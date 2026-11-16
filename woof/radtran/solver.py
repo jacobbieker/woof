@@ -47,17 +47,18 @@ def _workspace_budget(cp, need_bytes):
     (radtran_disort.cu, rt_w), so a launch runs as many problems as the
     workspace holds and a bigger chunk is fewer, fuller launches: 16-stream
     radiances on 5000 problems take 30 s at 512 MiB and 6.5 s at 8 GiB on an
-    A6000.  Take a quarter of the free device memory (the driver's free bytes
-    plus the pool's cached free blocks), never below MIN_BUDGET and never
-    above what the solve needs.  Other backends keep MIN_BUDGET.  The budget
-    sets only how problems are grouped into launches; each problem is solved
-    by one thread on its own workspace, so the words do not depend on it.
+    A6000.  Take a quarter of the driver's free device memory (read after the
+    solve's own inputs and outputs are resident; the pool's cached blocks are
+    not counted, since the raw allocation in _zeros cannot reuse them), never
+    below MIN_BUDGET and never above what the solve needs.  Other backends
+    keep MIN_BUDGET.  The budget sets only how problems are grouped into
+    launches; each problem is solved by one thread on its own workspace, so
+    the words do not depend on it.
     """
     from woof.backend import get_backend
     if get_backend().name != "cuda":
         return MIN_BUDGET
     free, _total = cp.cuda.runtime.memGetInfo()
-    free += cp.get_default_memory_pool().free_bytes()
     return max(MIN_BUDGET, min(int(need_bytes), int(free) // 4))
 
 
@@ -115,9 +116,6 @@ def solve(*, nstr, flags, dtau, ssa, pmom, umu0, fbeam, albedo, zlev=None, radiu
     wstride = work_size(nlyr, n_str)
     mode_parallel = numu > 0 and not (flags & TWOSTREAM) and nprob * n_str <= MODE_THREADS
     nmodes = n_str if mode_parallel else 1
-    if budget_bytes is None:
-        budget_bytes = _workspace_budget(cp, 8 * wstride * nprob * nmodes)
-    chunk = max(1, min(nprob, budget_bytes // (8 * wstride * nmodes)))
     d = {k: cp.asarray(v) for k, v in dict(
         dtau=dtau, ssa=np.ascontiguousarray(ssa, dtype=np.float64), pmom=pmom,
         umu0=bc(umu0), fbeam=bc(fbeam), albedo=bc(albedo), zlev=zl).items()}
@@ -127,6 +125,9 @@ def solve(*, nstr, flags, dtau, ssa, pmom, umu0, fbeam, albedo, zlev=None, radiu
     d_pt = cp.asarray(np.zeros(1) if ptrue is None else np.ascontiguousarray(ptrue, dtype=np.float64))
     flux = cp.zeros((nprob, nout, 6), dtype=cp.float64)
     rad = cp.zeros((nprob, nout, max(numu, 1), max(nphi, 1)), dtype=cp.float64)
+    if budget_bytes is None:
+        budget_bytes = _workspace_budget(cp, 8 * wstride * nprob * nmodes)
+    chunk = max(1, min(nprob, budget_bytes // (8 * wstride * nmodes)))
     common = lambda p0, n: (np.int32(p0), np.int32(p0 + n), np.int32(nlyr), np.int32(nmom), np.int32(nstr),
                             np.int32(flags), d["dtau"], d["ssa"], d["pmom"], d["umu0"], d["fbeam"],
                             d["albedo"], d["zlev"], np.float64(radius), np.int32(nout), d_out, np.int32(numu),
