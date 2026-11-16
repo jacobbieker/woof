@@ -1,0 +1,10 @@
+Native MPAS-A v8.4.2 upper-damping block deck (CAM viscosity floor and horizontal Rayleigh damping of u).
+Built 2026-11-16 by components/hex/tools/build_native_upper_damping_deck.sh in the pinned wrf-oracle:u2404
+container (GNU Fortran 13.3.0, -O3 -ffree-line-length-none -ffree-form, single precision as the native build).
+The blocks are MPAS-8.4.2's own lines, included unchanged:
+  src/core_atmosphere/dynamics/mpas_atm_time_integration.F lines 6400-6404 (CAM) and 6608-6631 (Rayleigh)
+  file sha256 579acb2819b565760822194401d5af9e33c129a4114ac03e6882d7abdbabc757
+59 levels, 3 cells/edges, config_len_disp 12000, config_mpas_cam_coef 2, 8 CAM levels,
+6 Rayleigh levels, 5 days, edgeSolveEnd 2.  Inputs are seeded pseudo-random words.
+upper-input.bin  9c2ea6f7f32d60ded103fc0a82e052eabdcde687e57f960720bcc591c8c50c83
+upper-output.bin 268232de84660f1cad34b1c7c797183b049887ebb9f1e71f85ca967c143b84ad
