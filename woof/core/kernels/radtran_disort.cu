@@ -27,6 +27,17 @@
 // Arithmetic: binary64 throughout; exp/log/cos through woof's word-exact
 // ports (glibc_flt64.cuh), sqrt and division IEEE; compiled without FMA
 // contraction so CUDA and the Metal translation produce the same words.
+//
+// Out of line under NVRTC (RT_OUTLINE): fully inlined, each of the three
+// kernels carried its own rt_problem with every exp and cos call expanded
+// (the correctly rounded cos alone is large), and NVRTC took over an hour
+// and more than 17 GB to compile the unit for one architecture.  With the
+// solver, its helpers and the two libm calls as functions it compiles in
+// about a minute (PTX ~10 s, sm_120 SASS ~50 s, 0.4 GB).  A call changes no
+// arithmetic here (no contraction, IEEE division and sqrt, binary64 has no
+// flush), so the words are the same.  The Metal translation keeps its full
+// inlining (__WOOF_METAL__), the build its words were graded under; the
+// host build ignores the attribute.
 
 #define RT_MAXN 16
 #define RT_MAXSTR 32
@@ -46,14 +57,21 @@
 
 #define RT_DITHER 1e-9
 
-__device__ __forceinline__ double rt_exp(double x) { return glibc_exp(x); }
+#ifdef __WOOF_METAL__
+#define RT_OUTLINE
+#else
+#define RT_OUTLINE __noinline__
+#endif
+
+__device__ RT_OUTLINE double rt_exp(double x) { return glibc_exp(x); }
+__device__ RT_OUTLINE double rt_cos(double x) { return uw_cos(x); }
 __device__ __forceinline__ double rt_abs(double x) { return x < 0.0 ? -x : x; }
 
 // Gauss-Legendre nodes/weights on (0,1), ascending (Newton on P_n).
-__device__ void rt_double_gauss(int n, double *mu, double *w)
+__device__ RT_OUTLINE void rt_double_gauss(int n, double *mu, double *w)
 {
     for (int i = 0; i < n; ++i) {
-        double z = uw_cos(RT_PI * ((double)i + 0.75) / ((double)n + 0.5));
+        double z = rt_cos(RT_PI * ((double)i + 0.75) / ((double)n + 0.5));
         double dp = 1.0;
         for (int it = 0; it < 100; ++it) {
             double p0 = 1.0, p1 = z;
@@ -84,7 +102,7 @@ __device__ void rt_double_gauss(int n, double *mu, double *w)
 }
 
 // Lambda_l^m(x) = sqrt((l-m)!/(l+m)!) P_l^m(x) for l = 0..lmax (0 for l < m).
-__device__ void rt_lambda(int m, int lmax, double x, double *out)
+__device__ RT_OUTLINE void rt_lambda(int m, int lmax, double x, double *out)
 {
     for (int l = 0; l <= lmax; ++l) out[l] = 0.0;
     if (m > lmax) return;
@@ -103,7 +121,7 @@ __device__ void rt_lambda(int m, int lmax, double x, double *out)
 
 // Cyclic Jacobi eigen-decomposition of a symmetric n x n matrix a (row-major,
 // overwritten).  Eigenvalues in d, eigenvectors in the columns of v.
-__device__ void rt_jacobi(int n, double *a, double *d, double *v)
+__device__ RT_OUTLINE void rt_jacobi(int n, double *a, double *d, double *v)
 {
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j) v[i * n + j] = (i == j) ? 1.0 : 0.0;
@@ -148,7 +166,7 @@ __device__ void rt_jacobi(int n, double *a, double *d, double *v)
 }
 
 // Dense solve a x = b (n x n row-major, partial pivoting); b is overwritten.
-__device__ void rt_dense_solve(int n, double *a, double *b)
+__device__ RT_OUTLINE void rt_dense_solve(int n, double *a, double *b)
 {
     for (int k = 0; k < n; ++k) {
         int p = k;
@@ -186,7 +204,7 @@ __device__ __forceinline__ long rt_bidx(int ml, int mu, int ldab, int r, int c)
     return (long)(ml + mu + r - c) + (long)c * ldab;
 }
 
-__device__ void rt_band_solve(int n, int ml, int mu, double *ab, double *piv, double *b)
+__device__ RT_OUTLINE void rt_band_solve(int n, int ml, int mu, double *ab, double *piv, double *b)
 {
     int ldab = 2 * ml + mu + 1;
     for (int k = 0; k < n; ++k) {
@@ -234,7 +252,7 @@ __device__ void rt_band_solve(int n, int ml, int mu, double *ab, double *piv, do
 }
 
 // int_0^d e^{-k(d-t)} e^{-t/u} dt/u  (k, u > 0)
-__device__ double rt_grow(double k, double u, double d)
+__device__ RT_OUTLINE double rt_grow(double k, double u, double d)
 {
     double x = k * u - 1.0;
     double ku = k * u;
@@ -244,7 +262,7 @@ __device__ double rt_grow(double k, double u, double d)
 }
 
 // int_0^d e^{-k t} e^{-t/u} dt/u
-__device__ __forceinline__ double rt_decay(double k, double u, double d)
+__device__ RT_OUTLINE double rt_decay(double k, double u, double d)
 {
     return (1.0 - rt_exp(-(k + 1.0 / u) * d)) / (1.0 + k * u);
 }
@@ -272,7 +290,7 @@ extern "C" __global__ void radtran_work_size(int nlyr, int N, int nstr, long lon
 // the same words: every radiance slot receives exactly one addition per
 // mode, so the per-mode partials summed from 0.0 in mode order repeat the
 // single thread's additions.
-__device__ void rt_problem(
+__device__ RT_OUTLINE void rt_problem(
     int prob, double *wk, int m_first, int m_last, int part,
     int nlyr, int nmom, int nstr, int flags,
     const double *dtau_in, const double *ssa_in, const double *pmom_in,
@@ -638,7 +656,7 @@ __device__ void rt_problem(
                 for (int l = 0; l < nstr; ++l) lus[l] = u > 0.0 ? lu[l] : lu[l] * sg[l];
                 double cosm[RT_MAXUMU];
                 for (int ip = 0; ip < nphi; ++ip)
-                    cosm[ip] = m == 0 ? 1.0 : uw_cos((double)m * phi_in[ip] * (RT_PI / 180.0));
+                    cosm[ip] = m == 0 ? 1.0 : rt_cos((double)m * phi_in[ip] * (RT_PI / 180.0));
                 double val = 0.0;
                 if (u > 0.0) {
                     if (m == 0) {
@@ -756,7 +774,7 @@ __device__ void rt_problem(
                 double su = 1.0 - u * u, s0 = 1.0 - umu0 * umu0;
                 su = su > 0.0 ? sqrt(su) : 0.0;
                 s0 = s0 > 0.0 ? sqrt(s0) : 0.0;
-                cosang = cosang + su * s0 * uw_cos(phi_in[ip] * (RT_PI / 180.0));
+                cosang = cosang + su * s0 * rt_cos(phi_in[ip] * (RT_PI / 180.0));
                 double pl[RT_MAXSTR];
                 rt_lambda(0, nstr - 1, cosang, pl);
                 double val = 0.0;
