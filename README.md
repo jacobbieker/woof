@@ -590,6 +590,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `woof go --lakes clm` turns on WRF's CLM lake model with WPS bathymetry and
   this initial state on every domain in one opt-in; `--lakes ic` sets only the
   initial state ([docs/lakes.md](docs/lakes.md)).
+  `[static.highres] fields = "lakes"` (opt-in) takes the lake extent from
+  CGLC-MODIS-LCZ 100 m land cover. WPS's 30-arc-second lakes cover glacier
+  and rock and sit about 1 km north of the shoreline: on the Alps 1 km
+  domain, 480 lake cells above 2000 m became 8 real reservoirs
+  ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
