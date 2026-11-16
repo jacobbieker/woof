@@ -3789,7 +3789,11 @@ def execute_forecast(
     # longer pins sm_120 (``required_compute``), because that pin named no
     # breakage.  The receipt records whether the card holds an anchor
     # (``architecture`` below, woof.hex.cuda_backend.arch_admission).
-    capability = require_cuda(min_compute=(12, 0), cache_dir=cache_root)
+    from woof.hex.cuda_backend.cupy_cache import forecast_directory
+
+    # The box's kernel image cache, not this run's scratch (WOOF_HEX_SHARED_KERNEL_IMAGES).
+    images = forecast_directory(cache_root)
+    capability = require_cuda(min_compute=(12, 0), cache_dir=images)
     import cupy as cp
 
     # ``required_free_bytes`` is the forecast door's own admission sum,
@@ -3818,7 +3822,7 @@ def execute_forecast(
             stochastic_bytes + tc_allowance + obs_bytes)
     else:
         memory = proof.gpu_memory_admission(cp, minimum=int(required_free_bytes))
-    cache = KernelCache(capability=capability, cache_dir=cache_root)
+    cache = KernelCache(capability=capability, cache_dir=images)
     # RRFS v2 stage H6: a resumed run (plain restart or DA-cycling restart).
     stochastic_restart = None
     start_step = 0

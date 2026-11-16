@@ -480,7 +480,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`WOOF_METAL_ADDRESS_ASYNC=0` restores the eval). Together they remove
   about 96 % of the queue drains on that mesh, and the hour takes 0.59x the
   wall time on edi-vr and 0.64x on a uniform 12 km mesh. Both are
-  byte-identical.
+  byte-identical. Hex on CUDA: a forecast keeps its kernel images in the
+  box's kernel cache (`<kernel cache root>/cupy`) instead of each run's
+  `--scratch`, so a regional run in a fresh work dir no longer recompiles
+  in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
+  byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
+  cache).
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
