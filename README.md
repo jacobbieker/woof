@@ -519,6 +519,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   writers' per-field staging into page-locked blocks takes about half the
   time (40 Edinburgh 3 km fields: 51-86 ms against 111-143 ms median,
   byte-identical; `WOOF_METAL_DIRECT_OUT=0` restores the two copies).
+  A device-to-device `copy_from_device(_async)` between facade arrays (the
+  wrfout writer's per-field snapshot) is one ordered device copy instead of
+  a read back and a write: the writer's host time per Edinburgh 3 km frame
+  falls from 761-1061 ms to 470-576 ms, byte-identical
+  (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
