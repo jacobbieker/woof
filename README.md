@@ -500,7 +500,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `--scratch`, so a regional run in a fresh work dir no longer recompiles
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
-  cache).
+  cache). The Metal facade's `get(out=)` reads the evaluated buffer in
+  place from unified memory and copies once, into `out`: the history
+  writers' per-field staging into page-locked blocks takes about half the
+  time (40 Edinburgh 3 km fields: 51-86 ms against 111-143 ms median,
+  byte-identical; `WOOF_METAL_DIRECT_OUT=0` restores the two copies).
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
