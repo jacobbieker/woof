@@ -76,6 +76,7 @@ def test_device_copies_the_bytes(cp, monkeypatch, dtype, device):
 def test_device_copy_is_ordered_without_a_synchronize(cp, monkeypatch, synchronizes):
     from woof.backend.facade import _array
     monkeypatch.setattr(_array, "_DEVICE_COPY", True)
+    monkeypatch.setattr(_array, "_ADDRESS_ASYNC", True)     # no wait for a fresh address
     bump = cp.RawKernel(_BUMP, "bump")
     n = 3 * 40 * 50
     rng = np.random.default_rng(9)
