@@ -223,3 +223,34 @@ def test_a_table_rewritten_through_its_address_is_read_again(monkeypatch):
     assert np.array_equal(out_a.get(), np.arange(n, dtype=np.float32))
     assert np.array_equal(reader.get(), np.zeros(n, np.float32))
     assert np.array_equal(out_b.get(), np.arange(n, dtype=np.float32) + 100)
+
+
+def test_a_table_rewritten_through_an_alias_is_read_again(monkeypatch):
+    """A write through another storage over the table's buffer (an alias,
+    as hostAlloc memory has) gives only the alias a new value: the words
+    read before it must not be used for the next gather."""
+    _mlx_or_skip()
+    import cupy as cp
+    from woof.backend.facade._array import ndarray
+    from woof.backend.metal import loader
+    from woof.core.kernels import get_kernel
+
+    used = []
+    words = loader._device_table_words
+    monkeypatch.setattr(loader, "_device_table_words",
+                        lambda view: used.append(words(view)) or used[-1])
+    ring = get_kernel("microphysics_validation", "mp_ring_copy")
+    n = 64
+    a, b = cp.asarray(np.arange(n, dtype=np.float32)), cp.asarray(np.arange(n, dtype=np.float32) + 100)
+    out_a, out_b = cp.zeros(n, cp.float32), cp.zeros(n, cp.float32)
+    row = lambda src, dst: np.asarray([(src.data.ptr, dst.data.ptr, 1, 0, 1, 0, n, n, n)],
+                                      dtype=np.int64).reshape(-1)
+    table = cp.asarray(row(a, out_a))
+    ring((1, 1), (256,), (table, np.int32(1), np.int32(0)))      # the words are cached
+    alias = table._st.alias(np.int32)
+    assert alias is not table._st
+    as_int32 = ndarray((2 * table.size,), np.int32, _storage=alias, _offset=0)
+    as_int32[...] = cp.asarray(row(b, out_b).view(np.int32))
+    ring((1, 1), (256,), (table, np.int32(1), np.int32(0)))
+    assert [int(w) for w in used[-1][:2]] == [b.data.ptr, out_b.data.ptr]
+    assert np.array_equal(out_b.get(), np.arange(n, dtype=np.float32) + 100)

@@ -342,7 +342,7 @@ DEVICE_ADDRESS_TABLES = {
     "mp_ring_copy": "table",                 # woof/core/kernels/microphysics_validation.cu
 }
 
-#: id(storage) -> (the storage, its value when read, the words): a device
+#: id(storage) -> (the storage, its buffer's values when read, the words): a device
 #: table is read once per value it takes, not once per launch.  An
 #: unresolved indirect launch empties it (it can write a table through an
 #: address without giving the storage a new value).
@@ -359,15 +359,20 @@ def _device_table_words(view) -> np.ndarray:
     import weakref
     import mlx.core as mx
     st = view._st
+    # the values of every storage over the table's buffer: a write through
+    # an alias (another dtype's view of it) rebinds only the alias
+    root = st.buffer_root()
+    values = (root.arr,) + tuple(a.arr for a in (root._aliases or {}).values())
     cached = _TABLE_WORDS.get(id(st))
-    if cached is not None and cached[0]() is st and cached[1] is st.arr \
+    if cached is not None and cached[0]() is st and len(cached[1]) == len(values) \
+            and all(x is y for x, y in zip(cached[1], values)) \
             and cached[2] == (view._offset, view.nbytes):
         return cached[3]
-    mx.eval(st.arr)
+    mx.eval(*values)
     raw = np.asarray(st.arr).view(np.uint8)[view._offset:view._offset + view.nbytes]
     words = np.array(raw[:raw.size // 8 * 8].view(np.uint64))
     _TABLE_WORDS[id(st)] = (weakref.ref(st, lambda _r, key=id(st): _TABLE_WORDS.pop(key, None)),
-                            st.arr, (view._offset, view.nbytes), words)
+                            values, (view._offset, view.nbytes), words)
     return words
 
 
