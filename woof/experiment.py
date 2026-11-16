@@ -2217,9 +2217,16 @@ def build_experiment_from_config_tables(raw: dict, *, source: str,
         fill_omitted_generation_selectors(raw, fetch_table)
     case_table = raw.pop("case_data", None)
     if case_table is not None:
-        from woof.case_data import build_case_data
-        build_case_data(case_table, source=source, base_dir=base_dir,
-                        require_inputs=False)
+        from woof.case_data import (
+            build_case_data, is_gfs_policy_table, optional_case_data_from_tables)
+        if is_gfs_policy_table(case_table):
+            # A policy-only table (fetched-GFS preparation choices) names
+            # no inputs; its values are still validated.
+            optional_case_data_from_tables({"case_data": case_table},
+                                           source=source, base_dir=base_dir)
+        else:
+            build_case_data(case_table, source=source, base_dir=base_dir,
+                            require_inputs=False)
     static_table = raw.pop("static", None)
     if static_table is not None:
         from woof.static.highres_production import parse_static_table
