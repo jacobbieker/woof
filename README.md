@@ -527,7 +527,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `WOOF_METAL_RESOLVE_DEVICE_TABLES=0` restores the drains). Hex on Metal:
   the solve-region checks, the physics seam's per-species tables and the
   MPAS sea-ice driver tables are resolved the same way (Edinburgh 3 km
-  variable-resolution: 12 to 0 drains around those launches per step,
+  variable-resolution: 23 to 0 drains around those launches per step,
   byte-identical).
   A device-to-device `copy_from_device(_async)` between facade arrays (the
   wrfout writer's per-field snapshot) is one ordered device copy instead of
