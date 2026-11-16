@@ -2901,6 +2901,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # wrf_smag_hd_u / wrf_smag_hd_v on stored stress coefficients (composes smag2d.cu),
     # RTX A6000, default and strict numerics, 2026-11-15: 0 B.
     "smag2d_uv_faces": 0,
+    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu), RTX
+    # A6000, default and strict numerics, 2026-11-15: 0 B.
+    "smag2d_tke_faces": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,
@@ -8492,7 +8495,10 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "write_before_read", "woof/core/dycore.py:launch_wrf_smag2d_hd_multi",
         "the multi-row Smagorinsky scalar launch writes a chunk's H1/H2 "
         "face fluxes and reads them in the divergence launch that follows "
-        "within the same step; diff6_x/y are the chunk's first pair"),
+        "within the same step; diff6_x/y are the chunk's first pair; "
+        "earlier in the same step km_opt=2's launch_wrf_tke_km stores the "
+        "defor13/defor23 faces in the first pair for the tke_rhs launch "
+        "that follows it"),
     ScratchSlotLifetime(
         ("diff6_x", "diff6_y", "diff6_z", "diff6_m"),
         "write_before_read", "woof/core/dycore.py:prepare_fixed_tendencies; "
