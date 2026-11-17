@@ -223,7 +223,10 @@ def column_lanes() -> int:
     lanes = os.environ.get("WOOF_OCEAN_COLUMN_LANES", "").strip()
     if lanes:
         if lanes not in ("1", "32"):
-            raise ConfigurationRefusal(f"WOOF_OCEAN_COLUMN_LANES={lanes!r}: 1 or 32")
+            raise ConfigurationRefusal(
+                knob="WOOF_OCEAN_COLUMN_LANES", value=lanes,
+                reason="the column sums run a warp (32) or a thread (1) per edge",
+                declaration="WOOF_OCEAN_COLUMN_LANES=1 or WOOF_OCEAN_COLUMN_LANES=32")
         return int(lanes)
     from woof import backend
     return 32 if backend.active() == "cuda" else 1
