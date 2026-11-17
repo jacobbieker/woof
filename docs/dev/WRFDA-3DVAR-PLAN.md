@@ -1,6 +1,8 @@
 # Variational data assimilation (WRFDA, 3D-Var first): scope and plan
 
-Status: design study (requested 2026-11-21). Nothing in this document is
+Status: design study (the coordinator's brief is dated 2026-11-21; the
+oracle build and measurements in section 8 are dated as run, 2026-11-17).
+Nothing in this document is
 implemented. It scopes adding WRFDA-style variational data assimilation to
 woof, starting with 3D-Var, and says how to build and verify it. A second
 part (section 6) scopes gradient-based and neural-network options inside the
@@ -30,11 +32,11 @@ them with measurements.
 
 ## Verdict, in short
 
-- **3D-Var on the WRF route is feasible and medium-sized**: about 15-21
+- **3D-Var on the WRF route is feasible and medium-sized**: about 10-13
   engineer-weeks for conventional observations, WRFDA's own `be.dat`, the
-  CG minimiser and a WRFDA oracle agreement gate (V0-V1), and about 8 more
-  to make woof's own background-error statistics (V2), then 3-4 more for
-  hybrid 3DEnVar with the LETKF ensemble (V3).
+  CG minimiser and a WRFDA oracle agreement gate (V0-V1), 3-4 more to make
+  woof's own background-error statistics (V2), and 3-4 more for hybrid
+  3DEnVar with the LETKF ensemble (V3): 16-21 weeks in all (section 7).
 - **Everything except the minimiser's inner products is local or
   line-parallel**, and fits the GPU well: the recursive filters are one
   thread per grid line, the vertical EOFs a batched small matrix product
@@ -360,8 +362,12 @@ for u, v, T, q and ps, and optionally the hydrometeors) to the static
   a recursive filter of scale `alpha_corr_scale` (default 200 km) and a
   vertical localisation (`alpha_vertloc_opt`; 2 = computed in log p);
 - the weights: `je_factor` (ensemble) is a namelist key, and WRFDA derives
-  the static weight `jb_factor = je_factor / (je_factor - 1)`
-  (`da_setup_background_errors`), so `1/jb_factor + 1/je_factor = 1`.
+  the static weight in `da_setup_background_errors`. With `ensdim_alpha > 0`
+  and `je_factor > 1` it sets `jb_factor = je_factor / (je_factor - 1)`, so
+  `1/jb_factor + 1/je_factor = 1`. With `ensdim_alpha > 0` and
+  `je_factor <= 1` it sets `jb_factor = -999` ("full ensemble mode"),
+  zeroes every `max_vert_var*` and so drops the static `Jb` control
+  variables. With `ensdim_alpha = 0`, `jb_factor = 1`.
 
 This is Lorenc (2003)'s alpha control variable as implemented for WRF by
 Wang et al. (2008). `anal_type_hybrid_dual_res` runs the ensemble part on a
@@ -637,8 +643,11 @@ backends must agree, and the oracle must be matchable. Two reduction
 modes:
 
 - **`wrfda-serial`** (oracle tier): reproduces `da_dot`'s order exactly,
-  i.e. the `mod(n,5)` head then the five-term groups, each group summed
-  left to right and added to the running total. It is inherently serial;
+  i.e. the `mod(n,5)` head then the five-term groups. Each product is added
+  to the running total in turn: the Fortran statement
+  `dtemp1 = dtemp1 + p1 + p2 + p3 + p4 + p5` parses as
+  `((((dtemp1 + p1) + p2) + p3) + p4) + p5`, so the order is one long
+  left-to-right sum, not per-group partial sums. It is inherently serial;
   it runs as one thread (or a short chain of chunk carries that preserve
   the left-to-right association), and it is used only for oracle
   comparison and tests. *Estimate:* 10 M terms in about 10-30 ms on one GPU
@@ -694,9 +703,11 @@ both programs the same `fg`, `be.dat` and observation file, and compares:
   a cross-check that woof's gen_be means what WRFDA expects.
 - Agreement targets: arrays derived from `be.dat` are equal to the last
   bit in the oracle tier (same binary64 arithmetic, same order). Transforms
-  `U v` for a given `v` agree to 1e-13 relative (WRFDA's own transcendental
-  calls, e.g. in `da_calculate_rf_factors`, use glibc libm; woof's use its
-  own libm, so equality is not guaranteed).
+  `U v` for a given `v` agree to 1e-13 relative. `da_calculate_rf_factors`
+  uses only arithmetic and `sqrt` (correctly rounded on both sides), so the
+  RF coefficients themselves can be bitwise; the residual comes from
+  operation order and contraction (FMA) differences in the longer
+  transforms, which the `-O0 -ffp-contract=off` oracle build isolates.
 
 ### 4.10 Interfaces shared with the differentiable plan
 
@@ -748,21 +759,36 @@ A6000:
 
 - **RF:** 5 variables x 3 passes x 2 directions x 2 sweeps, each about one
   read and one write of an 8 MB field: roughly 1 GB of traffic per `U`,
-  about 2 ms at the card's bandwidth. The serial line length (200) is
-  latency, not bandwidth; with 40 modes x 200 lines there are 8,000 lines,
-  enough to fill the card.
+  about 2 ms at the card's bandwidth. The sweeps are latency-bound,
+  not bandwidth-bound: each thread walks a 200-point line serially, and one
+  sweep of one variable has only 200 x 50 = 10,000 lines (about 1 per
+  CUDA core), so a single sweep cannot hide memory latency. The fix is to
+  batch: all five variables (and, where the boundary form allows, both
+  directions of independent lines) in one launch, which gives about 50,000
+  lines; in fast mode a parallel first-order linear-recurrence scan along
+  the line is the alternative. *Estimate*, widened for this: 2-10 ms per
+  `U`, measured in V1.6.
 - **EOF and balance:** under 1 GFLOP per `U`, so below 1 ms.
 - **`H'`/`H'^T`:** 10^5 x 16 gathers, well below 1 ms.
 - **Per CG iteration:** one `U`, one `U^T`, one `H'`, one `H'^T`, and a few
-  dot products: about 5-10 ms.
-- **Per analysis:** 50 iterations x 1 outer loop is **under 1 s** on the
-  A6000; on the M3 Max, *estimate* 3-4x that.
+  dot products: about 5-25 ms.
+- **Re-orthonormalisation:** iteration `k` costs `k` extra dot products and
+  `k` axpys on the 8 M-value control vector; over 50 iterations about 1,275
+  of each, i.e. roughly 80 GB of traffic in binary64, about 0.1-0.15 s on
+  the A6000 with `fixed-tree` reductions. It also needs all previous
+  gradients stored (50 x 64 MB in binary64).
+- **Per analysis:** 50 iterations x 1 outer loop is **about 1-1.5 s** on
+  the A6000; on the M3 Max, *estimate* 3-4x that.
 
 Targets, gated in V1:
 
 - a 50-iteration conventional 3D-Var on 200x200x50 in at most 5 s on the
   A6000 and 20 s on the M3 Max, excluding I/O;
-- in the oracle tier, at most 10x the production tier's time.
+- the oracle tier has no time target: `wrfda-serial` reductions run on one
+  thread, and with re-orthonormalisation that is `O(iter^2)` serial dot
+  products (about 1,300 of 8 M terms each, minutes rather than seconds).
+  It runs only on the oracle cases (90x60x41), where its time is recorded,
+  not gated.
 
 The WRFDA serial wall time on the same case (section 8 has the tutorial
 case's) is recorded as the reference, not as a gate.
@@ -798,7 +824,7 @@ as for the WRF oracles ([verify-exact.md](verify-exact.md)).
 
 ## 6. Gradient-based and neural-network options in the DA
 
-Requested 2026-11-21 as an addition to the 3D-Var scope. Every option below
+Added to the 3D-Var scope by the same brief (dated 2026-11-21). Every option below
 is opt-in, enters through an interface the classical path already has, and
 is verified against the classical path, against observations, and with the
 gradient tests. Default forecast words do not change under any of them.
@@ -1106,7 +1132,8 @@ difference before V1. Every later gate inherits it.
 
 **Gate GV1:** O3-O7 pass on the tutorial case and on single-observation
 cases. Production tier: CUDA and Metal bitwise under strict numerics. The
-performance targets of section 4.12 are met. A forecast started from the
+production-tier performance targets of section 4.12 are met (the oracle
+tier is recorded, not gated). A forecast started from the
 woof analysis matches, within the forecast's own CUDA/Metal tolerance, one
 started from WRFDA's `wrfvar_output` through the same `--analysis` door.
 **No-go:** if O6/O7 cannot be reached because WRFDA's operation order in
@@ -1134,22 +1161,25 @@ default `B`.
 
 | PR | content | effort |
 |---|---|---|
-| V3.1 | `hybrid.py`: alpha control variables, `alpha_corr_scale` RF (reusing V0's kernels), vertical localisation (`alpha_vertloc_opt = 2`), `je_factor` (and the derived `jb_factor`); `x'_n` straight from device-resident LETKF members (no `ep` files); `ep_format` reader for the oracle lane | 2-2.5 w |
+| V3.1 | `hybrid.py`: alpha control variables, `alpha_corr_scale` RF (reusing V0's kernels), vertical localisation (`alpha_vertloc_opt = 2`), `je_factor` and the derived `jb_factor` (all three branches: hybrid, full-ensemble `-999` with the static CVs dropped, and `ensdim_alpha = 0`); `x'_n` straight from device-resident LETKF members (no `ep` files); `ep_format` reader for the oracle lane | 2-2.5 w |
 | V3.2 | Oracle: the same members written as WRFDA `ep` files, WRFDA hybrid against woof (O6/O7); cycling: 3DEnVar mean analysis plus LETKF perturbation update (the usual hybrid EnKF-Var pairing) | 1-1.5 w |
 
 **Gate GV3:**
 
-- WRFDA hybrid agreement (O6/O7 tolerances).
+- WRFDA hybrid agreement at O6/O7 tolerances, or, if GV1 ended on its
+  no-go branch, at the residual GV1 recorded ("WRFDA-compatible to
+  tolerance"); GV3 inherits V1's status rather than asking for more.
 - On an OSSE (`woof/da/osse.py`), 3DEnVar's analysis error is no worse
   than both pure 3D-Var and pure LETKF at 95 % bootstrap confidence on at
   least one regime. If it is not, keep hybrid as an option and say so.
 
-### V4. Radar, GOES, radiances (8-14 w)
+### V4. Hydrometeor CVs, radar, GOES, radiances (9.5-16 w)
 
 | PR | content | effort |
 |---|---|---|
+| V4.0 | Hydrometeor control variables (`cloud_cv_options = 2` first: `qcw`, `qrn`, `qci`, `qsn`, `qgr` as CVs with WRFDA's `be.dat` hydrometeor records, their RF/EOF transforms and adjoints; `cloud_cv_options = 3` later); O1/O2 extended to the hydrometeor records; needed by V4.1's indirect reflectivity and V4.2 | 1.5-2 w |
 | V4.1 | Radar radial velocity (TL/AD; geometry shared with `obsop.py`) and indirect reflectivity (Wang et al. 2013: retrieved `qr`/`qs`/`qg` and in-cloud humidity), against WRFDA's radar ASCII path | 2-3 w |
-| V4.2 | GOES CWP (`obsop_cwp`, linear in the hydrometeors) as a variational operator; needs `cloud_cv_options >= 2` or a hydrometeor alpha (V3) | 1 w |
+| V4.2 | GOES CWP (`obsop_cwp`, linear in the hydrometeors) as a variational operator; needs V4.0's hydrometeor CVs (or a hydrometeor alpha from V3) | 1 w |
 | V4.3 | `crtm` opt-in: CRTM v2.4+ build and C shim, coefficients path, TL/AD/K calls, radiance readers (AMSU-A/MHS BUFR first; the tutorial has AMSU), thinning; against WRFDA's CRTM path built with the same CRTM version | 3-6 w |
 | V4.4 | VarBC (predictors, `Jp`, `VARBC.in/out`), cold and warm start | 2-3 w |
 
@@ -1167,7 +1197,8 @@ default `B`.
 | V5.1 | FGAT (`num_fgat_time`) with P0's pairing over forecast frames; against WRFDA FGAT on the tutorial's hourly files | 1-2 w |
 | V5.2 | `TimeOperator` slot in `VarCost` for P3's `M'` and `M'^T`; a 4D-Var test case staged (WRFDA 4D-Var tutorial with WRFPLUS on pb) | 1-2 w |
 
-**Gate GV5:** FGAT agrees with WRFDA's FGAT (O6/O7). 4D-Var waits for the
+**Gate GV5:** FGAT agrees with WRFDA's FGAT (O6/O7, or GV1's recorded
+residual, as for GV3). 4D-Var waits for the
 differentiable plan's G3.
 
 ### Effort summary
@@ -1178,7 +1209,7 @@ differentiable plan's G3.
 | V1 | 6-8 w | V0; P0.1 interfaces | GV1 |
 | V2 | 3-4 w | V0 | GV2 |
 | V3 | 3-4 w | V1 | GV3 |
-| V4 | 8-14 w | V1 (V3 for hydrometeor alpha) | GV4 |
+| V4 | 9.5-16 w (V4.0 hydrometeor CVs 1.5-2 w, then 8-14 w) | V1 (V3 for hydrometeor alpha) | GV4 |
 | V5 | 2-4 w | V1, P0.1; 4D-Var needs P3/P4 | GV5 |
 | section 6 options | see its table | as listed | per option |
 
@@ -1259,7 +1290,7 @@ OBSPROC run on the tutorial's `little_r` file.
 
 | risk | effect | mitigation |
 |---|---|---|
-| WRFDA's operation order not reproducible on the GPU in a transform (e.g. a fused libm call in `da_calculate_rf_factors`) | O2/O6 stop at a tolerance instead of exact | `-O0 -ffp-contract=off` oracle as tie-breaker; record the residual and its cause; GV1's no-go keeps going on tolerance |
+| WRFDA's operation order not reproducible on the GPU in a transform (e.g. the compiler's FMA contraction or reassociation in the EOF or balance loops) | O2/O6 stop at a tolerance instead of exact | `-O0 -ffp-contract=off` oracle as tie-breaker; record the residual and its cause; GV1's no-go keeps going on tolerance |
 | binary32 CG loses conjugacy | slower convergence or a different minimum | re-orthonormalisation; binary64 control vector (small); measured in V1.6 |
 | Nondeterministic adjoint scatter | CUDA and Metal disagree; run-to-run drift | sorted observations and CSR gather, no atomics (section 4.5); a backend identity test |
 | `be.dat` binning and interpolation subtleties | woof's `B` differs from WRFDA's silently | O1 bitwise against a debug dump; single-observation tests |

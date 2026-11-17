@@ -748,7 +748,7 @@ sensitivities.
 | PR | content | effort |
 |---|---|---|
 | P4.1 | `woof/grad/checkpoint.py`: revolve-style binomial schedule over device, pinned host and NVMe snapshots, reusing the restart payload definition. | 2 w |
-| P4.2 | Window gradient `grad J_o` with respect to the initial state, then an incremental minimiser (L-BFGS or CG) with a sampled B from the LETKF ensemble (4DEnVar-like preconditioning). 1-6 h windows at 9-15 km. | 3-4 w |
+| P4.2 | Window gradient `grad J_o` with respect to the initial state, then an incremental minimiser reusing [WRFDA-3DVAR-PLAN.md](WRFDA-3DVAR-PLAN.md)'s control variables, `U`/`B` and CG (V0-V1), with the LETKF ensemble entering `B` through its alpha control variables (V3; 4DEnVar-like when the window has no `M'`). 1-6 h windows at 9-15 km. | 3-4 w |
 | P4.3 | Online hybrid training: backprop the obs cost through P3's adjoint into a P2 column model; truncated windows as PyWRF does. | 3-4 w |
 | P4.4 | Optional: radiance cost term with `radtran` once it has a Jacobian. | later |
 
