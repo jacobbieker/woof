@@ -163,6 +163,10 @@ def test_omni2_reader_fills_codes_and_gaps(tmp_path):
     x = sw.newell_coupling(400.0, 1.0, -3.0)
     want = sw.kp_from_coupling(x, np.sqrt(5.0) * 400.0 ** 2)
     assert wind.kp_estimate(t0 + timedelta(hours=4)) == pytest.approx(want)
+    # The fit's three hours must all lie in the record: 00-03 UT needs 23 UT the day before.
+    with pytest.raises(sw.SolarWindError, match="outside"):
+        wind.kp_estimate(t0 + timedelta(hours=1))
+    assert wind.al_at(t0) == -120.0 and np.isnan(wind.al_at(t0 + timedelta(hours=2)))
     gap = tmp_path / "gap.dat"
     gap.write_text("\n".join([rows[0], rows[3]]) + "\n")
     with pytest.raises(sw.SolarWindError, match="consecutive"):
@@ -188,6 +192,56 @@ def test_swpc_reader_keeps_the_active_spacecraft_and_needs_ten_minutes():
     assert record.speed[0] == 500.0 and np.isnan(record.speed[1])
     with pytest.raises(sw.SolarWindError, match="active"):
         sw.parse_swpc(json.dumps(mag[1::2]), json.dumps(wind))
+
+
+def test_omni2_cache_is_reused_when_covered_or_fresh_and_refetched_when_damaged(tmp_path):
+    import io
+    import os
+    t0 = datetime(2024, 5, 10, 0)
+    served = "\n".join(_omni_row(t0 + timedelta(hours=h)) for h in range(48)) + "\n"
+    calls = []
+
+    def opener(url):
+        calls.append(url)
+        return io.BytesIO(served.encode())
+
+    end = t0 + timedelta(hours=30)
+    path, = sw.fetch_omni2(t0, end, cache=tmp_path, opener=opener)
+    assert len(calls) == 1 and sw.read_omni2(path).hours.size == 48
+    assert sw.fetch_omni2(t0, end, cache=tmp_path, opener=opener) == [path] and len(calls) == 1
+    # Not covered (the window runs past the file) but fetched an hour ago: reused.
+    later = t0 + timedelta(days=5)
+    assert sw.fetch_omni2(t0, later, cache=tmp_path, opener=opener) == [path] and len(calls) == 1
+    old = path.stat().st_mtime - 2 * sw.OMNI_REFETCH_SECONDS
+    os.utime(path, (old, old))
+    sw.fetch_omni2(t0, later, cache=tmp_path, opener=opener)
+    assert len(calls) == 2
+    path.write_text("1 2 3\n")                  # damaged: fetched again, not an error
+    assert sw.read_omni2(sw.fetch_omni2(t0, end, cache=tmp_path, opener=opener)[0]).hours.size == 48
+    assert len(calls) == 3
+
+
+def test_gfz_is_fetched_again_for_a_kp_interval_it_lacks(tmp_path):
+    import io
+    from datetime import date
+    from test_spacewx_ionosphere import _gfz
+    from woof.spacewx import indices
+    days = [((date(2024, 5, 1) + timedelta(days=i)).timetuple()[:3], 150.0, "1.000") for i in range(10)]
+    partial = _gfz(days[:-1] + [(days[-1][0], 150.0, "-1.000")])
+    full = _gfz(days)
+    served = [partial, full]
+
+    def opener(url):
+        return io.BytesIO(served.pop(0).encode())
+
+    when = datetime(2024, 5, 10, 22)              # the 21-24 UT interval of the last day
+    rec = indices.read(indices.fetch_gfz(when, cache=tmp_path, opener=opener))
+    assert not rec.has_kp(when) and len(served) == 1
+    # Without kp the day is covered; with kp the missing interval fetches again.
+    indices.fetch_gfz(when, cache=tmp_path, opener=opener)
+    assert len(served) == 1
+    rec = indices.read(indices.fetch_gfz(when, cache=tmp_path, opener=opener, kp=True))
+    assert rec.has_kp(when) and rec.kp_at(when) == pytest.approx(1.0) and not served
 
 
 def test_load_needs_a_source():

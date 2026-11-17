@@ -79,26 +79,39 @@ def _aurora_activity(args, times):
 
     if args.observed_al and not args.solar_wind:
         raise SystemExit("woof spacewx aurora: --observed-al needs --solar-wind (OMNI2 carries AL)")
+    if args.observed_al and str(args.solar_wind).strip() == "swpc":
+        raise SystemExit("woof spacewx aurora: --observed-al needs OMNI2 ('omni' or files); "
+                         "the SWPC real-time feed carries no AL")
     rows, record = [], None
-    if args.solar_wind:
-        record = solarwind.load(args.solar_wind, times[0] - timedelta(hours=2), times[-1] + timedelta(hours=2))
-        source = f"{record.source} sha256:{record.sha256}"
-    elif args.kp is None:
-        geo = indices.load(args.indices, needed=times[-1])
-        source = f"{geo.source} sha256:{geo.sha256}"
-    else:
-        source = f"fixed Kp {args.kp}"
+    try:
+        if args.solar_wind:
+            # The Kp fit reads the hour before the 3-hour interval, up to 4 h before the first time.
+            record = solarwind.load(args.solar_wind, times[0] - timedelta(hours=4),
+                                    times[-1] + timedelta(hours=2))
+            source = f"{record.source} sha256:{record.sha256}"
+        elif args.kp is None:
+            geo = indices.load(args.indices, needed=times[-1], kp=True)
+            source = f"{geo.source} sha256:{geo.sha256}"
+        else:
+            source = f"fixed Kp {args.kp}"
+    except (solarwind.SolarWindError, indices.IndicesError, OSError) as exc:
+        raise SystemExit(f"woof spacewx aurora: {exc}") from exc
     for when in times:
         row = {"time": when.isoformat() + "Z"}
         try:
             if record is not None:
                 hour = record.hourly(when)
-                row["kp"] = record.kp_estimate(when)
+                try:
+                    row["kp"] = record.kp_estimate(when)
+                except solarwind.SolarWindError:
+                    if not args.observed_al:
+                        raise
+                    row["kp"] = float("nan")       # only the observed AL drives the oval
                 row["newell"] = float(solarwind.newell_coupling(hour["speed"], hour["by"], hour["bz"]))
                 b = float(np.hypot(hour["by"], hour["bz"]))
                 row["polar_cap_kv"] = float(solarwind.boyle_potential(hour["speed"], b, hour["bz"]))
                 if args.observed_al:
-                    al = float(record.al[record._index(when)])
+                    al = record.al_at(when)
                     if not np.isfinite(al):
                         raise solarwind.SolarWindError(f"{when}: OMNI2 has no AL")
                     row["al"] = abs(al)
@@ -140,7 +153,9 @@ def aurora_main(args) -> int:
         print(f"{when:%Y-%m-%dT%H:%MZ}  Kp {row['kp']:4.2f}  |AL| {row['al']:6.1f} nT  "
               f"aurora reaches {edge.min() if edge.size else float('nan'):5.1f} N{extra}")
     doc = receipt(oval, {"spacewx_activity_source": source})
-    doc["times"] = rows
+    # Strict JSON: a coupling over a fill-value hour is null, not NaN.
+    doc["times"] = [{k: (None if isinstance(v, float) and not np.isfinite(v) else v)
+                     for k, v in row.items()} for row in rows]
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         np.savez(args.out, lat=lat, lon=lon, **{k: np.stack(v) for k, v in fields.items()})
