@@ -370,9 +370,39 @@ def test_overlap_across_lattices_refuses():
     shifted = b.HeightRaster(np.zeros((3, 3), np.float32), 0.5, 3.0, 1.0, 1.0)
     with pytest.raises(ValueError, match="different pixel lattices overlap"):
         b.aggregate([a, shifted], grid, min_samples=1)
+    # Touching at a seam (y = 1) on different lattices: walls there would be
+    # lost, so it refuses too.
     finer = b.HeightRaster(np.zeros((2, 6), np.float32), 0.0, 1.0, 0.5, 0.5)
     top = b.HeightRaster(np.zeros((2, 3), np.float32), 0.0, 3.0, 1.0, 1.0)
-    b.aggregate([top, finer], grid, min_samples=1)      # disjoint: fine
+    with pytest.raises(ValueError, match="overlap or touch"):
+        b.aggregate([top, finer], b.CartesianGrid(3, 3, 1.0, 1.0),
+                    min_samples=1)
+    # A model cell or more apart: fine.
+    grid = _cart(8, 3, 1.0)
+    left = b.HeightRaster(np.zeros((3, 2), np.float32), 0.0, 3.0, 1.0, 1.0)
+    right = b.HeightRaster(np.zeros((6, 6), np.float32), 4.0, 3.0, 0.5, 0.5)
+    b.aggregate([left, right], grid, min_samples=1)
+
+
+class _BowedGrid(b.CartesianGrid):
+    """A projected grid whose raster edges bow: j rises with (x - 50)^2."""
+
+    def fractional_ij(self, x, y, crs):
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        return x / self.dx, y / self.dy + 0.004 * (x - 50.0) ** 2
+
+
+def test_overlap_check_follows_bowed_edges():
+    # Raster A spans x 0..100; its bottom edge's midpoint sits 10 cells
+    # below its corners on the model grid.  B, near that midpoint, lies
+    # outside the corner box but inside A's true extent.
+    grid = _BowedGrid(100, 100, 1.0, 1.0)
+    a = b.HeightRaster(np.zeros((40, 100), np.float32), 0.0, 60.0, 1.0, 1.0)
+    inner = b.HeightRaster(np.zeros((8, 8), np.float32), 48.25, 24.5, 0.5,
+                           0.5)
+    with pytest.raises(ValueError, match="overlap or touch"):
+        b.aggregate([a, inner], grid, min_samples=1)
 
 
 def test_footprint_medians_ignore_overlap_and_order():

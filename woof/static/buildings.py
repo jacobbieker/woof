@@ -828,10 +828,17 @@ def _mosaic(rasters: Sequence[HeightRaster]) -> HeightRaster:
                         tuple(sorted(sources)))
 
 
-def _model_box(raster: HeightRaster, grid):
+def _model_box(raster: HeightRaster, grid, densify: int = 256):
+    """The raster's extent on the model grid, from densified edges (a
+    projected edge can bow outside the box its corners span)."""
     rows, cols = raster.shape
-    xs = np.array([raster.x0, raster.x0 + cols * raster.px] * 2)
-    ys = np.array([raster.y0] * 2 + [raster.y0 - rows * raster.py] * 2)
+    x0, x1 = raster.x0, raster.x0 + cols * raster.px
+    y1, y0 = raster.y0, raster.y0 - rows * raster.py
+    t = np.linspace(0.0, 1.0, densify + 1)
+    xs = np.concatenate([x0 + (x1 - x0) * t, x0 + (x1 - x0) * t,
+                         np.full_like(t, x0), np.full_like(t, x1)])
+    ys = np.concatenate([np.full_like(t, y0), np.full_like(t, y1),
+                         y0 + (y1 - y0) * t, y0 + (y1 - y0) * t])
     fi, fj = grid.fractional_ij(xs, ys, raster.crs)
     return (float(np.min(fi)), float(np.min(fj)), float(np.max(fi)),
             float(np.max(fj)))
@@ -847,8 +854,9 @@ def aggregate(rasters: Iterable[HeightRaster], grid, *,
     Rasters on one pixel lattice (same CRS, pixel size and alignment) are
     mosaicked first: where two know the same pixel the taller wins, and
     walls across their seams count once.  Rasters on different lattices
-    must not overlap on the model grid (their extents are checked, and an
-    overlap refuses): resample them onto one lattice first.
+    must lie at least a model cell apart (their densified extents are
+    checked; an overlap or a shared seam refuses): resample them onto one
+    lattice first.
     Pixels are assigned by centre; a wall face (a height step between two
     neighbouring known pixels) by its midpoint.  Frontal area index is
     half the wall area facing each model axis per plan area (the windward
@@ -874,11 +882,15 @@ def aggregate(rasters: Iterable[HeightRaster], grid, *,
     for a in range(len(boxes)):
         for b in range(a):
             (ai0, aj0, ai1, aj1), (bi0, bj0, bi1, bj1) = boxes[a], boxes[b]
-            if (min(ai1, bi1) - max(ai0, bi0) > 1e-6
-                    and min(aj1, bj1) - max(aj0, bj0) > 1e-6):
+            # Touching counts too: a seam between lattices would lose the
+            # walls along it.  One model cell of margin covers the
+            # densified box's own sampling error.
+            if (min(ai1, bi1) - max(ai0, bi0) > -1.0
+                    and min(aj1, bj1) - max(aj0, bj0) > -1.0):
                 raise ValueError(
                     "building rasters on different pixel lattices overlap "
-                    "on the model grid; their ground would count twice. "
+                    "or touch on the model grid; their ground would count "
+                    "twice or the walls along their seam would be lost. "
                     "Resample them onto one lattice (same CRS, pixel size "
                     "and alignment) so they mosaic")
     for raster in mosaics:

@@ -80,9 +80,9 @@ export the area you need with the provider's own tools (for example the
 one pixel lattice (same CRS, pixel size and alignment, such as adjacent
 GEM-15 windows or a footprint burn on a GEM-15 window's grid) are mosaicked
 first: where two know the same pixel the taller wins, and walls across the
-tile seams are counted once. Rasters on different lattices must not overlap
-on the model grid: `aggregate` refuses, because that ground would count
-twice. It then supersamples each raster until each model cell holds at
+tile seams are counted once. Rasters on different lattices must lie at
+least one model cell apart: `aggregate` refuses an overlap (that ground
+would count twice) and a shared seam (the walls along it would be lost). It then supersamples each raster until each model cell holds at
 least nine samples, and assigns each pixel to a model cell by its centre. Walls (height steps between
 neighbouring pixels) go to a cell by their midpoint. A WRF domain is read
 through its own projection (`ProjectionGrid`); idealised cases use the model
