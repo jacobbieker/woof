@@ -487,8 +487,15 @@ FROZEN_MODULE_DIGESTS = {
         # Reading: whole-substep words equal the separate sweeps' in fast,
         # strict and WRF-exact builds on CUDA (A6000) and Metal
         # (tests/test_acoustic_wphi_one_pass.py).  Previously 97a7e164/cfd6ba49.
-        '02d25ba401a374cc4579dc1e5bccf36afd86e828c789135fe573357d4bb4146f',
-        'e3a2b71e2eb58aa07b3e1acf200cd22cc595d15fcff77477e291af8a3c752fb8'),
+        # Re-pinned for advance_frame_phi_w_ring: the specified/nested frame
+        # update over the ring's columns with level lanes, a new entry inside
+        # `#if !GPUWM_WRF_EXACT`; the column frame kernels' phi'' statements
+        # moved verbatim into frame_phi_level (arn_* asm).  Reading: its words
+        # equal advance_specified_phi_w's / advance_nested_phi_w's in fast
+        # and strict numerics on CUDA (A6000) and Metal
+        # (tests/test_acoustic_frame_ring.py).  Previously 02d25ba4/e3a2b71e.
+        '4d9d324788e875c15524219bed9a24ec17579cb8b0219a0618b7deecc9128591',
+        '49b42f2600ac7d45783bca1348c4f552716c611cb318c5eabc83a2e81f0e8790'),
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.
