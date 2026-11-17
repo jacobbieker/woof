@@ -39,7 +39,9 @@ def molecular(col: atmosphere.Column, rep, iw: int, lam_nm: float | None = None,
     lam = float(rep.wvl[iw]) if lam_nm is None else float(lam_nm)
     co2 = (col.vmr("CO2")[..., -1] if co2_rayleigh is None else np.asarray(co2_rayleigh))
     sig_r = rayleigh.cross_section(lam, co2)
-    air = atmosphere.layer_column(col.z, col.n_air)
+    # the air factors are shared by the air column and every gas column
+    air_f = atmosphere.layer_air(col.z, col.n_air)
+    air = atmosphere.layer_column(col.z, col.n_air, air=air_f)
     dtau_ray = np.asarray(sig_r)[..., None] * air
     chi2 = rayleigh.second_moment(lam, co2)
     by = {}
@@ -51,17 +53,17 @@ def molecular(col: atmosphere.Column, rep, iw: int, lam_nm: float | None = None,
         if not lk.has(iw):
             continue
         sig = lk.sigma(iw, col.p, col.t, h2o_vmr if sp == "H2O" else None)
-        by[sp] = _mean_levels(sig) * atmosphere.layer_column(col.z, col.n_air, col.dens[sp])
+        by[sp] = _mean_levels(sig) * atmosphere.layer_column(col.z, col.n_air, col.dens[sp], air=air_f)
     # tabulated cross sections where the lookup has none
     if "O3" not in by:
         s = crs.o3(lam, col.t)
         if np.any(s):
-            by["O3"] = _mean_levels(s) * atmosphere.layer_column(col.z, col.n_air, col.dens["O3"])
+            by["O3"] = _mean_levels(s) * atmosphere.layer_column(col.z, col.n_air, col.dens["O3"], air=air_f)
     s = crs.no2(lam)
     if s and "NO2" in col.dens:
-        by["NO2"] = s * atmosphere.layer_column(col.z, col.n_air, col.dens["NO2"])
+        by["NO2"] = s * atmosphere.layer_column(col.z, col.n_air, col.dens["NO2"], air=air_f)
     s = crs.o4(lam)
     if s:
-        by["O4"] = s * atmosphere.layer_column(col.z, col.n_air, col.dens["O2"] ** 2)
+        by["O4"] = s * atmosphere.layer_column(col.z, col.n_air, col.dens["O2"] ** 2, air=air_f)
     dtau_abs = sum(by.values()) if by else np.zeros_like(dtau_ray)
     return MolecularOptics(dtau_ray=dtau_ray, dtau_abs=dtau_abs, by_species=by, chi2=np.asarray(chi2))

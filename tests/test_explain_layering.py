@@ -130,6 +130,7 @@ def _front_door_subcommands() -> list[str]:
     before this parser runs: every word after its name goes to the
     component's own parser, and the front door records no invocation for
     it, so no front-door pointer ever names ``woof hex ... --explain``.
+    The same holds for a door that forwards its argv to an external binary.
     Holding it to the sweep would hold the component to an empty
     forwarding entry it never parses (the docs-flag test excludes it
     for the same reason).
@@ -137,8 +138,18 @@ def _front_door_subcommands() -> list[str]:
 
     from woof.components import COMPONENTS
 
+    from woof.cli import build_parser
+
+    forwarded = set()
+    for action in build_parser()._actions:  # noqa: SLF001 - argparse only API
+        if isinstance(action, argparse._SubParsersAction):
+            forwarded = {name for name, door in action.choices.items()
+                         if getattr(door, "_forward_argv", False)}
+    # A door marked ``_forward_argv`` (``woof tc-verify``) hands every word after
+    # its name, ``--help`` included, to a Rust binary's own grammar; like a
+    # component door it records no front-door invocation to point from.
     return [name for name in _registered_subcommands()
-            if name not in COMPONENTS]
+            if name not in COMPONENTS and name not in forwarded]
 
 
 def test_a_component_door_answers_its_own_help(capsys):

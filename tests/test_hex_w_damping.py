@@ -51,7 +51,7 @@ def test_the_forecast_parser_carries_the_flags():
 
 
 def _request(**kw):
-    values = dict(nudging=None, tc_climate=None, w_damping=None, inflow_perturbation=None)
+    values = dict(nudging=None, obs_nudging=None, tc_climate=None, w_damping=None, inflow_perturbation=None)
     values.update(kw)
     return SimpleNamespace(**values)
 

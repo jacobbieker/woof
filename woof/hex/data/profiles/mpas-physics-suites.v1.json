@@ -2122,6 +2122,20 @@
         "module": "woof.hex.mpasphys.shcu_deng_v842",
         "operations": [],
         "woof_only": "WRF cu_rad_feedback, ICLOUD_CU = 1 (module_radiation_driver.F:1264-1281) for cu_grell_freitas: qc_cu/qi_cu added to the cloudiness slot's condensate before the cloud fraction; MPAS v8.4.2 radiation reads no convective cloud"
+      },
+      "clm_lake": {
+        "backend_selector": "config_clm_lake_backend",
+        "default_backend": "off",
+        "backends": [
+          "off",
+          "hex-cuda"
+        ],
+        "module": "woof.hex.mpasphys.clm_lake_v842",
+        "operations": [
+          "clm_lake_init",
+          "clm_lake"
+        ],
+        "woof_only": "WRF CLM lake (sf_lake_physics = 1, phys/module_sf_lake.F v4.7.1, woof.core.lake): lakeini once before the first step, then Lake on the LAKEMASK cells of the mesh's surface statics after the land surface, sea ice and surface diagnostics on the land surface's steps; its hfx, lh, grdflx, qfx, skintemp, t2m, th2m, q2 and sfc_albedo replace MPAS's there; MPAS v8.4.2 has no lake model"
       }
     },
     "framework": {

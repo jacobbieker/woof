@@ -232,12 +232,15 @@ def _capture_plan(state, device):
 @pytest.mark.gpu
 @pytest.mark.parametrize("form", ["nested", "nested_store", "strict",
                                   "capture", "seam"])
-def test_every_row_form_matches_the_per_row_path(monkeypatch, form):
+@pytest.mark.parametrize("ny,nx", [(36, 40), (11, 13), (10, 12)])
+def test_every_row_form_matches_the_per_row_path(monkeypatch, form, ny, nx):
+    """Each row form, at shapes whose frame rings leave a wide, an odd
+    and a narrow interior (the kernel walks the rings first)."""
     import cupy as cp
 
     import woof.ingest.lateral_bc as lbc
 
-    cfg, state, boundaries = _setup(map_factors=True)
+    cfg, state, boundaries = _setup(ny=ny, nx=nx, map_factors=True)
     rng = np.random.default_rng(9)
     for name in ("u", "v", "w", "thp", "php", "mup"):
         src = getattr(state, name)

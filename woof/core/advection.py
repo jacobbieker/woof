@@ -32,6 +32,18 @@ from woof.core.state import (DTYPE, DomainState, mu_at_u_faces,
                               mu_at_v_faces)
 
 _TPB = 128  # threads per block along i (i fastest)
+#: The flux-divergence launches' block on CUDA: 32 points along i by 4 rows
+#: along j.  A 128-wide row block leaves most of a second block idle on a
+#: row of 150 or 186 points; every thread computes the same point either way
+#: (no shared memory, each entry guards i, j and k), so the words are the
+#: 128 x 1 block's.  Metal measured no gain and keeps the row block.
+_FLUX_BLOCK_CUDA = (32, 4, 1)
+_FLUX_BLOCK_ROW = (_TPB, 1, 1)
+
+
+def _flux_block() -> tuple[int, int, int]:
+    from woof import backend
+    return _FLUX_BLOCK_CUDA if backend.active() == "cuda" else _FLUX_BLOCK_ROW
 
 
 def vertical_orders(cfg) -> tuple[int, int]:
@@ -117,8 +129,9 @@ def _launch(func: str, q, ru, rv, rw, tend, rdnw, fnm, fnp,
         kern = get_kernel_int_defines("advection", func, zero, (nz, ny, nx))
     else:
         kern = get_kernel("advection", func, (nz, ny, nx))
-    grid = ((n_i + _TPB - 1) // _TPB, n_j, n_k)
-    kern(grid, (_TPB, 1, 1),
+    block = _flux_block()
+    grid = ((n_i + block[0] - 1) // block[0], (n_j + block[1] - 1) // block[1], n_k)
+    kern(grid, block,
          (q, ru, rv, rw, tend, cp.asarray(rdnw, dtype=DTYPE),
           cp.asarray(fnm, dtype=DTYPE), cp.asarray(fnp, dtype=DTYPE), msf,
           DTYPE(1.0 / dx), DTYPE(1.0 / dy),

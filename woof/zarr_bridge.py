@@ -122,6 +122,18 @@ def extract_regular_zarr(request: dict, *, request_path: Path,
     return document
 
 
+def zarr_coverage(store: str) -> dict:
+    """The time window a store declares (``rw_zarr coverage``), as its JSON."""
+    result = subprocess.run([os.fspath(resolve_zarr_bin()), "coverage", store],
+                            capture_output=True, text=True, check=False, timeout=600)
+    if result.returncode:
+        raise ValueError(f"Native Zarr coverage query failed: {result.stderr[-4000:].strip()}")
+    document = json.loads(result.stdout)
+    if document.get("schema") != "gpuwm.zarr-coverage.v1":
+        raise ValueError("Native Zarr reader returned an incompatible coverage schema")
+    return document
+
+
 @contextmanager
 def regular_netcdf_record(path: Path, index: int, variables):
     """Expose one native-decoded time record without rereading the whole window."""

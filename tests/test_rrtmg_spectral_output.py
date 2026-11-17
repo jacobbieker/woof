@@ -14,6 +14,7 @@ The words against compiled WRF are held by the spectral oracle.
 import numpy as np
 import pytest
 
+import _numerics_child
 from conftest import requires_gpu
 
 pytestmark = [pytest.mark.gpu, requires_gpu]
@@ -22,15 +23,17 @@ BROADBAND = ("swuflx", "swdflx", "swuflxc", "swdflxc", "swdkdir", "swdkdirc",
              "sibvisdir", "sibnirdir", "swhr", "swhrc")
 
 
-def _run(spectral):
+def _run(spectral, levels="all", chunk=None):
     import test_rrtmg_sw_cuda as T
     engine = T.cuda()
     engine.spectral_output = spectral
+    engine.spectral_levels = levels
     try:
         groups = T._deck_groups()
-        return [T._run_batched(cs, T._group_inputs(cs)) for cs in groups.values()]
+        return [T._run_batched(cs, T._group_inputs(cs), chunk=chunk) for cs in groups.values()]
     finally:
         engine.spectral_output = "none"
+        engine.spectral_levels = "all"
 
 
 @pytest.fixture(scope="module")
@@ -137,7 +140,7 @@ def _lw_oracle():
     return cases
 
 
-def _lw_run(cases, names, spectral):
+def _lw_run(cases, names, spectral, levels="all", chunk=None):
     from woof.core import rrtmg_lw
     from woof.core.rrtmg_legacy import _lw_coeffs
     fx0 = cases[names[0]]
@@ -151,7 +154,8 @@ def _lw_run(cases, names, spectral):
         ins["cfc22vmr"], ins["ccl4vmr"], ins["emis"], int(fx0["in/inflglw"]),
         int(fx0["in/iceflglw"]), int(fx0["in/liqflglw"]), ins["cldfmcl"], ins["taucmcl"],
         ins["ciwpmcl"], ins["clwpmcl"], ins["cswpmcl"], ins["reicmcl"], ins["relqmcl"],
-        ins["resnmcl"], ins["tauaer"], _lw_coeffs(), spectral_output=spectral)
+        ins["resnmcl"], ins["tauaer"], _lw_coeffs(), column_chunk=chunk,
+        spectral_output=spectral, spectral_levels=levels)
     import cupy as cp
     return {k: cp.asnumpy(v) for k, v in out.items()}
 
@@ -178,3 +182,61 @@ def test_lw_band_words_equal_compiled_wrf_and_broadband_is_unchanged():
             assert not bad.any(), (name, int(bad.sum()), np.argwhere(bad)[:4].tolist())
             compared += 1
     assert compared == len(cases)
+
+
+# ---------------------------------------------------------------------------
+# spectral_levels = "boundary": the adapters (rrtmg_legacy, hex MPAS RRTMG)
+# read only the surface and the top level of a slab, so they ask the engines
+# for those two levels.  Each stored word is the same expression, so the
+# boundary slab is the full slab's levels 0 and -1 word for word, and the
+# broadband words do not move.  Checked under fast and strict numerics in
+# child processes (tests/_numerics_child.py): production runs fast.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("mode", ["bands", "gpoints"])
+def test_sw_boundary_levels_are_the_full_slabs_edge_words(mode):
+    key = "sw_band" if mode == "bands" else "sw_gpt"
+    full = _run(mode)
+    # a 3-column chunk walks the per-chunk copy into the call's slab, after
+    # the full run left its words in the reused spectral workspace
+    for chunk in (None, 3):
+        edge = _run(mode, levels="boundary", chunk=chunk)
+        for a, b in zip(full, edge):
+            want = a[key][:, :, [0, -1], :]
+            assert b[key].shape == want.shape, (mode, chunk, b[key].shape, want.shape)
+            assert np.array_equal(b[key].view(np.uint32), want.view(np.uint32)), (mode, chunk)
+            for name in BROADBAND:
+                assert np.array_equal(a[name].view(np.uint32), b[name].view(np.uint32)), (mode, chunk, name)
+
+
+def test_lw_boundary_levels_are_the_full_slabs_edge_words():
+    cases = _lw_oracle()
+    groups = {}
+    for name, fx in sorted(cases.items()):
+        key = (int(fx["meta/nlayers"]), int(fx["in/icld"]), int(fx["in/inflglw"]),
+               int(fx["in/iceflglw"]), int(fx["in/liqflglw"]))
+        groups.setdefault(key, []).append(name)
+    for names in groups.values():
+        full = _lw_run(cases, names, "bands")
+        for chunk in (None, 2):
+            edge = _lw_run(cases, names, "bands", levels="boundary", chunk=chunk)
+            want = full["lw_band"][:, :, [0, -1], :]
+            assert edge["lw_band"].shape == want.shape, (chunk, edge["lw_band"].shape)
+            assert np.array_equal(edge["lw_band"].view(np.uint32), want.view(np.uint32)), chunk
+            for key in ("uflx", "dflx", "uflxc", "dflxc", "hr", "hrc"):
+                assert np.array_equal(full[key].view(np.uint32), edge[key].view(np.uint32)), (chunk, key)
+
+
+def test_spectral_levels_refuses_an_unknown_name():
+    from woof.core.rrtmg_sw import spectral_level_count
+    assert spectral_level_count("all", 51) == 51
+    assert spectral_level_count("boundary", 51) == 2
+    with pytest.raises(ValueError, match="spectral_levels"):
+        spectral_level_count("top", 51)
+
+
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_boundary_levels_keep_the_words_in_every_numerics_mode(numerics, exact):
+    _numerics_child.run(__file__, ["test_sw_boundary_levels_are_the_full_slabs_edge_words",
+                                   "test_lw_boundary_levels_are_the_full_slabs_edge_words"],
+                        numerics, exact)

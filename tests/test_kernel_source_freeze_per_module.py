@@ -1197,8 +1197,12 @@ BASELINE_PINNED: dict[str, str] = {
     # unchanged text.  Its words equal compiled WRF v4.6.1 rtrnmc's per-band
     # terms (tests/test_rrtmg_spectral_output.py), CUDA and Metal.
     # RE-PINNED at the 1.1.6 upstream merge: the fork's 256-level source on upstream 1.1.6's edits.
+    # RE-PINNED on perf/rrtmg-spectral-boundary-levels: rlw_rtrn_band_rows can
+    # write only the surface and top levels (nlo == 2); no physics changed, the
+    # kept words equal the full slab's (test_lw_boundary_levels_* in
+    # tests/test_rrtmg_spectral_output.py, fast, strict and wrf_exact).
     "rrtmg_lw_zbatched":
-        "dfe3b824da5e8af04366dc873654368fb687a26075ddad898f48e3a6a2a367e6",
+        "f1bb5d25fd9855ba377a6dc9298fc213876eb811b42061b8dc48b1413aab0f9f",
     # The clean-room spectral solver (woof/radtran, docs/dev/radtran.md);
     # its words are tests/data/radtran/kernel_words.npz on host, CUDA and
     # Metal, and its fluxes are held to uvspec 2.0.6.  Moved once on

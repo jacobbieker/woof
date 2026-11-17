@@ -1486,6 +1486,10 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # Rebuilt geometry/kernel; all held undimmed arrays alias fields/*,
     # including the initialized marker used to preserve radiation cadence.
     "eclipse",
+    # The opt-in TSI forcing (woof.spacewx): rebuilt from the resumed
+    # RunConfig; stateless (the factor is read from the series at each
+    # radiation call's model time), so a resumed run scales identically.
+    "solar_variability",
     # WRF's topo_wind / gwd_opt (woof.core.terrain_drag): initialize_physics
     # rebuilds it from the resumed RunConfig and the prepared statics; it
     # holds only static coefficients and statistics, never a value a step
@@ -3445,6 +3449,13 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # header ran, so it is omitted there and echoed only when selected.
     if values.get("gf_deep_rain_evaporation_booking", False) is False:
         values.pop("gf_deep_rain_evaporation_booking", None)
+    # The opt-in TSI forcing (woof.spacewx): off is what every earlier
+    # header ran, so its keys are omitted there and echoed only when on.
+    if values.get("solar_tsi_opt", 0) == 0:
+        for name, default in (("solar_tsi_opt", 0), ("solar_tsi_source", ""),
+                              ("solar_tsi_mode", "absolute")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
     if values.get("bl_mynn_cloud_tendency_form", "wrf_461") == "wrf_461":
         values.pop("bl_mynn_cloud_tendency_form", None)
     # WRF's cycling flag: omitted at its .false. default.
@@ -5626,6 +5637,9 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'bl_mynn_cloud_tendency_form': 'wrf_461',
     'bl_mynn_gsd41_unsquared_qtke': False,
     'gf_deep_rain_evaporation_booking': False,
+    'solar_tsi_opt': 0,
+    'solar_tsi_source': '',
+    'solar_tsi_mode': 'absolute',
     'ruc_soilprop': 'wrf_45',
     'rrtmg_cloud_optics_form': 'wrf_461',
     'rrtmg_aer3_type_source': 'rural',
@@ -6192,6 +6206,8 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "noahmp_snow_age": "wrf_461",
                           "urban_water_balance": "wrf_471",
                           "gf_deep_rain_evaporation_booking": False,
+                          "solar_tsi_opt": 0, "solar_tsi_source": "",
+                          "solar_tsi_mode": "absolute",
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without
                           # the key ran the exact arithmetic.

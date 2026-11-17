@@ -499,9 +499,10 @@ def _raise_for_status(cp, status, out, outs) -> None:
                 if flags & bit:
                     raise kind(f"{name} problem in NOAHMP LSM"
                                + health_ledger.deferred_note())
-        flags = cp.zeros(1, dtype=cp.uint32)
-        for code in (1, 2, 3):
-            flags |= active_probe(status == code).any().astype(cp.uint32) << (code - 1)
+        from woof.core.noahmp_slab_libm import flag_bits
+        from woof.core.noahmp_surface_device import column_mask
+        flags = flag_bits([(status, "==", code) for code in (1, 2, 3)],
+                          active=column_mask())
         ledger.record("noahmp.post.native_budgets", flags, refuse)
         return
     n = int(status.size)

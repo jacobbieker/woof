@@ -99,8 +99,10 @@ def digest(a) -> str:
 
 
 def _header():
-    import cupy as cp
+    # woof first: under WOOF_BACKEND=mlx its import installs the cupy facade (check-fixture without
+    # --tier reaches here before anything else has imported woof).
     import woof.wrf_exact as wrf_exact
+    import cupy as cp
 
     name = cp.cuda.runtime.getDeviceProperties(0)["name"]
     return {"strict_build": bool(wrf_exact.ENABLED),

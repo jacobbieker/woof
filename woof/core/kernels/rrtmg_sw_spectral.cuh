@@ -11,7 +11,15 @@
 // ascending iw, zincflx(iw)*flux.  These kernels are separate launches that
 // read the same buffers, so the broadband words are untouched.
 // Output quantity order q: fu, fd, cu, cd, fddir, cddir.
+// nlo output levels: every level (nlo = nlayers + 1), or only the surface and
+// the top (nlo = 2, output K 0 and 1 from level 0 and nlayers), the two levels
+// the history fields read.  Each stored word is the same expression either way.
 // ---------------------------------------------------------------------------
+
+__device__ __forceinline__ int rsw_spectral_level(int Ko, int nlo, int nlayers)
+{
+    return nlo == nlayers + 1 ? Ko : Ko * nlayers;
+}
 
 __device__ __forceinline__ const real* rsw_spectral_input(
     int q, const real* zfu, const real* zfd, const real* zcu, const real* zcd,
@@ -21,9 +29,9 @@ __device__ __forceinline__ const real* rsw_spectral_input(
          : q == 4 ? ztdbt_nodel : ztdbtc_nodel;
 }
 
-// thread -> (q, col, K, band); out (6, ncol, nlayers+1, 14)
+// thread -> (q, col, K, band); out (6, ncol, nlo, 14)
 extern "C" __global__
-void rsw_spc_band_accum_b(int ncol, int nlayers,
+void rsw_spc_band_accum_b(int ncol, int nlayers, int nlo,
                           const int* __restrict__ ngb,
                           const real* __restrict__ zincflx,   // (ncol, 112)
                           const real* __restrict__ zcd,       // (ncol, n1, 112)
@@ -35,11 +43,11 @@ void rsw_spc_band_accum_b(int ncol, int nlayers,
 {
     long long n1 = (long long)nlayers + 1;
     long long idx = (long long)blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= 6LL * ncol * n1 * RSW_NBND) return;
+    if (idx >= 6LL * ncol * nlo * RSW_NBND) return;
     int band = (int)(idx % RSW_NBND);
     long long rest = idx / RSW_NBND;
-    int K = (int)(rest % n1);
-    rest /= n1;
+    int K = rsw_spectral_level((int)(rest % nlo), nlo, nlayers);
+    rest /= nlo;
     int col = (int)(rest % ncol);
     int q = (int)(rest / ncol);
     const real* in = rsw_spectral_input(q, zfu, zfd, zcu, zcd, ztdbt_nodel, ztdbtc_nodel);
@@ -52,9 +60,9 @@ void rsw_spc_band_accum_b(int ncol, int nlayers,
     out[idx] = acc;
 }
 
-// thread -> (q, col, K, iw); out (6, ncol, nlayers+1, 112): zincflx(iw)*flux
+// thread -> (q, col, K, iw); out (6, ncol, nlo, 112): zincflx(iw)*flux
 extern "C" __global__
-void rsw_spc_gpt_b(int ncol, int nlayers,
+void rsw_spc_gpt_b(int ncol, int nlayers, int nlo,
                    const real* __restrict__ zincflx,
                    const real* __restrict__ zcd, const real* __restrict__ zcu,
                    const real* __restrict__ zfd, const real* __restrict__ zfu,
@@ -64,11 +72,11 @@ void rsw_spc_gpt_b(int ncol, int nlayers,
 {
     long long n1 = (long long)nlayers + 1;
     long long idx = (long long)blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= 6LL * ncol * n1 * RSW_NGPT) return;
+    if (idx >= 6LL * ncol * nlo * RSW_NGPT) return;
     int iw = (int)(idx % RSW_NGPT);
     long long rest = idx / RSW_NGPT;
-    int K = (int)(rest % n1);
-    rest /= n1;
+    int K = rsw_spectral_level((int)(rest % nlo), nlo, nlayers);
+    rest /= nlo;
     int col = (int)(rest % ncol);
     int q = (int)(rest / ncol);
     const real* in = rsw_spectral_input(q, zfu, zfd, zcu, zcd, ztdbt_nodel, ztdbtc_nodel);

@@ -623,6 +623,7 @@ class _Rewriter:
         self._handled_literals: set[int] = set()
         #: spans already replaced by a folded constant (not visited again)
         self._folded: set = set()
+        self._const_spelled: set = set()
         #: program-scope constant tables whose `float` stays `float`
         self._keep_float_ranges: list = []
         #: declaration statement start -> (stmt, var usrs, function usr, default space)
@@ -976,16 +977,47 @@ class _Rewriter:
         if init and _is_double(cursor.type) and init[-1].kind.name not in ("INIT_LIST_EXPR", "FLOATING_LITERAL"):
             if self.fold_constant_double(init[-1]):
                 self._folded.add(self.span(init[-1]))
-        if init and self.retain and _is_float(cursor.type) \
-                and init[-1].kind.name not in ("INIT_LIST_EXPR", "FLOATING_LITERAL"):
-            # f32s arithmetic is not constexpr: the value, as a literal
-            v = self.const_eval(init[-1])
-            if v is not None and v[0] == "double":
-                import math
-                if math.isfinite(v[1]):
-                    s_, e_ = self.span(init[-1])
-                    self.edits.replace(s_, e_, f"{float(v[1]).hex()}f")
-                    self._folded.add(self.span(init[-1]))
+        if init and self.retain and _is_float(cursor.type):
+            self._fold_f32s_initialiser(init[-1])
+
+    def _fold_f32s_initialiser(self, init) -> bool:
+        """f32s arithmetic (and its conversion from an integer) is not
+        constexpr: a binary32 constant initialiser becomes its value, as a
+        hex literal, the word NVRTC folds.  False if it is not a constant."""
+        if init.kind.name in ("INIT_LIST_EXPR", "FLOATING_LITERAL"):
+            return False
+        v = self.const_eval(init)
+        if v is None or v[0] != "double":
+            return False
+        import math
+        if not math.isfinite(v[1]):
+            return False
+        s_, e_ = self.span(init)
+        self.edits.replace(s_, e_, f"{float(v[1]).hex()}f")
+        self._folded.add(self.span(init))
+        return True
+
+    def local_constexpr_float(self, node):
+        """``constexpr float c = 1.f / b;`` (or ``= 80``) in a function of a
+        subnormal-retaining unit: c is an f32s, whose arithmetic and integer
+        conversion are not constexpr (Metal: "constexpr variable must be
+        initialized by a constant expression"; strict hex MYNN's l0, rbm_st,
+        rbh_st).  The initialiser folds to its binary32 word; one that does
+        not fold keeps the same value as ``const``."""
+        if not _is_float(node.type):
+            return
+        toks = list(node.get_tokens())
+        constexpr = next((tk for tk in toks if tk.spelling == "constexpr"), None)
+        if constexpr is None:
+            return
+        init = [c for c in node.get_children() if c.kind.name not in ("TYPE_REF", "ANNOTATE_ATTR")]
+        if not init or init[-1].kind.name == "FLOATING_LITERAL" or self.span(init[-1]) in self._folded:
+            return              # a literal, or this declaration already seen (another instance)
+        if self.span(constexpr) in self._const_spelled:
+            return
+        self._const_spelled.add(self.span(constexpr))
+        if not self._fold_f32s_initialiser(init[-1]):
+            self.edits.replace(constexpr.extent.start.offset, constexpr.extent.end.offset, "const")
 
     def local_pointer_decl(self, node):
         """Local pointers and references need an address space in Metal.
@@ -3617,6 +3649,8 @@ class _Rewriter:
                 self.generic_cast(node)
             if kind == K.VAR_DECL and d > 0:
                 self.local_pointer_decl(node)
+                if self.retain:
+                    self.local_constexpr_float(node)
                 if node.storage_class == self.ci.StorageClass.STATIC and node.semantic_parent is not None \
                         and node.semantic_parent.kind.name in self._FUNCTION_KINDS:
                     self.static_local(node)

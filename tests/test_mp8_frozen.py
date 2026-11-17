@@ -479,8 +479,23 @@ FROZEN_MODULE_DIGESTS = {
         # and Metal); the shape-specialized CUDA column build's words differ
         # from that generic build's by NVRTC's contraction on the folded loops
         # (PR #475).  Previously 14f8d637/5c720500.
-        '97a7e1646a217ad7e19c17f52a70e7d6c7cb1837b557e1ab6168084932dc3876',
-        'cfd6ba49dee0bce96b7cd472eafdd53d5c41e18e57dc04beefb92802d20dd4c3'),
+        # Re-pinned for advance_w_phi_msf's one-pass default arm: the forward
+        # sweep inside the forcing loop, then back substitution, damper,
+        # phi'' update and per-level p''/alpha'' diagnosis (diagnose_p_level)
+        # in one top-down pass, 3 resident blocks.  The same statements on
+        # the same operands; WPHI_SEPARATE_SWEEPS=1 keeps the old sweeps.
+        # Reading: whole-substep words equal the separate sweeps' in fast,
+        # strict and WRF-exact builds on CUDA (A6000) and Metal
+        # (tests/test_acoustic_wphi_one_pass.py).  Previously 97a7e164/cfd6ba49.
+        # Re-pinned for advance_frame_phi_w_ring: the specified/nested frame
+        # update over the ring's columns with level lanes, a new entry inside
+        # `#if !GPUWM_WRF_EXACT`; the column frame kernels' phi'' statements
+        # moved verbatim into frame_phi_level (arn_* asm).  Reading: its words
+        # equal advance_specified_phi_w's / advance_nested_phi_w's in fast
+        # and strict numerics on CUDA (A6000) and Metal
+        # (tests/test_acoustic_frame_ring.py).  Previously 02d25ba4/e3a2b71e.
+        '4d9d324788e875c15524219bed9a24ec17579cb8b0219a0618b7deecc9128591',
+        '49b42f2600ac7d45783bca1348c4f552716c611cb318c5eabc83a2e81f0e8790'),
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.
@@ -937,8 +952,21 @@ FROZEN_MODULE_DIGESTS = {
         # Re-read for the 32-bit cell index and the write-if-changed store
         # (integer and store logic only; the audit record was re-taken).
         # Previously b35120f7/1730a720.
-        'a5bc696d4f3e0ce4e04608bac1b956fd8c80fdfaa869082d70da1d7b7f7d213d',
-        'b83b8ec8b0ab60b5f7863a391d5b7cb6099302878bd4460ff164c2b5c758e82a'),
+        # Re-pinned for the ring-first thread walk: state_relaxation_multi
+        # hands its first threads to each level's frame rings and the rest
+        # to the interior, so the relaxation path runs in dense warps.  Only
+        # the integer cell mapping moved; every cell evaluates the same
+        # statements (tests/test_lbc_relax_multi.py against the per-row path,
+        # both backends and modes).  Previously a5bc696d/b83b8ec8.
+        # Re-pinned for finalize_state_multi: one spec_bdy_final's forced
+        # fields in one table-driven launch.  finalize_state_field's body
+        # moved verbatim into the device function finalize_state_cell, which
+        # the per-field kernel and the table kernel both call, so every cell
+        # evaluates the same statements (tests/test_lbc_finalize_multi.py
+        # against the per-field launches, both backends, fast/strict/exact).
+        # Previously 988a312e/66abb703.
+        '41efd3f809ff2d746aff66c20896ce5812b32ea675ac649a0bf0871c6d9bf298',
+        '171a660d6c4a537de8e6a73d9ecf215d163a1449714d48413f5f91dbfe4ab94b'),
     'morrison': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,

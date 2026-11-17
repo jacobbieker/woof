@@ -88,6 +88,35 @@ compiled WRF v4.7.1's words on all 1,737,808 graded words, and the glue, couplin
 merges are held word for word (`components/hex/tests/test_mpas_shcu_deng_v842.py`).
 Without the keys nothing runs and the receipt is unchanged.
 
+WOOF-only CLM lake (`woof.hex.mpasphys.clm_lake_v842`; MPAS v8.4.2 has no lake model and
+folds the MODIS lake class to water). `config_clm_lake_backend='hex-cuda'` in `&hex_mpasphys`
+(or `--physics config_clm_lake_backend=hex-cuda`; service `clm_lake`, default `off`) runs WRF's
+`sf_lake_physics = 1` (`phys/module_sf_lake.F` v4.7.1 through `woof.core.lake`, no copy of the
+lake physics) on the LAKEMASK cells of the mesh's surface statics (`<mesh>.surface_statics.nc`,
+`woof hex surface-statics`, read by `woof.hex.surface_inputs.bind` with LAKE_DEPTH and WRF's
+defaults `use_lakedepth = 1`, `lakedepth_default = 50`; `--surface-statics`, else beside
+`--grid`/`--static`; refused by name when absent). Lakes stay water for MPAS's own schemes, as
+real.exe leaves them with the lake model on. `clm_lake_init` (WRF's lakeini) runs once at the
+start of the first step, before any surface scheme, from the run's `skintemp`, `isltyp`, `snow`
+and `xice`; a frozen lake goes back from MPAS's land-ice branch to lake water (`ivgtyp = iswater`,
+`xland = 2`, `xice = 0`), as lakeini does. `clm_lake` then runs on every land-surface step after
+the land surface, sea ice, `atmphys_sfc_diagnostics` and the TC spray and before the PBL, as WRF's
+surface driver runs Lake after its LSM blocks (`module_surface_driver.F:4394-4426`). Its inputs are
+the words MPAS's land-surface driver hands Noah (`mpas_atmphys_driver_lsm.F:357-480,704-726`):
+`t_p`, `pres2_hyd_p(1:2)` (MPAS's p8w for its LSM), `dz_p`, `qv_p` at k = 1, `u_p`/`v_p` at k = 1,
+`glw`, `sfc_emiss`, SWDOWN `gsw/(1-sfc_albedo)`, RAINBL `0 + rainncv + raincv` (each when its
+scheme is on), `sfc_albedo`, `latCell` in degrees, the step `dt` (= `dt_pbl`, since
+`config_pbl_interval` is refused) and MPAS's `xice_threshold`. Its `hfx`, `lh`, `grdflx`, `qfx`,
+`tsk -> skintemp`, `t2 -> t2m`, `th2 -> th2m`, `q2` and `albedo -> sfc_albedo` replace MPAS's on
+the lake cells only. Every lake call is WRF's lake kernel on the same inputs, bit for bit, with the
+inputs formed independently in the test (`components/hex/tests/test_mpas_clm_lake_v842.py`, CUDA and
+Metal). Refused with it on: `config_sst_update` and `config_sstdiurn_update` (they rewrite the lake
+skin and ice; WRF's own lake hand-back on an SST update is not carried), OML1D or `--ocean-mode
+pwp`, `config_pbl_interval`, no land surface, native-file restarts, checkpoints and moving
+regions, same-host ranks, LTS and DA cycling (the lake columns have no carrier yet). The lake
+initial-state sources (`lake_state_source`) are not bound on this route. Without the key nothing
+runs and the receipt is unchanged.
+
 WOOF-only WRF-Solar EPS (`woof.hex.mpasphys.wrfsolar_eps_v842`; MPAS v8.4.2 perturbs
 no physics input). The WOOF group `&wrfsolar_eps` carries WRF's `&stoch` multi_perturb
 keys with `config_` names (`config_multi_perturb`, `config_pert_farms`/`_deng`/`_thom`/

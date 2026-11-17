@@ -105,6 +105,12 @@ MOVED = {
     "gf_deep_rain_evaporation_booking": (
         dict(gf_deep_rain_evaporation_booking=True),
         {"gf_deep_rain_evaporation_booking"}),
+    # On, all three keys are echoed (the mode at its default too).
+    "solar_tsi_opt": (dict(solar_tsi_opt=1, solar_tsi_source="tsi.csv"),
+                      {"solar_tsi_opt", "solar_tsi_source", "solar_tsi_mode"}),
+    "solar_tsi_mode": (dict(solar_tsi_opt=1, solar_tsi_source="tsi.csv",
+                            solar_tsi_mode="relative"),
+                       {"solar_tsi_opt", "solar_tsi_source", "solar_tsi_mode"}),
     "cycling": (dict(bl_mynn_version="gsd_41", cycling=True),
                 {"bl_mynn_version", "cycling"}),
     "diff_6th_form": (dict(diff_6th_form="noaa_wrf39", diff_6th_factor2=0.04),
@@ -197,6 +203,8 @@ DEFAULT_OFF = frozenset({
     "mynn_sfclay_variant",
     # The opt-in GF deep evaporation booking, absent while off.
     "gf_deep_rain_evaporation_booking",
+    # The opt-in TSI forcing (woof.spacewx), absent while off.
+    "solar_tsi_opt", "solar_tsi_source", "solar_tsi_mode",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The RUC sea-ice threshold switch, absent at 0 as in a 2.8.5 header.

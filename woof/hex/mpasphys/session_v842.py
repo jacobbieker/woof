@@ -184,6 +184,15 @@ class NativePhysicsSession:
             from .shcu_deng_v842 import DengService
             self.shcu_deng_service = DengService(self)
             self.hooks.external.update(self.shcu_deng_service.callbacks())
+        # WOOF-only CLM lake service (clm_lake_v842): WRF's lake columns on the device pool views.
+        self.clm_lake_service = None
+        if str(backends.get('clm_lake', 'off')) == 'hex-cuda':
+            if cuda_device is None:
+                raise RuntimeError("the CLM lake service (config_clm_lake_backend = 'hex-cuda') runs on the CUDA "
+                                   "device pool views; this session has none")
+            from .clm_lake_v842 import ClmLakeService
+            self.clm_lake_service = ClmLakeService(self)
+            self.hooks.external.update(self.clm_lake_service.callbacks())
         mark('surface-service')
         self.driver = PhysicsDriver(config, PhysicsManager(config, dt,
                                      streams=stream_intervals), slots, self.hooks)
