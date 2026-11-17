@@ -941,6 +941,30 @@ def _column_batch(ncol, stride, processors, free_bytes, *, shared_card=False):
     return min(((ncol + 63) // 64) * 64, max(64, (64 if shared_card else 256) * processors), affordable)
 
 
+def _compact_workers(ncol, stride, processors, free_bytes, *, metal):
+    """Worker cap of the compact (borrowed) arena.
+
+    CUDA keeps 128 workers per SM.  Metal reports its GPU cores as processors (40 on an M-series Max), and 128 per
+    core left 5,120 workers striding over a 14,751-column Alps mesh: mynn_mmm_run took 112 ms/step there against
+    50 ms/step with a worker per column (R2-D, 2026-11-16).  On Metal every column gets a worker, still within the
+    one-eighth-of-free-memory bound.  Words do not depend on the worker count (each column is computed in its own
+    worker's private arena).  ``WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR`` overrides the per-processor cap on either
+    backend.
+    """
+    import os
+    budget = max(64 * stride, free_bytes // 8)
+    affordable = max(64, (budget // stride // 64) * 64)
+    columns = ((ncol + 63) // 64) * 64
+    override = os.environ.get('WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR', '').strip()
+    if override:
+        per = max(1, int(override))
+    elif metal:
+        return min(columns, affordable)
+    else:
+        per = 128
+    return min(columns, max(64, per * processors), affordable)
+
+
 _STATIC_COLUMNS = (
     "const int worker = blockIdx.x*blockDim.x+threadIdx.x;\n"
     "for (int thread = worker; thread < batch_count; thread += blockDim.x*gridDim.x) {\n")
@@ -1079,9 +1103,12 @@ class MynnCudaModule:
             import os
             narrow = os.environ.get('WOOF_HEX_MEMBER_MEMORY', 'compact').strip().lower() == 'shared-card'
             idle = cp.get_default_memory_pool().free_bytes()
-            batch = _column_batch(ncol, stride, processors, free_bytes + idle, shared_card=narrow)
-            if not narrow:
-                batch = min(batch, 128 * processors)
+            if narrow:
+                batch = _column_batch(ncol, stride, processors, free_bytes + idle, shared_card=True)
+            else:
+                from woof import backend
+                batch = _compact_workers(ncol, stride, processors, free_bytes + idle,
+                                         metal=backend.active() == "mlx")
             held = self._workers = (key, batch)
         batch = held[1]
         return (cp.empty(batch * stride, dtype=cp.uint8),

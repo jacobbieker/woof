@@ -533,6 +533,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   strict numerics on CUDA and Metal; Alps 3 km variable-resolution, 11
   tracers: 28 -> 2-3 ms per launch on an M3 Max, 15 -> 0.55 ms on an A6000;
   `WOOF_HEX_REGIONAL_EDGE_HOIST=0` restores the element kernel).
+  Hex MYNN on Metal gives every column its own worker (within the
+  one-eighth-of-free-memory bound) instead of 128 per GPU core, so the
+  column loop no longer strides: on the 14,751-cell Alps VR mesh
+  `mynn_mmm_run` drops from 112 to 50 ms a step, byte-identical
+  (`WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR` sets the per-processor cap on
+  either backend; CUDA keeps 128 per SM).
   Hex `woof hex moving`: the resident forecast process prepares the next
   region beside the running one only when the host has room for a second
   copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
