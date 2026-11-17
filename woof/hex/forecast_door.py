@@ -4455,7 +4455,9 @@ def run_forecast(arguments: argparse.Namespace) -> int:
     from .wave_options import environment as wave_environment
     from woof.wrf_hydro_route import launch_scope as wrf_hydro_scope
     with wave_environment(arguments), wrf_hydro_scope(getattr(arguments, "wrf_hydro", None),
-                                                      getattr(arguments, "wrf_hydro_output", None)), \
+                                                      getattr(arguments, "wrf_hydro_output", None),
+                                                      gpu_exchange=getattr(arguments, "wrf_hydro_gpu_exchange",
+                                                                           None)), \
             command_scope(arguments, engine="woof hex") as scope:
         result = _run_forecast_with_outputs(arguments)
         return scope.finish(result) if scope else result

@@ -6357,6 +6357,9 @@ def _public_config_value(value):
                                   ("gf_deep_rain_evaporation_booking", False),
                                   ("solar_tsi_opt", 0), ("solar_tsi_source", ""),
                                   ("solar_tsi_mode", "absolute"),
+                                  ("spacewx_ionosphere_opt", 0), ("spacewx_f107_source", ""),
+                                  ("spacewx_f107_mode", "81day"),
+                                  ("spacewx_ionosphere_maps", "ccir"),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

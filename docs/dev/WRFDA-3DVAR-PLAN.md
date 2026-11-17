@@ -712,7 +712,7 @@ both programs the same `fg`, `be.dat` and observation file, and compares:
 ### 4.10 Interfaces shared with the differentiable plan
 
 Coordinated with P0 (`woof/grad/`, branch `grad/p0-obs-cost`, in progress)
-and P2 (`woof/nn/`, #584, open):
+and P2 (`woof/nn/`, #584, merged; `docs/nn-physics.md`):
 
 - **Observations:** P0's `woof.grad.obs_cost.ObsSet` (flat table: platform,
   kind, station, time, lat, lon, pressure, height, elevation, value,
@@ -834,7 +834,7 @@ Shared machinery from the differentiable plan:
 
 - the P1 tensor bridge (CuPy/torch via DLPack, MLX arrays on Metal);
 - P2.1's artefact manifest and runners (`woof/nn/`, #584), installed with
-  that PR's torch extra (`nn-torch`, proposed there);
+  the `nn-torch` extra that PR added;
 - P0's cost and observation table;
 - P3's adjoints and P4's checkpointing.
 

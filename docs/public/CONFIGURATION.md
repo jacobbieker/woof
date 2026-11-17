@@ -1516,6 +1516,10 @@ each one off, the run executes no new code. The design and the planned layers
 | `solar_tsi_opt` | `0` | `1` scales every shortwave output of each radiation call by `TSI(t) / reference`. Shortwave transfer is linear in the top-of-atmosphere flux, so this equals changing WRF's `SOLCON = 1370 * ECCFAC` for every shortwave scheme. |
 | `solar_tsi_source` | `""` | The TSI series. A CSV of `YYYY-MM-DD,W m-2` daily means, a NOAA CDR netCDF (`TSI`, `time` in days since 1610-01-01), several paths joined by `:`, or `"nrlssi2"`, which fetches the NOAA NRLSSI2 daily CDR files for the run's years into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`). Daily means sit at noon UTC and are interpolated linearly. A run time outside the series, or in a gap longer than a day, is refused. |
 | `solar_tsi_mode` | `"absolute"` | `"absolute"`: the reference is 1370 W m-2, so the measured TSI replaces WRF's constant. `"relative"`: the reference is 1360.8 W m-2 (the TIM cycle mean), which keeps WRF's calibration and adds only the variability. |
+| `spacewx_ionosphere_opt` | `0` | `1` adds the climatological ionosphere to every history frame: `IONO_TEC` (vertical TEC, 60-2000 km, TECU), `IONO_FOF2` and `IONO_FOE` (MHz), `IONO_HMF2` (km) and `IONO_NMF2` (m-3), on the domain's columns at the frame's valid time. It is a diagnostic: the atmosphere integrates identically. |
+| `spacewx_f107_source` | `""` | The F10.7 that drives it. `""` or `"gfz"` fetches GFZ's `Kp_ap_Ap_SN_F107_since_1932.txt` into the space-weather cache. A path reads a file in that format, and a number is a fixed flux in sfu. The value at the run's start is held for the whole run (persistence). |
+| `spacewx_f107_mode` | `"81day"` | `"81day"`: the mean observed F10.7 of the 81 UT days ending the day before the start. `"daily"`: the day before the start alone. |
+| `spacewx_ionosphere_maps` | `"ccir"` | The foF2 maps, `"ccir"` or `"ursi"`. |
 
 `solar_tsi_source` and `solar_tsi_mode` are refused while `solar_tsi_opt = 0`,
 since they would do nothing. `solar_tsi_opt = 1` is refused without a
@@ -1526,6 +1530,18 @@ seam takes the same keys (`woof hex forecast --physics solar_tsi_opt=1
 take them yet. The NOAA CDR lags real time by a few months, so a forecast for
 the coming days needs a CSV, for example the last measured value carried
 forward.
+
+The `spacewx_f107_*` and `spacewx_ionosphere_maps` keys are refused while
+`spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 1` is refused without a
+radiation scheme, since the ionosphere uses the radiation geometry's columns.
+It is also refused on a streamed (tiled) domain and on hex, where no history
+stream carries the rows yet. Its CCIR/URSI maps and IGRF-14 coefficients are
+fetched on first use into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`) and
+checked against pinned SHA-256 sums. The GFZ index file is a living record, so
+it has no pinned sum: it is fetched again when it ends before the day before the
+start (and once more when that day's flux is not yet released), its format is
+checked on reading, and its SHA-256 is printed with the rest of the
+ionosphere's receipt as the run starts (the `[spacewx ionosphere]` line).
 
 ## What a WRF namelist setting becomes
 

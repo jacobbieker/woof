@@ -4286,3 +4286,17 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     measured="2026-11-08", complete=False,
     frames=MappingProxyType({"chem_sorgam": 672}),
 ),)
+
+# The climatological ionosphere (kernels/spacewx_ionosphere.cu, the
+# spacewx_ionosphere_opt history rows), production loader
+# (woof.core.kernels.get_kernel), RTX A6000 sm_86, NVRTC 12.9.86,
+# 2026-11-17, both GPUWM_WRF_EXACT modes: 96 B, 40 registers.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "spacewx_ionosphere" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"spacewx_ionosphere": 96}),
+),)
