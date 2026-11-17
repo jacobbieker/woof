@@ -149,17 +149,19 @@ def _edge_reach(mesh: dict) -> np.ndarray:
     synchronise the device, and the stage runs twice a step."""
     import cupy as cp
     eoe_d, n_eoe_d = mesh["edgesOnEdge"], mesh["nEdgesOnEdge"]
-    hit = _REACH.get((id(eoe_d), id(n_eoe_d)))
+    key = (id(eoe_d), id(n_eoe_d))
+    hit = _REACH.pop(key, None)
     if hit is not None and hit[0] is eoe_d and hit[1] is n_eoe_d:
+        _REACH[key] = hit       # most recently used last
         return hit[2]
     n_eoe = cp.asnumpy(n_eoe_d)
     eoe = cp.asnumpy(eoe_d)
     cols = np.arange(eoe.shape[1])[None, :] < n_eoe[:, None]
     reach = np.maximum.accumulate(np.where(cols, eoe, np.iinfo(eoe.dtype).min).max(axis=1))
-    while len(_REACH) >= 4:
-        _REACH.pop(next(iter(_REACH)))
+    while len(_REACH) >= 4:     # least recently used first
+        _REACH.pop(next(iter(_REACH)), None)
     # the entry holds the arrays: their ids are not reused while it lives
-    _REACH[(id(eoe_d), id(n_eoe_d))] = (eoe_d, n_eoe_d, reach)
+    _REACH[key] = (eoe_d, n_eoe_d, reach)
     return reach
 
 

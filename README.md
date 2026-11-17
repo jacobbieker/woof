@@ -282,8 +282,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     (Coriolis, thickness flux, pressure gradient, del2/Leith, vertical
     momentum advection, stability, reconstruction and the split step's
     edge updates) run a thread per edge or cell and level, so a warp reads
-    a column's consecutive levels: a 33,000-cell, 60-level step takes 140
-    instead of 259 ms on an A6000, the same words. Each barotropic
+    a column's consecutive levels: a 33,000-cell, 60-level step runs about
+    1.9 times as fast on a (shared) A6000, the same words. Each barotropic
     subcycle's velocity kernels also add the thickness flux, the
     corrector's velocity copy and the running sum, so in the default
     configuration (predictor, two corrector iterations, no SSH2) a
@@ -313,7 +313,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     the ridging iterations and the cleanup after them), neither of which
     needs an opt-in. The elastic subcycles check their arrays once per
     solve and work out their compile options once per numerics mode:
-    120 subcycles on a 9,200-cell torus take 34 instead of 41 ms a step on
+    120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
     stress coefficient and solves the velocity in one launch (a vertex's
     solve reads only its own coefficient), so the step launches 120 fewer
