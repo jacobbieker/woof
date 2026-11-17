@@ -33,6 +33,11 @@ def test_the_rule_picks_convection_permitting_on_every_mesh_and_says_why():
     (["--physics-backend", "mpasphys"], False),
     (["--physics-namelist=namelist.atmosphere"], False),
     (["--forecast-arg=--physics-suite=rrfs_v2_dev"], False),
+    (["--physics=config_clm_lake_backend=hex-cuda"], True),
+    (["--physics", "config_clm_lake_backend=hex-cuda"], True),
+    (["--forecast-arg=--physics=config_farms_sw_backend=hex-cuda"], True),
+    (["--physics=config_clm_lake_backend=hex-cuda", "--physics=config_pbl_scheme=bl_ysu"], False),
+    (["--physics=config_microp_backend=native-cpu"], False),
 ])
 def test_ensure_adds_the_default_only_when_no_physics_is_named(flags, defaulted):
     out = physics_default.ensure(flags)
@@ -211,3 +216,42 @@ def test_the_woof_route_refuses_diagnostics_by_name_with_the_remedy():
     refused = [r for r in result.refusals if r.knob == "config_lightning_option"]
     assert refused and "MPAS v8.4.2 suite route (R2)" in refused[0].reason
     assert "config_physics_suite" in refused[0].follow_up
+
+
+def test_a_service_backend_alone_keeps_the_default_mpas_suite_and_reaches_its_route(tmp_path):
+    """A service backend selector (``config_clm_lake_backend`` ...) names no physics: the default MPAS suite is added
+    and the service rides on it.
+
+    THE BREAKAGE THIS PREVENTS (lakes worker, 2026-11-17): `woof hex regional
+    --forecast-arg=--physics=config_clm_lake_backend=hex-cuda`, as documented, added no suite, so the run took the
+    WOOF route, which refused the key as "not RunConfig fields"."""
+    from woof.hex.mpasphys.forecast_v842 import native_route
+
+    keys = physics_default.service_backend_keys()
+    assert {"config_clm_lake_backend", "config_farms_sw_backend", "config_shcu_deng_backend",
+            "config_cu_rad_feedback_backend", "config_surface_update_backend"} <= keys
+    assert not keys & {"config_microp_backend", "config_pbl_backend", "config_microp_scheme"}
+    flag = "--forecast-arg=--physics=config_clm_lake_backend=hex-cuda"
+    regional = physics_default.ensure([flag], context={"geometry": "limited-area", "source": "gfs", "start": "cold"})
+    assert regional[0] == flag and "--physics-suite=convection_permitting" in regional
+
+    run = _forecast_namespace("--physics", "config_clm_lake_backend=hex-cuda")
+    assert physics_default.apply(run)["suite"] == "convection_permitting"
+    config, text = native_route(run, default_mode="correct")
+    assert config is not None, "the MPAS suite route"
+    assert "config_clm_lake_backend" in text and "convection_permitting" in text
+    # With a scheme override beside it the run names its own physics, as before.
+    named = _forecast_namespace("--physics", "config_clm_lake_backend=hex-cuda", "--physics", "config_pbl_scheme=bl_ysu")
+    assert physics_default.apply(named) is None and named.physics_suite is None
+
+    # A namelist holding only service selectors in &hex_mpasphys (beside &diagnostics) names none either.
+    service = _write(tmp_path, "lake.namelist", "&hex_mpasphys\n config_clm_lake_backend='hex-cuda'\n/\n")
+    both = _write(tmp_path, "both.namelist", "&hex_mpasphys\n config_clm_lake_backend='hex-cuda'\n/\n"
+                  "&diagnostics\n config_lightning_option=1\n/\n")
+    other = _write(tmp_path, "other.namelist", "&hex_mpasphys\n config_clm_lake_backend='hex-cuda'\n"
+                   " config_microp_backend='native-cpu'\n/\n")
+    empty = _write(tmp_path, "empty.namelist", "&hex_mpasphys\n/\n")
+    assert not physics_default.names_physics([f"--physics-namelist={service}"])
+    assert not physics_default.names_physics([f"--physics-namelist={both}"])
+    assert physics_default.names_physics([f"--physics-namelist={other}"])
+    assert physics_default.names_physics([f"--physics-namelist={empty}"])
