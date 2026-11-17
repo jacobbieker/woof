@@ -638,6 +638,14 @@
     "status": "unresolved"
    },
    {
+    "file": "woof/hex/hydro_remap_gpu.py",
+    "constructor": "RawModule",
+    "factory": "_module",
+    "call_sha256": "42b8305d4cb3f4eceac8f0854ca15c058202456bd568c62daf4674ff532410b8",
+    "factory_sha256": "96ad93018cf8e9224a7f46fa601d5b5e2ac29a1eb35f996a4031f5db2c24f0af",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "42b8305d4cb3f4eceac8f0854ca15c058202456bd568c62daf4674ff532410b8",
     "constructor": "RawModule",
     "factory": "kernels",
@@ -4728,6 +4736,10 @@
     "sha256": "b6396195ee30f7485a1b84277191b1e090a505d3e18846935c70e299411d2193"
    },
    {
+    "file": "woof/hex/hydro_remap.cu",
+    "sha256": "f9fd13a474707dbf66964652e9aa538738ddc1c13b4fbb7914300f6e84a159fe"
+   },
+   {
     "file": "woof/hex/init_gpu/horizontal.cu",
     "sha256": "c3b76e846951378eb2546ed4d288ca3a5fbb07681d196e51bd6ceaa495b04946"
    },
@@ -5672,6 +5684,10 @@
    {
     "file": "woof/hex/cuda_w_damping.py",
     "sha256": "eb0138e5c2f4406eab79fa9e0392866f747b71552deac292a90704c64ca2f86c"
+   },
+   {
+    "file": "woof/hex/hydro_remap_gpu.py",
+    "sha256": "42d7817d54b2621fb8ab39e38b9a11ae75c504b65afce2b581de8d1fb9b55b6a"
    },
    {
     "file": "woof/hex/iau_forcing.py",
