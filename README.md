@@ -675,7 +675,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   what does not depend on wavelength. That cache holds the layer air and
   gas columns, the cloud radius selections and the REPTRAN pressure,
   temperature and vmr brackets. All eight REPTRAN lookups share one grid,
-  so a single bracket serves every species. The blocks write straight into
+  so one bracket serves every species looked up without a vmr (H2O, looked
+  up with its vmr, takes its own vmr-interpolated bracket). The blocks write straight into
   the solver's arrays, and the AFGL splice is written in place. The words
   are unchanged: 30,000 columns x 8 wavelengths take 15 s instead of 23 s
   on the A6000 host.

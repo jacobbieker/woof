@@ -34,6 +34,7 @@ from functools import lru_cache
 import numpy as np
 
 from woof.radtran import data
+from woof.radtran.optics import _memo
 
 
 def _hu_read(name):
@@ -102,15 +103,6 @@ def _lerp(x, x0, x1, y0, y1):
     return np.array([math.fma(s, d, y) for s, y in zip(slope.tolist(), y0.tolist())], dtype=np.float64)
 
 
-def _memo(cache, key, make):
-    """``cache[key]``, made once; ``cache=None`` makes it every time."""
-    if cache is None:
-        return make()
-    if key not in cache:
-        cache[key] = make()
-    return cache[key]
-
-
 def _hu_prop(blocks, lam_um, reff, cache=None):
     """``cache`` (a dict kept for one ``reff``) holds each radius range's
     selection and, per bracketing table pair, the rows' coefficients, across
@@ -164,6 +156,11 @@ def hu_stamnes(lam_nm: float, reff_um, *, cache: dict | None = None):
     ``cache``: a dict kept for one ``reff_um`` across wavelengths
     (:func:`_hu_prop`)."""
     reff = np.asarray(reff_um, dtype=np.float64)
+    if cache is not None and cache.get("reff_of") is not reff_um:
+        # the cached selections belong to one radius array: a different one
+        # starts the cache afresh (and is range-checked)
+        cache.clear()
+        cache["reff_of"] = reff_um
     if cache is None or "checked" not in cache:
         if np.any((reff < 2.5) | (reff > 60.0)):
             raise ValueError("Hu & Stamnes (1993) covers effective radii 2.5-60 um")

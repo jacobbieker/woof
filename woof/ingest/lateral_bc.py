@@ -3077,8 +3077,7 @@ def _launch_finalize_field(state, name, boundary, old_mup_frame, dtbc,
                  boundary.south, boundary.north):
         sides.extend((side.value, side.tendency))
     scalar = target
-    kind = {"u": 0, "v": 1, "theta": 2, "phi": 3,
-            "qv": 5, "w": 6}.get(name, 7)
+    kind = _FINAL_KINDS.get(name, 7)
     kernel = get_kernel("lbc_state", "finalize_state_field")
     kernel(((count + _THREADS - 1) // _THREADS,), (_THREADS,), (
         target, old_mup_frame, state.mub2d, state.mup,
@@ -3106,8 +3105,22 @@ LBC_FINAL_MULTI_ENABLED = os.environ.get("WOOF_LBC_FINAL_MULTI", "1") != "0"
 #: about even at 150x186 (1.4M cells) and 636 -> 695 us at 228x276, where
 #: one long launch loses to ten shorter ones.  Words are the per-field
 #: launches' at any size; ``WOOF_LBC_FINAL_MULTI_MAX_CELLS`` moves the cut.
-LBC_FINAL_MULTI_MAX_CELLS = int(os.environ.get(
-    "WOOF_LBC_FINAL_MULTI_MAX_CELLS", str(1 << 20)))
+def _final_multi_max_cells(default: int = 1 << 20) -> int:
+    raw = os.environ.get("WOOF_LBC_FINAL_MULTI_MAX_CELLS")
+    if not raw:
+        return default
+    try:
+        return int(float(raw))
+    except ValueError:
+        import warnings
+        warnings.warn(f"WOOF_LBC_FINAL_MULTI_MAX_CELLS={raw!r} is not a number; "
+                      f"using {default}", RuntimeWarning, stacklevel=2)
+        return default
+
+
+LBC_FINAL_MULTI_MAX_CELLS = _final_multi_max_cells()
+#: kernels/lbc_state.cu LBC_* kinds of the finalizer, shared by the
+#: per-field and table launches (any other field is a scalar, 7).
 _FINAL_KINDS = {"u": 0, "v": 1, "theta": 2, "phi": 3, "qv": 5, "w": 6}
 
 
@@ -3130,6 +3143,12 @@ def _launch_finalize_multi(state, names, device_interval, old_mup_frame,
 
     if not names:
         return True
+    # The size cut first: above it (most production domains) nothing else
+    # needs checking.
+    for name in names:
+        target = getattr(state, {"theta": "thp", "phi": "php"}.get(name, name), None)
+        if target is None or int(getattr(target, "size", 0)) > LBC_FINAL_MULTI_MAX_CELLS:
+            return False
 
     def device(a):
         return (isinstance(a, cp.ndarray) and a.dtype == np.dtype(np.float32)
@@ -3167,10 +3186,20 @@ def _launch_finalize_multi(state, names, device_interval, old_mup_frame,
         rows.append((name, target, sides))
         spans.append((int(target.data.ptr),
                       int(target.data.ptr) + int(target.nbytes)))
-    # The rows run concurrently: no two targets may share a byte.
+    # The rows run concurrently: no two targets may share a byte, and no
+    # target may share a byte with any array a row reads (another row's
+    # boundary sides, the header planes), which the per-field launches would
+    # read after that target's own launch.
     spans.sort()
     if not all(hi <= lo for (_l, hi), (lo, _h) in zip(spans, spans[1:])):
         return False
+    reads = [a for a in header] + [a for _n, _t, sides in rows for a in sides]
+    if muts_ptr:
+        reads.append(muts[0])
+    for a in reads:
+        lo, hi = int(a.data.ptr), int(a.data.ptr) + int(a.nbytes)
+        if any(lo < t_hi and t_lo < hi for t_lo, t_hi in spans):
+            return False
     mny, mnx = (int(n) for n in state.mup.shape)
     kernel = get_kernel("lbc_state", "finalize_state_multi")
     for start in range(0, len(rows), LBC_FINAL_MULTI_MAX_ROWS):

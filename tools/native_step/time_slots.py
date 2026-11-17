@@ -74,6 +74,11 @@ def bind_slots(plan,slots, *, frame_type=Frame, prefix="", start=0, end=None):
            'specified_relaxation':(12,'boundary_dtbc'),
            'install_mu_boundary':(10,'boundary_dtbc'),
            'finalize_state_field':(21,'boundary_dtbc'),
+           # the table launches (state_relaxation_multi, finalize_state_multi):
+           # (table, nrows, dtbc, ...); their side pointers ride in the
+           # by-value table, which boundary_slots does not rebind.
+           'state_relaxation_multi':(2,'boundary_dtbc'),
+           'finalize_state_multi':(2,'boundary_dtbc'),
            'evaluate_linear_boundary':(4,'forcing_dtbc'),
            'evaluate_rational_boundary':(6,'forcing_dtbc')}
     for op in operations[start:end]:
