@@ -257,14 +257,15 @@ def utm_raster(lon_min: float, lat_min: float, lon_max: float,
     zone = int((lon_c + 180.0) // 6.0) % 60 + 1
     epsg = (32600 if lat_c >= 0 else 32700) + zone
     tr = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
-    lons = np.array([lon_min, lon_max, lon_min, lon_max])
-    lats = np.array([lat_min, lat_min, lat_max, lat_max])
-    x, y = tr.transform(lons, lats)
+    # Densified edges: UTM parallels curve, so an edge's midpoint can lie
+    # outside the box its corners span.
+    xmin, ymin, xmax, ymax = tr.transform_bounds(
+        lon_min, lat_min, lon_max, lat_max, densify_pts=64)
     res = float(resolution_m)
-    x0 = math.floor(min(x) / res) * res
-    y1 = math.ceil(max(y) / res) * res
-    cols = int(math.ceil((max(x) - x0) / res))
-    rows = int(math.ceil((y1 - min(y)) / res))
+    x0 = math.floor(xmin / res) * res
+    y1 = math.ceil(ymax / res) * res
+    cols = int(math.ceil((xmax - x0) / res))
+    rows = int(math.ceil((y1 - ymin) / res))
     return HeightRaster(np.zeros((rows, cols), np.float32), x0, y1, res, res,
                         f"EPSG:{epsg}", sources)
 
@@ -494,12 +495,7 @@ def read_footprints(path, *, source: str = "user", bbox=None
         if info.get("encoding", "WKB").upper() != "WKB":
             raise ValueError(f"GeoParquet geometry encoding "
                              f"{info.get('encoding')!r} is not WKB")
-        crs = info.get("crs")
-        if isinstance(crs, dict):
-            ident = crs.get("id") or {}
-            crs = (f"{ident.get('authority')}:{ident.get('code')}"
-                   if ident else "OGC:CRS84")
-        crs = crs or "OGC:CRS84"
+        crs = _geoparquet_crs(info, path)
         names = set(table.column_names)
         geoms = table.column(column).to_pylist()
         props = {name: table.column(name).to_pylist()
@@ -518,6 +514,25 @@ def read_footprints(path, *, source: str = "user", bbox=None
         return out, crs
     raise ValueError(f"{path.name}: footprints must be .geojson/.json or "
                      ".parquet (GeoParquet)")
+
+
+def _geoparquet_crs(info: dict, path) -> str:
+    """A GeoParquet column's CRS: an omitted key is OGC:CRS84 (the spec's
+    default); an explicit null is an unknown CRS and refuses; a PROJJSON
+    definition is kept whole (as WKT) when it carries no authority id."""
+    if "crs" not in info:
+        return "OGC:CRS84"
+    crs = info["crs"]
+    if crs is None:
+        raise ValueError(f"{Path(path).name}: the GeoParquet CRS is null "
+                         "(unknown); reproject the footprints to a known CRS")
+    if isinstance(crs, dict):
+        ident = crs.get("id") or {}
+        if ident.get("authority") and ident.get("code") is not None:
+            return f"{ident['authority']}:{ident['code']}"
+        from pyproj import CRS
+        return CRS.from_json_dict(crs).to_wkt()
+    return str(crs)
 
 
 def _transform_footprints(footprints, src_crs, dst_crs):
@@ -540,8 +555,34 @@ def _transform_footprints(footprints, src_crs, dst_crs):
     return out
 
 
+def _footprint_median(fp: Footprint, values: np.ndarray, like: HeightRaster
+                      ) -> float:
+    """Median of ``values`` (>0, finite) over ``fp``'s own pixels, read in
+    a window around the footprint so other footprints cannot hide them."""
+    from rasterio import features
+    from rasterio.transform import from_origin
+
+    rows, cols = like.shape
+    minx, miny, maxx, maxy = fp.bounds()
+    c0 = max(0, int(math.floor((minx - like.x0) / like.px)))
+    c1 = min(cols, int(math.ceil((maxx - like.x0) / like.px)))
+    r0 = max(0, int(math.floor((like.y0 - maxy) / like.py)))
+    r1 = min(rows, int(math.ceil((like.y0 - miny) / like.py)))
+    if c1 <= c0 or r1 <= r0:
+        return math.nan
+    mask = features.rasterize(
+        [(fp.geojson(), 1)], out_shape=(r1 - r0, c1 - c0),
+        transform=from_origin(like.x0 + c0 * like.px,
+                              like.y0 - r0 * like.py, like.px, like.py),
+        fill=0, dtype="uint8").astype(bool)
+    v = values[r0:r1, c0:c1][mask]
+    v = v[np.isfinite(v) & (v > 0)]
+    return float(np.median(v)) if v.size else math.nan
+
+
 def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
                          like: HeightRaster, *, ndsm=None,
+                         ndsm_sources: tuple[str, ...] = ("gem15-ndsm",),
                          storey_height_m: float = 3.0,
                          default_height_m: float | None = None
                          ) -> tuple[HeightRaster, dict]:
@@ -549,9 +590,13 @@ def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
 
     Each building's height is, in order: its own ``height`` attribute; the
     median of ``ndsm`` (a building-height raster on ``like``'s grid, e.g.
-    from :func:`ndsm_heights` with no area filter) over its pixels; its
-    storey count x ``storey_height_m``; ``default_height_m``.  A building
-    with none of these is dropped and counted.  Overlaps keep the taller.
+    from :func:`ndsm_heights` with no area filter, as an array or a
+    :class:`HeightRaster`) over its own pixels, whatever other footprints
+    cover them; its storey count x ``storey_height_m``;
+    ``default_height_m``.  A building with none of these is dropped and
+    counted.  Overlaps keep the taller, whatever the input order.  When an
+    nDSM median supplies any height, the nDSM's sources (a HeightRaster's
+    own, else ``ndsm_sources``) join the result's.
     """
     from rasterio import features
     from rasterio.transform import from_origin
@@ -560,24 +605,19 @@ def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
                                        like.crs)
     rows, cols = like.shape
     transform = from_origin(like.x0, like.y0, like.px, like.py)
-    labels = np.zeros((rows, cols), dtype=np.int32)
-    if footprints:
-        shapes = [(fp.geojson(), n + 1) for n, fp in enumerate(footprints)]
-        labels = features.rasterize(shapes, out_shape=(rows, cols),
-                                    transform=transform, fill=0,
-                                    dtype="int32")
+    if isinstance(ndsm, HeightRaster):
+        if ndsm.shape != like.shape:
+            raise ValueError("ndsm must be on like's grid")
+        ndsm_sources = ndsm.sources or tuple(ndsm_sources)
+        ndsm = ndsm.height
+    values = None if ndsm is None else np.asarray(ndsm, np.float64)
+    if values is not None and values.shape != (rows, cols):
+        raise ValueError("ndsm must be on like's grid")
     median = np.full(len(footprints) + 1, np.nan)
-    if ndsm is not None and footprints:
-        values = np.asarray(ndsm, np.float64)
-        inside = (labels > 0) & np.isfinite(values) & (values > 0)
-        lab, val = labels[inside], values[inside]
-        order = np.lexsort((val, lab))
-        lab, val = lab[order], val[order]
-        ids, start, count = np.unique(lab, return_index=True,
-                                      return_counts=True)
-        mid = start + (count - 1) // 2
-        upper = start + count // 2
-        median[ids] = 0.5 * (val[mid] + val[upper])
+    if values is not None:
+        for n, fp in enumerate(footprints, start=1):
+            if math.isnan(fp.height):
+                median[n] = _footprint_median(fp, values, like)
     heights = np.zeros(len(footprints) + 1)
     provenance = {"attribute": 0, "ndsm_median": 0, "storeys": 0,
                   "default": 0, "dropped": 0}
@@ -603,7 +643,10 @@ def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
                                    dtype="float32")
     else:
         burnt = np.zeros((rows, cols), np.float32)
-    used = sorted({fp.source for fp in footprints})
+    used = {fp.source for fp in footprints}
+    if provenance["ndsm_median"]:
+        used.update(ndsm_sources)
+    used = sorted(used)
     raster = HeightRaster(burnt, like.x0, like.y0, like.px, like.py,
                           like.crs, tuple(used))
     receipt = dict(footprints=len(footprints), height_from=provenance,
@@ -627,6 +670,8 @@ class BuildingMorphology:
     lambda_b: np.ndarray              # building surface / plan area
     frontal_x: np.ndarray             # frontal area index, flow along x
     frontal_y: np.ndarray             # frontal area index, flow along y
+    frontal_d45: np.ndarray           # flow along +x+y (WRF LF sector 2)
+    frontal_d135: np.ndarray          # flow along +x-y (WRF LF sector 4)
     hi: np.ndarray                    # (15, ny, nx) BEP class fractions
     bldg_hist: np.ndarray             # (nb, ny, nx) plan fraction per bin
     bldg_hbin: np.ndarray             # (nb, ny, nx) mean height per bin
@@ -639,10 +684,12 @@ class BuildingMorphology:
         return self.lambda_p.shape
 
     def lambda_f_sectors(self) -> np.ndarray:
-        """LF_URB2D's four wind sectors (module_sf_urban.F:708-733): 1 flow
-        along y (N-S), 2 and 4 the diagonals, 3 flow along x (E-W)."""
-        diag = (self.frontal_x + self.frontal_y) / math.sqrt(2.0)
-        return np.stack([self.frontal_y, diag, self.frontal_x, diag])
+        """LF_URB2D's four wind sectors (module_sf_urban.F:708-733, sector
+        by WDR = atan2(U10, V10)): 1 flow along y (N-S), 2 along +x+y,
+        3 along x (E-W), 4 along +x-y; each is projected from the walls'
+        own orientations."""
+        return np.stack([self.frontal_y, self.frontal_d45, self.frontal_x,
+                         self.frontal_d135])
 
     def solid_fraction(self, z_bottom, z_top) -> np.ndarray:
         """Building volume fraction of the layer [z_bottom, z_top) (m above
@@ -668,6 +715,8 @@ class _Sums:
         self.wall = np.zeros(ncell)
         self.fx = np.zeros(ncell)
         self.fy = np.zeros(ncell)
+        self.f45 = np.zeros(ncell)
+        self.f135 = np.zeros(ncell)
         self.hi = np.zeros((15, ncell))
         self.bin_area = np.zeros((nbins, ncell))
         self.bin_h = np.zeros((nbins, ncell))
@@ -687,7 +736,15 @@ def _accumulate(sums: _Sums, raster: HeightRaster, grid, edges, rotation):
     # Row blocks keep the projected coordinates small.
     block = max(1, 2_000_000 // max(1, h.shape[1]))
     nb = len(edges) - 1
-    cos_r, sin_r = abs(math.cos(rotation)), abs(math.sin(rotation))
+    # A raster-x wall's normal lies at -rotation in the model plane, a
+    # raster-y wall's at 90 degrees more.  Flow along angle a sees half a
+    # wall's area times |cos(normal - a)| (its windward faces).
+    def seen(alpha):
+        return (abs(math.cos(rotation + alpha)),
+                abs(math.sin(rotation + alpha)))
+    planes = ((sums.fx, seen(0.0)), (sums.fy, seen(0.5 * math.pi)),
+              (sums.f45, seen(0.25 * math.pi)),
+              (sums.f135, seen(0.75 * math.pi)))
     for r0 in range(0, rows, block):
         r1 = min(rows, r0 + block + 1)        # one extra row for y edges
         hb = h[r0:r1]
@@ -725,8 +782,8 @@ def _accumulate(sums: _Sums, raster: HeightRaster, grid, edges, rotation):
             cx = _cells(grid, mx[okx], Y[own][:, 1:][okx], raster.crs)
             area = dxh[okx] * raster.py
             sums.add(sums.wall, cx, area)
-            sums.add(sums.fx, cx, 0.5 * area * cos_r)
-            sums.add(sums.fy, cx, 0.5 * area * sin_r)
+            for target, (from_x, _from_y) in planes:
+                sums.add(target, cx, 0.5 * area * from_x)
         hy, ky, Yy, Xy = hb, kb, Y, X
         dyh = np.abs(hy[1:] - hy[:-1])
         oky = ky[1:] & ky[:-1] & (dyh > 0)
@@ -735,8 +792,49 @@ def _accumulate(sums: _Sums, raster: HeightRaster, grid, edges, rotation):
             cy = _cells(grid, Xy[1:][oky], my[oky], raster.crs)
             area = dyh[oky] * raster.px
             sums.add(sums.wall, cy, area)
-            sums.add(sums.fy, cy, 0.5 * area * cos_r)
-            sums.add(sums.fx, cy, 0.5 * area * sin_r)
+            for target, (_from_x, from_y) in planes:
+                sums.add(target, cy, 0.5 * area * from_y)
+
+
+def _grid_key(raster: HeightRaster):
+    """Rasters sharing a key lie on one pixel lattice and can be mosaicked."""
+    def phase(origin, step):
+        return round((origin / step) % 1.0, 6) % 1.0
+    return (raster.crs, raster.px, raster.py, phase(raster.x0, raster.px),
+            phase(raster.y0, raster.py))
+
+
+def _mosaic(rasters: Sequence[HeightRaster]) -> HeightRaster:
+    """One raster from rasters on one lattice: where two know the same
+    pixel the taller wins (the footprints' rule); a pixel none knows is a
+    hole (NaN).  Walls across the old seams are then seen once."""
+    if len(rasters) == 1:
+        return rasters[0]
+    first = rasters[0]
+    px, py = first.px, first.py
+    x0 = min(r.x0 for r in rasters)
+    y0 = max(r.y0 for r in rasters)
+    cols = max(int(round((r.x0 - x0) / px)) + r.shape[1] for r in rasters)
+    rows = max(int(round((y0 - r.y0) / py)) + r.shape[0] for r in rasters)
+    out = np.full((rows, cols), np.nan, np.float32)
+    sources: set[str] = set()
+    for r in rasters:
+        c = int(round((r.x0 - x0) / px))
+        w = int(round((y0 - r.y0) / py))
+        view = out[w:w + r.shape[0], c:c + r.shape[1]]
+        view[...] = np.fmax(view, r.height)
+        sources.update(r.sources)
+    return HeightRaster(out, x0, y0, px, py, first.crs,
+                        tuple(sorted(sources)))
+
+
+def _model_box(raster: HeightRaster, grid):
+    rows, cols = raster.shape
+    xs = np.array([raster.x0, raster.x0 + cols * raster.px] * 2)
+    ys = np.array([raster.y0] * 2 + [raster.y0 - rows * raster.py] * 2)
+    fi, fj = grid.fractional_ij(xs, ys, raster.crs)
+    return (float(np.min(fi)), float(np.min(fj)), float(np.max(fi)),
+            float(np.max(fj)))
 
 
 def aggregate(rasters: Iterable[HeightRaster], grid, *,
@@ -746,6 +844,11 @@ def aggregate(rasters: Iterable[HeightRaster], grid, *,
 
     Rasters are supersampled (nearest) until at least ``min_samples``
     pixels fall in a cell, so a 15 m source still resolves a 10 m grid.
+    Rasters on one pixel lattice (same CRS, pixel size and alignment) are
+    mosaicked first: where two know the same pixel the taller wins, and
+    walls across their seams count once.  Rasters on different lattices
+    must not overlap on the model grid (their extents are checked, and an
+    overlap refuses): resample them onto one lattice first.
     Pixels are assigned by centre; a wall face (a height step between two
     neighbouring known pixels) by its midpoint.  Frontal area index is
     half the wall area facing each model axis per plan area (the windward
@@ -759,11 +862,26 @@ def aggregate(rasters: Iterable[HeightRaster], grid, *,
     sums = _Sums(ny * nx, edges.size - 1)
     sources: set[str] = set()
     factors = []
+    groups: dict = {}
     for raster in rasters:
         if raster.crs is not None and _is_geographic(raster.crs):
             raise ValueError(f"building rasters must be in metres; "
                              f"{raster.crs} is geographic (use the source's "
                              "UTM grid, :func:`utm_raster`)")
+        groups.setdefault(_grid_key(raster), []).append(raster)
+    mosaics = [_mosaic(group) for group in groups.values()]
+    boxes = [_model_box(r, grid) for r in mosaics]
+    for a in range(len(boxes)):
+        for b in range(a):
+            (ai0, aj0, ai1, aj1), (bi0, bj0, bi1, bj1) = boxes[a], boxes[b]
+            if (min(ai1, bi1) - max(ai0, bi0) > 1e-6
+                    and min(aj1, bj1) - max(aj0, bj0) > 1e-6):
+                raise ValueError(
+                    "building rasters on different pixel lattices overlap "
+                    "on the model grid; their ground would count twice. "
+                    "Resample them onto one lattice (same CRS, pixel size "
+                    "and alignment) so they mosaic")
+    for raster in mosaics:
         per_cell = grid.dx * grid.dy / (raster.px * raster.py)
         factor = max(1, int(math.ceil(math.sqrt(
             min_samples / max(per_cell, 1e-12)))))
@@ -796,6 +914,8 @@ def aggregate(rasters: Iterable[HeightRaster], grid, *,
         lambda_b=plane(lambda_b).astype(f32),
         frontal_x=plane(sums.fx * inv_area).astype(f32),
         frontal_y=plane(sums.fy * inv_area).astype(f32),
+        frontal_d45=plane(sums.f45 * inv_area).astype(f32),
+        frontal_d135=plane(sums.f135 * inv_area).astype(f32),
         hi=hi.reshape(15, ny, nx).astype(f32),
         bldg_hist=hist.reshape(-1, ny, nx).astype(f32),
         bldg_hbin=hbin.reshape(-1, ny, nx).astype(f32),
@@ -835,7 +955,8 @@ def urb_param(morph: BuildingMorphology) -> np.ndarray:
 # --------------------------------------------------------------------------
 
 _PLANES = ("sampled_area", "lambda_p", "mean_height", "std_height",
-           "lambda_b", "frontal_x", "frontal_y")
+           "lambda_b", "frontal_x", "frontal_y", "frontal_d45",
+           "frontal_d135")
 
 
 def write_product(path, morph: BuildingMorphology, *, grid_note: str = "",

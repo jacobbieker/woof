@@ -16,6 +16,7 @@ nothing runs unless you ask for it.
 | `mean_height`, `std_height` | plan-area-weighted mean and standard deviation of building height (m) |
 | `lambda_b` | building surface area (roofs plus walls) per plan area |
 | `frontal_x`, `frontal_y` | frontal area index for flow along the model x and y axes (windward wall area per plan area) |
+| `frontal_d45`, `frontal_d135` | the same for flow along the diagonals +x+y and +x-y, projected from each wall's own orientation |
 | `bldg_hist(bin)`, `bldg_hbin(bin)` | plan area fraction of buildings in each height bin, and their mean height; bins are 2 m to 20 m, 5 m to 100 m, 10 m to 300 m, then 300-400 m (`bin_edges`) |
 | `hi(15)` | fraction of building plan area in BEP's 5 m height classes (5, 10, ... 75 m; nearest class) |
 | `URB_PARAM(132)` | the NUDAPT block WRF 4.7.1's real init reads |
@@ -24,8 +25,9 @@ nothing runs unless you ask for it.
 `URB_PARAM` is filled at exactly the indices `module_initialize_real.F`
 (lines 3182-3215) reads: 91 `LP_URB2D`, 92 `MH_URB2D`, 93 `STDH_URB2D`,
 94 `HGT_URB2D`, 95 `LB_URB2D`, 96-99 `LF_URB2D` (the wind sectors of
-`module_sf_urban.F`: 1 north-south flow, 2 and 4 the diagonals, 3 east-west
-flow) and 118-132 `HI_URB2D`. Every other index is zero. A raster carries no
+`module_sf_urban.F`, chosen by `atan2(U10, V10)`: 1 north-south flow,
+2 flow along +x+y, 3 east-west flow, 4 flow along +x-y) and 118-132
+`HI_URB2D`. Every other index is zero. A raster carries no
 building identity, so `MH_URB2D` is the plan-area-weighted mean, the same as
 `HGT_URB2D`; NUDAPT's index 92 is a per-building mean. The fork's urban
 schemes do not read `URB_PARAM` yet (they use the URBPARM table's
@@ -64,13 +66,24 @@ exists:
 4. a default height, if you give one.
 
 A building with none of these is dropped and counted in the receipt. Where
-footprints overlap, the taller one wins. woof does not download footprints:
+footprints overlap, the taller one wins, whatever their order; each
+footprint's nDSM median is taken over its own pixels, including those
+another footprint covers. When an nDSM median supplies a height, the nDSM's
+source (GEM-15) is recorded with its licence and attribution. A GeoParquet
+file with no `crs` key is in OGC:CRS84, as the GeoParquet spec says; an
+explicit `"crs": null` (unknown) is refused, and a PROJJSON definition
+without an authority id is kept whole. woof does not download footprints:
 export the area you need with the provider's own tools (for example the
 `overturemaps` CLI or an OSM extract) and pass the file.
 
-**Combining.** `aggregate` takes any number of height rasters, supersamples
-them until each model cell holds at least nine samples, and assigns each
-pixel to a model cell by its centre. Walls (height steps between
+**Combining.** `aggregate` takes any number of height rasters. Rasters on
+one pixel lattice (same CRS, pixel size and alignment, such as adjacent
+GEM-15 windows or a footprint burn on a GEM-15 window's grid) are mosaicked
+first: where two know the same pixel the taller wins, and walls across the
+tile seams are counted once. Rasters on different lattices must not overlap
+on the model grid: `aggregate` refuses, because that ground would count
+twice. It then supersamples each raster until each model cell holds at
+least nine samples, and assigns each pixel to a model cell by its centre. Walls (height steps between
 neighbouring pixels) go to a cell by their midpoint. A WRF domain is read
 through its own projection (`ProjectionGrid`); idealised cases use the model
 plane (`CartesianGrid`, `block_raster`). Holes (NaN) count as neither

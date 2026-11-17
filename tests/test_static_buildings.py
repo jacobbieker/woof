@@ -67,8 +67,12 @@ def test_urb_param_layout_matches_wrf_real_init():
     assert np.array_equal(up[93], m.mean_height)       # 94 HGT_URB2D
     assert np.array_equal(up[94], m.lambda_b)          # 95 LB_URB2D
     assert np.array_equal(up[95], m.frontal_y)         # 96 LF(1): N-S flow
+    assert np.array_equal(up[96], m.frontal_d45)       # 97 LF(2): +x+y
     assert np.array_equal(up[97], m.frontal_x)         # 98 LF(3): E-W flow
+    assert np.array_equal(up[98], m.frontal_d135)      # 99 LF(4): +x-y
+    # Axis-aligned walls: each diagonal sees both faces at 45 degrees.
     assert np.allclose(up[96], (m.frontal_x + m.frontal_y) / math.sqrt(2))
+    assert np.allclose(up[98], up[96])
     assert np.array_equal(up[117:132], m.hi)           # 118-132 HI_URB2D
     assert up[118 + 3, 1, 1] == pytest.approx(1.0)     # 23 m -> 25 m class
     untouched = np.ones(132, bool)
@@ -195,7 +199,8 @@ def test_footprints_read_and_height_precedence(tmp_path, kind):
                                   "storeys": 1, "default": 0, "dropped": 1}
     values = set(np.unique(raster.height).tolist())
     assert values == {0.0, 12.0, 17.0, 30.0}
-    assert raster.sources == ("overture",)
+    # The nDSM median supplied one height, so GEM-15 is a source.
+    assert raster.sources == ("gem15-ndsm", "overture")
     # Plan area of the 40 x 40 m building within a pixel row of 2 m.
     assert np.count_nonzero(raster.height == 30.0) * 4.0 == \
         pytest.approx(1600.0, rel=0.12)
@@ -292,3 +297,137 @@ def test_registry_rows_name_licences():
         "This dataset is produced by Google")
     with pytest.raises(KeyError):
         b.HeightRaster(np.zeros((1, 1)), 0, 0, 1, 1, None, ("nope",))
+
+
+class _RotatedCart(b.CartesianGrid):
+    """A Cartesian grid whose rasters are rotated by ``angle`` onto it
+    (only the frontal projection reads the rotation)."""
+
+    def __init__(self, *args, angle):
+        super().__init__(*args)
+        self.angle = angle
+
+    def axis_rotation(self, raster):
+        return self.angle
+
+
+def test_diagonal_frontal_area_follows_wall_orientation():
+    # A 20 m square, 10 m tall: one face is C = 200 m2.  Rotated 45 degrees
+    # onto the model axes, flow along one diagonal meets one face square on.
+    raster = b.block_raster(6, 6, 10.0, 10.0, [(20.0, 40.0, 20.0, 40.0, 10.0)])
+    for angle in (math.pi / 4, -math.pi / 4):
+        m = b.aggregate([raster], _RotatedCart(6, 6, 10.0, 10.0, angle=angle))
+        area = m.sampled_area.astype(np.float64)
+        total = lambda plane: float((plane * area).sum())
+        assert total(m.frontal_d45) == pytest.approx(200.0, rel=1e-5)
+        assert total(m.frontal_d135) == pytest.approx(200.0, rel=1e-5)
+        assert total(m.frontal_x) == pytest.approx(200.0 * math.sqrt(2),
+                                                   rel=1e-5)
+    # A 40 x 20 m slab rotated +45 degrees: its 40 m faces' normals lie at
+    # +45 degrees in the model plane and its 20 m faces' at -45, so the
+    # +x+y flow meets a 40 m face and the +x-y flow a 20 m face.
+    slab = b.block_raster(6, 6, 10.0, 10.0, [(10.0, 50.0, 20.0, 40.0, 10.0)])
+    m = b.aggregate([slab], _RotatedCart(6, 6, 10.0, 10.0, angle=math.pi / 4))
+    area = m.sampled_area.astype(np.float64)
+    assert float((m.frontal_d45 * area).sum()) == pytest.approx(400.0, rel=1e-5)
+    assert float((m.frontal_d135 * area).sum()) == pytest.approx(200.0,
+                                                                rel=1e-5)
+
+
+def _split(raster, col):
+    left = b.HeightRaster(raster.height[:, :col], raster.x0, raster.y0,
+                          raster.px, raster.py, raster.crs, raster.sources)
+    right = b.HeightRaster(raster.height[:, col:],
+                           raster.x0 + col * raster.px, raster.y0, raster.px,
+                           raster.py, raster.crs, raster.sources)
+    return left, right
+
+
+def test_tiles_on_one_lattice_mosaic_seams_and_overlaps():
+    grid = _cart(3, 3, 1.0)
+    whole = b.HeightRaster(np.array([[0, 0, 0], [0, 10, 0], [0, 0, 0]],
+                                    np.float32), 0.0, 3.0, 1.0, 1.0)
+    ref = b.aggregate([whole], grid, min_samples=1)
+    wall = lambda m: float(((m.lambda_b - m.lambda_p) * m.sampled_area).sum())
+    assert wall(ref) == pytest.approx(40.0)
+    tiles = _split(whole, 2)
+    for rasters in (tiles, tiles[::-1], [whole, *tiles], [whole, whole]):
+        m = b.aggregate(rasters, grid, min_samples=1)
+        assert wall(m) == pytest.approx(40.0)
+        for name in ("sampled_area", "lambda_p", "frontal_x", "frontal_y",
+                     "bldg_hist"):
+            assert np.array_equal(getattr(m, name), getattr(ref, name)), name
+    # Overlapping known pixels: the taller wins.
+    low = b.HeightRaster(np.full((3, 3), 4.0, np.float32), 0.0, 3.0, 1.0, 1.0)
+    m = b.aggregate([low, whole], grid, min_samples=1)
+    assert m.mean_height[1, 1] == pytest.approx(10.0)
+    assert m.mean_height[0, 0] == pytest.approx(4.0)
+
+
+def test_overlap_across_lattices_refuses():
+    grid = _cart(3, 3, 1.0)
+    a = b.HeightRaster(np.zeros((3, 3), np.float32), 0.0, 3.0, 1.0, 1.0)
+    shifted = b.HeightRaster(np.zeros((3, 3), np.float32), 0.5, 3.0, 1.0, 1.0)
+    with pytest.raises(ValueError, match="different pixel lattices overlap"):
+        b.aggregate([a, shifted], grid, min_samples=1)
+    finer = b.HeightRaster(np.zeros((2, 6), np.float32), 0.0, 1.0, 0.5, 0.5)
+    top = b.HeightRaster(np.zeros((2, 3), np.float32), 0.0, 3.0, 1.0, 1.0)
+    b.aggregate([top, finer], grid, min_samples=1)      # disjoint: fine
+
+
+def test_footprint_medians_ignore_overlap_and_order():
+    like = _like()
+    ring = _lonlat_box(20, 20, 40, 40)
+    no_height = b.Footprint(((tuple(map(tuple, ring)),),), source="osm")
+    ten = b.Footprint(((tuple(map(tuple, ring)),),), height=10.0,
+                      source="osm")
+    ndsm = b.HeightRaster(np.full(like.shape, 20.0, np.float32), like.x0,
+                          like.y0, like.px, like.py, like.crs,
+                          ("gem15-ndsm",))
+    for fps in ([no_height, ten], [ten, no_height]):
+        raster, rec = b.rasterize_footprints(fps, "OGC:CRS84", like,
+                                             ndsm=ndsm)
+        assert rec["height_from"]["ndsm_median"] == 1
+        assert set(np.unique(raster.height).tolist()) == {0.0, 20.0}
+        assert raster.sources == ("gem15-ndsm", "osm")
+    # No nDSM height used: GEM-15 is not a source.
+    raster, _ = b.rasterize_footprints([ten], "OGC:CRS84", like, ndsm=ndsm)
+    assert raster.sources == ("osm",)
+
+
+def test_utm_raster_covers_curved_edges():
+    from pyproj import Transformer
+    like = b.utm_raster(2.0, 45.0, 4.0, 46.0, 15.0)
+    tr = Transformer.from_crs("EPSG:4326", like.crs, always_xy=True)
+    x, y = tr.transform(3.0, 45.0001)
+    rows, cols = like.shape
+    assert like.x0 <= x <= like.x0 + cols * like.px
+    assert like.y0 - rows * like.py <= y <= like.y0
+
+
+def _parquet_with_crs(tmp_path, crs_entry):
+    pa = pytest.importorskip("pyarrow")
+    import pyarrow.parquet as pq
+    column = {"encoding": "WKB", "geometry_types": ["Polygon"], **crs_entry}
+    table = pa.table({"geometry": [_wkb_polygon([_ring(0, 0, 10, 10)])]})
+    table = table.replace_schema_metadata({"geo": json.dumps(
+        {"version": "1.1.0", "primary_column": "geometry",
+         "columns": {"geometry": column}})})
+    path = tmp_path / "fp.parquet"
+    pq.write_table(table, path)
+    return path
+
+
+def test_geoparquet_crs_rules(tmp_path):
+    from pyproj import CRS
+    with pytest.raises(ValueError, match="null"):
+        b.read_footprints(_parquet_with_crs(tmp_path, {"crs": None}))
+    custom = CRS.from_proj4("+proj=tmerc +lat_0=0 +lon_0=7 +k=1 +x_0=0 "
+                            "+y_0=0 +ellps=WGS84 +units=m").to_json_dict()
+    custom.pop("id", None)
+    _, crs = b.read_footprints(_parquet_with_crs(tmp_path, {"crs": custom}))
+    parsed = CRS.from_user_input(crs)
+    assert parsed.is_projected and not parsed.is_geographic
+    tagged = CRS.from_epsg(32632).to_json_dict()
+    _, crs = b.read_footprints(_parquet_with_crs(tmp_path, {"crs": tagged}))
+    assert crs == "EPSG:32632"
