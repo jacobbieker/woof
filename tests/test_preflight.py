@@ -5158,6 +5158,9 @@ def test_legacy_rrtmg_variant_prices_the_lw_chain_local_frame():
     # "thompson_fork" joined 2026-10-07 the same way: the fork Thompson
     # column launches only as woof/core/thompson_fork.py's own unit,
     # priced as thompson_fork_unit.
+    # RRTMG-K's three units joined 2026-11-17 the same way: rrtmgk_prep,
+    # rrtmgk_lw and rrtmgk_sw compile only inside woof/core/rrtmgk.py's
+    # composed sources, priced as rrtmgk_{prep,lw,sw}_unit.
     covered = frozenset().union(
         *(tu.covers for tu in pf.CHAINED_TRANSLATION_UNIT_FRAMES.values()))
     assert covered == {
@@ -5166,7 +5169,8 @@ def test_legacy_rrtmg_variant_prices_the_lw_chain_local_frame():
         "rrtmg_lw_taugb13_16", "p3", "urban_bep_bem",
         "terrain_drag", "windfarm_fitch",
         "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched", "noah_mosaic",
-        "thompson_fork", "gbmpbl", "acm2pbl", "nest_vertical", "windfarm_fitch_cells"}
+        "thompson_fork", "gbmpbl", "acm2pbl", "nest_vertical", "windfarm_fitch_cells",
+        "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw"}
     assert covered <= pf.UNMEASURED_KERNEL_MODULES
     assert not modules & pf.UNMEASURED_KERNEL_MODULES
 

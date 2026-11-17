@@ -161,3 +161,49 @@ def test_default_numerics_run_the_same_scheme(regime, wrf):
     for field in ("rthratenlw", "rthratensw"):
         np.testing.assert_allclose(woof[field], wrf[f"{regime}/{field}"],
                                    rtol=1e-3, atol=5e-8, err_msg=field)
+
+
+@gpu_gate
+def test_the_three_units_compile_no_wider_than_their_priced_frames():
+    """Each of K's composed units, loaded through its production route (the
+    one kernel pre-warm takes), compiles no wider than the 0 B frame
+    woof/core/preflight.py CHAINED_TRANSLATION_UNIT_FRAMES prices it at.
+    The units do not compile standalone, so under_priced_kernel_frames
+    cannot see them drift; a wider frame here is a reservation every 14/14
+    run would under-charge."""
+    import re
+
+    import cupy as cp
+    from cupy.cuda import driver
+
+    from woof.core import preflight as pf
+    from woof.core import rrtmgk as rk
+
+    symbol = re.compile(
+        r'extern\s+"C"\s+__global__\s+(?:__launch_bounds__\([^)]*\)\s*)?void\s+(\w+)')
+    units = {
+        "rrtmgk_prep_unit": (rk.prep_module(), rk.prep_source()),
+        "rrtmgk_lw_unit": (rk.lw_module(), rk.lw_post_source()),
+        "rrtmgk_sw_unit": (rk._engines()[1].module, rk.sw_source(
+            rk._sw._pack_cuda_tables(rk.sw_tables_k())[1])),
+    }
+    local_size_bytes = 3  # CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES
+    wider = {}
+    for unit, (module, source) in units.items():
+        frames = []
+        for name in sorted(set(symbol.findall(source))):
+            try:  # a name the unit's defines compile out has no symbol
+                function = module.get_function(name)
+            except driver.CUDADriverError:
+                continue
+            frames.append(int(driver.funcGetAttribute(local_size_bytes, function.ptr)))
+        assert frames, unit
+        widest = max(frames)
+        row = pf.CHAINED_TRANSLATION_UNIT_FRAMES[unit]
+        if widest > row.max_local_size_bytes:
+            wider[unit] = (widest, row.max_local_size_bytes)
+    assert not wider, (
+        f"(driver frame, priced frame) per unit on {cp.cuda.Device().compute_capability}"
+        f", NVRTC {cp.cuda.nvrtc.getVersion()}: {wider}.  Remedy: move the row in "
+        "CHAINED_TRANSLATION_UNIT_FRAMES to this reading and record it in "
+        "CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW")
