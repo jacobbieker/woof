@@ -53,6 +53,7 @@ def _outputs(*, shape, open_bc, vorder, horder, zero_first):
     bufs = [cp.full(s, np.nan, dtype=cp.float32) for s in
             ((nz, ny, nx + 1),) * 2 + ((nz, ny + 1, nx),) * 2 + ((nz + 1, ny, nx),) * 2]
     tend = cp.asarray(rng.normal(0.0, 1e-6, (nz, ny, nx)).astype(np.float32))
+    tend0 = cp.asnumpy(tend).view(np.uint32).copy()
     moist.launch_pd_fluxes(q, q0, ru, rv, rw, mut, coord, 3000.0, 3000.0, 12.0, *bufs,
                            msft=msft, open_x=open_bc, open_y=open_bc, vorder=vorder,
                            horder=horder)
@@ -61,7 +62,9 @@ def _outputs(*, shape, open_bc, vorder, horder, zero_first):
                                  open_y=open_bc, zero_first=zero_first)
     cp.cuda.runtime.deviceSynchronize()
     names = ("fxl", "fxc", "fyl", "fyc", "fzl", "fzc", "tend")
-    return {name: cp.asnumpy(a).view(np.uint32) for name, a in zip(names, bufs + [tend])}
+    out = {name: cp.asnumpy(a).view(np.uint32) for name, a in zip(names, bufs + [tend])}
+    out["tend_before"] = tend0
+    return out
 
 
 @requires_gpu
@@ -87,18 +90,27 @@ def test_pd_block_writes_the_row_block_words(monkeypatch, shape, open_bc, vorder
     for name in reference:
         differ = int(np.count_nonzero(reference[name] != candidate[name]))
         assert differ == 0, f"{name}: {differ} words differ"
-    # not vacuous: the limiter ran and moved the tendency
-    assert np.count_nonzero(candidate["tend"] != 0)
+    # not vacuous: the launches wrote every flux and moved the tendency
+    for name in ("fxl", "fxc", "fyl", "fyc", "fzl", "fzc"):
+        assert np.isfinite(candidate[name].view(np.float32)).all(), name
+    assert np.count_nonzero(candidate["tend"] != candidate["tend_before"]) > candidate["tend"].size // 2
 
 
 def test_pd_block_override_keeps_whole_warps_on_one_row(monkeypatch):
+    pytest.importorskip("cupy")
     from woof.core import moist
 
     monkeypatch.setenv("WOOF_PD_BLOCK", "32x8")
     assert moist._pd_block() == (32, 8, 1)
-    monkeypatch.setenv("WOOF_PD_BLOCK", "16x8")
-    with pytest.raises(ValueError, match="multiple of 32"):
-        moist._pd_block()
+    monkeypatch.setenv("WOOF_PD_BLOCK", "64X4")
+    assert moist._pd_block() == (64, 4, 1)
+    for bad in ("16x8", "0x4", "64x0", "-32x4", "64x32", "64", "ax4"):
+        monkeypatch.setenv("WOOF_PD_BLOCK", bad)
+        with pytest.raises(ValueError, match="WOOF_PD_BLOCK"):
+            moist._pd_block()
+    assert moist._pd_block_for(None, "cuda") == moist._PD_BLOCK_CUDA
+    for active in ("mlx", "hip", "hip-nvidia"):
+        assert moist._pd_block_for(None, active) == moist._PD_BLOCK_ROW
     assert moist._PD_BLOCK_CUDA[0] % 32 == 0 and moist._PD_BLOCK_ROW[0] % 32 == 0
 
 

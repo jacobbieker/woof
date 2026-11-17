@@ -104,13 +104,29 @@ _PD_BLOCK_ROW = (_TPB, 1, 1)
 def _pd_block() -> tuple[int, int, int]:
     import os
     from woof import backend
-    override = os.environ.get("WOOF_PD_BLOCK")
+    return _pd_block_for(os.environ.get("WOOF_PD_BLOCK") or None, backend.active())
+
+
+@lru_cache(maxsize=None)
+def _pd_block_for(override: str | None, active: str) -> tuple[int, int, int]:
+    """The PD launches' block for an override (``BXxBY``) and backend.
+
+    An override must keep every warp on one row: a positive width that is a
+    multiple of 32 (the kernel's lane arithmetic assumes 32-wide warps), a
+    positive height, and at most 1024 threads.  Only CUDA defaults to the
+    2-D block; HIP and Metal keep the row block.
+    """
     if override:
-        bx, by = (int(v) for v in override.split("x"))
-        if bx % 32:
-            raise ValueError(f"WOOF_PD_BLOCK {override!r}: the width must be a multiple of 32")
+        try:
+            bx, by = (int(v) for v in override.lower().split("x"))
+        except ValueError:
+            raise ValueError(f"WOOF_PD_BLOCK {override!r}: expected BXxBY, e.g. 64x4") from None
+        if bx <= 0 or by <= 0 or bx % 32 or bx * by > 1024:
+            raise ValueError(f"WOOF_PD_BLOCK {override!r}: the width must be a positive multiple "
+                             "of 32, the height positive, and at most 1024 threads")
         return (bx, by, 1)
-    return _PD_BLOCK_CUDA if backend.active() == "cuda" else _PD_BLOCK_ROW
+    return _PD_BLOCK_CUDA if active == "cuda" else _PD_BLOCK_ROW
+
 
 #: Frozen Phase-2 moisture species (allocation/operation order in state).
 SPECIES = ("qv", "qc", "qr")
@@ -512,6 +528,8 @@ def launch_pd_renorm_apply(q0, mu_old, fxl, fxc, fyl, fyc, fzl, fzc,
     else:
         kern = get_kernel("pd_advection", "pd_renorm_apply")
     block = _pd_block()
+    # The warp exchange of a neighbour's cell scale needs whole warps on one row.
+    assert block[0] % 32 == 0, block
     grid = ((nx + block[0] - 1) // block[0], (ny + block[1] - 1) // block[1], nz)
     args = (q0, _mut2d(mu_old, ny, nx), fxl, fxc, fyl, fyc, fzl, fzc,
           cp.asarray(coord.c1h, dtype=DTYPE),
