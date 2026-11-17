@@ -81,6 +81,15 @@ def test_only_glibc_definitions_are_rerouted(monkeypatch):
     swapped = src.replace(sep + body, "float gfk_log(float x)\n{\n    return x;\n}\n")
     out = translate.gfk_fast(swapped)
     assert "gfk_log_soft" not in out and "__woof_gfk_exp(" in out and "__woof_gfk_pow(" in out
+    # glibc's definition in one namespace (signature spaced differently, so
+    # only the impostor matches the rewrite) and an impostor in another
+    spaced = src.replace("float gfk_log(float x)", "float gfk_log(float  x)")
+    namespaced = ("namespace A {\n" + spaced + "\n}\nnamespace B {\n"
+                  "float gfk_log(float x)\n{\n    return x;\n}\n}\n")
+    assert "gfk_log_soft" not in translate.gfk_fast(namespaced)
+    # a second, identical glibc copy elsewhere is still glibc's
+    twice = src + "\nnamespace C {\n" + src + "\n}\n"
+    assert translate.gfk_fast(twice).count("__woof_gfk_") == 0  # two exact matches: ambiguous, left alone
     # one table word changed: the routines reading GFK_EXP2F_TAB keep their bodies
     table = src.index("GFK_EXP2F_TAB")
     first = re.compile(r"0x[0-9a-fA-F]+").search(src, src.index("{", table))

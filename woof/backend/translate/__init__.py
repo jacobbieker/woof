@@ -4861,9 +4861,10 @@ _GFK_SHORTCUTS = (("gfk_log", "float x", "x"), ("gfk_exp", "float x", "x"),
 GFK_REFERENCE = KERNEL_INCLUDE_DIRS[0] / "glibc_flt32.cuh"
 
 
-def _gfk_definition(text: str, name: str) -> str | None:
-    """The whitespace-free text of ``name``'s definition in preprocessed
-    ``text`` (a function body or a braced array initializer), or None."""
+def _gfk_definitions(text: str, name: str) -> list[tuple[int, str]]:
+    """Every definition of ``name`` in preprocessed ``text`` (a function body
+    or a braced array initializer): ``(start offset, whitespace-free text)``."""
+    found = []
     for m in re.finditer(r"(?m)^[ \t]*(?:[A-Za-z_]\w*[ \t\*&]+)+%s\s*[\(\[]" % re.escape(name), text):
         brace = text.find("{", m.end())
         if brace < 0 or ";" in text[m.end():brace]:
@@ -4874,8 +4875,14 @@ def _gfk_definition(text: str, name: str) -> str | None:
             if depth == 0:
                 break
             j += 1
-        return re.sub(r"\s+", "", text[m.start():j + 1])
-    return None
+        found.append((m.start(), re.sub(r"\s+", "", text[m.start():j + 1])))
+    return found
+
+
+def _gfk_definition(text: str, name: str) -> str | None:
+    """The first definition of ``name`` in ``text``, whitespace-free, or None."""
+    found = _gfk_definitions(text, name)
+    return found[0][1] if found else None
 
 
 @lru_cache(maxsize=1)
@@ -4920,8 +4927,12 @@ def gfk_fast(text: str) -> str:
         found = list(pattern.finditer(text))
         if len(found) != 1:
             continue
-        if any(_gfk_definition(text, ident) != definition
-               for ident, definition in _gfk_reference()[name].items()):
+        # every definition of the routine and of what it reaches (in any
+        # namespace or scope) is glibc's, and the one rewritten is among them
+        closure = {ident: _gfk_definitions(text, ident) for ident in _gfk_reference()[name]}
+        if any(not defs or any(d != _gfk_reference()[name][ident] for _, d in defs)
+               for ident, defs in closure.items()) \
+                or found[0].start() not in {start for start, _ in closure[name]}:
             continue
         matches.append((found[0], name, params, args))
     for m, name, params, args in sorted(matches, key=lambda item: -item[0].start()):
