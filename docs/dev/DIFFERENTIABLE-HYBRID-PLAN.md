@@ -1,6 +1,6 @@
 # Gradients against observations and hybrid physics/NN: feasibility and plan
 
-Status: design study, 2026-11-21. Nothing in this document is implemented.
+Status: design study (requested 2026-11-21). Nothing in this document is implemented.
 It answers two requests: (1) get gradients of a woof forecast with respect
 to the observations that are available, and (2) work towards a
 differentiable WRF/MPAS/hex in which physics schemes can be swapped for
@@ -33,7 +33,7 @@ measurements.
 - **End-to-end differentiable windows** (4D-Var-style gradients and online
   hybrid training) follow from P3 plus checkpointing. They are practical for
   1-6 h windows at 9-15 km, not for 24 h at 3 km (P4; the cost table in
-  section 6 says why).
+  section 3(e) says why).
 - **Not worth doing:** rewriting woof in PyTorch or JAX (a second model that
   would drift from the WRF-identical one), adjoints of every physics scheme,
   Enzyme on Metal (there is no route), and differentiating through the
@@ -67,7 +67,11 @@ nothing; section 8 lists the tests that prove it.
   graph, no tape, and no autodiff anywhere: a grep for `jax`, `mx.grad`,
   `mx.vjp`, `autograd`, `enzyme`, `tapenade` finds nothing, and "adjoint"
   appears only in unrelated senses. `torch` is imported only by the Earth2
-  AI-weather door (`woof/earth2_*.py`), and there only as a seeded RNG.
+  AI-weather door (`woof/earth2_*.py`), which runs AI-weather models: `torch.load` of
+  models, `torch.einsum` kernels, and a seeded RNG
+  (`woof/earth2_runner.py`), in an environment pinned by
+  `woof/authorities/earth2-env.v1.json`. Nothing there is autograd, but it
+  is a torch install, model loading and device handling that P2 can reuse.
 - An earlier gap review
   ([gaps-and-roadmap.md](../comparisons/clima-numericalearth/gaps-and-roadmap.md),
   section 5) rated a differentiable single-scheme column "M" and a full-model
@@ -92,7 +96,7 @@ nothing; section 8 lists the tests that prove it.
   (both backends) or binary64 (CUDA only, at 1/32 rate on an A6000), and it
   is never part of an identity proof. Identity is a property of the primal
   words only.
-- Tangent-linear/adjoint *tests* (section 5.7) need binary64 to reach the
+- Tangent-linear/adjoint *tests* (section 3(g)) need binary64 to reach the
   usual 1e-12 dot-product agreement; in binary32 the achievable agreement is
   about 1e-5 to 1e-6. So adjoint kernels are written templated on the real
   type, and the binary64 instantiation is the test build.
@@ -141,8 +145,10 @@ nothing; section 8 lists the tests that prove it.
   loop and hands `h_diabatic` to the next step.
 - **hex route** (`woof/hex/cuda_driver.py`, `_step_device_v841` at :4870):
   MPAS split-explicit. Defaults (`woof/hex/mpas_defaults.py`):
-  `config_dynamics_split_steps = 3`, `config_number_of_sub_steps = 4`, so
-  **3 x (1+2+4) = 21 acoustic substeps per physics step**, then scalar
+  `config_time_integration_order = 2`, `config_dynamics_split_steps = 3`,
+  `config_number_of_sub_steps = 4`. Order 2 uses acoustic counts
+  `(n//2, n//2, n)` (`RKSchedule.from_mpas`, `woof/hex/integration.py:104`),
+  so **3 x (2+2+4) = 24 acoustic substeps per physics step**, then scalar
   transport once over the whole step. Physics is two-phase: phase 1
   (radiation, surface/PBL, cumulus) before the dynamics with held
   tendencies; phase 2 (microphysics) after transport
@@ -154,7 +160,8 @@ nothing; section 8 lists the tests that prove it.
     grid size, 250 of them dynamics, **93 for the dry core**; radiation steps
     issue 697-7,646. Wall time per ordinary step: 49.6 ms (40x40x30),
     100.3 ms (100x100x49), **238.6 ms (200x200x49)**; the dry core alone is
-    6.1, 18.2 and 34.3 ms.
+    6.1, 18.2 and 34.3 ms. A 200x200x49 radiation step is about 2.4 s,
+    roughly ten ordinary steps.
   - hex: the first step on a 1,607-cell, 55-level mesh issues 1,709
     launches; Maui 3 km (7,042 cells, dt 18 s) runs **0.15 s/step on the
     A6000 and 0.60 s/step on the M3 Max**
@@ -410,22 +417,29 @@ checkpoint while one step is reversed):
 
 | case | steps (24 h) | checkpoint | c, r | snapshot memory | cost per gradient |
 |---|---|---|---|---|---|
-| WRF 200x200x50, 3 km, dt 18 s | 4,800 | 0.2 GB | 20, 4 (C=10,626) | 4 GB | ~4 forward + 1 adjoint sweep: ~7-9 x forward |
+| WRF 200x200x50, 3 km, dt 18 s | 4,800 | 0.2 GB | 20, 4 (C=10,626) | 4 GB | 1 forward + up to 4 recompute sweeps + 1 adjoint sweep (2-4 x): ~7-9 x forward |
 | same | 4,800 | 0.2 GB | 60, 3 (C=39,711) | 12 GB | ~6-8 x forward |
 | WRF 200x200x50, 12 km, dt 72 s | 1,200 | 0.2 GB | 20, 3 (C=1,771) | 4 GB | ~6-8 x forward |
 | hex 100k cells x 55, 15 km, dt 90 s | 960 | 0.45 GB | 10, 4 (C=1,001) | 4.5 GB | ~7-9 x forward |
 
 Wall-clock, *estimate*: the 3 km WRF row's forward run is about 4,800 x
-0.24 s = 19 min on the A6000 without radiation steps, so one gradient is
-about 2.5 h, and a 30-iteration minimisation about 3 days. That is not a
-usable 4D-Var. A 6 h window at 12 km (300 steps) is about 1.2 min forward
-and 10 min per gradient: usable. Hence the windows in section 2.
+0.24 s = 19 min on the A6000 for ordinary steps, plus radiation steps
+(about 2.4 s each; with `radt` of 3 min, one step in ten), so about 38 min.
+One gradient is then about 5 h, and a 30-iteration minimisation about a
+week. That is not a usable 4D-Var. A 6 h window at 12 km (300 steps, the
+same one-in-ten radiation ratio at `radt` 12 min) is about 2.5 min forward
+and 20 min per gradient: usable. Hence the windows in section 2. (The
+adjoint would freeze radiation, option (f) 5, so the adjoint sweep itself
+does not pay the radiation cost; the recompute sweeps do.)
 
 Snapshots can sit in device memory, pinned host memory (pb 125 GB; the
 Mac's 128 GB is unified) or NVMe, as multi-level checkpointing. woof's
-restart serialisation (`restart_state`/`restore_restart_state`, byte-exact)
-defines what a snapshot must contain; the scheduler itself is new
-(`woof/grad/checkpoint.py`).
+restart writers define what a snapshot must contain: on the WRF route
+`write_restart`/`prepare_restart` with `state_manifest` and
+`carried_scratch_manifest` (`woof/io/restart.py`); on hex the checkpoint
+payload (`woof/hex/checkpoint_io.py`) plus each component's
+`restart_state`/`restore_restart_state`. Both are byte-exact on resume.
+The scheduler itself is new (`woof/grad/checkpoint.py`).
 
 ### (f) Non-differentiable physics
 
@@ -577,8 +591,10 @@ A column MLP with about 600 inputs (10 variables x 60 levels) and four
 | hex 100k cells | 100,000 | 0.3 TFLOP | ~25 ms | ~70 ms |
 
 Called at the PBL/cumulus cadence (every step, or every few), this is a few
-per cent to ~15 % of a step on CUDA and more on Metal, where woof's own
-step is about 4x slower. Measuring this is a P2 gate.
+per cent of an ordinary step on CUDA (10 ms against 239 ms). On Metal the
+inference is about 3x slower but woof's own step is about 4x slower, so the
+share is similar or slightly smaller. These are estimates; measuring them
+is a P2 gate.
 
 ### 4.7 Related work (verified references)
 
@@ -603,7 +619,9 @@ step is about 4x slower. Measuring this is a P2 gate.
   [arXiv:2610.35095](https://arxiv.org/abs/2610.35095)): WRF 4.5 dynamics
   and CONUS physics in JAX; figures quoted in 3(c).
 - **WRFPLUS** (Zhang, Huang and Pan 2013, J. Atmos. Oceanic Technol.;
-  Zhang et al. 2014, BAMS); WRFDA user's guide for the simplified physics.
+  Zhang et al. 2014, J. Atmos. Oceanic Technol. 31, 2777-2794,
+  [doi:10.1175/JTECH-D-13-00076.1](https://doi.org/10.1175/JTECH-D-13-00076.1));
+  WRFDA user's guide for the simplified physics.
 - **MPAS-JEDI** EnVar (Liu et al. 2022, GMD 15, 7859-7878,
   [doi:10.5194/gmd-15-7859-2022](https://doi.org/10.5194/gmd-15-7859-2022)).
 - **ClimSim** (Yu et al., NeurIPS 2023 Datasets and Benchmarks,
@@ -669,7 +687,7 @@ variable-resolution meshes; `J_o` reproduces the scorecard's RMSE for the
 same pairs. If G0 shows sensitivities dominated by noise at 3 km, stop
 gradient work at convective scales and keep P1-P4 at 9-15 km.
 
-### P1. Tensor bridge and one differentiable column scheme (4-6 w)
+### P1. Tensor bridge and one differentiable column scheme (4.5-7 w)
 
 | PR | content | effort |
 |---|---|---|
@@ -684,11 +702,11 @@ tests unchanged. If the Metal wrapper cannot run the adjoint through
 woof's in-place primitive, the Metal leg uses out-of-place copies and the
 gate records the overhead.
 
-### P2. NN column physics, inference only, opt-in (4-6 w; parallel with P1)
+### P2. NN column physics, inference only, opt-in (5-6.5 w; parallel with P1)
 
 | PR | content | effort |
 |---|---|---|
-| P2.1 | `woof/nn/` protocol and loaders (TorchScript/`torch.export` on CUDA, `mlx.nn` on Metal), artefact manifest with weight hash, input bounds and fallback. | 1 w |
+| P2.1 | `woof/nn/` protocol and loaders (TorchScript/`torch.export` on CUDA, `mlx.nn` on Metal), artefact manifest with weight hash, input bounds and fallback; reuse the Earth2 door's pinned torch environment and model loading rather than a second one. | 1 w |
 | P2.2 | Tendency tap: opt-in writer of the seam's per-scheme inputs and tendencies (Zarr/Icechunk, like `ml-export`). | 1 w |
 | P2.3 | WRF-route seat: an `[nn]` residual or replacement applied at the `after_nonmicrophysics` seat; registry row, restart identity, refusal under exact mode. | 1-1.5 w |
 | P2.4 | hex seat: the same on held sources, and a `woof.hex.rows` example backend. | 1 w |
@@ -746,7 +764,7 @@ offline-trained parent on the scorecard.
   or NN surrogates.
 - **Enzyme on Metal.** No toolchain route; and on CUDA it bypasses NVRTC,
   the numerics rewrite and the Metal translator. Generator/oracle use only.
-- **24 h, 3 km 4D-Var.** About 2.5 h per gradient on the A6000 (section
+- **24 h, 3 km 4D-Var.** About 5 h per gradient on the A6000 (section
   3e); tangent-linear validity at convective scales is also far shorter
   than 24 h. Use ensemble sensitivity for 24 h questions.
 - **Differentiating the soft-float/df64 binary64 path on Metal.** It is
@@ -769,12 +787,13 @@ offline-trained parent on the scorecard.
 | phase | effort | depends on | stop condition |
 |---|---|---|---|
 | P0 | 4-6 w | none | G0 |
-| P1 | 4-6 w | P0.1 for the cost | G1 |
-| P2 | 4-6 w | none (parallel) | G2 |
+| P1 | 4.5-7 w | P0.1 for the cost | G1 |
+| P2 | 5-6.5 w | none (parallel) | G2 |
 | P3 | 12-20 w | P1 test kit | G3 |
 | P4 | 8-12 w | P2, P3 | G4 |
 
-P0 + P1 + P2 (about 3-4 months of one person, partly parallel) deliver
+P0 + P1 + P2 (13.5-19.5 w, about 3-4.5 months of one person, partly
+parallel) deliver
 observation gradients for parameters and patterns, one differentiable
 scheme on both backends, and opt-in NN physics. P3 + P4 (about 5-8 more
 months) deliver short-window variational gradients and online hybrid
