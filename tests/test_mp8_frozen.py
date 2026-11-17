@@ -1638,8 +1638,16 @@ FROZEN_MODULE_DIGESTS = {
         # the exact-C build on the HRRR-fork fixture's cases
         # (tests/test_advect_wrf_legacy_parity.py).
         # Previously 20a2dd79/b4832282.
-        'db86f46e0ae5d6e0040a49b6af11e638527e9fc0afb458729d32c6df23844af9',
-        '43d703b4b6fcc3440f534621950a45ecf5c525966e0b6724b0f1295bc42dcf01'),
+        # Re-pinned for the 64x4 CUDA block (perf/pd-block): pd_fluxes and
+        # pd_renorm_apply take j from blockIdx.y * blockDim.y + threadIdx.y.
+        # Every thread computes its own point and the warp exchange sees 32
+        # consecutive i of one row with its edges at the same i as the 128x1
+        # row block, so the words are unchanged (tests/test_pd_advection_block.py,
+        # both backends, fast/strict/exact; the RTX A6000 recapture reproduced
+        # every production word of both advection fixtures).
+        # Previously db86f46e/43d703b4.
+        '952e0f085ab73a69d8c3c6c9136fa5b6878b2689c4ac3dfba24ef72bc013ed76',
+        '6db2d481e14fcdde22252a414dca1f7524df057fd9214815767d0f6691ea9246'),
     'refl': (
         # Re-pinned for A146 (a98f2482e): every float division by a compile-time
         # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a
