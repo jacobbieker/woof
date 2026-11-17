@@ -149,6 +149,10 @@ include docs/migrating-from-wps.md docs/ml-export.md docs/mpas-seam.md
 include docs/native_source_adapters.md docs/nowcast-frames.md docs/obs-scorecard.md
 include docs/run-output-folders.md docs/run-plan.md
 include docs/scoreboard-nightly.md docs/water-temperature-overlay.md
+# Pages the README links (tests/test_package_data_coverage.py).
+include docs/branch-from-checkpoint.md docs/high-resolution-static-geography.md
+include docs/lake-state-initialization.md docs/lakes.md docs/ruc-mosaic-and-clm-lake.md
+include docs/coupling/WRF-HYDRO-NEMO.md
 recursive-include docs/manual *.md
 recursive-include docs/integration-kit *.md *.json *.py
 

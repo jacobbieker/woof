@@ -146,6 +146,10 @@ _PROVIDERS: dict[str, tuple[str, ...]] = {
     # NO distribution provides these either: tools/wrf_exact_localize's trace
     # hooks and comparer, reached by the exact chain's localization
     # instruments after a sys.path insert -- see _OPTIONAL_BY_DESIGN.
+    # NO distribution provides these: the PNNL opt-in package and tests/'s
+    # selection menu -- see _OPTIONAL_BY_DESIGN.
+    "woof_wrfchem_pnnl": (),
+    "mpas_column_physics_cases": (),
     "cmpphys": (),
     "woof_hook": (),
     "woof_hook2": (),
@@ -382,6 +386,16 @@ _OPTIONAL_BY_DESIGN: dict[str, str] = {
         "inventory a maintainer runs from a checkout to rebuild the model "
         "table. No woof door imports it (woof hf-fetch downloads with "
         "urllib), so a user's install never reaches it."
+    ),
+    "woof_wrfchem_pnnl": (
+        "woof/core/chem_activation.py imports woof_wrfchem_pnnl only after woof.optin.load('wrfchem_pnnl') "
+        "(WOOF_ENABLE_WRFCHEM_PNNL=1, the graded PNNL-terms opt-in door); the default build uses the "
+        "clean-room activation, and the opt-in package is never a wheel dependency."
+    ),
+    "mpas_column_physics_cases": (
+        "tools/hex_option_matrix.py puts tests/ on sys.path to read the selection menu in "
+        "tests/mpas_column_physics_cases.py; tests/ does not ship, and the option matrix is a "
+        "checkout instrument no wheel-user path reaches."
     ),
     "cmpphys": (
         "the WRF exact chain's localization instruments (2.9.1): tools/coupled_exact_trace.py, tools/coupled_gf_receipt.py and tools/coupled_trace_receipt.py put tools/wrf_exact_localize on sys.path and import its trace hooks and comparer by bare name. That directory does not ship (packages.find names `tools`, not `tools*`), so from a wheel the import fails by name; the scripts are maintainer instruments that replay a recorded WRF run from a checkout, and no wheel-user path reaches them."

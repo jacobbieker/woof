@@ -526,8 +526,11 @@ def mesh_summary(grid: Path) -> dict:
 
     import netCDF4
 
-    sys.path.insert(0, str(REPO / "tools"))
-    import hex_varres
+    try:
+        from tools import hex_varres
+    except ImportError:  # run as a path from a checkout
+        sys.path.insert(0, str(REPO / "tools"))
+        import hex_varres
 
     with netCDF4.Dataset(str(grid)) as data:
         area = np.asarray(data["areaCell"][:], dtype=float)
