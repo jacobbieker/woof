@@ -90,7 +90,9 @@ Without the keys nothing runs and the receipt is unchanged.
 
 WOOF-only CLM lake (`woof.hex.mpasphys.clm_lake_v842`; MPAS v8.4.2 has no lake model and
 folds the MODIS lake class to water). `config_clm_lake_backend='hex-cuda'` in `&hex_mpasphys`
-(or `--physics config_clm_lake_backend=hex-cuda`; service `clm_lake`, default `off`) runs WRF's
+(or `--physics config_clm_lake_backend=hex-cuda`; service `clm_lake`, default `off`; a service
+backend selector names no physics, so the run keeps the default MPAS suite and profile,
+`woof.hex.physics_default.service_backend_keys`) runs WRF's
 `sf_lake_physics = 1` (`phys/module_sf_lake.F` v4.7.1 through `woof.core.lake`, no copy of the
 lake physics) on the LAKEMASK cells of the mesh's surface statics (`<mesh>.surface_statics.nc`,
 `woof hex surface-statics`, read by `woof.hex.surface_inputs.bind` with LAKE_DEPTH and WRF's
