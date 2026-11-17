@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -47,19 +49,44 @@ def test_the_constants_sum_to_the_binary64_values():
     assert hi + lo + lo2 == float.fromhex("0x1.71547652b82fep+0") * 32.0
 
 
+needs_clang = pytest.mark.skipif(shutil.which("clang") is None and shutil.which("clang++") is None,
+                                 reason="the translator preprocesses with clang")
+
+
+@needs_clang
 def test_the_translator_routes_the_three_routines(monkeypatch):
     from woof.backend import translate
     monkeypatch.delenv(translate.GFK_FAST_ENV, raising=False)
-    src = HEADER.read_text(encoding="utf-8")
+    src = translate.preprocess(HEADER.read_text(encoding="utf-8"))
     out = translate.gfk_fast(src)
     for name, params, args in translate._GFK_SHORTCUTS:
         assert f"float {name}_soft({params}) {{" in out
         assert f"unsigned int __b = __woof_{name}({args});" in out
-    # preprocessed text: __device__ has expanded to blanks
-    assert translate.gfk_fast(src.replace("__device__ float gfk_", "           float gfk_")) \
-        .count("__woof_gfk_") == 3
+    assert out.count("__woof_gfk_") == 3
     monkeypatch.setenv(translate.GFK_FAST_ENV, "0")
     assert translate.gfk_fast(src) == src
+
+
+@needs_clang
+def test_only_glibc_definitions_are_rerouted(monkeypatch):
+    """A same-signature routine that is not glibc_flt32.cuh's, or glibc's
+    body over a different table, keeps its own words: no wrapper."""
+    from woof.backend import translate
+    monkeypatch.delenv(translate.GFK_FAST_ENV, raising=False)
+    impostor = "float gfk_log(float x) { return x; }\nfloat gfk_exp(float x) { return x; }\n"
+    assert translate.gfk_fast(impostor) == impostor
+    src = translate.preprocess(HEADER.read_text(encoding="utf-8"))
+    head, sep, tail = src.partition("float gfk_log(float x)")
+    body = tail[:tail.index("\n}\n") + 3]
+    swapped = src.replace(sep + body, "float gfk_log(float x)\n{\n    return x;\n}\n")
+    out = translate.gfk_fast(swapped)
+    assert "gfk_log_soft" not in out and "__woof_gfk_exp(" in out and "__woof_gfk_pow(" in out
+    # one table word changed: the routines reading GFK_EXP2F_TAB keep their bodies
+    table = src.index("GFK_EXP2F_TAB")
+    first = re.compile(r"0x[0-9a-fA-F]+").search(src, src.index("{", table))
+    altered = src[:first.start()] + hex(int(first.group(), 16) ^ 1) + src[first.end():]
+    out = translate.gfk_fast(altered)
+    assert "__woof_gfk_log(" in out and "__woof_gfk_exp(" not in out and "__woof_gfk_pow(" not in out
 
 
 needs_mlx = pytest.mark.skipif(importlib.util.find_spec("mlx") is None,

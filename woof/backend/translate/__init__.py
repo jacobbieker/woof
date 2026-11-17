@@ -4857,6 +4857,47 @@ _GFK_SHORTCUTS = (("gfk_log", "float x", "x"), ("gfk_exp", "float x", "x"),
                   ("gfk_pow", "float x, float y", "x, y"))
 
 
+#: the reference: glibc_flt32.cuh, whose definitions gfk_fast.h reproduces
+GFK_REFERENCE = KERNEL_INCLUDE_DIRS[0] / "glibc_flt32.cuh"
+
+
+def _gfk_definition(text: str, name: str) -> str | None:
+    """The whitespace-free text of ``name``'s definition in preprocessed
+    ``text`` (a function body or a braced array initializer), or None."""
+    for m in re.finditer(r"(?m)^[ \t]*(?:[A-Za-z_]\w*[ \t\*&]+)+%s\s*[\(\[]" % re.escape(name), text):
+        brace = text.find("{", m.end())
+        if brace < 0 or ";" in text[m.end():brace]:
+            continue
+        depth, j = 0, brace
+        while j < len(text):
+            depth += {"{": 1, "}": -1}.get(text[j], 0)
+            if depth == 0:
+                break
+            j += 1
+        return re.sub(r"\s+", "", text[m.start():j + 1])
+    return None
+
+
+@lru_cache(maxsize=1)
+def _gfk_reference() -> dict:
+    """For each shortcut, the definitions its word depends on in the
+    reference header: the routine and every function or table it reaches."""
+    text = preprocess(GFK_REFERENCE.read_text())
+    closures = {}
+    for name, _, _ in _GFK_SHORTCUTS:
+        pending, seen = [name], {}
+        while pending:
+            ident = pending.pop()
+            if ident in seen:
+                continue
+            seen[ident] = _gfk_definition(text, ident)
+            for ref in set(re.findall(r"\b[A-Za-z_]\w*\b", seen[ident] or "")) - set(seen):
+                if ref != ident and _gfk_definition(text, ref) is not None:
+                    pending.append(ref)
+        closures[name] = seen
+    return closures
+
+
 def gfk_fast(text: str) -> str:
     """Route glibc_flt32.cuh's gfk_log/gfk_exp/gfk_pow through gfk_fast.h.
 
@@ -4864,10 +4905,13 @@ def gfk_fast(text: str) -> str:
     and preceded by a ``<name>`` that returns gfk_fast.h's binary32 word, or
     calls ``<name>_soft`` where the shortcut defers.  The shortcut returns
     the binary64 routine's word whenever it answers (gfk_fast.h), so the
-    unit's words do not change.  A unit without those definitions, or
-    ``WOOF_METAL_GFK_FAST=0``, is returned as it was."""
+    unit's words do not change.  Only a definition identical to
+    glibc_flt32.cuh's, together with every function and table it reaches,
+    is rerouted; anything else, or ``WOOF_METAL_GFK_FAST=0``, is left as it
+    was."""
     if os.environ.get(GFK_FAST_ENV, "1").strip() == "0" or "gfk_" not in text:
         return text
+    matches = []
     for name, params, args in _GFK_SHORTCUTS:
         # preprocessed text: __device__ has expanded to nothing
         pattern = re.compile(r"^[ \t]*(?:__device__\s+)?float\s+%s\s*\(\s*%s\s*\)\s*\{"
@@ -4876,7 +4920,11 @@ def gfk_fast(text: str) -> str:
         found = list(pattern.finditer(text))
         if len(found) != 1:
             continue
-        m = found[0]
+        if any(_gfk_definition(text, ident) != definition
+               for ident, definition in _gfk_reference()[name].items()):
+            continue
+        matches.append((found[0], name, params, args))
+    for m, name, params, args in sorted(matches, key=lambda item: -item[0].start()):
         wrapper = (f"float {name}_soft({params});\n"
                    f"float {name}({params}) {{\n"
                    f"    unsigned int __b = __woof_{name}({args});\n"
