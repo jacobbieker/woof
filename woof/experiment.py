@@ -6355,7 +6355,8 @@ def _public_config_value(value):
                                   ("solar_tsi_mode", "absolute"),
                                   ("spacewx_ionosphere_opt", 0), ("spacewx_f107_source", ""),
                                   ("spacewx_f107_mode", "81day"),
-                                  ("spacewx_ionosphere_maps", "ccir")):
+                                  ("spacewx_ionosphere_maps", "ccir"),
+                                  ("spacewx_aurora_opt", 0), ("spacewx_kp_source", "")):
                 value = run_document.get(name, default)
                 if isinstance(value, list):
                     value = tuple(value)

@@ -687,7 +687,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   forecast; hex and streamed domains refuse it for now. `woof spacewx aurora`
   places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
-  through a Kp fit with test RMSE 0.73). The auroral energy, storm-time and
+  through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
+  oval (`AURORA_ZONE`, `AURORA_DIST`, `MAG_LAT`, `MAG_LT`) into every WRF-route
+  history frame from the start's Kp. The auroral energy, storm-time and
   particle-precipitation layers are planned ([docs/spacewx.md](docs/spacewx.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight

@@ -2763,8 +2763,8 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # The ionosphere history (woof.spacewx.history), RTX A6000 sm_86,
     # NVRTC 12.9, fast and strict, 2026-11-17: 96 B (the profile's locals).
     "spacewx_ionosphere": 96,
-    # The auroral oval (woof spacewx aurora; no forecast module yet), same
-    # card and reading: 32 B.
+    # The auroral oval (woof.spacewx.aurora_history), same card and
+    # reading: 32 B.
     "spacewx_aurora": 32,
     "cu_radiation": 0,  # test host B sm_120 / NVRTC 13.4.92, both modes.
     "wrf_stock_aer3": 0,  # same reading, both optics and diagnostics.
@@ -4472,6 +4472,8 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("solar_eclipse")
     if int(getattr(dc.run, "spacewx_ionosphere_opt", 0) or 0):
         modules.add("spacewx_ionosphere")   # woof/spacewx/history.py
+    if int(getattr(dc.run, "spacewx_aurora_opt", 0) or 0):
+        modules.add("spacewx_aurora")   # woof/spacewx/aurora_history.py
     if dc.run.cu_rad_feedback:
         modules.add("cu_radiation")
     if int(getattr(dc.run, "icloud", 1)) == 3:
@@ -10439,6 +10441,10 @@ def estimate_domain(dc: DomainConfig, *, spec_bdy_width: int | None = None,
         # The ionosphere history's held geometry, outputs and rows.
         from woof.spacewx.history import device_shapes as spacewx_shapes
         items += _items("physics", spacewx_shapes(run))
+    if int(getattr(run, "spacewx_aurora_opt", 0) or 0):
+        # The auroral oval history's held columns, frame, outputs and rows.
+        from woof.spacewx.aurora_history import device_shapes as aurora_shapes
+        items += _items("physics", aurora_shapes(run))
     items += _items("transient", ysu_output_transient_shapes(run))
     items += _items("transient", mynn_scalar_transient_shapes(run))
     items += _items("transient", tracer_pbl_transient_shapes(run))

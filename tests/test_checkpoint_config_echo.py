@@ -116,6 +116,8 @@ MOVED = {
         dict(spacewx_ionosphere_opt=1),
         {"spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
          "spacewx_ionosphere_maps"}),
+    "spacewx_aurora_opt": (dict(spacewx_aurora_opt=1),
+                           {"spacewx_aurora_opt", "spacewx_kp_source"}),
     "cycling": (dict(bl_mynn_version="gsd_41", cycling=True),
                 {"bl_mynn_version", "cycling"}),
     "diff_6th_form": (dict(diff_6th_form="noaa_wrf39", diff_6th_factor2=0.04),
@@ -213,6 +215,8 @@ DEFAULT_OFF = frozenset({
     # The opt-in ionosphere history (woof.spacewx), absent while off.
     "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
     "spacewx_ionosphere_maps",
+    # The opt-in auroral oval history (woof.spacewx), absent while off.
+    "spacewx_aurora_opt", "spacewx_kp_source",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The RUC sea-ice threshold switch, absent at 0 as in a 2.8.5 header.

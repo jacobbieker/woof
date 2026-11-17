@@ -15,7 +15,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU | available as `woof spacewx ionosphere` (global grid) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
-| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; energy flux and Joule heating to follow | oval available as `woof spacewx aurora` (global grid); energy flux, Joule heating and forecast history planned |
+| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; energy flux and Joule heating to follow | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt`); energy flux and Joule heating planned |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | ion-pair rates (CMIP6 EPP, Ap-driven MEE, GOES SPE) as NOx/HOx sources in chemistry, for high-top runs | planned |
 | L1b spectral irradiance | per-band solar variability in RRTMG SW and photolysis | planned |
@@ -190,6 +190,21 @@ Checks:
 - The storm of 10-11 May 2024: observed Kp 7.67-9 puts the diffuse aurora's
   edge at 44.5-52.5 N geographic. The solar-wind estimate saturates at Kp 9.
   The observed AL (peaking at 1636 nT) takes it to 36.5 N.
+
+### In forecast history (`spacewx_aurora_opt`)
+
+`spacewx_aurora_opt = 1` evaluates the oval kernel on a WRF-route domain's
+columns at each history frame's valid time and writes four surface rows:
+`AURORA_ZONE`, `AURORA_DIST` (the visibility line), `MAG_LAT` and `MAG_LT`.
+The forecast is identical with the option on or off.
+
+- The Kp is the one the start sees (`spacewx_kp_source`): the latest observed
+  GFZ Kp, the solar-wind estimate (OMNI2 or SWPC) for the latest 3-hour
+  interval, or a number. It is held for the run (persistence) and must lie
+  within 24 h before the start. The receipt names the interval it came from.
+- The dipole frame is taken at the start; the MLT turns with each frame.
+- Rows are rebuilt from the configuration on restart; preflight prices the
+  held arrays and the kernel's 32 B frame. Streamed domains and hex refuse it.
 
 ## Data sources and licences (all layers)
 

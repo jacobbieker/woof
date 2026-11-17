@@ -1494,6 +1494,9 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # resumed RunConfig; its rows are recomputed at each frame's valid time
     # from the run start's F10.7, so a resumed run writes the same rows.
     "spacewx_ionosphere",
+    # The opt-in auroral oval history (woof.spacewx.aurora_history), the
+    # same contract: rebuilt from the RunConfig, the run start's Kp held.
+    "spacewx_aurora",
     # WRF's topo_wind / gwd_opt (woof.core.terrain_drag): initialize_physics
     # rebuilds it from the resumed RunConfig and the prepared statics; it
     # holds only static coefficients and statistics, never a value a step
@@ -3462,6 +3465,10 @@ def _drop_default_off_run_keys(values: dict) -> None:
         for name, default in (("spacewx_ionosphere_opt", 0), ("spacewx_f107_source", ""),
                               ("spacewx_f107_mode", "81day"),
                               ("spacewx_ionosphere_maps", "ccir")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    if values.get("spacewx_aurora_opt", 0) == 0:
+        for name, default in (("spacewx_aurora_opt", 0), ("spacewx_kp_source", "")):
             if values.get(name, default) == default:
                 values.pop(name, None)
     if values.get("bl_mynn_cloud_tendency_form", "wrf_461") == "wrf_461":
@@ -5652,6 +5659,8 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'spacewx_f107_source': '',
     'spacewx_f107_mode': '81day',
     'spacewx_ionosphere_maps': 'ccir',
+    'spacewx_aurora_opt': 0,
+    'spacewx_kp_source': '',
     'ruc_soilprop': 'wrf_45',
     'rrtmg_cloud_optics_form': 'wrf_461',
     'rrtmg_aer3_type_source': 'rural',
@@ -6223,6 +6232,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "spacewx_ionosphere_opt": 0, "spacewx_f107_source": "",
                           "spacewx_f107_mode": "81day",
                           "spacewx_ionosphere_maps": "ccir",
+                          "spacewx_aurora_opt": 0, "spacewx_kp_source": "",
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without
                           # the key ran the exact arithmetic.

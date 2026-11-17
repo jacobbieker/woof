@@ -2520,6 +2520,11 @@ class PhysicsDriver:
         if int(getattr(cfg, "spacewx_ionosphere_opt", 0) or 0) and radiation is not None:
             from woof.spacewx.history import IonosphereHistory
             self.spacewx_ionosphere = IonosphereHistory.for_run(cfg, radiation)
+        # Opt-in auroral oval rows (woof.spacewx), the same contract.
+        self.spacewx_aurora = None
+        if int(getattr(cfg, "spacewx_aurora_opt", 0) or 0) and radiation is not None:
+            from woof.spacewx.aurora_history import AuroraHistory
+            self.spacewx_aurora = AuroraHistory.for_run(cfg, radiation)
         self.cumulus_callable = cumulus
         # Producers declare their retained fields as rows before any carrier
         # inventory is built. A later scheme call only writes these buffers.

@@ -1502,6 +1502,8 @@ each one off, the run executes no new code. The design and the planned layers
 | `spacewx_f107_source` | `""` | The F10.7 that drives it. `""` or `"gfz"` fetches GFZ's `Kp_ap_Ap_SN_F107_since_1932.txt` into the space-weather cache. A path reads a file in that format, and a number is a fixed flux in sfu. The value at the run's start is held for the whole run (persistence). |
 | `spacewx_f107_mode` | `"81day"` | `"81day"`: the mean observed F10.7 of the 81 UT days ending the day before the start. `"daily"`: the day before the start alone. |
 | `spacewx_ionosphere_maps` | `"ccir"` | The foF2 maps, `"ccir"` or `"ursi"`. |
+| `spacewx_aurora_opt` | `0` | `1` adds the auroral oval (Starkov 1994 on the IGRF-14 dipole) to every history frame: `AURORA_ZONE` (0 equatorward of the diffuse aurora, 1 diffuse aurora, 2 oval, 3 polar cap), `AURORA_DIST` (degrees poleward of the diffuse aurora's equatorward edge, the visibility line), `MAG_LAT` (degrees) and `MAG_LT` (hours), on the domain's columns at the frame's valid time. It is a diagnostic: the atmosphere integrates identically. |
+| `spacewx_kp_source` | `""` | The Kp that drives it, held at the run's start (persistence). `""` or `"gfz"`: the latest observed Kp at or before the start in GFZ's index file (fetched; a path reads a file in that format). `"omni"` or `"swpc"`: Kp estimated from the solar wind (NASA SPDF OMNI2 or NOAA SWPC real time) for the latest 3-hour interval at or before the start. A number is a fixed Kp in [0, 9]. Either way the Kp must lie within 24 h before the start. |
 
 `solar_tsi_source` and `solar_tsi_mode` are refused while `solar_tsi_opt = 0`,
 since they would do nothing. `solar_tsi_opt = 1` is refused without a
@@ -1523,6 +1525,12 @@ checked against pinned SHA-256 sums. The GFZ index file is a living record, so
 it has no pinned sum: it is fetched again when it ends before the day before the
 start, its format is checked on reading, and its SHA-256 is recorded in the
 run's receipt.
+
+`spacewx_kp_source` is refused while `spacewx_aurora_opt = 0`, and
+`spacewx_aurora_opt = 1` is refused without a radiation scheme, on a streamed
+domain and on hex, for the same reasons as the ionosphere rows. For the aurora
+the GFZ file is fetched again when it does not reach the start's own day, since
+the latest Kp is the one that matters.
 
 ## What a WRF namelist setting becomes
 
