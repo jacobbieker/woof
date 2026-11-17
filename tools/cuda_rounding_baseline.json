@@ -9490,7 +9490,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "2c73041c10fe584e66a9aabb2cc4ef2c0020699eeccf52bce88abafba372814e"
+   "source_sha256": "57e72fd723541584e892aac54ad40ba4f826cd8e14e5cd0bbbe7d0f731e5a118"
   },
   "composed:snow_papers": {
    "assessment": "static_diagnostic_only",
