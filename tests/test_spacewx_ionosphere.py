@@ -352,11 +352,16 @@ def test_spacewx_door_is_registered_lazily():
 
 
 def test_forecast_paths_do_not_reach_the_ionosphere():
-    for rel in ("woof/core/physics.py", "woof/config.py", "woof/hex/physics_seam.py"):
-        path = ROOT / rel
-        if path.is_file():
-            text = path.read_text()
-            assert "spacewx.ionosphere" not in text and "spacewx_ionosphere" not in text, rel
+    """The forecast reaches the model only through the opt-in history door
+    (woof.spacewx.history, tests/test_spacewx_ionosphere_history.py); the hex
+    seam not at all."""
+    for rel in ("woof/core/physics.py", "woof/config.py"):
+        text = (ROOT / rel).read_text()
+        assert "spacewx.ionosphere" not in text, rel
+        assert "import woof.spacewx" not in text, rel
+    seam = ROOT / "woof/hex/physics_seam.py"
+    if seam.is_file():
+        assert "spacewx" not in seam.read_text()
 
 
 # ---------------------------------------------------------------- real coefficients (cached only)

@@ -725,8 +725,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
   has a correlation of 0.90 on 1-3 May 2024 and 0.81 during the 10-12 May
   storm, and it reads about 25 % low at this solar maximum
-  (`tools/spacewx_gim_validate.py`). Its output does not yet go into forecast
-  history. The aurora, storm-time and particle-precipitation layers are
+  (`tools/spacewx_gim_validate.py`). `spacewx_ionosphere_opt = 1` writes the
+  same ionosphere into every WRF-route history frame (`IONO_TEC`,
+  `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
+  forecast; hex and streamed domains refuse it for now. The aurora, storm-time and particle-precipitation layers are
   planned ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
