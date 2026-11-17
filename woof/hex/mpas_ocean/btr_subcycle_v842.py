@@ -216,10 +216,11 @@ def _graphs_on() -> bool:
 
 def column_lanes() -> int:
     """Threads per column for the level sums of btr_transport and the split
-    step's ss_bcl: a warp (32) on CUDA, where the column's loads then
-    coalesce, one on Metal, where the serial loop is faster. Both add in
-    level order, so both give the same words; ``WOOF_OCEAN_COLUMN_LANES``
-    (1 or 32) picks one."""
+    step's ss_bcl, and for monotone vertical advection: a warp (32) on CUDA,
+    where the column's loads then coalesce (and advection runs a thread per
+    cell and level), one on Metal, where the serial loops are faster. Both
+    keep the Fortran's order, so both give the same words;
+    ``WOOF_OCEAN_COLUMN_LANES`` (1 or 32) picks one."""
     lanes = os.environ.get("WOOF_OCEAN_COLUMN_LANES", "").strip()
     if lanes:
         if lanes not in ("1", "32"):

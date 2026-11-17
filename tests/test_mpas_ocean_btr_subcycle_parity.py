@@ -265,8 +265,10 @@ def test_the_captured_stage_writes_the_eager_words(monkeypatch, precision):
 def test_a_warp_per_column_writes_the_serial_words(monkeypatch, precision):
     """btr_transport and ss_bcl add their columns in level order with a warp
     per edge (lanes 32, CUDA's default) or a thread per edge (lanes 1,
-    Metal's): the forward steps write the same words in every array either
-    way, and a lane count other than 1 or 32 is refused by name."""
+    Metal's), and monotone vertical advection runs a thread per cell and
+    level or per column: the forward steps write the same words in every
+    array either way, and a lane count other than 1 or 32 is refused by
+    name."""
     from woof.hex.mpas_ocean import btr_subcycle_v842 as bt
     from woof.verify import mpas_ocean_forward_oracle as fo
     case = next(c for c in fo.cases(precision) if c["name"] == "split_nested_halos")

@@ -147,6 +147,11 @@ def tracer_advection_tend(*, tracers, normal_thickness_flux, w, layer_thickness,
     budgets = bool(configs.get("config_compute_active_tracer_budgets", False))
     i32 = np.int32
     m = mesh
+    # the vertical pass: a thread per (cell, level) under a warp's column lanes
+    # (CUDA), a thread per column otherwise (Metal); the same words either way
+    from .btr_subcycle_v842 import column_lanes
+    columns = int(column_lanes() == 1)
+    per = 1 if columns else nl
     shape = (n_rows, nl)
     h_prov, h_prov_inv, h_new_inv = (cp.zeros(shape, dtype=real) for _ in range(3))
     cur, work, f_in, f_out, t_min, t_max = (cp.zeros(shape, dtype=real) for _ in range(6))
@@ -181,15 +186,18 @@ def tracer_advection_tend(*, tracers, normal_thickness_flux, w, layer_thickness,
         # the vertical pass starts from zeroed fluxes and work over nCellsArray(4)
         hof_cells[: cells[-1]] = 0
         work[: cells[-1]] = 0
-        _launch(precision, "ocn_adv_mono_vertical_flux_v842", cells[1] * nl, (
+        _launch(precision, "ocn_adv_mono_vertical_flux_v842", cells[1] * per, (
             hof_cells, work, t_min, t_max, f_in, f_out, cur, h_prov, w, m["maxLevelCell"], i32(cells[1]), i32(nl),
-            i32(vertical), coef))
-        _launch(precision, "ocn_adv_mono_vertical_inout_v842", cells[1] * nl, (
-            f_in, f_out, hof_cells, m["maxLevelCell"], i32(cells[1]), i32(nl)))
+            i32(vertical), coef, i32(columns)))
+        if not columns:
+            _launch(precision, "ocn_adv_mono_vertical_inout_v842", cells[1] * nl, (
+                f_in, f_out, hof_cells, m["maxLevelCell"], i32(cells[1]), i32(nl)))
         _launch(precision, "ocn_adv_mono_vertical_limiter_v842", cells[1] * nl, (
             f_in, f_out, work, cur, t_min, t_max, h_prov, h_new_inv, m["maxLevelCell"], i32(cells[1]), i32(nl), rdt))
-        _launch(precision, "ocn_adv_mono_vertical_update_v842", cells[0] * nl, (
-            hof_cells, f_in, f_out, m["maxLevelCell"], i32(cells[0]), i32(nl)))
-        _launch(precision, "ocn_adv_mono_vertical_tend_v842", cells[0] * nl, (
-            hof_cells, work, tend, v_budget, m["maxLevelCell"], i32(cells[0]), i32(nl), i32(nt), i32(i_tracer),
-            i32(budgets)))
+        _launch(precision, "ocn_adv_mono_vertical_update_v842", cells[0] * per, (
+            hof_cells, work, tend, v_budget, f_in, f_out, m["maxLevelCell"], i32(cells[0]), i32(nl), i32(nt),
+            i32(i_tracer), i32(budgets), i32(columns)))
+        if not columns:
+            _launch(precision, "ocn_adv_mono_vertical_tend_v842", cells[0] * nl, (
+                hof_cells, work, tend, v_budget, m["maxLevelCell"], i32(cells[0]), i32(nl), i32(nt), i32(i_tracer),
+                i32(budgets)))
