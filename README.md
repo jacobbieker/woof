@@ -423,6 +423,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and excluded regions are refused by name
   ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md),
   [docs/public/HIGHRES-TERRAIN.md](docs/public/HIGHRES-TERRAIN.md)).
+- **Building morphology (opt-in input).** `woof.static.buildings` turns
+  GEM-15 heights (surface minus terrain, with tree and noise filters) and
+  open footprint files (Overture Maps, Microsoft, Google Open Buildings,
+  OSM; GeoJSON or GeoParquet) into per-cell building statistics on the model
+  grid. These are plan and frontal area indices, a height histogram, and
+  WRF's NUDAPT `URB_PARAM` block. Each source's licence and attribution
+  travel with the file. Footprints are read from a local file, not
+  downloaded, and the urban schemes do not read `URB_PARAM` yet
+  ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
@@ -669,6 +678,8 @@ carry none of the following. Each is off until selected:
 - WRF routines that are not freely licensed come from your own WRF tree
   (`WOOF_WRF_SOURCE`).
 - GEM-15 terrain is CC-BY-4.0 and needs its attribution.
+- Building footprints from Overture, Microsoft and OSM are ODbL-1.0; a
+  derived buildings file must carry their attribution.
 
 ### Install on a Mac
 
