@@ -629,8 +629,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
   The Metal facade's `ReductionKernel` folded each output on one thread.
   An exact, order-free and idempotent fold (`a | b`, `a || b`, `a & b`,
-  `a && b`) over 4096 or more elements is now folded in slices and then
-  across the slices, giving the same value (hex Edinburgh 3 km
+  `a && b`, a concrete reduce type and an `out = a` post-map) over 4096
+  or more elements per output, with fewer than 2048 outputs, is now folded
+  in slices and then across the slices, giving the same value (hex Edinburgh 3 km
   variable-resolution: Noah-MP's surface identity check from 3.6 ms to
   0.16 ms per step and the transport species-word check from 1.4 ms to
   0.18 ms, byte-identical; `WOOF_METAL_SPLIT_REDUCTIONS=0` restores the

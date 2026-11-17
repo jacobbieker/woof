@@ -31,10 +31,12 @@ def test_generic_output_without_reduce_type_stays_serial():
 
 
 def test_slice_counts(monkeypatch):
+    monkeypatch.delenv("WOOF_METAL_SPLIT_REDUCTIONS", raising=False)
     assert metal._slices(1, metal.SPLIT_MIN_ELEMENTS - 1) == 1
     assert metal._slices(1, 400_000) == 1024
     assert metal._slices(3, 8192) == 8192 // metal.SPLIT_SLICE_ELEMENTS
-    assert metal._slices(metal.SPLIT_MAX_THREADS, 1 << 20) == 1
+    assert metal._slices(metal.SPLIT_MAX_OUTPUTS, 1 << 20) == 1
+    assert metal._slices(metal.SPLIT_MAX_OUTPUTS - 1, 1 << 20) == metal.SPLIT_MAX_THREADS // (metal.SPLIT_MAX_OUTPUTS - 1)
     monkeypatch.setenv("WOOF_METAL_SPLIT_REDUCTIONS", "0")
     assert metal._slices(1, 400_000) == 1
 
@@ -64,8 +66,15 @@ def test_split_matches_serial_and_numpy(n, monkeypatch):
     v = [rng.integers(0, 256, n, dtype=np.uint8) for _ in range(2)]
     x = rng.integers(0, 1 << 20, n, dtype=np.int32)
     x[rng.integers(0, n)] |= 1 << 30
-    m = rng.integers(0, 1 << 20, (3, n), dtype=np.int32)
-    w = rng.integers(-1, 0, n, dtype=np.int32) & ~np.int32(1 << int(rng.integers(0, 31)))
+    # sparse, distinct bits per row and position: a slice that reads another
+    # output's row, or skips or repeats an element, changes the value
+    m = np.zeros((3, n), dtype=np.int32)
+    w = np.full(n, -1, dtype=np.int32)
+    for row in range(3):
+        for bit, at in enumerate(rng.integers(0, n, 10)):
+            m[row, at] |= np.int32(1 << (3 * bit + row))
+    for bit, at in enumerate(rng.integers(0, n, 12)):
+        w[at] &= ~np.int32(1 << (2 * bit + 1))
     f = rng.standard_normal(n).astype(np.float32)
     f[-1] = np.inf
 

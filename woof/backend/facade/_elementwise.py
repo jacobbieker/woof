@@ -160,7 +160,9 @@ class ReductionKernel(ReductionSource):
         result = _ops.empty((n_out,), odt)
         call_args += [result, np.int64(n_out), np.int64(n_red)]
         key = (tuple(str(types.get(t)) for t in sorted(types)), tuple(is_array))
-        slices = _slices(n_out, n_red) if self.splittable() else 1
+        if self._splittable is None:
+            self._splittable = self.splittable()
+        slices = _slices(n_out, n_red) if self._splittable else 1
         if slices > 1:
             self._split_call(key, types, is_array, call_args, n_out, n_red, slices)
         else:
@@ -189,7 +191,8 @@ class ReductionKernel(ReductionSource):
             module = RawModule(code=self._split_source(types, is_array),
                                options=self.options or ("-std=c++17",))
             fns = self._modules[("split",) + key] = (
-                module.get_function(self.name), module.get_function(self.name + "__woof_fold"))
+                module.get_function(self.name + "__woof_slices"),
+                module.get_function(self.name + "__woof_fold"))
         part = _ops.empty((n_out * slices,), _reduce_dtype(self, types))
         *ins, result, n, r = call_args
         threads = n_out * slices
@@ -203,6 +206,8 @@ SPLIT_MIN_ELEMENTS = 4096
 #: elements each slice folds, at least, and the most threads a split launches
 SPLIT_SLICE_ELEMENTS = 256
 SPLIT_MAX_THREADS = 1 << 18
+#: from this many outputs on, one thread per output is already a wide launch
+SPLIT_MAX_OUTPUTS = 2048
 
 
 def _slices(n_out: int, n_red: int) -> int:
@@ -210,7 +215,7 @@ def _slices(n_out: int, n_red: int) -> int:
     unless each output folds many elements across few outputs."""
     if os.environ.get("WOOF_METAL_SPLIT_REDUCTIONS", "1").strip() == "0":
         return 1
-    if n_out < 1 or n_red < SPLIT_MIN_ELEMENTS or n_out * _TPB >= SPLIT_MAX_THREADS:
+    if n_out < 1 or n_red < SPLIT_MIN_ELEMENTS or n_out >= SPLIT_MAX_OUTPUTS:
         return 1
     return max(1, min(n_red // SPLIT_SLICE_ELEMENTS, SPLIT_MAX_THREADS // n_out, 1024))
 

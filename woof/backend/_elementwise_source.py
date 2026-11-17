@@ -109,6 +109,9 @@ class ReductionSource:
     One thread per output element folds its elements serially, in index
     order: deterministic, and exact for the bitwise/logical reductions woof
     uses.  (A floating sum would differ from CuPy's tree order by rounding.)
+    The Metal facade folds a :meth:`splittable` reduction in slices instead
+    (``_split_source``) when each of few outputs (under 2048) folds 4096 or
+    more elements: the same value.
     """
 
     def __init__(self, in_params, out_params, map_expr, reduce_expr, post_map_expr,
@@ -125,6 +128,7 @@ class ReductionSource:
         self.preamble = preamble or ""
         self.options = tuple(options or ())
         self._modules = {}
+        self._splittable = None
 
     def _source(self, types, is_array):
         def ctype(p):
@@ -173,7 +177,7 @@ class ReductionSource:
                                  self.post_map_expr) is not None)
 
     def _split_source(self, types, is_array):
-        """The reduction as two kernels: ``<name>`` folds slice ``j`` of output
+        """The reduction as two kernels: ``<name>__woof_slices`` folds slice ``j`` of output
         ``o`` (elements ``j, j + s, j + 2s, ...``) into ``part[o * s + j]``, and
         ``<name>__woof_fold`` folds each output's ``s`` slices and post-maps.
         Only for :meth:`splittable` reductions."""
@@ -193,7 +197,7 @@ class ReductionSource:
         params.append(f"{rtype}* __woof_part")
         typedefs = "".join(f"typedef {_CTYPES[np.dtype(dt).name]} {nm};\n" for nm, dt in types.items())
         return (f"{typedefs}{self.preamble}\n"
-                f'extern "C" __global__ void {self.name}({", ".join(params)}, '
+                f'extern "C" __global__ void {self.name}__woof_slices({", ".join(params)}, '
                 f"long long __woof_n, long long __woof_r, long long __woof_s) {{\n"
                 f"    long long __woof_t = (long long)blockIdx.x * blockDim.x + threadIdx.x;\n"
                 f"    if (__woof_t >= __woof_n * __woof_s) return;\n"
