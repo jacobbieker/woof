@@ -1501,7 +1501,9 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # from the run start's F10.7, so a resumed run writes the same rows.
     "spacewx_ionosphere",
     # The opt-in auroral oval history (woof.spacewx.aurora_history), the
-    # same contract: rebuilt from the RunConfig, the run start's Kp held.
+    # same contract: rebuilt from the RunConfig.  A fetched Kp is held per
+    # (source, start) in the space-weather cache, so a resume on the same
+    # host reads the Kp the first start found.
     "spacewx_aurora",
     # WRF's topo_wind / gwd_opt (woof.core.terrain_drag): initialize_physics
     # rebuilds it from the resumed RunConfig and the prepared statics; it

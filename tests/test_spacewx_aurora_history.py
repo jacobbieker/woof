@@ -87,11 +87,13 @@ def test_gfz_holds_the_latest_observed_kp_at_the_start(tmp_path):
 
     late = START.replace(hour=22)
     drive = ah.activity("gfz", late, indices_loader=loader)
-    assert asked == [("gfz", late)]
+    # 18-21 UT is the latest interval that has ended by 22 UT; nothing after the start is read.
+    assert asked == [("gfz", START)]
     assert drive["kp"] == 7.0 and drive["record"]["spacewx_kp_interval"] == "2024-05-10T18:00Z"
     assert drive["al"] == pytest.approx(au.kp_to_al(7.0))
-    assert ah.activity("gfz", START, indices_loader=loader)["kp"] == 7.0
-    assert ah.activity(str(path), START.replace(hour=4))["kp"] == 2.0
+    assert ah.activity("gfz", START, indices_loader=loader)["kp"] == 6.0      # 15-18, not 18-21
+    assert ah.activity("gfz", START.replace(hour=23, minute=59), indices_loader=loader)["kp"] == 7.0
+    assert ah.activity(str(path), START.replace(hour=4))["kp"] == 1.0
     with pytest.raises(ah.AuroraHistoryError, match="no observed Kp"):
         ah.activity(str(path), datetime(2024, 6, 1, 12))
 
@@ -121,6 +123,44 @@ def test_the_solar_wind_kp_is_the_latest_interval_with_data():
     assert drive["record"]["spacewx_kp_interval"] == "2024-05-10T15:00Z"
     with pytest.raises(ah.AuroraHistoryError, match="no swpc solar wind"):
         ah.activity("swpc", START + timedelta(days=3), solarwind_loader=loader)
+    # A record running past the start (OMNI2 year files do) is not read past it.
+    longer = _wind(30, START - timedelta(hours=19))
+    drive = ah.activity("omni", START, solarwind_loader=lambda *a: longer)
+    assert drive["record"]["spacewx_kp_interval"] == "2024-05-10T15:00Z"
+
+
+def test_a_fetched_activity_is_held_for_the_start_and_reused(tmp_path):
+    wind = _wind(20, START - timedelta(hours=19))
+    calls = []
+
+    def loader(source, first, last):
+        calls.append(source)
+        return wind
+
+    first = ah.activity("swpc", START, solarwind_loader=loader, memo=tmp_path)
+    again = ah.activity("swpc", START, solarwind_loader=lambda *a: 1 / 0, memo=tmp_path)
+    assert calls == ["swpc"] and again["kp"] == first["kp"] and again["al"] == first["al"]
+    assert again["record"]["spacewx_kp_interval"] == first["record"]["spacewx_kp_interval"]
+    other = ah.activity("swpc", START + timedelta(hours=3), solarwind_loader=loader, memo=tmp_path)
+    assert calls == ["swpc", "swpc"] and other["record"]["spacewx_kp_interval"] == "2024-05-10T15:00Z"
+    for path in tmp_path.iterdir():
+        path.write_text("{")                      # damaged: the source is read again
+    ah.activity("swpc", START, solarwind_loader=loader, memo=tmp_path)
+    assert len(calls) == 3
+
+
+def test_an_unreachable_gfz_falls_back_to_the_cached_file(tmp_path):
+    path = _gfz(tmp_path)
+    asked = []
+
+    def loader(source, needed, kp=False):
+        asked.append((needed, kp))
+        if kp:
+            raise OSError("network down")
+        return indices.read(path)
+
+    assert ah.activity("gfz", START, indices_loader=loader)["kp"] >= 0.0
+    assert asked == [(START - timedelta(hours=3), True), (None, False)]
 
 
 def test_a_fixed_kp_is_held():

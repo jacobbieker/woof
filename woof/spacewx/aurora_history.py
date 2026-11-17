@@ -12,11 +12,12 @@ The activity is held for the run at the value the START sees, which is
 persistence: a forecast has no observed Kp for its future.  ``spacewx_kp_source``
 picks it:
 
-* ``"gfz"`` (or ``""``): the latest observed Kp at or before the start in the
-  GFZ index file (fetched, CC BY 4.0); a local file in GFZ's format also works;
+* ``"gfz"`` (or ``""``): the observed Kp of the latest 3-hour interval that
+  has ended by the start, in the GFZ index file (fetched, CC BY 4.0); a local
+  file in GFZ's format also works;
 * ``"omni"`` or ``"swpc"``: the Kp estimated from the solar wind
-  (woof.spacewx.solarwind) for the latest 3-hour interval at or before the
-  start, from NASA SPDF OMNI2 or NOAA SWPC's real-time feed;
+  (woof.spacewx.solarwind) for the latest 3-hour interval whose fitted hours
+  have ended by the start, from NASA SPDF OMNI2 or NOAA SWPC's real-time feed;
 * a number in [0, 9]: that Kp.
 
 Kp becomes |AL| through Starkov's relation.  The magnetic frame (the IGRF-14
@@ -88,10 +89,17 @@ def parse_kp_source(source: str):
     return "value", value
 
 
-def _latest(lookup, start: datetime, what: str) -> tuple[float, datetime]:
-    """The value of ``lookup`` for the latest 3-hour interval at or before ``start``."""
-    when = start.replace(minute=0, second=0, microsecond=0)
-    when -= timedelta(hours=when.hour % 3)
+def _interval_start(when: datetime) -> datetime:
+    when = when.replace(minute=0, second=0, microsecond=0)
+    return when - timedelta(hours=when.hour % 3)
+
+
+def _latest(lookup, start: datetime, what: str, complete_hours: int) -> tuple[float, datetime]:
+    """The value of ``lookup`` for the latest 3-hour interval T whose data end by
+    ``start`` (T + ``complete_hours`` <= start): nothing after the start is read."""
+    when = _interval_start(start)
+    while when + timedelta(hours=complete_hours) > start:
+        when -= timedelta(hours=3)
     first = when
     errors = []
     while start - when <= timedelta(hours=LOOKBACK_HOURS):
@@ -105,30 +113,64 @@ def _latest(lookup, start: datetime, what: str) -> tuple[float, datetime]:
         f"(latest interval tried {first:%Y-%m-%dT%H}Z: {errors[0] if errors else 'none'})")
 
 
-def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loader=None) -> dict:
-    """The run's held Kp, its |AL| and the receipt of where it came from."""
+def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loader=None,
+             memo=None) -> dict:
+    """The run's held Kp, its |AL| and the receipt of where it came from.
+
+    With ``memo`` (a directory), a fetched source's result is kept per
+    (source, start): a resumed run, and every domain of a nested one, holds
+    the Kp the first read found, even after the live feed has moved on."""
     from woof.spacewx.aurora import kp_to_al
 
     kind, value = parse_kp_source(source)
     if kind == "value":
-        kp, record = value, {"spacewx_kp_source": "value"}
-    elif kind in ("omni", "swpc"):
+        return {"kp": float(value), "al": float(kp_to_al(value)),
+                "record": {"spacewx_kp_source": "value"}}
+    memo_path = None
+    if memo is not None and kind in ("gfz", "omni", "swpc"):
+        import hashlib
+        import json
+        from pathlib import Path
+        key = hashlib.sha256(f"{kind}|{start.isoformat()}".encode()).hexdigest()[:24]
+        memo_path = Path(memo) / f"{kind}-{start:%Y%m%dT%H%M%S}-{key}.json"
+        if memo_path.is_file():
+            try:
+                held = json.loads(memo_path.read_text(encoding="utf-8"))
+                return {"kp": float(held["kp"]), "al": float(held["al"]),
+                        "record": dict(held["record"], spacewx_kp_held_from=str(memo_path))}
+            except (ValueError, KeyError, TypeError):
+                pass                                   # damaged: read the source again
+    if kind in ("omni", "swpc"):
         from woof.spacewx import solarwind
         load = solarwind_loader or solarwind.load
-        wind = load(kind, start - timedelta(hours=LOOKBACK_HOURS + 2), start)
-        kp, at = _latest(wind.kp_estimate, start, f"{kind} solar wind")
+        wind = load(kind, start - timedelta(hours=LOOKBACK_HOURS + 4), start)
+        # Hours T-1, T and T+1 must have ended by the start.
+        kp, at = _latest(wind.kp_estimate, start, f"{kind} solar wind", complete_hours=2)
         record = {"spacewx_kp_source": wind.source, "spacewx_kp_sha256": wind.sha256,
                   "spacewx_kp_interval": f"{at:%Y-%m-%dT%H:%M}Z", "spacewx_kp_estimated": True}
     else:
         from woof.spacewx import indices
         load = indices_loader or indices.load
-        # The start's own interval: the latest Kp is the one that matters here
-        # (a cached GFZ file without it is fetched again).
-        geo = load("gfz" if kind == "gfz" else value, start, kp=True)
-        kp, at = _latest(geo.kp_at, start, "observed Kp")
+        name = "gfz" if kind == "gfz" else value
+        # The latest interval that has ended by the start; a cached GFZ file
+        # without it is fetched again, and kept if GFZ cannot be reached.
+        newest = _interval_start(start) - timedelta(hours=3)
+        try:
+            geo = load(name, newest, kp=True)
+        except OSError:
+            geo = load(name, None)
+        kp, at = _latest(geo.kp_at, start, "observed Kp", complete_hours=3)
         record = {"spacewx_kp_source": geo.source, "spacewx_kp_sha256": geo.sha256,
                   "spacewx_kp_interval": f"{at:%Y-%m-%dT%H:%M}Z"}
-    return {"kp": float(kp), "al": float(kp_to_al(kp)), "record": record}
+    out = {"kp": float(kp), "al": float(kp_to_al(kp)), "record": record}
+    if memo_path is not None:
+        import json
+        import os
+        memo_path.parent.mkdir(parents=True, exist_ok=True)
+        part = memo_path.with_name(f"{memo_path.name}.{os.getpid()}.part")
+        part.write_text(json.dumps(out, sort_keys=True) + "\n", encoding="utf-8")
+        part.replace(memo_path)
+    return out
 
 
 class AuroraHistory:
@@ -148,8 +190,12 @@ class AuroraHistory:
                 "geometry's columns, and this domain's radiation publishes no start "
                 "time or latitude/longitude")
         start = _naive_utc(start)
+        memo = None
+        if indices_loader is None and solarwind_loader is None:
+            from woof.spacewx.solar_irradiance import cache_root
+            memo = cache_root() / "aurora-activity"
         drive = activity(getattr(cfg, "spacewx_kp_source", ""), start,
-                         indices_loader=indices_loader, solarwind_loader=solarwind_loader)
+                         indices_loader=indices_loader, solarwind_loader=solarwind_loader, memo=memo)
         from woof.spacewx.aurora import Aurora
         lat, lon = _host(lat), _host(lon)
         oval = Aurora(lat, lon, when=start, igrf_model=igrf_model)

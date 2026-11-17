@@ -212,17 +212,22 @@ columns at each history frame's valid time and writes four surface rows:
 `AURORA_ZONE`, `AURORA_DIST` (the visibility line), `MAG_LAT` and `MAG_LT`.
 The forecast is identical with the option on or off.
 
-- The Kp is the one the start sees (`spacewx_kp_source`): the latest observed
-  GFZ Kp, the solar-wind estimate (OMNI2 or SWPC) for the latest complete
-  3-hour interval (one whose fitted hours T-1, T and T+1 are all at or before
-  the start), or a number. It is held for the run (persistence) and must lie
-  within 24 h before the start. The receipt names the interval it came from.
+- The Kp is the one the start sees (`spacewx_kp_source`), with nothing after
+  the start read: the observed GFZ Kp of the latest 3-hour interval that has
+  ended by the start, the solar-wind estimate (OMNI2 or SWPC) for the latest
+  interval whose fitted hours T-1, T and T+1 have ended by the start, or a
+  number. It is held for the run (persistence) and must lie within 24 h before
+  the start. The receipt names the interval it came from. If GFZ cannot be
+  reached, the cached file is used.
 - The dipole frame is taken at the start; the MLT turns with each frame.
 - Rows are rebuilt from the configuration on restart (no checkpoint state),
   and the two keys are output-only for the restart and prepared-cache
-  identities, so a resume may switch the rows on or off. The Kp is read again
-  on resume; the `[spacewx aurora]` start-up line records the value, the
-  interval and the source. Preflight prices the held arrays and the kernel's
+  identities, so a resume may switch the rows on or off. A fetched Kp (gfz,
+  omni, swpc) is kept per source and start in `~/.woof/spacewx/aurora-activity`,
+  so a resume on the same host, and every domain of a nested run, holds the
+  Kp the first read found, even after SWPC's 24-hour feed has moved on. The
+  `[spacewx aurora]` start-up line records the value, the interval and the
+  source. Preflight prices the held arrays and the kernel's
   32 B frame. Streamed domains and hex refuse it.
 
 ## Data sources and licences (all layers)
