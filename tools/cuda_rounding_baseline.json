@@ -5431,7 +5431,7 @@
    },
    {
     "file": "woof/doctor.py",
-    "sha256": "c17c28087faebc4c63726ef957385d789ef77eb6cf0c35c599fd07ff42db8140"
+    "sha256": "9a14b7018d591f222630e364083081f7183da0af545cd1e035f5c2c740609b7b"
    },
    {
     "file": "woof/ensemble/batch_acoustic_fusion.py",
