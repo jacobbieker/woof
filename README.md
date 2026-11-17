@@ -254,6 +254,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     wired into the forecast route (`--wrf-hydro`, `[wrf_hydro]`), and into
     hex through a conservative cell-to-routing-grid exchange. Unported
     `hydro.namelist` options are refused by name.
+  - Hex's cell-to-grid exchange runs on the GPU by default. The overlap
+    weights stay on the device and nothing goes through the host at the LSM
+    step. Its words match the host route's on the same machine: it sums in
+    scipy's order and copies that host's use of FMA.
+    `--no-wrf-hydro-gpu-exchange` (`[wrf_hydro] gpu_exchange = false`) keeps
+    the host route, which also runs, with a log line, when there is no GPU
+    backend. Measured on a 128x128 1-km LSM grid with a 96k-cell
+    hex mesh: on pb the exchange went from 230 ms (host) to 0.4 ms (A6000),
+    and the whole coupling cycle from 528 to 196 ms. On the M3 Max it went
+    from 15-27 ms to 4 ms; there the routing (about 650 ms) dominates.
   - NEMO 5.0.2: the equation of state, TKE mixing, vertical and lateral
     tracer diffusion, FCT advection and solar penetration. A coupled column
     ocean is driven by WRF's ocean-coupler exchange (SST only for now); a
@@ -738,6 +748,31 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   ensemble), then one differentiable column scheme, NN physics through the
   existing column seams, and later a WRF dry-core adjoint checked against
   WRFPLUS. Default runs are not changed.
+  The first tools exist (experimental, reached only through `woof grad`):
+  `woof grad obs` reads a forecast window's surface, upper-air, aircraft
+  and radio-occultation observations from the bkr/obs stores, and
+  `woof grad cost` scores a WRF or hex history against them as an
+  error-weighted observation cost `J_o`, pairing each observation with the
+  nearest history frame and freezing the accepted set so perturbed runs
+  are scored on the same observations ([docs/grad.md](docs/grad.md)).
+- **A plan, not yet code, for variational data assimilation.**
+  [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
+  WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
+  transforms, a conventional-observation 3D-Var checked against compiled
+  WRFDA 4.7.1, background-error statistics from woof forecasts, and hybrid
+  3DEnVar with the LETKF members. Radar, GOES and radiances come later;
+  radiances need an opt-in CRTM. It also scopes opt-in gradient and
+  neural-network options inside the DA. 4D-Var waits for the adjoints in
+  the plan above. woof has no variational DA today, and default runs are
+  not changed.
+- **Neural-network column physics (opt-in, inference only; in progress).**
+  `woof.nn` loads a column model (a manifest with weights hash, units,
+  normalisation and trained input range) and runs it with PyTorch on CUDA
+  (DLPack, no copies; `recast-woof[nn-torch]`, never a base dependency) or
+  MLX on Metal. A safety layer refuses, clips or falls back to the physics
+  scheme outside the trained range, and limits outputs, keeps moisture
+  positive and can fix column budgets. The forecast seats are not wired yet.
+  Runs that use it are not WRF-identical ([docs/nn-physics.md](docs/nn-physics.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
