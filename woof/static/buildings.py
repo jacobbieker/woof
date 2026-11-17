@@ -536,8 +536,14 @@ def _geoparquet_crs(info: dict, path) -> str:
 
 
 def _transform_footprints(footprints, src_crs, dst_crs):
-    if src_crs == dst_crs or dst_crs is None:
+    if src_crs == dst_crs:
         return footprints
+    if dst_crs is None or src_crs is None:
+        raise ValueError(
+            f"footprints in {src_crs!r} cannot burn onto a raster in "
+            f"{dst_crs!r}: one of them is the model's own plane (crs=None), "
+            "which has no georeference; burn georeferenced footprints onto a "
+            "georeferenced raster (utm_raster)")
     from pyproj import Transformer
     tr = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
     out = []
@@ -580,6 +586,15 @@ def _footprint_median(fp: Footprint, values: np.ndarray, like: HeightRaster
     return float(np.median(v)) if v.size else math.nan
 
 
+def _same_lattice(a: HeightRaster, b: HeightRaster) -> bool:
+    """Same CRS, origin and pixel size (to a millionth of a pixel)."""
+    return (a.crs == b.crs
+            and math.isclose(a.px, b.px, rel_tol=1e-9)
+            and math.isclose(a.py, b.py, rel_tol=1e-9)
+            and abs(a.x0 - b.x0) <= 1e-6 * b.px
+            and abs(a.y0 - b.y0) <= 1e-6 * b.py)
+
+
 def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
                          like: HeightRaster, *, ndsm=None,
                          ndsm_sources: tuple[str, ...] = ("gem15-ndsm",),
@@ -606,8 +621,11 @@ def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
     rows, cols = like.shape
     transform = from_origin(like.x0, like.y0, like.px, like.py)
     if isinstance(ndsm, HeightRaster):
-        if ndsm.shape != like.shape:
-            raise ValueError("ndsm must be on like's grid")
+        if ndsm.shape != like.shape or not _same_lattice(ndsm, like):
+            raise ValueError("ndsm must be on like's grid (same CRS, origin "
+                             "and pixel size); a same-sized window from "
+                             "other ground would give every footprint the "
+                             "wrong height")
         ndsm_sources = ndsm.sources or tuple(ndsm_sources)
         ndsm = ndsm.height
     values = None if ndsm is None else np.asarray(ndsm, np.float64)
@@ -621,6 +639,7 @@ def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
     heights = np.zeros(len(footprints) + 1)
     provenance = {"attribute": 0, "ndsm_median": 0, "storeys": 0,
                   "default": 0, "dropped": 0}
+    keys: list[str] = []
     for n, fp in enumerate(footprints, start=1):
         if not math.isnan(fp.height):
             heights[n], key = fp.height, "attribute"
@@ -633,6 +652,7 @@ def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
         else:
             heights[n], key = 0.0, "dropped"
         provenance[key] += 1
+        keys.append(key)
     # Taller buildings win overlaps: burn again in ascending height order.
     order = np.argsort(heights[1:], kind="stable")
     shapes = [(footprints[k].geojson(), float(heights[k + 1]))
@@ -641,10 +661,19 @@ def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
         burnt = features.rasterize(shapes, out_shape=(rows, cols),
                                    transform=transform, fill=0.0,
                                    dtype="float32")
+        # Credit only footprints that show: burn their indices in the same
+        # order, so a building hidden under a taller one, dropped, or off
+        # the raster contributes no source.
+        index = features.rasterize(
+            [(footprints[k].geojson(), int(k) + 1) for k in order
+             if heights[k + 1] > 0], out_shape=(rows, cols),
+            transform=transform, fill=0, dtype="int32")
+        shown = np.unique(index[index > 0]) - 1
     else:
         burnt = np.zeros((rows, cols), np.float32)
-    used = {fp.source for fp in footprints}
-    if provenance["ndsm_median"]:
+        shown = np.zeros(0, np.int64)
+    used = {footprints[int(k)].source for k in shown}
+    if any(keys[int(k)] == "ndsm_median" for k in shown):
         used.update(ndsm_sources)
     used = sorted(used)
     raster = HeightRaster(burnt, like.x0, like.y0, like.px, like.py,
@@ -828,20 +857,34 @@ def _mosaic(rasters: Sequence[HeightRaster]) -> HeightRaster:
                         tuple(sorted(sources)))
 
 
-def _model_box(raster: HeightRaster, grid, densify: int = 256):
-    """The raster's extent on the model grid, from densified edges (a
-    projected edge can bow outside the box its corners span)."""
+def _model_cells(raster: HeightRaster, grid, densify: int = 256):
+    """The model cells the raster's extent reaches (a boolean (ny, nx)
+    mask), from its densified outline mapped onto the grid (a projected
+    edge can bow).  An outline lying exactly on a cell edge does not reach
+    the cell beyond it; a raster off the grid reaches none."""
+    from affine import Affine
+    from rasterio import features
+
     rows, cols = raster.shape
     x0, x1 = raster.x0, raster.x0 + cols * raster.px
     y1, y0 = raster.y0, raster.y0 - rows * raster.py
-    t = np.linspace(0.0, 1.0, densify + 1)
-    xs = np.concatenate([x0 + (x1 - x0) * t, x0 + (x1 - x0) * t,
-                         np.full_like(t, x0), np.full_like(t, x1)])
-    ys = np.concatenate([np.full_like(t, y0), np.full_like(t, y1),
-                         y0 + (y1 - y0) * t, y0 + (y1 - y0) * t])
+    t = np.linspace(0.0, 1.0, densify + 1)[:-1]
+    xs = np.concatenate([x0 + (x1 - x0) * t, np.full_like(t, x1),
+                         x1 - (x1 - x0) * t, np.full_like(t, x0)])
+    ys = np.concatenate([np.full_like(t, y0), y0 + (y1 - y0) * t,
+                         np.full_like(t, y1), y1 - (y1 - y0) * t])
     fi, fj = grid.fractional_ij(xs, ys, raster.crs)
-    return (float(np.min(fi)), float(np.min(fj)), float(np.max(fi)),
-            float(np.max(fj)))
+    fi, fj = np.asarray(fi, np.float64), np.asarray(fj, np.float64)
+    ci, cj = fi.mean(), fj.mean()
+    shrink = 1.0 - 1e-7
+    ring = list(zip((ci + (fi - ci) * shrink).tolist(),
+                    (cj + (fj - cj) * shrink).tolist()))
+    ring.append(ring[0])
+    ny, nx = grid.shape
+    return features.rasterize(
+        [({"type": "Polygon", "coordinates": [ring]}, 1)],
+        out_shape=(ny, nx), transform=Affine.identity(), fill=0,
+        all_touched=True, dtype="uint8").astype(bool)
 
 
 def aggregate(rasters: Iterable[HeightRaster], grid, *,
@@ -854,9 +897,10 @@ def aggregate(rasters: Iterable[HeightRaster], grid, *,
     Rasters on one pixel lattice (same CRS, pixel size and alignment) are
     mosaicked first: where two know the same pixel the taller wins, and
     walls across their seams count once.  Rasters on different lattices
-    must lie at least a model cell apart (their densified extents are
-    checked; an overlap or a shared seam refuses): resample them onto one
-    lattice first.
+    must lie at least a model cell apart (the cells their densified
+    outlines reach are compared; an overlap or a shared seam refuses, a
+    raster off the grid is ignored): resample them onto one lattice
+    first.  Only rasters that sample some cell are credited as sources.
     Pixels are assigned by centre; a wall face (a height step between two
     neighbouring known pixels) by its midpoint.  Frontal area index is
     half the wall area facing each model axis per plan area (the windward
@@ -878,15 +922,17 @@ def aggregate(rasters: Iterable[HeightRaster], grid, *,
                              "UTM grid, :func:`utm_raster`)")
         groups.setdefault(_grid_key(raster), []).append(raster)
     mosaics = [_mosaic(group) for group in groups.values()]
-    boxes = [_model_box(r, grid) for r in mosaics]
-    for a in range(len(boxes)):
+    if len(mosaics) > 1:
+        from scipy import ndimage
+        reach = [_model_cells(r, grid) for r in mosaics]
+        near = [ndimage.binary_dilation(m, np.ones((3, 3), bool))
+                for m in reach]
+    for a in range(len(mosaics)):
         for b in range(a):
-            (ai0, aj0, ai1, aj1), (bi0, bj0, bi1, bj1) = boxes[a], boxes[b]
             # Touching counts too: a seam between lattices would lose the
-            # walls along it.  One model cell of margin covers the
-            # densified box's own sampling error.
-            if (min(ai1, bi1) - max(ai0, bi0) > -1.0
-                    and min(aj1, bj1) - max(aj0, bj0) > -1.0):
+            # walls along it, so a raster may not reach a cell beside one
+            # the other reaches.
+            if np.any(near[a] & reach[b]):
                 raise ValueError(
                     "building rasters on different pixel lattices overlap "
                     "or touch on the model grid; their ground would count "
@@ -899,8 +945,11 @@ def aggregate(rasters: Iterable[HeightRaster], grid, *,
             min_samples / max(per_cell, 1e-12)))))
         factors.append(factor)
         raster = raster.supersampled(factor)
+        sampled = float(sums.area.sum())
         _accumulate(sums, raster, grid, edges, grid.axis_rotation(raster))
-        sources.update(raster.sources)
+        # Only a raster that put ground into some cell is credited.
+        if float(sums.area.sum()) > sampled:
+            sources.update(raster.sources)
 
     def plane(values):
         return values.reshape(ny, nx)

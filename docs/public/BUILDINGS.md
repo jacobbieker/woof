@@ -82,7 +82,13 @@ GEM-15 windows or a footprint burn on a GEM-15 window's grid) are mosaicked
 first: where two know the same pixel the taller wins, and walls across the
 tile seams are counted once. Rasters on different lattices must lie at
 least one model cell apart: `aggregate` refuses an overlap (that ground
-would count twice) and a shared seam (the walls along it would be lost). It then supersamples each raster until each model cell holds at
+would count twice) and a shared seam (the walls along it would be lost),
+comparing the model cells each raster's outline reaches, so a rotated
+or curved raster is judged by its true shape. A raster off the domain is
+ignored. Only rasters that sample some cell, and only footprints that
+show in the burn, are credited as sources. An nDSM must sit on the footprint
+raster's own lattice, and georeferenced footprints cannot burn onto the
+model plane (`crs=None`). It then supersamples each raster until each model cell holds at
 least nine samples, and assigns each pixel to a model cell by its centre. Walls (height steps between
 neighbouring pixels) go to a cell by their midpoint. A WRF domain is read
 through its own projection (`ProjectionGrid`); idealised cases use the model

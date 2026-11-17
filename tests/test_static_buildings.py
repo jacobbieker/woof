@@ -461,3 +461,74 @@ def test_geoparquet_crs_rules(tmp_path):
     tagged = CRS.from_epsg(32632).to_json_dict()
     _, crs = b.read_footprints(_parquet_with_crs(tmp_path, {"crs": tagged}))
     assert crs == "EPSG:32632"
+
+
+def test_rasters_exactly_one_cell_apart_and_off_grid_are_accepted():
+    grid = _cart(8, 3, 1.0)
+    left = b.HeightRaster(np.zeros((3, 2), np.float32), 0.0, 3.0, 1.0, 1.0)
+    # Cells 0-1 and 3-7: one empty cell (2) between the lattices.
+    right = b.HeightRaster(np.zeros((6, 10), np.float32), 3.0, 3.0, 0.5, 0.5)
+    b.aggregate([left, right], grid, min_samples=1)
+    # A raster lying wholly off the grid on another lattice: ignored, and
+    # credited as no source.
+    away = b.HeightRaster(np.zeros((3, 3), np.float32), 50.5, 3.0, 1.0, 1.0,
+                          None, ("osm",))
+    m = b.aggregate([left, away], grid, min_samples=1)
+    assert "osm" not in m.sources
+
+
+class _RotatedGrid(b.CartesianGrid):
+    """Model axes at 45 degrees to the raster's."""
+
+    def fractional_ij(self, x, y, crs):
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        c = math.sqrt(0.5)
+        return (c * (x - y)) / self.dx + 50.0, (c * (x + y)) / self.dy
+
+    def axis_rotation(self, raster):
+        return -math.pi / 4.0
+
+
+def test_overlap_check_is_not_widened_by_rotation():
+    # Two thin strips 3 cells apart on the raster plane: their model-space
+    # boxes overlap at 45 degrees, their cells do not.
+    grid = _RotatedGrid(100, 100, 1.0, 1.0)
+    a = b.HeightRaster(np.zeros((2, 40), np.float32), 0.0, 22.0, 1.0, 1.0)
+    c = b.HeightRaster(np.zeros((4, 80), np.float32), 0.0, 17.0, 0.5, 0.5)
+    b.aggregate([a, c], grid, min_samples=1)
+
+
+def test_ndsm_must_be_on_the_footprint_lattice():
+    like = b.HeightRaster(np.zeros((10, 10), np.float32), 0.0, 10.0, 1.0,
+                          1.0, "EPSG:32630")
+    other = b.HeightRaster(np.full((10, 10), 50.0, np.float32), 1000.0,
+                           10.0, 1.0, 1.0, "EPSG:32630", ("gem15-ndsm",))
+    fp = b.Footprint((((((2.0, 2.0), (6.0, 2.0), (6.0, 6.0), (2.0, 6.0),
+                         (2.0, 2.0)),),)))
+    with pytest.raises(ValueError, match="ndsm must be on like's grid"):
+        b.rasterize_footprints([fp], "EPSG:32630", like, ndsm=other)
+
+
+def test_georeferenced_footprints_refuse_the_model_plane():
+    plane = b.block_raster(10, 10, 1.0, 1.0, [])
+    fp = b.Footprint((((((0.1, 0.1), (0.2, 0.1), (0.2, 0.2), (0.1, 0.2),
+                         (0.1, 0.1)),),)), height=10.0)
+    with pytest.raises(ValueError, match="model's own plane"):
+        b.rasterize_footprints([fp], "OGC:CRS84", plane)
+
+
+def test_only_footprints_that_show_are_credited():
+    like = b.HeightRaster(np.zeros((10, 10), np.float32), 0.0, 10.0, 1.0,
+                          1.0, "EPSG:32630")
+    square = lambda x0, y0, s: (((((x0, y0), (x0 + s, y0), (x0 + s, y0 + s),
+                                   (x0, y0 + s), (x0, y0)),),))
+    shown = b.Footprint(square(2.0, 2.0, 4.0), height=20.0, source="overture")
+    hidden = b.Footprint(square(3.0, 3.0, 2.0), height=5.0, source="osm")
+    away = b.Footprint(square(500.0, 500.0, 4.0), height=9.0,
+                       source="microsoft")
+    dropped = b.Footprint(square(7.0, 7.0, 2.0), source="google-open-buildings")
+    raster, receipt = b.rasterize_footprints([shown, hidden, away, dropped],
+                                             "EPSG:32630", like)
+    assert raster.sources == ("overture",)
+    assert receipt["height_from"]["dropped"] == 1
