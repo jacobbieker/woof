@@ -2514,6 +2514,16 @@ class PhysicsDriver:
             from woof.spacewx.solar_irradiance import SolarVariability
             self.solar_variability = SolarVariability.for_run(
                 cfg, getattr(radiation, "start_time", None))
+        # Opt-in ionosphere history rows (woof.spacewx); None, and no import,
+        # by default.  Diagnostic only: nothing the step reads.
+        self.spacewx_ionosphere = None
+        if int(getattr(cfg, "spacewx_ionosphere_opt", 0) or 0) and radiation is not None:
+            from woof.spacewx.history import IonosphereHistory
+            self.spacewx_ionosphere = IonosphereHistory.for_run(cfg, radiation)
+            if self.spacewx_ionosphere is not None:
+                import json as _spacewx_json
+                print("[spacewx ionosphere] " + _spacewx_json.dumps(
+                    self.spacewx_ionosphere.receipt(), default=str), flush=True)
         self.cumulus_callable = cumulus
         # Producers declare their retained fields as rows before any carrier
         # inventory is built. A later scheme call only writes these buffers.

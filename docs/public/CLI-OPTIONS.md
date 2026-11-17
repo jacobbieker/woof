@@ -1431,6 +1431,7 @@ Takes no options of its own.
 | `--no-supervise` | WRF input directories only: integrate in this process under an existing device reservation |
 | `--no-surface-fill` | disable fill soil/SST perturbations |
 | `--no-verify-visuals` | skip postforecast observation verification; the physical run is unchanged |
+| `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |
 | `--nudging {off,spectral,grid}` | relax toward prepared source analyses; spectral keeps only the configured large-scale modes |
 | `--outdir DIR` | output root for one timestamped run folder per launch, with forecast files, pictures and diagnostics (default <config-stem>-go beside the config); an existing run-... folder is used directly |
 | `--output-config TOML` | Read [output] formats and icechunk_store from TOML; CLI values override it |
@@ -1813,6 +1814,7 @@ Takes no options of its own.
 | `--no-supervise` | WRF input directories only: integrate in this process under an existing device reservation |
 | `--no-surface-fill` | disable fill soil/SST perturbations |
 | `--no-verify-visuals` | skip postforecast observation verification; the physical run is unchanged |
+| `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |
 | `--nudging {off,spectral,grid}` | relax toward prepared source analyses; spectral keeps only the configured large-scale modes |
 | `--outdir DIR` | output root for one timestamped run folder per launch, with forecast files, pictures and diagnostics (default <config-stem>-go beside the config); an existing run-... folder is used directly |
 | `--output-config TOML` | Read [output] formats and icechunk_store from TOML; CLI values override it |
@@ -3501,6 +3503,7 @@ Takes no options of its own.
 | `--met-em DIR` | WPS metgrid directory with met_em.d0*.nc and producing namelist.input; native WOOF initialization |
 | `--no-memory-gate` | run a case whose priced peak envelope exceeds this card's free memory anyway, as `woof go --no-memory-gate` does: the envelope is an upper bound and the card's own allocation then decides; a model state too big to build at all is still refused |
 | `--no-supervise` | run the experiment in this process (escape hatch; disables fresh-process recovery and exclusive-GPU supervision) |
+| `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |
 | `--outdir OUT` | wrfout output directory |
 | `--output-config TOML` | Read [output] formats and icechunk_store from TOML; CLI values override it |
 | `--output-format FORMATS` | Output-format table rows, comma separated (default netcdf); netcdf,icechunk adds atomic native Zarr v3 history |
