@@ -6350,7 +6350,9 @@ def _public_config_value(value):
                                   *MULTI_PERTURB_RUN_DEFAULTS.items(),
                                   ("madwrf_opt", 0), ("madwrf_dt_relax", 60.0),
                                   ("madwrf_dt_nudge", 60.0), ("madwrf_cldinit", 0),
-                                  ("gf_deep_rain_evaporation_booking", False)):
+                                  ("gf_deep_rain_evaporation_booking", False),
+                                  ("solar_tsi_opt", 0), ("solar_tsi_source", ""),
+                                  ("solar_tsi_mode", "absolute")):
                 value = run_document.get(name, default)
                 if isinstance(value, list):
                     value = tuple(value)

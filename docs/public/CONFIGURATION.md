@@ -1486,6 +1486,29 @@ draws them. Dust needs `woof fetch-geog --datasets chem-dust` once; CAMS
 sources need an Atmosphere Data Store key. Every option, refusal and output is
 in [SMOKE-AND-AIR-QUALITY.md](SMOKE-AND-AIR-QUALITY.md).
 
+## Space weather (`[shared]`, opt-in)
+
+These keys go beyond WRF and MPAS parity, so each one is off by default. With
+each one off, the run executes no new code. The design and the planned layers
+(ionosphere, aurora, particle precipitation) are in
+[../spacewx.md](../spacewx.md).
+
+| key | default | meaning |
+|---|---|---|
+| `solar_tsi_opt` | `0` | `1` scales every shortwave output of each radiation call by `TSI(t) / reference`. Shortwave transfer is linear in the top-of-atmosphere flux, so this equals changing WRF's `SOLCON = 1370 * ECCFAC` for every shortwave scheme. |
+| `solar_tsi_source` | `""` | The TSI series. A CSV of `YYYY-MM-DD,W m-2` daily means, a NOAA CDR netCDF (`TSI`, `time` in days since 1610-01-01), several paths joined by `:`, or `"nrlssi2"`, which fetches the NOAA NRLSSI2 daily CDR files for the run's years into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`). Daily means sit at noon UTC and are interpolated linearly. A run time outside the series, or in a gap longer than a day, is refused. |
+| `solar_tsi_mode` | `"absolute"` | `"absolute"`: the reference is 1370 W m-2, so the measured TSI replaces WRF's constant. `"relative"`: the reference is 1360.8 W m-2 (the TIM cycle mean), which keeps WRF's calibration and adds only the variability. |
+
+`solar_tsi_source` and `solar_tsi_mode` are refused while `solar_tsi_opt = 0`,
+since they would do nothing. `solar_tsi_opt = 1` is refused without a
+shortwave scheme, and with `swint_opt = 2` (FARMS computes the surface
+shortwave every step from its own solar constant). On hex, the generic column
+seam takes the same keys (`woof hex forecast --physics solar_tsi_opt=1
+--physics solar_tsi_source=nrlssi2`). The MPAS-native radiation suite does not
+take them yet. The NOAA CDR lags real time by a few months, so a forecast for
+the coming days needs a CSV, for example the last measured value carried
+forward.
+
 ## What a WRF namelist setting becomes
 
 One rule: a namelist setting that changes the forecast either maps onto an

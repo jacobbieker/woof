@@ -647,6 +647,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   is refused with SST updates, OML, restarts, checkpoints, moving regions and
   multi-rank or LTS runs
   ([mpas-physics-seam.md](components/hex/docs/manual/mpas-physics-seam.md)).
+- **Space weather (opt-in, beyond WRF/MPAS).** `solar_tsi_opt = 1` drives
+  every shortwave scheme with a time-varying total solar irradiance (the NOAA
+  NRLSSI2 CDR with `solar_tsi_source = "nrlssi2"`, or your own CSV/netCDF)
+  instead of WRF's fixed 1370 W m-2. `solar_tsi_mode = "absolute"` uses the
+  measured TSI (about -0.6 % shortwave); `"relative"` keeps 1370 and adds only
+  the solar-cycle and sunspot variability (TSI fell by about 2 W m-2
+  between 1 and 8 May 2024). It works on the WRF route and on hex's generic column seam
+  (`--physics solar_tsi_opt=1`), but not yet on hex's MPAS-native
+  radiation suite, and it is refused with FARMS (`swint_opt = 2`). The
+  ionosphere, aurora and particle-precipitation layers are planned
+  ([docs/spacewx.md](docs/spacewx.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
