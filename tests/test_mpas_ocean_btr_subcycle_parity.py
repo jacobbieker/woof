@@ -232,3 +232,29 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
         assert sorted(fresh.files) == sorted(pinned.files)
         for key in pinned.files:
             assert oo.word_mismatches(fresh[key], pinned[key]) == 0, (precision, key)
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", BOTH)
+def test_the_captured_stage_writes_the_eager_words(monkeypatch, precision):
+    """CUDA: the split-explicit stage captured as a graph on its key's second
+    sighting and replayed after writes the eager stage's words in every
+    array. Metal keeps its launches and captures nothing."""
+    from woof import backend
+    from woof.hex.mpas_ocean import btr_subcycle_v842 as bt
+    from woof.verify import mpas_ocean_forward_oracle as fo
+    case = next(c for c in fo.cases(precision) if c["name"] == "split_nested_halos")
+    bt._GRAPHS.clear()
+    monkeypatch.setenv("WOOF_OCEAN_CUDA_GRAPHS", "0")
+    eager = fo.run_gpu(case)
+    assert not bt._GRAPHS
+    monkeypatch.setenv("WOOF_OCEAN_CUDA_GRAPHS", "1")
+    graphed = fo.run_gpu(case)
+    if backend.active() == "cuda":
+        assert any(entry.graph is not None and entry.seen >= 3 for entry in bt._GRAPHS.values())
+    else:
+        assert not bt._GRAPHS
+    bt._GRAPHS.clear()
+    assert eager.keys() == graphed.keys()
+    for name, want in eager.items():
+        assert graphed[name].tobytes() == want.tobytes(), name
