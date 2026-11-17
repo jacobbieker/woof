@@ -222,20 +222,27 @@ def test_installing_an_uncertified_receipt_again_drops_its_staleness_record(tool
 def test_installing_a_blackwell_receipt_again_drops_its_not_repinned_record(tool, tmp_path):
     """A Blackwell receipt left un-re-pinned (no card, 2026-11-14) is re-pinned
     only by a capture on that card, which takes the record with it."""
-    from woof.verify.advect_oracle import CERTIFIED_UNREPINNED_KEY
+    from woof.verify.advect_oracle import CERTIFIED_UNREPINNED_KEY, STAND_IN_KEY
     assert tool.UNREPINNED_RECORD_KEY == CERTIFIED_UNREPINNED_KEY
+    assert tool.STAND_IN_RECORD_KEY == STAND_IN_KEY
     fixture = _fixture(tmp_path, "wrf471_advect", {"Card A": "gpu-receipt-sm120.json"},
                        {"12.0": "gpu-receipt-sm120.json"},
                        {"gpu-receipt-sm120.json": ("Card A", (12, 0), "gpu-words-sm120")})
     index_path = fixture / "gpu-receipts.json"
     index = json.loads(index_path.read_text(encoding="ascii"))
     index[CERTIFIED_UNREPINNED_KEY] = {"gpu-receipt-sm120.json": {
-        "staled_by": "c" * 40, "reason": "no card", "pins": {"advection": "old" + "0" * 61}}}
+        "staled_by": "c" * 40, "reason": "no card", "pins": {"advection": "old" + "0" * 61},
+        "stand_in": "gpu-receipt-sm86.json", "rerecord_on": "Card A"}}
+    # Its stand-in (user ruling 2026-11-17) stands down with the record.
+    index[STAND_IN_KEY] = {"gpu-receipt-sm86.json": {
+        "stands_in_for": "gpu-receipt-sm120.json", "reason": "only Card A re-records it"}}
     tool.write_index(fixture, index)
     receipt, words = _capture(tmp_path, "Card A", (12, 0))
     status, record = tool.settle(fixture, receipt, words, install=True)
     assert (status, record["mode"], record["stale_record_dropped"]) == (0, "card", True)
-    assert CERTIFIED_UNREPINNED_KEY not in json.loads(index_path.read_text(encoding="ascii"))
+    assert record["stand_in_record_dropped"] is True
+    index = json.loads(index_path.read_text(encoding="ascii"))
+    assert CERTIFIED_UNREPINNED_KEY not in index and STAND_IN_KEY not in index
 
 
 def test_a_first_capture_writes_its_receipt_words_and_index(tool, tmp_path):
