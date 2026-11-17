@@ -1,8 +1,7 @@
 {
  "_what": "Which committed receipt each card replays (cards, by device name) and which an unlisted card of a recorded architecture replays (architectures, \"major.minor\"). Read by this fixture's parity tests and by tools/advect_wrf471_oracle/recapture_receipt.py, which adds a card here when it installs that card's first capture. certified_stand_in records a receipt of an older architecture that gates exactly as a certified one, standing in for certified receipts recorded as not re-pinned (user ruling 2026-11-17: the sm_120 receipts can be re-recorded only on an RTX 5090; the RTX A6000 receipt verifies kernel edits meanwhile); recapture_receipt.py --install of a certified receipt drops both records.",
  "architectures": {
-  "12.0": "gpu-receipt-sm120.json",
-  "8.6": "gpu-receipt-sm86.json"
+  "12.0": "gpu-receipt-sm120.json"
  },
  "cards": {
   "NVIDIA GeForce RTX 4090": "gpu-receipt.json",
@@ -26,7 +25,7 @@
     "pd_vertical_sl": "dad6c8c0d6c5bf32a602d324c88685dd788faedfe2a44368df32623782cd9733"
    },
    "reason": "zero_first (advection.cu, pd_advection.cu) moved the source; no Blackwell card was available to recapture (decision 2026-11-14). tests/test_advection_zero_first.py holds zero_first word-identical to fill-then-accumulate on CUDA and Metal",
-   "rerecord_on": "NVIDIA GeForce RTX 5090 under NVRTC 13.2 (measured on an RTX PRO 6000 Blackwell Server Edition)",
+   "rerecord_on": "an sm_120 card under NVRTC 13.2 (the RTX 5090; measured on an RTX PRO 6000 Blackwell Server Edition)",
    "staled_by": "9c318097754f31ff351f0bd888b130545d9b9e0e",
    "stand_in": "gpu-receipt-sm86.json"
   },

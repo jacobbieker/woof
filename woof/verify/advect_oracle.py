@@ -224,8 +224,8 @@ def certified_unrepinned_report(name: str, receipt: dict, moved: dict, record: d
     major, minor = receipt["compute_capability"]
     parts = "; ".join(f"{pin} {was[:8]} -> {now[:8]}" for pin, (was, now) in sorted(moved.items()))
     pending = ""
-    if record.get("rerecord_on"):
-        pending = (f" STALE, pending a re-record on: {record['rerecord_on']} (user ruling "
+    if record.get("stand_in"):
+        pending = (f" STALE, pending a re-record on: {record.get('rerecord_on')} (user ruling "
                    f"2026-11-17); {record['stand_in']} gates kernel edits meanwhile.")
     return (f"{name} ({receipt['gpu']}, sm_{major}{minor}) is NOT re-pinned: {parts}, "
             f"staled by {record['staled_by'][:9]} ({record['reason']}).{pending} Its committed words "
@@ -236,7 +236,12 @@ def certified_unrepinned_report(name: str, receipt: dict, moved: dict, record: d
 def check_certified_receipt_pins(name: str, receipt: dict, fixture_dir: Path, modules, records: dict) -> None:
     """A Blackwell receipt's pins equal the tree, except recorded not-re-pinned kernel pins."""
     moved = receipt_staleness(receipt, fixture_dir, modules)
-    excused = (records.get(name) or {}).get("pins", {})
+    record = records.get(name) or {}
+    excused = set(record.get("pins", {}))
+    if record.get("stand_in"):
+        # Its stand-in gates every kernel pin meanwhile (user ruling
+        # 2026-11-17); the fixture pin still gates here.
+        excused |= set(modules)
     gating = {pin: pair for pin, pair in moved.items() if pin not in excused}
     # Exactly the source the default loader compiles (and the fixture's
     # cases.json). A pin moves only with a fresh capture on the receipt's card
@@ -274,14 +279,35 @@ def receipt_gates(name: str, receipt: dict, index: dict) -> bool:
             or name in index.get(STAND_IN_KEY, {}))
 
 
-def selected_receipt_name(index: dict, gpu: str, compute_capability) -> str | None:
-    """The receipt file the index selects for a card (by name, else architecture)."""
+def selected_receipt_name(index: dict, gpu: str, compute_capability, nvrtc: str | None = None) -> str | None:
+    """The receipt file the index selects for a card: a compiler capture for
+    this NVRTC and architecture, else by name, else by architecture (the order
+    tools/advect_wrf471_oracle/recapture_receipt.py and the parity tests use)."""
+    if nvrtc is not None and compute_capability is not None:
+        major, minor = tuple(compute_capability)
+        name = index.get("compilers", {}).get(nvrtc, {}).get(f"{major}.{minor}")
+        if name is not None:
+            return name
     if gpu in index.get("cards", {}):
         return index["cards"][gpu]
     if compute_capability is None:
         return None
     major, minor = tuple(compute_capability)
     return index.get("architectures", {}).get(f"{major}.{minor}")
+
+
+def card_gates(index: dict, fixture_dir: Path, gpu: str, compute_capability,
+               nvrtc: str | None = None) -> bool:
+    """Whether this card's device words gate: a certified card, or the very
+    card a stand-in receipt was measured on, when the index selects that
+    receipt for it (user ruling 2026-11-17)."""
+    if architecture_is_certified(compute_capability):
+        return True
+    name = selected_receipt_name(index, gpu, compute_capability, nvrtc)
+    if name not in index.get(STAND_IN_KEY, {}):
+        return False
+    receipt = json.loads((Path(fixture_dir) / name).read_text(encoding="ascii"))
+    return receipt["gpu"] == gpu
 
 
 def stand_in_targets(record: dict) -> list:
@@ -302,7 +328,14 @@ def check_stand_in_records(index: dict, fixture_dir: Path) -> dict:
     selectable = _selectable_receipts(index)
     unrepinned = index.get(CERTIFIED_UNREPINNED_KEY, {})
     for name, record in records.items():
-        assert name in selectable, f"{STAND_IN_KEY} names {name}, which the index never selects"
+        # Selected by its card's name only: another card of the architecture
+        # (or a compiler capture) never replays or re-pins a gating receipt.
+        assert name in index.get("cards", {}).values(), (
+            f"{STAND_IN_KEY} names {name}, which no card selects by name")
+        assert name not in set(index.get("architectures", {}).values()) | {
+            n for rows in index.get("compilers", {}).values() for n in rows.values()}, (
+            f"{name} stands in for a certified receipt, so only its own card may select it: "
+            "drop its architectures/compilers mapping")
         receipt = json.loads((Path(fixture_dir) / name).read_text(encoding="ascii"))
         assert not architecture_is_certified(receipt["compute_capability"]), (
             f"{name} is already a certified receipt; it needs no {STAND_IN_KEY} record")

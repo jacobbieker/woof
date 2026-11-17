@@ -460,8 +460,11 @@ does: its kernel and fixture pins must equal the tree, so a kernel edit
 such as `pd_advection.cu` moves only through a card-mode
 `recapture_receipt.py --install` on the A6000 that reproduces every
 recorded word, and on the A6000 itself the device tests compare every word.
-Only the measured card gates; another sm_86 card replays the receipt as an
-uncertified one. A record must be true both ways (the stand-in is not
+Only the measured card gates, and only by name: the stand-in has no
+`architectures` or `compilers` mapping, so another sm_86 card has no receipt
+(it skips as uncertified) and cannot re-pin the stand-in in architecture
+mode. While a stand-in gates, every kernel pin of the receipt it stands in
+for is excused (its fixture pin still gates). A record must be true both ways (the stand-in is not
 Blackwell and carries no staleness record; each receipt it stands in for is
 a Blackwell receipt whose not-re-pinned record names it). Installing a
 fresh capture of the certified receipt on its card drops its not-re-pinned

@@ -28,7 +28,7 @@ from woof.verify.advect_oracle import (
     UncertifiedReceiptStale, UNCERTIFIED_STALE_KEY,
     check_certified_unrepinned_records, check_certified_receipt_pins,
     CertifiedReceiptNotRepinned, CERTIFIED_UNREPINNED_KEY,
-    STAND_IN_KEY, receipt_gates, selected_receipt_name, check_stand_in_records)
+    STAND_IN_KEY, receipt_gates, card_gates, check_stand_in_records)
 
 #: The modules every receipt of this fixture pins by assembled source.
 RECEIPT_MODULES = ("advection", "pd_advection", "openbc")
@@ -86,11 +86,7 @@ def _gates_on_this_card(gpu, capability):
     The RTX A6000 (sm_86) receipt stands in for the RTX 5090 (sm_120) one,
     which only an RTX 5090 can re-record (user ruling 2026-11-17).
     """
-    if architecture_is_certified(capability):
-        return True
-    name = selected_receipt_name(RECEIPT_INDEX, gpu, capability)
-    # The card the stand-in was measured on, not every card of its architecture.
-    return name in RECEIPT_INDEX.get(STAND_IN_KEY, {}) and _receipt(name)["gpu"] == gpu
+    return card_gates(RECEIPT_INDEX, ADVECT_ORACLE_DIR, gpu, capability)
 
 
 def _device_receipt():
@@ -284,23 +280,40 @@ def test_advect_a6000_stands_in_for_the_rtx5090_receipt_pending_its_rerecord(mon
     assert "STALE, pending a re-record on: NVIDIA GeForce RTX 5090" in report
     assert "gpu-receipt-sm86.json gates kernel edits" in report
     # The A6000 compares words even when its receipt trails; an older card
-    # without a stand-in record still skips.
+    # without a stand-in record still skips, and another sm_86 card has no
+    # receipt at all (only the A6000 selects the stand-in).
+    monkeypatch.setattr(module, "receipt_staleness", lambda *args: dict(moved))
     monkeypatch.setattr(module, "advect_gpu_identity", lambda: ("NVIDIA RTX A6000", (8, 6)))
     assert _device_receipt()["gpu"] == "NVIDIA RTX A6000"
     monkeypatch.setattr(module, "advect_gpu_identity", lambda: ("NVIDIA H100 80GB HBM3", (9, 0)))
     with pytest.raises(pytest.skip.Exception, match="informational, not a gate"):
         _device_receipt()
-    monkeypatch.setattr(module, "receipt_staleness", lambda *args: dict(moved))
     monkeypatch.setattr(module, "advect_gpu_identity", lambda: ("another sm_86 card", (8, 6)))
-    with pytest.raises(pytest.skip.Exception, match="informational, not a gate"):
+    with pytest.raises(pytest.skip.Exception, match="no advection receipt and is not certified"):
         _device_receipt()
+    # The not-re-pinned receipt's every kernel pin is excused while its
+    # stand-in gates (a later edit of a module its record does not list),
+    # but never its fixture pin.
+    sm120_receipt = _receipt("gpu-receipt-sm120.json")
+    records = {"gpu-receipt-sm120.json": sm120}
+    monkeypatch.setattr(oracle, "receipt_staleness", lambda *args: {
+        "openbc": (sm120_receipt["kernels"]["openbc"], "b" * 64)})
+    with pytest.warns(CertifiedReceiptNotRepinned, match="gpu-receipt-sm86.json gates kernel edits"):
+        check_certified_receipt_pins("gpu-receipt-sm120.json", sm120_receipt, ADVECT_ORACLE_DIR,
+                                     RECEIPT_MODULES, records)
+    monkeypatch.setattr(oracle, "receipt_staleness", lambda *args: {"fixture": ("c" * 64, "d" * 64)})
+    with pytest.raises(AssertionError, match="trails the tree"):
+        check_certified_receipt_pins("gpu-receipt-sm120.json", sm120_receipt, ADVECT_ORACLE_DIR,
+                                     RECEIPT_MODULES, records)
     # Every half of the record must be true.
     stand_in = RECEIPT_INDEX[STAND_IN_KEY]["gpu-receipt-sm86.json"]
     unrepinned = RECEIPT_INDEX[CERTIFIED_UNREPINNED_KEY]
     for bad, match in (
             ({STAND_IN_KEY: {"gpu-receipt-sm86.json": dict(stand_in, stands_in_for="gpu-receipt-h100.json")}},
              "not a certified receipt"),
-            ({STAND_IN_KEY: {"gpu-receipt-sm120.json": dict(stand_in)}}, "already a certified"),
+            ({STAND_IN_KEY: {"gpu-receipt-sm120.json": dict(stand_in)}}, "only its own card"),
+            ({"architectures": dict(RECEIPT_INDEX["architectures"], **{"8.6": "gpu-receipt-sm86.json"})},
+             "only its own card"),
             ({STAND_IN_KEY: {"gpu-receipt-sm86.json": dict(stand_in, reason="")}}, "sm86"),
             ({STAND_IN_KEY: {}}, "no certified_stand_in record"),
             ({CERTIFIED_UNREPINNED_KEY: dict(unrepinned, **{"gpu-receipt-sm120.json": {
