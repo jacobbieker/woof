@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 5885,
+  "site_count": 5887,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 5818
+    "prose": 5820
   },
   "sites": [
     {
@@ -14037,6 +14037,17 @@
       "kind": "prose",
       "anchor": "assert units[1][\"options\"] == [\"-arch=compute_120\", \"--ftz=false\"]",
       "anchor_sha256": "77b9dbc115c0ea7169a9e5059c811aa05bdb5ce881e3d066a44a4e6d0ef5d01e",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_cuda_rounding_check.py",
+      "line": 429,
+      "kind": "prose",
+      "anchor": "\"woof/nvrtc_cache_key.py\", \"woof/cuda_subnormals.py\"):",
+      "anchor_sha256": "95943c63cfd46b40eb2370f35de42dd89928d838cb470aae3eb86c30dcfd0f14",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -39205,6 +39216,17 @@
       "kind": "prose",
       "anchor": "options += (\"-ftz=true\",)",
       "anchor_sha256": "aad20ce393374d0f4208d97a7b5d64f827c76c7a63c43d66160a973c993f3103",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_check.py",
+      "line": 813,
+      "kind": "prose",
+      "anchor": "\"woof/nvrtc_cache_key.py\", \"woof/cuda_subnormals.py\")",
+      "anchor_sha256": "058864e61423dc955adefa3339fd05c1cc477e2bd3b42b19d57a611e96f38a5e",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
