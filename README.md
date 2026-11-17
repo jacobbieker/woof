@@ -302,7 +302,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     lateral melt, rebinning and zapping, with level, CESM or topo ponds),
     and its ridging (both participation and both redistribution functions,
     the ridging iterations and the cleanup after them), neither of which
-    needs an opt-in;
+    needs an opt-in. The elastic subcycles check their arrays once per
+    solve and work out their compile options once per numerics mode:
+    120 subcycles on a 9,200-cell torus take 34 instead of 41 ms a step on
+    an M3 Max, with the same words;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
