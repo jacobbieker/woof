@@ -23,7 +23,8 @@ from pathlib import Path
 import numpy as np
 
 _SOURCE = Path(__file__).with_name("hydro_remap.cu")
-#: no flush: a binary32 cast of a subnormal mean keeps it, as numpy's astype does
+#: no flush: a binary32 cast of a subnormal mean keeps it, as numpy's astype does (the Metal translation's options;
+#: CUDA compiles through woof.core.kernels.compile_no_ftz, since cupy.RawModule appends -ftz=true after these)
 OPTIONS = ("--std=c++17", "--ftz=false")
 _THREADS = 128
 
@@ -42,21 +43,29 @@ def host_fuses() -> tuple[bool, bool]:
     out = []
     # the host's two products: overlap @ x (CSR) and overlap.T @ x (the CSC view of a CSR's transpose)
     for product in (lambda v: row @ v, lambda v: column.T @ v):
-        got = {float(np.asarray(product(np.repeat(x[:, None], n, axis=1)))[0, 0]) for n in (1, 4)}
+        got = {float(np.asarray(product(np.repeat(x[:, None], n, axis=1)))[0, k])
+               for n in (1, 2, 3, 4, 5, 8) for k in range(n)}
         if len(got) != 1 or not got <= {0.0, -2.0 ** -54}:
-            raise RuntimeError(f"this host's scipy sparse product is neither the plain nor the fused loop: {got}")
+            raise RuntimeError(f"this host's scipy sparse product is neither the plain nor the fused loop at "
+                               f"every width: {got}")
         out.append(got == {-2.0 ** -54})
     return tuple(out)
 
 
 def _module():
     import cupy as cp
+    from woof import backend
     key = cp.cuda.Device().id
     if key not in _MODULES:
-        from woof.certify.kernel_manifest import record_module
         source = _SOURCE.read_text()
-        module = cp.RawModule(code=source, options=OPTIONS)
-        record_module("woof.hex.hydro_remap_gpu", source=source, options=OPTIONS, module=module)
+        if backend.active() == "cuda":
+            from woof.core.kernels import compile_no_ftz
+            module = compile_no_ftz(source, module_key="woof.hex.hydro_remap_gpu", filename="hydro_remap.cu",
+                                    device=key)
+        else:
+            from woof.certify.kernel_manifest import record_module
+            module = cp.RawModule(code=source, options=OPTIONS)
+            record_module("woof.hex.hydro_remap_gpu", source=source, options=OPTIONS, module=module)
         _MODULES[key] = {name: module.get_function(name) for name in (
             "hydro_to_grid", "hydro_increment", "hydro_to_cells", "hydro_dominant", "hydro_budget_cells",
             "hydro_budget_grid")}
@@ -68,6 +77,18 @@ _MODULES: dict = {}
 
 def _blocks(n):
     return ((int(n) + _THREADS - 1) // _THREADS,)
+
+
+def _check(array, dtype, words, name, *, rows=None, stride=None, width=None):
+    """Metadata only: a C-contiguous device array of ``dtype`` holding at least ``words`` words, and when
+    ``stride`` is given, rows of ``stride >= width`` words."""
+    if array.dtype != dtype or not array.flags.c_contiguous:
+        raise ValueError(f"{name} must be a C-contiguous {np.dtype(dtype).name} device array, not "
+                         f"{array.dtype} {'contiguous' if array.flags.c_contiguous else 'strided'}")
+    if stride is not None and int(stride) < int(width):
+        raise ValueError(f"{name}'s row stride {stride} is shorter than its {width} words")
+    if array.size < int(words):
+        raise ValueError(f"{name} holds {array.size} words, the exchange needs {int(words)}")
 
 
 class DeviceExchange:
@@ -105,6 +126,10 @@ class DeviceExchange:
         """Overlap-weighted means of ``fields`` binary32 cell rows of ``source`` (``stride`` words apart, the
         first ``cells`` of each row) into ``exact`` (binary64) and ``out`` (binary32), each ``(fields, grid)``."""
         n = int(fields) * self.grid
+        _check(source, np.float32, (int(fields) - 1) * int(stride) + self.cells, "source", stride=stride,
+               width=self.cells)
+        _check(exact, np.float64, n, "exact")
+        _check(out, np.float32, n, "out")
         self.kernels["hydro_to_grid"](_blocks(n), (_THREADS,), (
             self.indptr, self.index, self.weight, self.grid_area, source, np.int64(stride), np.int32(fields),
             np.int32(self.grid), self.fuse[0], exact, out))
@@ -114,6 +139,12 @@ class DeviceExchange:
         of ``after - before`` (binary32 grids), in binary64 then cast in place; ``prior`` keeps the old state
         and ``exact`` the binary64 result, each ``(fields, cells)``."""
         n = int(fields) * self.cells
+        for name, a in (("before", before), ("after", after)):
+            _check(a, np.float32, int(fields) * self.grid, name)
+        _check(state, np.float32, (int(fields) - 1) * int(stride) + self.cells, "state", stride=stride,
+               width=self.cells)
+        _check(prior, np.float32, n, "prior")
+        _check(exact, np.float64, n, "exact")
         self.kernels["hydro_increment"](_blocks(n), (_THREADS,), (
             self.t_indptr, self.t_index, self.t_weight, self.cell_area, before, after, np.int32(self.grid),
             state, np.int64(stride), np.int32(fields), np.int32(self.cells), self.fuse[1], prior, exact))
@@ -121,6 +152,9 @@ class DeviceExchange:
     def to_cells(self, source, *, exact, out):
         """A binary32 grid field returned to the cells into ``exact`` (binary64) and ``out``'s first ``cells``
         words (binary32)."""
+        _check(source, np.float32, self.grid, "source")
+        _check(exact, np.float64, self.cells, "exact")
+        _check(out, np.float32, self.cells, "out")
         self.kernels["hydro_to_cells"](_blocks(self.cells), (_THREADS,), (
             self.t_indptr, self.t_index, self.t_weight, self.cell_area, source, np.int32(self.cells),
             self.fuse[1], exact, out))
@@ -142,13 +176,18 @@ class DeviceExchange:
         return cp.sum(cells, axis=1), cp.sum(grid, axis=1)
 
     def dominant(self, categories):
-        """Per grid cell, the class of ``categories`` (one int32 per hex cell, on the device) with the largest
-        overlap area, ties to the smaller class: an int32 ``(ny, nx)`` device array."""
+        """Per grid cell, the class of ``categories`` (one integer class per hex cell, on the device) with the
+        largest overlap area, ties to the smaller class: an int32 ``(ny, nx)`` device array."""
         import cupy as cp
-        cats = cp.ascontiguousarray(cp.asarray(categories).reshape(-1)[:self.cells].astype(cp.int32))
+        cats = cp.asarray(categories)
         if cats.size != self.cells:
-            raise ValueError("one category per hex cell")
+            raise ValueError(f"one category per hex cell: {cats.size} for {self.cells} cells")
+        if cats.dtype.kind not in "iu":
+            raise ValueError(f"categories must be integer classes, not {cats.dtype}")
+        if cats.size and (int(cats.min()) < -2 ** 31 or int(cats.max()) >= 2 ** 31):
+            raise ValueError("a category does not fit int32")
+        cats = cp.ascontiguousarray(cats.reshape(-1).astype(cp.int32))
         out = cp.empty(self.grid, cp.int32)
         self.kernels["hydro_dominant"](_blocks(self.grid), (_THREADS,), (
-            self.indptr, self.index, self.weight, cats, np.int32(self.grid), out))
+            self.indptr, self.index, self.weight, cats, np.int32(int(cats.min())), np.int32(self.grid), out))
         return out.reshape(self.shape)

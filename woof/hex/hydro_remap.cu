@@ -67,13 +67,16 @@ extern "C" __global__ void hydro_to_cells(const int *indptr, const int *index, c
 
 // Per grid cell, the class with the largest overlap area; ties to the smaller class.  Each class's area is
 // summed over the row's entries in the stored order from 0.0, as numpy's add.at over the COO entries does.
+// numpy's argmax runs over every class on the mesh (each absent one at 0.0), so a row whose overlaps sum to
+// no area keeps the smallest class on the mesh, ``lowest``.  A one-time pass at attachment: quadratic in a
+// row's entries, a few hundred at most.
 extern "C" __global__ void hydro_dominant(const int *indptr, const int *index, const double *weight,
-                                          const int *category, int rows, int *out) {
+                                          const int *category, int lowest, int rows, int *out) {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
     if (i >= rows) return;
     int lo = indptr[i], hi = indptr[i + 1];
-    int best = 0;
-    double most = -1.0;
+    int best = lowest;
+    double most = 0.0;
     for (int e = lo; e < hi; ++e) {
         int cls = category[index[e]];
         bool seen = false;
@@ -105,18 +108,18 @@ extern "C" __global__ void hydro_budget_cells(const double *dz, int layers, cons
         double old = (double)prior[(long long)k * cells + c];
         double now = (double)state[(long long)k * stride + c];
         double e = exact[(long long)k * cells + c];
-        moved += (now - old) * dz[k];
-        moved_exact += (e - old) * dz[k];
-        envelope += fabs(now - e) * dz[k];
-        water += old * dz[k];
+        moved = __dadd_rn(moved, __dmul_rn(__dsub_rn(now, old), dz[k]));
+        moved_exact = __dadd_rn(moved_exact, __dmul_rn(__dsub_rn(e, old), dz[k]));
+        envelope = __dadd_rn(envelope, __dmul_rn(fabs(__dsub_rn(now, e)), dz[k]));
+        water = __dadd_rn(water, __dmul_rn(old, dz[k]));
     }
     double a = area[c];
-    out[c] = moved * a;
-    out[cells + c] = moved_exact * a;
-    out[2 * cells + c] = envelope * a;
-    out[3 * cells + c] = water * a;
-    out[4 * cells + c] = head[c] * 1e-3 * a;
-    out[5 * cells + c] = ((double)infx[c] + (double)sold[c]) * covered[c] * 1e-3;
+    out[c] = __dmul_rn(moved, a);
+    out[cells + c] = __dmul_rn(moved_exact, a);
+    out[2 * cells + c] = __dmul_rn(envelope, a);
+    out[3 * cells + c] = __dmul_rn(water, a);
+    out[4 * cells + c] = __dmul_rn(__dmul_rn(head[c], 1e-3), a);
+    out[5 * cells + c] = __dmul_rn(__dmul_rn(__dadd_rn((double)infx[c], (double)sold[c]), covered[c]), 1e-3);
 }
 
 // ... and per grid cell: the routing's soil change, its head and the runoff it took (as cast, exact, and the
@@ -129,11 +132,13 @@ extern "C" __global__ void hydro_budget_grid(const double *dz, int layers, const
     if (g >= grid) return;
     double moved = 0.0;
     for (int k = 0; k < layers; ++k)
-        moved += ((double)after[(long long)k * grid + g] - (double)before[(long long)k * grid + g]) * dz[k];
+        moved = __dadd_rn(moved, __dmul_rn(__dsub_rn((double)after[(long long)k * grid + g],
+                                                     (double)before[(long long)k * grid + g]), dz[k]));
     double a = area[g], i32 = (double)infx[g], s32 = (double)sold[g];
-    out[g] = moved * a;
-    out[grid + g] = (double)head[g] * 1e-3 * a;
-    out[2 * grid + g] = (i32 + s32) * 1e-3 * a;
-    out[3 * grid + g] = (infx_exact[g] + sold_exact[g]) * 1e-3 * a;
-    out[4 * grid + g] = (fabs(i32 - infx_exact[g]) + fabs(s32 - sold_exact[g])) * 1e-3 * a;
+    out[g] = __dmul_rn(moved, a);
+    out[grid + g] = __dmul_rn(__dmul_rn((double)head[g], 1e-3), a);
+    out[2 * grid + g] = __dmul_rn(__dmul_rn(__dadd_rn(i32, s32), 1e-3), a);
+    out[3 * grid + g] = __dmul_rn(__dmul_rn(__dadd_rn(infx_exact[g], sold_exact[g]), 1e-3), a);
+    out[4 * grid + g] = __dmul_rn(__dmul_rn(__dadd_rn(fabs(__dsub_rn(i32, infx_exact[g])),
+                                                      fabs(__dsub_rn(s32, sold_exact[g]))), 1e-3), a);
 }

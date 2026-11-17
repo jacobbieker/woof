@@ -93,11 +93,10 @@ def _operator_words(refined: bool) -> dict:
     assert cp.asnumpy(back64).tobytes() == host_back.tobytes(), "to_cells binary64"
     assert cp.asnumpy(plane)[0, :nc].tobytes() == host_back.astype(f32).tobytes()
     assert float(plane[0, -1]) == 7.0
-    # majority: two classes split along a latitude, a patchwork, and ties (equal areas: one class per cell
-    # pair) all as the host picks them
+    # majority: two classes split along a latitude, a patchwork and one class, as the host picks them
     lat = np.degrees(np.arcsin(cells.centers[:, 2]))
     for cats in (np.where(lat > 14.0, 7, 2), rng.integers(1, 21, nc), np.full(nc, 5)):
-        got = cp.asnumpy(dev.dominant(cp.asarray(np.append(cats, 99).astype(np.int32))))
+        got = cp.asnumpy(dev.dominant(cp.asarray(cats.astype(np.int32))))
         assert np.array_equal(got, ex.dominant(cats)), "dominant"
     # conservation of what returns to the cells
     residual = abs(float(ex.integral_cells(host_back[None])[0]) - float(ex.integral_grid(head[None].astype(
@@ -116,9 +115,10 @@ def test_the_device_operator_is_the_host_operator_word_for_word(refined):
 
 
 def test_the_words_hold_under_fast_numerics():
-    """tests/conftest.py pins strict numerics; production runs fast (Metal's binary64 is df64-seeded there)."""
+    """tests/conftest.py pins strict numerics; production runs fast.  On Metal the fast translation computes
+    binary64 through df64 (woof.backend.metal.loader.f64_mode), a different code path from strict's soft-float."""
     pytest.importorskip("cupy")
-    env = dict(os.environ, GPUWM_NUMERICS="fast", GPUWM_WRF_EXACT="0",
+    env = dict(os.environ, GPUWM_NUMERICS="fast", WOOF_HEX_NUMERICS="fast", GPUWM_WRF_EXACT="0",
                PYTHONPATH=os.pathsep.join(filter(None, (str(Path(__file__).parents[1]), os.environ.get(
                    "PYTHONPATH")))))
     code = ("import test_hex_hydro_remap_gpu as t; from woof import numerics; assert numerics.mode() == 'fast';"
@@ -131,3 +131,52 @@ def test_the_words_hold_under_fast_numerics():
 def test_the_host_probe_names_one_loop():
     from woof.hex.hydro_remap_gpu import host_fuses
     assert all(isinstance(f, bool) for f in host_fuses())
+
+
+def test_subnormal_words_are_kept_as_numpy_keeps_them():
+    """The binary32 casts keep subnormals as numpy's astype does (no FTZ in the module's compile)."""
+    cp = pytest.importorskip("cupy")
+    from woof.hex.hydro_remap_gpu import DeviceExchange
+    ex, _ = _exchange(True)
+    dev = DeviceExchange(ex)
+    nc, ng = dev.cells, dev.grid
+    tiny = np.random.default_rng(5).uniform(1e-44, 1e-39, (1, nc)).astype(np.float32)
+    exact, out = cp.full((1, ng), np.nan, cp.float64), cp.full((1, ng), np.nan, cp.float32)
+    dev.to_grid(cp.asarray(tiny), fields=1, stride=nc, exact=exact, out=out)
+    want = ex.to_grid(tiny.astype(np.float64)).reshape(1, ng)
+    assert np.count_nonzero(want.astype(np.float32)) > 0
+    assert cp.asnumpy(exact).tobytes() == want.tobytes()
+    assert cp.asnumpy(out).tobytes() == want.astype(np.float32).tobytes()
+
+
+def test_majority_ties_and_arealess_rows_follow_numpy():
+    """Exact ties go to the smaller class; a row whose overlaps hold no area takes the mesh's smallest class,
+    as np.argmax over every class does."""
+    cp = pytest.importorskip("cupy")
+    import scipy.sparse as sp
+    from woof.hex.hydro_remap import CellGridExchange
+    from woof.hex.hydro_remap_gpu import DeviceExchange
+    # rows: equal halves of classes 9 and 4; 3 beats 7 by area; zero-area overlaps of classes 8 and 6
+    w = np.array([2.5, 2.5, 1.0, 3.0, 0.0, 0.0])
+    m = sp.csr_matrix((w, [0, 1, 2, 3, 4, 5], [0, 2, 4, 6]), shape=(3, 6))
+    ex = CellGridExchange(m, np.full(6, 5.0), np.asarray(m.sum(axis=1)).ravel(), (1, 3), {})
+    cats = np.array([9, 4, 7, 3, 8, 6])
+    assert np.array_equal(cp.asnumpy(DeviceExchange(ex).dominant(cp.asarray(cats))), ex.dominant(cats))
+    assert ex.dominant(cats).tolist() == [[4, 3, 3]]
+
+
+def test_mismatched_arguments_are_refused():
+    cp = pytest.importorskip("cupy")
+    from woof.hex.hydro_remap_gpu import DeviceExchange
+    ex, _ = _exchange(True)
+    dev = DeviceExchange(ex)
+    nc, ng = dev.cells, dev.grid
+    exact, out = cp.zeros((1, ng), cp.float64), cp.zeros((1, ng), cp.float32)
+    with pytest.raises(ValueError, match="float32"):
+        dev.to_grid(cp.zeros((1, nc), cp.float64), fields=1, stride=nc, exact=exact, out=out)
+    with pytest.raises(ValueError, match="stride"):
+        dev.to_grid(cp.zeros((2, nc), cp.float32), fields=2, stride=nc - 1, exact=exact, out=out)
+    with pytest.raises(ValueError, match="one category"):
+        dev.dominant(cp.zeros(nc + 1, cp.int32))
+    with pytest.raises(ValueError, match="integer"):
+        dev.dominant(cp.zeros(nc, cp.float32))

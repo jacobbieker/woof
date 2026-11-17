@@ -642,7 +642,7 @@
     "constructor": "RawModule",
     "factory": "_module",
     "call_sha256": "42b8305d4cb3f4eceac8f0854ca15c058202456bd568c62daf4674ff532410b8",
-    "factory_sha256": "7a827e024febf90a4e81dac2446aea54fd1ba73b034a078f9b9291b44ea931d3",
+    "factory_sha256": "96ad93018cf8e9224a7f46fa601d5b5e2ac29a1eb35f996a4031f5db2c24f0af",
     "status": "unresolved"
    },
    {
@@ -4737,7 +4737,7 @@
    },
    {
     "file": "woof/hex/hydro_remap.cu",
-    "sha256": "2086b197136be9a22bea72842017a8904da23db487b0ea11a3e4161e625a87bd"
+    "sha256": "f9fd13a474707dbf66964652e9aa538738ddc1c13b4fbb7914300f6e84a159fe"
    },
    {
     "file": "woof/hex/init_gpu/horizontal.cu",
@@ -5687,7 +5687,7 @@
    },
    {
     "file": "woof/hex/hydro_remap_gpu.py",
-    "sha256": "728aee7f70a244892cf5630c2bf97af2d3c98c449944e98df2120503c095754a"
+    "sha256": "42d7817d54b2621fb8ab39e38b9a11ae75c504b65afce2b581de8d1fb9b55b6a"
    },
    {
     "file": "woof/hex/iau_forcing.py",
