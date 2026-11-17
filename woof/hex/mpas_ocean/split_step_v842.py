@@ -52,7 +52,7 @@ from woof.hex.mpas_ice import rkind
 
 from . import (btr_subcycle_v842, diagnostics_v842, forcing_v842, tend_tracer_v842, tend_v842,
                vert_transport_v842, vmix_v842)
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, column_lanes, launch_options
 
 SOURCE_FILES = (
     "src/core_ocean/mode_forward/mpas_ocn_time_integration_split.F:82-1926",
@@ -201,7 +201,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
                 st["normalVelocity@2"], st["normalBaroclinicVelocity@2"], m["weightsOnEdge"], m["fEdge"],
                 m["edgesOnEdge"], m["nEdgesOnEdge"], m["maxLevelEdgeTop"], i32(m["nEdgesSolve"]), i32(nl), i32(me2)))
             n1 = int(m["nEdgesArray"][0])
-            lanes = btr_subcycle_v842.column_lanes()
+            lanes = column_lanes()
             _launch(precision, "ocn_ss_bcl_v842", n1 * lanes, (
                 st["normalBaroclinicVelocity@2"], d["barotropicForcing"], u_temp, st["normalBaroclinicVelocity"],
                 td["normalVelocity"], st["normalVelocity@2"], st["ssh@2"], d["layerThicknessEdge"], m["dcEdge"],

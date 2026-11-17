@@ -109,6 +109,15 @@ extern "C" __global__ void ocn_ss_fuperp_v842(
     u[e * nl + k] = sum;
 }
 
+// lane j's word, for the warp-per-edge sums (lanes == 32, CUDA and Metal).
+// The host backend runs one lane per edge, so its scan never sees the
+// shuffle and its kernels need no fibers.
+#ifdef WOOF_HOST_SCAN
+#define SS_LANE_WORD(v, j) (v)
+#else
+#define SS_LANE_WORD(v, j) __shfl_sync(0xffffffffu, (v), (j))
+#endif
+
 // one baroclinic iteration on the linear Coriolis term, edges 1..nEdgesArray(1):
 // the predicted baroclinic velocity, its thickness-weighted mean as the
 // barotropic forcing, the new baroclinic velocity the average of old and predicted.
@@ -137,13 +146,13 @@ extern "C" __global__ void ocn_ss_bcl_v842(
     for (int k0 = 0; k0 == 0 || k0 < top; k0 += lanes) {
         const int k = k0 + lane;
         rk h = C(0.0), term = C(0.0);
-        if (k < nl) {
+        if (k < nl && (k == 0 || k < top)) {
             h = layerThicknessEdge[b + k];
             term = M(layerThicknessEdge[b + k], ut[k]);
         }
-        for (int j = 0; j < lanes && k0 + j < nl; ++j) {
-            const rk hj = lanes == 1 ? h : __shfl_sync(0xffffffffu, h, j);
-            const rk tj = lanes == 1 ? term : __shfl_sync(0xffffffffu, term, j);
+        for (int j = 0; j < lanes && k0 + j < nl && (k0 + j == 0 || k0 + j < top); ++j) {
+            const rk hj = lanes == 1 ? h : SS_LANE_WORD(h, j);
+            const rk tj = lanes == 1 ? term : SS_LANE_WORD(term, j);
             if (k0 + j == 0) {
                 sum = tj;
                 thick = hj;

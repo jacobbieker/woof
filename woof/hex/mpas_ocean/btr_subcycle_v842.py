@@ -50,7 +50,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, column_lanes, launch_options
 
 SOURCE_FILES = ("src/core_ocean/mode_forward/mpas_ocn_time_integration_split.F:84-223,227-259,638-1384",)
 MODULE_OPTIONS = COMPILE_OPTIONS
@@ -212,25 +212,6 @@ def _graphs_on() -> bool:
         return False
     import cupy as cp
     return not cp.cuda.get_current_stream().is_capturing()
-
-
-def column_lanes() -> int:
-    """Threads per column for the level sums of btr_transport and the split
-    step's ss_bcl, and for monotone vertical advection: a warp (32) on CUDA,
-    where the column's loads then coalesce (and advection runs a thread per
-    cell and level), one on Metal, where the serial loops are faster. Both
-    keep the Fortran's order, so both give the same words;
-    ``WOOF_OCEAN_COLUMN_LANES`` (1 or 32) picks one."""
-    lanes = os.environ.get("WOOF_OCEAN_COLUMN_LANES", "").strip()
-    if lanes:
-        if lanes not in ("1", "32"):
-            raise ConfigurationRefusal(
-                knob="WOOF_OCEAN_COLUMN_LANES", value=lanes,
-                reason="the column sums run a warp (32) or a thread (1) per edge",
-                declaration="WOOF_OCEAN_COLUMN_LANES=1 or WOOF_OCEAN_COLUMN_LANES=32")
-        return int(lanes)
-    from woof import backend
-    return 32 if backend.active() == "cuda" else 1
 
 
 def _graph_entry(key: tuple) -> _GraphEntry:

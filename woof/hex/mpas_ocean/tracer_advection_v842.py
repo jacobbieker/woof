@@ -41,7 +41,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, column_lanes, launch_options
 
 SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_tracer_advection.F",
@@ -149,7 +149,6 @@ def tracer_advection_tend(*, tracers, normal_thickness_flux, w, layer_thickness,
     m = mesh
     # the vertical pass: a thread per (cell, level) under a warp's column lanes
     # (CUDA), a thread per column otherwise (Metal); the same words either way
-    from .btr_subcycle_v842 import column_lanes
     columns = int(column_lanes() == 1)
     per = 1 if columns else nl
     shape = (n_rows, nl)

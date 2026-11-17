@@ -269,7 +269,7 @@ def test_a_warp_per_column_writes_the_serial_words(monkeypatch, precision):
     level or per column: the forward steps write the same words in every
     array either way, and a lane count other than 1 or 32 is refused by
     name."""
-    from woof.hex.mpas_ocean import btr_subcycle_v842 as bt
+    from woof.hex.mpas_ocean import tend_v842
     from woof.verify import mpas_ocean_forward_oracle as fo
     case = next(c for c in fo.cases(precision) if c["name"] == "split_nested_halos")
     monkeypatch.setenv("WOOF_OCEAN_COLUMN_LANES", "1")
@@ -281,4 +281,4 @@ def test_a_warp_per_column_writes_the_serial_words(monkeypatch, precision):
         assert warp[name].tobytes() == want.tobytes(), name
     monkeypatch.setenv("WOOF_OCEAN_COLUMN_LANES", "8")
     with pytest.raises(ConfigurationRefusal, match="WOOF_OCEAN_COLUMN_LANES"):
-        bt.column_lanes()
+        tend_v842.column_lanes()

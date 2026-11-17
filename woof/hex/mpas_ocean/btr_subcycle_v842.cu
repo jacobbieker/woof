@@ -235,6 +235,15 @@ extern "C" __global__ void ocn_btr_normalize_v842(rk *thicknessFlux, rk *btrNew,
     btrNew[e] = D(btrNew[e], (rk)(nSum + 1));
 }
 
+// lane j's word, for the warp-per-edge sums (lanes == 32, CUDA and Metal).
+// The host backend runs one lane per edge, so its scan never sees the
+// shuffle and its kernels need no fibers.
+#ifdef WOOF_HOST_SCAN
+#define BT_LANE_WORD(v, j) (v)
+#else
+#define BT_LANE_WORD(v, j) __shfl_sync(0xffffffffu, (v), (j))
+#endif
+
 // the transport velocity with the correction (F - sum h u)/sum h, edges
 // 1..nEdgesArray(config_num_halos). With lanes == 32, a warp per edge: lane
 // l loads levels l, l+32, ... (a column's consecutive words, so the loads
@@ -254,13 +263,13 @@ extern "C" __global__ void ocn_btr_transport_v842(
     for (int k0 = 0; k0 < nl && (k0 == 0 || k0 < top); k0 += lanes) {
         const int k = k0 + lane;
         rk h = C(0.0), term = C(0.0);
-        if (k < nl) {
+        if (k < nl && (k == 0 || k < top)) {
             h = layerThicknessEdge[b + k];
             term = M(layerThicknessEdge[b + k], A(A(btrNew[e], bclNew[b + k]), bolus[b + k]));
         }
-        for (int j = 0; j < lanes && k0 + j < nl; ++j) {
-            const rk hj = lanes == 1 ? h : __shfl_sync(0xffffffffu, h, j);
-            const rk tj = lanes == 1 ? term : __shfl_sync(0xffffffffu, term, j);
+        for (int j = 0; j < lanes && k0 + j < nl && (k0 + j == 0 || k0 + j < top); ++j) {
+            const rk hj = lanes == 1 ? h : BT_LANE_WORD(h, j);
+            const rk tj = lanes == 1 ? term : BT_LANE_WORD(term, j);
             if (k0 + j == 0) {
                 fluxSum = tj;
                 thicknessSum = hj;

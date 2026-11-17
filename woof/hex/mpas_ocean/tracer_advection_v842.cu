@@ -271,9 +271,8 @@ __device__ __forceinline__ rk adv_vflux2(const rk *cur, const rk *hp, const rk *
     return M(ww[kk], A(M(weightK, cur[kk]), M(weightKm1, cur[kk - 1])));
 }
 
-// a column as the Fortran's loops walk it, on one thread: every column with
-// columns != 0, else one with maxLevelCell < 2 (its last layer's block reads
-// the layer above the column, as v8.4.2 does)
+// a column as the Fortran's loops walk it, on one thread (columns != 0);
+// tracer_advection_tend refuses columns with maxLevelCell < 2 before launch
 __device__ void adv_vflux_column(
     int iCell, rk *highOrderFlux, rk *workTend, rk *tracerMin, rk *tracerMax, rk *fluxIncoming, rk *fluxOutgoing,
     const rk *tracerCur, const rk *hProv, const rk *w, const int *maxLevelCell, int nl, int vertOrder, rk coef3rd)
@@ -288,9 +287,7 @@ __device__ void adv_vflux_column(
     if (k < 1) k = 1;
     if (k >= 2) {
         const int kk = k - 1;   // 0-based level k
-        const rk sum = A(hp[kk], hp[kk - 1]);
-        const rk weightK = D(hp[kk - 1], sum), weightKm1 = D(hp[kk], sum);
-        hof[kk] = M(ww[kk], A(M(weightK, cur[kk]), M(weightKm1, cur[kk - 1])));
+        hof[kk] = adv_vflux2(cur, hp, ww, kk);
         tmax[kk] = fmaxw(fmaxw(cur[kk - 1], cur[kk]), cur[kk + 1]);
         tmin[kk] = fminw(fminw(cur[kk - 1], cur[kk]), cur[kk + 1]);
     }
@@ -301,18 +298,14 @@ __device__ void adv_vflux_column(
         } else if (vertOrder == 3) {
             hof[kk] = vflux3(cur[kk - 2], cur[kk - 1], cur[kk], cur[kk + 1], ww[kk], coef3rd);
         } else {
-            const rk sum = A(hp[kk], hp[kk - 1]);
-            const rk weightK = D(hp[kk - 1], sum), weightKm1 = D(hp[kk], sum);
-            hof[kk] = M(ww[kk], A(M(weightK, cur[kk]), M(weightKm1, cur[kk - 1])));
+            hof[kk] = adv_vflux2(cur, hp, ww, kk);
         }
         tmax[kk] = fmaxw(fmaxw(cur[kk - 1], cur[kk]), cur[kk + 1]);
         tmin[kk] = fminw(fminw(cur[kk - 1], cur[kk]), cur[kk + 1]);
     }
     {
         const int kk = top - 1;   // k = max(1, maxLevelCell) >= 2 here
-        const rk sum = A(hp[kk], hp[kk - 1]);
-        const rk weightK = D(hp[kk - 1], sum), weightKm1 = D(hp[kk], sum);
-        hof[kk] = M(ww[kk], A(M(weightK, cur[kk]), M(weightKm1, cur[kk - 1])));
+        hof[kk] = adv_vflux2(cur, hp, ww, kk);
         tmax[kk] = fmaxw(cur[kk], cur[kk - 1]);
         tmin[kk] = fminw(cur[kk], cur[kk - 1]);
     }
@@ -337,8 +330,7 @@ __device__ void adv_vflux_column(
 // level forms its own final words in their order. Layer 1's flux and the
 // bottom layer's are second order; the bottom layer's extrema are over two
 // layers; workTend(k) loses layer k's upwind flux, then gains layer k+1's.
-// A column with maxLevelCell < 2 runs the Fortran's loops on one thread.
-// With columns != 0 (Metal's default), a thread per cell runs every column's
+// (Columns with maxLevelCell < 2 are refused before launch.) With columns != 0 (Metal's default), a thread per cell runs every column's
 // loops, the antidiffusive fluxes in and out included, so the same words.
 extern "C" __global__ void ocn_adv_mono_vertical_flux_v842(
     rk *highOrderFlux, rk *workTend, rk *tracerMin, rk *tracerMax, rk *fluxIncoming, rk *fluxOutgoing,
@@ -355,12 +347,6 @@ extern "C" __global__ void ocn_adv_mono_vertical_flux_v842(
     if (t >= nCells * nl) return;
     const int iCell = t / nl, kk = t % nl;
     const int top = maxLevelCell[iCell], np1 = nl + 1;
-    if (top < 2) {
-        if (kk == 0)
-            adv_vflux_column(iCell, highOrderFlux, workTend, tracerMin, tracerMax, fluxIncoming, fluxOutgoing,
-                             tracerCur, hProv, w, maxLevelCell, nl, vertOrder, coef3rd);
-        return;
-    }
     if (kk >= top) return;
     const rk *cur = tracerCur + iCell * nl, *hp = hProv + iCell * nl, *ww = w + iCell * np1;
     rk *hof = highOrderFlux + iCell * np1, *work = workTend + iCell * nl;
