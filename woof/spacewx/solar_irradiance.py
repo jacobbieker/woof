@@ -56,10 +56,14 @@ def cache_root() -> Path:
     return Path(explicit).expanduser() if explicit else Path.home() / ".woof" / "spacewx"
 
 
-def _naive_utc(value: datetime) -> datetime:
+def naive_utc(value: datetime) -> datetime:
+    """``value`` as a naive UTC datetime: an aware one is converted, not relabelled."""
     if value.tzinfo is not None:
         value = value.astimezone(timezone.utc).replace(tzinfo=None)
     return value
+
+
+_naive_utc = naive_utc
 
 
 @dataclass(frozen=True)
@@ -170,7 +174,8 @@ def fetch_nrlssi2(years, *, cache=None, opener=None) -> list[Path]:
 
     The CDR republishes a year's file with a new creation stamp (``_cYYYYMMDD``);
     the newest listed one is taken and its SHA-256 goes into the run's receipt
-    through :class:`TsiSeries`.  NOAA CDR data are open (cite Coddington et al.
+    through :class:`TsiSeries` (printed by the driver as the
+    ``[spacewx tsi]`` start-up line).  NOAA CDR data are open (cite Coddington et al.
     2016, BAMS 97, and the CDR DOI 10.7289/V56W985W)."""
     import urllib.request
     opener = opener or (lambda url: urllib.request.urlopen(url, timeout=120))
@@ -192,9 +197,29 @@ def fetch_nrlssi2(years, *, cache=None, opener=None) -> list[Path]:
                 f"no complete NOAA CDR TSI file for {year} at {NRLSSI2_INDEX_URL} (the CDR lags by a few "
                 "months); give solar_tsi_source a CSV or netCDF that covers the run")
         target = root / names[-1]
-        part = target.with_suffix(".part")
-        with opener(NRLSSI2_INDEX_URL + names[-1]) as reply, part.open("wb") as stream:
-            stream.write(reply.read())
+        from woof.spacewx.assets import unique_part
+        part = unique_part(target)
+        try:
+            with opener(NRLSSI2_INDEX_URL + names[-1]) as reply, part.open("wb") as stream:
+                stream.write(reply.read())
+        except BaseException:
+            part.unlink(missing_ok=True)
+            raise
+        from woof.netcdf_bridge import NetcdfBridgeMissing
+        try:
+            # A truncated or wrong download must not be installed: it must read
+            # as a TSI series (decodes, finite, ascending, in W m-2) first.
+            TsiSeries(*_read_netcdf(part), str(part), "")
+        except NetcdfBridgeMissing:
+            part.unlink(missing_ok=True)      # the reader is missing, not the file bad
+            raise
+        except Exception as exc:
+            part.unlink(missing_ok=True)
+            raise SolarForcingError(f"{NRLSSI2_INDEX_URL}{names[-1]}: the download does not read "
+                                    f"as a NOAA CDR TSI file ({exc}); try again") from exc
+        except BaseException:
+            part.unlink(missing_ok=True)
+            raise
         part.replace(target)
         out.append(target)
     return out
@@ -207,7 +232,9 @@ def load_series(source: str, start: datetime, end: datetime) -> TsiSeries:
         raise SolarForcingError("solar_tsi_opt=1 needs solar_tsi_source: a TSI CSV/netCDF path or 'nrlssi2'")
     if text == "nrlssi2":
         start, end = _naive_utc(start), _naive_utc(end)
-        years = range((start - timedelta(days=1)).year, (end + timedelta(days=1)).year + 1)
+        # Daily means sit at noon: a time is covered by the days within half a
+        # day of it, so only those days' years are needed.
+        years = range((start - timedelta(hours=12)).year, (end + timedelta(hours=12)).year + 1)
         return read_series(fetch_nrlssi2(years))
     return read_series([p for p in text.split(os.pathsep) if p])
 
@@ -274,6 +301,18 @@ class SolarVariability:
             if mapping:
                 setattr(result, attr, {k: (mul(v) if self.is_shortwave(k) else v) for k, v in mapping.items()})
         return result
+
+    #: Shortwave outputs a scheme writes straight into the driver's fields
+    #: rather than returning on RadiationResult, by ra_sw_physics.
+    DIRECT_SW_FIELDS = {2: ("rswtoa",), 99: ("rswtoa", "swdownc")}
+
+    def scale_direct_fields(self, fields, ra_sw_physics: int) -> None:
+        """Scale, in place and by the factor :meth:`scale` just applied, the
+        shortwave outputs the scheme ``ra_sw_physics`` wrote into ``fields``."""
+        f = np.float32(self.last_factor)
+        for name in self.DIRECT_SW_FIELDS.get(int(ra_sw_physics), ()):
+            if name in fields:
+                fields[name] *= f
 
     def receipt(self) -> dict:
         return {"solar_tsi_source": self.series.source, "solar_tsi_sha256": self.series.sha256,
