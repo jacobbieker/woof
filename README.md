@@ -309,7 +309,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     needs an opt-in. The elastic subcycles check their arrays once per
     solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take 34 instead of 41 ms a step on
-    an M3 Max, with the same words;
+    an M3 Max, with the same words. Each subcycle computes the ocean
+    stress coefficient and solves the velocity in one launch (a vertex's
+    solve reads only its own coefficient), so the step launches 120 fewer
+    kernels: about 30 instead of 33 ms on an M3 Max, the same words;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
