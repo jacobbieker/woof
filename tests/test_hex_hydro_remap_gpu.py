@@ -1,4 +1,4 @@
-"""The hex cell <-> LSM grid exchange on the device (woof.hex.hydro_remap_gpu), the opt-in route.
+"""The hex cell <-> LSM grid exchange on the device (woof.hex.hydro_remap_gpu), the default route on a GPU.
 
 The device operator keeps the overlap weights resident as CSR in both directions and sums each output in the
 host scipy's order with the host's own contraction (hydro_remap_gpu.host_fuses), so its words are the host
@@ -8,7 +8,13 @@ grid), with WRF-like soil and runoff values:
 * the forward mean, the increment return, the back-map and the category majority are the host's, byte for
   byte (0 ULP), under strict numerics and, in a child process, fast numerics;
 * conservation: sum_c A_c q_c = sum_g A_g q_g for a returned field, to 1e-13 relative (binary64 rounding of
-  the two area-weighted sums).
+  the two area-weighted sums);
+* the coupled seam (with the WRF-Hydro opt-in) attached by default runs on the device and gives the host
+  route's soil, head and routing state byte for byte over four cycles, and its device-side budget closes as
+  the host's does; run this file with GPUWM_NUMERICS=fast for the fast words;
+* the switch: on unless turned off (``--no-wrf-hydro-gpu-exchange``, ``[wrf_hydro] gpu_exchange = false``,
+  ``WOOF_WRF_HYDRO_GPU_EXCHANGE=0``), refused without ``--wrf-hydro``; with no GPU backend, or a host
+  scipy that mixes loops, the host route runs and the log says why.
 """
 from __future__ import annotations
 
@@ -22,7 +28,10 @@ import numpy as np
 import pytest
 from scipy.spatial import SphericalVoronoi
 
+from woof import optin
+
 RADIUS = 6371229.0
+REASON = optin.unavailable_reason("wrf_hydro")
 
 
 def _mesh(refined: bool, n=20000, seed=4):
@@ -180,3 +189,159 @@ def test_mismatched_arguments_are_refused():
         dev.dominant(cp.zeros(nc + 1, cp.int32))
     with pytest.raises(ValueError, match="integer"):
         dev.dominant(cp.zeros(nc, cp.float32))
+
+
+# -- the switch ---------------------------------------------------------------------------------------------
+@pytest.fixture
+def clean_env(monkeypatch):
+    from woof import wrf_hydro_route as route
+    for key in (route.ENV_NAMELIST, route.ENV_OUTPUT, route.ENV_GPU_EXCHANGE):
+        monkeypatch.delenv(key, raising=False)
+    return route
+
+
+def test_the_gpu_exchange_is_on_unless_turned_off(clean_env, tmp_path, monkeypatch):
+    route = clean_env
+    assert route.gpu_exchange() is True
+    with route.launch_scope(namelist=tmp_path / "hydro.namelist"):
+        assert route.configured() and route.gpu_exchange() is True
+    with route.launch_scope(namelist=tmp_path / "hydro.namelist", gpu_exchange=False):
+        assert route.gpu_exchange() is False
+    assert route.gpu_exchange() is True and route.configured() is None
+    toml = tmp_path / "case.toml"
+    toml.write_text('[wrf_hydro]\nnamelist = "hydro.namelist"\ngpu_exchange = false\n')
+    with route.launch_scope(config=toml):
+        assert route.gpu_exchange() is False
+    with route.launch_scope(config=toml, gpu_exchange=True):          # the flag overrides the table
+        assert route.gpu_exchange() is True
+    assert route.gpu_exchange() is True
+    for off in ("0", "false", "OFF", "no"):
+        monkeypatch.setenv(route.ENV_GPU_EXCHANGE, off)
+        assert route.gpu_exchange() is False
+    monkeypatch.setenv(route.ENV_GPU_EXCHANGE, "maybe")
+    with pytest.raises(ValueError, match="use 1 or 0"):
+        route.gpu_exchange()
+    monkeypatch.delenv(route.ENV_GPU_EXCHANGE)
+    for asked in (True, False):
+        with pytest.raises(ValueError, match="without --wrf-hydro"):
+            with route.launch_scope(gpu_exchange=asked):
+                pass
+    toml.write_text('[wrf_hydro]\nnamelist = "hydro.namelist"\ngpu_exchange = "yes"\n')
+    with pytest.raises(ValueError, match="true or false"):
+        route.read_table(toml)
+
+
+def test_hex_forecast_hands_the_switch_to_the_launch(monkeypatch):
+    import argparse
+    import contextlib
+
+    from woof import wrf_hydro_route
+    from woof.hex import forecast_door
+    seen = {}
+
+    @contextlib.contextmanager
+    def scope(*args, **kw):
+        seen.update(kw)
+        yield
+    monkeypatch.setattr(wrf_hydro_route, "launch_scope", scope)
+    monkeypatch.setattr(forecast_door, "_run_forecast_with_outputs", lambda arguments: 0)
+    forecast_door.run_forecast(argparse.Namespace(wrf_hydro="hydro.namelist", wrf_hydro_gpu_exchange=False))
+    assert seen == {"gpu_exchange": False}
+
+
+def test_the_cli_flag_reaches_the_launch():
+    import argparse
+
+    from woof.wrf_hydro_route import add_arguments
+    parser = argparse.ArgumentParser()
+    add_arguments(parser)
+    assert parser.parse_args([]).wrf_hydro_gpu_exchange is None
+    assert parser.parse_args(["--wrf-hydro-gpu-exchange"]).wrf_hydro_gpu_exchange is True
+    assert parser.parse_args(["--no-wrf-hydro-gpu-exchange"]).wrf_hydro_gpu_exchange is False
+
+
+def test_the_host_route_runs_and_says_why_without_a_device(monkeypatch, caplog):
+    from woof import backend
+    from woof.hex import hydro_remap_gpu, wrf_hydro_hex
+    exchange, _ = _exchange(False)
+    assert wrf_hydro_hex._device_exchange(exchange, False) == (None, wrf_hydro_hex.SWITCHED_OFF)
+    for name in ("cpu", "host", "hip", "hip-nvidia"):
+        monkeypatch.setattr(backend, "active", lambda name=name: name)
+        device, reason = wrf_hydro_hex._device_exchange(exchange, True)
+        assert device is None and name in reason
+    monkeypatch.setattr(backend, "active", lambda: "cuda")
+    strided = np.zeros((4, 1, 8), np.float32)[..., ::2]
+    device, reason = wrf_hydro_hex._device_exchange(exchange, True, {"smois": strided})
+    assert device is None and "contiguous float32" in reason
+
+    def mixed(*_):
+        raise RuntimeError("this scipy mixes fused and plain loops")
+    monkeypatch.setattr(hydro_remap_gpu.DeviceExchange, "__init__", mixed)
+    device, reason = wrf_hydro_hex._device_exchange(exchange, True)
+    assert device is None and "mixes" in reason
+
+    def compile_error(*_):
+        raise ValueError("the overlap holds 2**31 entries")
+    monkeypatch.setattr(hydro_remap_gpu.DeviceExchange, "__init__", compile_error)
+    device, reason = wrf_hydro_hex._device_exchange(exchange, True)
+    assert device is None and reason.startswith("ValueError")
+
+
+# -- the coupled seam (WRF-Hydro opt-in) -------------------------------------------------------------------
+@pytest.mark.skipif(REASON is not None, reason=f"opt-in rule: {REASON}")
+def test_the_default_seam_is_the_host_seam(tmp_path):
+    cp = pytest.importorskip("cupy")
+    import datetime
+
+    import test_hex_wrf_hydro_gpu as h
+    from woof import backend
+    from woof.hex.hydro_remap import mesh_cells
+    from woof.hex.wrf_hydro_hex import DEVICE_BACKENDS, attach
+    if backend.active() not in DEVICE_BACKENDS:
+        pytest.skip(f"no GPU backend ({backend.active()})")
+    namelist = h._domain(tmp_path / "dom")
+    cells = mesh_cells(mesh := h._hex_mesh())
+    nc = len(cells.area)
+    water = np.degrees(mesh.arrays["lonCell"]) > h.LON0 + h.DLON * (h.NX - 1.5)
+    start = datetime.datetime(2020, 1, 1)
+
+    def seam(tag, **kw):
+        fields = {"smois": cp.zeros((4, 1, nc), cp.float32), "sh2o": cp.zeros((4, 1, nc), cp.float32),
+                  "ivgtyp": cp.asarray(np.where(water, 17, 10).reshape(1, nc), dtype=cp.int32),
+                  "isltyp": cp.asarray(np.where(water, 14, 6).reshape(1, nc), dtype=cp.int32)}
+        driver = SimpleNamespace(fields=fields, bldt_seconds=60.0)
+        return attach(driver, cells, namelist=namelist, start_time=start, dzs=h.DZS, lsm=2,
+                      output_dir=str(tmp_path / tag), **kw), driver
+
+    (host, hd), (dev, dd) = seam("host", gpu_exchange=False), seam("dev")
+    assert host.device is None and dev.device is not None
+    dev.PENDING = 3                     # the fourth cycle's row waits on the device, the first three are folded
+    rng = np.random.default_rng(3)
+    f32 = np.float32
+    for cycle in range(4):
+        smois = rng.uniform(0.2, 0.4, (4, 1, nc)).astype(f32)
+        infx, sold = rng.uniform(0.0, 6.0, (1, nc)).astype(f32), rng.uniform(0.0, 0.2, (1, nc)).astype(f32)
+        for s, d in ((host, hd), (dev, dd)):
+            d.fields["smois"][...] = cp.asarray(smois)
+            d.fields["sh2o"][...] = cp.asarray((smois * f32(0.9)).astype(f32))
+            s.planes["infxsrt"][...] = cp.asarray(infx)
+            s.planes["soldrain"][...] = cp.asarray(sold)
+            s.exchange(d.fields)
+        for name in ("smois", "sh2o"):
+            assert cp.asnumpy(hd.fields[name]).tobytes() == cp.asnumpy(dd.fields[name]).tobytes(), (cycle, name)
+        got, want = dev.digest_arrays(), host.digest_arrays()
+        assert set(got) == set(want)
+        for name in want:
+            assert cp.asnumpy(got[name]).tobytes() == cp.asnumpy(want[name]).tobytes(), (cycle, name)
+    assert len(dev.budget) == len(host.budget) == 4
+    for b, ref in zip(dev.budget, host.budget):
+        total = b["soil_water_cells_m3"]
+        assert abs(b["soil_change_cells_exact_m3"] - b["soil_change_grid_m3"]) <= 1e-12 * total
+        assert abs(b["runoff_cells_m3"] - b["runoff_grid_exact_m3"]) <= 1e-12 * b["runoff_cells_m3"]
+        assert abs(b["head_cells_m3"] - b["head_grid_m3"]) <= 1e-12 * max(abs(b["head_grid_m3"]), 1e-9)
+        for key, value in ref.items():
+            assert abs(b[key] - value) <= 1e-12 * max(abs(value), total), key
+    assert dev.receipt()["exchange_route"]["device"] is True
+    from woof.hex.wrf_hydro_hex import SWITCHED_OFF
+    assert host.receipt()["exchange_route"] == {"device": False, "reason": SWITCHED_OFF}
+    assert any(b["head_grid_m3"] > 0.0 for b in dev.budget) and abs(dev.budget[-1]["soil_change_grid_m3"]) > 0
