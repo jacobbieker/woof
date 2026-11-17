@@ -35,6 +35,7 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
+import time
 
 import numpy as np
 
@@ -49,6 +50,10 @@ SWPC_WIND_URL = "https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json"
 #: bias -0.16; for observed Kp >= 5 the RMSE is 1.43 and the bias -0.70.
 #: The fit script is described in docs/spacewx.md.
 KP_FIT = {"a": -1.0892145, "b": 2.7694599, "p": 0.6, "c": 35.518510}
+
+
+#: A cached OMNI2 year file younger than this is not fetched again.
+OMNI_REFETCH_SECONDS = 6 * 3600
 
 
 class SolarWindError(ValueError):
@@ -75,6 +80,10 @@ class SolarWind:
                 f"{when}: outside the solar-wind record {self.hours[0]}..{self.hours[-1]} ({self.source})")
         return i
 
+    def al_at(self, when: datetime) -> float:
+        """The hour's observed AL (nT; NaN where the source has none)."""
+        return float(self.al[self._index(when)])
+
     def hourly(self, when: datetime) -> dict:
         i = self._index(when)
         return {"by": float(self.by[i]), "bz": float(self.bz[i]),
@@ -84,12 +93,9 @@ class SolarWind:
         """The fitted Kp of the 3-hour UT interval containing ``when``."""
         start = _naive_utc(when).replace(minute=0, second=0, microsecond=0)
         start -= timedelta(hours=start.hour % 3)
-        rows = [self._index(start + timedelta(hours=k)) for k in (-1, 0, 1)
-                if 0 <= int((np.datetime64(start + timedelta(hours=k), "h") - self.hours[0]).astype(int))
-                < self.hours.size]
-        if not rows:
-            raise SolarWindError(f"{when}: no solar-wind hours around the Kp interval ({self.source})")
-        sel = np.asarray(rows)
+        # The fit was made on these three hours: all must lie in the record
+        # (fill values inside it are averaged over, as in the fit).
+        sel = np.asarray([self._index(start + timedelta(hours=k)) for k in (-1, 0, 1)])
         x = np.nanmean(newell_coupling(self.speed[sel], self.by[sel], self.bz[sel])) if np.any(
             np.isfinite(self.speed[sel] + self.by[sel] + self.bz[sel])) else np.nan
         w = np.nanmean(np.sqrt(self.density[sel]) * self.speed[sel] ** 2) if np.any(
@@ -187,14 +193,26 @@ def fetch_omni2(start: datetime, end: datetime, *, cache=None, opener=None) -> l
     import urllib.request
     opener = opener or (lambda url: urllib.request.urlopen(url, timeout=120))
     out = []
+    start, end = _naive_utc(start), _naive_utc(end)
     for year in range(start.year, end.year + 1):
         target = root / f"omni2_{year}.dat"
         if target.is_file():
-            cached = read_omni2(target)
-            if cached.hours[-1] >= np.datetime64(min(end, datetime(year, 12, 31, 23)), "h") and np.any(
-                    np.isfinite(cached.speed[-24:])):
-                out.append(target)
-                continue
+            try:
+                cached = read_omni2(target)
+            except SolarWindError:
+                cached = None                      # a damaged cache file is fetched again
+            if cached is not None:
+                last = np.datetime64(min(end, datetime(year, 12, 31, 23)), "h")
+                # Covered: the file reaches the window's end with data in its
+                # last day (a file padded with fill rows is not covered).
+                tail = (cached.hours > last - np.timedelta64(24, "h")) & (cached.hours <= last)
+                covered = cached.hours[-1] >= last and bool(np.any(np.isfinite(cached.speed[tail])))
+                # OMNI2 lags by weeks: a file fetched within the last 6 hours
+                # is as new as the server's, so it is not fetched again.
+                fresh = time.time() - target.stat().st_mtime < OMNI_REFETCH_SECONDS
+                if covered or fresh:
+                    out.append(target)
+                    continue
         part = target.with_name(target.name + ".part")
         with opener(OMNI_URL.format(year=year)) as reply:
             part.write_bytes(reply.read())

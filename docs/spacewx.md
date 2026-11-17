@@ -163,17 +163,25 @@ fields and a JSON receipt.
   degrees in some sectors; that is this layer's main approximation.
 - **Activity, three ways.**
   - `--kp` (fixed) or `--indices gfz` (observed Kp, GFZ, CC BY 4.0), converted
-    with Starkov's `|AL| = 18 - 12.3 Kp + 27.2 Kp^2 - 2 Kp^3` nT.
+    with Starkov's `|AL| = 18 - 12.3 Kp + 27.2 Kp^2 - 2 Kp^3` nT. GFZ adds
+    each day's Kp through the day, so the cached file is fetched again when it
+    lacks the interval asked for. The cubic peaks near Kp 8.8 (about 653 nT).
   - `--solar-wind omni|swpc|FILE[:FILE]`: Kp estimated from the solar wind.
     `omni` fetches NASA SPDF's hourly OMNI2 years; `swpc` reads NOAA SWPC's
     real-time L1 feed (the active spacecraft only, 1-minute data averaged to
     hourly means with at least 10 minutes each). Each line also prints the
-    Newell et al. 2007 coupling and the Boyle et al. 1997 polar cap potential.
-  - `--solar-wind omni --observed-al` drives the oval with OMNI2's observed AL.
+    Newell et al. 2007 coupling and the Boyle et al. 1997 polar cap potential
+    (`null` in the JSON receipt for an hour of fill values). A cached OMNI2
+    year is fetched again when it does not reach the window or is damaged,
+    but not within 6 hours of the last fetch, since OMNI2 lags by weeks.
+  - `--solar-wind omni --observed-al` drives the oval with OMNI2's observed AL;
+    the Kp estimate is then informational and may be missing. SWPC carries no
+    AL, so `swpc` with `--observed-al` is refused.
 - **Kp from the solar wind** (`woof.spacewx.solarwind.KP_FIT`). Fitted here on
   OMNI2 against GFZ Kp, since published Kp regressions are not all
   reproducible from their papers. Each 3-hour Kp interval starting at T is
-  regressed on the mean of the hourly values stamped T-1, T and T+1:
+  regressed on the mean of the hourly values stamped T-1, T and T+1 (all three
+  must lie in the record read):
   `Kp = a + b (1e-4 dPhi/dt)^0.6 + c (1e-7 sqrt(n) v^2)`, clipped to 0-9, where
   dPhi/dt is Newell's coupling and the second term is a viscous one. Trained
   on 2012-2021 (29,019 intervals), tested on 2022-2024 (8,658): RMSE 0.73,

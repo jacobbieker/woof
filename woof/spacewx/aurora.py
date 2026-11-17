@@ -61,7 +61,9 @@ STARKOV = {
 }
 OUTPUTS = ("mlat", "mlt", "zone", "eq_dist")
 ZONES = {0: "equatorward of the diffuse aurora", 1: "diffuse aurora", 2: "auroral oval", 3: "polar cap"}
-#: Starkov's fit covers |AL| from about 10 to 2000 nT (Kp 0 to 9 gives 18-1077 nT).
+#: Starkov's fit covers |AL| from about 10 to 2000 nT.  Kp 0 to 9 gives 18 to
+#: about 653 nT through :func:`kp_to_al`, whose cubic peaks near Kp 8.83 and
+#: falls 0.1 % by Kp 9 (Kp 9 is then a hair smaller oval than Kp 8.67).
 AL_RANGE = (10.0, 2000.0)
 
 
