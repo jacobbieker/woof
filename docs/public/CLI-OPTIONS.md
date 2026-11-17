@@ -174,7 +174,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--no-gem15` | do not read GEM-15: heights then come from the footprints' own attributes or storeys only |
 | `--offline` | read GEM-15 from the cache only |
 | `--output NC` | buildings product to write (NetCDF); name it in [[domain]] obstacle_file |
-| `--resolution M` | footprint lattice spacing in metres (default: a quarter of the grid spacing) |
+| `--resolution M` | footprint lattice spacing in metres (default: a quarter of the grid spacing, at most 5) |
 | `--storey-height M` | metres per storey for footprints with only a storey count (default 3) |
 
 ## `woof case-catalog`

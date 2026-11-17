@@ -107,19 +107,24 @@ and writes its product. `--footprints PATH[:SOURCE]` names a footprint file
 and its source (`osm`, `overture`, `microsoft`, `google-open-buildings`, or
 `user`); repeat it for more files. The footprints are read over the domain
 plus a two-cell halo and burned on one UTM lattice at a quarter of the grid
-spacing (`--resolution`). GEM-15 is range-read under the same box into the
-high-resolution terrain cache (`--cache`, `--offline`):
+spacing, but no coarser than 5 m (`--resolution`). A lattice of more than
+150 million pixels is refused; pass a coarser `--resolution` for a large
+domain, knowing that footprints much smaller than a pixel are lost or grown
+to it. GEM-15 is range-read under the same box into the high-resolution
+terrain cache (`--cache`, `--offline`):
 
 - with footprints, GEM-15 only supplies the nDSM median for footprints that
   have no `height` attribute; only footprints become buildings, so trees
   and bridges in the nDSM do not;
 - without footprints, the filtered nDSM is the product (objects under
-  `--min-area`, 200 m2 by default, are dropped);
+  `--min-area`, 200 m2 by default, are dropped); GEM-15 cells on either side
+  of a UTM zone edge are resampled onto one 15 m lattice;
 - `--no-gem15` uses the footprints' own heights and storeys only.
 
 The receipt is printed and stored in the product. It gives the box, the
 GEM-15 windows, and for each footprint file where every height came from
-(attribute, GEM-15 median, storeys, default, or dropped).
+(attribute, GEM-15 median, storeys, default, or dropped). GEM-15 is named
+as a source only when a building whose height it gave shows in the domain.
 
 ## Resolved obstacles in the model (`obstacle_opt = 1`)
 

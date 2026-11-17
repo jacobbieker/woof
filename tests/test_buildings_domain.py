@@ -109,7 +109,8 @@ def test_cli_footprints_only(tmp_path, capsys):
     burn = receipt["footprint_files"][0]
     assert burn["source"] == "osm" and burn["file"] == "fp.geojson"
     assert burn["height_from"]["attribute"] == 1
-    assert burn["height_from"]["gem15_ndsm_median"] == 0
+    assert burn["height_from"]["ndsm_median"] == 0
+    assert receipt["footprint_resolution_m"] == 5.0
 
 
 def test_cli_picks_the_innermost_domain_and_refuses_a_missing_one(
@@ -139,35 +140,40 @@ class _Fetched:
         return {"path": self.path.name}
 
 
-def _gem15_windows(tmp_path, monkeypatch, grid, *, raise_m=25.0):
-    """Synthetic GEM-15 dsm/dtm windows over the domain with a raised
-    patch 120 m square at mass point (20, 20); fetch_gem15_windows is
-    replaced so nothing touches the network."""
+def _gem15_windows(tmp_path, monkeypatch, grid, *, raise_m=25.0,
+                   zones=("EPSG:32614",)):
+    """Synthetic GEM-15 dsm/dtm windows over the domain, one per CRS in
+    ``zones``, the first with a raised patch 120 m square at mass point
+    (20, 20) and the others open ground; fetch_gem15_windows is replaced
+    so nothing touches the network."""
     rasterio = pytest.importorskip("rasterio")
     from pyproj import Transformer
     from rasterio.transform import from_origin
-    crs = "EPSG:32614"
     lat, lon = grid.ij_to_latlon(np.array([20.0]), np.array([20.0]))
-    x, y = Transformer.from_crs("EPSG:4326", crs, always_xy=True).transform(
-        float(np.ravel(lon)[0]), float(np.ravel(lat)[0]))
     n, px = 240, 15.0
-    x0, y0 = x - n * px / 2, y + n * px / 2
-    dtm = np.full((n, n), 400.0, np.float32)
-    dsm = dtm.copy()
-    dsm[116:124, 116:124] += raise_m          # 120 m x 120 m at the centre
-    paths = {}
-    for name, data in (("dsm", dsm), ("dtm", dtm)):
-        path = tmp_path / f"gem-{name}.tif"
-        with rasterio.open(path, "w", driver="GTiff", height=n, width=n,
-                           count=1, dtype="float32", crs=crs,
-                           transform=from_origin(x0, y0, px, px)) as dst:
-            dst.write(data, 1)
-        paths[f"gem15-{name}"] = path
+    paths = {"gem15-dsm": [], "gem15-dtm": []}
+    for z, crs in enumerate(zones):
+        x, y = Transformer.from_crs("EPSG:4326", crs,
+                                    always_xy=True).transform(
+            float(np.ravel(lon)[0]), float(np.ravel(lat)[0]))
+        x0, y0 = x - n * px / 2, y + n * px / 2
+        dtm = np.full((n, n), 400.0, np.float32)
+        dsm = dtm.copy()
+        if z == 0:
+            dsm[116:124, 116:124] += raise_m   # 120 m x 120 m at the centre
+        for name, data in (("dsm", dsm), ("dtm", dtm)):
+            path = tmp_path / f"gem-{z}-{name}.tif"
+            with rasterio.open(path, "w", driver="GTiff", height=n, width=n,
+                               count=1, dtype="float32", crs=crs,
+                               transform=from_origin(x0, y0, px,
+                                                     px)) as dst:
+                dst.write(data, 1)
+            paths[f"gem15-{name}"].append(path)
     calls = []
 
     def fake(bbox, root, source_id, **kw):
         calls.append((source_id, kw.get("offline")))
-        return (_Fetched(paths[source_id]),), {}
+        return tuple(_Fetched(p) for p in paths[source_id]), {}
 
     from woof.static import gem15
     monkeypatch.setattr(gem15, "fetch_gem15_windows", fake)
@@ -188,8 +194,9 @@ def test_gem15_supplies_missing_footprint_heights(tmp_path, monkeypatch):
     assert set(heights.tolist()) == {7, 25}
     assert morph.sources == ("gem15-ndsm", "osm")
     burn = receipt["footprint_files"][0]
-    assert burn["height_from"]["gem15_ndsm_median"] == 1
+    assert burn["height_from"]["ndsm_median"] == 1
     assert burn["height_from"]["attribute"] == 1
+    assert burn["sources"] == ["gem15-ndsm", "osm"]
     # Only footprints are burned: the nDSM patch around the footprint
     # (120 m against the footprint's 100 m) adds no area.
     assert _built_area(morph) == pytest.approx(1.0e4 + 1.6e3, rel=0.03)
@@ -221,3 +228,96 @@ def test_nothing_to_build_from(tmp_path):
     with pytest.raises(ValueError, match="nothing to build from"):
         bd.build_domain_buildings(_grid(tmp_path), tmp_path / "x.nc",
                                   gem15=False)
+
+
+def test_gem15_height_of_an_unseen_footprint_is_not_credited(
+        tmp_path, monkeypatch):
+    """A footprint whose nDSM height is hidden under a taller building
+    leaves GEM-15 out of the product's sources."""
+    grid = _grid(tmp_path)
+    _gem15_windows(tmp_path, monkeypatch, grid)
+    fp = _geojson(tmp_path, [_square(grid, 20, 20, 30.0),
+                             _square(grid, 20, 20, 50.0, height=60.0)])
+    path, receipt = bd.build_domain_buildings(
+        grid, tmp_path / "bld.nc", footprints=[(fp, "osm")],
+        cache_root=tmp_path / "cache")
+    burn = receipt["footprint_files"][0]
+    assert burn["height_from"]["ndsm_median"] == 1
+    assert burn["sources"] == ["osm"]
+    assert b.read_product(path).sources == ("osm",)
+
+
+def test_gem15_alone_across_a_utm_zone_edge(tmp_path, monkeypatch):
+    """Windows of two UTM zones overlap on different lattices: they are
+    resampled onto one, the taller value winning, instead of refused."""
+    grid = _grid(tmp_path)
+    _gem15_windows(tmp_path, monkeypatch, grid,
+                   zones=("EPSG:32614", "EPSG:32613"))
+    path, receipt = bd.build_domain_buildings(
+        grid, tmp_path / "bld.nc", cache_root=tmp_path / "cache")
+    morph = b.read_product(path)
+    assert _built_area(morph) == pytest.approx(120.0 * 120.0, rel=0.1)
+    assert np.nanmax(morph.mean_height) == pytest.approx(25.0)
+    assert len(receipt["gem15"]["ndsm"]) == 2
+
+
+def test_default_resolution_is_capped():
+    assert bd._default_resolution(50.0, 50.0) == 5.0
+    assert bd._default_resolution(12.0, 16.0) == 3.0
+    assert bd._default_resolution(2.0, 2.0) == 1.0
+
+
+def test_lattice_budget_refuses(tmp_path, monkeypatch):
+    grid = _grid(tmp_path)
+    fp = _geojson(tmp_path, [_square(grid, 20, 20, 50.0, height=10.0)])
+    monkeypatch.setattr(bd, "MAX_LATTICE_PIXELS", 1000)
+    with pytest.raises(ValueError, match="coarser --resolution"):
+        bd.build_domain_buildings(grid, tmp_path / "bld.nc",
+                                  footprints=[(fp, "osm")], gem15=False)
+
+
+def test_cli_refusals(tmp_path, capsys):
+    pytest.importorskip("rasterio")
+    from woof.cli import main
+    grid = _grid(tmp_path)
+    nl = str(tmp_path / "namelist.wps")
+    out = str(tmp_path / "bld.nc")
+    fp = _geojson(tmp_path, [_square(grid, 20, 20, 50.0)])
+    cases = [
+        (["--namelist", str(tmp_path / "missing.wps")], "cannot read"),
+        (["--namelist", nl, "--footprints", str(tmp_path / "no.geojson")],
+         "not found"),
+        (["--namelist", nl, "--footprints", f"{fp}:nope"],
+         "unknown footprint source"),
+        (["--namelist", nl, "--footprints", str(fp), "--default-height",
+          "0"], "default_height_m must be > 0"),
+        (["--namelist", nl, "--footprints", str(fp), "--storey-height",
+          "-3"], "storey_height_m must be > 0"),
+    ]
+    for extra, message in cases:
+        assert main(["buildings", "--output", out, "--no-gem15"]
+                    + extra) == 2
+        assert message in capsys.readouterr().err
+
+
+def test_projected_footprint_box_is_densified(tmp_path):
+    """A footprint just inside the box's curved southern edge, which the
+    box's four projected corners alone would miss, is kept."""
+    from pyproj import Transformer
+    from woof.static.highres_fetch import FootprintBBox
+    bbox = FootprintBBox(47.0, 47.5, -101.5, -98.5)
+    crs = "EPSG:32614"
+    tr = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    x, y = tr.transform(-99.0, 47.0005)
+    ring = [[x - 10, y - 10], [x + 10, y - 10], [x + 10, y + 10],
+            [x - 10, y + 10], [x - 10, y - 10]]
+    fp = b.Footprint(((ring,),), 10.0, float("nan"), "osm")
+    corners = tr.transform([-101.5, -98.5], [47.0, 47.0])
+    assert y + 10 < min(corners[1])    # the corners' box misses it
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(bd, "read_footprints", lambda path, source: ([fp], crs))
+    try:
+        kept, _ = bd._read_in_box(tmp_path / "x.parquet", "osm", bbox)
+    finally:
+        monkey.undo()
+    assert kept == [fp]

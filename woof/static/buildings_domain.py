@@ -37,6 +37,14 @@ from woof.static.buildings import (BUILDING_SOURCES, HeightRaster,
                                    rasterize_footprints, read_footprints,
                                    utm_raster, write_product)
 
+#: Default footprint lattice: a quarter of the grid spacing, but never
+#: coarser than this, so a house-sized footprint still covers pixels and
+#: the wall and frontal areas are not lost to the pixel size.
+MAX_DEFAULT_RESOLUTION_M = 5.0
+#: Largest footprint lattice built in one piece (pixels); a bigger domain
+#: names a coarser ``resolution_m`` (``--resolution``).
+MAX_LATTICE_PIXELS = 150_000_000
+
 def domain_bbox(grid, *, halo_cells: float = 2.0, samples: int = 64):
     """Lon/lat box around a domain's mass cells plus ``halo_cells``.
 
@@ -57,8 +65,9 @@ def domain_bbox(grid, *, halo_cells: float = 2.0, samples: int = 64):
     lat, lon = grid.ij_to_latlon(xs, ys)
     lat, lon = np.asarray(lat, np.float64), np.asarray(lon, np.float64)
     if float(np.ptp(lon)) > 180.0:
-        raise ValueError("the domain crosses the antimeridian; build its "
-                         "buildings product in two halves")
+        raise ValueError("the domain crosses the antimeridian or contains "
+                         "a pole; build its buildings product in pieces "
+                         "that do neither")
     return FootprintBBox(float(lat.min()), float(lat.max()),
                          float(lon.min()), float(lon.max()))
 
@@ -91,45 +100,97 @@ def _read_in_box(path: Path, source: str, bbox):
     else:
         from pyproj import Transformer
         tr = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
-        x, y = tr.transform(
-            np.array([bbox.lon_min, bbox.lon_max, bbox.lon_max,
-                      bbox.lon_min]),
-            np.array([bbox.lat_min, bbox.lat_min, bbox.lat_max,
-                      bbox.lat_max]))
-        box = (float(np.min(x)), float(np.min(y)), float(np.max(x)),
-               float(np.max(y)))
+        # Densified edges: projected parallels curve, so the corners alone
+        # can miss part of the box.
+        box = tuple(float(v) for v in tr.transform_bounds(
+            bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max,
+            densify_pts=64))
     return [fp for fp in footprints if _bbox_hit(fp, box)], crs
 
 
-def _ndsm_heights_for(footprints, crs, windows, resolution_m):
-    """Footprints without a height attribute get the GEM-15 nDSM median
-    over their own pixels, from the first window that has one.
+def _sub_window(window: HeightRaster, bounds, pad: int = 1):
+    """The part of ``window`` under ``bounds`` (x0, y0, x1, y1 in its
+    CRS) plus ``pad`` pixels, or None when they do not meet."""
+    rows, cols = window.shape
+    minx, miny, maxx, maxy = bounds
+    c0 = max(0, int(math.floor((minx - window.x0) / window.px)) - pad)
+    c1 = min(cols, int(math.ceil((maxx - window.x0) / window.px)) + pad)
+    r0 = max(0, int(math.floor((window.y0 - maxy) / window.py)) - pad)
+    r1 = min(rows, int(math.ceil((window.y0 - miny) / window.py)) + pad)
+    if c1 <= c0 or r1 <= r0:
+        return None
+    return HeightRaster(window.height[r0:r1, c0:c1],
+                        window.x0 + c0 * window.px,
+                        window.y0 - r0 * window.py, window.px, window.py,
+                        window.crs, window.sources)
 
-    The median is read on the window's lattice split by up to 4 (nearest,
-    so no height is invented), so a footprint smaller than a 15 m pixel
-    still finds its pixels.  Returns ``(footprints, n_from_ndsm)``.
+
+def _ndsm_medians_for(footprints, crs, windows, resolution_m):
+    """GEM-15 nDSM median over each height-less footprint's own pixels,
+    from the first window that has one (NaN elsewhere).
+
+    The median is read around each footprint on the window's lattice split
+    by up to 4 (nearest, so no height is invented), so a footprint smaller
+    than a 15 m pixel still finds its pixels; only the few pixels under
+    the footprint are split, never the whole window.
     """
-    from woof.static.buildings import (Footprint, _footprint_median,
+    from woof.static.buildings import (_footprint_median,
                                        _transform_footprints)
 
+    medians = np.full(len(footprints), np.nan)
     need = [n for n, fp in enumerate(footprints) if math.isnan(fp.height)]
-    heights = {}
     for window in windows:
-        todo = [n for n in need if n not in heights]
+        todo = [n for n in need if math.isnan(medians[n])]
         if not todo:
             break
         factor = min(4, max(1, int(math.ceil(window.px / resolution_m))))
-        fine = window.supersampled(factor)
-        values = np.asarray(fine.height, np.float64)
         moved = _transform_footprints([footprints[n] for n in todo], crs,
                                       window.crs)
         for n, fp in zip(todo, moved):
-            median = _footprint_median(fp, values, fine)
-            if not math.isnan(median):
-                heights[n] = median
-    out = [Footprint(fp.polygons, heights[n], fp.levels, fp.source)
-           if n in heights else fp for n, fp in enumerate(footprints)]
-    return out, len(heights)
+            sub = _sub_window(window, fp.bounds())
+            if sub is None:
+                continue
+            fine = sub.supersampled(factor)
+            medians[n] = _footprint_median(
+                fp, np.asarray(fine.height, np.float64), fine)
+    return medians
+
+
+def _one_lattice(windows: Sequence[HeightRaster], bbox):
+    """GEM-15 windows as rasters :func:`aggregate` can mosaic.
+
+    GEM-15 cells share one 15 m lattice within a UTM zone, but cells either
+    side of a zone edge are on different lattices and overlap; such windows
+    are resampled (nearest, the taller value where they overlap) onto one
+    15 m UTM lattice over the domain.  Windows of one zone pass unchanged.
+    """
+    from woof.static.buildings import _same_crs
+    if all(_same_crs(w.crs, windows[0].crs) for w in windows[1:]):
+        return list(windows)
+    from rasterio.enums import Resampling
+    from rasterio.transform import from_origin
+    from rasterio.warp import reproject
+
+    like = utm_raster(bbox.lon_min, bbox.lat_min, bbox.lon_max,
+                      bbox.lat_max, windows[0].px)
+    out = np.full(like.shape, np.nan, np.float32)
+    for w in windows:
+        part = np.full(like.shape, np.nan, np.float32)
+        reproject(np.asarray(w.height, np.float32), part,
+                  src_transform=from_origin(w.x0, w.y0, w.px, w.py),
+                  src_crs=w.crs, src_nodata=np.nan,
+                  dst_transform=from_origin(like.x0, like.y0, like.px,
+                                            like.py),
+                  dst_crs=like.crs, dst_nodata=np.nan,
+                  resampling=Resampling.nearest)
+        out = np.fmax(out, part)
+    sources = tuple(sorted({s for w in windows for s in w.sources}))
+    return [HeightRaster(out, like.x0, like.y0, like.px, like.py, like.crs,
+                         sources)]
+
+
+def _default_resolution(dx: float, dy: float) -> float:
+    return max(1.0, min(min(dx, dy) / 4.0, MAX_DEFAULT_RESOLUTION_M))
 
 
 def build_domain_buildings(grid, output, *, footprints: Sequence = (),
@@ -146,16 +207,21 @@ def build_domain_buildings(grid, output, *, footprints: Sequence = (),
 
     ``footprints`` holds ``(path, source)`` pairs.  ``resolution_m`` is
     the footprint lattice spacing (default a quarter of the smaller grid
-    spacing, at least 1 m).  Returns ``(path, receipt)``; the receipt
+    spacing, between 1 m and :data:`MAX_DEFAULT_RESOLUTION_M`); a lattice
+    over :data:`MAX_LATTICE_PIXELS` refuses and asks for a coarser one.  Returns ``(path, receipt)``; the receipt
     (also stored in the product) names the box, the GEM-15 windows, the
     footprint counts and where each building's height came from.
     """
     if not gem15 and not footprints:
         raise ValueError("nothing to build from: give footprint files, or "
                          "leave GEM-15 on")
+    for name, value in (("storey_height_m", storey_height_m),
+                        ("default_height_m", default_height_m)):
+        if value is not None and not (math.isfinite(value) and value > 0):
+            raise ValueError(f"{name} must be > 0, got {value!r}")
     model = ProjectionGrid(grid)
     if resolution_m is None:
-        resolution_m = max(1.0, min(model.dx, model.dy) / 4.0)
+        resolution_m = _default_resolution(model.dx, model.dy)
     if not (math.isfinite(resolution_m) and resolution_m > 0):
         raise ValueError(f"resolution_m must be > 0, got {resolution_m!r}")
     bbox = domain_bbox(grid)
@@ -192,31 +258,30 @@ def build_domain_buildings(grid, output, *, footprints: Sequence = (),
         if not windows:
             raise ValueError("GEM-15 publishes no data under this domain and "
                              "no footprints were given")
-        rasters = windows
+        rasters = _one_lattice(windows, bbox)
     else:
         like = utm_raster(bbox.lon_min, bbox.lat_min, bbox.lon_max,
                           bbox.lat_max, resolution_m)
+        if like.height.size > MAX_LATTICE_PIXELS:
+            raise ValueError(
+                f"a {resolution_m:g} m footprint lattice over this domain "
+                f"has {like.height.size:,} pixels (most "
+                f"{MAX_LATTICE_PIXELS:,}); pass a coarser --resolution "
+                "(footprints much smaller than it are lost or grown to a "
+                "pixel) or build the product for a smaller domain")
         rasters, files = [], []
         for path, source in footprints:
             fps, crs = _read_in_box(Path(path), source, bbox)
-            n_ndsm = 0
-            if windows:
-                fps, n_ndsm = _ndsm_heights_for(fps, crs, windows,
-                                                resolution_m)
+            medians = (_ndsm_medians_for(fps, crs, windows, resolution_m)
+                       if windows else None)
+            # The nDSM source joins only when a building whose height it
+            # gave shows on the lattice (rasterize_footprints decides).
             burnt, burn = rasterize_footprints(
                 fps, crs, like, storey_height_m=storey_height_m,
-                default_height_m=default_height_m)
-            # Heights the nDSM supplied arrive as attributes; name them.
-            burn["height_from"]["attribute"] -= n_ndsm
-            burn["height_from"]["gem15_ndsm_median"] = n_ndsm
-            sources = set(burnt.sources)
-            if n_ndsm:
-                sources.add("gem15-ndsm")
-            rasters.append(HeightRaster(burnt.height, burnt.x0, burnt.y0,
-                                        burnt.px, burnt.py, burnt.crs,
-                                        tuple(sorted(sources))))
+                default_height_m=default_height_m, ndsm_medians=medians)
+            rasters.append(burnt)
             files.append(dict(burn, file=Path(path).name, source=source,
-                              crs=str(crs), sources=sorted(sources)))
+                              crs=str(crs)))
         receipt["footprint_files"] = files
     morph = aggregate(rasters, model)
     path = write_product(output, morph, grid_note=grid_note,
@@ -252,7 +317,8 @@ def _arguments(parser) -> None:
     parser.add_argument("--resolution", type=float, default=None,
                         metavar="M",
                         help="footprint lattice spacing in metres "
-                             "(default: a quarter of the grid spacing)")
+                             "(default: a quarter of the grid spacing, "
+                             "at most 5)")
     parser.add_argument("--storey-height", type=float, default=3.0,
                         metavar="M",
                         help="metres per storey for footprints with only a "
@@ -272,14 +338,23 @@ def _run(args) -> int:
     import json
     import sys
 
+    from woof.static.highres_refusal import HighresRefusal
     from woof.static.projection import grids_from_wps_namelist
 
-    grids = grids_from_wps_namelist(args.namelist)
+    try:
+        grids = grids_from_wps_namelist(args.namelist)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"woof buildings: cannot read {args.namelist}: {exc}",
+              file=sys.stderr)
+        return 2
     number = len(grids) if args.domain is None else int(args.domain)
     if not 1 <= number <= len(grids):
         print(f"woof buildings: --domain {number} is not in "
               f"{args.namelist} ({len(grids)} domains)", file=sys.stderr)
         return 2
+    if args.no_gem15 and (args.offline or args.cache is not None):
+        print("woof buildings: --cache and --offline only apply to GEM-15 "
+              "and are ignored with --no-gem15", file=sys.stderr)
     try:
         footprints = [parse_footprint_spec(s) for s in args.footprints]
         for path, _ in footprints:
@@ -293,8 +368,12 @@ def _run(args) -> int:
             default_height_m=args.default_height,
             min_area_m2=args.min_area,
             grid_note=f"{args.namelist.name} d{number:02d}")
-    except (ValueError, KeyError, FileNotFoundError) as exc:
+    except (ValueError, KeyError, OSError, HighresRefusal) as exc:
+        # PreparationRefusal (a ValueError) carries its own remedy line.
         print(f"woof buildings: {exc}", file=sys.stderr)
+        remedy = getattr(exc, "remedy", None)
+        if remedy:
+            print(remedy, file=sys.stderr)
         return 2
     print(f"woof buildings: wrote {path} for d{number:02d}")
     print(json.dumps(receipt, indent=1, sort_keys=True, default=str))
