@@ -438,6 +438,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   checkpoints and cannot resume.
 - **More data sources:** the Met Office global and UKV models, DWD ICON
   (global and the machine-learning variant) and additional mapped routes.
+- **GFS lake and snow choices on a downloaded run.** A `[case_data]` table
+  that holds only `gfs_lake_skin`, `gfs_lake_ice` or `gfs_snow_convention`
+  stays on `woof go`'s fetch route (including `--prepare-only`); upstream
+  sends any `[case_data]` table to the declared-inputs route, where a GFS
+  download cannot run. A table with any other key routes as upstream's does.
 - **Applied tooling:** wind-energy siting, hindcasts and power products,
   storm-track planning, and delete-after-commit backpressure and domain
   selection for upstream's Icechunk store export
