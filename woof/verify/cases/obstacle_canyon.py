@@ -118,7 +118,7 @@ def _drive(state, upper, cfg) -> None:
     state.u += (U_REF - mean) * cp.float32(gain)
 
 
-def _metrics(u, w, z_mass, z_w, cfg, nan) -> dict:
+def _metrics(u, w, z_mass, z_w, cfg, nan, *, u_sq=None) -> dict:
     nx = cfg.nx
     H = _height(cfg)
     x = (np.arange(nx) + 0.5) * cfg.dx
@@ -137,13 +137,26 @@ def _metrics(u, w, z_mass, z_w, cfg, nan) -> dict:
     roof = int(np.argmin(np.abs(zc - H)))
     roof_u = float(um[roof, centre_col]) / ref
     solid = (~street)[None] & in_canyon[:, None]
-    leak = float(np.sqrt(np.mean(um[solid] ** 2))) / ref
+    # rms over time and y inside the buildings (u_sq), not the rms of the
+    # mean, so opposite interior motions cannot cancel.
+    leak = float(np.sqrt(np.mean((um * um if u_sq is None
+                                  else u_sq)[solid]))) / ref
     column = um[in_canyon, centre_col]
     vortices = int(np.count_nonzero(np.diff(np.sign(column)) != 0))
     return dict(vortex_x=float(x[ix] / W), vortex_z=float(zc[kz] / H),
                 floor_u=floor_u, roof_u=roof_u, leak=leak, u_ref=ref,
                 vortices=vortices, centre_u=(column / ref).tolist(),
                 nan=bool(nan))
+
+
+def sample_steps(n_total: int, n_avg: int, every: int = 10) -> range:
+    """The steps averaged: every ``every``-th step of the last ``n_avg``,
+    counted from the window's own start, so a valid window always holds
+    its first step."""
+    if not 1 <= n_avg <= n_total:
+        raise ValueError(f"the averaging window ({n_avg} steps) must hold "
+                         f"at least one step of the run ({n_total} steps)")
+    return range(n_total - n_avg, n_total, every)
 
 
 def run(outdir=None, *, minutes: float = 10.0, average_minutes: float = 4.0,
@@ -160,17 +173,22 @@ def run(outdir=None, *, minutes: float = 10.0, average_minutes: float = 4.0,
     upper = cp.asarray(np.flatnonzero(z_mass > 2 * _height(cfg)))
     n_total = int(round(cfg.run_seconds / cfg.dt))
     n_avg = int(round(average_minutes * 60.0 / cfg.dt))
+    sampled = set(sample_steps(n_total, n_avg))
     u_sum = np.zeros((cfg.nz, cfg.nx + 1))
+    u_sq = np.zeros((cfg.nz, cfg.nx))
     w_sum = np.zeros((cfg.nz + 1, cfg.nx))
-    samples = 0
     for step in range(n_total):
         run_steps(state, cfg, n=1)
         _drive(state, upper, cfg)
-        if step >= n_total - n_avg and step % 10 == 0:
-            u_sum += cp.asnumpy(state.u).astype(np.float64).mean(axis=1)
+        if step in sampled:
+            u = cp.asnumpy(state.u).astype(np.float64)
+            u_sum += u.mean(axis=1)
+            um = 0.5 * (u[..., :cfg.nx] + u[..., 1:])
+            u_sq += (um * um).mean(axis=1)
             w_sum += cp.asnumpy(state.w).astype(np.float64).mean(axis=1)
-            samples += 1
+    samples = len(sampled)
     metrics = _metrics(u_sum / samples, w_sum / samples, z_mass, z_w, cfg,
-                       stability_report(state)["nan"])
+                       stability_report(state)["nan"],
+                       u_sq=u_sq / samples)
     metrics["obstacles"] = getattr(state, "_obstacles_receipt", None)
     return metrics

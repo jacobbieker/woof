@@ -8046,6 +8046,12 @@ def _validate_obstacles(cfg: RunConfig) -> None:
     if cfg.polar:
         raise ConfigurationRefused(
             "obstacle_opt = 1 runs on the regional (WRF-route) grid only")
+    if cfg.umove or cfg.vmove:
+        raise ConfigurationRefused(
+            "obstacle_opt = 1 holds buildings fixed to the ground, but "
+            f"umove = {cfg.umove:g}, vmove = {cfg.vmove:g} m/s moves the "
+            "frame, where the drag would see frame-relative wind; run "
+            "obstacles with umove = vmove = 0")
 
 
 def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> RunConfig:

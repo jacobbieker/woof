@@ -664,6 +664,11 @@ def _with_handover(cfg, kept):
 @pytest.mark.parametrize("field", sorted(MOVED))
 def test_every_writer_echoes_a_moved_field_alike(monkeypatch, tmp_path, field):
     overrides, kept = MOVED[field]
+    if overrides.get("obstacle_file"):
+        # The checkpoint's physics identity binds the buildings product's
+        # bytes, so the named product has to exist.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / overrides["obstacle_file"]).write_bytes(b"buildings")
     cfg = _cfg(**overrides)
     kept = _with_handover(cfg, kept)
     echoes = _echoes(cfg, monkeypatch, tmp_path)

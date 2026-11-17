@@ -40,6 +40,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from woof.core.device_cache import cuda_cache
+
 #: Von Karman constant of the wall law.
 KARMAN = 0.4
 OBSTACLE_OPTIONS = (0, 1)
@@ -98,8 +100,11 @@ def layer_heights(state) -> np.ndarray:
 
 
 def build_coefficients(morph, z_w, cfg, *, periodic_x: bool,
-                       periodic_y: bool, ring: int = 0):
+                       periodic_y: bool, ring=0):
     """Host face coefficients from a morphology and level heights.
+
+    ``ring`` cells next to the domain edges hold no obstacles: an int for
+    both axes or a ``(ring_y, ring_x)`` pair (0 on a periodic axis).
 
     Returns ``(faces_u, faces_v, faces_w, receipt)``; each faces tuple is
     ``(flat_index, a, b)`` over that component's own array, only for faces
@@ -114,9 +119,11 @@ def build_coefficients(morph, z_w, cfg, *, periodic_x: bool,
     phi = np.zeros((nz, ny, nx))
     for k in range(nz):
         phi[k] = morph.solid_fraction(z_w[k], z_w[k + 1])
-    if ring > 0:
+    ring_y, ring_x = (ring, ring) if np.isscalar(ring) else ring
+    trimmed = ring_y > 0 or ring_x > 0
+    if trimmed:
         keep = np.zeros((ny, nx), bool)
-        keep[ring:ny - ring, ring:nx - ring] = True
+        keep[ring_y:ny - ring_y, ring_x:nx - ring_x] = True
         phi *= keep[None]
     phi = np.clip(phi, 0.0, 1.0)
     solid = (phi >= float(cfg.obstacle_solid_fraction)).astype(np.float64)
@@ -128,7 +135,7 @@ def build_coefficients(morph, z_w, cfg, *, periodic_x: bool,
     open_cell = 1.0 - solid
     fx = np.asarray(morph.frontal_x, np.float64)
     fy = np.asarray(morph.frontal_y, np.float64)
-    if ring > 0:
+    if trimmed:
         fx = fx * keep
         fy = fy * keep
     cd = float(cfg.obstacle_drag_coefficient)
@@ -172,9 +179,10 @@ def build_coefficients(morph, z_w, cfg, *, periodic_x: bool,
             out[:, 0] = 0.0
         return out
 
-    # Wall neighbours of each cell pair, per open face.
-    side_y = 0.5 * (sy(solid, 1) + sy(solid, -1))       # per cell, y sides
-    side_x = 0.5 * (sx(solid, 1) + sx(solid, -1))
+    # Solid neighbours of each cell (each wall counts once), averaged onto
+    # the open faces between cell pairs.
+    side_y = sy(solid, 1) + sy(solid, -1)               # per cell, y sides
+    side_x = sx(solid, 1) + sx(solid, -1)
     below = sz(solid, -1)                               # cell k-1 at k
     u_a = relax * u_faces(solid)
     u_open = u_a == 0
@@ -207,12 +215,16 @@ def build_coefficients(morph, z_w, cfg, *, periodic_x: bool,
     return (*faces, receipt)
 
 
-def _boundary_ring(cfg) -> int:
+def _boundary_ring(cfg) -> tuple[int, int]:
+    """``(ring_y, ring_x)``: the edge cells left free of obstacles.
+
+    Specified and nested domains keep the relaxation zone plus one on every
+    side; an open axis keeps two cells; a periodic axis keeps none.
+    """
     if cfg.specified or cfg.nested:
-        return int(cfg.spec_bdy_width) + 1
-    if cfg.open_x or cfg.open_y:
-        return 2
-    return 0
+        ring = int(cfg.spec_bdy_width) + 1
+        return ring, ring
+    return (2 if cfg.open_y else 0), (2 if cfg.open_x else 0)
 
 
 def attach(state, cfg, morph=None) -> ObstacleFaces | None:
@@ -250,15 +262,11 @@ def attach(state, cfg, morph=None) -> ObstacleFaces | None:
     return faces
 
 
-_KERNEL = []
-
-
+@cuda_cache(maxsize=None)
 def _kernel():
-    if not _KERNEL:
-        from woof.core.kernels import load_module_no_ftz
-        _KERNEL.append(load_module_no_ftz("obstacle_drag", no_fmad=True)
-                       .get_function("obstacle_drag"))
-    return _KERNEL[0]
+    from woof.core.kernels import load_module_no_ftz
+    return load_module_no_ftz("obstacle_drag", no_fmad=True).get_function(
+        "obstacle_drag")
 
 
 def apply(state, cfg, ru, rv) -> None:

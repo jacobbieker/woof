@@ -61663,7 +61663,7 @@
     },
     {
       "file": "woof/core/obstacles.py",
-      "line": 258,
+      "line": 267,
       "kind": "prose",
       "anchor": "from woof.core.kernels import load_module_no_ftz",
       "anchor_sha256": "f591a05bab906b8405ad74ecab52ea21be6c5078f3e4dc681c7f7521fcbcca4e",
@@ -61674,10 +61674,10 @@
     },
     {
       "file": "woof/core/obstacles.py",
-      "line": 259,
+      "line": 268,
       "kind": "prose",
-      "anchor": "_KERNEL.append(load_module_no_ftz(\"obstacle_drag\", no_fmad=True)",
-      "anchor_sha256": "f3ad9094f031a4afc3042ced584cd690866bb817201278d4c9d4f7d1a1cfcf1c",
+      "anchor": "return load_module_no_ftz(\"obstacle_drag\", no_fmad=True).get_function(",
+      "anchor_sha256": "0320d76eb7f15d60d89fec2f41aebe6129cec4389042e402dc74a9ffb3db648b",
       "route": null,
       "mechanism": null,
       "asserted_token": null,

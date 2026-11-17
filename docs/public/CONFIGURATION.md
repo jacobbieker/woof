@@ -597,7 +597,7 @@ momentum on its faces is relaxed to zero at `obstacle_relax_factor`/`dt`
 above a wall get log-law wall stress with roughness `obstacle_wall_z0` m
 (default `0.01`). The option is refused without a file, with a file and
 `obstacle_opt = 0`, above 500 m grid spacing (use `sf_urban_physics`
-there), and on the global grid. With `obstacle_opt = 0`, or a product
+there), on the global grid, and in a moving frame (`umove`, `vmove`). With `obstacle_opt = 0`, or a product
 with no buildings, no obstacle code runs.
 
 The eleven numerics from `diff_6th_slopeopt` through `tke_budget` are

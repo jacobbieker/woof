@@ -51,6 +51,8 @@ def test_defaults_are_off():
     (dict(obstacle_relax_factor=-1.0), "obstacle_relax_factor"),
     (dict(obstacle_drag_coefficient=float("nan")), "obstacle_drag_coefficient"),
     (dict(obstacle_wall_z0=0.0), "obstacle_wall_z0"),
+    (dict(obstacle_opt=1, obstacle_file="b.nc", umove=2.0), "umove"),
+    (dict(obstacle_opt=1, obstacle_file="b.nc", vmove=-1.0), "umove"),
 ])
 def test_refusals(overrides, match):
     with pytest.raises(ConfigurationRefused, match=match):
@@ -121,6 +123,34 @@ def test_boundary_ring_drops_edge_buildings():
     assert fu[0].size == fv[0].size == fw[0].size == 0
 
 
+def test_boundary_ring_is_per_axis():
+    """An open x edge with periodic y trims only the x edges."""
+    from woof.core.obstacles import _boundary_ring
+
+    cfg = _les(open_x=True)
+    assert _boundary_ring(cfg) == (0, 2)
+    cfg, (fu, fv, fw, receipt) = _canyon_coefficients(ring=(0, 2))
+    # The buildings (cells 10..19) end two cells inside the x edge; y keeps
+    # every row.
+    assert receipt["solid_cells"] == 8 * cfg.ny * 10
+
+
+def test_wall_stress_counts_each_wall():
+    """A v face beside one facade carries that facade's full wall
+    coefficient, and the w face beside it the same."""
+    from woof.core.obstacles import _wall_coefficient
+
+    cfg, (fu, fv, fw, receipt) = _canyon_coefficients()
+    nx, ny, nz = cfg.nx, cfg.ny, cfg.nz
+    v_b = np.zeros((nz, ny + 1, nx), np.float32)
+    v_b.ravel()[fv[0]] = fv[2]
+    wx = np.float32(_wall_coefficient(cfg.dx, cfg.obstacle_wall_z0))
+    np.testing.assert_allclose(v_b[1:9, :, 9], wx, rtol=1e-6)
+    w_b = np.zeros((nz + 1, ny, nx), np.float32)
+    w_b.ravel()[fw[0]] = fw[2]
+    np.testing.assert_allclose(w_b[2:10, :, 9], wx, rtol=1e-6)
+
+
 def test_empty_morphology_attaches_nothing(monkeypatch):
     pytest.importorskip("cupy")
     from woof.core import obstacles
@@ -169,10 +199,8 @@ def _run(route, steps=12):
                             dtype=cp.float32)
     run_steps(state, cfg, n=steps)
     words = {}
-    for name in ("u", "v", "w", "t", "ph", "mu", "p"):
-        value = getattr(state, name, None)
-        if value is not None:
-            words[name] = cp.asnumpy(value).view(np.uint32)
+    for name in ("u", "v", "w", "thp", "php", "mup", "p"):
+        words[name] = cp.asnumpy(getattr(state, name)).view(np.uint32)
     return words
 
 

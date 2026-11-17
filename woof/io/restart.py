@@ -4311,6 +4311,22 @@ def physics_setup_identity(state, cfg) -> dict:
     parameters = parameter_receipt()
     if parameters is not None:
         identity["physics_params"] = parameters
+    # The opt-in resolved obstacles (woof.core.obstacles): the coefficients
+    # are rebuilt at resume from the woof-buildings.v1 product, so its bytes
+    # are bound here; a replaced product refuses the resume.  Off adds no
+    # key, so every earlier checkpoint's setup bytes are unchanged.
+    if int(getattr(cfg, "obstacle_opt", 0) or 0):
+        from woof.file_digest import sha256_file
+        path = Path(cfg.obstacle_file)
+        try:
+            identity["obstacles"] = {
+                "policy": "porous-immersed-v1",
+                "product_bytes": int(path.stat().st_size),
+                "product_sha256": sha256_file(path, block_bytes=1024 * 1024)}
+        except OSError as exc:
+            raise RestartManifestError(
+                f"obstacle_file {str(path)!r} is unreadable; the checkpoint "
+                "cannot bind the buildings it ran with") from exc
     return identity
 
 

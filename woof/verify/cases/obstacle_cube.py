@@ -83,7 +83,8 @@ def run(outdir=None, *, minutes: float = 15.0, average_minutes: float = 6.0
 
     from woof.core import obstacles
     from woof.core.dycore import run_steps, stability_report
-    from woof.verify.cases.obstacle_canyon import _drive, build
+    from woof.verify.cases.obstacle_canyon import (_drive, build,
+                                                    sample_steps)
 
     cfg = default_config(minutes=minutes)
     state = build(cfg, morphology(cfg))
@@ -95,21 +96,20 @@ def run(outdir=None, *, minutes: float = 15.0, average_minutes: float = 6.0
     jc = cfg.ny // 2
     u_sum = np.zeros((cfg.nz, cfg.nx + 1))
     inside = np.zeros(2)
-    samples = 0
+    sampled = set(sample_steps(n_total, n_avg))
     i0, i1 = int(X0 / DX), int((X0 + H) / DX)
     j0, j1 = jc - int(H / DX / 2), jc + int(H / DX / 2)
     k1 = int(np.searchsorted(z_mass, H))
     for step in range(n_total):
         run_steps(state, cfg, n=1)
         _drive(state, upper, cfg)
-        if step >= n_total - n_avg and step % 10 == 0:
+        if step in sampled:
             u = state.u
             u_sum += cp.asnumpy(0.5 * (u[:, jc - 1] + u[:, jc])).astype(
                 np.float64)
             core = u[:k1, j0 + 1:j1 - 1, i0 + 2:i1 - 1]
             inside += (float(cp.mean(core * core)), 1.0)
-            samples += 1
-    u_mean = u_sum / samples
+    u_mean = u_sum / len(sampled)
     ref = float(u_mean[(z_mass > 1.9 * H) & (z_mass < 2.1 * H)].mean())
     x_u = np.arange(cfg.nx + 1) * DX
     reattach, separate = _crossings(x_u, u_mean[0])

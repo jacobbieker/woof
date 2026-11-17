@@ -116,8 +116,8 @@ masked topography of PALM, and the drag-porosity buildings of Meso-NH
   cell's frontal area index spread over its building volume profile, and
   Cd is `obstacle_drag_coefficient` (Coceal and Belcher 2004).
 - Open faces beside or above a wall get log-law wall stress
-  `(kappa / ln(d / z0))^2 |U| / spacing`, with d half the spacing and z0
-  `obstacle_wall_z0`. This is the wall model WRF-IBM uses (Lundquist et al.
+  `(kappa / ln(d / z0))^2 |U| / spacing` for each wall, with d half the
+  spacing and z0 `obstacle_wall_z0`. This is the wall model WRF-IBM uses (Lundquist et al.
   2010, 2012; Bao, Chow and Lundquist 2018).
 
 All three act as one rate `k = a/dt + b|U|` per face. Each RK stage
@@ -125,7 +125,9 @@ subtracts `k / (1 + k dt)` times the coupled momentum from the face's
 tendency, after the stage's other slow tendencies. That bounded implicit
 form is stable for any k. The acoustic steps carry it as part of the held
 slow forcing, so no acoustic kernel changes. The geometry is static (from
-`phb`), so a restart rebuilds the same coefficients. One fused kernel
+`phb`), so a restart rebuilds the same coefficients. The checkpoint binds
+the buildings product's bytes, so resuming against a changed product is
+refused. One fused kernel
 (`kernels/obstacle_drag.cu`, CUDA and Metal) works on a sparse list of the
 faces that touch an obstacle. Off, or with no buildings, nothing is built
 and nothing launches, and the run steps to the same bits as before (checked
@@ -180,8 +182,11 @@ database you share publicly must itself be under ODbL.
   not masked: advection through a blocked face stops with its wind, but
   sub-grid diffusion across a wall does not. Buildings exchange no heat or
   moisture.
-- Buildings in the specified or nested boundary ring of a domain are
-  dropped, so the boundary update and the obstacles never fight.
+- Buildings in the specified or nested boundary ring of a domain, or
+  within two cells of an open edge, are dropped, so the boundary update
+  and the obstacles never fight. A periodic axis keeps every cell.
+- A moving frame (`umove`, `vmove`) is refused: the buildings are fixed
+  to the ground.
 
 - Building heats, shading and moisture are not represented. The product
   describes geometry only.
