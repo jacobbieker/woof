@@ -26,7 +26,7 @@
     "nssl1_support.cuh": "aa531d60c33371850aa3c3594cf5567f1505d73d3b2a7d02537cedfd62ed3311",
     "ntu_parallel.cuh": "24778f06880ba750cc675208cc5e18ca20af83a2453b540196ef1109e0fd7c76",
     "p3_gnu239.cuh": "de99fb11c7f14f1b2dad93419c97e36bc0bc0e727a1c360e0572f7cfb658c9da",
-    "rrtmg_sw_spectral.cuh": "5ea756c7d433fa382657f484179adfcb6dfd4b83a4d774061a11d3e968d72340",
+    "rrtmg_sw_spectral.cuh": "965ab0c8e92cedf1d201be58426b7e5b357dccd32fa9fd040aca21b74f0ef67f",
     "sas_fast.cuh": "f966b0fb610f42d835b173814c8001bad6bded634cbebc2166a9ae9e533c8f76"
   },
   "headers": {

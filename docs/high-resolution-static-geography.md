@@ -56,6 +56,54 @@ case far from the land-cover map's year (2018 for CGLC-MODIS-LCZ, before
 1985 or after 2024 for NLCD) takes the nearest map and the receipt names
 the anachronism in years.
 
+## Lakes only (`fields = "lakes"`)
+
+```toml
+[static.highres]
+enabled = true
+cache_root = "/data/highres-cache"
+fields = "lakes"
+```
+
+This mode takes the inland lake extent from the land-cover source
+(CGLC-MODIS-LCZ by default) and changes nothing else:
+
+- A baseline lake cell (dominant category 21) that the source calls land
+  becomes that land. It takes the source's land-use fractions, index and
+  mask, the selected WPS soil reconciled to land, and the climatologies
+  and deep-soil temperature of its nearest land cell.
+- A baseline land cell that the source calls a lake becomes a lake, with
+  water soil and water-masked climatologies.
+- Terrain, the sea (category 17) and every other cell stay the
+  30-arc-second baseline. Only the land-cover raster is fetched.
+
+The receipt's `lake_check` gives the counts, the categories and the
+heights of the changed cells.
+
+Why: WPS's `modis_landuse_20class_30s_with_lakes` marks glacier, rock and
+shaded alpine pixels as lakes (MODIS IGBP water). Its real lakes also sit
+about one 30-arc-second pixel north of the 100 m shorelines. On the
+2026-11-09 Alps case (1 km d02, 3 km d01):
+
+| | d02 before | d02 after | d01 before | d01 after |
+|---|---|---|---|---|
+| lake cells | 2679 | 1988 | 339 | 283 |
+| lake cells above 2000 m | 480 | 8 | 9 | 0 |
+| demoted / promoted | | 1101 / 410 | | 95 / 39 |
+
+- 334 of the demoted d02 cells became permanent ice and 84 became barren
+  land. The 8 lakes left above 2000 m are reservoirs, up to 2464 m.
+- Below 1500 m, the lake area summed from fractions is 2020 km2 in the
+  baseline and 2035 km2 in CGLC. Only the positions differ: at 6.6 E,
+  Lake Geneva spans 46.41-46.53 N in the baseline and 46.40-46.51 N in
+  CGLC (Evian 46.40 N, Ouchy 46.51 N).
+- On WOOF's GFS route the default observed lake ice (IMS) froze the
+  glacier "lakes". WRF's real.exe gives them the nearest GFS water
+  temperature instead (286-291 K on that date).
+
+The mode changes the forecast wherever a domain has lakes, so it is not a
+default. The hex route accepts only the terrain-only values of `fields`.
+
 ## The pilot
 
 RW-WPS previously used only the standard 30-arc-second WPS geography tree

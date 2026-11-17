@@ -2131,11 +2131,9 @@ def prepare_gfs_wrf(
         load_static_highres, apply_prepared_highres, static_highres_identity)
     static_highres = load_static_highres(experiment_config)
     from woof.case_data import (
-        gfs_preparation_policy, optional_case_data_from_config,
-        preparation_case_policy)
-    case_data = optional_case_data_from_config(experiment_config)
-    case_policy = {**preparation_case_policy(case_data),
-                   **gfs_preparation_policy(case_data)}
+        optional_case_policy_from_config, preparation_case_policy)
+    case_data, gfs_policy = optional_case_policy_from_config(experiment_config)
+    case_policy = {**preparation_case_policy(case_data), **gfs_policy}
     from woof.ingest.water_overlay import (
         load_bound_water_overlay, overlay_snapshot_sequence, verify_overlay_sequence)
     water_overlay, water_overlay_binding = load_bound_water_overlay(

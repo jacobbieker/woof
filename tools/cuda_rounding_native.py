@@ -77,7 +77,9 @@ def compile_sass(source: str, options: tuple[str, ...], *, nvrtc_library: Path,
         metadata = {"cubin_bytes": len(blob), "cubin_sha256": hashlib.sha256(blob).hexdigest()}
         try:
             process = subprocess.run([str(nvdisasm), "--print-code", "--print-line-info-inline", str(cubin)],
-                                     check=False, capture_output=True, text=True, timeout=180)
+                                     check=False, capture_output=True, text=True,
+                                     # a loaded shared host exceeds 180 s on big cubins
+                                     timeout=float(os.environ.get("WOOF_NVDISASM_TIMEOUT_S", "1800")))
             if process.returncode:
                 raise RuntimeError(f"nvdisasm returned {process.returncode}: {process.stderr[:2000]}")
             if not process.stdout.strip():

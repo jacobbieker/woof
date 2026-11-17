@@ -923,19 +923,10 @@ def build_case_data(raw: dict, *, source: str, base_dir: Path,
             orog_path = _resolve_path(base_dir, raw_orography,
                                       "source_orography", source)
 
-    snow_convention = raw.get("gfs_snow_convention", "wps")
-    if snow_convention not in ("wps", "raw"):
-        raise ValueError("gfs_snow_convention must be 'wps' or 'raw'")
-    lake_skin = raw.get("gfs_lake_skin", "wps")
-    if lake_skin not in GFS_LAKE_SKIN_CHOICES:
-        raise ValueError(
-            "gfs_lake_skin must be one of "
-            + ", ".join(repr(choice) for choice in GFS_LAKE_SKIN_CHOICES))
-    lake_ice = raw.get("gfs_lake_ice", GFS_LAKE_ICE_CHOICES[0])
-    if lake_ice not in GFS_LAKE_ICE_CHOICES:
-        raise ValueError(
-            "gfs_lake_ice must be one of "
-            + ", ".join(repr(choice) for choice in GFS_LAKE_ICE_CHOICES))
+    policy = _validated_gfs_policy(raw)
+    snow_convention = policy["gfs_snow_convention"]
+    lake_skin = policy["gfs_lake_skin"]
+    lake_ice = policy["gfs_lake_ice"]
     water_policy = None
     if "water_temperature_policy" in raw:
         from woof.ingest.water_temperature import (
@@ -1076,9 +1067,17 @@ def build_case_data(raw: dict, *, source: str, base_dir: Path,
 
 
 def optional_case_data_from_tables(raw: dict, *, source: str, base_dir: Path):
-    """Validate optional scientific companions without opening weather inputs."""
+    """Validate optional scientific companions without opening weather inputs.
+
+    A policy-only table (:func:`is_gfs_policy_table`) declares no case
+    data: its keys are validated here and read by
+    :func:`optional_case_policy_from_config`, and this returns ``None``.
+    """
     table = raw.get("case_data")
     if table is None:
+        return None
+    if is_gfs_policy_table(table):
+        _validated_gfs_policy(table)
         return None
     return build_case_data(table, source=source, base_dir=base_dir,
                            require_inputs=False)
@@ -1119,6 +1118,70 @@ GFS_LAKE_SKIN_CHOICES = ("wps", "air_temperature")
 #: ``gfs_lake_ice`` values; the first is the default
 #: (woof.ingest.lake_ice.LAKE_ICE_CHOICES).
 GFS_LAKE_ICE_CHOICES = ("observed", "wps")
+
+
+#: The [case_data] keys that name no input file: the GFS route's own
+#: preparation choices.  A [case_data] table holding only these keys is a
+#: policy table, read on ``woof go``'s fetch route; any other key puts the
+#: config on the declared-inputs route, as before.
+GFS_POLICY_KEYS = ("gfs_snow_convention", "gfs_lake_skin", "gfs_lake_ice")
+
+
+def is_gfs_policy_table(table) -> bool:
+    """True for a non-empty [case_data] table holding only GFS policy keys."""
+    return (isinstance(table, Mapping) and bool(table)
+            and set(table) <= set(GFS_POLICY_KEYS))
+
+
+def declares_case_inputs(raw: Mapping) -> bool:
+    """True when ``raw``'s [case_data] puts the config on the declared-inputs route.
+
+    Breakage it prevents: ``gfs_lake_skin`` and ``gfs_lake_ice`` are read
+    only by the fetched-GFS preparation, yet any [case_data] table sent
+    ``woof go`` to the declared-inputs route, where --prepare-only and
+    ``woof go`` itself refuse and native forcing must be GRIB1, so the
+    two lake policies could not be selected for a GFS run at all.
+    """
+    return "case_data" in raw and not is_gfs_policy_table(raw["case_data"])
+
+
+def _validated_gfs_policy(raw: Mapping) -> dict:
+    """The three GFS policy values in ``raw``, defaults filled, validated."""
+    snow_convention = raw.get("gfs_snow_convention", "wps")
+    if snow_convention not in ("wps", "raw"):
+        raise ValueError("gfs_snow_convention must be 'wps' or 'raw'")
+    lake_skin = raw.get("gfs_lake_skin", GFS_LAKE_SKIN_CHOICES[0])
+    if lake_skin not in GFS_LAKE_SKIN_CHOICES:
+        raise ValueError(
+            "gfs_lake_skin must be one of "
+            + ", ".join(repr(choice) for choice in GFS_LAKE_SKIN_CHOICES))
+    lake_ice = raw.get("gfs_lake_ice", GFS_LAKE_ICE_CHOICES[0])
+    if lake_ice not in GFS_LAKE_ICE_CHOICES:
+        raise ValueError(
+            "gfs_lake_ice must be one of "
+            + ", ".join(repr(choice) for choice in GFS_LAKE_ICE_CHOICES))
+    return {"gfs_snow_convention": snow_convention,
+            "gfs_lake_skin": lake_skin, "gfs_lake_ice": lake_ice}
+
+
+def optional_case_policy_from_config(path, *, expected_sha256=None):
+    """``(case_data, gfs_policy)`` read from one captured authority.
+
+    ``case_data`` is :func:`optional_case_data_from_config`'s answer;
+    ``gfs_policy`` is :func:`gfs_preparation_policy` of it, or of a
+    policy-only [case_data] table's own keys.
+    """
+    from woof.config_authority import read_config_authority
+    authority = read_config_authority(path)
+    if expected_sha256 is not None and authority.sha256 != expected_sha256:
+        raise ValueError("case-data experiment authority digest differs from its pin")
+    raw = tomllib.loads(authority.payload.decode("utf-8"))
+    data = optional_case_data_from_tables(
+        raw, source=str(authority.source), base_dir=authority.base_dir)
+    table = raw.get("case_data")
+    policy = (_validated_gfs_policy(table) if is_gfs_policy_table(table)
+              else gfs_preparation_policy(data))
+    return data, policy
 
 
 def gfs_preparation_policy(data):

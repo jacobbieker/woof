@@ -547,9 +547,15 @@ domain (see the physics table below), and `hailcast_version` its stone
 model: `wrf_39_noaa` (default, the HAILCAST in NOAA's operational HRRR v4)
 or `wrf_461` (WRF v4.6.1's). `lake_state_source` picks the lake
 initial-state row from `woof/data/surface_obs/lake-state-sources.v1.toml`
-(`auto` and `forcing` are the two built-in choices); a research-only row
+(`auto` and `forcing` are the two built-in choices; `era5` reads ERA5's
+FLake lake state keylessly from the Google ARCO mirror, and `auto+era5` uses
+GLSEA where it covers and ERA5 elsewhere; see
+[lake-state-initialization.md](../lake-state-initialization.md)); a research-only row
 also needs `lake_state_path`, its acquired CF NetCDF file, and
 `lake_state_accept_licence` set to that row's licence string.
+`woof go --lakes clm|ic|off` writes these lake keys, plus `sf_lake_physics`
+and `use_lakedepth`, on every domain in a launched copy of the experiment
+([lakes.md](../lakes.md)).
 
 `clos_choice` and `ishallow` configure the Grell-Freitas cumulus scheme
 (`cu_physics = 3`): which closure the deep scheme uses (0, the default,
@@ -1531,7 +1537,7 @@ A lake GFS does not resolve takes the skin temperature of the nearest GFS
 water, as WPS metgrid and real.exe give it. This is the default,
 `gfs_lake_skin = "wps"`. To give such lakes the 2 m air temperature instead,
 as the inland-water reach does for other routes, add
-`gfs_lake_skin = "air_temperature"` to the complete `[case_data]` table. Other
+`gfs_lake_skin = "air_temperature"` to the `[case_data]` table (see below). Other
 inland water (enclosed water that is not a land-use lake) keeps the inland-water
 reach either way, and the preparation log counts the cells it fills.
 
@@ -1552,13 +1558,26 @@ SHA-256. The analysis is fetched without a key into
 without network access, put the file there under its own name. When no
 analysis can be read, the run prints a warning that names each file it tried,
 and keeps the forcing's ice for that run only. `gfs_lake_ice = "wps"` in the
-complete `[case_data]` table keeps the forcing's ice outright, which is what
+`[case_data]` table keeps the forcing's ice outright, which is what
 WPS and real.exe give.
+
+A config whose `[case_data]` table holds nothing but the GFS keys
+(`gfs_lake_skin`, `gfs_lake_ice`, `gfs_snow_convention`) stays on `woof go`'s
+fetch route, so a downloaded GFS run and `--prepare-only` both read them:
+
+```toml
+[case_data]
+gfs_lake_skin = "air_temperature"
+gfs_lake_ice = "wps"
+```
+
+Any other key in the table makes it a declared-inputs table, which needs the
+complete table (forcing, Vtable, namelist, geography) and runs through
+`woof run`, as before.
 
 The GFS decoder defaults to the WPS snow convention: `SNOW = 2 * WEASD` and
 `SNOWH = 0.005 * SNOW`. To retain the raw GFS WEASD and separately supplied SNOD,
-add `gfs_snow_convention = "raw"` to the experiment's complete `[case_data]`
-table. The table's other required input declarations still apply. The decoder
+add `gfs_snow_convention = "raw"` to the experiment's `[case_data]` table. The decoder
 records the convention and refuses a cached decoder result using another
 convention. Direct bridge callers can select the same behavior with
 `GPUWM_GFS_SNOW_CONVENTION=raw`; normal preparation uses the experiment policy.

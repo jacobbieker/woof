@@ -123,6 +123,85 @@ def acquire_field(row, field, valid_time, bounds, cache):
 
 
 
+def acquire_zarr(row, valid_time, longitude, cache):
+    """One native Zarr extraction of every field of a ``zarr`` row.
+
+    The time is the latest hour at or before initialization that the store
+    has actually written.  The store's declared stop runs ahead of its chunks
+    (ARCO declared ERA5T through 2026-11-10 while 2026-11-09 00Z had no chunk
+    yet; rw_zarr then serves the fill value), so an hour whose first field is
+    entirely missing is passed over for the same hour a day earlier, within
+    the row's max_age_hours.  The request is the whole globe, so a lake cell
+    is sampled off the same window whichever other cells are asked for (the
+    X12 rule below); the one-column seam of the cyclic axis sits at 180 E
+    unless a target lies within 1 degree of it, then at 0 E.  A full ARCO
+    field is one chunk, so this costs no more than a crop.
+    """
+    from woof.fetch import ERA5_PRESSURE_LEVELS_HPA
+    from woof.netcdf_bridge import Dataset
+    from woof.zarr_bridge import extract_regular_zarr, zarr_coverage
+    coverage = zarr_coverage(row['store'])
+    valid = utc(valid_time)
+    selected = min(valid.replace(minute=0, second=0, microsecond=0), utc(coverage['accepted_stop']))
+    lon = np.asarray(longitude, np.float64)
+    lon = lon[np.isfinite(lon)]
+    near_seam = bool(lon.size) and bool((np.abs(((lon + 180.) % 360.) - 180.) > 179.).any())
+    west = 0. if near_seam else -180.
+    tried = []
+    while (valid - selected).total_seconds() / 3600 <= row['max_age_hours']:
+        request = {'store': row['store'], 'times': [selected.strftime('%Y-%m-%dT%H:%M:%SZ')],
+                   'area': [-90., west, 90., west + 360.], 'expected_levels_hpa': list(ERA5_PRESSURE_LEVELS_HPA),
+                   'fields': [{'source': f['variable'], 'output': f['variable'], 'units': f['units'],
+                               'pressure': False} for f in row['field']]}
+        key = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+        path = cache / f'{row["id"]}-{key}.nc'
+        if path.exists():
+            return path, f'{row["store"]}@{request["times"][0]}'
+        stage = cache / f'.{key}.{os.getpid()}'
+        stage.mkdir(parents=True, exist_ok=True)
+        try:
+            staged = stage / path.name
+            extract_regular_zarr(request, request_path=stage / 'request.json', output=staged,
+                                 progress=lambda line: None)
+            with Dataset(staged) as ds:
+                written = bool(np.isfinite(np.asarray(ds.variables[row['field'][0]['variable']][0])).any())
+            if written:
+                staged.replace(path)
+                return path, f'{row["store"]}@{request["times"][0]}'
+        finally:
+            for leftover in stage.iterdir():
+                leftover.unlink()
+            stage.rmdir()
+        tried.append(request['times'][0])
+        selected -= timedelta(days=1)
+    raise ValueError(f'{row["store"]}: no hour within {row["max_age_hours"]} h before {valid.isoformat()} '
+                     f'is written (tried {", ".join(tried) or "none"})')
+
+
+def apply_ice_authority(values, forcing_ice):
+    """A model source fills lake temperatures; the forcing's ice decides frozen cells.
+
+    Where the forcing has ice (an observed analysis such as IMS on the GFS
+    route) the cell keeps it: the source's water profile is dropped there and
+    its ice thickness and temperature are kept only where the source is frozen
+    too, at the forcing's concentration.  Where the forcing is open water the
+    source's ice is dropped, so a model never freezes or thaws a lake that the
+    forcing's ice analysis decided.  Returns the per-rule cell counts.
+    """
+    icy = np.asarray(forcing_ice, np.float64) > 0
+    for name in ('water_temperature', 'bottom_temperature', 'mixed_layer_depth', 'temperature_shape_factor'):
+        if name in values:
+            values[name] = np.where(icy, np.nan, values[name])
+    depth = values.get('ice_thickness')
+    frozen = icy & np.isfinite(depth) & (depth > 0) if depth is not None else np.zeros_like(icy)
+    if depth is not None:
+        values['ice_thickness'] = np.where(frozen, depth, np.nan)
+    if 'ice_temperature' in values:
+        values['ice_temperature'] = np.where(frozen, values['ice_temperature'], np.nan)
+    values['ice_fraction'] = np.where(frozen, np.asarray(forcing_ice, np.float64), np.nan)
+    return dict(forcing_ice_cells=int(icy.sum()), source_ice_kept_cells=int(frozen.sum()))
+
+
 def coordinate_coverage(latitude, longitude, row):
     """Rust request envelope and in-source count; Python only marshals arrays."""
     from woof.ingest.cpu_backend import masked_fields_cpu_backend, host_step_workers
@@ -143,8 +222,47 @@ def coordinate_coverage(latitude, longitude, row):
     return dict(zip(('south', 'north', 'west', 'east', 'covered'), map(float, out)))
 
 
-def load_state(source, valid_time, lat, lon, *, path='', accept_licence='', cache=None):
-    """Sample canonical fields and return provenance, ages, coverage and errors."""
+#: ``lake_state_source`` chains: each source fills only the lake cells the
+#: earlier ones left without a water temperature.
+CHAINS = {'auto+era5': ('auto', 'era5')}
+
+
+def load_chain(sources, valid_time, lat, lon, *, forcing_ice=None, **kwargs):
+    """Observed sources first, then a model fallback for the cells they miss."""
+    lat, lon = np.asarray(lat, np.float64), np.asarray(lon, np.float64)
+    values, receipts = {}, []
+    pending = np.ones(lat.shape, bool)
+    for source in sources:
+        if not pending.any():
+            break
+        ice = None if forcing_ice is None else np.asarray(forcing_ice)[pending]
+        part, receipt = load_state(source, valid_time, lat[pending], lon[pending],
+                                   forcing_ice=ice, **kwargs)
+        receipt['requested_cells'] = int(pending.sum())
+        receipts.append(receipt)
+        if not part:
+            continue
+        index = np.flatnonzero(pending)
+        for name, data in part.items():
+            values.setdefault(name, np.full(lat.shape, np.nan))[index] = data
+        bound = np.zeros(lat.shape, bool)
+        bound[index] = np.isfinite(part.get('water_temperature', np.full(index.size, np.nan)))
+        if forcing_ice is not None and 'water_temperature' in part:
+            bound[index] |= np.isfinite(part.get('ice_thickness', np.full(index.size, np.nan)))
+        pending &= ~bound
+    errors = [e for r in receipts for e in r.get('errors', ())]
+    status = ('bound' if not pending.any() else 'partial_forcing_fallback') if values else 'forcing_fallback'
+    return values, dict(schema='gpuwm.lake-init.v1', source='+'.join(sources), status=status,
+                        chain=receipts, errors=errors, unbound_cells=int(pending.sum()),
+                        target_cells=int(lat.size))
+
+
+def load_state(source, valid_time, lat, lon, *, path='', accept_licence='', cache=None, forcing_ice=None):
+    """Sample canonical fields and return provenance, ages, coverage and errors.
+
+    ``forcing_ice`` (the forcing's ice concentration at the targets) is
+    required by a row with ``ice_authority = "forcing"``.
+    """
     started = time.monotonic()
     rows = source_rows()
     if source == 'auto':
@@ -158,7 +276,10 @@ def load_state(source, valid_time, lat, lon, *, path='', accept_licence='', cach
         row = rows[source]
     if row['research_only'] and accept_licence != row['licence']:
         raise ValueError(f'lake source {row["id"]} requires lake_state_accept_licence={row["licence"]!r}; its data cannot be a default')
-    if not path and any('url' not in f for f in row['field']):
+    zarr = row.get('acquisition') == 'zarr'
+    if row.get('ice_authority') == 'forcing' and forcing_ice is None:
+        raise ValueError(f'lake source {row["id"]} needs the forcing ice concentration: its ice is subordinate to the forcing\'s')
+    if not path and not zarr and any('url' not in f for f in row['field']):
         raise ValueError(f'lake source {row["id"]} requires lake_state_path to an acquired CF NetCDF file')
     cache = Path(cache or os.environ.get('WOOF_LAKE_STATE_CACHE', str(Path.home()/'.woof/cache/lake-state')))
     cache.mkdir(parents=True, exist_ok=True)
@@ -179,8 +300,10 @@ def load_state(source, valid_time, lat, lon, *, path='', accept_licence='', cach
                       east=min(row.get('east', 180.), envelope['east']+.04))
     date = utc(valid_time).date().isoformat()
     fields = [f for f in row['field'] if f.get('start', '0000') <= date <= f.get('end', '9999')]
+    shared = acquire_zarr(row, valid_time, lon, cache) if zarr and not path else None
     def read(field):
-        p, url = (Path(path), None) if path else acquire_field(row, field, valid_time, bounds, cache)
+        p, url = ((Path(path), None) if path else shared if shared
+                  else acquire_field(row, field, valid_time, bounds, cache))
         data, evidence = decode_field(p, row, field, valid_time, lat, lon)
         evidence['url'] = url
         return field['name'], data, evidence
@@ -203,6 +326,8 @@ def load_state(source, valid_time, lat, lon, *, path='', accept_licence='', cach
         ice_rule='thickness times horizontal concentration distributed top-down as equivalent ice volume; concentration alone retains the lakeini thickness prior, reported as unobserved')
     if errors and source != 'auto':
         raise ValueError('explicit lake-state source incomplete: '+'; '.join(errors))
+    if row.get('ice_authority') == 'forcing' and values:
+        receipt['ice_authority'] = dict(rule='forcing', **apply_ice_authority(values, forcing_ice))
     return values, receipt
 
 
@@ -223,8 +348,11 @@ def initialize_surface(fields, cfg, *, valid_time, latitude, longitude, cold_sta
     la, lo = cp.broadcast_arrays(cp.asarray(latitude), cp.asarray(longitude))
     if la.shape != shape:
         raise ValueError('lake initialization coordinates must match the surface grid')
-    values, receipt = load_state(source, valid_time, cp.asnumpy(la[mask]), cp.asnumpy(lo[mask]),
-        path=getattr(cfg, 'lake_state_path', ''), accept_licence=getattr(cfg, 'lake_state_accept_licence', ''))
+    loader = (lambda *a, **kw: load_chain(CHAINS[source], *a, **kw)) if source in CHAINS else (
+        lambda *a, **kw: load_state(source, *a, **kw))
+    values, receipt = loader(valid_time, cp.asnumpy(la[mask]), cp.asnumpy(lo[mask]),
+        path=getattr(cfg, 'lake_state_path', ''), accept_licence=getattr(cfg, 'lake_state_accept_licence', ''),
+        forcing_ice=cp.asnumpy(fields['xice'][mask]) if 'xice' in fields else np.zeros(int(mask.sum().item())))
     for error in receipt.get('errors', ()):
         print(f'WARNING lake initialization retained forcing: {error}', file=sys.stderr, flush=True)
     if receipt.get('uncovered_targets'):
