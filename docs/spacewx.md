@@ -213,8 +213,9 @@ columns at each history frame's valid time and writes four surface rows:
 The forecast is identical with the option on or off.
 
 - The Kp is the one the start sees (`spacewx_kp_source`): the latest observed
-  GFZ Kp, the solar-wind estimate (OMNI2 or SWPC) for the latest 3-hour
-  interval, or a number. It is held for the run (persistence) and must lie
+  GFZ Kp, the solar-wind estimate (OMNI2 or SWPC) for the latest complete
+  3-hour interval (one whose fitted hours T-1, T and T+1 are all at or before
+  the start), or a number. It is held for the run (persistence) and must lie
   within 24 h before the start. The receipt names the interval it came from.
 - The dipole frame is taken at the start; the MLT turns with each frame.
 - Rows are rebuilt from the configuration on restart (no checkpoint state),

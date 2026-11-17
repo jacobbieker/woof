@@ -80,7 +80,8 @@ def test_gfz_holds_the_latest_observed_kp_at_the_start(tmp_path):
     path.write_text("\n".join(text) + "\n")
     asked = []
 
-    def loader(source, needed):
+    def loader(source, needed, kp=False):
+        assert kp                                # the start's interval, not only its day
         asked.append((source, needed))
         return indices.read(path)
 
@@ -113,9 +114,11 @@ def test_the_solar_wind_kp_is_the_latest_interval_with_data():
 
     drive = ah.activity("swpc", START, solarwind_loader=loader)
     assert calls[0][0] == "swpc" and calls[0][2] == START
-    assert drive["kp"] == pytest.approx(wind.kp_estimate(START))
+    # The 18 UT interval needs the 19 UT hour the record does not have yet, so
+    # the latest complete one (15 UT: hours 14, 15, 16) is taken.
+    assert drive["kp"] == pytest.approx(wind.kp_estimate(START - timedelta(hours=3)))
     assert drive["record"]["spacewx_kp_estimated"] is True
-    assert drive["record"]["spacewx_kp_interval"] == "2024-05-10T18:00Z"
+    assert drive["record"]["spacewx_kp_interval"] == "2024-05-10T15:00Z"
     with pytest.raises(ah.AuroraHistoryError, match="no swpc solar wind"):
         ah.activity("swpc", START + timedelta(days=3), solarwind_loader=loader)
 

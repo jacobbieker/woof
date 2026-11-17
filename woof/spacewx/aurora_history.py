@@ -122,8 +122,9 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
     else:
         from woof.spacewx import indices
         load = indices_loader or indices.load
-        # The start's own day: the latest Kp is the one that matters here.
-        geo = load("gfz" if kind == "gfz" else value, start)
+        # The start's own interval: the latest Kp is the one that matters here
+        # (a cached GFZ file without it is fetched again).
+        geo = load("gfz" if kind == "gfz" else value, start, kp=True)
         kp, at = _latest(geo.kp_at, start, "observed Kp")
         record = {"spacewx_kp_source": geo.source, "spacewx_kp_sha256": geo.sha256,
                   "spacewx_kp_interval": f"{at:%Y-%m-%dT%H:%M}Z"}
