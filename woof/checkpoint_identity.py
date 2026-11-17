@@ -329,7 +329,12 @@ CONFIG_DIAGNOSTIC_FIELDS = frozenset(
      "uh_layers",
      # Correct mode WB1 (woof/correct_mode.py OUTPUT_ONLY_KEYS): books the
      # settled-cloud total CLOUDNC and changes no prognostic word.
-     "thompson_cloud_surface_booking"})
+     "thompson_cloud_surface_booking",
+     # The opt-in ionosphere history (woof.spacewx.history): IONO_* rows
+     # only, computed from the run start and the frame's valid time; no
+     # prognostic word moves (tests/test_spacewx_ionosphere_history.py).
+     "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
+     "spacewx_ionosphere_maps"})
 
 #: Versioned semantic identities.  These are deliberately explicit instead
 #: of inferred from scheme numbers: a trajectory-changing implementation or

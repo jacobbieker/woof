@@ -5167,7 +5167,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "a074463c2516bcbc998e602f94ba36b834f065359c49a0ae8c1c800edfac7c39"
+    "sha256": "329ae34c65234b204cf534fa15bc19600af7b3b05185d64cb41d458225d7f82a"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5287,11 +5287,11 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "bacdbf2dba2602ca13a1013223e60fa2359be1c1cf03470e0ef8a0c431e75ce6"
+    "sha256": "6255e7f844b3bba51b236f088894f52961838c1db2c6b4d7dbb928603a921539"
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "e718cc188f906b40463c018eea20b8b523799b45a539a3ef5a03b64ac9e79797"
+    "sha256": "17fb949bf923865891a5427051582f254822baa9eb283b332b34e5425101a5f5"
    },
    {
     "file": "woof/core/refl.py",
@@ -5455,7 +5455,7 @@
    },
    {
     "file": "woof/doctor.py",
-    "sha256": "c17c28087faebc4c63726ef957385d789ef77eb6cf0c35c599fd07ff42db8140"
+    "sha256": "9a14b7018d591f222630e364083081f7183da0af545cd1e035f5c2c740609b7b"
    },
    {
     "file": "woof/ensemble/batch_acoustic_fusion.py",

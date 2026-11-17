@@ -217,6 +217,9 @@ DEFAULT_OFF = frozenset({
     *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS,
     # The opt-in TSI forcing (woof.spacewx), absent while off.
     "solar_tsi_opt", "solar_tsi_source", "solar_tsi_mode",
+    # The opt-in ionosphere history (woof.spacewx), absent while off.
+    "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
+    "spacewx_ionosphere_maps",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The RUC sea-ice threshold switch, absent at 0 as in a 2.8.5 header.

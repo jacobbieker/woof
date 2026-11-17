@@ -580,7 +580,7 @@
     },
     {
       "file": "docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md",
-      "line": 87,
+      "line": 91,
       "kind": "prose",
       "anchor": "with `--fmad=false --ftz=false --prec-div=true --prec-sqrt=true`.",
       "anchor_sha256": "aec4308057b7c411662a9d1abce4ea502370397404ae24acb02d09ec3c098163",
@@ -14165,7 +14165,7 @@
     },
     {
       "file": "tests/test_dependency_declaration_parity.py",
-      "line": 1293,
+      "line": 1304,
       "kind": "prose",
       "anchor": "assert not any(\"ftz_receipt\" in p.as_posix() for p in shipped), (",
       "anchor_sha256": "e5cb54db15e7df42b62964cc8de0de83e4e81fa2d04b8ee94c6ea660059f180a",
@@ -15826,7 +15826,7 @@
     },
     {
       "file": "tests/test_hex_hydro_remap_gpu.py",
-      "line": 136,
+      "line": 145,
       "kind": "prose",
       "anchor": "def test_subnormal_words_are_kept_as_numpy_keeps_them():",
       "anchor_sha256": "c693a0c701956b8b9e443f23d9d33479b0b3a49907603e234ebe4588bbbad525",
@@ -15837,7 +15837,7 @@
     },
     {
       "file": "tests/test_hex_hydro_remap_gpu.py",
-      "line": 137,
+      "line": 146,
       "kind": "prose",
       "anchor": "\"\"\"The binary32 casts keep subnormals as numpy's astype does (no FTZ in the module's compile).\"\"\"",
       "anchor_sha256": "bf24ff8ab640033a55aa5bab9e856936023e99792878dc8be2015ecd0de3e720",
@@ -61982,7 +61982,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 3713,
+      "line": 3716,
       "kind": "prose",
       "anchor": "# Direct no-FTZ units compose their math and radar headers. The column",
       "anchor_sha256": "184948054ba022bbad69bebea2f81b001a2e7b7ecb87d70239779c61b7c82b7a",
@@ -61993,7 +61993,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 3731,
+      "line": 3734,
       "kind": "prose",
       "anchor": "# Strict -std=c++17 --fmad=false --ftz=false: acm2_pbl_column keeps scalars",
       "anchor_sha256": "9e2c3aa7d94671e8f147fc58dbf1a25417824d5ce144d07fe2b7ca715d74fb41",
@@ -62004,7 +62004,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 4225,
+      "line": 4228,
       "kind": "prose",
       "anchor": "# the direct NVRTC route (--ftz=false); the column arrays live in a",
       "anchor_sha256": "f2e5728c42b24c29e0cdbaee8dae62e5470b144a7383f39941bdf8b4959d8e1e",
@@ -62015,7 +62015,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 4231,
+      "line": 4234,
       "kind": "prose",
       "anchor": "# --ftz=false and strict-only --fmad=false, priced as acm2pbl_composed. Its column",
       "anchor_sha256": "8c902ee0768eea050e9eb4c49a9c618660b542f690745a745db2cbb4e0f91960",
@@ -62026,7 +62026,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 4238,
+      "line": 4241,
       "kind": "prose",
       "anchor": "# MRF's column unit uses the direct no-FTZ compiler; the separate",
       "anchor_sha256": "c58e3c51ed2580a30a90a625ada80e2683a99b24f0ab860af67502df588d0d58",
