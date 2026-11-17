@@ -489,6 +489,8 @@ def _register_run_parser(sub):
                           "a TOML file selects settings (as on woof go); without it the run has no hydro")
     from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
     add_wrf_hydro_arguments(run)
+    from woof.nn.launch import add_arguments as add_nn_arguments
+    add_nn_arguments(run)
     run.add_argument("--restart-from", type=Path, default=None, metavar="WRFRST",
                      help="continue a WRF run from its restart file (wrfrst_d01_<time>, any "
                           "suffix): the state, physics and clock are the file's, and the "
@@ -1259,6 +1261,8 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         # --wrf-hydro / [wrf_hydro] (woof.wrf_hydro_route): the launch's
         # environment, inherited by every process it starts.
         from woof.wrf_hydro_route import launch_scope as wrf_hydro_scope
+        # --nn (woof.nn.launch): likewise, as WOOF_NN_CONFIG.
+        from woof.nn.launch import launch_scope as nn_scope
         _config = getattr(args, "config", None)
         with memory_gate_override(getattr(args, "no_memory_gate", False)), waves_scope(
                 getattr(args, "waves", None), getattr(args, "waves_options", None)), \
@@ -1268,7 +1272,9 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
                                             and Path(str(_config)).suffix == ".toml"
                                             and Path(str(_config)).is_file()) else None,
                                 members=getattr(args, "members", None),
-                                gpu_exchange=getattr(args, "wrf_hydro_gpu_exchange", None)):
+                                gpu_exchange=getattr(args, "wrf_hydro_gpu_exchange", None)), \
+                nn_scope(getattr(args, "nn", None) if args.command in ("run", "go") else None,
+                         members=getattr(args, "members", None)):
             if args.command == "run" and getattr(args, "hydro", None) is not None:
                 from woof.hydro.runtime import run_scope
                 with run_scope(args.hydro, getattr(args, "config", None)):

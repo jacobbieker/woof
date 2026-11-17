@@ -7909,6 +7909,8 @@ def _add_go_arguments(parser) -> None:
                         "forecast has no hydro")
     from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
     add_wrf_hydro_arguments(parser)
+    from woof.nn.launch import add_arguments as add_nn_arguments
+    add_nn_arguments(parser)
     from woof.source_adapters import ensemble_source_ids
     from woof.ensemble.wofs_recipe import source_spec_argument
     parser.add_argument("--source", type=source_spec_argument, default=None, metavar="SOURCE[:N],...",

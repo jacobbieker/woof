@@ -5416,6 +5416,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     _assert_derived_copies(experiment, source)
     from woof.wrf_hydro_route import refuse_multiple_domains
     refuse_multiple_domains(len(experiment.domains))
+    from os import environ
+    if environ.get("WOOF_NN_CONFIG"):  # --nn (woof.nn.launch)
+        from woof.nn.launch import refuse_multiple_domains as refuse_nn_domains
+        refuse_nn_domains(len(experiment.domains))
     return _bind_physics_params(experiment, source)
 
 
