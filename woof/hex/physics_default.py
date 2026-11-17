@@ -34,8 +34,10 @@ from typing import Any, Iterable, Mapping, Sequence
 SCHEMA = "gpuwm-hex.physics-default/v1"
 TABLE_PATH = "data/profiles/physics-default.v1.json"
 
-#: Forecast-door flags that name the run's physics.  ``--physics`` is matched exactly (not ``--physics-mode``).
-_NAMING_FLAGS = ("--physics-profile", "--physics-suite", "--physics-namelist", "--physics", "--physics-backend")
+#: Forecast-door flags that name the run's physics outright.  ``--physics`` (matched exactly, not ``--physics-mode``)
+#: and ``--physics-namelist`` name it unless they carry only service selectors (:func:`override_names_physics`,
+#: :func:`namelist_names_physics`), so :func:`names_physics` reads them on their own.
+_NAMING_FLAGS = ("--physics-profile", "--physics-suite", "--physics-backend")
 #: ``--convection`` names physics unless it is the door default.
 _CONVECTION_DEFAULTS = ("auto", "")
 
@@ -124,18 +126,35 @@ def namelist_names_physics(path: Any) -> bool:
         return True
     if not groups:
         return True
+    service_groups = service_namelist_groups()
     for group, options in groups.items():
         name = str(group).casefold()
         if name in ROUTE_ONLY_GROUPS:
             continue
-        if name == SERVICE_GROUP and options and all(str(key).casefold() in service_backend_keys() for key in options):
+        # A service group names nothing when every key in it is a service selector (an empty one names nothing).
+        if name in service_groups and all(str(key).casefold() in service_backend_keys() for key in options):
             continue
         return True
     return False
 
 
-#: The namelist group that carries the MPAS suite route's WOOF-only service selectors (``&hex_mpasphys``).
-SERVICE_GROUP = "hex_mpasphys"
+def _default_route_rows() -> list[Mapping[str, Any]]:
+    """The MPAS suite route rows the default recipes run (every suite a default or recipe rule names, on the row
+    the suites table routes it to by default), so a service exempted here is one that route carries."""
+    from .physics_suites import load_table as suites_table, route_default_for
+
+    table = load_table()
+    suites = {rule["suite"] for rule in (*table["rules"], *table.get("recipe_rules", ()))}
+    return [row for row in suites_table().values()
+            if isinstance(row, Mapping) and "suite_routes" in row
+            and any(suite in row["suite_routes"] and route_default_for(row, suite) for suite in suites)]
+
+
+@lru_cache(maxsize=1)
+def service_namelist_groups() -> frozenset[str]:
+    """The namelist groups the default route writes its backend selectors to (``backend_namelist_group``)."""
+    return frozenset(str(row["backend_namelist_group"]).casefold() for row in _default_route_rows()
+                     if row.get("backend_namelist_group"))
 
 
 @lru_cache(maxsize=1)
@@ -149,13 +168,11 @@ def service_backend_keys() -> frozenset[str]:
     mpas-physics-seam.md document it, counted as naming physics, so no suite was added; with no suite the run took
     the WOOF route, which refused the key as "not RunConfig fields", and the lake model could only be turned on by
     restating the suite, mode and profile.  The slots' own backend selectors (``config_microp_backend`` ...) still
-    name physics."""
-    from .physics_suites import load_table as suites_table
-
+    name physics.  Only the services of the route the default recipes run count (:func:`_default_route_rows`): a
+    service another route alone carries needs that route's suite named."""
     keys: set[str] = set()
-    for row in suites_table().values():
-        services = row.get("services") if isinstance(row, Mapping) else None
-        for service in (services or {}).values():
+    for row in _default_route_rows():
+        for service in (row.get("services") or {}).values():
             selector = service.get("backend_selector") if isinstance(service, Mapping) else None
             if selector:
                 keys.add(str(selector).casefold())
@@ -167,26 +184,29 @@ def override_names_physics(text: Any) -> bool:
     return str(text).split("=", 1)[0].strip().casefold() not in service_backend_keys()
 
 
+def _flag_value(items: Sequence[str], index: int) -> str:
+    """The value of the flag at ``items[index]``: ``--flag=VALUE`` or ``--flag VALUE`` ('' when none follows)."""
+    item = items[index]
+    if "=" in item:
+        return item.split("=", 1)[1]
+    return items[index + 1] if index + 1 < len(items) else ""
+
+
 def names_physics(flags: Sequence[Any] | None) -> bool:
     """Whether a forecast-flag list names the run's physics (so no default applies)."""
     items = _unwrap(flags or ())
     for index, item in enumerate(items):
         name = _flag_name(item)
         if name == "--physics-namelist":
-            value = item.split("=", 1)[1] if "=" in item else (items[index + 1] if index + 1 < len(items) else "")
-            if namelist_names_physics(value):
+            if namelist_names_physics(_flag_value(items, index)):
                 return True
-            continue
-        if name == "--physics":
-            value = item.split("=", 1)[1] if "=" in item else (items[index + 1] if index + 1 < len(items) else "")
-            if override_names_physics(value):
+        elif name == "--physics":
+            if override_names_physics(_flag_value(items, index)):
                 return True
-            continue
-        if name in _NAMING_FLAGS:
+        elif name in _NAMING_FLAGS:
             return True
-        if name == "--convection":
-            value = item.split("=", 1)[1] if "=" in item else (items[index + 1] if index + 1 < len(items) else "")
-            if str(value).strip().lower() not in _CONVECTION_DEFAULTS:
+        elif name == "--convection":
+            if str(_flag_value(items, index)).strip().lower() not in _CONVECTION_DEFAULTS:
                 return True
     return False
 
@@ -265,10 +285,18 @@ def suite_takes_door_step(named: Mapping[str, Any]) -> bool:
     """Whether a door's named physics (``global_door.forecast_arg_physics``) takes the forecast door's own step for
     that suite, so the door passes no mesh ``--dt`` of its own.  The WOOF suite named alone keeps the door's mesh
     step, exactly as a bare run did before 0.4.6."""
-    if named.get("namelist"):
+    if _namelist_owns_step(named):
         return True
     suite = named.get("suite")
     return bool(suite) and suite != arwen_suite()
+
+
+def _namelist_owns_step(named: Mapping[str, Any]) -> bool:
+    """Whether a named ``--physics-namelist`` decides the run's step (its ``config_dt``).  A namelist that names no
+    physics (``&diagnostics``, service selectors) rides beside the default suite and leaves the step to the door,
+    as a run with no namelist does."""
+    namelist = named.get("namelist")
+    return bool(namelist) and namelist_names_physics(namelist)
 
 
 def door_step(named: Mapping[str, Any], dt_seconds: Any, finest_dx_m: Any) -> list[str]:
@@ -283,7 +311,7 @@ def door_step(named: Mapping[str, Any], dt_seconds: Any, finest_dx_m: Any) -> li
     ``config_dt`` decides) and the WOOF suite keep their roads unchanged."""
     if not suite_takes_door_step(named):
         return ["--dt", str(dt_seconds)]
-    if named.get("namelist") or dt_seconds is None or finest_dx_m is None:
+    if _namelist_owns_step(named) or dt_seconds is None or finest_dx_m is None:
         return []
     from .mpas_defaults import default_dt_seconds
 

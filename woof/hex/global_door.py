@@ -477,7 +477,8 @@ def plan(args: argparse.Namespace, table: Mapping[str, Any] | None = None) -> di
     from .physics_default import names_physics
     if suite_arm is None and physics.get("route") == "mpas" and names_physics(args.forecast_arg):
         # --forecast-arg names an ArWen-route option (--physics KEY=VALUE, --convection, a backend row) with no
-        # suite: the forecast door runs it on the ArWen suite, so the plan says so and takes that arm's step.
+        # suite: the forecast door runs it on the ArWen suite, so the plan says so and takes that arm's step.  A
+        # service selector (--physics config_clm_lake_backend=...) names none and keeps the MPAS default below.
         row["physics"], physics = "arwen", dict(table["physics"]["arwen"])
     if suite_arm is None and physics.get("route") == "mpas":
         from .physics_default import default_suite, record as default_record
