@@ -142,15 +142,24 @@ RTX A6000):
 | case | measure | woof | reference |
 |---|---|---|---|
 | 2-D canyon, H/W = 1, 10 cells per H | vortex centre x/W, z/H | 0.55, 0.45 | about 0.5 and 0.5 to 0.6 (Brown et al. 2000; Li, Liu and Leung 2008) |
-| | floor wind / U(2H), roof wind / U(2H) | -0.10, +0.20 | reverse floor flow, forward roof shear |
-| | wind inside the buildings / U(2H) | 1.8e-4 | 0 |
-| cube, 8 cells per H, periodic 12H x 6H | reattachment behind the cube / H | 2.4 | about 1.6 (Martinuzzi and Tropea 1993), 1.7 (Shah and Ferziger 1997) |
-| | horseshoe separation ahead / H | 0.25 | about 1.0 |
-| | wind inside the cube / U(2H) | 0.011 | 0 |
+| | recirculation cells up the canyon | 1 | 1 |
+| | floor wind / U(2H), roof wind / U(2H) | -0.09, +0.20 | reverse floor flow, forward roof shear |
+| | wind inside the buildings / U(2H) | 1.7e-4 | 0 |
+| 2-D canyon, H/W = 2 | recirculation cells up the canyon | 2 | 2 (Li, Liu and Leung 2008; Sini, Anquetin and Mestayer 1996) |
+| | primary vortex centre z/H | 0.67 | upper canyon |
+| | floor wind / U(2H) | +0.02 | forward, under the lower counter-rotating vortex |
+| cube, 8 cells per H, periodic 12H x 6H | reattachment behind the cube / H | 1.86 | about 1.6 (Martinuzzi and Tropea 1993), 1.7 (Shah and Ferziger 1997) |
+| | horseshoe separation ahead / H | 0.5 | about 1.0 |
+| | wind inside the cube / U(2H) | 0.008 | 0 |
 
-The cube's floor is free-slip in this benchmark (no surface layer), so no
-boundary layer approaches the cube. That weakens the horseshoe vortex and
-lengthens the wake. A real case runs a surface layer on the ground.
+The benchmarks run without a surface layer, so the ground takes the LES
+closure's prescribed drag (`isfflx = 0`, `tke_drag_coefficient`). They set
+it to the walls' own log law (z0 = 1 cm at the first level). With a
+free-slip floor instead, no boundary layer approaches the cube: the
+horseshoe shrinks to 0.25 H and the wake reattaches at 2.4 H. A real case
+runs a surface layer on the ground. Eight cells per H under-resolve the
+horseshoe; Martinuzzi and Tropea's 1.0 H is a channel flow at
+Re_H = 4e4.
 
 ## Licences
 

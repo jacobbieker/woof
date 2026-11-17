@@ -7,7 +7,8 @@ under the default (fast) and strict numerics (and run the file again with
 ``obstacle_opt = 1`` and no buildings, and one whose face list carries only
 zero coefficients (the kernel launches and must write nothing) step to the
 same words.  A one-minute canyon checks the sign of the in-canyon vortex;
-the full canyon and cube benchmarks are ``slow``.
+the full canyon (H/W = 1 and 2) and cube benchmarks are ``slow`` and run
+with ``WOOF_OBSTACLE_BENCHMARKS=1``.
 """
 import dataclasses
 import os
@@ -205,6 +206,13 @@ def test_no_obstacles_step_the_words_the_off_path_steps(numerics):
         result.stdout[-4000:] + result.stderr[-4000:])
 
 
+#: The full benchmarks take minutes each (5-10 on an A6000, more on Metal):
+#: run them with WOOF_OBSTACLE_BENCHMARKS=1.
+_benchmarks = pytest.mark.skipif(
+    not os.environ.get("WOOF_OBSTACLE_BENCHMARKS"),
+    reason="set WOOF_OBSTACLE_BENCHMARKS=1 for the canyon and cube benchmarks")
+
+
 def _within(value, band):
     low, high = band
     return ((low is None or value > low) and (high is None or value < high))
@@ -224,6 +232,7 @@ def test_one_minute_canyon_turns_the_right_way():
 @requires_gpu
 @pytest.mark.gpu
 @pytest.mark.slow
+@_benchmarks
 def test_canyon_benchmark():
     from woof.verify.cases import obstacle_canyon as oc
 
@@ -236,6 +245,7 @@ def test_canyon_benchmark():
 @requires_gpu
 @pytest.mark.gpu
 @pytest.mark.slow
+@_benchmarks
 def test_cube_benchmark():
     from woof.verify.cases import obstacle_cube as oc
 
@@ -248,6 +258,7 @@ def test_cube_benchmark():
 @requires_gpu
 @pytest.mark.gpu
 @pytest.mark.slow
+@_benchmarks
 def test_deep_canyon_has_two_vortices():
     from woof.verify.cases import obstacle_canyon as oc
 

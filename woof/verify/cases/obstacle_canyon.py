@@ -61,6 +61,14 @@ GATES_ASPECT_2 = {
 }
 
 
+def floor_drag(dz: float, z0: float = 0.01) -> float:
+    """The ground's drag coefficient, the same log law the obstacles' walls
+    use (woof.core.obstacles), for the first level dz/2 above it.  With no
+    surface layer (sf_sfclay_physics = 0, isfflx = 0) the LES closure takes
+    the ground's momentum flux from tke_drag_coefficient."""
+    return (0.4 / np.log(0.5 * dz / z0)) ** 2
+
+
 def default_config(*, minutes: float = 10.0, aspect: float = 1.0
                    ) -> RunConfig:
     nx = int(round((W + B) / DX))
@@ -70,7 +78,8 @@ def default_config(*, minutes: float = 10.0, aspect: float = 1.0
         ztop=5 * height, dt=0.1,
         run_seconds=minutes * 60.0, km_opt=3, mix_isotropic=1, c_s=0.18,
         bl_pbl_physics=0, sf_sfclay_physics=0, moist=False, mp_physics=0,
-        isfflx=0, tke_heat_flux=0.0, tke_drag_coefficient=0.0013,
+        isfflx=0, tke_heat_flux=0.0,
+        tke_drag_coefficient=float(floor_drag(DX)),
         time_step_sound=40, obstacle_opt=1, case="obstacle_canyon")
 
 

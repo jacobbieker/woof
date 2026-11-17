@@ -23,6 +23,7 @@ from __future__ import annotations
 import numpy as np
 
 from woof.config import RunConfig
+from woof.verify.cases.obstacle_canyon import floor_drag
 
 H = 20.0
 DX = 2.5
@@ -41,7 +42,8 @@ def default_config(*, minutes: float = 15.0) -> RunConfig:
         ztop=5 * H, dt=0.1, run_seconds=minutes * 60.0, km_opt=3,
         mix_isotropic=1, c_s=0.18, bl_pbl_physics=0, sf_sfclay_physics=0,
         moist=False, mp_physics=0, isfflx=0, tke_heat_flux=0.0,
-        tke_drag_coefficient=0.0013, time_step_sound=28, obstacle_opt=1,
+        tke_drag_coefficient=float(floor_drag(DX)), time_step_sound=28,
+        obstacle_opt=1,
         case="obstacle_cube")
 
 
