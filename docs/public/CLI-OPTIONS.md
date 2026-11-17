@@ -1900,6 +1900,12 @@ Takes no options of its own.
 | `--dry-run` | print the manifest and upload nothing |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 
+## `woof grad`
+
+| option | what it does |
+|---|---|
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
 ## `woof hex`
 
 | option | what it does |
