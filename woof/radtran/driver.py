@@ -96,9 +96,13 @@ def _hg_phase(g, mu):
     return (1.0 - g * g) / (1.0 + g * g - 2.0 * g * mu) ** 1.5
 
 
-def _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer=None, aer_nodes=None):
-    """(dtau, ssa, pmom, ptrue) for every column at representative wavelength iw."""
-    mo = optics.molecular(col, rep, iw)
+def _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer=None, aer_nodes=None, cache=None):
+    """(dtau, ssa, pmom, ptrue) for every column at representative wavelength iw.
+
+    ``cache``: a dict kept across wavelengths for one ``col`` and ``cl``
+    (:func:`woof.radtran.optics.molecular`, :func:`woof.radtran.clouds.hu_stamnes`)."""
+    memo = optics._memo
+    mo = optics.molecular(col, rep, iw, cache=cache)
     lam = float(rep.wvl[iw])
     tr = mo.dtau_ray
     ta = mo.dtau_abs
@@ -115,18 +119,18 @@ def _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer=None, aer_nodes
     tsca = tr.copy()
     text = tr + ta
     hg = []                       # (tau_sca, g) per cloud kind for the exact phase function
-    dz_km = col.z[..., :-1] - col.z[..., 1:]
+    dz_km = memo(cache, "dz_km", lambda: col.z[..., :-1] - col.z[..., 1:])
     if cl is not None and cl.lwc is not None:
         lwc = np.broadcast_to(cl.lwc, shape)
-        reff = np.where(lwc > 0, np.broadcast_to(cl.reff_wc, shape), 10.0)
-        ext, w, g = clouds.hu_stamnes(lam, reff)
+        reff = memo(cache, "reff_wc", lambda: np.where(lwc > 0, np.broadcast_to(cl.reff_wc, shape), 10.0))
+        ext, w, g = clouds.hu_stamnes(lam, reff, cache=None if cache is None else cache.setdefault("hu", {}))
         tau = lwc * ext * dz_km
         hg.append(_add_cloud(opts, tau, w, g, coef, nmom))
         tsca = tsca + hg[-1][0]
         text = text + (hg[-1][0] if opts.no_absorption else tau)
     if cl is not None and cl.iwc is not None:
         iwc = np.broadcast_to(cl.iwc, shape)
-        reff = np.where(iwc > 0, np.broadcast_to(cl.reff_ic, shape), 30.0)
+        reff = memo(cache, "reff_ic", lambda: np.where(iwc > 0, np.broadcast_to(cl.reff_ic, shape), 30.0))
         ext, w, g = clouds.fu96(lam, reff, reff_def_fu=opts.ic_fu_reff_def)
         tau = iwc * ext * dz_km * 1000.0
         hg.append(_add_cloud(opts, tau, w, g, coef, nmom))
@@ -180,8 +184,11 @@ GROUP_BYTES = 2 << 30
 def optics_bytes_per_wavelength(ncol, nlyr, nstr, nang=0):
     """Host bytes one representative wavelength's optics take in a solve:
     dtau, ssa, the nstr+1 moments, the user-angle phase functions and zlev
-    (float64), counted three times for the per-wavelength parts, their
-    concatenation and the solver's contiguous copies."""
+    (float64), counted three times: the stacked arrays, the solver's
+    contiguous copies, and headroom.  Not counted: each column block's
+    wavelength-free cache (air and gas columns, REPTRAN brackets, cloud
+    selections), which lives through the group's wavelengths and, with
+    aerosols or a single block, spans every column."""
     return 3 * 8 * int(ncol) * (int(nlyr) * (2 + int(nstr) + 1 + int(nang)) + int(nlyr) + 1)
 
 
@@ -205,40 +212,80 @@ def band_groups(rep, bands, per_wavelength, group_bytes=None):
     return groups
 
 
-def _layer_optics_columns(opts, col, rep, iw, cl, nstr, numu_angles, aer=None, aer_nodes=None):
-    """:func:`_layer_optics` over column blocks on host threads.
+def _layer_optics_columns(opts, col, rep, iws, cl, nstr, numu_angles, aer=None, aer_nodes=None):
+    """:func:`_layer_optics` at every representative wavelength of ``iws``:
+    (text, ssa, pmom, ptrue) stacked (nw, ncol, ...) and one peaks list per
+    wavelength.
 
     Every operation in ``_layer_optics`` is per column (elementwise, or along
     a column's own layers), so a block of columns gives the block's words of
     the whole-domain call; numpy releases the GIL inside its loops, so the
-    blocks run in parallel and their temporaries stay small.  Aerosol layers
-    (per-species node selections) keep the single call.
+    blocks run in parallel on host threads and their temporaries stay small.
+    Each block runs every wavelength with one cache of its wavelength-free
+    parts and writes its rows of the stacked arrays in place.  Aerosol
+    layers (per-species node selections) keep the single block.
     """
-    nd = col.z.shape[0] if col.z.ndim == 2 else 0
+    nw = len(iws)
+    if col.z.ndim == 1:
+        # one column (levels only): its optics have no column axis to block or
+        # to write rows of, so stack the per-wavelength results
+        cache = {}
+        res = [_layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer, aer_nodes, cache)
+               for iw in iws]
+        text, ssa, pmom, ptrue = (None if res[0][i] is None else np.stack([x[i] for x in res])
+                                  for i in range(4))
+        return text, ssa, pmom, ptrue, [x[4] for x in res]
+    nd = col.z.shape[0]
     nthreads = min(8, os.cpu_count() or 1)
+    out = {}
+
+    def put(k, c0, res):
+        text, ssa, pmom, ptrue, peaks = res
+        if k not in out:
+            # allocated by the first block, which runs alone on this thread
+            if c0 != 0:
+                raise RuntimeError("_layer_optics_columns: block 0 must run first and alone")
+            if not out:
+                out["arrays"] = [None if a is None else np.empty((nw, nd) + a.shape[1:], dtype=a.dtype)
+                                 for a in (text, ssa, pmom, ptrue)]
+            out[k] = (peaks if text.shape[0] == nd else
+                      [(kind, np.empty((nd,) + ts.shape[1:], ts.dtype), np.empty((nd,) + g.shape[1:], g.dtype))
+                       for kind, ts, g in peaks])
+        rows = slice(c0, c0 + text.shape[0])
+        for dst, a in zip(out["arrays"], (text, ssa, pmom, ptrue)):
+            if dst is not None:
+                dst[k, rows] = a
+        if out[k] is not peaks:
+            for (_, ts_d, g_d), (_, ts, g) in zip(out[k], peaks):
+                ts_d[rows] = ts
+                g_d[rows] = g
+
     if aer is not None or nd <= OPTICS_CHUNK or nthreads < 2:
-        return _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer, aer_nodes)
-    from concurrent.futures import ThreadPoolExecutor
-    L = col.z.shape[1] - 1
+        cache = {}
+        for k, iw in enumerate(iws):
+            put(k, 0, _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer, aer_nodes, cache))
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        L = col.z.shape[1] - 1
 
-    def block(c0):
-        rows = slice(c0, min(c0 + OPTICS_CHUNK, nd))
-        cb = atmosphere.Column(z=col.z[rows], p=col.p[rows], t=col.t[rows], n_air=col.n_air[rows],
-                               dens={k: v[rows] for k, v in col.dens.items()})
-        clb = None if cl is None else CloudLayers(**{
-            k: (None if v is None else np.broadcast_to(v, (nd, L))[rows]) for k, v in cl.__dict__.items()})
-        ang = None if numu_angles is None else numu_angles[rows]
-        return _layer_optics(opts, cb, rep, iw, clb, nstr, ang)
+        def block(c0):
+            rows = slice(c0, min(c0 + OPTICS_CHUNK, nd))
+            cb = atmosphere.Column(z=col.z[rows], p=col.p[rows], t=col.t[rows], n_air=col.n_air[rows],
+                                   dens={k: v[rows] for k, v in col.dens.items()})
+            clb = None if cl is None else CloudLayers(**{
+                k: (None if v is None else np.broadcast_to(v, (nd, L))[rows]) for k, v in cl.__dict__.items()})
+            ang = None if numu_angles is None else numu_angles[rows]
+            cache = {}
+            for k, iw in enumerate(iws):
+                put(k, c0, _layer_optics(opts, cb, rep, iw, clb, nstr, ang, cache=cache))
 
-    # the first block alone: it loads the lazily read tables (netCDF) once, off the threads
-    parts = [block(0)]
-    with ThreadPoolExecutor(nthreads) as pool:
-        parts += list(pool.map(block, range(OPTICS_CHUNK, nd, OPTICS_CHUNK)))
-    text, ssa, pmom = (np.concatenate([q[i] for q in parts]) for i in range(3))
-    ptrue = None if parts[0][3] is None else np.concatenate([q[3] for q in parts])
-    peaks = [(kind, np.concatenate([q[4][j][1] for q in parts]), np.concatenate([q[4][j][2] for q in parts]))
-             for j, (kind, _, _) in enumerate(parts[0][4])]
-    return text, ssa, pmom, ptrue, peaks
+        # the first block alone: it loads the lazily read tables (netCDF) once,
+        # off the threads, and allocates the stacked arrays
+        block(0)
+        with ThreadPoolExecutor(nthreads) as pool:
+            list(pool.map(block, range(OPTICS_CHUNK, nd, OPTICS_CHUNK)))
+    text, ssa, pmom, ptrue = out["arrays"]
+    return text, ssa, pmom, ptrue, [out[k] for k in range(nw)]
 
 
 def _add_cloud(opts, tau, w, g, coef, nmom):
@@ -352,18 +399,13 @@ def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None
     nw_total = len({int(i) for b in bands for i in rep.band(b).iwvl})
     for group in band_groups(rep, bands, per_iw, group_bytes):
         giws = sorted({int(i) for j in group for i in rep.band(bands[j]).iwvl})
-        D, S, P, PT, PK = [], [], [], [], []
-        for iw in giws:
-            d, s, p, pt, pk = _layer_optics_columns(opts, col, rep, iw, clouds_in, nstr,
-                                                    ang if flags & solver.TMS else None, aerosol, aer_nodes)
-            D.append(d); S.append(s); P.append(p); PK.append(pk)
-            if pt is not None:
-                PT.append(pt)
+        D, S, P, PT, PK = _layer_optics_columns(opts, col, rep, giws, clouds_in, nstr,
+                                                ang if flags & solver.TMS else None, aerosol, aer_nodes)
         nw = len(giws)
-        dtau = np.concatenate(D).reshape(nw * nd, L)
-        ssa = np.concatenate(S).reshape(nw * nd, L)
-        pmom = np.concatenate(P).reshape(nw * nd, L, nstr + 1)
-        ptrue = np.concatenate(PT).reshape(nw * nd, L, numu, nphi) if PT else None
+        dtau = D.reshape(nw * nd, L)
+        ssa = S.reshape(nw * nd, L)
+        pmom = P.reshape(nw * nd, L, nstr + 1)
+        ptrue = None if PT is None else PT.reshape(nw * nd, L, numu, nphi)
         del PT
         zlev = np.tile(col.z, (nw, 1))
         flux, rad = solver.solve(nstr=nstr, flags=flags, dtau=dtau, ssa=ssa, pmom=pmom, umu0=np.tile(mu0, nw),

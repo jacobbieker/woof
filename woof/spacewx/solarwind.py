@@ -38,7 +38,7 @@ from pathlib import Path
 
 import numpy as np
 
-from woof.spacewx.solar_irradiance import cache_root
+from woof.spacewx.solar_irradiance import _naive_utc, cache_root
 
 OMNI_URL = "https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2_{year}.dat"
 SWPC_MAG_URL = "https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json"
@@ -69,7 +69,7 @@ class SolarWind:
     sha256: str
 
     def _index(self, when: datetime) -> int:
-        i = int((np.datetime64(when.replace(tzinfo=None), "h") - self.hours[0]).astype(int))
+        i = int((np.datetime64(_naive_utc(when), "h") - self.hours[0]).astype(int))
         if not 0 <= i < self.hours.size:
             raise SolarWindError(
                 f"{when}: outside the solar-wind record {self.hours[0]}..{self.hours[-1]} ({self.source})")
@@ -82,7 +82,7 @@ class SolarWind:
 
     def kp_estimate(self, when: datetime) -> float:
         """The fitted Kp of the 3-hour UT interval containing ``when``."""
-        start = when.replace(tzinfo=None, minute=0, second=0, microsecond=0)
+        start = _naive_utc(when).replace(minute=0, second=0, microsecond=0)
         start -= timedelta(hours=start.hour % 3)
         rows = [self._index(start + timedelta(hours=k)) for k in (-1, 0, 1)
                 if 0 <= int((np.datetime64(start + timedelta(hours=k), "h") - self.hours[0]).astype(int))

@@ -354,6 +354,12 @@ def test_new_fields_are_reviewed_defaults_appended_last():
         assert names.pop() == name
         assert RunConfig.__dataclass_fields__[name].default == default
         assert RunConfig.__dataclass_fields__[name].kw_only
+    # The opt-in resolved obstacles, appended off (woof.core.obstacles).
+    from woof.config import OBSTACLE_RUN_DEFAULTS
+    for name in reversed([*OBSTACLE_RUN_DEFAULTS]):
+        assert names.pop() == name
+        field = RunConfig.__dataclass_fields__[name]
+        assert field.kw_only and field.default == OBSTACLE_RUN_DEFAULTS[name]
     # The opt-in TSI forcing (woof.spacewx), appended off.
     for name, default in (("solar_tsi_mode", "absolute"), ("solar_tsi_source", ""),
                           ("solar_tsi_opt", 0)):
@@ -952,7 +958,9 @@ def _check_frozen_defaults(actual):
                          ("spacewx_ionosphere_opt", 0), ("spacewx_f107_source", ""),
                          ("spacewx_f107_mode", "81day"), ("spacewx_ionosphere_maps", "ccir"),
                          # the opt-in auroral oval history (woof.spacewx), off
-                         ("spacewx_aurora_opt", 0), ("spacewx_kp_source", "")):
+                         ("spacewx_aurora_opt", 0), ("spacewx_kp_source", ""),
+                         # the opt-in resolved obstacles, off
+                         *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field
     for field,value in (("urban_ucm_generation","wrf_471"),("urban_treeoption",-1),
                         ("urban_ttscheme",-1),("urban_fvg",-1.),("urban_table_dir","")):

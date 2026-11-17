@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 447,
+**Which keys a `[[domain]]` table may override.** Exactly these 453,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -407,6 +407,8 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
     gf_deep_rain_evaporation_booking
+    obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
+    obstacle_drag_coefficient  obstacle_wall_z0
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
     radt_minutes  bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics
     ra_rrtmg_variant  wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat
@@ -581,6 +583,22 @@ column budget closes; every tendency is unchanged. It is not a WRF
 namelist key, so it is set in the TOML (or as `--physics
 gf_deep_rain_evaporation_booking=true` on the hex WOOF arm). See the
 Grell-Freitas notes in [PHYSICS.md](PHYSICS.md#cumulus-cu_physics).
+
+`obstacle_opt` (default `0`) resolves buildings and other obstacles on an
+LES or other high-resolution domain. It is woof's own option, not a WRF
+one, and it is per domain because buildings belong to one grid.
+`obstacle_opt = 1` reads `obstacle_file`, a `woof-buildings.v1` product
+made on that domain's own mass grid (see [BUILDINGS.md](BUILDINGS.md)), and
+represents the buildings as porous immersed obstacles. A layer at least
+`obstacle_solid_fraction` (default `0.5`) full of building is solid, and
+momentum on its faces is relaxed to zero at `obstacle_relax_factor`/`dt`
+(default `10`). Partly built layers get canopy form drag with coefficient
+`obstacle_drag_coefficient` (default `0.4`, BEP's). Open faces beside or
+above a wall get log-law wall stress with roughness `obstacle_wall_z0` m
+(default `0.01`). The option is refused without a file, with a file and
+`obstacle_opt = 0`, above 500 m grid spacing (use `sf_urban_physics`
+there), on the global grid, and in a moving frame (`umove`, `vmove`). With `obstacle_opt = 0`, or a product
+with no buildings, no obstacle code runs.
 
 The eleven numerics from `diff_6th_slopeopt` through `tke_budget` are
 per domain because WRF declares every one of them `max_domains` and the
@@ -1523,14 +1541,17 @@ stream carries the rows yet. Its CCIR/URSI maps and IGRF-14 coefficients are
 fetched on first use into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`) and
 checked against pinned SHA-256 sums. The GFZ index file is a living record, so
 it has no pinned sum: it is fetched again when it ends before the day before the
-start, its format is checked on reading, and its SHA-256 is recorded in the
-run's receipt.
+start (and once more when that day's flux is not yet released), its format is
+checked on reading, and its SHA-256 is printed with the rest of the
+ionosphere's receipt as the run starts (the `[spacewx ionosphere]` line).
 
 `spacewx_kp_source` is refused while `spacewx_aurora_opt = 0`, and
 `spacewx_aurora_opt = 1` is refused without a radiation scheme, on a streamed
 domain and on hex, for the same reasons as the ionosphere rows. For the aurora
 the GFZ file is fetched again when it does not reach the start's own day, since
-the latest Kp is the one that matters.
+the latest Kp is the one that matters. The Kp, the interval it belongs to and the
+source are printed as the run starts (the `[spacewx aurora]` line). Both aurora
+keys are output-only, so a restart may switch the rows on or off.
 
 ## What a WRF namelist setting becomes
 
