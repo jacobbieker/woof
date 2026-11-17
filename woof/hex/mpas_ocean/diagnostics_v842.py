@@ -55,11 +55,10 @@ from importlib.resources import files
 
 import numpy as np
 
-from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
 from . import eos_v842
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
 
 SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_diagnostics.F:90-870,1279-1308,1541-1830",
@@ -92,7 +91,7 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 
 def _function(precision: str, name: str):
     import cupy as cp
-    options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+    options = launch_options()
     return _module_on(cp.cuda.Device().id, precision, options).get_function(name)
 
 

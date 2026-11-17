@@ -41,10 +41,9 @@ from importlib.resources import files
 
 import numpy as np
 
-from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
 
 SOURCE_FILES = ("src/core_ocean/mode_forward/mpas_ocn_time_integration_split.F:84-223,227-259,638-1384",)
 MODULE_OPTIONS = COMPILE_OPTIONS
@@ -75,7 +74,7 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 def _launch(precision: str, name: str, n: int, args: tuple, threads: int | None = None) -> None:
     import cupy as cp
     if n > 0:
-        options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+        options = launch_options()
         block = _BLOCK if threads is None else threads
         _module_on(cp.cuda.Device().id, precision, options).get_function(name)(
             ((n + block - 1) // block,), (block,), args)
@@ -131,23 +130,45 @@ def check_config(configs: dict, n_btr_subcycles: int) -> None:
         halo_schedule(configs, n_btr_subcycles)
 
 
+#: (edgesOnEdge, nEdgesOnEdge) device arrays -> (the arrays, their reach); see _edge_reach
+_REACH: dict[tuple[int, int], tuple] = {}
+
+
+def _edge_reach(mesh: dict) -> np.ndarray:
+    """``reach[i]``: the largest edgesOnEdge neighbour edges ``1..i+1`` read, a
+    running maximum over the edges. One host read of the connectivity per
+    mesh (it is constant over a run), not two per barotropic stage: the reads
+    synchronise the device, and the stage runs twice a step."""
+    import cupy as cp
+    eoe_d, n_eoe_d = mesh["edgesOnEdge"], mesh["nEdgesOnEdge"]
+    hit = _REACH.get((id(eoe_d), id(n_eoe_d)))
+    if hit is not None and hit[0] is eoe_d and hit[1] is n_eoe_d:
+        return hit[2]
+    n_eoe = cp.asnumpy(n_eoe_d)
+    eoe = cp.asnumpy(eoe_d)
+    cols = np.arange(eoe.shape[1])[None, :] < n_eoe[:, None]
+    reach = np.maximum.accumulate(np.where(cols, eoe, np.iinfo(eoe.dtype).min).max(axis=1))
+    while len(_REACH) >= 4:
+        _REACH.pop(next(iter(_REACH)))
+    # the entry holds the arrays: their ids are not reused while it lives
+    _REACH[(id(eoe_d), id(n_eoe_d))] = (eoe_d, n_eoe_d, reach)
+    return reach
+
+
 def _check_copies(mesh: dict, schedule: list[dict]) -> None:
     """Every edgesOnEdge neighbour a corrector reads lies in the extent it copied."""
-    import cupy as cp
     edges = [int(x) for x in mesh["nEdgesArray"]]
-    n_eoe = cp.asnumpy(mesh["nEdgesOnEdge"])
-    eoe = cp.asnumpy(mesh["edgesOnEdge"])
-    for step in schedule:
-        for copied, computed in step["correctors"]:
-            n = edges[computed - 1]
-            limit = edges[copied - 1] + 1
-            cols = np.arange(eoe.shape[1])[None, :] < n_eoe[:n, None]
-            if (eoe[:n][cols] > limit).any():
-                raise ConfigurationRefusal(
-                    knob="nEdgesArray", value=edges,
-                    reason="a barotropic corrector reads an edgesOnEdge neighbour outside the extent it copied "
-                           "(v8.4.2 reads an uninitialised scratch word)",
-                    declaration="each halo layer's edgesOnEdge within the next layer")
+    pairs = {pair for step in schedule for pair in step["correctors"]}
+    reach = _edge_reach(mesh) if pairs else None
+    for copied, computed in sorted(pairs):
+        n = edges[computed - 1]
+        limit = edges[copied - 1] + 1
+        if n > 0 and reach[n - 1] > limit:
+            raise ConfigurationRefusal(
+                knob="nEdgesArray", value=edges,
+                reason="a barotropic corrector reads an edgesOnEdge neighbour outside the extent it copied "
+                       "(v8.4.2 reads an uninitialised scratch word)",
+                declaration="each halo layer's edgesOnEdge within the next layer")
 
 
 def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict, diagnostics: dict,
