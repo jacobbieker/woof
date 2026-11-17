@@ -512,7 +512,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   zero-fill into its first accumulating launch (`zero_first`, word-identical
   on CUDA and Metal). On CUDA the four flux-divergence launches take 32 x 4
   thread blocks instead of 128-wide rows (word-identical; 6-14 % less kernel
-  time at 150-260 points per row on the A6000; Metal keeps the rows). Its advection receipts for the RTX 5090 and RTX PRO 6000
+  time at 150-260 points per row on the A6000; Metal keeps the rows). The
+  positive-definite flux and renormalisation launches take 64 x 4 blocks
+  on CUDA (word-identical in fast and strict; 3-11 % less kernel time,
+  e.g. 257 -> 230 us at 50x150x186; `WOOF_PD_BLOCK=BXxBY` overrides, width
+  a multiple of 32; Metal keeps the rows). Its advection receipts for the RTX 5090 and RTX PRO 6000
   (Blackwell) are **not re-pinned**: no Blackwell card was available, so
   `certified_unrepinned` in each fixture's `gpu-receipts.json` records the
   pins and the commit, and the gate warns rather than fails for those pins.
