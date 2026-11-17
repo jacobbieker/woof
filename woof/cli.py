@@ -642,6 +642,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     fetch_register_cli(sub)
     _lazy_register("woof.hf_fetch")(sub)
     fire_static_register_cli(sub)
+    _lazy_register("woof.static.buildings_domain")(sub)
     _lazy_register("woof.fire_ignition")(sub)
     fire_ideal_register_cli(sub)
     ideal_plan_register_cli(sub)

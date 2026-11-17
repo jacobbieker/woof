@@ -95,6 +95,32 @@ through its own projection (`ProjectionGrid`); idealised cases use the model
 plane (`CartesianGrid`, `block_raster`). Holes (NaN) count as neither
 building nor open ground.
 
+## Building the product for a domain (`woof buildings`)
+
+```bash
+woof buildings --namelist namelist.wps --domain 4 \
+    --footprints buildings.geojson:osm --output buildings_d04.nc
+```
+
+The command reads one domain of a WPS namelist (the innermost by default)
+and writes its product. `--footprints PATH[:SOURCE]` names a footprint file
+and its source (`osm`, `overture`, `microsoft`, `google-open-buildings`, or
+`user`); repeat it for more files. The footprints are read over the domain
+plus a two-cell halo and burned on one UTM lattice at a quarter of the grid
+spacing (`--resolution`). GEM-15 is range-read under the same box into the
+high-resolution terrain cache (`--cache`, `--offline`):
+
+- with footprints, GEM-15 only supplies the nDSM median for footprints that
+  have no `height` attribute; only footprints become buildings, so trees
+  and bridges in the nDSM do not;
+- without footprints, the filtered nDSM is the product (objects under
+  `--min-area`, 200 m2 by default, are dropped);
+- `--no-gem15` uses the footprints' own heights and storeys only.
+
+The receipt is printed and stored in the product. It gives the box, the
+GEM-15 windows, and for each footprint file where every height came from
+(attribute, GEM-15 median, storeys, default, or dropped).
+
 ## Resolved obstacles in the model (`obstacle_opt = 1`)
 
 On an LES or other high-resolution domain (grid spacing up to 500 m;
