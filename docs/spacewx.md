@@ -127,6 +127,20 @@ Three findings stand out:
 | GNSS TEC maps (validation only) | NASA CDDIS IONEX (Earthdata login) | public |
 | CMIP6 solar forcing (EPP ion-pair rates) | input4MIPs SOLARIS-HEPPA | CC BY 4.0 |
 
+**Redistribution.** The coefficient sets listed above are fetched at run time into the
+space-weather cache and checked against pinned sizes and SHA-256 sums. woof does not ship them:
+none is in the wheel, the repository or the test fixtures, which use synthetic coefficients.
+Attribution:
+- The CCIR foF2 and M(3000)F2 maps are from CCIR Report 340 (ITU-R, 1966/1988), and the URSI
+  foF2 maps from Rush et al. 1989 (Telecomm. J. 56, 179). Both are distributed with IRI and
+  copied by PyIRI (Forsythe et al. 2023, Space Weather 21, e2022SW003352, MIT licence), whose
+  repository at commit c0a50e0a is the download source.
+- IGRF-14 is from IAGA Division V-MOD (Alken et al. 2025), downloaded from NOAA NCEI.
+- Kp, ap and F10.7 are from GFZ Potsdam (Matzka et al. 2021, CC BY 4.0), with F10.7 from
+  DRAO/NRCan. Cite these when publishing results.
+- The IONEX TEC maps are from IGS through NASA CDDIS (Johnston et al. 2017, the IGS). They are
+  used for grading only.
+
 NRLMSIS 2.x is not freely licensed (NRL restricts commercial use), so it is not bundled.
 Neither are the GPL OVATION and Weimer ports. The thermosphere and aurora layers use
 clean-room implementations of published formulas instead.
