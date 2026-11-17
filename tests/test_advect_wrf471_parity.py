@@ -281,7 +281,7 @@ def test_advect_a6000_stands_in_for_the_rtx5090_receipt_pending_its_rerecord(mon
                                      RECEIPT_MODULES, {})
     report = oracle.certified_unrepinned_report(
         "gpu-receipt-sm120.json", _receipt("gpu-receipt-sm120.json"), moved, sm120)
-    assert "STALE, pending a re-record on the NVIDIA GeForce RTX 5090" in report
+    assert "STALE, pending a re-record on: NVIDIA GeForce RTX 5090" in report
     assert "gpu-receipt-sm86.json gates kernel edits" in report
     # The A6000 compares words even when its receipt trails; an older card
     # without a stand-in record still skips.

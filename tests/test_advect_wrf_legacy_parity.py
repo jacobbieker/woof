@@ -171,7 +171,7 @@ def test_the_a6000_stands_in_for_the_rtx5090_receipts_pending_their_rerecord(mon
         assert record["rerecord_on"].startswith("NVIDIA GeForce RTX 5090")
         receipt = json.loads((LEGACY_DIR / name).read_text(encoding="ascii"))
         moved = {pin: (receipt["kernels"][pin], "a" * 64) for pin in record["pins"]}
-        assert "STALE, pending a re-record on the NVIDIA GeForce RTX 5090" in (
+        assert "STALE, pending a re-record on: NVIDIA GeForce RTX 5090" in (
             certified_unrepinned_report(name, receipt, moved, record))
     a6000 = json.loads((LEGACY_DIR / "gpu-receipt-sm86.json").read_text(encoding="ascii"))
     assert receipt_gates("gpu-receipt-sm86.json", a6000, _INDEX)
