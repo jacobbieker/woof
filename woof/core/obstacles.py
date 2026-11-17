@@ -238,17 +238,29 @@ def attach(state, cfg, morph=None) -> ObstacleFaces | None:
     if not getattr(cfg, "obstacle_opt", 0):
         state._obstacles = None
         return None
+    digest = None
     if morph is None:
+        from pathlib import Path
+
+        from woof.file_digest import sha256_file
         from woof.static.buildings import read_product
-        morph = read_product(cfg.obstacle_file)
+        path = Path(cfg.obstacle_file)
+        digest = sha256_file(path, block_bytes=1024 * 1024)
+        morph = read_product(path)
+        if sha256_file(path, block_bytes=1024 * 1024) != digest:
+            raise RuntimeError(f"obstacle_file {str(path)!r} changed while "
+                               "it was read")
     periodic_x = not (cfg.open_x or cfg.specified or cfg.nested)
     periodic_y = not (cfg.open_y or cfg.specified or cfg.nested)
     fu, fv, fw, receipt = build_coefficients(
         morph, layer_heights(state), cfg, periodic_x=periodic_x,
         periodic_y=periodic_y, ring=_boundary_ring(cfg))
     counts = (fu[0].size, fv[0].size, fw[0].size)
+    # product_sha256 is the bytes of the product this domain loaded (None
+    # for a morphology handed in memory); checkpoints bind it
+    # (woof.io.restart.physics_setup_identity).
     receipt.update(sources=list(getattr(morph, "sources", ())),
-                   option=int(cfg.obstacle_opt))
+                   option=int(cfg.obstacle_opt), product_sha256=digest)
     if sum(counts) == 0:
         state._obstacles = None
         state._obstacles_receipt = receipt

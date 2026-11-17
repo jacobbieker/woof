@@ -609,6 +609,11 @@ STATE_INFRA_ATTRS = frozenset({
     # names/bytes, not this preparation selector, own forecast forcing and
     # are already covered by setup_fingerprint/lateral prefix identity.
     "_external_scalar_boundary_fields",
+    # The opt-in obstacles' device face lists and host receipt
+    # (woof.core.obstacles.attach): rebuilt from obstacle_file and the base
+    # state at the first stage, and the product's bytes are bound by the
+    # physics setup identity.
+    "_obstacles", "_obstacles_receipt",
     # Config binds speed; restored U/V already use this frame (see restore).
     "_moving_frame_velocity", "_moving_frame_initialized",
     # The HAILCAST generation a resumed run keeps (woof.core.hail
@@ -4312,21 +4317,32 @@ def physics_setup_identity(state, cfg) -> dict:
     if parameters is not None:
         identity["physics_params"] = parameters
     # The opt-in resolved obstacles (woof.core.obstacles): the coefficients
-    # are rebuilt at resume from the woof-buildings.v1 product, so its bytes
-    # are bound here; a replaced product refuses the resume.  Off adds no
+    # are rebuilt at resume from the woof-buildings.v1 product, so the bytes
+    # of the product the domain loaded are bound here and a resume against
+    # other bytes refuses.  A domain not yet attached (the coefficients
+    # build at its first stage) binds the file it will load.  Off adds no
     # key, so every earlier checkpoint's setup bytes are unchanged.
     if int(getattr(cfg, "obstacle_opt", 0) or 0):
-        from woof.file_digest import sha256_file
-        path = Path(cfg.obstacle_file)
-        try:
-            identity["obstacles"] = {
-                "policy": "porous-immersed-v1",
-                "product_bytes": int(path.stat().st_size),
-                "product_sha256": sha256_file(path, block_bytes=1024 * 1024)}
-        except OSError as exc:
-            raise RestartManifestError(
-                f"obstacle_file {str(path)!r} is unreadable; the checkpoint "
-                "cannot bind the buildings it ran with") from exc
+        receipt = getattr(state, "_obstacles_receipt", None)
+        if receipt is not None:
+            digest = receipt.get("product_sha256")
+            if digest is None:
+                raise RestartManifestError(
+                    "the obstacles were attached from a morphology in "
+                    "memory, not obstacle_file; a checkpoint cannot bind "
+                    "the buildings it ran with")
+        else:
+            from woof.file_digest import sha256_file
+            path = Path(cfg.obstacle_file)
+            try:
+                digest = sha256_file(path, block_bytes=1024 * 1024)
+            except OSError as exc:
+                raise RestartManifestError(
+                    f"obstacle_file {str(path)!r} is unreadable; the "
+                    "checkpoint cannot bind the buildings it runs with") \
+                    from exc
+        identity["obstacles"] = {"policy": "porous-immersed-v1",
+                                 "product_sha256": digest}
     return identity
 
 

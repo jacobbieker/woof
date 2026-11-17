@@ -234,6 +234,85 @@ def test_no_obstacles_step_the_words_the_off_path_steps(numerics):
         result.stdout[-4000:] + result.stderr[-4000:])
 
 
+def _restart(tmp):
+    """Child-process body: a checkpoint of an obstacle run continues to the
+    words of the unbroken run, and a changed buildings product refuses."""
+    import cupy as cp
+
+    from woof.core import obstacles
+    from woof.core.dycore import run_steps
+    from woof.io import restart
+    from woof.static.buildings import (CartesianGrid, aggregate,
+                                       block_raster, write_product)
+    from woof.verify.cases.obstacle_canyon import build
+
+    tmp = Path(tmp)
+    product = tmp / "buildings.nc"
+    off = _les(time_step_sound=40, mix_isotropic=1, c_s=0.18)
+    cfg = dataclasses.replace(off, obstacle_opt=1,
+                              obstacle_file=str(product))
+
+    def morph(height):
+        return aggregate([block_raster(cfg.nx, cfg.ny, cfg.dx, cfg.dy,
+                                       [(20.0, 30.0, 0.0, 8.0, height)])],
+                         CartesianGrid(cfg.nx, cfg.ny, cfg.dx, cfg.dy))
+
+    def fresh():
+        state = build(off)
+        rng = np.random.default_rng(5)
+        for name in ("u", "v", "w"):
+            field = getattr(state, name)
+            field += cp.asarray(0.5 * rng.standard_normal(field.shape),
+                                dtype=cp.float32)
+        return state
+
+    def words(state):
+        return {name: cp.asnumpy(getattr(state, name)).view(np.uint32)
+                for name in ("u", "v", "w", "thp", "php", "mup", "p")}
+
+    write_product(product, morph(10.0))
+    whole = fresh()
+    obstacles.attach(whole, cfg)
+    assert whole._obstacles_receipt["product_sha256"]
+    run_steps(whole, cfg, n=6)
+    path = restart.write_restart(tmp / "obstacles.npz", whole, cfg)
+    run_steps(whole, cfg, n=6)
+    resumed = fresh()
+    restart.restore_restart(path, resumed, cfg)
+    run_steps(resumed, cfg, n=6)
+    assert resumed._obstacles is not None
+    a, b = words(whole), words(resumed)
+    for name in a:
+        assert np.array_equal(a[name], b[name]), name
+    write_product(product, morph(14.0))
+    try:
+        restart.restore_restart(path, fresh(), cfg)
+    except restart.RestartMismatchError as exc:
+        assert "physics" in str(exc).lower(), exc
+    else:
+        raise AssertionError("a changed buildings product resumed")
+    print("RESTARTED")
+
+
+@requires_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("numerics", ["fast", "strict"])
+def test_checkpoint_continues_and_binds_the_product(numerics, tmp_path):
+    if numerics == "fast" and os.environ.get("GPUWM_WRF_EXACT", "0") == "1":
+        pytest.skip("GPUWM_WRF_EXACT=1 is strict numerics")
+    here = Path(__file__).resolve().parent
+    code = (f"import os, sys; sys.path.insert(0, {str(here)!r}); "
+            "import test_obstacles as t; "
+            f"os.environ['GPUWM_NUMERICS'] = {numerics!r}; "
+            "from woof import numerics; "
+            f"assert numerics.mode() == {numerics!r}, numerics.mode(); "
+            f"t._restart({str(tmp_path)!r})")
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                            text=True, env=dict(os.environ), timeout=900)
+    assert result.returncode == 0 and "RESTARTED" in result.stdout, (
+        result.stdout[-4000:] + result.stderr[-4000:])
+
+
 #: The full benchmarks take minutes each (5-10 on an A6000, more on Metal):
 #: run them with WOOF_OBSTACLE_BENCHMARKS=1.
 _benchmarks = pytest.mark.skipif(
