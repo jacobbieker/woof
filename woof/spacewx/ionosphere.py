@@ -30,7 +30,7 @@ import numpy as np
 
 from woof.spacewx import igrf
 from woof.spacewx.assets import PinnedAsset, fetch_pinned
-from woof.spacewx.solar_irradiance import _naive_utc
+from woof.spacewx.solar_irradiance import naive_utc as _naive_utc
 
 PYIRI_COMMIT = "c0a50e0af6370f00dd24c1f8900442fe818a331b"
 _PYIRI_RAW = f"https://raw.githubusercontent.com/victoriyaforsythe/PyIRI/{PYIRI_COMMIT}/PyIRI/coefficients"
@@ -256,8 +256,8 @@ class Ionosphere:
         f107 = float(f107)
         if not np.isfinite(f107) or f107 <= 0.0:
             raise IonosphereError(f"F10.7 {f107} sfu is not a solar flux")
-        r12 = min(f107_to_r12(f107), R12_FIT_PEAK)
-        ig12 = r12_to_ig12(r12)
+        r12 = f107_to_r12(f107)
+        ig12 = r12_to_ig12(r12)     # clamped at the fit's turning point; r12 itself is not
         ut = when.hour + when.minute / 60.0 + when.second / 3600.0
         d_f2, d_m3 = diurnal(NJ_F2, ut), diurnal(NJ_M3, ut)
         coef = np.zeros(NCOEF)

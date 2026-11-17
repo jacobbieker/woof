@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 
 from woof.spacewx.assets import PinnedAsset, fetch_pinned
-from woof.spacewx.solar_irradiance import _naive_utc
+from woof.spacewx.solar_irradiance import naive_utc as _naive_utc
 
 #: IAGA IGRF-14 coefficients (NOAA NCEI mirror of the IAGA V-MOD release).
 IGRF14 = PinnedAsset(

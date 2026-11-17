@@ -17,7 +17,7 @@ model residual of a few TECU is expected even for a perfect ionosphere.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 import gzip
 import json
 from pathlib import Path
@@ -144,12 +144,12 @@ def main(argv=None) -> int:
     import cupy as cp  # after woof: the Metal backend installs its shim on import
 
     gims = [(path, read_ionex(path)) for path in args.ionex]
-    # The fetched record must cover the last map (and its 81-day window).
+    # The F10.7 driver at the last map reads the UT day before it.
     last = max(max(gim["epochs"]) for _, gim in gims)
-    record = None if args.f107 is not None else indices.load(args.indices, last)
+    record = None if args.f107 is not None else indices.load(args.indices, last - timedelta(days=1))
     report = {"files": [], "per_file": {}}
-    all_model, all_ref, lat_ref = [], [], None
-    pooled = set()      # an epoch shared by consecutive files (24:00 = next 00:00) counts once
+    all_model, all_ref, lat_ref, lon_ref = [], [], None, None
+    previous_last = None    # a daily file's 24:00 map is the next file's 00:00 map: count it once
     for path, gim in gims:
         lat2, lon2 = np.meshgrid(gim["lat"], gim["lon"], indexing="ij")
         epochs = sorted(set(gim["epochs"]))
@@ -167,13 +167,14 @@ def main(argv=None) -> int:
         stats = statistics(model, reference, gim["lat"])
         report["files"].append(str(path.name))
         report["per_file"][path.name] = {"first": epochs[0].isoformat(), "maps": len(model), "stats": stats}
-        fresh = [i for i, epoch in enumerate(kept) if epoch not in pooled]
-        pooled.update(kept)
-        if lat_ref is not None and not np.array_equal(lat_ref, gim["lat"]):
-            raise IonexError(f"{path}: its latitude grid differs from the earlier files'")
+        fresh = [i for i, epoch in enumerate(kept) if not (i == 0 and epoch == previous_last)]
+        previous_last = kept[-1]
+        if lat_ref is not None and not (np.array_equal(lat_ref, gim["lat"])
+                                        and np.array_equal(lon_ref, gim["lon"])):
+            raise IonexError(f"{path}: its latitude/longitude grid differs from the earlier files'")
         all_model.append(model[fresh])
         all_ref.append(reference[fresh])
-        lat_ref = gim["lat"]
+        lat_ref, lon_ref = gim["lat"], gim["lon"]
         s = stats["all"]
         print(f"{path.name}: {len(model)} maps  bias {s['bias']:+6.2f}  rmse {s['rmse']:6.2f}  corr {s['corr']:5.3f}  "
               f"model {s['model_mean']:6.2f}  GIM {s['gim_mean']:6.2f} TECU")

@@ -56,10 +56,14 @@ def cache_root() -> Path:
     return Path(explicit).expanduser() if explicit else Path.home() / ".woof" / "spacewx"
 
 
-def _naive_utc(value: datetime) -> datetime:
+def naive_utc(value: datetime) -> datetime:
+    """``value`` as a naive UTC datetime: an aware one is converted, not relabelled."""
     if value.tzinfo is not None:
         value = value.astimezone(timezone.utc).replace(tzinfo=None)
     return value
+
+
+_naive_utc = naive_utc
 
 
 @dataclass(frozen=True)
@@ -201,13 +205,21 @@ def fetch_nrlssi2(years, *, cache=None, opener=None) -> list[Path]:
         except BaseException:
             part.unlink(missing_ok=True)
             raise
+        from woof.netcdf_bridge import NetcdfBridgeMissing
         try:
-            # A truncated or wrong download must not be installed: read it first.
-            _read_netcdf(part)
+            # A truncated or wrong download must not be installed: it must read
+            # as a TSI series (decodes, finite, ascending, in W m-2) first.
+            TsiSeries(*_read_netcdf(part), str(part), "")
+        except NetcdfBridgeMissing:
+            part.unlink(missing_ok=True)      # the reader is missing, not the file bad
+            raise
         except Exception as exc:
             part.unlink(missing_ok=True)
             raise SolarForcingError(f"{NRLSSI2_INDEX_URL}{names[-1]}: the download does not read "
                                     f"as a NOAA CDR TSI file ({exc}); try again") from exc
+        except BaseException:
+            part.unlink(missing_ok=True)
+            raise
         part.replace(target)
         out.append(target)
     return out

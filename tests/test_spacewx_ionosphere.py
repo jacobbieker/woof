@@ -180,6 +180,10 @@ def test_ig12_does_not_turn_over_at_high_flux():
     values = [ion.r12_to_ig12(r) for r in (0.0, 100.0, 200.0, 240.0, 300.0, 400.0)]
     assert all(b >= a for a, b in zip(values, values[1:]))
     assert values[-1] == pytest.approx(peak) and values[-2] == pytest.approx(peak)
+    # Only IG12 is held: the drivers keep the R12 the flux gives (M(3000)F2, hmF2, topside).
+    d = _iono([10.0], [0.0]).drivers(WHEN, 350.0)
+    assert d["r12"] == pytest.approx(ion.f107_to_r12(350.0)) and d["r12"] > ion.R12_FIT_PEAK
+    assert d["ig12"] == pytest.approx(peak)
 
 
 def test_aware_times_are_converted_to_utc_not_relabelled():
@@ -288,6 +292,10 @@ def test_index_parser_drivers_and_missing_values():
     when = datetime.combine(start + timedelta(days=89), datetime.min.time()).replace(hour=12)
     assert rec.f107_driver(when, "daily") == pytest.approx(100.0 + 88)      # the previous day's
     assert rec.f107_driver(when, "81day") == pytest.approx(np.mean(100.0 + np.arange(8, 89)))
+    # An aware time is read at its UTC day: 22 EST on day 88 is 03 UTC on day 89.
+    from datetime import timezone
+    est = when.replace(hour=22, tzinfo=timezone(timedelta(hours=-5))) - timedelta(days=1)
+    assert rec.f107_driver(est, "daily") == rec.f107_driver(when, "daily")
     assert rec.kp_at(datetime(2024, 3, 1, 22)) == pytest.approx(1.0)
     missing = [((2024, 3, 1), 100.0, "-1.000"), ((2024, 3, 2), -1.0, "1.000"), ((2024, 3, 3), 120.0, "1.000")]
     rec = indices.parse(_gfz(missing), "t")
