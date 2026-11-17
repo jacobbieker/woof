@@ -89,6 +89,69 @@ through its own projection (`ProjectionGrid`); idealised cases use the model
 plane (`CartesianGrid`, `block_raster`). Holes (NaN) count as neither
 building nor open ground.
 
+## Resolved obstacles in the model (`obstacle_opt = 1`)
+
+On an LES or other high-resolution domain (grid spacing up to 500 m;
+in practice a few metres) the product can be resolved by the dynamics.
+Set it per domain:
+
+```toml
+[[domain]]
+obstacle_opt = 1
+obstacle_file = "buildings_d03.nc"   # made on this domain's mass grid
+```
+
+The method is a porous immersed obstacle. It is a hybrid of the volume
+penalisation (Brinkman) method of Angot, Bruneau and Fabrie (1999), the
+masked topography of PALM, and the drag-porosity buildings of Meso-NH
+(Aumond, Masson and Lac 2013):
+
+- The solid fraction of each model layer comes from the building height
+  histogram and the base-state level heights above ground. A layer at
+  least `obstacle_solid_fraction` full is solid. Every u, v or w face next
+  to a solid cell is blocked, the C-grid rule.
+- A blocked face's coupled momentum is relaxed toward zero at the rate
+  `obstacle_relax_factor / dt`.
+- Partly built cells get canopy form drag `Cd a_f |U|`. `a_f` is the
+  cell's frontal area index spread over its building volume profile, and
+  Cd is `obstacle_drag_coefficient` (Coceal and Belcher 2004).
+- Open faces beside or above a wall get log-law wall stress
+  `(kappa / ln(d / z0))^2 |U| / spacing`, with d half the spacing and z0
+  `obstacle_wall_z0`. This is the wall model WRF-IBM uses (Lundquist et al.
+  2010, 2012; Bao, Chow and Lundquist 2018).
+
+All three act as one rate `k = a/dt + b|U|` per face. Each RK stage
+subtracts `k / (1 + k dt)` times the coupled momentum from the face's
+tendency, after the stage's other slow tendencies. That bounded implicit
+form is stable for any k. The acoustic steps carry it as part of the held
+slow forcing, so no acoustic kernel changes. The geometry is static (from
+`phb`), so a restart rebuilds the same coefficients. One fused kernel
+(`kernels/obstacle_drag.cu`, CUDA and Metal) works on a sparse list of the
+faces that touch an obstacle. Off, or with no buildings, nothing is built
+and nothing launches, and the run steps to the same bits as before (checked
+in fast and strict numerics).
+
+WRF-IBM's cut-cell reconstruction would follow sloped roofs more
+closely. It needs terrain-following interpolation stencils on every
+boundary point, which a staircase of blocked faces avoids. At a few metres
+the staircase is what PALM and most urban LES use.
+
+**Benchmarks** (`woof.verify.cases.obstacle_canyon` and `obstacle_cube`,
+RTX A6000):
+
+| case | measure | woof | reference |
+|---|---|---|---|
+| 2-D canyon, H/W = 1, 10 cells per H | vortex centre x/W, z/H | 0.55, 0.45 | about 0.5 and 0.5 to 0.6 (Brown et al. 2000; Li, Liu and Leung 2008) |
+| | floor wind / U(2H), roof wind / U(2H) | -0.10, +0.20 | reverse floor flow, forward roof shear |
+| | wind inside the buildings / U(2H) | 1.8e-4 | 0 |
+| cube, 8 cells per H, periodic 12H x 6H | reattachment behind the cube / H | 2.4 | about 1.6 (Martinuzzi and Tropea 1993), 1.7 (Shah and Ferziger 1997) |
+| | horseshoe separation ahead / H | 0.25 | about 1.0 |
+| | wind inside the cube / U(2H) | 0.011 | 0 |
+
+The cube's floor is free-slip in this benchmark (no surface layer), so no
+boundary layer approaches the cube. That weakens the horseshoe vortex and
+lengthens the wake. A real case runs a surface layer on the ground.
+
 ## Licences
 
 | source | licence | attribution woof records |
@@ -104,6 +167,12 @@ footprints is a Produced Work and must carry the attribution. A derived
 database you share publicly must itself be under ODbL.
 
 ## Limitations
+- Resolved obstacles (`obstacle_opt = 1`) act on momentum only. Scalars are
+  not masked: advection through a blocked face stops with its wind, but
+  sub-grid diffusion across a wall does not. Buildings exchange no heat or
+  moisture.
+- Buildings in the specified or nested boundary ring of a domain are
+  dropped, so the boundary update and the obstacles never fight.
 
 - Building heats, shading and moisture are not represented. The product
   describes geometry only.

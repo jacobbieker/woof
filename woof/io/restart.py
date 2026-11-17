@@ -3446,6 +3446,13 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # header ran, so it is omitted there and echoed only when selected.
     if values.get("gf_deep_rain_evaporation_booking", False) is False:
         values.pop("gf_deep_rain_evaporation_booking", None)
+    # The opt-in resolved obstacles (woof.core.obstacles): every key at its
+    # default is what every earlier header ran, so each is echoed only when
+    # it differs; obstacle_opt = 1 always echoes with its file.
+    from woof.config import OBSTACLE_RUN_DEFAULTS
+    for key, default in OBSTACLE_RUN_DEFAULTS.items():
+        if values.get(key, default) == default:
+            values.pop(key, None)
     # The opt-in TSI forcing (woof.spacewx): off is what every earlier
     # header ran, so its keys are omitted there and echoed only when on.
     if values.get("solar_tsi_opt", 0) == 0:
@@ -5634,6 +5641,12 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'bl_mynn_cloud_tendency_form': 'wrf_461',
     'bl_mynn_gsd41_unsquared_qtke': False,
     'gf_deep_rain_evaporation_booking': False,
+    'obstacle_opt': 0,
+    'obstacle_file': '',
+    'obstacle_solid_fraction': 0.5,
+    'obstacle_relax_factor': 10.0,
+    'obstacle_drag_coefficient': 0.4,
+    'obstacle_wall_z0': 0.01,
     'solar_tsi_opt': 0,
     'solar_tsi_source': '',
     'solar_tsi_mode': 'absolute',
@@ -6203,6 +6216,11 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "noahmp_snow_age": "wrf_461",
                           "urban_water_balance": "wrf_471",
                           "gf_deep_rain_evaporation_booking": False,
+                          "obstacle_opt": 0, "obstacle_file": "",
+                          "obstacle_solid_fraction": 0.5,
+                          "obstacle_relax_factor": 10.0,
+                          "obstacle_drag_coefficient": 0.4,
+                          "obstacle_wall_z0": 0.01,
                           "solar_tsi_opt": 0, "solar_tsi_source": "",
                           "solar_tsi_mode": "absolute",
                           # The correct-mode keys (2.9.0): the default is

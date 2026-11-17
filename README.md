@@ -448,6 +448,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   travel with the file. Footprints are read from a local file, not
   downloaded, and the urban schemes do not read `URB_PARAM` yet
   ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
+- **Resolved buildings in LES (`obstacle_opt = 1`, opt-in).** On a domain
+  with spacing up to 500 m, the building product becomes porous immersed
+  obstacles on the WRF route. Faces of solid cells are blocked (Brinkman
+  penalisation), partly built cells get canopy drag, and walls and roofs
+  get log-law stress. One fused CUDA/Metal kernel acts on the RK-stage
+  momentum tendencies. A street-canyon benchmark gives the H/W = 1 vortex,
+  and a cube benchmark gives the wake and horseshoe. Off, or with no
+  buildings, nothing launches and runs are bit-identical. Momentum only,
+  regional grid only.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
