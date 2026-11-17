@@ -6,7 +6,7 @@ when the path ends in ``.icechunk``, committed at every flush):
 ``inputs``        float32 ``[sample, n_inputs, column]``
 ``targets``       float32 ``[sample, n_outputs, column]``
 ``time_seconds``  float64 ``[sample]``, forecast seconds at the step
-``step``          int64 ``[sample]``, the dycore step
+``step``          int64 ``[sample]``, the dycore step (counted by the seat)
 ``column_index``  int64 ``[sample, column]``, ``j * nx + i`` on the mass grid
 
 The group attributes carry ``schema`` (:data:`SCHEMA`), the route, the
@@ -116,7 +116,7 @@ class TendencyTap:
             raise TapError(f"tap store {self.path}: cannot open it as a tendency tap "
                            f"({type(error).__name__}: {error})") from error
         if exists:
-            for key in ("schema", "inputs", "outputs", "columns", "route", "scheme", "grid", "dt",
+            for key in ("schema", "inputs", "outputs", "columns", "route", "scheme", "grid",
                         "levels", "tap_every", "tap_seed"):
                 if key in self.attrs and stored.get(key) != self.attrs[key]:
                     raise TapError(f"tap store {self.path} was written with a different {key} "
@@ -191,15 +191,14 @@ class TendencyTap:
             array.resize((samples,) + tuple(array.shape[1:]))
         self._commit(f"tendency tap: kept {samples} samples")
 
-    def truncate(self, step: int) -> None:
-        """Drop the samples recorded at ``step`` or later: a resumed run
-        writes them again."""
+    def truncate(self, time_seconds: float) -> None:
+        """Drop the samples recorded at model time ``time_seconds`` or
+        later: a resumed run writes them again."""
         self.flush()
         if not self.samples:
             return
-        steps = np.asarray(self._open_group("r")["step"][...])
-        keep = int(np.searchsorted(steps, step, side="left")) if np.all(np.diff(steps) >= 0) \
-            else int(np.count_nonzero(steps < step))
+        times = np.asarray(self._open_group("r")["time_seconds"][...])[:self.samples]
+        keep = int(np.searchsorted(times, float(time_seconds), side="left"))
         if keep < self.samples:
             self._resize(keep)
             self.samples = keep

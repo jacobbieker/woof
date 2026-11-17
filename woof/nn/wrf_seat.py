@@ -26,7 +26,9 @@ smooths at the grid scale).
 When.  A scheme's slot holds the tendency of its last call (``radt``,
 ``cudt``, ``bldt`` > 0 hold it over steps), so a scheme is recorded only on
 a step on which it ran (its ``PhysicsDriver.call_counts`` counter moved),
-and then only on steps that are multiples of ``tap_every``.  ``total`` is
+and then only on every ``tap_every``-th dycore step the seat has seen
+(``step`` in the record counts those; an adaptive clock's ``cfg.dt`` varies,
+so model time does not name a step, and a resumed run counts afresh).  ``total`` is
 recorded on every such step; it sums slots held from different steps.
 
 ``mode = "tap"`` (this module's one mode for now) records ``(inputs,
@@ -202,11 +204,11 @@ class WrfColumnSeat:
                 raise NNConfigError("--nn input 'rthraten': this configuration runs no radiation")
 
     # ------------------------------------------------------------ columns
-    def draw(self, step: int) -> np.ndarray:
-        """Step ``step``'s columns (flat mass-grid indices, sorted): a
-        function of the seed and the step alone, so a resumed run draws
-        what the unbroken run draws."""
-        rng = np.random.default_rng([self.settings.tap_seed, int(step)])
+    def draw(self, elapsed: float) -> np.ndarray:
+        """The columns drawn at model time ``elapsed`` seconds (flat
+        mass-grid indices, sorted): a function of the seed and the time
+        alone, so a resumed run draws what the unbroken run draws."""
+        rng = np.random.default_rng([self.settings.tap_seed, int(round(float(elapsed) * 1000.0))])
         return np.sort(rng.choice(self.pool, size=self.ncol, replace=False))
 
     def _count(self, state):
@@ -323,19 +325,21 @@ class WrfColumnSeat:
     def after_nonmicrophysics(self, state, cfg, tendencies):
         if tendencies is None:
             raise RuntimeError("--nn: the step held no physics tendencies (physics did not run)")
+        # The seat's own step count: an adaptive clock changes cfg.dt from
+        # step to step, so model time does not name a step.
+        step = self.calls
         self.calls += 1
         ran = self._ran(state)
         elapsed = float(getattr(state, "elapsed_seconds", 0.0))
-        step = int(round(elapsed / float(cfg.dt)))
         if not ran or step % self.settings.tap_every:
             return tendencies
         if self._resume:
-            # The record keeps what was written before this step; samples
+            # The record keeps what was written before this time; samples
             # flushed after the checkpoint the run resumed from are the
             # unbroken run's and are written again from here.
-            self.tap.truncate(step)
+            self.tap.truncate(elapsed)
             self._resume = False
-        flat = self.draw(step)
+        flat = self.draw(elapsed)
         x, y = self.columns(state, cfg, tendencies, flat)
         self.tap.append(_host(x), _host(y), time_seconds=elapsed, step=step, column_index=flat)
         return tendencies

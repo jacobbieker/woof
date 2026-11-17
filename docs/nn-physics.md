@@ -128,10 +128,13 @@ layout the artefact manifest takes, so a trainer can read
 
 A scheme's slot holds the tendency of its last call, and `radt`, `cudt`
 or a positive `bldt` hold it over steps. So a scheme is recorded only on
-steps where it ran and where the step is a multiple of `tap_every`. The
-columns drawn depend only on `tap_seed` and the step, so a resumed run
-draws the same ones as an unbroken run. A resumed run trims the store
-back to its resume step and appends from there. `total` is recorded on
+steps where it ran, and only on every `tap_every`-th dycore step the seat
+sees. The record's `step` counts those steps: an adaptive clock changes
+`dt` from step to step, so model time does not name a step, and a resumed
+run starts counting again. The columns drawn depend only on `tap_seed` and
+the model time, so a resumed run draws the same ones as an unbroken run.
+A resumed run trims the store back to its resume time and appends from
+there. `total` is recorded on
 every such step, and it sums slots held from different steps.
 
 A tap only reads. A tapped forecast is byte-identical to the same forecast

@@ -124,15 +124,15 @@ def test_tap_round_trip_resume_and_refusals(tmp_path, suffix):
         TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5,
                     attrs={**attrs, "scheme": "radiation"}, resume=True)
     again = TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5, attrs=attrs, resume=True)
-    again.truncate(3)  # resumed at step 3: steps 3 and 4 are written again
+    again.truncate(180.0)  # resumed at t = 180 s: steps 3 and 4 are written again
     x, y, idx = _sample(rng)
     again.append(x, y, time_seconds=180.0, step=3, column_index=idx)
     again.close()
     data = read_tap(path)
     np.testing.assert_array_equal(data["step"], [0, 1, 2, 3])
     np.testing.assert_array_equal(data["inputs"][3], x)
-    with pytest.raises(TapError, match="different dt"):
-        TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5, attrs={**attrs, "dt": 30.0},
+    with pytest.raises(TapError, match="different grid"):
+        TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5, attrs={**attrs, "grid": [3, 4, 6]},
                     resume=True)
 
 
@@ -254,18 +254,19 @@ def test_seat_records_only_steps_the_scheme_ran_on(monkeypatch):
     state, couple, _, _ = _host_state()
     held = object()
     seat = wrf_seat.WrfColumnSeat(state, _cfg(), _settings(tap_every=2), couple=couple, tap=_ListTap())
-    for k in range(8):
-        state.elapsed_seconds = 60.0 * k
+    times = [0.0, 45.0, 97.5, 130.0, 160.0, 200.0, 241.25, 280.0]  # an adaptive clock
+    for k, t in enumerate(times):
+        state.elapsed_seconds = t
         if k != 4:  # the PBL is held (bldt > 0) on step 4
             state.physics.call_counts["ysu"] += 1
         assert seat.after_nonmicrophysics(state, _cfg(), held) is held
     assert [row[2]["step"] for row in seat.tap.rows] == [0, 2, 6]
-    assert [row[2]["time_seconds"] for row in seat.tap.rows] == [0.0, 120.0, 360.0]
-    # The draw is a function of the seed and the step: a resumed seat draws
-    # what the unbroken one drew.
+    assert [row[2]["time_seconds"] for row in seat.tap.rows] == [0.0, 97.5, 241.25]
+    # The draw is a function of the seed and the model time: a resumed
+    # seat draws what the unbroken one drew.
     other = wrf_seat.WrfColumnSeat(state, _cfg(), _settings(tap_every=2), couple=couple, tap=_ListTap())
-    np.testing.assert_array_equal(other.draw(6), seat.tap.rows[2][2]["column_index"])
-    assert not np.array_equal(other.draw(6), other.draw(2))
+    np.testing.assert_array_equal(other.draw(241.25), seat.tap.rows[2][2]["column_index"])
+    assert not np.array_equal(other.draw(241.25), other.draw(97.5))
     # A resumed seat does not know whether the scheme ran on its first
     # step (a restore rewrites the counters after attach) and skips it.
     resumed = wrf_seat.WrfColumnSeat(state, _cfg(), _settings(), couple=couple, tap=_ListTap(), resume=True)
