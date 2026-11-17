@@ -290,6 +290,7 @@ def test_advect_a6000_stands_in_for_the_rtx5090_receipt_pending_its_rerecord(mon
     monkeypatch.setattr(module, "advect_gpu_identity", lambda: ("NVIDIA H100 80GB HBM3", (9, 0)))
     with pytest.raises(pytest.skip.Exception, match="informational, not a gate"):
         _device_receipt()
+    monkeypatch.setattr(module, "receipt_staleness", lambda *args: dict(moved))
     monkeypatch.setattr(module, "advect_gpu_identity", lambda: ("another sm_86 card", (8, 6)))
     with pytest.raises(pytest.skip.Exception, match="informational, not a gate"):
         _device_receipt()

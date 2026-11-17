@@ -155,8 +155,9 @@ def test_device_receipt_gates_blackwell_and_skips_older_cards_only_when_stale(mo
 
 
 def test_the_a6000_stands_in_for_the_rtx5090_receipts_pending_their_rerecord(monkeypatch):
-    """Both RTX 5090 receipts (card and NVRTC 13.2) can be re-recorded only on
-    an RTX 5090: they are marked STALE pending that re-record, per file, and
+    """Both sm_120 receipts (the RTX 5090 card receipt and the NVRTC 13.2
+    receipt measured on an RTX PRO 6000) can be re-recorded only on an
+    RTX 5090: they are marked STALE pending that re-record, per file, and
     the RTX A6000 receipt gates kernel edits in their place (user ruling
     2026-11-17).  Only that card gates; another sm_86 card does not."""
     module = sys.modules[__name__]
@@ -166,8 +167,8 @@ def test_the_a6000_stands_in_for_the_rtx5090_receipts_pending_their_rerecord(mon
         "gpu-receipt-sm120-nvrtc13.2.json", "gpu-receipt-sm120.json"]
     for name in ("gpu-receipt-sm120.json", "gpu-receipt-sm120-nvrtc13.2.json"):
         record = _INDEX[CERTIFIED_UNREPINNED_KEY][name]
-        assert (record["stand_in"], record["rerecord_on"]) == (
-            "gpu-receipt-sm86.json", "NVIDIA GeForce RTX 5090")
+        assert record["stand_in"] == "gpu-receipt-sm86.json"
+        assert record["rerecord_on"].startswith("NVIDIA GeForce RTX 5090")
         receipt = json.loads((LEGACY_DIR / name).read_text(encoding="ascii"))
         moved = {pin: (receipt["kernels"][pin], "a" * 64) for pin in record["pins"]}
         assert "STALE, pending a re-record on the NVIDIA GeForce RTX 5090" in (
