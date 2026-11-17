@@ -6217,6 +6217,21 @@ def go_main(args, *, observer=None) -> int:
 
 @_cyclone_go_scope
 @_hydro_go_scope(beside=True)
+def _refuse_lakes_off_configuration(args) -> None:
+    """``--lakes`` rewrites a TOML configuration; every directory route
+    (WRF input, met_em, namelist.input, global directory) carries its own
+    namelist and static fields and would launch with the switch ignored."""
+    if getattr(args, "lakes", None) is None:
+        return
+    config = getattr(args, "config", None)
+    if getattr(args, "wrfinput", None) is not None or (
+            config is not None and (Path(config).is_dir()
+                                    or Path(config).name == "namelist.input")):
+        raise GoRefusal("--lakes applies to a TOML configuration launch; a WRF input, "
+                        "met_em or namelist directory carries its own namelist and "
+                        "static fields. Next: drop --lakes, or launch from the configuration.")
+
+
 def _go_config_main(args, *, observer=None) -> int:
     """Launch through the source's existing native preparation chain.
 
@@ -6233,6 +6248,7 @@ def _go_config_main(args, *, observer=None) -> int:
     except ValueError as error:
         print(f"go: {error}", file=sys.stderr)
         return 2
+    _refuse_lakes_off_configuration(args)
     from woof.go_wrfinput import launch_if_global_directory
     native_status = launch_if_global_directory(args, observer=observer)
     if native_status is not None:

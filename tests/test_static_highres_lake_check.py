@@ -426,3 +426,22 @@ def test_a_lake_outflow_to_the_sea_does_not_hold_its_shore():
     water[1, 4] = True   # new shore water of the lake
     reach = _water_reaching_sea(water, ocean, lake)
     assert reach[1, 1] and not reach[1, 4]
+
+
+def test_lake_depth_donor_is_the_euclidean_nearest_within_reach():
+    """Review (#587): a promoted cell with kept lakes at (0, 6) and (3, 3)
+    cells takes the (3, 3) one, 4.2 cells off, inside a 5-cell reach."""
+    from types import SimpleNamespace
+    from woof.static import highres_production as hp
+    shape = (12, 12)
+    lake = np.zeros(shape, dtype=bool)
+    lake[2, 8] = lake[5, 5] = True
+    depth = np.full(shape, 10.0)
+    depth[2, 8], depth[5, 5] = 30.0, 70.0
+    promote = np.zeros(shape, dtype=bool)
+    promote[2, 2] = True
+    dx = hp._LAKE_DEPTH_REACH_M / 5.0
+    out, record = hp._lake_depth_for(
+        {"LAKE_DEPTH": depth}, SimpleNamespace(dx=dx, dy=dx), lake=lake,
+        demote=np.zeros(shape, dtype=bool), promote=promote)
+    assert out[2, 2] == 70.0 and record["promoted_from_nearest_lake_cells"] == 1

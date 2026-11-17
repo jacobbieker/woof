@@ -167,7 +167,7 @@ def _route_causes(moving):
     causes = []
     if getattr(moving, "native_restart", False):
         causes.append(("a correct-mode native restart (config_do_restart) resumes the continuation sealed "
-                       "beside its restart file", "restart in exact mode or from a cold start"))
+                       "beside its restart file", "run the lake from a cold start"))
     elif getattr(moving, "cli_restart", False):
         causes.append(("--restart-from", "drop --restart-from"))
     if getattr(moving, "checkpoint_seconds", ()):

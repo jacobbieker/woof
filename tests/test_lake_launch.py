@@ -70,3 +70,29 @@ def test_bathymetry_tuning_survives():
 def test_invalid_engine_is_named_by_the_config_validator():
     with pytest.raises(ValueError, match="bogus"):
         lake_settings({"model": {"engine": "bogus"}}, "off")
+
+
+@pytest.mark.parametrize("route", ["dir", "namelist", "wrfinput"])
+def test_lakes_is_refused_on_directory_routes(tmp_path, route):
+    """Review (#587): a directory route carries its own namelist; --lakes
+    there would be ignored, so it is refused before anything launches."""
+    from woof.go_cli import GoRefusal, _refuse_lakes_off_configuration
+    config = {"dir": tmp_path, "namelist": tmp_path / "namelist.input",
+              "wrfinput": tmp_path / "forecast.toml"}[route]
+    args = SimpleNamespace(config=config, lakes="clm",
+                           wrfinput=tmp_path if route == "wrfinput" else None)
+    with pytest.raises(GoRefusal, match="drop --lakes"):
+        _refuse_lakes_off_configuration(args)
+    _refuse_lakes_off_configuration(SimpleNamespace(config=config, lakes=None, wrfinput=None))
+    _refuse_lakes_off_configuration(SimpleNamespace(config=tmp_path / "f.toml", lakes="clm", wrfinput=None))
+
+
+def test_derived_configuration_keeps_the_umask_mode(tmp_path):
+    import os
+    original = tmp_path / "forecast.toml"
+    original.write_text('[experiment]\nname="demo"\n[shared]\nsf_surface_physics=2\n[[domain]]\ngrid_id=1\n')
+    args = SimpleNamespace(config=original, lakes="clm")
+    prepare_launch(args)
+    umask = os.umask(0)
+    os.umask(umask)
+    assert Path(args.config).stat().st_mode & 0o777 == 0o666 & ~umask

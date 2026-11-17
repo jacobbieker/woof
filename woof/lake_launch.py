@@ -91,6 +91,11 @@ def prepare_launch(args):
         try:
             with os.fdopen(fd, "wb") as handle:
                 handle.write(payload)
+            # mkstemp makes the file 0600: keep the umask's mode, as the
+            # configuration beside it has.
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(temp, 0o666 & ~umask)
             os.replace(temp, target)
         except BaseException:
             Path(temp).unlink(missing_ok=True)

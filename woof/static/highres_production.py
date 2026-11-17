@@ -1789,12 +1789,15 @@ def _lake_depth_for(baseline, grid, *, lake, demote, promote):
     yy, xx = np.nonzero(promote)
     near = np.zeros(yy.shape, dtype=bool)
     if yy.size and donors.any():
-        from .highres import _nearest_donors
-        donor_y, donor_x = _nearest_donors(donors)
-        sy, sx = donor_y[yy, xx], donor_x[yy, xx]
+        from scipy import ndimage
+        # The Euclidean-nearest kept lake cell in metres (dy, dx sampling):
+        # a grid-step-nearest donor can lie beyond the reach while another
+        # within it is nearer on the ground.
         dy = float(getattr(grid, "dy", grid.dx))
-        near = (np.hypot((yy - sy) * dy, (xx - sx) * float(grid.dx))
-                <= _LAKE_DEPTH_REACH_M)
+        distance, (donor_y, donor_x) = ndimage.distance_transform_edt(
+            ~donors, sampling=(dy, float(grid.dx)), return_indices=True)
+        sy, sx = donor_y[yy, xx], donor_x[yy, xx]
+        near = distance[yy, xx] <= _LAKE_DEPTH_REACH_M
         depth[yy[near], xx[near]] = source[sy[near], sx[near]]
     depth[yy[~near], xx[~near]] = fill
     return depth, {
