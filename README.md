@@ -675,9 +675,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   the solar-cycle and sunspot variability (TSI fell by about 2 W m-2
   between 1 and 8 May 2024). It works on the WRF route and on hex's generic column seam
   (`--physics solar_tsi_opt=1`), but not yet on hex's MPAS-native
-  radiation suite, and it is refused with FARMS (`swint_opt = 2`). The
-  ionosphere, aurora and particle-precipitation layers are planned
-  ([docs/spacewx.md](docs/spacewx.md)).
+  radiation suite, and it is refused with FARMS (`swint_opt = 2`).
+  `woof spacewx ionosphere` computes an IRI-type climatological ionosphere on
+  the GPU on a global grid: foF2, hmF2, foE, F1 and vertical TEC, from the
+  CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
+  has a correlation of 0.90 on 1-3 May 2024 and 0.81 during the 10-12 May
+  storm, and it reads about 25 % low at this solar maximum
+  (`tools/spacewx_gim_validate.py`). Its output does not yet go into forecast
+  history. The aurora, storm-time and particle-precipitation layers are
+  planned ([docs/spacewx.md](docs/spacewx.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
