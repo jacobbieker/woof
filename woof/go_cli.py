@@ -6215,8 +6215,6 @@ def go_main(args, *, observer=None) -> int:
     return _go_config_main(args, observer=observer)
 
 
-@_cyclone_go_scope
-@_hydro_go_scope(beside=True)
 def _refuse_lakes_off_configuration(args) -> None:
     """``--lakes`` rewrites a TOML configuration; every directory route
     (WRF input, met_em, namelist.input, global directory) carries its own
@@ -6232,6 +6230,8 @@ def _refuse_lakes_off_configuration(args) -> None:
                         "static fields. Next: drop --lakes, or launch from the configuration.")
 
 
+@_cyclone_go_scope
+@_hydro_go_scope(beside=True)
 def _go_config_main(args, *, observer=None) -> int:
     """Launch through the source's existing native preparation chain.
 
