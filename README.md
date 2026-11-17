@@ -508,7 +508,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and its back substitution, damper, phi'' update and p''/alpha''
   diagnosis in one top-down pass (byte-identical in fast and strict
   numerics on CUDA and Metal): 725 -> 655 us per launch at 49x228x276 and
-  367 -> 329 us at 49x150x186 on an A6000. Hex: CUDA
+  367 -> 329 us at 49x150x186 on an A6000 (CUPTI kernel time per launch,
+  default numerics and shape-specialized build, this change against its
+  merge base, on a shared GPU; output words compared equal). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
