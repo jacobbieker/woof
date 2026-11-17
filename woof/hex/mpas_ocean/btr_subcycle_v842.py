@@ -224,13 +224,18 @@ def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict
     _launch(precision, "ocn_btr_init_cells_v842", n_cells, (ssh_sub[old], state["ssh"][0], i32(n_cells)))
     _launch(precision, "ocn_btr_init_edges_v842", n_edges, (
         u_sub[old], btr[1], flux, forcing, btr[0], i32(n_edges), i32(bool(configs["config_filter_btr_mode"]))))
-    temp = cp.full(n_edges + 1, np.finfo(real).max, dtype=real)
+    # btrvel_temp, twice: a corrector reads one while the velocity kernel before
+    # it writes the next corrector's copy into the other
+    temps = cp.full((2, n_edges + 1), np.finfo(real).max, dtype=real)
+    bottom = m["bottomDepth"]
 
-    def velocity(n: int, u_perp, corrector: int) -> None:
-        _launch(precision, "ocn_btr_velocity_v842", n, (
+    def velocity(n: int, u_perp, corrector: int, n_flux: int, temp_next, n_copy: int, n_acc: int) -> None:
+        # the thread count covers the folded flux, copy and sum, which may reach past n
+        _launch(precision, "ocn_btr_velocity_v842", max(n, n_flux, n_copy, n_acc), (
             u_sub[new], u_sub[old], u_perp, ssh_sub[old], ssh_sub[new], forcing, m["fEdge"], m["dcEdge"],
             m["weightsOnEdge"], m["edgesOnEdge"], m["nEdgesOnEdge"], m["cellsOnEdge"], edge_mask, i32(n), i32(nl),
-            i32(me2), i32(corrector), dtn, gravity, omg2, g2))
+            i32(me2), i32(corrector), dtn, gravity, omg2, g2, flux, bottom, i32(n_flux), omg1, g1,
+            temp_next, i32(n_copy), btr[1], i32(n_acc)))
 
     def ssh_args(n_c: int):
         return (ssh_tend, ssh_sub[new], ssh_sub[old], u_sub[old], u_sub[new], m["bottomDepth"], m["dvEdge"],
@@ -243,21 +248,39 @@ def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict
             i32(n_e), i32(weighted), omg2, g2, omgv, gv))
 
     for step in schedule:
-        if step["predictor"] is not None:
-            velocity(edges[step["predictor"] - 1], u_sub[old], 0)
+        # Each velocity kernel writes the next corrector's btrvel_temp copy, the
+        # subcycle's last one adds the new level into the running sum, and the
+        # predictor sums the thickness flux (which reads only the old SSH and
+        # the predicted velocity). Only the SSH kernels run in between, and they
+        # write neither the new velocity, the flux nor the sum. A corrector with
+        # no velocity kernel before it in the subcycle copies on its own.
+        predictor = step["predictor"] is not None
+        pairs = step["correctors"]
+        n_copy = [edges[copied - 1] + 1 for copied, _ in pairs]
+        n_calls = int(predictor) + len(pairs)
+
+        def folded(j: int) -> tuple:
+            i = j + 1 - int(predictor)      # the corrector after velocity call j
+            copy = (temps[i % 2], n_copy[i]) if i < len(pairs) else (temps[0], 0)
+            return copy + (n_edges if j == n_calls - 1 else 0,)
+
+        if predictor:
+            velocity(edges[step["predictor"] - 1], u_sub[old], 0,
+                     0 if ssh2 else edges[step["ssh_edges"] - 1], *folded(0))
         n_c = cells[step["ssh_cells"] - 1]
         _launch(precision, "ocn_btr_ssh_predict_v842", n_c, ssh_args(n_c) + (g1, omg1, dtn))
-        if not ssh2:
+        if not ssh2 and not predictor:
             flux_sum(edges[step["ssh_edges"] - 1], 0, omg1, g1)
-        for copied, computed in step["correctors"]:
-            n_copy = edges[copied - 1] + 1
-            _launch(precision, "ocn_btr_copy_v842", n_copy, (temp, u_sub[new], i32(n_copy)))
-            velocity(edges[computed - 1], temp, 1)
+        for i, (copied, computed) in enumerate(pairs):
+            if i == 0 and not predictor:
+                _launch(precision, "ocn_btr_copy_v842", n_copy[0], (temps[0], u_sub[new], i32(n_copy[0])))
+            velocity(edges[computed - 1], temps[i % 2], 1, 0, *folded(i + int(predictor)))
         if ssh2:
             n_c = cells[step["ssh2_cells"] - 1]
             _launch(precision, "ocn_btr_ssh_correct_v842", 1, ssh_args(n_c) + (omg2, g2, omg3, g3, dtn), threads=1)
             flux_sum(edges[step["ssh2_edges"] - 1], 1, omg3, g3)
-        _launch(precision, "ocn_btr_accumulate_v842", n_edges, (btr[1], u_sub[new], i32(n_edges)))
+        if not n_calls:
+            _launch(precision, "ocn_btr_accumulate_v842", n_edges, (btr[1], u_sub[new], i32(n_edges)))
         old, new = new, old
 
     n_sum = n_btr_subcycles * int(configs["config_btr_subcycle_loop_factor"])

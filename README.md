@@ -283,7 +283,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     momentum advection, stability, reconstruction and the split step's
     edge updates) run a thread per edge or cell and level, so a warp reads
     a column's consecutive levels: a 33,000-cell, 60-level step takes 140
-    instead of 259 ms on an A6000, the same words;
+    instead of 259 ms on an A6000, the same words. Each barotropic
+    subcycle's velocity kernels also add the thickness flux, the
+    corrector's velocity copy and the running sum, so a subcycle launches
+    4 kernels instead of 8 (320 fewer launches a step, the same words): on
+    an M3 Max the 8,300-cell step takes about 44 instead of 52 ms;
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
@@ -675,9 +679,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   the solar-cycle and sunspot variability (TSI fell by about 2 W m-2
   between 1 and 8 May 2024). It works on the WRF route and on hex's generic column seam
   (`--physics solar_tsi_opt=1`), but not yet on hex's MPAS-native
-  radiation suite, and it is refused with FARMS (`swint_opt = 2`). The
-  ionosphere, aurora and particle-precipitation layers are planned
-  ([docs/spacewx.md](docs/spacewx.md)).
+  radiation suite, and it is refused with FARMS (`swint_opt = 2`).
+  `woof spacewx ionosphere` computes an IRI-type climatological ionosphere on
+  the GPU on a global grid: foF2, hmF2, foE, F1 and vertical TEC, from the
+  CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
+  has a correlation of 0.90 on 1-3 May 2024 and 0.81 during the 10-12 May
+  storm, and it reads about 25 % low at this solar maximum
+  (`tools/spacewx_gim_validate.py`). Its output does not yet go into forecast
+  history. The aurora, storm-time and particle-precipitation layers are
+  planned ([docs/spacewx.md](docs/spacewx.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

@@ -3725,6 +3725,30 @@ Takes no options of its own.
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--json` | emit the registry document instead of the table -- the gpuwm.run-plan.sources.v1 schema, narrowed to the one row when ID is given |
 
+## `woof spacewx`
+
+| option | what it does |
+|---|---|
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof spacewx ionosphere`
+
+| option | what it does |
+|---|---|
+| `--alt-max` | TEC integration top, km (default 2000) |
+| `--alt-min` | TEC integration floor, km (default 60) |
+| `--cells` | TEC integration cells (default 1940) |
+| `--count` | number of times (default 1) |
+| `--dlat` | grid spacing in latitude, deg (default 2.5) |
+| `--dlon` | grid spacing in longitude, deg (default 5) |
+| `--f107` | a fixed F10.7 (sfu) instead of the index record |
+| `--f107-mode {daily,81day}` | previous day's F10.7obs, or its trailing 81-day mean (default) |
+| `--indices` | 'gfz' (fetched, CC BY 4.0) or a file in GFZ's Kp/ap/F10.7 format |
+| `--maps {ccir,ursi}` | foF2 map family (default ccir) |
+| `--out` | write the fields to this .npz (receipt beside it) |
+| `--step-hours` | hours between times (default 1) |
+| `--time` | first valid time, ISO UTC (2024-05-10T18:00Z) |
+
 ## `woof spectral`
 
 | option | what it does |
