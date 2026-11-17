@@ -11,7 +11,7 @@ index file or a fixed flux), so nothing is fetched.
 from __future__ import annotations
 
 import dataclasses
-from datetime import datetime
+from datetime import datetime, timedelta
 import inspect
 from types import SimpleNamespace
 
@@ -178,6 +178,20 @@ def test_for_run_holds_the_start_flux_from_the_index_file(tmp_path):
     assert hist.IonosphereHistory.for_run(_cfg(), _radiation()) is None
     with pytest.raises(hist.IonosphereHistoryError, match="radiation"):
         hist.IonosphereHistory.for_run(cfg, SimpleNamespace(start_time=START))
+
+
+def test_gfz_coverage_is_asked_only_through_the_day_before_the_start(tmp_path):
+    from woof.spacewx import indices
+    path = _gfz(tmp_path, f107=150.0)
+    asked = []
+
+    def loader(source, needed):
+        asked.append((source, needed))
+        return indices.read(path)
+
+    h = _history(_cfg(spacewx_ionosphere_opt=1, spacewx_f107_source="gfz"), indices_loader=loader)
+    assert asked == [("gfz", START - timedelta(days=1))]
+    assert h.f107 == pytest.approx(150.0)
 
 
 @pytest.mark.gpu

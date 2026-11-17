@@ -113,7 +113,8 @@ class IonosphereHistory:
         else:
             from woof.spacewx import indices
             load = indices_loader or indices.load
-            geo = load("gfz" if kind == "gfz" else value, start)
+            # F10.7 reads through the previous UTC day, so a cache through it is enough.
+            geo = load("gfz" if kind == "gfz" else value, start - timedelta(days=1))
             f107 = geo.f107_driver(start, mode)
             record = {"spacewx_f107_source": geo.source, "spacewx_f107_sha256": geo.sha256}
         from woof.spacewx.ionosphere import Ionosphere

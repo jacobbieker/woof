@@ -1517,9 +1517,12 @@ The `spacewx_f107_*` and `spacewx_ionosphere_maps` keys are refused while
 `spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 1` is refused without a
 radiation scheme, since the ionosphere uses the radiation geometry's columns.
 It is also refused on a streamed (tiled) domain and on hex, where no history
-stream carries the rows yet. Its CCIR/URSI maps, IGRF-14 coefficients and GFZ
-indices are fetched on first use into `~/.woof/spacewx` (or
-`$WOOF_SPACEWX_CACHE`) and checked against pinned SHA-256 sums.
+stream carries the rows yet. Its CCIR/URSI maps and IGRF-14 coefficients are
+fetched on first use into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`) and
+checked against pinned SHA-256 sums. The GFZ index file is a living record, so
+it has no pinned sum: it is fetched again when it ends before the day before the
+start, its format is checked on reading, and its SHA-256 is recorded in the
+run's receipt.
 
 ## What a WRF namelist setting becomes
 
