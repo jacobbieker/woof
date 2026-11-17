@@ -499,7 +499,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   each level's frame rings first and the interior after, so the relaxation
   runs in dense warps (word-identical; 243 -> 145 us per nested-stage
   launch at 49x120x150, 479 -> 121 us at 49x120x120; CUPTI kernel time on
-  a shared A6000, default numerics, against the merge base). WRF-Solar's
+  a shared A6000, default numerics, against the merge base). The step-end
+  `spec_bdy_final` takes its forced fields (u, v, theta, phi, moist scalars,
+  w on a nest) in one table-driven launch while every field has at most 1M
+  cells (`finalize_state_multi`; each cell runs the per-field kernel's own
+  body, byte-identical in fast, strict and WRF-exact on CUDA and Metal;
+  10 fields at 50 levels, CUDA-event minimum on a shared A6000: 73 -> 46 us
+  at 60x60, 160 -> 138 us at 100x120; larger domains keep the per-field
+  launches, which are faster there; `WOOF_LBC_FINAL_MULTI=0` restores them,
+  `WOOF_LBC_FINAL_MULTI_MAX_CELLS` moves the cut). WRF-Solar's
   FARMS surface irradiance (`swint_opt = 2`) is one launch per step: the
   column kernel composes the cloud fraction per cell, merges the MYNN
   boundary-layer cloud, scales the microphysics radii and writes the six
@@ -663,6 +671,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   is refused with SST updates, OML, restarts, checkpoints, moving regions and
   multi-rank or LTS runs
   ([mpas-physics-seam.md](components/hex/docs/manual/mpas-physics-seam.md)).
+- **Space weather (opt-in, beyond WRF/MPAS).** `solar_tsi_opt = 1` drives
+  every shortwave scheme with a time-varying total solar irradiance (the NOAA
+  NRLSSI2 CDR with `solar_tsi_source = "nrlssi2"`, or your own CSV/netCDF)
+  instead of WRF's fixed 1370 W m-2. `solar_tsi_mode = "absolute"` uses the
+  measured TSI (about -0.6 % shortwave); `"relative"` keeps 1370 and adds only
+  the solar-cycle and sunspot variability (TSI fell by about 2 W m-2
+  between 1 and 8 May 2024). It works on the WRF route and on hex's generic column seam
+  (`--physics solar_tsi_opt=1`), but not yet on hex's MPAS-native
+  radiation suite, and it is refused with FARMS (`swint_opt = 2`). The
+  ionosphere, aurora and particle-precipitation layers are planned
+  ([docs/spacewx.md](docs/spacewx.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
