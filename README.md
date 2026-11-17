@@ -636,7 +636,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   input (logf, expf, and powf at 20 exponents) plus 2^30 random powf
   pairs was checked under both subnormal modes
   (`tools/metal_gfk_fast_grade.py`). The surface-layer kernel
-  `sfclayrev` is 5.5x faster (55x83: 11.70 to 2.14 ms).
+  `sfclayrev` is 5.5x faster (55x83: 11.70 to 2.14 ms). On the hex
+  Edinburgh 3 km variable-resolution forecast, WSM6 drops from 22.5 to
+  5.2 ms per step, the surface layer from 21.0 to 6.6 ms and Grell-Freitas
+  from 8.3 to 4.6 ms; one forecast hour integrates in 44-47 s instead of
+  50-57 s, with byte-identical history.
   `WOOF_METAL_GFK_FAST=0` restores the binary64-only path.
   `WOOF_METAL_GPU_TIMES` times each kernel. Its per-launch command
   buffers also hold the lazy MLX work the launch waited on, and their GPU
