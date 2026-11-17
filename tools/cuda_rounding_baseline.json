@@ -638,6 +638,14 @@
     "status": "unresolved"
    },
    {
+    "file": "woof/hex/hydro_remap_gpu.py",
+    "constructor": "RawModule",
+    "factory": "_module",
+    "call_sha256": "42b8305d4cb3f4eceac8f0854ca15c058202456bd568c62daf4674ff532410b8",
+    "factory_sha256": "96ad93018cf8e9224a7f46fa601d5b5e2ac29a1eb35f996a4031f5db2c24f0af",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "42b8305d4cb3f4eceac8f0854ca15c058202456bd568c62daf4674ff532410b8",
     "constructor": "RawModule",
     "factory": "kernels",
@@ -4728,6 +4736,10 @@
     "sha256": "b6396195ee30f7485a1b84277191b1e090a505d3e18846935c70e299411d2193"
    },
    {
+    "file": "woof/hex/hydro_remap.cu",
+    "sha256": "f9fd13a474707dbf66964652e9aa538738ddc1c13b4fbb7914300f6e84a159fe"
+   },
+   {
     "file": "woof/hex/init_gpu/horizontal.cu",
     "sha256": "c3b76e846951378eb2546ed4d288ca3a5fbb07681d196e51bd6ceaa495b04946"
    },
@@ -4994,6 +5006,10 @@
    {
     "file": "woof/spectral_nudging/surface_forecast.cu",
     "sha256": "4fb2330ab076f7f65dfd8d79a43802cfed4d3ed4425063517fd51612c174ebd9"
+   },
+   {
+    "file": "woof/core/kernels/obstacle_drag.cu",
+    "sha256": "8d267bf826a42f2737397864eb190b3a6c1c34ad7f63d2e3c787698e32088598"
    }
   ],
   "python_compiler_files": [
@@ -5095,7 +5111,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "ebd2430d7cb17c1e61575a8c0f9aa49fbc81adb48d8cc7dc3c369b9b5b42ccf5"
+    "sha256": "038834f02b3aa82614fa068abf50633db78d00c9aa117244963bba8c2636b3a0"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5131,7 +5147,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "63acbc1bc7ea48a0a6b33d3b85a116f0b182a700ec51635b60468c61aa25ea5c"
+    "sha256": "4c8dbc9afd45fdf7216c158d108054fc47267a351dd455b03ad0a7fae90d9d1f"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5255,7 +5271,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "2ce151ebdabc732afdb67099913c3e20151f37d7dbe0adcb2aa181dcf02958dc"
+    "sha256": "81120a60fadce01e37facbc877d70407e1d1431788af67d467993a16e2c8f15b"
    },
    {
     "file": "woof/core/refl.py",
@@ -5672,6 +5688,10 @@
    {
     "file": "woof/hex/cuda_w_damping.py",
     "sha256": "eb0138e5c2f4406eab79fa9e0392866f747b71552deac292a90704c64ca2f86c"
+   },
+   {
+    "file": "woof/hex/hydro_remap_gpu.py",
+    "sha256": "42d7817d54b2621fb8ab39e38b9a11ae75c504b65afce2b581de8d1fb9b55b6a"
    },
    {
     "file": "woof/hex/iau_forcing.py",
@@ -6359,7 +6379,7 @@
    },
    {
     "file": "woof/verify/advect_oracle.py",
-    "sha256": "92b2666c71f6cbb08f1ff2e62f57b3e33c2a73cd983a7e6a3cca34eab7fafec0"
+    "sha256": "d235939945e070bd0fd5fb1d74a8ab9dc123e2f1a14832a4ca98c192bf01882e"
    },
    {
     "file": "woof/verify/gwdo_kim_oracle.py",
@@ -19061,6 +19081,53 @@
     ]
    },
    "source_sha256": "a52f2b02a4cdde52b786a485fb2106789caf0717ab1bdd600f774f5ad4e6e32e"
+  },
+  "kernels:obstacle_drag": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "c4b2421edd8d0fb615485bb41e44aadab40a8ca52b28618a59b83725c9e7dab4",
+    "sites": {
+     "100": 4
+    }
+   },
+   "native_differences": {
+    "sha256": "8a637e0ceb71d55c020950bce09df45b815056cc0db25f9284ba4c27e52d2fd0",
+    "sites": {
+     "100": 4
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ],
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ]
+   },
+   "source_sha256": "93472745bb9f9aa5791edb8966d67db8d24062a1401ca94e467da542a0e677ca"
   },
   "kernels:oml": {
    "assessment": "static_diagnostic_only",

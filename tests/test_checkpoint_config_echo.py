@@ -105,6 +105,16 @@ MOVED = {
     "gf_deep_rain_evaporation_booking": (
         dict(gf_deep_rain_evaporation_booking=True),
         {"gf_deep_rain_evaporation_booking"}),
+    "obstacle_opt": (dict(obstacle_opt=1, obstacle_file="city.nc",
+                          dx=5.0, dy=5.0),
+                     {"obstacle_opt", "obstacle_file"}),
+    "obstacle_solid_fraction": (dict(obstacle_solid_fraction=0.25),
+                                {"obstacle_solid_fraction"}),
+    "obstacle_relax_factor": (dict(obstacle_relax_factor=4.0),
+                              {"obstacle_relax_factor"}),
+    "obstacle_drag_coefficient": (dict(obstacle_drag_coefficient=0.6),
+                                  {"obstacle_drag_coefficient"}),
+    "obstacle_wall_z0": (dict(obstacle_wall_z0=0.05), {"obstacle_wall_z0"}),
     # On, all three keys are echoed (the mode at its default too).
     "solar_tsi_opt": (dict(solar_tsi_opt=1, solar_tsi_source="tsi.csv"),
                       {"solar_tsi_opt", "solar_tsi_source", "solar_tsi_mode"}),
@@ -203,6 +213,8 @@ DEFAULT_OFF = frozenset({
     "mynn_sfclay_variant",
     # The opt-in GF deep evaporation booking, absent while off.
     "gf_deep_rain_evaporation_booking",
+    # The opt-in resolved obstacles, each absent at its default.
+    *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS,
     # The opt-in TSI forcing (woof.spacewx), absent while off.
     "solar_tsi_opt", "solar_tsi_source", "solar_tsi_mode",
     # TEMPO's optional coupling arms, absent while off.
@@ -652,6 +664,11 @@ def _with_handover(cfg, kept):
 @pytest.mark.parametrize("field", sorted(MOVED))
 def test_every_writer_echoes_a_moved_field_alike(monkeypatch, tmp_path, field):
     overrides, kept = MOVED[field]
+    if overrides.get("obstacle_file"):
+        # The checkpoint's physics identity binds the buildings product's
+        # bytes, so the named product has to exist.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / overrides["obstacle_file"]).write_bytes(b"buildings")
     cfg = _cfg(**overrides)
     kept = _with_handover(cfg, kept)
     echoes = _echoes(cfg, monkeypatch, tmp_path)
@@ -677,7 +694,8 @@ def test_the_digest_drops_what_the_echo_drops():
 @pytest.mark.parametrize("field", (
     "bl_mynn_version", "bl_mynn_gsd41_unsquared_qtke",
     "bl_mynn_cloud_tendency_form", "swint_opt", "aer_opt", "alb_sol",
-    "gf_deep_rain_evaporation_booking",
+    "gf_deep_rain_evaporation_booking", "obstacle_opt",
+    "obstacle_relax_factor",
 ))
 def test_inherited_default_off_fields_bind_both_restart_directions(field):
     """An old header may omit the default, never an active selector."""

@@ -283,6 +283,10 @@ BASELINE_PINNED: dict[str, str] = {
     # keeps its bytes): the same TKE source words (tests/test_smag2d_tke_faces.py,
     # CUDA and Metal, GPUWM_WRF_EXACT=0 and 1).
     "smag2d_tke_faces": "421c718311e7724d3fd5ba733bfd3c59eca0cf828a753d284bac6e3142128f59",
+    # The opt-in porous immersed obstacles (obstacle_opt = 1, woof's own,
+    # beyond WRF): a new unit, launched only when a domain has buildings
+    # (tests/test_obstacles.py; off and zero-obstacle runs never load it).
+    "obstacle_drag": "8d267bf826a42f2737397864eb190b3a6c1c34ad7f63d2e3c787698e32088598",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":

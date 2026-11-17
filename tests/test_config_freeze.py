@@ -343,6 +343,12 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The opt-in resolved obstacles, appended off (woof.core.obstacles).
+    from woof.config import OBSTACLE_RUN_DEFAULTS
+    for name in reversed([*OBSTACLE_RUN_DEFAULTS]):
+        assert names.pop() == name
+        field = RunConfig.__dataclass_fields__[name]
+        assert field.kw_only and field.default == OBSTACLE_RUN_DEFAULTS[name]
     # The opt-in TSI forcing (woof.spacewx), appended off.
     for name, default in (("solar_tsi_mode", "absolute"), ("solar_tsi_source", ""),
                           ("solar_tsi_opt", 0)):
@@ -936,7 +942,9 @@ def _check_frozen_defaults(actual):
                          ("gf_deep_rain_evaporation_booking", False),
                          # the opt-in TSI forcing (woof.spacewx), off
                          ("solar_tsi_opt", 0), ("solar_tsi_source", ""),
-                         ("solar_tsi_mode", "absolute")):
+                         ("solar_tsi_mode", "absolute"),
+                         # the opt-in resolved obstacles, off
+                         *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field
     for field,value in (("urban_ucm_generation","wrf_471"),("urban_treeoption",-1),
                         ("urban_ttscheme",-1),("urban_fvg",-1.),("urban_table_dir","")):
