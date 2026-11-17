@@ -218,7 +218,7 @@ def test_the_woof_route_refuses_diagnostics_by_name_with_the_remedy():
     assert "config_physics_suite" in refused[0].follow_up
 
 
-def test_a_service_backend_alone_keeps_the_default_mpas_suite_and_reaches_its_route(tmp_path):
+def test_a_service_backend_alone_keeps_the_default_mpas_suite_and_reaches_its_route():
     """A service backend selector (``config_clm_lake_backend`` ...) names no physics: the default MPAS suite is added
     and the service rides on it.
 
@@ -243,31 +243,3 @@ def test_a_service_backend_alone_keeps_the_default_mpas_suite_and_reaches_its_ro
     # With a scheme override beside it the run names its own physics, as before.
     named = _forecast_namespace("--physics", "config_clm_lake_backend=hex-cuda", "--physics", "config_pbl_scheme=bl_ysu")
     assert physics_default.apply(named) is None and named.physics_suite is None
-
-    # A namelist holding only service selectors in &hex_mpasphys (beside &diagnostics) names none either.
-    service = _write(tmp_path, "lake.namelist", "&hex_mpasphys\n config_clm_lake_backend='hex-cuda'\n/\n")
-    both = _write(tmp_path, "both.namelist", "&hex_mpasphys\n config_clm_lake_backend='hex-cuda'\n/\n"
-                  "&diagnostics\n config_lightning_option=1\n/\n")
-    other = _write(tmp_path, "other.namelist", "&hex_mpasphys\n config_clm_lake_backend='hex-cuda'\n"
-                   " config_microp_backend='native-cpu'\n/\n")
-    empty = _write(tmp_path, "empty.namelist", "&hex_mpasphys\n/\n")
-    assert not physics_default.names_physics([f"--physics-namelist={service}"])
-    assert not physics_default.names_physics([f"--physics-namelist={both}"])
-    assert physics_default.names_physics([f"--physics-namelist={other}"])
-    assert not physics_default.names_physics([f"--physics-namelist={empty}"])  # an empty service group selects nothing
-    assert physics_default.service_namelist_groups() == {"hex_mpasphys"}
-
-
-def test_a_namelist_naming_no_physics_leaves_the_step_to_the_door(tmp_path):
-    """A --physics-namelist that names no physics carries no config_dt, so it does not take the door's mesh step
-    away: the door passes a mesh step shorter than the suite's rule, as it does for a run with no namelist (the
-    zc1200 Courant breakage door_step guards).  A namelist that names physics keeps deciding its own step."""
-    service = _write(tmp_path, "lake.namelist", "&hex_mpasphys\n config_clm_lake_backend='hex-cuda'\n/\n")
-    diag = _write(tmp_path, "diag.namelist", "&diagnostics\n config_lightning_option=1\n/\n")
-    physics = _write(tmp_path, "physics.namelist", "&physics\n config_physics_suite='convection_permitting'\n/\n")
-    suite = "convection_permitting"
-    for path in (service, diag):
-        named = {"suite": suite, "namelist": str(path)}
-        assert physics_default.door_step(named, 12, 3000.0) == ["--dt", "12"]
-        assert physics_default.door_step({"suite": suite}, 12, 3000.0) == ["--dt", "12"]
-    assert physics_default.door_step({"suite": suite, "namelist": str(physics)}, 12, 3000.0) == []
