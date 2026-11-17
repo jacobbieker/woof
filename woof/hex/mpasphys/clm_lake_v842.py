@@ -153,7 +153,7 @@ def refusal(arguments, config, layout, *, moving, execution) -> str | None:
                 "lakeini, discarding their water, ice and sediment heat; the Registry restart stream holds no "
                 "lake state. Run the lake from a cold start")
     if moving is not None:
-        return ("config_clm_lake_backend: " + route_cause(moving) + " carries no lake columns yet "
+        return ("config_clm_lake_backend: " + route_cause(moving).removesuffix(":") + " carries no lake columns yet "
                 "(moving_v842's carrier holds none, so they would start again from lakeini); "
                 + route_remedy(moving) + ", or drop the lake service")
     if execution is not None or getattr(arguments, "samehost_devices", None):

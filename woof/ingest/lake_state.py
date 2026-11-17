@@ -15,6 +15,8 @@ import sys
 import time
 import tomllib
 from urllib.request import urlopen
+import subprocess
+
 import numpy as np
 
 TABLE = Path(__file__).resolve().parents[1] / 'data/surface_obs/lake-state-sources.v1.toml'
@@ -144,7 +146,7 @@ def acquire_field(row, field, valid_time, bounds, cache):
 
 
 
-def acquire_zarr(row, valid_time, longitude, cache):
+def acquire_zarr(row, valid_time, cache):
     """One native Zarr extraction of every field of a ``zarr`` row.
 
     The time is the latest hour at or before initialization that the store
@@ -212,7 +214,12 @@ def acquire_zarr(row, valid_time, longitude, cache):
         written_hour = selected
         while (gap := int((missed - written_hour).total_seconds() // 3600)) > 1:
             middle = written_hour + timedelta(hours=gap // 2)
-            hit = attempt(middle)
+            try:
+                hit = attempt(middle)
+            except SOURCE_FAILURES:
+                # A refinement probe that fails keeps the written hour in hand
+                # rather than refuse a run that already has a valid state.
+                break
             if hit:
                 written_hour, found = middle, hit
             else:
@@ -275,6 +282,11 @@ RANGES = {'water_temperature': (270., 330.), 'bottom_temperature': (270., 330.),
           'ice_thickness': (0., 20.), 'ice_fraction': (0., 1.), 'ice_temperature': (170., 273.16)}
 
 
+#: The failures a source acquisition may raise (a store timeout is a
+#: subprocess.TimeoutExpired, a SubprocessError).
+SOURCE_FAILURES = (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError)
+
+
 def out_of_range(name, data):
     """Finite values outside the field's admission range (float32 comparison)."""
     lower, upper = RANGES[name]
@@ -293,7 +305,6 @@ def load_chain(sources, valid_time, lat, lon, *, forcing_ice=None, **kwargs):
     failure (a store timeout, a network error, no written hour) refuses the
     run with the chain and the step named.
     """
-    import subprocess
     lat, lon = np.asarray(lat, np.float64), np.asarray(lon, np.float64)
     values, receipts = {}, []
     pending = np.ones(lat.shape, bool)
@@ -304,7 +315,7 @@ def load_chain(sources, valid_time, lat, lon, *, forcing_ice=None, **kwargs):
         try:
             part, receipt = load_state(source, valid_time, lat[pending], lon[pending],
                                        forcing_ice=ice, **kwargs)
-        except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as e:
+        except SOURCE_FAILURES as e:
             if source == 'auto':
                 raise
             raise ValueError(
@@ -321,8 +332,11 @@ def load_chain(sources, valid_time, lat, lon, *, forcing_ice=None, **kwargs):
                 bad = out_of_range(name, part[name]) if name in RANGES else None
                 if bad is not None and bad.any():
                     lower, upper = RANGES[name]
-                    receipt.setdefault('errors', []).append(
-                        f'auto {name}: {int(bad.sum())} source values outside [{lower}, {upper}]')
+                    # Dropped and passed on to the next step, which may bind
+                    # them: whether the forcing is kept is unbound_cells' to say.
+                    receipt.setdefault('dropped', []).append(
+                        f'auto {name}: {int(bad.sum())} source values outside [{lower}, {upper}] '
+                        'dropped and passed to the next step')
                     receipt['status'] = 'partial_forcing_fallback'
                     part[name] = np.where(bad, np.nan, np.asarray(part[name], np.float64))
         index = np.flatnonzero(pending)
@@ -335,9 +349,10 @@ def load_chain(sources, valid_time, lat, lon, *, forcing_ice=None, **kwargs):
             bound[index] |= np.isfinite(part.get('ice_thickness', np.full(index.size, np.nan)))
         pending &= ~bound
     errors = [e for r in receipts for e in r.get('errors', ())]
+    dropped = [e for r in receipts for e in r.get('dropped', ())]
     status = ('bound' if not pending.any() else 'partial_forcing_fallback') if values else 'forcing_fallback'
     return values, dict(schema='gpuwm.lake-init.v1', source='+'.join(sources), status=status,
-                        chain=receipts, errors=errors, unbound_cells=int(pending.sum()),
+                        chain=receipts, errors=errors, dropped=dropped, unbound_cells=int(pending.sum()),
                         target_cells=int(lat.size))
 
 
@@ -386,10 +401,9 @@ def load_state(source, valid_time, lat, lon, *, path='', accept_licence='', cach
     fields = [f for f in row['field'] if f.get('start', '0000') <= date <= f.get('end', '9999')]
     shared = None
     if zarr and not path:
-        import subprocess
         try:
-            shared = acquire_zarr(row, valid_time, lon, cache)
-        except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as e:
+            shared = acquire_zarr(row, valid_time, cache)
+        except SOURCE_FAILURES as e:
             raise ValueError(f'lake source {row["id"]}: {row["store"]} unavailable '
                              f'({type(e).__name__}: {e})') from e
     def read(field):
@@ -449,6 +463,8 @@ def initialize_surface(fields, cfg, *, valid_time, latitude, longitude, cold_sta
         forcing_ice=cp.asnumpy(fields['xice'][mask]) if 'xice' in fields else None)
     for error in receipt.get('errors', ()):
         print(f'WARNING lake initialization retained forcing: {error}', file=sys.stderr, flush=True)
+    for note in receipt.get('dropped', ()):
+        print(f'WARNING lake initialization: {note}', file=sys.stderr, flush=True)
     if receipt.get('uncovered_targets'):
         print(f'WARNING lake initialization retained forcing for uncovered targets: {receipt["uncovered_targets"]}', file=sys.stderr, flush=True)
     if receipt.get('unbound_cells'):

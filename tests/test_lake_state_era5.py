@@ -54,19 +54,19 @@ def test_zarr_request_is_global_latest_published_hour_and_cached(monkeypatch, tm
     fake_bridge(monkeypatch, '2026-11-10T23:00:00Z', requests)
     row = source_rows()['era5']
     valid = datetime(2026, 11, 9, 12, 30, tzinfo=timezone.utc)
-    path, ident = obs.acquire_zarr(row, valid, np.array([6.6, 9.4]), tmp_path)
+    path, ident = obs.acquire_zarr(row, valid, tmp_path)
     assert requests[-1]['times'] == ['2026-11-09T12:00:00Z'] and ident.endswith('2026-11-09T12:00:00Z')
     assert requests[-1]['area'] == [-90., -180., 90., 180.]
     assert {f['source'] for f in requests[-1]['fields']} == {f['variable'] for f in row['field']}
     assert not any(f['pressure'] for f in requests[-1]['fields'])
     # The same request is served from the cache, whatever the targets.
-    assert obs.acquire_zarr(row, valid, np.array([7.0]), tmp_path)[0] == path and len(requests) == 1
+    assert obs.acquire_zarr(row, valid, tmp_path)[0] == path and len(requests) == 1
     # Past the store's last published hour: that hour (decode_field judges its age).
-    obs.acquire_zarr(row, datetime(2026, 11, 16, 12, tzinfo=timezone.utc), np.array([7.]), tmp_path)
+    obs.acquire_zarr(row, datetime(2026, 11, 16, 12, tzinfo=timezone.utc), tmp_path)
     assert requests[-1]['times'] == ['2026-11-10T23:00:00Z']
     # Targets at the antimeridian ask for the same window (decode_field
     # closes the cyclic seam), so the request is served from the cache.
-    assert obs.acquire_zarr(row, valid, np.array([179.6]), tmp_path)[0] == path
+    assert obs.acquire_zarr(row, valid, tmp_path)[0] == path
     assert all(r['area'] == [-90., -180., 90., 180.] for r in requests)
     assert not list(tmp_path.glob('.*'))
 
@@ -77,7 +77,7 @@ def test_an_unwritten_declared_hour_steps_back_a_day_within_the_age_limit(monkey
     fake_bridge(monkeypatch, '2026-11-10T00:00:00Z', requests,
                 unwritten=('2026-11-09T12:00:00Z', '2026-11-08T12:00:00Z'))
     row = source_rows()['era5']
-    path, ident = obs.acquire_zarr(row, datetime(2026, 11, 9, 12, tzinfo=timezone.utc), np.array([7.]), tmp_path)
+    path, ident = obs.acquire_zarr(row, datetime(2026, 11, 9, 12, tzinfo=timezone.utc), tmp_path)
     assert [r['times'][0] for r in requests[:3]] == ['2026-11-09T12:00:00Z', '2026-11-08T12:00:00Z', '2026-11-07T12:00:00Z']
     # Then the hours between the written and the last unwritten one are
     # bisected: here every one of them is written, so the latest is taken.
@@ -87,7 +87,25 @@ def test_an_unwritten_declared_hour_steps_back_a_day_within_the_age_limit(monkey
                 unwritten=tuple(f'2026-{m:02d}-{d:02d}T12:00:00Z' for m, d in
                                 ((10, 30), (10, 31), *((11, d) for d in range(1, 10)))))
     with pytest.raises(ValueError, match='no hour within 240 h'):
-        obs.acquire_zarr(row, datetime(2026, 11, 9, 12, tzinfo=timezone.utc), np.array([7.]), tmp_path / 'x')
+        obs.acquire_zarr(row, datetime(2026, 11, 9, 12, tzinfo=timezone.utc), tmp_path / 'x')
+
+
+def test_a_failed_refinement_probe_keeps_the_written_hour(monkeypatch, tmp_path):
+    """Review (#587): a probe failing during the hourly bisection must not
+    refuse a run that already found a written hour."""
+    requests = []
+    fake_bridge(monkeypatch, '2026-11-10T00:00:00Z', requests, unwritten=('2026-11-09T12:00:00Z',))
+    import woof.zarr_bridge as zb
+    extract = zb.extract_regular_zarr
+    def flaky(request, **kw):
+        if len(requests) >= 2:
+            requests.append(request)
+            raise OSError('store timed out')
+        return extract(request, **kw)
+    monkeypatch.setattr(zb, 'extract_regular_zarr', flaky)
+    row = source_rows()['era5']
+    path, ident = obs.acquire_zarr(row, datetime(2026, 11, 9, 12, tzinfo=timezone.utc), tmp_path)
+    assert ident.endswith('2026-11-08T12:00:00Z') and path.exists() and len(requests) == 3
 
 
 def test_forcing_ice_decides_frozen_cells():
@@ -145,7 +163,7 @@ def test_the_latest_written_hour_not_a_day_older(monkeypatch, tmp_path):
     fake_bridge(monkeypatch, '2026-11-10T00:00:00Z', requests,
                 unwritten=lambda hour: hour > '2026-11-08T05:00:00Z')
     row = source_rows()['era5']
-    _, ident = obs.acquire_zarr(row, datetime(2026, 11, 9, 12, tzinfo=timezone.utc), np.array([7.]), tmp_path)
+    _, ident = obs.acquire_zarr(row, datetime(2026, 11, 9, 12, tzinfo=timezone.utc), tmp_path)
     assert ident.endswith('2026-11-08T05:00:00Z')
     assert len(requests) <= 3 + 5
 
@@ -156,7 +174,7 @@ def test_a_partly_written_hour_is_not_cached(monkeypatch, tmp_path):
     fake_bridge(monkeypatch, '2026-11-10T00:00:00Z', requests,
                 unwritten=('2026-11-09T12:00:00Z',), missing=('lake_ice_temperature',))
     row = source_rows()['era5']
-    path, ident = obs.acquire_zarr(row, datetime(2026, 11, 9, 12, tzinfo=timezone.utc), np.array([7.]), tmp_path)
+    path, ident = obs.acquire_zarr(row, datetime(2026, 11, 9, 12, tzinfo=timezone.utc), tmp_path)
     assert not ident.endswith('2026-11-09T12:00:00Z') and path.exists()
     assert len(list(tmp_path.glob('*.nc'))) == len([r for r in requests if r['times'][0] != '2026-11-09T12:00:00Z'])
 
@@ -206,7 +224,9 @@ def test_chain_auto_step_stays_tolerant_of_out_of_range_values(monkeypatch):
     values, receipt = obs.load_chain(obs.CHAINS['auto+era5'], None, np.array([42., 46.]), np.zeros(2),
                                      forcing_ice=np.zeros(2))
     np.testing.assert_array_equal(values['water_temperature'], [280., 277.])
-    assert receipt['status'] == 'bound' and any('outside [270.0, 330.0]' in e for e in receipt['errors'])
+    # A value the next step filled is a note, not a retained-forcing error.
+    assert receipt['status'] == 'bound' and not receipt['errors']
+    assert any('outside [270.0, 330.0]' in e for e in receipt['dropped'])
     assert receipt['chain'][0]['status'] == 'partial_forcing_fallback'
 
 

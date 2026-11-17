@@ -411,3 +411,18 @@ def test_lakes_messages_name_the_land_cover_not_terrain(tmp_path):
     remedy = _refusal_remedy(config)
     assert "land-cover source" in remedy
     assert "declared terrain source" not in remedy
+
+
+def test_a_lake_outflow_to_the_sea_does_not_hold_its_shore():
+    """Review (#587): new shore water reaching the sea only through a
+    baseline lake (and its outflow) is the lake's, not the sea's."""
+    from woof.static.highres_production import _water_reaching_sea
+    ocean = np.zeros((3, 6), dtype=bool)
+    ocean[:, 0] = True
+    lake = np.zeros_like(ocean)
+    lake[:, 2:4] = True
+    water = lake.copy()
+    water[1, 1] = True   # the outflow channel, new water joining the sea
+    water[1, 4] = True   # new shore water of the lake
+    reach = _water_reaching_sea(water, ocean, lake)
+    assert reach[1, 1] and not reach[1, 4]

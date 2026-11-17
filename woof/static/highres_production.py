@@ -1584,7 +1584,7 @@ def _apply(baseline, grid, *, config: HighresStaticConfig,
             baseline, grid, config=config, case_date=case_date, bbox=bbox,
             landcover_row=landcover_row, urlopen=urlopen)
     coverage, selection = _experimental_terrain(coverage, bbox, grid)
-    if mode in ("all", "lakes"):
+    if mode == "all":
         # The land-use leg targets one inventory: the crosswalk's category
         # numbers are only meaningful against MODIS 21.
         _require_modis21(landuse_attrs)
@@ -1736,11 +1736,14 @@ _LAKE_CHECK_FIELDS = ("LANDUSEF", "LANDMASK", "LU_INDEX", "SOILCTOP",
 _LAKE_DEPTH_REACH_M = 5 * 1852.0 / 2.0
 
 
-def _water_reaching_sea(water: np.ndarray, ocean: np.ndarray) -> np.ndarray:
-    """Cells of ``water | ocean`` 8-connected to a baseline ocean cell."""
+def _water_reaching_sea(water: np.ndarray, ocean: np.ndarray,
+                        lake: np.ndarray) -> np.ndarray:
+    """Cells of ``water | ocean`` 8-connected to a baseline ocean cell
+    without passing through a baseline lake: a lake's outflow to the sea
+    (the St. Lawrence) does not make its new shore water the sea."""
     from scipy import ndimage
 
-    labels, _ = ndimage.label(water | ocean,
+    labels, _ = ndimage.label((water & ~lake) | ocean,
                               structure=np.ones((3, 3), dtype=bool))
     sea = np.unique(labels[ocean])
     return np.isin(labels, sea[sea > 0])
@@ -1868,7 +1871,7 @@ def _apply_lakes(baseline, grid, *, config: HighresStaticConfig,
                & (source_index == MODIS21_ISLAKE))
     sea_held = np.zeros_like(promote)
     if landcover_row.water != WATER_FROM_SOURCE and promote.any():
-        sea_held = promote & _water_reaching_sea(built_water, ocean)
+        sea_held = promote & _water_reaching_sea(built_water, ocean, lake)
         promote = promote & ~sea_held
     changed = demote | promote
     overrides = {"HGT_M": np.asarray(baseline["HGT_M"])}
