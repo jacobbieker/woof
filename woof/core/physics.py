@@ -2508,6 +2508,12 @@ class PhysicsDriver:
         self.radiation_callable = radiation
         from woof.eclipse_windows import EclipseRadiation
         self.eclipse = EclipseRadiation.for_run(cfg, radiation)
+        # Opt-in TSI forcing (woof.spacewx); None, and no import, by default.
+        self.solar_variability = None
+        if int(getattr(cfg, "solar_tsi_opt", 0) or 0) and radiation is not None:
+            from woof.spacewx.solar_irradiance import SolarVariability
+            self.solar_variability = SolarVariability.for_run(
+                cfg, getattr(radiation, "start_time", None))
         self.cumulus_callable = cumulus
         # Producers declare their retained fields as rows before any carrier
         # inventory is built. A later scheme call only writes these buffers.
@@ -3247,6 +3253,9 @@ class PhysicsDriver:
             atmosphere=atmosphere, fields=radiation_fields, state=radiation_state, cfg=cfg)
         if not isinstance(result, RadiationResult):
             raise TypeError("radiation callable must return RadiationResult")
+        if getattr(self, "solar_variability", None) is not None:
+            # TSI(t)/reference on every shortwave output, before any consumer.
+            result = self.solar_variability.scale(result, state.elapsed_seconds)
         if cloud_view is not None and int(cfg.icloud) == 3:
             result.cldfra = cloud_view.fraction
         nz, ny, nx = state.p.shape

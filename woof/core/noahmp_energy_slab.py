@@ -106,9 +106,9 @@ def _refuse_unadmitted(ice, ist):
                 f"Noah-MP land ENERGY received a {branch} column; "
                 "its dedicated solver must own that column"
                 + health_ledger.deferred_note())
-        flags = ((cp.asarray(ice) != 0).any().astype(cp.uint32)
-                 | ((cp.asarray(ist) != 1).any().astype(cp.uint32) << 1))
-        ledger.record("noahmp.energy.land_identity", flags.reshape(1), refuse)
+        from woof.core.noahmp_slab_libm import flag_bits
+        flags = flag_bits([(ice, "!=", 0), (ist, "!=", 1)])
+        ledger.record("noahmp.energy.land_identity", flags, refuse)
         return
 
     bad_ice = cp.asnumpy(cp.asarray(ice) != 0)
@@ -307,8 +307,10 @@ def energy_seg3(s, g, e, v, b):
                 "Noah-MP emitted longwave <= 0: SHDFAC is inconsistent "
                 "with LAI (module_sf_noahmplsm.F:2323-2329)"
                 + health_ledger.deferred_note())
+        from woof.core.noahmp_slab_libm import flag_bits
+        from woof.core.noahmp_surface_device import column_mask
         ledger.record("noahmp.energy.longwave",
-                      active_probe(fire <= _ZERO).any().astype(cp.uint32).reshape(1), refuse)
+                      flag_bits([(fire, "<=", _ZERO)], active=column_mask()), refuse)
     else:
         bad = cp.asnumpy(active_probe(fire <= _ZERO))
         if bad.any():

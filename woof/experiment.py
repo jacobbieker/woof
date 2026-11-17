@@ -2217,9 +2217,16 @@ def build_experiment_from_config_tables(raw: dict, *, source: str,
         fill_omitted_generation_selectors(raw, fetch_table)
     case_table = raw.pop("case_data", None)
     if case_table is not None:
-        from woof.case_data import build_case_data
-        build_case_data(case_table, source=source, base_dir=base_dir,
-                        require_inputs=False)
+        from woof.case_data import (
+            build_case_data, is_gfs_policy_table, optional_case_data_from_tables)
+        if is_gfs_policy_table(case_table):
+            # A policy-only table (fetched-GFS preparation choices) names
+            # no inputs; its values are still validated.
+            optional_case_data_from_tables({"case_data": case_table},
+                                           source=source, base_dir=base_dir)
+        else:
+            build_case_data(case_table, source=source, base_dir=base_dir,
+                            require_inputs=False)
     static_table = raw.pop("static", None)
     if static_table is not None:
         from woof.static.highres_production import parse_static_table
@@ -6343,7 +6350,9 @@ def _public_config_value(value):
                                   *MULTI_PERTURB_RUN_DEFAULTS.items(),
                                   ("madwrf_opt", 0), ("madwrf_dt_relax", 60.0),
                                   ("madwrf_dt_nudge", 60.0), ("madwrf_cldinit", 0),
-                                  ("gf_deep_rain_evaporation_booking", False)):
+                                  ("gf_deep_rain_evaporation_booking", False),
+                                  ("solar_tsi_opt", 0), ("solar_tsi_source", ""),
+                                  ("solar_tsi_mode", "absolute")):
                 value = run_document.get(name, default)
                 if isinstance(value, list):
                     value = tuple(value)

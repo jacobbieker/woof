@@ -2312,6 +2312,50 @@ class RunConfig:
     # closes the deep column budget; tendencies are unchanged
     # (kernels/gf.cu GF_DEEP_EVAP_BOOKING).  Read only where cu_physics = 3.
     gf_deep_rain_evaporation_booking: bool = _config_field(default=False, kw_only=True)
+    # Space weather (woof.spacewx, beyond WRF parity), appended off.
+    # solar_tsi_opt = 1 scales every shortwave output of a radiation call
+    # by TSI(t)/reference (woof.spacewx.solar_irradiance): "absolute"
+    # replaces WRF's fixed 1370 W m-2 by the measured TSI, "relative" keeps
+    # it and adds only the solar-cycle/sunspot variability.  The source is a
+    # TSI CSV/netCDF path or "nrlssi2" (the NOAA CDR, fetched).  0 runs no
+    # new code.
+    solar_tsi_opt: int = _config_field(default=0, kw_only=True)
+    solar_tsi_source: str = _config_field(default="", kw_only=True)
+    solar_tsi_mode: str = _config_field(default="absolute", kw_only=True)
+
+def _validate_solar_tsi(cfg) -> None:
+    """solar_tsi_opt and its keys (woof.spacewx.solar_irradiance)."""
+    opt, source, mode = cfg.solar_tsi_opt, cfg.solar_tsi_source, cfg.solar_tsi_mode
+    if type(opt) is not int or opt not in (0, 1):
+        raise ConfigurationRefused(
+            f"solar_tsi_opt={opt!r} must be 0 (WRF's 1370 W m-2 solar constant) "
+            "or 1 (scale the shortwave by a time-varying TSI)")
+    if type(source) is not str or type(mode) is not str:
+        raise ConfigurationRefused("solar_tsi_source and solar_tsi_mode must be strings")
+    if mode not in ("absolute", "relative"):
+        raise ConfigurationRefused(
+            f"solar_tsi_mode={mode!r} must be 'absolute' (TSI replaces 1370 W m-2) "
+            "or 'relative' (TSI variability about the 1360.8 W m-2 cycle mean)")
+    if opt == 0:
+        if source or mode != "absolute":
+            raise ConfigurationRefused(
+                "solar_tsi_source/solar_tsi_mode are set but solar_tsi_opt = 0, "
+                "so they would do nothing; set solar_tsi_opt = 1 or drop them")
+        return
+    if not source.strip():
+        raise ConfigurationRefused(
+            "solar_tsi_opt = 1 needs solar_tsi_source: a TSI CSV "
+            "(YYYY-MM-DD,W m-2) or NOAA CDR netCDF path, or 'nrlssi2'")
+    if not radiation_scheme_ids(cfg)[1]:
+        raise ConfigurationRefused(
+            "solar_tsi_opt = 1 scales the shortwave, but no shortwave scheme "
+            "is on (ra_sw_physics = 0)")
+    if int(cfg.swint_opt) == 2:
+        raise ConfigurationRefused(
+            "solar_tsi_opt = 1 with swint_opt = 2: FARMS recomputes the "
+            "surface shortwave every step from its own solar constant, "
+            "outside the radiation call the TSI factor scales")
+
 
 @dataclass(frozen=True)
 class _DfiBackwardRunConfig(RunConfig):
@@ -8878,7 +8922,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             raise ValueError("sf_ocean_physics requires surface-layer fluxes: UST, HFX and LH would otherwise stay zero")
     from woof.ingest.lake_state import source_rows
     rows = source_rows()
-    if cfg.lake_state_source not in ("auto", "forcing", *rows):
+    from woof.ingest.lake_state import CHAINS
+    if cfg.lake_state_source not in ("auto", "forcing", *CHAINS, *rows):
         raise ConfigurationRefused(
             f"lake_state_source={cfg.lake_state_source!r} is unknown; "
             "an unknown row would leave requested lake observations unbound")
@@ -9030,6 +9075,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     if type(cfg.gf_deep_rain_evaporation_booking) is not bool:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking must be true or false")
+    _validate_solar_tsi(cfg)
     if cfg.gf_deep_rain_evaporation_booking and int(cfg.cu_physics) != 3:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking corrects Grell-Freitas's deep "

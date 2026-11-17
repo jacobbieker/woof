@@ -482,3 +482,52 @@ def test_the_hex_lane_refuses_a_paravirtual_device(cp, monkeypatch):
     props = dict(cp.cuda.runtime.getDeviceProperties(0), architecture="Apple Paravirtual device")
     monkeypatch.setattr(cp.cuda.runtime, "getDeviceProperties", lambda device: props)
     assert not metal_lane.apple_gpu()
+
+
+_LOCAL_CONSTEXPR = r'''
+__device__ __noinline__ float stability(float zet) {
+    constexpr float bm_st = 2.5f;
+    constexpr float rbm_st = ((1.f) / (bm_st));
+    constexpr float bh_st = 1.1f;
+    constexpr float rbh_st = ((1.f) / (bh_st));
+    constexpr float l0 = 80;
+    return zet * rbm_st + rbh_st * l0;
+}
+extern "C" __global__ void local_constexpr(const float* zet, float* out, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    constexpr float tiny = 1e-38f / 64.f;
+    out[i] = stability(zet[i]) + tiny;
+}
+'''
+
+
+def test_local_constexpr_floats_in_a_subnormal_retaining_unit(cp):
+    """Strict hex MYNN (``--ftz=false``) declares ``constexpr float rbm_st = 1.f / bm_st`` and
+    ``constexpr float l0 = 80`` in its functions.  There float is f32s, whose division and integer
+    conversion are not constexpr, so Metal refused the whole unit (whole strict hex forecasts failed
+    at the first MYNN call).  Each folds to the binary32 word NVRTC folds; the subnormal stays."""
+    from woof.backend.metal import loader
+    msl = loader.translate_unit("local_constexpr", _LOCAL_CONSTEXPR, options=("--ftz=false",)).msl
+    assert "f32s" in msl and "(1.f) / (bm_st)" not in msl
+    zet = np.array([0.0, 1.0, -3.25, 1e-39], dtype=np.float32)
+    f = np.float32
+    with np.errstate(under="ignore"):
+        want = zet * (f(1) / f(2.5)) + (f(1) / f(1.1)) * f(80) + f(1e-38) / f(64)
+    out = cp.zeros(zet.size, dtype=cp.float32)
+    module = cp.RawModule(code=_LOCAL_CONSTEXPR, options=("--ftz=false",))
+    module.get_function("local_constexpr")((1,), (4,), (cp.asarray(zet), out, np.int32(zet.size)))
+    assert cp.asnumpy(out).tobytes() == want.tobytes()
+
+
+@pytest.mark.slow
+def test_strict_hex_mynn_compiles_on_metal(cp, monkeypatch):
+    """The whole strict MYNN unit (bl_mynn_v842, ``--ftz=false``) translates and compiles on Metal
+    (about 4 minutes on an M3 Max)."""
+    from woof.hex import numerics as hex_numerics
+    from woof.hex.mpasphys import bl_mynn_v842 as bl, resources_build as resources
+    if hex_numerics._bound and not hex_numerics.is_strict():
+        pytest.skip("this process compiled hex kernels in fast numerics")
+    monkeypatch.setattr(hex_numerics, "_mode", "strict")
+    module = bl.MynnCudaModule(shared_math_source=resources.mynn_maths(resources._vendored_maths()))
+    assert module.module.get_function("mynn_mmm_run") is not None

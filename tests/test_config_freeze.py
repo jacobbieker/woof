@@ -343,6 +343,12 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The opt-in TSI forcing (woof.spacewx), appended off.
+    for name, default in (("solar_tsi_mode", "absolute"), ("solar_tsi_source", ""),
+                          ("solar_tsi_opt", 0)):
+        assert names.pop() == name
+        assert RunConfig.__dataclass_fields__[name].default == default
+        assert RunConfig.__dataclass_fields__[name].kw_only
     # The opt-in GF deep evaporation booking, appended off.
     assert names.pop() == "gf_deep_rain_evaporation_booking"
     assert RunConfig.__dataclass_fields__["gf_deep_rain_evaporation_booking"].default is False
@@ -927,7 +933,10 @@ def _check_frozen_defaults(actual):
                          ("radtran_aerosol", "none"),
                          *__import__("woof.config", fromlist=["x"]).MULTI_PERTURB_RUN_DEFAULTS.items(),
                          # the opt-in GF deep evaporation booking, off
-                         ("gf_deep_rain_evaporation_booking", False)):
+                         ("gf_deep_rain_evaporation_booking", False),
+                         # the opt-in TSI forcing (woof.spacewx), off
+                         ("solar_tsi_opt", 0), ("solar_tsi_source", ""),
+                         ("solar_tsi_mode", "absolute")):
         assert actual.pop(field) == value, field
     for field,value in (("urban_ucm_generation","wrf_471"),("urban_treeoption",-1),
                         ("urban_ttscheme",-1),("urban_fvg",-1.),("urban_table_dir","")):

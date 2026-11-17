@@ -60,6 +60,12 @@ _TPB = 256
 
 
 @lru_cache(maxsize=1)
+def _isolated() -> bool:
+    from woof.backend.metal import ext
+    return ext.gpu_times_isolated()
+
+
+@lru_cache(maxsize=1)
 def _compiled():
     from woof.backend.metal import ext
     ext.load().compile(_KEY, _SOURCE, [f"woof_{kind}_{w}" for kind in ("copy", "fill")
@@ -121,9 +127,16 @@ def write(view, values) -> None:
     flush_pending()
     st = view._st
     kernel = f"woof_{'fill' if fill else 'copy'}_{item}"
-    (out,) = ext.load().launch(_KEY, _SOURCE, kernel, ((n + _TPB - 1) // _TPB, 1, 1),
+    module = ext.load()
+    if _isolated():
+        module.set_gpu_label(ext.call_site())
+    try:
+        (out,) = module.launch(_KEY, _SOURCE, kernel, ((n + _TPB - 1) // _TPB, 1, 1),
                                (_TPB, 1, 1), [st.arr, src], [0, 0], [True, False], [0, 1], -1,
                                [blob], [2], 0, 0)
+    finally:
+        if _isolated():
+            module.set_gpu_label("")
     st.rebind_written(out)
 
 

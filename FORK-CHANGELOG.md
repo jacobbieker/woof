@@ -990,3 +990,11 @@ Fixed:
   those inputs already exist. Under `--prepare-only` the forecast memory
   gate warns instead of refusing and the forecast-device check is
   skipped, since no forecast starts.
+- `[case_data]` with only the GFS policy keys (`gfs_lake_skin`,
+  `gfs_lake_ice`, `gfs_snow_convention`) now stays on `woof go`'s fetch
+  route, and the downloaded GFS preparation reads them. Before, any
+  `[case_data]` table sent `woof go` to the declared-inputs route, where
+  `--prepare-only` refused it and the native forcing had to be GRIB1, so
+  the lake policies could not reach a downloaded GFS run. A table with any
+  other key routes, and is refused, as before; configs without the table
+  are unchanged.

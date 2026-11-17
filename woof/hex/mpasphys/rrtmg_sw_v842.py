@@ -729,6 +729,8 @@ class MPASShortwave(CudaSW):
             # icld=0 inatm clears the same optical slabs supplied here; bypass
             # the legacy launcher's campaign-only refusal without changing it.
             self.spectral_output = spectral_output if fields else "none"
+            # boundary_slabs reads the surface and the top only.
+            self.spectral_levels = "boundary"
             try:
                 out = self.rrtmg_sw_batched_device(
                     n, nl, max(1, cldovrlp), l[0], it[0], l[1], it[1], cp.ascontiguousarray(s[3, cols]),
@@ -739,6 +741,7 @@ class MPASShortwave(CudaSW):
                     aer_opt=3 if optics is not None else 0, column_chunk=column_chunk or n, mcica_layout="column", aerosol=optics)
             finally:
                 self.spectral_output = "none"
+                self.spectral_levels = "all"
             for target, name in zip(profiles, ("swuflx", "swuflxc", "swdflx", "swdflxc")):
                 target[cols] = out[name]
             direct[cols] = out["swdkdir"]

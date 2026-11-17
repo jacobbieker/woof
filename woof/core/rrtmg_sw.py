@@ -2988,6 +2988,10 @@ class CudaSW:
         #: nlay+1, 14)) or "gpoints" (O["sw_gpt"], (6, ncol, nlay+1, 112));
         #: quantities SPECTRAL_QUANTITIES, levels as the broadband slabs
         self.spectral_output = "none"
+        #: spectral slab levels: "all" (nlay+1, as above) or "boundary" (2:
+        #: the surface and the top, the only levels the history fields read;
+        #: the same words as those two levels of "all")
+        self.spectral_levels = "all"
         packed, defines = _pack_cuda_tables(tab)
         src_path = __import__("pathlib").Path(__file__).parent / "kernels" / "rrtmg_sw.cu"
         code = defines + src_path.read_text(encoding="ascii") + spectral_source()
@@ -3626,10 +3630,11 @@ class CudaSW:
         spectral = self.spectral_output
         if spectral not in ("none", "bands", "gpoints"):
             raise ValueError(f"rrtmg_spectral_output must be none, bands or gpoints, not {spectral!r}")
+        nlo = spectral_level_count(getattr(self, "spectral_levels", "all"), nl1)
         if spectral != "none":
             width = NBNDSW if spectral == "bands" else NGPTSW
             O["sw_band" if spectral == "bands" else "sw_gpt"] = cp.empty(
-                (len(SPECTRAL_QUANTITIES), ncol, nl1, width), dtype=cp.float32)
+                (len(SPECTRAL_QUANTITIES), ncol, nlo, width), dtype=cp.float32)
 
         iceflg = int(iceflgsw)
         # laysolfr is computed on device from the resident jp/laytrop
@@ -3852,18 +3857,18 @@ class CudaSW:
                 # words above are unchanged by the option
                 width = NBNDSW if spectral == "bands" else NGPTSW
                 part = scratch.take("spectral",
-                                    (len(SPECTRAL_QUANTITIES), nc, nl1, width), f32)
+                                    (len(SPECTRAL_QUANTITIES), nc, nlo, width), f32)
                 total = part.size
                 if spectral == "bands":
                     self._k("rsw_spc_band_accum_b")(
                         ((total + 127) // 128,), (128,),
-                        (i32(nc), i32(nlayers), self.ngb_gpu, zincflx_d,
+                        (i32(nc), i32(nlayers), i32(nlo), self.ngb_gpu, zincflx_d,
                          zcd_d, zcu_d, zfd_d, zfu_d, ztn_d, ztcn_d, part))
                     O["sw_band"][:, rows] = part
                 else:
                     self._k("rsw_spc_gpt_b")(
                         ((total + 127) // 128,), (128,),
-                        (i32(nc), i32(nlayers), zincflx_d,
+                        (i32(nc), i32(nlayers), i32(nlo), zincflx_d,
                          zcd_d, zcu_d, zfd_d, zfu_d, ztn_d, ztcn_d, part))
                     O["sw_gpt"][:, rows] = part
                 del part
@@ -4336,6 +4341,16 @@ def sw_batched_vram_bytes(ncol_chunk, nlay, ncol_total=None, *, mcica_layout="gp
     stage_p = (4 * copied + 1) * s_gnl + 3 * s_b + s_c
     return (sw_batched_scratch_bytes(nc, nl)
             + max(stage_u, stage_s, stage_p) + out_b)
+
+
+def spectral_level_count(levels, nl1):
+    """Output levels of a spectral slab: ``"all"`` keeps the ``nl1`` levels,
+    ``"boundary"`` the surface and the top (2; kernels/rrtmg_sw_spectral.cuh)."""
+    if levels == "all":
+        return int(nl1)
+    if levels == "boundary":
+        return 2
+    raise ValueError(f"spectral_levels must be all or boundary, not {levels!r}")
 
 
 def spectral_source() -> str:

@@ -47,11 +47,10 @@ from pathlib import Path
 
 import numpy as np
 
-from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
 from . import pgrad_hmix_v842, tend_v842
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, loop_extent
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, loop_extent, launch_options
 
 SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_tendency.F:107-350,1034-1049",
@@ -118,7 +117,7 @@ def _module_on(device: int, precision: str, options: tuple[str, ...], trig64: bo
 
 def _function(precision: str, name: str):
     import cupy as cp
-    options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+    options = launch_options()
     from woof.hex.mpas_ice import rkind
     return _module_on(cp.cuda.Device().id, precision, options, precision == "r8" and rkind.trig64()).get_function(
         name)
