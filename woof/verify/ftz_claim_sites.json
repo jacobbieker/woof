@@ -39080,10 +39080,10 @@
     },
     {
       "file": "tools/cuda_rounding_check.py",
-      "line": 414,
+      "line": 420,
       "kind": "prose",
-      "anchor": "(\"-std=c++17\", \"--ftz=false\")),",
-      "anchor_sha256": "09584a7daab80e5d754db59f6d251dfc8d45c7a124534f3e1f7ffdaf5a327941",
+      "anchor": "+ sw.spectral_source(), (\"-std=c++17\", \"--ftz=false\")),",
+      "anchor_sha256": "1940e435133ad8e4bd77b0bef31395cd6970ae3e6d760d80e2023e7460f6300b",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
