@@ -3099,6 +3099,15 @@ _LBC_FINAL_ROW_WORDS = 12
 #: ``WOOF_LBC_FINAL_MULTI=0`` keeps one finalize_state_field launch per
 #: forced field, for A/B and byte-identity checks.
 LBC_FINAL_MULTI_ENABLED = os.environ.get("WOOF_LBC_FINAL_MULTI", "1") != "0"
+#: The table takes the fields only while every one has at most this many
+#: cells.  The launches it saves are the gain, so it pays where they are a
+#: large part of the work: A6000 (shared, CUDA-event minimum per call, 10
+#: fields at 50 levels) 73 -> 46 us at 60x60, 160 -> 138 us at 100x120,
+#: about even at 150x186 (1.4M cells) and 636 -> 695 us at 228x276, where
+#: one long launch loses to ten shorter ones.  Words are the per-field
+#: launches' at any size; ``WOOF_LBC_FINAL_MULTI_MAX_CELLS`` moves the cut.
+LBC_FINAL_MULTI_MAX_CELLS = int(os.environ.get(
+    "WOOF_LBC_FINAL_MULTI_MAX_CELLS", str(1 << 20)))
 _FINAL_KINDS = {"u": 0, "v": 1, "theta": 2, "phi": 3, "qv": 5, "w": 6}
 
 
@@ -3112,8 +3121,10 @@ def _launch_finalize_multi(state, names, device_interval, old_mup_frame,
     own body (``finalize_state_cell``), so the words are the per-field
     launches' by construction.  Returns False, having launched nothing,
     when a field cannot take the table (a non-contiguous or non-float32
-    array, 2^31 cells or more, overlapping targets); the caller then runs
-    the per-field launches.
+    array, 2^31 cells or more, overlapping targets, a field above the size
+    cut); the caller then runs
+    the per-field launches.  A field above ``LBC_FINAL_MULTI_MAX_CELLS``
+    sends every field to the per-field launches (same words, faster there).
     """
     import cupy as cp
 
@@ -3147,6 +3158,8 @@ def _launch_finalize_multi(state, names, device_interval, old_mup_frame,
         if not device(target) or not all(device(a) for a in sides):
             return False
         if target.ndim != 3 or int(target.size) >= 2**31:
+            return False
+        if int(target.size) > LBC_FINAL_MULTI_MAX_CELLS:
             return False
         rows.append((name, target, sides))
         spans.append((int(target.data.ptr),

@@ -185,6 +185,20 @@ def test_overlapping_targets_fall_back(monkeypatch):
 
 @requires_gpu
 @pytest.mark.gpu
+def test_fields_above_the_size_cut_take_the_per_field_launches(monkeypatch):
+    import woof.ingest.lateral_bc as lbc
+
+    cfg, state, _ = _setup()
+    interval, names, old_frame, dtbc = _forced(state, cfg, muts=False)
+    monkeypatch.setattr(lbc, "LBC_FINAL_MULTI_MAX_CELLS", state.thp.size - 1)
+    counts = _counter(monkeypatch)
+    assert not lbc._launch_finalize_multi(state, names, interval, old_frame,
+                                          dtbc, cfg.spec_zone)
+    assert counts["launches"] == 0
+
+
+@requires_gpu
+@pytest.mark.gpu
 def test_apply_state_boundary_values_takes_one_launch(monkeypatch):
     """The production entry, table on vs off, from the same state."""
     import cupy as cp
