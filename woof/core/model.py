@@ -2169,7 +2169,7 @@ def execute_experiment(
         from woof.nn.launch import refuse_multiple_domains
         refuse_multiple_domains(len(model.nodes_by_grid_id))
         nn_seat = attach_nn_seat(
-            model.root.state, model.root.cfg,
+            model.root.state, model.root.cfg.run,
             resume=float(getattr(model.root.state, "elapsed_seconds", 0.0)) > 0.0)
     from woof.core import health_ledger, lagged_health
     health_policy = lagged_health.resolve_health_check(
