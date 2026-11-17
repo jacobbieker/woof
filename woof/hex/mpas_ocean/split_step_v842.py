@@ -201,7 +201,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
                 st["normalVelocity@2"], st["normalBaroclinicVelocity@2"], m["weightsOnEdge"], m["fEdge"],
                 m["edgesOnEdge"], m["nEdgesOnEdge"], m["maxLevelEdgeTop"], i32(m["nEdgesSolve"]), i32(nl), i32(me2)))
             n1 = int(m["nEdgesArray"][0])
-            _launch(precision, "ocn_ss_bcl_v842", n1, (
+            _launch(precision, "ocn_ss_bcl_v842", n1 * 32, (
                 st["normalBaroclinicVelocity@2"], d["barotropicForcing"], u_temp, st["normalBaroclinicVelocity"],
                 td["normalVelocity"], st["normalVelocity@2"], st["ssh@2"], d["layerThicknessEdge"], m["dcEdge"],
                 m["cellsOnEdge"], m["maxLevelEdgeTop"], i32(n1), i32(nl), i32(split), rdt, gravity))

@@ -111,30 +111,48 @@ extern "C" __global__ void ocn_ss_fuperp_v842(
 
 // one baroclinic iteration on the linear Coriolis term, edges 1..nEdgesArray(1):
 // the predicted baroclinic velocity, its thickness-weighted mean as the
-// barotropic forcing, the new baroclinic velocity the average of old and predicted
+// barotropic forcing, the new baroclinic velocity the average of old and predicted.
+// A warp per edge: lane l owns levels l, l+32, ... (a column's consecutive
+// words, so the loads coalesce), writes and reads back only its own uTemp
+// words, and forms their terms; every lane then adds the terms in level
+// order, each broadcast from its lane, so the sums are the serial loop's
+// words. Every lane stores the same forcing word before reading it back.
 extern "C" __global__ void ocn_ss_bcl_v842(
     rk *bclNew, rk *forcing, rk *uTemp, const rk *bclCur, const rk *tend, const rk *uNew, const rk *sshNew,
     const rk *layerThicknessEdge, const rk *dcEdge, const int *cellsOnEdge, const int *maxLevelEdgeTop,
     int nEdges, int nl, int split, rk dt, rk gravity)
 {
-    const int e = ss_thread();
+    const int e = ss_thread() >> 5, lane = threadIdx.x & 31;
     if (e >= nEdges) return;
     const int cell1 = cellsOnEdge[e * 2] - 1, cell2 = cellsOnEdge[e * 2 + 1] - 1;
     rk *ut = uTemp + (size_t)e * nl;
     const int b = e * nl, top = maxLevelEdgeTop[e];
-    for (int k = 0; k < nl; ++k) ut[k] = C(0.0);
-    for (int k = 0; k < top; ++k)
+    for (int k = lane; k < nl; k += 32) ut[k] = C(0.0);
+    for (int k = lane; k < top; k += 32)
         ut[k] = A(bclCur[b + k],
                   M(dt, A(A(tend[b + k], uNew[b + k]),
                           D(M(M((rk)split, gravity), S(sshNew[cell2], sshNew[cell1])), dcEdge[e]))));
-    rk sum = M(layerThicknessEdge[b], ut[0]);
-    rk thick = layerThicknessEdge[b];
-    for (int k = 1; k < top; ++k) {
-        sum = A(sum, M(layerThicknessEdge[b + k], ut[k]));
-        thick = A(thick, layerThicknessEdge[b + k]);
+    rk sum = C(0.0), thick = C(0.0);
+    for (int k0 = 0; k0 == 0 || k0 < top; k0 += 32) {
+        const int k = k0 + lane;
+        rk h = C(0.0), term = C(0.0);
+        if (k < nl) {
+            h = layerThicknessEdge[b + k];
+            term = M(layerThicknessEdge[b + k], ut[k]);
+        }
+        for (int j = 0; j < 32 && k0 + j < nl; ++j) {
+            const rk hj = __shfl_sync(0xffffffffu, h, j), tj = __shfl_sync(0xffffffffu, term, j);
+            if (k0 + j == 0) {
+                sum = tj;
+                thick = hj;
+            } else if (k0 + j < top) {
+                sum = A(sum, tj);
+                thick = A(thick, hj);
+            }
+        }
     }
     forcing[e] = D(D(M((rk)split, sum), thick), dt);
-    for (int k = 0; k < top; ++k)
+    for (int k = lane; k < top; k += 32)
         bclNew[b + k] = M(C(0.5), S(A(bclCur[b + k], ut[k]), M(dt, forcing[e])));
 }
 
