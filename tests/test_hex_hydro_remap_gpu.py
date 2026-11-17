@@ -215,8 +215,12 @@ def test_the_gpu_exchange_is_on_unless_turned_off(clean_env, tmp_path, monkeypat
     with route.launch_scope(config=toml, gpu_exchange=True):          # the flag overrides the table
         assert route.gpu_exchange() is True
     assert route.gpu_exchange() is True
-    monkeypatch.setenv(route.ENV_GPU_EXCHANGE, "0")
-    assert route.gpu_exchange() is False
+    for off in ("0", "false", "OFF", "no"):
+        monkeypatch.setenv(route.ENV_GPU_EXCHANGE, off)
+        assert route.gpu_exchange() is False
+    monkeypatch.setenv(route.ENV_GPU_EXCHANGE, "maybe")
+    with pytest.raises(ValueError, match="use 1 or 0"):
+        route.gpu_exchange()
     monkeypatch.delenv(route.ENV_GPU_EXCHANGE)
     for asked in (True, False):
         with pytest.raises(ValueError, match="without --wrf-hydro"):
@@ -225,6 +229,24 @@ def test_the_gpu_exchange_is_on_unless_turned_off(clean_env, tmp_path, monkeypat
     toml.write_text('[wrf_hydro]\nnamelist = "hydro.namelist"\ngpu_exchange = "yes"\n')
     with pytest.raises(ValueError, match="true or false"):
         route.read_table(toml)
+
+
+def test_hex_forecast_hands_the_switch_to_the_launch(monkeypatch):
+    import argparse
+    import contextlib
+
+    from woof import wrf_hydro_route
+    from woof.hex import forecast_door
+    seen = {}
+
+    @contextlib.contextmanager
+    def scope(*args, **kw):
+        seen.update(kw)
+        yield
+    monkeypatch.setattr(wrf_hydro_route, "launch_scope", scope)
+    monkeypatch.setattr(forecast_door, "_run_forecast_with_outputs", lambda arguments: 0)
+    forecast_door.run_forecast(argparse.Namespace(wrf_hydro="hydro.namelist", wrf_hydro_gpu_exchange=False))
+    assert seen == {"gpu_exchange": False}
 
 
 def test_the_cli_flag_reaches_the_launch():
@@ -242,17 +264,27 @@ def test_the_host_route_runs_and_says_why_without_a_device(monkeypatch, caplog):
     from woof import backend
     from woof.hex import hydro_remap_gpu, wrf_hydro_hex
     exchange, _ = _exchange(False)
-    assert wrf_hydro_hex._device_exchange(exchange, False) == (None, "--no-wrf-hydro-gpu-exchange")
-    monkeypatch.setattr(backend, "active", lambda: "cpu")
-    device, reason = wrf_hydro_hex._device_exchange(exchange, True)
-    assert device is None and "no GPU backend" in reason
+    assert wrf_hydro_hex._device_exchange(exchange, False) == (None, wrf_hydro_hex.SWITCHED_OFF)
+    for name in ("cpu", "host", "hip", "hip-nvidia"):
+        monkeypatch.setattr(backend, "active", lambda name=name: name)
+        device, reason = wrf_hydro_hex._device_exchange(exchange, True)
+        assert device is None and name in reason
     monkeypatch.setattr(backend, "active", lambda: "cuda")
+    strided = np.zeros((4, 1, 8), np.float32)[..., ::2]
+    device, reason = wrf_hydro_hex._device_exchange(exchange, True, {"smois": strided})
+    assert device is None and "contiguous float32" in reason
 
     def mixed(*_):
         raise RuntimeError("this scipy mixes fused and plain loops")
     monkeypatch.setattr(hydro_remap_gpu.DeviceExchange, "__init__", mixed)
     device, reason = wrf_hydro_hex._device_exchange(exchange, True)
     assert device is None and "mixes" in reason
+
+    def compile_error(*_):
+        raise ValueError("the overlap holds 2**31 entries")
+    monkeypatch.setattr(hydro_remap_gpu.DeviceExchange, "__init__", compile_error)
+    device, reason = wrf_hydro_hex._device_exchange(exchange, True)
+    assert device is None and reason.startswith("ValueError")
 
 
 # -- the coupled seam (WRF-Hydro opt-in) -------------------------------------------------------------------
@@ -283,6 +315,7 @@ def test_the_default_seam_is_the_host_seam(tmp_path):
 
     (host, hd), (dev, dd) = seam("host", gpu_exchange=False), seam("dev")
     assert host.device is None and dev.device is not None
+    dev.PENDING = 3                     # the fourth cycle's row waits on the device, the first three are folded
     rng = np.random.default_rng(3)
     f32 = np.float32
     for cycle in range(4):
@@ -309,5 +342,6 @@ def test_the_default_seam_is_the_host_seam(tmp_path):
         for key, value in ref.items():
             assert abs(b[key] - value) <= 1e-12 * max(abs(value), total), key
     assert dev.receipt()["exchange_route"]["device"] is True
-    assert host.receipt()["exchange_route"] == {"device": False, "reason": "--no-wrf-hydro-gpu-exchange"}
+    from woof.hex.wrf_hydro_hex import SWITCHED_OFF
+    assert host.receipt()["exchange_route"] == {"device": False, "reason": SWITCHED_OFF}
     assert any(b["head_grid_m3"] > 0.0 for b in dev.budget) and abs(dev.budget[-1]["soil_change_grid_m3"]) > 0

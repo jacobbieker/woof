@@ -174,7 +174,12 @@ def gpu_exchange() -> bool:
     """Whether this launch asks for hex's cell <-> grid exchange on the device:
     the default, unless ``--no-wrf-hydro-gpu-exchange`` (``gpu_exchange =
     false``, ``WOOF_WRF_HYDRO_GPU_EXCHANGE=0``)."""
-    return os.environ.get(ENV_GPU_EXCHANGE, "1").strip() != "0"
+    value = os.environ.get(ENV_GPU_EXCHANGE, "1").strip().lower()
+    if value in ("1", "true", "yes", "on", ""):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"{ENV_GPU_EXCHANGE}={value!r}: use 1 or 0")
 
 
 def refuse_multiple_domains(count: int) -> None:

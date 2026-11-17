@@ -192,7 +192,7 @@ def main(argv=None):
     mesh_s = time.perf_counter() - t
     nc = len(cells.area)
     transfers = _Transfers(cp)
-    out = {"backend": woof.backend.name() if hasattr(woof.backend, "name") else None,
+    out = {"backend": woof.backend.active(),
            "lsm_grid": [args.ny, args.nx], "cells": nc, "spacing_km": args.spacing_km, "outer_km": args.outer_km,
            "mesh_s": round(mesh_s, 2)}
     for label, gpu in (("host", False), ("device", True)):
@@ -202,6 +202,8 @@ def main(argv=None):
         t = time.perf_counter()
         seam = attach(driver, cells, namelist=namelist, start_time=datetime.datetime(2020, 1, 1), dzs=DZS, lsm=2,
                       output_dir=str(work / label), gpu_exchange=gpu)
+        if (seam.device is not None) != gpu:
+            raise SystemExit(f"the {label} run attached the other route: {seam.receipt()['exchange_route']}")
         out[label] = {"attach_s": round(time.perf_counter() - t, 2)}
         if label == "host":
             out["overlaps"] = int(seam.remap.overlap.nnz)

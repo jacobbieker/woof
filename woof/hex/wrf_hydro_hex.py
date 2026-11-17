@@ -61,6 +61,9 @@ class HexWrfHydroSeam:
         self._budget, self._pending = [], []
         self._work = None
 
+    #: the device route fetches its budget rows to the host every this many cycles (one copy, not one a cycle)
+    PENDING = 256
+
     @property
     def budget(self) -> list:
         """One dict per coupling cycle (:meth:`_budget_row`); the device route's rows are fetched here, at once."""
@@ -172,6 +175,8 @@ class HexWrfHydroSeam:
                           prior=w[name + "_prior"], exact=w[name + "_exact"])
         dev.to_cells(self.head, exact=w["head64"], out=p["sfcheadrt"])
         self._pending.append(self._budget_device(fields, w))
+        if len(self._pending) >= self.PENDING:
+            self.budget  # noqa: B018 -- folds the pending rows into the host list
 
     def _budget_device(self, fields, w):
         """:meth:`_budget_row`'s terms as one device vector (the sums run in the device's order)."""
@@ -215,23 +220,33 @@ def _water_rule(veg, sol, geo_static):
     return veg, sol
 
 
-#: the backends whose arrays live on a GPU (woof.backend)
-DEVICE_BACKENDS = ("cuda", "mlx", "hip", "hip-nvidia")
+#: the backends the device exchange is built and checked on (woof.backend): CUDA through the no-FTZ compile,
+#: Metal; hip and hip-nvidia keep the host route until they are (hydro_remap_gpu compiles no-FTZ on cuda only)
+DEVICE_BACKENDS = ("cuda", "mlx")
+#: the receipt's reason when the launch switched the device exchange off
+SWITCHED_OFF = ("switched off (--no-wrf-hydro-gpu-exchange, [wrf_hydro] gpu_exchange = false or "
+                "WOOF_WRF_HYDRO_GPU_EXCHANGE=0)")
 
 
-def _device_exchange(exchange, asked):
-    """The device route for ``exchange`` and why not, as ``(DeviceExchange or None, reason or None)``."""
+def _device_exchange(exchange, asked, fields=None):
+    """The device route for ``exchange`` and why not, as ``(DeviceExchange or None, reason or None)``: any
+    failure to build it (no GPU backend, a host scipy that mixes loops, an overlap past int32, a kernel that
+    does not compile, soil fields it cannot update in place) leaves the host route, with the reason."""
     if not asked:
-        return None, "--no-wrf-hydro-gpu-exchange"
+        return None, SWITCHED_OFF
     from woof import backend
     name = backend.active()
     if name not in DEVICE_BACKENDS:
-        return None, f"no GPU backend (woof backend {name!r})"
+        return None, f"no device exchange on woof backend {name!r}"
+    for key in ("smois", "sh2o"):
+        field = (fields or {}).get(key)
+        if field is not None and (str(field.dtype) != "float32" or not field.flags.c_contiguous):
+            return None, f"{key} is not contiguous float32, which the device exchange updates in place"
     from .hydro_remap_gpu import DeviceExchange
     try:
         return DeviceExchange(exchange), None
-    except RuntimeError as exc:          # host_fuses: this scipy mixes fused and plain loops
-        return None, str(exc)
+    except Exception as exc:  # noqa: BLE001 -- any failure here leaves the host route, which the log names
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def attach(driver, cells, *, namelist, start_time, dzs, lsm, output_dir=None, gpu_exchange=True):
@@ -269,7 +284,7 @@ def attach(driver, cells, *, namelist, start_time, dzs, lsm, output_dir=None, gp
     if columns not in (ncells, ncells + 1):
         raise ValueError(f"the column driver carries {columns} columns and the mesh {ncells} cells")
     import cupy as cp
-    device, reason = _device_exchange(exchange, gpu_exchange)
+    device, reason = _device_exchange(exchange, gpu_exchange, fields)
     if device is None and gpu_exchange:
         import logging
         logging.getLogger(__name__).warning("WRF-Hydro on hex: the cell <-> grid exchange runs on the host: %s",
