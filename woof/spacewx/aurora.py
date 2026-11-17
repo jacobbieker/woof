@@ -38,6 +38,7 @@ import numpy as np
 
 from woof.spacewx import igrf
 from woof.spacewx.ionosphere import subsolar_point
+from woof.spacewx.solar_irradiance import _naive_utc
 
 BOUNDARIES = ("ocb", "eab", "diffuse")
 COEFFICIENTS = ("A0", "A1", "A2", "A3", "alpha1", "alpha2", "alpha3")
@@ -138,16 +139,16 @@ class Aurora:
         lon = np.asarray(lon_deg, dtype=np.float64).ravel()
         if lat.shape != lon.shape or lat.size == 0:
             raise AuroraError("lat and lon must be non-empty and of one size")
-        if np.any(np.abs(lat) > 90.0) or not np.all(np.isfinite(lon)):
+        if not np.all(np.abs(lat) <= 90.0) or not np.all(np.isfinite(lon)):
             raise AuroraError("latitudes must lie in [-90, 90] and longitudes be finite")
         self.lat, self.lon = lat, lon
         model = igrf_model or igrf.load()
         self.igrf_sha256 = model.sha256
-        self.frame = dipole_frame(model, when.replace(tzinfo=None))
+        self.frame = dipole_frame(model, _naive_utc(when))
         self._device = None
 
     def drivers(self, when: datetime, al: float) -> dict:
-        return {"coef": coefficients(al), "mlon_sun": sun_magnetic_longitude(self.frame, when.replace(tzinfo=None)),
+        return {"coef": coefficients(al), "mlon_sun": sun_magnetic_longitude(self.frame, _naive_utc(when)),
                 "al": abs(float(al))}
 
     def evaluate(self, when: datetime, al: float) -> dict:

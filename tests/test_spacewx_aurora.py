@@ -93,6 +93,8 @@ def test_refuses_bad_columns():
     with pytest.raises(au.AuroraError):
         au.Aurora([91.0], [0.0], when=WHEN, igrf_model=_dipole())
     with pytest.raises(au.AuroraError):
+        au.Aurora([float("nan")], [0.0], when=WHEN, igrf_model=_dipole())
+    with pytest.raises(au.AuroraError):
         au.Aurora([1.0, 2.0], [0.0], when=WHEN, igrf_model=_dipole())
 
 

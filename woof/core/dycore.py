@@ -5326,6 +5326,11 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                                  weno=(istage == len(stages) - 1 and
                                        getattr(cfg, "momentum_adv_opt", 1) == 3))
         apply_idealized_momentum_damping(state, cfg, ru, rv)
+        if cfg.obstacle_opt:
+            # Opt-in resolved obstacles (woof.core.obstacles): every RK
+            # stage, from this stage's winds; off, nothing is imported.
+            from woof.core.obstacles import apply as apply_obstacles
+            apply_obstacles(state, cfg, ru, rv)
         if (istage == 0 or cfg.cu_physics == 16
                 or (WRF_EXACT and cfg.cu_physics == 3)):
             # WRF RTHFTEN for the cumulus schemes that take it.  THIS LINE

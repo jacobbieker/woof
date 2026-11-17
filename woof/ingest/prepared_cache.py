@@ -538,11 +538,13 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The opt-in GF deep evaporation booking (cu_physics = 3 only, default
     # off): a tree prepared before it existed ran it off.
     "run.gf_deep_rain_evaporation_booking",
+    # The opt-in resolved obstacles (woof.core.obstacles), appended last and
+    # off: a tree prepared before they existed ran without obstacles.
+    "run.obstacle_opt", "run.obstacle_file", "run.obstacle_solid_fraction",
+    "run.obstacle_relax_factor", "run.obstacle_drag_coefficient",
+    "run.obstacle_wall_z0",
     # The opt-in TSI forcing (woof.spacewx), appended off.
     "run.solar_tsi_opt", "run.solar_tsi_source", "run.solar_tsi_mode",
-    # The opt-in ionosphere history (woof.spacewx), appended off.
-    "run.spacewx_ionosphere_opt", "run.spacewx_f107_source", "run.spacewx_f107_mode",
-    "run.spacewx_ionosphere_maps",
     # The WRF-Solar fields (b14dfd8bb cu_rad_feedback; 61107f3fe the
     # Deng shallow-cumulus slot, the EPS &stoch switches and MAD-WRF;
     # 9d6b47c4f use_theta_m), each appended last and off by default, so

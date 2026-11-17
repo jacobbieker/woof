@@ -194,6 +194,41 @@ def test_gfz_coverage_is_asked_only_through_the_day_before_the_start(tmp_path):
     assert h.f107 == pytest.approx(150.0)
 
 
+def test_for_run_loads_every_month_the_run_blends_up_front():
+    seen = []
+    inner = _loader()
+
+    def loader(asset):
+        seen.append(int(asset.name[4:6]) - 10)
+        return inner(asset)
+
+    cfg = _cfg(spacewx_ionosphere_opt=1, spacewx_f107_source="150", run_seconds=10 * 86400.0)
+    h = _history(cfg, map_loader=loader)
+    assert sorted(set(seen)) == [4, 5, 6]       # 10-20 May blends April, May and June
+    assert sorted(h.ionosphere._maps) == [4, 5, 6]
+
+
+def test_an_unreleased_flux_is_fetched_again_then_refused_by_name(tmp_path):
+    from woof.spacewx import indices
+    path = _gfz(tmp_path, f107=150.0)
+    text = path.read_text().replace(" 150.0 150.0 2", " -1.0 -1.0 2")
+    stale = tmp_path / "stale.txt"
+    stale.write_text(text)
+    asked = []
+
+    def loader(source, needed):
+        asked.append(needed)
+        return indices.read(stale)
+
+    cfg = _cfg(spacewx_ionosphere_opt=1, spacewx_f107_source="gfz", spacewx_f107_mode="daily")
+    with pytest.raises(hist.IonosphereHistoryError, match="has not released the flux"):
+        _history(cfg, indices_loader=loader)
+    assert asked == [START - timedelta(days=1), START]
+    with pytest.raises(hist.IonosphereHistoryError, match="observed F10.7"):
+        _history(_cfg(spacewx_ionosphere_opt=1, spacewx_f107_source=str(stale),
+                      spacewx_f107_mode="daily"))
+
+
 @pytest.mark.gpu
 @requires_gpu
 def test_rows_are_the_kernel_at_each_valid_time_and_are_held_between():

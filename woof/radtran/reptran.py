@@ -117,33 +117,66 @@ class Lookup:
     def sigma(self, iw: int, p_hpa, t, vmr=None) -> np.ndarray:
         """Cross section [cm^2] at representative wavelength ``iw`` for
         pressures [hPa], temperatures [K] and (H2O) vmr, any matching shape."""
-        r = self._row[iw]
-        x = self.xsec[:, :, r, :]                     # (nt, nv, np)
+        return self.sigma_at(iw, self.bracket(p_hpa, t, vmr))
+
+    def bracket_key(self, vmr_given: bool) -> tuple:
+        """Lookups with equal keys give equal :meth:`bracket` words for the
+        same levels (same pressure, reference-temperature, offset and vmr
+        nodes), so one bracket serves every species and wavelength."""
+        uses_vmr = self.vmrs.size > 1 and vmr_given
+        return (self.pressure.tobytes(), self.t_ref.tobytes(), self.t_pert.tobytes(),
+                self.vmrs.tobytes() if uses_vmr else None, self.vmrs.size)
+
+    def bracket(self, p_hpa, t, vmr=None) -> tuple:
+        """The wavelength-independent part of :meth:`sigma`: per pressure
+        node, its weight and the (flat index into one wavelength's
+        ``xsec[:, :, row, :]``, weight) terms of the temperature (and H2O
+        vmr) interpolation, each evaluated as :meth:`sigma` always has."""
         p = np.asarray(p_hpa, dtype=np.float64) * 100.0
         t = np.asarray(t, dtype=np.float64)
         P = self.pressure
+        nv, npres = self.vmrs.size, P.size
         # pressure nodes are decreasing: work in ascending order
         Pa = P[::-1]
         ip = np.clip(np.searchsorted(Pa, p) - 1, 0, Pa.size - 2)
         p0, p1 = Pa[ip], Pa[ip + 1]
         wp1 = (p - p0) / (p1 - p0)
-        out = np.zeros(np.broadcast(p, t).shape)
-        for node, wpn in ((P.size - 1 - ip, 1.0 - wp1), (P.size - 2 - ip, wp1)):
+        uses_vmr = nv > 1 and vmr is not None
+        if uses_vmr:
+            v = np.asarray(vmr, dtype=np.float64)
+            iv = np.clip(np.searchsorted(self.vmrs, v) - 1, 0, nv - 2)
+            v0, v1 = self.vmrs[iv], self.vmrs[iv + 1]
+            wv1 = (v - v0) / (v1 - v0)
+        nodes = []
+        for node, wpn in ((npres - 1 - ip, 1.0 - wp1), (npres - 2 - ip, wp1)):
             dt = t - self.t_ref[node]
             it = np.clip(np.searchsorted(self.t_pert, dt) - 1, 0, self.t_pert.size - 2)
             t0, t1 = self.t_pert[it], self.t_pert[it + 1]
             wt1 = (dt - t0) / (t1 - t0)
-            if self.vmrs.size > 1 and vmr is not None:
-                v = np.asarray(vmr, dtype=np.float64)
-                iv = np.clip(np.searchsorted(self.vmrs, v) - 1, 0, self.vmrs.size - 2)
-                v0, v1 = self.vmrs[iv], self.vmrs[iv + 1]
-                wv1 = (v - v0) / (v1 - v0)
-                val = 0.0
-                for ti, wt in ((it, 1.0 - wt1), (it + 1, wt1)):
-                    for vi, wv in ((iv, 1.0 - wv1), (iv + 1, wv1)):
-                        val = val + wt * wv * x[ti, vi, node]
+            # x[ti, vi, node] of the (nt, nv, np) row is flat[(ti nv + vi) np + node]
+            if uses_vmr:
+                terms = tuple(((ti * nv + vi) * npres + node, wt * wv)
+                              for ti, wt in ((it, 1.0 - wt1), (it + 1, wt1))
+                              for vi, wv in ((iv, 1.0 - wv1), (iv + 1, wv1)))
             else:
-                val = (1.0 - wt1) * x[it, 0, node] + wt1 * x[it + 1, 0, node]
+                terms = ((it * nv * npres + node, 1.0 - wt1), ((it + 1) * nv * npres + node, wt1))
+            nodes.append((wpn, terms))
+        return np.broadcast(p, t).shape, uses_vmr, tuple(nodes)
+
+    def sigma_at(self, iw: int, bracket: tuple) -> np.ndarray:
+        """:meth:`sigma` from a :meth:`bracket` of this lookup's grid."""
+        shape, uses_vmr, nodes = bracket
+        x = np.ascontiguousarray(self.xsec[:, :, self._row[iw], :]).ravel()
+        out = np.zeros(shape)
+        for wpn, terms in nodes:
+            if uses_vmr:
+                # val = 0 + wt wv x00 + wt wv x01 + ..., wt wv formed first
+                val = 0.0
+                for flat, w in terms:
+                    val = val + w * x[flat]
+            else:
+                (f0, w0), (f1, w1) = terms
+                val = w0 * x[f0] + w1 * x[f1]
             out = out + wpn * val
         return out * XSEC_TO_CM2
 

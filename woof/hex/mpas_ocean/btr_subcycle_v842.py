@@ -27,6 +27,12 @@ v8.4.2's own behaviours kept as written: the predictor-skipped subcycle reads
 whatever the new subcycle level holds; the SSH corrector reads the new SSH of
 the cells before it in the loop (run in the Fortran's order on one thread).
 
+On CUDA the split-explicit stage's launches are captured as a CUDA graph the
+second time the same arrays, mesh, configuration and module come through, and
+replayed from then on: the same kernels with the same arguments, so the same
+words (``WOOF_OCEAN_CUDA_GRAPHS=0`` keeps every launch eager; Metal always
+does).
+
 Refused by name: a configuration whose halo counters index ``nCellsArray``
 or ``nEdgesArray`` outside ``1..config_num_halos+1`` (v8.4.2 reads outside
 the array: ``config_btr_solve_SSH2`` with ``config_n_btr_cor_iter >= 1``,
@@ -36,6 +42,7 @@ scratch word).
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from importlib.resources import files
 
@@ -171,6 +178,74 @@ def _check_copies(mesh: dict, schedule: list[dict]) -> None:
                 declaration="each halo layer's edgesOnEdge within the next layer")
 
 
+#: the mesh arrays the split-explicit launches read (with the state and
+#: diagnostics arrays, they key a captured stage)
+_GRAPH_MESH_FIELDS = ("edgeMask", "fEdge", "dcEdge", "weightsOnEdge", "edgesOnEdge", "nEdgesOnEdge", "cellsOnEdge",
+                      "bottomDepth", "dvEdge", "areaCell", "nEdgesOnCell", "edgesOnCell", "edgeSignOnCell",
+                      "maxLevelEdgeTop")
+_GRAPH_CONFIGS = ("config_time_integrator", "config_btr_gam1_velWt1", "config_btr_gam2_SSHWt1",
+                  "config_btr_gam3_velWt2", "config_btr_solve_SSH2", "config_n_btr_cor_iter",
+                  "config_btr_subcycle_loop_factor", "config_num_halos", "config_filter_btr_mode",
+                  "config_vel_correction")
+_GRAPH_LIMIT = 8
+
+
+class _GraphEntry:
+    __slots__ = ("seen", "graph", "temps")
+
+    def __init__(self) -> None:
+        self.seen, self.graph, self.temps = 0, None, None
+
+
+#: key (every pointer, shape, value and module the launches use) -> _GraphEntry
+_GRAPHS: dict[tuple, _GraphEntry] = {}
+
+
+def _graphs_on() -> bool:
+    """CUDA graphs for the split-explicit stage: CUDA only (Metal keeps its
+    launches), not inside another capture, and off under
+    ``WOOF_OCEAN_CUDA_GRAPHS=0``."""
+    if os.environ.get("WOOF_OCEAN_CUDA_GRAPHS", "1").strip() == "0":
+        return False
+    from woof import backend
+    if backend.active() != "cuda":
+        return False
+    import cupy as cp
+    return not cp.cuda.get_current_stream().is_capturing()
+
+
+def _graph_entry(key: tuple) -> _GraphEntry:
+    entry = _GRAPHS.pop(key, None)
+    if entry is None:
+        entry = _GraphEntry()
+        while len(_GRAPHS) >= _GRAPH_LIMIT:
+            _GRAPHS.pop(next(iter(_GRAPHS)))
+    entry.seen += 1
+    _GRAPHS[key] = entry
+    return entry
+
+
+def _capture(launches):
+    """The stage's launches as a CUDA graph (nothing runs while capturing),
+    or None if the driver refuses the capture."""
+    import cupy as cp
+    stream = cp.cuda.Stream(non_blocking=True)
+    try:
+        with stream:
+            stream.begin_capture()
+            try:
+                launches()
+            except BaseException:
+                try:
+                    stream.end_capture()
+                except BaseException:
+                    pass
+                raise
+            return stream.end_capture()
+    except cp.cuda.runtime.CUDARuntimeError:
+        return None
+
+
 def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict, diagnostics: dict,
                      tend: dict, configs: dict) -> None:
     """Stage 2 of ``ocn_time_integrator_split`` for one block, in place.
@@ -220,49 +295,99 @@ def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict
     me = int(m["edgesOnCell"].shape[1])
     me2 = int(m["edgesOnEdge"].shape[1])
 
-    old, new = 0, 1
-    _launch(precision, "ocn_btr_init_cells_v842", n_cells, (ssh_sub[old], state["ssh"][0], i32(n_cells)))
-    _launch(precision, "ocn_btr_init_edges_v842", n_edges, (
-        u_sub[old], btr[1], flux, forcing, btr[0], i32(n_edges), i32(bool(configs["config_filter_btr_mode"]))))
-    temp = cp.full(n_edges + 1, np.finfo(real).max, dtype=real)
+    temps = None
 
-    def velocity(n: int, u_perp, corrector: int) -> None:
-        _launch(precision, "ocn_btr_velocity_v842", n, (
-            u_sub[new], u_sub[old], u_perp, ssh_sub[old], ssh_sub[new], forcing, m["fEdge"], m["dcEdge"],
-            m["weightsOnEdge"], m["edgesOnEdge"], m["nEdgesOnEdge"], m["cellsOnEdge"], edge_mask, i32(n), i32(nl),
-            i32(me2), i32(corrector), dtn, gravity, omg2, g2))
+    def launches() -> None:
+        old, new = 0, 1
+        _launch(precision, "ocn_btr_init_cells_v842", n_cells, (ssh_sub[old], state["ssh"][0], i32(n_cells)))
+        _launch(precision, "ocn_btr_init_edges_v842", n_edges, (
+            u_sub[old], btr[1], flux, forcing, btr[0], i32(n_edges), i32(bool(configs["config_filter_btr_mode"]))))
+        # btrvel_temp, twice: a corrector reads one while the velocity kernel before
+        # it writes the next corrector's copy into the other
+        temps.fill(np.finfo(real).max)
+        bottom = m["bottomDepth"]
 
-    def ssh_args(n_c: int):
-        return (ssh_tend, ssh_sub[new], ssh_sub[old], u_sub[old], u_sub[new], m["bottomDepth"], m["dvEdge"],
-                m["areaCell"], m["nEdgesOnCell"], m["edgesOnCell"], m["edgeSignOnCell"], m["cellsOnEdge"],
-                i32(n_c), i32(me))
+        def velocity(n: int, u_perp, corrector: int, n_flux: int, temp_next, n_copy: int, n_acc: int) -> None:
+            # the thread count covers the folded flux, copy and sum, which may reach past n
+            _launch(precision, "ocn_btr_velocity_v842", max(n, n_flux, n_copy, n_acc), (
+                u_sub[new], u_sub[old], u_perp, ssh_sub[old], ssh_sub[new], forcing, m["fEdge"], m["dcEdge"],
+                m["weightsOnEdge"], m["edgesOnEdge"], m["nEdgesOnEdge"], m["cellsOnEdge"], edge_mask, i32(n), i32(nl),
+                i32(me2), i32(corrector), dtn, gravity, omg2, g2, flux, bottom, i32(n_flux), omg1, g1,
+                temp_next, i32(n_copy), btr[1], i32(n_acc)))
 
-    def flux_sum(n_e: int, weighted: int, omgv, gv) -> None:
-        _launch(precision, "ocn_btr_flux_sum_v842", n_e, (
-            flux, u_sub[old], u_sub[new], ssh_sub[old], ssh_sub[new], m["bottomDepth"], m["cellsOnEdge"],
-            i32(n_e), i32(weighted), omg2, g2, omgv, gv))
+        def ssh_args(n_c: int):
+            return (ssh_tend, ssh_sub[new], ssh_sub[old], u_sub[old], u_sub[new], m["bottomDepth"], m["dvEdge"],
+                    m["areaCell"], m["nEdgesOnCell"], m["edgesOnCell"], m["edgeSignOnCell"], m["cellsOnEdge"],
+                    i32(n_c), i32(me))
 
-    for step in schedule:
-        if step["predictor"] is not None:
-            velocity(edges[step["predictor"] - 1], u_sub[old], 0)
-        n_c = cells[step["ssh_cells"] - 1]
-        _launch(precision, "ocn_btr_ssh_predict_v842", n_c, ssh_args(n_c) + (g1, omg1, dtn))
-        if not ssh2:
-            flux_sum(edges[step["ssh_edges"] - 1], 0, omg1, g1)
-        for copied, computed in step["correctors"]:
-            n_copy = edges[copied - 1] + 1
-            _launch(precision, "ocn_btr_copy_v842", n_copy, (temp, u_sub[new], i32(n_copy)))
-            velocity(edges[computed - 1], temp, 1)
-        if ssh2:
-            n_c = cells[step["ssh2_cells"] - 1]
-            _launch(precision, "ocn_btr_ssh_correct_v842", 1, ssh_args(n_c) + (omg2, g2, omg3, g3, dtn), threads=1)
-            flux_sum(edges[step["ssh2_edges"] - 1], 1, omg3, g3)
-        _launch(precision, "ocn_btr_accumulate_v842", n_edges, (btr[1], u_sub[new], i32(n_edges)))
-        old, new = new, old
+        def flux_sum(n_e: int, weighted: int, omgv, gv) -> None:
+            _launch(precision, "ocn_btr_flux_sum_v842", n_e, (
+                flux, u_sub[old], u_sub[new], ssh_sub[old], ssh_sub[new], m["bottomDepth"], m["cellsOnEdge"],
+                i32(n_e), i32(weighted), omg2, g2, omgv, gv))
 
-    n_sum = n_btr_subcycles * int(configs["config_btr_subcycle_loop_factor"])
-    _launch(precision, "ocn_btr_normalize_v842", edges[0], (flux, btr[1], i32(edges[0]), i32(n_sum)))
-    n_h = edges[int(configs["config_num_halos"]) - 1]
-    _launch(precision, "ocn_btr_transport_v842", n_h, (
-        transport, btr[1], bcl_new, bolus, d["layerThicknessEdge"], flux, m["maxLevelEdgeTop"], edge_mask, i32(n_h),
-        i32(nl), i32(1 if configs["config_vel_correction"] else 0)))
+        for step in schedule:
+            # Each velocity kernel writes the next corrector's btrvel_temp copy, the
+            # subcycle's last one adds the new level into the running sum, and the
+            # predictor sums the thickness flux (which reads only the old SSH and
+            # the predicted velocity). Only the SSH kernels run in between, and they
+            # write neither the new velocity, the flux nor the sum. A corrector with
+            # no velocity kernel before it in the subcycle copies on its own.
+            predictor = step["predictor"] is not None
+            pairs = step["correctors"]
+            n_copy = [edges[copied - 1] + 1 for copied, _ in pairs]
+            n_calls = int(predictor) + len(pairs)
+
+            def folded(j: int) -> tuple:
+                i = j + 1 - int(predictor)      # the corrector after velocity call j
+                copy = (temps[i % 2], n_copy[i]) if i < len(pairs) else (temps[0], 0)
+                return copy + (n_edges if j == n_calls - 1 else 0,)
+
+            if predictor:
+                velocity(edges[step["predictor"] - 1], u_sub[old], 0,
+                         0 if ssh2 else edges[step["ssh_edges"] - 1], *folded(0))
+            n_c = cells[step["ssh_cells"] - 1]
+            _launch(precision, "ocn_btr_ssh_predict_v842", n_c, ssh_args(n_c) + (g1, omg1, dtn))
+            if not ssh2 and not predictor:
+                flux_sum(edges[step["ssh_edges"] - 1], 0, omg1, g1)
+            for i, (copied, computed) in enumerate(pairs):
+                if i == 0 and not predictor:
+                    _launch(precision, "ocn_btr_copy_v842", n_copy[0], (temps[0], u_sub[new], i32(n_copy[0])))
+                velocity(edges[computed - 1], temps[i % 2], 1, 0, *folded(i + int(predictor)))
+            if ssh2:
+                n_c = cells[step["ssh2_cells"] - 1]
+                _launch(precision, "ocn_btr_ssh_correct_v842", 1, ssh_args(n_c) + (omg2, g2, omg3, g3, dtn), threads=1)
+                flux_sum(edges[step["ssh2_edges"] - 1], 1, omg3, g3)
+            if not n_calls:
+                _launch(precision, "ocn_btr_accumulate_v842", n_edges, (btr[1], u_sub[new], i32(n_edges)))
+            old, new = new, old
+
+        n_sum = n_btr_subcycles * int(configs["config_btr_subcycle_loop_factor"])
+        _launch(precision, "ocn_btr_normalize_v842", edges[0], (flux, btr[1], i32(edges[0]), i32(n_sum)))
+        n_h = edges[int(configs["config_num_halos"]) - 1]
+        _launch(precision, "ocn_btr_transport_v842", n_h, (
+            transport, btr[1], bcl_new, bolus, d["layerThicknessEdge"], flux, m["maxLevelEdgeTop"], edge_mask, i32(n_h),
+            i32(nl), i32(1 if configs["config_vel_correction"] else 0)))
+
+    if not _graphs_on():
+        temps = cp.empty((2, n_edges + 1), dtype=real)
+        launches()
+        return
+    # every array and value the launches read: the same key, the same launches
+    arrays = (*ssh_sub, *u_sub, *btr, state["ssh"][0], bcl_new, forcing, flux, transport, bolus,
+              d["layerThicknessEdge"], ssh_tend, *(m[k] for k in _GRAPH_MESH_FIELDS))
+    key = (cp.cuda.Device().id, precision, launch_options(), _module_on(cp.cuda.Device().id, precision,
+                                                                      launch_options()),
+           float(dt), int(n_btr_subcycles), nl, n_cells, n_edges, tuple(cells), tuple(edges),
+           tuple(configs[k] for k in _GRAPH_CONFIGS),
+           tuple((a.data.ptr, a.shape, a.dtype.str) for a in arrays))
+    entry = _graph_entry(key)
+    if entry.graph is None:
+        temps = entry.temps = cp.empty((2, n_edges + 1), dtype=real) if entry.temps is None else entry.temps
+        if entry.seen < 2:
+            launches()
+            return
+        entry.graph = _capture(launches)
+        if entry.graph is None:     # capture refused: this stage stays eager
+            launches()
+            return
+    entry.graph.launch(stream=cp.cuda.get_current_stream())
