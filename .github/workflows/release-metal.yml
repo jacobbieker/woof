@@ -96,7 +96,7 @@ jobs:
           set -euo pipefail
           while read -r sha version previous; do
             header="metal-woof ${version}: Recast WOOF built for Apple silicon (MLX/Metal), from ${sha::12} on main."
-            header+=$'\n\n'"PyPI receives the newest metal-v tag once a day (publish-metal.yml), so \`pip install metal-woof==${version}\` works only if this was the newest tag at publishing time; otherwise install from this tag's source."
+            header+=$'\n\n'"PyPI receives the newest metal-v tag once a day (publish-metal.yml), so this exact version may not be on PyPI: \`pip install metal-woof\` gives the latest published build; to run exactly this one, clone tag metal-v${version} and install from source."
             args=(--target "$sha" --title "metal-woof ${version}" --generate-notes --notes "$header")
             if [ -n "$previous" ]; then
               args+=(--notes-start-tag "$previous")

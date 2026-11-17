@@ -194,9 +194,12 @@ source built for Apple silicon. It never touches `publish.yml` or
   by the next run with consecutive build numbers. A commit whose message
   carries `[skip release]` is not released. To publish a particular tag, run
   this workflow by hand with `version` set to it and `publish` ticked.
-- **Concurrency:** scheduled and tag runs share one group with
-  cancel-in-progress, so only the newest proceeds. A manual run has its own
-  group per version and is never cancelled by an unrelated run.
+- **Concurrency:** on the build job, scheduled and tag runs share one group
+  with cancel-in-progress, so only the newest proceeds. A manual run has its
+  own group per version and is never cancelled by an unrelated run. The
+  publish job has its own non-cancelling group, so an upload under way
+  finishes. A scheduled run uses this workflow file from `main` but builds
+  the newest tag's source and tools.
 - **Build (macos-15):** every `build-native` workspace for macOS 14+, then
   `tools/metal_woof_project.py` renames the distribution (name, version, the
   extras' self-references, and the `gpu-mlx` requirements folded into the

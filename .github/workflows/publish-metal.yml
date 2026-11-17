@@ -20,12 +20,15 @@ name: publish-metal
 # smoke-tests the version it is given and publishes only when `publish` is
 # ticked.
 #
-# Concurrency: scheduled and tag runs share one group with cancel-in-progress,
-# so only the newest proceeds.  A manual run names an explicit version, so it
-# gets its own group per version and is never cancelled by an unrelated
-# schedule or tag run (a requested publish is not lost); re-dispatching the
-# same version replaces only its own pending run.  skip-existing makes a
-# second upload of the same version a no-op rather than an error.
+# Concurrency (job level, on build): scheduled and tag runs share one group
+# with cancel-in-progress, so only the newest proceeds.  A manual run names an
+# explicit version, so it gets its own group per version and is never
+# cancelled by an unrelated schedule or tag run (a requested publish is not
+# lost); re-dispatching the same version replaces only its own pending run.
+# The publish job has its own non-cancelling group, so a run superseded
+# mid-upload finishes uploading.  A scheduled run executes this workflow file
+# from main but builds the newest tag's source and tools; a change to how the
+# workflow calls those tools should land with its tag before the next cron.
 
 on:
   push:
@@ -44,10 +47,6 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('publish-metal-dispatch-{0}', inputs.version) || 'publish-metal-newest' }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
   PIXI_VERSION: v0.81.0
@@ -105,11 +104,14 @@ jobs:
           fi
           skip=false
           if [ "$publish" = true ]; then
-            code="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/metal-woof/${version}/json" || true)"
+            code="$(curl -s --retry 3 --retry-all-errors -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/metal-woof/${version}/json" || true)"
             echo "PyPI metal-woof ${version}: HTTP ${code}"
             if [ "$code" = 200 ]; then
               echo "metal-woof ${version} is already on PyPI; nothing to build"
               skip=true
+            elif [ "$code" != 404 ]; then
+              echo "::error::PyPI answered HTTP ${code} for metal-woof ${version}; not guessing"
+              exit 1
             fi
           fi
           {
@@ -123,6 +125,9 @@ jobs:
     name: build (macos-15, arm64)
     needs: resolve
     if: needs.resolve.outputs.skip != 'true'
+    concurrency:
+      group: ${{ github.event_name == 'workflow_dispatch' && format('publish-metal-dispatch-{0}', inputs.version) || 'publish-metal-newest' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
     runs-on: macos-15
     timeout-minutes: 180
     env:
@@ -263,6 +268,10 @@ jobs:
     name: publish to PyPI (metal-woof)
     needs: [resolve, build, smoke]
     if: needs.resolve.outputs.publish == 'true'
+    # Never cancelled: a newer run may cancel the build, not an upload under way.
+    concurrency:
+      group: publish-metal-upload
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     environment:
       name: pypi-metal
@@ -282,6 +291,5 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
-          skip-existing: true
           attestations: true
           print-hash: true
