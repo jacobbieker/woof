@@ -119,7 +119,17 @@ def _hu_prop(blocks, lam_um, reff):
             # only the two tabulated wavelengths bracketing lam enter np.interp
             vals = coef(rows[j:j + 2])
             if np.all(np.isfinite(vals)):
-                out[sel] = _lerp(lam_um, xp[j], xp[j + 1], vals[:, 0], vals[:, 1])
+                inverse = slice(None)
+                if _interp_mode() == "fused":
+                    # _lerp is a scalar fma per row here: evaluate it once per
+                    # distinct radius (cloud-free layers all carry the default)
+                    # when each radius group's rows are the same bits as its
+                    # first, and scatter back; the same words either way.
+                    _, first, inv = np.unique(r, return_index=True, return_inverse=True)
+                    inv = inv.ravel()
+                    if np.array_equal(vals.view(np.uint64), vals[first][inv].view(np.uint64)):
+                        vals, inverse = vals[first], inv
+                out[sel] = _lerp(lam_um, xp[j], xp[j + 1], vals[:, 0], vals[:, 1])[inverse]
                 continue
         out[sel] = np.array([np.interp(lam_um, xp, v) for v in coef(rows)])
     return out

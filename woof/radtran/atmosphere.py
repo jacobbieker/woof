@@ -152,21 +152,14 @@ def model_columns(z_km, p_hpa, t_k, *, h2o_vmr=None, o3_vmr=None, co2_vmr=None,
                   dens=dens)
 
 
-def layer_column(z_km, n_air, n_gas=None):
-    """Per-layer column [cm-2] (top first), exponential air x linear vmr.
-
-    Works on (..., nlev) arrays; ``n_gas=None`` gives the air column.
-    """
+def layer_air(z_km, n_air):
+    """The air-only factors of :func:`layer_column` for (..., nlev) levels:
+    (n_top, n_bottom, n_bottom dz, phi0, phi1).  Every gas column of the same
+    levels shares them, so one evaluation serves all of them."""
     z = np.asarray(z_km, dtype=np.float64)
     na = np.asarray(n_air, dtype=np.float64)
     nt, nb = na[..., :-1], na[..., 1:]
     dz = (z[..., :-1] - z[..., 1:]) * 1e5          # cm
-    if n_gas is None:
-        vt = np.ones_like(nt)
-        vb = np.ones_like(nb)
-    else:
-        ng = np.asarray(n_gas, dtype=np.float64)
-        vt, vb = ng[..., :-1] / nt, ng[..., 1:] / nb
     # x = dz/H = ln(n_b/n_t); with u = t/dz the integral is
     # n_b dz [v_b phi0(x) + (v_t - v_b) phi1(x)],
     # phi0 = (1 - e^-x)/x, phi1 = (1 - e^-x - x e^-x)/x^2.
@@ -177,4 +170,21 @@ def layer_column(z_km, n_air, n_gas=None):
     phi0 = np.where(small, 1.0 - x / 2 + x * x / 6 - x ** 3 / 24, em / xs)
     phi1 = np.where(small, 0.5 - x / 3 + x * x / 8 - x ** 3 / 30,
                     (em - xs * np.exp(-xs)) / (xs * xs))
-    return nb * dz * (vb * phi0 + (vt - vb) * phi1)
+    return nt, nb, nb * dz, phi0, phi1
+
+
+def layer_column(z_km, n_air, n_gas=None, *, air=None):
+    """Per-layer column [cm-2] (top first), exponential air x linear vmr.
+
+    Works on (..., nlev) arrays; ``n_gas=None`` gives the air column.
+    ``air`` is :func:`layer_air` of the same ``z_km`` and ``n_air``, when the
+    caller already has it (the same words as evaluating it here).
+    """
+    nt, nb, nbdz, phi0, phi1 = layer_air(z_km, n_air) if air is None else air
+    if n_gas is None:
+        vt = np.ones_like(nt)
+        vb = np.ones_like(nb)
+    else:
+        ng = np.asarray(n_gas, dtype=np.float64)
+        vt, vb = ng[..., :-1] / nt, ng[..., 1:] / nb
+    return nbdz * (vb * phi0 + (vt - vb) * phi1)
