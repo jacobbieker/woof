@@ -18,7 +18,7 @@ def _probe_hex_mode():
     from woof.hex import numerics as hex_numerics
 
     assert hex_numerics.mode() == numerics.mode(), (hex_numerics.mode(), numerics.mode())
-    strict = ("--std=c++17", "--fmad=false", "--ftz=false")
+    strict = ("--std=c++17", "--fmad=false")
     chosen = hex_numerics.options(strict)
     if numerics.mode() == "strict":
         assert chosen == strict, chosen
