@@ -5199,7 +5199,7 @@
    },
    {
     "file": "woof/core/noahmp_energy_slab.py",
-    "sha256": "da8281d2a2c10929bea8133dfbb4a8c634dfc9d633053a60749def19e7cb0d13"
+    "sha256": "d4bb02f921df1e806189a68a3693a935b01dcf48d57fd1b43758edd7b01ccf59"
    },
    {
     "file": "woof/core/noahmp_frame_provenance.py",
@@ -5215,7 +5215,7 @@
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "95d6e7f3b9a9a78a80b8acb9f22dcdd03d8d55e09702b017c063fb1f261fb1b9"
+    "sha256": "9a6037ad5b560c0a445780873985a31913b5804da5f97b11c05da7c5bedcc29b"
    },
    {
     "file": "woof/core/noahmp_surface_device.py",
@@ -6706,6 +6706,10 @@
    {
     "file": "woof/core/noahmp_slab_libm.py",
     "sha256": "aa4b49c7d3d6d5e593bc026b1c7040786afd83049130fdaabaf3b15a45d87f16"
+   },
+   {
+    "file": "woof/core/noahmp_slab_libm.py",
+    "sha256": "aadb7084ff7f47c7c951ce6fa44d5532e0a3b9ef21c9de16bf9249457c159edd"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
