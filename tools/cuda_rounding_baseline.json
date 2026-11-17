@@ -4785,7 +4785,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/btr_subcycle_v842.cu",
-    "sha256": "36432f927f6521fd212c7e924fa6db127a6af5a7d345cdd11fccc951a848ae30"
+    "sha256": "90ea1b3f379cbacd59766d3c52deb93c93fb85d07c17f6ec5e7c345f3ade317a"
    },
    {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.cu",
@@ -5771,7 +5771,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/btr_subcycle_v842.py",
-    "sha256": "8d78c636a1f2f7b78bd345963cfed313f62c6e2333418095c24880c5c22f0a54"
+    "sha256": "21c408645f229fef7fe9071ad19ac0d423c67bb1b7814daee80cecd80e0ce13b"
    },
    {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.py",

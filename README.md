@@ -283,7 +283,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     momentum advection, stability, reconstruction and the split step's
     edge updates) run a thread per edge or cell and level, so a warp reads
     a column's consecutive levels: a 33,000-cell, 60-level step takes 140
-    instead of 259 ms on an A6000, the same words;
+    instead of 259 ms on an A6000, the same words. Each barotropic
+    subcycle's velocity kernels also add the thickness flux, the
+    corrector's velocity copy and the running sum, so a subcycle launches
+    4 kernels instead of 8 (320 fewer launches a step, the same words): on
+    an M3 Max the 8,300-cell step takes about 44 instead of 52 ms;
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
