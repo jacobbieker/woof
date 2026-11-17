@@ -43,7 +43,14 @@ longwave is untouched.
 
 The factor is applied as soon as the scheme returns, before any consumer reads the result.
 The consumers include `swint_opt = 1`, the eclipse overlay, the tendency coupling, the land
-surface and history. See the [configuration reference](public/CONFIGURATION.md) for the keys.
+surface and history. The shortwave diagnostics a scheme writes into the driver's fields itself
+are scaled by the same factor: RSWTOA for GSFC (`ra_sw_physics = 2`), and RSWTOA and SWDOWNC for
+GFDL-Eta (`ra_sw_physics = 99`). See the [configuration reference](public/CONFIGURATION.md) for
+the keys.
+
+At start-up the run prints a `[spacewx tsi]` line: the source, the SHA-256 of the TSI files
+read, the mode and the reference. A fetched CDR file is read as a TSI series before it is
+installed in the cache; a truncated or wrong download is deleted and refused.
 
 The data come from the NOAA Climate Data Record "Total Solar Irradiance" (NRLSSI2 v03, daily;
 Coddington et al. 2016, doi:10.7289/V56W985W). It is fetched on demand and never shipped.
@@ -71,7 +78,9 @@ column on the GPU (CUDA and Metal; one thread per column) and reports these quan
 
 The model is built from published formulas:
 - foF2 and M(3000)F2 come from the CCIR (default) or URSI numerical maps (Jones & Gallet
-  1965). foF2 is interpolated in IG12 and M(3000)F2 in R12, as CCIR Report 340 does. Months
+  1965). foF2 is interpolated in IG12 and M(3000)F2 in R12, as CCIR Report 340 does. The
+  quadratic R12-to-IG12 fit turns over at R12 of about 247 (F10.7 near 300 sfu), so R12 is
+  held at that point above it rather than letting more flux give a lower foF2. Months
   are blended linearly in time between mid-month maps.
 - Each map is expanded in Rawer's modified dip latitude, computed from IGRF-14 at 300 km.
 - foE uses the IRI effective zenith angle.

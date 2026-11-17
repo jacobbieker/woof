@@ -1,0 +1,19 @@
+{
+  "schema": "woof.grad.obs-cost-types/v1",
+  "note": "Diagonal observation-error table for the observation cost J_o (woof.grad.obs_cost). One row per (platform, kind). error is the standard deviation in the kind's unit; relative_error (refractivity only) is a fraction of the observed value, linear in height between the listed nodes and constant outside them. gross_sigma rejects a pair on the reference trajectory when |H(x) - y| > gross_sigma * error; the accepted set is then frozen for every perturbed run, so J stays a smooth function of the control. max_elevation_diff_m drops a surface report whose station elevation differs from its column's model terrain by more than that. The values are UNCALIBRATED defaults of the order of NCEP's conventional error table (prepobs_errtable, the source woof/data/da/conventional-obs-types.v1.json also cites) and of the usual GNSS-RO refractivity error profile (about 2 % at the surface falling to 0.2 % by 12 km); replace them with --error-table FILE for any scientific use.",
+  "types": [
+    {"platform": "synop", "kind": "surface_temperature", "error": 1.5, "gross_sigma": 5.0, "max_elevation_diff_m": 200.0},
+    {"platform": "synop", "kind": "surface_dewpoint", "error": 2.0, "gross_sigma": 5.0, "max_elevation_diff_m": 200.0},
+    {"platform": "synop", "kind": "surface_wind_u", "error": 2.0, "gross_sigma": 5.0, "max_elevation_diff_m": 200.0},
+    {"platform": "synop", "kind": "surface_wind_v", "error": 2.0, "gross_sigma": 5.0, "max_elevation_diff_m": 200.0},
+    {"platform": "synop", "kind": "surface_wind_speed", "error": 2.0, "gross_sigma": 5.0, "max_elevation_diff_m": 200.0},
+    {"platform": "sonde", "kind": "upper_temperature", "error": 1.0, "gross_sigma": 5.0},
+    {"platform": "sonde", "kind": "upper_wind_u", "error": 2.0, "gross_sigma": 5.0},
+    {"platform": "sonde", "kind": "upper_wind_v", "error": 2.0, "gross_sigma": 5.0},
+    {"platform": "aircraft", "kind": "upper_temperature", "error": 1.0, "gross_sigma": 5.0},
+    {"platform": "aircraft", "kind": "upper_wind_u", "error": 2.5, "gross_sigma": 5.0},
+    {"platform": "aircraft", "kind": "upper_wind_v", "error": 2.5, "gross_sigma": 5.0},
+    {"platform": "ro", "kind": "refractivity", "relative_error": {"height_m": [0.0, 12000.0], "fraction": [0.02, 0.002]}, "gross_sigma": 5.0},
+    {"platform": "goes", "kind": "cloud_water_path", "error": 50.0, "gross_sigma": 5.0}
+  ]
+}
