@@ -1,16 +1,20 @@
 """Street-canyon benchmark for the opt-in resolved obstacles (obstacle_opt=1).
 
-A periodic row of 2-D street canyons with aspect ratio H/W = 1 (building
-height H = 20 m, street width W = 20 m, building width 20 m), resolved with
-10 cells per H (dx = dz = 2 m). The flow is neutral and dry, under the 3-D
-Smagorinsky LES closure (km_opt = 3). A uniform body force, adjusted every
-step, holds the mean wind at 5 m/s above 2H (a constant-flow-rate drive, as in
-channel LES). The domain is quasi-2-D: four rows in y, periodic.
+A periodic row of 2-D street canyons, street width W = 20 m and building
+width 20 m, resolved with 10 cells per W (dx = dz = 2 m).  The aspect ratio
+H/W is the case's parameter (``aspect``, default 1: H = 20 m).  The flow
+is neutral and dry, under the 3-D Smagorinsky LES closure (km_opt = 3). A
+uniform body force, adjusted every step, holds the mean wind at 5 m/s above
+2H (a constant-flow-rate drive, as in channel LES). The domain is quasi-2-D: four rows in y, periodic.
 
 At H/W = 1 the canyon is in the skimming-flow regime. One primary vortex
 fills it, with its centre near mid-width and slightly above mid-height, and
 with reverse flow along the floor. Wind-tunnel and LES references for that
 are Brown et al. (2000), Liu and Barth (2002), and Li, Liu and Leung (2008).
+At H/W = 2 the primary vortex sits in the upper canyon and drives a weaker,
+counter-rotating one below it, so the floor flow turns forward again (Li,
+Liu and Leung 2008, LES at H/W = 2, 3 and 5; Sini, Anquetin and Mestayer
+1996).
 ``run`` returns:
 
 * ``vortex_x``, ``vortex_z``: the vortex centre from the in-canyon
@@ -19,6 +23,9 @@ are Brown et al. (2000), Liu and Barth (2002), and Li, Liu and Leung (2008).
   canyon centre, over the 2H reference wind (negative is reverse flow);
 * ``roof_u``: the same at roof height;
 * ``leak``: the rms wind inside the buildings, over the reference wind;
+* ``vortices``: the number of stacked recirculation cells, from the sign
+  changes of the mean along-street wind up the canyon's centre column
+  (below the roof);
 * ``nan``: whether anything went non-finite.
 
 The gates are deliberately wide bands around those published values.
@@ -45,23 +52,37 @@ GATES = {
     "roof_u": (0.0, None),
     "leak": (None, 0.05),
 }
+#: H/W = 2: two stacked vortices, the floor wind forward again.
+GATES_ASPECT_2 = {
+    "vortices": (1.5, 2.5),
+    "floor_u": (0.0, None),
+    "roof_u": (0.0, None),
+    "leak": (None, 0.05),
+}
 
 
-def default_config(*, minutes: float = 10.0) -> RunConfig:
+def default_config(*, minutes: float = 10.0, aspect: float = 1.0
+                   ) -> RunConfig:
     nx = int(round((W + B) / DX))
+    height = aspect * W
     return RunConfig(
-        nx=nx, ny=4, nz=50, dx=DX, dy=DX, ztop=5 * H, dt=0.1,
+        nx=nx, ny=4, nz=int(round(5 * height / DX)), dx=DX, dy=DX,
+        ztop=5 * height, dt=0.1,
         run_seconds=minutes * 60.0, km_opt=3, mix_isotropic=1, c_s=0.18,
         bl_pbl_physics=0, sf_sfclay_physics=0, moist=False, mp_physics=0,
         isfflx=0, tke_heat_flux=0.0, tke_drag_coefficient=0.0013,
         time_step_sound=40, obstacle_opt=1, case="obstacle_canyon")
 
 
+def _height(cfg: RunConfig) -> float:
+    return cfg.ztop / 5.0
+
+
 def morphology(cfg: RunConfig):
-    """Buildings fill x in [W, W + B) of each period, at height H."""
+    """Buildings fill x in [W, W + B) of each period, at ztop / 5."""
     from woof.static.buildings import CartesianGrid, aggregate, block_raster
     raster = block_raster(cfg.nx, cfg.ny, cfg.dx, cfg.dy,
-                          [(W, W + B, 0.0, cfg.ny * cfg.dy, H)])
+                          [(W, W + B, 0.0, cfg.ny * cfg.dy, _height(cfg))])
     return aggregate([raster], CartesianGrid(cfg.nx, cfg.ny, cfg.dx, cfg.dy))
 
 
@@ -90,6 +111,7 @@ def _drive(state, upper, cfg) -> None:
 
 def _metrics(u, w, z_mass, z_w, cfg, nan) -> dict:
     nx = cfg.nx
+    H = _height(cfg)
     x = (np.arange(nx) + 0.5) * cfg.dx
     street = x < W
     zc = z_mass
@@ -107,23 +129,26 @@ def _metrics(u, w, z_mass, z_w, cfg, nan) -> dict:
     roof_u = float(um[roof, centre_col]) / ref
     solid = (~street)[None] & in_canyon[:, None]
     leak = float(np.sqrt(np.mean(um[solid] ** 2))) / ref
+    column = um[in_canyon, centre_col]
+    vortices = int(np.count_nonzero(np.diff(np.sign(column)) != 0))
     return dict(vortex_x=float(x[ix] / W), vortex_z=float(zc[kz] / H),
                 floor_u=floor_u, roof_u=roof_u, leak=leak, u_ref=ref,
+                vortices=vortices, centre_u=(column / ref).tolist(),
                 nan=bool(nan))
 
 
-def run(outdir=None, *, minutes: float = 10.0, average_minutes: float = 4.0
-        ) -> dict:
+def run(outdir=None, *, minutes: float = 10.0, average_minutes: float = 4.0,
+        aspect: float = 1.0) -> dict:
     import cupy as cp
 
     from woof.core.dycore import run_steps, stability_report
     from woof.core.obstacles import layer_heights
 
-    cfg = default_config(minutes=minutes)
+    cfg = default_config(minutes=minutes, aspect=aspect)
     state = build(cfg)
     z_w = layer_heights(state)[:, 0, 0]
     z_mass = 0.5 * (z_w[1:] + z_w[:-1])
-    upper = cp.asarray(np.flatnonzero(z_mass > 2 * H))
+    upper = cp.asarray(np.flatnonzero(z_mass > 2 * _height(cfg)))
     n_total = int(round(cfg.run_seconds / cfg.dt))
     n_avg = int(round(average_minutes * 60.0 / cfg.dt))
     u_sum = np.zeros((cfg.nz, cfg.nx + 1))

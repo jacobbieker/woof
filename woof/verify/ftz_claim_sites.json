@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 5896,
+  "site_count": 5900,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 5829
+    "prose": 5833
   },
   "sites": [
     {
@@ -39057,6 +39057,28 @@
       "attribution": "unattributed"
     },
     {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 30709,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 30716,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
       "file": "tools/cuda_rounding_check.py",
       "line": 104,
       "kind": "prose",
@@ -61634,6 +61656,28 @@
       "kind": "prose",
       "anchor": "MODULE_OPTIONS = (\"-std=c++17\", \"--ftz=false\")",
       "anchor_sha256": "65c09f4afc86b54da2c6639fc1fd0c8c26ddbee9ea8e4232bb7929c6d260f34a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/core/obstacles.py",
+      "line": 258,
+      "kind": "prose",
+      "anchor": "from woof.core.kernels import load_module_no_ftz",
+      "anchor_sha256": "f591a05bab906b8405ad74ecab52ea21be6c5078f3e4dc681c7f7521fcbcca4e",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/core/obstacles.py",
+      "line": 259,
+      "kind": "prose",
+      "anchor": "_KERNEL.append(load_module_no_ftz(\"obstacle_drag\", no_fmad=True)",
+      "anchor_sha256": "f3ad9094f031a4afc3042ced584cd690866bb817201278d4c9d4f7d1a1cfcf1c",
       "route": null,
       "mechanism": null,
       "asserted_token": null,

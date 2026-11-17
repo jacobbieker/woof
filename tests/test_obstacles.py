@@ -243,3 +243,15 @@ def test_cube_benchmark():
     assert not m["nan"]
     for name, band in oc.GATES.items():
         assert _within(m[name], band), (name, m[name], band)
+
+
+@requires_gpu
+@pytest.mark.gpu
+@pytest.mark.slow
+def test_deep_canyon_has_two_vortices():
+    from woof.verify.cases import obstacle_canyon as oc
+
+    m = oc.run(aspect=2.0)
+    assert not m["nan"]
+    for name, band in oc.GATES_ASPECT_2.items():
+        assert _within(m[name], band), (name, m[name], band)

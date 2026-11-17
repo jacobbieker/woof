@@ -3628,7 +3628,7 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
 ),)
 
 # The opt-in porous immersed obstacles (kernels/obstacle_drag.cu), production
-# loader (load_module_no_ftz, no_fmad), default and strict
+# loader (no contraction), default and strict
 # (GPUWM_WRF_EXACT=1) numerics, read 2026-11-17 on the RTX A6000 CUDA host
 # with kernel_local_size_bytes: obstacle_drag 0 B.
 KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
