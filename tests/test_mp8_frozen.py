@@ -952,8 +952,14 @@ FROZEN_MODULE_DIGESTS = {
         # Re-read for the 32-bit cell index and the write-if-changed store
         # (integer and store logic only; the audit record was re-taken).
         # Previously b35120f7/1730a720.
-        'a5bc696d4f3e0ce4e04608bac1b956fd8c80fdfaa869082d70da1d7b7f7d213d',
-        'b83b8ec8b0ab60b5f7863a391d5b7cb6099302878bd4460ff164c2b5c758e82a'),
+        # Re-pinned for the ring-first thread walk: state_relaxation_multi
+        # hands its first threads to each level's frame rings and the rest
+        # to the interior, so the relaxation path runs in dense warps.  Only
+        # the integer cell mapping moved; every cell evaluates the same
+        # statements (tests/test_lbc_relax_multi.py against the per-row path,
+        # both backends and modes).  Previously a5bc696d/b83b8ec8.
+        '988a312e61caf30fbde73e7c1645872ff820fe4858a1d6cb14b54c3fb4f6ac53',
+        '66abb703b2f2a5031aca210619aae5b23a4bff848f5e31ac54df2543bfdd5645'),
     'morrison': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
