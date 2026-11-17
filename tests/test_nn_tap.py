@@ -183,7 +183,9 @@ def _host_state(nz=4, ny=6, nx=7, seed=3):
     theta = f(nz, ny, nx) * 300
 
     def couple(state, cfg, *, rtheta, rqv, ru, rv):
-        return SimpleNamespace(rtheta=rtheta * chm / msft, rqv=rqv * chm, ru=ru * unit_u, rv=rv * unit_v)
+        # A-grid momentum onto faces; the seat only ever passes ones.
+        assert float(ru.min()) == float(ru.max()) == 1.0 and float(rv.min()) == 1.0
+        return SimpleNamespace(rtheta=rtheta * chm / msft, rqv=rqv * chm, ru=unit_u, rv=unit_v)
 
     return state, couple, phys, chm
 
