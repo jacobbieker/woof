@@ -83,17 +83,31 @@ extern "C" __global__ void ocn_btr_init_edges_v842(
     thicknessFlux[e] = C(0.0);
 }
 
-// the velocity predictor (corrector = 0: uPerp the old level, the SSH the
-// old level's) and corrector (corrector = 1: uPerp btrvel_temp, the SSH
-// (1 - gam2)*old + gam2*new); edges 1..nEdges
-extern "C" __global__ void ocn_btr_velocity_v842(
-    rk *uNew, const rk *uCur, const rk *uPerp, const rk *sshCur, const rk *sshNew, const rk *forcing,
-    const rk *fEdge, const rk *dcEdge, const rk *weightsOnEdge, const int *edgesOnEdge, const int *nEdgesOnEdge,
-    const int *cellsOnEdge, const int *edgeMask, int nEdges, int nl, int me2, int corrector,
-    rk dtn, rk gravity, rk omg2, rk g2)
+// an edge's thickness flux: the edge SSH from the old level (weighted = 0)
+// or the gam2 mix of old and new (weighted = 1)
+__device__ __forceinline__ rk bt_flux(
+    int e, const rk *uCur, const rk *uNew, const rk *sshCur, const rk *sshNew, const rk *bottomDepth,
+    const int *cellsOnEdge, int weighted, rk omg2, rk g2, rk omgv, rk gv)
 {
-    const int e = bt_thread();
-    if (e >= nEdges) return;
+    const int cell1 = cellsOnEdge[e * 2] - 1, cell2 = cellsOnEdge[e * 2 + 1] - 1;
+    rk sshEdge;
+    if (weighted) {
+        const rk ssh1 = A(M(omg2, sshCur[cell1]), M(g2, sshNew[cell1]));
+        const rk ssh2 = A(M(omg2, sshCur[cell2]), M(g2, sshNew[cell2]));
+        sshEdge = M(C(0.5), A(ssh1, ssh2));
+    } else {
+        sshEdge = M(C(0.5), A(sshCur[cell1], sshCur[cell2]));
+    }
+    const rk thicknessSum = A(sshEdge, bt_min(bottomDepth[cell1], bottomDepth[cell2]));
+    return M(A(M(omgv, uCur[e]), M(gv, uNew[e])), thicknessSum);
+}
+
+__device__ __forceinline__ void bt_velocity_edge(
+    int e, rk *uNew, const rk *uCur, const rk *uPerp, const rk *sshCur, const rk *sshNew, const rk *forcing,
+    const rk *fEdge, const rk *dcEdge, const rk *weightsOnEdge, const int *edgesOnEdge, const int *nEdgesOnEdge,
+    const int *cellsOnEdge, const int *edgeMask, int nl, int me2, int corrector, rk dtn, rk gravity, rk omg2,
+    rk g2)
+{
     const int tempMask = edgeMask[e * nl];
     const int cell1 = cellsOnEdge[e * 2] - 1, cell2 = cellsOnEdge[e * 2 + 1] - 1;
     rk coriolis = C(0.0);
@@ -113,30 +127,42 @@ extern "C" __global__ void ocn_btr_velocity_v842(
                 A(uCur[e], M(dtn, A(S(coriolis, D(M(gravity, S(ssh2, ssh1)), dcEdge[e])), forcing[e]))));
 }
 
+// the velocity predictor (corrector = 0: uPerp the old level, the SSH the
+// old level's) and corrector (corrector = 1: uPerp btrvel_temp, the SSH
+// (1 - gam2)*old + gam2*new); edges 1..nEdges.
+//
+// Folded in, each on its own edge's word after this thread wrote it (no other
+// thread writes it, and nothing the host would launch in between writes the
+// new level, the flux or the sum), so every word is the separate kernels':
+// the predictor's thickness flux sum (edges 1..nFlux; the old level's SSH, as
+// ocn_btr_flux_sum_v842 with weighted = 0); the next corrector's copy of the
+// new velocity into btrvel_temp (edges 1..nCopy); and the subcycle's running
+// sum of the barotropic velocity (edges 1..nAcc). A zero count skips one.
+extern "C" __global__ void ocn_btr_velocity_v842(
+    rk *uNew, const rk *uCur, const rk *uPerp, const rk *sshCur, const rk *sshNew, const rk *forcing,
+    const rk *fEdge, const rk *dcEdge, const rk *weightsOnEdge, const int *edgesOnEdge, const int *nEdgesOnEdge,
+    const int *cellsOnEdge, const int *edgeMask, int nEdges, int nl, int me2, int corrector,
+    rk dtn, rk gravity, rk omg2, rk g2,
+    rk *thicknessFlux, const rk *bottomDepth, int nFlux, rk omgv, rk gv, rk *tempNext, int nCopy,
+    rk *btrNew, int nAcc)
+{
+    const int e = bt_thread();
+    if (e < nEdges) bt_velocity_edge(e, uNew, uCur, uPerp, sshCur, sshNew, forcing, fEdge, dcEdge, weightsOnEdge,
+                                     edgesOnEdge, nEdgesOnEdge, cellsOnEdge, edgeMask, nl, me2, corrector, dtn,
+                                     gravity, omg2, g2);
+    if (e < nFlux)
+        thicknessFlux[e] = A(thicknessFlux[e],
+                             bt_flux(e, uCur, uNew, sshCur, sshNew, bottomDepth, cellsOnEdge, 0, C(0.0), C(0.0),
+                                     omgv, gv));
+    if (e < nCopy) tempNext[e] = uNew[e];
+    if (e < nAcc) btrNew[e] = A(btrNew[e], uNew[e]);
+}
+
 // the corrector's copy of the new velocity, edges 1..nEdges+1
 extern "C" __global__ void ocn_btr_copy_v842(rk *temp, const rk *uNew, int n)
 {
     const int e = bt_thread();
     if (e < n) temp[e] = uNew[e];
-}
-
-// an edge's thickness flux: the edge SSH from the old level (weighted = 0)
-// or the gam2 mix of old and new (weighted = 1)
-__device__ __forceinline__ rk bt_flux(
-    int e, const rk *uCur, const rk *uNew, const rk *sshCur, const rk *sshNew, const rk *bottomDepth,
-    const int *cellsOnEdge, int weighted, rk omg2, rk g2, rk omgv, rk gv)
-{
-    const int cell1 = cellsOnEdge[e * 2] - 1, cell2 = cellsOnEdge[e * 2 + 1] - 1;
-    rk sshEdge;
-    if (weighted) {
-        const rk ssh1 = A(M(omg2, sshCur[cell1]), M(g2, sshNew[cell1]));
-        const rk ssh2 = A(M(omg2, sshCur[cell2]), M(g2, sshNew[cell2]));
-        sshEdge = M(C(0.5), A(ssh1, ssh2));
-    } else {
-        sshEdge = M(C(0.5), A(sshCur[cell1], sshCur[cell2]));
-    }
-    const rk thicknessSum = A(sshEdge, bt_min(bottomDepth[cell1], bottomDepth[cell2]));
-    return M(A(M(omgv, uCur[e]), M(gv, uNew[e])), thicknessSum);
 }
 
 __device__ __forceinline__ void bt_ssh_cell(

@@ -102,6 +102,65 @@ def test_an_uncopied_corrector_neighbour_is_refused():
         bt._check_copies(dev["mesh"], bt.halo_schedule(case["config"], case["config"]["nBtrSubcycles"]))
 
 
+def _copies_refused_by_brute_force(mesh: dict, schedule: list[dict]) -> bool:
+    """The copy check as it was written first: every corrector, every neighbour."""
+    import cupy as cp
+    edges = [int(x) for x in mesh["nEdgesArray"]]
+    n_eoe, eoe = cp.asnumpy(mesh["nEdgesOnEdge"]), cp.asnumpy(mesh["edgesOnEdge"])
+    for step in schedule:
+        for copied, computed in step["correctors"]:
+            n = edges[computed - 1]
+            cols = np.arange(eoe.shape[1])[None, :] < n_eoe[:n, None]
+            if (eoe[:n][cols] > edges[copied - 1] + 1).any():
+                return True
+    return False
+
+
+@requires_gpu
+def test_the_copy_check_is_the_brute_force_check_and_reads_a_mesh_once(monkeypatch):
+    """The running-maximum check refuses exactly where the per-corrector scan
+    does (the pinned meshes and mutated ones), and reads a mesh's connectivity
+    from the device once, not twice per barotropic stage."""
+    import cupy as cp
+    from woof.verify import mpas_ocean_stream as stream
+    from woof.hex.mpas_ocean import btr_subcycle_v842 as bt
+    rs = np.random.RandomState(20261117)
+    checked = refused = 0
+    for case in oo.cases():
+        if case["config"]["config_time_integrator"] != "split_explicit":
+            continue
+        schedule = bt.halo_schedule(case["config"], case["config"]["nBtrSubcycles"])
+        if not any(step["correctors"] for step in schedule):
+            continue
+        for trial in range(6):
+            eoe = case["pools"]["mesh"]["edgesOnEdge"].copy()
+            n_edges = case["dims"]["nEdges"]
+            if trial:   # an edge reading another, the outermost layer on odd trials
+                inner = int(case["pools"]["mesh"]["nEdgesArray"][0])
+                eoe[rs.randint(0, inner), rs.randint(0, eoe.shape[1])] = (
+                    n_edges if trial % 2 else rs.randint(1, n_edges + 1))
+            mesh = dict(stream.on_device(oo.FIELDS, case)["mesh"], edgesOnEdge=cp.asarray(eoe))
+            want = _copies_refused_by_brute_force(mesh, schedule)
+            try:
+                bt._check_copies(mesh, schedule)
+                got = False
+            except ConfigurationRefusal:
+                got = True
+            assert got == want, (case["name"], trial)
+            checked += 1
+            refused += got
+    assert checked and refused, (checked, refused)
+    case = next(c for c in oo.cases() if c["name"] == "nested_halos")
+    mesh = stream.on_device(oo.FIELDS, case)["mesh"]
+    schedule = bt.halo_schedule(case["config"], case["config"]["nBtrSubcycles"])
+    reads = []
+    real = cp.asnumpy
+    monkeypatch.setattr(cp, "asnumpy", lambda a, *k, **kw: reads.append(1) or real(a, *k, **kw))
+    for _ in range(3):
+        bt._check_copies(mesh, schedule)
+    assert len(reads) == 2
+
+
 @requires_gpu
 @pytest.mark.parametrize("precision", BOTH)
 def test_gpu_matches_the_v842_oracle_word_for_word(precision):
