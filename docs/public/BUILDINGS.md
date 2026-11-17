@@ -150,9 +150,9 @@ RTX A6000):
 | 2-D canyon, H/W = 2 | recirculation cells up the canyon | 2 | 2 (Li, Liu and Leung 2008; Sini, Anquetin and Mestayer 1996) |
 | | primary vortex centre z/H | 0.67 | upper canyon |
 | | floor wind / U(2H) | +0.02 | forward, under the lower counter-rotating vortex |
-| cube, 8 cells per H, periodic 12H x 6H | reattachment behind the cube / H | 1.86 | about 1.6 (Martinuzzi and Tropea 1993), 1.7 (Shah and Ferziger 1997) |
+| cube, 8 cells per H, periodic 12H x 6H | reattachment behind the cube / H | 1.70 | about 1.6 (Martinuzzi and Tropea 1993), 1.7 (Shah and Ferziger 1997) |
 | | horseshoe separation ahead / H | 0.5 | about 1.0 |
-| | wind inside the cube / U(2H) | 0.008 | 0 |
+| | wind inside the cube / U(2H) | 0.009 | 0 |
 
 The benchmarks run without a surface layer, so the ground takes the LES
 closure's prescribed drag (`isfflx = 0`, `tke_drag_coefficient`). They set
