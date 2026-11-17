@@ -517,7 +517,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   numerics on CUDA and Metal): 725 -> 655 us per launch at 49x228x276 and
   367 -> 329 us at 49x150x186 on an A6000 (CUPTI kernel time per launch,
   default numerics and shape-specialized build, this change against its
-  merge base, on a shared GPU; output words compared equal). Hex: CUDA
+  merge base, on a shared GPU; output words compared equal). The specified/nested frame's
+  phi'', w'' and p'' update launches over the ring's columns with level
+  lanes instead of one thread per column of the domain
+  (`advance_frame_phi_w_ring`, byte-identical in fast and strict
+  numerics): 108 -> 25 us per substep at 49x150x186 and 116 -> 33 us at a
+  nested 49x228x276 on an A6000 under the same conditions. Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
