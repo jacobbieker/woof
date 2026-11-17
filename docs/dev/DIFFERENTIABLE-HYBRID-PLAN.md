@@ -5,6 +5,10 @@ It answers two requests: (1) get gradients of a woof forecast with respect
 to the observations that are available, and (2) work towards a
 differentiable WRF/MPAS/hex in which physics schemes can be swapped for
 neural-network components. Both live inside metal-woof; no new repository.
+Its companion, [WRFDA-3DVAR-PLAN.md](WRFDA-3DVAR-PLAN.md), scopes
+WRFDA-style 3D-Var (which needs no model adjoint) on the same observation
+cost; the 4D-Var in P4 below reuses its control variables, `B` and
+minimiser.
 
 Numbers marked *measured* come from the repo's own docs or from counting
 files in this checkout (cited by path). Numbers marked *estimate* are
