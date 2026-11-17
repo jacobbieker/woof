@@ -44,8 +44,8 @@ from importlib.resources import files
 
 import numpy as np
 
-from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
+from .velocity_v842 import launch_options
 
 SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_velocity_solver_constitutive_relation.F:28-49,64-294",
@@ -99,7 +99,7 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 
 def _function(precision: str, name: str):
     import cupy as cp
-    options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+    options = launch_options(COMPILE_OPTIONS)
     return _module_on(cp.cuda.Device().id, precision, options).get_function(name)
 
 
@@ -165,7 +165,7 @@ def init_evp(dv_edge, n_edges_solve: int, dynamics_time_step: float, elastic_tim
 
 
 def internal_stress_variational(*, mesh: dict, solver: dict, variational: dict, consts,
-                                elastic_time_step: float, revised_evp: bool) -> None:
+                                elastic_time_step: float, revised_evp: bool, check: bool = True) -> None:
     """``seaice_internal_stress_variational`` for one block, updating in place.
 
     ``mesh``: ``nEdgesOnCell``, ``verticesOnCell``, ``cellsOnVertex``,
@@ -176,14 +176,40 @@ def internal_stress_variational(*, mesh: dict, solver: dict, variational: dict, 
     ``stressDivergenceV``. ``variational``: ``strain11/22/12``,
     ``stress11/22/12``, ``replacementPressure``, ``cellVerticesAtVertex``,
     ``tanLatVertexRotatedOverRadius`` and the five ``basis*`` arrays.
-    ``consts`` is :func:`init_evp`'s result.
+    ``consts`` is :func:`init_evp`'s result. ``check=False`` skips the arrays'
+    checks, for a subcycle loop that checked the same arrays on its first pass.
     """
-    import cupy as cp
     precision = _precision_of(solver["uVelocity"])
     dtype = PRECISIONS[precision]
     n_cells, max_edges = variational["strain11"].shape
     n_vertices = solver["uVelocity"].shape[0]
     vertex_degree = int(mesh["vertexDegree"])
+    if check:
+        _check_internal_stress(mesh, solver, variational, consts, dtype, n_cells, max_edges, n_vertices,
+                               vertex_degree)
+    v = variational
+    _function(precision, "seaice_strain_tensor_variational_v842")(_grid(n_cells), (_BLOCK,), (
+        v["strain11"], v["strain22"], v["strain12"], solver["uVelocity"], solver["vVelocity"],
+        v["basisGradientU"], v["basisGradientV"], v["tanLatVertexRotatedOverRadius"],
+        solver["solveStress"], mesh["nEdgesOnCell"], mesh["verticesOnCell"],
+        np.int32(n_cells), np.int32(max_edges)))
+    n_loop = loop_count("cells", n_cells)
+    _function(precision, "seaice_stress_tensor_variational_v842")(_grid(n_loop), (_BLOCK,), (
+        v["stress11"], v["stress22"], v["stress12"], v["strain11"], v["strain22"], v["strain12"],
+        solver["icePressure"], v["replacementPressure"], solver["solveStress"], mesh["nEdgesOnCell"],
+        consts, dtype(elastic_time_step), np.int32(bool(revised_evp)), np.int32(n_loop),
+        np.int32(max_edges)))
+    _function(precision, "seaice_stress_divergence_variational_v842")(_grid(n_vertices), (_BLOCK,), (
+        solver["stressDivergenceU"], solver["stressDivergenceV"], v["stress11"], v["stress22"],
+        v["stress12"], v["basisIntegralsU"], v["basisIntegralsV"], v["basisIntegralsMetric"],
+        v["tanLatVertexRotatedOverRadius"], v["cellVerticesAtVertex"], solver["solveVelocity"],
+        mesh["nEdgesOnCell"], mesh["cellsOnVertex"], mesh["areaTriangle"], np.int32(n_vertices),
+        np.int32(vertex_degree), np.int32(max_edges)))
+
+
+def _check_internal_stress(mesh: dict, solver: dict, variational: dict, consts, dtype, n_cells: int,
+                           max_edges: int, n_vertices: int, vertex_degree: int) -> None:
+    import cupy as cp
     _check("nEdgesOnCell", mesh["nEdgesOnCell"], cp.int32, (n_cells,))
     _check("verticesOnCell", mesh["verticesOnCell"], cp.int32, (n_cells, max_edges))
     _check("cellsOnVertex", mesh["cellsOnVertex"], cp.int32, (n_vertices, vertex_degree))
@@ -203,24 +229,6 @@ def internal_stress_variational(*, mesh: dict, solver: dict, variational: dict, 
                  "basisIntegralsMetric"):
         _check(name, variational[name], dtype, (n_cells, max_edges, max_edges))
     _check("consts", consts, dtype, (3,))
-    v = variational
-    _function(precision, "seaice_strain_tensor_variational_v842")(_grid(n_cells), (_BLOCK,), (
-        v["strain11"], v["strain22"], v["strain12"], solver["uVelocity"], solver["vVelocity"],
-        v["basisGradientU"], v["basisGradientV"], v["tanLatVertexRotatedOverRadius"],
-        solver["solveStress"], mesh["nEdgesOnCell"], mesh["verticesOnCell"],
-        np.int32(n_cells), np.int32(max_edges)))
-    n_loop = loop_count("cells", n_cells)
-    _function(precision, "seaice_stress_tensor_variational_v842")(_grid(n_loop), (_BLOCK,), (
-        v["stress11"], v["stress22"], v["stress12"], v["strain11"], v["strain22"], v["strain12"],
-        solver["icePressure"], v["replacementPressure"], solver["solveStress"], mesh["nEdgesOnCell"],
-        consts, dtype(elastic_time_step), np.int32(bool(revised_evp)), np.int32(n_loop),
-        np.int32(max_edges)))
-    _function(precision, "seaice_stress_divergence_variational_v842")(_grid(n_vertices), (_BLOCK,), (
-        solver["stressDivergenceU"], solver["stressDivergenceV"], v["stress11"], v["stress22"],
-        v["stress12"], v["basisIntegralsU"], v["basisIntegralsV"], v["basisIntegralsMetric"],
-        v["tanLatVertexRotatedOverRadius"], v["cellVerticesAtVertex"], solver["solveVelocity"],
-        mesh["nEdgesOnCell"], mesh["cellsOnVertex"], mesh["areaTriangle"], np.int32(n_vertices),
-        np.int32(vertex_degree), np.int32(max_edges)))
 
 
 def final_divergence_shear_variational(*, mesh: dict, solver: dict, variational: dict,

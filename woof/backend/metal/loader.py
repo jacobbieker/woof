@@ -329,6 +329,7 @@ FLAT_ADDRESS_TABLES = frozenset({
     "glue_add_arrays",                       # woof/core/kernels/bandwidth_glue.cu
     "diff6_multi",                           # woof/core/kernels/diff6.cu
     "state_relaxation_multi",                # woof/core/kernels/lbc_state.cu
+    "finalize_state_multi",                  # woof/core/kernels/lbc_state.cu
     "solve_region_scrub_words_v841",         # woof/hex/cuda_solve_region_v841.py
     # by-value row tables beside const grid pointers (woof/core/kernels/smag2d.cu)
     "wrf_smag_flux_s_multi", "wrf_smag_hd_s_multi",

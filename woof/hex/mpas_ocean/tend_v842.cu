@@ -37,8 +37,10 @@ typedef float rk;
 #define D(a,b) __fdiv_rn((a),(b))
 #endif
 
-// ocn_vel_coriolis_tend: one thread per edge. rk4On is RK4On (1 for 'RK4',
-// 0 for 'split_explicit' / 'unsplit_explicit').
+// ocn_vel_coriolis_tend: one thread per (edge, level), the level fastest so a
+// warp reads a column's consecutive levels; each (edge, level) is the
+// operations the edge's level loop gave it. rk4On is RK4On (1 for 'RK4',
+// 0 for 'split_explicit' / 'unsplit_explicit'). Launch nEdges * nVertLevels.
 extern "C" __global__ void ocn_vel_coriolis_tend_v842(
     rk *tend, const rk *normalizedRelativeVorticityEdge,
     const rk *normalizedPlanetaryVorticityEdge, const rk *layerThicknessEdge,
@@ -47,87 +49,96 @@ extern "C" __global__ void ocn_vel_coriolis_tend_v842(
     const int *edgesOnEdge, const rk *weightsOnEdge, const rk *dcEdge, const int *edgeMask,
     int rk4On, int nEdges, int nVertLevels, int maxEdges2)
 {
-    int iEdge = blockIdx.x * blockDim.x + threadIdx.x;
+    const int t = blockIdx.x * blockDim.x + threadIdx.x;
+    const int iEdge = t / nVertLevels;
     if (iEdge >= nEdges) return;
+    const int k = t - iEdge * nVertLevels;
+    if (k >= maxLevelEdgeTop[iEdge]) return;
     const int cell1 = cellsOnEdge[iEdge * 2] - 1;
     const int cell2 = cellsOnEdge[iEdge * 2 + 1] - 1;
     const rk invLength = D((rk)1.0, dcEdge[iEdge]);
     const rk r4 = (rk)rk4On;
-    const int kmax = maxLevelEdgeTop[iEdge];
     const int nj = nEdgesOnEdge[iEdge];
-    for (int k = 0; k < kmax; ++k) {
-        rk q = (rk)0.0;
-        const int p = iEdge * nVertLevels + k;
-        for (int j = 0; j < nj; ++j) {
-            const int eoe = edgesOnEdge[iEdge * maxEdges2 + j] - 1;
-            const rk edgeWeight = weightsOnEdge[iEdge * maxEdges2 + j];
-            const int pe = eoe * nVertLevels + k;
-            const rk workVorticity = M((rk)0.5,
-                A(A(A(normalizedRelativeVorticityEdge[p], M(r4, normalizedPlanetaryVorticityEdge[p])),
-                    normalizedRelativeVorticityEdge[pe]),
-                  M(r4, normalizedPlanetaryVorticityEdge[pe])));
-            q = A(q, M(M(M(edgeWeight, normalVelocity[pe]), workVorticity), layerThicknessEdge[pe]));
-        }
-        tend[p] = A(tend[p], M((rk)edgeMask[p],
-            S(q, M(S(kineticEnergyCell[cell2 * nVertLevels + k], kineticEnergyCell[cell1 * nVertLevels + k]),
-                   invLength))));
+    rk q = (rk)0.0;
+    const int p = iEdge * nVertLevels + k;
+    for (int j = 0; j < nj; ++j) {
+        const int eoe = edgesOnEdge[iEdge * maxEdges2 + j] - 1;
+        const rk edgeWeight = weightsOnEdge[iEdge * maxEdges2 + j];
+        const int pe = eoe * nVertLevels + k;
+        const rk workVorticity = M((rk)0.5,
+            A(A(A(normalizedRelativeVorticityEdge[p], M(r4, normalizedPlanetaryVorticityEdge[p])),
+                normalizedRelativeVorticityEdge[pe]),
+              M(r4, normalizedPlanetaryVorticityEdge[pe])));
+        q = A(q, M(M(M(edgeWeight, normalVelocity[pe]), workVorticity), layerThicknessEdge[pe]));
     }
+    tend[p] = A(tend[p], M((rk)edgeMask[p],
+        S(q, M(S(kineticEnergyCell[cell2 * nVertLevels + k], kineticEnergyCell[cell1 * nVertLevels + k]),
+               invLength))));
 }
 
-// ocn_vel_vadv_tend: one thread per edge. w_dudzTopEdge(1) is the zero the
-// routine sets once and never overwrites; w_dudzTopEdge(maxLevelEdgeTop+1) is
-// the zero it sets per edge.
+// ocn_vel_vadv_tend: one thread per (edge, level), the level fastest; each
+// level forms the two interface values the edge's level loop carried down.
+// w_dudzTopEdge(1) is the zero the routine sets once and never overwrites;
+// w_dudzTopEdge(maxLevelEdgeTop+1) is the zero it sets per edge. Launch
+// nEdges * nVertLevels.
 extern "C" __global__ void ocn_vel_vadv_tend_v842(
     rk *tend, const rk *normalVelocity, const rk *layerThicknessEdge,
     const rk *vertAleTransportTop, const int *maxLevelEdgeTop, const int *cellsOnEdge,
     const int *edgeMask, int nEdges, int nVertLevels)
 {
-    int iEdge = blockIdx.x * blockDim.x + threadIdx.x;
+    const int t = blockIdx.x * blockDim.x + threadIdx.x;
+    const int iEdge = t / nVertLevels;
     if (iEdge >= nEdges) return;
+    const int k = t - iEdge * nVertLevels;
+    const int kmax = maxLevelEdgeTop[iEdge];
+    if (k >= kmax) return;
     const int cell1 = cellsOnEdge[iEdge * 2] - 1;
     const int cell2 = cellsOnEdge[iEdge * 2 + 1] - 1;
-    const int kmax = maxLevelEdgeTop[iEdge];
     const int base = iEdge * nVertLevels;
     const int nw = nVertLevels + 1;
-    // w_dudzTopEdge at the top interface of layer k (0-based k = Fortran k-1)
-    rk wTop = (rk)0.0;
-    for (int k = 0; k < kmax; ++k) {
-        rk wBot = (rk)0.0;
-        if (k + 1 < kmax) {
-            const int kk = k + 1;  // Fortran k = kk+1, from 2 to maxLevelEdgeTop
+    // w_dudzTopEdge at interface kk (0-based, kk = Fortran k-1), from 1 to
+    // maxLevelEdgeTop-1; zero at the top and at maxLevelEdgeTop
+    rk w[2];
+    for (int j = 0; j < 2; ++j) {
+        const int kk = k + j;
+        w[j] = (rk)0.0;
+        if (kk > 0 && kk < kmax) {
             const rk vertAleTransportTopEdge = M((rk)0.5,
                 A(vertAleTransportTop[cell1 * nw + kk], vertAleTransportTop[cell2 * nw + kk]));
-            wBot = D(M(vertAleTransportTopEdge, S(normalVelocity[base + kk - 1], normalVelocity[base + kk])),
+            w[j] = D(M(vertAleTransportTopEdge, S(normalVelocity[base + kk - 1], normalVelocity[base + kk])),
                      M((rk)0.5, A(layerThicknessEdge[base + kk - 1], layerThicknessEdge[base + kk])));
         }
-        // edgeMask * 0.5: integer times a default-real literal, exact in either kind
-        tend[base + k] = S(tend[base + k], M((rk)((float)edgeMask[base + k] * 0.5f), A(wTop, wBot)));
-        wTop = wBot;
     }
+    // edgeMask * 0.5: integer times a default-real literal, exact in either kind
+    tend[base + k] = S(tend[base + k], M((rk)((float)edgeMask[base + k] * 0.5f), A(w[0], w[1])));
 }
 
-// ocn_thick_hadv_tend: one thread per cell
+// ocn_thick_hadv_tend: one thread per (cell, level), the level fastest; the
+// level's sum over the cell's edges in the cell's edge order, as the edge loop
+// gave it. Launch nCells * nVertLevels.
 extern "C" __global__ void ocn_thick_hadv_tend_v842(
     rk *tend, const rk *normalVelocity, const rk *layerThicknessEdge,
     const int *maxLevelEdgeBot, const int *nEdgesOnCell, const int *edgesOnCell,
     const int *edgeSignOnCell, const rk *dvEdge, const rk *areaCell,
     int nCells, int nVertLevels, int maxEdges)
 {
-    int iCell = blockIdx.x * blockDim.x + threadIdx.x;
+    const int t = blockIdx.x * blockDim.x + threadIdx.x;
+    const int iCell = t / nVertLevels;
     if (iCell >= nCells) return;
+    const int k = t - iCell * nVertLevels;
     const rk invAreaCell = D((rk)1.0, areaCell[iCell]);
     const int n = nEdgesOnCell[iCell];
+    const int p = iCell * nVertLevels + k;
+    rk sum = tend[p];
     for (int i = 0; i < n; ++i) {
         const int iEdge = edgesOnCell[iCell * maxEdges + i] - 1;
+        if (k >= maxLevelEdgeBot[iEdge]) continue;
         const rk sign = (rk)edgeSignOnCell[iCell * maxEdges + i];
-        const int kmax = maxLevelEdgeBot[iEdge];
-        for (int k = 0; k < kmax; ++k) {
-            const rk flux = M(M(normalVelocity[iEdge * nVertLevels + k], dvEdge[iEdge]),
-                              layerThicknessEdge[iEdge * nVertLevels + k]);
-            const int p = iCell * nVertLevels + k;
-            tend[p] = A(tend[p], M(M(sign, flux), invAreaCell));
-        }
+        const rk flux = M(M(normalVelocity[iEdge * nVertLevels + k], dvEdge[iEdge]),
+                          layerThicknessEdge[iEdge * nVertLevels + k]);
+        sum = A(sum, M(M(sign, flux), invAreaCell));
     }
+    tend[p] = sum;
 }
 
 // ocn_thick_vadv_tend: one thread per cell
