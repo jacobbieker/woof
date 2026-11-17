@@ -231,17 +231,16 @@ def velocity_update(*, mesh: dict, icestate: dict, solver: dict, inertia, use_oc
         _check("solveVelocity", solver["solveVelocity"], cp.int32, (n_vertices,))
         _check("inertia", inertia, dtype, (1,))
     s = solver
-    _function(precision, "seaice_ocean_stress_coefficient_v842")(_grid(n_vertices), (_BLOCK,), (
-        s["oceanStressCoeff"], s["uOceanVelocityVertex"], s["vOceanVelocityVertex"], s["uVelocity"],
-        s["vVelocity"], icestate["iceAreaVertex"], s["solveVelocity"], np.int32(bool(use_ocean_stress)),
-        np.int32(nvs), np.int32(n_vertices)))
     time_step = dtype(dynamics_time_step if revised_evp else elastic_time_step)
-    _function(precision, "seaice_solve_velocity_v842")(_grid(nvs), (_BLOCK,), (
+    # ocean_stress_coefficient and the solve, one launch (per vertex, in order)
+    _function(precision, "seaice_velocity_update_v842")(_grid(n_vertices), (_BLOCK,), (
         s["uVelocity"], s["vVelocity"], s["uVelocityInitial"], s["vVelocityInitial"],
         icestate["totalMassVertex"], s["totalMassVertexfVertex"], s["stressDivergenceU"],
         s["stressDivergenceV"], s["airStressVertexU"], s["airStressVertexV"], s["surfaceTiltForceU"],
         s["surfaceTiltForceV"], s["oceanStressU"], s["oceanStressV"], s["oceanStressCoeff"],
-        s["solveVelocity"], inertia, time_step, np.int32(bool(revised_evp)), np.int32(nvs)))
+        s["solveVelocity"], inertia, time_step, np.int32(bool(revised_evp)), np.int32(nvs),
+        s["uOceanVelocityVertex"], s["vOceanVelocityVertex"], icestate["iceAreaVertex"],
+        np.int32(bool(use_ocean_stress)), np.int32(n_vertices)))
 
 
 def principal_stresses(*, mesh: dict, variational: dict) -> None:

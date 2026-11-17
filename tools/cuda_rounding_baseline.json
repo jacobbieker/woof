@@ -4244,6 +4244,10 @@
     "sha256": "61705513ff6b75df038761c71206e8d36f2d692a271a729f56c695ca5d5be5f4"
    },
    {
+    "file": "woof/core/kernels/spacewx_ionosphere.cu",
+    "sha256": "9694f11071f2ebcf06bdc3f45ef1dba3695e84ee72032aa8798160b931b18c4f"
+   },
+   {
     "file": "woof/core/kernels/spec_bdy.cu",
     "sha256": "bcc7090fbbb8ea307bd6dd6c65ab9b8a3f56948c4752ae3d744127b450d20161"
    },
@@ -4801,7 +4805,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/btr_subcycle_v842.cu",
-    "sha256": "36432f927f6521fd212c7e924fa6db127a6af5a7d345cdd11fccc951a848ae30"
+    "sha256": "90ea1b3f379cbacd59766d3c52deb93c93fb85d07c17f6ec5e7c345f3ade317a"
    },
    {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.cu",
@@ -4881,7 +4885,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.cu",
-    "sha256": "130e5723a8a2c34a45bac6bb2ad39ccb47ca9439dcff7d017341099fb77df03d"
+    "sha256": "01073e25f0768a46ebd77c21fe27035b3559c55f474b559c45c7440087384791"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_sunpro.cuh",
@@ -5791,7 +5795,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/btr_subcycle_v842.py",
-    "sha256": "8d78c636a1f2f7b78bd345963cfed313f62c6e2333418095c24880c5c22f0a54"
+    "sha256": "ed6e34ad8b23df0d53a2181c6566802118110fe63f59980edef44141017b32ad"
    },
    {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
@@ -5871,7 +5875,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.py",
-    "sha256": "987e899e454e310a3a058b0452fb6b3d9c408b4b3466f223fd6b138bdc0c67b1"
+    "sha256": "d8703ab167ecc0737e9feb431b721593297b4b005ec7ee49f17cccacc8b53599"
    },
    {
     "file": "woof/hex/mpasdiag/_kernels.py",
@@ -22461,6 +22465,53 @@
     ]
    },
    "source_sha256": "87977c71b92c019cc182f63a0e64a22913dce7cc8c446e215a6269b91792cfad"
+  },
+  "kernels:spacewx_ionosphere": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "4e9778814793b5ecf0247234b89ba513dcb2798c918b20b0ff63523b550301b3",
+    "sites": {
+     "100": 72
+    }
+   },
+   "native_differences": {
+    "sha256": "ff3685b7a24df43cbd941c514c28dce429aa0e3ded7a86fcc8fc8f2b4b7203fe",
+    "sites": {
+     "100": 2
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "2d64a24562d619502a247ab04e18839a9f8451acc14f859110f28c4f29a27388"
   },
   "kernels:spec_bdy": {
    "assessment": "static_diagnostic_only",
