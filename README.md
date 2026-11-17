@@ -254,6 +254,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     wired into the forecast route (`--wrf-hydro`, `[wrf_hydro]`), and into
     hex through a conservative cell-to-routing-grid exchange. Unported
     `hydro.namelist` options are refused by name.
+  - Hex's cell-to-grid exchange runs on the GPU by default. The overlap
+    weights stay on the device and nothing goes through the host at the LSM
+    step. Its words match the host route's on the same machine: it sums in
+    scipy's order and copies that host's use of FMA.
+    `--no-wrf-hydro-gpu-exchange` (`[wrf_hydro] gpu_exchange = false`) keeps
+    the host route, which also runs, with a log line, when there is no GPU
+    backend. Measured on a 128x128 1-km LSM grid with a 96k-cell
+    hex mesh: on pb the exchange went from 230 ms (host) to 0.4 ms (A6000),
+    and the whole coupling cycle from 528 to 196 ms. On the M3 Max it went
+    from 15-27 ms to 4 ms; there the routing (about 650 ms) dominates.
   - NEMO 5.0.2: the equation of state, TKE mixing, vertical and lateral
     tracer diffusion, FCT advection and solar penetration. A coupled column
     ocean is driven by WRF's ocean-coupler exchange (SST only for now); a
@@ -675,7 +685,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   what does not depend on wavelength. That cache holds the layer air and
   gas columns, the cloud radius selections and the REPTRAN pressure,
   temperature and vmr brackets. All eight REPTRAN lookups share one grid,
-  so a single bracket serves every species. The blocks write straight into
+  so one bracket serves every species looked up without a vmr (H2O, looked
+  up with its vmr, takes its own vmr-interpolated bracket). The blocks write straight into
   the solver's arrays, and the AFGL splice is written in place. The words
   are unchanged: 30,000 columns x 8 wavelengths take 15 s instead of 23 s
   on the A6000 host.
@@ -732,6 +743,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73). The auroral energy, storm-time and
   particle-precipitation layers are planned ([docs/spacewx.md](docs/spacewx.md)).
+- **A plan, not yet code, for gradients and hybrid physics.**
+  [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
+  studies gradients of a forecast's fit to observations and opt-in
+  neural-network column physics. woof has no adjoint or autodiff code today.
+  The plan starts with adjoint-free sensitivities (finite-difference and
+  ensemble), then one differentiable column scheme, NN physics through the
+  existing column seams, and later a WRF dry-core adjoint checked against
+  WRFPLUS. Default runs are not changed.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

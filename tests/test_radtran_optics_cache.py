@@ -190,3 +190,44 @@ def test_stacked_block_optics_keep_the_per_wavelength_words(monkeypatch, chunk):
         for (_, ts, g), (_, ts_w, g_w) in zip(peaks[k], want[4]):
             assert np.array_equal(_bits(ts), _bits(ts_w)), iw
             assert np.array_equal(_bits(g), _bits(np.broadcast_to(g_w, ts_w.shape))), iw
+
+
+def test_hu_stamnes_cache_belongs_to_one_radius_array():
+    """A cache reused with another radius array starts afresh and range
+    checks it, rather than applying the first array's selections."""
+    _need_data()
+    from woof.radtran import clouds
+    a = np.full((4, 5), 10.0)
+    b = np.full((3, 7), 20.0)
+    cache = {}
+    clouds.hu_stamnes(550.0, a, cache=cache)
+    got = clouds.hu_stamnes(550.0, b, cache=cache)
+    for x, y in zip(got, clouds.hu_stamnes(550.0, b)):
+        assert np.array_equal(_bits(x), _bits(y))
+    with pytest.raises(ValueError, match="2.5-60"):
+        clouds.hu_stamnes(550.0, np.full((2, 2), 90.0), cache=cache)
+
+
+def test_one_column_optics_stack_per_wavelength():
+    """A single column (levels only) has no column axis: its optics stack per
+    wavelength, as the per-wavelength calls give them."""
+    _need_data()
+    from woof.radtran import atmosphere, data, driver
+    from woof.radtran.options import Options
+    from woof.radtran.reptran import open_reptran
+    rep = open_reptran(str(data.reptran_file("coarse")))
+    z = np.linspace(20.0, 0.0, 26)
+    p = 1013.25 * np.exp(-z / 7.6)
+    t = 288.0 - 6.5 * np.minimum(z, 11.0)
+    col = atmosphere.model_columns(z[None, :], p[None, :], t[None, :], co2_vmr=4e-4)
+    one = atmosphere.Column(z=col.z[0], p=col.p[0], t=col.t[0], n_air=col.n_air[0],
+                            dens={k: v[0] for k, v in col.dens.items()})
+    opts = Options(wavelength=(440.0, 560.0)).validate()
+    iws = sorted({int(i) for i in rep.band(rep.band_containing(550.0)).iwvl})[:3]
+    text, ssa, pmom, ptrue, peaks = driver._layer_optics_columns(opts, one, rep, iws, None,
+                                                                 opts.streams, None)
+    for k, iw in enumerate(iws):
+        want = driver._layer_optics(opts, one, rep, iw, None, opts.streams, None)
+        assert text[k].shape == want[0].shape
+        for got, ref in zip((text[k], ssa[k], pmom[k]), want[:3]):
+            assert np.array_equal(_bits(got), _bits(ref)), iw
