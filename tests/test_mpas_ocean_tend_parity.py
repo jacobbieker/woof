@@ -99,9 +99,9 @@ def test_the_ocean_door_verify_grades_the_ported_piece():
 @pytest.mark.parametrize("original, mutated, field", [
     # the thickness flux formed as u*(dv*h)
     ("const rk flux = M(M(normalVelocity[iEdge * nVertLevels + k], dvEdge[iEdge]),\n"
-     "                              layerThicknessEdge[iEdge * nVertLevels + k]);",
+     "                          layerThicknessEdge[iEdge * nVertLevels + k]);",
      "const rk flux = M(normalVelocity[iEdge * nVertLevels + k],\n"
-     "                              M(dvEdge[iEdge], layerThicknessEdge[iEdge * nVertLevels + k]));",
+     "                          M(dvEdge[iEdge], layerThicknessEdge[iEdge * nVertLevels + k]));",
      "tendThickHadv"),
     # the Coriolis edge sum reassociated
     ("q = A(q, M(M(M(edgeWeight, normalVelocity[pe]), workVorticity), layerThicknessEdge[pe]));",

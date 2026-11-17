@@ -274,7 +274,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     thickness tendencies, tracer tendencies, monotone tracer advection,
     implicit vertical mixing, vertical transport velocity, the
     split-explicit barotropic stage and whole split-explicit step, and
-    forward mode (clock, cold start, N steps, bitwise restart);
+    forward mode (clock, cold start, N steps, bitwise restart). The step
+    checks its barotropic halo copies against the mesh once per mesh, not
+    with two device reads per stage: on an 8,300-cell, 60-level torus a
+    step takes 36 instead of 130 ms on an A6000 and 110 instead of 245 ms
+    on an M3 Max, with the same words. Its level-independent loops
+    (Coriolis, thickness flux, pressure gradient, del2/Leith, vertical
+    momentum advection, stability, reconstruction and the split step's
+    edge updates) run a thread per edge or cell and level, so a warp reads
+    a column's consecutive levels: a 33,000-cell, 60-level step takes 140
+    instead of 259 ms on an A6000, the same words;
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
@@ -293,7 +302,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     lateral melt, rebinning and zapping, with level, CESM or topo ponds),
     and its ridging (both participation and both redistribution functions,
     the ridging iterations and the cleanup after them), neither of which
-    needs an opt-in;
+    needs an opt-in. The elastic subcycles check their arrays once per
+    solve and work out their compile options once per numerics mode:
+    120 subcycles on a 9,200-cell torus take 34 instead of 41 ms a step on
+    an M3 Max, with the same words;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
