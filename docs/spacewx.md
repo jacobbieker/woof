@@ -15,7 +15,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU | available as `woof spacewx ionosphere` (global grid) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
-| L3b high latitudes | auroral oval energy flux and Joule heating from Kp and the solar wind (OMNI, SWPC real time) | planned |
+| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; energy flux and Joule heating to follow | oval available as `woof spacewx aurora` (global grid); energy flux, Joule heating and forecast history planned |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | ion-pair rates (CMIP6 EPP, Ap-driven MEE, GOES SPE) as NOx/HOx sources in chemistry, for high-top runs | planned |
 | L1b spectral irradiance | per-band solar variability in RRTMG SW and photolysis | planned |
@@ -133,14 +133,74 @@ the forecast is identical with the option on or off.
 - A streamed domain refuses the option, because the rows are not a tile
   carrier, and hex refuses it until a hex history stream carries them.
 
+## L3b: the auroral oval and the solar wind (`woof spacewx aurora`)
+
+`woof spacewx aurora --time 2024-05-10T21:00Z --count 12` places the auroral
+oval on a global grid on the GPU (CUDA or Metal; kernel
+`woof/core/kernels/spacewx_aurora.cu`, model `woof/spacewx/aurora.py`). Each
+column gets its geomagnetic latitude, magnetic local time, a zone (0
+equatorward of the diffuse aurora, 1 diffuse aurora, 2 auroral oval, 3 polar
+cap) and its distance in degrees from the diffuse aurora's equatorward edge,
+which is the usual visibility line of an aurora forecast. `--out` writes the
+fields and a JSON receipt.
+
+- **Oval.** Starkov 1994 (Geomagn. Aeron. 34, 331): three boundaries (the polar
+  cap edge, the oval's equatorward edge, the diffuse aurora's equatorward
+  edge), each a three-harmonic series in MLT whose coefficients are cubic in
+  log10|AL|. The coefficient table is Sigernes et al. 2011 (Optica Pura y
+  Aplicada 44, 599, Table 2). ocbpy (BSD-3-Clause) carries the same table
+  except that the oval's equatorward A0 has b0 = 1.16, where Sigernes and a
+  third tabulation give 1.61; woof uses 1.61. |AL| is clamped to 10-2000 nT.
+- **Geomagnetic frame.** The centred dipole of IGRF-14 (degree 1) at the
+  run's date (2026: boreal pole at 80.9 N, 72.8 W). Starkov's boundaries are
+  in corrected geomagnetic coordinates, which differ from the dipole by a few
+  degrees in some sectors; that is this layer's main approximation.
+- **Activity, three ways.**
+  - `--kp` (fixed) or `--indices gfz` (observed Kp, GFZ, CC BY 4.0), converted
+    with Starkov's `|AL| = 18 - 12.3 Kp + 27.2 Kp^2 - 2 Kp^3` nT.
+  - `--solar-wind omni|swpc|FILE[:FILE]`: Kp estimated from the solar wind.
+    `omni` fetches NASA SPDF's hourly OMNI2 years; `swpc` reads NOAA SWPC's
+    real-time L1 feed (the active spacecraft only, 1-minute data averaged to
+    hourly means with at least 10 minutes each). Each line also prints the
+    Newell et al. 2007 coupling and the Boyle et al. 1997 polar cap potential.
+  - `--solar-wind omni --observed-al` drives the oval with OMNI2's observed AL.
+- **Kp from the solar wind** (`woof.spacewx.solarwind.KP_FIT`). Fitted here on
+  OMNI2 against GFZ Kp, since published Kp regressions are not all
+  reproducible from their papers. Each 3-hour Kp interval starting at T is
+  regressed on the mean of the hourly values stamped T-1, T and T+1:
+  `Kp = a + b (1e-4 dPhi/dt)^0.6 + c (1e-7 sqrt(n) v^2)`, clipped to 0-9, where
+  dPhi/dt is Newell's coupling and the second term is a viscous one. Trained
+  on 2012-2021 (29,019 intervals), tested on 2022-2024 (8,658): RMSE 0.73,
+  correlation 0.84, bias -0.16. For observed Kp >= 5 the RMSE is 1.43 and the
+  bias -0.70, so strong storms are underestimated. Newell alone gives RMSE 0.92
+  and correlation 0.72.
+
+Checks:
+- The device kernel matches the float64 NumPy reference to 0.002 deg in
+  geomagnetic latitude with no zone mismatches away from the boundaries
+  (tests/test_spacewx_aurora.py, CUDA and Metal).
+- Starkov's Kp-to-AL relation against OMNI2's observed AL, 2012-2024 (median
+  |AL| observed / Starkov, nT): Kp 2: 89 / 86, Kp 4: 290 / 276, Kp 6: 535 /
+  491, Kp 8: 744 / 636. It holds to Kp 5 and reads low above that.
+- Against NOAA SWPC's OVATION Prime nowcast (17 Nov 2026 16:52 UT, Kp 0.67):
+  the diffuse aurora's equatorward edge (taken as OVATION's 10 % contour) is
+  5.0 deg poleward of OVATION's in the north (MAE 6.0) and 5.4 deg in the
+  south; with the solar-wind Kp of 1.35, 3.8 and 4.1 deg. The dipole frame and
+  the choice of contour account for much of this.
+- The storm of 10-11 May 2024: observed Kp 7.67-9 puts the diffuse aurora's
+  edge at 44.5-52.5 N geographic. The solar-wind estimate saturates at Kp 9.
+  The observed AL (peaking at 1636 nT) takes it to 36.5 N.
+
 ## Data sources and licences (all layers)
 
 | input | source | licence |
 |---|---|---|
 | TSI, SSI | NOAA NCEI CDR (NRLSSI2) | NOAA CDR, open |
 | Kp, ap, Ap, F10.7 | GFZ Potsdam (`kp.gfz.de`) | CC BY 4.0; the sunspot column (CC BY-NC) is not read |
-| F10.7, solar wind real time | NOAA SWPC | public domain |
-| solar wind historical | NASA SPDF OMNIWeb | public |
+| F10.7, solar wind real time (`json/rtsw`) | NOAA SWPC | public domain |
+| solar wind historical (OMNI2 hourly, incl. Kp and AL) | NASA SPDF OMNIWeb | public |
+| auroral oval coefficients (shipped in `woof/spacewx/aurora.py`) | Starkov 1994, as tabulated by Sigernes et al. 2011 and ocbpy | published coefficients; ocbpy BSD-3-Clause, notice kept in the module |
+| Kp-from-solar-wind fit (shipped, 4 numbers) | fitted here on OMNI2 and GFZ Kp | woof's own; GFZ Kp CC BY 4.0 |
 | CCIR/URSI ionospheric maps | PyIRI (MIT) at commit c0a50e0a, each file pinned by SHA-256 | ITU-R / URSI published coefficients |
 | IGRF-14 | IAGA V-MOD via NOAA NCEI, pinned by SHA-256 | IAGA published coefficients |
 | GNSS TEC maps (validation only) | NASA CDDIS IONEX (Earthdata login) | public |
@@ -157,6 +217,11 @@ Attribution:
 - IGRF-14 is from IAGA Division V-MOD (Alken et al. 2025), downloaded from NOAA NCEI.
 - Kp, ap and F10.7 are from GFZ Potsdam (Matzka et al. 2021, CC BY 4.0), with F10.7 from
   DRAO/NRCan. Cite these when publishing results.
+- OMNI2 is from NASA SPDF (King & Papitashvili 2005, JGR 110, A02104), with AL from WDC Kyoto.
+  The real-time solar wind is from NOAA SWPC.
+- The auroral oval coefficients are Starkov's (1994) published fit, as tabulated by Sigernes et
+  al. 2011 and by ocbpy (Copyright (c) 2017 Angeline G. Burrell and Gareth Chisham,
+  BSD-3-Clause).
 - The IONEX TEC maps are from IGS through NASA CDDIS (Johnston et al. 2017, the IGS). They are
   used for grading only.
 
