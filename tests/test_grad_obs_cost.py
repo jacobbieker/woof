@@ -277,6 +277,34 @@ def test_the_background_check_rejects_and_the_frozen_set_does_not(tmp_path):
     other = _obs([dict(base, value=t7)])
     with pytest.raises(oc.ObsCostError, match="another observation set"):
         oc.evaluate(other, warm, accept=oc.accepted_from(pairs))
+    with pytest.raises(oc.ObsCostError, match="another FGAT offset"):
+        oc.evaluate(obs, warm, accept=oc.accepted_from(pairs), max_offset_s=600.0)
+    table = tmp_path / "t.json"
+    table.write_text(json.dumps({"schema": oc.TYPES_SCHEMA, "types": [
+        {"platform": "sonde", "kind": "upper_temperature", "error": 2.0}]}))
+    with pytest.raises(oc.ObsCostError, match="another error table"):
+        oc.evaluate(obs, warm, accept=oc.accepted_from(pairs), table=oc.read_error_table(table))
+    with pytest.raises(oc.ObsCostError, match="another history frame times"):
+        oc.evaluate(obs, warm[:2], accept=oc.accepted_from(pairs))
+
+
+def test_a_zero_elevation_limit_is_a_limit(tmp_path):
+    frames = oc.read_frames([write_wrf(tmp_path / "wrfout_d01_x")])
+    table = tmp_path / "t.json"
+    table.write_text(json.dumps({"schema": oc.TYPES_SCHEMA, "types": [
+        {"platform": "synop", "kind": "surface_temperature", "error": 1.0, "max_elevation_diff_m": 0.0}]}))
+    base = {"platform": "synop", "kind": "surface_temperature", "lat": 55.6, "lon": -3.3, "time": _at(1),
+            "value": 283.0}
+    result = oc.evaluate(_obs([dict(base, elevation_m=50.0), dict(base, elevation_m=51.0)]), frames,
+                         table=oc.read_error_table(table))
+    assert result.obs_index.tolist() == [0] and result.counts["surface_elevation_mismatch"] == 1
+
+
+def test_history_extent_reads_coordinates_and_times_only(tmp_path):
+    lat, lon, first, last = oc.history_extent([write_wrf(tmp_path / "wrfout_d01_x")])
+    assert (first, last) == (_at(0), _at(2)) and lat.size == NY * NX
+    box = obs_stores.box_of(lat, lon, 0.5)
+    assert box[0] == pytest.approx(54.5) and box[3] == pytest.approx(-2.5 + 0.5, abs=1e-6)
 
 
 def test_obs_sets_round_trip_without_pickle(tmp_path):
@@ -322,6 +350,56 @@ def test_land_rows_split_wind_and_keep_the_latest_update():
     assert obs.value[(obs.station == "A") & (obs.kind == "surface_wind_u")] == pytest.approx([5.0])
     b = obs.kind[obs.station == "B"].tolist()
     assert b == ["surface_dewpoint"]  # 400 K fails the bounds; a 30 m mast is not a 10 m wind
+
+
+def test_a_global_box_keeps_every_longitude():
+    lon = np.array([-170.0, -30.0, 30.0, 90.0, 150.0, 179.0])
+    lat = np.zeros(lon.size)
+    assert obs_stores._in_box(lat, lon, (-90.0, 90.0, -179.5, 179.5)).all()
+    assert obs_stores._in_box(np.zeros(3), np.array([10.0, 350.0, -10.0]), (-5.0, 5.0, -15.0, 15.0)).all()
+
+
+def test_missing_station_ids_never_merge():
+    cols = {"station_id": np.array(["", "nan", ""]),
+            "time": np.array(["2026-11-07T01:00"] * 3, "datetime64[s]"), "row": np.array([7, 8, 9]),
+            "lat": np.array([55.6, 55.7, 55.8]), "lon": np.array([-3.3, -3.2, -3.1]),
+            "station_elevation": np.array([50.0, 60.0, 70.0]), "update_sequence_number": np.array([0, 0, 0]),
+            "2m_temperature": np.array([281.0, 282.0, 283.0]), "temperature_sensor_height": np.full(3, 2.0),
+            "2m_dewpoint_temperature": np.full(3, np.nan), "10m_wind_speed": np.full(3, np.nan),
+            "10m_wind_direction": np.full(3, np.nan), "wind_sensor_height": np.full(3, np.nan)}
+    obs = obs_stores.land_rows(cols)
+    assert sorted(obs.value.tolist()) == [281.0, 282.0, 283.0]
+    assert len(set(obs.station.tolist())) == 3
+
+
+def test_two_bulletins_of_one_launch_across_an_hour_are_one_sounding():
+    xr = pytest.importorskip("xarray")
+    launch = np.array(["2026-11-07T10:59:30", "2026-11-07T11:00:10", "2026-11-07T11:00:00"], "datetime64[ns]")
+    levels = np.array([100000.0, 85000.0, 70000.0])
+    first = np.array([0, 3, 5])
+    count = np.array([3, 2, 3])
+    pressure = np.concatenate([levels, levels[:2], levels])
+    n = pressure.size
+    ds = xr.Dataset({
+        "launch_time": ("s", launch), "latitude": ("s", [55.9, 55.9, 56.5]), "longitude": ("s", [-3.2, -3.2, -3.0]),
+        "first_level": ("s", first), "level_count": ("s", count), "station_id": ("s", ["03160", "03160", "03999"]),
+        "station_elevation": ("s", [40.0, 40.0, 10.0]),
+        "pressure": ("l", pressure), "temperature": ("l", np.full(n, 270.0)), "wind_speed": ("l", np.full(n, 5.0)),
+        "wind_direction": ("l", np.full(n, 270.0)), "time_since_launch": ("l", np.zeros(n)),
+        "latitude_displacement": ("l", np.zeros(n)), "longitude_displacement": ("l", np.zeros(n))})
+    obs = obs_stores.wis2_upper_air(datetime(2026, 11, 7, 10, tzinfo=timezone.utc),
+                                    datetime(2026, 11, 7, 12, tzinfo=timezone.utc), (50.0, 60.0, -10.0, 5.0), ds=ds)
+    temps = obs.take(np.nonzero(obs.kind == "upper_temperature")[0])
+    assert sorted(temps.station.tolist()) == ["03160"] * 3 + ["03999"] * 3
+
+
+def test_mandatory_levels_hold_the_referees_temperature_rule():
+    from woof.hex.sonde_profile_referee import mandatory_from_levels
+
+    p = np.array([101000.0, 99980.0, 93000.0, 86000.0, 72000.0, 50020.0, 30000.0, 26000.0, 9000.0])
+    t = np.array([288.0, 287.5, 283.0, 279.0, 271.0, 252.0, 228.0, 222.0, 215.0])
+    ours = {lev: q["t"] for lev, q in obs_stores.mandatory_levels(p, {"t": t}).items()}
+    assert ours == mandatory_from_levels(p, t)
 
 
 def test_wind_components_follow_the_from_convention():

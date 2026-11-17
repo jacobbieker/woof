@@ -421,7 +421,11 @@ def mpas_frames(path, *, mesh=None) -> list[ModelFrame]:
             zw = zgrid.T  # (nz+1, nCells)
             z = 0.5 * (zw[:-1] + zw[1:])
             terrain = zw[0] if ter is None else ter.reshape(-1)
-            usable = usable_cells(lat, lon, None if bdy is None else bdy.reshape(-1).astype(np.int64))
+            try:
+                usable = usable_cells(lat, lon, None if bdy is None else bdy.reshape(-1).astype(np.int64))
+            except ValueError as error:
+                raise ObsCostError(f"{path}: a regional mesh without bdyMaskCell; pass --mesh with a grid, "
+                                   "static or init file of the same mesh") from error
             usable = np.ones(lat.size, bool) if usable is None else np.asarray(usable)
             uname = _mpas_name(v, "u_zonal", "uReconstructZonal")
             vname = _mpas_name(v, "v_meridional", "uReconstructMeridional")
@@ -464,16 +468,56 @@ def mpas_frames(path, *, mesh=None) -> list[ModelFrame]:
     return frames
 
 
+def _route_of(path, route):
+    import netCDF4
+
+    if route != "auto":
+        return route
+    with netCDF4.Dataset(path) as d:
+        return "wrf" if "Times" in d.variables else "mpas"
+
+
+def history_extent(paths: Sequence, *, route: str = "auto", mesh=None):
+    """(lat, lon, first valid, last valid) of history files, reading only coordinates and times."""
+    import netCDF4
+
+    lat = lon = None
+    times = []
+    for path in paths:
+        kind = _route_of(path, route)
+        with netCDF4.Dataset(path) as d:
+            v = d.variables
+            if kind == "wrf":
+                times.extend(_wrf_times(d))
+                if lat is None:
+                    lat, lon = _record(v["XLAT"], 0).reshape(-1), _record(v["XLONG"], 0).reshape(-1)
+                continue
+            for row in np.atleast_2d(v["xtime"][:]):
+                text = "".join(ch.decode() if isinstance(ch, bytes) else str(ch)
+                               for ch in np.ma.filled(row, b" ")).strip()
+                times.append(datetime.strptime(text, "%Y-%m-%d_%H:%M:%S").replace(tzinfo=timezone.utc))
+            if lat is None:
+                source = d if "latCell" in v else (netCDF4.Dataset(mesh) if mesh is not None else None)
+                if source is None:
+                    raise ObsCostError(f"{path} carries no latCell; pass --mesh with a grid, static or init file")
+                try:
+                    lat = np.degrees(np.asarray(source.variables["latCell"][:], float)).reshape(-1)
+                    lon = np.degrees(np.asarray(source.variables["lonCell"][:], float)).reshape(-1)
+                finally:
+                    if source is not d:
+                        source.close()
+    if not times:
+        raise ObsCostError("no history records")
+    return lat, lon, min(times), max(times)
+
+
 def read_frames(paths: Sequence, *, route: str = "auto", mesh=None, rim: int = 5) -> list[ModelFrame]:
     """Frames from history files, sorted by valid time; ``route`` is wrf, mpas or auto."""
     import netCDF4
 
     frames = []
     for path in paths:
-        kind = route
-        if kind == "auto":
-            with netCDF4.Dataset(path) as d:
-                kind = "wrf" if "Times" in d.variables else "mpas"
+        kind = _route_of(path, route)
         frames.extend(wrf_frames(path, rim=rim) if kind == "wrf" else mpas_frames(path, mesh=mesh))
     frames.sort(key=lambda f: f.valid)
     for a, b in zip(frames, frames[1:]):
@@ -537,8 +581,12 @@ def pair(obs: ObsSet, frames: Sequence[ModelFrame], table: ErrorTable, *, max_of
     counts["outside_usable_columns"] = int(np.sum(keep & (column < 0)))
     keep &= column >= 0
     surface = np.isin(obs.kind, SURFACE_KINDS)
-    limit = np.array([(table.row(p, k).max_elevation_diff_m if table.row(p, k) is not None else None) or np.inf
-                      for p, k in zip(obs.platform, obs.kind)], float) if len(obs) else np.zeros(0)
+    def elevation_limit(platform, kind):
+        row = table.row(platform, kind)
+        return np.inf if row is None or row.max_elevation_diff_m is None else float(row.max_elevation_diff_m)
+
+    limit = np.array([elevation_limit(p, k) for p, k in zip(obs.platform, obs.kind)], float) \
+        if len(obs) else np.zeros(0)
     checked = keep & surface & np.isfinite(limit)
     diff = np.full(len(obs), np.inf)
     if np.any(checked):
@@ -652,6 +700,8 @@ class CostResult:
     frames: list
     obs_digest: str
     table_sha256: str
+    max_offset_s: float = float("nan")
+    frame_times: tuple = ()
 
     @property
     def departure(self) -> np.ndarray:
@@ -680,31 +730,59 @@ class CostResult:
 
     def save_pairs(self, path) -> None:
         np.savez(path, schema=np.asarray(SCHEMA), obs_sha256=np.asarray(self.obs_digest),
+                 table_sha256=np.asarray(self.table_sha256), max_offset_s=np.asarray(self.max_offset_s),
+                 frame_times=np.asarray(self.frame_times, dtype=str),
                  obs_index=self.obs_index, frame_index=self.frame_index, column=self.column,
                  h=self.h, y=self.y, sigma=self.sigma, platform=self.platform, kind=self.kind)
 
 
-def accepted_from(path) -> tuple[np.ndarray, str]:
-    """The accepted observation indices and the observation-set digest of a saved reference."""
+@dataclass(frozen=True)
+class Reference:
+    """What a perturbed run must share with the reference it is frozen to."""
+
+    indices: np.ndarray
+    obs_sha256: str
+    table_sha256: str
+    max_offset_s: float
+    frame_times: tuple
+
+
+def accepted_from(path) -> Reference:
+    """The accepted observations of a saved reference and the definition of its cost."""
     with np.load(path, allow_pickle=False) as data:
         if str(data["schema"]) != SCHEMA:
             raise ObsCostError(f"{path} is not a {SCHEMA} pairs file")
-        return np.asarray(data["obs_index"]), str(data["obs_sha256"])
+        return Reference(indices=np.asarray(data["obs_index"]), obs_sha256=str(data["obs_sha256"]),
+                         table_sha256=str(data["table_sha256"]), max_offset_s=float(data["max_offset_s"]),
+                         frame_times=tuple(np.asarray(data["frame_times"]).tolist()))
 
 
 def evaluate(obs: ObsSet, frames: Sequence[ModelFrame], *, table: ErrorTable | None = None,
              max_offset_s: float | None = None, start=None, end=None,
-             accept: tuple[np.ndarray, str] | None = None) -> CostResult:
+             accept: Reference | None = None) -> CostResult:
     """``J_o`` of ``frames`` against ``obs``.
 
-    ``accept`` (``(indices, obs_sha256)`` from a reference's pairs file)
-    freezes the observation set: the background check is skipped and only
-    those observations are scored.  An accepted observation the operator
+    ``accept`` (:func:`accepted_from` a reference's pairs file) freezes the
+    observation set: the background check is skipped and only those
+    observations are scored.  The reference must have been scored against
+    the same observation file, error table, FGAT offset and frame times;
+    anything else would change what ``J`` means between the two runs.  An accepted observation the operator
     cannot simulate on these frames is counted as ``lost_from_reference``
     and left out of ``J`` (it would otherwise be a silent change of the
     cost's definition between two runs).
     """
     table = table or read_error_table()
+    if max_offset_s is None:
+        max_offset_s = default_max_offset_s(frames)
+    frame_times = tuple(f.valid.strftime("%Y-%m-%dT%H:%M:%SZ") for f in frames)
+    if accept is not None:
+        for what, theirs, ours in (("observation set", accept.obs_sha256, obs.digest()),
+                                   ("error table", accept.table_sha256, table.sha256),
+                                   ("FGAT offset (s)", accept.max_offset_s, float(max_offset_s)),
+                                   ("history frame times", accept.frame_times, frame_times)):
+            if theirs != ours:
+                raise ObsCostError(f"the reference pairs were scored with another {what} ({theirs} != {ours}); "
+                                   "score both runs with the same definition of J")
     pairing = pair(obs, frames, table, max_offset_s=max_offset_s, start=start, end=end)
     counts = dict(pairing.counts)
     h = simulate(obs, frames, pairing)
@@ -713,12 +791,8 @@ def evaluate(obs: ObsSet, frames: Sequence[ModelFrame], *, table: ErrorTable | N
     y = obs.value[oi]
     valid = np.isfinite(h) & np.isfinite(y) & np.isfinite(sigma) & (sigma > 0)
     if accept is not None:
-        indices, digest = accept
-        if digest != obs.digest():
-            raise ObsCostError("the reference pairs were made against another observation set "
-                               f"({digest[:12]} != {obs.digest()[:12]}); score both against the same file")
         wanted = np.zeros(len(obs), bool)
-        wanted[np.asarray(indices, np.int64)] = True
+        wanted[np.asarray(accept.indices, np.int64)] = True
         mask = valid & wanted[oi]
         counts["lost_from_reference"] = int(np.sum(wanted) - np.sum(mask))
         counts["not_in_reference"] = int(np.sum(valid & ~wanted[oi]))
@@ -737,4 +811,5 @@ def evaluate(obs: ObsSet, frames: Sequence[ModelFrame], *, table: ErrorTable | N
                       h=h[mask], y=y[mask], sigma=sigma[mask], platform=obs.platform[oi][mask],
                       kind=obs.kind[oi][mask], counts=counts,
                       frames=[f"{f.valid.strftime('%Y-%m-%dT%H:%M:%SZ')} {f.source}" for f in frames],
-                      obs_digest=obs.digest(), table_sha256=table.sha256)
+                      obs_digest=obs.digest(), table_sha256=table.sha256, max_offset_s=float(max_offset_s),
+                      frame_times=frame_times)

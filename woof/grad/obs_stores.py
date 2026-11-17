@@ -42,6 +42,10 @@ from datetime import datetime, timedelta
 import numpy as np
 
 from woof.grad.obs_cost import ObsCostError, ObsSet, _utc
+# The radiosonde referee's levels and temperature bounds, shared so the cost and the scorecard
+# select the same levels (tests/test_grad_obs_cost.py holds mandatory_levels to its rule).
+from woof.hex.sonde_profile_referee import LEVELS_HPA as MANDATORY_HPA, T_BOUNDS
+from woof.hex.metoffice_intermediate import wind_components
 
 BUCKET = "us-west-2.opendata.source.coop"
 STORES = {
@@ -50,13 +54,13 @@ STORES = {
     "wis2_aircraft": "bkr/obs/wis2_aircraft.icechunk",
     "metop_sg_ro": "bkr/obs/metop_sg_ro.icechunk",
 }
-MANDATORY_HPA = (1000, 925, 850, 700, 500, 400, 300, 250, 200, 150, 100, 70, 50, 30, 20, 10)
-T_BOUNDS = (150.0, 340.0)
 SPEED_BOUNDS = (0.0, 120.0)
 T2_SENSOR_M = (1.0, 3.0)
 WIND_SENSOR_M = (8.0, 12.0)
 # A WIS2 sounding filed for hour H is launched up to about 75 min before it.
 SONDE_LAUNCH_LEAD = timedelta(minutes=150)
+# Two bulletins of one station launched this close together are one sounding.
+SONDE_DUPLICATE_S = 3600.0
 
 
 def open_store(name):
@@ -69,9 +73,20 @@ def open_store(name):
 
 
 def _in_box(lat, lon, box):
+    """Inside (south, north, west, east); longitudes are taken in [west, west + 360)."""
     south, north, west, east = box
-    lon = ((np.asarray(lon, float) - west + 180.0) % 360.0) - 180.0 + west
+    lon = ((np.asarray(lon, float) - west) % 360.0) + west
     return (lat >= south) & (lat <= north) & (lon >= west) & (lon <= east)
+
+
+def _ids(raw, prefix, index):
+    """Text ids, with a unique stand-in where the store has none (so missing ids never merge)."""
+    out = []
+    for value, i in zip(np.asarray(raw).tolist(), np.asarray(index).tolist()):
+        text = value.decode() if isinstance(value, bytes) else str(value)
+        text = text.strip()
+        out.append(text if text and text.lower() not in ("nan", "none") else f"{prefix}-{int(i)}")
+    return np.asarray(out, dtype=str)
 
 
 def _window(start, end):
@@ -80,18 +95,14 @@ def _window(start, end):
 
 
 def _rows(ds, index, names):
-    """Columns ``names`` at rows ``index`` (sorted), reading one contiguous block."""
+    """Columns ``names`` at rows ``index`` (sorted): one contiguous block when the rows are dense,
+    else only the selected rows (a late correction far from the rest does not pull the span)."""
     if index.size == 0:
         return {name: np.zeros(0) for name in names}
     lo, hi = int(index.min()), int(index.max()) + 1
-    return {name: np.asarray(ds[name][lo:hi].values)[index - lo] for name in names}
-
-
-def wind_components(speed, direction_from_deg):
-    """Earth-relative (u, v) from speed and the direction the wind blows from."""
-    rad = np.radians(np.asarray(direction_from_deg, float))
-    speed = np.asarray(speed, float)
-    return -speed * np.sin(rad), -speed * np.cos(rad)
+    if hi - lo <= 4 * index.size:
+        return {name: np.asarray(ds[name][lo:hi].values)[index - lo] for name in names}
+    return {name: np.asarray(ds[name].isel({ds[name].dims[0]: index}).values) for name in names}
 
 
 def pressure_from_flight_level(height_m):
@@ -114,13 +125,13 @@ def wis2_land(start, end, box, *, ds=None) -> ObsSet:
              "temperature_sensor_height", "10m_wind_speed", "10m_wind_direction", "wind_sensor_height",
              "update_sequence_number")
     cols = _rows(ds, index, names)
-    cols.update(time=time[index], lat=lat[index], lon=lon[index])
+    cols.update(time=time[index], lat=lat[index], lon=lon[index], row=index)
     return land_rows(cols)
 
 
 def land_rows(cols) -> ObsSet:
     """The SYNOP selection on plain columns (what :func:`wis2_land` reads)."""
-    sid = np.asarray([str(s) for s in np.asarray(cols["station_id"]).tolist()])
+    sid = _ids(cols["station_id"], "wis2-land", cols.get("row", np.arange(len(cols["station_id"]))))
     time = np.asarray(cols["time"]).astype("datetime64[s]")
     seq = np.asarray(cols["update_sequence_number"], float)
     best = {}
@@ -203,9 +214,9 @@ def wis2_upper_air(start, end, box, *, ds=None) -> ObsSet:
     level = {name: np.asarray(ds[name][a:b].values, float) for name in
              ("pressure", "temperature", "wind_speed", "wind_direction", "time_since_launch",
               "latitude_displacement", "longitude_displacement")}
-    sid = np.asarray(ds["station_id"].values)[rows]
+    sid = _ids(np.asarray(ds["station_id"].values)[rows], "wis2", rows)
     elev = np.asarray(ds["station_elevation"].values, float)[rows]
-    best = {}
+    kept = []  # (name, launch, n, r, profile); bulletins of one launch keep the one with more levels
     for n, r in enumerate(rows):
         s0, s1 = int(first[n]) - a, int(first[n] + count[n]) - a
         sl = {k: v[s0:s1] for k, v in level.items()}
@@ -218,12 +229,17 @@ def wis2_upper_air(start, end, box, *, ds=None) -> ObsSet:
         since = np.nan_to_num(sl["time_since_launch"])
         profile = mandatory_levels(sl["pressure"], {"t": t, "u": u, "v": v, "dlat": disp_lat, "dlon": disp_lon,
                                                     "since": since})
-        name = str(sid[n]) or f"wis2-{int(r)}"
-        key = (name, launch[r].astype("datetime64[h]"))
-        if profile and (key not in best or len(profile) > len(best[key][2])):
-            best[key] = (n, r, profile)
+        if not profile:
+            continue
+        name = sid[n]
+        same = [k for k, row in enumerate(kept) if row[0] == name
+                and abs((row[1] - launch[r]) / np.timedelta64(1, "s")) < SONDE_DUPLICATE_S]
+        if not same:
+            kept.append((name, launch[r], n, r, profile))
+        elif len(profile) > len(kept[same[0]][4]):
+            kept[same[0]] = (name, launch[r], n, r, profile)
     columns = {k: [] for k in ("station", "time", "lat", "lon", "pressure_pa", "elevation_m", "kind", "value")}
-    for (name, _hour), (n, r, profile) in sorted(best.items()):
+    for name, _launch, n, r, profile in sorted(kept, key=lambda row: (row[0], row[1])):
         for lev, q in sorted(profile.items(), reverse=True):
             when = launch[r] + np.timedelta64(int(round(q.get("since", 0.0))), "s")
             if not (lo <= when <= hi):
@@ -252,7 +268,7 @@ def wis2_aircraft(start, end, box, *, ds=None) -> ObsSet:
     index = np.nonzero((time >= lo) & (time <= hi) & _in_box(lat, lon, box))[0]
     cols = _rows(ds, index, ("report_id", "flight_level", "temperature", "wind_speed", "wind_direction",
                              "aircraft_identifier"))
-    rid = np.asarray(cols["report_id"])
+    rid = _ids(cols["report_id"], "wis2-aircraft", index)  # a missing id is its own report
     _, first = np.unique(rid, return_index=True)
     keep = np.sort(first)
     fl = np.asarray(cols["flight_level"], float)[keep]
@@ -392,15 +408,15 @@ def read_window(stores, start, end, box) -> tuple[ObsSet, dict]:
     return ObsSet.concat(parts), counts
 
 
-def frames_box(frames, margin_deg: float = 0.0) -> tuple[float, float, float, float]:
-    """(south, north, west, east) of the frames' columns, widened by ``margin_deg``."""
-    lat, lon = frames[0].lat, frames[0].lon
+def box_of(lat, lon, margin_deg: float = 0.0) -> tuple[float, float, float, float]:
+    """(south, north, west, east) of model columns, widened by ``margin_deg``."""
+    lat, lon = np.asarray(lat, float), np.asarray(lon, float)
     centre = float(np.degrees(np.arctan2(np.mean(np.sin(np.radians(lon))), np.mean(np.cos(np.radians(lon))))))
     rel = ((lon - centre + 180.0) % 360.0) - 180.0
     return (float(lat.min()) - margin_deg, float(lat.max()) + margin_deg,
             centre + float(rel.min()) - margin_deg, centre + float(rel.max()) + margin_deg)
 
 
-__all__ = ["BUCKET", "MANDATORY_HPA", "READERS", "STORES", "abel_refractivity", "frames_box", "goes_cwp",
+__all__ = ["BUCKET", "MANDATORY_HPA", "READERS", "STORES", "abel_refractivity", "box_of", "goes_cwp",
            "land_rows", "mandatory_levels", "metop_sg_ro", "open_store", "pressure_from_flight_level",
            "read_window", "ro_profile_rows", "wind_components", "wis2_aircraft", "wis2_land", "wis2_upper_air"]

@@ -59,12 +59,12 @@ def _add_history(parser):
 
 def command_obs(args) -> int:
     from woof.grad import obs_stores
-    from woof.grad.obs_cost import ObsSet
+    from woof.grad.obs_cost import ObsSet, history_extent
 
-    frames = _frames(args)
-    start = _time(args.start) or frames[0].valid
-    end = _time(args.end) or frames[-1].valid
-    box = obs_stores.frames_box(frames, args.margin_deg)
+    lat, lon, first, last = history_extent(history_files(args.history), route=args.route, mesh=args.mesh)
+    start = _time(args.start) or first
+    end = _time(args.end) or last
+    box = obs_stores.box_of(lat, lon, args.margin_deg)
     stores = [s for s in args.stores.split(",") if s]
     obs, counts = obs_stores.read_window(stores, start, end, box)
     for path in args.goes_cwp or ():
