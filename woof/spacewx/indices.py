@@ -125,10 +125,15 @@ def fetch_gfz(needed: datetime | None = None, *, cache=None, opener=None) -> Pat
         return target
     import urllib.request
     opener = opener or (lambda url: urllib.request.urlopen(url, timeout=120))
-    part = target.with_name(target.name + ".part")
-    with opener(GFZ_URL) as reply:
-        part.write_bytes(reply.read())
-    parse(part.read_bytes().decode("ascii", "replace"), str(part))
+    from woof.spacewx.assets import unique_part
+    part = unique_part(target)
+    try:
+        with opener(GFZ_URL) as reply:
+            part.write_bytes(reply.read())
+        parse(part.read_bytes().decode("ascii", "replace"), str(part))
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
     part.replace(target)
     return target
 

@@ -28,6 +28,7 @@ from pathlib import Path
 import numpy as np
 
 from woof.spacewx.assets import PinnedAsset, fetch_pinned
+from woof.spacewx.solar_irradiance import _naive_utc
 
 #: IAGA IGRF-14 coefficients (NOAA NCEI mirror of the IAGA V-MOD release).
 IGRF14 = PinnedAsset(
@@ -120,9 +121,10 @@ def load(path=None) -> IgrfModel:
 
 
 def decimal_year(when: datetime) -> float:
+    when = _naive_utc(when)
     start = datetime(when.year, 1, 1)
     length = (datetime(when.year + 1, 1, 1) - start).total_seconds()
-    return when.year + (when.replace(tzinfo=None) - start).total_seconds() / length
+    return when.year + (when - start).total_seconds() / length
 
 
 def _geodetic_to_geocentric(lat_deg, alt_km):

@@ -2514,6 +2514,9 @@ class PhysicsDriver:
             from woof.spacewx.solar_irradiance import SolarVariability
             self.solar_variability = SolarVariability.for_run(
                 cfg, getattr(radiation, "start_time", None))
+            import json as _tsi_json
+            print("[spacewx tsi] " + _tsi_json.dumps(self.solar_variability.receipt(),
+                                                     sort_keys=True, default=str), flush=True)
         self.cumulus_callable = cumulus
         # Producers declare their retained fields as rows before any carrier
         # inventory is built. A later scheme call only writes these buffers.
@@ -3256,6 +3259,8 @@ class PhysicsDriver:
         if getattr(self, "solar_variability", None) is not None:
             # TSI(t)/reference on every shortwave output, before any consumer.
             result = self.solar_variability.scale(result, state.elapsed_seconds)
+            # ...and on the shortwave outputs the scheme wrote into fields itself.
+            self.solar_variability.scale_direct_fields(radiation_fields, cfg.ra_sw_physics)
         if cloud_view is not None and int(cfg.icloud) == 3:
             result.cldfra = cloud_view.fraction
         nz, ny, nx = state.p.shape

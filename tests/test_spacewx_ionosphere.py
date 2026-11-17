@@ -175,6 +175,25 @@ def test_solar_index_conversions_and_month_weights():
     assert (m1, m2) == (12, 1) and w1 + w2 == pytest.approx(1.0) and 0.5 < w2 < 0.6
 
 
+def test_ig12_does_not_turn_over_at_high_flux():
+    peak = ion.r12_to_ig12(ion.R12_FIT_PEAK)
+    values = [ion.r12_to_ig12(r) for r in (0.0, 100.0, 200.0, 240.0, 300.0, 400.0)]
+    assert all(b >= a for a, b in zip(values, values[1:]))
+    assert values[-1] == pytest.approx(peak) and values[-2] == pytest.approx(peak)
+
+
+def test_aware_times_are_converted_to_utc_not_relabelled():
+    from datetime import timezone
+    est = timezone(timedelta(hours=-5))
+    aware = datetime(2024, 6, 20, 15, 51, tzinfo=est)
+    naive = datetime(2024, 6, 20, 20, 51)
+    assert ion.subsolar_point(aware) == ion.subsolar_point(naive)
+    assert ion.month_weights(datetime(2024, 6, 30, 22, tzinfo=est)) == \
+        ion.month_weights(datetime(2024, 7, 1, 3))
+    assert igrf.decimal_year(datetime(2024, 12, 31, 22, tzinfo=est)) == \
+        igrf.decimal_year(datetime(2025, 1, 1, 3))
+
+
 def test_subsolar_point():
     lat, _ = ion.subsolar_point(datetime(2024, 6, 20, 20, 51))
     assert lat == pytest.approx(23.44, abs=0.02)
@@ -220,6 +239,8 @@ def test_drivers_refuse_a_bad_flux_and_bad_columns():
             io_.drivers(WHEN, bad)
     with pytest.raises(ion.IonosphereError):
         _iono([95.0], [0.0])
+    with pytest.raises(ion.IonosphereError):
+        _iono([float("nan")], [0.0])
     with pytest.raises(ion.IonosphereError):
         _iono([0.0], [0.0], family="iri")
     with pytest.raises(ion.IonosphereError):
