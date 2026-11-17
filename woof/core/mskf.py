@@ -41,8 +41,16 @@ MSKF_DSLOTS = 62
 MSKF_ASLOTS = 512
 #: MSKF_KMAX in kernels/mskf.cu: a refusal ceiling, nothing is sized by it.
 VERTICAL_LEVEL_BOUNDS = (8, 160)
-#: Columns in flight per streaming multiprocessor.
-MSKF_TILE_COLUMNS_PER_SM = 64
+#: Columns in flight per streaming multiprocessor without the aerosol path:
+#: the two 128-thread blocks an SM holds resident at mskf_column's 255
+#: registers (sm_86..sm_120), so every SM runs two blocks and one launch covers
+#: up to SMs x 256 columns.  It was 64 (half a block per SM, half the SMs
+#: idle and four launches on a 3 km domain): 32.5 -> 11.0 ms/step for
+#: mskf_column on edi-3km-s (A6000), wrfout byte-identical.  The tile only
+#: partitions independent columns; no column's arithmetic depends on it.
+MSKF_TILE_COLUMNS_PER_SM = 256
+#: The aerosol path's base (its workspace is about 5x larger per column).
+MSKF_AEROSOL_TILE_COLUMNS_PER_SM = 64
 
 # Status bits the kernel raises (kernels/mskf.cu).  Each is a place where WRF
 # stops the model with wrf_error_fatal; the port refuses at the same place,
@@ -111,9 +119,11 @@ def tile_columns(ncol: int, multiprocessors: int, *, aerosol: bool = False) -> i
     """Columns kept in flight: the workspace is charged per column in flight."""
     from woof.numerics import is_strict
 
-    # Positive activation spills heavily: expose one 128-thread block per SM.
-    # Keep native replay and the option-off launch geometry unchanged.
-    columns_per_sm = (2 if aerosol and not is_strict() else 1) * MSKF_TILE_COLUMNS_PER_SM
+    # Positive activation spills heavily: the aerosol path exposes one
+    # 128-thread block per SM in fast numerics, half a block in strict.  The
+    # option-off path fills the SM's two resident blocks.
+    columns_per_sm = ((2 if not is_strict() else 1) * MSKF_AEROSOL_TILE_COLUMNS_PER_SM if aerosol
+                      else MSKF_TILE_COLUMNS_PER_SM)
     return int(min(int(ncol), max(1, int(multiprocessors)) * columns_per_sm))
 
 

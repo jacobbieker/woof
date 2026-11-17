@@ -126,6 +126,95 @@ def _blocks(n: int) -> int:
     return (n + THREADS - 1) // THREADS
 
 
+#: Slot offsets in a carved block are rounded up to this many elements (256
+#: bytes for 4-byte words), the alignment of a fresh pool allocation.
+_CARVE_ALIGN = 64
+
+
+def carve_slabs(n, widths, dtype, *, zero=False):
+    """Owned ``(n,)``/``(n, width)`` slabs as views of one allocation.
+
+    One ``cupy.empty`` (or ``zeros``) and a view per name replaces an
+    allocation per name: about 33 us each on Metal, 3 us on CUDA, against a
+    3 us or 1.5 us view. Every slab is C-contiguous, disjoint from the others
+    and starts on a 256-byte boundary, so a kernel writing one cannot touch
+    another; the block lives as long as any of its views.
+    """
+    import cupy as cp
+
+    n = int(n)
+    offsets, total = [], 0
+    for width in widths.values():
+        offsets.append(total)
+        total += -(-(n * width) // _CARVE_ALIGN) * _CARVE_ALIGN
+    block = (cp.zeros if zero else cp.empty)(max(total, 1), dtype=dtype)
+    return {name: (block[start:start + n] if width == 1 else
+                   block[start:start + n * width].reshape(n, width))
+            for (name, width), start in zip(widths.items(), offsets)}
+
+
+_FLAG_BITS_KERNELS = {}
+
+
+def flag_bits(probes, *, active=None):
+    """``OR_k any(probe_k) << k`` as one ``(1,)`` uint32, in one launch.
+
+    Each probe is ``(array, op, value)``: column ``c`` raises bit ``k`` when
+    ``array[c] op value`` holds (``op`` one of ``!= == <=``) and, if given,
+    ``active[c]``. Integer and comparison work only, so the flag word is the
+    one the per-probe ``(...).any().astype(uint32) << k`` chain builds, at the
+    cost of one memset and one launch instead of five launches per probe.
+    """
+    import cupy as cp
+
+    flags = cp.zeros(1, dtype=cp.uint32)
+    if not probes:
+        return flags
+    arrays, layout = [], []
+    for array, op, value in probes:
+        array = cp.asarray(array)
+        if op not in ("!=", "==", "<="):
+            raise ValueError(f"flag_bits: unsupported comparison {op!r}")
+        if array.ndim != 1 or not array.flags.c_contiguous:
+            array = cp.ascontiguousarray(array.reshape(-1))
+        kind = {("f", 4): "float", ("f", 8): "double", ("i", 4): "int",
+                ("i", 8): "long long", ("u", 4): "unsigned int",
+                ("b", 1): "bool"}.get((array.dtype.kind, array.dtype.itemsize))
+        if kind is None:
+            raise TypeError(f"flag_bits: {array.dtype} probe")
+        if kind == "float":
+            literal = repr(float(np.float32(value))) + "f"
+        elif kind == "double":
+            literal = repr(float(value))
+        else:
+            literal = str(int(value))
+        arrays.append(array)
+        layout.append((kind, op, literal))
+    n = int(arrays[0].size)
+    if any(int(array.size) != n for array in arrays):
+        raise ValueError("flag_bits: probes must share the column count")
+    if active is not None:
+        active = cp.ascontiguousarray(active, dtype=cp.bool_)
+    if not n:
+        return flags
+    key = (cp.cuda.runtime.getDevice(), tuple(layout), active is not None)
+    kernel = _FLAG_BITS_KERNELS.get(key)
+    if kernel is None:
+        args = "".join(f", const {kind}* v{k}" for k, (kind, _o, _l) in enumerate(layout))
+        bits = " | ".join(f"((v{k}[c] {op} {literal}) ? {1 << k}u : 0u)"
+                          for k, (_kind, op, literal) in enumerate(layout))
+        source = (f'extern "C" __global__ void noahmp_flag_bits('
+                  f'unsigned int* flags, int n{", const bool* active" if active is not None else ""}{args}) {{ '
+                  'int c = blockDim.x*blockIdx.x+threadIdx.x; if(c>=n) return; '
+                  + ("if(!active[c]) return; " if active is not None else "")
+                  + f"unsigned int b = {bits}; if(b) atomicOr(flags, b); }}")
+        kernel = compile_generated_slab_kernel(source, "noahmp_flag_bits")
+        _FLAG_BITS_KERNELS[key] = kernel
+    kernel((_blocks(n),), (THREADS,),
+           (flags, np.int32(n), *((active,) if active is not None else ()), *arrays))
+    return flags
+
+
 def _module():
     """Compile ``noahmp_libm_slab`` as the three-part unit it is, per card.
 
@@ -356,9 +445,8 @@ def split_slab_slots(matrix, specs):
     import cupy as cp
 
     n, stride = matrix.shape
-    result = {name: cp.empty((n,) if width == 1 else (n, width),
-                             dtype=matrix.dtype)
-              for name, (start, width) in specs.items()}
+    result = carve_slabs(n, {name: width for name, (start, width) in specs.items()},
+                         matrix.dtype)
     if not n or not result:
         return result
     layout = tuple(specs.values())
@@ -452,9 +540,12 @@ def gather_slab_fields(j, i, sources, grid_shape):
            for value in sources.values()):
         return {name: value[j, i] if value.ndim == 2 else value[:, j, i].T
                 for name, value in sources.items()}
-    result = {name: cp.empty((n,) if value.ndim == 2 else (n, value.shape[0]),
-                             dtype=value.dtype)
-              for name, value in sources.items()}
+    result = carve_slabs(n, {name: 1 if value.ndim == 2 else value.shape[0]
+                             for name, value in sources.items()},
+                         cp.float32) if sources else {}
+    result = {name: value if sources[name].dtype == value.dtype
+              else value.view(sources[name].dtype)
+              for name, value in result.items()}
     if not n or not result:
         return result
     j = cp.ascontiguousarray(j, dtype=cp.int64)
@@ -641,7 +732,7 @@ def energy_average_slabs(s, g, e, v, b, sb):
              "rssun", "rssha", "tgv", "chv", "emissi", "apar", "psn",
              "acc_ssoil", "ssoil_avg", "dt_soil", "_fire", "_trad_base")
     n = int(s["fveg"].size)
-    output = {name: cp.empty(n, dtype=cp.float32) for name in names}
+    output = carve_slabs(n, dict.fromkeys(names, 1), cp.float32)
     if not n:
         return output
     arrays = [cp.ascontiguousarray(value, dtype=cp.float32) for _, value in inputs]

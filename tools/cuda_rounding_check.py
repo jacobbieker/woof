@@ -414,8 +414,10 @@ def composed_units(root: Path) -> list[Unit]:
         Unit("composed:p3_reflectivity", p3.p3_reflectivity_source(kernel_dir=kdir),
              tuple(p3.DEFAULT_OPTIONS)),
         Unit("composed:rrtmg_lw", lw._gpu_source(), ("-std=c++17", "--ftz=false")),
-        Unit("composed:rrtmg_sw", sw_defines + (kdir / "rrtmg_sw.cu").read_text(encoding="utf-8"),
-             ("-std=c++17", "--ftz=false")),
+        # The runtime compiles the spectral output kernels into the same
+        # unit (RRTMGSWDevice: defines + rrtmg_sw.cu + spectral_source()).
+        Unit("composed:rrtmg_sw", sw_defines + (kdir / "rrtmg_sw.cu").read_text(encoding="utf-8")
+             + sw.spectral_source(), ("-std=c++17", "--ftz=false")),
         Unit("composed:terrain_drag", terrain.module_source(), tuple(terrain.MODULE_OPTIONS)),
         Unit("composed:windfarm_fitch", fitch.module_source(), tuple(fitch.MODULE_OPTIONS)),
         Unit("composed:nest_vertical", vnest.module_source(), tuple(vnest.MODULE_OPTIONS)),

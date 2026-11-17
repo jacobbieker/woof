@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from conftest import requires_gpu
+import _numerics_child
 from woof.verify.mskf_oracle import load_fixture, grade, run_port
 
 
@@ -73,6 +74,7 @@ def test_tile_tail_matches_column_oracle(monkeypatch, ncol):
     outputs['cu_act'] = cp.zeros((1, ncol), dtype=cp.int32)
     # Limit workspace to 64 columns. The arithmetic still runs on the GPU.
     monkeypatch.setattr(mskf, '_multiprocessors', lambda: 1)
+    monkeypatch.setattr(mskf, 'MSKF_TILE_COLUMNS_PER_SM', 64)
     phase = mskf.MskfPhase(bool(ci['warm_rain']), bool(ci['f_qr']),
                          bool(ci['f_qi']), bool(ci['f_qs']))
     assert mskf.launch_mskf(inputs, outputs, dx=sc['dx'], dt=sc['dt'],
@@ -86,6 +88,70 @@ def test_tile_tail_matches_column_oracle(monkeypatch, ncol):
     np.testing.assert_array_equal(actual.view(np.uint32), expected.view(np.uint32))
 
 
+
+def _tiled_launch(monkeypatch, per_sm, ncol=600):
+    """mskf_column over ncol distinct columns (case 0 with a per-column
+    temperature and moisture offset) with per_sm columns in flight on one
+    SM, every workspace word poisoned with NaN before the launch."""
+    import cupy as cp
+    from woof.core import mskf
+    from woof.verify.mskf_oracle import case_columns, SENTINEL
+    fx = load_fixture()
+    case = case_columns(fx, 0)
+    nz = fx.nz
+    sc, ci = case['scalars'], case['ints']
+    j = cp.arange(ncol, dtype=cp.float32)[None, None, :]
+    inputs = {n: cp.broadcast_to(cp.asarray(case['cols'][n])[:, None, None],
+                               (nz, 1, ncol)).copy() for n in mskf.INPUT_3D}
+    inputs['t'] += (j % 37) * np.float32(0.05) - np.float32(0.9)
+    inputs['qv'] *= np.float32(1.0) + (j % 23) * np.float32(0.004)
+    inputs.update({n: cp.full((1, ncol), sc[n], dtype=cp.float32)
+                   for n in mskf.INPUT_2D})
+    w = cp.broadcast_to(cp.asarray(case['cols']['w'])[:, None, None],
+                        (nz + 1, 1, ncol)).copy()
+    mskf.update_w0avg(inputs['w0avg'], w, dt=sc['dt'], cudt_minutes=sc['cudt'],
+                      stepcu=ci['stepcu'], adaptive=bool(ci['adapt_step']))
+    outputs = {n: cp.full((nz, 1, ncol), SENTINEL, dtype=cp.float32)
+               for n in mskf.OUTPUT_3D}
+    outputs.update({n: cp.full((1, ncol), SENTINEL, dtype=cp.float32)
+                    for n in mskf.OUTPUT_2D})
+    outputs['nca'][...] = np.float32(sc['nca'])
+    outputs['cu_act'] = cp.zeros((1, ncol), dtype=cp.int32)
+    empty = cp.empty
+
+    def poisoned(shape, dtype=float, *a, **k):
+        out = empty(shape, dtype, *a, **k)
+        if cp.dtype(dtype).kind == 'f':
+            out.fill(np.nan)
+        return out
+    monkeypatch.setattr(cp, 'empty', poisoned)
+    monkeypatch.setattr(mskf, '_multiprocessors', lambda: 1)
+    monkeypatch.setattr(mskf, 'MSKF_TILE_COLUMNS_PER_SM', per_sm)
+    phase = mskf.MskfPhase(bool(ci['warm_rain']), bool(ci['f_qr']),
+                           bool(ci['f_qi']), bool(ci['f_qs']))
+    try:
+        assert mskf.launch_mskf(inputs, outputs, dx=sc['dx'], dt=sc['dt'],
+                                cudt_minutes=sc['cudt'], phase=phase) == 0
+    finally:
+        monkeypatch.setattr(cp, 'empty', empty)
+    return {n: cp.asnumpy(v) for n, v in {**outputs, 'w0avg': inputs['w0avg']}.items()}
+
+
+@requires_gpu
+def test_tile_width_keeps_every_word(monkeypatch):
+    """The tile only partitions independent columns: 64 columns per launch
+    (ten launches) and the SM-resident 256 and a single 600-column launch
+    give the same words, and some columns convect."""
+    runs = {per_sm: _tiled_launch(monkeypatch, per_sm) for per_sm in (64, 256, 600)}
+    assert np.count_nonzero(runs[64]['cu_act']) > 0
+    for per_sm in (256, 600):
+        for name, value in runs[64].items():
+            assert np.array_equal(value.view(np.uint32), runs[per_sm][name].view(np.uint32)), (per_sm, name)
+
+
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_tile_width_keeps_every_word_in_every_numerics_mode(numerics, exact):
+    _numerics_child.run(__file__, ["test_tile_width_keeps_every_word"], numerics, exact)
 
 def test_layout_refuses_wrong_horizontal_shape():
     from woof.core import mskf
