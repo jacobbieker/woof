@@ -483,7 +483,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   each level's frame rings first and the interior after, so the relaxation
   runs in dense warps (word-identical; 243 -> 145 us per nested-stage
   launch at 49x120x150, 479 -> 121 us at 49x120x120; CUPTI kernel time on
-  a shared A6000, default numerics, against the merge base). WRF-Solar's
+  a shared A6000, default numerics, against the merge base). The step-end
+  `spec_bdy_final` takes its forced fields (u, v, theta, phi, moist scalars,
+  w on a nest) in one table-driven launch while every field has at most 1M
+  cells (`finalize_state_multi`; each cell runs the per-field kernel's own
+  body, byte-identical in fast, strict and WRF-exact on CUDA and Metal;
+  10 fields at 50 levels, CUDA-event minimum on a shared A6000: 73 -> 46 us
+  at 60x60, 160 -> 138 us at 100x120; larger domains keep the per-field
+  launches, which are faster there; `WOOF_LBC_FINAL_MULTI=0` restores them,
+  `WOOF_LBC_FINAL_MULTI_MAX_CELLS` moves the cut). WRF-Solar's
   FARMS surface irradiance (`swint_opt = 2`) is one launch per step: the
   column kernel composes the cloud fraction per cell, merges the MYNN
   boundary-layer cloud, scales the microphysics radii and writes the six
