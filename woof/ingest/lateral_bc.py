@@ -3135,21 +3135,24 @@ def _launch_finalize_multi(state, names, device_interval, old_mup_frame,
         return (isinstance(a, cp.ndarray) and a.dtype == np.dtype(np.float32)
                 and a.flags.c_contiguous)
 
+    # A state without every device array the table names (a host fixture,
+    # a stand-in object) is refused before any of its fields is read.
+    header = (old_mup_frame,) + tuple(
+        getattr(state, name, None) for name in (
+            "mub2d", "mup", "thb", "c1h", "c2h", "c1f", "c2f", "msft",
+            "msfu", "msfv"))
+    if not all(device(a) for a in header):
+        return False
     muts = _wrf_final_muts_arg(state)
     muts_ptr = 0
     if muts and isinstance(muts[0], cp.ndarray):
         if not device(muts[0]):
             return False
         muts_ptr = int(muts[0].data.ptr)
-    header = (old_mup_frame, state.mub2d, state.mup, state.thb, state.c1h,
-              state.c2h, state.c1f, state.c2f, state.msft, state.msfu,
-              state.msfv)
-    if not all(device(a) for a in header):
-        return False
     rows = []
     spans = []
     for name in names:
-        target = getattr(state, {"theta": "thp", "phi": "php"}.get(name, name))
+        target = getattr(state, {"theta": "thp", "phi": "php"}.get(name, name), None)
         boundary = device_interval.fields[name]
         sides = []
         for side in (boundary.west, boundary.east,
