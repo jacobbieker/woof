@@ -236,23 +236,40 @@ extern "C" __global__ void ocn_btr_normalize_v842(rk *thicknessFlux, rk *btrNew,
 }
 
 // the transport velocity with the correction (F - sum h u)/sum h, edges
-// 1..nEdgesArray(config_num_halos)
+// 1..nEdgesArray(config_num_halos). A warp per edge: lane l loads levels
+// l, l+32, ... (a column's consecutive words, so the loads coalesce) and
+// forms their terms; every lane then adds the terms in level order, each
+// broadcast from its lane, so the sums are the serial loop's words.
 extern "C" __global__ void ocn_btr_transport_v842(
     rk *normalTransportVelocity, const rk *btrNew, const rk *bclNew, const rk *bolus,
     const rk *layerThicknessEdge, const rk *thicknessFlux, const int *maxLevelEdgeTop, const int *edgeMask,
     int nEdges, int nl, int useVelocityCorrection)
 {
-    const int e = bt_thread();
+    const int e = bt_thread() >> 5, lane = threadIdx.x & 31;
     if (e >= nEdges) return;
     const int b = e * nl;
-    rk fluxSum = M(layerThicknessEdge[b], A(A(btrNew[e], bclNew[b]), bolus[b]));
-    rk thicknessSum = layerThicknessEdge[b];
-    for (int k = 1; k < maxLevelEdgeTop[e]; ++k) {
-        fluxSum = A(fluxSum, M(layerThicknessEdge[b + k], A(A(btrNew[e], bclNew[b + k]), bolus[b + k])));
-        thicknessSum = A(thicknessSum, layerThicknessEdge[b + k]);
+    const int top = maxLevelEdgeTop[e];
+    rk fluxSum = C(0.0), thicknessSum = C(0.0);
+    for (int k0 = 0; k0 < nl && (k0 == 0 || k0 < top); k0 += 32) {
+        const int k = k0 + lane;
+        rk h = C(0.0), term = C(0.0);
+        if (k < nl) {
+            h = layerThicknessEdge[b + k];
+            term = M(layerThicknessEdge[b + k], A(A(btrNew[e], bclNew[b + k]), bolus[b + k]));
+        }
+        for (int j = 0; j < 32 && k0 + j < nl; ++j) {
+            const rk hj = __shfl_sync(0xffffffffu, h, j), tj = __shfl_sync(0xffffffffu, term, j);
+            if (k0 + j == 0) {
+                fluxSum = tj;
+                thicknessSum = hj;
+            } else if (k0 + j < top) {
+                fluxSum = A(fluxSum, tj);
+                thicknessSum = A(thicknessSum, hj);
+            }
+        }
     }
     const rk correction = M((rk)useVelocityCorrection, D(S(thicknessFlux[e], fluxSum), thicknessSum));
-    for (int k = 0; k < nl; ++k)
+    for (int k = lane; k < nl; k += 32)
         normalTransportVelocity[b + k] = M((rk)edgeMask[b + k],
                                            A(A(A(btrNew[e], bclNew[b + k]), bolus[b + k]), correction));
 }

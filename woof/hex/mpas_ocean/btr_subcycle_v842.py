@@ -286,6 +286,6 @@ def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict
     n_sum = n_btr_subcycles * int(configs["config_btr_subcycle_loop_factor"])
     _launch(precision, "ocn_btr_normalize_v842", edges[0], (flux, btr[1], i32(edges[0]), i32(n_sum)))
     n_h = edges[int(configs["config_num_halos"]) - 1]
-    _launch(precision, "ocn_btr_transport_v842", n_h, (
+    _launch(precision, "ocn_btr_transport_v842", n_h * 32, (
         transport, btr[1], bcl_new, bolus, d["layerThicknessEdge"], flux, m["maxLevelEdgeTop"], edge_mask, i32(n_h),
         i32(nl), i32(1 if configs["config_vel_correction"] else 0)))
