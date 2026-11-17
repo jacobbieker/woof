@@ -930,13 +930,16 @@ void advance_mu_th_msf(const real* __restrict__ u_pp,
                               - v_s * (t_c + t_jm));
         size_t ci = (size_t)k * st + c;
 #if !MUTH_SEPARATE_COPY
-        th_pp_old[ci] = th_pp[ci];
-        p_pp_old[ci] = p_pp[ci];
+        const real th_old = th_pp[ci];
 #endif
         th_pp[ci] += dtau * msft[c]
                    * (rth_t[ci]
                       - (msft[c] * (hx + hy)
                          + rdnw[k] * (wdtn_kp1 - wdtn_k)));
+#if !MUTH_SEPARATE_COPY
+        th_pp_old[ci] = th_old;
+        p_pp_old[ci] = p_pp[ci];
+#endif
         wdtn_k = wdtn_kp1;
     }
     ww_pp[(size_t)nz * st + c] = 0.0f;
