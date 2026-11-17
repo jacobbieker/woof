@@ -119,10 +119,15 @@ def column_lanes() -> int:
     cell and level), one elsewhere (Metal's serial loops are faster). Both
     keep the Fortran's order, so both give the same words;
     ``WOOF_OCEAN_COLUMN_LANES`` (1 or 32) picks one. 32 needs a 32-wide warp
-    or SIMD group with its shuffles, so only CUDA and Metal take it."""
+    or SIMD group with its shuffles, so only CUDA (not CuPy-ROCm, whose
+    wavefronts are 64 wide) and Metal take it."""
     import os
     from woof import backend
     name = backend.active()
+    if name == "cuda":
+        import cupy as cp
+        if cp.cuda.runtime.is_hip:
+            name = "hip"   # CuPy-ROCm under the default backend: a 64-wide wavefront
     lanes = os.environ.get("WOOF_OCEAN_COLUMN_LANES", "").strip()
     if not lanes:
         return 32 if name == "cuda" else 1
