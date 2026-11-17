@@ -642,6 +642,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     fetch_register_cli(sub)
     _lazy_register("woof.hf_fetch")(sub)
     fire_static_register_cli(sub)
+    _lazy_register("woof.static.buildings_domain")(sub)
     _lazy_register("woof.fire_ignition")(sub)
     fire_ideal_register_cli(sub)
     ideal_plan_register_cli(sub)
@@ -1267,7 +1268,8 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
                                 _config if (args.command in ("run", "go") and _config
                                             and Path(str(_config)).suffix == ".toml"
                                             and Path(str(_config)).is_file()) else None,
-                                members=getattr(args, "members", None)):
+                                members=getattr(args, "members", None),
+                                gpu_exchange=getattr(args, "wrf_hydro_gpu_exchange", None)):
             if args.command == "run" and getattr(args, "hydro", None) is not None:
                 from woof.hydro.runtime import run_scope
                 with run_scope(args.hydro, getattr(args, "config", None)):
