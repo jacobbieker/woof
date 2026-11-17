@@ -27,11 +27,20 @@ import functools
 import os
 import pathlib
 import re
+import sys
 
 # Kernel numerics for the battery (owner ruling 2026-10-16: fast is the default, strict the opt-in).  The
 # column oracles grade units word for word against WRF, so the battery names strict before woof loads;
 # tests of the fast default select it themselves (tests/test_numerics_default.py).
 os.environ["GPUWM_NUMERICS"] = "strict"
+# The hex units read their own knob (woof.hex.numerics: WOOF_HEX_NUMERICS, default fast), not
+# GPUWM_NUMERICS, so without this every hex unit in the battery compiled fast while the rest ran strict.
+# components/hex/tests/conftest.py names both the same way.  Tests of the hex fast route select it
+# themselves (hex numerics.set_mode or WOOF_HEX_NUMERICS in a child; tests/_numerics_child.py).
+os.environ["WOOF_HEX_NUMERICS"] = "strict"
+if "woof.hex.numerics" in sys.modules:
+    # Imported ahead of this file (a plugin): its mode is read once, so name it before any hex compile.
+    sys.modules["woof.hex.numerics"].set_mode("strict", source="tests/conftest.py")
 
 # WOOF_BACKEND=mlx|cpu runs the GPU suite on woof's facade backends: the
 # facade must own `import cupy` before has_gpu() below probes it, so the

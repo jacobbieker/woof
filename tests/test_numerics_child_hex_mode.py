@@ -29,3 +29,15 @@ def _probe_hex_mode():
 @pytest.mark.parametrize(*_numerics_child.MODES)
 def test_hex_units_compile_in_the_child_mode(numerics, exact):
     _numerics_child.run(__file__, ["_probe_hex_mode"], numerics, exact, timeout=300)
+
+
+def test_battery_compiles_hex_units_strict():
+    """tests/conftest.py names strict for the hex units as it does for the engine: until 2026-11-17 it
+    pinned only GPUWM_NUMERICS, so ~120 hex-importing battery files compiled their hex units fast."""
+    import os
+
+    from woof import numerics
+    from woof.hex import numerics as hex_numerics
+
+    assert os.environ["WOOF_HEX_NUMERICS"] == "strict"
+    assert hex_numerics.mode() == numerics.mode() == "strict", (hex_numerics.mode(), numerics.mode())
