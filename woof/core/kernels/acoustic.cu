@@ -659,6 +659,15 @@ void advance_mu_th(const real* __restrict__ u_pp,
 #endif
 }
 
+// advance_mu_th_msf's default arm saves th_pp_old and p_pp_old inside its
+// theta'' update loops, from the th_pp word each update reads, instead of
+// a separate copy pass over the column first (the same words; one load of
+// th_pp per cell fewer).  MUTH_SEPARATE_COPY=1 compiles the separate copy
+// pass; tests/test_acoustic_muth_fold.py holds the two to the same words.
+#ifndef MUTH_SEPARATE_COPY
+#define MUTH_SEPARATE_COPY 0
+#endif
+
 // Map-scale-factor variant of advance_mu_th (Phase 3 Task 3, WRF
 // advance_mu_t with map factors; launched instead of advance_mu_th when
 // any msf != 1; the arithmetic update in the msf==1 kernel above remains
@@ -824,11 +833,13 @@ void advance_mu_th_msf(const real* __restrict__ u_pp,
     int j = c / nx, i = c - j * nx;
     size_t st = (size_t)ny * nx;
     mu_pp_old[c] = mu_pp[c];
+#if MUTH_SEPARATE_COPY
     for (int k = 0; k < nz; ++k) {
         size_t ci = (size_t)k * st + c;
         th_pp_old[ci] = th_pp[ci];
         p_pp_old[ci] = p_pp[ci];
     }
+#endif
     if (i < spec_zone || i >= nx - spec_zone
         || j < spec_zone || j >= ny - spec_zone) {
         real rmu = rmu_t[c];
@@ -839,6 +850,10 @@ void advance_mu_th_msf(const real* __restrict__ u_pp,
             real mt0 = arn_mul(300.0f, c1h[k]);
             real mt1 = arn_mul(mt0, rmu);
             real full_tendency = arn_add(rth_t[ci], mt1);
+#if !MUTH_SEPARATE_COPY
+            th_pp_old[ci] = th_pp[ci];
+            p_pp_old[ci] = p_pp[ci];
+#endif
             th_pp[ci] = arn_add(th_pp[ci], arn_mul(dtau, full_tendency));
         }
         return;
@@ -914,6 +929,10 @@ void advance_mu_th_msf(const real* __restrict__ u_pp,
         real hy = 0.5f * rdy * (v_n * (t_jp + t_c)
                               - v_s * (t_c + t_jm));
         size_t ci = (size_t)k * st + c;
+#if !MUTH_SEPARATE_COPY
+        th_pp_old[ci] = th_pp[ci];
+        p_pp_old[ci] = p_pp[ci];
+#endif
         th_pp[ci] += dtau * msft[c]
                    * (rth_t[ci]
                       - (msft[c] * (hx + hy)
