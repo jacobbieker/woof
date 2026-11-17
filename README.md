@@ -294,8 +294,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     8,300 cells. On CUDA the barotropic transport and baroclinic update
     also run a warp per edge (the level sums still added in level order)
     and monotone vertical advection a thread per cell and level, so a
-    column's loads coalesce: the 33,000-cell step takes about 27% less time
-    on a shared A6000, the same words. Metal keeps a thread per column,
+    column's loads coalesce: the 33,000-cell step takes 42 instead of 58 ms
+    on an A6000, the same words. Metal keeps a thread per column,
     which is faster there (switch: `WOOF_OCEAN_COLUMN_LANES=1` or `32`);
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
