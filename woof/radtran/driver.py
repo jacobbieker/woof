@@ -185,9 +185,10 @@ def optics_bytes_per_wavelength(ncol, nlyr, nstr, nang=0):
     """Host bytes one representative wavelength's optics take in a solve:
     dtau, ssa, the nstr+1 moments, the user-angle phase functions and zlev
     (float64), counted three times: the stacked arrays, the solver's
-    contiguous copies, and an allowance for each column block's
+    contiguous copies, and headroom.  Not counted: each column block's
     wavelength-free cache (air and gas columns, REPTRAN brackets, cloud
-    selections), which lives through the group's wavelengths."""
+    selections), which lives through the group's wavelengths and, with
+    aerosols or a single block, spans every column."""
     return 3 * 8 * int(ncol) * (int(nlyr) * (2 + int(nstr) + 1 + int(nang)) + int(nlyr) + 1)
 
 
@@ -225,14 +226,14 @@ def _layer_optics_columns(opts, col, rep, iws, cl, nstr, numu_angles, aer=None, 
     layers (per-species node selections) keep the single block.
     """
     nw = len(iws)
-    if col.z.ndim != 2:
+    if col.z.ndim == 1:
         # one column (levels only): its optics have no column axis to block or
         # to write rows of, so stack the per-wavelength results
         cache = {}
         res = [_layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer, aer_nodes, cache)
                for iw in iws]
-        text, ssa, pmom, ptrue = (None if r[0][i] is None else np.stack([x[i] for x in r])
-                                  for i, r in ((i, res) for i in range(4)))
+        text, ssa, pmom, ptrue = (None if res[0][i] is None else np.stack([x[i] for x in res])
+                                  for i in range(4))
         return text, ssa, pmom, ptrue, [x[4] for x in res]
     nd = col.z.shape[0]
     nthreads = min(8, os.cpu_count() or 1)

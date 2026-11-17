@@ -252,6 +252,7 @@ def test_the_size_cut_reads_any_number_and_falls_back(monkeypatch):
     import woof.ingest.lateral_bc as lbc
     monkeypatch.setenv("WOOF_LBC_FINAL_MULTI_MAX_CELLS", "1e6")
     assert lbc._final_multi_max_cells() == 1_000_000
-    monkeypatch.setenv("WOOF_LBC_FINAL_MULTI_MAX_CELLS", "1M")
-    with pytest.warns(RuntimeWarning, match="not a number"):
-        assert lbc._final_multi_max_cells() == 1 << 20
+    for bad in ("1M", "inf", "nan", "-5", "1e400"):
+        monkeypatch.setenv("WOOF_LBC_FINAL_MULTI_MAX_CELLS", bad)
+        with pytest.warns(RuntimeWarning, match="not a cell count"):
+            assert lbc._final_multi_max_cells() == 1 << 20

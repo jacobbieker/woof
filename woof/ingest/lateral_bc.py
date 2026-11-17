@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -3063,13 +3064,18 @@ def _launch_mu_boundary_values(state, boundary, dtbc, spec_zone):
     return old_frame
 
 
+def _final_target(state, name, default=...):
+    """The state array spec_bdy_final writes for forced field ``name``."""
+    attr = {"theta": "thp", "phi": "php"}.get(name, name)
+    return getattr(state, attr) if default is ... else getattr(state, attr, default)
+
+
 def _launch_finalize_field(state, name, boundary, old_mup_frame, dtbc,
                            spec_zone):
     """Fused exact old-couple/install/new-uncouple transformation."""
     import cupy as cp
 
-    target_name = {"theta": "thp", "phi": "php"}.get(name, name)
-    target = getattr(state, target_name)
+    target = _final_target(state, name)
     nz, ny, nx = target.shape
     count = nz * ny * nx
     sides = []
@@ -3110,12 +3116,15 @@ def _final_multi_max_cells(default: int = 1 << 20) -> int:
     if not raw:
         return default
     try:
-        return int(float(raw))
+        value = float(raw)
     except ValueError:
+        value = float("nan")
+    if not (0 <= value < 2**63):
         import warnings
-        warnings.warn(f"WOOF_LBC_FINAL_MULTI_MAX_CELLS={raw!r} is not a number; "
+        warnings.warn(f"WOOF_LBC_FINAL_MULTI_MAX_CELLS={raw!r} is not a cell count; "
                       f"using {default}", RuntimeWarning, stacklevel=2)
         return default
+    return int(value)
 
 
 LBC_FINAL_MULTI_MAX_CELLS = _final_multi_max_cells()
@@ -3146,7 +3155,7 @@ def _launch_finalize_multi(state, names, device_interval, old_mup_frame,
     # The size cut first: above it (most production domains) nothing else
     # needs checking.
     for name in names:
-        target = getattr(state, {"theta": "thp", "phi": "php"}.get(name, name), None)
+        target = _final_target(state, name, None)
         if target is None or int(getattr(target, "size", 0)) > LBC_FINAL_MULTI_MAX_CELLS:
             return False
 
@@ -3171,7 +3180,7 @@ def _launch_finalize_multi(state, names, device_interval, old_mup_frame,
     rows = []
     spans = []
     for name in names:
-        target = getattr(state, {"theta": "thp", "phi": "php"}.get(name, name), None)
+        target = _final_target(state, name, None)
         boundary = device_interval.fields[name]
         sides = []
         for side in (boundary.west, boundary.east,
@@ -3180,8 +3189,6 @@ def _launch_finalize_multi(state, names, device_interval, old_mup_frame,
         if not device(target) or not all(device(a) for a in sides):
             return False
         if target.ndim != 3 or int(target.size) >= 2**31:
-            return False
-        if int(target.size) > LBC_FINAL_MULTI_MAX_CELLS:
             return False
         rows.append((name, target, sides))
         spans.append((int(target.data.ptr),
@@ -3196,9 +3203,14 @@ def _launch_finalize_multi(state, names, device_interval, old_mup_frame,
     reads = [a for a in header] + [a for _n, _t, sides in rows for a in sides]
     if muts_ptr:
         reads.append(muts[0])
+    starts = [lo for lo, _hi in spans]
     for a in reads:
-        lo, hi = int(a.data.ptr), int(a.data.ptr) + int(a.nbytes)
-        if any(lo < t_hi and t_lo < hi for t_lo, t_hi in spans):
+        lo = int(a.data.ptr)
+        hi = lo + int(a.nbytes)
+        # the last target starting below this read's end is the only one
+        # (targets are disjoint and sorted) that can reach into it
+        i = bisect.bisect_left(starts, hi) - 1
+        if i >= 0 and spans[i][1] > lo:
             return False
     mny, mnx = (int(n) for n in state.mup.shape)
     kernel = get_kernel("lbc_state", "finalize_state_multi")

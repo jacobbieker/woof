@@ -82,15 +82,10 @@ def afgl(name: str = "us") -> Column:
     return col
 
 
-def _afgl_ref(name: str) -> Column:
-    """:func:`afgl`, read once per data directory
-    (:func:`woof.radtran.data.data_dir`, re-resolved on every call) and
-    read-only."""
-    return _afgl_ref_in(name, data.data_dir())
-
-
 @lru_cache(maxsize=None)
-def _afgl_ref_in(name: str, directory) -> Column:
+def _afgl_ref(name: str) -> Column:
+    """:func:`afgl`, read once per process (the data directory is fixed per
+    process, :func:`woof.radtran.data.data_dir`) and read-only."""
     col = afgl(name)
     for a in (col.z, col.p, col.t, col.n_air, *col.dens.values()):
         a.setflags(write=False)

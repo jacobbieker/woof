@@ -154,7 +154,8 @@ def hu_stamnes(lam_nm: float, reff_um, *, cache: dict | None = None):
     """(extinction per LWC [km^-1 / (g m^-3)], single-scattering albedo, g).
 
     ``cache``: a dict kept for one ``reff_um`` across wavelengths
-    (:func:`_hu_prop`)."""
+    (:func:`_hu_prop`).  It is keyed on that array object, which must not
+    change while the cache is in use; another array starts it afresh."""
     reff = np.asarray(reff_um, dtype=np.float64)
     if cache is not None and cache.get("reff_of") is not reff_um:
         # the cached selections belong to one radius array: a different one
