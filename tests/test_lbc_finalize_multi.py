@@ -232,3 +232,27 @@ def test_identity_holds_under_each_numerics(numerics, exact):
         "test_table_matches_the_per_field_launches",
         "test_more_fields_than_one_table_take_further_launches",
         "test_apply_state_boundary_values_takes_one_launch"], numerics, exact)
+
+
+def test_the_table_layout_constants_match_the_kernel():
+    """The host packs the blob the kernel's LbcFinalTable reads: the row
+    count and word counts must agree on both sides."""
+    import re
+    from pathlib import Path
+
+    import woof.ingest.lateral_bc as lbc
+    src = (Path(lbc.__file__).parents[1] / "core" / "kernels" / "lbc_state.cu").read_text()
+    define = {k: int(v) for k, v in re.findall(r"#define (LBC_FINAL_\w+) (\d+)", src)}
+    assert define["LBC_FINAL_MAX_ROWS"] == lbc.LBC_FINAL_MULTI_MAX_ROWS
+    assert define["LBC_FINAL_HEADER_WORDS"] == lbc._LBC_FINAL_HEADER_WORDS
+    assert define["LBC_FINAL_ROW_WORDS"] == lbc._LBC_FINAL_ROW_WORDS
+
+
+def test_the_size_cut_reads_any_number_and_falls_back(monkeypatch):
+    import woof.ingest.lateral_bc as lbc
+    monkeypatch.setenv("WOOF_LBC_FINAL_MULTI_MAX_CELLS", "1e6")
+    assert lbc._final_multi_max_cells() == 1_000_000
+    for bad in ("1M", "inf", "nan", "-5", "1e400"):
+        monkeypatch.setenv("WOOF_LBC_FINAL_MULTI_MAX_CELLS", bad)
+        with pytest.warns(RuntimeWarning, match="not a cell count"):
+            assert lbc._final_multi_max_cells() == 1 << 20

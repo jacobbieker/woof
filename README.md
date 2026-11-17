@@ -675,7 +675,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   what does not depend on wavelength. That cache holds the layer air and
   gas columns, the cloud radius selections and the REPTRAN pressure,
   temperature and vmr brackets. All eight REPTRAN lookups share one grid,
-  so a single bracket serves every species. The blocks write straight into
+  so one bracket serves every species looked up without a vmr (H2O, looked
+  up with its vmr, takes its own vmr-interpolated bracket). The blocks write straight into
   the solver's arrays, and the AFGL splice is written in place. The words
   are unchanged: 30,000 columns x 8 wavelengths take 15 s instead of 23 s
   on the A6000 host.
@@ -729,6 +730,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
   forecast; hex and streamed domains refuse it for now. The aurora, storm-time and particle-precipitation layers are
   planned ([docs/spacewx.md](docs/spacewx.md)).
+- **A plan, not yet code, for gradients and hybrid physics.**
+  [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
+  studies gradients of a forecast's fit to observations and opt-in
+  neural-network column physics. woof has no adjoint or autodiff code today.
+  The plan starts with adjoint-free sensitivities (finite-difference and
+  ensemble), then one differentiable column scheme, NN physics through the
+  existing column seams, and later a WRF dry-core adjoint checked against
+  WRFPLUS. Default runs are not changed.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
