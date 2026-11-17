@@ -44,8 +44,8 @@ from importlib.resources import files
 
 import numpy as np
 
-from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
+from .velocity_v842 import launch_options
 
 SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_velocity_solver_constitutive_relation.F:28-49,64-294",
@@ -99,7 +99,7 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 
 def _function(precision: str, name: str):
     import cupy as cp
-    options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+    options = launch_options(COMPILE_OPTIONS)
     return _module_on(cp.cuda.Device().id, precision, options).get_function(name)
 
 

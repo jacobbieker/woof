@@ -88,9 +88,24 @@ def _precision_of(array) -> str:
     raise ValueError(f"velocity arrays must be float32 (r4) or float64 (r8), not {array.dtype}")
 
 
+#: (numerics mode, strict options) -> the options in that mode (launch_options)
+_LAUNCH_OPTIONS: dict[tuple[str, tuple[str, ...]], tuple[str, ...]] = {}
+
+
+def launch_options(strict: tuple[str, ...] = COMPILE_OPTIONS) -> tuple[str, ...]:
+    """``_hex_numerics.options(strict, keep_ftz=True)``, worked out once per
+    numerics mode: every launch of the dynamics' units asks for it, and the
+    elastic subcycles launch some 600 kernels a step."""
+    key = (_hex_numerics._bind(), strict)
+    options = _LAUNCH_OPTIONS.get(key)
+    if options is None:
+        options = _LAUNCH_OPTIONS[key] = _hex_numerics.options(strict, keep_ftz=True, numerics=key[0])
+    return options
+
+
 def _function(precision: str, name: str):
     import cupy as cp
-    options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+    options = launch_options()
     return _module_on(cp.cuda.Device().id, precision, options).get_function(name)
 
 

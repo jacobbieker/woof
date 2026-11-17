@@ -43,11 +43,11 @@ from pathlib import Path
 
 import numpy as np
 
-from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
 from . import evp_v842, velocity_v842
-from .velocity_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, _solve_bounds
+from .velocity_v842 import (COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, _solve_bounds,
+                            launch_options)
 
 SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_velocity_solver.F:31-36,546-1650,1819-2135",
@@ -85,7 +85,7 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 
 def _function(precision: str, name: str):
     import cupy as cp
-    options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+    options = launch_options(COMPILE_OPTIONS)
     return _module_on(cp.cuda.Device().id, precision, options).get_function(name)
 
 
