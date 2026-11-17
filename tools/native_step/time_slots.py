@@ -69,14 +69,23 @@ def bind_slots(plan,slots, *, frame_type=Frame, prefix="", start=0, end=None):
         bound.append({'operation':op['index'],'argument':0,'field':slot['field'],'source':slot})
     assert {x['field'] for x in slots}=={'julian','yearlen'},slots
     # ABI positions are from the exact tuple construction in lateral_bc.py:
-    # state relaxation:1197, mu install:2474, finalizer:2500; lbc_time:885.
+    # _launch_state_relaxation, _launch_mu_boundary_values,
+    # _launch_finalize_field; lbc_time's evaluate_*_boundary launchers.
     specs={'state_specified_relaxation':(28,'boundary_dtbc'),
            'specified_relaxation':(12,'boundary_dtbc'),
            'install_mu_boundary':(10,'boundary_dtbc'),
            'finalize_state_field':(21,'boundary_dtbc'),
            'evaluate_linear_boundary':(4,'forcing_dtbc'),
            'evaluate_rational_boundary':(6,'forcing_dtbc')}
+    # The table launches carry their boundary side pointers inside a by-value
+    # blob that no slot can rebind: a replay across intervals would read the
+    # captured interval's sides.  Capture with WOOF_LBC_RELAX_MULTI=0 and
+    # WOOF_LBC_FINAL_MULTI=0 (the per-field launches above).
+    tables={'state_relaxation_multi','finalize_state_multi'}
     for op in operations[start:end]:
+        if op.get('kernel') in tables:
+            raise RuntimeError(f"{op['kernel']}: capture with WOOF_LBC_RELAX_MULTI=0 "
+                               "and WOOF_LBC_FINAL_MULTI=0 (its boundary pointers cannot be rebound)")
         if op.get('kernel') in specs:
             index,field=specs[op['kernel']]
             assert op['argument_bytes'][index]==4,op
