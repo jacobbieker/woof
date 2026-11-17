@@ -4847,6 +4847,56 @@ def _translation_cache(text, unit, contract, retain_subnormals, source, defines,
     return None, store
 
 
+#: WOOF_METAL_GFK_FAST=0: glibc_flt32.cuh's gfk_log, gfk_exp and gfk_pow
+#: run their binary64 bodies on every call, as before the shortcut.
+GFK_FAST_ENV = "WOOF_METAL_GFK_FAST"
+GFK_FAST = METAL_DIR / "gfk_fast.h"
+#: the three glibc binary32 routines (glibc_flt32.cuh, and its hex copy)
+#: whose binary64 bodies gfk_fast.h shortcuts, with their parameter lists
+_GFK_SHORTCUTS = (("gfk_log", "float x", "x"), ("gfk_exp", "float x", "x"),
+                  ("gfk_pow", "float x, float y", "x, y"))
+
+
+def gfk_fast(text: str) -> str:
+    """Route glibc_flt32.cuh's gfk_log/gfk_exp/gfk_pow through gfk_fast.h.
+
+    Each definition is renamed ``<name>_soft`` (its binary64 body, unchanged)
+    and preceded by a ``<name>`` that returns gfk_fast.h's binary32 word, or
+    calls ``<name>_soft`` where the shortcut defers.  The shortcut returns
+    the binary64 routine's word whenever it answers (gfk_fast.h), so the
+    unit's words do not change.  A unit without those definitions, or
+    ``WOOF_METAL_GFK_FAST=0``, is returned as it was."""
+    if os.environ.get(GFK_FAST_ENV, "1").strip() == "0" or "gfk_" not in text:
+        return text
+    for name, params, args in _GFK_SHORTCUTS:
+        # preprocessed text: __device__ has expanded to nothing
+        pattern = re.compile(r"^[ \t]*(?:__device__\s+)?float\s+%s\s*\(\s*%s\s*\)\s*\{"
+                             % (name, r"\s*,\s*".join(re.escape(p) for p in params.split(", "))),
+                             re.M)
+        found = list(pattern.finditer(text))
+        if len(found) != 1:
+            continue
+        m = found[0]
+        wrapper = (f"float {name}_soft({params});\n"
+                   f"float {name}({params}) {{\n"
+                   f"    unsigned int __b = __woof_{name}({args});\n"
+                   f"    return __b == 0xFFFFFFFFu ? {name}_soft({args}) : __uint_as_float(__b);\n"
+                   f"}}\n"
+                   f"float {name}_soft({params}) {{")
+        text = text[:m.start()] + wrapper + text[m.end():]
+    return text
+
+
+def _with_gfk_fast(head: str, contract: bool) -> str:
+    """The prelude with gfk_fast.h ahead of a contracting unit's pragma, so
+    the shortcuts compile uncontracted like the rest of the prelude."""
+    pragma = "\n#pragma METAL fp contract(fast)\n"
+    fast = "\n" + GFK_FAST.read_text()
+    if contract and head.endswith(pragma):
+        return head[:-len(pragma)] + fast + pragma
+    return head + fast
+
+
 def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
               retain_subnormals: bool = False, defines=(), include_dirs=(),
               f64: str = "soft") -> TranslatedUnit:
@@ -4863,6 +4913,7 @@ def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
     text = preprocess(source, defines, include_dirs)
     if compose(source, text, f64) is not source:
         text = preprocess(compose(source, text, f64), defines, include_dirs)
+    text = gfk_fast(text)
     cached, store = _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64)
     if cached is not None:
         return cached
@@ -4882,8 +4933,10 @@ def _translate_preprocessed(text: str, source: str, *, unit: str, contract: bool
     tu = parse(text)
     result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,
                        macros=_integer_macros(source, defines)).run()
-    result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,
-                          ieee_helpers="__woof_ieee_" in result.msl, f64=f64)
-                  + "\n// ---- translated unit: " + unit + "\n" + result.msl)
+    head = prelude(contract=contract, retain_subnormals=retain_subnormals,
+                   ieee_helpers="__woof_ieee_" in result.msl, f64=f64)
+    if "__woof_gfk_" in result.msl:
+        head = _with_gfk_fast(head, contract)
+    result.msl = head + "\n// ---- translated unit: " + unit + "\n" + result.msl
     result.key = hashlib.sha256(result.msl.encode()).hexdigest()
     return result

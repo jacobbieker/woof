@@ -627,6 +627,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   a read back and a write: the writer's host time per Edinburgh 3 km frame
   falls from 761-1061 ms to 470-576 ms, byte-identical
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
+  Metal: woof's glibc binary32 `logf`, `expf` and `powf` ports
+  (`gfk_log`, `gfk_exp`, `gfk_pow`) compute in binary64, which Metal
+  emulates in integer arithmetic. They now first evaluate the same
+  formula in float pairs and keep that word only when no binary32 rounding
+  boundary lies within its error bound, and otherwise run the binary64
+  body. The words are identical by construction, and every binary32
+  input (logf, expf, and powf at 20 exponents) plus 2^30 random powf
+  pairs was checked under both subnormal modes
+  (`tools/metal_gfk_fast_grade.py`). The surface-layer kernel
+  `sfclayrev` is 5.5x faster (55x83: 11.70 to 2.14 ms).
+  `WOOF_METAL_GFK_FAST=0` restores the binary64-only path.
   `WOOF_METAL_GPU_TIMES` times each kernel. Its per-launch command
   buffers also hold the lazy MLX work the launch waited on, and their GPU
   intervals overlap, so a facade write (`woof_copy_4`) used to carry other
