@@ -287,7 +287,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     subcycle's velocity kernels also add the thickness flux, the
     corrector's velocity copy and the running sum, so a subcycle launches
     4 kernels instead of 8 (320 fewer launches a step, the same words): on
-    an M3 Max the 8,300-cell step takes about 44 instead of 52 ms;
+    an M3 Max the 8,300-cell step takes about 44 instead of 52 ms. On CUDA
+    the barotropic stage is captured as a CUDA graph and replayed (the
+    same kernels and arguments, so the same words; switch:
+    `WOOF_OCEAN_CUDA_GRAPHS=0`): 9.9 instead of 10.7 ms on an A6000 at
+    8,300 cells;
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
