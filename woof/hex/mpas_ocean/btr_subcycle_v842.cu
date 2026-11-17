@@ -236,29 +236,31 @@ extern "C" __global__ void ocn_btr_normalize_v842(rk *thicknessFlux, rk *btrNew,
 }
 
 // the transport velocity with the correction (F - sum h u)/sum h, edges
-// 1..nEdgesArray(config_num_halos). A warp per edge: lane l loads levels
-// l, l+32, ... (a column's consecutive words, so the loads coalesce) and
-// forms their terms; every lane then adds the terms in level order, each
-// broadcast from its lane, so the sums are the serial loop's words.
+// 1..nEdgesArray(config_num_halos). With lanes == 32, a warp per edge: lane
+// l loads levels l, l+32, ... (a column's consecutive words, so the loads
+// coalesce) and forms their terms; every lane then adds the terms in level
+// order, each broadcast from its lane, so the sums are the serial loop's
+// words. With lanes == 1, a thread per edge runs the same loop serially.
 extern "C" __global__ void ocn_btr_transport_v842(
     rk *normalTransportVelocity, const rk *btrNew, const rk *bclNew, const rk *bolus,
     const rk *layerThicknessEdge, const rk *thicknessFlux, const int *maxLevelEdgeTop, const int *edgeMask,
-    int nEdges, int nl, int useVelocityCorrection)
+    int nEdges, int nl, int useVelocityCorrection, int lanes)
 {
-    const int e = bt_thread() >> 5, lane = threadIdx.x & 31;
+    const int e = bt_thread() / lanes, lane = lanes == 1 ? 0 : (int)(threadIdx.x & 31);
     if (e >= nEdges) return;
     const int b = e * nl;
     const int top = maxLevelEdgeTop[e];
     rk fluxSum = C(0.0), thicknessSum = C(0.0);
-    for (int k0 = 0; k0 < nl && (k0 == 0 || k0 < top); k0 += 32) {
+    for (int k0 = 0; k0 < nl && (k0 == 0 || k0 < top); k0 += lanes) {
         const int k = k0 + lane;
         rk h = C(0.0), term = C(0.0);
         if (k < nl) {
             h = layerThicknessEdge[b + k];
             term = M(layerThicknessEdge[b + k], A(A(btrNew[e], bclNew[b + k]), bolus[b + k]));
         }
-        for (int j = 0; j < 32 && k0 + j < nl; ++j) {
-            const rk hj = __shfl_sync(0xffffffffu, h, j), tj = __shfl_sync(0xffffffffu, term, j);
+        for (int j = 0; j < lanes && k0 + j < nl; ++j) {
+            const rk hj = lanes == 1 ? h : __shfl_sync(0xffffffffu, h, j);
+            const rk tj = lanes == 1 ? term : __shfl_sync(0xffffffffu, term, j);
             if (k0 + j == 0) {
                 fluxSum = tj;
                 thicknessSum = hj;
@@ -269,7 +271,7 @@ extern "C" __global__ void ocn_btr_transport_v842(
         }
     }
     const rk correction = M((rk)useVelocityCorrection, D(S(thicknessFlux[e], fluxSum), thicknessSum));
-    for (int k = lane; k < nl; k += 32)
+    for (int k = lane; k < nl; k += lanes)
         normalTransportVelocity[b + k] = M((rk)edgeMask[b + k],
                                            A(A(A(btrNew[e], bclNew[b + k]), bolus[b + k]), correction));
 }

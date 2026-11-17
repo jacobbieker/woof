@@ -214,6 +214,21 @@ def _graphs_on() -> bool:
     return not cp.cuda.get_current_stream().is_capturing()
 
 
+def column_lanes() -> int:
+    """Threads per column for the level sums of btr_transport and the split
+    step's ss_bcl: a warp (32) on CUDA, where the column's loads then
+    coalesce, one on Metal, where the serial loop is faster. Both add in
+    level order, so both give the same words; ``WOOF_OCEAN_COLUMN_LANES``
+    (1 or 32) picks one."""
+    lanes = os.environ.get("WOOF_OCEAN_COLUMN_LANES", "").strip()
+    if lanes:
+        if lanes not in ("1", "32"):
+            raise ConfigurationRefusal(f"WOOF_OCEAN_COLUMN_LANES={lanes!r}: 1 or 32")
+        return int(lanes)
+    from woof import backend
+    return 32 if backend.active() == "cuda" else 1
+
+
 def _graph_entry(key: tuple) -> _GraphEntry:
     entry = _GRAPHS.pop(key, None)
     if entry is None:
@@ -296,6 +311,7 @@ def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict
     me2 = int(m["edgesOnEdge"].shape[1])
 
     temps = None
+    lanes = column_lanes()
 
     def launches() -> None:
         old, new = 0, 1
@@ -364,9 +380,9 @@ def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict
         n_sum = n_btr_subcycles * int(configs["config_btr_subcycle_loop_factor"])
         _launch(precision, "ocn_btr_normalize_v842", edges[0], (flux, btr[1], i32(edges[0]), i32(n_sum)))
         n_h = edges[int(configs["config_num_halos"]) - 1]
-        _launch(precision, "ocn_btr_transport_v842", n_h * 32, (
+        _launch(precision, "ocn_btr_transport_v842", n_h * lanes, (
             transport, btr[1], bcl_new, bolus, d["layerThicknessEdge"], flux, m["maxLevelEdgeTop"], edge_mask, i32(n_h),
-            i32(nl), i32(1 if configs["config_vel_correction"] else 0)))
+            i32(nl), i32(1 if configs["config_vel_correction"] else 0), i32(lanes)))
 
     if not _graphs_on():
         temps = cp.empty((2, n_edges + 1), dtype=real)
@@ -377,7 +393,7 @@ def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict
               d["layerThicknessEdge"], ssh_tend, *(m[k] for k in _GRAPH_MESH_FIELDS))
     key = (cp.cuda.Device().id, precision, launch_options(), _module_on(cp.cuda.Device().id, precision,
                                                                       launch_options()),
-           float(dt), int(n_btr_subcycles), nl, n_cells, n_edges, tuple(cells), tuple(edges),
+           float(dt), int(n_btr_subcycles), nl, lanes, n_cells, n_edges, tuple(cells), tuple(edges),
            tuple(configs[k] for k in _GRAPH_CONFIGS),
            tuple((a.data.ptr, a.shape, a.dtype.str) for a in arrays))
     entry = _graph_entry(key)
