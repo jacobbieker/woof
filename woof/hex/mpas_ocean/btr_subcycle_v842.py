@@ -30,8 +30,9 @@ the cells before it in the loop (run in the Fortran's order on one thread).
 On CUDA the split-explicit stage's launches are captured as a CUDA graph the
 second time the same arrays, mesh, configuration and module come through, and
 replayed from then on: the same kernels with the same arguments, so the same
-words (``WOOF_OCEAN_CUDA_GRAPHS=0`` keeps every launch eager; Metal always
-does).
+words (``WOOF_OCEAN_CUDA_GRAPHS=0``, or false, off, no, keeps every launch
+eager; Metal and CuPy-ROCm always do, and a key whose capture the runtime or
+driver refuses stays eager while it is cached).
 
 Refused by name: a configuration whose halo counters index ``nCellsArray``
 or ``nEdgesArray`` outside ``1..config_num_halos+1`` (v8.4.2 reads outside
@@ -211,13 +212,11 @@ def _graphs_on() -> bool:
     from woof import backend
     if backend.active() != "cuda":
         return False
+    from woof.hip_backend import supports_graphs
+    if not supports_graphs():
+        return False
     import cupy as cp
-    if cp.cuda.runtime.is_hip:
-        return False
-    try:
-        return not cp.cuda.get_current_stream().is_capturing()
-    except RuntimeError:
-        return False
+    return not cp.cuda.get_current_stream().is_capturing()
 
 
 def _graph_entry(key: tuple) -> _GraphEntry:
@@ -395,7 +394,7 @@ def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict
             launches()
             return
         entry.graph = _capture(launches)
-        if entry.graph is None:     # capture refused: this key stays eager from now on
+        if entry.graph is None:     # capture refused: this key stays eager while cached
             entry.refused = True
             launches()
             return

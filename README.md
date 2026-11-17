@@ -286,9 +286,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     instead of 259 ms on an A6000, the same words. Each barotropic
     subcycle's velocity kernels also add the thickness flux, the
     corrector's velocity copy and the running sum, so in the default
-    configuration (predictor, two corrector iterations, no SSH2, 40
-    subcycles) a subcycle launches 4 kernels instead of 8 (320 fewer
-    launches a step, the same words): on
+    configuration (predictor, two corrector iterations, no SSH2) a
+    subcycle launches 4 kernels instead of 8, the same words: on
     an M3 Max the 8,300-cell step takes about 44 instead of 52 ms. On CUDA
     the barotropic stage is captured as a CUDA graph and replayed (the
     same kernels and arguments, so the same words; switch:
