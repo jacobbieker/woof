@@ -62,16 +62,23 @@ def main():
     ncol = meta["ncol"]
     summary = {"arm": arm, "exact": exact, "regimes": {}}
     total = differ = 0
+    missing = []
     for name in meta["regimes"]:
         wpath = wrf_dir / f"out_{name}.bin"
         opath = woof_dir / f"woof_{arm}_{exact}_{name}.npz"
-        if not (wpath.exists() and opath.exists()):
+        absent = [str(p) for p in (wpath, opath) if not p.exists()]
+        if absent:
+            missing.append(f"{name}: {', '.join(absent)}")
             continue
         rec = read_records(wpath)
         out = dict(np.load(opath))
         rows = {}
         for wname, oname in PAIRS[arm].items():
             if wname not in rec or oname not in out:
+                # o3rad is published only when CAM ozone (o3input=2) runs.
+                if not (wname == "o3rad"
+                        and meta["regimes"][name].get("o3input") != 2):
+                    missing.append(f"{name}: {wname}")
                 continue
             d = diff(to_cols(rec[wname], ncol), out[oname])
             rows[wname] = d
@@ -81,9 +88,13 @@ def main():
         summary["regimes"][name] = rows
     summary["total"] = total
     summary["differ"] = differ
+    summary["missing"] = missing
     json.dump(summary, sys.stdout, indent=1)
     print()
+    # Nothing compared is not a pass: every regime and mapped field must be
+    # present (the legacy comparator's skips are left to its own owner).
+    return 1 if missing or not total else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

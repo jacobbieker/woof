@@ -7537,6 +7537,20 @@ def _rrtmg_k(registry):
         reachability={'state':'component-override'},
         parameters={'ra_physics':0,'icloud':1,'aer_opt':0,'ghg_input':0,
                     'wrf_rrtmg_compatibility':'none'},
+        # woof.config.validate_rrtmgk_config's cloud-merge refusals, as rules
+        # plan review evaluates (the port radiates the resolved cloud only).
+        constraints={'required_settings':{'ra_physics':0},'refused_when':[
+            {'settings':{'bl_pbl_physics':[5],'icloud_bl':[1]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the MYNN subgrid-cloud merge (icloud_bl=1) is not ported for it.',
+             'remedy_label':'Set icloud_bl=0.','remedy_settings':{'icloud_bl':0}},
+            {'settings':{'cu_physics':[10]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the KF-CuP (cu_physics=10) cloud feedback is not ported for it.',
+             'remedy_label':'Set cu_physics=0.','remedy_settings':{'cu_physics':0}},
+            {'settings':{'shcu_physics':[5]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the Deng shallow-cumulus cloud merge (shcu_physics=5) is not ported for it.',
+             'remedy_label':'Set shcu_physics=0.','remedy_settings':{'shcu_physics':0}},
+            {'settings':{'mp_physics':[11,95]},
+             'reason':'RRTMG-K: this microphysics supplies radiation clouds through a path rad_rrtmg_driver is not ported for.'}]},
         warnings=['Native WRF executes both spectra through LW-14 (rad_rrtmg_driver) and its SW-14 case only adds the shortwave heating; only the 14/14 pair runs.',
                   'Explicit selection only; never a default. The port runs microphysics carrying snow (rad_rrtmg_driver iceflag 5), aer_opt=0, ghg_input=0, icloud=1 and no subgrid or convective cloud merge; rrtmg_spectral_output is refused.'],
         extensions={'column_contract':{

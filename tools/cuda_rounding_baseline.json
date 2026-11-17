@@ -5139,7 +5139,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "03fe1c3c19f7b2d2c9f8f771ab0b894ae0bc36ab85b52c102221e6e3de70f4d7"
+    "sha256": "b0e19fa601e2af4920b627cfa17ca23b3b0751d7198962b84527f25bc1c9f138"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5263,7 +5263,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "0bb820235c56fef926f956cb32878d780035d1f88bbf30de0432dcb0b965724f"
+    "sha256": "9680b85009cca82cfdb892ec1005269faf27588eee7a9223145bbcf4291a1130"
    },
    {
     "file": "woof/core/refl.py",
@@ -5303,7 +5303,7 @@
    },
    {
     "file": "woof/core/rrtmgk.py",
-    "sha256": "c171c5375773e2cabfb69b7afad4832a776e768f199deb90cd184f21f85ce218"
+    "sha256": "949a3838d090c0c06c1b2d5e364be596c2ae86d36e4f39cdb2ad45d674245e72"
    },
    {
     "file": "woof/core/ruc_gpu.py",

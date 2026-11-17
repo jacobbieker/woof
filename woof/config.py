@@ -3745,15 +3745,22 @@ def validate_rrtmgk_config(cfg, ra_lw_physics, ra_sw_physics) -> None:
         ("cu_rad_feedback=.true.", bool(getattr(cfg, "cu_rad_feedback", False))),
         ("bmj_rad_feedback=.true.", bool(getattr(cfg, "bmj_rad_feedback", False))),
         ("shcu_physics=5 (Deng shallow-cumulus clouds)",
-         int(getattr(cfg, "shcu_physics", 0) or 0) == 5)) if on]
+         int(getattr(cfg, "shcu_physics", 0) or 0) == 5),
+        ("cu_physics=10 (KF-CuP cloud feedback)",
+         int(getattr(cfg, "cu_physics", 0) or 0) == 10)) if on]
     if merges:
         raise ConfigurationRefused(
             f"{', '.join(merges)} with ra_lw_physics=ra_sw_physics=14: the "
             "RRTMG-K port radiates the resolved cloud only; the driver's "
             "subgrid and convective cloud merges are not ported for it. "
             "Turn the named merge off (icloud_bl=0, cu_rad_feedback=.false., "
-            "bmj_rad_feedback=.false., shcu_physics=0) to radiate the "
-            "resolved cloud.")
+            "bmj_rad_feedback=.false., shcu_physics=0, a cu_physics other "
+            "than 10) to radiate the resolved cloud.")
+    if int(getattr(cfg, "mp_physics", 0) or 0) in (11, 95):
+        raise ConfigurationRefused(
+            f"mp_physics={cfg.mp_physics} with ra_lw_physics=ra_sw_physics=14: "
+            "this scheme supplies radiation clouds through a path "
+            "rad_rrtmg_driver is not ported for.")
     if cfg.moist and cfg.mp_physics:
         from woof.wrf_physics_inventory import stock_wrf_physics_inventory
         try:

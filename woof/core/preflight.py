@@ -2637,13 +2637,6 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # The adapter's WRF v4.6.1 radconst + calc_coszen (WOOF's own float32
     # trig): 0 B for both entry points, read on sm_120 at NVRTC 12.9.86.
     "rrtmg_legacy_solar": 0,
-    # RRTMG-K's own units (woof.core.rrtmgk): the device prep + McICA,
-    # the LW taumol_post (band 7's lower atmosphere) and the SW unit with
-    # K's cloud optics and two-stream solver.  0 B for every kernel in
-    # each, read on sm_86 (RTX A6000) at NVRTC 12.9.
-    "rrtmgk_prep": 0,
-    "rrtmgk_lw": 0,
-    "rrtmgk_sw": 0,
     # The exact chain's strict Exner unit (physics_exner.cu): 0 B, read
     # on sm_120 at NVRTC 13.4.92.
     "physics_exner": 0,
@@ -3405,6 +3398,10 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     "rrtmg_sw", "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
     "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
     "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16",
+    # RRTMG-K's fragments: each compiles only inside its composed unit
+    # (woof.core.rrtmgk prep_source / lw_post_source / sw_source), priced
+    # as rrtmgk_{prep,lw,sw}_unit in CHAINED_TRANSLATION_UNIT_FRAMES.
+    "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw",
     # BEP+BEM's column kernel needs urban_bem.cuh and the glibc headers
     # woof/core/urban_bem.py composes; priced as urban_bem_composed.
     "urban_bep_bem",
@@ -3563,6 +3560,18 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         # store on every path (fix/rrtmg-sw-sfluxzen): all 17 kernels 0 B
         # on sm_120 (RTX 5070 Ti) at NVRTC 13.4.92, before and after.
         covers=frozenset({"rrtmg_sw"})),
+    # RRTMG-K (14/14), woof.core.rrtmgk._load: every kernel of each
+    # composed unit read 0 B on sm_86 (RTX A6000) at NVRTC 12.9.86,
+    # 2026-11-16 (driver CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES).
+    "rrtmgk_prep_unit": ChainedTranslationUnitFrame(
+        module="rrtmgk_prep_unit", max_local_size_bytes=0,
+        covers=frozenset({"rrtmgk_prep"})),
+    "rrtmgk_lw_unit": ChainedTranslationUnitFrame(
+        module="rrtmgk_lw_unit", max_local_size_bytes=0,
+        covers=frozenset({"rrtmgk_lw"})),
+    "rrtmgk_sw_unit": ChainedTranslationUnitFrame(
+        module="rrtmgk_sw_unit", max_local_size_bytes=0,
+        covers=frozenset({"rrtmgk_sw"})),
     # P3 one-category (mp=50).  ``noahmp_leaves.cu`` + ``p3.cu`` compiled as
     # ONE unit by woof/core/p3_device.p3_source(), the same shape the
     # legacy-RRTMG chain and the Noah-MP driver use.
@@ -4294,12 +4303,13 @@ _RRTMG_LEGACY_KERNEL_MODULES: tuple[str, ...] = (
 
 
 #: What the RRTMG-K pair (14/14) launches: the legacy LW chain (with K's
-#: band-7 taumol_post hook from ``rrtmgk_lw``), K's own prep and SW units,
+#: band-7 taumol_post hook from ``rrtmgk_lw_unit``), K's own prep and SW
+#: units (all three chained units, CHAINED_TRANSLATION_UNIT_FRAMES),
 #: the legacy adapter's glue and solar geometry, and cal_cldfra1's slab
 #: libm unit.
 _RRTMGK_KERNEL_MODULES: tuple[str, ...] = (
-    "rrtmg_lw_legacy_chain", "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw",
-    "rrtmg_legacy_adapter", "rrtmg_legacy_solar",
+    "rrtmg_lw_legacy_chain", "rrtmgk_prep_unit", "rrtmgk_lw_unit",
+    "rrtmgk_sw_unit", "rrtmg_legacy_adapter", "rrtmg_legacy_solar",
     "noahmp_libm_slab_composed")
 
 
@@ -12429,6 +12439,7 @@ def estimate_experiment(
         k_calls = tuple(
             rrtmgk_vram_bytes(
                 ncol=dc.run.ny * dc.run.nx, nz=dc.run.nz,
+                column_chunk=column_chunk,
                 resident_threads=device_profile.resident_thread_capacity)
             if 14 in radiation_scheme_ids(dc.run) else 0
             for dc in exp.domains)

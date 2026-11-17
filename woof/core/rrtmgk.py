@@ -423,6 +423,16 @@ def _module(which):
     return _MODULES[key]
 
 
+def prep_module():
+    """The prep + McICA unit on this card (kernel pre-warm's route)."""
+    return _module("prep")
+
+
+def lw_module():
+    """The LW taumol_post unit on this card (kernel pre-warm's route)."""
+    return _module("lw")
+
+
 def _kernel(which, name):
     return _module(which).get_function(name)
 
@@ -474,8 +484,14 @@ class CudaSWK(_sw.CudaSW):
         self.max_nlay = None
         self._scratch_by_stream = {}
         self._chunk_by_nlayers = {}
-        self._dtwa = None
-        self._err = None
+        # cldprmc -> spcvmc hand-off of K's optics slab and error word,
+        # owned per (thread, stream) so interleaved calls never share one.
+        self._handoff = {}
+
+    def _owner(self, kw):
+        import threading
+        stream = kw.get("stream") or self.cp.cuda.get_current_stream()
+        return (threading.get_ident(), int(getattr(stream, "ptr", 0) or 0))
 
     def _k(self, name):
         fn = super()._k({"rsw_cldprmc_b": "rswk_cldprmc_b",
@@ -483,14 +499,14 @@ class CudaSWK(_sw.CudaSW):
         if name == "rsw_cldprmc_b":
             def cldprmc(grid, block, args, **kw):
                 nc, nl = int(args[0]), int(args[1])
-                self._dtwa = self.cp.empty((9, nc, nl, NGPTSW), np.float32)
-                self._err = args[-1]
-                return fn(grid, block, tuple(args) + (self._dtwa,), **kw)
+                dtwa = self.cp.empty((9, nc, nl, NGPTSW), np.float32)
+                self._handoff[self._owner(kw)] = (dtwa, args[-1])
+                return fn(grid, block, tuple(args) + (dtwa,), **kw)
             return cldprmc
         if name == "rsw_spcvmc_gpt_b":
             def spcvmc(grid, block, args, **kw):
-                dtwa, self._dtwa = self._dtwa, None
-                return fn(grid, block, tuple(args) + (dtwa, self._err), **kw)
+                dtwa, err = self._handoff.pop(self._owner(kw))
+                return fn(grid, block, tuple(args) + (dtwa, err), **kw)
             return spcvmc
         return fn
 

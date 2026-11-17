@@ -5796,7 +5796,14 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                     "adapter")
             else:
                 o3input = value
+        # A domain on another adapter that reads ghg_input keeps it for the
+        # shared reader below (validate_rrtmgk_config then holds the K
+        # domains to 0); cldovrlp/idcor are already taken above by the
+        # 4/4 arm when one is selected.
+        shared = ("ghg_input",) if (any_rrtmg or any_cam or any_gsfc) else ()
         for key in ("ghg_input", "cldovrlp", "idcor"):
+            if key in shared:
+                continue
             drop("physics", key, ph.take(key),
                  "RRTMG-K's rad_rrtmg_driver does not read it (fixed trace "
                  "gases, its own McICA subcolumn walk)")

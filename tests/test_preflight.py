@@ -5057,11 +5057,14 @@ def test_rrtmgk_pair_prices_its_own_units_and_call_peak():
     run = SimpleNamespace(ra_physics=0, ra_lw_physics=14, ra_sw_physics=14)
     modules = pf._radiation_kernel_modules(run, 1)
     assert modules == {
-        "rrtmg_lw_legacy_chain", "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw",
-        "rrtmg_legacy_adapter", "rrtmg_legacy_solar",
+        "rrtmg_lw_legacy_chain", "rrtmgk_prep_unit", "rrtmgk_lw_unit",
+        "rrtmgk_sw_unit", "rrtmg_legacy_adapter", "rrtmg_legacy_solar",
         "noahmp_libm_slab_composed"}
     for name in ("rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw"):
-        assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES[name] == 0
+        # Fragments: priced through their composed units, never standalone.
+        assert name in pf.UNMEASURED_KERNEL_MODULES
+        unit = pf.CHAINED_TRANSLATION_UNIT_FRAMES[name + "_unit"]
+        assert unit.covers == {name} and unit.max_local_size_bytes == 0
     small = rrtmgk_vram_bytes(ncol=1000, nz=49, resident_threads=0)
     large = rrtmgk_vram_bytes(ncol=100_000, nz=49, resident_threads=0)
     assert 0 < small < large
