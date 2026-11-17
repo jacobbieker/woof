@@ -1209,7 +1209,7 @@ struct LbcFinalTable {
 #define LBC_FINAL_TABLE_PARAM const LbcFinalTable
 #endif
 
-extern "C" __global__
+extern "C" __global__ __launch_bounds__(256, 6)
 void finalize_state_multi(LBC_FINAL_TABLE_PARAM table, int nrows, real dtbc,
                           int spec_zone, int has_msf, int thb_3d,
                           int mny, int mnx)
@@ -1230,20 +1230,34 @@ void finalize_state_multi(LBC_FINAL_TABLE_PARAM table, int nrows, real dtbc,
     int rem = tid - k*ny*nx;
     int j = rem/nx;
     int i = rem - j*nx;
+    // __restrict__ locals: the per-field kernel's parameters are restrict,
+    // which lets the compiler use the read-only path for the const loads.
+    real* __restrict__ target = (real*)row[0];
+    const real* __restrict__ old_mup_frame = (const real*)table.header[0];
+    const real* __restrict__ mub2d = (const real*)table.header[1];
+    const real* __restrict__ mup = (const real*)table.header[2];
+    const real* __restrict__ thb = (const real*)table.header[3];
+    const real* __restrict__ c1h = (const real*)table.header[4];
+    const real* __restrict__ c2h = (const real*)table.header[5];
+    const real* __restrict__ c1f = (const real*)table.header[6];
+    const real* __restrict__ c2f = (const real*)table.header[7];
+    const real* __restrict__ msft = (const real*)table.header[8];
+    const real* __restrict__ msfu = (const real*)table.header[9];
+    const real* __restrict__ msfv = (const real*)table.header[10];
+    const real* __restrict__ muts_wrf = (const real*)table.header[11];
+    const real* __restrict__ west = (const real*)row[1];
+    const real* __restrict__ west_t = (const real*)row[2];
+    const real* __restrict__ east = (const real*)row[3];
+    const real* __restrict__ east_t = (const real*)row[4];
+    const real* __restrict__ south = (const real*)row[5];
+    const real* __restrict__ south_t = (const real*)row[6];
+    const real* __restrict__ north = (const real*)row[7];
+    const real* __restrict__ north_t = (const real*)row[8];
     finalize_state_cell(
-        tid, k, j, i, (real*)row[0],
-        (const real*)table.header[0], (const real*)table.header[1],
-        (const real*)table.header[2], (const real*)table.header[3],
-        (const real*)row[0],
-        (const real*)table.header[4], (const real*)table.header[5],
-        (const real*)table.header[6], (const real*)table.header[7],
-        (const real*)table.header[8], (const real*)table.header[9],
-        (const real*)table.header[10],
-        (const real*)row[1], (const real*)row[2], (const real*)row[3],
-        (const real*)row[4], (const real*)row[5], (const real*)row[6],
-        (const real*)row[7], (const real*)row[8],
-        dtbc, width, spec_zone, has_msf, thb_3d, kind, ny, nx, mny, mnx,
-        (const real*)table.header[11]);
+        tid, k, j, i, target, old_mup_frame, mub2d, mup, thb, target,
+        c1h, c2h, c1f, c2f, msft, msfu, msfv, west, west_t, east, east_t,
+        south, south_t, north, north_t, dtbc, width, spec_zone, has_msf,
+        thb_3d, kind, ny, nx, mny, mnx, muts_wrf);
 }
 
 // ---------------------------------------------------------------------------
