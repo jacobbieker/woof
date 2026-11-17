@@ -1424,6 +1424,7 @@ Takes no options of its own.
 | `--members-per-card auto\|N` | checkpoint branches run at once on each card, one process each (default auto: as many priced members as the card's free memory holds, up to 4) |
 | `--native-shared-gpu` | with --wrfinput: proceed on a shared GPU |
 | `--nest-at LAT,LON[@TIME]` | spawn a storm-following nest at this point (at TIME, an ISO time or seconds into the run; default the first step); repeatable |
+| `--nn NN.toml` | opt-in neural-network column physics from the [nn] table of this TOML file (docs/nn-physics.md); mode = "tap" records a scheme's inputs and tendencies as training data and leaves the forecast unchanged. Not WRF-identical when a model is applied |
 | `--no-memory-gate` | skip the before-launch memory check that refuses a configuration whose binding phase cannot fit this card's free VRAM, and the forecast runner's own check of the same envelope; a model state too big to build at all is still refused |
 | `--no-probe` | with --readiness: compute the schedule from the source table only and ask no host |
 | `--no-skeb, --skeb` | stochastic kinetic-energy backscatter in every member (WRF's SKEBS; overrides [ensemble.stochastic] skebs; default: the config's) |
@@ -1807,6 +1808,7 @@ Takes no options of its own.
 | `--members-per-card auto\|N` | checkpoint branches run at once on each card, one process each (default auto: as many priced members as the card's free memory holds, up to 4) |
 | `--native-shared-gpu` | with --wrfinput: proceed on a shared GPU |
 | `--nest-at LAT,LON[@TIME]` | spawn a storm-following nest at this point (at TIME, an ISO time or seconds into the run; default the first step); repeatable |
+| `--nn NN.toml` | opt-in neural-network column physics from the [nn] table of this TOML file (docs/nn-physics.md); mode = "tap" records a scheme's inputs and tendencies as training data and leaves the forecast unchanged. Not WRF-identical when a model is applied |
 | `--no-memory-gate` | skip the before-launch memory check that refuses a configuration whose binding phase cannot fit this card's free VRAM, and the forecast runner's own check of the same envelope; a model state too big to build at all is still refused |
 | `--no-probe` | with --readiness: compute the schedule from the source table only and ask no host |
 | `--no-skeb, --skeb` | stochastic kinetic-energy backscatter in every member (WRF's SKEBS; overrides [ensemble.stochastic] skebs; default: the config's) |
@@ -3501,6 +3503,7 @@ Takes no options of its own.
 | `--keep-member-files` | also retain every member's full history files |
 | `--members N` | make an N-member ensemble with aggregate products |
 | `--met-em DIR` | WPS metgrid directory with met_em.d0*.nc and producing namelist.input; native WOOF initialization |
+| `--nn NN.toml` | opt-in neural-network column physics from the [nn] table of this TOML file (docs/nn-physics.md); mode = "tap" records a scheme's inputs and tendencies as training data and leaves the forecast unchanged. Not WRF-identical when a model is applied |
 | `--no-memory-gate` | run a case whose priced peak envelope exceeds this card's free memory anyway, as `woof go --no-memory-gate` does: the envelope is an upper bound and the card's own allocation then decides; a model state too big to build at all is still refused |
 | `--no-supervise` | run the experiment in this process (escape hatch; disables fresh-process recovery and exclusive-GPU supervision) |
 | `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |

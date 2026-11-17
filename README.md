@@ -754,8 +754,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (DLPack, no copies; `recast-woof[nn-torch]`, never a base dependency) or
   MLX on Metal. A safety layer refuses, clips or falls back to the physics
   scheme outside the trained range, and limits outputs, keeps moisture
-  positive and can fix column budgets. The forecast seats are not wired yet.
-  Runs that use it are not WRF-identical ([docs/nn-physics.md](docs/nn-physics.md)).
+  positive and can fix column budgets. `woof run`/`woof go --nn NN.toml`
+  with `mode = "tap"` records a WRF-route scheme's column inputs and
+  physical-rate tendencies to Zarr or Icechunk as training data, leaving the
+  forecast byte-identical. Applying a model at the seat is not wired yet.
+  Runs that apply one are not WRF-identical ([docs/nn-physics.md](docs/nn-physics.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
