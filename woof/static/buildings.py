@@ -586,9 +586,18 @@ def _footprint_median(fp: Footprint, values: np.ndarray, like: HeightRaster
     return float(np.median(v)) if v.size else math.nan
 
 
+def _same_crs(a, b) -> bool:
+    if a == b:
+        return True
+    if a is None or b is None:
+        return False
+    from pyproj import CRS
+    return CRS.from_user_input(a) == CRS.from_user_input(b)
+
+
 def _same_lattice(a: HeightRaster, b: HeightRaster) -> bool:
     """Same CRS, origin and pixel size (to a millionth of a pixel)."""
-    return (a.crs == b.crs
+    return (_same_crs(a.crs, b.crs)
             and math.isclose(a.px, b.px, rel_tol=1e-9)
             and math.isclose(a.py, b.py, rel_tol=1e-9)
             and abs(a.x0 - b.x0) <= 1e-6 * b.px
@@ -920,11 +929,21 @@ def aggregate(rasters: Iterable[HeightRaster], grid, *,
             raise ValueError(f"building rasters must be in metres; "
                              f"{raster.crs} is geographic (use the source's "
                              "UTM grid, :func:`utm_raster`)")
-        groups.setdefault(_grid_key(raster), []).append(raster)
-    mosaics = [_mosaic(group) for group in groups.values()]
+        # A raster that reaches no cell, or knows no pixel, contributes
+        # nothing: it is neither mosaicked, checked nor credited.
+        cells = _model_cells(raster, grid)
+        if not cells.any() or not np.isfinite(raster.height).any():
+            continue
+        key = _grid_key(raster)
+        group = groups.setdefault(key, ([], np.zeros(grid.shape, bool)))
+        group[0].append(raster)
+        group[1][...] |= cells
+    mosaics = [_mosaic(members) for members, _ in groups.values()]
     if len(mosaics) > 1:
         from scipy import ndimage
-        reach = [_model_cells(r, grid) for r in mosaics]
+        # Each lattice reaches the union of its members' cells, not the
+        # box around them, so a gap between tiles stays open.
+        reach = [cells for _, cells in groups.values()]
         near = [ndimage.binary_dilation(m, np.ones((3, 3), bool))
                 for m in reach]
     for a in range(len(mosaics)):
