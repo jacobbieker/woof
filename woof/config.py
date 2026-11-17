@@ -8046,6 +8046,16 @@ def _validate_obstacles(cfg: RunConfig) -> None:
     if cfg.polar:
         raise ConfigurationRefused(
             "obstacle_opt = 1 runs on the regional (WRF-route) grid only")
+    if 0.5 * min(cfg.dx, cfg.dy) < 10.0 * cfg.obstacle_wall_z0:
+        raise ConfigurationRefused(
+            f"obstacle_wall_z0 = {cfg.obstacle_wall_z0:g} m is too rough for "
+            f"dx = {min(cfg.dx, cfg.dy):g} m: the wall law needs half the "
+            "grid spacing to be at least 10 z0")
+    if cfg.dfi_opt:
+        raise ConfigurationRefused(
+            "obstacle_opt = 1 does not run under digital filter "
+            f"initialisation (dfi_opt = {cfg.dfi_opt}): its backward "
+            "integration would turn the obstacle drag into a source")
     if cfg.umove or cfg.vmove:
         raise ConfigurationRefused(
             "obstacle_opt = 1 holds buildings fixed to the ground, but "

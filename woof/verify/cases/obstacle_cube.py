@@ -65,15 +65,11 @@ def _crossings(x, u):
             frac = -us[n - 1] / (us[n] - us[n - 1])
             reattach = xs[n - 1] + frac * (xs[n] - xs[n - 1]) - (X0 + H)
             break
-    ahead = x < X0
-    separate = np.nan
-    xa, ua = x[ahead][::-1], u[ahead][::-1]
-    reversed_run = ua < 0.0
-    if reversed_run.any():
-        n = int(np.argmin(reversed_run)) if not reversed_run.all() else \
-            reversed_run.size
-        if n > 0:
-            separate = X0 - xa[n - 1]
+    # Separation: the farthest-upstream reversed floor face within 2H of
+    # the windward face, so a corner vortex with forward flow right at the
+    # face still counts its horseshoe.
+    ahead = (x < X0) & (x > X0 - 2.0 * H) & (u < 0.0)
+    separate = X0 - float(x[ahead].min()) if ahead.any() else np.nan
     return reattach / H, separate / H
 
 

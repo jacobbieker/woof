@@ -11,6 +11,7 @@ the full canyon (H/W = 1 and 2) and cube benchmarks are ``slow`` and run
 with ``WOOF_OBSTACLE_BENCHMARKS=1``.
 """
 import dataclasses
+import math
 import os
 import subprocess
 import sys
@@ -51,12 +52,24 @@ def test_defaults_are_off():
     (dict(obstacle_relax_factor=-1.0), "obstacle_relax_factor"),
     (dict(obstacle_drag_coefficient=float("nan")), "obstacle_drag_coefficient"),
     (dict(obstacle_wall_z0=0.0), "obstacle_wall_z0"),
+    (dict(obstacle_opt=1, obstacle_file="b.nc", obstacle_wall_z0=0.2),
+     "too rough"),
     (dict(obstacle_opt=1, obstacle_file="b.nc", umove=2.0), "umove"),
     (dict(obstacle_opt=1, obstacle_file="b.nc", vmove=-1.0), "umove"),
 ])
 def test_refusals(overrides, match):
     with pytest.raises(ConfigurationRefused, match=match):
         validate_run_config(_les(**overrides))
+
+
+def test_digital_filter_initialisation_refuses():
+    # validate_run_config checks the DFI window first; the obstacle rule
+    # itself refuses any dfi_opt.
+    from woof.config import _validate_obstacles
+
+    with pytest.raises(ConfigurationRefused, match="dfi_opt"):
+        _validate_obstacles(_les(obstacle_opt=1, obstacle_file="b.nc",
+                                 dfi_opt=3))
 
 
 def test_selected_obstacles_validate():
@@ -231,6 +244,112 @@ def test_no_obstacles_step_the_words_the_off_path_steps(numerics):
     result = subprocess.run([sys.executable, "-c", code], capture_output=True,
                             text=True, env=dict(os.environ), timeout=900)
     assert result.returncode == 0 and "IDENTICAL" in result.stdout, (
+        result.stdout[-4000:] + result.stderr[-4000:])
+
+
+def _reference():
+    """Child-process body: one kernel launch against a float64 host
+    reference of every face, on a grid with map factors (msft = 1.2)."""
+    import cupy as cp
+
+    from woof.core import obstacles
+    from woof.static.buildings import CartesianGrid, aggregate, block_raster
+    from woof.verify.cases.obstacle_canyon import build
+
+    cfg = _les(obstacle_opt=1, obstacle_file="unused.nc",
+               time_step_sound=40, mix_isotropic=1, c_s=0.18)
+    morph = aggregate([block_raster(cfg.nx, cfg.ny, cfg.dx, cfg.dy,
+                                    [(20.0, 30.0, 0.0, 4.0, 10.0),
+                                     (6.0, 10.0, 4.0, 8.0, 5.0)])],
+                      CartesianGrid(cfg.nx, cfg.ny, cfg.dx, cfg.dy))
+    state = build(cfg, morph)
+    ny, nx = cfg.ny, cfg.nx
+    ones = np.ones((ny, nx))
+    state.set_map_coriolis(msft=1.2 * ones, msfu=np.ones((ny, nx + 1)),
+                           msfv=np.ones((ny + 1, nx)), f=0 * ones,
+                           e=0 * ones)
+    assert state.has_msf
+    rng = np.random.default_rng(11)
+    host = {}
+    for name in ("u", "v", "w"):
+        field = getattr(state, name)
+        values = rng.uniform(-3.0, 3.0, field.shape).astype(np.float32)
+        field[...] = cp.asarray(values)
+        host[name] = values.astype(np.float64)
+    ru = cp.asarray(rng.uniform(-3e4, 3e4, state.u.shape).astype(np.float32))
+    rv = cp.asarray(rng.uniform(-3e4, 3e4, state.v.shape).astype(np.float32))
+    for name in ("ru_t", "rv_t", "rw_t"):
+        getattr(state, name)[...] = 0
+    obstacles.apply(state, cfg, ru, rv)
+    faces = state._obstacles
+    nu, nv, nw = faces.counts
+    idx = cp.asnumpy(faces.face)
+    a = cp.asnumpy(faces.a).astype(np.float64)
+    b = cp.asnumpy(faces.b).astype(np.float64)
+    u, v, w = host["u"], host["v"], host["w"]
+    nz = cfg.nz
+    mut = cp.asnumpy(state.total_mu()).astype(np.float64) * ones
+    c1f = cp.asnumpy(state.c1f).astype(np.float64)
+    c2f = cp.asnumpy(state.c2f).astype(np.float64)
+    ru_h = cp.asnumpy(ru).astype(np.float64)
+    rv_h = cp.asnumpy(rv).astype(np.float64)
+    expect = {"ru_t": np.zeros(u.shape), "rv_t": np.zeros(v.shape),
+              "rw_t": np.zeros(w.shape)}
+    for n, flat in enumerate(idx):
+        if n < nu:
+            k, j, i = np.unravel_index(flat, u.shape)
+            l, r = (i - 1) % nx, i % nx
+            uu = u[k, j, i]
+            vv = 0.25 * (v[k, j, l] + v[k, j, r] + v[k, j + 1, l]
+                         + v[k, j + 1, r])
+            ww = 0.25 * (w[k, j, l] + w[k, j, r] + w[k + 1, j, l]
+                         + w[k + 1, j, r])
+            mom, key = ru_h[k, j, i], "ru_t"
+        elif n < nu + nv:
+            k, j, i = np.unravel_index(flat, v.shape)
+            s_, t_ = (j - 1) % ny, j % ny
+            vv = v[k, j, i]
+            uu = 0.25 * (u[k, s_, i] + u[k, s_, i + 1] + u[k, t_, i]
+                         + u[k, t_, i + 1])
+            ww = 0.25 * (w[k, s_, i] + w[k, t_, i] + w[k + 1, s_, i]
+                         + w[k + 1, t_, i])
+            mom, key = rv_h[k, j, i], "rv_t"
+        else:
+            k, j, i = np.unravel_index(flat, w.shape)
+            ww = w[k, j, i]
+            uu = 0.25 * (u[k - 1, j, i] + u[k - 1, j, i + 1] + u[k, j, i]
+                         + u[k, j, i + 1])
+            vv = 0.25 * (v[k - 1, j, i] + v[k - 1, j + 1, i] + v[k, j, i]
+                         + v[k, j + 1, i])
+            mom = (c1f[k] * mut[j, i] + c2f[k]) * ww / 1.2
+            key = "rw_t"
+        rate = a[n] / cfg.dt + b[n] * math.sqrt(uu * uu + vv * vv + ww * ww)
+        if rate > 0:
+            expect[key][k, j, i] -= rate / (1.0 + rate * cfg.dt) * mom
+    assert nu and nv and nw
+    for key, ref in expect.items():
+        got = cp.asnumpy(getattr(state, key)).astype(np.float64)
+        np.testing.assert_allclose(got, ref, rtol=2e-5,
+                                   atol=1e-6 * np.abs(ref).max(), err_msg=key)
+    print("MATCHED")
+
+
+@requires_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("numerics", ["fast", "strict"])
+def test_kernel_matches_a_host_reference_with_map_factors(numerics):
+    if numerics == "fast" and os.environ.get("GPUWM_WRF_EXACT", "0") == "1":
+        pytest.skip("GPUWM_WRF_EXACT=1 is strict numerics")
+    here = Path(__file__).resolve().parent
+    code = (f"import os, sys; sys.path.insert(0, {str(here)!r}); "
+            "import test_obstacles as t; "
+            f"os.environ['GPUWM_NUMERICS'] = {numerics!r}; "
+            "from woof import numerics; "
+            f"assert numerics.mode() == {numerics!r}, numerics.mode(); "
+            "t._reference()")
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                            text=True, env=dict(os.environ), timeout=900)
+    assert result.returncode == 0 and "MATCHED" in result.stdout, (
         result.stdout[-4000:] + result.stderr[-4000:])
 
 

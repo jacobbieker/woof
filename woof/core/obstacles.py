@@ -63,10 +63,20 @@ class ObstacleFaces:
         return sum(self.counts)
 
 
+#: The wall law needs the face well above the roughness: d >= this x z0.
+WALL_MIN_D_OVER_Z0 = 10.0
+
+
 def _wall_coefficient(spacing, z0):
     """Wall-law drag per metre for a wall ``spacing/2`` from the face."""
-    d = np.maximum(0.5 * np.asarray(spacing, np.float64), 1.01 * z0)
-    return (KARMAN / np.log(d / z0)) ** 2 / np.asarray(spacing, np.float64)
+    spacing = np.asarray(spacing, np.float64)
+    d = 0.5 * spacing
+    if np.any(d < WALL_MIN_D_OVER_Z0 * z0):
+        raise ValueError(
+            f"obstacle_wall_z0 = {z0:g} m is too rough for a {float(np.min(spacing)):g} m "
+            f"spacing: the wall law needs half the spacing to be at least "
+            f"{WALL_MIN_D_OVER_Z0:g} z0")
+    return (KARMAN / np.log(d / z0)) ** 2 / spacing
 
 
 def _shift(field3, offset, axis, periodic):
@@ -298,13 +308,15 @@ def apply(state, cfg, ru, rv) -> None:
         faces = attach(state, cfg)
     if faces is None:
         return
-    from woof.wrf_exact import ENABLED as WRF_EXACT
-
     nz, ny, nx = state.p.shape
     nu, nv, nw = faces.counts
     total = nu + nv + nw
     mut = state.total_mu()
-    divides = bool(state.has_msf and not WRF_EXACT)
+    # rw_t is the tendency of W = C(mu) w / msft in both numerics (the
+    # Coriolis kernel, the uncoupling and advance_w all read it so), so the
+    # w momentum always carries the map factor.  Only physics differs in
+    # strict mode, where it goes through held slots divided later.
+    divides = bool(state.has_msf)
     msft = state.msft if state.has_msf else mut
     periodic_x, periodic_y = faces.periodic
     _kernel()(((total + _BLOCK - 1) // _BLOCK,), (_BLOCK,), (
