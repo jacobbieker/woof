@@ -191,10 +191,10 @@ _GRAPH_LIMIT = 8
 
 
 class _GraphEntry:
-    __slots__ = ("seen", "graph", "temps")
+    __slots__ = ("seen", "graph", "temps", "refused")
 
     def __init__(self) -> None:
-        self.seen, self.graph, self.temps = 0, None, None
+        self.seen, self.graph, self.temps, self.refused = 0, None, None, False
 
 
 #: key (every pointer, shape, value and module the launches use) -> _GraphEntry
@@ -203,15 +203,21 @@ _GRAPHS: dict[tuple, _GraphEntry] = {}
 
 def _graphs_on() -> bool:
     """CUDA graphs for the split-explicit stage: CUDA only (Metal keeps its
-    launches), not inside another capture, and off under
-    ``WOOF_OCEAN_CUDA_GRAPHS=0``."""
-    if os.environ.get("WOOF_OCEAN_CUDA_GRAPHS", "1").strip() == "0":
+    launches; CuPy-ROCm, which the default backend also reports as CUDA,
+    cannot capture), not inside another capture, and off under
+    ``WOOF_OCEAN_CUDA_GRAPHS=0`` (or false, off, no)."""
+    if os.environ.get("WOOF_OCEAN_CUDA_GRAPHS", "1").strip().lower() in ("0", "false", "off", "no"):
         return False
     from woof import backend
     if backend.active() != "cuda":
         return False
     import cupy as cp
-    return not cp.cuda.get_current_stream().is_capturing()
+    if cp.cuda.runtime.is_hip:
+        return False
+    try:
+        return not cp.cuda.get_current_stream().is_capturing()
+    except RuntimeError:
+        return False
 
 
 def _graph_entry(key: tuple) -> _GraphEntry:
@@ -227,7 +233,7 @@ def _graph_entry(key: tuple) -> _GraphEntry:
 
 def _capture(launches):
     """The stage's launches as a CUDA graph (nothing runs while capturing),
-    or None if the driver refuses the capture."""
+    or None if the runtime or driver refuses the capture."""
     import cupy as cp
     stream = cp.cuda.Stream(non_blocking=True)
     try:
@@ -242,7 +248,7 @@ def _capture(launches):
                     pass
                 raise
             return stream.end_capture()
-    except cp.cuda.runtime.CUDARuntimeError:
+    except (cp.cuda.runtime.CUDARuntimeError, cp.cuda.driver.CUDADriverError):
         return None
 
 
@@ -375,19 +381,22 @@ def barotropic_stage(*, dt: float, n_btr_subcycles: int, mesh: dict, state: dict
     # every array and value the launches read: the same key, the same launches
     arrays = (*ssh_sub, *u_sub, *btr, state["ssh"][0], bcl_new, forcing, flux, transport, bolus,
               d["layerThicknessEdge"], ssh_tend, *(m[k] for k in _GRAPH_MESH_FIELDS))
-    key = (cp.cuda.Device().id, precision, launch_options(), _module_on(cp.cuda.Device().id, precision,
-                                                                      launch_options()),
+    device, options = cp.cuda.Device().id, launch_options()
+    key = (device, precision, options, _module_on(device, precision, options),
            float(dt), int(n_btr_subcycles), nl, n_cells, n_edges, tuple(cells), tuple(edges),
            tuple(configs[k] for k in _GRAPH_CONFIGS),
            tuple((a.data.ptr, a.shape, a.dtype.str) for a in arrays))
     entry = _graph_entry(key)
     if entry.graph is None:
-        temps = entry.temps = cp.empty((2, n_edges + 1), dtype=real) if entry.temps is None else entry.temps
-        if entry.seen < 2:
+        if entry.temps is None:
+            entry.temps = cp.empty((2, n_edges + 1), dtype=real)
+        temps = entry.temps
+        if entry.seen < 2 or entry.refused:
             launches()
             return
         entry.graph = _capture(launches)
-        if entry.graph is None:     # capture refused: this stage stays eager
+        if entry.graph is None:     # capture refused: this key stays eager from now on
+            entry.refused = True
             launches()
             return
     entry.graph.launch(stream=cp.cuda.get_current_stream())

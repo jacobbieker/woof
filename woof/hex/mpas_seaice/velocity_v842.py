@@ -95,7 +95,7 @@ _LAUNCH_OPTIONS: dict[tuple[str, tuple[str, ...]], tuple[str, ...]] = {}
 def launch_options(strict: tuple[str, ...] = COMPILE_OPTIONS) -> tuple[str, ...]:
     """``_hex_numerics.options(strict, keep_ftz=True)``, worked out once per
     numerics mode: every launch of the dynamics' units asks for it, and the
-    elastic subcycles launch some 600 kernels a step."""
+    elastic subcycles launch some 500 kernels a step (120 subcycles)."""
     key = (_hex_numerics._bind(), strict)
     options = _LAUNCH_OPTIONS.get(key)
     if options is None:
