@@ -482,7 +482,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches). The launch walks
   each level's frame rings first and the interior after, so the relaxation
   runs in dense warps (word-identical; 243 -> 145 us per nested-stage
-  launch at 49x120x150, 479 -> 121 us at 49x120x120). WRF-Solar's
+  launch at 49x120x150, 479 -> 121 us at 49x120x120; CUPTI kernel time on
+  a shared A6000, default numerics, against the merge base). WRF-Solar's
   FARMS surface irradiance (`swint_opt = 2`) is one launch per step: the
   column kernel composes the cloud fraction per cell, merges the MYNN
   boundary-layer cloud, scales the microphysics radii and writes the six
