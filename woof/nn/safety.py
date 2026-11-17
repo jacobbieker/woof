@@ -26,7 +26,7 @@ no new kernels.  A seat composes them through :class:`SafetyPolicy`:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 
@@ -83,7 +83,12 @@ def limit_outputs(y: Any, limit):
 
 
 def positive_tendency(dq: Any, q: Any, dt: float):
-    """``dq`` raised where needed so that ``q + dt * dq >= 0``."""
+    """``dq`` raised where needed so that ``q + dt * dq >= min(q, 0)``.
+
+    The model may not take moisture below zero, and where ``q`` is already
+    negative (an advection undershoot) it may not deepen it; it is not
+    asked to repair it either, which is the moisture fixer's job, not a
+    column model's."""
     xp = array_module(dq)
     floor = -xp.maximum(q, np.float32(0)) / np.float32(dt)
     return xp.maximum(dq, floor)
@@ -105,7 +110,12 @@ def column_fix(d: Any, weight: Any, target: Any = None):
 
 @dataclass
 class RangeLedger:
-    """Out-of-range column counts, kept on the device until read."""
+    """Out-of-range column counts, kept on the device until read.
+
+    On Metal the running sum is a facade array like any other: its storage
+    is encoded with the next launch (``woof.backend.facade._array.PENDING``),
+    so the chain of additions is evaluated step by step and holds no step's
+    inputs alive."""
 
     calls: int = 0
     columns: int = 0
@@ -151,10 +161,13 @@ class SafetyPolicy:
     def screen(self, x: Any, manifest, *, feature_names=None):
         """Apply the range rule to ``x``; returns ``(x, fallback_mask or None)``."""
         lo, hi = manifest.input_min, manifest.input_max
-        if self.out_of_range == "clip":
-            self.ledger.add(out_of_range_columns(x, lo, hi, self.margin))
-            return clip_inputs(x, lo, hi, self.margin), None
         mask = out_of_range_columns(x, lo, hi, self.margin)
+        if self.out_of_range == "clip":
+            # Clipping moves a finite value into range; a NaN or inf column
+            # has no value to move, so it falls back like any other.
+            self.ledger.add(mask)
+            xp = array_module(x)
+            return clip_inputs(x, lo, hi, self.margin), ~xp.isfinite(x).all(axis=0)
         self.ledger.add(mask)
         if self.out_of_range == "refuse" and bool(mask.any()):
             index, count = worst_feature(x, lo, hi, self.margin)
@@ -165,3 +178,42 @@ class SafetyPolicy:
                 "rather than extrapolate. Use \"fallback\" to keep the physics scheme there, or "
                 "retrain on data that covers this state")
         return x, mask
+
+    def constrain(self, y: Any, manifest, *, dt: float, state: Mapping[str, Any] | None = None,
+                  weight: Any = None, targets: Mapping[str, Any] | None = None):
+        """Apply the output rules to ``y`` (``[n_outputs, column]``).
+
+        ``state`` maps a field name to its current ``[level, column]``
+        values: ``qv`` (and any other moisture species) for positivity, and
+        ``exner`` for the heat fixer.  An output ``d<name>`` is a moisture
+        tendency when ``<name>`` starts with ``q``.  ``weight`` is the layer
+        mass per unit area (``[level, column]``); ``targets`` maps an output
+        name to the column integral the fixer must reproduce (absent: zero).
+        The fixer runs before positivity so that the floor has the last word.
+        """
+        if self.limit_outputs and manifest.output_limit is not None:
+            y = limit_outputs(y, manifest.output_limit)
+        state = state or {}
+        targets = targets or {}
+        pieces = []
+        touched = False
+        for spec, rows in zip(manifest.outputs, manifest.output_slices().values()):
+            value = y[rows]
+            field = spec.name[1:] if spec.name.startswith("d") else ""
+            moisture = field.startswith("q")
+            heat = field in ("theta", "t") and self.fixer == "moisture+heat"
+            if self.fixer != "none" and weight is not None and (moisture or heat):
+                w = weight[:spec.levels]
+                if heat:
+                    if "exner" not in state:
+                        raise ValueError("the moisture+heat fixer needs state['exner'] for the heat budget")
+                    w = w * state["exner"][:spec.levels]
+                value = column_fix(value, w, targets.get(spec.name))
+                touched = True
+            if self.positivity and moisture and field in state:
+                value = positive_tendency(value, state[field][:spec.levels], dt)
+                touched = True
+            pieces.append(value)
+        if not touched:
+            return y
+        return array_module(y).concatenate(pieces, axis=0)

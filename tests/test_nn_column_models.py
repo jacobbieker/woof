@@ -215,8 +215,8 @@ def test_out_of_range_policies(tmp_path):
     assert policy.ledger.summary()["columns_out_of_range"] == 2
     with pytest.raises(safety.InputOutOfRange, match="2 of 8 columns"):
         safety.SafetyPolicy(out_of_range="refuse").screen(x, m, feature_names=["a"] * m.n_inputs)
-    clipped, none = safety.SafetyPolicy(out_of_range="clip").screen(x[:, :5], m)
-    assert none is None and clipped[0, 3] == pytest.approx(m.input_max[0])
+    clipped, finite_fallback = safety.SafetyPolicy(out_of_range="clip").screen(x[:, :5], m)
+    assert not finite_fallback.any() and clipped[0, 3] == pytest.approx(m.input_max[0])
     # a margin widens the range by a fraction of it
     wide = safety.out_of_range_columns(x[:, :5], m.input_min, m.input_max, margin=0.2)
     assert not wide.any()
@@ -238,3 +238,85 @@ def test_limits_positivity_and_column_fix():
         safety.SafetyPolicy(fixer="energy")
     with pytest.raises(ValueError):
         safety.SafetyPolicy(out_of_range="ignore")
+
+
+# ------------------------------------------------------------------ review follow-ups
+def test_clip_policy_still_falls_back_on_non_finite_columns(tmp_path):
+    m = _artefact(tmp_path)
+    x = _inputs(m, columns=4)
+    x[0, 1] = m.input_max[0] + 10.0
+    x[1, 2] = np.inf
+    clipped, fallback = safety.SafetyPolicy(out_of_range="clip").screen(x, m)
+    assert fallback.tolist() == [False, False, True, False]
+    assert clipped[0, 1] == pytest.approx(m.input_max[0])
+
+
+def test_constrain_applies_limits_fixer_and_positivity(tmp_path):
+    m = _artefact(tmp_path)
+    columns = 5
+    rng = np.random.default_rng(3)
+    y = np.concatenate([rng.normal(0, 5e-4, (LEVELS, columns)),
+                        rng.normal(0, 2e-6, (LEVELS, columns))]).astype(np.float32)
+    qv = np.full((LEVELS, columns), 1e-5, dtype=np.float32)
+    weight = np.full((LEVELS, columns), 100.0, dtype=np.float32)
+    exner = np.full((LEVELS, columns), 0.9, dtype=np.float32)
+    target = np.full(columns, 1e-4, dtype=np.float32)
+    policy = safety.SafetyPolicy(fixer="moisture+heat")
+    out = policy.constrain(y, m, dt=60.0, state={"qv": qv, "exner": exner}, weight=weight,
+                           targets={"dqv": target})
+    rows = m.output_slices()
+    dtheta, dqv = out[rows["dtheta"]], out[rows["dqv"]]
+    np.testing.assert_allclose((weight * exner * dtheta).sum(axis=0), 0.0, atol=1e-6)
+    assert np.all(qv + 60.0 * dqv >= -1e-12)
+    # untouched rules give the limited array back
+    plain = safety.SafetyPolicy(positivity=False, limit_outputs=False).constrain(y, m, dt=60.0)
+    assert plain is y
+    with pytest.raises(ValueError, match="exner"):
+        policy.constrain(y, m, dt=60.0, state={"qv": qv}, weight=weight)
+
+
+def test_torch_runner_casts_float64_input(tmp_path):
+    if importlib.util.find_spec("torch") is None:
+        pytest.skip("PyTorch is not installed (recast-woof[nn-torch])")
+    m = _artefact(tmp_path)
+    x = _inputs(m).astype(np.float64)
+    y = load_column_model(m, backend="torch", device="cpu")(x)
+    assert y.dtype == np.float32
+    _close(y, _reference(m, x), m)
+
+
+def test_mlx_safetensors_reads_sequential_layer_numbering(tmp_path):
+    if importlib.util.find_spec("mlx") is None:
+        pytest.skip("MLX is not installed (Apple silicon only)")
+    import mlx.core as mx
+    import mlx.nn as nn
+    from woof.nn.models import MlxColumnModel
+    m = _artefact(tmp_path)
+    layers = nn_manifest.mlp_layers(m)
+    seq = nn.Sequential(nn.Linear(1, 1), nn.Tanh(), nn.Linear(1, 1), nn.Tanh(), nn.Linear(1, 1))
+    for module, (w, b) in zip([seq.layers[0], seq.layers[2], seq.layers[4]], layers):
+        module.weight, module.bias = mx.array(w), mx.array(b)
+    target = m.path.parent / "weights.safetensors"
+    seq.save_weights(str(target))
+    raw = json.loads(m.path.read_text())
+    raw.update(format="mlx-safetensors", weights=target.name, weights_sha256=nn_manifest._sha256(target))
+    m.path.write_text(json.dumps(raw))
+    st = load_manifest(m.path)
+    x = _inputs(st)
+    _close(MlxColumnModel(st)(x), _reference(m, x), m)
+    # a transposed layer is refused at load, not discovered inside addmm
+    seq.layers[2].weight = mx.array(layers[1][0].T.copy())
+    seq.save_weights(str(target))
+    raw["weights_sha256"] = nn_manifest._sha256(target)
+    m.path.write_text(json.dumps(raw))
+    with pytest.raises(ManifestError, match="layer 2"):
+        MlxColumnModel(load_manifest(m.path))
+
+
+def test_bridge_kinds_include_the_host_facade():
+    from woof.backend import hostfacade
+    from woof.nn import bridge
+    a = hostfacade.asarray(np.ones((2, 3), dtype=np.float32))
+    assert bridge.array_kind(a) == "host"
+    assert bridge.array_kind(np.ones(2)) == "numpy"
+    assert bridge.host_view(a).shape == (2, 3)

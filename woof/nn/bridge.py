@@ -29,22 +29,32 @@ import numpy as np
 
 
 def array_kind(array: Any) -> str:
-    """``"numpy"``, ``"facade"`` (the MLX-backed CuPy facade) or ``"cupy"``."""
+    """``"numpy"``, ``"facade"`` (the MLX-backed CuPy facade), ``"host"``
+    (the host facade, :mod:`woof.backend.hostfacade`: NumPy memory behind
+    CuPy's interface) or ``"cupy"``."""
     if isinstance(array, np.ndarray):
         return "numpy"
     if getattr(type(array), "__woof_facade__", False):
         return "facade"
+    if type(array).__module__.startswith("woof.backend.hostfacade"):
+        return "host"
     if hasattr(array, "__cuda_array_interface__"):
         return "cupy"
     raise TypeError(f"not a woof array: {type(array).__name__}")
 
 
 def array_module(array: Any):
-    """NumPy for a host array, else woof's ``cupy`` (real CuPy or the facade)."""
+    """The array's own module: NumPy, or woof's ``cupy`` (CuPy or a facade),
+    as ``cupy.get_array_module`` answers it."""
     if array_kind(array) == "numpy":
         return np
     import cupy
-    return cupy
+    return cupy.get_array_module(array)
+
+
+def host_view(array: Any) -> np.ndarray:
+    """A NumPy view of a host-facade array's memory (no copy)."""
+    return array._a
 
 
 # ---------------------------------------------------------------- PyTorch
@@ -56,6 +66,8 @@ def to_torch(array: Any):
     kind = array_kind(array)
     if kind == "numpy":
         return torch.from_numpy(np.ascontiguousarray(array))
+    if kind == "host":
+        return torch.from_numpy(np.ascontiguousarray(host_view(array)))
     if kind == "facade":
         raise TypeError("a Metal (facade) array cannot be handed to PyTorch without a host copy; "
                         "use backend = \"mlx\" on Metal")
@@ -69,6 +81,10 @@ def from_torch(tensor: Any, like: Any):
     if kind == "numpy":
         return tensor.detach().cpu().numpy()
     import cupy
+    if kind == "host":
+        return cupy.asarray(tensor.detach().cpu().numpy())
+    if not tensor.is_cuda:
+        raise TypeError("a CPU tensor cannot be handed back to a CUDA array without a copy")
     return cupy.from_dlpack(tensor.detach())
 
 
@@ -96,8 +112,9 @@ def to_mlx(array: Any):
         if array.dtype != np.float32:
             raise TypeError(f"the MLX runner takes float32 arrays, got {array.dtype}")
         return array._values()
-    if kind == "numpy":
-        return mx.array(np.ascontiguousarray(array, dtype=np.float32))
+    if kind in ("numpy", "host"):
+        host = host_view(array) if kind == "host" else array
+        return mx.array(np.ascontiguousarray(host, dtype=np.float32))
     raise TypeError("a CUDA array cannot be handed to MLX; use backend = \"torch\" on CUDA")
 
 
@@ -108,8 +125,12 @@ def from_mlx(values: Any, like: Any):
     if kind == "facade":
         from woof.backend.facade._ops import _wrap
         return _wrap(values, np.float32, fresh=True)
-    if kind == "numpy":
+    if kind in ("numpy", "host"):
         import mlx.core as mx
         mx.eval(values)
-        return np.array(values, copy=True)
+        host = np.array(values, copy=True)
+        if kind == "host":
+            import cupy
+            return cupy.asarray(host)
+        return host
     raise TypeError("an MLX result cannot be handed to a CUDA array")

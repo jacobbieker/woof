@@ -54,8 +54,9 @@ def torch_remedy() -> str:
         recipe = earth2_env.runtime()["install_recipes"][earth2_env.recipe_name()]
         line = next(c for c in recipe["commands"] if " torch==" in c)
         version = line.split("torch==", 1)[1].split()[0]
-        return (f"pip install 'recast-woof[nn-torch]' torch=={version} --index-url {recipe['torch_index']} "
-                "(the torch the Earth2 door pins, installed into woof's own interpreter)")
+        return (f"pip install torch=={version} --index-url {recipe['torch_index']} "
+                "(the torch the Earth2 door pins, installed into woof's own interpreter; "
+                "or pip install 'recast-woof[nn-torch]' for PyPI's build)")
     except Exception:
         return "pip install 'recast-woof[nn-torch]'"
 
@@ -145,16 +146,18 @@ class TorchColumnModel:
 
     def __call__(self, x):
         torch = self._torch
+        if bridge.array_kind(x) == "cupy" and self._device.type != "cuda":
+            raise ModelUnavailable(
+                f"the column model runs on {self._device} but the forecast's arrays are on the GPU; "
+                f"a CUDA build of torch is needed: {torch_remedy()}")
         with bridge.torch_stream(x), torch.inference_mode():
             t = bridge.to_torch(x)
-            if t.device != self._device:
-                t = t.to(self._device)
+            if t.device != self._device or t.dtype != torch.float32:
+                t = t.to(device=self._device, dtype=torch.float32)
             # [feature, column] -> the module's batch-first [column, feature]
             h = (t.T - self._in_mean) / self._in_std
             y = self._module(h) * self._out_std + self._out_mean
             y = y.T.contiguous().to(torch.float32)
-            if bridge.array_kind(x) == "numpy":
-                return y.cpu().numpy()
             return bridge.from_torch(y, x)
 
 
@@ -184,13 +187,8 @@ class MlxColumnModel:
                 linear.weight = mx.array(w)
                 linear.bias = mx.array(b)
         else:
-            loaded = mx.load(str(manifest.weights))
-            for index, linear in enumerate(self._layers):
-                try:
-                    linear.weight = loaded[f"layers.{index}.weight"].astype(mx.float32)
-                    linear.bias = loaded[f"layers.{index}.bias"].astype(mx.float32)
-                except KeyError:
-                    raise ManifestError(f"{manifest.weights}: layers.{index}.weight/bias missing") from None
+            for linear, (w, b) in zip(self._layers, _safetensors_layers(manifest, widths, mx)):
+                linear.weight, linear.bias = w, b
         self._act = act
         self._in_mean = mx.array(manifest.input_mean)[:, None]
         self._in_std = mx.array(manifest.input_std)[:, None]
@@ -207,6 +205,40 @@ class MlxColumnModel:
                 h = self._act(h)
         y = h * self._out_std + self._out_mean
         return bridge.from_mlx(y, x)
+
+
+def _safetensors_layers(manifest: ColumnModelManifest, widths, mx):
+    """``mlx-safetensors`` weights as ``[(w, b), ...]`` in layer order.
+
+    ``mlx.nn.Module.save_weights`` names a ``Sequential``'s layers by
+    position, activations included (``layers.0``, ``layers.2``, ...), so
+    the linear layers are taken in ascending index order, whatever the
+    gaps, and every shape is checked against the manifest's widths."""
+    import re
+    loaded = mx.load(str(manifest.weights))
+    pattern = re.compile(r"^(?:.*\.)?(\d+)\.(weight|bias)$")
+    found: dict[int, dict[str, object]] = {}
+    for key, value in loaded.items():
+        match = pattern.match(key)
+        if match is None:
+            raise ManifestError(f"{manifest.weights}: {key!r} is not a numbered layer's weight or bias")
+        found.setdefault(int(match.group(1)), {})[match.group(2)] = value
+    order = sorted(found)
+    if len(order) != len(widths) - 1:
+        raise ManifestError(f"{manifest.weights}: {len(order)} layers; the manifest's widths {widths} "
+                            f"need {len(widths) - 1}")
+    layers = []
+    for position, index in enumerate(order):
+        pair = found[index]
+        if set(pair) != {"weight", "bias"}:
+            raise ManifestError(f"{manifest.weights}: layer {index} needs both weight and bias")
+        w, b = pair["weight"].astype(mx.float32), pair["bias"].astype(mx.float32)
+        want = (widths[position + 1], widths[position])
+        if tuple(w.shape) != want or tuple(b.shape) != (want[0],):
+            raise ManifestError(f"{manifest.weights}: layer {index} has weight {tuple(w.shape)} bias "
+                                f"{tuple(b.shape)}; the manifest needs {want}")
+        layers.append((w, b))
+    return layers
 
 
 def default_backend() -> str:
