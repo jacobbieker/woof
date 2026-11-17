@@ -444,8 +444,9 @@ def selection_carrier(config):
     where the block builds it.  A catalog that resolves selections must
     carry such a carrier, or that token is refused on a run that declared
     the block.  Any other carrier (disabled, terrain only, the engine's
-    default terrain row) selects exactly what no carrier selects, so it
-    stays off the catalog and those routes keep the calls they made.
+    default terrain row, lakes only) selects exactly what no carrier
+    selects, so it stays off the catalog and those routes keep the calls
+    they made.
     """
     if config is None:
         return None
@@ -456,7 +457,8 @@ def selection_carrier(config):
         # is read by every selection the carrier reaches.
         return config
     if (getattr(config, "enabled", False)
-            and getattr(config, "fields", "auto") != "terrain"):
+            and getattr(config, "fields", "auto") not in ("terrain",
+                                                          "lakes")):
         return config
     return None
 

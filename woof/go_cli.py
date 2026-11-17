@@ -6296,12 +6296,18 @@ def _go_config_main(args, *, observer=None) -> int:
         raise GoRefusal("--run-seconds requires WRF inputs")
     _at_flag_storm_nests(args)
     if getattr(args, "branch_from", None) is not None:
+        if getattr(args, "lakes", None) is not None:
+            raise GoRefusal("--lakes does not apply to --branch-from, which launches branches "
+                            "of an existing run. Next: drop --lakes.")
         from woof.ensemble.mass_launcher import run as run_branches
         return run_branches(args)
     # A future stage-only owner can answer before GPU admission. None is
     # the frozen no-op result; all existing callers take the same route.
     stage_result = SpeedHooks.stage_only(args, None)
     if stage_result is not None:
+        if getattr(args, "lakes", None) is not None:
+            raise GoRefusal("--lakes does not apply to a stage-only launch, which never "
+                            "reaches the lake configuration. Next: drop --lakes.")
         return stage_result
     # An acquisition owner can materialize its source-only domain using the
     # same wizard as CONFIG launches. The registry chooses it, not source ids.

@@ -94,15 +94,17 @@ def _baseline(lakes=(GLACIER, ROCK, REAL, LAKE_TO_SEA)):
     }
 
 
-def _stub(monkeypatch, seen):
+_PLACEMENTS = ((GLACIER, 15), (ROCK, 16), (REAL, 21), (NEW_WATER, 21),
+               (SEA_TO_LAKE, 21), (LAKE_TO_SEA, 17))
+
+
+def _stub(monkeypatch, seen, placements=_PLACEMENTS):
     def categories(source, grid, mapping, *, category_count):
         ny, nx = grid.e_sn - 1, grid.e_we - 1
         halo = (ny - N) // 2
         fractions = np.zeros((category_count, ny, nx))
         fractions[9] = 1.0
-        for (row, col), category in ((GLACIER, 15), (ROCK, 16), (REAL, 21),
-                                     (NEW_WATER, 21), (SEA_TO_LAKE, 21),
-                                     (LAKE_TO_SEA, 17)):
+        for (row, col), category in placements:
             fractions[:, row + halo, col + halo] = 0.0
             fractions[category - 1, row + halo, col + halo] = 1.0
         return fractions
@@ -220,3 +222,192 @@ def test_a_domain_the_land_cover_does_not_reach_is_refused(tmp_path,
                                        fields="lakes"),
             domain_id=1, case_date=date(2026, 11, 9),
             landuse_attrs=MODIS21_ATTRS)
+
+
+def _lakes(**kwargs):
+    return HighresStaticConfig(enabled=True, cache_root=kwargs.pop("root"),
+                               fields="lakes", **kwargs)
+
+
+def test_lake_depth_follows_the_changed_cells(tmp_path, monkeypatch):
+    """``woof go --lakes clm`` reads LAKE_DEPTH: a demoted cell takes the
+    WPS land fill, a promoted one the nearest kept lake's depth."""
+    _stub(monkeypatch, {})
+    baseline = _baseline()
+    depth = np.full((N, N), 10.0)
+    depth[REAL], depth[LAKE_TO_SEA] = 55.0, 7.0
+    depth[GLACIER], depth[ROCK] = 30.0, 31.0
+    baseline["LAKE_DEPTH"] = depth
+    fields, receipt = apply_highres_statics(
+        baseline, _grid(), config=_lakes(root=tmp_path), domain_id=2,
+        case_date=date(2026, 11, 9), landuse_attrs=MODIS21_ATTRS)
+    after = fields["LAKE_DEPTH"]
+    assert after[GLACIER] == 10.0 and after[ROCK] == 10.0
+    # (5,5) -> (8,8) is 4.2 km, inside WPS's five-pixel search reach.
+    assert after[NEW_WATER] == 55.0
+    unchanged = np.ones((N, N), dtype=bool)
+    unchanged[GLACIER] = unchanged[ROCK] = unchanged[NEW_WATER] = False
+    np.testing.assert_array_equal(after[unchanged], depth[unchanged])
+    record = receipt["lake_check"]["lake_depth"]
+    assert record["demoted_to_fill_cells"] == 2
+    assert record["promoted_from_nearest_lake_cells"] == 1
+    assert "LAKE_DEPTH" in receipt["fields_replaced"]
+
+
+def test_a_promoted_lake_beyond_the_search_reach_takes_the_fill(
+        tmp_path, monkeypatch):
+    _stub(monkeypatch, {})
+    baseline = _baseline()
+    baseline["LAKE_DEPTH"] = np.where(baseline["LU_INDEX"] == 21, 55.0, 10.0)
+    grid = LambertGrid(ref_lat=46.5, ref_lon=8.0, truelat1=30.0,
+                       truelat2=60.0, stand_lon=8.0, dx=3000.0, dy=3000.0,
+                       e_we=N + 1, e_sn=N + 1)
+    fields, receipt = apply_highres_statics(
+        baseline, grid, config=_lakes(root=tmp_path), domain_id=1,
+        case_date=date(2026, 11, 9), landuse_attrs=MODIS21_ATTRS)
+    assert fields["LAKE_DEPTH"][NEW_WATER] == 10.0
+    assert receipt["lake_check"]["lake_depth"]["promoted_to_fill_cells"] == 1
+
+
+def test_unchanged_cells_are_the_baseline_bit_for_bit(tmp_path, monkeypatch):
+    _stub(monkeypatch, {})
+    baseline = _baseline()
+    # A TMN no recompute reproduces, and a float32 field.
+    baseline["TMN"] = np.where(baseline["LANDMASK"] > 0, 281.25, 0.0)
+    baseline["SNOALB"] = baseline["SNOALB"].astype(np.float32)
+    fields, receipt = apply_highres_statics(
+        baseline, _grid(), config=_lakes(root=tmp_path), domain_id=2,
+        case_date=date(2026, 11, 9), landuse_attrs=MODIS21_ATTRS)
+    changed = np.zeros((N, N), dtype=bool)
+    changed[GLACIER] = changed[ROCK] = changed[NEW_WATER] = True
+    for name, before in baseline.items():
+        after = np.asarray(fields[name])
+        assert after.dtype == np.asarray(before).dtype, name
+        np.testing.assert_array_equal(after[..., ~changed],
+                                      np.asarray(before)[..., ~changed],
+                                      err_msg=name)
+    assert fields["TMN"][GLACIER] != 281.25
+    assert "TMN" in receipt["fields_replaced"]
+    assert "smooth-desmooth" not in receipt["override_audit"]["method"]
+    assert "terrain" not in receipt["override_audit"]
+    assert receipt["landcover"]["crosswalk_target"] == (
+        "MODIFIED_IGBP_MODIS_NOAH, 21 categories")
+
+
+def test_nlcd_open_water_joined_to_the_sea_is_not_a_lake(tmp_path,
+                                                         monkeypatch):
+    """Annual NLCD has one open-water class: the strip the 30-arc-second
+    coast calls land and NLCD calls water is the sea, not a lake."""
+    coast, inland = (6, 2), (6, 8)
+    _stub(monkeypatch, {}, placements=((coast, 21), (inland, 21)))
+    baseline = _baseline(lakes=())
+    for row in range(N):
+        for col in (0, 1):
+            baseline["LANDUSEF"][:, row, col] = 0.0
+            baseline["LANDUSEF"][16, row, col] = 1.0
+            baseline["LANDMASK"][row, col] = 0.0
+            baseline["LU_INDEX"][row, col] = 17.0
+    grid = LambertGrid(ref_lat=40.0, ref_lon=-100.0, truelat1=30.0,
+                       truelat2=60.0, stand_lon=-100.0, dx=1000.0, dy=1000.0,
+                       e_we=N + 1, e_sn=N + 1)
+    fields, receipt = apply_highres_statics(
+        baseline, grid, config=_lakes(root=tmp_path,
+                                      landcover_source="annual-nlcd"),
+        domain_id=1, case_date=date(2020, 6, 1), landuse_attrs=MODIS21_ATTRS)
+    assert fields["LU_INDEX"][coast] == 10.0
+    assert fields["LU_INDEX"][inland] == 21.0
+    check = receipt["lake_check"]
+    assert check["promoted_cells"] == 1
+    assert check["sea_connected_water_not_promoted_cells"] == 1
+
+
+def test_lakes_reads_no_terrain_source(tmp_path, monkeypatch):
+    """A pinned terrain source the domain leaves (3DEP over the Alps) is
+    not resolved, refused or routed: terrain is the baseline."""
+    from woof.static.highres_production import _resolve_plan
+    from woof.static.highres_fetch import domain_footprint
+    _stub(monkeypatch, {})
+    config = _lakes(root=tmp_path, terrain_source="usgs-3dep-13as")
+    assert _resolve_plan(config, domain_footprint(_grid(), HALO)) == (
+        "lakes", None)
+    fields, receipt = apply_highres_statics(
+        _baseline(), _grid(), config=config, domain_id=2,
+        case_date=date(2026, 11, 9), landuse_attrs=MODIS21_ATTRS)
+    assert receipt["status"] == "APPLIED"
+    assert "terrain_source_selection" not in receipt
+
+
+def test_lakes_admits_no_land_cover_token_and_carries_no_selection(tmp_path):
+    from woof.static.build import _highres_landcover_on_slot
+    from woof.static.terrain_smoothing import selection_carrier
+    config = _lakes(root=tmp_path)
+    assert _highres_landcover_on_slot(config, None, 0,
+                                      "cglc_modis_lcz+default") is None
+    assert selection_carrier(config) is None
+    full = HighresStaticConfig(enabled=True, cache_root=tmp_path,
+                               fields="all")
+    assert selection_carrier(full) is full
+
+
+def test_lcz_pervious_split_reaches_the_lakes_build(tmp_path, monkeypatch):
+    seen = {}
+    _stub(monkeypatch, seen)
+    plain = highres_module.resample_mapped_categories
+
+    def split(source, grid, mapping, *, category_count):
+        seen["split"] = True
+        return plain(source, grid, mapping, category_count=category_count)
+
+    monkeypatch.setattr(highres_module, "resample_lcz_pervious_split", split)
+    _, receipt = apply_highres_statics(
+        _baseline(), _grid(),
+        config=_lakes(root=tmp_path, lcz_pervious="split"), domain_id=2,
+        case_date=date(2026, 11, 9), landuse_attrs=MODIS21_ATTRS)
+    assert seen.get("split") is True
+    assert receipt["override_audit"]["lcz_pervious"]["rule"] == "split"
+
+
+def test_a_footprint_outside_the_raster_keeps_its_lakes(tmp_path,
+                                                        monkeypatch):
+    """The real land-cover leg (not stubbed): a footprint wholly outside
+    the published raster keeps the baseline, as fields = "all" does."""
+    from woof.static import highres_production as production
+    from woof.static.highres_fetch import CoverageError
+
+    class _Raster:
+        def receipt(self):
+            return {"path": "stub"}
+
+    monkeypatch.setattr(production, "fetch_landcover",
+                        lambda source, year, root, urlopen=None:
+                        ([], _Raster()))
+
+    def outside(raster, bbox, root):
+        raise CoverageError("footprint outside the stub raster")
+
+    monkeypatch.setattr(production, "derive_landcover_window", outside)
+    baseline = _baseline()
+    fields, receipt = apply_highres_statics(
+        baseline, _grid(), config=_lakes(root=tmp_path), domain_id=2,
+        case_date=date(2026, 11, 9), landuse_attrs=MODIS21_ATTRS)
+    assert receipt["status"] == "APPLIED"
+    assert receipt["cells_replaced"]["total"] == 0
+    assert "outside the published land-cover raster" in (
+        receipt["unchanged_reason"])
+    assert receipt["fetch"]["landcover_window_outside_raster"] == (
+        "footprint outside the stub raster")
+    for name in ("LU_INDEX", "LANDMASK", "LANDUSEF"):
+        np.testing.assert_array_equal(fields[name], baseline[name])
+
+
+def test_lakes_messages_name_the_land_cover_not_terrain(tmp_path):
+    from woof.static.highres_production import (_refusal_remedy,
+                                                 _scoped_plan_line)
+    config = _lakes(root=tmp_path, terrain_source="copernicus-dem-glo30",
+                    max_dx_m=1500.0)
+    line = _scoped_plan_line(config, _grid(), 2)
+    assert "lake extent comes from the cglc-modis-lcz" in line
+    assert "terrain comes from" not in line and "tile(s)" not in line
+    remedy = _refusal_remedy(config)
+    assert "land-cover source" in remedy
+    assert "declared terrain source" not in remedy
