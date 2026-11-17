@@ -958,8 +958,15 @@ FROZEN_MODULE_DIGESTS = {
         # the integer cell mapping moved; every cell evaluates the same
         # statements (tests/test_lbc_relax_multi.py against the per-row path,
         # both backends and modes).  Previously a5bc696d/b83b8ec8.
-        '988a312e61caf30fbde73e7c1645872ff820fe4858a1d6cb14b54c3fb4f6ac53',
-        '66abb703b2f2a5031aca210619aae5b23a4bff848f5e31ac54df2543bfdd5645'),
+        # Re-pinned for finalize_state_multi: one spec_bdy_final's forced
+        # fields in one table-driven launch.  finalize_state_field's body
+        # moved verbatim into the device function finalize_state_cell, which
+        # the per-field kernel and the table kernel both call, so every cell
+        # evaluates the same statements (tests/test_lbc_finalize_multi.py
+        # against the per-field launches, both backends, fast/strict/exact).
+        # Previously 988a312e/66abb703.
+        '41efd3f809ff2d746aff66c20896ce5812b32ea675ac649a0bf0871c6d9bf298',
+        '171a660d6c4a537de8e6a73d9ecf215d163a1449714d48413f5f91dbfe4ab94b'),
     'morrison': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
