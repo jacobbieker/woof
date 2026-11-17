@@ -612,8 +612,9 @@ STATE_INFRA_ATTRS = frozenset({
     # The opt-in obstacles' device face lists and host receipt
     # (woof.core.obstacles.attach): rebuilt from obstacle_file and the base
     # state at the first stage, and the product's bytes are bound by the
-    # physics setup identity.
-    "_obstacles", "_obstacles_receipt",
+    # physics setup identity; the expected digest is that binding, pinned
+    # by the restore for the attach to check.
+    "_obstacles", "_obstacles_receipt", "_obstacles_expected_sha256",
     # Config binds speed; restored U/V already use this frame (see restore).
     "_moving_frame_velocity", "_moving_frame_initialized",
     # The HAILCAST generation a resumed run keeps (woof.core.hail
@@ -6414,6 +6415,13 @@ def _require_physics_setup_match(header: dict, state, cfg, path) -> None:
             f"restart file {path} physics setup schema "
             f"{stored.get('schema_version')!r} is not supported by this "
             f"build (expected {PHYSICS_SETUP_SCHEMA_VERSION})")
+    # A resumed obstacle domain attaches at its first stage, after this
+    # check: pin the product the checkpoint bound, so the attach refuses a
+    # file replaced in between (woof.core.obstacles.attach).
+    pinned = stored.get("obstacles")
+    if (isinstance(pinned, Mapping)
+            and getattr(state, "_obstacles", False) is False):
+        state._obstacles_expected_sha256 = pinned.get("product_sha256")
     try:
         live = physics_setup_identity(state, cfg)
         # Serialisability is part of the contract, and the comparison

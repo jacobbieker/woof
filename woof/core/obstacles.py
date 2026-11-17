@@ -250,6 +250,14 @@ def attach(state, cfg, morph=None) -> ObstacleFaces | None:
         if sha256_file(path, block_bytes=1024 * 1024) != digest:
             raise RuntimeError(f"obstacle_file {str(path)!r} changed while "
                                "it was read")
+    # A restored domain loads the product its checkpoint bound
+    # (woof.io.restart._require_physics_setup_match pins the digest).
+    expected = getattr(state, "_obstacles_expected_sha256", None)
+    if expected is not None and digest != expected:
+        raise RuntimeError(
+            f"obstacle_file {str(cfg.obstacle_file)!r} is not the buildings "
+            "product the checkpoint this domain resumed from was written "
+            f"with (sha256 {digest} != {expected})")
     periodic_x = not (cfg.open_x or cfg.specified or cfg.nested)
     periodic_y = not (cfg.open_y or cfg.specified or cfg.nested)
     fu, fv, fw, receipt = build_coefficients(

@@ -270,13 +270,26 @@ def _restart(tmp):
         return {name: cp.asnumpy(getattr(state, name)).view(np.uint32)
                 for name in ("u", "v", "w", "thp", "php", "mup", "p")}
 
+    import shutil
+
     write_product(product, morph(10.0))
+    original = tmp / "original.nc"
+    shutil.copyfile(product, original)
     whole = fresh()
     obstacles.attach(whole, cfg)
     assert whole._obstacles_receipt["product_sha256"]
     run_steps(whole, cfg, n=6)
+    # Replaced after the attach: the checkpoint binds what the run loaded.
+    write_product(product, morph(14.0))
     path = restart.write_restart(tmp / "obstacles.npz", whole, cfg)
     run_steps(whole, cfg, n=6)
+    try:
+        restart.restore_restart(path, fresh(), cfg)
+    except restart.RestartMismatchError as exc:
+        assert "obstacles" in str(exc), exc
+    else:
+        raise AssertionError("a changed buildings product resumed")
+    shutil.copyfile(original, product)
     resumed = fresh()
     restart.restore_restart(path, resumed, cfg)
     run_steps(resumed, cfg, n=6)
@@ -284,13 +297,16 @@ def _restart(tmp):
     a, b = words(whole), words(resumed)
     for name in a:
         assert np.array_equal(a[name], b[name]), name
+    # Replaced between the restore and the first resumed stage.
+    late = fresh()
+    restart.restore_restart(path, late, cfg)
     write_product(product, morph(14.0))
     try:
-        restart.restore_restart(path, fresh(), cfg)
-    except restart.RestartMismatchError as exc:
-        assert "physics" in str(exc).lower(), exc
+        run_steps(late, cfg, n=1)
+    except RuntimeError as exc:
+        assert "checkpoint" in str(exc), exc
     else:
-        raise AssertionError("a changed buildings product resumed")
+        raise AssertionError("a product replaced after the restore loaded")
     print("RESTARTED")
 
 
