@@ -225,8 +225,8 @@ def certified_unrepinned_report(name: str, receipt: dict, moved: dict, record: d
     parts = "; ".join(f"{pin} {was[:8]} -> {now[:8]}" for pin, (was, now) in sorted(moved.items()))
     pending = ""
     if record.get("rerecord_on"):
-        pending = (f" STALE, pending a re-record on the {record['rerecord_on']} (the only card "
-                   f"that can re-record it); {record['stand_in']} gates kernel edits meanwhile.")
+        pending = (f" STALE, pending a re-record on: {record['rerecord_on']} (user ruling "
+                   f"2026-11-17); {record['stand_in']} gates kernel edits meanwhile.")
     return (f"{name} ({receipt['gpu']}, sm_{major}{minor}) is NOT re-pinned: {parts}, "
             f"staled by {record['staled_by'][:9]} ({record['reason']}).{pending} Its committed words "
             "still replay; a capture on that card with tools/advect_wrf471_oracle/"

@@ -22,7 +22,7 @@
     "advection": "075f8edde330612422da3a096fb83f882920449da97162d51d9c0a7b3457211d",
     "pd_advection": "59139c1b2c592a4f3b098976ef11d5a749d93f7ec29f2cd7b2c7332db5767766"
    },
-   "reason": "zero_first (advection.cu, pd_advection.cu) moved the source; no Blackwell card was available to recapture (decision 2026-11-14). tests/test_advection_zero_first.py holds zero_first word-identical to fill-then-accumulate on CUDA and Metal; STALE pending a re-record on an RTX 5090 (only that card can re-record it, user 2026-11-17): gpu-receipt-sm86.json (RTX A6000) gates kernel edits meanwhile",
+   "reason": "zero_first (advection.cu, pd_advection.cu) moved the source; no Blackwell card was available to recapture (decision 2026-11-14). tests/test_advection_zero_first.py holds zero_first word-identical to fill-then-accumulate on CUDA and Metal",
    "rerecord_on": "NVIDIA GeForce RTX 5090",
    "staled_by": "9c318097754f31ff351f0bd888b130545d9b9e0e",
    "stand_in": "gpu-receipt-sm86.json"

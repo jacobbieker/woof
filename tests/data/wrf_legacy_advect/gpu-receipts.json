@@ -25,8 +25,8 @@
     "pd_advection": "59139c1b2c592a4f3b098976ef11d5a749d93f7ec29f2cd7b2c7332db5767766",
     "pd_vertical_sl": "dad6c8c0d6c5bf32a602d324c88685dd788faedfe2a44368df32623782cd9733"
    },
-   "reason": "zero_first (advection.cu, pd_advection.cu) moved the source; no Blackwell card was available to recapture (decision 2026-11-14). tests/test_advection_zero_first.py holds zero_first word-identical to fill-then-accumulate on CUDA and Metal; STALE pending a re-record on an RTX 5090 under NVRTC 13.2 (only an sm_120 card can re-record it; user 2026-11-17): gpu-receipt-sm86.json (RTX A6000) gates kernel edits meanwhile",
-   "rerecord_on": "NVIDIA GeForce RTX 5090 under NVRTC 13.2 (an sm_120 card; this receipt was measured on an RTX PRO 6000 Blackwell Server Edition)",
+   "reason": "zero_first (advection.cu, pd_advection.cu) moved the source; no Blackwell card was available to recapture (decision 2026-11-14). tests/test_advection_zero_first.py holds zero_first word-identical to fill-then-accumulate on CUDA and Metal",
+   "rerecord_on": "NVIDIA GeForce RTX 5090 under NVRTC 13.2 (measured on an RTX PRO 6000 Blackwell Server Edition)",
    "staled_by": "9c318097754f31ff351f0bd888b130545d9b9e0e",
    "stand_in": "gpu-receipt-sm86.json"
   },
@@ -36,7 +36,7 @@
     "pd_advection": "59139c1b2c592a4f3b098976ef11d5a749d93f7ec29f2cd7b2c7332db5767766",
     "pd_vertical_sl": "dad6c8c0d6c5bf32a602d324c88685dd788faedfe2a44368df32623782cd9733"
    },
-   "reason": "zero_first (advection.cu, pd_advection.cu) moved the source; no Blackwell card was available to recapture (decision 2026-11-14). tests/test_advection_zero_first.py holds zero_first word-identical to fill-then-accumulate on CUDA and Metal; STALE pending a re-record on an RTX 5090 (only that card can re-record it, user 2026-11-17): gpu-receipt-sm86.json (RTX A6000) gates kernel edits meanwhile",
+   "reason": "zero_first (advection.cu, pd_advection.cu) moved the source; no Blackwell card was available to recapture (decision 2026-11-14). tests/test_advection_zero_first.py holds zero_first word-identical to fill-then-accumulate on CUDA and Metal",
    "rerecord_on": "NVIDIA GeForce RTX 5090",
    "staled_by": "9c318097754f31ff351f0bd888b130545d9b9e0e",
    "stand_in": "gpu-receipt-sm86.json"
