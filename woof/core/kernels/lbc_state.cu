@@ -993,8 +993,12 @@ real coupled_old_target(int kind, int k, int j, int i,
     return __fmul_rn(ch, target[idx]);
 }
 
-extern "C" __global__
-void finalize_state_field(
+// One cell of finalize_state_field (WRF spec_bdy_final): the per-field
+// kernel and the table-driven finalize_state_multi evaluate exactly these
+// statements for a cell, so their words agree by construction.
+static __device__ __forceinline__
+void finalize_state_cell(
+    int tid, int k, int j, int i,
     real* __restrict__ target,
     const real* __restrict__ old_mup_frame,
     const real* __restrict__ mub2d,
@@ -1017,19 +1021,9 @@ void finalize_state_field(
     const real* __restrict__ north,
     const real* __restrict__ north_t,
     real dtbc, int width, int spec_zone, int has_msf, int thb_3d,
-#if GPUWM_WRF_EXACT
-    int kind, int nz, int ny, int nx, int mny, int mnx,
+    int kind, int ny, int nx, int mny, int mnx,
     const real* __restrict__ muts_wrf)
-#else
-    int kind, int nz, int ny, int nx, int mny, int mnx)
-#endif
 {
-    int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    if (tid >= nz*ny*nx) return;
-    int k = tid/(ny*nx);
-    int rem = tid - k*ny*nx;
-    int j = rem/nx;
-    int i = rem - j*nx;
 #if GPUWM_WRF_EXACT
     // WRF spec_bdy_final writes the specified rows only:
     // field = xmsf*bfield/xmu, bfield = bdy + dtbc*bdy_tend, xmsf the
@@ -1130,6 +1124,126 @@ void finalize_state_field(
         }
         target[tid] = result;
     }
+}
+
+extern "C" __global__
+void finalize_state_field(
+    real* __restrict__ target,
+    const real* __restrict__ old_mup_frame,
+    const real* __restrict__ mub2d,
+    const real* __restrict__ mup,
+    const real* __restrict__ thb,
+    const real* __restrict__ scalar_unused,
+    const real* __restrict__ c1h,
+    const real* __restrict__ c2h,
+    const real* __restrict__ c1f,
+    const real* __restrict__ c2f,
+    const real* __restrict__ msft,
+    const real* __restrict__ msfu,
+    const real* __restrict__ msfv,
+    const real* __restrict__ west,
+    const real* __restrict__ west_t,
+    const real* __restrict__ east,
+    const real* __restrict__ east_t,
+    const real* __restrict__ south,
+    const real* __restrict__ south_t,
+    const real* __restrict__ north,
+    const real* __restrict__ north_t,
+    real dtbc, int width, int spec_zone, int has_msf, int thb_3d,
+#if GPUWM_WRF_EXACT
+    int kind, int nz, int ny, int nx, int mny, int mnx,
+    const real* __restrict__ muts_wrf)
+#else
+    int kind, int nz, int ny, int nx, int mny, int mnx)
+#endif
+{
+    int tid = blockIdx.x*blockDim.x + threadIdx.x;
+    if (tid >= nz*ny*nx) return;
+    int k = tid/(ny*nx);
+    int rem = tid - k*ny*nx;
+    int j = rem/nx;
+    int i = rem - j*nx;
+    finalize_state_cell(
+        tid, k, j, i, target, old_mup_frame, mub2d, mup, thb,
+        scalar_unused, c1h, c2h, c1f, c2f, msft, msfu, msfv, west, west_t,
+        east, east_t, south, south_t, north, north_t, dtbc, width,
+        spec_zone, has_msf, thb_3d, kind, ny, nx, mny, mnx,
+#if GPUWM_WRF_EXACT
+        muts_wrf);
+#else
+        nullptr);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// finalize_state_multi: every field of one spec_bdy_final in ONE launch.
+//
+// apply_state_boundary_values launched finalize_state_field once per forced
+// field (u, v, theta, phi, the supplied scalars, w on a nest), each over its
+// whole array.  Here each field is one blockIdx.y of a single launch; a
+// cell evaluates finalize_state_cell, the per-field kernel's own body, with
+// the per-field kernel's arguments read from a by-value table of words
+// (the rk_copy_words / state_relaxation_multi form), so every word equals
+// the per-field launch's by construction.  The fields' arrays are distinct
+// and a cell reads and writes only its own target word, so the rows are
+// independent.
+//
+// header words: old_mup_frame, mub2d, mup, thb, c1h, c2h, c1f, c2f, msft,
+// msfu, msfv, muts_wrf (0 = null: the re-coupling finalizer); row words:
+// target, west, west_t, east, east_t, south, south_t, north, north_t,
+// kind | width << 32, nz | ny << 32, nx.
+// ---------------------------------------------------------------------------
+
+#define LBC_FINAL_MAX_ROWS 24
+#define LBC_FINAL_HEADER_WORDS 12
+#define LBC_FINAL_ROW_WORDS 12
+
+struct LbcFinalTable {
+    unsigned long long header[LBC_FINAL_HEADER_WORDS];
+    unsigned long long rows[LBC_FINAL_MAX_ROWS][LBC_FINAL_ROW_WORDS];
+};
+
+#if __CUDA_ARCH__ >= 700
+#define LBC_FINAL_TABLE_PARAM const __grid_constant__ LbcFinalTable
+#else
+#define LBC_FINAL_TABLE_PARAM const LbcFinalTable
+#endif
+
+extern "C" __global__
+void finalize_state_multi(LBC_FINAL_TABLE_PARAM table, int nrows, real dtbc,
+                          int spec_zone, int has_msf, int thb_3d,
+                          int mny, int mnx)
+{
+    const int r = blockIdx.y;
+    if (r >= nrows) return;
+    const unsigned long long* row = table.rows[r];
+    const int kind = (int)(row[9] & 0xffffffffull);
+    const int width = (int)(row[9] >> 32);
+    const int nz = (int)(row[10] & 0xffffffffull);
+    const int ny = (int)(row[10] >> 32);
+    const int nx = (int)(row[11] & 0xffffffffull);
+    // The per-field kernel's int index arithmetic: the host keeps every
+    // row below 2^31 cells, as that launch requires.
+    int tid = blockIdx.x*blockDim.x + threadIdx.x;
+    if (tid >= nz*ny*nx) return;
+    int k = tid/(ny*nx);
+    int rem = tid - k*ny*nx;
+    int j = rem/nx;
+    int i = rem - j*nx;
+    finalize_state_cell(
+        tid, k, j, i, (real*)row[0],
+        (const real*)table.header[0], (const real*)table.header[1],
+        (const real*)table.header[2], (const real*)table.header[3],
+        (const real*)row[0],
+        (const real*)table.header[4], (const real*)table.header[5],
+        (const real*)table.header[6], (const real*)table.header[7],
+        (const real*)table.header[8], (const real*)table.header[9],
+        (const real*)table.header[10],
+        (const real*)row[1], (const real*)row[2], (const real*)row[3],
+        (const real*)row[4], (const real*)row[5], (const real*)row[6],
+        (const real*)row[7], (const real*)row[8],
+        dtbc, width, spec_zone, has_msf, thb_3d, kind, ny, nx, mny, mnx,
+        (const real*)table.header[11]);
 }
 
 // ---------------------------------------------------------------------------

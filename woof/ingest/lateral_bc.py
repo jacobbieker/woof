@@ -3091,6 +3091,101 @@ def _launch_finalize_field(state, name, boundary, old_mup_frame, dtbc,
         + _wrf_final_muts_arg(state))
 
 
+#: Rows per finalize_state_multi launch (kernels/lbc_state.cu
+#: LBC_FINAL_MAX_ROWS); more fields take further launches.
+LBC_FINAL_MULTI_MAX_ROWS = 24
+_LBC_FINAL_HEADER_WORDS = 12
+_LBC_FINAL_ROW_WORDS = 12
+#: ``WOOF_LBC_FINAL_MULTI=0`` keeps one finalize_state_field launch per
+#: forced field, for A/B and byte-identity checks.
+LBC_FINAL_MULTI_ENABLED = os.environ.get("WOOF_LBC_FINAL_MULTI", "1") != "0"
+_FINAL_KINDS = {"u": 0, "v": 1, "theta": 2, "phi": 3, "qv": 5, "w": 6}
+
+
+def _launch_finalize_multi(state, names, device_interval, old_mup_frame,
+                           dtbc, spec_zone) -> bool:
+    """Every forced field of one ``spec_bdy_final`` in one launch
+    (kernels/lbc_state.cu ``finalize_state_multi``).
+
+    Each field is a row of a by-value table naming the arrays and shape
+    :func:`_launch_finalize_field` passes; a cell evaluates that kernel's
+    own body (``finalize_state_cell``), so the words are the per-field
+    launches' by construction.  Returns False, having launched nothing,
+    when a field cannot take the table (a non-contiguous or non-float32
+    array, 2^31 cells or more, overlapping targets); the caller then runs
+    the per-field launches.
+    """
+    import cupy as cp
+
+    if not names:
+        return True
+
+    def device(a):
+        return (isinstance(a, cp.ndarray) and a.dtype == np.dtype(np.float32)
+                and a.flags.c_contiguous)
+
+    muts = _wrf_final_muts_arg(state)
+    muts_ptr = 0
+    if muts and isinstance(muts[0], cp.ndarray):
+        if not device(muts[0]):
+            return False
+        muts_ptr = int(muts[0].data.ptr)
+    header = (old_mup_frame, state.mub2d, state.mup, state.thb, state.c1h,
+              state.c2h, state.c1f, state.c2f, state.msft, state.msfu,
+              state.msfv)
+    if not all(device(a) for a in header):
+        return False
+    rows = []
+    spans = []
+    for name in names:
+        target = getattr(state, {"theta": "thp", "phi": "php"}.get(name, name))
+        boundary = device_interval.fields[name]
+        sides = []
+        for side in (boundary.west, boundary.east,
+                     boundary.south, boundary.north):
+            sides.extend((side.value, side.tendency))
+        if not device(target) or not all(device(a) for a in sides):
+            return False
+        if target.ndim != 3 or int(target.size) >= 2**31:
+            return False
+        rows.append((name, target, sides))
+        spans.append((int(target.data.ptr),
+                      int(target.data.ptr) + int(target.nbytes)))
+    # The rows run concurrently: no two targets may share a byte.
+    spans.sort()
+    if not all(hi <= lo for (_l, hi), (lo, _h) in zip(spans, spans[1:])):
+        return False
+    mny, mnx = (int(n) for n in state.mup.shape)
+    kernel = get_kernel("lbc_state", "finalize_state_multi")
+    for start in range(0, len(rows), LBC_FINAL_MULTI_MAX_ROWS):
+        chunk = rows[start:start + LBC_FINAL_MULTI_MAX_ROWS]
+        table = np.zeros(
+            _LBC_FINAL_HEADER_WORDS
+            + LBC_FINAL_MULTI_MAX_ROWS * _LBC_FINAL_ROW_WORDS,
+            dtype=np.uint64)
+        table[:len(header)] = [int(a.data.ptr) for a in header]
+        table[len(header)] = muts_ptr
+        max_count = 0
+        for r, (name, target, sides) in enumerate(chunk):
+            nz, ny, nx = (int(n) for n in target.shape)
+            width = int(sides[0].shape[-1])
+            kind = _FINAL_KINDS.get(name, 7)
+            words = [int(target.data.ptr)]
+            words.extend(int(a.data.ptr) for a in sides)
+            words.extend((kind | (width << 32), nz | (ny << 32), nx))
+            at = _LBC_FINAL_HEADER_WORDS + r * _LBC_FINAL_ROW_WORDS
+            table[at:at + len(words)] = words
+            max_count = max(max_count, nz * ny * nx)
+        # By value, as state_relaxation_multi passes its rows.
+        blob = table.view(np.dtype(('V', table.nbytes)))
+        kernel(((max_count + _THREADS - 1) // _THREADS, len(chunk)),
+               (_THREADS,),
+               (blob, np.int32(len(chunk)), cp.float32(dtbc),
+                np.int32(spec_zone), np.int32(state.has_msf),
+                np.int32(state.thb.ndim == 3), np.int32(mny), np.int32(mnx)))
+    return True
+
+
 def _wrf_final_muts_arg(state) -> tuple:
     """Strict mode: WRF's grid%muts for spec_bdy_final, or a null pointer.
 
@@ -3204,13 +3299,16 @@ def apply_state_boundary_values(state, cfg, elapsed_seconds=None) -> None:
     names = (("u", "v", *specified_w, "theta", "phi", *scalars)
              if cfg.specified else
              tuple(name for name in device_interval.fields if name != "mu"))
-    for name in names:
-        if name not in device_interval.fields or (
-                name == "qv" and state.qv is None):
-            continue
-        _launch_finalize_field(
-            state, name, device_interval.fields[name], old_mup_frame,
-            dtbc, cfg.spec_zone)
+    forced = [name for name in names
+              if name in device_interval.fields
+              and not (name == "qv" and state.qv is None)]
+    if not (LBC_FINAL_MULTI_ENABLED and _launch_finalize_multi(
+            state, forced, device_interval, old_mup_frame, dtbc,
+            cfg.spec_zone)):
+        for name in forced:
+            _launch_finalize_field(
+                state, name, device_interval.fields[name], old_mup_frame,
+                dtbc, cfg.spec_zone)
     if handover:
         forced_pairs = tuple(
             (mass, number) for mass, number in PAIRED_NUMBER_OF_MASS.items()
