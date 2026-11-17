@@ -115,9 +115,13 @@ inputs formed independently in the test (`components/hex/tests/test_mpas_clm_lak
 Metal). Refused with it on: `config_sst_update` and `config_sstdiurn_update` (they rewrite the lake
 skin and ice; WRF's own lake hand-back on an SST update is not carried), OML1D or `--ocean-mode
 pwp`, `config_pbl_interval`, no land surface, native-file restarts, checkpoints and moving
-regions, same-host ranks, LTS and DA cycling (the lake columns have no carrier yet). The lake
-initial-state sources (`lake_state_source`) are not bound on this route. Without the key nothing
-runs and the receipt is unchanged.
+regions, a correct-mode deck whose streams write a native restart (correct mode seals a checkpoint
+continuation beside each restart file), same-host ranks, LTS and DA cycling (the lake columns have
+no carrier yet); the refusal names the flag or stream that asked for the route. The lake
+initial-state sources (`lake_state_source`) are not bound on this route. With the key on, the
+receipt's `clm_lake` block names the sidecar and `clm_lake_service` the lake columns and the steps
+they ran. Without the key nothing runs; the only receipt difference is that `service_backends`,
+written only when some service leaves its default, lists `clm_lake: off` beside the others.
 
 WOOF-only WRF-Solar EPS (`woof.hex.mpasphys.wrfsolar_eps_v842`; MPAS v8.4.2 perturbs
 no physics input). The WOOF group `&wrfsolar_eps` carries WRF's `&stoch` multi_perturb

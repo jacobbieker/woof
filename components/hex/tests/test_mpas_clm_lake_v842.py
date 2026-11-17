@@ -3,8 +3,9 @@
 * the physics driver runs ``clm_lake_init`` once, at the start of the first step
   before any surface scheme, and ``clm_lake`` on every land-surface step after the
   land surface, sea ice and surface diagnostics and before the PBL, only when
-  ``config_clm_lake_backend = 'hex-cuda'``; without it nothing runs and the
-  receipt is unchanged;
+  ``config_clm_lake_backend = 'hex-cuda'``; without it nothing runs (the receipt's
+  ``service_backends``, written only when a service leaves its default, lists
+  ``clm_lake: off``);
 * the configurations whose lake words the route does not carry are refused by name;
 * the glue reads MPAS's own words on R2-shaped pools (owned cells first, halo
   after) and every lake call IS WRF's lake kernel on the same inputs: the
@@ -322,3 +323,105 @@ def test_the_lake_refuses_a_lake_cell_this_run_holds_as_land():
     provider.sfc["xice"][0] = 0.0
     with pytest.raises(ValueError, match="LAKEMASK marks 1 cells"):
         lake_init_step(provider, SimpleNamespace(dt=60.0, options={}))
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Review follow-ups: refusal causes, sidecar lookup, lakeini's threshold, the service receipt.
+# ---------------------------------------------------------------------------------------------------------------
+def test_a_checkpoint_route_refusal_names_what_built_the_route():
+    from fractions import Fraction
+    from woof.hex.mpasphys.checkpoint_v842 import CheckpointRoute
+    from woof.hex.mpasphys.clm_lake_v842 import refusal
+    config = resolve_namelist(deck() + ON)
+    layout = SimpleNamespace(configs={"config_do_restart": False})
+    plain = SimpleNamespace(samehost_devices=None)
+
+    def route(**values):
+        built = CheckpointRoute()
+        built.fixed_mesh = True
+        for name, value in values.items():
+            setattr(built, name, value)
+        return built
+    # A correct-mode deck whose streams write a native restart: no checkpoint or moving flag was given.
+    text = refusal(plain, config, layout, moving=route(restart_output=(Fraction(21600), "restart.$Y.nc")),
+                   execution=None)
+    assert "native restart output stream ('restart', every 21600 s)" in text
+    assert "output_interval to 'none'" in text
+    assert "--checkpoint-hours" not in text and "--restart-from" not in text and "moving" not in text.split("(")[0]
+    text = refusal(plain, config, layout, moving=route(checkpoint_seconds=(Fraction(3600),)), execution=None)
+    assert "--checkpoint-hours" in text and "restart output stream" not in text
+    assert "--restart-from" in refusal(plain, config, layout, moving=route(cli_restart=True), execution=None)
+    assert "correct-mode native restart" in refusal(plain, config, layout, moving=route(native_restart=True),
+                                                    execution=None)
+    # A moving region (a route that is not on the run's fixed mesh) is still named, and nothing runs.
+    assert "moving region" in refusal(plain, config, layout, moving=SimpleNamespace(), execution=None)
+    assert refusal(plain, config, layout, moving=None, execution=None) is None
+
+
+def test_the_sidecar_lookup_is_the_doors(tmp_path):
+    from woof.hex import surface_inputs as si
+    from woof.hex.mpasphys.clm_lake_v842 import bind_statics, statics_candidates, statics_path
+    static = tmp_path / "statics" / "m.static.nc"
+    static.parent.mkdir()
+    init = tmp_path / "init" / "m.init.nc"
+    init.parent.mkdir()
+    door = dict(surface_statics=None, static=str(static), init=str(init))
+    # --grid given: the door's own candidates, in its order.
+    grid = tmp_path / "m.grid.nc"
+    named = SimpleNamespace(grid=str(grid), mesh="m", **door)
+    assert statics_candidates(named) == si.default_candidates(grid, static, "m")
+    # No --grid on the MPAS route: the init carries the grid, then --static's places.
+    no_grid = SimpleNamespace(grid=None, mesh="m", **door)
+    assert statics_candidates(no_grid) == si.default_candidates(init, static, "m")
+    beside_static = si.default_path(static, "m")
+    beside_static.write_bytes(b"")
+    assert statics_path(no_grid) == beside_static
+    beside_static.unlink()
+    # No --mesh: the builder's own default beside --static still answers (it needs no mesh name).
+    no_mesh = SimpleNamespace(grid=None, mesh=None, **door)
+    assert statics_candidates(no_mesh) == (si.builder_default_path(static),)
+    si.builder_default_path(static).write_bytes(b"")
+    assert statics_path(no_mesh) == si.builder_default_path(static)
+    si.builder_default_path(static).unlink()
+    # Nothing found: the first candidate is refused, naming every place looked.
+    assert statics_path(no_grid) == si.default_path(init, "m")
+    with pytest.raises(ValueError, match="none exists at .*m.surface_statics.nc"):
+        bind_statics(SimpleNamespace(), SimpleNamespace(arrays={}), SimpleNamespace(dimensions={}), no_grid)
+    nowhere = SimpleNamespace(surface_statics=None, grid=None, mesh=None, static=None, init=str(init))
+    assert statics_path(nowhere) is None
+    with pytest.raises(ValueError, match="none was looked for"):
+        bind_statics(SimpleNamespace(), SimpleNamespace(arrays={}), SimpleNamespace(dimensions={}), nowhere)
+
+
+@pytest.mark.parametrize("xice, refused", [(0.5, True), (np.nextafter(np.float32(0.5), np.float32(1)), False)])
+def test_the_land_check_is_lakeinis_own_comparison(xice, refused):
+    """lakeini converts only xice > xice_threshold (woof.core.lake): a LAKEMASK land cell at the threshold stays
+    MPAS sea ice, so it is refused; one float32 step above it is handed to lake water."""
+    import cupy as cp
+    from woof.hex.mpasphys.clm_lake_v842 import lake_init_step
+    provider = _Provider(cp, np.random.default_rng(3))
+    provider.sfc["xland"][0] = 1.0
+    provider.sfc["xice"][0] = np.float32(xice)
+    call = SimpleNamespace(dt=60.0, options={})
+    if refused:
+        with pytest.raises(ValueError, match="LAKEMASK marks 1 cells"):
+            lake_init_step(provider, call)
+    else:
+        lake_init_step(provider, call)
+        assert float(_host(cp, provider.sfc["xland"])[0]) == 2.0
+
+
+def test_the_service_receipt_is_published():
+    from woof.hex.mpasphys.clm_lake_v842 import ClmLakeService, LakeColumns
+    from woof.hex.mpasphys.runtime_v842 import clm_lake_service_receipt
+    assert clm_lake_service_receipt(SimpleNamespace()) is None          # the key off: nothing published
+    service = ClmLakeService(SimpleNamespace())
+    session = SimpleNamespace(clm_lake_service=service)
+    assert clm_lake_service_receipt(session) is None                    # before clm_lake_init
+    service.columns = LakeColumns(np, statics=dict(lakemask=np.float32([1, 0, 1, 1])), nc=4)
+    service.columns.steps = 7
+    receipt = clm_lake_service_receipt(session)
+    assert receipt["service"] == "clm_lake" and receipt["lake_columns"] == 3 and receipt["steps"] == 7
+    import inspect
+    from woof.hex.mpasphys import runtime_v842
+    assert "receipt['clm_lake_service'] = lake_receipt" in inspect.getsource(runtime_v842._run_native_dynamics)

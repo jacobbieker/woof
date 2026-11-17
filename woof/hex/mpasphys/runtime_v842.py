@@ -66,6 +66,13 @@ def nudging_partitioned(execution, moving) -> bool:
     return execution is not None or (moving is not None and not getattr(moving, 'fixed_mesh', False))
 
 
+def clm_lake_service_receipt(session):
+    """The WOOF-only CLM lake service's receipt (clm_lake_v842: lake columns and steps run), or None when the
+    service is off or has not run clm_lake_init yet."""
+    service = getattr(session, 'clm_lake_service', None)
+    return None if service is None else service.receipt()
+
+
 def wind_reconstruction_refusal(cp, geometry, normal_velocity, value) -> str:
     """The wind reconstruction's refusal, naming which of its checks failed.
 
@@ -2393,6 +2400,9 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                         receipt['iau']=coupling.iau.receipt()
                     if getattr(coupling, 'nudging', None) is not None:
                         receipt['nudging']=coupling.nudging.receipt()
+                    lake_receipt = clm_lake_service_receipt(session)
+                    if lake_receipt is not None:
+                        receipt['clm_lake_service'] = lake_receipt
                     if les is not None:
                         receipt['les_execution']=les.receipt(step)
                     records.append(calls_path, json.dumps(dict(step=step,calls=session.driver.calls))+'\n')

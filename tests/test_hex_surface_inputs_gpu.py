@@ -701,60 +701,96 @@ def test_hex_topo_wind_1_columns_are_wrf_topo_wind_coefficients():
 def test_hex_lake_initial_state_is_wrf_lakeini_from_the_same_source(monkeypatch, tmp_path):
     """lake_state_source on hex R1: the seam binds the source's lake state
     through the same initialize_surface the WRF route runs, and the CLM
-    columns are WRF lakeini's from that initial state, bit for bit."""
+    columns are WRF lakeini's from that initial state, bit for bit.  One lake
+    cell carries forcing ice, so the source row's ice authority (water dropped,
+    source ice kept at the forcing's concentration) is covered too."""
+    from types import SimpleNamespace
     from woof.core.lake import initialize_lake
     from woof.ingest import lake_state
 
     monkeypatch.setenv("WOOF_LAKE_RECEIPT_DIR", str(tmp_path))
     targets = int(LAKES.sum())
+    icy = 1  # the second lake cell: forcing ice below xice_threshold
+    ramp = np.arange(targets, dtype=np.float64)
     source = {
-        "water_temperature": np.array([279.25, 281.5, 277.75])[:targets],
-        "bottom_temperature": np.array([277.5, 277.25, 277.0])[:targets],
-        "mixed_layer_depth": np.array([8.0, 2.5, 20.0])[:targets],
-        "temperature_shape_factor": np.array([0.6, 0.65, 0.7])[:targets],
-        "ice_thickness": np.full(targets, np.nan),
-        "ice_fraction": np.full(targets, np.nan),
-        "ice_temperature": np.full(targets, np.nan),
+        "water_temperature": 279.25 + 1.25 * ramp,
+        "bottom_temperature": 277.5 - 0.25 * ramp,
+        "mixed_layer_depth": 8.0 + 2.5 * ramp,
+        "temperature_shape_factor": 0.6 + 0.05 * ramp,
+        "ice_thickness": np.where(ramp == icy, 0.25, 0.0),
+        "ice_fraction": np.where(ramp == icy, 1.0, 0.0),
+        "ice_temperature": np.where(ramp == icy, 270.5, 273.16),
     }
     asked = []
 
-    def fake(name, valid_time, lat, lon, **kwargs):
-        asked.append((name, len(lat)))
-        return ({k: v.copy() for k, v in source.items()},
-                dict(schema="gpuwm.lake-init.v1", status="bound", source=name))
+    def fake(name, valid_time, lat, lon, *, forcing_ice=None, **kwargs):
+        asked.append((name, len(lat), None if forcing_ice is None
+                      else np.asarray(forcing_ice).copy()))
+        values = {k: v.copy() for k, v in source.items()}
+        counts = lake_state.apply_ice_authority(values, forcing_ice)
+        return values, dict(schema="gpuwm.lake-init.v1", status="bound", source=name,
+                            ice_authority=dict(rule="forcing", **counts))
 
     monkeypatch.setattr(lake_state, "load_state", fake)
     physics = dict(_physics(), lake_state_source="era5")
-    sealed = _seal(_mapping(physics, _inputs()))
+    mapping = _mapping(physics, _inputs())
+    forcing_ice = np.zeros(targets, np.float32)
+    forcing_ice[icy] = 0.3
+    xice = np.asarray(mapping["xice"], np.float32).reshape(-1).copy()
+    xice[LAKES] = forcing_ice
+    mapping["xice"] = xice.reshape(np.shape(mapping["xice"]))
+    sealed = _seal(mapping)
     kwargs = sealed.arwen_kwargs()
     seam = suite.run_mpas_column_physics(**kwargs)
     driver = seam._driver
-    assert asked == [("era5", targets)]
-    assert driver.lake_initialization_receipt["temperature_bound_cells"] == targets
-    tsk = _host(driver.fields["tsk"]).reshape(-1)
-    np.testing.assert_array_equal(tsk[LAKES], source["water_temperature"].astype(np.float32))
+    assert [entry[:2] for entry in asked] == [("era5", targets)]
+    np.testing.assert_array_equal(asked[0][2], forcing_ice)
+    receipt = driver.lake_initialization_receipt
+    assert receipt["temperature_bound_cells"] == targets - 1
+    assert receipt["ice_authority"] == dict(rule="forcing", forcing_ice_cells=1,
+                                            source_ice_kept_cells=1)
+    tsk = _host(driver.fields["tsk"]).reshape(-1)[LAKES]
+    open_water = np.arange(targets) != icy
+    np.testing.assert_array_equal(
+        tsk[open_water], source["water_temperature"][open_water].astype(np.float32))
+    assert tsk[icy] == np.float32(270.5)
 
     def grid(values):
         return cp.asarray(np.asarray(values).reshape(GRID))
 
+    # WRF: the WRF route's own initialize_surface on a (2, 4) grid of the
+    # same cells, then lakeini from the initial state it returns.
     host = kwargs["surface"]
-    initial_state = {}
-    for name, values in source.items():
-        full = np.full(NCOL, np.nan, np.float32)
-        full[LAKES] = values
-        initial_state[name] = grid(full)
-    sst = np.asarray(host["tsk"], np.float32).reshape(-1).copy()
-    sst[LAKES] = source["water_temperature"]
-    wrf = {"tsk": grid(sst), "isltyp": grid(host["isltyp"]),
-           "snow": grid(host["snow"]), "xice": grid(host["xice"]),
+    wrf = {"tsk": grid(np.asarray(host["tsk"], np.float32)),
+           "sst": grid(np.asarray(host["tsk"], np.float32)),
+           "isltyp": grid(host["isltyp"]), "snow": grid(host["snow"]),
+           "xice": grid(np.asarray(host["xice"], np.float32)),
+           "xicem": grid(np.asarray(host["xice"], np.float32)),
            "lakemask": grid(host["lakemask"])}
+    initial_state, _ = lake_state.initialize_surface(
+        wrf, SimpleNamespace(lake_state_source="era5"), valid_time=kwargs["start_time"],
+        latitude=grid(kwargs["latitude_deg"]), longitude=grid(kwargs["longitude_deg"]))
+    np.testing.assert_array_equal(asked[1][2], forcing_ice)
     initialize_lake(
         wrf, latitude=grid(kwargs["latitude_deg"]),
         lake_depth=grid(host["lake_depth"]), lake_depth_flag=1,
         use_lakedepth=1, lakedepth_default=50.0, iswater=17, xice_threshold=0.5,
         initial_state=initial_state)
+    for name in ("tsk", "xice"):
+        np.testing.assert_array_equal(
+            _host(wrf[name]).reshape(-1)[LAKES].view(np.uint32),
+            _host(driver.fields[name]).reshape(-1)[LAKES].view(np.uint32), err_msg=name)
     for name in ("lake_columns", "lake_static"):
         value = _host(driver.fields[name])
         np.testing.assert_array_equal(
             _host(wrf[name]).view(np.uint32),
             value.reshape(value.shape[:-2] + GRID).view(np.uint32), err_msg=name)
+
+
+def test_hex_explicit_lake_source_without_a_lake_mask_is_refused():
+    """Without sf_lake_physics = 1 the column route stages no lake mask, so an
+    explicit lake_state_source would be accepted and never read."""
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, lake_state_source="era5")
+    kwargs = _seal(_mapping(physics, None)).arwen_kwargs()
+    with pytest.raises(ValueError, match="accepted and never read"):
+        suite.run_mpas_column_physics(**kwargs)
