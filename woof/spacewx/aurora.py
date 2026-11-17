@@ -38,7 +38,7 @@ import numpy as np
 
 from woof.spacewx import igrf
 from woof.spacewx.ionosphere import subsolar_point
-from woof.spacewx.solar_irradiance import _naive_utc
+from woof.spacewx.solar_irradiance import naive_utc as _naive_utc
 
 BOUNDARIES = ("ocb", "eab", "diffuse")
 COEFFICIENTS = ("A0", "A1", "A2", "A3", "alpha1", "alpha2", "alpha3")

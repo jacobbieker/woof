@@ -39,7 +39,8 @@ import time
 
 import numpy as np
 
-from woof.spacewx.solar_irradiance import _naive_utc, cache_root
+from woof.spacewx.assets import unique_part
+from woof.spacewx.solar_irradiance import cache_root, naive_utc as _naive_utc
 
 OMNI_URL = "https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2_{year}.dat"
 SWPC_MAG_URL = "https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json"
@@ -213,10 +214,14 @@ def fetch_omni2(start: datetime, end: datetime, *, cache=None, opener=None) -> l
                 if covered or fresh:
                     out.append(target)
                     continue
-        part = target.with_name(target.name + ".part")
-        with opener(OMNI_URL.format(year=year)) as reply:
-            part.write_bytes(reply.read())
-        parse_omni2(part.read_bytes().decode("ascii", "replace"), str(part))
+        part = unique_part(target)
+        try:
+            with opener(OMNI_URL.format(year=year)) as reply:
+                part.write_bytes(reply.read())
+            parse_omni2(part.read_bytes().decode("ascii", "replace"), str(part))
+        except BaseException:
+            part.unlink(missing_ok=True)
+            raise
         part.replace(target)
         out.append(target)
     return out

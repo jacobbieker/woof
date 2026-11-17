@@ -5271,7 +5271,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "994c9c7a7e2f8a8b866871a0d14acafd8633de3fbb2c24adfd32ddfb1657dbe3"
+    "sha256": "f2d1319cf7ef34c94a6253f5f8e1e0e482e61111e68bf24c0a55ab1a211f2a58"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5435,7 +5435,7 @@
    },
    {
     "file": "woof/doctor.py",
-    "sha256": "c17c28087faebc4c63726ef957385d789ef77eb6cf0c35c599fd07ff42db8140"
+    "sha256": "9a14b7018d591f222630e364083081f7183da0af545cd1e035f5c2c740609b7b"
    },
    {
     "file": "woof/ensemble/batch_acoustic_fusion.py",
