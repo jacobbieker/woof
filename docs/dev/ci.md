@@ -173,33 +173,39 @@ GPUWM_WRF_EXACT=1 pixi run -e mlx python -m pytest -q tests/test_kessler_wrf461_
 source built for Apple silicon. It never touches `publish.yml` or
 `publish-data.yml`, which publish `recast-woof`.
 
-- **When:** a `metal-vX.Y.Z[.N]` tag, or a manual run given a version (it
-  publishes only with `publish` ticked). Versions are upstream's release plus
-  a fork build number, for example `1.1.3.1`.
-- **Every merge releases:** `.github/workflows/release-metal.yml` runs on each
-  push to `main`. It takes upstream's version from `pyproject.toml`, bumps
-  the fork build number past the highest `metal-v<version>.N` tag, tags the
-  pushed commit, creates the GitHub release (the merged pull requests since
-  the previous `metal-v` tag, as GitHub generates them) and dispatches this
-  workflow on the new tag with `publish` on. The dispatch is explicit because
-  a tag pushed with `GITHUB_TOKEN` starts no workflow. Each run releases
+- **When:** a daily schedule (04:17 UTC), which publishes the newest
+  `metal-vX.Y.Z[.N]` tag; or a manual run given a version (it publishes only
+  with `publish` ticked); or a pushed tag (never fired by
+  `release-metal.yml`, whose `GITHUB_TOKEN` pushes start no workflow). A
+  scheduled run resolves the newest tag, checks it out, and skips cleanly,
+  with no build, when that version is already on PyPI. Versions are
+  upstream's release plus a fork build number, for example `1.1.3.1`.
+- **Every merge releases on GitHub, not PyPI:**
+  `.github/workflows/release-metal.yml` runs on each push to `main`. It takes
+  upstream's version from `pyproject.toml`, bumps the fork build number past
+  the highest `metal-v<version>.N` tag, tags the pushed commit and creates
+  the GitHub release (the merged pull requests since the previous `metal-v`
+  tag, as GitHub generates them). It starts no publish: PyPI caps a project
+  at 10 GB and a build takes about 90 minutes, so PyPI gets only the newest
+  tag, once a day, as a wheel with no sdist. Each run releases
   every first-parent commit on `main` after the newest `metal-v` tag, oldest
   first: GitHub keeps only the newest pending run of the `release-metal`
   concurrency group, so merges that land while a release runs are caught up
   by the next run with consecutive build numbers. A commit whose message
-  carries `[skip release]` is not released. If the dispatch fails
-  after the tag and release exist, a re-run sees the tagged head and stops;
-  run this workflow by hand with `version` set to that release and `publish`
-  ticked.
+  carries `[skip release]` is not released. To publish a particular tag, run
+  this workflow by hand with `version` set to it and `publish` ticked.
+- **Concurrency:** scheduled and tag runs share one group with
+  cancel-in-progress, so only the newest proceeds. A manual run has its own
+  group per version and is never cancelled by an unrelated run.
 - **Build (macos-15):** every `build-native` workspace for macOS 14+, then
   `tools/metal_woof_project.py` renames the distribution (name, version, the
   extras' self-references, and the `gpu-mlx` requirements folded into the
-  base dependencies). The rename happens only in two `git archive` exports
+  base dependencies). The rename happens only in a `git archive` export
   of the committed tree, never in the checkout, so the checkout keeps
   recast-woof's manifest and pixi (which installs it as the editable
   recast-woof) keeps working. The macOS bridges are staged in the checkout
   (`tools/stage_wheel_bridges.py --platform macos-arm64`) and copied into
-  the wheel's export; the sdist is built from the other, unstaged export.
+  the wheel's export. No sdist is built.
 - **Smoke:** the wheel is installed into a fresh venv outside the checkout;
   it must report `metal-woof` at the tag's version, carry its bridges and
   import the MLX stack.
