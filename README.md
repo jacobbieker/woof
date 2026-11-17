@@ -577,7 +577,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   about 190 s to 11 s, and a three-wavelength call from about 570 s to
   28 s. With an output every 10 minutes, the hour costs 209 s instead of
   2,578 s; with no diagnostic it costs 61 s. Eight wavelengths in one call
-  on such a domain hold over 13 GB of host memory.
+  on such a domain used to hold over 13 GB of host memory. The
+  representative wavelengths are now solved in groups bounded by
+  `WOOF_RADTRAN_GROUP_BYTES` (default 2 GiB), with the same words: 6,000
+  columns x 8 wavelengths peak at 2.6 GB instead of 3.6 GB.
+  The RRTMG band and g-point output (`rrtmg_spectral_output = "bands"` or
+  `"gpoints"`) keeps only the surface and top levels it publishes, with the
+  same words: a 12,000-column shortwave call with g-points fell from about
+  2.9 s to 0.3 s on an A6000, and with bands from about 0.5 s to 0.15 s.
+  Multi-scale Kain-Fritsch (`cu_physics = 11`) launches 256 columns per SM
+  instead of 64, so both of its resident blocks stay busy: `mskf_column`
+  fell from 32.5 to 11.0 ms per step on Edinburgh 3 km (A6000),
+  byte-identical.
 - **Lakes.** `lake_state_source = "era5"` or `"auto+era5"` (opt-in) starts
   lakes outside GLSEA from ERA5's FLake lake state (keyless, Google ARCO),
   including the CLM lake column's profile, instead of the forcing's skin (on
