@@ -1753,6 +1753,8 @@ _IMPORT_NAME = {
     "recast-woof-data": "woof_data",
     # The 7z decoder ([hydro-conus] extra) for EPA's NHDPlus V2.1 archives.
     "py7zr": "py7zr",
+    # PyTorch ([nn-torch] extra) for opt-in NN column physics on CUDA (woof.nn).
+    "torch": "torch",
 }
 
 
@@ -1982,6 +1984,14 @@ _EXTRA_FACTS: dict[str, _ExtraFacts] = {
                     "back to the worldwide fabric",
         blocking=False, severity=SEVERITY_DEGRADED,
         deferred_to="py7zr (7z decoder)",
+        expected_absent=True),
+    # PyTorch in woof's interpreter for an [nn] column model on CUDA
+    # (woof.nn, docs/nn-physics.md).  Absent is normal: no default run uses
+    # one, and Metal runs column models on MLX.
+    "nn-torch": _ExtraFacts(
+        doors=("an [nn] column model on CUDA (docs/nn-physics.md)",),
+        still_works="every forecast door; NN column models on Metal (MLX)",
+        blocking=False, severity=SEVERITY_DEGRADED,
         expected_absent=True),
     "gpu-cu12": _ExtraFacts(
         doors=_GPU_DOORS, still_works=_GPU_STILL_WORKS,

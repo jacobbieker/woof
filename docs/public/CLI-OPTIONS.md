@@ -160,6 +160,23 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--set KEY=VALUE` | a setting to change in the branched run, repeatable. Changeable from a checkpoint: run_seconds, restart_interval_s, acknowledgements, relocation.*, tiles.*, devices.*, output.*, simulated_radar.*, domain.<grid_id>.history_interval_s, domain.<grid_id>.history_begin_s, domain.<grid_id>.history_end_s, domain.<grid_id>.tiles.*, domain.<grid_id>.output.*, domain.<grid_id>.surface_energy_diag. Everything else is refused by name, because the restart identity binds it |
 | `--supervisor-max-restarts N` | fresh-process recovery attempts (default 3) |
 
+## `woof buildings`
+
+| option | what it does |
+|---|---|
+| `--cache DIR` | GEM-15 cache root (default: the high-resolution terrain cache) |
+| `--default-height M` | height of footprints with no height, storeys or GEM-15 value (default: such footprints are left out) |
+| `--domain N` | 1-based domain number (default: the innermost, the last one in the namelist) |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--footprints PATH[:SOURCE]` | footprint file (GeoJSON or GeoParquet) and its source, one of gem15-ndsm, google-open-buildings, microsoft, osm, overture, user (default user); repeat for more files |
+| `--min-area M2` | GEM-15 alone: drop nDSM objects smaller than this (default 200) |
+| `--namelist NAMELIST_WPS` | WPS namelist whose domain gets the product |
+| `--no-gem15` | do not read GEM-15: heights then come from the footprints' own attributes or storeys only |
+| `--offline` | read GEM-15 from the cache only |
+| `--output NC` | buildings product to write (NetCDF); name it in [[domain]] obstacle_file |
+| `--resolution M` | footprint lattice spacing in metres (default: a quarter of the grid spacing, at most 5) |
+| `--storey-height M` | metres per storey for footprints with only a storey count (default 3) |
+
 ## `woof case-catalog`
 
 | option | what it does |
@@ -1900,6 +1917,12 @@ Takes no options of its own.
 | option | what it does |
 |---|---|
 | `--dry-run` | print the manifest and upload nothing |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof grad`
+
+| option | what it does |
+|---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 
 ## `woof hex`

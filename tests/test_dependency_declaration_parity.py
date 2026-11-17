@@ -373,7 +373,6 @@ _OPTIONAL_BY_DESIGN: dict[str, str] = {
         "the reverse, and a WOOF store never reaches the import."
     ),
     "earth2studio": _EARTH2_INTERPRETER,
-    "torch": _EARTH2_INTERPRETER,
     "xarray": _EARTH2_INTERPRETER,
     "torch_harmonics": (
         "woof/earth2_runner.py imports torch_harmonics inside a try/except "
@@ -499,6 +498,14 @@ _EXTRA_GATED: dict[str, tuple[tuple[str, ...], str]] = {
         "forecast. The import is lazy and its absence raises "
         "DynamicalUnavailable naming `pip install 'recast-woof[obs]'`; no "
         "forecast or preprocessing route reaches it, and [all-*] carries it.",
+    ),
+    "torch": (
+        ("nn-torch",),
+        "Opt-in neural-network column physics on CUDA (woof/nn/models.py, docs/nn-physics.md): "
+        "imported inside TorchColumnModel only when a configuration names an [nn] model, and its "
+        "absence raises ModelUnavailable naming `pip install 'recast-woof[nn-torch]'`; "
+        "tests/test_nn_default_path_imports.py holds every default door free of it. The Earth2 "
+        "runner scripts also import it, in the separate interpreter WOOF_EARTH2_PYTHON names.",
     ),
     "py7zr": (
         ("hydro-conus",),
@@ -1043,6 +1050,10 @@ def test_all_covers_every_extra_a_forecast_user_needs(declaration, pyproject):
                "would be dead weight in the one-liner. The agent that "
                "does need it is told the extra by name in the guarded "
                "import's remedy sentence and in docs/mcp-server.md.",
+        "nn-torch": "PyTorch for opt-in NN column physics on CUDA "
+                    "(woof.nn): a multi-GiB stack no default forecast "
+                    "imports, named by the refusal of the one door that "
+                    "needs it and by docs/nn-physics.md.",
         "gpu-mlx": "the Apple-silicon backend, which [all-cu12] and "
                    "[all-cu13] exclude as they exclude each other's CuPy: "
                    "a CUDA install never runs Metal, and its own aggregate "
