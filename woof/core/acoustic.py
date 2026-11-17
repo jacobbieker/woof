@@ -697,6 +697,12 @@ def prepare_acoustic_substep_launch(state: DomainState, cfg: RunConfig,
             nz_arg, ny_arg, nx_arg,
         ) + ((wrf_acoustic_muts(state),) if WRF_EXACT else ())
 
+    frame_launch = None
+    if frame_kernel is not None:
+        frame_launch = _frame_ring_launch(state, cfg, dtau_arg, c2a, nz, ny, nx)
+        if frame_launch is None:
+            frame_launch = lambda: frame_kernel(column_grid, block, frame_args)
+
     radiative_x = cfg.open_x and not _boundary_forced(cfg)
     radiative_y = cfg.open_y and not _boundary_forced(cfg)
     sx = (state.scratch((nz, ny, 2), "openbc_upp_faces")
@@ -754,7 +760,7 @@ def prepare_acoustic_substep_launch(state: DomainState, cfg: RunConfig,
             joined_column[0](column_grid, block,
                              joined_column[1] if first else joined_column[2])
             if frame_after_column:
-                frame_kernel(column_grid, block, frame_args)
+                frame_launch()
             return
         mu_kernel(column_grid, block, mu_args)
         if exact_frame_kernel is not None:
@@ -762,8 +768,8 @@ def prepare_acoustic_substep_launch(state: DomainState, cfg: RunConfig,
         w_kernel(w_grid, w_block, w_args)
         if upper_wind_limiter is not None:
             upper_wind_limiter()
-        if frame_kernel is not None:
-            frame_kernel(column_grid, block, frame_args)
+        if frame_launch is not None:
+            frame_launch()
 
     launch.absorbs = frozenset(
         (("emdiv",) if joined_uv is not None else ())
@@ -771,6 +777,35 @@ def prepare_acoustic_substep_launch(state: DomainState, cfg: RunConfig,
     launch.joined = (joined_uv is not None, joined_column is not None)
     launch.joined_written = joined_written
     return launch
+
+
+#: advance_frame_phi_w_ring's block: ring columns x level lanes (the
+#: kernel's FRAME_RING_LANES).
+_FRAME_RING_BLOCK = (32, 8, 1)
+
+
+def _frame_ring_launch(state, cfg, dtau_arg, c2a, nz, ny, nx):
+    """The specified/nested frame update over the ring's columns only, with
+    level lanes (advance_frame_phi_w_ring): the same statements per level as
+    advance_specified_phi_w / advance_nested_phi_w, which launch one thread
+    per column of the whole domain.  None where those must run: the
+    WRF-exact build, and a ring as wide as half the domain."""
+    zone = int(cfg.spec_zone)
+    if WRF_EXACT or not 0 < 2 * zone < min(ny, nx):
+        return None
+    count = 2 * zone * nx + (ny - 2 * zone) * 2 * zone
+    kernel = get_kernel("acoustic", "advance_frame_phi_w_ring", (nz, ny, nx))
+    grid = ((count + _FRAME_RING_BLOCK[0] - 1) // _FRAME_RING_BLOCK[0],)
+    args = (
+        state.ph_pp, state.w_pp, state.p_pp, state.al_pp, state.rph_t,
+        state.rw_t, state.th_pp, state.mup, state.mu_pp, state.mub2d,
+        state.rmu_t, state.php, state.thp, state.thb, state.alt, c2a,
+        state.rdnw, state.c1h, state.c2h, state.c1f, state.c2f,
+        dtau_arg, np.int32(zone), _base3d(state),
+        np.int32(_frame_takes_table_w(cfg)),
+        np.int32(nz), np.int32(ny), np.int32(nx),
+    )
+    return lambda: kernel(grid, _FRAME_RING_BLOCK, args)
 
 
 _SEPARATE_SUBSTEP_WARNED: set = set()

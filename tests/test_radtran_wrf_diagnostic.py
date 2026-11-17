@@ -20,6 +20,7 @@ import pytest
 
 import cupy as cp  # noqa: F401  (gpu module; the facade on MLX)
 
+import _numerics_child
 from conftest import requires_gpu
 
 START = datetime(2025, 6, 21, 18)
@@ -222,3 +223,61 @@ def test_restart_carries_the_radtran_fields(tmp_path):
     for name in ("rt_edir", "rt_edn", "rt_eup", "rt_eup_toa", "rt_rad", "rt_wavelength", "rt_umu"):
         assert cp.asnumpy(d2.fields[name]).tobytes() == cp.asnumpy(driver.fields[name]).tobytes(), name
     assert d2.radtran is not None and d2.radtran is not driver.radtran
+
+
+def test_band_groups_bound_each_solves_wavelengths():
+    from types import SimpleNamespace
+    from woof.radtran import driver
+    iwvl = {0: [1, 2], 1: [2, 3], 2: [4]}
+    rep = SimpleNamespace(band=lambda b: SimpleNamespace(iwvl=iwvl[b]))
+    assert driver.band_groups(rep, [0, 1, 2], 10, 10 ** 9) == [[0, 1, 2]]
+    assert driver.band_groups(rep, [0, 1, 2], 10, 30) == [[0, 1], [2]]
+    # a band over the bound still solves, alone
+    assert driver.band_groups(rep, [0, 1, 2], 10, 1) == [[0], [1], [2]]
+
+
+def _grouped_and_whole(monkeypatch):
+    from woof.core.physics import _prepare_atmosphere
+    from woof.radtran import model
+    cfg = _cfg(radtran_wavelengths=(450.0, 500.0, 760.5), radtran_umu=(0.6, -0.8),
+               radtran_phi=(0.0, 90.0), radtran_interval_s=30.0)
+    state, driver = _driver(cfg)
+    atmos = _prepare_atmosphere(state)
+    nz = cfg.nz
+    cols = lambda a, n: np.asarray(cp.asnumpy(a), dtype=np.float64).reshape(n, -1).T
+    qv = cols(atmos["qv"], nz)
+    kw = dict(z_w_m=cols(atmos["z_interface"], nz + 1), p_w_pa=cols(atmos["p_interface"], nz + 1),
+              t_mass=cols(atmos["temperature"], nz), qv_mass=qv,
+              umu0=driver.radtran.coszen(float(state.elapsed_seconds), "wrf_480").reshape(-1),
+              albedo=np.clip(cp.asnumpy(driver.fields["albedo"]).reshape(-1), 0, 1),
+              qc_mass=cols(atmos["qc"], nz), qi_mass=cols(atmos["qi"], nz),
+              rho_dry=cols(atmos["rho"], nz) / (1 + qv), day_of_year=START.timetuple().tm_yday)
+    out = {}
+    for label, budget in (("whole", str(1 << 40)), ("grouped", "1")):
+        monkeypatch.setenv("WOOF_RADTRAN_GROUP_BYTES", budget)
+        out[label] = model.compute(driver.radtran.diag, **kw)
+    return out
+
+
+@requires_gpu
+@pytest.mark.parametrize("mode_threads", [None, 0])
+def test_band_groups_keep_the_words(monkeypatch, mode_threads):
+    """One solve per band (the bound at 1 byte) gives the words of one solve
+    for every band, on both device paths (radiances over Fourier-mode threads
+    and one thread per problem): the problems are independent and the path is
+    chosen from the whole call's problem count."""
+    _need_data()
+    from woof.radtran import solver
+    if mode_threads is not None:
+        monkeypatch.setattr(solver, "MODE_THREADS", mode_threads)
+    out = _grouped_and_whole(monkeypatch)
+    whole, grouped = out["whole"], out["grouped"]
+    assert set(whole) == set(grouped) and "rad" in whole
+    assert np.max(whole["edir"]) > 0.1
+    for key, value in whole.items():
+        assert np.array_equal(np.asarray(value).view(np.uint64), np.asarray(grouped[key]).view(np.uint64)), key
+
+
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_band_groups_keep_the_words_in_every_numerics_mode(numerics, exact):
+    _numerics_child.run(__file__, ["test_band_groups_keep_the_words"], numerics, exact)

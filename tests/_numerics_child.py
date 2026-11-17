@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-#: (GPUWM_NUMERICS, GPUWM_WRF_EXACT) per child: the production default, the
+#: (GPUWM_NUMERICS = WOOF_HEX_NUMERICS, GPUWM_WRF_EXACT) per child: the production default, the
 #: battery's strict, and WRF-exact (strict numerics plus WRF's controls).
 MODES = ("numerics,exact", [
     pytest.param("fast", "0", id="fast"),
@@ -42,6 +42,11 @@ import {module} as t
 os.environ["GPUWM_NUMERICS"] = os.environ["WOOF_NUMERICS"] = {numerics!r}
 from woof import numerics
 assert numerics.mode() == {numerics!r}, numerics.mode()
+# The hex units read their own knob (woof.hex.numerics, WOOF_HEX_NUMERICS, default fast); without
+# it every hex "strict" child compiled fast.  set_mode refuses if a hex kernel already bound the other mode.
+from woof.hex import numerics as hex_numerics
+hex_numerics.set_mode({numerics!r}, source="tests/_numerics_child")
+assert hex_numerics.mode() == {numerics!r}, hex_numerics.mode()
 
 def cases(fn):
     marks = [m for m in getattr(fn, "pytestmark", []) if m.name == "parametrize"]
@@ -93,6 +98,8 @@ def run(test_file, names, numerics, exact, *, env=None, timeout=1800):
     # Both spellings: importing woof copies GPUWM_X onto an unset WOOF_X only,
     # so an inherited WOOF_WRF_EXACT would otherwise win.
     child_env["GPUWM_WRF_EXACT"] = child_env["WOOF_WRF_EXACT"] = exact
+    # woof.hex.numerics reads WOOF_HEX_NUMERICS, not GPUWM_NUMERICS: name it too.
+    child_env["WOOF_HEX_NUMERICS"] = numerics
     # A diagnostic contraction override would make the fast row compile with
     # --fmad=false and test nothing production runs.
     for name in ("WOOF_FMAD_OFF", "GPUWM_FMAD_OFF"):

@@ -950,6 +950,16 @@ void advance_mu_th_msf(const real* __restrict__ u_pp,
 #define WPHI_MAX_LEV 129
 #endif
 
+// advance_w_phi_msf's default arm takes the Thomas forward sweep inside the
+// forcing loop and the back substitution, damper, phi'' update and p''
+// diagnosis in one top-down pass (the same statements on the same operands,
+// fewer passes over the column).  WPHI_SEPARATE_SWEEPS=1 compiles the
+// separate sweeps it replaced; tests/test_acoustic_wphi_one_pass.py holds the
+// two to the same words.
+#ifndef WPHI_SEPARATE_SWEEPS
+#define WPHI_SEPARATE_SWEEPS 0
+#endif
+
 // Linearized-EOS p''/alpha'' diagnosis (WRF calc_p_rho, non-hydrostatic
 // branch; with full theta the WRF t0-offset terms cancel):
 //   alpha'' = -(alpha_t*'(c1h*mu'') + d(phi'')/d(eta)) / (c1h*mu_ts+c2h)
@@ -957,24 +967,25 @@ void advance_mu_th_msf(const real* __restrict__ u_pp,
 //                  / ((c1h*mu_ts+c2h)*theta_t*) - alpha'')
 // The owning solve/frame thread diagnoses its complete column after updating
 // phi''.  alpha'' is stored for the next substep's advance_uv terrain term.
+// One level k of diagnose_p_column below.
 static __device__ __forceinline__
-void diagnose_p_column(real* __restrict__ p_pp,
-                       real* __restrict__ al_pp,
-                       const real* __restrict__ th_pp,
-                       const real* __restrict__ ph_pp,
-                       const real* __restrict__ mu_pp,
-                       const real* __restrict__ thp,
-                       const real* __restrict__ thb,
-                       const real* __restrict__ alt,
-                       const real* __restrict__ c2a,
-                       const real* __restrict__ mup,
-                       const real* __restrict__ rdnw,
-                       const real* __restrict__ c1h,
-                       const real* __restrict__ c2h,
-                       const real* __restrict__ mub2d,
-                       size_t c, size_t st, int base3d, int nz)
+void diagnose_p_level(real* __restrict__ p_pp,
+                      real* __restrict__ al_pp,
+                      const real* __restrict__ th_pp,
+                      const real* __restrict__ ph_pp,
+                      const real* __restrict__ mu_pp,
+                      const real* __restrict__ thp,
+                      const real* __restrict__ thb,
+                      const real* __restrict__ alt,
+                      const real* __restrict__ c2a,
+                      const real* __restrict__ mup,
+                      const real* __restrict__ rdnw,
+                      const real* __restrict__ c1h,
+                      const real* __restrict__ c2h,
+                      const real* __restrict__ mub2d,
+                      size_t c, size_t st, int base3d, int k)
 {
-    for (int k = 0; k < nz; ++k) {
+    {
         size_t tid = (size_t)k * st + c;
         real chm = c1h[k] * (mub2d[c] + mup[c] + mu_pp[c]) + c2h[k];
 #if GPUWM_WRF_EXACT
@@ -998,6 +1009,28 @@ void diagnose_p_column(real* __restrict__ p_pp,
                      / (chm * th_ref) - al);
 #endif
     }
+}
+
+static __device__ __forceinline__
+void diagnose_p_column(real* __restrict__ p_pp,
+                       real* __restrict__ al_pp,
+                       const real* __restrict__ th_pp,
+                       const real* __restrict__ ph_pp,
+                       const real* __restrict__ mu_pp,
+                       const real* __restrict__ thp,
+                       const real* __restrict__ thb,
+                       const real* __restrict__ alt,
+                       const real* __restrict__ c2a,
+                       const real* __restrict__ mup,
+                       const real* __restrict__ rdnw,
+                       const real* __restrict__ c1h,
+                       const real* __restrict__ c2h,
+                       const real* __restrict__ mub2d,
+                       size_t c, size_t st, int base3d, int nz)
+{
+    for (int k = 0; k < nz; ++k)
+        diagnose_p_level(p_pp, al_pp, th_pp, ph_pp, mu_pp, thp, thb, alt,
+                         c2a, mup, rdnw, c1h, c2h, mub2d, c, st, base3d, k);
 }
 
 #if GPUWM_WRF_EXACT
@@ -1481,10 +1514,12 @@ void advance_w_phi(real* __restrict__ w_pp, real* __restrict__ ph_pp,
 //   - damper: WRF's damp target (c1f*mut+c2f)*w_save has NO msf factor
 //     even though w'' is msf-coupled -- transcribed literally (the
 //     Fortran's own comment: "have not thought through w equation").
+// Three resident blocks (85 registers): the one-pass back substitution
+// below spills under a 64-register cap.
 extern "C" __global__
 #if GPUWM_WRF_EXACT || GPUWM_WRF_EXACT_C_BIGSTEP || GPUWM_WRF_EXACT_C_ADVECTION || GPUWM_WRF_EXACT_C_DIFFUSION || GPUWM_WRF_EXACT_D_DIAGNOSTICS
 #else
-__launch_bounds__(256, 4)
+__launch_bounds__(256, 3)
 #endif
 void advance_w_phi_msf(real* __restrict__ w_pp, real* __restrict__ ph_pp,
                        const real* __restrict__ rw_t,
@@ -1824,6 +1859,9 @@ void advance_w_phi_msf(real* __restrict__ w_pp, real* __restrict__ ph_pp,
 
     // Kinematic terrain lower BC (WRF advance_w: msfty*(v part) +
     // msftx*(u part); the isotropic single factor multiplies the sum).
+#if !WPHI_SEPARATE_SWEEPS
+    real w_lo;     // the eliminated w'' row below, for the forward sweep
+#endif
     {
         int ip = boundary_x ? min(i + 1, nx - 1) : (i + 1) % nx;
         int im = boundary_x ? max(i - 1, 0)      : (i - 1 + nx) % nx;
@@ -1848,6 +1886,9 @@ void advance_w_phi_msf(real* __restrict__ w_pp, real* __restrict__ ph_pp,
                                          + (ht[c] - ht[cjm]) * vs)
                            + 0.5f * rdx * ((ht[cip] - ht[c]) * ue
                                            + (ht[c] - ht[cim]) * uw));
+#if !WPHI_SEPARATE_SWEEPS
+        w_lo = w_pp[c];
+#endif
     }
 
     // Forcing rows of the implicit w'' system (interior w levels).
@@ -1908,6 +1949,12 @@ void advance_w_phi_msf(real* __restrict__ w_pp, real* __restrict__ ph_pp,
                           - c1f[k] * muave);
         }
         t2_dn = t2_up;
+#if !WPHI_SEPARATE_SWEEPS
+        // The Thomas forward sweep's row k, taken as soon as its forcing
+        // row is formed (the same statement on the same operands).
+        w_pp[f] = (w_pp[f] - a[f] * w_lo) * alpha[f];
+        w_lo = w_pp[f];
+#endif
         if (k > 1) ph_pp[(size_t)(k - 1) * st + c] = rhs_lo;
         rhs_lo = rhs_mid;
         rhs_mid = rhs_hi;
@@ -1929,9 +1976,60 @@ void advance_w_phi_msf(real* __restrict__ w_pp, real* __restrict__ ph_pp,
                         * (2.0f * rdnw[nz - 1] * c2a[h] * alt[h] * t2_dn
                            + c1f[nz] * muave));
     }
+#if !WPHI_SEPARATE_SWEEPS
+    {
+        size_t f = (size_t)nz * st + c;                // forward sweep, top row
+        w_pp[f] = (w_pp[f] - a[f] * w_lo) * alpha[f];
+    }
+#endif
     if (nz > 1) ph_pp[(size_t)(nz - 1) * st + c] = rhs_lo;
     ph_pp[(size_t)nz * st + c] = rhs_mid;
 
+#if !WPHI_SEPARATE_SWEEPS
+    // Back substitution, the damp_opt=3 implicit w damper (msf-free damp
+    // target: WRF literal), the phi'' forward update (WRF: +
+    // msfty*0.5*dts*g*(1+epssm)*w/C_f(muts)) and the p''/alpha'' diagnosis
+    // in one top-down pass.  Each statement is the one the separate sweeps
+    // made, on the same operands: the substitution reads the undamped row
+    // above (w_up), as it did when the damper ran after the whole sweep, and
+    // every level of the damper, the phi'' update and the diagnosis is
+    // independent of the others.
+    real hbot = 0.0f;
+    if (dampmag > 0.0f) {
+        real htop = __fdiv_rn((phb[(size_t)nz * bstr + boff]
+                     + php[(size_t)nz * st + c]), G);
+        hbot = htop - zdamp;
+    }
+    real w_up = 0.0f;
+    for (int k = nz; k >= 1; --k) {
+        size_t f = (size_t)k * st + c;
+        if (k < nz)
+            w_pp[f] -= gam[f] * w_up;
+        w_up = w_pp[f];
+        if (dampmag > 0.0f) {
+            real hk = __fdiv_rn((phb[(size_t)k * bstr + boff]
+                       + php[(size_t)k * st + c]), G);
+            if (hk >= hbot) {
+                real sn = sinf(__fdiv_rn(1.5707963267948966f * (hk - hbot), zdamp));
+                real dw = dampmag * sn * sn;
+                real cfm = c1f[k] * mut + c2f[k];
+                w_pp[f] = __fdiv_rn(w_pp[f] - dw * cfm * w_ref[f], 1.0f + dw);
+            }
+        }
+        ph_pp[f] =
+            ph_pp[f]
+                     + __fdiv_rn(msf_c * 0.5f * dtau * G * (1.0f + epssm)
+                     * w_pp[f],
+                     c1f[k] * muts + c2f[k]);
+        if (k < nz)
+            diagnose_p_level(p_pp, al_pp, th_pp, ph_pp, mu_pp, thp, thb, alt,
+                             c2a, mup, rdnw, c1h, c2h, mub2d,
+                             (size_t)c, st, base3d, k);
+    }
+    diagnose_p_level(p_pp, al_pp, th_pp, ph_pp, mu_pp, thp, thb, alt,
+                     c2a, mup, rdnw, c1h, c2h, mub2d,
+                     (size_t)c, st, base3d, 0);
+#else
     // Thomas solve with the precomputed factors.
     for (int k = 1; k <= nz; ++k)
         w_pp[(size_t)k * st + c] =
@@ -1971,6 +2069,7 @@ void advance_w_phi_msf(real* __restrict__ w_pp, real* __restrict__ ph_pp,
     diagnose_p_column(p_pp, al_pp, th_pp, ph_pp, mu_pp, thp, thb, alt,
                       c2a, mup, rdnw, c1h, c2h, mub2d,
                       (size_t)c, st, base3d, nz);
+#endif
 #endif
 }
 
@@ -2249,6 +2348,34 @@ void advance_w_phi_msf_kpar(real* __restrict__ w_pp, real* __restrict__ ph_pp,
 }
 #endif
 
+// One level of the specified/nested frame's phi'' update: the boundary
+// re-coupling (c1f*mu_old+c2f)/(c1f*muts+c2f) and the rph tendency.  arn_*
+// matches each former eager CuPy operator boundary in
+// acoustic._advance_specified_phi.
+static __device__ __forceinline__
+real frame_phi_level(real ph, real rph, real php_k, real c1f_k, real c2f_k,
+                     real mu_old, real muts, real dtau)
+{
+    real numerator = arn_add(arn_mul(c1f_k, mu_old), c2f_k);
+    real denominator = arn_add(arn_mul(c1f_k, muts), c2f_k);
+    real ratio = arn_div(numerator, denominator);
+#if GPUWM_WRF_EXACT
+    // spec_bdyupdate_ph: field*(c1*mu_old+c2)/(c1*muts+c2), i.e.
+    // (field*num)/den.  field*(num/den) agrees while phi'' is zero on
+    // the ring (RK stage 1) and rounds apart from stage 2 on.
+    real value0 = arn_div(arn_mul(ph, numerator), denominator);
+#else
+    real value0 = arn_mul(ph, ratio);
+#endif
+    real value1 = arn_mul(dtau, rph);
+    real denominator2 = arn_add(arn_mul(c1f_k, muts), c2f_k);
+    real value2 = arn_div(value1, denominator2);
+    real value3 = arn_add(value0, value2);
+    real value4 = arn_sub(ratio, 1.0f);
+    real value5 = arn_mul(php_k, value4);
+    return arn_add(value3, value5);
+}
+
 // Specified-frame phi update followed by zero-gradient w.  The two outputs
 // are independent; one thread owns one frame point, and every source w point
 // is clamped to the untouched interior.  arn_* matches each former eager
@@ -2302,24 +2429,8 @@ void advance_specified_phi_w(real* __restrict__ ph_pp,
     size_t source_c = (size_t)source_j * nx + source_i;
     for (int k = 0; k <= nz; ++k) {
         size_t tid = (size_t)k * st + c;
-        real numerator = arn_add(arn_mul(c1f[k], mu_old), c2f[k]);
-        real denominator = arn_add(arn_mul(c1f[k], muts), c2f[k]);
-        real ratio = arn_div(numerator, denominator);
-#if GPUWM_WRF_EXACT
-        // spec_bdyupdate_ph: field*(c1*mu_old+c2)/(c1*muts+c2), i.e.
-        // (field*num)/den.  field*(num/den) agrees while phi'' is zero on
-        // the ring (RK stage 1) and rounds apart from stage 2 on.
-        real value0 = arn_div(arn_mul(ph_pp[tid], numerator), denominator);
-#else
-        real value0 = arn_mul(ph_pp[tid], ratio);
-#endif
-        real value1 = arn_mul(dtau, rph_t[tid]);
-        real denominator2 = arn_add(arn_mul(c1f[k], muts), c2f[k]);
-        real value2 = arn_div(value1, denominator2);
-        real value3 = arn_add(value0, value2);
-        real value4 = arn_sub(ratio, 1.0f);
-        real value5 = arn_mul(php[tid], value4);
-        ph_pp[tid] = arn_add(value3, value5);
+        ph_pp[tid] = frame_phi_level(ph_pp[tid], rph_t[tid], php[tid],
+                                     c1f[k], c2f[k], mu_old, muts, dtau);
         w_pp[tid] = w_pp[(size_t)k * st + source_c];
     }
 #if GPUWM_WRF_EXACT
@@ -2384,24 +2495,8 @@ void advance_nested_phi_w(real* __restrict__ ph_pp,
     real mu_old = arn_sub(muts, dt_rmu);
     for (int k = 0; k <= nz; ++k) {
         size_t tid = (size_t)k * st + c;
-        real numerator = arn_add(arn_mul(c1f[k], mu_old), c2f[k]);
-        real denominator = arn_add(arn_mul(c1f[k], muts), c2f[k]);
-        real ratio = arn_div(numerator, denominator);
-#if GPUWM_WRF_EXACT
-        // spec_bdyupdate_ph: field*(c1*mu_old+c2)/(c1*muts+c2), i.e.
-        // (field*num)/den.  field*(num/den) agrees while phi'' is zero on
-        // the ring (RK stage 1) and rounds apart from stage 2 on.
-        real value0 = arn_div(arn_mul(ph_pp[tid], numerator), denominator);
-#else
-        real value0 = arn_mul(ph_pp[tid], ratio);
-#endif
-        real value1 = arn_mul(dtau, rph_t[tid]);
-        real denominator2 = arn_add(arn_mul(c1f[k], muts), c2f[k]);
-        real value2 = arn_div(value1, denominator2);
-        real value3 = arn_add(value0, value2);
-        real value4 = arn_sub(ratio, 1.0f);
-        real value5 = arn_mul(php[tid], value4);
-        ph_pp[tid] = arn_add(value3, value5);
+        ph_pp[tid] = frame_phi_level(ph_pp[tid], rph_t[tid], php[tid],
+                                     c1f[k], c2f[k], mu_old, muts, dtau);
         w_pp[tid] = arn_add(w_pp[tid], arn_mul(dtau, rw_t[tid]));
     }
 #if GPUWM_WRF_EXACT
@@ -2413,6 +2508,92 @@ void advance_nested_phi_w(real* __restrict__ ph_pp,
                       c, st, base3d, nz);
 #endif
 }
+
+#if !GPUWM_WRF_EXACT
+// The frame ring's n-th column (0 <= n < frame_ring_count): the spec_zone
+// rows at the south and north edges in full, then the spec_zone columns at
+// each end of every row between.  Needs 2*spec_zone < ny and < nx.
+static __device__ __forceinline__
+size_t frame_ring_column(int n, int sz, int ny, int nx)
+{
+    int edge = sz * nx;
+    int j, i;
+    if (n < edge) {
+        j = n / nx; i = n - j * nx;
+    } else if (n < 2 * edge) {
+        n -= edge;
+        j = n / nx; i = n - j * nx; j += ny - sz;
+    } else {
+        n -= 2 * edge;
+        int r = n / (2 * sz), q = n - r * 2 * sz;
+        j = sz + r; i = q < sz ? q : nx - 2 * sz + q;
+    }
+    return (size_t)j * nx + i;
+}
+
+// advance_specified_phi_w / advance_nested_phi_w with the ring's columns
+// along x and eight level lanes along y (block 32 x 8): one launch over the
+// ring instead of every column, each level's statements unchanged, and the
+// p''/alpha'' diagnosis after the block has written every phi'' level.
+#define FRAME_RING_LANES 8
+extern "C" __global__
+__launch_bounds__(256)
+void advance_frame_phi_w_ring(real* __restrict__ ph_pp,
+                              real* __restrict__ w_pp,
+                              real* __restrict__ p_pp,
+                              real* __restrict__ al_pp,
+                              const real* __restrict__ rph_t,
+                              const real* __restrict__ rw_t,
+                              const real* __restrict__ th_pp,
+                              const real* __restrict__ mup,
+                              const real* __restrict__ mu_pp,
+                              const real* __restrict__ mub2d,
+                              const real* __restrict__ rmu_t,
+                              const real* __restrict__ php,
+                              const real* __restrict__ thp,
+                              const real* __restrict__ thb,
+                              const real* __restrict__ alt,
+                              const real* __restrict__ c2a,
+                              const real* __restrict__ rdnw,
+                              const real* __restrict__ c1h,
+                              const real* __restrict__ c2h,
+                              const real* __restrict__ c1f,
+                              const real* __restrict__ c2f,
+                              real dtau, int spec_zone, int base3d,
+                              int nested, int nz, int ny, int nx)
+{
+    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    int lane = threadIdx.y;
+    size_t st = (size_t)ny * nx;
+    bool active = n < 2 * spec_zone * nx + (ny - 2 * spec_zone) * 2 * spec_zone;
+    size_t c = active ? frame_ring_column(n, spec_zone, ny, nx) : 0;
+    if (active) {
+        int j = (int)(c / nx), i = (int)(c - (size_t)j * nx);
+        real mut = arn_add(mub2d[c], mup[c]);
+        real muts = arn_add(mut, mu_pp[c]);
+        real dt_rmu = arn_mul(dtau, rmu_t[c]);
+        real mu_old = arn_sub(muts, dt_rmu);
+        int source_j = min(max(j, spec_zone), ny - 1 - spec_zone);
+        int source_i = min(max(i, spec_zone), nx - 1 - spec_zone);
+        size_t source_c = (size_t)source_j * nx + source_i;
+        for (int k = lane; k <= nz; k += FRAME_RING_LANES) {
+            size_t tid = (size_t)k * st + c;
+            ph_pp[tid] = frame_phi_level(ph_pp[tid], rph_t[tid], php[tid],
+                                         c1f[k], c2f[k], mu_old, muts, dtau);
+            if (nested)
+                w_pp[tid] = arn_add(w_pp[tid], arn_mul(dtau, rw_t[tid]));
+            else
+                w_pp[tid] = w_pp[(size_t)k * st + source_c];
+        }
+    }
+    __syncthreads();
+    if (active)
+        for (int k = lane; k < nz; k += FRAME_RING_LANES)
+            diagnose_p_level(p_pp, al_pp, th_pp, ph_pp, mu_pp, thp, thb, alt,
+                             c2a, mup, rdnw, c1h, c2h, mub2d,
+                             c, st, base3d, k);
+}
+#endif
 
 // WRF external-mode filter.  gx/gy were formerly full-domain CuPy
 // temporaries; arn_* retains their subtraction, scale, optional division,

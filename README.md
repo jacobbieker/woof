@@ -438,6 +438,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   checkpoints and cannot resume.
 - **More data sources:** the Met Office global and UKV models, DWD ICON
   (global and the machine-learning variant) and additional mapped routes.
+- **GFS lake and snow choices on a downloaded run.** A `[case_data]` table
+  that holds only `gfs_lake_skin`, `gfs_lake_ice` or `gfs_snow_convention`
+  stays on `woof go`'s fetch route (including `--prepare-only`); upstream
+  sends any `[case_data]` table to the declared-inputs route, where a GFS
+  download cannot run. A table with any other key routes as upstream's does.
 - **Applied tooling:** wind-energy siting, hindcasts and power products,
   storm-track planning, and delete-after-commit backpressure and domain
   selection for upstream's Icechunk store export
@@ -464,7 +469,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   wall per forecast hour, Edinburgh 3 km about 2 %; `WOOF_DIFF6_MULTI=0`
   restores the per-field launches). Advection folds each species' tendency
   zero-fill into its first accumulating launch (`zero_first`, word-identical
-  on CUDA and Metal). Its advection receipts for the RTX 5090 and RTX PRO 6000
+  on CUDA and Metal). On CUDA the four flux-divergence launches take 32 x 4
+  thread blocks instead of 128-wide rows (word-identical; 6-14 % less kernel
+  time at 150-260 points per row on the A6000; Metal keeps the rows). Its advection receipts for the RTX 5090 and RTX PRO 6000
   (Blackwell) are **not re-pinned**: no Blackwell card was available, so
   `certified_unrepinned` in each fixture's `gpu-receipts.json` records the
   pins and the commit, and the gate warns rather than fails for those pins. An RK stage's lateral specified/relaxation
@@ -506,7 +513,19 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `WOOF_ACOUSTIC_KPAR=1` takes a level-parallel w''-phi'' solve (32 columns
   x 8 lanes per block; 1.7-2.2x the column kernel's speed per launch on an
   A6000): opt-in, because on CUDA its words are the column kernel's generic
-  build's, not the shape-specialized build's that runs by default. Hex: CUDA
+  build's, not the shape-specialized build's that runs by default. The
+  column w''-phi'' solve itself takes its forward sweep in the forcing loop
+  and its back substitution, damper, phi'' update and p''/alpha''
+  diagnosis in one top-down pass (byte-identical in fast and strict
+  numerics on CUDA and Metal): 725 -> 655 us per launch at 49x228x276 and
+  367 -> 329 us at 49x150x186 on an A6000 (CUPTI kernel time per launch,
+  default numerics and shape-specialized build, this change against its
+  merge base, on a shared GPU; output words compared equal). The specified/nested frame's
+  phi'', w'' and p'' update launches over the ring's columns with level
+  lanes instead of one thread per column of the domain
+  (`advance_frame_phi_w_ring`, byte-identical in fast and strict
+  numerics): 108 -> 25 us per substep at 49x150x186 and 116 -> 33 us at a
+  nested 49x228x276 on an A6000 under the same conditions. Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
@@ -523,6 +542,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
   cache).
+  Hex regional scalar transport reads each edge's advection stencil once
+  per (edge, level chunk) and walks the tracers
+  (`transport_edge_values_regional_hoist_v841`, byte-identical in fast and
+  strict numerics on CUDA and Metal; Alps 3 km variable-resolution, 11
+  tracers: 28 -> 2-3 ms per launch on an M3 Max, 15 -> 0.55 ms on an A6000;
+  `WOOF_HEX_REGIONAL_EDGE_HOIST=0` restores the element kernel).
+  Hex MYNN on Metal gives every column its own worker (within the
+  one-eighth-of-free-memory bound) instead of 128 per GPU core, so the
+  column loop no longer strides: on the 14,751-cell Alps VR mesh
+  `mynn_mmm_run` drops from 112 to 50 ms a step, byte-identical
+  (`WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR` sets the per-processor cap on
+  either backend; CUDA keeps 128 per SM).
   Hex `woof hex moving`: the resident forecast process prepares the next
   region beside the running one only when the host has room for a second
   copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
@@ -580,7 +611,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   about 190 s to 11 s, and a three-wavelength call from about 570 s to
   28 s. With an output every 10 minutes, the hour costs 209 s instead of
   2,578 s; with no diagnostic it costs 61 s. Eight wavelengths in one call
-  on such a domain hold over 13 GB of host memory.
+  on such a domain used to hold over 13 GB of host memory. The
+  representative wavelengths are now solved in groups bounded by
+  `WOOF_RADTRAN_GROUP_BYTES` (default 2 GiB), with the same words: 6,000
+  columns x 8 wavelengths peak at 2.6 GB instead of 3.6 GB.
+  The RRTMG band and g-point output (`rrtmg_spectral_output = "bands"` or
+  `"gpoints"`) keeps only the surface and top levels it publishes, with the
+  same words: a 12,000-column shortwave call with g-points fell from about
+  2.9 s to 0.3 s on an A6000, and with bands from about 0.5 s to 0.15 s.
+  Multi-scale Kain-Fritsch (`cu_physics = 11`) launches 256 columns per SM
+  instead of 64, so both of its resident blocks stay busy: `mskf_column`
+  fell from 32.5 to 11.0 ms per step on Edinburgh 3 km (A6000),
+  byte-identical.
 - **Lakes.** `lake_state_source = "era5"` or `"auto+era5"` (opt-in) starts
   lakes outside GLSEA from ERA5's FLake lake state (keyless, Google ARCO),
   including the CLM lake column's profile, instead of the forcing's skin (on
@@ -598,6 +640,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and rock and sit about 1 km north of the shoreline: on the Alps 1 km
   domain, 480 lake cells above 2000 m became 8 real reservoirs
   ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md)).
+  On the hex MPAS-suite route, `--physics config_clm_lake_backend=hex-cuda`
+  (opt-in) runs WRF's CLM lake on the LAKEMASK cells of `--surface-statics`,
+  bitwise to WRF's lake kernel on the same inputs. It starts from lakeini and
+  is refused with SST updates, OML, restarts, checkpoints, moving regions and
+  multi-rank or LTS runs
+  ([mpas-physics-seam.md](components/hex/docs/manual/mpas-physics-seam.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

@@ -2715,7 +2715,9 @@ class RRTMGLegacyRadiation:
                     mc["reicmcl"], mc["relqmcl"], mc["resnmcl"],
                     tauaer, self._C, column_chunk=chunk_lw,
                     mcica_layout="column", _stage_probe=self._stage_probe,
-                    spectral_output=spectral_mode if spectral_out else "none")
+                    spectral_output=spectral_mode if spectral_out else "none",
+                    # history reads the surface and the top only
+                    spectral_levels="boundary")
                 del mc, tauaer
                 if "lw_band" in res:
                     for base, (q, level) in LW_SPECTRAL_FLUXES.items():
@@ -2876,6 +2878,8 @@ class RRTMGLegacyRadiation:
                 engine = _cuda_sw(self._sw_tables)
                 engine.spectral_output = (spectral_mode if any(n.startswith("sw") for n in spectral_out)
                                           else "none")
+                # history reads the surface and the top only
+                engine.spectral_levels = "boundary"
                 res = engine.rrtmg_sw_batched_device(
                     nc, ps["nlay"], ps["icld"], ps["play"][rows],
                     ps["plev"][rows], ps["tlay"][rows], ps["tlev"][rows],
@@ -2907,6 +2911,7 @@ class RRTMGLegacyRadiation:
                             value = res[output][:, 0]
                         spectral[key][selw] = value
                 engine.spectral_output = "none"
+                engine.spectral_levels = "all"
                 del mc, aerosol_w
                 slab = res.get("sw_band", res.get("sw_gpt"))
                 if slab is not None:
