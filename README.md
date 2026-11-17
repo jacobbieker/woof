@@ -735,6 +735,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   ensemble), then one differentiable column scheme, NN physics through the
   existing column seams, and later a WRF dry-core adjoint checked against
   WRFPLUS. Default runs are not changed.
+- **Neural-network column physics (opt-in, inference only; in progress).**
+  `woof.nn` loads a column model (a manifest with weights hash, units,
+  normalisation and trained input range) and runs it with PyTorch on CUDA
+  (DLPack, no copies; `recast-woof[nn-torch]`, never a base dependency) or
+  MLX on Metal. A safety layer refuses, clips or falls back to the physics
+  scheme outside the trained range, and limits outputs, keeps moisture
+  positive and can fix column budgets. The forecast seats are not wired yet.
+  Runs that use it are not WRF-identical ([docs/nn-physics.md](docs/nn-physics.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
