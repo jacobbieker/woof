@@ -748,6 +748,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   ensemble), then one differentiable column scheme, NN physics through the
   existing column seams, and later a WRF dry-core adjoint checked against
   WRFPLUS. Default runs are not changed.
+  The first tools exist (experimental, reached only through `woof grad`):
+  `woof grad obs` reads a forecast window's surface, upper-air, aircraft
+  and radio-occultation observations from the bkr/obs stores, and
+  `woof grad cost` scores a WRF or hex history against them as an
+  error-weighted observation cost `J_o`, pairing each observation with the
+  nearest history frame and freezing the accepted set so perturbed runs
+  are scored on the same observations ([docs/grad.md](docs/grad.md)).
 - **A plan, not yet code, for variational data assimilation.**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
