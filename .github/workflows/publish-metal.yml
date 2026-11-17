@@ -219,7 +219,7 @@ jobs:
 
   smoke:
     name: install and import (macos-15, clean venv)
-    needs: build
+    needs: [resolve, build]
     runs-on: macos-15
     timeout-minutes: 60
     steps:
