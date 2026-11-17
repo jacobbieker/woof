@@ -1173,13 +1173,13 @@ class _HealthBackend(_FakeBackend):
         return update
 
 
-def _health_step(runner, backend, log):
+def _health_step(runner, backend, log, **extra):
     couple, clamp, recover = _transaction_callables(log)
     return runner.execute_composite_step(
         driver=_FakeDriver(log), backend=backend,
         scalar_names=runner.SCALAR_NAMES, physics_geometry=object(),
         kernel_cache=object(), previous_surface_updates=None,
-        couple=couple, clamp=clamp, recover=recover)
+        couple=couple, clamp=clamp, recover=recover, **extra)
 
 
 @pytest.mark.gpu
@@ -1238,6 +1238,38 @@ def test_immediate_mode_and_unadmitted_sites_read_at_the_site(
     assert seen["returned"] == 4
     assert log[-2:] == ["driver_commit", "adapter_commit"]
     assert health_ledger.active() is None
+
+
+@pytest.mark.gpu
+def test_a_step_that_exchanges_halos_reads_at_the_site(monkeypatch) -> None:
+    """Same-host ranks and LTS classes exchange before phase two: a failing
+    scheme must stop its own rank there, so nothing is deferred."""
+    cp = pytest.importorskip("cupy")
+    from woof.core import health_ledger
+
+    monkeypatch.delenv(health_ledger.RESIDENT_ENV, raising=False)
+    runner = _load_runner()
+    log: list[str] = []
+    seen: dict[str, object] = {}
+    backend = _HealthBackend(log, cp, site="ysu", phase="phase1", word=4, seen=seen)
+    before = health_ledger.resident_receipt()["immediate_steps"].get("exchanged", 0)
+    _health_step(runner, backend, log, before_phase_two=lambda *args, **kwargs: None)
+    assert seen == {"active": False, "returned": 4}
+    assert health_ledger.resident_receipt()["immediate_steps"]["exchanged"] == before + 1
+    assert health_ledger.active() is None
+
+
+def test_the_hex_admitted_sites_are_real_call_sites() -> None:
+    """Each extra site the composite step admits is spelled exactly so by a
+    read_status call; a renamed site would silently fall back to the
+    immediate read and these tests would not notice."""
+    import woof
+
+    runner = _load_runner()
+    root = Path(woof.__file__).resolve().parent
+    text = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
+    for site in runner.HEX_EXTRA_RESIDENT_SITES:
+        assert f'site="{site}"' in text, site
 
 
 def test_native_gate_includes_physical_edge_u_interface_w_and_gwdo() -> None:

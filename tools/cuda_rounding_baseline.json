@@ -5115,7 +5115,7 @@
    },
    {
     "file": "woof/core/health_ledger.py",
-    "sha256": "9faf3da1a67c9317ecb809787c5aed11c4b8590f321ca7405eb60dc9477eb89a"
+    "sha256": "c6e663e9afb39f88ed22ead7b093287ce0fedc3b4d78c59c782e0d1771b7234d"
    },
    {
     "file": "woof/core/hub_wind_diag.py",

@@ -149,8 +149,11 @@ RESIDENT_CAPACITY = 256
 #: the refusal) or an input check whose scheme stays bounded on rejected
 #: inputs.  Every other site -- RRTMGP's input guard, whose eager path also
 #: replays the detailed validators, Grell-Freitas, WDM6 and the urban
-#: models -- keeps its immediate read on the resident path; the tiled/graph
-#: ledger (:func:`deferring`) still defers them all.
+#: models -- keeps its immediate read on the dycore's resident path; the
+#: tiled/graph ledger (:func:`deferring`) still defers them all.  The hex
+#: composite step, a transaction drained before its commit, admits three
+#: more (Grell-Freitas among them: run_cuda_v841_full_physics_x4.
+#: HEX_EXTRA_RESIDENT_SITES).
 RESIDENT_SITES = (
     "microphysics",          # canonical surface-output finite/range flags
     "ysu",                   # YSU output finite flags
@@ -277,7 +280,15 @@ class HealthLedger:
         return self._slots[:self._capacity]
 
     def admits(self, site: str) -> bool:
-        return self.admit is None or site.startswith(self.admit)
+        if self.admit is None:
+            return True
+        # A resident ledger (an admit list) is drained by Python after the
+        # step, so a record made while a CUDA graph is being captured would
+        # be replayed without a Python record and never drained: such a site
+        # keeps its immediate read, which refuses the capture as before.
+        if _capturing():
+            return False
+        return site.startswith(self.admit)
 
     def _slot(self, site: str) -> int:
         i = self._index.get(site)
@@ -454,7 +465,16 @@ IMMEDIATE_REASONS = {
                     "its drain",
     "capturing": "the step is being captured into a CUDA graph with no "
                  "ledger of its own",
+    "exchanged": "the hex step exchanges halos with other ranks or LTS "
+                 "classes before its commit, so a failing scheme must stop "
+                 "its own rank first",
 }
+
+
+def count_immediate(reason: str) -> None:
+    """Count a resident step that kept the per-site reads, by
+    :data:`IMMEDIATE_REASONS` key (for callers outside this module)."""
+    _count_immediate(reason)
 
 
 def _count_immediate(reason: str) -> None:
@@ -468,7 +488,9 @@ def resident_receipt() -> dict:
 
     Pinned shape: ``{"mode", "source", "env", "deferred_steps", "drains",
     "immediate_steps": {reason: steps}}``; ``source`` is ``"default"`` or
-    ``"environment"``.  Counts cover every ``dycore.step`` in the process.
+    ``"environment"``.  Counts cover every resident step in the process:
+    ``dycore.step`` and the hex composite step (woof.hex.drivers.
+    run_cuda_v841_full_physics_x4), which admits more sites.
     """
     with _RESIDENT_LOCK:
         stats = {"deferred_steps": _RESIDENT_STATS["deferred_steps"],
@@ -731,6 +753,15 @@ def _raise_nonfinite(message: str) -> None:
     raise FloatingPointError(message + deferred_note())
 
 
+def _capturing() -> bool:
+    try:
+        import cupy as cp
+
+        return bool(cp.cuda.get_current_stream().is_capturing())
+    except Exception:  # noqa: BLE001 - no device stream: nothing captures
+        return False
+
+
 def _admits(ledger, site: str) -> bool:
     admits = getattr(ledger, "admits", None)
     return True if admits is None else bool(admits(site))
@@ -742,7 +773,7 @@ def deferred_note(ledger: "HealthLedger | None" = None) -> str:
         return (" (detected by the deferred health read at the end of this "
                 "model step, so the rest of the step ran after the check "
                 f"failed; {RESIDENT_ENV}=immediate stops at the check "
-                "itself)")
+                "itself and, for a hex column scheme, names the column)")
     return (" (detected at a deferred health drain, so the run advanced past "
             "the step that produced it; re-run with the ledger disabled to "
             "stop on the exact step)")

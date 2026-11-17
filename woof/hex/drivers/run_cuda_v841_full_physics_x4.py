@@ -3089,17 +3089,32 @@ HEX_EXTRA_RESIDENT_SITES = (
     "grell-freitas", "noahmp_static_surface_identity", "lagged-heating")
 
 
-def _resident_health(health_ledger: Any) -> Any:
-    """The composite step's resident ledger scope, or ``None`` off-device.
+_DEVICE_PRESENT: list[bool] = []
+
+
+def _resident_health(health_ledger: Any, *, exchanged: bool = False) -> Any:
+    """The composite step's resident ledger scope, or ``None`` to keep the
+    immediate reads.
 
     A host with no device (the transaction tests' fakes on a CPU runner)
-    has no status words to defer and keeps the immediate path.
+    has no status words to defer; that is decided once per process.  A step
+    that exchanges halos with other ranks or LTS classes before its commit
+    (``before_phase_two``) keeps the immediate reads: there a failing
+    scheme must stop its rank before the exchange, or its peers would
+    receive its rejected fields and commit the step while it rolls back.
     """
-    try:
-        import cupy as cp
+    if not _DEVICE_PRESENT:
+        try:
+            import cupy as cp
 
-        cp.cuda.runtime.getDevice()
-    except Exception:  # noqa: BLE001 - no cupy, or no device
+            cp.cuda.runtime.getDevice()
+            _DEVICE_PRESENT.append(True)
+        except Exception:  # noqa: BLE001 - no cupy, or no device
+            _DEVICE_PRESENT.append(False)
+    if not _DEVICE_PRESENT[0]:
+        return None
+    if exchanged:
+        health_ledger.count_immediate("exchanged")
         return None
     return health_ledger.resident_step(
         health_ledger.RESIDENT_SITES + HEX_EXTRA_RESIDENT_SITES)
@@ -3194,7 +3209,7 @@ def execute_composite_step(
     # model ran before saying so moves.  The same ledger skips the carrier
     # contract's consumer-footprint read on the healthy path.
     # WOOF_HEALTH_READBACK=immediate restores the per-site reads.
-    health = _resident_health(health_ledger)
+    health = _resident_health(health_ledger, exchanged=before_phase_two is not None)
     health_open = health is not None
     if health_open:
         health.__enter__()
