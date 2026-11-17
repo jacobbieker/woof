@@ -254,6 +254,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     wired into the forecast route (`--wrf-hydro`, `[wrf_hydro]`), and into
     hex through a conservative cell-to-routing-grid exchange. Unported
     `hydro.namelist` options are refused by name.
+  - Hex's cell-to-grid exchange runs on the GPU by default. The overlap
+    weights stay on the device and nothing goes through the host at the LSM
+    step. Its words match the host route's on the same machine: it sums in
+    scipy's order and copies that host's use of FMA.
+    `--no-wrf-hydro-gpu-exchange` (`[wrf_hydro] gpu_exchange = false`) keeps
+    the host route, which also runs, with a log line, when there is no GPU
+    backend. Measured on a 128x128 1-km LSM grid with a 96k-cell
+    hex mesh: on pb the exchange went from 230 ms (host) to 0.4 ms (A6000),
+    and the whole coupling cycle from 528 to 196 ms. On the M3 Max it went
+    from 15-27 ms to 4 ms; there the routing (about 650 ms) dominates.
   - NEMO 5.0.2: the equation of state, TKE mixing, vertical and lateral
     tracer diffusion, FCT advection and solar penetration. A coupled column
     ocean is driven by WRF's ocean-coupler exchange (SST only for now); a

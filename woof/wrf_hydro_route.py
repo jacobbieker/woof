@@ -22,11 +22,20 @@ or a ``[wrf_hydro]`` table in the run TOML::
     [wrf_hydro]
     namelist = "hydro.namelist"      # relative to the TOML
     output_dir = "wrf_hydro_output"  # optional; frxst_pts_out.txt, CHRTOUT, RTOUT
+    gpu_exchange = false             # optional, hex only: the host exchange; see below
 
 Either sets ``WOOF_WRF_HYDRO_NAMELIST`` (and ``WOOF_WRF_HYDRO_OUTPUT``) for
 the launch and every process it starts.  Without them nothing here runs: no
 plane is allocated, no driver attribute is set, the LSM calls are the
 default ones, so the forecast is byte-identical to a run without this module.
+
+On hex the conservative cell <-> grid exchange (woof.hex.hydro_remap) runs
+on the device by default (woof.hex.hydro_remap_gpu, the host route's words
+on the host it runs beside).  ``--no-wrf-hydro-gpu-exchange`` (or
+``gpu_exchange = false``, or ``WOOF_WRF_HYDRO_GPU_EXCHANGE=0``) keeps it on
+the host; without a GPU backend the host route runs and the log says so.
+On the WRF mass grid the exchange is cell for cell and already on the
+device, so the switch changes nothing there.
 
 Refused by name: an LSM other than Noah (2) or Noah-MP (4); Noah's mosaic;
 an adaptive time step; an ensemble of more than one member; a run with more
@@ -39,14 +48,16 @@ no urban hand-over); the NextGen coupling at the same time.
 
 from __future__ import annotations
 
+import argparse
 import os
 from contextlib import contextmanager
 from pathlib import Path
 
 ENV_NAMELIST = "WOOF_WRF_HYDRO_NAMELIST"
 ENV_OUTPUT = "WOOF_WRF_HYDRO_OUTPUT"
+ENV_GPU_EXCHANGE = "WOOF_WRF_HYDRO_GPU_EXCHANGE"
 TABLE = "wrf_hydro"
-TABLE_KEYS = frozenset({"namelist", "output_dir"})
+TABLE_KEYS = frozenset({"namelist", "output_dir", "gpu_exchange"})
 #: LSMs with ported WRF_HYDRO hooks: sf_surface_physics -> exchange planes
 LSM_PLANES = {2: ("sfcheadrt", "infxsrt", "soldrain"),
               4: ("sfcheadrt", "infxsrt", "soldrain", "qtiledrain")}
@@ -62,6 +73,10 @@ def add_arguments(parser) -> None:
         "--wrf-hydro-output", default=None, metavar="DIR",
         help="where --wrf-hydro writes frxst_pts_out.txt and its CHRTOUT/RTOUT files "
              "(default: wrf_hydro_output in the working directory)")
+    parser.add_argument(
+        "--wrf-hydro-gpu-exchange", action=argparse.BooleanOptionalAction, default=None,
+        help="on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a "
+             "GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host")
 
 
 def read_table(path) -> dict | None:
@@ -85,7 +100,9 @@ def read_table(path) -> dict | None:
                          f"{sorted(TABLE_KEYS)}")
     if not isinstance(table.get("namelist"), str) or not table["namelist"]:
         raise ValueError(f"[{TABLE}] in {path} needs namelist = \"hydro.namelist\"")
-    out = {}
+    if not isinstance(table.get("gpu_exchange", False), bool):
+        raise ValueError(f"[{TABLE}] gpu_exchange in {path} must be true or false")
+    out = {"gpu_exchange": table.get("gpu_exchange")}
     for key in ("namelist", "output_dir"):
         if key in table:
             value = Path(table[key])
@@ -103,7 +120,7 @@ def consume_table(raw: dict, source) -> dict:
     if not isinstance(table, dict) or sorted(set(table) - TABLE_KEYS) or not isinstance(
             table.get("namelist"), str):
         raise ValueError(f"[{TABLE}] in {source} takes namelist = \"hydro.namelist\" and "
-                         f"optionally output_dir; got {table!r}")
+                         f"optionally output_dir and gpu_exchange; got {table!r}")
     if configured() is None:
         raise ValueError(
             f"{source} carries [{TABLE}], which `woof run` and `woof go` read at launch "
@@ -113,7 +130,7 @@ def consume_table(raw: dict, source) -> dict:
 
 
 @contextmanager
-def launch_scope(namelist=None, output=None, config=None, members=None):
+def launch_scope(namelist=None, output=None, config=None, members=None, gpu_exchange=None):
     """Set the environment a coupled launch reads, for its duration.  The
     command line wins over a ``[wrf_hydro]`` table in ``config``.  An ensemble
     (``members`` > 1) is refused: every member would write the one output
@@ -121,17 +138,23 @@ def launch_scope(namelist=None, output=None, config=None, members=None):
     table = read_table(config) if config else None
     if namelist is None and table is not None:
         namelist, output = table["namelist"], output or table.get("output_dir")
+    if gpu_exchange is None and table is not None:
+        gpu_exchange = table["gpu_exchange"]
     if namelist is None:
+        if gpu_exchange is not None:
+            raise ValueError("--[no-]wrf-hydro-gpu-exchange without --wrf-hydro: there is no exchange to place")
         yield
         return
     if members is not None and int(members) > 1:
         raise NotImplementedError(
             f"--wrf-hydro with {int(members)} ensemble members: the members would share one "
             "WRF-Hydro output directory; run the coupled forecast as a single member")
-    saved = {k: os.environ.get(k) for k in (ENV_NAMELIST, ENV_OUTPUT)}
+    saved = {k: os.environ.get(k) for k in (ENV_NAMELIST, ENV_OUTPUT, ENV_GPU_EXCHANGE)}
     os.environ[ENV_NAMELIST] = str(Path(namelist).resolve())
     if output is not None:
         os.environ[ENV_OUTPUT] = str(Path(output).resolve())
+    if gpu_exchange is not None:
+        os.environ[ENV_GPU_EXCHANGE] = "1" if gpu_exchange else "0"
     try:
         yield
     finally:
@@ -145,6 +168,13 @@ def launch_scope(namelist=None, output=None, config=None, members=None):
 def configured() -> str | None:
     """The hydro.namelist this launch couples, or None (the default)."""
     return os.environ.get(ENV_NAMELIST) or None
+
+
+def gpu_exchange() -> bool:
+    """Whether this launch asks for hex's cell <-> grid exchange on the device:
+    the default, unless ``--no-wrf-hydro-gpu-exchange`` (``gpu_exchange =
+    false``, ``WOOF_WRF_HYDRO_GPU_EXCHANGE=0``)."""
+    return os.environ.get(ENV_GPU_EXCHANGE, "1").strip() != "0"
 
 
 def refuse_multiple_domains(count: int) -> None:
