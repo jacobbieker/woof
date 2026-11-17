@@ -92,6 +92,9 @@ STALE_RECORD_KEY = "uncertified_stale"
 #: woof.verify.advect_oracle.CERTIFIED_UNREPINNED_KEY: the index's record of a
 #: Blackwell receipt left un-re-pinned for want of a card; dropped the same way.
 UNREPINNED_RECORD_KEY = "certified_unrepinned"
+#: A receipt standing in for a certified one recorded as not re-pinned (user
+#: ruling 2026-11-17); installing the certified receipt ends the stand-in.
+STAND_IN_RECORD_KEY = "certified_stand_in"
 CAPTURED_RECEIPT = "captured-receipt.json"
 
 
@@ -425,6 +428,22 @@ def settle(fixture: Path, captured_receipt: Path, captured_words: Path, *,
             write_index(fixture, index)
             written.append(fixture / INDEX_NAME)
             record["stale_record_dropped"] = True
+    stand_ins = index.get(STAND_IN_RECORD_KEY, {})
+    for stand_in, entry in list(stand_ins.items()):
+        targets = entry["stands_in_for"]
+        targets = [targets] if isinstance(targets, str) else list(targets)
+        if name in targets:
+            # The certified receipt is current again: its stand-in stands down.
+            targets.remove(name)
+            if targets:
+                entry["stands_in_for"] = targets[0] if len(targets) == 1 else targets
+            else:
+                del stand_ins[stand_in]
+            if not stand_ins:
+                del index[STAND_IN_RECORD_KEY]
+            write_index(fixture, index)
+            written.append(fixture / INDEX_NAME)
+            record["stand_in_record_dropped"] = True
     sums_name = FIXTURE_SUMS.get(fixture.name)
     if sums_name:
         record["sums_changed"] = _sums_update(fixture / sums_name, written,

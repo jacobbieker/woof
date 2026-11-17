@@ -27,7 +27,8 @@ from woof.verify.advect_oracle import (
     check_uncertified_stale_records, uncertified_stale_report,
     UncertifiedReceiptStale, UNCERTIFIED_STALE_KEY,
     check_certified_unrepinned_records, check_certified_receipt_pins,
-    CertifiedReceiptNotRepinned, CERTIFIED_UNREPINNED_KEY)
+    CertifiedReceiptNotRepinned, CERTIFIED_UNREPINNED_KEY,
+    STAND_IN_KEY, receipt_gates, selected_receipt_name, check_stand_in_records)
 
 #: The modules every receipt of this fixture pins by assembled source.
 RECEIPT_MODULES = ("advection", "pd_advection", "openbc")
@@ -79,17 +80,31 @@ def _receipt_for_gpu(gpu_name, compute_capability=None):
     return receipt
 
 
+def _gates_on_this_card(gpu, capability):
+    """A certified card, or one whose receipt stands in for a certified one.
+
+    The RTX A6000 (sm_86) receipt stands in for the RTX 5090 (sm_120) one,
+    which only an RTX 5090 can re-record (user ruling 2026-11-17).
+    """
+    if architecture_is_certified(capability):
+        return True
+    name = selected_receipt_name(RECEIPT_INDEX, gpu, capability)
+    # The card the stand-in was measured on, not every card of its architecture.
+    return name in RECEIPT_INDEX.get(STAND_IN_KEY, {}) and _receipt(name)["gpu"] == gpu
+
+
 def _device_receipt():
     """The receipt this card's runtime words are compared with.
 
-    A Blackwell or newer card gates exactly as before: no receipt is a
-    coverage gap, a stale receipt fails.  An older card is not certified
-    (ruling 2026-10-04): with no receipt, or with one that trails the tree,
-    the word comparison is skipped and says why; a current receipt still
-    compares every word.
+    A Blackwell or newer card, or a card whose receipt stands in for a
+    Blackwell one (the RTX A6000, user ruling 2026-11-17), gates exactly as
+    before: no receipt is a coverage gap, a stale receipt fails.  An older
+    card is not certified (ruling 2026-10-04): with no receipt, or with one
+    that trails the tree, the word comparison is skipped and says why; a
+    current receipt still compares every word.
     """
     gpu, capability = advect_gpu_identity()
-    if not architecture_is_certified(capability):
+    if not _gates_on_this_card(gpu, capability):
         if GPU_RECEIPTS.get(gpu) is None and ARCH_RECEIPTS.get(tuple(capability)) is None:
             pytest.skip(f"{gpu} (sm_{capability[0]}{capability[1]}) has no advection receipt and is "
                         "not certified: byte identity is certified on Blackwell and newer only "
@@ -226,7 +241,7 @@ def test_advect_device_receipt_gates_blackwell_and_skips_older_cards_only_when_s
     card("unmeasured Blackwell", (10, 0))
     with pytest.raises(AssertionError, match="test coverage gap"):
         _device_receipt()
-    card("unmeasured Ampere", (8, 6))
+    card("unmeasured Ada", (8, 9))
     with pytest.raises(pytest.skip.Exception, match="not certified"):
         _device_receipt()
     card("NVIDIA H100 80GB HBM3", (9, 0), stale)
@@ -234,6 +249,68 @@ def test_advect_device_receipt_gates_blackwell_and_skips_older_cards_only_when_s
         _device_receipt()
     card("NVIDIA H100 80GB HBM3", (9, 0))
     assert _device_receipt()["gpu"] == "NVIDIA H100 80GB HBM3"
+
+
+def test_advect_a6000_stands_in_for_the_rtx5090_receipt_pending_its_rerecord(monkeypatch):
+    """The RTX 5090 (sm_120) receipt can be re-recorded only on an RTX 5090,
+    so it is marked STALE pending that re-record and the RTX A6000 (sm_86)
+    receipt gates kernel edits in its place (user ruling 2026-11-17).
+
+    The breakage this prevents: the stand-in quietly becoming a blanket skip
+    (a stale A6000 receipt passing, or its card skipping the word
+    comparison), a stand-in for a receipt that is current or not certified,
+    and the RTX 5090 record losing its re-record note.  Per file: only the
+    receipt named in certified_stand_in gates; other older cards do not.
+    """
+    import woof.verify.advect_oracle as oracle
+    module = sys.modules[__name__]
+    stand_ins = check_stand_in_records(RECEIPT_INDEX, ADVECT_ORACLE_DIR)
+    assert stand_ins["gpu-receipt-sm86.json"]["stands_in_for"] == "gpu-receipt-sm120.json"
+    sm120 = RECEIPT_INDEX[CERTIFIED_UNREPINNED_KEY]["gpu-receipt-sm120.json"]
+    assert sm120["stand_in"] == "gpu-receipt-sm86.json"
+    assert sm120["rerecord_on"] == "NVIDIA GeForce RTX 5090"
+    a6000 = _receipt("gpu-receipt-sm86.json")
+    assert a6000["gpu"] == "NVIDIA RTX A6000" and a6000["compute_capability"] == [8, 6]
+    assert receipt_gates("gpu-receipt-sm86.json", a6000, RECEIPT_INDEX)
+    assert not receipt_gates("gpu-receipt-h100.json", _receipt("gpu-receipt-h100.json"), RECEIPT_INDEX)
+    # The stand-in's pins gate exactly as a certified receipt's do.
+    moved = {"pd_advection": (a6000["kernels"]["pd_advection"], "a" * 64)}
+    monkeypatch.setattr(oracle, "receipt_staleness", lambda *args: dict(moved))
+    with pytest.raises(AssertionError, match="trails the tree"):
+        check_certified_receipt_pins("gpu-receipt-sm86.json", a6000, ADVECT_ORACLE_DIR,
+                                     RECEIPT_MODULES, {})
+    report = oracle.certified_unrepinned_report(
+        "gpu-receipt-sm120.json", _receipt("gpu-receipt-sm120.json"), moved, sm120)
+    assert "STALE, pending a re-record on the NVIDIA GeForce RTX 5090" in report
+    assert "gpu-receipt-sm86.json gates kernel edits" in report
+    # The A6000 compares words even when its receipt trails; an older card
+    # without a stand-in record still skips.
+    monkeypatch.setattr(module, "advect_gpu_identity", lambda: ("NVIDIA RTX A6000", (8, 6)))
+    assert _device_receipt()["gpu"] == "NVIDIA RTX A6000"
+    monkeypatch.setattr(module, "advect_gpu_identity", lambda: ("NVIDIA H100 80GB HBM3", (9, 0)))
+    with pytest.raises(pytest.skip.Exception, match="informational, not a gate"):
+        _device_receipt()
+    monkeypatch.setattr(module, "advect_gpu_identity", lambda: ("another sm_86 card", (8, 6)))
+    with pytest.raises(pytest.skip.Exception, match="informational, not a gate"):
+        _device_receipt()
+    # Every half of the record must be true.
+    stand_in = RECEIPT_INDEX[STAND_IN_KEY]["gpu-receipt-sm86.json"]
+    unrepinned = RECEIPT_INDEX[CERTIFIED_UNREPINNED_KEY]
+    for bad, match in (
+            ({STAND_IN_KEY: {"gpu-receipt-sm86.json": dict(stand_in, stands_in_for="gpu-receipt-h100.json")}},
+             "not a certified receipt"),
+            ({STAND_IN_KEY: {"gpu-receipt-sm120.json": dict(stand_in)}}, "already a certified"),
+            ({STAND_IN_KEY: {"gpu-receipt-sm86.json": dict(stand_in, reason="")}}, "sm86"),
+            ({STAND_IN_KEY: {}}, "no certified_stand_in record"),
+            ({CERTIFIED_UNREPINNED_KEY: dict(unrepinned, **{"gpu-receipt-sm120.json": {
+                key: value for key, value in sm120.items() if key != "stand_in"}})},
+             "no not-re-pinned record naming"),
+            ({CERTIFIED_UNREPINNED_KEY: dict(unrepinned, **{"gpu-receipt-sm120.json": dict(
+                sm120, rerecord_on="")})}, "sm120"),
+            ({UNCERTIFIED_STALE_KEY: dict(RECEIPT_INDEX[UNCERTIFIED_STALE_KEY], **{
+                "gpu-receipt-sm86.json": {"staled_by": "c" * 40, "pins": {}}})}, "may not trail")):
+        with pytest.raises(AssertionError, match=match):
+            check_stand_in_records(dict(RECEIPT_INDEX, **bad), ADVECT_ORACLE_DIR)
 
 
 def test_advect_fixture_has_real_source_and_exact_input_receipts():
@@ -284,19 +361,25 @@ def test_advect_word_metric_does_not_hide_signed_zero():
 
 
 def test_advect_native_reference_and_cuda_words_match_their_receipts():
-    """Blackwell receipts gate their pins; older ones are reported when stale.
+    """Blackwell receipts and their stand-ins gate their pins; older ones are
+    reported when stale.
 
     Byte identity is certified on Blackwell and newer only (ruling
     2026-10-04).  Every receipt is checked for presence and format and its
     committed words replay against the reference; only a Blackwell
-    receipt's kernel and fixture pins must equal the tree.
+    receipt's kernel and fixture pins, or a stand-in's, must equal the
+    tree.  The RTX 5090 receipt is stale pending a re-record on an RTX 5090,
+    the only card that can re-record it; the RTX A6000 receipt stands in for
+    it, so a kernel edit is captured and verified on the A6000 (user ruling
+    2026-11-17).
     """
     records = check_uncertified_stale_records(RECEIPT_INDEX, ADVECT_ORACLE_DIR, RECEIPT_MODULES)
     unrepinned = check_certified_unrepinned_records(RECEIPT_INDEX, ADVECT_ORACLE_DIR, RECEIPT_MODULES)
+    check_stand_in_records(RECEIPT_INDEX, ADVECT_ORACLE_DIR)
     cases = load_advect_cases()
     for name, receipt in _available_receipts():
         check_receipt_format(receipt, ADVECT_ORACLE_DIR, RECEIPT_MODULES, cases)
-        if not architecture_is_certified(receipt["compute_capability"]):
+        if not receipt_gates(name, receipt, RECEIPT_INDEX):
             moved = receipt_staleness(receipt, ADVECT_ORACLE_DIR, RECEIPT_MODULES)
             if moved:
                 warnings.warn(UncertifiedReceiptStale(
@@ -385,7 +468,7 @@ def device_receipt():
 @pytest.fixture(scope="module")
 def cuda_cases():
     gpu, capability = advect_gpu_identity()
-    if architecture_is_certified(capability):
+    if _gates_on_this_card(gpu, capability):
         # A certified card with no receipt is a coverage gap: fail before the launches.
         _receipt_for_gpu(gpu, capability)
     return {case.name: (case, advect_port_outputs(case)) for case in load_advect_cases()}
