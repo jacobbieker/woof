@@ -493,6 +493,14 @@ class CudaSWK(_sw.CudaSW):
         stream = kw.get("stream") or self.cp.cuda.get_current_stream()
         return (threading.get_ident(), int(getattr(stream, "ptr", 0) or 0))
 
+    def drop_handoff(self):
+        """Release this thread's pending optics slab: a call that raised
+        between cldprmc and spcvmc must not pin it on the shared engine."""
+        import threading
+        thread = threading.get_ident()
+        for owner in [owner for owner in self._handoff if owner[0] == thread]:
+            self._handoff.pop(owner, None)
+
     def _k(self, name):
         fn = super()._k({"rsw_cldprmc_b": "rswk_cldprmc_b",
                          "rsw_spcvmc_gpt_b": "rswk_spcvmc_gpt_b"}.get(name, name))
@@ -703,22 +711,28 @@ def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
             d = cp.asarray(day.astype(np.int64))
             nd = int(day.size)
             take = (lambda a: cp.ascontiguousarray(a[d]))
-            mc = {k: cp.ascontiguousarray(v[d][:, :, :NGPTSW])
+            # One gather of the lit columns' first NGPTSW g-points (a
+            # gather then a slice would copy the full 140-wide slab first).
+            mc = {k: cp.ascontiguousarray(v[d, :, :NGPTSW])
                   for k, v in M.items()}
             shape = (nd, nl, NGPTSW)
             alb = take(albedo[rows])
-            r = sw.rrtmg_sw_batched_device(
-                nd, nl, 2, take(P["play"]), take(P["plev"]), take(P["tlay"]),
-                take(P["tlev"]), take(tsk[rows]), take(P["h2ovmr"]),
-                take(P["o3vmr"]), gas["co2"][:nd], gas["ch4"][:nd],
-                gas["n2o"][:nd], gas["o2"][:nd], alb, alb, alb, alb,
-                take(coszen[rows]), cp.ones(nd, f32), 0,
-                cp.full(nd, F(solcon), f32), inflg, iceflg, 1,
-                mc["cldfmcl"], cp.zeros(shape, f32), cp.ones(shape, f32),
-                cp.zeros(shape, f32), cp.zeros(shape, f32),
-                mc["ciwpmcl"], mc["clwpmcl"], mc["cswpmcl"],
-                take(P["rei"]), take(P["rel"]), take(P["res"]),
-                aer_opt=0, column_chunk=chunk, mcica_layout="column")
+            try:
+                r = sw.rrtmg_sw_batched_device(
+                    nd, nl, 2, take(P["play"]), take(P["plev"]), take(P["tlay"]),
+                    take(P["tlev"]), take(tsk[rows]), take(P["h2ovmr"]),
+                    take(P["o3vmr"]), gas["co2"][:nd], gas["ch4"][:nd],
+                    gas["n2o"][:nd], gas["o2"][:nd], alb, alb, alb, alb,
+                    take(coszen[rows]), cp.ones(nd, f32), 0,
+                    cp.full(nd, F(solcon), f32), inflg, iceflg, 1,
+                    mc["cldfmcl"], cp.zeros(shape, f32), cp.ones(shape, f32),
+                    cp.zeros(shape, f32), cp.zeros(shape, f32),
+                    mc["ciwpmcl"], mc["clwpmcl"], mc["cswpmcl"],
+                    take(P["rei"]), take(P["rel"]), take(P["res"]),
+                    aer_opt=0, column_chunk=chunk, mcica_layout="column")
+            except BaseException:
+                sw.drop_handoff()
+                raise
             sel = d + c0
             _kernel("prep", "rkp_sw_out")(
                 ((nd * nz + 127) // 128,), (128,),
@@ -911,9 +925,14 @@ class RRTMGKRadiation:
         if mynn_bl_cloud_active(getattr(cfg, "bl_pbl_physics", 0),
                                 getattr(cfg, "icloud_bl", 0)):
             refuse("the MYNN subgrid-cloud merge (icloud_bl=1) is not ported")
+        # The same convective-merge refusals as config.validate_rrtmgk_config,
+        # for routes that build the adapter without validate_run_config.
         cu = int(getattr(cfg, "cu_physics", 0) or 0)
-        if cu == 10 or (cu == 2 and getattr(cfg, "bmj_rad_feedback", False)):
-            refuse(f"cu_physics={cu} radiation cloud feedback is not ported")
+        if cu == 10:
+            refuse("cu_physics=10 (KF-CuP) radiation cloud feedback is not ported")
+        for name in ("cu_rad_feedback", "bmj_rad_feedback"):
+            if bool(getattr(cfg, name, False)):
+                refuse(f"the convective cloud merge ({name}=.true.) is not ported")
         if mp_physics in (11, 95):
             refuse(f"mp_physics={mp_physics} supplies radiation clouds "
                    "through a path rad_rrtmg_driver is not ported for")
