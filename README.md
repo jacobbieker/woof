@@ -464,7 +464,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   wall per forecast hour, Edinburgh 3 km about 2 %; `WOOF_DIFF6_MULTI=0`
   restores the per-field launches). Advection folds each species' tendency
   zero-fill into its first accumulating launch (`zero_first`, word-identical
-  on CUDA and Metal). Its advection receipts for the RTX 5090 and RTX PRO 6000
+  on CUDA and Metal). On CUDA the four flux-divergence launches take 32 x 4
+  thread blocks instead of 128-wide rows (word-identical; 6-14 % less kernel
+  time at 150-260 points per row on the A6000; Metal keeps the rows). Its advection receipts for the RTX 5090 and RTX PRO 6000
   (Blackwell) are **not re-pinned**: no Blackwell card was available, so
   `certified_unrepinned` in each fixture's `gpu-receipts.json` records the
   pins and the commit, and the gate warns rather than fails for those pins. An RK stage's lateral specified/relaxation
@@ -519,7 +521,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `--scratch`, so a regional run in a fresh work dir no longer recompiles
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
-  cache). Hex MYNN on Metal gives every column its own worker (within the
+  cache).
+  Hex regional scalar transport reads each edge's advection stencil once
+  per (edge, level chunk) and walks the tracers
+  (`transport_edge_values_regional_hoist_v841`, byte-identical in fast and
+  strict numerics on CUDA and Metal; Alps 3 km variable-resolution, 11
+  tracers: 28 -> 2-3 ms per launch on an M3 Max, 15 -> 0.55 ms on an A6000;
+  `WOOF_HEX_REGIONAL_EDGE_HOIST=0` restores the element kernel).
+  Hex MYNN on Metal gives every column its own worker (within the
   one-eighth-of-free-memory bound) instead of 128 per GPU core, so the
   column loop no longer strides: on the 14,751-cell Alps VR mesh
   `mynn_mmm_run` drops from 112 to 50 ms a step, byte-identical

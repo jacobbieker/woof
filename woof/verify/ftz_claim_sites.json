@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 5882,
+  "site_count": 5885,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 5815
+    "prose": 5818
   },
   "sites": [
     {
@@ -15797,6 +15797,39 @@
       "kind": "prose",
       "anchor": "cell degrees, subnormal and signed-zero inputs) at several levels-per-thread",
       "anchor_sha256": "374904806a5a92741fd2e31bc3c7747096a41ad910b2d2ddee949093627b07f8",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_hex_regional_edge_hoist.py",
+      "line": 7,
+      "kind": "prose",
+      "anchor": "WRF-like advection weights, and stage values that are subnormal, signed zeros and tiny enough for the",
+      "anchor_sha256": "623a2189caf5cc1f479ff8f3b9b3473854ff8cbf91ee7506d14e889c6d19042d",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_hex_regional_edge_hoist.py",
+      "line": 8,
+      "kind": "prose",
+      "anchor": "weight products to flush, so the subnormal-sensitivity fallback is taken -- into poisoned outputs, and every",
+      "anchor_sha256": "4973384eba4e8fd5050e34931da828080425406e5af9a99f2b65f6570c72ab3d",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_hex_regional_edge_hoist.py",
+      "line": 46,
+      "kind": "prose",
+      "anchor": "# weights whose sum cancels into the subnormal range",
+      "anchor_sha256": "f0e9dcf07a4c2ef31a3ae95eab326ca1b9602829d659e02cc0dbf5f46f82206d",
       "route": null,
       "mechanism": null,
       "asserted_token": null,

@@ -1687,19 +1687,16 @@ def advance_scalars_regional_cuda_v841(
             group_edges.fill(0.0)
             group_flux.fill(0.0)
         stage_group = scalar_stage[first:last]
-        runtime.kernels.launch(
-            "transport_edge_values_regional_v841",
-            group * nlev * nedges,
-            (
-                np.int32(group), np.int32(nlev), np.int32(ncells),
-                np.int32(nedges), np.int32(width),
-                np.float32(config_coef_3rd_order), runtime.bdy_mask_edge,
-                mesh.dv_edge, mesh.cells_on_edge, stage_group, uh_avg,
-                coefficients.adv_coefs, coefficients.adv_coefs_3rd,
-                coefficients.n_adv_cells_for_edge, coefficients.adv_cells_for_edge,
-                group_edges,
-            ),
+        edge_arguments = (
+            np.int32(group), np.int32(nlev), np.int32(ncells),
+            np.int32(nedges), np.int32(width),
+            np.float32(config_coef_3rd_order), runtime.bdy_mask_edge,
+            mesh.dv_edge, mesh.cells_on_edge, stage_group, uh_avg,
+            coefficients.adv_coefs, coefficients.adv_coefs_3rd,
+            coefficients.n_adv_cells_for_edge, coefficients.adv_cells_for_edge,
+            group_edges,
         )
+        _regional_edge_values(runtime, edge_arguments, group, nlev, nedges, cp)
         runtime.shared_transport_launch(
             "transport_vertical_flux",
             ncells,
@@ -1722,6 +1719,26 @@ def advance_scalars_regional_cuda_v841(
             ),
         )
     return output, target
+
+
+def _regional_edge_values(runtime: Any, arguments: tuple[Any, ...], group: int, nlev: int, nedges: int, cp: Any) -> None:
+    """The regional edge values: one thread per (edge, level chunk) walking the tracers
+    (woof.hex.cuda_regional_hoist_v841, the same words), or the element kernel under
+    WOOF_HEX_REGIONAL_EDGE_HOIST=0 / WOOF_HEX_EDGE_HOIST=0 / an edge count under the hoist size."""
+    from . import cuda_edge_hoist
+    from . import cuda_regional_hoist_v841 as hoist
+
+    if not (hoist.enabled() and cuda_edge_hoist.enabled(nedges)):
+        runtime.kernels.launch(hoist.ELEMENT_KERNEL, group * nlev * nedges, arguments)
+        return
+    cache = runtime.kernels.cache
+    lpt = cuda_edge_hoist.levels_per_thread(
+        hoist.KERNEL, group * nedges, nlev, lambda value: hoist.launch(cache, arguments, value), cp)
+    hoist.launch(cache, arguments, lpt)
+    if cuda_edge_hoist.check_wanted(hoist.KERNEL, cp):
+        element = cp.empty_like(arguments[-1])
+        runtime.kernels.launch(hoist.ELEMENT_KERNEL, group * nlev * nedges, (*arguments[:-1], element))
+        cuda_edge_hoist.compare(hoist.KERNEL, arguments[-1], element, cp)
 
 
 # THE BREAKAGE THIS PREVENTS (eight-card system 2026-10-29 06:46-07:54Z): NOAA conus3km hrrrv5 on 4 x RTX PRO 6000 (44c0849 row,
