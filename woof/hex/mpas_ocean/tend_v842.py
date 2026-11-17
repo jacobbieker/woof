@@ -185,7 +185,7 @@ def vel_coriolis_tend(*, mesh: dict, normalized_relative_vorticity_edge, normali
     _check("dcEdge", mesh["dcEdge"], dtype, (n_edges,))
     _check("edgeMask", mesh["edgeMask"], cp.int32, (n_edges, n_levels))
     n_edges_loop = loop_extent("edges", 1, n_edges)
-    _function(precision, "ocn_vel_coriolis_tend_v842")(_grid(n_edges_loop), (_BLOCK,), (
+    _function(precision, "ocn_vel_coriolis_tend_v842")(_grid(n_edges_loop * n_levels), (_BLOCK,), (
         tend, normalized_relative_vorticity_edge, normalized_planetary_vorticity_edge, layer_thickness_edge,
         normal_velocity, kinetic_energy_cell, mesh["maxLevelEdgeTop"], mesh["nEdgesOnEdge"],
         mesh["cellsOnEdge"], mesh["edgesOnEdge"], mesh["weightsOnEdge"], mesh["dcEdge"], mesh["edgeMask"],
@@ -211,7 +211,7 @@ def vel_vadv_tend(*, mesh: dict, normal_velocity, layer_thickness_edge, vert_ale
     _check("cellsOnEdge", mesh["cellsOnEdge"], cp.int32, (n_edges, 2))
     _check("edgeMask", mesh["edgeMask"], cp.int32, (n_edges, n_levels))
     n_edges_loop = loop_extent("edges", 1, n_edges)
-    _function(precision, "ocn_vel_vadv_tend_v842")(_grid(n_edges_loop), (_BLOCK,), (
+    _function(precision, "ocn_vel_vadv_tend_v842")(_grid(n_edges_loop * n_levels), (_BLOCK,), (
         tend, normal_velocity, layer_thickness_edge, vert_ale_transport_top, mesh["maxLevelEdgeTop"],
         mesh["cellsOnEdge"], mesh["edgeMask"], np.int32(n_edges_loop), np.int32(n_levels)))
 
@@ -239,7 +239,7 @@ def thick_hadv_tend(*, mesh: dict, normal_velocity, layer_thickness_edge, tend,
     _check("dvEdge", mesh["dvEdge"], dtype, (n_edges,))
     _check("areaCell", mesh["areaCell"], dtype, (n_cells,))
     n_cells_loop = loop_extent("cells", 1, n_cells)
-    _function(precision, "ocn_thick_hadv_tend_v842")(_grid(n_cells_loop), (_BLOCK,), (
+    _function(precision, "ocn_thick_hadv_tend_v842")(_grid(n_cells_loop * n_levels), (_BLOCK,), (
         tend, normal_velocity, layer_thickness_edge, mesh["maxLevelEdgeBot"], mesh["nEdgesOnCell"],
         mesh["edgesOnCell"], mesh["edgeSignOnCell"], mesh["dvEdge"], mesh["areaCell"],
         np.int32(n_cells_loop), np.int32(n_levels), np.int32(max_edges)))

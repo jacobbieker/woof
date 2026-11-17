@@ -234,7 +234,7 @@ def diagnostic_solve(*, dt: float, mesh: dict, state: dict, tracers: dict, diagn
             i32(with_frazil), i32(with_land_ice)))
     rho_sw = real(configs["config_density0"])
     coef = -(real(GRAVITY) / rho_sw)
-    _launch(precision, "ocn_diag_stability_v842", cells[2], (
+    _launch(precision, "ocn_diag_stability_v842", cells[2] * nl, (
         d["BruntVaisalaFreqTop"], d["RiTopOfCell"], d["displacedDensity"], d["density"], d["zMid"], u,
         m["dcEdge"], m["dvEdge"], m["areaCell"], m["nEdgesOnCell"], m["edgesOnCell"], m["maxLevelCell"],
         i32(cells[2]), i32(nl), i32(me), real(coef)))

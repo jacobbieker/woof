@@ -161,7 +161,7 @@ def test_gpu_matches_the_v842_oracle_word_for_word(precision):
      "M(pTop, D(S(rho[k - 1], rho[k]), M(rho[k], rho[k - 1])))", "montgomery_jm_rk4_kpp_deep",
      "diagnostics/montgomeryPotential", BOTH),
     # the Richardson number without its 1e-10
-    ("ri[k] = D(bv[k], A(M(shearMean, shearMean), C(1.0e-10)));", "ri[k] = D(bv[k], M(shearMean, shearMean));",
+    ("ri[level] = D(bvK, A(M(shearMean, shearMean), C(1.0e-10)));", "ri[level] = D(bvK, M(shearMean, shearMean));",
      "zmid_linear", "diagnostics/RiTopOfCell", BOTH),
     # the land-ice fraction kept below 0.5
     ("        landIceFraction[iCell] = C(0.0);\n", "", "jts_jm_apvm_kpp_land_ice", "forcing/landIceFraction", BOTH),

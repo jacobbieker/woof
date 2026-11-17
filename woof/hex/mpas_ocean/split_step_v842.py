@@ -167,7 +167,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
     tend_configs = {k: configs[k] for k in forcing_v842.DEFAULT_CONFIGS if k in configs}
 
     # the preparation
-    _launch(precision, "ocn_ss_prep_edges_v842", ne, (
+    _launch(precision, "ocn_ss_prep_edges_v842", ne * nl, (
         st["normalBaroclinicVelocity"], st["normalVelocity@2"], st["normalBaroclinicVelocity@2"],
         st["normalVelocity"], st["normalBarotropicVelocity"], i32(ne), i32(nl)))
     _launch(precision, "ocn_ss_prep_cells_v842", nc, (
@@ -197,7 +197,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
             # ocn_vel_hmix_tend zeroes the whole viscosity array, the missing edge's row too
             d["viscosity"][ne:] = 0
         for _ in range(n_bcl[step - 1]):
-            _launch(precision, "ocn_ss_fuperp_v842", int(m["nEdgesSolve"]), (
+            _launch(precision, "ocn_ss_fuperp_v842", int(m["nEdgesSolve"]) * nl, (
                 st["normalVelocity@2"], st["normalBaroclinicVelocity@2"], m["weightsOnEdge"], m["fEdge"],
                 m["edgesOnEdge"], m["nEdgesOnEdge"], m["maxLevelEdgeTop"], i32(m["nEdgesSolve"]), i32(nl), i32(me2)))
             n1 = int(m["nEdgesArray"][0])
@@ -231,7 +231,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
             _launch(precision, "ocn_ss_mid_cells_v842", nc, (
                 h_new, tr_new, h_cur, td["layerThickness"], tr_cur, tt["activeTracersTend"], m["maxLevelCell"],
                 i32(nc), i32(nl), i32(nt), i32(tr["activeGRP_start"]), i32(tr["activeGRP_end"]), rdt))
-            _launch(precision, "ocn_ss_mid_edges_v842", ne, (
+            _launch(precision, "ocn_ss_mid_edges_v842", ne * nl, (
                 st["normalVelocity@2"], st["normalBarotropicVelocity@2"], st["normalBaroclinicVelocity@2"],
                 m["edgeMask"], i32(ne), i32(nl)))
             diagnostics_v842.diagnostic_solve(dt=dt, mesh=m, state=state_at(2), tracers=tracers_at(2),
@@ -250,7 +250,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
                 _launch(precision, "ocn_ss_final_tracers_v842", nc, (
                     tr_new, tr_cur, tt["activeTracersTend"], h_cur, h_new, m["maxLevelCell"], i32(nc), i32(nl),
                     i32(nt), i32(tr["index_salinity"]), rdt))
-            _launch(precision, "ocn_ss_final_velocity_v842", ne, (
+            _launch(precision, "ocn_ss_final_velocity_v842", ne * nl, (
                 st["normalVelocity@2"], st["normalBarotropicVelocity@2"], st["normalBaroclinicVelocity@2"],
                 st["normalBaroclinicVelocity"], m["maxLevelEdgeTop"], i32(ne), i32(nl)))
 
@@ -270,7 +270,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
                                                         "velocityMeridional"), nl),
                              (d["gradSSH"], ("gradSSHX", "gradSSHY", "gradSSHZ", "gradSSHZonal",
                                              "gradSSHMeridional"), 1)):
-        _launch(precision, "ocn_ss_reconstruct_v842", nc, (
+        _launch(precision, "ocn_ss_reconstruct_v842", nc * levels, (
             *(d[n] for n in names), u, m["coeffs_reconstruct"], m["nEdgesOnCell"], m["edgesOnCell"], m["latCell"],
             m["lonCell"], i32(nc), i32(levels), i32(me), sphere))
     _launch(precision, "ocn_ss_surface_v842", nc, (
