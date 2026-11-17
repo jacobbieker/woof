@@ -6,6 +6,22 @@
  "inventory": {
   "compile_sites": [
    {
+    "call_sha256": "6545f899483c3186fa4c979e195575594fae4bae1c74f3f7c2c721dca4f91e4d",
+    "constructor": "RawModule",
+    "factory": "__call__",
+    "factory_sha256": "be7cc1cf638b0b2197e981ab9287426c2d670ca4aa1b6660e68e2211c3b3b62a",
+    "file": "woof/backend/facade/_elementwise.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "6d12418565a64a0e50341d6528ad50a1e7119770107a87a34ea305d49c94071c",
+    "constructor": "RawModule",
+    "factory": "_split_call",
+    "factory_sha256": "0cc2180952fd2e38a71345dd16fdcad4775b0febb578e2868e88f715414be328",
+    "file": "woof/backend/facade/_elementwise.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "00ae93a39da3ba70a7c427c9275367060475cb282919e165ab826b3e68a4dc41",
     "constructor": "compile_using_nvrtc",
     "factory": "__init__",
@@ -1059,14 +1075,6 @@
     "factory": "__init__",
     "factory_sha256": "44819f5afe594da0cca391170edd6a3e72c51fdbc0afed8b2d4bfdab66f03387",
     "file": "woof/backend/facade/__init__.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "6545f899483c3186fa4c979e195575594fae4bae1c74f3f7c2c721dca4f91e4d",
-    "constructor": "RawModule",
-    "factory": "__call__",
-    "factory_sha256": "a5f3b501ec8941b1c4822f3d9c3e14b1138037cb2abf6b77a87e3ae56abb857e",
-    "file": "woof/backend/facade/_elementwise.py",
     "status": "unresolved"
    },
    {
@@ -5003,7 +5011,7 @@
    },
    {
     "file": "woof/backend/_elementwise_source.py",
-    "sha256": "6f043e20637862cd88f4480de44ac8b6443a7224afc3968247ed7dac9f141fd4"
+    "sha256": "eeae014aecad45727624c27e61619d56a772fd11145439f612e6f493af440271"
    },
    {
     "file": "woof/backend/facade/__init__.py",
@@ -5011,7 +5019,7 @@
    },
    {
     "file": "woof/backend/facade/_elementwise.py",
-    "sha256": "89151b56195d55b1b7cd2c77a89fa9d23671901e0880cf4a82e01fc39adbe67e"
+    "sha256": "bbefb4ce1812ce8b0079bdf3c367714d146d8a8caa9e577ce6c561be4e7f5e1a"
    },
    {
     "file": "woof/backend/facade/_ops.py",
@@ -6398,6 +6406,14 @@
    {
     "file": "woof/backend/_elementwise_source.py",
     "sha256": "126819c122e8957029943dedc0e682d11ad0e7ab9f6a58326ef30aa67c002206"
+   },
+   {
+    "file": "woof/backend/_elementwise_source.py",
+    "sha256": "126819c122e8957029943dedc0e682d11ad0e7ab9f6a58326ef30aa67c002206"
+   },
+   {
+    "file": "woof/backend/_elementwise_source.py",
+    "sha256": "d300827e73c302eee4aee9f28843fd537e5a565a1e463fabeb7880c5408161ae"
    },
    {
     "file": "woof/backend/host/loader.py",

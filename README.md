@@ -627,6 +627,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   a read back and a write: the writer's host time per Edinburgh 3 km frame
   falls from 761-1061 ms to 470-576 ms, byte-identical
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
+  The Metal facade's `ReductionKernel` folded each output on one thread.
+  An exact, order-free and idempotent fold (`a | b`, `a || b`, `a & b`,
+  `a && b`) over 4096 or more elements is now folded in slices and then
+  across the slices, giving the same value (hex Edinburgh 3 km
+  variable-resolution: Noah-MP's surface identity check from 3.6 ms to
+  0.16 ms per step and the transport species-word check from 1.4 ms to
+  0.18 ms, byte-identical; `WOOF_METAL_SPLIT_REDUCTIONS=0` restores the
+  serial fold).
   `WOOF_METAL_GPU_TIMES` times each kernel. Its per-launch command
   buffers also hold the lazy MLX work the launch waited on, and their GPU
   intervals overlap, so a facade write (`woof_copy_4`) used to carry other

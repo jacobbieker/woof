@@ -20,7 +20,7 @@ A Mac with MLX installed and no CuPy also selects mlx on its own.
 | Path | What it is |
 |---|---|
 | `woof/backend/__init__.py` | Backend selection. `install()` puts an import hook in place that serves the facade for `import cupy`. |
-| `woof/backend/facade/` | CuPy's API over MLX: arrays (`_array.py`), operations (`_ops.py`), `cupy.cuda` (`cuda.py`), `ElementwiseKernel` and `ReductionKernel` (`_elementwise.py`). |
+| `woof/backend/facade/` | CuPy's API over MLX: arrays (`_array.py`), operations (`_ops.py`), `cupy.cuda` (`cuda.py`), `ElementwiseKernel` and `ReductionKernel` (`_elementwise.py`; a reduction folds each output serially on one thread, except that an exact, order-free, idempotent fold (`a | b`, `a || b`, `a & b`, `a && b`) over 4096 or more elements per output is folded in slices and then across slices, with the same value; `WOOF_METAL_SPLIT_REDUCTIONS=0` keeps the serial fold). |
 | `woof/backend/translate/` | The CUDA→MSL translator, which uses libclang. `spaces.py` infers address spaces; `cuda_decls.h` declares CUDA's builtins for the parser; `vendor_libm64.cuh` provides binary64 libm. |
 | `woof/backend/metal/prelude.h` | The CUDA intrinsics, atomics and math every translated unit starts with. |
 | `woof/backend/metal/f64_soft.h` | Bit-exact IEEE binary64 in integer arithmetic. Apple GPUs have no fp64. |
