@@ -60,19 +60,21 @@ __device__ __forceinline__ rk ss_max(rk a, rk b) {
 #define SS_SIN(x) glibc_sinf(x)
 #endif
 __device__ __forceinline__ int ss_thread() { return blockIdx.x * blockDim.x + threadIdx.x; }
+// one thread per (element, level), the level fastest: a warp reads a column's
+// consecutive levels. Each (element, level) is the same operations as the
+// element's level loop gave it, so every word is unchanged; launch n * nl.
+#define SS_LANE(n, nl, elem, k) const int ss_t_ = ss_thread(); const int elem = ss_t_ / (nl); \
+    if (elem >= (n)) return; const int k = ss_t_ - elem * (nl)
 
 // the preparation, edges 1..nEdges: the baroclinic velocity, the new level
 extern "C" __global__ void ocn_ss_prep_edges_v842(
     rk *bclCur, rk *uNew, rk *bclNew, const rk *uCur, const rk *btrCur, int nEdges, int nl)
 {
-    const int e = ss_thread();
-    if (e >= nEdges) return;
-    for (int k = 0; k < nl; ++k) {
-        const int i = e * nl + k;
-        bclCur[i] = S(uCur[i], btrCur[e]);
-        uNew[i] = uCur[i];
-        bclNew[i] = bclCur[i];
-    }
+    SS_LANE(nEdges, nl, e, k);
+    const int i = e * nl + k;
+    bclCur[i] = S(uCur[i], btrCur[e]);
+    uNew[i] = uCur[i];
+    bclNew[i] = bclCur[i];
 }
 
 // the preparation, cells 1..nCells: SSH, thickness and tracers copied to the
@@ -97,16 +99,14 @@ extern "C" __global__ void ocn_ss_fuperp_v842(
     rk *u, const rk *bcl, const rk *weightsOnEdge, const rk *fEdge, const int *edgesOnEdge,
     const int *nEdgesOnEdge, const int *maxLevelEdgeTop, int nEdges, int nl, int me2)
 {
-    const int e = ss_thread();
-    if (e >= nEdges) return;
-    for (int k = 0; k < maxLevelEdgeTop[e]; ++k) {
-        rk sum = C(0.0);
-        for (int j = 0; j < nEdgesOnEdge[e]; ++j) {
-            const int eoe = edgesOnEdge[e * me2 + j] - 1;
-            sum = A(sum, M(M(weightsOnEdge[e * me2 + j], bcl[eoe * nl + k]), fEdge[eoe]));
-        }
-        u[e * nl + k] = sum;
+    SS_LANE(nEdges, nl, e, k);
+    if (k >= maxLevelEdgeTop[e]) return;
+    rk sum = C(0.0);
+    for (int j = 0; j < nEdgesOnEdge[e]; ++j) {
+        const int eoe = edgesOnEdge[e * me2 + j] - 1;
+        sum = A(sum, M(M(weightsOnEdge[e * me2 + j], bcl[eoe * nl + k]), fEdge[eoe]));
     }
+    u[e * nl + k] = sum;
 }
 
 // one baroclinic iteration on the linear Coriolis term, edges 1..nEdgesArray(1):
@@ -163,10 +163,8 @@ extern "C" __global__ void ocn_ss_mid_cells_v842(
 extern "C" __global__ void ocn_ss_mid_edges_v842(
     rk *uNew, const rk *btrNew, const rk *bclNew, const int *edgeMask, int nEdges, int nl)
 {
-    const int e = ss_thread();
-    if (e >= nEdges) return;
-    for (int k = 0; k < nl; ++k)
-        uNew[e * nl + k] = M((rk)edgeMask[e * nl + k], A(btrNew[e], bclNew[e * nl + k]));
+    SS_LANE(nEdges, nl, e, k);
+    uNew[e * nl + k] = M((rk)edgeMask[e * nl + k], A(btrNew[e], bclNew[e * nl + k]));
 }
 
 // the last iteration, cells 1..nCells: the new thickness
@@ -214,12 +212,10 @@ extern "C" __global__ void ocn_ss_final_tracers_v842(
 extern "C" __global__ void ocn_ss_final_velocity_v842(
     rk *uNew, const rk *btrNew, const rk *bclNew, const rk *bclCur, const int *maxLevelEdgeTop, int nEdges, int nl)
 {
-    const int e = ss_thread();
-    if (e >= nEdges) return;
-    for (int k = 0; k < maxLevelEdgeTop[e]; ++k) {
-        const int i = e * nl + k;
-        uNew[i] = S(A(btrNew[e], M(C(2.0), bclNew[i])), bclCur[i]);
-    }
+    SS_LANE(nEdges, nl, e, k);
+    if (k >= maxLevelEdgeTop[e]) return;
+    const int i = e * nl + k;
+    uNew[i] = S(A(btrNew[e], M(C(2.0), bclNew[i])), bclCur[i]);
 }
 
 // mpas_reconstruct (2-D, or 1-D with nl = 1): the cell vector from the edge
@@ -228,35 +224,27 @@ extern "C" __global__ void ocn_ss_reconstruct_v842(
     rk *x, rk *y, rk *z, rk *zonal, rk *meridional, const rk *u, const rk *coeffs, const int *nEdgesOnCell,
     const int *edgesOnCell, const rk *latCell, const rk *lonCell, int nCells, int nl, int me, int onSphere)
 {
-    const int c = ss_thread();
-    if (c >= nCells) return;
-    const int b = c * nl;
-    for (int k = 0; k < nl; ++k) {
-        x[b + k] = C(0.0);
-        y[b + k] = C(0.0);
-        z[b + k] = C(0.0);
-    }
+    SS_LANE(nCells, nl, c, k);
+    const int p = c * nl + k;
+    rk xs = C(0.0), ys = C(0.0), zs = C(0.0);
     for (int i = 0; i < nEdgesOnCell[c]; ++i) {
         const int e = edgesOnCell[c * me + i] - 1;
         const rk *cf = coeffs + (c * me + i) * 3;
-        for (int k = 0; k < nl; ++k) {
-            x[b + k] = A(x[b + k], M(cf[0], u[e * nl + k]));
-            y[b + k] = A(y[b + k], M(cf[1], u[e * nl + k]));
-            z[b + k] = A(z[b + k], M(cf[2], u[e * nl + k]));
-        }
+        xs = A(xs, M(cf[0], u[e * nl + k]));
+        ys = A(ys, M(cf[1], u[e * nl + k]));
+        zs = A(zs, M(cf[2], u[e * nl + k]));
     }
+    x[p] = xs;
+    y[p] = ys;
+    z[p] = zs;
     if (onSphere) {
         const rk clat = SS_COS(latCell[c]), slat = SS_SIN(latCell[c]);
         const rk clon = SS_COS(lonCell[c]), slon = SS_SIN(lonCell[c]);
-        for (int k = 0; k < nl; ++k) {
-            zonal[b + k] = A(-M(x[b + k], slon), M(y[b + k], clon));
-            meridional[b + k] = A(-M(A(M(x[b + k], clon), M(y[b + k], slon)), slat), M(z[b + k], clat));
-        }
+        zonal[p] = A(-M(xs, slon), M(ys, clon));
+        meridional[p] = A(-M(A(M(xs, clon), M(ys, slon)), slat), M(zs, clat));
     } else {
-        for (int k = 0; k < nl; ++k) {
-            zonal[b + k] = x[b + k];
-            meridional[b + k] = y[b + k];
-        }
+        zonal[p] = xs;
+        meridional[p] = ys;
     }
 }
 

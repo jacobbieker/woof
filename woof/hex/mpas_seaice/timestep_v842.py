@@ -179,12 +179,15 @@ def _velocity_solver(pools: dict, configs: dict, consts) -> None:
         variational=variational, use_air_stress=bool(configs.get("config_use_air_stress", False)),
         use_ocean_stress=use_ocean_stress, tilt=_tilt(configs), **flags)
     inertia = consts[1:2]
-    for _ in range(int(configs["config_elastic_subcycle_number"])):
+    # the subcycles run on the same arrays, so the first one checks them for all
+    for subcycle in range(int(configs["config_elastic_subcycle_number"])):
         evp_v842.internal_stress_variational(mesh=mesh, solver=solver, variational=variational, consts=consts,
-                                             elastic_time_step=elastic_dt, revised_evp=revised)
+                                             elastic_time_step=elastic_dt, revised_evp=revised,
+                                             check=subcycle == 0)
         velocity_v842.velocity_update(mesh=mesh, icestate=icestate, solver=solver, inertia=inertia,
                                       use_ocean_stress=use_ocean_stress, revised_evp=revised,
-                                      elastic_time_step=elastic_dt, dynamics_time_step=dynamics_dt)
+                                      elastic_time_step=elastic_dt, dynamics_time_step=dynamics_dt,
+                                      check=subcycle == 0)
     evp_v842.final_divergence_shear_variational(mesh=mesh, solver=solver, variational=variational,
                                                 ridging=p["ridging"], use_column_package=False)
     velocity_v842.principal_stresses(mesh=mesh, variational=variational)

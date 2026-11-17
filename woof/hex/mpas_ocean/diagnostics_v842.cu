@@ -362,35 +362,41 @@ extern "C" __global__ void ocn_diag_pressure_zmid_v842(
     ssh[iCell] = zt[0];
 }
 
-// BruntVaisalaFreqTop, then RiTopOfCell, cells 1..nCellsArray(3): one thread per column
+// BruntVaisalaFreqTop, then RiTopOfCell, cells 1..nCellsArray(3): one thread
+// per (cell, level), the level fastest; launch nCells * nl. Each level's words
+// are the column loop's: RiTopOfCell(1) is RiTopOfCell(2), which the level-0
+// thread forms again, and RiTopOfCell(nl+1) is the last level's thread's 100.
 extern "C" __global__ void ocn_diag_stability_v842(
     rk *BruntVaisalaFreqTop, rk *RiTopOfCell, const rk *displacedDensity, const rk *density, const rk *zMid,
     const rk *normalVelocity, const rk *dcEdge, const rk *dvEdge, const rk *areaCell, const int *nEdgesOnCell,
     const int *edgesOnCell, const int *maxLevelCell, int nCells, int nl, int maxEdges, rk coef)
 {
-    const int iCell = diag_thread();
-    if (iCell >= nCells) return;
+    const int t = diag_thread();
+    if (t >= nCells * nl) return;
+    const int iCell = t / nl, level = t % nl;
     const int top = maxLevelCell[iCell];
     rk *bv = BruntVaisalaFreqTop + iCell * nl, *ri = RiTopOfCell + iCell * (nl + 1);
     const rk *zm = zMid + iCell * nl;
-    bv[0] = C(0.0);
-    for (int k = 1; k < top; ++k)
-        bv[k] = D(M(coef, S(displacedDensity[iCell * nl + k - 1], density[iCell * nl + k])), S(zm[k - 1], zm[k]));
-    for (int k = 0; k <= nl; ++k) ri[k] = C(100.0);
-    const rk invAreaCell1 = D(C(1.0), areaCell[iCell]);
-    for (int k = 1; k < top; ++k) {
-        rk shearSquared = C(0.0);
-        for (int i = 0; i < nEdgesOnCell[iCell]; ++i) {
-            const int iEdge = edgesOnCell[iCell * maxEdges + i] - 1;
-            const rk factor = M(M(M(C(0.5), dcEdge[iEdge]), dvEdge[iEdge]), invAreaCell1);
-            const rk du = S(normalVelocity[iEdge * nl + k - 1], normalVelocity[iEdge * nl + k]);
-            shearSquared = A(shearSquared, M(factor, M(du, du)));
-        }
-        rk shearMean = SQRT(shearSquared);
-        shearMean = D(shearMean, S(zm[k - 1], zm[k]));
-        ri[k] = D(bv[k], A(M(shearMean, shearMean), C(1.0e-10)));
+    if (level == 0) bv[0] = C(0.0);
+    if (level == nl - 1) ri[nl] = C(100.0);
+    const int k = level == 0 ? 1 : level;
+    if (k >= top) {
+        ri[level] = C(100.0);
+        return;
     }
-    ri[0] = ri[1];
+    const rk bvK = D(M(coef, S(displacedDensity[iCell * nl + k - 1], density[iCell * nl + k])), S(zm[k - 1], zm[k]));
+    if (level > 0) bv[k] = bvK;
+    const rk invAreaCell1 = D(C(1.0), areaCell[iCell]);
+    rk shearSquared = C(0.0);
+    for (int i = 0; i < nEdgesOnCell[iCell]; ++i) {
+        const int iEdge = edgesOnCell[iCell * maxEdges + i] - 1;
+        const rk factor = M(M(M(C(0.5), dcEdge[iEdge]), dvEdge[iEdge]), invAreaCell1);
+        const rk du = S(normalVelocity[iEdge * nl + k - 1], normalVelocity[iEdge * nl + k]);
+        shearSquared = A(shearSquared, M(factor, M(du, du)));
+    }
+    rk shearMean = SQRT(shearSquared);
+    shearMean = D(shearMean, S(zm[k - 1], zm[k]));
+    ri[level] = D(bvK, A(M(shearMean, shearMean), C(1.0e-10)));
 }
 
 // tracersSurfaceValue(:, iCell) = activeTracers(:, 1, iCell), cells 1..nCellsArray(3)
