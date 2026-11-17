@@ -1521,8 +1521,9 @@ stream carries the rows yet. Its CCIR/URSI maps and IGRF-14 coefficients are
 fetched on first use into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`) and
 checked against pinned SHA-256 sums. The GFZ index file is a living record, so
 it has no pinned sum: it is fetched again when it ends before the day before the
-start, its format is checked on reading, and its SHA-256 is recorded in the
-run's receipt.
+start (and once more when that day's flux is not yet released), its format is
+checked on reading, and its SHA-256 is printed with the rest of the
+ionosphere's receipt as the run starts (the `[spacewx ionosphere]` line).
 
 ## What a WRF namelist setting becomes
 

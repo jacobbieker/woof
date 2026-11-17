@@ -3097,6 +3097,10 @@ def _packed_parameters_identity(params, *, label: str,
 #: the switch apart, which is all the restart walk needs.
 _DIGEST_DROPPED_DIAGNOSTIC_FIELDS = frozenset(
     {"hailcast_opt", "haildt", "hailcast_version", "nwp_diagnostics", "tke_budget", "sase_flux_diag", "surface_energy_diag",
+     # The opt-in ionosphere history: output-only, and dropped while off by
+     # _drop_default_off_run_keys, so no earlier digest carried them.
+     "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
+     "spacewx_ionosphere_maps",
      # Correct mode WB1: output-only and on by default from 2.9.0, so it is
      # dropped rather than held at a default no earlier digest carried.
      "thompson_cloud_surface_booking",

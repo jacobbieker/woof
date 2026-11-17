@@ -22,9 +22,11 @@ refuse the option for now; each says so by name.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import numpy as np
+
+from woof.spacewx.solar_irradiance import _naive_utc
 
 #: wrfout name -> (ionosphere output, description, units).
 HISTORY_FIELDS = {
@@ -79,12 +81,6 @@ def parse_f107_source(source: str):
     return "value", value
 
 
-def _naive_utc(value: datetime) -> datetime:
-    if value.tzinfo is not None:
-        value = value.astimezone(timezone.utc).replace(tzinfo=None)
-    return value
-
-
 def _host(array):
     get = getattr(array, "get", None)
     return np.asarray(get() if callable(get) else array, dtype=np.float64)
@@ -115,12 +111,37 @@ class IonosphereHistory:
             load = indices_loader or indices.load
             # F10.7 reads through the previous UTC day, so a cache through it is enough.
             geo = load("gfz" if kind == "gfz" else value, start - timedelta(days=1))
-            f107 = geo.f107_driver(start, mode)
+            try:
+                f107 = geo.f107_driver(start, mode)
+            except indices.IndicesError as first:
+                if kind != "gfz":
+                    raise IonosphereHistoryError(str(first)) from None
+                # The cached file may carry the previous day's row before its
+                # flux was released (-1): fetch again if the file does not
+                # reach the start's own day, then refuse by name.
+                geo = load("gfz", start)
+                try:
+                    f107 = geo.f107_driver(start, mode)
+                except indices.IndicesError as exc:
+                    raise IonosphereHistoryError(
+                        f"spacewx_ionosphere_opt = 1: {exc}; GFZ has not released the flux "
+                        "this start needs, so set spacewx_f107_source to a number (sfu) "
+                        "or use spacewx_f107_mode = '81day'") from None
             record = {"spacewx_f107_source": geo.source, "spacewx_f107_sha256": geo.sha256}
-        from woof.spacewx.ionosphere import Ionosphere
+        from woof.spacewx.ionosphere import Ionosphere, month_weights
         lat, lon = _host(lat), _host(lon)
         iono = Ionosphere(lat, lon, when=start, family=getattr(cfg, "spacewx_ionosphere_maps", "ccir"),
                           igrf_model=igrf_model, map_loader=map_loader)
+        # Load every monthly map the run's frames blend now, so a run crossing
+        # a mid-month boundary does not fetch one in the middle of the forecast.
+        end = start + timedelta(seconds=float(getattr(cfg, "run_seconds", 0.0) or 0.0))
+        when = start
+        while True:
+            for month, _weight in month_weights(min(when, end)):
+                iono.maps(month)
+            if when >= end:
+                break
+            when += timedelta(days=1)
         return cls(iono, start, f107, mode, lat.shape, record)
 
     def __init__(self, iono, start_time: datetime, f107: float, mode: str, shape, record: dict):

@@ -1174,8 +1174,8 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
             # spacewx_ionosphere_opt writes its rows through the same seam.
             spacewx_ionosphere=(SimpleNamespace(
                 history_fields=lambda _elapsed: {
-                    name: carrier(surface) for name in
-                    __import__("woof.spacewx.history", fromlist=["x"]).HISTORY_FIELDS})
+                    name: carrier(shape) for name, shape in
+                    __import__("woof.spacewx.history", fromlist=["x"]).history_shapes(cfg).items()})
                 if int(getattr(cfg, "spacewx_ionosphere_opt", 0) or 0)
                 else None),
             olr=carrier(surface) if "olr" in allocated else None,

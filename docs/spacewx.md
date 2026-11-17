@@ -127,7 +127,13 @@ the forecast is identical with the option on or off.
   persistence is the usual stand-in. A number in `spacewx_f107_source` fixes it.
 - The magnetic coordinates are taken at the start. The UT, month blend and
   solar zenith angle move with each frame.
-- The rows are rebuilt from the configuration on restart (no checkpoint state).
+- The rows are rebuilt from the configuration on restart (no checkpoint state),
+  and the four keys are output-only for the restart and prepared-cache
+  identities, so a resume may switch the rows on or off. The F10.7 is read
+  again on resume; GFZ's observed flux rarely changes once released, and the
+  `[spacewx ionosphere]` start-up line records the value and the file's SHA-256.
+- Every monthly map the run will blend is loaded when the run starts, so a
+  forecast never fetches one mid-run.
 - Preflight prices the held arrays (14 column vectors and the five rows) and
   the kernel's 96 B local frame.
 - A streamed domain refuses the option, because the rows are not a tile
