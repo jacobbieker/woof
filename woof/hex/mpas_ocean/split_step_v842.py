@@ -47,13 +47,12 @@ from pathlib import Path
 
 import numpy as np
 
-from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ice import rkind
 
 from . import (btr_subcycle_v842, diagnostics_v842, forcing_v842, tend_tracer_v842, tend_v842,
                vert_transport_v842, vmix_v842)
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
 
 SOURCE_FILES = (
     "src/core_ocean/mode_forward/mpas_ocn_time_integration_split.F:82-1926",
@@ -94,7 +93,7 @@ def _module_on(device: int, precision: str, options: tuple[str, ...], trig64: bo
 def _launch(precision: str, name: str, n: int, args: tuple) -> None:
     import cupy as cp
     if n > 0:
-        options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+        options = launch_options()
         _module_on(cp.cuda.Device().id, precision, options, precision == "r8" and rkind.trig64()).get_function(
             name)(((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,), args)
 

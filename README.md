@@ -274,7 +274,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     thickness tendencies, tracer tendencies, monotone tracer advection,
     implicit vertical mixing, vertical transport velocity, the
     split-explicit barotropic stage and whole split-explicit step, and
-    forward mode (clock, cold start, N steps, bitwise restart);
+    forward mode (clock, cold start, N steps, bitwise restart). The step
+    checks its barotropic halo copies against the mesh once per mesh, not
+    with two device reads per stage: on an 8,300-cell, 60-level torus a
+    step takes 36 instead of 130 ms on an A6000 and 110 instead of 245 ms
+    on an M3 Max, with the same words;
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated

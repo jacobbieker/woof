@@ -97,9 +97,24 @@ def _precision_of(array) -> str:
     raise ValueError(f"tendency arrays must be float32 (r4) or float64 (r8), not {array.dtype}")
 
 
+#: the numerics mode -> COMPILE_OPTIONS in it (launch_options)
+_LAUNCH_OPTIONS: dict[str, tuple[str, ...]] = {}
+
+
+def launch_options() -> tuple[str, ...]:
+    """``_hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)``, worked out once
+    per numerics mode: every launch of the ocean's units asks for it, and the
+    split step launches some 800 kernels a step."""
+    mode = _hex_numerics._bind()
+    options = _LAUNCH_OPTIONS.get(mode)
+    if options is None:
+        options = _LAUNCH_OPTIONS[mode] = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True, numerics=mode)
+    return options
+
+
 def _function(precision: str, name: str):
     import cupy as cp
-    options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+    options = launch_options()
     return _module_on(cp.cuda.Device().id, precision, options).get_function(name)
 
 
