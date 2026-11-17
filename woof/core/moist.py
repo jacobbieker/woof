@@ -90,6 +90,27 @@ from woof.core import tke_budget
 from woof.core.passive_tracer_contract import TRACER_NAMES, TR17_NAMES
 
 _TPB = 128  # threads per block along i (i fastest)
+#: The PD flux and renormalisation launches' block on CUDA: 64 points along
+#: i by 4 rows along j (measured best of 32x4, 32x8, 64x2, 64x4).  Every
+#: thread computes the same point either way.  pd_renorm_apply's warp
+#: exchange of a neighbour's cell scale needs each warp to be 32 consecutive
+#: i of one row, which any block 32k wide gives; its warp edges (i a
+#: multiple of 32) are the 128-wide row block's, so the same cells exchange
+#: and the same cells evaluate their own.  Metal keeps the row block.
+_PD_BLOCK_CUDA = (64, 4, 1)
+_PD_BLOCK_ROW = (_TPB, 1, 1)
+
+
+def _pd_block() -> tuple[int, int, int]:
+    import os
+    from woof import backend
+    override = os.environ.get("WOOF_PD_BLOCK")
+    if override:
+        bx, by = (int(v) for v in override.split("x"))
+        if bx % 32:
+            raise ValueError(f"WOOF_PD_BLOCK {override!r}: the width must be a multiple of 32")
+        return (bx, by, 1)
+    return _PD_BLOCK_CUDA if backend.active() == "cuda" else _PD_BLOCK_ROW
 
 #: Frozen Phase-2 moisture species (allocation/operation order in state).
 SPECIES = ("qv", "qc", "qr")
@@ -440,7 +461,8 @@ def launch_pd_fluxes(q, q0, ru, rv, rw, mut, coord, dx, dy, dt,
     kern = (get_kernel("pd_advection", "pd_fluxes") if horder == 5 else
             get_kernel_int_defines("pd_advection", "pd_fluxes",
                                    (("GPUWM_HORDER", int(horder)),)))
-    grid = ((nx + 1 + _TPB - 1) // _TPB, ny + 1, nz + 1)
+    block = _pd_block()
+    grid = ((nx + 1 + block[0] - 1) // block[0], (ny + 1 + block[1] - 1) // block[1], nz + 1)
     args = (q, q0, ru, rv, rw, _mut2d(mut, ny, nx),
           cp.asarray(coord.c1h, dtype=DTYPE),
           cp.asarray(coord.c2h, dtype=DTYPE),
@@ -451,10 +473,11 @@ def launch_pd_fluxes(q, q0, ru, rv, rw, mut, coord, dx, dy, dt,
           fxl, fxc, fyl, fyc, fzl, fzc,
           np.int32(nz), np.int32(ny), np.int32(nx), np.int32(has_msf),
           np.int32(open_x), np.int32(open_y), np.int32(vorder))
-    kern(grid, (_TPB, 1, 1), args)
+    kern(grid, block, args)
     if vorder == 5:
+        # pd_vertical_sl indexes rows by blockIdx.y: the row block
         get_kernel("pd_vertical_sl", "pd_vertical_sl")(
-            grid, (_TPB, 1, 1), args)
+            ((nx + 1 + _TPB - 1) // _TPB, ny + 1, nz + 1), (_TPB, 1, 1), args)
 
 
 def launch_pd_renorm_apply(q0, mu_old, fxl, fxc, fyl, fyc, fzl, fzc,
@@ -488,7 +511,8 @@ def launch_pd_renorm_apply(q0, mu_old, fxl, fxc, fyl, fyc, fzl, fzc,
                                       (("GPUWM_PD_ZERO_FIRST", 1),))
     else:
         kern = get_kernel("pd_advection", "pd_renorm_apply")
-    grid = ((nx + _TPB - 1) // _TPB, ny, nz)
+    block = _pd_block()
+    grid = ((nx + block[0] - 1) // block[0], (ny + block[1] - 1) // block[1], nz)
     args = (q0, _mut2d(mu_old, ny, nx), fxl, fxc, fyl, fyc, fzl, fzc,
           cp.asarray(coord.c1h, dtype=DTYPE),
           cp.asarray(coord.c2h, dtype=DTYPE),
@@ -499,7 +523,7 @@ def launch_pd_renorm_apply(q0, mu_old, fxl, fxc, fyl, fyc, fzl, fzc,
     from woof.wrf_exact import ADVECTION_ENABLED
     if ADVECTION_ENABLED:
         args += (coord.mub2d, coord.mup0)
-    kern(grid, (_TPB, 1, 1), args)
+    kern(grid, block, args)
 
 
 def _pd_fold_sources(state: DomainState, cfg: RunConfig, name: str,
