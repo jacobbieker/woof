@@ -1490,6 +1490,10 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # RunConfig; stateless (the factor is read from the series at each
     # radiation call's model time), so a resumed run scales identically.
     "solar_variability",
+    # The opt-in ionosphere history (woof.spacewx.history): rebuilt from the
+    # resumed RunConfig; its rows are recomputed at each frame's valid time
+    # from the run start's F10.7, so a resumed run writes the same rows.
+    "spacewx_ionosphere",
     # WRF's topo_wind / gwd_opt (woof.core.terrain_drag): initialize_physics
     # rebuilds it from the resumed RunConfig and the prepared statics; it
     # holds only static coefficients and statistics, never a value a step
@@ -3451,6 +3455,13 @@ def _drop_default_off_run_keys(values: dict) -> None:
     if values.get("solar_tsi_opt", 0) == 0:
         for name, default in (("solar_tsi_opt", 0), ("solar_tsi_source", ""),
                               ("solar_tsi_mode", "absolute")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    # The opt-in ionosphere history (woof.spacewx), the same contract.
+    if values.get("spacewx_ionosphere_opt", 0) == 0:
+        for name, default in (("spacewx_ionosphere_opt", 0), ("spacewx_f107_source", ""),
+                              ("spacewx_f107_mode", "81day"),
+                              ("spacewx_ionosphere_maps", "ccir")):
             if values.get(name, default) == default:
                 values.pop(name, None)
     if values.get("bl_mynn_cloud_tendency_form", "wrf_461") == "wrf_461":
@@ -5637,6 +5648,10 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'solar_tsi_opt': 0,
     'solar_tsi_source': '',
     'solar_tsi_mode': 'absolute',
+    'spacewx_ionosphere_opt': 0,
+    'spacewx_f107_source': '',
+    'spacewx_f107_mode': '81day',
+    'spacewx_ionosphere_maps': 'ccir',
     'ruc_soilprop': 'wrf_45',
     'rrtmg_cloud_optics_form': 'wrf_461',
     'rrtmg_aer3_type_source': 'rural',
@@ -6205,6 +6220,9 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "gf_deep_rain_evaporation_booking": False,
                           "solar_tsi_opt": 0, "solar_tsi_source": "",
                           "solar_tsi_mode": "absolute",
+                          "spacewx_ionosphere_opt": 0, "spacewx_f107_source": "",
+                          "spacewx_f107_mode": "81day",
+                          "spacewx_ionosphere_maps": "ccir",
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without
                           # the key ran the exact arithmetic.

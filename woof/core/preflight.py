@@ -4464,6 +4464,8 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.update(("swint", "farms"))
     if int(dc.run.ra_sw_eclipse):
         modules.add("solar_eclipse")
+    if int(getattr(dc.run, "spacewx_ionosphere_opt", 0) or 0):
+        modules.add("spacewx_ionosphere")   # woof/spacewx/history.py
     if dc.run.cu_rad_feedback:
         modules.add("cu_radiation")
     if int(getattr(dc.run, "icloud", 1)) == 3:
@@ -10427,6 +10429,10 @@ def estimate_domain(dc: DomainConfig, *, spec_bdy_width: int | None = None,
     items += _items("transient", ksas_output_transient_shapes(run))
 
     items += _items("transient", cloud_farms_transient_shapes(run))
+    if int(getattr(run, "spacewx_ionosphere_opt", 0) or 0):
+        # The ionosphere history's held geometry, outputs and rows.
+        from woof.spacewx.history import device_shapes as spacewx_shapes
+        items += _items("physics", spacewx_shapes(run))
     items += _items("transient", ysu_output_transient_shapes(run))
     items += _items("transient", mynn_scalar_transient_shapes(run))
     items += _items("transient", tracer_pbl_transient_shapes(run))
