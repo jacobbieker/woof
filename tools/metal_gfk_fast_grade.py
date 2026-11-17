@@ -76,17 +76,19 @@ extern "C" __global__ void gfk_probe_pow_sweep(unsigned int base, unsigned int s
 POW_EXPONENTS = (0.2857143, 3.5, 0.25, 0.5, 1.0 / 3.0, 0.4, 1.5, 2.5, -0.5, 0.19, 0.16,
                  0.8, 1.4, -1.1, 4.0, 0.0625, 2.0, -2.0, 0.75, 1.1)
 
-#: the two arithmetic contracts a unit can carry: flushing (CUDA's default
-#: -ftz=true) and --ftz=false (float is f32s on Metal)
+#: the arithmetic contracts a unit can carry: flushing (CUDA's default
+#: -ftz=true), --ftz=false (float is f32s on Metal), and a contracting unit
+#: (--fmad=true: the unit compiles under fp contract(fast), gfk_fast.h not)
 OPTION_SETS = {"ftz": ("-std=c++17", "--fmad=false"),
-               "noftz": ("-std=c++17", "--fmad=false", "--ftz=false")}
+               "noftz": ("-std=c++17", "--fmad=false", "--ftz=false"),
+               "fmad": ("-std=c++17", "--fmad=true")}
 
 
 def probe_module(options):
     from woof.backend.metal.loader import load_unit
     source = HEADER.read_text(encoding="utf-8") + PROBES
-    return load_unit("gfk_probe_" + ("noftz" if "--ftz=false" in options else "ftz"), source,
-                     options=options)
+    name = next(key for key, value in OPTION_SETS.items() if value == tuple(options))
+    return load_unit("gfk_probe_" + name, source, options=options)
 
 
 def _sync():

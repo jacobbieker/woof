@@ -13,6 +13,7 @@ usage: python tools/metal_gfk_fast_constants.py   (prints the block)
 """
 from __future__ import annotations
 
+import math
 import re
 import struct
 from pathlib import Path
@@ -38,7 +39,9 @@ def split(d: float, terms: int = 2) -> list[float]:
 
 
 def lit(x: float) -> str:
-    return "0.0f" if x == 0.0 else f"{x.hex()}f".replace("0x", "0x", 1)
+    if x == 0.0:
+        return "-0.0f" if math.copysign(1.0, x) < 0 else "0.0f"
+    return f"{x.hex()}f"
 
 
 def _array(text: str, name: str) -> list[float]:

@@ -4861,11 +4861,40 @@ _GFK_SHORTCUTS = (("gfk_log", "float x", "x"), ("gfk_exp", "float x", "x"),
 GFK_REFERENCE = KERNEL_INCLUDE_DIRS[0] / "glibc_flt32.cuh"
 
 
-def _gfk_definitions(text: str, name: str) -> list[tuple[int, str]]:
-    """Every definition of ``name`` in preprocessed ``text`` (a function body
-    or a braced array initializer): ``(start offset, whitespace-free text)``."""
-    found = []
-    for m in re.finditer(r"(?m)^[ \t]*(?:[A-Za-z_]\w*[ \t\*&]+)+%s\s*[\(\[]" % re.escape(name), text):
+#: C tokens, so that a comparison ignores spacing but not token boundaries
+#: (``a - -b`` and ``a-- b`` stay different): preprocessing numbers (hex
+#: floats with their exponent signs), identifiers, multi-character
+#: operators, then any other character
+_GFK_TOKEN = re.compile(r"\.?\d(?:[eEpP][+-]|[\w.])*|[A-Za-z_]\w*"
+                        r"|->|\+\+|--|<<=|>>=|<<|>>|<=|>=|==|!=|&&|\|\||[-+*/%&|^]=|::|\S")
+#: the head of a definition: declaration words at the start of a line, then
+#: the defined name and its parameter list or array bound
+_GFK_HEAD = re.compile(r"(?m)^[ \t]*(?:[A-Za-z_]\w*[ \t\*&]+)+([A-Za-z_]\w*)\s*[\(\[]")
+_GFK_PREFIX = re.compile(r"[ \t]*(?:[A-Za-z_]\w*[ \t\*&]+)+")
+
+
+def gfk_fast_enabled() -> bool:
+    """``WOOF_METAL_GFK_FAST`` is not ``0``."""
+    return os.environ.get(GFK_FAST_ENV, "1").strip() != "0"
+
+
+def _gfk_definitions(text: str, names=None) -> dict[str, list[tuple[int, str]]]:
+    """Every definition in preprocessed ``text`` (a function body or a braced
+    array initializer) of each name in ``names`` (every name when None):
+    ``{name: [(start offset, its tokens joined by single spaces), ...]}``.
+    One pass over the text."""
+    found: dict[str, list[tuple[int, str]]] = {}
+    if names is None:
+        heads = _GFK_HEAD.finditer(text)
+    elif names:
+        heads = re.finditer(r"\b(%s)\s*[\(\[]" % "|".join(map(re.escape, sorted(names))), text)
+    else:
+        heads = ()
+    for m in heads:
+        name = m.group(1)
+        line = text.rfind("\n", 0, m.start(1)) + 1
+        if names is not None and not _GFK_PREFIX.fullmatch(text, line, m.start(1)):
+            continue
         brace = text.find("{", m.end())
         if brace < 0 or ";" in text[m.end():brace]:
             continue
@@ -4875,14 +4904,9 @@ def _gfk_definitions(text: str, name: str) -> list[tuple[int, str]]:
             if depth == 0:
                 break
             j += 1
-        found.append((m.start(), re.sub(r"\s+", "", text[m.start():j + 1])))
+        found.setdefault(name, []).append(
+            (line, " ".join(_GFK_TOKEN.findall(text[line:j + 1]))))
     return found
-
-
-def _gfk_definition(text: str, name: str) -> str | None:
-    """The first definition of ``name`` in ``text``, whitespace-free, or None."""
-    found = _gfk_definitions(text, name)
-    return found[0][1] if found else None
 
 
 @lru_cache(maxsize=1)
@@ -4890,6 +4914,7 @@ def _gfk_reference() -> dict:
     """For each shortcut, the definitions its word depends on in the
     reference header: the routine and every function or table it reaches."""
     text = preprocess(GFK_REFERENCE.read_text())
+    every = {name: found[0][1] for name, found in _gfk_definitions(text).items()}
     closures = {}
     for name, _, _ in _GFK_SHORTCUTS:
         pending, seen = [name], {}
@@ -4897,15 +4922,14 @@ def _gfk_reference() -> dict:
             ident = pending.pop()
             if ident in seen:
                 continue
-            seen[ident] = _gfk_definition(text, ident)
-            for ref in set(re.findall(r"\b[A-Za-z_]\w*\b", seen[ident] or "")) - set(seen):
-                if ref != ident and _gfk_definition(text, ref) is not None:
-                    pending.append(ref)
+            seen[ident] = every[ident]
+            pending.extend(ref for ref in set(_GFK_TOKEN.findall(every[ident]))
+                           if ref in every and ref not in seen)
         closures[name] = seen
     return closures
 
 
-def gfk_fast(text: str) -> str:
+def gfk_fast(text: str, enabled: bool | None = None) -> str:
     """Route glibc_flt32.cuh's gfk_log/gfk_exp/gfk_pow through gfk_fast.h.
 
     Each definition is renamed ``<name>_soft`` (its binary64 body, unchanged)
@@ -4914,11 +4938,14 @@ def gfk_fast(text: str) -> str:
     the binary64 routine's word whenever it answers (gfk_fast.h), so the
     unit's words do not change.  Only a definition identical to
     glibc_flt32.cuh's, together with every function and table it reaches,
-    is rerouted; anything else, or ``WOOF_METAL_GFK_FAST=0``, is left as it
-    was."""
-    if os.environ.get(GFK_FAST_ENV, "1").strip() == "0" or "gfk_" not in text:
+    is rerouted, and only when exactly one definition carries the routine's
+    signature; anything else, or ``enabled`` False (by default
+    ``WOOF_METAL_GFK_FAST=0``), is left as it was."""
+    if enabled is None:
+        enabled = gfk_fast_enabled()
+    if not enabled or "gfk_" not in text:
         return text
-    matches = []
+    matches, definitions = [], None
     for name, params, args in _GFK_SHORTCUTS:
         # preprocessed text: __device__ has expanded to nothing
         pattern = re.compile(r"^[ \t]*(?:__device__\s+)?float\s+%s\s*\(\s*%s\s*\)\s*\{"
@@ -4929,10 +4956,14 @@ def gfk_fast(text: str) -> str:
             continue
         # every definition of the routine and of what it reaches (in any
         # namespace or scope) is glibc's, and the one rewritten is among them
-        closure = {ident: _gfk_definitions(text, ident) for ident in _gfk_reference()[name]}
-        if any(not defs or any(d != _gfk_reference()[name][ident] for _, d in defs)
-               for ident, defs in closure.items()) \
-                or found[0].start() not in {start for start, _ in closure[name]}:
+        reference = _gfk_reference()[name]
+        if definitions is None:
+            definitions = _gfk_definitions(
+                text, {ident for closure in _gfk_reference().values() for ident in closure})
+        if any(not definitions.get(ident)
+               or any(d != reference[ident] for _, d in definitions[ident])
+               for ident in reference) \
+                or found[0].start() not in {start for start, _ in definitions[name]}:
             continue
         matches.append((found[0], name, params, args))
     for m, name, params, args in sorted(matches, key=lambda item: -item[0].start()):
@@ -4947,18 +4978,16 @@ def gfk_fast(text: str) -> str:
 
 
 def _with_gfk_fast(head: str, contract: bool) -> str:
-    """The prelude with gfk_fast.h ahead of a contracting unit's pragma, so
-    the shortcuts compile uncontracted like the rest of the prelude."""
-    pragma = "\n#pragma METAL fp contract(fast)\n"
-    fast = "\n" + GFK_FAST.read_text()
-    if contract and head.endswith(pragma):
-        return head[:-len(pragma)] + fast + pragma
-    return head + fast
+    """The prelude followed by gfk_fast.h, which always compiles uncontracted
+    (its float-pair sums are error-free only unfused); a contracting unit
+    gets its pragma back after it."""
+    return (head + "\n#pragma METAL fp contract(off)\n" + GFK_FAST.read_text()
+            + ("\n#pragma METAL fp contract(fast)\n" if contract else ""))
 
 
 def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
               retain_subnormals: bool = False, defines=(), include_dirs=(),
-              f64: str = "soft") -> TranslatedUnit:
+              f64: str = "soft", gfk: bool | None = None) -> TranslatedUnit:
     """CUDA unit text -> :class:`TranslatedUnit` (MSL plus kernel signatures).
 
     ``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual
@@ -4968,11 +4997,14 @@ def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
     ``df64``, the fast numerics' division, square root and libm through
     double-float (woof/backend/metal/f64_df64.h).  The translated body is
     the same text in both; the prelude and the vendored libm differ.
+    ``gfk``: route glibc_flt32.cuh's gfk_log/gfk_exp/gfk_pow through
+    gfk_fast.h (:func:`gfk_fast`, the same words); None reads
+    ``WOOF_METAL_GFK_FAST``.
     """
     text = preprocess(source, defines, include_dirs)
     if compose(source, text, f64) is not source:
         text = preprocess(compose(source, text, f64), defines, include_dirs)
-    text = gfk_fast(text)
+    text = gfk_fast(text, gfk)
     cached, store = _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64)
     if cached is not None:
         return cached

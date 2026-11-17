@@ -87,9 +87,14 @@ def test_only_glibc_definitions_are_rerouted(monkeypatch):
     namespaced = ("namespace A {\n" + spaced + "\n}\nnamespace B {\n"
                   "float gfk_log(float x)\n{\n    return x;\n}\n}\n")
     assert "gfk_log_soft" not in translate.gfk_fast(namespaced)
-    # a second, identical glibc copy elsewhere is still glibc's
+    # two definitions with the routine's signature are ambiguous: neither is rewritten
     twice = src + "\nnamespace C {\n" + src + "\n}\n"
-    assert translate.gfk_fast(twice).count("__woof_gfk_") == 0  # two exact matches: ambiguous, left alone
+    assert translate.gfk_fast(twice).count("__woof_gfk_") == 0
+    # spacing is ignored but token boundaries are not: "- -" is not "--"
+    assert translate._GFK_TOKEN.findall("a - -b") != translate._GFK_TOKEN.findall("a-- b")
+    # the closure reaches gfk_d2f_rn through "return gfk_d2f_rn(...)"
+    assert "gfk_d2f_rn" in translate._gfk_reference()["gfk_exp"]
+    assert "gfk_d2f_rn" in translate._gfk_reference()["gfk_pow"]
     # one table word changed: the routines reading GFK_EXP2F_TAB keep their bodies
     table = src.index("GFK_EXP2F_TAB")
     first = re.compile(r"0x[0-9a-fA-F]+").search(src, src.index("{", table))
@@ -111,7 +116,7 @@ def _mlx_or_skip():
 
 
 @needs_mlx
-@pytest.mark.parametrize("contract", ["ftz", "noftz"])
+@pytest.mark.parametrize("contract", ["ftz", "noftz", "fmad"])
 def test_logf_and_expf_shortcuts_give_the_binary64_words(contract):
     _mlx_or_skip()
     import metal_gfk_fast_grade as grade
@@ -129,7 +134,7 @@ def test_logf_and_expf_shortcuts_give_the_binary64_words(contract):
 
 
 @needs_mlx
-@pytest.mark.parametrize("contract", ["ftz", "noftz"])
+@pytest.mark.parametrize("contract", ["ftz", "noftz", "fmad"])
 def test_powf_shortcut_gives_the_binary64_words(contract):
     _mlx_or_skip()
     import metal_gfk_fast_grade as grade
