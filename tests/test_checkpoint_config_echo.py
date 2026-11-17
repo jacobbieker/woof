@@ -111,6 +111,11 @@ MOVED = {
     "solar_tsi_mode": (dict(solar_tsi_opt=1, solar_tsi_source="tsi.csv",
                             solar_tsi_mode="relative"),
                        {"solar_tsi_opt", "solar_tsi_source", "solar_tsi_mode"}),
+    # On, all four keys are echoed (the defaults too).
+    "spacewx_ionosphere_opt": (
+        dict(spacewx_ionosphere_opt=1),
+        {"spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
+         "spacewx_ionosphere_maps"}),
     "cycling": (dict(bl_mynn_version="gsd_41", cycling=True),
                 {"bl_mynn_version", "cycling"}),
     "diff_6th_form": (dict(diff_6th_form="noaa_wrf39", diff_6th_factor2=0.04),
@@ -205,6 +210,9 @@ DEFAULT_OFF = frozenset({
     "gf_deep_rain_evaporation_booking",
     # The opt-in TSI forcing (woof.spacewx), absent while off.
     "solar_tsi_opt", "solar_tsi_source", "solar_tsi_mode",
+    # The opt-in ionosphere history (woof.spacewx), absent while off.
+    "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
+    "spacewx_ionosphere_maps",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The RUC sea-ice threshold switch, absent at 0 as in a 2.8.5 header.
