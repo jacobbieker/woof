@@ -419,6 +419,11 @@ _COMPOSED_LOADERS = {
     "noahmp_vegeflux_runtime": ("noahmp_vegeflux_gpu", "_module"),
     "rrtmg_lw_legacy_chain": ("rrtmg_lw", "_gpu_module"),
     "rrtmg_sw_legacy": ("rrtmg_legacy", "_cuda_sw"),
+    # RRTMG-K (14/14): its prep and LW post units, and its SW unit built
+    # with the LW coefficients by rrtmgk._engines.
+    "rrtmgk_prep_unit": ("rrtmgk", "prep_module"),
+    "rrtmgk_lw_unit": ("rrtmgk", "lw_module"),
+    "rrtmgk_sw_unit": ("rrtmgk", "_engines"),
     # The chained translation units preflight prices
     # (woof/core/preflight.py CHAINED_TRANSLATION_UNIT_FRAMES).  None has a
     # .cu of its own, so load_module refused each one: the HRRR v4 recipe's

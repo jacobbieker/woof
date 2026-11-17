@@ -348,7 +348,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `wind_farm_scheme = "fitch_wrf"` beside upstream's `fitch`, also on hex's
     unequal-area cells;
   - coupled fire spread and smoke;
-  - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`).
+  - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`);
+  - RRTMG-K (`ra_lw_physics = ra_sw_physics = 14`, only as the pair), held
+    bit for bit to compiled WRF 4.7.1 on oracle columns. It reuses the
+    legacy RRTMG kernels and ports only K's differences. `aer_opt`,
+    `ghg_input`, `icloud = 2/3` and `rrtmg_spectral_output` are refused
+    with K by name.
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
