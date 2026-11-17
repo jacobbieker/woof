@@ -66,6 +66,13 @@ def test_launch_scope_exports_and_restores(tmp_path, monkeypatch):
             pass
     with launch.launch_scope(None):
         assert launch.configured() is None
+    (tmp_path / "rec.zarr").mkdir()
+    (tmp_path / "rec.zarr" / "zarr.json").write_text("{}")
+    with pytest.raises(launch.NNConfigError, match="already exists"):
+        with launch.launch_scope(path):
+            pass
+    with launch.launch_scope(path, resume=True):
+        assert launch.configured() == str(path.resolve())
 
 
 def test_cli_parsers_take_nn():
@@ -117,10 +124,38 @@ def test_tap_round_trip_resume_and_refusals(tmp_path, suffix):
         TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5,
                     attrs={**attrs, "scheme": "radiation"}, resume=True)
     again = TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5, attrs=attrs, resume=True)
+    again.truncate(3)  # resumed at step 3: steps 3 and 4 are written again
     x, y, idx = _sample(rng)
-    again.append(x, y, time_seconds=300.0, step=5, column_index=idx)
+    again.append(x, y, time_seconds=180.0, step=3, column_index=idx)
     again.close()
-    assert read_tap(path)["inputs"].shape == (6, 4, 5)
+    data = read_tap(path)
+    np.testing.assert_array_equal(data["step"], [0, 1, 2, 3])
+    np.testing.assert_array_equal(data["inputs"][3], x)
+    with pytest.raises(TapError, match="different dt"):
+        TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5, attrs={**attrs, "dt": 30.0},
+                    resume=True)
+
+
+@pytest.mark.skipif(not HAS_ZARR, reason="zarr not installed")
+def test_tap_resume_trims_a_ragged_record_and_refuses_a_file(tmp_path):
+    import zarr
+
+    rng = np.random.default_rng(1)
+    path = tmp_path / "rec.zarr"
+    tap = TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5, chunk=1)
+    for k in range(3):
+        x, y, idx = _sample(rng)
+        tap.append(x, y, time_seconds=k, step=k, column_index=idx)
+    tap.close()
+    group = zarr.open_group(str(path), mode="a")
+    group["time_seconds"].resize((2,))  # a flush that stopped part-way
+    again = TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5, resume=True)
+    assert again.samples == 2
+    again.close()
+    assert read_tap(path)["inputs"].shape[0] == 2
+    (tmp_path / "file").write_text("x")
+    with pytest.raises(TapError, match="is a file"):
+        TendencyTap(tmp_path / "file", inputs=SPECS_IN, outputs=SPECS_OUT, columns=5)
 
 
 # ---------------------------------------------------------------- seat, host
@@ -131,21 +166,24 @@ def _host_state(nz=4, ny=6, nx=7, seed=3):
     f = lambda *s: rng.uniform(0.5, 1.5, s).astype(np.float32)
     chm = f(nz, ny, nx) * 900.0
     msft = f(ny, nx)
-    phys = {"rtheta": f(nz, ny, nx) * 1e-4, "rqv": f(nz, ny, nx) * 1e-7, "ru": f(nz, ny, nx + 1),
-            "rv": f(nz, ny + 1, nx)}
+    unit_u, unit_v = f(nz, ny, nx + 1) * 900.0, f(nz, ny + 1, nx) * 900.0
+    unit_u[:, :, 0] = 0.0  # an edge face the coupler holds at zero
+    phys = {"rtheta": f(nz, ny, nx) * 1e-4, "rqv": f(nz, ny, nx) * 1e-7, "ru": f(nz, ny, nx + 1) * 1e-3,
+            "rv": f(nz, ny + 1, nx) * 1e-3}
     held = SimpleNamespace(rtheta=phys["rtheta"] * chm / msft, rqv=phys["rqv"] * chm, rqc=np.zeros_like(chm),
-                           rqr=None, rqi=None, rqs=None, ru=phys["ru"], rv=phys["rv"])
+                           rqr=None, rqi=None, rqs=None, ru=phys["ru"] * unit_u, rv=phys["rv"] * unit_v)
     fields = {k: f(ny, nx) for k in ("hfx", "qfx", "ust", "tsk", "znt", "xland")}
     state = SimpleNamespace(
         p=f(nz, ny, nx) * 9e4, u=f(nz, ny, nx + 1), v=f(nz, ny + 1, nx), w=f(nz + 1, ny, nx),
         phb=np.linspace(0, 9.81 * 4000, nz + 1).astype(np.float32), php=f(nz + 1, ny, nx),
         ht=f(ny, nx) * 100, qv=f(nz, ny, nx) * 1e-2, qc=f(nz, ny, nx) * 1e-4, elapsed_seconds=120.0,
-        physics=SimpleNamespace(fields=fields, pbl_tendencies=held, radiation_tendencies=held),
+        physics=SimpleNamespace(fields=fields, pbl_tendencies=held, radiation_tendencies=held,
+                                call_counts={"ysu": 0, "radiation": 0}),
         total_theta=lambda: theta, total_mu=lambda: f(ny, nx))
     theta = f(nz, ny, nx) * 300
 
-    def couple(state, cfg, *, rtheta, rqv):
-        return SimpleNamespace(rtheta=rtheta * chm / msft, rqv=rqv * chm)
+    def couple(state, cfg, *, rtheta, rqv, ru, rv):
+        return SimpleNamespace(rtheta=rtheta * chm / msft, rqv=rqv * chm, ru=ru * unit_u, rv=rv * unit_v)
 
     return state, couple, phys, chm
 
@@ -198,14 +236,41 @@ def test_seat_vocabulary_and_decoupling_on_host(monkeypatch):
     np.testing.assert_allclose(y[0:3], phys["rtheta"][:3, j, i], rtol=1e-5)
     np.testing.assert_allclose(y[3:6], phys["rqv"][:3, j, i], rtol=1e-5)
     np.testing.assert_array_equal(y[6:9], 0.0)
-    np.testing.assert_allclose(y[9:12], 0.5 * (phys["ru"][:3, j, i] + phys["ru"][:3, j, i + 1]) / chm[:3, j, i],
-                               rtol=1e-5)
+    # du: each face over its own response, then the pair's mean; column 0
+    # (i = 0) has a zeroed west face and takes the east face alone.
+    ru = phys["ru"]
+    expect = np.where(i == 0, ru[:3, j, i + 1], 0.5 * (ru[:3, j, i] + ru[:3, j, i + 1]))
+    np.testing.assert_allclose(y[9:12], expect, rtol=1e-5)
+    rv = phys["rv"]
+    np.testing.assert_allclose(y[12:15], 0.5 * (rv[:3, j, i] + rv[:3, j + 1, i]), rtol=1e-5)
 
+
+def test_seat_records_only_steps_the_scheme_ran_on(monkeypatch):
+    from woof.nn import wrf_seat
+
+    monkeypatch.setattr(wrf_seat.WrfColumnSeat, "_check_available", lambda *a: None)
+    state, couple, _, _ = _host_state()
     held = object()
-    seat2 = wrf_seat.WrfColumnSeat(state, _cfg(), _settings(tap_every=2), couple=couple, tap=_ListTap())
-    for _ in range(5):
-        assert seat2.after_nonmicrophysics(state, _cfg(), held) is held
-    assert len(seat2.tap.rows) == 3 and seat2.tap.rows[0][2]["step"] == 2
+    seat = wrf_seat.WrfColumnSeat(state, _cfg(), _settings(tap_every=2), couple=couple, tap=_ListTap())
+    for k in range(8):
+        state.elapsed_seconds = 60.0 * k
+        if k != 4:  # the PBL is held (bldt > 0) on step 4
+            state.physics.call_counts["ysu"] += 1
+        assert seat.after_nonmicrophysics(state, _cfg(), held) is held
+    assert [row[2]["step"] for row in seat.tap.rows] == [0, 2, 6]
+    assert [row[2]["time_seconds"] for row in seat.tap.rows] == [0.0, 120.0, 360.0]
+    # The draw is a function of the seed and the step: a resumed seat draws
+    # what the unbroken one drew.
+    other = wrf_seat.WrfColumnSeat(state, _cfg(), _settings(tap_every=2), couple=couple, tap=_ListTap())
+    np.testing.assert_array_equal(other.draw(6), seat.tap.rows[2][2]["column_index"])
+    assert not np.array_equal(other.draw(6), other.draw(2))
+    # A resumed seat does not know whether the scheme ran on its first
+    # step (a restore rewrites the counters after attach) and skips it.
+    resumed = wrf_seat.WrfColumnSeat(state, _cfg(), _settings(), couple=couple, tap=_ListTap(), resume=True)
+    resumed._resume = False
+    state.physics.call_counts["ysu"] += 1
+    resumed.after_nonmicrophysics(state, _cfg(), held)
+    assert resumed.tap.rows == []
 
 
 def test_interior_pool_excludes_the_ring():
@@ -318,3 +383,14 @@ def test_a_tapped_run_is_byte_identical_and_its_targets_recouple(tmp_path):
     held = tapped.physics.pbl_tendencies
     np.testing.assert_allclose(cp.asnumpy(again.rtheta), cp.asnumpy(held.rtheta), rtol=2e-6, atol=1e-12)
     np.testing.assert_allclose(cp.asnumpy(again.rqv), cp.asnumpy(held.rqv), rtol=2e-6, atol=1e-15)
+    # du/dv: C-grid to A-grid and back smooths at the grid scale only.
+    seat.output_names = ("du", "dv")
+    _, y = seat.columns(tapped, cfg, None, flat)
+    y = cp.asnumpy(y)
+    faces = couple_column_tendencies(tapped, cfg, ru=cp.asarray(y[:nz].reshape(nz, ny, nx)),
+                                     rv=cp.asarray(y[nz:].reshape(nz, ny, nx)))
+    for name in ("ru", "rv"):
+        a, b = cp.asnumpy(getattr(faces, name)), cp.asnumpy(getattr(held, name))
+        error = np.linalg.norm(a - b) / max(np.linalg.norm(b), 1e-30)
+        print(f"{name} recoupled relative error {error:.3e}")
+        assert error < 0.25, (name, error)

@@ -136,19 +136,25 @@ def read_settings(path) -> NNSettings:
 
 
 @contextmanager
-def launch_scope(path=None, members=None):
+def launch_scope(path=None, members=None, resume=False):
     """Export ``--nn``'s file for the launch's duration.  Checked here, at
     the door, so a bad table is refused before any preparation.  An
-    ensemble that taps (``members`` > 1) is refused: every member would
-    write the one store."""
+    ensemble (``members`` > 1) is refused: every member would write the one
+    store (a member leg refuses ``--nn`` itself, however its count was
+    set).  A tap store that already holds a record is refused unless the
+    launch resumes (``resume``), which appends to it."""
     if path is None:
         yield
         return
     settings = read_settings(path)
-    if settings.mode == "tap" and members is not None and int(members) > 1:
+    if members is not None and int(members) > 1:
         raise NotImplementedError(
-            f"--nn with mode = \"tap\" and {int(members)} ensemble members: the members would "
-            "write one store; record from a single member")
+            f"--nn with {int(members)} ensemble members: the NN seat attaches to a single "
+            "deterministic forecast")
+    if settings.tap is not None and not resume and settings.tap.exists() \
+            and (not settings.tap.is_dir() or any(settings.tap.iterdir())):
+        raise NNConfigError(f"--nn {settings.source}: tap store {settings.tap} already exists; "
+                            "remove it or name another (a resumed run appends to it)")
     saved = os.environ.get(ENV_CONFIG)
     os.environ[ENV_CONFIG] = str(settings.source)
     try:

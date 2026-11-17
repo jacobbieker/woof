@@ -126,11 +126,19 @@ The defaults depend on the scheme (`woof.nn.wrf_seat.DEFAULT_INPUTS`,
 layout the artefact manifest takes, so a trainer can read
 `woof.nn.tap.read_tap(path)` straight into `write_mlp_artefact`.
 
+A scheme's slot holds the tendency of its last call, and `radt`, `cudt`
+or a positive `bldt` hold it over steps. So a scheme is recorded only on
+steps where it ran and where the step is a multiple of `tap_every`. The
+columns drawn depend only on `tap_seed` and the step, so a resumed run
+draws the same ones as an unbroken run. A resumed run trims the store
+back to its resume step and appends from there. `total` is recorded on
+every such step, and it sums slots held from different steps.
+
 A tap only reads. A tapped forecast is byte-identical to the same forecast
 without `--nn`; `tests/test_nn_tap.py` checks this after real steps.
 Recording is refused on a multi-domain experiment, on a `[tiles]`-streamed
-domain and for an ensemble of more than one member. A restarted run
-appends to the store it started.
+domain, on an ensemble member leg, and on a store that already exists
+unless the launch resumes (`--restart`, `--restart-from`).
 
 ## Installing
 

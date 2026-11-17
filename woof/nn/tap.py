@@ -18,7 +18,7 @@ Samples are buffered on the host and written ``chunk`` at a time, so a
 recorded step costs one device-to-host copy of the drawn columns and no
 store write.  :meth:`TendencyTap.close` writes the rest; an interpreter
 that exits without it (an exception in the forecast) still flushes through
-``atexit``.
+``atexit``, which holds the tap until then.
 
 zarr (and icechunk) are imported when a tap is opened, never by a forecast
 without ``--nn``.
@@ -27,7 +27,6 @@ without ``--nn``.
 from __future__ import annotations
 
 import atexit
-import weakref
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -94,25 +93,41 @@ class TendencyTap:
         self._closed = False
         zarr = _zarr()
         self._zarr = zarr
-        exists = self.path.exists() and any(self.path.iterdir())
+        if self.path.exists() and not self.path.is_dir():
+            raise TapError(f"tap store {self.path} is a file; name a directory")
+        exists = self.path.is_dir() and any(self.path.iterdir())
         if exists and not resume:
             raise TapError(f"tap store {self.path} already exists; remove it or name another")
         self._repo = None
-        if _is_icechunk(self.path):
-            ic = _icechunk()
-            storage = ic.local_filesystem_storage(str(self.path))
-            self._repo = ic.Repository.open(storage) if exists else ic.Repository.create(storage)
+        try:
+            if _is_icechunk(self.path):
+                ic = _icechunk()
+                storage = ic.local_filesystem_storage(str(self.path))
+                self._repo = ic.Repository.open(storage) if exists else ic.Repository.create(storage)
+            if exists:
+                group = self._open_group("r")
+                stored = dict(group.attrs)
+                lengths = {name: int(group[name].shape[0]) for name in ARRAYS}
+            else:
+                self._create()
+        except TapError:
+            raise
+        except Exception as error:
+            raise TapError(f"tap store {self.path}: cannot open it as a tendency tap "
+                           f"({type(error).__name__}: {error})") from error
         if exists:
-            group = self._open_group("r")
-            stored = dict(group.attrs)
-            for key in ("schema", "inputs", "outputs", "columns", "route", "scheme", "grid"):
+            for key in ("schema", "inputs", "outputs", "columns", "route", "scheme", "grid", "dt",
+                        "levels", "tap_every", "tap_seed"):
                 if key in self.attrs and stored.get(key) != self.attrs[key]:
                     raise TapError(f"tap store {self.path} was written with a different {key} "
                                    f"({stored.get(key)!r}); a resumed run appends only to its own record")
-            self.samples = int(group["time_seconds"].shape[0])
-        else:
-            self._create()
-        atexit.register(_flush_at_exit, weakref.ref(self))
+            # A flush interrupted part-way leaves the arrays of unequal
+            # length (plain Zarr has no transaction); the record is the
+            # samples every array holds.
+            self.samples = min(lengths.values())
+            if len(set(lengths.values())) > 1:
+                self._resize(self.samples)
+        atexit.register(self._exit_flush)
 
     # ------------------------------------------------------------- store
     def _open_group(self, mode):
@@ -169,17 +184,35 @@ class TendencyTap:
         self._buffer.clear()
         self._commit(f"tendency tap: {self.samples} samples")
 
+    def _resize(self, samples: int) -> None:
+        group = self._open_group("a")
+        for name in ARRAYS:
+            array = group[name]
+            array.resize((samples,) + tuple(array.shape[1:]))
+        self._commit(f"tendency tap: kept {samples} samples")
+
+    def truncate(self, step: int) -> None:
+        """Drop the samples recorded at ``step`` or later: a resumed run
+        writes them again."""
+        self.flush()
+        if not self.samples:
+            return
+        steps = np.asarray(self._open_group("r")["step"][...])
+        keep = int(np.searchsorted(steps, step, side="left")) if np.all(np.diff(steps) >= 0) \
+            else int(np.count_nonzero(steps < step))
+        if keep < self.samples:
+            self._resize(keep)
+            self.samples = keep
+
     def close(self) -> None:
         if not self._closed:
             self.flush()
             self._closed = True
+            atexit.unregister(self._exit_flush)
 
-
-def _flush_at_exit(ref) -> None:
-    tap = ref()
-    if tap is not None and not tap._closed:
+    def _exit_flush(self) -> None:
         try:
-            tap.close()
+            self.close()
         except Exception:  # the interpreter is exiting; the record keeps what it had
             pass
 

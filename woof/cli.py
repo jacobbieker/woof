@@ -1274,7 +1274,9 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
                                 members=getattr(args, "members", None),
                                 gpu_exchange=getattr(args, "wrf_hydro_gpu_exchange", None)), \
                 nn_scope(getattr(args, "nn", None) if args.command in ("run", "go") else None,
-                         members=getattr(args, "members", None)):
+                         members=getattr(args, "members", None),
+                         resume=bool(getattr(args, "restart_from", None)
+                                     or getattr(args, "restart", None))):
             if args.command == "run" and getattr(args, "hydro", None) is not None:
                 from woof.hydro.runtime import run_scope
                 with run_scope(args.hydro, getattr(args, "config", None)):

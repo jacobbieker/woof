@@ -19,9 +19,15 @@ in fast numerics, zero in a specified ring).  The seat recovers physical
 rates by dividing by the coupler's own response to a unit rate
 (:func:`woof.core.physics.couple_column_tendencies` on ones), so whatever
 convention the coupler follows, strict or fast numerics, the division is
-its exact inverse on the interior.  ``du``/``dv`` are the face pair's mean
-over the same mass factor: C-grid to A-grid, approximate (it smooths at
-the grid scale and ignores the u/v-point map factors).
+its exact inverse on the interior.  ``du``/``dv`` divide each face by its
+own unit response and average the pair: C-grid to A-grid, approximate (it
+smooths at the grid scale).
+
+When.  A scheme's slot holds the tendency of its last call (``radt``,
+``cudt``, ``bldt`` > 0 hold it over steps), so a scheme is recorded only on
+a step on which it ran (its ``PhysicsDriver.call_counts`` counter moved),
+and then only on steps that are multiples of ``tap_every``.  ``total`` is
+recorded on every such step; it sums slots held from different steps.
 
 ``mode = "tap"`` (this module's one mode for now) records ``(inputs,
 targets)`` to a :class:`woof.nn.tap.TendencyTap` and returns the step's
@@ -77,6 +83,9 @@ DEFAULT_OUTPUTS = {
 }
 SCHEME_SLOT = {"pbl": "pbl_tendencies", "radiation": "radiation_tendencies",
                "cumulus": "cumulus_tendencies"}
+#: PhysicsDriver.call_counts key each scheme's call increments ("ysu" is the
+#: historical name of the PBL-slot counter every PBL scheme increments).
+SCHEME_COUNTER = {"pbl": "ysu", "radiation": "radiation", "cumulus": "cumulus"}
 
 
 def _host(array) -> np.ndarray:
@@ -153,7 +162,13 @@ class WrfColumnSeat:
         self.outputs = tuple(FieldSpec(n, OUTPUTS[n][0], self.levels) for n in self.output_names)
         self.pool = interior_pool(cfg, ny, nx)
         self.ncol = min(settings.tap_columns, self.pool.size)
-        self.rng = np.random.default_rng(settings.tap_seed)
+        # A scheme's slot holds the tendency of its LAST call (radt, cudt,
+        # bldt > 0 hold it over steps); a sample pairs it with the inputs
+        # of the step it was computed on, so only a step on which the
+        # scheme ran is recorded.  Unknown until the first step after a
+        # resume whose counters a restore has not yet rewritten.
+        self._last_count = None if resume else self._count(state)
+        self._resume = resume
         if couple is None:
             from woof.core.physics import couple_column_tendencies as couple
         self._couple = couple
@@ -187,9 +202,25 @@ class WrfColumnSeat:
                 raise NNConfigError("--nn input 'rthraten': this configuration runs no radiation")
 
     # ------------------------------------------------------------ columns
-    def draw(self) -> np.ndarray:
-        """The next recorded step's columns (flat mass-grid indices, sorted)."""
-        return np.sort(self.rng.choice(self.pool, size=self.ncol, replace=False))
+    def draw(self, step: int) -> np.ndarray:
+        """Step ``step``'s columns (flat mass-grid indices, sorted): a
+        function of the seed and the step alone, so a resumed run draws
+        what the unbroken run draws."""
+        rng = np.random.default_rng([self.settings.tap_seed, int(step)])
+        return np.sort(rng.choice(self.pool, size=self.ncol, replace=False))
+
+    def _count(self, state):
+        if self.scheme == "total":
+            return None
+        return state.physics.call_counts.get(SCHEME_COUNTER[self.scheme])
+
+    def _ran(self, state) -> bool:
+        """Whether the scheme ran on this step (always, for ``total``)."""
+        count = self._count(state)
+        previous, self._last_count = self._last_count, count
+        if self.scheme == "total":
+            return True
+        return previous is not None and count != previous
 
     def _tendencies(self, state, tendencies):
         if self.scheme == "total":
@@ -210,9 +241,24 @@ class WrfColumnSeat:
             nonlocal unit
             if unit is None:
                 ones = xp.ones(self.shape, dtype=f32)
-                coupled = self._couple(state, cfg, rtheta=ones, rqv=ones)
-                unit = (g.take(coupled.rtheta, levels=L), g.take(coupled.rqv, levels=L))
+                coupled = self._couple(state, cfg, rtheta=ones, rqv=ones, ru=ones, rv=ones)
+                unit = {"rtheta": g.take(coupled.rtheta, levels=L), "rq": g.take(coupled.rqv, levels=L),
+                        "ru": coupled.ru, "rv": coupled.rv}
             return unit
+
+        def faces(value, slot, first, second):
+            """Each face over its own unit response, then the faces'
+            mean: C-grid to A-grid.  A face the coupler holds at zero (an
+            open or specified edge) drops out of the mean."""
+            ratios = []
+            for index in (first, second):
+                response = g.take(unit_response()[slot], index, L)
+                safe = xp.where(response != 0, response, f32(1))
+                ratios.append((xp.where(response != 0, g.take(value, index, L) / safe, f32(0)),
+                               (response != 0).astype(f32)))
+            total = ratios[0][0] + ratios[1][0]
+            count = ratios[0][1] + ratios[1][1]
+            return total / xp.maximum(count, f32(1))
 
         geo = None
 
@@ -246,7 +292,8 @@ class WrfColumnSeat:
                 ph = geopotential()
                 rows.append((ph[1:] - ph[:-1]) / f32(G))
             elif name == "rthraten":
-                rows.append(g.take(state.physics.radiation_tendencies.rtheta, levels=L) / unit_response()[0])
+                rows.append(g.take(state.physics.radiation_tendencies.rtheta, levels=L)
+                            / unit_response()["rtheta"])
             elif name == "hgt":
                 rows.append(g.take(state.ht))
             elif name == "mu":
@@ -261,15 +308,13 @@ class WrfColumnSeat:
             if value is None:
                 targets.append(xp.zeros((L, flat.size), dtype=f32))
             elif slot == "ru":
-                targets.append(f32(0.5) * (g.take(value, g.u_west, L) + g.take(value, g.u_east, L))
-                               / unit_response()[1])
+                targets.append(faces(value, "ru", g.u_west, g.u_east))
             elif slot == "rv":
-                targets.append(f32(0.5) * (g.take(value, g.v_south, L) + g.take(value, g.v_north, L))
-                               / unit_response()[1])
+                targets.append(faces(value, "rv", g.v_south, g.v_north))
             elif slot == "rtheta":
-                targets.append(g.take(value, levels=L) / unit_response()[0])
+                targets.append(g.take(value, levels=L) / unit_response()["rtheta"])
             else:
-                targets.append(g.take(value, levels=L) / unit_response()[1])
+                targets.append(g.take(value, levels=L) / unit_response()["rq"])
         x = xp.concatenate([r.astype(f32, copy=False) for r in rows], axis=0)
         y = xp.concatenate([t.astype(f32, copy=False) for t in targets], axis=0)
         return x, y
@@ -279,13 +324,20 @@ class WrfColumnSeat:
         if tendencies is None:
             raise RuntimeError("--nn: the step held no physics tendencies (physics did not run)")
         self.calls += 1
-        if (self.calls - 1) % self.settings.tap_every:
-            return tendencies
-        flat = self.draw()
-        x, y = self.columns(state, cfg, tendencies, flat)
+        ran = self._ran(state)
         elapsed = float(getattr(state, "elapsed_seconds", 0.0))
-        self.tap.append(_host(x), _host(y), time_seconds=elapsed,
-                        step=int(round(elapsed / float(cfg.dt))), column_index=flat)
+        step = int(round(elapsed / float(cfg.dt)))
+        if not ran or step % self.settings.tap_every:
+            return tendencies
+        if self._resume:
+            # The record keeps what was written before this step; samples
+            # flushed after the checkpoint the run resumed from are the
+            # unbroken run's and are written again from here.
+            self.tap.truncate(step)
+            self._resume = False
+        flat = self.draw(step)
+        x, y = self.columns(state, cfg, tendencies, flat)
+        self.tap.append(_host(x), _host(y), time_seconds=elapsed, step=step, column_index=flat)
         return tendencies
 
     def close(self) -> dict:
