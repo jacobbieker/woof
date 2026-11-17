@@ -3833,7 +3833,7 @@
    },
    {
     "file": "woof/core/kernels/pd_advection.cu",
-    "sha256": "db86f46e0ae5d6e0040a49b6af11e638527e9fc0afb458729d32c6df23844af9"
+    "sha256": "952e0f085ab73a69d8c3c6c9136fa5b6878b2689c4ac3dfba24ef72bc013ed76"
    },
    {
     "file": "woof/core/kernels/pd_vertical_sl.cu",
@@ -5155,7 +5155,7 @@
    },
    {
     "file": "woof/core/moist.py",
-    "sha256": "ffd180ae7ba2bf711f9a359d37327d933e436c7154b8f56edcb91d34c4e20baf"
+    "sha256": "cebccdf10ce8b6dfd87698a865c5033ba8d39b0677ce5a32074f04a06eadf7b0"
    },
    {
     "file": "woof/core/morrison.py",
@@ -6359,7 +6359,7 @@
    },
    {
     "file": "woof/verify/advect_oracle.py",
-    "sha256": "92b2666c71f6cbb08f1ff2e62f57b3e33c2a73cd983a7e6a3cca34eab7fafec0"
+    "sha256": "86a39ac4d7f9afde67005b9540f68ec0c5ec622d683ad2f46b5d446a65127d77"
    },
    {
     "file": "woof/verify/gwdo_kim_oracle.py",
@@ -19316,15 +19316,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "0f534258db1bf9d26873bc8df8472b0a8ef20b912c56a470bbde54f36665c508",
+    "sha256": "94f56b9f27d642e4e1b78d6c3c92dfbc55c9a18fe89a3678801e17323ae8c91f",
     "sites": {
-     "100": 92
+     "100": 91
     }
    },
    "native_differences": {
-    "sha256": "38db5f867161a8ab77a0b100db88848e35e36579a7b6e7b5b2b67b98474016b2",
+    "sha256": "eabcfd2c185d05890796625e832cb0377f2d4f5443e9fd081c6b33774e5818a9",
     "sites": {
-     "100": 13
+     "100": 10
     }
    },
    "native_errors": {},
@@ -19344,7 +19344,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "43d703b4b6fcc3440f534621950a45ecf5c525966e0b6724b0f1295bc42dcf01"
+   "source_sha256": "6db2d481e14fcdde22252a414dca1f7524df057fd9214815767d0f6691ea9246"
   },
   "kernels:pd_vertical_sl": {
    "assessment": "static_diagnostic_only",
@@ -19363,15 +19363,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "4eba30782eeb440b95f0ba82217be60ca53d49f82251477b882170d409ca3753",
+    "sha256": "c4ce7794a3aa0ab95a72cad503820875c3dbd077ddb53d63ba632925932ea537",
     "sites": {
-     "100": 99
+     "100": 98
     }
    },
    "native_differences": {
-    "sha256": "62330de2cc2670c551a5267b14e9ba9daf71ebe265b3142563295b2f942a422d",
+    "sha256": "a62a8cc8abdbe9f5290d4b32036862f37495b28a8246869d8ce81ddbcc99f799",
     "sites": {
-     "100": 15
+     "100": 12
     }
    },
    "native_errors": {},
@@ -19391,7 +19391,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "5992e93690475e6d753906380966b0bfd9df18d1f618a5fce9cd28d0def1162b"
+   "source_sha256": "c66b49f1baa3411bcb736473b11cdb5e447dcff43f8a2b639e7f80a1ec515e07"
   },
   "kernels:physics_exner": {
    "assessment": "static_diagnostic_only",

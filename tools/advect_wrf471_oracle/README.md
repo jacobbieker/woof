@@ -446,6 +446,31 @@ HRRR-fork RTX PRO 6000 NVRTC 13.2 receipt, staled by 9c3180977 (zero_first,
 to fill-then-accumulate on CUDA and Metal. The RTX 4090 receipts trail the
 same commit under `uncertified_stale`.
 
+## The RTX A6000 stands in for the sm_120 receipts
+
+The sm_120 receipts can be re-recorded only on an RTX 5090, which no test
+lane reaches (user ruling 2026-11-17). Each is marked STALE pending that
+re-record, per file: its `certified_unrepinned` record also names
+`rerecord_on` (the card) and `stand_in` (the receipt that gates meanwhile),
+and the receipt-pin warning says so. The RTX A6000 (sm_86, pb) receipt
+stands in for them, recorded under `certified_stand_in` in each fixture's
+`gpu-receipts.json` (`{receipt: {"stands_in_for": certified receipt or
+list, "reason": text}}`). A stand-in gates exactly as a Blackwell receipt
+does: its kernel and fixture pins must equal the tree, so a kernel edit
+such as `pd_advection.cu` moves only through a card-mode
+`recapture_receipt.py --install` on the A6000 that reproduces every
+recorded word, and on the A6000 itself the device tests compare every word.
+Only the measured card gates; another sm_86 card replays the receipt as an
+uncertified one. A record must be true both ways (the stand-in is not
+Blackwell and carries no staleness record; each receipt it stands in for is
+a Blackwell receipt whose not-re-pinned record names it). Installing a
+fresh capture of the certified receipt on its card drops its not-re-pinned
+record and the stand-in's claim on it.
+
+The A6000 receipts were first captured at 24cfae7c4 and re-pinned by the
+64 x 4 positive-definite advection block with every word of every variant
+reproduced (`receipts/nvidia-rtx-a6000-*-recapture.json`).
+
 ## Moving a receipt: `recapture_receipt.py`
 
 A receipt moves only through `recapture_receipt.py`, on the card it names
