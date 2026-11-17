@@ -141,12 +141,11 @@ extern "C" __global__ void seaice_init_subcycle_cells_variational_v842(
 // ocean_stress_coefficient: one thread per vertex. Without
 // config_use_ocean_stress the whole array is zeroed; with it, vertices not
 // solved keep their words.
-extern "C" __global__ void seaice_ocean_stress_coefficient_v842(
-    rk *oceanStressCoeff, const rk *uOceanVelocityVertex, const rk *vOceanVelocityVertex,
+__device__ __forceinline__ void si_ocean_stress_coefficient(
+    int iVertex, rk *oceanStressCoeff, const rk *uOceanVelocityVertex, const rk *vOceanVelocityVertex,
     const rk *uVelocity, const rk *vVelocity, const rk *iceAreaVertex, const int *solveVelocity,
     int useOceanStress, int nVerticesSolve, int nVertices)
 {
-    int iVertex = blockIdx.x * blockDim.x + threadIdx.x;
     if (!useOceanStress) {
         if (iVertex < nVertices) oceanStressCoeff[iVertex] = (rk)0.0;
         return;
@@ -158,18 +157,27 @@ extern "C" __global__ void seaice_ocean_stress_coefficient_v842(
                                   SQRT(A(M(du, du), M(dv, dv))));
 }
 
+extern "C" __global__ void seaice_ocean_stress_coefficient_v842(
+    rk *oceanStressCoeff, const rk *uOceanVelocityVertex, const rk *vOceanVelocityVertex,
+    const rk *uVelocity, const rk *vVelocity, const rk *iceAreaVertex, const int *solveVelocity,
+    int useOceanStress, int nVerticesSolve, int nVertices)
+{
+    si_ocean_stress_coefficient(blockIdx.x * blockDim.x + threadIdx.x, oceanStressCoeff, uOceanVelocityVertex,
+                                vOceanVelocityVertex, uVelocity, vVelocity, iceAreaVertex, solveVelocity,
+                                useOceanStress, nVerticesSolve, nVertices);
+}
+
 // solve_velocity (revised = 0, elasticTimeStep) and solve_velocity_revised
 // (revised = 1, dynamicsTimeStep and numericalInertiaCoefficient, read from
 // inertia[0]): one thread per vertex, the 2x2 implicit solve.
-extern "C" __global__ void seaice_solve_velocity_v842(
-    rk *uVelocity, rk *vVelocity, const rk *uVelocityInitial, const rk *vVelocityInitial,
+__device__ __forceinline__ void si_solve_velocity(
+    int iVertex, rk *uVelocity, rk *vVelocity, const rk *uVelocityInitial, const rk *vVelocityInitial,
     const rk *totalMassVertex, const rk *totalMassVertexfVertex,
     const rk *stressDivergenceU, const rk *stressDivergenceV, const rk *airStressVertexU,
     const rk *airStressVertexV, const rk *surfaceTiltForceU, const rk *surfaceTiltForceV,
     const rk *oceanStressU, const rk *oceanStressV, const rk *oceanStressCoeff, const int *solveVelocity,
     const rk *inertia, rk timeStep, int revised, int nVerticesSolve)
 {
-    int iVertex = blockIdx.x * blockDim.x + threadIdx.x;
     if (iVertex >= nVerticesSolve || solveVelocity[iVertex] != 1) return;
     const rk mass = totalMassVertex[iVertex];
     const rk massF = totalMassVertexfVertex[iVertex];
@@ -199,6 +207,30 @@ extern "C" __global__ void seaice_solve_velocity_v842(
     const rk den = S(M(l11, l22), M(l12, l21));
     uVelocity[iVertex] = D(S(M(l22, r1), M(l12, r2)), den);
     vVelocity[iVertex] = D(S(M(l11, r2), M(l21, r1)), den);
+}
+
+// one elastic subcycle's ocean_stress_coefficient then solve_velocity (or
+// solve_velocity_revised), one thread per vertex: a vertex's coefficient
+// reads only its own words, and its solve reads only its own coefficient,
+// so the thread runs the two in order with the separate kernels' words.
+extern "C" __global__ void seaice_velocity_update_v842(
+    rk *uVelocity, rk *vVelocity, const rk *uVelocityInitial, const rk *vVelocityInitial,
+    const rk *totalMassVertex, const rk *totalMassVertexfVertex,
+    const rk *stressDivergenceU, const rk *stressDivergenceV, const rk *airStressVertexU,
+    const rk *airStressVertexV, const rk *surfaceTiltForceU, const rk *surfaceTiltForceV,
+    const rk *oceanStressU, const rk *oceanStressV, rk *oceanStressCoeff, const int *solveVelocity,
+    const rk *inertia, rk timeStep, int revised, int nVerticesSolve,
+    const rk *uOceanVelocityVertex, const rk *vOceanVelocityVertex, const rk *iceAreaVertex,
+    int useOceanStress, int nVertices)
+{
+    const int iVertex = blockIdx.x * blockDim.x + threadIdx.x;
+    si_ocean_stress_coefficient(iVertex, oceanStressCoeff, uOceanVelocityVertex, vOceanVelocityVertex, uVelocity,
+                                vVelocity, iceAreaVertex, solveVelocity, useOceanStress, nVerticesSolve,
+                                nVertices);
+    si_solve_velocity(iVertex, uVelocity, vVelocity, uVelocityInitial, vVelocityInitial, totalMassVertex,
+                      totalMassVertexfVertex, stressDivergenceU, stressDivergenceV, airStressVertexU,
+                      airStressVertexV, surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV,
+                      oceanStressCoeff, solveVelocity, inertia, timeStep, revised, nVerticesSolve);
 }
 
 // principal_stresses_driver, variational branch: one thread per cell, over

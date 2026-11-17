@@ -287,7 +287,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     subcycle's velocity kernels also add the thickness flux, the
     corrector's velocity copy and the running sum, so a subcycle launches
     4 kernels instead of 8 (320 fewer launches a step, the same words): on
-    an M3 Max the 8,300-cell step takes about 44 instead of 52 ms;
+    an M3 Max the 8,300-cell step takes about 44 instead of 52 ms. On CUDA
+    the barotropic stage is captured as a CUDA graph and replayed (the
+    same kernels and arguments, so the same words; switch:
+    `WOOF_OCEAN_CUDA_GRAPHS=0`): 9.9 instead of 10.7 ms on an A6000 at
+    8,300 cells;
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
@@ -309,7 +313,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     needs an opt-in. The elastic subcycles check their arrays once per
     solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take 34 instead of 41 ms a step on
-    an M3 Max, with the same words;
+    an M3 Max, with the same words. Each subcycle computes the ocean
+    stress coefficient and solves the velocity in one launch (a vertex's
+    solve reads only its own coefficient), so the step launches 120 fewer
+    kernels: about 30 instead of 33 ms on an M3 Max, the same words;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -439,6 +446,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and excluded regions are refused by name
   ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md),
   [docs/public/HIGHRES-TERRAIN.md](docs/public/HIGHRES-TERRAIN.md)).
+- **Building morphology (opt-in input).** `woof.static.buildings` turns
+  GEM-15 heights (surface minus terrain, with tree and noise filters) and
+  open footprint files (Overture Maps, Microsoft, Google Open Buildings,
+  OSM; GeoJSON or GeoParquet) into per-cell building statistics on the model
+  grid. These are plan and frontal area indices, a height histogram, and
+  WRF's NUDAPT `URB_PARAM` block. Each source's licence and attribution
+  travel with the file. Footprints are read from a local file, not
+  downloaded, and the urban schemes do not read `URB_PARAM` yet
+  ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
@@ -718,6 +734,8 @@ carry none of the following. Each is off until selected:
 - WRF routines that are not freely licensed come from your own WRF tree
   (`WOOF_WRF_SOURCE`).
 - GEM-15 terrain is CC-BY-4.0 and needs its attribution.
+- Building footprints from Overture, Microsoft and OSM are ODbL-1.0; a
+  derived buildings file must carry their attribution.
 
 ### Install on a Mac
 
