@@ -663,6 +663,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     relocation_register_cli(sub)
     cyclone_setup_register_cli(sub)
     _lazy_register("woof.solar")(sub)
+    _lazy_register("woof.spacewx.cli")(sub)
     earth2_register_cli(sub)
     earth2_diagnostics_register_cli(sub)
     tc_tracks_register_cli(sub)

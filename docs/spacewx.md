@@ -14,7 +14,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | layer | what it does | status |
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
-| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU on the model's columns | planned |
+| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU | available as `woof spacewx ionosphere` (global grid); forecast history output planned |
 | L3b high latitudes | auroral oval energy flux and Joule heating from Kp and the solar wind (OMNI, SWPC real time) | planned |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | ion-pair rates (CMIP6 EPP, Ap-driven MEE, GOES SPE) as NOx/HOx sources in chemistry, for high-top runs | planned |
@@ -58,6 +58,62 @@ name. So does FARMS (`swint_opt = 2`).
 clear-sky noon of 800 W m-2), which removes WRF's constant-high bias. In relative mode the
 change is the solar variability alone, at most about 0.15 %.
 
+## L3a: climatological ionosphere (`woof spacewx ionosphere`)
+
+The ionosphere sits above every WRF/MPAS model top, so this layer is a diagnostic: it does
+not feed back on the weather. It computes an IRI-type electron density profile on each
+column on the GPU (CUDA and Metal; one thread per column) and reports these quantities:
+- foF2, NmF2 and hmF2;
+- M(3000)F2;
+- foE, and foF1/hmF1 where an F1 layer forms;
+- the F2 bottomside and topside thicknesses;
+- vertical TEC, from 60 to 2000 km.
+
+The model is built from published formulas:
+- foF2 and M(3000)F2 come from the CCIR (default) or URSI numerical maps (Jones & Gallet
+  1965). foF2 is interpolated in IG12 and M(3000)F2 in R12, as CCIR Report 340 does. Months
+  are blended linearly in time between mid-month maps.
+- Each map is expanded in Rawer's modified dip latitude, computed from IGRF-14 at 300 km.
+- foE uses the IRI effective zenith angle.
+- hmF2 follows Bilitza et al. (1979).
+- The bottomside thickness comes from the peak density gradient. The topside thickness
+  uses the NeQuick-type height scaling.
+- Each layer is an Epstein layer.
+
+The formulas and references are listed at the top of `woof/core/kernels/spacewx_ionosphere.cu`.
+PyIRI (Forsythe et al. 2023, MIT licence) was read for the arrangement of the map expansions,
+and its coefficient files are fetched, pinned by SHA-256, as data. No IRI or PyIRI code is run
+or copied.
+
+Space weather enters through F10.7, taken from GFZ's index file:
+- `--f107-mode 81day` (the default) uses the trailing 81-day mean of the observed flux;
+- `--f107-mode daily` uses the previous day's value.
+
+Both are available at forecast time. The maps are monthly medians, so the profile does not
+respond to a geomagnetic storm. That response is layer L3b.
+
+**Validation against GNSS TEC.** `python -m tools.spacewx_gim_validate` grades the model's
+vertical TEC against IGS rapid global ionosphere maps (CDDIS). It compares every 2-hour map
+node by node, on 71 x 73 nodes per map, with cos(latitude) weights. Bias is model minus GIM,
+in TECU. The default 81-day driver and CCIR maps give:
+
+| period | bias | RMSE | correlation | correlation, low / mid / high latitudes |
+|---|---|---|---|---|
+| 1-3 May 2024 (Ap 7, 42, 8) | -8.7 | 13.6 | 0.90 | 0.87 / 0.89 / 0.77 |
+| 10-12 May 2024 (Gannon storm, Ap 105, 271, 53) | -10.6 | 19.1 | 0.81 | 0.78 / 0.66 / 0.54 |
+| 11 May 2024 alone (main and recovery phase) | -6.4 | 18.2 | 0.71 | |
+
+Three findings stand out:
+- **The storm costs skill.** At mid and high latitudes the correlation falls from 0.89 to
+  0.66 and from 0.77 to 0.54. This is the signal a storm-time layer has to capture.
+- **The climatology is about 25 % low at this solar maximum.**
+  - Only 0.8 TECU of the gap is the profile above 2000 km.
+  - The rest is the F10.7-to-R12/IG12 conversion and the climatology itself.
+  - With the previous day's flux (`daily`), the storm days come out at bias -2.1, RMSE
+    16.2 and correlation 0.77. The quiet days, with a lower daily flux of 135-156 sfu,
+    come out at bias -13.5 and RMSE 17.9.
+- **The URSI maps change little:** on 1-3 May, bias -8.5, RMSE 13.9 and correlation 0.89.
+
 ## Data sources and licences (all layers)
 
 | input | source | licence |
@@ -66,7 +122,9 @@ change is the solar variability alone, at most about 0.15 %.
 | Kp, ap, Ap, F10.7 | GFZ Potsdam (`kp.gfz.de`) | CC BY 4.0; the sunspot column (CC BY-NC) is not read |
 | F10.7, solar wind real time | NOAA SWPC | public domain |
 | solar wind historical | NASA SPDF OMNIWeb | public |
-| CCIR/URSI ionospheric maps, IGRF | through PyIRI (MIT) at a pinned commit | MIT / ITU-R / IAGA published coefficients |
+| CCIR/URSI ionospheric maps | PyIRI (MIT) at commit c0a50e0a, each file pinned by SHA-256 | ITU-R / URSI published coefficients |
+| IGRF-14 | IAGA V-MOD via NOAA NCEI, pinned by SHA-256 | IAGA published coefficients |
+| GNSS TEC maps (validation only) | NASA CDDIS IONEX (Earthdata login) | public |
 | CMIP6 solar forcing (EPP ion-pair rates) | input4MIPs SOLARIS-HEPPA | CC BY 4.0 |
 
 NRLMSIS 2.x is not freely licensed (NRL restricts commercial use), so it is not bundled.
