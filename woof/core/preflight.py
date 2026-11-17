@@ -2760,6 +2760,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
 
     "cldfra3": 0,
     "solar_eclipse": 32,
+    # The ionosphere history (woof.spacewx.history), RTX A6000 sm_86,
+    # NVRTC 12.9, fast and strict, 2026-11-17: 96 B (the profile's locals).
+    "spacewx_ionosphere": 96,
     "cu_radiation": 0,  # test host B sm_120 / NVRTC 13.4.92, both modes.
     "wrf_stock_aer3": 0,  # same reading, both optics and diagnostics.
     "farms": 136,
@@ -2904,6 +2907,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu), RTX
     # A6000, default and strict numerics, 2026-11-15: 0 B.
     "smag2d_tke_faces": 0,
+    # The opt-in porous immersed obstacles (kernels/obstacle_drag.cu), RTX
+    # A6000, default and strict numerics, 2026-11-17: 0 B.
+    "obstacle_drag": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,
@@ -4495,6 +4501,8 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.update(("swint", "farms"))
     if int(dc.run.ra_sw_eclipse):
         modules.add("solar_eclipse")
+    if int(getattr(dc.run, "spacewx_ionosphere_opt", 0) or 0):
+        modules.add("spacewx_ionosphere")   # woof/spacewx/history.py
     if dc.run.cu_rad_feedback:
         modules.add("cu_radiation")
     if int(getattr(dc.run, "icloud", 1)) == 3:
@@ -10458,6 +10466,10 @@ def estimate_domain(dc: DomainConfig, *, spec_bdy_width: int | None = None,
     items += _items("transient", ksas_output_transient_shapes(run))
 
     items += _items("transient", cloud_farms_transient_shapes(run))
+    if int(getattr(run, "spacewx_ionosphere_opt", 0) or 0):
+        # The ionosphere history's held geometry, outputs and rows.
+        from woof.spacewx.history import device_shapes as spacewx_shapes
+        items += _items("physics", spacewx_shapes(run))
     items += _items("transient", ysu_output_transient_shapes(run))
     items += _items("transient", mynn_scalar_transient_shapes(run))
     items += _items("transient", tracer_pbl_transient_shapes(run))

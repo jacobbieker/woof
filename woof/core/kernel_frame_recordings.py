@@ -3643,6 +3643,21 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     frames=MappingProxyType({"smag2d_tke_faces": 0}),
 ),)
 
+# The opt-in porous immersed obstacles (kernels/obstacle_drag.cu), production
+# loader (no contraction), default and strict
+# (GPUWM_WRF_EXACT=1) numerics, read 2026-11-17 on the RTX A6000 CUDA host
+# with kernel_local_size_bytes: obstacle_drag 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if "obstacle_drag" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"obstacle_drag": 0}),
+),)
+
 # The Fitch wind-farm unit (labs/windfarm, 2.9.11), through the production
 # loader on test host A's RTX 4090 with fast and strict numerics, 2026-10-30:
 # widest kernel wind_wake 56 B (wind_locate_cells 40, wind_gad 32, wind_locate
@@ -4286,4 +4301,18 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
     measured="2026-11-08", complete=False,
     frames=MappingProxyType({"chem_sorgam": 672}),
+),)
+
+# The climatological ionosphere (kernels/spacewx_ionosphere.cu, the
+# spacewx_ionosphere_opt history rows), production loader
+# (woof.core.kernels.get_kernel), RTX A6000 sm_86, NVRTC 12.9.86,
+# 2026-11-17, both GPUWM_WRF_EXACT modes: 96 B, 40 registers.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "spacewx_ionosphere" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"spacewx_ionosphere": 96}),
 ),)

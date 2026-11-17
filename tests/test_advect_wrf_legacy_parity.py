@@ -27,7 +27,9 @@ from woof.verify.advect_oracle import (
     advect_gpu_identity, advect_nvrtc_key, architecture_is_certified, check_receipt_format,
     receipt_staleness, check_uncertified_stale_records, uncertified_stale_report,
     UncertifiedReceiptStale, UNCERTIFIED_STALE_KEY,
-    check_certified_unrepinned_records, check_certified_receipt_pins)
+    check_certified_unrepinned_records, check_certified_receipt_pins,
+    CERTIFIED_UNREPINNED_KEY, STAND_IN_KEY, receipt_gates, card_gates,
+    check_stand_in_records, certified_unrepinned_report)
 
 LEGACY_DIR = ADVECT_ORACLE_DIR.parent / "wrf_legacy_advect"
 COLUMN_DIR = ADVECT_ORACLE_DIR.parent / "wrf_legacy_vertical_columns"
@@ -84,16 +86,25 @@ def _receipt_for_gpu(gpu_name, compute_capability=None, nvrtc=None):
     return json.loads(path.read_text(encoding="ascii"))
 
 
+def _gates_on_this_card(gpu, capability):
+    """A certified card, or the card whose receipt stands in for the
+    certified ones (the RTX A6000 for the sm_120 receipts, which only an
+    RTX 5090 can re-record: user ruling 2026-11-17).  The receipt is chosen
+    as _receipt_for_gpu chooses it, compiler capture first."""
+    return card_gates(_INDEX, LEGACY_DIR, gpu, capability, _nvrtc_key())
+
+
 def _device_receipt():
     """The receipt this card's runtime words are compared with.
 
-    Blackwell and newer gate exactly as before (no receipt is a coverage
-    gap).  An older card is not certified (ruling 2026-10-04): with no
-    receipt, or one that trails the tree, the word comparison is skipped
-    and says why; a current receipt still compares every word.
+    Blackwell and newer, and the stand-in card (the RTX A6000, user ruling
+    2026-11-17), gate exactly as before (no receipt is a coverage gap).  An
+    older card is not certified (ruling 2026-10-04): with no receipt, or one
+    that trails the tree, the word comparison is skipped and says why; a
+    current receipt still compares every word.
     """
     gpu, capability = advect_gpu_identity()
-    if not architecture_is_certified(capability):
+    if not _gates_on_this_card(gpu, capability):
         name = GPU_RECEIPTS.get(gpu) or ARCH_RECEIPTS.get(tuple(capability))
         if name is None:
             pytest.skip(f"{gpu} (sm_{capability[0]}{capability[1]}) has no HRRR-fork advection "
@@ -138,6 +149,40 @@ def test_device_receipt_gates_blackwell_and_skips_older_cards_only_when_stale(mo
         _device_receipt()
     card("NVIDIA GeForce RTX 4090", (8, 9))
     assert _device_receipt()["gpu"] == "NVIDIA GeForce RTX 4090"
+
+
+def test_the_a6000_stands_in_for_the_rtx5090_receipts_pending_their_rerecord(monkeypatch):
+    """Both sm_120 receipts (the RTX 5090 card receipt and the NVRTC 13.2
+    receipt measured on an RTX PRO 6000) can be re-recorded only on an
+    sm_120 card (the RTX 5090): they are marked STALE pending that re-record, per file, and
+    the RTX A6000 receipt gates kernel edits in their place (user ruling
+    2026-11-17).  Only that card gates; another sm_86 card does not."""
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "_nvrtc_key", lambda: None)
+    stand_ins = check_stand_in_records(_INDEX, LEGACY_DIR)
+    assert sorted(stand_ins["gpu-receipt-sm86.json"]["stands_in_for"]) == [
+        "gpu-receipt-sm120-nvrtc13.2.json", "gpu-receipt-sm120.json"]
+    for name in ("gpu-receipt-sm120.json", "gpu-receipt-sm120-nvrtc13.2.json"):
+        record = _INDEX[CERTIFIED_UNREPINNED_KEY][name]
+        assert record["stand_in"] == "gpu-receipt-sm86.json"
+        assert "RTX 5090" in record["rerecord_on"]
+        receipt = json.loads((LEGACY_DIR / name).read_text(encoding="ascii"))
+        moved = {pin: (receipt["kernels"][pin], "a" * 64) for pin in record["pins"]}
+        assert f"STALE, pending a re-record on: {record['rerecord_on']}" in (
+            certified_unrepinned_report(name, receipt, moved, record))
+    a6000 = json.loads((LEGACY_DIR / "gpu-receipt-sm86.json").read_text(encoding="ascii"))
+    assert receipt_gates("gpu-receipt-sm86.json", a6000, _INDEX)
+    monkeypatch.setattr(module, "receipt_staleness", lambda *args: {"pd_advection": ("e" * 64, "a" * 64)})
+    monkeypatch.setattr(module, "advect_gpu_identity", lambda: ("NVIDIA RTX A6000", (8, 6)))
+    assert _device_receipt()["gpu"] == "NVIDIA RTX A6000"
+    monkeypatch.setattr(module, "advect_gpu_identity", lambda: ("another sm_86 card", (8, 6)))
+    with pytest.raises(pytest.skip.Exception, match="not certified"):
+        _device_receipt()
+    # A compiler capture on the A6000 is not the stand-in: it does not gate.
+    monkeypatch.setattr(module, "_nvrtc_key", lambda: "99.9")
+    index = dict(_INDEX, compilers={"99.9": {"8.6": "gpu-receipt.json"}})
+    assert not card_gates(index, LEGACY_DIR, "NVIDIA RTX A6000", (8, 6), "99.9")
+    assert card_gates(index, LEGACY_DIR, "NVIDIA RTX A6000", (8, 6), "13.2")
 
 
 def _available_receipts():
@@ -264,17 +309,21 @@ def test_order_five_reference_is_not_the_order_three_one():
 
 
 def test_cuda_receipts_pin_the_compiled_source_and_replay_their_words():
-    """Blackwell receipts gate their pins; older ones are reported when stale
-    (byte identity is certified on Blackwell and newer only, ruling
-    2026-10-04).  Every receipt's format and committed words are checked."""
+    """Blackwell receipts and their stand-in gate their pins; older ones are
+    reported when stale (byte identity is certified on Blackwell and newer
+    only, ruling 2026-10-04).  The RTX 5090 receipts are stale pending a
+    re-record on an RTX 5090, the only card that can re-record them; the
+    RTX A6000 receipt stands in for them (user ruling 2026-11-17).  Every
+    receipt's format and committed words are checked."""
     records = check_uncertified_stale_records(_INDEX, LEGACY_DIR, RECEIPT_MODULES)
     unrepinned = check_certified_unrepinned_records(_INDEX, LEGACY_DIR, RECEIPT_MODULES)
+    check_stand_in_records(_INDEX, LEGACY_DIR)
     cases = _cases()
     found = False
     for name, receipt in _available_receipts():
         found = True
         check_receipt_format(receipt, LEGACY_DIR, RECEIPT_MODULES, cases)
-        if not architecture_is_certified(receipt["compute_capability"]):
+        if not receipt_gates(name, receipt, _INDEX):
             moved = receipt_staleness(receipt, LEGACY_DIR, RECEIPT_MODULES)
             if moved:
                 warnings.warn(UncertifiedReceiptStale(
@@ -310,7 +359,7 @@ def device_receipt():
 @pytest.fixture(scope="module")
 def cuda_cases():
     gpu, capability = advect_gpu_identity()
-    if architecture_is_certified(capability):
+    if _gates_on_this_card(gpu, capability):
         # A certified card with no receipt is a coverage gap: fail before the launches.
         _receipt_for_gpu(gpu, capability)
     return {case.name: (case, advect_port_outputs(case)) for case in _cases()}

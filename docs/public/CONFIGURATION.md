@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 447,
+**Which keys a `[[domain]]` table may override.** Exactly these 453,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -407,6 +407,8 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
     gf_deep_rain_evaporation_booking
+    obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
+    obstacle_drag_coefficient  obstacle_wall_z0
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
     radt_minutes  bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics
     ra_rrtmg_variant  wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat
@@ -553,8 +555,9 @@ GLSEA where it covers and ERA5 elsewhere; see
 [lake-state-initialization.md](../lake-state-initialization.md)); a research-only row
 also needs `lake_state_path`, its acquired CF NetCDF file, and
 `lake_state_accept_licence` set to that row's licence string.
-`woof go --lakes clm|ic|off` writes these lake keys, plus `sf_lake_physics`
-and `use_lakedepth`, on every domain in a launched copy of the experiment
+`woof go --lakes clm|ic|off` writes `sf_lake_physics` and the lake-state keys
+in `[shared]` (removing them per domain) in a launched copy of the experiment;
+`use_lakedepth`, `lakedepth_default` and `lake_min_elev` are left as set
 ([lakes.md](../lakes.md)).
 
 `clos_choice` and `ishallow` configure the Grell-Freitas cumulus scheme
@@ -581,6 +584,22 @@ column budget closes; every tendency is unchanged. It is not a WRF
 namelist key, so it is set in the TOML (or as `--physics
 gf_deep_rain_evaporation_booking=true` on the hex WOOF arm). See the
 Grell-Freitas notes in [PHYSICS.md](PHYSICS.md#cumulus-cu_physics).
+
+`obstacle_opt` (default `0`) resolves buildings and other obstacles on an
+LES or other high-resolution domain. It is woof's own option, not a WRF
+one, and it is per domain because buildings belong to one grid.
+`obstacle_opt = 1` reads `obstacle_file`, a `woof-buildings.v1` product
+made on that domain's own mass grid (see [BUILDINGS.md](BUILDINGS.md)), and
+represents the buildings as porous immersed obstacles. A layer at least
+`obstacle_solid_fraction` (default `0.5`) full of building is solid, and
+momentum on its faces is relaxed to zero at `obstacle_relax_factor`/`dt`
+(default `10`). Partly built layers get canopy form drag with coefficient
+`obstacle_drag_coefficient` (default `0.4`, BEP's). Open faces beside or
+above a wall get log-law wall stress with roughness `obstacle_wall_z0` m
+(default `0.01`). The option is refused without a file, with a file and
+`obstacle_opt = 0`, above 500 m grid spacing (use `sf_urban_physics`
+there), on the global grid, and in a moving frame (`umove`, `vmove`). With `obstacle_opt = 0`, or a product
+with no buildings, no obstacle code runs.
 
 The eleven numerics from `diff_6th_slopeopt` through `tke_budget` are
 per domain because WRF declares every one of them `max_domains` and the
@@ -1498,6 +1517,10 @@ each one off, the run executes no new code. The design and the planned layers
 | `solar_tsi_opt` | `0` | `1` scales every shortwave output of each radiation call by `TSI(t) / reference`. Shortwave transfer is linear in the top-of-atmosphere flux, so this equals changing WRF's `SOLCON = 1370 * ECCFAC` for every shortwave scheme. |
 | `solar_tsi_source` | `""` | The TSI series. A CSV of `YYYY-MM-DD,W m-2` daily means, a NOAA CDR netCDF (`TSI`, `time` in days since 1610-01-01), several paths joined by `:`, or `"nrlssi2"`, which fetches the NOAA NRLSSI2 daily CDR files for the run's years into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`). Daily means sit at noon UTC and are interpolated linearly. A run time outside the series, or in a gap longer than a day, is refused. |
 | `solar_tsi_mode` | `"absolute"` | `"absolute"`: the reference is 1370 W m-2, so the measured TSI replaces WRF's constant. `"relative"`: the reference is 1360.8 W m-2 (the TIM cycle mean), which keeps WRF's calibration and adds only the variability. |
+| `spacewx_ionosphere_opt` | `0` | `1` adds the climatological ionosphere to every history frame: `IONO_TEC` (vertical TEC, 60-2000 km, TECU), `IONO_FOF2` and `IONO_FOE` (MHz), `IONO_HMF2` (km) and `IONO_NMF2` (m-3), on the domain's columns at the frame's valid time. It is a diagnostic: the atmosphere integrates identically. |
+| `spacewx_f107_source` | `""` | The F10.7 that drives it. `""` or `"gfz"` fetches GFZ's `Kp_ap_Ap_SN_F107_since_1932.txt` into the space-weather cache. A path reads a file in that format, and a number is a fixed flux in sfu. The value at the run's start is held for the whole run (persistence). |
+| `spacewx_f107_mode` | `"81day"` | `"81day"`: the mean observed F10.7 of the 81 UT days ending the day before the start. `"daily"`: the day before the start alone. |
+| `spacewx_ionosphere_maps` | `"ccir"` | The foF2 maps, `"ccir"` or `"ursi"`. |
 
 `solar_tsi_source` and `solar_tsi_mode` are refused while `solar_tsi_opt = 0`,
 since they would do nothing. `solar_tsi_opt = 1` is refused without a
@@ -1508,6 +1531,18 @@ seam takes the same keys (`woof hex forecast --physics solar_tsi_opt=1
 take them yet. The NOAA CDR lags real time by a few months, so a forecast for
 the coming days needs a CSV, for example the last measured value carried
 forward.
+
+The `spacewx_f107_*` and `spacewx_ionosphere_maps` keys are refused while
+`spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 1` is refused without a
+radiation scheme, since the ionosphere uses the radiation geometry's columns.
+It is also refused on a streamed (tiled) domain and on hex, where no history
+stream carries the rows yet. Its CCIR/URSI maps and IGRF-14 coefficients are
+fetched on first use into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`) and
+checked against pinned SHA-256 sums. The GFZ index file is a living record, so
+it has no pinned sum: it is fetched again when it ends before the day before the
+start (and once more when that day's flux is not yet released), its format is
+checked on reading, and its SHA-256 is printed with the rest of the
+ionosphere's receipt as the run starts (the `[spacewx ionosphere]` line).
 
 ## What a WRF namelist setting becomes
 

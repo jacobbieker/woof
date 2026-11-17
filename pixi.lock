@@ -6681,6 +6681,7 @@ packages:
   - ruff==0.13.3 ; extra == 'dev'
   - huggingface-hub>=0.23 ; extra == 'publish'
   - h5py>=3.10 ; extra == 'publish'
+  - torch>=2.10 ; extra == 'nn-torch'
   - py7zr>=1.0 ; extra == 'hydro-conus'
   - recast-woof[gpu-cu12] ; extra == 'all-cu12'
   - recast-woof[render] ; extra == 'all-cu12'

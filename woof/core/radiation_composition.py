@@ -66,6 +66,17 @@ def legacy_radiation_adapter(adapter):
                  and type(item).__name__ == "RRTMGLegacyRadiation"), None)
 
 
+def retained_ozone_adapter(adapter):
+    """The adapter that retains the o33d it radiated (legacy RRTMG or
+    RRTMG-K, which shares legacy's retained-ozone contract), or None."""
+    legacy = legacy_radiation_adapter(adapter)
+    if legacy is not None:
+        return legacy
+    return next((item for item in radiation_adapters(adapter)
+                 if type(item).__module__ == "woof.core.rrtmgk"
+                 and type(item).__name__ == "RRTMGKRadiation"), None)
+
+
 class ComposedRadiation:
     """Keep each spectrum's own heating, flux and restart authority."""
     @property

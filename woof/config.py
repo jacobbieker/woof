@@ -2322,6 +2322,36 @@ class RunConfig:
     solar_tsi_opt: int = _config_field(default=0, kw_only=True)
     solar_tsi_source: str = _config_field(default="", kw_only=True)
     solar_tsi_mode: str = _config_field(default="absolute", kw_only=True)
+    # Appended last.  Resolved buildings and obstacles at LES / high
+    # resolution (woof.core.obstacles; docs/public/BUILDINGS.md), woof's own
+    # option beyond WRF parity, default OFF: 0 runs no obstacle code at all.
+    # 1 = porous immersed obstacles: Brinkman penalisation of momentum on
+    # faces of solid cells, canopy drag in partly built cells and log-law
+    # wall stress beside walls, from the woof-buildings.v1 product named by
+    # obstacle_file (woof.static.buildings).
+    obstacle_opt: int = _config_field(default=0, kw_only=True)
+    obstacle_file: str = _config_field(default="", kw_only=True)
+    # A layer at least this full of building is solid (blocked faces).
+    obstacle_solid_fraction: float = _config_field(default=0.5, kw_only=True)
+    # Penalisation rate on blocked faces, in units of 1/dt.
+    obstacle_relax_factor: float = _config_field(default=10.0, kw_only=True)
+    # Form-drag coefficient of partly built cells (BEP's CDRAG).
+    obstacle_drag_coefficient: float = _config_field(default=0.4, kw_only=True)
+    # Roughness length (m) of building walls and roofs for the wall law.
+    obstacle_wall_z0: float = _config_field(default=0.01, kw_only=True)
+    # spacewx_ionosphere_opt = 1 adds the climatological ionosphere
+    # (woof.spacewx.history: vertical TEC and the F2/E-layer parameters) to
+    # every history frame on the radiation geometry's columns.  Diagnostic
+    # only: the atmosphere integrates identically.  The F10.7 driver is
+    # "gfz" (the GFZ index file, fetched; "" means the same), a local file
+    # in its format or a number in sfu, held at the run start's value;
+    # spacewx_f107_mode is "81day" or "daily".  spacewx_ionosphere_maps
+    # picks the foF2 maps ("ccir" or "ursi").  0 runs no new code.
+    spacewx_ionosphere_opt: int = _config_field(default=0, kw_only=True)
+    spacewx_f107_source: str = _config_field(default="", kw_only=True)
+    spacewx_f107_mode: str = _config_field(default="81day", kw_only=True)
+    spacewx_ionosphere_maps: str = _config_field(default="ccir", kw_only=True)
+
 
 def _validate_solar_tsi(cfg) -> None:
     """solar_tsi_opt and its keys (woof.spacewx.solar_irradiance)."""
@@ -2355,6 +2385,45 @@ def _validate_solar_tsi(cfg) -> None:
             "solar_tsi_opt = 1 with swint_opt = 2: FARMS recomputes the "
             "surface shortwave every step from its own solar constant, "
             "outside the radiation call the TSI factor scales")
+
+
+def _validate_spacewx_ionosphere(cfg) -> None:
+    """spacewx_ionosphere_opt and its keys (woof.spacewx.history)."""
+    opt = cfg.spacewx_ionosphere_opt
+    source, mode, maps = (cfg.spacewx_f107_source, cfg.spacewx_f107_mode,
+                          cfg.spacewx_ionosphere_maps)
+    if type(opt) is not int or opt not in (0, 1):
+        raise ConfigurationRefused(
+            f"spacewx_ionosphere_opt={opt!r} must be 0 (no ionosphere) or 1 "
+            "(the climatological ionosphere in every history frame)")
+    if type(source) is not str or type(mode) is not str or type(maps) is not str:
+        raise ConfigurationRefused(
+            "spacewx_f107_source, spacewx_f107_mode and spacewx_ionosphere_maps "
+            "must be strings")
+    if mode not in ("81day", "daily"):
+        raise ConfigurationRefused(
+            f"spacewx_f107_mode={mode!r} must be '81day' (the trailing 81-day "
+            "mean F10.7) or 'daily' (the previous UT day's)")
+    if maps not in ("ccir", "ursi"):
+        raise ConfigurationRefused(
+            f"spacewx_ionosphere_maps={maps!r} must be 'ccir' or 'ursi'")
+    if opt == 0:
+        if source or mode != "81day" or maps != "ccir":
+            raise ConfigurationRefused(
+                "spacewx_f107_source/spacewx_f107_mode/spacewx_ionosphere_maps "
+                "are set but spacewx_ionosphere_opt = 0, so they would do "
+                "nothing; set spacewx_ionosphere_opt = 1 or drop them")
+        return
+    from woof.spacewx.history import IonosphereHistoryError, parse_f107_source
+    try:
+        parse_f107_source(source)
+    except IonosphereHistoryError as exc:
+        raise ConfigurationRefused(str(exc)) from None
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            "spacewx_ionosphere_opt = 1 places the ionosphere on the radiation "
+            "geometry's columns, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
 
 
 @dataclass(frozen=True)
@@ -8057,6 +8126,74 @@ def multi_perturb_refusal(cfg) -> str | None:
     return None
 
 
+#: Above this grid spacing buildings are sub-grid: use the urban canopy
+#: schemes (sf_urban_physics) instead of resolved obstacles.
+OBSTACLE_MAX_DX_M = 500.0
+
+#: The resolved-obstacle keys at their defaults (all appended last, off):
+#: every older header, cache and tree ran exactly these.
+OBSTACLE_RUN_DEFAULTS = {
+    "obstacle_opt": 0, "obstacle_file": "", "obstacle_solid_fraction": 0.5,
+    "obstacle_relax_factor": 10.0, "obstacle_drag_coefficient": 0.4,
+    "obstacle_wall_z0": 0.01}
+
+
+def _validate_obstacles(cfg: RunConfig) -> None:
+    """The opt-in resolved obstacles' refusals (woof.core.obstacles)."""
+    option = cfg.obstacle_opt
+    if type(option) is not int or option not in (0, 1):
+        raise ConfigurationRefused(
+            f"obstacle_opt must be 0 (off) or 1 (porous immersed obstacles), "
+            f"got {option!r}")
+    numbers = {"obstacle_solid_fraction": (0.0, 1.0),
+               "obstacle_relax_factor": (0.0, None),
+               "obstacle_drag_coefficient": (0.0, None),
+               "obstacle_wall_z0": (0.0, None)}
+    for name, (low, high) in numbers.items():
+        value = getattr(cfg, name)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value <= low
+                or (high is not None and value > high)):
+            bound = f"in ({low}, {high}]" if high is not None else f"> {low}"
+            raise ConfigurationRefused(f"{name} must be a number {bound}, "
+                                       f"got {value!r}")
+    if not option:
+        if cfg.obstacle_file:
+            raise ConfigurationRefused(
+                "obstacle_file is set but obstacle_opt = 0: the buildings "
+                "would be silently ignored; set obstacle_opt = 1 or drop it")
+        return
+    if not cfg.obstacle_file:
+        raise ConfigurationRefused(
+            "obstacle_opt = 1 needs obstacle_file, a woof-buildings.v1 "
+            "product on this domain's grid (woof.static.buildings)")
+    if max(cfg.dx, cfg.dy) > OBSTACLE_MAX_DX_M:
+        raise ConfigurationRefused(
+            f"obstacle_opt = 1 resolves buildings, which needs dx <= "
+            f"{OBSTACLE_MAX_DX_M:g} m (this domain has {cfg.dx:g} m); at "
+            "coarser spacing buildings are sub-grid, so use the urban "
+            "canopy schemes (sf_urban_physics) instead")
+    if cfg.polar:
+        raise ConfigurationRefused(
+            "obstacle_opt = 1 runs on the regional (WRF-route) grid only")
+    if 0.5 * min(cfg.dx, cfg.dy) < 10.0 * cfg.obstacle_wall_z0:
+        raise ConfigurationRefused(
+            f"obstacle_wall_z0 = {cfg.obstacle_wall_z0:g} m is too rough for "
+            f"dx = {min(cfg.dx, cfg.dy):g} m: the wall law needs half the "
+            "grid spacing to be at least 10 z0")
+    if cfg.dfi_opt:
+        raise ConfigurationRefused(
+            "obstacle_opt = 1 does not run under digital filter "
+            f"initialisation (dfi_opt = {cfg.dfi_opt}): its backward "
+            "integration would turn the obstacle drag into a source")
+    if cfg.umove or cfg.vmove:
+        raise ConfigurationRefused(
+            "obstacle_opt = 1 holds buildings fixed to the ground, but "
+            f"umove = {cfg.umove:g}, vmove = {cfg.vmove:g} m/s moves the "
+            "frame, where the drag would see frame-relative wind; run "
+            "obstacles with umove = vmove = 0")
+
+
 def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> RunConfig:
     """The RunConfig invariant battery, shared by BOTH loaders.
 
@@ -9151,10 +9288,12 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "(public WRF's 2 m flux form) or 'log_profile' (the operational "
             "RAP/HRRR branch's logarithmic profile): the two write different "
             "2 m values, so an unknown name cannot select either.")
+    _validate_obstacles(cfg)
     if type(cfg.gf_deep_rain_evaporation_booking) is not bool:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking must be true or false")
     _validate_solar_tsi(cfg)
+    _validate_spacewx_ionosphere(cfg)
     if cfg.gf_deep_rain_evaporation_booking and int(cfg.cu_physics) != 3:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking corrects Grell-Freitas's deep "

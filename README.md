@@ -254,6 +254,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     wired into the forecast route (`--wrf-hydro`, `[wrf_hydro]`), and into
     hex through a conservative cell-to-routing-grid exchange. Unported
     `hydro.namelist` options are refused by name.
+  - Hex's cell-to-grid exchange runs on the GPU by default. The overlap
+    weights stay on the device and nothing goes through the host at the LSM
+    step. Its words match the host route's on the same machine: it sums in
+    scipy's order and copies that host's use of FMA.
+    `--no-wrf-hydro-gpu-exchange` (`[wrf_hydro] gpu_exchange = false`) keeps
+    the host route, which also runs, with a log line, when there is no GPU
+    backend. Measured on a 128x128 1-km LSM grid with a 96k-cell
+    hex mesh: on pb the exchange went from 230 ms (host) to 0.4 ms (A6000),
+    and the whole coupling cycle from 528 to 196 ms. On the M3 Max it went
+    from 15-27 ms to 4 ms; there the routing (about 650 ms) dominates.
   - NEMO 5.0.2: the equation of state, TKE mixing, vertical and lateral
     tracer diffusion, FCT advection and solar penetration. A coupled column
     ocean is driven by WRF's ocean-coupler exchange (SST only for now); a
@@ -463,6 +473,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   travel with the file. Footprints are read from a local file, not
   downloaded, and the urban schemes do not read `URB_PARAM` yet
   ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
+- **Resolved buildings in LES (`obstacle_opt = 1`, opt-in).** On a domain
+  with spacing up to 500 m, the building product becomes porous immersed
+  obstacles on the WRF route. Faces of solid cells are blocked (Brinkman
+  penalisation), partly built cells get canopy drag, and walls and roofs
+  get log-law stress. One fused CUDA/Metal kernel acts on the RK-stage
+  momentum tendencies. A street-canyon benchmark gives the H/W = 1 vortex,
+  and a cube benchmark gives the wake and horseshoe. Off, or with no
+  buildings, nothing launches and runs are bit-identical. Momentum only,
+  regional grid only.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
@@ -511,10 +530,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   zero-fill into its first accumulating launch (`zero_first`, word-identical
   on CUDA and Metal). On CUDA the four flux-divergence launches take 32 x 4
   thread blocks instead of 128-wide rows (word-identical; 6-14 % less kernel
-  time at 150-260 points per row on the A6000; Metal keeps the rows). Its advection receipts for the RTX 5090 and RTX PRO 6000
+  time at 150-260 points per row on the A6000; Metal keeps the rows). The
+  positive-definite flux and renormalisation launches take 64 x 4 blocks
+  on CUDA (word-identical in fast and strict; 3-11 % less kernel time,
+  e.g. 257 -> 230 us at 50x150x186; `WOOF_PD_BLOCK=BXxBY` overrides, width
+  a multiple of 32; Metal keeps the rows). Its advection receipts for the RTX 5090 and RTX PRO 6000
   (Blackwell) are **not re-pinned**: no Blackwell card was available, so
   `certified_unrepinned` in each fixture's `gpu-receipts.json` records the
-  pins and the commit, and the gate warns rather than fails for those pins. An RK stage's lateral specified/relaxation
+  pins and the commit, and the gate warns rather than fails for those pins.
+  They are marked stale pending a re-record on an RTX 5090; until then the
+  RTX A6000 receipt stands in and gates kernel edits (`certified_stand_in`). An RK stage's lateral specified/relaxation
   rows (u, v, theta, phi, w, mu) are one launch that also absorbs their held
   zero-fills and interior ufuncs (`state_relaxation_multi`, byte-identical;
   about 33 launches, 15 memsets and 15 strided adds fewer per nested domain
@@ -668,7 +693,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   what does not depend on wavelength. That cache holds the layer air and
   gas columns, the cloud radius selections and the REPTRAN pressure,
   temperature and vmr brackets. All eight REPTRAN lookups share one grid,
-  so a single bracket serves every species. The blocks write straight into
+  so one bracket serves every species looked up without a vmr (H2O, looked
+  up with its vmr, takes its own vmr-interpolated bracket). The blocks write straight into
   the solver's arrays, and the AFGL splice is written in place. The words
   are unchanged: 30,000 columns x 8 wavelengths take 15 s instead of 23 s
   on the A6000 host.
@@ -717,9 +743,44 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
   has a correlation of 0.90 on 1-3 May 2024 and 0.81 during the 10-12 May
   storm, and it reads about 25 % low at this solar maximum
-  (`tools/spacewx_gim_validate.py`). Its output does not yet go into forecast
-  history. The aurora, storm-time and particle-precipitation layers are
+  (`tools/spacewx_gim_validate.py`). `spacewx_ionosphere_opt = 1` writes the
+  same ionosphere into every WRF-route history frame (`IONO_TEC`,
+  `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
+  forecast; hex and streamed domains refuse it for now. The aurora, storm-time and particle-precipitation layers are
   planned ([docs/spacewx.md](docs/spacewx.md)).
+- **A plan, not yet code, for gradients and hybrid physics.**
+  [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
+  studies gradients of a forecast's fit to observations and opt-in
+  neural-network column physics. woof has no adjoint or autodiff code today.
+  The plan starts with adjoint-free sensitivities (finite-difference and
+  ensemble), then one differentiable column scheme, NN physics through the
+  existing column seams, and later a WRF dry-core adjoint checked against
+  WRFPLUS. Default runs are not changed.
+  The first tools exist (experimental, reached only through `woof grad`):
+  `woof grad obs` reads a forecast window's surface, upper-air, aircraft
+  and radio-occultation observations from the bkr/obs stores, and
+  `woof grad cost` scores a WRF or hex history against them as an
+  error-weighted observation cost `J_o`, pairing each observation with the
+  nearest history frame and freezing the accepted set so perturbed runs
+  are scored on the same observations ([docs/grad.md](docs/grad.md)).
+- **A plan, not yet code, for variational data assimilation.**
+  [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
+  WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
+  transforms, a conventional-observation 3D-Var checked against compiled
+  WRFDA 4.7.1, background-error statistics from woof forecasts, and hybrid
+  3DEnVar with the LETKF members. Radar, GOES and radiances come later;
+  radiances need an opt-in CRTM. It also scopes opt-in gradient and
+  neural-network options inside the DA. 4D-Var waits for the adjoints in
+  the plan above. woof has no variational DA today, and default runs are
+  not changed.
+- **Neural-network column physics (opt-in, inference only; in progress).**
+  `woof.nn` loads a column model (a manifest with weights hash, units,
+  normalisation and trained input range) and runs it with PyTorch on CUDA
+  (DLPack, no copies; `recast-woof[nn-torch]`, never a base dependency) or
+  MLX on Metal. A safety layer refuses, clips or falls back to the physics
+  scheme outside the trained range, and limits outputs, keeps moisture
+  positive and can fix column budgets. The forecast seats are not wired yet.
+  Runs that use it are not WRF-identical ([docs/nn-physics.md](docs/nn-physics.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

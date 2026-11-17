@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from woof.spacewx.solar_irradiance import cache_root
+from woof.spacewx.solar_irradiance import cache_root, naive_utc
 
 GFZ_URL = "https://kp.gfz.de/app/files/Kp_ap_Ap_SN_F107_since_1932.txt"
 GFZ_NAME = "Kp_ap_Ap_SN_F107_since_1932.txt"
@@ -55,6 +55,7 @@ class GeoIndices:
         """The F10.7 that drives the ionosphere at ``when`` (see module doc)."""
         if mode not in F107_MODES:
             raise IndicesError(f"F10.7 driver {mode!r}: one of {F107_MODES}")
+        when = naive_utc(when)
         last = self._row((when - timedelta(days=1)).date())
         first = last if mode == "daily" else last - 80
         if first < 0:
@@ -67,6 +68,7 @@ class GeoIndices:
 
     def kp_at(self, when: datetime) -> float:
         """The 3-hourly Kp of the interval containing ``when``."""
+        when = naive_utc(when)
         i = self._row(when.date())
         value = self.kp[i, when.hour // 3]
         if not np.isfinite(value):
@@ -117,7 +119,7 @@ def fetch_gfz(needed: datetime | None = None, *, cache=None, opener=None) -> Pat
     if target.is_file() and needed is not None:
         try:
             current = read(target)
-            if current.days[-1] >= np.datetime64(needed.date(), "D"):
+            if current.days[-1] >= np.datetime64(naive_utc(needed).date(), "D"):
                 return target
         except IndicesError:
             pass
@@ -125,10 +127,15 @@ def fetch_gfz(needed: datetime | None = None, *, cache=None, opener=None) -> Pat
         return target
     import urllib.request
     opener = opener or (lambda url: urllib.request.urlopen(url, timeout=120))
-    part = target.with_name(target.name + ".part")
-    with opener(GFZ_URL) as reply:
-        part.write_bytes(reply.read())
-    parse(part.read_bytes().decode("ascii", "replace"), str(part))
+    from woof.spacewx.assets import unique_part
+    part = unique_part(target)
+    try:
+        with opener(GFZ_URL) as reply:
+            part.write_bytes(reply.read())
+        parse(part.read_bytes().decode("ascii", "replace"), str(part))
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
     part.replace(target)
     return target
 

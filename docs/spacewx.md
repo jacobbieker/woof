@@ -14,7 +14,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | layer | what it does | status |
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
-| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU | available as `woof spacewx ionosphere` (global grid); forecast history output planned |
+| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU | available as `woof spacewx ionosphere` (global grid) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
 | L3b high latitudes | auroral oval energy flux and Joule heating from Kp and the solar wind (OMNI, SWPC real time) | planned |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | ion-pair rates (CMIP6 EPP, Ap-driven MEE, GOES SPE) as NOx/HOx sources in chemistry, for high-top runs | planned |
@@ -43,7 +43,14 @@ longwave is untouched.
 
 The factor is applied as soon as the scheme returns, before any consumer reads the result.
 The consumers include `swint_opt = 1`, the eclipse overlay, the tendency coupling, the land
-surface and history. See the [configuration reference](public/CONFIGURATION.md) for the keys.
+surface and history. The shortwave diagnostics a scheme writes into the driver's fields itself
+are scaled by the same factor: RSWTOA for GSFC (`ra_sw_physics = 2`), and RSWTOA and SWDOWNC for
+GFDL-Eta (`ra_sw_physics = 99`). See the [configuration reference](public/CONFIGURATION.md) for
+the keys.
+
+At start-up the run prints a `[spacewx tsi]` line: the source, the SHA-256 of the TSI files
+read, the mode and the reference. A fetched CDR file is read as a TSI series before it is
+installed in the cache; a truncated or wrong download is deleted and refused.
 
 The data come from the NOAA Climate Data Record "Total Solar Irradiance" (NRLSSI2 v03, daily;
 Coddington et al. 2016, doi:10.7289/V56W985W). It is fetched on demand and never shipped.
@@ -71,7 +78,9 @@ column on the GPU (CUDA and Metal; one thread per column) and reports these quan
 
 The model is built from published formulas:
 - foF2 and M(3000)F2 come from the CCIR (default) or URSI numerical maps (Jones & Gallet
-  1965). foF2 is interpolated in IG12 and M(3000)F2 in R12, as CCIR Report 340 does. Months
+  1965). foF2 is interpolated in IG12 and M(3000)F2 in R12, as CCIR Report 340 does. The
+  quadratic R12-to-IG12 fit turns over at R12 of about 247 (F10.7 near 300 sfu), so R12 is
+  held at that point above it rather than letting more flux give a lower foF2. Months
   are blended linearly in time between mid-month maps.
 - Each map is expanded in Rawer's modified dip latitude, computed from IGRF-14 at 300 km.
 - foE uses the IRI effective zenith angle.
@@ -113,6 +122,31 @@ Three findings stand out:
     16.2 and correlation 0.77. The quiet days, with a lower daily flux of 135-156 sfu,
     come out at bias -13.5 and RMSE 17.9.
 - **The URSI maps change little:** on 1-3 May, bias -8.5, RMSE 13.9 and correlation 0.89.
+
+### In forecast history (`spacewx_ionosphere_opt`)
+
+`spacewx_ionosphere_opt = 1` evaluates the same kernel on a WRF-route domain's
+columns (the radiation geometry's latitude and longitude) at each history
+frame's valid time and writes five surface rows: `IONO_TEC`, `IONO_FOF2`,
+`IONO_HMF2`, `IONO_NMF2` and `IONO_FOE`. Nothing the step reads changes, so
+the forecast is identical with the option on or off.
+
+- The F10.7 is the value the run's start would use (`spacewx_f107_mode`), held
+  for the whole run. A forecast has no observed flux for its future days, and
+  persistence is the usual stand-in. A number in `spacewx_f107_source` fixes it.
+- The magnetic coordinates are taken at the start. The UT, month blend and
+  solar zenith angle move with each frame.
+- The rows are rebuilt from the configuration on restart (no checkpoint state),
+  and the four keys are output-only for the restart and prepared-cache
+  identities, so a resume may switch the rows on or off. The F10.7 is read
+  again on resume; GFZ's observed flux rarely changes once released, and the
+  `[spacewx ionosphere]` start-up line records the value and the file's SHA-256.
+- Every monthly map the run will blend is loaded when the run starts, so a
+  forecast never fetches one mid-run.
+- Preflight prices the held arrays (14 column vectors and the five rows) and
+  the kernel's 96 B local frame.
+- A streamed domain refuses the option, because the rows are not a tile
+  carrier, and hex refuses it until a hex history stream carries them.
 
 ## Data sources and licences (all layers)
 
