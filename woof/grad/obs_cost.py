@@ -425,9 +425,10 @@ def mpas_frames(path, *, mesh=None) -> list[ModelFrame]:
             usable = np.ones(lat.size, bool) if usable is None else np.asarray(usable)
             uname = _mpas_name(v, "u_zonal", "uReconstructZonal")
             vname = _mpas_name(v, "v_meridional", "uReconstructMeridional")
+            t2name = _mpas_name(v, "t2m", "t2")  # MPAS-A writes t2m, woof hex t2
             missing = [n for n, k in (("theta", "theta"), ("pressure", "pressure"), ("qv", "qv"),
                                       ("zonal wind", uname), ("meridional wind", vname),
-                                      ("t2m", "t2m"), ("q2", "q2"), ("u10", "u10"), ("v10", "v10"))
+                                      ("2 m temperature", t2name), ("q2", "q2"), ("u10", "u10"), ("v10", "v10"))
                        if k is None or k not in v]
             if missing:
                 raise ObsCostError(f"{path} lacks {missing}; the cost needs a full-state history frame")
@@ -455,7 +456,7 @@ def mpas_frames(path, *, mesh=None) -> list[ModelFrame]:
                 frames.append(ModelFrame(
                     valid=valid, lat=lat, lon=lon, usable=usable, terrain=terrain,
                     p=p, t=t, q=qv / (1.0 + qv), u=field3(uname), v=field3(vname), z=z,
-                    t2=field2("t2m"), q2=q2 / (1.0 + q2), u10=field2("u10"), v10=field2("v10"),
+                    t2=field2(t2name), q2=q2 / (1.0 + q2), u10=field2("u10"), v10=field2("v10"),
                     psfc=psfc, cwp=cwp, source=f"{path}#{index}"))
     finally:
         if extra is not None:

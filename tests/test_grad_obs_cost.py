@@ -85,8 +85,10 @@ def write_wrf(path, hours=(0, 1, 2), *, sina=0.0, cosa=1.0, theta_shift=0.0):
     return path
 
 
-def write_mpas(path, hours=(0, 1, 2)):
-    """An MPAS-layout history on the same points (cells), with bdyMaskCell framing a 2-cell rim."""
+def write_mpas(path, hours=(0, 1, 2), *, t2_name="t2m"):
+    """An MPAS-layout history on the same points (cells), with bdyMaskCell framing a 2-cell rim.
+
+    ``t2_name`` is t2m (MPAS-A) or t2 (woof hex)."""
     lat, lon = _lat_lon()
     ring = np.minimum.reduce([np.arange(NY)[:, None] + 0 * lon.astype(int), (NY - 1 - np.arange(NY))[:, None]
                               + 0 * lon.astype(int), np.arange(NX)[None, :] + 0 * lat.astype(int),
@@ -119,7 +121,7 @@ def write_mpas(path, hours=(0, 1, 2)):
         var("rho", three, np.full((nt, ncell, nz), 1.0))
         var("uReconstructZonal", three, np.full((nt, ncell, nz), 4.0))
         var("uReconstructMeridional", three, np.full((nt, ncell, nz), -2.0))
-        var("t2m", two, np.stack([_t2(h, lat, lon).reshape(-1) for h in hours]))
+        var(t2_name, two, np.stack([_t2(h, lat, lon).reshape(-1) for h in hours]))
         var("q2", two, np.full((nt, ncell), 0.005))
         var("u10", two, np.full((nt, ncell), 3.0))
         var("v10", two, np.full((nt, ncell), 4.0))
@@ -222,6 +224,8 @@ def test_wrf_winds_are_rotated_to_earth_relative(tmp_path):
 def test_mpas_frames_agree_with_wrf_on_the_same_columns(tmp_path):
     wrf = oc.read_frames([write_wrf(tmp_path / "wrfout_d01_x")])
     mpas = oc.read_frames([write_mpas(tmp_path / "history.nc")])
+    hex_named = oc.read_frames([write_mpas(tmp_path / "cuda-history.nc", t2_name="t2")])
+    np.testing.assert_array_equal(hex_named[1].t2, mpas[1].t2)
     for a, b in zip(wrf, mpas):
         assert a.valid == b.valid
         for name in ("t", "p", "q", "u", "v", "z", "t2", "q2", "u10", "v10", "psfc"):
