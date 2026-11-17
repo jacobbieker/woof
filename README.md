@@ -460,6 +460,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   travel with the file. Footprints are read from a local file, not
   downloaded, and the urban schemes do not read `URB_PARAM` yet
   ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
+- **Resolved buildings in LES (`obstacle_opt = 1`, opt-in).** On a domain
+  with spacing up to 500 m, the building product becomes porous immersed
+  obstacles on the WRF route. Faces of solid cells are blocked (Brinkman
+  penalisation), partly built cells get canopy drag, and walls and roofs
+  get log-law stress. One fused CUDA/Metal kernel acts on the RK-stage
+  momentum tendencies. A street-canyon benchmark gives the H/W = 1 vortex,
+  and a cube benchmark gives the wake and horseshoe. Off, or with no
+  buildings, nothing launches and runs are bit-identical. Momentum only,
+  regional grid only.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
@@ -508,10 +517,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   zero-fill into its first accumulating launch (`zero_first`, word-identical
   on CUDA and Metal). On CUDA the four flux-divergence launches take 32 x 4
   thread blocks instead of 128-wide rows (word-identical; 6-14 % less kernel
-  time at 150-260 points per row on the A6000; Metal keeps the rows). Its advection receipts for the RTX 5090 and RTX PRO 6000
+  time at 150-260 points per row on the A6000; Metal keeps the rows). The
+  positive-definite flux and renormalisation launches take 64 x 4 blocks
+  on CUDA (word-identical in fast and strict; 3-11 % less kernel time,
+  e.g. 257 -> 230 us at 50x150x186; `WOOF_PD_BLOCK=BXxBY` overrides, width
+  a multiple of 32; Metal keeps the rows). Its advection receipts for the RTX 5090 and RTX PRO 6000
   (Blackwell) are **not re-pinned**: no Blackwell card was available, so
   `certified_unrepinned` in each fixture's `gpu-receipts.json` records the
-  pins and the commit, and the gate warns rather than fails for those pins. An RK stage's lateral specified/relaxation
+  pins and the commit, and the gate warns rather than fails for those pins.
+  They are marked stale pending a re-record on an RTX 5090; until then the
+  RTX A6000 receipt stands in and gates kernel edits (`certified_stand_in`). An RK stage's lateral specified/relaxation
   rows (u, v, theta, phi, w, mu) are one launch that also absorbs their held
   zero-fills and interior ufuncs (`state_relaxation_multi`, byte-identical;
   about 33 launches, 15 memsets and 15 strided adds fewer per nested domain
@@ -665,7 +680,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   what does not depend on wavelength. That cache holds the layer air and
   gas columns, the cloud radius selections and the REPTRAN pressure,
   temperature and vmr brackets. All eight REPTRAN lookups share one grid,
-  so a single bracket serves every species. The blocks write straight into
+  so one bracket serves every species looked up without a vmr (H2O, looked
+  up with its vmr, takes its own vmr-interpolated bracket). The blocks write straight into
   the solver's arrays, and the AFGL splice is written in place. The words
   are unchanged: 30,000 columns x 8 wavelengths take 15 s instead of 23 s
   on the A6000 host.
@@ -717,6 +733,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`tools/spacewx_gim_validate.py`). Its output does not yet go into forecast
   history. The aurora, storm-time and particle-precipitation layers are
   planned ([docs/spacewx.md](docs/spacewx.md)).
+- **A plan, not yet code, for gradients and hybrid physics.**
+  [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
+  studies gradients of a forecast's fit to observations and opt-in
+  neural-network column physics. woof has no adjoint or autodiff code today.
+  The plan starts with adjoint-free sensitivities (finite-difference and
+  ensemble), then one differentiable column scheme, NN physics through the
+  existing column seams, and later a WRF dry-core adjoint checked against
+  WRFPLUS. Default runs are not changed.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

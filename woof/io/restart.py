@@ -609,6 +609,12 @@ STATE_INFRA_ATTRS = frozenset({
     # names/bytes, not this preparation selector, own forecast forcing and
     # are already covered by setup_fingerprint/lateral prefix identity.
     "_external_scalar_boundary_fields",
+    # The opt-in obstacles' device face lists and host receipt
+    # (woof.core.obstacles.attach): rebuilt from obstacle_file and the base
+    # state at the first stage, and the product's bytes are bound by the
+    # physics setup identity; the expected digest is that binding, pinned
+    # by the restore for the attach to check.
+    "_obstacles", "_obstacles_receipt", "_obstacles_expected_sha256",
     # Config binds speed; restored U/V already use this frame (see restore).
     "_moving_frame_velocity", "_moving_frame_initialized",
     # The HAILCAST generation a resumed run keeps (woof.core.hail
@@ -3449,6 +3455,13 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # header ran, so it is omitted there and echoed only when selected.
     if values.get("gf_deep_rain_evaporation_booking", False) is False:
         values.pop("gf_deep_rain_evaporation_booking", None)
+    # The opt-in resolved obstacles (woof.core.obstacles): every key at its
+    # default is what every earlier header ran, so each is echoed only when
+    # it differs; obstacle_opt = 1 always echoes with its file.
+    from woof.config import OBSTACLE_RUN_DEFAULTS
+    for key, default in OBSTACLE_RUN_DEFAULTS.items():
+        if values.get(key, default) == default:
+            values.pop(key, None)
     # The opt-in TSI forcing (woof.spacewx): off is what every earlier
     # header ran, so its keys are omitted there and echoed only when on.
     if values.get("solar_tsi_opt", 0) == 0:
@@ -4307,6 +4320,33 @@ def physics_setup_identity(state, cfg) -> dict:
     parameters = parameter_receipt()
     if parameters is not None:
         identity["physics_params"] = parameters
+    # The opt-in resolved obstacles (woof.core.obstacles): the coefficients
+    # are rebuilt at resume from the woof-buildings.v1 product, so the bytes
+    # of the product the domain loaded are bound here and a resume against
+    # other bytes refuses.  A domain not yet attached (the coefficients
+    # build at its first stage) binds the file it will load.  Off adds no
+    # key, so every earlier checkpoint's setup bytes are unchanged.
+    if int(getattr(cfg, "obstacle_opt", 0) or 0):
+        receipt = getattr(state, "_obstacles_receipt", None)
+        if receipt is not None:
+            digest = receipt.get("product_sha256")
+            if digest is None:
+                raise RestartManifestError(
+                    "the obstacles were attached from a morphology in "
+                    "memory, not obstacle_file; a checkpoint cannot bind "
+                    "the buildings it ran with")
+        else:
+            from woof.file_digest import sha256_file
+            path = Path(cfg.obstacle_file)
+            try:
+                digest = sha256_file(path, block_bytes=1024 * 1024)
+            except OSError as exc:
+                raise RestartManifestError(
+                    f"obstacle_file {str(path)!r} is unreadable; the "
+                    "checkpoint cannot bind the buildings it runs with") \
+                    from exc
+        identity["obstacles"] = {"policy": "porous-immersed-v1",
+                                 "product_sha256": digest}
     return identity
 
 
@@ -5637,6 +5677,12 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'bl_mynn_cloud_tendency_form': 'wrf_461',
     'bl_mynn_gsd41_unsquared_qtke': False,
     'gf_deep_rain_evaporation_booking': False,
+    'obstacle_opt': 0,
+    'obstacle_file': '',
+    'obstacle_solid_fraction': 0.5,
+    'obstacle_relax_factor': 10.0,
+    'obstacle_drag_coefficient': 0.4,
+    'obstacle_wall_z0': 0.01,
     'solar_tsi_opt': 0,
     'solar_tsi_source': '',
     'solar_tsi_mode': 'absolute',
@@ -6206,6 +6252,11 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "noahmp_snow_age": "wrf_461",
                           "urban_water_balance": "wrf_471",
                           "gf_deep_rain_evaporation_booking": False,
+                          "obstacle_opt": 0, "obstacle_file": "",
+                          "obstacle_solid_fraction": 0.5,
+                          "obstacle_relax_factor": 10.0,
+                          "obstacle_drag_coefficient": 0.4,
+                          "obstacle_wall_z0": 0.01,
                           "solar_tsi_opt": 0, "solar_tsi_source": "",
                           "solar_tsi_mode": "absolute",
                           # The correct-mode keys (2.9.0): the default is
@@ -6367,6 +6418,13 @@ def _require_physics_setup_match(header: dict, state, cfg, path) -> None:
             f"restart file {path} physics setup schema "
             f"{stored.get('schema_version')!r} is not supported by this "
             f"build (expected {PHYSICS_SETUP_SCHEMA_VERSION})")
+    # A resumed obstacle domain attaches at its first stage, after this
+    # check: pin the product the checkpoint bound, so the attach refuses a
+    # file replaced in between (woof.core.obstacles.attach).
+    pinned = stored.get("obstacles")
+    if (isinstance(pinned, Mapping)
+            and getattr(state, "_obstacles", False) is False):
+        state._obstacles_expected_sha256 = pinned.get("product_sha256")
     try:
         live = physics_setup_identity(state, cfg)
         # Serialisability is part of the contract, and the comparison

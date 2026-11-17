@@ -10,7 +10,7 @@ reasons in the table).
 
 WOOF physics stays selectable and unchanged: ``--physics-suite arwen_mpas_column`` takes the road a bare run took
 before 0.4.6, byte for byte (``forecast_door.resolve_door_physics``).  Any other hex suite, a ``--physics
-KEY=VALUE`` override, an explicit ``--convection`` scheme or an explicit ``--physics-backend`` row names physics
+KEY=VALUE`` override (except a service backend selector, :func:`service_backend_keys`), an explicit ``--convection`` scheme or an explicit ``--physics-backend`` row names physics
 on its own and is never overridden by this default.
 
 Regional cold-start doors also supply a context to ``ensure``. First-match recipe rows
@@ -34,8 +34,10 @@ from typing import Any, Iterable, Mapping, Sequence
 SCHEMA = "gpuwm-hex.physics-default/v1"
 TABLE_PATH = "data/profiles/physics-default.v1.json"
 
-#: Forecast-door flags that name the run's physics.  ``--physics`` is matched exactly (not ``--physics-mode``).
-_NAMING_FLAGS = ("--physics-profile", "--physics-suite", "--physics-namelist", "--physics", "--physics-backend")
+#: Forecast-door flags that name the run's physics outright.  ``--physics`` (matched exactly, not ``--physics-mode``)
+#: and ``--physics-namelist`` name it unless they carry only a service selector (:func:`override_names_physics`) or
+#: only route-only groups (:func:`namelist_names_physics`), so :func:`names_physics` reads them on their own.
+_NAMING_FLAGS = ("--physics-profile", "--physics-suite", "--physics-backend")
 #: ``--convection`` names physics unless it is the door default.
 _CONVECTION_DEFAULTS = ("auto", "")
 
@@ -125,21 +127,68 @@ def namelist_names_physics(path: Any) -> bool:
     return not groups or any(str(group).casefold() not in ROUTE_ONLY_GROUPS for group in groups)
 
 
+def _default_route_rows() -> list[Mapping[str, Any]]:
+    """The MPAS suite route rows the default recipes run (every suite a default or recipe rule names, on the row
+    the suites table routes it to by default), so a service exempted here is one that route carries."""
+    from .physics_suites import load_table as suites_table, route_default_for
+
+    table = load_table()
+    suites = {rule["suite"] for rule in (*table["rules"], *table.get("recipe_rules", ()))}
+    return [row for row in suites_table().values()
+            if isinstance(row, Mapping) and "suite_routes" in row
+            and any(suite in row["suite_routes"] and route_default_for(row, suite) for suite in suites)]
+
+
+@lru_cache(maxsize=1)
+def service_backend_keys() -> frozenset[str]:
+    """The backend selectors of the MPAS suite route's services (``config_clm_lake_backend``,
+    ``config_farms_sw_backend`` ...; ``services.*.backend_selector`` in data/profiles/mpas-physics-suites.v1.json).
+
+    A service runs beside the suite's schemes and chooses none of them, so naming its backend names no physics: the
+    run keeps the default MPAS suite and the service rides on it.  THE BREAKAGE THIS PREVENTS (lakes worker,
+    2026-11-17): `woof hex regional --forecast-arg=--physics=config_clm_lake_backend=hex-cuda`, as the README and
+    mpas-physics-seam.md document it, counted as naming physics, so no suite was added; with no suite the run took
+    the WOOF route, which refused the key as "not RunConfig fields", and the lake model could only be turned on by
+    restating the suite, mode and profile.  The slots' own backend selectors (``config_microp_backend`` ...) still
+    name physics.  Only the services of the route the default recipes run count (:func:`_default_route_rows`): a
+    service another route alone carries needs that route's suite named."""
+    keys: set[str] = set()
+    for row in _default_route_rows():
+        for service in (row.get("services") or {}).values():
+            selector = service.get("backend_selector") if isinstance(service, Mapping) else None
+            if selector:
+                keys.add(str(selector).casefold())
+    return frozenset(keys)
+
+
+def override_names_physics(text: Any) -> bool:
+    """Whether one ``--physics KEY=VALUE`` override names physics: every key but a service backend selector does."""
+    return str(text).split("=", 1)[0].strip().casefold() not in service_backend_keys()
+
+
+def _flag_value(items: Sequence[str], index: int) -> str:
+    """The value of the flag at ``items[index]``: ``--flag=VALUE`` or ``--flag VALUE`` ('' when none follows)."""
+    item = items[index]
+    if "=" in item:
+        return item.split("=", 1)[1]
+    return items[index + 1] if index + 1 < len(items) else ""
+
+
 def names_physics(flags: Sequence[Any] | None) -> bool:
     """Whether a forecast-flag list names the run's physics (so no default applies)."""
     items = _unwrap(flags or ())
     for index, item in enumerate(items):
         name = _flag_name(item)
         if name == "--physics-namelist":
-            value = item.split("=", 1)[1] if "=" in item else (items[index + 1] if index + 1 < len(items) else "")
-            if namelist_names_physics(value):
+            if namelist_names_physics(_flag_value(items, index)):
                 return True
-            continue
-        if name in _NAMING_FLAGS:
+        elif name == "--physics":
+            if override_names_physics(_flag_value(items, index)):
+                return True
+        elif name in _NAMING_FLAGS:
             return True
-        if name == "--convection":
-            value = item.split("=", 1)[1] if "=" in item else (items[index + 1] if index + 1 < len(items) else "")
-            if str(value).strip().lower() not in _CONVECTION_DEFAULTS:
+        elif name == "--convection":
+            if str(_flag_value(items, index)).strip().lower() not in _CONVECTION_DEFAULTS:
                 return True
     return False
 
@@ -196,7 +245,7 @@ def namespace_names_physics(arguments: Any) -> bool:
         return True
     if getattr(arguments, "physics_namelist", None) is not None and namelist_names_physics(arguments.physics_namelist):
         return True
-    if getattr(arguments, "physics", None):
+    if any(override_names_physics(item) for item in getattr(arguments, "physics", None) or ()):
         return True
     if getattr(arguments, "physics_backend", None) not in (None, DEFAULT_BACKEND):
         return True

@@ -2904,6 +2904,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu), RTX
     # A6000, default and strict numerics, 2026-11-15: 0 B.
     "smag2d_tke_faces": 0,
+    # The opt-in porous immersed obstacles (kernels/obstacle_drag.cu), RTX
+    # A6000, default and strict numerics, 2026-11-17: 0 B.
+    "obstacle_drag": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,
