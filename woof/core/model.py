@@ -2974,7 +2974,7 @@ def execute_experiment(
             for output in station_outputs:
                 cleanup.callback(output.close)
             if nn_seat is not None:
-                cleanup.callback(nn_seat.close)
+                cleanup.callback(lambda: setattr(model, "_nn_column_receipt", nn_seat.close()))
             if health_monitor is not None:
                 model._health_check_policy = health_monitor.receipt(
                     health_policy)

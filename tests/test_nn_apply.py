@@ -324,3 +324,29 @@ def test_applying_on_the_device(tmp_path):
                 expect = steps * cfg.dt * 1e-4
                 print(f"{runner}: residual warming {np.median(warmed):.3e} K (expect {expect:.3e})")
                 assert np.median(warmed) == pytest.approx(expect, rel=0.2), (runner, np.median(warmed))
+
+
+def test_review_refusals_identity_and_fallback_faces(monkeypatch, tmp_path):
+    from woof.nn import wrf_seat
+    from woof.nn.models import default_backend
+
+    seat, state, held, *_ = _seat(monkeypatch, tmp_path, settings_over={"backend": "auto"})
+    assert seat.identity()["backend"] == default_backend() != "auto"
+    # A face beside a fallback column takes the scheme's word alone.
+    nz, ny, nx = seat.shape
+    bad = np.zeros(ny * nx, dtype=bool)
+    bad[2 * nx + 3] = True
+    u, v = seat._fallback_faces(np, bad)
+    assert u.shape == (ny, nx + 1) and v.shape == (ny + 1, nx)
+    assert sorted(zip(*np.nonzero(u))) == [(2, 3), (2, 4)]
+    assert sorted(zip(*np.nonzero(v))) == [(2, 3), (3, 3)]
+    # SPPT/SKEBS act before the seat: an applying seat is refused there.
+    state._ensemble_stochastic = object()
+    model = tmp_path / "model"
+    with pytest.raises(NotImplementedError, match="SPPT/SKEBS"):
+        wrf_seat.WrfColumnSeat(state, _cfg(), _settings(model=model), couple=lambda *a, **k: None)
+    del state._ensemble_stochastic
+    # An output naming moisture the run does not carry is refused at attach.
+    state.qv = None
+    with pytest.raises(launch.NNConfigError, match="does not carry"):
+        wrf_seat.WrfColumnSeat(state, _cfg(), _settings(model=model), couple=lambda *a, **k: None)
