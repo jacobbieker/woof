@@ -137,7 +137,11 @@ def _seat_receipt(work: Path) -> dict:
                     return found
         return None
 
-    receipt = find(json.loads((work / "forecast" / "forecast-receipt.json").read_text(encoding="utf-8")))
+    receipt = None
+    for name in ("native-physics-receipt.json", "forecast-receipt.json"):
+        path = work / "forecast" / name
+        if receipt is None and path.exists():
+            receipt = find(json.loads(path.read_text(encoding="utf-8")))
     assert receipt is not None, "the forecast receipt carries no nn_column_seat"
     return receipt
 
