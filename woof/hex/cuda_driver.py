@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from woof.backend.scratch import scratch_empty as _scratch, scratch_like as _scratch_like
+
 from . import host_parallel
 from .host_parallel import all_finite, active_indices_in_range
 from .cuda_fp32 import CUDA_FTZ_HELPERS
@@ -3515,8 +3517,8 @@ class CudaDryDycoreDriver:
 
     def _vertical_u(self, u: Any, rw: Any) -> Any:
         cp = self.cp
-        flux = cp.empty((self.nlev + 1, self.nedges), dtype=cp.float32)
-        result = cp.empty((self.nlev, self.nedges), dtype=cp.float32)
+        flux = _scratch(cp, (self.nlev + 1, self.nedges), cp.float32)
+        result = _scratch(cp, (self.nlev, self.nedges), cp.float32)
         self._launch(
             "vertical_u_flux_f32",
             self.nedges * (self.nlev + 1),
@@ -3604,9 +3606,8 @@ class CudaDryDycoreDriver:
         cp = self.cp
         coefficient = self.coefficients
         width = int(coefficient.adv_coefs.shape[1])
-        edge_flux = cp.empty_like(state.rho_u)
-        vertical_flux = cp.empty_like(state.rho_w)
-        result = cp.empty_like(state.rho)
+        edge_flux = _scratch_like(cp, state.rho_u)
+        vertical_flux = _scratch_like(cp, state.rho_w)
         # v8.4.1 accumulates the RK correction in a separate cell loop
         # (native F:6814-6874; dycore-match 8322a3f).  A full-step LTS class
         # driver keeps it inside the edge flux instead: its interface capture
@@ -3645,7 +3646,7 @@ class CudaDryDycoreDriver:
             self._launch("theta_edge_flux_hoist_f32", self.nedges * cuda_edge_hoist.chunks(self.nlev, lpt),
                          (*theta_arguments, edge_flux, np.int32(lpt)))
             if cuda_edge_hoist.check_wanted("theta_edge_flux_hoist_f32", cp):
-                element = cp.empty_like(edge_flux)
+                element = _scratch_like(cp, edge_flux)
                 self._launch("theta_edge_flux_f32", self.nedges * self.nlev, (*theta_arguments, element))
                 cuda_edge_hoist.compare("theta_edge_flux_hoist_f32", edge_flux, element, cp)
         else:
@@ -3678,6 +3679,7 @@ class CudaDryDycoreDriver:
                 if rk_step > 1 and separate_correction else None,
                 kernel_cache=self.cache,
             )
+        result = _scratch_like(cp, state.rho)
         self._launch(
             "theta_finish_f32",
             self.ncells,
@@ -3718,9 +3720,8 @@ class CudaDryDycoreDriver:
         cp = self.cp
         coefficient = self.coefficients
         width = int(coefficient.adv_coefs.shape[1])
-        edge_flux = cp.empty((self.nlev + 1, self.nedges), dtype=cp.float32)
-        vertical_flux = cp.empty_like(state.rho_w)
-        result = cp.empty_like(state.rho_w)
+        edge_flux = _scratch(cp, (self.nlev + 1, self.nedges), cp.float32)
+        vertical_flux = _scratch_like(cp, state.rho_w)
         w_arguments = (
             np.int32(self.nlev),
             np.int32(self.ncells),
@@ -3745,7 +3746,7 @@ class CudaDryDycoreDriver:
             self._launch("w_edge_flux_hoist_f32", self.nedges * cuda_edge_hoist.chunks(self.nlev + 1, lpt),
                          (*w_arguments, edge_flux, np.int32(lpt)))
             if cuda_edge_hoist.check_wanted("w_edge_flux_hoist_f32", cp):
-                element = cp.empty_like(edge_flux)
+                element = _scratch_like(cp, edge_flux)
                 self._launch("w_edge_flux_f32", self.nedges * (self.nlev + 1), (*w_arguments, element))
                 cuda_edge_hoist.compare("w_edge_flux_hoist_f32", edge_flux, element, cp)
         else:
@@ -3765,6 +3766,7 @@ class CudaDryDycoreDriver:
                 n_vert_levels=self.nlev,
                 kernel_cache=self.cache,
             )
+        result = _scratch_like(cp, state.rho_w)
         self._launch(
             "w_finish_f32",
             self.ncells,
@@ -3837,15 +3839,15 @@ class CudaDryDycoreDriver:
         # Once acoustic stepping is complete its cell increments and averaged
         # fluxes can hold the recovered outputs. The caller's output callback
         # still receives the unchanged ru_p and rw_p arrays.
-        rho = acoustic.rho_pp if consume_acoustic else cp.empty_like(saved_state.rho)
-        rtheta = acoustic.rtheta_pp if consume_acoustic else cp.empty_like(saved_state.rho_theta)
+        rho = acoustic.rho_pp if consume_acoustic else _scratch_like(cp, saved_state.rho)
+        rtheta = acoustic.rtheta_pp if consume_acoustic else _scratch_like(cp, saved_state.rho_theta)
         if consume_acoustic:
             acoustic.rtheta_pp_old = None
-        rho_p = cp.empty_like(saved_state.rho)
-        rtheta_p = cp.empty_like(saved_state.rho_theta)
-        theta = cp.empty_like(saved_state.rho)
-        exner = cp.empty_like(saved_diag.exner)
-        pressure_p = cp.empty_like(saved_diag.pressure_perturbation)
+        rho_p = _scratch_like(cp, saved_state.rho)
+        rtheta_p = _scratch_like(cp, saved_state.rho_theta)
+        theta = _scratch_like(cp, saved_state.rho)
+        exner = _scratch_like(cp, saved_diag.exner)
+        pressure_p = _scratch_like(cp, saved_diag.pressure_perturbation)
         self._launch(
             "recover_cells_f32",
             self.ncells * self.nlev,
@@ -3878,8 +3880,8 @@ class CudaDryDycoreDriver:
                 pressure_p,
             ),
         )
-        ru = cp.empty_like(saved_state.rho_u)
-        flux_u = acoustic.ru_avg if consume_acoustic else cp.empty_like(saved_state.rho_u)
+        ru = _scratch_like(cp, saved_state.rho_u)
+        flux_u = acoustic.ru_avg if consume_acoustic else _scratch_like(cp, saved_state.rho_u)
         self._launch(
             "recover_edges_f32",
             self.nedges * self.nlev,
@@ -3894,8 +3896,8 @@ class CudaDryDycoreDriver:
                 flux_u,
             ),
         )
-        rw = cp.empty_like(saved_state.rho_w)
-        flux_w = acoustic.ww_avg if consume_acoustic else cp.empty_like(saved_state.rho_w)
+        rw = _scratch_like(cp, saved_state.rho_w)
+        flux_w = acoustic.ww_avg if consume_acoustic else _scratch_like(cp, saved_state.rho_w)
         self._launch(
             "recover_interfaces_f32",
             self.ncells * (self.nlev + 1),
