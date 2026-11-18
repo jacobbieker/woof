@@ -1070,6 +1070,18 @@ class _PaddedMaskExtents:
         self.n_edges = int(n_edges)
 
 
+def _tend_cache_bytes() -> int:
+    """WOOF_HEX_LBC_TEND_CACHE_MB: bytes of full-extent driving tendencies kept per LBC interval (0 turns it off)."""
+
+    import os
+
+    value = os.environ.get("WOOF_HEX_LBC_TEND_CACHE_MB", "256").strip()
+    try:
+        return max(int(float(value) * 2**20), 0)
+    except ValueError:
+        raise ValueError(f"WOOF_HEX_LBC_TEND_CACHE_MB must be a number of MiB, got {value!r}") from None
+
+
 def _ring_lbc_on() -> bool:
     """WOOF_HEX_REGIONAL_RING_LBC=0 restores the full-extent LBC admission derivation (A/B only)."""
 
@@ -1099,6 +1111,9 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
         super().__init__(*args, **kwargs)
         # _derive makes the zeros it needs; holding a full-extent edge array of zeros for the run bought nothing.
         self._rho_edge_zero = None
+        # tendency()'s full-extent expansions for the current interval: (the interval's tendency dict, {name: array}).
+        self._tend_expanded: tuple[Any, dict[str, Any]] | None = None
+        self._tend_cache_bytes = _tend_cache_bytes()
 
     # -- the boundary-support pool ------------------------------------------
     #
@@ -1196,7 +1211,27 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
         return compact, compact_scalars
 
     def tendency(self, name: str) -> Any:
-        return self._expand(name, super().tendency(name))
+        """The interval tendency at full extent.
+
+        The expansion (a zero fill and a scatter of the boundary support) is the
+        same for every stage and step of one LBC interval; it is kept until
+        ``advance`` installs the next interval's tendency dict, within
+        WOOF_HEX_LBC_TEND_CACHE_MB (256 MiB; 0 expands on every call).  Every
+        consumer reads it (speczone kernels, graph staging copies).
+        """
+        compact = super().tendency(name)
+        if self._support is None or self._tend_cache_bytes <= 0:
+            return self._expand(name, compact)
+        cache = self._tend_expanded
+        if cache is None or cache[0] is not self._tend:
+            cache = self._tend_expanded = (self._tend, {})
+        held = cache[1].get(name)
+        if held is not None:
+            return held
+        out = self._expand(name, compact)
+        if sum(int(a.nbytes) for a in cache[1].values()) + int(out.nbytes) <= self._tend_cache_bytes:
+            cache[1][name] = out
+        return out
 
     def state_at(self, name: str, step_start: Any, delta_t: Any, out: Any = None) -> Any:
         return self._expand(name, super().state_at(name, step_start, delta_t), out=out)
