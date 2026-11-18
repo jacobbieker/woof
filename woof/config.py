@@ -1905,7 +1905,8 @@ class RunConfig:
     # WRF &physics ghg_input: 0 = fixed gases (CO2 a function of year),
     # 1 = time-varying CO2/N2O/CH4/CFC-11/CFC-12 from the CAMtr SSP245
     # table (woof.core.camtr_gases), re-interpolated at every radiation
-    # call as WRF's RRTMG and RRTM longwave wrappers do; one tree-wide
+    # call as WRF's RRTMG and RRTM longwave wrappers do (and, beyond WRF,
+    # woof's RRTMG-K, ra_lw/ra_sw_physics = 14); one tree-wide
     # value, inert on a domain whose radiation reads no gases (as in WRF).  The WRF v4 Registry
     # default is 1; the namelist importer writes 1 for a namelist named as
     # V4 that omits the key.  The engine's own default stays 0 so
@@ -2357,7 +2358,10 @@ class RunConfig:
     # only: the atmosphere integrates identically.  spacewx_kp_source is
     # "gfz" (the latest observed Kp at the start; "" means the same), "omni"
     # or "swpc" (Kp estimated from the solar wind), a GFZ-format file or a
-    # number in [0, 9], held for the run.  0 runs no new code.
+    # number in [0, 9], held for the run.  spacewx_aurora_opt = 2 adds
+    # OVATION Prime 2010's electron energy flux, mean energy and ion energy
+    # flux (woof.spacewx.ovation), driven by the solar wind ("omni" or
+    # "swpc").  0 runs no new code.
     spacewx_aurora_opt: int = _config_field(default=0, kw_only=True)
     spacewx_kp_source: str = _config_field(default="", kw_only=True)
 
@@ -2438,10 +2442,11 @@ def _validate_spacewx_ionosphere(cfg) -> None:
 def _validate_spacewx_aurora(cfg) -> None:
     """spacewx_aurora_opt and its key (woof.spacewx.aurora_history)."""
     opt, source = cfg.spacewx_aurora_opt, cfg.spacewx_kp_source
-    if type(opt) is not int or opt not in (0, 1):
+    if type(opt) is not int or opt not in (0, 1, 2):
         raise ConfigurationRefused(
-            f"spacewx_aurora_opt={opt!r} must be 0 (no aurora) or 1 "
-            "(the auroral oval in every history frame)")
+            f"spacewx_aurora_opt={opt!r} must be 0 (no aurora), 1 (the auroral "
+            "oval in every history frame) or 2 (the oval and its particle "
+            "energy flux)")
     if type(source) is not str:
         raise ConfigurationRefused("spacewx_kp_source must be a string")
     if opt == 0:
@@ -2452,12 +2457,16 @@ def _validate_spacewx_aurora(cfg) -> None:
         return
     from woof.spacewx.aurora_history import AuroraHistoryError, parse_kp_source
     try:
-        parse_kp_source(source)
+        kind, _value = parse_kp_source(source)
     except AuroraHistoryError as exc:
         raise ConfigurationRefused(str(exc)) from None
+    if opt == 2 and kind not in ("omni", "swpc"):
+        raise ConfigurationRefused(
+            f"spacewx_aurora_opt = 2 drives OVATION Prime with the solar wind, so "
+            f"spacewx_kp_source must be 'omni' or 'swpc', not {source!r}")
     if not radiation_enabled(cfg):
         raise ConfigurationRefused(
-            "spacewx_aurora_opt = 1 places the auroral oval on the radiation "
+            f"spacewx_aurora_opt = {opt} places the auroral oval on the radiation "
             "geometry's columns, and no radiation scheme is on "
             "(ra_lw_physics = ra_sw_physics = 0)")
 
@@ -3868,16 +3877,15 @@ def validate_rrtmgk_config(cfg, ra_lw_physics, ra_sw_physics) -> None:
             "RRTMG (4/4) diagnostic: WRF RRTMG-K's rad_rrtmg_driver has no "
             "band or g-point flux output, so there is nothing to write. Set "
             "rrtmg_spectral_output='none' with ra_lw_physics=ra_sw_physics=14.")
-    for name, admitted, why in (
-            ("aer_opt", 0, "the aer_opt>0 aerosol optics on the RRTMG-K "
-             "shortwave are not ported"),
-            ("ghg_input", 0, "rad_rrtmg_driver carries fixed trace gases "
-             "and never reads ghg_input")):
-        value = int(getattr(cfg, name, 0) or 0)
-        if value != admitted:
-            raise ConfigurationRefused(
-                f"{name}={value} with ra_lw_physics=ra_sw_physics=14: {why}. "
-                f"Set {name}={admitted}.")
+    # ghg_input is admitted (both values): WRF's rad_rrtmg_driver never
+    # reads it, and woof's RRTMG-K takes legacy RRTMG's CAMtr gases under 1
+    # (woof.core.rrtmgk.RRTMGKRadiation), a declared extension beyond WRF.
+    aer_opt = int(getattr(cfg, "aer_opt", 0) or 0)
+    if aer_opt:
+        raise ConfigurationRefused(
+            f"aer_opt={aer_opt} with ra_lw_physics=ra_sw_physics=14: the "
+            "aer_opt>0 aerosol optics on the RRTMG-K shortwave are not "
+            "ported. Set aer_opt=0.")
     if cfg.icloud != 1:
         raise ConfigurationRefused(
             f"icloud={cfg.icloud} with ra_lw_physics=ra_sw_physics=14: the "

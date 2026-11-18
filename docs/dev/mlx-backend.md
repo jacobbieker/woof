@@ -20,7 +20,7 @@ A Mac with MLX installed and no CuPy also selects mlx on its own.
 | Path | What it is |
 |---|---|
 | `woof/backend/__init__.py` | Backend selection. `install()` puts an import hook in place that serves the facade for `import cupy`. |
-| `woof/backend/facade/` | CuPy's API over MLX: arrays (`_array.py`), operations (`_ops.py`), `cupy.cuda` (`cuda.py`), `ElementwiseKernel` and `ReductionKernel` (`_elementwise.py`). |
+| `woof/backend/facade/` | CuPy's API over MLX: arrays (`_array.py`), operations (`_ops.py`), `cupy.cuda` (`cuda.py`), `ElementwiseKernel` and `ReductionKernel` (`_elementwise.py`; a reduction folds each output serially on one thread, except that an exact, order-free, idempotent fold (`a | b`, `a || b`, `a & b`, `a && b`) with a concrete reduce type and an `out = a` post-map, over 4096 or more elements per output and fewer than 2048 outputs, is folded in slices (`<name>__woof_slices`, then `<name>__woof_fold`) and then across slices, with the same value; `WOOF_METAL_SPLIT_REDUCTIONS=0` keeps the serial fold). |
 | `woof/backend/translate/` | The CUDA→MSL translator, which uses libclang. `spaces.py` infers address spaces; `cuda_decls.h` declares CUDA's builtins for the parser; `vendor_libm64.cuh` provides binary64 libm. |
 | `woof/backend/metal/prelude.h` | The CUDA intrinsics, atomics and math every translated unit starts with. |
 | `woof/backend/metal/f64_soft.h` | Bit-exact IEEE binary64 in integer arithmetic. Apple GPUs have no fp64. |
@@ -91,6 +91,22 @@ same bytes in either mode; what differs is how its operations compute.
   `-DGPUWM_PREPARATION_IDENTITY=1` or it is listed in
   `loader.SOFT_F64_UNITS` (empty); `WOOF_METAL_F64=soft` keeps soft-float
   everywhere, for diagnosis.
+
+  woof's glibc binary32 ports `gfk_log`, `gfk_exp` and `gfk_pow`
+  (`glibc_flt32.cuh`) compute in binary64, so on Metal each call costs a
+  handful of soft-float operations. In both modes the translator renames
+  each body to `*_soft` and puts a wrapper in front of it. The wrapper
+  calls `woof/backend/metal/gfk_fast.h`, which evaluates the same formula
+  and tables in float pairs (about 2^-46 relative). It returns that word
+  only when no binary32 rounding midpoint lies within the pair's error
+  bound, so the word is the one the binary64 body would give. Anything
+  else (special operands, subnormal results, near-ties) goes to `*_soft`.
+  `tools/metal_gfk_fast_grade.py` checks every binary32 input of logf and
+  expf, every positive normal base of powf at 20 exponents, and 2^30
+  random powf pairs, with and without FTZ: none differ. The constants
+  come from `tools/metal_gfk_fast_constants.py`, and
+  `tests/test_metal_gfk_fast.py` checks they match. `WOOF_METAL_GFK_FAST=0`
+  turns the wrappers off.
 
 **Accuracy.** `tools/df64_grade.py host` (x86-64, x87 `long double`
 references, 4 million operands per function over random words, each

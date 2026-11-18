@@ -4466,13 +4466,37 @@ def run_forecast(arguments: argparse.Namespace) -> int:
     from woof.output_formats import command_scope
     from .wave_options import environment as wave_environment
     from woof.wrf_hydro_route import launch_scope as wrf_hydro_scope
+    nn = getattr(arguments, "nn", None)
+    if nn is not None:
+        _refuse_nn_launch(arguments)
+    from contextlib import nullcontext
+    if nn is None:
+        nn_scope = nullcontext()
+    else:
+        from woof.nn.launch import launch_scope
+        # The door cannot tell every resume (a native restart's continuation and a moving segment's checkpoint
+        # become resumes later), so the seat refuses an existing tap store unless the run did resume
+        # (woof.nn.hex_seat.attach; TendencyTap).
+        nn_scope = launch_scope(nn, resume=True)
     with wave_environment(arguments), wrf_hydro_scope(getattr(arguments, "wrf_hydro", None),
                                                       getattr(arguments, "wrf_hydro_output", None),
                                                       gpu_exchange=getattr(arguments, "wrf_hydro_gpu_exchange",
                                                                            None)), \
-            command_scope(arguments, engine="woof hex") as scope:
+            nn_scope, command_scope(arguments, engine="woof hex") as scope:
         result = _run_forecast_with_outputs(arguments)
         return scope.finish(result) if scope else result
+
+
+def _refuse_nn_launch(arguments: argparse.Namespace) -> None:
+    """``--nn`` on the runs its seat cannot attach to, refused at the door (woof.nn.hex_seat says why)."""
+    if getattr(arguments, "members", None) is not None:
+        raise ForecastDoorRefusal("--nn with a --members roster: the NN seat attaches to a single deterministic "
+                                  "forecast (every member would write the one tap store)")
+    for name, flag in (("samehost_devices", "--samehost-devices"), ("hosts", "--hosts")):
+        if getattr(arguments, name, None) is not None:
+            raise ForecastDoorRefusal(f"--nn with {flag}: the hex NN seat runs on one card's whole mesh")
+    if getattr(arguments, "fullstep_local_timestep", False):
+        raise ForecastDoorRefusal("--nn with --fullstep-local-timestep: the hex NN seat runs on one step clock")
 
 
 def _run_forecast_with_outputs(arguments: argparse.Namespace) -> int:
@@ -5176,6 +5200,12 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             # Every other host starts now, so its preparation runs beside this host's (woof.hex.multihost).
             from . import multihost
             multihost.begin(arguments)
+        if native_config is None and os.environ.get("WOOF_NN_CONFIG"):
+            # The seat sits on the MPAS route's held sources (woof.nn.hex_seat); the WOOF-physics route would accept
+            # the file and never apply it.  A column model there runs as a woof.hex.rows backend (docs/nn-physics.md).
+            raise ValueError("--nn runs on the MPAS suite route (the hex default physics) only; the WOOF-physics "
+                             "route (--physics-suite arwen_*, --physics ...) has no NN seat. A column model there "
+                             "is a woof.hex.rows physics backend (docs/nn-physics.md)")
         if native_config is not None and (getattr(arguments, "nudging", None) is None) != (
                 not getattr(arguments, "nudging_analysis", None)):
             raise ValueError("--nudging and --nudging-analysis go together: a nudging configuration reads its "
@@ -5783,6 +5813,16 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     # through the conservative cell <-> grid exchange (woof.hex.wrf_hydro_hex; WOOF route only).
     from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
     add_wrf_hydro_arguments(parser)
+    # --nn NN.toml: the opt-in NN column seat on the MPAS route's held physics sources (woof.nn.hex_seat), exported
+    # as WOOF_NN_CONFIG for the forecast's processes (woof.nn.launch.launch_scope).
+    # Declared here, not by woof.nn.launch.add_arguments: parsing a forecast without --nn imports nothing from
+    # woof.nn (tests/test_nn_default_path_imports.py builds this parser).
+    parser.add_argument(
+        "--nn", default=None, metavar="NN.toml",
+        help="opt-in neural-network column physics on the MPAS route from the [nn] table of this TOML file "
+             "(docs/nn-physics.md); mode = \"tap\" records the held physics source as training data and leaves "
+             "the forecast unchanged; \"residual\" and \"replace\" apply a column model, which makes the run "
+             "not MPAS-identical")
     parser.add_argument(
         "--source-table", type=Path, default=None, metavar="FILE",
         help="a point-source table the selected row's seam releases from "

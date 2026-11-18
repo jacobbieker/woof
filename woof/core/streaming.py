@@ -4888,7 +4888,7 @@ def attach(state, cfg, decision: StreamingDecision, *, tile_state_factory,
         # for the same reason as the ionosphere rows above.
         raise StreamingRefused(
             f"grid_id = {int(getattr(cfg, 'grid_id', 0))} sets "
-            "spacewx_aurora_opt = 1, whose history rows are computed on the "
+            f"spacewx_aurora_opt = {int(cfg.spacewx_aurora_opt)}, whose history rows are computed on the "
             "driver's columns at each frame and are not carried by the tile "
             "store, so it cannot run streamed yet.  Run this domain resident "
             "([tiles] mode = 'off'), or set spacewx_aurora_opt = 0.")

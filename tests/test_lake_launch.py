@@ -96,3 +96,20 @@ def test_derived_configuration_keeps_the_umask_mode(tmp_path):
     umask = os.umask(0)
     os.umask(umask)
     assert Path(args.config).stat().st_mode & 0o777 == 0o666 & ~umask
+
+
+@pytest.mark.parametrize("use_lakedepth, needed", [(1, True), (0, False)])
+def test_go_preflight_asks_for_lake_depth_only_with_use_lakedepth(tmp_path, use_lakedepth, needed):
+    """Review (#599): use_lakedepth = 0 runs on lakedepth_default, which the
+    builder (woof.static.lake) reads no dataset for, so go must not ask."""
+    from woof.geog_assets import geography_for_run
+    from woof.toml_document import emit_experiment_toml
+    recipe = Path(__file__).resolve().parents[1] / "woof/data/recipes/hrrr_v4_gsd41.toml"
+    raw = lake_settings(tomllib.loads(recipe.read_text()), "clm")
+    raw.pop("static", None)  # WPS geography, not the native HRRR statics
+    raw.setdefault("shared", {})["use_lakedepth"] = use_lakedepth
+    for domain in raw.get("domain", ()):
+        domain.pop("use_lakedepth", None)
+    config = tmp_path / "lakes.toml"
+    config.write_bytes(emit_experiment_toml(raw).encode())
+    assert ("lake_depth" in geography_for_run(config)["datasets"]) is needed

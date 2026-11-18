@@ -195,6 +195,196 @@ leaves every prognostic value unchanged.
 The physics registry lists both modes under `nn_column_physics` as
 `experimental-runtime` with `wrf_identical: false`.
 
+## Training a model, and a worked example (WRF route)
+
+`python -m woof.nn.train TAP OUT` trains a small float32 MLP on a tap
+store with NumPy alone, and writes an `mlp-npz` artefact that runs on every
+backend. It uses Adam with minibatches. The last `--holdout` fraction of
+recorded steps (default 0.2) is kept out, so the score is out of sample in
+time. The manifest's statistics come from the training samples:
+- normalisation;
+- the trained input range that the safety screen uses;
+- `output_limit` (twice the largest target seen per level, floored at a
+  hundredth of the field's largest level limit, so a level that never saw a
+  non-zero target is not clamped to zero online).
+
+The tap's targets are the scheme's own tendency, so a trained artefact is
+an emulator of the scheme, for `mode = "replace"`. Under
+`mode = "residual"` its rate would be added on top of the scheme's; a
+residual model needs a reference target that the tap does not record.
+Samples are ordered by model time before the split, and a time recorded
+twice (a resumed run appends) keeps its last record.
+
+Its `training` table records the tap, the split, the hyper-parameters and
+the held-out R² per output. The trainer demonstrates the workflow and is
+not meant as a research trainer: anything that writes the same artefact
+can be used in its place.
+
+`tools/nn_seat_cost.py MODEL` measures what an applying seat adds to a
+dycore step on this machine's backend. It also times the model call alone.
+
+The worked example (P2.5) uses one real-data case: a 9 km, 80 x 100 x 49
+domain run for 24 h with an adaptive time step (about 1400 steps), with
+YSU, the revised MM5 surface layer and WSM6.
+
+1. **Record.** `--nn` tap of `pbl` (default inputs and outputs, every 4th
+   step, 256 columns). This gave 352 samples, and the tapped forecast's
+   3849 history variables were byte-identical to the plain run's over all
+   25 frames.
+2. **Train.** `--hidden 256,256 --epochs 40` took 25 s on the CPU.
+   Held-out R² (last 20 % of the day): dtheta 0.78, dqv 0.69, dqc 0.82,
+   du 0.53, dv 0.57. (This artefact was trained before the per-level
+   output-limit floor, so levels that saw no target were clamped to zero
+   in the runs below.)
+3. **Run online.** `mode = "replace"`, `scheme = "pbl"`, with fallback,
+   output limits and positivity on, for the full 24 h. The table gives the
+   RMSE against the physics run, averaged over the 25 hourly frames, on
+   the interior (5-column ring excluded). TH10 is potential temperature
+   over the lowest 10 levels. "Zero model" replaces the PBL tendency with
+   zero, as a baseline for what dropping the scheme costs.
+
+   | run | T2 (K) | U10 (m/s) | V10 (m/s) | Q2 (g/kg) | HFX (W/m²) | TH10 (K) |
+   |---|---|---|---|---|---|---|
+   | emulator, CUDA (torch) | 0.60 | 0.67 | 0.59 | 0.30 | 4.2 | 0.40 |
+   | emulator, Metal (MLX) | 0.60 | 0.67 | 0.59 | 0.30 | 4.2 | 0.40 |
+   | zero model, CUDA | 1.29 | 2.20 | 1.78 | 0.40 | 12.1 | 0.73 |
+
+   The emulator run stayed stable for the whole day on both backends.
+   About 14 % of column calls fell outside the trained range (one day of
+   training data) and kept the scheme's tendency. The error grows from
+   0.35 K T2 at 3 h to 1.0 K at 24 h.
+4. **Restart.** A replace run resumed from its 12 h checkpoint reproduces
+   the unbroken run byte for byte: every history variable over the last 12
+   frames, and every final restart array.
+5. **Cost.** `tools/nn_seat_cost.py`, same grid size (8000 columns, 349
+   inputs, 245 outputs, 256 x 256 tanh MLP):
+
+   | backend | dycore step | seat per step | model call |
+   |---|---|---|---|
+   | CUDA (A6000, shared with other jobs), torch | 29-30 ms | 5.3-6.0 ms | 3.3-3.7 ms |
+   | CUDA, numpy runner (host round trip) | 31.5 ms | 265 ms | 125 ms |
+   | Metal (MLX) | 32.8 ms | 3.4 ms | 1.05 ms |
+
+   The model call is timed per call, each read back before the next (the
+   latency a step pays). The CUDA rows are two runs on a shared card.
+
+## The hex seat (MPAS route)
+
+`woof hex forecast --nn NN.toml` (and `woof hex regional
+--forecast-arg=--nn=/abs/NN.toml`) takes the same `[nn]` table on the MPAS
+suite route, the hex default. The seat is in
+`ResidentNativeCoupling.stage` (`woof/nn/hex_seat.py`): it acts on the
+step's held physics sources once they are assembled from
+`physics_get_tend`. That is after the regional padding and before SPPT/SKEB,
+IAU and analysis nudging add theirs. So the tap records the schemes' own
+sum, unperturbed. An applying model's rate is part of the physics source
+that SPPT then perturbs, as it would perturb a scheme's. IAU and nudging
+increments never reach the model.
+
+Only `scheme = "total"` is available. The held source is the sum of every
+non-microphysics scheme (PBL, surface layer, cumulus, radiation,
+gravity-wave drag), and the lagged microphysics heating is held apart and
+is not part of it. The source is held per unit dry mass, with `m = rho_zz`:
+
+- `scalars[q] = m dq/dt`
+- `rho_theta = m (c dtheta/dt + (Rv/Rd) theta dqv/dt)`, with
+  `c = 1 + (Rv/Rd) qv` and `theta = theta_m / c` the dry potential
+  temperature. This is MPAS's coupling into the modified potential
+  temperature `theta_m`, so `rho_theta / m` is `dtheta_m/dt`.
+
+The seat divides by `m` and inverts the theta conversion with the cell's
+own `theta_m` and `qv`. An increment is coupled back the same way:
+
+- `dtheta` is dry theta, in K s-1.
+- `dtheta_m` is modified theta, in K s-1. A model writes one of the two.
+- A `dq*` rate is in kg kg-1 s-1. A `dqv` increment also enters `theta_m`
+  through the vapour term, as the scheme's does.
+
+Momentum (`du`, `dv`) is refused, because the held momentum source is
+edge-normal and the seat has no cell-to-edge projection yet.
+
+The hex vocabulary has two kinds of input. The level-wise inputs, bottom-up,
+are:
+
+- `theta`, `theta_m`, `qv` ... `qg`;
+- `u`, `v` (the reconstructed cell winds);
+- `w` (the mean of the layer's two faces);
+- `p`, `exner`, `rho` (dry density, `zz rho_zz`);
+- `z` (layer centre above the ground), `dz`.
+
+The cell inputs are `hgt`, `hfx`, `qfx`, `lh`, `ust`, `znt`, `pblh`, `tsk`,
+`xland` and `psfc`. They are read from the MPAS physics pools.
+
+On a limited-area mesh the columns follow the boundary rings:
+
+- The tap draws only interior cells (`bdyMaskCell == 0`) and never the
+  padded garbage cell. The draw is keyed by the seed and the model time, so
+  a resumed run draws the same cells as the unbroken one.
+- An applying seat writes every cell outside the specified zone
+  (`bdyMaskCell < 6`, the cells nudging writes). The specified zone takes
+  the boundary tendencies and is left alone.
+
+What the seat refuses:
+
+- an applying mode under `--physics-mode exact` or `GPUWM_WRF_EXACT=1`;
+- `--members` rosters, `--samehost-devices`, `--hosts` and
+  `--fullstep-local-timestep`, at the door;
+- a moving region;
+- the WOOF-physics route (`--physics ...`, `--physics-suite
+  arwen_mpas_column`).
+
+On the WOOF-physics route, a column model belongs in a backend row instead
+(below).
+
+An applying run seals the settings and the artefact's hashes in the
+route's checkpoint carrier (`nn`). A resume checks them with
+`woof.nn.hex_seat.check_carried`, and refuses a different model, a model
+added to a checkpoint written without one, and the reverse. A native MPAS
+restart file that carries no route carrier (an exact-mode restart) holds no
+such identity, so the seat cannot check it. The model still screens the
+specified zone's columns, which it never writes, so
+`out_of_range = "refuse"` and the range counts see them too.
+
+`tests/test_nn_hex_seat.py` checks on the host:
+
+- that decoupling inverts MPAS's coupling;
+- the tap's columns and rates;
+- the residual, replace, positivity, fallback and refusal paths.
+
+`tests/test_nn_hex_gpu.py` (opt-in, `WOOF_HEX_VARRES_CASE`) runs short
+regional forecasts on a uniform and a variable-resolution mesh. It checks
+three things:
+
+- a tapped run is byte-identical to the plain run under fast and strict
+  numerics, with its columns interior;
+- a zero residual leaves every history variable unchanged;
+- a constant `dtheta` residual warms the levels it spans by about
+  rate x time.
+
+### A column model as a backend row
+
+`woof.nn.hex_backend.NNColumnBackend` is an example
+`woof.hex.physics_seam.PhysicsBackend`. It runs an inner backend on a
+`ColumnBatch` and adds (`residual`) or substitutes (`replace`) a column
+model's rates, under the same safety policy. It returns uncoupled rates,
+which the seam's `unpack_mpas_tendencies` couples to dry mass. The batch's
+winds are cell-centred, so `du`/`dv` are available there.
+`tests/test_nn_hex_backend.py` runs it CUDA-free on
+`DeterministicNumpyBackend`.
+
+The example is not registered in woof's own metadata, because the row
+lookup on every forecast would then import `woof.nn`. A third party ships
+a row from its own distribution:
+
+```toml
+[project.entry-points."woof.hex.rows"]
+my_nn_rows = "my_package.rows:rows"
+```
+
+Here `rows()` returns `PhysicsBackendRow` entries under new names (rows
+are never rebound), and the row's adapter module publishes
+`build_column_backend(row, **kw)`.
+
 ## Installing
 
 - CUDA: `pip install 'recast-woof[nn-torch]'`, with the CUDA build of

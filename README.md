@@ -358,8 +358,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - RRTMG-K (`ra_lw_physics = ra_sw_physics = 14`, only as the pair), held
     bit for bit to compiled WRF 4.7.1 on oracle columns. It reuses the
     legacy RRTMG kernels and ports only K's differences. `aer_opt`,
-    `ghg_input`, `icloud = 2/3` and `rrtmg_spectral_output` are refused
-    with K by name. Hex runs it on its generic column seam (R1), bit for
+    `icloud = 2/3` and `rrtmg_spectral_output` are refused with K by name.
+    Beyond WRF, whose K ignores it, `ghg_input = 1` gives K legacy RRTMG's
+    time-varying CO2, N2O, CH4, CFC-11 and CFC-12 from the CAMtr table at
+    every radiation call, in both spectra and on both routes; unset, K
+    keeps WRF's fixed gases bit for bit. A K-only WRF namelist still
+    imports without it, as wrf.exe ran; a WRF tree mixing K with another
+    RRTMG-family domain under `ghg_input = 1` refuses at import. Hex runs it on its generic column seam (R1), bit for
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
@@ -476,7 +481,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   OSM; GeoJSON or GeoParquet) into per-cell building statistics on the model
   grid. These are plan and frontal area indices, a height histogram, and
   WRF's NUDAPT `URB_PARAM` block. Each source's licence and attribution
-  travel with the file. Footprints are read from a local file, not
+  travel with the file. `woof buildings` builds the product for one
+  domain of a WPS namelist. Footprints are read from a local file, not
   downloaded, and the urban schemes do not read `URB_PARAM` yet
   ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
 - **Resolved buildings in LES (`obstacle_opt = 1`, opt-in).** On a domain
@@ -487,7 +493,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   momentum tendencies. A street-canyon benchmark gives the H/W = 1 vortex,
   and a cube benchmark gives the wake and horseshoe. Off, or with no
   buildings, nothing launches and runs are bit-identical. Momentum only,
-  regional grid only.
+  regional grid only. A real-data check over Manhattan places the model's
+  buildings at their footprint heights (r = 0.99 at 25 m). In lower and
+  midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
+  50 m does not open the streets.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
@@ -666,6 +675,30 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   a read back and a write: the writer's host time per Edinburgh 3 km frame
   falls from 761-1061 ms to 470-576 ms, byte-identical
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
+  Metal: woof's glibc binary32 `logf`, `expf` and `powf` ports
+  (`gfk_log`, `gfk_exp`, `gfk_pow`) compute in binary64, which Metal
+  emulates in integer arithmetic. They now first evaluate the same
+  formula in float pairs and keep that word only when no binary32 rounding
+  boundary lies within its error bound, and otherwise run the binary64
+  body. The words are identical by construction, and every binary32
+  input (logf, expf, and powf at 20 exponents) plus 2^30 random powf
+  pairs was checked under both subnormal modes
+  (`tools/metal_gfk_fast_grade.py`). The surface-layer kernel
+  `sfclayrev` is 5.5x faster (55x83: 11.70 to 2.14 ms). On the hex
+  Edinburgh 3 km variable-resolution forecast, WSM6 drops from 22.5 to
+  5.2 ms per step, the surface layer from 21.0 to 6.6 ms and Grell-Freitas
+  from 8.3 to 4.6 ms; one forecast hour integrates in 44-47 s instead of
+  50-57 s, with byte-identical history.
+  `WOOF_METAL_GFK_FAST=0` restores the binary64-only path.
+  The Metal facade's `ReductionKernel` folded each output on one thread.
+  An exact, order-free and idempotent fold (`a | b`, `a || b`, `a & b`,
+  `a && b`, a concrete reduce type and an `out = a` post-map) over 4096
+  or more elements per output, with fewer than 2048 outputs, is now folded
+  in slices and then across the slices, giving the same value (hex Edinburgh 3 km
+  variable-resolution: Noah-MP's surface identity check from 3.6 ms to
+  0.16 ms per step and the transport species-word check from 1.4 ms to
+  0.18 ms, byte-identical; `WOOF_METAL_SPLIT_REDUCTIONS=0` restores the
+  serial fold).
   `WOOF_METAL_GPU_TIMES` times each kernel. Its per-launch command
   buffers also hold the lazy MLX work the launch waited on, and their GPU
   intervals overlap, so a facade write (`woof_copy_4`) used to carry other
@@ -736,6 +769,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and rock and sit about 1 km north of the shoreline: on the Alps 1 km
   domain, 480 lake cells above 2000 m became 8 real reservoirs
   ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md)).
+  **Recommended on the WRF route where lakes matter:** `--lakes clm` with
+  `fields = "lakes"` (both stay opt-in). On the Alps 1 km case, lake-shore
+  T2 bias/RMSE went from +1.66/2.34 K to +0.43/1.49 K and 10 m wind RMSE
+  from 1.86 to 1.44 m/s (25 SMN stations, 24 h). Caveats
+  ([docs/lakes.md](docs/lakes.md#recommended-settings)): the Great Lakes cool
+  2-3 times as fast as GLSEA (WRF's CLM lake), lake-effect cores are
+  over-intense (50 mm FSS .81 to .70 at 9 km on Buffalo, Nov 2022),
+  `lake_depth` needs `woof fetch-geog` (unless `use_lakedepth = 0`), and hex
+  R2 lakes start about 1.4 K
+  cold.
   On the hex MPAS-suite route, `--physics config_clm_lake_backend=hex-cuda`
   (opt-in) runs WRF's CLM lake on the LAKEMASK cells of `--surface-statics`,
   bitwise to WRF's lake kernel on the same inputs. It starts from lakeini and
@@ -764,7 +807,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
   oval (`AURORA_ZONE`, `AURORA_DIST`, `MAG_LAT`, `MAG_LT`) into every WRF-route
-  history frame from the start's Kp. The auroral energy, storm-time and
+  history frame from the start's Kp. `woof spacewx aurora --energy` adds the
+  precipitating electron and ion energy and number fluxes and the hemispheric
+  power of OVATION Prime 2010 (a port of NOAA's public-domain IDL code, which
+  reproduces its test outputs; the coefficients are fetched and pinned), and
+  the Knipp et al. 2004 Joule power from OMNI2's PC(N) and Dst. Against POES
+  TED electron flux over the 24-25 Oct 2011 storm, the per-pass correlation is
+  0.48-0.61 and the model reads about 2.5 times higher. `spacewx_aurora_opt =
+  2` adds OVATION's electron energy flux, mean energy and ion energy flux
+  (`AURORA_EFLUX`, `AURORA_EMEAN`, `AURORA_IFLUX`) to those history frames,
+  from the solar wind at the start. The storm-time and
   particle-precipitation layers are planned ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
@@ -811,8 +863,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   forecast byte-identical. `mode = "residual"` or `"replace"` applies a
   model at the same seat through the couplers' own path, with a fallback to
   the scheme outside the trained range. Such runs are not WRF-identical:
-  `GPUWM_WRF_EXACT=1` refuses them, and checkpoints bind the artefact
-  ([docs/nn-physics.md](docs/nn-physics.md)).
+  `GPUWM_WRF_EXACT=1` refuses them, and checkpoints bind the artefact.
+  `python -m woof.nn.train TAP OUT` trains a small MLP on a tap with NumPy
+  alone, and `tools/nn_seat_cost.py` measures the seat's per-step cost; a
+  worked 24 h, 9 km example (PBL emulator, CUDA and Metal) is in
+  [docs/nn-physics.md](docs/nn-physics.md). `woof hex forecast --nn`
+  puts the same seat on the hex MPAS route. It taps or adjusts the held
+  physics source (`scheme = "total"`, theta and moisture rates) before
+  SPPT, IAU and nudging. The tap uses interior cells only, an applying
+  model skips the specified zone, and the hex carrier binds the artefact.
+  `woof.nn.hex_backend` is an example `woof.hex.rows` backend that adds a
+  model to a column batch.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

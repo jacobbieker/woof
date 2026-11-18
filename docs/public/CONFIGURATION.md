@@ -1521,7 +1521,7 @@ each one off, the run executes no new code. The design and the planned layers
 | `spacewx_f107_source` | `""` | The F10.7 that drives it. `""` or `"gfz"` fetches GFZ's `Kp_ap_Ap_SN_F107_since_1932.txt` into the space-weather cache. A path reads a file in that format, and a number is a fixed flux in sfu. The value at the run's start is held for the whole run (persistence). |
 | `spacewx_f107_mode` | `"81day"` | `"81day"`: the mean observed F10.7 of the 81 UT days ending the day before the start. `"daily"`: the day before the start alone. |
 | `spacewx_ionosphere_maps` | `"ccir"` | The foF2 maps, `"ccir"` or `"ursi"`. |
-| `spacewx_aurora_opt` | `0` | `1` adds the auroral oval (Starkov 1994 on the IGRF-14 dipole) to every history frame: `AURORA_ZONE` (0 equatorward of the diffuse aurora, 1 diffuse aurora, 2 oval, 3 polar cap), `AURORA_DIST` (degrees poleward of the diffuse aurora's equatorward edge, the visibility line), `MAG_LAT` (degrees) and `MAG_LT` (hours), on the domain's columns at the frame's valid time. It is a diagnostic: the atmosphere integrates identically. |
+| `spacewx_aurora_opt` | `0` | `1` adds the auroral oval (Starkov 1994 on the IGRF-14 dipole) to every history frame: `AURORA_ZONE` (0 equatorward of the diffuse aurora, 1 diffuse aurora, 2 oval, 3 polar cap), `AURORA_DIST` (degrees poleward of the diffuse aurora's equatorward edge, the visibility line), `MAG_LAT` (degrees) and `MAG_LT` (hours), on the domain's columns at the frame's valid time. `2` also adds OVATION Prime 2010's precipitating particle energy flux: `AURORA_EFLUX` (electron energy flux, mW m-2), `AURORA_EMEAN` (electron mean energy, keV) and `AURORA_IFLUX` (ion energy flux, mW m-2), from the solar-wind coupling of the hours that have ended by the start; it needs `spacewx_kp_source = "omni"` or `"swpc"`. It is a diagnostic: the atmosphere integrates identically. |
 | `spacewx_kp_source` | `""` | The Kp that drives it, held at the run's start (persistence). `""` or `"gfz"`: the observed Kp of the latest 3-hour interval that has ended by the start, in GFZ's index file (fetched; a path reads a file in that format). `"omni"` or `"swpc"`: Kp estimated from the solar wind (NASA SPDF OMNI2 or NOAA SWPC real time) for the latest 3-hour interval whose fitted hours have ended by the start. A number is a fixed Kp in [0, 9]. Either way the Kp must lie within 24 h before the start. |
 
 `solar_tsi_source` and `solar_tsi_mode` are refused while `solar_tsi_opt = 0`,
@@ -1546,14 +1546,19 @@ start (and once more when that day's flux is not yet released), its format is
 checked on reading, and its SHA-256 is printed with the rest of the
 ionosphere's receipt as the run starts (the `[spacewx ionosphere]` line).
 
-`spacewx_kp_source` is refused while `spacewx_aurora_opt = 0`, and
-`spacewx_aurora_opt = 1` is refused without a radiation scheme, on a streamed
+`spacewx_kp_source` is refused while `spacewx_aurora_opt = 0`;
+`spacewx_aurora_opt = 2` is refused unless `spacewx_kp_source` is `"omni"` or `"swpc"`, and
+`spacewx_aurora_opt = 1` or `2` is refused without a radiation scheme, on a streamed
 domain and on hex, for the same reasons as the ionosphere rows. For the aurora
 the GFZ file is fetched again when it lacks the latest 3-hour interval that has
 ended by the start, since the latest Kp is the one that matters (the cached file
 is kept if GFZ cannot be reached). A fetched Kp is held per source and start in
 the space-weather cache, so resumes and nests use the same value. The Kp, the interval it belongs to and the
-source are printed as the run starts (the `[spacewx aurora]` line). Both aurora
+source are printed as the run starts (the `[spacewx aurora]` line), and with
+`2` also OVATION's dPhi/dt, the coefficients' SHA-256 and the hemispheric power.
+The OVATION Prime coefficients (NOAA's public-domain ovation-prime 2.3.0 zip,
+24 MB) are fetched on first use into the space-weather cache and checked
+against a pinned SHA-256. Both aurora
 keys are output-only, so a restart may switch the rows on or off.
 
 ## What a WRF namelist setting becomes
