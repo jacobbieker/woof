@@ -204,7 +204,16 @@ recorded steps (default 0.2) is kept out, so the score is out of sample in
 time. The manifest's statistics come from the training samples:
 - normalisation;
 - the trained input range that the safety screen uses;
-- `output_limit` (twice the largest target seen).
+- `output_limit` (twice the largest target seen per level, floored at a
+  hundredth of the field's largest level limit, so a level that never saw a
+  non-zero target is not clamped to zero online).
+
+The tap's targets are the scheme's own tendency, so a trained artefact is
+an emulator of the scheme, for `mode = "replace"`. Under
+`mode = "residual"` its rate would be added on top of the scheme's; a
+residual model needs a reference target that the tap does not record.
+Samples are ordered by model time before the split, and a time recorded
+twice (a resumed run appends) keeps its last record.
 
 Its `training` table records the tap, the split, the hyper-parameters and
 the held-out R² per output. The trainer demonstrates the workflow and is
@@ -224,7 +233,9 @@ YSU, the revised MM5 surface layer and WSM6.
    25 frames.
 2. **Train.** `--hidden 256,256 --epochs 40` took 25 s on the CPU.
    Held-out R² (last 20 % of the day): dtheta 0.78, dqv 0.69, dqc 0.82,
-   du 0.53, dv 0.57.
+   du 0.53, dv 0.57. (This artefact was trained before the per-level
+   output-limit floor, so levels that saw no target were clamped to zero
+   in the runs below.)
 3. **Run online.** `mode = "replace"`, `scheme = "pbl"`, with fallback,
    output limits and positivity on, for the full 24 h. The table gives the
    RMSE against the physics run, averaged over the 25 hourly frames, on
@@ -250,9 +261,12 @@ YSU, the revised MM5 surface layer and WSM6.
 
    | backend | dycore step | seat per step | model call |
    |---|---|---|---|
-   | CUDA (A6000, shared with another job), torch | 32.7 ms | 6.0 ms | 3.4 ms |
+   | CUDA (A6000, shared with other jobs), torch | 29-30 ms | 5.3-6.0 ms | 3.3-3.7 ms |
    | CUDA, numpy runner (host round trip) | 31.5 ms | 265 ms | 125 ms |
-   | Metal (MLX) | 38.2 ms | 7.1 ms | 0.85 ms |
+   | Metal (MLX) | 32.8 ms | 3.4 ms | 1.05 ms |
+
+   The model call is timed per call, each read back before the next (the
+   latency a step pays). The CUDA rows are two runs on a shared card.
 
 ## Installing
 
