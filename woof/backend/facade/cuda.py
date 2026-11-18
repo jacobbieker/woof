@@ -329,6 +329,15 @@ def _bytes_view(ptr, nbytes):
     return ndarray((int(nbytes),), np.uint8, _storage=st, _offset=offset)
 
 
+def _land_host_block(view):
+    """A write into a hostAlloc block is complete when the call returns, as a
+    cudaMemcpy into page-locked memory is: the host reads the block in place
+    (its NumPy view) with no facade read to evaluate it first."""
+    root = view._st.buffer_root()
+    if any(st.buffer_root() is root for _host, st in _HOST_BLOCKS.values()):
+        _mx().eval(view._st.arr)
+
+
 def _memcpy(dst, src, size, kind=4):
     """cudaMemcpy over raw addresses: a device side is a facade storage's GPU
     address (``a.data.ptr``), a host side any process address.  Memory is
@@ -344,6 +353,7 @@ def _memcpy(dst, src, size, kind=4):
     target = _bytes_view(dst, size)
     if target is not None:
         target.set(data)
+        _land_host_block(target)
     else:
         ctypes.memmove(int(dst), data.ctypes.data, size)
 
@@ -365,6 +375,7 @@ def _write_bytes(ptr, data):
     view = _bytes_view(ptr, data.size)
     if view is not None:
         view.set(data)
+        _land_host_block(view)
     else:
         ctypes.memmove(int(ptr), data.ctypes.data, data.size)
 
@@ -415,6 +426,7 @@ def _memset(ptr, value, size):
         ctypes.memset(int(ptr), int(value), int(size))
     else:
         view.fill(np.uint8(int(value) & 0xFF))
+        _land_host_block(view)
 
 
 #: cudaDeviceAttr's numbers for the attributes _attributes answers.
