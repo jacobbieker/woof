@@ -10,7 +10,10 @@ on the same kind of grid: geomagnetic latitude, MLT, the auroral zone and the
 distance from the diffuse aurora's equatorward boundary.  Its activity comes
 from a fixed Kp, the observed Kp (GFZ), or the solar wind (OMNI2 or SWPC real
 time) through the fitted Kp estimate; with OMNI2, ``--observed-al`` uses the
-observed AL instead.
+observed AL instead.  With a solar wind, ``--energy`` adds the precipitating
+energy and number fluxes and the hemispheric power of OVATION Prime 2010
+(:mod:`woof.spacewx.ovation`), and with OMNI2 the Knipp et al. 2004 Joule
+power.
 """
 from __future__ import annotations
 
@@ -82,6 +85,9 @@ def _aurora_activity(args, times):
     if args.observed_al and str(args.solar_wind).strip() == "swpc":
         raise SystemExit("woof spacewx aurora: --observed-al needs OMNI2 ('omni' or files); "
                          "the SWPC real-time feed carries no AL")
+    if args.energy and not args.solar_wind:
+        raise SystemExit("woof spacewx aurora: --energy needs --solar-wind (OVATION Prime is driven "
+                         "by the solar-wind coupling)")
     rows, record = [], None
     try:
         if args.solar_wind:
@@ -123,7 +129,56 @@ def _aurora_activity(args, times):
         except (solarwind.SolarWindError, indices.IndicesError, aurora.AuroraError) as exc:
             raise SystemExit(f"woof spacewx aurora: {exc}") from exc
         rows.append(row)
-    return rows, source
+    return rows, source, record
+
+
+def _energy(args, times, record):
+    """Per time: OVATION's combined-hemisphere grids for the north and the south,
+    and the row of scalars (dPhi/dt, hemispheric power, Joule power)."""
+    from woof.spacewx import ovation, solarwind
+
+    try:
+        coef = ovation.load(args.ovation)
+    except (ovation.OvationError, OSError, ValueError) as exc:
+        raise SystemExit(f"woof spacewx aurora: OVATION Prime coefficients: {exc}") from exc
+    out = []
+    for when in times:
+        try:
+            dfdt = ovation.coupling(record, when)
+        except ovation.OvationError as exc:
+            raise SystemExit(f"woof spacewx aurora: {exc}") from exc
+        grids = {h: ovation.flux_grids(coef, dfdt, ovation.hemisphere_doy(when, h)) for h in ("north", "south")}
+        scalars = {"ovation_dphidt": dfdt}
+        for h, g in grids.items():
+            scalars[f"hp_{h}_gw"] = ovation.hemispheric_power(g["eflux_diff"] + g["eflux_mono"] + g["eflux_wave"])
+            scalars[f"hp_ion_{h}_gw"] = ovation.hemispheric_power(g["eflux_ion"])
+        try:
+            pcn, dst = record.pcn_at(when), record.dst_at(when)
+        except solarwind.SolarWindError:
+            pcn = dst = float("nan")
+        scalars["pcn"], scalars["dst"] = pcn, dst
+        scalars["joule_north_gw"] = (ovation.joule_power(pcn, dst, when)
+                                     if np.isfinite(pcn) and np.isfinite(dst) else float("nan"))
+        out.append((grids, scalars))
+    return coef, out
+
+
+#: The ``--energy`` fields, written beside the oval's.
+ENERGY_FIELDS = ("eflux", "eflux_diff", "eflux_mono", "eflux_wave", "eflux_ion", "nflux", "mean_energy")
+
+
+def _energy_columns(grids, mlat, mlt):
+    """:data:`ENERGY_FIELDS` on columns: the northern grids where mlat >= 0, else the southern."""
+    from woof.spacewx import ovation
+
+    north = ovation.on_columns(grids["north"], mlat, mlt)
+    south = ovation.on_columns(grids["south"], mlat, mlt)
+    cols = {k: np.where(mlat >= 0.0, north[k], south[k]) for k in north}
+    eflux = cols["eflux_diff"] + cols["eflux_mono"] + cols["eflux_wave"]
+    nflux = cols["nflux_diff"] + cols["nflux_mono"] + cols["nflux_wave"]
+    return {"eflux": eflux, "eflux_diff": cols["eflux_diff"], "eflux_mono": cols["eflux_mono"],
+            "eflux_wave": cols["eflux_wave"], "eflux_ion": cols["eflux_ion"], "nflux": nflux,
+            "mean_energy": ovation.mean_energy_kev(eflux, nflux)}
 
 
 def aurora_main(args) -> int:
@@ -132,7 +187,8 @@ def aurora_main(args) -> int:
 
     start = _utc(args.time)
     times = [start + timedelta(hours=i * args.step_hours) for i in range(max(1, args.count))]
-    rows, source = _aurora_activity(args, times)
+    rows, source, record = _aurora_activity(args, times)
+    energy = _energy(args, times, record) if args.energy else None
     lat, lon = grid(args.dlat, args.dlon)
     lat2, lon2 = np.meshgrid(lat, lon, indexing="ij")
     try:
@@ -140,19 +196,37 @@ def aurora_main(args) -> int:
     except AuroraError as exc:
         raise SystemExit(f"woof spacewx aurora: {exc}") from exc
     import cupy as cp
-    fields = {k: [] for k in OUTPUTS}
+    fields = {k: [] for k in OUTPUTS + (ENERGY_FIELDS if energy else ())}
     north = lat2 > 0
-    for when, row in zip(times, rows):
+    for n, (when, row) in enumerate(zip(times, rows)):
         out = oval.evaluate(when, row["al"])
         for key in OUTPUTS:
             fields[key].append(cp.asnumpy(out[key]).reshape(lat2.shape))
+        if energy is not None:
+            grids, scalars = energy[1][n]
+            row.update(scalars)
+            cols = _energy_columns(grids, fields["mlat"][-1].astype(np.float64),
+                                   fields["mlt"][-1].astype(np.float64))
+            for key in ENERGY_FIELDS:
+                fields[key].append(cols[key].astype(np.float32))
         zone = fields["zone"][-1]
         edge = lat2[north & (zone >= 1)]
         extra = (f"  Newell {row['newell']:8.0f}  PCP {row['polar_cap_kv']:5.1f} kV"
                  if "newell" in row and np.isfinite(row["newell"]) else "")
+        if energy is not None:
+            extra += (f"  dPhi/dt {row['ovation_dphidt']:6.0f}  HP N {row['hp_north_gw']:5.1f} "
+                      f"S {row['hp_south_gw']:5.1f} GW")
+            if np.isfinite(row["joule_north_gw"]):
+                extra += f"  Joule N {row['joule_north_gw']:6.1f} GW"
         print(f"{when:%Y-%m-%dT%H:%MZ}  Kp {row['kp']:4.2f}  |AL| {row['al']:6.1f} nT  "
               f"aurora reaches {edge.min() if edge.size else float('nan'):5.1f} N{extra}")
     doc = receipt(oval, {"spacewx_activity_source": source})
+    if energy is not None:
+        from woof.spacewx.ovation import OVATION_ZIP
+        doc["spacewx_energy_model"] = "OVATION Prime 2010 (ovation-prime 2.3.0, NOAA)"
+        doc["spacewx_ovation_source"] = f"{energy[0].source} sha256:{energy[0].sha256}"
+        doc["spacewx_ovation_pin"] = OVATION_ZIP.sha256
+        doc["spacewx_joule_model"] = "Knipp et al. 2004 Table I, northern hemisphere, |PC(N)| and |Dst|"
     # Strict JSON: a coupling over a fill-value hour is null, not NaN.
     doc["times"] = [{k: (None if isinstance(v, float) and not np.isfinite(v) else v)
                      for k, v in row.items()} for row in rows]
@@ -200,6 +274,11 @@ def register_cli(sub):
                                "'swpc' (NOAA real time, last 24 h) or OMNI2 file(s) joined by ':'")
     aur.add_argument("--observed-al", action="store_true",
                      help="with an OMNI2 solar wind, drive the oval with the observed AL instead of Kp")
+    aur.add_argument("--energy", action="store_true",
+                     help="with a solar wind, add OVATION Prime 2010 energy and number fluxes and hemispheric "
+                          "power, and with OMNI2 the Knipp et al. 2004 Joule power")
+    aur.add_argument("--ovation", help="OVATION Prime coefficients: the distribution's zip or its premodel "
+                                       "directory (default: the pinned zip, fetched)")
     aur.add_argument("--dlat", type=float, default=1.0, help="grid spacing in latitude, deg (default 1)")
     aur.add_argument("--dlon", type=float, default=2.0, help="grid spacing in longitude, deg (default 2)")
     aur.add_argument("--out", type=Path, help="write the fields to this .npz (receipt beside it)")

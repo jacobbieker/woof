@@ -15,7 +15,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU | available as `woof spacewx ionosphere` (global grid) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
-| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; energy flux and Joule heating to follow | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt`); energy flux and Joule heating planned |
+| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt`); energy flux and Joule power available as `woof spacewx aurora --energy` |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | ion-pair rates (CMIP6 EPP, Ap-driven MEE, GOES SPE) as NOx/HOx sources in chemistry, for high-top runs | planned |
 | L1b spectral irradiance | per-band solar variability in RRTMG SW and photolysis | planned |
@@ -214,6 +214,86 @@ Checks:
   edge at 44.5-52.5 N geographic. The solar-wind estimate saturates at Kp 9.
   The observed AL (peaking at 1636 nT) takes it to 36.5 N.
 
+### Energy flux and Joule heating (`woof spacewx aurora --energy`)
+
+With a solar wind (`--solar-wind omni|swpc|FILE`), `--energy` adds the
+precipitating particle fluxes of OVATION Prime 2010 to the same grid, and with
+OMNI2 the Joule power. The model is `woof/spacewx/ovation.py`.
+
+- **Model.** OVATION Prime 2010 (Newell, Sotirelis & Wing 2009; Newell et al.
+  2010) regresses DMSP precipitation on the Newell coupling dPhi/dt, on a
+  96 MLT x 0.5 deg grid from 50 deg poleward, for four seasons and four kinds
+  of aurora: diffuse, monoenergetic and broadband electrons, and ions. woof
+  ports NOAA's public-domain IDL distribution, ovation-prime 2.3.0 (P. Newell,
+  JHU/APL; R. Redmon and J. Machol, NOAA/NGDC), routine by routine:
+  - dPhi/dt is averaged over the 4 hours up to the time, with weights 0.65^k;
+  - the four seasons are blended by day of year;
+  - the probability of each aurora type is fitted;
+  - the IDL's outlier clamps are kept;
+  - the northern and southern bins at the same |MLAT| are combined, as the
+    authors recommend.
+- **Two departures from the IDL code, both documented in the module:**
+  - The IDL's fallback table of probabilities is read into a subscripted array,
+    which IDL passes by value, so it is never filled and the fallback gives 0.
+    woof keeps that behaviour, and the distribution's test outputs confirm it.
+  - For the southern hemisphere woof moves the day of year by half a year. The
+    IDL's comment says `365 - doy`, which would leave the solstices in the same
+    season.
+- **The coefficients are not shipped.** The 24 MB distribution zip is fetched
+  from SourceForge into `~/.woof/spacewx/ovation` and checked against its
+  pinned size and SHA-256 (`--ovation` takes a local zip or `premodel`
+  directory). OvationPyme (LGPL) is not read or used.
+- **Outputs.** In the `.npz`:
+  - `eflux`: the electron energy flux, diffuse + mono + wave, in erg cm-2 s-1
+    (= mW m-2);
+  - each part of it, and the ion energy flux (`eflux_ion`);
+  - `nflux`: the electron number flux, in cm-2 s-1;
+  - `mean_energy`: eflux / nflux, in keV.
+
+  Each line, and the receipt, also carries the northern and southern
+  hemispheric power in GW (electrons, and ions separately). It is integrated as
+  the IDL does it, leaving out the dayside strip at 7-19 MLT equatorward of
+  63 deg. The grid is placed on the IGRF-14 dipole frame. OVATION's own MLAT is
+  AACGM, so the dipole shifts it by a few degrees in some sectors, as it does
+  for the oval.
+- **Joule power.** Knipp et al. 2004 (Sol. Phys. 224, 495, Table I) give the
+  northern hemisphere's Joule power as a seasonal quadratic in |PC(N)| and
+  |Dst|, fitted to AMIE:
+  - winter (21 Oct - 20 Feb): `13.36 PC + 5.08 PC^2 + 0.47 Dst + 0.0011 Dst^2` GW;
+  - summer (21 Apr - 20 Aug): `29.27 PC + 8.18 PC^2 - 0.04 Dst + 0.0126 Dst^2` GW;
+  - equinox (otherwise): `29.14 PC + 2.54 PC^2 + 0.21 Dst + 0.0023 Dst^2` GW.
+
+  PC(N) and Dst come from OMNI2 (words 52 and 41), so SWPC runs have no Joule
+  line. Knipp et al. double the northern value for the globe. During great
+  storms the fit is extrapolated: on 10-11 May 2024 it gives 1.5-4 TW.
+
+Checks (`tools/spacewx_ovation_validate.py`):
+- **Against the IDL.** The distribution's test outputs for the storm of 24-25
+  Oct 2011 were run with its own OMNI2 file.
+  - All 63 energy-flux outputs agree with the port cell by cell to 0.02
+    erg cm-2 s-1, where the IDL prints 0.01 and the largest difference is 0.019.
+    Their hemispheric powers agree to 0.01 %.
+  - Of the 60 number-flux outputs, 58 agree to 0.3 % of each field's maximum. The 03 UT wave output
+    differs in one cell, where the two hemispheres straddle a clamp. The 12 UT
+    diffuse output lies outside the IDL test's 14-03 UT window, and it differs
+    at low latitudes.
+  - A unit test repeats the energy-flux check whenever the pinned zip is cached.
+- **Against observations.** The NOAA POES/MetOp TED electron energy flux (NCEI
+  level 2, `ted x econtr`) was taken at the 120-km foot of each 16-s record.
+  Six satellites over 24-25 Oct 2011 gave 29,403 records poleward of 50 deg
+  and 338 polar passes. For both hemispheres:
+  - log-flux correlation per record: 0.57 (north), 0.56 (south);
+  - correlation of the flux summed over each pass: 0.49 (north), 0.61 (south);
+  - median ratio of model to observed: 2.3 (north), 2.6 (south). With ions
+    against TED's total, it is 2.4 and 2.7.
+
+  The high ratio is consistent with TED's 20 keV upper limit, against DMSP's
+  30 keV, and with TED viewing only near the local vertical. Single records
+  scatter widely, because OVATION is a model of mean precipitation.
+- **The storm of 10-11 May 2024** (OMNI2):
+  - hemispheric power rises from about 12 GW (16 UT) to 110-115 GW (21-01 UT);
+  - the northern Joule power is 1.5-4 TW.
+
 ### In forecast history (`spacewx_aurora_opt`)
 
 `spacewx_aurora_opt = 1` evaluates the oval kernel on a WRF-route domain's
@@ -248,6 +328,9 @@ The forecast is identical with the option on or off.
 | F10.7, solar wind real time (`json/rtsw`) | NOAA SWPC | public domain |
 | solar wind historical (OMNI2 hourly, incl. Kp and AL) | NASA SPDF OMNIWeb | public |
 | auroral oval coefficients (shipped in `woof/spacewx/aurora.py`) | Starkov 1994, as tabulated by Sigernes et al. 2011 and ocbpy | published coefficients; ocbpy BSD-3-Clause, notice kept in the module |
+| auroral precipitation (OVATION Prime 2010 coefficients) | NOAA's ovation-prime 2.3.0 distribution on SourceForge, pinned by SHA-256 | public domain (NOAA); fetched at run time, not shipped |
+| Joule power fit (shipped, 16 numbers) | Knipp et al. 2004, Table I | published coefficients |
+| POES/MetOp TED energy flux (validation only) | NOAA NCEI SEM-2 level 2 | public |
 | Kp-from-solar-wind fit (shipped, 4 numbers) | fitted here on OMNI2 and GFZ Kp | woof's own; GFZ Kp CC BY 4.0 |
 | CCIR/URSI ionospheric maps | PyIRI (MIT) at commit c0a50e0a, each file pinned by SHA-256 | ITU-R / URSI published coefficients |
 | IGRF-14 | IAGA V-MOD via NOAA NCEI, pinned by SHA-256 | IAGA published coefficients |
@@ -272,10 +355,13 @@ Attribution:
   BSD-3-Clause).
 - The IONEX TEC maps are from IGS through NASA CDDIS (Johnston et al. 2017, the IGS). They are
   used for grading only.
+- OVATION Prime 2010 is Newell et al. (2009, 2010), distributed by NOAA NGDC/NCEI (ovation-prime
+  2.3.0: P. Newell, JHU/APL; R. Redmon and J. Machol, NOAA). The POES TED data are from NOAA NCEI.
 
 NRLMSIS 2.x is not freely licensed (NRL restricts commercial use), so it is not bundled.
-Neither are the GPL OVATION and Weimer ports. The thermosphere and aurora layers use
-clean-room implementations of published formulas instead.
+Neither are the copyleft ports of OVATION (OvationPyme, LGPL) and of Weimer. The aurora layer
+ports NOAA's public-domain OVATION IDL code instead. The thermosphere layer will use a clean-room
+implementation of published formulas.
 
 ## Validation plan
 

@@ -757,7 +757,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
   oval (`AURORA_ZONE`, `AURORA_DIST`, `MAG_LAT`, `MAG_LT`) into every WRF-route
-  history frame from the start's Kp. The auroral energy, storm-time and
+  history frame from the start's Kp. `woof spacewx aurora --energy` adds the
+  precipitating electron and ion energy and number fluxes and the hemispheric
+  power of OVATION Prime 2010 (a port of NOAA's public-domain IDL code, which
+  reproduces its test outputs; the coefficients are fetched and pinned), and
+  the Knipp et al. 2004 Joule power from OMNI2's PC(N) and Dst. Against POES
+  TED electron flux over the 24-25 Oct 2011 storm, the per-pass correlation is
+  0.49-0.61 and the model reads about 2.5 times higher. The storm-time and
   particle-precipitation layers are planned ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
