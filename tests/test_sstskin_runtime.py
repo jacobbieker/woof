@@ -44,3 +44,23 @@ def test_bulk_sst_snapshot_does_not_alias_device_skin_temperature():
     driver.compute(state,cfg)
     np.testing.assert_array_equal(cp.asnumpy(driver.fields["sst"]).view(np.uint32),cp.asnumpy(bulk).view(np.uint32))
     assert bool(cp.any(driver.fields["tsk"] != bulk))
+
+@pytest.mark.gpu
+@requires_gpu
+def test_skin_keeps_the_bound_lake_water_temperature(monkeypatch):
+    """sst_skin=1 used to rebuild SST from the caller's arrays after the
+    lake-state binding, discarding the observed lake water temperature."""
+    import cupy as cp
+    import woof.ingest.lake_state as obs
+    from woof.core.physics import initialize_physics
+    state,cfg,old = _full_state(sst_skin=1,sf_surface_physics=0,bl_pbl_physics=0)
+    temperature=old.fields["tsk"].copy()
+    def bind(fields, cfg, **kw):
+        fields["sst"][0, 0] = fields["tsk"][0, 0] = cp.float32(280.)
+        return None, dict(schema='gpuwm.lake-init.v1', status='bound')
+    monkeypatch.setattr(obs, "initialize_surface", bind)
+    bulk=temperature.copy()
+    driver=initialize_physics(state,cfg,landmask=0.,tsk=temperature,sst=bulk,glw=400.,swdown=1000.)
+    assert float(bulk[0, 0]) != 280.
+    assert float(driver.fields["sst"][0, 0]) == 280.
+    assert driver.fields["sst"].data.ptr not in (driver.fields["tsk"].data.ptr, bulk.data.ptr)

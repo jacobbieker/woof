@@ -8715,9 +8715,10 @@ def initialize_physics(
         latitude=radiation_latitude, longitude=radiation_longitude,
         cold_start=lsm_cold_start)
     if getattr(cfg, "sst_skin", 0):
-        f["sst"] = _as_2d(tsk if sst is None else sst, shape, "sst").copy()
-        # Bulk SST must stay independent if a device caller supplies the
-        # same array for SST and TSK; the skin write-back mutates TSK.
+        # f["sst"] is already its own copy (above), independent of TSK,
+        # which the skin write-back mutates; it is not rebuilt here, since
+        # a rebuild from the caller's arrays would discard the lake water
+        # temperature initialize_surface just bound.
         # WRF tools/gen_allocs.c initializes allocated REAL state to zero.
         # SSTSK has no later cold-start initializer before its first call.
         f["sstsk"] = cp.zeros(shape, dtype=DTYPE)
