@@ -10511,6 +10511,11 @@ def estimate_domain(dc: DomainConfig, *, spec_bdy_width: int | None = None,
         # The auroral oval history's held columns, frame, outputs and rows.
         from woof.spacewx.aurora_history import device_shapes as aurora_shapes
         items += _items("physics", aurora_shapes(run))
+    if int(getattr(run, "spacewx_epp_opt", 0) or 0):
+        # The solar-proton chemistry source's held mask and its step's peak.
+        from woof.spacewx import epp_chem
+        items += _items("physics", epp_chem.device_shapes(run))
+        items += _items("transient", epp_chem.transient_shapes(run))
     items += _items("transient", ysu_output_transient_shapes(run))
     items += _items("transient", mynn_scalar_transient_shapes(run))
     items += _items("transient", tracer_pbl_transient_shapes(run))

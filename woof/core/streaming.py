@@ -4892,6 +4892,15 @@ def attach(state, cfg, decision: StreamingDecision, *, tile_state_factory,
             "driver's columns at each frame and are not carried by the tile "
             "store, so it cannot run streamed yet.  Run this domain resident "
             "([tiles] mode = 'off'), or set spacewx_aurora_opt = 0.")
+    if int(getattr(cfg, "spacewx_epp_opt", 0) or 0):
+        # Named breakage: the solar-proton source (woof.spacewx.epp_chem)
+        # holds its polar-cap mask per domain on the driver's columns, which
+        # the tile store does not carry.
+        raise StreamingRefused(
+            f"grid_id = {int(getattr(cfg, 'grid_id', 0))} sets spacewx_epp_opt = 1, "
+            "whose polar-cap source is held on the driver's columns and is not "
+            "carried by the tile store, so it cannot run streamed yet.  Run this "
+            "domain resident ([tiles] mode = 'off'), or set spacewx_epp_opt = 0.")
     if int(getattr(cfg, "sf_surface_mosaic", 0) or 0) == 1:
         # Named breakage: a tile buffer is built by initialize_physics on
         # neutral geography (prepared_tile_state_factory) and no door runs

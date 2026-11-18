@@ -262,6 +262,8 @@ def step(ctx, dt, ktau):
     if sorgam:
         nu0 = ctx.field(table.row("nu0"))
         cp.maximum(nu0, NU0_FLOOR, out=nu0)
+    if int(getattr(ctx.cfg, "spacewx_epp_opt", 0) or 0):
+        _solar_protons(ctx, dt)
     frames = emission_frames(ctx)
     if frames is None:
         for name, _e in PUBLISHED:
@@ -280,3 +282,18 @@ def step(ctx, dt, ktau):
     for name, e in PUBLISHED:
         frame = frames[e]
         ctx.diag[name][...] = frame if frame.ndim == 2 else frame[0]
+
+
+def _solar_protons(ctx, dt):
+    """spacewx_epp_opt = 1: the solar-proton NO, OH and HO2 (woof.spacewx.epp_chem),
+    booked with this process's emissions.  Rebuilt from the configuration on
+    the first step of a run or a resume."""
+    from woof.spacewx.epp_chem import YIELDS, EppSource
+
+    chem = ctx.state.chem
+    source = getattr(chem, "epp_source", None)
+    if source is None:
+        source = chem.epp_source = EppSource.for_context(ctx)
+        receipt = source.receipt()
+        print("[spacewx epp] " + " ".join(f"{k}={v}" for k, v in sorted(receipt.items())), flush=True)
+    source.apply({name: ctx.field(ctx.table.row(name)) for name, _y in YIELDS}, ctx.met("p8w"), dt)

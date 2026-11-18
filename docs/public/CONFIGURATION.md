@@ -1517,12 +1517,16 @@ each one off, the run executes no new code. The design and the planned layers
 | `solar_tsi_opt` | `0` | `1` scales every shortwave output of each radiation call by `TSI(t) / reference`. Shortwave transfer is linear in the top-of-atmosphere flux, so this equals changing WRF's `SOLCON = 1370 * ECCFAC` for every shortwave scheme. |
 | `solar_tsi_source` | `""` | The TSI series. A CSV of `YYYY-MM-DD,W m-2` daily means, a NOAA CDR netCDF (`TSI`, `time` in days since 1610-01-01), several paths joined by `:`, or `"nrlssi2"`, which fetches the NOAA NRLSSI2 daily CDR files for the run's years into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`). Daily means sit at noon UTC and are interpolated linearly. A run time outside the series, or in a gap longer than a day, is refused. |
 | `solar_tsi_mode` | `"absolute"` | `"absolute"`: the reference is 1370 W m-2, so the measured TSI replaces WRF's constant. `"relative"`: the reference is 1360.8 W m-2 (the TIM cycle mean), which keeps WRF's calibration and adds only the variability. |
+| `solar_ssi_opt` | `0` | `1` moves RRTMG SW's source between its 14 bands with the day's solar spectrum: band b takes `[S_b(t)/TSI(t)] / [S_b/TSI over solar cycle 24]`, renormalised so the total is unchanged (`solar_tsi_opt` sets the total). The 200-263 nm band is about 2.5 % stronger in 2024 than the cycle mean. RRTMG (`ra_sw_physics = 4` with `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (`14`) only. |
+| `solar_ssi_source` | `""` | The spectral series: `"nrlssi2"` fetches the NOAA CDR daily SSI files (about 13 MB a year) for the run's years into the space-weather cache, or NOAA CDR SSI netCDF paths joined by `:`. Daily means sit at noon UTC and are interpolated linearly; a time outside the series or in a gap is refused. |
 | `spacewx_ionosphere_opt` | `0` | `1` adds the climatological ionosphere to every history frame: `IONO_TEC` (vertical TEC, 60-2000 km, TECU), `IONO_FOF2` and `IONO_FOE` (MHz), `IONO_HMF2` (km) and `IONO_NMF2` (m-3), on the domain's columns at the frame's valid time. It is a diagnostic: the atmosphere integrates identically. |
 | `spacewx_f107_source` | `""` | The F10.7 that drives it. `""` or `"gfz"` fetches GFZ's `Kp_ap_Ap_SN_F107_since_1932.txt` into the space-weather cache. A path reads a file in that format, and a number is a fixed flux in sfu. The value at the run's start is held for the whole run (persistence). |
 | `spacewx_f107_mode` | `"81day"` | `"81day"`: the mean observed F10.7 of the 81 UT days ending the day before the start. `"daily"`: the day before the start alone. |
 | `spacewx_ionosphere_maps` | `"ccir"` | The foF2 maps, `"ccir"` or `"ursi"`. |
 | `spacewx_aurora_opt` | `0` | `1` adds the auroral oval (Starkov 1994 on the IGRF-14 dipole) to every history frame: `AURORA_ZONE` (0 equatorward of the diffuse aurora, 1 diffuse aurora, 2 oval, 3 polar cap), `AURORA_DIST` (degrees poleward of the diffuse aurora's equatorward edge, the visibility line), `MAG_LAT` (degrees) and `MAG_LT` (hours), on the domain's columns at the frame's valid time. `2` also adds OVATION Prime 2010's precipitating particle energy flux: `AURORA_EFLUX` (electron energy flux, mW m-2), `AURORA_EMEAN` (electron mean energy, keV) and `AURORA_IFLUX` (ion energy flux, mW m-2), from the solar-wind coupling of the hours that have ended by the start; it needs `spacewx_kp_source = "omni"` or `"swpc"`. It is a diagnostic: the atmosphere integrates identically. |
 | `spacewx_kp_source` | `""` | The Kp that drives it, held at the run's start (persistence). `""` or `"gfz"`: the observed Kp of the latest 3-hour interval that has ended by the start, in GFZ's index file (fetched; a path reads a file in that format). `"omni"` or `"swpc"`: Kp estimated from the solar wind (NASA SPDF OMNI2 or NOAA SWPC real time) for the latest 3-hour interval whose fitted hours have ended by the start. A number is a fixed Kp in [0, 9]. Either way the Kp must lie within 24 h before the start. |
+| `spacewx_epp_opt` | `0` | `1` adds the NO, OH and HO2 that solar protons make in the polar caps (\|dipole magnetic latitude\| >= 60 deg) to the RADM2 rows `no`, `ho` and `ho2`, at each chemistry step, inside `emission.radm2` (booked as emitted): 1.25 NO and one OH plus one HO2 per ion pair, with the ion pairs from the GOES integral proton flux (Bethe stopping in air, 35 eV per pair; `woof spacewx particles` prints the same rates). Only an hour at or above NOAA's S1 threshold (10 pfu above 10 MeV) adds anything. It changes the chemistry; it needs `chem_sets` `radm2` or `radm2sorg`. |
+| `spacewx_epp_source` | `""` | The proton flux, held at the run's start (persistence): `"omni"` (NASA SPDF OMNI2, words 43-48), `"swpc"` (NOAA SWPC's GOES feed, the last 3 days) or OMNI2 file path(s) joined by `:`. The hour read is the last one that has ended by the domain's start; one whose >10 MeV flux is missing is refused (OMNI2's proton words are fill from 2021 on: use `"swpc"`). |
 
 `solar_tsi_source` and `solar_tsi_mode` are refused while `solar_tsi_opt = 0`,
 since they would do nothing. `solar_tsi_opt = 1` is refused without a
@@ -1533,6 +1537,12 @@ seam takes the same keys (`woof hex forecast --physics solar_tsi_opt=1
 take them yet. The NOAA CDR lags real time by a few months, so a forecast for
 the coming days needs a CSV, for example the last measured value carried
 forward.
+
+`solar_ssi_source` is refused while `solar_ssi_opt = 0`. `solar_ssi_opt = 1` is
+refused with any shortwave other than legacy RRTMG or RRTMG-K (RTE+RRTMGP's
+g-point source has its own bands), with `dfi_opt` (the filter's CUDA graph
+would freeze the first call's factor), with FARMS (`swint_opt = 2`, whose
+surface shortwave would not see the band shares) and on hex.
 
 The `spacewx_f107_*` and `spacewx_ionosphere_maps` keys are refused while
 `spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 1` is refused without a
@@ -1560,6 +1570,16 @@ The OVATION Prime coefficients (NOAA's public-domain ovation-prime 2.3.0 zip,
 24 MB) are fetched on first use into the space-weather cache and checked
 against a pinned SHA-256. Both aurora
 keys are output-only, so a restart may switch the rows on or off.
+
+`spacewx_epp_source` is refused while `spacewx_epp_opt = 0`. `spacewx_epp_opt =
+1` is refused without RADM2 chemistry (the `emission.radm2` rows `no`, `ho`
+and `ho2`), with no radiation scheme (the polar caps are placed on the
+radiation geometry's xlat/xlong), on a streamed domain and on hex. Each domain
+holds the hour before its own start, kept per source and start in the
+space-weather cache (`epp-flux`), so a resume holds the same hour and a nest
+started with its parent holds its parent's. The hour, the source's SHA-256 and whether it is an event are
+printed as the run starts (the `[spacewx epp]` line). Both keys change the
+forecast, so they are part of the restart identity.
 
 ## What a WRF namelist setting becomes
 
