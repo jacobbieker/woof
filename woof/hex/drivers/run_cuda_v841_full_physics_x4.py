@@ -321,7 +321,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # manifest JSON round trip at every coupling launch.  No kernel, launch or operand changed;
     # 2 h the storm LTS forecast 0 of 1,167,818,735 words differ (HEX-HOST-BOUND-2026-10-27).
     "src/hexcore/cuda_physics_v841.py": (
-        "8140553c0bec161af26c5c4f66ff8a54f1f18762810d36460cf447996ee64b44"
+        "af035559be26ab35ed64abe493d2086abb3c82a5f7c5aa672653d2bf43101276"
     ),
     # Re-frozen during the 12 GiB capacity work: the dynamics subcycle stopped
     # copying a scalar block nothing writes, stopped taking a private image of

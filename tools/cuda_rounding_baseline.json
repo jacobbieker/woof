@@ -5675,7 +5675,7 @@
    },
    {
     "file": "woof/hex/cuda_physics_v841.py",
-    "sha256": "8140553c0bec161af26c5c4f66ff8a54f1f18762810d36460cf447996ee64b44"
+    "sha256": "af035559be26ab35ed64abe493d2086abb3c82a5f7c5aa672653d2bf43101276"
    },
    {
     "file": "woof/hex/cuda_regional_hoist_v841.py",
