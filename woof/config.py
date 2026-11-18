@@ -2357,7 +2357,10 @@ class RunConfig:
     # only: the atmosphere integrates identically.  spacewx_kp_source is
     # "gfz" (the latest observed Kp at the start; "" means the same), "omni"
     # or "swpc" (Kp estimated from the solar wind), a GFZ-format file or a
-    # number in [0, 9], held for the run.  0 runs no new code.
+    # number in [0, 9], held for the run.  spacewx_aurora_opt = 2 adds
+    # OVATION Prime 2010's electron energy flux, mean energy and ion energy
+    # flux (woof.spacewx.ovation), driven by the solar wind ("omni" or
+    # "swpc").  0 runs no new code.
     spacewx_aurora_opt: int = _config_field(default=0, kw_only=True)
     spacewx_kp_source: str = _config_field(default="", kw_only=True)
 
@@ -2438,10 +2441,11 @@ def _validate_spacewx_ionosphere(cfg) -> None:
 def _validate_spacewx_aurora(cfg) -> None:
     """spacewx_aurora_opt and its key (woof.spacewx.aurora_history)."""
     opt, source = cfg.spacewx_aurora_opt, cfg.spacewx_kp_source
-    if type(opt) is not int or opt not in (0, 1):
+    if type(opt) is not int or opt not in (0, 1, 2):
         raise ConfigurationRefused(
-            f"spacewx_aurora_opt={opt!r} must be 0 (no aurora) or 1 "
-            "(the auroral oval in every history frame)")
+            f"spacewx_aurora_opt={opt!r} must be 0 (no aurora), 1 (the auroral "
+            "oval in every history frame) or 2 (the oval and its particle "
+            "energy flux)")
     if type(source) is not str:
         raise ConfigurationRefused("spacewx_kp_source must be a string")
     if opt == 0:
@@ -2452,12 +2456,16 @@ def _validate_spacewx_aurora(cfg) -> None:
         return
     from woof.spacewx.aurora_history import AuroraHistoryError, parse_kp_source
     try:
-        parse_kp_source(source)
+        kind, _value = parse_kp_source(source)
     except AuroraHistoryError as exc:
         raise ConfigurationRefused(str(exc)) from None
+    if opt == 2 and kind not in ("omni", "swpc"):
+        raise ConfigurationRefused(
+            f"spacewx_aurora_opt = 2 drives OVATION Prime with the solar wind, so "
+            f"spacewx_kp_source must be 'omni' or 'swpc', not {source!r}")
     if not radiation_enabled(cfg):
         raise ConfigurationRefused(
-            "spacewx_aurora_opt = 1 places the auroral oval on the radiation "
+            f"spacewx_aurora_opt = {opt} places the auroral oval on the radiation "
             "geometry's columns, and no radiation scheme is on "
             "(ra_lw_physics = ra_sw_physics = 0)")
 

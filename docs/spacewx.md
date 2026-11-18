@@ -15,7 +15,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU | available as `woof spacewx ionosphere` (global grid) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
-| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt`); energy flux and Joule power available as `woof spacewx aurora --energy` |
+| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | ion-pair rates (CMIP6 EPP, Ap-driven MEE, GOES SPE) as NOx/HOx sources in chemistry, for high-top runs | planned |
 | L1b spectral irradiance | per-band solar variability in RRTMG SW and photolysis | planned |
@@ -317,6 +317,16 @@ The forecast is identical with the option on or off.
   the start. The receipt names the interval it came from. If GFZ cannot be
   reached, the cached file is used.
 - The dipole frame is taken at the start; the MLT turns with each frame.
+- `spacewx_aurora_opt = 2` adds three rows from OVATION Prime 2010:
+  `AURORA_EFLUX` (the electron energy flux, diffuse + mono + wave, mW m-2),
+  `AURORA_EMEAN` (its mean energy, keV) and `AURORA_IFLUX` (the ion energy
+  flux, mW m-2). It needs `spacewx_kp_source = "omni"` or `"swpc"`. OVATION's
+  dPhi/dt is taken on the hour of the start, where the hour in progress has
+  weight 0, so only hours that have ended count. It is held for the run, and so
+  is each hemisphere's season. Each frame looks the held grids up at the oval's
+  MAG_LAT and MAG_LT, so the pattern turns with the Sun as the oval does. The
+  `[spacewx aurora]` line adds dPhi/dt, the coefficients' SHA-256 and the
+  hemispheric power. The dPhi/dt is kept with the held Kp.
 - Rows are rebuilt from the configuration on restart (no checkpoint state),
   and the two keys are output-only for the restart and prepared-cache
   identities, so a resume may switch the rows on or off. A fetched Kp (gfz,

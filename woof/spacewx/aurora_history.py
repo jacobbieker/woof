@@ -1,4 +1,5 @@
-"""The L3b auroral oval in a forecast's history (``spacewx_aurora_opt = 1``).
+"""The L3b auroral oval in a forecast's history (``spacewx_aurora_opt = 1``),
+and with ``spacewx_aurora_opt = 2`` its particle energy flux.
 
 A diagnostic layer above the model top, like the ionosphere rows
 (woof.spacewx.history).  It reads nothing the forecast integrates and writes
@@ -25,6 +26,15 @@ dipole) is taken at the start; the subsolar point, and so the MLT, moves with
 each frame.  The columns are the radiation geometry's, so a run needs a
 radiation scheme on.  Hex meshes and streamed (tiled) domains refuse the option
 for now; each says so by name.
+
+``spacewx_aurora_opt = 2`` adds three rows from OVATION Prime 2010
+(woof.spacewx.ovation): the precipitating electron energy flux, its mean
+energy and the ion energy flux.  OVATION is driven by the solar wind, so this
+needs ``spacewx_kp_source = "omni"`` or ``"swpc"``.  Its dPhi/dt is OVATION's
+4-hour weighted mean taken on the hour of the start, where the hour in
+progress has weight 0, so only hours that have ended count; it is held for the
+run like the Kp, and so is the season.  Each frame looks the held grid up at
+the oval's geomagnetic latitude and MLT.
 """
 from __future__ import annotations
 
@@ -39,6 +49,13 @@ HISTORY_FIELDS = {
     "MAG_LAT": ("mlat", "GEOMAGNETIC LATITUDE (IGRF-14 CENTRED DIPOLE)", "degree_north"),
     "MAG_LT": ("mlt", "MAGNETIC LOCAL TIME (IGRF-14 CENTRED DIPOLE)", "hour"),
 }
+#: The energy-flux rows of ``spacewx_aurora_opt = 2``: wrfout name ->
+#: (woof.spacewx.ovation column field, description, units).
+ENERGY_HISTORY_FIELDS = {
+    "AURORA_EFLUX": ("eflux", "ELECTRON PRECIPITATION ENERGY FLUX (OVATION PRIME 2010)", "mW m-2"),
+    "AURORA_EMEAN": ("mean_energy", "ELECTRON PRECIPITATION MEAN ENERGY (OVATION PRIME 2010)", "keV"),
+    "AURORA_IFLUX": ("eflux_ion", "ION PRECIPITATION ENERGY FLUX (OVATION PRIME 2010)", "mW m-2"),
+}
 #: How far back from the start an observed or estimated Kp is looked for.
 LOOKBACK_HOURS = 24
 
@@ -51,11 +68,20 @@ def enabled(cfg) -> bool:
     return bool(int(getattr(cfg, "spacewx_aurora_opt", 0) or 0))
 
 
+def energy_enabled(cfg) -> bool:
+    return int(getattr(cfg, "spacewx_aurora_opt", 0) or 0) == 2
+
+
+def row_names(cfg) -> tuple[str, ...]:
+    """The wrfout names the option writes (none when off)."""
+    if not enabled(cfg):
+        return ()
+    return tuple(HISTORY_FIELDS) + (tuple(ENERGY_HISTORY_FIELDS) if energy_enabled(cfg) else ())
+
+
 def history_shapes(cfg) -> dict[str, tuple[int, int]]:
     """wrfout name -> shape of the rows the option adds (empty when off)."""
-    if not enabled(cfg):
-        return {}
-    return {name: (int(cfg.ny), int(cfg.nx)) for name in HISTORY_FIELDS}
+    return {name: (int(cfg.ny), int(cfg.nx)) for name in row_names(cfg)}
 
 
 def device_shapes(cfg) -> dict[str, tuple[int, ...]]:
@@ -68,7 +94,7 @@ def device_shapes(cfg) -> dict[str, tuple[int, ...]]:
     ncol = int(cfg.ny) * int(cfg.nx)
     shapes = {f"spacewx_aurora/{name}": (ncol,) for name in ("lat", "lon", *OUTPUTS)}
     shapes["spacewx_aurora/frame"] = (9,)
-    shapes["spacewx_aurora/history"] = (len(HISTORY_FIELDS), int(cfg.ny), int(cfg.nx))
+    shapes["spacewx_aurora/history"] = (len(row_names(cfg)), int(cfg.ny), int(cfg.nx))
     return shapes
 
 
@@ -113,9 +139,19 @@ def _latest(lookup, start: datetime, what: str, complete_hours: int) -> tuple[fl
         f"(latest interval tried {first:%Y-%m-%dT%H}Z: {errors[0] if errors else 'none'})")
 
 
+def _coupling_at_start(wind, start: datetime) -> float:
+    """OVATION's dPhi/dt from the hours that have ended by the start."""
+    from woof.spacewx import ovation
+    try:
+        return ovation.coupling(wind, start.replace(minute=0, second=0, microsecond=0))
+    except ovation.OvationError as exc:
+        raise AuroraHistoryError(f"spacewx_aurora_opt = 2: no OVATION coupling at the start: {exc}") from None
+
+
 def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loader=None,
-             memo=None) -> dict:
-    """The run's held Kp, its |AL| and the receipt of where it came from.
+             memo=None, energy: bool = False) -> dict:
+    """The run's held Kp, its |AL| and the receipt of where it came from; with
+    ``energy``, also OVATION's dPhi/dt (a solar-wind source only).
 
     With ``memo`` (a directory), a fetched source's result is kept per
     (source, start): a resumed run, and every domain of a nested one, holds
@@ -123,10 +159,14 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
     from woof.spacewx.aurora import kp_to_al
 
     kind, value = parse_kp_source(source)
+    if energy and kind not in ("omni", "swpc"):
+        raise AuroraHistoryError(
+            f"spacewx_aurora_opt = 2 drives OVATION Prime with the solar wind, so "
+            f"spacewx_kp_source must be 'omni' or 'swpc', not {source!r}")
     if kind == "value":
         return {"kp": float(value), "al": float(kp_to_al(value)),
                 "record": {"spacewx_kp_source": "value"}}
-    memo_path = None
+    memo_path = held = None
     if memo is not None and kind in ("gfz", "omni", "swpc"):
         import hashlib
         import json
@@ -136,18 +176,35 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
         if memo_path.is_file():
             try:
                 held = json.loads(memo_path.read_text(encoding="utf-8"))
-                return {"kp": float(held["kp"]), "al": float(held["al"]),
-                        "record": dict(held["record"], spacewx_kp_held_from=str(memo_path))}
+                out = {"kp": float(held["kp"]), "al": float(held["al"]),
+                       "record": dict(held["record"], spacewx_kp_held_from=str(memo_path))}
+                if held.get("dphidt") is not None:
+                    out["dphidt"] = float(held["dphidt"])
+                if not energy or "dphidt" in out:
+                    return out
+                # Held by a run without the energy rows: keep its Kp, add the coupling.
             except (ValueError, KeyError, TypeError):
-                pass                                   # damaged: read the source again
+                held = None                            # damaged: read the source again
     if kind in ("omni", "swpc"):
         from woof.spacewx import solarwind
         load = solarwind_loader or solarwind.load
         wind = load(kind, start - timedelta(hours=LOOKBACK_HOURS + 4), start)
+        if held is not None:
+            out["dphidt"] = _coupling_at_start(wind, start)
+            out["record"]["spacewx_dphidt_sha256"] = wind.sha256
+            _write_memo(memo_path, {**held, "dphidt": out["dphidt"]})
+            return out
         # Hours T-1, T and T+1 must have ended by the start.
         kp, at = _latest(wind.kp_estimate, start, f"{kind} solar wind", complete_hours=2)
         record = {"spacewx_kp_source": wind.source, "spacewx_kp_sha256": wind.sha256,
                   "spacewx_kp_interval": f"{at:%Y-%m-%dT%H:%M}Z", "spacewx_kp_estimated": True}
+        # Kept whenever it exists, so that a resume with the energy rows finds it.
+        try:
+            dphidt = _coupling_at_start(wind, start)
+        except AuroraHistoryError:
+            if energy:
+                raise
+            dphidt = None
     else:
         from woof.spacewx import indices
         load = indices_loader or indices.load
@@ -163,21 +220,28 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
         record = {"spacewx_kp_source": geo.source, "spacewx_kp_sha256": geo.sha256,
                   "spacewx_kp_interval": f"{at:%Y-%m-%dT%H:%M}Z"}
     out = {"kp": float(kp), "al": float(kp_to_al(kp)), "record": record}
+    if kind in ("omni", "swpc") and dphidt is not None:
+        out["dphidt"] = float(dphidt)
     if memo_path is not None:
-        import json
-        import os
-        memo_path.parent.mkdir(parents=True, exist_ok=True)
-        part = memo_path.with_name(f"{memo_path.name}.{os.getpid()}.part")
-        part.write_text(json.dumps(out, sort_keys=True) + "\n", encoding="utf-8")
-        part.replace(memo_path)
+        _write_memo(memo_path, out)
     return out
+
+
+def _write_memo(memo_path, out: dict) -> None:
+    import json
+    import os
+    memo_path.parent.mkdir(parents=True, exist_ok=True)
+    part = memo_path.with_name(f"{memo_path.name}.{os.getpid()}.part")
+    part.write_text(json.dumps(out, sort_keys=True) + "\n", encoding="utf-8")
+    part.replace(memo_path)
 
 
 class AuroraHistory:
     """The option's state on one domain: rebuilt from the RunConfig, stateless."""
 
     @classmethod
-    def for_run(cls, cfg, radiation, *, indices_loader=None, solarwind_loader=None, igrf_model=None):
+    def for_run(cls, cfg, radiation, *, indices_loader=None, solarwind_loader=None, igrf_model=None,
+                ovation_coefficients=None):
         if not enabled(cfg):
             return None
         from woof.spacewx.history import _host, _naive_utc
@@ -194,19 +258,30 @@ class AuroraHistory:
         if indices_loader is None and solarwind_loader is None:
             from woof.spacewx.solar_irradiance import cache_root
             memo = cache_root() / "aurora-activity"
-        drive = activity(getattr(cfg, "spacewx_kp_source", ""), start,
-                         indices_loader=indices_loader, solarwind_loader=solarwind_loader, memo=memo)
+        energy = energy_enabled(cfg)
+        drive = activity(getattr(cfg, "spacewx_kp_source", ""), start, indices_loader=indices_loader,
+                         solarwind_loader=solarwind_loader, memo=memo, energy=energy)
         from woof.spacewx.aurora import Aurora
         lat, lon = _host(lat), _host(lon)
         oval = Aurora(lat, lon, when=start, igrf_model=igrf_model)
-        return cls(oval, start, drive, lat.shape)
+        grids = None
+        if energy:
+            from woof.spacewx import ovation
+            coef = ovation_coefficients if ovation_coefficients is not None else ovation.load()
+            grids = ovation.hemisphere_grids(coef, drive["dphidt"], start)
+            drive = dict(drive, record=dict(drive["record"], spacewx_ovation_sha256=coef.sha256,
+                                            spacewx_ovation_source=coef.source))
+        return cls(oval, start, drive, lat.shape, grids=grids)
 
-    def __init__(self, oval, start_time: datetime, drive: dict, shape):
+    def __init__(self, oval, start_time: datetime, drive: dict, shape, grids=None):
         self.aurora = oval
         self.start_time = start_time
         self.kp = drive["kp"]
         self.al = drive["al"]
         self.record = drive["record"]
+        self.dphidt = drive.get("dphidt")
+        self.grids = grids
+        self.names = tuple(HISTORY_FIELDS) + (tuple(ENERGY_HISTORY_FIELDS) if grids is not None else ())
         self.shape = tuple(int(n) for n in shape)
         self._rows = None
         self._elapsed = None
@@ -216,22 +291,35 @@ class AuroraHistory:
 
     def receipt(self) -> dict:
         from woof.spacewx.aurora import receipt
-        return receipt(self.aurora, {**self.record, "spacewx_kp": self.kp, "spacewx_al_nt": self.al})
+        extra = {}
+        if self.grids is not None:
+            from woof.spacewx import ovation
+            extra = {"spacewx_ovation_dphidt": self.dphidt, "spacewx_energy_model": "OVATION Prime 2010",
+                     **{f"spacewx_hp_{h}_gw": ovation.electron_power(g) for h, g in self.grids.items()}}
+        return receipt(self.aurora, {**self.record, "spacewx_kp": self.kp, "spacewx_al_nt": self.al, **extra})
 
     def history_fields(self, elapsed_seconds: float) -> dict:
         """wrfout name -> (ny, nx) float32 device row at the frame's valid time
         (one stable allocation, refilled when the valid time moves)."""
         import cupy as cp
         if self._rows is None:
-            rows = cp.zeros((len(HISTORY_FIELDS), *self.shape), dtype=cp.float32)
-            self._rows = dict(zip(HISTORY_FIELDS, (rows[i] for i in range(len(HISTORY_FIELDS)))))
+            rows = cp.zeros((len(self.names), *self.shape), dtype=cp.float32)
+            self._rows = dict(zip(self.names, (rows[i] for i in range(len(self.names)))))
         if self._elapsed != float(elapsed_seconds):
             out = self.aurora.evaluate(self.valid_time(elapsed_seconds), self.al)
             for name, (key, _desc, _units) in HISTORY_FIELDS.items():
                 self._rows[name][...] = out[key].reshape(self.shape)
+            if self.grids is not None:
+                # OVATION's bins on the frame's columns: an integer lookup of the
+                # held grid, done on the host from the kernel's mlat and MLT.
+                from woof.spacewx import ovation
+                cols = ovation.energy_columns(self.grids, cp.asnumpy(out["mlat"]).astype(np.float64),
+                                              cp.asnumpy(out["mlt"]).astype(np.float64))
+                for name, (key, _desc, _units) in ENERGY_HISTORY_FIELDS.items():
+                    self._rows[name][...] = cp.asarray(cols[key].astype(np.float32).reshape(self.shape))
             self._elapsed = float(elapsed_seconds)
         return dict(self._rows)
 
 
-__all__ = ["HISTORY_FIELDS", "AuroraHistory", "AuroraHistoryError", "activity", "enabled",
-           "history_shapes", "device_shapes", "parse_kp_source"]
+__all__ = ["HISTORY_FIELDS", "ENERGY_HISTORY_FIELDS", "AuroraHistory", "AuroraHistoryError", "activity",
+           "enabled", "energy_enabled", "row_names", "history_shapes", "device_shapes", "parse_kp_source"]

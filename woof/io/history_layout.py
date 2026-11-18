@@ -1185,7 +1185,7 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
             spacewx_aurora=(SimpleNamespace(
                 history_fields=lambda _elapsed: {
                     name: carrier(surface) for name in
-                    __import__("woof.spacewx.aurora_history", fromlist=["x"]).HISTORY_FIELDS})
+                    __import__("woof.spacewx.aurora_history", fromlist=["x"]).row_names(cfg)})
                 if int(getattr(cfg, "spacewx_aurora_opt", 0) or 0)
                 else None),
             olr=carrier(surface) if "olr" in allocated else None,
