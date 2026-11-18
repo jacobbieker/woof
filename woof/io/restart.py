@@ -768,9 +768,11 @@ STATE_INFRA_ATTRS = frozenset({
     # digest of every IAU run on the tree route, raised RestartManifestError.
     "_iau_forcing",
     # --nn (woof.nn.wrf_seat): the launch attaches the seat from its --nn
-    # file at every start and resume.  INFRA while it only records (mode
-    # "tap": the forecast's arrays are untouched); a seat that applies a
-    # model binds the model's identity into the checkpoint instead.
+    # file at every start and resume.  INFRA: it carries no state across a
+    # step (a tap only records; an applying seat recomputes its increment
+    # from the time-t state every step), and an applying seat's identity
+    # -- the artefact's hashes and the safety settings -- is bound in the
+    # checkpoint header ("nn_column_seat", _validate_nn_column_checkpoint).
     "_nn_column_seat",
     # woof.da.iau.IAU_AFTER_STEP_ATTRIBUTE: the analysis door's post-step
     # acts for a STREAMED root (its dry-mass share of the IAU window and its
@@ -5380,6 +5382,9 @@ def _prepare_restart(path, state, cfg, *, run_trackers=None,
     header[HAILCAST_VERSION_HEADER_KEY] = _hail_generation(state, cfg)
     if stochastic_header is not None:
         header["ensemble_stochastic"] = stochastic_header
+    nn_seat = getattr(state, "_nn_column_seat", None)
+    if nn_seat is not None and nn_seat.identity() is not None:
+        header["nn_column_seat"] = nn_seat.identity()
     if forcing_contract:
         header.update({
             "forcing_extension_mode": (PRESERVED_FORCING_PREFIX_MODE if preserved_forcing_prefix
@@ -9360,6 +9365,42 @@ def _validate_ensemble_stochastic_checkpoint(header, stored, state):
         raise RestartMismatchError(f"stochastic checkpoint is incompatible: {error}") from error
 
 
+def _validate_nn_column_checkpoint(header) -> None:
+    """An applying --nn seat's identity against the launch's.
+
+    Read from the launch (WOOF_NN_CONFIG), not from an attached seat: a
+    route may restore before it attaches.  A trajectory that applied a
+    column model resumes only under the same artefact and settings, and
+    one that did not resumes only without one; a tap changes nothing and
+    binds nothing."""
+    stored = header.get("nn_column_seat")
+    from os import environ
+    live = None
+    if environ.get("WOOF_NN_CONFIG"):
+        from woof.nn.launch import read_settings
+        settings = read_settings(environ["WOOF_NN_CONFIG"])
+        if settings.applies:
+            from woof.nn.manifest import load_manifest
+            live = {**settings.identity(), "model": load_manifest(settings.model).identity()}
+    if stored is None and live is None:
+        return
+    if stored is None:
+        raise RestartMismatchError(
+            "this checkpoint was written without a neural-network column model, and the launch "
+            f"applies one ({live['mode']} of {live['scheme']} by {live['model']['name']}); resuming "
+            "would splice two trajectories. Resume without --nn, or with mode = \"tap\"")
+    if live is None:
+        raise RestartMismatchError(
+            f"this checkpoint was written by a run that applied a neural-network column model "
+            f"({stored.get('mode')} of {stored.get('scheme')} by {stored.get('model', {}).get('name')}); "
+            "resume it with the same --nn file")
+    if stored != live:
+        changed = sorted(k for k in set(stored) | set(live) if stored.get(k) != live.get(k))
+        raise RestartMismatchError(
+            f"this checkpoint's neural-network column model differs from the launch's in {changed}; "
+            "resume it with the artefact and settings that wrote it")
+
+
 def validate_strict_mass_cold(header) -> bool:
     """Validate the optional first-acoustic-step marker before any restore."""
     value = header.get("wrf_mass_carriers_cold", False)
@@ -9431,6 +9472,7 @@ def _validate_restart(path, state, cfg, *,
     if "native_wrf_moisture" in header and header["native_wrf_moisture"] is not True:
         raise RestartMismatchError("malformed native WRF signed-moisture provenance")
     _validate_ensemble_stochastic_checkpoint(header, stored, state)
+    _validate_nn_column_checkpoint(header)
     from woof.core.trajectory_contract import validate_checkpoint as _validate_trajectory_checkpoint
     _validate_trajectory_checkpoint(header, stored, cfg)
     try:
