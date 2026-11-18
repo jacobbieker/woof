@@ -98,9 +98,13 @@ class NNSettings:
 
     def identity(self) -> dict:
         """What a checkpoint of an applying run binds: the settings that
-        change the trajectory (the artefact's own identity is added by the
-        seat)."""
-        return {"mode": self.mode, "scheme": self.scheme, "backend": self.backend,
+        change the trajectory, with ``auto`` resolved to the runner this
+        process uses (the artefact's own identity is added by the seat)."""
+        backend = self.backend
+        if backend == "auto":
+            from woof.nn.models import default_backend
+            backend = default_backend()
+        return {"mode": self.mode, "scheme": self.scheme, "backend": backend, "device": self.device,
                 "out_of_range": self.out_of_range, "margin": float(self.margin), "fixer": self.fixer,
                 "limit_outputs": self.limit_outputs, "positivity": self.positivity}
 

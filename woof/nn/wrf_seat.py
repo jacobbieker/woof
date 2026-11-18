@@ -4,9 +4,12 @@
 once per dycore step, on the time-t state, right after the ensemble
 stochastic binding (SPPT/SKEBS) has acted on the step's held
 non-microphysics tendencies and before chemistry, IAU and FDDA fold theirs
-in -- the same seat, so a scheme an NN replaces is perturbed and nudged as
-the scheme was.  A state without ``_nn_column_seat`` (every forecast
-without ``--nn``) skips the call; the default path is unchanged.
+in.  An applying seat is refused on a state that carries a stochastic
+binding: a replacement there would keep the scheme's perturbation and drop
+the model's (``total`` would drop SPPT altogether), and only ensemble
+member legs, which refuse ``--nn``, carry one today.  A state without
+``_nn_column_seat`` (every forecast without ``--nn``) skips the call; the
+default path is unchanged.
 
 Columns.  :meth:`WrfColumnSeat.columns` draws a set of mass-grid columns
 and assembles the vocabulary below for them as ``[feature, column]``
@@ -184,6 +187,16 @@ class WrfColumnSeat:
         if unknown:
             raise NNConfigError(f"--nn outputs {unknown} are not tendencies the seat holds {sorted(OUTPUTS)}")
         self._check_available(state, cfg)
+        if self.applies:
+            if getattr(state, "_ensemble_stochastic", None) is not None:
+                raise NotImplementedError(
+                    f"--nn mode = {settings.mode!r} with SPPT/SKEBS: the seat acts after the stochastic "
+                    "binding, so the model's rate would not be perturbed as the scheme's is")
+            missing = [n for n in self.output_names
+                       if n.startswith("dq") and getattr(state, n[1:], None) is None]
+            if missing:
+                raise NNConfigError(f"--nn model {self.manifest.name}: outputs {missing} name moisture this "
+                                    "configuration does not carry")
         self.inputs = tuple(FieldSpec(n, VOCABULARY[n][0], self.levels if VOCABULARY[n][1] == "3d" else 1)
                             for n in self.input_names)
         self.outputs = tuple(FieldSpec(n, OUTPUTS[n][0], self.levels) for n in self.output_names)
@@ -195,6 +208,7 @@ class WrfColumnSeat:
                 f"vocabulary units {[(f.name, f.units, f.levels) for f in self.inputs]} -> "
                 f"{[(f.name, f.units, f.levels) for f in self.outputs]}")
         self.all_columns = np.arange(ny * nx, dtype=np.int64)
+        self._all_gather = None
         self.pool = interior_pool(cfg, ny, nx)
         self.ncol = min(settings.tap_columns, self.pool.size)
         # A scheme's slot holds the tendency of its LAST call (radt, cudt,
@@ -244,6 +258,19 @@ class WrfColumnSeat:
         if not self.applies:
             return None
         return {**self.settings.identity(), "model": self.manifest.identity()}
+
+    def _fallback_faces(self, xp, fallback):
+        """Face masks (u ``[ny, nx+1]``, v ``[ny+1, nx]``) of the faces next
+        to a fallback column: the A-grid to C-grid coupling averages a
+        face's two cells, so a face beside a fallback column is given the
+        scheme's word alone."""
+        nz, ny, nx = self.shape
+        bad = fallback.reshape(ny, nx)
+        no = xp.zeros((ny, 1), dtype=bool)
+        u = xp.concatenate([bad, no], axis=1) | xp.concatenate([no, bad], axis=1)
+        no = xp.zeros((1, nx), dtype=bool)
+        v = xp.concatenate([bad, no], axis=0) | xp.concatenate([no, bad], axis=0)
+        return u, v
 
     # ------------------------------------------------------------ checks
     def _check_available(self, state, cfg) -> None:
@@ -299,7 +326,12 @@ class WrfColumnSeat:
         xp = _xp(state)
         nz, ny, nx = self.shape
         L = self.levels
-        g = _Gather.build(xp, flat, nx)
+        if flat is self.all_columns:  # an applying seat's every step: build the indices once
+            if self._all_gather is None:
+                self._all_gather = _Gather.build(xp, flat, nx)
+            g = self._all_gather
+        else:
+            g = _Gather.build(xp, flat, nx)
         f32 = np.float32
         unit = None
 
@@ -471,13 +503,19 @@ class WrfColumnSeat:
             zero = xp.zeros((nz, ny, nx), dtype=f32)
             momentum = {"ru": rates.pop("ru", zero), "rv": rates.pop("rv", zero)}
         coupled = self._couple(state, cfg, **rates, **momentum)
+        faces = None
+        if momentum and fallback is not None:
+            faces = dict(zip(("ru", "rv"), self._fallback_faces(xp, fallback)))
         out = copy.copy(tendencies)
         for slot in (OUTPUTS[name][1] for name in self.output_names):
             held = getattr(tendencies, slot)
             if held is None:
                 raise RuntimeError(f"--nn model {m.name} writes {slot}, which this run's tendencies do not "
                                    "carry (no scheme produces it)")
-            setattr(out, slot, held + getattr(coupled, slot))
+            increment = getattr(coupled, slot)
+            if faces is not None and slot in faces:
+                increment = xp.where(faces[slot][None], f32(0), increment)
+            setattr(out, slot, held + increment)
         return out
 
     def close(self) -> dict:
