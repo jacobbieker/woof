@@ -286,6 +286,26 @@ class NativeDevicePoolViews(Mapping):
         if self.resident and factory is not None:
             factory().free_all_blocks()
 
+    def resident_target(self, pool, name, like, *, level=1):
+        """The allocation ``write_field(pool, name, like, level=level)`` copies into, when that copy is a
+        whole-array one (same shape and dtype, C-contiguous); otherwise None.
+
+        A producer that writes every element can write it there directly: the pool then holds the words
+        the copy would have put there, without the private buffer or the copy.
+        """
+        if not self.resident:
+            return None
+        old = self.level
+        self.level = level
+        try:
+            target = self.field(pool, name)
+        finally:
+            self.level = old
+        if (tuple(target.shape) == tuple(like.shape) and target.dtype == like.dtype
+                and target.flags.c_contiguous):
+            return target
+        return None
+
     def write_field(self, pool, name, value, *, level=1):
         """Update the authoritative device allocation without a host round trip."""
         old = self.level

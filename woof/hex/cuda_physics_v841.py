@@ -2091,13 +2091,15 @@ def update_mpas_radiation_diagnostics_v842(
 
 def prepare_mpas_transport_source_baseline_v842(
     *, before: Any, source: Any, rho_old: Any, dt: float,
-    n_cells_solve: int, kernel_cache: KernelCache,
+    n_cells_solve: int, kernel_cache: KernelCache, out: Any = None,
 ) -> Any:
     """Time-level-one source update; mpas_atm_time_integration.F:5199-5210.
 
     CUDA transport owns its limiter. This seam reproduces the baseline that
     native leaves in scalars_1 for the post-transport vapor tendency. The held
     sources and outer state remain intact for their other consumers.
+    ``out`` (``before``'s shape, float32, C-contiguous, not ``source``) receives
+    the baseline; the kernel writes every element of it.
     """
     require_resident_array("rho_old", rho_old, dtype=np.float32, ndim=2)
     nlev, ncells = rho_old.shape
@@ -2107,7 +2109,13 @@ def prepare_mpas_transport_source_baseline_v842(
         raise ValueError("MPAS source baseline must match the old density extent")
     if not 0 < n_cells_solve <= ncells or not math.isfinite(dt) or dt <= 0:
         raise ValueError("MPAS source baseline requires positive dt and solve extent")
-    baseline = _cp().empty_like(before)
+    if out is None:
+        baseline = _cp().empty_like(before)
+    else:
+        require_resident_array("out", out, dtype=np.float32, shape=before.shape)
+        if not out.flags.c_contiguous or int(out.data.ptr) == int(source.data.ptr):
+            raise ValueError("MPAS source baseline out must be C-contiguous and distinct from source")
+        baseline = out
     _mpas_v842_launch(kernel_cache, "mpas_transport_source_baseline_v842_f32", before.size,
         (np.int32(nlev), np.int32(ncells), np.int32(n_cells_solve),
          np.int32(before.shape[0]), np.float32(dt), before, source, rho_old, baseline))
