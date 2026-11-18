@@ -4306,7 +4306,8 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
 # The climatological ionosphere (kernels/spacewx_ionosphere.cu, the
 # spacewx_ionosphere_opt history rows), production loader
 # (woof.core.kernels.get_kernel), RTX A6000 sm_86, NVRTC 12.9.86,
-# 2026-11-17, both GPUWM_WRF_EXACT modes: 96 B, 40 registers.
+# 2026-11-17, both GPUWM_WRF_EXACT modes: 96 B, 40 registers; re-measured
+# 2026-11-18 with the storm-time fo_scale argument: unchanged.
 KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
     replace(row, complete=False) if "spacewx_ionosphere" not in row.frames else row
     for row in KERNEL_LOCAL_FRAME_RECORDINGS)
