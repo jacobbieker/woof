@@ -123,9 +123,11 @@ def tile_columns(ncol: int, multiprocessor_count: int, *,
     """Columns in flight per launch: the card's width, never more than ncol.
 
     On Metal (``metal``, default: the active backend) the tile is
-    :func:`woof.core.physics_inventory.metal_column_tile_columns`, the
-    whole domain in one launch under the byte cap at this ``nz`` when the
-    ``scheme`` is given.  The tile only partitions independent columns.
+    :func:`woof.core.physics_inventory.metal_column_tile_columns`: 2,048
+    columns per core, held to whole blocks under the byte cap at this
+    ``nz`` when the ``scheme`` is given, and at least one block (so it can
+    exceed a domain smaller than one block; the launcher bounds its loop by
+    ``ncol``).  The tile only partitions independent columns.
     """
     if _metal_active() if metal is None else metal:
         from woof.core.physics_inventory import metal_column_tile_columns

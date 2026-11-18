@@ -5236,10 +5236,9 @@ def column_cumulus_workspace_bytes(
             continue
         args = (int(dc.run.cu_physics), int(dc.run.nz),
                 int(dc.run.nx) * int(dc.run.ny), profile.multiprocessor_count)
-        worst = max(worst, workspace_bytes(*args))
-        # A Metal device launches the wider Metal tile (tile_columns).
-        if getattr(profile, "backend", "cuda") == "mlx":
-            worst = max(worst, workspace_bytes(*args, metal=True))
+        # A Metal device launches the Metal tile (tile_columns).
+        worst = max(worst, workspace_bytes(
+            *args, metal=getattr(profile, "backend", "cuda") == "mlx"))
     return int(worst)
 
 
@@ -5429,11 +5428,10 @@ def mrf_column_workspace_bytes(
         if int(dc.run.bl_pbl_physics) != MRF_PBL_SCHEME:
             continue
         ncol = int(dc.run.nx) * int(dc.run.ny)
-        columns = min(ncol, tile_cap)
-        if metal:
-            columns = max(columns, metal_column_tile_columns(
-                profile.multiprocessor_count, ncol, MRF_BLOCK,
-                block_bytes=mrf_workspace_floats(int(dc.run.nz), MRF_BLOCK) * 4))
+        columns = (metal_column_tile_columns(
+                       profile.multiprocessor_count, ncol, MRF_BLOCK,
+                       block_bytes=mrf_workspace_floats(int(dc.run.nz), MRF_BLOCK) * 4)
+                   if metal else min(ncol, tile_cap))
         worst = max(worst, mrf_workspace_floats(int(dc.run.nz), columns) * 4)
     return int(worst)
 def ksas_column_workspace_bytes(exp: ExperimentConfig) -> int:
@@ -5714,7 +5712,9 @@ def column_kernel_cumulus_workspace_bytes(
     Read off the scheme's registry ``column_kernel`` row and the launcher's
     own tile rule (woof/core/column_cumulus.py), never restated: the
     workspace is ``workspace_slots * nz`` floats per column in flight, the
-    tile at most ``_TILE_BLOCKS_PER_SM`` blocks per SM, and the tables are
+    tile at most ``_TILE_BLOCKS_PER_SM`` blocks per SM on CUDA and
+    :func:`woof.core.physics_inventory.metal_column_tile_columns` on a
+    Metal profile, and the tables are
     ``tables.floats`` words held for the run.
     """
     from woof.core.column_cumulus import _TILE_BLOCKS_PER_SM, column_kernel_spec
@@ -5729,12 +5729,11 @@ def column_kernel_cumulus_workspace_bytes(
         if spec is None:
             continue
         ncol = int(dc.run.nx) * int(dc.run.ny)
-        columns = min(ncol, int(profile.multiprocessor_count)
-                      * _TILE_BLOCKS_PER_SM * spec.block)
-        if metal:
-            columns = max(columns, metal_column_tile_columns(
-                profile.multiprocessor_count, ncol, spec.block,
-                block_bytes=4 * spec.workspace_slots * int(dc.run.nz) * spec.block))
+        columns = (metal_column_tile_columns(
+                       profile.multiprocessor_count, ncol, spec.block,
+                       block_bytes=4 * spec.workspace_slots * int(dc.run.nz) * spec.block)
+                   if metal else min(ncol, int(profile.multiprocessor_count)
+                                     * _TILE_BLOCKS_PER_SM * spec.block))
         held = int(spec.tables["floats"]) if spec.tables else 0
         initialization = (int(spec.tables["grid"]) * int(spec.tables["block"])
                           * int(spec.tables["scratch_floats_per_thread"])

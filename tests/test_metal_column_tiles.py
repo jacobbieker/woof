@@ -282,6 +282,8 @@ def test_metal_tiles_are_one_launch_and_cuda_keeps_its_rules(monkeypatch):
     assert capped % P.MRF_BLOCK == 0
     assert P.mrf_workspace_floats(256, capped) * 4 <= P.YSU_TILE_BYTES_CAP_METAL
     assert P.mrf_workspace_floats(256, capped + P.MRF_BLOCK) * 4 > P.YSU_TILE_BYTES_CAP_METAL
+    # A workspace-free kernel (zero bytes per block) sets no byte cap.
+    assert C.registry_tile_columns(_Fn(), ncol, 128, block_bytes=0) == ncol
     monkeypatch.setenv("WOOF_METAL_COLUMN_TILE_BLOCKS", "4")
     assert M.mrf_tile_columns(_Fn(), ncol, 49) == 40 * 4 * 32
     assert C.tile_columns(ncol, 40, scheme=nsas, nz=49) == 40 * 2 * C.BLOCK

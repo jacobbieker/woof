@@ -1088,21 +1088,27 @@ YSU_TILE_BLOCKS_PER_CORE_METAL = 64
 YSU_TILE_BYTES_CAP_METAL = 512 * 2**20
 
 
-def ysu_metal_tile_blocks() -> int:
-    """Blocks per core of the Metal YSU tile: ``WOOF_METAL_YSU_TILE_BLOCKS``
-    when set, else :data:`YSU_TILE_BLOCKS_PER_CORE_METAL`."""
+def _positive_env_int(name: str, default: int) -> int:
+    """``name`` as a positive integer when set (blank counts as unset),
+    else ``default``; anything else is refused."""
     import os
-    raw = os.environ.get("WOOF_METAL_YSU_TILE_BLOCKS", "").strip()
+    raw = os.environ.get(name, "").strip()
     if not raw:
-        return YSU_TILE_BLOCKS_PER_CORE_METAL
+        return default
     try:
         value = int(raw)
     except ValueError:
         value = 0
     if value < 1:
-        raise ValueError(
-            f"WOOF_METAL_YSU_TILE_BLOCKS must be a positive integer, not {raw!r}")
+        raise ValueError(f"{name} must be a positive integer, not {raw!r}")
     return value
+
+
+def ysu_metal_tile_blocks() -> int:
+    """Blocks per core of the Metal YSU tile: ``WOOF_METAL_YSU_TILE_BLOCKS``
+    when set, else :data:`YSU_TILE_BLOCKS_PER_CORE_METAL`."""
+    return _positive_env_int("WOOF_METAL_YSU_TILE_BLOCKS",
+                             YSU_TILE_BLOCKS_PER_CORE_METAL)
 
 
 def metal_tile_columns(cores: int, ncol: int, block: int, *,
@@ -1112,49 +1118,43 @@ def metal_tile_columns(cores: int, ncol: int, block: int, *,
     """Columns per Metal launch of a tiled column kernel: ``blocks_per_core``
     blocks of ``block`` columns per GPU core, at most ``ncol``, narrowed to
     whole blocks whose workspace (``block_bytes`` per block, when given)
-    fits ``cap_bytes``, and never below one block.
+    fits ``cap_bytes``, and never below one block (a ``block_bytes`` of
+    zero or less sets no cap).
 
-    The shared Metal rule of YSU, MRF, EEPS and the column cumulus schemes.
+    The shared Metal rule of YSU, MRF and the column cumulus schemes (EEPS
+    keeps its occupancy rule: the wide tile measured slower there).
     CUDA sizes those tiles to the card's resident capacity because the
     workspace is charged per column in flight; on Metal that rule leaves
     the cores unsaturated and costs a full serial column time per launch,
-    so Metal puts a whole domain in one launch where the cap allows.  The
+    so Metal launches as many columns as the per-core width and the byte
+    cap allow (a 228 x 276 domain in one launch for MRF, two for New SAS
+    at 49 levels, where the cap binds).  The
     tile only partitions independent columns, so the words do not depend
     on it (tests/test_ysu_tile_width.py, tests/test_metal_column_tiles.py).
     """
     block = int(block)
     tile = int(cores) * int(blocks_per_core) * block
-    if block_bytes is not None:
+    if block_bytes is not None and int(block_bytes) > 0:
         tile = min(tile, (int(cap_bytes) // int(block_bytes)) * block)
     return int(max(block, min(int(ncol), tile)))
 
 
-#: Metal blocks per core of the MRF, EEPS and column-cumulus tiles, in
+#: Metal blocks per core of the MRF and column-cumulus tiles, in
 #: ``YSU_BLOCK`` (32-column) units, so each launches YSU's columns per
 #: core whatever its own block: 2,048 columns per core, 81,920 on a
-#: 40-core M3 Max, which puts a 228 x 276 domain in one launch.
+#: 40-core M3 Max (before the byte cap).
 #: ``WOOF_METAL_COLUMN_TILE_BLOCKS`` overrides it (same units).
 METAL_COLUMN_TILE_BLOCKS_PER_CORE = YSU_TILE_BLOCKS_PER_CORE_METAL
 
 
 def metal_column_tile_columns(cores: int, ncol: int, block: int, *,
                               block_bytes: int | None = None) -> int:
-    """:func:`metal_tile_columns` for MRF, EEPS and the column cumulus
-    schemes: :data:`METAL_COLUMN_TILE_BLOCKS_PER_CORE` (or
+    """:func:`metal_tile_columns` for MRF and the column cumulus schemes: :data:`METAL_COLUMN_TILE_BLOCKS_PER_CORE` (or
     ``WOOF_METAL_COLUMN_TILE_BLOCKS``) 32-column units per core, rounded
     down to whole ``block``-column blocks (at least one per core), under
     :data:`YSU_TILE_BYTES_CAP_METAL`."""
-    import os
-    raw = os.environ.get("WOOF_METAL_COLUMN_TILE_BLOCKS", "").strip()
-    units = METAL_COLUMN_TILE_BLOCKS_PER_CORE
-    if raw:
-        try:
-            units = int(raw)
-        except ValueError:
-            units = 0
-        if units < 1:
-            raise ValueError("WOOF_METAL_COLUMN_TILE_BLOCKS must be a "
-                             f"positive integer, not {raw!r}")
+    units = _positive_env_int("WOOF_METAL_COLUMN_TILE_BLOCKS",
+                              METAL_COLUMN_TILE_BLOCKS_PER_CORE)
     per_core = max(1, units * YSU_BLOCK // int(block))
     return metal_tile_columns(cores, ncol, block, blocks_per_core=per_core,
                               block_bytes=block_bytes)
