@@ -334,7 +334,11 @@ CONFIG_DIAGNOSTIC_FIELDS = frozenset(
      # only, computed from the run start and the frame's valid time; no
      # prognostic word moves (tests/test_spacewx_ionosphere_history.py).
      "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
-     "spacewx_ionosphere_maps"})
+     "spacewx_ionosphere_maps",
+     # The opt-in auroral oval history (woof.spacewx.aurora_history): AURORA_*
+     # and MAG_* rows only, from the start's Kp and the frame's valid time
+     # (tests/test_spacewx_aurora_history.py).
+     "spacewx_aurora_opt", "spacewx_kp_source"})
 
 #: Versioned semantic identities.  These are deliberately explicit instead
 #: of inferred from scheme numbers: a trajectory-changing implementation or

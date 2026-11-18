@@ -568,6 +568,11 @@
         "inactive_values": ["0"],
         "reason": "the climatological ionosphere (woof.spacewx.history) writes its TEC and F2/E-layer rows through the WRF history writer on the radiation geometry's columns; no hex history stream carries them yet",
         "follow_up": "spacewx_ionosphere_opt=0 on hex; a WRF domain for the ionosphere rows, or woof spacewx ionosphere --time ... on any lat/lon grid"
+      },
+      "spacewx_aurora_opt": {
+        "inactive_values": ["0"],
+        "reason": "the auroral oval (woof.spacewx.aurora_history) writes its zone, visibility-line and magnetic-coordinate rows through the WRF history writer on the radiation geometry's columns; no hex history stream carries them yet",
+        "follow_up": "spacewx_aurora_opt=0 on hex; a WRF domain for the aurora rows, or woof spacewx aurora --time ... on any lat/lon grid"
       }
     }
   },
