@@ -169,3 +169,5 @@ float __woof_ieee_min(float, float); float __woof_ieee_max(float, float);
 bool __woof_ieee_eq(float, float); bool __woof_ieee_ne(float, float); bool __woof_ieee_lt(float, float);
 bool __woof_ieee_le(float, float); bool __woof_ieee_gt(float, float); bool __woof_ieee_ge(float, float);
 float __woof_selmax(float, float); float __woof_selmin(float, float);
+// woof/backend/metal/gfk_fast.h (glibc_flt32.cuh shortcuts, woof.backend.translate.gfk_fast)
+unsigned int __woof_gfk_log(float); unsigned int __woof_gfk_exp(float); unsigned int __woof_gfk_pow(float, float);

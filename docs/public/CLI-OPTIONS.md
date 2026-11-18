@@ -1431,7 +1431,7 @@ Takes no options of its own.
 | `--initial-inputs JSON` | a separate packaged analysis for the initial state (woof prep --initial-inputs); the fetched source still supplies every lateral boundary, and the forecast starts at the preparation head while the later boundary times are built |
 | `--keep-checkpoints N` | how many complete checkpoint sets the run keeps in its folder (default 1, enough to resume); 0 keeps every hourly set, which a later branch or downscale from an earlier checkpoint needs |
 | `--keep-member-files` | also retain every member's full history files |
-| `--lakes {clm,ic,off}` | opt-in lakes: clm = WRF's CLM lake model with WPS bathymetry, lakes started from GLSEA where it covers and ERA5's FLake state elsewhere; ic = that initial state only; off = the defaults (docs/lakes.md) |
+| `--lakes {clm,ic,off}` | opt-in lakes (clm is recommended where lakes matter, but not for Great Lakes lake-effect snow; see docs/lakes.md): clm = WRF's CLM lake model with WPS bathymetry, lakes started from GLSEA where it covers and ERA5's FLake state elsewhere; ic = that initial state only; off = the defaults |
 | `--late-after-minutes MIN` | download routes only: how far past its scheduled time a lead may be before the run stops with exit 75; wins over the config's [fetch] late_after_minutes and the source row's budget |
 | `--live-products-width` | _(accepted, but not listed by --help)_ |
 | `--max-lag-hours` | oldest lagged cycle (0 disables lags) |
@@ -1815,7 +1815,7 @@ Takes no options of its own.
 | `--initial-inputs JSON` | a separate packaged analysis for the initial state (woof prep --initial-inputs); the fetched source still supplies every lateral boundary, and the forecast starts at the preparation head while the later boundary times are built |
 | `--keep-checkpoints N` | how many complete checkpoint sets the run keeps in its folder (default 1, enough to resume); 0 keeps every hourly set, which a later branch or downscale from an earlier checkpoint needs |
 | `--keep-member-files` | also retain every member's full history files |
-| `--lakes {clm,ic,off}` | opt-in lakes: clm = WRF's CLM lake model with WPS bathymetry, lakes started from GLSEA where it covers and ERA5's FLake state elsewhere; ic = that initial state only; off = the defaults (docs/lakes.md) |
+| `--lakes {clm,ic,off}` | opt-in lakes (clm is recommended where lakes matter, but not for Great Lakes lake-effect snow; see docs/lakes.md): clm = WRF's CLM lake model with WPS bathymetry, lakes started from GLSEA where it covers and ERA5's FLake state elsewhere; ic = that initial state only; off = the defaults |
 | `--late-after-minutes MIN` | download routes only: how far past its scheduled time a lead may be before the run stops with exit 75; wins over the config's [fetch] late_after_minutes and the source row's budget |
 | `--live-products-width` | _(accepted, but not listed by --help)_ |
 | `--max-lag-hours` | oldest lagged cycle (0 disables lags) |
@@ -3767,10 +3767,12 @@ Takes no options of its own.
 | `--count` | number of times (default 1) |
 | `--dlat` | grid spacing in latitude, deg (default 1) |
 | `--dlon` | grid spacing in longitude, deg (default 2) |
+| `--energy` | with a solar wind, add OVATION Prime 2010 energy and number fluxes and hemispheric power, and with OMNI2 the Knipp et al. 2004 Joule power |
 | `--indices` | observed Kp: 'gfz' (fetched, CC BY 4.0) or a file in GFZ's format |
 | `--kp` | a fixed Kp (0-9) |
 | `--observed-al` | with an OMNI2 solar wind, drive the oval with the observed AL instead of Kp |
 | `--out` | write the fields to this .npz (receipt beside it) |
+| `--ovation` | OVATION Prime coefficients: the distribution's zip or its premodel directory (default: the pinned zip, fetched) |
 | `--solar-wind` | Kp estimated from the solar wind: 'omni' (NASA SPDF OMNI2, fetched), 'swpc' (NOAA real time, last 24 h) or OMNI2 file(s) joined by ':' |
 | `--step-hours` | hours between times (default 1) |
 | `--time` | first valid time, ISO UTC (2024-05-10T18:00Z) |
