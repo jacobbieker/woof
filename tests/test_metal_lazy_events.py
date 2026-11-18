@@ -78,20 +78,46 @@ def test_a_wait_on_another_thread_waits_for_the_recorded_work(cp, monkeypatch):
         box = {}
 
         def produce():
-            x = mx.ones((2048, 2048))
-            for _ in range(12):
+            x = mx.ones((4096, 4096))
+            for _ in range(40):
                 x = x @ x * 1e-4
             mx.async_eval(x)
             event = cp.cuda.Event(disable_timing=True)
             event.record()
             box["x"], box["event"] = x, event
-        worker = threading.Thread(target=produce)
-        worker.start()
-        worker.join()
-        box["event"].synchronize()
-        start = time.perf_counter()
-        mx.eval(box["x"])                    # already complete: no wait left
-        assert time.perf_counter() - start < 0.005
+        for wait in ("synchronize", "wait_event"):
+            worker = threading.Thread(target=produce)
+            worker.start()
+            worker.join()
+            start = time.perf_counter()
+            if wait == "synchronize":
+                box["event"].synchronize()
+            else:
+                cp.cuda.get_current_stream().wait_event(box["event"])
+            waited = time.perf_counter() - start
+            start = time.perf_counter()
+            mx.eval(box["x"])                # already complete: no wait left
+            left = time.perf_counter() - start
+            # the work is long (hundreds of ms); what is left after the wait is not
+            assert left < max(0.05, 0.25 * waited), (wait, waited, left)
+            assert box["event"]._marker is None
+    finally:
+        from woof.backend.facade import cuda as fcuda
+        fcuda._lazy_events.cache_clear()
+
+
+def test_untimed_record_refuses_during_capture(cp, monkeypatch):
+    from woof.backend.facade import _capture
+    _lazy(monkeypatch, True)
+    monkeypatch.setattr(_capture, "record_event", lambda event: False)
+    monkeypatch.setattr(_capture, "recording", lambda: object())
+
+    def refuse(what):
+        raise RuntimeError(f"refused: {what}")
+    monkeypatch.setattr(_capture, "refuse", refuse)
+    try:
+        with pytest.raises(RuntimeError, match="refused"):
+            cp.cuda.Event(disable_timing=True).record()
     finally:
         from woof.backend.facade import cuda as fcuda
         fcuda._lazy_events.cache_clear()

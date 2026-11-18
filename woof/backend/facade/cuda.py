@@ -3,8 +3,9 @@
 An Apple-silicon Mac has one GPU and unified memory.  ``Device(0)`` is it;
 any other ordinal is refused by name.  Streams map to MLX streams on the GPU
 device; ``synchronize`` evaluates every pending value (MLX is lazy, so
-"finished" means "evaluated").  Events record wall time at the point the
-stream has drained, which is what woof's timing code reads them for.
+"finished" means "evaluated").  A timed event records wall time at the point
+the stream has drained, which is what woof's timing code reads them for; an
+untimed event (``disable_timing=True``) only marks a point for its waits.
 """
 
 from __future__ import annotations
@@ -160,7 +161,10 @@ class Stream:
         _drain()
 
     def wait_event(self, event):
-        return None
+        # one thread's MLX stream is ordered; another thread's untimed point
+        # is waited for here (a timed record has already drained)
+        if getattr(event, "_thread", None) not in (None, threading.get_ident()):
+            event._wait()
 
     def record(self, event=None):
         event = event or Event()
@@ -217,6 +221,7 @@ class Event:
         # only the waiting thread's own MLX stream).
         self._lazy = bool(disable_timing) and _lazy_events()
         self._marker = None
+        self._thread = None
 
     def record(self, stream=None):
         from woof.backend.facade import _capture
@@ -224,19 +229,27 @@ class Event:
             return
         if self._lazy:
             from woof.backend.facade._array import flush_pending
+            if _capture.recording() is not None:
+                _capture.refuse("a synchronize")
             mx = _mx()
             flush_pending()
             marker = mx.zeros((1,), dtype=mx.uint8)
             mx.async_eval(marker)
-            self._marker = marker
+            self._marker, self._thread = marker, threading.get_ident()
             return
         _drain()
         self.t = time.perf_counter()
 
     def _wait(self):
-        marker, self._marker = self._marker, None
+        # Every waiter evaluates the marker (several threads may wait on one
+        # event; an evaluated array returns at once), and it is dropped only
+        # after the wait succeeded.  The marker is queued after the recorded
+        # work on the recording thread's stream, and that stream completes in
+        # order: the guarantee mx.synchronize(stream) itself rests on.
+        marker = self._marker
         if marker is not None:
             _mx().eval(marker)
+            self._marker = None
 
     def synchronize(self):
         if self._lazy:
