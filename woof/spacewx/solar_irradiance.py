@@ -130,20 +130,24 @@ def _read_csv(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(days, np.float64), np.asarray(values, np.float64)
 
 
+def cdr_day_centres(data, path) -> np.ndarray:
+    """The centres of a NOAA CDR file's daily means, in days since 1610-01-01."""
+    units = str(getattr(data.variables["time"], "units", ""))
+    if units.strip() != "days since 1610-01-01 00:00:00":
+        raise SolarForcingError(f"{path}: time units {units!r}; expected the CDR's 'days since 1610-01-01 00:00:00'")
+    start = np.asarray(data.variables["time"][:], np.float64)
+    if "time_bnds" in data.variables:
+        bounds = np.asarray(data.variables["time_bnds"][:], np.float64)
+        return 0.5 * (bounds[:, 0] + bounds[:, 1])
+    return start + 0.5
+
+
 def _read_netcdf(path: Path) -> tuple[np.ndarray, np.ndarray]:
     from woof.netcdf_bridge import open_dataset    # the Rust decoder; no Python NetCDF fallback
     with open_dataset(path) as data:
         if "TSI" not in data.variables or "time" not in data.variables:
             raise SolarForcingError(f"{path}: a TSI netCDF needs 'TSI' and 'time' (the NOAA CDR layout)")
-        units = str(getattr(data.variables["time"], "units", ""))
-        if units.strip() != "days since 1610-01-01 00:00:00":
-            raise SolarForcingError(f"{path}: time units {units!r}; expected the CDR's 'days since 1610-01-01 00:00:00'")
-        start = np.asarray(data.variables["time"][:], np.float64)
-        if "time_bnds" in data.variables:
-            bounds = np.asarray(data.variables["time_bnds"][:], np.float64)
-            centre = 0.5 * (bounds[:, 0] + bounds[:, 1])
-        else:
-            centre = start + 0.5
+        centre = cdr_day_centres(data, path)
         values = np.ma.filled(np.ma.asarray(data.variables["TSI"][:]).astype(np.float64), np.nan)
     keep = np.isfinite(values)
     return centre[keep], values[keep]
@@ -177,30 +181,44 @@ def fetch_nrlssi2(years, *, cache=None, opener=None) -> list[Path]:
     through :class:`TsiSeries` (printed by the driver as the
     ``[spacewx tsi]`` start-up line).  NOAA CDR data are open (cite Coddington et al.
     2016, BAMS 97, and the CDR DOI 10.7289/V56W985W)."""
+    return fetch_cdr_years(
+        years, prefix="tsi", index_url=NRLSSI2_INDEX_URL,
+        subdir="nrlssi2-tsi", what="TSI", key="solar_tsi_source a CSV or netCDF",
+        check=lambda path: TsiSeries(*_read_netcdf(path), str(path), ""),
+        cache=cache, opener=opener, timeout=120)
+
+
+def fetch_cdr_years(years, *, prefix, index_url, subdir, what, key, check,
+                    cache=None, opener=None, timeout=120) -> list[Path]:
+    """The NOAA CDR daily ``{prefix}_v03r00_daily_s{Y}0101_e{Y}1231_c*.nc`` file
+    of each year (the newest final one listed; preliminary files are not
+    taken), fetched once into ``cache_root()/subdir``.  ``check(path)`` must
+    accept a download before it is installed."""
     import urllib.request
-    opener = opener or (lambda url: urllib.request.urlopen(url, timeout=120))
-    root = Path(cache) if cache is not None else cache_root() / "nrlssi2-tsi"
+    opener = opener or (lambda url: urllib.request.urlopen(url, timeout=timeout))
+    root = Path(cache) if cache is not None else cache_root() / subdir
     root.mkdir(parents=True, exist_ok=True)
     listing = None
     out = []
     for year in sorted(set(int(y) for y in years)):
-        local = sorted(root.glob(f"tsi_v03r00_daily_s{year}0101_e{year}1231_c*.nc"))
+        pattern = f"{prefix}_v03r00_daily_s{year}0101_e{year}1231_c"
+        local = sorted(root.glob(pattern + "*.nc"))
         if local:
             out.append(local[-1])
             continue
         if listing is None:
-            with opener(NRLSSI2_INDEX_URL) as reply:
+            with opener(index_url) as reply:
                 listing = reply.read().decode("utf-8", "replace")
-        names = sorted(set(re.findall(rf'tsi_v03r00_daily_s{year}0101_e{year}1231_c\d{{8}}\.nc', listing)))
+        names = sorted(set(re.findall(re.escape(pattern) + r"\d{8}\.nc", listing)))
         if not names:
             raise SolarForcingError(
-                f"no complete NOAA CDR TSI file for {year} at {NRLSSI2_INDEX_URL} (the CDR lags by a few "
-                "months); give solar_tsi_source a CSV or netCDF that covers the run")
+                f"no complete NOAA CDR {what} file for {year} at {index_url} (the CDR lags by a few "
+                f"months); give {key} that covers the run")
         target = root / names[-1]
         from woof.spacewx.assets import unique_part
         part = unique_part(target)
         try:
-            with opener(NRLSSI2_INDEX_URL + names[-1]) as reply, part.open("wb") as stream:
+            with opener(index_url + names[-1]) as reply, part.open("wb") as stream:
                 stream.write(reply.read())
         except BaseException:
             part.unlink(missing_ok=True)
@@ -208,15 +226,15 @@ def fetch_nrlssi2(years, *, cache=None, opener=None) -> list[Path]:
         from woof.netcdf_bridge import NetcdfBridgeMissing
         try:
             # A truncated or wrong download must not be installed: it must read
-            # as a TSI series (decodes, finite, ascending, in W m-2) first.
-            TsiSeries(*_read_netcdf(part), str(part), "")
+            # as a series (decodes, finite, ascending, in W m-2) first.
+            check(part)
         except NetcdfBridgeMissing:
             part.unlink(missing_ok=True)      # the reader is missing, not the file bad
             raise
         except Exception as exc:
             part.unlink(missing_ok=True)
-            raise SolarForcingError(f"{NRLSSI2_INDEX_URL}{names[-1]}: the download does not read "
-                                    f"as a NOAA CDR TSI file ({exc}); try again") from exc
+            raise SolarForcingError(f"{index_url}{names[-1]}: the download does not read "
+                                    f"as a NOAA CDR {what} file ({exc}); try again") from exc
         except BaseException:
             part.unlink(missing_ok=True)
             raise
@@ -225,17 +243,20 @@ def fetch_nrlssi2(years, *, cache=None, opener=None) -> list[Path]:
     return out
 
 
+def noon_years(start: datetime, end: datetime) -> range:
+    """The years of the daily means (at noon) a run from start to end reads:
+    a time is covered by the days within half a day of it."""
+    start, end = _naive_utc(start), _naive_utc(end)
+    return range((start - timedelta(hours=12)).year, (end + timedelta(hours=12)).year + 1)
+
+
 def load_series(source: str, start: datetime, end: datetime) -> TsiSeries:
     """The TSI series ``solar_tsi_source`` names, covering ``start``..``end``."""
     text = str(source or "").strip()
     if not text:
         raise SolarForcingError("solar_tsi_opt=1 needs solar_tsi_source: a TSI CSV/netCDF path or 'nrlssi2'")
     if text == "nrlssi2":
-        start, end = _naive_utc(start), _naive_utc(end)
-        # Daily means sit at noon: a time is covered by the days within half a
-        # day of it, so only those days' years are needed.
-        years = range((start - timedelta(hours=12)).year, (end + timedelta(hours=12)).year + 1)
-        return read_series(fetch_nrlssi2(years))
+        return read_series(fetch_nrlssi2(noon_years(start, end)))
     return read_series([p for p in text.split(os.pathsep) if p])
 
 
