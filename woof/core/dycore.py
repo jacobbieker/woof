@@ -1323,6 +1323,12 @@ def _wrf_smag_grid_args(state: DomainState, cfg: RunConfig, *,
             np.int32(moist)]
 
 
+#: ``WOOF_SMAG_DEFORM_HAT=0`` keeps wrf_smag_deform dividing u/msfu and
+#: v/msfv at every stencil point (A/B and byte-identity checks).
+def _smag_deform_hat_enabled() -> bool:
+    return os.environ.get("WOOF_SMAG_DEFORM_HAT", "1") != "0"
+
+
 def launch_wrf_smag2d_km(state: DomainState, cfg: RunConfig,
                           xkmh, xkhh, *, time_t: bool):
     """WRF v4.6.1 ``cal_deform_and_div`` + ``smag2d_km`` on device.
@@ -1353,8 +1359,25 @@ def launch_wrf_smag2d_km(state: DomainState, cfg: RunConfig,
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
-    get_kernel("smag2d", "wrf_smag_deform")(
-        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    from woof.config import wrf_mixing_package_active
+    if _smag_deform_hat_enabled() and wrf_mixing_package_active(cfg):
+        # u/msfu and v/msfv once per face, into the diff6 face temporaries
+        # (free until the u/v stress rows below zero them), read by the
+        # deformation kernel in place of a division at every stencil point
+        # that needs them.  The same division of the same operands, stored:
+        # the same words (tests/test_smag_deform_hat.py).
+        uhat = state.scratch((nz, ny, nx + 1), "diff6_x")
+        vhat = state.scratch((nz, ny + 1, nx), "diff6_y")
+        get_kernel("smag2d", "wrf_smag_uvhat")(
+            ((nx + _TPB) // _TPB, ny + 1, nz), (_TPB, 1, 1),
+            (common[0], common[1], state.msfu, state.msfv, uhat, vhat,
+             np.int32(nz), np.int32(ny), np.int32(nx)))
+        get_kernel("smag2d", "wrf_smag_deform_hat")(
+            grid, (_TPB, 1, 1),
+            tuple(common + [d11, d22, d12] + dims + [uhat, vhat]))
+    else:
+        get_kernel("smag2d", "wrf_smag_deform")(
+            grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
     tail = [DTYPE(cfg.c_s), DTYPE(_PRANDTL), d11, d22, d12, xkmh, xkhh,
             np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
