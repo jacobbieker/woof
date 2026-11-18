@@ -407,8 +407,8 @@ Steps:
    | uniform | -1742.9 / -1743.3 | 5.7 Pa | 0.37 mm |
    | variable | -1698.5 / -1699.4 | 14.1 Pa | 0.18 mm |
 
-   The area-mean changes differ by under 1 Pa and 0.01 mm; the maxima are
-   over all hourly frames. The NN runs keep the budget to the physics
+   The area-mean surface-pressure changes differ by under 1 Pa; the maxima
+   are over all hourly frames. The NN runs keep the budget to the physics
    run's level.
 5. **Scorecard.** The scorecard uses WIS2 land SYNOP T2 (lapse-corrected
    to the model height), 10 m wind and radiosonde temperature. Model and
