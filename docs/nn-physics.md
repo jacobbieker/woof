@@ -361,6 +361,97 @@ three things:
 - a constant `dtheta` residual warms the levels it spans by about
   rate x time.
 
+### Results on hex (the plan's G2 gate)
+
+Two regional meshes around one point, both on the MPAS suite route
+(`convection_permitting`):
+
+- uniform: 12 km, 250 km radius, 2107 cells, 55 levels;
+- variable resolution: 3 km over a 100 km radius grading to 96 km, 4565
+  cells.
+
+Steps:
+
+1. **Record.** A 120 h tap (`scheme = "total"`, 256 interior columns, every
+   10th step on the uniform mesh and every 40th on the variable one) from a
+   GFS cycle five days before the evaluation cycle. Each tapped run was
+   byte-identical to its plain run (`tests/test_nn_hex_gpu.py` checks
+   this on both meshes, fast and strict).
+2. **Train.** `python -m woof.nn.train` with `--hidden 256,256 --epochs 20`
+   took about 40 s per mesh on the CPU, on 138240 columns (540 steps). The
+   last 10 % of the recorded period was held out:
+
+   | mesh | dtheta R² | dqv R² | dqc R² | (train R²) |
+   |---|---|---|---|---|
+   | uniform 12 km | 0.28 | 0.11 | 0.08 | 0.79-0.87 |
+   | variable 3-96 km | -0.53 | -0.98 | -2.71 | 0.74-0.84 |
+
+   Five days of one mesh do not generalise in time: the emulators are
+   poor, and the variable-resolution one is worse than a zero model.
+3. **Run online.** `mode = "replace"`, with fallback and `margin = 0.3`,
+   120 h from the evaluation cycle. The margin was needed because pressure
+   aloft in the evaluation week lies outside the training week's range.
+   Even with it, most columns fell back to the schemes:
+
+   | mesh, backend | stable 120 h | column calls outside the range |
+   |---|---|---|
+   | uniform, CUDA (torch) | yes | 88 % (11.2 M of 12.6 M) |
+   | uniform, Metal (MLX) | yes (max \|w\| 0.38 m/s) | 88 % |
+   | variable, CUDA (torch) | yes | 89 % (97.4 M of 109.6 M) |
+
+4. **Mass budget.** Area-mean surface pressure and precipitable water over
+   the interior cells, compared with the physics run:
+
+   | mesh | psfc change, physics / NN (Pa) | max \|NN - physics\| psfc | max \|NN - physics\| PW |
+   |---|---|---|---|
+   | uniform | -1742.9 / -1743.3 | 5.7 Pa | 0.37 mm |
+   | variable | -1698.5 / -1699.4 | 14.1 Pa | 0.18 mm |
+
+   The NN runs keep the budget to the physics run's level.
+5. **Scorecard.** The scorecard uses WIS2 land SYNOP T2 (lapse-corrected
+   to the model height), 10 m wind and radiosonde temperature. Model and
+   observation are paired by station and lead. The test is a station-block
+   bootstrap (5000 draws) of the RMSE difference, NN minus physics; a
+   difference above zero means the NN run is worse.
+
+   | mesh | T2 RMSE physics / NN (K) | difference, 95 % CI | pairs, stations |
+   |---|---|---|---|
+   | uniform | 1.954 / 2.103 | +0.15 [+0.05, +0.26] (worse) | 8381, 141 |
+   | variable | 1.511 / 1.450 | -0.06 [-0.11, -0.01] (better) | 5105, 86 |
+
+   The 10 m wind and sonde scores have only one or two stations in these
+   domains. They are too few to test.
+
+6. **Cost.** The cost of the seat per step (2107 columns, 445 inputs, 165
+   outputs, 256 x 256 tanh MLP) is the difference in the median step time
+   between plain and NN runs of the same 6 h, run in pairs:
+
+   | backend | plain step | NN step, minus plain, per pair |
+   |---|---|---|
+   | Metal (MLX) | 198-205 ms | +4.4, +1.5, +2.7 ms (1-2 %) |
+   | CUDA (A6000 shared with other jobs), torch | 101-102 ms | +1.6, -29.6, -0.2, +10.7 ms |
+
+   On CUDA the card was shared, so the step-time noise is larger than the
+   seat's cost. The model call alone is 3.3-3.7 ms for 8000 columns on the
+   WRF route (above).
+
+The gate's verdict:
+
+- **Pass:**
+  - With the option absent, the identity tests are unchanged.
+  - The NN runs are stable for 5 days on both meshes on CUDA, and on the
+    uniform mesh on Metal.
+  - The mass budget closes to the physics run's level.
+  - Cost is measured on both backends.
+- **Fail:** the scorecard criterion, on the uniform mesh. T2 there is worse
+  than the physics run at 95 %. The variable mesh is better at 95 %, but
+  with 89 % of columns falling back, both differences come from about a
+  tenth of the columns. Neither result shows that the emulator has skill.
+
+Passing the scorecard criterion needs broader training data (several
+cycles and seasons, both meshes) so that fewer columns fall back, and a
+better trainer than the NumPy example.
+
 ### A column model as a backend row
 
 `woof.nn.hex_backend.NNColumnBackend` is an example
