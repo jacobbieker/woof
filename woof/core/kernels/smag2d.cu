@@ -312,6 +312,10 @@ struct WrfSmagGrid {
     const real* fnp;
     const real* dn;
     const real* dnw;
+#ifdef GPUWM_SMAG_STORED_HAT
+    const real* uhat;   // u / msfu at every u face, or null (recompute)
+    const real* vhat;   // v / msfv at every v face, or null
+#endif
     real rdx, rdy, dx, dy;
     real cf1, cf2, cf3;
     int nz, ny, nx;
@@ -335,6 +339,9 @@ WrfSmagGrid wrf_grid(const real* u, const real* v, const real* w,
     q.qv = qv;
     q.msft = msft; q.msfu = msfu; q.msfv = msfv;
     q.fnm = fnm; q.fnp = fnp; q.dn = dn; q.dnw = dnw;
+#ifdef GPUWM_SMAG_STORED_HAT
+    q.uhat = nullptr; q.vhat = nullptr;
+#endif
     q.rdx = rdx; q.rdy = rdy; q.dx = dx; q.dy = dy;
     q.cf1 = cf1; q.cf2 = cf2; q.cf3 = cf3;
     q.nz = nz; q.ny = ny; q.nx = nx; q.phb3d = phb3d;
@@ -480,6 +487,9 @@ __device__ __forceinline__
 real wrf_uhat(const WrfSmagGrid& q, int k, int j, int iface)
 {
     int jj = wrf_iy(q, j), ii = wrf_iu(q, iface);
+#ifdef GPUWM_SMAG_STORED_HAT
+    if (q.uhat) return q.uhat[I3S(k, jj, ii, q.ny, q.nx + 1)];
+#endif
     return q.u[I3S(k, jj, ii, q.ny, q.nx + 1)]
          / q.msfu[(SmagIndex)jj * (q.nx + 1) + ii];
 }
@@ -488,6 +498,9 @@ __device__ __forceinline__
 real wrf_vhat(const WrfSmagGrid& q, int k, int jface, int i)
 {
     int jj = wrf_jv(q, jface), ii = wrf_ix(q, i);
+#ifdef GPUWM_SMAG_STORED_HAT
+    if (q.vhat) return q.vhat[I3S(k, jj, ii, q.ny + 1, q.nx)];
+#endif
     return q.v[I3S(k, jj, ii, q.ny + 1, q.nx)]
          / q.msfv[(SmagIndex)jj * q.nx + ii];
 }
@@ -705,6 +718,63 @@ void wrf_smag_deform(const real* u, const real* v, const real* w,
     d22[IDX3(k, j, i)] = wrf_defor22(q, k, j, i);
     d12[IDX3(k, j, i)] = wrf_defor12(q, k, j, i);
 }
+
+#ifdef GPUWM_SMAG_STORED_HAT
+// Compiled only in the GPUWM_SMAG_STORED_HAT=1 tier
+// (dycore.launch_wrf_smag2d_km through get_kernel_int_defines), so the
+// default smag2d module and every unit composing smag2d.cu preprocess to
+// the same text as before.  wrf_smag_uvhat divides the coupled-to-uncoupled
+// winds wrf_uhat/wrf_vhat need once per face (the same division, the same
+// operands, stored); wrf_smag_deform_hat reads them instead of dividing at
+// every stencil point that needs them.
+extern "C" __global__
+void wrf_smag_uvhat(const real* u, const real* v,
+                    const real* msfu, const real* msfv,
+                    real* uhat, real* vhat, int nz, int ny, int nx)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int k = blockIdx.z * blockDim.z + threadIdx.z;
+    if (k >= nz) return;
+    if (j < ny && i <= nx) {
+        SmagIndex h = I3S(k, j, i, ny, nx + 1);
+        uhat[h] = u[h] / msfu[(SmagIndex)j * (nx + 1) + i];
+    }
+    if (j <= ny && i < nx) {
+        SmagIndex h = I3S(k, j, i, ny + 1, nx);
+        vhat[h] = v[h] / msfv[(SmagIndex)j * nx + i];
+    }
+}
+
+extern "C" __global__
+void wrf_smag_deform_hat(const real* u, const real* v, const real* w,
+                         const real* php, const real* phb, const real* alt,
+                         const real* qv,
+                         const real* msft, const real* msfu, const real* msfv,
+                         const real* fnm, const real* fnp,
+                         const real* dn, const real* dnw,
+                         real rdx, real rdy, real dx, real dy,
+                         real cf1, real cf2, real cf3,
+                         int moist,
+                         real* d11, real* d22, real* d12,
+                         int nz, int ny, int nx, int phb3d,
+                         int boundary_x, int boundary_y,
+                         const real* uhat, const real* vhat)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int k = blockIdx.z * blockDim.z + threadIdx.z;
+    if (i >= nx || j >= ny || k >= nz) return;
+    WrfSmagGrid q = wrf_grid(u, v, w, php, phb, alt, qv, msft, msfu, msfv,
+                             fnm, fnp, dn, dnw, rdx, rdy, dx, dy,
+                             cf1, cf2, cf3, nz, ny, nx, phb3d,
+                             boundary_x, boundary_y, moist);
+    q.uhat = uhat; q.vhat = vhat;
+    d11[IDX3(k, j, i)] = wrf_defor11(q, k, j, i);
+    d22[IDX3(k, j, i)] = wrf_defor22(q, k, j, i);
+    d12[IDX3(k, j, i)] = wrf_defor12(q, k, j, i);
+}
+#endif
 
 __device__ __forceinline__
 real wrf_d(const WrfSmagGrid& q, const real* d, int k, int j, int i)
