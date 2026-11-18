@@ -14,6 +14,11 @@ observed AL instead.  With a solar wind, ``--energy`` adds the precipitating
 energy and number fluxes and the hemispheric power of OVATION Prime 2010
 (:mod:`woof.spacewx.ovation`), and with OMNI2 the Knipp et al. 2004 Joule
 power.
+
+``woof spacewx particles`` prints the L2 polar-cap ion-pair production rate of
+solar protons (:mod:`woof.spacewx.particles`) on pressure levels, from OMNI2's
+or GOES's (SWPC real time) integral proton fluxes, with the odd-nitrogen and
+odd-hydrogen production it implies.
 """
 from __future__ import annotations
 
@@ -270,6 +275,73 @@ def aurora_main(args) -> int:
     return 0
 
 
+def particles_main(args) -> int:
+    from woof.spacewx import particles as P
+
+    start = _utc(args.time)
+    times = [start + timedelta(hours=i * args.step_hours) for i in range(max(1, args.count))]
+    levels = np.asarray(sorted(args.levels), dtype=np.float64)
+    if levels.size == 0 or np.any(levels <= 0) or np.any(np.diff(levels) <= 0):
+        raise SystemExit("woof spacewx particles: --levels must be distinct positive pressures in hPa")
+    if args.count > 1 and args.step_hours <= 0:
+        raise SystemExit("woof spacewx particles: --step-hours must be positive")
+    # Each level is the centre of a layer whose edges are the geometric means
+    # between levels (the ends mirror their neighbours).
+    if levels.size == 1:
+        edges = levels * np.array([0.9, 1.0 / 0.9])
+    else:
+        mid = np.sqrt(levels[1:] * levels[:-1])
+        edges = np.concatenate([[levels[0] ** 2 / mid[0]], mid, [levels[-1] ** 2 / mid[-1]]])
+    try:
+        record = P.load(args.source, times[0], times[-1])
+    except P.ParticleError as exc:
+        raise SystemExit(f"woof spacewx particles: {exc}") from exc
+    table = P.range_table()
+    per_day = 86400.0 * 1.0e9
+    rows = []
+    for when in times:
+        try:
+            flux = record.at(when)
+        except P.ParticleError as exc:
+            raise SystemExit(f"woof spacewx particles: {exc}") from exc
+        row = {"time": when.isoformat() + "Z",
+               "flux": {f">{c:g} MeV": (float(v) if np.isfinite(v) else None) for c, v in zip(record.channels, flux)},
+               "spe": record.active(flux)}
+        q = np.zeros(levels.size)
+        if row["spe"]:
+            try:
+                x = P.depth_from_pressure(edges * 100.0)
+                f = P.absorbed(flux, x, record.channels, table)
+                q = np.abs(np.diff(f)) / np.diff(x) / P.W_ION_MEV
+                row["energy_flux_mev_cm2_s"] = P.energy_flux(flux, record.channels)
+            except P.ParticleError as exc:
+                # An event hour whose spectrum cannot be built: no rates, said so.
+                q = np.full(levels.size, np.nan)
+                row["spectrum_error"] = str(exc)
+        row["levels_hpa"] = levels.tolist()
+        listed = lambda a: [None if not np.isfinite(v) else float(v) for v in a]
+        row["ion_pairs_per_gram_s"] = listed(q)
+        row["nox_ppbv_per_day"] = listed(P.vmr_tendency(q, P.NOX_PER_ION_PAIR) * per_day)
+        row["hox_ppbv_per_day"] = listed(P.vmr_tendency(q, P.HOX_PER_ION_PAIR) * per_day)
+        rows.append(row)
+        k10 = record.channels.index(10.0)
+        text = "  ".join(f"{lev:g} hPa {v:9.3e}" for lev, v in zip(levels, q))
+        print(f"{when:%Y-%m-%dT%H:%MZ}  >10 MeV {flux[k10]:9.2f} pfu  "
+              f"{'SPE' if row['spe'] else 'quiet'}  ion pairs g-1 s-1: {text}"
+              + (f"  (no spectrum: {row['spectrum_error']})" if "spectrum_error" in row else ""))
+    doc = {"spacewx_particles_model": "solar protons: Bethe range in air, isotropic, W = 35 eV, "
+                                      f"polar cap |MLAT| >= {P.POLAR_CAP_DEG:g}",
+           "spacewx_proton_source": f"{record.source} sha256:{record.sha256}",
+           "spacewx_proton_channels_mev": list(record.channels),
+           "spacewx_spe_threshold_pfu": P.SPE_THRESHOLD_PFU,
+           "nox_per_ion_pair": P.NOX_PER_ION_PAIR, "hox_per_ion_pair": P.HOX_PER_ION_PAIR, "times": rows}
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8")
+        print(f"wrote {args.out}")
+    return 0
+
+
 def register_cli(sub):
     parser = sub.add_parser("spacewx", help="space weather: the opt-in ionosphere and solar layers")
     commands = parser.add_subparsers(dest="spacewx_command", required=True)
@@ -318,6 +390,18 @@ def register_cli(sub):
     aur.add_argument("--dlon", type=float, default=2.0, help="grid spacing in longitude, deg (default 2)")
     aur.add_argument("--out", type=Path, help="write the fields to this .npz (receipt beside it)")
     aur.set_defaults(func=aurora_main)
+    part = commands.add_parser(
+        "particles", help="polar-cap ion-pair production by solar protons (OMNI2 or GOES) on pressure levels")
+    part.add_argument("--time", required=True, help="first valid time, ISO UTC (2012-01-24T00:00Z)")
+    part.add_argument("--count", type=int, default=1, help="number of times (default 1)")
+    part.add_argument("--step-hours", type=float, default=1.0, help="hours between times (default 1)")
+    part.add_argument("--source", default="omni",
+                      help="'omni' (NASA SPDF OMNI2, fetched), 'swpc' (GOES via NOAA SWPC, the last 3 days) "
+                           "or OMNI2 file(s) joined by ':'")
+    part.add_argument("--levels", type=float, nargs="+", default=[0.01, 0.1, 1.0, 10.0, 50.0, 100.0],
+                      help="pressure levels, hPa (default 0.01 0.1 1 10 50 100)")
+    part.add_argument("--out", type=Path, help="write the profiles and receipt to this .json")
+    part.set_defaults(func=particles_main)
     return parser
 
 

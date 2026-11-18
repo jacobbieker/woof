@@ -825,8 +825,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   0.48-0.61 and the model reads about 2.5 times higher. `spacewx_aurora_opt =
   2` adds OVATION's electron energy flux, mean energy and ion energy flux
   (`AURORA_EFLUX`, `AURORA_EMEAN`, `AURORA_IFLUX`) to those history frames,
-  from the solar wind at the start. The particle-precipitation layer is
-  planned ([docs/spacewx.md](docs/spacewx.md)).
+  from the solar wind at the start. `woof spacewx particles` turns the GOES
+  integral proton flux (OMNI2 or SWPC real time) into polar-cap ion-pair rates
+  and NOx/HOx production during solar proton events (Bethe stopping in air,
+  35 eV per ion pair). Against the CMIP7 rates, the ratio is 0.4-1.0 at 0.1-100
+  hPa. The chemistry source is planned ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
   studies gradients of a forecast's fit to observations and opt-in
