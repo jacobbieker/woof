@@ -5211,7 +5211,7 @@
    },
    {
     "file": "woof/core/mrf.py",
-    "sha256": "8df3fcb5e0c97f1ab903e20ddc04f83ae1e6d720d6e16313d84e0d959d42f2be"
+    "sha256": "18d8fe84bfe5aa7f426e6efc8faa4f9fee50cc8d32e2b8c882598bbc8d7789b6"
    },
    {
     "file": "woof/core/mynn471_gpu.py",
@@ -5303,7 +5303,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "78f0a0ee440b3d4adf8a28d0c0be1a71b4c792f5ca4e441d0a2a13da7776aa43"
+    "sha256": "b0ffa5c0e658c3977cb4fc9603dc3a0d14e2d1476f1fd648a17cd56275f67b22"
    },
    {
     "file": "woof/core/refl.py",
