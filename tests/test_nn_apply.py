@@ -350,3 +350,20 @@ def test_review_refusals_identity_and_fallback_faces(monkeypatch, tmp_path):
     state.qv = None
     with pytest.raises(launch.NNConfigError, match="does not carry"):
         wrf_seat.WrfColumnSeat(state, _cfg(), _settings(model=model), couple=lambda *a, **k: None)
+
+
+def test_the_all_column_slices_match_the_indexed_gather():
+    from woof.nn.wrf_seat import _Gather
+
+    rng = np.random.default_rng(1)
+    ny, nx, nz = 5, 6, 3
+    flat = np.arange(ny * nx)
+    a, b = _Gather.build(np, flat, nx), _Gather.full(np, ny, nx)
+    fields = {"mass": rng.random((nz, ny, nx)), "u": rng.random((nz, ny, nx + 1)),
+              "v": rng.random((nz, ny + 1, nx)), "w": rng.random((nz + 1, ny, nx)), "ht": rng.random((ny, nx))}
+    np.testing.assert_array_equal(a.take(fields["mass"], levels=2), b.take(fields["mass"], levels=2))
+    np.testing.assert_array_equal(a.take(fields["w"], levels=4), b.take(fields["w"], levels=4))
+    np.testing.assert_array_equal(a.take(fields["ht"]), b.take(fields["ht"]))
+    for name, field in (("u_west", "u"), ("u_east", "u"), ("v_south", "v"), ("v_north", "v")):
+        np.testing.assert_array_equal(a.take(fields[field], getattr(a, name), 2),
+                                      b.take(fields[field], getattr(b, name), 2))
