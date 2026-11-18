@@ -110,16 +110,23 @@ Each side is a forecast restarted from a perturbed state and scored with
   run's output directory, and continue with
   `woof go CFG --prepared-root BASE/prepared --restart FILE`. The restart
   must be run by the same woof source as the base run, and a checkpoint is
-  written only when the base run used `--keep-checkpoints`.
+  written only when the base run used `--keep-checkpoints`. Pass the base
+  run's `--mp-physics`, and `--morr-rimed-ice` for Morrison, so the
+  writer's number-moment repair matches the run's microphysics. WRF-route
+  blobs are zero in the outer `--rim` rows and columns (default 5, the
+  specified and relaxation zone).
 - **hex.** Run the base with `--checkpoint-hours H --jedi-background`.
   `woof grad perturb --checkpoint BACKGROUND.nc` writes a copy of the JEDI
   background at hour H with `eps * p` added. Continue with
   `--restart-from CHECKPOINT.pkl --da-analysis COPY.nc`, which rebuilds
   the dycore state from it. Directions on hex are `theta` fields
-  `(nCells, nVertLevels)`, and they are zero in the relaxation rings.
+  `(nCells, nVertLevels)`, and they are zero in the relaxation rings when
+  `--mesh` is a static or init file that carries `bdyMaskCell`.
 - **The reference.** The writer also repairs number moments the model left
   inconsistent, and those repairs are the same for any `eps`. Score a run
-  written with `--scale 0` as `--reference`. A restart from the untouched
+  written with `--scale 0` as `--reference`. Score every run, including
+  `--reference` and `--zero`, with the same `--accept` pairs file;
+  `woof grad fd` refuses runs scored on other observations. A restart from the untouched
   checkpoint is then `--zero`. On the WRF route, under strict numerics, it
   reproduces the base bit for bit. On hex, the `--da-analysis` restart
   rebuilds the dycore state from float32 fields, so a scale-0 restart moves
@@ -136,7 +143,10 @@ woof grad fd --leg 0.2 plus.json minus.json --leg 0.1 plus2.json minus2.json --r
 each scale and the curvature, and how much the derivative changes between
 scales. When the summaries carry them, it also gives the central
 difference for each observation type, which shows where the response and
-the noise come from.
+the noise come from. The headline `dJ` is taken from the smallest scale
+whose derivative is within 25% of the next larger scale's
+(`"converged": true`). When no scale meets that, the headline comes from
+the largest scale, with `"converged": false`.
 
 Choose `eps` by looking at the scale table. Any perturbation, however
 small, moves a 9 h forecast's `J` by a few units, because convection and

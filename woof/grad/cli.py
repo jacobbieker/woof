@@ -97,8 +97,8 @@ def command_cost(args) -> int:
     summary["error_table"] = table.path
     summary["accepted_from"] = str(Path(args.accept).resolve()) if args.accept else None
     if args.accept:
-        import hashlib
-        summary["accepted_sha256"] = hashlib.sha256(Path(args.accept).read_bytes()).hexdigest()
+        from woof.file_digest import sha256_file
+        summary["accepted_sha256"] = sha256_file(args.accept)
     if args.pairs_out:
         result.save_pairs(args.pairs_out)
         summary["pairs"] = str(args.pairs_out)
@@ -110,20 +110,22 @@ def command_cost(args) -> int:
 
 
 def command_direction(args) -> int:
-    from woof.grad.sensitivity import (cell_blob, checkpoint_fields, gaussian_blob, load_direction, mesh_cells,
-                                       save_direction)
+    from woof.grad.sensitivity import (cell_blob, checkpoint_fields, direction_path, gaussian_blob, load_direction,
+                                       mesh_cells, save_direction)
 
-    fields = {}
+    fields, blobs = {}, []
     if args.add_to:
-        fields, _meta = load_direction(args.add_to)
+        fields, previous = load_direction(args.add_to)
+        # Carry the earlier blobs' provenance; a pre-history file records one blob under "added".
+        blobs = list(previous.get("blobs") or ([previous["added"]] if previous.get("added") else []))
     if args.blob is not None:
         if not args.checkpoint:
             raise SystemExit("woof grad direction: --blob needs --checkpoint")
         shape = checkpoint_fields(args.checkpoint, [args.field])[args.field].shape
         k, j, i = args.blob
         blob = gaussian_blob(shape, k=k, j=j, i=i, radius_cells=args.radius_cells,
-                             depth_levels=args.depth_levels, amplitude=args.amplitude)
-        added = {"field": args.field, "kji": [k, j, i], "radius_cells": args.radius_cells}
+                             depth_levels=args.depth_levels, amplitude=args.amplitude, rim=args.rim)
+        added = {"field": args.field, "kji": [k, j, i], "radius_cells": args.radius_cells, "rim": args.rim}
     else:
         if not args.mesh:
             raise SystemExit("woof grad direction: --at needs --mesh")
@@ -132,16 +134,21 @@ def command_direction(args) -> int:
         if not nz:
             raise SystemExit("woof grad direction: the mesh file has no nVertLevels; pass --levels")
         interior = None if cells["bdy"] is None else cells["bdy"] == 0
+        if interior is None:
+            print(f"woof grad direction: {args.mesh} carries no bdyMaskCell, so the blob is not zeroed in a "
+                  "regional mesh's relaxation rings; pass the static or init file of a regional mesh",
+                  file=sys.stderr)
         lat0, lon0, level = args.at
         blob = cell_blob(cells["lat"], cells["lon"], nz, lat0=lat0, lon0=lon0, level=level,
                          radius_km=args.radius_km, depth_levels=args.depth_levels, amplitude=args.amplitude,
                          interior=interior)
         added = {"field": args.field, "lat_lon_level": [lat0, lon0, level], "radius_km": args.radius_km}
     fields[args.field] = fields.get(args.field, 0.0) + blob
-    added.update(depth_levels=args.depth_levels, amplitude=args.amplitude)
-    sha = save_direction(args.out, fields, {"kind": "gaussian_blob", "source": str(args.checkpoint or args.mesh),
-                                             "added": added, "added_to": args.add_to})
-    print(json.dumps({"direction": str(args.out), "sha256": sha, "fields": sorted(fields)}, indent=2))
+    added.update(depth_levels=args.depth_levels, amplitude=args.amplitude,
+                 source=str(args.checkpoint or args.mesh))
+    sha = save_direction(args.out, fields, {"kind": "gaussian_blob", "blobs": blobs + [added]})
+    print(json.dumps({"direction": str(direction_path(args.out)), "sha256": sha, "fields": sorted(fields),
+                      "blobs": len(blobs) + 1}, indent=2))
     return 0
 
 
@@ -152,7 +159,8 @@ def command_perturb(args) -> int:
     if str(args.checkpoint).endswith(".nc"):
         receipt = perturb_mpas_file(args.checkpoint, fields, args.scale, args.out)
     else:
-        receipt = perturb_checkpoint(args.checkpoint, fields, args.scale, args.out, mp_physics=args.mp_physics)
+        receipt = perturb_checkpoint(args.checkpoint, fields, args.scale, args.out, mp_physics=args.mp_physics,
+                                     morr_rimed_ice=args.morr_rimed_ice)
     receipt["direction"] = str(args.direction)
     text = json.dumps(receipt, indent=2, sort_keys=True, default=str)
     if args.receipt:
@@ -214,6 +222,8 @@ def build_parser() -> argparse.ArgumentParser:
     direction.add_argument("--radius-km", type=float, default=30.0)
     direction.add_argument("--depth-levels", type=float, default=3.0)
     direction.add_argument("--amplitude", type=float, default=1.0, help="peak value, in the field's unit")
+    direction.add_argument("--rim", type=int, default=5,
+                           help="WRF route: rows and columns zeroed at each edge (the specified and relaxation zone)")
     direction.add_argument("--add-to", default=None, help="an existing direction file to add this blob to")
     direction.add_argument("--out", required=True)
     direction.set_defaults(handler=command_direction)
@@ -224,6 +234,9 @@ def build_parser() -> argparse.ArgumentParser:
     perturb.add_argument("--direction", required=True)
     perturb.add_argument("--scale", type=float, required=True, help="signed multiple of the direction")
     perturb.add_argument("--mp-physics", type=int, default=None, help="the run's mp_physics, for the moment guard")
+    perturb.add_argument("--morr-rimed-ice", type=int, default=None, choices=(0, 1),
+                         help="the run's morr_rimed_ice (Morrison: 0 graupel, 1 hail), for the moment repair; "
+                              "default: the analysis writer's")
     perturb.add_argument("--out", required=True, help="the perturbed checkpoint (a new file)")
     perturb.add_argument("--receipt", default=None, help="write the writer's receipt JSON here")
     perturb.add_argument("--quiet", action="store_true")

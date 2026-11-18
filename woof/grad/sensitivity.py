@@ -47,11 +47,12 @@ def checkpoint_fields(path, names: Sequence[str] | None = None) -> dict[str, np.
 
 
 def gaussian_blob(shape: Sequence[int], *, k: float, j: float, i: float,
-                  radius_cells: float, depth_levels: float, amplitude: float = 1.0) -> np.ndarray:
+                  radius_cells: float, depth_levels: float, amplitude: float = 1.0, rim: int = 0) -> np.ndarray:
     """``amplitude * exp(-r^2 / 2 radius^2 - dk^2 / 2 depth^2)`` on a ``(nz, ny, nx)`` field's own index grid.
 
     The centre is in the field's own indices, so for a staggered field a
-    half-cell shift is the caller's choice.
+    half-cell shift is the caller's choice.  The outer ``rim`` rows and
+    columns (the specified and relaxation zone) are zero.
     """
     shape = tuple(int(n) for n in shape)
     if len(shape) != 3 or min(shape) < 1:
@@ -61,7 +62,16 @@ def gaussian_blob(shape: Sequence[int], *, k: float, j: float, i: float,
     kk, jj, ii = (np.arange(n, dtype=np.float64) for n in shape)
     vertical = np.exp(-0.5 * ((kk - k) / depth_levels) ** 2)
     horizontal = np.exp(-0.5 * (((jj[:, None] - j) ** 2 + (ii[None, :] - i) ** 2) / radius_cells ** 2))
-    return amplitude * vertical[:, None, None] * horizontal[None, :, :]
+    blob = amplitude * vertical[:, None, None] * horizontal[None, :, :]
+    rim = int(rim)
+    if rim < 0 or 2 * rim >= min(shape[1:]):
+        raise SensitivityError(f"rim {rim} does not fit a {shape[1]} x {shape[2]} field")
+    if rim:
+        blob[:, :rim, :] = 0.0
+        blob[:, -rim:, :] = 0.0
+        blob[:, :, :rim] = 0.0
+        blob[:, :, -rim:] = 0.0
+    return blob
 
 
 def direction_digest(fields: Mapping[str, np.ndarray]) -> str:
@@ -73,15 +83,25 @@ def direction_digest(fields: Mapping[str, np.ndarray]) -> str:
     return digest.hexdigest()
 
 
+def direction_path(path) -> Path:
+    """``path`` with the ``.npz`` suffix numpy would add."""
+    path = Path(path)
+    return path if path.suffix == ".npz" else path.with_name(path.name + ".npz")
+
+
 def save_direction(path, fields: Mapping[str, np.ndarray], meta: Mapping | None = None) -> str:
-    """Write a direction (``field -> array``) and return its digest."""
+    """Write a direction (``field -> array``) to ``direction_path(path)``, atomically; return its digest."""
     if not fields:
         raise SensitivityError("a direction needs at least one field")
     sha = direction_digest(fields)
-    np.savez(path, schema=np.asarray(DIRECTION_SCHEMA), sha256=np.asarray(sha),
-             meta=np.asarray(json.dumps(dict(meta or {}), sort_keys=True)),
-             names=np.asarray(sorted(fields)),
-             **{f"field/{name}": np.asarray(fields[name], dtype=np.float64) for name in fields})
+    target = direction_path(path)
+    partial = target.with_name(f".{target.name}.partial")
+    with open(partial, "wb") as handle:
+        np.savez(handle, schema=np.asarray(DIRECTION_SCHEMA), sha256=np.asarray(sha),
+                 meta=np.asarray(json.dumps(dict(meta or {}), sort_keys=True)),
+                 names=np.asarray(sorted(fields)),
+                 **{f"field/{name}": np.asarray(fields[name], dtype=np.float64) for name in fields})
+    partial.replace(target)
     return sha
 
 
@@ -98,14 +118,21 @@ def load_direction(path) -> tuple[dict[str, np.ndarray], dict]:
 
 
 def perturb_checkpoint(source, direction: Mapping[str, np.ndarray], scale: float, destination, *,
-                       mp_physics: int | None = None) -> dict:
-    """Write ``source + scale * direction`` to ``destination`` through the analysis writer; return its receipt."""
+                       mp_physics: int | None = None, morr_rimed_ice: int | None = None) -> dict:
+    """Write ``source + scale * direction`` to ``destination`` through the analysis writer; return its receipt.
+
+    ``mp_physics`` and ``morr_rimed_ice`` are the base run's, for the
+    writer's number-moment repair (``morr_rimed_ice`` None keeps the
+    writer's default).
+    """
     from woof.ensemble.increments import apply_increments_to_checkpoint
 
     if not np.isfinite(scale):
         raise SensitivityError(f"scale must be finite, got {scale!r}")
     increments = {name: float(scale) * np.asarray(values, dtype=np.float64) for name, values in direction.items()}
-    receipt = apply_increments_to_checkpoint(source, increments, destination, publish=True, mp_physics=mp_physics)
+    options = {} if morr_rimed_ice is None else {"morr_rimed_ice": int(morr_rimed_ice)}
+    receipt = apply_increments_to_checkpoint(source, increments, destination, publish=True, mp_physics=mp_physics,
+                                             **options)
     receipt["direction_sha256"] = direction_digest(direction)
     receipt["scale"] = float(scale)
     return receipt
@@ -119,28 +146,46 @@ def _cost(entry) -> tuple[float, dict]:
     return float(summary["J"]), summary
 
 
+def _frozen_key(summary: Mapping) -> str | None:
+    """The frozen pair set a summary was scored against: its digest, or the digest of the file it names."""
+    if summary.get("accepted_sha256"):
+        return summary["accepted_sha256"]
+    named = summary.get("accepted_from")
+    if named and Path(named).is_file():
+        from woof.file_digest import sha256_file
+        return sha256_file(named)
+    return named
+
+
 def _same_definition(reference: Mapping | None, frozen: Sequence[Mapping]) -> None:
-    """Every scored run must use one observation set and error table, and the perturbed runs one frozen pair set."""
+    """Every scored run must use one observation set and error table and one frozen pair set.
+
+    The reference is held to the same frozen set as the perturbed runs: its
+    ``J`` enters the one-sided differences and the curvature.
+    """
+    if reference is not None:
+        frozen = [reference] + list(frozen)
     seen = {}
-    for summary in ([reference] if reference else []) + [s for s in frozen if s]:
+    for summary in frozen:
         for key in ("obs_sha256", "error_table_sha256"):
             if key in seen and seen[key] != summary.get(key):
                 raise SensitivityError(f"the scored runs differ in {key} ({seen[key]} != {summary.get(key)}); "
                                        "a difference of J is only meaningful for one definition of J")
             seen[key] = summary.get(key)
     # The pairs file's digest when the summary has one (paths differ between working directories).
-    accepted = {s.get("accepted_sha256") or s.get("accepted_from") for s in frozen if s}
+    accepted = {_frozen_key(s) for s in frozen}
     if None in accepted or len(accepted) > 1:
-        raise SensitivityError("score every perturbed run with --accept and the same reference pairs file "
-                               f"(frozen observation set); got {sorted(map(str, accepted))}")
+        raise SensitivityError("score every run (perturbed, --reference and --zero) with --accept and the same "
+                               f"reference pairs file (frozen observation set); got {sorted(map(str, accepted))}")
     for summary in frozen:
-        lost = (summary or {}).get("counts", {}).get("lost_from_reference")
+        lost = summary.get("counts", {}).get("lost_from_reference")
         if lost:
             raise SensitivityError(f"a scored run lost {lost} of the reference's observations, so J counts "
                                    "different observations; pick a smaller scale")
 
 
-def fd_summary(legs: Sequence[tuple[float, object, object]], *, reference=None, zero=None) -> dict:
+def fd_summary(legs: Sequence[tuple[float, object, object]], *, reference=None, zero=None,
+               converged_within: float = 0.25) -> dict:
     """Central differences for each ``(scale, plus, minus)`` leg.
 
     ``plus``/``minus`` are ``woof grad cost`` summaries (paths or dicts) or bare
@@ -153,7 +198,13 @@ def fd_summary(legs: Sequence[tuple[float, object, object]], *, reference=None, 
     a restart from the untouched checkpoint: its distance from the
     reference is what the writer's repairs alone change.  With two or more scales
     the relative change of the derivative between consecutive scales says
-    whether the smallest one is in the linear range.
+    whether the smallest one is in the linear range.  The headline ``dJ``
+    is the smallest scale whose derivative is within ``converged_within``
+    of the next larger scale's (``converged`` True); when no scale is, it
+    is the largest scale's, with ``converged`` False.  A single scale gives
+    ``converged`` None.  Either every input is a summary or every input
+    is a bare number; a mix is refused, because the bare numbers could not
+    be checked.
     """
     if not legs:
         raise SensitivityError("fd_summary needs at least one (scale, plus, minus) leg")
@@ -184,16 +235,22 @@ def fd_summary(legs: Sequence[tuple[float, object, object]], *, reference=None, 
             row["dJ_backward"] = (j0 - jm) / scale
             row["curvature"] = (jp + jm - 2.0 * j0) / scale ** 2
         if floor is not None:
-            row["difference_over_repair_offset"] = (abs(jp - jm) / floor) if floor > 0 else float("inf")
+            row["difference_over_repair_offset"] = (abs(jp - jm) / floor) if floor > 0 else None
         rows.append(row)
-    if any(summaries):
+    checked = summaries + ([] if reference is None else [s0])
+    if any(checked):
+        if not all(checked):
+            raise SensitivityError("give every leg, --reference and --zero as cost summaries, or all as bare "
+                                   "numbers; bare numbers cannot be checked against the summaries' definition of J")
         _same_definition(s0, summaries)
     for coarse, fine in zip(rows, rows[1:]):
         if fine["dJ_central"] != 0:
             fine["relative_change_from_larger_scale"] = abs(coarse["dJ_central"] - fine["dJ_central"]) / abs(fine["dJ_central"])
-    best = rows[-1]
+    converged = [row for row in rows[1:] if row.get("relative_change_from_larger_scale", np.inf) <= converged_within]
+    best = converged[-1] if converged else rows[0]
     return {"schema": FD_SCHEMA, "J_reference": j0, "repair_offset": floor, "legs": rows,
-            "dJ": best["dJ_central"], "dJ_scale": best["scale"]}
+            "dJ": best["dJ_central"], "dJ_scale": best["scale"],
+            "converged": None if len(rows) == 1 else bool(converged), "converged_within": converged_within}
 
 
 # ---------------------------------------------------------------------------
@@ -219,10 +276,8 @@ def mesh_cells(path) -> dict:
 
 
 def great_circle_km(lat, lon, lat0, lon0) -> np.ndarray:
-    lat, lon = np.radians(lat), np.radians(lon)
-    lat0, lon0 = np.radians(lat0), np.radians(lon0)
-    h = np.sin((lat - lat0) / 2) ** 2 + np.cos(lat) * np.cos(lat0) * np.sin((lon - lon0) / 2) ** 2
-    return 2.0 * EARTH_RADIUS_KM * np.arcsin(np.sqrt(np.minimum(h, 1.0)))
+    from woof.track.model import haversine_km
+    return haversine_km(lat0, lon0, lat, lon)
 
 
 def cell_blob(lat, lon, nz: int, *, lat0: float, lon0: float, level: float, radius_km: float,
