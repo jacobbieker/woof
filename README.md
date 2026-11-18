@@ -792,7 +792,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
   has a correlation of 0.90 on 1-3 May 2024 and 0.81 during the 10-12 May
   storm, and it reads about 25 % low at this solar maximum
-  (`tools/spacewx_gim_validate.py`). `spacewx_ionosphere_opt = 1` writes the
+  (`tools/spacewx_gim_validate.py`). `--storm` adds a storm-time foF2
+  correction, woof's own fit of filtered ap on CODE GNSS maps (2015-2023).
+  In the 2024 storms it raises the pattern correlation with GNSS TEC, and
+  it lowers the storm-hour foF2 RMSE at 12 ionosondes from 2.46 to 2.14 MHz.
+  It overshoots the May 2024 negative phase.
+  `spacewx_ionosphere_opt = 1` writes the
   same ionosphere into every WRF-route history frame (`IONO_TEC`,
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
   forecast; hex and streamed domains refuse it for now. `woof spacewx aurora`
@@ -809,8 +814,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   0.48-0.61 and the model reads about 2.5 times higher. `spacewx_aurora_opt =
   2` adds OVATION's electron energy flux, mean energy and ion energy flux
   (`AURORA_EFLUX`, `AURORA_EMEAN`, `AURORA_IFLUX`) to those history frames,
-  from the solar wind at the start. The storm-time and
-  particle-precipitation layers are planned ([docs/spacewx.md](docs/spacewx.md)).
+  from the solar wind at the start. The particle-precipitation layer is
+  planned ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
   studies gradients of a forecast's fit to observations and opt-in

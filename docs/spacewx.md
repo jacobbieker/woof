@@ -14,7 +14,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | layer | what it does | status |
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
-| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU | available as `woof spacewx ionosphere` (global grid) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
+| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
 | L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | ion-pair rates (CMIP6 EPP, Ap-driven MEE, GOES SPE) as NOx/HOx sources in chemistry, for high-top runs | planned |
@@ -99,7 +99,7 @@ Space weather enters through F10.7, taken from GFZ's index file:
 - `--f107-mode daily` uses the previous day's value.
 
 Both are available at forecast time. The maps are monthly medians, so the profile does not
-respond to a geomagnetic storm. That response is layer L3b.
+respond to a geomagnetic storm unless the storm-time correction below is switched on.
 
 **Validation against GNSS TEC.** `python -m tools.spacewx_gim_validate` grades the model's
 vertical TEC against IGS rapid global ionosphere maps (CDDIS). It compares every 2-hour map
@@ -122,6 +122,96 @@ Three findings stand out:
     16.2 and correlation 0.77. The quiet days, with a lower daily flux of 135-156 sfu,
     come out at bias -13.5 and RMSE 17.9.
 - **The URSI maps change little:** on 1-3 May, bias -8.5, RMSE 13.9 and correlation 0.89.
+
+### Storm-time correction (`woof spacewx ionosphere --storm`)
+
+`--storm` multiplies foF2 by a storm factor sqrt(R), where R = NmF2(storm) / NmF2(quiet),
+on each column and at each time. hmF2, the thicknesses and TEC then follow from the
+corrected peak, as usual. The fit is woof's own and is shipped as
+`woof/data/spacewx/storm_fit_v1.json`. It follows the approach of STORM (Araujo-Pradere et
+al. 2002), but no STORM code or coefficients are used.
+
+- **Driver.** Wrenn's (1987) filtered ap,
+  `ap_tau(t) = (1 - tau) * sum_i tau^i ap_i`, taken over the 3-hour GFZ ap intervals that
+  have ended by t (40 intervals, 120 h). It never reads the future, so a forecast can use it
+  up to its start.
+- **Model.** `log R = a x + b x^2`, with `x = ap_tau / 100`. There is no intercept, so a
+  quiet day has R = 1. (a, b) are interpolated linearly between nodes of:
+  - dipole |MLAT|: 0, 20, 35, 50, 62.5 and 75 deg;
+  - local solar time: every 4 h, periodic;
+  - season: local winter, equinox and local summer.
+
+  x is held at the largest value in the training data, and R is clipped to the range of the
+  training data.
+- **Target.** `log(TEC / TEC_q)` on CODE's final global ionosphere maps (AIUB, University of
+  Bern), 2-hourly and at nodes every 5 deg x 10 deg. TEC_q is the median of the 27 days
+  before, at the same UT and node. This measures the storm's departure from the recent quiet
+  ionosphere, independently of the climatology's own bias.
+- **Fitting.** The fit was trained on 2015, 2017 and 2023, and tested on 2024 and 2025.
+  - A nuisance term per |MLAT| node, in the day-before F10.7 over its 27-day mean, is fitted
+    alongside but not shipped. It keeps flux changes that come with storms out of the ap
+    coefficients.
+  - The filter constant (tau = 0.6-0.98) and the shape (linear, or linear plus quadratic)
+    were chosen by leave-one-year-out RMSE on the storm rows: those with ap_tau >= 30 for
+    tau = 0.8, the same rows for every candidate. Training RMSE alone favours the slowest
+    filter, which tracks solar rotation rather than storms.
+  - The choice is tau = 0.93 with the quadratic shape.
+- **Tools.** `tools/spacewx_storm_fit.py` refits and grades the model.
+  `tools/spacewx_gim_validate.py --storm` grades the corrected climatology.
+
+**Test years (2024-2025), against the quiet reference TEC_q** (RMSE of TEC in TECU; the
+storm rows have ap_tau >= 30 or >= 80 for tau = 0.8):
+
+| rows | |MLAT| 0-20 | 20-40 | 40-60 | 60-90 | all |
+|---|---|---|---|---|---|
+| all (10.2 million) | 9.63 -> 9.38 | 7.43 -> 7.32 | 5.92 -> 5.78 | 5.37 -> 5.34 | 7.18 -> 7.04 |
+| ap_tau >= 30 | 13.70 -> 13.68 | 11.44 -> 11.63 | 8.58 -> 7.83 | 6.70 -> 6.07 | 10.26 -> 10.05 |
+| ap_tau >= 80 | 18.46 -> 19.66 | 18.84 -> 18.36 | 13.03 -> 9.32 | 8.95 -> 7.14 | 15.06 -> 14.33 |
+
+The gain is in the negative phase at middle and high magnetic latitudes. At low latitudes
+the positive phase is not captured: 0-20 deg gets slightly worse in strong storms. The RMSE
+of log R barely moves overall (0.298 -> 0.296), because storm-to-storm variability is much
+larger than any mean storm response.
+
+**On the climatology, against CODE TEC** (cos-latitude weighted; correlation and RMSE in
+TECU, without -> with `--storm`):
+
+| period | correlation all / mid / high | RMSE all / mid / high |
+|---|---|---|
+| 1-3 May 2024 (quiet) | 0.897 -> 0.900 / 0.864 -> 0.873 / 0.721 -> 0.747 | 13.2 -> 13.3 / 8.1 -> 8.2 / 6.7 -> 6.9 |
+| 10-12 May 2024 (Gannon storm) | 0.798 -> 0.810 / 0.651 -> 0.713 / 0.522 -> 0.671 | 19.6 -> 20.6 / 14.3 -> 16.0 / 8.6 -> 10.8 |
+| 10-12 Oct 2024 (storm) | 0.782 -> 0.817 / 0.768 -> 0.786 / 0.555 -> 0.672 | 25.2 -> 26.1 / 14.2 -> 16.6 / 10.4 -> 12.2 |
+
+The correction improves the storm pattern (correlation), but it raises the TEC RMSE. The
+reason is that the climatology already reads about 25 % low at this solar maximum, and a
+negative phase lowers TEC further.
+
+**Against ionosondes (foF2, GIRO).** Twenty station-periods are graded at hourly medians
+(autoscaling confidence >= 70; storm hours by the fit's own ap_tau):
+- stations: Juliusruh, Ebro, Athens, Pruhonice, Dourbes, Wallops Island, Austin, Point
+  Arguello, Millstone Hill, Tromso, Grahamstown and Learmonth;
+- periods: 12 Apr-20 May and 8 Sep-16 Oct 2024.
+
+Here the climatology reads foF2 high during storms, and the correction helps:
+
+| hours | n | RMSE, MHz | bias, MHz | correlation |
+|---|---|---|---|---|
+| all | 15,897 | 1.46 -> 1.40 | +0.64 -> +0.41 | 0.850 -> 0.859 |
+| ap_tau >= 30 | 2,788 | 2.46 -> 2.14 | +1.69 -> +0.25 | 0.777 -> 0.723 |
+| ap_tau >= 60 | 922 | 2.83 -> 2.36 | +2.05 -> -0.75 | 0.718 -> 0.637 |
+
+The two storms differ:
+- In October the correction helps at every mid-latitude station (storm RMSE 2.9-3.1 ->
+  2.0-2.2 MHz).
+- In May it overshoots: storm bias -1.3 to -2.2 MHz and higher RMSE at most stations, so the
+  storm-hour correlation drops.
+
+The GIRO data are CC BY-NC-SA 4.0. They were used for this grading only and are not shipped.
+We thank the station operators and the Lowell GIRO Data Center.
+
+The CLI reads ap from GFZ's file, which must reach the requested time, so `--storm` refuses
+`--f107`. The dipole latitudes are taken at the first time. The receipt records the fit's
+SHA-256 and tau, and gives each time's ap_tau. The `storm_factor` field is R.
 
 ### In forecast history (`spacewx_ionosphere_opt`)
 
@@ -357,6 +447,8 @@ The forecast is identical with the option on or off.
 | CCIR/URSI ionospheric maps | PyIRI (MIT) at commit c0a50e0a, each file pinned by SHA-256 | ITU-R / URSI published coefficients |
 | IGRF-14 | IAGA V-MOD via NOAA NCEI, pinned by SHA-256 | IAGA published coefficients |
 | GNSS TEC maps (validation only) | NASA CDDIS IONEX (Earthdata login) | public |
+| CODE final GIMs (storm-time fit input; validation) | AIUB, University of Bern, via `zhw-b.s3.cloud.switch.ch/aiub/CODE/` | open, cite Dach et al.; only woof's fitted coefficients are shipped |
+| Ionosonde foF2 (validation only) | GIRO / Lowell DIDBase FastChar | CC BY-NC-SA 4.0: not shipped, used for grading only |
 | CMIP6 solar forcing (EPP ion-pair rates) | input4MIPs SOLARIS-HEPPA | CC BY 4.0 |
 
 **Redistribution.** The coefficient sets listed above are fetched at run time into the
