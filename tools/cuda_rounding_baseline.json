@@ -5343,7 +5343,7 @@
    },
    {
     "file": "woof/core/rrtmgk.py",
-    "sha256": "23d26e1439ff6700337156c2a4c34457ad4eadf2cdf2377d8698c3aa73f75930"
+    "sha256": "c471d8d291cbf5734fa58bec3d232e2fee41f6852251724f6d9be946e1bfa452"
    },
    {
     "file": "woof/core/ruc_gpu.py",

@@ -7535,7 +7535,7 @@ def _rrtmg_k(registry):
         selectors={'ra_lw_physics':14,'ra_sw_physics':14},
         implemented=True,maturity='implemented-unverified',scientific_evidence='none',
         reachability={'state':'component-override'},
-        parameters={'ra_physics':0,'icloud':1,'aer_opt':0,'ghg_input':0,
+        parameters={'ra_physics':0,'icloud':1,'aer_opt':0,
                     'wrf_rrtmg_compatibility':'none'},
         # woof.config.validate_rrtmgk_config's cloud-merge refusals, as rules
         # plan review evaluates (the port radiates the resolved cloud only).
@@ -7558,7 +7558,8 @@ def _rrtmg_k(registry):
             {'settings':{'mp_physics':[11,95]},
              'reason':'RRTMG-K: this microphysics supplies radiation clouds through a path rad_rrtmg_driver is not ported for.'}]},
         warnings=['Native WRF executes both spectra through LW-14 (rad_rrtmg_driver) and its SW-14 case only adds the shortwave heating; only the 14/14 pair runs.',
-                  'Explicit selection only; never a default. The port runs microphysics carrying snow (rad_rrtmg_driver iceflag 5), aer_opt=0, ghg_input=0, icloud=1 and no subgrid or convective cloud merge; rrtmg_spectral_output is refused.'],
+                  'Explicit selection only; never a default. The port runs microphysics carrying snow (rad_rrtmg_driver iceflag 5), aer_opt=0, icloud=1 and no subgrid or convective cloud merge; rrtmg_spectral_output is refused.',
+                  'ghg_input=1 goes beyond WRF (its rad_rrtmg_driver never reads it): the port then takes CO2, N2O, CH4, CFC-11 and CFC-12 from the CAMtr table at every call, as legacy RRTMG does; ghg_input=0 keeps the driver fixed gases.'],
         extensions={'column_contract':{
             'wrf_source':'WRF v4.7.1 phys/module_ra_rrtmg_lwk.F, phys/module_ra_rrtmg_swk.F, phys/module_ra_effective_radius.F (BUILD_RRTMK=1)',
             'oracle':'tools/rrtmg_k_column_oracle',
