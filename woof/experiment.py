@@ -5416,6 +5416,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     _assert_derived_copies(experiment, source)
     from woof.wrf_hydro_route import refuse_multiple_domains
     refuse_multiple_domains(len(experiment.domains))
+    from os import environ
+    if environ.get("WOOF_NN_CONFIG"):  # --nn (woof.nn.launch)
+        from woof.nn.launch import refuse_multiple_domains as refuse_nn_domains
+        refuse_nn_domains(len(experiment.domains))
     return _bind_physics_params(experiment, source)
 
 
@@ -6357,6 +6361,9 @@ def _public_config_value(value):
                                   ("gf_deep_rain_evaporation_booking", False),
                                   ("solar_tsi_opt", 0), ("solar_tsi_source", ""),
                                   ("solar_tsi_mode", "absolute"),
+                                  ("spacewx_ionosphere_opt", 0), ("spacewx_f107_source", ""),
+                                  ("spacewx_f107_mode", "81day"),
+                                  ("spacewx_ionosphere_maps", "ccir"),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

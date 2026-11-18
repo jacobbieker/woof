@@ -5048,6 +5048,30 @@ def test_legacy_rrtmg_variant_prices_the_call_peak_envelope():
     assert bigger <= big * 2, (bigger, big)
 
 
+def test_rrtmgk_pair_prices_its_own_units_and_call_peak():
+    """RRTMG-K (14/14) launches the legacy LW chain with its band-7 hook,
+    its own prep and SW units, the legacy adapter glue and solar geometry
+    and cal_cldfra1's slab libm; never the RTE+RRTMGP kernels."""
+    from woof.core.rrtmgk import rrtmgk_vram_bytes
+    from types import SimpleNamespace
+    run = SimpleNamespace(ra_physics=0, ra_lw_physics=14, ra_sw_physics=14)
+    modules = pf._radiation_kernel_modules(run, 1)
+    assert modules == {
+        "rrtmg_lw_legacy_chain", "rrtmgk_prep_unit", "rrtmgk_lw_unit",
+        "rrtmgk_sw_unit", "rrtmg_legacy_adapter", "rrtmg_legacy_solar",
+        "noahmp_libm_slab_composed"}
+    for name in ("rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw"):
+        # Fragments: priced through their composed units, never standalone.
+        assert name in pf.UNMEASURED_KERNEL_MODULES
+        unit = pf.CHAINED_TRANSLATION_UNIT_FRAMES[name + "_unit"]
+        assert unit.covers == {name} and unit.max_local_size_bytes == 0
+    small = rrtmgk_vram_bytes(ncol=1000, nz=49, resident_threads=0)
+    large = rrtmgk_vram_bytes(ncol=100_000, nz=49, resident_threads=0)
+    assert 0 < small < large
+    # Fixed chunk: the whole-call planes are what grows past one chunk.
+    assert large - small >= 18 * (100_000 - 1000) * 49 * 4
+
+
 def test_legacy_rrtmg_variant_prices_the_lw_chain_local_frame():
     """Variant-aware kernel-module selection (step-1 audit, major 1).
 
@@ -5134,6 +5158,9 @@ def test_legacy_rrtmg_variant_prices_the_lw_chain_local_frame():
     # "thompson_fork" joined 2026-10-07 the same way: the fork Thompson
     # column launches only as woof/core/thompson_fork.py's own unit,
     # priced as thompson_fork_unit.
+    # RRTMG-K's three units joined 2026-11-17 the same way: rrtmgk_prep,
+    # rrtmgk_lw and rrtmgk_sw compile only inside woof/core/rrtmgk.py's
+    # composed sources, priced as rrtmgk_{prep,lw,sw}_unit.
     covered = frozenset().union(
         *(tu.covers for tu in pf.CHAINED_TRANSLATION_UNIT_FRAMES.values()))
     assert covered == {
@@ -5142,7 +5169,8 @@ def test_legacy_rrtmg_variant_prices_the_lw_chain_local_frame():
         "rrtmg_lw_taugb13_16", "p3", "urban_bep_bem",
         "terrain_drag", "windfarm_fitch",
         "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched", "noah_mosaic",
-        "thompson_fork", "gbmpbl", "acm2pbl", "nest_vertical", "windfarm_fitch_cells"}
+        "thompson_fork", "gbmpbl", "acm2pbl", "nest_vertical", "windfarm_fitch_cells",
+        "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw"}
     assert covered <= pf.UNMEASURED_KERNEL_MODULES
     assert not modules & pf.UNMEASURED_KERNEL_MODULES
 

@@ -608,7 +608,8 @@ def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
                          like: HeightRaster, *, ndsm=None,
                          ndsm_sources: tuple[str, ...] = ("gem15-ndsm",),
                          storey_height_m: float = 3.0,
-                         default_height_m: float | None = None
+                         default_height_m: float | None = None,
+                         ndsm_medians: Sequence[float] | None = None
                          ) -> tuple[HeightRaster, dict]:
     """Burn footprints into ``like``'s raster (pixel-centre rule).
 
@@ -620,7 +621,10 @@ def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
     ``default_height_m``.  A building with none of these is dropped and
     counted.  Overlaps keep the taller, whatever the input order.  When an
     nDSM median supplies any height, the nDSM's sources (a HeightRaster's
-    own, else ``ndsm_sources``) join the result's.
+    own, else ``ndsm_sources``) join the result's.  ``ndsm_medians``
+    (one value per footprint, NaN for none) gives those medians already
+    read elsewhere, e.g. from GEM-15 windows on their own lattices, in
+    place of ``ndsm``.
     """
     from rasterio import features
     from rasterio.transform import from_origin
@@ -641,6 +645,13 @@ def rasterize_footprints(footprints: Sequence[Footprint], footprint_crs,
     if values is not None and values.shape != (rows, cols):
         raise ValueError("ndsm must be on like's grid")
     median = np.full(len(footprints) + 1, np.nan)
+    if ndsm_medians is not None:
+        if values is not None:
+            raise ValueError("give ndsm or ndsm_medians, not both")
+        given = np.asarray(ndsm_medians, np.float64)
+        if given.shape != (len(footprints),):
+            raise ValueError("ndsm_medians needs one value per footprint")
+        median[1:] = given
     if values is not None:
         for n, fp in enumerate(footprints, start=1):
             if math.isnan(fp.height):

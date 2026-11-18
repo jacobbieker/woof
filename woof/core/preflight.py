@@ -2760,6 +2760,12 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
 
     "cldfra3": 0,
     "solar_eclipse": 32,
+    # The ionosphere history (woof.spacewx.history), RTX A6000 sm_86,
+    # NVRTC 12.9, fast and strict, 2026-11-17: 96 B (the profile's locals).
+    "spacewx_ionosphere": 96,
+    # The auroral oval (woof spacewx aurora; no forecast module yet), same
+    # card and reading: 32 B.
+    "spacewx_aurora": 32,
     "cu_radiation": 0,  # test host B sm_120 / NVRTC 13.4.92, both modes.
     "wrf_stock_aer3": 0,  # same reading, both optics and diagnostics.
     "farms": 136,
@@ -3401,6 +3407,10 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     "rrtmg_sw", "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
     "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
     "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16",
+    # RRTMG-K's fragments: each compiles only inside its composed unit
+    # (woof.core.rrtmgk prep_source / lw_post_source / sw_source), priced
+    # as rrtmgk_{prep,lw,sw}_unit in CHAINED_TRANSLATION_UNIT_FRAMES.
+    "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw",
     # BEP+BEM's column kernel needs urban_bem.cuh and the glibc headers
     # woof/core/urban_bem.py composes; priced as urban_bem_composed.
     "urban_bep_bem",
@@ -3559,6 +3569,18 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         # store on every path (fix/rrtmg-sw-sfluxzen): all 17 kernels 0 B
         # on sm_120 (RTX 5070 Ti) at NVRTC 13.4.92, before and after.
         covers=frozenset({"rrtmg_sw"})),
+    # RRTMG-K (14/14), woof.core.rrtmgk._load: every kernel of each
+    # composed unit read 0 B on sm_86 (RTX A6000) at NVRTC 12.9.86,
+    # 2026-11-16 (driver CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES).
+    "rrtmgk_prep_unit": ChainedTranslationUnitFrame(
+        module="rrtmgk_prep_unit", max_local_size_bytes=0,
+        covers=frozenset({"rrtmgk_prep"})),
+    "rrtmgk_lw_unit": ChainedTranslationUnitFrame(
+        module="rrtmgk_lw_unit", max_local_size_bytes=0,
+        covers=frozenset({"rrtmgk_lw"})),
+    "rrtmgk_sw_unit": ChainedTranslationUnitFrame(
+        module="rrtmgk_sw_unit", max_local_size_bytes=0,
+        covers=frozenset({"rrtmgk_sw"})),
     # P3 one-category (mp=50).  ``noahmp_leaves.cu`` + ``p3.cu`` compiled as
     # ONE unit by woof/core/p3_device.p3_source(), the same shape the
     # legacy-RRTMG chain and the Noah-MP driver use.
@@ -4269,6 +4291,8 @@ _RADIATION_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
     1: ("noahmp_libm_slab_composed", "dudhia_sw"),
     4: ("rrtmgp_cloud", "rrtmgp_gas", "rrtmgp_mcica", "rrtmgp_rte"),
     5: ("goddard",),
+    # RRTMG-K: only as the 14/14 pair (physics_compat refuses a mix).
+    14: (),
     # Selector 31 (Held-Suarez relaxation, radiation_composition.py): the
     # temperature relaxation and its sigma Rayleigh momentum partner are both
     # in idealized_forcing.cu.
@@ -4285,6 +4309,17 @@ _RADIATION_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
 _RRTMG_LEGACY_KERNEL_MODULES: tuple[str, ...] = (
     "rrtmg_mcica_wrf", "rrtmg_lw_legacy_chain", "rrtmg_sw_legacy",
     "rrtmg_legacy_adapter", "rrtmg_legacy_prep", "rrtmg_legacy_solar")
+
+
+#: What the RRTMG-K pair (14/14) launches: the legacy LW chain (with K's
+#: band-7 taumol_post hook from ``rrtmgk_lw_unit``), K's own prep and SW
+#: units (all three chained units, CHAINED_TRANSLATION_UNIT_FRAMES),
+#: the legacy adapter's glue and solar geometry, and cal_cldfra1's slab
+#: libm unit.
+_RRTMGK_KERNEL_MODULES: tuple[str, ...] = (
+    "rrtmg_lw_legacy_chain", "rrtmgk_prep_unit", "rrtmgk_lw_unit",
+    "rrtmgk_sw_unit", "rrtmg_legacy_adapter", "rrtmg_legacy_solar",
+    "noahmp_libm_slab_composed")
 
 
 def _radiation_44_kernel_modules(run) -> tuple[str, ...]:
@@ -4328,6 +4363,8 @@ def _radiation_kernel_modules(run, grid_id: int) -> frozenset[str]:
             # Retain the existing complete implementation ceiling even
             # when only one spectrum uses it.
             modules.update(_radiation_44_kernel_modules(run))
+        elif value == 14:
+            modules.update(_RRTMGK_KERNEL_MODULES)
         else:
             modules.update(_RADIATION_KERNEL_MODULES[value])
     return frozenset(modules)
@@ -4467,6 +4504,8 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.update(("swint", "farms"))
     if int(dc.run.ra_sw_eclipse):
         modules.add("solar_eclipse")
+    if int(getattr(dc.run, "spacewx_ionosphere_opt", 0) or 0):
+        modules.add("spacewx_ionosphere")   # woof/spacewx/history.py
     if dc.run.cu_rad_feedback:
         modules.add("cu_radiation")
     if int(getattr(dc.run, "icloud", 1)) == 3:
@@ -6785,12 +6824,12 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
         shapes["radiation/_ozone_vmr"] = (60,)
     if 7 in (ra_lw_physics, ra_sw_physics):
         shapes["radiation_flux_diagnostics"] = (11, ny, nx)
-    if ra_lw_physics in (1, 4, 7, 99):
+    if ra_lw_physics in (1, 4, 7, 14, 99):
         # The OLR publication buffer (physics.py PhysicsDriver __init__):
         # one resident (ny, nx) FP32 driver persistent holding WRF's TOA
         # outgoing longwave for output, allocated when the attached
         # longwave adapter declares ``publishes_olr``.  BOTH built-in 4/4
-        # adapters declare it, and so does the 1/1 WRF RRTM + Dudhia
+        # adapters declare it, as do RRTMG-K (14/14) and the 1/1 WRF RRTM + Dudhia
         # composition, which is what this gate reproduces; a
         # caller-injected adapter that does not leaves this counted but
         # unallocated, and over-counting by one 2-D field is the safe
@@ -6814,12 +6853,12 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
         shapes["aod5503d"] = m
         for key in ("AOD5502D", "ANGEXP2D", "AERSSA2D", "AERASY2D"):
             shapes[key] = s2
-    if ra_lw_physics in (1, 4, 7, 99) or ra_sw_physics in (2, 4, 7, 99) or (int(cfg.icloud) == 3 and (ra_lw_physics or ra_sw_physics)) or (int(cfg.swint_opt) == 2 and int(cfg.icloud) == 3):
+    if ra_lw_physics in (1, 4, 7, 14, 99) or ra_sw_physics in (2, 4, 7, 14, 99) or (int(cfg.icloud) == 3 and (ra_lw_physics or ra_sw_physics)) or (int(cfg.swint_opt) == 2 and int(cfg.icloud) == 3):
         # The CLDFRA publication buffer (physics.py PhysicsDriver
         # __init__): one resident (nz, ny, nx) FP32 driver persistent
         # holding the radiation cloud fraction for output, allocated when
         # the attached radiation callable declares ``publishes_cldfra``.
-        # RTE+RRTMGP and legacy RRTMG declare it on either spectrum, the
+        # RTE+RRTMGP, legacy RRTMG and RRTMG-K declare it on either spectrum, the
         # classic RRTM longwave on its own; Dudhia alone computes no
         # fraction.  Over-counting a caller-injected adapter that does not
         # declare it is the safe direction for a VRAM estimate.
@@ -10430,6 +10469,10 @@ def estimate_domain(dc: DomainConfig, *, spec_bdy_width: int | None = None,
     items += _items("transient", ksas_output_transient_shapes(run))
 
     items += _items("transient", cloud_farms_transient_shapes(run))
+    if int(getattr(run, "spacewx_ionosphere_opt", 0) or 0):
+        # The ionosphere history's held geometry, outputs and rows.
+        from woof.spacewx.history import device_shapes as spacewx_shapes
+        items += _items("physics", spacewx_shapes(run))
     items += _items("transient", ysu_output_transient_shapes(run))
     items += _items("transient", mynn_scalar_transient_shapes(run))
     items += _items("transient", tracer_pbl_transient_shapes(run))
@@ -12403,6 +12446,20 @@ def estimate_experiment(
             if (4 in radiation_scheme_ids(dc.run)
                 and rrtmg_variant(dc.run) == RRTMG_VARIANT_LEGACY) else 0
             for dc in exp.domains)
+        legacy_envelope = max(legacy_calls, default=0)
+    if any(14 in radiation_scheme_ids(dc.run) for dc in exp.domains):
+        # RRTMG-K's call peak (woof.core.rrtmgk.rrtmgk_vram_bytes), priced
+        # into the same per-domain call-peak lane as the legacy adapter.
+        from woof.core.rrtmgk import rrtmgk_vram_bytes
+        k_calls = tuple(
+            rrtmgk_vram_bytes(
+                ncol=dc.run.ny * dc.run.nx, nz=dc.run.nz,
+                column_chunk=column_chunk,
+                resident_threads=device_profile.resident_thread_capacity)
+            if 14 in radiation_scheme_ids(dc.run) else 0
+            for dc in exp.domains)
+        legacy_calls = (tuple(max(a, b) for a, b in zip(legacy_calls, k_calls))
+                        if legacy_calls else k_calls)
         legacy_envelope = max(legacy_calls, default=0)
     from woof.core.flg_radiation import flg_radiation_vram_bytes
     flg_storage = sum(flg_radiation_vram_bytes(dc.run.nx*dc.run.ny, dc.run.nz)

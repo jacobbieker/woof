@@ -247,7 +247,7 @@ void pd_fluxes(const real* __restrict__ q,      // (nz, ny, nx) stage estimate
                int open_x, int open_y, int vorder)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
     int k = blockIdx.z;
     if (i > nx || j > ny || k > nz) return;
 
@@ -521,7 +521,7 @@ void pd_renorm_apply(const real* __restrict__ q0,      // (nz, ny, nx)
                      )
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
     int k = blockIdx.z;
 #if GPUWM_WRF_EXACT_C_ADVECTION
     if (i >= nx || j >= ny || k >= nz) return;
@@ -562,6 +562,8 @@ void pd_renorm_apply(const real* __restrict__ q0,      // (nz, ny, nx)
     // Adjacent x donors already evaluate the identical cell scale in
     // this warp. Exchange the result without changing its arithmetic;
     // warp edges and periodic seams retain the original evaluation.
+    // (blockDim.x is a multiple of 32, so a warp is 32 consecutive i of
+    // one row whatever blockDim.y is: launch_pd_renorm_apply holds that.)
     int lane = threadIdx.x & 31;
     real sc_l = __shfl_up_sync(active, sc, 1);
     real sc_r = __shfl_down_sync(active, sc, 1);

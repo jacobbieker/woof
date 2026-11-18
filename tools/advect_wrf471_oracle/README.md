@@ -470,8 +470,9 @@ a Blackwell receipt whose not-re-pinned record names it). Installing a
 fresh capture of the certified receipt on its card drops its not-re-pinned
 record and the stand-in's claim on it.
 
-The A6000 receipts were first captured at 24cfae7c4
-(`receipts/nvidia-rtx-a6000-*-recapture.json`).
+The A6000 receipts were first captured at 24cfae7c4 and re-pinned by the
+64 x 4 positive-definite advection block with every word of every variant
+reproduced (`receipts/nvidia-rtx-a6000-*-recapture.json`).
 
 ## Moving a receipt: `recapture_receipt.py`
 

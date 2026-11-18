@@ -767,6 +767,11 @@ STATE_INFRA_ATTRS = frozenset({
     # so any checkpoint written inside a window, and the final trajectory
     # digest of every IAU run on the tree route, raised RestartManifestError.
     "_iau_forcing",
+    # --nn (woof.nn.wrf_seat): the launch attaches the seat from its --nn
+    # file at every start and resume.  INFRA while it only records (mode
+    # "tap": the forecast's arrays are untouched); a seat that applies a
+    # model binds the model's identity into the checkpoint instead.
+    "_nn_column_seat",
     # woof.da.iau.IAU_AFTER_STEP_ATTRIBUTE: the analysis door's post-step
     # acts for a STREAMED root (its dry-mass share of the IAU window and its
     # balance probe, served per compute window by woof.da.iau
@@ -1496,6 +1501,10 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # RunConfig; stateless (the factor is read from the series at each
     # radiation call's model time), so a resumed run scales identically.
     "solar_variability",
+    # The opt-in ionosphere history (woof.spacewx.history): rebuilt from the
+    # resumed RunConfig; its rows are recomputed at each frame's valid time
+    # from the run start's F10.7, so a resumed run writes the same rows.
+    "spacewx_ionosphere",
     # WRF's topo_wind / gwd_opt (woof.core.terrain_drag): initialize_physics
     # rebuilds it from the resumed RunConfig and the prepared statics; it
     # holds only static coefficients and statistics, never a value a step
@@ -2955,6 +2964,9 @@ def _radiation_setup_identity(driver, cfg) -> dict:
     if (lw_id, sw_id) == (7, 7):
         from woof.core.radiation_composition import adapter_restart_identity
         identity["flg"] = adapter_restart_identity(scheme)
+    if (lw_id, sw_id) == (14, 14):
+        # RRTMG-K's own operands: o3input, ozone routing and assets.
+        identity["rrtmgk"] = scheme.restart_identity()
     if (lw_id, sw_id) == (4, 4) and not legacy_rrtmg:
         try:
             identity.update({
@@ -3099,6 +3111,10 @@ def _packed_parameters_identity(params, *, label: str,
 #: the switch apart, which is all the restart walk needs.
 _DIGEST_DROPPED_DIAGNOSTIC_FIELDS = frozenset(
     {"hailcast_opt", "haildt", "hailcast_version", "nwp_diagnostics", "tke_budget", "sase_flux_diag", "surface_energy_diag",
+     # The opt-in ionosphere history: output-only, and dropped while off by
+     # _drop_default_off_run_keys, so no earlier digest carried them.
+     "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
+     "spacewx_ionosphere_maps",
      # Correct mode WB1: output-only and on by default from 2.9.0, so it is
      # dropped rather than held at a default no earlier digest carried.
      "thompson_cloud_surface_booking",
@@ -3464,6 +3480,13 @@ def _drop_default_off_run_keys(values: dict) -> None:
     if values.get("solar_tsi_opt", 0) == 0:
         for name, default in (("solar_tsi_opt", 0), ("solar_tsi_source", ""),
                               ("solar_tsi_mode", "absolute")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    # The opt-in ionosphere history (woof.spacewx), the same contract.
+    if values.get("spacewx_ionosphere_opt", 0) == 0:
+        for name, default in (("spacewx_ionosphere_opt", 0), ("spacewx_f107_source", ""),
+                              ("spacewx_f107_mode", "81day"),
+                              ("spacewx_ionosphere_maps", "ccir")):
             if values.get(name, default) == default:
                 values.pop(name, None)
     if values.get("bl_mynn_cloud_tendency_form", "wrf_461") == "wrf_461":
@@ -5683,6 +5706,10 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'solar_tsi_opt': 0,
     'solar_tsi_source': '',
     'solar_tsi_mode': 'absolute',
+    'spacewx_ionosphere_opt': 0,
+    'spacewx_f107_source': '',
+    'spacewx_f107_mode': '81day',
+    'spacewx_ionosphere_maps': 'ccir',
     'ruc_soilprop': 'wrf_45',
     'rrtmg_cloud_optics_form': 'wrf_461',
     'rrtmg_aer3_type_source': 'rural',
@@ -6256,6 +6283,9 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "obstacle_wall_z0": 0.01,
                           "solar_tsi_opt": 0, "solar_tsi_source": "",
                           "solar_tsi_mode": "absolute",
+                          "spacewx_ionosphere_opt": 0, "spacewx_f107_source": "",
+                          "spacewx_f107_mode": "81day",
+                          "spacewx_ionosphere_maps": "ccir",
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without
                           # the key ran the exact arithmetic.

@@ -244,20 +244,36 @@ def test_the_captured_stage_writes_the_eager_words(monkeypatch, precision):
     from woof.hex.mpas_ocean import btr_subcycle_v842 as bt
     from woof.verify import mpas_ocean_forward_oracle as fo
     case = next(c for c in fo.cases(precision) if c["name"] == "split_nested_halos")
+    from woof.hip_backend import supports_graphs
+    captures = backend.active() == "cuda" and supports_graphs()
+    for off in ("0", "false", "off", "no", " OFF "):
+        monkeypatch.setenv("WOOF_OCEAN_CUDA_GRAPHS", off)
+        assert not bt._graphs_on()
     bt._GRAPHS.clear()
-    monkeypatch.setenv("WOOF_OCEAN_CUDA_GRAPHS", "0")
-    eager = fo.run_gpu(case)
-    assert not bt._GRAPHS
-    monkeypatch.setenv("WOOF_OCEAN_CUDA_GRAPHS", "1")
-    graphed = fo.run_gpu(case)
-    if backend.active() == "cuda":
-        assert any(entry.graph is not None and entry.seen >= 3 for entry in bt._GRAPHS.values())
-    else:
+    try:
+        monkeypatch.setenv("WOOF_OCEAN_CUDA_GRAPHS", "0")
+        eager = fo.run_gpu(case)
         assert not bt._GRAPHS
-    bt._GRAPHS.clear()
-    assert eager.keys() == graphed.keys()
+        monkeypatch.setenv("WOOF_OCEAN_CUDA_GRAPHS", "1")
+        graphed = fo.run_gpu(case)
+        if captures:
+            assert any(entry.graph is not None and entry.seen >= 3 for entry in bt._GRAPHS.values())
+        else:
+            assert not bt._GRAPHS
+        bt._GRAPHS.clear()
+        # a refused capture leaves its key eager for good, with the same words
+        calls = []
+        monkeypatch.setattr(bt, "_capture", lambda launches: calls.append(1))
+        refused = fo.run_gpu(case)
+        if captures:
+            assert calls and all(entry.refused for entry in bt._GRAPHS.values() if entry.seen >= 2)
+            assert len(calls) == sum(1 for entry in bt._GRAPHS.values() if entry.seen >= 2)
+    finally:
+        bt._GRAPHS.clear()
+    assert eager.keys() == graphed.keys() == refused.keys()
     for name, want in eager.items():
         assert graphed[name].tobytes() == want.tobytes(), name
+        assert refused[name].tobytes() == want.tobytes(), name
 
 
 @requires_gpu

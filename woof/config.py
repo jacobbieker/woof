@@ -2339,6 +2339,18 @@ class RunConfig:
     obstacle_drag_coefficient: float = _config_field(default=0.4, kw_only=True)
     # Roughness length (m) of building walls and roofs for the wall law.
     obstacle_wall_z0: float = _config_field(default=0.01, kw_only=True)
+    # spacewx_ionosphere_opt = 1 adds the climatological ionosphere
+    # (woof.spacewx.history: vertical TEC and the F2/E-layer parameters) to
+    # every history frame on the radiation geometry's columns.  Diagnostic
+    # only: the atmosphere integrates identically.  The F10.7 driver is
+    # "gfz" (the GFZ index file, fetched; "" means the same), a local file
+    # in its format or a number in sfu, held at the run start's value;
+    # spacewx_f107_mode is "81day" or "daily".  spacewx_ionosphere_maps
+    # picks the foF2 maps ("ccir" or "ursi").  0 runs no new code.
+    spacewx_ionosphere_opt: int = _config_field(default=0, kw_only=True)
+    spacewx_f107_source: str = _config_field(default="", kw_only=True)
+    spacewx_f107_mode: str = _config_field(default="81day", kw_only=True)
+    spacewx_ionosphere_maps: str = _config_field(default="ccir", kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -2373,6 +2385,45 @@ def _validate_solar_tsi(cfg) -> None:
             "solar_tsi_opt = 1 with swint_opt = 2: FARMS recomputes the "
             "surface shortwave every step from its own solar constant, "
             "outside the radiation call the TSI factor scales")
+
+
+def _validate_spacewx_ionosphere(cfg) -> None:
+    """spacewx_ionosphere_opt and its keys (woof.spacewx.history)."""
+    opt = cfg.spacewx_ionosphere_opt
+    source, mode, maps = (cfg.spacewx_f107_source, cfg.spacewx_f107_mode,
+                          cfg.spacewx_ionosphere_maps)
+    if type(opt) is not int or opt not in (0, 1):
+        raise ConfigurationRefused(
+            f"spacewx_ionosphere_opt={opt!r} must be 0 (no ionosphere) or 1 "
+            "(the climatological ionosphere in every history frame)")
+    if type(source) is not str or type(mode) is not str or type(maps) is not str:
+        raise ConfigurationRefused(
+            "spacewx_f107_source, spacewx_f107_mode and spacewx_ionosphere_maps "
+            "must be strings")
+    if mode not in ("81day", "daily"):
+        raise ConfigurationRefused(
+            f"spacewx_f107_mode={mode!r} must be '81day' (the trailing 81-day "
+            "mean F10.7) or 'daily' (the previous UT day's)")
+    if maps not in ("ccir", "ursi"):
+        raise ConfigurationRefused(
+            f"spacewx_ionosphere_maps={maps!r} must be 'ccir' or 'ursi'")
+    if opt == 0:
+        if source or mode != "81day" or maps != "ccir":
+            raise ConfigurationRefused(
+                "spacewx_f107_source/spacewx_f107_mode/spacewx_ionosphere_maps "
+                "are set but spacewx_ionosphere_opt = 0, so they would do "
+                "nothing; set spacewx_ionosphere_opt = 1 or drop them")
+        return
+    from woof.spacewx.history import IonosphereHistoryError, parse_f107_source
+    try:
+        parse_f107_source(source)
+    except IonosphereHistoryError as exc:
+        raise ConfigurationRefused(str(exc)) from None
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            "spacewx_ionosphere_opt = 1 places the ionosphere on the radiation "
+            "geometry's columns, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
 
 
 @dataclass(frozen=True)
@@ -3662,8 +3713,8 @@ def gf_clos_choice_advice(value: int) -> str | None:
 #: refusal string cannot be iterated.  The refusal sentences below still
 #: recite the names; these tuples are the membership they test.
 RA_PHYSICS_ACCEPTED = (0, 4, 90)
-RA_LW_PHYSICS_ACCEPTED = (0, 1, 3, 4, 5, 7, 31, 90, 99)
-RA_SW_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 7, 90, 99)
+RA_LW_PHYSICS_ACCEPTED = (0, 1, 3, 4, 5, 7, 14, 31, 90, 99)
+RA_SW_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 7, 14, 90, 99)
 
 #: Every other WRF v4.6.1/v4.7.1 radiation selector value, with the reason it
 #: is refused.  A value is never run as another scheme: the forecast and its
@@ -3676,17 +3727,11 @@ RA_SW_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 7, 90, 99)
 #: batch branches) stays out of it.
 RA_UNPORTED_REASONS: dict[str, dict[int, str]] = {
     "ra_lw_physics": {
-        14: ("WRF RRTMG-K longwave is not ported; RRTMG (4, with "
-             "ra_rrtmg_variant = rrtmg_legacy for WRF's transcription) is the "
-             "nearest scheme and is a different k-distribution"),
         24: ("WRF fast RRTMG longwave (module_ra_rrtmg_lwf) is a separately "
              "coded solver that is not ported; ra_lw_physics = 4 with "
              "ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription"),
     },
     "ra_sw_physics": {
-        14: ("WRF RRTMG-K shortwave is not ported; RRTMG (4, with "
-             "ra_rrtmg_variant = rrtmg_legacy for WRF's transcription) is the "
-             "nearest scheme and is a different k-distribution"),
         24: ("WRF fast RRTMG shortwave (module_ra_rrtmg_swf) is a separately "
              "coded solver that is not ported; ra_sw_physics = 4 with "
              "ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription"),
@@ -3764,6 +3809,91 @@ def drop_inactive_radiation_port_keys(values: dict) -> None:
     if values.get("aer_opt", 0) != 2:
         for key in AER_OPT2_RUN_KEYS:
             values.pop(key, None)
+
+
+def validate_rrtmgk_config(cfg, ra_lw_physics, ra_sw_physics) -> None:
+    """Refuse what WRF 4.7.1's RRTMG-K (ra_lw_physics = ra_sw_physics = 14,
+    module_ra_rrtmg_swk.F rad_rrtmg_driver) is not ported for.
+
+    WRF runs both spectra in one call from the longwave CASE
+    (module_radiation_driver.F:2103-2129); its RRTMK_SWSCHEME CASE only adds
+    the shortwave heating the longwave call already made, so a split pair
+    either never radiates the shortwave (14/x) or adds a second one (x/14).
+    """
+    if (ra_lw_physics, ra_sw_physics) != (14, 14):
+        raise ConfigurationRefused(
+            f"ra_lw_physics={ra_lw_physics}, ra_sw_physics={ra_sw_physics}: "
+            "WRF RRTMG-K computes both spectra in one rad_rrtmg_driver call "
+            "from the longwave case, so it runs only as the pair "
+            "ra_lw_physics=14, ra_sw_physics=14.")
+    if str(getattr(cfg, "rrtmg_spectral_output", "none") or "none") != "none":
+        raise ConfigurationRefused(
+            f"rrtmg_spectral_output={cfg.rrtmg_spectral_output!r} is a legacy "
+            "RRTMG (4/4) diagnostic: WRF RRTMG-K's rad_rrtmg_driver has no "
+            "band or g-point flux output, so there is nothing to write. Set "
+            "rrtmg_spectral_output='none' with ra_lw_physics=ra_sw_physics=14.")
+    for name, admitted, why in (
+            ("aer_opt", 0, "the aer_opt>0 aerosol optics on the RRTMG-K "
+             "shortwave are not ported"),
+            ("ghg_input", 0, "rad_rrtmg_driver carries fixed trace gases "
+             "and never reads ghg_input")):
+        value = int(getattr(cfg, name, 0) or 0)
+        if value != admitted:
+            raise ConfigurationRefused(
+                f"{name}={value} with ra_lw_physics=ra_sw_physics=14: {why}. "
+                f"Set {name}={admitted}.")
+    if cfg.icloud != 1:
+        raise ConfigurationRefused(
+            f"icloud={cfg.icloud} with ra_lw_physics=ra_sw_physics=14: the "
+            "RRTMG-K port is anchored on the icloud=1 cal_cldfra1 cloud "
+            "fraction only. Set icloud=1.")
+    if int(getattr(cfg, "o3input", 2)) not in (0, 2):
+        raise ConfigurationRefused(
+            f"o3input={cfg.o3input}: RRTMG-K implements 0 (wrapper O3DATA) "
+            "and 2 (CAM climatology).")
+    from woof.core.mynn_radiation import mynn_bl_cloud_active
+    merges = [name for name, on in (
+        ("icloud_bl=1 (MYNN subgrid clouds)", mynn_bl_cloud_active(
+            cfg.bl_pbl_physics, getattr(cfg, "icloud_bl", 0))),
+        ("cu_rad_feedback=.true.", bool(getattr(cfg, "cu_rad_feedback", False))),
+        ("bmj_rad_feedback=.true.", bool(getattr(cfg, "bmj_rad_feedback", False))),
+        ("shcu_physics=5 (Deng shallow-cumulus clouds)",
+         int(getattr(cfg, "shcu_physics", 0) or 0) == 5),
+        ("cu_physics=10 (KF-CuP cloud feedback)",
+         int(getattr(cfg, "cu_physics", 0) or 0) == 10)) if on]
+    if merges:
+        raise ConfigurationRefused(
+            f"{', '.join(merges)} with ra_lw_physics=ra_sw_physics=14: the "
+            "RRTMG-K port radiates the resolved cloud only; the driver's "
+            "subgrid and convective cloud merges are not ported for it. "
+            "Turn the named merge off (icloud_bl=0, cu_rad_feedback=.false., "
+            "bmj_rad_feedback=.false., shcu_physics=0, a cu_physics other "
+            "than 10) to radiate the resolved cloud.")
+    if int(getattr(cfg, "mp_physics", 0) or 0) in (11, 95):
+        raise ConfigurationRefused(
+            f"mp_physics={cfg.mp_physics} with ra_lw_physics=ra_sw_physics=14: "
+            "this scheme supplies radiation clouds through a path "
+            "rad_rrtmg_driver is not ported for.")
+    if cfg.moist and cfg.mp_physics:
+        from woof.wrf_physics_inventory import stock_wrf_physics_inventory
+        try:
+            inv = stock_wrf_physics_inventory(int(cfg.mp_physics))
+        except ValueError:
+            inv = None
+        names = () if inv is None else {
+            f.registry_name for f in inv.wrfinput_fields}
+        if inv is None or "qs" not in names:
+            raise ConfigurationRefused(
+                f"mp_physics={cfg.mp_physics} with ra_lw_physics="
+                "ra_sw_physics=14: the RRTMG-K port runs rad_rrtmg_driver's "
+                "snow-carrying cloud optics (iceflag 5), which needs a "
+                "microphysics scheme whose Registry package carries QS (and "
+                "a packaged package contract to read F_QNC from).")
+    else:
+        raise ConfigurationRefused(
+            "ra_lw_physics=ra_sw_physics=14 needs moist microphysics with "
+            "snow: rad_rrtmg_driver's ported cloud optics are the iceflag 5 "
+            "arm.")
 
 
 def wrf_unported_reason(key: str, value: int) -> str:
@@ -9163,6 +9293,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking must be true or false")
     _validate_solar_tsi(cfg)
+    _validate_spacewx_ionosphere(cfg)
     if cfg.gf_deep_rain_evaporation_booking and int(cfg.cu_physics) != 3:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking corrects Grell-Freitas's deep "
@@ -9217,13 +9348,13 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         why = radiation_unported_reason("ra_lw_physics", ra_lw_physics)
         raise ConfigurationRefused(
             "ra_lw_physics must be 0 (off), 1 (WRF RRTM), 3 (WRF CAM), 4 "
-            "(RTE+RRTMGP), 5 (WRF New Goddard), 7 (WRF Fu-Liou-Gu), 31 (idealized relaxation), 90 (analytic proxy) or 99 (GFDL Eta), "
+            "(RTE+RRTMGP), 5 (WRF New Goddard), 7 (WRF Fu-Liou-Gu), 14 (WRF RRTMG-K), 31 (idealized relaxation), 90 (analytic proxy) or 99 (GFDL Eta), "
             f"got {ra_lw_physics}." + (f" {why}." if why else ""))
     if ra_sw_physics not in RA_SW_PHYSICS_ACCEPTED:
         why = radiation_unported_reason("ra_sw_physics", ra_sw_physics)
         raise ConfigurationRefused(
             "ra_sw_physics must be 0 (off), 1 (WRF Dudhia), 2 (WRF GSFC), 3 (WRF CAM), 4 "
-            "(RTE+RRTMGP), 5 (WRF New Goddard), 7 (WRF Fu-Liou-Gu), 90 (analytic proxy) or 99 (GFDL Eta), "
+            "(RTE+RRTMGP), 5 (WRF New Goddard), 7 (WRF Fu-Liou-Gu), 14 (WRF RRTMG-K), 90 (analytic proxy) or 99 (GFDL Eta), "
             f"got {ra_sw_physics}." + (f" {why}." if why else ""))
     if 7 in (ra_lw_physics, ra_sw_physics):
         if ra_lw_physics == 7 and ra_sw_physics == 0:
@@ -9237,6 +9368,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             raise ConfigurationRefused(
                 "WRF FLG needs 4 to 100 model layers: its three cloud groups "
                 "need a layer each and its native scratch bound is nvx=100.")
+    if 14 in (ra_lw_physics, ra_sw_physics):
+        validate_rrtmgk_config(cfg, ra_lw_physics, ra_sw_physics)
     if 99 in (ra_lw_physics, ra_sw_physics) and (type(cfg.co2tf) is not int or cfg.co2tf not in (0, 1)):
         raise ConfigurationRefused("co2tf must be 0 (CONRAD) or 1 (CO2O3)")
     if 3 in (ra_lw_physics, ra_sw_physics):

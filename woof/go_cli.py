@@ -6215,6 +6215,21 @@ def go_main(args, *, observer=None) -> int:
     return _go_config_main(args, observer=observer)
 
 
+def _refuse_lakes_off_configuration(args) -> None:
+    """``--lakes`` rewrites a TOML configuration; every directory route
+    (WRF input, met_em, namelist.input, global directory) carries its own
+    namelist and static fields and would launch with the switch ignored."""
+    if getattr(args, "lakes", None) is None:
+        return
+    config = getattr(args, "config", None)
+    if getattr(args, "wrfinput", None) is not None or (
+            config is not None and (Path(config).is_dir()
+                                    or Path(config).name == "namelist.input")):
+        raise GoRefusal("--lakes applies to a TOML configuration launch; a WRF input, "
+                        "met_em or namelist directory carries its own namelist and "
+                        "static fields. Next: drop --lakes, or launch from the configuration.")
+
+
 @_cyclone_go_scope
 @_hydro_go_scope(beside=True)
 def _go_config_main(args, *, observer=None) -> int:
@@ -6233,6 +6248,7 @@ def _go_config_main(args, *, observer=None) -> int:
     except ValueError as error:
         print(f"go: {error}", file=sys.stderr)
         return 2
+    _refuse_lakes_off_configuration(args)
     from woof.go_wrfinput import launch_if_global_directory
     native_status = launch_if_global_directory(args, observer=observer)
     if native_status is not None:
@@ -6296,12 +6312,18 @@ def _go_config_main(args, *, observer=None) -> int:
         raise GoRefusal("--run-seconds requires WRF inputs")
     _at_flag_storm_nests(args)
     if getattr(args, "branch_from", None) is not None:
+        if getattr(args, "lakes", None) is not None:
+            raise GoRefusal("--lakes does not apply to --branch-from, which launches branches "
+                            "of an existing run. Next: drop --lakes.")
         from woof.ensemble.mass_launcher import run as run_branches
         return run_branches(args)
     # A future stage-only owner can answer before GPU admission. None is
     # the frozen no-op result; all existing callers take the same route.
     stage_result = SpeedHooks.stage_only(args, None)
     if stage_result is not None:
+        if getattr(args, "lakes", None) is not None:
+            raise GoRefusal("--lakes does not apply to a stage-only launch, which never "
+                            "reaches the lake configuration. Next: drop --lakes.")
         return stage_result
     # An acquisition owner can materialize its source-only domain using the
     # same wizard as CONFIG launches. The registry chooses it, not source ids.
@@ -7909,6 +7931,8 @@ def _add_go_arguments(parser) -> None:
                         "forecast has no hydro")
     from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
     add_wrf_hydro_arguments(parser)
+    from woof.nn.launch import add_arguments as add_nn_arguments
+    add_nn_arguments(parser)
     from woof.source_adapters import ensemble_source_ids
     from woof.ensemble.wofs_recipe import source_spec_argument
     parser.add_argument("--source", type=source_spec_argument, default=None, metavar="SOURCE[:N],...",

@@ -30,6 +30,7 @@ import numpy as np
 
 from woof.spacewx import igrf
 from woof.spacewx.assets import PinnedAsset, fetch_pinned
+from woof.spacewx.solar_irradiance import naive_utc as _naive_utc
 
 PYIRI_COMMIT = "c0a50e0af6370f00dd24c1f8900442fe818a331b"
 _PYIRI_RAW = f"https://raw.githubusercontent.com/victoriyaforsythe/PyIRI/{PYIRI_COMMIT}/PyIRI/coefficients"
@@ -156,8 +157,17 @@ def f107_to_r12(f107: float) -> float:
     return (-b + np.sqrt(b * b - 4.0 * a * c)) / (2.0 * a)
 
 
+#: The R12 at which the quadratic IG12 fit turns over (dIG12/dR12 = 0).
+R12_FIT_PEAK = 1.5332 / (2.0 * 0.0031)
+
+
 def r12_to_ig12(r12: float) -> float:
-    """IG12 from R12 (sunspot number v2; Forsythe et al. 2023 fit)."""
+    """IG12 from R12 (sunspot number v2; Forsythe et al. 2023 fit).
+
+    The quadratic turns over at R12 of about 247 (F10.7 near 300 sfu); beyond
+    it the fit would give a smaller IG12, and so a lower foF2, for more solar
+    activity, so R12 is held at the turning point there."""
+    r12 = min(float(r12), R12_FIT_PEAK)
     return -11.5634 + 1.5332 * r12 - 0.0031 * r12 * r12
 
 
@@ -182,7 +192,7 @@ def _mid_month(year: int, month: int) -> datetime:
 
 def month_weights(when: datetime) -> tuple[tuple[int, float], tuple[int, float]]:
     """The two monthly maps around ``when`` and their linear weights in time."""
-    when = when.replace(tzinfo=None)
+    when = _naive_utc(when)
     here = _mid_month(when.year, when.month)
     if when >= here:
         before, after = here, _mid_month(when.year, when.month + 1)
@@ -195,7 +205,7 @@ def month_weights(when: datetime) -> tuple[tuple[int, float], tuple[int, float]]
 def subsolar_point(when: datetime) -> tuple[float, float]:
     """Subsolar latitude and longitude (deg), low-precision solar coordinates
     (Astronomical Almanac, sec. C; good to about 0.01 deg)."""
-    when = when.replace(tzinfo=None)
+    when = _naive_utc(when)
     j2000 = datetime(2000, 1, 1, 12)
     t = (when - j2000).total_seconds() / 86400.0 / 36525.0
     mean_lon = np.mod(280.460 + 36000.771 * t, 360.0)
@@ -223,7 +233,7 @@ class Ionosphere:
         lon = np.asarray(lon_deg, dtype=np.float64).ravel()
         if lat.shape != lon.shape or lat.size == 0:
             raise IonosphereError("lat and lon must be non-empty and of one size")
-        if np.any(np.abs(lat) > 90.0) or not np.all(np.isfinite(lon)):
+        if not np.all(np.abs(lat) <= 90.0) or not np.all(np.isfinite(lon)):
             raise IonosphereError("latitudes must lie in [-90, 90] and longitudes be finite")
         self.family = family
         self.alt = (float(alt_lo), float(alt_hi), int(nalt))
@@ -242,12 +252,12 @@ class Ionosphere:
 
     def drivers(self, when: datetime, f107: float) -> dict:
         """Everything that is shared by the columns at ``when``."""
-        when = when.replace(tzinfo=None)
+        when = _naive_utc(when)
         f107 = float(f107)
         if not np.isfinite(f107) or f107 <= 0.0:
             raise IonosphereError(f"F10.7 {f107} sfu is not a solar flux")
         r12 = f107_to_r12(f107)
-        ig12 = r12_to_ig12(r12)
+        ig12 = r12_to_ig12(r12)     # clamped at the fit's turning point; r12 itself is not
         ut = when.hour + when.minute / 60.0 + when.second / 3600.0
         d_f2, d_m3 = diurnal(NJ_F2, ut), diurnal(NJ_M3, ut)
         coef = np.zeros(NCOEF)
