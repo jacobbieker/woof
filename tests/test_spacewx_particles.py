@@ -191,6 +191,28 @@ def test_maxwellian_electrons_conserve_energy_and_stay_above_wrf_tops():
         P.electron_ion_pairs_per_gram(1.0, 2000.0, edges, spectrum="mono")
     with pytest.raises(P.ParticleError, match="spectrum"):
         P.electron_ion_pairs_per_gram(1.0, 4.0, edges, spectrum="kappa")
+    for bad in (-1.0, math.nan):
+        with pytest.raises(P.ParticleError, match="non-negative"):
+            P.electron_ion_pairs_per_gram(bad, 4.0, edges)
+    # A zero flux is checked like any other: only (0, 0) is OVATION's empty cell.
+    with pytest.raises(P.ParticleError, match="positive"):
+        P.electron_ion_pairs_per_gram(0.0, -5.0, edges)
+    with pytest.raises(P.ParticleError, match="outside"):
+        P.electron_ion_pairs_per_gram(0.0, 5000.0, edges, spectrum="mono")
+    # A Maxwellian whose energy falls mostly outside the fit's range is refused.
+    for mean in (0.05, 5000.0):
+        with pytest.raises(P.ParticleError, match="outside"):
+            P.maxwellian_bins(mean)
+    for mean in (0.3, 250.0):
+        assert P.maxwellian_bins(mean)[1].sum() == pytest.approx(1.0)
+
+
+def test_the_vectorised_maxwellian_is_the_sum_of_its_monoenergetic_parts():
+    x = np.geomspace(1.0e-8, 1.0, 50)
+    e, w = P.maxwellian_bins(4.0)
+    together = P.electron_absorbed(x, 3.0 * w, e)
+    apart = sum(P.electron_absorbed(x, 3.0 * wk, ek) for ek, wk in zip(e, w))
+    np.testing.assert_allclose(together, apart, rtol=1e-12)
 
 
 def test_cli_adds_auroral_electrons_without_protons(tmp_path, capsys):
@@ -201,7 +223,9 @@ def test_cli_adds_auroral_electrons_without_protons(tmp_path, capsys):
                      "--levels", "1e-5", "1e-4", "1e-3", "1", "--out", str(out)]) == 0
     doc = json.loads(out.read_text())
     assert doc["times"] == [] and "spacewx_proton_source" not in doc
+    assert "spacewx_particles_model" not in doc and "hox_per_ion_pair" not in doc
     el = doc["electrons"]
+    assert el["time"] == "2012-01-24T00:00:00Z"
     q = np.asarray(el["ion_pairs_per_gram_s"])
     assert q[0] > q[1] > q[2] > 0 and q[3] == 0.0
     np.testing.assert_allclose(el["nox_ppbv_per_day"], P.vmr_tendency(q, 1.25) * 86400e9)
@@ -211,6 +235,9 @@ def test_cli_adds_auroral_electrons_without_protons(tmp_path, capsys):
                   "--electron-energy-flux", "5"])
     with pytest.raises(SystemExit, match="needs the electron options"):
         cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--source", "none"])
+    with pytest.raises(SystemExit, match="--count applies to the protons only"):
+        cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--source", "none", "--count", "3",
+                  "--electron-energy-flux", "5", "--electron-mean-energy", "3"])
     with pytest.raises(SystemExit, match="non-negative"):
         cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--source", "none",
                   "--electron-energy-flux", "-1", "--electron-mean-energy", "3"])

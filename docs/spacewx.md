@@ -548,7 +548,12 @@ woof spacewx particles --time 2024-05-11T00:00Z --source none \
 - **Spectrum.** A Maxwellian number flux, E exp(-E / E0), whose mean energy
   2 E0 is OVATION's eflux / nflux (`--electron-spectrum maxwellian`, the
   default), on 160 log bins over 0.1-1000 keV; or monoenergetic
-  (`--electron-spectrum mono`).
+  (`--electron-spectrum mono`). A mean energy that puts more than 5 % of the
+  energy flux outside the fit's 0.1-1000 keV (below about 0.25 keV or above
+  about 300 keV) is refused, as is a negative or non-finite flux; a zero flux
+  with a zero mean energy (OVATION outside the oval) gives zeros. The profile
+  is one profile for the given inputs, recorded with `--time`; `--count`
+  steps the protons only.
 - **Checks** (`tests/test_spacewx_particles.py`):
   - The column total against the incident energy: 0.84 at 100 eV, 0.94 at
     1 keV, 0.99 at 10 keV, 1.01 at 100 keV and 1.05 at 1 MeV. This is the fit's

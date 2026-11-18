@@ -188,14 +188,22 @@ ELECTRON_E_RANGE_KEV = (0.1, 1000.0)
 _KEV_PER_ERG = 1.0 / 1.602176634e-9
 
 
+def _fang_coefficients(e_kev) -> np.ndarray:
+    """C_i(E) of Fang et al. 2010 eq. 5, shape (8,) + E's shape."""
+    e = np.asarray(e_kev, dtype=np.float64)
+    lo, hi = ELECTRON_E_RANGE_KEV
+    if not np.all(np.isfinite(e) & (e >= lo) & (e <= hi)):
+        raise ParticleError(f"electron energy {e_kev!r} keV is outside the 0.1-1000 keV of Fang et al. 2010")
+    le = np.log(e)
+    powers = np.stack([np.ones_like(le), le, le * le, le ** 3])          # (4,) + shape
+    return np.exp(np.tensordot(FANG2010_P, powers, axes=(1, 0)))
+
+
 def electron_dissipation(y, e_kev) -> np.ndarray:
     """Fang et al. 2010 eq. 4: the normalised energy dissipation f(y, E) of
-    monoenergetic electrons of ``e_kev`` keV at normalised depth ``y``."""
-    e = float(e_kev)
-    if not ELECTRON_E_RANGE_KEV[0] <= e <= ELECTRON_E_RANGE_KEV[1]:
-        raise ParticleError(f"electron energy {e:g} keV is outside the 0.1-1000 keV of Fang et al. 2010")
-    le = math.log(e)
-    c = np.exp(FANG2010_P @ np.array([1.0, le, le * le, le ** 3]))
+    monoenergetic electrons of ``e_kev`` keV (a scalar, or an array that
+    broadcasts against ``y``) at normalised depth ``y``."""
+    c = _fang_coefficients(e_kev)
     y = np.asarray(y, dtype=np.float64)
     return (c[0] * y ** c[1] * np.exp(-c[2] * y ** c[3])
             + c[4] * y ** c[5] * np.exp(-c[6] * y ** c[7]))
@@ -207,52 +215,85 @@ def _electron_y(depth, e_kev):
     return (2.0 / e_kev) * (np.asarray(depth, dtype=np.float64) / 6.0e-6) ** 0.7
 
 
+#: ln y nodes of the cumulative dissipation (Fang's y runs over about 1e-3..1e2).
+_LY = np.linspace(math.log(1.0e-6), math.log(1.0e4), 2001)
+
+
+def _check_flux(energy_flux_erg) -> np.ndarray:
+    q = np.asarray(energy_flux_erg, dtype=np.float64)
+    if not np.all(np.isfinite(q) & (q >= 0.0)):
+        raise ParticleError(f"electron energy flux {energy_flux_erg!r} erg cm-2 s-1 must be finite and non-negative")
+    return q
+
+
 def electron_absorbed(depth, energy_flux_erg, e_kev) -> np.ndarray:
-    """Energy absorbed above each column depth (g cm-2), keV cm-2 s-1, from an
-    isotropic monoenergetic flux of ``energy_flux_erg`` erg cm-2 s-1 at
-    ``e_kev``: ``Q int_0^X f(y) dX' / X'``, since Fang's ionisation rate per
-    unit mass is ``Q f / (D X)`` (eq. 3, D = 35 eV).  The total over the whole
-    column is Q to within the fit's few per cent."""
-    q = float(energy_flux_erg) * _KEV_PER_ERG
-    ly = np.linspace(math.log(1.0e-6), math.log(1.0e4), 2001)
-    # dX / X = dy / (0.7 y): trapezoids in ln y.
-    g = electron_dissipation(np.exp(ly), e_kev) / 0.7
-    cum = np.concatenate([[0.0], np.cumsum(0.5 * (g[1:] + g[:-1]) * np.diff(ly))])
-    y = _electron_y(depth, e_kev)
-    return q * np.interp(np.log(np.maximum(y, 1.0e-300)), ly, cum, left=0.0, right=cum[-1])
+    """Energy absorbed above each column depth (g cm-2), keV cm-2 s-1, from
+    isotropic monoenergetic fluxes of ``energy_flux_erg`` erg cm-2 s-1 at
+    ``e_kev`` (scalars, or 1-D arrays of components that are summed):
+    ``Q int_0^X f(y) dX' / X'``, since Fang's ionisation rate per unit mass is
+    ``Q f / (D X)`` (eq. 3, D = 35 eV).  The total over the whole column is Q
+    to within the fit's few per cent."""
+    e = np.atleast_1d(np.asarray(e_kev, dtype=np.float64))
+    q = np.broadcast_to(_check_flux(energy_flux_erg), e.shape) * _KEV_PER_ERG
+    # dX / X = dy / (0.7 y): trapezoids in ln y, all energies at once.
+    g = electron_dissipation(np.exp(_LY)[None, :], e[:, None]) / 0.7
+    cum = np.concatenate([np.zeros((e.size, 1)), np.cumsum(0.5 * (g[:, 1:] + g[:, :-1]) * np.diff(_LY), axis=1)],
+                         axis=1)
+    x = np.asarray(depth, dtype=np.float64)
+    lx = 0.7 * np.log(np.maximum(x, 1.0e-300) / 6.0e-6)
+    out = np.zeros(x.shape)
+    for k in range(e.size):
+        if q[k] > 0.0:
+            out += q[k] * np.interp(math.log(2.0 / e[k]) + lx, _LY, cum[k], left=0.0, right=cum[k, -1])
+    return out
+
+
+#: The least share of a Maxwellian's energy flux that must fall inside the
+#: fit's 0.1-1000 keV; a softer or harder mean energy is refused.
+MAXWELLIAN_MIN_IN_RANGE = 0.95
 
 
 def maxwellian_bins(mean_energy_kev, n: int = 160):
     """(energies keV, energy-flux fractions) of a Maxwellian number flux
     ``phi ~ E exp(-E / E0)`` with mean energy 2 E0 = ``mean_energy_kev`` (the
     OVATION Prime eflux / nflux), on log bins over 0.1-1000 keV; the fractions
-    sum to 1 (the part outside the range is dropped and the rest rescaled)."""
+    sum to 1.  A mean energy that puts more than 5 % of the energy flux
+    outside 0.1-1000 keV is refused (about 0.25 to 300 keV is admitted)."""
     mean = float(mean_energy_kev)
     if not math.isfinite(mean) or mean <= 0.0:
         raise ParticleError(f"electron mean energy {mean_energy_kev!r} keV must be positive")
     e0 = 0.5 * mean
-    edges = np.geomspace(*ELECTRON_E_RANGE_KEV, n + 1)
+    # The energy flux ~ E^2 exp(-E/E0) dE: the share inside the range is the
+    # regularised incomplete gamma P(3, E/E0) difference.
+    share = lambda u: 1.0 - math.exp(-u) * (1.0 + u + 0.5 * u * u)
+    lo, hi = ELECTRON_E_RANGE_KEV
+    inside = share(hi / e0) - share(lo / e0)
+    if inside < MAXWELLIAN_MIN_IN_RANGE:
+        raise ParticleError(f"a Maxwellian of mean energy {mean:g} keV puts {100 * (1 - inside):.0f} % of its "
+                            f"energy outside the 0.1-1000 keV of Fang et al. 2010")
+    edges = np.geomspace(lo, hi, n + 1)
     e = np.sqrt(edges[1:] * edges[:-1])
-    w = e ** 3 * np.exp(-e / e0) * np.diff(np.log(edges))    # energy flux ~ E^2 exp(-E/E0) dE
-    if not np.any(w > 0):
-        raise ParticleError(f"a {mean:g} keV Maxwellian has no energy in 0.1-1000 keV")
+    w = e ** 3 * np.exp(-e / e0) * np.diff(np.log(edges))
     return e, w / w.sum()
 
 
 def electron_ion_pairs_per_gram(energy_flux_erg, mean_energy_kev, p_edges_pa, *, spectrum="maxwellian"):
     """Layer-mean ion pairs g-1 s-1 between successive interface pressures (Pa)
     from auroral electrons of ``energy_flux_erg`` erg cm-2 s-1: a Maxwellian of
-    that mean energy (keV) or, with ``spectrum="mono"``, monoenergetic."""
+    that mean energy (keV) or, with ``spectrum="mono"``, monoenergetic.  A zero
+    flux with a zero mean energy (OVATION outside the oval) gives zeros."""
     x = depth_from_pressure(p_edges_pa)
     if spectrum not in ("maxwellian", "mono"):
         raise ParticleError(f"electron spectrum {spectrum!r} must be 'maxwellian' or 'mono'")
-    if float(energy_flux_erg) == 0.0:                 # no aurora (OVATION's mean energy is 0 there)
+    q = float(_check_flux(energy_flux_erg))
+    if q == 0.0 and mean_energy_kev == 0.0:
         return np.zeros(x.shape[0] - 1)
     if spectrum == "mono":
-        f = electron_absorbed(x, energy_flux_erg, mean_energy_kev)
+        _fang_coefficients(mean_energy_kev)
+        f = electron_absorbed(x, q, mean_energy_kev)
     else:
         e, frac = maxwellian_bins(mean_energy_kev)
-        f = sum(electron_absorbed(x, energy_flux_erg * w, ek) for ek, w in zip(e, frac) if w > 1.0e-12)
+        f = electron_absorbed(x, q * frac, e)
     dx = np.abs(np.diff(x))
     return np.where(dx > 0, np.abs(np.diff(f)) / np.where(dx > 0, dx, 1.0), 0.0) / (W_ION_MEV * 1.0e3)
 
@@ -413,6 +454,6 @@ def polar_cap(mlat_deg, edge_deg: float = POLAR_CAP_DEG) -> np.ndarray:
 __all__ = ["CHANNELS_MEV", "W_ION_MEV", "E_MAX", "POLAR_CAP_DEG", "NOX_PER_ION_PAIR", "HOX_PER_ION_PAIR",
            "DEPTH_GRID", "ParticleError", "stopping_power", "RangeTable", "range_table", "spectrum", "absorbed",
            "depth_from_pressure", "ion_pairs_per_gram", "FANG2010_P", "ELECTRON_E_RANGE_KEV",
-           "electron_dissipation", "electron_absorbed", "maxwellian_bins", "electron_ion_pairs_per_gram", "vmr_tendency", "ion_pair_rate", "energy_flux",
+           "electron_dissipation", "electron_absorbed", "MAXWELLIAN_MIN_IN_RANGE", "maxwellian_bins", "electron_ion_pairs_per_gram", "vmr_tendency", "ion_pair_rate", "energy_flux",
            "polar_cap", "SPE_THRESHOLD_PFU", "ProtonRecord", "from_solar_wind", "parse_swpc", "fetch_swpc",
            "load"]
