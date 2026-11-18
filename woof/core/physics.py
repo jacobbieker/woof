@@ -8822,12 +8822,12 @@ def initialize_physics(
     if int(cfg.sf_surface_physics) in (3, 8) or (int(cfg.sf_surface_physics) in (2, 4, 7) and cfg.fractional_seaice):
         # module_physics_init.F:3126-3131 initializes TSK_SAVE from TSK.
         # The open-water component comes from SST when the ingest carries it;
-        # otherwise the already repaired surface temperature is WRF's
-        # no-SST fallback.  Read from f["sst"], which carries the lake
-        # water temperature initialize_surface bound; the caller's arrays
-        # do not (or do only when a device caller's tsk aliased f["tsk"]).
+        # otherwise TSK is WRF's no-SST fallback.  Both are read from the
+        # fields after initialize_surface, so they carry the lake state it
+        # bound (water temperature in SST and TSK; ice temperature and the
+        # 273.15 K clamp in TSK), whatever array type the caller passed.
         f["tsk_save"] = cp.ascontiguousarray(f["tsk"].copy())
-        f["tsk_sea"] = f["sst"].copy()
+        f["tsk_sea"] = (f["tsk"] if sst is None else f["sst"]).copy()
         for name in ("znt", "ust", "mol", "zol", "flhc", "flqc", "cpm",
                      "cqs2", "chs2", "chs", "qsfc", "qgh", "hfx", "qfx",
                      "lh"):

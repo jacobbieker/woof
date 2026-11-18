@@ -65,7 +65,9 @@ def test_skin_keeps_the_bound_lake_water_temperature(monkeypatch, given):
     bulk=temperature.copy() if given == "separate" else None
     driver=initialize_physics(state,cfg,landmask=0.,tsk=temperature.copy(),sst=bulk,glw=400.,swdown=1000.)
     if bulk is not None:
-        assert float(bulk[0, 0]) != float(lake)
+        # The caller's SST is not written: the binding lives in the fields.
+        cp.testing.assert_array_equal(bulk, temperature)
+    assert float(driver.fields["xland"][0, 0]) > 1.5
     assert float(driver.fields["sst"][0, 0]) == float(lake)
     assert driver.fields["sst"].data.ptr != driver.fields["tsk"].data.ptr
     driver.fields["gsw"][...] = cp.float32(1000.)
@@ -75,3 +77,31 @@ def test_skin_keeps_the_bound_lake_water_temperature(monkeypatch, given):
     # most a few kelvin, nowhere near the forcing's 8 K warmer value.
     assert float(driver.fields["sst"][0, 0]) == float(lake)
     assert abs(float(driver.fields["tsk"][0, 0]) - float(lake)) < 3.
+
+
+@pytest.mark.gpu
+@requires_gpu
+@pytest.mark.parametrize("given", ["sst", "none"])
+def test_open_water_component_starts_from_the_bound_lake(monkeypatch, given):
+    """TSK_SEA (fractional sea ice) was rebuilt from the caller's arrays
+    after the lake-state binding: a host caller's lakes kept the forcing."""
+    import cupy as cp
+    import woof.ingest.lake_state as obs
+    from woof.core.physics import initialize_physics
+    state, cfg, old = _full_state(sf_surface_physics=2, fractional_seaice=1)
+    water = (0, cfg.nx - 1)
+    def bind(fields, cfg, **kw):
+        fields["sst"][water] = fields["tsk"][water] = cp.float32(280.)
+        return None, dict(schema='gpuwm.lake-init.v1', status='bound')
+    monkeypatch.setattr(obs, "initialize_surface", bind)
+    landmask = np.ones((cfg.ny, cfg.nx)); landmask[:, -1] = 0.
+    tsk = np.where(landmask > 0, 299., 296.)
+    driver = initialize_physics(
+        state, cfg, landmask=landmask, tsk=tsk, sst=tsk.copy() if given == "sst" else None,
+        soil_temperature=np.stack([tsk - 0.5, tsk - 1.0, tsk - 1.5, tsk - 2.0]),
+        soil_moisture=np.where(landmask > 0, .31, 1.)[None].repeat(4, 0),
+        liquid_moisture=np.where(landmask > 0, .31, 1.)[None].repeat(4, 0),
+        ivgtyp=np.where(landmask, 10, 17), isltyp=np.where(landmask, 6, 14),
+        vegfra=55.0, tmn=286.0, swdown=450.0, glw=310.0, pblh=700.0)
+    assert float(driver.fields["tsk_sea"][water]) == 280.
+    assert float(driver.fields["tsk_sea"][0, 0]) == float(driver.fields["sst"][0, 0])
