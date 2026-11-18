@@ -57,3 +57,8 @@ def scratch_empty(xp, shape, dtype):
             from woof.backend.facade._scratch import uninitialized
             return uninitialized(shape, dtype)
     return xp.empty(shape, dtype=dtype)
+
+
+def scratch_like(xp, a):
+    """``scratch_empty`` of ``a``'s shape and dtype (C order)."""
+    return scratch_empty(xp, a.shape, a.dtype)

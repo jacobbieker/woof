@@ -1713,7 +1713,11 @@ class DeviceRegionalDrivingState:
                     )
                 state = self._state[name]
                 tend = self._tend[name]
-        target = cp.empty_like(state) if out is None else out
+        if out is None:
+            from woof.backend.scratch import scratch_like
+            target = scratch_like(cp, state)      # the kernel writes every element
+        else:
+            target = out
         self._kernels.launch(
             "regional_lbc_state_at_v841",
             int(state.size),

@@ -5611,7 +5611,7 @@
    },
    {
     "file": "woof/hex/cuda_driver.py",
-    "sha256": "d8615882fee2cddc925f5cf089aa7b95ce363d19e2005c28e9cf3ff45433a518"
+    "sha256": "cbc9fb7e17dea7edfa842239898f7e4592312d0c8f180a89d14543e059e86a26"
    },
    {
     "file": "woof/hex/cuda_dynamics_rrfs.py",
@@ -5687,7 +5687,7 @@
    },
    {
     "file": "woof/hex/cuda_regional_v841.py",
-    "sha256": "b33d522a13ab359713683dd8354a60452c68840bd9a5981027a6ff377b1bdfc7"
+    "sha256": "08c6a3c7c921d145fbc707ca3f228dcbdf64add3f43993fc103a4d866d8195de"
    },
    {
     "file": "woof/hex/cuda_shape.py",

@@ -1420,8 +1420,9 @@ def advance_acoustic_step_regional_cuda_v841(
     # acoustic_rs_ts_regional_v841 writes every (level, cell) of rs and ts,
     # the specified zone included (zero there), so the scratch needs no
     # memset of its own.
-    rs = cp.empty((nlev, ncells), dtype=cp.float32)
-    ts = cp.empty_like(rs)
+    from woof.backend.scratch import scratch_empty
+    rs = scratch_empty(cp, (nlev, ncells), cp.float32)
+    ts = scratch_empty(cp, (nlev, ncells), cp.float32)
     split = regional_acoustic_split_enabled()
 
     def rs_ts(slot_major: bool, rs_out: Any, ts_out: Any) -> None:
