@@ -93,6 +93,57 @@ observation, and for each type the count, `J`, bias, RMSE and mean sigma.
 It also counts every reason an observation was dropped, and records the
 SHA-256 of the observation set and of the error table.
 
+## Finite-difference sensitivities
+
+The derivative of `J_o` along a direction `p` in the initial state is
+
+    dJ/d(eps) ~= (J(x0 + eps p) - J(x0 - eps p)) / (2 eps)
+
+Each side is a forecast restarted from a perturbed state and scored with
+`--accept`, so both count the same observations.
+
+- **WRF route.** `woof grad perturb` writes `CKPT + eps * p` as a new
+  restart checkpoint through the same writer an analysis uses
+  (`woof.ensemble.increments.apply_increments_to_checkpoint`), which caps
+  vapour at saturation and repairs microphysics number moments. Keep the
+  file name in the `gpuwmrst_d01_<time>.npz` form, put it outside the new
+  run's output directory, and continue with
+  `woof go CFG --prepared-root BASE/prepared --restart FILE`. The restart
+  must be run by the same woof source as the base run, and a checkpoint is
+  written only when the base run used `--keep-checkpoints`.
+- **hex.** Run the base with `--checkpoint-hours H --jedi-background`.
+  `woof grad perturb --checkpoint BACKGROUND.nc` writes a copy of the JEDI
+  background at hour H with `eps * p` added. Continue with
+  `--restart-from CHECKPOINT.pkl --da-analysis COPY.nc`, which rebuilds
+  the dycore state from it. Directions on hex are `theta` fields
+  `(nCells, nVertLevels)`, and they are zero in the relaxation rings.
+- **The reference.** The writer also repairs number moments the model left
+  inconsistent, and those repairs are the same for any `eps`. Score a run
+  written with `--scale 0` as `--reference`. A restart from the untouched
+  checkpoint is then `--zero`. On the WRF route, under strict numerics, it
+  reproduces the base bit for bit. On hex, the `--da-analysis` restart
+  rebuilds the dycore state from float32 fields, so a scale-0 restart moves
+  `J` slightly. Use that run, not the base, as the hex reference.
+
+```bash
+woof grad direction --checkpoint CKPT --field thp --blob 8 40 50 --radius-cells 5 --out p.npz
+woof grad direction --mesh GRID.nc --field theta --at LAT LON 8 --radius-km 30 --out p.npz   # hex
+woof grad perturb --checkpoint CKPT --direction p.npz --scale 0.2 --mp-physics 10 --out plus/gpuwmrst_d01_2026-11-07_03_00_00.npz
+woof grad fd --leg 0.2 plus.json minus.json --leg 0.1 plus2.json minus2.json --reference zero-scale.json
+```
+
+`woof grad fd` gives the central, forward and backward differences for
+each scale and the curvature, and how much the derivative changes between
+scales. When the summaries carry them, it also gives the central
+difference for each observation type, which shows where the response and
+the noise come from.
+
+Choose `eps` by looking at the scale table. Any perturbation, however
+small, moves a 9 h forecast's `J` by a few units, because convection and
+QC thresholds respond nonlinearly. On a 9 km regional case, a 1 K `thp`
+blob gave a derivative that held steady only for amplitudes of about
+0.4 K and above. Below that, the noise dominated.
+
 ## Limits
 
 - Radio occultation in the store is bending angle, which is converted

@@ -5,6 +5,10 @@ other command imports this package.
 
     woof grad obs  --history RUN_OR_FILES --out OBS.npz [--stores wis2_land,...] [--goes-cwp FILE ...]
     woof grad cost --history RUN_OR_FILES --obs OBS.npz --out J.json [--pairs-out PAIRS.npz] [--accept REF.npz]
+    woof grad direction --checkpoint CKPT --field thp --blob K J I --radius-cells R --depth-levels D --out DIR.npz
+    woof grad direction --mesh GRID.nc --field theta --at LAT LON LEVEL --radius-km R --out DIR.npz
+    woof grad perturb --checkpoint CKPT|STATE.nc --direction DIR.npz --scale EPS --out PERTURBED
+    woof grad fd --leg EPS PLUS.json MINUS.json [--leg ...] [--reference J0.json] [--zero JZ.json]
 """
 from __future__ import annotations
 
@@ -91,7 +95,10 @@ def command_cost(args) -> int:
                       accept=accept)
     summary = result.summary()
     summary["error_table"] = table.path
-    summary["accepted_from"] = args.accept
+    summary["accepted_from"] = str(Path(args.accept).resolve()) if args.accept else None
+    if args.accept:
+        import hashlib
+        summary["accepted_sha256"] = hashlib.sha256(Path(args.accept).read_bytes()).hexdigest()
     if args.pairs_out:
         result.save_pairs(args.pairs_out)
         summary["pairs"] = str(args.pairs_out)
@@ -99,6 +106,70 @@ def command_cost(args) -> int:
     if args.out:
         Path(args.out).write_text(text + "\n")
     print(text if not args.quiet else f"J = {result.J:.6g} over {result.n} observations")
+    return 0
+
+
+def command_direction(args) -> int:
+    from woof.grad.sensitivity import (cell_blob, checkpoint_fields, gaussian_blob, load_direction, mesh_cells,
+                                       save_direction)
+
+    fields = {}
+    if args.add_to:
+        fields, _meta = load_direction(args.add_to)
+    if args.blob is not None:
+        if not args.checkpoint:
+            raise SystemExit("woof grad direction: --blob needs --checkpoint")
+        shape = checkpoint_fields(args.checkpoint, [args.field])[args.field].shape
+        k, j, i = args.blob
+        blob = gaussian_blob(shape, k=k, j=j, i=i, radius_cells=args.radius_cells,
+                             depth_levels=args.depth_levels, amplitude=args.amplitude)
+        added = {"field": args.field, "kji": [k, j, i], "radius_cells": args.radius_cells}
+    else:
+        if not args.mesh:
+            raise SystemExit("woof grad direction: --at needs --mesh")
+        cells = mesh_cells(args.mesh)
+        nz = args.levels or cells["nz"]
+        if not nz:
+            raise SystemExit("woof grad direction: the mesh file has no nVertLevels; pass --levels")
+        interior = None if cells["bdy"] is None else cells["bdy"] == 0
+        lat0, lon0, level = args.at
+        blob = cell_blob(cells["lat"], cells["lon"], nz, lat0=lat0, lon0=lon0, level=level,
+                         radius_km=args.radius_km, depth_levels=args.depth_levels, amplitude=args.amplitude,
+                         interior=interior)
+        added = {"field": args.field, "lat_lon_level": [lat0, lon0, level], "radius_km": args.radius_km}
+    fields[args.field] = fields.get(args.field, 0.0) + blob
+    added.update(depth_levels=args.depth_levels, amplitude=args.amplitude)
+    sha = save_direction(args.out, fields, {"kind": "gaussian_blob", "source": str(args.checkpoint or args.mesh),
+                                             "added": added, "added_to": args.add_to})
+    print(json.dumps({"direction": str(args.out), "sha256": sha, "fields": sorted(fields)}, indent=2))
+    return 0
+
+
+def command_perturb(args) -> int:
+    from woof.grad.sensitivity import load_direction, perturb_checkpoint, perturb_mpas_file
+
+    fields, meta = load_direction(args.direction)
+    if str(args.checkpoint).endswith(".nc"):
+        receipt = perturb_mpas_file(args.checkpoint, fields, args.scale, args.out)
+    else:
+        receipt = perturb_checkpoint(args.checkpoint, fields, args.scale, args.out, mp_physics=args.mp_physics)
+    receipt["direction"] = str(args.direction)
+    text = json.dumps(receipt, indent=2, sort_keys=True, default=str)
+    if args.receipt:
+        Path(args.receipt).write_text(text + "\n")
+    print(text if not args.quiet else f"wrote {args.out} (scale {args.scale:g}, direction {meta['sha256'][:12]})")
+    return 0
+
+
+def command_fd(args) -> int:
+    from woof.grad.sensitivity import fd_summary
+
+    legs = [(float(scale), plus, minus) for scale, plus, minus in args.leg]
+    result = fd_summary(legs, reference=args.reference, zero=args.zero)
+    text = json.dumps(result, indent=2, sort_keys=True)
+    if args.out:
+        Path(args.out).write_text(text + "\n")
+    print(text)
     return 0
 
 
@@ -128,6 +199,44 @@ def build_parser() -> argparse.ArgumentParser:
     cost.add_argument("--out", default=None, help="write the summary JSON here")
     cost.add_argument("--quiet", action="store_true")
     cost.set_defaults(handler=command_cost)
+
+    direction = sub.add_parser("direction", help="write a perturbation direction: a Gaussian blob on one state field")
+    where = direction.add_mutually_exclusive_group(required=True)
+    where.add_argument("--blob", nargs=3, type=float, metavar=("K", "J", "I"),
+                       help="WRF route: centre in the field's own (level, row, column) indices; needs --checkpoint")
+    where.add_argument("--at", nargs=3, type=float, metavar=("LAT", "LON", "LEVEL"),
+                       help="hex: centre in degrees and level; needs --mesh")
+    direction.add_argument("--checkpoint", default=None, help="a WRF-route restart checkpoint (gives the field's shape)")
+    direction.add_argument("--mesh", default=None, help="hex: a grid, static or init file of the mesh")
+    direction.add_argument("--levels", type=int, default=None, help="hex: level count when the mesh file has none")
+    direction.add_argument("--field", required=True, help="state field, e.g. thp, u, v, qv (WRF) or theta (hex)")
+    direction.add_argument("--radius-cells", type=float, default=4.0)
+    direction.add_argument("--radius-km", type=float, default=30.0)
+    direction.add_argument("--depth-levels", type=float, default=3.0)
+    direction.add_argument("--amplitude", type=float, default=1.0, help="peak value, in the field's unit")
+    direction.add_argument("--add-to", default=None, help="an existing direction file to add this blob to")
+    direction.add_argument("--out", required=True)
+    direction.set_defaults(handler=command_direction)
+
+    perturb = sub.add_parser("perturb", help="write CHECKPOINT + SCALE * DIRECTION as a new restart state")
+    perturb.add_argument("--checkpoint", required=True,
+                         help="a WRF-route restart checkpoint (.npz) or a hex MPAS-layout state file (.nc)")
+    perturb.add_argument("--direction", required=True)
+    perturb.add_argument("--scale", type=float, required=True, help="signed multiple of the direction")
+    perturb.add_argument("--mp-physics", type=int, default=None, help="the run's mp_physics, for the moment guard")
+    perturb.add_argument("--out", required=True, help="the perturbed checkpoint (a new file)")
+    perturb.add_argument("--receipt", default=None, help="write the writer's receipt JSON here")
+    perturb.add_argument("--quiet", action="store_true")
+    perturb.set_defaults(handler=command_perturb)
+
+    fd = sub.add_parser("fd", help="central-difference derivative of J from scored +/- runs")
+    fd.add_argument("--leg", nargs=3, action="append", required=True, metavar=("SCALE", "PLUS", "MINUS"),
+                    help="a scale and the cost summaries of its + and - runs; repeat for several scales")
+    fd.add_argument("--reference", default=None, help="cost summary of the run written with --scale 0 (the writer's own repairs, no perturbation)")
+    fd.add_argument("--zero", default=None, help="cost summary of a restart from the untouched checkpoint (its distance from --reference is reported)")
+    fd.add_argument("--out", default=None)
+    fd.set_defaults(handler=command_fd)
+
     return parser
 
 
