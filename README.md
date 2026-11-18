@@ -363,7 +363,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     time-varying CO2, N2O, CH4, CFC-11 and CFC-12 from the CAMtr table at
     every radiation call, in both spectra and on both routes; unset, K
     keeps WRF's fixed gases bit for bit. A K-only WRF namelist still
-    imports without it, as wrf.exe ran. Hex runs it on its generic column seam (R1), bit for
+    imports without it, as wrf.exe ran; a WRF tree mixing K with another
+    RRTMG-family domain under `ghg_input = 1` refuses at import. Hex runs it on its generic column seam (R1), bit for
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
