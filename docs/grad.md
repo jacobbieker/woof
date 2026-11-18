@@ -154,6 +154,55 @@ QC thresholds respond nonlinearly. On a 9 km regional case, a 1 K `thp`
 blob gave a derivative that held steady only for amplitudes of about
 0.4 K and above. Below that, the noise dominated.
 
+## Ensemble sensitivity and EFSO
+
+`woof grad members` draws K centred initial perturbations from
+`woof.da.perturb`. On the WRF route these are a Gaussian random `thp`
+field and a non-divergent wind, tapered at the rim. On hex they are
+`theta` only, drawn on a tangent plane and sampled at the cells. Each
+member is a direction applied with `--scale 1`.
+
+`woof grad ens` regresses the members' costs on their states:
+
+    S_j = cov(J, x_j) / var(x_j)
+
+It writes the maps of `S`, the correlation and the spread, and lists the
+strongest points. `--regress FIELD INDEX` also writes the localised
+regression of the whole state on one point, `cov(X, x_j) / var(x_j)`. For
+that direction the ensemble predicts `dJ/d(eps) = S_j`, and a finite
+difference along it tests the prediction (Ancell & Hakim 2007).
+
+EFSO (Kalnay et al. 2012; Ota et al. 2013) uses `J` as its measure of
+forecast error:
+
+1. `woof grad letkf` analyses member checkpoints with the observations
+   that a pairs file accepted at the analysis time. It uses
+   `woof.da.letkf`, with point batches and winds destaggered and
+   restaggered. It writes the analysis members, and it also keeps `Y^a`,
+   the analysis ensemble in observation space. `Y^a` comes from the
+   filter's own local weights, by carrying `H(x_k)` as an extra analysed
+   field.
+   - Each `--history` file must hold the analysis time only.
+   - Column-integrated observations have no model level, so they are
+     left out of the LETKF.
+   - The analysis is not relaxed (no RTPS), because EFSO needs the
+     Kalman gain's own analysis perturbations.
+   - Every member is staged before any is published.
+   - Observations that share a grid point need one extra analysed field
+     each: a station's five surface kinds, or a sounding's levels that
+     fall on one model level. Each extra field is the size of the state,
+     so memory and run time grow with that count.
+2. Forecasts from the analysis members are scored with `--accept` and
+   `--pairs-out`.
+3. `woof grad efso` gives each observation's first-order impact
+   `d_i / sigma_i^2 * 1/(K-1) * sum_k Y^a'_ik J'_k`, where
+   `d = y - H(mean background)`. Negative values lowered the forecast's
+   cost. With `--localization-km`, each verifying observation's share of
+   `J` is weighted by its distance from the assimilated one.
+4. `woof grad mean` writes ensemble-mean checkpoints. The forecasts from
+   the background mean and the analysis mean then give the actual change
+   that the summed impact predicts.
+
 ## Limits
 
 - Radio occultation in the store is bending angle, which is converted
