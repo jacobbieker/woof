@@ -105,3 +105,27 @@ def test_the_importer_maps_rrtmgk(tmp_path):
         assert (dc.run.ra_lw_physics, dc.run.ra_sw_physics) == (14, 14)
     assert all("ra_" not in substitution.key
                for substitution in report.substitutions)
+
+
+def _mixed_k_tree(ghg_line):
+    inp = (INPUT_TEXT.replace("mp_physics = 55, 55", "mp_physics = 8, 8")
+           .replace("ra_lw_physics = 4, 4", "ra_lw_physics = 4, 14")
+           .replace("ra_sw_physics = 4, 4",
+                    "ra_sw_physics = 4, 14" + ghg_line))
+    assert "4, 14" in inp
+    return inp
+
+
+def test_a_mixed_k_tree_with_ghg_input_1_refuses_at_import(tmp_path):
+    """wrf.exe's K ignores ghg_input; woof's tree-wide value would give the
+    K domain CAMtr gases, so the import refuses instead of drifting."""
+    with pytest.raises(ValueError, match="woof's RRTMG-K"):
+        import_namelists(*_pair(tmp_path, inp=_mixed_k_tree("\n ghg_input = 1,")))
+
+
+def test_a_k_only_namelist_drops_ghg_input_as_wrf_ran(tmp_path):
+    inp = (INPUT_TEXT.replace("mp_physics = 55, 55", "mp_physics = 8, 8")
+           .replace("ra_lw_physics = 4, 4", "ra_lw_physics = 14, 14")
+           .replace("ra_sw_physics = 4, 4", "ra_sw_physics = 14, 14\n ghg_input = 1,"))
+    toml_text, _ = import_namelists(*_pair(tmp_path, inp=inp), name="k")
+    assert "ghg_input" not in toml_text

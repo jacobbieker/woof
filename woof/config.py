@@ -3872,14 +3872,12 @@ def validate_rrtmgk_config(cfg, ra_lw_physics, ra_sw_physics) -> None:
     # ghg_input is admitted (both values): WRF's rad_rrtmg_driver never
     # reads it, and woof's RRTMG-K takes legacy RRTMG's CAMtr gases under 1
     # (woof.core.rrtmgk.RRTMGKRadiation), a declared extension beyond WRF.
-    for name, admitted, why in (
-            ("aer_opt", 0, "the aer_opt>0 aerosol optics on the RRTMG-K "
-             "shortwave are not ported"),):
-        value = int(getattr(cfg, name, 0) or 0)
-        if value != admitted:
-            raise ConfigurationRefused(
-                f"{name}={value} with ra_lw_physics=ra_sw_physics=14: {why}. "
-                f"Set {name}={admitted}.")
+    aer_opt = int(getattr(cfg, "aer_opt", 0) or 0)
+    if aer_opt:
+        raise ConfigurationRefused(
+            f"aer_opt={aer_opt} with ra_lw_physics=ra_sw_physics=14: the "
+            "aer_opt>0 aerosol optics on the RRTMG-K shortwave are not "
+            "ported. Set aer_opt=0.")
     if cfg.icloud != 1:
         raise ConfigurationRefused(
             f"icloud={cfg.icloud} with ra_lw_physics=ra_sw_physics=14: the "

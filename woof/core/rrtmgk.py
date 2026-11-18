@@ -63,7 +63,7 @@ GASES = {"co2": F("379.e-6"), "o2": F("0.209488"), "ch4": F("1774.e-9"),
 #: The gases ghg_input = 1 takes from the CAMtr table (read_CAMgases, as
 #: legacy RRTMG_LWRAD/RRTMG_SWRAD read them); o2, cfc22 and ccl4 stay the
 #: driver's fixed values, as they stay legacy RRTMG's.
-GHG_INPUT_GASES = ("co2", "n2o", "ch4", "cfc11", "cfc12")
+from woof.core.camtr_gases import GAS_NAMES as GHG_INPUT_GASES  # noqa: E402
 
 
 def camtr_gases(yr, julian):
@@ -662,6 +662,7 @@ def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
     err = cp.zeros(1, np.int32)
     cdm = cdm2()
     day_all = cp.asnumpy(coszen) > F(0.0)
+    table = GASES if gases is None else {**GASES, **gases}
     for c0 in range(0, ncol, chunk):
         c1 = min(c0 + chunk, ncol)
         n = c1 - c0
@@ -696,8 +697,7 @@ def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
              P["play"], P["cldfrac"], P["ciwp"], P["clwp"], P["cswp"], cdf,
              M["cldfmcl"], M["ciwpmcl"], M["clwpmcl"], M["cswpmcl"], err))
         del cdf
-        gas = {k: cp.full((n, nl), v, f32) for k, v in (
-            GASES if gases is None else {**GASES, **gases}).items()}
+        gas = {k: cp.full((n, nl), v, f32) for k, v in table.items()}
         res = _lw.gpu_rrtmg_lw_batched_device(
             n, nl, 2, P["play"], P["plev"], P["tlay"], P["tlev"],
             tsk[rows], P["h2ovmr"], P["o3vmr"], gas["co2"], gas["ch4"],
@@ -938,19 +938,16 @@ class RRTMGKRadiation:
             raise ValueError(
                 f"adapter was constructed for o3input={self.o3input} but the "
                 f"run config requests o3input={cfg.o3input}")
-        if int(getattr(cfg, "ghg_input", 0) or 0) != self.ghg_input:
+        ghg_input = int(getattr(cfg, "ghg_input", 0) or 0)
+        if ghg_input != self.ghg_input:
             raise ValueError(
                 f"adapter was constructed for ghg_input={self.ghg_input} but "
-                f"the run config requests ghg_input={cfg.ghg_input}")
-        for name, admitted in (("aer_opt", 0), ("shcu_physics", None)):
-            value = int(getattr(cfg, name, 0) or 0)
-            if name == "shcu_physics":
-                if value == 5:
-                    refuse("the shallow-cumulus cloud merge (shcu_physics=5) "
-                           "is not ported")
-            elif value != admitted:
-                refuse(f"{name}={value} is not ported ({name}=0 only: "
-                       "no aerosol)")
+                f"the run config requests ghg_input={ghg_input}")
+        aer_opt = int(getattr(cfg, "aer_opt", 0) or 0)
+        if aer_opt:
+            refuse(f"aer_opt={aer_opt} is not ported (aer_opt=0 only: no aerosol)")
+        if int(getattr(cfg, "shcu_physics", 0) or 0) == 5:
+            refuse("the shallow-cumulus cloud merge (shcu_physics=5) is not ported")
         if str(getattr(cfg, "rrtmg_spectral_output", "none") or "none") != "none":
             refuse("rrtmg_spectral_output is a legacy RRTMG (4/4) diagnostic; "
                    "rad_rrtmg_driver has no spectral flux output")
