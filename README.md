@@ -629,7 +629,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   registry column cumulus (BMJ and its siblings) take the same Metal tile
   rule as YSU, 2,048 columns per core under the byte cap (byte-identical
   in every numerics mode; 49x228x276 on an M3 Max: MRF 8.4 -> 6.5 ms,
-  New SAS 54.6 -> 33.1 ms, BMJ 16.3 -> 12.5 ms per launch;
+  New SAS 54.6 -> 33.1 ms per launch, BMJ 16.3 -> 12.5 ms on 63k
+  columns;
   `WOOF_METAL_COLUMN_TILE_BLOCKS` sets the width in 32-column units;
   EEPS and CUDA keep their occupancy-bounded tiles). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
