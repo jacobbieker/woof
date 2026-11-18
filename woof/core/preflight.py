@@ -2118,6 +2118,10 @@ def local_memory_profile_from_device(cp, *, device_id: int = 0) -> DeviceLocalMe
     name = props["name"]
     hip = bool(cp.cuda.runtime.is_hip)
     stack_limit = 0 if hip else int(cp.cuda.runtime.deviceGetLimit(0))
+    from woof import backend as _backend
+    # The Metal facade answers CUDA's queries; its tiles are priced by the
+    # Metal rules (ysu_column_workspace_bytes).
+    kind = "hip" if hip else ("mlx" if _backend._active == "mlx" else "cuda")
     return DeviceLocalMemoryProfile(
         name=name.decode() if isinstance(name, bytes) else str(name),
         multiprocessor_count=int(props["multiProcessorCount"]),
@@ -2125,7 +2129,7 @@ def local_memory_profile_from_device(cp, *, device_id: int = 0) -> DeviceLocalMe
             props["maxThreadsPerMultiProcessor"]),
         default_stack_limit_bytes=stack_limit,
         compile_platform=None if hip else read_compile_platform(),
-        backend="hip" if hip else "cuda",
+        backend=kind,
     )
 
 
@@ -5600,10 +5604,10 @@ def ysu_column_workspace_bytes(
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
     tile_cap = (profile.multiprocessor_count * YSU_TILE_BLOCKS_PER_SM
                 * YSU_BLOCK)
-    # A Metal process launches the wider Metal tile (ysu.ysu_tile_columns);
-    # price whichever rule is wider, so pricing never falls below it.
-    from woof import backend
-    metal = backend._active == "mlx"
+    # A Metal device launches the wider Metal tile (ysu.ysu_tile_columns);
+    # price whichever rule is wider, so pricing never falls below it.  A
+    # CUDA card priced from a Metal process keeps CUDA's rule.
+    metal = getattr(profile, "backend", "cuda") == "mlx"
     worst = 0
     for dc in exp.domains:
         if int(dc.run.bl_pbl_physics) != 1:

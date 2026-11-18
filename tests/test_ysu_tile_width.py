@@ -125,22 +125,20 @@ def test_metal_tile_is_blocks_per_core_and_cuda_keeps_its_rule(monkeypatch):
 
 
 def test_preflight_prices_the_metal_tile(monkeypatch):
-    """A Metal process prices the tile it launches (one 62,928-column launch
-    on 40 cores at nz = 49), not CUDA's 16 blocks per core; CUDA keeps its
-    pricing."""
+    """A Metal device profile prices the tile it launches (one 62,928-column
+    launch on 40 cores at nz = 49), not CUDA's 16 blocks per core; a CUDA
+    profile keeps its pricing, whichever backend prices it."""
     from types import SimpleNamespace
 
-    import woof.backend as wb
     from woof.core import physics_inventory as P
     from woof.core.preflight import ysu_column_workspace_bytes
 
     run = SimpleNamespace(bl_pbl_physics=1, nx=276, ny=228, nz=49)
     exp = SimpleNamespace(domains=[SimpleNamespace(run=run)])
-    profile = SimpleNamespace(multiprocessor_count=40)
     monkeypatch.delenv("WOOF_METAL_YSU_TILE_BLOCKS", raising=False)
-    monkeypatch.setattr(wb, "_active", "cuda")
+    profile = SimpleNamespace(multiprocessor_count=40, backend="cuda")
     assert ysu_column_workspace_bytes(exp, profile=profile) == (
         P.ysu_workspace_floats(49, 40 * P.YSU_TILE_BLOCKS_PER_SM * P.YSU_BLOCK) * 4)
-    monkeypatch.setattr(wb, "_active", "mlx")
+    profile = SimpleNamespace(multiprocessor_count=40, backend="mlx")
     assert ysu_column_workspace_bytes(exp, profile=profile) == (
         P.ysu_workspace_floats(49, 276 * 228) * 4)
