@@ -286,13 +286,16 @@ def layered_batches(flat_index: np.ndarray, values, errors, simulated, *, shape,
 
 
 def letkf_with_obs_space(prior: Mapping[str, np.ndarray], batches: Sequence, rows: Sequence[np.ndarray],
-                         grid, config) -> tuple[dict, np.ndarray]:
+                         grid, config, *, solve_namespace=None, progress=None,
+                         diagnostics=None) -> tuple[dict, np.ndarray]:
     """One LETKF analysis that also returns ``Y^a``, the analysis ensemble in observation space.
 
     ``H(x_k)`` of each batch is carried as an extra analysed field that is
     zero except at the batch's observation points, so it is transformed by
     the same local weights as the state at those points: ``Y^a = Y^b W``.
-    Returns ``(increments, ya)`` with ``ya`` ``(K, n_obs)``.
+    Returns ``(increments, ya)`` with ``ya`` ``(K, n_obs)``.  ``solve_namespace``
+    (e.g. cupy), ``progress`` and ``diagnostics`` pass through to :func:`woof.da.letkf.analyze`:
+    the state stays on the host and the local solves run in that namespace.
 
     Each layer adds one dense ``(K, nz, ny, nx)`` field, so memory and the
     solve grow with the number of layers.  Relaxation (RTPS/RTPP) is
@@ -319,7 +322,8 @@ def letkf_with_obs_space(prior: Mapping[str, np.ndarray], batches: Sequence, row
         work[name] = field
         names.append(name)
     config = dataclasses.replace(config, analysis_fields=tuple(config.analysis_fields) + tuple(names))
-    increments = analyze(work, list(batches), grid, config)
+    increments = analyze(work, list(batches), grid, config, solve_namespace=solve_namespace, progress=progress,
+                         diagnostics=diagnostics)
     for b, (batch, sel) in enumerate(zip(batches, rows)):
         index = np.asarray(batch.points.flat_index, np.int64)
         ya[:, sel] = (work[names[b]] + increments[names[b]]).reshape(members, -1)[:, index]
