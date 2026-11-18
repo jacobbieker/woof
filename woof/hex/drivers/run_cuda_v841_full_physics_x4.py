@@ -507,7 +507,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # freely, so a later edit to the pressure-diagnostic path could change
     # forecast bytes with every proof still reporting frozen sources.
     "src/hexcore/cuda_backend/recovery.py": (
-        "1a5a85585ebc72867904f852ee54c541ace5fc2ac26f0ef89dabd179096cc041"
+        "93ae1ec638b80717e50ab5a8b95427da01bc4f64f985e9a73ee888b827689f0c"
     ),
     # Re-frozen for the regional CPU authority lane: the v8.4.1
     # config admits config_apply_lbcs and config_moist_physics behind the
@@ -921,7 +921,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # sub-anchor lane depends on these bytes.  Outside the regional kernel
     # set by design: kernel_set_sha256 does not move.
     "src/hexcore/cuda_compensated_recovery.py": (
-        "f076673925dc4761c7bd77380722f8badc1ffdbdec228cbb4c3c573edb2f6129"
+        "4a2a31e9e64107d899f3fe76224fdf08ce771f463bdd189a54fe806054e22f69"
     ),
     "src/hexcore/cuda_horizontal.py": (
         "f94137176db65d24df0d9ff1d491c278d6c835bb08cd76dc43c5cfcbf323a345"
