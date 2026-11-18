@@ -7535,8 +7535,8 @@ class PhysicsDriver:
                 self.call_counts["radiation"] += 1
                 if (self.cam_ozone is not None
                         and self.cam_ozone.mode == "legacy-root"):
-                    from woof.core.radiation_composition import legacy_radiation_adapter
-                    legacy = legacy_radiation_adapter(self.radiation_callable)
+                    from woof.core.radiation_composition import retained_ozone_adapter
+                    legacy = retained_ozone_adapter(self.radiation_callable)
                     # Device to device: the adapter keeps its field on the
                     # card and a host round trip would copy the same bytes.
                     import cupy as _cp

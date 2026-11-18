@@ -930,6 +930,7 @@ _RA_LW_MAP = {
     4: (4, "RRTMG", "RTE+RRTMGP"),
     5: (5, "New Goddard", "WRF New Goddard"),
     7: (7, "Fu-Liou-Gu", "WRF Fu-Liou-Gu"),
+    14: (14, "RRTMG-K", "WRF RRTMG-K"),
 }
 _RA_SW_MAP = {
     99: (99, "GFDL Eta", "WRF GFDL Eta"),
@@ -940,6 +941,7 @@ _RA_SW_MAP = {
     4: (4, "RRTMG", "RTE+RRTMGP"),
     5: (5, "New Goddard", "WRF New Goddard"),
     7: (7, "Fu-Liou-Gu", "WRF Fu-Liou-Gu"),
+    14: (14, "RRTMG-K", "WRF RRTMG-K"),
 }
 #: WRF values the importer may emit into a woof configuration.  These are
 #: the RUNNABLE sets, deliberately narrower than woof/config.py's schema
@@ -5777,6 +5779,34 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                 f"the only implemented value in the {adapter_label} "
                 f"adapter ({why})")
 
+    if any(14 in pair for pair in radiation_pairs):
+        # RRTMG-K (14/14): rad_rrtmg_driver reads o3input (0 or 2) and
+        # nothing of ghg_input, cldovrlp or idcor (fixed gases, its own
+        # McICA walk).
+        raw_o3input = ph.take("o3input")
+        if raw_o3input is not None:
+            value = int(_uniform("physics", "o3input", raw_o3input))
+            if value not in (0, 2):
+                raise _err("physics", "o3input", raw_o3input,
+                           "woof's RRTMG-K adapter implements o3input 0 "
+                           "(wrapper O3DATA) and 2 (CAM climatology).")
+            if value == 2:
+                fix("physics", "o3input", raw_o3input, 2,
+                    "the established CAM-climatology value in the RRTMG-K "
+                    "adapter")
+            else:
+                o3input = value
+        # A domain on another adapter that reads ghg_input keeps it for the
+        # shared reader below (validate_rrtmgk_config then holds the K
+        # domains to 0); cldovrlp/idcor are already taken above by the
+        # 4/4 arm when one is selected.
+        shared = ("ghg_input",) if (any_rrtmg or any_cam or any_gsfc) else ()
+        for key in ("ghg_input", "cldovrlp", "idcor"):
+            if key in shared:
+                continue
+            drop("physics", key, ph.take(key),
+                 "RRTMG-K's rad_rrtmg_driver does not read it (fixed trace "
+                 "gases, its own McICA subcolumn walk)")
     if any_rrtmg or any_cam or any_gsfc:
         raw_ghg = ph.take("ghg_input")
         if raw_ghg is not None:

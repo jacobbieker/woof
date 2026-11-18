@@ -5298,6 +5298,7 @@ _STOCK_CALLABLE_CLASSES: dict[str, dict[str, object]] = {
         "wrf-rrtm-dudhia": "woof.core.rrtm_lw.RRTMDudhiaRadiation",
         "new-goddard": "woof.core.radiation_composition.ColumnTableRadiation",
         "fu-liou-gu": "woof.core.flg_radiation.FLGRadiation",
+        "wrf-rrtmg-k": "woof.core.rrtmgk.RRTMGKRadiation",
         "wrf-gfdleta": "woof.core.gfdleta.GFDLEtaRadiation",
         "analytic-clear-sky":
             "woof.core.analytic_radiation.AnalyticClearSkyRadiation",
@@ -7526,6 +7527,46 @@ def _fu_liou_gu(registry):
             'licence':'WRF public domain statement, README.md at v4.7.1'}})
     registry['components']['radiation']['options']['fu-liou-gu']=row
 
+def _rrtmg_k(registry):
+    """WRF 4.7.1 RRTMG-K (14/14): rad_rrtmg_driver, woof.core.rrtmgk."""
+    row=copy.deepcopy(registry['components']['radiation']['options']['wrf-rrtm-dudhia'])
+    row.pop('consumers',None)
+    row.update(label='WRF RRTMG-K longwave and shortwave',
+        selectors={'ra_lw_physics':14,'ra_sw_physics':14},
+        implemented=True,maturity='implemented-unverified',scientific_evidence='none',
+        reachability={'state':'component-override'},
+        parameters={'ra_physics':0,'icloud':1,'aer_opt':0,'ghg_input':0,
+                    'wrf_rrtmg_compatibility':'none'},
+        # woof.config.validate_rrtmgk_config's cloud-merge refusals, as rules
+        # plan review evaluates (the port radiates the resolved cloud only).
+        constraints={'required_settings':{'ra_physics':0},'refused_when':[
+            {'settings':{'bl_pbl_physics':[5],'icloud_bl':[1]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the MYNN subgrid-cloud merge (icloud_bl=1) is not ported for it.',
+             'remedy_label':'Set icloud_bl=0.','remedy_settings':{'icloud_bl':0}},
+            {'settings':{'cu_rad_feedback':[True]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the convective cloud merge (cu_rad_feedback=.true.) is not ported for it.',
+             'remedy_label':'Set cu_rad_feedback=.false.','remedy_settings':{'cu_rad_feedback':False}},
+            {'settings':{'bmj_rad_feedback':[True]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the BMJ convective cloud merge (bmj_rad_feedback=.true.) is not ported for it.',
+             'remedy_label':'Set bmj_rad_feedback=.false.','remedy_settings':{'bmj_rad_feedback':False}},
+            {'settings':{'cu_physics':[10]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the KF-CuP (cu_physics=10) cloud feedback is not ported for it.',
+             'remedy_label':'Set cu_physics=0.','remedy_settings':{'cu_physics':0}},
+            {'settings':{'shcu_physics':[5]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the Deng shallow-cumulus cloud merge (shcu_physics=5) is not ported for it.',
+             'remedy_label':'Set shcu_physics=0.','remedy_settings':{'shcu_physics':0}},
+            {'settings':{'mp_physics':[11,95]},
+             'reason':'RRTMG-K: this microphysics supplies radiation clouds through a path rad_rrtmg_driver is not ported for.'}]},
+        warnings=['Native WRF executes both spectra through LW-14 (rad_rrtmg_driver) and its SW-14 case only adds the shortwave heating; only the 14/14 pair runs.',
+                  'Explicit selection only; never a default. The port runs microphysics carrying snow (rad_rrtmg_driver iceflag 5), aer_opt=0, ghg_input=0, icloud=1 and no subgrid or convective cloud merge; rrtmg_spectral_output is refused.'],
+        extensions={'column_contract':{
+            'wrf_source':'WRF v4.7.1 phys/module_ra_rrtmg_lwk.F, phys/module_ra_rrtmg_swk.F, phys/module_ra_effective_radius.F (BUILD_RRTMK=1)',
+            'oracle':'tools/rrtmg_k_column_oracle',
+            'inputs':['T','P','P8W','RHO','QVAPOR','QCLOUD','QICE','QSNOW','QGRAUP','QNCLOUD','ALBEDO','EMISS','TSK','XLAT','XLONG','O3RAD'],
+            'outputs':['RTHRATENLW','RTHRATENSW','SWDOWN','GLW','GSW','OLR','COSZEN','CLDFRA','LWUPT','LWUPTC','LWDNT','LWDNTC','LWUPB','LWUPBC','LWDNB','LWDNBC','SWUPT','SWUPTC','SWDNT','SWDNTC','SWUPB','SWUPBC','SWDNB','SWDNBC'],
+            'licence':'WRF public domain statement, README.md at v4.7.1'}})
+    registry['components']['radiation']['options']['wrf-rrtmg-k']=row
+
 def _retimed_radiation_costs(registry):
     """Real forecast costs; these additional native solvers stay opt-in."""
     options = registry['components']['radiation']['options']
@@ -7892,6 +7933,7 @@ def build(registry: dict) -> dict:
     _kfcup_metadata(registry)
 
     _fu_liou_gu(registry)
+    _rrtmg_k(registry)
     _retimed_radiation_costs(registry)
     from woof.lightning_contract import LIGHTNING_DEFAULTS, LIGHTNING_OPTIONS, FIELD_METADATA
     registry["diagnostic_packages"] = {"lightning_option": {str(k): dict(v) for k,v in LIGHTNING_OPTIONS.items()}}
@@ -10223,7 +10265,7 @@ def build(registry: dict) -> dict:
         # It is the only registered longwave-on pairing that is not the
         # coupled RRTMG adapter, which is the point of listing it here.
         "radiation": [
-            "off", "dudhia-shortwave", "gsfc-shortwave", "wrf-rrtm-dudhia", "rte-rrtmgp", "new-goddard", "fu-liou-gu", "wrf-gfdleta", "wrf-cam3", "relaxation-31"],
+            "off", "dudhia-shortwave", "gsfc-shortwave", "wrf-rrtm-dudhia", "rte-rrtmgp", "new-goddard", "fu-liou-gu", "wrf-rrtmg-k", "wrf-gfdleta", "wrf-cam3", "relaxation-31"],
     }
     # The per-domain override surface names the WHOLE implemented cumulus
     # set, so it is derived from the options rather than typed: a typed

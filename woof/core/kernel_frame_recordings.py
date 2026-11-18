@@ -2209,6 +2209,22 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "kernels on sm_120 (RTX 5070 Ti) at NVRTC 13.4.92 on 2026-10-02, "
         "after rsw_sfluxzen_body's store on every path; bounded on a "
         "device by tests/test_rrtmg_sw_cuda.py (LOCAL_FRAME_BOUNDS).",
+    # RRTMG-K (ra_lw_physics = ra_sw_physics = 14).
+    "rrtmgk_prep_unit":
+        "glibc_flt32.cuh + rrtmg_mcica_wrf.cu + rrtmgk_prep.cu as one unit "
+        "(woof/core/rrtmgk.py prep_source); rrtmgk_prep.cu fails NVRTC "
+        "standalone.  Every kernel read 0 B on an RTX A6000, sm_86 / NVRTC "
+        "12.9.86, 2026-11-16.",
+    "rrtmgk_lw_unit":
+        "rrtmg_lw.cu + rrtmg_lw_taugb06_09.cu + rrtmgk_lw.cu as one unit "
+        "(woof/core/rrtmgk.py lw_post_source); rrtmgk_lw.cu fails NVRTC "
+        "standalone.  Every kernel read 0 B on an RTX A6000, sm_86 / NVRTC "
+        "12.9.86, 2026-11-16.",
+    "rrtmgk_sw_unit":
+        "K's packed-table defines + rrtmg_sw.cu + its spectral helpers + "
+        "rrtmgk_sw.cu as one unit (woof/core/rrtmgk.py sw_source); "
+        "rrtmgk_sw.cu fails NVRTC standalone.  Every kernel read 0 B on an "
+        "RTX A6000, sm_86 / NVRTC 12.9.86, 2026-11-16.",
     # BEP+BEM (sf_urban_physics = 3).
     "urban_bem_composed":
         "glibc_flt32.cuh + glibc_trig_flt32.cuh + urban_bem.cuh + "

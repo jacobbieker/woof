@@ -2436,11 +2436,16 @@ def _downscale_main(args, reservation: _OutputReservation,
                      "be built.")
         print("woof downscale: child terrain: its own static geography "
               f"at {float(cfg.dx):g} m, built from {static_policy.geog_root}"
-              + (f" with {static_policy.highres.terrain_source} terrain"
-                 + ("" if static_policy.highres.fields == "terrain"
-                    else " and land cover and soil at source resolution "
-                         f"(fields = {static_policy.highres.fields!r}, "
-                         f"land cover {static_policy.highres.landcover_source!r})")
+              + (((" with its lake extent from "
+                   f"{static_policy.highres.landcover_source!r} land cover "
+                   "(fields = 'lakes'; terrain, land use and soil otherwise "
+                   "the 30-arc-second baseline)")
+                  if static_policy.highres.fields == "lakes" else
+                  f" with {static_policy.highres.terrain_source} terrain"
+                  + ("" if static_policy.highres.fields == "terrain"
+                     else " and land cover and soil at source resolution "
+                          f"(fields = {static_policy.highres.fields!r}, "
+                          f"land cover {static_policy.highres.landcover_source!r})"))
                  if static_policy.highres is not None
                  and static_policy.highres.enabled
                  and float(cfg.dx) <= float(
