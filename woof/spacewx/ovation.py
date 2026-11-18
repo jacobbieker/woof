@@ -28,8 +28,13 @@ What the port reproduces, routine by routine of the IDL:
   is absent (b1p = b2p = 0) the IDL falls back to a table of probabilities by
   dPhi/dt bin, but ``fill_arrays`` reads that table with ``readf`` into a
   subscripted array, which IDL passes by value, so the table stays zero and
-  the fallback gives 0.  The distribution's own test outputs show it, and woof
-  keeps that behaviour (p = 0 without a fit) and does not read the table.
+  the fallback gives 0.  The distribution's own test outputs show it, those
+  from NOAA's later trunk build included, and woof keeps that behaviour (p = 0
+  without a fit) and does not read the table: with the table's fallback the
+  port misses every electron output by 2-190 % of its peak.  (One trunk
+  output, the 12 UT diffuse number flux, has flux in 165 equatorward cells
+  where the regression itself is 0 in the run's seasons, so no probability
+  gives it; it was made with other tables, and is not used as a reference.)
   Negative fluxes are 0, and the IDL's outlier clamps are kept (electron
   energy flux above 10 erg/cm2/s becomes 0.5, then above 5 becomes 5; see
   :func:`_clamp`).
@@ -196,12 +201,22 @@ def _cached(source: str) -> Coefficients:
     return read_coefficients(source)
 
 
+@functools.lru_cache(maxsize=1)
+def _pinned_path() -> str:
+    return str(fetch_pinned(OVATION_ZIP))
+
+
 def load(source=None) -> Coefficients:
-    """The pinned distribution (fetched once into the space-weather cache), or
-    a local zip or ``premodel`` directory."""
+    """The pinned distribution (fetched and checked once per process), or a
+    local zip or ``premodel`` directory."""
     if source is None or str(source).strip() in ("", "pinned"):
-        return _cached(str(fetch_pinned(OVATION_ZIP)))
+        return _cached(_pinned_path())
     return _cached(str(Path(source).resolve()))
+
+
+def is_pinned(coef: Coefficients) -> bool:
+    """Whether the tables came from the pinned distribution's zip."""
+    return coef.sha256 == OVATION_ZIP.sha256
 
 
 # ------------------------------------------------------------------ drivers
@@ -319,6 +334,16 @@ def flux_grids(coef: Coefficients, dfdt: float, doy: int) -> dict[str, np.ndarra
     return out
 
 
+def hemisphere_grids(coef: Coefficients, dfdt: float, when: datetime) -> dict[str, dict[str, np.ndarray]]:
+    """{"north", "south"} -> :func:`flux_grids` in each hemisphere's season."""
+    return {h: flux_grids(coef, dfdt, hemisphere_doy(when, h)) for h in ("north", "south")}
+
+
+def electron_power(grids: dict[str, np.ndarray]) -> float:
+    """Hemispheric power of the electrons (diffuse + monoenergetic + broadband), GW."""
+    return hemispheric_power(grids["eflux_diff"] + grids["eflux_mono"] + grids["eflux_wave"])
+
+
 def cell_areas_km2() -> np.ndarray:
     """(96, 80) area of each grid cell, km2, with the IDL's cell edges."""
     mlat1 = 50.001 + 0.5 * np.arange(80)
@@ -346,6 +371,26 @@ def on_columns(grids: dict[str, np.ndarray], mlat, mlt) -> dict[str, np.ndarray]
     inside = (mlat >= 50.0) & (mlat <= 90.0)
     j = np.clip(((np.where(inside, mlat, 50.0) - 50.0) * 2.0).astype(np.int64), 0, 79)
     return {k: np.where(inside, g[i, j], 0.0) for k, g in grids.items()}
+
+
+#: The fields :func:`energy_columns` gives: electron energy flux (total and
+#: by type, erg cm-2 s-1), ion energy flux, electron number flux (cm-2 s-1)
+#: and electron mean energy (keV).
+COLUMN_FIELDS = ("eflux", "eflux_diff", "eflux_mono", "eflux_wave", "eflux_ion", "nflux", "mean_energy")
+
+
+def energy_columns(grids: dict[str, dict[str, np.ndarray]], mlat, mlt) -> dict[str, np.ndarray]:
+    """:data:`COLUMN_FIELDS` on columns, from :func:`hemisphere_grids`: the
+    northern grids where mlat >= 0, else the southern."""
+    mlat = np.asarray(mlat, dtype=np.float64)
+    north = on_columns(grids["north"], mlat, mlt)
+    south = on_columns(grids["south"], mlat, mlt)
+    cols = {k: np.where(mlat >= 0.0, north[k], south[k]) for k in north}
+    eflux = cols["eflux_diff"] + cols["eflux_mono"] + cols["eflux_wave"]
+    nflux = cols["nflux_diff"] + cols["nflux_mono"] + cols["nflux_wave"]
+    return {"eflux": eflux, "eflux_diff": cols["eflux_diff"], "eflux_mono": cols["eflux_mono"],
+            "eflux_wave": cols["eflux_wave"], "eflux_ion": cols["eflux_ion"], "nflux": nflux,
+            "mean_energy": mean_energy_kev(eflux, nflux)}
 
 
 def mean_energy_kev(eflux, nflux) -> np.ndarray:
@@ -380,7 +425,8 @@ def joule_power(pc: float, dst: float, when: datetime, season: str | None = None
     return float(a * pc + b * pc * pc + c * dst + d * dst * dst)
 
 
-__all__ = ["OVATION_ZIP", "TYPES", "SEASONS", "OUTPUTS", "KNIPP_2004", "Coefficients", "OvationError",
-           "read_coefficients", "load", "season_weights", "hemisphere_doy", "coupling", "fit_grid",
-           "combine_hemispheres", "flux_grids", "cell_areas_km2", "hemispheric_power", "on_columns",
+__all__ = ["OVATION_ZIP", "TYPES", "SEASONS", "OUTPUTS", "COLUMN_FIELDS", "KNIPP_2004",
+           "Coefficients", "OvationError", "read_coefficients", "load", "is_pinned", "season_weights",
+           "hemisphere_doy", "coupling", "fit_grid", "combine_hemispheres", "flux_grids", "hemisphere_grids",
+           "electron_power", "cell_areas_km2", "hemispheric_power", "on_columns", "energy_columns",
            "mean_energy_kev", "knipp_season", "joule_power"]

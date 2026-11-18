@@ -17,6 +17,7 @@ power.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -85,6 +86,8 @@ def _aurora_activity(args, times):
     if args.observed_al and str(args.solar_wind).strip() == "swpc":
         raise SystemExit("woof spacewx aurora: --observed-al needs OMNI2 ('omni' or files); "
                          "the SWPC real-time feed carries no AL")
+    if args.ovation and not args.energy:
+        raise SystemExit("woof spacewx aurora: --ovation chooses the coefficients of --energy; add --energy")
     if args.energy and not args.solar_wind:
         raise SystemExit("woof spacewx aurora: --energy needs --solar-wind (OVATION Prime is driven "
                          "by the solar-wind coupling)")
@@ -132,63 +135,59 @@ def _aurora_activity(args, times):
     return rows, source, record
 
 
-def _energy(args, times, record):
-    """Per time: OVATION's combined-hemisphere grids for the north and the south,
-    and the row of scalars (dPhi/dt, hemispheric power, Joule power)."""
-    from woof.spacewx import ovation, solarwind
+@dataclass
+class _Energy:
+    """One time's OVATION grids (None without a coupling) and its scalars."""
+    grids: dict | None
+    scalars: dict
 
+
+def _energy_coefficients(args):
+    from woof.spacewx import ovation
     try:
-        coef = ovation.load(args.ovation)
+        return ovation.load(args.ovation)
     except (ovation.OvationError, OSError, ValueError) as exc:
         raise SystemExit(f"woof spacewx aurora: OVATION Prime coefficients: {exc}") from exc
-    out = []
-    for when in times:
-        try:
-            dfdt = ovation.coupling(record, when)
-        except ovation.OvationError as exc:
-            raise SystemExit(f"woof spacewx aurora: {exc}") from exc
-        grids = {h: ovation.flux_grids(coef, dfdt, ovation.hemisphere_doy(when, h)) for h in ("north", "south")}
-        scalars = {"ovation_dphidt": dfdt}
+
+
+def _energy(coef, record, when) -> _Energy:
+    """OVATION's grids in both hemispheres and the row of scalars (dPhi/dt,
+    hemispheric power, Joule power) at ``when``.  A time without three good
+    solar-wind hours gets no grids and NaN scalars, as the oval's gaps do."""
+    from woof.spacewx import ovation, solarwind
+
+    nan = float("nan")
+    scalars = {"ovation_dphidt": nan, "hp_north_gw": nan, "hp_south_gw": nan,
+               "hp_ion_north_gw": nan, "hp_ion_south_gw": nan}
+    try:
+        dfdt = ovation.coupling(record, when)
+    except ovation.OvationError:
+        grids = None
+    else:
+        grids = ovation.hemisphere_grids(coef, dfdt, when)
+        scalars["ovation_dphidt"] = dfdt
         for h, g in grids.items():
-            scalars[f"hp_{h}_gw"] = ovation.hemispheric_power(g["eflux_diff"] + g["eflux_mono"] + g["eflux_wave"])
+            scalars[f"hp_{h}_gw"] = ovation.electron_power(g)
             scalars[f"hp_ion_{h}_gw"] = ovation.hemispheric_power(g["eflux_ion"])
-        try:
-            pcn, dst = record.pcn_at(when), record.dst_at(when)
-        except solarwind.SolarWindError:
-            pcn = dst = float("nan")
-        scalars["pcn"], scalars["dst"] = pcn, dst
-        scalars["joule_north_gw"] = (ovation.joule_power(pcn, dst, when)
-                                     if np.isfinite(pcn) and np.isfinite(dst) else float("nan"))
-        out.append((grids, scalars))
-    return coef, out
-
-
-#: The ``--energy`` fields, written beside the oval's.
-ENERGY_FIELDS = ("eflux", "eflux_diff", "eflux_mono", "eflux_wave", "eflux_ion", "nflux", "mean_energy")
-
-
-def _energy_columns(grids, mlat, mlt):
-    """:data:`ENERGY_FIELDS` on columns: the northern grids where mlat >= 0, else the southern."""
-    from woof.spacewx import ovation
-
-    north = ovation.on_columns(grids["north"], mlat, mlt)
-    south = ovation.on_columns(grids["south"], mlat, mlt)
-    cols = {k: np.where(mlat >= 0.0, north[k], south[k]) for k in north}
-    eflux = cols["eflux_diff"] + cols["eflux_mono"] + cols["eflux_wave"]
-    nflux = cols["nflux_diff"] + cols["nflux_mono"] + cols["nflux_wave"]
-    return {"eflux": eflux, "eflux_diff": cols["eflux_diff"], "eflux_mono": cols["eflux_mono"],
-            "eflux_wave": cols["eflux_wave"], "eflux_ion": cols["eflux_ion"], "nflux": nflux,
-            "mean_energy": ovation.mean_energy_kev(eflux, nflux)}
+    try:
+        pcn, dst = record.pcn_at(when), record.dst_at(when)
+    except solarwind.SolarWindError:
+        pcn = dst = nan
+    scalars["pcn"], scalars["dst"] = pcn, dst
+    scalars["joule_north_gw"] = (ovation.joule_power(pcn, dst, when)
+                                 if np.isfinite(pcn) and np.isfinite(dst) else nan)
+    return _Energy(grids, scalars)
 
 
 def aurora_main(args) -> int:
     from woof.spacewx.aurora import Aurora, AuroraError, OUTPUTS, receipt
     from woof.spacewx.ionosphere import grid
+    from woof.spacewx.ovation import COLUMN_FIELDS, energy_columns, is_pinned
 
     start = _utc(args.time)
     times = [start + timedelta(hours=i * args.step_hours) for i in range(max(1, args.count))]
     rows, source, record = _aurora_activity(args, times)
-    energy = _energy(args, times, record) if args.energy else None
+    coef = _energy_coefficients(args) if args.energy else None
     lat, lon = grid(args.dlat, args.dlon)
     lat2, lon2 = np.meshgrid(lat, lon, indexing="ij")
     try:
@@ -196,24 +195,27 @@ def aurora_main(args) -> int:
     except AuroraError as exc:
         raise SystemExit(f"woof spacewx aurora: {exc}") from exc
     import cupy as cp
-    fields = {k: [] for k in OUTPUTS + (ENERGY_FIELDS if energy else ())}
+    fields = {k: [] for k in OUTPUTS + (COLUMN_FIELDS if coef is not None else ())}
     north = lat2 > 0
-    for n, (when, row) in enumerate(zip(times, rows)):
+    for when, row in zip(times, rows):
         out = oval.evaluate(when, row["al"])
         for key in OUTPUTS:
             fields[key].append(cp.asnumpy(out[key]).reshape(lat2.shape))
-        if energy is not None:
-            grids, scalars = energy[1][n]
-            row.update(scalars)
-            cols = _energy_columns(grids, fields["mlat"][-1].astype(np.float64),
-                                   fields["mlt"][-1].astype(np.float64))
-            for key in ENERGY_FIELDS:
+        if coef is not None:
+            energy = _energy(coef, record, when)
+            row.update(energy.scalars)
+            if energy.grids is None:           # no coupling at this time: fill
+                cols = {key: np.full(lat2.shape, np.nan) for key in COLUMN_FIELDS}
+            else:
+                cols = energy_columns(energy.grids, fields["mlat"][-1].astype(np.float64),
+                                      fields["mlt"][-1].astype(np.float64))
+            for key in COLUMN_FIELDS:
                 fields[key].append(cols[key].astype(np.float32))
         zone = fields["zone"][-1]
         edge = lat2[north & (zone >= 1)]
         extra = (f"  Newell {row['newell']:8.0f}  PCP {row['polar_cap_kv']:5.1f} kV"
                  if "newell" in row and np.isfinite(row["newell"]) else "")
-        if energy is not None:
+        if coef is not None and np.isfinite(row["ovation_dphidt"]):
             extra += (f"  dPhi/dt {row['ovation_dphidt']:6.0f}  HP N {row['hp_north_gw']:5.1f} "
                       f"S {row['hp_south_gw']:5.1f} GW")
             if np.isfinite(row["joule_north_gw"]):
@@ -221,11 +223,11 @@ def aurora_main(args) -> int:
         print(f"{when:%Y-%m-%dT%H:%MZ}  Kp {row['kp']:4.2f}  |AL| {row['al']:6.1f} nT  "
               f"aurora reaches {edge.min() if edge.size else float('nan'):5.1f} N{extra}")
     doc = receipt(oval, {"spacewx_activity_source": source})
-    if energy is not None:
-        from woof.spacewx.ovation import OVATION_ZIP
+    if coef is not None:
         doc["spacewx_energy_model"] = "OVATION Prime 2010 (ovation-prime 2.3.0, NOAA)"
-        doc["spacewx_ovation_source"] = f"{energy[0].source} sha256:{energy[0].sha256}"
-        doc["spacewx_ovation_pin"] = OVATION_ZIP.sha256
+        doc["spacewx_ovation_source"] = f"{coef.source} sha256:{coef.sha256}"
+        # Whether the tables are the pinned distribution's, not a local copy.
+        doc["spacewx_ovation_pinned"] = is_pinned(coef)
         doc["spacewx_joule_model"] = "Knipp et al. 2004 Table I, northern hemisphere, |PC(N)| and |Dst|"
     # Strict JSON: a coupling over a fill-value hour is null, not NaN.
     doc["times"] = [{k: (None if isinstance(v, float) and not np.isfinite(v) else v)

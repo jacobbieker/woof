@@ -9,7 +9,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import io
 from pathlib import Path
-import re
 import zipfile
 
 import numpy as np
@@ -186,6 +185,52 @@ def test_reads_the_zip_and_refuses_damaged_tables(tmp_path):
         ov.read_coefficients(root)
 
 
+def test_energy_columns_pick_the_hemisphere_and_derive_the_mean_energy(coef):
+    when = datetime(2024, 6, 20, 22, 10)
+    grids = ov.hemisphere_grids(coef, 1000.0, when)
+    cols = ov.energy_columns(grids, np.array([70.2, -70.2, 40.0]), np.array([3.1, 3.1, 3.1]))
+    assert set(cols) == set(ov.COLUMN_FIELDS)
+    i, j = 12, 40
+    for k, h in enumerate(("north", "south")):
+        g = grids[h]
+        e = g["eflux_diff"][i, j] + g["eflux_mono"][i, j] + g["eflux_wave"][i, j]
+        assert cols["eflux"][k] == pytest.approx(e)
+        assert cols["eflux_ion"][k] == g["eflux_ion"][i, j]
+    # June: the south's season is winter, so the two hemispheres differ.
+    assert cols["eflux"][0] != cols["eflux"][1]
+    assert cols["eflux"][2] == 0.0 and cols["mean_energy"][2] == 0.0
+    assert ov.electron_power(grids["north"]) > 0.0
+
+
+def test_only_the_pinned_zip_counts_as_pinned(coef):
+    assert not ov.is_pinned(coef)
+    assert ov.is_pinned(ov.Coefficients(*([None] * 6), sha256=ov.OVATION_ZIP.sha256, source="x"))
+
+
+def test_cli_energy_keeps_the_good_times_around_a_gap(coef):
+    from woof.spacewx import cli
+    t0 = datetime(2024, 5, 10, 0)
+    wind = _wind(n=10, bz=(5, np.nan), speed=(6, np.nan))
+    good = cli._energy(coef, wind, t0 + timedelta(hours=5, minutes=0))
+    assert good.grids is not None and good.scalars["ovation_dphidt"] > 0.0
+    assert good.scalars["hp_north_gw"] > 0.0 and good.scalars["hp_south_gw"] > 0.0
+    assert np.isnan(good.scalars["joule_north_gw"])          # synthetic wind: no PC(N) or Dst
+    gap = cli._energy(coef, wind, t0 + timedelta(hours=7, minutes=30))   # hours 4-7: two of them bad
+    assert gap.grids is None
+    assert all(np.isnan(v) for v in gap.scalars.values())
+
+
+def test_cli_refuses_ovation_without_energy():
+    from types import SimpleNamespace
+    from woof.spacewx import cli
+    args = SimpleNamespace(observed_al=False, solar_wind="omni", ovation="op.zip", energy=False, kp=None)
+    with pytest.raises(SystemExit, match="--ovation"):
+        cli._aurora_activity(args, [datetime(2024, 5, 10)])
+    args = SimpleNamespace(observed_al=False, solar_wind=None, ovation=None, energy=True, kp=None)
+    with pytest.raises(SystemExit, match="--solar-wind"):
+        cli._aurora_activity(args, [datetime(2024, 5, 10)])
+
+
 # ---------------------------------------------------------------- Joule heating
 
 def test_knipp_seasons_and_fit():
@@ -229,33 +274,21 @@ def _cached_zip():
 
 def test_port_reproduces_the_distributions_test_outputs():
     """The IDL's text outputs for the storm of 24-25 Oct 2011 (test mode 1, its own
-    OMNI2 file): every cell to the printed 0.01 and the hemispheric power to 0.1 %."""
-    path = _cached_zip()
-    coef = ov.load(path)
-    archive = zipfile.ZipFile(path)
-    names = {Path(n).name: n for n in archive.namelist()}
-    # The distribution's OMNI2 file predates word 55; pad it so the reader takes it.
-    text = archive.read(names["omni2_2011.dat"]).decode("ascii")
-    wind = sw.parse_omni2("\n".join(f"{line} 0" for line in text.splitlines() if line.strip()), "omni2_2011")
-    checked = 0
-    for name in sorted(names):
-        m = re.fullmatch(r"ov_(diff|mono|wave|ions)_Eflux_2011_(\d\d)(\d\d)_(\d\d)00\.txt", name)
-        if not m:
-            continue
-        kind, mo, dy, hh = m.groups()
-        when = datetime(2011, int(mo), int(dy), int(hh))
-        lines = archive.read(names[name]).decode("ascii").splitlines()[1:]
-        cells = np.array([[float(x) for x in ln.split()] for ln in lines
-                          if len(ln.split()) == 3 and re.fullmatch(r"[\d.\seE+-]+", ln)])
-        power = float(next(ln for ln in lines if ln.startswith("Hemispherical power")).split(":")[1])
-        grid = ov.combine_hemispheres(ov.fit_grid(coef, ov.coupling(wind, when), when.timetuple().tm_yday,
-                                                  ov.TYPES.index(kind)))
-        i = (cells[:, 0] * 4 + 1e-3).astype(int)
-        j = ((cells[:, 1] - 50.0) * 2 + 1e-3).astype(int)
-        assert np.abs(grid[i, j] - cells[:, 2]).max() < 0.0201, name
-        assert ov.hemispheric_power(grid) == pytest.approx(power, rel=1e-3), name
-        checked += 1
-    assert checked == 63
+    OMNI2 file), through the validation tool: every energy-flux cell to the
+    printed 0.01 and its hemispheric power to 0.1 %, and the number fluxes to
+    0.3 % of their peak but for the two outputs the docs explain."""
+    from types import SimpleNamespace
+    from tools.spacewx_ovation_validate import testdata
+    rows = testdata(SimpleNamespace(zip=_cached_zip()))["outputs"]
+    energy = [r for r in rows if not r["number"]]
+    assert len(energy) == 63 and len(rows) == 123
+    for r in energy:
+        assert r["max_abs_diff"] < 0.0201, r["file"]
+        assert r["hp_gw"] == pytest.approx(r["hp_ref_gw"], rel=1e-3), r["file"]
+    known = {"ov_diff_flux_2011_1024_1200.txt", "ov_wave_flux_2011_1025_0300.txt"}
+    for r in rows:
+        if r["number"] and r["file"] not in known:
+            assert r["max_abs_diff"] < 3e-3 * r["max_ref"], r["file"]
 
 
 # ---------------------------------------------------------------- on the GPU
@@ -266,21 +299,20 @@ def test_energy_columns_on_the_device_frame_match_the_float64_frame(coef):
     from test_spacewx_ionosphere import _dipole
     import cupy as cp
     from woof.spacewx import aurora as au
-    from woof.spacewx.cli import ENERGY_FIELDS, _energy_columns
     when = datetime(2024, 6, 20, 22, 10)
     lat, lon = np.meshgrid(np.arange(-89.5, 90.0, 1.0), np.arange(-180.0, 180.0, 2.0), indexing="ij")
     oval = au.Aurora(lat, lon, when=when, igrf_model=_dipole())
     dev = oval.evaluate(when, 300.0)
     mlat, mlt = (cp.asnumpy(dev[k]).astype(np.float64) for k in ("mlat", "mlt"))
     ref = oval.reference(when, 300.0)
-    grids = {h: ov.flux_grids(coef, 5000.0, ov.hemisphere_doy(when, h)) for h in ("north", "south")}
-    got = _energy_columns(grids, mlat.reshape(-1), mlt.reshape(-1))
-    want = _energy_columns(grids, ref["mlat"], ref["mlt"])
-    assert set(got) == set(ENERGY_FIELDS)
+    grids = ov.hemisphere_grids(coef, 5000.0, when)
+    got = ov.energy_columns(grids, mlat.reshape(-1), mlt.reshape(-1))
+    want = ov.energy_columns(grids, ref["mlat"], ref["mlt"])
+    assert set(got) == set(ov.COLUMN_FIELDS)
     # Columns that sit on a bin edge may fall either side of it in float32.
     edge = (np.abs((np.abs(ref["mlat"]) * 2) - np.round(np.abs(ref["mlat"]) * 2)) < 1e-3) | (
         np.abs(ref["mlt"] * 4 - np.round(ref["mlt"] * 4)) < 1e-3)
-    for key in ENERGY_FIELDS:
+    for key in ov.COLUMN_FIELDS:
         assert np.array_equal(got[key][~edge], want[key][~edge]), key
     # Synthetic tables: only the north bins carry flux, and the south reads the
     # same combined grid, so both polar caps light up.
@@ -306,3 +338,7 @@ def test_validation_tool_reads_poes_level2_text(tmp_path):
     bad.write_text("a b c\n1 2 3\n")
     with pytest.raises(ValueError, match="POES"):
         read_poes(bad)
+    # A header-only day reads as no records.
+    empty = tmp_path / "poes_n19_20111025.txt"
+    empty.write_text(head + "\n")
+    assert read_poes(empty)["time"].size == 0

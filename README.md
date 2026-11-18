@@ -763,7 +763,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   reproduces its test outputs; the coefficients are fetched and pinned), and
   the Knipp et al. 2004 Joule power from OMNI2's PC(N) and Dst. Against POES
   TED electron flux over the 24-25 Oct 2011 storm, the per-pass correlation is
-  0.49-0.61 and the model reads about 2.5 times higher. The storm-time and
+  0.48-0.61 and the model reads about 2.5 times higher. The storm-time and
   particle-precipitation layers are planned ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)

@@ -44,9 +44,12 @@ import numpy as np
 
 
 def testdata(args) -> dict:
+    """Per output file: its build (2.3.0 or NOAA's later trunk, from the path in
+    its first line), the largest cell difference and, for energy flux, the
+    hemispheric power."""
     from woof.spacewx import assets, ovation, solarwind
 
-    path = Path(args.zip) if args.zip else assets.fetch_pinned(ovation.OVATION_ZIP)
+    path = Path(args.zip) if getattr(args, "zip", None) else assets.fetch_pinned(ovation.OVATION_ZIP)
     coef = ovation.load(path)
     archive = zipfile.ZipFile(path)
     names = {Path(n).name: n for n in archive.namelist()}
@@ -60,7 +63,9 @@ def testdata(args) -> dict:
             continue
         kind, what, mo, dy, hh = m.groups()
         when = datetime(2011, int(mo), int(dy), int(hh))
-        lines = archive.read(names[name]).decode("ascii").splitlines()[1:]
+        lines = archive.read(names[name]).decode("ascii").splitlines()
+        build = "trunk" if "trunk" in lines[0] else "2.3.0"
+        lines = lines[1:]
         cells = np.array([[float(x) for x in ln.split()] for ln in lines
                           if len(ln.split()) == 3 and re.fullmatch(r"[\d.\seE+-]+", ln)])
         number = what == "flux"
@@ -69,12 +74,13 @@ def testdata(args) -> dict:
         i = (cells[:, 0] * 4 + 1e-3).astype(int)
         j = ((cells[:, 1] - 50.0) * 2 + 1e-3).astype(int)
         err = np.abs(grid[i, j] - cells[:, 2])
-        row = {"file": name, "max_abs_diff": float(err.max()), "max_ref": float(np.abs(cells[:, 2]).max())}
+        row = {"file": name, "build": build, "number": number, "max_abs_diff": float(err.max()),
+               "max_ref": float(np.abs(cells[:, 2]).max())}
         if not number:
             row["hp_gw"] = ovation.hemispheric_power(grid)
             row["hp_ref_gw"] = float(next(ln for ln in lines if ln.startswith("Hemispherical power")).split(":")[1])
         rows.append(row)
-        print(f"{name:34s} max |diff| {row['max_abs_diff']:9.3g} (of {row['max_ref']:9.3g})"
+        print(f"{name:34s} {build:5s} max |diff| {row['max_abs_diff']:9.3g} (of {row['max_ref']:9.3g})"
               + (f"  HP {row['hp_gw']:8.3f} ref {row['hp_ref_gw']:8.3f} GW" if not number else ""))
     return {"zip": str(path), "outputs": rows}
 
@@ -88,7 +94,7 @@ def read_poes(path) -> dict:
         raise ValueError(f"{path}: not a POES level-2 text file (header {head[:8]}...)")
     col = {k: head.index(k) for k in need}
     data = np.array([[float(w[col[k]]) for k in need] for w in (ln.split() for ln in lines[1:])
-                     if len(w) == len(head)])
+                     if len(w) == len(head)]).reshape(-1, len(need))
     t = [datetime(int(r[0]), int(r[1]), int(r[2]), int(r[3]), int(r[4])) + timedelta(seconds=float(r[5]))
          for r in data]
     ok = (data[:, 8] >= 0.0) & (data[:, 9] >= 0.0) & (data[:, 9] <= 1.0) & (np.abs(data[:, 6]) <= 90.0)
@@ -103,47 +109,44 @@ def _corr(a, b) -> float:
 def poes(args) -> dict:
     from woof.spacewx import aurora, igrf, ovation, solarwind
 
-    sats = [read_poes(p) for p in args.poes]
+    sats = [s for s in (read_poes(p) for p in args.poes) if s["time"].size]
+    if not sats:
+        raise SystemExit("no POES records with a valid electron flux")
     first = min(s["time"].min() for s in sats)
     last = max(s["time"].max() for s in sats)
     wind = solarwind.load(args.solar_wind, first - timedelta(hours=4), last + timedelta(hours=1))
     coef = ovation.load(args.ovation)
     frame = aurora.dipole_frame(igrf.load(), first)
-    grids = {}
     out = {"poes": [s["source"] for s in sats], "solar_wind": f"{wind.source} sha256:{wind.sha256}",
            "frame": "IGRF-14 centred dipole", "hemispheres": {}}
     passes = {"north": ([], [], [], []), "south": ([], [], [], [])}
     points = {"north": ([], []), "south": ([], [])}
     for sat in sats:
         p = aurora._unit(sat["lat"], sat["lon"])
-        mlat = np.rad2deg(np.arcsin(np.clip(p @ frame[0], -1.0, 1.0)))
-        mlon = np.rad2deg(np.arctan2(p @ frame[2], p @ frame[1]))
-        model = np.zeros(mlat.size)
-        model_ion = np.zeros(mlat.size)
-        mlt = np.zeros(mlat.size)
-        for k, when in enumerate(sat["time"]):
+        sat["mlat"] = np.rad2deg(np.arcsin(np.clip(p @ frame[0], -1.0, 1.0)))
+        sat["mlon"] = np.rad2deg(np.arctan2(p @ frame[2], p @ frame[1]))
+        sat["model"] = np.full(sat["mlat"].size, np.nan)
+        sat["model_ion"] = np.zeros(sat["mlat"].size)
+    # All satellites' records in time order, so that only one minute's grids
+    # are held at a time.
+    order = sorted((when, n, k) for n, sat in enumerate(sats) for k, when in enumerate(sat["time"]))
+    key, grids = None, None
+    for when, n, k in order:
+        sat = sats[n]
+        if when.replace(second=0, microsecond=0) != key:
             key = when.replace(second=0, microsecond=0)
-            if key not in grids:
-                try:
-                    dfdt = ovation.coupling(wind, key)
-                except ovation.OvationError:
-                    grids[key] = None
-                else:
-                    grids[key] = {}
-                    for h in ("north", "south"):
-                        doy = ovation.hemisphere_doy(key, h)
-                        grids[key][h] = sum(ovation.combine_hemispheres(ovation.fit_grid(coef, dfdt, doy, t))
-                                            for t in range(3))
-                        grids[key][h + "_ion"] = ovation.combine_hemispheres(ovation.fit_grid(coef, dfdt, doy, 3))
-                    grids[key]["mlon_sun"] = aurora.sun_magnetic_longitude(frame, key)
-            g = grids[key]
-            if g is None:
-                model[k] = np.nan
-                continue
-            mlt[k] = np.mod(12.0 + (mlon[k] - g["mlon_sun"]) / 15.0, 24.0)
-            h = "north" if mlat[k] >= 0 else "south"
-            cols = ovation.on_columns({"e": g[h], "i": g[h + "_ion"]}, mlat[k:k + 1], mlt[k:k + 1])
-            model[k], model_ion[k] = cols["e"][0], cols["i"][0]
+            try:
+                grids = ovation.hemisphere_grids(coef, ovation.coupling(wind, key), key)
+            except ovation.OvationError:
+                grids = None
+            mlon_sun = aurora.sun_magnetic_longitude(frame, key)
+        if grids is None:
+            continue
+        mlt = np.mod(12.0 + (sat["mlon"][k:k + 1] - mlon_sun) / 15.0, 24.0)
+        cols = ovation.energy_columns(grids, sat["mlat"][k:k + 1], mlt)
+        sat["model"][k], sat["model_ion"][k] = cols["eflux"][0], cols["eflux_ion"][0]
+    for sat in sats:
+        mlat, model, model_ion = sat["mlat"], sat["model"], sat["model_ion"]
         polar = (np.abs(mlat) >= 50.0) & np.isfinite(model)
         for h, sign in (("north", 1.0), ("south", -1.0)):
             sel = polar & (np.sign(mlat) == sign)

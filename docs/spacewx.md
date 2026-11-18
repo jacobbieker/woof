@@ -242,13 +242,17 @@ OMNI2 the Joule power. The model is `woof/spacewx/ovation.py`.
 - **The coefficients are not shipped.** The 24 MB distribution zip is fetched
   from SourceForge into `~/.woof/spacewx/ovation` and checked against its
   pinned size and SHA-256 (`--ovation` takes a local zip or `premodel`
-  directory). OvationPyme (LGPL) is not read or used.
+  directory, and the receipt's `spacewx_ovation_pinned` says whether the
+  tables are the pinned ones). OvationPyme (LGPL) is not read or used.
 - **Outputs.** In the `.npz`:
   - `eflux`: the electron energy flux, diffuse + mono + wave, in erg cm-2 s-1
     (= mW m-2);
   - each part of it, and the ion energy flux (`eflux_ion`);
   - `nflux`: the electron number flux, in cm-2 s-1;
   - `mean_energy`: eflux / nflux, in keV.
+
+  A time with fewer than 3 good solar-wind hours of the 4 has no coupling:
+  its fields are NaN and its scalars `null`, and the other times are kept.
 
   Each line, and the receipt, also carries the northern and southern
   hemispheric power in GW (electrons, and ions separately). It is integrated as
@@ -275,15 +279,19 @@ Checks (`tools/spacewx_ovation_validate.py`):
     Their hemispheric powers agree to 0.01 %.
   - Of the 60 number-flux outputs, 58 agree to 0.3 % of each field's maximum. The 03 UT wave output
     differs in one cell, where the two hemispheres straddle a clamp. The 12 UT
-    diffuse output lies outside the IDL test's 14-03 UT window, and it differs
-    at low latitudes.
+    diffuse output, from NOAA's later trunk build, has flux in 165 cells at
+    50-52 deg where the regression itself is 0 in that day's seasons, so it
+    was made with other tables.
+  - The outputs show the 2.3.0 IDL's probability: 0 where the probability fit
+    is absent, as woof does. The tabulated fallback the code intends (but
+    never fills) would miss every electron output by 2-190 % of its peak.
   - A unit test repeats the energy-flux check whenever the pinned zip is cached.
 - **Against observations.** The NOAA POES/MetOp TED electron energy flux (NCEI
   level 2, `ted x econtr`) was taken at the 120-km foot of each 16-s record.
   Six satellites over 24-25 Oct 2011 gave 29,403 records poleward of 50 deg
   and 338 polar passes. For both hemispheres:
   - log-flux correlation per record: 0.57 (north), 0.56 (south);
-  - correlation of the flux summed over each pass: 0.49 (north), 0.61 (south);
+  - correlation of the flux summed over each pass: 0.48 (north), 0.61 (south);
   - median ratio of model to observed: 2.3 (north), 2.6 (south). With ions
     against TED's total, it is 2.4 and 2.7.
 
