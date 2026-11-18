@@ -16,20 +16,22 @@ import operator
 
 import numpy as np
 
-# Never true (n is the element count): the output is bound and left as allocated.
-_SOURCE = "if (thread_position_in_grid.x == 0 && n[0] < 0) out[0] = 0;"
+# Never true (the input is one 0): the output is bound and left as allocated.
+_SOURCE = "if (thread_position_in_grid.x == 0 && flag[0] != 0) out[0] = 0;"
 
 
 @functools.lru_cache(maxsize=1)
 def _kernel():
     import mlx.core as mx
-    return mx.fast.metal_kernel(name="woof_uninitialized", input_names=["n"],
-                                output_names=["out"], source=_SOURCE)
+    flag = mx.zeros((1,), dtype=mx.int32)
+    mx.eval(flag)
+    kernel = mx.fast.metal_kernel(name="woof_uninitialized", input_names=["flag"],
+                                  output_names=["out"], source=_SOURCE)
+    return kernel, flag
 
 
 def uninitialized(shape, dtype=np.float32):
     """A C-contiguous facade array of ``shape`` whose words are unspecified."""
-    import mlx.core as mx
     from woof.backend.facade._array import (MAX_ELEMENTS, Storage, ndarray, storage_dtype,
                                             storage_mx_dtype)
     from woof.backend.facade._ops import empty
@@ -37,9 +39,11 @@ def uninitialized(shape, dtype=np.float32):
     shape = (int(shape),) if isinstance(shape, (int, np.integer)) else tuple(int(n) for n in shape)
     n = functools.reduce(operator.mul, shape, 1)
     words = n * dtype.itemsize // storage_dtype(dtype).itemsize
-    if words == 0 or n > MAX_ELEMENTS:
+    if words == 0 or n > MAX_ELEMENTS or words > MAX_ELEMENTS:
         return empty(shape, dtype)          # the ordinary path (and its refusal)
-    (arr,) = _kernel()(inputs=[mx.array([words], dtype=mx.int64)], grid=(1, 1, 1),
-                       threadgroup=(1, 1, 1), output_shapes=[(words,)],
-                       output_dtypes=[storage_mx_dtype(dtype)])
+    kernel, flag = _kernel()
+    (arr,) = kernel(inputs=[flag], grid=(1, 1, 1), threadgroup=(1, 1, 1),
+                    output_shapes=[(words,)], output_dtypes=[storage_mx_dtype(dtype)])
+    # A kernel output is a flat, row-contiguous buffer it owns: held as it is
+    # (no contiguous copy), and queued like any new storage (PENDING).
     return ndarray(shape, dtype, _storage=Storage(arr, dtype, ready=True))

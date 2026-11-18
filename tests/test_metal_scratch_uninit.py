@@ -1,9 +1,10 @@
 """woof.backend.scratch.scratch_empty: ``cp.empty`` without the Metal fill.
 
 The facade's ``empty`` is ``zeros`` (a GPU pass over the buffer); scratch a
-kernel writes before it reads (MYNN's worker arena) skips that pass.  The
-words a kernel then writes and reads are the same: checked here for the
-allocation itself, and for whole forecasts with WOOF_SCRATCH_POISON=1.
+kernel writes before it reads (MYNN's worker arena) skips that pass.  This
+file checks the allocation; that every read word is written first is shown
+by whole forecasts poisoned with two bytes (WOOF_SCRATCH_POISON=ff and a5),
+word-identical to the ordinary run on CUDA and Metal (the PR's evidence).
 """
 
 import importlib.util
@@ -37,10 +38,11 @@ def test_scratch_is_a_writable_c_contiguous_empty(cp, monkeypatch, dtype, shape)
         host = np.arange(want.size).astype(dtype).reshape(want.shape)
         a[...] = cp.asarray(host)
         assert a.get().tobytes() == host.tobytes()
-        monkeypatch.setenv("WOOF_SCRATCH_POISON", "1")
-        _reset()
-        b = scratch_empty(cp, shape, dtype)
-        assert b.get().tobytes() == b"\xa5" * want.nbytes
+        for knob, byte in (("1", b"\xff"), ("a5", b"\xa5")):
+            monkeypatch.setenv("WOOF_SCRATCH_POISON", knob)
+            _reset()
+            b = scratch_empty(cp, shape, dtype)
+            assert b.get().tobytes() == byte * want.nbytes
     finally:
         monkeypatch.delenv("WOOF_SCRATCH_POISON", raising=False)
         _reset()
@@ -52,7 +54,6 @@ def test_metal_scratch_skips_the_fill(cp, monkeypatch):
     if backend.active() != "mlx":
         pytest.skip("runs under WOOF_BACKEND=mlx")
     import mlx.core as mx
-    from woof.backend.facade import _scratch
     from woof.backend.scratch import scratch_empty
     calls = []
     monkeypatch.setattr(mx, "zeros", lambda *a, **k: calls.append(a) or mx.full(*a, 0, **k))
@@ -69,4 +70,23 @@ def test_metal_scratch_skips_the_fill(cp, monkeypatch):
     finally:
         monkeypatch.delenv("WOOF_METAL_SCRATCH_UNINIT", raising=False)
         _reset()
-    assert _scratch._kernel() is _scratch._kernel()
+
+
+@pytest.mark.parametrize("value, want", [("0", None), ("off", None), ("false", None), ("no", None),
+                                         ("1", 0xFF), ("on", 0xFF), ("a5", 0xA5), ("00", 0)])
+def test_switch_values(monkeypatch, value, want):
+    from woof.backend import scratch
+    monkeypatch.setenv("WOOF_SCRATCH_POISON", value)
+    _reset()
+    try:
+        assert scratch._poison() == want
+    finally:
+        monkeypatch.delenv("WOOF_SCRATCH_POISON")
+        _reset()
+    for off in ("0", "off", "False", "no"):
+        monkeypatch.setenv("WOOF_METAL_SCRATCH_UNINIT", off)
+        _reset()
+        assert not scratch._uninit_enabled()
+    monkeypatch.delenv("WOOF_METAL_SCRATCH_UNINIT")
+    _reset()
+    assert scratch._uninit_enabled()
