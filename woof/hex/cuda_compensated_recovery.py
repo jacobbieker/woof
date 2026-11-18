@@ -89,6 +89,8 @@ from typing import Any, NoReturn
 
 import numpy as np
 
+from woof.backend.scratch import scratch_like as _scratch_like
+
 from .cuda_fp32 import CUDA_FTZ_HELPERS
 from .errors import ConfigurationRefusal
 
@@ -276,10 +278,10 @@ class CompensatedRecoveryKernels:
         self._require("perturbation", pert, pert)
         if (saved is None) != (anchor is None):
             raise ValueError("the fold guard needs both saved and anchor")
-        folded = self.cp.empty_like(pert) if folded_out is None else folded_out
+        folded = _scratch_like(self.cp, pert) if folded_out is None else folded_out
         error = None
         if want_error:
-            error = self.cp.empty_like(pert) if error_out is None else error_out
+            error = _scratch_like(self.cp, pert) if error_out is None else error_out
         use_guard = anchor is not None
         self._launch(
             "compensated_fold_f32",
@@ -328,8 +330,8 @@ class CompensatedRecoveryKernels:
         nrows = int(recovered.shape[0]) if recovered.ndim else 1
         width = int(recovered.size) // max(nrows, 1)
         begin, end = (0, nrows) if rows is None else (int(rows[0]), int(rows[1]))
-        out = self.cp.empty_like(recovered) if residual_out is None else residual_out
-        anchor = self.cp.empty_like(recovered) if anchor_out is None else anchor_out
+        out = _scratch_like(self.cp, recovered) if residual_out is None else residual_out
+        anchor = _scratch_like(self.cp, recovered) if anchor_out is None else anchor_out
         self._launch(
             "compensated_residual_f32",
             int(recovered.size),
