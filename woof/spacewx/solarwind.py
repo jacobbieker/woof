@@ -6,8 +6,9 @@ Sources, both public and both fetched on demand into the space-weather cache:
   A02104; ``spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2_YYYY.dat``),
   time-shifted to the bow-shock nose.  Words used (omni2.text): 16-17 By/Bz GSM
   (nT), 24 proton density (cm-3), 25 flow speed (km/s), 39 Kp (x10, from GFZ),
-  41 Dst (nT, Kyoto), 52 PC(N) (the northern polar cap index, DTU) and 53 AL
-  (nT, Kyoto).
+  41 Dst (nT, Kyoto), 43-48 the integral proton flux above 1, 2, 4, 10, 30 and
+  60 MeV (cm-2 s-1 sr-1, IMP and GOES), 52 PC(N) (the northern polar cap
+  index, DTU) and 53 AL (nT, Kyoto).
 * ``"swpc"``: NOAA SWPC's real-time solar wind (``json/rtsw/rtsw_mag_1m.json``
   and ``rtsw_wind_1m.json``, the last 24 hours at 1 minute from the active L1
   spacecraft; public domain), averaged to hourly means.  It is measured at L1,
@@ -76,11 +77,14 @@ class SolarWind:
     sha256: str
     dst: np.ndarray | None = None    # nT, where carried (OMNI), else NaN
     pcn: np.ndarray | None = None    # northern polar cap index, where carried (OMNI), else NaN
+    protons: np.ndarray | None = None   # (n, 6) integral proton flux >1..>60 MeV, cm-2 s-1 sr-1 (OMNI), else NaN
 
     def __post_init__(self):
         for name in ("dst", "pcn"):
             if getattr(self, name) is None:
                 object.__setattr__(self, name, np.full(self.hours.size, np.nan))
+        if self.protons is None:
+            object.__setattr__(self, "protons", np.full((self.hours.size, 6), np.nan))
 
     def _index(self, when: datetime) -> int:
         i = int((np.datetime64(_naive_utc(when), "h") - self.hours[0]).astype(int))
@@ -100,6 +104,10 @@ class SolarWind:
     def pcn_at(self, when: datetime) -> float:
         """The hour's northern polar cap index (NaN where the source has none)."""
         return float(self.pcn[self._index(when)])
+
+    def protons_at(self, when: datetime) -> np.ndarray:
+        """The hour's integral proton fluxes >1, >2, >4, >10, >30, >60 MeV (NaN where missing)."""
+        return self.protons[self._index(when)].copy()
 
     def hourly(self, when: datetime) -> dict:
         i = self._index(when)
@@ -179,7 +187,8 @@ def parse_omni2(text: str, source: str = "", sha256: str = "") -> SolarWind:
     kp = _kp_from_code(np.where(d[:, 38] >= 99, 0, d[:, 38]))
     kp[d[:, 38] >= 99] = np.nan
     return SolarWind(hours, word(16, 999.9), word(17, 999.9), word(24, 999.9), word(25, 9999.0),
-                     kp, word(53, 99999.0), source, sha256, word(41, 99999.0), word(52, 999.9))
+                     kp, word(53, 99999.0), source, sha256, word(41, 99999.0), word(52, 999.9),
+                     np.stack([word(43, 999999.0)] + [word(n, 99999.0) for n in range(44, 49)], axis=1))
 
 
 def _concat(parts: list[SolarWind], source: str) -> SolarWind:
@@ -190,7 +199,7 @@ def _concat(parts: list[SolarWind], source: str) -> SolarWind:
     sha = hashlib.sha256("".join(p.sha256 for p in parts).encode()).hexdigest()
     cat = lambda name: np.concatenate([getattr(p, name) for p in parts])
     return SolarWind(cat("hours"), cat("by"), cat("bz"), cat("density"), cat("speed"),
-                     cat("kp"), cat("al"), source, sha, cat("dst"), cat("pcn"))
+                     cat("kp"), cat("al"), source, sha, cat("dst"), cat("pcn"), cat("protons"))
 
 
 def read_omni2(paths) -> SolarWind:

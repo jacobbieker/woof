@@ -17,7 +17,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU | available as `woof spacewx ionosphere` (global grid) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
 | L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
-| L2 particle precipitation | ion-pair rates (CMIP6 EPP, Ap-driven MEE, GOES SPE) as NOx/HOx sources in chemistry, for high-top runs | planned |
+| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make | ion-pair rates available as `woof spacewx particles`; the chemistry source is planned |
 | L1b spectral irradiance | per-band solar variability in RRTMG SW and photolysis | planned |
 
 Couplings that stay speculative are not implemented, and none is planned. One example is
@@ -341,6 +341,94 @@ The forecast is identical with the option on or off.
   source. Preflight prices the held arrays and the kernel's
   32 B frame. Streamed domains and hex refuse it.
 
+## L2: solar proton events (`woof spacewx particles`)
+
+`woof spacewx particles` turns the integral proton flux that GOES measures into
+ion-pair rates in the polar caps, and the NOx and HOx those ion pairs make:
+
+```
+woof spacewx particles --time 2012-01-24T12:00Z --count 6 --step-hours 1 --source omni \
+    --levels 0.01 0.1 1 10 50 100 --out jan2012.json
+```
+
+- **Flux.** `--source omni` reads OMNI2's words 43-48 (J(>1, >2, >4, >10, >30,
+  >60 MeV), cm-2 s-1 sr-1, GOES since the 1990s; after about 2010 only >10, >30
+  and >60 MeV are filled). `--source swpc` reads SWPC's real-time GOES feed
+  (`json/goes/primary/integral-protons-3-day.json`, >1 to >500 MeV, the last
+  3 days), averaged to hours that hold at least 3 of their 12 values. A path
+  reads an OMNI2 file.
+- **Event gate.** An hour counts only while J(>10 MeV) is at least 10 pfu (NOAA
+  S1). Below that the channels hold mostly galactic cosmic rays and detector
+  background (about 0.2 pfu at >10 MeV), which this layer leaves out.
+- **Spectrum.** A power law in log J against log E between the channels
+  present. Past the last channel the last pair's slope is kept, but never
+  flatter than J ~ E^-3, up to 1 GeV.
+- **Deposition.** Protons in air:
+  - stopping power from the Bethe formula (Z/A 0.4992, I = 85.7 eV, within 3 %
+    of NIST PSTAR at 10 and 100 MeV);
+  - CSDA ranges;
+  - an isotropic downward flux over 2π, with a 16-point Gauss-Legendre rule
+    in the cosine of the zenith angle;
+  - one ion pair per 35 eV.
+  The depth is p/g, so the rates need no temperature. Energy is conserved: the
+  column absorbs the whole flux.
+- **Chemistry yield.** 1.25 NOx and 2 HOx per ion pair (Porter et al. 1976;
+  Solomon et al. 1981; the CMIP6/CMIP7 convention). The tendency in mixing
+  ratio is yield x q x M_air / N_A, with q in ion pairs per gram per second.
+- **Where.** The polar caps, |magnetic latitude| >= 60 degrees (the CMIP7
+  rates are uniform poleward of about 60 degrees). The command prints one
+  profile per time. `--out` writes it with the flux, the event flag and a
+  receipt (source, SHA-256, channels).
+
+For the storm of 23-24 January 2012 at 12 UT (1310 pfu above 10 MeV), the rates
+in ion pairs per gram per second are:
+
+| pressure | ion pairs per gram per second | NOx made |
+|---|---|---|
+| 0.01 hPa | 7.6e9 | 40 ppbv/day |
+| 0.1 hPa | 4.4e9 | 23 ppbv/day |
+| 1 hPa | 1.4e8 | 0.7 ppbv/day |
+| 10 hPa | 2.5e5 | 0.001 ppbv/day |
+
+A model top at 10-50 hPa therefore sees almost nothing from a soft event like
+this one. Hard events (October 1989, July 2000, January 2005) reach 10-100 hPa.
+
+**Validation against CMIP7.** The rates are compared with the CMIP7 solar
+forcing (input4MIPs SOLARIS-HEPPA v4.6, `iprp`, daily, CC BY 4.0) at 77.5
+degrees N. That forcing is built from GOES fluxes with a full ionisation model,
+so it serves as the reference here. Each number is the geometric mean, over the
+event days, of the daily-mean ratio woof/CMIP7; hours outside an event count as
+zero:
+
+| pressure | training: 8 days, 2000-2005 | test: 7 days, 2012-2017 |
+|---|---|---|
+| 0.01 hPa | 0.57 | 0.14 |
+| 0.1 hPa | 0.57 | 0.82 |
+| 1 hPa | 0.55 | 0.82 |
+| 3 hPa | 0.73 | 0.53 |
+| 10 hPa | 0.65 | 0.48 |
+| 31.6 hPa | 0.59 | 0.39 |
+| 100 hPa | 0.96 | 0.59 |
+
+The floor on the tail index was the only number chosen against CMIP7, and only
+on the training days. With no floor (the 30-60 MeV slope carried to 1 GeV), the
+training ratios are 1.8 at 10 hPa, 5.8 at 31.6 hPa and 38 at 100 hPa. A floor
+of 2 gives 1.2, 2.1 and 7.3; a floor of 3 gives 0.65, 0.59 and 0.96; a floor of
+4 gives 0.35, 0.16 and 0.13. Floor 3 is shipped.
+
+Known limits:
+- After 2010, OMNI2 has no channel below 10 MeV. The flux under 10 MeV, which
+  ionises above about 0.03 hPa, is then the 10-30 MeV power law carried
+  downward, and 0.01 hPa reads about 7 times low. The SWPC feed has the >1 and
+  >5 MeV channels.
+- Single days scatter by a factor of 2-5. The largest misses are the decay
+  days of hard events: 2001-04-15 and 2005-01-20, where three channels cannot
+  represent a spectrum hardening above 100 MeV.
+
+Not modelled: electrons (auroral and radiation-belt). They deposit at 70-150
+km, above WRF and MPAS model tops (see the energy flux of L3b for the auroral
+part). Galactic cosmic rays are also left out.
+
 ## Data sources and licences (all layers)
 
 | input | source | licence |
@@ -358,6 +446,9 @@ The forecast is identical with the option on or off.
 | IGRF-14 | IAGA V-MOD via NOAA NCEI, pinned by SHA-256 | IAGA published coefficients |
 | GNSS TEC maps (validation only) | NASA CDDIS IONEX (Earthdata login) | public |
 | CMIP6 solar forcing (EPP ion-pair rates) | input4MIPs SOLARIS-HEPPA | CC BY 4.0 |
+| CMIP7 solar forcing v4.6 (proton ion-pair rates `iprp`; validation only) | input4MIPs SOLARIS-HEPPA | CC BY 4.0 |
+| GOES integral proton flux, real time (`json/goes/primary/integral-protons-3-day.json`) | NOAA SWPC | public domain |
+| GOES integral proton flux, historical (OMNI2 words 43-48) | NASA SPDF OMNIWeb | public |
 
 **Redistribution.** The coefficient sets listed above are fetched at run time into the
 space-weather cache and checked against pinned sizes and SHA-256 sums. woof does not ship them:
@@ -392,6 +483,7 @@ The ionosphere layers will be checked against observations:
 - foF2 and hmF2 from GIRO ionosondes;
 - the storm of 10-12 May 2024, with 1-3 May 2024 as the quiet reference.
 
-The particle layer will be checked against MLS/ACE NOx and ozone. L1 is checked by scaling
+The proton ion-pair rates are checked against the CMIP7 rates (above). Once the chemistry source
+exists, it will be checked against MLS/ACE NOx and ozone. L1 is checked by scaling
 identity tests on CUDA and Metal. Its bias direction can be checked against NSRDB / source.coop
 surface solar. Its 0.07-0.6 % signal is below the noise of single-station observations.
