@@ -802,6 +802,10 @@ def physics_history_fields(physics) -> dict[str, object]:
     ionosphere = getattr(physics, "spacewx_ionosphere", None)
     if ionosphere is not None:
         output.update(ionosphere.history_fields(physics.state.elapsed_seconds))
+    # spacewx_aurora_opt (woof.spacewx.aurora_history): the auroral oval.
+    aurora = getattr(physics, "spacewx_aurora", None)
+    if aurora is not None:
+        output.update(aurora.history_fields(physics.state.elapsed_seconds))
     cumulus = getattr(physics, "cumulus_callable", None)
     diagnostics = getattr(cumulus, "cu_diag", {})
     for key, schema in GD_OUTPUT_FIELDS.items():
@@ -1177,6 +1181,12 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
                     name: carrier(shape) for name, shape in
                     __import__("woof.spacewx.history", fromlist=["x"]).history_shapes(cfg).items()})
                 if int(getattr(cfg, "spacewx_ionosphere_opt", 0) or 0)
+                else None),
+            spacewx_aurora=(SimpleNamespace(
+                history_fields=lambda _elapsed: {
+                    name: carrier(surface) for name in
+                    __import__("woof.spacewx.aurora_history", fromlist=["x"]).HISTORY_FIELDS})
+                if int(getattr(cfg, "spacewx_aurora_opt", 0) or 0)
                 else None),
             olr=carrier(surface) if "olr" in allocated else None,
             surface_dni=(carrier(surface) if "surface_dni" in allocated

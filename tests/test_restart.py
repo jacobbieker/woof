@@ -4179,7 +4179,9 @@ _DIAGNOSTIC_ON = {"rrtmg_spectral_output": "bands",
                   "radtran_streams": 8, "radtran_aerosol": "continental_average",
                   # The ionosphere history's keys (each valid only with the option on).
                   "spacewx_ionosphere_opt": 1, "spacewx_f107_source": "150",
-                  "spacewx_f107_mode": "daily", "spacewx_ionosphere_maps": "ursi"}
+                  "spacewx_f107_mode": "daily", "spacewx_ionosphere_maps": "ursi",
+                  # The auroral oval history's keys.
+                  "spacewx_aurora_opt": 1, "spacewx_kp_source": "4"}
 
 
 def _diagnostic_on(name):
