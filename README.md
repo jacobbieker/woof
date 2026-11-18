@@ -614,7 +614,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   lanes instead of one thread per column of the domain
   (`advance_frame_phi_w_ring`, byte-identical in fast and strict
   numerics): 108 -> 25 us per substep at 49x150x186 and 116 -> 33 us at a
-  nested 49x228x276 on an A6000 under the same conditions. Hex: CUDA
+  nested 49x228x276 on an A6000 under the same conditions. On Metal the
+  YSU boundary layer launches 64 column blocks per GPU core per tile
+  (workspace capped at 512 MiB), so on a 40-core M3 Max a 228 x 276
+  domain is one launch instead of four (byte-identical in fast,
+  strict and WRF-exact numerics; Alps 3-1 km on an M3 Max: `ysu_column`
+  46 -> 32 ms of isolated GPU time per d01 step, 10 -> 3 launches;
+  `WOOF_METAL_YSU_TILE_BLOCKS=16` restores CUDA's width, and CUDA keeps
+  its occupancy-bounded 16 per SM). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and

@@ -229,7 +229,7 @@ def test_tiling_does_not_change_the_answer():
 
     original = Y.ysu_tile_columns
     try:                        # force many tiles, incl. a partial last one
-        Y.ysu_tile_columns = lambda fn, ncol: Y.YSU_BLOCK
+        Y.ysu_tile_columns = lambda fn, ncol, nz=None: Y.YSU_BLOCK
         tiled = _bits(Y.launch_ysu(**col, **surf, dt=30.0))
     finally:
         Y.ysu_tile_columns = original

@@ -2118,6 +2118,10 @@ def local_memory_profile_from_device(cp, *, device_id: int = 0) -> DeviceLocalMe
     name = props["name"]
     hip = bool(cp.cuda.runtime.is_hip)
     stack_limit = 0 if hip else int(cp.cuda.runtime.deviceGetLimit(0))
+    from woof import backend as _backend
+    # The Metal facade answers CUDA's queries; its tiles are priced by the
+    # Metal rules (ysu_column_workspace_bytes).
+    kind = "hip" if hip else ("mlx" if _backend._active == "mlx" else "cuda")
     return DeviceLocalMemoryProfile(
         name=name.decode() if isinstance(name, bytes) else str(name),
         multiprocessor_count=int(props["multiProcessorCount"]),
@@ -2125,7 +2129,7 @@ def local_memory_profile_from_device(cp, *, device_id: int = 0) -> DeviceLocalMe
             props["maxThreadsPerMultiProcessor"]),
         default_stack_limit_bytes=stack_limit,
         compile_platform=None if hip else read_compile_platform(),
-        backend="hip" if hip else "cuda",
+        backend=kind,
     )
 
 
@@ -5575,7 +5579,8 @@ def ysu_column_workspace_bytes(
     default.  ``woof/core/kernels/ysu.cu`` keeps the scheme's column
     arrays in a global workspace instead of the per-thread local frame,
     and ``woof/core/ysu.py`` sizes it to the columns it keeps in flight
-    -- ``SMs x YSU_TILE_BLOCKS_PER_SM x YSU_BLOCK`` -- rather than to the
+    -- ``SMs x YSU_TILE_BLOCKS_PER_SM x YSU_BLOCK`` (on Metal the wider
+    ``physics_inventory.ysu_metal_tile_columns``) -- rather than to the
     resident-thread capacity the driver charged.
 
     MEASURED on test host A (RTX 5070 Ti, 70 SMs x 1,536,
@@ -5593,16 +5598,25 @@ def ysu_column_workspace_bytes(
     # scope and this pricing must be readable on installs with no GPU
     # runtime (the wizard's estimator runs here).
     from woof.core.physics_inventory import (
-        YSU_BLOCK, YSU_TILE_BLOCKS_PER_SM, ysu_workspace_floats)
+        YSU_BLOCK, YSU_TILE_BLOCKS_PER_SM, ysu_metal_tile_columns,
+        ysu_workspace_floats)
 
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
     tile_cap = (profile.multiprocessor_count * YSU_TILE_BLOCKS_PER_SM
                 * YSU_BLOCK)
+    # A Metal device launches the wider Metal tile (ysu.ysu_tile_columns);
+    # price whichever rule is wider, so pricing never falls below it.  A
+    # CUDA card priced from a Metal process keeps CUDA's rule.
+    metal = getattr(profile, "backend", "cuda") == "mlx"
     worst = 0
     for dc in exp.domains:
         if int(dc.run.bl_pbl_physics) != 1:
             continue
-        columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
+        ncol = int(dc.run.nx) * int(dc.run.ny)
+        columns = min(ncol, tile_cap)
+        if metal:
+            columns = max(columns, ysu_metal_tile_columns(
+                profile.multiprocessor_count, ncol, int(dc.run.nz)))
         worst = max(worst, ysu_workspace_floats(int(dc.run.nz), columns) * 4)
     return int(worst)
 
