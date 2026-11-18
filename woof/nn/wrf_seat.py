@@ -521,11 +521,12 @@ class WrfColumnSeat:
     def close(self) -> dict:
         if self.tap is not None:
             self.tap.close()
-        summary = {"calls": self.calls, "samples": 0 if self.tap is None else self.tap.samples,
+        summary = {"mode": self.settings.mode, "scheme": self.scheme, "wrf_identical": not self.applies,
+                   "calls": self.calls, "samples": 0 if self.tap is None else self.tap.samples,
                    "store": None if self.tap is None else str(self.tap.path)}
         if self.applies:
-            summary.update(mode=self.settings.mode, scheme=self.scheme, model=self.manifest.name,
-                           **self.policy.ledger.summary())
+            summary.update(model=self.manifest.name, identity=self.identity(), runner=self.model.backend,
+                           note=NOT_WRF_IDENTICAL, **self.policy.ledger.summary())
             print(f"nn: {self.settings.mode} of {self.scheme} by {self.manifest.name} "
                   f"({self.model.backend}) over {self.calls} steps; "
                   f"{summary['columns_out_of_range']} of {summary['columns_seen']} column calls outside the "
