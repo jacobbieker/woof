@@ -636,9 +636,9 @@ def f64_mode(name: str, source: str, options) -> str:
 
 @lru_cache(maxsize=None)
 def _translated(source: str, unit: str, contract: bool, retain: bool, defines=(),
-                include_dirs=(), f64: str = "soft") -> TranslatedUnit:
+                include_dirs=(), f64: str = "soft", gfk: bool = True) -> TranslatedUnit:
     return translate(source, unit=unit, contract=contract, retain_subnormals=retain, defines=defines,
-                     include_dirs=include_dirs, f64=f64)
+                     include_dirs=include_dirs, f64=f64, gfk=gfk)
 
 
 #: translations run one at a time: the compile prefetch translates on its own thread
@@ -648,11 +648,13 @@ _TRANSLATE_LOCK = threading.RLock()
 def translate_unit(name: str, source: str, *, options=()) -> TranslatedUnit:
     """The MSL ``load_unit`` would compile, without touching a Metal device."""
     from woof import numerics
-    from woof.backend.translate import option_defines, option_include_dirs
+    from woof.backend.translate import gfk_fast_enabled, option_defines, option_include_dirs
     effective = numerics.effective_options(tuple(options or ()))
     with _TRANSLATE_LOCK:
+        # WOOF_METAL_GFK_FAST is read here, so it is part of the cache key
         return _translated(source, name, contracts(options, source), retains_subnormals(name, source, options),
-                           option_defines(effective), option_include_dirs(effective), f64_mode(name, source, options))
+                           option_defines(effective), option_include_dirs(effective), f64_mode(name, source, options),
+                           gfk_fast_enabled())
 
 
 def load_unit(name: str, source: str, *, options=()) -> MetalModule:

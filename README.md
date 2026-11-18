@@ -671,6 +671,30 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   a read back and a write: the writer's host time per Edinburgh 3 km frame
   falls from 761-1061 ms to 470-576 ms, byte-identical
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
+  Metal: woof's glibc binary32 `logf`, `expf` and `powf` ports
+  (`gfk_log`, `gfk_exp`, `gfk_pow`) compute in binary64, which Metal
+  emulates in integer arithmetic. They now first evaluate the same
+  formula in float pairs and keep that word only when no binary32 rounding
+  boundary lies within its error bound, and otherwise run the binary64
+  body. The words are identical by construction, and every binary32
+  input (logf, expf, and powf at 20 exponents) plus 2^30 random powf
+  pairs was checked under both subnormal modes
+  (`tools/metal_gfk_fast_grade.py`). The surface-layer kernel
+  `sfclayrev` is 5.5x faster (55x83: 11.70 to 2.14 ms). On the hex
+  Edinburgh 3 km variable-resolution forecast, WSM6 drops from 22.5 to
+  5.2 ms per step, the surface layer from 21.0 to 6.6 ms and Grell-Freitas
+  from 8.3 to 4.6 ms; one forecast hour integrates in 44-47 s instead of
+  50-57 s, with byte-identical history.
+  `WOOF_METAL_GFK_FAST=0` restores the binary64-only path.
+  The Metal facade's `ReductionKernel` folded each output on one thread.
+  An exact, order-free and idempotent fold (`a | b`, `a || b`, `a & b`,
+  `a && b`, a concrete reduce type and an `out = a` post-map) over 4096
+  or more elements per output, with fewer than 2048 outputs, is now folded
+  in slices and then across the slices, giving the same value (hex Edinburgh 3 km
+  variable-resolution: Noah-MP's surface identity check from 3.6 ms to
+  0.16 ms per step and the transport species-word check from 1.4 ms to
+  0.18 ms, byte-identical; `WOOF_METAL_SPLIT_REDUCTIONS=0` restores the
+  serial fold).
   `WOOF_METAL_GPU_TIMES` times each kernel. Its per-launch command
   buffers also hold the lazy MLX work the launch waited on, and their GPU
   intervals overlap, so a facade write (`woof_copy_4`) used to carry other
@@ -734,6 +758,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and rock and sit about 1 km north of the shoreline: on the Alps 1 km
   domain, 480 lake cells above 2000 m became 8 real reservoirs
   ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md)).
+  **Recommended on the WRF route where lakes matter:** `--lakes clm` with
+  `fields = "lakes"` (both stay opt-in). On the Alps 1 km case, lake-shore
+  T2 bias/RMSE went from +1.66/2.34 K to +0.43/1.49 K and 10 m wind RMSE
+  from 1.86 to 1.44 m/s (25 SMN stations, 24 h). Caveats
+  ([docs/lakes.md](docs/lakes.md#recommended-settings)): the Great Lakes cool
+  2-3 times as fast as GLSEA (WRF's CLM lake), lake-effect cores are
+  over-intense (50 mm FSS .81 to .70 at 9 km on Buffalo, Nov 2022),
+  `lake_depth` needs `woof fetch-geog` (unless `use_lakedepth = 0`), and hex
+  R2 lakes start about 1.4 K
+  cold.
   On the hex MPAS-suite route, `--physics config_clm_lake_backend=hex-cuda`
   (opt-in) runs WRF's CLM lake on the LAKEMASK cells of `--surface-statics`,
   bitwise to WRF's lake kernel on the same inputs. It starts from lakeini and
@@ -762,7 +796,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
   oval (`AURORA_ZONE`, `AURORA_DIST`, `MAG_LAT`, `MAG_LT`) into every WRF-route
-  history frame from the start's Kp. The auroral energy, storm-time and
+  history frame from the start's Kp. `woof spacewx aurora --energy` adds the
+  precipitating electron and ion energy and number fluxes and the hemispheric
+  power of OVATION Prime 2010 (a port of NOAA's public-domain IDL code, which
+  reproduces its test outputs; the coefficients are fetched and pinned), and
+  the Knipp et al. 2004 Joule power from OMNI2's PC(N) and Dst. Against POES
+  TED electron flux over the 24-25 Oct 2011 storm, the per-pass correlation is
+  0.48-0.61 and the model reads about 2.5 times higher. The storm-time and
   particle-precipitation layers are planned ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
