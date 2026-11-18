@@ -1071,15 +1071,19 @@ class _PaddedMaskExtents:
 
 
 def _tend_cache_bytes() -> int:
-    """WOOF_HEX_LBC_TEND_CACHE_MB: bytes of full-extent driving tendencies kept per LBC interval (0 turns it off)."""
+    """WOOF_HEX_LBC_TEND_CACHE_MB: bytes of full-extent driving tendencies kept per LBC interval (0, the default, turns it off)."""
 
+    import math
     import os
 
-    value = os.environ.get("WOOF_HEX_LBC_TEND_CACHE_MB", "64").strip()
+    value = os.environ.get("WOOF_HEX_LBC_TEND_CACHE_MB", "0").strip() or "0"
     try:
-        return max(int(float(value) * 2**20), 0)
+        mib = float(value)
     except ValueError:
-        raise ValueError(f"WOOF_HEX_LBC_TEND_CACHE_MB must be a number of MiB, got {value!r}") from None
+        mib = math.nan
+    if not math.isfinite(mib) or mib < 0:
+        raise ValueError(f"WOOF_HEX_LBC_TEND_CACHE_MB must be a finite, non-negative number of MiB, got {value!r}")
+    return int(mib * 2**20)
 
 
 def _ring_lbc_on() -> bool:
@@ -1111,8 +1115,9 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
         super().__init__(*args, **kwargs)
         # _derive makes the zeros it needs; holding a full-extent edge array of zeros for the run bought nothing.
         self._rho_edge_zero = None
-        # tendency()'s full-extent expansions for the current interval: (the interval's tendency dict, {name: array}).
-        self._tend_expanded: tuple[Any, dict[str, Any]] | None = None
+        # tendency()'s full-extent expansions for the current interval, dropped by start() and advance().
+        self._tend_expanded: dict[str, Any] = {}
+        self._tend_expanded_bytes = 0
         self._tend_cache_bytes = _tend_cache_bytes()
 
     # -- the boundary-support pool ------------------------------------------
@@ -1210,28 +1215,41 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
         del state, scalars
         return compact, compact_scalars
 
+    def _drop_tend_expanded(self) -> None:
+        self._tend_expanded = {}
+        self._tend_expanded_bytes = 0
+
+    def start(self, when: datetime) -> None:
+        self._drop_tend_expanded()
+        super().start(when)
+
+    def advance(self, when: datetime | None = None) -> None:
+        # Dropped before the next interval is derived, so the held expansions
+        # do not add to the admission peak.
+        self._drop_tend_expanded()
+        super().advance(when)
+
     def tendency(self, name: str) -> Any:
-        """The interval tendency at full extent.
+        """The interval tendency at full extent.  Read-only: with the cache on,
+        every stage of the interval gets the same array.
 
         The expansion (a zero fill and a scatter of the boundary support) is the
-        same for every stage and step of one LBC interval; it is kept until
-        ``advance`` installs the next interval's tendency dict, within
-        WOOF_HEX_LBC_TEND_CACHE_MB (64 MiB, so a conus3km rank, whose three
-        fields need about 590 MB, holds none; 0 expands on every call).  Every
-        consumer reads it (speczone kernels, graph staging copies).
+        same for every stage and step of one LBC interval.  With
+        WOOF_HEX_LBC_TEND_CACHE_MB > 0 it is kept, within that many MiB, until
+        ``start`` or ``advance`` (a conus3km rank's three fields need about
+        590 MB).  Off by default: every call expands.  Every consumer reads it
+        (speczone kernels, graph staging copies).
         """
         compact = super().tendency(name)
         if self._support is None or self._tend_cache_bytes <= 0:
             return self._expand(name, compact)
-        cache = self._tend_expanded
-        if cache is None or cache[0] is not self._tend:
-            cache = self._tend_expanded = (self._tend, {})
-        held = cache[1].get(name)
+        held = self._tend_expanded.get(name)
         if held is not None:
             return held
         out = self._expand(name, compact)
-        if sum(int(a.nbytes) for a in cache[1].values()) + int(out.nbytes) <= self._tend_cache_bytes:
-            cache[1][name] = out
+        if self._tend_expanded_bytes + int(out.nbytes) <= self._tend_cache_bytes:
+            self._tend_expanded[name] = out
+            self._tend_expanded_bytes += int(out.nbytes)
         return out
 
     def state_at(self, name: str, step_start: Any, delta_t: Any, out: Any = None) -> Any:
