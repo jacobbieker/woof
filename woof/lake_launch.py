@@ -34,9 +34,10 @@ OWNED = ("sf_lake_physics", "lake_state_source", "lake_state_path", "lake_state_
 def add_argument(parser):
     parser.add_argument(
         "--lakes", choices=tuple(MODES), default=None,
-        help="opt-in lakes (clm is recommended where lakes matter): clm = WRF's CLM lake model with WPS bathymetry, lakes started from "
-             "GLSEA where it covers and ERA5's FLake state elsewhere; ic = that initial state only; "
-             "off = the defaults (docs/lakes.md)")
+        help="opt-in lakes (clm is recommended where lakes matter): clm = WRF's CLM lake "
+             "model with WPS bathymetry, lakes started from GLSEA where it covers and ERA5's "
+             "FLake state elsewhere; ic = that initial state only; off = the defaults "
+             "(docs/lakes.md)")
 
 
 def lake_settings(raw: dict, mode: str) -> dict:

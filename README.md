@@ -724,19 +724,20 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `woof go --lakes clm` turns on WRF's CLM lake model with WPS bathymetry and
   this initial state on every domain in one opt-in; `--lakes ic` sets only the
   initial state ([docs/lakes.md](docs/lakes.md)).
-  **Recommended where lakes matter:** `--lakes clm` with
-  `[static.highres] fields = "lakes"` (both stay opt-in). On the Alps 1 km
-  case, lake-shore T2 bias/RMSE fell from +1.66/2.34 K to +0.43/1.49 K and
-  10 m wind RMSE from 1.86 to 1.44 m/s (25 SMN stations, 24 h). Caveats: the
-  Great Lakes cool about twice as fast as GLSEA (WRF's CLM lake), lake-effect
-  cores are over-intense (50 mm FSS .81 to .70 at 9 km on Buffalo, Nov 2022),
-  `lake_depth` needs `woof fetch-geog`, and hex R2 lakes start about 1.4 K
-  cold.
   `[static.highres] fields = "lakes"` (opt-in) takes the lake extent from
   CGLC-MODIS-LCZ 100 m land cover. WPS's 30-arc-second lakes cover glacier
   and rock and sit about 1 km north of the shoreline: on the Alps 1 km
   domain, 480 lake cells above 2000 m became 8 real reservoirs
   ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md)).
+  **Recommended on the WRF route where lakes matter:** `--lakes clm` with
+  `fields = "lakes"` (both stay opt-in). On the Alps 1 km case, lake-shore
+  T2 bias/RMSE went from +1.66/2.34 K to +0.43/1.49 K and 10 m wind RMSE
+  from 1.86 to 1.44 m/s (25 SMN stations, 24 h). Caveats
+  ([docs/lakes.md](docs/lakes.md#recommended-settings)): the Great Lakes cool
+  2-3 times as fast as GLSEA (WRF's CLM lake), lake-effect cores are
+  over-intense (50 mm FSS .81 to .70 at 9 km on Buffalo, Nov 2022),
+  `lake_depth` needs `woof fetch-geog`, and hex R2 lakes start about 1.4 K
+  cold.
   On the hex MPAS-suite route, `--physics config_clm_lake_backend=hex-cuda`
   (opt-in) runs WRF's CLM lake on the LAKEMASK cells of `--surface-statics`,
   bitwise to WRF's lake kernel on the same inputs. It starts from lakeini and
