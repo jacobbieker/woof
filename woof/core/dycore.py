@@ -5191,6 +5191,12 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
     if stochastic_binding is not None:
         physics_tendencies = stochastic_binding.after_nonmicrophysics(
             state, cfg, physics_tendencies)
+    # --nn (woof.nn.wrf_seat): the opt-in NN column seat, on the held
+    # tendencies as the stochastic binding left them.  Absent without --nn.
+    nn_seat = getattr(state, "_nn_column_seat", None)
+    if nn_seat is not None:
+        physics_tendencies = nn_seat.after_nonmicrophysics(
+            state, cfg, physics_tendencies)
     if getattr(state, "chem", None) is not None:
         # Native SFIRE emits into tracers before RK transport. The common
         # chem driver owns its source ledger and refreshes affected time-t
@@ -5326,6 +5332,11 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                                  weno=(istage == len(stages) - 1 and
                                        getattr(cfg, "momentum_adv_opt", 1) == 3))
         apply_idealized_momentum_damping(state, cfg, ru, rv)
+        if cfg.obstacle_opt:
+            # Opt-in resolved obstacles (woof.core.obstacles): every RK
+            # stage, from this stage's winds; off, nothing is imported.
+            from woof.core.obstacles import apply as apply_obstacles
+            apply_obstacles(state, cfg, ru, rv)
         if (istage == 0 or cfg.cu_physics == 16
                 or (WRF_EXACT and cfg.cu_physics == 3)):
             # WRF RTHFTEN for the cumulus schemes that take it.  THIS LINE

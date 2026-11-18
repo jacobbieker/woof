@@ -2209,6 +2209,22 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "kernels on sm_120 (RTX 5070 Ti) at NVRTC 13.4.92 on 2026-10-02, "
         "after rsw_sfluxzen_body's store on every path; bounded on a "
         "device by tests/test_rrtmg_sw_cuda.py (LOCAL_FRAME_BOUNDS).",
+    # RRTMG-K (ra_lw_physics = ra_sw_physics = 14).
+    "rrtmgk_prep_unit":
+        "glibc_flt32.cuh + rrtmg_mcica_wrf.cu + rrtmgk_prep.cu as one unit "
+        "(woof/core/rrtmgk.py prep_source); rrtmgk_prep.cu fails NVRTC "
+        "standalone.  Every kernel read 0 B on an RTX A6000, sm_86 / NVRTC "
+        "12.9.86, 2026-11-16.",
+    "rrtmgk_lw_unit":
+        "rrtmg_lw.cu + rrtmg_lw_taugb06_09.cu + rrtmgk_lw.cu as one unit "
+        "(woof/core/rrtmgk.py lw_post_source); rrtmgk_lw.cu fails NVRTC "
+        "standalone.  Every kernel read 0 B on an RTX A6000, sm_86 / NVRTC "
+        "12.9.86, 2026-11-16.",
+    "rrtmgk_sw_unit":
+        "K's packed-table defines + rrtmg_sw.cu + its spectral helpers + "
+        "rrtmgk_sw.cu as one unit (woof/core/rrtmgk.py sw_source); "
+        "rrtmgk_sw.cu fails NVRTC standalone.  Every kernel read 0 B on an "
+        "RTX A6000, sm_86 / NVRTC 12.9.86, 2026-11-16.",
     # BEP+BEM (sf_urban_physics = 3).
     "urban_bem_composed":
         "glibc_flt32.cuh + glibc_trig_flt32.cuh + urban_bem.cuh + "
@@ -3627,6 +3643,21 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     frames=MappingProxyType({"smag2d_tke_faces": 0}),
 ),)
 
+# The opt-in porous immersed obstacles (kernels/obstacle_drag.cu), production
+# loader (no contraction), default and strict
+# (GPUWM_WRF_EXACT=1) numerics, read 2026-11-17 on the RTX A6000 CUDA host
+# with kernel_local_size_bytes: obstacle_drag 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if "obstacle_drag" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"obstacle_drag": 0}),
+),)
+
 # The Fitch wind-farm unit (labs/windfarm, 2.9.11), through the production
 # loader on test host A's RTX 4090 with fast and strict numerics, 2026-10-30:
 # widest kernel wind_wake 56 B (wind_locate_cells 40, wind_gad 32, wind_locate
@@ -4270,4 +4301,32 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
     measured="2026-11-08", complete=False,
     frames=MappingProxyType({"chem_sorgam": 672}),
+),)
+
+# The climatological ionosphere (kernels/spacewx_ionosphere.cu, the
+# spacewx_ionosphere_opt history rows), production loader
+# (woof.core.kernels.get_kernel), RTX A6000 sm_86, NVRTC 12.9.86,
+# 2026-11-17, both GPUWM_WRF_EXACT modes: 96 B, 40 registers.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "spacewx_ionosphere" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"spacewx_ionosphere": 96}),
+),)
+
+# The auroral oval (kernels/spacewx_aurora.cu, woof spacewx aurora),
+# production loader (woof.core.kernels.get_kernel), RTX A6000 sm_86,
+# NVRTC 12.9.86, 2026-11-17, both GPUWM_WRF_EXACT modes: 32 B, 28-29
+# registers.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "spacewx_aurora" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"spacewx_aurora": 32}),
 ),)

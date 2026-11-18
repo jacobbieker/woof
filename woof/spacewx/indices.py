@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from woof.spacewx.solar_irradiance import cache_root
+from woof.spacewx.solar_irradiance import cache_root, naive_utc
 
 GFZ_URL = "https://kp.gfz.de/app/files/Kp_ap_Ap_SN_F107_since_1932.txt"
 GFZ_NAME = "Kp_ap_Ap_SN_F107_since_1932.txt"
@@ -55,6 +55,7 @@ class GeoIndices:
         """The F10.7 that drives the ionosphere at ``when`` (see module doc)."""
         if mode not in F107_MODES:
             raise IndicesError(f"F10.7 driver {mode!r}: one of {F107_MODES}")
+        when = naive_utc(when)
         last = self._row((when - timedelta(days=1)).date())
         first = last if mode == "daily" else last - 80
         if first < 0:
@@ -65,8 +66,17 @@ class GeoIndices:
             raise IndicesError(f"{when}: too few observed F10.7 values for the {mode} driver ({self.source})")
         return float(values.mean())
 
+    def has_kp(self, when: datetime) -> bool:
+        """Whether the record holds an observed Kp for ``when``'s interval."""
+        when = naive_utc(when)
+        try:
+            return bool(np.isfinite(self.kp[self._row(when.date()), when.hour // 3]))
+        except IndicesError:
+            return False
+
     def kp_at(self, when: datetime) -> float:
         """The 3-hourly Kp of the interval containing ``when``."""
+        when = naive_utc(when)
         i = self._row(when.date())
         value = self.kp[i, when.hour // 3]
         if not np.isfinite(value):
@@ -109,15 +119,18 @@ def read(path) -> GeoIndices:
     return parse(data.decode("ascii", "replace"), str(path), hashlib.sha256(data).hexdigest())
 
 
-def fetch_gfz(needed: datetime | None = None, *, cache=None, opener=None) -> Path:
-    """GFZ's index file in the cache, fetched again when it ends before ``needed``."""
+def fetch_gfz(needed: datetime | None = None, *, cache=None, opener=None, kp: bool = False) -> Path:
+    """GFZ's index file in the cache, fetched again when it ends before ``needed``
+    (with ``kp``: when it lacks the Kp of ``needed``'s 3-hour interval, which GFZ
+    adds through the day)."""
     root = Path(cache) if cache is not None else cache_root() / "indices"
     root.mkdir(parents=True, exist_ok=True)
     target = root / GFZ_NAME
     if target.is_file() and needed is not None:
         try:
             current = read(target)
-            if current.days[-1] >= np.datetime64(needed.date(), "D"):
+            if current.days[-1] >= np.datetime64(naive_utc(needed).date(), "D") and (
+                    not kp or current.has_kp(needed)):
                 return target
         except IndicesError:
             pass
@@ -125,17 +138,22 @@ def fetch_gfz(needed: datetime | None = None, *, cache=None, opener=None) -> Pat
         return target
     import urllib.request
     opener = opener or (lambda url: urllib.request.urlopen(url, timeout=120))
-    part = target.with_name(target.name + ".part")
-    with opener(GFZ_URL) as reply:
-        part.write_bytes(reply.read())
-    parse(part.read_bytes().decode("ascii", "replace"), str(part))
+    from woof.spacewx.assets import unique_part
+    part = unique_part(target)
+    try:
+        with opener(GFZ_URL) as reply:
+            part.write_bytes(reply.read())
+        parse(part.read_bytes().decode("ascii", "replace"), str(part))
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
     part.replace(target)
     return target
 
 
-def load(source: str = "gfz", needed: datetime | None = None) -> GeoIndices:
+def load(source: str = "gfz", needed: datetime | None = None, *, kp: bool = False) -> GeoIndices:
     """``"gfz"`` (fetched) or a path to a file in GFZ's format."""
     text = str(source or "").strip()
     if text in ("", "gfz"):
-        return read(fetch_gfz(needed))
+        return read(fetch_gfz(needed, kp=kp))
     return read(text)

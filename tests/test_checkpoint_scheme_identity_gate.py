@@ -437,8 +437,8 @@ def test_the_accepted_registries_are_the_loader_menus():
     from woof.microphysics_schemes import NAMED_MP_IDS
     # 5 is Ferrier-Aligo (its own identity row).  30 is FAST_SBM, which joined with its own restart identity in 2.8.9.
     assert config_mod.MP_PHYSICS_ACCEPTED == (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 18, 24, 26, 27, 28, 29, 30, 38, 40, 50, 51, 52, 53, 55, 56, 95, 96, 97, 106, 900)
-    assert config_mod.RA_LW_PHYSICS_ACCEPTED == (0, 1, 3, 4, 5, 7, 31, 90, 99)
-    assert config_mod.RA_SW_PHYSICS_ACCEPTED == (0, 1, 2, 3, 4, 5, 7, 90, 99)
+    assert config_mod.RA_LW_PHYSICS_ACCEPTED == (0, 1, 3, 4, 5, 7, 14, 31, 90, 99)
+    assert config_mod.RA_SW_PHYSICS_ACCEPTED == (0, 1, 2, 3, 4, 5, 7, 14, 90, 99)
     validate_run_config(_cfg(moist=True, mp_physics=55))
     with pytest.raises(ValueError, match="mp_physics must be"):
         validate_run_config(_cfg(moist=True, mp_physics=9999))

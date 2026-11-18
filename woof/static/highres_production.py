@@ -715,9 +715,17 @@ def _resolve_plan(config: HighresStaticConfig, bbox: FootprintBBox
             f"published over {envelope.as_dict()}; the domain+halo "
             f"footprint {bbox.as_dict()} lies wholly outside it (by "
             f"{landcover.coverage.outside(bbox)}), so no cell of this "
-            f"domain could take it.  {landcover.coverage.note}  Set "
-            "fields = \"terrain\" to take high-resolution terrain here and "
-            "keep land use and soil on the 30-arc-second baseline")
+            f"domain could take it.  {landcover.coverage.note}  "
+            + ("Set enabled = false (or bound the block with max_dx_m) to "
+               "keep this domain's 30-arc-second lakes"
+               if mode == "lakes" else
+               "Set fields = \"terrain\" to take high-resolution terrain "
+               "here and keep land use and soil on the 30-arc-second "
+               "baseline"))
+    if mode == "lakes":
+        # Terrain stays the baseline: no terrain source is resolved,
+        # checked for coverage or routed (GEM-15) in this mode.
+        return mode, None
 
     if config.terrain_source == "auto":
         source_id = ("usgs-3dep-13as" if US_COVERAGE_ENVELOPE.contains(bbox)
@@ -956,6 +964,50 @@ def _fetch_and_bind(bbox: FootprintBBox, cache_root: Path, case_date: date,
         bbox, cache_root, coverage, grid=grid, baseline=baseline,
         urlopen=urlopen)
 
+    landcover, leg = _fetch_landcover_leg(bbox, cache_root, case_date,
+                                          source=source, urlopen=urlopen)
+
+    soil_fetched = (fetch_soilgrids(bbox, cache_root, urlopen=urlopen)
+                    if soil_source == "soilgrids" else {})
+    soil_sources = {
+        key: _bound(
+            item, source_id="soilgrids-v2",
+            role=f"soil_{key[0]}_{key[1]}", source_url=SOILGRIDS_SOURCE_URL,
+            license_id=SOILGRIDS_LICENSE[0],
+            license_url=SOILGRIDS_LICENSE[1], nominal_resolution="250 m",
+            crs_override=SOILGRIDS_CRS, nodata_override=SOILGRIDS_NODATA,
+            scale_factor=SOILGRIDS_SCALE)
+        for key, item in soil_fetched.items()
+    }
+    fetch_manifest = {
+        **terrain_manifest,
+        **leg["manifest"],
+        "soilgrids_windows": {
+            f"{component}_{depth}": item.receipt()
+            for (component, depth), item in soil_fetched.items()
+        },
+        "bytes_fetched": (
+            terrain_manifest["terrain_bytes_fetched"]
+            + leg["bytes_fetched"]
+            + sum(item.bytes for item in soil_fetched.values()
+                  if not item.cache_hit)),
+        "landcover_year": leg["year"],
+        "landcover_anachronism_years": leg["anachronism_years"],
+    }
+    return terrain, landcover, soil_sources, fetch_manifest
+
+
+def _fetch_landcover_leg(bbox: FootprintBBox, cache_root: Path,
+                         case_date: date, *, source: LandcoverSource,
+                         urlopen=None):
+    """Fetch and bind the land-cover raster over one footprint.
+
+    The one land-cover leg :func:`_fetch_and_bind` and
+    :func:`_fetch_landcover_only` share.  Returns ``(landcover, leg)``:
+    ``landcover`` is ``None`` when the footprint lies wholly outside the
+    published raster (every cell then takes the baseline land use, and
+    ``landcover_window_outside_raster`` says why).
+    """
     year, anachronism_years = source.year_for(case_date)
     downloaded, raster = fetch_landcover(source, year, cache_root,
                                          urlopen=urlopen)
@@ -977,41 +1029,21 @@ def _fetch_and_bind(bbox: FootprintBBox, cache_root: Path, case_date: date,
             license_url=source.coverage.license_url,
             nominal_resolution=source.coverage.nominal_resolution,
             reference_year=year, nodata_override=source.nodata)
-
-    soil_fetched = (fetch_soilgrids(bbox, cache_root, urlopen=urlopen)
-                    if soil_source == "soilgrids" else {})
-    soil_sources = {
-        key: _bound(
-            item, source_id="soilgrids-v2",
-            role=f"soil_{key[0]}_{key[1]}", source_url=SOILGRIDS_SOURCE_URL,
-            license_id=SOILGRIDS_LICENSE[0],
-            license_url=SOILGRIDS_LICENSE[1], nominal_resolution="250 m",
-            crs_override=SOILGRIDS_CRS, nodata_override=SOILGRIDS_NODATA,
-            scale_factor=SOILGRIDS_SCALE)
-        for key, item in soil_fetched.items()
-    }
-    fetch_manifest = {
-        **terrain_manifest,
-        "landcover_source": source.source_id,
-        "landcover_downloads": [item.receipt() for item in downloaded],
-        "landcover_raster": raster.receipt(),
-        "landcover_window": (None if landcover_window is None
-                             else landcover_window.receipt()),
-        "landcover_window_audit": window_audit,
-        "landcover_window_outside_raster": landcover_outside,
-        "soilgrids_windows": {
-            f"{component}_{depth}": item.receipt()
-            for (component, depth), item in soil_fetched.items()
+    return landcover, {
+        "manifest": {
+            "landcover_source": source.source_id,
+            "landcover_downloads": [item.receipt() for item in downloaded],
+            "landcover_raster": raster.receipt(),
+            "landcover_window": (None if landcover_window is None
+                                 else landcover_window.receipt()),
+            "landcover_window_audit": window_audit,
+            "landcover_window_outside_raster": landcover_outside,
         },
-        "bytes_fetched": (
-            terrain_manifest["terrain_bytes_fetched"]
-            + sum(item.bytes for item in downloaded if not item.cache_hit)
-            + sum(item.bytes for item in soil_fetched.values()
-                  if not item.cache_hit)),
-        "landcover_year": year,
-        "landcover_anachronism_years": anachronism_years,
+        "bytes_fetched": sum(item.bytes for item in downloaded
+                             if not item.cache_hit),
+        "year": year,
+        "anachronism_years": anachronism_years,
     }
-    return terrain, landcover, soil_sources, fetch_manifest
 
 
 # ---------------------------------------------------------------------------
@@ -1202,6 +1234,11 @@ def _write_receipt(config: HighresStaticConfig, receipt: dict) -> Path:
 
 def _refusal_remedy(config) -> str:
     """Name the selected data source without proposing a retired workaround."""
+    if getattr(config, "fields", "auto") == "lakes":
+        return (f"  Check the declared land-cover source "
+                f"{getattr(config, 'landcover_source', 'auto')!r} and its "
+                f"coverage (cache {config.cache_root}); fields = \"lakes\" "
+                "reads no terrain source.")
     return (f"  Check the declared terrain source {config.terrain_source!r} "
             f"and its coverage (cache {config.cache_root}). An all-water "
             "footprint is accepted; missing required land coverage still refuses.")
@@ -1335,11 +1372,18 @@ def _scoped_plan_line(config: HighresStaticConfig, grid,
     the rest will download and where they land; for the engine's default
     it also names the way back to the 30-arc-second baseline.
     """
+    lakes = getattr(config, "fields", "auto") == "lakes"
     line = (f"[static.highres] d{int(domain_id):02d}: grid spacing "
             f"{float(grid.dx):g} m is at or finer than "
             f"{float(config.max_dx_m):g} m, so its terrain comes from "
-            f"{config.terrain_source}")
-    if config.terrain_source == "copernicus-dem-glo30":
+            f"{config.terrain_source}" if not lakes else
+            f"[static.highres] d{int(domain_id):02d}: grid spacing "
+            f"{float(grid.dx):g} m is at or finer than "
+            f"{float(config.max_dx_m):g} m, so its lake extent comes from "
+            f"the {_select_landcover(config).source_id} land cover "
+            "(fields = \"lakes\"; terrain stays the 30-arc-second "
+            "baseline and no terrain tile is fetched)")
+    if config.terrain_source == "copernicus-dem-glo30" and not lakes:
         from .highres_fetch import copernicus_dem_tile_ids
         try:
             tiles = copernicus_dem_tile_ids(
@@ -1533,16 +1577,17 @@ def _apply(baseline, grid, *, config: HighresStaticConfig,
     _require_cut_frame_window(bbox)
     landcover_row = _select_landcover(config)
     mode, coverage = _resolve_plan(config, bbox)
+    if mode == "lakes":
+        # No terrain source is resolved or routed: terrain is the baseline.
+        _require_modis21(landuse_attrs)
+        return _apply_lakes(
+            baseline, grid, config=config, case_date=case_date, bbox=bbox,
+            landcover_row=landcover_row, urlopen=urlopen)
     coverage, selection = _experimental_terrain(coverage, bbox, grid)
-    if mode in ("all", "lakes"):
+    if mode == "all":
         # The land-use leg targets one inventory: the crosswalk's category
         # numbers are only meaningful against MODIS 21.
         _require_modis21(landuse_attrs)
-    if mode == "lakes":
-        fields, detail = _apply_lakes(
-            baseline, grid, config=config, case_date=case_date, bbox=bbox,
-            landcover_row=landcover_row, coverage=coverage, urlopen=urlopen)
-        return fields, _with_selection(detail, selection)
 
     if mode == "terrain":
         smoothing_kw = {} if terrain_smoothing.is_default else {
@@ -1668,27 +1713,13 @@ def _fetch_landcover_only(bbox: FootprintBBox, cache_root: Path,
                           urlopen=None):
     """The land-cover leg of :func:`_fetch_and_bind` alone (``fields =
     "lakes"`` reads no terrain and no soil source)."""
-    year, anachronism_years = landcover_source.year_for(case_date)
-    downloaded, raster = fetch_landcover(landcover_source, year, cache_root,
-                                         urlopen=urlopen)
-    window = derive_landcover_window(raster, bbox, cache_root)
-    landcover = _bound(
-        window, source_id=landcover_source.bound_id(year), role="landcover",
-        source_url=landcover_source.coverage.source_url,
-        license_id=landcover_source.coverage.license_id,
-        license_url=landcover_source.coverage.license_url,
-        nominal_resolution=landcover_source.coverage.nominal_resolution,
-        reference_year=year, nodata_override=landcover_source.nodata)
+    landcover, leg = _fetch_landcover_leg(
+        bbox, cache_root, case_date, source=landcover_source, urlopen=urlopen)
     return landcover, {
-        "landcover_source": landcover_source.source_id,
-        "landcover_downloads": [item.receipt() for item in downloaded],
-        "landcover_raster": raster.receipt(),
-        "landcover_window": window.receipt(),
-        "landcover_window_audit": landcover_window_audit(window),
-        "bytes_fetched": sum(item.bytes for item in downloaded
-                             if not item.cache_hit),
-        "landcover_year": year,
-        "landcover_anachronism_years": anachronism_years,
+        **leg["manifest"],
+        "bytes_fetched": leg["bytes_fetched"],
+        "landcover_year": leg["year"],
+        "landcover_anachronism_years": leg["anachronism_years"],
     }
 
 
@@ -1698,10 +1729,92 @@ def _fetch_landcover_only(bbox: FootprintBBox, cache_root: Path,
 _LAKE_CHECK_FIELDS = ("LANDUSEF", "LANDMASK", "LU_INDEX", "SOILCTOP",
                       "SCT_DOM", "SOILCBOT", "SCB_DOM")
 
+#: How far a promoted lake cell looks for a kept lake's depth: WPS samples
+#: LAKE_DEPTH with ``search(5)`` over the 30-arc-second ``lake_depth``
+#: dataset (:data:`woof.static.lake.LAKE_DEPTH_ROW`), i.e. five 30"
+#: pixels, 5 x 926.6 m of latitude.
+_LAKE_DEPTH_REACH_M = 5 * 1852.0 / 2.0
+
+
+def _water_reaching_sea(water: np.ndarray, ocean: np.ndarray,
+                        lake: np.ndarray) -> np.ndarray:
+    """Cells of ``water | ocean`` 8-connected to a baseline ocean cell
+    without passing through a baseline lake: a lake's outflow to the sea
+    (the St. Lawrence) does not make its new shore water the sea."""
+    from scipy import ndimage
+
+    labels, _ = ndimage.label((water & ~lake) | ocean,
+                              structure=np.ones((3, 3), dtype=bool))
+    sea = np.unique(labels[ocean])
+    return np.isin(labels, sea[sea > 0])
+
+
+def _baseline_where_unchanged(baseline, merged, changed: np.ndarray) -> dict:
+    """``merged`` with every cell outside ``changed`` the baseline, bit for
+    bit (value and dtype), and every baseline field carried."""
+    out = {}
+    for name, value in merged.items():
+        if name not in baseline:
+            out[name] = value
+            continue
+        base = np.asarray(baseline[name])
+        after = np.asarray(value)
+        if base.shape != after.shape or base.shape[-2:] != changed.shape:
+            out[name] = value
+            continue
+        out[name] = np.where(changed, after, base).astype(base.dtype,
+                                                          copy=False)
+    for name, value in baseline.items():
+        out.setdefault(name, value)
+    return out
+
+
+def _lake_depth_for(baseline, grid, *, lake, demote, promote):
+    """LAKE_DEPTH for the changed cells, WPS's way; ``(depth, record)``.
+
+    WPS masks the row over land (``masked = land``), so a demoted cell
+    takes the row's fill, as every land cell does.  A promoted cell takes
+    the bathymetry of its nearest kept lake cell within WPS's search reach
+    (:data:`_LAKE_DEPTH_REACH_M`), else the fill.  ``None`` when the
+    baseline carries no LAKE_DEPTH (no lake model consumes it).
+    """
+    if "LAKE_DEPTH" not in baseline:
+        return None, None
+    from .lake import LAKE_DEPTH_ROW
+    fill = float(LAKE_DEPTH_ROW["fill_missing"])
+    source = np.asarray(baseline["LAKE_DEPTH"])
+    depth = np.array(source, copy=True)
+    depth[demote] = fill
+    donors = lake & ~demote
+    yy, xx = np.nonzero(promote)
+    near = np.zeros(yy.shape, dtype=bool)
+    if yy.size and donors.any():
+        from scipy import ndimage
+        # The Euclidean-nearest kept lake cell in metres (dy, dx sampling):
+        # a grid-step-nearest donor can lie beyond the reach while another
+        # within it is nearer on the ground.
+        dy = float(getattr(grid, "dy", grid.dx))
+        distance, (donor_y, donor_x) = ndimage.distance_transform_edt(
+            ~donors, sampling=(dy, float(grid.dx)), return_indices=True)
+        sy, sx = donor_y[yy, xx], donor_x[yy, xx]
+        near = distance[yy, xx] <= _LAKE_DEPTH_REACH_M
+        depth[yy[near], xx[near]] = source[sy[near], sx[near]]
+    depth[yy[~near], xx[~near]] = fill
+    return depth, {
+        "rule": ("demoted cells take the LAKE_DEPTH fill (WPS masks the "
+                 "row over land); promoted cells take the depth of the "
+                 "nearest kept lake cell within WPS's search(5) reach of "
+                 f"{_LAKE_DEPTH_REACH_M:.0f} m, else the fill"),
+        "fill_m": fill,
+        "demoted_to_fill_cells": int(demote.sum()),
+        "promoted_from_nearest_lake_cells": int(near.sum()),
+        "promoted_to_fill_cells": int((~near).sum()),
+    }
+
 
 def _apply_lakes(baseline, grid, *, config: HighresStaticConfig,
                  case_date: date, bbox: FootprintBBox,
-                 landcover_row: LandcoverSource, coverage, urlopen=None):
+                 landcover_row: LandcoverSource, urlopen=None):
     """``fields = "lakes"``: the inland lake extent of the land cover.
 
     A cell whose baseline dominant category is the lake (21) and whose
@@ -1710,9 +1823,13 @@ def _apply_lakes(baseline, grid, *, config: HighresStaticConfig,
     land (its nearest land cell's), and the climatologies and deep-soil
     temperature of its nearest land cell (the overlay's merge).  A baseline
     land cell whose land-cover dominant category is the lake becomes a lake
-    the same way (water soil, water-masked climatologies).  The sea (17) on
-    either side, every other cell, and terrain everywhere are the baseline;
-    a cell the source does not cover keeps its baseline land use.
+    the same way (water soil, water-masked climatologies).  LAKE_DEPTH, when
+    the baseline carries it, follows (:func:`_lake_depth_for`).  The sea
+    (17) on either side, every other cell, and terrain everywhere are the
+    baseline, bit for bit; a cell the source does not cover keeps its
+    baseline land use.  A source with one open-water class (its water rule
+    splits by the baseline) promotes no water connected to the baseline's
+    sea: that is the coastline offset, not a lake.
     """
     try:
         landcover, fetch_manifest = _fetch_landcover_only(
@@ -1721,34 +1838,55 @@ def _apply_lakes(baseline, grid, *, config: HighresStaticConfig,
     except CoverageError as error:
         raise HighresRefusal("missing-source-coverage", str(error)) \
             from error
-    from .highres import landcover_legend, expand_landuse_baseline
+    from .highres import (WATER_FROM_SOURCE, expand_landuse_baseline,
+                          landcover_legend)
     mapping, category_count = landcover_legend(
         landcover_row.source_id, sf_urban_physics=config.sf_urban_physics,
         use_wudapt_lcz=config.use_wudapt_lcz)
     baseline = expand_landuse_baseline(baseline, category_count)
+    split_kw = ({} if getattr(config, "lcz_pervious", "urban") == "urban"
+                else {"lcz_pervious": config.lcz_pervious})
+    ocean = baseline_ocean_mask(baseline, iswater=_MODIS21_ISWATER)
     built, source_audit = build_highres_overrides(
         grid, terrain=None, landcover=landcover, soil_sources={},
         soil_source="wps-geog",
         soil_fallback={"SOILCTOP": np.asarray(baseline["SOILCTOP"]),
                        "SOILCBOT": np.asarray(baseline["SOILCBOT"])},
         landcover_mapping=mapping, category_count=category_count,
-        baseline_ocean=baseline_ocean_mask(baseline, iswater=_MODIS21_ISWATER),
-        halo=HALO, baseline=baseline, landcover_water=landcover_row.water)
+        baseline_ocean=ocean, halo=HALO, baseline=baseline,
+        landcover_water=landcover_row.water, **split_kw)
     field_coverage = source_audit.pop("coverage")
+    # The build read no terrain: its terrain summary and method describe a
+    # pass this mode does not make.
+    source_audit.pop("terrain", None)
+    source_audit["method"] = (
+        "hash-bound GeoTIFF reprojection to the WRF spherical "
+        f"{getattr(grid, 'map_proj', 'lambert')} grid; area-average "
+        "categorical fractions; no terrain read (HGT_M is the baseline)")
     base_index = np.asarray(baseline["LU_INDEX"])
     lake = base_index == MODIS21_ISLAKE
     source_index = np.asarray(built["LU_INDEX"])
-    demote = (lake & (np.asarray(built["LANDMASK"]) > 0.5)
+    built_water = np.asarray(built["LANDMASK"]) < 0.5
+    demote = (lake & ~built_water
               & (source_index != MODIS21_ISLAKE)
               & (source_index != _MODIS21_ISWATER))
     promote = ((np.asarray(baseline["LANDMASK"]) > 0.5)
                & (source_index == MODIS21_ISLAKE))
+    sea_held = np.zeros_like(promote)
+    if landcover_row.water != WATER_FROM_SOURCE and promote.any():
+        sea_held = promote & _water_reaching_sea(built_water, ocean, lake)
+        promote = promote & ~sea_held
     changed = demote | promote
     overrides = {"HGT_M": np.asarray(baseline["HGT_M"])}
     for name in _LAKE_CHECK_FIELDS:
         base = np.asarray(baseline[name])
         overrides[name] = np.where(changed, np.asarray(built[name]), base)
     merged, merge_audit = merge_highres_overrides(baseline, overrides)
+    merged = _baseline_where_unchanged(baseline, merged, changed)
+    depth, depth_record = _lake_depth_for(baseline, grid, lake=lake,
+                                          demote=demote, promote=promote)
+    if depth is not None:
+        merged["LAKE_DEPTH"] = depth
     hgt = np.asarray(baseline["HGT_M"])
     classes = {str(int(k)): int(v) for k, v in zip(
         *np.unique(source_index[demote], return_counts=True))}
@@ -1762,6 +1900,34 @@ def _apply_lakes(baseline, grid, *, config: HighresStaticConfig,
 
     landcover_record = _landcover_record(landcover_row, fetch_manifest,
                                          case_date)
+    landcover_record["crosswalk_target"] = (
+        f"MODIFIED_IGBP_MODIS_NOAH, {int(category_count)} categories")
+    lake_check = {
+        "rule": ("a baseline lake (LU_INDEX 21) the land cover's dominant "
+                 "category calls land, and baseline land it calls a "
+                 "lake, take the land cover's land use; the sea and "
+                 "every other cell keep the baseline"),
+        "baseline_lake_cells": int(lake.sum()),
+        "lake_cells": int((np.asarray(merged["LU_INDEX"])
+                           == MODIS21_ISLAKE).sum()),
+        "demoted_cells": int(demote.sum()),
+        "promoted_cells": int(promote.sum()),
+        "kept_lake_cells": int((lake & ~demote).sum()),
+        "demoted_to_category": classes,
+        "promoted_from_category": promoted_from,
+        "demoted_height_m": heights(demote),
+        "promoted_height_m": heights(promote),
+        "kept_height_m": heights(lake & ~demote),
+    }
+    if landcover_row.water != WATER_FROM_SOURCE:
+        lake_check["sea_connected_water_not_promoted_cells"] = int(
+            sea_held.sum())
+    if depth_record is not None:
+        lake_check["lake_depth"] = depth_record
+    replaced = list(_LAKE_CHECK_FIELDS) + [
+        "GREENFRAC", "LAI12M", "ALBEDO12M", "SNOALB", "SOILTEMP", "TMN"]
+    if depth is not None:
+        replaced.append("LAKE_DEPTH")
     detail = {
         "mode": "lakes",
         "terrain_source": {"source_id": "30-arc-second baseline (unchanged)"},
@@ -1775,36 +1941,23 @@ def _apply_lakes(baseline, grid, *, config: HighresStaticConfig,
         "coverage": {"fields": {"land_use": field_coverage["fields"]["land_use"]},
                      **{k: v for k, v in field_coverage.items() if k != "fields"}},
         "merge_audit": merge_audit,
-        "lake_check": {
-            "rule": ("a baseline lake (LU_INDEX 21) the land cover's dominant "
-                     "category calls land, and baseline land it calls a "
-                     "lake, take the land cover's land use; the sea and "
-                     "every other cell keep the baseline"),
-            "baseline_lake_cells": int(lake.sum()),
-            "lake_cells": int((np.asarray(merged["LU_INDEX"])
-                               == MODIS21_ISLAKE).sum()),
-            "demoted_cells": int(demote.sum()),
-            "promoted_cells": int(promote.sum()),
-            "kept_lake_cells": int((lake & ~demote).sum()),
-            "demoted_to_category": classes,
-            "promoted_from_category": promoted_from,
-            "demoted_height_m": heights(demote),
-            "promoted_height_m": heights(promote),
-            "kept_height_m": heights(lake & ~demote),
-        },
+        "lake_check": lake_check,
         "cells_replaced": {**_replacement_counts(baseline, merged),
                            "total": int(changed.sum()),
                            "cell_count": int(hgt.size)},
-        "fields_replaced": (list(_LAKE_CHECK_FIELDS)
-                            + ["GREENFRAC", "LAI12M", "ALBEDO12M", "SNOALB",
-                               "SOILTEMP", "TMN"] if changed.any() else []),
+        "fields_replaced": replaced if changed.any() else [],
         "scope_statement": (
             "Only cells whose lake status the land cover changes took its "
             "land use; terrain, the sea and every other cell are the "
-            "30-arc-second baseline."),
+            "30-arc-second baseline, bit for bit, in every field."),
         "attribution": landcover_row.coverage.attribution,
         "attributions": {"land_cover": landcover_row.coverage.attribution},
     }
+    if landcover is None:
+        detail["unchanged_reason"] = (
+            "the footprint lies wholly outside the published land-cover "
+            "raster, so every cell keeps its baseline lake status: "
+            f"{fetch_manifest.get('landcover_window_outside_raster')}")
     if "anachronism" in landcover_record:
         detail["anachronism"] = landcover_record["anachronism"]
     return merged, detail

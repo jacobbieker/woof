@@ -17,7 +17,7 @@ model residual of a few TECU is expected even for a perfect ionosphere.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 import gzip
 import json
 from pathlib import Path
@@ -143,19 +143,23 @@ def main(argv=None) -> int:
     from woof.spacewx.ionosphere import Ionosphere, receipt
     import cupy as cp  # after woof: the Metal backend installs its shim on import
 
-    record = None if args.f107 is not None else indices.load(args.indices)
+    gims = [(path, read_ionex(path)) for path in args.ionex]
+    # The F10.7 driver at the last map reads the UT day before it.
+    last = max(max(gim["epochs"]) for _, gim in gims)
+    record = None if args.f107 is not None else indices.load(args.indices, last - timedelta(days=1))
     report = {"files": [], "per_file": {}}
-    all_model, all_ref, lat_ref = [], [], None
-    for path in args.ionex:
-        gim = read_ionex(path)
+    all_model, all_ref, lat_ref, lon_ref = [], [], None, None
+    previous_last = None    # a daily file's 24:00 map is the next file's 00:00 map: count it once
+    for path, gim in gims:
         lat2, lon2 = np.meshgrid(gim["lat"], gim["lon"], indexing="ij")
         epochs = sorted(set(gim["epochs"]))
         iono = Ionosphere(lat2, lon2, when=epochs[0], family=args.maps, alt_hi=args.alt_max,
                           nalt=int(round(args.alt_max - 60.0)))
-        model, reference = [], []
+        model, reference, kept = [], [], []
         for idx, epoch in enumerate(gim["epochs"]):
             if gim["epochs"].index(epoch) != idx:
                 continue
+            kept.append(epoch)
             f107 = args.f107 if record is None else record.f107_driver(epoch, args.f107_mode)
             model.append(cp.asnumpy(iono.evaluate(epoch, f107)["tec"]).reshape(lat2.shape).astype(np.float64))
             reference.append(gim["tec"][idx])
@@ -163,9 +167,14 @@ def main(argv=None) -> int:
         stats = statistics(model, reference, gim["lat"])
         report["files"].append(str(path.name))
         report["per_file"][path.name] = {"first": epochs[0].isoformat(), "maps": len(model), "stats": stats}
-        all_model.append(model)
-        all_ref.append(reference)
-        lat_ref = gim["lat"]
+        fresh = [i for i, epoch in enumerate(kept) if not (i == 0 and epoch == previous_last)]
+        previous_last = kept[-1]
+        if lat_ref is not None and not (np.array_equal(lat_ref, gim["lat"])
+                                        and np.array_equal(lon_ref, gim["lon"])):
+            raise IonexError(f"{path}: its latitude/longitude grid differs from the earlier files'")
+        all_model.append(model[fresh])
+        all_ref.append(reference[fresh])
+        lat_ref, lon_ref = gim["lat"], gim["lon"]
         s = stats["all"]
         print(f"{path.name}: {len(model)} maps  bias {s['bias']:+6.2f}  rmse {s['rmse']:6.2f}  corr {s['corr']:5.3f}  "
               f"model {s['model_mean']:6.2f}  GIM {s['gim_mean']:6.2f} TECU")

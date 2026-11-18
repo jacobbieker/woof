@@ -3166,6 +3166,18 @@ def resolve_surface_statics(arguments, physics, mesh, grid, collected):
     given = getattr(arguments, "surface_statics", None)
     profile = None if physics is None else physics.column_profile
     selection = None if profile is None else profile.get("physics")
+    lake_source = (selection or {}).get("lake_state_source", "auto")
+    if (lake_source not in ("auto", "forcing")
+            and int((selection or {}).get("sf_lake_physics", 0) or 0) != 1):
+        # Only sf_lake_physics = 1 stages a lake mask on the mesh, so an
+        # explicit source would mark no lake cell: accepted and never read.
+        problem = (
+            f"lake_state_source={lake_source} binds lake cells, but without "
+            "sf_lake_physics=1 this run stages no lake mask, so the source "
+            "would be accepted and never read")
+        if collected is None:
+            raise _refuse(problem)
+        collected.append(problem)
     needed = surface_inputs.reads_surface_statics(selection)
     if (not needed and given is not None and physics is not None
             and physics.column_profile is not None
@@ -4455,7 +4467,9 @@ def run_forecast(arguments: argparse.Namespace) -> int:
     from .wave_options import environment as wave_environment
     from woof.wrf_hydro_route import launch_scope as wrf_hydro_scope
     with wave_environment(arguments), wrf_hydro_scope(getattr(arguments, "wrf_hydro", None),
-                                                      getattr(arguments, "wrf_hydro_output", None)), \
+                                                      getattr(arguments, "wrf_hydro_output", None),
+                                                      gpu_exchange=getattr(arguments, "wrf_hydro_gpu_exchange",
+                                                                           None)), \
             command_scope(arguments, engine="woof hex") as scope:
         result = _run_forecast_with_outputs(arguments)
         return scope.finish(result) if scope else result

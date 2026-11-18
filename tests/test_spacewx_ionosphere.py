@@ -175,6 +175,29 @@ def test_solar_index_conversions_and_month_weights():
     assert (m1, m2) == (12, 1) and w1 + w2 == pytest.approx(1.0) and 0.5 < w2 < 0.6
 
 
+def test_ig12_does_not_turn_over_at_high_flux():
+    peak = ion.r12_to_ig12(ion.R12_FIT_PEAK)
+    values = [ion.r12_to_ig12(r) for r in (0.0, 100.0, 200.0, 240.0, 300.0, 400.0)]
+    assert all(b >= a for a, b in zip(values, values[1:]))
+    assert values[-1] == pytest.approx(peak) and values[-2] == pytest.approx(peak)
+    # Only IG12 is held: the drivers keep the R12 the flux gives (M(3000)F2, hmF2, topside).
+    d = _iono([10.0], [0.0]).drivers(WHEN, 350.0)
+    assert d["r12"] == pytest.approx(ion.f107_to_r12(350.0)) and d["r12"] > ion.R12_FIT_PEAK
+    assert d["ig12"] == pytest.approx(peak)
+
+
+def test_aware_times_are_converted_to_utc_not_relabelled():
+    from datetime import timezone
+    est = timezone(timedelta(hours=-5))
+    aware = datetime(2024, 6, 20, 15, 51, tzinfo=est)
+    naive = datetime(2024, 6, 20, 20, 51)
+    assert ion.subsolar_point(aware) == ion.subsolar_point(naive)
+    assert ion.month_weights(datetime(2024, 6, 30, 22, tzinfo=est)) == \
+        ion.month_weights(datetime(2024, 7, 1, 3))
+    assert igrf.decimal_year(datetime(2024, 12, 31, 22, tzinfo=est)) == \
+        igrf.decimal_year(datetime(2025, 1, 1, 3))
+
+
 def test_subsolar_point():
     lat, _ = ion.subsolar_point(datetime(2024, 6, 20, 20, 51))
     assert lat == pytest.approx(23.44, abs=0.02)
@@ -220,6 +243,8 @@ def test_drivers_refuse_a_bad_flux_and_bad_columns():
             io_.drivers(WHEN, bad)
     with pytest.raises(ion.IonosphereError):
         _iono([95.0], [0.0])
+    with pytest.raises(ion.IonosphereError):
+        _iono([float("nan")], [0.0])
     with pytest.raises(ion.IonosphereError):
         _iono([0.0], [0.0], family="iri")
     with pytest.raises(ion.IonosphereError):
@@ -267,6 +292,10 @@ def test_index_parser_drivers_and_missing_values():
     when = datetime.combine(start + timedelta(days=89), datetime.min.time()).replace(hour=12)
     assert rec.f107_driver(when, "daily") == pytest.approx(100.0 + 88)      # the previous day's
     assert rec.f107_driver(when, "81day") == pytest.approx(np.mean(100.0 + np.arange(8, 89)))
+    # An aware time is read at its UTC day: 22 EST on day 88 is 03 UTC on day 89.
+    from datetime import timezone
+    est = when.replace(hour=22, tzinfo=timezone(timedelta(hours=-5))) - timedelta(days=1)
+    assert rec.f107_driver(est, "daily") == rec.f107_driver(when, "daily")
     assert rec.kp_at(datetime(2024, 3, 1, 22)) == pytest.approx(1.0)
     missing = [((2024, 3, 1), 100.0, "-1.000"), ((2024, 3, 2), -1.0, "1.000"), ((2024, 3, 3), 120.0, "1.000")]
     rec = indices.parse(_gfz(missing), "t")
@@ -352,11 +381,16 @@ def test_spacewx_door_is_registered_lazily():
 
 
 def test_forecast_paths_do_not_reach_the_ionosphere():
-    for rel in ("woof/core/physics.py", "woof/config.py", "woof/hex/physics_seam.py"):
-        path = ROOT / rel
-        if path.is_file():
-            text = path.read_text()
-            assert "spacewx.ionosphere" not in text and "spacewx_ionosphere" not in text, rel
+    """The forecast reaches the model only through the opt-in history door
+    (woof.spacewx.history, tests/test_spacewx_ionosphere_history.py); the hex
+    seam not at all."""
+    for rel in ("woof/core/physics.py", "woof/config.py"):
+        text = (ROOT / rel).read_text()
+        assert "spacewx.ionosphere" not in text, rel
+        assert "import woof.spacewx" not in text, rel
+    seam = ROOT / "woof/hex/physics_seam.py"
+    if seam.is_file():
+        assert "spacewx" not in seam.read_text()
 
 
 # ---------------------------------------------------------------- real coefficients (cached only)

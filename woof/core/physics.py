@@ -2514,6 +2514,28 @@ class PhysicsDriver:
             from woof.spacewx.solar_irradiance import SolarVariability
             self.solar_variability = SolarVariability.for_run(
                 cfg, getattr(radiation, "start_time", None))
+            import json as _tsi_json
+            print("[spacewx tsi] " + _tsi_json.dumps(self.solar_variability.receipt(),
+                                                     sort_keys=True, default=str), flush=True)
+        # Opt-in ionosphere history rows (woof.spacewx); None, and no import,
+        # by default.  Diagnostic only: nothing the step reads.
+        self.spacewx_ionosphere = None
+        if int(getattr(cfg, "spacewx_ionosphere_opt", 0) or 0) and radiation is not None:
+            from woof.spacewx.history import IonosphereHistory
+            self.spacewx_ionosphere = IonosphereHistory.for_run(cfg, radiation)
+            if self.spacewx_ionosphere is not None:
+                import json as _spacewx_json
+                print("[spacewx ionosphere] " + _spacewx_json.dumps(
+                    self.spacewx_ionosphere.receipt(), default=str), flush=True)
+        # Opt-in auroral oval rows (woof.spacewx), the same contract.
+        self.spacewx_aurora = None
+        if int(getattr(cfg, "spacewx_aurora_opt", 0) or 0) and radiation is not None:
+            from woof.spacewx.aurora_history import AuroraHistory
+            self.spacewx_aurora = AuroraHistory.for_run(cfg, radiation)
+            if self.spacewx_aurora is not None:
+                import json as _aurora_json
+                print("[spacewx aurora] " + _aurora_json.dumps(
+                    self.spacewx_aurora.receipt(), default=str), flush=True)
         self.cumulus_callable = cumulus
         # Producers declare their retained fields as rows before any carrier
         # inventory is built. A later scheme call only writes these buffers.
@@ -3256,6 +3278,8 @@ class PhysicsDriver:
         if getattr(self, "solar_variability", None) is not None:
             # TSI(t)/reference on every shortwave output, before any consumer.
             result = self.solar_variability.scale(result, state.elapsed_seconds)
+            # ...and on the shortwave outputs the scheme wrote into fields itself.
+            self.solar_variability.scale_direct_fields(radiation_fields, cfg.ra_sw_physics)
         if cloud_view is not None and int(cfg.icloud) == 3:
             result.cldfra = cloud_view.fraction
         nz, ny, nx = state.p.shape
@@ -7511,8 +7535,8 @@ class PhysicsDriver:
                 self.call_counts["radiation"] += 1
                 if (self.cam_ozone is not None
                         and self.cam_ozone.mode == "legacy-root"):
-                    from woof.core.radiation_composition import legacy_radiation_adapter
-                    legacy = legacy_radiation_adapter(self.radiation_callable)
+                    from woof.core.radiation_composition import retained_ozone_adapter
+                    legacy = retained_ozone_adapter(self.radiation_callable)
                     # Device to device: the adapter keeps its field on the
                     # card and a host round trip would copy the same bytes.
                     import cupy as _cp
