@@ -681,6 +681,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   from 8.3 to 4.6 ms; one forecast hour integrates in 44-47 s instead of
   50-57 s, with byte-identical history.
   `WOOF_METAL_GFK_FAST=0` restores the binary64-only path.
+  The Metal facade's `ReductionKernel` folded each output on one thread.
+  An exact, order-free and idempotent fold (`a | b`, `a || b`, `a & b`,
+  `a && b`, a concrete reduce type and an `out = a` post-map) over 4096
+  or more elements per output, with fewer than 2048 outputs, is now folded
+  in slices and then across the slices, giving the same value (hex Edinburgh 3 km
+  variable-resolution: Noah-MP's surface identity check from 3.6 ms to
+  0.16 ms per step and the transport species-word check from 1.4 ms to
+  0.18 ms, byte-identical; `WOOF_METAL_SPLIT_REDUCTIONS=0` restores the
+  serial fold).
   `WOOF_METAL_GPU_TIMES` times each kernel. Its per-launch command
   buffers also hold the lazy MLX work the launch waited on, and their GPU
   intervals overlap, so a facade write (`woof_copy_4`) used to carry other

@@ -109,6 +109,9 @@ class ReductionSource:
     One thread per output element folds its elements serially, in index
     order: deterministic, and exact for the bitwise/logical reductions woof
     uses.  (A floating sum would differ from CuPy's tree order by rounding.)
+    The Metal facade folds a :meth:`splittable` reduction in slices instead
+    (``_split_source``) when each of few outputs (under 2048) folds 4096 or
+    more elements: the same value.
     """
 
     def __init__(self, in_params, out_params, map_expr, reduce_expr, post_map_expr,
@@ -125,6 +128,7 @@ class ReductionSource:
         self.preamble = preamble or ""
         self.options = tuple(options or ())
         self._modules = {}
+        self._splittable = None
 
     def _source(self, types, is_array):
         def ctype(p):
@@ -151,6 +155,67 @@ class ReductionSource:
                 f"    for (long long __woof_k = 0; __woof_k < __woof_r; ++__woof_k) {{\n"
                 + "".join(f"        {line}\n" for line in loads)
                 + f"        {rtype} b = ({rtype})({self.map_expr});\n"
+                f"        a = ({rtype})({self.reduce_expr});\n"
+                f"    }}\n"
+                f"    {ctype(out)} {out.name};\n"
+                f"    {self.post_map_expr};\n"
+                f"    __woof_out[__woof_o] = {out.name};\n}}\n")
+
+    #: reduce_expr forms whose fold is exact in any order and idempotent, so
+    #: folding in slices (each starting from the identity) and then folding the
+    #: slices gives the serial fold's value, whatever the identity
+    _SPLITTABLE = frozenset(("a|b", "b|a", "a||b", "b||a", "a&b", "b&a", "a&&b", "b&&a"))
+
+    def splittable(self) -> bool:
+        """True when :meth:`_split_source`'s two-stage fold returns the serial
+        fold's words: an exact, order-free, idempotent ``reduce_expr`` and a
+        ``post_map_expr`` that only assigns ``a`` to the output."""
+        rtype = self.reduce_type or (None if self.outputs[0].generic else _CTYPES[self.outputs[0].type])
+        return (re.sub(r"\s", "", self.reduce_expr) in self._SPLITTABLE
+                and rtype in _CTYPES.values()
+                and re.fullmatch(r"\s*%s\s*=\s*a\s*;?\s*" % re.escape(self.outputs[0].name),
+                                 self.post_map_expr) is not None)
+
+    def _split_source(self, types, is_array):
+        """The reduction as two kernels: ``<name>__woof_slices`` folds slice ``j`` of output
+        ``o`` (elements ``j, j + s, j + 2s, ...``) into ``part[o * s + j]``, and
+        ``<name>__woof_fold`` folds each output's ``s`` slices and post-maps.
+        Only for :meth:`splittable` reductions."""
+        def ctype(p):
+            return _CTYPES[np.dtype(types[p.type]).name] if p.generic else _CTYPES[p.type]
+
+        out = self.outputs[0]
+        rtype = self.reduce_type or ctype(out)
+        params, loads = [], []
+        for p, array in zip(self.inputs, is_array):
+            t = ctype(p)
+            if array:
+                params.append(f"const {t}* __woof_in_{p.name}")
+                loads.append(f"const {t} {p.name} = __woof_in_{p.name}[__woof_o * __woof_r + __woof_k];")
+            else:
+                params.append(f"{t} {p.name}")
+        params.append(f"{rtype}* __woof_part")
+        typedefs = "".join(f"typedef {_CTYPES[np.dtype(dt).name]} {nm};\n" for nm, dt in types.items())
+        return (f"{typedefs}{self.preamble}\n"
+                f'extern "C" __global__ void {self.name}__woof_slices({", ".join(params)}, '
+                f"long long __woof_n, long long __woof_r, long long __woof_s) {{\n"
+                f"    long long __woof_t = (long long)blockIdx.x * blockDim.x + threadIdx.x;\n"
+                f"    if (__woof_t >= __woof_n * __woof_s) return;\n"
+                f"    long long __woof_o = __woof_t / __woof_s;\n"
+                f"    {rtype} a = ({rtype})({self.identity});\n"
+                f"    for (long long __woof_k = __woof_t % __woof_s; __woof_k < __woof_r; __woof_k += __woof_s) {{\n"
+                + "".join(f"        {line}\n" for line in loads)
+                + f"        {rtype} b = ({rtype})({self.map_expr});\n"
+                f"        a = ({rtype})({self.reduce_expr});\n"
+                f"    }}\n"
+                f"    __woof_part[__woof_t] = a;\n}}\n"
+                f'extern "C" __global__ void {self.name}__woof_fold(const {rtype}* __woof_part, '
+                f"{ctype(out)}* __woof_out, long long __woof_n, long long __woof_s) {{\n"
+                f"    long long __woof_o = (long long)blockIdx.x * blockDim.x + threadIdx.x;\n"
+                f"    if (__woof_o >= __woof_n) return;\n"
+                f"    {rtype} a = ({rtype})({self.identity});\n"
+                f"    for (long long __woof_k = 0; __woof_k < __woof_s; ++__woof_k) {{\n"
+                f"        {rtype} b = __woof_part[__woof_o * __woof_s + __woof_k];\n"
                 f"        a = ({rtype})({self.reduce_expr});\n"
                 f"    }}\n"
                 f"    {ctype(out)} {out.name};\n"
