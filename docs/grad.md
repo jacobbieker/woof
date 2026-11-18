@@ -188,6 +188,10 @@ forecast error:
    - The analysis is not relaxed (no RTPS), because EFSO needs the
      Kalman gain's own analysis perturbations.
    - Every member is staged before any is published.
+   - `--solve cuda` runs the local solves on the GPU while the state
+     stays on the host. On a 100x80x49 grid with 24 members and 729
+     observations, this took 43 s; the host solve had not finished after
+     70 min. `letkf.json` records the device and eigensolver used.
    - Observations that share a grid point need one extra analysed field
      each: a station's five surface kinds, or a sounding's levels that
      fall on one model level. Each extra field is the size of the state,

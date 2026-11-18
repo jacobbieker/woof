@@ -5,6 +5,7 @@ import json
 
 import numpy as np
 import pytest
+from conftest import requires_gpu
 
 from woof.grad import ensemble as ens
 
@@ -66,7 +67,7 @@ def test_observations_sharing_a_gridpoint_go_to_separate_batches():
     assert batches[0].points.flat_index.tolist() == [2, 5, 9]
 
 
-def _toy_analysis(localization_m, solve_namespace=None):
+def _toy_analysis(localization_m, solve_namespace=None, diagnostics=None):
     from woof.da.letkf import GridGeometry, LetkfConfig, Localization
 
     rng = np.random.default_rng(3)
@@ -79,18 +80,23 @@ def _toy_analysis(localization_m, solve_namespace=None):
     batches, rows = ens.layered_batches(flat, y, sigma, hb, shape=shape, name="t")
     grid = GridGeometry(dx_m=100.0, dy_m=100.0, heights_m=np.array([0.0, 1000.0]))
     config = LetkfConfig(localization=Localization(localization_m, 1e6), analysis_fields=("thp",), rtps_alpha=0.0)
-    increments, ya = ens.letkf_with_obs_space(prior, batches, rows, grid, config, solve_namespace=solve_namespace)
+    increments, ya = ens.letkf_with_obs_space(prior, batches, rows, grid, config, solve_namespace=solve_namespace,
+                                              diagnostics=diagnostics)
     return prior, increments, ya, flat, y, sigma, hb
 
 
+@requires_gpu
 def test_letkf_device_solve_matches_the_host():
-    cupy = pytest.importorskip("cupy")
-    try:
-        cupy.cuda.runtime.getDeviceCount()
-    except Exception:
-        pytest.skip("no CUDA device")
+    import cupy
+    from woof import backend
+    from woof.da.letkf import LetkfDiagnostics
+
+    if getattr(cupy, "__woof_facade__", False) or backend.active() != "cuda":
+        pytest.skip("the CUDA backend is not active")
     _, host_inc, host_ya, *_ = _toy_analysis(3000.0)
-    _, dev_inc, dev_ya, *_ = _toy_analysis(3000.0, solve_namespace=cupy)
+    diagnostics = LetkfDiagnostics()
+    _, dev_inc, dev_ya, *_ = _toy_analysis(3000.0, solve_namespace=cupy, diagnostics=diagnostics)
+    assert diagnostics.host_staging and diagnostics.eigensolver == "jacobi"
     np.testing.assert_allclose(dev_ya, host_ya, rtol=0, atol=1e-9)
     np.testing.assert_allclose(dev_inc["thp"], host_inc["thp"], rtol=0, atol=1e-9)
 
@@ -198,7 +204,7 @@ def test_the_letkf_mean_and_efso_doors_on_hand_built_members(tmp_path, capsys):
                  "--progress"]) == 0
     captured = capsys.readouterr()
     report = json.loads(captured.out)
-    assert "letkf solve:" in captured.err and report["solve"] == "host"
+    assert "letkf solve:" in captured.err and report["solve"]["device"] == "host"
     assert report["observations"] == 2 and report["members"] == K
     assert report["spread_ya_over_sigma"] < report["spread_hb_over_sigma"]
     with np.load(tmp_path / "an" / "efso-inputs.npz") as data:
