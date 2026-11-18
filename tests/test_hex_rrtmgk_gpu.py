@@ -14,8 +14,11 @@ every other radiation row.  These tests hold the seam to the WRF route:
   (the column set of a variable-resolution mesh, in no particular order),
   permuting the cells permutes every radiation output bit for bit, and a
   column chunk smaller than the cell count changes no bit;
-* K is load-bearing: the seam's radiative heating differs from legacy
-  RRTMG's on the same columns.
+* K is load-bearing: the seam's radiative heating rates differ from legacy
+  RRTMG's on the same columns by more than rounding.
+
+The cap sits near 56N at local midday, so every column is lit and the
+shortwave gather/scatter carries real fluxes.
 
 The one-hour forecast on a variable-resolution mesh is
 tests/test_hex_varres_gpu.py with
@@ -38,12 +41,12 @@ from woof.core.rrtmgk import RRTMGKRadiation  # noqa: E402
 
 NZ, DT = cases.NZ, cases.DT
 NCOL = 24
-K_PAIR = {"ra_lw_physics": 14, "ra_sw_physics": 14}
+#: Local midday on the cap (3W): every column lit, coszen ~0.5.
+START = cases.START.replace(hour=12)
 
 
-def _physics(**extra):
+def _physics():
     physics = dict(cases.selections()["radiation.wrf-rrtmg-k"])
-    physics.update(extra)
     assert (physics["ra_lw_physics"], physics["ra_sw_physics"]) == (14, 14)
     return physics
 
@@ -78,7 +81,7 @@ def _build(physics, order=None, column_chunk=None):
     seam = suite.run_mpas_column_physics(
         physics=physics, n_levels=NZ, n_columns=NCOL, dt=DT,
         radiation_seconds=120.0, surface_pbl_seconds=DT,
-        start_time=cases.START, latitude_deg=lat[order],
+        start_time=START, latitude_deg=lat[order],
         longitude_deg=lon[order],
         terrain_height_m=terrain[order].astype(np.float32),
         z_interface_nominal_m=np.linspace(0.0, cases.ZTOP, NZ + 1),
@@ -90,31 +93,52 @@ def _build(physics, order=None, column_chunk=None):
     return seam
 
 
-def _spy(seam, also=None):
-    """Record every radiation result the seam's driver receives."""
-    calls = []
-    inner = seam._driver.radiation_callable
+def _spy(monkeypatch, seam, also=None):
+    """Record every radiation result the seam's driver receives.
 
-    def spy(**kwargs):
+    The class's ``__call__`` is wrapped, so the driver keeps the adapter
+    object itself (its ozone carrier, diagnostics and attributes) and runs
+    the production path; only calls on this seam's adapter are recorded.
+    """
+    calls = []
+    target = seam._driver.radiation_callable
+    cls = type(target)
+    inner = cls.__call__
+
+    def spy(self, **kwargs):
+        if self is not target:
+            return inner(self, **kwargs)
         reference = also(**kwargs) if also is not None else None
-        result = inner(**kwargs)
+        result = inner(self, **kwargs)
         calls.append((_host(result), None if reference is None
                       else _host(reference)))
         return result
-    seam._driver.radiation_callable = spy
+    monkeypatch.setattr(cls, "__call__", spy)
     return calls
 
 
+def _leaf(value):
+    if isinstance(value, cp.ndarray):
+        return cp.asnumpy(value).copy()
+    if isinstance(value, np.ndarray):
+        return value.copy()
+    if isinstance(value, (bool, int, float, str, np.generic)):
+        return np.asarray(value)
+    return None
+
+
 def _host(result):
+    """Every array or scalar of a ``RadiationResult``, on the host."""
     out = {}
     for field in dataclasses.fields(result):
         value = getattr(result, field.name)
-        if isinstance(value, cp.ndarray):
-            out[field.name] = cp.asnumpy(value).copy()
-        elif isinstance(value, dict):
-            for key, item in value.items():
-                if isinstance(item, cp.ndarray):
-                    out[f"{field.name}.{key}"] = cp.asnumpy(item).copy()
+        items = value.items() if isinstance(value, dict) else [(None, value)]
+        for key, item in items:
+            leaf = _leaf(item)
+            if leaf is not None:
+                out[field.name if key is None else f"{field.name}.{key}"] = leaf
+            elif item is not None:
+                raise TypeError(f"unrecorded {field.name}.{key}: {type(item)}")
     return out
 
 
@@ -140,16 +164,20 @@ def _run(seam, order=None, steps=3):
     return dtheta
 
 
-def test_the_seam_radiates_through_the_wrf_route_adapter():
+def test_the_seam_radiates_through_the_wrf_route_adapter(monkeypatch):
     seam = _build(_physics())
     adapter = seam._driver.radiation_callable
     assert type(adapter) is RRTMGKRadiation
+    # make_radiation's arguments, from the run's config and the seam's
+    # inputs, not read back off the adapter under test.
+    cfg = seam._cfg
+    assert (cfg.o3input, cfg.icloud) == (2, 1)    # WRF's defaults
     lat, lon = _cap(NCOL)
     fresh = RRTMGKRadiation(
-        cases.START, lat.reshape(1, -1), lon.reshape(1, -1),
-        o3input=adapter.o3input, icloud=1, column_chunk=adapter.column_chunk,
-        p_top=adapter.p_top)
-    calls = _spy(seam, also=fresh)
+        START, lat.reshape(1, -1), lon.reshape(1, -1),
+        o3input=cfg.o3input, icloud=cfg.icloud, column_chunk=None,
+        p_top=cases.P_TOP)
+    calls = _spy(monkeypatch, seam, also=fresh)
     dtheta = _run(seam)
     assert calls, "the seam never radiated"
     assert all(np.isfinite(d).all() for d in dtheta)
@@ -160,19 +188,22 @@ def test_the_seam_radiates_through_the_wrf_route_adapter():
                                           f"call {step} {name}")
         assert np.isfinite(got["olr"]).all() and (got["olr"] > 50).all()
         assert np.isfinite(got["glw"]).all() and (got["glw"] > 50).all()
+        assert (got["coszen"] > 0.3).all() and (got["swdown"] > 50).all()
 
 
-def test_columns_are_independent_of_cell_order_and_chunking():
+def test_columns_are_independent_of_cell_order_and_chunking(monkeypatch):
     physics = _physics()
     base = _build(physics)
-    base_calls = _spy(base)
+    base_calls = _spy(monkeypatch, base)
     _run(base)
+    assert base_calls, "the seam never radiated"
     order = np.random.default_rng(7).permutation(NCOL)
     for label, seam, cells in (
             ("permuted", _build(physics, order=order), order),
             ("chunked", _build(physics, column_chunk=7), None)):
-        calls = _spy(seam)
-        _run(seam, order=cells)
+        with monkeypatch.context() as patch:
+            calls = _spy(patch, seam)
+            _run(seam, order=cells)
         idx = np.arange(NCOL) if cells is None else cells
         assert len(calls) == len(base_calls), label
         for step, ((got, _), (want, _)) in enumerate(zip(calls, base_calls)):
@@ -183,10 +214,20 @@ def test_columns_are_independent_of_cell_order_and_chunking():
                     f"{label} call {step} {name}")
 
 
-def test_rrtmgk_heating_differs_from_legacy_rrtmg():
-    k = _run(_build(_physics()), steps=1)[0]
-    legacy_physics = {key: value for key, value in _physics().items()
-                      if key not in K_PAIR}
-    legacy_physics.update(ra_physics=4, ra_rrtmg_variant="rrtmg_legacy")
-    legacy = _run(_build(legacy_physics), steps=1)[0]
-    assert not np.array_equal(k, legacy)
+def test_rrtmgk_heating_differs_from_legacy_rrtmg(monkeypatch):
+    heating = {}
+    for label, physics in (
+            ("k", _physics()),
+            ("legacy", cases.selections()["radiation.rrtmg-legacy"])):
+        seam = _build(physics)
+        with monkeypatch.context() as patch:
+            calls = _spy(patch, seam)
+            _run(seam, steps=1)
+        assert calls, label
+        heating[label] = calls[0][0]
+    for name in ("rthratenlw", "rthratensw"):
+        k, legacy = heating["k"][name], heating["legacy"][name]
+        scale = float(np.abs(legacy).max())
+        assert scale > 0, name
+        # More than rounding: K's gas optics and cloud path, not ULPs.
+        assert float(np.abs(k - legacy).max()) > 1e-3 * scale, name

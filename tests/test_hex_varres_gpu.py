@@ -40,7 +40,8 @@ import hex_varres as vr  # noqa: E402
 
 pytestmark = pytest.mark.slow
 NAME = os.environ.get("WOOF_HEX_VARRES_NAME", "edi-vr")
-PHYSICS = [item for item in os.environ.get("WOOF_HEX_VARRES_PHYSICS", "mp_physics=6").split(",") if item]
+PHYSICS = [item.strip() for item in (os.environ.get("WOOF_HEX_VARRES_PHYSICS") or "mp_physics=6").split(",")
+           if item.strip()]
 
 
 def _receipt_values(node, wanted, found):
@@ -102,6 +103,11 @@ def test_an_hour_on_a_variable_resolution_mesh(tmp_path):
     # ... and the forecast stepped with it, not only the row.
     ran_dt = float(receipt["driver_receipt"]["forecast"]["schedule"]["dt_seconds"])
     assert ran_dt <= float(admission["maximum_admitted_dt_seconds"])
+    # The requested physics is the physics the forecast ran, not the door's default.
+    ran = receipt["driver_receipt"]["forecast"]["host_preparation"]["constructor"]["physics_suite"]["physics"]
+    for item in PHYSICS:
+        key, _, value = item.partition("=")
+        assert str(ran.get(key.strip())) == value.strip(), (item, ran.get(key.strip()))
     found = _receipt_values(receipt, {"scheme", "gf_dx_column"}, {})
     if found.get("scheme") == "cu_grell_freitas":
         assert found.get("gf_dx_column") == "per-column"
