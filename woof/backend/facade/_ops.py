@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from woof.backend.scratch import facade_empty_fill as _facade_empty_fill, poison_fill as _poison_fill
 from woof.backend.facade._array import (ndarray, on_host, storage_mx_dtype, to_storage_values,
                                         values_shape)
 
@@ -107,19 +108,17 @@ def _host(x):
 def empty(shape, dtype=np.float32, order="C"):
     """CuPy's ``empty``.  MLX has no uninitialized allocation, so it is
     ``zeros`` unless ``WOOF_METAL_SCRATCH_UNINIT=all`` (woof.backend.scratch)
-    leaves a C-ordered buffer unfilled (or poisons it)."""
-    if order != "F":
-        from woof.backend.scratch import facade_empty_fill
-        fill = facade_empty_fill()
-        if fill == "none":
-            from woof.backend.facade._scratch import uninitialized
-            return uninitialized(shape, dtype)
-        if fill != "zeros":
-            out = zeros(shape, dtype)
-            if out.size:
-                out.reshape(-1).view(np.uint8)[...] = fill
-            return out
-    return zeros(shape, dtype, order)
+    leaves a C-ordered buffer unfilled, or ``all`` with WOOF_SCRATCH_POISON
+    poisons it (either order)."""
+    fill = _facade_empty_fill()
+    if fill is None:
+        return zeros(shape, dtype, order)
+    if order == "F":
+        out = zeros(shape, dtype, order)
+    else:
+        from woof.backend.facade._scratch import uninitialized
+        out = uninitialized(shape, dtype)
+    return out if fill == "none" else _poison_fill(out, fill)
 
 
 def zeros(shape, dtype=np.float32, order="C"):

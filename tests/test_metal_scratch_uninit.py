@@ -22,9 +22,7 @@ def cp():
 
 def _reset():
     from woof.backend import scratch
-    scratch._uninit_enabled.cache_clear()
-    scratch._empty_all.cache_clear()
-    scratch._poison.cache_clear()
+    scratch._reset_caches()
 
 
 @pytest.mark.parametrize("dtype", [np.uint8, np.int32, np.float32, np.float64])
@@ -124,6 +122,8 @@ def test_facade_empty_is_unfilled_only_when_asked(cp, monkeypatch):
     if backend.active() != "mlx":
         pytest.skip("runs under WOOF_BACKEND=mlx")
     import mlx.core as mx
+    from woof.backend.facade import _scratch
+    _scratch._kernel()                      # warm: its one-time flag is an mx.zeros
     calls = []
     monkeypatch.setattr(mx, "zeros", lambda *a, **k: calls.append(a) or mx.full(*a, 0, **k))
     _reset()
@@ -146,6 +146,8 @@ def test_facade_empty_is_unfilled_only_when_asked(cp, monkeypatch):
             _reset()
             assert cp.empty(7, cp.float64).get().tobytes() == byte * 56
             assert cp.empty_like(a).get().tobytes() == byte * a.nbytes
+            f = cp.empty((3, 5), cp.float32, order="F")      # poisoned in either order
+            assert f.flags.f_contiguous and f.get().tobytes(order="A") == byte * f.nbytes
             assert cp.zeros(4, cp.int32).get().tobytes() == bytes(16)
         monkeypatch.setenv("WOOF_METAL_SCRATCH_UNINIT", "1")
         _reset()
@@ -159,18 +161,23 @@ def test_facade_empty_is_unfilled_only_when_asked(cp, monkeypatch):
 
 def test_empty_all_switch(monkeypatch):
     from woof.backend import scratch
-    for value, want in (("all", True), ("ALL", True), ("1", False), ("0", False)):
-        monkeypatch.setenv("WOOF_METAL_SCRATCH_UNINIT", value)
+    try:
+        for value, mode in (("all", "all"), ("ALL", "all"), ("1", "scratch"), ("", "scratch"), ("0", "off")):
+            monkeypatch.setenv("WOOF_METAL_SCRATCH_UNINIT", value)
+            _reset()
+            assert scratch._uninit_mode() == mode
+            assert scratch._uninit_enabled() is (mode != "off")
+        monkeypatch.setenv("WOOF_METAL_SCRATCH_UNINIT", "all")
+        monkeypatch.setenv("WOOF_SCRATCH_POISON", "a5")
         _reset()
-        assert scratch._empty_all() is want
-        assert scratch._uninit_enabled() is (value != "0")
-    monkeypatch.setenv("WOOF_METAL_SCRATCH_UNINIT", "all")
-    monkeypatch.setenv("WOOF_SCRATCH_POISON", "a5")
-    _reset()
-    assert scratch.facade_empty_fill() == 0xA5
-    monkeypatch.delenv("WOOF_SCRATCH_POISON")
-    _reset()
-    assert scratch.facade_empty_fill() == "none"
-    monkeypatch.delenv("WOOF_METAL_SCRATCH_UNINIT")
-    _reset()
-    assert scratch.facade_empty_fill() == "zeros"
+        assert scratch.facade_empty_fill() == 0xA5
+        monkeypatch.delenv("WOOF_SCRATCH_POISON")
+        _reset()
+        assert scratch.facade_empty_fill() == "none"
+        monkeypatch.delenv("WOOF_METAL_SCRATCH_UNINIT")
+        _reset()
+        assert scratch.facade_empty_fill() is None
+    finally:
+        monkeypatch.delenv("WOOF_METAL_SCRATCH_UNINIT", raising=False)
+        monkeypatch.delenv("WOOF_SCRATCH_POISON", raising=False)
+        _reset()
