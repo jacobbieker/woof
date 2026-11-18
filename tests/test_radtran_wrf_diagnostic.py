@@ -339,8 +339,10 @@ def test_model_columns_top_km_selects_the_wider_sets_levels():
     p = kw["p_w_pa"][:, ::-1] * 1e-2
     t = np.repeat(kw["t_mass"][:, :1], z.shape[1], axis=1)
     whole = atmosphere.model_columns(z, p, t)
-    part = atmosphere.model_columns(z[:3], p[:3], t[:3], top_km=float(z[:, 0].max()))
+    keep = np.delete(np.arange(z.shape[0]), int(np.argmax(z[:, 0])))   # without the highest top
+    assert z[keep, 0].max() < z[:, 0].max()
+    part = atmosphere.model_columns(z[keep], p[keep], t[keep], top_km=float(z[:, 0].max()))
     assert part.z.shape[1] == whole.z.shape[1]
-    assert np.array_equal(part.z, whole.z[:3]) and np.array_equal(part.dens["O3"], whole.dens["O3"][:3])
+    assert np.array_equal(part.z, whole.z[keep]) and np.array_equal(part.dens["O3"], whole.dens["O3"][keep])
     with pytest.raises(ValueError, match="top_km"):
         atmosphere.model_columns(z, p, t, top_km=float(z[:, 0].max()) - 1.0)

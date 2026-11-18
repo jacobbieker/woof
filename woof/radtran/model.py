@@ -211,7 +211,6 @@ def compute(diag: Diagnostic, *, z_w_m, p_w_pa, t_mass, qv_mass, umu0, albedo,
     mass layer for ``aerosol = "thompson"``; umu0, albedo: (ncol,).
     Returns arrays shaped (nband, ncol) and (nband, ndir, ncol).
     """
-    opts = diag.options(day_of_year)
     z_all = np.asarray(z_w_m, dtype=np.float64)
     ncol_all = z_all.shape[0]
     mu = None if umu0 is None else np.broadcast_to(np.asarray(umu0, dtype=np.float64), (ncol_all,))
@@ -221,22 +220,37 @@ def compute(diag: Diagnostic, *, z_w_m, p_w_pa, t_mass, qv_mass, umu0, albedo,
         # the day columns; dropping them here as well skips their column,
         # cloud and aerosol preparation.  Every column keeps the AFGL levels
         # the whole set selects (top_km), so a day column's words do not
-        # depend on which columns are night.
-        rows = lambda a: None if a is None else np.asarray(a)[day]
+        # depend on which columns are night.  The all-night case (day.size
+        # == 0) takes the full path, whose driver returns the zeros and band
+        # metadata itself.
+        def rows(a):
+            if a is None or np.ndim(a) == 0:
+                return a
+            a = np.asarray(a)
+            return a[day] if a.shape[0] == ncol_all else a
         top_km = float((z_all[:, -1] * 1e-3).max())
+        if _top_km is not None:
+            top_km = max(top_km, float(_top_km))
+        alb = None if albedo is None else rows(
+            np.broadcast_to(np.asarray(albedo, dtype=np.float64), (ncol_all,)))
         sub = compute(diag, z_w_m=z_all[day], p_w_pa=rows(p_w_pa), t_mass=rows(t_mass),
-                      qv_mass=rows(qv_mass), umu0=mu[day],
-                      albedo=np.broadcast_to(np.asarray(albedo, dtype=np.float64), (ncol_all,))[day],
+                      qv_mass=rows(qv_mass), umu0=mu[day], albedo=alb,
                       qc_mass=rows(qc_mass), qi_mass=rows(qi_mass), rho_dry=rows(rho_dry),
                       re_cloud_um=rows(re_cloud_um), re_ice_um=rows(re_ice_um), nwfa=rows(nwfa),
                       nifa=rows(nifa), day_of_year=day_of_year, backend=backend, _top_km=top_km)
-        out = dict(sub)
-        for key in ("edir", "edn", "eup", "eup_toa", "rad"):
-            if key in sub:
-                full = np.zeros(sub[key].shape[:-1] + (ncol_all,))
-                full[..., day] = sub[key]
+        out = {}
+        for key, v in sub.items():
+            # Per-column outputs ((nband, [ndir,] ncol): last axis = the day
+            # columns) go back to their rows with zeros at night; the 1-D
+            # band metadata passes through even when nband == day.size.
+            if isinstance(v, np.ndarray) and v.ndim >= 2 and v.shape[-1] == day.size:
+                full = np.zeros(v.shape[:-1] + (ncol_all,), dtype=v.dtype)
+                full[..., day] = v
                 out[key] = full
+            else:
+                out[key] = v
         return out
+    opts = diag.options(day_of_year)
     z = z_all[:, ::-1] * 1e-3                                            # top first, km
     p = np.asarray(p_w_pa, dtype=np.float64)[:, ::-1] * 1e-2
     t = _interfaces(np.asarray(t_mass, dtype=np.float64))[:, ::-1]
