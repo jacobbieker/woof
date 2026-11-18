@@ -5234,9 +5234,12 @@ def column_cumulus_workspace_bytes(
     for dc in exp.domains:
         if int(dc.run.cu_physics) not in COLUMN_CUMULUS_SCHEMES:
             continue
-        worst = max(worst, workspace_bytes(
-            int(dc.run.cu_physics), int(dc.run.nz),
-            int(dc.run.nx) * int(dc.run.ny), profile.multiprocessor_count))
+        args = (int(dc.run.cu_physics), int(dc.run.nz),
+                int(dc.run.nx) * int(dc.run.ny), profile.multiprocessor_count)
+        worst = max(worst, workspace_bytes(*args))
+        # A Metal device launches the wider Metal tile (tile_columns).
+        if getattr(profile, "backend", "cuda") == "mlx":
+            worst = max(worst, workspace_bytes(*args, metal=True))
     return int(worst)
 
 
@@ -5413,16 +5416,24 @@ def mrf_column_workspace_bytes(
     for every configuration that does not select ``bl_pbl_physics = 99``.
     """
     from woof.core.physics_inventory import (
-        MRF_BLOCK, MRF_TILE_BLOCKS_PER_SM, mrf_workspace_floats)
+        MRF_BLOCK, MRF_TILE_BLOCKS_PER_SM, metal_column_tile_columns,
+        mrf_workspace_floats)
 
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
     tile_cap = (profile.multiprocessor_count * MRF_TILE_BLOCKS_PER_SM
                 * MRF_BLOCK)
+    # A Metal device launches the wider Metal tile (mrf.mrf_tile_columns).
+    metal = getattr(profile, "backend", "cuda") == "mlx"
     worst = 0
     for dc in exp.domains:
         if int(dc.run.bl_pbl_physics) != MRF_PBL_SCHEME:
             continue
-        columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
+        ncol = int(dc.run.nx) * int(dc.run.ny)
+        columns = min(ncol, tile_cap)
+        if metal:
+            columns = max(columns, metal_column_tile_columns(
+                profile.multiprocessor_count, ncol, MRF_BLOCK,
+                block_bytes=mrf_workspace_floats(int(dc.run.nz), MRF_BLOCK) * 4))
         worst = max(worst, mrf_workspace_floats(int(dc.run.nz), columns) * 4)
     return int(worst)
 def ksas_column_workspace_bytes(exp: ExperimentConfig) -> int:
@@ -5626,12 +5637,24 @@ def eeps_column_workspace_bytes(
         profile: DeviceLocalMemoryProfile | None = None) -> int:
     """Conservative EEPS tile allocation without importing a GPU runtime."""
     from woof.core.physics_inventory import (
-        EEPS_BLOCK, EEPS_TILE_BLOCKS_PER_SM, eeps_workspace_floats)
+        EEPS_BLOCK, EEPS_TILE_BLOCKS_PER_SM, eeps_workspace_floats,
+        metal_column_tile_columns)
 
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
     capacity = profile.multiprocessor_count * EEPS_TILE_BLOCKS_PER_SM * EEPS_BLOCK
-    return max((eeps_workspace_floats(int(dc.run.nz),
-                min(int(dc.run.nx) * int(dc.run.ny), capacity)) * 4
+    # A Metal device launches the wider Metal tile (eeps_pbl.tile_columns).
+    metal = getattr(profile, "backend", "cuda") == "mlx"
+
+    def columns(dc):
+        ncol = int(dc.run.nx) * int(dc.run.ny)
+        width = min(ncol, capacity)
+        if metal:
+            width = max(width, metal_column_tile_columns(
+                profile.multiprocessor_count, ncol, EEPS_BLOCK,
+                block_bytes=eeps_workspace_floats(int(dc.run.nz), EEPS_BLOCK) * 4))
+        return width
+
+    return max((eeps_workspace_floats(int(dc.run.nz), columns(dc)) * 4
                 for dc in exp.domains if int(dc.run.bl_pbl_physics) == EEPS_PBL_SCHEME),
                default=0)
 
@@ -5707,16 +5730,23 @@ def column_kernel_cumulus_workspace_bytes(
     ``tables.floats`` words held for the run.
     """
     from woof.core.column_cumulus import _TILE_BLOCKS_PER_SM, column_kernel_spec
+    from woof.core.physics_inventory import metal_column_tile_columns
 
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
+    # A Metal device launches the wider Metal tile (registry_tile_columns).
+    metal = getattr(profile, "backend", "cuda") == "mlx"
     worst = 0
     for dc in exp.domains:
         spec = column_kernel_spec(int(dc.run.cu_physics))
         if spec is None:
             continue
-        columns = min(int(dc.run.nx) * int(dc.run.ny),
-                      int(profile.multiprocessor_count)
+        ncol = int(dc.run.nx) * int(dc.run.ny)
+        columns = min(ncol, int(profile.multiprocessor_count)
                       * _TILE_BLOCKS_PER_SM * spec.block)
+        if metal:
+            columns = max(columns, metal_column_tile_columns(
+                profile.multiprocessor_count, ncol, spec.block,
+                block_bytes=4 * spec.workspace_slots * int(dc.run.nz) * spec.block))
         held = int(spec.tables["floats"]) if spec.tables else 0
         initialization = (int(spec.tables["grid"]) * int(spec.tables["block"])
                           * int(spec.tables["scratch_floats_per_thread"])
