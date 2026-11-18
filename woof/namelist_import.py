@@ -5797,16 +5797,20 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             else:
                 o3input = value
         # A domain on another adapter that reads ghg_input keeps it for the
-        # shared reader below (validate_rrtmgk_config then holds the K
-        # domains to 0); cldovrlp/idcor are already taken above by the
+        # shared reader below, and woof's K domains then follow it too (a
+        # declared extension beyond WRF, woof.core.rrtmgk).  A K-only
+        # namelist drops it: wrf.exe's K never read it, so the imported run
+        # keeps WRF's fixed gases; ghg_input=1 on K is opted into through
+        # woof's own config.  cldovrlp/idcor are already taken above by the
         # 4/4 arm when one is selected.
         shared = ("ghg_input",) if (any_rrtmg or any_cam or any_gsfc) else ()
         for key in ("ghg_input", "cldovrlp", "idcor"):
             if key in shared:
                 continue
             drop("physics", key, ph.take(key),
-                 "RRTMG-K's rad_rrtmg_driver does not read it (fixed trace "
-                 "gases, its own McICA subcolumn walk)")
+                 "wrf.exe's RRTMG-K rad_rrtmg_driver does not read it (fixed "
+                 "trace gases, its own McICA subcolumn walk); woof's K reads "
+                 "ghg_input only when its own config sets it")
     if any_rrtmg or any_cam or any_gsfc:
         raw_ghg = ph.take("ghg_input")
         if raw_ghg is not None:
@@ -5833,6 +5837,19 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                 reason="the namelist omits ghg_input; the WRF v4 Registry "
                        "default is 1 (time-varying CO2/N2O/CH4/CFCs from "
                        "CAMtr_volume_mixing_ratio, SSP245 as WRF ships it)"))
+        if ghg_input == 1 and any(14 in pair for pair in radiation_pairs):
+            # wrf.exe's K domains ignored it and radiated fixed gases; woof's
+            # one tree-wide ghg_input would give them CAMtr gases (woof's K
+            # follows it, beyond WRF), so the import cannot reproduce the run.
+            raise _err(
+                "physics", "ghg_input",
+                raw_ghg if raw_ghg is not None else "(omitted: WRF v4 default 1)",
+                "ghg_input is one tree-wide value in woof, and woof's RRTMG-K "
+                "(ra_lw/ra_sw_physics=14) follows it while wrf.exe's K never "
+                "read it, so this tree's K domains would radiate CAMtr gases "
+                "where wrf.exe ran fixed ones. Set ghg_input = 0 (fixed gases "
+                "on every domain), or opt K into CAMtr gases in woof's config "
+                "after import.")
         if ghg_input == 0:
             ghg_input = None  # the engine default: write nothing
     if not (any_rrtmg or any_cam) and any(5 in pair for pair in radiation_pairs):

@@ -111,7 +111,7 @@ def _families(cfg):
         if _get(cfg, "urban_ucm_generation", "wrf_471") == "wrf_480":
             urban += "-480"
         selected.append(urban)
-    if _get(cfg, "ghg_input") and (lw in (1, 4, 5) or sw in (4, 5)):
+    if _get(cfg, "ghg_input") and (lw in (1, 4, 5, 14) or sw in (4, 5, 14)):
         selected.append("camtr")
     return selected
 

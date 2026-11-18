@@ -14,7 +14,7 @@ every other radiation row.  These tests hold the seam to the WRF route:
   (the column set of a variable-resolution mesh, in no particular order),
   permuting the cells permutes every radiation output bit for bit, and a
   column chunk smaller than the cell count changes no bit;
-* K is load-bearing: the seam's radiative heating rates differ from legacy
+* K is the scheme that ran: the seam's radiative heating rates differ from legacy
   RRTMG's on the same columns by more than rounding.
 
 The cap sits near 56N at local midday, so every column is lit and the
@@ -231,3 +231,47 @@ def test_rrtmgk_heating_differs_from_legacy_rrtmg(monkeypatch):
         assert scale > 0, name
         # More than rounding: K's gas optics and cloud path, not ULPs.
         assert float(np.abs(k - legacy).max()) > 1e-3 * scale, name
+
+
+def test_ghg_input_reaches_the_seam_and_takes_the_camtr_gases(monkeypatch):
+    """ghg_input = 1 on the seam (beyond WRF, woof.core.rrtmgk): the adapter
+    radiates the CAMtr gases at each call's valid time, bit for bit the
+    WRF-route adapter built with ghg_input = 1; unset, no gases are read."""
+    from woof.core import rrtmgk
+    from woof.core.camtr_gases import camtr_trace_gases
+    reads = []
+    inner = rrtmgk.camtr_gases
+
+    def camtr(yr, julian):
+        gases = inner(yr, julian)
+        reads.append((yr, julian, gases))
+        return gases
+    monkeypatch.setattr(rrtmgk, "camtr_gases", camtr)
+
+    physics = dict(_physics(), ghg_input=1)
+    seam = _build(physics)
+    adapter = seam._driver.radiation_callable
+    assert seam._cfg.ghg_input == 1 and adapter.ghg_input == 1
+    lat, lon = _cap(NCOL)
+    fresh = RRTMGKRadiation(
+        START, lat.reshape(1, -1), lon.reshape(1, -1), o3input=2, icloud=1,
+        column_chunk=None, p_top=cases.P_TOP, ghg_input=1)
+    calls = _spy(monkeypatch, seam, also=fresh)
+    _run(seam, steps=1)
+    assert calls and reads
+    for yr, julian, gases in reads:
+        assert yr == START.year
+        table = camtr_trace_gases(yr, julian)
+        assert gases == {k: np.float32(table[k]) for k in rrtmgk.GHG_INPUT_GASES}
+    k_ghg = calls[0][0]
+    for name in k_ghg:
+        np.testing.assert_array_equal(k_ghg[name], calls[0][1][name], name)
+
+    reads.clear()
+    base = _build(_physics())
+    assert base._driver.radiation_callable.ghg_input == 0
+    with monkeypatch.context() as patch:
+        base_calls = _spy(patch, base)
+        _run(base, steps=1)
+    assert base_calls and not reads
+    assert not np.array_equal(k_ghg["rthratenlw"], base_calls[0][0]["rthratenlw"])
