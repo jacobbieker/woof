@@ -8715,9 +8715,10 @@ def initialize_physics(
         latitude=radiation_latitude, longitude=radiation_longitude,
         cold_start=lsm_cold_start)
     if getattr(cfg, "sst_skin", 0):
-        f["sst"] = _as_2d(tsk if sst is None else sst, shape, "sst").copy()
-        # Bulk SST must stay independent if a device caller supplies the
-        # same array for SST and TSK; the skin write-back mutates TSK.
+        # f["sst"] is already its own copy (above), independent of TSK,
+        # which the skin write-back mutates; it is not rebuilt here, since
+        # a rebuild from the caller's arrays would discard the lake water
+        # temperature initialize_surface just bound.
         # WRF tools/gen_allocs.c initializes allocated REAL state to zero.
         # SSTSK has no later cold-start initializer before its first call.
         f["sstsk"] = cp.zeros(shape, dtype=DTYPE)
@@ -8821,11 +8822,12 @@ def initialize_physics(
     if int(cfg.sf_surface_physics) in (3, 8) or (int(cfg.sf_surface_physics) in (2, 4, 7) and cfg.fractional_seaice):
         # module_physics_init.F:3126-3131 initializes TSK_SAVE from TSK.
         # The open-water component comes from SST when the ingest carries it;
-        # otherwise the already repaired surface temperature is WRF's
-        # no-SST fallback.
+        # otherwise TSK is WRF's no-SST fallback.  Both are read from the
+        # fields after initialize_surface, so they carry the lake state it
+        # bound (water temperature in SST and TSK; ice temperature and the
+        # 273.15 K clamp in TSK), whatever array type the caller passed.
         f["tsk_save"] = cp.ascontiguousarray(f["tsk"].copy())
-        f["tsk_sea"] = _as_2d(
-            tsk if sst is None else sst, shape, "sst").copy()
+        f["tsk_sea"] = (f["tsk"] if sst is None else f["sst"]).copy()
         for name in ("znt", "ust", "mol", "zol", "flhc", "flqc", "cpm",
                      "cqs2", "chs2", "chs", "qsfc", "qgh", "hfx", "qfx",
                      "lh"):
@@ -9790,10 +9792,8 @@ def initialize_physics(
         import json as _wind_json
         print("[wind-farm detection] " + _wind_json.dumps(driver.wind_farm_detection), flush=True)
     if cfg.sst_update:
-        # Same bulk SST carrier name as the independent skin-SST port.
-        if "sst" not in driver.fields:
-            driver.fields["sst"] = _as_2d(sst if sst is not None else tsk,
-                                            shape, "sst").copy()
+        # Same bulk SST carrier name as the independent skin-SST port;
+        # f["sst"] is always built above, with any bound lake temperature.
         from woof.surface_analysis import bind_surface_analysis
         bind_surface_analysis(driver, cfg, radiation_start_time,
                               radiation_latitude, radiation_longitude)
