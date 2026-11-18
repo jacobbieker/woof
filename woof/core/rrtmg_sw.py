@@ -3612,11 +3612,19 @@ class CudaSW:
             # solar_ssi_opt: the band shares of the day's solar spectrum
             # (woof.spacewx.solar_spectrum), bands 16..29 in order; None
             # leaves adjflux, and so every output, bitwise unchanged.
-            bf = np.asarray(band_factor, dtype=f32)
-            if bf.shape != (NBNDSW,) or not np.all(np.isfinite(bf)) or np.any(bf <= 0):
-                raise ValueError(f"band_factor must be {NBNDSW} finite positive float32 values (bands 16..29), "
-                                 f"got {bf.shape} {bf}")
-            adjflux_h = adjflux_h * xp.asarray(bf)[None, :]
+            # Validated and uploaded once per value (a radiation call runs
+            # one SW batch per column window), then reused.
+            key = (tuple(float(v) for v in np.ravel(band_factor)), device,
+                   cp.cuda.Device().id if device else -1)
+            held = getattr(self, "_band_factor_held", None)
+            if held is None or held[0] != key:
+                bf = np.asarray(band_factor, dtype=f32)
+                if bf.shape != (NBNDSW,) or not np.all(np.isfinite(bf)) or np.any(bf <= 0):
+                    raise ValueError(f"band_factor must be {NBNDSW} finite positive float32 values "
+                                     f"(bands 16..29), got {bf.shape} {bf}")
+                held = (key, xp.asarray(bf)[None, :])
+                self._band_factor_held = held
+            adjflux_h = adjflux_h * held[1]
         aldir_h, aldif_h = dev(aldir), dev(aldif)
         asdir_h, asdif_h = dev(asdir), dev(asdif)
         albdir_h = xp.zeros((ncol, NBNDSW), f32)

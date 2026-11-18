@@ -136,6 +136,33 @@ def test_a_gap_and_a_missing_variable_are_refused(tmp_path):
         ss.read_series(tmp_path / "bad.nc")
 
 
+def test_out_of_band_fill_keeps_the_day_and_a_dead_band_is_refused(tmp_path):
+    netCDF4 = pytest.importorskip("netCDF4")
+    # The test file with one extra bin below 200 nm, a fill on day 1.
+    src = netCDF4.Dataset(_ssi_file(tmp_path / "ssi.nc"))
+    n = src.dimensions["wavelength"].size
+    out = tmp_path / "wide.nc"
+    with netCDF4.Dataset(out, "w") as data:
+        data.createDimension("time", 3)
+        data.createDimension("bounds", 2)
+        data.createDimension("wavelength", n + 1)
+        t = data.createVariable("time", "f8", ("time",))
+        t.units = src["time"].units
+        t[:] = src["time"][:]
+        data.createVariable("time_bnds", "f8", ("time", "bounds"))[:] = src["time_bnds"][:]
+        data.createVariable("wavelength", "f4", ("wavelength",))[:] = np.r_[150.0, src["wavelength"][:]]
+        data.createVariable("Wavelength_Band_Width", "f4", ("wavelength",))[:] = \
+            np.r_[10.0, src["Wavelength_Band_Width"][:]]
+        ssi = np.c_[np.ones(3), src["SSI"][:]]
+        ssi[1, 0] = np.nan
+        data.createVariable("SSI", "f4", ("time", "wavelength"))[:] = ssi
+        data.createVariable("TSI", "f4", ("time",))[:] = src["TSI"][:]
+    src.close()
+    assert ss.read_series(out).days.size == 3
+    with pytest.raises(SolarForcingError, match="no irradiance"):
+        ss.SsiSeries(np.array([1.0]), np.zeros((1, 14)), np.array([1361.0]), "x", "")
+
+
 def test_nrlssi2_fetch_takes_the_newest_final_file_once(tmp_path):
     import io
     payload = _ssi_file(tmp_path / "served.nc").read_bytes()
@@ -186,6 +213,7 @@ def test_defaults_are_off_and_admitted():
     (dict(solar_ssi_opt=1, solar_ssi_source="nrlssi2", ra_physics=0, ra_sw_physics=0,
           ra_lw_physics=0), "14 bands"),
     (dict(solar_ssi_opt=1, solar_ssi_source="nrlssi2", dfi_opt=3), "dfi_opt"),
+    (dict(solar_ssi_opt=1, solar_ssi_source="nrlssi2", swint_opt=2), "FARMS"),
 ])
 def test_refusals_name_the_breakage(overrides, match):
     from woof.config import _validate_solar_ssi
@@ -207,6 +235,29 @@ def test_hex_refuses_it():
     from woof.hex.physics_suites import PhysicsSelectionRefusal, resolve_physics
     with pytest.raises(PhysicsSelectionRefusal, match="solar_ssi_opt"):
         resolve_physics("arwen_mpas_column", {"solar_ssi_opt": 1}, mesh="x1.40962")
+
+
+def test_the_factor_reaches_a_wrapped_or_swapped_shortwave(tmp_path):
+    """A partial nest's extended-column wrapper forwards attributes to its inner
+    adapter; the factor must land on the inner one.  A callable swapped in after
+    start-up (a batched ensemble's member radiation) is the one set."""
+    from types import SimpleNamespace
+    from woof.core.partial_nest_physics import ExtendedColumnRadiation
+    from woof.core.rrtmg_legacy import RRTMGLegacyRadiation
+
+    class Leaf(RRTMGLegacyRadiation):
+        def __init__(self):
+            self.shortwave = True
+
+    series = ss.read_series(_ssi_file(tmp_path / "ssi.nc", uv=(1.2, 1.2, 1.2)))
+    sv = ss.SpectralVariability(series, datetime(2024, 5, 10, 12))
+    inner = Leaf()
+    wrapper = ExtendedColumnRadiation(inner, SimpleNamespace())
+    sv.apply(wrapper, 0.0)
+    assert "sw_band_factor" not in vars(wrapper) and inner.sw_band_factor[12] > 1.19
+    swapped = Leaf()
+    sv.apply(swapped, 3600.0)
+    assert swapped.sw_band_factor == inner.sw_band_factor
 
 
 def test_a_shortwave_without_rrtmgs_bands_is_refused():
@@ -307,7 +358,8 @@ def test_legacy_rrtmg_band_factor_is_exact_at_one_and_linear():
 def test_the_driver_sets_the_days_factor_before_the_call(tmp_path):
     path = _ssi_file(tmp_path / "ssi.nc", first=datetime(2011, 4, 25), uv=(1.2, 1.2, 1.2))
     driver, state, cfg = _driver(solar_ssi_opt=1, solar_ssi_source=str(path))
-    assert driver.solar_spectrum is not None and driver.solar_spectrum.targets == (_sw_leaf(driver),)
+    assert driver.solar_spectrum is not None
+    assert ss.SpectralVariability.shortwave_targets(driver.radiation_callable) == (_sw_leaf(driver),)
     from woof.core.physics import _prepare_atmosphere
     driver._run_radiation(_prepare_atmosphere(state), state, cfg)
     want = ss.band_factor(np.where(np.arange(14) == 12, REF * 1.2, REF))

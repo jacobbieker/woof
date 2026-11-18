@@ -2440,6 +2440,11 @@ def _validate_solar_ssi(cfg) -> None:
         raise ConfigurationRefused(
             "solar_ssi_opt = 1 with dfi_opt: the filter captures the step in a "
             "CUDA graph, which would freeze the band factor of its first call")
+    if int(cfg.swint_opt) == 2:
+        raise ConfigurationRefused(
+            "solar_ssi_opt = 1 with swint_opt = 2: FARMS recomputes the surface "
+            "shortwave every step from its own broadband source, so the surface "
+            "would not see the band shares the heating rates use")
 
 
 def _validate_spacewx_ionosphere(cfg) -> None:

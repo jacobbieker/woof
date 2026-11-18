@@ -28,11 +28,11 @@ from datetime import datetime, timedelta
 import hashlib
 import os
 from pathlib import Path
-import re
 
 import numpy as np
 
-from woof.spacewx.solar_irradiance import _EPOCH_1610, SolarForcingError, cache_root, naive_utc
+from woof.spacewx.solar_irradiance import (_EPOCH_1610, SolarForcingError, cdr_day_centres, fetch_cdr_years,
+                                             naive_utc, noon_years)
 
 #: RRTMG SW bands 16..29 (rrsw_wvn wavenum1/wavenum2), cm-1.
 BANDS_CM1 = ((2600.0, 3250.0), (3250.0, 4000.0), (4000.0, 4650.0), (4650.0, 5150.0),
@@ -55,13 +55,7 @@ SOURCES = ("nrlssi2",)
 def band_irradiance(wavelength_nm, width_nm, ssi) -> np.ndarray:
     """(..., 14) W m-2 in RRTMG's bands from SSI (..., n) in W m-2 nm-1 on bins
     centred at ``wavelength_nm`` of width ``width_nm`` (partial bins pro rata)."""
-    w = np.asarray(wavelength_nm, np.float64)
-    dw = np.asarray(width_nm, np.float64)
-    lo, hi = w - 0.5 * dw, w + 0.5 * dw
-    weights = np.empty((NBANDS, w.size))
-    for b, (a, z) in enumerate(BANDS_NM):
-        weights[b] = np.clip(np.minimum(hi, z) - np.maximum(lo, a), 0.0, None)
-    return np.asarray(ssi, np.float64) @ weights.T
+    return np.asarray(ssi, np.float64) @ _band_weights(wavelength_nm, width_nm).T
 
 
 @dataclass(frozen=True)
@@ -84,6 +78,10 @@ class SsiSeries:
             raise SolarForcingError(f"{self.source}: SSI series days are not strictly ascending")
         if np.any((self.tsi < 1300.0) | (self.tsi > 1400.0)):
             raise SolarForcingError(f"{self.source}: TSI outside 1300-1400 W m-2; is the unit W m-2?")
+        if np.any(self.band <= 0.0):
+            raise SolarForcingError(f"{self.source}: a day has a band with no irradiance; the series is damaged")
+        # S_b / TSI, read at every radiation call.
+        object.__setattr__(self, "fractions", self.band / self.tsi[:, None])
 
     def fractions_at(self, valid_time: datetime) -> np.ndarray:
         """S_b / TSI at ``valid_time`` (linear between daily noons, no extrapolation)."""
@@ -94,7 +92,7 @@ class SsiSeries:
                 f"{valid_time:%Y-%m-%d %H:%M} is outside the SSI series {self.source} "
                 f"({_EPOCH_1610 + timedelta(days=first - 0.5):%Y-%m-%d} to "
                 f"{_EPOCH_1610 + timedelta(days=last + 0.5):%Y-%m-%d}); extend it rather than extrapolate")
-        frac = self.band / self.tsi[:, None]
+        frac = self.fractions
         if day <= first:
             return frac[0].copy()
         if day >= last:
@@ -108,31 +106,37 @@ class SsiSeries:
         return frac[k] + w * (frac[k + 1] - frac[k])
 
 
+def _band_weights(wavelength_nm, width_nm) -> np.ndarray:
+    w = np.asarray(wavelength_nm, np.float64)
+    dw = np.asarray(width_nm, np.float64)
+    lo, hi = w - 0.5 * dw, w + 0.5 * dw
+    weights = np.empty((NBANDS, w.size))
+    for b, (a, z) in enumerate(BANDS_NM):
+        weights[b] = np.clip(np.minimum(hi, z) - np.maximum(lo, a), 0.0, None)
+    return weights
+
+
 def read_netcdf(path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(noon days, (n, 14) band W m-2, TSI) from one NOAA CDR SSI netCDF."""
+    """(noon days, (n, 14) band W m-2, TSI) from one NOAA CDR SSI netCDF.  A day
+    is kept when its TSI and every bin inside RRTMG's bands are finite."""
     from woof.netcdf_bridge import open_dataset    # the Rust decoder; no Python NetCDF fallback
     with open_dataset(path) as data:
         need = ("SSI", "wavelength", "Wavelength_Band_Width", "TSI", "time")
         missing = [k for k in need if k not in data.variables]
         if missing:
             raise SolarForcingError(f"{path}: an SSI netCDF needs {need} (the NOAA CDR layout); missing {missing}")
-        units = str(getattr(data.variables["time"], "units", ""))
-        if units.strip() != "days since 1610-01-01 00:00:00":
-            raise SolarForcingError(f"{path}: time units {units!r}; expected 'days since 1610-01-01 00:00:00'")
-        start = np.asarray(data.variables["time"][:], np.float64)
-        if "time_bnds" in data.variables:
-            bounds = np.asarray(data.variables["time_bnds"][:], np.float64)
-            centre = 0.5 * (bounds[:, 0] + bounds[:, 1])
-        else:
-            centre = start + 0.5
+        centre = cdr_day_centres(data, path)
         wl = np.asarray(data.variables["wavelength"][:], np.float64)
         dw = np.asarray(data.variables["Wavelength_Band_Width"][:], np.float64)
         ssi = np.ma.filled(np.ma.asarray(data.variables["SSI"][:]).astype(np.float64), np.nan)
         tsi = np.ma.filled(np.ma.asarray(data.variables["TSI"][:]).astype(np.float64), np.nan)
     if ssi.shape != (centre.size, wl.size):
         raise SolarForcingError(f"{path}: SSI of shape {ssi.shape}, expected {(centre.size, wl.size)}")
+    weights = _band_weights(wl, dw)
+    inside = weights.sum(axis=0) > 0.0
+    ssi = ssi[:, inside]
     keep = np.isfinite(tsi) & np.all(np.isfinite(ssi), axis=1)
-    return centre[keep], band_irradiance(wl, dw, ssi[keep]), tsi[keep]
+    return centre[keep], ssi[keep] @ weights[:, inside].T, tsi[keep]
 
 
 def read_series(paths) -> SsiSeries:
@@ -158,50 +162,11 @@ def read_series(paths) -> SsiSeries:
 def fetch_nrlssi2(years, *, cache=None, opener=None) -> list[Path]:
     """The NOAA CDR daily SSI netCDF (about 13 MB) for each year, fetched once
     into the cache; the newest listed final (not preliminary) file is taken."""
-    import urllib.request
-    opener = opener or (lambda url: urllib.request.urlopen(url, timeout=300))
-    root = Path(cache) if cache is not None else cache_root() / "nrlssi2-ssi"
-    root.mkdir(parents=True, exist_ok=True)
-    listing = None
-    out = []
-    for year in sorted(set(int(y) for y in years)):
-        local = sorted(root.glob(f"ssi_v03r00_daily_s{year}0101_e{year}1231_c*.nc"))
-        if local:
-            out.append(local[-1])
-            continue
-        if listing is None:
-            with opener(NRLSSI2_SSI_INDEX_URL) as reply:
-                listing = reply.read().decode("utf-8", "replace")
-        names = sorted(set(re.findall(rf'ssi_v03r00_daily_s{year}0101_e{year}1231_c\d{{8}}\.nc', listing)))
-        if not names:
-            raise SolarForcingError(
-                f"no complete NOAA CDR SSI file for {year} at {NRLSSI2_SSI_INDEX_URL} (the CDR lags by a "
-                "few months); give solar_ssi_source netCDF files in its layout that cover the run")
-        target = root / names[-1]
-        from woof.spacewx.assets import unique_part
-        part = unique_part(target)
-        try:
-            with opener(NRLSSI2_SSI_INDEX_URL + names[-1]) as reply, part.open("wb") as stream:
-                stream.write(reply.read())
-        except BaseException:
-            part.unlink(missing_ok=True)
-            raise
-        from woof.netcdf_bridge import NetcdfBridgeMissing
-        try:
-            SsiSeries(*read_netcdf(part), str(part), "")      # a truncated download is not installed
-        except NetcdfBridgeMissing:
-            part.unlink(missing_ok=True)
-            raise
-        except Exception as exc:
-            part.unlink(missing_ok=True)
-            raise SolarForcingError(f"{NRLSSI2_SSI_INDEX_URL}{names[-1]}: the download does not read "
-                                    f"as a NOAA CDR SSI file ({exc}); try again") from exc
-        except BaseException:
-            part.unlink(missing_ok=True)
-            raise
-        part.replace(target)
-        out.append(target)
-    return out
+    return fetch_cdr_years(
+        years, prefix="ssi", index_url=NRLSSI2_SSI_INDEX_URL, subdir="nrlssi2-ssi",
+        what="SSI", key="solar_ssi_source netCDF files in its layout",
+        check=lambda path: SsiSeries(*read_netcdf(path), str(path), ""),
+        cache=cache, opener=opener, timeout=300)
 
 
 def load_series(source: str, start: datetime, end: datetime) -> SsiSeries:
@@ -210,9 +175,7 @@ def load_series(source: str, start: datetime, end: datetime) -> SsiSeries:
     if not text:
         raise SolarForcingError("solar_ssi_opt=1 needs solar_ssi_source: 'nrlssi2' or NOAA CDR SSI netCDF path(s)")
     if text == "nrlssi2":
-        start, end = naive_utc(start), naive_utc(end)
-        years = range((start - timedelta(hours=12)).year, (end + timedelta(hours=12)).year + 1)
-        return read_series(fetch_nrlssi2(years))
+        return read_series(fetch_nrlssi2(noon_years(start, end)))
     return read_series([p for p in text.split(os.pathsep) if p])
 
 
@@ -228,29 +191,43 @@ def band_factor(fractions, reference=None) -> np.ndarray:
 class SpectralVariability:
     """The per-radiation-call band factor (``solar_ssi_opt = 1``)."""
 
-    #: SW schemes whose source is RRTMG's 14 bands (RRTMG, RRTMG-K).
-    SCHEMES = (4, 14)
-
-    def __init__(self, series: SsiSeries, start_time: datetime, targets=()):
+    def __init__(self, series: SsiSeries, start_time: datetime):
         self.series = series
         self.start_time = naive_utc(start_time)
-        self.targets = tuple(targets)
-        self.last_factor = None
+        self.start_factor = self.factor(0.0)
+        self.last_factor = self.start_factor
 
     @staticmethod
     def shortwave_targets(radiation) -> tuple:
-        """The shortwave leaves of ``radiation`` that take the band factor;
-        refused when the shortwave is not RRTMG's 14 bands."""
+        """The shortwave adapters inside ``radiation`` that take the band
+        factor: composition leaves, and the adapter a wrapper (a partial nest's
+        extended column) runs.  Resolved at each call, so a callable the
+        driver swaps in (a batched ensemble's member radiation) is the one
+        set.  Refused when no shortwave takes RRTMG's 14 bands."""
         from woof.core.radiation_composition import radiation_adapters
-        leaves = [a for a in radiation_adapters(radiation) if getattr(a, "shortwave", True)]
-        targets = tuple(a for a in leaves if getattr(a, "accepts_sw_band_factor", False))
-        if not targets:
+        found, leaves, seen = [], [], set()
+
+        def visit(adapter):
+            for leaf in radiation_adapters(adapter):
+                if id(leaf) in seen:
+                    continue
+                seen.add(id(leaf))
+                if getattr(type(leaf), "accepts_sw_band_factor", False):
+                    if getattr(leaf, "shortwave", True):
+                        found.append(leaf)
+                elif "inner" in vars(leaf):          # a wrapper runs its own inner adapter
+                    visit(vars(leaf)["inner"])
+                else:
+                    leaves.append(leaf)
+
+        visit(radiation)
+        if not found:
             names = sorted({type(a).__name__ for a in leaves})
             raise SolarForcingError(
                 f"solar_ssi_opt=1 scales RRTMG SW's 14 bands, and this run's shortwave ({names}) "
                 "does not take a band factor; it needs ra_sw_physics = 4 with ra_rrtmg_variant = "
                 "'rrtmg_legacy', or 14 (RRTMG-K)")
-        return targets
+        return tuple(found)
 
     @classmethod
     def for_run(cls, cfg, start_time, radiation=None):
@@ -258,19 +235,20 @@ class SpectralVariability:
             return None
         if start_time is None:
             raise SolarForcingError("solar_ssi_opt=1 needs the run's UTC start time")
-        targets = cls.shortwave_targets(radiation) if radiation is not None else ()
+        if radiation is not None:
+            cls.shortwave_targets(radiation)          # refuse a shortwave without the bands now
         start = naive_utc(start_time)
         series = load_series(getattr(cfg, "solar_ssi_source", ""), start,
                              start + timedelta(seconds=float(cfg.run_seconds)))
-        out = cls(series, start, targets)
-        out.factor(0.0)       # refuse a series that misses the start now, not mid-run
+        out = cls(series, start)       # refuses a series that misses the start now, not mid-run
         out.factor(float(cfg.run_seconds))
         return out
 
-    def apply(self, elapsed_seconds: float) -> None:
-        """Set the factor at this radiation call's time on every target leaf."""
+    def apply(self, radiation, elapsed_seconds: float) -> None:
+        """Set the factor at this radiation call's time on every shortwave
+        adapter ``radiation`` runs."""
         f = tuple(float(v) for v in self.factor(elapsed_seconds))
-        for target in self.targets:
+        for target in self.shortwave_targets(radiation):
             target.sw_band_factor = f
 
     def factor(self, elapsed_seconds: float) -> np.ndarray:
@@ -279,9 +257,8 @@ class SpectralVariability:
         return self.last_factor
 
     def receipt(self) -> dict:
-        f = self.factor(0.0)
         return {"solar_ssi_source": self.series.source, "solar_ssi_sha256": self.series.sha256,
-                "solar_ssi_band_factor_at_start": [round(float(v), 6) for v in f]}
+                "solar_ssi_band_factor_at_start": [round(float(v), 6) for v in self.start_factor]}
 
 
 __all__ = ["BANDS_CM1", "BANDS_NM", "NBANDS", "REF_BAND_FRACTION", "SsiSeries", "SpectralVariability",

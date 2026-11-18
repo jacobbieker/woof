@@ -3283,7 +3283,7 @@ class PhysicsDriver:
             radiation_fields = dict(radiation_fields, albedo=self.fields["albsol"])
         if getattr(self, "solar_spectrum", None) is not None:
             # The band shares at the call's model time, read by the SW leaf.
-            self.solar_spectrum.apply(state.elapsed_seconds)
+            self.solar_spectrum.apply(self.radiation_callable, state.elapsed_seconds)
         result = self.radiation_callable(
             atmosphere=atmosphere, fields=radiation_fields, state=radiation_state, cfg=cfg)
         if not isinstance(result, RadiationResult):
