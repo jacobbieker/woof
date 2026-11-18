@@ -3934,6 +3934,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rw-cu99-launch"
+version = "0.1.0"
+
+[[package]]
 name = "rw-fetch"
 version = "0.1.0"
 dependencies = [
@@ -4334,10 +4338,6 @@ dependencies = [
 
 [[package]]
 name = "rw-tempo"
-version = "0.1.0"
-
-[[package]]
-name = "rw-cu99-launch"
 version = "0.1.0"
 
 [[package]]
