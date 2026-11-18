@@ -60,14 +60,34 @@ def test_refusals_name_the_breakage(overrides, match):
 
 def test_radm2_admits_the_source_and_it_reaches_the_identity():
     from woof.io import restart
-    cfg = _cfg(chem_sets="radm2", bl_pbl_physics=1, sf_sfclay_physics=1, spacewx_epp_opt=1, spacewx_epp_source="swpc")
+    cfg = _cfg(chem_sets="radm2", bl_pbl_physics=1, sf_sfclay_physics=1, ra_physics=4, spacewx_epp_opt=1,
+               spacewx_epp_source="swpc")
     validate_run_config(cfg)
     assert E.device_shapes(cfg) == {"spacewx_epp/cap": (4, 6)}
-    assert E.transient_shapes(cfg)["spacewx_epp/p8w"] == (6, 4, 6)
+    shapes = E.transient_shapes(cfg)
+    assert shapes["spacewx_epp/p8w"] == shapes["spacewx_epp/logp"] == (6, 4, 6)
+    assert len(shapes) == 13 and sum(s == (5, 4, 6) for s in shapes.values()) == 11
     on = restart.configuration_echo(cfg)
     assert on["spacewx_epp_opt"] == 1 and on["spacewx_epp_source"] == "swpc"
     off = restart.configuration_echo(_cfg(chem_sets="radm2", bl_pbl_physics=1, sf_sfclay_physics=1))
     assert "spacewx_epp_opt" not in off and "spacewx_epp_source" not in off
+
+
+def test_no_radiation_is_refused():
+    cfg = _cfg(chem_sets="radm2", bl_pbl_physics=1, sf_sfclay_physics=1, spacewx_epp_opt=1,
+               spacewx_epp_source="swpc", ra_physics=0, ra_lw_physics=0, ra_sw_physics=0)
+    with pytest.raises(ConfigurationRefused, match="no radiation scheme"):
+        validate_run_config(cfg)
+
+
+def test_omni2_paths_join_with_colons_and_expand_the_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for name in ("omni2_2011.dat", "omni2_2012.dat"):
+        (tmp_path / name).write_text("")
+    joined = E.parse_source("~/omni2_2011.dat:~/omni2_2012.dat")
+    assert joined == f"{tmp_path}/omni2_2011.dat:{tmp_path}/omni2_2012.dat"
+    with pytest.raises(E.EppChemError, match="missing: .*omni2_2013.dat"):
+        E.parse_source("~/omni2_2012.dat:~/omni2_2013.dat")
 
 
 def test_hex_refuses_it():
@@ -94,6 +114,25 @@ def test_the_flux_of_the_last_ended_hour_is_held_and_memoised(tmp_path):
     assert "spacewx_epp_held_from" in again["record"] and len(seen) == 1
     with pytest.raises(E.EppChemError, match="no proton flux"):
         E.held_flux("omni", datetime(2024, 5, 11, 9), loader=loader)
+
+
+def test_a_missing_10_mev_flux_is_refused_and_not_memoised(tmp_path):
+    fill = [np.nan] * 6                      # OMNI2's proton words since 2021
+    with pytest.raises(E.EppChemError, match="(?s)missing.*fill from 2021.*swpc"):
+        E.held_flux("omni", START, loader=lambda *a: _record(fill), memo=tmp_path)
+    assert not list(tmp_path.iterdir())
+    # A later call reads the source again (here with the flux present).
+    held = E.held_flux("omni", START, loader=lambda *a: _record(JAN2012), memo=tmp_path)
+    assert held["spe"] and len(list(tmp_path.iterdir())) == 1
+
+
+def test_no_cell_in_a_cap_skips_the_table_and_a_bad_spectrum_is_named():
+    held = _held(JAN2012)
+    assert E.EppSource(START, held, np.zeros((2, 3), np.float32)).log_rate is None
+    assert E.EppSource(START, held, np.ones((2, 3), np.float32)).log_rate is not None
+    bad = dict(held, channels=(1.0, 2.0))          # channels and flux disagree
+    with pytest.raises(E.EppChemError, match="spacewx_epp_opt = 1"):
+        E.EppSource(START, bad, np.ones((2, 3), np.float32))
 
 
 # --- the rate --------------------------------------------------------------------------

@@ -12,11 +12,14 @@ The ion pairs that solar protons make in the polar caps
 - only in the polar caps, |dipole magnetic latitude| >= 60 deg at the start.
 
 The flux is the GOES integral proton flux of the last hour that has ended by
-the start (``spacewx_epp_source``: ``omni``, ``swpc`` or an OMNI2 file),
-held for the run: persistence, like the Kp of the aurora rows.  A fetched
-flux is kept per source and start in ``~/.woof/spacewx/epp-flux``, so a
-resume and every domain of a nested run hold the same one.  An hour below
-NOAA's S1 threshold (10 pfu above 10 MeV) adds nothing.
+the domain's start (``spacewx_epp_source``: ``omni``, ``swpc`` or OMNI2
+file(s) joined by ``:``), held for the run: persistence, like the Kp of the
+aurora rows.  Each domain holds the hour before its own start, so a nest
+started with its parent holds the same hour and a later nest its own.  A
+fetched flux is kept per source and start in ``~/.woof/spacewx/epp-flux``,
+so a resume holds the same one.  An hour below NOAA's S1 threshold (10 pfu
+above 10 MeV) adds nothing; an hour whose >10 MeV flux is missing is
+refused (OMNI2's proton words 43-48 are fill from 2021 on: use ``swpc``).
 
 On the device the source is one interpolation per cell: the deposition rate
 per unit depth, dF/dX / W, is tabulated on :data:`particles.DEPTH_GRID`
@@ -41,7 +44,6 @@ YIELDS = (("no", particles.NOX_PER_ION_PAIR),
           ("ho", particles.HOX_PER_ION_PAIR / 2.0),
           ("ho2", particles.HOX_PER_ION_PAIR / 2.0))
 SOURCES = ("omni", "swpc")
-G0 = 9.80665
 #: ln of the floor on the tabulated deposition rate (ion pairs g-1 s-1);
 #: below it a layer gets no source.
 LOG_FLOOR = math.log(1.0e-30)
@@ -63,28 +65,35 @@ def device_shapes(cfg) -> dict[str, tuple[int, ...]]:
 
 
 def transient_shapes(cfg) -> dict[str, tuple[int, ...]]:
-    """The peak of :func:`ion_pairs` and the row update: the w-level pressures
-    and seven mass-level volumes (mid depth, index, weight, the two table
-    reads, the rate and its masked copy), live together at most."""
+    """The peak of :func:`ion_pairs` and the row update, a bound on what is
+    live together: the float32 w-level pressures and their log, and eleven
+    mass-level volumes (mid depth, its clipped position, index, weight, the
+    two weighted table reads, their sum, its exp, the rate, its masked copy
+    and one row's increment)."""
     if not enabled(cfg):
         return {}
     nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
-    shapes = {"spacewx_epp/p8w": (nz + 1, ny, nx)}
+    shapes = {f"spacewx_epp/{name}": (nz + 1, ny, nx) for name in ("p8w", "logp")}
     shapes.update({f"spacewx_epp/{name}": (nz, ny, nx)
-                   for name in ("lmid", "index", "weight", "lo", "hi", "rate", "masked")})
+                   for name in ("lmid", "u", "index", "weight", "lo", "hi", "lq", "exp", "rate",
+                                "masked", "increment")})
     return shapes
 
 
 def parse_source(source: str) -> str:
-    """``omni``, ``swpc`` or the path of an OMNI2 file (returned stripped)."""
+    """``omni``, ``swpc`` or OMNI2 file path(s) joined by ``:`` (returned
+    with each path's ``~`` expanded)."""
     text = str(source or "").strip()
     if not text:
-        raise EppChemError("spacewx_epp_opt = 1 needs spacewx_epp_source: 'omni', 'swpc' or an OMNI2 file")
+        raise EppChemError("spacewx_epp_opt = 1 needs spacewx_epp_source: 'omni', 'swpc' or OMNI2 file(s)")
     if text.lower() in SOURCES:
         return text.lower()
-    if not Path(text).expanduser().is_file():
-        raise EppChemError(f"spacewx_epp_source {text!r} is neither 'omni' nor 'swpc' nor an existing OMNI2 file")
-    return text
+    paths = [Path(part.strip()).expanduser() for part in text.split(":")]
+    missing = [str(p) for p in paths if not str(p) or not p.is_file()]
+    if missing:
+        raise EppChemError(f"spacewx_epp_source {text!r} is neither 'omni' nor 'swpc' nor existing OMNI2 "
+                           f"file(s) joined by ':' (missing: {', '.join(missing)})")
+    return ":".join(str(p) for p in paths)
 
 
 def flux_hour(start: datetime) -> datetime:
@@ -96,7 +105,9 @@ def held_flux(source: str, start: datetime, *, loader=None, memo=None) -> dict:
     """The run's held flux: ``{"channels", "flux", "spe", "record"}``.
 
     With ``memo`` (a directory), the result of a fetched source is kept per
-    (source, start)."""
+    (source, start); a refused hour is never kept, so a later call reads the
+    source again.  An hour whose >10 MeV flux is missing is refused, not taken
+    as quiet."""
     kind = parse_source(source)
     hour = flux_hour(start)
     path = None
@@ -118,6 +129,16 @@ def held_flux(source: str, start: datetime, *, loader=None, memo=None) -> dict:
     except (particles.ParticleError, OSError, ValueError) as exc:
         raise EppChemError(f"spacewx_epp_opt = 1: no proton flux for the hour from {hour:%Y-%m-%dT%H:%M}Z "
                            f"({kind}): {exc}") from None
+    try:
+        j10 = flux[list(rec.channels).index(10.0)]
+    except ValueError:
+        raise EppChemError(f"spacewx_epp_opt = 1: the proton record ({kind}) has no >10 MeV channel") from None
+    if not np.isfinite(j10):
+        hint = (" OMNI2's proton words (43-48) are fill from 2021 on; use spacewx_epp_source = 'swpc' "
+                "for the last three days" if kind != "swpc" else "")
+        raise EppChemError(f"spacewx_epp_opt = 1: the >10 MeV proton flux of the hour from "
+                           f"{hour:%Y-%m-%dT%H:%M}Z is missing in {rec.source}, so whether a solar proton "
+                           f"event was on is unknown.{hint}")
     out = {"channels": tuple(float(c) for c in rec.channels), "flux": flux, "spe": bool(rec.active(flux)),
            "record": {"spacewx_epp_source": rec.source, "spacewx_epp_sha256": rec.sha256,
                       "spacewx_epp_hour": f"{hour:%Y-%m-%dT%H:%M}Z"}}
@@ -149,7 +170,7 @@ def ion_pairs(p8w, log_rate, xp=np):
     dlx = float(np.log(grid[-1] / grid[0]) / (grid.size - 1))
     p = xp.maximum(p8w.astype(xp.float32), xp.float32(1.0e-6))
     # X = p / g in g cm-2 (kg m-2 / 10); the mid depth in log.
-    lmid = xp.float32(0.5) * (xp.log(p[:-1]) + xp.log(p[1:])) + xp.float32(math.log(0.1 / G0))
+    lmid = xp.float32(0.5) * (xp.log(p[:-1]) + xp.log(p[1:])) + xp.float32(math.log(0.1 / particles._G))
     u = xp.clip((lmid - xp.float32(lx0)) / xp.float32(dlx), 0.0, float(grid.size - 1))
     i = xp.minimum(xp.floor(u).astype(xp.int32), grid.size - 2)
     f = u - i.astype(xp.float32)
@@ -165,7 +186,13 @@ class EppSource:
         self.start = start
         self.held = held
         self.cap = cap                                   # (ny, nx) float32 0/1 on the device
-        self.log_rate = log_rate_table(held["flux"], held["channels"]) if held["spe"] else None
+        self.log_rate = None
+        # No cell in a polar cap (a mid-latitude domain): nothing to add.
+        if held["spe"] and bool((cap > 0).any()):
+            try:
+                self.log_rate = log_rate_table(held["flux"], held["channels"])
+            except particles.ParticleError as exc:
+                raise EppChemError(f"spacewx_epp_opt = 1: {exc}") from None
 
     @classmethod
     def for_context(cls, ctx, *, loader=None, igrf_model=None):

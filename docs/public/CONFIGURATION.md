@@ -1524,7 +1524,7 @@ each one off, the run executes no new code. The design and the planned layers
 | `spacewx_aurora_opt` | `0` | `1` adds the auroral oval (Starkov 1994 on the IGRF-14 dipole) to every history frame: `AURORA_ZONE` (0 equatorward of the diffuse aurora, 1 diffuse aurora, 2 oval, 3 polar cap), `AURORA_DIST` (degrees poleward of the diffuse aurora's equatorward edge, the visibility line), `MAG_LAT` (degrees) and `MAG_LT` (hours), on the domain's columns at the frame's valid time. `2` also adds OVATION Prime 2010's precipitating particle energy flux: `AURORA_EFLUX` (electron energy flux, mW m-2), `AURORA_EMEAN` (electron mean energy, keV) and `AURORA_IFLUX` (ion energy flux, mW m-2), from the solar-wind coupling of the hours that have ended by the start; it needs `spacewx_kp_source = "omni"` or `"swpc"`. It is a diagnostic: the atmosphere integrates identically. |
 | `spacewx_kp_source` | `""` | The Kp that drives it, held at the run's start (persistence). `""` or `"gfz"`: the observed Kp of the latest 3-hour interval that has ended by the start, in GFZ's index file (fetched; a path reads a file in that format). `"omni"` or `"swpc"`: Kp estimated from the solar wind (NASA SPDF OMNI2 or NOAA SWPC real time) for the latest 3-hour interval whose fitted hours have ended by the start. A number is a fixed Kp in [0, 9]. Either way the Kp must lie within 24 h before the start. |
 | `spacewx_epp_opt` | `0` | `1` adds the NO, OH and HO2 that solar protons make in the polar caps (\|dipole magnetic latitude\| >= 60 deg) to the RADM2 rows `no`, `ho` and `ho2`, at each chemistry step, inside `emission.radm2` (booked as emitted): 1.25 NO and one OH plus one HO2 per ion pair, with the ion pairs from the GOES integral proton flux (Bethe stopping in air, 35 eV per pair; `woof spacewx particles` prints the same rates). Only an hour at or above NOAA's S1 threshold (10 pfu above 10 MeV) adds anything. It changes the chemistry; it needs `chem_sets` `radm2` or `radm2sorg`. |
-| `spacewx_epp_source` | `""` | The proton flux, held at the run's start (persistence): `"omni"` (NASA SPDF OMNI2, words 43-48), `"swpc"` (NOAA SWPC's GOES feed, the last 3 days) or the path of an OMNI2 file. The hour read is the last one that has ended by the start. |
+| `spacewx_epp_source` | `""` | The proton flux, held at the run's start (persistence): `"omni"` (NASA SPDF OMNI2, words 43-48), `"swpc"` (NOAA SWPC's GOES feed, the last 3 days) or OMNI2 file path(s) joined by `:`. The hour read is the last one that has ended by the domain's start; one whose >10 MeV flux is missing is refused (OMNI2's proton words are fill from 2021 on: use `"swpc"`). |
 
 `solar_tsi_source` and `solar_tsi_mode` are refused while `solar_tsi_opt = 0`,
 since they would do nothing. `solar_tsi_opt = 1` is refused without a
@@ -1565,9 +1565,11 @@ keys are output-only, so a restart may switch the rows on or off.
 
 `spacewx_epp_source` is refused while `spacewx_epp_opt = 0`. `spacewx_epp_opt =
 1` is refused without RADM2 chemistry (the `emission.radm2` rows `no`, `ho`
-and `ho2`), on a streamed domain and on hex. The flux is held per source and
-start in the space-weather cache (`epp-flux`), so resumes and nests use the
-same hour. The hour, the source's SHA-256 and whether it is an event are
+and `ho2`), with no radiation scheme (the polar caps are placed on the
+radiation geometry's xlat/xlong), on a streamed domain and on hex. Each domain
+holds the hour before its own start, kept per source and start in the
+space-weather cache (`epp-flux`), so a resume holds the same hour and a nest
+started with its parent holds its parent's. The hour, the source's SHA-256 and whether it is an event are
 printed as the run starts (the `[spacewx epp]` line). Both keys change the
 forecast, so they are part of the restart identity.
 

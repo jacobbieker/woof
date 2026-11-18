@@ -452,7 +452,7 @@ woof spacewx particles --time 2012-01-24T12:00Z --count 6 --step-hours 1 --sourc
   (`json/goes/primary/integral-protons-3-day.json`, >1 to >500 MeV, the last
   3 days), averaged to hours that hold at least 3 of their 12 values; where
   two spacecraft report the same time, the one with more records is kept. A path
-  reads an OMNI2 file.
+  reads an OMNI2 file (several joined by `:`).
 - **Event gate.** An hour counts only while J(>10 MeV) is at least 10 pfu (NOAA
   S1). Below that the channels hold mostly galactic cosmic rays and detector
   background (about 0.2 pfu at >10 MeV), which this layer leaves out.
@@ -520,6 +520,9 @@ Known limits:
   times low. The SWPC feed has the >1 and >5 MeV channels. Before 1988 (IMP 8),
   the channels that OMNI2's word 49 marks as holding magnetospheric protons
   are dropped.
+- OMNI2's proton words 43-48 are fill from 2021 on, so `--source omni` gives
+  no flux (NaN, no event) for recent years; use `--source swpc` for the last 3
+  days. Between 2021 and the SWPC window there is no source here.
 - The last energy bin, at about 1 GeV, also holds the protons above 1 GeV.
   In the atmosphere they lose energy at close to the minimum-ionising rate, as
   a 1 GeV proton does, so they are placed there rather than dropped.
@@ -539,16 +542,23 @@ domain that runs RADM2 (`chem_sets` `radm2` or `radm2sorg`).
   models without odd-nitrogen atoms. The H atom is counted as HO2, which it
   becomes within seconds through H + O2 + M.
 - **Where.** The polar caps, |dipole magnetic latitude| >= 60 deg at the start.
-- **The flux.** `spacewx_epp_source` (`omni`, `swpc` or an OMNI2 file) gives
-  the GOES flux of the last hour that has ended by the start. That flux is
-  held for the run (persistence, as the aurora's Kp is), and it is kept per
-  source and start in the space-weather cache. An hour below S1 adds nothing.
+- **The flux.** `spacewx_epp_source` (`omni`, `swpc` or OMNI2 file(s) joined
+  by `:`) gives the GOES flux of the last hour that has ended by the domain's
+  start. That flux is held for the run (persistence, as the aurora's Kp is).
+  Each domain holds the hour before its own start: a nest started with its
+  parent holds the same hour, a nest started later holds its own. A fetched
+  flux is kept per source and start in the space-weather cache, so a resume
+  holds the same one. An hour below S1 adds nothing. An hour whose >10 MeV flux
+  is missing is refused rather than taken as quiet; OMNI2's proton words are
+  fill from 2021 on, so recent runs need `swpc` (the last 3 days).
 - **On the device.** The deposition rate per unit depth is tabulated on the
   host, in float64, on the 241-point depth grid. Each layer reads it, log-log,
   at its mid depth sqrt(X_top X_bottom), with X = p8w / g. This is within 3 %
   of the layer means wherever the rate matters
   (`tests/test_spacewx_epp_chem.py`).
-- **Refusals.** Streamed domains and hex refuse the option, for now.
+- **Refusals.** Streamed domains and hex refuse the option, for now, and so
+  does a run with no radiation scheme (the caps are placed on the radiation
+  geometry's xlat/xlong). A domain with no cell in a polar cap adds nothing.
 
 **Validation.** The source is the ion-pair rate above multiplied by fixed
 yields, so its validation is the CMIP7 comparison. A comparison with MLS (OH,

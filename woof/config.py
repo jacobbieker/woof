@@ -2508,6 +2508,11 @@ def _validate_spacewx_epp(cfg) -> None:
             "spacewx_epp_opt = 1 adds NO, OH and HO2 to the RADM2 chemistry "
             "(chem_sets radm2 or radm2sorg), and this run's emission.radm2 "
             f"rows lack {', '.join(missing)}")
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            "spacewx_epp_opt = 1 places the source in the polar caps from the "
+            "radiation geometry's xlat/xlong, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
 
 
 @dataclass(frozen=True)
