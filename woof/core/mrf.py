@@ -25,7 +25,8 @@ import numpy as np
 import cupy as cp
 
 from woof.core.physics_inventory import (MRF_BLOCK, MRF_TILE_BLOCKS_PER_SM,
-                                          MRFWS_SLOTS, mrf_workspace_floats)
+                                          MRFWS_SLOTS, metal_column_tile_columns,
+                                          mrf_workspace_floats)
 from woof.core.state import DTYPE
 from woof.physics_vertical_contract import (
     MRF_VERTICAL_LEVEL_BOUNDS, outside_vertical_bounds,
@@ -96,15 +97,23 @@ MRF_3D_OUTPUTS = ("rublten", "rvblten", "rthblten", "rqvblten", "rqcblten",
 MRF_2D_OUTPUTS = ("pblh", "hol", "kpbl")
 
 
-def mrf_tile_columns(fn, ncol: int) -> int:
+def mrf_tile_columns(fn, ncol: int, nz: int | None = None) -> int:
     """Columns to keep in flight: enough to fill the card, and no more.
 
     The workspace is charged per column in flight, so the tile is the
     card's resident capacity for this kernel and never more than the
     domain (the ysu.py rule, :func:`woof.core.ysu.ysu_tile_columns`).
+    On Metal the tile is
+    :func:`woof.core.physics_inventory.metal_column_tile_columns` (the
+    whole domain in one launch under the byte cap at this ``nz``).
     """
     dev = cp.cuda.Device()
     sms = dev.attributes["MultiProcessorCount"]
+    from woof import backend
+    if backend.active() == "mlx":
+        return metal_column_tile_columns(
+            sms, ncol, MRF_BLOCK, block_bytes=(
+                None if nz is None else mrf_workspace_floats(nz, MRF_BLOCK) * 4))
     per_sm = MRF_TILE_BLOCKS_PER_SM
     try:
         from cupy_backends.cuda.api import driver
@@ -179,7 +188,7 @@ def launch_mrf(u, v, t, qv, qc, qi, p, pi, dz8w, z, *, psfc, ust, psim,
     if ncol == 0:
         return out
     fn = kernel if kernel is not None else mrf_kernel()
-    tile = mrf_tile_columns(fn, ncol)
+    tile = mrf_tile_columns(fn, ncol, nz)
     wskp = nz + 2
     ws = cp.empty(mrf_workspace_floats(nz, tile), dtype=DTYPE)
     try:
