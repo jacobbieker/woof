@@ -2098,8 +2098,9 @@ def prepare_mpas_transport_source_baseline_v842(
     CUDA transport owns its limiter. This seam reproduces the baseline that
     native leaves in scalars_1 for the post-transport vapor tendency. The held
     sources and outer state remain intact for their other consumers.
-    ``out`` (``before``'s shape, float32, C-contiguous, not ``source``) receives
-    the baseline; the kernel writes every element of it.
+    ``out`` (``before``'s shape, float32, C-contiguous, overlapping neither
+    ``source`` nor ``before``) receives the baseline; the kernel writes every
+    element of it.
     """
     require_resident_array("rho_old", rho_old, dtype=np.float32, ndim=2)
     nlev, ncells = rho_old.shape
@@ -2113,8 +2114,9 @@ def prepare_mpas_transport_source_baseline_v842(
         baseline = _cp().empty_like(before)
     else:
         require_resident_array("out", out, dtype=np.float32, shape=before.shape)
-        if not out.flags.c_contiguous or int(out.data.ptr) == int(source.data.ptr):
-            raise ValueError("MPAS source baseline out must be C-contiguous and distinct from source")
+        for name, other in (("source", source), ("before", before)):
+            if _cp().may_share_memory(out, other):
+                raise ValueError(f"MPAS source baseline out must not overlap {name}")
         baseline = out
     _mpas_v842_launch(kernel_cache, "mpas_transport_source_baseline_v842_f32", before.size,
         (np.int32(nlev), np.int32(ncells), np.int32(n_cells_solve),

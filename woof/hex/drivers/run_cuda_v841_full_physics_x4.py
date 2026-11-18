@@ -320,8 +320,12 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # compile-platform binding alone (compile_contract.kernel_cache_platform) instead of a full
     # manifest JSON round trip at every coupling launch.  No kernel, launch or operand changed;
     # 2 h the storm LTS forecast 0 of 1,167,818,735 words differ (HEX-HOST-BOUND-2026-10-27).
+    # Re-frozen 2026-11-18 (R4-H pool-direct): prepare_mpas_transport_source_baseline_v842 gained an
+    # optional ``out`` operand (validated: shape, dtype, no overlap with source or before); no kernel
+    # changed, and with out=None the launch is the old one.  What re-ran: Alps hex VR 1 h on CUDA, fast
+    # and hex-strict, WOOF_HEX_POOL_DIRECT 0 vs 1, TOTAL_DIFFER 0.  The x4 proof was not re-run.
     "src/hexcore/cuda_physics_v841.py": (
-        "af035559be26ab35ed64abe493d2086abb3c82a5f7c5aa672653d2bf43101276"
+        "9bfd4c75271254f5dcb0d0a913242afc31da70bf650127dab272c97d0b6fe526"
     ),
     # Re-frozen during the 12 GiB capacity work: the dynamics subcycle stopped
     # copying a scalar block nothing writes, stopped taking a private image of

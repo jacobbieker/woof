@@ -2,7 +2,8 @@
 
 ``prepare_mpas_transport_source_baseline_v842(out=...)`` gives the words of its
 own allocation in a caller's (poisoned) buffer, and
-``NativeDevicePoolViews.resident_target`` answers only for a whole-array copy.
+``NativeDevicePoolViews.resident_target`` answers only for a whole-array copy,
+whose ``write_field`` is then a no-op.  WOOF_HEX_POOL_DIRECT=1 opts in.
 The forecast-level evidence (Alps hex VR, fast and strict, CUDA and Metal) is
 in the PR.
 """
@@ -32,8 +33,9 @@ def test_baseline_into_a_poisoned_out_is_word_identical(cp, dt):
         out = cp.asarray(np.full(ns * nl * nc * 4, byte, np.uint8).view(np.float32).reshape(ns, nl, nc))
         got = prepare_mpas_transport_source_baseline_v842(**args, out=out)
         assert got is out and got.get().tobytes() == want.tobytes()
-    with pytest.raises(ValueError):
-        prepare_mpas_transport_source_baseline_v842(**args, out=source)
+    for overlapping in (source, before):
+        with pytest.raises(ValueError):
+            prepare_mpas_transport_source_baseline_v842(**args, out=overlapping)
     with pytest.raises(ValueError):
         prepare_mpas_transport_source_baseline_v842(**args, out=cp.zeros((ns, nl, nc + 1), cp.float32))
 
@@ -55,3 +57,35 @@ def test_resident_target_answers_only_for_a_whole_array_copy(cp):
     assert views.resident_target("tend_physics", "rqvdynten", like.astype(cp.int32)) is None
     views.resident = False
     assert views.resident_target("tend_physics", "rqvdynten", like) is None
+
+
+def test_write_field_of_the_target_itself_is_a_no_op(cp):
+    from types import SimpleNamespace
+    from woof.hex.mpasphys.device_pools_v842 import NativeDevicePoolViews
+    target = cp.zeros((5, 11), cp.float32)
+    views = NativeDevicePoolViews.__new__(NativeDevicePoolViews)
+    views.resident, views.level, views.cp = True, 1, cp
+    views.session = SimpleNamespace(layout=SimpleNamespace())
+    views.field = lambda pool, name: target
+    target[...] = 3.0
+    views.write_field("tend_physics", "rqvdynten", target)          # in place: nothing to copy
+    assert float(target.sum()) == 3.0 * target.size
+    views.write_field("tend_physics", "rqvdynten", cp.ones((5, 11), cp.float32))
+    assert float(target.sum()) == target.size
+    with pytest.raises(ValueError):
+        views.write_field("tend_physics", "rqvdynten", cp.ones((4, 11), cp.float32))
+
+
+def test_pool_direct_is_opt_in(monkeypatch):
+    from types import SimpleNamespace
+    from woof.hex.mpasphys import runtime_v842
+    asked = []
+    views = SimpleNamespace(resident=True, resident_target=lambda *a, **k: asked.append(a) or "target")
+    coupling = SimpleNamespace(session=SimpleNamespace(device_pools=views))
+    pool_target = runtime_v842.ResidentNativeCoupling._pool_target
+    monkeypatch.setattr(runtime_v842, "_POOL_DIRECT", False)
+    assert pool_target(coupling, "tend_physics", "rqvdynten", None) is None and not asked
+    monkeypatch.setattr(runtime_v842, "_POOL_DIRECT", True)
+    assert pool_target(coupling, "tend_physics", "rqvdynten", None) == "target"
+    views.resident = False
+    assert pool_target(coupling, "tend_physics", "rqvdynten", None) is None
