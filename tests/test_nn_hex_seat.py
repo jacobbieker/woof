@@ -255,10 +255,15 @@ def test_replace_puts_the_model_rate_in_place_of_the_schemes(tmp_path):
 def test_residual_positivity_holds_for_the_sum(tmp_path):
     w = _world()
     w.state.scalars[0, :, :3] = 1e-9
+    m, q = w.state.rho[:, :10], w.state.scalars[0, :, :10]
+    q_scheme = q + 30.0 * w.sources.scalars[0, :, :10] / m
     seat = _applying(w, tmp_path, out_mean=np.r_[np.zeros(NZ), np.full(NZ, -1e-3)], positivity=True)
     seat.stage(w.sources, state=w.state, saved=w.saved, time_seconds=0.0)
-    q_next = w.state.scalars[0, :, :10] + 30.0 * w.sources.scalars[0, :, :10] / w.state.rho[:, :10]
-    assert float(q_next.min()) >= -1e-9
+    q_next = q + 30.0 * w.sources.scalars[0, :, :10] / m
+    # The model takes the vapour the scheme leaves, and no more; where the
+    # scheme alone overdraws, the model adds nothing negative.
+    np.testing.assert_array_less(np.minimum(q_scheme, 0) - 1e-9, q_next + 1e-12)
+    assert float(np.abs(q_next).max()) < 1e-4 and float(q_next.max()) < float(q_scheme.max())
 
 
 def test_out_of_range_columns_fall_back_to_the_scheme(tmp_path):
@@ -357,3 +362,35 @@ def test_registry_names_the_hex_route():
     rows = launch.registry_rows()
     assert all("hex" in row["routes"] for row in rows.values())
     assert rows["residual"]["hex"]["schemes"] == ["total"]
+
+
+# ----------------------------------------------------------------- door --
+
+def _door_args(**over):
+    import argparse
+    from woof.hex.forecast_door import add_forecast_arguments
+    parser = argparse.ArgumentParser(add_help=False)
+    add_forecast_arguments(parser)
+    arguments = parser.parse_args(["--nn", "nn.toml"])
+    for key, value in over.items():
+        setattr(arguments, key, value)
+    return arguments
+
+
+def test_the_forecast_door_takes_nn():
+    from woof.hex.forecast_door import _refuse_nn_launch
+    arguments = _door_args()
+    assert str(arguments.nn) == "nn.toml"
+    _refuse_nn_launch(arguments)
+
+
+@pytest.mark.parametrize("over, match", [
+    (dict(members="roster.json"), "--members"),
+    (dict(samehost_devices="0,1"), "--samehost-devices"),
+    (dict(hosts="a:2"), "--hosts"),
+    (dict(fullstep_local_timestep=True), "--fullstep-local-timestep"),
+])
+def test_the_forecast_door_refuses_what_the_seat_cannot_attach_to(over, match):
+    from woof.hex.forecast_door import ForecastDoorRefusal, _refuse_nn_launch
+    with pytest.raises(ForecastDoorRefusal, match=match):
+        _refuse_nn_launch(_door_args(**over))

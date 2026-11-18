@@ -1,0 +1,206 @@
+"""woof.nn P2.4: the hex NN column seat in real forecasts (opt-in, slow, CUDA or Metal).
+
+Short ``woof hex regional`` forecasts on the MPAS route of a uniform and a
+variable-resolution mesh, each run in its own child process, held to:
+
+* a tapped forecast is byte-identical to the plain one (every variable of
+  every history frame), under fast and under strict numerics, and its
+  record holds interior columns only;
+* a residual model that returns zero leaves the forecast byte-identical;
+* a constant dry-theta residual heats the interior's model levels it spans
+  by about rate x time, and leaves the levels above it near the plain run.
+
+Opt in with ``WOOF_HEX_VARRES_CASE=<work dir>`` naming cases prepared by
+``python tools/hex_varres.py prep NAME --work-dir DIR`` (mesh and
+boundaries are generated there, never committed).  ``WOOF_NN_HEX_CASES``
+names them (default ``edi-u12,edi-vr``: one uniform, one variable-resolution),
+``WOOF_NN_HEX_HOURS`` the length (default 1).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+ROOT = os.environ.get("WOOF_HEX_VARRES_CASE")
+if not ROOT:
+    pytest.skip("opt-in: set WOOF_HEX_VARRES_CASE to a work dir prepared by tools/hex_varres.py prep",
+                allow_module_level=True)
+pytest.importorskip("zarr")
+netCDF4 = pytest.importorskip("netCDF4")
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "tools"))
+
+import hex_varres as vr  # noqa: E402
+
+pytestmark = pytest.mark.slow
+CASES = tuple(os.environ.get("WOOF_NN_HEX_CASES", "edi-u12,edi-vr").split(","))
+HOURS = float(os.environ.get("WOOF_NN_HEX_HOURS", "1"))
+LEVELS = 10
+RATE = 1.0e-4  # K s-1
+#: The prepared cases carry no aerosol init fields, so the GFS cold start's
+#: aerosol profile is not the default here; the suite is MPAS's own.
+SUITE = "--forecast-arg=--physics-suite=convection_permitting"
+_RUNS: dict = {}
+
+
+def _artefact(path: Path, out_mean) -> Path:
+    from woof.nn.hex_seat import OUTPUTS, VOCABULARY
+    from woof.nn.manifest import FieldSpec, write_mlp_artefact
+
+    inputs = ("theta", "qv", "p", "z", "hfx")
+    ins = tuple(FieldSpec(n, VOCABULARY[n][0], LEVELS if VOCABULARY[n][1] == "3d" else 1) for n in inputs)
+    outs = tuple(FieldSpec(n, OUTPUTS[n], LEVELS) for n in ("dtheta", "dqv"))
+    n_in, n_out = sum(f.levels for f in ins), 2 * LEVELS
+    write_mlp_artefact(path, name=path.name, inputs=ins, outputs=outs,
+                       layers=[(np.zeros((4, n_in)), np.zeros(4)), (np.zeros((n_out, 4)), np.zeros(n_out))],
+                       activation="tanh", input_mean=np.zeros(n_in), input_std=np.ones(n_in),
+                       output_mean=np.asarray(out_mean, dtype=np.float64), output_std=np.ones(n_out),
+                       input_min=np.full(n_in, -1e30), input_max=np.full(n_in, 1e30))
+    return path
+
+
+def _toml(path: Path, body: str) -> Path:
+    path.write_text("[nn]\n" + body, encoding="utf-8")
+    return path
+
+
+def _run(name: str, tag: str, scratch: Path, *, nn: Path | None = None, numerics: str = "fast") -> Path:
+    key = (name, tag, numerics)
+    if key in _RUNS:
+        return _RUNS[key]
+    data = vr.load_cases()
+    case = vr.case_row(name, data)
+    source = Path(ROOT) / name
+    work = scratch / f"{name}-{tag}-{numerics}"
+    shutil.copytree(source, work, ignore=shutil.ignore_patterns("forecast", "products", "grib", "met"))
+    for path in work.rglob("*.json"):
+        text = path.read_text(encoding="utf-8")
+        if str(source) in text:
+            path.write_text(text.replace(str(source), str(work)), encoding="utf-8")
+    argv = [sys.executable, "-m", "woof", "hex", "regional", *vr.case_arguments(case, Path(ROOT)),
+            "--cycle", data["cycle_default"], "--source", data["source_default"], "--hours", f"{HOURS:g}",
+            "--history-every-minutes", str(int(HOURS * 30)), "--work-dir", str(work),
+            "--skip", "mesh", "--skip", "intermediate", "--skip", "init", "--skip", "lbc", "--skip", "contract",
+            SUITE, "--no-products"]
+    if nn is not None:
+        argv.append(f"--forecast-arg=--nn={nn}")
+    env = {k: v for k, v in os.environ.items() if k not in ("WOOF_NN_CONFIG", "GPUWM_WRF_EXACT")}
+    env["WOOF_HEX_NUMERICS"] = numerics
+    done = subprocess.run(argv, cwd=str(REPO), capture_output=True, text=True, env=env)
+    assert done.returncode == 0, done.stdout[-4000:] + done.stderr[-4000:]
+    _RUNS[key] = work
+    return work
+
+
+def _frames(work: Path) -> dict:
+    files = sorted((work / "forecast").glob("history.*.nc"))
+    assert len(files) >= 2, f"no history frames in {work / 'forecast'}"
+    out = {}
+    for path in files:
+        with netCDF4.Dataset(str(path)) as ds:
+            ds.set_auto_maskandscale(False)
+            for var, value in ds.variables.items():
+                out[f"{path.name}/{var}"] = np.asarray(value[...])
+    return out
+
+
+def _assert_identical(a: Path, b: Path, what: str) -> None:
+    fa, fb = _frames(a), _frames(b)
+    assert sorted(fa) == sorted(fb), what
+    differ = [k for k in fa if fa[k].tobytes() != fb[k].tobytes()]
+    assert not differ, f"{what}: {len(differ)} variables differ, e.g. {differ[:6]}"
+
+
+def _seat_receipt(work: Path) -> dict:
+    def find(node):
+        if isinstance(node, dict):
+            if "nn_column_seat" in node:
+                return node["nn_column_seat"]
+            for value in node.values():
+                found = find(value)
+                if found is not None:
+                    return found
+        elif isinstance(node, list):
+            for value in node:
+                found = find(value)
+                if found is not None:
+                    return found
+        return None
+
+    receipt = find(json.loads((work / "forecast" / "forecast-receipt.json").read_text(encoding="utf-8")))
+    assert receipt is not None, "the forecast receipt carries no nn_column_seat"
+    return receipt
+
+
+def _bdy(work: Path) -> np.ndarray:
+    grid = next((work / "mesh").glob("*-cull.grid.nc"))
+    with netCDF4.Dataset(str(grid)) as g:
+        return np.asarray(g["bdyMaskCell"][:]) if "bdyMaskCell" in g.variables else np.zeros(g.dimensions["nCells"].size)
+
+
+@pytest.fixture(scope="module")
+def scratch(tmp_path_factory):
+    return tmp_path_factory.mktemp("nn-hex")
+
+
+@pytest.mark.parametrize("numerics", ["fast", "strict"])
+@pytest.mark.parametrize("name", CASES)
+def test_a_tapped_forecast_is_byte_identical(name, numerics, scratch):
+    from woof.nn.tap import read_tap
+
+    base = _run(name, "base", scratch, numerics=numerics)
+    store = scratch / f"{name}-{numerics}.zarr"
+    nn = _toml(scratch / f"tap-{name}-{numerics}.toml", f'mode = "tap"\nscheme = "total"\ntap = "{store}"\n'
+                                                         "tap_columns = 64\n")
+    tapped = _run(name, "tap", scratch, nn=nn, numerics=numerics)
+    _assert_identical(base, tapped, f"{name} {numerics}: the tap changed the forecast")
+
+    summary = _seat_receipt(tapped)
+    assert summary["mpas_identical"] and summary["samples"] == summary["calls"] > 0
+    record = read_tap(store)
+    assert record["attrs"]["route"] == "hex" and record["inputs"].shape[0] == summary["samples"]
+    assert np.isfinite(record["inputs"]).all() and np.isfinite(record["targets"]).all()
+    assert np.abs(record["targets"]).max() > 0.0, "the schemes held no physics source"
+    bdy = _bdy(tapped)
+    cells = np.asarray(record["column_index"]).ravel()
+    assert cells.max() < bdy.size and np.all(bdy[cells] == 0), "a tap column left the interior"
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_residual_models_on_the_held_source(name, scratch):
+    base = _run(name, "base", scratch)
+    zero = _toml(scratch / f"zero-{name}.toml",
+                 f'mode = "residual"\nscheme = "total"\nmodel = "{_artefact(scratch / "zero", np.zeros(2 * LEVELS))}"\n'
+                 'backend = "numpy"\n')
+    _assert_identical(base, _run(name, "zero", scratch, nn=zero), f"{name}: a zero residual changed the forecast")
+
+    heat = _artefact(scratch / "heat", np.r_[np.full(LEVELS, RATE), np.zeros(LEVELS)])
+    const = _toml(scratch / f"heat-{name}.toml",
+                  f'mode = "residual"\nscheme = "total"\nmodel = "{heat}"\nbackend = "numpy"\n'
+                  "limit_outputs = false\npositivity = false\n")
+    heated = _run(name, "heat", scratch, nn=const)
+    summary = _seat_receipt(heated)
+    assert not summary["mpas_identical"] and summary["columns_out_of_range"] == 0
+    last = sorted((base / "forecast").glob("history.*.nc"))[-1].name
+    with netCDF4.Dataset(str(base / "forecast" / last)) as a, \
+            netCDF4.Dataset(str(heated / "forecast" / last)) as b:
+        theta_a = np.asarray(a["theta"][-1], dtype=np.float64)   # [cell, level]
+        theta_b = np.asarray(b["theta"][-1], dtype=np.float64)
+    interior = _bdy(heated)[:theta_a.shape[0]] == 0
+    diff = (theta_b - theta_a)[interior]
+    expected = RATE * HOURS * 3600.0
+    low = diff[:, 1:LEVELS - 1].mean()
+    high = np.abs(diff[:, LEVELS + 4:]).mean()
+    print(f"{name}: mean interior theta change {low:.4f} K on the model's levels (expected {expected:.4f}), "
+          f"{high:.4f} K above")
+    assert 0.6 * expected < low < 1.4 * expected
+    assert high < 0.25 * expected

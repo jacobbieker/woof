@@ -20,8 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 #: that cannot import on this host (no device, no CuPy) is reported and
 #: skipped inside the child; the CPU-safe ones always run.
 DOORS = ("woof.cli", "woof.config", "woof.runtime", "woof.experiment", "woof.core.dycore",
-         "woof.core.physics", "woof.hex.forecast_door", "woof.hex.mpasphys.runtime_v842",
-         "woof.hex.physics_seam", "woof.hex.physics_backend_admission", "woof.io.restart")
+         "woof.core.physics", "woof.hex.cli", "woof.hex.forecast_door", "woof.hex.mpasphys.runtime_v842",
+         "woof.hex.mpasphys.moving_v842", "woof.hex.mpasphys.checkpoint_v842", "woof.hex.physics_seam",
+         "woof.hex.physics_backend_admission", "woof.io.restart")
 
 _CHILD = r"""
 import importlib, json, sys
@@ -43,7 +44,8 @@ def test_default_doors_import_no_nn_runtime():
                             capture_output=True, text=True, timeout=600)
     assert result.returncode == 0, result.stderr[-2000:]
     report = json.loads(result.stdout.strip().splitlines()[-1])
-    assert {"woof.cli", "woof.config", "woof.hex.physics_seam"} <= set(report["done"]), report["failed"]
+    assert {"woof.cli", "woof.config", "woof.hex.physics_seam", "woof.hex.cli",
+            "woof.hex.forecast_door"} <= set(report["done"]), report["failed"]
     assert report["loaded"] == [], (
         f"importing the default doors loaded {report['loaded']}; an NN runtime must load only when "
         "a configuration names an NN option")
