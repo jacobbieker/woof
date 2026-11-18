@@ -4,8 +4,8 @@ Phase P2 of [the differentiable/hybrid plan](dev/DIFFERENTIABLE-HYBRID-PLAN.md).
 A **column model** maps the state of a model column to physical
 tendencies. woof can run one in place of a physics scheme's tendencies, or
 add one as a learned residual to them. A run that does either is **not
-WRF-identical**. The identity doors (`GPUWM_WRF_EXACT=1`,
-`physics_mode = "exact"`) refuse it, and every record of such a run says so.
+WRF-identical**. The identity door (`GPUWM_WRF_EXACT=1`) refuses it, and
+every record of such a run says so.
 A configuration that names no column model imports no NN runtime and
 launches nothing extra; `tests/test_nn_default_path_imports.py` checks
 this for the default doors.
@@ -81,7 +81,9 @@ runtime cannot run is refused by name and is not converted.
   The counts are accumulated on the device and read once per report, so
   no per-step synchronisation is added.
 - `limit_outputs` clamps each output to the manifest's `output_limit`.
-- `positivity` keeps `q + dt * dq >= 0` for moisture outputs.
+- `positivity` keeps `q + dt * dq >= min(q, 0)` for moisture outputs. For
+  a residual the floor applies to the sum of the scheme's rate and the
+  model's.
 - `fixer` (`none`, `moisture`, `moisture+heat`) shifts the tendency
   uniformly in mass within each column, so that its column integral equals
   that of the replaced scheme (or zero for a residual).
@@ -93,7 +95,7 @@ table:
 
 ```toml
 [nn]
-mode = "tap"            # record only; applying a model comes later (P2.3)
+mode = "tap"            # record only; "residual"/"replace" apply a model (below)
 scheme = "pbl"          # pbl, radiation, cumulus or total
 tap = "pbl-tap.zarr"    # relative to this file; *.icechunk makes an Icechunk repo
 tap_every = 1           # every n-th dycore step
@@ -142,6 +144,56 @@ without `--nn`; `tests/test_nn_tap.py` checks this after real steps.
 Recording is refused on a multi-domain experiment, on a `[tiles]`-streamed
 domain, on an ensemble member leg, and on a store that already exists
 unless the launch resumes (`--restart`, `--restart-from`).
+
+## Applying a model (WRF route)
+
+```toml
+[nn]
+mode = "residual"       # or "replace"
+scheme = "pbl"          # pbl, radiation, cumulus or total
+model = "pbl-mlp"       # the artefact directory, relative to this file
+backend = "auto"        # MLX on Metal, PyTorch on CUDA; "torch", "mlx", "numpy"
+out_of_range = "fallback"
+margin = 0.0
+fixer = "none"          # "moisture", "moisture+heat"
+limit_outputs = true
+positivity = true
+# device = "cuda:0"
+```
+
+The inputs, outputs and levels are the artefact's. Every field must be in
+the tap's vocabulary with the same units. The seat runs on every column at
+every dycore step, from the time-t state, at the same place as the tap:
+
+- `residual` adds the model's rate to the step's tendencies.
+- `replace` uses the model's rate instead of the scheme's. The scheme
+  still runs: its rate is what a fallback column keeps, and it sets the
+  column budget the fixer reproduces. A scheme held over steps (`bldt`,
+  `radt` or `cudt` > 0) is replaced on every step by a rate computed from
+  that step's state.
+
+The increment is coupled by `woof.core.physics.couple_column_tendencies`,
+the couplers' own path, so the dry-mass weighting, the map factor and the
+boundary-ring mask are the scheme's. It is added to a copy of the step's
+tendencies, and the scheme's own slot is never written. Momentum goes from
+the A-grid to the faces, so a replaced `du`/`dv` is the scheme's faces plus
+the coupled difference of the two A-grid rates. Levels above the model's
+keep the scheme.
+
+The run prints one line at the end: the mode, the scheme, the artefact,
+the runner, and how many column calls were outside the trained range.
+`GPUWM_WRF_EXACT=1` refuses an applying mode at the door and again at
+attach. A checkpoint written by an applying run carries the artefact's
+hashes and the settings (`nn_column_seat` in the header). It resumes only
+under the same `--nn` file and artefact, and a checkpoint written without a
+model does not resume with one. The seat holds nothing between steps, so a
+resumed run computes what the unbroken one does.
+`tests/test_nn_apply.py` checks the arithmetic on the host, and the
+residual, replace and zero-model runs on CUDA and Metal. A zero residual
+leaves every prognostic value unchanged.
+
+The physics registry lists both modes under `nn_column_physics` as
+`experimental-runtime` with `wrf_identical: false`.
 
 ## Installing
 

@@ -246,6 +246,34 @@ def launch_scope(path=None, members=None, resume=False):
             os.environ[ENV_CONFIG] = saved
 
 
+def registry_rows() -> dict:
+    """The physics registry's ``nn_column_physics`` block: what ``--nn``
+    offers.  Not a namelist selection; an applying mode is never
+    WRF-identical."""
+    from woof.nn import NOT_WRF_IDENTICAL
+    from woof.nn.safety import FIXERS, OUT_OF_RANGE
+
+    common = {"implemented": True, "maturity": "experimental-runtime", "scientific_evidence": "none",
+              "launch": "--nn NN.toml ([nn] table; docs/nn-physics.md)", "routes": ["wrf"],
+              "schemes": list(SCHEMES), "consumer": "woof.nn.wrf_seat.WrfColumnSeat"}
+    return {
+        "tap": {**common, "wrf_identical": True,
+                "behavior": "records a scheme's column inputs and decoupled tendencies to Zarr or "
+                            "Icechunk; the forecast is byte-identical to the same run without --nn",
+                "restart": "binds nothing; a resumed run trims and appends to its own record"},
+        **{mode: {**common, "wrf_identical": False, "note": NOT_WRF_IDENTICAL,
+                  "behavior": ("adds the model's rate to the scheme's" if mode == "residual"
+                               else "uses the model's rate in place of the scheme's (the scheme still "
+                                    "runs: fallback columns and the fixer's budget)"),
+                  "backends": ["torch (CUDA)", "mlx (Metal)", "numpy"],
+                  "safety": {"out_of_range": list(OUT_OF_RANGE), "fixer": list(FIXERS),
+                             "limit_outputs": True, "positivity": True},
+                  "refused_under": "GPUWM_WRF_EXACT=1",
+                  "restart": "checkpoint header binds the artefact hashes and the settings"}
+           for mode in APPLYING},
+    }
+
+
 def configured() -> str | None:
     """The ``--nn`` file this launch carries, or None (the default)."""
     return os.environ.get(ENV_CONFIG) or None

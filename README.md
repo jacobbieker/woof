@@ -779,8 +779,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   positive and can fix column budgets. `woof run`/`woof go --nn NN.toml`
   with `mode = "tap"` records a WRF-route scheme's column inputs and
   physical-rate tendencies to Zarr or Icechunk as training data, leaving the
-  forecast byte-identical. Applying a model at the seat is not wired yet.
-  Runs that apply one are not WRF-identical ([docs/nn-physics.md](docs/nn-physics.md)).
+  forecast byte-identical. `mode = "residual"` or `"replace"` applies a
+  model at the same seat through the couplers' own path, with a fallback to
+  the scheme outside the trained range. Such runs are not WRF-identical:
+  `GPUWM_WRF_EXACT=1` refuses them, and checkpoints bind the artefact
+  ([docs/nn-physics.md](docs/nn-physics.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
