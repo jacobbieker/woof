@@ -759,27 +759,43 @@ point, and the finite difference (FD) is the central difference at 1 and
 | WRF | q3 `v` | +73 | +14 / +15 | agrees |
 | WRF | r1 `thp` (from 24 members; an independent 24 give -50) | -204 | -51 / -58 | agrees |
 | WRF | q4 `thp` | -124 | -0.3 / +0.6 | no response |
-| hex uniform | g1 `theta` (48) | -34 | -0.5 / -0.6 | agrees, below noise |
+| hex uniform | g1 `theta` (48) | -34 | -0.5 / -0.6 | no response (below noise) |
 | hex uniform | g2 | +37 | +0.7 / 0.0 | no response |
 | hex uniform | g3 | -28 | -7.4 / -11.6 | agrees |
 | hex VR | v1 `theta` (32) | +16 | -0.2 / 0.0 | no response |
 | hex VR | v2 | -20 | -3.2 / -2.5 | agrees |
 | hex VR | v3 | +19 | -0.8 / +0.5 | no response |
 
-- **WRF route: G0 met.** Four directions agree in sign. Across the 11
-  observation types, the ES and FD responses correlate at 0.94-0.99, so
-  the pattern agrees as well. ES overstates the magnitude by 4-6x at
-  points picked for their correlation. Picking such points is a
-  selection bias: with 24 members, r1's ES was 4x the FD, but an
-  independent 24-member ensemble gave -50, matching the FD of -51 to -57.
+- **WRF route, uniform 9 km: G0 met for this grid.** Four of five
+  directions agree in sign at both scales. Across the 11 observation
+  types, the ES and FD responses correlate at 0.94-0.99, so the pattern
+  agrees as well.
+  - ES overstates the magnitude by 3.8-6.8x at points picked for their
+    correlation, which is a selection bias. With 24 members, r1's ES was
+    4x the FD, but an independent 24-member ensemble gave -50, close to
+    the FD of -51 (scale 0.5) and -58 (0.25). r1's regression direction
+    is broad, so even the 0.25 scale moves a large volume. Both scales
+    agree.
+  - q4 is a false positive: ES -124 with no FD response. One in five
+    selected directions failed this way, so a single ES point is not a
+    sensitivity until an FD or an independent ensemble confirms it.
+  - The WRF route has no variable-resolution grid, and nested domains
+    were not tested, so the VR half of G0 exists only on hex.
 - **hex, uniform and variable resolution: G0 not met.** A 1 K local
   `theta` perturbation moves `J` by less than the noise floor of about
   ±1-3 in most directions, while the members' whole-domain perturbations
   give a `J` spread of 34 (uniform) and 14 (VR). The ES maps from
   independent 16-member sets barely correlate with each other: 0.12, 0.01
   and -0.02 on the uniform mesh, and 0.20 on the VR mesh. The maps are
-  noise-dominated at 3-5 km. By the rule above, gradient work stays at
-  9-15 km for P1-P4.
+  noise-dominated on these meshes. Only g3 and v2 respond above the noise,
+  with the predicted sign.
+  - This failure is confounded. The hex cases differ from the WRF case
+    in route, resolution (3-5 km vs 9 km), lead (restart at 1 h, `J` over
+    02-06 Z vs 3 h and 07-12 Z) and observation count (1,023-1,762 vs
+    6,167), all at once.
+  - Until a hex run at 9-15 km or a WRF run at 3 km separates these, the
+    stop rule above applies provisionally: P1-P4 plan for 9-15 km, and
+    hex gradient work waits for that run.
 - **FD noise floor.** On the WRF route, a `thp` blob gives a stable
   derivative only for amplitudes of about 0.4 K and above; any smaller
   perturbation moves `J` by ±1.5-4. A restart through the analysis
@@ -791,14 +807,16 @@ point, and the finite difference (FD) is the central difference at 1 and
   Restarting from the analysis mean instead of the background mean
   lowered `J` over 07-12 Z from 2,212.8 to 2,011.6 (-201).
   - EFSO predicts -1,707 without localisation, -1,235 with 300 km and
-    -654 with 150 km. The sign is right and the magnitude is 3-8x too
-    large, the same over-statement ES shows. The ensemble is
+    -654 with 150 km. The sign is right and the magnitude is 3.3-8.5x
+    too large, the same over-statement ES shows. The ensemble is
     under-dispersive (spread / sigma 0.35 at 06 Z).
   - At 150 km, synop temperature (-378) and dewpoint (-183) carry most of
     the benefit, with 90% of those observations beneficial, followed by
     aircraft temperature (-57) and wind (-36).
-- **J_o against the scorecard: met in P0.1.** On hex at 5 km, the
-  station-wind and sonde RMSEs are identical pair for pair.
+- **J_o against the scorecard: met on hex uniform 5 km only (P0.1).**
+  There the station-wind and sonde RMSEs are identical pair for pair.
+  The WRF route and the VR mesh have not been checked against the
+  scorecard yet.
 - **Costs on pb (A6000, shared).**
   - One WRF restart leg (3 to 12 h, 100x80x49): 45-68 s.
   - One hex restart leg (1 to 6 h): 116 s uniform, 249 s VR.
