@@ -1840,9 +1840,9 @@ def verify_round_trip(exp, wps_namelist: Path, namelist_input: Path) -> None:
             for key, value in every_field.items():
                 if key not in exempt:
                     run.setdefault(key, value)
-            # Group (b) is exempt wherever it came from: the prepared
-            # identity also carries the default-tolerant obstacle keys,
-            # which the pair cannot spell.
+            # Group (b) is never compared, even if a future identity table
+            # stops dropping one of its keys (a guard: today the effective
+            # prepared identity already drops every exempt key).
             for key in exempt:
                 run.pop(key, None)
             # Dead Noah-mosaic state, on the experiment fingerprint's own
