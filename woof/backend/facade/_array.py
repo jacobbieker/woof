@@ -406,14 +406,34 @@ def _materialize(arr):
     return mx.contiguous(arr.reshape(-1))
 
 
+_PENDING_DRAIN = threading.Lock()
+
+
+def take_pending() -> list:
+    """Remove and return the values of every pending storage, in order.
+
+    Storages are appended from any thread (an allocation, a rebind).  A drain
+    that copied the list and then cleared it would drop a storage appended in
+    between, which then never runs before the next in-place launch.  Appends
+    only ever go to the end, so taking the first ``n`` items and deleting
+    exactly those keeps every later one; the lock keeps two drains (two
+    threads launching) from taking the same prefix."""
+    with _PENDING_DRAIN:
+        n = len(PENDING)
+        if not n:
+            return []
+        taken = PENDING[:n]
+        del PENDING[:n]
+    return [s.arr for s in taken]
+
+
 def flush_pending():
     """Encode every pending storage value (before an in-place launch)."""
     if not PENDING:
         return
-    mx = _mx()
-    arrays = [s.arr for s in PENDING]
-    PENDING.clear()
-    mx.async_eval(*arrays)
+    arrays = take_pending()
+    if arrays:
+        _mx().async_eval(*arrays)
 
 
 def _contiguous_strides(shape, itemsize):
