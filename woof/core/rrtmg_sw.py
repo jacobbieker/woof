@@ -3469,7 +3469,8 @@ class CudaSW:
                                 fsfcmcl, ciwpmcl, clwpmcl, cswpmcl,
                                 reicmcl, relqmcl, resnmcl, aer_opt=0,
                                 column_chunk=None, _stage_probe=None,
-                                mcica_layout="gpoint", aerosol=None):
+                                mcica_layout="gpoint", aerosol=None,
+                                band_factor=None):
         """Batched full SW chain, device-resident: the ``_b`` re-indexing
         twins of Section 10's kernels, same compile path, same per-thread
         statement order -- the only changes are grid sizes (ncol > 1) and
@@ -3607,6 +3608,15 @@ class CudaSW:
         solvar_h = dev(scon) / RRSW_SCON          # F(F(scon) / RRSW_SCON)
         adjb_h = adjflx_h * solvar_h              # F(adjflx * solvar[ib])
         adjflux_h = xp.repeat(adjb_h[:, None], NBNDSW, axis=1)
+        if band_factor is not None:
+            # solar_ssi_opt: the band shares of the day's solar spectrum
+            # (woof.spacewx.solar_spectrum), bands 16..29 in order; None
+            # leaves adjflux, and so every output, bitwise unchanged.
+            bf = np.asarray(band_factor, dtype=f32)
+            if bf.shape != (NBNDSW,) or not np.all(np.isfinite(bf)) or np.any(bf <= 0):
+                raise ValueError(f"band_factor must be {NBNDSW} finite positive float32 values (bands 16..29), "
+                                 f"got {bf.shape} {bf}")
+            adjflux_h = adjflux_h * xp.asarray(bf)[None, :]
         aldir_h, aldif_h = dev(aldir), dev(aldif)
         asdir_h, asdif_h = dev(asdir), dev(asdif)
         albdir_h = xp.zeros((ncol, NBNDSW), f32)

@@ -2364,6 +2364,15 @@ class RunConfig:
     # "swpc").  0 runs no new code.
     spacewx_aurora_opt: int = _config_field(default=0, kw_only=True)
     spacewx_kp_source: str = _config_field(default="", kw_only=True)
+    # solar_ssi_opt = 1 moves the solar source between RRTMG SW's 14 bands
+    # with the day's solar spectrum (woof.spacewx.solar_spectrum): each band
+    # takes [S_b(t)/TSI(t)] / [S_b/TSI over solar cycle 24], renormalised
+    # so the total is unchanged (solar_tsi_opt sets the total).  The source
+    # is "nrlssi2" (the NOAA CDR daily SSI, fetched) or NOAA CDR SSI netCDF
+    # path(s).  RRTMG (ra_sw_physics = 4, rrtmg_legacy) and RRTMG-K (14)
+    # only.  0 runs no new code.
+    solar_ssi_opt: int = _config_field(default=0, kw_only=True)
+    solar_ssi_source: str = _config_field(default="", kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -2398,6 +2407,39 @@ def _validate_solar_tsi(cfg) -> None:
             "solar_tsi_opt = 1 with swint_opt = 2: FARMS recomputes the "
             "surface shortwave every step from its own solar constant, "
             "outside the radiation call the TSI factor scales")
+
+
+def _validate_solar_ssi(cfg) -> None:
+    """solar_ssi_opt and its source (woof.spacewx.solar_spectrum)."""
+    opt, source = cfg.solar_ssi_opt, cfg.solar_ssi_source
+    if type(opt) is not int or opt not in (0, 1):
+        raise ConfigurationRefused(
+            f"solar_ssi_opt={opt!r} must be 0 (RRTMG's fixed band shares) or 1 "
+            "(the band shares of the day's solar spectrum)")
+    if type(source) is not str:
+        raise ConfigurationRefused("solar_ssi_source must be a string")
+    if opt == 0:
+        if source:
+            raise ConfigurationRefused(
+                "solar_ssi_source is set but solar_ssi_opt = 0, so it would do "
+                "nothing; set solar_ssi_opt = 1 or drop it")
+        return
+    if not source.strip():
+        raise ConfigurationRefused(
+            "solar_ssi_opt = 1 needs solar_ssi_source: 'nrlssi2' or NOAA CDR "
+            "SSI netCDF path(s)")
+    sw = radiation_scheme_ids(cfg)[1]
+    from woof.physics_compat import RRTMG_VARIANT_LEGACY, rrtmg_variant
+    if not (sw == 14 or (sw == 4 and rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY)):
+        raise ConfigurationRefused(
+            f"solar_ssi_opt = 1 scales RRTMG SW's 14 bands; ra_sw_physics = {sw}"
+            + (" runs RTE+RRTMGP, whose g-point solar source has its own bands; set "
+               "ra_rrtmg_variant = 'rrtmg_legacy'" if sw == 4 else "")
+            + " (it needs ra_sw_physics = 4 with ra_rrtmg_variant = 'rrtmg_legacy', or 14)")
+    if int(cfg.dfi_opt) != 0:
+        raise ConfigurationRefused(
+            "solar_ssi_opt = 1 with dfi_opt: the filter captures the step in a "
+            "CUDA graph, which would freeze the band factor of its first call")
 
 
 def _validate_spacewx_ionosphere(cfg) -> None:
@@ -9337,6 +9379,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking must be true or false")
     _validate_solar_tsi(cfg)
+    _validate_solar_ssi(cfg)
     _validate_spacewx_ionosphere(cfg)
     _validate_spacewx_aurora(cfg)
     if cfg.gf_deep_rain_evaporation_booking and int(cfg.cu_physics) != 3:

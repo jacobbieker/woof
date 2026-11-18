@@ -6365,6 +6365,7 @@ def _public_config_value(value):
                                   ("spacewx_f107_mode", "81day"),
                                   ("spacewx_ionosphere_maps", "ccir"),
                                   ("spacewx_aurora_opt", 0), ("spacewx_kp_source", ""),
+                                  ("solar_ssi_opt", 0), ("solar_ssi_source", ""),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):
