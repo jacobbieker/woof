@@ -430,6 +430,11 @@ def test_a_resident_run_reads_the_live_device_words_not_the_stale_host_storage()
     np.testing.assert_array_equal(read("diag_physics", "hfx"), stale[:NC])
     read = hex_seat._reader(SimpleNamespace(field=bind, native=native), NC)
     np.testing.assert_array_equal(read("diag_physics", "hfx"), stale[:NC])
+    # The views go resident after the seat attaches: residency is asked per read.
+    later = views(False)
+    read = hex_seat._reader(SimpleNamespace(field=bind, device_pools=later, native=native), NC)
+    later.resident = True
+    np.testing.assert_array_equal(read("diag_physics", "hfx"), live)
 
 
 def test_registry_names_the_hex_route():

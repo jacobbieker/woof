@@ -541,15 +541,19 @@ def _reader(session, n_cells: int):
     the host.  A run without resident views reads the host storage, which
     is then the authority.  ``session.field`` is not used: on a resident
     run it would upload and cache an unbound field, making the device copy
-    the one published (a tap must change nothing)."""
-    views = getattr(session, "device_pools", None)
-    if views is None and hasattr(session, "resident_field"):
-        views = session   # the views themselves
-    resident = views is not None and getattr(views, "resident", True) and hasattr(views, "resident_field")
+    the one published (a tap must change nothing).
+
+    The views go resident only after the seat attaches (the resident
+    suite's admission), so residency is asked at every read, never once at
+    attach -- a reader that decided at attach read the host storage for
+    the whole run."""
     native = session.native
 
     def read(pool, name):
-        if resident:
+        views = getattr(session, "device_pools", None)
+        if views is None and hasattr(session, "resident_field"):
+            views = session   # the views themselves
+        if views is not None and getattr(views, "resident", True) and hasattr(views, "resident_field"):
             value = views.resident_field(pool, name, level=1)
             if value is not None:
                 return value
