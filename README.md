@@ -623,7 +623,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `WOOF_METAL_YSU_TILE_BLOCKS=16` restores CUDA's width, and CUDA keeps
   its occupancy-bounded 16 per SM). On Metal the Smagorinsky deformation
   reads u/msfu and v/msfv stored once per face instead of dividing at
-  every stencil point (about 9 % off that launch, the same words;
+  every stencil point (9-11 % off that launch, the same words;
   `WOOF_SMAG_DEFORM_HAT=0` restores the old kernel; CUDA keeps it,
   because the extra pass did not pay there). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per

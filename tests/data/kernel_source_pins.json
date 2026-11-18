@@ -72,7 +72,7 @@
     "rrtmg_aer3.cu": "0ab8dab99a9b49c93699c0e3ce6778d63a6e8e1eb39966a1db49d4847db10dd3",
     "scalar_atan.cuh": "47e93ec8e1f6aa039191962a2add455dec0508f45cf715ec33cc9b65ae97f804",
     "sinhf_flt32.cuh": "cff7b61810ad14c46916c9dbd864f26565ccab1c932c1780c856e307aa831827",
-    "smag2d.cu": "28f2823655e987337c7146d86b713f8b283b737f21f950ece69cef7bbda44d42",
+    "smag2d.cu": "379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f",
     "swint.cu": "9a79b7e43cb92553ae454975a943acedc3d8510b5c7eae59ec2c5bb8c8b47c5b",
     "temf_log10_flt32.cuh": "61c2596ef9b7456c1328eb5b9064c84b72f15acad698b084b87a831c478bb69f",
     "thompson_collision_constants.cuh": "01225b95f51e08a3127cd7703ce6915529ac0df7863d104af6193eeb20014e98",
