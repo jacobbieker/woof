@@ -10,8 +10,9 @@ def cam_ozone_domain_ids(exp):
     required = set()
     for domain in exp.domains:
         cfg = domain.run
-        if (domain.parent_id == 0 or 4 not in radiation_scheme_ids(cfg)
-                or rrtmg_variant(cfg) != RRTMG_VARIANT_LEGACY or cfg.o3input != 2):
+        ids = radiation_scheme_ids(cfg)
+        legacy = 4 in ids and rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY
+        if domain.parent_id == 0 or not (legacy or 14 in ids) or cfg.o3input != 2:
             continue
         current = domain
         chain = set()

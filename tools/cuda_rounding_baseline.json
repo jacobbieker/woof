@@ -1646,6 +1646,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "9bf6eabbe1634869ca04bcb69fb0114a7e980e5be3b6a39acdcda4f93ed18ed4",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_load",
+    "factory_sha256": "d380f4718292a22139813c5d2f20f756beb8eced0a97a38a98b9e4b84e1e0630",
+    "file": "woof/core/rrtmgk.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "9c480f73d15b85055fe812a8ea19a62df49c70cddc5822a41e9b87ad39ec455d",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
@@ -3996,6 +4004,18 @@
     "sha256": "965ab0c8e92cedf1d201be58426b7e5b357dccd32fa9fd040aca21b74f0ef67f"
    },
    {
+    "file": "woof/core/kernels/rrtmgk_lw.cu",
+    "sha256": "887e276ea96ee776f0a32a70e38e76ab1bba4e7bac70a4ea4e992dfdfb1b1ecf"
+   },
+   {
+    "file": "woof/core/kernels/rrtmgk_prep.cu",
+    "sha256": "2df3ca5b115cc58d9a68bfb914321db666c54d23a483838957ac79f75999b5b6"
+   },
+   {
+    "file": "woof/core/kernels/rrtmgk_sw.cu",
+    "sha256": "a56b6b3b2254967ca4a767dd99766df1c7bce186b35bc9a69fd3031ee7574ab0"
+   },
+   {
     "file": "woof/core/kernels/rrtmgp_cloud.cu",
     "sha256": "512157c75edf4637d99a1cad490e8db71e51cd2c3643ff129adebefa81557560"
    },
@@ -5151,7 +5171,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "6334b15bd9b2d32d5c12eaddcff90546ec6446b439ea041ab26d4b203f8cd858"
+    "sha256": "088fda0da3e67f5a5fe8e4613bfe60365c2994964f2c7d45fc377f284a58ee49"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5271,11 +5291,11 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "36ca47b772c9ad773a5f79b787ee23c50c6ab3a86002701bc46069226190400f"
+    "sha256": "6255e7f844b3bba51b236f088894f52961838c1db2c6b4d7dbb928603a921539"
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "42a7ecc759a1fa3d9fe946b6b4f9cd5f72400d4aca95bf8dd8dfe103c1ef9a2f"
+    "sha256": "ca739c503d07a4ba7a1c5e3e1bb7d5abf8e72f657df23bec609a01824e6b925a"
    },
    {
     "file": "woof/core/refl.py",
@@ -5303,7 +5323,7 @@
    },
    {
     "file": "woof/core/rrtmg_lw.py",
-    "sha256": "4a2ede9d819285ab26699e6e55b43e45275b5f51c82612cc72db6c18b37f217c"
+    "sha256": "0e32220aa7c66cf19374d440259b125035e84a45e7a0cb74ec149b9fc55510df"
    },
    {
     "file": "woof/core/rrtmg_mcica.py",
@@ -5312,6 +5332,10 @@
    {
     "file": "woof/core/rrtmg_sw.py",
     "sha256": "2b16603e91d61d8d3074902402c7d4a38a82a6dc1eced2398b370be7c6a79f6e"
+   },
+   {
+    "file": "woof/core/rrtmgk.py",
+    "sha256": "23d26e1439ff6700337156c2a4c34457ad4eadf2cdf2377d8698c3aa73f75930"
    },
    {
     "file": "woof/core/ruc_gpu.py",
@@ -9523,6 +9547,147 @@
     ]
    },
    "source_sha256": "57e72fd723541584e892aac54ad40ba4f826cd8e14e5cd0bbbe7d0f731e5a118"
+  },
+  "composed:rrtmgk_lw": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "93974c9d833a20ca7439eb5b1ff6c4e9c01f982d03a6bf180ce65d5f292ab0c9",
+    "sites": {
+     "100": 75
+    }
+   },
+   "native_differences": {
+    "sha256": "03756d8878dbb867c3754e931d0b1d274d88a94b82e6112863f170271fe0226f",
+    "sites": {
+     "100": 9
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "c9ff27f48f7b9c31546212e4d691f2d9d3113a4c5baced087c801479e0347adb"
+  },
+  "composed:rrtmgk_prep": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "7719a40213222123c9414ccb044ba3e75ae660ac0ec8c21efc94bcb46b198ea3",
+    "sites": {
+     "100": 52
+    }
+   },
+   "native_differences": {
+    "sha256": "d0838dd2a1084f89dbfa134a93532306dc4528828a0903c4fc623848809fdf4a",
+    "sites": {
+     "100": 46
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "a06935c32803e5b072848303e5db7fdca0e42176b47338da264b6c268ae1bed6"
+  },
+  "composed:rrtmgk_sw": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "012df9b9618c00b3f118308108eac2fc6138258ee9de3adac45addcf8664f441",
+    "sites": {
+     "100": 293
+    }
+   },
+   "native_differences": {
+    "sha256": "d08186f03307b3778f38f1b674809da54394286b0ce6119564428f3543e326d2",
+    "sites": {
+     "100": 676
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "220211ca305fd1c158db9881f974c2e7ce1af1c587e737bcf56cd3c1fe0432a4"
   },
   "composed:snow_papers": {
    "assessment": "static_diagnostic_only",

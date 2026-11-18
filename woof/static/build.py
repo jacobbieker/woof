@@ -496,14 +496,17 @@ def _highres_landcover_on_slot(config, namelist, index: int,
                                value: str) -> str | None:
     """The ``landcover_source`` id a ``[static.highres]`` block builds on
     WPS slot ``index``, or ``None`` when it builds no land cover there
-    (no block, disabled, terrain only, or scoped away by ``max_dx_m``).
+    (no block, disabled, terrain only, lakes only, or scoped away by
+    ``max_dx_m``).  ``fields = "lakes"`` takes only the lake extent from
+    the collection, so a slot naming it would still be built on the GEOG
+    tree's land use: the token stays refused there.
 
     Asked only for a slot whose ``geog_data_res`` names a land-cover
     collection; every other slot resolves exactly as before.
     """
     if config is None or not getattr(config, "enabled", False):
         return None
-    if getattr(config, "fields", "auto") == "terrain":
+    if getattr(config, "fields", "auto") in ("terrain", "lakes"):
         return None
     from .highres_fetch import (DEFAULT_LANDCOVER_SOURCE,
                                 landcover_source_ids_by_wps_token)

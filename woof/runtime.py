@@ -1743,14 +1743,15 @@ def _child_radiation_adapter(exp: ExperimentConfig, data: CaseDataConfig,
     from woof.physics_compat import RRTMG_VARIANT_LEGACY, rrtmg_variant
     cfg = dc.run
     ozone_parent = None
-    if (4 in radiation_scheme_ids(cfg)
-            and rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY
+    ids = radiation_scheme_ids(cfg)
+    # RRTMG-K (14/14) radiates its parent's ozone exactly like legacy RRTMG.
+    if (((4 in ids and rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY) or 14 in ids)
             and cfg.o3input == 2):
         if radiation_parent is None:
             from woof.core.cam_ozone import cam_ozone_domain_ids, DriverOzoneProvider
             if exp is None or dc.grid_id not in cam_ozone_domain_ids(exp):
                 raise ValueError(
-                    "ra_rrtmg_variant='rrtmg_legacy' on child domain "
+                    "legacy RRTMG or RRTMG-K with o3input=2 on child domain "
                     f"grid_id={dc.grid_id} requires radiation_parent= "
                     "or the experiment's shared CAM ozone carrier")
             ozone_parent = DriverOzoneProvider()
