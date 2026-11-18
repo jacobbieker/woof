@@ -743,8 +743,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`tools/spacewx_gim_validate.py`). `spacewx_ionosphere_opt = 1` writes the
   same ionosphere into every WRF-route history frame (`IONO_TEC`,
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
-  forecast; hex and streamed domains refuse it for now. The aurora, storm-time and particle-precipitation layers are
-  planned ([docs/spacewx.md](docs/spacewx.md)).
+  forecast; hex and streamed domains refuse it for now. `woof spacewx aurora`
+  places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
+  observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
+  through a Kp fit with test RMSE 0.73). The auroral energy, storm-time and
+  particle-precipitation layers are planned ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
   studies gradients of a forecast's fit to observations and opt-in
