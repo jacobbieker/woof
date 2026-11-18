@@ -1075,7 +1075,7 @@ def _tend_cache_bytes() -> int:
 
     import os
 
-    value = os.environ.get("WOOF_HEX_LBC_TEND_CACHE_MB", "256").strip()
+    value = os.environ.get("WOOF_HEX_LBC_TEND_CACHE_MB", "64").strip()
     try:
         return max(int(float(value) * 2**20), 0)
     except ValueError:
@@ -1216,7 +1216,8 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
         The expansion (a zero fill and a scatter of the boundary support) is the
         same for every stage and step of one LBC interval; it is kept until
         ``advance`` installs the next interval's tendency dict, within
-        WOOF_HEX_LBC_TEND_CACHE_MB (256 MiB; 0 expands on every call).  Every
+        WOOF_HEX_LBC_TEND_CACHE_MB (64 MiB, so a conus3km rank, whose three
+        fields need about 590 MB, holds none; 0 expands on every call).  Every
         consumer reads it (speczone kernels, graph staging copies).
         """
         compact = super().tendency(name)

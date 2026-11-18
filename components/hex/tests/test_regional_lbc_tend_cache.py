@@ -67,7 +67,7 @@ def test_cap_bounds_what_is_held(cp):
 def test_cap_switch(monkeypatch):
     from woof.hex.cuda_regional_forecast_v841 import _tend_cache_bytes
     monkeypatch.delenv("WOOF_HEX_LBC_TEND_CACHE_MB", raising=False)
-    assert _tend_cache_bytes() == 256 * 2**20
+    assert _tend_cache_bytes() == 64 * 2**20
     monkeypatch.setenv("WOOF_HEX_LBC_TEND_CACHE_MB", "0")
     assert _tend_cache_bytes() == 0
     monkeypatch.setenv("WOOF_HEX_LBC_TEND_CACHE_MB", "lots")
