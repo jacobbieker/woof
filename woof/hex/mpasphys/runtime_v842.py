@@ -51,11 +51,13 @@ def commit_outer_scalar_groups(session, atmosphere, cp):
 
 
 def forcing_writes_scalar_sources(coupling) -> bool:
-    """Whether a forcing (SPPT/SKEBS, IAU or analysis nudging) adds into the stage's scalar sources in place.
+    """Whether a forcing (SPPT/SKEBS, IAU, analysis nudging or an applying --nn seat) adds into the stage's scalar
+    sources in place.
 
     Compact resident assembly lends Registry publication its scalar allocation, so such a forcing must work on a
     copy or it would rewrite the published pre-forcing words."""
-    return any(getattr(coupling, name, None) is not None for name in ('stochastic', 'iau', 'nudging'))
+    return (any(getattr(coupling, name, None) is not None for name in ('stochastic', 'iau', 'nudging'))
+            or bool(getattr(getattr(coupling, 'nn_seat', None), 'applies', False)))
 
 
 def nudging_partitioned(execution, moving) -> bool:
@@ -320,6 +322,11 @@ class ResidentNativeCoupling:
                 self.sources=self.widen_sources(self.sources,state)
             if getattr(self, 'regional', None) is not None:
                 self.sources=self.pad_regional_sources(self.sources, state=state, saved=saved)
+            if getattr(self, 'nn_seat', None) is not None:
+                # --nn (woof.nn.hex_seat): the opt-in NN column seat on the schemes' own sum, before SPPT/SKEB,
+                # IAU and nudging (so SPPT perturbs the scheme's and the model's source alike).  Absent without --nn.
+                self.nn_seat.stage(self.sources, state=state, saved=saved,
+                                   time_seconds=float(self.dycore.atmosphere.state.time_seconds))
             if getattr(self, 'stochastic', None) is not None:
                 self.stochastic.apply(self.sources, state=state,
                     rho_edge=diagnostics.h_edge, normal_velocity=saved.normal_velocity,
@@ -2103,6 +2110,19 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 pbl_height=lambda: session.field('diag_physics', 'hpbl'))
             receipt['nudging'] = coupling.nudging.receipt()
             print(json.dumps({'nudging': receipt['nudging']}, default=str), flush=True)
+        # --nn (woof.nn.hex_seat, WOOF_NN_CONFIG): the opt-in NN column seat on the held sources.  Without it nothing
+        # from woof.nn is imported; a resume refuses a carrier an applying seat sealed (it would splice trajectories).
+        nn_carried = moving.carrier.get('nn') if resumed else None
+        if os.environ.get('WOOF_NN_CONFIG'):
+            from woof.nn.hex_seat import attach as attach_nn_seat
+            attach_nn_seat(coupling, config=config, mesh=mesh, n_cells=int(layout.dimensions['nCells']),
+                           vertical=grid.vertical_grid, dt=dt, execution=execution, moving=moving,
+                           physics_map=physics_map, resumed=resumed, carried=nn_carried)
+            receipt['nn_column_seat'] = coupling.nn_seat.receipt()
+        elif nn_carried is not None:
+            raise ValueError(f"this checkpoint was written by a run that applied a neural-network column model "
+                             f"({nn_carried.get('mode')} by {(nn_carried.get('model') or {}).get('name')}); "
+                             "resume it with the same --nn file")
         from .diagnostics_v842 import initialize_thermodynamics
         # A restart forms the cold start's base state too (the restart stream's base words), never the
         # perturbation state it carries.
@@ -2517,6 +2537,9 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
             raise RuntimeError(f"IAU window not fully applied: {receipt['iau']}")
     if execution is not None:
         receipt['rank_execution']=execution.receipt()
+    if getattr(coupling, 'nn_seat', None) is not None:
+        # The tap's record is flushed here; an applying seat reports its model, ledger and not-identical flag.
+        receipt['nn_column_seat']=coupling.nn_seat.close()
     if limited_area:
         receipt['limited_area']=limited_area_receipt(arguments, dycore, coupling)
     if fullstep_shadow is not None:
