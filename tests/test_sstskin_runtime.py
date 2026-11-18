@@ -47,20 +47,31 @@ def test_bulk_sst_snapshot_does_not_alias_device_skin_temperature():
 
 @pytest.mark.gpu
 @requires_gpu
-def test_skin_keeps_the_bound_lake_water_temperature(monkeypatch):
+@pytest.mark.parametrize("given", ["separate", "none"])
+def test_skin_keeps_the_bound_lake_water_temperature(monkeypatch, given):
     """sst_skin=1 used to rebuild SST from the caller's arrays after the
-    lake-state binding, discarding the observed lake water temperature."""
+    lake-state binding, discarding the observed lake water temperature; one
+    step later TSK (SST plus the skin correction) was the forcing's again."""
     import cupy as cp
     import woof.ingest.lake_state as obs
     from woof.core.physics import initialize_physics
     state,cfg,old = _full_state(sst_skin=1,sf_surface_physics=0,bl_pbl_physics=0)
     temperature=old.fields["tsk"].copy()
+    lake=cp.float32(float(temperature[0, 0]) - 8.)
     def bind(fields, cfg, **kw):
-        fields["sst"][0, 0] = fields["tsk"][0, 0] = cp.float32(280.)
+        fields["sst"][0, 0] = fields["tsk"][0, 0] = lake
         return None, dict(schema='gpuwm.lake-init.v1', status='bound')
     monkeypatch.setattr(obs, "initialize_surface", bind)
-    bulk=temperature.copy()
-    driver=initialize_physics(state,cfg,landmask=0.,tsk=temperature,sst=bulk,glw=400.,swdown=1000.)
-    assert float(bulk[0, 0]) != 280.
-    assert float(driver.fields["sst"][0, 0]) == 280.
-    assert driver.fields["sst"].data.ptr not in (driver.fields["tsk"].data.ptr, bulk.data.ptr)
+    bulk=temperature.copy() if given == "separate" else None
+    driver=initialize_physics(state,cfg,landmask=0.,tsk=temperature.copy(),sst=bulk,glw=400.,swdown=1000.)
+    if bulk is not None:
+        assert float(bulk[0, 0]) != float(lake)
+    assert float(driver.fields["sst"][0, 0]) == float(lake)
+    assert driver.fields["sst"].data.ptr != driver.fields["tsk"].data.ptr
+    driver.fields["gsw"][...] = cp.float32(1000.)
+    driver.fields["glw"][...] = cp.float32(400.)
+    driver.compute(state,cfg)
+    # SST stays the bound value; TSK is that plus a skin correction of at
+    # most a few kelvin, nowhere near the forcing's 8 K warmer value.
+    assert float(driver.fields["sst"][0, 0]) == float(lake)
+    assert abs(float(driver.fields["tsk"][0, 0]) - float(lake)) < 3.
