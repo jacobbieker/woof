@@ -33,7 +33,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import functools
 import hashlib
 import json
 from pathlib import Path
@@ -45,6 +44,11 @@ from woof.spacewx.indices import naive_utc
 FIT_PATH = Path(__file__).resolve().parent.parent / "data" / "spacewx" / "storm_fit_v1.json"
 #: Hours per ap interval.
 AP_HOURS = 3
+#: The latest ended intervals that must have ap: a storm's onset is in them.
+LATEST_REQUIRED = 2
+#: Within this magnetic latitude, deg, of the dip equator the season coordinate
+#: goes linearly to 0, so the two hemispheres' seasons meet without a jump.
+SEASON_TAPER_DEG = 10.0
 
 
 class StormError(ValueError):
@@ -74,7 +78,10 @@ def load_fit(path=None) -> StormFit:
     return _load(str(Path(path) if path else FIT_PATH))
 
 
-@functools.lru_cache(maxsize=2)
+def _increasing(nodes) -> bool:
+    return len(nodes) >= 2 and bool(np.all(np.diff(np.asarray(nodes, dtype=np.float64)) > 0))
+
+
 def _load(path: str) -> StormFit:
     raw = Path(path).read_bytes()
     try:
@@ -83,8 +90,14 @@ def _load(path: str) -> StormFit:
         coef = np.asarray(doc["coef"], dtype=np.float64)
         if coef.shape != (*_shape(nodes), 2) or not np.all(np.isfinite(coef)):
             raise StormError(f"coefficients of shape {coef.shape}, expected {(*_shape(nodes), 2)}")
-        return StormFit(float(doc["tau"]), int(doc["nlag"]), *nodes, coef, float(doc["x_max"]),
-                        tuple(float(v) for v in doc["ratio_range"]), hashlib.sha256(raw).hexdigest(),
+        tau, nlag, x_max = float(doc["tau"]), int(doc["nlag"]), float(doc["x_max"])
+        lo, hi = (float(v) for v in doc["ratio_range"])
+        if not (0.0 < tau < 1.0 and nlag >= LATEST_REQUIRED and x_max > 0.0 and 0.0 < lo <= 1.0 <= hi):
+            raise StormError(f"tau {tau}, nlag {nlag}, x_max {x_max} or ratio_range {(lo, hi)} out of range")
+        if not all(_increasing(n) for n in nodes):
+            raise StormError("node lists must be increasing and hold at least two nodes each")
+        coef.setflags(write=False)
+        return StormFit(tau, nlag, *nodes, coef, x_max, (lo, hi), hashlib.sha256(raw).hexdigest(),
                         dict(doc.get("record", {})))
     except (KeyError, TypeError, ValueError) as exc:
         raise StormError(f"{path}: not a storm-time fit ({exc})") from None
@@ -92,15 +105,21 @@ def _load(path: str) -> StormFit:
 
 # ------------------------------------------------------------------ the driver
 
+def last_ended_interval(when: datetime) -> datetime:
+    """The start of the latest 3-hour ap interval that has ended by ``when`` (naive UTC)."""
+    when = naive_utc(when)
+    now = when.replace(minute=0, second=0, microsecond=0)
+    now -= timedelta(hours=now.hour % AP_HOURS)            # the interval in progress starts here
+    return now - timedelta(hours=AP_HOURS)
+
+
 def _ap_series(geo, when: datetime, nlag: int) -> np.ndarray:
     """ap of the ``nlag`` 3-hour intervals that have ended by ``when``, latest
     first (NaN where GFZ has none)."""
-    when = naive_utc(when)
-    last = when.replace(minute=0, second=0, microsecond=0)
-    last -= timedelta(hours=last.hour % AP_HOURS)          # the interval in progress starts here
+    last = last_ended_interval(when)
     out = np.full(nlag, np.nan)
     for i in range(nlag):
-        start = last - timedelta(hours=AP_HOURS * (i + 1))
+        start = last - timedelta(hours=AP_HOURS * i)
         try:
             row = geo._row(start.date())
         except (KeyError, ValueError, IndexError):
@@ -110,12 +129,17 @@ def _ap_series(geo, when: datetime, nlag: int) -> np.ndarray:
 
 
 def filtered_ap(geo, when: datetime, tau: float, nlag: int, min_weight: float = 0.8) -> float:
-    """Wrenn's ap_tau at ``when`` from the intervals that have ended by then;
-    missing intervals are left out and the weights renormalised, and fewer
-    than ``min_weight`` of the weight present is an error."""
+    """Wrenn's ap_tau at ``when`` from the intervals that have ended by then.
+    The latest :data:`LATEST_REQUIRED` intervals must be present (a storm's
+    onset is there); an older missing interval is left out and the weights
+    renormalised, and fewer than ``min_weight`` of the weight present is an
+    error."""
     ap = _ap_series(geo, when, nlag)
     w = (1.0 - tau) * tau ** np.arange(nlag)
     good = np.isfinite(ap)
+    if not good[:LATEST_REQUIRED].all():
+        raise StormError(f"GFZ has no ap yet for the 3-hour intervals that end {AP_HOURS * LATEST_REQUIRED} h "
+                         f"before {naive_utc(when):%Y-%m-%dT%H:%MZ}; the storm correction needs them")
     if w[good].sum() < min_weight * w.sum():
         raise StormError(f"GFZ has too little ap in the {nlag * AP_HOURS} h before {when:%Y-%m-%dT%H:%MZ}")
     return float(np.dot(w[good], ap[good]) / w[good].sum())
@@ -126,9 +150,7 @@ def filtered_ap(geo, when: datetime, tau: float, nlag: int, min_weight: float = 
 def magnetic_latitude(lat_deg, lon_deg, when: datetime, model=None) -> np.ndarray:
     """Dipole geomagnetic latitude, deg, of geodetic points (the IGRF-14 dipole at ``when``)."""
     from woof.spacewx import aurora, igrf
-    frame = aurora.dipole_frame(model or igrf.load(), when)
-    p = aurora._unit(lat_deg, lon_deg)
-    return np.rad2deg(np.arcsin(np.clip(p @ frame[0], -1.0, 1.0)))
+    return aurora.dipole_latitude(aurora.dipole_frame(model or igrf.load(), when), lat_deg, lon_deg)
 
 
 def local_time(lon_deg, when: datetime) -> np.ndarray:
@@ -139,11 +161,13 @@ def local_time(lon_deg, when: datetime) -> np.ndarray:
 
 
 def season_coordinate(when: datetime, mlat_deg) -> np.ndarray:
-    """+1 at the local summer solstice, -1 at the winter one, 0 at the equinoxes."""
+    """+1 at the solstice of the magnetic hemisphere's summer, -1 at its winter
+    one, 0 at the equinoxes; tapered linearly to 0 within
+    :data:`SEASON_TAPER_DEG` of the dip equator, so that it is continuous there."""
     when = naive_utc(when)
     doy = when.timetuple().tm_yday + when.hour / 24.0
     north = np.cos(2.0 * np.pi * (doy - 172.0) / 365.25)
-    return np.where(np.asarray(mlat_deg) >= 0.0, north, -north)
+    return north * np.clip(np.asarray(mlat_deg, dtype=np.float64) / SEASON_TAPER_DEG, -1.0, 1.0)
 
 
 def _hats(x, nodes, period=None) -> np.ndarray:
@@ -202,11 +226,12 @@ def fof2_scale(fit: StormFit, lat_deg, lon_deg, when: datetime, ap_tau: float, *
     return np.sqrt(nmf2_factor(fit, mlat, local_time(lon, when), season_coordinate(when, mlat), ap_tau))
 
 
-def receipt(fit: StormFit, ap_tau: float, source: str) -> dict:
+def receipt(fit: StormFit, source: str) -> dict:
+    """The fit and the ap record; each time's ap_tau goes with that time."""
     return {"spacewx_storm_model": "woof storm-time fit v1 (CODE GIM TEC, Wrenn filtered ap)",
             "spacewx_storm_fit_sha256": fit.sha256, "spacewx_storm_tau": fit.tau,
-            "spacewx_storm_ap_tau": ap_tau, "spacewx_storm_ap_source": source}
+            "spacewx_storm_ap_source": source}
 
 
-__all__ = ["FIT_PATH", "StormError", "StormFit", "load_fit", "filtered_ap", "magnetic_latitude", "local_time",
+__all__ = ["FIT_PATH", "StormError", "StormFit", "load_fit", "last_ended_interval", "filtered_ap", "magnetic_latitude", "local_time",
            "season_coordinate", "basis", "log_ratio", "nmf2_factor", "fof2_scale", "receipt"]

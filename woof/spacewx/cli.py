@@ -50,8 +50,14 @@ def ionosphere_main(args) -> int:
     if args.f107 is not None:
         f107_source, record = f"fixed {args.f107}", None
     else:
-        # The storm driver reads ap through the last time; F10.7 through the day before.
-        record = indices.load(args.indices, needed=times[-1] - timedelta(days=0 if args.storm else 1))
+        # F10.7 is read through the day before the last time. The storm driver
+        # reads ap through the last 3-hour interval that has ended by then, which
+        # GFZ adds during the day, so a same-day cache without it is fetched again.
+        if args.storm:
+            from woof.spacewx.storm import last_ended_interval
+            record = indices.load(args.indices, needed=last_ended_interval(times[-1]), kp=True)
+        else:
+            record = indices.load(args.indices, needed=times[-1] - timedelta(days=1))
         f107_source = f"{record.source} sha256:{record.sha256}"
     lat, lon = grid(args.dlat, args.dlon)
     lat2, lon2 = np.meshgrid(lat, lon, indexing="ij")
@@ -93,8 +99,7 @@ def ionosphere_main(args) -> int:
               f"max {tec.max():6.2f} TECU  foF2 max {fields['fof2'][-1].max():5.2f} MHz")
     doc = receipt(iono, f107_source, "fixed" if record is None else args.f107_mode)
     if fit is not None:
-        doc.update(storm.receipt(fit, None, f107_source))
-        doc.pop("spacewx_storm_ap_tau")                  # one per time, in "times"
+        doc.update(storm.receipt(fit, f107_source))       # ap_tau: one per time, in "times"
     doc["times"] = drivers
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)

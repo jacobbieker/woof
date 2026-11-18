@@ -134,12 +134,17 @@ al. 2002), but no STORM code or coefficients are used.
 - **Driver.** Wrenn's (1987) filtered ap,
   `ap_tau(t) = (1 - tau) * sum_i tau^i ap_i`, taken over the 3-hour GFZ ap intervals that
   have ended by t (40 intervals, 120 h). It never reads the future, so a forecast can use it
-  up to its start.
+  up to its start. The latest two intervals must have ap, because a storm's onset is in
+  them: before GFZ publishes them, `--storm` refuses the time rather than fall back to older
+  ap. A cached GFZ file that lacks them is fetched again. An older missing interval is left
+  out and the weights renormalised (at least 80 % of the weight must be present).
 - **Model.** `log R = a x + b x^2`, with `x = ap_tau / 100`. There is no intercept, so a
   quiet day has R = 1. (a, b) are interpolated linearly between nodes of:
   - dipole |MLAT|: 0, 20, 35, 50, 62.5 and 75 deg;
   - local solar time: every 4 h, periodic;
-  - season: local winter, equinox and local summer.
+  - season: winter, equinox and summer of the magnetic hemisphere, going linearly to
+    equinox within 10 deg of the dip equator, so that the two hemispheres meet without a
+    jump.
 
   x is held at the largest value in the training data, and R is clipped to the range of the
   training data.
@@ -164,13 +169,13 @@ storm rows have ap_tau >= 30 or >= 80 for tau = 0.8):
 
 | rows | |MLAT| 0-20 | 20-40 | 40-60 | 60-90 | all |
 |---|---|---|---|---|---|
-| all (10.2 million) | 9.63 -> 9.38 | 7.43 -> 7.32 | 5.92 -> 5.78 | 5.37 -> 5.34 | 7.18 -> 7.04 |
-| ap_tau >= 30 | 13.70 -> 13.68 | 11.44 -> 11.63 | 8.58 -> 7.83 | 6.70 -> 6.07 | 10.26 -> 10.05 |
-| ap_tau >= 80 | 18.46 -> 19.66 | 18.84 -> 18.36 | 13.03 -> 9.32 | 8.95 -> 7.14 | 15.06 -> 14.33 |
+| all (10.2 million) | 9.63 -> 9.42 | 7.43 -> 7.34 | 5.92 -> 5.78 | 5.37 -> 5.34 | 7.18 -> 7.06 |
+| ap_tau >= 30 | 13.70 -> 13.70 | 11.44 -> 11.62 | 8.58 -> 7.83 | 6.70 -> 6.07 | 10.26 -> 10.05 |
+| ap_tau >= 80 | 18.46 -> 19.79 | 18.84 -> 18.34 | 13.03 -> 9.32 | 8.95 -> 7.14 | 15.06 -> 14.37 |
 
 The gain is in the negative phase at middle and high magnetic latitudes. At low latitudes
 the positive phase is not captured: 0-20 deg gets slightly worse in strong storms. The RMSE
-of log R barely moves overall (0.298 -> 0.296), because storm-to-storm variability is much
+of log R barely moves overall (0.298 -> 0.297), because storm-to-storm variability is much
 larger than any mean storm response.
 
 **On the climatology, against CODE TEC** (cos-latitude weighted; correlation and RMSE in
@@ -178,9 +183,9 @@ TECU, without -> with `--storm`):
 
 | period | correlation all / mid / high | RMSE all / mid / high |
 |---|---|---|
-| 1-3 May 2024 (quiet) | 0.897 -> 0.900 / 0.864 -> 0.873 / 0.721 -> 0.747 | 13.2 -> 13.3 / 8.1 -> 8.2 / 6.7 -> 6.9 |
-| 10-12 May 2024 (Gannon storm) | 0.798 -> 0.810 / 0.651 -> 0.713 / 0.522 -> 0.671 | 19.6 -> 20.6 / 14.3 -> 16.0 / 8.6 -> 10.8 |
-| 10-12 Oct 2024 (storm) | 0.782 -> 0.817 / 0.768 -> 0.786 / 0.555 -> 0.672 | 25.2 -> 26.1 / 14.2 -> 16.6 / 10.4 -> 12.2 |
+| 1-3 May 2024 (quiet) | 0.897 -> 0.901 / 0.864 -> 0.873 / 0.721 -> 0.747 | 13.2 -> 13.3 / 8.1 -> 8.2 / 6.7 -> 6.9 |
+| 10-12 May 2024 (Gannon storm) | 0.798 -> 0.813 / 0.651 -> 0.713 / 0.522 -> 0.671 | 19.6 -> 20.5 / 14.3 -> 16.0 / 8.6 -> 10.8 |
+| 10-12 Oct 2024 (storm) | 0.782 -> 0.817 / 0.768 -> 0.786 / 0.555 -> 0.672 | 25.2 -> 25.9 / 14.2 -> 16.5 / 10.4 -> 12.2 |
 
 The correction improves the storm pattern (correlation), but it raises the TEC RMSE. The
 reason is that the climatology already reads about 25 % low at this solar maximum, and a
@@ -197,7 +202,7 @@ Here the climatology reads foF2 high during storms, and the correction helps:
 | hours | n | RMSE, MHz | bias, MHz | correlation |
 |---|---|---|---|---|
 | all | 15,897 | 1.46 -> 1.40 | +0.64 -> +0.41 | 0.850 -> 0.859 |
-| ap_tau >= 30 | 2,788 | 2.46 -> 2.14 | +1.69 -> +0.25 | 0.777 -> 0.723 |
+| ap_tau >= 30 | 2,788 | 2.46 -> 2.14 | +1.69 -> +0.24 | 0.777 -> 0.723 |
 | ap_tau >= 60 | 922 | 2.83 -> 2.36 | +2.05 -> -0.75 | 0.718 -> 0.637 |
 
 The two storms differ:

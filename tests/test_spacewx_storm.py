@@ -64,12 +64,19 @@ def test_filtered_ap_reads_only_ended_intervals_and_renormalises():
     # At the boundary the interval just ended counts, the next does not.
     assert storm.filtered_ap(rec, datetime(2024, 5, 8, 15), tau, nlag) == pytest.approx(
         np.dot(w, 60 - np.arange(nlag)) / w.sum())
-    # A missing interval is left out and the weights renormalised.
+    # An older missing interval is left out and the weights renormalised.
     gap = ap.copy()
-    gap[59] = np.nan
+    gap[54] = np.nan
     got = storm.filtered_ap(_record(gap), when, tau, nlag)
-    good = np.arange(nlag) != 0
+    good = np.arange(nlag) != 5
     assert got == pytest.approx(np.dot(w[good], (59 - np.arange(nlag))[good]) / w[good].sum())
+    # One of the latest two missing (GFZ has not published it yet): refused, not renormalised.
+    for lag in range(storm.LATEST_REQUIRED):
+        late = ap.copy()
+        late[59 - lag] = np.nan
+        with pytest.raises(storm.StormError, match="no ap yet"):
+            storm.filtered_ap(_record(late), when, tau, nlag)
+    assert storm.last_ended_interval(when) == datetime(2024, 5, 8, 9)
     # Too little of the weight present, or before the record: refused.
     with pytest.raises(storm.StormError):
         storm.filtered_ap(_record(np.full(80, np.nan)), when, tau, nlag)
@@ -112,6 +119,9 @@ def test_ratio_follows_the_fit_and_is_clipped(fit_file):
         storm.season_coordinate(when, [0.0, 80.0]), 100.0))
     assert storm.season_coordinate(datetime(2024, 6, 20), [10.0])[0] == pytest.approx(1.0, abs=1e-3)
     assert storm.season_coordinate(datetime(2024, 6, 20), [-10.0])[0] == pytest.approx(-1.0, abs=1e-3)
+    # Continuous across the dip equator: 0 there, half way at half the taper.
+    np.testing.assert_allclose(storm.season_coordinate(datetime(2024, 6, 20), [-1e-9, 0.0, 1e-9, 5.0]),
+                               [0.0, 0.0, 0.0, 0.5], atol=1e-3)
     np.testing.assert_allclose(storm.local_time([90.0, -90.0], when), [18.0, 6.0])
 
 
@@ -125,8 +135,14 @@ def test_fit_file_is_checked_and_pinned_by_its_hash(tmp_path, fit_file):
     bad.write_text(json.dumps({"tau": 0.9}))
     with pytest.raises(storm.StormError):
         storm.load_fit(tmp_path / "bad.json")
-    doc = storm.receipt(fit, 42.0, "synthetic")
-    assert doc["spacewx_storm_fit_sha256"] == fit.sha256 and doc["spacewx_storm_ap_tau"] == 42.0
+    for over in ({"nlag": 0}, {"tau": 1.0}, {"ratio_range": [2.0, 0.5]}, {"lt_nodes": [0, 8, 4, 12, 16, 20]},
+                 {"mlat_nodes": [0.0], "coef": np.zeros((1, 6, 3, 2)).tolist()}):
+        bad.write_text(json.dumps(_fit_doc(**over)))
+        with pytest.raises(storm.StormError):
+            storm.load_fit(bad)
+    assert not fit.coef.flags.writeable
+    doc = storm.receipt(fit, "synthetic")
+    assert doc["spacewx_storm_fit_sha256"] == fit.sha256 and "spacewx_storm_ap_tau" not in doc
 
 
 def test_shipped_fit_loads_and_is_quiet_at_zero_ap():

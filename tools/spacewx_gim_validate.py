@@ -146,6 +146,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.storm and args.indices is None:
         parser.error("--storm reads ap from the index record: use --indices")
+    if args.storm_fit and not args.storm:
+        parser.error("--storm-fit chooses the fit of --storm: add --storm")
 
     from woof.spacewx import indices
     from woof.spacewx.ionosphere import Ionosphere, receipt
@@ -154,7 +156,13 @@ def main(argv=None) -> int:
     gims = [(path, read_ionex(path)) for path in args.ionex]
     # The F10.7 driver at the last map reads the UT day before it.
     last = max(max(gim["epochs"]) for _, gim in gims)
-    record = None if args.f107 is not None else indices.load(args.indices, last - timedelta(days=0 if args.storm else 1))
+    if args.f107 is not None:
+        record = None
+    elif args.storm:            # ap through the last ended interval, which GFZ adds during the day
+        from woof.spacewx.storm import last_ended_interval
+        record = indices.load(args.indices, last_ended_interval(last), kp=True)
+    else:
+        record = indices.load(args.indices, last - timedelta(days=1))
     fit = None
     if args.storm:
         from woof.spacewx import storm
@@ -201,7 +209,7 @@ def main(argv=None) -> int:
     report["receipt"] = receipt(iono, "fixed" if record is None else f"{record.source} sha256:{record.sha256}",
                                 "fixed" if record is None else args.f107_mode)
     if fit is not None:
-        report["receipt"].update(storm.receipt(fit, None, f"{record.source} sha256:{record.sha256}"))
+        report["receipt"].update(storm.receipt(fit, f"{record.source} sha256:{record.sha256}"))
     for name, s in total.items():
         if not s["nodes"]:
             continue
