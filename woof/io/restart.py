@@ -1503,6 +1503,9 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # RunConfig; stateless (the factor is read from the series at each
     # radiation call's model time), so a resumed run scales identically.
     "solar_variability",
+    # The opt-in band shares (woof.spacewx.solar_spectrum), the same: the
+    # factor is set on the SW leaf before each call from that call's time.
+    "solar_spectrum",
     # The opt-in ionosphere history (woof.spacewx.history): rebuilt from the
     # resumed RunConfig; its rows are recomputed at each frame's valid time
     # from the run start's F10.7, so a resumed run writes the same rows.
@@ -3500,6 +3503,11 @@ def _drop_default_off_run_keys(values: dict) -> None:
                 values.pop(name, None)
     if values.get("spacewx_aurora_opt", 0) == 0:
         for name, default in (("spacewx_aurora_opt", 0), ("spacewx_kp_source", "")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    # The opt-in solar spectral variability (woof.spacewx), the same contract.
+    if values.get("solar_ssi_opt", 0) == 0:
+        for name, default in (("solar_ssi_opt", 0), ("solar_ssi_source", "")):
             if values.get(name, default) == default:
                 values.pop(name, None)
     # The opt-in solar-proton chemistry source (woof.spacewx.epp_chem): the
@@ -5734,6 +5742,8 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'spacewx_ionosphere_maps': 'ccir',
     'spacewx_aurora_opt': 0,
     'spacewx_kp_source': '',
+    'solar_ssi_opt': 0,
+    'solar_ssi_source': '',
     'spacewx_epp_opt': 0,
     'spacewx_epp_source': '',
     'ruc_soilprop': 'wrf_45',
@@ -6313,6 +6323,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "spacewx_f107_mode": "81day",
                           "spacewx_ionosphere_maps": "ccir",
                           "spacewx_aurora_opt": 0, "spacewx_kp_source": "",
+                          "solar_ssi_opt": 0, "solar_ssi_source": "",
                           "spacewx_epp_opt": 0, "spacewx_epp_source": "",
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without

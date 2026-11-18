@@ -617,7 +617,7 @@ def rrtmgk_vram_bytes(*, ncol, nz, column_chunk=None, resident_threads=None,
 def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
                    cldfra, o33d, tsk, emiss, albedo, coszen, solcon,
                    f_qc, f_qi, f_qs, f_qnc, o3input, column_chunk=None,
-                   radii=False, gases=None):
+                   radii=False, gases=None, band_factor=None):
     """rad_rrtmg_driver over a batch of columns, on the device.
 
     Profiles are C-contiguous float32 device arrays (ncol, nz) (p8w, t8w:
@@ -628,7 +628,9 @@ def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
     cldfrac (ncol, nz); with ``radii`` the clamped effective radii
     re_qc/re_qi/re_qs (ncol, nz) before the snow-mass cap.  ``gases``
     (name -> float32 mole fraction) replaces those of the driver's fixed
-    ``GASES`` it names (ghg_input = 1, ``camtr_gases``); None keeps them."""
+    ``GASES`` it names (ghg_input = 1, ``camtr_gases``); None keeps them.
+    ``band_factor`` (14 floats, bands 16..29) scales the SW source per band
+    (solar_ssi_opt); None leaves it bitwise unchanged."""
     import cupy as cp
     gpu_preflight()
     inflg, iceflg = flags(f_qc, f_qi, f_qs)
@@ -745,7 +747,8 @@ def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
                     cp.zeros(shape, f32), cp.zeros(shape, f32),
                     mc["ciwpmcl"], mc["clwpmcl"], mc["cswpmcl"],
                     take(P["rei"]), take(P["rel"]), take(P["res"]),
-                    aer_opt=0, column_chunk=chunk, mcica_layout="column")
+                    aer_opt=0, column_chunk=chunk, mcica_layout="column",
+                    band_factor=band_factor)
             except BaseException:
                 sw.drop_handoff()
                 raise
@@ -825,6 +828,10 @@ class RRTMGKRadiation:
     publishes_cldfra = True
     supplies_surface_direct = False
     glw_provenance = "scheme"
+    #: solar_ssi_opt (woof.spacewx.solar_spectrum): the band factor on RRTMG
+    #: SW's 14 bands, set by PhysicsDriver before each call; None is off.
+    accepts_sw_band_factor = True
+    sw_band_factor = None
 
     def __init__(self, start_time, latitude_deg, longitude_deg, *,
                  o3input=2, icloud=1, column_chunk=None, ozone_parent=None,
@@ -1107,7 +1114,8 @@ class RRTMGKRadiation:
             f_qs=flags_on["qs"], f_qnc=f_qnc, o3input=self.o3input,
             column_chunk=self.column_chunk,
             gases=(camtr_gases(valid_time.year, julian) if self.ghg_input
-                   else None))
+                   else None),
+            band_factor=self.sw_band_factor)
         del p3d, p8w, t3d, t8w, rho, moist, nc, o33d
 
         rthratenlw = cp.ascontiguousarray(out["rthratenlw"].T)

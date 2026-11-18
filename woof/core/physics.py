@@ -2517,6 +2517,16 @@ class PhysicsDriver:
             import json as _tsi_json
             print("[spacewx tsi] " + _tsi_json.dumps(self.solar_variability.receipt(),
                                                      sort_keys=True, default=str), flush=True)
+        # Opt-in solar spectral variability (woof.spacewx): RRTMG SW's band
+        # shares at each radiation call; None, and no import, by default.
+        self.solar_spectrum = None
+        if int(getattr(cfg, "solar_ssi_opt", 0) or 0) and radiation is not None:
+            from woof.spacewx.solar_spectrum import SpectralVariability
+            self.solar_spectrum = SpectralVariability.for_run(
+                cfg, getattr(radiation, "start_time", None), radiation)
+            import json as _ssi_json
+            print("[spacewx ssi] " + _ssi_json.dumps(self.solar_spectrum.receipt(),
+                                                     sort_keys=True, default=str), flush=True)
         # Opt-in ionosphere history rows (woof.spacewx); None, and no import,
         # by default.  Diagnostic only: nothing the step reads.
         self.spacewx_ionosphere = None
@@ -3271,6 +3281,9 @@ class PhysicsDriver:
                     self.fields, cp.asarray(cosine).reshape(self.fields["albedo"].shape),
                     initialize=initialize)
             radiation_fields = dict(radiation_fields, albedo=self.fields["albsol"])
+        if getattr(self, "solar_spectrum", None) is not None:
+            # The band shares at the call's model time, read by the SW leaf.
+            self.solar_spectrum.apply(self.radiation_callable, state.elapsed_seconds)
         result = self.radiation_callable(
             atmosphere=atmosphere, fields=radiation_fields, state=radiation_state, cfg=cfg)
         if not isinstance(result, RadiationResult):

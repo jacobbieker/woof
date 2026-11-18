@@ -1455,6 +1455,11 @@ class RRTMGLegacyRadiation:
     """
 
     native_eclipse = True  # WRF dims incoming SCON before SW transport.
+    #: solar_ssi_opt (woof.spacewx.solar_spectrum): PhysicsDriver sets
+    #: ``sw_band_factor`` (14 floats, bands 16..29) before each call; None
+    #: is WRF's fixed Kurucz band shares.
+    accepts_sw_band_factor = True
+    sw_band_factor = None
 
     #: RRTMG_LWRAD's ``OLR`` (TOA outgoing longwave, W m-2) is
     #: ``TOTUFLUX`` at the top level -- ``lwrad_outputs_batch`` already maps
@@ -2897,7 +2902,7 @@ class RRTMGLegacyRadiation:
                              (0 if aerosol_w is None else self.aer_opt)),
                     aerosol=aerosol_w,
                     column_chunk=chunk_sw, _stage_probe=self._stage_probe,
-                    mcica_layout="column")
+                    mcica_layout="column", band_factor=self.sw_band_factor)
                 if spectral is not None:
                     for key, output, _, _ in spectral_bindings:
                         # The device engine returns total and direct spectral

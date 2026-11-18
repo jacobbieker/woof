@@ -222,6 +222,8 @@ DEFAULT_OFF = frozenset({
     "spacewx_ionosphere_maps",
     # The opt-in auroral oval history (woof.spacewx), absent while off.
     "spacewx_aurora_opt", "spacewx_kp_source",
+    # The opt-in solar band shares (woof.spacewx), absent while off.
+    "solar_ssi_opt", "solar_ssi_source",
     # The opt-in solar-proton chemistry source (woof.spacewx), absent while off.
     "spacewx_epp_opt", "spacewx_epp_source",
     # TEMPO's optional coupling arms, absent while off.
