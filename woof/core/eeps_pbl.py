@@ -99,19 +99,9 @@ def _kernel(nz: int):
     return _module(cp.cuda.Device().id, int(nz)).get_function("eeps_column")
 
 
-def tile_columns(fn, columns: int, nz: int | None = None) -> int:
-    """Bound the workspace by the card's resident column capacity (on Metal,
-    :func:`woof.core.physics_inventory.metal_column_tile_columns`: the
-    whole domain in one launch under the byte cap at this ``nz``)."""
+def tile_columns(fn, columns: int) -> int:
+    """Bound the workspace by the card's resident column capacity."""
     import cupy as cp
-    from woof import backend
-    if backend.active() == "mlx":
-        from woof.core.physics_inventory import metal_column_tile_columns
-        wanted = metal_column_tile_columns(
-            int(cp.cuda.Device().attributes["MultiProcessorCount"]),
-            columns, _BLOCK, block_bytes=(
-                None if nz is None else eeps_workspace_floats(nz, _BLOCK) * 4))
-        return ((wanted + _BLOCK - 1) // _BLOCK) * _BLOCK
     from cupy_backends.cuda.api import driver
 
     resident = driver.occupancyMaxActiveBlocksPerMultiprocessor(
@@ -186,7 +176,7 @@ def eeps_step(columns, surface, carried, *, dt: float, first_step: bool,
     out["kpbl"] = cp.empty(shape, dtype=cp.int32)
     status = cp.zeros(1, dtype=cp.uint32)
     fn = kernel if kernel is not None else _kernel(nz)
-    tile = tile_columns(fn, n, nz)
+    tile = tile_columns(fn, n)
     workspace = cp.empty(eeps_workspace_floats(nz, tile), dtype=f32)
     args = (tuple(columns[name] for name in COLUMN_INPUTS)
             + tuple(surface[name] for name in SURFACE_INPUTS)

@@ -1,6 +1,8 @@
 """The Metal column tile (physics_inventory.metal_column_tile_columns) moves
-no word in MRF, EEPS, New SAS (the column_cumulus table route) or the
-registry column-kernel cumulus route (BMJ), and each launcher's tile rule.
+no word in MRF, New SAS (the column_cumulus table route) or the registry
+column-kernel cumulus route (BMJ), and each launcher's tile rule.  EEPS
+keeps its occupancy-bounded tile on Metal too: the wide tile measured
+slower there (15.3 vs 14.0 ms at 49 x 228 x 276 on an M3 Max).
 
 On Metal those launchers put a whole domain in one launch under a byte cap
 (YSU's #602 rule); CUDA keeps its occupancy-bounded tiles.  The tile only
@@ -44,7 +46,8 @@ def _digest(out):
     return h.hexdigest()
 
 
-def _profile(rng, nz=NZ, ny=NY, nx=NX):
+def _profile(rng):
+    nz, ny, nx = NZ, NY, NX
     psf = 1.0e5 + rng.uniform(-2e3, 2e3, (ny, nx))
     pif = np.empty((nz + 1, ny, nx))
     for k in range(nz + 1):
@@ -124,54 +127,6 @@ def test_mrf_tile_keeps_every_word():
         out = M.launch_mrf(**col, **surf, ust=_f32(cp, ust), dt=30.0, flag_qi=True)
         assert np.isfinite(cp.asnumpy(out["rthblten"])).all()
         return _digest(out)
-
-    _assert_same(_runs(cp, launch, rules, patch))
-
-
-@pytest.mark.gpu
-def test_eeps_tile_keeps_every_word():
-    cp = pytest.importorskip("cupy")
-    from woof.core import eeps_pbl as E
-
-    rng = np.random.default_rng(9)
-    a = _profile(rng)
-    shape3 = (NZ, NY, NX)
-    columns = {k: _f32(cp, v) for k, v in dict(
-        u=rng.uniform(-10, 10, shape3), v=rng.uniform(-10, 10, shape3),
-        t=a["t"], qv=a["qv"], qc=rng.uniform(0, 3e-5, shape3),
-        qi=rng.uniform(0, 2e-5, shape3), qr=np.zeros(shape3), qs=np.zeros(shape3),
-        qg=np.zeros(shape3), p=a["p"], pi=a["pi"], rho=a["rho"],
-        rthraten=rng.uniform(-8e-4, 2e-4, shape3), dz8w=a["dz"]).items()}
-    surface = {k: _f32(cp, v) for k, v in dict(
-        psfc=a["psfc"], qsfc=rng.uniform(5e-3, 1.5e-2, (NY, NX)),
-        tsk=a["t"][0] + rng.uniform(-2, 4, (NY, NX)),
-        ust=rng.uniform(0.05, 0.85, (NY, NX)), rmol=rng.uniform(-0.05, 0.02, (NY, NX)),
-        wspd=rng.uniform(0.7, 15, (NY, NX)), hfx=rng.uniform(-30, 250, (NY, NX)),
-        qfx=rng.uniform(-1e-5, 2e-4, (NY, NX))).items()}
-    carried0 = {"pek_pbl": rng.uniform(1e-4, 1.0, shape3),
-                "pep_pbl": rng.uniform(1e-7, 1e-3, shape3),
-                "pek_adv": rng.uniform(1e-4, 1.0, shape3),
-                "pep_adv": rng.uniform(1e-7, 1e-3, shape3)}
-    from woof.core.physics_inventory import (EEPS_BLOCK, eeps_workspace_floats,
-                                              metal_column_tile_columns)
-    original = E.tile_columns
-    rules = {"one block": lambda fn, n, nz=None: EEPS_BLOCK,
-             "three blocks": lambda fn, n, nz=None: 3 * EEPS_BLOCK,
-             "metal rule, one core": lambda fn, n, nz=None: -(-metal_column_tile_columns(
-                 1, n, EEPS_BLOCK, block_bytes=eeps_workspace_floats(nz, EEPS_BLOCK) * 4)
-                 // EEPS_BLOCK) * EEPS_BLOCK,
-             "backend rule": original,
-             "whole domain": lambda fn, n, nz=None: -(-n // EEPS_BLOCK) * EEPS_BLOCK}
-
-    def patch(rule):
-        E.tile_columns = rule
-        return lambda: setattr(E, "tile_columns", original)
-
-    def launch():
-        carried = {k: _f32(cp, v) for k, v in carried0.items()}
-        out = E.eeps_step(columns, surface, carried, dt=30.0, first_step=False)
-        assert np.isfinite(cp.asnumpy(out["rthblten"])).all()
-        return _digest({**out, **{"carried_" + k: v for k, v in carried.items()}})
 
     _assert_same(_runs(cp, launch, rules, patch))
 
@@ -280,7 +235,7 @@ def test_registry_cumulus_tile_keeps_every_word():
 @pytest.mark.parametrize(*_numerics_child.MODES)
 def test_column_tiles_keep_every_word_in_every_numerics_mode(numerics, exact):
     _numerics_child.run(__file__, [
-        "test_mrf_tile_keeps_every_word", "test_eeps_tile_keeps_every_word",
+        "test_mrf_tile_keeps_every_word",
         "test_new_sas_tile_keeps_every_word",
         "test_registry_cumulus_tile_keeps_every_word"], numerics, exact)
 
@@ -294,6 +249,7 @@ def test_metal_tiles_are_one_launch_and_cuda_keeps_its_rules(monkeypatch):
     from woof.core import column_cumulus as C
     from woof.core import eeps_pbl as E
     from woof.core import mrf as M
+    from cupy_backends.cuda.api import driver
     from woof.core import physics_inventory as P
 
     class _Device:
@@ -308,7 +264,10 @@ def test_metal_tiles_are_one_launch_and_cuda_keeps_its_rules(monkeypatch):
     ncol = 228 * 276
     nsas = C.COLUMN_CUMULUS_SCHEMES[96]
     assert M.mrf_tile_columns(_Fn(), ncol, 49) == ncol
-    assert E.tile_columns(_Fn(), ncol, 49) == -(-ncol // P.EEPS_BLOCK) * P.EEPS_BLOCK
+    # EEPS keeps its occupancy rule on Metal (the wide tile was slower).
+    monkeypatch.setattr(driver, "occupancyMaxActiveBlocksPerMultiprocessor",
+                        lambda *a: 1, raising=False)
+    assert E.tile_columns(_Fn(), ncol) <= 40 * P.EEPS_TILE_BLOCKS_PER_SM * P.EEPS_BLOCK
     # New SAS's 50 slots hit the byte cap: whole blocks under it.
     capped_sas = C.tile_columns(ncol, 40, scheme=nsas, nz=49)
     assert capped_sas % C.BLOCK == 0 and capped_sas < ncol
@@ -359,7 +318,8 @@ def test_preflight_prices_the_metal_tiles():
     eeps = exp(bl_pbl_physics=F.EEPS_PBL_SCHEME)
     assert F.eeps_column_workspace_bytes(eeps, profile=cuda) == (
         P.eeps_workspace_floats(49, 40 * P.EEPS_TILE_BLOCKS_PER_SM * P.EEPS_BLOCK) * 4)
-    assert F.eeps_column_workspace_bytes(eeps, profile=metal) == P.eeps_workspace_floats(49, ncol) * 4
+    assert F.eeps_column_workspace_bytes(eeps, profile=metal) == (
+        F.eeps_column_workspace_bytes(eeps, profile=cuda))
     from woof.core import column_cumulus as C
     nsas = exp(cu_physics=96)
     assert F.column_cumulus_workspace_bytes(nsas, profile=cuda) == C.workspace_bytes(96, 49, ncol, 40)
