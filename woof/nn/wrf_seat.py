@@ -444,7 +444,18 @@ class WrfColumnSeat:
                     targets[spec] = (weight * scheme[rows]).sum(axis=0)
                 elif spec == "dtheta" and self.policy.fixer == "moisture+heat":
                     targets[spec] = (weight * more["exner"] * scheme[rows]).sum(axis=0)
-        y = self.policy.constrain(y, m, dt=float(cfg.dt), state=more, weight=weight, targets=targets)
+        dt = float(cfg.dt)
+        floor = more
+        if not replace:
+            # A residual adds to the scheme's rate: the positivity floor
+            # holds for the sum, so it is taken from the moisture the
+            # scheme's rate alone would leave after the step.
+            floor = dict(more)
+            for spec, rows in m.output_slices().items():
+                field = spec[1:]
+                if spec.startswith("dq") and field in more:
+                    floor[field] = more[field] + f32(dt) * scheme[rows]
+        y = self.policy.constrain(y, m, dt=dt, state=floor, weight=weight, targets=targets)
         delta = y - scheme if replace else y
         if fallback is not None:
             delta = xp.where(fallback[None, :], f32(0), delta)
