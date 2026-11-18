@@ -506,8 +506,15 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # certified a driver digest while the recovery module underneath it moved
     # freely, so a later edit to the pressure-diagnostic path could change
     # forecast bytes with every proof still reporting frozen sources.
+    # Re-frozen 2026-11-18 (R4-H scratch outputs): recover_state's eight
+    # outputs come from scratch_like instead of cupy.empty_like.  On CUDA that
+    # is the same cupy.empty call (no new bytes); on Metal it drops the zero
+    # fill.  Every recovery kernel writes each element of its output.  What
+    # re-ran: Alps hex VR 1 h on CUDA, fast and strict, with WOOF_SCRATCH_POISON
+    # ff/a5 against unpoisoned runs (TOTAL_DIFFER 0).  The x4 full-physics
+    # proof and the regional mints were not re-run.
     "src/hexcore/cuda_backend/recovery.py": (
-        "93ae1ec638b80717e50ab5a8b95427da01bc4f64f985e9a73ee888b827689f0c"
+        "d47e5523a9ea997367565a9756573b98912bb149599827101dafe7980608f4d5"
     ),
     # Re-frozen for the regional CPU authority lane: the v8.4.1
     # config admits config_apply_lbcs and config_moist_physics behind the
@@ -920,6 +927,10 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # anchored timestep, wrapping _recover_candidate, so the execution of the
     # sub-anchor lane depends on these bytes.  Outside the regional kernel
     # set by design: kernel_set_sha256 does not move.
+    # Re-frozen 2026-11-18 (R4-H scratch outputs): the fold and residual
+    # outputs, when no *_out buffer is passed, come from scratch_like (a full
+    # write by compensated_fold_f32 / compensated_residual_f32).  Same evidence
+    # as the recovery.py re-freeze above; the x4 proof was not re-run.
     "src/hexcore/cuda_compensated_recovery.py": (
         "4a2a31e9e64107d899f3fe76224fdf08ce771f463bdd189a54fe806054e22f69"
     ),

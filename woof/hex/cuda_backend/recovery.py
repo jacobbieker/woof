@@ -315,7 +315,10 @@ def recover_state(
     # Allocation ORDER through the default (include_pressure=True) path is
     # unchanged: the frozen phase-1 longwave seam is sensitive to device pool
     # contents, so the six pressure arrays keep their place ahead of the two
-    # velocity arrays.
+    # velocity arrays.  The outputs are scratch (no fill on Metal; plain
+    # cupy.empty on CUDA, so the CUDA pool layout is unchanged).  Every kernel
+    # below writes each element, so no reader sees stale contents; poison runs
+    # (WOOF_SCRATCH_POISON=ff/a5) are byte-identical.
     if include_pressure:
         theta = _scratch_like(cupy, state.rho)
         exner = _scratch_like(cupy, state.rho)
