@@ -284,7 +284,27 @@ def arith_in_place(np_name, view, other) -> bool:
 #: every element back (woof_copy).  A word copy either way: the same bytes land.
 _SCATTER_SOURCE = """#include <metal_stdlib>
 struct WoofScatter { long n; long m; long offset; long ndim; long shape[8]; long stride[8];
-                     long last_n; long last_stride; long index_offset; };
+                     long last_n; long last_stride; long index_offset; long src_mod; };
+// L is the element-number type: 32-bit where n fits (Metal emulates 64-bit / and %)
+template <typename T, typename I, typename L>
+inline void woof_scatter_body(device T* dst, const device T* src, const device I* index,
+                              constant WoofScatter& c, L i) {
+  L m = (L)c.m;
+  long k = (long)index[c.index_offset + (long)(i % m)];
+  if (k < 0) k += c.last_n;
+  if (k < 0 || k >= c.last_n) return;
+  L rem = i / m;
+  long off = c.offset + k * c.last_stride;
+  for (long d = c.ndim - 1; d > 0; --d) {
+    L extent = (L)c.shape[d];
+    off += (long)(rem % extent) * c.stride[d];
+    rem /= extent;
+  }
+  off += (long)rem * c.stride[0];
+  // src_mod: 1 for a scalar, m for one row over the outer axes, n for a full source
+  L j = c.src_mod == 1 ? (L)0 : (c.src_mod == c.n ? i : i % (L)c.src_mod);
+  dst[off] = src[j];
+}
 #define WOOF_SCATTER(NAME, T, I)                                                        \\
 [[kernel]] void NAME(device T* dst [[buffer(0)]], const device T* src [[buffer(1)]],    \\
                      const device I* index [[buffer(2)]],                               \\
@@ -294,22 +314,15 @@ struct WoofScatter { long n; long m; long offset; long ndim; long shape[8]; long
                      uint3 bd [[threads_per_threadgroup]]) {                            \\
   long i = (long)bid.x * (long)bd.x + (long)tid.x;                                     \\
   if (i >= c.n) return;                                                                 \\
-  long k = (long)index[c.index_offset + i % c.m];                                       \\
-  if (k < 0) k += c.last_n;                                                             \\
-  if (k < 0 || k >= c.last_n) return;                                                   \\
-  long rem = i / c.m, off = c.offset + k * c.last_stride;                               \\
-  for (long d = c.ndim - 1; d > 0; --d) {                                               \\
-    long q = rem % c.shape[d]; rem /= c.shape[d]; off += q * c.stride[d];               \\
-  }                                                                                     \\
-  off += rem * c.stride[0];                                                             \\
-  dst[off] = src[i];                                                                    \\
+  if (c.n <= 0xFFFFFFFFl) woof_scatter_body<T, I, uint>(dst, src, index, c, (uint)i);  \\
+  else woof_scatter_body<T, I, long>(dst, src, index, c, i);                            \\
 }
 WOOF_SCATTER(woof_scatter_4_i4, uint, int)
 WOOF_SCATTER(woof_scatter_4_i8, uint, long)
 WOOF_SCATTER(woof_scatter_8_i4, ulong, int)
 WOOF_SCATTER(woof_scatter_8_i8, ulong, long)
 """
-_SCATTER_KEY = "woof:facade-scatter-last:v1"
+_SCATTER_KEY = "woof:facade-scatter-last:v2"
 
 
 @lru_cache(maxsize=1)
@@ -368,25 +381,34 @@ def scatter_last(a, key, value) -> bool:
         return False
     m = index.size
     target = tuple(view.shape[:-1]) + (m,)
-    count = int(np.prod(target)) if target else 1
+    count = int(np.prod(target))
     if count == 0:
-        return True
+        return False             # nothing to store: the general path checks the value's shape
+    outer_shape = list(view.shape[:-1]) or [1]
+    outer_strides = [s // item for s in view.strides[:-1]] or [0]
+    outer_shape, outer_strides = _collapsed(outer_shape, outer_strides)
+    if len(outer_shape) > MAX_DIMS:
+        return False
     values = operand_values(value, a.dtype)
     try:
         if np.broadcast_shapes(tuple(values.shape), target) != target:
             return False
     except ValueError:
         return False
-    src = mx.contiguous(mx.broadcast_to(values, target).reshape(-1))
-    src = src.view(_width_dtype(item)) if src.dtype.size == item else \
-        src.astype(values.dtype).view(_width_dtype(item))
-    outer_shape = list(view.shape[:-1]) or [1]
-    outer_strides = [s // item for s in view.strides[:-1]] or [0]
-    outer_shape, outer_strides = _collapsed(outer_shape, outer_strides)
+    # a scalar or one row is read in place (src_mod), not broadcast to the target
+    shape = tuple(values.shape)
+    if values.size == 1:
+        src, src_mod = values.reshape(-1), 1
+    elif shape[-1:] == (m,) and all(s == 1 for s in shape[:-1]):
+        src, src_mod = values.reshape(-1), m
+    else:
+        src, src_mod = mx.broadcast_to(values, target).reshape(-1), count
+    src = mx.contiguous(src).view(_width_dtype(item))
     blob = struct.pack("<qqqq", count, m, view._offset // item, len(outer_shape))
     blob += struct.pack(f"<{MAX_DIMS}q", *(list(outer_shape) + [1] * (MAX_DIMS - len(outer_shape))))
     blob += struct.pack(f"<{MAX_DIMS}q", *(list(outer_strides) + [0] * (MAX_DIMS - len(outer_strides))))
-    blob += struct.pack("<qqq", int(view.shape[-1]), view.strides[-1] // item, index._offset // index.itemsize)
+    blob += struct.pack("<qqqq", int(view.shape[-1]), view.strides[-1] // item,
+                        index._offset // index.itemsize, src_mod)
     _scatter_compiled()
     flush_pending()
     st = a._st

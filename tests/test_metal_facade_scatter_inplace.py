@@ -145,3 +145,31 @@ def test_scatter_orders_after_readers_and_before_later_launches(cp):
     host[..., [1, 3, -1]] = 7.5
     assert after.get().tobytes() == host.tobytes()
     assert a.get().tobytes() == host.tobytes()
+
+
+def test_empty_selection_and_deep_outer_axes_decline(cp):
+    from woof.backend.facade._write import scatter_last
+    a = cp.zeros((4, 6), dtype=cp.float32)
+    empty = cp.asarray(np.array([], dtype=np.int32))
+    # nothing to store: the general path keeps checking the value's shape
+    assert not scatter_last(a, (Ellipsis, empty), cp.ones((7, 9), dtype=cp.float32))
+    # nine outer axes that do not collapse (every other element) exceed the kernel's eight
+    deep = cp.zeros((3,) * 9 + (4,), dtype=cp.float32)[(slice(None, None, 2),) * 9]
+    assert not scatter_last(deep, (Ellipsis, cp.asarray(np.array([1], dtype=np.int32))), 1.0)
+
+
+@pytest.mark.parametrize("key", ["leading", "ellipsis", "slices", "short"])
+def test_eight_byte_general_path_keys(cp, monkeypatch, key):
+    """The general path stores 8-byte words through a uint32 halves view: every
+    key form must leave the halves axis alone."""
+    rng = np.random.default_rng(5)
+    host = rng.standard_normal((3, 4, 5))
+    idx = np.array([0, 2], dtype=np.int32)
+    key_host = {"leading": (idx,), "ellipsis": (Ellipsis, idx),
+                "slices": (slice(None), slice(None), idx), "short": (slice(None), idx)}[key]
+    want = host.copy()
+    want[key_host] = -3.25
+    a = cp.asarray(host)
+    dkey = tuple(cp.asarray(k) if isinstance(k, np.ndarray) else k for k in key_host)
+    _general(monkeypatch, lambda: a.__setitem__(dkey, -3.25))
+    assert a.get().tobytes() == want.tobytes()

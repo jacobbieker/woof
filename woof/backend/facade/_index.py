@@ -127,10 +127,9 @@ def setitem(a: ndarray, key, value):
         v = values.reshape(-1).view(mx.uint32).reshape(tuple(values.shape) + (2,))
         k = _advanced_key(key)
         k = k if isinstance(k, tuple) else (k,)
-        if any(x is Ellipsis for x in k):
-            # an ellipsis would reach the halves axis: name it, so the key's
-            # last index stays on the array's last axis
-            k = k + (slice(None),)
+        # name the halves axis after an ellipsis, so no key form (an ellipsis,
+        # a short key, a newaxis) can reach it
+        k = k + ((slice(None),) if any(x is Ellipsis for x in k) else (Ellipsis, slice(None)))
         halves[k] = v
         a._write(halves.reshape(-1).view(mx.uint64).reshape(tuple(whole.shape)))
         return
