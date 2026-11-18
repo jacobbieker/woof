@@ -138,6 +138,7 @@ Common variations:
 | Set root or nest history cadence | `--history-interval SECONDS`, `--nest-history-interval SECONDS`. |
 | Allow planned tile streaming | `--tiles auto`. |
 | Forecast without pictures | `go --products none`. |
+| A domain where lakes matter (recommended there) | `go --lakes clm`, with `[static.highres] fields = "lakes"` in the TOML and `woof fetch-geog` for `lake_depth`; see [lakes.md](../lakes.md). |
 
 Changing resolution, extent, levels, nests, duration, or physics changes resource requirements. A point-based fit can change coverage. A polygon-based fit retains the required footprint or refuses it. Read the emitted geometry before downloading data.
 

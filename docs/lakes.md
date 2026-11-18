@@ -5,6 +5,58 @@ wherever the domain has lakes. The default WRF route keeps WRF's lake
 treatment: lakes are water points, with the skin temperature the forcing gives
 them, and GLSEA (`lake_state_source = "auto"`) wherever it covers.
 
+## Recommended settings
+
+Where lakes matter to the forecast, run with both of these:
+
+```toml
+[static.highres]
+enabled = true
+cache_root = "/data/highres-cache"
+fields = "lakes"     # lake extent from 100 m land cover (WRF route)
+```
+
+```text
+woof fetch-geog --config <stem>.lakes-clm-<hash>.toml   # once: WPS lake_depth
+woof go forecast.toml --lakes clm
+```
+
+They stay opt-in because they change the forecast. What they did on the
+cases we scored:
+
+- **Alps, 1 km, 24 h (25 SMN stations within 3 km of a lake shore and below
+  1000 m, CUDA and Metal agree to 0.01 K).**
+
+  | run | shore T2 bias / RMSE (K) | shore 10 m wind bias / RMSE (m/s) |
+  |---|---|---|
+  | defaults | +1.66 / 2.34 | +1.01 / 1.86 |
+  | `--lakes clm` | +0.49 / 1.45 | +0.67 / 1.55 |
+  | `--lakes clm` + `fields = "lakes"` | +0.43 / 1.49 | +0.57 / 1.44 |
+
+  Stations far from the lakes and high stations moved by less than 0.05 K.
+  With `fields = "lakes"`, the 480 WPS lake cells above 2000 m (glacier and
+  rock) became 8 real reservoirs.
+- **Great Lakes lake-effect snow, 3 km, 48 h (Buffalo, 17 Nov 2022, against
+  MRMS).** Lee-shore totals stay close to MRMS (Erie 31.9 mm with
+  `--lakes clm` against 28.6 mm with the defaults and 27.9 mm observed).
+  The caveats below are from this case.
+
+Caveats:
+
+- **The Great Lakes cool too fast.** Over 48 h the CLM lake cools Erie by
+  3.3 K where GLSEA shows 1.5 K (Ontario 2.9 K against 1.0 K). This is WRF's
+  CLM lake behaviour: the kernel is bitwise WRF's.
+- **Lake-effect cores are over-intense.** The 50 mm FSS falls from
+  .81/.89/.94 to .70/.82/.88 at 9/27/51 km, and the Erie lee band sits
+  8.6 km south of MRMS (7.5 km with the defaults). The 10 mm FSS improves (.76/.83/.88 to .79/.86/.90).
+- **`lake_depth` is a separate download.** `woof go` does not fetch the WPS
+  `lake_depth` geography; run `woof fetch-geog` on the copy `--lakes clm`
+  wrote (see below), or set `use_lakedepth = 0`.
+- **Hex R2 starts too cold.** On the hex MPAS-suite route
+  (`config_clm_lake_backend`), lakes start from the forcing's skin
+  temperature (lakeini), about 1.4 K colder than GLSEA on the Great Lakes
+  case; `lake_state_source` is not bound there.
+
 ## `woof go --lakes`
 
 | switch | `sf_lake_physics` | `use_lakedepth` | `lake_state_source` |
