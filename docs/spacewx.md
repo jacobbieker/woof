@@ -17,7 +17,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
 | L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
-| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make | ion-pair rates available as `woof spacewx particles`; the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
+| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make; auroral-electron ion-pair rates (Fang et al. 2010) from OVATION's energy flux and mean energy | ion-pair rates available as `woof spacewx particles` (electrons with `--electron-energy-flux`, a diagnostic above every model top); the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
 | L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route; photolysis not yet |
 
 Couplings that stay speculative are not implemented, and none is planned. One example is
@@ -624,9 +624,55 @@ precision for OH and HO2 at those heights. A high-top run reaching 1 hPa or
 above would gain about 1 ppbv per day, which MLS could see in principle; that
 comparison awaits such a run.
 
-Not modelled: electrons (auroral and radiation-belt). They deposit at 70-150
-km, above WRF and MPAS model tops (see the energy flux of L3b for the auroral
-part). Galactic cosmic rays are also left out.
+### Auroral electrons (`woof spacewx particles --electron-energy-flux`)
+
+`--electron-energy-flux` (erg cm-2 s-1) and `--electron-mean-energy` (keV) add
+the ion-pair rates of precipitating auroral electrons, and the NOx they make
+(1.25 per ion pair), at the same levels. The inputs are OVATION Prime's
+`eflux` and `mean_energy` (`woof spacewx aurora --energy`, L3b) at a point:
+
+```
+woof spacewx particles --time 2024-05-11T00:00Z --source none \
+    --electron-energy-flux 10 --electron-mean-energy 4 --levels 1e-6 1e-5 1e-4 1e-3 0.01
+```
+
+- **Model.** Fang et al. 2010 (GRL 37, L22106): a fit to first-principles
+  multi-stream and two-stream transport models, for isotropic monoenergetic
+  electrons of 100 eV to 1 MeV. The rate per gram is Q f(y, E) / (35 eV X),
+  with y = (2 / E) (X / 6e-6)^0.7 and X the column depth (g cm-2), so it needs
+  no temperature. Layer means come from the energy absorbed above each
+  interface, as for the protons.
+- **Spectrum.** A Maxwellian number flux, E exp(-E / E0), whose mean energy
+  2 E0 is OVATION's eflux / nflux (`--electron-spectrum maxwellian`, the
+  default), on 160 log bins over 0.1-1000 keV; or monoenergetic
+  (`--electron-spectrum mono`). A mean energy that puts more than 5 % of the
+  energy flux outside the fit's 0.1-1000 keV (below about 0.25 keV or above
+  about 300 keV) is refused, as is a negative or non-finite flux; a zero flux
+  with a zero mean energy (OVATION outside the oval) gives zeros. The profile
+  is one profile for the given inputs, recorded with `--time`; `--count`
+  steps the protons only.
+- **Checks** (`tests/test_spacewx_particles.py`):
+  - The column total against the incident energy: 0.84 at 100 eV, 0.94 at
+    1 keV, 0.99 at 10 keV, 1.01 at 100 keV and 1.05 at 1 MeV. This is the fit's
+    own error, which the paper quotes as within 5 % above 1 keV. It is not
+    renormalised.
+  - The peaks of the monoenergetic rates per volume lie where the transport
+    models put them: 10 keV at about 1.3e-4 hPa (about 105 km), 1 MeV at about
+    0.15 hPa (about 60 km).
+- **HOx is not given** for the electrons. HOx forms through water cluster
+  ions, which fade above about 80 km where these electrons deposit.
+- **Not a forecast source.** A Maxwellian of 10 keV mean energy, harder than
+  OVATION's usual 1-5 keV, falls to 1e-6 of its peak rate by 6.5e-3 hPa
+  (about 85 km). Even a 1 MeV monoenergetic beam peaks at 0.15 hPa. WRF and
+  MPAS model tops sit at pressures of 1 hPa or more (about 48 km or lower), so
+  `spacewx_epp_opt` carries the protons only. Coupling the electrons to a
+  forecast would add exactly nothing inside the domain. The indirect effect,
+  thermospheric NOx carried down inside the polar vortex in winter, needs a
+  model whose top reaches the lower thermosphere.
+
+Radiation-belt (medium-energy, 30 keV-1 MeV) electrons reach 60-90 km. They
+need a flux source (POES MEPED) that woof does not read, and they too stay
+above WRF tops. Galactic cosmic rays are left out.
 
 ## Data sources and licences (all layers)
 
@@ -651,6 +697,7 @@ part). Galactic cosmic rays are also left out.
 | CMIP7 solar forcing v4.6 (proton ion-pair rates `iprp`; validation only) | input4MIPs SOLARIS-HEPPA | CC BY 4.0 |
 | GOES integral proton flux, real time (`json/goes/primary/integral-protons-3-day.json`) | NOAA SWPC | public domain |
 | GOES integral proton flux, historical (OMNI2 words 43-48) | NASA SPDF OMNIWeb | public |
+| Auroral electron ionisation fit (shipped, 32 numbers) | Fang et al. 2010, GRL 37, L22106, Table 1 | published coefficients |
 
 **Redistribution.** The coefficient sets listed above are fetched at run time into the
 space-weather cache and checked against pinned sizes and SHA-256 sums. woof does not ship them:
@@ -685,8 +732,9 @@ The ionosphere layers will be checked against observations:
 - foF2 and hmF2 from GIRO ionosondes;
 - the storm of 10-12 May 2024, with 1-3 May 2024 as the quiet reference.
 
-The proton ion-pair rates are checked against the CMIP7 rates (above). Once the chemistry source
-exists, it will be checked against MLS/ACE NOx and ozone. L1 is checked by scaling
+The proton ion-pair rates are checked against the CMIP7 rates (above). The chemistry source
+(`spacewx_epp_opt`) is too small at WRF tops for MLS/ACE NOx and ozone to see (above); the
+auroral electron rates are checked against the transport models Fang et al. 2010 fitted. L1 is checked by scaling
 identity tests on CUDA and Metal, L1b by band-factor identity and linearity tests and against
 SORCE SSI (above). L1's bias direction can be checked against NSRDB / source.coop
 surface solar. Its 0.07-0.6 % signal is below the noise of single-station observations.

@@ -3802,9 +3802,12 @@ Takes no options of its own.
 | option | what it does |
 |---|---|
 | `--count` | number of times (default 1) |
+| `--electron-energy-flux` | auroral electron energy flux, erg cm-2 s-1 (OVATION Prime's eflux): adds its ion-pair rates (Fang et al. 2010) at the levels |
+| `--electron-mean-energy` | auroral electron mean energy, keV (OVATION Prime's mean_energy) |
+| `--electron-spectrum {maxwellian,mono}` | the electrons' spectrum: Maxwellian of that mean energy (default) or monoenergetic |
 | `--levels` | pressure levels, hPa (default 0.01 0.1 1 10 50 100) |
 | `--out` | write the profiles and receipt to this .json |
-| `--source` | 'omni' (NASA SPDF OMNI2, fetched), 'swpc' (GOES via NOAA SWPC, the last 3 days) or OMNI2 file(s) joined by ':' |
+| `--source` | 'omni' (NASA SPDF OMNI2, fetched), 'swpc' (GOES via NOAA SWPC, the last 3 days), OMNI2 file(s) joined by ':', or 'none' (electrons only) |
 | `--step-hours` | hours between times (default 1) |
 | `--time` | first valid time, ISO UTC (2012-01-24T00:00Z) |
 
