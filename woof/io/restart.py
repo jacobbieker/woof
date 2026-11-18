@@ -3502,6 +3502,12 @@ def _drop_default_off_run_keys(values: dict) -> None:
         for name, default in (("spacewx_aurora_opt", 0), ("spacewx_kp_source", "")):
             if values.get(name, default) == default:
                 values.pop(name, None)
+    # The opt-in solar-proton chemistry source (woof.spacewx.epp_chem): the
+    # same contract as the TSI forcing, absent while off.
+    if values.get("spacewx_epp_opt", 0) == 0:
+        for name, default in (("spacewx_epp_opt", 0), ("spacewx_epp_source", "")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
     if values.get("bl_mynn_cloud_tendency_form", "wrf_461") == "wrf_461":
         values.pop("bl_mynn_cloud_tendency_form", None)
     # WRF's cycling flag: omitted at its .false. default.
@@ -5728,6 +5734,8 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'spacewx_ionosphere_maps': 'ccir',
     'spacewx_aurora_opt': 0,
     'spacewx_kp_source': '',
+    'spacewx_epp_opt': 0,
+    'spacewx_epp_source': '',
     'ruc_soilprop': 'wrf_45',
     'rrtmg_cloud_optics_form': 'wrf_461',
     'rrtmg_aer3_type_source': 'rural',
@@ -6305,6 +6313,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "spacewx_f107_mode": "81day",
                           "spacewx_ionosphere_maps": "ccir",
                           "spacewx_aurora_opt": 0, "spacewx_kp_source": "",
+                          "spacewx_epp_opt": 0, "spacewx_epp_source": "",
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without
                           # the key ran the exact arithmetic.

@@ -343,6 +343,11 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The opt-in solar-proton chemistry source (woof.spacewx), appended off.
+    for name, default in (("spacewx_epp_source", ""), ("spacewx_epp_opt", 0)):
+        assert names.pop() == name
+        assert RunConfig.__dataclass_fields__[name].default == default
+        assert RunConfig.__dataclass_fields__[name].kw_only
     # The opt-in auroral oval history (woof.spacewx), appended off.
     for name, default in (("spacewx_kp_source", ""), ("spacewx_aurora_opt", 0)):
         assert names.pop() == name
@@ -959,6 +964,8 @@ def _check_frozen_defaults(actual):
                          ("spacewx_f107_mode", "81day"), ("spacewx_ionosphere_maps", "ccir"),
                          # the opt-in auroral oval history (woof.spacewx), off
                          ("spacewx_aurora_opt", 0), ("spacewx_kp_source", ""),
+                         # the opt-in solar-proton chemistry source (woof.spacewx), off
+                         ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
                          # the opt-in resolved obstacles, off
                          *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field

@@ -17,7 +17,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
 | L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
-| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make | ion-pair rates available as `woof spacewx particles`; the chemistry source is planned |
+| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make | ion-pair rates available as `woof spacewx particles`; the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
 | L1b spectral irradiance | per-band solar variability in RRTMG SW and photolysis | planned |
 
 Couplings that stay speculative are not implemented, and none is planned. One example is
@@ -526,6 +526,38 @@ Known limits:
 - Single days scatter by a factor of 2-5. The largest misses are the decay
   days of hard events: 2001-04-15 and 2005-01-20, where three channels cannot
   represent a spectrum hardening above 100 MeV.
+
+### In RADM2 chemistry (`spacewx_epp_opt`)
+
+`spacewx_epp_opt = 1` turns those ion pairs into chemistry on a WRF-route
+domain that runs RADM2 (`chem_sets` `radm2` or `radm2sorg`).
+- **What it adds.** At each chemistry step, inside `emission.radm2` (so the
+  ledger books it as emitted), each polar-cap column gains:
+  - 1.25 NO per ion pair;
+  - one OH and one HO2 per ion pair.
+  RADM2 has no N or H atoms. The N atoms are therefore counted as NO, as in
+  models without odd-nitrogen atoms. The H atom is counted as HO2, which it
+  becomes within seconds through H + O2 + M.
+- **Where.** The polar caps, |dipole magnetic latitude| >= 60 deg at the start.
+- **The flux.** `spacewx_epp_source` (`omni`, `swpc` or an OMNI2 file) gives
+  the GOES flux of the last hour that has ended by the start. That flux is
+  held for the run (persistence, as the aurora's Kp is), and it is kept per
+  source and start in the space-weather cache. An hour below S1 adds nothing.
+- **On the device.** The deposition rate per unit depth is tabulated on the
+  host, in float64, on the 241-point depth grid. Each layer reads it, log-log,
+  at its mid depth sqrt(X_top X_bottom), with X = p8w / g. This is within 3 %
+  of the layer means wherever the rate matters
+  (`tests/test_spacewx_epp_chem.py`).
+- **Refusals.** Streamed domains and hex refuse the option, for now.
+
+**Validation.** The source is the ion-pair rate above multiplied by fixed
+yields, so its validation is the CMIP7 comparison. A comparison with MLS (OH,
+HO2) or SABER is not made here, because at WRF's usual model tops it would
+measure nothing. At 10 hPa the January 2012 event makes about 0.001 ppbv of NO
+per day, and at 50 hPa less. Those amounts are far below MLS's single-profile
+precision for OH and HO2 at those heights. A high-top run reaching 1 hPa or
+above would gain about 1 ppbv per day, which MLS could see in principle; that
+comparison awaits such a run.
 
 Not modelled: electrons (auroral and radiation-belt). They deposit at 70-150
 km, above WRF and MPAS model tops (see the energy flux of L3b for the auroral
