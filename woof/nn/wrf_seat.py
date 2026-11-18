@@ -151,6 +151,12 @@ class _Gather:
         return cls(xp, dev(flat), dev(j * (nx + 1) + i), dev(j * (nx + 1) + i + 1),
                    dev(j * nx + i), dev((j + 1) * nx + i))
 
+    @classmethod
+    def full(cls, xp, ny: int, nx: int):
+        """Every column, in ``j * nx + i`` order: the gathers are slices
+        (no index arrays, no gather launches)."""
+        return _FullGrid(xp, "mass", "u_west", "u_east", "v_south", "v_north", ny, nx)
+
     def take(self, array, index=None, levels=None):
         index = self.mass if index is None else index
         if array.ndim == 2:
@@ -158,6 +164,29 @@ class _Gather:
         if levels is not None:
             array = array[:levels]
         return self.xp.take(array.reshape(array.shape[0], -1), index, axis=1)
+
+
+@dataclass
+class _FullGrid(_Gather):
+    ny: int = 0
+    nx: int = 0
+
+    def take(self, array, index=None, levels=None):
+        index = "mass" if index is None else index
+        if levels is not None and array.ndim == 3:
+            array = array[:levels]
+        if array.ndim == 2:
+            array = array[None]
+        ny, nx = self.ny, self.nx
+        if index == "u_west":
+            array = array[:, :, :nx]
+        elif index == "u_east":
+            array = array[:, :, 1:]
+        elif index == "v_south":
+            array = array[:, :ny, :]
+        elif index == "v_north":
+            array = array[:, 1:, :]
+        return self.xp.ascontiguousarray(array).reshape(array.shape[0], ny * nx)
 
 
 class WrfColumnSeat:
@@ -328,7 +357,7 @@ class WrfColumnSeat:
         L = self.levels
         if flat is self.all_columns:  # an applying seat's every step: build the indices once
             if self._all_gather is None:
-                self._all_gather = _Gather.build(xp, flat, nx)
+                self._all_gather = _Gather.full(xp, ny, nx)
             g = self._all_gather
         else:
             g = _Gather.build(xp, flat, nx)
