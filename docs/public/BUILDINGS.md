@@ -219,8 +219,9 @@ whether their heights in the model match the source data.
   the buildings already in it.
 - Buildings: `woof buildings` made both products from an OpenStreetMap
   extract (256,305 footprints in the 50 m domain), with GEM-15 supplying
-  missing heights. The 50 m product used a 12.5 m lattice (the default
-  before 5 m became the cap) and the 25 m product a 5 m lattice.
+  missing heights. The 50 m product used a 12.5 m lattice, the default
+  (dx/4) before #585's review fix capped it at 5 m. The 25 m product used
+  a 5 m lattice.
 - Run: HRRR initial and boundary data from 2026-11-02 19 UTC, wind about
   4 m/s from the SSW, on an RTX A6000 that other jobs were also using.
 - Comparison: one run with buildings (`obstacle_opt = 1` on the 50 m and
@@ -231,15 +232,15 @@ whether their heights in the model match the source data.
 (nDSM, surface minus terrain), compared with the OSM `height` tag (220,782
 footprints):
 
-| OSM height | GEM-15 minus OSM (bias) | RMSE |
-|---|---|---|
-| all | -3.1 m (-20%) | 8.5 m (r = 0.65) |
-| 0-10 m | -1.5 m | 2.9 m |
-| 10-20 m | -3.2 m | 4.9 m |
-| 20-50 m | -10 m | 12.7 m |
-| 50-100 m | -35 m (-54%) | r = 0.03 |
-| 100-200 m | -107 m (-82%) | |
-| over 200 m | -253 m (-92%) | |
+| OSM height | footprints | GEM-15 minus OSM (bias) | RMSE | r |
+|---|---|---|---|---|
+| all | 220,782 | -3.1 m (-20%) | 8.5 m | 0.65 |
+| 0-10 m | 133,563 | -1.5 m (-16%) | 2.9 m | 0.43 |
+| 10-20 m | 72,963 | -3.2 m (-24%) | 4.9 m | 0.49 |
+| 20-50 m | 11,718 | -10 m (-34%) | 12.7 m | 0.53 |
+| 50-100 m | 2,138 | -35 m (-53%) | 39 m | 0.03 |
+| 100-200 m | 348 | -107 m (-82%) | 112 m | -0.09 |
+| 200-600 m | 52 | -253 m (-92%) | 263 m | 0.03 |
 
 GEM-15 is good for low-rise buildings but loses towers. Its 15 m pixels
 blend roofs with streets, and 21-26% of the pixels under towers over 100 m
@@ -278,13 +279,19 @@ streets, 30 m avenues and 60 m deep blocks:
 | footprint area in solid cells | 64% | 76% |
 | street area in fully open cells | 33% | 46% |
 | street area in solid cells | 21% | 14% |
-| resolved, under 250 m2 / 250-1,000 / 1,000-2,500 / over 2,500 m2 | 54 / 65 / 70 / 86-100% | 72 / 84 / 93 / 97-100% |
+| resolved, under 250 m2 (11,171 buildings) | 54% | 72% |
+| resolved, 250-1,000 m2 (5,205) | 65% | 84% |
+| resolved, 1,000-2,500 m2 (1,180) | 70% | 93% |
+| resolved, 2,500-10,000 m2 (326) | 86% | 97% |
+| resolved, over 10,000 m2 (21) | 100% | 100% |
 
 Over the whole 50 m domain, with its six-cell boundary ring left out:
 
 - 10,524 ground columns are solid and 44,412 ground cells are porous;
 - the tallest towers stay solid up to 390-400 m (8 columns);
-- about a third of the buildings are resolved.
+- about a fifth of the buildings are resolved (28,682 of 150,780), which
+  is a third of the footprint area. The domain includes the low-rise
+  outer boroughs.
 
 So 50 m resolves Manhattan's blocks and large buildings but not its
 streets: a cross street narrower than a cell is closed or porous. 25 m
@@ -304,19 +311,21 @@ With buildings, the wind follows the street grid:
 
 - it channels along the open avenues and the waterfronts;
 - it leaves slack wakes behind single towers that reach up to their heights;
-- reversed flow appears in 2.5% of open cells at 10 m;
-- up- and down-drafts sit on the tower edges. Above 2 m/s they are absent
-  without buildings.
+- reversed flow appears in 2.5% of the open cells of the whole 50 m domain
+  at 10 m (1.4% at 30 m, 0.4% at 60 m), and in none without buildings;
+- up- and down-drafts sit on the tower edges: at 60 m they reach 1.8 m/s up
+  and 1.9 m/s down, against 0.6 and 0.7 m/s without buildings.
 
 On the cross-section along 42nd St, the solid towers stand at their
-footprint heights (two towers of about 185 and 215 m mid-section). Above them the 25 m nest
-shows rotors and downwash that the 50 m domain smears out.
+footprint heights, two of them about 185 and 215 m tall mid-section. Above
+them the 25 m nest shows rotors and downwash that the 50 m domain smears
+out.
 
-At the lowest level, the flow inside solid cells is 0.045 m/s at 50 m and
-0.023 m/s at 25 m. In open cells it is 2.5 and 1.7 m/s.
+In the 19:10 output, the lowest-level flow inside solid cells is 0.045 m/s
+at 50 m and 0.023 m/s at 25 m. In open cells it is 2.5 and 1.7 m/s.
 
-**Stations.** The Battery heliport (KJRB) at 19:56 UTC reported 4.1 m/s
-from 200°:
+**Stations.** Model winds are given first and the station report second.
+The Battery heliport (KJRB) at 19:56 UTC reported 4.1 m/s from 200°:
 
 | run | 10 m wind |
 |---|---|
@@ -325,20 +334,21 @@ from 200°:
 | buildings, 25 m | 3.4 m/s from 254° |
 
 The model wind is taken from the nearest five cells with no building at
-0-10 m, averaged over ±10 min. The station sits on the waterfront, and the
-buildings just inland turn the modelled wind westward.
+0-10 m, averaged over ±10 min. The station sits on the waterfront. The
+buildings just inland veer the modelled wind from SSW to WSW, away from
+the report.
 
 2 m temperature is 3.0 K below the station's in both runs. The obstacles
-exchange no heat (see Limitations), and HRRR's 19 UTC analysis is already
-4.8 K below it.
+exchange no heat (see Limitations). HRRR's 19 UTC start is already 4.8 K
+below the station's 18:56 report.
 
 The buildings run stopped at one model hour, so LaGuardia and Central Park
 (20:51-20:53) are compared only without buildings:
 
 - LaGuardia: 3.9 m/s from 200° against 4.6 m/s from 160°.
 - Central Park: 4.6 m/s from 206° against 8.2 m/s from 240°. Its 2 m
-  temperature runs 4 K below that of the nearby stations throughout, so it
-  is used for wind only.
+  temperature runs on average 4.1 K below KJRB's in the archive at any time
+  shift, so it is used for wind only.
 
 **Cost.** Wall seconds per simulated hour for the whole 4- or 5-domain tree,
 on a shared A6000:

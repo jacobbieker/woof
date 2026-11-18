@@ -494,8 +494,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and a cube benchmark gives the wake and horseshoe. Off, or with no
   buildings, nothing launches and runs are bit-identical. Momentum only,
   regional grid only. A real-data check over Manhattan places the model's
-  buildings at their footprint heights (r = 0.99 at 25 m) and resolves 59%
-  of buildings at 50 m and 77% at 25 m; 50 m does not open the streets.
+  buildings at their footprint heights (r = 0.99 at 25 m). In lower and
+  midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
+  50 m does not open the streets.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
