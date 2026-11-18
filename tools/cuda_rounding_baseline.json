@@ -5067,7 +5067,7 @@
    },
    {
     "file": "woof/backend/facade/cuda.py",
-    "sha256": "52f6c5dbdbcb34499f377d5dd1bc86ede0f1f80d3715a2b5a1b778aca383cc5c"
+    "sha256": "11966e5789f44eac7244e5508aec6eb006ce26aa5f5c894b89cf377dd1823e17"
    },
    {
     "file": "woof/backend/host/loader.py",

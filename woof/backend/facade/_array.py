@@ -40,7 +40,8 @@ from functools import reduce
 
 import numpy as np
 
-#: Storages rebound since the last launch (strong refs; cleared by flush()).
+#: Storages rebound since the last launch (strong refs).  Appended from any thread; drained only by
+#: drain_pending (flush_pending before an in-place launch, synchronize).
 PENDING: list = []
 
 #: Elements one facade allocation may hold: MLX sizes an array with int32.
@@ -409,31 +410,30 @@ def _materialize(arr):
 _PENDING_DRAIN = threading.Lock()
 
 
-def take_pending() -> list:
-    """Remove and return the values of every pending storage, in order.
+def drain_pending(evaluate) -> int:
+    """Take every pending storage value and encode it (``evaluate``: ``mx.async_eval`` or ``mx.eval``).
 
-    Storages are appended from any thread (an allocation, a rebind).  A drain
-    that copied the list and then cleared it would drop a storage appended in
-    between, which then never runs before the next in-place launch.  Appends
-    only ever go to the end, so taking the first ``n`` items and deleting
-    exactly those keeps every later one; the lock keeps two drains (two
-    threads launching) from taking the same prefix."""
+    Storages are appended from any thread (an allocation, a rebind).  Taking
+    and encoding happen under one lock, so a drain on another thread cannot
+    find the list empty and launch, or synchronize, while values taken here
+    are not yet encoded.  Only the first ``n`` items are removed: a storage
+    appended meanwhile (appends go to the end, without the lock) stays
+    pending.  Every drain goes through here; never copy-then-clear PENDING.
+    Returns the number of values encoded.
+    """
     with _PENDING_DRAIN:
         n = len(PENDING)
         if not n:
-            return []
-        taken = PENDING[:n]
+            return 0
+        arrays = [s.arr for s in PENDING[:n]]
         del PENDING[:n]
-    return [s.arr for s in taken]
+        evaluate(*arrays)
+    return n
 
 
 def flush_pending():
     """Encode every pending storage value (before an in-place launch)."""
-    if not PENDING:
-        return
-    arrays = take_pending()
-    if arrays:
-        _mx().async_eval(*arrays)
+    drain_pending(_mx().async_eval)
 
 
 def _contiguous_strides(shape, itemsize):

@@ -1,9 +1,11 @@
 """The facade's pending-storage drain keeps every storage appended while it runs.
 
 Storages join ``_array.PENDING`` from any thread; a launch drains the list
-(``take_pending``).  A drain that copied the list and then cleared it lost any
+(``drain_pending``).  A drain that copied the list and then cleared it lost any
 storage appended in between, so its value was not encoded before the next
-in-place launch.  Pure Python: no MLX needed.
+in-place launch.  Taking and encoding happen under one lock, so a second
+drain cannot run while taken values are not yet encoded.  Pure Python: no MLX
+needed.
 """
 
 import threading
@@ -12,13 +14,19 @@ from types import SimpleNamespace
 from woof.backend.facade import _array
 
 
-def test_take_pending_returns_values_in_order_and_empties():
+def _take():
+    got = []
+    _array.drain_pending(lambda *arrays: got.extend(arrays))
+    return got
+
+
+def test_drain_returns_values_in_order_and_empties():
     saved = _array.PENDING[:]
     _array.PENDING.clear()
     try:
         _array.PENDING.extend(SimpleNamespace(arr=i) for i in range(5))
-        assert _array.take_pending() == [0, 1, 2, 3, 4]
-        assert _array.PENDING == [] and _array.take_pending() == []
+        assert _take() == [0, 1, 2, 3, 4]
+        assert _array.PENDING == [] and _take() == []
     finally:
         _array.PENDING[:] = saved
 
@@ -28,6 +36,17 @@ def test_concurrent_appends_and_drains_lose_nothing():
     _array.PENDING.clear()
     per_thread, writers = 20000, 4
     drained, stop = [], threading.Event()
+    encoding = threading.Semaphore(1)     # two drains encoding at once would fail to acquire
+    overlap = []
+
+    def encode(*arrays):
+        if not encoding.acquire(blocking=False):
+            overlap.append(len(arrays))
+            return
+        try:
+            drained.extend(arrays)
+        finally:
+            encoding.release()
 
     def write(base):
         for i in range(per_thread):
@@ -35,22 +54,23 @@ def test_concurrent_appends_and_drains_lose_nothing():
 
     def drain():
         while not stop.is_set():
-            drained.extend(_array.take_pending())
+            _array.drain_pending(encode)
 
+    drainers = [threading.Thread(target=drain, daemon=True) for _ in range(2)]
+    threads = [threading.Thread(target=write, args=(k * per_thread,), daemon=True) for k in range(writers)]
     try:
-        drainers = [threading.Thread(target=drain) for _ in range(2)]
-        threads = [threading.Thread(target=write, args=(k * per_thread,)) for k in range(writers)]
         for t in drainers + threads:
             t.start()
         for t in threads:
             t.join()
+    finally:
         stop.set()
         for t in drainers:
             t.join()
-        drained.extend(_array.take_pending())
-        assert sorted(drained) == list(range(writers * per_thread))
-    finally:
+        _array.drain_pending(encode)
         _array.PENDING[:] = saved
+    assert not overlap
+    assert sorted(drained) == list(range(writers * per_thread))
 
 
 class _AppendsMidDrain(list):
@@ -79,5 +99,5 @@ def test_a_storage_appended_mid_drain_stays_pending(monkeypatch):
     late = SimpleNamespace(arr="late")
     pending = _AppendsMidDrain([SimpleNamespace(arr=i) for i in range(3)], late)
     monkeypatch.setattr(_array, "PENDING", pending)
-    assert _array.take_pending() == [0, 1, 2]
+    assert _take() == [0, 1, 2]
     assert list(pending) == [late]          # (a copy-then-clear drain lost it)
