@@ -1323,6 +1323,34 @@ def _wrf_smag_grid_args(state: DomainState, cfg: RunConfig, *,
             np.int32(moist)]
 
 
+#: Stored u/msfu and v/msfv for wrf_smag_deform (wrf_smag_uvhat +
+#: wrf_smag_deform_hat, smag2d.cu's GPUWM_SMAG_STORED_HAT=1 tier): on by
+#: default on Metal only, where it took 9-11 % off the deformation launch
+#: (M3 Max, 49x228x276: 8.04 vs 8.88 ms minimum, 9.98 vs 11.00 ms median).
+#: On CUDA the extra pass did not pay (A6000: 5.11 ms with the stored hats
+#: vs 4.96 ms for wrf_smag_deform alone), so CUDA keeps wrf_smag_deform.  The
+#: words are the same either way (tests/test_smag_deform_hat.py).
+#: ``WOOF_SMAG_DEFORM_HAT`` forces either kernel on any backend (A/B and
+#: byte-identity checks): ``0``/``false``/``no``/``off`` selects
+#: wrf_smag_deform, any other non-empty value the stored hats; unset or
+#: empty keeps the backend default.
+_SMAG_HAT_DEFINES = (("GPUWM_SMAG_STORED_HAT", 1),)
+
+
+def _smag_deform_hat_enabled() -> bool:
+    forced = os.environ.get("WOOF_SMAG_DEFORM_HAT", "").strip().lower()
+    if forced:
+        return forced not in ("0", "false", "no", "off")
+    from woof import backend
+    return backend.active() == "mlx"
+
+
+def _disjoint(a, b) -> bool:
+    """True when two device arrays share no bytes."""
+    a0, b0 = a.data.ptr, b.data.ptr
+    return a0 + a.nbytes <= b0 or b0 + b.nbytes <= a0
+
+
 def launch_wrf_smag2d_km(state: DomainState, cfg: RunConfig,
                           xkmh, xkhh, *, time_t: bool):
     """WRF v4.6.1 ``cal_deform_and_div`` + ``smag2d_km`` on device.
@@ -1353,8 +1381,30 @@ def launch_wrf_smag2d_km(state: DomainState, cfg: RunConfig,
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
-    get_kernel("smag2d", "wrf_smag_deform")(
-        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    hats = None
+    if _smag_deform_hat_enabled() and wrf_mixing_package_active(cfg):
+        # u/msfu and v/msfv once per face, into the diff6 face temporaries
+        # (free until the u/v stress rows below zero them), read by the
+        # deformation kernel in place of a division at every stencil point
+        # that needs them.  The same division of the same operands, stored:
+        # the same words (tests/test_smag_deform_hat.py).  The two hats need
+        # two separate backings; if the scratch arena ever hands back
+        # overlapping ones, keep the per-point division.
+        uhat = state.scratch((nz, ny, nx + 1), "diff6_x")
+        vhat = state.scratch((nz, ny + 1, nx), "diff6_y")
+        if _disjoint(uhat, vhat):
+            hats = (uhat, vhat)
+    if hats is not None:
+        get_kernel_int_defines("smag2d", "wrf_smag_uvhat", _SMAG_HAT_DEFINES)(
+            ((nx + _TPB) // _TPB, ny + 1, nz), (_TPB, 1, 1),
+            (common[0], common[1], common[8], common[9], *hats,
+             np.int32(nz), np.int32(ny), np.int32(nx)))
+        get_kernel_int_defines("smag2d", "wrf_smag_deform_hat", _SMAG_HAT_DEFINES)(
+            grid, (_TPB, 1, 1),
+            tuple(common + [d11, d22, d12] + dims + list(hats)))
+    else:
+        get_kernel("smag2d", "wrf_smag_deform")(
+            grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
     tail = [DTYPE(cfg.c_s), DTYPE(_PRANDTL), d11, d22, d12, xkmh, xkhh,
             np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),

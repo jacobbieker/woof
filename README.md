@@ -621,7 +621,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   strict and WRF-exact numerics; Alps 3-1 km on an M3 Max: `ysu_column`
   46 -> 32 ms of isolated GPU time per d01 step, 10 -> 3 launches;
   `WOOF_METAL_YSU_TILE_BLOCKS=16` restores CUDA's width, and CUDA keeps
-  its occupancy-bounded 16 per SM). Hex: CUDA
+  its occupancy-bounded 16 per SM). On Metal the Smagorinsky deformation
+  reads u/msfu and v/msfv stored once per face instead of dividing at
+  every stencil point (9-11 % off that launch, the same words;
+  `WOOF_SMAG_DEFORM_HAT=0` restores the old kernel; CUDA keeps it,
+  because the extra pass did not pay there). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
