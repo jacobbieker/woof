@@ -200,6 +200,158 @@ runs a surface layer on the ground. Eight cells per H under-resolve the
 horseshoe; Martinuzzi and Tropea's 1.0 H is a channel flow at
 Re_H = 4e4.
 
+## A city check: Manhattan at 50 m and 25 m
+
+This check asks whether individual buildings show up in a real-data LES, and
+whether their heights in the model match the source data.
+
+**Setup.**
+- `woof domain` built a nested HRRR-route tree from 3 km down to 50 m:
+  - 3 km, 1 km and 250 m parents, then a 50 m domain (370 x 320 cells,
+    18.5 x 16 km) over Manhattan, Brooklyn and Queens;
+  - a one-way 25 m nest (120 x 300 cells, 3 x 7.5 km) from the Battery to
+    59th St;
+  - 112 levels, about 5 m apart at the ground and 10 m apart at 100 m.
+- Physics: the 250 m, 50 m and 25 m domains run LES (`km_opt = 3`, PBL off).
+- Terrain: the bare-earth 3DEP 1/3" DEM (`[static.highres] terrain_source =
+  "usgs-3dep-13as"`). On a city, use a bare-earth source. Copernicus
+  GLO-30, which `auto` can pick on the HRRR route, is a surface model with
+  the buildings already in it.
+- Buildings: `woof buildings` made both products from an OpenStreetMap
+  extract (256,305 footprints in the 50 m domain), with GEM-15 supplying
+  missing heights. The 50 m product used a 12.5 m lattice (the default
+  before 5 m became the cap) and the 25 m product a 5 m lattice.
+- Run: HRRR initial and boundary data from 2026-11-02 19 UTC, wind about
+  4 m/s from the SSW, on an RTX A6000 that other jobs were also using.
+- Comparison: one run with buildings (`obstacle_opt = 1` on the 50 m and
+  25 m domains) against one without. Fields are 10-minute output averaged
+  over 19:20-20:00, so the first 20 minutes of spin-up are left out.
+
+**Source heights.** GEM-15's median surface height over each footprint
+(nDSM, surface minus terrain), compared with the OSM `height` tag (220,782
+footprints):
+
+| OSM height | GEM-15 minus OSM (bias) | RMSE |
+|---|---|---|
+| all | -3.1 m (-20%) | 8.5 m (r = 0.65) |
+| 0-10 m | -1.5 m | 2.9 m |
+| 10-20 m | -3.2 m | 4.9 m |
+| 20-50 m | -10 m | 12.7 m |
+| 50-100 m | -35 m (-54%) | r = 0.03 |
+| 100-200 m | -107 m (-82%) | |
+| over 200 m | -253 m (-92%) | |
+
+GEM-15 is good for low-rise buildings but loses towers. Its 15 m pixels
+blend roofs with streets, and 21-26% of the pixels under towers over 100 m
+are holes. Use it to fill missing heights under footprints, which is what
+`woof buildings` does. GEM-15 on its own is a poor building map:
+
+- it marks 85,714 cells built where OSM marks 48,656, because trees,
+  bridges and highways pass its filters;
+- its cell mean height has an 18.8 m RMSE against OSM.
+
+OSM footprints with GEM-15 filling the gaps match the footprint-only
+product to within +0.06 in plan area fraction and +0.7 m in mean height.
+
+**Heights in the model.** The model's building height is the top of its
+solid cells at each footprint centre, on the run's own levels. This
+compares it with the OSM tag for footprints whose bounding box is at least
+2,500 m2:
+
+| domain | footprints | with a solid column | bias | median | RMSE | r |
+|---|---|---|---|---|---|---|
+| 50 m | 4,315 | 2,478 | -8.0 m | -2.3 m | 25 m | 0.86 |
+| 25 m | 841 | 793 | -1.8 m | -1.0 m | 7.0 m | 0.99 |
+
+At 25 m the model's buildings stand at their source heights, to within
+about one level spacing. At 50 m, 43% of these footprints have no solid
+column at their centre, and their volume is carried as canopy drag instead.
+
+**Which buildings are resolved.** A building counts as resolved when at
+least half its footprint lies in cells that are solid at 0-10 m. The table
+covers the 25 m nest's interior, where the street grid is 18 m cross
+streets, 30 m avenues and 60 m deep blocks:
+
+| | 50 m | 25 m |
+|---|---|---|
+| buildings resolved | 59% (10,481 of 17,903) | 77% (13,805) |
+| footprint area in solid cells | 64% | 76% |
+| street area in fully open cells | 33% | 46% |
+| street area in solid cells | 21% | 14% |
+| resolved, under 250 m2 / 250-1,000 / 1,000-2,500 / over 2,500 m2 | 54 / 65 / 70 / 86-100% | 72 / 84 / 93 / 97-100% |
+
+Over the whole 50 m domain, with its six-cell boundary ring left out:
+
+- 10,524 ground columns are solid and 44,412 ground cells are porous;
+- the tallest towers stay solid up to 390-400 m (8 columns);
+- about a third of the buildings are resolved.
+
+So 50 m resolves Manhattan's blocks and large buildings but not its
+streets: a cross street narrower than a cell is closed or porous. 25 m
+opens most avenues and many cross streets. That is the spacing to use when
+the street canyons themselves matter.
+
+**Wind.** Mean speeds over the built cells of the 25 m nest's area, taken
+from the 50 m domain:
+
+| height AGL | no buildings: mean (p10-p90) | buildings: mean (p10-p90) | w std, no buildings / buildings | max updraft, no buildings / buildings |
+|---|---|---|---|---|
+| 10 m | 4.2 (3.4-5.2) m/s | 0.5 (0.05-1.2) m/s | 0.05 / 0.06 m/s | 0.4 / 0.4 m/s |
+| 30 m | 5.6 (4.8-6.4) m/s | 1.3 (0.2-2.7) m/s | 0.09 / 0.13 m/s | 0.4 / 0.9 m/s |
+| 60 m | 7.0 (6.1-7.7) m/s | 2.9 (0.7-5.2) m/s | 0.17 / 0.23 m/s | 0.6 / 1.8 m/s |
+
+With buildings, the wind follows the street grid:
+
+- it channels along the open avenues and the waterfronts;
+- it leaves slack wakes behind single towers that reach up to their heights;
+- reversed flow appears in 2.5% of open cells at 10 m;
+- up- and down-drafts sit on the tower edges. Above 2 m/s they are absent
+  without buildings.
+
+On the cross-section along 42nd St, the solid towers stand at their
+footprint heights (two towers of about 185 and 215 m mid-section). Above them the 25 m nest
+shows rotors and downwash that the 50 m domain smears out.
+
+At the lowest level, the flow inside solid cells is 0.045 m/s at 50 m and
+0.023 m/s at 25 m. In open cells it is 2.5 and 1.7 m/s.
+
+**Stations.** The Battery heliport (KJRB) at 19:56 UTC reported 4.1 m/s
+from 200°:
+
+| run | 10 m wind |
+|---|---|
+| no buildings, 50 m | 4.4 m/s from 205° |
+| buildings, 50 m | 3.5 m/s from 235° |
+| buildings, 25 m | 3.4 m/s from 254° |
+
+The model wind is taken from the nearest five cells with no building at
+0-10 m, averaged over ±10 min. The station sits on the waterfront, and the
+buildings just inland turn the modelled wind westward.
+
+2 m temperature is 3.0 K below the station's in both runs. The obstacles
+exchange no heat (see Limitations), and HRRR's 19 UTC analysis is already
+4.8 K below it.
+
+The buildings run stopped at one model hour, so LaGuardia and Central Park
+(20:51-20:53) are compared only without buildings:
+
+- LaGuardia: 3.9 m/s from 200° against 4.6 m/s from 160°.
+- Central Park: 4.6 m/s from 206° against 8.2 m/s from 240°. Its 2 m
+  temperature runs 4 K below that of the nearby stations throughout, so it
+  is used for wind only.
+
+**Cost.** Wall seconds per simulated hour for the whole 4- or 5-domain tree,
+on a shared A6000:
+
+| tree | wall s per simulated hour |
+|---|---|
+| 3 km to 50 m, no buildings | about 6,000 |
+| with buildings and the 25 m nest, first 20 minutes | 11,500 (the GPU less busy) |
+| with buildings and the 25 m nest, whole hour | 16,200 |
+
+The 50 m domain takes most of the step. GPU memory was 17 GB without the
+nest and 21 GB with it.
+
 ## Licences
 
 | source | licence | attribution woof records |

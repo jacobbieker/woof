@@ -481,7 +481,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   OSM; GeoJSON or GeoParquet) into per-cell building statistics on the model
   grid. These are plan and frontal area indices, a height histogram, and
   WRF's NUDAPT `URB_PARAM` block. Each source's licence and attribution
-  travel with the file. Footprints are read from a local file, not
+  travel with the file. `woof buildings` builds the product for one
+  domain of a WPS namelist. Footprints are read from a local file, not
   downloaded, and the urban schemes do not read `URB_PARAM` yet
   ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
 - **Resolved buildings in LES (`obstacle_opt = 1`, opt-in).** On a domain
@@ -492,7 +493,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   momentum tendencies. A street-canyon benchmark gives the H/W = 1 vortex,
   and a cube benchmark gives the wake and horseshoe. Off, or with no
   buildings, nothing launches and runs are bit-identical. Momentum only,
-  regional grid only.
+  regional grid only. A real-data check over Manhattan places the model's
+  buildings at their footprint heights (r = 0.99 at 25 m) and resolves 59%
+  of buildings at 50 m and 77% at 25 m; 50 m does not open the streets.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
