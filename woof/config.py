@@ -2373,6 +2373,14 @@ class RunConfig:
     # only.  0 runs no new code.
     solar_ssi_opt: int = _config_field(default=0, kw_only=True)
     solar_ssi_source: str = _config_field(default="", kw_only=True)
+    # spacewx_epp_opt = 1 adds the NO, OH and HO2 that solar protons make in
+    # the polar caps (woof.spacewx.epp_chem: 1.25 NO and 2 HOx per ion pair,
+    # |magnetic latitude| >= 60) to the RADM2 rows, inside emission.radm2.
+    # spacewx_epp_source is "omni", "swpc" or OMNI2 file(s); the GOES flux of
+    # the last hour that has ended by the start is held for the run.  This
+    # changes the chemistry.  0 runs no new code.
+    spacewx_epp_opt: int = _config_field(default=0, kw_only=True)
+    spacewx_epp_source: str = _config_field(default="", kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -2515,6 +2523,42 @@ def _validate_spacewx_aurora(cfg) -> None:
         raise ConfigurationRefused(
             f"spacewx_aurora_opt = {opt} places the auroral oval on the radiation "
             "geometry's columns, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def _validate_spacewx_epp(cfg) -> None:
+    """spacewx_epp_opt and its key (woof.spacewx.epp_chem)."""
+    opt, source = cfg.spacewx_epp_opt, cfg.spacewx_epp_source
+    if type(opt) is not int or opt not in (0, 1):
+        raise ConfigurationRefused(
+            f"spacewx_epp_opt={opt!r} must be 0 (no particle source) or 1 (the "
+            "solar-proton NO, OH and HO2 in the RADM2 chemistry)")
+    if type(source) is not str:
+        raise ConfigurationRefused("spacewx_epp_source must be a string")
+    if opt == 0:
+        if source:
+            raise ConfigurationRefused(
+                "spacewx_epp_source is set but spacewx_epp_opt = 0, so it would "
+                "do nothing; set spacewx_epp_opt = 1 or drop it")
+        return
+    from woof.spacewx.epp_chem import EppChemError, YIELDS, parse_source
+    try:
+        parse_source(source)
+    except EppChemError as exc:
+        raise ConfigurationRefused(str(exc)) from None
+    from woof.chem_table import load as load_chem_table
+    table = load_chem_table(cfg) if getattr(cfg, "chem_sets", "") else None
+    names = {row.name for row in table.rows_for("emission.radm2")} if table is not None else set()
+    missing = [name for name, _y in YIELDS if name not in names]
+    if missing:
+        raise ConfigurationRefused(
+            "spacewx_epp_opt = 1 adds NO, OH and HO2 to the RADM2 chemistry "
+            "(chem_sets radm2 or radm2sorg), and this run's emission.radm2 "
+            f"rows lack {', '.join(missing)}")
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            "spacewx_epp_opt = 1 places the source in the polar caps from the "
+            "radiation geometry's xlat/xlong, and no radiation scheme is on "
             "(ra_lw_physics = ra_sw_physics = 0)")
 
 
@@ -9387,6 +9431,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     _validate_solar_ssi(cfg)
     _validate_spacewx_ionosphere(cfg)
     _validate_spacewx_aurora(cfg)
+    _validate_spacewx_epp(cfg)
     if cfg.gf_deep_rain_evaporation_booking and int(cfg.cu_physics) != 3:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking corrects Grell-Freitas's deep "

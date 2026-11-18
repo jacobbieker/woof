@@ -17,7 +17,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
 | L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
-| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make | ion-pair rates available as `woof spacewx particles`; the chemistry source is planned |
+| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make | ion-pair rates available as `woof spacewx particles`; the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
 | L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route; photolysis not yet |
 
 Couplings that stay speculative are not implemented, and none is planned. One example is
@@ -507,7 +507,7 @@ woof spacewx particles --time 2012-01-24T12:00Z --count 6 --step-hours 1 --sourc
   (`json/goes/primary/integral-protons-3-day.json`, >1 to >500 MeV, the last
   3 days), averaged to hours that hold at least 3 of their 12 values; where
   two spacecraft report the same time, the one with more records is kept. A path
-  reads an OMNI2 file.
+  reads an OMNI2 file (several joined by `:`).
 - **Event gate.** An hour counts only while J(>10 MeV) is at least 10 pfu (NOAA
   S1). Below that the channels hold mostly galactic cosmic rays and detector
   background (about 0.2 pfu at >10 MeV), which this layer leaves out.
@@ -575,12 +575,54 @@ Known limits:
   times low. The SWPC feed has the >1 and >5 MeV channels. Before 1988 (IMP 8),
   the channels that OMNI2's word 49 marks as holding magnetospheric protons
   are dropped.
+- OMNI2's proton words 43-48 are fill from 2021 on, so `--source omni` gives
+  no flux (NaN, no event) for recent years; use `--source swpc` for the last 3
+  days. Between 2021 and the SWPC window there is no source here.
 - The last energy bin, at about 1 GeV, also holds the protons above 1 GeV.
   In the atmosphere they lose energy at close to the minimum-ionising rate, as
   a 1 GeV proton does, so they are placed there rather than dropped.
 - Single days scatter by a factor of 2-5. The largest misses are the decay
   days of hard events: 2001-04-15 and 2005-01-20, where three channels cannot
   represent a spectrum hardening above 100 MeV.
+
+### In RADM2 chemistry (`spacewx_epp_opt`)
+
+`spacewx_epp_opt = 1` turns those ion pairs into chemistry on a WRF-route
+domain that runs RADM2 (`chem_sets` `radm2` or `radm2sorg`).
+- **What it adds.** At each chemistry step, inside `emission.radm2` (so the
+  ledger books it as emitted), each polar-cap column gains:
+  - 1.25 NO per ion pair;
+  - one OH and one HO2 per ion pair.
+  RADM2 has no N or H atoms. The N atoms are therefore counted as NO, as in
+  models without odd-nitrogen atoms. The H atom is counted as HO2, which it
+  becomes within seconds through H + O2 + M.
+- **Where.** The polar caps, |dipole magnetic latitude| >= 60 deg at the start.
+- **The flux.** `spacewx_epp_source` (`omni`, `swpc` or OMNI2 file(s) joined
+  by `:`) gives the GOES flux of the last hour that has ended by the domain's
+  start. That flux is held for the run (persistence, as the aurora's Kp is).
+  Each domain holds the hour before its own start: a nest started with its
+  parent holds the same hour, a nest started later holds its own. A fetched
+  flux is kept per source and start in the space-weather cache, so a resume
+  holds the same one. An hour below S1 adds nothing. An hour whose >10 MeV flux
+  is missing is refused rather than taken as quiet; OMNI2's proton words are
+  fill from 2021 on, so recent runs need `swpc` (the last 3 days).
+- **On the device.** The deposition rate per unit depth is tabulated on the
+  host, in float64, on the 241-point depth grid. Each layer reads it, log-log,
+  at its mid depth sqrt(X_top X_bottom), with X = p8w / g. This is within 3 %
+  of the layer means wherever the rate matters
+  (`tests/test_spacewx_epp_chem.py`).
+- **Refusals.** Streamed domains and hex refuse the option, for now, and so
+  does a run with no radiation scheme (the caps are placed on the radiation
+  geometry's xlat/xlong). A domain with no cell in a polar cap adds nothing.
+
+**Validation.** The source is the ion-pair rate above multiplied by fixed
+yields, so its validation is the CMIP7 comparison. A comparison with MLS (OH,
+HO2) or SABER is not made here, because at WRF's usual model tops it would
+measure nothing. At 10 hPa the January 2012 event makes about 0.001 ppbv of NO
+per day, and at 50 hPa less. Those amounts are far below MLS's single-profile
+precision for OH and HO2 at those heights. A high-top run reaching 1 hPa or
+above would gain about 1 ppbv per day, which MLS could see in principle; that
+comparison awaits such a run.
 
 Not modelled: electrons (auroral and radiation-belt). They deposit at 70-150
 km, above WRF and MPAS model tops (see the energy flux of L3b for the auroral
