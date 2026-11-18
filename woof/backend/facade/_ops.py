@@ -105,13 +105,27 @@ def _host(x):
 # ---------------------------------------------------------------- creation
 
 def empty(shape, dtype=np.float32, order="C"):
-    if order == "F":
-        return _fortran_from_host(np.zeros(shape, dtype=dtype, order="F"))
-    return ndarray(shape, dtype)
+    """CuPy's ``empty``.  MLX has no uninitialized allocation, so it is
+    ``zeros`` unless ``WOOF_METAL_SCRATCH_UNINIT=all`` (woof.backend.scratch)
+    leaves a C-ordered buffer unfilled (or poisons it)."""
+    if order != "F":
+        from woof.backend.scratch import facade_empty_fill
+        fill = facade_empty_fill()
+        if fill == "none":
+            from woof.backend.facade._scratch import uninitialized
+            return uninitialized(shape, dtype)
+        if fill != "zeros":
+            out = zeros(shape, dtype)
+            if out.size:
+                out.reshape(-1).view(np.uint8)[...] = fill
+            return out
+    return zeros(shape, dtype, order)
 
 
 def zeros(shape, dtype=np.float32, order="C"):
-    return empty(shape, dtype, order)
+    if order == "F":
+        return _fortran_from_host(np.zeros(shape, dtype=dtype, order="F"))
+    return ndarray(shape, dtype)
 
 
 def ones(shape, dtype=np.float32, order="C"):

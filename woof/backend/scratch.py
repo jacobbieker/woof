@@ -8,7 +8,9 @@ arena, never a buffer read before it is written.
 
 Both switches are read once, at the first scratch allocation; set them before.
 ``WOOF_METAL_SCRATCH_UNINIT=0`` (or off/false/no) restores the filled
-allocation (A/B).  ``WOOF_SCRATCH_POISON`` fills scratch with one byte on every
+allocation (A/B).  ``WOOF_METAL_SCRATCH_UNINIT=all`` (opt-in) also drops the
+fill from the facade's own ``cupy.empty``/``empty_like`` (``zeros`` keeps it),
+and poisons them too when ``WOOF_SCRATCH_POISON`` is set.  ``WOOF_SCRATCH_POISON`` fills scratch with one byte on every
 backend: ``1``/``on`` is 0xFF (a NaN in every float word), two hex digits name
 another byte (``a5``).  Runs poisoned with two bytes whose words match the
 ordinary run show every read word is written first.
@@ -26,6 +28,22 @@ _OFF = frozenset({"", "0", "off", "false", "no"})
 @functools.lru_cache(maxsize=1)
 def _uninit_enabled() -> bool:
     return os.environ.get("WOOF_METAL_SCRATCH_UNINIT", "1").strip().lower() not in _OFF - {""}
+
+
+@functools.lru_cache(maxsize=1)
+def _empty_all() -> bool:
+    return os.environ.get("WOOF_METAL_SCRATCH_UNINIT", "1").strip().lower() == "all"
+
+
+def facade_empty_fill():
+    """How the Metal facade's own ``empty``/``empty_like`` fill a new buffer:
+    ``"zeros"`` (MLX's zero fill, the default), ``"none"`` (uninitialized,
+    ``WOOF_METAL_SCRATCH_UNINIT=all``) or a poison byte (``all`` with
+    ``WOOF_SCRATCH_POISON``)."""
+    if not _empty_all():
+        return "zeros"
+    poison = _poison()
+    return "none" if poison is None else poison
 
 
 @functools.lru_cache(maxsize=1)
