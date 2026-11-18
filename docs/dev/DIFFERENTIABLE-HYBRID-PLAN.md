@@ -863,10 +863,11 @@ cost measured on both backends.
 
 G2 status (2026-11-18, P2.1-P2.5 merged): not met. Identity, 5-day
 stability (both meshes on CUDA, uniform on Metal), mass budget and cost on
-both backends pass. The scorecard fails on the uniform 12 km mesh (T2 RMSE
+both backends pass (on CUDA the seat's cost is within the noise of a
+shared card). The scorecard fails on the uniform 12 km mesh (T2 RMSE
 +0.15 K, 95 % CI [+0.05, +0.26]); the 3-96 km mesh is better at 95 %
-(-0.06 K). 88-89 % of columns fell back to the schemes, because one week of
-one mesh's tap does not cover the evaluation week. Details are in
+(-0.06 K). 88-89 % of column calls fell back to the schemes, because five
+days of one mesh's tap do not cover the evaluation period. Details are in
 [docs/nn-physics.md](../nn-physics.md). Next: multi-cycle, multi-season
 training data and a residual-target trainer.
 

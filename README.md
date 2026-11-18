@@ -908,9 +908,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   On hex, 5-day emulator runs on a uniform and a variable-resolution mesh
   were stable on CUDA (the uniform one also on Metal) and kept the mass
   budget. The plan's G2 scorecard criterion failed: T2 was worse at 95 %
-  on the uniform mesh, and most columns (88-89 %) fell outside the
-  five-day training range.
-  The results and per-step costs are in the same document.
+  on the uniform mesh, and most column calls (88-89 %) fell outside the
+  (margin-widened) five-day training range. Results and per-step costs
+  are in [docs/nn-physics.md](docs/nn-physics.md).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

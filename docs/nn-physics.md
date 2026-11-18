@@ -391,7 +391,7 @@ Steps:
 3. **Run online.** `mode = "replace"`, with fallback and `margin = 0.3`,
    120 h from the evaluation cycle. The margin was needed because pressure
    aloft in the evaluation week lies outside the training week's range.
-   Even with it, most columns fell back to the schemes:
+   Even with it, most column calls fell back to the schemes:
 
    | mesh, backend | stable 120 h | column calls outside the range |
    |---|---|---|
@@ -407,7 +407,9 @@ Steps:
    | uniform | -1742.9 / -1743.3 | 5.7 Pa | 0.37 mm |
    | variable | -1698.5 / -1699.4 | 14.1 Pa | 0.18 mm |
 
-   The NN runs keep the budget to the physics run's level.
+   The area-mean changes differ by under 1 Pa and 0.01 mm; the maxima are
+   over all hourly frames. The NN runs keep the budget to the physics
+   run's level.
 5. **Scorecard.** The scorecard uses WIS2 land SYNOP T2 (lapse-corrected
    to the model height), 10 m wind and radiosonde temperature. Model and
    observation are paired by station and lead. The test is a station-block
@@ -432,7 +434,7 @@ Steps:
    | CUDA (A6000 shared with other jobs), torch | 101-102 ms | +1.6, -29.6, -0.2, +10.7 ms |
 
    On CUDA the card was shared, so the step-time noise is larger than the
-   seat's cost. The model call alone is 3.3-3.7 ms for 8000 columns on the
+   seat's cost and the cost is not resolved there. The model call alone is 3.3-3.7 ms for 8000 columns on the
    WRF route (above).
 
 The gate's verdict:
@@ -442,11 +444,12 @@ The gate's verdict:
   - The NN runs are stable for 5 days on both meshes on CUDA, and on the
     uniform mesh on Metal.
   - The mass budget closes to the physics run's level.
-  - Cost is measured on both backends.
+  - Cost is measured on both backends: 1-2 % of a step on Metal; within
+    the noise of a shared card on CUDA.
 - **Fail:** the scorecard criterion, on the uniform mesh. T2 there is worse
   than the physics run at 95 %. The variable mesh is better at 95 %, but
-  with 89 % of columns falling back, both differences come from about a
-  tenth of the columns. Neither result shows that the emulator has skill.
+  with 88-89 % of column calls falling back, the model acts in few
+  columns. Neither result shows that the emulator has skill.
 
 Passing the scorecard criterion needs broader training data (several
 cycles and seasons, both meshes) so that fewer columns fall back, and a
