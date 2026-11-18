@@ -256,17 +256,27 @@ extern "C" __global__ void ocn_adv_mono_horizontal_update_v842(
     }
 }
 
-// the vertical high-order flux less the upwind flux, the vertical extrema and
-// the antidiffusive fluxes in and out of each layer; one thread per column of
-// cells 1..nCellsArray(2). highOrderFlux (nVertLevels+1 per cell) and
-// workTend start at zero.
-extern "C" __global__ void ocn_adv_mono_vertical_flux_v842(
-    rk *highOrderFlux, rk *workTend, rk *tracerMin, rk *tracerMax, rk *fluxIncoming, rk *fluxOutgoing,
-    const rk *tracerCur, const rk *hProv, const rk *w, const int *maxLevelCell, int nCells, int nl, int vertOrder,
-    rk coef3rd)
+// the upwind flux through the top of layer kk (0-based, kk >= 1)
+__device__ __forceinline__ rk adv_upwind(const rk *ww, const rk *cur, int kk)
 {
-    const int iCell = adv_thread();
-    if (iCell >= nCells) return;
+    const rk upwind = A(M(fminw(C(0.0), ww[kk]), cur[kk - 1]), M(fmaxw(C(0.0), ww[kk]), cur[kk]));
+    return upwind;
+}
+
+// the thickness-weighted second-order flux through the top of layer kk
+__device__ __forceinline__ rk adv_vflux2(const rk *cur, const rk *hp, const rk *ww, int kk)
+{
+    const rk sum = A(hp[kk], hp[kk - 1]);
+    const rk weightK = D(hp[kk - 1], sum), weightKm1 = D(hp[kk], sum);
+    return M(ww[kk], A(M(weightK, cur[kk]), M(weightKm1, cur[kk - 1])));
+}
+
+// a column as the Fortran's loops walk it, on one thread (columns != 0);
+// tracer_advection_tend refuses columns with maxLevelCell < 2 before launch
+__device__ void adv_vflux_column(
+    int iCell, rk *highOrderFlux, rk *workTend, rk *tracerMin, rk *tracerMax, rk *fluxIncoming, rk *fluxOutgoing,
+    const rk *tracerCur, const rk *hProv, const rk *w, const int *maxLevelCell, int nl, int vertOrder, rk coef3rd)
+{
     const int top = maxLevelCell[iCell], np1 = nl + 1;
     const rk *cur = tracerCur + iCell * nl, *hp = hProv + iCell * nl, *ww = w + iCell * np1;
     rk *hof = highOrderFlux + iCell * np1, *work = workTend + iCell * nl;
@@ -277,9 +287,7 @@ extern "C" __global__ void ocn_adv_mono_vertical_flux_v842(
     if (k < 1) k = 1;
     if (k >= 2) {
         const int kk = k - 1;   // 0-based level k
-        const rk sum = A(hp[kk], hp[kk - 1]);
-        const rk weightK = D(hp[kk - 1], sum), weightKm1 = D(hp[kk], sum);
-        hof[kk] = M(ww[kk], A(M(weightK, cur[kk]), M(weightKm1, cur[kk - 1])));
+        hof[kk] = adv_vflux2(cur, hp, ww, kk);
         tmax[kk] = fmaxw(fmaxw(cur[kk - 1], cur[kk]), cur[kk + 1]);
         tmin[kk] = fminw(fminw(cur[kk - 1], cur[kk]), cur[kk + 1]);
     }
@@ -290,24 +298,20 @@ extern "C" __global__ void ocn_adv_mono_vertical_flux_v842(
         } else if (vertOrder == 3) {
             hof[kk] = vflux3(cur[kk - 2], cur[kk - 1], cur[kk], cur[kk + 1], ww[kk], coef3rd);
         } else {
-            const rk sum = A(hp[kk], hp[kk - 1]);
-            const rk weightK = D(hp[kk - 1], sum), weightKm1 = D(hp[kk], sum);
-            hof[kk] = M(ww[kk], A(M(weightK, cur[kk]), M(weightKm1, cur[kk - 1])));
+            hof[kk] = adv_vflux2(cur, hp, ww, kk);
         }
         tmax[kk] = fmaxw(fmaxw(cur[kk - 1], cur[kk]), cur[kk + 1]);
         tmin[kk] = fminw(fminw(cur[kk - 1], cur[kk]), cur[kk + 1]);
     }
     {
         const int kk = top - 1;   // k = max(1, maxLevelCell) >= 2 here
-        const rk sum = A(hp[kk], hp[kk - 1]);
-        const rk weightK = D(hp[kk - 1], sum), weightKm1 = D(hp[kk], sum);
-        hof[kk] = M(ww[kk], A(M(weightK, cur[kk]), M(weightKm1, cur[kk - 1])));
+        hof[kk] = adv_vflux2(cur, hp, ww, kk);
         tmax[kk] = fmaxw(cur[kk], cur[kk - 1]);
         tmin[kk] = fminw(cur[kk], cur[kk - 1]);
     }
     for (int kf = 2; kf <= top; ++kf) {
         const int kk = kf - 1;
-        const rk upwind = A(M(fminw(C(0.0), ww[kk]), cur[kk - 1]), M(fmaxw(C(0.0), ww[kk]), cur[kk]));
+        const rk upwind = adv_upwind(ww, cur, kk);
         work[kk - 1] = A(work[kk - 1], upwind);
         work[kk] = S(work[kk], upwind);
         hof[kk] = S(hof[kk], upwind);
@@ -316,6 +320,80 @@ extern "C" __global__ void ocn_adv_mono_vertical_flux_v842(
         fluxIncoming[iCell * nl + kk] = S(fmaxw(C(0.0), hof[kk + 1]), fminw(C(0.0), hof[kk]));
         fluxOutgoing[iCell * nl + kk] = S(fminw(C(0.0), hof[kk + 1]), fmaxw(C(0.0), hof[kk]));
     }
+}
+
+// the vertical high-order flux less the upwind flux, the vertical extrema and
+// workTend's upwind update; cells 1..nCellsArray(2). highOrderFlux
+// (nVertLevels+1 per cell) and workTend start at zero. One thread per (cell,
+// level), level fastest (a column's consecutive words, so the loads
+// coalesce): the Fortran's loops write each word from inputs alone, so a
+// level forms its own final words in their order. Layer 1's flux and the
+// bottom layer's are second order; the bottom layer's extrema are over two
+// layers; workTend(k) loses layer k's upwind flux, then gains layer k+1's.
+// (Columns with maxLevelCell < 2 are refused before launch.) With columns != 0 (Metal's default), a thread per cell runs every column's
+// loops, the antidiffusive fluxes in and out included, so the same words.
+extern "C" __global__ void ocn_adv_mono_vertical_flux_v842(
+    rk *highOrderFlux, rk *workTend, rk *tracerMin, rk *tracerMax, rk *fluxIncoming, rk *fluxOutgoing,
+    const rk *tracerCur, const rk *hProv, const rk *w, const int *maxLevelCell, int nCells, int nl, int vertOrder,
+    rk coef3rd, int columns)
+{
+    const int t = adv_thread();
+    if (columns) {
+        if (t < nCells)
+            adv_vflux_column(t, highOrderFlux, workTend, tracerMin, tracerMax, fluxIncoming, fluxOutgoing,
+                             tracerCur, hProv, w, maxLevelCell, nl, vertOrder, coef3rd);
+        return;
+    }
+    if (t >= nCells * nl) return;
+    const int iCell = t / nl, kk = t % nl;
+    const int top = maxLevelCell[iCell], np1 = nl + 1;
+    if (kk >= top) return;
+    const rk *cur = tracerCur + iCell * nl, *hp = hProv + iCell * nl, *ww = w + iCell * np1;
+    rk *hof = highOrderFlux + iCell * np1, *work = workTend + iCell * nl;
+    rk *tmax = tracerMax + iCell * nl, *tmin = tracerMin + iCell * nl;
+    if (kk == 0) {
+        tmax[0] = fmaxw(cur[0], cur[1]);
+        tmin[0] = fminw(cur[0], cur[1]);
+    } else if (kk == top - 1) {
+        tmax[kk] = fmaxw(cur[kk], cur[kk - 1]);
+        tmin[kk] = fminw(cur[kk], cur[kk - 1]);
+    } else {
+        tmax[kk] = fmaxw(fmaxw(cur[kk - 1], cur[kk]), cur[kk + 1]);
+        tmin[kk] = fminw(fminw(cur[kk - 1], cur[kk]), cur[kk + 1]);
+    }
+    rk wk = work[kk];
+    if (kk >= 1) {
+        rk high;
+        if (kk == 1 || kk == top - 1) {
+            high = adv_vflux2(cur, hp, ww, kk);
+        } else if (vertOrder == 4) {
+            high = vflux4(cur[kk - 2], cur[kk - 1], cur[kk], cur[kk + 1], ww[kk]);
+        } else if (vertOrder == 3) {
+            high = vflux3(cur[kk - 2], cur[kk - 1], cur[kk], cur[kk + 1], ww[kk], coef3rd);
+        } else {
+            high = adv_vflux2(cur, hp, ww, kk);
+        }
+        const rk upwind = adv_upwind(ww, cur, kk);
+        hof[kk] = S(high, upwind);
+        wk = S(wk, upwind);
+    }
+    if (kk + 1 <= top - 1) wk = A(wk, adv_upwind(ww, cur, kk + 1));
+    work[kk] = wk;
+}
+
+// the antidiffusive fluxes in and out of each layer, from the fluxes above
+// and below it; cells 1..nCellsArray(2), one thread per (cell, level)
+extern "C" __global__ void ocn_adv_mono_vertical_inout_v842(
+    rk *fluxIncoming, rk *fluxOutgoing, const rk *highOrderFlux, const int *maxLevelCell, int nCells, int nl)
+{
+    const int t = adv_thread();
+    if (t >= nCells * nl) return;
+    const int iCell = t / nl, kk = t % nl;
+    const int top = maxLevelCell[iCell];
+    if (top < 2 || kk >= top) return;
+    const rk *hof = highOrderFlux + iCell * (nl + 1);
+    fluxIncoming[iCell * nl + kk] = S(fmaxw(C(0.0), hof[kk + 1]), fminw(C(0.0), hof[kk]));
+    fluxOutgoing[iCell * nl + kk] = S(fminw(C(0.0), hof[kk + 1]), fmaxw(C(0.0), hof[kk]));
 }
 
 // the vertical limiter's factors; cells 1..nCellsArray(2)
@@ -337,26 +415,64 @@ extern "C" __global__ void ocn_adv_mono_vertical_limiter_v842(
     fluxOutgoing[t] = fminw(C(1.0), fmaxw(C(0.0), scale));
 }
 
-// the limited vertical flux and the vertical update of the tendency (and its
-// budget); one thread per column of cells 1..nCellsArray(1)
-extern "C" __global__ void ocn_adv_mono_vertical_update_v842(
-    rk *highOrderFlux, rk *workTend, rk *tend, rk *budget, const rk *fluxIncoming, const rk *fluxOutgoing,
-    const int *maxLevelCell, int nCells, int nl, int nTracers, int iTracer, int withBudget)
+// layer kk's limited vertical flux: it reads only its own flux
+__device__ void adv_limit_level(int iCell, int kk, rk *highOrderFlux, const rk *fluxIncoming,
+                                const rk *fluxOutgoing, int nl)
 {
-    const int iCell = adv_thread();
-    if (iCell >= nCells) return;
-    const int top = maxLevelCell[iCell], np1 = nl + 1;
-    rk *hof = highOrderFlux + iCell * np1, *work = workTend + iCell * nl;
+    rk *hof = highOrderFlux + iCell * (nl + 1);
     const rk *fin = fluxIncoming + iCell * nl, *fout = fluxOutgoing + iCell * nl;
-    for (int kk = 1; kk < top; ++kk) {
+    {
         const rk flux = hof[kk];
         hof[kk] = A(M(fmaxw(C(0.0), flux), fminw(fout[kk], fin[kk - 1])),
                     M(fminw(C(0.0), flux), fminw(fout[kk - 1], fin[kk])));
     }
-    for (int kk = 0; kk < top; ++kk) {
-        work[kk] = A(work[kk], S(hof[kk + 1], hof[kk]));
-        const int at = (iCell * nl + kk) * nTracers + iTracer;
-        tend[at] = A(tend[at], work[kk]);
-        if (withBudget) budget[at] = work[kk];
+}
+
+// layer kk's update of the tendency (and its budget) from the limited fluxes
+__device__ void adv_tend_level(int iCell, int kk, const rk *highOrderFlux, rk *workTend, rk *tend, rk *budget,
+                               int nl, int nTracers, int iTracer, int withBudget)
+{
+    const rk *hof = highOrderFlux + iCell * (nl + 1);
+    rk *work = workTend + iCell * nl;
+    work[kk] = A(work[kk], S(hof[kk + 1], hof[kk]));
+    const int at = (iCell * nl + kk) * nTracers + iTracer;
+    tend[at] = A(tend[at], work[kk]);
+    if (withBudget) budget[at] = work[kk];
+}
+
+// the limited vertical flux, cells 1..nCellsArray(1); one thread per (cell,
+// level), level fastest. With columns != 0 (Metal's default), a thread per
+// cell walks the Fortran's two loops: every layer's limited flux, then the
+// tendency and budget from them, so the same words.
+extern "C" __global__ void ocn_adv_mono_vertical_update_v842(
+    rk *highOrderFlux, rk *workTend, rk *tend, rk *budget, const rk *fluxIncoming, const rk *fluxOutgoing,
+    const int *maxLevelCell, int nCells, int nl, int nTracers, int iTracer, int withBudget, int columns)
+{
+    const int t = adv_thread();
+    if (columns) {
+        if (t >= nCells) return;
+        const int top = maxLevelCell[t];
+        for (int kk = 1; kk < top; ++kk) adv_limit_level(t, kk, highOrderFlux, fluxIncoming, fluxOutgoing, nl);
+        for (int kk = 0; kk < top; ++kk)
+            adv_tend_level(t, kk, highOrderFlux, workTend, tend, budget, nl, nTracers, iTracer, withBudget);
+        return;
     }
+    if (t >= nCells * nl) return;
+    const int iCell = t / nl, kk = t % nl;
+    if (kk < 1 || kk >= maxLevelCell[iCell]) return;
+    adv_limit_level(iCell, kk, highOrderFlux, fluxIncoming, fluxOutgoing, nl);
+}
+
+// the vertical update of the tendency (and its budget) from the limited
+// fluxes, cells 1..nCellsArray(1); one thread per (cell, level), after the
+// update kernel has limited every layer's flux
+extern "C" __global__ void ocn_adv_mono_vertical_tend_v842(
+    const rk *highOrderFlux, rk *workTend, rk *tend, rk *budget, const int *maxLevelCell, int nCells, int nl,
+    int nTracers, int iTracer, int withBudget)
+{
+    const int t = adv_thread();
+    if (t >= nCells * nl) return;
+    const int iCell = t / nl, kk = t % nl;
+    if (kk >= maxLevelCell[iCell]) return;
+    adv_tend_level(iCell, kk, highOrderFlux, workTend, tend, budget, nl, nTracers, iTracer, withBudget);
 }

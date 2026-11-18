@@ -292,16 +292,22 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     (Coriolis, thickness flux, pressure gradient, del2/Leith, vertical
     momentum advection, stability, reconstruction and the split step's
     edge updates) run a thread per edge or cell and level, so a warp reads
-    a column's consecutive levels: a 33,000-cell, 60-level step takes 140
-    instead of 259 ms on an A6000, the same words. Each barotropic
+    a column's consecutive levels: a 33,000-cell, 60-level step runs about
+    1.9 times as fast on a (shared) A6000, the same words. Each barotropic
     subcycle's velocity kernels also add the thickness flux, the
-    corrector's velocity copy and the running sum, so a subcycle launches
-    4 kernels instead of 8 (320 fewer launches a step, the same words): on
+    corrector's velocity copy and the running sum, so in the default
+    configuration (predictor, two corrector iterations, no SSH2) a
+    subcycle launches 4 kernels instead of 8, the same words: on
     an M3 Max the 8,300-cell step takes about 44 instead of 52 ms. On CUDA
     the barotropic stage is captured as a CUDA graph and replayed (the
     same kernels and arguments, so the same words; switch:
     `WOOF_OCEAN_CUDA_GRAPHS=0`): 9.9 instead of 10.7 ms on an A6000 at
-    8,300 cells;
+    8,300 cells. On CUDA the barotropic transport and baroclinic update
+    also run a warp per edge (the level sums still added in level order)
+    and monotone vertical advection a thread per cell and level, so a
+    column's loads coalesce: the 33,000-cell step takes 42 instead of 58 ms
+    on an A6000, the same words. Metal keeps a thread per column,
+    which is faster there (switch: `WOOF_OCEAN_COLUMN_LANES=1` or `32`);
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
@@ -322,7 +328,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     the ridging iterations and the cleanup after them), neither of which
     needs an opt-in. The elastic subcycles check their arrays once per
     solve and work out their compile options once per numerics mode:
-    120 subcycles on a 9,200-cell torus take 34 instead of 41 ms a step on
+    120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
     stress coefficient and solves the velocity in one launch (a vertex's
     solve reads only its own coefficient), so the step launches 120 fewer
@@ -353,7 +359,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     bit for bit to compiled WRF 4.7.1 on oracle columns. It reuses the
     legacy RRTMG kernels and ports only K's differences. `aer_opt`,
     `ghg_input`, `icloud = 2/3` and `rrtmg_spectral_output` are refused
-    with K by name.
+    with K by name. Hex runs it on its generic column seam (R1), bit for
+    bit with the WRF route's adapter on the same columns; a 1 h forecast on
+    the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
+    and 0.282 s/step on Metal (M3 Max).
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
