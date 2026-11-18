@@ -380,8 +380,11 @@ def test_attach_binds_the_seat_and_checks_the_carrier(tmp_path, monkeypatch):
     def bind(pool, name):
         raise AssertionError("the seat bound a pool field")
 
-    session = SimpleNamespace(field=bind, resident_field=lambda pool, name: w.pools.get((pool, name)),
-                              native=SimpleNamespace(field_storage=unbound))
+    # The real shape: the MPAS physics session holds the resident views
+    # (session.device_pools); only the views hold resident_field.
+    views = SimpleNamespace(resident=True, field=bind,
+                            resident_field=lambda pool, name, level=1: w.pools.get((pool, name)))
+    session = SimpleNamespace(field=bind, device_pools=views, native=SimpleNamespace(get_field=unbound))
     coupling = SimpleNamespace(session=session, dycore=dycore, cp=np, names=NAMES)
     mesh = SimpleNamespace(arrays={"bdyMaskCell": BDY})
     pytest.importorskip("zarr")
@@ -399,6 +402,39 @@ def test_attach_binds_the_seat_and_checks_the_carrier(tmp_path, monkeypatch):
         hex_seat.attach(coupling, config=None, mesh=mesh, n_cells=NC, vertical=None, dt=30.0, execution=object())
     monkeypatch.delenv(launch.ENV_CONFIG)
     assert hex_seat.attach(coupling, config=None, mesh=mesh, n_cells=NC, vertical=None, dt=30.0) is None
+
+
+def test_a_resident_run_reads_the_live_device_words_not_the_stale_host_storage():
+    """The tap once recorded diag_physics.hfx/qfx/ust at their initial
+    values: the reader looked for resident_field on the physics session,
+    which only its device views carry, and fell back to the host storage a
+    resident run publishes only at output boundaries."""
+    live = np.full(NC, 120.0, dtype=np.float32)
+    stale = np.zeros(NC + 1, dtype=np.float32)
+    held = {("diag_physics", "hfx"): live}
+
+    def bind(pool, name, **kw):
+        raise AssertionError("the reader bound a pool field")
+
+    def views(resident):
+        return SimpleNamespace(resident=resident, field=bind,
+                               resident_field=lambda pool, name, level=1: held.get((pool, name)))
+
+    native = SimpleNamespace(get_field=lambda pool, name, level=1: stale)
+    read = hex_seat._reader(SimpleNamespace(field=bind, device_pools=views(True), native=native), NC)
+    np.testing.assert_array_equal(read("diag_physics", "hfx"), live)
+    # A field no slot has bound: the host storage is still the authority.
+    np.testing.assert_array_equal(read("diag_physics", "qfx"), stale[:NC])
+    # Without resident views the host storage is the authority.
+    read = hex_seat._reader(SimpleNamespace(field=bind, device_pools=views(False), native=native), NC)
+    np.testing.assert_array_equal(read("diag_physics", "hfx"), stale[:NC])
+    read = hex_seat._reader(SimpleNamespace(field=bind, native=native), NC)
+    np.testing.assert_array_equal(read("diag_physics", "hfx"), stale[:NC])
+    # The views go resident after the seat attaches: residency is asked per read.
+    later = views(False)
+    read = hex_seat._reader(SimpleNamespace(field=bind, device_pools=later, native=native), NC)
+    later.resident = True
+    np.testing.assert_array_equal(read("diag_physics", "hfx"), live)
 
 
 def test_registry_names_the_hex_route():
