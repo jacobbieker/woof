@@ -2071,10 +2071,20 @@ FROZEN_MODULE_DIGESTS = {
         # other entry is untouched text.  Each row's words equal the
         # per-row launches' (tests/test_smag_multi.py, CUDA and Metal, both
         # modes).  Previously db91a5f9/7dec200c.
-        '6ee9ec60dd39deba2c8ddcea7ad0e717b94101879ab55fd33eb5fe9c5968c137',
+        # Re-pinned for wrf_smag_uvhat / wrf_smag_deform_hat: u/msfu and
+        # v/msfv stored once per face and read by the deformation in place
+        # of the division (dycore.launch_wrf_smag2d_km, default on Metal
+        # only; WOOF_SMAG_DEFORM_HAT=0 restores wrf_smag_deform).  Every
+        # stored-hat line sits under GPUWM_SMAG_STORED_HAT, compiled only in
+        # that int-define tier, so the default module and the units composing
+        # smag2d.cu preprocess to the previous text (per-entry PTX equal to
+        # 6ee9ec60's on sm_86, fast and WRF-exact).  The tier's tensors equal
+        # wrf_smag_deform's (tests/test_smag_deform_hat.py, CUDA and Metal,
+        # every mode).  Previously 6ee9ec60/64164164.
+        '379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f',
         # smag2d's default composition keeps 2.9.1's glibc_flt32 text
         # (glibc_flt32_default.cuh); the exact chain's header is strict-only.
-        '64164164291fa1e59bf59592e73df3cc13b56a043be40725a3f57d937b9ae329'),
+        '31b03d4dae7e29b0aa327c2b7d016f18d8eb5a47e0449f2896bfcb2d5efb5d0e'),
     'spec_bdy': (
         'bcc7090fbbb8ea307bd6dd6c65ab9b8a3f56948c4752ae3d744127b450d20161',
         'bc03ed595bacc546d8e041fbb1d11b5bb3b3b90760ef06ea1dd1f0f18b4de931'),

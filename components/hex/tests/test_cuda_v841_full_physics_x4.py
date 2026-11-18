@@ -134,7 +134,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
             "6f619095a10bf6787ca38c57304765561519d452aa8c1ee7b654b63e8062cb74"
         ),
         "src/hexcore/cuda_physics_v841.py": (
-            "8140553c0bec161af26c5c4f66ff8a54f1f18762810d36460cf447996ee64b44"
+            "9bfd4c75271254f5dcb0d0a913242afc31da70bf650127dab272c97d0b6fe526"
         ),
         # Re-frozen 2026-08-26 for the convection ruling: the physics cadence
         # table reports convection: None when no scheme is selected; and again

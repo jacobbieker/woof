@@ -529,18 +529,35 @@ def refuse_unsupported(*, execution=None, moving=None, physics_map=None) -> None
 
 
 def _reader(session, n_cells: int):
-    """A physics-pool field without binding it: the device copy the pools
-    already hold, or a copy of the host storage that is still authoritative
-    for a field no slot has bound.  ``session.field`` would upload and
-    cache an unbound field, making the device copy the one published (a tap
-    must change nothing)."""
+    """A physics-pool field, live, without binding it.
+
+    ``session`` is the MPAS physics session (``session_v842``); on a
+    resident run its device views (``session.device_pools``) hold the
+    authoritative words of every field a slot has bound, and the native
+    host storage is stale until an output boundary publishes it.  A
+    resident run therefore reads the views' held device array
+    (``resident_field``, which never uploads), and only a field no slot has
+    bound -- whose host storage is still authoritative -- is copied from
+    the host.  A run without resident views reads the host storage, which
+    is then the authority.  ``session.field`` is not used: on a resident
+    run it would upload and cache an unbound field, making the device copy
+    the one published (a tap must change nothing).
+
+    The views go resident only after the seat attaches (the resident
+    suite's admission), so residency is asked at every read, never once at
+    attach -- a reader that decided at attach read the host storage for
+    the whole run."""
+    native = session.native
+
     def read(pool, name):
-        resident = getattr(session, "resident_field", None)
-        value = resident(pool, name) if resident is not None else None
-        if value is not None:
-            return value
-        native = session.native
-        storage = getattr(native, "field_storage", None)
+        views = getattr(session, "device_pools", None)
+        if views is None and hasattr(session, "resident_field"):
+            views = session   # the views themselves
+        if views is not None and getattr(views, "resident", True) and hasattr(views, "resident_field"):
+            value = views.resident_field(pool, name, level=1)
+            if value is not None:
+                return value
+        storage = getattr(native, "field_storage", None)   # the live storage, sliced once below
         host = storage(pool, name, level=1) if storage is not None else native.get_field(pool, name, level=1)
         return np.array(np.asarray(host)[..., :n_cells])
     return read

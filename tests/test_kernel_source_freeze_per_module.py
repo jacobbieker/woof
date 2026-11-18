@@ -1749,7 +1749,7 @@ PINNED_HEADERS = {
     'nsas_constants.cuh': 'e50bd02c62e11ec3c4bf5619bab6e30805832401df930c1235a136db2fb4c907',
     'radar_backscatter_common.cuh': '7564e059e3e99be94134b97c625d85a9a74fdee872bba193197ade7196d9fd72',
     'refl.cu': '1e2c45699a721b4b042769f9f868d85d8a6eb4960fc547ce9affb59b69f43f66',
-    'smag2d.cu': '6ee9ec60dd39deba2c8ddcea7ad0e717b94101879ab55fd33eb5fe9c5968c137',
+    'smag2d.cu': '379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f',
     'swint.cu': '9a79b7e43cb92553ae454975a943acedc3d8510b5c7eae59ec2c5bb8c8b47c5b',
     'temf_log10_flt32.cuh': '61c2596ef9b7456c1328eb5b9064c84b72f15acad698b084b87a831c478bb69f',
     'wdm_common.cuh': '77590100c6d6066bda9bb347caa318839a107104fceaf1c7690ba184779b01f8',

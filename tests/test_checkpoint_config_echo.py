@@ -224,6 +224,8 @@ DEFAULT_OFF = frozenset({
     "spacewx_aurora_opt", "spacewx_kp_source",
     # The opt-in solar band shares (woof.spacewx), absent while off.
     "solar_ssi_opt", "solar_ssi_source",
+    # The opt-in solar-proton chemistry source (woof.spacewx), absent while off.
+    "spacewx_epp_opt", "spacewx_epp_source",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The RUC sea-ice threshold switch, absent at 0 as in a 2.8.5 header.
