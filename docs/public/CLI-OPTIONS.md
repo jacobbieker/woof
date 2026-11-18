@@ -3797,6 +3797,17 @@ Takes no options of its own.
 | `--storm-fit` | a storm-time fit file (default: the shipped one) |
 | `--time` | first valid time, ISO UTC (2024-05-10T18:00Z) |
 
+## `woof spacewx particles`
+
+| option | what it does |
+|---|---|
+| `--count` | number of times (default 1) |
+| `--levels` | pressure levels, hPa (default 0.01 0.1 1 10 50 100) |
+| `--out` | write the profiles and receipt to this .json |
+| `--source` | 'omni' (NASA SPDF OMNI2, fetched), 'swpc' (GOES via NOAA SWPC, the last 3 days) or OMNI2 file(s) joined by ':' |
+| `--step-hours` | hours between times (default 1) |
+| `--time` | first valid time, ISO UTC (2012-01-24T00:00Z) |
+
 ## `woof spectral`
 
 | option | what it does |
