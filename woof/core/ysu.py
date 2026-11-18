@@ -29,6 +29,7 @@ from woof.core.kernels import get_kernel, get_kernel_int_defines
 # beside the constants there.
 from woof.core.physics_inventory import (YSUWS_SLOTS, YSU_BLOCK,
                                           YSU_TILE_BLOCKS_PER_SM,
+                                          ysu_metal_tile_columns,
                                           ysu_workspace_floats)
 from woof.core.state import DTYPE
 from woof.ysu_generations import YSU_DEFAULT_GENERATION, ysu_generation, ysu_kernel_selection
@@ -42,54 +43,25 @@ _VALIDATE_TPB = 256
 _KMAX = 256
 
 
-#: Metal (Apple GPU, unified memory): blocks of ``YSU_BLOCK`` columns per GPU
-#: core in one launch.  CUDA's rule (16 per SM, bounded by occupancy) gave
-#: 20,480 columns on a 40-core M3 Max, so a 228 x 276 domain took four
-#: launches, the last a 1,488-column tail, and each launch costs the full
-#: serial column time (the cores are not saturated at that width).  64 per
-#: core puts that domain in one launch: Metal kernel time 20.9 -> 13.3-15.4
-#: ms per call there, 9.4 -> 5.4-7.6 ms at 150 x 186 (M3 Max, shared GPU).
-#: The workspace is then 18 x (nz + 1) x 4 B per column, 295 MB at 49
-#: levels and 81,920 columns, in unified memory.  The tile only partitions
-#: independent columns: each column runs the same thread code at the same
-#: column index, so the words do not depend on it
-#: (tests/test_ysu_workspace.py).  ``WOOF_METAL_YSU_TILE_BLOCKS`` overrides
-#: it (16 restores the CUDA rule's width).
-YSU_TILE_BLOCKS_PER_CORE_METAL = 64
-
-
-def _metal_tile_blocks() -> int | None:
-    """Blocks per core on the Metal backend, ``None`` on every other one."""
-    from woof import backend
-    if backend.active() != "mlx":
-        return None
-    import os
-    raw = os.environ.get("WOOF_METAL_YSU_TILE_BLOCKS", "").strip()
-    if not raw:
-        return YSU_TILE_BLOCKS_PER_CORE_METAL
-    value = int(raw)
-    if value < 1:
-        raise ValueError(f"WOOF_METAL_YSU_TILE_BLOCKS must be a positive integer, not {raw!r}")
-    return value
-
-
-def ysu_tile_columns(fn, ncol: int) -> int:
-    """Columns to keep in flight: enough to fill the card, and no more.
+def ysu_tile_columns(fn, ncol: int, nz: int | None = None) -> int:
+    """Columns to keep in flight: on CUDA enough to fill the card, and no
+    more.
 
     The whole point of the workspace is that it is charged per thread IN
     FLIGHT where the local-memory backing store was charged per thread the
     card could ever hold.  Over-sizing the tile hands that ratio back.
     On Metal there is no such store and the cores hold more columns than
     CUDA's rule launches, so the tile is
-    :data:`YSU_TILE_BLOCKS_PER_CORE_METAL` blocks per core.
+    :func:`woof.core.physics_inventory.ysu_metal_tile_columns` (64 blocks
+    per core, under a byte cap at this ``nz``).
     """
     import cupy as cp
 
     dev = cp.cuda.Device()
     sms = dev.attributes["MultiProcessorCount"]
-    metal = _metal_tile_blocks()
-    if metal is not None:
-        return int(max(YSU_BLOCK, min(int(ncol), sms * metal * YSU_BLOCK)))
+    from woof import backend
+    if backend.active() == "mlx":
+        return ysu_metal_tile_columns(sms, ncol, nz)
     per_sm = YSU_TILE_BLOCKS_PER_SM
     try:
         from cupy_backends.cuda.api import driver
@@ -283,7 +255,7 @@ def launch_ysu(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
     # OFFSET rather than as a slice, because the (nz, ny, nx) fields make a
     # column tile non-contiguous, so the kernel indexes them exactly as
     # before.
-    tile = ysu_tile_columns(kernel, ncol)
+    tile = ysu_tile_columns(kernel, ncol, nz)
     wskp = nz + 1
     ws = cp.empty(ysu_workspace_floats(nz, tile), dtype=DTYPE)
     try:

@@ -12,10 +12,19 @@ the numerics mode.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
 import _numerics_child
+
+
+def _restore_env(saved):
+    if saved is None:
+        os.environ.pop("WOOF_METAL_YSU_TILE_BLOCKS", None)
+    else:
+        os.environ["WOOF_METAL_YSU_TILE_BLOCKS"] = saved
 
 
 @pytest.mark.gpu
@@ -31,7 +40,9 @@ def test_tile_width_keeps_every_word():
 
     col, surf = _demo_columns(41, 30, 37, seed=11)
     assert (30 * 37) % Y.YSU_BLOCK, "the one-block arm needs a partial last tile"
+    from woof.core.physics_inventory import ysu_metal_tile_columns
     real_empty, original = cp.empty, Y.ysu_tile_columns
+    saved = os.environ.get("WOOF_METAL_YSU_TILE_BLOCKS")
 
     def poisoned(shape, dtype=float, *a, **kw):
         arr = real_empty(shape, dtype, *a, **kw)
@@ -40,17 +51,25 @@ def test_tile_width_keeps_every_word():
         return arr
 
     runs = {}
-    for name, width in (("one block", lambda fn, n: Y.YSU_BLOCK),
-                        ("three blocks", lambda fn, n: 3 * Y.YSU_BLOCK),
+    # The Metal rule on a one-core device at 8 blocks per core: 256-column
+    # tiles, five launches with a 86-column tail, so its geometry runs
+    # multi-launch on every backend (on a real chip it covers this domain
+    # in one launch, the "backend rule" arm).
+    metal_rule = lambda fn, n, nz=None: ysu_metal_tile_columns(1, n, nz)  # noqa: E731
+    for name, width in (("one block", lambda fn, n, nz=None: Y.YSU_BLOCK),
+                        ("three blocks", lambda fn, n, nz=None: 3 * Y.YSU_BLOCK),
+                        ("metal rule, one core", metal_rule),
                         ("backend rule", original),
-                        ("whole domain", lambda fn, n: n)):
+                        ("whole domain", lambda fn, n, nz=None: n)):
         cp.empty, Y.ysu_tile_columns = poisoned, width
+        os.environ["WOOF_METAL_YSU_TILE_BLOCKS"] = "8"
         try:
             runs[name] = _bits(Y.launch_ysu(**col, **surf, dt=30.0))
         finally:
             cp.empty, Y.ysu_tile_columns = real_empty, original
+            _restore_env(saved)
     assert np.isfinite(runs["whole domain"]["dtheta"]).all()
-    for name in ("one block", "three blocks", "backend rule"):
+    for name in ("one block", "three blocks", "metal rule, one core", "backend rule"):
         _assert_bitwise(runs["whole domain"], runs[name],
                         f"the {name} tile changed the result")
 
@@ -66,6 +85,7 @@ def test_metal_tile_is_blocks_per_core_and_cuda_keeps_its_rule(monkeypatch):
     other backend keeps the occupancy-bounded CUDA rule."""
     cp = pytest.importorskip("cupy")
     import woof.backend as wb
+    from woof.core import physics_inventory as P
     from woof.core import ysu as Y
 
     class _Device:
@@ -74,15 +94,21 @@ def test_metal_tile_is_blocks_per_core_and_cuda_keeps_its_rule(monkeypatch):
     monkeypatch.setattr(cp.cuda, "Device", _Device)
     monkeypatch.delenv("WOOF_METAL_YSU_TILE_BLOCKS", raising=False)
     monkeypatch.setattr(wb, "active", lambda: "mlx")
-    assert Y.ysu_tile_columns(None, 10**6) == 40 * Y.YSU_TILE_BLOCKS_PER_CORE_METAL * Y.YSU_BLOCK
-    assert Y.ysu_tile_columns(None, 62_928) == 62_928
-    assert Y.ysu_tile_columns(None, 5) == Y.YSU_BLOCK
+    assert Y.ysu_tile_columns(None, 10**6) == 40 * P.YSU_TILE_BLOCKS_PER_CORE_METAL * Y.YSU_BLOCK
+    assert Y.ysu_tile_columns(None, 10**6, 49) == 81_920
+    assert Y.ysu_tile_columns(None, 62_928, 49) == 62_928
+    assert Y.ysu_tile_columns(None, 5, 49) == Y.YSU_BLOCK
+    # The byte cap: whole blocks under YSU_TILE_BYTES_CAP_METAL at nz = 256.
+    capped = Y.ysu_tile_columns(None, 10**6, 256)
+    assert capped % Y.YSU_BLOCK == 0 and capped < 81_920
+    assert P.ysu_workspace_floats(256, capped) * 4 <= P.YSU_TILE_BYTES_CAP_METAL
+    assert P.ysu_workspace_floats(256, capped + Y.YSU_BLOCK) * 4 > P.YSU_TILE_BYTES_CAP_METAL
     monkeypatch.setenv("WOOF_METAL_YSU_TILE_BLOCKS", "16")
-    assert Y.ysu_tile_columns(None, 62_928) == 40 * 16 * Y.YSU_BLOCK
-    for bad in ("0", "many"):
+    assert Y.ysu_tile_columns(None, 62_928, 49) == 40 * 16 * Y.YSU_BLOCK
+    for bad in ("0", "many", "16.0"):
         monkeypatch.setenv("WOOF_METAL_YSU_TILE_BLOCKS", bad)
-        with pytest.raises(ValueError):
-            Y.ysu_tile_columns(None, 62_928)
+        with pytest.raises(ValueError, match="WOOF_METAL_YSU_TILE_BLOCKS"):
+            Y.ysu_tile_columns(None, 62_928, 49)
     monkeypatch.setattr(wb, "active", lambda: "cuda")
     monkeypatch.setattr(wb, "active_blocks_per_multiprocessor", lambda *a, **k: 13)
 
@@ -96,3 +122,25 @@ def test_metal_tile_is_blocks_per_core_and_cuda_keeps_its_rule(monkeypatch):
     else:
         expected = 40 * 13 * Y.YSU_BLOCK
     assert Y.ysu_tile_columns(_Fn(), 10**6) == expected
+
+
+def test_preflight_prices_the_metal_tile(monkeypatch):
+    """A Metal process prices the tile it launches (one 62,928-column launch
+    on 40 cores at nz = 49), not CUDA's 16 blocks per core; CUDA keeps its
+    pricing."""
+    from types import SimpleNamespace
+
+    import woof.backend as wb
+    from woof.core import physics_inventory as P
+    from woof.core.preflight import ysu_column_workspace_bytes
+
+    run = SimpleNamespace(bl_pbl_physics=1, nx=276, ny=228, nz=49)
+    exp = SimpleNamespace(domains=[SimpleNamespace(run=run)])
+    profile = SimpleNamespace(multiprocessor_count=40)
+    monkeypatch.delenv("WOOF_METAL_YSU_TILE_BLOCKS", raising=False)
+    monkeypatch.setattr(wb, "_active", "cuda")
+    assert ysu_column_workspace_bytes(exp, profile=profile) == (
+        P.ysu_workspace_floats(49, 40 * P.YSU_TILE_BLOCKS_PER_SM * P.YSU_BLOCK) * 4)
+    monkeypatch.setattr(wb, "_active", "mlx")
+    assert ysu_column_workspace_bytes(exp, profile=profile) == (
+        P.ysu_workspace_floats(49, 276 * 228) * 4)
