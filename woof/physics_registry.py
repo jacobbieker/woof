@@ -451,6 +451,7 @@ REGISTRY_PHYSICS_IDENTITY_SCHEMA = "gpuwm-physics-registry-parts-v4"
 #: Top-level blocks no selection's physics identity binds.
 REGISTRY_BLOCKS_OUTSIDE_PHYSICS_IDENTITY: Mapping[str, str] = {
     "analysis_nudging": "FDDA capability documentation; selected run controls, native input authority and compiled kernels bind execution",
+    "nn_column_physics": "opt-in --nn launch file, not a namelist selection; an applying seat's artefact and settings are bound by the checkpoint header",
     "diagnostic_packages": "passive package descriptions; selected parameters and compiled kernels bind the diagnostic identity",
     "diagnostic_state": "WRF diagnostic field metadata; checkpoint inventory binds the actual fields",
     "template_aliases": "historical profile spellings, not executable settings",

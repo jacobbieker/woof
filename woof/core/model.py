@@ -2158,6 +2158,19 @@ def execute_experiment(
         # build alive past its activation (see _release_startup_build).
         for gid in validators:
             validators[gid].require_healthy(phase="initialized-or-restored")
+    # --nn (woof.nn.launch): the opt-in NN column seat the dycore step
+    # calls, on the single root domain the launch refuses anything else
+    # for; closed (its record flushed) on every exit below.  Without it no
+    # seat, tap or model runtime is imported.
+    nn_seat = None
+    from os import environ
+    if environ.get("WOOF_NN_CONFIG"):
+        from woof.nn.wrf_seat import attach as attach_nn_seat
+        from woof.nn.launch import refuse_multiple_domains
+        refuse_multiple_domains(len(model.nodes_by_grid_id))
+        nn_seat = attach_nn_seat(
+            model.root.state, model.root.cfg.run,
+            resume=float(getattr(model.root.state, "elapsed_seconds", 0.0)) > 0.0)
     from woof.core import health_ledger, lagged_health
     health_policy = lagged_health.resolve_health_check(
         health_check, health_debug=health_debug)
@@ -2960,6 +2973,8 @@ def execute_experiment(
         with ExitStack() as cleanup:
             for output in station_outputs:
                 cleanup.callback(output.close)
+            if nn_seat is not None:
+                cleanup.callback(lambda: setattr(model, "_nn_column_receipt", nn_seat.close()))
             if health_monitor is not None:
                 model._health_check_policy = health_monitor.receipt(
                     health_policy)

@@ -223,8 +223,12 @@ def certified_unrepinned_report(name: str, receipt: dict, moved: dict, record: d
     """The line for a Blackwell receipt recorded as not re-pinned."""
     major, minor = receipt["compute_capability"]
     parts = "; ".join(f"{pin} {was[:8]} -> {now[:8]}" for pin, (was, now) in sorted(moved.items()))
+    pending = ""
+    if record.get("stand_in"):
+        pending = (f" STALE, pending a re-record on: {record.get('rerecord_on')} (user ruling "
+                   f"2026-11-17); {record['stand_in']} gates kernel edits meanwhile.")
     return (f"{name} ({receipt['gpu']}, sm_{major}{minor}) is NOT re-pinned: {parts}, "
-            f"staled by {record['staled_by'][:9]} ({record['reason']}). Its committed words "
+            f"staled by {record['staled_by'][:9]} ({record['reason']}).{pending} Its committed words "
             "still replay; a capture on that card with tools/advect_wrf471_oracle/"
             "recapture_receipt.py --install re-pins it.")
 
@@ -232,7 +236,12 @@ def certified_unrepinned_report(name: str, receipt: dict, moved: dict, record: d
 def check_certified_receipt_pins(name: str, receipt: dict, fixture_dir: Path, modules, records: dict) -> None:
     """A Blackwell receipt's pins equal the tree, except recorded not-re-pinned kernel pins."""
     moved = receipt_staleness(receipt, fixture_dir, modules)
-    excused = (records.get(name) or {}).get("pins", {})
+    record = records.get(name) or {}
+    excused = set(record.get("pins", {}))
+    if record.get("stand_in"):
+        # Its stand-in gates every kernel pin meanwhile (user ruling
+        # 2026-11-17); the fixture pin still gates here.
+        excused |= set(modules)
     gating = {pin: pair for pin, pair in moved.items() if pin not in excused}
     # Exactly the source the default loader compiles (and the fixture's
     # cases.json). A pin moves only with a fresh capture on the receipt's card
@@ -248,6 +257,109 @@ def check_certified_receipt_pins(name: str, receipt: dict, fixture_dir: Path, mo
     if moved:
         warnings.warn(CertifiedReceiptNotRepinned(
             certified_unrepinned_report(name, receipt, moved, records[name])))
+
+
+#: The receipt-index key for a receipt of an older architecture that gates
+#: exactly as a certified (Blackwell) receipt does, standing in for a
+#: certified receipt that is recorded as not re-pinned (user ruling
+#: 2026-11-17: the sm_120 receipt can be re-recorded only on an RTX 5090, so
+#: kernel edits are verified on the RTX A6000 in its place):
+#: {receipt file: {"stands_in_for": certified receipt file (or a list of
+#: them, one per compiler capture), "reason": text}}.
+#: A stand-in's kernel and fixture pins must equal the tree and its card
+#: compares every word it launches; it may carry no staleness or not-re-pinned
+#: record.  The certified receipt's not-re-pinned record names its stand-in
+#: ("stand_in") and the card that alone can re-record it ("rerecord_on").
+STAND_IN_KEY = "certified_stand_in"
+
+
+def receipt_gates(name: str, receipt: dict, index: dict) -> bool:
+    """A certified receipt, or one recorded as standing in for one."""
+    return (architecture_is_certified(receipt["compute_capability"])
+            or name in index.get(STAND_IN_KEY, {}))
+
+
+def selected_receipt_name(index: dict, gpu: str, compute_capability, nvrtc: str | None = None) -> str | None:
+    """The receipt file the index selects for a card: a compiler capture for
+    this NVRTC and architecture, else by name, else by architecture (the order
+    tools/advect_wrf471_oracle/recapture_receipt.py and the parity tests use)."""
+    if nvrtc is not None and compute_capability is not None:
+        major, minor = tuple(compute_capability)
+        name = index.get("compilers", {}).get(nvrtc, {}).get(f"{major}.{minor}")
+        if name is not None:
+            return name
+    if gpu in index.get("cards", {}):
+        return index["cards"][gpu]
+    if compute_capability is None:
+        return None
+    major, minor = tuple(compute_capability)
+    return index.get("architectures", {}).get(f"{major}.{minor}")
+
+
+def card_gates(index: dict, fixture_dir: Path, gpu: str, compute_capability,
+               nvrtc: str | None = None) -> bool:
+    """Whether this card's device words gate: a certified card, or the very
+    card a stand-in receipt was measured on, when the index selects that
+    receipt for it (user ruling 2026-11-17)."""
+    if architecture_is_certified(compute_capability):
+        return True
+    name = selected_receipt_name(index, gpu, compute_capability, nvrtc)
+    if name not in index.get(STAND_IN_KEY, {}):
+        return False
+    receipt = json.loads((Path(fixture_dir) / name).read_text(encoding="ascii"))
+    return receipt["gpu"] == gpu
+
+
+def stand_in_targets(record: dict) -> list:
+    """The certified receipt files a stand-in record names."""
+    target = record.get("stands_in_for")
+    return [target] if isinstance(target, str) else list(target or ())
+
+
+def check_stand_in_records(index: dict, fixture_dir: Path) -> dict:
+    """Every stand-in record must be true; returns them by receipt file.
+
+    A record names a receipt the index selects, of an architecture that is
+    not already certified, carrying no staleness or not-re-pinned record of
+    its own, standing in for a certified receipt the index selects that is
+    recorded as not re-pinned and names this stand-in, with a reason.
+    """
+    records = index.get(STAND_IN_KEY, {})
+    selectable = _selectable_receipts(index)
+    unrepinned = index.get(CERTIFIED_UNREPINNED_KEY, {})
+    for name, record in records.items():
+        # Selected by its card's name only: another card of the architecture
+        # (or a compiler capture) never replays or re-pins a gating receipt.
+        assert name in index.get("cards", {}).values(), (
+            f"{STAND_IN_KEY} names {name}, which no card selects by name")
+        assert name not in set(index.get("architectures", {}).values()) | {
+            n for rows in index.get("compilers", {}).values() for n in rows.values()}, (
+            f"{name} stands in for a certified receipt, so only its own card may select it: "
+            "drop its architectures/compilers mapping")
+        receipt = json.loads((Path(fixture_dir) / name).read_text(encoding="ascii"))
+        assert not architecture_is_certified(receipt["compute_capability"]), (
+            f"{name} is already a certified receipt; it needs no {STAND_IN_KEY} record")
+        for key in (UNCERTIFIED_STALE_KEY, CERTIFIED_UNREPINNED_KEY):
+            assert name not in index.get(key, {}), (
+                f"{name} stands in for a certified receipt and gates: it may not trail ({key})")
+        assert isinstance(record.get("reason"), str) and record["reason"], name
+        targets = stand_in_targets(record)
+        assert targets, f"{name}'s {STAND_IN_KEY} record names no certified receipt"
+        for target in targets:
+            assert target in selectable, (name, target)
+            certified = json.loads((Path(fixture_dir) / target).read_text(encoding="ascii"))
+            assert architecture_is_certified(certified["compute_capability"]), (
+                f"{name} stands in for {target}, which is not a certified receipt")
+            assert unrepinned.get(target, {}).get("stand_in") == name, (
+                f"{target} has no not-re-pinned record naming {name} as its stand-in: a stand-in "
+                "replaces a certified receipt only while that receipt cannot be re-pinned")
+    for target, record in unrepinned.items():
+        if "stand_in" in record:
+            assert target in stand_in_targets(records.get(record["stand_in"], {})), (
+                f"{target}'s not-re-pinned record names stand-in {record['stand_in']}, "
+                f"which has no {STAND_IN_KEY} record for it")
+            assert isinstance(record.get("rerecord_on"), str) and record["rerecord_on"], target
+    return records
 
 
 @dataclass(frozen=True)

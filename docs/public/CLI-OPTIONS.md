@@ -160,6 +160,23 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--set KEY=VALUE` | a setting to change in the branched run, repeatable. Changeable from a checkpoint: run_seconds, restart_interval_s, acknowledgements, relocation.*, tiles.*, devices.*, output.*, simulated_radar.*, domain.<grid_id>.history_interval_s, domain.<grid_id>.history_begin_s, domain.<grid_id>.history_end_s, domain.<grid_id>.tiles.*, domain.<grid_id>.output.*, domain.<grid_id>.surface_energy_diag. Everything else is refused by name, because the restart identity binds it |
 | `--supervisor-max-restarts N` | fresh-process recovery attempts (default 3) |
 
+## `woof buildings`
+
+| option | what it does |
+|---|---|
+| `--cache DIR` | GEM-15 cache root (default: the high-resolution terrain cache) |
+| `--default-height M` | height of footprints with no height, storeys or GEM-15 value (default: such footprints are left out) |
+| `--domain N` | 1-based domain number (default: the innermost, the last one in the namelist) |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--footprints PATH[:SOURCE]` | footprint file (GeoJSON or GeoParquet) and its source, one of gem15-ndsm, google-open-buildings, microsoft, osm, overture, user (default user); repeat for more files |
+| `--min-area M2` | GEM-15 alone: drop nDSM objects smaller than this (default 200) |
+| `--namelist NAMELIST_WPS` | WPS namelist whose domain gets the product |
+| `--no-gem15` | do not read GEM-15: heights then come from the footprints' own attributes or storeys only |
+| `--offline` | read GEM-15 from the cache only |
+| `--output NC` | buildings product to write (NetCDF); name it in [[domain]] obstacle_file |
+| `--resolution M` | footprint lattice spacing in metres (default: a quarter of the grid spacing, at most 5) |
+| `--storey-height M` | metres per storey for footprints with only a storey count (default 3) |
+
 ## `woof case-catalog`
 
 | option | what it does |
@@ -1424,6 +1441,7 @@ Takes no options of its own.
 | `--members-per-card auto\|N` | checkpoint branches run at once on each card, one process each (default auto: as many priced members as the card's free memory holds, up to 4) |
 | `--native-shared-gpu` | with --wrfinput: proceed on a shared GPU |
 | `--nest-at LAT,LON[@TIME]` | spawn a storm-following nest at this point (at TIME, an ISO time or seconds into the run; default the first step); repeatable |
+| `--nn NN.toml` | opt-in neural-network column physics from the [nn] table of this TOML file (docs/nn-physics.md); mode = "tap" records a scheme's inputs and tendencies as training data and leaves the forecast unchanged; "residual" and "replace" apply a column model, which makes the run not WRF-identical |
 | `--no-memory-gate` | skip the before-launch memory check that refuses a configuration whose binding phase cannot fit this card's free VRAM, and the forecast runner's own check of the same envelope; a model state too big to build at all is still refused |
 | `--no-probe` | with --readiness: compute the schedule from the source table only and ask no host |
 | `--no-skeb, --skeb` | stochastic kinetic-energy backscatter in every member (WRF's SKEBS; overrides [ensemble.stochastic] skebs; default: the config's) |
@@ -1431,6 +1449,7 @@ Takes no options of its own.
 | `--no-supervise` | WRF input directories only: integrate in this process under an existing device reservation |
 | `--no-surface-fill` | disable fill soil/SST perturbations |
 | `--no-verify-visuals` | skip postforecast observation verification; the physical run is unchanged |
+| `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |
 | `--nudging {off,spectral,grid}` | relax toward prepared source analyses; spectral keeps only the configured large-scale modes |
 | `--outdir DIR` | output root for one timestamped run folder per launch, with forecast files, pictures and diagnostics (default <config-stem>-go beside the config); an existing run-... folder is used directly |
 | `--output-config TOML` | Read [output] formats and icechunk_store from TOML; CLI values override it |
@@ -1806,6 +1825,7 @@ Takes no options of its own.
 | `--members-per-card auto\|N` | checkpoint branches run at once on each card, one process each (default auto: as many priced members as the card's free memory holds, up to 4) |
 | `--native-shared-gpu` | with --wrfinput: proceed on a shared GPU |
 | `--nest-at LAT,LON[@TIME]` | spawn a storm-following nest at this point (at TIME, an ISO time or seconds into the run; default the first step); repeatable |
+| `--nn NN.toml` | opt-in neural-network column physics from the [nn] table of this TOML file (docs/nn-physics.md); mode = "tap" records a scheme's inputs and tendencies as training data and leaves the forecast unchanged; "residual" and "replace" apply a column model, which makes the run not WRF-identical |
 | `--no-memory-gate` | skip the before-launch memory check that refuses a configuration whose binding phase cannot fit this card's free VRAM, and the forecast runner's own check of the same envelope; a model state too big to build at all is still refused |
 | `--no-probe` | with --readiness: compute the schedule from the source table only and ask no host |
 | `--no-skeb, --skeb` | stochastic kinetic-energy backscatter in every member (WRF's SKEBS; overrides [ensemble.stochastic] skebs; default: the config's) |
@@ -1813,6 +1833,7 @@ Takes no options of its own.
 | `--no-supervise` | WRF input directories only: integrate in this process under an existing device reservation |
 | `--no-surface-fill` | disable fill soil/SST perturbations |
 | `--no-verify-visuals` | skip postforecast observation verification; the physical run is unchanged |
+| `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |
 | `--nudging {off,spectral,grid}` | relax toward prepared source analyses; spectral keeps only the configured large-scale modes |
 | `--outdir DIR` | output root for one timestamped run folder per launch, with forecast files, pictures and diagnostics (default <config-stem>-go beside the config); an existing run-... folder is used directly |
 | `--output-config TOML` | Read [output] formats and icechunk_store from TOML; CLI values override it |
@@ -1898,6 +1919,12 @@ Takes no options of its own.
 | option | what it does |
 |---|---|
 | `--dry-run` | print the manifest and upload nothing |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof grad`
+
+| option | what it does |
+|---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 
 ## `woof hex`
@@ -3499,8 +3526,10 @@ Takes no options of its own.
 | `--keep-member-files` | also retain every member's full history files |
 | `--members N` | make an N-member ensemble with aggregate products |
 | `--met-em DIR` | WPS metgrid directory with met_em.d0*.nc and producing namelist.input; native WOOF initialization |
+| `--nn NN.toml` | opt-in neural-network column physics from the [nn] table of this TOML file (docs/nn-physics.md); mode = "tap" records a scheme's inputs and tendencies as training data and leaves the forecast unchanged; "residual" and "replace" apply a column model, which makes the run not WRF-identical |
 | `--no-memory-gate` | run a case whose priced peak envelope exceeds this card's free memory anyway, as `woof go --no-memory-gate` does: the envelope is an upper bound and the card's own allocation then decides; a model state too big to build at all is still refused |
 | `--no-supervise` | run the experiment in this process (escape hatch; disables fresh-process recovery and exclusive-GPU supervision) |
+| `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |
 | `--outdir OUT` | wrfout output directory |
 | `--output-config TOML` | Read [output] formats and icechunk_store from TOML; CLI values override it |
 | `--output-format FORMATS` | Output-format table rows, comma separated (default netcdf); netcdf,icechunk adds atomic native Zarr v3 history |
@@ -3730,6 +3759,21 @@ Takes no options of its own.
 | option | what it does |
 |---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof spacewx aurora`
+
+| option | what it does |
+|---|---|
+| `--count` | number of times (default 1) |
+| `--dlat` | grid spacing in latitude, deg (default 1) |
+| `--dlon` | grid spacing in longitude, deg (default 2) |
+| `--indices` | observed Kp: 'gfz' (fetched, CC BY 4.0) or a file in GFZ's format |
+| `--kp` | a fixed Kp (0-9) |
+| `--observed-al` | with an OMNI2 solar wind, drive the oval with the observed AL instead of Kp |
+| `--out` | write the fields to this .npz (receipt beside it) |
+| `--solar-wind` | Kp estimated from the solar wind: 'omni' (NASA SPDF OMNI2, fetched), 'swpc' (NOAA real time, last 24 h) or OMNI2 file(s) joined by ':' |
+| `--step-hours` | hours between times (default 1) |
+| `--time` | first valid time, ISO UTC (2024-05-10T18:00Z) |
 
 ## `woof spacewx ionosphere`
 

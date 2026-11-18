@@ -288,6 +288,18 @@ RADIATION_PAIR_REFUSALS = {
     (0, 7): "WRF radiation_driver has no ra_lw_physics=0 CASE for ra_sw_physics=7; select an implemented ra_lw_physics.",
     (7, 0): "WRF radiation_driver rejects ra_lw_physics=7 with ra_sw_physics=0: select an active ra_sw_physics (native CASE 0).",
 }
+# WRF RRTMG-K computes both spectra in its longwave CASE: only 14/14 runs.
+RADIATION_PAIR_REFUSALS.update({
+    (lw, sw): (f"ra_lw_physics={lw}, ra_sw_physics={sw}: WRF RRTMG-K computes "
+               "both spectra in one rad_rrtmg_driver call from the longwave "
+               "case, so it runs only as the pair ra_lw_physics=14, "
+               "ra_sw_physics=14.")
+    for lw in walk.AXIS_VALUES["ra_lw_physics"]
+    for sw in walk.AXIS_VALUES["ra_sw_physics"]
+    if 14 in (lw, sw) and (lw, sw) != (14, 14)})
+#: Pairs MYNN's default subgrid clouds (icloud_bl=1) cannot reach: RRTMG-K
+#: radiates the resolved cloud only (remedy: icloud_bl=0).
+MYNN_PAIR_REFUSALS = {**RADIATION_PAIR_REFUSALS, (14, 14): "icloud_bl"}
 
 
 def test_independent_radiation_spectra_preserve_every_selected_pair() -> None:
@@ -416,7 +428,7 @@ def test_mynn_composes_with_every_radiation_pairing_the_loader_admits(
         f"{lw}/{sw}"
         for lw in walk.AXIS_VALUES["ra_lw_physics"]
         for sw in walk.AXIS_VALUES["ra_sw_physics"]
-        if (lw, sw) not in RADIATION_PAIR_REFUSALS
+        if (lw, sw) not in MYNN_PAIR_REFUSALS
     }
     assert accepted_anywhere == expected
     longwave_on = {pair for pair in accepted_anywhere
@@ -425,7 +437,7 @@ def test_mynn_composes_with_every_radiation_pairing_the_loader_admits(
         f"{lw}/{sw}"
         for lw in walk.AXIS_VALUES["ra_lw_physics"] if lw != 0
         for sw in walk.AXIS_VALUES["ra_sw_physics"]
-        if (lw, sw) not in RADIATION_PAIR_REFUSALS
+        if (lw, sw) not in MYNN_PAIR_REFUSALS
     }
 
 

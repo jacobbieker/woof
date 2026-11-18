@@ -95,7 +95,7 @@ _LAUNCH_OPTIONS: dict[tuple[str, tuple[str, ...]], tuple[str, ...]] = {}
 def launch_options(strict: tuple[str, ...] = COMPILE_OPTIONS) -> tuple[str, ...]:
     """``_hex_numerics.options(strict, keep_ftz=True)``, worked out once per
     numerics mode: every launch of the dynamics' units asks for it, and the
-    elastic subcycles launch some 600 kernels a step."""
+    elastic subcycles launch some 500 kernels a step (120 subcycles)."""
     key = (_hex_numerics._bind(), strict)
     options = _LAUNCH_OPTIONS.get(key)
     if options is None:
@@ -356,14 +356,14 @@ def subcycle(*, mesh: dict, boundary: dict, icestate: dict, solver: dict, variat
                  use_ocean_stress=use_ocean_stress)
     inertia = cp.ascontiguousarray(consts[1:2])
     # the subcycles run on the same arrays, so the first one checks them for all
-    for subcycle in range(int(n_subcycles)):
+    for n in range(int(n_subcycles)):
         evp.internal_stress_variational(mesh=mesh, solver=solver, variational=variational, consts=consts,
                                         elastic_time_step=elastic_time_step, revised_evp=revised_evp,
-                                        check=subcycle == 0)
+                                        check=n == 0)
         velocity_update(mesh=mesh, icestate=icestate, solver=solver, inertia=inertia,
                         use_ocean_stress=use_ocean_stress, revised_evp=revised_evp,
                         elastic_time_step=elastic_time_step, dynamics_time_step=dynamics_time_step,
-                        check=subcycle == 0)
+                        check=n == 0)
     evp.final_divergence_shear_variational(mesh=mesh, solver=solver, variational=variational, ridging=ridging,
                                            use_column_package=use_column_package)
     principal_stresses(mesh=mesh, variational=variational)

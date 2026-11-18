@@ -63,13 +63,34 @@ model, so the forcing's ice stays in charge (`ice_authority = "forcing"`):
 - a cell the forcing has open never takes ERA5 ice.
 
 `auto+era5` binds GLSEA first and asks ERA5 only for the cells that GLSEA
-left without a water temperature. Both values change the initial state
-wherever the domain has lakes, so neither is a default.
+left without a water temperature. ERA5 fills only values GLSEA left missing:
+a GLSEA ice concentration on a cell without a GLSEA water temperature is
+kept. Both values change the initial state wherever the domain has lakes, so
+neither is a default.
+
+In `auto+era5`, the `auto` step keeps the tolerant contract of `auto`. A GLSEA
+value outside its physical range is dropped with a warning, and its cell is
+passed on to ERA5. The `era5` step is explicit. If ERA5 fails for the cells
+GLSEA left (a store timeout, a network error, or no written hour within the
+age limit), the run is refused with a message that names the chain and the
+step. It does not quietly keep the forcing there. An out-of-range ERA5 value
+refuses the run too. A start without an initialization time or surface
+coordinates is refused for `auto+era5` as well, because its ERA5 step cannot
+run. Use `auto` to keep the forcing wherever GLSEA does not cover. Lake
+cells that no step bound are reported as a warning, with the count in the
+receipt's `unbound_cells`.
 
 The ARCO store declares ERA5T further ahead than it has written chunks (on
 2026-11-16 it declared 2026-11-10, but its last written hour was
-2026-11-08 23 UTC). An hour whose fields come back entirely missing is
-therefore skipped for the same hour one day earlier, within the age limit.
+2026-11-08 23 UTC). An hour where any of the six fields comes back entirely
+missing is therefore skipped. The search steps back one day at a time, within
+the age limit, until it finds a written hour. Because the store fills in time
+order, it then bisects the hours between that hour and the last unwritten one.
+The state is the latest written hour, not up to 23 hours older.
+
+The request is always the whole globe from 180 W, whichever lake cells are
+asked for. The longitude axis is closed with a wrapped column, so a lake next
+to the antimeridian is sampled like any other lake.
 
 Surface water temperature at the 2026-11-09 12 UTC start of the Alps case
 (Simstrat is Eawag's operational 1-D lake model, from the Alplakes API. It
@@ -161,7 +182,9 @@ lake_state_source=auto+era5 --surface-statics <mesh>.surface_statics.nc`
 binds the same rows, through the same `initialize_surface`, on the cells
 that the surface statics mark as lakes. The CLM columns that result are WRF
 lakeini's columns from that initial state, bit for bit
-(`tests/test_hex_surface_inputs_gpu.py`, CUDA and Metal). Without
-`sf_lake_physics = 1`, no lake mask is staged on the mesh, so no lake
-state is bound either. The MPAS suite route (R2) folds lakes to water, as
-MPAS-A v8.4.2 does.
+(`tests/test_hex_surface_inputs_gpu.py`, CUDA and Metal). A licensed row's
+`lake_state_path` and `lake_state_accept_licence` are `--physics` keys too.
+Without `sf_lake_physics = 1`, no lake mask is staged on the mesh. An
+explicit source (anything but `auto` or `forcing`) is then refused, because
+it would be accepted and never read. `auto` binds nothing there. The MPAS
+suite route (R2) folds lakes to water, as MPAS-A v8.4.2 does.
