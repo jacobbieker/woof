@@ -6,8 +6,9 @@ Builds an idealised moist YSU case whose level count matches the artefact
 (``MODEL``, an ``mlp-npz`` directory), steps it ``--steps`` times without a
 seat and with one, and prints the wall time per step of each, their
 difference (what the seat adds to a step) and the time of the model call
-alone on the same ``[features, columns]`` array.  Each timing is closed by
-a device-to-host read, so queued work is counted.  The idealised columns
+alone on the same ``[features, columns]`` array, each call read back
+before the next (per-call latency, not pipelined throughput).  Each timing
+is closed by a device-to-host read, so queued work is counted.  The idealised columns
 lie outside a real-case artefact's trained range; the safety screen still
 runs and the model still runs on every column, so the cost is the cost.
 """
@@ -69,7 +70,8 @@ def main(argv=None) -> int:
     parser.add_argument("--ny", type=int, default=80)
     parser.add_argument("--steps", type=int, default=40)
     parser.add_argument("--mode", default="replace", choices=("replace", "residual"))
-    parser.add_argument("--backend", default="auto")
+    parser.add_argument("--backend", default="auto",
+                        help="the model runner (auto, torch, mlx, numpy); the dycore runs on woof's own backend")
     args = parser.parse_args(argv)
 
     from woof import backend
@@ -81,6 +83,7 @@ def main(argv=None) -> int:
     levels = max(f.levels for f in manifest.outputs)
     cp, cfg, plain = _case(args.nx, args.ny, levels)
     without = _per_step(cp, plain, cfg, args.steps)
+    del plain
 
     cp, cfg, state = _case(args.nx, args.ny, levels)
     settings = NNSettings(source=None, mode=args.mode, scheme="pbl", inputs=None, outputs=None, levels=None,
@@ -94,11 +97,10 @@ def main(argv=None) -> int:
         seat.model(x)
     cp.asnumpy(seat.model(x).sum())
     start = time.perf_counter()
-    total = None
     for _ in range(args.steps):
-        y = seat.model(x).sum()  # a reduction over every output: a lazy runtime evaluates the whole call
-        total = y if total is None else total + y
-    cp.asnumpy(total)
+        # each call read back on its own, as a step does: a reduction over every output, so a lazy
+        # runtime evaluates the whole call, and no pipelining across calls
+        cp.asnumpy(seat.model(x).sum())
     model_only = (time.perf_counter() - start) / args.steps
     summary = seat.close()
     nz, ny, nx = state.p.shape

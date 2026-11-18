@@ -2,19 +2,28 @@
 
 ``python -m woof.nn.train TAP OUT`` reads a store written by ``--nn`` in
 ``mode = "tap"`` (:mod:`woof.nn.tap`) and writes an ``mlp-npz`` artefact
-(:mod:`woof.nn.manifest`) that ``mode = "residual"`` or ``"replace"`` runs
-on every backend.  The trainer is deliberately small: a float32 MLP, Adam,
+(:mod:`woof.nn.manifest`) that runs on every backend.  The tap's targets
+are the scheme's own tendency, so the artefact emulates the scheme: it is
+for ``mode = "replace"``.  Under ``mode = "residual"`` its rate would be
+added on top of the scheme's (a residual model needs a reference target
+the tap does not record).  The trainer is deliberately small: a float32 MLP, Adam,
 minibatches, a held-out tail of the record (the last ``holdout`` fraction
-of recorded steps, so the score is out of sample in time), and nothing but
+of recorded model times, so the score is out of sample in time; samples
+are ordered by model time first, and a time recorded twice, as a resumed
+run may leave it, keeps its last record), and nothing but
 NumPy, so it runs wherever woof does.  It is the demonstration of the
 loop, not a research trainer: anything that writes the same artefact may
 take its place.
 
 The artefact's statistics come from the training samples: the input and
-output means and standard deviations (a feature that never varies gets a
-unit scale, so it passes through as an offset), the trained input range
-(``bounds``, what the safety layer screens against), and ``output_limit``
-(``limit_factor`` times the largest target magnitude seen per output).
+output means and standard deviations (an input that never varies gets a
+unit scale, so it passes through as an offset; an output level's scale is
+floored at a thousandth of its field's largest level scale), the trained
+input range (``bounds``, what the safety layer screens against), and
+``output_limit``: ``limit_factor`` times the largest target magnitude seen
+per output level, floored at a hundredth of the field's largest level
+limit, so a level where training never saw a non-zero target (cloud
+water above the cloud, say) is not clamped to zero online.
 The manifest's ``training`` table records the tap, its schema, the split,
 the hyper-parameters and the held-out scores.
 """
@@ -61,6 +70,33 @@ def _scale(values: np.ndarray, fields=None) -> tuple[np.ndarray, np.ndarray]:
     return mean.astype(np.float32), std.astype(np.float32)
 
 
+def _by_time(data: dict) -> dict:
+    """The record ordered by model time, a time recorded more than once
+    (a run resumed from before its last recorded sample appends again)
+    keeping its last record."""
+    times = np.asarray(data["time_seconds"], dtype=np.float64)
+    last = len(times) - 1 - np.unique(times[::-1], return_index=True)[1]
+    if np.array_equal(last, np.arange(len(times))):
+        return data
+    out = dict(data)
+    for name in ("inputs", "targets", "time_seconds", "step", "column_index"):
+        out[name] = np.asarray(data[name])[last]
+    return out
+
+
+def _limits(limit: np.ndarray, fields) -> np.ndarray:
+    """Per-level output limits floored at a hundredth of the field's
+    largest level limit (1e-30 for a field never seen non-zero)."""
+    limit = np.asarray(limit, dtype=np.float64).copy()
+    start = 0
+    for spec in fields:
+        rows = slice(start, start + spec.levels)
+        start += spec.levels
+        top = float(limit[rows].max())
+        limit[rows] = np.maximum(limit[rows], top * 1e-2)
+    return np.maximum(limit, 1e-30)
+
+
 def _act(name):
     if name == "tanh":
         return np.tanh, lambda h, a: 1.0 - a * a
@@ -93,6 +129,7 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
     return the held-out scores."""
     data = read_tap(tap)
     attrs = data["attrs"]
+    data = _by_time(data)
     n = data["inputs"].shape[0]
     if n < 2:
         raise ValueError(f"{tap}: {n} recorded step(s); training needs at least two (one held out)")
@@ -166,10 +203,12 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
     scores = {"held_out_r2": r2_by_output(y_test, predict(x_test), slices),
               "train_r2": r2_by_output(y_train, predict(x_train), slices),
               "held_out_columns": int(x_test.shape[0]), "train_columns": int(x_train.shape[0])}
-    limit = np.maximum(np.abs(y_train).max(axis=0) * limit_factor, 1e-30)
+    limit = _limits(np.abs(y_train).max(axis=0) * limit_factor, outputs)
     training = {"tap": str(Path(tap).resolve()), "tap_schema": attrs.get("schema"),
                 "route": attrs.get("route"), "scheme": attrs.get("scheme"), "grid": attrs.get("grid"),
-                "steps_train": cut, "steps_held_out": n - cut, "hidden": list(hidden),
+                "target": "the scheme's tendency (an emulator: mode = \"replace\")",
+                "steps_train": cut, "steps_held_out": n - cut,
+                "held_out_from_seconds": float(data["time_seconds"][cut]), "hidden": list(hidden),
                 "activation": activation, "epochs": epochs, "batch": batch, "lr": lr, "seed": seed,
                 "seconds": round(seconds, 2), "note": NOT_WRF_IDENTICAL, **scores}
     write_mlp_artefact(

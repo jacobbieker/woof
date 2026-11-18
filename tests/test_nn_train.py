@@ -58,3 +58,25 @@ def test_train_refuses_a_single_step_record(tmp_path):
     tap.close()
     with pytest.raises(ValueError, match="at least two"):
         train(tmp_path / "one.zarr", tmp_path / "m", log=lambda *_: None)
+
+
+def test_train_orders_by_time_and_keeps_the_last_record_of_a_repeated_time():
+    from woof.nn.train import _by_time
+
+    data = {"inputs": np.arange(5.0)[:, None, None], "targets": np.arange(5.0)[:, None, None] * 10,
+            "time_seconds": np.array([0.0, 60.0, 120.0, 60.0, 120.0]), "step": np.arange(5),
+            "column_index": np.zeros((5, 1), dtype=np.int64)}
+    out = _by_time(data)
+    assert out["time_seconds"].tolist() == [0.0, 60.0, 120.0]
+    assert out["inputs"][:, 0, 0].tolist() == [0.0, 3.0, 4.0]  # a resumed run's records win
+    ordered = {**data, "time_seconds": np.arange(5.0)}
+    assert _by_time(ordered) is ordered  # an ordered record is used as it is
+
+
+def test_output_limits_are_floored_within_each_field():
+    from woof.nn.train import _limits
+
+    fields = (FieldSpec("dqc", "kg kg-1 s-1", 3), FieldSpec("dqi", "kg kg-1 s-1", 2))
+    limit = _limits(np.array([4e-6, 0.0, 1e-9, 0.0, 0.0]), fields)
+    assert limit[0] == 4e-6 and limit[1] == limit[2] == 4e-8  # a level never seen non-zero is not clamped to 0
+    assert np.all(limit[3:] == 1e-30)  # a field never seen non-zero stays at the floor
