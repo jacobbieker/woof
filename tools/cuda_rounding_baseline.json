@@ -4265,7 +4265,7 @@
    },
    {
     "file": "woof/core/kernels/spacewx_ionosphere.cu",
-    "sha256": "9694f11071f2ebcf06bdc3f45ef1dba3695e84ee72032aa8798160b931b18c4f"
+    "sha256": "c1bbe87bf9dd168b9f6d302c2ccc2f6dbca8adf9d8f42b3757b8f27c63ecddf2"
    },
    {
     "file": "woof/core/kernels/spec_bdy.cu",

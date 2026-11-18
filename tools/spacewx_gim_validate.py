@@ -42,6 +42,10 @@ def read_ionex(path) -> dict:
     raw = path.read_bytes()
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
+    elif raw[:2] == b"\x1f\x9d":
+        # Unix compress (.Z), as CODE's files before 2022 are: gzip reads it.
+        import subprocess
+        raw = subprocess.run(["gzip", "-dc"], input=raw, capture_output=True, check=True).stdout
     lines = raw.decode("ascii", "replace").splitlines()
     exponent = 0
     lat_spec = lon_spec = None
@@ -136,8 +140,12 @@ def main(argv=None) -> int:
     parser.add_argument("--f107-mode", choices=("daily", "81day"), default="81day")
     parser.add_argument("--maps", choices=("ccir", "ursi"), default="ccir")
     parser.add_argument("--alt-max", type=float, default=2000.0)
+    parser.add_argument("--storm", action="store_true", help="apply woof's storm-time foF2 correction")
+    parser.add_argument("--storm-fit", help="a storm-time fit file (default: the shipped one)")
     parser.add_argument("--json", type=Path)
     args = parser.parse_args(argv)
+    if args.storm and args.indices is None:
+        parser.error("--storm reads ap from the index record: use --indices")
 
     from woof.spacewx import indices
     from woof.spacewx.ionosphere import Ionosphere, receipt
@@ -146,7 +154,11 @@ def main(argv=None) -> int:
     gims = [(path, read_ionex(path)) for path in args.ionex]
     # The F10.7 driver at the last map reads the UT day before it.
     last = max(max(gim["epochs"]) for _, gim in gims)
-    record = None if args.f107 is not None else indices.load(args.indices, last - timedelta(days=1))
+    record = None if args.f107 is not None else indices.load(args.indices, last - timedelta(days=0 if args.storm else 1))
+    fit = None
+    if args.storm:
+        from woof.spacewx import storm
+        fit = storm.load_fit(args.storm_fit)
     report = {"files": [], "per_file": {}}
     all_model, all_ref, lat_ref, lon_ref = [], [], None, None
     previous_last = None    # a daily file's 24:00 map is the next file's 00:00 map: count it once
@@ -155,13 +167,19 @@ def main(argv=None) -> int:
         epochs = sorted(set(gim["epochs"]))
         iono = Ionosphere(lat2, lon2, when=epochs[0], family=args.maps, alt_hi=args.alt_max,
                           nalt=int(round(args.alt_max - 60.0)))
+        mlat = None if fit is None else storm.magnetic_latitude(lat2.ravel(), lon2.ravel(), epochs[0])
         model, reference, kept = [], [], []
         for idx, epoch in enumerate(gim["epochs"]):
             if gim["epochs"].index(epoch) != idx:
                 continue
             kept.append(epoch)
             f107 = args.f107 if record is None else record.f107_driver(epoch, args.f107_mode)
-            model.append(cp.asnumpy(iono.evaluate(epoch, f107)["tec"]).reshape(lat2.shape).astype(np.float64))
+            scale = None
+            if fit is not None:
+                ap_tau = storm.filtered_ap(record, epoch, fit.tau, fit.nlag)
+                scale = storm.fof2_scale(fit, lat2.ravel(), lon2.ravel(), epoch, ap_tau, mlat_deg=mlat)
+            out = iono.evaluate(epoch, f107, fo_scale=scale)
+            model.append(cp.asnumpy(out["tec"]).reshape(lat2.shape).astype(np.float64))
             reference.append(gim["tec"][idx])
         model, reference = np.stack(model), np.stack(reference)
         stats = statistics(model, reference, gim["lat"])
@@ -182,6 +200,8 @@ def main(argv=None) -> int:
     report["all_files"] = total
     report["receipt"] = receipt(iono, "fixed" if record is None else f"{record.source} sha256:{record.sha256}",
                                 "fixed" if record is None else args.f107_mode)
+    if fit is not None:
+        report["receipt"].update(storm.receipt(fit, None, f"{record.source} sha256:{record.sha256}"))
     for name, s in total.items():
         if not s["nodes"]:
             continue
