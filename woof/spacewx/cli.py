@@ -18,7 +18,9 @@ power.
 ``woof spacewx particles`` prints the L2 polar-cap ion-pair production rate of
 solar protons (:mod:`woof.spacewx.particles`) on pressure levels, from OMNI2's
 or GOES's (SWPC real time) integral proton fluxes, with the odd-nitrogen and
-odd-hydrogen production it implies.
+odd-hydrogen production it implies; with ``--electron-energy-flux`` and
+``--electron-mean-energy`` (OVATION Prime's ``eflux`` and ``mean_energy``) it
+adds the auroral electrons' rates (Fang et al. 2010) and their odd nitrogen.
 """
 from __future__ import annotations
 
@@ -292,14 +294,38 @@ def particles_main(args) -> int:
     else:
         mid = np.sqrt(levels[1:] * levels[:-1])
         edges = np.concatenate([[levels[0] ** 2 / mid[0]], mid, [levels[-1] ** 2 / mid[-1]]])
-    try:
-        record = P.load(args.source, times[0], times[-1])
-    except P.ParticleError as exc:
-        raise SystemExit(f"woof spacewx particles: {exc}") from exc
-    table = P.range_table()
     per_day = 86400.0 * 1.0e9
+    listed = lambda a: [None if not np.isfinite(v) else float(v) for v in a]
+    electrons = None
+    if (args.electron_energy_flux is None) != (args.electron_mean_energy is None):
+        raise SystemExit("woof spacewx particles: --electron-energy-flux and --electron-mean-energy go together")
+    if args.electron_energy_flux is not None:
+        eflux = float(args.electron_energy_flux)
+        if not np.isfinite(eflux) or eflux < 0.0:
+            raise SystemExit("woof spacewx particles: --electron-energy-flux must be a non-negative erg cm-2 s-1")
+        try:
+            qe = P.electron_ion_pairs_per_gram(eflux, args.electron_mean_energy, edges * 100.0,
+                                               spectrum=args.electron_spectrum)
+        except P.ParticleError as exc:
+            raise SystemExit(f"woof spacewx particles: {exc}") from exc
+        electrons = {"energy_flux_erg_cm2_s": eflux, "mean_energy_kev": float(args.electron_mean_energy),
+                     "spectrum": args.electron_spectrum, "levels_hpa": levels.tolist(),
+                     "ion_pairs_per_gram_s": listed(qe),
+                     "nox_ppbv_per_day": listed(P.vmr_tendency(qe, P.NOX_PER_ION_PAIR) * per_day)}
+        text = "  ".join(f"{lev:g} hPa {v:9.3e}" for lev, v in zip(levels, qe))
+        print(f"auroral electrons  {eflux:g} erg cm-2 s-1, {args.electron_mean_energy:g} keV "
+              f"{args.electron_spectrum}  ion pairs g-1 s-1: {text}")
+    elif args.source == "none":
+        raise SystemExit("woof spacewx particles: --source none needs the electron options")
     rows = []
-    for when in times:
+    record = None
+    if args.source != "none":
+        try:
+            record = P.load(args.source, times[0], times[-1])
+        except P.ParticleError as exc:
+            raise SystemExit(f"woof spacewx particles: {exc}") from exc
+    table = P.range_table()
+    for when in times if record is not None else ():
         try:
             flux = record.at(when)
         except P.ParticleError as exc:
@@ -319,7 +345,6 @@ def particles_main(args) -> int:
                 q = np.full(levels.size, np.nan)
                 row["spectrum_error"] = str(exc)
         row["levels_hpa"] = levels.tolist()
-        listed = lambda a: [None if not np.isfinite(v) else float(v) for v in a]
         row["ion_pairs_per_gram_s"] = listed(q)
         row["nox_ppbv_per_day"] = listed(P.vmr_tendency(q, P.NOX_PER_ION_PAIR) * per_day)
         row["hox_ppbv_per_day"] = listed(P.vmr_tendency(q, P.HOX_PER_ION_PAIR) * per_day)
@@ -331,10 +356,14 @@ def particles_main(args) -> int:
               + (f"  (no spectrum: {row['spectrum_error']})" if "spectrum_error" in row else ""))
     doc = {"spacewx_particles_model": "solar protons: Bethe range in air, isotropic, W = 35 eV, "
                                       f"polar cap |MLAT| >= {P.POLAR_CAP_DEG:g}",
-           "spacewx_proton_source": f"{record.source} sha256:{record.sha256}",
-           "spacewx_proton_channels_mev": list(record.channels),
-           "spacewx_spe_threshold_pfu": P.SPE_THRESHOLD_PFU,
            "nox_per_ion_pair": P.NOX_PER_ION_PAIR, "hox_per_ion_pair": P.HOX_PER_ION_PAIR, "times": rows}
+    if record is not None:
+        doc.update({"spacewx_proton_source": f"{record.source} sha256:{record.sha256}",
+                    "spacewx_proton_channels_mev": list(record.channels),
+                    "spacewx_spe_threshold_pfu": P.SPE_THRESHOLD_PFU})
+    if electrons is not None:
+        doc["spacewx_electron_model"] = "auroral electrons: Fang et al. 2010 (GRL 37, L22106), isotropic, W = 35 eV"
+        doc["electrons"] = electrons
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8")
@@ -396,10 +425,17 @@ def register_cli(sub):
     part.add_argument("--count", type=int, default=1, help="number of times (default 1)")
     part.add_argument("--step-hours", type=float, default=1.0, help="hours between times (default 1)")
     part.add_argument("--source", default="omni",
-                      help="'omni' (NASA SPDF OMNI2, fetched), 'swpc' (GOES via NOAA SWPC, the last 3 days) "
-                           "or OMNI2 file(s) joined by ':'")
+                      help="'omni' (NASA SPDF OMNI2, fetched), 'swpc' (GOES via NOAA SWPC, the last 3 days), "
+                           "OMNI2 file(s) joined by ':', or 'none' (electrons only)")
     part.add_argument("--levels", type=float, nargs="+", default=[0.01, 0.1, 1.0, 10.0, 50.0, 100.0],
                       help="pressure levels, hPa (default 0.01 0.1 1 10 50 100)")
+    part.add_argument("--electron-energy-flux", type=float,
+                      help="auroral electron energy flux, erg cm-2 s-1 (OVATION Prime's eflux): adds its "
+                           "ion-pair rates (Fang et al. 2010) at the levels")
+    part.add_argument("--electron-mean-energy", type=float,
+                      help="auroral electron mean energy, keV (OVATION Prime's mean_energy)")
+    part.add_argument("--electron-spectrum", choices=("maxwellian", "mono"), default="maxwellian",
+                      help="the electrons' spectrum: Maxwellian of that mean energy (default) or monoenergetic")
     part.add_argument("--out", type=Path, help="write the profiles and receipt to this .json")
     part.set_defaults(func=particles_main)
     return parser

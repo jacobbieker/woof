@@ -150,3 +150,67 @@ def test_cli_prints_profiles_and_a_receipt(tmp_path, capsys):
                      "--levels", "1", "--out", str(out)]) == 0
     row = json.loads(out.read_text())["times"][0]
     assert row["spe"] and row["ion_pairs_per_gram_s"] == [None] and "spectrum_error" in row
+
+
+# --- auroral electrons (Fang et al. 2010) ----------------------------------------------
+
+def test_fang2010_column_energy_and_peak_depths():
+    # The fit carries the incident energy to within its quoted few per cent
+    # (worse at the 100 eV end), and its peaks sit where the first-principles
+    # models put them: 10 keV near 105 km (about 1.3e-4 hPa), 1 MeV near 60 km.
+    x = np.geomspace(1.0e-10, 10.0, 4001)
+    for e, lo, hi in ((0.1, 0.80, 0.90), (1.0, 0.90, 1.0), (10.0, 0.97, 1.02), (100.0, 0.98, 1.03),
+                      (1000.0, 1.0, 1.06)):
+        total = P.electron_absorbed(x, 1.0, e)[-1] / (1.0 / 1.602176634e-9)
+        assert lo < total < hi, (e, total)
+    def peak_hpa(e):
+        q = P.electron_ion_pairs_per_gram(1.0, e, x * P._G * 10.0, spectrum="mono")
+        rho = np.sqrt(x[1:] * x[:-1])          # per volume ~ per gram x depth (isothermal)
+        k = int(np.argmax(q * rho))
+        return math.sqrt(x[k] * x[k + 1]) * P._G * 10.0 / 100.0
+    assert 0.8e-4 < peak_hpa(10.0) < 2.0e-4
+    assert 0.08 < peak_hpa(1000.0) < 0.3
+
+
+def test_maxwellian_electrons_conserve_energy_and_stay_above_wrf_tops():
+    e, w = P.maxwellian_bins(4.0)
+    assert w.sum() == pytest.approx(1.0)
+    # The energy-flux-weighted mean of phi ~ E exp(-E/E0) is 3 E0 = 1.5 x the mean energy.
+    assert np.sum(w * e) == pytest.approx(6.0, rel=0.02)
+    edges = np.geomspace(1.0e-9, 10.0, 600) * 100.0
+    x = P.depth_from_pressure(edges)
+    q = P.electron_ion_pairs_per_gram(2.0, 4.0, edges)
+    absorbed_kev = np.sum(q * np.diff(x)) * P.W_ION_MEV * 1.0e3
+    assert absorbed_kev == pytest.approx(2.0 / 1.602176634e-9, rel=0.05)
+    # Nothing at or below 1 hPa, the top of the highest WRF configurations.
+    assert np.all(q[edges[1:] >= 100.0] == 0.0)
+    assert np.all(P.electron_ion_pairs_per_gram(0.0, 0.0, edges) == 0.0)
+    with pytest.raises(P.ParticleError, match="positive"):
+        P.electron_ion_pairs_per_gram(1.0, 0.0, edges)
+    with pytest.raises(P.ParticleError, match="outside"):
+        P.electron_ion_pairs_per_gram(1.0, 2000.0, edges, spectrum="mono")
+    with pytest.raises(P.ParticleError, match="spectrum"):
+        P.electron_ion_pairs_per_gram(1.0, 4.0, edges, spectrum="kappa")
+
+
+def test_cli_adds_auroral_electrons_without_protons(tmp_path, capsys):
+    from woof.spacewx import cli
+    out = tmp_path / "e.json"
+    assert cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--source", "none",
+                     "--electron-energy-flux", "5", "--electron-mean-energy", "3",
+                     "--levels", "1e-5", "1e-4", "1e-3", "1", "--out", str(out)]) == 0
+    doc = json.loads(out.read_text())
+    assert doc["times"] == [] and "spacewx_proton_source" not in doc
+    el = doc["electrons"]
+    q = np.asarray(el["ion_pairs_per_gram_s"])
+    assert q[0] > q[1] > q[2] > 0 and q[3] == 0.0
+    np.testing.assert_allclose(el["nox_ppbv_per_day"], P.vmr_tendency(q, 1.25) * 86400e9)
+    assert "Fang" in doc["spacewx_electron_model"] and "auroral electrons" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="go together"):
+        cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--source", "none",
+                  "--electron-energy-flux", "5"])
+    with pytest.raises(SystemExit, match="needs the electron options"):
+        cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--source", "none"])
+    with pytest.raises(SystemExit, match="non-negative"):
+        cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--source", "none",
+                  "--electron-energy-flux", "-1", "--electron-mean-energy", "3"])

@@ -30,8 +30,13 @@ production rate from the proton flux, from first principles:
   :data:`POLAR_CAP_DEG` (the open-field convention of Jackman et al. 2008,
   JGR 113, D17203), uniformly.
 
-Auroral and radiation-belt electrons are not included: they deposit their
-energy at 70-150 km, above every WRF and MPAS model top.
+Auroral electrons (100 eV to 1 MeV) have their own ion-pair rates
+(:func:`electron_absorbed`, :func:`electron_ion_pairs_per_gram`): the
+parameterisation of Fang et al. 2010 (GRL 37, L22106), fitted to
+first-principles transport models, for an isotropic monoenergetic or
+Maxwellian flux such as OVATION Prime's energy flux and mean energy.  They
+deposit at 70-150 km, above every WRF and MPAS model top, so they are a
+diagnostic, not a source in the forecast.
 """
 from __future__ import annotations
 
@@ -164,6 +169,92 @@ def absorbed(integral_flux, depth, channels=CHANNELS_MEV, table: RangeTable | No
         resid = table.residual(e_mid[:, None], x.ravel()[None, :] / m)     # (nE, nX)
         out += (2.0 * math.pi * wm * m * (counts @ (e_mid[:, None] - resid))).reshape(x.shape)
     return out
+
+
+#: Fang et al. 2010 (GRL 37, L22106), Table 1: P_ij for isotropically incident
+#: monoenergetic 100 eV to 1 MeV electrons; C_i(E) = exp(sum_j P_ij ln(E/keV)^j).
+FANG2010_P = np.array([
+    [1.24616e+0, 1.45903e+0, -2.42269e-1, 5.95459e-2],
+    [2.23976e+0, -4.22918e-7, 1.36458e-2, 2.53332e-3],
+    [1.41754e+0, 1.44597e-1, 1.70433e-2, 6.39717e-4],
+    [2.48775e-1, -1.50890e-1, 6.30894e-9, 1.23707e-3],
+    [-4.65119e-1, -1.05081e-1, -8.95701e-2, 1.22450e-2],
+    [3.86019e-1, 1.75430e-3, -7.42960e-4, 4.60881e-4],
+    [-6.45454e-1, 8.49555e-4, -4.28581e-2, -2.99302e-3],
+    [9.48930e-1, 1.97385e-1, -2.50660e-3, -2.06938e-3]])
+#: The energies the fit covers, keV.
+ELECTRON_E_RANGE_KEV = (0.1, 1000.0)
+#: keV per erg.
+_KEV_PER_ERG = 1.0 / 1.602176634e-9
+
+
+def electron_dissipation(y, e_kev) -> np.ndarray:
+    """Fang et al. 2010 eq. 4: the normalised energy dissipation f(y, E) of
+    monoenergetic electrons of ``e_kev`` keV at normalised depth ``y``."""
+    e = float(e_kev)
+    if not ELECTRON_E_RANGE_KEV[0] <= e <= ELECTRON_E_RANGE_KEV[1]:
+        raise ParticleError(f"electron energy {e:g} keV is outside the 0.1-1000 keV of Fang et al. 2010")
+    le = math.log(e)
+    c = np.exp(FANG2010_P @ np.array([1.0, le, le * le, le ** 3]))
+    y = np.asarray(y, dtype=np.float64)
+    return (c[0] * y ** c[1] * np.exp(-c[2] * y ** c[3])
+            + c[4] * y ** c[5] * np.exp(-c[6] * y ** c[7]))
+
+
+def _electron_y(depth, e_kev):
+    """Fang et al. 2010 eq. 1, y = (2 / E) (rho H / 6e-6)^0.7, with rho H the
+    column depth in g cm-2."""
+    return (2.0 / e_kev) * (np.asarray(depth, dtype=np.float64) / 6.0e-6) ** 0.7
+
+
+def electron_absorbed(depth, energy_flux_erg, e_kev) -> np.ndarray:
+    """Energy absorbed above each column depth (g cm-2), keV cm-2 s-1, from an
+    isotropic monoenergetic flux of ``energy_flux_erg`` erg cm-2 s-1 at
+    ``e_kev``: ``Q int_0^X f(y) dX' / X'``, since Fang's ionisation rate per
+    unit mass is ``Q f / (D X)`` (eq. 3, D = 35 eV).  The total over the whole
+    column is Q to within the fit's few per cent."""
+    q = float(energy_flux_erg) * _KEV_PER_ERG
+    ly = np.linspace(math.log(1.0e-6), math.log(1.0e4), 2001)
+    # dX / X = dy / (0.7 y): trapezoids in ln y.
+    g = electron_dissipation(np.exp(ly), e_kev) / 0.7
+    cum = np.concatenate([[0.0], np.cumsum(0.5 * (g[1:] + g[:-1]) * np.diff(ly))])
+    y = _electron_y(depth, e_kev)
+    return q * np.interp(np.log(np.maximum(y, 1.0e-300)), ly, cum, left=0.0, right=cum[-1])
+
+
+def maxwellian_bins(mean_energy_kev, n: int = 160):
+    """(energies keV, energy-flux fractions) of a Maxwellian number flux
+    ``phi ~ E exp(-E / E0)`` with mean energy 2 E0 = ``mean_energy_kev`` (the
+    OVATION Prime eflux / nflux), on log bins over 0.1-1000 keV; the fractions
+    sum to 1 (the part outside the range is dropped and the rest rescaled)."""
+    mean = float(mean_energy_kev)
+    if not math.isfinite(mean) or mean <= 0.0:
+        raise ParticleError(f"electron mean energy {mean_energy_kev!r} keV must be positive")
+    e0 = 0.5 * mean
+    edges = np.geomspace(*ELECTRON_E_RANGE_KEV, n + 1)
+    e = np.sqrt(edges[1:] * edges[:-1])
+    w = e ** 3 * np.exp(-e / e0) * np.diff(np.log(edges))    # energy flux ~ E^2 exp(-E/E0) dE
+    if not np.any(w > 0):
+        raise ParticleError(f"a {mean:g} keV Maxwellian has no energy in 0.1-1000 keV")
+    return e, w / w.sum()
+
+
+def electron_ion_pairs_per_gram(energy_flux_erg, mean_energy_kev, p_edges_pa, *, spectrum="maxwellian"):
+    """Layer-mean ion pairs g-1 s-1 between successive interface pressures (Pa)
+    from auroral electrons of ``energy_flux_erg`` erg cm-2 s-1: a Maxwellian of
+    that mean energy (keV) or, with ``spectrum="mono"``, monoenergetic."""
+    x = depth_from_pressure(p_edges_pa)
+    if spectrum not in ("maxwellian", "mono"):
+        raise ParticleError(f"electron spectrum {spectrum!r} must be 'maxwellian' or 'mono'")
+    if float(energy_flux_erg) == 0.0:                 # no aurora (OVATION's mean energy is 0 there)
+        return np.zeros(x.shape[0] - 1)
+    if spectrum == "mono":
+        f = electron_absorbed(x, energy_flux_erg, mean_energy_kev)
+    else:
+        e, frac = maxwellian_bins(mean_energy_kev)
+        f = sum(electron_absorbed(x, energy_flux_erg * w, ek) for ek, w in zip(e, frac) if w > 1.0e-12)
+    dx = np.abs(np.diff(x))
+    return np.where(dx > 0, np.abs(np.diff(f)) / np.where(dx > 0, dx, 1.0), 0.0) / (W_ION_MEV * 1.0e3)
 
 
 def depth_from_pressure(p_pa) -> np.ndarray:
@@ -321,6 +412,7 @@ def polar_cap(mlat_deg, edge_deg: float = POLAR_CAP_DEG) -> np.ndarray:
 
 __all__ = ["CHANNELS_MEV", "W_ION_MEV", "E_MAX", "POLAR_CAP_DEG", "NOX_PER_ION_PAIR", "HOX_PER_ION_PAIR",
            "DEPTH_GRID", "ParticleError", "stopping_power", "RangeTable", "range_table", "spectrum", "absorbed",
-           "depth_from_pressure", "ion_pairs_per_gram", "vmr_tendency", "ion_pair_rate", "energy_flux",
+           "depth_from_pressure", "ion_pairs_per_gram", "FANG2010_P", "ELECTRON_E_RANGE_KEV",
+           "electron_dissipation", "electron_absorbed", "maxwellian_bins", "electron_ion_pairs_per_gram", "vmr_tendency", "ion_pair_rate", "energy_flux",
            "polar_cap", "SPE_THRESHOLD_PFU", "ProtonRecord", "from_solar_wind", "parse_swpc", "fetch_swpc",
            "load"]

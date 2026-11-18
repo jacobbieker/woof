@@ -829,7 +829,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   integral proton flux (OMNI2 or SWPC real time) into polar-cap ion-pair rates
   and NOx/HOx production during solar proton events (Bethe stopping in air,
   35 eV per ion pair). Against the CMIP7 rates, the ratio is 0.4-1.0 at 0.1-100
-  hPa. The chemistry source is planned ([docs/spacewx.md](docs/spacewx.md)).
+  hPa. The chemistry source is planned. With `--electron-energy-flux` and
+  `--electron-mean-energy` (OVATION's eflux and mean energy) it adds the
+  auroral electrons' ion-pair rates and NOx (Fang et al. 2010). They deposit
+  above about 85 km, so they are a diagnostic, not a forecast source
+  ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
   studies gradients of a forecast's fit to observations and opt-in
