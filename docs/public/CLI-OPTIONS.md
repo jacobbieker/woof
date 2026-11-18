@@ -1441,6 +1441,7 @@ Takes no options of its own.
 | `--members-per-card auto\|N` | checkpoint branches run at once on each card, one process each (default auto: as many priced members as the card's free memory holds, up to 4) |
 | `--native-shared-gpu` | with --wrfinput: proceed on a shared GPU |
 | `--nest-at LAT,LON[@TIME]` | spawn a storm-following nest at this point (at TIME, an ISO time or seconds into the run; default the first step); repeatable |
+| `--nn NN.toml` | opt-in neural-network column physics from the [nn] table of this TOML file (docs/nn-physics.md); mode = "tap" records a scheme's inputs and tendencies as training data and leaves the forecast unchanged. Not WRF-identical when a model is applied |
 | `--no-memory-gate` | skip the before-launch memory check that refuses a configuration whose binding phase cannot fit this card's free VRAM, and the forecast runner's own check of the same envelope; a model state too big to build at all is still refused |
 | `--no-probe` | with --readiness: compute the schedule from the source table only and ask no host |
 | `--no-skeb, --skeb` | stochastic kinetic-energy backscatter in every member (WRF's SKEBS; overrides [ensemble.stochastic] skebs; default: the config's) |
@@ -1824,6 +1825,7 @@ Takes no options of its own.
 | `--members-per-card auto\|N` | checkpoint branches run at once on each card, one process each (default auto: as many priced members as the card's free memory holds, up to 4) |
 | `--native-shared-gpu` | with --wrfinput: proceed on a shared GPU |
 | `--nest-at LAT,LON[@TIME]` | spawn a storm-following nest at this point (at TIME, an ISO time or seconds into the run; default the first step); repeatable |
+| `--nn NN.toml` | opt-in neural-network column physics from the [nn] table of this TOML file (docs/nn-physics.md); mode = "tap" records a scheme's inputs and tendencies as training data and leaves the forecast unchanged. Not WRF-identical when a model is applied |
 | `--no-memory-gate` | skip the before-launch memory check that refuses a configuration whose binding phase cannot fit this card's free VRAM, and the forecast runner's own check of the same envelope; a model state too big to build at all is still refused |
 | `--no-probe` | with --readiness: compute the schedule from the source table only and ask no host |
 | `--no-skeb, --skeb` | stochastic kinetic-energy backscatter in every member (WRF's SKEBS; overrides [ensemble.stochastic] skebs; default: the config's) |
@@ -3524,6 +3526,7 @@ Takes no options of its own.
 | `--keep-member-files` | also retain every member's full history files |
 | `--members N` | make an N-member ensemble with aggregate products |
 | `--met-em DIR` | WPS metgrid directory with met_em.d0*.nc and producing namelist.input; native WOOF initialization |
+| `--nn NN.toml` | opt-in neural-network column physics from the [nn] table of this TOML file (docs/nn-physics.md); mode = "tap" records a scheme's inputs and tendencies as training data and leaves the forecast unchanged. Not WRF-identical when a model is applied |
 | `--no-memory-gate` | run a case whose priced peak envelope exceeds this card's free memory anyway, as `woof go --no-memory-gate` does: the envelope is an upper bound and the card's own allocation then decides; a model state too big to build at all is still refused |
 | `--no-supervise` | run the experiment in this process (escape hatch; disables fresh-process recovery and exclusive-GPU supervision) |
 | `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |
@@ -3756,6 +3759,21 @@ Takes no options of its own.
 | option | what it does |
 |---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof spacewx aurora`
+
+| option | what it does |
+|---|---|
+| `--count` | number of times (default 1) |
+| `--dlat` | grid spacing in latitude, deg (default 1) |
+| `--dlon` | grid spacing in longitude, deg (default 2) |
+| `--indices` | observed Kp: 'gfz' (fetched, CC BY 4.0) or a file in GFZ's format |
+| `--kp` | a fixed Kp (0-9) |
+| `--observed-al` | with an OMNI2 solar wind, drive the oval with the observed AL instead of Kp |
+| `--out` | write the fields to this .npz (receipt beside it) |
+| `--solar-wind` | Kp estimated from the solar wind: 'omni' (NASA SPDF OMNI2, fetched), 'swpc' (NOAA real time, last 24 h) or OMNI2 file(s) joined by ':' |
+| `--step-hours` | hours between times (default 1) |
+| `--time` | first valid time, ISO UTC (2024-05-10T18:00Z) |
 
 ## `woof spacewx ionosphere`
 

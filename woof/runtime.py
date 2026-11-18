@@ -5248,6 +5248,13 @@ def integrate_prepared_case(
             state, history_selection, nx=cfg.nx, ny=cfg.ny, dx=cfg.dx,
             dy=cfg.dy, grid_id=domain_id,
             latlon=prepared.grid.latlon_mass, streamed=streamed)
+    # --nn (woof.nn.launch): the opt-in NN column seat the dycore step
+    # calls; without it no seat, tap or model runtime is imported.
+    nn_seat = None
+    if os.environ.get("WOOF_NN_CONFIG"):
+        from woof.nn.wrf_seat import attach as attach_nn_seat
+        nn_seat = attach_nn_seat(state, integration_cfg, streamed=streamed,
+                                 resume=restart_path is not None)
     if restart_write_steps is not None:
         # THE CHECKPOINT'S QUESTION, ASKED BEFORE STEP 0.  A run that will
         # write checkpoints must be able to NAME its physics setup, and
@@ -5661,6 +5668,8 @@ def integrate_prepared_case(
         lat, lon = prepared.grid.latlon_mass()
         rainc_lat = float(lat[j, i])
         rainc_lon = float(lon[j, i])
+    if nn_seat is not None:
+        nn_seat.close()
     if health_validations_unarmed:
         import warnings
 

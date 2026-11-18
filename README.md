@@ -292,11 +292,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     (Coriolis, thickness flux, pressure gradient, del2/Leith, vertical
     momentum advection, stability, reconstruction and the split step's
     edge updates) run a thread per edge or cell and level, so a warp reads
-    a column's consecutive levels: a 33,000-cell, 60-level step takes 140
-    instead of 259 ms on an A6000, the same words. Each barotropic
+    a column's consecutive levels: a 33,000-cell, 60-level step runs about
+    1.9 times as fast on a (shared) A6000, the same words. Each barotropic
     subcycle's velocity kernels also add the thickness flux, the
-    corrector's velocity copy and the running sum, so a subcycle launches
-    4 kernels instead of 8 (320 fewer launches a step, the same words): on
+    corrector's velocity copy and the running sum, so in the default
+    configuration (predictor, two corrector iterations, no SSH2) a
+    subcycle launches 4 kernels instead of 8, the same words: on
     an M3 Max the 8,300-cell step takes about 44 instead of 52 ms. On CUDA
     the barotropic stage is captured as a CUDA graph and replayed (the
     same kernels and arguments, so the same words; switch:
@@ -322,7 +323,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     the ridging iterations and the cleanup after them), neither of which
     needs an opt-in. The elastic subcycles check their arrays once per
     solve and work out their compile options once per numerics mode:
-    120 subcycles on a 9,200-cell torus take 34 instead of 41 ms a step on
+    120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
     stress coefficient and solves the velocity in one launch (a vertex's
     solve reads only its own coefficient), so the step launches 120 fewer
@@ -746,8 +747,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`tools/spacewx_gim_validate.py`). `spacewx_ionosphere_opt = 1` writes the
   same ionosphere into every WRF-route history frame (`IONO_TEC`,
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
-  forecast; hex and streamed domains refuse it for now. The aurora, storm-time and particle-precipitation layers are
-  planned ([docs/spacewx.md](docs/spacewx.md)).
+  forecast; hex and streamed domains refuse it for now. `woof spacewx aurora`
+  places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
+  observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
+  through a Kp fit with test RMSE 0.73). The auroral energy, storm-time and
+  particle-precipitation layers are planned ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
   studies gradients of a forecast's fit to observations and opt-in
@@ -779,8 +783,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (DLPack, no copies; `recast-woof[nn-torch]`, never a base dependency) or
   MLX on Metal. A safety layer refuses, clips or falls back to the physics
   scheme outside the trained range, and limits outputs, keeps moisture
-  positive and can fix column budgets. The forecast seats are not wired yet.
-  Runs that use it are not WRF-identical ([docs/nn-physics.md](docs/nn-physics.md)).
+  positive and can fix column budgets. `woof run`/`woof go --nn NN.toml`
+  with `mode = "tap"` records a WRF-route scheme's column inputs and
+  physical-rate tendencies to Zarr or Icechunk as training data, leaving the
+  forecast byte-identical. Applying a model at the seat is not wired yet.
+  Runs that apply one are not WRF-identical ([docs/nn-physics.md](docs/nn-physics.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

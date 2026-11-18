@@ -160,7 +160,9 @@ def vel_pressure_grad_tend(*, mesh: dict, pressure, montgomery_potential, z_mid,
     _check("edgeMask", mesh["edgeMask"], cp.int32, (n_edges, n_levels))
     density0_inv, gdensity0_inv = pgrad_constants(config_density0, precision)
     n_edges_loop = loop_extent("edges", 1, n_edges)
-    _function(precision, "ocn_vel_pressure_grad_tend_v842")(_grid(n_edges_loop * n_levels), (_BLOCK,), (
+    jacobian = code in (PGRAD_TYPES["Jacobian_from_density"], PGRAD_TYPES["Jacobian_from_TS"])
+    n_threads = n_edges_loop if jacobian else n_edges_loop * n_levels   # the Jacobian sum walks the column
+    _function(precision, "ocn_vel_pressure_grad_tend_v842")(_grid(n_threads), (_BLOCK,), (
         tend, pressure, montgomery_potential, z_mid, density, potential_density, tracers, alpha, beta,
         mesh["maxLevelEdgeTop"], mesh["cellsOnEdge"], mesh["dcEdge"], mesh["edgeMask"], np.int32(code),
         density0_inv, gdensity0_inv, dtype(config_common_level_weight), np.int32(index_temperature),

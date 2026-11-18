@@ -86,6 +86,63 @@ runtime cannot run is refused by name and is not converted.
   uniformly in mass within each column, so that its column integral equals
   that of the replaced scheme (or zero for a residual).
 
+## Recording training data: the tendency tap (WRF route)
+
+`woof run` and `woof go` take `--nn NN.toml`. That file holds one `[nn]`
+table:
+
+```toml
+[nn]
+mode = "tap"            # record only; applying a model comes later (P2.3)
+scheme = "pbl"          # pbl, radiation, cumulus or total
+tap = "pbl-tap.zarr"    # relative to this file; *.icechunk makes an Icechunk repo
+tap_every = 1           # every n-th dycore step
+tap_columns = 256       # columns drawn per recorded step, interior only
+tap_seed = 0
+# levels = 30           # keep the lowest 30 levels of every 3-D field
+# inputs = ["theta", "qv", "u", "v", "p", "z", "hfx", "ust"]
+# outputs = ["dtheta", "dqv", "du", "dv"]
+```
+
+The seat sits where SPPT and SKEBS act: after the step's non-microphysics
+physics and before chemistry, IAU and FDDA. On each recorded step it draws
+`tap_columns` mass-grid columns at random from the interior. A specified or
+nested domain's `spec_bdy_width` ring is excluded. The seat then writes the
+following arrays:
+
+- `inputs [sample, n_inputs, column]`: the named fields, levels bottom-up.
+  3-D: `theta qv qc qr qi qs qg u v w p exner z dz rthraten`, with `u`, `v`
+  and `w` averaged to mass points and `z` measured above the ground.
+  Per column: `hgt mu hfx qfx ust tsk znt xland pblh psfc lh coszen`.
+- `targets [sample, n_outputs, column]`: the scheme's held tendencies as
+  physical rates (`dtheta dqv dqc dqr dqi dqs du dv`). They are decoupled
+  by dividing by the coupler's response to a unit rate. On the interior
+  this is the exact inverse of the dry-mass coupling in both numerics.
+  `du` and `dv` are face-pair means, so they are approximate.
+- `time_seconds`, `step`, `column_index` (`j * nx + i`).
+
+The defaults depend on the scheme (`woof.nn.wrf_seat.DEFAULT_INPUTS`,
+`DEFAULT_OUTPUTS`). The group attributes give the field specs in the
+layout the artefact manifest takes, so a trainer can read
+`woof.nn.tap.read_tap(path)` straight into `write_mlp_artefact`.
+
+A scheme's slot holds the tendency of its last call, and `radt`, `cudt`
+or a positive `bldt` hold it over steps. So a scheme is recorded only on
+steps where it ran, and only on every `tap_every`-th dycore step the seat
+sees. The record's `step` counts those steps: an adaptive clock changes
+`dt` from step to step, so model time does not name a step, and a resumed
+run starts counting again. The columns drawn depend only on `tap_seed` and
+the model time, so a resumed run draws the same ones as an unbroken run.
+A resumed run trims the store back to its resume time and appends from
+there. `total` is recorded on
+every such step, and it sums slots held from different steps.
+
+A tap only reads. A tapped forecast is byte-identical to the same forecast
+without `--nn`; `tests/test_nn_tap.py` checks this after real steps.
+Recording is refused on a multi-domain experiment, on a `[tiles]`-streamed
+domain, on an ensemble member leg, and on a store that already exists
+unless the launch resumes (`--restart`, `--restart-from`).
+
 ## Installing
 
 - CUDA: `pip install 'recast-woof[nn-torch]'`, with the CUDA build of

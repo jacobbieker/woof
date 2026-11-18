@@ -767,6 +767,11 @@ STATE_INFRA_ATTRS = frozenset({
     # so any checkpoint written inside a window, and the final trajectory
     # digest of every IAU run on the tree route, raised RestartManifestError.
     "_iau_forcing",
+    # --nn (woof.nn.wrf_seat): the launch attaches the seat from its --nn
+    # file at every start and resume.  INFRA while it only records (mode
+    # "tap": the forecast's arrays are untouched); a seat that applies a
+    # model binds the model's identity into the checkpoint instead.
+    "_nn_column_seat",
     # woof.da.iau.IAU_AFTER_STEP_ATTRIBUTE: the analysis door's post-step
     # acts for a STREAMED root (its dry-mass share of the IAU window and its
     # balance probe, served per compute window by woof.da.iau

@@ -2763,6 +2763,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # The ionosphere history (woof.spacewx.history), RTX A6000 sm_86,
     # NVRTC 12.9, fast and strict, 2026-11-17: 96 B (the profile's locals).
     "spacewx_ionosphere": 96,
+    # The auroral oval (woof spacewx aurora; no forecast module yet), same
+    # card and reading: 32 B.
+    "spacewx_aurora": 32,
     "cu_radiation": 0,  # test host B sm_120 / NVRTC 13.4.92, both modes.
     "wrf_stock_aer3": 0,  # same reading, both optics and diagnostics.
     "farms": 136,
