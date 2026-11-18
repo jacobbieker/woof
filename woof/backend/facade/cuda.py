@@ -9,6 +9,8 @@ stream has drained, which is what woof's timing code reads them for.
 
 from __future__ import annotations
 
+import functools
+import os
 import threading
 import time
 import types
@@ -197,23 +199,57 @@ def get_current_stream(device_id=None):
     return getattr(_STREAMS, "current", None) or Stream.null
 
 
+@functools.lru_cache(maxsize=1)
+def _lazy_events() -> bool:
+    """``WOOF_METAL_LAZY_EVENTS=0`` makes an untimed event's record drain the queue again (A/B)."""
+    return os.environ.get("WOOF_METAL_LAZY_EVENTS", "1") != "0"
+
+
 class Event:
     def __init__(self, block=False, disable_timing=False, interprocess=False):
         self.t = None
         self.ptr = id(self)
+        # An untimed event marks a point that only its own waits read, so
+        # recording it need not drain the queue (WOOF_METAL_LAZY_EVENTS=0
+        # restores the drain).  The record queues a one-byte marker behind
+        # everything this thread has queued, and a wait evaluates the marker:
+        # the point CUDA's event waits for, from any thread (a drain reaches
+        # only the waiting thread's own MLX stream).
+        self._lazy = bool(disable_timing) and _lazy_events()
+        self._marker = None
 
     def record(self, stream=None):
         from woof.backend.facade import _capture
         if _capture.record_event(self):
             return
+        if self._lazy:
+            from woof.backend.facade._array import flush_pending
+            mx = _mx()
+            flush_pending()
+            marker = mx.zeros((1,), dtype=mx.uint8)
+            mx.async_eval(marker)
+            self._marker = marker
+            return
         _drain()
         self.t = time.perf_counter()
 
+    def _wait(self):
+        marker, self._marker = self._marker, None
+        if marker is not None:
+            _mx().eval(marker)
+
     def synchronize(self):
+        if self._lazy:
+            from woof.backend.facade import _capture
+            if _capture.recording() is not None:
+                _capture.refuse("a synchronize")
+            self._wait()
+            return
         _drain()
 
     @property
     def done(self):
+        self._wait()
         return True
 
 
