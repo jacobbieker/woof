@@ -340,7 +340,17 @@ def command_letkf(args) -> int:
                          memory_budget_mib=args.memory_budget_mib)
     import time
     t0 = time.perf_counter()
-    increments, ya = letkf_with_obs_space(prior, batches, layers, grid, config)
+    solve_namespace = None
+    if args.solve == "cuda":
+        import cupy
+        solve_namespace = cupy
+
+    def progress(event):
+        print(f"letkf {event['phase']}: {event['gridpoints_done']}/{event['gridpoints_total']} gridpoints, "
+              f"{event['active_points']} active, {event['elapsed_seconds']:.0f} s", file=sys.stderr, flush=True)
+
+    increments, ya = letkf_with_obs_space(prior, batches, layers, grid, config, solve_namespace=solve_namespace,
+                                          progress=progress if args.progress else None)
     seconds = time.perf_counter() - t0
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -361,7 +371,7 @@ def command_letkf(args) -> int:
               "observations_by_type": dict(sorted(Counter(f"{p}/{k}" for p, k in
                                                           zip(obs.platform[rows], obs.kind[rows])).items())),
               "batches": len(batches), "fields": list(names), "localization_km": args.localization_km,
-              "vertical_km": args.vertical_km, "rtps_alpha": 0.0, "analysis_seconds": seconds,
+              "vertical_km": args.vertical_km, "rtps_alpha": 0.0, "analysis_seconds": seconds, "solve": args.solve,
               "left_out_column_kinds": int(column_kind.sum()),
               "innovation_rms_over_sigma": float(np.sqrt(np.mean(((y - hb_mean) / sigma) ** 2))),
               "spread_hb_over_sigma": float(np.mean(hb.std(axis=0, ddof=1) / sigma)),
@@ -557,6 +567,9 @@ def build_parser() -> argparse.ArgumentParser:
     letkf.add_argument("--vertical-km", type=float, default=3.0)
     letkf.add_argument("--rim", type=int, default=5)
     letkf.add_argument("--memory-budget-mib", type=float, default=512.0, help="the filter's batched-solve scratch ceiling")
+    letkf.add_argument("--solve", choices=("host", "cuda"), default="host",
+                       help="where the local solves run; the state stays on the host either way (cuda needs cupy)")
+    letkf.add_argument("--progress", action="store_true", help="report the filter's progress on stderr")
     letkf.add_argument("--mp-physics", type=int, default=None)
     letkf.add_argument("--out-dir", required=True)
     letkf.set_defaults(handler=command_letkf)
