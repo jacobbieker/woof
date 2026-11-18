@@ -377,9 +377,9 @@ Steps:
    GFS cycle five days before the evaluation cycle. Each tapped run was
    byte-identical to its plain run (`tests/test_nn_hex_gpu.py` checks
    this on both meshes, fast and strict).
-2. **Train.** `python -m woof.nn.train` with `--hidden 256,256 --epochs 20`
-   took about 40 s per mesh on the CPU, on 138240 columns (540 steps). The
-   last 10 % of the recorded period was held out:
+2. **Train.** `python -m woof.nn.train` with `--hidden 256,256 --epochs 20
+   --holdout 0.1` took about 40 s per mesh on the CPU, on 138240 columns
+   (540 recorded steps). The last 60 steps (10 %) were held out:
 
    | mesh | dtheta R² | dqv R² | dqc R² | (train R²) |
    |---|---|---|---|---|
