@@ -155,7 +155,9 @@ def _ctx(flux, xlat, monkeypatch):
     monkeypatch.setattr(E, "held_flux", lambda source, start, **k: _held(flux))
     p8w = cp.asarray(np.repeat(np.geomspace(1.0e5, 5.0, 31)[:, None], xlat.size, axis=1).reshape(31, 1, -1),
                      dtype=cp.float32)
-    fields = {n: cp.full((30, 1, xlat.size), 1.0e-3, dtype=cp.float32) for n in ("no", "ho", "ho2")}
+    # Start from zero: a float32 1e-3 ppmv would round away the deep layers'
+    # 1e-12 ppmv gains this test compares.
+    fields = {n: cp.zeros((30, 1, xlat.size), dtype=cp.float32) for n in ("no", "ho", "ho2")}
     state = SimpleNamespace(chem=SimpleNamespace(start_time=START), **{f"chem_{n}": a for n, a in fields.items()})
     met = {"p8w": p8w, "xlat": cp.asarray(xlat.reshape(1, -1), dtype=cp.float32),
            "xlong": cp.zeros((1, xlat.size), dtype=cp.float32)}
