@@ -93,6 +93,120 @@ observation, and for each type the count, `J`, bias, RMSE and mean sigma.
 It also counts every reason an observation was dropped, and records the
 SHA-256 of the observation set and of the error table.
 
+## Finite-difference sensitivities
+
+The derivative of `J_o` along a direction `p` in the initial state is
+
+    dJ/d(eps) ~= (J(x0 + eps p) - J(x0 - eps p)) / (2 eps)
+
+Each side is a forecast restarted from a perturbed state and scored with
+`--accept`, so both count the same observations.
+
+- **WRF route.** `woof grad perturb` writes `CKPT + eps * p` as a new
+  restart checkpoint through the same writer an analysis uses
+  (`woof.ensemble.increments.apply_increments_to_checkpoint`), which caps
+  vapour at saturation and repairs microphysics number moments. Keep the
+  file name in the `gpuwmrst_d01_<time>.npz` form, put it outside the new
+  run's output directory, and continue with
+  `woof go CFG --prepared-root BASE/prepared --restart FILE`. The restart
+  must be run by the same woof source as the base run, and a checkpoint is
+  written only when the base run used `--keep-checkpoints`. Pass the base
+  run's `--mp-physics`, and `--morr-rimed-ice` for Morrison, so the
+  writer's number-moment repair matches the run's microphysics. WRF-route
+  blobs are zero in the outer `--rim` rows and columns (default 5, the
+  specified and relaxation zone).
+- **hex.** Run the base with `--checkpoint-hours H --jedi-background`.
+  `woof grad perturb --checkpoint BACKGROUND.nc` writes a copy of the JEDI
+  background at hour H with `eps * p` added. Continue with
+  `--restart-from CHECKPOINT.pkl --da-analysis COPY.nc`, which rebuilds
+  the dycore state from it. Directions on hex are `theta` fields
+  `(nCells, nVertLevels)`, and they are zero in the relaxation rings when
+  `--mesh` is a static or init file that carries `bdyMaskCell`.
+- **The reference.** The writer also repairs number moments the model left
+  inconsistent, and those repairs are the same for any `eps`. Score a run
+  written with `--scale 0` as `--reference`. Score every run, including
+  `--reference` and `--zero`, with the same `--accept` pairs file;
+  `woof grad fd` refuses runs scored on other observations. A restart from the untouched
+  checkpoint is then `--zero`. On the WRF route, under strict numerics, it
+  reproduces the base bit for bit. On hex, the `--da-analysis` restart
+  rebuilds the dycore state from float32 fields, so a scale-0 restart moves
+  `J` slightly. Use that run, not the base, as the hex reference.
+
+```bash
+woof grad direction --checkpoint CKPT --field thp --blob 8 40 50 --radius-cells 5 --out p.npz
+woof grad direction --mesh GRID.nc --field theta --at LAT LON 8 --radius-km 30 --out p.npz   # hex
+woof grad perturb --checkpoint CKPT --direction p.npz --scale 0.2 --mp-physics 10 --out plus/gpuwmrst_d01_2026-11-07_03_00_00.npz
+woof grad fd --leg 0.2 plus.json minus.json --leg 0.1 plus2.json minus2.json --reference zero-scale.json
+```
+
+`woof grad fd` gives the central, forward and backward differences for
+each scale and the curvature, and how much the derivative changes between
+scales. When the summaries carry them, it also gives the central
+difference for each observation type, which shows where the response and
+the noise come from. The headline `dJ` is taken from the smallest scale
+whose derivative is within 25% of the next larger scale's
+(`"converged": true`). When no scale meets that, the headline comes from
+the largest scale, with `"converged": false`.
+
+Choose `eps` by looking at the scale table. Any perturbation, however
+small, moves a 9 h forecast's `J` by a few units, because convection and
+QC thresholds respond nonlinearly. On a 9 km regional case, a 1 K `thp`
+blob gave a derivative that held steady only for amplitudes of about
+0.4 K and above. Below that, the noise dominated.
+
+## Ensemble sensitivity and EFSO
+
+`woof grad members` draws K centred initial perturbations from
+`woof.da.perturb`. On the WRF route these are a Gaussian random `thp`
+field and a non-divergent wind, tapered at the rim. On hex they are
+`theta` only, drawn on a tangent plane and sampled at the cells. Each
+member is a direction applied with `--scale 1`.
+
+`woof grad ens` regresses the members' costs on their states:
+
+    S_j = cov(J, x_j) / var(x_j)
+
+It writes the maps of `S`, the correlation and the spread, and lists the
+strongest points. `--regress FIELD INDEX` also writes the localised
+regression of the whole state on one point, `cov(X, x_j) / var(x_j)`. For
+that direction the ensemble predicts `dJ/d(eps) = S_j`, and a finite
+difference along it tests the prediction (Ancell & Hakim 2007).
+
+EFSO (Kalnay et al. 2012; Ota et al. 2013) uses `J` as its measure of
+forecast error:
+
+1. `woof grad letkf` analyses member checkpoints with the observations
+   that a pairs file accepted at the analysis time. It uses
+   `woof.da.letkf`, with point batches and winds destaggered and
+   restaggered. It writes the analysis members, and it also keeps `Y^a`,
+   the analysis ensemble in observation space. `Y^a` comes from the
+   filter's own local weights, by carrying `H(x_k)` as an extra analysed
+   field.
+   - Each `--history` file must hold the analysis time only.
+   - Column-integrated observations have no model level, so they are
+     left out of the LETKF.
+   - The analysis is not relaxed (no RTPS), because EFSO needs the
+     Kalman gain's own analysis perturbations.
+   - Every member is staged before any is published.
+   - `--solve cuda` runs the local solves on the GPU while the state
+     stays on the host. On a 100x80x49 grid with 24 members and 729
+     observations, this took 43 s; the host solve had not finished after
+     70 min. `letkf.json` records the device and eigensolver used.
+   - Observations that share a grid point need one extra analysed field
+     each: a station's five surface kinds, or a sounding's levels that
+     fall on one model level. Each extra field is the size of the state,
+     so memory and run time grow with that count.
+2. Forecasts from the analysis members are scored with `--accept` and
+   `--pairs-out`.
+3. `woof grad efso` gives each observation's first-order impact
+   `d_i / sigma_i^2 * 1/(K-1) * sum_k Y^a'_ik J'_k`, where
+   `d = y - H(mean background)`. Negative values lowered the forecast's
+   cost. With `--localization-km`, each verifying observation's share of
+   `J` is weighted by its distance from the assimilated one.
+4. `woof grad mean` writes ensemble-mean checkpoints. The forecasts from
+   the background mean and the analysis mean then give the actual change
+   that the summed impact predicts.
+
 ## Limits
 
 - Radio occultation in the store is bending angle, which is converted

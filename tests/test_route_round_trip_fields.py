@@ -699,3 +699,12 @@ def test_history_switch_round_trips(tmp_path):
     replay = _replay(paths)
     assert replay.root.run.history_interval2_s == 7200.
     assert replay.root.run.history_interval_change_s == 10800.
+
+
+def test_obstacles_are_read_from_the_toml(tmp_path):
+    """obstacle_opt has no WRF spelling: the round trip must not refuse an
+    LES nest with buildings for the pair's silence."""
+    exp, paths = _emit(tmp_path, "obstacles", obstacle_opt=1,
+                       obstacle_file=str(tmp_path / "bld.nc"))
+    assert {"obstacle_opt", "obstacle_file"} <= set(ROUTE_FORECAST_TOML_FIELDS)
+    verify_round_trip(exp, paths["wps_namelist"], paths["namelist_input"])
