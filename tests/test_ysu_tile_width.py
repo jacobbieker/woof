@@ -74,6 +74,7 @@ def test_tile_width_keeps_every_word():
                         f"the {name} tile changed the result")
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize(*_numerics_child.MODES)
 def test_tile_width_keeps_every_word_in_every_numerics_mode(numerics, exact):
     _numerics_child.run(__file__, ["test_tile_width_keeps_every_word"], numerics, exact)
