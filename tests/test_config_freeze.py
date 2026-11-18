@@ -343,10 +343,13 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
-    # The opt-in solar band shares (woof.spacewx), appended off.
-    for name, default in (("solar_ssi_source", ""), ("solar_ssi_opt", 0)):
     # The opt-in solar-proton chemistry source (woof.spacewx), appended off.
     for name, default in (("spacewx_epp_source", ""), ("spacewx_epp_opt", 0)):
+        assert names.pop() == name
+        assert RunConfig.__dataclass_fields__[name].default == default
+        assert RunConfig.__dataclass_fields__[name].kw_only
+    # The opt-in solar band shares (woof.spacewx), appended off.
+    for name, default in (("solar_ssi_source", ""), ("solar_ssi_opt", 0)):
         assert names.pop() == name
         assert RunConfig.__dataclass_fields__[name].default == default
         assert RunConfig.__dataclass_fields__[name].kw_only
