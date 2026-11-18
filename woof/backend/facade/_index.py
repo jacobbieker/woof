@@ -112,6 +112,9 @@ def setitem(a: ndarray, key, value):
         host[_host_key(key)] = value.get() if isinstance(value, ndarray) else value
         a.set(host)
         return
+    from woof.backend.facade._write import scatter_last
+    if scatter_last(a, key, value):
+        return
     # Advanced: scatter into the full view, then write the view back.
     whole = a._values()
     values = operand_values(value, a.dtype)
@@ -122,7 +125,13 @@ def setitem(a: ndarray, key, value):
         # trailing axis carries past the key untouched.
         halves = whole.reshape(-1).view(mx.uint32).reshape(tuple(whole.shape) + (2,))
         v = values.reshape(-1).view(mx.uint32).reshape(tuple(values.shape) + (2,))
-        halves[_advanced_key(key)] = v
+        k = _advanced_key(key)
+        k = k if isinstance(k, tuple) else (k,)
+        if any(x is Ellipsis for x in k):
+            # an ellipsis would reach the halves axis: name it, so the key's
+            # last index stays on the array's last axis
+            k = k + (slice(None),)
+        halves[k] = v
         a._write(halves.reshape(-1).view(mx.uint64).reshape(tuple(whole.shape)))
         return
     whole[_advanced_key(key)] = values
