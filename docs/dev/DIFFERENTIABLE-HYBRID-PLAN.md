@@ -737,6 +737,81 @@ variable-resolution meshes; `J_o` reproduces the scorecard's RMSE for the
 same pairs. If G0 shows sensitivities dominated by noise at 3 km, stop
 gradient work at convective scales and keep P1-P4 at 9-15 km.
 
+**G0 results (measured, P0.3/P0.4).** All runs were on the pb A6000
+(CUDA), on one regional case with three meshes:
+- WRF route: 100x80x49 at 9 km, restart at 3 h, `J_o` over 07-12 Z with
+  6,167 observations.
+- hex uniform: 5 km, 10,426 cells, restart at 1 h, `J_o` over 02-06 Z
+  with 1,762 observations.
+- hex variable resolution: 3-20 km, 4,565 cells, restart at 1 h, `J_o`
+  over 02-06 Z with 1,023 observations.
+
+Every perturbed run was scored against the base run's frozen pairs.
+Directions are localised regressions of the ensemble state onto one
+point. For each direction, the ensemble predicts `dJ/d(eps) = S` at that
+point, and the finite difference (FD) is the central difference at 1 and
+0.5 (in K or m/s at the point; 0.5 and 0.25 for r1).
+
+| route | direction | ES `S` | FD `dJ/d(eps)` | sign |
+|---|---|---|---|---|
+| WRF | q1 `thp` (48 members) | -135 | -29 / -32 | agrees |
+| WRF | q2 `u` | +71 | +10 / +11 | agrees |
+| WRF | q3 `v` | +73 | +14 / +15 | agrees |
+| WRF | r1 `thp` (from 24 members; an independent 24 give -50) | -204 | -51 / -58 | agrees |
+| WRF | q4 `thp` | -124 | -0.3 / +0.6 | no response |
+| hex uniform | g1 `theta` (48) | -34 | -0.5 / -0.6 | agrees, below noise |
+| hex uniform | g2 | +37 | +0.7 / 0.0 | no response |
+| hex uniform | g3 | -28 | -7.4 / -11.6 | agrees |
+| hex VR | v1 `theta` (32) | +16 | -0.2 / 0.0 | no response |
+| hex VR | v2 | -20 | -3.2 / -2.5 | agrees |
+| hex VR | v3 | +19 | -0.8 / +0.5 | no response |
+
+- **WRF route: G0 met.** Four directions agree in sign. Across the 11
+  observation types, the ES and FD responses correlate at 0.94-0.99, so
+  the pattern agrees as well. ES overstates the magnitude by 4-6x at
+  points picked for their correlation. Picking such points is a
+  selection bias: with 24 members, r1's ES was 4x the FD, but an
+  independent 24-member ensemble gave -50, matching the FD of -51 to -57.
+- **hex, uniform and variable resolution: G0 not met.** A 1 K local
+  `theta` perturbation moves `J` by less than the noise floor of about
+  ±1-3 in most directions, while the members' whole-domain perturbations
+  give a `J` spread of 34 (uniform) and 14 (VR). The ES maps from
+  independent 16-member sets barely correlate with each other: 0.12, 0.01
+  and -0.02 on the uniform mesh, and 0.20 on the VR mesh. The maps are
+  noise-dominated at 3-5 km. By the rule above, gradient work stays at
+  9-15 km for P1-P4.
+- **FD noise floor.** On the WRF route, a `thp` blob gives a stable
+  derivative only for amplitudes of about 0.4 K and above; any smaller
+  perturbation moves `J` by ±1.5-4. A restart through the analysis
+  writer with scale 0 equals the untouched restart exactly. On hex, the
+  `--da-analysis` restart itself moves `J` by 0.2 (uniform) and 1.2 (VR),
+  so its scale-0 run is the reference.
+- **EFSO (WRF route).** A 24-member LETKF at 06 Z assimilated 729
+  observations (aircraft and synop) with 150 km / 2 km localisation.
+  Restarting from the analysis mean instead of the background mean
+  lowered `J` over 07-12 Z from 2,212.8 to 2,011.6 (-201).
+  - EFSO predicts -1,707 without localisation, -1,235 with 300 km and
+    -654 with 150 km. The sign is right and the magnitude is 3-8x too
+    large, the same over-statement ES shows. The ensemble is
+    under-dispersive (spread / sigma 0.35 at 06 Z).
+  - At 150 km, synop temperature (-378) and dewpoint (-183) carry most of
+    the benefit, with 90% of those observations beneficial, followed by
+    aircraft temperature (-57) and wind (-36).
+- **J_o against the scorecard: met in P0.1.** On hex at 5 km, the
+  station-wind and sonde RMSEs are identical pair for pair.
+- **Costs on pb (A6000, shared).**
+  - One WRF restart leg (3 to 12 h, 100x80x49): 45-68 s.
+  - One hex restart leg (1 to 6 h): 116 s uniform, 249 s VR.
+  - Scoring `J_o`: about 3 s (1.5 s on the Mac for one frame).
+  - `woof grad ens` on 48 members: a few seconds.
+  - LETKF with Y^a: 43 s with `--solve cuda`. The host solve had not
+    finished after 70 min.
+  - `woof grad efso`: under 1 s.
+  - FD of one direction at two scales is 4 restarts. ES with K members
+    is K restarts and then serves every direction.
+  - A Metal restart leg was not measured. The Mac had less than 2 GB of
+    free swap throughout, which the run rules forbid for a model run.
+
 ### P1. Tensor bridge and one differentiable column scheme (4.5-7 w)
 
 | PR | content | effort |

@@ -834,6 +834,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `woof grad ens`, `woof grad letkf` and `woof grad efso` give ensemble
   sensitivities and each observation's impact on the forecast cost
   (EFSO), using the LETKF's own weights ([docs/grad.md](docs/grad.md)).
+  On a regional case, the finite-difference and ensemble sensitivities
+  agree in sign and pattern on the WRF route at 9 km. On hex at 3-5 km
+  they are dominated by noise, so later gradient work stays at
+  9-15 km (plan, gate G0).
 - **A plan, not yet code, for variational data assimilation.**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
