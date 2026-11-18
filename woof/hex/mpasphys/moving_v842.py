@@ -841,6 +841,11 @@ class MovingRoute:
                                   dycore.chemistry.restart_state()),
                        waves=(None if getattr(session, 'wave_binding', None) is None else
                               session.wave_binding.service.snapshot()))
+        nn_seat = getattr(dycore, 'nn_seat', None)
+        if nn_seat is not None and nn_seat.identity() is not None:
+            # --nn (woof.nn.hex_seat): an applying seat's settings and artefact hashes; a resume checks them
+            # (hex_seat.check_carried).  Absent from every other carrier, whose words are unchanged.
+            payload['nn'] = nn_seat.identity()
         return payload, dict(
             physics_fields=len(rows), physics_words=int(sum(np.asarray(v).size for v in pools.values())),
             state={k: list(v.shape) for k, v in state.items()})

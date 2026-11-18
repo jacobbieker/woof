@@ -268,6 +268,123 @@ YSU, the revised MM5 surface layer and WSM6.
    The model call is timed per call, each read back before the next (the
    latency a step pays). The CUDA rows are two runs on a shared card.
 
+## The hex seat (MPAS route)
+
+`woof hex forecast --nn NN.toml` (and `woof hex regional
+--forecast-arg=--nn=/abs/NN.toml`) takes the same `[nn]` table on the MPAS
+suite route, the hex default. The seat is in
+`ResidentNativeCoupling.stage` (`woof/nn/hex_seat.py`): it acts on the
+step's held physics sources once they are assembled from
+`physics_get_tend`. That is after the regional padding and before SPPT/SKEB,
+IAU and analysis nudging add theirs. So the tap records the schemes' own
+sum, unperturbed. An applying model's rate is part of the physics source
+that SPPT then perturbs, as it would perturb a scheme's. IAU and nudging
+increments never reach the model.
+
+Only `scheme = "total"` is available. The held source is the sum of every
+non-microphysics scheme (PBL, surface layer, cumulus, radiation,
+gravity-wave drag), and the lagged microphysics heating is held apart and
+is not part of it. The source is held per unit dry mass, with `m = rho_zz`:
+
+- `scalars[q] = m dq/dt`
+- `rho_theta = m (c dtheta/dt + (Rv/Rd) theta dqv/dt)`, with
+  `c = 1 + (Rv/Rd) qv` and `theta = theta_m / c` the dry potential
+  temperature. This is MPAS's coupling into the modified potential
+  temperature `theta_m`, so `rho_theta / m` is `dtheta_m/dt`.
+
+The seat divides by `m` and inverts the theta conversion with the cell's
+own `theta_m` and `qv`. An increment is coupled back the same way:
+
+- `dtheta` is dry theta, in K s-1.
+- `dtheta_m` is modified theta, in K s-1. A model writes one of the two.
+- A `dq*` rate is in kg kg-1 s-1. A `dqv` increment also enters `theta_m`
+  through the vapour term, as the scheme's does.
+
+Momentum (`du`, `dv`) is refused, because the held momentum source is
+edge-normal and the seat has no cell-to-edge projection yet.
+
+The hex vocabulary has two kinds of input. The level-wise inputs, bottom-up,
+are:
+
+- `theta`, `theta_m`, `qv` ... `qg`;
+- `u`, `v` (the reconstructed cell winds);
+- `w` (the mean of the layer's two faces);
+- `p`, `exner`, `rho` (dry density, `zz rho_zz`);
+- `z` (layer centre above the ground), `dz`.
+
+The cell inputs are `hgt`, `hfx`, `qfx`, `lh`, `ust`, `znt`, `pblh`, `tsk`,
+`xland` and `psfc`. They are read from the MPAS physics pools.
+
+On a limited-area mesh the columns follow the boundary rings:
+
+- The tap draws only interior cells (`bdyMaskCell == 0`) and never the
+  padded garbage cell. The draw is keyed by the seed and the model time, so
+  a resumed run draws the same cells as the unbroken one.
+- An applying seat writes every cell outside the specified zone
+  (`bdyMaskCell < 6`, the cells nudging writes). The specified zone takes
+  the boundary tendencies and is left alone.
+
+What the seat refuses:
+
+- an applying mode under `--physics-mode exact` or `GPUWM_WRF_EXACT=1`;
+- `--members` rosters, `--samehost-devices`, `--hosts` and
+  `--fullstep-local-timestep`, at the door;
+- a moving region;
+- the WOOF-physics route (`--physics ...`, `--physics-suite
+  arwen_mpas_column`).
+
+On the WOOF-physics route, a column model belongs in a backend row instead
+(below).
+
+An applying run seals the settings and the artefact's hashes in the
+route's checkpoint carrier (`nn`). A resume checks them with
+`woof.nn.hex_seat.check_carried`, and refuses a different model, a model
+added to a checkpoint written without one, and the reverse. A native MPAS
+restart file that carries no route carrier (an exact-mode restart) holds no
+such identity, so the seat cannot check it. The model still screens the
+specified zone's columns, which it never writes, so
+`out_of_range = "refuse"` and the range counts see them too.
+
+`tests/test_nn_hex_seat.py` checks on the host:
+
+- that decoupling inverts MPAS's coupling;
+- the tap's columns and rates;
+- the residual, replace, positivity, fallback and refusal paths.
+
+`tests/test_nn_hex_gpu.py` (opt-in, `WOOF_HEX_VARRES_CASE`) runs short
+regional forecasts on a uniform and a variable-resolution mesh. It checks
+three things:
+
+- a tapped run is byte-identical to the plain run under fast and strict
+  numerics, with its columns interior;
+- a zero residual leaves every history variable unchanged;
+- a constant `dtheta` residual warms the levels it spans by about
+  rate x time.
+
+### A column model as a backend row
+
+`woof.nn.hex_backend.NNColumnBackend` is an example
+`woof.hex.physics_seam.PhysicsBackend`. It runs an inner backend on a
+`ColumnBatch` and adds (`residual`) or substitutes (`replace`) a column
+model's rates, under the same safety policy. It returns uncoupled rates,
+which the seam's `unpack_mpas_tendencies` couples to dry mass. The batch's
+winds are cell-centred, so `du`/`dv` are available there.
+`tests/test_nn_hex_backend.py` runs it CUDA-free on
+`DeterministicNumpyBackend`.
+
+The example is not registered in woof's own metadata, because the row
+lookup on every forecast would then import `woof.nn`. A third party ships
+a row from its own distribution:
+
+```toml
+[project.entry-points."woof.hex.rows"]
+my_nn_rows = "my_package.rows:rows"
+```
+
+Here `rows()` returns `PhysicsBackendRow` entries under new names (rows
+are never rebound), and the row's adapter module publishes
+`build_column_backend(row, **kw)`.
+
 ## Installing
 
 - CUDA: `pip install 'recast-woof[nn-torch]'`, with the CUDA build of

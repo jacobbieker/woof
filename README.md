@@ -860,7 +860,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `python -m woof.nn.train TAP OUT` trains a small MLP on a tap with NumPy
   alone, and `tools/nn_seat_cost.py` measures the seat's per-step cost; a
   worked 24 h, 9 km example (PBL emulator, CUDA and Metal) is in
-  [docs/nn-physics.md](docs/nn-physics.md).
+  [docs/nn-physics.md](docs/nn-physics.md). `woof hex forecast --nn`
+  puts the same seat on the hex MPAS route. It taps or adjusts the held
+  physics source (`scheme = "total"`, theta and moisture rates) before
+  SPPT, IAU and nudging. The tap uses interior cells only, an applying
+  model skips the specified zone, and the hex carrier binds the artefact.
+  `woof.nn.hex_backend` is an example `woof.hex.rows` backend that adds a
+  model to a column batch.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

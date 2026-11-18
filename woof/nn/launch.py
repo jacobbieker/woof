@@ -5,7 +5,9 @@ launch exports its resolved path as ``WOOF_NN_CONFIG`` for its duration,
 the way ``--wrf-hydro`` does (:mod:`woof.wrf_hydro_route`), so every
 process the launch starts (``woof go``'s forecast worker, ``woof run``)
 reads the same settings; the WRF route's single-domain integrator attaches
-the seat when the variable is set (:func:`woof.nn.wrf_seat.attach`).
+the seat when the variable is set (:func:`woof.nn.wrf_seat.attach`), and so
+does the hex MPAS route's runtime (:func:`woof.nn.hex_seat.attach`; ``woof
+hex forecast --nn``).
 Without ``--nn`` nothing here runs and nothing under :mod:`woof.nn` is
 imported by a forecast.
 
@@ -20,11 +22,14 @@ imported by a forecast.
                  refused under ``GPUWM_WRF_EXACT=1``.
 ``scheme``       whose tendencies: ``"pbl"``, ``"radiation"``, ``"cumulus"``
                  or ``"total"`` (every non-microphysics tendency the step
-                 holds, after SPPT/SKEBS).
-``inputs``       vocabulary names (:data:`woof.nn.wrf_seat.VOCABULARY`);
-                 default per scheme.
+                 holds, after SPPT/SKEBS on the WRF route; before them on
+                 hex, where ``"total"`` is the only scheme).
+``inputs``       vocabulary names (:data:`woof.nn.wrf_seat.VOCABULARY`,
+                 :data:`woof.nn.hex_seat.VOCABULARY` on hex); default per
+                 scheme.
 ``outputs``      ``dtheta``, ``dqv``, ``dqc``, ``dqr``, ``dqi``, ``dqs``,
-                 ``du``, ``dv``; default per scheme.
+                 ``du``, ``dv``; default per scheme (hex: ``dtheta`` or
+                 ``dtheta_m`` and moisture, no momentum).
 ``levels``       keep the lowest ``levels`` model levels of every 3-D field
                  (default: all).
 ``tap``          the store to write (a directory; ``*.icechunk`` makes an
@@ -258,8 +263,13 @@ def registry_rows() -> dict:
     from woof.nn.safety import FIXERS, OUT_OF_RANGE
 
     common = {"implemented": True, "maturity": "experimental-runtime", "scientific_evidence": "none",
-              "launch": "--nn NN.toml ([nn] table; docs/nn-physics.md)", "routes": ["wrf"],
-              "schemes": list(SCHEMES), "consumer": "woof.nn.wrf_seat.WrfColumnSeat"}
+              "launch": "--nn NN.toml ([nn] table; docs/nn-physics.md)", "routes": ["wrf", "hex"],
+              "schemes": list(SCHEMES), "consumer": "woof.nn.wrf_seat.WrfColumnSeat",
+              "hex": {"consumer": "woof.nn.hex_seat.HexColumnSeat", "route": "MPAS suite (hex default physics)",
+                      "seat": "held physics sources after physics_get_tend, before SPPT/SKEB, IAU and nudging",
+                      "schemes": ["total"], "outputs": "dtheta or dtheta_m and moisture rates; no momentum",
+                      "refused": ["physics mode exact (applying modes)", "same-host partition", "LTS",
+                                  "moving region", "ensemble", "WOOF-physics route"]}}
     return {
         "tap": {**common, "wrf_identical": True,
                 "behavior": "records a scheme's column inputs and decoupled tendencies to Zarr or "
@@ -272,8 +282,9 @@ def registry_rows() -> dict:
                   "backends": ["torch (CUDA)", "mlx (Metal)", "numpy"],
                   "safety": {"out_of_range": list(OUT_OF_RANGE), "fixer": list(FIXERS),
                              "limit_outputs": True, "positivity": True},
-                  "refused_under": "GPUWM_WRF_EXACT=1",
-                  "restart": "checkpoint header binds the artefact hashes and the settings"}
+                  "refused_under": "GPUWM_WRF_EXACT=1 (hex: also physics mode exact)",
+                  "restart": "checkpoint header (WRF) or route carrier (hex) binds the artefact hashes and "
+                             "the settings"}
            for mode in APPLYING},
     }
 
