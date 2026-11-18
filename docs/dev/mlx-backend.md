@@ -92,6 +92,22 @@ same bytes in either mode; what differs is how its operations compute.
   `loader.SOFT_F64_UNITS` (empty); `WOOF_METAL_F64=soft` keeps soft-float
   everywhere, for diagnosis.
 
+  woof's glibc binary32 ports `gfk_log`, `gfk_exp` and `gfk_pow`
+  (`glibc_flt32.cuh`) compute in binary64, so on Metal each call costs a
+  handful of soft-float operations. In both modes the translator renames
+  each body to `*_soft` and puts a wrapper in front of it. The wrapper
+  calls `woof/backend/metal/gfk_fast.h`, which evaluates the same formula
+  and tables in float pairs (about 2^-46 relative). It returns that word
+  only when no binary32 rounding midpoint lies within the pair's error
+  bound, so the word is the one the binary64 body would give. Anything
+  else (special operands, subnormal results, near-ties) goes to `*_soft`.
+  `tools/metal_gfk_fast_grade.py` checks every binary32 input of logf and
+  expf, every positive normal base of powf at 20 exponents, and 2^30
+  random powf pairs, with and without FTZ: none differ. The constants
+  come from `tools/metal_gfk_fast_constants.py`, and
+  `tests/test_metal_gfk_fast.py` checks they match. `WOOF_METAL_GFK_FAST=0`
+  turns the wrappers off.
+
 **Accuracy.** `tools/df64_grade.py host` (x86-64, x87 `long double`
 references, 4 million operands per function over random words, each
 function's domain and the special values) gives the largest error in
