@@ -11113,6 +11113,10 @@ def run_prepared_forecast(
         "health_check": getattr(model, "_health_check_policy", None),
         "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
         "health_readback": _health_readback_receipt(),
+        # --nn (woof.nn): what the column seat did -- a tap's record, or an
+        # applying seat's model, out-of-range counts and its
+        # not-WRF-identical flag.  None without --nn.
+        "nn_column_seat": getattr(model, "_nn_column_receipt", None),
         "history_writes": getattr(model, "_history_writes_receipt", None),
         "source": inputs.source,
         "prepared_layout": inputs.layout,

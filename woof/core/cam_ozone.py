@@ -205,8 +205,8 @@ def attach_cam_ozone(state, cfg, owner):
         driver.o3rad = cp.zeros(state.p.shape, dtype=cp.float32)
     driver.call_counts.setdefault("cam_ozone", 0)
     if owner.mode == ROUTING_PARENT_INTERPOLATED:
-        from woof.core.radiation_composition import legacy_radiation_adapter
-        legacy = legacy_radiation_adapter(driver.radiation_callable)
+        from woof.core.radiation_composition import retained_ozone_adapter
+        legacy = retained_ozone_adapter(driver.radiation_callable)
         if legacy is not None and legacy.o3input == 2:
             legacy._ozone_provider = DriverOzoneProvider()
     return driver
@@ -219,8 +219,11 @@ def cam_ozone_setup(*, exp, dc, grid):
     cfg = dc.run
     from woof.config import radiation_scheme_ids
     from woof.physics_compat import RRTMG_VARIANT_LEGACY, rrtmg_variant
-    legacy_root = (4 in radiation_scheme_ids(cfg)
-                   and rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY
+    # RRTMG-K (14/14) retains its o33d like legacy RRTMG, so its root
+    # feeds the carrier the same way instead of evaluating CAM twice.
+    ids = radiation_scheme_ids(cfg)
+    legacy_root = (((4 in ids and rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY)
+                    or 14 in ids)
                    and cfg.o3input == 2)
     mode = (ROUTING_PARENT_INTERPOLATED if dc.parent_id else
             "legacy-root" if legacy_root else ROUTING_ROOT_CLIMATOLOGY)

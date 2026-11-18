@@ -90,7 +90,9 @@ Without the keys nothing runs and the receipt is unchanged.
 
 WOOF-only CLM lake (`woof.hex.mpasphys.clm_lake_v842`; MPAS v8.4.2 has no lake model and
 folds the MODIS lake class to water). `config_clm_lake_backend='hex-cuda'` in `&hex_mpasphys`
-(or `--physics config_clm_lake_backend=hex-cuda`; service `clm_lake`, default `off`) runs WRF's
+(or `--physics config_clm_lake_backend=hex-cuda`; service `clm_lake`, default `off`; a service
+backend selector names no physics, so the run keeps the default MPAS suite and profile,
+`woof.hex.physics_default.service_backend_keys`) runs WRF's
 `sf_lake_physics = 1` (`phys/module_sf_lake.F` v4.7.1 through `woof.core.lake`, no copy of the
 lake physics) on the LAKEMASK cells of the mesh's surface statics (`<mesh>.surface_statics.nc`,
 `woof hex surface-statics`, read by `woof.hex.surface_inputs.bind` with LAKE_DEPTH and WRF's
@@ -113,9 +115,13 @@ inputs formed independently in the test (`components/hex/tests/test_mpas_clm_lak
 Metal). Refused with it on: `config_sst_update` and `config_sstdiurn_update` (they rewrite the lake
 skin and ice; WRF's own lake hand-back on an SST update is not carried), OML1D or `--ocean-mode
 pwp`, `config_pbl_interval`, no land surface, native-file restarts, checkpoints and moving
-regions, same-host ranks, LTS and DA cycling (the lake columns have no carrier yet). The lake
-initial-state sources (`lake_state_source`) are not bound on this route. Without the key nothing
-runs and the receipt is unchanged.
+regions, a correct-mode deck whose streams write a native restart (correct mode seals a checkpoint
+continuation beside each restart file), same-host ranks, LTS and DA cycling (the lake columns have
+no carrier yet); the refusal names the flag or stream that asked for the route. The lake
+initial-state sources (`lake_state_source`) are not bound on this route. With the key on, the
+receipt's `clm_lake` block names the sidecar and `clm_lake_service` the lake columns and the steps
+they ran. Without the key nothing runs; the only receipt difference is that `service_backends`,
+written only when some service leaves its default, lists `clm_lake: off` beside the others.
 
 WOOF-only WRF-Solar EPS (`woof.hex.mpasphys.wrfsolar_eps_v842`; MPAS v8.4.2 perturbs
 no physics input). The WOOF group `&wrfsolar_eps` carries WRF's `&stoch` multi_perturb

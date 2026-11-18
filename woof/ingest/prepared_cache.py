@@ -1065,6 +1065,17 @@ PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
     # initialization and boundary preparation never read these controls.
     # Runtime overrides retain the original config bytes and record changes.
     "run.wind_farm_scheme", "run.wind_farm_table", "run.wind_farm_max_dx_m", "run.wind_farms", "run.windfarm_tke_factor", "run.windfarm_ij",
+    # The resolved obstacles (woof.core.obstacles), on the turbines' terms:
+    # the dycore attaches the buildings product when the forecast starts,
+    # and nothing under woof/ingest reads it, so one prepared bundle serves
+    # a run with buildings and one without.  The HRRR route prepares from a
+    # namelist pair that cannot spell them, so binding them here refused
+    # every HRRR-route nest with buildings ("these identity fields differ:
+    # run.obstacle_file, run.obstacle_opt").  The restart identity still
+    # binds the product's digest (woof/io/restart.py).
+    "run.obstacle_opt", "run.obstacle_file", "run.obstacle_solid_fraction",
+    "run.obstacle_relax_factor", "run.obstacle_drag_coefficient",
+    "run.obstacle_wall_z0",
     # The per-run smoke-off sentence (woof/smoke_execution.py): launch
     # metadata for the receipts; chem_sets carries the physics it
     # describes, so one prepared bundle serves either value.  It rides the

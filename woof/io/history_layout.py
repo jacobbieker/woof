@@ -797,6 +797,15 @@ def physics_history_fields(physics) -> dict[str, object]:
     wind_farm = getattr(physics, "wind_farm", None)
     if wind_farm is not None:
         output.update(wind_farm.history_fields())
+    # spacewx_ionosphere_opt (woof.spacewx.history): the climatological
+    # ionosphere's TEC and layer parameters at the frame's valid time.
+    ionosphere = getattr(physics, "spacewx_ionosphere", None)
+    if ionosphere is not None:
+        output.update(ionosphere.history_fields(physics.state.elapsed_seconds))
+    # spacewx_aurora_opt (woof.spacewx.aurora_history): the auroral oval.
+    aurora = getattr(physics, "spacewx_aurora", None)
+    if aurora is not None:
+        output.update(aurora.history_fields(physics.state.elapsed_seconds))
     cumulus = getattr(physics, "cumulus_callable", None)
     diagnostics = getattr(cumulus, "cu_diag", {})
     for key, schema in GD_OUTPUT_FIELDS.items():
@@ -1135,6 +1144,7 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
     state._scratch.update({slot: carrier(shape) for slot, shape in
                           (output_shapes(cfg) | hail_shapes(cfg) | avgflx_shapes(cfg)).items()})
     state.p_top = 0.0
+    state.elapsed_seconds = 0.0
     state.physics = None
     uh = carrier(surface) if int(cfg.nwp_diagnostics) == 1 or cfg.gsd_diagnostics else None
     state.existing_scratch = lambda name: uh if name == "up_heli_max" else state._scratch.get(name)
@@ -1164,6 +1174,19 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
             wind_farm=(SimpleNamespace(
                 history_fields=lambda: {"POWER": carrier(surface)})
                 if getattr(cfg, "wind_farm_scheme", "off") == "fitch_wrf"
+                else None),
+            # spacewx_ionosphere_opt writes its rows through the same seam.
+            spacewx_ionosphere=(SimpleNamespace(
+                history_fields=lambda _elapsed: {
+                    name: carrier(shape) for name, shape in
+                    __import__("woof.spacewx.history", fromlist=["x"]).history_shapes(cfg).items()})
+                if int(getattr(cfg, "spacewx_ionosphere_opt", 0) or 0)
+                else None),
+            spacewx_aurora=(SimpleNamespace(
+                history_fields=lambda _elapsed: {
+                    name: carrier(surface) for name in
+                    __import__("woof.spacewx.aurora_history", fromlist=["x"]).HISTORY_FIELDS})
+                if int(getattr(cfg, "spacewx_aurora_opt", 0) or 0)
                 else None),
             olr=carrier(surface) if "olr" in allocated else None,
             surface_dni=(carrier(surface) if "surface_dni" in allocated

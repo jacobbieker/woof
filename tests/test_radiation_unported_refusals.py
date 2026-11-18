@@ -31,12 +31,13 @@ def test_every_wrf_value_is_run_or_refused_with_a_reason(key, values, accepted):
     assert set(config_mod.RA_UNPORTED_REASONS[key]) == set(values) - set(accepted)
 
 
-# Fu-Liou-Gu (7), Held-Suarez (31), GFDL (99), old Goddard SW (2) and CAM SW
-# (3) are ported now; RRTMG-K (14) and fast RRTMG (24) are the WRF values
-# still refused, on either stream.
+# Fu-Liou-Gu (7), Held-Suarez (31), GFDL (99), old Goddard SW (2), CAM SW
+# (3) and RRTMG-K (14, as the 14/14 pair) are ported now; fast RRTMG (24) is
+# the WRF value still refused, on either stream, and RRTMG-K refuses any
+# split pair because WRF computes both spectra in its longwave call.
 @pytest.mark.parametrize("lw,sw,needle", [
-    (24, 4, "fast RRTMG longwave"), (14, 4, "RRTMG-K longwave"),
-    (4, 24, "fast RRTMG shortwave"), (4, 14, "RRTMG-K shortwave"),
+    (24, 4, "fast RRTMG longwave"), (14, 4, "only as the pair"),
+    (4, 24, "fast RRTMG shortwave"), (4, 14, "only as the pair"),
 ])
 def test_the_importer_names_the_reason(tmp_path, lw, sw, needle):
     # mp 8 (Thompson): the fixture's mp 55 is refused by its own name on
@@ -67,3 +68,37 @@ def test_aer_opt_1_selects_the_legacy_rrtmg_spectrum_like_2_and_3():
     for value in (1, 2, 3):
         inp = {"physics": {"aer_opt": [value], "bl_pbl_physics": [1]}}
         assert _default_rrtmg_variant_for_namelist(inp) == RRTMG_VARIANT_LEGACY
+
+
+def test_rrtmgk_pair_imports_and_refuses_what_it_does_not_port():
+    """14/14 is admitted; what rad_rrtmg_driver is not ported for refuses
+    by name (rrtmg_spectral_output, aer_opt, ghg_input, icloud, no snow)."""
+    config_mod.validate_run_config(_cfg(moist=True, mp_physics=8,
+                                        ra_lw_physics=14, ra_sw_physics=14))
+    for kw, needle in (
+            ({"rrtmg_spectral_output": "bands"}, "rrtmg_spectral_output"),
+            ({"aer_opt": 1}, "aer_opt=1"),
+            ({"ghg_input": 1}, "ghg_input=1"),
+            ({"icloud": 2}, "icloud=2"),
+            ({"mp_physics": 1}, "carries QS"),
+            ({"ra_sw_physics": 4}, "only as the pair")):
+        cfg = dict(moist=True, mp_physics=8, ra_lw_physics=14,
+                   ra_sw_physics=14)
+        cfg.update(kw)
+        with pytest.raises(ValueError, match=needle):
+            config_mod.validate_run_config(_cfg(**cfg))
+
+
+def test_the_importer_maps_rrtmgk(tmp_path):
+    """A WRF 14/14 namelist imports as itself, with no radiation substitution."""
+    from woof.experiment import load_experiment
+    inp = (INPUT_TEXT.replace("mp_physics = 55, 55", "mp_physics = 8, 8")
+           .replace("ra_lw_physics = 4, 4", "ra_lw_physics = 14, 14")
+           .replace("ra_sw_physics = 4, 4", "ra_sw_physics = 14, 14"))
+    toml_text, report = import_namelists(*_pair(tmp_path, inp=inp), name="rrtmgk")
+    output = tmp_path / "rrtmgk.toml"
+    output.write_text(toml_text)
+    for dc in load_experiment(output).domains:
+        assert (dc.run.ra_lw_physics, dc.run.ra_sw_physics) == (14, 14)
+    assert all("ra_" not in substitution.key
+               for substitution in report.substitutions)
