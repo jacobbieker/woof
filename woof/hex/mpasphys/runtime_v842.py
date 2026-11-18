@@ -23,6 +23,11 @@ from .driver_v842 import interval_seconds
 from .native_backend import NativePhysics
 from .pool_v842 import NativePoolHydration
 from .session_v842 import NativePhysicsSession, native_working_directory
+from woof.core.adaptive_clock import env_flag
+
+#: WOOF_HEX_POOL_DIRECT=1 (opt-in): producers that write every element of a resident pool field write
+#: it in place instead of into a private buffer that write_field then copies.
+_POOL_DIRECT = env_flag('WOOF_HEX_POOL_DIRECT')
 
 
 def commit_outer_scalar_groups(session, atmosphere, cp):
@@ -470,8 +475,14 @@ class ResidentNativeCoupling:
             raise RuntimeError('native post-transport callback was not bound to the current CUDA step')
         state,saved,outer,rate=self.transport
         rth=self.cp.zeros_like(state.rho) if rate is None else rate
-        rqv=self.cp.empty_like(state.rho)
         convection=self.session.config.selectors['convection']
+        # GF/NTiedtke write every rqvdynten word (mpas_transport_handoff_v842_f32) and publish it below: the
+        # resident pool field can take the words directly (the put of that same array is then a no-op).
+        rqv_put = (convection in ('cu_grell_freitas','cu_ntiedtke')
+                   and ('tend_physics','rqvdynten') in self.session.native._fields)
+        rqv=self._pool_target('tend_physics','rqvdynten',state.rho) if rqv_put else None
+        if rqv is None:
+            rqv=self.cp.empty_like(state.rho)
         if convection in ('cu_grell_freitas','cu_ntiedtke') and rate is None:
             raise RuntimeError('native convection needs the final RK modified-theta rate')
         before=outer.scalars
@@ -481,10 +492,13 @@ class ResidentNativeCoupling:
             # Native F:5208 modifies scalars_1 before F:2783 computes rqvdynten.
             # Subtracting the untouched outer state folds physical vapor sources
             # into the resolved-advection rate and then convection sees them twice.
+            # scalars_1 takes the baseline: written straight into the resident pool when the copy would be whole
+            # (not with chemistry, whose extra rows change the shape); the put is then a no-op.
             before=prepare_mpas_transport_source_baseline_v842(before=before,
                 source=self.sources.scalars,rho_old=outer.rho,
                 dt=self.dycore.config.config_dt,n_cells_solve=self.solve_cells(),
-                kernel_cache=self.physics_cache)
+                kernel_cache=self.physics_cache,
+                out=self._pool_target('state','scalars',before,level=1))
             self.session.put('state','scalars',self._registry_rows(before),level=1)
         prepare_mpas_post_transport_v842(before=self._registry_rows(before),after=self._registry_rows(state.scalars),
             theta_m=saved.theta_m,scalar_names=self.names,rqvdynten=rqv,rthdynten=rth,
@@ -509,10 +523,19 @@ class ResidentNativeCoupling:
             resident_transport(self, candidate)
         # mpas_atm_time_integration.F:2768-2802 updates this field only for
         # GF/NTiedtke. Original Tiedtke allocates it but leaves it untouched.
-        if (convection in ('cu_grell_freitas','cu_ntiedtke')
-                and ('tend_physics','rqvdynten') in self.session.native._fields):
+        if rqv_put:
             self.session.put('tend_physics','rqvdynten',rqv)
         self.session.put('tend_physics','rthdynten',rth)
+
+    def _pool_target(self, pool, name, like, *, level=1):
+        """The resident pool allocation a whole-array put of ``like`` would copy into, or None
+        (WOOF_HEX_POOL_DIRECT unset/0 -- opt-in -- no resident pools, or another extent)."""
+        if not _POOL_DIRECT:
+            return None
+        views = getattr(self.session, 'device_pools', None)
+        if views is None or not getattr(views, 'resident', False):
+            return None
+        return views.resident_target(pool, name, like, level=level)
 
 
 class SuiteIau:
