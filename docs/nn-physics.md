@@ -266,7 +266,11 @@ On the WOOF-physics route, a column model belongs in a backend row instead
 An applying run seals the settings and the artefact's hashes in the
 route's checkpoint carrier (`nn`). A resume checks them with
 `woof.nn.hex_seat.check_carried`, and refuses a different model, a model
-added to a checkpoint written without one, and the reverse.
+added to a checkpoint written without one, and the reverse. A native MPAS
+restart file that carries no route carrier (an exact-mode restart) holds no
+such identity, so the seat cannot check it. The model still screens the
+specified zone's columns, which it never writes, so
+`out_of_range = "refuse"` and the range counts see them too.
 
 `tests/test_nn_hex_seat.py` checks on the host:
 

@@ -81,6 +81,7 @@ def _run(name: str, tag: str, scratch: Path, *, nn: Path | None = None, numerics
     case = vr.case_row(name, data)
     source = Path(ROOT) / name
     work = scratch / f"{name}-{tag}-{numerics}"
+    shutil.rmtree(work, ignore_errors=True)
     shutil.copytree(source, work, ignore=shutil.ignore_patterns("forecast", "products", "grib", "met"))
     for path in work.rglob("*.json"):
         text = path.read_text(encoding="utf-8")
