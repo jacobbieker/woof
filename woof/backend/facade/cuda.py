@@ -3,12 +3,15 @@
 An Apple-silicon Mac has one GPU and unified memory.  ``Device(0)`` is it;
 any other ordinal is refused by name.  Streams map to MLX streams on the GPU
 device; ``synchronize`` evaluates every pending value (MLX is lazy, so
-"finished" means "evaluated").  Events record wall time at the point the
-stream has drained, which is what woof's timing code reads them for.
+"finished" means "evaluated").  A timed event records wall time at the point
+the stream has drained, which is what woof's timing code reads them for; an
+untimed event (``disable_timing=True``) only marks a point for its waits.
 """
 
 from __future__ import annotations
 
+import functools
+import os
 import threading
 import time
 import types
@@ -158,7 +161,10 @@ class Stream:
         _drain()
 
     def wait_event(self, event):
-        return None
+        # one thread's MLX stream is ordered; another thread's untimed point
+        # is waited for here (a timed record has already drained)
+        if getattr(event, "_thread", None) not in (None, threading.get_ident()):
+            event._wait()
 
     def record(self, event=None):
         event = event or Event()
@@ -197,23 +203,66 @@ def get_current_stream(device_id=None):
     return getattr(_STREAMS, "current", None) or Stream.null
 
 
+@functools.lru_cache(maxsize=1)
+def _lazy_events() -> bool:
+    """``WOOF_METAL_LAZY_EVENTS=0`` makes an untimed event's record drain the queue again (A/B)."""
+    return os.environ.get("WOOF_METAL_LAZY_EVENTS", "1") != "0"
+
+
 class Event:
     def __init__(self, block=False, disable_timing=False, interprocess=False):
         self.t = None
         self.ptr = id(self)
+        # An untimed event marks a point that only its own waits read, so
+        # recording it need not drain the queue (WOOF_METAL_LAZY_EVENTS=0
+        # restores the drain).  The record queues a one-byte marker behind
+        # everything this thread has queued, and a wait evaluates the marker:
+        # the point CUDA's event waits for, from any thread (a drain reaches
+        # only the waiting thread's own MLX stream).
+        self._lazy = bool(disable_timing) and _lazy_events()
+        self._marker = None
+        self._thread = None
 
     def record(self, stream=None):
         from woof.backend.facade import _capture
         if _capture.record_event(self):
             return
+        if self._lazy:
+            from woof.backend.facade._array import flush_pending
+            if _capture.recording() is not None:
+                _capture.refuse("a synchronize")
+            mx = _mx()
+            flush_pending()
+            marker = mx.zeros((1,), dtype=mx.uint8)
+            mx.async_eval(marker)
+            self._marker, self._thread = marker, threading.get_ident()
+            return
         _drain()
         self.t = time.perf_counter()
 
+    def _wait(self):
+        # Every waiter evaluates the marker (several threads may wait on one
+        # event; an evaluated array returns at once), and it is dropped only
+        # after the wait succeeded.  The marker is queued after the recorded
+        # work on the recording thread's stream, and that stream completes in
+        # order: the guarantee mx.synchronize(stream) itself rests on.
+        marker = self._marker
+        if marker is not None:
+            _mx().eval(marker)
+            self._marker = None
+
     def synchronize(self):
+        if self._lazy:
+            from woof.backend.facade import _capture
+            if _capture.recording() is not None:
+                _capture.refuse("a synchronize")
+            self._wait()
+            return
         _drain()
 
     @property
     def done(self):
+        self._wait()
         return True
 
 
@@ -329,6 +378,15 @@ def _bytes_view(ptr, nbytes):
     return ndarray((int(nbytes),), np.uint8, _storage=st, _offset=offset)
 
 
+def _land_host_block(view):
+    """A write into a hostAlloc block is complete when the call returns, as a
+    cudaMemcpy into page-locked memory is: the host reads the block in place
+    (its NumPy view) with no facade read to evaluate it first."""
+    root = view._st.buffer_root()
+    if any(st.buffer_root() is root for _host, st in _HOST_BLOCKS.values()):
+        _mx().eval(view._st.arr)
+
+
 def _memcpy(dst, src, size, kind=4):
     """cudaMemcpy over raw addresses: a device side is a facade storage's GPU
     address (``a.data.ptr``), a host side any process address.  Memory is
@@ -344,6 +402,7 @@ def _memcpy(dst, src, size, kind=4):
     target = _bytes_view(dst, size)
     if target is not None:
         target.set(data)
+        _land_host_block(target)
     else:
         ctypes.memmove(int(dst), data.ctypes.data, size)
 
@@ -365,6 +424,7 @@ def _write_bytes(ptr, data):
     view = _bytes_view(ptr, data.size)
     if view is not None:
         view.set(data)
+        _land_host_block(view)
     else:
         ctypes.memmove(int(ptr), data.ctypes.data, data.size)
 
@@ -415,6 +475,7 @@ def _memset(ptr, value, size):
         ctypes.memset(int(ptr), int(value), int(size))
     else:
         view.fill(np.uint8(int(value) & 0xFF))
+        _land_host_block(view)
 
 
 #: cudaDeviceAttr's numbers for the attributes _attributes answers.

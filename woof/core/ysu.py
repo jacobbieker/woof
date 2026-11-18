@@ -29,6 +29,7 @@ from woof.core.kernels import get_kernel, get_kernel_int_defines
 # beside the constants there.
 from woof.core.physics_inventory import (YSUWS_SLOTS, YSU_BLOCK,
                                           YSU_TILE_BLOCKS_PER_SM,
+                                          ysu_metal_tile_columns,
                                           ysu_workspace_floats)
 from woof.core.state import DTYPE
 from woof.ysu_generations import YSU_DEFAULT_GENERATION, ysu_generation, ysu_kernel_selection
@@ -42,17 +43,25 @@ _VALIDATE_TPB = 256
 _KMAX = 256
 
 
-def ysu_tile_columns(fn, ncol: int) -> int:
-    """Columns to keep in flight: enough to fill the card, and no more.
+def ysu_tile_columns(fn, ncol: int, nz: int | None = None) -> int:
+    """Columns to keep in flight: on CUDA enough to fill the card, and no
+    more.
 
     The whole point of the workspace is that it is charged per thread IN
     FLIGHT where the local-memory backing store was charged per thread the
     card could ever hold.  Over-sizing the tile hands that ratio back.
+    On Metal there is no such store and the cores hold more columns than
+    CUDA's rule launches, so the tile is
+    :func:`woof.core.physics_inventory.ysu_metal_tile_columns` (64 blocks
+    per core, under a byte cap at this ``nz``).
     """
     import cupy as cp
 
     dev = cp.cuda.Device()
     sms = dev.attributes["MultiProcessorCount"]
+    from woof import backend
+    if backend.active() == "mlx":
+        return ysu_metal_tile_columns(sms, ncol, nz)
     per_sm = YSU_TILE_BLOCKS_PER_SM
     try:
         from cupy_backends.cuda.api import driver
@@ -246,7 +255,7 @@ def launch_ysu(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
     # OFFSET rather than as a slice, because the (nz, ny, nx) fields make a
     # column tile non-contiguous, so the kernel indexes them exactly as
     # before.
-    tile = ysu_tile_columns(kernel, ncol)
+    tile = ysu_tile_columns(kernel, ncol, nz)
     wskp = nz + 1
     ws = cp.empty(ysu_workspace_floats(nz, tile), dtype=DTYPE)
     try:

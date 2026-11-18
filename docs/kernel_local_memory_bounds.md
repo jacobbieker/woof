@@ -479,7 +479,9 @@ Measured at 102,400 columns, `nz = 49`, block 32:
 
 The kernel's hardware occupancy at block 32 is **16 blocks/SM**, so 16 is
 both the plateau and the point where the tile exactly fills the card;
-`ysu_tile_columns` queries occupancy and only ever lowers it. Rows past 16
+`ysu_tile_columns` queries occupancy and only ever lowers it on CUDA (Metal
+launches 64 blocks per core under a 512 MiB workspace cap,
+`physics_inventory.ysu_metal_tile_columns`). Rows past 16
 buy nothing (they cannot be resident) and cost workspace linearly.
 
 ### The floor: what a bare default run actually gains, and why

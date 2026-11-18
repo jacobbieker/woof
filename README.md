@@ -481,7 +481,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   OSM; GeoJSON or GeoParquet) into per-cell building statistics on the model
   grid. These are plan and frontal area indices, a height histogram, and
   WRF's NUDAPT `URB_PARAM` block. Each source's licence and attribution
-  travel with the file. Footprints are read from a local file, not
+  travel with the file. `woof buildings` builds the product for one
+  domain of a WPS namelist. Footprints are read from a local file, not
   downloaded, and the urban schemes do not read `URB_PARAM` yet
   ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
 - **Resolved buildings in LES (`obstacle_opt = 1`, opt-in).** On a domain
@@ -492,7 +493,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   momentum tendencies. A street-canyon benchmark gives the H/W = 1 vortex,
   and a cube benchmark gives the wake and horseshoe. Off, or with no
   buildings, nothing launches and runs are bit-identical. Momentum only,
-  regional grid only.
+  regional grid only. A real-data check over Manhattan places the model's
+  buildings at their footprint heights (r = 0.99 at 25 m). In lower and
+  midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
+  50 m does not open the streets.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
@@ -610,7 +614,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   lanes instead of one thread per column of the domain
   (`advance_frame_phi_w_ring`, byte-identical in fast and strict
   numerics): 108 -> 25 us per substep at 49x150x186 and 116 -> 33 us at a
-  nested 49x228x276 on an A6000 under the same conditions. Hex: CUDA
+  nested 49x228x276 on an A6000 under the same conditions. On Metal the
+  YSU boundary layer launches 64 column blocks per GPU core per tile
+  (workspace capped at 512 MiB), so on a 40-core M3 Max a 228 x 276
+  domain is one launch instead of four (byte-identical in fast,
+  strict and WRF-exact numerics; Alps 3-1 km on an M3 Max: `ysu_column`
+  46 -> 32 ms of isolated GPU time per d01 step, 10 -> 3 launches;
+  `WOOF_METAL_YSU_TILE_BLOCKS=16` restores CUDA's width, and CUDA keeps
+  its occupancy-bounded 16 per SM). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
@@ -732,7 +743,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   up with its vmr, takes its own vmr-interpolated bracket). The blocks write straight into
   the solver's arrays, and the AFGL splice is written in place. The words
   are unchanged: 30,000 columns x 8 wavelengths take 15 s instead of 23 s
-  on the A6000 host.
+  on the A6000 host. Night columns are dropped before the AFGL splice,
+  cloud and aerosol preparation, not only before the solve, and every day
+  column keeps the AFGL levels of the whole set (the same words). That
+  saves about 0.35 s of a 4.1 s call at 100,000 columns with 30 % in
+  daylight (M3 Max).
   The RRTMG band and g-point output (`rrtmg_spectral_output = "bands"` or
   `"gpoints"`) keeps only the surface and top levels it publishes, with the
   same words: a 12,000-column shortwave call with g-points fell from about
@@ -788,7 +803,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
   has a correlation of 0.90 on 1-3 May 2024 and 0.81 during the 10-12 May
   storm, and it reads about 25 % low at this solar maximum
-  (`tools/spacewx_gim_validate.py`). `spacewx_ionosphere_opt = 1` writes the
+  (`tools/spacewx_gim_validate.py`). `--storm` adds a storm-time foF2
+  correction, woof's own fit of filtered ap on CODE GNSS maps (2015-2023).
+  In the 2024 storms it raises the pattern correlation with GNSS TEC, and
+  it lowers the storm-hour foF2 RMSE at 12 ionosondes from 2.46 to 2.14 MHz.
+  It overshoots the May 2024 negative phase.
+  `spacewx_ionosphere_opt = 1` writes the
   same ionosphere into every WRF-route history frame (`IONO_TEC`,
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
   forecast; hex and streamed domains refuse it for now. `woof spacewx aurora`
@@ -809,8 +829,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   integral proton flux (OMNI2 or SWPC real time) into polar-cap ion-pair rates
   and NOx/HOx production during solar proton events (Bethe stopping in air,
   35 eV per ion pair). Against the CMIP7 rates, the ratio is 0.4-1.0 at 0.1-100
-  hPa. The storm-time layer and the chemistry source are planned
-  ([docs/spacewx.md](docs/spacewx.md)).
+  hPa. The chemistry source is planned ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
   studies gradients of a forecast's fit to observations and opt-in
@@ -860,7 +879,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `python -m woof.nn.train TAP OUT` trains a small MLP on a tap with NumPy
   alone, and `tools/nn_seat_cost.py` measures the seat's per-step cost; a
   worked 24 h, 9 km example (PBL emulator, CUDA and Metal) is in
-  [docs/nn-physics.md](docs/nn-physics.md).
+  [docs/nn-physics.md](docs/nn-physics.md). `woof hex forecast --nn`
+  puts the same seat on the hex MPAS route. It taps or adjusts the held
+  physics source (`scheme = "total"`, theta and moisture rates) before
+  SPPT, IAU and nudging. The tap uses interior cells only, an applying
+  model skips the specified zone, and the hex carrier binds the artefact.
+  `woof.nn.hex_backend` is an example `woof.hex.rows` backend that adds a
+  model to a column batch.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

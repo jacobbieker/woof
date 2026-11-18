@@ -47,10 +47,22 @@ def ionosphere_main(args) -> int:
 
     start = _utc(args.time)
     times = [start + timedelta(hours=i * args.step_hours) for i in range(max(1, args.count))]
+    if args.storm and args.f107 is not None:
+        raise SystemExit("woof spacewx ionosphere: --storm reads ap from the index record; "
+                         "drop --f107 (use --indices)")
+    if args.storm_fit and not args.storm:
+        raise SystemExit("woof spacewx ionosphere: --storm-fit chooses the fit of --storm; add --storm")
     if args.f107 is not None:
         f107_source, record = f"fixed {args.f107}", None
     else:
-        record = indices.load(args.indices, needed=times[-1] - timedelta(days=1))
+        # F10.7 is read through the day before the last time. The storm driver
+        # reads ap through the last 3-hour interval that has ended by then, which
+        # GFZ adds during the day, so a same-day cache without it is fetched again.
+        if args.storm:
+            from woof.spacewx.storm import last_ended_interval
+            record = indices.load(args.indices, needed=last_ended_interval(times[-1]), kp=True)
+        else:
+            record = indices.load(args.indices, needed=times[-1] - timedelta(days=1))
         f107_source = f"{record.source} sha256:{record.sha256}"
     lat, lon = grid(args.dlat, args.dlon)
     lat2, lon2 = np.meshgrid(lat, lon, indexing="ij")
@@ -59,20 +71,40 @@ def ionosphere_main(args) -> int:
                           alt_lo=args.alt_min, alt_hi=args.alt_max, nalt=args.cells)
     except IonosphereError as exc:
         raise SystemExit(f"woof spacewx ionosphere: {exc}") from exc
+    fit = mlat = None
+    if args.storm:
+        from woof.spacewx import storm
+        try:
+            fit = storm.load_fit(args.storm_fit)
+        except (storm.StormError, OSError) as exc:
+            raise SystemExit(f"woof spacewx ionosphere: storm-time fit: {exc}") from exc
+        mlat = storm.magnetic_latitude(lat2.ravel(), lon2.ravel(), start)
     import cupy as cp
-    fields = {k: [] for k in OUTPUTS}
+    fields = {k: [] for k in OUTPUTS + (("storm_factor",) if fit else ())}
     drivers = []
     for when in times:
         f107 = float(args.f107) if record is None else record.f107_driver(when, args.f107_mode)
-        out = iono.evaluate(when, f107)
+        row = {"time": when.isoformat() + "Z", "f107": f107}
+        scale = None
+        if fit is not None:
+            try:
+                row["ap_tau"] = storm.filtered_ap(record, when, fit.tau, fit.nlag)
+            except storm.StormError as exc:
+                raise SystemExit(f"woof spacewx ionosphere: {exc}") from exc
+            scale = storm.fof2_scale(fit, lat2, lon2, when, row["ap_tau"], mlat_deg=mlat)
+            fields["storm_factor"].append((scale * scale).reshape(lat2.shape).astype(np.float32))
+        out = iono.evaluate(when, f107, fo_scale=scale)
         for key in OUTPUTS:
             fields[key].append(cp.asnumpy(out[key]).reshape(lat2.shape))
-        drivers.append({"time": when.isoformat() + "Z", "f107": f107})
+        drivers.append(row)
         tec = fields["tec"][-1]
         weights = np.cos(np.deg2rad(lat2))
-        print(f"{when:%Y-%m-%dT%H:%MZ}  F10.7 {f107:6.1f}  TEC mean {np.average(tec, weights=weights):6.2f} "
+        storm_text = f"  ap_tau {row['ap_tau']:5.1f}" if fit is not None else ""
+        print(f"{when:%Y-%m-%dT%H:%MZ}  F10.7 {f107:6.1f}{storm_text}  TEC mean {np.average(tec, weights=weights):6.2f} "
               f"max {tec.max():6.2f} TECU  foF2 max {fields['fof2'][-1].max():5.2f} MHz")
     doc = receipt(iono, f107_source, "fixed" if record is None else args.f107_mode)
+    if fit is not None:
+        doc.update(storm.receipt(fit, f107_source))       # ap_tau: one per time, in "times"
     doc["times"] = drivers
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -325,6 +357,9 @@ def register_cli(sub):
     iono.add_argument("--f107-mode", choices=("daily", "81day"), default="81day",
                       help="previous day's F10.7obs, or its trailing 81-day mean (default)")
     iono.add_argument("--maps", choices=("ccir", "ursi"), default="ccir", help="foF2 map family (default ccir)")
+    iono.add_argument("--storm", action="store_true",
+                      help="apply woof's storm-time correction to foF2 (filtered ap from the index record)")
+    iono.add_argument("--storm-fit", help="a storm-time fit file (default: the shipped one)")
     iono.add_argument("--dlat", type=float, default=2.5, help="grid spacing in latitude, deg (default 2.5)")
     iono.add_argument("--dlon", type=float, default=5.0, help="grid spacing in longitude, deg (default 5)")
     iono.add_argument("--alt-min", type=float, default=60.0, help="TEC integration floor, km (default 60)")

@@ -123,7 +123,14 @@ class DeferredChecks:
         else:
             value = _reduce(flag, reduce).astype(self.cp.int64, copy=False)
         # A slot may run on its own stream: the flush stream waits for this point.
-        self._pending.append((value, (message, error), self.cp.cuda.get_current_stream().record()))
+        self._pending.append((value, (message, error), self._mark(self.cp.cuda.get_current_stream())))
+
+    def _mark(self, stream: Any) -> Any:
+        """An untimed event at this point of ``stream``: only waited on and
+        polled, never timed (on Metal recording it does not drain the queue)."""
+        event = self.cp.cuda.Event(disable_timing=True)
+        event.record(stream)
+        return event
 
     def flush(self, step: int | None = None) -> None:
         """Queue this step's words to pinned memory; inspect copies that have landed."""
@@ -147,7 +154,7 @@ class DeferredChecks:
         import numpy as np
         out = np.frombuffer(host, dtype=np.int64, count=values.size)
         values.get(out=out, stream=stream, blocking=False)
-        event = stream.record()
+        event = self._mark(stream)
         # values must outlive its asynchronous copy; host keeps the pinned block alive.
         self._inflight.append((event, (values, host, out), messages, self.step))
         self.flushed += 1

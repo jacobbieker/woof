@@ -3793,6 +3793,8 @@ Takes no options of its own.
 | `--maps {ccir,ursi}` | foF2 map family (default ccir) |
 | `--out` | write the fields to this .npz (receipt beside it) |
 | `--step-hours` | hours between times (default 1) |
+| `--storm` | apply woof's storm-time correction to foF2 (filtered ap from the index record) |
+| `--storm-fit` | a storm-time fit file (default: the shipped one) |
 | `--time` | first valid time, ISO UTC (2024-05-10T18:00Z) |
 
 ## `woof spacewx particles`

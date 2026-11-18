@@ -1111,7 +1111,10 @@ class MynnCudaModule:
                                          metal=backend.active() == "mlx")
             held = self._workers = (key, batch)
         batch = held[1]
-        return (cp.empty(batch * stride, dtype=cp.uint8),
+        # The arena is each worker's automatic arrays, written before read (CUDA hands it out as
+        # garbage); on Metal it is allocated without the fill an empty costs there.
+        from woof.backend.scratch import scratch_empty
+        return (scratch_empty(cp, batch * stride, cp.uint8),
                 cp.empty(ncol, dtype=cp.int32), batch)
 
     @property
