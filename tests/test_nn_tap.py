@@ -40,8 +40,8 @@ def test_settings_read_and_anchor_the_store_at_the_file(tmp_path):
 @pytest.mark.parametrize("body, words", [
     ('scheme = "pbl"\n', "needs tap"),
     ('scheme = "mp"\ntap = "a"\n', "scheme must be one of"),
-    ('scheme = "pbl"\ntap = "a"\nmodel = "x"\n', "unknown [nn] keys"),
-    ('scheme = "pbl"\nmode = "replace"\n', "P2.3"),
+    ('scheme = "pbl"\ntap = "a"\ncape = "x"\n', "unknown [nn] keys"),
+    ('scheme = "pbl"\nmode = "replace"\n', "needs model"),
     ('scheme = "pbl"\ntap = "a"\ntap_every = 0\n', "positive integer"),
     ('scheme = "pbl"\ntap = "a"\ninputs = ["qv", "qv"]\n', "twice"),
 ])

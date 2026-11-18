@@ -7927,6 +7927,8 @@ def build(registry: dict) -> dict:
     registry = seed_options(registry, load_seeds())
     from woof.spectral_nudging.surface_contract import registry_rows as surface_fdda_rows
     registry["analysis_nudging"] = surface_fdda_rows()
+    from woof.nn.launch import registry_rows as nn_column_rows
+    registry["nn_column_physics"] = nn_column_rows()
     from woof.knobs.physics import registry_row as physics_knob_registry_row
     registry["authority"]["regional_tuning_controls"] = physics_knob_registry_row()
     _new_goddard(registry)
