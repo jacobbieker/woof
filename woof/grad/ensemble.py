@@ -37,7 +37,6 @@ ES_SCHEMA = "woof.grad.ensemble-sensitivity/v1"
 EFSO_SCHEMA = "woof.grad.efso/v1"
 
 #: kinds located by pressure in the column; the rest are surface or height kinds
-_PRESSURE_KINDS = ("upper_temperature", "upper_wind_u", "upper_wind_v")
 
 
 class EnsembleError(ValueError):
@@ -178,6 +177,9 @@ def grf_cells(lat, lon, nz: int, *, seed: int, dx_km: float, length_scale_km: fl
     dlon = (lon - lon0 + 180.0) % 360.0 - 180.0
     x = EARTH_RADIUS_KM * np.radians(dlon) * np.cos(np.radians(lat))
     y = EARTH_RADIUS_KM * np.radians(lat - lat0)
+    if np.abs(dlon).max() > 60.0 or np.abs(lat - lat0).max() > 45.0:
+        raise EnsembleError("grf_cells draws on one tangent plane, which suits a regional mesh only; this mesh "
+                            f"spans {np.ptp(lat):.0f} deg of latitude and {2 * np.abs(dlon).max():.0f} of longitude")
     margin = 3.0 * length_scale_km
     x0, y0 = x.min() - margin, y.min() - margin
     nx = int(np.ceil((x.max() + margin - x0) / dx_km)) + 1
@@ -233,14 +235,20 @@ def obs_gridpoints(obs, obs_index: np.ndarray, column: np.ndarray, frame) -> np.
 
     Pressure kinds take the nearest ``ln p``, refractivity the nearest height,
     and surface kinds level 0.  ``column`` is the pairing's mass column.
+    Column-integrated kinds have no level and are refused.
     """
+    from woof.grad.obs_cost import COLUMN_KINDS, HEIGHT_KINDS, PRESSURE_KINDS
+
     kind = obs.kind[obs_index]
+    if np.isin(kind, COLUMN_KINDS).any():
+        raise EnsembleError(f"column-integrated observations ({sorted(set(kind[np.isin(kind, COLUMN_KINDS)]))}) "
+                            "have no model level; leave them out of the LETKF")
     k = np.zeros(len(obs_index), np.int64)
-    upper = np.isin(kind, _PRESSURE_KINDS)
+    upper = np.isin(kind, PRESSURE_KINDS)
     if upper.any():
         lnp = np.log(np.asarray(frame.p)[:, column[upper]])
         k[upper] = np.argmin(np.abs(lnp - np.log(obs.pressure_pa[obs_index[upper]])[None, :]), axis=0)
-    height = kind == "refractivity"
+    height = np.isin(kind, HEIGHT_KINDS)
     if height.any():
         z = np.asarray(frame.z)[:, column[height]]
         k[height] = np.argmin(np.abs(z - obs.height_m[obs_index[height]][None, :]), axis=0)
@@ -285,11 +293,18 @@ def letkf_with_obs_space(prior: Mapping[str, np.ndarray], batches: Sequence, row
     zero except at the batch's observation points, so it is transformed by
     the same local weights as the state at those points: ``Y^a = Y^b W``.
     Returns ``(increments, ya)`` with ``ya`` ``(K, n_obs)``.
+
+    Each layer adds one dense ``(K, nz, ny, nx)`` field, so memory and the
+    solve grow with the number of layers.  Relaxation (RTPS/RTPP) is
+    refused: EFSO needs the analysis perturbations of the Kalman gain
+    itself, not relaxed ones.
     """
     import dataclasses
 
     from woof.da.letkf import analyze
 
+    if float(getattr(config, "rtps_alpha", 0.0) or 0.0) != 0.0:
+        raise EnsembleError("EFSO needs the unrelaxed analysis ensemble; run the LETKF with rtps_alpha 0")
     members = next(iter(prior.values())).shape[0]
     shape = tuple(next(iter(prior.values())).shape[1:])
     n = int(sum(len(r) for r in rows))
@@ -311,14 +326,17 @@ def letkf_with_obs_space(prior: Mapping[str, np.ndarray], batches: Sequence, row
     return {name: increments[name] for name in prior if name in increments}, ya
 
 
-def efso(innovation, sigma, ya, jf, *, rho=None) -> np.ndarray:
+def efso(innovation, sigma, ya, jf, *, rho=None, chunk_rows: int = 2048) -> np.ndarray:
     """Each observation's first-order impact on the verifying cost.
 
     ``innovation`` ``d = y - H(mean background)`` and ``sigma`` are ``(n,)``;
-    ``ya`` is ``(K, n)``; ``jf`` is the analysis-member forecast costs,
-    either ``(K,)`` or per verifying observation ``(K, m)``.  With ``rho``
-    ``(n, m)`` (a localisation between assimilated and verifying
-    observations) the per-observation costs are weighted by it.
+    ``ya`` is ``(K, n)``, the unrelaxed analysis ensemble in observation
+    space; ``jf`` is the analysis-member forecast costs, either ``(K,)`` or
+    per verifying observation ``(K, m)``.  With ``rho`` (a localisation
+    between assimilated and verifying observations: an ``(n, m)`` array, or
+    a function of assimilated row indices returning their ``(rows, m)``
+    block) the per-observation costs are weighted by it, ``chunk_rows``
+    assimilated observations at a time so no ``(n, m)`` array need exist.
     """
     d = np.asarray(innovation, np.float64)
     s = np.asarray(sigma, np.float64)
@@ -332,13 +350,18 @@ def efso(innovation, sigma, ya, jf, *, rho=None) -> np.ndarray:
         if rho is not None:
             raise EnsembleError("a localisation needs per-observation forecast costs (K, m)")
         return weight * (y.T @ j) / (members - 1)
-    cross = (y.T @ j) / (members - 1)
-    if rho is not None:
-        rho = np.asarray(rho, np.float64)
-        if rho.shape != cross.shape:
-            raise EnsembleError(f"rho is {rho.shape}, expected {cross.shape}")
-        cross = cross * rho
-    return weight * cross.sum(axis=1)
+    if rho is None:
+        return weight * (y.T @ j.sum(axis=1)) / (members - 1)
+    block = rho if callable(rho) else (lambda rows: np.asarray(rho, np.float64)[rows])
+    out = np.empty(d.shape[0])
+    for start in range(0, d.shape[0], int(chunk_rows)):
+        rows = np.arange(start, min(start + int(chunk_rows), d.shape[0]))
+        cross = (y[:, rows].T @ j) / (members - 1)
+        local = np.asarray(block(rows), np.float64)
+        if local.shape != cross.shape:
+            raise EnsembleError(f"rho block is {local.shape}, expected {cross.shape}")
+        out[rows] = weight[rows] * (cross * local).sum(axis=1)
+    return out
 
 
 def impact_table(impact, platform, kind) -> dict:

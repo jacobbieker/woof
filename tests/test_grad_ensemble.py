@@ -193,14 +193,37 @@ def test_the_letkf_mean_and_efso_doors_on_hand_built_members(tmp_path, capsys):
     assert main(["mean", "--checkpoints", *map(str, analysed), "--out", str(tmp_path / "mean.npz")]) == 0
     capsys.readouterr()
     pairs = []
+    digest = ObsSet.load(tmp_path / "obs.npz").digest()
     for m in range(K):
         path = tmp_path / f"fc{m}.npz"
         np.savez(path, obs_index=np.array([0, 1]), h=np.array([286.0 + shifts[m], 272.0 + shifts[m]]),
-                 y=np.array([286.5, 273.0]), sigma=np.array([1.0, 1.0]))
+                 y=np.array([286.5, 273.0]), sigma=np.array([1.0, 1.0]), obs_sha256=np.asarray(digest))
         pairs.append(str(path))
+    stranger = tmp_path / "stranger.npz"
+    with np.load(pairs[0]) as data:
+        np.savez(stranger, **dict(data, obs_sha256=np.asarray("other")))
+    with pytest.raises(SystemExit, match="another observation file"):
+        main(["efso", "--analysis", str(tmp_path / "an" / "efso-inputs.npz"), "--obs", str(tmp_path / "obs.npz"),
+              "--forecast-pairs", str(stranger), *pairs[1:]])
     assert main(["efso", "--analysis", str(tmp_path / "an" / "efso-inputs.npz"), "--obs", str(tmp_path / "obs.npz"),
                  "--forecast-pairs", *pairs, "--localization-km", "500"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["assimilated"] == 2 and np.isfinite(out["predicted_dJ"])
     assert out["by_type"]["sonde/upper_temperature"]["n"] == 2
     assert ObsSet.load(tmp_path / "obs.npz").digest()
+
+
+def test_efso_chunks_and_refusals():
+    from woof.da.letkf import LetkfConfig, Localization
+
+    rng = np.random.default_rng(3)
+    K, n, m = 6, 7, 5
+    ya, jf, rho = rng.normal(size=(K, n)), rng.normal(size=(K, m)), rng.uniform(size=(n, m))
+    d, s = rng.normal(size=n), rng.uniform(0.5, 2.0, size=n)
+    whole = ens.efso(d, s, ya, jf, rho=rho)
+    np.testing.assert_allclose(ens.efso(d, s, ya, jf, rho=lambda rows: rho[rows], chunk_rows=2), whole)
+    np.testing.assert_allclose(ens.efso(d, s, ya, jf), ens.efso(d, s, ya, jf.sum(axis=1)))
+    config = LetkfConfig(localization=Localization(1e5, 1e6), analysis_fields=("thp",), rtps_alpha=0.5)
+    prior = {"thp": np.zeros((K, 2, 3, 3))}
+    with pytest.raises(ens.EnsembleError, match="unrelaxed"):
+        ens.letkf_with_obs_space(prior, [], [], None, config)

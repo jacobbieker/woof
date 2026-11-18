@@ -182,6 +182,16 @@ forecast error:
    the analysis ensemble in observation space. `Y^a` comes from the
    filter's own local weights, by carrying `H(x_k)` as an extra analysed
    field.
+   - Each `--history` file must hold the analysis time only.
+   - Column-integrated observations have no model level, so they are
+     left out of the LETKF.
+   - The analysis is not relaxed (no RTPS), because EFSO needs the
+     Kalman gain's own analysis perturbations.
+   - Every member is staged before any is published.
+   - Observations that share a grid point need one extra analysed field
+     each: a station's five surface kinds, or a sounding's levels that
+     fall on one model level. Each extra field is the size of the state,
+     so memory and run time grow with that count.
 2. Forecasts from the analysis members are scored with `--accept` and
    `--pairs-out`.
 3. `woof grad efso` gives each observation's first-order impact

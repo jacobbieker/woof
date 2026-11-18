@@ -296,9 +296,9 @@ def command_letkf(args) -> int:
     from woof.da.letkf import GridGeometry, LetkfConfig, Localization
     from woof.da.radar_assimilation import _RESTAGGER, _mass_field
     from woof.grad.ensemble import layered_batches, letkf_with_obs_space, obs_gridpoints
-    from woof.grad.obs_cost import ObsSet, accepted_from, evaluate, read_error_table, read_frames
+    from woof.grad.obs_cost import COLUMN_KINDS, ObsSet, accepted_from, evaluate, read_error_table, read_frames
     from woof.grad.sensitivity import checkpoint_fields
-    from woof.ensemble.increments import apply_increments_to_checkpoint
+    from woof.ensemble.increments import apply_increments_to_checkpoint, publish_staged_analysis
 
     if len(args.history) != len(args.checkpoints):
         raise SystemExit("woof grad letkf: one --history file per --checkpoints member")
@@ -306,23 +306,29 @@ def command_letkf(args) -> int:
     table = read_error_table(args.error_table)
     accept = accepted_from(args.accept)
     results = []
+    frame = None
     for path in args.history:
         frames = read_frames([path], rim=args.rim)
+        if len(frames) != 1:
+            raise SystemExit(f"woof grad letkf: {path} has {len(frames)} frames; give each member's history at "
+                             "the analysis time only (one frame), so every observation is placed in that frame")
+        frame = frame or frames[0]
         results.append(evaluate(obs, frames, table=table, accept=accept,
                                 max_offset_s=accept.max_offset_s))
     common = set(results[0].obs_index.tolist())
     for result in results[1:]:
         common &= set(result.obs_index.tolist())
-    rows = np.array(sorted(common), np.int64)
+    common_rows = np.array(sorted(common), np.int64)
+    column_kind = np.isin(obs.kind[common_rows], COLUMN_KINDS)
+    rows = common_rows[~column_kind]
     pick = [np.searchsorted(r.obs_index, rows) for r in results]
     hb = np.stack([r.h[p] for r, p in zip(results, pick)])
     first = results[0]
     sigma, y, column = first.sigma[pick[0]], first.y[pick[0]], first.column[pick[0]]
-    frame = read_frames([args.history[0]], rim=args.rim)[0]
     names = tuple(args.fields)
     states = [checkpoint_fields(path, names) for path in args.checkpoints]
     prior = {name: np.stack([_mass_field(name, state, where="grad letkf") for state in states]) for name in names}
-    nz, ny, nx = prior["thp"].shape[1:]
+    nz, ny, nx = prior[names[0]].shape[1:]
     k = obs_gridpoints(obs, rows, column, frame)
     flat = k * ny * nx + column
     batches, layers = layered_batches(flat, y, sigma, hb, shape=(nz, ny, nx), name="obs")
@@ -330,7 +336,7 @@ def command_letkf(args) -> int:
                         heights_m=np.asarray(frame.z).reshape(nz, ny, nx),
                         lat_deg=np.asarray(frame.lat).reshape(ny, nx), lon_deg=np.asarray(frame.lon).reshape(ny, nx))
     config = LetkfConfig(localization=Localization(args.localization_km * 1e3, args.vertical_km * 1e3),
-                         analysis_fields=names, rtps_alpha=args.rtps_alpha,
+                         analysis_fields=names, rtps_alpha=0.0,
                          memory_budget_mib=args.memory_budget_mib)
     import time
     t0 = time.perf_counter()
@@ -338,14 +344,16 @@ def command_letkf(args) -> int:
     seconds = time.perf_counter() - t0
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    written = []
+    staged = []
     for m, path in enumerate(args.checkpoints):
         member = {name: (_RESTAGGER[name](increments[name][m]) if name in _RESTAGGER else increments[name][m])
                   for name in names}
         target = out / f"member_{m:03d}" / Path(path).name.split("__")[0]
         target = target.with_suffix(".npz") if target.suffix != ".npz" else target
-        apply_increments_to_checkpoint(path, member, target, publish=True, mp_physics=args.mp_physics)
-        written.append(str(target))
+        receipt = apply_increments_to_checkpoint(path, member, target, publish=False, mp_physics=args.mp_physics)
+        staged.append((receipt["staged"], target))
+    # Every member is staged before any is published, so a failure leaves no half-analysed ensemble.
+    written = [str(publish_staged_analysis(source, target)) for source, target in staged]
     hb_mean = hb.mean(axis=0)
     np.savez(out / "efso-inputs.npz", obs_index=rows, innovation=y - hb_mean, sigma=sigma, hb=hb, ya=ya,
              lat=obs.lat[rows], lon=obs.lon[rows], k=k, column=column, obs_sha256=np.asarray(obs.digest()))
@@ -353,7 +361,8 @@ def command_letkf(args) -> int:
               "observations_by_type": dict(sorted(Counter(f"{p}/{k}" for p, k in
                                                           zip(obs.platform[rows], obs.kind[rows])).items())),
               "batches": len(batches), "fields": list(names), "localization_km": args.localization_km,
-              "vertical_km": args.vertical_km, "rtps_alpha": args.rtps_alpha, "analysis_seconds": seconds,
+              "vertical_km": args.vertical_km, "rtps_alpha": 0.0, "analysis_seconds": seconds,
+              "left_out_column_kinds": int(column_kind.sum()),
               "innovation_rms_over_sigma": float(np.sqrt(np.mean(((y - hb_mean) / sigma) ** 2))),
               "spread_hb_over_sigma": float(np.mean(hb.std(axis=0, ddof=1) / sigma)),
               "spread_ya_over_sigma": float(np.mean(ya.std(axis=0, ddof=1) / sigma)),
@@ -389,6 +398,7 @@ def command_efso(args) -> int:
     from woof.da.letkf import gaspari_cohn
     from woof.grad.ensemble import efso, impact_table
     from woof.grad.obs_cost import ObsSet
+    from woof.grad.sensitivity import great_circle_km
 
     obs = ObsSet.load(args.obs)
     with np.load(args.analysis, allow_pickle=False) as data:
@@ -398,6 +408,8 @@ def command_efso(args) -> int:
     pairs = []
     for path in args.forecast_pairs:
         with np.load(path, allow_pickle=False) as data:
+            if str(data["obs_sha256"]) != obs.digest():
+                raise SystemExit(f"woof grad efso: {path} was scored against another observation file")
             pairs.append({key: data[key] for key in ("obs_index", "h", "y", "sigma")})
     common = set(pairs[0]["obs_index"].tolist())
     for p in pairs[1:]:
@@ -410,10 +422,11 @@ def command_efso(args) -> int:
     jv = np.stack(jv)
     rho = None
     if args.localization_km:
-        lat1, lon1 = np.radians(a["lat"])[:, None], np.radians(a["lon"])[:, None]
-        lat2, lon2 = np.radians(obs.lat[verify])[None, :], np.radians(obs.lon[verify])[None, :]
-        h = np.sin((lat2 - lat1) / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
-        rho = gaspari_cohn(2 * 6370e3 * np.arcsin(np.sqrt(np.minimum(h, 1.0))), args.localization_km * 1e3)
+        lat_v, lon_v = obs.lat[verify][None, :], obs.lon[verify][None, :]
+
+        def rho(rows):
+            km = great_circle_km(lat_v, lon_v, a["lat"][rows][:, None], a["lon"][rows][:, None])
+            return np.asarray(gaspari_cohn(km, args.localization_km))
     impact = efso(a["innovation"], a["sigma"], a["ya"], jv if rho is not None else jv.sum(axis=1), rho=rho)
     rows = a["obs_index"]
     table = impact_table(impact, obs.platform[rows], obs.kind[rows])
@@ -542,7 +555,6 @@ def build_parser() -> argparse.ArgumentParser:
     letkf.add_argument("--dx-km", type=float, required=True)
     letkf.add_argument("--localization-km", type=float, default=200.0)
     letkf.add_argument("--vertical-km", type=float, default=3.0)
-    letkf.add_argument("--rtps-alpha", type=float, default=0.0)
     letkf.add_argument("--rim", type=int, default=5)
     letkf.add_argument("--memory-budget-mib", type=float, default=512.0, help="the filter's batched-solve scratch ceiling")
     letkf.add_argument("--mp-physics", type=int, default=None)
