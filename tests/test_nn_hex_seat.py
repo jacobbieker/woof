@@ -302,6 +302,34 @@ def test_refused_species_the_run_does_not_carry():
                       zgrid=w.zgrid, dt=30.0, tap=_Tap())
 
 
+def test_non_finite_model_output_never_reaches_the_specified_zone(tmp_path):
+    w = _world()
+    before = w.sources.rho_theta.copy()
+    seat = _applying(w, tmp_path, out_mean=0.0)
+
+    class Poisoned:
+        backend, manifest = "numpy", seat.model.manifest
+
+        def __call__(self, x):
+            y = seat_model(x)
+            y[:, 10:] = np.nan
+            return y
+
+    seat_model, seat.model = seat.model, Poisoned()
+    seat.stage(w.sources, state=w.state, saved=w.saved, time_seconds=0.0)
+    np.testing.assert_array_equal(w.sources.rho_theta[:, 10:], before[:, 10:])
+
+
+def test_settings_an_applying_run_would_drop_are_refused(tmp_path):
+    w = _world()
+    model = _artefact(tmp_path / "m")
+    with pytest.raises(launch.NNConfigError, match="takes its levels from the artefact"):
+        _seat(w, _settings(mode="residual", model=model, inputs=None, outputs=None, levels=NZ - 1))
+    heat = _artefact(tmp_path / "h", outputs=("dtheta_m", "dqv"), name="h")
+    with pytest.raises(launch.NNConfigError, match="dry-theta rate"):
+        _seat(w, _settings(mode="residual", model=heat, inputs=None, outputs=None, fixer="moisture+heat"))
+
+
 def test_applying_is_refused_in_exact_mode_and_under_wrf_exact(tmp_path, monkeypatch):
     w = _world()
     model = _artefact(tmp_path / "m")
@@ -318,10 +346,10 @@ def test_partitioned_lts_and_moving_runs_are_refused():
     with pytest.raises(NotImplementedError, match="same-host partition or an LTS"):
         hex_seat.refuse_unsupported(execution=object())
     with pytest.raises(NotImplementedError, match="moving region"):
-        hex_seat.refuse_unsupported(moving=SimpleNamespace(control=object()))
+        hex_seat.refuse_unsupported(moving=SimpleNamespace(fixed_mesh=False, control=None))
     with pytest.raises(NotImplementedError, match="moving region"):
         hex_seat.refuse_unsupported(physics_map=object())
-    hex_seat.refuse_unsupported(moving=SimpleNamespace(control=None))
+    hex_seat.refuse_unsupported(moving=SimpleNamespace(fixed_mesh=True))
 
 
 def test_carried_identity_is_checked_on_resume(tmp_path):
@@ -344,13 +372,28 @@ def test_attach_binds_the_seat_and_checks_the_carrier(tmp_path, monkeypatch):
     toml.write_text('[nn]\nmode = "tap"\nscheme = "total"\ntap = "t.zarr"\ninputs = ["theta", "qv"]\n')
     monkeypatch.setenv(launch.ENV_CONFIG, str(toml))
     dycore = SimpleNamespace(atmosphere=SimpleNamespace(state=w.state, vertical=SimpleNamespace(zz=w.zz)))
-    coupling = SimpleNamespace(session=SimpleNamespace(field=lambda pool, name: w.pools[(pool, name)]),
-                               dycore=dycore, cp=np, names=NAMES)
+    host = {("diag_physics", "hfx"): np.arange(NC + 3, dtype=np.float32)}
+
+    def unbound(pool, name, level=1):
+        return host[(pool, name)]
+
+    def bind(pool, name):
+        raise AssertionError("the seat bound a pool field")
+
+    session = SimpleNamespace(field=bind, resident_field=lambda pool, name: w.pools.get((pool, name)),
+                              native=SimpleNamespace(field_storage=unbound))
+    coupling = SimpleNamespace(session=session, dycore=dycore, cp=np, names=NAMES)
     mesh = SimpleNamespace(arrays={"bdyMaskCell": BDY})
     pytest.importorskip("zarr")
     seat = hex_seat.attach(coupling, config=SimpleNamespace(mode="correct"), mesh=mesh, n_cells=NC,
                            vertical=SimpleNamespace(zgrid=w.zgrid), dt=30.0)
     assert coupling.nn_seat is seat and dycore.nn_seat is seat and seat.pool.tolist() == list(range(8))
+    # Pool reads never bind: a held device field, else a copy of the host storage over the real cells.
+    np.testing.assert_array_equal(seat._fields("diag", "pressure"), w.pools[("diag", "pressure")])
+    del w.pools[("diag_physics", "hfx")]
+    unbound_read = seat._fields("diag_physics", "hfx")
+    np.testing.assert_array_equal(unbound_read, np.arange(NC))
+    assert not np.shares_memory(unbound_read, host[("diag_physics", "hfx")])
     seat.close()
     with pytest.raises(NotImplementedError):
         hex_seat.attach(coupling, config=None, mesh=mesh, n_cells=NC, vertical=None, dt=30.0, execution=object())

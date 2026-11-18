@@ -248,6 +248,11 @@ class HexColumnSeat:
             self.levels = self.nz if settings.levels is None else settings.levels
             self.input_names = settings.inputs or DEFAULT_INPUTS
             self.output_names = settings.outputs or DEFAULT_OUTPUTS
+        if self.applies and settings.levels is not None and settings.levels != self.levels:
+            raise NNConfigError(f"--nn levels = {settings.levels}, but the model {self.manifest.name} spans "
+                                f"{self.levels}; an applying run takes its levels from the artefact")
+        if self.applies and self.policy.fixer == "moisture+heat" and "dtheta_m" in self.output_names:
+            raise NNConfigError("--nn fixer = \"moisture+heat\" fixes a dry-theta rate; this model writes dtheta_m")
         if self.levels > self.nz:
             raise NNConfigError(f"--nn levels = {self.levels}, but the mesh has {self.nz} model levels")
         self._check_names()
@@ -274,7 +279,7 @@ class HexColumnSeat:
         self.pool = interior_pool(self.nc, bdy_mask)
         self.ncol = min(settings.tap_columns, self.pool.size)
         mask = apply_mask(self.nc, bdy_mask)
-        self._mask = None if mask is None else cp.asarray(mask)[None, :]
+        self._mask = None if mask is None else cp.asarray(mask > 0)[None, :]
         self.applied_cells = self.nc if mask is None else int(mask.sum())
         self._resume = resume
         self.calls = 0
@@ -470,15 +475,17 @@ class HexColumnSeat:
         increments = {name: delta[rows] for name, rows in slices.items()}
         d_theta, d_scalars = couple_increment(cp, increments, mass=more["mass"], theta_m=more["theta_m"],
                                               qv=more["qv"])
+        # A select, not a product: a non-finite model value in the specified
+        # zone must not reach it (NaN * 0 is NaN).
         mask = self._mask
         if d_theta is not None:
             if mask is not None:
-                d_theta = d_theta * mask
+                d_theta = cp.where(mask, d_theta, f32(0))
             sources.rho_theta[:L, :nc] = sources.rho_theta[:L, :nc] + d_theta.astype(f32, copy=False)
         for species, value in d_scalars.items():
             i = self.names.index(species)
             if mask is not None:
-                value = value * mask
+                value = cp.where(mask, value, f32(0))
             sources.scalars[i, :L, :nc] = sources.scalars[i, :L, :nc] + value.astype(f32, copy=False)
 
     def receipt(self) -> dict:
@@ -515,10 +522,28 @@ def refuse_unsupported(*, execution=None, moving=None, physics_map=None) -> None
         raise NotImplementedError(
             "--nn on a same-host partition or an LTS execution: the hex seat runs on one card's whole mesh "
             "(one process, one step clock); run it on one card without --fullstep-local-timestep")
-    if physics_map is not None or getattr(moving, "control", None) is not None:
+    if physics_map is not None or (moving is not None and not getattr(moving, "fixed_mesh", False)):
         raise NotImplementedError(
             "--nn on a moving region: the seat's columns and tap record are bound to one mesh; run it on a "
             "fixed mesh (checkpoint and --restart-from resumes on the same mesh are supported)")
+
+
+def _reader(session, n_cells: int):
+    """A physics-pool field without binding it: the device copy the pools
+    already hold, or a copy of the host storage that is still authoritative
+    for a field no slot has bound.  ``session.field`` would upload and
+    cache an unbound field, making the device copy the one published (a tap
+    must change nothing)."""
+    def read(pool, name):
+        resident = getattr(session, "resident_field", None)
+        value = resident(pool, name) if resident is not None else None
+        if value is not None:
+            return value
+        native = session.native
+        storage = getattr(native, "field_storage", None)
+        host = storage(pool, name, level=1) if storage is not None else native.get_field(pool, name, level=1)
+        return np.array(np.asarray(host)[..., :n_cells])
+    return read
 
 
 def attach(coupling, *, config, mesh, n_cells: int, vertical, dt: float, execution=None, moving=None,
@@ -540,8 +565,8 @@ def attach(coupling, *, config, mesh, n_cells: int, vertical, dt: float, executi
     seat = HexColumnSeat(settings, cp=coupling.cp, names=coupling.names, n_cells=n_cells,
                          n_levels=int(state.rho.shape[0]), zgrid=vertical.zgrid,
                          zz=getattr(getattr(coupling.dycore.atmosphere, "vertical", None), "zz", None),
-                         bdy_mask=bdy, dt=dt, mode=getattr(config, "mode", "correct"),
-                         fields=lambda pool, name: session.field(pool, name), resume=resumed)
+                         bdy_mask=bdy, dt=dt, mode=getattr(config, "mode", "exact"),
+                         fields=_reader(session, int(n_cells)), resume=resumed)
     if resumed:
         check_carried(seat.identity(), carried)
     coupling.nn_seat = seat

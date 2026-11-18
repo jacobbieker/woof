@@ -33,6 +33,11 @@ for name in json.loads(sys.argv[1]):
         done.append(name)
     except Exception as error:   # a door this host cannot import
         failed[name] = f"{type(error).__name__}: {error}"[:200]
+if "woof.hex.forecast_door" in done:
+    import argparse
+    from woof.hex.forecast_door import add_forecast_arguments
+    add_forecast_arguments(argparse.ArgumentParser())   # building the hex parser imports no woof.nn either
+    done.append("hex forecast parser")
 loaded = sorted(m for m in sys.modules if m == "torch" or m.startswith("torch.")
                 or m == "mlx.nn" or m.startswith("mlx.nn.") or m == "woof.nn" or m.startswith("woof.nn."))
 print(json.dumps({"done": done, "failed": failed, "loaded": loaded}))

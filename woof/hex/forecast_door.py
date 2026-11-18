@@ -4474,7 +4474,10 @@ def run_forecast(arguments: argparse.Namespace) -> int:
         nn_scope = nullcontext()
     else:
         from woof.nn.launch import launch_scope
-        nn_scope = launch_scope(nn, resume=bool(getattr(arguments, "restart_from", None)))
+        # The door cannot tell every resume (a native restart's continuation and a moving segment's checkpoint
+        # become resumes later), so the seat refuses an existing tap store unless the run did resume
+        # (woof.nn.hex_seat.attach; TendencyTap).
+        nn_scope = launch_scope(nn, resume=True)
     with wave_environment(arguments), wrf_hydro_scope(getattr(arguments, "wrf_hydro", None),
                                                       getattr(arguments, "wrf_hydro_output", None),
                                                       gpu_exchange=getattr(arguments, "wrf_hydro_gpu_exchange",
@@ -5812,8 +5815,14 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     add_wrf_hydro_arguments(parser)
     # --nn NN.toml: the opt-in NN column seat on the MPAS route's held physics sources (woof.nn.hex_seat), exported
     # as WOOF_NN_CONFIG for the forecast's processes (woof.nn.launch.launch_scope).
-    from woof.nn.launch import add_arguments as add_nn_arguments
-    add_nn_arguments(parser)
+    # Declared here, not by woof.nn.launch.add_arguments: parsing a forecast without --nn imports nothing from
+    # woof.nn (tests/test_nn_default_path_imports.py builds this parser).
+    parser.add_argument(
+        "--nn", default=None, metavar="NN.toml",
+        help="opt-in neural-network column physics on the MPAS route from the [nn] table of this TOML file "
+             "(docs/nn-physics.md); mode = \"tap\" records the held physics source as training data and leaves "
+             "the forecast unchanged; \"residual\" and \"replace\" apply a column model, which makes the run "
+             "not MPAS-identical")
     parser.add_argument(
         "--source-table", type=Path, default=None, metavar="FILE",
         help="a point-source table the selected row's seam releases from "
