@@ -5179,7 +5179,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "088fda0da3e67f5a5fe8e4613bfe60365c2994964f2c7d45fc377f284a58ee49"
+    "sha256": "269202188291cfecf90bd35276d6247edc1ae9983c6c8c5e0ddabd1a099d619e"
    },
    {
     "file": "woof/core/kernels/__init__.py",
