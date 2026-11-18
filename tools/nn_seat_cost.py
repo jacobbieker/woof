@@ -92,11 +92,13 @@ def main(argv=None) -> int:
     x, _ = seat.columns(state, cfg, state.physics.pbl_tendencies, seat.all_columns)
     for _ in range(3):
         seat.model(x)
-    cp.asnumpy(seat.model(x)[:1, :1])
+    cp.asnumpy(seat.model(x).sum())
     start = time.perf_counter()
+    total = None
     for _ in range(args.steps):
-        y = seat.model(x)
-    cp.asnumpy(y[:1, :1])
+        y = seat.model(x).sum()  # a reduction over every output: a lazy runtime evaluates the whole call
+        total = y if total is None else total + y
+    cp.asnumpy(total)
     model_only = (time.perf_counter() - start) / args.steps
     summary = seat.close()
     nz, ny, nx = state.p.shape
