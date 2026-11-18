@@ -75,6 +75,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from woof.backend.scratch import scratch_like
 from .cuda_fp32 import CUDA_FTZ_HELPERS
 from .cuda_backend.containers import TransferStats, require_resident_array
 from .errors import ConfigurationRefusal
@@ -1714,7 +1715,6 @@ class DeviceRegionalDrivingState:
                 state = self._state[name]
                 tend = self._tend[name]
         if out is None:
-            from woof.backend.scratch import scratch_like
             target = scratch_like(cp, state)      # the kernel writes every element
         else:
             target = out

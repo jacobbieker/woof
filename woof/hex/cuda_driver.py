@@ -3608,7 +3608,6 @@ class CudaDryDycoreDriver:
         width = int(coefficient.adv_coefs.shape[1])
         edge_flux = _scratch_like(cp, state.rho_u)
         vertical_flux = _scratch_like(cp, state.rho_w)
-        result = _scratch_like(cp, state.rho)
         # v8.4.1 accumulates the RK correction in a separate cell loop
         # (native F:6814-6874; dycore-match 8322a3f).  A full-step LTS class
         # driver keeps it inside the edge flux instead: its interface capture
@@ -3647,7 +3646,7 @@ class CudaDryDycoreDriver:
             self._launch("theta_edge_flux_hoist_f32", self.nedges * cuda_edge_hoist.chunks(self.nlev, lpt),
                          (*theta_arguments, edge_flux, np.int32(lpt)))
             if cuda_edge_hoist.check_wanted("theta_edge_flux_hoist_f32", cp):
-                element = cp.empty_like(edge_flux)
+                element = _scratch_like(cp, edge_flux)
                 self._launch("theta_edge_flux_f32", self.nedges * self.nlev, (*theta_arguments, element))
                 cuda_edge_hoist.compare("theta_edge_flux_hoist_f32", edge_flux, element, cp)
         else:
@@ -3680,6 +3679,7 @@ class CudaDryDycoreDriver:
                 if rk_step > 1 and separate_correction else None,
                 kernel_cache=self.cache,
             )
+        result = _scratch_like(cp, state.rho)
         self._launch(
             "theta_finish_f32",
             self.ncells,
@@ -3722,7 +3722,6 @@ class CudaDryDycoreDriver:
         width = int(coefficient.adv_coefs.shape[1])
         edge_flux = _scratch(cp, (self.nlev + 1, self.nedges), cp.float32)
         vertical_flux = _scratch_like(cp, state.rho_w)
-        result = _scratch_like(cp, state.rho_w)
         w_arguments = (
             np.int32(self.nlev),
             np.int32(self.ncells),
@@ -3747,7 +3746,7 @@ class CudaDryDycoreDriver:
             self._launch("w_edge_flux_hoist_f32", self.nedges * cuda_edge_hoist.chunks(self.nlev + 1, lpt),
                          (*w_arguments, edge_flux, np.int32(lpt)))
             if cuda_edge_hoist.check_wanted("w_edge_flux_hoist_f32", cp):
-                element = cp.empty_like(edge_flux)
+                element = _scratch_like(cp, edge_flux)
                 self._launch("w_edge_flux_f32", self.nedges * (self.nlev + 1), (*w_arguments, element))
                 cuda_edge_hoist.compare("w_edge_flux_hoist_f32", edge_flux, element, cp)
         else:
@@ -3767,6 +3766,7 @@ class CudaDryDycoreDriver:
                 n_vert_levels=self.nlev,
                 kernel_cache=self.cache,
             )
+        result = _scratch_like(cp, state.rho_w)
         self._launch(
             "w_finish_f32",
             self.ncells,

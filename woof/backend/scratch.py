@@ -60,5 +60,16 @@ def scratch_empty(xp, shape, dtype):
 
 
 def scratch_like(xp, a):
-    """``scratch_empty`` of ``a``'s shape and dtype (C order)."""
+    """``scratch_empty`` of ``a``'s shape and dtype.
+
+    C order, which is ``empty_like``'s layout for a C-contiguous ``a``; any
+    other ``a`` takes ``xp.empty_like`` (its layout), poisoned the same way.
+    """
+    if not a.flags.c_contiguous:
+        out = xp.empty_like(a)
+        poison = _poison()
+        base = out if out.flags.c_contiguous else out.T
+        if poison is not None and base.flags.c_contiguous:
+            base.reshape(-1).view(xp.uint8)[...] = poison
+        return out
     return scratch_empty(xp, a.shape, a.dtype)

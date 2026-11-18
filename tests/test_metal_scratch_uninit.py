@@ -90,3 +90,25 @@ def test_switch_values(monkeypatch, value, want):
     monkeypatch.delenv("WOOF_METAL_SCRATCH_UNINIT")
     _reset()
     assert scratch._uninit_enabled()
+
+
+@pytest.mark.parametrize("order", ["C", "F"])
+def test_scratch_like_keeps_the_layout_of_its_input(cp, monkeypatch, order):
+    """``scratch_like`` replaces ``empty_like``: an F-ordered input keeps an
+    F-ordered output, so a kernel writing it linearly maps the same elements."""
+    from woof.backend.scratch import scratch_like
+    a = cp.asarray(np.asfortranarray(np.zeros((3, 5), np.float32)) if order == "F"
+                   else np.zeros((3, 5), np.float32))
+    if order == "F" and a.flags.c_contiguous:
+        pytest.skip("this array module holds F-ordered arrays C-contiguous")
+    _reset()
+    try:
+        out = scratch_like(cp, a)
+        assert out.shape == a.shape and out.dtype == a.dtype
+        assert out.strides == cp.empty_like(a).strides
+        monkeypatch.setenv("WOOF_SCRATCH_POISON", "a5")
+        _reset()
+        assert scratch_like(cp, a).get().tobytes() == b"\xa5" * a.nbytes
+    finally:
+        monkeypatch.delenv("WOOF_SCRATCH_POISON", raising=False)
+        _reset()
