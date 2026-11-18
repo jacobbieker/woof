@@ -244,6 +244,7 @@ class Ionosphere:
         self._map_loader = map_loader
         self._maps = {}
         self._device = None
+        self._ones = None
 
     def maps(self, month: int):
         if month not in self._maps:
@@ -273,8 +274,10 @@ class Ionosphere:
         return {"coef": coef, "r12": r12, "ig12": ig12, "f107": f107, "sun_lat": sun_lat,
                 "sun_lon": sun_lon, "season": season(when.month)}
 
-    def evaluate(self, when: datetime, f107: float) -> dict:
-        """Device arrays (ncol,) of :data:`OUTPUTS` at ``when``."""
+    def evaluate(self, when: datetime, f107: float, fo_scale=None) -> dict:
+        """Device arrays (ncol,) of :data:`OUTPUTS` at ``when``; ``fo_scale``
+        (ncol,) multiplies foF2 before the profile is built (the storm-time
+        correction, woof.spacewx.storm), and None leaves the climatology."""
         import cupy as cp
         from woof.core.kernels import get_kernel
 
@@ -283,22 +286,31 @@ class Ionosphere:
             self._device = tuple(cp.asarray(a, dtype=cp.float32)
                                  for a in (self.lat, self.lon, self.modip, self.dip_latitude))
         ncol = self.lat.size
+        if fo_scale is None:
+            if self._ones is None:
+                self._ones = cp.ones(ncol, dtype=cp.float32)
+            scale = self._ones
+        else:
+            scale = cp.asarray(fo_scale, dtype=cp.float32).ravel()
+            if scale.size != ncol:
+                raise IonosphereError(f"fo_scale has {scale.size} values for {ncol} columns")
         out = {k: cp.zeros(ncol, dtype=cp.float32) for k in OUTPUTS}
         coef = cp.asarray(drv["coef"], dtype=cp.float32)
         alt_lo, alt_hi, nalt = self.alt
         threads = 128
         get_kernel("spacewx_ionosphere", "spacewx_ionosphere")(
             ((ncol + threads - 1) // threads,), (threads,),
-            (*self._device, coef, np.float32(drv["r12"]), np.float32(drv["f107"]),
+            (*self._device, coef, scale, np.float32(drv["r12"]), np.float32(drv["f107"]),
              np.float32(drv["sun_lat"]), np.float32(drv["sun_lon"]), np.int32(drv["season"]),
              np.float32(alt_lo), np.float32(alt_hi), np.int32(nalt),
              *(out[k] for k in OUTPUTS), np.int64(ncol)))
         return out
 
-    def reference(self, when: datetime, f107: float) -> dict:
+    def reference(self, when: datetime, f107: float, fo_scale=None) -> dict:
         """The same model in NumPy float64 (the device kernel's test oracle)."""
         drv = self.drivers(when, f107)
-        return profile_parameters(drv, self.lat, self.lon, self.modip, self.dip_latitude, self.alt)
+        return profile_parameters(drv, self.lat, self.lon, self.modip, self.dip_latitude, self.alt,
+                                  fo_scale=fo_scale)
 
 
 def _epstein(nm, hm, b, h):
@@ -316,13 +328,15 @@ def _epstein_top(nm, hm, b, h):
     return np.where(e > 1.0e11, 4.0 * nm / e, 4.0 * nm * e / (e + 1.0) ** 2)
 
 
-def profile_parameters(drv, lat_deg, lon_deg, modip_deg, diplat_deg, alt) -> dict:
+def profile_parameters(drv, lat_deg, lon_deg, modip_deg, diplat_deg, alt, fo_scale=None) -> dict:
     """NumPy float64 version of the device kernel (same equations, same order)."""
     coef = drv["coef"]
     r12, f107 = drv["r12"], drv["f107"]
     fo = coef[:NK_F2] @ geographic(Q_F2, lat_deg, lon_deg, modip_deg)
     m3 = coef[NK_F2:] @ geographic(Q_M3, lat_deg, lon_deg, modip_deg)
     fo = np.maximum(fo, 0.0)
+    if fo_scale is not None:
+        fo = fo * np.asarray(fo_scale, dtype=np.float64).ravel()
     lat = np.deg2rad(lat_deg)
     slat = np.deg2rad(drv["sun_lat"])
     cchi = np.clip(np.sin(slat) * np.sin(lat)

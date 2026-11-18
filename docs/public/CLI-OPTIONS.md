@@ -3793,7 +3793,20 @@ Takes no options of its own.
 | `--maps {ccir,ursi}` | foF2 map family (default ccir) |
 | `--out` | write the fields to this .npz (receipt beside it) |
 | `--step-hours` | hours between times (default 1) |
+| `--storm` | apply woof's storm-time correction to foF2 (filtered ap from the index record) |
+| `--storm-fit` | a storm-time fit file (default: the shipped one) |
 | `--time` | first valid time, ISO UTC (2024-05-10T18:00Z) |
+
+## `woof spacewx particles`
+
+| option | what it does |
+|---|---|
+| `--count` | number of times (default 1) |
+| `--levels` | pressure levels, hPa (default 0.01 0.1 1 10 50 100) |
+| `--out` | write the profiles and receipt to this .json |
+| `--source` | 'omni' (NASA SPDF OMNI2, fetched), 'swpc' (GOES via NOAA SWPC, the last 3 days) or OMNI2 file(s) joined by ':' |
+| `--step-hours` | hours between times (default 1) |
+| `--time` | first valid time, ISO UTC (2012-01-24T00:00Z) |
 
 ## `woof spectral`
 
