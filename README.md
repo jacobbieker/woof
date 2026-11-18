@@ -773,7 +773,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `woof grad cost` scores a WRF or hex history against them as an
   error-weighted observation cost `J_o`, pairing each observation with the
   nearest history frame and freezing the accepted set so perturbed runs
-  are scored on the same observations ([docs/grad.md](docs/grad.md)).
+  are scored on the same observations. `woof grad direction`,
+  `woof grad perturb` and `woof grad fd` give finite-difference
+  sensitivities of `J_o`. They write a perturbed restart state, continued
+  with `woof go --restart` (WRF route) or `--restart-from` with
+  `--da-analysis` (hex), and turn the scored plus and minus runs into a
+  derivative, per scale and per observation type
+  ([docs/grad.md](docs/grad.md)).
 - **A plan, not yet code, for variational data assimilation.**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
