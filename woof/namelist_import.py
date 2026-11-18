@@ -5797,8 +5797,11 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             else:
                 o3input = value
         # A domain on another adapter that reads ghg_input keeps it for the
-        # shared reader below (validate_rrtmgk_config then holds the K
-        # domains to 0); cldovrlp/idcor are already taken above by the
+        # shared reader below, and woof's K domains then follow it too (a
+        # declared extension beyond WRF, woof.core.rrtmgk).  A K-only
+        # namelist drops it: wrf.exe's K never read it, so the imported run
+        # keeps WRF's fixed gases; ghg_input=1 on K is opted into through
+        # woof's own config.  cldovrlp/idcor are already taken above by the
         # 4/4 arm when one is selected.
         shared = ("ghg_input",) if (any_rrtmg or any_cam or any_gsfc) else ()
         for key in ("ghg_input", "cldovrlp", "idcor"):

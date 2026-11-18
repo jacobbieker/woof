@@ -15,7 +15,8 @@ Wrapper (rad_rrtmg_driver, one routine for both spectra; kernels/rrtmgk_prep.cu)
     ``cldfra > 0 and qi+qc+qs < 1e-9`` thin-cloud floor;
   * nlay = kte + 1: one layer above the model top, play = plev(kte+1)/2,
     plev(kte+2) = 1e-5 hPa, no Cavallo buffer layers; layer pressures by
-    ``* 1.e-2``; fixed trace gases (co2 379 ppmv, ...);
+    ``* 1.e-2``; fixed trace gases (co2 379 ppmv, ...); beyond WRF, with
+    ghg_input = 1 the CAMtr gases legacy RRTMG reads (see ``RRTMGKRadiation``);
   * the wrapper ozone (o3data) over the K levels, or the CAM o3rad under
     o3input = 2 with the same top-layer splice as the legacy wrapper;
   * ONE McICA call for both spectra (mcica_subcol, permuteseed 1): 28
@@ -59,6 +60,18 @@ GASES = {"co2": F("379.e-6"), "o2": F("0.209488"), "ch4": F("1774.e-9"),
          "n2o": F("319.e-9"), "cfc11": F("0.251e-9"),
          "cfc12": F("0.538e-9"), "cfc22": F("0.169e-9"),
          "ccl4": F("0.093e-9")}
+#: The gases ghg_input = 1 takes from the CAMtr table (read_CAMgases, as
+#: legacy RRTMG_LWRAD/RRTMG_SWRAD read them); o2, cfc22 and ccl4 stay the
+#: driver's fixed values, as they stay legacy RRTMG's.
+GHG_INPUT_GASES = ("co2", "n2o", "ch4", "cfc11", "cfc12")
+
+
+def camtr_gases(yr, julian):
+    """ghg_input = 1: legacy RRTMG's CAMtr gases at ``yr`` / ``julian``,
+    narrowed to the REAL(4) profile values (``co2vmr(ncol,k) = co2``)."""
+    from woof.core.camtr_gases import camtr_trace_gases
+    values = camtr_trace_gases(yr, julian)
+    return {name: F(values[name]) for name in GHG_INPUT_GASES}
 
 
 # --- BEGIN GENERATED K LIQUID TABLES (tools/rrtmg_k_column_oracle/gen_static.py) ---
@@ -604,7 +617,7 @@ def rrtmgk_vram_bytes(*, ncol, nz, column_chunk=None, resident_threads=None,
 def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
                    cldfra, o33d, tsk, emiss, albedo, coszen, solcon,
                    f_qc, f_qi, f_qs, f_qnc, o3input, column_chunk=None,
-                   radii=False):
+                   radii=False, gases=None):
     """rad_rrtmg_driver over a batch of columns, on the device.
 
     Profiles are C-contiguous float32 device arrays (ncol, nz) (p8w, t8w:
@@ -613,7 +626,9 @@ def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
     wrapper's swhr/86400, zero on night columns) (ncol, nz); glw, olr, gsw
     and the eight lw*/sw* boundary fluxes (ncol,); the McICA-ready layer
     cldfrac (ncol, nz); with ``radii`` the clamped effective radii
-    re_qc/re_qi/re_qs (ncol, nz) before the snow-mass cap."""
+    re_qc/re_qi/re_qs (ncol, nz) before the snow-mass cap.  ``gases``
+    (name -> float32 mole fraction) replaces those of the driver's fixed
+    ``GASES`` it names (ghg_input = 1, ``camtr_gases``); None keeps them."""
     import cupy as cp
     gpu_preflight()
     inflg, iceflg = flags(f_qc, f_qi, f_qs)
@@ -681,7 +696,8 @@ def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
              P["play"], P["cldfrac"], P["ciwp"], P["clwp"], P["cswp"], cdf,
              M["cldfmcl"], M["ciwpmcl"], M["clwpmcl"], M["cswpmcl"], err))
         del cdf
-        gas = {k: cp.full((n, nl), v, f32) for k, v in GASES.items()}
+        gas = {k: cp.full((n, nl), v, f32) for k, v in (
+            GASES if gases is None else {**GASES, **gases}).items()}
         res = _lw.gpu_rrtmg_lw_batched_device(
             n, nl, 2, P["play"], P["plev"], P["tlay"], P["tlev"],
             tsk[rows], P["h2ovmr"], P["o3vmr"], gas["co2"], gas["ch4"],
@@ -793,10 +809,16 @@ class RRTMGKRadiation:
     o3input = 2.
 
     Fail closed on anything rad_rrtmg_driver does not read the way this
-    port does (aer_opt != 0, ghg_input != 0, icloud != 1, the MYNN/KF/BMJ/
+    port does (aer_opt != 0, icloud != 1, the MYNN/KF/BMJ/
     shallow-cumulus cloud merges, spectral output, nests receiving parent
     ozone) and on microphysics without snow (iceflag 5 is the ported
-    shortwave cloud-optics arm)."""
+    shortwave cloud-optics arm).
+
+    ghg_input = 1 goes beyond WRF, whose rad_rrtmg_driver never reads it:
+    each call takes CO2, N2O, CH4, CFC-11 and CFC-12 from the CAMtr table
+    at the valid time, exactly as legacy RRTMG does (read_CAMgases,
+    woof.core.camtr_gases), into both spectra; o2, cfc22 and ccl4 stay
+    fixed.  ghg_input = 0 is rad_rrtmg_driver's fixed gases, unchanged."""
 
     publishes_olr = True
     publishes_coszen = True
@@ -806,7 +828,7 @@ class RRTMGKRadiation:
 
     def __init__(self, start_time, latitude_deg, longitude_deg, *,
                  o3input=2, icloud=1, column_chunk=None, ozone_parent=None,
-                 ozone_routing=None, p_top=None):
+                 ozone_routing=None, p_top=None, ghg_input=0):
         from datetime import datetime
         from woof.core.rrtmg_legacy import RRTMGLegacyRadiation
         if not isinstance(start_time, datetime):
@@ -825,6 +847,9 @@ class RRTMGKRadiation:
         if int(icloud) != 1:
             raise NotImplementedError(
                 f"RRTMG-K is ported for icloud=1 (cal_cldfra1); got icloud={icloud!r}")
+        if int(ghg_input) not in (0, 1):
+            raise ValueError(f"ghg_input must be 0 or 1, got {ghg_input!r}")
+        self.ghg_input = int(ghg_input)
         if ozone_parent is not None and not callable(ozone_parent):
             raise TypeError("ozone_parent must be a callable provider or None")
         if ozone_parent is not None and self.o3input != 2:
@@ -886,6 +911,11 @@ class RRTMGKRadiation:
             "column_chunk": self.column_chunk,
             "ozone_routing": self.ozone_routing,
         }
+        if self.ghg_input:
+            # Absent at 0, so a fixed-gas checkpoint keeps its identity.
+            from woof.core.camtr_gases import camtr_identity
+            identity["ghg_input"] = self.ghg_input
+            identity["ghg_source"] = camtr_identity()
         if self.o3input == 2:
             from woof.ingest.wrf_ozone import (OZONE_LAT_SHA256,
                                                 OZONE_PLEV_SHA256,
@@ -908,8 +938,11 @@ class RRTMGKRadiation:
             raise ValueError(
                 f"adapter was constructed for o3input={self.o3input} but the "
                 f"run config requests o3input={cfg.o3input}")
-        for name, admitted in (("aer_opt", 0), ("ghg_input", 0),
-                               ("shcu_physics", None)):
+        if int(getattr(cfg, "ghg_input", 0) or 0) != self.ghg_input:
+            raise ValueError(
+                f"adapter was constructed for ghg_input={self.ghg_input} but "
+                f"the run config requests ghg_input={cfg.ghg_input}")
+        for name, admitted in (("aer_opt", 0), ("shcu_physics", None)):
             value = int(getattr(cfg, name, 0) or 0)
             if name == "shcu_physics":
                 if value == 5:
@@ -917,7 +950,7 @@ class RRTMGKRadiation:
                            "is not ported")
             elif value != admitted:
                 refuse(f"{name}={value} is not ported ({name}=0 only: "
-                       "rad_rrtmg_driver's fixed gases and no aerosol)")
+                       "no aerosol)")
         if str(getattr(cfg, "rrtmg_spectral_output", "none") or "none") != "none":
             refuse("rrtmg_spectral_output is a legacy RRTMG (4/4) diagnostic; "
                    "rad_rrtmg_driver has no spectral flux output")
@@ -1075,7 +1108,9 @@ class RRTMGKRadiation:
             albedo=_device_flat(fields["albedo"]), coszen=coszen_d,
             solcon=F(solcon), f_qc=flags_on["qc"], f_qi=flags_on["qi"],
             f_qs=flags_on["qs"], f_qnc=f_qnc, o3input=self.o3input,
-            column_chunk=self.column_chunk)
+            column_chunk=self.column_chunk,
+            gases=(camtr_gases(valid_time.year, julian) if self.ghg_input
+                   else None))
         del p3d, p8w, t3d, t8w, rho, moist, nc, o33d
 
         rthratenlw = cp.ascontiguousarray(out["rthratenlw"].T)

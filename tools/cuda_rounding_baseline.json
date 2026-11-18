@@ -5335,7 +5335,7 @@
    },
    {
     "file": "woof/core/rrtmgk.py",
-    "sha256": "23d26e1439ff6700337156c2a4c34457ad4eadf2cdf2377d8698c3aa73f75930"
+    "sha256": "5d6d6e8e9dea1250323513686ed017905d4054917247b1eb5c105c29ec830cef"
    },
    {
     "file": "woof/core/ruc_gpu.py",

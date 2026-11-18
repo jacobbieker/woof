@@ -1905,7 +1905,8 @@ class RunConfig:
     # WRF &physics ghg_input: 0 = fixed gases (CO2 a function of year),
     # 1 = time-varying CO2/N2O/CH4/CFC-11/CFC-12 from the CAMtr SSP245
     # table (woof.core.camtr_gases), re-interpolated at every radiation
-    # call as WRF's RRTMG and RRTM longwave wrappers do; one tree-wide
+    # call as WRF's RRTMG and RRTM longwave wrappers do (and, beyond WRF,
+    # woof's RRTMG-K, ra_lw/ra_sw_physics = 14); one tree-wide
     # value, inert on a domain whose radiation reads no gases (as in WRF).  The WRF v4 Registry
     # default is 1; the namelist importer writes 1 for a namelist named as
     # V4 that omits the key.  The engine's own default stays 0 so
@@ -3868,11 +3869,12 @@ def validate_rrtmgk_config(cfg, ra_lw_physics, ra_sw_physics) -> None:
             "RRTMG (4/4) diagnostic: WRF RRTMG-K's rad_rrtmg_driver has no "
             "band or g-point flux output, so there is nothing to write. Set "
             "rrtmg_spectral_output='none' with ra_lw_physics=ra_sw_physics=14.")
+    # ghg_input is admitted (both values): WRF's rad_rrtmg_driver never
+    # reads it, and woof's RRTMG-K takes legacy RRTMG's CAMtr gases under 1
+    # (woof.core.rrtmgk.RRTMGKRadiation), a declared extension beyond WRF.
     for name, admitted, why in (
             ("aer_opt", 0, "the aer_opt>0 aerosol optics on the RRTMG-K "
-             "shortwave are not ported"),
-            ("ghg_input", 0, "rad_rrtmg_driver carries fixed trace gases "
-             "and never reads ghg_input")):
+             "shortwave are not ported"),):
         value = int(getattr(cfg, name, 0) or 0)
         if value != admitted:
             raise ConfigurationRefused(

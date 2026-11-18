@@ -72,13 +72,16 @@ def test_aer_opt_1_selects_the_legacy_rrtmg_spectrum_like_2_and_3():
 
 def test_rrtmgk_pair_imports_and_refuses_what_it_does_not_port():
     """14/14 is admitted; what rad_rrtmg_driver is not ported for refuses
-    by name (rrtmg_spectral_output, aer_opt, ghg_input, icloud, no snow)."""
+    by name (rrtmg_spectral_output, aer_opt, icloud, no snow).  ghg_input=1
+    is admitted: woof's K takes legacy RRTMG's CAMtr gases (beyond WRF)."""
     config_mod.validate_run_config(_cfg(moist=True, mp_physics=8,
                                         ra_lw_physics=14, ra_sw_physics=14))
+    config_mod.validate_run_config(_cfg(moist=True, mp_physics=8,
+                                        ra_lw_physics=14, ra_sw_physics=14,
+                                        ghg_input=1))
     for kw, needle in (
             ({"rrtmg_spectral_output": "bands"}, "rrtmg_spectral_output"),
             ({"aer_opt": 1}, "aer_opt=1"),
-            ({"ghg_input": 1}, "ghg_input=1"),
             ({"icloud": 2}, "icloud=2"),
             ({"mp_physics": 1}, "carries QS"),
             ({"ra_sw_physics": 4}, "only as the pair")):

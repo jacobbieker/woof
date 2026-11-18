@@ -358,8 +358,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - RRTMG-K (`ra_lw_physics = ra_sw_physics = 14`, only as the pair), held
     bit for bit to compiled WRF 4.7.1 on oracle columns. It reuses the
     legacy RRTMG kernels and ports only K's differences. `aer_opt`,
-    `ghg_input`, `icloud = 2/3` and `rrtmg_spectral_output` are refused
-    with K by name. Hex runs it on its generic column seam (R1), bit for
+    `icloud = 2/3` and `rrtmg_spectral_output` are refused with K by name.
+    Beyond WRF, whose K ignores it, `ghg_input = 1` gives K legacy RRTMG's
+    time-varying CO2, N2O, CH4, CFC-11 and CFC-12 from the CAMtr table at
+    every radiation call, in both spectra and on both routes; unset, K
+    keeps WRF's fixed gases bit for bit. A K-only WRF namelist still
+    imports without it, as wrf.exe ran. Hex runs it on its generic column seam (R1), bit for
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
