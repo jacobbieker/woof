@@ -2016,10 +2016,11 @@ def geography_for_run(config_path: Path) -> dict:
                     rebuilt = GeogSelection.from_tokens(selection.root, tokens)
             required.update(getattr(rebuilt, role) for role in _DEFAULT_GEOG_DIRS)
         cfg = domains[domain_id].run
-        # The builder reads lake_depth only with use_lakedepth = 1
-        # (woof.static.lake); 0 runs on the uniform lakedepth_default.
-        if (getattr(cfg, "sf_lake_physics", 0)
-                and int(getattr(cfg, "use_lakedepth", 1)) == 1
+        # The builder's own rule (woof.static.lake.with_lake_statics):
+        # lake_depth only for sf_lake_physics = 1 with use_lakedepth = 1.
+        from dataclasses import replace as _replace
+        from woof.static.lake import with_lake_statics
+        if (with_lake_statics(_replace(selection, lake_depth=False), cfg).lake_depth
                 and "LAKE_DEPTH" not in served):
             required.add("lake_depth")
         from woof.static.orographic import required_static_fields, orographic_paths

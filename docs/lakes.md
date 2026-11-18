@@ -18,7 +18,7 @@ fields = "lakes"     # lake extent from 100 m land cover
 ```
 
 ```text
-woof fetch-geog --datasets lake_depth --source ncar   # once: WPS bathymetry
+woof fetch-geog --datasets lake_depth --source ncar   # once; --root DIR for a non-default geography tree
 woof go forecast.toml --lakes clm
 ```
 
@@ -79,11 +79,12 @@ Caveats:
   `lake_depth` geography) and starts the lakes from GLSEA where GLSEA covers
   and from ERA5's FLake state elsewhere. `woof go` does not download
   `lake_depth` itself (about 2.4 MB to download, about 1.9 GB unpacked; NCAR
-  is its only source). Where it is missing, preparation stops and names the
-  remedy: `woof fetch-geog --config <stem>.lakes-clm-<hash>.toml` (the copy
-  the switch wrote; add `--geog-root` for a non-default geography tree), then
-  run `woof go --lakes clm` again. `use_lakedepth = 0` (uniform
-  `lakedepth_default`) needs no bathymetry. `clm` also needs an active
+  is its only source). Where it is missing, go's geography check refuses
+  before the forcing download and names the remedy:
+  `woof fetch-geog --config <stem>.lakes-clm-<hash>.toml` (the copy the
+  switch wrote; add `--root DIR` for a non-default geography tree), then run
+  `woof go --lakes clm` again. `use_lakedepth = 0` (uniform
+  `lakedepth_default`) needs no bathymetry, and go does not ask for it. `clm` also needs an active
   land-surface scheme (`sf_surface_physics` 1, 2, 3, 4 or 8) and is refused
   up front otherwise.
 - `ic` keeps WRF's water-point lakes but replaces the forcing's lake skin
@@ -109,6 +110,12 @@ On the WOOF column route (R1), `woof hex forecast --physics sf_lake_physics=1`
 runs the same CLM lake kernel. It reads the lake mask and depth from
 `--surface-statics` (`woof hex surface-statics`). Every lake call has been
 replayed bitwise against WRF's kernel on CUDA and Metal.
+
+On the MPAS-suite route (R2), `--physics config_clm_lake_backend=hex-cuda`
+runs the same kernel on the LAKEMASK cells of `--surface-statics`. It starts
+every lake from the forcing's skin temperature (lakeini) and does not bind
+`lake_state_source`, so on the Great Lakes case its lakes start about 1.4 K
+colder than GLSEA ([mpas-physics-seam.md](../components/hex/docs/manual/mpas-physics-seam.md)).
 
 ## Lake extent
 

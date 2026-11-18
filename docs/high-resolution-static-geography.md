@@ -66,8 +66,9 @@ fields = "lakes"
 ```
 
 This mode takes the inland lake extent from the land-cover source
-(CGLC-MODIS-LCZ by default) and changes nothing else. It is opt-in and is
-recommended together with `woof go --lakes clm` wherever lakes matter
+(CGLC-MODIS-LCZ by default) and changes nothing else. It is opt-in and, on
+the WRF route, is recommended together with `woof go --lakes clm` wherever
+lakes matter
 (scores and caveats in [lakes.md](lakes.md#recommended-settings)):
 
 - A baseline lake cell (dominant category 21) that the source calls land

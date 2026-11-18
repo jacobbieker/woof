@@ -2,7 +2,7 @@
 
 ``--lakes clm`` turns on WRF's CLM lake model (``sf_lake_physics = 1``) with
 its WPS bathymetry (``use_lakedepth`` keeps its value, default 1; the
-``lake_depth`` geography is NOT fetched by ``woof go``: preparation refuses
+``lake_depth`` geography is NOT fetched by ``woof go``: go's geography check refuses
 until ``woof fetch-geog`` has staged it) and starts the lakes from ``lake_state_source =
 "auto+era5"``: GLSEA where it covers, ERA5's FLake state elsewhere.  ``--lakes
 ic`` keeps the lake model off and binds only the initial state; ``--lakes off``
@@ -34,10 +34,10 @@ OWNED = ("sf_lake_physics", "lake_state_source", "lake_state_path", "lake_state_
 def add_argument(parser):
     parser.add_argument(
         "--lakes", choices=tuple(MODES), default=None,
-        help="opt-in lakes (clm is recommended where lakes matter): clm = WRF's CLM lake "
+        help="opt-in lakes (clm is recommended where lakes matter, but not for Great Lakes "
+             "lake-effect snow; see docs/lakes.md): clm = WRF's CLM lake "
              "model with WPS bathymetry, lakes started from GLSEA where it covers and ERA5's "
-             "FLake state elsewhere; ic = that initial state only; off = the defaults "
-             "(docs/lakes.md)")
+             "FLake state elsewhere; ic = that initial state only; off = the defaults")
 
 
 def lake_settings(raw: dict, mode: str) -> dict:

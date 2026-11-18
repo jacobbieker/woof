@@ -736,7 +736,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   ([docs/lakes.md](docs/lakes.md#recommended-settings)): the Great Lakes cool
   2-3 times as fast as GLSEA (WRF's CLM lake), lake-effect cores are
   over-intense (50 mm FSS .81 to .70 at 9 km on Buffalo, Nov 2022),
-  `lake_depth` needs `woof fetch-geog`, and hex R2 lakes start about 1.4 K
+  `lake_depth` needs `woof fetch-geog` (unless `use_lakedepth = 0`), and hex
+  R2 lakes start about 1.4 K
   cold.
   On the hex MPAS-suite route, `--physics config_clm_lake_backend=hex-cuda`
   (opt-in) runs WRF's CLM lake on the LAKEMASK cells of `--surface-statics`,
