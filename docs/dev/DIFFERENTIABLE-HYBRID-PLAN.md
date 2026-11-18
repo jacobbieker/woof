@@ -135,6 +135,34 @@ nothing; section 8 lists the tests that prove it.
   - P0 replaces these with the size of the existing restart payloads
     (`woof/io/restart.py`, `woof/hex/checkpoint_io.py`), which are by
     construction the full trajectory state.
+- *Measured* restart payloads (P0.2, 2026-11-18, the Edinburgh campaign
+  case, written by `woof go --keep-checkpoints` and by `woof hex forecast
+  --checkpoint-hours`). These replace the estimates above:
+
+  | route and grid | file | bytes | per column-level |
+  |---|---|---|---|
+  | WRF 100x80x49, 9 km, Morrison, KF, YSU, Noah, RRTMGP | `gpuwmrst_d01_*.npz` | 99.9 MB | 255 B |
+  | hex uniform 5 km, 10,426 cells x 55 levels, WSM6 | `checkpoint.*.pkl` | 193.9 MB | 338 B |
+  | hex variable 3-20 km, 4,565 cells x 55 levels | `checkpoint.*.pkl` | 86.6 MB | 345 B |
+
+  The WRF file is 37.8 MB of prognostic state (25 arrays: winds, `thp`,
+  `p`, `php`, `mup`, the moist species and their number moments,
+  `h_diabatic`, effective radii). It also holds 36.2 MB of driver state,
+  mostly the lateral-boundary tables, 10.1 MB of carried physics scratch,
+  9.2 MB of surface and static fields, and 6.4 MB of diagnostics, acoustic
+  and cumulus carriers. The hex file is about 141 MB of physics-backend
+  state (land, PBL, radiation and microphysics carriers on cells),
+  4.6 MB of GF advective-forcing carrier, and about 48 MB of dycore state
+  and saved diagnostics. The hex JEDI background, the dycore-only state that
+  `--da-analysis` reads, is 66.4 MB (uniform) and 29.1 MB (variable).
+
+  Scaled per column-level, a WRF 200x200x50 checkpoint is about
+  **0.5 GB**, not 0.2 GB. A 100k-cell, 55-level hex checkpoint is about
+  **1.9 GB**, not 0.45 GB. The estimates counted only prognostics, and on
+  both routes the carried physics and boundary state is larger than the
+  prognostics. A trajectory store for P4 can drop what a window does not
+  change, such as boundary tables and static fields. It cannot drop the
+  physics carriers that the recompute sweeps read.
 
 ### 1.4 Time stepping
 
