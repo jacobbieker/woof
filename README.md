@@ -804,8 +804,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   forecast byte-identical. `mode = "residual"` or `"replace"` applies a
   model at the same seat through the couplers' own path, with a fallback to
   the scheme outside the trained range. Such runs are not WRF-identical:
-  `GPUWM_WRF_EXACT=1` refuses them, and checkpoints bind the artefact
-  ([docs/nn-physics.md](docs/nn-physics.md)).
+  `GPUWM_WRF_EXACT=1` refuses them, and checkpoints bind the artefact.
+  `python -m woof.nn.train TAP OUT` trains a small MLP on a tap with NumPy
+  alone, and `tools/nn_seat_cost.py` measures the seat's per-step cost; a
+  worked 24 h, 9 km example (PBL emulator, CUDA and Metal) is in
+  [docs/nn-physics.md](docs/nn-physics.md).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

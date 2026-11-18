@@ -195,6 +195,79 @@ leaves every prognostic value unchanged.
 The physics registry lists both modes under `nn_column_physics` as
 `experimental-runtime` with `wrf_identical: false`.
 
+## Training a model, and a worked example (WRF route)
+
+`python -m woof.nn.train TAP OUT` trains a small float32 MLP on a tap
+store with NumPy alone, and writes an `mlp-npz` artefact that runs on every
+backend. It uses Adam with minibatches. The last `--holdout` fraction of
+recorded steps (default 0.2) is kept out, so the score is out of sample in
+time. The manifest's statistics come from the training samples:
+- normalisation;
+- the trained input range that the safety screen uses;
+- `output_limit` (twice the largest target seen per level, floored at a
+  hundredth of the field's largest level limit, so a level that never saw a
+  non-zero target is not clamped to zero online).
+
+The tap's targets are the scheme's own tendency, so a trained artefact is
+an emulator of the scheme, for `mode = "replace"`. Under
+`mode = "residual"` its rate would be added on top of the scheme's; a
+residual model needs a reference target that the tap does not record.
+Samples are ordered by model time before the split, and a time recorded
+twice (a resumed run appends) keeps its last record.
+
+Its `training` table records the tap, the split, the hyper-parameters and
+the held-out R² per output. The trainer demonstrates the workflow and is
+not meant as a research trainer: anything that writes the same artefact
+can be used in its place.
+
+`tools/nn_seat_cost.py MODEL` measures what an applying seat adds to a
+dycore step on this machine's backend. It also times the model call alone.
+
+The worked example (P2.5) uses one real-data case: a 9 km, 80 x 100 x 49
+domain run for 24 h with an adaptive time step (about 1400 steps), with
+YSU, the revised MM5 surface layer and WSM6.
+
+1. **Record.** `--nn` tap of `pbl` (default inputs and outputs, every 4th
+   step, 256 columns). This gave 352 samples, and the tapped forecast's
+   3849 history variables were byte-identical to the plain run's over all
+   25 frames.
+2. **Train.** `--hidden 256,256 --epochs 40` took 25 s on the CPU.
+   Held-out R² (last 20 % of the day): dtheta 0.78, dqv 0.69, dqc 0.82,
+   du 0.53, dv 0.57. (This artefact was trained before the per-level
+   output-limit floor, so levels that saw no target were clamped to zero
+   in the runs below.)
+3. **Run online.** `mode = "replace"`, `scheme = "pbl"`, with fallback,
+   output limits and positivity on, for the full 24 h. The table gives the
+   RMSE against the physics run, averaged over the 25 hourly frames, on
+   the interior (5-column ring excluded). TH10 is potential temperature
+   over the lowest 10 levels. "Zero model" replaces the PBL tendency with
+   zero, as a baseline for what dropping the scheme costs.
+
+   | run | T2 (K) | U10 (m/s) | V10 (m/s) | Q2 (g/kg) | HFX (W/m²) | TH10 (K) |
+   |---|---|---|---|---|---|---|
+   | emulator, CUDA (torch) | 0.60 | 0.67 | 0.59 | 0.30 | 4.2 | 0.40 |
+   | emulator, Metal (MLX) | 0.60 | 0.67 | 0.59 | 0.30 | 4.2 | 0.40 |
+   | zero model, CUDA | 1.29 | 2.20 | 1.78 | 0.40 | 12.1 | 0.73 |
+
+   The emulator run stayed stable for the whole day on both backends.
+   About 14 % of column calls fell outside the trained range (one day of
+   training data) and kept the scheme's tendency. The error grows from
+   0.35 K T2 at 3 h to 1.0 K at 24 h.
+4. **Restart.** A replace run resumed from its 12 h checkpoint reproduces
+   the unbroken run byte for byte: every history variable over the last 12
+   frames, and every final restart array.
+5. **Cost.** `tools/nn_seat_cost.py`, same grid size (8000 columns, 349
+   inputs, 245 outputs, 256 x 256 tanh MLP):
+
+   | backend | dycore step | seat per step | model call |
+   |---|---|---|---|
+   | CUDA (A6000, shared with other jobs), torch | 29-30 ms | 5.3-6.0 ms | 3.3-3.7 ms |
+   | CUDA, numpy runner (host round trip) | 31.5 ms | 265 ms | 125 ms |
+   | Metal (MLX) | 32.8 ms | 3.4 ms | 1.05 ms |
+
+   The model call is timed per call, each read back before the next (the
+   latency a step pays). The CUDA rows are two runs on a shared card.
+
 ## Installing
 
 - CUDA: `pip install 'recast-woof[nn-torch]'`, with the CUDA build of
