@@ -621,7 +621,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   strict and WRF-exact numerics; Alps 3-1 km on an M3 Max: `ysu_column`
   46 -> 32 ms of isolated GPU time per d01 step, 10 -> 3 launches;
   `WOOF_METAL_YSU_TILE_BLOCKS=16` restores CUDA's width, and CUDA keeps
-  its occupancy-bounded 16 per SM). Hex: CUDA
+  its occupancy-bounded 16 per SM). On Metal the Smagorinsky deformation
+  reads u/msfu and v/msfv stored once per face instead of dividing at
+  every stencil point (9-11 % off that launch, the same words;
+  `WOOF_SMAG_DEFORM_HAT=0` restores the old kernel; CUDA keeps it,
+  because the extra pass did not pay there). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
@@ -863,6 +867,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `woof grad ens`, `woof grad letkf` and `woof grad efso` give ensemble
   sensitivities and each observation's impact on the forecast cost
   (EFSO), using the LETKF's own weights ([docs/grad.md](docs/grad.md)).
+  On a regional case, the finite-difference and ensemble sensitivities
+  agree in sign and pattern on the WRF route at 9 km, though ES and EFSO
+  overstate magnitudes by about 4-8x. On hex at 3-5 km they are dominated
+  by noise. Later gradient work therefore plans for 9-15 km for now
+  (plan, gate G0).
 - **A plan, not yet code, for variational data assimilation.**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
