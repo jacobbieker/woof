@@ -115,7 +115,7 @@ conservative choice, and both bands carry under 4 % of the TSI.
 At start-up the run prints a `[spacewx ssi]` line: the files, their SHA-256 and the band
 factors at the start. Hex refuses the key, as do RTE+RRTMGP (`ra_rrtmg_variant` other than
 `"rrtmg_legacy"`, whose g-point solar source has its own bands and its own NRLSSI2 facular/sunspot
-terms), every other shortwave scheme, and DFI (the filter captures the step in a CUDA graph,
+terms), every other shortwave scheme, FARMS (`swint_opt = 2`), and DFI (the filter captures the step in a CUDA graph,
 which would freeze the first call's factor). The CDR lags real time by a few months; a forecast
 for the coming days needs a netCDF in the CDR's layout. Photolysis (the chemistry's actinic
 flux) does not take the factor yet.
