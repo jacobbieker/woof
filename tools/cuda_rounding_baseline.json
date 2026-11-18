@@ -6,6 +6,22 @@
  "inventory": {
   "compile_sites": [
    {
+    "call_sha256": "6545f899483c3186fa4c979e195575594fae4bae1c74f3f7c2c721dca4f91e4d",
+    "constructor": "RawModule",
+    "factory": "__call__",
+    "factory_sha256": "a7617f79a249a59448d3331a27c25a8adaf0c480894c38ed8154a9f9fb3a08bf",
+    "file": "woof/backend/facade/_elementwise.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "6d12418565a64a0e50341d6528ad50a1e7119770107a87a34ea305d49c94071c",
+    "constructor": "RawModule",
+    "factory": "_split_call",
+    "factory_sha256": "a90719a10618386b4f0431062779e94c0672def23d9530ba5a01dc1828b17b83",
+    "file": "woof/backend/facade/_elementwise.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "00ae93a39da3ba70a7c427c9275367060475cb282919e165ab826b3e68a4dc41",
     "constructor": "compile_using_nvrtc",
     "factory": "__init__",
@@ -22,11 +38,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_seaice/evp_v842.py",
+    "call_sha256": "0151490adedf8e4747dd221eb95b88153439ddf2039c14e50c3009bddbde5910",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "0151490adedf8e4747dd221eb95b88153439ddf2039c14e50c3009bddbde5910",
     "factory_sha256": "b93945338cb2d78d24548ed781cbe818527c620b022ffdcf2b1917c04425fffc",
+    "file": "woof/hex/mpas_seaice/evp_v842.py",
     "status": "unresolved"
    },
    {
@@ -342,11 +358,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/eos_v842.py",
+    "call_sha256": "13b969660102d852de0db4d6f6f8b9fb4ece078d171bd31cf8a848a79b86f994",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "13b969660102d852de0db4d6f6f8b9fb4ece078d171bd31cf8a848a79b86f994",
     "factory_sha256": "9c91bc696e5b10e58b9c25aeaf799250deafce62f3e1d70122ee1a4b41a82dad",
+    "file": "woof/hex/mpas_ocean/eos_v842.py",
     "status": "unresolved"
    },
    {
@@ -510,11 +526,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/tracer_advection_v842.py",
+    "call_sha256": "2d9b4c6b74ebdde7fa9aa1e2491194d48a6cf2a7604fb6b8248049ea762b2efd",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "2d9b4c6b74ebdde7fa9aa1e2491194d48a6cf2a7604fb6b8248049ea762b2efd",
     "factory_sha256": "5d8cb4d40d1ce80f4f85681a825814c39f42f8c60866c9e1a4a399c0594d177f",
+    "file": "woof/hex/mpas_ocean/tracer_advection_v842.py",
     "status": "unresolved"
    },
    {
@@ -542,11 +558,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
+    "call_sha256": "3182ef23ba61e69d3a628e0c89fd5dd2105b51fbca9a70812c584c2fea12b0dd",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "3182ef23ba61e69d3a628e0c89fd5dd2105b51fbca9a70812c584c2fea12b0dd",
     "factory_sha256": "904b63973d7ae1288e980d578433e029cb0ad02c3b9fc3525379b61adcbbe90b",
+    "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
     "status": "unresolved"
    },
    {
@@ -566,11 +582,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_seaice/velocity_v842.py",
+    "call_sha256": "330108c3b38c3b297260a55207b05b8c5cb02e5eda43f364d2e01dd26681cf11",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "330108c3b38c3b297260a55207b05b8c5cb02e5eda43f364d2e01dd26681cf11",
     "factory_sha256": "8d497c22deef74f7ca648e8ff7696b359242e4958c80df4b26996b3c8593c269",
+    "file": "woof/hex/mpas_seaice/velocity_v842.py",
     "status": "unresolved"
    },
    {
@@ -582,11 +598,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/btr_subcycle_v842.py",
+    "call_sha256": "3906e794ed37c2b114e021e89124cd4712eade511394f273ba751a0f4df17ebc",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "3906e794ed37c2b114e021e89124cd4712eade511394f273ba751a0f4df17ebc",
     "factory_sha256": "f072dd33be2323ae178a38483e0f62d6be8d336f1b20c70d7003ccc4465a1374",
+    "file": "woof/hex/mpas_ocean/btr_subcycle_v842.py",
     "status": "unresolved"
    },
    {
@@ -638,11 +654,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/hydro_remap_gpu.py",
+    "call_sha256": "42b8305d4cb3f4eceac8f0854ca15c058202456bd568c62daf4674ff532410b8",
     "constructor": "RawModule",
     "factory": "_module",
-    "call_sha256": "42b8305d4cb3f4eceac8f0854ca15c058202456bd568c62daf4674ff532410b8",
     "factory_sha256": "96ad93018cf8e9224a7f46fa601d5b5e2ac29a1eb35f996a4031f5db2c24f0af",
+    "file": "woof/hex/hydro_remap_gpu.py",
     "status": "unresolved"
    },
    {
@@ -718,11 +734,11 @@
     "status": "resolved_literal"
    },
    {
-    "file": "woof/hex/mpas_ocean/vert_transport_v842.py",
+    "call_sha256": "45cd8018793f07ec85c57167b19593d04a530b81083e7efd76184dce97a489d5",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "45cd8018793f07ec85c57167b19593d04a530b81083e7efd76184dce97a489d5",
     "factory_sha256": "e30c9101d5b5a9f84ee38c8b085f19338d9d45b89b4d4c063f4b0b06d6f729da",
+    "file": "woof/hex/mpas_ocean/vert_transport_v842.py",
     "status": "unresolved"
    },
    {
@@ -742,11 +758,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
+    "call_sha256": "47176d8d8e8e2488c4a0fb42749c55aa69b95c05f6916d5df7d95d72bd8e17fe",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "47176d8d8e8e2488c4a0fb42749c55aa69b95c05f6916d5df7d95d72bd8e17fe",
     "factory_sha256": "8d331dd2ed2f9fe47ae64061d20c2bd406057fde6d78b40ea1148f6affecc037",
+    "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
     "status": "unresolved"
    },
    {
@@ -1070,14 +1086,6 @@
     "status": "unresolved"
    },
    {
-    "call_sha256": "6545f899483c3186fa4c979e195575594fae4bae1c74f3f7c2c721dca4f91e4d",
-    "constructor": "RawModule",
-    "factory": "__call__",
-    "factory_sha256": "a5f3b501ec8941b1c4822f3d9c3e14b1138037cb2abf6b77a87e3ae56abb857e",
-    "file": "woof/backend/facade/_elementwise.py",
-    "status": "unresolved"
-   },
-   {
     "call_sha256": "654f9bd5962d97fb679ba544c9d9af5b7ce7e44c8d9f614d1e3b2d8b06b0618d",
     "constructor": "RawKernel",
     "factory": "_kernel",
@@ -1118,11 +1126,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/vmix_v842.py",
+    "call_sha256": "6e4a7a11ade451e199f6bc5d39eefa19a19669b557bc87f312cf83857a925c67",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "6e4a7a11ade451e199f6bc5d39eefa19a19669b557bc87f312cf83857a925c67",
     "factory_sha256": "c787aed862a9e962b904697350d56871fdacc3b2fcec9fbb7fb1f4f497ebce8a",
+    "file": "woof/hex/mpas_ocean/vmix_v842.py",
     "status": "unresolved"
    },
    {
@@ -1158,11 +1166,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/split_step_v842.py",
+    "call_sha256": "73ef247459dd0f071654e95fed29efda63553ee956bea6edac9a4cd326fb5311",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "73ef247459dd0f071654e95fed29efda63553ee956bea6edac9a4cd326fb5311",
     "factory_sha256": "6a0b8504945f8d222893c5f06802cd889f239804416695ccc8df22f586874123",
+    "file": "woof/hex/mpas_ocean/split_step_v842.py",
     "status": "unresolved"
    },
    {
@@ -1462,11 +1470,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/tend_v842.py",
+    "call_sha256": "8be02c54ad521a8c9f571ea0d49504ae8224089144251818de78bca330318a2a",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "8be02c54ad521a8c9f571ea0d49504ae8224089144251818de78bca330318a2a",
     "factory_sha256": "dc721f4354689c31770e503e5598d1d517ac6311edc60a99cc09396285451952",
+    "file": "woof/hex/mpas_ocean/tend_v842.py",
     "status": "unresolved"
    },
    {
@@ -1950,11 +1958,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/forcing_v842.py",
+    "call_sha256": "be0924781cea8198f885aa10f37f1656bea898226917cc03a8ad782b13db8825",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "be0924781cea8198f885aa10f37f1656bea898226917cc03a8ad782b13db8825",
     "factory_sha256": "7fc3019e082bd303ec0732b2cc01c3e5193484ef89104e0e7e7279db9e9a65a6",
+    "file": "woof/hex/mpas_ocean/forcing_v842.py",
     "status": "unresolved"
    },
    {
@@ -2102,11 +2110,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
+    "call_sha256": "ceaedc4fadfe09d9e906128d73fc043ce23324037c0ce5e9e9012377da9a9f60",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "ceaedc4fadfe09d9e906128d73fc043ce23324037c0ce5e9e9012377da9a9f60",
     "factory_sha256": "6690eae7b041661d0f1d3126efd7095e39a150300b3045e4c7c28a96aee984e6",
+    "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
     "status": "unresolved"
    },
    {
@@ -2390,11 +2398,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
+    "call_sha256": "efd68658e722bf2ec5cfbcb1f350571ea9b0a968b7d68deb0ec8e1a674eb5977",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "efd68658e722bf2ec5cfbcb1f350571ea9b0a968b7d68deb0ec8e1a674eb5977",
     "factory_sha256": "d76bcd480b10f78cdea250bb5aea328d00cf7831668f1d30ce2b01507f75f650",
+    "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
     "status": "unresolved"
    },
    {
@@ -2422,11 +2430,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/tracer_hmix_v842.py",
+    "call_sha256": "f33b1c08fe4d4685aacdce406075227262b16d3215ec6f5a898cfe4c0c62f729",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "f33b1c08fe4d4685aacdce406075227262b16d3215ec6f5a898cfe4c0c62f729",
     "factory_sha256": "e7a7da4bc746fe6ad6bc31e049336c1e61974a5b3d4682fc1814a0d7454db08e",
+    "file": "woof/hex/mpas_ocean/tracer_hmix_v842.py",
     "status": "unresolved"
    },
    {
@@ -2454,11 +2462,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/hex/mpas_ocean/forward_v842.py",
+    "call_sha256": "f4afaef5300567cd77e77ddd70a3092e590b4f29456b6186b83f3a183d6ce8ad",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "call_sha256": "f4afaef5300567cd77e77ddd70a3092e590b4f29456b6186b83f3a183d6ce8ad",
     "factory_sha256": "b340a96ae30394b3bf8319a6d69677263f1aa4eeb1d91eb12ee8d3684d3ebd5a",
+    "file": "woof/hex/mpas_ocean/forward_v842.py",
     "status": "unresolved"
    },
    {
@@ -4252,6 +4260,10 @@
     "sha256": "61705513ff6b75df038761c71206e8d36f2d692a271a729f56c695ca5d5be5f4"
    },
    {
+    "file": "woof/core/kernels/spacewx_aurora.cu",
+    "sha256": "6ad45bcc356142e5d87cde5733d81f785ee97baf61889b60884730d1f227a571"
+   },
+   {
     "file": "woof/core/kernels/spacewx_ionosphere.cu",
     "sha256": "9694f11071f2ebcf06bdc3f45ef1dba3695e84ee72032aa8798160b931b18c4f"
    },
@@ -4817,7 +4829,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/btr_subcycle_v842.cu",
-    "sha256": "90ea1b3f379cbacd59766d3c52deb93c93fb85d07c17f6ec5e7c345f3ade317a"
+    "sha256": "973ebe26587d52e22a82510afdb987d9412185145081fd01f475f611bc3c2d0e"
    },
    {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.cu",
@@ -4837,11 +4849,11 @@
    },
    {
     "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.cu",
-    "sha256": "cf8c7da294c0ef4036ccd35bf4199a8ee66649b5b058412d0c41523ee3456fa6"
+    "sha256": "3d89ec777505010d5abf58841ae3f468c8819bd9d367c0fa24bc5d6b61789090"
    },
    {
     "file": "woof/hex/mpas_ocean/split_step_v842.cu",
-    "sha256": "17c6d67751e42d7d4a4f92693100cf2f5ea675721505cc5a5e6c5770dd1d80e4"
+    "sha256": "3cb511126403a96691175f2eede6ae110a9f004ea69150260cde5751b9c99124"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.cu",
@@ -4853,7 +4865,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/tracer_advection_v842.cu",
-    "sha256": "385544b1607e8173378150bfbe1b71084d09af60c00d415d6b29329de502fb06"
+    "sha256": "e7a8d5e6ad5985f157ae90aa2851ccf7df68d4603c06a2294e67c78520d73f85"
    },
    {
     "file": "woof/hex/mpas_ocean/tracer_hmix_v842.cu",
@@ -5039,7 +5051,7 @@
    },
    {
     "file": "woof/backend/_elementwise_source.py",
-    "sha256": "6f043e20637862cd88f4480de44ac8b6443a7224afc3968247ed7dac9f141fd4"
+    "sha256": "40305da757c2013784f0b7b0ac0d454df4440077f65f7c42cec28aa2a3b39381"
    },
    {
     "file": "woof/backend/facade/__init__.py",
@@ -5047,7 +5059,7 @@
    },
    {
     "file": "woof/backend/facade/_elementwise.py",
-    "sha256": "89151b56195d55b1b7cd2c77a89fa9d23671901e0880cf4a82e01fc39adbe67e"
+    "sha256": "88827b74840b8f7bf6c964258aa40dd624a45bfe1b60ea653470bf526ec76253"
    },
    {
     "file": "woof/backend/facade/_ops.py",
@@ -5071,7 +5083,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "f3ba3cfd66835785256a3680580ae8aae8c86d7e51ae53c18b1abbcb417d3fa1"
+    "sha256": "c85aa4c74af18d2f1e322657496c17deff551ad5184c43896ddabc7ade9621ef"
    },
    {
     "file": "woof/chem_micm.py",
@@ -5167,7 +5179,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "329ae34c65234b204cf534fa15bc19600af7b3b05185d64cb41d458225d7f82a"
+    "sha256": "088fda0da3e67f5a5fe8e4613bfe60365c2994964f2c7d45fc377f284a58ee49"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5287,11 +5299,11 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "6255e7f844b3bba51b236f088894f52961838c1db2c6b4d7dbb928603a921539"
+    "sha256": "51b855a2ced399c48b69be9658344f54651b51f6e69b1aee60aa4e8f2532af03"
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "17fb949bf923865891a5427051582f254822baa9eb283b332b34e5425101a5f5"
+    "sha256": "06176e13b2a50e86b58f8e3bc4d54231cc29f4e487a858540f59a69a676ff125"
    },
    {
     "file": "woof/core/refl.py",
@@ -5815,7 +5827,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/btr_subcycle_v842.py",
-    "sha256": "ed6e34ad8b23df0d53a2181c6566802118110fe63f59980edef44141017b32ad"
+    "sha256": "386eb67c63be10d0d72642b433fd1bb0f796430dd9b21414aeba23ddda629c8e"
    },
    {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
@@ -5835,11 +5847,11 @@
    },
    {
     "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
-    "sha256": "999f88461de350e125d35ffdb7fd7ca5f8b2b2a233e1e3bd7d2d3acd24b0479a"
+    "sha256": "dfb72403383d029c3848607e4c6bfe9b101d9379bb5d015b275665b144cd85d7"
    },
    {
     "file": "woof/hex/mpas_ocean/split_step_v842.py",
-    "sha256": "d3c85722b953f05af650c5d07444749daf5862433e990c0820a41cb7218c75f0"
+    "sha256": "925492d6d9c67fe27b20444cf20691cf5c070cf136d791066610cd874a13bac4"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
@@ -5847,11 +5859,11 @@
    },
    {
     "file": "woof/hex/mpas_ocean/tend_v842.py",
-    "sha256": "16ac7c444791da13ac1bbc7b85b8bae099c351e7f9038d4b6b7db8472cd89bb3"
+    "sha256": "71d51102171e6a384d4113d0c621ec430a4d0f3d6cd42cc3dc1b5fe8c5a72a69"
    },
    {
     "file": "woof/hex/mpas_ocean/tracer_advection_v842.py",
-    "sha256": "a056469caaf5f43724236d0e6960d4ad604c66ec5e5c5cf401138f53c8f72856"
+    "sha256": "d0e3ed9e222c1a2158cc1899f96d1289c9f85f956ceb8a1126f2f1fe1e96bbe6"
    },
    {
     "file": "woof/hex/mpas_ocean/tracer_hmix_v842.py",
@@ -5895,7 +5907,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.py",
-    "sha256": "d8703ab167ecc0737e9feb431b721593297b4b005ec7ee49f17cccacc8b53599"
+    "sha256": "7b70420a4f8ada2cc8158cd62b516a7cf5b595d0a7596b92f132aded5ce1b243"
    },
    {
     "file": "woof/hex/mpasdiag/_kernels.py",
@@ -6444,6 +6456,14 @@
     "sha256": "126819c122e8957029943dedc0e682d11ad0e7ab9f6a58326ef30aa67c002206"
    },
    {
+    "file": "woof/backend/_elementwise_source.py",
+    "sha256": "126819c122e8957029943dedc0e682d11ad0e7ab9f6a58326ef30aa67c002206"
+   },
+   {
+    "file": "woof/backend/_elementwise_source.py",
+    "sha256": "d300827e73c302eee4aee9f28843fd537e5a565a1e463fabeb7880c5408161ae"
+   },
+   {
     "file": "woof/backend/host/loader.py",
     "sha256": "87cf8eb09a6787526bdc8446a76383298fd5f57b6fd4f7b6abaf65d0e2074267"
    },
@@ -6482,6 +6502,10 @@
    {
     "file": "woof/backend/translate/__init__.py",
     "sha256": "97c9feb0c39c946455d6812804a5ad28d02e57497f5913c570a777ce1aa4c6b9"
+   },
+   {
+    "file": "woof/backend/translate/__init__.py",
+    "sha256": "9dd7bf281b631d724d317571226fced1557fc25920287cc89b141bb42a2ccccd"
    },
    {
     "file": "woof/backend/translate/__init__.py",
@@ -19277,19 +19301,19 @@
    },
    "native_errors": {},
    "options": {
-    "120": [
-     "-std=c++17",
-     "-ftz=true",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ],
     "100": [
      "-std=c++17",
      "-ftz=true",
      "--device-as-default-execution-space",
      "-lineinfo",
      "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
     ]
    },
    "source_sha256": "93472745bb9f9aa5791edb8966d67db8d24062a1401ca94e467da542a0e677ca"
@@ -22532,6 +22556,53 @@
     ]
    },
    "source_sha256": "87977c71b92c019cc182f63a0e64a22913dce7cc8c446e215a6269b91792cfad"
+  },
+  "kernels:spacewx_aurora": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "0e1114a593288c9587a44f9c52cf858e1f47997d48653f4dbc3566b9662842ae",
+    "sites": {
+     "100": 14
+    }
+   },
+   "native_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "1f58aad6004fbdb3a7626714c883bf572a850ce954a9edae893ead37cd719d0b"
   },
   "kernels:spacewx_ionosphere": {
    "assessment": "static_diagnostic_only",

@@ -13,7 +13,8 @@ holds it to what a variable-resolution mesh must do:
 
 Opt in with ``WOOF_HEX_VARRES_CASE=<work dir>`` naming a case prepared by ``python tools/hex_varres.py
 prep NAME --work-dir DIR`` (the directory holding ``NAME/``; the mesh and boundaries are generated there,
-never committed) and ``WOOF_HEX_VARRES_NAME`` (default ``edi-vr``).
+never committed) and ``WOOF_HEX_VARRES_NAME`` (default ``edi-vr``).  ``WOOF_HEX_VARRES_PHYSICS`` is the
+comma-separated ``KEY=VALUE`` physics of the forecast (default ``mp_physics=6``).
 """
 
 from __future__ import annotations
@@ -39,6 +40,8 @@ import hex_varres as vr  # noqa: E402
 
 pytestmark = pytest.mark.slow
 NAME = os.environ.get("WOOF_HEX_VARRES_NAME", "edi-vr")
+PHYSICS = [item.strip() for item in (os.environ.get("WOOF_HEX_VARRES_PHYSICS") or "mp_physics=6").split(",")
+           if item.strip()]
 
 
 def _receipt_values(node, wanted, found):
@@ -70,7 +73,7 @@ def test_an_hour_on_a_variable_resolution_mesh(tmp_path):
             "--cycle", data["cycle_default"], "--source", data["source_default"], "--hours", "1",
             "--history-every-minutes", "60", "--work-dir", str(work),
             "--skip", "mesh", "--skip", "intermediate", "--skip", "init", "--skip", "lbc", "--skip", "contract",
-            "--forecast-arg=--physics=mp_physics=6", "--no-products"]
+            *(f"--forecast-arg=--physics={item}" for item in PHYSICS), "--no-products"]
     done = subprocess.run(argv, cwd=str(REPO), capture_output=True, text=True)
     assert done.returncode == 0, done.stdout[-4000:] + done.stderr[-4000:]
 
@@ -100,6 +103,11 @@ def test_an_hour_on_a_variable_resolution_mesh(tmp_path):
     # ... and the forecast stepped with it, not only the row.
     ran_dt = float(receipt["driver_receipt"]["forecast"]["schedule"]["dt_seconds"])
     assert ran_dt <= float(admission["maximum_admitted_dt_seconds"])
+    # The requested physics is the physics the forecast ran, not the door's default.
+    ran = receipt["driver_receipt"]["forecast"]["host_preparation"]["constructor"]["physics_suite"]["physics"]
+    for item in PHYSICS:
+        key, _, value = item.partition("=")
+        assert str(ran.get(key.strip())) == value.strip(), (item, ran.get(key.strip()))
     found = _receipt_values(receipt, {"scheme", "gf_dx_column"}, {})
     if found.get("scheme") == "cu_grell_freitas":
         assert found.get("gf_dx_column") == "per-column"

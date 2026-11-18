@@ -220,6 +220,8 @@ DEFAULT_OFF = frozenset({
     # The opt-in ionosphere history (woof.spacewx), absent while off.
     "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
     "spacewx_ionosphere_maps",
+    # The opt-in auroral oval history (woof.spacewx), absent while off.
+    "spacewx_aurora_opt", "spacewx_kp_source",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The RUC sea-ice threshold switch, absent at 0 as in a 2.8.5 header.

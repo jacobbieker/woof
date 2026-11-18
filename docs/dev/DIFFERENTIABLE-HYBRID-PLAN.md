@@ -135,6 +135,47 @@ nothing; section 8 lists the tests that prove it.
   - P0 replaces these with the size of the existing restart payloads
     (`woof/io/restart.py`, `woof/hex/checkpoint_io.py`), which are by
     construction the full trajectory state.
+- *Measured* restart payloads (P0.2, on a 9 km regional case, written by
+  `woof go --keep-checkpoints` and by `woof hex forecast
+  --checkpoint-hours`). These replace the estimates above. Sizes are
+  decimal (1 MB = 10^6 bytes, 1 GB = 10^9 bytes):
+
+  | route and grid | physics | file | size | per column-level |
+  |---|---|---|---|---|
+  | WRF 100x80x49, 9 km | Morrison, KF, YSU, Noah, RRTMGP | `gpuwmrst_d01_*.npz` | 99.9 MB | 255 B |
+  | hex uniform 5 km, 10,426 cells x 55 levels | WSM6 suite | `checkpoint.*.pkl` | 193.9 MB | 338 B |
+  | hex variable 3-20 km, 4,565 cells x 55 levels | WSM6 suite (same as uniform) | `checkpoint.*.pkl` | 86.6 MB | 345 B |
+
+  The WRF file holds:
+  - 37.8 MB of prognostic state (25 arrays: winds, `thp`, `p`, `php`,
+    `mup`, the moist species and their number moments, `h_diabatic`,
+    effective radii);
+  - 36.2 MB of driver state: the held radiation, PBL and cumulus tendencies
+    (`driver/*_tendencies/*`, `rthratenlw`, `rthratensw`), 23 full 3-D
+    fields. The lateral-boundary tables are not stored; the restart checks
+    them by fingerprint and rebuilds them from the configuration;
+  - 10.1 MB of carried physics scratch;
+  - 9.3 MB of surface and static fields;
+  - 6.5 MB of diagnostics, acoustic and cumulus carriers.
+
+  The hex file holds about 141 MB of physics-backend state (land, PBL,
+  radiation and microphysics carriers on cells), 4.6 MB of GF
+  advective-forcing carrier, and about 48 MB of dycore state and saved
+  diagnostics. The hex JEDI background (`mpasout.*.nc`, the MPAS-layout
+  state that `--da-analysis` reads: dycore fields plus the land and
+  surface fields the seam carries) is 66.4 MB (uniform) and 29.1 MB
+  (variable).
+
+  Scaled per column-level, a WRF 200x200x50 checkpoint is about
+  **0.5 GB**, not 0.2 GB. A 100k-cell, 55-level hex checkpoint with the same
+  physics is about **1.9 GB**, not 0.45 GB. Almost nothing in either file
+  scales with the boundary perimeter, so per-column-level scaling holds.
+  The estimates did count some carried physics, but undercounted it: they
+  allowed for a few held tendencies, where the WRF route holds one per
+  physics channel and species, and they left out the hex physics backend.
+  A trajectory store for P4 can drop static fields, which a window does not
+  change. It cannot drop the held tendencies or the other physics carriers
+  that the recompute sweeps read.
 
 ### 1.4 Time stepping
 
@@ -416,15 +457,16 @@ full-physics step's scratch is GBs; 4,800 steps). Binomial checkpointing
 (revolve; Griewank and Walther 2000) reverses `N` steps with `c` stored
 states and at most `r` recomputation sweeps when `N <= C(c+r, r)`.
 
-*Estimates* (checkpoint sizes from 1.3; a per-step tape of about 4 x the
-checkpoint while one step is reversed):
+*Estimates* (checkpoint sizes are the measured payloads of 1.3, scaled;
+a per-step tape of about 4 x the checkpoint while one step is reversed,
+so about 2 GB on the WRF rows and 7.6 GB on the hex row):
 
 | case | steps (24 h) | checkpoint | c, r | snapshot memory | cost per gradient |
 |---|---|---|---|---|---|
-| WRF 200x200x50, 3 km, dt 18 s | 4,800 | 0.2 GB | 20, 4 (C=10,626) | 4 GB | 1 forward + up to 4 recompute sweeps + 1 adjoint sweep (2-4 x): ~7-9 x forward |
-| same | 4,800 | 0.2 GB | 60, 3 (C=39,711) | 12 GB | ~6-8 x forward |
-| WRF 200x200x50, 12 km, dt 72 s | 1,200 | 0.2 GB | 20, 3 (C=1,771) | 4 GB | ~6-8 x forward |
-| hex 100k cells x 55, 15 km, dt 90 s | 960 | 0.45 GB | 10, 4 (C=1,001) | 4.5 GB | ~7-9 x forward |
+| WRF 200x200x50, 3 km, dt 18 s | 4,800 | 0.5 GB | 20, 4 (C=10,626) | 10 GB | 1 forward + up to 4 recompute sweeps + 1 adjoint sweep (2-4 x): ~7-9 x forward |
+| same | 4,800 | 0.5 GB | 60, 3 (C=39,711) | 30 GB | ~6-8 x forward |
+| WRF 200x200x50, 12 km, dt 72 s | 1,200 | 0.5 GB | 20, 3 (C=1,771) | 10 GB | ~6-8 x forward |
+| hex 100k cells x 55, 15 km, dt 90 s | 960 | 1.9 GB | 10, 4 (C=1,001) | 19 GB | ~7-9 x forward |
 
 Wall-clock, *estimate*: the 3 km WRF row's forward run is about 4,800 x
 0.24 s = 19 min on the A6000 for ordinary steps, plus radiation steps
@@ -435,6 +477,10 @@ same one-in-ten radiation ratio at `radt` 12 min) is about 2.5 min forward
 and 20 min per gradient: usable. Hence the windows in section 2. (The
 adjoint would freeze radiation, option (f) 5, so the adjoint sweep itself
 does not pay the radiation cost; the recompute sweeps do.)
+
+With the measured sizes, the 60-snapshot WRF row (30 GB) and the hex row
+(19 GB) do not fit on the 48 GB A6000 next to the forward state and the
+tape, so they need host or NVMe snapshots.
 
 Snapshots can sit in device memory, pinned host memory (pb 125 GB; the
 Mac's 128 GB is unified) or NVMe, as multi-level checkpointing. woof's
