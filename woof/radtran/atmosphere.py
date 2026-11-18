@@ -130,14 +130,16 @@ def model_column(z_km, p_hpa, t_k, *, h2o_vmr=None, o3_vmr=None, co2_vmr=None,
 
 
 def model_columns(z_km, p_hpa, t_k, *, h2o_vmr=None, o3_vmr=None, co2_vmr=None,
-                  above: str = "us", gap_km: float = 1.0) -> Column:
+                  above: str = "us", gap_km: float = 1.0, top_km: float | None = None) -> Column:
     """Many model columns (ncol, nlev), top first, spliced onto one AFGL profile.
 
     Every column receives the same AFGL levels: those more than ``gap_km``
     above the highest model top, so each column has the same number of
     levels (the gap layer between a column's top and the first AFGL level
     differs in thickness).  Gases the model does not supply take the AFGL
-    mixing ratio at the model levels.
+    mixing ratio at the model levels.  ``top_km`` replaces the highest model
+    top of these columns when they are a subset of a larger set that must
+    receive that set's AFGL levels (it must be at least their own top).
     """
     z = np.asarray(z_km, dtype=np.float64)
     p = np.asarray(p_hpa, dtype=np.float64)
@@ -147,7 +149,12 @@ def model_columns(z_km, p_hpa, t_k, *, h2o_vmr=None, o3_vmr=None, co2_vmr=None,
     ncol, nlev = z.shape
     na = p * 100.0 / (KB * t) * 1e-6
     ref = _afgl_ref(above)
-    top = ref.z > z[:, 0].max() + gap_km
+    highest = z[:, 0].max()
+    if top_km is not None:
+        if top_km < highest:
+            raise ValueError("top_km is below a column's own model top")
+        highest = top_km
+    top = ref.z > highest + gap_km
     nt = int(top.sum())
 
     def spliced(upper, model=None):

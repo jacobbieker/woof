@@ -743,7 +743,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   up with its vmr, takes its own vmr-interpolated bracket). The blocks write straight into
   the solver's arrays, and the AFGL splice is written in place. The words
   are unchanged: 30,000 columns x 8 wavelengths take 15 s instead of 23 s
-  on the A6000 host.
+  on the A6000 host. Night columns are dropped before the AFGL splice,
+  cloud and aerosol preparation, not only before the solve, and every day
+  column keeps the AFGL levels of the whole set (the same words). That
+  saves about 0.35 s of a 4.1 s call at 100,000 columns with 30 % in
+  daylight (M3 Max).
   The RRTMG band and g-point output (`rrtmg_spectral_output = "bands"` or
   `"gpoints"`) keeps only the surface and top levels it publishes, with the
   same words: a 12,000-column shortwave call with g-points fell from about

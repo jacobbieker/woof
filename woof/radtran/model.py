@@ -194,9 +194,15 @@ def aerosol_layers(diag: Diagnostic, col, nz: int, *, rho_dry=None, nwfa=None, n
     return opac.mixture_layers(diag.aerosol, zb)
 
 
+#: Prepare only the day columns (the driver solves only those): False keeps
+#: every column's preparation, for A/B and byte-identity checks.
+SUBSET_DAY_COLUMNS = True
+
+
 def compute(diag: Diagnostic, *, z_w_m, p_w_pa, t_mass, qv_mass, umu0, albedo,
             qc_mass=None, qi_mass=None, rho_dry=None, re_cloud_um=None, re_ice_um=None,
-            nwfa=None, nifa=None, day_of_year: int | None = None, backend: str = "gpu") -> dict:
+            nwfa=None, nifa=None, day_of_year: int | None = None, backend: str = "gpu",
+            _top_km: float | None = None) -> dict:
     """Spectral diagnostic on (ncol, ...) host arrays, surface first.
 
     z_w_m, p_w_pa: (ncol, nz+1) interface altitude above sea level [m] and
@@ -206,11 +212,37 @@ def compute(diag: Diagnostic, *, z_w_m, p_w_pa, t_mass, qv_mass, umu0, albedo,
     Returns arrays shaped (nband, ncol) and (nband, ndir, ncol).
     """
     opts = diag.options(day_of_year)
-    z = np.asarray(z_w_m, dtype=np.float64)[:, ::-1] * 1e-3            # top first, km
+    z_all = np.asarray(z_w_m, dtype=np.float64)
+    ncol_all = z_all.shape[0]
+    mu = None if umu0 is None else np.broadcast_to(np.asarray(umu0, dtype=np.float64), (ncol_all,))
+    day = None if mu is None else np.nonzero(mu > 0.0)[0]
+    if SUBSET_DAY_COLUMNS and day is not None and 0 < day.size < ncol_all:
+        # Night columns get zeros from the driver, which already solves only
+        # the day columns; dropping them here as well skips their column,
+        # cloud and aerosol preparation.  Every column keeps the AFGL levels
+        # the whole set selects (top_km), so a day column's words do not
+        # depend on which columns are night.
+        rows = lambda a: None if a is None else np.asarray(a)[day]
+        top_km = float((z_all[:, -1] * 1e-3).max())
+        sub = compute(diag, z_w_m=z_all[day], p_w_pa=rows(p_w_pa), t_mass=rows(t_mass),
+                      qv_mass=rows(qv_mass), umu0=mu[day],
+                      albedo=np.broadcast_to(np.asarray(albedo, dtype=np.float64), (ncol_all,))[day],
+                      qc_mass=rows(qc_mass), qi_mass=rows(qi_mass), rho_dry=rows(rho_dry),
+                      re_cloud_um=rows(re_cloud_um), re_ice_um=rows(re_ice_um), nwfa=rows(nwfa),
+                      nifa=rows(nifa), day_of_year=day_of_year, backend=backend, _top_km=top_km)
+        out = dict(sub)
+        for key in ("edir", "edn", "eup", "eup_toa", "rad"):
+            if key in sub:
+                full = np.zeros(sub[key].shape[:-1] + (ncol_all,))
+                full[..., day] = sub[key]
+                out[key] = full
+        return out
+    z = z_all[:, ::-1] * 1e-3                                            # top first, km
     p = np.asarray(p_w_pa, dtype=np.float64)[:, ::-1] * 1e-2
     t = _interfaces(np.asarray(t_mass, dtype=np.float64))[:, ::-1]
     qv = _interfaces(np.maximum(np.asarray(qv_mass, dtype=np.float64), 0.0))[:, ::-1]
-    col = atmosphere.model_columns(z, p, t, h2o_vmr=qv * AIR_OVER_H2O, co2_vmr=diag.co2_vmr)
+    col = atmosphere.model_columns(z, p, t, h2o_vmr=qv * AIR_OVER_H2O, co2_vmr=diag.co2_vmr,
+                                   top_km=_top_km)
     ncol, nlev = col.z.shape
     nz = z.shape[1] - 1
     L = nlev - 1
