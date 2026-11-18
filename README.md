@@ -778,8 +778,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   sensitivities of `J_o`. They write a perturbed restart state, continued
   with `woof go --restart` (WRF route) or `--restart-from` with
   `--da-analysis` (hex), and turn the scored plus and minus runs into a
-  derivative, per scale and per observation type
-  ([docs/grad.md](docs/grad.md)).
+  derivative, per scale and per observation type. `woof grad members`,
+  `woof grad ens`, `woof grad letkf` and `woof grad efso` give ensemble
+  sensitivities and each observation's impact on the forecast cost
+  (EFSO), using the LETKF's own weights ([docs/grad.md](docs/grad.md)).
 - **A plan, not yet code, for variational data assimilation.**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
