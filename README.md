@@ -802,6 +802,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   between 1 and 8 May 2024). It works on the WRF route and on hex's generic column seam
   (`--physics solar_tsi_opt=1`), but not yet on hex's MPAS-native
   radiation suite, and it is refused with FARMS (`swint_opt = 2`).
+  `solar_ssi_opt = 1` adds the spectral change: the NOAA CDR's daily solar
+  spectrum moves RRTMG SW's source between its 14 bands (200-263 nm about
+  +2.5 % in 2024 against the cycle-24 mean) with the total unchanged, for
+  legacy RRTMG and RRTMG-K; NRLSSI2's 200-263 nm band follows SORCE's observed
+  one (daily correlation 0.79, the same 27-day amplitude).
   `woof spacewx ionosphere` computes an IRI-type climatological ionosphere on
   the GPU on a global grid: foF2, hmF2, foE, F1 and vertical TEC, from the
   CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
@@ -833,7 +838,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   integral proton flux (OMNI2 or SWPC real time) into polar-cap ion-pair rates
   and NOx/HOx production during solar proton events (Bethe stopping in air,
   35 eV per ion pair). Against the CMIP7 rates, the ratio is 0.4-1.0 at 0.1-100
-  hPa. The chemistry source is planned ([docs/spacewx.md](docs/spacewx.md)).
+  hPa. `spacewx_epp_opt = 1` adds that NO, OH and HO2 to RADM2 chemistry in
+  the polar caps, from the GOES flux at the start
+  ([docs/spacewx.md](docs/spacewx.md)).
 - **A plan, not yet code, for gradients and hybrid physics.**
   [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
   studies gradients of a forecast's fit to observations and opt-in

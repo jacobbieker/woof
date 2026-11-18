@@ -540,6 +540,10 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     "run.gf_deep_rain_evaporation_booking",
     # The opt-in TSI forcing (woof.spacewx), appended off.
     "run.solar_tsi_opt", "run.solar_tsi_source", "run.solar_tsi_mode",
+    # The opt-in solar band shares (woof.spacewx), appended off.
+    "run.solar_ssi_opt", "run.solar_ssi_source",
+    # The opt-in solar-proton chemistry source (woof.spacewx), appended off.
+    "run.spacewx_epp_opt", "run.spacewx_epp_source",
     # The WRF-Solar fields (b14dfd8bb cu_rad_feedback; 61107f3fe the
     # Deng shallow-cumulus slot, the EPS &stoch switches and MAD-WRF;
     # 9d6b47c4f use_theta_m), each appended last and off by default, so

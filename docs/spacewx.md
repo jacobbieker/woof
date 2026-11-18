@@ -17,8 +17,8 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
 | L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
-| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make | ion-pair rates available as `woof spacewx particles`; the chemistry source is planned |
-| L1b spectral irradiance | per-band solar variability in RRTMG SW and photolysis | planned |
+| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make | ion-pair rates available as `woof spacewx particles`; the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
+| L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route; photolysis not yet |
 
 Couplings that stay speculative are not implemented, and none is planned. One example is
 galactic cosmic rays acting on cloud nucleation: the CLOUD chamber finds that the response of
@@ -58,12 +58,67 @@ Coddington et al. 2016, doi:10.7289/V56W985W). It is fetched on demand and never
 **Limits.** The CDR lags real time by a few months, so a forecast for the coming days needs a
 user CSV. The spectral (band-wise) variability is not carried: the whole spectrum scales by the
 TSI ratio. The UV varies 5-10 times more than the TSI, which matters for stratospheric heating
-and ozone, not for weather (layer L1b). The MPAS-native hex radiation suite refuses the keys by
+and ozone, not for weather; `solar_ssi_opt` (L1b, below) adds it for RRTMG. The MPAS-native hex radiation suite refuses the keys by
 name. So does FARMS (`swint_opt = 2`).
 
 **Expected effect.** In absolute mode the shortwave drops by about 0.6 % (about 5 W m-2 at a
 clear-sky noon of 800 W m-2), which removes WRF's constant-high bias. In relative mode the
 change is the solar variability alone, at most about 0.15 %.
+
+## L1b: spectral irradiance (`solar_ssi_opt`)
+
+RRTMG's shortwave source has a fixed spectral shape (Kurucz, in each band's `sfluxref`), and
+`solar_tsi_opt` scales all of it by one number. Over the solar cycle the shape changes: the
+NOAA CDR (NRLSSI2) puts the 200-263 nm band (RRTMG band 28) 3 % higher at the 2024 maximum
+than at the 2019 minimum, 263-345 nm (band 27) 0.3 %, and the visible and near-infrared
+bands 0.1 % or less, with the opposite sign.
+
+With `solar_ssi_opt = 1` each of RRTMG SW's 14 bands (16-29) takes the factor
+
+    f_b(t) = [S_b(t) / TSI(t)] / [S_b,ref / TSI_ref]
+
+where S_b is the CDR's daily spectral irradiance integrated over the band and the reference is
+its mean over solar cycle 24 (2009-2019, shipped as 14 numbers in
+`woof/spacewx/solar_spectrum.py` and refitted by `tools/spacewx_ssi_reference.py`). The
+factors are renormalised so that sum_b w_b f_b = sum_b w_b with w_b = S_b,ref / TSI_ref:
+the band shares move, and the total stays what `solar_tsi_opt` (or WRF's 1370 W m-2) sets.
+RRTMG's own (Kurucz) band shares are within 1.2 % of NRLSSI2's except 263-345 nm (+7 %), so
+RRTMG's top-of-atmosphere total moves by about 1e-5 (1.3e-5 on 2024's largest UV day, measured
+on a legacy RRTMG column). The factor multiplies the per-band `adjflux` of the batched SW engine
+(`band_factor`; `None` leaves every output bitwise unchanged) at every radiation call, from the
+series at the call's model time.
+
+| band (RRTMG) | 2024 mean (min-max) | 2019 mean | 2014 mean |
+|---|---|---|---|
+| 28: 200-263 nm | 1.0246 (1.0110-1.0453) | 0.9931 | 1.0110 |
+| 27: 263-345 nm | 1.0026 (1.0008-1.0046) | 0.9993 | 1.0011 |
+| 26: 345-442 nm | 1.0012 (1.0000-1.0023) | 0.9997 | 1.0005 |
+| 25: 442-625 nm | 0.9998 | 1.0001 | 0.9999 |
+| 20: 1.63-1.94 um | 0.9990 (0.9982-1.0001) | 1.0003 | 0.9996 |
+
+**Validation.** NRLSSI2 is a model of the spectrum (from sunspot and facular indices),
+so its band 27-28 irradiances were compared with SORCE SSI level 3 (SOLSTICE below 310 nm,
+SIM above; LASP LISIRD), on the 1836 days of 2009-2019 both cover:
+
+| band | mean NRLSSI2 / SORCE | daily anomaly correlation | slope NRLSSI2 vs SORCE | 27-day std, SORCE / NRLSSI2 |
+|---|---|---|---|---|
+| 28: 200-263 nm | 1.003 | 0.79 | 0.73 | 0.285 % / 0.276 % |
+| 27: 263-345 nm | 1.018 | 0.60 | 0.26 | 0.083 % / 0.044 % |
+
+In band 28 the annual means rise and fall together (2014 +0.82 % / +1.17 %, 2019 -1.32 % /
+-0.66 % against the cycle mean); NRLSSI2's rotational variability matches, and its cycle
+amplitude is 0.7-0.85 of SORCE's (SOLSTICE's long-term degradation correction is the larger
+uncertainty there). In band 27 SORCE varies two to three times more, mostly SIM above 310 nm,
+whose cycle trends are disputed (Ermolli et al. 2013); NRLSSI2's smaller UV cycle is the
+conservative choice, and both bands carry under 4 % of the TSI.
+
+At start-up the run prints a `[spacewx ssi]` line: the files, their SHA-256 and the band
+factors at the start. Hex refuses the key, as do RTE+RRTMGP (`ra_rrtmg_variant` other than
+`"rrtmg_legacy"`, whose g-point solar source has its own bands and its own NRLSSI2 facular/sunspot
+terms), every other shortwave scheme, FARMS (`swint_opt = 2`), and DFI (the filter captures the step in a CUDA graph,
+which would freeze the first call's factor). The CDR lags real time by a few months; a forecast
+for the coming days needs a netCDF in the CDR's layout. Photolysis (the chemistry's actinic
+flux) does not take the factor yet.
 
 ## L3a: climatological ionosphere (`woof spacewx ionosphere`)
 
@@ -452,7 +507,7 @@ woof spacewx particles --time 2012-01-24T12:00Z --count 6 --step-hours 1 --sourc
   (`json/goes/primary/integral-protons-3-day.json`, >1 to >500 MeV, the last
   3 days), averaged to hours that hold at least 3 of their 12 values; where
   two spacecraft report the same time, the one with more records is kept. A path
-  reads an OMNI2 file.
+  reads an OMNI2 file (several joined by `:`).
 - **Event gate.** An hour counts only while J(>10 MeV) is at least 10 pfu (NOAA
   S1). Below that the channels hold mostly galactic cosmic rays and detector
   background (about 0.2 pfu at >10 MeV), which this layer leaves out.
@@ -520,12 +575,54 @@ Known limits:
   times low. The SWPC feed has the >1 and >5 MeV channels. Before 1988 (IMP 8),
   the channels that OMNI2's word 49 marks as holding magnetospheric protons
   are dropped.
+- OMNI2's proton words 43-48 are fill from 2021 on, so `--source omni` gives
+  no flux (NaN, no event) for recent years; use `--source swpc` for the last 3
+  days. Between 2021 and the SWPC window there is no source here.
 - The last energy bin, at about 1 GeV, also holds the protons above 1 GeV.
   In the atmosphere they lose energy at close to the minimum-ionising rate, as
   a 1 GeV proton does, so they are placed there rather than dropped.
 - Single days scatter by a factor of 2-5. The largest misses are the decay
   days of hard events: 2001-04-15 and 2005-01-20, where three channels cannot
   represent a spectrum hardening above 100 MeV.
+
+### In RADM2 chemistry (`spacewx_epp_opt`)
+
+`spacewx_epp_opt = 1` turns those ion pairs into chemistry on a WRF-route
+domain that runs RADM2 (`chem_sets` `radm2` or `radm2sorg`).
+- **What it adds.** At each chemistry step, inside `emission.radm2` (so the
+  ledger books it as emitted), each polar-cap column gains:
+  - 1.25 NO per ion pair;
+  - one OH and one HO2 per ion pair.
+  RADM2 has no N or H atoms. The N atoms are therefore counted as NO, as in
+  models without odd-nitrogen atoms. The H atom is counted as HO2, which it
+  becomes within seconds through H + O2 + M.
+- **Where.** The polar caps, |dipole magnetic latitude| >= 60 deg at the start.
+- **The flux.** `spacewx_epp_source` (`omni`, `swpc` or OMNI2 file(s) joined
+  by `:`) gives the GOES flux of the last hour that has ended by the domain's
+  start. That flux is held for the run (persistence, as the aurora's Kp is).
+  Each domain holds the hour before its own start: a nest started with its
+  parent holds the same hour, a nest started later holds its own. A fetched
+  flux is kept per source and start in the space-weather cache, so a resume
+  holds the same one. An hour below S1 adds nothing. An hour whose >10 MeV flux
+  is missing is refused rather than taken as quiet; OMNI2's proton words are
+  fill from 2021 on, so recent runs need `swpc` (the last 3 days).
+- **On the device.** The deposition rate per unit depth is tabulated on the
+  host, in float64, on the 241-point depth grid. Each layer reads it, log-log,
+  at its mid depth sqrt(X_top X_bottom), with X = p8w / g. This is within 3 %
+  of the layer means wherever the rate matters
+  (`tests/test_spacewx_epp_chem.py`).
+- **Refusals.** Streamed domains and hex refuse the option, for now, and so
+  does a run with no radiation scheme (the caps are placed on the radiation
+  geometry's xlat/xlong). A domain with no cell in a polar cap adds nothing.
+
+**Validation.** The source is the ion-pair rate above multiplied by fixed
+yields, so its validation is the CMIP7 comparison. A comparison with MLS (OH,
+HO2) or SABER is not made here, because at WRF's usual model tops it would
+measure nothing. At 10 hPa the January 2012 event makes about 0.001 ppbv of NO
+per day, and at 50 hPa less. Those amounts are far below MLS's single-profile
+precision for OH and HO2 at those heights. A high-top run reaching 1 hPa or
+above would gain about 1 ppbv per day, which MLS could see in principle; that
+comparison awaits such a run.
 
 Not modelled: electrons (auroral and radiation-belt). They deposit at 70-150
 km, above WRF and MPAS model tops (see the energy flux of L3b for the auroral
@@ -535,7 +632,8 @@ part). Galactic cosmic rays are also left out.
 
 | input | source | licence |
 |---|---|---|
-| TSI, SSI | NOAA NCEI CDR (NRLSSI2) | NOAA CDR, open |
+| TSI, SSI (and the shipped 14 cycle-24 band shares) | NOAA NCEI CDR (NRLSSI2 v03; Coddington et al. 2016) | NOAA CDR, open |
+| SORCE SSI level 3 (validation only) | LASP LISIRD (SORCE SOLSTICE/SIM) | NASA, public |
 | Kp, ap, Ap, F10.7 | GFZ Potsdam (`kp.gfz.de`) | CC BY 4.0; the sunspot column (CC BY-NC) is not read |
 | F10.7, solar wind real time (`json/rtsw`) | NOAA SWPC | public domain |
 | solar wind historical (OMNI2 hourly, incl. Kp and AL) | NASA SPDF OMNIWeb | public |
@@ -589,5 +687,6 @@ The ionosphere layers will be checked against observations:
 
 The proton ion-pair rates are checked against the CMIP7 rates (above). Once the chemistry source
 exists, it will be checked against MLS/ACE NOx and ozone. L1 is checked by scaling
-identity tests on CUDA and Metal. Its bias direction can be checked against NSRDB / source.coop
+identity tests on CUDA and Metal, L1b by band-factor identity and linearity tests and against
+SORCE SSI (above). L1's bias direction can be checked against NSRDB / source.coop
 surface solar. Its 0.07-0.6 % signal is below the noise of single-station observations.
