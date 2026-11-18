@@ -1,9 +1,9 @@
 """wrf_smag_uvhat + wrf_smag_deform_hat (kernels/smag2d.cu): u/msfu and
 v/msfv divided once per face and stored, then read by the deformation
 kernel in place of the division at every stencil point; word for word the
-wrf_smag_deform tensors (dycore.launch_wrf_smag2d_km), over periodic and
-bounded axes, 1-D and 3-D base geopotential, moist and dry density, under
-fast, strict and WRF-exact numerics.
+wrf_smag_deform tensors (dycore.launch_wrf_smag2d_km; default on Metal
+only), over periodic and bounded axes, 1-D and 3-D base geopotential, moist
+and dry density, under fast, strict and WRF-exact numerics.
 """
 
 from __future__ import annotations
@@ -63,3 +63,26 @@ def test_stored_hat_words_hold_under_each_numerics(numerics, exact):
     Each mode in its own child process."""
     _numerics_child.run(__file__, ["test_stored_hats_keep_the_deformation_words"],
                         numerics, exact)
+
+
+def test_stored_hats_are_metal_only_by_default(monkeypatch):
+    """Metal takes the stored-hat pair by default; CUDA keeps
+    wrf_smag_deform (the extra pass did not pay there); the variable
+    forces either on any backend and refuses anything but 0/1."""
+    import woof.backend as wb
+    from woof.core import dycore
+
+    monkeypatch.delenv("WOOF_SMAG_DEFORM_HAT", raising=False)
+    monkeypatch.setattr(wb, "active", lambda: "mlx")
+    assert dycore._smag_deform_hat_enabled()
+    monkeypatch.setattr(wb, "active", lambda: "cuda")
+    assert not dycore._smag_deform_hat_enabled()
+    monkeypatch.setenv("WOOF_SMAG_DEFORM_HAT", "1")
+    assert dycore._smag_deform_hat_enabled()
+    monkeypatch.setattr(wb, "active", lambda: "mlx")
+    monkeypatch.setenv("WOOF_SMAG_DEFORM_HAT", "0")
+    assert not dycore._smag_deform_hat_enabled()
+    for bad in ("", "true", "2"):
+        monkeypatch.setenv("WOOF_SMAG_DEFORM_HAT", bad)
+        with pytest.raises(ValueError, match="WOOF_SMAG_DEFORM_HAT"):
+            dycore._smag_deform_hat_enabled()

@@ -1323,10 +1323,22 @@ def _wrf_smag_grid_args(state: DomainState, cfg: RunConfig, *,
             np.int32(moist)]
 
 
-#: ``WOOF_SMAG_DEFORM_HAT=0`` keeps wrf_smag_deform dividing u/msfu and
-#: v/msfv at every stencil point (A/B and byte-identity checks).
+#: Stored u/msfu and v/msfv for wrf_smag_deform (wrf_smag_uvhat +
+#: wrf_smag_deform_hat): on by default on Metal only, where it takes
+#: about 11 % off the deformation launch.  On CUDA the extra pass costs
+#: more than the divisions it saves (A6000: 4.96 vs 5.11 ms per call), so
+#: CUDA keeps wrf_smag_deform.  The words are the same either way
+#: (tests/test_smag_deform_hat.py).  ``WOOF_SMAG_DEFORM_HAT=1`` or ``=0``
+#: forces either kernel on any backend (A/B and byte-identity checks).
 def _smag_deform_hat_enabled() -> bool:
-    return os.environ.get("WOOF_SMAG_DEFORM_HAT", "1") != "0"
+    forced = os.environ.get("WOOF_SMAG_DEFORM_HAT")
+    if forced is not None:
+        if forced not in ("0", "1"):
+            raise ValueError(
+                f"WOOF_SMAG_DEFORM_HAT must be 0 or 1, got {forced!r}")
+        return forced == "1"
+    from woof import backend
+    return backend.active() == "mlx"
 
 
 def launch_wrf_smag2d_km(state: DomainState, cfg: RunConfig,
