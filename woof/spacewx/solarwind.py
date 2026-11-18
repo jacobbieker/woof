@@ -105,10 +105,6 @@ class SolarWind:
         """The hour's northern polar cap index (NaN where the source has none)."""
         return float(self.pcn[self._index(when)])
 
-    def protons_at(self, when: datetime) -> np.ndarray:
-        """The hour's integral proton fluxes >1, >2, >4, >10, >30, >60 MeV (NaN where missing)."""
-        return self.protons[self._index(when)].copy()
-
     def hourly(self, when: datetime) -> dict:
         i = self._index(when)
         return {"by": float(self.by[i]), "bz": float(self.bz[i]),
@@ -186,9 +182,15 @@ def parse_omni2(text: str, source: str = "", sha256: str = "") -> SolarWind:
 
     kp = _kp_from_code(np.where(d[:, 38] >= 99, 0, d[:, 38]))
     kp[d[:, 38] >= 99] = np.nan
+    protons = np.stack([word(43, 999999.0)] + [word(n, 99999.0) for n in range(44, 49)], axis=1)
+    # Word 49, the magnetospheric flag: 0..6 means the lowest 6 - flag
+    # channels hold magnetospheric protons (IMP 8), so they are dropped; -1
+    # (GOES, after 1988) means not checked.
+    flag = d[:, 48]
+    for k in range(6):
+        protons[(flag >= 0) & (flag <= 6) & (k < 6 - flag), k] = np.nan
     return SolarWind(hours, word(16, 999.9), word(17, 999.9), word(24, 999.9), word(25, 9999.0),
-                     kp, word(53, 99999.0), source, sha256, word(41, 99999.0), word(52, 999.9),
-                     np.stack([word(43, 999999.0)] + [word(n, 99999.0) for n in range(44, 49)], axis=1))
+                     kp, word(53, 99999.0), source, sha256, word(41, 99999.0), word(52, 999.9), protons)
 
 
 def _concat(parts: list[SolarWind], source: str) -> SolarWind:

@@ -75,8 +75,9 @@ def test_mixing_ratio_tendency_needs_no_temperature():
     np.testing.assert_array_equal(P.polar_cap([-75.0, -59.9, 0.0, 60.0, 89.0]), [1, 0, 0, 1, 1])
 
 
-def _omni_row(year, doy, hour, protons):
+def _omni_row(year, doy, hour, protons, flag="-1"):
     words = ["0"] * 55
+    words[48] = flag
     words[0], words[1], words[2] = str(year), str(doy), str(hour)
     fills = {16: "999.9", 17: "999.9", 24: "999.9", 25: "9999.", 39: "99", 41: "99999", 52: "999.9",
              53: "99999"}
@@ -97,11 +98,18 @@ def test_omni2_proton_words_and_swpc_hourly_means(tmp_path):
     assert not rec.active(rec.at(datetime(2012, 1, 24, 1)))
     with pytest.raises(P.ParticleError):
         rec.at(datetime(2012, 1, 24, 2))
+    # Word 49 = 4: magnetospheric protons in the lowest two channels, dropped.
+    imp = solarwind.parse_omni2(_omni_row(1985, 100, 0, ["50.0", "20.0", "8.0", "2.0", "0.5", "0.1"], flag="4") + "\n", "t")
+    np.testing.assert_array_equal(np.isnan(imp.protons[0]), [True, True, False, False, False, False])
     recs = []
     for minute in range(0, 60, 5):
         for e, v in ((">=10 MeV", 20.0 + minute), (">=100 MeV", 0.5), (">=500 MeV", -1.0)):
             recs.append({"time_tag": f"2026-11-17T07:{minute:02d}:00Z", "satellite": 18, "flux": v, "energy": e})
     recs.append({"time_tag": "2026-11-17T08:00:00Z", "satellite": 18, "flux": 9.0, "energy": ">=10 MeV"})
+    # A second spacecraft on the same tags (a primary switch) does not join the mean.
+    for minute in range(0, 60, 5):
+        recs.append({"time_tag": f"2026-11-17T07:{minute:02d}:00Z", "satellite": 16, "flux": 1.0e4,
+                     "energy": ">=10 MeV"})
     sw2 = P.parse_swpc(json.dumps(recs))
     assert sw2.channels == (10.0, 100.0)
     np.testing.assert_allclose(sw2.at(datetime(2026, 11, 17, 7)), [20.0 + 27.5, 0.5])
@@ -130,3 +138,15 @@ def test_cli_prints_profiles_and_a_receipt(tmp_path, capsys):
     assert "SPE" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="positive"):
         cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--source", str(path), "--levels", "-1"])
+    with pytest.raises(SystemExit, match="distinct"):
+        cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--source", str(path), "--levels", "1", "1"])
+    with pytest.raises(SystemExit, match="step-hours"):
+        cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--count", "2", "--step-hours", "-1",
+                  "--source", str(path)])
+    # An event hour with too few channels for a spectrum: no rates, and said so.
+    path.write_text(_omni_row(2012, 24, 0, ["999999.99", "99999.99", "99999.99", "500.0", "99999.99",
+                                            "99999.99"]) + "\n")
+    assert cli.main(["spacewx", "particles", "--time", "2012-01-24T00:00Z", "--source", str(path),
+                     "--levels", "1", "--out", str(out)]) == 0
+    row = json.loads(out.read_text())["times"][0]
+    assert row["spe"] and row["ion_pairs_per_gram_s"] == [None] and "spectrum_error" in row

@@ -355,14 +355,16 @@ woof spacewx particles --time 2012-01-24T12:00Z --count 6 --step-hours 1 --sourc
   >60 MeV), cm-2 s-1 sr-1, GOES since the 1990s; after about 2010 only >10, >30
   and >60 MeV are filled). `--source swpc` reads SWPC's real-time GOES feed
   (`json/goes/primary/integral-protons-3-day.json`, >1 to >500 MeV, the last
-  3 days), averaged to hours that hold at least 3 of their 12 values. A path
+  3 days), averaged to hours that hold at least 3 of their 12 values; where
+  two spacecraft report the same time, the one with more records is kept. A path
   reads an OMNI2 file.
 - **Event gate.** An hour counts only while J(>10 MeV) is at least 10 pfu (NOAA
   S1). Below that the channels hold mostly galactic cosmic rays and detector
   background (about 0.2 pfu at >10 MeV), which this layer leaves out.
 - **Spectrum.** A power law in log J against log E between the channels
   present. Past the last channel the last pair's slope is kept, but never
-  flatter than J ~ E^-3, up to 1 GeV.
+  flatter than J ~ E^-3, up to 1 GeV (the protons above 1 GeV are counted at
+  1 GeV).
 - **Deposition.** Protons in air:
   - stopping power from the Bethe formula (Z/A 0.4992, I = 85.7 eV, within 3 %
     of NIST PSTAR at 10 and 100 MeV);
@@ -417,10 +419,15 @@ of 2 gives 1.2, 2.1 and 7.3; a floor of 3 gives 0.65, 0.59 and 0.96; a floor of
 4 gives 0.35, 0.16 and 0.13. Floor 3 is shipped.
 
 Known limits:
-- After 2010, OMNI2 has no channel below 10 MeV. The flux under 10 MeV, which
-  ionises above about 0.03 hPa, is then the 10-30 MeV power law carried
-  downward, and 0.01 hPa reads about 7 times low. The SWPC feed has the >1 and
-  >5 MeV channels.
+- The spectrum starts at the lowest channel present, with nothing below it.
+  After 2010, OMNI2 has no channel below 10 MeV, so the protons under 10 MeV,
+  which ionise above about 0.03 hPa, are missing, and 0.01 hPa reads about 7
+  times low. The SWPC feed has the >1 and >5 MeV channels. Before 1988 (IMP 8),
+  the channels that OMNI2's word 49 marks as holding magnetospheric protons
+  are dropped.
+- The last energy bin, at about 1 GeV, also holds the protons above 1 GeV.
+  In the atmosphere they lose energy at close to the minimum-ionising rate, as
+  a 1 GeV proton does, so they are placed there rather than dropped.
 - Single days scatter by a factor of 2-5. The largest misses are the decay
   days of hard events: 2001-04-15 and 2005-01-20, where three channels cannot
   represent a spectrum hardening above 100 MeV.

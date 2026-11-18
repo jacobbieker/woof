@@ -249,8 +249,10 @@ def particles_main(args) -> int:
     start = _utc(args.time)
     times = [start + timedelta(hours=i * args.step_hours) for i in range(max(1, args.count))]
     levels = np.asarray(sorted(args.levels), dtype=np.float64)
-    if levels.size == 0 or np.any(levels <= 0):
-        raise SystemExit("woof spacewx particles: --levels must be positive pressures in hPa")
+    if levels.size == 0 or np.any(levels <= 0) or np.any(np.diff(levels) <= 0):
+        raise SystemExit("woof spacewx particles: --levels must be distinct positive pressures in hPa")
+    if args.count > 1 and args.step_hours <= 0:
+        raise SystemExit("woof spacewx particles: --step-hours must be positive")
     # Each level is the centre of a layer whose edges are the geometric means
     # between levels (the ends mirror their neighbours).
     if levels.size == 1:
@@ -276,20 +278,25 @@ def particles_main(args) -> int:
         q = np.zeros(levels.size)
         if row["spe"]:
             try:
-                f = P.absorbed(flux, P.DEPTH_GRID, record.channels, table)
-                q = P.ion_pairs_per_gram(f, edges * 100.0)
+                x = P.depth_from_pressure(edges * 100.0)
+                f = P.absorbed(flux, x, record.channels, table)
+                q = np.abs(np.diff(f)) / np.diff(x) / P.W_ION_MEV
                 row["energy_flux_mev_cm2_s"] = P.energy_flux(flux, record.channels)
-            except P.ParticleError:
-                row["spe"] = False
+            except P.ParticleError as exc:
+                # An event hour whose spectrum cannot be built: no rates, said so.
+                q = np.full(levels.size, np.nan)
+                row["spectrum_error"] = str(exc)
         row["levels_hpa"] = levels.tolist()
-        row["ion_pairs_per_gram_s"] = q.tolist()
-        row["nox_ppbv_per_day"] = (P.vmr_tendency(q, P.NOX_PER_ION_PAIR) * per_day).tolist()
-        row["hox_ppbv_per_day"] = (P.vmr_tendency(q, P.HOX_PER_ION_PAIR) * per_day).tolist()
+        listed = lambda a: [None if not np.isfinite(v) else float(v) for v in a]
+        row["ion_pairs_per_gram_s"] = listed(q)
+        row["nox_ppbv_per_day"] = listed(P.vmr_tendency(q, P.NOX_PER_ION_PAIR) * per_day)
+        row["hox_ppbv_per_day"] = listed(P.vmr_tendency(q, P.HOX_PER_ION_PAIR) * per_day)
         rows.append(row)
         k10 = record.channels.index(10.0)
         text = "  ".join(f"{lev:g} hPa {v:9.3e}" for lev, v in zip(levels, q))
         print(f"{when:%Y-%m-%dT%H:%MZ}  >10 MeV {flux[k10]:9.2f} pfu  "
-              f"{'SPE' if row['spe'] else 'quiet'}  ion pairs g-1 s-1: {text}")
+              f"{'SPE' if row['spe'] else 'quiet'}  ion pairs g-1 s-1: {text}"
+              + (f"  (no spectrum: {row['spectrum_error']})" if "spectrum_error" in row else ""))
     doc = {"spacewx_particles_model": "solar protons: Bethe range in air, isotropic, W = 35 eV, "
                                       f"polar cap |MLAT| >= {P.POLAR_CAP_DEG:g}",
            "spacewx_proton_source": f"{record.source} sha256:{record.sha256}",

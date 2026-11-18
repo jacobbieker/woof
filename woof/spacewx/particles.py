@@ -116,7 +116,11 @@ def spectrum(integral_flux, channels=CHANNELS_MEV, *, e_max: float = E_MAX, n: i
     """(energy edges, MeV; protons cm-2 s-1 sr-1 in each bin) from integral
     fluxes J(>E) at the channels (NaN where missing; at least two present):
     a power law between successive channels present, extended past the last
-    one with the last pair's slope, from the lowest channel present to ``e_max``."""
+    one with the last pair's slope (never flatter than ``tail_index``), from
+    the lowest channel present (nothing below it) to ``e_max``.  The last bin
+    also holds every proton above ``e_max``: in the atmosphere a proton above
+    1 GeV loses energy at close to the minimum-ionising rate, as one at 1 GeV
+    does, so the tail is placed there rather than dropped."""
     tail_index = TAIL_INDEX_MIN if tail_index is None else tail_index
     j = np.asarray(integral_flux, dtype=np.float64)
     ch = np.asarray(channels, dtype=np.float64)
@@ -131,7 +135,7 @@ def spectrum(integral_flux, channels=CHANNELS_MEV, *, e_max: float = E_MAX, n: i
     lx = np.log(edges)
     last = min((lj[-1] - lj[-2]) / (le[-1] - le[-2]), -tail_index)
     big_j = np.exp(np.where(lx > le[-1], lj[-1] + last * (lx - le[-1]), np.interp(lx, le, lj)))
-    big_j[-1] = 0.0                        # nothing above e_max
+    big_j[-1] = 0.0                        # the last bin takes J(>edges[-2]): the tail above e_max too
     return edges, np.maximum(big_j[:-1] - big_j[1:], 0.0)
 
 
@@ -175,7 +179,7 @@ def ion_pairs_per_gram(table_f, p_edges_pa, depth_grid=None, xp=np):
     grid = DEPTH_GRID if depth_grid is None else depth_grid
     lx = xp.log(xp.asarray(grid))
     f = xp.asarray(table_f)
-    x = xp.asarray(p_edges_pa, dtype=xp.float64) / _G * 0.1
+    x = depth_from_pressure(p_edges_pa) if xp is np else xp.asarray(p_edges_pa, dtype=xp.float64) / _G * 0.1
     lxe = xp.log(xp.clip(x, grid[0], grid[-1]))
     fe = xp.interp(lxe.ravel(), lx, f).reshape(x.shape)
     fe = xp.where(x <= grid[0], f[0] * x / grid[0], fe)
@@ -251,19 +255,32 @@ def parse_swpc(text: str, source: str = "swpc") -> ProtonRecord:
     rows = json.loads(text)
     if not isinstance(rows, list):
         raise ParticleError(f"{source}: not a list of records")
-    bins: dict = {}
-    channels = set()
+    # One value per five-minute tag and channel: where two spacecraft report
+    # the same tag (around a primary switch), the one with more records wins.
+    count: dict = {}
+    for row in rows:
+        if isinstance(row, dict):
+            count[row.get("satellite")] = count.get(row.get("satellite"), 0) + 1
+    best: dict = {}
     for row in rows:
         try:
             e = float(str(row["energy"]).strip().lstrip(">=").split()[0])
-            t = np.datetime64(str(row["time_tag"])[:13], "h")
+            tag = str(row["time_tag"])
+            np.datetime64(tag[:13], "h")
             v = float(row["flux"])
         except (KeyError, TypeError, ValueError, IndexError):
             continue
         if not np.isfinite(v) or v <= 0:
             continue
+        sat = row.get("satellite")
+        held = best.get((tag, e))
+        if held is None or count.get(sat, 0) > count.get(held[0], 0):
+            best[(tag, e)] = (sat, v)
+    bins: dict = {}
+    channels = set()
+    for (tag, e), (_sat, v) in best.items():
         channels.add(e)
-        bins.setdefault(t, {}).setdefault(e, []).append(v)
+        bins.setdefault(np.datetime64(tag[:13], "h"), {}).setdefault(e, []).append(v)
     if not bins or 10.0 not in channels:
         raise ParticleError(f"{source}: no >=10 MeV proton records")
     ch = tuple(sorted(channels))
