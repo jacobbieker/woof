@@ -394,3 +394,43 @@ def test_the_forecast_door_refuses_what_the_seat_cannot_attach_to(over, match):
     from woof.hex.forecast_door import ForecastDoorRefusal, _refuse_nn_launch
     with pytest.raises(ForecastDoorRefusal, match=match):
         _refuse_nn_launch(_door_args(**over))
+
+
+# --------------------------------------------------------------- device --
+
+@pytest.mark.gpu
+def test_the_seat_on_the_device_matches_the_host(tmp_path):
+    """The seat's gathers, slice writes and masks on CuPy (CUDA) or the
+    Metal facade give the host's numbers."""
+    from conftest import HAS_GPU
+    from woof import backend
+
+    if not HAS_GPU and backend.requested() != "mlx":
+        pytest.skip("needs a CUDA card or the Metal backend")
+    cp = pytest.importorskip("cupy")
+
+    def device(world):
+        on = lambda a: cp.asarray(a)
+        world.state = SimpleNamespace(rho=on(world.state.rho), scalars=on(world.state.scalars))
+        world.saved = SimpleNamespace(theta_m=on(world.saved.theta_m), exner=on(world.saved.exner),
+                                      vertical_velocity=on(world.saved.vertical_velocity))
+        world.sources = SimpleNamespace(rho_theta=on(world.sources.rho_theta), scalars=on(world.sources.scalars))
+        world.pools = {k: on(v) for k, v in world.pools.items()}
+        return world
+
+    host = lambda a: a.get() if hasattr(a, "get") else np.asarray(a)
+    model = _artefact(tmp_path / "m", out_mean=np.r_[np.full(NZ, 1e-4), np.full(NZ, -1e-8)])
+    settings = _settings(mode="residual", model=model, inputs=None, outputs=None)
+    results = []
+    for xp, prepare in ((np, lambda w: w), (cp, device)):
+        w = prepare(_world())
+        seat = HexColumnSeat(settings, cp=xp, names=NAMES, n_cells=NC, n_levels=NZ, zgrid=w.zgrid, zz=w.zz,
+                             bdy_mask=BDY, dt=30.0, fields=lambda pool, name, w=w: w.pools[(pool, name)])
+        seat.stage(w.sources, state=w.state, saved=w.saved, time_seconds=0.0)
+        tap = _Tap()
+        tapper = HexColumnSeat(_settings(), cp=xp, names=NAMES, n_cells=NC, n_levels=NZ, zgrid=w.zgrid, zz=w.zz,
+                               bdy_mask=BDY, dt=30.0, fields=lambda pool, name, w=w: w.pools[(pool, name)], tap=tap)
+        tapper.stage(w.sources, state=w.state, saved=w.saved, time_seconds=30.0)
+        results.append((host(w.sources.rho_theta), host(w.sources.scalars), tap.rows[0][0], tap.rows[0][1]))
+    for a, b in zip(*results):
+        np.testing.assert_allclose(b, a, rtol=2e-6, atol=1e-12)
