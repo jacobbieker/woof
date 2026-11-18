@@ -344,6 +344,15 @@ def electron_power(grids: dict[str, np.ndarray]) -> float:
     return hemispheric_power(grids["eflux_diff"] + grids["eflux_mono"] + grids["eflux_wave"])
 
 
+def power_scalars(grids: dict[str, dict[str, np.ndarray]]) -> dict[str, float]:
+    """``hp_{h}_gw`` (electrons) and ``hp_ion_{h}_gw`` for :func:`hemisphere_grids`."""
+    out = {}
+    for h, g in grids.items():
+        out[f"hp_{h}_gw"] = electron_power(g)
+        out[f"hp_ion_{h}_gw"] = hemispheric_power(g["eflux_ion"])
+    return out
+
+
 def cell_areas_km2() -> np.ndarray:
     """(96, 80) area of each grid cell, km2, with the IDL's cell edges."""
     mlat1 = 50.001 + 0.5 * np.arange(80)
@@ -428,5 +437,5 @@ def joule_power(pc: float, dst: float, when: datetime, season: str | None = None
 __all__ = ["OVATION_ZIP", "TYPES", "SEASONS", "OUTPUTS", "COLUMN_FIELDS", "KNIPP_2004",
            "Coefficients", "OvationError", "read_coefficients", "load", "is_pinned", "season_weights",
            "hemisphere_doy", "coupling", "fit_grid", "combine_hemispheres", "flux_grids", "hemisphere_grids",
-           "electron_power", "cell_areas_km2", "hemispheric_power", "on_columns", "energy_columns",
-           "mean_energy_kev", "knipp_season", "joule_power"]
+           "electron_power", "power_scalars", "cell_areas_km2", "hemispheric_power", "on_columns",
+           "energy_columns", "mean_energy_kev", "knipp_season", "joule_power"]

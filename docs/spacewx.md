@@ -321,12 +321,16 @@ The forecast is identical with the option on or off.
   `AURORA_EFLUX` (the electron energy flux, diffuse + mono + wave, mW m-2),
   `AURORA_EMEAN` (its mean energy, keV) and `AURORA_IFLUX` (the ion energy
   flux, mW m-2). It needs `spacewx_kp_source = "omni"` or `"swpc"`. OVATION's
-  dPhi/dt is taken on the hour of the start, where the hour in progress has
-  weight 0, so only hours that have ended count. It is held for the run, and so
-  is each hemisphere's season. Each frame looks the held grids up at the oval's
+  dPhi/dt is taken on the hour of the start from the three hours before it,
+  which must all have good solar wind; the hour in progress and anything later
+  are not read. It is held for the run, and so is each hemisphere's season. Each frame looks the held grids up at the oval's
   MAG_LAT and MAG_LT, so the pattern turns with the Sun as the oval does. The
   `[spacewx aurora]` line adds dPhi/dt, the coefficients' SHA-256 and the
-  hemispheric power. The dPhi/dt is kept with the held Kp.
+  hemispheric power. The dPhi/dt is kept with the held Kp (by option 1 too),
+  so a resume may switch the energy rows on. A hold written before this
+  option existed has no dPhi/dt: the solar wind for the start is then read
+  again, and the resume is refused by name if the feed no longer covers it
+  (SWPC keeps only 24 h).
 - Rows are rebuilt from the configuration on restart (no checkpoint state),
   and the two keys are output-only for the restart and prepared-cache
   identities, so a resume may switch the rows on or off. A fetched Kp (gfz,

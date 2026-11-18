@@ -177,6 +177,12 @@ def test_the_energy_coupling_uses_only_hours_ended_by_the_start(tmp_path):
     with pytest.raises(ah.AuroraHistoryError, match="no OVATION coupling"):
         ah.activity("omni", START, solarwind_loader=lambda *a: gap, energy=True)
     assert "dphidt" not in ah.activity("omni", START, solarwind_loader=lambda *a: gap)
+    # The start's own hour never counts, even toward the three good hours: with
+    # 15 UT missing, hours 16, 17 and 18 do not make a coupling.
+    early = _wind(20, START - timedelta(hours=19))
+    early.bz[-4] = np.nan
+    with pytest.raises(ah.AuroraHistoryError, match="no OVATION coupling"):
+        ah.activity("omni", START + timedelta(minutes=30), solarwind_loader=lambda *a: early, energy=True)
 
 
 def test_the_held_coupling_is_reused_and_added_to_an_older_hold(tmp_path):
@@ -202,6 +208,8 @@ def test_the_held_coupling_is_reused_and_added_to_an_older_hold(tmp_path):
     added = ah.activity("swpc", START, solarwind_loader=loader, memo=tmp_path, energy=True)
     assert calls == ["swpc", "swpc"] and added["kp"] == 2.0 and added["dphidt"] == plain["dphidt"]
     assert json.loads(memo.read_text())["dphidt"] == plain["dphidt"]
+    assert added["record"]["spacewx_dphidt_sha256"] == wind.sha256
+    assert json.loads(memo.read_text())["record"]["spacewx_dphidt_sha256"] == wind.sha256
     held = ah.activity("swpc", START, solarwind_loader=lambda *a: 1 / 0, memo=tmp_path, energy=True)
     assert held["kp"] == 2.0 and held["dphidt"] == plain["dphidt"]
 
@@ -273,7 +281,8 @@ def test_preflight_prices_the_held_arrays_and_the_kernel():
 
 def test_streamed_domains_refuse_by_name():
     from woof.core import streaming
-    assert "spacewx_aurora_opt = 1, whose history rows are computed on the" in inspect.getsource(streaming)
+    assert "spacewx_aurora_opt = {int(cfg.spacewx_aurora_opt)}, whose history rows are computed on the" in (
+        inspect.getsource(streaming))
 
 
 def test_hex_refuses_the_option_and_admits_off():
@@ -368,3 +377,25 @@ def test_energy_rows_are_ovation_on_the_kernels_frame(tmp_path):
     receipt = h.receipt()
     assert receipt["spacewx_ovation_dphidt"] == pytest.approx(ovation.coupling(wind, START))
     assert receipt["spacewx_ovation_sha256"] == coef.sha256 and receipt["spacewx_hp_north_gw"] > 0.0
+    assert receipt["spacewx_hp_ion_south_gw"] == pytest.approx(ovation.power_scalars(grids)["hp_ion_south_gw"])
+    # A second domain of the same run shares the held tables.
+    again = ah.AuroraHistory.for_run(_cfg(spacewx_aurora_opt=2, spacewx_kp_source="omni"), rad,
+                                     solarwind_loader=lambda *a: wind, igrf_model=_dipole(),
+                                     ovation_coefficients=coef)
+    assert again.tables is h.tables
+
+
+def test_missing_ovation_coefficients_are_refused_by_name(monkeypatch):
+    from types import SimpleNamespace
+    from woof.spacewx import ovation
+
+    def offline(source=None):
+        raise OSError("network down")
+
+    monkeypatch.setattr(ovation, "load", offline)
+    wind = _wind(20, START - timedelta(hours=19))
+    rad = SimpleNamespace(start_time=START, latitude_deg=np.zeros((2, 2), np.float32),
+                          longitude_deg=np.zeros((2, 2), np.float32))
+    with pytest.raises(ah.AuroraHistoryError, match="spacewx_aurora_opt = 2 needs the OVATION Prime"):
+        ah.AuroraHistory.for_run(_cfg(spacewx_aurora_opt=2, spacewx_kp_source="omni"), rad,
+                                 solarwind_loader=lambda *a: wind, igrf_model=_dipole())

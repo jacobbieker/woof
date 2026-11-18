@@ -1547,7 +1547,7 @@ checked on reading, and its SHA-256 is printed with the rest of the
 ionosphere's receipt as the run starts (the `[spacewx ionosphere]` line).
 
 `spacewx_kp_source` is refused while `spacewx_aurora_opt = 0`;
-`spacewx_aurora_opt = 2` is refused unless it is `"omni"` or `"swpc"`, and
+`spacewx_aurora_opt = 2` is refused unless `spacewx_kp_source` is `"omni"` or `"swpc"`, and
 `spacewx_aurora_opt = 1` or `2` is refused without a radiation scheme, on a streamed
 domain and on hex, for the same reasons as the ionosphere rows. For the aurora
 the GFZ file is fetched again when it lacks the latest 3-hour interval that has

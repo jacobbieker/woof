@@ -140,10 +140,17 @@ def _latest(lookup, start: datetime, what: str, complete_hours: int) -> tuple[fl
 
 
 def _coupling_at_start(wind, start: datetime) -> float:
-    """OVATION's dPhi/dt from the hours that have ended by the start."""
+    """OVATION's dPhi/dt from the hours that have ended by the start: taken on
+    the start's hour, with that hour and any later one removed from the record,
+    so the three hours before must all be good and nothing after is read."""
+    import dataclasses
     from woof.spacewx import ovation
+    hour = start.replace(minute=0, second=0, microsecond=0)
+    ended = wind.hours < np.datetime64(hour, "h")
+    past = dataclasses.replace(wind, **{k: np.where(ended, getattr(wind, k), np.nan)
+                                        for k in ("by", "bz", "speed")})
     try:
-        return ovation.coupling(wind, start.replace(minute=0, second=0, microsecond=0))
+        return ovation.coupling(past, hour)
     except ovation.OvationError as exc:
         raise AuroraHistoryError(f"spacewx_aurora_opt = 2: no OVATION coupling at the start: {exc}") from None
 
@@ -190,9 +197,12 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
         load = solarwind_loader or solarwind.load
         wind = load(kind, start - timedelta(hours=LOOKBACK_HOURS + 4), start)
         if held is not None:
+            # The hold predates its dPhi/dt: read the solar wind for the start
+            # again (refused, by name, if the feed no longer covers it).
             out["dphidt"] = _coupling_at_start(wind, start)
             out["record"]["spacewx_dphidt_sha256"] = wind.sha256
-            _write_memo(memo_path, {**held, "dphidt": out["dphidt"]})
+            _write_memo(memo_path, {**held, "dphidt": out["dphidt"],
+                                    "record": dict(held["record"], spacewx_dphidt_sha256=wind.sha256)})
             return out
         # Hours T-1, T and T+1 must have ended by the start.
         kp, at = _latest(wind.kp_estimate, start, f"{kind} solar wind", complete_hours=2)
@@ -236,6 +246,30 @@ def _write_memo(memo_path, out: dict) -> None:
     part.replace(memo_path)
 
 
+_TABLES: dict = {}
+
+
+def energy_tables(coef, dphidt: float, start: datetime) -> dict:
+    """Per hemisphere, the (96, 80) grid of each energy row (its column value is
+    the grid's cell, as woof.spacewx.ovation.energy_columns gives it), and the
+    hemispheric powers.  Held per (tables, dPhi/dt, start), so the domains of a
+    nested run share one."""
+    from woof.spacewx import ovation
+    key = (coef.sha256, coef.source, float(dphidt), start)
+    if key not in _TABLES:
+        grids = ovation.hemisphere_grids(coef, dphidt, start)
+        out = {"power": ovation.power_scalars(grids)}
+        for h, g in grids.items():
+            eflux = g["eflux_diff"] + g["eflux_mono"] + g["eflux_wave"]
+            nflux = g["nflux_diff"] + g["nflux_mono"] + g["nflux_wave"]
+            cells = {"eflux": eflux, "mean_energy": ovation.mean_energy_kev(eflux, nflux),
+                     "eflux_ion": g["eflux_ion"]}
+            out[h] = {name: cells[key] for name, (key, _d, _u) in ENERGY_HISTORY_FIELDS.items()}
+        _TABLES.clear()
+        _TABLES[key] = out
+    return _TABLES[key]
+
+
 class AuroraHistory:
     """The option's state on one domain: rebuilt from the RunConfig, stateless."""
 
@@ -250,7 +284,7 @@ class AuroraHistory:
         lon = getattr(radiation, "longitude_deg", None)
         if radiation is None or start is None or lat is None or lon is None:
             raise AuroraHistoryError(
-                "spacewx_aurora_opt = 1 places the auroral oval on the radiation "
+                f"spacewx_aurora_opt = {int(cfg.spacewx_aurora_opt)} places the auroral oval on the radiation "
                 "geometry's columns, and this domain's radiation publishes no start "
                 "time or latitude/longitude")
         start = _naive_utc(start)
@@ -264,24 +298,29 @@ class AuroraHistory:
         from woof.spacewx.aurora import Aurora
         lat, lon = _host(lat), _host(lon)
         oval = Aurora(lat, lon, when=start, igrf_model=igrf_model)
-        grids = None
+        tables = None
         if energy:
             from woof.spacewx import ovation
-            coef = ovation_coefficients if ovation_coefficients is not None else ovation.load()
-            grids = ovation.hemisphere_grids(coef, drive["dphidt"], start)
+            try:
+                coef = ovation_coefficients if ovation_coefficients is not None else ovation.load()
+            except (ovation.OvationError, OSError, ValueError) as exc:
+                raise AuroraHistoryError(
+                    f"spacewx_aurora_opt = 2 needs the OVATION Prime coefficients (NOAA's ovation-prime "
+                    f"2.3.0 zip, fetched into the space-weather cache): {exc}") from None
+            tables = energy_tables(coef, drive["dphidt"], start)
             drive = dict(drive, record=dict(drive["record"], spacewx_ovation_sha256=coef.sha256,
                                             spacewx_ovation_source=coef.source))
-        return cls(oval, start, drive, lat.shape, grids=grids)
+        return cls(oval, start, drive, lat.shape, tables=tables)
 
-    def __init__(self, oval, start_time: datetime, drive: dict, shape, grids=None):
+    def __init__(self, oval, start_time: datetime, drive: dict, shape, tables=None):
         self.aurora = oval
         self.start_time = start_time
         self.kp = drive["kp"]
         self.al = drive["al"]
         self.record = drive["record"]
         self.dphidt = drive.get("dphidt")
-        self.grids = grids
-        self.names = tuple(HISTORY_FIELDS) + (tuple(ENERGY_HISTORY_FIELDS) if grids is not None else ())
+        self.tables = tables
+        self.names = tuple(HISTORY_FIELDS) + (tuple(ENERGY_HISTORY_FIELDS) if tables is not None else ())
         self.shape = tuple(int(n) for n in shape)
         self._rows = None
         self._elapsed = None
@@ -292,10 +331,9 @@ class AuroraHistory:
     def receipt(self) -> dict:
         from woof.spacewx.aurora import receipt
         extra = {}
-        if self.grids is not None:
-            from woof.spacewx import ovation
+        if self.tables is not None:
             extra = {"spacewx_ovation_dphidt": self.dphidt, "spacewx_energy_model": "OVATION Prime 2010",
-                     **{f"spacewx_hp_{h}_gw": ovation.electron_power(g) for h, g in self.grids.items()}}
+                     **{f"spacewx_{k}": v for k, v in self.tables["power"].items()}}
         return receipt(self.aurora, {**self.record, "spacewx_kp": self.kp, "spacewx_al_nt": self.al, **extra})
 
     def history_fields(self, elapsed_seconds: float) -> dict:
@@ -309,14 +347,19 @@ class AuroraHistory:
             out = self.aurora.evaluate(self.valid_time(elapsed_seconds), self.al)
             for name, (key, _desc, _units) in HISTORY_FIELDS.items():
                 self._rows[name][...] = out[key].reshape(self.shape)
-            if self.grids is not None:
+            if self.tables is not None:
                 # OVATION's bins on the frame's columns: an integer lookup of the
-                # held grid, done on the host from the kernel's mlat and MLT.
+                # held tables, binned on the host in float64 from the kernel's
+                # mlat and MLT exactly as woof.spacewx.ovation.on_columns does
+                # (once per history frame, two column vectors each way).
                 from woof.spacewx import ovation
-                cols = ovation.energy_columns(self.grids, cp.asnumpy(out["mlat"]).astype(np.float64),
-                                              cp.asnumpy(out["mlt"]).astype(np.float64))
-                for name, (key, _desc, _units) in ENERGY_HISTORY_FIELDS.items():
-                    self._rows[name][...] = cp.asarray(cols[key].astype(np.float32).reshape(self.shape))
+                mlat = cp.asnumpy(out["mlat"]).astype(np.float64)
+                mlt = cp.asnumpy(out["mlt"]).astype(np.float64)
+                north = ovation.on_columns(self.tables["north"], mlat, mlt)
+                south = ovation.on_columns(self.tables["south"], mlat, mlt)
+                for name in ENERGY_HISTORY_FIELDS:
+                    col = np.where(mlat >= 0.0, north[name], south[name])
+                    self._rows[name][...] = cp.asarray(col.astype(np.float32).reshape(self.shape))
             self._elapsed = float(elapsed_seconds)
         return dict(self._rows)
 

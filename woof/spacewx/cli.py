@@ -166,9 +166,7 @@ def _energy(coef, record, when) -> _Energy:
     else:
         grids = ovation.hemisphere_grids(coef, dfdt, when)
         scalars["ovation_dphidt"] = dfdt
-        for h, g in grids.items():
-            scalars[f"hp_{h}_gw"] = ovation.electron_power(g)
-            scalars[f"hp_ion_{h}_gw"] = ovation.hemispheric_power(g["eflux_ion"])
+        scalars.update(ovation.power_scalars(grids))
     try:
         pcn, dst = record.pcn_at(when), record.dst_at(when)
     except solarwind.SolarWindError:
