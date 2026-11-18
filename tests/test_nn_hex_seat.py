@@ -431,10 +431,21 @@ def test_a_resident_run_reads_the_live_device_words_not_the_stale_host_storage()
     read = hex_seat._reader(SimpleNamespace(field=bind, native=native), NC)
     np.testing.assert_array_equal(read("diag_physics", "hfx"), stale[:NC])
     # The views go resident after the seat attaches: residency is asked per read.
-    later = views(False)
+    # The same reader before admission, resident but unbound, then bound:
+    # it caches neither the residency nor a miss.
+    later, held_later = views(False), {}
+    later.resident_field = lambda pool, name, level=1: held_later.get((pool, name))
     read = hex_seat._reader(SimpleNamespace(field=bind, device_pools=later, native=native), NC)
+    np.testing.assert_array_equal(read("diag_physics", "hfx"), stale[:NC])
     later.resident = True
+    np.testing.assert_array_equal(read("diag_physics", "hfx"), stale[:NC])
+    held_later[("diag_physics", "hfx")] = live
     np.testing.assert_array_equal(read("diag_physics", "hfx"), live)
+    # A native with live storage is sliced from it, not copied whole first.
+    sliced = SimpleNamespace(field_storage=lambda pool, name, level=1: stale,
+                             get_field=lambda *a, **k: (_ for _ in ()).throw(AssertionError("whole-field copy")))
+    read = hex_seat._reader(SimpleNamespace(field=bind, device_pools=views(False), native=sliced), NC)
+    np.testing.assert_array_equal(read("diag_physics", "hfx"), stale[:NC])
 
 
 def test_registry_names_the_hex_route():

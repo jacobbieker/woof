@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+import warnings
 
 import numpy as np
 import pytest
@@ -183,12 +184,17 @@ def test_a_tapped_forecast_is_byte_identical(name, numerics, scratch):
         offset += spec.levels
         if spec.name in ("ust", "hfx", "p", "theta"):
             # The same cell drawn at two times: its value must change somewhere.
-            seen, changed = {}, False
+            seen, changed, revisited = {}, False, False
             for sample in range(rows.shape[0]):
                 for column, cell in enumerate(np.asarray(record["column_index"])[sample]):
                     value = float(rows[sample, 0, column])
+                    revisited |= int(cell) in seen
                     changed |= int(cell) in seen and seen[int(cell)] != value
                     seen[int(cell)] = value
+            if not revisited:  # a run too short to draw any cell twice cannot show the change
+                warnings.warn(f"{name} {numerics}: no recorded cell repeats; the live-read check of "
+                              f"{spec.name} was skipped")
+                continue
             assert changed, f"{spec.name} never changes in time at any recorded cell"
     bdy = _bdy(tapped)
     cells = np.asarray(record["column_index"]).ravel()

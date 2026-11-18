@@ -557,7 +557,8 @@ def _reader(session, n_cells: int):
             value = views.resident_field(pool, name, level=1)
             if value is not None:
                 return value
-        host = native.get_field(pool, name, level=1)
+        storage = getattr(native, "field_storage", None)   # the live storage, sliced once below
+        host = storage(pool, name, level=1) if storage is not None else native.get_field(pool, name, level=1)
         return np.array(np.asarray(host)[..., :n_cells])
     return read
 
