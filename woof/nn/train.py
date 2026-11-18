@@ -39,11 +39,25 @@ def _columns(array: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(array.transpose(0, 2, 1).reshape(s * c, f), dtype=np.float32)
 
 
-def _scale(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _scale(values: np.ndarray, fields=None) -> tuple[np.ndarray, np.ndarray]:
+    """Per-feature mean and standard deviation.  An input that never
+    varies gets a unit scale (it is a constant after centring).  An output
+    is scaled within its field: a level whose target barely varies (cloud
+    water above the cloud, say) takes a floor of a thousandth of the
+    field's largest level scale, so the model's normalised error there is
+    not multiplied into a physical rate on the scale of one."""
     mean = values.mean(axis=0, dtype=np.float64)
     std = values.std(axis=0, dtype=np.float64)
-    tiny = np.maximum(np.abs(mean) * 1e-6, 1e-30)
-    std = np.where(std > tiny, std, 1.0)
+    if fields is None:
+        tiny = np.maximum(np.abs(mean) * 1e-6, 1e-30)
+        std = np.where(std > tiny, std, 1.0)
+        return mean.astype(np.float32), std.astype(np.float32)
+    start = 0
+    for spec in fields:
+        rows = slice(start, start + spec.levels)
+        start += spec.levels
+        top = float(std[rows].max())
+        std[rows] = np.maximum(std[rows], top * 1e-3) if top > 0.0 else 1e-30
     return mean.astype(np.float32), std.astype(np.float32)
 
 
@@ -86,7 +100,7 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
     x_train, y_train = _columns(data["inputs"][:cut]), _columns(data["targets"][:cut])
     x_test, y_test = _columns(data["inputs"][cut:]), _columns(data["targets"][cut:])
     in_mean, in_std = _scale(x_train)
-    out_mean, out_std = _scale(y_train)
+    out_mean, out_std = _scale(y_train, data["outputs_spec"])
     xn = (x_train - in_mean) / in_std
     yn = (y_train - out_mean) / out_std
 
