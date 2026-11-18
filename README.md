@@ -625,7 +625,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   reads u/msfu and v/msfv stored once per face instead of dividing at
   every stencil point (9-11 % off that launch, the same words;
   `WOOF_SMAG_DEFORM_HAT=0` restores the old kernel; CUDA keeps it,
-  because the extra pass did not pay there). Hex: CUDA
+  because the extra pass did not pay there). MRF, New SAS and the
+  registry column cumulus (BMJ and its siblings) take the same Metal tile
+  rule as YSU, 2,048 columns per core under the byte cap (byte-identical
+  in every numerics mode; 49x228x276 on an M3 Max: MRF 8.4 -> 6.5 ms,
+  New SAS 54.6 -> 33.1 ms per launch, BMJ 16.3 -> 12.5 ms on 63k
+  columns;
+  `WOOF_METAL_COLUMN_TILE_BLOCKS` sets the width in 32-column units;
+  EEPS and CUDA keep their occupancy-bounded tiles). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
@@ -905,6 +912,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   model skips the specified zone, and the hex carrier binds the artefact.
   `woof.nn.hex_backend` is an example `woof.hex.rows` backend that adds a
   model to a column batch.
+  On hex, 5-day emulator runs on a uniform and a variable-resolution mesh
+  were stable on CUDA (the uniform one also on Metal) and kept the mass
+  budget. The plan's G2 scorecard criterion failed: T2 was worse at 95 %
+  on the uniform mesh, and most column calls (88-89 %) fell outside the
+  (margin-widened) five-day training range. Results and per-step costs
+  are in [docs/nn-physics.md](docs/nn-physics.md).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
