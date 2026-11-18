@@ -4265,7 +4265,7 @@
    },
    {
     "file": "woof/core/kernels/spacewx_ionosphere.cu",
-    "sha256": "9694f11071f2ebcf06bdc3f45ef1dba3695e84ee72032aa8798160b931b18c4f"
+    "sha256": "c1bbe87bf9dd168b9f6d302c2ccc2f6dbca8adf9d8f42b3757b8f27c63ecddf2"
    },
    {
     "file": "woof/core/kernels/spec_bdy.cu",
@@ -5067,7 +5067,7 @@
    },
    {
     "file": "woof/backend/facade/cuda.py",
-    "sha256": "da1f18b07bd4d2fbd6f4fd053b6d52330ef8e6af0cf5b63cf92708ad3b7f85ef"
+    "sha256": "729cb404f0cc4fb68b019e87efe5aa0189bfb8070834e5332b09784db0c45345"
    },
    {
     "file": "woof/backend/host/loader.py",
@@ -5179,7 +5179,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "088fda0da3e67f5a5fe8e4613bfe60365c2994964f2c7d45fc377f284a58ee49"
+    "sha256": "269202188291cfecf90bd35276d6247edc1ae9983c6c8c5e0ddabd1a099d619e"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5939,7 +5939,7 @@
    },
    {
     "file": "woof/hex/mpasphys/bl_mynn_v842.py",
-    "sha256": "a2aa9345d8aac7eb6332d7f0811818536e1fd6b8281a5873ffdc9c3629ba5291"
+    "sha256": "b92618b86f9cd8ed18e624881ffd6a2b1fc5620d450a01049ee563d8baaf099e"
    },
    {
     "file": "woof/hex/mpasphys/cam_rad_v842.py",
@@ -22621,13 +22621,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "4e9778814793b5ecf0247234b89ba513dcb2798c918b20b0ff63523b550301b3",
+    "sha256": "97456a0500349ac03ff4bcaba3b79e55eb6a0a65b6c2c5a7cc994265dd0f0283",
     "sites": {
      "100": 72
     }
    },
    "native_differences": {
-    "sha256": "ff3685b7a24df43cbd941c514c28dce429aa0e3ded7a86fcc8fc8f2b4b7203fe",
+    "sha256": "d14a9d569d5045b76213930f3eb2c6570539e9acafbe09519a7acbf573206c83",
     "sites": {
      "100": 2
     }
@@ -22649,7 +22649,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "2d64a24562d619502a247ab04e18839a9f8451acc14f859110f28c4f29a27388"
+   "source_sha256": "46cdfffae1471b7545f5b68c6fcd6a0d2fb6f4d35d26f05b20f9d60c33c7b3c8"
   },
   "kernels:spec_bdy": {
    "assessment": "static_diagnostic_only",

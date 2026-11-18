@@ -121,6 +121,11 @@ def _unit(lat_deg, lon_deg, geodetic=True):
     return np.stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)], axis=-1)
 
 
+def dipole_latitude(frame: np.ndarray, lat_deg, lon_deg) -> np.ndarray:
+    """Dipole geomagnetic latitude, deg, of geodetic points in ``frame``."""
+    return np.rad2deg(np.arcsin(np.clip(_unit(lat_deg, lon_deg) @ frame[0], -1.0, 1.0)))
+
+
 def sun_magnetic_longitude(frame: np.ndarray, when: datetime) -> float:
     lat, lon = subsolar_point(when)
     s = _unit(lat, lon, geodetic=False)
@@ -175,7 +180,7 @@ class Aurora:
         """The same model in NumPy float64 (the kernel's test oracle)."""
         drv = self.drivers(when, al)
         p = _unit(self.lat, self.lon)
-        mlat = np.rad2deg(np.arcsin(np.clip(p @ self.frame[0], -1.0, 1.0)))
+        mlat = dipole_latitude(self.frame, self.lat, self.lon)
         mlon = np.rad2deg(np.arctan2(p @ self.frame[2], p @ self.frame[1]))
         mlt = np.mod(12.0 + (mlon - drv["mlon_sun"]) / 15.0, 24.0)
         colat = 90.0 - np.abs(mlat)

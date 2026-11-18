@@ -128,6 +128,7 @@ __device__ static float iono_density(float h, float nmf2, float hmf2, float bf2b
 extern "C" __global__ void spacewx_ionosphere(
     const float *lat_deg, const float *lon_deg, const float *modip_deg, const float *diplat_deg,
     const float *coef,        // 76 foF2 then 49 M(3000)F2 contracted coefficients
+    const float *fo_scale,    // per column factor on foF2 (1: the climatology; woof.spacewx.storm)
     const float r12, const float f107, const float sun_lat_deg, const float sun_lon_deg,
     const int season, const float alt_lo, const float alt_hi, const int nalt,
     float *fof2, float *m3000, float *hmf2_out, float *nmf2_out, float *foe_out,
@@ -146,7 +147,7 @@ extern "C" __global__ void spacewx_ionosphere(
     // F2 peak (CCIR/URSI maps).
     float fo = iono_expand(coef, q_f2, 9, smu, clat, lon);
     const float m3 = iono_expand(coef + IONO_NK_F2, q_m3, 7, smu, clat, lon);
-    fo = fo > 0.0f ? fo : 0.0f;
+    fo = (fo > 0.0f ? fo : 0.0f) * fo_scale[c];
 
     // Solar zenith angle from the subsolar point.
     const float slat = sun_lat_deg * IONO_DEG2RAD;
