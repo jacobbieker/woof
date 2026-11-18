@@ -3767,10 +3767,12 @@ Takes no options of its own.
 | `--count` | number of times (default 1) |
 | `--dlat` | grid spacing in latitude, deg (default 1) |
 | `--dlon` | grid spacing in longitude, deg (default 2) |
+| `--energy` | with a solar wind, add OVATION Prime 2010 energy and number fluxes and hemispheric power, and with OMNI2 the Knipp et al. 2004 Joule power |
 | `--indices` | observed Kp: 'gfz' (fetched, CC BY 4.0) or a file in GFZ's format |
 | `--kp` | a fixed Kp (0-9) |
 | `--observed-al` | with an OMNI2 solar wind, drive the oval with the observed AL instead of Kp |
 | `--out` | write the fields to this .npz (receipt beside it) |
+| `--ovation` | OVATION Prime coefficients: the distribution's zip or its premodel directory (default: the pinned zip, fetched) |
 | `--solar-wind` | Kp estimated from the solar wind: 'omni' (NASA SPDF OMNI2, fetched), 'swpc' (NOAA real time, last 24 h) or OMNI2 file(s) joined by ':' |
 | `--step-hours` | hours between times (default 1) |
 | `--time` | first valid time, ISO UTC (2024-05-10T18:00Z) |
