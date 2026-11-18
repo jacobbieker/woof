@@ -296,6 +296,7 @@ def test_every_implemented_option_is_selected_by_a_registered_suite() -> None:
                (("pbl", "gbm"), "bl_pbl_physics=12"),
                (("pbl", "mrf"), "bl_pbl_physics=99"),
                (("radiation", "wrf-gfdleta"), "ra_lw_physics=99/ra_sw_physics=99"),
+               (("radiation", "wrf-rrtmg-k"), "ra_lw_physics=14/ra_sw_physics=14"),
                (("turbulence", "sms-3dtke"), "km_opt=5"))},
         ("microphysics", "ishmael-mp55"):
             "Native adaptive-habit ice is numerically checked as a column but has no observation-qualified suite; imported namelists and per-domain component overrides select it directly",

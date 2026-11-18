@@ -1581,6 +1581,19 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                 f"surface names {unknown}, which initialize_physics does "
                 f"not take from a column caller; it takes "
                 f"{sorted(accepted - seam_bound)}")
+        # An explicit lake_state_source binds lake cells, and on the column
+        # route only a staged lake mask (sf_lake_physics = 1's surface
+        # inputs) marks any: without one the source would be accepted and
+        # never read.  'auto' and 'forcing' stay tolerant.
+        lake_source = getattr(cfg, "lake_state_source", "auto")
+        if (lake_source not in ("auto", "forcing")
+                and given.get("lakemask") is None
+                and given.get("landuse") is None):
+            raise ValueError(
+                f"lake_state_source={lake_source!r} names lake cells to bind, "
+                "but this column run stages no lake mask (set "
+                "sf_lake_physics=1 with its surface statics), so the source "
+                "would be accepted and never read")
         n_soil = plan.n_soil_levels
         for name in ("soil_temperature", "soil_moisture"):
             if not n_soil:

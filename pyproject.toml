@@ -75,6 +75,13 @@ obs = ["pyarrow>=15"]
 dealias = []
 dev = ["pytest>=8.0", "pytest-xdist>=3.5", "pyyaml>=6.0", "setuptools>=77", "ruff==0.13.3"]
 publish = ["huggingface_hub>=0.23", "h5py>=3.10"]
+# Opt-in neural-network column physics on CUDA (woof.nn, docs/nn-physics.md):
+# PyTorch in woof's own interpreter, so a column model shares the forecast's
+# device arrays through DLPack.  The floor is the torch the Earth2 door pins
+# (woof/authorities/earth2-models.v1.json).  Never in a base or [all-*]
+# install: multi-GiB, and no default run imports it.  Metal runs column
+# models on MLX, which [gpu-mlx] already carries.
+nn-torch = ["torch>=2.10"]
 # The CONUS NHDPlus V2.1 hydro provider reads EPA's .7z source archives.
 # py7zr and its codecs are LGPL-2.1-or-later, outside the permissive licences
 # the default install carries, so they are an explicit extra: without it

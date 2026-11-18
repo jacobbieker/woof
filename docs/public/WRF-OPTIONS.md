@@ -34,8 +34,8 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `sf_surface_physics` | 0, 1, 2, 3, 4, 7, 8 | 5, 6 |
 | `sf_urban_physics` | 0, 1, 2, 3 | - |
 | `sf_ocean_physics` | 0, 1, 2 | - |
-| `ra_lw_physics` | 0, 1, 3, 4, 5, 7, 31, 99 | 14, 24 |
-| `ra_sw_physics` | 0, 1, 2, 3, 4, 5, 7, 99 | 14, 24 |
+| `ra_lw_physics` | 0, 1, 3, 4, 5, 7, 14, 31, 99 | 24 |
+| `ra_sw_physics` | 0, 1, 2, 3, 4, 5, 7, 14, 99 | 24 |
 | `sst_update` | 1 | - |
 | `sst_skin` | 1 | - |
 | `tmn_update` | 1 | - |
@@ -204,8 +204,8 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `4` | rrtmg scheme | imports as RRTMG -> RTE+RRTMGP; `--rrtmg-variant rrtmg_legacy` runs WRF's own RRTMG |
 | `5` | Goddard longwave scheme | imports |
 | `7` | FLG (UCLA) scheme | imports |
-| `14` | rrtmg-k scheme from KIAPS | refused: &physics ra_lw_physics = 14: no ratified woof mapping (implemented: [0, 1, 3, 4, 5, 7, 31, 99]). WRF RRTMG-K longwave is not ported; RRTMG (4, with ra_rrtmg_variant = rrtmg_legacy for WRF's transcription) is the nearest scheme and is a different k-distribution. Nothing is substituted for it; choose one of the implemented values. |
-| `24` | fast rrtmg scheme for GPU and MIC (since 3.7) | refused: &physics ra_lw_physics = 24: no ratified woof mapping (implemented: [0, 1, 3, 4, 5, 7, 31, 99]). WRF fast RRTMG longwave (module_ra_rrtmg_lwf) is a separately coded solver that is not ported; ra_lw_physics = 4 with ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription. Nothing is substituted for it; choose one of the implemented values. |
+| `14` | rrtmg-k scheme from KIAPS | imports |
+| `24` | fast rrtmg scheme for GPU and MIC (since 3.7) | refused: &physics ra_lw_physics = 24: no ratified woof mapping (implemented: [0, 1, 3, 4, 5, 7, 14, 31, 99]). WRF fast RRTMG longwave (module_ra_rrtmg_lwf) is a separately coded solver that is not ported; ra_lw_physics = 4 with ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription. Nothing is substituted for it; choose one of the implemented values. |
 | `31` | Earth Held-Suarez forcing | imports |
 | `99` | GFDL (Eta) longwave (semi-supported) | imports |
 
@@ -220,8 +220,8 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `4` | rrtmg scheme | imports as RRTMG -> RTE+RRTMGP; `--rrtmg-variant rrtmg_legacy` runs WRF's own RRTMG |
 | `5` | Goddard shortwave scheme | imports |
 | `7` | FLG (UCLA) scheme | imports |
-| `14` | rrtmg-k scheme from KIAPS | refused: &physics ra_sw_physics = 14: no ratified woof mapping (implemented: [0, 1, 2, 3, 4, 5, 7, 99]). WRF RRTMG-K shortwave is not ported; RRTMG (4, with ra_rrtmg_variant = rrtmg_legacy for WRF's transcription) is the nearest scheme and is a different k-distribution. Nothing is substituted for it; choose one of the implemented values. |
-| `24` | fast rrtmg scheme for GPU and MIC (since 3.7) | refused: &physics ra_sw_physics = 24: no ratified woof mapping (implemented: [0, 1, 2, 3, 4, 5, 7, 99]). WRF fast RRTMG shortwave (module_ra_rrtmg_swf) is a separately coded solver that is not ported; ra_sw_physics = 4 with ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription. Nothing is substituted for it; choose one of the implemented values. |
+| `14` | rrtmg-k scheme from KIAPS | imports |
+| `24` | fast rrtmg scheme for GPU and MIC (since 3.7) | refused: &physics ra_sw_physics = 24: no ratified woof mapping (implemented: [0, 1, 2, 3, 4, 5, 7, 14, 99]). WRF fast RRTMG shortwave (module_ra_rrtmg_swf) is a separately coded solver that is not ported; ra_sw_physics = 4 with ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription. Nothing is substituted for it; choose one of the implemented values. |
 | `99` | GFDL (Eta) longwave (semi-supported) | imports |
 
 ## `sst_update`

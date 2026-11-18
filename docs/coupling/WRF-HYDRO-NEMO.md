@@ -188,6 +188,26 @@ Metal, and refuses what it does not port by name.
    `tests/test_wrf_hydro_coupled_forecast.py` runs short Noah and Noah-MP
    forecasts through the driver with a per-cycle water-budget check, and
    checks that a run without the table calls the LSM exactly as before.
+   On hex (`woof.hex.wrf_hydro_hex`) the routing keeps its LSM grid. The
+   hex cells cross to it through a first-order conservative exchange
+   (`woof.hex.hydro_remap`), which uses exact great-circle overlaps. Grid
+   values are overlap-weighted means of the cells, and soil returns as the
+   cells' share of the routing's change, so
+   `sum_c A_c q_c = sum_g A_g q_g`. On a GPU backend the exchange runs on
+   the device by default (`woof.hex.hydro_remap_gpu`,
+   `woof/hex/hydro_remap.cu`). `--no-wrf-hydro-gpu-exchange`
+   (`[wrf_hydro] gpu_exchange = false`, `WOOF_WRF_HYDRO_GPU_EXCHANGE=0`)
+   keeps it on the host, and without a GPU backend the host route runs and
+   the log says so. The seam's receipt names the route
+   (`exchange_route`). The weights stay resident as CSR in both
+   directions, and the soil, runoff and head planes never go through the
+   host. Each sum runs in the host scipy's order, and the device copies
+   that host's use of FMA (`host_fuses`: on the M3 Max scipy fuses
+   `y += a*x`; on pb's x86 it does not). So the device's words equal the
+   host's on the same machine, and the majority class equals the host's.
+   `tests/test_hex_hydro_remap_gpu.py` checks this on uniform and
+   variable-resolution meshes, under strict and fast numerics, on CUDA and
+   Metal. `tools/bench_hex_hydro_exchange.py` times both routes.
 4. **Routing**, in this order, each from the pinned WRF-Hydro source with its
    own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`,
    **done** in the opt-in), overland (`Routing/Overland/`,
