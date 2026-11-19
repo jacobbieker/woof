@@ -80,9 +80,11 @@ so it reads whatever the caller's variables held: in the Noah driver, the
 previous column's 10 m wind. That read is undefined, so woof uses the
 column's own lowest-level wind, `ATAN2(U1, V1)`. The oracle sets `U10 = U1`,
 `V10 = V1` before each call, so the comparison grades exactly that choice.
-The arm's `ELSEIF` width branch (`module_sf_urban.F:690`) can never be
-taken (its condition is the `IF`'s complement), and is transcribed as
-dead code.
+The arm's `ELSEIF (SW.lt.0.0.or.BW.lt.0.0)` width branch
+(`module_sf_urban.F:693`) also reads two values before they are written.
+It assigns exactly what the `ELSE` assigns (the table's first widths), so
+WRF's result does not depend on that read, and woof folds the two arms
+into one.
 
 Without `urban_param_file` the run is byte-identical to before, in fast and
 strict numerics, on CUDA and Metal (`tests/test_urban_param_runs.py`).
