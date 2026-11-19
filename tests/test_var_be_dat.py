@@ -202,6 +202,37 @@ def test_vertical_truncation():
     assert bd._vertical_truncation(99.0, np.array([1.0, 1e-13, 1.0]), 1) == 1
 
 
+def test_two_bins_two_local_modes_round_trip(tmp_path):
+    be = _synthetic(nb2d=2)
+    rng = np.random.default_rng(9)
+    nloc = 2
+    eigs = tuple(
+        bd.BeEigen(e.name, e.evec_glo, e.eval_glo,
+                   rng.standard_normal((nloc, nloc, 2)), rng.standard_normal((nloc, 2)))
+        for e in be.eigen)
+    be2 = bd.BeDat(**{**be.__dict__, "eigen": eigs})
+    p = tmp_path / "be.dat"
+    bd.write_be_dat(p, be2)
+    got = bd.read_be_dat(p)
+    for a, b in zip(eigs, got.eigen):
+        np.testing.assert_array_equal(a.evec_loc, b.evec_loc)
+        np.testing.assert_array_equal(a.eval_loc, b.eval_loc)
+        assert b.eval_loc.shape == (nloc, 2)
+
+
+def test_bin_ids_out_of_range_and_repeated_regression(tmp_path):
+    be = _synthetic(nb2d=2)
+    kw = dict(ix=be.ni, jy=be.nj, kz=be.nk, ds=1.0)
+    bad2 = be.bin2d.copy()
+    bad2[0, 0] = 3
+    with pytest.raises(ValueError, match="bin2d"):
+        bd.setup_be_regional(bd.BeDat(**{**be.__dict__, "bin2d": bad2}), **kw)
+    bad3 = be.bin.copy()
+    bad3[0, 0, 0] = 0
+    with pytest.raises(ValueError, match="bin\\(1"):
+        bd.setup_be_regional(bd.BeDat(**{**be.__dict__, "bin": bad3}), **kw)
+
+
 def test_setup_synthetic():
     be = _synthetic(nb2d=2)
     cfg = bd.BeConfig(var_scaling2=2.0, len_scaling3=0.5, max_vert_var1=100.0)

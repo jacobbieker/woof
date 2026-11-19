@@ -242,6 +242,8 @@ def read_be_dat(path, cv_options: int = 5) -> BeDat:
             key = _CV6_REGRESSIONS.get(nm)
             if key is None:
                 raise BeDatError(f"be.dat: unknown regression coefficient name {nm!r}")
+            if key in reg:
+                raise BeDatError(f"be.dat: repeated regression coefficient {nm!r}")
             reg[key] = rec.reals(reg_shape(key), rsize)
 
     eig: list = [None] * 4
@@ -363,7 +365,7 @@ def write_be_dat(path, be: BeDat, *, endian: str = ">", real_size: int = 8) -> s
             reals(be.regcoeff[key])
     for e in list(be.eigen) + [be.eigen_ps]:
         name(e.name)
-        ints([e.eval_glo.size, e.eval_loc.shape[-1]])
+        ints([e.eval_loc.shape[0], e.eval_loc.shape[-1]])
         reals(e.evec_glo)
         reals(e.eval_glo)
         reals(e.evec_loc)
@@ -545,6 +547,8 @@ def setup_be_regional(be: BeDat, *, ix: int, jy: int, kz: int, ds: float,
         )
     if be.eta_be is not None:
         raise NotImplementedError("woof var: be.dat carries eta_be, which only interpolate_stats reads")
+    if be.bin2d[0, :].min() < 1 or be.bin2d[0, :].max() > be.num_bins2d:
+        raise ValueError(f"be.dat bin2d(1,:) must lie in 1..{be.num_bins2d}")
     b2 = be.bin2d[0, :] - 1  # bin2d(1,j), 0-based
 
     reg: dict = {}
@@ -553,6 +557,8 @@ def setup_be_regional(be: BeDat, *, ix: int, jy: int, kz: int, ds: float,
         f = {"psi_chi": c.psi_chi_factor, "psi_ps": c.psi_ps_factor, "psi_t": c.psi_t_factor,
              "psi_rh": c.psi_rh_factor, "chi_u_t": c.chi_u_t_factor, "chi_u_ps": c.chi_u_ps_factor,
              "chi_u_rh": c.chi_u_rh_factor, "t_u_rh": c.t_u_rh_factor, "ps_u_rh": c.ps_u_rh_factor}
+        if be.bin[0].min() < 1 or be.bin[0].max() > be.num_bins:
+            raise ValueError(f"be.dat bin(1,:,:) must lie in 1..{be.num_bins}")
         b3 = be.bin[0, :, :] - 1  # bin(1,j,k), (nj, nk)
         reg["psi_chi"] = f["psi_chi"] * rc["psi_chi"][b3]
         keys2 = ["psi_ps"] + (["ps_u_rh", "chi_u_ps"] if c.cv_options == 6 else [])

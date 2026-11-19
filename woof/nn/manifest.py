@@ -36,7 +36,8 @@ in)``; runs on every backend, so one artefact gives the same model on CUDA
 and Metal), ``mlx-safetensors`` (the same MLP's weights saved by
 ``mlx.nn.Module.save_weights``; Metal only), ``torchscript`` and
 ``torch-export`` (any module taking ``[column, n_inputs]`` normalised
-float32 and returning ``[column, n_outputs]``; CUDA only).
+float32 and returning ``[column, n_outputs]``; PyTorch on CUDA, or on
+Metal through torch-MPS).
 """
 
 from __future__ import annotations

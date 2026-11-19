@@ -118,7 +118,11 @@ class TorchColumnModel:
         self.manifest = manifest
         self.backend = "torch"
         self._torch = torch
-        self._device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        if device is None:
+            # Metal: torch-MPS shares the facade's buffers (woof.grad.bridge)
+            metal = default_backend() == "mlx" and torch.backends.mps.is_available()
+            device = "cuda" if torch.cuda.is_available() else ("mps" if metal else "cpu")
+        self._device = torch.device(device)
         dev = self._device
         f32 = torch.float32
         self._in_mean = torch.as_tensor(manifest.input_mean, dtype=f32, device=dev)
@@ -173,8 +177,8 @@ class MlxColumnModel:
             raise ModelUnavailable("MLX is not installed: pip install 'recast-woof[gpu-mlx]' "
                                    "(Apple silicon only)") from None
         if manifest.format not in ("mlp-npz", "mlx-safetensors"):
-            raise ModelUnavailable(f"a {manifest.format} artefact runs on CUDA (PyTorch) only; "
-                                   "export mlp-npz for Metal")
+            raise ModelUnavailable(f"a {manifest.format} artefact runs on PyTorch only (CUDA, or torch-MPS "
+                                   "on Metal with backend = \"torch\"); export mlp-npz for the MLX runner")
         self.manifest = manifest
         self.backend = "mlx"
         self._mx = mx

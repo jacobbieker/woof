@@ -318,6 +318,8 @@ def vptox(vp, reg, cv_options, coefx, coefy, qs):
 
 def vptox_adj(xa, reg, cv_options, coefx, coefy, qs):
     """``da_transform_vptox_adj`` (cv 5/7) from zeroed ``vp``; returns vp dict."""
+    if cv_options == 6:
+        raise NotImplementedError("woof var: cv_options = 6 transforms are not implemented")
     nx, ny, nz = xa["t"].shape
     z = np.zeros((nx, ny, nz))
     vp = {"v1": z.copy(), "v2": z.copy(), "v3": z.copy(), "v4": z.copy(), "v5": np.zeros((nx, ny, 1))}

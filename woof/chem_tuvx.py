@@ -1160,14 +1160,23 @@ class Tuvx:
         field = delta_eddington(self.radiators.accumulate(states), geometry, self.albedo)
         return geometry, field, (avc, asc, osc)
 
-    def run(self, edges_km, temperature, air_layer, o2_layer, o3_layer, sza_deg, earth_sun_distance):
+    def run(self, edges_km, temperature, air_layer, o2_layer, o3_layer, sza_deg, earth_sun_distance,
+            etf_factor=None):
         """core run: ``{reaction: rate constants (ncol, nedge), s-1}``.  Every column array is (ncol, n) or
-        (n,); ``sza_deg`` and ``earth_sun_distance`` (the factor TUV-x scales the field by) per column."""
+        (n,); ``sza_deg`` and ``earth_sun_distance`` (the factor TUV-x scales the field by) per column.
+        ``etf_factor`` (woof, beyond TUV-x: ``solar_ssi_opt``): None, or one factor per wavelength bin on the
+        extraterrestrial flux."""
         temps = _columns(temperature)
         _geometry, field, (avc, asc, osc) = self.radiation_field(edges_km, temps, _columns(air_layer),
                                                                  _columns(o2_layer), _columns(o3_layer), sza_deg)
         field = field.scaled(np.broadcast_to(np.asarray(earth_sun_distance, dtype=np.float64), (temps.shape[0],)))
-        actinic = (field.fdr + field.fup + field.fdn) * self.etf
+        etf = self.etf
+        if etf_factor is not None:
+            factor = np.asarray(etf_factor, dtype=np.float64)
+            if factor.shape != etf.shape or not np.all(np.isfinite(factor)) or np.any(factor <= 0.0):
+                raise TuvxPortError(f"etf_factor must be {etf.size} finite positive factors, one per wavelength bin")
+            etf = etf * factor
+        actinic = (field.fdr + field.fup + field.fdn) * etf
         actinic = np.where(actinic < 0.0, 0.0, actinic)
         bands_xs = None
         out = {}

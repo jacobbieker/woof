@@ -37,7 +37,8 @@ runs on every backend, so a single artefact gives the same model on CUDA
 and on Metal. `woof.nn.manifest.write_mlp_artefact` writes one. A
 TorchScript or `torch.export` module takes `[column, n_inputs]`
 normalised float32 and returns `[column, n_outputs]`; these formats run on
-CUDA only. `mlx-safetensors` runs on Metal only.
+PyTorch: on CUDA, or on Metal with `backend = "torch"` (torch-MPS, see
+"Runners and array exchange"). `mlx-safetensors` runs on Metal only.
 
 The restart identity of a run binds the artefact's weights and manifest
 hashes (`ColumnModelManifest.identity()`), so a resume onto different
@@ -61,6 +62,11 @@ physical units, as arrays of the same kind as its input:
   reads that storage directly, and its result is wrapped as a new facade
   array, so the model joins woof's lazy graph without a host round trip.
   MLX is already part of `[gpu-mlx]`.
+- **Metal: PyTorch (`backend = "torch"`).** torch-MPS reads the facade's
+  buffer through DLPack with no copy, after the MLX queue drains, and the
+  result comes back as one device copy (MLX cannot wrap a torch buffer).
+  The tensor bridge, `woof.grad.bridge`, documents the ordering and the
+  refusals ([grad.md](grad.md#the-tensor-bridge)).
 - **Host: NumPy.** The reference runner for `mlp-npz`, used by the tests.
 
 `backend = "auto"` follows woof's own backend. A format that the chosen
@@ -215,7 +221,25 @@ residual model needs a reference target that the tap does not record.
 Samples are ordered by model time before the split, and a time recorded
 twice (a resumed run appends) keeps its last record.
 
-Its `training` table records the tap, the split, the hyper-parameters and
+Several taps train one model: `python -m woof.nn.train TAP [TAP ...]
+OUT` pools them (other cycles, seasons or meshes; their fields must
+agree). Each store is split on its own, as above. A store named with
+`--validate TAP` is held out whole, so the score is out of sample in
+weather as well as in time; the `--holdout` tail then defaults to 0.
+`--inputs a,b,...` keeps a subset of the tap's input fields and `--levels
+N` the lowest N levels of every 3-D input and output, so one broad tap
+serves several models. A store may be named only once, so a
+`--validate` store is never also trained on. `--keep-best` keeps the
+epoch with the lowest held-out error; the held-out scores are then those
+of the selection (`selected_on_held_out` in the table), so score a further
+cycle for an unbiased number. For each held-out store the report gives the R² per output
+and, for each `--margins` value (default `0,0.1,0.3`), the fraction of its
+columns outside the trained range widened by that margin: the share that
+`out_of_range = "fallback"` would leave to the scheme. It also names the
+input fields most often outside the range at the smallest margin, as the
+share of columns with any level of the field outside.
+
+Its `training` table records the taps, the splits, the hyper-parameters and
 the held-out R² per output. The trainer demonstrates the workflow and is
 not meant as a research trainer: anything that writes the same artefact
 can be used in its place.
@@ -478,6 +502,15 @@ my_nn_rows = "my_package.rows:rows"
 Here `rows()` returns `PhysicsBackendRow` entries under new names (rows
 are never rebound), and the row's adapter module publishes
 `build_column_backend(row, **kw)`.
+
+## A differentiable scheme through the seat
+
+`woof.grad.kessler.KesslerSeatModel` is Kessler warm-rain microphysics as
+a seat column model: it takes the seat's `[column, feature]` batch and
+returns `dtheta, dqv, dqc, dqr` for one call of length `dt`. Because it is
+torch, autograd gives its tangent-linear and adjoint through the seat's
+vocabulary ([grad.md](grad.md#a-differentiable-scheme-kessler)). It is not
+a trained model; it tests the seat's wiring and is not an accuracy claim.
 
 ## Installing
 
