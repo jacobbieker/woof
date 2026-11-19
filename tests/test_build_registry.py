@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -417,9 +418,14 @@ def test_a_remedy_label_names_exactly_the_edit_its_remedy_settings_makes(
                 if not label or not settings:
                     continue
                 checked += 1
-                assert all(name in label for name in settings), (
+                # Whole setting names: "shcu_physics" does not name
+                # cu_physics.
+                def names(name, text=label):
+                    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}"
+                                     r"(?![A-Za-z0-9_])", text) is not None
+                assert all(names(name) for name in settings), (
                     option_id, label)
-                named = {name for name in parameters if name in label}
+                named = {name for name in parameters if names(name)}
                 assert named <= set(settings), (option_id, label)
     # Coordinate TKE retains the metric operator's PBL-off refusal as
     # one conditional rule with a machine-applicable remedy, and the run
@@ -437,8 +443,18 @@ def test_a_remedy_label_names_exactly_the_edit_its_remedy_settings_makes(
     # The union also includes SSiB and NTU legacy cloud-optics remedies.
     # Eta MP95 adds its native legacy cloud-optics remedy to the union.
     # The fork's wind_farm_scheme (MYNN only) adds one remedy on each of
-    # the six closures.
-    assert checked == 30
+    # the six closures.  That is 30.
+    # RRTMG-K (ra_*_physics=14) adds its four plan-review remedies
+    # (cu_physics, icloud_bl, cu_rad_feedback, bmj_rad_feedback; 9693076b5,
+    # 96913edf9), and the shallow-cumulus pass (_shallow_cumulus_constraints,
+    # 6795fe79f) publishes "Set shcu_physics=0." on the PBL and
+    # microphysics rows it derives from woof.shallow_cumulus.shallow_refusal.
+    shallow = sum(rule.get("remedy_label") == "Set shcu_physics=0."
+                  for component in registry["components"].values()
+                  for option in component["options"].values()
+                  for rule in option.get("constraints", {}).get("refused_when", []))
+    assert shallow == 134
+    assert checked == 30 + 4 + shallow
 
 
 def test_the_builder_refuses_a_remedy_label_that_promises_a_second_edit(

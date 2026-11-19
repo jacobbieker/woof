@@ -339,10 +339,12 @@ RESOLVED: dict[str, tuple[str, str]] = {
     # unchanged.)
     # (3.0 port folds moved both launchers seven lines down; the registry
     # now cites :1490 and :1588.  Anchors unchanged.)
-    "woof/core/dycore.py:1492": (
+    # (2026-11 fork dycore edits moved them to :1565 and :1677; the builder
+    # follows the anchors, tools/build_registry.py.  Anchors unchanged.)
+    "woof/core/dycore.py:1565": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=2:"),
-    "woof/core/dycore.py:1590": (
+    "woof/core/dycore.py:1677": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=3:"),
 }
