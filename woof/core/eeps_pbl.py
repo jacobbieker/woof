@@ -99,11 +99,27 @@ def _kernel(nz: int):
     return _module(cp.cuda.Device().id, int(nz)).get_function("eeps_column")
 
 
-def tile_columns(fn, columns: int) -> int:
-    """Bound the workspace by the card's resident column capacity."""
+def tile_columns(fn, columns: int, nz: int | None = None) -> int:
+    """Bound the workspace by the card's resident column capacity.
+
+    On Metal the tile is
+    :func:`woof.core.physics_inventory.metal_column_tile_columns` (the
+    whole domain in one launch under the byte cap at this ``nz``), the MRF
+    and column-cumulus rule: a 44-49 level 228 x 276 domain runs 18-19 %
+    faster in one launch than in the four occupancy tiles on an M3 Max,
+    and narrower middle widths sit in between (PERF-HANDOFF, 2026-11-19).
+    """
     import cupy as cp
     from cupy_backends.cuda.api import driver
 
+    from woof import backend
+    if backend.active() == "mlx":
+        from woof.core.physics_inventory import metal_column_tile_columns
+        return metal_column_tile_columns(
+            int(cp.cuda.Device().attributes["MultiProcessorCount"]),
+            int(columns), _BLOCK, block_bytes=(
+                None if nz is None
+                else eeps_workspace_floats(int(nz), _BLOCK) * 4))
     resident = driver.occupancyMaxActiveBlocksPerMultiprocessor(
         getattr(fn, "kernel", fn).ptr, _BLOCK, 0)
     blocks = max(1, min(EEPS_TILE_BLOCKS_PER_SM, int(resident)))
@@ -176,7 +192,7 @@ def eeps_step(columns, surface, carried, *, dt: float, first_step: bool,
     out["kpbl"] = cp.empty(shape, dtype=cp.int32)
     status = cp.zeros(1, dtype=cp.uint32)
     fn = kernel if kernel is not None else _kernel(nz)
-    tile = tile_columns(fn, n)
+    tile = tile_columns(fn, n, nz)
     workspace = cp.empty(eeps_workspace_floats(nz, tile), dtype=f32)
     args = (tuple(columns[name] for name in COLUMN_INPUTS)
             + tuple(surface[name] for name in SURFACE_INPUTS)

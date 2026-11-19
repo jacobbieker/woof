@@ -1,8 +1,9 @@
 """The Metal column tile (physics_inventory.metal_column_tile_columns) moves
 no word in MRF, New SAS (the column_cumulus table route) or the registry
 column-kernel cumulus route (BMJ), and each launcher's tile rule.  EEPS
-keeps its occupancy-bounded tile on Metal too: the wide tile measured
-slower there (15.3 vs 14.0 ms at 49 x 228 x 276 on an M3 Max).
+takes the same Metal tile (2026-11-19: one launch measured 11.7 vs 14.4 ms
+at 49 x 228 x 276 on an M3 Max, interleaved; its words are tile-invariant
+by tests/test_eeps_wrf461_parity.py's split and partial-tile tests).
 
 On Metal those launchers put a whole domain in one launch under a byte cap
 (YSU's #602 rule); CUDA keeps its occupancy-bounded tiles.  The tile only
@@ -232,12 +233,60 @@ def test_registry_cumulus_tile_keeps_every_word():
 
 
 @pytest.mark.gpu
+def test_eeps_tile_keeps_every_word():
+    cp = pytest.importorskip("cupy")
+    from woof.core import eeps_pbl as E
+    from woof.core.physics_inventory import (eeps_workspace_floats,
+                                             metal_column_tile_columns)
+
+    rng = np.random.default_rng(11)
+    a = _profile(rng)
+    shape = (NZ, NY, NX)
+    t = a["t"]
+    col = {k: _f32(cp, v) for k, v in dict(
+        u=rng.uniform(-10, 10, shape), v=rng.uniform(-10, 10, shape),
+        t=t, qv=a["qv"], qc=rng.uniform(0, 3e-5, shape),
+        qi=rng.uniform(0, 2e-5, shape), qr=rng.uniform(0, 1e-5, shape),
+        qs=rng.uniform(0, 1e-5, shape), qg=rng.uniform(0, 1e-6, shape),
+        p=a["p"], pi=a["pi"], rho=a["rho"],
+        rthraten=rng.uniform(-2e-5, 1e-5, shape), dz8w=a["dz"]).items()}
+    surf = {k: _f32(cp, v) for k, v in dict(
+        psfc=a["psfc"], qsfc=rng.uniform(0.008, 0.018, (NY, NX)),
+        tsk=t[0] + rng.uniform(-3, 6, (NY, NX)),
+        ust=rng.uniform(0.05, 0.85, (NY, NX)),
+        rmol=rng.uniform(-0.05, 0.02, (NY, NX)),
+        wspd=rng.uniform(0.7, 15, (NY, NX)),
+        hfx=rng.uniform(-30, 250, (NY, NX)),
+        qfx=rng.uniform(-1e-5, 2e-4, (NY, NX))).items()}
+    original = E.tile_columns
+    rules = {"one block": lambda fn, n, nz=None: E._BLOCK,
+             "three blocks": lambda fn, n, nz=None: 3 * E._BLOCK,
+             "metal rule, one core": lambda fn, n, nz=None: metal_column_tile_columns(
+                 1, n, E._BLOCK, block_bytes=eeps_workspace_floats(nz, E._BLOCK) * 4),
+             "backend rule": original,
+             "whole domain": lambda fn, n, nz=None: n}
+
+    def patch(rule):
+        E.tile_columns = rule
+        return lambda: setattr(E, "tile_columns", original)
+
+    def launch():
+        carried = {k: cp.zeros(shape, dtype=cp.float32) for k in E.CARRIED}
+        out = E.eeps_step(col, surf, carried, dt=30.0, first_step=True)
+        assert np.isfinite(cp.asnumpy(out["rthblten"])).all()
+        return _digest({**out, **carried})
+
+    _assert_same(_runs(cp, launch, rules, patch))
+
+
+@pytest.mark.gpu
 @pytest.mark.parametrize(*_numerics_child.MODES)
 def test_column_tiles_keep_every_word_in_every_numerics_mode(numerics, exact):
     _numerics_child.run(__file__, [
         "test_mrf_tile_keeps_every_word",
         "test_new_sas_tile_keeps_every_word",
-        "test_registry_cumulus_tile_keeps_every_word"], numerics, exact)
+        "test_registry_cumulus_tile_keeps_every_word",
+        "test_eeps_tile_keeps_every_word"], numerics, exact)
 
 
 def test_metal_tiles_are_one_launch_and_cuda_keeps_its_rules(monkeypatch):
@@ -264,10 +313,11 @@ def test_metal_tiles_are_one_launch_and_cuda_keeps_its_rules(monkeypatch):
     ncol = 228 * 276
     nsas = C.COLUMN_CUMULUS_SCHEMES[96]
     assert M.mrf_tile_columns(_Fn(), ncol, 49) == ncol
-    # EEPS keeps its occupancy rule on Metal (the wide tile was slower).
+    # EEPS takes the Metal tile too: one launch at 49 levels.
     monkeypatch.setattr(driver, "occupancyMaxActiveBlocksPerMultiprocessor",
                         lambda *a: 1, raising=False)
-    assert E.tile_columns(_Fn(), ncol) <= 40 * P.EEPS_TILE_BLOCKS_PER_SM * P.EEPS_BLOCK
+    assert E.tile_columns(_Fn(), ncol, 49) == ncol
+    assert E.tile_columns(_Fn(), 10**6) == 40 * 2048
     # New SAS's 50 slots hit the byte cap: whole blocks under it.
     capped_sas = C.tile_columns(ncol, 40, scheme=nsas, nz=49)
     assert capped_sas % C.BLOCK == 0 and capped_sas < ncol
@@ -295,6 +345,7 @@ def test_metal_tiles_are_one_launch_and_cuda_keeps_its_rules(monkeypatch):
     monkeypatch.setattr(wb, "active", lambda: "cuda")
     assert C.tile_columns(ncol, 40, scheme=nsas, nz=49) == 40 * C.TILE_BLOCKS_PER_SM * C.BLOCK
     assert M.mrf_tile_columns(_Fn(), ncol) <= 40 * P.MRF_TILE_BLOCKS_PER_SM * P.MRF_BLOCK
+    assert E.tile_columns(_Fn(), ncol, 49) == 40 * 1 * P.EEPS_BLOCK
 
 
 def test_preflight_prices_the_metal_tiles():
@@ -320,8 +371,7 @@ def test_preflight_prices_the_metal_tiles():
     eeps = exp(bl_pbl_physics=F.EEPS_PBL_SCHEME)
     assert F.eeps_column_workspace_bytes(eeps, profile=cuda) == (
         P.eeps_workspace_floats(49, 40 * P.EEPS_TILE_BLOCKS_PER_SM * P.EEPS_BLOCK) * 4)
-    assert F.eeps_column_workspace_bytes(eeps, profile=metal) == (
-        F.eeps_column_workspace_bytes(eeps, profile=cuda))
+    assert F.eeps_column_workspace_bytes(eeps, profile=metal) == P.eeps_workspace_floats(49, ncol) * 4
     from woof.core import column_cumulus as C
     nsas = exp(cu_physics=96)
     assert F.column_cumulus_workspace_bytes(nsas, profile=cuda) == C.workspace_bytes(96, 49, ncol, 40)
