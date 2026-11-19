@@ -7,7 +7,7 @@ scheme at the physics columns and binds it to the generic column seam's WRF
 * E1: given the same pattern, the seam's MYNN (``spp_pbl = 1``) columns are
   bit for bit the columns WRF's binding produces (the pattern laid out as
   ``StochasticTimestepHook.parameter_patterns`` lays out WRF's grid pattern),
-  and the pattern is load-bearing (a zero pattern changes them).  The MYNN
+  and the pattern matters (a zero pattern changes them).  The MYNN
   SPP kernels themselves are held to native WRF in test_spp_consumers_gpu.py.
 * Pattern statistics against WRF's SPP rows (Registry/registry.stoch):
   the point variance of the clipped pattern, its spatial correlation at the

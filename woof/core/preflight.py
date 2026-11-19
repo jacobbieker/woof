@@ -5633,14 +5633,26 @@ def ysu_column_workspace_bytes(
 def eeps_column_workspace_bytes(
         exp: ExperimentConfig, *,
         profile: DeviceLocalMemoryProfile | None = None) -> int:
-    """Conservative EEPS tile allocation without importing a GPU runtime."""
+    """Conservative EEPS tile allocation without importing a GPU runtime.
+
+    A Metal profile prices the wider Metal tile (eeps_pbl.tile_columns:
+    :func:`woof.core.physics_inventory.metal_column_tile_columns`)."""
     from woof.core.physics_inventory import (
-        EEPS_BLOCK, EEPS_TILE_BLOCKS_PER_SM, eeps_workspace_floats)
+        EEPS_BLOCK, EEPS_TILE_BLOCKS_PER_SM, eeps_workspace_floats,
+        metal_column_tile_columns)
 
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
     capacity = profile.multiprocessor_count * EEPS_TILE_BLOCKS_PER_SM * EEPS_BLOCK
-    return max((eeps_workspace_floats(int(dc.run.nz),
-                min(int(dc.run.nx) * int(dc.run.ny), capacity)) * 4
+    metal = getattr(profile, "backend", "cuda") == "mlx"
+
+    def columns(dc):
+        ncol = int(dc.run.nx) * int(dc.run.ny)
+        if metal:
+            return metal_column_tile_columns(
+                profile.multiprocessor_count, ncol, EEPS_BLOCK,
+                block_bytes=eeps_workspace_floats(int(dc.run.nz), EEPS_BLOCK) * 4)
+        return min(ncol, capacity)
+    return max((eeps_workspace_floats(int(dc.run.nz), columns(dc)) * 4
                 for dc in exp.domains if int(dc.run.bl_pbl_physics) == EEPS_PBL_SCHEME),
                default=0)
 

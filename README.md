@@ -482,9 +482,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   grid. These are plan and frontal area indices, a height histogram, and
   WRF's NUDAPT `URB_PARAM` block. Each source's licence and attribution
   travel with the file. `woof buildings` builds the product for one
-  domain of a WPS namelist. Footprints are read from a local file, not
-  downloaded. With `urban_param_file` set, the SLUCM, BEP and BEP+BEM read
-  that file's `URB_PARAM` (or a `geo_em`'s) as WRF 4.7.1's real.exe and
+  domain of a WPS namelist. Footprints are read from local files, or
+  fetched for the domain from the public Overture Maps release
+  (`--overture`, anonymous S3, cached, ODbL-1.0 with per-record source
+  licences recorded; `--offline` uses the cache only). With
+  `urban_param_file` set, the SLUCM, BEP and BEP+BEM read that file's
+  `URB_PARAM` (or a `geo_em`'s) as WRF 4.7.1's real.exe and
   `urban_var_init` do. This includes the SLUCM's NUDAPT arm, which matches
   WRF bit for bit. Files that cannot be matched are refused
   ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
@@ -629,16 +632,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `WOOF_METAL_YSU_TILE_BLOCKS=16` restores CUDA's width, and CUDA keeps
   its occupancy-bounded 16 per SM). On Metal the Smagorinsky deformation
   reads u/msfu and v/msfv stored once per face instead of dividing at
-  every stencil point (9-11 % off that launch, the same words;
+  every stencil point, in every K launcher (km_opt 1, 2, 3, 4 and 5;
+  9-11 % off the 2-D launch, TKE K 15.5 -> 14.4 ms and 3-D Smagorinsky K
+  23.0 -> 21.9 ms at 49x228x276 on an M3 Max, the same words;
   `WOOF_SMAG_DEFORM_HAT=0` restores the old kernel; CUDA keeps it,
   because the extra pass did not pay there). MRF, New SAS and the
   registry column cumulus (BMJ and its siblings) take the same Metal tile
   rule as YSU, 2,048 columns per core under the byte cap (byte-identical
   in every numerics mode; 49x228x276 on an M3 Max: MRF 8.4 -> 6.5 ms,
   New SAS 54.6 -> 33.1 ms per launch, BMJ 16.3 -> 12.5 ms on 63k
-  columns;
+  columns, EEPS 14.4 -> 11.6 ms at 49 levels;
   `WOOF_METAL_COLUMN_TILE_BLOCKS` sets the width in 32-column units;
-  EEPS and CUDA keep their occupancy-bounded tiles). Hex: CUDA
+  CUDA keeps its occupancy-bounded tiles). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
@@ -661,6 +666,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   strict numerics on CUDA and Metal; Alps 3 km variable-resolution, 11
   tracers: 28 -> 2-3 ms per launch on an M3 Max, 15 -> 0.55 ms on an A6000;
   `WOOF_HEX_REGIONAL_EDGE_HOIST=0` restores the element kernel).
+  Hex regional forecasts keep each LBC interval's expanded driving
+  tendencies for the whole interval (up to 256 MiB per rank;
+  `WOOF_HEX_LBC_TEND_CACHE_MB` sets the cap, 0 expands on every call), and
+  MPAS physics producers that write a whole resident pool field write it in
+  place instead of copying through a private buffer
+  (`WOOF_HEX_POOL_DIRECT=0` restores the copy). Both are byte-identical in
+  fast and strict numerics on CUDA and Metal (Alps VR 1 h: Metal median
+  step 241 ms against 245-294 ms off).
   Hex MYNN on Metal gives every column its own worker (within the
   one-eighth-of-free-memory bound) instead of 128 per GPU core, so the
   column loop no longer strides: on the 14,751-cell Alps VR mesh
@@ -826,7 +839,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   spectrum moves RRTMG SW's source between its 14 bands (200-263 nm about
   +2.5 % in 2024 against the cycle-24 mean) with the total unchanged, for
   legacy RRTMG and RRTMG-K; NRLSSI2's 200-263 nm band follows SORCE's observed
-  one (daily correlation 0.79, the same 27-day amplitude).
+  one (daily correlation 0.79, the same 27-day amplitude). With RADM2
+  chemistry it also scales Fast-TUV's extraterrestrial flux per wavelength
+  bin: solar maximum against minimum moves J(O1D) by about 0.2 % and J(NO2)
+  and J(HCHO) by about 0.1 % in the troposphere. Hex's generic column seam
+  takes both, bit for bit the WRF route's, and hex's MICM chemistry with
+  TUV-x photolysis takes the same factor on TUV-x's 156 bins (120-735 nm).
   `woof spacewx ionosphere` computes an IRI-type climatological ionosphere on
   the GPU on a global grid: foF2, hmF2, foE, F1 and vertical TEC, from the
   CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
@@ -892,7 +910,27 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   overstate magnitudes by about 4-8x. On hex at 3-5 km they are dominated
   by noise. Later gradient work therefore plans for 9-15 km for now
   (plan, gate G0).
-- **A plan, not yet code, for variational data assimilation.**
+  `woof.grad.bridge` hands woof's arrays to PyTorch and back: DLPack with
+  no copy on CUDA (with a stream handoff), no copy from Metal into
+  torch-MPS and one device copy back, and a refusal for any unnamed copy or
+  any shared view that autograd could see overwritten
+  ([docs/grad.md](docs/grad.md#the-tensor-bridge)).
+  `woof.grad.kessler` is WRF's Kessler warm-rain scheme written in PyTorch,
+  so autograd gives its tangent-linear and adjoint for a column batch. It
+  is checked against woof's own `kessler_column` kernel on the WRF oracle
+  fixture, passes the dot-product test (float64 to 1e-15, float32 to 1e-7
+  on CUDA) and runs as a column model on the NN seat. Its backward pass
+  costs 8x the kernel eager and 4-5x compiled on CUDA, so the 3x cost gate
+  is not met. `tools/grad_kessler_g1.py` measures all of this
+  ([docs/grad.md](docs/grad.md#a-differentiable-scheme-kessler)).
+  The WRF dry-core adjoint has started, kernel by kernel
+  ([docs/dev/P3A-WRF-DRYCORE-ADJOINT.md](docs/dev/P3A-WRF-DRYCORE-ADJOINT.md)).
+  `woof.grad.wrfplus` has the tangent-linear and adjoint of the acoustic
+  `advance_uv` in binary64 (CUDA, host) and binary32 (CUDA, Metal). They
+  pass the dot-product test to 1e-15 and agree with WRFPLUS 4.7.1's
+  `g_/a_advance_uv` to about 1e-16, using a driver in
+  `tools/wrfplus_oracle`. The forecast path does not import it.
+- **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
   transforms, a conventional-observation 3D-Var checked against compiled
@@ -900,13 +938,23 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   3DEnVar with the LETKF members. Radar, GOES and radiances come later;
   radiances need an opt-in CRTM. It also scopes opt-in gradient and
   neural-network options inside the DA. 4D-Var waits for the adjoints in
-  the plan above. woof has no variational DA today, and default runs are
-  not changed.
+  the plan above. So far `woof.da.var` reads WRFDA's `be.dat` and has a
+  binary64 reference of the control-variable transform `U` and its
+  adjoint; on WRFDA's tutorial case both equal a compiled WRFDA 4.7.1 word
+  for word. `DeviceU` runs `U` and `U^T` as CUDA or Metal kernels: the
+  binary64 oracle tier gives the reference's words, and the binary32
+  production tier gives the same words on CUDA and Metal under strict
+  numerics. It also reads OBSPROC's `obs_gts` ASCII the way WRFDA does:
+  time window, domain check, wind rotation, `q` from `rh`, and the
+  per-type error rules. On the tutorial case it keeps the same
+  8,913 of the file's 9,061 reports as WRFDA, in the same order, with the
+  same grid indices and errors. There is no analysis command yet, and default runs are not
+  changed.
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
   (DLPack, no copies; `recast-woof[nn-torch]`, never a base dependency) or
-  MLX on Metal. A safety layer refuses, clips or falls back to the physics
+  MLX on Metal (PyTorch artefacts also run there, on torch-MPS). A safety layer refuses, clips or falls back to the physics
   scheme outside the trained range, and limits outputs, keeps moisture
   positive and can fix column budgets. `woof run`/`woof go --nn NN.toml`
   with `mode = "tap"` records a WRF-route scheme's column inputs and

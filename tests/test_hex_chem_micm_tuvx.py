@@ -118,3 +118,93 @@ def test_a_step_hands_micm_the_ports_rates(tmp_path, monkeypatch):
     lit = cosz > 0.1
     j_no2 = prm[:, rt.mech.parameters.index("PHOTO.jNO2")].reshape(NZ, NC)
     assert np.all(j_no2[:, lit] > 1e-3) and np.all(j_no2[:, cosz < -0.3] < 1e-8)
+
+
+def _spectrum_file(path, first):
+    """A NOAA CDR-layout SSI file over three days from ``first``: the cycle-24 mean spectrum with 290-420 nm
+    0, 6 and 12 % above it on the three days (so the factor moves with the valid time)."""
+    netCDF4 = pytest.importorskip("netCDF4")
+    from woof.spacewx import solar_spectrum as ss
+    wl, dw, frac = ss.reference_spectrum()
+    tsi, days = 1361.0, 3
+    start = (first - datetime.datetime(1610, 1, 1)).days
+    uv = (wl > 290.0) & (wl < 420.0)
+    ssi = np.stack([tsi * frac * np.where(uv, 1.0 + 0.06 * d, 1.0) for d in range(days)])
+    with netCDF4.Dataset(path, "w") as data:
+        data.createDimension("time", days)
+        data.createDimension("wavelength", wl.size)
+        data.createDimension("bounds", 2)
+        t = data.createVariable("time", "f8", ("time",))
+        t.units = "days since 1610-01-01 00:00:00"
+        t[:] = start + np.arange(days)
+        b = data.createVariable("time_bnds", "f8", ("time", "bounds"))
+        b[:] = np.stack([start + np.arange(days), start + 1 + np.arange(days)], axis=1)
+        data.createVariable("wavelength", "f8", ("wavelength",))[:] = wl
+        data.createVariable("Wavelength_Band_Width", "f8", ("wavelength",))[:] = dw
+        data.createVariable("SSI", "f8", ("time", "wavelength"))[:] = ssi
+        data.createVariable("TSI", "f8", ("time",))[:] = np.full(days, tsi)
+    return path
+
+
+def test_solar_ssi_opt_scales_tuvxs_flux_word_for_word(tmp_path):
+    """solar_ssi_opt = 1 (woof.spacewx.solar_spectrum, beyond TUV-x): the rates a step hands MICM are, word for
+    word, the port's with the day's per-bin factor on the extraterrestrial flux; ones are the unscaled port, and
+    without the option no spectrum is read."""
+    from types import SimpleNamespace
+    cp = pytest.importorskip("cupy")
+    from woof.spacewx import solar_spectrum as ss
+    root = _data_root()
+    if root is None:
+        pytest.skip("the pinned TUV-x data are not cached here (woof.chem_tuvx_data.ensure() fetches them)")
+    raw = _raw(tuvx={"config": str(TUVX_CONFIG), "reactions": REACTIONS, "data": root})
+    path = _write(tmp_path, raw)
+    ssi = _spectrum_file(tmp_path / "ssi.nc", (START - datetime.timedelta(days=1)).replace(hour=0))
+    solar = SimpleNamespace(solar_ssi_opt=1, solar_ssi_source=str(ssi), run_seconds=0.0)
+    geo = dict(lat_deg=np.linspace(-60, 70, NC), lon_deg=np.linspace(-170, 170, NC))
+    on = chem_micm_hex.HexMicmChemistry(path, raw, "0" * 64, nlev=NZ, ncells=NC, offset=0, start_time=START,
+                                        dt=DT, solar=solar, **geo)
+    off = chem_micm_hex.HexMicmChemistry(path, raw, "0" * 64, nlev=NZ, ncells=NC, offset=0, start_time=START,
+                                         dt=DT, solar=SimpleNamespace(solar_ssi_opt=0), **geo)
+    assert off.solar is None
+    rng = np.random.default_rng(5)
+    z = np.linspace(0, 20000, NZ + 1)[:, None] * np.ones(NC)
+    p = 101325 * np.exp(-0.5 * (z[1:] + z[:-1]) / 8000) * (1 + 0.01 * rng.standard_normal((NZ, NC)))
+    T = 290 - 6.5e-3 * 0.5 * (z[1:] + z[:-1]) + rng.standard_normal((NZ, NC))
+    cols = {"temperature": cp.asarray(T), "pressure": cp.asarray(p), "rho_dry": cp.asarray(p / (287.0 * T)),
+            "z_interface": cp.asarray(z)}
+    conc = cp.asarray(rng.uniform(1e-6, 1e-4, (NZ * NC, len(on.rows))))
+    prm_on = cp.asnumpy(on._params(DT, DT, columns=cols, conc=conc))
+    prm_off = cp.asnumpy(off._params(DT, DT, columns=cols, conc=conc))
+    assert off._solar_spectrum is None
+
+    core = chem_tuvx.Tuvx(json.loads(TUVX_CONFIG.read_text()), root=root)
+    bins = tuple(zip(core.grid.edge[:-1].tolist(), core.grid.edge[1:].tolist()))
+    spectrum = ss.PhotolysisSpectrum.for_run(solar, START, bins, "tuvx")
+    factor = spectrum.factor(0.0)            # the first interval's start: 10 UTC, 22/24 of the way to day 2
+    mid = core.grid.mid
+    band = (mid > 292.0) & (mid < 418.0)
+    assert np.all(factor[band] > 1.05) and np.all(factor[band] < 1.06)
+    assert not np.array_equal(spectrum.factor(DT)[band], factor[band])     # the interval's end differs
+    np.testing.assert_allclose(factor[mid > 425.0], 1.0, rtol=1e-12)
+    cosz = cp.asnumpy(chem_micm_hex.cos_sza(on.lat, on.lon, START.timetuple().tm_yday, 10.0))
+    sza = np.degrees(np.arccos(np.clip(cosz, -1.0, 1.0)))
+    o3 = cp.asnumpy(conc)[:, on.mech.species.index("O3")].reshape(NZ, NC)
+    inputs = chem_micm_hex.tuvx_columns(z, T, p, o3)
+    esd = chem_tuvx.earth_sun_distance(2021, 6, 21, 10.0)
+    rates = core.run(*inputs, sza, esd, factor)
+    plain = core.run(*inputs, sza, esd)
+    ones = core.run(*inputs, sza, esd, np.ones(core.grid.ncells))
+    lit = cosz > 0.1
+    for i, label in enumerate(on.mech.parameters):
+        if not label.startswith("PHOTO."):
+            continue
+        name = REACTIONS[label.split(".", 1)[1]]
+        edge = rates[name]
+        want = (0.5 * (edge[:, :NZ] + edge[:, 1:NZ + 1])).T.reshape(-1)
+        assert prm_on[:, i].tobytes() == want.tobytes(), label
+        assert ones[name].tobytes() == plain[name].tobytes(), label
+    j = on.mech.parameters.index("PHOTO.jNO2")
+    ratio = prm_on[:, j].reshape(NZ, NC)[:, lit] / prm_off[:, j].reshape(NZ, NC)[:, lit]
+    assert np.all(ratio > 1.02) and np.all(ratio < 1.061)
+    with pytest.raises(chem_tuvx.TuvxPortError, match="etf_factor"):
+        core.run(*inputs, sza, esd, np.ones(3))
