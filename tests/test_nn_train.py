@@ -128,6 +128,12 @@ def test_fallback_fractions_count_columns_outside_the_widened_range():
     out = fallback_fractions(x, np.array([0.0, 0.0]), np.array([1.0, 1.0]), (0.0, 0.1), names=["a", "b"])
     assert out["fraction"] == {"0": 0.5, "0.1": 0.25}
     assert out["most_often_outside"] == {"a": 0.25, "b": 0.25}
+    # a multi-level field counts a column once, however many of its levels are outside
+    x3 = np.array([[2.0, 2.0, 2.0], [0.5, 0.5, 0.5]])
+    out3 = fallback_fractions(x3, np.zeros(3), np.ones(3), (0.1, 0.0), names=["t", "t", "t"])
+    assert out3["most_often_outside"] == {"t": 0.5}
+    with pytest.raises(ValueError, match="margin"):
+        fallback_fractions(x3, np.zeros(3), np.ones(3), (), names=["t", "t", "t"])
 
 
 def test_inputs_and_levels_select_from_a_broad_tap(tmp_path):
@@ -142,6 +148,10 @@ def test_inputs_and_levels_select_from_a_broad_tap(tmp_path):
     assert manifest.outputs == (FieldSpec("dtheta", "K s-1", 2),)
     with pytest.raises(ValueError, match="not in the tap's inputs"):
         train(a, tmp_path / "n", inputs=("rho",), epochs=1, log=lambda *_: None)
+    with pytest.raises(ValueError, match="at least one level"):
+        train(a, tmp_path / "n", levels=0, epochs=1, log=lambda *_: None)
+    with pytest.raises(ValueError, match="names no field"):
+        train(a, tmp_path / "n", inputs=(), epochs=1, log=lambda *_: None)
 
 
 def test_pooled_taps_must_record_the_same_fields(tmp_path):
@@ -168,3 +178,18 @@ def test_main_takes_several_taps_then_the_artefact(tmp_path, capsys):
     manifest = load_manifest(tmp_path / "m")
     assert len(manifest.training["tap"]) == 2 and manifest.training["holdout"] == 0.2
     assert 1 <= manifest.training["kept_epoch"] <= 2
+
+
+def test_a_store_is_named_once_and_selection_is_recorded(tmp_path):
+    from woof.nn.train import main, train
+
+    rng = np.random.default_rng(5)
+    a = _record(tmp_path / "a.zarr", rng, steps=4)
+    b = _record(tmp_path / "b.zarr", rng, steps=4)
+    with pytest.raises(ValueError, match="named twice"):
+        train([a, b], tmp_path / "m", validate=[a], epochs=1, log=lambda *_: None)
+    # options may sit between the taps and the artefact
+    assert main([str(a), "--validate", str(b), "--hidden", "8", str(tmp_path / "m"), "--epochs", "2",
+                 "--keep-best"]) == 0
+    training = load_manifest(tmp_path / "m").training
+    assert training["selected_on_held_out"] is True and training["validate"] == [str(b.resolve())]

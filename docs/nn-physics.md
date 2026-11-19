@@ -222,12 +222,16 @@ agree). Each store is split on its own, as above. A store named with
 weather as well as in time; the `--holdout` tail then defaults to 0.
 `--inputs a,b,...` keeps a subset of the tap's input fields and `--levels
 N` the lowest N levels of every 3-D input and output, so one broad tap
-serves several models. `--keep-best` keeps the epoch with the lowest
-held-out error. For each held-out store the report gives the R² per output
+serves several models. A store may be named only once, so a
+`--validate` store is never also trained on. `--keep-best` keeps the
+epoch with the lowest held-out error; the held-out scores are then those
+of the selection (`selected_on_held_out` in the table), so score a further
+cycle for an unbiased number. For each held-out store the report gives the R² per output
 and, for each `--margins` value (default `0,0.1,0.3`), the fraction of its
 columns outside the trained range widened by that margin: the share that
 `out_of_range = "fallback"` would leave to the scheme. It also names the
-input fields most often outside the range.
+input fields most often outside the range at the smallest margin, as the
+share of columns with any level of the field outside.
 
 Its `training` table records the taps, the splits, the hyper-parameters and
 the held-out R² per output. The trainer demonstrates the workflow and is

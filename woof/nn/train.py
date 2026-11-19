@@ -39,7 +39,11 @@ tap serves several models.  The held-out report adds, per held-out store
 and for each ``--margins`` value, the fraction of its columns outside the
 trained input range widened by that margin (what ``out_of_range =
 "fallback"`` would leave to the scheme) and the input fields most often
-outside it at margin 0.
+outside it at the smallest margin (the fraction of columns with any level
+of the field outside).  A store may be named only once: a ``--validate``
+store is never also trained on.  With ``--keep-best`` the epoch is chosen on
+the held-out stores, so their scores are those of the selection
+(``selected_on_held_out``); score a further cycle for an unbiased one.
 """
 
 from __future__ import annotations
@@ -142,6 +146,10 @@ def _select(data: dict, inputs=None, levels=None) -> dict:
     and the lowest ``levels`` levels of every multi-level field."""
     if inputs is None and levels is None:
         return data
+    if levels is not None and int(levels) < 1:
+        raise ValueError(f"--levels {levels}: keep at least one level")
+    if inputs is not None and not inputs:
+        raise ValueError("--inputs names no field")
     specs = data["inputs_spec"]
     known = [f.name for f in specs]
     if inputs is not None:
@@ -195,19 +203,29 @@ def _agree(stores) -> None:
 
 def fallback_fractions(x: np.ndarray, lo, hi, margins, names=None, top: int = 5) -> dict:
     """The fraction of columns (rows of ``x``, ``[column, feature]``)
-    outside ``[lo, hi]`` widened by each margin, and the ``top`` feature
-    names most often outside at the first margin."""
-    from woof.nn.safety import out_of_range_columns
+    outside ``[lo, hi]`` widened by each margin (the safety screen's own
+    bounds), and the ``top`` input fields most often outside at the
+    smallest margin: the fraction of columns with any level of the field
+    outside."""
+    from woof.nn.safety import _bounds
 
+    if not len(margins):
+        raise ValueError("name at least one margin")
+    if not x.shape[0]:
+        raise ValueError("no held-out column to score")
     xt = np.ascontiguousarray(x.T)
-    out = {"fraction": {f"{float(m):g}": float(out_of_range_columns(xt, lo, hi, float(m)).mean())
-                        for m in margins}}
-    if names is not None and x.shape[0]:
-        pad = (np.asarray(hi) - np.asarray(lo)) * float(margins[0])
-        bad = (x < (np.asarray(lo) - pad)) | (x > (np.asarray(hi) + pad)) | ~np.isfinite(x)
-        counts: dict = {}
-        for name, n in zip(names, bad.sum(axis=0).tolist()):
-            counts[name] = counts.get(name, 0) + int(n)
+
+    def outside(margin):
+        low, high = _bounds(np, lo, hi, float(margin))
+        return (xt < low) | (xt > high) | ~np.isfinite(xt)      # [feature, column]
+
+    out = {"fraction": {f"{float(m):g}": float(outside(m).any(axis=0).mean()) for m in margins}}
+    if names is not None:
+        bad = outside(min(float(m) for m in margins))
+        by_field: dict = {}
+        for name, row in zip(names, bad):
+            by_field[name] = row if name not in by_field else (by_field[name] | row)
+        counts = {name: int(row.sum()) for name, row in by_field.items()}
         worst = sorted(((n, name) for name, n in counts.items() if n), reverse=True)[:top]
         out["most_often_outside"] = {name: n / x.shape[0] for n, name in worst}
     return out
@@ -220,13 +238,20 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
     return the held-out scores.  ``validate`` names stores held out whole;
     ``holdout`` (default 0.2, or 0 with ``validate``) is the tail of each
     training store held out.  ``keep_best`` keeps the epoch with the
-    lowest held-out error instead of the last."""
+    lowest held-out error instead of the last (the held-out scores are
+    then those of the selection, recorded as ``selected_on_held_out``)."""
     taps = [tap] if isinstance(tap, (str, Path)) else list(tap)
     if not taps:
         raise ValueError("name at least one tap store to train on")
     validate = [validate] if isinstance(validate, (str, Path)) else list(validate)
     if holdout is None:
         holdout = 0.0 if validate else 0.2
+    if not len(margins):
+        raise ValueError("name at least one margin")
+    resolved = [str(Path(p).resolve()) for p in (*taps, *validate)]
+    repeated = sorted({p for p in resolved if resolved.count(p) > 1})
+    if repeated:
+        raise ValueError(f"{repeated}: a store is named twice (a --validate store must not also be trained on)")
     stores = [_load(path, inputs, levels) for path in taps]
     checks = [_load(path, inputs, levels) for path in validate]
     _agree(stores + checks)
@@ -245,6 +270,7 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
             if n < 1:
                 raise ValueError(f"{store['path']}: no recorded step to train on")
             cut = n
+        store["recorded_steps"] = n
         x_parts.append(_columns(store["inputs"][:cut]))
         y_parts.append(_columns(store["targets"][:cut]))
         if cut < n:
@@ -253,14 +279,20 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
         splits.append({"tap": store["path"], "grid": store["attrs"].get("grid"), "steps_train": cut,
                        "steps_held_out": n - cut,
                        "held_out_from_seconds": (float(store["time_seconds"][cut]) if cut < n else None)})
+        store["inputs"] = store["targets"] = None            # the columns above are all training needs
     for store in checks:
+        if store["inputs"].shape[0] < 1:
+            raise ValueError(f"{store['path']}: no recorded step to validate on")
         held.append((f"{store['path']} (whole)", _columns(store["inputs"]), _columns(store["targets"])))
+        store["inputs"] = store["targets"] = None
     if not held:
         raise ValueError("nothing is held out: give holdout > 0 or a --validate store")
     x_train, y_train = np.concatenate(x_parts), np.concatenate(y_parts)
     del x_parts, y_parts
+    bounds = np.cumsum([0] + [h[1].shape[0] for h in held])
     x_test = np.concatenate([h[1] for h in held])
     y_test = np.concatenate([h[2] for h in held])
+    held = [(label, slice(int(a), int(b))) for (label, _, _), a, b in zip(held, bounds[:-1], bounds[1:])]
     in_mean, in_std = _scale(x_train)
     out_mean, out_std = _scale(y_train, data["outputs_spec"])
     xn = (x_train - in_mean) / in_std
@@ -334,10 +366,12 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
     slices = _slices(outputs)
     lo, hi = x_train.min(axis=0), x_train.max(axis=0)
     names = [spec.name for spec in data["inputs_spec"] for _ in range(spec.levels)]
-    per_store = {label: {"r2": r2_by_output(y, predict(x), slices), "columns": int(x.shape[0]),
-                         "fallback": fallback_fractions(x, lo, hi, margins, names)}
-                 for label, x, y in held}
-    scores = {"held_out_r2": r2_by_output(y_test, predict(x_test), slices),
+    y_hat = predict(x_test)
+    per_store = {label: {"r2": r2_by_output(y_test[part], y_hat[part], slices),
+                         "columns": int(part.stop - part.start),
+                         "fallback": fallback_fractions(x_test[part], lo, hi, margins, names)}
+                 for label, part in held}
+    scores = {"held_out_r2": r2_by_output(y_test, y_hat, slices),
               "train_r2": r2_by_output(y_train, predict(x_train), slices),
               "held_out_columns": int(x_test.shape[0]), "train_columns": int(x_train.shape[0]),
               "held_out": per_store}
@@ -346,13 +380,16 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
     training = {"tap": data["path"] if len(stores) == 1 else [s["path"] for s in stores],
                 "validate": [s["path"] for s in checks], "tap_schema": attrs.get("schema"),
                 "route": attrs.get("route"), "scheme": attrs.get("scheme"), "grid": attrs.get("grid"),
+                "grids": sorted({str(s["attrs"].get("grid")) for s in stores}),
                 "target": what, "splits": splits,
                 "steps_train": int(sum(s["steps_train"] for s in splits)),
                 "steps_held_out": int(sum(s["steps_held_out"] for s in splits)),
                 "held_out_from_seconds": splits[0]["held_out_from_seconds"], "hidden": list(hidden),
                 "activation": activation, "epochs": epochs, "batch": batch, "lr": lr, "seed": seed,
-                "holdout": holdout, "levels": levels, "margins": [float(m) for m in margins],
+                "holdout": holdout,
+                "levels": None if levels is None else max(s.levels for s in (*data["inputs_spec"], *data["outputs_spec"])), "margins": [float(m) for m in margins],
                 "kept_epoch": best[2] if keep_best and best[1] is not None else epochs,
+                "selected_on_held_out": bool(keep_best),
                 "seconds": round(seconds, 2), "note": NOT_WRF_IDENTICAL, **scores}
     write_mlp_artefact(
         out, name=name or f"{attrs.get('scheme', 'column')}-mlp", inputs=data["inputs_spec"],
@@ -385,7 +422,7 @@ def main(argv=None) -> int:
                         help="keep the epoch with the lowest held-out error, not the last")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--name", default=None)
-    args = parser.parse_args(argv)
+    args = parser.parse_intermixed_args(argv)
     if len(args.paths) < 2:
         parser.error("name at least one tap store and the artefact directory")
     *taps, out = args.paths
