@@ -8,9 +8,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 import numpy as np
-from woof.backend.scratch import scratch_like as _scratch_like
 from .cuda_driver import CudaDryDycoreDriver
-from .cuda_acoustic_v841 import short_lifetimes_enabled
 from .config_rrfs import RRFSDryDycoreConfig
 from .cuda_horizontal_rrfs import CudaHorizontalRRFS
 from .cuda_acoustic_rrfs import compute_vertical_implicit_coefficients_cuda_rrfs, advance_acoustic_step_cuda_rrfs
@@ -821,14 +819,11 @@ class CudaRRFSDycoreDriver(CudaDryDycoreDriver):
                 stage.acoustic_steps,
                 current_state.scalars,
                 diabatic_theta=diabatic_theta, large_timestep=stage.large_timestep,
-                # The base driver's rule: once the sub-steps are done the
-                # recovery writes into the acoustic increments and averaged
-                # fluxes (ru_p/rw_p stay for the callback below), so the four
-                # per-stage outputs are not allocated.  An override keeps its
-                # inputs.
-                consume_acoustic=(short_lifetimes_enabled() and
-                    getattr(self._recover_candidate, '__func__', None)
-                    is CudaDryDycoreDriver._recover_candidate),
+                # Fresh outputs, as this driver's own copy of the recovery
+                # allocated them.  The base driver's consume_acoustic (the
+                # recovery writing into rho_pp/rtheta_pp/ru_avg/ww_avg) is not
+                # turned on here until an RRFS forecast shows it word-identical.
+                consume_acoustic=False,
             )
             if stage.stage == 3 and acoustic_output_callback is not None:
                 # Registry.xml (fork 1d6e370e) puts the final acoustic ru_p/rw_p in the restart stream, as v8.4.2
