@@ -6187,8 +6187,8 @@ def _at_flag_storm_nests(args) -> None:
 
 def _go_wrfinput(args) -> int:
     """Compatibility entry for the shared stock-directory forecast door."""
-    from woof.wrfinput_go import launch
-    return launch(args)
+    from woof.wrfinput_go import launch, normalize_shared_gpu
+    return launch(normalize_shared_gpu(args))
 
 
 @_ledger_main
