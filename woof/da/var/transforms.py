@@ -7,8 +7,8 @@ statement for statement in the reference's order, at one of two precisions:
 ``oracle``
     binary64 storage and arithmetic.  Every operation is a correctly rounded
     intrinsic, so the result is the reference's, word for word, on CUDA and
-    on Metal's strict soft binary64 (Metal's fast double-float runs it to
-    about 1e-15 relative instead).
+    on Metal's soft binary64; ``tests/test_var_transforms_gpu.py`` checks
+    the words under both fast and strict numerics.
 ``production``
     binary32 storage and arithmetic in the same order; CUDA and Metal give
     the same words under strict numerics.

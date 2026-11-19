@@ -61,5 +61,7 @@ def axpy(a: float, x, y) -> None:
     """``y = y + a x`` in place, one rounding per operation."""
     if x.dtype != y.dtype or x.size != y.size:
         raise ValueError(f"axpy of {x.dtype}[{x.size}] into {y.dtype}[{y.size}]")
+    if not (x.flags.c_contiguous and y.flags.c_contiguous):
+        raise ValueError("axpy needs C-contiguous x and y (the kernel walks raw buffers)")
     prec = _precision(y)
     kernel(prec, "var_axpy")((blocks(y.size),), (256,), (y, x, y.dtype.type(a), np.int64(y.size)))
