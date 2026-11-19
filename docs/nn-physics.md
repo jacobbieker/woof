@@ -503,6 +503,15 @@ Here `rows()` returns `PhysicsBackendRow` entries under new names (rows
 are never rebound), and the row's adapter module publishes
 `build_column_backend(row, **kw)`.
 
+## A differentiable scheme through the seat
+
+`woof.grad.kessler.KesslerSeatModel` is Kessler warm-rain microphysics as
+a seat column model: it takes the seat's `[column, feature]` batch and
+returns `dtheta, dqv, dqc, dqr` for one call of length `dt`. Because it is
+torch, autograd gives its tangent-linear and adjoint through the seat's
+vocabulary ([grad.md](grad.md#a-differentiable-scheme-kessler)). It is not
+a trained model; it tests the seat's wiring and is not an accuracy claim.
+
 ## Installing
 
 - CUDA: `pip install 'recast-woof[nn-torch]'`, with the CUDA build of

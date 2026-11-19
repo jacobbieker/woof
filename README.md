@@ -911,6 +911,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   torch-MPS and one device copy back, and a refusal for any unnamed copy or
   any shared view that autograd could see overwritten
   ([docs/grad.md](docs/grad.md#the-tensor-bridge)).
+  `woof.grad.kessler` is WRF's Kessler warm-rain scheme written in PyTorch,
+  so autograd gives its tangent-linear and adjoint for a column batch. It
+  is checked against woof's own `kessler_column` kernel on the WRF oracle
+  fixture, passes the dot-product test (float64 to 1e-15, float32 to 1e-7
+  on CUDA) and runs as a column model on the NN seat. Its backward pass
+  costs 8x the kernel eager and 4-5x compiled on CUDA, so the 3x cost gate
+  is not met. `tools/grad_kessler_g1.py` measures all of this
+  ([docs/grad.md](docs/grad.md#a-differentiable-scheme-kessler)).
 - **A plan, not yet code, for variational data assimilation.**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
