@@ -78,7 +78,7 @@ import math
 import os
 import re
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Mapping
@@ -233,6 +233,12 @@ class HighresStaticConfig:
     #: canopy: "urban" (WRF's whole-pixel ISURBAN) or "split" (FRC_URB to
     #: ISURBAN, the rest to NATURAL; woof.static.highres.lcz_pervious_split).
     lcz_pervious: str = "urban"
+    #: Why this configuration needs bare-earth terrain ("" when it does
+    #: not): a domain resolves buildings (obstacle_opt) or runs an urban
+    #: canopy under LES.  A surface model (GLO-30, SRTM, GEM-15 DSM) has
+    #: those buildings in its heights already.  Derived from the
+    #: experiment on every resolve, so it is not echoed or compared.
+    bare_earth_reason: str = field(default="", compare=False)
 
     def smoothing_for(self, domain_id):
         """This carrier's terrain smoothing for one domain."""
@@ -419,6 +425,50 @@ def default_row_of(config) -> HighresDefaultRow | None:
     return None
 
 
+#: Terrain sources whose heights are a surface model: roofs and tree
+#: crowns are in them (Copernicus GLO-30 and SRTM are X/C-band radar DSMs;
+#: GEM-15's dsm is its surface layer).
+SURFACE_MODEL_TERRAIN = ("copernicus-dem-glo30", "srtm-gl1", "gem15-dsm")
+
+#: km_opt values that run the 3-D LES closures (2: 1.5-order TKE,
+#: 3: 3-D Smagorinsky, 5: SMS-3DTKE).
+_LES_KM_OPTS = (2, 3, 5)
+
+
+def bare_earth_reason(raw) -> str:
+    """Why the experiment ``raw`` needs bare-earth terrain, or "".
+
+    A domain needs it when it resolves buildings (``obstacle_opt`` > 0) or
+    runs an urban canopy (``sf_urban_physics`` > 0) under an LES closure
+    (``km_opt`` 2, 3 or 5): both put the buildings in on top of the
+    terrain.  Read from the raw ``[shared]`` and ``[[domain]]`` tables
+    (each domain's own value over the shared one), so a malformed table
+    reads as "" and the experiment loader owns its refusals.
+    """
+    if not isinstance(raw, Mapping):
+        return ""
+    shared = raw.get("shared")
+    shared = shared if isinstance(shared, Mapping) else {}
+    domains = raw.get("domain")
+    if not isinstance(domains, list) or not domains:
+        domains = [{}]
+    for dom in domains:
+        if not isinstance(dom, Mapping):
+            continue
+        table = {**shared, **dom}
+        grid_id = dom.get("grid_id", 1)
+        try:
+            if int(table.get("obstacle_opt", 0) or 0) > 0:
+                return f"d{int(grid_id):02d} resolves buildings (obstacle_opt)"
+            if (int(table.get("sf_urban_physics", 0) or 0) > 0
+                    and int(table.get("km_opt", 0) or 0) in _LES_KM_OPTS):
+                return (f"d{int(grid_id):02d} runs an urban canopy "
+                        "(sf_urban_physics) under LES (km_opt)")
+        except (TypeError, ValueError):
+            continue
+    return ""
+
+
 def resolve_static_highres(raw, *, source: str, base_dir, spacings_m=None, run_config=None
                            ) -> HighresStaticConfig | None:
     """The ``[static.highres]`` a whole configuration runs with.
@@ -459,6 +509,15 @@ def resolve_static_highres(raw, *, source: str, base_dir, spacings_m=None, run_c
         config = replace(config,
                          sf_urban_physics=int(run_config.sf_urban_physics),
                          use_wudapt_lcz=int(run_config.use_wudapt_lcz))
+    reason = bare_earth_reason(raw)
+    if config is not None and reason:
+        if default_row_of(config) is not None:
+            # The grid-spacing default names GLO-30, a surface model with
+            # the city's buildings in it; resolved buildings on top of it
+            # count them twice.  "auto" takes bare-earth 3DEP wherever it
+            # covers the footprint (_resolve_plan) and refuses elsewhere.
+            config = replace(config, terrain_source="auto")
+        config = replace(config, bare_earth_reason=reason)
     # Per-domain terrain smoothing ([[domain]] static) rides on the same
     # carrier; all-default returns ``config`` unchanged.
     from .terrain_smoothing import resolve_domain_smoothing
@@ -730,8 +789,28 @@ def _resolve_plan(config: HighresStaticConfig, bbox: FootprintBBox
     if config.terrain_source == "auto":
         source_id = ("usgs-3dep-13as" if US_COVERAGE_ENVELOPE.contains(bbox)
                      else "copernicus-dem-glo30")
+        if config.bare_earth_reason and source_id in SURFACE_MODEL_TERRAIN:
+            raise HighresRefusal(
+                "surface-model-under-buildings",
+                f"{config.bare_earth_reason}, so its terrain must be bare "
+                f"earth, and terrain_source = \"auto\" would take "
+                f"{source_id}, a surface model with the buildings already "
+                f"in its heights: they would count twice.  The bare-earth "
+                f"USGS 3DEP 1/3\" DEM covers {US_COVERAGE_ENVELOPE.as_dict()}"
+                f"; the domain+halo footprint {bbox.as_dict()} is not inside "
+                "it.  Name terrain_source = \"gem15-dtm\" (bare earth, "
+                "experimental) in [static.highres], or name a surface model "
+                "explicitly to accept the double count")
     else:
         source_id = config.terrain_source
+        if config.bare_earth_reason and source_id in SURFACE_MODEL_TERRAIN:
+            print(f"[static.highres] WARNING: {config.bare_earth_reason}, "
+                  f"but terrain_source = \"{source_id}\" is a surface "
+                  "model with the buildings already in its heights: they "
+                  "count twice (raised ground plus resolved buildings or "
+                  "urban canopy).  Use \"usgs-3dep-13as\" (US) or "
+                  "\"gem15-dtm\" for bare earth.",
+                  file=sys.stderr, flush=True)
     try:
         coverage = terrain_source_coverage(source_id)
     except CoverageError as error:
@@ -2298,7 +2377,8 @@ def apply_prepared_highres(baseline, grid, *, config, domain_id, case_date,
 
 __all__ = [
     "HighresRefusal", "HighresStaticConfig", "RECEIPT_SCHEMA",
-    "HIGHRES_DEFAULT_BY_DX", "HighresDefaultRow",
+    "HIGHRES_DEFAULT_BY_DX", "HighresDefaultRow", "SURFACE_MODEL_TERRAIN",
+    "bare_earth_reason",
     "default_highres_cache_root", "default_static_highres",
     "overlay_active", "raw_domain_spacings", "resolve_static_highres",
     "US_COVERAGE_ENVELOPE", "apply_highres_statics", "parse_static_table",
