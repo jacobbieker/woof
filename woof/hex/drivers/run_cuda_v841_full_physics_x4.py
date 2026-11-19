@@ -477,6 +477,9 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # 0.4.0 release scrub of one comment line (an owner ruling in place of a
     # person).  No code line differs from the copy the H1 identities above
     # ran on.  No card run for this merge.
+    # Re-derived 2026-11-19 (tools/repin_source_tables.py): the file has since
+    # taken host-side merges (scratch outputs #614, opt-in w_damping #420,
+    # adaptive readmission); their card evidence is in those PRs, not here.
     "src/hexcore/cuda_driver.py": (
         "7888ef788fb1b7e9600b798c30c5d3f939fbf272a1585bc0ece62bc01ee51d82"
     ),
