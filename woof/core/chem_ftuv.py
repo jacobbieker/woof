@@ -37,6 +37,8 @@ NABV = 15
 #: Columns per launch: each needs its own workspace (about 0.6 MB at 45
 #: module levels).
 BATCH = 2048
+#: The integer tier carrying photoin's per-bin flux factor (solar_ssi_opt).
+ETF_TIER = (("GPUWM_FTUV_ETF", 1),)
 _STATE = {}
 
 
@@ -108,19 +110,17 @@ def launch_ftuv(fields, *, chem_opt, julday, gmt, curr_secs, aer_ra_feedback=0,
     :data:`PHOTOLYSIS`, 1/min.
     """
     import cupy as cp
-    from woof.core.kernels import get_kernel
+    from woof.core.kernels import get_kernel, get_kernel_int_defines
     if chem_opt not in (1, 2):
         raise ValueError("this Fast-TUV port serves chem_opt = 1 and 2")
     if aer_ra_feedback not in (0, 1):
         raise ValueError("aer_ra_feedback must be 0 or 1")
-    etf_on = etf_factor is not None
-    if etf_on:
+    extra = ()
+    if etf_factor is not None:
         etf = np.asarray(etf_factor, dtype=np.float64)
         if etf.shape != (17,) or not np.all(np.isfinite(etf)) or np.any(etf <= 0.0):
             raise ValueError("etf_factor must be 17 finite positive factors")
-        etf = cp.asarray(etf)
-    else:
-        etf = cp.ones(17, dtype=cp.float64)          # not read with etf_on = 0
+        extra = (cp.asarray(etf),)
     t = fields["t_phy"]
     nz, ny, nx = t.shape
     shape, shape_w, shape_2 = (nz, ny, nx), (nz + 1, ny, nx), (ny, nx)
@@ -150,7 +150,10 @@ def launch_ftuv(fields, *, chem_opt, julday, gmt, curr_secs, aer_ra_feedback=0,
     ws_i = cp.empty(batch * ws_i_per, dtype=cp.int32)
     out = cp.zeros((len(PHOTOLYSIS), nz, ny, nx), dtype=cp.float32)
     fatal = cp.zeros(batch, dtype=cp.int32)
-    kernel = get_kernel("chem_ftuv", "chem_ftuv")
+    # solar_ssi_opt: the GPUWM_FTUV_ETF tier, one more argument; the default
+    # module is WRF's transcription, unchanged.
+    kernel = (get_kernel_int_defines("chem_ftuv", "chem_ftuv", ETF_TIER) if extra
+              else get_kernel("chem_ftuv", "chem_ftuv"))
     for col0 in range(0, ncol, batch):
         n = min(batch, ncol - col0)
         kernel((-(-n // 64),), (64,),
@@ -158,8 +161,7 @@ def launch_ftuv(fields, *, chem_opt, julday, gmt, curr_secs, aer_ra_feedback=0,
                 np.int64(ws_d_per), np.int64(ws_i_per), inp, out, fatal,
                 np.int32(col0), np.int32(n), np.int32(nx), np.int32(ny), np.int32(nz),
                 np.int32(nzm), np.int32(chem_opt), np.int32(aer_ra_feedback),
-                np.int32(julday), np.float32(gmt), np.float64(curr_secs),
-                np.int32(etf_on), etf))
+                np.int32(julday), np.float32(gmt), np.float64(curr_secs)) + extra)
         bad = fatal[:n].get()
         if bad.any():
             line = int(bad[bad != 0][0])
@@ -225,6 +227,7 @@ def init(ctx):
     reason = refusal(ctx.cfg)
     if reason:
         raise ValueError(reason)
+    _solar_spectrum(ctx)          # solar_ssi_opt: read and check the series before any step
 
 
 def step(ctx, dt, ktau):
@@ -263,10 +266,10 @@ def step(ctx, dt, ktau):
         ctx.diag[f"ph_{name}"][...] = out[name]
 
 
-def _solar_spectrum_factor(ctx):
-    """solar_ssi_opt = 1: photoin's per-bin flux factor at this call's valid
-    time (run start + curr_secs), else None.  The series is loaded on the
-    first call of a run or a resume and kept on the chem state."""
+def _solar_spectrum(ctx):
+    """solar_ssi_opt = 1: the run's PhotolysisSpectrum on photoin's bins, built
+    once per chem state (a run, a resume, a relocated nest) and kept on it;
+    else None."""
     if not int(getattr(ctx.cfg, "solar_ssi_opt", 0) or 0):
         return None
     chem = ctx.state.chem
@@ -278,4 +281,11 @@ def _solar_spectrum_factor(ctx):
         spectrum = chem.ftuv_solar_spectrum = PhotolysisSpectrum.for_run(
             ctx.cfg, start, etf_bins_nm(), "ftuv")
         print("[spacewx ssi] " + json.dumps(spectrum.receipt(), sort_keys=True), flush=True)
-    return spectrum.factor(float(ctx.clock.curr_secs))
+    return spectrum
+
+
+def _solar_spectrum_factor(ctx):
+    """solar_ssi_opt = 1: photoin's per-bin flux factor at this call's valid
+    time (run start + curr_secs), else None."""
+    spectrum = _solar_spectrum(ctx)
+    return None if spectrum is None else spectrum.factor(float(ctx.clock.curr_secs))

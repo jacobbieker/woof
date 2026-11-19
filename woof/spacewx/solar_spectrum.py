@@ -321,7 +321,8 @@ class PhotolysisSpectrum:
         self.bands_nm = tuple(series.bands_nm)
         self.scheme = scheme
         self.start_time = naive_utc(start_time)
-        reference_fractions(self.bands_nm)            # refuse bins the reference cannot cover now
+        # the bins' reference shares, once (refuses bins the reference cannot cover)
+        self.reference = reference_fractions(self.bands_nm)
         self.start_factor = self.factor(0.0)
 
     @classmethod
@@ -340,10 +341,11 @@ class PhotolysisSpectrum:
     def factor(self, elapsed_seconds: float) -> np.ndarray:
         """The bins' factors at start + ``elapsed_seconds`` (float64)."""
         frac = self.series.fractions_at(self.start_time + timedelta(seconds=float(elapsed_seconds)))
-        return bin_factor(frac, self.bands_nm)
+        return np.asarray(frac, np.float64) / self.reference      # bin_factor, its reference kept
 
     def receipt(self) -> dict:
-        return {f"solar_ssi_{self.scheme}_factor_at_start": [round(float(v), 6) for v in self.start_factor]}
+        return {"solar_ssi_source": self.series.source, "solar_ssi_sha256": self.series.sha256,
+                f"solar_ssi_{self.scheme}_factor_at_start": [round(float(v), 6) for v in self.start_factor]}
 
 
 __all__ = ["BANDS_CM1", "BANDS_NM", "NBANDS", "REF_BAND_FRACTION", "SsiSeries", "SpectralVariability",
