@@ -630,9 +630,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   rule as YSU, 2,048 columns per core under the byte cap (byte-identical
   in every numerics mode; 49x228x276 on an M3 Max: MRF 8.4 -> 6.5 ms,
   New SAS 54.6 -> 33.1 ms per launch, BMJ 16.3 -> 12.5 ms on 63k
-  columns;
+  columns, EEPS 14.4 -> 11.6 ms at 49 levels;
   `WOOF_METAL_COLUMN_TILE_BLOCKS` sets the width in 32-column units;
-  EEPS and CUDA keep their occupancy-bounded tiles). Hex: CUDA
+  CUDA keeps its occupancy-bounded tiles). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and

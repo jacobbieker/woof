@@ -99,15 +99,17 @@ def _kernel(nz: int):
     return _module(cp.cuda.Device().id, int(nz)).get_function("eeps_column")
 
 
-def tile_columns(fn, columns: int, nz: int | None = None) -> int:
-    """Bound the workspace by the card's resident column capacity.
+def tile_columns(fn, columns: int, nz: int) -> int:
+    """Columns per launch, which sizes the workspace.
 
-    On Metal the tile is
-    :func:`woof.core.physics_inventory.metal_column_tile_columns` (the
-    whole domain in one launch under the byte cap at this ``nz``), the MRF
-    and column-cumulus rule: a 44-49 level 228 x 276 domain runs 18-19 %
-    faster in one launch than in the four occupancy tiles on an M3 Max,
-    and narrower middle widths sit in between (PERF-HANDOFF, 2026-11-19).
+    On CUDA the card's resident column capacity, in whole blocks.  On
+    Metal :func:`woof.core.physics_inventory.metal_column_tile_columns`
+    (the whole domain in one launch under the byte cap at this ``nz``),
+    the MRF and column-cumulus rule: a 44-49 level 228 x 276 domain runs
+    18-21 % faster in one launch than in the four occupancy tiles on an
+    M3 Max, and middle widths sit in between.  That tile is a whole
+    number of blocks unless it is the whole domain (one launch); the
+    workspace is rounded up to whole blocks either way.
     """
     import cupy as cp
     from cupy_backends.cuda.api import driver
@@ -117,9 +119,8 @@ def tile_columns(fn, columns: int, nz: int | None = None) -> int:
         from woof.core.physics_inventory import metal_column_tile_columns
         return metal_column_tile_columns(
             int(cp.cuda.Device().attributes["MultiProcessorCount"]),
-            int(columns), _BLOCK, block_bytes=(
-                None if nz is None
-                else eeps_workspace_floats(int(nz), _BLOCK) * 4))
+            int(columns), _BLOCK,
+            block_bytes=eeps_workspace_floats(int(nz), _BLOCK) * 4)
     resident = driver.occupancyMaxActiveBlocksPerMultiprocessor(
         getattr(fn, "kernel", fn).ptr, _BLOCK, 0)
     blocks = max(1, min(EEPS_TILE_BLOCKS_PER_SM, int(resident)))

@@ -237,7 +237,7 @@ def test_eeps_tile_keeps_every_word():
     cp = pytest.importorskip("cupy")
     from woof.core import eeps_pbl as E
     from woof.core.physics_inventory import (eeps_workspace_floats,
-                                             metal_column_tile_columns)
+                                             metal_tile_columns)
 
     rng = np.random.default_rng(11)
     a = _profile(rng)
@@ -261,8 +261,12 @@ def test_eeps_tile_keeps_every_word():
     original = E.tile_columns
     rules = {"one block": lambda fn, n, nz=None: E._BLOCK,
              "three blocks": lambda fn, n, nz=None: 3 * E._BLOCK,
-             "metal rule, one core": lambda fn, n, nz=None: metal_column_tile_columns(
-                 1, n, E._BLOCK, block_bytes=eeps_workspace_floats(nz, E._BLOCK) * 4),
+             # The Metal rule with a byte cap of two blocks: the cap binds
+             # and the 483 columns take two full launches and a partial one.
+             "metal rule, capped": lambda fn, n, nz=None: metal_tile_columns(
+                 1, n, E._BLOCK, blocks_per_core=16,
+                 block_bytes=eeps_workspace_floats(nz, E._BLOCK) * 4,
+                 cap_bytes=2 * eeps_workspace_floats(nz, E._BLOCK) * 4),
              "backend rule": original,
              "whole domain": lambda fn, n, nz=None: n}
 
@@ -317,7 +321,7 @@ def test_metal_tiles_are_one_launch_and_cuda_keeps_its_rules(monkeypatch):
     monkeypatch.setattr(driver, "occupancyMaxActiveBlocksPerMultiprocessor",
                         lambda *a: 1, raising=False)
     assert E.tile_columns(_Fn(), ncol, 49) == ncol
-    assert E.tile_columns(_Fn(), 10**6) == 40 * 2048
+    assert E.tile_columns(_Fn(), 10**6, 49) == 40 * 2048
     # New SAS's 50 slots hit the byte cap: whole blocks under it.
     capped_sas = C.tile_columns(ncol, 40, scheme=nsas, nz=49)
     assert capped_sas % C.BLOCK == 0 and capped_sas < ncol
