@@ -899,8 +899,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   3DEnVar with the LETKF members. Radar, GOES and radiances come later;
   radiances need an opt-in CRTM. It also scopes opt-in gradient and
   neural-network options inside the DA. 4D-Var waits for the adjoints in
-  the plan above. woof has no variational DA today, and default runs are
-  not changed.
+  the plan above. Its section 11 plans geostationary imager radiances for
+  initial conditions: Google's SatWeave mosaic and the native GOES ABI,
+  Himawari AHI and Meteosat imagers, through an opt-in CRTM into the LETKF
+  first and into 3D-Var later. woof has no variational DA today, and
+  default runs are not changed.
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
