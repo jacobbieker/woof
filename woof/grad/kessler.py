@@ -75,6 +75,13 @@ RCP = RD / CP
 # tests/test_grad_kessler.py holds each literal to the value above.
 
 
+def _min(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """min(a, b) that gives a tie to ``a``: ``torch.minimum`` splits the
+    gradient half and half on an exact tie, which is the wrong one-sided
+    derivative where the branches meet (e.g. qr == 0 in subsaturated air)."""
+    return torch.where(a <= b, a, b)
+
+
 def _spow(x: torch.Tensor, e: float) -> torch.Tensor:
     """``x ** e`` for ``x >= 0``, with a zero derivative where ``x == 0``
     (where ``e < 1`` makes the true one-sided derivative infinite)."""
@@ -198,17 +205,19 @@ def _production(t: torch.Tensor, qv: torch.Tensor, qc: torch.Tensor, qr: torch.T
     pressure = 1.0e5 * pii ** (1004.0 / 287.0)
     gam = 2.5e6 / (1004.0 * pii)
     es = 1000.0 * 0.6112 * torch.exp(17.67 * (temp - 273.15) / (temp - 29.65))
-    es = torch.minimum(es, 0.99 * pressure)  # woof's es >= p guard
+    es = _min(es, 0.99 * pressure)  # woof's es >= p guard
     qvs = 0.6217504332755632 * es / (pressure - es)
     prod = (qv - qvs) / (1.0 + pressure / (pressure - es) * qvs * 10708424.589347932 / ((temp - 29.65) * (temp - 29.65)))
     rq = rcgs * qrk
-    ern = torch.minimum(torch.minimum(
+    # a tie goes to qrk (all the rain evaporates), the branch a small
+    # positive qr takes
+    ern = _min(qrk, _min(
         dt * (((1.6 + 124.9 * _spow(rq, 0.2046)) * _spow(rq, 0.525))
               / (2.55e8 / (pressure * qvs) + 5.4e5))
         * (torch.clamp(qvs - qv, min=0.0) / (rcgs * qvs)),
-        torch.clamp(-prod - qck, min=0.0)), qrk)
+        torch.clamp(-prod - qck, min=0.0)))
 
-    product = torch.maximum(prod, -qck)
+    product = torch.where(prod >= -qck, prod, -qck)
     t_out = t + gam * (product - ern)
     qv_out = torch.clamp(qv - product + ern, min=0.0)
     qc_out = qck + product

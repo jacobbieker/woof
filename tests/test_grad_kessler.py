@@ -73,6 +73,27 @@ def test_float64_module_is_the_kernels_numpy_mirror(case):
     np.testing.assert_allclose(out[5].numpy(), [r[4] for r in ref], rtol=1e-12, atol=1e-15)
 
 
+def test_the_gradient_at_a_min_tie_is_one_sided_not_halved():
+    """qr == 0 in subsaturated air: every branch of the rain-evaporation
+    min is 0, and torch.minimum would give each half the gradient."""
+    _need_torch()
+    from woof.grad.kessler import _kessler
+    inputs, _ = ko.load_fixture()
+    x = _x(inputs, columns=slice(0, 1))
+    x[1] = torch.full_like(x[1], 1.0e-5)   # qv: far below saturation
+    x[2] = torch.zeros_like(x[2])          # qc
+    x[3] = torch.zeros_like(x[3])          # qr
+    dt = float(inputs["dt"][2])
+    qr = x[3].clone().requires_grad_(True)
+    out = _kessler(x[0], x[1], x[2], qr, *x[4:], dt)
+    g, = torch.autograd.grad(out[3].sum(), qr)
+    h = 1.0e-12
+    with torch.no_grad():
+        one_sided = (_kessler(x[0], x[1], x[2], x[3] + h, *x[4:], dt)[3].sum()
+                     - _kessler(*x, dt)[3].sum()) / h
+    assert abs(float(g.sum()) - float(one_sided)) <= 1e-6 * max(1.0, abs(float(one_sided)))
+
+
 @pytest.mark.parametrize("dtype,bound", [("float64", 1e-12), ("float32", 1e-5)])
 def test_dot_product(dtype, bound):
     _need_torch()
