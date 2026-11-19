@@ -18,7 +18,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make; auroral-electron ion-pair rates (Fang et al. 2010) from OVATION's energy flux and mean energy | ion-pair rates available as `woof spacewx particles` (electrons with `--electron-energy-flux`, a diagnostic above every model top); the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
-| L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route, and on Fast-TUV photolysis (`phot_opt = 3`, RADM2) |
+| L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route and hex's generic column seam, and on Fast-TUV photolysis (`phot_opt = 3`, RADM2; WRF route and hex) |
 
 Couplings that stay speculative are not implemented, and none is planned. One example is
 galactic cosmic rays acting on cloud nucleation: the CLOUD chamber finds that the response of
@@ -113,7 +113,15 @@ whose cycle trends are disputed (Ermolli et al. 2013); NRLSSI2's smaller UV cycl
 conservative choice, and both bands carry under 4 % of the TSI.
 
 At start-up the run prints a `[spacewx ssi]` line: the files, their SHA-256 and the band
-factors at the start. Hex refuses the key, as do RTE+RRTMGP (`ra_rrtmg_variant` other than
+factors at the start. Hex's generic column seam (`--physics solar_ssi_opt=1`, the R1
+route that runs WRF's own physics driver on the cells) takes it the same way: at every radiation
+call the seam's shortwave is bit for bit a WRF-route adapter's carrying the same day's factor
+(tests/test_hex_solar_ssi_gpu.py, legacy RRTMG and RRTMG-K), and hex's RADM2 chemistry hands
+Fast-TUV the photolysis factor below word for word as the WRF path does
+(tests/test_hex_chem_ssi_photolysis_gpu.py). The seam's driver holds no forecast length, so
+the series is checked at the start only: a run that leaves it (the fetched CDR year, or a
+user file's last day) stops at the first call outside it. The MPAS-native hex suites refuse
+the key by name, as do RTE+RRTMGP (`ra_rrtmg_variant` other than
 `"rrtmg_legacy"`, whose g-point solar source has its own bands and its own NRLSSI2 facular/sunspot
 terms), every other shortwave scheme, FARMS (`swint_opt = 2`), and DFI (the filter captures the step in a CUDA graph,
 which would freeze the first call's factor). The CDR lags real time by a few months; a forecast
