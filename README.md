@@ -902,7 +902,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   the plan above. So far `woof.da.var` reads WRFDA's `be.dat` and has a
   binary64 reference of the control-variable transform `U` and its
   adjoint; on WRFDA's tutorial case both equal a compiled WRFDA 4.7.1 word
-  for word. There is no analysis command yet, and default runs are not
+  for word. It also reads OBSPROC's `obs_gts` ASCII the way WRFDA does:
+  time window, domain check, wind rotation, `q` from `rh`, and the
+  per-type error rules. On the tutorial case it keeps the same
+  8,913 of the file's 9,061 reports as WRFDA, in the same order, with the
+  same grid indices and errors. There is no analysis command yet, and default runs are not
   changed.
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,

@@ -47,5 +47,59 @@
   "reg_psi_t": "c72dbb1bad6cee925fa5b3239646a63ef6d798abf970d218f8ed7763d8af29e6",
   "reg_psi_ps": "955093e37f8a165386352c5217124f7d2c8de2ec89078d726a52ead696383881"
  },
- "o1_digests_source": "woof_be.bin from the dump build (tools/wrfda_oracle), tutorial case"
+ "o1_digests_source": "woof_be.bin from the dump build (tools/wrfda_oracle), tutorial case",
+ "obs": {
+  "comment": "V1.1: the tutorial ob.ascii (testdata ob/2008020512/ob.ascii) read by woof.da.var.obs_wrfda with the default correctly rounded libm; counts are WRFDA 4.7.1 rsl.out local counts. first_guess_attributes are rc/2008020512/wrfinput_d01 global attributes (float32 values).",
+  "ob_ascii_sha256": "979988a26f0da056a59e3f243edcf796eed416dda4d69c74107848c0ca7c43ba",
+  "first_guess_attributes": {
+   "MAP_PROJ": 1,
+   "CEN_LAT": 40.000008,
+   "CEN_LON": -95.0,
+   "STAND_LON": -95.0,
+   "TRUELAT1": 30.0,
+   "TRUELAT2": 60.0,
+   "MOAD_CEN_LAT": 40.000008,
+   "DX": 60000.0,
+   "WEST-EAST_GRID_DIMENSION": 90,
+   "SOUTH-NORTH_GRID_DIMENSION": 60
+  },
+  "window": {
+   "analysis_date": "2008-02-05_12:00:00",
+   "time_window_min": "2008-02-05_11:00:00",
+   "time_window_max": "2008-02-05_13:00:00"
+  },
+  "counts": {
+   "synop": 750,
+   "metar": 2408,
+   "ships": 51,
+   "buoy": 336,
+   "sonde_sfc": 86,
+   "gpspw": 187,
+   "qscat": 2126,
+   "sound": 86,
+   "airep": 216,
+   "pilot": 85,
+   "profiler": 61,
+   "geoamv": 2499,
+   "satem": 105,
+   "gpsref": 3
+  },
+  "digests": {
+   "synop": "f1324623523e194f877c1b5b6d47410ea176720400319832555ec7d534c993ae",
+   "metar": "c2e7a5d1e77ebdc7ee805f26653ce6f90a220351fdc5a8323abf44c62e885a15",
+   "ships": "196ea5927b7625948c2cceebf9b848b4bcccad5227ed317c7439746d5dde5003",
+   "buoy": "84e3c1eaeeea8072d52267c8460a6ffc1cb66f7ac8f2dab18298864ef801db58",
+   "sonde_sfc": "5fb5bce5c68ab1f8e50419299f06726db457f9dfd598ffb4b5002ff899e40778",
+   "gpspw": "efa73f30d2baddb7bb8e28aec0008e76b2863aaff39a4066f27df2ddb6fab097",
+   "qscat": "0bb3089692b19bdc47de0eb0df31c6b57e9989ab5e4c642f8c8e23248ff09f2f",
+   "sound": "7dbb5bfa5bc4febbebb566be58f3c3c690b54def1674c1ccc76af5f737a3da8e",
+   "airep": "e63e5d7b1be6926fdb19adbdd1d3a59b15473dac5bdcc04acfffcdf6ac90d744",
+   "pilot": "d888e2af74bb9318dc2e6692eb4bab732191ff09df0d31223f8ae522d6c2aacf",
+   "profiler": "86c3fe7602a73d9f2c77336a260b5c30e6776e9b6e6011e558e203f49569ee19",
+   "geoamv": "5e7036b331e1787f39537799e87893d47840f972cf9bc8119b85089878216406",
+   "polaramv": "ca64e910fd864a461664d4d3b79c56bc7e8fe70041890b56b737b1b3769751f4",
+   "satem": "78cc49126a63ab74ad5086e20cda9640b691cad15babf7f945b07c8827e2512a",
+   "gpsref": "1fe4c5e17ca3a5cb464841eebac9c5161db80aa5ebf2918ae00396e4b80ba25b"
+  }
+ }
 }
