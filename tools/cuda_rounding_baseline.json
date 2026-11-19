@@ -5063,11 +5063,11 @@
    },
    {
     "file": "woof/backend/facade/_ops.py",
-    "sha256": "054da647db781f1bb053608106a979d5f28aa8bdf208514ccd7abdcae5b277cc"
+    "sha256": "07e15ec6776a5521c0e120239ba93ceb9aa69c2c5add4c26a3c37033ffaa3b5d"
    },
    {
     "file": "woof/backend/facade/cuda.py",
-    "sha256": "729cb404f0cc4fb68b019e87efe5aa0189bfb8070834e5332b09784db0c45345"
+    "sha256": "11966e5789f44eac7244e5508aec6eb006ce26aa5f5c894b89cf377dd1823e17"
    },
    {
     "file": "woof/backend/host/loader.py",
@@ -5303,7 +5303,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "fe174b405cf958fbf1a9c69c17afe04d0518129d1530d26ec841ad5b23ad463f"
+    "sha256": "5cd5f2fc71c2037328e35f60bb1a2c96141969cd156a11ae4bd65701e394dae5"
    },
    {
     "file": "woof/core/refl.py",
@@ -5591,7 +5591,7 @@
    },
    {
     "file": "woof/hex/cuda_backend/recovery.py",
-    "sha256": "1a5a85585ebc72867904f852ee54c541ace5fc2ac26f0ef89dabd179096cc041"
+    "sha256": "d47e5523a9ea997367565a9756573b98912bb149599827101dafe7980608f4d5"
    },
    {
     "file": "woof/hex/cuda_backend/runtime.py",
@@ -5599,7 +5599,7 @@
    },
    {
     "file": "woof/hex/cuda_compensated_recovery.py",
-    "sha256": "f076673925dc4761c7bd77380722f8badc1ffdbdec228cbb4c3c573edb2f6129"
+    "sha256": "4a2a31e9e64107d899f3fe76224fdf08ce771f463bdd189a54fe806054e22f69"
    },
    {
     "file": "woof/hex/cuda_compile_rrfs.py",

@@ -200,7 +200,7 @@ def test_workspace_reuse_preserves_native_words_across_partial_tiles(monkeypatch
         name: np.concatenate([array, array, array], axis=-1)
         for name, array in step[section].items()}
         for section in ("inputs", "outputs")}}]
-    monkeypatch.setattr(eeps_pbl, "tile_columns", lambda fn, n: 128)
+    monkeypatch.setattr(eeps_pbl, "tile_columns", lambda fn, n, nz=None: 128)
     report = replay(trace)
     assert all(counts[0] == 0 for fields in report.values()
                for counts in fields.values()), report
