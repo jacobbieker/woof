@@ -126,10 +126,21 @@ def _oracle():
     return b, xb, du
 
 
-def _rel(a, b):
+def _rel(a, b, stage="?"):
+    """Relative residual (diagnostic); inf unless the binary64 bit patterns match
+    when O2_TOL == 0 (so +0.0 vs -0.0 counts).  Checked 2026-11-19: the dump and
+    woof agree bitwise at every stage, signed zeros included."""
     a, b = np.asarray(a), np.asarray(b)
+    if a.shape != b.shape:
+        raise AssertionError(f"{stage}: shape mismatch {a.shape} vs {b.shape}")
     scale = max(float(np.max(np.abs(b))), 1e-300)
-    return float(np.max(np.abs(a - b))) / scale
+    r = float(np.max(np.abs(a - b))) / scale
+    if O2_TOL == 0.0:
+        a64 = np.ascontiguousarray(a, dtype=np.float64)
+        b64 = np.ascontiguousarray(b, dtype=np.float64)
+        if not np.array_equal(a64.view(np.uint64), b64.view(np.uint64)):
+            return r if r > 0.0 else float("inf")
+    return r
 
 
 # The plan's O2 tolerance is 1e-13 relative; the binary64 reference follows
@@ -145,9 +156,9 @@ def test_o2_forward_stages():
     for stage, tag in (("vv", "vv"), ("vp", "vp"), ("vp_bal", "vp_bal")):
         for n in range(1, 6):
             mz = st[stage][f"v{n}"].shape[2]
-            report[f"{tag}%v{n}"] = _rel(st[stage][f"v{n}"], du[f"{tag}%v{n}"][:, :, :mz])
+            report[f"{tag}%v{n}"] = _rel(st[stage][f"v{n}"], du[f"{tag}%v{n}"][:, :, :mz], f"{tag}%v{n}")
     for k in ("u", "v", "t", "q", "psfc", "p", "rho"):
-        report[f"xa%{k}"] = _rel(st["xa"][k], du[f"xa%{k}"])
+        report[f"xa%{k}"] = _rel(st["xa"][k], du[f"xa%{k}"], f"xa%{k}")
     bad = {k: r for k, r in report.items() if not r <= O2_TOL}
     assert not bad, bad
 
@@ -158,11 +169,18 @@ def test_o2_adjoint_stages():
     st = ref.transform_u_adj(xa_in, b, xb)
     report = {}
     for k in ("u", "v", "t", "q", "psfc", "p", "rho"):
-        report[f"xa_adj%{k}"] = _rel(st["xa"][k], du[f"xa%{k}#3"])
+        report[f"xa_adj%{k}"] = _rel(st["xa"][k], du[f"xa%{k}#3"], f"xa_adj%{k}")
     for n in range(1, 6):
         mz = st["vv"][f"v{n}"].shape[2]
-        report[f"vp_adj%v{n}"] = _rel(st["vp"][f"v{n}"], du[f"vp_adj%v{n}"][:, :, : st["vp"][f"v{n}"].shape[2]])
-        report[f"vv_adj%v{n}"] = _rel(st["vv_eof"][f"v{n}"], du[f"vv_adj%v{n}"][:, :, :mz])
-    report["cv2"] = _rel(st["cv"], du["cv2"])
+        report[f"vp_adj%v{n}"] = _rel(st["vp"][f"v{n}"], du[f"vp_adj%v{n}"][:, :, : st["vp"][f"v{n}"].shape[2]], f"vp_adj%v{n}")
+        report[f"vv_adj%v{n}"] = _rel(st["vv_eof"][f"v{n}"], du[f"vv_adj%v{n}"][:, :, :mz], f"vv_adj%v{n}")
+    report["cv2"] = _rel(st["cv"], du["cv2"], "cv2")
     bad = {k: r for k, r in report.items() if not r <= O2_TOL}
     assert not bad, bad
+
+
+def test_vptox_adj_refuses_cv6():
+    z = np.zeros((2, 2, 2))
+    xa = {k: z for k in ("u", "v", "t", "q")} | {"psfc": np.zeros((2, 2))}
+    with pytest.raises(NotImplementedError):
+        ref.vptox_adj(xa, {}, 6, z, z, z)

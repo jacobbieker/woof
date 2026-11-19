@@ -14,13 +14,19 @@ import sys, pathlib
 main = pathlib.Path(sys.argv[1])
 top = main / "da_wrfvar_top.f90"
 s = top.read_text()
+missing = [h for h in ('#include "woof_dump.inc"',) if h not in s]
+sol_s = (main / "da_solve.inc").read_text()
+hooks_all = ("woof_dump_be", "woof_dump_xb", "woof_dump_u", "woof_dump_iv", "woof_dump_final")
+missing += [h for h in hooks_all if h not in sol_s]
+if missing and len(missing) < len(hooks_all) + 1:
+    sys.exit("partially patched tree (missing: " + ", ".join(missing) + "); use a clean copy of WRFV4.7.1")
 if '"woof_dump.inc"' not in s:
     s = s.replace('#include "da_solve_dual_res_init.inc"\n',
                   '#include "da_solve_dual_res_init.inc"\n#include "woof_dump.inc"\n', 1)
     top.write_text(s)
 sol = main / "da_solve.inc"
 s = sol.read_text()
-if "woof_dump_be" not in s:
+if not any(h in s for h in hooks_all):
     hooks = [
         ("      call da_setup_background_errors (grid, be)\n",
          "      call woof_dump_be(be)\n      call woof_dump_xb(grid)\n"),
