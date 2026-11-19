@@ -34,13 +34,14 @@ imports this module.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
 import time as _time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -48,7 +49,7 @@ from typing import Iterable, Sequence
 import numpy as np
 
 from woof.obs.imager_scene import (BANDS, FLAG_GEOMETRY_GUESSED, FLAG_LIMB, FLAG_NIGHT,
-                                   FLAG_NO_SATELLITE, FLAG_OVERLAP,
+                                   FLAG_NO_SATELLITE, FLAG_OUT_OF_RANGE, FLAG_OVERLAP,
                                    HORIZON_ZENITH_DEG, LIMB_ZENITH_DEG, OVERLAP_ZENITH_DEG,
                                    ImagerScene, Platform, band, geostationary_view,
                                    solar_angles, utc)
@@ -165,6 +166,8 @@ class _Transport:
         if self.kind == "directory":
             path = Path(self.root) / key
             return path.read_bytes() if path.is_file() else None
+        from woof.fetch_endpoints import retry_delay
+
         url = f"{self.root}/{key}"
         for attempt in range(4):
             try:
@@ -174,12 +177,18 @@ class _Transport:
             except urllib.error.HTTPError as error:
                 if error.code == 404:
                     return None
-                if error.code < 500 and error.code != 429 or attempt == 3:
+                delay = retry_delay(error, attempt, wait_limit_s=30.0)
+                if delay is None or attempt == 3:
                     raise SatWeaveError(f"GET {url}: HTTP {error.code}") from error
-            except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
-                if attempt == 3:
-                    raise SatWeaveError(f"GET {url}: {error}") from error
-            _time.sleep(2.0 * (attempt + 1))
+            except (OSError, http.client.HTTPException) as error:
+                # A body cut short (IncompleteRead), a reset, a timeout, a dropped
+                # connection: asked again; the last attempt's fault is the refusal.
+                delay = retry_delay(error, attempt, wait_limit_s=30.0)
+                if delay is None and isinstance(error, http.client.HTTPException):
+                    delay = 2.0 ** attempt
+                if delay is None or attempt == 3:
+                    raise SatWeaveError(f"GET {url}: {type(error).__name__}: {error}") from error
+            _time.sleep(delay)
         return None
 
 
@@ -242,6 +251,7 @@ def decode_cf_times(values, units: str) -> list[datetime]:
 class _Store:
     def __init__(self, transport: _Transport, path: str):
         self.transport, self.path = transport, path
+        self._memo: dict = {}
         raw = transport.get(f"{path}/zarr.json")
         if raw is None:
             raise SatWeaveError(f"no SatWeave store at {transport.root}/{path} (not yet published, or "
@@ -276,9 +286,8 @@ class _Store:
         key = f"{self.path}/{name}/c/" + "/".join(str(i) for i in index)
         raw = self.transport.get(key)
         if raw is None:
-            fill = meta.get("fill_value")
-            value = np.nan if fill in ("NaN", None) else fill
-            return np.full(shape, value, dtype=dtype), "absent"
+            raise SatWeaveError(f"{self.transport.root}/{key}: the store has no chunk for {name} "
+                                f"at index {index}; not yet written, or the band is missing at this time")
         data = _zstd_decompress(raw) if compressed else raw
         array = np.frombuffer(data, dtype=np.dtype(dtype).newbyteorder("<"))
         if array.size != int(np.prod(shape)):
@@ -290,8 +299,10 @@ class _Store:
         n = int(meta["shape"][0])
         if int(meta["chunk_grid"]["configuration"]["chunk_shape"][0]) != n:
             raise SatWeaveError(f"{self.path}/{name}: coordinate split across chunks")
-        values, _ = self.chunk(name, (0,), meta["data_type"], (n,))
-        return np.asarray(values, dtype=float)
+        if name not in self._memo:
+            values, _ = self.chunk(name, (0,), meta["data_type"], (n,))
+            self._memo[name] = np.asarray(values, dtype=float)
+        return self._memo[name]
 
     def time_at(self, index: int) -> datetime:
         meta = self._array("time")
@@ -301,7 +312,9 @@ class _Store:
             raise SatWeaveError(f"{self.path}: time index {index} outside 0..{n - 1}")
         block = index // size
         length = min(size, n - block * size)
-        values, _ = self.chunk("time", (block,), meta["data_type"], (length,))
+        if ("time", block) not in self._memo:
+            self._memo["time", block] = self.chunk("time", (block,), meta["data_type"], (length,))[0]
+        values = self._memo["time", block]
         return decode_cf_times([values[index - block * size]], meta["attributes"]["units"])[0]
 
     def band_array(self, name) -> dict:
@@ -355,16 +368,21 @@ class SatWeaveSubset:
     lon: np.ndarray            # (nx,) continuous from the box's west edge
     values: dict               # nm -> (ny, nx) float32
     provenance: dict
+    #: nm -> (ny, nx) bool, True where the stored value lay outside the band's
+    #: valid range and was dropped to NaN (bands with none are absent).
+    out_of_range: dict = field(default_factory=dict)
 
 
 def read_subset(when, *, bands: Iterable, bbox=None, root: str | None = None,
                 cache: Path | str | None = None, refresh: bool = False,
-                use_cache: bool = True) -> SatWeaveSubset:
+                use_cache: bool = True, stores: dict | None = None) -> SatWeaveSubset:
     """Read ``bands`` at ``when`` inside ``bbox = (west, south, east, north)``.
 
     The subset is cached under ``cache`` (default :func:`cache_root`) as
     ``<stamp>/<key>/satweave.nc`` with ``provenance.json`` beside it; a later
-    identical request reads the cache unless ``refresh``.
+    identical request reads the cache unless ``refresh``.  ``stores`` is an
+    optional dict that keeps opened stores (metadata, coordinates, time chunk)
+    between calls of one run, keyed by root and store path.
     """
 
     when = utc(when)
@@ -379,7 +397,11 @@ def read_subset(when, *, bands: Iterable, bbox=None, root: str | None = None,
         if not refresh and (cache_dir / "provenance.json").is_file() and (cache_dir / "satweave.nc").is_file():
             return _read_cached(cache_dir)
     transport = _Transport(root or default_root())
-    store = _Store(transport, store_path)
+    store = None if stores is None else stores.get((transport.root, store_path))
+    if store is None:
+        store = _Store(transport, store_path)
+        if stores is not None:
+            stores[transport.root, store_path] = store
     if index is None:
         index = 0
         n = int(store._array("time")["shape"][0])
@@ -393,7 +415,7 @@ def read_subset(when, *, bands: Iterable, bbox=None, root: str | None = None,
     if lat.shape != (GRID_SHAPE[0],) or lon.shape != (GRID_SHAPE[1],) or not lat[0] > lat[-1]:
         raise SatWeaveError(f"{store_path}: latitude/longitude are not the published north-first 0.1 degree grid")
     rows, cols, lon_out = _bbox_indices(lat, lon, bbox)
-    values, chunks, dropped, attrs = {}, {}, {}, {}
+    values, chunks, dropped, attrs, outside = {}, {}, {}, {}, {}
     for nm in nms:
         name = band(nm).name
         meta = store.band_array(name)
@@ -403,6 +425,8 @@ def read_subset(when, *, bands: Iterable, bbox=None, root: str | None = None,
         with np.errstate(invalid="ignore"):
             bad = np.isfinite(sub) & ((sub < lo) | (sub > hi))
         sub[bad] = np.nan
+        if bad.any():
+            outside[nm] = bad
         values[nm], chunks[name], dropped[str(nm)] = sub, digest, int(bad.sum())
         attrs[str(nm)] = {k: meta.get("attributes", {}).get(k)
                           for k in ("units", "satellite_sources", "valid_range", "long_name")}
@@ -415,7 +439,7 @@ def read_subset(when, *, bands: Iterable, bbox=None, root: str | None = None,
         dropped_outside_valid_range=dropped, band_attributes=attrs,
         store_attributes={k: store.attributes.get(k) for k in ("title", "institution", "source")},
         read_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    subset = SatWeaveSubset(when, lat[rows], lon_out, values, provenance)
+    subset = SatWeaveSubset(when, lat[rows], lon_out, values, provenance, outside)
     if cache_dir is not None:
         _write_cache(cache_dir, subset)
     return subset
@@ -436,6 +460,9 @@ def _write_cache(directory: Path, subset: SatWeaveSubset) -> None:
                                     fill_value=np.float32(np.nan))
             var.units = band(nm).units
             var[:] = value
+        for nm, bad in subset.out_of_range.items():
+            ds.createVariable(band(nm).name + "_out_of_range", "i1", ("latitude", "longitude"),
+                              zlib=True)[:] = bad.astype(np.int8)
         ds.time = subset.time.isoformat()
         ds.licence = LICENCE
         ds.attribution = ATTRIBUTION
@@ -460,7 +487,10 @@ def _read_cached(directory: Path) -> SatWeaveSubset:
         lon = np.array(ds["longitude"][:], dtype=float)
         values = {nm: np.array(ds[band(nm).name][:].filled(np.nan), dtype=np.float32)
                   for nm in provenance["bands"]}
-    return SatWeaveSubset(utc(provenance["time"]), lat, lon, values, dict(provenance, cached=True))
+        outside = {nm: np.array(ds[band(nm).name + "_out_of_range"][:], dtype=bool)
+                   for nm in provenance["bands"] if band(nm).name + "_out_of_range" in ds.variables}
+    return SatWeaveSubset(utc(provenance["time"]), lat, lon, values, dict(provenance, cached=True),
+                          outside)
 
 
 # --------------------------------------------------------------------------- reconstruction
@@ -479,8 +509,10 @@ def _check_sources(provenance: dict) -> None:
 def reconstruct(subset: SatWeaveSubset) -> ImagerScene:
     """Attribute each pixel to a satellite and compute its view and solar geometry.
 
-    Band availability first: a finite 6900 nm value means GOES or Himawari, a
-    finite 6200 nm value with a NaN 6900 nm one means Meteosat.  Then the
+    Band availability first: a 6900 nm value means GOES or Himawari, a
+    6200 nm value without a 6900 nm one means Meteosat (a value dropped for
+    lying outside its valid range still counts as present, and sets
+    ``FLAG_OUT_OF_RANGE``).  Then the
     smallest view zenith among the candidates.  Every pixel gets
     ``FLAG_GEOMETRY_GUESSED``; ``FLAG_OVERLAP`` where a second satellite sees
     it under 70 degrees.  Without 6200 and 6900 in the subset, only geometry
@@ -491,33 +523,46 @@ def reconstruct(subset: SatWeaveSubset) -> ImagerScene:
     platforms = platforms_at(subset.time)
     lon2, lat2 = np.meshgrid(subset.lon, subset.lat)
     shape = lat2.shape
-    zen, azi, scan = [], [], []
-    for p in platforms:
-        z, a, s = geostationary_view(lat2, lon2, p.sub_longitude_deg)
-        zen.append(z), azi.append(a), scan.append(s)
-    zen, azi, scan = np.stack(zen), np.stack(azi), np.stack(scan)
-    visible = zen < HORIZON_ZENITH_DEG
-    candidates = visible.copy()
+    # A value dropped for lying outside its valid range was still reported, so it
+    # counts as present when deciding which satellite carried the pixel.
+    oor = subset.out_of_range
     v62, v69 = subset.values.get(6200), subset.values.get(6900)
+    has69 = has62 = meteo_only = None
     if v69 is not None:
-        not_meteo = np.array([p.family != "seviri" for p in platforms])[:, None, None]
-        has69 = np.isfinite(v69)[None]
-        candidates &= np.where(has69, not_meteo, True)
+        has69 = np.isfinite(v69) | oor.get(6900, False)
         if v62 is not None:
-            meteo_only = (np.isfinite(v62) & ~np.isfinite(v69))[None]
-            candidates &= np.where(meteo_only, ~not_meteo, True)
-    masked = np.where(candidates, zen, np.inf)
-    index = np.argmin(masked, axis=0)
-    attributed = np.isfinite(np.take_along_axis(masked, index[None], 0)[0])
-    index = np.where(attributed, index, -1).astype(np.int16)
-    safe = np.maximum(index, 0)[None]
-    pick = lambda a: np.where(attributed, np.take_along_axis(a, safe, 0)[0], np.nan).astype(np.float32)
-    vza, vaz, sca = pick(zen), pick(azi), pick(scan)
-    others = (zen < OVERLAP_ZENITH_DEG) & (np.arange(len(platforms))[:, None, None] != index[None])
+            has62 = np.isfinite(v62) | oor.get(6200, False)
+            meteo_only = has62 & ~has69
+    # One platform at a time: a running smallest view zenith over the candidates,
+    # and a count of the platforms that see the pixel under the overlap zenith.
+    best = np.full(shape, np.inf, dtype=np.float32)
+    index = np.full(shape, -1, dtype=np.int16)
+    vaz = np.full(shape, np.nan, dtype=np.float32)
+    sca = np.full(shape, np.nan, dtype=np.float32)
+    seeing = np.zeros(shape, dtype=np.int8)
+    for k, p in enumerate(platforms):
+        z, a, s = (x.astype(np.float32) for x in geostationary_view(lat2, lon2, p.sub_longitude_deg))
+        seeing += z < OVERLAP_ZENITH_DEG
+        candidate = z < HORIZON_ZENITH_DEG
+        if has69 is not None:
+            candidate &= ~has69 if p.family == "seviri" else True
+            if meteo_only is not None and p.family != "seviri":
+                candidate &= ~meteo_only
+        z = np.where(candidate, z, np.float32(np.inf))
+        better = z < best
+        best = np.where(better, z, best)
+        index[better] = k
+        vaz[better], sca[better] = a[better], s[better]
+        del z, a, s, candidate, better
+    attributed = index >= 0
+    vza = np.where(attributed, best, np.float32(np.nan)).astype(np.float32)
     flags = np.full(shape, FLAG_GEOMETRY_GUESSED, dtype=np.uint16)
-    flags |= np.where(attributed & others.any(axis=0), FLAG_OVERLAP, 0).astype(np.uint16)
+    others = seeing - (attributed & (vza < OVERLAP_ZENITH_DEG))
+    flags |= np.where(attributed & (others > 0), FLAG_OVERLAP, 0).astype(np.uint16)
     flags |= np.where(attributed & (vza > LIMB_ZENITH_DEG), FLAG_LIMB, 0).astype(np.uint16)
     flags |= np.where(~attributed, FLAG_NO_SATELLITE, 0).astype(np.uint16)
+    for mask in oor.values():
+        flags |= np.where(mask, FLAG_OUT_OF_RANGE, 0).astype(np.uint16)
     # A finite value the attributed satellite does not carry is a contradiction.
     for nm, value in subset.values.items():
         carriers = np.array([p.family in BANDS[nm].channels for p in platforms] + [False])
@@ -539,7 +584,7 @@ def reconstruct(subset: SatWeaveSubset) -> ImagerScene:
 
 def read_scene(when, *, bands: Iterable, bbox=None, root: str | None = None,
                cache: Path | str | None = None, refresh: bool = False,
-               use_cache: bool = True, identify: bool = True) -> ImagerScene:
+               use_cache: bool = True, identify: bool = True, stores: dict | None = None) -> ImagerScene:
     """:func:`read_subset` then :func:`reconstruct`.
 
     ``identify`` adds 6200 and 6900 nm to the read (two more chunks) so the
@@ -550,7 +595,7 @@ def read_scene(when, *, bands: Iterable, bbox=None, root: str | None = None,
     wanted = {band(b).wavelength_nm for b in bands}
     read = wanted | ({6200, 6900} if identify else set())
     subset = read_subset(when, bands=read, bbox=bbox, root=root, cache=cache,
-                         refresh=refresh, use_cache=use_cache)
+                         refresh=refresh, use_cache=use_cache, stores=stores)
     scene = reconstruct(subset)
     scene.values = {nm: v for nm, v in scene.values.items() if nm in wanted}
     return scene
@@ -567,16 +612,36 @@ def _bands_argument(value: str) -> list[int]:
 
 
 def _times(args) -> list[datetime]:
-    start = args.time
-    end = args.end or start
+    start, end = args.time, args.end or args.time
     if end < start:
         raise SatWeaveError("--end is before --time")
-    out, when = [], nearest_step(start) if args.nearest else start
+    if args.nearest:
+        start, end = nearest_step(start), nearest_step(end)
+    out, when = [], start
     while when <= end:
         out.append(when)
         step = HOURLY_STEP if when >= HOURLY_START else ARCHIVE_STEP
         when = when + max(step, timedelta(minutes=args.every_minutes or 0))
+    if not out:
+        raise SatWeaveError(f"no step between {start.isoformat()} and {end.isoformat()}")
     return out
+
+
+def _satweave_time(flag: str):
+    """An argparse type for ``flag``: the obs ISO 8601 parser, its message naming ``flag``."""
+
+    import argparse
+
+    from woof.obs.cli import _utc_time
+
+    def parse(value: str):
+        try:
+            return _utc_time(value)
+        except argparse.ArgumentTypeError as error:
+            raise argparse.ArgumentTypeError(str(error).replace("--valid-time", flag, 1)) from None
+
+    parse.__name__ = "time"
+    return parse
 
 
 def fetch_main(args) -> int:
@@ -584,11 +649,13 @@ def fetch_main(args) -> int:
 
     import sys
 
+    summaries, failure = [], None
     try:
-        summaries = []
+        stores: dict = {}
         for when in _times(args):
             scene = read_scene(when, bands=args.bands, bbox=args.bbox, root=args.root,
-                               cache=args.cache, refresh=args.refresh, identify=not args.no_identify)
+                               cache=args.cache, refresh=args.refresh, identify=not args.no_identify,
+                               stores=stores)
             summary = scene.summary()
             summary["provenance"] = {k: scene.provenance.get(k) for k in
                                      ("store", "licence", "attribution", "cached", "transport")}
@@ -598,10 +665,17 @@ def fetch_main(args) -> int:
                               "bands": {k: v["finite"] for k, v in summary["bands"].items()},
                               "cached": bool(scene.provenance.get("cached"))}))
     except SatWeaveError as error:
-        print(f"woof obs satweave fetch: {error}", file=sys.stderr)
+        failure = str(error)
+    except (OSError, ImportError) as error:
+        failure = f"{type(error).__name__}: {error}"
+    if args.summary_json and (summaries or failure is None):
+        try:
+            Path(args.summary_json).write_text(json.dumps(summaries, indent=2) + "\n")
+        except OSError as error:
+            failure = failure or f"{type(error).__name__}: {error}"
+    if failure is not None:
+        print(f"woof obs satweave fetch: {' '.join(failure.split())}", file=sys.stderr)
         return 2
-    if args.summary_json:
-        Path(args.summary_json).write_text(json.dumps(summaries, indent=2) + "\n")
     print(f"SatWeave data: {LICENCE}. {ATTRIBUTION}", file=sys.stderr)
     return 0
 
@@ -609,16 +683,16 @@ def fetch_main(args) -> int:
 def register_cli(obs_sub) -> None:
     """``woof obs satweave fetch`` (``woof fetch satweave`` is the same door)."""
 
-    from woof.obs.cli import _bbox_wrapping, _utc_time
+    from woof.obs.cli import _bbox_wrapping
 
     parser = obs_sub.add_parser(
         "satweave", help="SatWeave geostationary mosaic (Google; CC BY 4.0): subset and cache")
     sub = parser.add_subparsers(dest="satweave_command", required=True)
     fetch = sub.add_parser(
         "fetch", help="read bands for a time (or a span) and bounding box into the local cache")
-    fetch.add_argument("--time", required=True, type=_utc_time,
+    fetch.add_argument("--time", required=True, type=_satweave_time("--time"),
                        help="UTC time with offset, e.g. 2026-11-18T12:00Z (archive: :00/:30; 2026 on: hourly)")
-    fetch.add_argument("--end", default=None, type=_utc_time,
+    fetch.add_argument("--end", default=None, type=_satweave_time("--end"),
                        help="last time of a span (inclusive); every step from --time")
     fetch.add_argument("--every-minutes", type=float, default=None,
                        help="span step in minutes (default the store's own: 30 or 60)")
@@ -635,4 +709,9 @@ def register_cli(obs_sub) -> None:
     fetch.add_argument("--no-identify", action="store_true",
                        help="do not read 6200/6900 nm to attribute satellites (geometry only)")
     fetch.add_argument("--summary-json", default=None, help="write every scene's summary here")
+    # argparse before Python 3.14 reads ``-105,25,-80,45`` as an option, so a western
+    # --bbox failed; any ``-<digit>`` token is a value here (this parser has no
+    # numeric options).  woof.cli's _COORDINATE_FLAGS join is global and would
+    # break the nargs=4 --bbox of other commands, so it is not used.
+    fetch._negative_number_matcher = re.compile(r"^-\.?\d")
     fetch.set_defaults(func=fetch_main)

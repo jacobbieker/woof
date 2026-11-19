@@ -16,10 +16,10 @@ Meteosat 0°, Meteosat IODC and Himawari. It has 17 bands on a 0.1° grid:
 - hourly steps from 2026, available about an hour after the hour.
 
 ```
-woof fetch satweave --time 2026-11-18T12:00Z --bbox -105,25,-80,45
+woof obs satweave fetch --time 2026-11-18T12:00Z --bbox -105,25,-80,45
 ```
 
-`woof obs satweave fetch` is the same door.
+`woof fetch satweave` is the same door.
 
 ### What `fetch` does
 

@@ -12,11 +12,19 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pytest
 
-zstd = pytest.importorskip("compression.zstd")
+try:
+    from compression import zstd  # Python 3.14
+    _compress = zstd.compress
+except ImportError:
+    try:
+        from numcodecs import Zstd
+        _compress = lambda data: bytes(Zstd().encode(data))
+    except ImportError:
+        _compress = None
 
 from woof.obs import satweave as sw  # noqa: E402
 from woof.obs.imager_scene import (FLAG_GEOMETRY_GUESSED, FLAG_LIMB, FLAG_NIGHT,  # noqa: E402
-                                   FLAG_OVERLAP, ImagerScene, band, geostationary_view)
+                                   FLAG_OUT_OF_RANGE, FLAG_OVERLAP, ImagerScene, band, geostationary_view)
 
 UTC = timezone.utc
 LAT = np.round(90.0 - 0.1 * np.arange(1801), 1)
@@ -39,7 +47,7 @@ def _array(shape, chunks, dtype, attrs, fill="NaN"):
 def _put(root, key, array):
     path = root / key
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(zstd.compress(np.ascontiguousarray(array).astype(array.dtype.newbyteorder("<")).tobytes()))
+    path.write_bytes(_compress(np.ascontiguousarray(array).astype(array.dtype.newbyteorder("<")).tobytes()))
 
 
 def _fields(lat2, lon2):
@@ -85,6 +93,8 @@ def _write_store(root, path, *, n_times, index, units, value, sources=None):
 
 @pytest.fixture(scope="module")
 def archive_root(tmp_path_factory):
+    if _compress is None:
+        pytest.skip("no zstd codec (Python 3.14 compression.zstd or numcodecs)")
     root = tmp_path_factory.mktemp("satweave")
     when = datetime(2024, 7, 1, 12, 30, tzinfo=UTC)
     index = int((when - sw.ARCHIVE_START) / sw.ARCHIVE_STEP)
@@ -229,3 +239,88 @@ def test_fetch_alias_and_door(archive_root, tmp_path, capsys):
     assert "CC BY 4.0" in capsys.readouterr().err
     assert main(["obs", "satweave", "fetch", "--time", "2026-03-04T05:30Z", "--root", str(root),
                  "--cache", str(tmp_path / "cache")]) == 2
+
+
+def test_missing_chunk_is_an_error_and_not_cached(archive_root, tmp_path):
+    root, when, _ = archive_root
+    path, index = sw.store_for(when)
+    (root / path / "mosaic_6900_nm" / "c" / str(index) / "0" / "0").rename(root / "held")
+    try:
+        with pytest.raises(sw.SatWeaveError, match="6900"):
+            sw.read_subset(when, bands=[6900], bbox=(5.0, -5.0, 15.0, 5.0), root=str(root), cache=tmp_path)
+    finally:
+        (root / "held").rename(root / path / "mosaic_6900_nm" / "c" / str(index) / "0" / "0")
+    assert not list(tmp_path.rglob("satweave.nc"))
+
+
+def test_out_of_range_6900_is_present_and_flagged():
+    when = datetime(2024, 7, 1, 12, 30, tzinfo=UTC)
+    lat, lon = np.array([10.0, 9.9]), np.array([-20.0, -19.9])
+    v62 = np.full((2, 2), 230.0, np.float32)
+    v69 = np.full((2, 2), np.nan, np.float32)
+    plain = sw.reconstruct(sw.SatWeaveSubset(when, lat, lon, {6200: v62, 6900: v69}, {}))
+    assert plain.platforms[plain.platform_index[0, 0]].family == "seviri"
+    assert not (plain.flags & FLAG_OUT_OF_RANGE).any()
+    mask = np.zeros((2, 2), bool)
+    mask[0, 0] = True  # a 6900 nm value was reported but dropped as out of range
+    scene = sw.reconstruct(sw.SatWeaveSubset(when, lat, lon, {6200: v62, 6900: v69}, {}, {6900: mask}))
+    assert scene.platforms[scene.platform_index[0, 0]].family != "seviri"
+    assert scene.platforms[scene.platform_index[0, 1]].family == "seviri"
+    assert scene.flags[0, 0] & FLAG_OUT_OF_RANGE and not scene.flags[0, 1] & FLAG_OUT_OF_RANGE
+
+
+def test_span_rounds_both_ends():
+    from types import SimpleNamespace
+
+    start = datetime(2024, 7, 1, 12, 20, tzinfo=UTC)  # rounds up to 12:30
+    one = sw._times(SimpleNamespace(time=start, end=None, nearest=True, every_minutes=None))
+    assert one == [datetime(2024, 7, 1, 12, 30, tzinfo=UTC)]
+    span = sw._times(SimpleNamespace(time=start, end=start + timedelta(hours=1), nearest=True, every_minutes=None))
+    assert len(span) == 3
+    with pytest.raises(sw.SatWeaveError):
+        sw._times(SimpleNamespace(time=start, end=start - timedelta(minutes=1), nearest=True, every_minutes=None))
+
+
+def test_transport_retries_incomplete_reads(monkeypatch):
+    import http.client
+    import urllib.request
+
+    monkeypatch.setattr(sw._time, "sleep", lambda seconds: None)
+    calls = []
+
+    class Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            calls.append(1)
+            if len(calls) < 3:
+                raise http.client.IncompleteRead(b"ab", 10)
+            return b"ok"
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: Reply())
+    assert sw._Transport("https://example.invalid/x").get("k") == b"ok"
+    calls.clear()
+    monkeypatch.setattr(Reply, "read", lambda self: (_ for _ in ()).throw(http.client.IncompleteRead(b"", 1)))
+    with pytest.raises(sw.SatWeaveError, match="IncompleteRead"):
+        sw._Transport("https://example.invalid/x").get("k")
+
+
+def test_fetch_failure_writes_partial_summary(archive_root, tmp_path, capsys):
+    from woof.cli import main
+
+    root, when, _ = archive_root
+    summary = tmp_path / "s.json"
+    code = main(["obs", "satweave", "fetch", "--time", when.strftime("%Y-%m-%dT%H:%MZ"),
+                 "--end", (when + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%MZ"), "--bands", "6200",
+                 "--bbox", "-100,30,-90,40", "--root", str(root), "--cache", str(tmp_path / "c"),
+                 "--summary-json", str(summary)])
+    assert code == 2  # the second step is not in the fixture store
+    assert len(json.loads(summary.read_text())) == 1
+    assert "woof obs satweave fetch:" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        main(["obs", "satweave", "fetch", "--time", "nonsense"])
+    assert "--time 'nonsense'" in capsys.readouterr().err
