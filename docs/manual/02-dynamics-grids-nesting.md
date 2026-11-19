@@ -31,7 +31,7 @@ the upwind low-order flux at every face.
 
 Lateral boundaries use specified/relaxation zones with Davies-style weighting;
 `spec_bdy_width` defaults to 5 and must be at least `spec_zone + relax_zone`
-[docs/public/CONFIGURATION.md:146, 661]. The damping stack is described in section 1.2.
+[docs/public/CONFIGURATION.md:146, 699]. The damping stack is described in section 1.2.
 
 No symbolic statement of the governing equation set exists in the documentation
 tree; the prose description above and the WRF-ARW technical-note lineage are the
@@ -41,8 +41,8 @@ reference. This is recorded as a documentation gap, not a claim.
 
 `hybrid_opt` supports 0/1 (sigma, `B(eta)=eta`) and 2 (WRF cubic-B hybrid); anything
 else is refused by name. The importer and the domain wizard default to 2 with
-`etac = 0.2` [docs/public/CONFIGURATION.md:184-185; woof/namelist_import.py:3011-3012;
-woof/domain_wizard.py:867]. That `etac` is the value asked for, not always the
+`etac = 0.2` [docs/public/CONFIGURATION.md:186-187; woof/namelist_import.py:6956-6957;
+woof/domain_wizard.py:1524]. That `etac` is the value asked for, not always the
 value run: at `hybrid_opt = 2` the cubic orders a column only while its surface
 pressure stays above a floor set by `etac` and `p_top` (46408 Pa, about 6082 m of
 terrain, at the shipped pair), and WRF calls a column below it fatal. Preparation
@@ -122,14 +122,14 @@ as an experimental path: it runs, it is stamped as experimental in the run's own
 provenance, and one-way consumers refuse a feedback-modified parent. It feeds back
 dynamic state only, where WRF also feeds back hundreds of masked land-surface
 fields, so it is not a WRF-equivalent claim [README.md, current release scope;
-docs/public/CONFIGURATION.md:140-141]. `smooth_option` admits 0 only (the parent
+docs/public/CONFIGURATION.md:143-144]. `smooth_option` admits 0 only (the parent
 smoother acts only under two-way feedback). No receipt, gate, or measurement exists
 yet for the two-way path beyond its stamping; treat it accordingly.
 
 Execution walks parent before child on a flat integer-tick schedule so no
 floating-point clock drift can reorder coupling; child timestep derives exactly as
 `dt_child = dt_parent / parent_time_step_ratio`
-[docs/gpuwm-project-history.md:75; docs/public/CONFIGURATION.md:235].
+[docs/gpuwm-project-history.md:75; docs/public/CONFIGURATION.md:238].
 Parent-to-child initialization uses WRF's SINT interpolation family with
 stagger-aware geometry; lateral forcing is stored as value/tendency tables in WRF
 `bdy_interp1` form [docs/gpuwm-project-history.md:77]. All 128 WRF boundary tables
@@ -181,7 +181,7 @@ Two inventories move, both derived rather than hand-listed:
 1. **Serialized model state**: exactly the restart layer's serialized-state
    contract (`woof.state_serialization_contract.STATE_SERIALIZED_ATTRS`), so a
    field added to the model reaches checkpointing and relocation at once
-   [woof/core/nest_relocation.py:486-496].
+   [woof/core/nest_relocation.py:781-813].
 2. **Driver-held physics continuation state** (new in 2.5.0): everything the
    physics driver holds per column that is cross-step memory nothing recomputes:
    Kain-Fritsch NCA hold timers, held cumulus rates, PRATEC/RAINCV, the
@@ -330,7 +330,7 @@ one line naming the ratio and the limit, and reported by the preflight checker
 `woof check` (section 8.5) as what the run will do. A config that writes
 `mix_isotropic = 0` keeps it, in the danger zone
 too, and gets the advisory carrying the override state
-[docs/public/LES.md:430-442; docs/public/CONFIGURATION.md:480]. Because
+[docs/public/LES.md:430-442; docs/public/CONFIGURATION.md:673]. Because
 `mix_isotropic` is inside the restart fingerprint, a checkpoint written under the
 old anisotropic default does not bit-continue under the auto-selected isotropic
 form. A guard test fails if any shipped config arrives on the exposed path, and the
