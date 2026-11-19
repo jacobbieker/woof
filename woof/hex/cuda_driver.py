@@ -3963,9 +3963,7 @@ class CudaDryDycoreDriver:
             self.regional_v841.overwrite_speczone_u(
                 recovered.normal_velocity, regional_u_overwrite
             )
-            # Recovery skips specified-zone terrain flux. Whole-column zeroing
-            # matches native at the step boundary; nearest is applied after solve.
-            self.regional_v841.zero_speczone_w(recovered.vertical_velocity)
+            self._zero_recovered_speczone_w(recovered.vertical_velocity)
         diagnostics = self._device_saved(
             theta,
             exner,
@@ -3976,6 +3974,16 @@ class CudaDryDycoreDriver:
             recovered.vertical_velocity,
         )
         return state, diagnostics, flux_u, flux_w
+
+    def _zero_recovered_speczone_w(self, vertical_velocity: Any) -> None:
+        """The recovered candidate's specified-zone w (regional runs only).
+
+        Recovery skips specified-zone terrain flux. Whole-column zeroing
+        matches native at the step boundary; nearest is applied after solve.
+        A dycore variant whose boundary law differs overrides this alone.
+        """
+
+        self.regional_v841.zero_speczone_w(vertical_velocity)
 
     def _copy_state(
         self, source: DevicePrognosticState, *, share_scalars: bool = False
