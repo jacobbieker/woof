@@ -1139,6 +1139,139 @@ def test_composite_transaction_rejects_incomplete_driver_rollback() -> None:
     assert log[-2:] == ["driver_abort", "adapter_abort"]
 
 
+class _HealthBackend(_FakeBackend):
+    """Phase one and phase two report a status word through the ledger."""
+
+    def __init__(self, log, cp, *, site, phase, word, seen):
+        super().__init__(log)
+        self._cp, self._site, self._phase = cp, site, phase
+        self._word, self._seen = word, seen
+
+    def _report(self, phase):
+        from woof.core import health_ledger
+
+        if phase != self._phase:
+            return
+        self._seen["active"] = health_ledger.active() is not None
+        status = self._cp.asarray([self._word], dtype=self._cp.uint32)
+
+        def describe(flags):
+            raise FloatingPointError(
+                f"{self._site} flagged {flags:#x}" + health_ledger.deferred_note())
+
+        self._seen["returned"] = health_ledger.read_status(
+            status, site=self._site, describe=describe)
+
+    def begin_step(self, **kwargs):
+        raw = super().begin_step(**kwargs)
+        self._report("phase1")
+        return raw
+
+    def finish_step(self, **kwargs):
+        update = super().finish_step(**kwargs)
+        self._report("phase2")
+        return update
+
+
+def _health_step(runner, backend, log, **extra):
+    couple, clamp, recover = _transaction_callables(log)
+    return runner.execute_composite_step(
+        driver=_FakeDriver(log), backend=backend,
+        scalar_names=runner.SCALAR_NAMES, physics_geometry=object(),
+        kernel_cache=object(), previous_surface_updates=None,
+        couple=couple, clamp=clamp, recover=recover, **extra)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("site,phase", [
+    ("microphysics", "phase2"), ("ysu", "phase1"), ("grell-freitas", "phase1"),
+    ("noahmp_static_surface_identity", "phase1"), ("lagged-heating", "phase2")])
+def test_a_deferred_health_refusal_is_drained_before_the_commit(
+        site, phase, monkeypatch) -> None:
+    """The step's health words are read once, before publication: a
+    deferred refusal aborts the same step exactly as the immediate one."""
+    cp = pytest.importorskip("cupy")
+    from woof.core import health_ledger
+
+    monkeypatch.delenv(health_ledger.RESIDENT_ENV, raising=False)
+    runner = _load_runner()
+    log: list[str] = []
+    seen: dict[str, object] = {}
+    backend = _HealthBackend(log, cp, site=site, phase=phase, word=4, seen=seen)
+    with pytest.raises(runner.CompositeTransactionError,
+                       match="aborted without publication") as caught:
+        _health_step(runner, backend, log)
+    assert seen == {"active": True, "returned": 0}
+    cause = caught.value.__cause__
+    assert isinstance(cause, FloatingPointError)
+    assert f"{site} flagged 0x4" in str(cause)
+    assert "deferred health read at the end of this model step" in str(cause)
+    assert "driver_commit" not in log and "adapter_commit" not in log
+    assert log[-2:] == ["driver_abort", "adapter_abort"]
+    assert health_ledger.active() is None
+
+    # Healthy: deferred, nothing raised, the ledger is gone after the step.
+    log.clear()
+    seen.clear()
+    backend = _HealthBackend(log, cp, site=site, phase=phase, word=0, seen=seen)
+    _health_step(runner, backend, log)
+    assert seen == {"active": True, "returned": 0}
+    assert log[-2:] == ["driver_commit", "adapter_commit"]
+    assert health_ledger.active() is None
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("mode,site", [
+    ("immediate", "microphysics"), ("deferred", "rrtmgp")])
+def test_immediate_mode_and_unadmitted_sites_read_at_the_site(
+        mode, site, monkeypatch) -> None:
+    cp = pytest.importorskip("cupy")
+    from woof.core import health_ledger
+
+    monkeypatch.setenv(health_ledger.RESIDENT_ENV, mode)
+    runner = _load_runner()
+    log: list[str] = []
+    seen: dict[str, object] = {}
+    backend = _HealthBackend(log, cp, site=site, phase="phase2", word=4,
+                             seen=seen)
+    _health_step(runner, backend, log)
+    assert seen["returned"] == 4
+    assert log[-2:] == ["driver_commit", "adapter_commit"]
+    assert health_ledger.active() is None
+
+
+@pytest.mark.gpu
+def test_a_step_that_exchanges_halos_reads_at_the_site(monkeypatch) -> None:
+    """Same-host ranks and LTS classes exchange before phase two: a failing
+    scheme must stop its own rank there, so nothing is deferred."""
+    cp = pytest.importorskip("cupy")
+    from woof.core import health_ledger
+
+    monkeypatch.delenv(health_ledger.RESIDENT_ENV, raising=False)
+    runner = _load_runner()
+    log: list[str] = []
+    seen: dict[str, object] = {}
+    backend = _HealthBackend(log, cp, site="ysu", phase="phase1", word=4, seen=seen)
+    before = health_ledger.resident_receipt()["immediate_steps"].get("exchanged", 0)
+    _health_step(runner, backend, log, before_phase_two=lambda *args, **kwargs: None)
+    assert seen == {"active": False, "returned": 4}
+    assert health_ledger.resident_receipt()["immediate_steps"]["exchanged"] == before + 1
+    assert health_ledger.active() is None
+
+
+def test_the_hex_admitted_sites_are_real_call_sites() -> None:
+    """Each extra site the composite step admits is spelled exactly so by a
+    read_status call; a renamed site would silently fall back to the
+    immediate read and these tests would not notice."""
+    import woof
+
+    runner = _load_runner()
+    root = Path(woof.__file__).resolve().parent
+    text = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
+    for site in runner.HEX_EXTRA_RESIDENT_SITES:
+        assert f'site="{site}"' in text, site
+
+
 def test_native_gate_includes_physical_edge_u_interface_w_and_gwdo() -> None:
     runner = _load_runner()
     assert runner.NATIVE_FIELD_MAP["normal_u"] == ("u", "level_edge")
