@@ -4021,7 +4021,7 @@
    },
    {
     "file": "woof/core/kernels/rrtmg_sw.cu",
-    "sha256": "43134d6d6d2be4b3e668c7ab92d5850f1f992a09812dd09c9536fce5d9ab791e"
+    "sha256": "502dfc9b15481742ff5d56a7730c372502904dd4abe37dd131a953e4a35f8122"
    },
    {
     "file": "woof/core/kernels/rrtmg_sw_spectral.cuh",
@@ -9570,15 +9570,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "d2472af3dc738f0f67711841d5e49549f8ed6846de9b680a5b62c966f9de48b0",
+    "sha256": "f1f4ecb290a1b7b7c10d807e2efac8b7627dbbdfde31ddd4c66bb00c920363d7",
     "sites": {
-     "100": 207
+     "100": 221
     }
    },
    "native_differences": {
-    "sha256": "b8ce2c3343166dd127107af939b30efd7bf2a0d4569d1f57c067bf715a059036",
+    "sha256": "722d529f661c63ddbc49e1a36af1a42b5ce632bc0239132e76ec87e83d6b6f70",
     "sites": {
-     "100": 606
+     "100": 589
     }
    },
    "native_errors": {},
@@ -9598,7 +9598,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "57e72fd723541584e892aac54ad40ba4f826cd8e14e5cd0bbbe7d0f731e5a118"
+   "source_sha256": "587d7f46870ece70af2c4e37ac996cb0ed1df47b2e97836ab78d34504b87fc61"
   },
   "composed:rrtmgk_lw": {
    "assessment": "static_diagnostic_only",
@@ -9711,15 +9711,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "012df9b9618c00b3f118308108eac2fc6138258ee9de3adac45addcf8664f441",
+    "sha256": "86d613c9f996e65f36049cfe9bca2c1e21adacfb7b3889d1db5f24f546f83eb3",
     "sites": {
-     "100": 293
+     "100": 291
     }
    },
    "native_differences": {
-    "sha256": "d08186f03307b3778f38f1b674809da54394286b0ce6119564428f3543e326d2",
+    "sha256": "88beb1f31e86de981f541b1ef35070d8db5f652db9b4008377f2d9a6b65aacf1",
     "sites": {
-     "100": 676
+     "100": 662
     }
    },
    "native_errors": {},
@@ -9739,7 +9739,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "220211ca305fd1c158db9881f974c2e7ce1af1c587e737bcf56cd3c1fe0432a4"
+   "source_sha256": "46a4000f5bff3f579b754efcbea151f2111a645b42d496d42ef4a22ef94a5b81"
   },
   "composed:snow_papers": {
    "assessment": "static_diagnostic_only",
