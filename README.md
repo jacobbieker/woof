@@ -906,6 +906,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   overstate magnitudes by about 4-8x. On hex at 3-5 km they are dominated
   by noise. Later gradient work therefore plans for 9-15 km for now
   (plan, gate G0).
+  `woof.grad.bridge` hands woof's arrays to PyTorch and back: DLPack with
+  no copy on CUDA (with a stream handoff), no copy from Metal into
+  torch-MPS and one device copy back, and a refusal for any unnamed copy or
+  any shared view that autograd could see overwritten
+  ([docs/grad.md](docs/grad.md#the-tensor-bridge)).
 - **A plan, not yet code, for variational data assimilation.**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
@@ -920,7 +925,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
   (DLPack, no copies; `recast-woof[nn-torch]`, never a base dependency) or
-  MLX on Metal. A safety layer refuses, clips or falls back to the physics
+  MLX on Metal (PyTorch artefacts also run there, on torch-MPS). A safety layer refuses, clips or falls back to the physics
   scheme outside the trained range, and limits outputs, keeps moisture
   positive and can fix column budgets. `woof run`/`woof go --nn NN.toml`
   with `mode = "tap"` records a WRF-route scheme's column inputs and
