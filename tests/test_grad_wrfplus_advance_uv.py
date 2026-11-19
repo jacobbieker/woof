@@ -85,7 +85,12 @@ CONFIGS = [dict(), dict(spec_zone=1), dict(top_lid=1, moist_cq=1), dict(base3d=0
            dict(top_lid=1, moist_cq=1, use_emdiv=1, has_msf=1,
                 xscale=-30.0, yscale=-30.0),
            dict(nz=4, ny=3, nx=1), dict(nz=4, ny=2, nx=2, top_lid=1),
-           dict(nz=5, ny=5, nx=3, spec_zone=1, base3d=0, has_msf=1)]
+           dict(nz=5, ny=5, nx=3, spec_zone=1, base3d=0, has_msf=1),
+           dict(nz=19, ny=4, nx=5, top_lid=1, use_emdiv=1, xscale=-30.0,
+                yscale=-30.0),
+           dict(nz=10, ny=3, nx=1, use_emdiv=1, has_msf=1, xscale=-30.0,
+                yscale=-30.0),
+           dict(nz=17, ny=5, nx=3, spec_zone=1, moist_cq=1, has_msf=1)]
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

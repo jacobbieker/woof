@@ -18,6 +18,9 @@ import numpy as np
 
 KERNELS = Path(__file__).resolve().parent / "kernels"
 THREADS = 256
+#: Levels per thread in the adjoint's face pass: dpn is shared within a
+#: chunk; more chunks give more threads.
+AD_KCHUNK = 8
 
 #: Trajectory arrays of advance_uv, in kernel argument order.
 UV_TRAJECTORY = ("ru_t", "rv_t", "p_pp", "p_pp_old", "ph_pp", "php", "phb",
@@ -154,22 +157,24 @@ def advance_uv_ad(u_a, v_a, traj: dict, adj: dict, geom: UVGeometry) -> None:
            + [("traj", n, traj[n]) for n in UV_TRAJECTORY]
            + [("adj", n, adj[n]) for n in UV_ACTIVE])
     g = geom
-    nu = g.nz * g.ny * (g.nx + 1)
-    nv = g.nz * (g.ny + 1) * g.nx
-    su = cp.empty(5 * nu, dtype=dtype)
-    sv = cp.empty(5 * nv, dtype=dtype)
+    lu, lv = g.ny * (g.nx + 1), (g.ny + 1) * g.nx
+    kc = AD_KCHUNK
+    if kc < 1:
+        raise ValueError(f"AD_KCHUNK must be >= 1, not {kc}")
+    nch = (g.nz + kc - 1) // kc
+    su = cp.empty(3 * (g.nz + nch) * lu, dtype=dtype)
+    sv = cp.empty(3 * (g.nz + nch) * lv, dtype=dtype)
     geo = g.args(dtype)
     _kernel("advance_uv", "advance_uv_ad_face", dtype)(
-        _blocks(g.nz * (g.ny + 1) * (g.nx + 1)), (THREADS,),
+        _blocks(nch * (g.ny + 1) * (g.nx + 1)), (THREADS,),
         (u_a, v_a) + traj_args
-        + (adj["ru_t"], adj["rv_t"], adj["cqu"], adj["cqv"], su, sv) + geo)
+        + (adj["ru_t"], adj["rv_t"], adj["cqu"], adj["cqv"], su, sv,
+           np.int32(kc)) + geo)
     _kernel("advance_uv", "advance_uv_ad_gather", dtype)(
         _blocks((g.nz + 1) * g.ny * g.nx), (THREADS,),
         traj_args + (su, sv, adj["ph_pp"], adj["php"], adj["alt"],
-                     adj["al_pp"], adj["p_pp"], adj["p_pp_old"]) + geo)
-    _kernel("advance_uv", "advance_uv_ad_column", dtype)(
-        _blocks(g.ny * g.nx), (THREADS,),
-        (traj["c1h"], su, sv, adj["mup"], adj["mu_pp"], adj["mudf"]) + geo)
+                     adj["al_pp"], adj["p_pp"], adj["p_pp_old"], adj["mup"],
+                     adj["mu_pp"], adj["mudf"], np.int32(kc)) + geo)
 
 
 def uv_shapes(geom: UVGeometry) -> dict[str, tuple[int, ...]]:
