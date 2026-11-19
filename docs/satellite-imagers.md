@@ -132,7 +132,11 @@ woof obs geo list --satellite 19 --channel 8 --coverage
     `--cache`, as a `scene.nc` with a `provenance.json`.
   - The provenance records the store, snapshot, scan bounds, rejected
     pixel counts and a SHA-256 of the raw counts read.
-  - A changed file is refused.
+  - A changed file is refused by the explicit reader; the fetch path
+    treats it as a cache miss and re-reads.
+  - The cache is keyed by satellite, UTC time, channels, box, tolerance and
+    root, not by the store's contents. A hit is served as is; `--refresh`
+    (`refresh=True`) re-reads, and the provenance names the snapshot read.
 - **Dependencies.** The reader needs `icechunk` and `zarr`
   (`pip install icechunk zarr`); nothing else in woof imports it.
 - **Access.**

@@ -17,7 +17,7 @@ icechunk = pytest.importorskip("icechunk")
 zarr = pytest.importorskip("zarr")
 
 from woof.obs import geo_icechunk as geo  # noqa: E402
-from woof.obs.imager_scene import FLAG_OUT_OF_RANGE, geostationary_view  # noqa: E402
+from woof.obs.imager_scene import FLAG_OUT_OF_RANGE, geostationary_view, read_scene_netcdf  # noqa: E402
 
 N = 400                      # fixed-grid pixels per side
 STEP = 2 * 0.151844 / N      # rad
@@ -30,7 +30,7 @@ def _j2000(when):
     return (when - J2000).total_seconds()
 
 
-def _write_store(path, times, *, renamed=True, raw_value=400, bad_rows=(), sub_lon=-75.2):
+def _write_store(path, times, *, renamed=True, raw_value=400, bad_rows=(), sub_lon=-75.2, fine=1, ramp=False):
     storage = icechunk.local_filesystem_storage(str(path))
     repo = icechunk.Repository.create(storage)
     session = repo.writable_session("main")
@@ -46,16 +46,20 @@ def _write_store(path, times, *, renamed=True, raw_value=400, bad_rows=(), sub_l
                               chunks=chunks or data.shape, attributes=attrs)
         a[...] = data
 
-    rad = np.full((nt, N, N), raw_value, dtype=np.int16)
-    dqf = np.zeros((nt, N, N), dtype=np.int8)
+    n = N * fine             # a finer channel has `fine` times the pixels on the same angles
+    rad = np.full((nt, n, n), raw_value, dtype=np.int16)
+    if ramp:                 # the raw count names the 2 km column it sits in
+        rad[:] = (100 + np.arange(n) // fine).astype(np.int16)[None, None, :]
+    dqf = np.zeros((nt, n, n), dtype=np.int8)
     for r in bad_rows:
         dqf[:, r, :] = 2
     array("abi_l1b_radiances", "Rad", rad,
-          {"scale_factor": SCALE, "add_offset": OFFSET, "_FillValue": 4095}, chunks=(1, 50, N))
-    array("abi_l1b_radiances_data_quality_flags", "DQF", dqf, {"_FillValue": -1}, chunks=(1, 50, N))
-    x_raw = np.arange(N, dtype=np.int16)
-    array("x_geostationary", "x", x_raw, {"scale_factor": STEP, "add_offset": -0.151844 + STEP / 2})
-    array("y_geostationary", "y", x_raw, {"scale_factor": -STEP, "add_offset": 0.151844 - STEP / 2})
+          {"scale_factor": SCALE, "add_offset": OFFSET, "_FillValue": 4095}, chunks=(1, 50 * fine, n))
+    array("abi_l1b_radiances_data_quality_flags", "DQF", dqf, {"_FillValue": -1}, chunks=(1, 50 * fine, n))
+    x_raw = np.arange(n, dtype=np.int16)
+    step = STEP / fine
+    array("x_geostationary", "x", x_raw, {"scale_factor": step, "add_offset": -0.151844 + step / 2})
+    array("y_geostationary", "y", x_raw, {"scale_factor": -step, "add_offset": 0.151844 - step / 2})
     t = np.array([_j2000(w) for w in times], dtype="f8")
     array("time", "t", t, {"units": "seconds since 2000-01-01T12:00:00"})
     array("time_bounds", "time_bounds", np.stack([t - 300, t + 300], axis=1))
@@ -75,6 +79,8 @@ def mirror(tmp_path):
     june = datetime(2025, 6, 1, tzinfo=timezone.utc)
     december = datetime(2024, 12, 15, 12, tzinfo=timezone.utc)
     _write_store(base / "goes19_radf_C08.icechunk", [june, june + timedelta(minutes=10)], bad_rows=(60, 80, 100, 120, 200))
+    _write_store(base / "goes19_radf_C03.icechunk", [june, june + timedelta(minutes=10)], fine=2, ramp=True)
+    _write_store(base / "goes19_radf_C09.icechunk", [june, june + timedelta(minutes=10)], ramp=True)
     _write_store(base / "goes19_radf_C14.icechunk", [june, june + timedelta(minutes=10)], raw_value=0)
     _write_store(base / "goes19_radf_C08_2025-01-01.icechunk", [december], renamed=False, raw_value=300)
     _write_store(base / "goes18_radf_C08.icechunk", [june], sub_lon=-137.2)
@@ -165,9 +171,28 @@ def test_the_cache_round_trips_and_refuses_a_changed_file(mirror, tmp_path):
     assert again.platforms == first.platforms
     scene_file = next(cache.rglob("scene.nc"))
     scene_file.write_bytes(scene_file.read_bytes() + b"x")
+    # the explicit reader refuses the tampered file; the cached read path re-reads instead
     with pytest.raises(ValueError, match="does not match its provenance"):
-        geo.read_goes_scene(19, "2025-06-01T00:00Z", channels=[8], bbox=(-90, 0, -60, 20),
-                            root=str(mirror), cache=cache)
+        read_scene_netcdf(scene_file.parent)
+    healed = geo.read_goes_scene(19, "2025-06-01T00:00Z", channels=[8], bbox=(-90, 0, -60, 20),
+                                 root=str(mirror), cache=cache)
+    assert healed.provenance["cached"] is False
+    assert np.array_equal(np.isnan(first.values[6200]), np.isnan(healed.values[6200]))
+    assert first.lat.dtype == again.lat.dtype == np.float64
+
+
+def test_mixed_resolution_channels_are_registered_over_a_box(mirror, tmp_path):
+    # C09 (2 km) and C03 (1 km) both carry the 2 km column index in their raw counts, so after the
+    # block mean every pixel of the two bands must come from the same column
+    scene = geo.read_goes_scene(19, "2025-06-01T00:00Z", channels=["C09", "C03"], bbox=(-100, 20, -80, 40),
+                                root=str(mirror), cache=tmp_path / "cache")
+    bt, refl = scene.values[6900], scene.values[863]
+    ok = np.isfinite(bt) & np.isfinite(refl)
+    assert ok.sum() > 50
+    rad_bt = FK1 / (np.exp(FK2 / (BC1 + BC2 * bt[ok])) - 1.0)
+    rad_refl = refl[ok] / (0.0019 * 100.0)
+    assert np.allclose(rad_bt, rad_refl, atol=2e-3)
+    assert scene.provenance["bbox"] == [-100.0, 20.0, -80.0, 40.0]
 
 
 def test_only_noaa_buckets_are_authorised_as_virtual_containers():

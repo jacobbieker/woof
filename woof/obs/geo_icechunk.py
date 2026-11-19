@@ -354,6 +354,8 @@ class _ChannelRead:
     y: np.ndarray
     first_row: int
     full_rows: int
+    rows: slice = None
+    cols: slice = None
 
 
 def _nearest(times: np.ndarray, when: datetime, tolerance: timedelta, label: str) -> int:
@@ -415,34 +417,72 @@ def _locate(t_array, when: datetime, tolerance: timedelta, label: str) -> int:
         return _nearest(_j2000(np.asarray(t_array[:])), when, tolerance, label)
 
 
-def _read_channel(satellite, channel, when, bbox, tolerance, root, segments) -> _ChannelRead:
+_RES_KM = {1: 1.0, 2: 0.5, 3: 1.0, 5: 1.0}   # ABI channels not listed are 2 km
+
+
+def _resolution_km(channel: int) -> float:
+    return _RES_KM.get(channel, 2.0)
+
+
+def _segment_order(segments, day: date) -> list:
+    """Segment indices by distance (days) from ``day`` to each segment's span.
+
+    Segments are sorted by end date, so a segment spans the day after the
+    previous end through its own end (an undated one is open-ended).
+    """
+
+    def distance(k):
+        lo = segments[k - 1].end + timedelta(days=1) if k else date.min
+        hi = segments[k].end or date.max
+        if day < lo:
+            return (lo - day).days
+        if day > hi:
+            return (day - hi).days
+        return 0
+
+    return sorted(range(len(segments)), key=lambda k: (distance(k), k))
+
+
+def _read_channel(satellite, channel, when, bbox, tolerance, root, segments, window=None,
+                  factor: int = 1) -> _ChannelRead:
     label_base = f"GOES-{satellite} C{channel:02d}"
     if not segments:
         raise GeoIcechunkError(f"{label_base}: no virtualized store under {root}")
-    day = when.date()
-    # the first segment whose end date is on or after the case, then the others in order of distance
-    first = next((k for k, s in enumerate(segments) if s.end is None or s.end >= day), len(segments) - 1)
-    order = [first] + [k for k in range(len(segments)) if k != first]
     misses = []
-    for k in order:
+    for k in _segment_order(segments, when.date()):
         seg = segments[k]
+        snap = None
         try:
             repo, containers, allowed = _open_repository(seg.name, "virtualized", root)
             arrays, snap, written, depth = _open_snapshot(repo, seg.name)
-            index = _locate(arrays["t"], when, tolerance, seg.name)
+            return _read_from_store(seg.name, arrays, snap, written, depth, containers, channel, when,
+                                    bbox, tolerance, window, factor)
         except GeoIcechunkError as error:
             misses.append(str(error))
-            continue
-        break
-    else:
-        raise GeoIcechunkError(f"{label_base} at {when.isoformat()}: " + " | ".join(misses))
+        except Exception as error:  # icechunk / zarr errors from the bisection or the data reads
+            misses.append(f"{seg.name} (snapshot {snap}): read failed ({type(error).__name__}: "
+                          f"{str(error).splitlines()[0][:160] if str(error) else ''})")
+    raise GeoIcechunkError(f"{label_base} at {when.isoformat()}: " + " | ".join(misses))
+
+
+def _read_from_store(name, arrays, snap, written, depth, containers, channel, when, bbox, tolerance,
+                     window, factor) -> _ChannelRead:
+    index = _locate(arrays["t"], when, tolerance, name)
     x = _cf_scaled(arrays["x"])
     y = _cf_scaled(arrays["y"])
     sub_lon = float(np.asarray(arrays["nominal_satellite_subpoint_lon"][index]))
+    if not (np.isfinite(sub_lon) and -180.0 <= sub_lon <= 180.0):
+        raise GeoIcechunkError(f"{name} (snapshot {snap}): nominal_satellite_subpoint_lon is {sub_lon}, "
+                               "not a longitude in [-180, 180]")
     # the fixed grid's projection origin is the nominal slot (-75.0, -137.0, -89.5),
     # 0.2 degrees off the satellite's sub-point at most
     origin = round(sub_lon * 2.0) / 2.0
-    rows, cols = _window(x, y, origin, bbox)
+    if window is None:
+        rows, cols = _window(x, y, origin, bbox)
+    else:
+        # the coarsest channel's window, scaled to this grid: block-aligned for the block mean
+        rows = slice(window[0].start * factor, min(window[0].stop * factor, len(y)))
+        cols = slice(window[1].start * factor, min(window[1].stop * factor, len(x)))
     rad = arrays["Rad"]
     raw = np.asarray(rad[index, rows, cols])
     fill = rad.attrs.get("_FillValue")
@@ -462,9 +502,9 @@ def _read_channel(satellite, channel, when, bbox, tolerance, root, segments) -> 
     bounds = np.asarray(arrays["time_bounds"][index], dtype="f8")
     start, end = (J2000 + timedelta(seconds=float(s)) for s in bounds)
     digest = hashlib.sha256(np.ascontiguousarray(raw).tobytes() + np.ascontiguousarray(dqf).tobytes()).hexdigest()
-    return _ChannelRead(channel, seg.name, snap, written, depth, index, start, end,
+    return _ChannelRead(channel, name, snap, written, depth, index, start, end,
                         values.astype("f4"), int(bad.sum()), digest, containers, sub_lon, origin,
-                        x[cols], y[rows], rows.start, len(y))
+                        x[cols], y[rows], rows.start, len(y), rows, cols)
 
 
 def _to_coarse(values: np.ndarray, factor: int) -> np.ndarray:
@@ -486,7 +526,14 @@ def read_goes_scene(satellite: int, when, *, channels: Iterable = (8, 9, 10, 14)
     Brightness temperatures (K) for channels 7-16 from NOAA's own Planck
     constants; reflectance factors (%) for 1-6 from ``kappa0``.  A pixel
     whose DQF is not 0 is NaN and counted.  Finer channels are block-averaged
-    onto the 2 km grid.  ``bbox`` is west,south,east,north in degrees.
+    onto the coarsest requested channel's grid, over one window chosen on that grid.
+    ``bbox`` is west,south,east,north in degrees.
+
+    The cache is keyed by satellite, time (UTC), channels, box, tolerance and
+    root, not by the store's contents; the snapshot each channel was read from
+    is recorded in the provenance.  A hit is served as is until ``refresh=True``
+    (``--refresh``) re-reads it; a cache entry whose digest no longer matches
+    is re-read.
     """
 
     when = utc(when)
@@ -494,19 +541,35 @@ def read_goes_scene(satellite: int, when, *, channels: Iterable = (8, 9, 10, 14)
     wanted = sorted({_band_channel(c) for c in channels})
     if satellite not in (16, 17, 18, 19):
         raise GeoIcechunkError(f"GOES-{satellite}: the virtualized stores hold GOES-16 to 19")
-    key = hashlib.sha256(json.dumps([satellite, when.isoformat(), wanted, bbox, tolerance.total_seconds(),
+    box = [float(v) for v in bbox] if bbox is not None else None
+    key = hashlib.sha256(json.dumps([satellite, when.isoformat(), wanted, box, tolerance.total_seconds(),
                                      root]).encode()).hexdigest()[:24]
     directory = Path(cache).expanduser() if cache else cache_root()
     entry = directory / f"goes{satellite}" / when.strftime("%Y%m%dT%H%M") / key
     if use_cache and not refresh and (entry / "provenance.json").is_file():
-        return _read_cached(entry)
+        try:
+            return _read_cached(entry)
+        except (ValueError, KeyError, OSError):
+            pass  # a tampered, truncated or half-written entry is a cache miss: re-read and rewrite
     names = list_stores("virtualized", root)
     # one channel per thread: each read is a few dozen object-store round trips
     from concurrent.futures import ThreadPoolExecutor
 
-    with ThreadPoolExecutor(max_workers=min(len(wanted), 8)) as pool:
-        reads = list(pool.map(lambda ch: _read_channel(satellite, ch, when, bbox, tolerance, root,
-                                                       goes_segments(satellite, ch, names=names)), wanted))
+    # the window is found once, on the coarsest requested channel's grid, and every finer channel
+    # reads the same window scaled by its resolution ratio (so the block means register)
+    coarse_ch = max(wanted, key=lambda c: (_resolution_km(c), -c))
+    coarse = _read_channel(satellite, coarse_ch, when, bbox, tolerance, root,
+                           goes_segments(satellite, coarse_ch, names=names))
+    others = [c for c in wanted if c != coarse_ch]
+
+    def read_other(ch):
+        factor = max(int(round(_resolution_km(coarse_ch) / _resolution_km(ch))), 1)
+        return _read_channel(satellite, ch, when, bbox, tolerance, root,
+                             goes_segments(satellite, ch, names=names),
+                             window=(coarse.rows, coarse.cols), factor=factor)
+
+    with ThreadPoolExecutor(max_workers=max(min(len(others), 8), 1)) as pool:
+        reads = [coarse] + list(pool.map(read_other, others))
     starts = {r.channel: r.scan_start for r in reads}
     if max(starts.values()) - min(starts.values()) > timedelta(seconds=60):
         raise GeoIcechunkError("the channels' nearest scans are different scans: "
@@ -545,7 +608,7 @@ def read_goes_scene(satellite: int, when, *, channels: Iterable = (8, 9, 10, 14)
     provenance = dict(
         schema=PROVENANCE_SCHEMA, source=f"s3://{BUCKET}/{PREFIX}/virtualized" if _is_remote(root) else root,
         licence=LICENCE, attribution=ATTRIBUTION, satellite=platform.name,
-        requested_time=when.isoformat(), bbox=list(bbox) if bbox else None,
+        requested_time=when.isoformat(), bbox=box,
         geometry="fixed-grid navigation from the file; view angles from the actual sub-point; "
                  "row time linear between the scan bounds",
         channels={f"C{r.channel:02d}": dict(

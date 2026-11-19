@@ -275,14 +275,19 @@ def write_scene_netcdf(directory, scene: ImagerScene, *, licence: str, attributi
 
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    tmp = directory / (SCENE_FILE + ".partial")
+    import os
+    import tempfile
+
+    fd, tmp_name = tempfile.mkstemp(dir=directory, prefix=SCENE_FILE + ".", suffix=".partial")
+    os.close(fd)
+    tmp = Path(tmp_name)
     ny, nx = scene.shape
     with Dataset(tmp, "w") as ds:
         ds.createDimension("y", ny)
         ds.createDimension("x", nx)
         for name in _SCENE_FIELDS + (("scan_offset_s",) if scene.scan_offset_s is not None else ()):
             value = np.asarray(getattr(scene, name))
-            kind = "i2" if value.dtype.kind in "iu" else "f4"
+            kind = "i2" if value.dtype.kind in "iu" else ("f8" if name in ("lat", "lon") else "f4")
             ds.createVariable(name, kind, ("y", "x"), zlib=True)[:] = value
         for nm, value in scene.values.items():
             var = ds.createVariable(band(nm).name, "f4", ("y", "x"), zlib=True, fill_value=np.float32(np.nan))
@@ -293,11 +298,13 @@ def write_scene_netcdf(directory, scene: ImagerScene, *, licence: str, attributi
         ds.platforms = json.dumps([p.to_payload() for p in scene.platforms])
         ds.licence = licence
         ds.attribution = attribution
-    tmp.replace(directory / SCENE_FILE)
+    os.replace(tmp, directory / SCENE_FILE)
     provenance = dict(scene.provenance, cache_sha256=hashlib.sha256(
         (directory / SCENE_FILE).read_bytes()).hexdigest())
-    (directory / "provenance.json.partial").write_text(json.dumps(provenance, indent=2, default=str) + "\n")
-    (directory / "provenance.json.partial").replace(directory / "provenance.json")
+    fd, ptmp = tempfile.mkstemp(dir=directory, prefix="provenance.json.", suffix=".partial")
+    with os.fdopen(fd, "w") as fh:
+        fh.write(json.dumps(provenance, indent=2, default=str) + "\n")
+    os.replace(ptmp, directory / "provenance.json")
     scene.provenance = provenance
 
 
