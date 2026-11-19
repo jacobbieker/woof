@@ -461,7 +461,6 @@ def init_state(state, params, *, tlayer0, tsurface0, tdeep0, smois,
 # ---------------------------------------------------------------------------
 
 _PTR_CACHE: dict = {}
-_MORPH: dict = {}
 
 
 def _width_planes(params, utype):
@@ -494,9 +493,9 @@ def _morph_table(state, params):
     """
     import cupy as cp
 
-    held = _MORPH.get(id(state))
-    if held is not None and held[0] is state:
-        return held[1], held[2]
+    held = getattr(state, "_ucm_morph", None)
+    if held is not None:
+        return held[0], held[1]
     mh = _get(state, "mh_urb2d")
     nudapt = bool(cp.any(cp.asarray(mh) > 0))
     arrays = ()
@@ -517,7 +516,9 @@ def _morph_table(state, params):
                                       dtype=np.uint64))
     else:
         table = cp.zeros(len(UCM_MORPH_PLANES), dtype=cp.uint64)
-    _MORPH[id(state)] = (state, int(nudapt), table, tuple(arrays))
+    # Held on the state itself (its own arrays keep the pointers alive and
+    # nothing outlives the domain); a restore writes those arrays in place.
+    state._ucm_morph = (int(nudapt), table, tuple(arrays))
     return int(nudapt), table
 
 

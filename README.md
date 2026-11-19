@@ -483,7 +483,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   WRF's NUDAPT `URB_PARAM` block. Each source's licence and attribution
   travel with the file. `woof buildings` builds the product for one
   domain of a WPS namelist. Footprints are read from a local file, not
-  downloaded, and the urban schemes do not read `URB_PARAM` yet
+  downloaded. With `urban_param_file` set, the SLUCM, BEP and BEP+BEM read
+  that file's `URB_PARAM` (or a `geo_em`'s) as WRF 4.7.1's real.exe and
+  `urban_var_init` do. This includes the SLUCM's NUDAPT arm, which matches
+  WRF bit for bit. Files that cannot be matched are refused
   ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
 - **Resolved buildings in LES (`obstacle_opt = 1`, opt-in).** On a domain
   with spacing up to 500 m, the building product becomes porous immersed
