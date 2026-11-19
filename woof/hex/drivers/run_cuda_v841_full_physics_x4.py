@@ -3087,6 +3087,54 @@ def _verify_backend_rollback_boundary(
             )
 
 
+#: Health sites the composite step defers to its pre-commit drain on top of
+#: the dycore's resident list (woof.core.health_ledger.RESIDENT_SITES).  The
+#: step is a transaction: whatever runs after a failed check is discarded by
+#: the rollback the drain's refusal triggers, so a site qualifies when the
+#: rest of the step stays bounded on its bad output.
+#:
+#: * ``grell-freitas``: GF's output finiteness (as KF's on the resident
+#:   list).  Non-finite tendencies reach the RK stages and phase two, whose
+#:   loops are bounded by the mesh and the column depth.
+#: * ``noahmp_static_surface_identity``: the rest of the step runs on the
+#:   layout bound at the start, then the drain refuses.
+#: * ``lagged-heating``: the SG2 heating rate's finiteness, checked in phase
+#:   two; only recovery runs before the drain.
+HEX_EXTRA_RESIDENT_SITES = (
+    "grell-freitas", "noahmp_static_surface_identity", "lagged-heating")
+
+
+_DEVICE_PRESENT: list[bool] = []
+
+
+def _resident_health(health_ledger: Any, *, exchanged: bool = False) -> Any:
+    """The composite step's resident ledger scope, or ``None`` to keep the
+    immediate reads.
+
+    A host with no device (the transaction tests' fakes on a CPU runner)
+    has no status words to defer; that is decided once per process.  A step
+    that exchanges halos with other ranks or LTS classes before its commit
+    (``before_phase_two``) keeps the immediate reads: there a failing
+    scheme must stop its rank before the exchange, or its peers would
+    receive its rejected fields and commit the step while it rolls back.
+    """
+    if not _DEVICE_PRESENT:
+        try:
+            import cupy as cp
+
+            cp.cuda.runtime.getDevice()
+            _DEVICE_PRESENT.append(True)
+        except Exception:  # noqa: BLE001 - no cupy, or no device
+            _DEVICE_PRESENT.append(False)
+    if not _DEVICE_PRESENT[0]:
+        return None
+    if exchanged:
+        health_ledger.count_immediate("exchanged")
+        return None
+    return health_ledger.resident_step(
+        health_ledger.RESIDENT_SITES + HEX_EXTRA_RESIDENT_SITES)
+
+
 @timed_arwen_step
 def execute_composite_step(
     *,
@@ -3166,7 +3214,20 @@ def execute_composite_step(
     # GPUWM_HEX_RELEASE_HEADROOM): then radiation blocks and the WSM6 frame
     # store are not held through the dycore half of the step.
     from woof.hex.device_memory_release import phase_release
+    from woof.core import health_ledger
 
+    # Deferred scheme health reads (woof.core.health_ledger.resident_step).
+    # The admitted sites record their status words on the device and the
+    # ledger is drained ONCE, just before the driver commit below, so a
+    # failure is still refused by the step that produced it and rolled back
+    # exactly as an immediate refusal is; only how far into the step the
+    # model ran before saying so moves.  The same ledger skips the carrier
+    # contract's consumer-footprint read on the healthy path.
+    # WOOF_HEALTH_READBACK=immediate restores the per-site reads.
+    health = _resident_health(health_ledger, exchanged=before_phase_two is not None)
+    health_open = health is not None
+    if health_open:
+        health.__enter__()
     try:
         with phase_release("arwen:phase1"):
             raw = backend.begin_step(
@@ -3255,6 +3316,11 @@ def execute_composite_step(
         # Drop the consumed update before commit rebuilds saved diagnostics,
         # so its temporary dry theta need not overlap that workspace.
         del update
+        # The detection bound: every deferred health word of this step is
+        # read here, before anything is published.
+        if health_open:
+            health_open = False
+            health.__exit__(None, None, None)
         committed = driver.commit_post_wsm6_candidate(candidate, recovery)
         driver_committed = True
         backend.commit_step()
@@ -3272,6 +3338,15 @@ def execute_composite_step(
             dynamics_tendencies=next_dynamics_tendencies,
         )
     except Exception as error:
+        if health_open:
+            # A deferred refusal recorded earlier in this step is what an
+            # immediate read would have raised first; it replaces the
+            # step's own exception, chained to it (resident_step._drain).
+            health_open = False
+            try:
+                health.__exit__(type(error), error, error.__traceback__)
+            except Exception as deferred:
+                error = deferred
         rollback_errors: list[str] = []
         if physics_park is not None and physics_park.is_parked:
             # The seam's own rollback reads the arrays this park emptied.
@@ -3362,6 +3437,13 @@ def execute_composite_step(
         raise CompositeTransactionError(
             f"composite step at {start_time} s was aborted without publication"
         ) from error
+    except BaseException:
+        # An interrupt must not leave this thread's resident ledger
+        # installed for whatever runs next.
+        if health_open:
+            health_open = False
+            health.__exit__(*sys.exc_info())
+        raise
 
 
 def _host_array(value: Any, cp: Any) -> np.ndarray:

@@ -71,7 +71,7 @@ def test_the_receipt_shape_is_pinned():
     assert set(receipt) == {"mode", "source", "env", "deferred_steps",
                             "drains", "immediate_steps"}
     assert set(health_ledger.IMMEDIATE_REASONS) == {
-        "mode-immediate", "outer-ledger", "capturing"}
+        "mode-immediate", "outer-ledger", "capturing", "exchanged"}
 
 
 # ---------------------------------------------------------------------------

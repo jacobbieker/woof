@@ -5163,7 +5163,7 @@
    },
    {
     "file": "woof/core/health_ledger.py",
-    "sha256": "1bb702c7bae5c95327cddd8282769ac8ca07fa532eeba1cd18faac8b0e2f7a2c"
+    "sha256": "c6e663e9afb39f88ed22ead7b093287ce0fedc3b4d78c59c782e0d1771b7234d"
    },
    {
     "file": "woof/core/hub_wind_diag.py",
@@ -5743,7 +5743,7 @@
    },
    {
     "file": "woof/hex/lagged_heating_v841.py",
-    "sha256": "57e082fd7bb36ce3a07fee2124bd26855cff9f162c52ec130cf9042fc1e5f1c1"
+    "sha256": "680cbbde0fc988787251c0f3b9e29401de732ee8500fbb3b21633fc60cd84c52"
    },
    {
     "file": "woof/hex/mixing_v842.py",
