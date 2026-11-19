@@ -853,7 +853,7 @@ class RegionalContract:
 #: of this set, so an edit to it does not move this digest (open item for the regional owner). Re-derived by
 #: tools/repin_source_tables.py; not a new mint.
 MINTED_KERNEL_SET_SHA256 = (
-    "585aaf909c6b7de02173fb8fce44480ab19345942b563aedff780c52965d343b"
+    "7fe561d53023958260c1d554c247e1ea5f7153a799521a152c740d4675b8facb"
 )
 
 _DRY_MINT_CAVEAT = (
