@@ -315,3 +315,9 @@ tests/test_hex_option_matrix_smoke.py  needs WOOF_HEX_OPTION_MATRIX_CASE naming 
 
 # A short hex forecast on a variable-resolution mesh (tools/hex_varres.py cases).
 tests/test_hex_varres_gpu.py  needs WOOF_HEX_VARRES_CASE naming a work dir prepared by `tools/hex_varres.py prep` (mesh, static, init and LBCs generated there, not committed) and a GPU backend; pb (CUDA) and the mac (Metal) ran it on edi-vr for the change that added it, and tests/test_hex_varres_tool.py covers the recipes and the diagnostics host-only.
+
+# Module-level skips added 2026-11-17/18 without an entry here (cleanup, 2026-11-19).
+tests/test_metal_facade_scatter_inplace.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (fc67696d8).
+tests/test_metal_lazy_events.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (ccb272144).
+tests/test_nn_hex_gpu.py  needs WOOF_HEX_VARRES_CASE naming a work dir prepared by `tools/hex_varres.py prep`, zarr, netCDF4 and a GPU backend; pb (CUDA) and the mac (Metal) ran it for the change that added it (741f2a79d).
+tests/test_nn_train.py  needs the zarr package, which the pixi environments carry (pyproject [tool.pixi] dependencies) and a bare pip install does not; every pixi leg runs it (135d10969).

@@ -128,8 +128,17 @@ def test_nested_pd_lbc_is_folded_once_before_advection(monkeypatch):
                         install_boundary)
     monkeypatch.setattr(moist, "launch_pd_fluxes",
                         lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(moist, "launch_pd_renorm_apply",
-                        lambda *_args, **_kwargs: None)
+    def renorm_apply(*_args, tend, zero_first=False, **_kwargs):
+        # The launcher clears ``tend`` itself before accumulating
+        # (zero_first); the advective part is zero here.
+        if zero_first:
+            tend[...] = 0
+
+    monkeypatch.setattr(moist, "launch_pd_renorm_apply", renorm_apply)
+    # The specified/nested ring exclusion's one-launch frame kernel takes
+    # device arrays; declining it runs the same element writes as slices.
+    import woof.core.ring_frame as ring_frame
+    monkeypatch.setattr(ring_frame, "zero_frame", lambda *_args: False)
 
     # The fused update kernel is lru_cached, so with cp mocked to numpy
     # this test was green only when an earlier same-process test had
@@ -176,7 +185,10 @@ def test_nested_pd_lbc_is_folded_once_before_advection(monkeypatch):
     state = FakeState()
     cfg = SimpleNamespace(
         nested=True, specified=False, open_x=False, open_y=False,
-        moist_adv_opt=1, dx=1.0, dy=1.0, spec_zone=1)
+        moist_adv_opt=1, dx=1.0, dy=1.0, spec_zone=1,
+        # woof.config defaults: no tracers, no MAD-WRF, PD tracer advection,
+        # no cumulus.
+        tracer_opt=0, madwrf_opt=0, tracer_adv_opt=1, cu_physics=0)
     dt = 2.0
     moist.advance_scalars_stage(
         state, cfg, np.zeros((1, 3, 5), dtype=np.float32),
