@@ -1,7 +1,8 @@
 """The default path imports no NN runtime (plan section 8).
 
 A configuration that names no NN option must not import ``woof.nn``,
-``torch`` or ``mlx.nn``: importing torch alone loads CUDA libraries of its
+``woof.grad`` (the tensor bridge, the differentiable schemes), ``torch``
+or ``mlx.nn``: importing torch alone loads CUDA libraries of its
 own, and an import is the first step to a launch.  Each door's module
 graph is imported in a fresh interpreter and the three names are looked
 up in ``sys.modules``.
@@ -39,7 +40,8 @@ if "woof.hex.forecast_door" in done:
     add_forecast_arguments(argparse.ArgumentParser())   # building the hex parser imports no woof.nn either
     done.append("hex forecast parser")
 loaded = sorted(m for m in sys.modules if m == "torch" or m.startswith("torch.")
-                or m == "mlx.nn" or m.startswith("mlx.nn.") or m == "woof.nn" or m.startswith("woof.nn."))
+                or m == "mlx.nn" or m.startswith("mlx.nn.") or m == "woof.nn" or m.startswith("woof.nn.")
+                or m == "woof.grad" or m.startswith("woof.grad."))
 print(json.dumps({"done": done, "failed": failed, "loaded": loaded}))
 """
 

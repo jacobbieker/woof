@@ -26,14 +26,11 @@ def _mx():
 
 def _drain():
     from woof.backend.facade import _capture
-    from woof.backend.facade._array import PENDING
+    from woof.backend.facade._array import drain_pending
     if _capture.recording() is not None:
         _capture.refuse("a synchronize")
     mx = _mx()
-    arrays = [s.arr for s in PENDING]
-    PENDING.clear()
-    if arrays:
-        mx.eval(*arrays)
+    drain_pending(mx.eval)
     mx.synchronize()
 
 

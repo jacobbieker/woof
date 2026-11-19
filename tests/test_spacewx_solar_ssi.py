@@ -231,10 +231,25 @@ def test_the_keys_reach_the_echo_only_when_on():
     assert values["solar_ssi_opt"] == 1 and values["solar_ssi_source"] == "nrlssi2"
 
 
-def test_hex_refuses_it():
-    from woof.hex.physics_suites import PhysicsSelectionRefusal, resolve_physics
-    with pytest.raises(PhysicsSelectionRefusal, match="solar_ssi_opt"):
-        resolve_physics("arwen_mpas_column", {"solar_ssi_opt": 1}, mesh="x1.40962")
+def test_hex_generic_seam_takes_the_keys_and_the_mpas_suites_refuse_them():
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    keys = ["--physics", "solar_ssi_opt=1", "--physics", "solar_ssi_source=nrlssi2"]
+    got = {}
+    for suite in ("arwen_mpas_column", "mesoscale_reference"):
+        argv = [sys.executable, "-m", "woof.cli", "hex", "physics", "resolve",
+                "--physics-suite", suite, "--mesh", "x1.40962", *keys]
+        run = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
+        got[suite] = json.loads(run.stdout[run.stdout.index("{"):])
+    seam = got["arwen_mpas_column"]
+    assert seam["resolved"] is True, seam
+    assert seam["engine_physics"]["solar_ssi_opt"] == 1
+    assert seam["engine_physics"]["solar_ssi_source"] == "nrlssi2"
+    native = got["mesoscale_reference"]
+    assert native["resolved"] is False and "solar_ssi_opt" in json.dumps(native["refusals"])
 
 
 def test_the_factor_reaches_a_wrapped_or_swapped_shortwave(tmp_path):
