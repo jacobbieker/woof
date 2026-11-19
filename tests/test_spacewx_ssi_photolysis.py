@@ -94,7 +94,9 @@ def test_the_run_object_reads_the_series_on_photolysis_bins(tmp_path):
     assert inside == list(range(1, 9))
     np.testing.assert_allclose(f[inside], 1.05, rtol=1e-12)
     np.testing.assert_allclose(np.delete(f, inside), 1.0, rtol=1e-12)
-    assert list(spec.receipt()) == ["solar_ssi_ftuv_factor_at_start"]
+    np.testing.assert_array_equal(f, ss.bin_factor(spec.series.fractions_at(datetime(2024, 5, 11)), bins))
+    assert sorted(spec.receipt()) == ["solar_ssi_ftuv_factor_at_start", "solar_ssi_sha256", "solar_ssi_source"]
+    assert spec.receipt()["solar_ssi_source"] == spec.series.source
     assert ss.PhotolysisSpectrum.for_run(SimpleNamespace(solar_ssi_opt=0), None, bins, "ftuv") is None
     with pytest.raises(SolarForcingError, match="start time"):
         ss.PhotolysisSpectrum.for_run(cfg, None, bins, "ftuv")

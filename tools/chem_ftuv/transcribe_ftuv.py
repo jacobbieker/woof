@@ -16,10 +16,11 @@ xs_hyac, xs_glyald calls record a fatal if reached), ftuv_timestep_init and
 p_interp (MOZART only, so esfact keeps its initial 1.0), and setaer/aer_init
 (photoin never calls setaer).
 
-One woof hook (``ETF_HOOK``): photoin's extraterrestrial flux is multiplied
-per wavelength bin by FtuvModule's etf_factor when etf_on is set
-(``solar_ssi_opt = 1``, woof.spacewx.solar_spectrum); with etf_on = 0 the
-flux is WRF's, untouched.
+One woof hook (``ETF_HOOK``): in the ``GPUWM_FTUV_ETF`` integer tier
+(``solar_ssi_opt = 1``, woof.spacewx.solar_spectrum) photoin's
+extraterrestrial flux is multiplied per wavelength bin by FtuvModule's
+etf_factor.  Every hook line sits under ``#if GPUWM_FTUV_ETF``, so the
+default module preprocesses to WRF's transcription unchanged.
 
 Module state.  DATA-initialised module variables are constants: arrays are
 file-scope __constant__ tables, scalars their literal.  Everything else the
@@ -143,8 +144,9 @@ def generate(src: Path) -> str:
         v = tr.module.vars[n]
         star = "*" if v.dims is not None else ""
         out.append(f"    {f2cu._CTYPE[v.kind]} {star}{n};")
-    out += ["    int etf_on;               // woof: photoin's etf *= etf_factor (solar_ssi_opt)",
-            "    double *etf_factor;       // woof: (nw - 1) per-bin factors when etf_on",
+    out += ["#if GPUWM_FTUV_ETF",
+            "    const double *etf_factor; // woof: photoin's etf *= etf_factor, (nw - 1) bins",
+            "#endif",
             "    double *ws_d, *ws_d_end;  // workspace stack (binary64 arrays)",
             "    int *ws_i, *ws_i_end;     // workspace stack (integer arrays)",
             "    int f2cu_fatal;  // first source line of a wrf_error_fatal/stop, or 0",
@@ -193,14 +195,16 @@ _ETF_LINE = re.compile(r"^(\s*)for \(int \w+ = 0; \w+ < 17; \+\+\w+\) etf\[.*"
 
 def _etf_hook(lines):
     """photoin (module_ftuv_subs.F:355, etf = sflx * esfact), then the woof
-    per-bin factor."""
+    per-bin factor in the GPUWM_FTUV_ETF tier only."""
     out = []
     for line in lines:
         out.append(line)
         m = _ETF_LINE.match(line)
         if m:
-            out.append(f"{m.group(1)}if (mod.etf_on) for (int q = 0; q < TV_NW - 1; ++q) "
-                       f"etf[q] = DMUL(etf[q], mod.etf_factor[q]);  {ETF_HOOK}")
+            out += ["#if GPUWM_FTUV_ETF",
+                    f"{m.group(1)}for (int q = 0; q < TV_NW - 1; ++q) "
+                    f"etf[q] = DMUL(etf[q], mod.etf_factor[q]);  {ETF_HOOK}",
+                    "#endif"]
     return out
 
 
