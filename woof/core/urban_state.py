@@ -251,6 +251,12 @@ def urban_array_shapes(cfg, *, urban_columns: int | None = None
     # new, which over-counts by at most seven planes.
     for name in ("psim", "psih", "gz1oz0", "akhs", "akms"):
         shapes.setdefault(f"override_{name}", (ny, nx))
+    if option == 1 and getattr(cfg, "urban_param_file", ""):
+        # The NUDAPT arm's per-column table widths, BUILDING_WIDTH(1) and
+        # STREET_WIDTH(1) gathered by UTYPE (woof.core.urban_ucm
+        # _width_planes), held for the run when a column has MH_URB2D > 0.
+        shapes["nudapt_building_width1"] = (ny, nx)
+        shapes["nudapt_street_width1"] = (ny, nx)
     if option == 3:
         # The direct/diffuse surface shortwave BEP_BEM reads.
         shapes["swddir"] = (ny, nx)
