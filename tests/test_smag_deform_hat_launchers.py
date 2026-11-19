@@ -55,7 +55,6 @@ def _words(km_opt, diff_opt, route):
     import cupy as cp
     from woof.core import dycore
 
-    os.environ["WOOF_SMAG_DEFORM_HAT"] = route
     state, cfg = _state(km_opt, diff_opt)
     seen = []
     tiered = dycore.get_kernel_int_defines
@@ -63,11 +62,18 @@ def _words(km_opt, diff_opt, route):
     def spy(module, name, defines):
         seen.append(name)
         return tiered(module, name, defines)
+    # Restored after the steps: a later test in this process keeps the backend default.
+    before = os.environ.get("WOOF_SMAG_DEFORM_HAT")
+    os.environ["WOOF_SMAG_DEFORM_HAT"] = route
     dycore.get_kernel_int_defines = spy
     try:
         dycore.run_steps(state, cfg, 3)
     finally:
         dycore.get_kernel_int_defines = tiered
+        if before is None:
+            os.environ.pop("WOOF_SMAG_DEFORM_HAT", None)
+        else:
+            os.environ["WOOF_SMAG_DEFORM_HAT"] = before
     # Each step's closure took the route asked for.
     assert seen.count("wrf_smag_deform_hat") == (3 if route == "1" else 0), seen
     out = {}
