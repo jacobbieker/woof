@@ -883,9 +883,12 @@ measured, its cost leg not met.
     `kessler_compiled` (`torch.compile`, Inductor), it is 4.1-4.8x.
     The 3x gate is not met. Hand-written adjoint kernels, the original
     P1.2, remain the way to meet it.
-  - Cost on Metal: not yet measured. The forward and dot-product legs
-    pass on MPS. Measure with `python tools/grad_kessler_g1.py --skip
-    forward,dot,gradcheck,fd_kernel` on the Metal backend.
+  - Cost on Metal (M3 Max, torch-MPS, eager; 40000 columns x 50 levels,
+    dt 60 s): the kernel takes 4.2 ms. The torch forward takes 41 ms and
+    the backward 38 ms, so the backward is 9.1x the kernel (forward plus
+    backward is 19x). The 3x gate is not met on Metal either;
+    `torch.compile` was not measured on MPS. Measure with `python
+    tools/grad_kessler_g1.py --skip forward,dot,gradcheck,fd_kernel`.
 
 ### P2. NN column physics, inference only, opt-in (5-6.5 w; parallel with P1)
 

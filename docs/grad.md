@@ -261,6 +261,24 @@ torch-MPS). `tests/test_grad_bridge.py` checks that memory is shared (a
 pointer on CUDA and the host; on Metal, a write through torch read back
 through MLX), the refusals, and the stream handoff.
 
+## A differentiable scheme: Kessler
+
+`woof.grad.kessler` ports WRF's Kessler scheme to PyTorch for a column
+batch. `woof.grad.checks` supplies the dot-product (adjoint) test,
+tangent-linear convergence and a per-column `gradcheck`.
+`python tools/grad_kessler_g1.py` runs all of them against the WRF oracle
+fixture and against woof's own kernel on this host's backend, and prints
+one JSON document.
+
+- A column that crosses a switch (the autoconversion threshold) has a
+  kink: the derivative there is one-sided and does not match a central
+  difference. 96 of 104 oracle columns pass `gradcheck`; the 8 that fail
+  are threshold columns.
+- Cost: see the plan's G1 paragraph. The adjoint is not within 3x of the
+  kernel; hand-written adjoint kernels remain the way to meet it.
+- `KesslerSeatModel` wraps the scheme as a column model for the NN seat
+  ([nn-physics.md](nn-physics.md)).
+
 ## Limits
 
 - Radio occultation in the store is bending angle, which is converted
