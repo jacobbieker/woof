@@ -844,7 +844,7 @@ class RegionalContract:
 #: (0, 0, driven), the launches as they were). Equality on the card, not assumed: see the PR for the pb runs.
 #: Re-derived by tools/repin_source_tables.py; not a new mint.
 MINTED_KERNEL_SET_SHA256 = (
-    "25e3cd3b1ab1503681c14a095350feb0274eb2b397efc2c3c968173d689545a8"
+    "585aaf909c6b7de02173fb8fce44480ab19345942b563aedff780c52965d343b"
 )
 
 _DRY_MINT_CAVEAT = (

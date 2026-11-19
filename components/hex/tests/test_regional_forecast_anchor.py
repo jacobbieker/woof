@@ -94,7 +94,7 @@ def test_the_named_forecast_pair_is_masked_digest_identical(receipts):
 SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
     "src/hexcore/cuda_driver.py": {
         "recorded": "cb6477ef2fd02ad551e9b6c8af0724c94fc4d90bdc712fff1378d218662f5d04",
-        "current": "f453eee1152aa33392b09ecfde1d16ee33ec53cf17d754ecd076736088630fea",
+        "current": "7888ef788fb1b7e9600b798c30c5d3f939fbf272a1585bc0ece62bc01ee51d82",
         "why": (
             "convection ruling, 2026-08-26: _v841_physics_cadences reports "
             "convection: None when no cumulus scheme is selected instead of "
@@ -145,7 +145,7 @@ SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
     },
     "src/hexcore/cuda_regional_forecast_v841.py": {
         "recorded": "3aa30ec3c3a11c1152a67d1fcbc8b2d470fd8ac2446ec8f7ec34906873421e88",
-        "current": "b8baf9f8bf76ae9ac1b9c66b65d3e9db93a31635aec5af1d78280efa1410a8df",
+        "current": "48d06d7f268681bb84ab963e6fc36a0b768adb8b2c47d0d728e286bccc469977",
         "why": (
             "Integration 2026-10-04 adds explicit rank constructor dispatch "
             "and preserves the ordinary constructor. The twelve arithmetic "
@@ -372,7 +372,7 @@ SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
     },
     "src/hexcore/cuda_regional_v841.py": {
         "recorded": "b9f1dbdbbd123066f1fec2ebebbb664da7b4d5b62bce06a15f42dc96193a4ab5",
-        "current": "b33d522a13ab359713683dd8354a60452c68840bd9a5981027a6ff377b1bdfc7",
+        "current": "6d3e794e11060101b1ca9130709c74fbe8b0ed2a14659e9a39f08be4838a29fa",
         "why": (
             "0.2.0 package rename, 2026-08-28: the token mpas_port became "
             "hexcore. This file is byte-identical to the copy these receipts "
