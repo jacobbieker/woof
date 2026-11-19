@@ -76,8 +76,9 @@ def compute(state, cfg, km, kh, specs, *, time_t, physics_tendencies=None):
               + [a[x] for x in ("theta", "rho", "up", "vp", "rdz", "rdzw",
                                 "zx", "zy", "d33", "d13", "d23", "p8w", "t8w")]
               + dims))
-    get_kernel("smag2d", "wrf_smag_deform")(
-        grid, (128, 1, 1), tuple(common + [a[x] for x in ("d11", "d22", "d12")] + dims))
+    # Stored hats (Metal default) in the dead diff6_x/diff6_y face workspaces.
+    d.launch_wrf_deform(state, cfg, common, tuple(a[x] for x in ("d11", "d22", "d12")),
+                        dims, grid, tpb=128)
     d.launch_wrf_calc_n2(state, cfg, a["bn2"], time_t=time_t)
 
     # WRF seeds the held tendencies with physics before implicit mixing.

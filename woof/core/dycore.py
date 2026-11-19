@@ -1351,6 +1351,41 @@ def _disjoint(a, b) -> bool:
     return a0 + a.nbytes <= b0 or b0 + b.nbytes <= a0
 
 
+def launch_wrf_deform(state: DomainState, cfg: RunConfig, common, tensors,
+                      dims, grid, hat_slots=("diff6_x", "diff6_y"), tpb=_TPB):
+    """WRF ``cal_deform_and_div``'s D11/D22/D12 into ``tensors``.
+
+    With the stored hats on (:func:`_smag_deform_hat_enabled`, Metal by
+    default) u/msfu and v/msfv are divided once per face into the
+    ``hat_slots`` face workspaces (dead at this point in every caller) and
+    read by wrf_smag_deform_hat in place of a division at every stencil
+    point that needs them: the same division of the same operands, stored,
+    so the same words (tests/test_smag_deform_hat.py).  The hats need two
+    backings that share no bytes with each other or with the tensors; if
+    the scratch arena ever hands back overlapping ones, keep the per-point
+    division (wrf_smag_deform).
+    """
+    nz, ny, nx = tensors[0].shape
+    hats = None
+    if _smag_deform_hat_enabled() and wrf_mixing_package_active(cfg):
+        uhat = state.scratch((nz, ny, nx + 1), hat_slots[0])
+        vhat = state.scratch((nz, ny + 1, nx), hat_slots[1])
+        if _disjoint(uhat, vhat) and all(
+                _disjoint(h, t) for h in (uhat, vhat) for t in tensors):
+            hats = (uhat, vhat)
+    if hats is not None:
+        get_kernel_int_defines("smag2d", "wrf_smag_uvhat", _SMAG_HAT_DEFINES)(
+            ((nx + tpb) // tpb, ny + 1, nz), (tpb, 1, 1),
+            (common[0], common[1], common[8], common[9], *hats,
+             np.int32(nz), np.int32(ny), np.int32(nx)))
+        get_kernel_int_defines("smag2d", "wrf_smag_deform_hat", _SMAG_HAT_DEFINES)(
+            grid, (tpb, 1, 1),
+            tuple(list(common) + list(tensors) + list(dims) + list(hats)))
+    else:
+        get_kernel("smag2d", "wrf_smag_deform")(
+            grid, (tpb, 1, 1), tuple(list(common) + list(tensors) + list(dims)))
+
+
 def launch_wrf_smag2d_km(state: DomainState, cfg: RunConfig,
                           xkmh, xkhh, *, time_t: bool):
     """WRF v4.6.1 ``cal_deform_and_div`` + ``smag2d_km`` on device.
@@ -1381,30 +1416,7 @@ def launch_wrf_smag2d_km(state: DomainState, cfg: RunConfig,
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
-    hats = None
-    if _smag_deform_hat_enabled() and wrf_mixing_package_active(cfg):
-        # u/msfu and v/msfv once per face, into the diff6 face temporaries
-        # (free until the u/v stress rows below zero them), read by the
-        # deformation kernel in place of a division at every stencil point
-        # that needs them.  The same division of the same operands, stored:
-        # the same words (tests/test_smag_deform_hat.py).  The two hats need
-        # two separate backings; if the scratch arena ever hands back
-        # overlapping ones, keep the per-point division.
-        uhat = state.scratch((nz, ny, nx + 1), "diff6_x")
-        vhat = state.scratch((nz, ny + 1, nx), "diff6_y")
-        if _disjoint(uhat, vhat):
-            hats = (uhat, vhat)
-    if hats is not None:
-        get_kernel_int_defines("smag2d", "wrf_smag_uvhat", _SMAG_HAT_DEFINES)(
-            ((nx + _TPB) // _TPB, ny + 1, nz), (_TPB, 1, 1),
-            (common[0], common[1], common[8], common[9], *hats,
-             np.int32(nz), np.int32(ny), np.int32(nx)))
-        get_kernel_int_defines("smag2d", "wrf_smag_deform_hat", _SMAG_HAT_DEFINES)(
-            grid, (_TPB, 1, 1),
-            tuple(common + [d11, d22, d12] + dims + list(hats)))
-    else:
-        get_kernel("smag2d", "wrf_smag_deform")(
-            grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid)
     tail = [DTYPE(cfg.c_s), DTYPE(_PRANDTL), d11, d22, d12, xkmh, xkhh,
             np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
@@ -1481,8 +1493,10 @@ def launch_wrf_isotropic_km(state: DomainState, cfg: RunConfig,
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
-    get_kernel("smag2d", "wrf_smag_deform")(
-        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    # D22/D12 hold the face workspaces here, so the stored hats take the
+    # u/v carrying buffers, which every caller zeroes after this launch.
+    launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid,
+                      hat_slots=("smag_ru", "smag_rv"))
     kmh, kmv, khh, khv = isotropic_km_constants(
         cfg.khdif, cfg.kvdif, cfg.constant_k_prandtl)
     xkmh.fill(kmh)
@@ -1589,8 +1603,8 @@ def launch_wrf_tke_km(state: DomainState, cfg: RunConfig,
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
-    get_kernel("smag2d", "wrf_smag_deform")(
-        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    # The stored hats take diff6_x/diff6_y; BN2 borrows diff6_x after them.
+    launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid)
 
     bn2 = state.scratch((nz, ny, nx + 1), "diff6_x").reshape(-1)[:n_mass]
     bn2 = bn2.reshape((nz, ny, nx))
@@ -1703,8 +1717,8 @@ def launch_wrf_smag3d_km(state: DomainState, cfg: RunConfig,
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
-    get_kernel("smag2d", "wrf_smag_deform")(
-        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    # The stored hats take diff6_x/diff6_y; BN2 borrows diff6_x after them.
+    launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid)
 
     # calculate_N2 inputs: time-t prognostic theta/moisture, current
     # diagnostic p (refreshed against the time-t state by step() before
