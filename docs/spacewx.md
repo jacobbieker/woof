@@ -184,7 +184,30 @@ three times larger (above), so the J changes are a conservative estimate.
 Same rule as for the radiation: the shortwave must be legacy RRTMG or RRTMG-K. The
 solar-proton source (`spacewx_epp_opt`) adds NO/OH/HO2 in the RADM2 rows, and those then
 photolyse with these same Fast-TUV rates, so it needs nothing more. The WRF route has no
-other photolysis scheme (no Fast-J, and TUV-x runs only with hex's MICM chemistry).
+other photolysis scheme (no Fast-J, and TUV-x runs only with hex's MICM chemistry, below).
+
+### Photolysis (TUV-x, hex MICM)
+
+Hex's MICM chemistry with `"photolysis": "tuvx"` (woof.chem_tuvx, the TUV-x v0.17.0 port) takes the
+same factor on every bin of its wavelength grid (156 bins, 120-735 nm for the shipped
+configuration), multiplying the extraterrestrial flux before the actinic flux is formed. As for
+Fast-TUV the factors are not renormalised, and TUV-x keeps its own solar files and Earth-Sun
+distance. `solar_ssi_opt` keeps its radiation rule here too: the run's shortwave must be legacy
+RRTMG or RRTMG-K on hex's generic column seam. The factor is evaluated at the start of each
+chemistry interval; off (or with
+`photolysis` as `j_max` numbers) no spectrum is read and the rates are the port's word for word.
+Solar maximum 2014-02-25 against minimum 2019-12-15 (the CDR; a standard column to 30 km,
+completed to 120 km as the hex route does, solar zenith 20-70 degrees):
+
+| J | max / min at the surface | at 120 km |
+|---|---|---|
+| O2 -> O + O | 1.026 | 1.129 |
+| O3 -> O(1D) | 1.0022-1.0026 | 1.010 |
+| O3 -> O(3P) | 1.0000-1.0002 | 1.007 |
+| NO2 | 1.0016 | 1.0016 |
+
+The shipped TUV-x configuration has no HCHO photolysis. The bin factors themselves move by 23 %
+(120-175 nm), 7 % (175-200 nm), 3 % (200-242 nm), 1.4 % (242-290 nm) and 0.1-0.2 % (290-420 nm).
 
 ## L3a: climatological ionosphere (`woof spacewx ionosphere`)
 
