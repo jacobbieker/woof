@@ -339,15 +339,28 @@ RESOLVED: dict[str, tuple[str, str]] = {
     # unchanged.)
     # (3.0 port folds moved both launchers seven lines down; the registry
     # now cites :1490 and :1588.  Anchors unchanged.)
-    # (2026-11 fork dycore edits moved them to :1565 and :1677; the builder
-    # follows the anchors, tools/build_registry.py.  Anchors unchanged.)
-    "woof/core/dycore.py:1565": (
-        "woof/core/dycore.py",
-        "WRF v4.6.1 km_opt=2:"),
-    "woof/core/dycore.py:1677": (
-        "woof/core/dycore.py",
-        "WRF v4.6.1 km_opt=3:"),
+    # (2026-11 fork dycore edits moved them to :1565 and :1677.  The two
+    # rows are no longer literals: _anchored_dycore_rows below finds each
+    # declaration by the same anchor tools/build_registry.py follows, so a
+    # dycore edit above them moves the registry and this table together.)
 }
+
+
+def _anchored_dycore_rows() -> dict[str, tuple[str, str]]:
+    """The km_opt=2/3 rows, keyed at the line their anchor sits on today."""
+
+    path = "woof/core/dycore.py"
+    lines = (MODEL / path).read_text(encoding="utf-8").splitlines()
+    rows = {}
+    for anchor in ("WRF v4.6.1 km_opt=2:", "WRF v4.6.1 km_opt=3:"):
+        hits = [n for n, line in enumerate(lines, 1) if anchor in line]
+        if len(hits) != 1:                            # pragma: no cover
+            raise ValueError(f"{path} needs one {anchor!r}, got {hits}")
+        rows[f"{path}:{hits[0]}"] = (path, anchor)
+    return rows
+
+
+RESOLVED.update(_anchored_dycore_rows())
 
 #: Citations written as ``path::routine`` rather than ``path:line``, and
 #: every file that carries one.
