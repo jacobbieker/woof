@@ -81,7 +81,7 @@ routines are named `g_*` (TL) and `a_*` (AD).
 | `small_step_prep` | `g_/a_small_step_prep` | `small_step_init_uv`, `small_step_init_column` |
 | `small_step_finish` | `g_/a_small_step_finish` | `small_step_finish_uv`, `small_step_finish_column` |
 | `calc_mu_uv_1` | `g_/a_calc_mu_uv_1` (big_step) | `average_mass_faces` |
-| `spec_bdyupdate(_ph)`, `zero_grad_bdy` | `g_/a_spec_bdyupdate*` (bc) | `advance_specified_phi_w`, `zero_gradient_w` |
+| `spec_bdyupdate(_ph)`, `zero_grad_bdy` | `g_/a_spec_bdyupdate` (bc), `g_/a_spec_bdyupdate_ph` (bc_em), `g_/a_zero_grad_bdy` (bc) | `advance_specified_phi_w`, `zero_gradient_w` |
 
 **B: RK stage**
 
@@ -113,8 +113,10 @@ routines are named `g_*` (TL) and `a_*` (AD).
 | `spec_bdy_dry`, `spec_bdytend` | `g_/a_spec_bdy_dry`, `g_/a_spec_bdytend` | `state_specified_relaxation` |
 | `spec_bdy_final`, `zero_bdytend` | `g_/a_SPEC_BDY_FINAL`, `g_/a_zero_bdytend` | `finalize_state_*`, `evaluate_linear_boundary` |
 
-About 26 WRF routines, including the optional diffusion, against about
-25 distinct woof kernels. Advection is the largest by far: WRFPLUS's
+Tables A-D have 24 rows. Counted one WRF routine at a time (the
+`rk_step_prep` parts, the advection and diffusion variants, each boundary
+routine), they cover about 37 WRF routines, against about 25 distinct woof
+kernels. Advection is the largest by far: WRFPLUS's
 `module_advect_em_ad.F` is 35.5 k lines, `small_step` AD 5 k, `bc` AD
 3.5 k.
 
@@ -275,7 +277,7 @@ To be agreed with the 3D-Var owner. `woof/da` is not edited.
   The adjoint takes forcing at any step, as FGAT and 4D-Var need, and
   returns `dx0`. With LBCs on, it also returns `dlbc`.
 - Arrays are CuPy (or facade) device arrays, taken without a host copy,
-  so 4D-Var's device-resident `U`/`U^T` (`woof/da/var`) feeds them
+  so 4D-Var's device-resident `U`/`U^T` (the planned `woof/da/var`) feeds them
   directly.
 - `DryState` stays a named tuple in woof's `(k, j, i)` layout. The
   control-variable transforms (psi/chi and so on) and the mapping from
@@ -283,7 +285,7 @@ To be agreed with the 3D-Var owner. `woof/da` is not edited.
 - Moist fields are an optional passthrough: `None` (or zeros) while the
   model is dry, so the signature does not change at P3b.
 - Inner products and norms are binary64. They take a `dot` hook whose
-  default has the signature of `woof.da.var.control.dot(x, y,
+  default has the signature of the planned `woof.da.var.control.dot(x, y,
   reduction=...)` (`"wrfda-serial"`, `"fixed-tree"`; WRFDA-3DVAR-PLAN
   4.7).
 - Agreed with the 3D-Var owner on 2026-11-19.

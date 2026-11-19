@@ -873,13 +873,14 @@ training data and a residual-target trainer.
 
 ### P3. A dynamical-core adjoint (12-20 w)
 
-- **P3a, WRF dry core** (93 launches per step): TL/AD kernels ported from
+- **P3a, WRF dry core** (93 launches per step under CUPTI): TL/AD kernels ported from
   WRFPLUS (`wrftladj/`) built on pb, kernel by kernel, with WRFPLUS as the
   Fortran oracle at `-O0 -ffp-contract=off`. Acoustic substeps, RK stages,
   big-step tendencies, boundary relaxation. No limiters (`moist_adv_opt =
   0`) at first. About 8-12 w; the design note
   [P3A-WRF-DRYCORE-ADJOINT.md](P3A-WRF-DRYCORE-ADJOINT.md) re-estimates it at
-  10-13 w (78 strict launches measured; WRFPLUS has no hybrid coordinate).
+  10-13 w (78 strict raw-kernel launches measured; WRFPLUS has no hybrid
+  coordinate). With P3b at 4-6 w, P3 stays inside 12-20 w.
 - **P3b, moist transport and WRFPLUS's simplified physics** (surface drag,
   `mp_physics = 98`, `cu_physics = 98`), and the coupling of held physics
   tendencies into the stages. About 4-6 w.
