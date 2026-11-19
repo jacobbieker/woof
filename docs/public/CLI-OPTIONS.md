@@ -2581,6 +2581,26 @@ Takes no options of its own.
 
 Takes no options of its own.
 
+## `woof obs satweave`
+
+Takes no options of its own.
+
+## `woof obs satweave fetch`
+
+| option | what it does |
+|---|---|
+| `--bands` | comma-separated wavelengths or names (default 6200,6900,7330,11200) |
+| `--bbox` | west,south,east,north in degrees (west > east crosses 180); default the globe |
+| `--cache` | cache directory (default $WOOF_SATWEAVE_CACHE or ~/.woof/cache/satweave) |
+| `--end` | last time of a span (inclusive); every step from --time |
+| `--every-minutes` | span step in minutes (default the store's own: 30 or 60) |
+| `--nearest` | round --time to the nearest published step instead of refusing |
+| `--no-identify` | do not read 6200/6900 nm to attribute satellites (geometry only) |
+| `--refresh` | re-read even when the cache holds the subset |
+| `--root` | store root: an https:// or gs:// URL or a directory (default $WOOF_SATWEAVE_ROOT or https://storage.googleapis.com/satweave_1) |
+| `--summary-json` | write every scene's summary here |
+| `--time` | UTC time with offset, e.g. 2026-11-18T12:00Z (archive: :00/:30; 2026 on: hourly) |
+
 ## `woof obs scorecard`
 
 | argument | what it does |

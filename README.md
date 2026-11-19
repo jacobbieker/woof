@@ -901,6 +901,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   neural-network options inside the DA. 4D-Var waits for the adjoints in
   the plan above. woof has no variational DA today, and default runs are
   not changed.
+- **SatWeave imager reader (opt-in; in progress).** `woof fetch satweave`
+  subsets and caches Google's SatWeave geostationary mosaic (17 bands at
+  0.1°, 2016 onward; CC BY 4.0, attribution kept in every provenance
+  record) over anonymous HTTPS. It reconstructs each pixel's satellite and
+  view geometry, which SatWeave does not publish, from band availability
+  and the sectors' sub-satellite longitudes
+  ([docs/satellite-imagers.md](docs/satellite-imagers.md)). The scenes do
+  not reach an analysis yet: the CRTM operator and the LETKF adapter come
+  next (plan section 11).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
