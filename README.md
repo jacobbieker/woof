@@ -833,7 +833,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   spectrum moves RRTMG SW's source between its 14 bands (200-263 nm about
   +2.5 % in 2024 against the cycle-24 mean) with the total unchanged, for
   legacy RRTMG and RRTMG-K; NRLSSI2's 200-263 nm band follows SORCE's observed
-  one (daily correlation 0.79, the same 27-day amplitude).
+  one (daily correlation 0.79, the same 27-day amplitude). With RADM2
+  chemistry it also scales Fast-TUV's extraterrestrial flux per wavelength
+  bin: solar maximum against minimum moves J(O1D) by about 0.2 % and J(NO2)
+  and J(HCHO) by about 0.1 % in the troposphere. Hex's generic column seam
+  takes both, bit for bit the WRF route's.
   `woof spacewx ionosphere` computes an IRI-type climatological ionosphere on
   the GPU on a global grid: foF2, hmF2, foE, F1 and vertical TEC, from the
   CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
