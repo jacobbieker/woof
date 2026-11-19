@@ -1542,7 +1542,8 @@ forward.
 refused with any shortwave other than legacy RRTMG or RRTMG-K (RTE+RRTMGP's
 g-point source has its own bands), with `dfi_opt` (the filter's CUDA graph
 would freeze the first call's factor), with FARMS (`swint_opt = 2`, whose
-surface shortwave would not see the band shares) and on hex.
+surface shortwave would not see the band shares) and on hex's MPAS-native suites (hex's
+generic column seam takes it).
 
 The `spacewx_f107_*` and `spacewx_ionosphere_maps` keys are refused while
 `spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 1` is refused without a
