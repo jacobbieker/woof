@@ -186,6 +186,12 @@ RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
         "float dtype compiled on first use; they run in the data-assimilation "
         "analysis, not a forecast step, record nothing and are not a "
         "translation unit the manifest freezes"),
+    "woof/da/var/transforms.py": (
+        "the experimental 3D-Var's control-variable transform and inner "
+        "products (woof.da.var, kernels/var_u.cu), one RawModule per "
+        "precision compiled on first use; they run only under the woof var "
+        "door, never in a forecast step, record nothing and are graded word "
+        "for word against WRFDA 4.7.1 instead (tests/test_var_transforms_gpu.py)"),
     "woof/da/radar_tten.py": (
         "the research data-assimilation line's radar latent heating, one "
         "RawKernel per entry point compiled on first use: the builder runs "

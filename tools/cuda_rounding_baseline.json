@@ -2198,6 +2198,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "dd8d577435e9cc5448cf99be773dd63b1de7d74e928b5e8c31329c3492d09f9d",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "059c7dcacd9e2ee80d633939543a26af57e95fa9c54d8f64817478a491c25ac4",
+    "file": "woof/grad/wrfplus/acoustic.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "ddf65c12fcc2a96a07091f3a704ee42bc6880b31db8ff81d67e78e229e388288",
     "constructor": "ElementwiseKernel",
     "factory": "_sequential_sum",
@@ -2579,6 +2587,14 @@
     "factory": "__init__",
     "factory_sha256": "1f52f60740f4cb1f4d11c09c28b98166a73beecf4e40de1b236b68d13cd83451",
     "file": "woof/hex/iau_forcing.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "fa9e0a16659fcb764d1104c1350f47476f5985e6cb3b108b34d28e3a04a6ec53",
+    "constructor": "RawModule",
+    "factory": "_module",
+    "factory_sha256": "3d6331d57be27ea1003a1c1478bc261f837b117e3270a0210c366953337e4454",
+    "file": "woof/da/var/transforms.py",
     "status": "unresolved"
    },
    {
@@ -4704,6 +4720,10 @@
     "sha256": "ed125e770df19cb3161c4a8bed53e55cc0d740f521f318cf9166e2a1063ddd25"
    },
    {
+    "file": "woof/da/var/kernels/var_u.cu",
+    "sha256": "982019de6841403f85b93c810fa011af68b6830710a838029f5ee6123c387470"
+   },
+   {
     "file": "woof/data/gbmpbl/constants.cuh",
     "sha256": "ae3379d57ef2311b659ce811a583b24c6b4f5f495904b5fef2024b4bcd248c82"
    },
@@ -4734,6 +4754,10 @@
    {
     "file": "woof/fddaobs/kernels.cu",
     "sha256": "74fcf8427fb8fe6234de12070a0d88f840be33467fd9b4706802dca8575785e6"
+   },
+   {
+    "file": "woof/grad/wrfplus/kernels/advance_uv.cu",
+    "sha256": "0bfde2792d260c7f839f5247f55b2a0bcd71de576d7664283e137efa0cf50832"
    },
    {
     "file": "woof/hex/chem_transport.cu",
@@ -5466,6 +5490,10 @@
     "sha256": "bea1ace4b8df937fa8a0d11659efb6b7438516cbf18cf129ab90c5580a023f7d"
    },
    {
+    "file": "woof/da/var/transforms.py",
+    "sha256": "1f753d5da1ab7a11f1c892e9c3e219a1c8f2fc49840172f9bc82c60d6dd6d709"
+   },
+   {
     "file": "woof/doctor.py",
     "sha256": "9a14b7018d591f222630e364083081f7183da0af545cd1e035f5c2c740609b7b"
    },
@@ -5552,6 +5580,10 @@
    {
     "file": "woof/fire/_device.py",
     "sha256": "d226f5b1d1cfba2f0743131a2190aaf9208993f20b05616659f879a128dff00c"
+   },
+   {
+    "file": "woof/grad/wrfplus/acoustic.py",
+    "sha256": "35a1255b10f73b0bd725c8603f6804e1f96e5707cb277ea92c1ed2f283380e15"
    },
    {
     "file": "woof/hex/cuda_acoustic.py",

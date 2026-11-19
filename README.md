@@ -919,6 +919,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   costs 8x the kernel eager and 4-5x compiled on CUDA, so the 3x cost gate
   is not met. `tools/grad_kessler_g1.py` measures all of this
   ([docs/grad.md](docs/grad.md#a-differentiable-scheme-kessler)).
+  The WRF dry-core adjoint has started, kernel by kernel
+  ([docs/dev/P3A-WRF-DRYCORE-ADJOINT.md](docs/dev/P3A-WRF-DRYCORE-ADJOINT.md)).
+  `woof.grad.wrfplus` has the tangent-linear and adjoint of the acoustic
+  `advance_uv` in binary64 (CUDA, host) and binary32 (CUDA, Metal). They
+  pass the dot-product test to 1e-15 and agree with WRFPLUS 4.7.1's
+  `g_/a_advance_uv` to about 1e-16, using a driver in
+  `tools/wrfplus_oracle`. The forecast path does not import it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
@@ -930,7 +937,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   the plan above. So far `woof.da.var` reads WRFDA's `be.dat` and has a
   binary64 reference of the control-variable transform `U` and its
   adjoint; on WRFDA's tutorial case both equal a compiled WRFDA 4.7.1 word
-  for word. It also reads OBSPROC's `obs_gts` ASCII the way WRFDA does:
+  for word. `DeviceU` runs `U` and `U^T` as CUDA or Metal kernels: the
+  binary64 oracle tier gives the reference's words, and the binary32
+  production tier gives the same words on CUDA and Metal under strict
+  numerics. It also reads OBSPROC's `obs_gts` ASCII the way WRFDA does:
   time window, domain check, wind rotation, `q` from `rh`, and the
   per-type error rules. On the tutorial case it keeps the same
   8,913 of the file's 9,061 reports as WRFDA, in the same order, with the
