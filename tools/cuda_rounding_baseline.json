@@ -2590,6 +2590,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "fa9e0a16659fcb764d1104c1350f47476f5985e6cb3b108b34d28e3a04a6ec53",
+    "constructor": "RawModule",
+    "factory": "_module",
+    "factory_sha256": "3d6331d57be27ea1003a1c1478bc261f837b117e3270a0210c366953337e4454",
+    "file": "woof/da/var/transforms.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "fb1e3ee1c28c1633330196530df3cb124226ce31bfaf9f81dbf441b4523079a6",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
@@ -4712,6 +4720,10 @@
     "sha256": "ed125e770df19cb3161c4a8bed53e55cc0d740f521f318cf9166e2a1063ddd25"
    },
    {
+    "file": "woof/da/var/kernels/var_u.cu",
+    "sha256": "982019de6841403f85b93c810fa011af68b6830710a838029f5ee6123c387470"
+   },
+   {
     "file": "woof/data/gbmpbl/constants.cuh",
     "sha256": "ae3379d57ef2311b659ce811a583b24c6b4f5f495904b5fef2024b4bcd248c82"
    },
@@ -5476,6 +5488,10 @@
    {
     "file": "woof/da/radar_tten.py",
     "sha256": "bea1ace4b8df937fa8a0d11659efb6b7438516cbf18cf129ab90c5580a023f7d"
+   },
+   {
+    "file": "woof/da/var/transforms.py",
+    "sha256": "1f753d5da1ab7a11f1c892e9c3e219a1c8f2fc49840172f9bc82c60d6dd6d709"
    },
    {
     "file": "woof/doctor.py",

@@ -1795,8 +1795,11 @@ PNG it writes carries an `experimental` stamp.
   `da_transform_through_rf(_adj)`, `da_transform_vvtovp(_adj)`,
   `da_transform_vptox(_adj)`, `da_psichi_to_uv(_adj)`,
   `da_transform_xtoxa(_adj)`, `da_pt_to_rho_lin/_adj`, `da_cv_to_vv`,
-  `da_vv_to_cv`), and `tools/wrfda_oracle/woof_dump.inc` (debug dumps
-  hooked into a copy of the WRFDA tree, never the pinned tree).
+  `da_vv_to_cv`), `woof/da/var/kernels/var_u.cu` (the same transforms as
+  device kernels, in the reference's order), `woof/da/var/control.py`
+  (`da_dot`/`da_dot_cv` serial order as the `wrfda-serial` reduction), and
+  `tools/wrfda_oracle/woof_dump.inc` (debug dumps hooked into a copy of the
+  WRFDA tree, never the pinned tree).
 - **Not used**: the CRTM 2.3.0 copy bundled in WRF (it carries GPL-headed
   files) is never compiled, linked or vendored by woof.
 - **Oracle**: WRF v4.7.1 tarball, `./configure wrfda` option 32 (serial GNU,
