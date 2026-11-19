@@ -1357,7 +1357,8 @@ def launch_wrf_deform(state: DomainState, cfg: RunConfig, common, tensors,
 
     With the stored hats on (:func:`_smag_deform_hat_enabled`, Metal by
     default) u/msfu and v/msfv are divided once per face into the
-    ``hat_slots`` face workspaces (dead at this point in every caller) and
+    ``hat_slots`` face workspaces (dead in each caller: diff6 by default,
+    smag_ru/smag_rv from the isotropic launcher) and
     read by wrf_smag_deform_hat in place of a division at every stencil
     point that needs them: the same division of the same operands, stored,
     so the same words (tests/test_smag_deform_hat.py).  The hats need two
