@@ -911,8 +911,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   reads native GOES ABI L1b (GOES-16 to 19) from the `bkr/geo` virtual
   Icechunk stores on Source Cooperative, which reference NOAA's own files.
   It keeps NOAA's calibration and quality flags and gives the true per-pixel
-  geometry. The scenes do not reach an analysis yet: the CRTM operator and the LETKF adapter come
-  next (plan section 11).
+  geometry. `woof.rtm` adds an opt-in clear-sky
+  infrared operator. It uses JCSDA CRTM v2.4+ (CC0), which you build
+  yourself with `python -m woof.rtm.crtm_build`, together with CRTM's own
+  coefficients. It gives brightness temperatures and Jacobians from woof
+  columns or from an isobaric analysis. The scenes do not reach an analysis
+  yet: the LETKF adapter comes next (plan section 11).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
