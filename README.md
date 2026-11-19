@@ -919,6 +919,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   costs 8x the kernel eager and 4-5x compiled on CUDA, so the 3x cost gate
   is not met. `tools/grad_kessler_g1.py` measures all of this
   ([docs/grad.md](docs/grad.md#a-differentiable-scheme-kessler)).
+  The WRF dry-core adjoint has started, kernel by kernel
+  ([docs/dev/P3A-WRF-DRYCORE-ADJOINT.md](docs/dev/P3A-WRF-DRYCORE-ADJOINT.md)).
+  `woof.grad.wrfplus` has the tangent-linear and adjoint of the acoustic
+  `advance_uv` in binary64 (CUDA, host) and binary32 (CUDA, Metal). They
+  pass the dot-product test to 1e-15 and agree with WRFPLUS 4.7.1's
+  `g_/a_advance_uv` to about 1e-16, using a driver in
+  `tools/wrfplus_oracle`. The forecast path does not import it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
