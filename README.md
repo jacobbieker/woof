@@ -628,7 +628,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `WOOF_METAL_YSU_TILE_BLOCKS=16` restores CUDA's width, and CUDA keeps
   its occupancy-bounded 16 per SM). On Metal the Smagorinsky deformation
   reads u/msfu and v/msfv stored once per face instead of dividing at
-  every stencil point (9-11 % off that launch, the same words;
+  every stencil point, in every K launcher (km_opt 1, 2, 3, 4 and 5;
+  9-11 % off the 2-D launch, TKE K 15.5 -> 14.4 ms and 3-D Smagorinsky K
+  23.0 -> 21.9 ms at 49x228x276 on an M3 Max, the same words;
   `WOOF_SMAG_DEFORM_HAT=0` restores the old kernel; CUDA keeps it,
   because the extra pass did not pay there). MRF, New SAS and the
   registry column cumulus (BMJ and its siblings) take the same Metal tile
