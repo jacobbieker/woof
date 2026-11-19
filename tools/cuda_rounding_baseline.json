@@ -5591,7 +5591,7 @@
    },
    {
     "file": "woof/hex/cuda_backend/recovery.py",
-    "sha256": "1a5a85585ebc72867904f852ee54c541ace5fc2ac26f0ef89dabd179096cc041"
+    "sha256": "d47e5523a9ea997367565a9756573b98912bb149599827101dafe7980608f4d5"
    },
    {
     "file": "woof/hex/cuda_backend/runtime.py",
@@ -5599,7 +5599,7 @@
    },
    {
     "file": "woof/hex/cuda_compensated_recovery.py",
-    "sha256": "f076673925dc4761c7bd77380722f8badc1ffdbdec228cbb4c3c573edb2f6129"
+    "sha256": "4a2a31e9e64107d899f3fe76224fdf08ce771f463bdd189a54fe806054e22f69"
    },
    {
     "file": "woof/hex/cuda_compile_rrfs.py",
