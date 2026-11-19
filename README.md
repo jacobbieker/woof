@@ -496,10 +496,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   regional grid only. A real-data check over Manhattan places the model's
   buildings at their footprint heights (r = 0.99 at 25 m). In lower and
   midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
-  50 m does not open the streets. A configuration with buildings (or an
-  urban canopy under LES) takes bare-earth 3DEP terrain instead of the
-  sub-km GLO-30 default, which has the buildings in it, and refuses
-  outside 3DEP unless a terrain source is named.
+  50 m does not open the streets. A domain with buildings (or an urban
+  canopy under LES) takes bare-earth 3DEP terrain instead of the sub-km
+  GLO-30 default, which has the buildings in it, and is refused outside
+  3DEP unless a terrain source is named.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band

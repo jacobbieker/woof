@@ -279,6 +279,13 @@ def test_forecast_column_of_an_inflow_perturbation_nest_validates():
     assert column.specified and not column.nested
     assert column.inflow_perturbation is False
     assert column.inflow_perturbation_seed == 3
+    # A mixed-scheme nest microphysics transition is nest-only as well.
+    mixed = validate_run_config(replace(
+        run, inflow_perturbation=False, mp_physics=8, moist=True,
+        nest_microphysics_transition="mp-edge-mass-diagnosed-v1"))
+    column = forecast_column_config(mixed)
+    assert column.nest_microphysics_transition == "same-scheme-only"
+    assert column.mp_physics == 8
     # A run without either keeps them untouched (no new replace keys).
     plain = replace(run, inflow_perturbation=False)
     assert forecast_column_config(plain).inflow_perturbation is False

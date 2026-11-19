@@ -207,17 +207,22 @@ terrain, so the terrain must be bare earth. Copernicus GLO-30, SRTM and the
 GEM-15 `dsm` are surface models: over a city their heights include the
 roofs, and the buildings would count twice.
 
-When any domain sets `obstacle_opt > 0`, or `sf_urban_physics > 0` with
-`km_opt` 2, 3 or 5 (in `[[domain]]` or `[shared]`):
+A domain that sets `obstacle_opt > 0`, or runs `sf_urban_physics > 0`
+(a `[shared]` key) with `km_opt` 2, 3 or 5, needs bare earth. For that
+domain only:
 
-- the sub-km default (no `[static.highres]` block, GLO-30) becomes
-  `terrain_source = "auto"`, which takes the bare-earth USGS 3DEP 1/3"
-  DEM where its envelope covers the domain;
-- outside 3DEP, `auto` refuses (`surface-model-under-buildings`) and names
-  `terrain_source = "gem15-dtm"` (bare earth, experimental) as the remedy;
-- a surface model you name yourself is kept, with a warning.
+- under the sub-km default (no `[static.highres]` block, GLO-30) or
+  `terrain_source = "auto"`, it takes the bare-earth USGS 3DEP 1/3" DEM
+  where the 3DEP envelope contains its footprint;
+- outside 3DEP it is refused (`surface-model-under-buildings`); declare
+  `terrain_source = "gem15-dtm"` (bare earth, experimental). Where GEM-15
+  would fall back to GLO-30, that is refused too;
+- a surface model you name yourself is kept, with one warning per domain.
 
-Configurations without buildings resolve exactly as before.
+The other domains of the tree, and configurations without buildings,
+resolve exactly as before. The building domains are part of the static
+identity (`bare_earth_domains`), so a preparation made without them is not
+reused.
 
 ## A city check: Manhattan at 50 m and 25 m
 

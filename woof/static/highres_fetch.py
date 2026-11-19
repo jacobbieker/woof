@@ -347,6 +347,10 @@ class SourceCoverage:
     #: chosen by ``auto``, prints a warning whenever it is used, and says
     #: so in its receipt echo.
     experimental: bool = False
+    #: The heights are a surface model (roofs and tree crowns in them), not
+    #: bare earth.  Resolved buildings or an urban canopy under LES on such
+    #: terrain count the buildings twice (highres_production._bare_earth_terrain).
+    surface_model: bool = False
 
     def outside(self, bbox: FootprintBBox) -> dict[str, float]:
         """Per-edge overshoot in degrees; empty when fully covered."""
@@ -453,7 +457,7 @@ TERRAIN_SOURCES: dict[str, SourceCoverage] = {
              "product reaches 84 N and 90 S.  All-water tiles are not "
              "published, which this path treats as sea level only where "
              "the domain's own baseline land mask already says water.",
-        global_lon=True),
+        global_lon=True, surface_model=True),
     "srtm-gl1": SourceCoverage(
         source_id="srtm-gl1", role="terrain",
         envelope=FootprintBBox(lat_min=-56.0, lat_max=60.0,
@@ -466,7 +470,7 @@ TERRAIN_SOURCES: dict[str, SourceCoverage] = {
              "Scandinavia, Alaska or most of Russia.  Fetched from the "
              "anonymous OpenTopography mirror because NASA's own "
              "distribution requires an Earthdata login.",
-        global_lon=True),
+        global_lon=True, surface_model=True),
 }
 
 #: GEM-15's published extent.  The excluded countries and India's offset
@@ -501,7 +505,8 @@ EXPERIMENTAL_TERRAIN_SOURCES: dict[str, SourceCoverage] = {
                            "local UTM cells)",
         source_url=GEM15_SOURCE_URL, license_id=GEM15_LICENSE[0],
         license_url=GEM15_LICENSE[1], attribution=GEM15_ATTRIBUTION,
-        note=_GEM15_NOTE, global_lon=True, experimental=True),
+        note=_GEM15_NOTE, global_lon=True, experimental=True,
+        surface_model=True),
 }
 
 #: Land-cover fetch kinds.  Each is a way a collection is PUBLISHED, not a

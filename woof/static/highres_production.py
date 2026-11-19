@@ -78,7 +78,7 @@ import math
 import os
 import re
 import sys
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Mapping
@@ -233,12 +233,12 @@ class HighresStaticConfig:
     #: canopy: "urban" (WRF's whole-pixel ISURBAN) or "split" (FRC_URB to
     #: ISURBAN, the rest to NATURAL; woof.static.highres.lcz_pervious_split).
     lcz_pervious: str = "urban"
-    #: Why this configuration needs bare-earth terrain ("" when it does
-    #: not): a domain resolves buildings (obstacle_opt) or runs an urban
-    #: canopy under LES.  A surface model (GLO-30, SRTM, GEM-15 DSM) has
-    #: those buildings in its heights already.  Derived from the
-    #: experiment on every resolve, so it is not echoed or compared.
-    bare_earth_reason: str = field(default="", compare=False)
+    #: ``(grid_id, reason)`` for each domain that needs bare-earth terrain:
+    #: it resolves buildings (obstacle_opt) or runs an urban canopy under
+    #: LES (:func:`bare_earth_domains`).  A surface model (GLO-30, SRTM,
+    #: GEM-15 DSM) has those buildings in its heights already.  Echoed only
+    #: when non-empty, so every other identity is unchanged.
+    bare_earth: tuple = ()
 
     def smoothing_for(self, domain_id):
         """This carrier's terrain smoothing for one domain."""
@@ -273,6 +273,9 @@ class HighresStaticConfig:
                 else URBAN_FRACTION_ALGORITHM)
         if self.static_source is not None:
             echoed["static_source"] = self.static_source.echo()
+        if self.bare_earth:
+            echoed["bare_earth_domains"] = [[int(gid), str(reason)]
+                                            for gid, reason in self.bare_earth]
         return echoed
 
     def applies_to(self, grid) -> bool:
@@ -425,59 +428,79 @@ def default_row_of(config) -> HighresDefaultRow | None:
     return None
 
 
-#: Terrain sources whose heights are a surface model: roofs and tree
-#: crowns are in them (Copernicus GLO-30 and SRTM are X/C-band radar DSMs;
-#: GEM-15's dsm is its surface layer).
-SURFACE_MODEL_TERRAIN = ("copernicus-dem-glo30", "srtm-gl1", "gem15-dsm")
-
 #: km_opt values that run the 3-D LES closures (2: 1.5-order TKE,
 #: 3: 3-D Smagorinsky, 5: SMS-3DTKE).
 _LES_KM_OPTS = (2, 3, 5)
 
 
-def bare_earth_reason(raw) -> str:
-    """Why the experiment ``raw`` needs bare-earth terrain, or "".
+def _needs_bare_earth(table) -> str:
+    """Why one domain's settings need bare-earth terrain, or ""."""
+    def number(key):
+        value = (table.get(key, 0) if isinstance(table, Mapping)
+                 else getattr(table, key, 0))
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+    if number("obstacle_opt") > 0:
+        return "it resolves buildings (obstacle_opt)"
+    if number("sf_urban_physics") > 0 and number("km_opt") in _LES_KM_OPTS:
+        return "it runs an urban canopy (sf_urban_physics) under LES (km_opt)"
+    return ""
+
+
+def bare_earth_domains(raw, domain_runs=()) -> tuple:
+    """``(grid_id, reason)`` for each domain that needs bare-earth terrain.
 
     A domain needs it when it resolves buildings (``obstacle_opt`` > 0) or
     runs an urban canopy (``sf_urban_physics`` > 0) under an LES closure
     (``km_opt`` 2, 3 or 5): both put the buildings in on top of the
-    terrain.  Read from the raw ``[shared]`` and ``[[domain]]`` tables
-    (each domain's own value over the shared one), so a malformed table
-    reads as "" and the experiment loader owns its refusals.
+    terrain.  Read from the built runs (``domain_runs``, each with its
+    ``grid_id``) and from the raw ``[shared]`` and ``[[domain]]`` tables
+    (each domain's own value over the shared one); a malformed table reads
+    as no buildings and the experiment loader owns its refusals.
     """
-    if not isinstance(raw, Mapping):
-        return ""
-    shared = raw.get("shared")
-    shared = shared if isinstance(shared, Mapping) else {}
-    domains = raw.get("domain")
-    if not isinstance(domains, list) or not domains:
-        domains = [{}]
-    for dom in domains:
-        if not isinstance(dom, Mapping):
+    found: dict[int, str] = {}
+    for run in domain_runs or ():
+        if run is None:
             continue
-        table = {**shared, **dom}
-        grid_id = dom.get("grid_id", 1)
+        reason = _needs_bare_earth(run)
         try:
-            if int(table.get("obstacle_opt", 0) or 0) > 0:
-                return f"d{int(grid_id):02d} resolves buildings (obstacle_opt)"
-            if (int(table.get("sf_urban_physics", 0) or 0) > 0
-                    and int(table.get("km_opt", 0) or 0) in _LES_KM_OPTS):
-                return (f"d{int(grid_id):02d} runs an urban canopy "
-                        "(sf_urban_physics) under LES (km_opt)")
+            gid = int(getattr(run, "grid_id", 1))
         except (TypeError, ValueError):
             continue
-    return ""
+        if reason:
+            found.setdefault(gid, reason)
+    if isinstance(raw, Mapping):
+        shared = raw.get("shared")
+        shared = shared if isinstance(shared, Mapping) else {}
+        domains = raw.get("domain")
+        if not isinstance(domains, list) or not domains:
+            domains = [{}]
+        for index, dom in enumerate(domains):
+            if not isinstance(dom, Mapping):
+                continue
+            reason = _needs_bare_earth({**shared, **dom})
+            try:
+                gid = int(dom.get("grid_id", index + 1))
+            except (TypeError, ValueError):
+                gid = index + 1
+            if reason:
+                found.setdefault(gid, reason)
+    return tuple(sorted(found.items()))
 
 
-def resolve_static_highres(raw, *, source: str, base_dir, spacings_m=None, run_config=None
-                           ) -> HighresStaticConfig | None:
+def resolve_static_highres(raw, *, source: str, base_dir, spacings_m=None, run_config=None,
+                           domain_runs=()) -> HighresStaticConfig | None:
     """The ``[static.highres]`` a whole configuration runs with.
 
     A declared ``[static]`` table is the user's and is taken as written,
     ``enabled = false`` included (the opt-out).  Without one, domains at
     or below a :data:`HIGHRES_DEFAULT_BY_DX` row take that row.
     ``spacings_m`` stands in for the spacings read from ``raw["domain"]``
-    when the caller already holds the built experiment.
+    when the caller already holds the built experiment, and ``domain_runs``
+    (every domain's built run) for :func:`bare_earth_domains` when the
+    caller's ``raw`` is not the whole experiment table.
 
     A static source the ``[fetch]`` source's metadata selects is a default:
     a ``[projection]`` off the row's cone does not take it and resolves
@@ -509,15 +532,11 @@ def resolve_static_highres(raw, *, source: str, base_dir, spacings_m=None, run_c
         config = replace(config,
                          sf_urban_physics=int(run_config.sf_urban_physics),
                          use_wudapt_lcz=int(run_config.use_wudapt_lcz))
-    reason = bare_earth_reason(raw)
-    if config is not None and reason:
-        if default_row_of(config) is not None:
-            # The grid-spacing default names GLO-30, a surface model with
-            # the city's buildings in it; resolved buildings on top of it
-            # count them twice.  "auto" takes bare-earth 3DEP wherever it
-            # covers the footprint (_resolve_plan) and refuses elsewhere.
-            config = replace(config, terrain_source="auto")
-        config = replace(config, bare_earth_reason=reason)
+    if config is not None:
+        bare = bare_earth_domains(
+            raw, (*(domain_runs or ()), run_config))
+        if bare:
+            config = replace(config, bare_earth=bare)
     # Per-domain terrain smoothing ([[domain]] static) rides on the same
     # carrier; all-default returns ``config`` unchanged.
     from .terrain_smoothing import resolve_domain_smoothing
@@ -746,8 +765,66 @@ def _select_landcover(config) -> LandcoverSource:
             from error
 
 
-def _resolve_plan(config: HighresStaticConfig, bbox: FootprintBBox
-                  ) -> tuple[str, object]:
+def _bare_earth_reason(config, domain_id) -> str:
+    """Why domain ``domain_id`` of ``config`` needs bare earth, or ""."""
+    if domain_id is None:
+        return ""
+    return dict(getattr(config, "bare_earth", ()) or ()).get(int(domain_id), "")
+
+
+#: (domain, source) pairs already warned about, so a tree's preparation
+#: says each once.
+_SURFACE_MODEL_WARNED: set = set()
+
+
+def _bare_earth_terrain(config, bbox: FootprintBBox, domain_id) -> str | None:
+    """The terrain source a building domain takes, or None for the usual rule.
+
+    A domain that needs bare earth (:func:`_bare_earth_reason`) under
+    ``terrain_source = "auto"`` or the grid-spacing default (GLO-30, a
+    surface model) takes bare-earth USGS 3DEP where its envelope contains
+    the footprint, and is refused elsewhere.  A surface model named
+    explicitly is kept, with a warning.
+    """
+    reason = _bare_earth_reason(config, domain_id)
+    if not reason:
+        return None
+    tag = f"d{int(domain_id):02d}"
+    if config.terrain_source == "auto" or default_row_of(config) is not None:
+        if US_COVERAGE_ENVELOPE.contains(bbox):
+            return "usgs-3dep-13as"
+        asked = ("the sub-km default (copernicus-dem-glo30)"
+                 if default_row_of(config) is not None
+                 else "terrain_source = \"auto\" (copernicus-dem-glo30 here)")
+        raise HighresRefusal(
+            "surface-model-under-buildings",
+            f"{tag} needs bare earth ({reason}), and "
+            f"{asked} is a surface model with the buildings already in its "
+            "heights: they would count twice.  The bare-earth USGS 3DEP "
+            f"1/3\" DEM covers {US_COVERAGE_ENVELOPE.as_dict()}; the "
+            f"domain+halo footprint {bbox.as_dict()} is not inside it.  "
+            "Declare [static.highres] terrain_source = \"gem15-dtm\" (bare "
+            "earth, experimental), or name a surface model explicitly to "
+            "accept the double count")
+    try:
+        coverage = terrain_source_coverage(config.terrain_source)
+    except CoverageError:
+        return None
+    key = (int(domain_id), coverage.source_id)
+    if coverage.surface_model and key not in _SURFACE_MODEL_WARNED:
+        _SURFACE_MODEL_WARNED.add(key)
+        print(f"[static.highres] {tag}: WARNING: this domain needs bare "
+              f"earth ({reason}), but "
+              f"terrain_source = \"{coverage.source_id}\" is a surface "
+              "model with the buildings already in its heights: they count "
+              "twice (raised ground plus resolved buildings or urban "
+              "canopy).  Use \"usgs-3dep-13as\" (US) or \"gem15-dtm\" for "
+              "bare earth.", file=sys.stderr, flush=True)
+    return None
+
+
+def _resolve_plan(config: HighresStaticConfig, bbox: FootprintBBox,
+                  domain_id=None) -> tuple[str, object]:
     """Decide (mode, terrain coverage) for one footprint; refuse by name.
 
     ``auto`` takes the full overlay wherever the selected land-cover
@@ -786,31 +863,14 @@ def _resolve_plan(config: HighresStaticConfig, bbox: FootprintBBox
         # checked for coverage or routed (GEM-15) in this mode.
         return mode, None
 
-    if config.terrain_source == "auto":
+    bare = _bare_earth_terrain(config, bbox, domain_id)
+    if bare is not None:
+        source_id = bare
+    elif config.terrain_source == "auto":
         source_id = ("usgs-3dep-13as" if US_COVERAGE_ENVELOPE.contains(bbox)
                      else "copernicus-dem-glo30")
-        if config.bare_earth_reason and source_id in SURFACE_MODEL_TERRAIN:
-            raise HighresRefusal(
-                "surface-model-under-buildings",
-                f"{config.bare_earth_reason}, so its terrain must be bare "
-                f"earth, and terrain_source = \"auto\" would take "
-                f"{source_id}, a surface model with the buildings already "
-                f"in its heights: they would count twice.  The bare-earth "
-                f"USGS 3DEP 1/3\" DEM covers {US_COVERAGE_ENVELOPE.as_dict()}"
-                f"; the domain+halo footprint {bbox.as_dict()} is not inside "
-                "it.  Name terrain_source = \"gem15-dtm\" (bare earth, "
-                "experimental) in [static.highres], or name a surface model "
-                "explicitly to accept the double count")
     else:
         source_id = config.terrain_source
-        if config.bare_earth_reason and source_id in SURFACE_MODEL_TERRAIN:
-            print(f"[static.highres] WARNING: {config.bare_earth_reason}, "
-                  f"but terrain_source = \"{source_id}\" is a surface "
-                  "model with the buildings already in its heights: they "
-                  "count twice (raised ground plus resolved buildings or "
-                  "urban canopy).  Use \"usgs-3dep-13as\" (US) or "
-                  "\"gem15-dtm\" for bare earth.",
-                  file=sys.stderr, flush=True)
     try:
         coverage = terrain_source_coverage(source_id)
     except CoverageError as error:
@@ -823,7 +883,7 @@ def _resolve_plan(config: HighresStaticConfig, bbox: FootprintBBox
 
 
 def _experimental_terrain(coverage, bbox: FootprintBBox, grid=None,
-                          domain_id=None):
+                          domain_id=None, bare_earth_reason: str = ""):
     """Route an experimental terrain row; ``(coverage, selection)``.
 
     An established row comes back unchanged with ``selection`` None, so
@@ -851,6 +911,15 @@ def _experimental_terrain(coverage, bbox: FootprintBBox, grid=None,
         selection["used"] = coverage.source_id
         return coverage, selection
     fallback = terrain_source_coverage(gem15.FALLBACK_SOURCE)
+    if bare_earth_reason and fallback.surface_model:
+        raise HighresRefusal(
+            "surface-model-under-buildings",
+            f"this domain needs bare earth ({bare_earth_reason}), "
+            f"but {coverage.source_id} cannot serve it ({reason}) and its "
+            f"fallback {fallback.source_id} is a surface model with the "
+            "buildings in its heights: they would count twice.  Name "
+            f"terrain_source = \"{fallback.source_id}\" explicitly to "
+            "accept the double count")
     print(f"{tag} WARNING: {coverage.source_id} is not used for this "
           f"domain: {reason}; its terrain comes from {fallback.source_id} "
           "instead", file=sys.stderr, flush=True)
@@ -1371,6 +1440,8 @@ def apply_highres_statics(baseline, grid, *, config, domain_id: int,
     smoothing = smoothing_for(config, domain_id)
     smoothing_kw = {} if smoothing.is_default else {
         "terrain_smoothing": smoothing}
+    if _bare_earth_reason(config, domain_id):
+        smoothing_kw["domain_id"] = domain_id
     try:
         fields, detail = _apply(baseline, grid, config=config,
                                 case_date=case_date,
@@ -1462,7 +1533,14 @@ def _scoped_plan_line(config: HighresStaticConfig, grid,
             f"the {_select_landcover(config).source_id} land cover "
             "(fields = \"lakes\"; terrain stays the 30-arc-second "
             "baseline and no terrain tile is fetched)")
-    if config.terrain_source == "copernicus-dem-glo30" and not lakes:
+    reason = _bare_earth_reason(config, domain_id)
+    if reason and not lakes and (config.terrain_source == "auto"
+                                 or default_row_of(config) is not None):
+        # The default names GLO-30; this domain takes bare earth instead
+        # (_bare_earth_terrain), so no GLO-30 tile count is promised.
+        line += (f"; this domain needs bare earth ({reason}), so it takes "
+                 "usgs-3dep-13as where 3DEP covers it")
+    elif config.terrain_source == "copernicus-dem-glo30" and not lakes:
         from .highres_fetch import copernicus_dem_tile_ids
         try:
             tiles = copernicus_dem_tile_ids(
@@ -1645,7 +1723,7 @@ def _landcover_record(source: LandcoverSource, fetch_manifest: dict,
 
 def _apply(baseline, grid, *, config: HighresStaticConfig,
            case_date: date, landuse_attrs, urlopen=None,
-           terrain_smoothing=WPS_DEFAULT):
+           terrain_smoothing=WPS_DEFAULT, domain_id=None):
     _require_projected_grid(grid)
     bbox = domain_footprint(grid, HALO)
     # Plan review, before a single byte is requested: the window writers
@@ -1655,14 +1733,16 @@ def _apply(baseline, grid, *, config: HighresStaticConfig,
     # writers call the same function as a backstop.
     _require_cut_frame_window(bbox)
     landcover_row = _select_landcover(config)
-    mode, coverage = _resolve_plan(config, bbox)
+    mode, coverage = _resolve_plan(config, bbox, domain_id)
     if mode == "lakes":
         # No terrain source is resolved or routed: terrain is the baseline.
         _require_modis21(landuse_attrs)
         return _apply_lakes(
             baseline, grid, config=config, case_date=case_date, bbox=bbox,
             landcover_row=landcover_row, urlopen=urlopen)
-    coverage, selection = _experimental_terrain(coverage, bbox, grid)
+    coverage, selection = _experimental_terrain(
+        coverage, bbox, grid, domain_id,
+        bare_earth_reason=_bare_earth_reason(config, domain_id))
     if mode == "all":
         # The land-use leg targets one inventory: the crosswalk's category
         # numbers are only meaningful against MODIS 21.
@@ -2277,8 +2357,18 @@ def parse_sealed_static_highres(echo, *, source: str, base_dir,
     fraction_algorithm = table.pop("urban_fraction", None)
     table.pop("urban_legend", None)
     table.pop("use_wudapt_lcz", None)
+    bare = table.pop("bare_earth_domains", None)
     config = parse_static_table({"highres": table}, source=source,
                                 base_dir=base_dir)
+    if bare is not None:
+        if not isinstance(bare, list) or not all(
+                isinstance(row, (list, tuple)) and len(row) == 2
+                for row in bare):
+            raise ValueError(
+                f"the bare_earth_domains of {source} must be [grid_id, "
+                f"reason] rows, got {bare!r}")
+        config = replace(config, bare_earth=tuple(
+            (int(gid), str(reason)) for gid, reason in bare))
     if run_config is not None and config.enabled:
         require_sealed_urban_legend(echo, run_config, source=source)
         # Read as urban_legend_selector reads them: a run object that does
@@ -2377,8 +2467,7 @@ def apply_prepared_highres(baseline, grid, *, config, domain_id, case_date,
 
 __all__ = [
     "HighresRefusal", "HighresStaticConfig", "RECEIPT_SCHEMA",
-    "HIGHRES_DEFAULT_BY_DX", "HighresDefaultRow", "SURFACE_MODEL_TERRAIN",
-    "bare_earth_reason",
+    "HIGHRES_DEFAULT_BY_DX", "HighresDefaultRow", "bare_earth_domains",
     "default_highres_cache_root", "default_static_highres",
     "overlay_active", "raw_domain_spacings", "resolve_static_highres",
     "US_COVERAGE_ENVELOPE", "apply_highres_statics", "parse_static_table",
