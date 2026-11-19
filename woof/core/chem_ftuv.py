@@ -10,6 +10,11 @@ initialisation kernel and cached.
 ftuv_driver hands photo the column's SORGAM masses (acb1 .. asal), but photoin
 never reads them (it calls setaer nowhere), so they are not inputs here.  The
 aerosol optical depths enter only with aer_ra_feedback = 1.
+
+``solar_ssi_opt = 1`` multiplies photoin's extraterrestrial flux in each of
+its 17 wavelength bins (:func:`etf_bins_nm`) by the CDR spectrum's factor
+(woof.spacewx.solar_spectrum.PhotolysisSpectrum) at the photolysis call's
+valid time; by default the flux is WRF's fixed sflx, untouched.
 """
 from __future__ import annotations
 
@@ -43,6 +48,14 @@ def _defines():
         m = re.search(r"^#define %s\(nz\) (.*)$" % name, src, re.M)
         out[name] = m.group(1)
     return out
+
+
+def etf_bins_nm() -> tuple:
+    """photoin's 17 extraterrestrial-flux bins, (low, high) nm (wave_data's wl)."""
+    from woof.core.kernels import module_source
+    m = re.search(r"__constant__ double tv_m_wl\[18\] = \{([^}]*)\};", module_source("chem_ftuv"))
+    edges = [float(v) for v in m.group(1).split(",")]
+    return tuple(zip(edges[:-1], edges[1:]))
 
 
 def _eval(expr, nz):
@@ -82,14 +95,16 @@ def _state(kte, chem_opt):
 
 
 def launch_ftuv(fields, *, chem_opt, julday, gmt, curr_secs, aer_ra_feedback=0,
-                aerosol_optics=None):
+                aerosol_optics=None, etf_factor=None):
     """One ftuv_driver call on every column.
 
     fields: mapping of (nz, ny, nx) float32 CuPy arrays t_phy (K), p_phy
     (Pa), rho_phy (kg/m3), qv, qc (kg/kg), o3 (ppmv), plus (nz + 1, ny, nx)
     p8w, t8w (only level 0 is read) and z_at_w (m), and (ny, nx) xlat, xlong
     (degrees).  aerosol_optics: with aer_ra_feedback = 1, 12 (nz, ny, nx)
-    rows tauaer1..4, waer1..4, gaer1..4.  Returns {name: (nz, ny, nx)} for
+    rows tauaer1..4, waer1..4, gaer1..4.  etf_factor: None (WRF's flux) or
+    17 factors on photoin's extraterrestrial flux, one per :func:`etf_bins_nm`
+    bin (``solar_ssi_opt``).  Returns {name: (nz, ny, nx)} for
     :data:`PHOTOLYSIS`, 1/min.
     """
     import cupy as cp
@@ -98,6 +113,14 @@ def launch_ftuv(fields, *, chem_opt, julday, gmt, curr_secs, aer_ra_feedback=0,
         raise ValueError("this Fast-TUV port serves chem_opt = 1 and 2")
     if aer_ra_feedback not in (0, 1):
         raise ValueError("aer_ra_feedback must be 0 or 1")
+    etf_on = etf_factor is not None
+    if etf_on:
+        etf = np.asarray(etf_factor, dtype=np.float64)
+        if etf.shape != (17,) or not np.all(np.isfinite(etf)) or np.any(etf <= 0.0):
+            raise ValueError("etf_factor must be 17 finite positive factors")
+        etf = cp.asarray(etf)
+    else:
+        etf = cp.ones(17, dtype=cp.float64)          # not read with etf_on = 0
     t = fields["t_phy"]
     nz, ny, nx = t.shape
     shape, shape_w, shape_2 = (nz, ny, nx), (nz + 1, ny, nx), (ny, nx)
@@ -135,7 +158,8 @@ def launch_ftuv(fields, *, chem_opt, julday, gmt, curr_secs, aer_ra_feedback=0,
                 np.int64(ws_d_per), np.int64(ws_i_per), inp, out, fatal,
                 np.int32(col0), np.int32(n), np.int32(nx), np.int32(ny), np.int32(nz),
                 np.int32(nzm), np.int32(chem_opt), np.int32(aer_ra_feedback),
-                np.int32(julday), np.float32(gmt), np.float64(curr_secs)))
+                np.int32(julday), np.float32(gmt), np.float64(curr_secs),
+                np.int32(etf_on), etf))
         bad = fatal[:n].get()
         if bad.any():
             line = int(bad[bad != 0][0])
@@ -233,6 +257,25 @@ def step(ctx, dt, ktau):
     out = launch_ftuv(fields, chem_opt=chem_opt_for(ctx.table),
                       julday=int(clock.julday), gmt=float(clock.gmt),
                       curr_secs=float(clock.curr_secs), aer_ra_feedback=feedback,
-                      aerosol_optics=aerosol_optics)
+                      aerosol_optics=aerosol_optics,
+                      etf_factor=_solar_spectrum_factor(ctx))
     for name in PHOTOLYSIS:
         ctx.diag[f"ph_{name}"][...] = out[name]
+
+
+def _solar_spectrum_factor(ctx):
+    """solar_ssi_opt = 1: photoin's per-bin flux factor at this call's valid
+    time (run start + curr_secs), else None.  The series is loaded on the
+    first call of a run or a resume and kept on the chem state."""
+    if not int(getattr(ctx.cfg, "solar_ssi_opt", 0) or 0):
+        return None
+    chem = ctx.state.chem
+    spectrum = getattr(chem, "ftuv_solar_spectrum", None)
+    if spectrum is None:
+        import json
+        from woof.spacewx.solar_spectrum import PhotolysisSpectrum
+        start = getattr(ctx.cfg, "start_time", None) or getattr(chem, "start_time", None)
+        spectrum = chem.ftuv_solar_spectrum = PhotolysisSpectrum.for_run(
+            ctx.cfg, start, etf_bins_nm(), "ftuv")
+        print("[spacewx ssi] " + json.dumps(spectrum.receipt(), sort_keys=True), flush=True)
+    return spectrum.factor(float(ctx.clock.curr_secs))
