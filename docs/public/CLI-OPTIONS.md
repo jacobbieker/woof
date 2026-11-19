@@ -174,7 +174,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--no-gem15` | do not read GEM-15: heights then come from the footprints' own attributes or storeys only |
 | `--offline` | read GEM-15 and Overture from the cache only |
 | `--output NC` | buildings product to write (NetCDF); name it in [[domain]] obstacle_file |
-| `--overture [RELEASE]` | fetch the Overture Maps buildings under the domain plus a halo (anonymous S3, ODbL 1.0) into --cache; RELEASE is a release id or latest (the default when given bare); combines with --footprints |
+| `--overture RELEASE` | fetch the Overture Maps buildings under the domain plus a halo (anonymous S3, ODbL 1.0) into --cache; RELEASE is a release id or latest (the default when given bare); combines with --footprints |
 | `--resolution M` | footprint lattice spacing in metres (default: a quarter of the grid spacing, at most 5) |
 | `--storey-height M` | metres per storey for footprints with only a storey count (default 3) |
 
