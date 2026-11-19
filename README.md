@@ -919,7 +919,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   costs 8x the kernel eager and 4-5x compiled on CUDA, so the 3x cost gate
   is not met. `tools/grad_kessler_g1.py` measures all of this
   ([docs/grad.md](docs/grad.md#a-differentiable-scheme-kessler)).
-- **A plan, not yet code, for variational data assimilation.**
+- **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
   transforms, a conventional-observation 3D-Var checked against compiled
@@ -927,8 +927,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   3DEnVar with the LETKF members. Radar, GOES and radiances come later;
   radiances need an opt-in CRTM. It also scopes opt-in gradient and
   neural-network options inside the DA. 4D-Var waits for the adjoints in
-  the plan above. woof has no variational DA today, and default runs are
-  not changed.
+  the plan above. So far `woof.da.var` reads WRFDA's `be.dat` and has a
+  binary64 reference of the control-variable transform `U` and its
+  adjoint; on WRFDA's tutorial case both equal a compiled WRFDA 4.7.1 word
+  for word. There is no analysis command yet, and default runs are not
+  changed.
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
