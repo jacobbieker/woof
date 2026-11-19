@@ -482,8 +482,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   grid. These are plan and frontal area indices, a height histogram, and
   WRF's NUDAPT `URB_PARAM` block. Each source's licence and attribution
   travel with the file. `woof buildings` builds the product for one
-  domain of a WPS namelist. Footprints are read from a local file, not
-  downloaded, and the urban schemes do not read `URB_PARAM` yet
+  domain of a WPS namelist. Footprints are read from local files, or
+  fetched for the domain from the public Overture Maps release
+  (`--overture`, anonymous S3, cached, ODbL-1.0 with per-record source
+  licences recorded; `--offline` uses the cache only), and the urban schemes do not read `URB_PARAM` yet
   ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
 - **Resolved buildings in LES (`obstacle_opt = 1`, opt-in).** On a domain
   with spacing up to 500 m, the building product becomes porous immersed
@@ -496,7 +498,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   regional grid only. A real-data check over Manhattan places the model's
   buildings at their footprint heights (r = 0.99 at 25 m). In lower and
   midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
-  50 m does not open the streets.
+  50 m does not open the streets. A domain with buildings (or an urban
+  canopy under LES) takes bare-earth 3DEP terrain instead of the sub-km
+  GLO-30 default, which has the buildings in it, and is refused outside
+  3DEP unless a terrain source is named.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
@@ -630,9 +635,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   rule as YSU, 2,048 columns per core under the byte cap (byte-identical
   in every numerics mode; 49x228x276 on an M3 Max: MRF 8.4 -> 6.5 ms,
   New SAS 54.6 -> 33.1 ms per launch, BMJ 16.3 -> 12.5 ms on 63k
-  columns;
+  columns, EEPS 14.4 -> 11.6 ms at 49 levels;
   `WOOF_METAL_COLUMN_TILE_BLOCKS` sets the width in 32-column units;
-  EEPS and CUDA keep their occupancy-bounded tiles). Hex: CUDA
+  CUDA keeps its occupancy-bounded tiles). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
@@ -767,6 +772,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   instead of 64, so both of its resident blocks stay busy: `mskf_column`
   fell from 32.5 to 11.0 ms per step on Edinburgh 3 km (A6000),
   byte-identical.
+  Hex: the composite step's scheme health checks (microphysics, YSU,
+  Grell-Freitas, Noah-MP's surface identity, the lagged heating rate and
+  the radiative-carrier finiteness) record on the device and are read
+  once, just before the step commits, so a failure is still refused and
+  rolled back by the step that produced it (Edinburgh 3 km on Metal: 257
+  to 247 ms per step, byte-identical; `WOOF_HEALTH_READBACK=immediate`
+  restores the per-check reads).
 - **Lakes.** `lake_state_source = "era5"` or `"auto+era5"` (opt-in) starts
   lakes outside GLSEA from ERA5's FLake lake state (keyless, Google ARCO),
   including the CLM lake column's profile, instead of the forcing's skin (on

@@ -261,6 +261,36 @@ def test_forecast_column_keeps_the_native_nwp_averaging_window():
     assert column.nwp_diagnostics == 1
 
 
+def test_forecast_column_of_an_inflow_perturbation_nest_validates():
+    # A nest child with inflow perturbation (LES nest) or a mixed-scheme
+    # microphysics transition: the column drops both nest-only mechanisms,
+    # which the validator refuses off a nest, instead of skipping the
+    # pre-warm ("requires nested=true", Manhattan 25 m nest, 2026-11-17).
+    from dataclasses import replace
+
+    from woof.config import RunConfig, validate_run_config
+    from woof.warm_kernels import forecast_column_config
+
+    run = validate_run_config(RunConfig(
+        nx=40, ny=32, nz=49, dx=50., dy=50., ztop=20000.,
+        dt=0.25, run_seconds=60., output_interval_s=60., nested=True,
+        specified=True, inflow_perturbation=True, inflow_perturbation_seed=3))
+    column = forecast_column_config(run)
+    assert column.specified and not column.nested
+    assert column.inflow_perturbation is False
+    assert column.inflow_perturbation_seed == 3
+    # A mixed-scheme nest microphysics transition is nest-only as well.
+    mixed = validate_run_config(replace(
+        run, inflow_perturbation=False, mp_physics=8, moist=True,
+        nest_microphysics_transition="mp-edge-mass-diagnosed-v1"))
+    column = forecast_column_config(mixed)
+    assert column.nest_microphysics_transition == "same-scheme-only"
+    assert column.mp_physics == 8
+    # A run without either keeps them untouched (no new replace keys).
+    plain = replace(run, inflow_perturbation=False)
+    assert forecast_column_config(plain).inflow_perturbation is False
+
+
 def _column_layer_temperatures(nz, ztop):
     import numpy as np
 
