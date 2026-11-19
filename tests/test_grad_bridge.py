@@ -125,9 +125,10 @@ def test_cuda_handoff_orders_the_two_streams():
             for _ in range(8):
                 busy = busy @ busy * cupy.float32(1.0 / 4096)
             x = cupy.full((1 << 20,), 3.0, cupy.float32) + busy[0, 0] * 0
-            t = bridge.to_torch(x)
         side = torch.cuda.Stream()
         with torch.cuda.stream(side):
+            with stream:
+                t = bridge.to_torch(x)       # side waits for woof's stream
             got = float(t.sum().item())
         assert got == 3.0 * (1 << 20), trial
         with torch.cuda.stream(side):

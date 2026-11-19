@@ -18,10 +18,12 @@ a facade array to a CPU tensor, float64 to MPS, a CUDA array on another
 device than the tensor's) is refused unless ``copy=True`` names the copy.
 
 Ordering.  CUDA: woof launches on CuPy's current stream and torch on its
-own current stream.  :func:`to_torch` makes torch's stream wait for
-CuPy's (a device-side event wait, no host sync), :func:`from_torch` makes
-CuPy's stream wait for torch's, so neither side reads a buffer the other
-is still writing.  :func:`woof_stream` instead runs the torch work on
+own current stream.  :func:`to_torch` makes torch's current stream wait
+for CuPy's current stream (a device-side event wait, no host sync), and
+:func:`from_torch` makes CuPy's current stream wait for torch's, so
+neither side reads a buffer the other is still writing.  The wait is for
+the streams current at the call: a tensor used later on another torch
+stream needs torch's own ``wait_stream``, as any torch tensor does.  :func:`woof_stream` instead runs the torch work on
 CuPy's stream itself (no handoff needed).  Metal: MLX and torch-MPS have
 separate command queues and expose no cross-queue event, so the handoff is
 a full drain of the producer: ``mx.eval`` + ``mx.synchronize`` before a
@@ -89,7 +91,12 @@ def _torch_waits_for_cupy(torch) -> None:
 def _cupy_waits_for_torch(torch) -> None:
     import cupy
     event = cupy.cuda.Event(disable_timing=True)
-    event.record(cupy.cuda.ExternalStream(torch.cuda.current_stream().cuda_stream))
+    stream = torch.cuda.current_stream()
+    if hasattr(cupy.cuda.Stream, "from_external"):       # CuPy >= 14
+        external = cupy.cuda.Stream.from_external(stream)
+    else:
+        external = cupy.cuda.ExternalStream(stream.cuda_stream)
+    event.record(external)
     cupy.cuda.get_current_stream().wait_event(event)
 
 
