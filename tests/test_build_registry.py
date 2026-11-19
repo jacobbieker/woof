@@ -462,13 +462,21 @@ def test_a_remedy_label_names_exactly_the_edit_its_remedy_settings_makes(
                 held[:] = [rule for rule in held
                            if rule.get("remedy_settings") != {"shcu_physics": 0}]
     _shallow_cumulus_constraints(stripped)
-    emitted = sum(
-        rule.get("remedy_settings") == {"shcu_physics": 0}
-        and rule in registry["components"][name]["options"][option_id]
-        .get("constraints", {}).get("refused_when", [])
-        for name, component in stripped["components"].items()
-        for option_id, option in component["options"].items()
-        for rule in option.get("constraints", {}).get("refused_when", []))
+    # The one emitted rule the build may lack, named; every other emitted
+    # rule must be in the registry, so a deleted refusal fails here.
+    known_gap = {("microphysics", "p3-mp52")}
+    emitted = 0
+    for name, component in stripped["components"].items():
+        for option_id, option in component["options"].items():
+            held = (registry["components"][name]["options"][option_id]
+                    .get("constraints", {}).get("refused_when", []))
+            for rule in option.get("constraints", {}).get("refused_when", []):
+                if rule.get("remedy_settings") != {"shcu_physics": 0}:
+                    continue
+                if rule in held:
+                    emitted += 1
+                else:
+                    assert (name, option_id) in known_gap, (name, option_id, rule)
     assert emitted > 0
     assert checked == 30 + 5 + emitted
 
