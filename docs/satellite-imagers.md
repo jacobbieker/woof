@@ -156,11 +156,12 @@ ships no CRTM, no compiled library and no coefficients. You build the
 library yourself from a CRTM checkout:
 
 ```
-git clone --branch v2.4.1 https://github.com/JCSDA/crtm CRTM_SRC
+git clone --branch v2.4.1-jedi.2 https://github.com/JCSDA/crtm CRTM_SRC
 pixi exec -s netcdf-fortran -s gfortran -- python -m woof.rtm.crtm_build --source CRTM_SRC --out CRTM_LIB
 ```
 
-The builder refuses a tree that is not the CC0 CRTM v2.4+. That includes
+JCSDA tags the 2.4.1 release `v2.4.1-jedi.N`; woof is tested with
+`v2.4.1-jedi.2`. The builder refuses a tree that is not the CC0 CRTM v2.4+. That includes
 the CRTM 2.3.0 copy inside WRF, which carries GPL files. The builder writes
 `libwoof_crtm` and a `build-receipt.json` with the version, the licence
 hash and the library hash.
