@@ -37,7 +37,8 @@ runs on every backend, so a single artefact gives the same model on CUDA
 and on Metal. `woof.nn.manifest.write_mlp_artefact` writes one. A
 TorchScript or `torch.export` module takes `[column, n_inputs]`
 normalised float32 and returns `[column, n_outputs]`; these formats run on
-CUDA only. `mlx-safetensors` runs on Metal only.
+PyTorch: on CUDA, or on Metal with `backend = "torch"` (torch-MPS, see
+"Runners and array exchange"). `mlx-safetensors` runs on Metal only.
 
 The restart identity of a run binds the artefact's weights and manifest
 hashes (`ColumnModelManifest.identity()`), so a resume onto different
@@ -61,6 +62,11 @@ physical units, as arrays of the same kind as its input:
   reads that storage directly, and its result is wrapped as a new facade
   array, so the model joins woof's lazy graph without a host round trip.
   MLX is already part of `[gpu-mlx]`.
+- **Metal: PyTorch (`backend = "torch"`).** torch-MPS reads the facade's
+  buffer through DLPack with no copy, after the MLX queue drains, and the
+  result comes back as one device copy (MLX cannot wrap a torch buffer).
+  The tensor bridge, `woof.grad.bridge`, documents the ordering and the
+  refusals ([grad.md](grad.md#the-tensor-bridge)).
 - **Host: NumPy.** The reference runner for `mlp-npz`, used by the tests.
 
 `backend = "auto"` follows woof's own backend. A format that the chosen
