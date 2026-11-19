@@ -2370,7 +2370,9 @@ class RunConfig:
     # so the total is unchanged (solar_tsi_opt sets the total).  The source
     # is "nrlssi2" (the NOAA CDR daily SSI, fetched) or NOAA CDR SSI netCDF
     # path(s).  RRTMG (ra_sw_physics = 4, rrtmg_legacy) and RRTMG-K (14)
-    # only.  0 runs no new code.
+    # only.  With RADM2's Fast-TUV photolysis the same spectrum scales its
+    # extraterrestrial flux per wavelength bin (not renormalised; the total
+    # stays Fast-TUV's fixed flux).  0 runs no new code.
     solar_ssi_opt: int = _config_field(default=0, kw_only=True)
     solar_ssi_source: str = _config_field(default="", kw_only=True)
     # spacewx_epp_opt = 1 adds the NO, OH and HO2 that solar protons make in

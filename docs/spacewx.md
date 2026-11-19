@@ -18,7 +18,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make; auroral-electron ion-pair rates (Fang et al. 2010) from OVATION's energy flux and mean energy | ion-pair rates available as `woof spacewx particles` (electrons with `--electron-energy-flux`, a diagnostic above every model top); the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
-| L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route; photolysis not yet |
+| L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route, and on Fast-TUV photolysis (`phot_opt = 3`, RADM2) |
 
 Couplings that stay speculative are not implemented, and none is planned. One example is
 galactic cosmic rays acting on cloud nucleation: the CLOUD chamber finds that the response of
@@ -117,8 +117,66 @@ factors at the start. Hex refuses the key, as do RTE+RRTMGP (`ra_rrtmg_variant` 
 `"rrtmg_legacy"`, whose g-point solar source has its own bands and its own NRLSSI2 facular/sunspot
 terms), every other shortwave scheme, FARMS (`swint_opt = 2`), and DFI (the filter captures the step in a CUDA graph,
 which would freeze the first call's factor). The CDR lags real time by a few months; a forecast
-for the coming days needs a netCDF in the CDR's layout. Photolysis (the chemistry's actinic
-flux) does not take the factor yet.
+for the coming days needs a netCDF in the CDR's layout.
+
+A naming note: the CDR files woof reads (`ssi_v03r00_daily_*.nc`) are the CDR's version 3,
+the series LISIRD serves as `nnl_ssi_P1D`; the reference reproduces from those to every
+printed digit, while LISIRD's older `nrl2_ssi_P1D` (NRLSSI2 v2) differs by 1-5 % per band.
+The source keyword stays `"nrlssi2"`.
+
+### Photolysis (Fast-TUV)
+
+With `solar_ssi_opt = 1` and the RADM2 chemistry (Fast-TUV, WRF-Chem's `phot_opt = 3`, the
+`photolysis.ftuv` process on the WRF route), the same daily spectrum scales photoin's
+extraterrestrial flux in each of its 17 wavelength bins (178.6-743.6 nm):
+
+    F_i(t) = [S_i(t) / TSI(t)] / [S_i,ref / TSI_ref]
+
+with S_i the CDR's irradiance integrated over bin i and the reference from the cycle-24 mean
+spectrum shipped as `woof/data/spacewx/ssi_reference_v03_2009_2019.json` (the CDR's 752 bins
+below 760 nm, 2009-2019, the same days as the RRTMG reference; it reproduces bands 25-28 of
+`REF_BAND_FRACTION` to the printed 8 decimals; rebuilt by `tools/spacewx_ssi_reference.py
+--spectrum`). These factors are not renormalised: the bins hold only part of the TSI, and
+renormalising them would remove the ultraviolet signal. The total stays Fast-TUV's own fixed
+flux (WRF's `sflx`; Fast-TUV applies no Earth-Sun or TSI correction, so `solar_tsi_opt` does
+not reach it). The factor is computed in float64 at each photolysis call's valid time (run
+start + `curr_secs`) and multiplies the flux inside the kernel (`etf_factor`). The multiply is
+compiled only in the kernel's `GPUWM_FTUV_ETF` tier, so with the option off the default module is
+WRF's transcription unchanged and `ftuv_driver`'s output is kept word for word (the 4.7.1 oracle).
+The series is read and checked when the process initialises, once per chem state.
+
+Validation (solar maximum 2014-02-25 against minimum 2019-12-15, the CDR spectrum; Fast-TUV
+on the 240 sunlit points of the WRF 4.7.1 oracle's case-1 columns, surface to 20 km):
+
+| bin | factor at max | at min | max / min |
+|---|---|---|---|
+| 178.6-180 nm | 1.0592 | 0.9742 | 1.0872 |
+| 198-205 nm | 1.0376 | 0.9836 | 1.0548 |
+| 222-241 nm | 1.0168 | 0.9927 | 1.0244 |
+| 241-289.9 nm | 1.0063 | 0.9973 | 1.0091 |
+| 289.9-305.5 nm | 1.0017 | 0.9993 | 1.0025 |
+| 313.5-337.5 nm | 1.0007 | 0.9997 | 1.0011 |
+| 337.5-420 nm | 1.0009 | 0.9996 | 1.0013 |
+| 475-729 nm | 0.9999 | 1.0001 | 0.9999 |
+
+| J | max / min | max / WRF's flux | min / WRF's flux |
+|---|---|---|---|
+| O3 -> O(1D) (`ph_o31d`) | 1.0019 (1.0014-1.0023) | 1.0014 | 0.9994 |
+| NO2 (`ph_no2`) | 1.0013 | 1.0009 | 0.9996 |
+| HCHO -> H + HCO (`ph_ch2or`) | 1.0012 (1.0011-1.0013) | 1.0008 | 0.9997 |
+| HCHO -> H2 + CO (`ph_ch2om`) | 1.0011 | 1.0008 | 0.9997 |
+| O3 -> O(3P) (`ph_o33p`) | 1.0000 | 1.0000 | 1.0000 |
+
+So in the troposphere the solar cycle moves J(O1D) by about 0.2 % and J(NO2) and J(HCHO) by
+about 0.1 %: the 5-9 % changes below 205 nm are absorbed by O2 and O3 well above the troposphere,
+and what reaches the troposphere is the 290-420 nm part, which the CDR moves by 0.1-0.3 %.
+These are the CDR's (modelled) UV amplitudes; SORCE's observed 263-345 nm cycle is two to
+three times larger (above), so the J changes are a conservative estimate.
+
+Same rule as for the radiation: the shortwave must be legacy RRTMG or RRTMG-K. The
+solar-proton source (`spacewx_epp_opt`) adds NO/OH/HO2 in the RADM2 rows, and those then
+photolyse with these same Fast-TUV rates, so it needs nothing more. The WRF route has no
+other photolysis scheme (no Fast-J, and TUV-x runs only with hex's MICM chemistry).
 
 ## L3a: climatological ionosphere (`woof spacewx ionosphere`)
 
