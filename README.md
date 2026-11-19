@@ -482,8 +482,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   grid. These are plan and frontal area indices, a height histogram, and
   WRF's NUDAPT `URB_PARAM` block. Each source's licence and attribution
   travel with the file. `woof buildings` builds the product for one
-  domain of a WPS namelist. Footprints are read from a local file, not
-  downloaded, and the urban schemes do not read `URB_PARAM` yet
+  domain of a WPS namelist. Footprints are read from local files, or
+  fetched for the domain from the public Overture Maps release
+  (`--overture`, anonymous S3, cached, ODbL-1.0 with per-record source
+  licences recorded; `--offline` uses the cache only), and the urban schemes do not read `URB_PARAM` yet
   ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
 - **Resolved buildings in LES (`obstacle_opt = 1`, opt-in).** On a domain
   with spacing up to 500 m, the building product becomes porous immersed
