@@ -26,6 +26,20 @@ limit, so a level where training never saw a non-zero target (cloud
 water above the cloud, say) is not clamped to zero online.
 The manifest's ``training`` table records the tap, its schema, the split,
 the hyper-parameters and the held-out scores.
+
+Pooling.  Several taps (other cycles, seasons or meshes) train one model:
+``python -m woof.nn.train TAP [TAP ...] OUT``.  Their fields must agree.
+Each store is ordered and split on its own (the last ``holdout`` of its
+recorded times is held out), and the training parts are pooled.  A store
+named with ``--validate`` is held out whole: a different cycle, so the
+score is out of sample in weather as well as in time; ``holdout`` then
+defaults to 0.  ``--inputs`` keeps a subset of the tap's input fields and
+``--levels`` the lowest levels of every 3-D input and output, so one broad
+tap serves several models.  The held-out report adds, per held-out store
+and for each ``--margins`` value, the fraction of its columns outside the
+trained input range widened by that margin (what ``out_of_range =
+"fallback"`` would leave to the scheme) and the input fields most often
+outside it at margin 0.
 """
 
 from __future__ import annotations
@@ -38,7 +52,7 @@ from pathlib import Path
 import numpy as np
 
 from woof.nn import NOT_WRF_IDENTICAL
-from woof.nn.manifest import write_mlp_artefact
+from woof.nn.manifest import FieldSpec, write_mlp_artefact
 from woof.nn.tap import read_tap
 
 
@@ -123,19 +137,130 @@ def r2_by_output(y: np.ndarray, p: np.ndarray, slices: dict) -> dict:
     return out
 
 
-def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=1024, lr=1e-3,
-          holdout=0.2, seed=0, limit_factor=2.0, name=None, log=print) -> dict:
-    """Train on the tap at ``tap``, write the artefact to ``out`` and
-    return the held-out scores."""
-    data = read_tap(tap)
+def _select(data: dict, inputs=None, levels=None) -> dict:
+    """``data`` with only the input fields ``inputs`` (tap order kept)
+    and the lowest ``levels`` levels of every multi-level field."""
+    if inputs is None and levels is None:
+        return data
+    specs = data["inputs_spec"]
+    known = [f.name for f in specs]
+    if inputs is not None:
+        unknown = [n for n in inputs if n not in known]
+        if unknown:
+            raise ValueError(f"--inputs {unknown} are not in the tap's inputs {known}")
+
+    def rows(fields, keep):
+        out, kept, start = [], [], 0
+        for spec in fields:
+            depth = spec.levels if levels is None or spec.levels == 1 else min(spec.levels, int(levels))
+            if keep is None or spec.name in keep:
+                out.extend(range(start, start + depth))
+                kept.append(FieldSpec(spec.name, spec.units, depth))
+            start += spec.levels
+        return np.asarray(out, dtype=np.int64), tuple(kept)
+
+    in_rows, in_spec = rows(specs, None if inputs is None else set(inputs))
+    out_rows, out_spec = rows(data["outputs_spec"], None)
+    out = dict(data)
+    out["inputs"] = np.asarray(data["inputs"])[:, in_rows]
+    out["targets"] = np.asarray(data["targets"])[:, out_rows]
+    out["inputs_spec"], out["outputs_spec"] = in_spec, out_spec
+    return out
+
+
+def _load(path, inputs, levels) -> dict:
+    data = read_tap(path)
     attrs = data["attrs"]
-    data = _by_time(data)
-    n = data["inputs"].shape[0]
-    if n < 2:
-        raise ValueError(f"{tap}: {n} recorded step(s); training needs at least two (one held out)")
-    cut = min(n - 1, max(1, int(round(n * (1.0 - holdout)))))
-    x_train, y_train = _columns(data["inputs"][:cut]), _columns(data["targets"][:cut])
-    x_test, y_test = _columns(data["inputs"][cut:]), _columns(data["targets"][cut:])
+    data = _select(_by_time(data), inputs, levels)
+    data["attrs"] = attrs
+    data["path"] = str(Path(path).resolve())
+    return data
+
+
+def _agree(stores) -> None:
+    """Pooled stores must carry the same fields, route, scheme and target."""
+    first = stores[0]
+    for other in stores[1:]:
+        for key in ("inputs_spec", "outputs_spec"):
+            if other[key] != first[key]:
+                raise ValueError(f"{other['path']}: its {key.split('_')[0]} {other[key]} differ from "
+                                 f"{first['path']}'s {first[key]}; pooled taps must record the same fields")
+        for key in ("route", "scheme", "target"):
+            a, b = first["attrs"].get(key), other["attrs"].get(key)
+            if key == "target":
+                a, b = a or "physics", b or "physics"
+            if a != b:
+                raise ValueError(f"{other['path']}: {key} {b!r} differs from {first['path']}'s {a!r}")
+
+
+def fallback_fractions(x: np.ndarray, lo, hi, margins, names=None, top: int = 5) -> dict:
+    """The fraction of columns (rows of ``x``, ``[column, feature]``)
+    outside ``[lo, hi]`` widened by each margin, and the ``top`` feature
+    names most often outside at the first margin."""
+    from woof.nn.safety import out_of_range_columns
+
+    xt = np.ascontiguousarray(x.T)
+    out = {"fraction": {f"{float(m):g}": float(out_of_range_columns(xt, lo, hi, float(m)).mean())
+                        for m in margins}}
+    if names is not None and x.shape[0]:
+        pad = (np.asarray(hi) - np.asarray(lo)) * float(margins[0])
+        bad = (x < (np.asarray(lo) - pad)) | (x > (np.asarray(hi) + pad)) | ~np.isfinite(x)
+        counts: dict = {}
+        for name, n in zip(names, bad.sum(axis=0).tolist()):
+            counts[name] = counts.get(name, 0) + int(n)
+        worst = sorted(((n, name) for name, n in counts.items() if n), reverse=True)[:top]
+        out["most_often_outside"] = {name: n / x.shape[0] for n, name in worst}
+    return out
+
+
+def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=1024, lr=1e-3,
+          holdout=None, seed=0, limit_factor=2.0, name=None, validate=(), inputs=None, levels=None,
+          margins=(0.0, 0.1, 0.3), keep_best=False, log=print) -> dict:
+    """Train on the tap(s) at ``tap``, write the artefact to ``out`` and
+    return the held-out scores.  ``validate`` names stores held out whole;
+    ``holdout`` (default 0.2, or 0 with ``validate``) is the tail of each
+    training store held out.  ``keep_best`` keeps the epoch with the
+    lowest held-out error instead of the last."""
+    taps = [tap] if isinstance(tap, (str, Path)) else list(tap)
+    if not taps:
+        raise ValueError("name at least one tap store to train on")
+    validate = [validate] if isinstance(validate, (str, Path)) else list(validate)
+    if holdout is None:
+        holdout = 0.0 if validate else 0.2
+    stores = [_load(path, inputs, levels) for path in taps]
+    checks = [_load(path, inputs, levels) for path in validate]
+    _agree(stores + checks)
+    data = stores[0]
+    attrs = data["attrs"]
+    x_parts, y_parts, held = [], [], []
+    splits = []
+    for store in stores:
+        n = store["inputs"].shape[0]
+        if holdout > 0.0:
+            if n < 2:
+                raise ValueError(f"{store['path']}: {n} recorded step(s); training needs at least two "
+                                 "(one held out)")
+            cut = min(n - 1, max(1, int(round(n * (1.0 - holdout)))))
+        else:
+            if n < 1:
+                raise ValueError(f"{store['path']}: no recorded step to train on")
+            cut = n
+        x_parts.append(_columns(store["inputs"][:cut]))
+        y_parts.append(_columns(store["targets"][:cut]))
+        if cut < n:
+            held.append((f"{store['path']} (last {n - cut} steps)", _columns(store["inputs"][cut:]),
+                         _columns(store["targets"][cut:])))
+        splits.append({"tap": store["path"], "grid": store["attrs"].get("grid"), "steps_train": cut,
+                       "steps_held_out": n - cut,
+                       "held_out_from_seconds": (float(store["time_seconds"][cut]) if cut < n else None)})
+    for store in checks:
+        held.append((f"{store['path']} (whole)", _columns(store["inputs"]), _columns(store["targets"])))
+    if not held:
+        raise ValueError("nothing is held out: give holdout > 0 or a --validate store")
+    x_train, y_train = np.concatenate(x_parts), np.concatenate(y_parts)
+    del x_parts, y_parts
+    x_test = np.concatenate([h[1] for h in held])
+    y_test = np.concatenate([h[2] for h in held])
     in_mean, in_std = _scale(x_train)
     out_mean, out_std = _scale(y_train, data["outputs_spec"])
     xn = (x_train - in_mean) / in_std
@@ -165,9 +290,12 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
             acts.append(h)
         return acts, pre
 
-    def predict(x):
-        return forward((x - in_mean) / in_std)[0][-1] * out_std + out_mean
+    def predict(x, chunk=65536):
+        parts = [forward((x[i:i + chunk] - in_mean) / in_std)[0][-1] * out_std + out_mean
+                 for i in range(0, x.shape[0], chunk)]
+        return np.concatenate(parts) if parts else np.zeros((0, len(out_mean)), dtype=np.float32)
 
+    best = (np.inf, None, 0)
     start = time.perf_counter()
     for epoch in range(epochs):
         order = rng.permutation(xn.shape[0])
@@ -193,51 +321,82 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
                     step = lr * np.sqrt(1 - beta2 ** t) / (1 - beta1 ** t)
                     p -= (step * m / (np.sqrt(v) + eps)).astype(np.float32)
         test_mse = float(((((predict(x_test) - out_mean) / out_std) - (y_test - out_mean) / out_std) ** 2).mean())
+        if keep_best and test_mse < best[0]:
+            best = (test_mse, [[w.copy(), b.copy()] for w, b in layers], epoch + 1)
         log(f"epoch {epoch + 1}/{epochs}: train mse {total / xn.shape[0]:.4f} (normalised), "
             f"held-out mse {test_mse:.4f}")
     seconds = time.perf_counter() - start
+    if keep_best and best[1] is not None:
+        layers[:] = best[1]
 
     from woof.nn.manifest import _slices
     outputs = data["outputs_spec"]
     slices = _slices(outputs)
+    lo, hi = x_train.min(axis=0), x_train.max(axis=0)
+    names = [spec.name for spec in data["inputs_spec"] for _ in range(spec.levels)]
+    per_store = {label: {"r2": r2_by_output(y, predict(x), slices), "columns": int(x.shape[0]),
+                         "fallback": fallback_fractions(x, lo, hi, margins, names)}
+                 for label, x, y in held}
     scores = {"held_out_r2": r2_by_output(y_test, predict(x_test), slices),
               "train_r2": r2_by_output(y_train, predict(x_train), slices),
-              "held_out_columns": int(x_test.shape[0]), "train_columns": int(x_train.shape[0])}
+              "held_out_columns": int(x_test.shape[0]), "train_columns": int(x_train.shape[0]),
+              "held_out": per_store}
     limit = _limits(np.abs(y_train).max(axis=0) * limit_factor, outputs)
-    training = {"tap": str(Path(tap).resolve()), "tap_schema": attrs.get("schema"),
+    what = "the scheme's tendency (an emulator: mode = \"replace\")"
+    training = {"tap": data["path"] if len(stores) == 1 else [s["path"] for s in stores],
+                "validate": [s["path"] for s in checks], "tap_schema": attrs.get("schema"),
                 "route": attrs.get("route"), "scheme": attrs.get("scheme"), "grid": attrs.get("grid"),
-                "target": "the scheme's tendency (an emulator: mode = \"replace\")",
-                "steps_train": cut, "steps_held_out": n - cut,
-                "held_out_from_seconds": float(data["time_seconds"][cut]), "hidden": list(hidden),
+                "target": what, "splits": splits,
+                "steps_train": int(sum(s["steps_train"] for s in splits)),
+                "steps_held_out": int(sum(s["steps_held_out"] for s in splits)),
+                "held_out_from_seconds": splits[0]["held_out_from_seconds"], "hidden": list(hidden),
                 "activation": activation, "epochs": epochs, "batch": batch, "lr": lr, "seed": seed,
+                "holdout": holdout, "levels": levels, "margins": [float(m) for m in margins],
+                "kept_epoch": best[2] if keep_best and best[1] is not None else epochs,
                 "seconds": round(seconds, 2), "note": NOT_WRF_IDENTICAL, **scores}
     write_mlp_artefact(
         out, name=name or f"{attrs.get('scheme', 'column')}-mlp", inputs=data["inputs_spec"],
         outputs=outputs, layers=[(w, b) for w, b in layers], activation=activation,
         input_mean=in_mean, input_std=in_std, output_mean=out_mean, output_std=out_std,
-        input_min=x_train.min(axis=0), input_max=x_train.max(axis=0), output_limit=limit,
-        training=training)
+        input_min=lo, input_max=hi, output_limit=limit, training=training)
     return training
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("tap", help="the tap store (--nn mode = \"tap\")")
-    parser.add_argument("out", help="the artefact directory to write")
+    parser.add_argument("paths", nargs="+", metavar="TAP [TAP ...] OUT",
+                        help="the tap store(s) (--nn mode = \"tap\"), then the artefact directory to write")
+    parser.add_argument("--validate", action="append", default=[], metavar="TAP",
+                        help="a tap store held out whole (another cycle); repeat for several")
+    parser.add_argument("--inputs", default=None, help="comma-separated subset of the tap's input fields")
+    parser.add_argument("--levels", type=int, default=None,
+                        help="keep the lowest LEVELS levels of every 3-D input and output")
     parser.add_argument("--hidden", default="128,128", help="hidden layer widths (default 128,128)")
     parser.add_argument("--activation", default="tanh", choices=("tanh", "relu", "silu"))
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--holdout", type=float, default=0.2,
-                        help="the last fraction of recorded steps kept out of training (default 0.2)")
+    parser.add_argument("--holdout", type=float, default=None,
+                        help="the last fraction of each store's recorded steps kept out of training "
+                             "(default 0.2, or 0 with --validate)")
+    parser.add_argument("--margins", default="0,0.1,0.3",
+                        help="range margins at which to report held-out fallback (default 0,0.1,0.3)")
+    parser.add_argument("--keep-best", action="store_true",
+                        help="keep the epoch with the lowest held-out error, not the last")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--name", default=None)
     args = parser.parse_args(argv)
+    if len(args.paths) < 2:
+        parser.error("name at least one tap store and the artefact directory")
+    *taps, out = args.paths
     hidden = tuple(int(v) for v in args.hidden.split(",") if v)
-    result = train(args.tap, args.out, hidden=hidden, activation=args.activation, epochs=args.epochs,
-                   batch=args.batch, lr=args.lr, holdout=args.holdout, seed=args.seed, name=args.name)
-    print(json.dumps({k: result[k] for k in ("held_out_r2", "train_r2", "seconds")}, indent=1))
+    inputs = None if args.inputs is None else tuple(v for v in args.inputs.split(",") if v)
+    margins = tuple(float(v) for v in args.margins.split(",") if v)
+    result = train(taps, out, hidden=hidden, activation=args.activation, epochs=args.epochs,
+                   batch=args.batch, lr=args.lr, holdout=args.holdout, seed=args.seed, name=args.name,
+                   validate=args.validate, inputs=inputs, levels=args.levels, margins=margins,
+                   keep_best=args.keep_best)
+    print(json.dumps({k: result[k] for k in ("held_out_r2", "train_r2", "held_out", "seconds")}, indent=1))
     return 0
 
 

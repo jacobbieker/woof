@@ -215,7 +215,21 @@ residual model needs a reference target that the tap does not record.
 Samples are ordered by model time before the split, and a time recorded
 twice (a resumed run appends) keeps its last record.
 
-Its `training` table records the tap, the split, the hyper-parameters and
+Several taps train one model: `python -m woof.nn.train TAP [TAP ...]
+OUT` pools them (other cycles, seasons or meshes; their fields must
+agree). Each store is split on its own, as above. A store named with
+`--validate TAP` is held out whole, so the score is out of sample in
+weather as well as in time; the `--holdout` tail then defaults to 0.
+`--inputs a,b,...` keeps a subset of the tap's input fields and `--levels
+N` the lowest N levels of every 3-D input and output, so one broad tap
+serves several models. `--keep-best` keeps the epoch with the lowest
+held-out error. For each held-out store the report gives the R² per output
+and, for each `--margins` value (default `0,0.1,0.3`), the fraction of its
+columns outside the trained range widened by that margin: the share that
+`out_of_range = "fallback"` would leave to the scheme. It also names the
+input fields most often outside the range.
+
+Its `training` table records the taps, the splits, the hyper-parameters and
 the held-out R² per output. The trainer demonstrates the workflow and is
 not meant as a research trainer: anything that writes the same artefact
 can be used in its place.
