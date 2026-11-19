@@ -165,3 +165,17 @@ def test_a_visible_bin_moves_no2_and_not_o1d():
     lit = base["no2"] > 0
     ratio = got["no2"][lit] / base["no2"][lit]
     assert np.all(ratio > 1.0) and np.all(ratio < 1.1)
+
+
+def test_the_step_builds_the_factor_once_at_the_calls_valid_time(tmp_path):
+    from woof.core import chem_ftuv
+    path = _spectrum_file(tmp_path / "ssi.nc", uv=(1.0, 1.1, 1.2))
+    cfg = SimpleNamespace(solar_ssi_opt=1, solar_ssi_source=str(path), run_seconds=86400.0)
+    chem = SimpleNamespace(start_time=datetime(2024, 5, 10, 12))
+    ctx = SimpleNamespace(cfg=cfg, state=SimpleNamespace(chem=chem), clock=SimpleNamespace(curr_secs=0.0))
+    np.testing.assert_allclose(chem_ftuv._solar_spectrum_factor(ctx), 1.0, rtol=1e-12)
+    spectrum = chem.ftuv_solar_spectrum
+    ctx.clock.curr_secs = 86400.0                     # 2024-05-11 12 UTC: the 1.1 day
+    f = chem_ftuv._solar_spectrum_factor(ctx)
+    assert chem.ftuv_solar_spectrum is spectrum
+    assert f.shape == (17,) and f[4] == pytest.approx(1.1, rel=1e-12) and f[14] == pytest.approx(1.0)
