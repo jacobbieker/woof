@@ -1781,6 +1781,32 @@ PNG it writes carries an `experimental` stamp.
   member against the manifest before anything renders, and stamps the
   override on every panel.
 
+## EXPERIMENTAL WRFDA 3D-Var (`woof.da.var`, docs/dev/WRFDA-3DVAR-PLAN.md)
+
+- **Source**: WRFDA as distributed in WRF v4.7.1 (`var/da/`), public
+  domain under the WRF Public Domain Notice
+  (`licenses/LICENSE-WRF-public-domain.txt`). The following files transcribe
+  WRFDA routines statement by statement, in WRFDA's operation order, so the
+  oracle tier can agree with a serial WRFDA build word for word:
+  `woof/da/var/be_dat.py` (`da_setup_be_regional`,
+  `da_get_vertical_truncation`, `da_allocate_background_errors`,
+  `da_rescale_background_errors`), `woof/da/var/reference.py`
+  (`da_recursive_filter_1d(_adj)`, `da_calculate_rf_factors`,
+  `da_transform_through_rf(_adj)`, `da_transform_vvtovp(_adj)`,
+  `da_transform_vptox(_adj)`, `da_psichi_to_uv(_adj)`,
+  `da_transform_xtoxa(_adj)`, `da_pt_to_rho_lin/_adj`, `da_cv_to_vv`,
+  `da_vv_to_cv`), and `tools/wrfda_oracle/woof_dump.inc` (debug dumps
+  hooked into a copy of the WRFDA tree, never the pinned tree).
+- **Not used**: the CRTM 2.3.0 copy bundled in WRF (it carries GPL-headed
+  files) is never compiled, linked or vendored by woof.
+- **Oracle**: WRF v4.7.1 tarball, `./configure wrfda` option 32 (serial GNU,
+  `-fdefault-real-8`), tutorial case from `WRFDAV3.9-testdata.tar.gz`
+  (sha256 `c6467c17a0beb9c41b3660c0e6bcf5e6c671b002015daf576573ae18900ef9a0`);
+  `tests/data/wrfda471/manifest.json` records the `be.dat` hash and the
+  gate digests. No WRFDA data file is committed.
+- **Scope**: experimental; nothing here is on a forecast path
+  (`tests/test_var_import_graph.py`).
+
 ## Attribution defects in this repository's own history (2026-07-26)
 
 This register exists so a provenance claim is never re-derived from memory.
