@@ -209,3 +209,34 @@ def test_torch_column_model_runs_on_metal_through_the_bridge(tmp_path):
     y = model(cupy.asarray(x))
     assert getattr(type(y), "__woof_facade__", False)
     np.testing.assert_allclose(y.get(), NumpyColumnModel(model.manifest)(x), rtol=1e-4, atol=1e-9)
+
+
+def test_metal_float64_copies_keep_their_values():
+    cupy = _facade()
+    from woof.grad import bridge
+    values = np.array([1.0 / 3.0, -2.5e-300, 6.02e23], dtype=np.float64)
+    x = cupy.asarray(values)
+    t = bridge.to_torch(x, device="cpu", copy=True)
+    assert t.dtype == torch.float64
+    np.testing.assert_array_equal(t.numpy(), values)
+    back = bridge.from_torch(t * 2, x, copy=True)
+    assert getattr(type(back), "__woof_facade__", False) and back.dtype == np.float64
+    np.testing.assert_array_equal(back.get(), values * 2)
+
+
+def test_torch_column_model_takes_a_float64_metal_input(tmp_path):
+    cupy = _facade()
+    from woof.nn.manifest import FieldSpec, write_mlp_artefact
+    from woof.nn.models import NumpyColumnModel, load_column_model
+    rng = np.random.default_rng(1)
+    layers = [(rng.normal(0, 0.4, (2, 4)), rng.normal(0, 0.1, 2))]
+    m = write_mlp_artefact(
+        tmp_path / "m", name="bridge-f64", inputs=(FieldSpec("theta", "K", 4),),
+        outputs=(FieldSpec("dtheta", "K s-1", 2),), layers=layers, activation="tanh",
+        input_mean=np.full(4, 290.0), input_std=np.full(4, 5.0), output_mean=np.zeros(2),
+        output_std=np.full(2, 1e-4), input_min=np.full(4, 270.0), input_max=np.full(4, 310.0))
+    x = 290 + 5 * rng.standard_normal((4, 16))
+    model = load_column_model(m, backend="torch")
+    y = model(cupy.asarray(x))
+    np.testing.assert_allclose(y.get(), NumpyColumnModel(model.manifest)(x.astype(np.float32)),
+                               rtol=1e-4, atol=1e-9)

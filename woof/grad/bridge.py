@@ -9,8 +9,10 @@ woof array                to torch               back to woof
 CuPy (CUDA)               DLPack, zero-copy      DLPack, zero-copy
 facade (Metal, MLX)       DLPack to ``mps``,     one device copy
                           zero-copy              (``mx.from_dlpack`` copies)
-NumPy / host facade       ``from_numpy``,        ``.numpy()``, zero-copy
+NumPy                     ``from_numpy``,        ``.numpy()``, zero-copy
                           zero-copy (CPU)        for a CPU tensor
+host facade (CPU MLX)     ``from_numpy``,        one copy into the
+                          zero-copy (CPU)        facade (``copy=True``)
 ========================  =====================  ==========================
 
 Anything else (a CuPy array to a CPU or MPS tensor, a CPU tensor to CuPy,
@@ -23,7 +25,13 @@ for CuPy's current stream (a device-side event wait, no host sync), and
 :func:`from_torch` makes CuPy's current stream wait for torch's, so
 neither side reads a buffer the other is still writing.  The wait is for
 the streams current at the call: a tensor used later on another torch
-stream needs torch's own ``wait_stream``, as any torch tensor does.  :func:`woof_stream` instead runs the torch work on
+stream needs torch's own ``wait_stream``, as any torch tensor does.  The
+other direction is the caller's: after torch *used* a shared view (read
+it, not only wrote it), call :func:`release` before woof's next launch
+writes that buffer, so the write waits for torch's reads.  A tensor
+handed to CuPy by :func:`from_torch` is recorded on CuPy's stream, so
+torch's caching allocator does not reuse its memory while woof's queued
+work still reads it.  :func:`woof_stream` instead runs the torch work on
 CuPy's stream itself (no handoff needed).  Metal: MLX and torch-MPS have
 separate command queues and expose no cross-queue event, so the handoff is
 a full drain of the producer: ``mx.eval`` + ``mx.synchronize`` before a
@@ -34,12 +42,16 @@ words).
 Autograd.  woof's kernels write in place, and torch cannot see a CuPy or
 MLX write to a buffer it shares, so a shared view that autograd saved for
 backward could be overwritten under it and give a silently wrong
-gradient.  The bridge therefore never returns a zero-copy view with
-``requires_grad``: :func:`grad_leaf` gives an out-of-place copy that is a
-leaf of the graph, :func:`from_torch` refuses a tensor that requires grad
-(``.detach()`` it first, deliberately), and :func:`mark_written` bumps a
-shared view's version counter after woof writes its buffer, so a backward
-that saved it raises instead of using stale words.
+gradient.  The bridge cannot stop that by itself (a shared view can be
+used in a graph like any tensor); it gives the means and the rule:
+:func:`grad_leaf` gives an out-of-place copy that is a leaf of the graph
+(what a gradient computation should start from), :func:`from_torch`
+refuses a tensor that requires grad (``.detach()`` it first,
+deliberately), and the rule is that after woof writes a buffer a torch
+tensor shares -- a :func:`to_torch` view, or a :func:`from_torch` result
+-- the caller calls :func:`mark_written` on that tensor, which bumps its
+version counter so a backward that saved it raises instead of using
+stale words.
 
 Nothing here imports torch, CuPy or MLX until a function needs them; no
 forecast path imports this module.
@@ -178,14 +190,15 @@ def to_torch(array: Any, *, device: str | None = None, copy: bool = False):
         if np.dtype(array.dtype) == np.float64 and target.type == "mps":
             raise BridgeRefused("torch-MPS has no float64; pass device='cpu', copy=True for a binary64 "
                                 "CPU tensor")
+        if target.type != "mps":
+            if not copy:
+                raise BridgeRefused(f"a Metal (facade) array is shared with torch on mps only, not {target}; "
+                                    "pass copy=True to copy it")
+            # .get() decodes the facade's storage (float64 is held as its bit words)
+            return torch.from_numpy(np.ascontiguousarray(array.get())).to(target)
         values = array._values()
         _mlx_drain(values)
-        if target.type == "mps":
-            return torch.from_dlpack(values)
-        if not copy:
-            raise BridgeRefused(f"a Metal (facade) array is shared with torch on mps only, not {target}; "
-                                "pass copy=True to copy it")
-        return torch.from_numpy(np.array(values, copy=True)).to(target)
+        return torch.from_dlpack(values)
     host = host_view(array) if kind == "host" else array
     if target is not None and target.type != "cpu":
         if not copy:
@@ -227,19 +240,22 @@ def from_torch(tensor: Any, like: Any, *, copy: bool = False):
         with cupy.cuda.Device(like.device.id):
             with torch.cuda.device(tensor.device.index):
                 _cupy_waits_for_torch(torch)
+                tensor.record_stream(_cupy_stream_for_torch(torch))
                 return cupy.from_dlpack(tensor)
     if kind == "facade":
         import mlx.core as mx
         from woof.backend.facade._ops import _wrap
         if tensor.device.type == "mps":
             _mps_drain(torch)
-            values = mx.from_dlpack(tensor)
-        elif copy:
-            values = mx.array(tensor.cpu().numpy())
-        else:
+            values = mx.from_dlpack(tensor, copy=True)
+            mx.eval(values)               # the copy is made now, not after torch reuses the buffer
+            return _wrap(values, np.dtype(str(tensor.dtype).removeprefix("torch.")), fresh=True)
+        if not copy:
             raise BridgeRefused(f"a {tensor.device} tensor cannot become a Metal array without a copy; "
                                 "pass copy=True")
-        return _wrap(values, np.dtype(str(tensor.dtype).removeprefix("torch.")), fresh=True)
+        import cupy
+        # the facade's own constructor encodes the storage (float64 as bit words)
+        return cupy.asarray(tensor.detach().cpu().numpy())
     if tensor.device.type != "cpu":
         if not copy:
             raise BridgeRefused(f"a {tensor.device} tensor cannot become a host array without a copy; "
@@ -259,6 +275,7 @@ def grad_leaf(array: Any, *, device: str | None = None, dtype=None):
     torch = _torch()
     tensor = to_torch(array, device=device, copy=True) if device is not None else to_torch(array)
     tensor = tensor.detach().clone()
+    release(array)                    # woof's next write waits for the clone
     if dtype is not None:
         tensor = tensor.to(getattr(torch, np.dtype(dtype).name))
     return tensor.requires_grad_(True)
@@ -288,11 +305,14 @@ def shares_memory(array: Any, tensor: Any) -> bool:
         torch = _torch()
         probe = tensor.reshape(-1)[:1]
         saved = probe.clone()
-        probe.add_(1)
+        _mps_drain(torch)
+        before = np.asarray(array._values()).reshape(-1)[:1].copy()
+        sentinel = 7 if float(before[0]) != 7 else 11
+        probe.fill_(sentinel)
         _mps_drain(torch)
         seen = float(np.asarray(array._values()).reshape(-1)[0])
         probe.copy_(saved)
         _mps_drain(torch)
-        return seen == float(saved.cpu()[0]) + 1
+        return seen == sentinel
     host = host_view(array) if kind == "host" else array
     return tensor.device.type == "cpu" and tensor.data_ptr() == host.ctypes.data

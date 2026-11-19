@@ -73,6 +73,10 @@ def to_torch(array: Any):
         return torch.from_numpy(np.ascontiguousarray(host_view(array)))
     if kind == "facade":
         from woof.grad import bridge as grad_bridge
+        if np.dtype(array.dtype) == np.float64:
+            array = array.astype(np.float32)          # in MLX: torch-MPS has no float64
+        if not torch.backends.mps.is_available():
+            return grad_bridge.to_torch(array, device="cpu", copy=True)
         return grad_bridge.to_torch(array)
     return torch.from_dlpack(array)
 

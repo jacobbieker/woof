@@ -217,33 +217,43 @@ it, and torch stays an optional extra (`recast-woof[nn-torch]`).
 |---|---|---|
 | CuPy (CUDA) | DLPack, no copy | DLPack, no copy |
 | facade (Metal, MLX) | DLPack to `mps`, no copy | one device copy |
-| NumPy or host facade | `from_numpy` on `cpu`, no copy | `.numpy()`, no copy |
+| NumPy | `from_numpy` on `cpu`, no copy | `.numpy()`, no copy |
+| host facade (CPU MLX) | `from_numpy` on `cpu`, no copy | one copy into the facade |
 
 - **Ordering, CUDA.** `to_torch` makes torch's current stream wait for
   CuPy's current stream with a device-side event, and `from_torch` does
   the reverse, so neither side reads a buffer the other is still writing.
   `woof_stream()` runs torch's work on CuPy's stream instead. A tensor
   used later on yet another torch stream needs torch's own `wait_stream`.
+  After torch has *used* a shared view (read it, not only written it),
+  call `release` before woof's next launch writes that buffer.
+  `from_torch` records the tensor on CuPy's stream, so torch's caching
+  allocator does not reuse the memory while woof's queued work reads it.
 - **Ordering, Metal.** MLX and torch-MPS use separate command queues with
   no shared event. `to_torch` evaluates the array and drains the facade
   first, and `from_torch` (or `release`) drains torch's queue. Without the
   drain, MLX read stale words of a recycled buffer in a probe.
 - **Metal is zero-copy in one direction.** torch-MPS wraps the MLX buffer
   (MLX 0.32, torch 2.10): a write through the tensor is read back by woof,
-  for whole arrays and for views. MLX copies a torch buffer it imports, so
-  the way back costs one device copy.
+  for whole arrays and for views. On the way back the bridge asks MLX for
+  an explicit copy (`mx.from_dlpack(copy=True)`, evaluated at once), so
+  it costs one device copy. float64 copies through the host keep their
+  values: the facade stores float64 as bit words, and the bridge decodes
+  them.
 - **Refusals.** Anything else raises `BridgeRefused` unless `copy=True`
   names the copy: a CuPy array as a CPU or MPS tensor, a tensor on another
   device or card, a facade array as a CPU tensor, a non-contiguous host
   array. float64 cannot go to MPS (torch-MPS has none; use the CPU).
   dtypes are float32, float64, int32 and int64.
 - **Autograd.** woof's kernels write in place, and torch cannot see a write
-  made by CuPy or MLX. So the bridge never returns a shared view that
-  requires grad. `grad_leaf` returns an out-of-place copy as a graph leaf,
-  and `from_torch` refuses a tensor that requires grad (detach it on
-  purpose). After woof writes a buffer that a shared view aliases,
-  `mark_written` bumps the view's version counter, so a backward that
-  saved it raises an error instead of using the new words.
+  made by CuPy or MLX. The bridge cannot prevent a shared view from
+  entering a graph, so it gives the tools and a rule. `grad_leaf` returns
+  an out-of-place copy as a graph leaf: start gradient work from it.
+  `from_torch` refuses a tensor that requires grad (detach it on purpose).
+  The rule: after woof writes a buffer that a torch tensor shares (a
+  `to_torch` view or a `from_torch` result), call `mark_written` on that
+  tensor. It bumps the version counter, so a backward that saved the
+  tensor raises an error instead of using the new words.
 
 `woof.nn`'s PyTorch runner uses the same bridge, so a TorchScript or
 `torch.export` column model also runs on Metal (`backend = "torch"`,
