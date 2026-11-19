@@ -570,7 +570,18 @@ def where_(cond, x=None, y=None):
     return _wrap(mx.where(c, xv, yv), result_dtype)
 
 
-def clip(a, a_min, a_max, out=None):
+def clip(a, a_min=None, a_max=None, out=None, *, min=None, max=None):
+    # min=/max= are NumPy 2.1's np.clip and ndarray.clip spelling
+    if min is not None:
+        if a_min is not None:
+            raise TypeError("clip: pass a_min or min, not both")
+        a_min = min
+    if max is not None:
+        if a_max is not None:
+            raise TypeError("clip: pass a_max or max, not both")
+        a_max = max
+    if a_min is None and a_max is None:
+        raise ValueError("One of max or min must be given")
     r = a
     if a_min is not None:
         r = UFUNCS["maximum"](r, a_min)
@@ -763,9 +774,7 @@ ndarray.imag = property(lambda self: from_host(np.ascontiguousarray(self.get().i
 
 METHODS = {name: fn for name, fn in REDUCTIONS.items()}
 METHODS.update({
-    # ndarray.clip spells its bounds min=/max= (NumPy, CuPy); the module
-    # function keeps a_min/a_max
-    "clip": lambda a, min=None, max=None, out=None: clip(a, min, max, out),
+    "clip": clip,
     "argmax": argmax, "argmin": argmin,
     "nonzero": lambda a: where_(a),
     "round": lambda a, decimals=0: UFUNCS["round"](a) if decimals == 0 else

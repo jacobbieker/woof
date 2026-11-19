@@ -104,3 +104,9 @@ def test_clip_keywords_and_a_tuple_inside_a_key_index_like_numpy(cp):
     a[:, (0, -1), :] = 5.0
     h[:, (0, -1), :] = 5.0
     assert cp.asnumpy(a).tobytes() == h.tobytes()
+    mask = (True, False, True)
+    assert cp.asnumpy(a[:, mask]).tobytes() == h[:, mask].tobytes()
+    assert cp.asnumpy(a[:, list(mask)]).tobytes() == h[:, list(mask)].tobytes()
+    assert cp.asnumpy(cp.clip(a, min=0.0)).tobytes() == np.clip(h, 0.0, None).tobytes()
+    with pytest.raises(ValueError):
+        a.clip()
