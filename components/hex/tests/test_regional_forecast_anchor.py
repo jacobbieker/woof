@@ -96,6 +96,10 @@ SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
         "recorded": "cb6477ef2fd02ad551e9b6c8af0724c94fc4d90bdc712fff1378d218662f5d04",
         "current": "7888ef788fb1b7e9600b798c30c5d3f939fbf272a1585bc0ece62bc01ee51d82",
         "why": (
+            "2026-11-19 current-source refresh: host-side merges only "
+            "(step-path outputs as scratch #614, the opt-in w_damping #420 "
+            "and adaptive readmission); no CUDA source string changed; card "
+            "evidence in those PRs. "
             "convection ruling, 2026-08-26: _v841_physics_cadences reports "
             "convection: None when no cumulus scheme is selected instead of "
             "calling float() on it.  Every configuration these four receipts "
@@ -147,6 +151,11 @@ SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
         "recorded": "3aa30ec3c3a11c1152a67d1fcbc8b2d470fd8ac2446ec8f7ec34906873421e88",
         "current": "48d06d7f268681bb84ab963e6fc36a0b768adb8b2c47d0d728e286bccc469977",
         "why": (
+            "2026-11-19 current-source refresh: host-side merges only "
+            "(scratch outputs #614, the LBC tendency cache #640, the opt-in "
+            "inflow perturbation #428, the edge-value hoist dispatch #530); "
+            "no CUDA source string in this file changed; card evidence in "
+            "those PRs. "
             "Integration 2026-10-04 adds explicit rank constructor dispatch "
             "and preserves the ordinary constructor. The twelve arithmetic "
             "source files remain exact e6 bytes. The current source set passed "
@@ -374,6 +383,9 @@ SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
         "recorded": "b9f1dbdbbd123066f1fec2ebebbb664da7b4d5b62bce06a15f42dc96193a4ab5",
         "current": "6d3e794e11060101b1ca9130709c74fbe8b0ed2a14659e9a39f08be4838a29fa",
         "why": (
+            "2026-11-19 current-source refresh: step-path outputs allocated "
+            "as scratch (#614, 04917cddf), host allocation only, no CUDA "
+            "source string changed; card evidence in #614. "
             "0.2.0 package rename, 2026-08-28: the token mpas_port became "
             "hexcore. This file is byte-identical to the copy these receipts "
             "ran once that one identifier is substituted -- measured file "
