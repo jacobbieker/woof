@@ -1245,8 +1245,9 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
         same for every stage and step of one LBC interval.  With
         WOOF_HEX_LBC_TEND_CACHE_MB > 0 (256 by default) it is kept, within that many
         MiB, until ``start`` or ``advance`` (a conus3km rank's three fields need
-        about 590 MB, so the default holds some of them).  0: every call expands.  Every consumer reads it
-        (speczone kernels, graph staging copies).
+        about 590 MB, so the default holds some of them).  0: every call
+        expands.  Every consumer reads it (speczone kernels, graph staging
+        copies).
         """
         compact = super().tendency(name)
         if self._support is None or self._tend_cache_bytes <= 0:
