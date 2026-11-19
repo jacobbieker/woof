@@ -34,11 +34,18 @@ Not transcribed, and refused rather than approximated:
 * ``slucm_distributed_drag`` (``distributed_aerodynamics_option``): its
   ``Z0_URB2D``/``LF_URB2D_S`` inputs are gridded morphology the engine does
   not carry (DESIGN.md section 2, named follow-up).
-* the NUDAPT arm, ``mh_urb > 0`` (``module_sf_urban.F`` 649-788): gridded
-  morphology again.  :func:`init_state` refuses a state that carries it.
 
-Two WRF reads of undefined memory are given defined behaviour, identical in
-the kernel and in the CPU reference ``woof/verify/urban_ucm_ref.py``:
+The NUDAPT gridded-morphology arm, ``mh_urb > 0`` (``module_sf_urban.F``
+649-788), IS transcribed (``ucm_nudapt`` in the kernel): it runs when
+``urban_param_file`` gives the domain WPS's ``URB_PARAM``
+(:mod:`woof.core.urban_param`) and the column keeps ``MH_URB2D > 0`` after
+``urban_var_init``.  Without the file no column carries morphology, the
+kernels are launched with ``nudapt = 0`` and nothing of the arm executes.
+The ``wrf_480`` generation has no transcription of it and refuses it.
+
+Three WRF reads of undefined memory are given defined behaviour, identical
+in the kernel and in the CPU reference ``woof/verify/urban_ucm_ref.py``
+(the third only in the kernel and its compiled twin):
 
 * ``ETR`` (``module_sf_urban.F:571``) is read by ``SMFLX``/``SRT`` on the
   green-roof dew arm (:1161-1168) before ``TRANSP`` ever wrote it in that
@@ -47,6 +54,14 @@ the kernel and in the CPU reference ``woof/verify/urban_ucm_ref.py``:
 * ``tloc`` is set only when ``AHOPTION == 1`` (:623-627) but read by the
   ``IRI_SCHEME == 1`` arm (:874-883).  Defined by the same formula whenever
   either arm needs it.
+* the NUDAPT arm picks its frontal-area sector from ``ATAN2(U10,V10)``
+  (:709), but ``U10``/``V10`` are ``urban``'s INTENT(OUT) arguments, written
+  only at its end (:1640-1641); ``module_sf_noahdrv.F`` passes its locals
+  ``U10_URB``/``V10_URB``, which still hold the PREVIOUS urban column's 10 m
+  wind (undefined on the first column of a tile).  Defined as the column's
+  own first-level wind direction ``ATAN2(U1,V1)``: the direction its own
+  U10 then takes (``U10 = U1*PSIX10/PSIX``, :1640).  The NUDAPT oracle
+  stores U1/V1 into U10/V10 before each call to match.
 """
 from __future__ import annotations
 
@@ -68,6 +83,7 @@ __all__ = [
     "after_lsm",
     "after_surface_diagnostics",
     "run_columns",
+    "UCM_MORPH_PLANES",
     "UrbanCanopyError",
 ]
 
@@ -110,6 +126,14 @@ _SWITCH_DOMAIN = MappingProxyType({
     "alhoption": (0, 1), "imp_scheme": (1, 2), "iri_scheme": (0, 1),
     "groption": (0, 1),
 })
+
+#: The NUDAPT arm's per-column inputs (kernel MP_* order): the
+#: urban_var_init-filtered morphology, the urban fraction, and read_param's
+#: BUILDING_WIDTH(1)/STREET_WIDTH(1) for the column's UTYPE.
+UCM_MORPH_PLANES = ("mh_urb2d", "stdh_urb2d", "lf_urb2d1", "lf_urb2d2",
+                    "lf_urb2d3", "lf_urb2d4", "lp_urb2d", "hgt_urb2d",
+                    "lb_urb2d", "frc_urb2d", "building_width1",
+                    "street_width1")
 
 #: Kernel state planes (SP_* order): Registry name -> layers (0 = 2-D).
 UCM_STATE_PLANES = (
@@ -201,10 +225,14 @@ class UcmParams:
     switches: np.ndarray     # table switches, n_utype, water-balance generation
     frc_urb: np.ndarray      # (n_utype,) FRC_URB_TBL, for init defaulting
     generation: str = "wrf_471"
+    #: (2, n_utype) BUILDING_WIDTH(1), STREET_WIDTH(1) per UTYPE (the NUDAPT
+    #: arm's fallback widths, :694-698); None when the source lacks them.
+    widths: np.ndarray | None = None
 
 
 def _pack(table_rows: np.ndarray, glob: Mapping[str, object],
-          switches: Mapping[str, int], frc_urb, *, generation="wrf_471") -> UcmParams:
+          switches: Mapping[str, int], frc_urb, *, generation="wrf_471",
+          widths=None) -> UcmParams:
     table = np.ascontiguousarray(np.asarray(table_rows, dtype=np.float32))
     columns = UCM480_TABLE_COLUMNS if generation == "wrf_480" else UCM_TABLE_COLUMNS
     if table.ndim != 2 or table.shape[1] != len(columns):
@@ -249,9 +277,14 @@ def _pack(table_rows: np.ndarray, glob: Mapping[str, object],
                 raise UrbanCanopyError("Invalid tree geometry: 2*rt must be <= W and ht+rt <= H (VF_TREE_ANALYTICAL)")
         ints.extend((tree, tt))
     ints.append(1)  # Corrected water balance follows the generation controls.
+    if widths is not None:
+        widths = np.ascontiguousarray(np.asarray(widths, dtype=np.float32))
+        if widths.shape != (2, table.shape[0]):
+            raise ValueError("UCM widths must be (2, n_utype) float32")
     return UcmParams(table=table, globals_=globals_,
                      switches=np.asarray(ints, dtype=np.int32),
-                     frc_urb=np.asarray(frc_urb, dtype=np.float32), generation=generation)
+                     frc_urb=np.asarray(frc_urb, dtype=np.float32), generation=generation,
+                     widths=widths)
 
 
 def _field(obj, *names):
@@ -288,7 +321,13 @@ def pack_params(params) -> UcmParams:
     frc = np.asarray(_field(params, "FRC_URB_TBL", "frc_urb_tbl"), np.float32)
     if generation == "wrf_480":
         sw.update(treeoption=_field(params, "TREEOPTION"), ttscheme=_field(params, "TTscheme"))
-    return _pack(rows, glob, sw, frc, generation=generation)
+    try:
+        widths = np.stack([
+            np.asarray(_field(params, "BUILDING_WIDTH_TBL"), np.float32)[0],
+            np.asarray(_field(params, "STREET_WIDTH_TBL"), np.float32)[0]])
+    except KeyError:
+        widths = None
+    return _pack(rows, glob, sw, frc, generation=generation, widths=widths)
 
 
 _PACKED: dict = {}
@@ -336,7 +375,11 @@ def pack_params_from_rows(table: Mapping[str, np.ndarray],
                     axis=1)
     glob = {name: switches[name] for name, _ in UCM_GLOBAL_LAYOUT}
     sw = {name: switches[name] for name in UCM_SWITCHES}
-    return _pack(rows, glob, sw, table["frc_urb"])
+    widths = None
+    if "building_width1" in table and "street_width1" in table:
+        widths = np.stack([np.asarray(table["building_width1"], np.float32),
+                           np.asarray(table["street_width1"], np.float32)])
+    return _pack(rows, glob, sw, table["frc_urb"], widths=widths)
 
 
 _DEVICE_PARAMS: dict = {}
@@ -400,23 +443,17 @@ def init_state(state, params, *, tlayer0, tsurface0, tdeep0, smois,
     """Option-1 hook after infra's ``urban_var_init``.
 
     ``woof.core.urban_state.urban_var_init_host`` already transcribes every
-    option-1 line of ``urban_var_init`` (module_sf_urban.F:2840-2889) and is
-    graded against the Fortran routine; the ``cm*/ch*_sfcdif`` coefficients
-    this module adds to the spec start at WRF's Registry zero there too.  So
-    the hook only refuses what this port cannot run: a column carrying
-    gridded morphology (``MH_URB2D > 0``) would take the NUDAPT arm
-    (:649-788), which is not transcribed, and run on table morphology while
-    claiming gridded.
+    option-1 line of ``urban_var_init`` (module_sf_urban.F:2840-2889),
+    including the gridded-morphology keep/zero rule, and is graded against
+    the Fortran routine; the ``cm*/ch*_sfcdif`` coefficients this module
+    adds to the spec start at WRF's Registry zero there too.  The hook
+    decides, once, whether any column carries gridded morphology
+    (``MH_URB2D > 0``, the NUDAPT arm's condition, :649) and, if so, builds
+    the arm's per-column inputs (:func:`_morph_table`).  The ``wrf_480``
+    generation has no NUDAPT transcription and refuses such a column.
     """
-    import cupy as cp
-
-    del params, tlayer0, tsurface0, tdeep0, smois, restart
-    mh = _get(state, "mh_urb2d")
-    if bool(cp.any(cp.asarray(mh) > 0)):
-        raise UrbanCanopyError(
-            "MH_URB2D > 0 selects module_sf_urban.F's NUDAPT gridded-"
-            "morphology arm (:649-788), which this port does not transcribe; "
-            "the column would run on table morphology while claiming gridded")
+    del tlayer0, tsurface0, tdeep0, smois, restart
+    _morph_table(state, params)
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +461,64 @@ def init_state(state, params, *, tlayer0, tsurface0, tdeep0, smois,
 # ---------------------------------------------------------------------------
 
 _PTR_CACHE: dict = {}
+_MORPH: dict = {}
+
+
+def _width_planes(params, utype):
+    """read_param's BUILDING_WIDTH(1)/STREET_WIDTH(1) gathered per column
+    by UTYPE (0 off urban columns), as device float32 planes."""
+    import cupy as cp
+
+    p = _packed(params)
+    if p.widths is None:
+        raise UrbanCanopyError(
+            "the urban table carries no BUILDING_WIDTH/STREET_WIDTH rows, "
+            "which the NUDAPT arm falls back to when LB_URB2D <= LP_URB2D "
+            "(module_sf_urban.F:694-698)")
+    utype = cp.asarray(utype)
+    index = cp.clip(utype - 1, 0, p.widths.shape[1] - 1)
+    out = []
+    for row in p.widths:
+        table = cp.asarray(row)
+        out.append(cp.ascontiguousarray(
+            cp.where(utype > 0, table[index], cp.float32(0.0)).astype(cp.float32)))
+    return out
+
+
+def _morph_table(state, params):
+    """``(nudapt, pointer table)`` for the UCM launches of ``state``.
+
+    Built once per state: ``nudapt`` is 1 when any column carries
+    ``MH_URB2D > 0``.  When 0 the kernels never read the table, and the
+    returned one is a placeholder of valid pointers.
+    """
+    import cupy as cp
+
+    held = _MORPH.get(id(state))
+    if held is not None and held[0] is state:
+        return held[1], held[2]
+    mh = _get(state, "mh_urb2d")
+    nudapt = bool(cp.any(cp.asarray(mh) > 0))
+    arrays = ()
+    if nudapt:
+        if getattr(_packed(params), "generation", "wrf_471") == "wrf_480":
+            raise UrbanCanopyError(_ERRORS480[2])
+        shape = tuple(mh.shape)
+        lf = _checked(_get(state, "lf_urb2d"), (4, *shape), "lf_urb2d")
+        widths = _width_planes(params, _get(state, "utype_urb2d"))
+        arrays = (
+            [_checked(mh, shape, "mh_urb2d"),
+             _checked(_get(state, "stdh_urb2d"), shape, "stdh_urb2d")]
+            + [lf[k] for k in range(4)]
+            + [_checked(_get(state, n), shape, n)
+               for n in ("lp_urb2d", "hgt_urb2d", "lb_urb2d", "frc_urb2d")]
+            + widths)
+        table = cp.asarray(np.asarray([int(a.data.ptr) for a in arrays],
+                                      dtype=np.uint64))
+    else:
+        table = cp.zeros(len(UCM_MORPH_PLANES), dtype=cp.uint64)
+    _MORPH[id(state)] = (state, int(nudapt), table, tuple(arrays))
+    return int(nudapt), table
 
 
 def _pointer_table(arrays):
@@ -566,6 +661,11 @@ def after_lsm(state, params, *, lsm: int, fields: dict, atmosphere: Mapping,
     err = _status_word(state)
     blocks = (ny * nx + _TPB - 1) // _TPB
     jmonth = np.int32(_jmonth(solar))
+    if new:
+        morph_args = ()
+    else:
+        nudapt, morph = _morph_table(state, params)
+        morph_args = (morph, np.int32(nudapt))
     if int(lsm) == 2:
         rural = _field(state, "rural")
         rp = _pointer_table([_checked(_get(rural, n), (ny, nx), f"rural {n}")
@@ -573,7 +673,7 @@ def after_lsm(state, params, *, lsm: int, fields: dict, atmosphere: Mapping,
         kern = get_kernel(unit, "ucm480_noah_after_lsm" if new else "ucm_noah_after_lsm")
         kern((blocks,), (_TPB,),
              (urban, utype, frc, u1, v1, hrang, *solar_args, rp, fp, sp, tab, glob, isw,
-              np.float32(dt), jmonth, err, np.int32(ny), np.int32(nx)))
+              *morph_args, np.float32(dt), jmonth, err, np.int32(ny), np.int32(nx)))
     elif int(lsm) == 4:
         t3d1 = cp.ascontiguousarray(atmosphere["temperature"][0])
         qv1 = cp.ascontiguousarray(atmosphere["qv"][0])
@@ -584,7 +684,7 @@ def after_lsm(state, params, *, lsm: int, fields: dict, atmosphere: Mapping,
         kern = get_kernel(unit, "ucm480_noahmp_after_lsm" if new else "ucm_noahmp_after_lsm")
         kern((blocks,), (_TPB,),
              (urban, utype, frc, u1, v1, t3d1, qv1, p8w1, p8w2, dz1, hrang, *solar_args,
-              fp, sp, tab, glob, isw, np.float32(dt), jmonth, err,
+              fp, sp, tab, glob, isw, *morph_args, np.float32(dt), jmonth, err,
               np.int32(ny), np.int32(nx)))
     else:
         raise ValueError(
@@ -635,13 +735,34 @@ UCM_COLUMN_OUTPUTS = ("ts", "qs", "sh", "lh", "lh_kinematic", "sw", "alb",
                       "th2", "q2", "ust", "znt")
 
 
+def column_morph_planes(params: UcmParams, inputs: Mapping[str, np.ndarray],
+                        morph: Mapping[str, np.ndarray]) -> list[np.ndarray]:
+    """Host (n,) float32 planes in :data:`UCM_MORPH_PLANES` order.
+
+    ``morph`` maps ``mh_urb stdh_urb lf_urb1..4 lp_urb hgt_urb lb_urb
+    frc_urb`` (the oracle's column names) to (n,) arrays; the widths are
+    gathered from ``params.widths`` by ``inputs["utype"]``.
+    """
+    if params.widths is None:
+        raise ValueError("params carry no BUILDING_WIDTH/STREET_WIDTH rows")
+    utype = np.asarray(inputs["utype"], np.int64)
+    names = ("mh_urb", "stdh_urb", "lf_urb1", "lf_urb2", "lf_urb3",
+             "lf_urb4", "lp_urb", "hgt_urb", "lb_urb", "frc_urb")
+    planes = [np.ascontiguousarray(morph[n], dtype=np.float32) for n in names]
+    for row in params.widths:
+        planes.append(np.ascontiguousarray(row[utype - 1], dtype=np.float32))
+    return planes
+
+
 def run_columns(params: UcmParams, inputs: Mapping[str, np.ndarray],
-                state: Mapping[str, np.ndarray], *, generation=None):
+                state: Mapping[str, np.ndarray], *, generation=None,
+                morph: Mapping[str, np.ndarray] | None = None):
     """Run ``urban`` over n independent columns on the device.
 
     ``state`` maps every :data:`UCM_STATE_PLANES` name to a host array of
     shape ``(n,)`` or ``(4, n)``; returns ``(outputs, state_after, codes)``
-    as host arrays.
+    as host arrays.  ``morph`` (see :func:`column_morph_planes`) turns on
+    the NUDAPT arm for the columns with ``mh_urb > 0``.
     """
     import cupy as cp
 
@@ -670,8 +791,14 @@ def run_columns(params: UcmParams, inputs: Mapping[str, np.ndarray],
     ip = cp.asarray(np.asarray([a.data.ptr for a in dev_in], dtype=np.uint64))
     op = cp.asarray(np.asarray([a.data.ptr for a in dev_out], dtype=np.uint64))
     sp = cp.asarray(np.asarray([a.data.ptr for a in dev_state], dtype=np.uint64))
+    if morph is not None:
+        dev_morph = [cp.asarray(a) for a in column_morph_planes(params, inputs, morph)]
+        mp = cp.asarray(np.asarray([a.data.ptr for a in dev_morph], dtype=np.uint64))
+    else:
+        mp = cp.zeros(len(UCM_MORPH_PLANES), dtype=cp.uint64)
     kern(((n + _TPB - 1) // _TPB,), (_TPB,),
-         (ip, op, sp, tab, glob, isw, codes, np.int32(n)))
+         (ip, op, sp, tab, glob, isw, codes, mp, np.int32(morph is not None),
+          np.int32(n)))
     outputs = {name: a.get() for name, a in zip(UCM_COLUMN_OUTPUTS, dev_out)}
     after = {name: a.get() for (name, _), a in zip(UCM_STATE_PLANES, dev_state)}
     return outputs, after, codes.get()
