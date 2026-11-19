@@ -763,7 +763,9 @@ ndarray.imag = property(lambda self: from_host(np.ascontiguousarray(self.get().i
 
 METHODS = {name: fn for name, fn in REDUCTIONS.items()}
 METHODS.update({
-    "clip": clip,
+    # ndarray.clip spells its bounds min=/max= (NumPy, CuPy); the module
+    # function keeps a_min/a_max
+    "clip": lambda a, min=None, max=None, out=None: clip(a, min, max, out),
     "argmax": argmax, "argmin": argmin,
     "nonzero": lambda a: where_(a),
     "round": lambda a, decimals=0: UFUNCS["round"](a) if decimals == 0 else

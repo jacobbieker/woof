@@ -86,3 +86,21 @@ def test_a_memory_hook_subclass_sees_each_device_allocation(cp):
     with hook:
         cp.zeros(1000, dtype=cp.float32)
     assert hook.sizes and hook.sizes[-1] >= 4000
+
+
+def test_clip_keywords_and_a_tuple_inside_a_key_index_like_numpy(cp):
+    """ndarray.clip(min=) and a[:, :, (0, -1)] (tests/test_lateral_bc.py).
+
+    ndarray.clip spells its bounds min=/max=, which the module function's
+    a_min/a_max signature refused; a tuple inside a key is a sequence index,
+    which the gather path handed to mx unconverted.
+    """
+    h = np.arange(-12, 12, dtype=np.float32).reshape(2, 3, 4)
+    a = cp.asarray(h)
+    assert cp.asnumpy(a.clip(min=0.0)).tobytes() == h.clip(min=0.0).tobytes()
+    assert cp.asnumpy(a.clip(max=1.0)).tobytes() == h.clip(max=1.0).tobytes()
+    assert cp.asnumpy(a.clip(-2.0, 3.0)).tobytes() == h.clip(-2.0, 3.0).tobytes()
+    assert cp.asnumpy(a[:, :, (0, -1)]).tobytes() == h[:, :, (0, -1)].tobytes()
+    a[:, (0, -1), :] = 5.0
+    h[:, (0, -1), :] = 5.0
+    assert cp.asnumpy(a).tobytes() == h.tobytes()

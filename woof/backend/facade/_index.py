@@ -70,7 +70,8 @@ def _advanced_key(key):
                 out.extend(mx.array(i.astype(np.int64)) for i in np.nonzero(k))
                 continue
             out.append(mx.array(k.astype(np.int64)))
-        elif isinstance(k, list):
+        elif isinstance(k, (list, tuple)):
+            # a sequence inside a key indexes like a list: a[:, (0, -1)]
             out.append(mx.array(np.asarray(k, dtype=np.int64)))
         else:
             out.append(k)
