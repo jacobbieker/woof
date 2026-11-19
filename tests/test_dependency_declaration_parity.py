@@ -150,6 +150,7 @@ _PROVIDERS: dict[str, tuple[str, ...]] = {
     # selection menu -- see _OPTIONAL_BY_DESIGN.
     "woof_wrfchem_pnnl": (),
     "mpas_column_physics_cases": (),
+    "wrf_hydro_synthetic": (),
     "cmpphys": (),
     "woof_hook": (),
     "woof_hook2": (),
@@ -394,6 +395,11 @@ _OPTIONAL_BY_DESIGN: dict[str, str] = {
     "mpas_column_physics_cases": (
         "tools/hex_option_matrix.py puts tests/ on sys.path to read the selection menu in "
         "tests/mpas_column_physics_cases.py; tests/ does not ship, and the option matrix is a "
+        "checkout instrument no wheel-user path reaches."
+    ),
+    "wrf_hydro_synthetic": (
+        "tools/bench_hex_hydro_exchange.py puts tests/ on sys.path to build the synthetic WRF-Hydro "
+        "domain of tests/wrf_hydro_synthetic.py; tests/ does not ship, and the exchange benchmark is a "
         "checkout instrument no wheel-user path reaches."
     ),
     "cmpphys": (

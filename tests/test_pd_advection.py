@@ -85,8 +85,6 @@ def test_nested_pd_lbc_is_folded_once_before_advection(monkeypatch):
     with a non-unit map factor.  Retaining it in the advection accumulator
     produces ``B + msft*B`` in addition to the time-t scalar.
     """
-    from types import SimpleNamespace
-
     import woof.core.moist as moist
     import woof.ingest.lateral_bc as lateral_bc
 
@@ -128,8 +126,17 @@ def test_nested_pd_lbc_is_folded_once_before_advection(monkeypatch):
                         install_boundary)
     monkeypatch.setattr(moist, "launch_pd_fluxes",
                         lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(moist, "launch_pd_renorm_apply",
-                        lambda *_args, **_kwargs: None)
+    def renorm_apply(*_args, tend, zero_first=False, **_kwargs):
+        # The launcher clears ``tend`` itself before accumulating
+        # (zero_first); the advective part is zero here.
+        if zero_first:
+            tend[...] = 0
+
+    monkeypatch.setattr(moist, "launch_pd_renorm_apply", renorm_apply)
+    # The specified/nested ring exclusion's one-launch frame kernel takes
+    # device arrays; declining it runs the same element writes as slices.
+    import woof.core.ring_frame as ring_frame
+    monkeypatch.setattr(ring_frame, "zero_frame", lambda *_args: False)
 
     # The fused update kernel is lru_cached, so with cp mocked to numpy
     # this test was green only when an earlier same-process test had
@@ -174,9 +181,13 @@ def test_nested_pd_lbc_is_folded_once_before_advection(monkeypatch):
     monkeypatch.setattr(moist, "_update_scalar_kernel", numpy_update_kernel)
 
     state = FakeState()
-    cfg = SimpleNamespace(
-        nested=True, specified=False, open_x=False, open_y=False,
-        moist_adv_opt=1, dx=1.0, dy=1.0, spec_zone=1)
+    # The real RunConfig's defaults (no tracers, no MAD-WRF, no cumulus, ...),
+    # so a field the stage starts reading cannot break the stub.
+    from woof.config import RunConfig
+    cfg = RunConfig(nx=4, ny=3, nz=1, dx=1.0, dy=1.0, ztop=1000.0, dt=2.0,
+                    run_seconds=2.0, nested=True, moist_adv_opt=1,
+                    spec_zone=1)
+    assert not (cfg.specified or cfg.open_x or cfg.open_y)
     dt = 2.0
     moist.advance_scalars_stage(
         state, cfg, np.zeros((1, 3, 5), dtype=np.float32),
