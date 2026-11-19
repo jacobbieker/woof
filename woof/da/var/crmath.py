@@ -100,7 +100,11 @@ def log10(x: float) -> float:
 
 
 def pow_(x: float, y: float) -> float:
-    """Fortran ``x ** y`` with a real exponent, for ``x > 0``."""
+    """Fortran ``x ** y`` with a real exponent, for ``x >= 0``."""
+    if x == 0.0:
+        # A report at the pole reaches ``tan(0) ** cone``; Fortran gives 0
+        # and WRFDA then drops the report as outside the domain.
+        return 1.0 if y == 0.0 else (0.0 if y > 0.0 else math.inf)
     if not x > 0.0:
         raise ValueError(f"pow of {x!r}")
     if y == 0.0:

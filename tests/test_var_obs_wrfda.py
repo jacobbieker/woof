@@ -172,6 +172,15 @@ def test_lambert_centre_maps_to_the_known_point():
     assert u == pytest.approx(10.0, rel=1e-12) and abs(v) < 1e-6
 
 
+def test_pole_maps_to_the_pole_point():
+    # Fortran 0.0**cone is 0; the report then falls outside the domain
+    assert crmath.pow_(0.0, 0.7) == 0.0 and crmath.pow_(0.0, 0.0) == 1.0
+    proj = ow.LambertWRFDA(**PROJ)
+    x, y = proj.llxy(90.0, 0.0)
+    assert x == pytest.approx(proj.polei + proj.knowni - 1.0, abs=1e-9)
+    assert y == pytest.approx(proj.polej + proj.knownj - 1.0, abs=1e-9)
+
+
 def test_synthetic_reports(synthetic):
     obs = synthetic
     assert obs.counts()["synop"] == 1 and obs.ntotal["synop"] == 1  # S2 out of window, S3 outside all
