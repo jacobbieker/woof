@@ -1797,9 +1797,17 @@ PNG it writes carries an `experimental` stamp.
   `da_transform_xtoxa(_adj)`, `da_pt_to_rho_lin/_adj`, `da_cv_to_vv`,
   `da_vv_to_cv`), `woof/da/var/kernels/var_u.cu` (the same transforms as
   device kernels, in the reference's order), `woof/da/var/control.py`
-  (`da_dot`/`da_dot_cv` serial order as the `wrfda-serial` reduction), and
-  `tools/wrfda_oracle/woof_dump.inc` (debug dumps hooked into a copy of the
-  WRFDA tree, never the pinned tree).
+  (`da_dot`/`da_dot_cv` serial order as the `wrfda-serial` reduction),
+  `woof/da/var/obs_wrfda.py` (`da_read_obs_ascii`,
+  `da_obs_proc_station`, `da_ffdduv`, `da_llxy`, `da_llxy_wrf`,
+  `da_llxy_lc`, `da_map_set`/`da_set_lc`/`da_lc_cone`, `da_togrid`,
+  `da_get_julian_time`, `da_tp_to_qs`, `da_get_q_error`, `f_qv_from_rh`,
+  `da_msl2geo1`, the transfer part of `da_fill_obs_structures`,
+  `da_store_obs_grid_info`), and `tools/wrfda_oracle/woof_dump.inc` (debug
+  dumps hooked into a copy of the WRFDA tree, never the pinned tree).
+  `woof/da/var/crmath.py` is woof's own: correctly rounded `sin`, `cos`,
+  `tan`, `exp`, `log10` and `pow`, evaluated in Python's `decimal`, with no
+  libm code in it.
 - **Not used**: the CRTM 2.3.0 copy bundled in WRF (it carries GPL-headed
   files) is never compiled, linked or vendored by woof.
 - **Oracle**: WRF v4.7.1 tarball, `./configure wrfda` option 32 (serial GNU,

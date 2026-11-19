@@ -940,7 +940,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   for word. `DeviceU` runs `U` and `U^T` as CUDA or Metal kernels: the
   binary64 oracle tier gives the reference's words, and the binary32
   production tier gives the same words on CUDA and Metal under strict
-  numerics. There is no analysis command yet, and default runs are not
+  numerics. It also reads OBSPROC's `obs_gts` ASCII the way WRFDA does:
+  time window, domain check, wind rotation, `q` from `rh`, and the
+  per-type error rules. On the tutorial case it keeps the same
+  8,913 of the file's 9,061 reports as WRFDA, in the same order, with the
+  same grid indices and errors. There is no analysis command yet, and default runs are not
   changed.
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
