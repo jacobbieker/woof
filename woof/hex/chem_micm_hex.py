@@ -28,6 +28,8 @@ profile; the solar zenith angle from the same solar geometry (cos SZA unclamped)
 factor for the date.  Each layer's rate is the mean of its two edges'.  The calculation runs in binary64 numpy
 on the host, in batches of columns: about 15 s per thousand cells of ~90 TUV-x layers on an M3 Max, once per
 chemistry interval, so large meshes want a long ``chemistry_interval`` (a device port is future work).
+With the run's ``solar_ssi_opt = 1`` (woof.spacewx.solar_spectrum) the day's solar spectrum scales TUV-x's
+extraterrestrial flux per wavelength bin, at the interval's start (``HexMicmChemistry.solar_factor``).
 
 Every grid point is its own solve, so (unlike CheMPAS-A, which hands MICM all of a rank's points as one
 state with one shared step size) a column's chemistry does not depend on the decomposition.  Keys follow
@@ -205,7 +207,8 @@ def cos_sza(lat_deg, lon_deg, day_of_year, hour_utc):
 class HexMicmChemistry:
     """MICM on hex grid points (see module docstring)."""
 
-    def __init__(self, path, raw, digest, *, nlev, ncells, offset, start_time, dt, lat_deg=None, lon_deg=None):
+    def __init__(self, path, raw, digest, *, nlev, ncells, offset, start_time, dt, lat_deg=None, lon_deg=None,
+                 solar=None):
         import cupy as cp
         self.path, self.raw, self.digest = Path(path), raw, digest
         self.mech, self.rows, self.settings = load(path, raw)
@@ -225,6 +228,10 @@ class HexMicmChemistry:
         self.provider_receipt = None
         self.last_status = None
         self._tuvx = None
+        #: solar_ssi_opt (woof.spacewx.solar_spectrum): the run's config (solar_ssi_opt, solar_ssi_source,
+        #: run_seconds) when the day's spectrum scales TUV-x's extraterrestrial flux, else None.
+        self.solar = solar if solar is not None and int(getattr(solar, "solar_ssi_opt", 0) or 0) else None
+        self._solar_spectrum = None
 
     def set_geometry(self, lat_deg, lon_deg):
         import cupy as cp
@@ -284,13 +291,27 @@ class HexMicmChemistry:
         sza = np.degrees(np.arccos(np.clip(host(cosz).reshape(nc), -1.0, 1.0)))
         esd = chem_tuvx.earth_sun_distance(when.year, when.month, when.day, hour)
         core = self.tuvx_core()
+        etf_factor = self.solar_factor(when)
         out = {name: np.empty((n, nc)) for name in core.reactions}
         for start in range(0, nc, TUVX_BATCH):
             part = slice(start, min(nc, start + TUVX_BATCH))
-            rates = core.run(*(a[part] for a in inputs), sza[part], esd)
+            rates = core.run(*(a[part] for a in inputs), sza[part], esd, etf_factor)
             for name, edge in rates.items():
                 out[name][:, part] = (0.5 * (edge[:, :n] + edge[:, 1:n + 1])).T
         return out
+
+    def solar_factor(self, when):
+        """solar_ssi_opt = 1: the day's spectrum on each TUV-x wavelength bin at ``when`` (float64), else
+        None.  Built from the configuration on the first call of a run or a resume."""
+        if self.solar is None:
+            return None
+        if self._solar_spectrum is None:
+            from woof.spacewx.solar_spectrum import PhotolysisSpectrum
+            edge = self.tuvx_core().grid.edge
+            bins = tuple(zip(edge[:-1].tolist(), edge[1:].tolist()))
+            self._solar_spectrum = PhotolysisSpectrum.for_run(self.solar, self.start_time, bins, "tuvx")
+            print("[spacewx ssi] " + json.dumps(self._solar_spectrum.receipt(), sort_keys=True), flush=True)
+        return self._solar_spectrum.factor((when - self.start_time).total_seconds())
 
     def columns(self, prepared, phase):
         return {"temperature": prepared.t_p, "pressure": prepared.pres_p, "rho_dry": prepared.rho_dry,
@@ -430,7 +451,7 @@ def build_column_backend(row, config, *, constructor, prep_geometry, kernel_cach
         made = HexMicmChemistry(
             path, raw, digest, nlev=constructor.n_levels, ncells=constructor.n_columns,
             offset=len(species_row.species) - len(declare(path, raw)), start_time=seam._start_time,
-            dt=float(seam._cfg.dt))
+            dt=float(seam._cfg.dt), solar=seam._cfg)
         made.species_row = species_row
         return made
 

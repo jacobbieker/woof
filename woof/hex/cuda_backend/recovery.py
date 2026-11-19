@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 
+from woof.backend.scratch import scratch_like as _scratch_like
+
 from ..cuda_fp32 import CUDA_FTZ_HELPERS
 from .containers import DeviceAtmosphere, terrain_slot_tables
 from .runtime import KernelCache, KernelTiming, launch_checked, launch_timed
@@ -313,16 +315,19 @@ def recover_state(
     # Allocation ORDER through the default (include_pressure=True) path is
     # unchanged: the frozen phase-1 longwave seam is sensitive to device pool
     # contents, so the six pressure arrays keep their place ahead of the two
-    # velocity arrays.
+    # velocity arrays.  The outputs are scratch (no fill on Metal; plain
+    # cupy.empty on CUDA, so the CUDA pool layout is unchanged).  Every kernel
+    # below writes each element, so no reader sees stale contents; poison runs
+    # (WOOF_SCRATCH_POISON=ff/a5) are byte-identical.
     if include_pressure:
-        theta = cupy.empty_like(state.rho)
-        exner = cupy.empty_like(state.rho)
-        pressure = cupy.empty_like(state.rho)
-        density_p = cupy.empty_like(state.rho)
-        rtheta_p = cupy.empty_like(state.rho)
-        pressure_p = cupy.empty_like(state.rho)
-    normal = cupy.empty_like(state.rho_u)
-    vertical_velocity = cupy.empty_like(state.rho_w)
+        theta = _scratch_like(cupy, state.rho)
+        exner = _scratch_like(cupy, state.rho)
+        pressure = _scratch_like(cupy, state.rho)
+        density_p = _scratch_like(cupy, state.rho)
+        rtheta_p = _scratch_like(cupy, state.rho)
+        pressure_p = _scratch_like(cupy, state.rho)
+    normal = _scratch_like(cupy, state.rho_u)
+    vertical_velocity = _scratch_like(cupy, state.rho_w)
     block = (256,)
     scalar = np.float32 if dtype == np.dtype(np.float32) else np.float64
     if timing_repeats < 0:

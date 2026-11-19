@@ -5016,6 +5016,17 @@ def registry_setting_names(registry: dict) -> set[str]:
     return names
 
 
+def label_names_setting(label: str, name: str) -> bool:
+    """Whether ``label`` names the setting ``name`` as a whole word.
+
+    A substring test reads 'Set shcu_physics=0.' as naming cu_physics too;
+    a setting name is bounded by characters that cannot continue one.
+    """
+
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
+                     label) is not None
+
+
 def _check_remedy_label_describes_its_edit(
         rule: dict, registry: dict, option_id: str) -> None:
     """A remedy's words and a remedy's edit must be the same remedy.
@@ -5037,7 +5048,8 @@ def _check_remedy_label_describes_its_edit(
     settings = rule.get("remedy_settings") or {}
     if not label or not settings:
         return
-    missing = sorted(name for name in settings if name not in label)
+    missing = sorted(name for name in settings
+                     if not label_names_setting(label, name))
     if missing:
         raise RuntimeError(
             f"microphysics/{option_id}: the remedy label does not name "
@@ -5045,7 +5057,7 @@ def _check_remedy_label_describes_its_edit(
             "reader offered this repair cannot tell what it changes.")
     extra = sorted(
         name for name in registry_setting_names(registry)
-        if name in label and name not in settings)
+        if label_names_setting(label, name) and name not in settings)
     if extra:
         raise RuntimeError(
             f"microphysics/{option_id}: the remedy label names "
@@ -11193,12 +11205,6 @@ def build(registry: dict) -> dict:
     # LAST of all: every template and every route declaration above is
     # final, so the easiest path to each option is the one this computes.
     _phase2c_recompute_reachability(registry)
-    for option_id, old_line, new_line in (("tke-1.5-order", 1424, 1423),
-                                          ("smagorinsky-3d", 1518, 1517)):
-        row = registry["components"]["turbulence"]["options"][option_id]
-        row["warnings"] = [text.replace(f"woof/core/dycore.py:{old_line}",
-                                       f"woof/core/dycore.py:{new_line}")
-                           for text in row.get("warnings", [])]
     registry["template_aliases"] = dict(TEMPLATE_ID_ALIASES)
     for option in registry["components"]["cumulus"]["options"].values():
         constraints = option.get("constraints", {})
