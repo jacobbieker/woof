@@ -274,8 +274,19 @@ To be agreed with the 3D-Var owner. `woof/da` is not edited.
 - `tl(traj, dx0, steps) -> [dx_n]` and `ad(traj, dy_by_step) -> dx0`.
   The adjoint takes forcing at any step, as FGAT and 4D-Var need, and
   returns `dx0`. With LBCs on, it also returns `dlbc`.
-- Inner products and norms are binary64, with the deterministic
-  reduction order of WRFDA-3DVAR-PLAN 4.7.
+- Arrays are CuPy (or facade) device arrays, taken without a host copy,
+  so 4D-Var's device-resident `U`/`U^T` (`woof/da/var`) feeds them
+  directly.
+- `DryState` stays a named tuple in woof's `(k, j, i)` layout. The
+  control-variable transforms (psi/chi and so on) and the mapping from
+  `xa` to the model state stay in `woof/da`.
+- Moist fields are an optional passthrough: `None` (or zeros) while the
+  model is dry, so the signature does not change at P3b.
+- Inner products and norms are binary64. They take a `dot` hook whose
+  default has the signature of `woof.da.var.control.dot(x, y,
+  reduction=...)` (`"wrfda-serial"`, `"fixed-tree"`; WRFDA-3DVAR-PLAN
+  4.7).
+- Agreed with the 3D-Var owner on 2026-11-19.
 
 ## 7. Effort, against the plan's 8-12 w
 
