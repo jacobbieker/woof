@@ -1121,8 +1121,7 @@ def metal_tile_columns(cores: int, ncol: int, block: int, *,
     fits ``cap_bytes``, and never below one block (a ``block_bytes`` of
     zero or less sets no cap).
 
-    The shared Metal rule of YSU, MRF and the column cumulus schemes (EEPS
-    keeps its occupancy rule: the wide tile measured slower there).
+    The shared Metal rule of YSU, MRF, EEPS and the column cumulus schemes.
     CUDA sizes those tiles to the card's resident capacity because the
     workspace is charged per column in flight; on Metal that rule leaves
     the cores unsaturated and costs a full serial column time per launch,
@@ -1149,7 +1148,7 @@ METAL_COLUMN_TILE_BLOCKS_PER_CORE = YSU_TILE_BLOCKS_PER_CORE_METAL
 
 def metal_column_tile_columns(cores: int, ncol: int, block: int, *,
                               block_bytes: int | None = None) -> int:
-    """:func:`metal_tile_columns` for MRF and the column cumulus schemes: :data:`METAL_COLUMN_TILE_BLOCKS_PER_CORE` (or
+    """:func:`metal_tile_columns` for MRF, EEPS and the column cumulus schemes: :data:`METAL_COLUMN_TILE_BLOCKS_PER_CORE` (or
     ``WOOF_METAL_COLUMN_TILE_BLOCKS``) 32-column units per core, rounded
     down to whole ``block``-column blocks (at least one per core), under
     :data:`YSU_TILE_BYTES_CAP_METAL`."""

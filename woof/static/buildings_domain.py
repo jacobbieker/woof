@@ -20,7 +20,7 @@ Two ways to get building heights, chosen by what the caller gives:
   nDSM never become obstacles on this route: only footprints are burned.
 
 Nothing here knows a place: the domain comes from the namelist and the
-footprints from files the caller downloaded.  Every contributing source's
+footprints from files the caller names or from the Overture fetch.  Every contributing source's
 licence and attribution go into the product (``BUILDING_SOURCES``).
 """
 from __future__ import annotations
@@ -200,7 +200,9 @@ def build_domain_buildings(grid, output, *, footprints: Sequence = (),
                            storey_height_m: float = 3.0,
                            default_height_m: float | None = None,
                            min_area_m2: float = 200.0,
-                           grid_note: str = "", urlopen=None, index=None
+                           grid_note: str = "", urlopen=None, index=None,
+                           overture: str | None = None,
+                           overture_filesystem=None
                            ) -> tuple[Path, dict]:
     """Write the buildings product of one WRF domain (``grid``, a
     :class:`woof.static.projection.ProjectedGrid`) to ``output``.
@@ -211,10 +213,15 @@ def build_domain_buildings(grid, output, *, footprints: Sequence = (),
     over :data:`MAX_LATTICE_PIXELS` refuses and asks for a coarser one.  Returns ``(path, receipt)``; the receipt
     (also stored in the product) names the box, the GEM-15 windows, the
     footprint counts and where each building's height came from.
+    ``overture`` (a release id or ``"latest"``) first fetches the Overture
+    Maps buildings under the domain plus a halo into ``cache_root`` (see
+    :mod:`woof.static.overture`) and adds them as an ``overture`` file;
+    its provenance sidecar goes into the receipt.
     """
-    if not gem15 and not footprints:
-        raise ValueError("nothing to build from: give footprint files, or "
-                         "leave GEM-15 on")
+    footprints = list(footprints)
+    if not gem15 and not footprints and overture is None:
+        raise ValueError("nothing to build from: give footprint files "
+                         "(--footprints, --overture), or leave GEM-15 on")
     for name, value in (("storey_height_m", storey_height_m),
                         ("default_height_m", default_height_m)):
         if value is not None and not (math.isfinite(value) and value > 0):
@@ -232,11 +239,20 @@ def build_domain_buildings(grid, output, *, footprints: Sequence = (),
                      "grid": dict(nx=model.nx, ny=model.ny, dx=model.dx,
                                   dy=model.dy),
                      "footprint_resolution_m": float(resolution_m)}
+    from woof.static.highres_production import default_highres_cache_root
+    root = Path(cache_root) if cache_root else default_highres_cache_root()
+    if overture is not None:
+        from woof.static.overture import fetch_overture_buildings
+        # Four cells plus ~100 m (0.001 degree) of halo.
+        fetch_box = domain_bbox(grid, halo_cells=4.0).padded(0.001)
+        got, sidecar = fetch_overture_buildings(
+            fetch_box, root / "overture", release=overture, offline=offline,
+            filesystem=overture_filesystem)
+        footprints.append((got, "overture"))
+        receipt["overture"] = sidecar
     windows: list[HeightRaster] = []
     if gem15:
         from woof.static import gem15 as g15
-        from woof.static.highres_production import default_highres_cache_root
-        root = Path(cache_root) if cache_root else default_highres_cache_root()
         fetched, gem = {}, {}
         for source_id in ("gem15-dsm", "gem15-dtm"):
             files, manifest = g15.fetch_gem15_windows(
@@ -305,15 +321,23 @@ def _arguments(parser) -> None:
                              "its source, one of "
                              + ", ".join(sorted(BUILDING_SOURCES))
                              + " (default user); repeat for more files")
+    parser.add_argument("--overture", nargs="?", const="latest", default=None,
+                        metavar="RELEASE",
+                        help="fetch the Overture Maps buildings under the "
+                             "domain plus a halo (anonymous S3, ODbL 1.0) "
+                             "into --cache; RELEASE is a release id or "
+                             "latest (the default when given bare); "
+                             "combines with --footprints")
     parser.add_argument("--no-gem15", action="store_true",
                         help="do not read GEM-15: heights then come from "
                              "the footprints' own attributes or storeys "
                              "only")
     parser.add_argument("--cache", type=Path, default=None, metavar="DIR",
-                        help="GEM-15 cache root (default: the high-"
-                             "resolution terrain cache)")
+                        help="GEM-15 and Overture cache root (default: "
+                             "the high-resolution terrain cache)")
     parser.add_argument("--offline", action="store_true",
-                        help="read GEM-15 from the cache only")
+                        help="read GEM-15 and Overture from the cache "
+                             "only")
     parser.add_argument("--resolution", type=float, default=None,
                         metavar="M",
                         help="footprint lattice spacing in metres "
@@ -352,9 +376,11 @@ def _run(args) -> int:
         print(f"woof buildings: --domain {number} is not in "
               f"{args.namelist} ({len(grids)} domains)", file=sys.stderr)
         return 2
-    if args.no_gem15 and (args.offline or args.cache is not None):
+    if (args.no_gem15 and args.overture is None
+            and (args.offline or args.cache is not None)):
         print("woof buildings: --cache and --offline only apply to GEM-15 "
-              "and are ignored with --no-gem15", file=sys.stderr)
+              "and Overture, and are ignored with --no-gem15 alone",
+              file=sys.stderr)
     try:
         footprints = [parse_footprint_spec(s) for s in args.footprints]
         for path, _ in footprints:
@@ -366,7 +392,7 @@ def _run(args) -> int:
             offline=args.offline, resolution_m=args.resolution,
             storey_height_m=args.storey_height,
             default_height_m=args.default_height,
-            min_area_m2=args.min_area,
+            min_area_m2=args.min_area, overture=args.overture,
             grid_note=f"{args.namelist.name} d{number:02d}")
     except (ValueError, KeyError, OSError, HighresRefusal) as exc:
         # PreparationRefusal (a ValueError) carries its own remedy line.
