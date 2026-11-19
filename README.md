@@ -829,7 +829,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   chemistry it also scales Fast-TUV's extraterrestrial flux per wavelength
   bin: solar maximum against minimum moves J(O1D) by about 0.2 % and J(NO2)
   and J(HCHO) by about 0.1 % in the troposphere. Hex's generic column seam
-  takes both, bit for bit the WRF route's.
+  takes both, bit for bit the WRF route's, and hex's MICM chemistry with
+  TUV-x photolysis takes the same factor on TUV-x's 156 bins (120-735 nm).
   `woof spacewx ionosphere` computes an IRI-type climatological ionosphere on
   the GPU on a global grid: foF2, hmF2, foE, F1 and vertical TEC, from the
   CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
