@@ -185,10 +185,13 @@ class ClearSkyOperator:
         arrays = [profiles.level_pressure_hpa, profiles.pressure_hpa, profiles.temperature_k,
                   profiles.water_vapour_gkg, profiles.ozone_ppmv, np.ascontiguousarray(profiles.surface_array()),
                   np.ascontiguousarray(geo)]
-        status = self._lib.woof_crtm_clear(
-            ctypes.c_int(self.sensors.index(sensor) + 1), ctypes.c_int(n), ctypes.c_int(nlay),
-            *[_pointer(a) for a in arrays], _pointer(ymd), ctypes.c_int(1 if jacobian else 0),
-            *[_pointer(a) for a in (bt, kt, kq, ko, ks)])
+        with _LOCK:
+            if _OPEN is not self:
+                raise CrtmError("this CRTM operator is closed")
+            status = self._lib.woof_crtm_clear(
+                ctypes.c_int(self.sensors.index(sensor) + 1), ctypes.c_int(n), ctypes.c_int(nlay),
+                *[_pointer(a) for a in arrays], _pointer(ymd), ctypes.c_int(1 if jacobian else 0),
+                *[_pointer(a) for a in (bt, kt, kq, ko, ks)])
         if status != 0:
             raise CrtmError(f"CRTM {'K-matrix' if jacobian else 'forward'} call for {sensor} failed with status {status}")
         result = Simulation(sensor=sensor, channels=available[pick], brightness_temperature=bt[:, pick])

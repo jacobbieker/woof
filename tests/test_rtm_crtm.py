@@ -46,6 +46,16 @@ def test_wrf_state_columns_run_top_first_with_wrf_temperature_and_units():
     np.testing.assert_allclose(prof.wind_direction_deg, [216.869898, 0.0, 90.0], atol=1e-5)
 
 
+def test_wrf_state_moist_theta_and_psfc_check():
+    state, t = _wrf_state()
+    moist = dict(state, T=(state["T"] + 300.0) * (1 + (461.6 / 287.04) * state["QVAPOR"]) - 300.0)
+    prof = profiles_from_wrf_state(moist, use_theta_m=True)
+    np.testing.assert_allclose(prof.temperature_k, t[:, ::-1], rtol=1e-12)
+    low = dict(state, PSFC=state["PSFC"] * 0.5)
+    with pytest.raises(ValueError, match="PSFC"):
+        profiles_from_wrf_state(low)
+
+
 def test_wrf_state_refuses_missing_fields_and_bad_columns():
     state, _ = _wrf_state()
     with pytest.raises(KeyError, match="SNOWC"):

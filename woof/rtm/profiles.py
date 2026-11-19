@@ -129,7 +129,7 @@ def _interfaces(pressure_hpa, top_hpa, surface_hpa):
                            np.asarray(surface_hpa, dtype=float).reshape(-1, 1)], axis=1)
 
 
-def profiles_from_wrf_state(state, *, ozone_ppmv=None) -> Profiles:
+def profiles_from_wrf_state(state, *, ozone_ppmv=None, use_theta_m: bool = False) -> Profiles:
     """Columns from WRF-named fields, each ``(n, nz)`` bottom first (3-D) or ``(n,)``.
 
     ``state`` maps ``T`` (perturbation potential temperature, K), ``P`` and
@@ -137,6 +137,14 @@ def profiles_from_wrf_state(state, *, ozone_ppmv=None) -> Profiles:
     ``(n,)``), ``TSK`` (K), ``U10``/``V10`` (m/s), ``LANDMASK``, ``XICE``,
     ``SNOWC`` (fractions) and ``HGT`` (m).  ``ozone_ppmv`` overrides the
     standard ozone, ``(n, nz)`` bottom first.
+
+    ``use_theta_m`` says ``T + 300`` is WRF's moist potential temperature
+    ``theta_m = theta * (1 + (Rv/Rd) * qv)`` (``use_theta_m = 1``, the WRF 4.x
+    namelist default) rather than dry theta; then ``theta = (T + 300) / (1 +
+    (Rv/Rd) * QVAPOR)`` with ``Rv/Rd = 461.6 / 287.04``.  woof's own state
+    carries dry theta by default (``use_theta_m = 0`` in its config), so the
+    default here is False; set it when the state came from a moist-theta run.
+    Raises ``ValueError`` where ``PSFC`` is not above the lowest mass-level pressure.
     """
 
     missing = [k for k in ("T", "P", "PB", "QVAPOR", "PSFC", "P_TOP", "TSK", "U10", "V10",
@@ -148,15 +156,20 @@ def profiles_from_wrf_state(state, *, ozone_ppmv=None) -> Profiles:
         raise ValueError(f"P must be (n, nz), got {p.shape}")
     n = p.shape[0]
     theta = np.asarray(state["T"], dtype=float) + 300.0
+    if use_theta_m:
+        theta = theta / (1.0 + (461.6 / 287.04) * np.asarray(state["QVAPOR"], dtype=float))
     t = theta * (p / 1.0e5) ** _KAPPA
     q = np.maximum(np.asarray(state["QVAPOR"], dtype=float), 0.0) * 1000.0
     p_hpa = p[:, ::-1] / 100.0
     top = np.broadcast_to(np.asarray(state["P_TOP"], dtype=float).reshape(-1), (n,)) / 100.0
     surface = np.asarray(state["PSFC"], dtype=float).reshape(n) / 100.0
+    bad = np.flatnonzero(surface <= p_hpa[:, -1])
+    if bad.size:
+        raise ValueError(f"PSFC must exceed the lowest mass-level pressure; columns {bad.tolist()} do not")
     o3 = (standard_ozone_ppmv(p_hpa) if ozone_ppmv is None
           else np.asarray(ozone_ppmv, dtype=float)[:, ::-1])
     speed, direction = _wind(state["U10"], state["V10"])
-    return Profiles(level_pressure_hpa=_interfaces(p_hpa, top, np.maximum(surface, p_hpa[:, -1] + 0.01)),
+    return Profiles(level_pressure_hpa=_interfaces(p_hpa, top, surface),
                     pressure_hpa=p_hpa, temperature_k=t[:, ::-1], water_vapour_gkg=q[:, ::-1], ozone_ppmv=o3,
                     skin_temperature_k=np.asarray(state["TSK"], dtype=float).reshape(n),
                     wind_speed_ms=speed.reshape(n), wind_direction_deg=direction.reshape(n),

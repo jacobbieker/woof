@@ -68,9 +68,21 @@ contains
       end if
       if (comma == 0) then
         names(n) = adjustl(ids(start:))
+        if (len_trim(names(n)) == 0) then
+          woof_crtm_init = -1
+          return
+        end if
         exit
       end if
+      if (comma == 1) then
+        woof_crtm_init = -1
+        return
+      end if
       names(n) = adjustl(ids(start:start + comma - 2))
+      if (len_trim(names(n)) == 0) then
+        woof_crtm_init = -1
+        return
+      end if
       start = start + comma
     end do
     allocate(chinfo(n))
@@ -78,6 +90,7 @@ contains
                     Load_CloudCoeff=.false., Load_AerosolCoeff=.false., Quiet=.true.)
     woof_crtm_init = err
     if (err /= SUCCESS) then
+      err = CRTM_Destroy(chinfo)
       deallocate(chinfo)
       return
     end if
@@ -127,6 +140,7 @@ contains
     call CRTM_Atmosphere_Create(atm, nlay, 2, 0, 0)
     if (any(.not. CRTM_Atmosphere_Associated(atm))) then
       woof_crtm_clear = -2
+      call CRTM_Atmosphere_Destroy(atm)
       return
     end if
     do m = 1, nprof
@@ -166,7 +180,7 @@ contains
       err = CRTM_K_Matrix(atm, sfc_c, rts_k, geo_c, chinfo(sensor:sensor), atm_k, sfc_k, rts)
     end if
     woof_crtm_clear = err
-    if (err /= SUCCESS) return
+    if (err == SUCCESS) then
     do m = 1, nprof
       do l = 1, nchan
         bt(l + (m - 1) * nchan) = rts(l, m)%Brightness_Temperature
@@ -181,8 +195,9 @@ contains
         end if
       end do
     end do
+    end if
     call CRTM_Atmosphere_Destroy(atm)
-    if (want_k /= 0) call CRTM_Atmosphere_Destroy(atm_k)
+    if (allocated(atm_k)) call CRTM_Atmosphere_Destroy(atm_k)
   end function
 
 end module woof_crtm_shim
