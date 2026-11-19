@@ -418,8 +418,11 @@ and the gradient is
     ignored when the body calls a Metal kernel, while `vjp` works. woof's
     in-place launcher is its own primitive (`launch.cpp`), so the wrapper
     either calls the adjoint through that primitive inside a `vjp` rule or
-    implements `vjp` on a C++ primitive. torch-MPS cannot share MLX buffers
-    without a copy; PyTorch on a Mac is for host-side training only.
+    implements `vjp` on a C++ primitive. (Measured in P1.1, MLX 0.32 and
+    torch 2.10: `torch.from_dlpack` of an MLX array is zero-copy onto
+    `mps`, so torch-MPS reads and writes MLX buffers directly; the way
+    back, `mx.from_dlpack`, copies. PyTorch on a Mac is therefore usable
+    on the device, not only for host-side training.)
   - `torch.compile`/Triton add nothing for woof's own kernels (they are
     already hand-written CUDA); they matter only for the NN components.
 - **Recommendation.** Use wrappers for the column scheme(s) and the NN
@@ -844,6 +847,45 @@ backends; adjoint kernel at most 3x the forward kernel's time; identity
 tests unchanged. If the Metal wrapper cannot run the adjoint through
 woof's in-place primitive, the Metal leg uses out-of-place copies and the
 gate records the overhead.
+
+**Status (2026-11-19).** P1.1 and P1.2 as PyTorch code, P1.3 kit; G1
+measured, its cost leg not met.
+
+- *Bridge* (`woof/grad/bridge.py`). CUDA: DLPack both ways, zero-copy,
+  with device-side stream waits. Metal: zero-copy to torch-MPS, one
+  explicit device copy back. Any other exchange is refused unless
+  `copy=True` names the copy (`tests/test_grad_bridge.py`).
+- *Kessler* (`woof/grad/kessler.py`). P1.2 was built as a torch module
+  that re-expresses the WRF 4.6.1 scheme. It replaces the planned
+  hand-written TL/AD kernels: torch's autograd supplies both.
+  - Forward agreement with woof's kernel on the 104-column oracle
+    fixture, float32, CUDA and Metal alike: theta within 1 ULP, qv
+    within 21 ULP, qc and qr within 7.5e-9 kg/kg absolute, RAINNCV
+    within 10 ULP. In float64 it matches the kernel's NumPy mirror to
+    6e-14.
+  - Derivatives are those of the branch taken. A q of 0 has zero
+    derivative, and the split count `nfall` is held fixed.
+- *G1*.
+  - Dot product: float64 7.4e-16 (CPU and CUDA); float32 1.1e-7 on CUDA
+    and 4.1e-7 on MPS. Met.
+  - gradcheck: 96 of 104 fixture columns pass. The 8 that fail are the
+    `autoconv_threshold` regime, whose qc sits exactly on the
+    autoconversion kink.
+  - TL convergence: 0.998 to 1.000 across dt 5 to 300 s.
+  - The TL agrees with central differences of woof's own kernel to a
+    median 3e-4 relative error. Columns that cross a switch disagree,
+    as they must.
+  - Identity tests unchanged: the default path imports neither torch
+    nor woof.grad.
+  - Cost on CUDA (A6000, shared and 90-100 % busy with other jobs;
+    40000 columns x 50 levels, dt 60 s): the kernel takes 13-15 ms.
+    Eager torch's backward is 7.7-8.1x the kernel. With
+    `kessler_compiled` (`torch.compile`, Inductor), it is 4.1-4.8x.
+    The 3x gate is not met. Hand-written adjoint kernels, the original
+    P1.2, remain the way to meet it.
+  - Cost on Metal: not yet measured. The forward and dot-product legs
+    pass on MPS. Measure with `python tools/grad_kessler_g1.py --skip
+    forward,dot,gradcheck,fd_kernel` on the Metal backend.
 
 ### P2. NN column physics, inference only, opt-in (5-6.5 w; parallel with P1)
 
