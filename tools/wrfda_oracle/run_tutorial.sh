@@ -5,15 +5,26 @@
 #                 copy made by apply_dump_patch.sh is WRFV4.7.1-dump)
 #   data/         the unpacked WRFDAV3.9-testdata tarball
 # usage: run_tutorial.sh NAME [extra wrfvar10 settings, e.g. test_transforms=true,]
-set -ex
-W=${W:-/d/scratch/wrfda}; S=$W/src/${TREE:-WRFV4.7.1}; D=$W/data; R=$W/run/$1
+set -eux
+NAME=${1:?usage: run_tutorial.sh NAME [extra wrfvar10 settings]}
+EXTRA=${2:-}
+case "$NAME" in */*|.*) echo "NAME must be a plain directory name" >&2; exit 2;; esac
+case "$EXTRA" in */*|*\&*|*\\*) echo "extra settings must not contain / & or \\" >&2; exit 2;; esac
+W=${W:-/d/scratch/wrfda}; S=$W/src/${TREE:-WRFV4.7.1}; D=$W/data; R=$W/run/$NAME
 rm -rf "$R"; mkdir -p "$R"; cd "$R"
 ln -sf "$S/var/build/da_wrfvar.exe" .
 ln -sf "$S/run/LANDUSE.TBL" .
 cp "$D/be/be.dat" be.dat
 cp "$D/ob/2008020512/ob.ascii" ob.ascii
 cp "$D/rc/2008020512/wrfinput_d01" fg
-sed "s/^test_transforms=false,/test_transforms=false,${2}/" "$S/var/test/tutorial/namelist.input" \
+NL=$S/var/test/tutorial/namelist.input
+grep -q "^test_transforms=false," "$NL" || { echo "$NL has no test_transforms=false, line" >&2; exit 2; }
+grep -q "^start_year=2008," "$NL" || { echo "$NL has no start_year=2008, line" >&2; exit 2; }
+sed "s/^test_transforms=false,/test_transforms=false,${EXTRA}/" "$NL" \
   | sed "s/^start_year=2008,/force_use_old_data=.true.,\nstart_year=2008,/" > namelist.input
-/usr/bin/time -v ./da_wrfvar.exe > wrfda.out 2> time.txt || true
+status=0
+/usr/bin/time -v ./da_wrfvar.exe > wrfda.out 2> time.txt || status=$?
 grep -E "Elapsed|Maximum resident" time.txt
+# da_wrfvar.exe can exit 0 after wrf_error_fatal; its own success line decides.
+grep -q "WRF-Var completed successfully" rsl.out.0000 wrfda.out 2>/dev/null \
+  || { echo "da_wrfvar.exe did not complete (exit $status)" >&2; exit 1; }

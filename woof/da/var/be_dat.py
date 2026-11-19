@@ -97,7 +97,9 @@ class _Records:
                 f"be.dat: first record marker is {head_be} (big) / {head_le} (little); "
                 "expected 12 (ni, nj, nk)"
             )
-        self.records: list[bytes] = []
+        # (offset, length) views into the one buffer, not copies of it
+        view = memoryview(data)
+        self.records: list[memoryview] = []
         off = 0
         order = "big" if self.endian == ">" else "little"
         while off < len(data):
@@ -110,7 +112,7 @@ class _Records:
             tail = int.from_bytes(data[end : end + 4], order, signed=True)
             if tail != n:
                 raise BeDatError(f"be.dat: record at offset {off}: markers {n} and {tail} disagree")
-            self.records.append(data[off + 4 : end])
+            self.records.append(view[off + 4 : end])
             off = end + 4
         self.pos = 0
 
@@ -118,7 +120,7 @@ class _Records:
         i = self.pos + ahead
         return len(self.records[i]) if i < len(self.records) else None
 
-    def next(self) -> bytes:
+    def next(self) -> memoryview:
         if self.pos >= len(self.records):
             raise BeDatError("be.dat: ended before the records WRFDA reads")
         r = self.records[self.pos]
@@ -147,7 +149,7 @@ class _Records:
 
     def name(self, width: int = 10) -> str:
         """A ``character*width`` read: the record's first ``width`` bytes, trimmed."""
-        return self.next()[:width].decode("ascii", errors="replace").strip()
+        return bytes(self.next()[:width]).decode("ascii", errors="replace").strip()
 
 
 @dataclass(frozen=True)
@@ -440,6 +442,7 @@ class RegionalB:
     jy: int = 0
     kz: int = 0
     cv_options: int = 5
+    rf_passes: int = 6  # the passes rf_alpha and the variance scale were normalised for
     be_sha256: str = ""
 
     @property
@@ -508,7 +511,6 @@ def _rescale(be_sub: BeSub, var_scaling: float, len_scaling: float, ds: float,
     s = s / ds
     val = var_scaling * be_sub.val
     rf_alpha, sf = calculate_rf_factors(s, rf_passes)
-    val = val.copy()
     for m in range(mz):
         val[:, m] = sf[m] * val[:, m]
     return BeSub(be_sub.name, mz, val, be_sub.evec, rf_alpha, be_sub.val_g, be_sub.evec_g, s)
@@ -543,7 +545,6 @@ def setup_be_regional(be: BeDat, *, ix: int, jy: int, kz: int, ds: float,
         )
     if be.eta_be is not None:
         raise NotImplementedError("woof var: be.dat carries eta_be, which only interpolate_stats reads")
-    nj, nk = be.nj, be.nk
     b2 = be.bin2d[0, :] - 1  # bin2d(1,j), 0-based
 
     reg: dict = {}
@@ -563,11 +564,7 @@ def setup_be_regional(be: BeDat, *, ix: int, jy: int, kz: int, ds: float,
             # regcoeff(i, k, b) -> reg(j, i, k)
             reg[key] = f[key] * np.moveaxis(rc[key][:, :, b2], 2, 0)
         if not c.lat_stats_option and be.bin_type != 5:
-            for key in keys2 + ["psi_chi"]:
-                a = reg[key]
-                mean = seq_sum(a, axis=0) / float(jy)
-                reg[key] = np.broadcast_to(mean, a.shape).copy()
-            for key in keys3:
+            for key in keys2 + ["psi_chi"] + keys3:
                 a = reg[key]
                 mean = seq_sum(a, axis=0) / float(jy)
                 reg[key] = np.broadcast_to(mean, a.shape).copy()
@@ -594,4 +591,5 @@ def setup_be_regional(be: BeDat, *, ix: int, jy: int, kz: int, ds: float,
         s = rfls[i] * ds  # be*_rf_lengthscale(1:kz) * xb%ds
         out.append(_rescale(subs[i], vs[i], ls[i], ds, s, c.rf_passes))
     return RegionalB(v=tuple(out), reg=reg, ix=ix, jy=jy, kz=kz, cv_options=c.cv_options,
+                     rf_passes=c.rf_passes,
                      be_sha256=be.sha256)

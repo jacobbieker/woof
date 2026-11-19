@@ -27,34 +27,51 @@ _MAGIC = b"WOOFDUMP"
 
 
 def read_dump(path) -> dict:
-    """Read one dump file; repeated names get ``#2``, ``#3``... suffixes."""
+    """Read one dump file; repeated names get ``#2``, ``#3``... suffixes.
+
+    The byte order is the one in which the whole file parses: a scalar
+    record's rank (0) reads the same either way round, so no single record
+    can decide it.
+    """
     data = Path(path).read_bytes()
     if data[:8] != _MAGIC:
         raise ValueError(f"{path}: not a woof WRFDA dump (magic {data[:8]!r})")
+    errors = []
+    for endian in (">", "<"):
+        try:
+            return _parse(data, endian, path)
+        except ValueError as exc:
+            errors.append(f"{'big' if endian == '>' else 'little'}-endian: {exc}")
+    raise ValueError(f"{path}: parses in neither byte order ({'; '.join(errors)})")
+
+
+def _parse(data: bytes, endian: str, path) -> dict:
     off = 8
-    endian = None
     out: dict = {}
     while off < len(data):
+        if off + 37 > len(data):
+            raise ValueError("truncated record header")
         name = data[off : off + 32].decode("ascii").strip()
         kind = data[off + 32 : off + 33]
         off += 33
-        if endian is None:
-            rank_be = int.from_bytes(data[off : off + 4], "big")
-            endian = ">" if 0 <= rank_be <= 7 else "<"
         rank = int(np.frombuffer(data[off : off + 4], dtype=endian + "i4")[0])
         off += 4
+        if not 0 <= rank <= 7 or off + 4 * rank > len(data):
+            raise ValueError(f"record {name!r} has rank {rank}")
         shape = tuple(int(v) for v in np.frombuffer(data[off : off + 4 * rank], dtype=endian + "i4"))
         off += 4 * rank
+        if any(n < 0 for n in shape):
+            raise ValueError(f"record {name!r} has shape {shape}")
         count = int(np.prod(shape)) if rank else 1
         if kind == b"r":
             dt, size = endian + "f8", 8
         elif kind == b"i":
             dt, size = endian + "i4", 4
         else:
-            raise ValueError(f"{path}: record {name!r} has kind {kind!r}")
+            raise ValueError(f"record {name!r} has kind {kind!r}")
+        if off + count * size > len(data):
+            raise ValueError(f"record {name!r} runs past the end")
         a = np.frombuffer(data[off : off + count * size], dtype=dt)
-        if a.size != count:
-            raise ValueError(f"{path}: record {name!r} runs past the end")
         off += count * size
         a = a.astype(np.float64 if kind == b"r" else np.int32)
         a = a.reshape(shape, order="F") if rank else a[0]

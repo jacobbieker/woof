@@ -419,13 +419,18 @@
                end select
             end do
          end do
-         call woof_w1(u, trim(obs_names(ty))//'%h', h)
-         call woof_w1(u, trim(obs_names(ty))//'%p', p)
+         ! h only where the type has heights, p only where it is a plain
+         ! coordinate (gpsref's p, t, q are innovation fields, below)
+         if (t <= 4 .or. t == 8) call woof_w1(u, trim(obs_names(ty))//'%h', h)
+         if (t <= 7) call woof_w1(u, trim(obs_names(ty))//'%p', p)
          if (t == 7) then
             call woof_w1(u, 'satem%ref_p', iv%satem(1:n)%ref_p)
             call woof_dump_field(u, 'satem%thickness', f1)
          else if (t == 8) then
             call woof_dump_field(u, 'gpsref%ref', f1)
+            call woof_dump_field(u, 'gpsref%p', f2)
+            call woof_dump_field(u, 'gpsref%t', f3)
+            call woof_dump_field(u, 'gpsref%q', f4)
          else
             call woof_dump_field(u, trim(obs_names(ty))//'%u', f1)
             call woof_dump_field(u, trim(obs_names(ty))//'%v', f2)

@@ -16,19 +16,45 @@ ALLOWED_PREFIXES = (ROOT / "da" / "var",)
 ALLOWED_FILES = {ROOT / "var_cli.py"}
 
 
-def _imports_var(tree: ast.AST) -> list[int]:
+def _is_var(name: str) -> bool:
+    return name == "woof.da.var" or name.startswith("woof.da.var.")
+
+
+def _package(path: Path) -> list[str]:
+    """The dotted package a module's relative imports resolve against."""
+    parts = list(path.relative_to(ROOT.parent).with_suffix("").parts)
+    return parts[:-1]  # a package's __init__ and a plain module alike drop the last part
+
+
+def _imports_var(tree: ast.AST, path: Path | None = None) -> list[int]:
     lines = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            if any(a.name == "woof.da.var" or a.name.startswith("woof.da.var.") for a in node.names):
+            if any(_is_var(a.name) for a in node.names):
                 lines.append(node.lineno)
         elif isinstance(node, ast.ImportFrom):
             mod = node.module or ""
-            if node.level == 0 and (mod == "woof.da.var" or mod.startswith("woof.da.var.")):
-                lines.append(node.lineno)
-            elif node.level == 0 and mod == "woof.da" and any(a.name == "var" for a in node.names):
+            if node.level:
+                if path is None:
+                    continue
+                base = _package(path)
+                base = base[: len(base) - (node.level - 1)] if node.level > 1 else base
+                mod = ".".join(base + ([mod] if mod else []))
+            if _is_var(mod) or (mod == "woof.da" and any(a.name == "var" for a in node.names)):
                 lines.append(node.lineno)
     return lines
+
+
+def test_relative_imports_are_resolved():
+    da = ROOT / "da" / "letkf.py"
+    core = ROOT / "core" / "x.py"
+    init = ROOT / "da" / "__init__.py"
+    for src, path in [("from .var import be_dat", da), ("from . import var", da),
+                      ("from ..da.var import reference", core), ("from .var.be_dat import read_be_dat", init),
+                      ("from . import var", init)]:
+        assert _imports_var(ast.parse(src), path) == [1], src
+    for src, path in [("from . import letkf", da), ("from ..da import letkf", core), ("from .var import x", core)]:
+        assert _imports_var(ast.parse(src), path) == [], src
 
 
 def test_no_forecast_module_imports_woof_da_var():
@@ -40,7 +66,7 @@ def test_no_forecast_module_imports_woof_da_var():
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         except SyntaxError:
             continue
-        for line in _imports_var(tree):
+        for line in _imports_var(tree, path):
             offenders.append(f"{path.relative_to(ROOT.parent)}:{line}")
     assert offenders == [], f"modules outside the woof var door import woof.da.var: {offenders}"
 

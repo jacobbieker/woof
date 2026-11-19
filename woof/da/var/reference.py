@@ -410,7 +410,14 @@ def xtoxa_adj(xa, xb, c1h, c2h):
 
 
 def cv_to_vv(cv, nx, ny, cv_mz):
-    """``da_cv_to_vv``: blocks v1..v5, each (nx, ny, mz) in Fortran order."""
+    """``da_cv_to_vv``: blocks v1..v5, each (nx, ny, mz) in Fortran order.
+
+    ``cv`` must hold exactly those blocks: alpha or VarBC control variables
+    are not part of this transform, and a size mismatch is an error.
+    """
+    want = nx * ny * sum(int(m) for m in cv_mz[:5])
+    if len(cv) != want:
+        raise ValueError(f"cv has {len(cv)} values; nx*ny*sum(cv_mz[:5]) is {want}")
     out, off = {}, 0
     for n, mz in enumerate(cv_mz[:5], start=1):
         size = nx * ny * mz
@@ -425,7 +432,7 @@ def vv_to_cv(vv, cv_mz):
     return np.concatenate(parts) if parts else np.zeros(0)
 
 
-def transform_u(cv, b, xb, rf_passes=6):
+def transform_u(cv, b, xb):
     """``U v``: vtovv (RF), vertical EOFs, vptox, xtoxa.  Returns dict of stages.
 
     ``b`` is a :class:`woof.da.var.be_dat.RegionalB`; ``xb`` holds
@@ -433,6 +440,7 @@ def transform_u(cv, b, xb, rf_passes=6):
     """
     nx, ny = xb["grid_box_area"].shape
     nz = b.kz
+    rf_passes = b.rf_passes  # the passes setup_be_regional normalised rf_alpha and val for
     vv = cv_to_vv(cv, nx, ny, b.cv_mz)
     for n, s in enumerate(b.v, start=1):
         if s.mz > 0:
@@ -446,9 +454,10 @@ def transform_u(cv, b, xb, rf_passes=6):
     return {"vv": vv, "vp": vp, "vp_bal": vp_bal, "xa": xa}
 
 
-def transform_u_adj(xa, b, xb, rf_passes=6):
+def transform_u_adj(xa, b, xb):
     """``U^T x``: xtoxa_adj, vptox_adj, vertical EOF adjoint, RF adjoint, vv_to_cv."""
     nx, ny, nz = xa["t"].shape
+    rf_passes = b.rf_passes
     xa1 = xtoxa_adj(xa, xb, xb["c1h"], xb["c2h"])
     vp = vptox_adj(xa1, b.reg, b.cv_options, xb["coefx"], xb["coefy"], xb["qs"])
     vv = {}

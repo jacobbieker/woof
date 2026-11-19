@@ -10,5 +10,12 @@ if [ -z "$INCREMENTAL" ]; then
   ./clean -a >/dev/null 2>&1 || true
   printf "32\n" | ./configure wrfda
 fi
-/usr/bin/time -v ./compile all_wrfvar > "$W/build-${TREE:-WRFV4.7.1}.log" 2>&1
+# WRF's compile exits 0 on failure, and an incremental build would leave the
+# previous executable behind: remove it first so only a fresh link passes.
+rm -f var/build/da_wrfvar.exe
+LOG="$W/build-${TREE:-WRFV4.7.1}.log"
+/usr/bin/time -v ./compile all_wrfvar > "$LOG" 2>&1 || true
+# (Some gen_be, da_rad_diags and da_update_bc links fail in this
+# configuration; make ignores them and da_wrfvar.exe does not need them.)
+[ -x var/build/da_wrfvar.exe ] || { echo "da_wrfvar.exe was not linked: see $LOG" >&2; exit 1; }
 ls -la var/build/da_wrfvar.exe

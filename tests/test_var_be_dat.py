@@ -166,6 +166,33 @@ def test_rf_factors_normalise_the_peak():
         assert f[500] * sf[m] == pytest.approx(1.0, rel=1e-15)
 
 
+def _dump_bytes(endian, records):
+    out = [b"WOOFDUMP"]
+    for name, a in records:
+        a = np.asarray(a)
+        kind, dt = (b"r", endian + "f8") if a.dtype.kind == "f" else (b"i", endian + "i4")
+        out += [name.ljust(32).encode(), kind, np.array([a.ndim], dtype=endian + "i4").tobytes(),
+                np.array(a.shape, dtype=endian + "i4").tobytes(),
+                np.asarray(a, dtype=dt).reshape(-1, order="F").tobytes()]
+    return b"".join(out)
+
+
+@pytest.mark.parametrize("endian", [">", "<"])
+def test_read_dump_either_byte_order_with_a_scalar_first(tmp_path, endian):
+    # A rank-0 first record reads the same in both byte orders, so the
+    # order must come from the whole file (woof_be.bin starts with cv%size).
+    m = np.arange(6, dtype=np.float64).reshape(2, 3) / 7.0
+    path = tmp_path / "d.bin"
+    path.write_bytes(_dump_bytes(endian, [("cv%size", np.int32(42)), ("v1%evec", m),
+                                          ("cv%size", np.int32(7))]))
+    d = read_dump(path)
+    assert int(d["cv%size"]) == 42 and int(d["cv%size#2"]) == 7
+    np.testing.assert_array_equal(d["v1%evec"], m)
+    path.write_bytes(_dump_bytes(endian, [("x", m)])[:-3])
+    with pytest.raises(ValueError, match="neither byte order"):
+        read_dump(path)
+
+
 def test_vertical_truncation():
     ev = np.array([5.0, 3.0, 1.0, 0.5, 0.0])
     assert bd._vertical_truncation(100.0, ev, 1) == 4  # stops at the first non-positive
