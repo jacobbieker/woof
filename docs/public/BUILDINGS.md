@@ -200,6 +200,30 @@ runs a surface layer on the ground. Eight cells per H under-resolve the
 horseshoe; Martinuzzi and Tropea's 1.0 H is a channel flow at
 Re_H = 4e4.
 
+## Terrain under buildings
+
+Resolved buildings (and an urban canopy under LES) sit on top of the
+terrain, so the terrain must be bare earth. Copernicus GLO-30, SRTM and the
+GEM-15 `dsm` are surface models: over a city their heights include the
+roofs, and the buildings would count twice.
+
+A domain that sets `obstacle_opt > 0`, or runs `sf_urban_physics > 0`
+(a `[shared]` key) with `km_opt` 2, 3 or 5, needs bare earth. For that
+domain only:
+
+- under the sub-km default (no `[static.highres]` block, GLO-30) or
+  `terrain_source = "auto"`, it takes the bare-earth USGS 3DEP 1/3" DEM
+  where the 3DEP envelope contains its footprint;
+- outside 3DEP it is refused (`surface-model-under-buildings`); declare
+  `terrain_source = "gem15-dtm"` (bare earth, experimental). Where GEM-15
+  would fall back to GLO-30, that is refused too;
+- a surface model you name yourself is kept, with one warning per domain.
+
+The other domains of the tree, and configurations without buildings,
+resolve exactly as before. The building domains are part of the static
+identity (`bare_earth_domains`), so a preparation made without them is not
+reused.
+
 ## A city check: Manhattan at 50 m and 25 m
 
 This check asks whether individual buildings show up in a real-data LES, and
@@ -215,8 +239,9 @@ whether their heights in the model match the source data.
 - Physics: the 250 m, 50 m and 25 m domains run LES (`km_opt = 3`, PBL off).
 - Terrain: the bare-earth 3DEP 1/3" DEM (`[static.highres] terrain_source =
   "usgs-3dep-13as"`). On a city, use a bare-earth source. Copernicus
-  GLO-30, which `auto` can pick on the HRRR route, is a surface model with
-  the buildings already in it.
+  GLO-30, the sub-km default, is a surface model with the buildings
+  already in it. Since phase 2 a configuration with `obstacle_opt` (or an
+  urban canopy under LES) does this itself; see "Terrain under buildings".
 - Buildings: `woof buildings` made both products from an OpenStreetMap
   extract (256,305 footprints in the 50 m domain), with GEM-15 supplying
   missing heights. The 50 m product used a 12.5 m lattice, the default
