@@ -72,7 +72,7 @@ def test_bbox_filter_columns_and_provenance(tmp_path):
     path, side = _fetch(tmp_path, release="2026-11-18.0")
     table = pq.read_table(path)
     assert sorted(table.column("id").to_pylist()) == ["a", "b"]
-    assert set(table.column_names) == set(ov.COLUMNS)
+    assert set(table.column_names) == set(ov.FILE_COLUMNS)
     assert side["release"] == "2026-11-18.0"
     assert side["n_footprints"] == 2
     assert side["sources_by_dataset"] == {"Microsoft ML Buildings": 1,
@@ -121,7 +121,8 @@ def test_second_call_is_cached_and_offline_uses_it(tmp_path):
     assert again == path and side2 == side
     assert os.stat(path).st_mtime_ns == mtime
     off, side3 = ov.fetch_overture_buildings(
-        BOX, tmp_path / "cache", release="latest", offline=True)
+        BOX, tmp_path / "cache", release="latest", offline=True,
+        base=str(tmp_path / "release"))
     assert off == path and side3 == side
 
 
@@ -133,6 +134,9 @@ def test_offline_refuses_cleanly_when_not_cached(tmp_path):
     other = FootprintBBox(10.0, 10.1, 10.0, 10.1)
     with pytest.raises(ov.OvertureRefusal, match="--offline"):
         ov.fetch_overture_buildings(other, tmp_path / "cache", offline=True)
+    with pytest.raises(ov.OvertureRefusal, match="bad Overture release"):
+        ov.fetch_overture_buildings(BOX, tmp_path / "cache", offline=True,
+                                    release="../../x")
 
 
 def test_bad_or_missing_release_refuses(tmp_path):
@@ -141,6 +145,63 @@ def test_bad_or_missing_release_refuses(tmp_path):
         _fetch(tmp_path, release="../x")
     with pytest.raises(ov.OvertureRefusal, match="cannot read"):
         _fetch(tmp_path, release="1999-01-01.0")
+
+
+def test_two_sources_do_not_share_a_cache_entry(tmp_path):
+    _release(tmp_path / "release")
+    _release(tmp_path / "mirror")
+    one, _ = _fetch(tmp_path, release="2026-11-18.0")
+    two, _ = ov.fetch_overture_buildings(
+        BOX, tmp_path / "cache", release="2026-11-18.0",
+        filesystem=pafs.LocalFileSystem(), base=str(tmp_path / "mirror"))
+    assert one != two and one.is_file() and two.is_file()
+
+
+def test_latest_falls_back_to_the_cache_when_listing_fails(tmp_path, capsys):
+    _release(tmp_path / "release")
+    path, _ = _fetch(tmp_path, release="latest")
+    # Listing now fails (the base is gone), the cache still answers.
+    got, _ = ov.fetch_overture_buildings(
+        BOX, tmp_path / "cache", release="latest",
+        filesystem=pafs.LocalFileSystem(), base=str(tmp_path / "release"))
+    assert got == path
+    import shutil
+    shutil.rmtree(tmp_path / "release")
+    got, _ = ov.fetch_overture_buildings(
+        BOX, tmp_path / "cache", release="latest",
+        filesystem=pafs.LocalFileSystem(), base=str(tmp_path / "release"))
+    assert got == path
+    assert "using the cached release 2026-11-18.0" in capsys.readouterr().err
+    with pytest.raises(ov.OvertureRefusal):  # nothing cached for this box
+        ov.fetch_overture_buildings(
+            FootprintBBox(1.0, 1.1, 1.0, 1.1), tmp_path / "cache",
+            filesystem=pafs.LocalFileSystem(), base=str(tmp_path / "release"))
+
+
+def test_missing_pyarrow_s3_is_a_refusal(tmp_path, monkeypatch):
+    monkeypatch.delattr(pafs, "S3FileSystem")
+    with pytest.raises(ov.OvertureRefusal, match="pyarrow"):
+        ov.fetch_overture_buildings(BOX, tmp_path / "cache")
+    import builtins
+    real = builtins.__import__
+
+    def deny(name, *a, **k):
+        if name.startswith("pyarrow"):
+            raise ModuleNotFoundError(name)
+        return real(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", deny)
+    with pytest.raises(ov.OvertureRefusal, match="pyarrow"):
+        ov.fetch_overture_buildings(BOX, tmp_path / "cache")
+
+
+def test_provenance_counts_distinct_footprints(tmp_path):
+    _release(tmp_path / "release")
+    table = pq.read_table(tmp_path / "release" / "2026-11-18.0" / ov.THEME_PATH
+                          / "part-0.parquet")
+    assert ov._provenance(table) == (
+        {"Esri Community Maps": 1, "Microsoft ML Buildings": 1,
+         "OpenStreetMap": 2},
+        {"CC-BY-4.0": 1, "ODbL-1.0": 2})
 
 
 def test_empty_box_writes_an_empty_readable_file(tmp_path):

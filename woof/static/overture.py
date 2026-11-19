@@ -27,14 +27,18 @@ import hashlib
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 #: Anonymous public bucket and release prefix (bucket/key form, no scheme).
 OVERTURE_RELEASE_BASE = "overturemaps-us-west-2/release"
 OVERTURE_REGION = "us-west-2"
 THEME_PATH = "theme=buildings/type=building"
-#: Columns kept from the release (``bbox`` is only used for the filter).
+#: Columns read from the release (``bbox`` is only used for the filter).
+#: ``sources`` is read for the provenance counts only; the cached file
+#: drops it (the sidecar holds the provenance).
 COLUMNS = ("id", "geometry", "height", "num_floors", "sources")
+FILE_COLUMNS = ("id", "geometry", "height", "num_floors")
 THEME_LICENSE = "ODbL-1.0"
 ATTRIBUTION = "© OpenStreetMap contributors, Overture Maps Foundation"
 SIDECAR_SCHEMA = "woof-overture-fetch.v1"
@@ -47,19 +51,35 @@ class OvertureRefusal(ValueError):
     """The footprints cannot be fetched or found in the cache."""
 
 
+_NO_PYARROW = ("fetching Overture footprints needs pyarrow built with S3 "
+               "support; install pyarrow (the woof extra that provides it, "
+               "or `pip install pyarrow`), or download the footprints and "
+               "pass them with --footprints PATH:overture")
+
+
 def _s3():
-    import pyarrow.fs as pafs
+    try:
+        import pyarrow.fs as pafs
+        fs = pafs.S3FileSystem
+    except (ImportError, AttributeError) as exc:
+        raise OvertureRefusal(_NO_PYARROW) from exc
     # Retries and longer timeouts: the default 3 s connect timeout fails
     # on a slow link or a busy bucket.
-    return pafs.S3FileSystem(
-        anonymous=True, region=OVERTURE_REGION, connect_timeout=15.0,
-        request_timeout=120.0,
-        retry_strategy=pafs.AwsStandardS3RetryStrategy(max_attempts=6))
+    try:
+        return fs(
+            anonymous=True, region=OVERTURE_REGION, connect_timeout=15.0,
+            request_timeout=120.0,
+            retry_strategy=pafs.AwsStandardS3RetryStrategy(max_attempts=6))
+    except (ImportError, NotImplementedError) as exc:
+        raise OvertureRefusal(_NO_PYARROW) from exc
 
 
 def latest_release(filesystem=None, base: str = OVERTURE_RELEASE_BASE) -> str:
     """The newest ``YYYY-MM-DD.N`` release under ``base``."""
-    import pyarrow.fs as pafs
+    try:
+        import pyarrow.fs as pafs
+    except ImportError as exc:
+        raise OvertureRefusal(_NO_PYARROW) from exc
 
     fs = filesystem if filesystem is not None else _s3()
     try:
@@ -82,8 +102,11 @@ def _box(bbox) -> tuple[float, float, float, float]:
         bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max))
 
 
-def _box_key(box) -> str:
-    return hashlib.sha256(json.dumps(box).encode()).hexdigest()[:12]
+def _box_key(box, base) -> str:
+    """Hash of the box and the source location, so a fixture or mirror
+    never aliases the public bucket's cache entry."""
+    return hashlib.sha256(json.dumps([box, str(base)]).encode()
+                          ).hexdigest()[:12]
 
 
 def _cache_names(cache_dir: Path, release: str, key: str):
@@ -109,33 +132,48 @@ def _newest_cached(cache_dir: Path, key: str):
     return best[1] if best else None
 
 
-def _geo_metadata(table) -> bytes:
-    from pyproj import CRS
-    types = ["Polygon", "MultiPolygon"]
+def _geo_metadata() -> bytes:
+    # No ``crs`` key: the GeoParquet specification defines that as
+    # OGC:CRS84, and read_footprints reads it that way.
     meta = {"version": "1.1.0", "primary_column": "geometry",
             "columns": {"geometry": {
-                "encoding": "WKB", "geometry_types": types,
-                "crs": CRS.from_user_input("OGC:CRS84").to_json_dict()}}}
+                "encoding": "WKB",
+                "geometry_types": ["Polygon", "MultiPolygon"]}}}
     return json.dumps(meta).encode()
+
+
+def _distinct_counts(rows, values) -> dict[str, int]:
+    """Footprints (distinct ``rows``) per value; null values are named
+    ``unspecified``."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
+
+    if len(values) == 0:
+        return {}
+    pairs = pa.table({"row": rows, "v": pc.fill_null(values, "unspecified")})
+    pairs = pairs.group_by(["row", "v"]).aggregate([])
+    counted = pairs.group_by("v").aggregate([("row", "count")])
+    return dict(sorted(zip(counted.column("v").to_pylist(),
+                           counted.column("row_count").to_pylist())))
 
 
 def _provenance(table) -> tuple[dict, dict]:
     """Footprints per ``sources[].dataset`` and per ``sources[].license``
     (a footprint counts once per distinct value)."""
-    datasets: dict[str, int] = {}
-    licenses: dict[str, int] = {}
-    if "sources" not in table.column_names:
-        return datasets, licenses
-    for row in table.column("sources").to_pylist():
-        seen_d, seen_l = set(), set()
-        for src in row or []:
-            seen_d.add(str(src.get("dataset") or "unknown"))
-            seen_l.add(str(src.get("license") or "unspecified"))
-        for name in seen_d:
-            datasets[name] = datasets.get(name, 0) + 1
-        for name in seen_l:
-            licenses[name] = licenses.get(name, 0) + 1
-    return dict(sorted(datasets.items())), dict(sorted(licenses.items()))
+    import pyarrow.compute as pc
+
+    if "sources" not in table.column_names or table.num_rows == 0:
+        return {}, {}
+    col = table.column("sources").combine_chunks()
+    flat = pc.list_flatten(col)
+    rows = pc.list_parent_indices(col)
+    out = []
+    for field in ("dataset", "license"):
+        if flat.type.get_field_index(field) < 0:
+            out.append({})
+            continue
+        out.append(_distinct_counts(rows, pc.struct_field(flat, field)))
+    return out[0], out[1]
 
 
 def _replace_atomic(path: Path, write) -> None:
@@ -154,34 +192,51 @@ def fetch_overture_buildings(bbox, cache_dir, *, release: str = "latest",
     """GeoParquet of the Overture buildings meeting ``bbox``, cached.
 
     ``bbox`` has ``lon_min/lat_min/lon_max/lat_max``.  ``release`` is an
-    explicit release id or ``"latest"`` (discovered from the bucket;
-    offline, the newest cached release for this box).  ``filesystem`` and
+    explicit release id or ``"latest"`` (discovered from the bucket; if the
+    listing fails, or offline, the newest cached release for this box).  ``filesystem`` and
     ``base`` replace the anonymous S3 bucket (tests).  Returns
-    ``(parquet path, sidecar dict)``; a second call for the same release
-    and box reads the cache and touches no network.
+    ``(parquet path, sidecar dict)``; a second call for the same release,
+    box and source reads the cache (an explicit release touches no network).
     """
     cache_dir = Path(cache_dir)
     box = _box(bbox)
-    key = _box_key(box)
+    key = _box_key(box, base)
+
+    def cached(rel):
+        hit = _cached(cache_dir, rel, key)
+        return (hit[0], json.loads(hit[1].read_text(encoding="utf-8"))
+                ) if hit else None
+
+    if release != "latest" and not _SAFE_RELEASE.match(str(release)):
+        raise OvertureRefusal(f"bad Overture release id {release!r}")
     if offline:
         if release == "latest":
             release = _newest_cached(cache_dir, key)
-        hit = release and _cached(cache_dir, release, key)
-        if not hit:
+        got = release and cached(release)
+        if not got:
             raise OvertureRefusal(
                 f"--offline: no cached Overture buildings for this box "
                 f"under {cache_dir}; run once without --offline")
-        return hit[0], json.loads(hit[1].read_text(encoding="utf-8"))
+        return got
     if release == "latest":
-        release = latest_release(filesystem, base)
-    if not _SAFE_RELEASE.match(release):
-        raise OvertureRefusal(f"bad Overture release id {release!r}")
-    hit = _cached(cache_dir, release, key)
-    if hit:
-        return hit[0], json.loads(hit[1].read_text(encoding="utf-8"))
+        try:
+            release = latest_release(filesystem, base)
+        except OvertureRefusal as exc:
+            newest = _newest_cached(cache_dir, key)
+            if newest is None:
+                raise
+            print(f"woof buildings: cannot list Overture releases ({exc}); "
+                  f"using the cached release {newest}", file=sys.stderr)
+            release = newest
+    got = cached(release)
+    if got:
+        return got
 
-    import pyarrow.dataset as ds
-    import pyarrow.parquet as pq
+    try:
+        import pyarrow.dataset as ds
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise OvertureRefusal(_NO_PYARROW) from exc
 
     fs = filesystem if filesystem is not None else _s3()
     location = f"{base}/{release}/{THEME_PATH}/"
@@ -214,8 +269,8 @@ def fetch_overture_buildings(bbox, cache_dir, *, release: str = "latest",
         "attribution": ATTRIBUTION,
         "attribution_url": "https://docs.overturemaps.org/attribution/",
     }
-    table = table.replace_schema_metadata(
-        {b"geo": _geo_metadata(table)})
+    table = table.select(list(FILE_COLUMNS)).replace_schema_metadata(
+        {b"geo": _geo_metadata()})
     cache_dir.mkdir(parents=True, exist_ok=True)
     data, side = _cache_names(cache_dir, release, key)
     # Sidecar first: a parquet file is only a cache hit once its sidecar

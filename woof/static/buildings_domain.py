@@ -220,8 +220,8 @@ def build_domain_buildings(grid, output, *, footprints: Sequence = (),
     """
     footprints = list(footprints)
     if not gem15 and not footprints and overture is None:
-        raise ValueError("nothing to build from: give footprint files, or "
-                         "leave GEM-15 on")
+        raise ValueError("nothing to build from: give footprint files "
+                         "(--footprints, --overture), or leave GEM-15 on")
     for name, value in (("storey_height_m", storey_height_m),
                         ("default_height_m", default_height_m)):
         if value is not None and not (math.isfinite(value) and value > 0):
@@ -239,15 +239,12 @@ def build_domain_buildings(grid, output, *, footprints: Sequence = (),
                      "grid": dict(nx=model.nx, ny=model.ny, dx=model.dx,
                                   dy=model.dy),
                      "footprint_resolution_m": float(resolution_m)}
+    from woof.static.highres_production import default_highres_cache_root
+    root = Path(cache_root) if cache_root else default_highres_cache_root()
     if overture is not None:
-        from woof.static.highres_fetch import FootprintBBox
-        from woof.static.highres_production import default_highres_cache_root
         from woof.static.overture import fetch_overture_buildings
-        wide = domain_bbox(grid, halo_cells=4.0)
-        pad = 0.001  # ~100 m on top of the four-cell halo
-        fetch_box = FootprintBBox(wide.lat_min - pad, wide.lat_max + pad,
-                                  wide.lon_min - pad, wide.lon_max + pad)
-        root = Path(cache_root) if cache_root else default_highres_cache_root()
+        # Four cells plus ~100 m (0.001 degree) of halo.
+        fetch_box = domain_bbox(grid, halo_cells=4.0).padded(0.001)
         got, sidecar = fetch_overture_buildings(
             fetch_box, root / "overture", release=overture, offline=offline,
             filesystem=overture_filesystem)
@@ -256,8 +253,6 @@ def build_domain_buildings(grid, output, *, footprints: Sequence = (),
     windows: list[HeightRaster] = []
     if gem15:
         from woof.static import gem15 as g15
-        from woof.static.highres_production import default_highres_cache_root
-        root = Path(cache_root) if cache_root else default_highres_cache_root()
         fetched, gem = {}, {}
         for source_id in ("gem15-dsm", "gem15-dtm"):
             files, manifest = g15.fetch_gem15_windows(

@@ -129,13 +129,16 @@ of four cells and about 100 m, and adds it as an `overture` footprint file
 (`s3://overturemaps-us-west-2/release/<release>/theme=buildings/type=building/`)
 anonymously through pyarrow's S3 filesystem, filters on each row's `bbox`
 struct so only matching row groups are read, and keeps `id`, the WKB
-geometry, `height`, `num_floors` and `sources`. A bare `--overture` or
+geometry, `height` and `num_floors` (`sources` is read for the sidecar's
+counts and not stored in the GeoParquet). A bare `--overture` or
 `latest` takes the newest release under the bucket's `release/` prefix; an
 id such as `2026-11-18.0` pins one. The result is a GeoParquet file
 (`overture-buildings-<release>-<box hash>.parquet`, OGC:CRS84) with a JSON
 sidecar of the same name under `<cache>/overture/` (`--cache`, by default
 the high-resolution terrain cache). A second run with the same release and
-box reads the cache and uses no network. `--offline` never touches the
+box reads the cache; an explicit release uses no network, and `latest` lists
+the bucket first, falling back to the newest cached release (with a note on
+stderr) if the listing fails. `--offline` never touches the
 network: it uses the cached file (the newest cached release for `latest`)
 and refuses with a message if there is none. The sidecar records the release,
 box, S3 path, fetch time, footprint count, the footprints per
