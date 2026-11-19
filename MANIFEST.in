@@ -154,6 +154,7 @@ include docs/branch-from-checkpoint.md docs/high-resolution-static-geography.md
 include docs/lake-state-initialization.md docs/lakes.md docs/ruc-mosaic-and-clm-lake.md
 include docs/coupling/WRF-HYDRO-NEMO.md
 include docs/grad.md docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md
+include docs/dev/WRFDA-3DVAR-PLAN.md docs/nn-physics.md docs/spacewx.md
 recursive-include docs/manual *.md
 recursive-include docs/integration-kit *.md *.json *.py
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 import numpy as np
+from woof.backend.scratch import scratch_like as _scratch_like
 from .cuda_driver import CudaDryDycoreDriver
 from .config_rrfs import RRFSDryDycoreConfig
 from .cuda_horizontal_rrfs import CudaHorizontalRRFS
@@ -371,13 +372,13 @@ class CudaRRFSDycoreDriver(CudaDryDycoreDriver):
         *, diabatic_theta: Any | None = None, large_timestep: float = 0.0,
     ) -> tuple[DevicePrognosticState, DeviceSavedDiagnostics, Any, Any]:
         cp = self.cp
-        rho = cp.empty_like(saved_state.rho)
-        rtheta = cp.empty_like(saved_state.rho_theta)
-        rho_p = cp.empty_like(saved_state.rho)
-        rtheta_p = cp.empty_like(saved_state.rho_theta)
-        theta = cp.empty_like(saved_state.rho)
-        exner = cp.empty_like(saved_diag.exner)
-        pressure_p = cp.empty_like(saved_diag.pressure_perturbation)
+        rho = _scratch_like(cp, saved_state.rho)
+        rtheta = _scratch_like(cp, saved_state.rho_theta)
+        rho_p = _scratch_like(cp, saved_state.rho)
+        rtheta_p = _scratch_like(cp, saved_state.rho_theta)
+        theta = _scratch_like(cp, saved_state.rho)
+        exner = _scratch_like(cp, saved_diag.exner)
+        pressure_p = _scratch_like(cp, saved_diag.pressure_perturbation)
         self._launch(
             "recover_cells_f32",
             self.ncells * self.nlev,
@@ -411,8 +412,8 @@ class CudaRRFSDycoreDriver(CudaDryDycoreDriver):
                 pressure_p,
             ),
         )
-        ru = cp.empty_like(saved_state.rho_u)
-        flux_u = cp.empty_like(saved_state.rho_u)
+        ru = _scratch_like(cp, saved_state.rho_u)
+        flux_u = _scratch_like(cp, saved_state.rho_u)
         self._launch(
             "recover_edges_f32",
             self.nedges * self.nlev,
@@ -427,8 +428,8 @@ class CudaRRFSDycoreDriver(CudaDryDycoreDriver):
                 flux_u,
             ),
         )
-        rw = cp.empty_like(saved_state.rho_w)
-        flux_w = cp.empty_like(saved_state.rho_w)
+        rw = _scratch_like(cp, saved_state.rho_w)
+        flux_w = _scratch_like(cp, saved_state.rho_w)
         self._launch(
             "recover_interfaces_f32",
             self.ncells * (self.nlev + 1),
