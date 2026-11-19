@@ -930,7 +930,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   the plan above. So far `woof.da.var` reads WRFDA's `be.dat` and has a
   binary64 reference of the control-variable transform `U` and its
   adjoint; on WRFDA's tutorial case both equal a compiled WRFDA 4.7.1 word
-  for word. There is no analysis command yet, and default runs are not
+  for word. `DeviceU` runs `U` and `U^T` as CUDA or Metal kernels: the
+  binary64 oracle tier gives the reference's words, and the binary32
+  production tier gives the same words on CUDA and Metal under strict
+  numerics. There is no analysis command yet, and default runs are not
   changed.
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
