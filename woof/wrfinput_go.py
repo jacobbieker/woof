@@ -12,18 +12,12 @@ def _visual_scope(value):
     return nullcontext() if value is None else verification_scope(value)
 
 
-def normalize_shared_gpu(args):
-    """``--native-shared-gpu`` is ``--allow-shared-gpu --no-supervise``."""
+def validate_controls(args, *, metem=False):
+    """Refuse unused controls before input IO or device admission."""
     if getattr(args, "native_shared_gpu", False):
         args.allow_shared_gpu = True
         args.no_supervise = True
         args.native_shared_gpu = False
-    return args
-
-
-def validate_controls(args, *, metem=False):
-    """Refuse unused controls before input IO or device admission."""
-    normalize_shared_gpu(args)
     from woof.cli import build_parser
     from woof.go_cli import GoRefusal
     defaults = vars(build_parser(go_only=True).parse_args(["go"]))

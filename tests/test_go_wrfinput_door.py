@@ -43,14 +43,18 @@ def runner(monkeypatch):
 
 def test_stock_go_preserves_run_arguments(runner):
     assert _go_wrfinput(args()) == 0
-    assert runner["source"] == Path("native") and runner["out"] == Path("result")
-    assert runner["run_seconds"] == 10800
-    assert runner["restart"] == Path("resume.nc")
-    assert runner["benchmark"] is True
-    assert runner["allow_shared_gpu"] is True
-    assert runner["render_products"] == "none"
-    assert runner["checkpoint_at"] == "2024-05-25_19:00:00"
-    assert "soil_source" not in runner or runner["soil_source"] is None
+    # Exactly these keywords: a stray or dropped control fails here.
+    assert runner == dict(source=Path("native"), out=Path("result"),
+                          run_seconds=10800, restart=Path("resume.nc"),
+                          benchmark=True, allow_shared_gpu=True,
+                          exclusive_gpu=True, render_products="none",
+                          checkpoint_at="2024-05-25_19:00:00")
+
+
+def test_a_control_the_door_does_not_consume_is_refused(runner):
+    with pytest.raises(GoRefusal, match="do not consume"):
+        _go_wrfinput(args("--lakes", "off"))
+    assert not runner
 
 
 def test_native_one_trajectory_cannot_duplicate_ensemble_members(runner):
@@ -59,8 +63,16 @@ def test_native_one_trajectory_cannot_duplicate_ensemble_members(runner):
     assert not runner
 
 
-def test_native_restart_is_forwarded(runner):
-    _go_wrfinput(args("--restart-from", "wrfrst_d01"))
+def test_native_restart_is_forwarded(runner, monkeypatch):
+    from woof import wrfinput_go
+    resolved = {}
+
+    def resolve(directory, a):
+        resolved.update(restart_from=a.restart_from)
+        return SimpleNamespace(experiment=SimpleNamespace(start_time=None))
+    monkeypatch.setattr(wrfinput_go, "_resolve_inputs", resolve)
+    assert _go_wrfinput(args("--restart-from", "wrfrst_d01")) == 0
+    assert resolved["restart_from"] == Path("wrfrst_d01")
     assert runner["restart_from"] == Path("wrfrst_d01")
 
 

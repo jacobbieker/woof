@@ -6187,8 +6187,8 @@ def _at_flag_storm_nests(args) -> None:
 
 def _go_wrfinput(args) -> int:
     """Compatibility entry for the shared stock-directory forecast door."""
-    from woof.wrfinput_go import launch, normalize_shared_gpu
-    return launch(normalize_shared_gpu(args))
+    from woof.wrfinput_go import launch
+    return launch(args)
 
 
 @_ledger_main
@@ -6306,6 +6306,8 @@ def _go_config_main(args, *, observer=None) -> int:
                         "configuration launches retain their stage workers")
     if getattr(args, "allow_shared_gpu", False):
         raise GoRefusal("--allow-shared-gpu currently requires WRF inputs")
+    if getattr(args, "native_shared_gpu", False):
+        raise GoRefusal("--native-shared-gpu requires WRF inputs")
     if getattr(args, "benchmark", False):
         raise GoRefusal("--benchmark requires WRF inputs")
     if getattr(args, "run_seconds", None) is not None:
