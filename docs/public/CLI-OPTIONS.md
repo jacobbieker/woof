@@ -2450,6 +2450,34 @@ Takes no options of its own.
 | `--timeout S` | network timeout in seconds (default 120) |
 | `--valid-time ISO8601` | the valid time to match, with its zone (2026-10-05T12:00Z). Required unless --list-stations |
 
+## `woof obs geo`
+
+Takes no options of its own.
+
+## `woof obs geo fetch`
+
+| option | what it does |
+|---|---|
+| `--bbox` | west,south,east,north in degrees (west > east crosses 180); default the full disc |
+| `--cache` | cache directory (default $WOOF_GEO_CACHE or ~/.woof/cache/geo) |
+| `--channels` | comma-separated ABI channels (C08 or 8) or band wavelengths (default C08,C09,C10,C14) |
+| `--refresh` | re-read even when the cache holds the subset |
+| `--root` | store root: s3://us-west-2.opendata.source.coop/bkr/geo (default) or a local mirror ($WOOF_GEO_ROOT) |
+| `--satellite {16,17,18,19}` | GOES satellite number |
+| `--summary-json` | write the scene summary and provenance here |
+| `--time` | UTC time with offset, e.g. 2025-06-01T18:00Z |
+| `--tolerance-minutes` | nearest scan accepted within this many minutes (default 5) |
+
+## `woof obs geo list`
+
+| option | what it does |
+|---|---|
+| `--channel` | ABI channel for --satellite (default 8) |
+| `--coverage` | open each store and print its readable snapshot and time coverage (slow) |
+| `--root` | store root (as for fetch) |
+| `--satellite {16,17,18,19}` | only this GOES satellite's segments of --channel |
+| `--subdir` | sub-prefix to list (default virtualized; '' = top level) |
+
 ## `woof obs glm`
 
 | argument | what it does |

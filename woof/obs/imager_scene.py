@@ -257,3 +257,72 @@ def utc(value) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+SCENE_FILE = "scene.nc"
+_SCENE_FIELDS = ("lat", "lon", "platform_index", "view_zenith", "view_azimuth", "scan_angle",
+                 "solar_zenith", "solar_azimuth", "flags")
+
+
+def write_scene_netcdf(directory, scene: ImagerScene, *, licence: str, attribution: str) -> None:
+    """Cache ``scene`` as ``directory/scene.nc`` plus ``provenance.json`` (with the file's SHA-256)."""
+
+    import hashlib
+    import json
+    from pathlib import Path
+
+    from netCDF4 import Dataset
+
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    tmp = directory / (SCENE_FILE + ".partial")
+    ny, nx = scene.shape
+    with Dataset(tmp, "w") as ds:
+        ds.createDimension("y", ny)
+        ds.createDimension("x", nx)
+        for name in _SCENE_FIELDS + (("scan_offset_s",) if scene.scan_offset_s is not None else ()):
+            value = np.asarray(getattr(scene, name))
+            kind = "i2" if value.dtype.kind in "iu" else "f4"
+            ds.createVariable(name, kind, ("y", "x"), zlib=True)[:] = value
+        for nm, value in scene.values.items():
+            var = ds.createVariable(band(nm).name, "f4", ("y", "x"), zlib=True, fill_value=np.float32(np.nan))
+            var.units = band(nm).units
+            var[:] = value
+        ds.schema = SCENE_SCHEMA
+        ds.time = scene.time.isoformat()
+        ds.platforms = json.dumps([p.to_payload() for p in scene.platforms])
+        ds.licence = licence
+        ds.attribution = attribution
+    tmp.replace(directory / SCENE_FILE)
+    provenance = dict(scene.provenance, cache_sha256=hashlib.sha256(
+        (directory / SCENE_FILE).read_bytes()).hexdigest())
+    (directory / "provenance.json.partial").write_text(json.dumps(provenance, indent=2, default=str) + "\n")
+    (directory / "provenance.json.partial").replace(directory / "provenance.json")
+    scene.provenance = provenance
+
+
+def read_scene_netcdf(directory) -> ImagerScene:
+    """A scene :func:`write_scene_netcdf` cached; refused when the file's digest has changed."""
+
+    import hashlib
+    import json
+    from pathlib import Path
+
+    from netCDF4 import Dataset
+
+    directory = Path(directory)
+    provenance = json.loads((directory / "provenance.json").read_text())
+    digest = hashlib.sha256((directory / SCENE_FILE).read_bytes()).hexdigest()
+    if digest != provenance.get("cache_sha256"):
+        raise ValueError(f"{directory / SCENE_FILE}: digest {digest} does not match its provenance "
+                         f"({provenance.get('cache_sha256')}); delete the entry or refresh it")
+    by_name = {band(nm).name: nm for nm in BANDS}
+    with Dataset(directory / SCENE_FILE) as ds:
+        ds.set_auto_mask(False)
+        fields = {name: np.asarray(ds[name][:]) for name in _SCENE_FIELDS}
+        offset = np.asarray(ds["scan_offset_s"][:]) if "scan_offset_s" in ds.variables else None
+        values = {by_name[k]: np.asarray(v[:], dtype="f4") for k, v in ds.variables.items() if k in by_name}
+        platforms = tuple(Platform(**p) for p in json.loads(ds.platforms))
+        when = utc(ds.time)
+    return ImagerScene(time=when, values=values, platforms=platforms, provenance=provenance,
+                       scan_offset_s=offset, **fields)

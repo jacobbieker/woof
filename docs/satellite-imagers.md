@@ -4,7 +4,8 @@ woof can read geostationary imager brightness temperatures and reflectances
 so that later stages can assimilate them into initial conditions. The plan,
 with its sources and gates, is section 11 of
 [dev/WRFDA-3DVAR-PLAN.md](dev/WRFDA-3DVAR-PLAN.md). This page covers what
-exists today: the SatWeave reader.
+exists today: the SatWeave reader and the GOES ABI reader for the `bkr/geo`
+Icechunk stores.
 
 ## SatWeave
 
@@ -89,11 +90,70 @@ attribution, and a product built from these data must keep it:
 woof commits and ships no SatWeave data. SatWeave is experimental and is
 not an official forecast or warning product.
 
+## GOES ABI from the `bkr/geo` Icechunk stores
+
+Source Cooperative's `bkr/geo` holds geostationary imagery as Icechunk
+repositories that anyone can read. woof reads GOES ABI from
+`bkr/geo/virtualized/`: one repository per satellite and channel
+(`goes{16,17,18,19}_radf_C{01..16}`), whose chunks are references into
+NOAA's own ABI L1b full-disk files. A read is NOAA's radiance with its
+quality flags, calibration and navigation, so the satellite, view angles and
+scan time are known rather than reconstructed.
+
+```
+woof obs geo fetch --satellite 16 --time 2025-03-01T18:00Z --channels C08,C09,C10,C14 --bbox -105,25,-80,45
+woof obs geo list --satellite 19 --channel 8 --coverage
+```
+
+`woof fetch geo` is the same door as `woof obs geo fetch`.
+
+- **Values.**
+  - Channels 7-16 come out as brightness temperature, converted with the
+    file's own Planck constants.
+  - Channels 1-6 come out as reflectance factor (%), from `kappa0`.
+  - A pixel whose quality flag is not 0 is NaN, and is counted in the
+    provenance.
+  - The 0.5 and 1 km channels are averaged onto the 2 km grid.
+  - `--channels` takes ABI channels (`C08` or `8`) or band wavelengths
+    (`6200`).
+- **Time.**
+  - The scan nearest `--time` is used, within `--tolerance-minutes`
+    (default 5). A scan's time is the middle of the scan.
+  - Each row's time is placed linearly between the scan's start and end.
+  - Each channel's archive is split into dated segments: `_<date>` holds
+    scans up to that date, and the undated store holds the newest.
+  - woof opens the segment that should hold the case, checks its time
+    coordinate, and refuses with each segment's span if none has a scan in
+    tolerance.
+  - A store being written can have an unreadable newest snapshot. woof
+    then reads up to 8 snapshots back, and records which one it used.
+- **Cache.**
+  - Subsets are cached under `~/.woof/cache/geo`, or `$WOOF_GEO_CACHE` or
+    `--cache`, as a `scene.nc` with a `provenance.json`.
+  - The provenance records the store, snapshot, scan bounds, rejected
+    pixel counts and a SHA-256 of the raw counts read.
+  - A changed file is refused.
+- **Dependencies.** The reader needs `icechunk` and `zarr`
+  (`pip install icechunk zarr`); nothing else in woof imports it.
+- **Access.**
+  - Reads are anonymous.
+  - Only NOAA's public `s3://noaa-*` buckets are allowed as sources of
+    referenced chunks.
+- **Speed.** A 4-channel box over the central US takes about 40 s cold
+  and 2.5 s from the cache.
+- **Licence.** NOAA's GOES data are open with no restrictions, and NOAA
+  asks for attribution. The command prints it.
+
+Docs for developers: section 11.12 of the plan lists every `bkr/geo` store
+and its coverage, including Himawari, GK-2A, Meteosat and MTG, which come
+next.
+
 ## Not yet
 
 These come next, in the plan's order:
 
-- the native GOES ABI and Himawari AHI readers;
+- Himawari AHI, GK-2A AMI and Meteosat SEVIRI/FCI from the other
+  `bkr/geo` stores;
 - the opt-in CRTM forward operator;
 - the LETKF radiance adapter.
 
