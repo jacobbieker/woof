@@ -5,6 +5,7 @@
 set -ex
 export HOME=/tmp NETCDF=/usr J=${J:-6}
 W=${W:-/d/scratch/wrfda}
+W=$(cd "$W" && pwd)
 cd "$W/src/${TREE:-WRFV4.7.1}"
 if [ -z "$INCREMENTAL" ]; then
   ./clean -a >/dev/null 2>&1 || true
