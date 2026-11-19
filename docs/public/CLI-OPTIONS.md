@@ -164,7 +164,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 
 | option | what it does |
 |---|---|
-| `--cache DIR` | GEM-15 cache root (default: the high-resolution terrain cache) |
+| `--cache DIR` | GEM-15 and Overture cache root (default: the high-resolution terrain cache) |
 | `--default-height M` | height of footprints with no height, storeys or GEM-15 value (default: such footprints are left out) |
 | `--domain N` | 1-based domain number (default: the innermost, the last one in the namelist) |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
@@ -172,8 +172,9 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--min-area M2` | GEM-15 alone: drop nDSM objects smaller than this (default 200) |
 | `--namelist NAMELIST_WPS` | WPS namelist whose domain gets the product |
 | `--no-gem15` | do not read GEM-15: heights then come from the footprints' own attributes or storeys only |
-| `--offline` | read GEM-15 from the cache only |
+| `--offline` | read GEM-15 and Overture from the cache only |
 | `--output NC` | buildings product to write (NetCDF); name it in [[domain]] obstacle_file |
+| `--overture RELEASE` | fetch the Overture Maps buildings under the domain plus a halo (anonymous S3, ODbL 1.0) into --cache; RELEASE is a release id or latest (the default when given bare); combines with --footprints |
 | `--resolution M` | footprint lattice spacing in metres (default: a quarter of the grid spacing, at most 5) |
 | `--storey-height M` | metres per storey for footprints with only a storey count (default 3) |
 

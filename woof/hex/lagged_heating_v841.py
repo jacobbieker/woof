@@ -163,10 +163,18 @@ def lagged_theta_m_rate(
     threads = 128
     kernel(((count + threads - 1) // threads,), (threads,),
            (np.int32(count), np.float32(rvord), np.float32(dt), before, theta, qv, rate, invalid))
-    if int(invalid.get()[0]) != 0:
-        raise FloatingPointError(
-            "lagged microphysics heating rate is not finite; carrying it would put a "
-            "non-finite theta tendency into every RK stage of the next step")
+    from woof.core import health_ledger
+
+    message = ("lagged microphysics heating rate is not finite; carrying it would put a "
+               "non-finite theta tendency into every RK stage of the next step")
+
+    def describe(_flags: int) -> None:
+        raise FloatingPointError(message + health_ledger.deferred_note())
+
+    # Read now, or -- inside the hex composite step's resident ledger -- at
+    # its pre-commit drain, which refuses this same step before publication.
+    if health_ledger.read_status(invalid, site="lagged-heating", describe=describe):
+        raise FloatingPointError(message)
     return rate
 
 

@@ -1315,7 +1315,8 @@ def load_experiment_case_bytes(
         {"static": static_table, "domain": raw.get("domain", ())}, source=source, base_dir=base,
         spacings_m=[float(dc.run.dx) for dc in experiment.domains],
         run_config=(experiment.domains[0].run if experiment.domains
-                    else None))
+                    else None),
+        domain_runs=[dc.run for dc in experiment.domains])
     if highres is not None:
         data = replace(data, static_highres=highres)
     if ingest_policy is not None and (

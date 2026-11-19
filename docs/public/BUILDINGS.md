@@ -72,9 +72,10 @@ another footprint covers. When an nDSM median supplies a height, the nDSM's
 source (GEM-15) is recorded with its licence and attribution. A GeoParquet
 file with no `crs` key is in OGC:CRS84, as the GeoParquet spec says; an
 explicit `"crs": null` (unknown) is refused, and a PROJJSON definition
-without an authority id is kept whole. woof does not download footprints:
-export the area you need with the provider's own tools (for example the
-`overturemaps` CLI or an OSM extract) and pass the file.
+without an authority id is kept whole. woof downloads
+footprints from one provider only, Overture Maps (`--overture`, below);
+for any other source export the area you need with the provider's own tools
+(for example an OSM extract) and pass the file.
 
 **Combining.** `aggregate` takes any number of height rasters. Rasters on
 one pixel lattice (same CRS, pixel size and alignment, such as adjacent
@@ -120,6 +121,42 @@ terrain cache (`--cache`, `--offline`):
   `--min-area`, 200 m2 by default, are dropped); GEM-15 cells on either side
   of a UTM zone edge are resampled onto one 15 m lattice;
 - `--no-gem15` uses the footprints' own heights and storeys only.
+
+**Overture Maps door (`--overture [RELEASE|latest]`).** The command fetches
+the Overture `buildings` theme, type `building`, for the domain plus a halo
+of four cells and about 100 m, and adds it as an `overture` footprint file
+(it combines with `--footprints`). It reads the public release
+(`s3://overturemaps-us-west-2/release/<release>/theme=buildings/type=building/`)
+anonymously through pyarrow's S3 filesystem, filters on each row's `bbox`
+struct so only matching row groups are read, and keeps `id`, the WKB
+geometry, `height` and `num_floors` (`sources` is read for the sidecar's
+counts and not stored in the GeoParquet). A bare `--overture` or
+`latest` takes the newest release under the bucket's `release/` prefix; an
+id such as `2026-11-18.0` pins one. The result is a GeoParquet file
+(`overture-buildings-<release>-<box hash>.parquet`, OGC:CRS84) with a JSON
+sidecar of the same name under `<cache>/overture/` (`--cache`, by default
+the high-resolution terrain cache). A second run with the same release and
+box reads the cache; an explicit release uses no network, and `latest` lists
+the bucket first, falling back to the newest cached release (with a note on
+stderr) if the listing fails. `--offline` never touches the
+network: it uses the cached file (the newest cached release for `latest`)
+and refuses with a message if there is none. The sidecar records the release,
+box, S3 path, fetch time, footprint count, the footprints per
+`sources[].dataset` and per source licence; the receipt in the product
+carries it as `overture`.
+
+Licences: the theme is ODbL 1.0 and woof attributes it "© OpenStreetMap
+contributors, Overture Maps Foundation". Individual records can come from
+other datasets under their own licences (for example Esri Community Maps
+contributors and Google Open Buildings under CC BY 4.0, Microsoft Global ML
+Building Footprints under ODbL); read the per-dataset and per-licence counts
+in the sidecar and see <https://docs.overturemaps.org/attribution/> before
+you publish a product or database derived from it. woof ships no Overture
+data. The first fetch of a small box took about five minutes
+(it reads the footers of the release's 512 files); later runs use the cache.
+This is a known cost, not yet optimised. Without a pyarrow that has S3
+support the command refuses and says so. Releases are large; the box keeps the download to the row groups
+under it.
 
 The receipt is printed and stored in the product. It gives the box, the
 GEM-15 windows, and for each footprint file where every height came from
@@ -200,6 +237,30 @@ runs a surface layer on the ground. Eight cells per H under-resolve the
 horseshoe; Martinuzzi and Tropea's 1.0 H is a channel flow at
 Re_H = 4e4.
 
+## Terrain under buildings
+
+Resolved buildings (and an urban canopy under LES) sit on top of the
+terrain, so the terrain must be bare earth. Copernicus GLO-30, SRTM and the
+GEM-15 `dsm` are surface models: over a city their heights include the
+roofs, and the buildings would count twice.
+
+A domain that sets `obstacle_opt > 0`, or runs `sf_urban_physics > 0`
+(a `[shared]` key) with `km_opt` 2, 3 or 5, needs bare earth. For that
+domain only:
+
+- under the sub-km default (no `[static.highres]` block, GLO-30) or
+  `terrain_source = "auto"`, it takes the bare-earth USGS 3DEP 1/3" DEM
+  where the 3DEP envelope contains its footprint;
+- outside 3DEP it is refused (`surface-model-under-buildings`); declare
+  `terrain_source = "gem15-dtm"` (bare earth, experimental). Where GEM-15
+  would fall back to GLO-30, that is refused too;
+- a surface model you name yourself is kept, with one warning per domain.
+
+The other domains of the tree, and configurations without buildings,
+resolve exactly as before. The building domains are part of the static
+identity (`bare_earth_domains`), so a preparation made without them is not
+reused.
+
 ## A city check: Manhattan at 50 m and 25 m
 
 This check asks whether individual buildings show up in a real-data LES, and
@@ -215,8 +276,9 @@ whether their heights in the model match the source data.
 - Physics: the 250 m, 50 m and 25 m domains run LES (`km_opt = 3`, PBL off).
 - Terrain: the bare-earth 3DEP 1/3" DEM (`[static.highres] terrain_source =
   "usgs-3dep-13as"`). On a city, use a bare-earth source. Copernicus
-  GLO-30, which `auto` can pick on the HRRR route, is a surface model with
-  the buildings already in it.
+  GLO-30, the sub-km default, is a surface model with the buildings
+  already in it. Since phase 2 a configuration with `obstacle_opt` (or an
+  urban canopy under LES) does this itself; see "Terrain under buildings".
 - Buildings: `woof buildings` made both products from an OpenStreetMap
   extract (256,305 footprints in the 50 m domain), with GEM-15 supplying
   missing heights. The 50 m product used a 12.5 m lattice, the default
