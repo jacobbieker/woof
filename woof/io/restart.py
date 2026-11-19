@@ -3531,6 +3531,9 @@ def _drop_default_off_run_keys(values: dict) -> None:
             values.pop(name, None)
     if values.get("urban_table_dir", "") == "":
         values.pop("urban_table_dir", None)
+    # The gridded urban morphology (woof.core.urban_param): absent unset.
+    if values.get("urban_param_file", "") == "":
+        values.pop("urban_param_file", None)
     # The sixth-order filter form and the fork's second factor (unset at
     # the WRF v4.6.1 form), and mp_zero_out with its threshold and array
     # switch (off), are omitted at their defaults: every earlier header
@@ -3719,7 +3722,8 @@ def _configuration_digest_values(config: Mapping) -> dict:
 #: :func:`_configuration_digest_values`.
 _URBAN_DIGEST_FIELDS = ("sf_urban_physics", "use_wudapt_lcz", "num_urban_hi",
                         "urban_water_balance",
-                        "urban_ucm_generation", "urban_treeoption", "urban_ttscheme", "urban_fvg", "urban_table_dir")
+                        "urban_ucm_generation", "urban_treeoption", "urban_ttscheme", "urban_fvg", "urban_table_dir",
+                        "urban_param_file")
 
 
 def _configuration_fingerprint(cfg) -> str:
@@ -4394,6 +4398,22 @@ def physics_setup_identity(state, cfg) -> dict:
                     from exc
         identity["obstacles"] = {"policy": "porous-immersed-v1",
                                  "product_sha256": digest}
+    # The gridded urban morphology (woof.core.urban_param): urban_var_init
+    # re-reads urban_param_file at resume before the checkpoint's urban
+    # arrays are restored, so the bytes are bound and a resume against
+    # another file refuses.  Unset adds no key.
+    if urban is not None and getattr(cfg, "urban_param_file", ""):
+        from woof.file_digest import sha256_file
+        path = Path(cfg.urban_param_file)
+        try:
+            digest = sha256_file(path, block_bytes=1024 * 1024)
+        except OSError as exc:
+            raise RestartManifestError(
+                f"urban_param_file {str(path)!r} is unreadable; the "
+                "checkpoint cannot bind the urban morphology it runs with") \
+                from exc
+        identity["urban_param"] = {"policy": "wrf471-real-split-v1",
+                                   "file_sha256": digest}
     return identity
 
 
@@ -5758,6 +5778,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'mynn_sfclay_variant': 'wrf_461',
     'urban_ucm_generation': 'wrf_471',
     'urban_table_dir': '',
+    'urban_param_file': '',
     'use_rap_aero_icbc': False,
     'ruc_snow': 'wrf_461',
     'ruc_2m_diagnostic': 'flux',
@@ -6325,6 +6346,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "spacewx_aurora_opt": 0, "spacewx_kp_source": "",
                           "solar_ssi_opt": 0, "solar_ssi_source": "",
                           "spacewx_epp_opt": 0, "spacewx_epp_source": "",
+                          "urban_param_file": "",
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without
                           # the key ran the exact arithmetic.

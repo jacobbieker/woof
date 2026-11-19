@@ -1,0 +1,16 @@
+# gfortran: GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0
+# glibc:    ldd (GNU libc) 2.44
+# -O0 module_sf_urban.o libm symbols (THE REFERENCE):
+U __powisf2
+U acosf
+U asinf
+U atan2f
+U atanf
+U cosf
+U expf
+U log10f
+U logf
+U powf
+U sinf
+U tanf
+nudapt-nlcd-probe: rows differing ref vs snan-init: 0
