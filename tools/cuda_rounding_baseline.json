@@ -2749,7 +2749,7 @@
    },
    {
     "file": "woof/core/kernels/chem_ftuv.cu",
-    "sha256": "c5ce548ac34c9570d7b57a43abd47e8f679910506cfabbb876c610f563867270"
+    "sha256": "3c7dc316b66179ddd4d8a8af18fbc5225e0409061efe95a782208e4273c7788c"
    },
    {
     "file": "woof/core/kernels/chem_inventory.cu",
@@ -11624,15 +11624,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "eb0fb4dacb582a1ffcd14b3f0bc12765acdcf019d40afbf1066d5333de4edd82",
+    "sha256": "595d6ae3906939a662d968f90db878d0cf52d8dd062645a3f05f001a8e089b06",
     "sites": {
-     "100": 890
+     "100": 905
     }
    },
    "native_differences": {
-    "sha256": "4265122c38ef8a584ecb79ec393fa373f74aaeef6c916b1670780d867d710ed9",
+    "sha256": "40d3bc21a1ae5c42721959f64471c5b6215f49a931408ad055a8625236d0ba56",
     "sites": {
-     "100": 1985
+     "100": 2326
     }
    },
    "native_errors": {},
@@ -11654,7 +11654,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "d166d48bb75c8b8eb0674c5c0d849c9f9ed4a87f2a6722ec884905861bfc1f24"
+   "source_sha256": "3f5cb04802df32d6bfe3b4dde6fe81105577e63c22ca7f4f9560c63acfb4d627"
   },
   "kernels:chem_inventory": {
    "assessment": "static_diagnostic_only",
