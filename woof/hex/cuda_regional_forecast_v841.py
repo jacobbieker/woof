@@ -1070,13 +1070,21 @@ class _PaddedMaskExtents:
         self.n_edges = int(n_edges)
 
 
+#: The default WOOF_HEX_LBC_TEND_CACHE_MB.
+_TEND_CACHE_DEFAULT_MB = 256
+
+
 def _tend_cache_bytes() -> int:
-    """WOOF_HEX_LBC_TEND_CACHE_MB: bytes of full-extent driving tendencies kept per LBC interval (0, the default, turns it off)."""
+    """WOOF_HEX_LBC_TEND_CACHE_MB: bytes of full-extent driving tendencies kept per LBC interval.
+
+    256 MiB by default: a regional Alps/edi rank's three fields fit many times over, and a conus3km
+    rank (about 590 MB for all three) holds what fits and expands the rest per call, so the cache
+    never adds more than this per rank.  0 turns it off (every call expands)."""
 
     import math
     import os
 
-    value = os.environ.get("WOOF_HEX_LBC_TEND_CACHE_MB", "0").strip() or "0"
+    value = os.environ.get("WOOF_HEX_LBC_TEND_CACHE_MB", "").strip() or str(_TEND_CACHE_DEFAULT_MB)
     try:
         mib = float(value)
     except ValueError:
@@ -1235,9 +1243,9 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
 
         The expansion (a zero fill and a scatter of the boundary support) is the
         same for every stage and step of one LBC interval.  With
-        WOOF_HEX_LBC_TEND_CACHE_MB > 0 it is kept, within that many MiB, until
-        ``start`` or ``advance`` (a conus3km rank's three fields need about
-        590 MB).  Off by default: every call expands.  Every consumer reads it
+        WOOF_HEX_LBC_TEND_CACHE_MB > 0 (256 by default) it is kept, within that many
+        MiB, until ``start`` or ``advance`` (a conus3km rank's three fields need
+        about 590 MB, so the default holds some of them).  0: every call expands.  Every consumer reads it
         (speczone kernels, graph staging copies).
         """
         compact = super().tendency(name)
