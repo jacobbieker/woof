@@ -85,8 +85,6 @@ def test_nested_pd_lbc_is_folded_once_before_advection(monkeypatch):
     with a non-unit map factor.  Retaining it in the advection accumulator
     produces ``B + msft*B`` in addition to the time-t scalar.
     """
-    from types import SimpleNamespace
-
     import woof.core.moist as moist
     import woof.ingest.lateral_bc as lateral_bc
 
@@ -183,12 +181,13 @@ def test_nested_pd_lbc_is_folded_once_before_advection(monkeypatch):
     monkeypatch.setattr(moist, "_update_scalar_kernel", numpy_update_kernel)
 
     state = FakeState()
-    cfg = SimpleNamespace(
-        nested=True, specified=False, open_x=False, open_y=False,
-        moist_adv_opt=1, dx=1.0, dy=1.0, spec_zone=1,
-        # woof.config defaults: no tracers, no MAD-WRF, PD tracer advection,
-        # no cumulus.
-        tracer_opt=0, madwrf_opt=0, tracer_adv_opt=1, cu_physics=0)
+    # The real RunConfig's defaults (no tracers, no MAD-WRF, no cumulus, ...),
+    # so a field the stage starts reading cannot break the stub.
+    from woof.config import RunConfig
+    cfg = RunConfig(nx=4, ny=3, nz=1, dx=1.0, dy=1.0, ztop=1000.0, dt=2.0,
+                    run_seconds=2.0, nested=True, moist_adv_opt=1,
+                    spec_zone=1)
+    assert not (cfg.specified or cfg.open_x or cfg.open_y)
     dt = 2.0
     moist.advance_scalars_stage(
         state, cfg, np.zeros((1, 3, 5), dtype=np.float32),
