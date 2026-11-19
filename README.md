@@ -767,6 +767,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   instead of 64, so both of its resident blocks stay busy: `mskf_column`
   fell from 32.5 to 11.0 ms per step on Edinburgh 3 km (A6000),
   byte-identical.
+  Hex: the composite step's scheme health checks (microphysics, YSU,
+  Grell-Freitas, Noah-MP's surface identity, the lagged heating rate and
+  the radiative-carrier finiteness) record on the device and are read
+  once, just before the step commits, so a failure is still refused and
+  rolled back by the step that produced it (Edinburgh 3 km on Metal: 257
+  to 247 ms per step, byte-identical; `WOOF_HEALTH_READBACK=immediate`
+  restores the per-check reads).
 - **Lakes.** `lake_state_source = "era5"` or `"auto+era5"` (opt-in) starts
   lakes outside GLSEA from ERA5's FLake lake state (keyless, Google ARCO),
   including the CLM lake column's profile, instead of the forcing's skin (on
