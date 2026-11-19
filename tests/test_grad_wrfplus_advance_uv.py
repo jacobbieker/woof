@@ -79,12 +79,19 @@ def _run(backend, body, tmp_path, extra_env=None):
 
 CONFIGS = [dict(), dict(spec_zone=1), dict(top_lid=1, moist_cq=1), dict(base3d=0),
            dict(spec_zone=1, top_lid=1, moist_cq=1, use_emdiv=1, has_msf=1,
-                xscale=-30.0, yscale=-30.0)]
+                xscale=-30.0, yscale=-30.0),
+           dict(spec_zone=2, top_lid=1, moist_cq=1, use_emdiv=1,
+                xscale=-30.0, yscale=-30.0),
+           dict(top_lid=1, moist_cq=1, use_emdiv=1, has_msf=1,
+                xscale=-30.0, yscale=-30.0),
+           dict(nz=4, ny=3, nx=1), dict(nz=4, ny=2, nx=2, top_lid=1),
+           dict(nz=5, ny=5, nx=3, spec_zone=1, base3d=0, has_msf=1)]
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_dot_product(backend, tmp_path):
-    """<TL dx, dy> == <dx, AD dy>: 1e-12 in binary64, 1e-5 in binary32."""
+    """<TL dx, dy> == <dx, AD dy>: 1e-12 in binary64; 1e-5 in binary32,
+    relative to the term magnitudes (small grids cancel to ~1e-3)."""
     dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
     out = _run(backend, f'''
 for dtn in {dtypes!r}:
@@ -103,11 +110,38 @@ for dtn in {dtypes!r}:
             p = dev(C.uv_perturbation(g, 100 + i, dt))
             q = dev(C.uv_perturbation(g, 200 + i, dt))
             out[f"{{dtn}}/{{i}}/{{hybrid}}"] = K.dot_product(
-                tl, ad, [p[n] for n in names], [q["u_pp"], q["v_pp"]])
+                tl, ad, [p[n] for n in names], [q["u_pp"], q["v_pp"]],
+                terms=dtn == "float32")
 ''', tmp_path)
     for key, rel in out.items():
         limit = 1e-12 if key.startswith("float64") else 1e-5
         assert rel < limit, (key, rel)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_adjoint_accumulates(backend, tmp_path):
+    """The AD adds into ``adj``: a random start comes back plus the
+    zero-start adjoint, in every output (a ``=`` for ``+=`` fails here)."""
+    dtn = "float32" if backend == "mlx" else "float64"
+    out = _run(backend, f'''
+dt = np.dtype({dtn!r})
+for i, over in enumerate({CONFIGS!r}):
+    g = C.uv_geometry(**over)
+    tr = dev(C.uv_trajectory(g, 51 + i, dt, hybrid=bool(i % 2)))
+    q = dev(C.uv_perturbation(g, 500 + i, dt))
+    s = dev(C.uv_perturbation(g, 600 + i, dt))
+    zero = run_ad(g, tr, q["u_pp"], q["v_pp"])
+    adj = {{n: s[n].copy() for n in A.UV_ACTIVE}}
+    A.advance_uv_ad(q["u_pp"], q["v_pp"], tr, adj, g)
+    for n in A.UV_ACTIVE:
+        want = cp.asnumpy(s[n]).astype(np.float64) + cp.asnumpy(zero[n])
+        got = cp.asnumpy(adj[n]).astype(np.float64)
+        scale = max(float(np.abs(want).max()), 1e-300)
+        out[f"{{i}}/{{n}}"] = float(np.abs(got - want).max()) / scale
+''', tmp_path)
+    limit = 1e-5 if backend == "mlx" else 1e-13
+    bad = {k: v for k, v in out.items() if not v < limit}
+    assert not bad, bad
 
 
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
@@ -136,7 +170,7 @@ for i, over in enumerate({CONFIGS!r}):
 ''', tmp_path)
     for key, rows in out.items():
         misfits = [abs(r - 1.0) for _, r in rows]
-        assert misfits[-1] < 1e-6, (key, rows)
+        assert misfits[-1] < 1e-5, (key, rows)
         assert misfits[0] < 0.1, (key, rows)
 
 

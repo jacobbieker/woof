@@ -33,11 +33,21 @@ def norm(xs) -> float:
     return math.sqrt(inner(xs, xs))
 
 
-def dot_product(tl, ad, dx, dy) -> float:
-    """Relative misfit of <TL dx, dy> against <dx, AD dy>."""
-    left = inner(tl(dx), dy)
-    right = inner(dx, ad(dy))
+def dot_product(tl, ad, dx, dy, *, terms: bool = False) -> float:
+    """Relative misfit of <TL dx, dy> against <dx, AD dy>.
+
+    ``terms=True`` scales by the inner products of the magnitudes
+    (<|TL dx|, |dy|> and <|dx|, |AD dy|>) instead of the results: the
+    roundoff bound when the terms cancel, as they can on small grids in
+    binary32.
+    """
+    tdx, ady = tl(dx), ad(dy)
+    left = inner(tdx, dy)
+    right = inner(dx, ady)
     scale = max(abs(left), abs(right), np.finfo(np.float64).tiny)
+    if terms:
+        mag = lambda xs: [np.abs(_host(x)) for x in xs]
+        scale = max(scale, inner(mag(tdx), mag(dy)), inner(mag(dx), mag(ady)))
     return abs(left - right) / scale
 
 

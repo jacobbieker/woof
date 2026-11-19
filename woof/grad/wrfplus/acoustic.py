@@ -73,8 +73,13 @@ def _real(dtype) -> str:
     raise TypeError(f"TL/AD kernels run in float64 or float32, not {dtype}")
 
 
-@lru_cache(maxsize=None)
 def _module(unit: str, real: str):
+    import cupy as cp
+    return _device_module(unit, real, cp.cuda.Device().id)
+
+
+@lru_cache(maxsize=None)
+def _device_module(unit: str, real: str, device: int):
     import cupy as cp
     source = (KERNELS / f"{unit}.cu").read_text(encoding="utf-8")
     return cp.RawModule(code=source,
@@ -96,6 +101,27 @@ def _dtype(arrays) -> np.dtype:
     return kinds.pop()
 
 
+def _check(geom: UVGeometry, named) -> None:
+    """Shapes, contiguity and distinct buffers: the kernels index raw
+    C-order memory and declare every pointer ``__restrict__``."""
+    if geom.nz < 3:
+        raise ValueError("advance_uv needs nz >= 3 (dpn reads levels 0-2)")
+    shapes = uv_shapes(geom)
+    seen = {}
+    for label, name, a in named:
+        if tuple(a.shape) != shapes[name]:
+            raise ValueError(f"{label} {name}: shape {tuple(a.shape)}, "
+                             f"expected {shapes[name]}")
+        flags = getattr(a, "flags", None)
+        if flags is not None and not flags.c_contiguous:
+            raise ValueError(f"{label} {name} is not C-contiguous")
+        ptr = getattr(getattr(a, "data", None), "ptr", None)
+        if ptr is not None:
+            if ptr in seen:
+                raise ValueError(f"{label} {name} aliases {seen[ptr]}")
+            seen[ptr] = f"{label} {name}"
+
+
 def advance_uv_tl(u_pp, v_pp, u_d, v_d, traj: dict, pert: dict,
                   geom: UVGeometry, *, nl: bool = True) -> None:
     """WRFPLUS g_advance_uv: update u_d/v_d (and u_pp/v_pp when ``nl``).
@@ -104,6 +130,10 @@ def advance_uv_tl(u_pp, v_pp, u_d, v_d, traj: dict, pert: dict,
     """
     traj_args = tuple(traj[n] for n in UV_TRAJECTORY)
     pert_args = tuple(pert[n] for n in UV_ACTIVE)
+    _check(geom, [("state", "u_pp", u_pp), ("state", "v_pp", v_pp),
+                  ("pert", "u_pp", u_d), ("pert", "v_pp", v_d)]
+           + [("traj", n, traj[n]) for n in UV_TRAJECTORY]
+           + [("pert", n, pert[n]) for n in UV_ACTIVE])
     dtype = _dtype((u_pp, v_pp, u_d, v_d) + traj_args + pert_args)
     g = geom
     _kernel("advance_uv", "advance_uv_tl", dtype)(
@@ -120,6 +150,9 @@ def advance_uv_ad(u_a, v_a, traj: dict, adj: dict, geom: UVGeometry) -> None:
     import cupy as cp
     traj_args = tuple(traj[n] for n in UV_TRAJECTORY)
     dtype = _dtype((u_a, v_a) + traj_args + tuple(adj[n] for n in UV_ACTIVE))
+    _check(geom, [("adj", "u_pp", u_a), ("adj", "v_pp", v_a)]
+           + [("traj", n, traj[n]) for n in UV_TRAJECTORY]
+           + [("adj", n, adj[n]) for n in UV_ACTIVE])
     g = geom
     nu = g.nz * g.ny * (g.nx + 1)
     nv = g.nz * (g.ny + 1) * g.nx

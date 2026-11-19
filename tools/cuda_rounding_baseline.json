@@ -2200,8 +2200,8 @@
    {
     "call_sha256": "dd8d577435e9cc5448cf99be773dd63b1de7d74e928b5e8c31329c3492d09f9d",
     "constructor": "RawModule",
-    "factory": "_module",
-    "factory_sha256": "13b20083602fb2e739437ce9ef8edde8632bfeb410ada1cff08a5833e128211d",
+    "factory": "_device_module",
+    "factory_sha256": "059c7dcacd9e2ee80d633939543a26af57e95fa9c54d8f64817478a491c25ac4",
     "file": "woof/grad/wrfplus/acoustic.py",
     "status": "unresolved"
    },
@@ -5567,7 +5567,7 @@
    },
    {
     "file": "woof/grad/wrfplus/acoustic.py",
-    "sha256": "77274160e93301138227fab4a476ba178bfb35ac23108ad614d72625031eb2e1"
+    "sha256": "35a1255b10f73b0bd725c8603f6804e1f96e5707cb277ea92c1ed2f283380e15"
    },
    {
     "file": "woof/hex/cuda_acoustic.py",
