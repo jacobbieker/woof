@@ -545,7 +545,7 @@ New package `woof/da/var/`, nothing imported on any forecast path:
 | `analysis.py` | outer loops, `x_a`, the WRFDA-variable to WRF-prognostic transfer, analysis bundle write |
 | `hybrid.py` | alpha control variable from on-device LETKF members (V3) |
 | `gen_be.py` | NMC and ensemble statistics to `be.dat` (V2) |
-| `varbc.py`, `rtm/` | V4 radiances, opt-in |
+| `varbc.py` | V4 radiances, opt-in; the CRTM builder, shim and operator are `woof/rtm/` (section 11.9), shared with the LETKF path |
 | `oracle.py` | runs and parses the WRFDA oracle, compares (section 5) |
 
 Tests: `tests/test_var_*.py`. Oracle fixtures under `tests/data/wrfda471/`
@@ -1180,7 +1180,7 @@ default `B`.
 | V4.0 | Hydrometeor control variables (`cloud_cv_options = 2` first: `qcw`, `qrn`, `qci`, `qsn`, `qgr` as CVs with WRFDA's `be.dat` hydrometeor records, their RF/EOF transforms and adjoints; `cloud_cv_options = 3` later); O1/O2 extended to the hydrometeor records; needed by V4.1's indirect reflectivity and V4.2 | 1.5-2 w |
 | V4.1 | Radar radial velocity (TL/AD; geometry shared with `obsop.py`) and indirect reflectivity (Wang et al. 2013: retrieved `qr`/`qs`/`qg` and in-cloud humidity), against WRFDA's radar ASCII path | 2-3 w |
 | V4.2 | GOES CWP (`obsop_cwp`, linear in the hydrometeors) as a variational operator; needs V4.0's hydrometeor CVs (or a hydrometeor alpha from V3) | 1 w |
-| V4.3 | `crtm` opt-in: CRTM v2.4+ build and C shim, coefficients path, TL/AD/K calls, radiance readers (AMSU-A/MHS BUFR first; the tutorial has AMSU), thinning; against WRFDA's CRTM path built with the same CRTM version | 3-6 w |
+| V4.3 | `crtm` opt-in: TL/AD/K calls through `woof/rtm/` (its CRTM v2.4+ build, C shim and coefficients path are section 11's R4, one builder for both paths), radiance readers (AMSU-A/MHS BUFR first; the tutorial has AMSU), thinning; against WRFDA's CRTM path built with the same CRTM version | 3-6 w |
 | V4.4 | VarBC (predictors, `Jp`, `VARBC.in/out`), cold and warm start | 2-3 w |
 
 **Gate GV4:**
@@ -1545,10 +1545,16 @@ reconstructs it in three steps.
    - 470, 2250, 6900 and 10400 nm: GOES and Himawari, never Meteosat.
    - So a pixel with a finite 6200 nm value and a NaN 6900 nm value is in
      a Meteosat sector. That test works at night, from the infrared alone.
+     It holds only from 2018-11-14, when every sector is ABI, AHI or
+     SEVIRI. Before that, the legacy GOES-13/15 imagers had a water-vapour
+     channel but no 6.9 µm band, and would be misread as Meteosat.
 2. **Nominal sub-satellite longitudes, per era.** woof keeps a dated table:
-   - GOES-East at 75.2° W: GOES-16, then GOES-19 from 2025-04-07.
-   - GOES-West at 137.2° W: GOES-17 from 2019-02-12, then GOES-18 from
-     2023-01-04.
+   - GOES-East at 75.2° W: GOES-16, then GOES-19 from 2025-04-04 (the
+     data transition; GOES-19 was declared operational on 2025-04-07).
+   - GOES-West at 137.2° W: GOES-17, then GOES-18 from 2023-01-04.
+     GOES-17 drifted to 137.2° W in November 2018 and was declared
+     operational on 2019-02-12; from 2018-11-14 woof treats it as the
+     West sector at its final position.
    - Himawari at 140.7° E: Himawari-8, then Himawari-9 from 2022-12-13.
    - Meteosat 0°: Meteosat-11 (SEVIRI) from 2018-02-20.
    - Meteosat IODC: Meteosat-8 at 41.5° E, then Meteosat-9 at 45.5° E from
@@ -1557,7 +1563,12 @@ reconstructs it in three steps.
    PR R2 cites each row against the operator's notice. It also confirms
    whether the 0° service has moved to Meteosat-12 (FCI), and which
    instrument SatWeave uses after that date; the band attributes still name
-   SEVIRI. A date outside the table is refused by name, never guessed. Within the band-availability
+   SEVIRI. The table starts on 2018-11-14. The archive's earlier years
+   (2016 to 2018) are refused for reconstruction by name, never guessed:
+   they need GOES-13/15 (no 6.9 µm), GOES-16 at its 89.5° W checkout
+   position (July to December 2017), Meteosat-10 at 0° (until 2018-02-20)
+   and Meteosat-7 IODC at 57.5° E (until 2017), each with its own rows and
+   band test. Within the band-availability
    class, a pixel's satellite is the candidate with the smallest view
    zenith angle, which is the usual mosaic rule.
 3. **Geometry.** For a geostationary satellite at height 35 786 km above
@@ -1575,7 +1586,12 @@ difference between flagged and unflagged pixels of the same sector.
 
 **Time.** A full-disc scan takes about 10 min (ABI, AHI) or 12-15 min
 (SEVIRI), so a pixel's true time is up to about 15 min from the nominal one.
-FGAT pairing takes the nominal time. The timing error enters as a
+Measured against native ABI (11.12): SatWeave's step at `T` is the scan
+that *starts* at `T`. Over the central US at 2025-03-01 18:00 UTC, the
+GOES-16 scan of 18:00-18:10 matches SatWeave with a 6.2 µm difference of
+0.20 K std. The 17:50 scan gives 0.54 K. So a pixel's time is `T` plus 0
+to 10 min (ABI), never before `T`. FGAT pairing takes `T` plus the row's
+offset in the scan. The timing error enters as a
 representativeness term that scales with the band's local tendency. That
 term is measured as the O-B difference between consecutive 30-minute archive
 steps, not assumed.
@@ -1609,6 +1625,26 @@ in CRTM, and treats the cross-calibration as a bias:
 - SEVIRI's 10.8 µm channel standing in for 11.2 µm, and 13.4 µm for
   13.3 µm, is where the sector bias is largest. That is why the bias is
   per sector and not per band.
+- **Measured, SatWeave against native ABI (2026-11-19).** GOES-16,
+  2025-03-01 18:00 UTC, box 105-80 W, 25-45 N. Native ABI L1b from the
+  bkr/geo virtual store (11.12) was averaged into the mosaic's 0.1° cells
+  (at least 9 pixels per cell). Pixels in overlaps or with view zenith
+  over 65° were excluded, leaving 6140 cells:
+
+  | band | SatWeave minus ABI, mean | std | 5-95 % | correlation |
+  |---|---|---|---|---|
+  | 6200 nm | 0.00 K | 0.20 K | -0.17 to 0.19 K | 0.997 |
+  | 6900 nm | 0.00 K | 0.33 K | -0.26 to 0.28 K | 0.994 |
+  | 7330 nm | 0.00 K | 0.62 K | -0.78 to 0.82 K | 0.992 |
+  | 11200 nm | 0.00 K | 2.19 K | -3.4 to 3.6 K | 0.990 |
+
+  GOES-East in SatWeave is therefore not adjusted. The spread is
+  resampling, since SatWeave's own regridding is not a cell mean, and it is
+  largest in the window band, where sub-cell contrast is largest. The other
+  sectors are measured the same way in R4 (11.12 has the sources): AHI from
+  the Himawari virtual stores, SEVIRI from `msg_3000m`/`odegree_3000m`.
+  That gives the per-sector cross-calibration bias that 11.3 treats as a
+  static term.
 - **Measured (2026-11-19):**
   - CRTM 2.4.1's coefficient package (`crtm_coefficients_2.4.1_skylab_4.0`)
     has `abi_g16`, `abi_g17`, `abi_g18`, `ahi_himawari8`, `ahi_himawari9`
@@ -1655,8 +1691,12 @@ one-sided bias of observation-only screening (Geer et al. 2018).
     which marks cloud edges.
   - The split window, 11.2 minus 12.4 µm, flags thin cirrus.
   - At night only, 3.83 minus 11.2 µm flags low cloud and fog.
-- **Background-side test:** the member-mean column condensate is above a
-  threshold (`qc + qi + qs` path > 5 g m-2, the `obsop_cwp` operator).
+- **Background-side test:** the member-mean condensate path *above the
+  band's Jacobian-peak pressure minus 100 hPa* is above a threshold
+  (`qc + qi + qs` > 5 g m-2, the `obsop_cwp` operator). The window bands
+  use the whole column. Integrating only above the weighting function lets
+  the water-vapour exception below keep a column whose background has the
+  same low cloud as the observation.
 - **Water-vapour bands above cloud.** A cloud below a band's weighting
   function does not affect it.
   1. Estimate the cloud-top pressure by matching the 11.2 µm brightness
@@ -1711,8 +1751,9 @@ one-sided bias of observation-only screening (Geer et al. 2018).
   - From 55° to 65° the error is inflated linearly to twice its value.
   - Meteosat sectors stop at 55° because of the published MSG infrared
     limb artefacts.
-- **Glint:** 3.83 µm is rejected where the glint angle is under 25° and
-  the sun is up. The other infrared bands are unaffected.
+- **Glint:** none is needed at first. 3.83 µm is used only at night
+  (11.6), and the other infrared bands are unaffected by glint. A daytime
+  3.83 µm would add a glint-angle cut (under 25°).
 - **Surface:**
   - Window bands over land wait for an emissivity atlas. The CRTM IR land
     model is per surface class, which is too coarse over deserts.
@@ -1737,6 +1778,10 @@ The operator is JCSDA CRTM v2.4 or later, which is CC0 (section 1.11).
 woof links it through a small Fortran shim with C bindings (11.10, R4).
 
 - **Measured (2026-11-19, M3 Max):**
+  - The licence was checked on the tag built, not assumed from v2.4.0:
+    `v2.4.1-jedi.2` (`e477c08`) carries the CC0 dedication and no
+    GPL-headed file under `src/`. woof's builder repeats that scan on
+    every tree it builds and refuses a tree that fails it.
   - CRTM v2.4.1 (tag `v2.4.1-jedi.2`, 203 sources) compiles with gfortran
     16 and netCDF-Fortran in under a minute. No ecbuild is needed: woof's
     builder reads CRTM's own source list from `src/CMakeLists.txt` and
@@ -1773,8 +1818,11 @@ woof links it through a small Fortran shim with C bindings (11.10, R4).
 **A. Forward-only, into the existing LETKF (this work).**
 
 - The LETKF needs `H(x_k)` for each member and nothing else.
-- The adapter (`woof/da/obs_radiance.py`, like `obs_goes.py`) runs the
-  forward operator on every member's full state.
+- The adapter (`woof/da/obs_radiance.py`, like `obs_goes.py`) first
+  builds the observation column list (superobs, thinning, QC that needs
+  only the observation), then runs the forward operator for every member
+  on those columns only. A 30 km thinning keeps a few per cent of a
+  regional grid's columns, so this is what keeps the CPU CRTM affordable.
 - It places each superob as a column observation at one level, the level
   of the member-mean Jacobian peak, as `obs_goes.py` places CWP.
   Localisation does the rest. The vertical radius has to span the
@@ -1795,17 +1843,19 @@ woof links it through a small Fortran shim with C bindings (11.10, R4).
   - K is computed once at the innovation step, from the background.
 - VarBC (V4.4) takes the static bias of 11.3 as its cold start.
 - The 3D-Var worker's GV4 gate compares O-B per channel with WRFDA's CRTM
-  path built on the same CRTM version. WRFDA's ingest is BUFR from the
-  sounders, not imagers. So woof's imager O-B is checked against its own
-  path-A numbers and against published O-B statistics, and the WRFDA
-  comparison waits for an AMSU-A or ABI BUFR case.
+  path built on the same CRTM version. WRFDA 4.7.1 reads imagers directly:
+  `da_read_obs_ncgoesabi` (GOES ABI netCDF), `da_read_obs_hdf5ahi` and
+  the two `netcdf4ahi` readers (Himawari AHI), `da_read_obs_bufrseviri`
+  (SEVIRI BUFR), each with its own QC (`da_qc_goesabi`, `da_qc_ahi`,
+  `da_qc_seviri`). So woof's imager O-B is checked against the oracle on
+  the same ABI or AHI granule, not only against path A's own numbers.
 
 **Interfaces between the two owners** (recorded in the
 WRFDA-3DVAR-HANDOFF.md working notes):
 
 | module | owner | what the other side calls |
 |---|---|---|
-| `woof/obs/satweave.py`, the imager readers | this work | `read_window(...) -> ImagerScene` (11.10) |
+| `woof/obs/satweave.py`, `woof/obs/geo_icechunk.py`, the imager readers | this work | `read_window(...) -> ImagerScene` (11.10) |
 | `woof/rtm/` | this work | `ClearSkyOperator(sensors, coeffs).simulate(profiles, geometry) -> bt` and `.jacobian(...) -> K` (layers top-down, numpy) |
 | `woof/rtm/profiles.py` | this work | `profiles_from_wrf_state(state, setup, columns)` |
 | `woof/da/obs_radiance.py` | this work | the LETKF adapter (path A) |
@@ -1831,9 +1881,10 @@ readers fill it exactly.
 
 | imager | source | licence and access |
 |---|---|---|
+| GOES ABI, AHI, AMI, SEVIRI, FCI as Icechunk stores | Source Cooperative `bkr/geo` (`us-west-2.opendata.source.coop`, anonymous); section 11.12 | the underlying producers' terms (rows below); the GOES virtual stores reference NOAA's own files |
 | GOES ABI (16-19) L1b `RadF`/`RadC`, L2 `CMIPF` | NOAA NODD: `s3://noaa-goes{16,17,18,19}` (AWS), `gs://gcp-public-data-goes-{16,17,18,19}` (GCP); netCDF-4 | open, no account; NOAA requests attribution of unaltered data and no implied endorsement (AWS Open Data registry entry `noaa-goes`) |
 | Himawari AHI (8/9) L1b full disc | NOAA NODD: `s3://noaa-himawari{8,9}`, `AHI-L1b-FLDK`; Himawari Standard Data segments, bzip2 | JMA data distributed by NOAA; NOAA and JMA request attribution of unaltered data and no implied endorsement (registry entry `noaa-himawari`) |
-| MSG SEVIRI L1.5, MTG FCI L1C | EUMETSAT Data Store (a free EUMETSAT account and API key) | EUMETSAT Data Policy (amended 27 June 2024): Core data, including hourly Level 1 SEVIRI and FCI, free and unrestricted under CC BY 4.0, attribution "[Contains modified] EUMETSAT Meteosat data [year]"; higher-frequency Level 1 data are "Recommended" data with conditions, and redistribution is excluded from "any use" |
+| MSG SEVIRI L1.5, MTG FCI L1C | EUMETSAT Data Store (a free EUMETSAT account and API key) | EUMETSAT Data Policy (amended 27 June 2024): Core data, including hourly Level 1 SEVIRI and FCI, free and unrestricted under CC BY 4.0, attribution "[Contains modified] EUMETSAT Meteosat data [year]"; higher-frequency Level 1 data (for example 15-minute SEVIRI) are "Recommended" data, free for non-commercial use but with conditions on commercial use and redistribution; woof caches them locally and never redistributes them |
 
 - **Polar sounders** (ATMS, CrIS, IASI, AMSU-A/MHS) are a follow-on. They
   share the operator, but they need BUFR ingest, scan-dependent bias and
@@ -1847,9 +1898,9 @@ readers fill it exactly.
 | PR | content |
 |---|---|
 | R1 | this section |
-| R2 | `woof/obs/satweave.py`: time, bounding box and band subsetting over anonymous HTTPS (or obstore when installed); both store layouts; the NaN rules; the 11.2 reconstruction; a local cache under the obs cache with a provenance record (CC BY 4.0 attribution, chunk digests); `woof fetch satweave` |
-| R3 | native readers: GOES ABI L1b/CMIP from NODD first, then Himawari AHI HSD; the same `ImagerScene` with true geometry |
-| R4 | `woof/rtm/`: the CRTM opt-in builder and shim, `ClearSkyOperator`, profiles from woof's state, coefficient digests; O-B per band per sector on a real case |
+| R2 | `woof/obs/satweave.py`: time, bounding box and band subsetting over anonymous HTTPS; both store layouts; the NaN rules; the 11.2 reconstruction; a local cache under the obs cache with a provenance record (CC BY 4.0 attribution, chunk digests); `woof fetch satweave` |
+| R3 | native readers from the `bkr/geo` Icechunk stores first (11.12): `woof/obs/geo_icechunk.py` with GOES ABI L1b from the virtual stores, then AHI and AMI from their virtual stores, and SEVIRI and FCI from the Satpy stores. The raw-file route is the fallback where the stores do not cover a case, reusing what woof already has: `rw_goes bt` (ABI L1b to brightness temperature, DQF-gated, ACM mask and CMIP cross-check) and `rw_goes geo-fetch`/`geo-bt` (Himawari AHI HSD and GK-2A AMI from NODD, per-row scan time) already write `gpuwm-obs.goes-bt.v1` packs. R3 is the Python reader of those packs into the same `ImagerScene`, with true geometry from the pack's navigation; no second decoder |
+| R4 | `woof/rtm/`: the CRTM opt-in builder and shim, `ClearSkyOperator`, profiles from woof's state, coefficient digests; O-B per band per sector on a real case. `rw_goes forward` (ABI clear-sky, a fast model trained on CRTM optical depths, table `gpuwm-da.abi-fast-model.v1`) stays the fast path; CRTM is its reference, and GR4 reports both where a table exists |
 | R5 | `woof/da/obs_radiance.py`: superobs, thinning, QC, cloud screening, bias; radiance batches through the LETKF into an analysis bundle; one regional case showing a smaller first-guess departure in the water-vapour bands and no worse conventional scorecard |
 | R6 (plan only) | 3D-Var TL/AD with VarBC (V4.3, V4.4); all-sky; reflectances through a visible RT or a neural operator (section 6.2: Scheck 2021); the hex route through the same column operator on hex columns |
 
@@ -1861,14 +1912,116 @@ readers fill it exactly.
   regional model: 1-2 K for the water-vapour bands and 1.5-3 K for the
   windows. A band outside its range blocks that band, not the PR.
 - **GR5 (impact).** On one regional case, the analysis reduces the
-  water-vapour bands' RMS first-guess departure against the next SatWeave
-  step (an independent time), and the conventional-observation scorecard
+  water-vapour bands' RMS first-guess departure at the next analysis time.
+  The next SatWeave step is not independent: it is the same instrument,
+  with the same bias correction and time-correlated errors. So the
+  departure is also checked against an independent humidity source
+  (radiosonde and GNSS precipitable water from the bkr/obs stores) and
+  against a different imager where one overlaps (a native AHI or ABI scan
+  not assimilated). The conventional-observation scorecard
   (P0's `J_o` against the bkr/obs stores, and the surface and upper-air
   referees) is no worse beyond its member-to-member noise.
 - **Default identity.** Nothing on a forecast path imports `woof.rtm`,
   `woof.obs.satweave` or `woof.da.obs_radiance`, and an import-graph test
   checks it. A wheel-content test checks that no CRTM file or symbol is in
   the wheel (GV4's test, shared).
+
+### 11.12 The `bkr/geo` Icechunk stores (surveyed 2026-11-19)
+
+Source Cooperative's `bkr/geo` (bucket `us-west-2.opendata.source.coop`,
+prefix `bkr/geo/`) holds geostationary imagery as Icechunk repositories,
+readable anonymously. Every store was opened and its time coordinate read.
+Coverage is uneven, so a reader checks the store's own times for the case
+and never assumes coverage from a store's name. `*_test` stores are
+ignored.
+
+**GOES: `virtualized/` (the GOES source, per the user).**
+
+- **Layout.**
+  - `goes{16,17,18,19}_radf_C{01..16}` holds one ABI channel's full-disk
+    L1b radiance (`ABI-L1b-RadF`).
+  - Its chunks are *virtual references* into NOAA's own netCDF files. The
+    repository config names `s3://noaa-goes{16..19}/` as virtual-chunk
+    containers, anonymous, `us-east-1`. So a read returns NOAA's L1b bytes
+    with their DQF, Planck constants (`planck_fk1/fk2/bc1/bc2`), `kappa0`,
+    fixed-grid `x`/`y`, `time_bounds` and the actual sub-point.
+  - woof authorises only `s3://noaa-*` containers.
+- **Time split.**
+  - A channel's archive is split into segments: `_<date>` stores hold
+    scans up to that date, and the undated store holds the newest segment.
+  - GOES-16: `_2018-01-03` from 2017-02-28 (15-min cadence), then
+    `_2024-12-28`, then undated from 2024-12-29 to 2025-04-07 (10-min
+    cadence).
+  - GOES-17: `_2021-12-31`, then undated.
+  - GOES-18: `_2023-03-26`, `_2026-07-08`, `_2026-11-18`, then undated.
+  - GOES-19: `_2026-07-08` from 2024-10-10, `_2026-11-18`, then undated.
+  - Spans from the 2026-11-19 survey, by reading each head's time
+    coordinate: undated `goes17_radf_C08` holds 1245 scans,
+    2023-01-02 to 2023-01-10, at 10-min cadence. The GOES-17/18/19 dated
+    segments timed out from here, so their spans are not listed; woof reads
+    the span from the store at run time.
+  - woof lists the segments, opens the one whose end date first reaches
+    the case, and searches its time coordinate. That coordinate is chunked
+    27 scans per chunk, so woof bisects rather than reading thousands of
+    chunks. If the time is not there, woof tries the other segments, then
+    refuses with each segment's span.
+- **Being written.**
+  - Some repositories are mid-ingest. On 2026-11-19 the undated
+    `goes19_radf_*` and `goes18_radf_*` heads name manifests that are not
+    in the bucket, and the `_2026-11-18` stores had no repository yet.
+  - So woof falls back up to 8 snapshots from `main`'s head, and records
+    which snapshot it read.
+  - The stores were renamed after ingest: `Rad` became `abi_l1b_radiances`,
+    and `t` became `time`. Every array keeps its NOAA name in
+    `source_name`, and older snapshots still carry the original names. woof
+    addresses arrays by `source_name`.
+- **Measured.**
+  - One 4-channel, 849 x 1201-pixel box (105-80 W, 25-45 N) takes 39 s
+    cold from the UK, with channels read in parallel, and 2.5 s from
+    woof's cache.
+  - Chunks are 226 x 226 pixels, so a regional box reads a few dozen
+    chunks per channel, not the disc.
+- **Also there.** `goes1x_l2/` and `goes1x_l2_meso/` hold L2 products as
+  virtual stores: ACHA and ACHA2km, ACHP2km, ACHT, ACM, ACTP, per sector,
+  split the same way. ACM, the clear-sky mask, is the observation-side
+  cloud screen's natural input (11.5).
+- **The top-level GOES stores** (`goes-east_*`, `goes-west_*`,
+  `goes{16..19}_radf_C*`, `goes1x_l2_points`) are Satpy or partial copies.
+  Per the user, GOES is read from `virtualized/` only.
+
+**Other imagers (top level, and `virtualized/` for AHI and AMI).**
+
+| store family | instrument, CRTM sensor | grid | scans held | first, last |
+|---|---|---|---|---|
+| `virtualized/himawari{8,9}_isatss_C{01..16}[_<date>]` | AHI, `ahi_himawari8`/`9` | native L1b (virtual) | H8: 2020-07 to 2022-12-12 by year, and late 2025; H9: 2022-12-13 to 2026-10-21; 10-min | H8 `_2019-12-31` and `_2020-07-02` have no root group |
+| `virtualized/gk2a_ami_fd_{vi004..ir133,nr013,nr016,sw038}[_<date>]` | GK-2A AMI (CRTM `ami_gk2a`, presence in v2.4.1 to be checked) | native L1b (virtual) | about 12 days per year segment (early January 2024, 2025 and 2026; 16-27 February 2023) | sparse |
+| `himawari_{500,1000,2000}m` plus monthly `_backfill_YYYYMM` | AHI | Satpy | 1000m/500m: 2015-07 to 2025-01, 2-4 % of 10-min scans; backfills 2020-02 to 2025-12 (about 240 k scans at 1 km) | |
+| `msg_{1000,3000}m` | SEVIRI 0° (Meteosat-11 era), `seviri_m11` | 3 km (11 channels) or 1 km HRV | 2025-01-01 to 2026-10-24, 56 % (3 km) of 15-min scans | |
+| `rss_{1000,3000}m` | SEVIRI rapid scan, 5-min | 3 km and 1 km | 2025-01-02 to 2026-10-24, 29-41 % | |
+| `odegree_3000m` | SEVIRI 0°, Meteosat-10/11 | 3 km | 2018-01-01 to 2022-04-20, 27 % | |
+| `odegree-12*`, `mtg_{500,1000,2000}m`, `mtg_highres_1000m` | MTG-I1 FCI (Meteosat-12) | 0.5-2 km | `mtg_2000m`: 2024-09-24 to 2026-11-19, 97 %; `odegree-12*` to 2026-01, 13-18 % | |
+| `iodc_1000m`, `gk2a_*`, `himawari_2000m` (top level) | | | one day (2026-10-06) only | |
+| `mtg_irs_l1` | MTG-S1 IRS, hyperspectral infrared sounder | L1 spectra | 2026-07-31 to 2026-11-19, 11 s step | `mtg_irs_l1_lac4_hourly` has no root group |
+| `sentinel4_l2`, `tempo` | Sentinel-4 UVN, TEMPO (composition) | | | out of scope |
+
+- **CRTM coefficients.**
+  - ABI (`abi_g16/17/18`, with GOES-19 on `abi_g16`, see 11.3), AHI
+    (`ahi_himawari8/9`) and SEVIRI (`seviri_m08`-`m11`) are in the v2.4.1
+    package.
+  - FCI is not: the package has no `fci_*` file. Whether it has an AMI
+    file (`ami_gk2a`) is not yet checked. FCI, and AMI if it is missing,
+    wait for v2.4-readable files, or a proxy-plus-bias like GOES-19's.
+- **MTG-IRS** is the natural later hyperspectral-sounder target. It needs
+  the same operator with an IRS coefficient file, channel selection, and
+  the polar-sounder machinery of 11.10.
+- **Sentinel-4 and TEMPO** are atmospheric composition, so they are out of
+  scope here.
+- **Preference order per case.**
+  1. The `bkr/geo` virtual store, for native L1b and true geometry.
+  2. The raw NOAA, JMA or EUMETSAT files through `rw_goes bt` and
+     `geo-bt`, where the stores have no scan in tolerance.
+  3. SatWeave, where neither covers the case. Its geometry is
+     reconstructed.
 
 References for this section:
 
