@@ -865,7 +865,7 @@
     "call_sha256": "5004d0454501a98395939411abbfe58e1e9b231abfff8fa83985186eeffc46d8",
     "constructor": "compile_using_nvrtc",
     "factory": "_load_module_preserving_subnormals",
-    "factory_sha256": "5a3edef4009a0127f9d0764f3a872a6c017637a8b82974f4efd1b667a96e67aa",
+    "factory_sha256": "2f0cd2a65d3b830edb8b878c080f944c20bdf3ed0d64b2b71b3e4f532c30f0f4",
     "file": "woof/core/kernels/__init__.py",
     "status": "unresolved"
    },
@@ -2241,7 +2241,7 @@
     "call_sha256": "e54d51d13267608d6a21bdfa3459d8ec6e2ab9d4d77298b2623c44ee48009846",
     "constructor": "RawModule",
     "factory": "load_module_int_defines",
-    "factory_sha256": "661a119957a61ff90a58a634424bfcdbea63258bef88d698690a479426c1368f",
+    "factory_sha256": "3c24540795ef48f094c945ab69f7ff0aba4097b2624829b86c65c61a9ab9fec4",
     "file": "woof/core/kernels/__init__.py",
     "status": "unresolved"
    },
@@ -2749,7 +2749,7 @@
    },
    {
     "file": "woof/core/kernels/chem_ftuv.cu",
-    "sha256": "3c7dc316b66179ddd4d8a8af18fbc5225e0409061efe95a782208e4273c7788c"
+    "sha256": "938f998fda2d5bca4bdbb1a12555e8b3f4f257bec2ea1d3b23f451a29fdd9735"
    },
    {
     "file": "woof/core/kernels/chem_inventory.cu",
@@ -5163,7 +5163,7 @@
    },
    {
     "file": "woof/core/health_ledger.py",
-    "sha256": "1bb702c7bae5c95327cddd8282769ac8ca07fa532eeba1cd18faac8b0e2f7a2c"
+    "sha256": "c6e663e9afb39f88ed22ead7b093287ce0fedc3b4d78c59c782e0d1771b7234d"
    },
    {
     "file": "woof/core/hub_wind_diag.py",
@@ -5183,7 +5183,7 @@
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "e3589244adc44d2fee7fc7f38938cc3fec25dc13905b410f1a427c2db2bc2700"
+    "sha256": "b36275fe458d0c2afa2a5b753431fe1cc2f92deaee93ab96576dbd9bd1b076d5"
    },
    {
     "file": "woof/core/kernels/no_ftz.py",
@@ -5743,7 +5743,7 @@
    },
    {
     "file": "woof/hex/lagged_heating_v841.py",
-    "sha256": "57e082fd7bb36ce3a07fee2124bd26855cff9f162c52ec130cf9042fc1e5f1c1"
+    "sha256": "680cbbde0fc988787251c0f3b9e29401de732ee8500fbb3b21633fc60cd84c52"
    },
    {
     "file": "woof/hex/mixing_v842.py",
@@ -11624,15 +11624,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "595d6ae3906939a662d968f90db878d0cf52d8dd062645a3f05f001a8e089b06",
+    "sha256": "503d4505129272b017ae716f1a79eb767fe172f3078e32f31031625c57679277",
     "sites": {
      "100": 905
     }
    },
    "native_differences": {
-    "sha256": "40d3bc21a1ae5c42721959f64471c5b6215f49a931408ad055a8625236d0ba56",
+    "sha256": "b4d9d63827c623c7bd754d4b25bdc4389a10ac8d8ec6b824a48b3b75fbe34f86",
     "sites": {
-     "100": 2326
+     "100": 2333
     }
    },
    "native_errors": {},
@@ -11654,7 +11654,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "3f5cb04802df32d6bfe3b4dde6fe81105577e63c22ca7f4f9560c63acfb4d627"
+   "source_sha256": "5b5267af376244df59707717aba316ed466b38d3c3de434331cd6a1b23745e2d"
   },
   "kernels:chem_inventory": {
    "assessment": "static_diagnostic_only",

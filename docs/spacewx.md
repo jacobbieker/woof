@@ -140,8 +140,10 @@ below 760 nm, 2009-2019, the same days as the RRTMG reference; it reproduces ban
 renormalising them would remove the ultraviolet signal. The total stays Fast-TUV's own fixed
 flux (WRF's `sflx`; Fast-TUV applies no Earth-Sun or TSI correction, so `solar_tsi_opt` does
 not reach it). The factor is computed in float64 at each photolysis call's valid time (run
-start + `curr_secs`) and multiplies the flux inside the kernel (`etf_factor`); off, the kernel
-skips the multiply, and WRF's `ftuv_driver` output is kept word for word (the 4.7.1 oracle).
+start + `curr_secs`) and multiplies the flux inside the kernel (`etf_factor`). The multiply is
+compiled only in the kernel's `GPUWM_FTUV_ETF` tier, so with the option off the default module is
+WRF's transcription unchanged and `ftuv_driver`'s output is kept word for word (the 4.7.1 oracle).
+The series is read and checked when the process initialises, once per chem state.
 
 Validation (solar maximum 2014-02-25 against minimum 2019-12-15, the CDR spectrum; Fast-TUV
 on the 240 sunlit points of the WRF 4.7.1 oracle's case-1 columns, surface to 20 km):
@@ -173,7 +175,8 @@ three times larger (above), so the J changes are a conservative estimate.
 
 Same rule as for the radiation: the shortwave must be legacy RRTMG or RRTMG-K. The
 solar-proton source (`spacewx_epp_opt`) adds NO/OH/HO2 in the RADM2 rows, and those then
-photolyse with these same Fast-TUV rates, so it needs nothing more.
+photolyse with these same Fast-TUV rates, so it needs nothing more. The WRF route has no
+other photolysis scheme (no Fast-J, and TUV-x runs only with hex's MICM chemistry, below).
 
 ### Photolysis (TUV-x, hex MICM)
 

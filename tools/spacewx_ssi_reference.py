@@ -14,7 +14,8 @@ LaTiS CSV copies of the same product, DIR/ssi_{2009..2019}.csv and DIR/tsi.csv::
     https://lasp.colorado.edu/lisird/latis/dap/nnl_ssi_P1D.csv?time>=Y-01-01&time<Y+1-01-01&wavelength<760&project(time,wavelength,irradiance)
     https://lasp.colorado.edu/lisird/latis/dap/nnl_tsi_P1D.csv?time>=2009-01-01&time<2020-01-01
 
-It checks the result against REF_BAND_FRACTION in bands 25-28 (inside 760 nm).
+It checks the result against REF_BAND_FRACTION in bands 25-28 (inside 760 nm)
+and writes nothing unless every band agrees to its 8 printed decimals.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ import sys
 
 import numpy as np
 
-from woof.spacewx.solar_spectrum import BANDS_CM1, BANDS_NM, REF_BAND_FRACTION, _band_weights, read_series
+from woof.spacewx.solar_spectrum import BANDS_CM1, BANDS_NM, REF_BAND_FRACTION, band_irradiance, read_series
 
 DESCRIPTION = ("S(lambda)/TSI, nm-1: the NOAA CDR SSI v03 (NNLSSI, standard resolution) daily spectrum over "
                "its TSI, averaged over 2009-01-01..2019-12-31 ({days} days), on the CDR's own bins below 760 nm. "
@@ -50,12 +51,17 @@ def spectrum(folder: str, out: str) -> int:
         f = (s[ok] / tot[ok, None]).sum(0)
         acc = f if acc is None else acc + f
         days += int(ok.sum())
+    if days == 0:
+        raise SystemExit("no day has both an SSI spectrum and a TSI (do the CSVs' times match?)")
     ref = acc / days
     width = np.where(wl < 750.0, 1.0, 5.0)
-    bands = _band_weights(wl, width, BANDS_NM[9:13]) @ ref
+    bands = band_irradiance(wl, width, ref, BANDS_NM[9:13])
     for b, v in enumerate(bands, start=9):
         print(f"band {16 + b}: spectrum {v:.8f} REF_BAND_FRACTION {REF_BAND_FRACTION[b]:.8f} ratio "
               f"{v / REF_BAND_FRACTION[b]:.6f}")
+    if not (np.all(np.isfinite(ref)) and np.all(ref > 0)
+            and np.allclose(bands, REF_BAND_FRACTION[9:13], rtol=0, atol=5e-9)):
+        raise SystemExit("the spectrum does not reproduce REF_BAND_FRACTION in bands 25-28; nothing written")
     doc = {"description": DESCRIPTION.format(days=days), "days": days, "wavelength_nm": wl.tolist(),
            "width_nm": width.tolist(), "fraction_per_nm": [float(f"{x:.8e}") for x in ref]}
     with open(out, "w", encoding="utf-8") as fh:
