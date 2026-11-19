@@ -660,6 +660,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   strict numerics on CUDA and Metal; Alps 3 km variable-resolution, 11
   tracers: 28 -> 2-3 ms per launch on an M3 Max, 15 -> 0.55 ms on an A6000;
   `WOOF_HEX_REGIONAL_EDGE_HOIST=0` restores the element kernel).
+  Hex regional forecasts keep each LBC interval's expanded driving
+  tendencies for the whole interval (up to 256 MiB per rank;
+  `WOOF_HEX_LBC_TEND_CACHE_MB` sets the cap, 0 expands on every call), and
+  MPAS physics producers that write a whole resident pool field write it in
+  place instead of copying through a private buffer
+  (`WOOF_HEX_POOL_DIRECT=0` restores the copy). Both are byte-identical in
+  fast and strict numerics on CUDA and Metal (Alps VR 1 h: Metal median
+  step 241 ms against 245-294 ms off).
   Hex MYNN on Metal gives every column its own worker (within the
   one-eighth-of-free-memory bound) instead of 128 per GPU core, so the
   column loop no longer strides: on the 14,751-cell Alps VR mesh
@@ -825,7 +833,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   spectrum moves RRTMG SW's source between its 14 bands (200-263 nm about
   +2.5 % in 2024 against the cycle-24 mean) with the total unchanged, for
   legacy RRTMG and RRTMG-K; NRLSSI2's 200-263 nm band follows SORCE's observed
-  one (daily correlation 0.79, the same 27-day amplitude).
+  one (daily correlation 0.79, the same 27-day amplitude). With RADM2
+  chemistry it also scales Fast-TUV's extraterrestrial flux per wavelength
+  bin: solar maximum against minimum moves J(O1D) by about 0.2 % and J(NO2)
+  and J(HCHO) by about 0.1 % in the troposphere. Hex's generic column seam
+  takes both, bit for bit the WRF route's, and hex's MICM chemistry with
+  TUV-x photolysis takes the same factor on TUV-x's 156 bins (120-735 nm).
   `woof spacewx ionosphere` computes an IRI-type climatological ionosphere on
   the GPU on a global grid: foF2, hmF2, foE, F1 and vertical TEC, from the
   CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it

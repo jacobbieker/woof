@@ -25,9 +25,10 @@ from .pool_v842 import NativePoolHydration
 from .session_v842 import NativePhysicsSession, native_working_directory
 from woof.core.adaptive_clock import env_flag
 
-#: WOOF_HEX_POOL_DIRECT=1 (opt-in): producers that write every element of a resident pool field write
-#: it in place instead of into a private buffer that write_field then copies.
-_POOL_DIRECT = env_flag('WOOF_HEX_POOL_DIRECT')
+#: Producers that write every element of a resident pool field write it in place instead of into a
+#: private buffer that write_field then copies.  On by default (the same words, Alps hex VR fast and
+#: strict on CUDA and Metal); WOOF_HEX_POOL_DIRECT=0 restores the copy (A/B).
+_POOL_DIRECT = not os.environ.get('WOOF_HEX_POOL_DIRECT', '').strip() or env_flag('WOOF_HEX_POOL_DIRECT')
 
 
 def commit_outer_scalar_groups(session, atmosphere, cp):
@@ -529,7 +530,7 @@ class ResidentNativeCoupling:
 
     def _pool_target(self, pool, name, like, *, level=1):
         """The resident pool allocation a whole-array put of ``like`` would copy into, or None
-        (WOOF_HEX_POOL_DIRECT unset/0 -- opt-in -- no resident pools, or another extent)."""
+        (WOOF_HEX_POOL_DIRECT=0, no resident pools, or another extent)."""
         if not _POOL_DIRECT:
             return None
         views = getattr(self.session, 'device_pools', None)

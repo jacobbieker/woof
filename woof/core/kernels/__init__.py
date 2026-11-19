@@ -1378,7 +1378,7 @@ def compile_cam_module_no_ftz(name: str, src: str, options: tuple[str, ...] | No
 
 
 
-def _load_module_preserving_subnormals(name: str, src: str, options):
+def _load_module_preserving_subnormals(name: str, src: str, options, key=None):
     """Use the shared direct NVRTC cache so CuPy cannot append FTZ=true."""
     import cupy as cp
     from woof import nvrtc_ptx_cache as compiler
@@ -1386,7 +1386,7 @@ def _load_module_preserving_subnormals(name: str, src: str, options):
     from woof.kernel_compile_notice import observe_module_compile
     from woof.physics_params import note_compiled
 
-    key = f"{MODULE_KEY_ROOT}:{name}"
+    key = key or f"{MODULE_KEY_ROOT}:{name}"
     with observe_module_compile(key):
         binary, _ = compiler.compile_using_nvrtc(src, options, None, f"{name}.cu")
         mod = cp.cuda.function.Module()
@@ -1592,6 +1592,12 @@ def load_module_int_defines(
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}[{tier}]")
     if name in _DIFFUSION_MODULES:
         return _load_diffusion_module(name, normalized)
+    if name == "chem_ftuv":
+        # solar_ssi_opt's GPUWM_FTUV_ETF tier: the default module's options and
+        # direct NVRTC route (no FMA contraction, subnormals kept).
+        tier = ",".join(f"{key}={value}" for key, value in normalized)
+        return _load_module_preserving_subnormals(
+            name, src, module_options(name), key=f"{MODULE_KEY_ROOT}:{name}[{tier}]")
     if name in ("camzm", "cammgmp", "uwshcu"):
         tier = ",".join(f"{key}={value}" for key, value in normalized)
         return compile_cam_module_no_ftz(name, src, suffix=f"[{tier}]")

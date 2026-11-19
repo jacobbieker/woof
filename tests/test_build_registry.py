@@ -28,6 +28,7 @@ write is reported as a defect rather than silently applied to the tree.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import os
 import subprocess
@@ -47,8 +48,10 @@ if str(REPO_ROOT) not in sys.path:
 from tools.build_registry import (  # noqa: E402
     OWNED,
     _check_remedy_label_describes_its_edit,
+    _shallow_cumulus_constraints,
     consuming_read_candidates,
     find_consuming_read,
+    label_names_setting,
     reads_knob,
     registry_setting_names,
 )
@@ -417,9 +420,12 @@ def test_a_remedy_label_names_exactly_the_edit_its_remedy_settings_makes(
                 if not label or not settings:
                     continue
                 checked += 1
-                assert all(name in label for name in settings), (
-                    option_id, label)
-                named = {name for name in parameters if name in label}
+                # Whole setting names (label_names_setting, the builder's
+                # own matcher): "shcu_physics" does not name cu_physics.
+                assert all(label_names_setting(label, name)
+                           for name in settings), (option_id, label)
+                named = {name for name in parameters
+                         if label_names_setting(label, name)}
                 assert named <= set(settings), (option_id, label)
     # Coordinate TKE retains the metric operator's PBL-off refusal as
     # one conditional rule with a machine-applicable remedy, and the run
@@ -437,8 +443,42 @@ def test_a_remedy_label_names_exactly_the_edit_its_remedy_settings_makes(
     # The union also includes SSiB and NTU legacy cloud-optics remedies.
     # Eta MP95 adds its native legacy cloud-optics remedy to the union.
     # The fork's wind_farm_scheme (MYNN only) adds one remedy on each of
-    # the six closures.
-    assert checked == 30
+    # the six closures.  That is 30.
+    # RRTMG-K (ra_*_physics=14) adds its five plan-review remedies
+    # (cu_physics, icloud_bl, cu_rad_feedback, bmj_rad_feedback; 9693076b5,
+    # 96913edf9; and shcu_physics).  The shallow-cumulus pass
+    # (_shallow_cumulus_constraints, 6795fe79f) adds the rules it emits
+    # that the finished build keeps, counted by re-running it on a copy
+    # stripped of every shcu remedy (113 PBL, 19 microphysics and 1 cumulus
+    # rule at 6795fe79f..).  The re-run also emits a UW rule on p3-mp52 the
+    # build does not hold: _consumer_rows registers p3-mp52 only after
+    # this pass runs (an open registry gap, not a label defect), so it is
+    # not counted here.
+    stripped = copy.deepcopy(registry)
+    for component in stripped["components"].values():
+        for option in component["options"].values():
+            held = option.get("constraints", {}).get("refused_when")
+            if held is not None:
+                held[:] = [rule for rule in held
+                           if rule.get("remedy_settings") != {"shcu_physics": 0}]
+    _shallow_cumulus_constraints(stripped)
+    # The one emitted rule the build may lack, named; every other emitted
+    # rule must be in the registry, so a deleted refusal fails here.
+    known_gap = {("microphysics", "p3-mp52")}
+    emitted = 0
+    for name, component in stripped["components"].items():
+        for option_id, option in component["options"].items():
+            held = (registry["components"][name]["options"][option_id]
+                    .get("constraints", {}).get("refused_when", []))
+            for rule in option.get("constraints", {}).get("refused_when", []):
+                if rule.get("remedy_settings") != {"shcu_physics": 0}:
+                    continue
+                if rule in held:
+                    emitted += 1
+                else:
+                    assert (name, option_id) in known_gap, (name, option_id, rule)
+    assert emitted > 0
+    assert checked == 30 + 5 + emitted
 
 
 def test_the_builder_refuses_a_remedy_label_that_promises_a_second_edit(

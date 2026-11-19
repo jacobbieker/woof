@@ -22,8 +22,7 @@ def cp():
 
 def _reset():
     from woof.backend import scratch
-    scratch._uninit_enabled.cache_clear()
-    scratch._poison.cache_clear()
+    scratch._reset_caches()
 
 
 @pytest.mark.parametrize("dtype", [np.uint8, np.int32, np.float32, np.float64])
@@ -110,5 +109,75 @@ def test_scratch_like_keeps_the_layout_of_its_input(cp, monkeypatch, order):
         _reset()
         assert scratch_like(cp, a).get().tobytes() == b"\xa5" * a.nbytes
     finally:
+        monkeypatch.delenv("WOOF_SCRATCH_POISON", raising=False)
+        _reset()
+
+
+@pytest.mark.skipif(importlib.util.find_spec("mlx") is None, reason="needs mlx (Apple silicon)")
+def test_facade_empty_is_unfilled_only_when_asked(cp, monkeypatch):
+    """``WOOF_METAL_SCRATCH_UNINIT=all`` drops the fill from the facade's own
+    ``empty``/``empty_like`` (and poisons them with WOOF_SCRATCH_POISON);
+    ``zeros`` and the default ``empty`` keep the zero fill."""
+    from woof import backend
+    if backend.active() != "mlx":
+        pytest.skip("runs under WOOF_BACKEND=mlx")
+    import mlx.core as mx
+    from woof.backend.facade import _scratch
+    _scratch._kernel()                      # warm: its one-time flag is an mx.zeros
+    calls = []
+    monkeypatch.setattr(mx, "zeros", lambda *a, **k: calls.append(a) or mx.full(*a, 0, **k))
+    _reset()
+    try:
+        assert cp.empty(64, cp.float32).get().tobytes() == bytes(256) and calls   # default: filled
+        monkeypatch.setenv("WOOF_METAL_SCRATCH_UNINIT", "all")
+        _reset()
+        calls.clear()
+        a = cp.empty((4, 8), cp.float32)
+        b = cp.empty_like(a)
+        assert not calls and a.shape == b.shape == (4, 8) and b.flags.c_contiguous
+        b[...] = cp.asarray(np.arange(32, dtype=np.float32).reshape(4, 8))
+        assert b.get().ravel().tolist() == list(range(32))
+        assert cp.zeros(16, cp.float32).get().tobytes() == bytes(64) and calls
+        assert cp.empty(0, cp.float32).size == 0
+        f = cp.empty((3, 5), cp.float32, order="F")          # F order stays the host path
+        assert f.shape == (3, 5)
+        for knob, byte in (("1", b"\xff"), ("a5", b"\xa5")):
+            monkeypatch.setenv("WOOF_SCRATCH_POISON", knob)
+            _reset()
+            assert cp.empty(7, cp.float64).get().tobytes() == byte * 56
+            assert cp.empty_like(a).get().tobytes() == byte * a.nbytes
+            f = cp.empty((3, 5), cp.float32, order="F")      # poisoned in either order
+            assert f.flags.f_contiguous and f.get().tobytes(order="A") == byte * f.nbytes
+            assert cp.zeros(4, cp.int32).get().tobytes() == bytes(16)
+        monkeypatch.setenv("WOOF_METAL_SCRATCH_UNINIT", "1")
+        _reset()
+        calls.clear()
+        assert cp.empty(16, cp.uint8).get().tobytes() == bytes(16) and calls   # poison alone: scratch only
+    finally:
+        monkeypatch.delenv("WOOF_METAL_SCRATCH_UNINIT", raising=False)
+        monkeypatch.delenv("WOOF_SCRATCH_POISON", raising=False)
+        _reset()
+
+
+def test_empty_all_switch(monkeypatch):
+    from woof.backend import scratch
+    try:
+        for value, mode in (("all", "all"), ("ALL", "all"), ("1", "scratch"), ("", "scratch"), ("0", "off")):
+            monkeypatch.setenv("WOOF_METAL_SCRATCH_UNINIT", value)
+            _reset()
+            assert scratch._uninit_mode() == mode
+            assert scratch._uninit_enabled() is (mode != "off")
+        monkeypatch.setenv("WOOF_METAL_SCRATCH_UNINIT", "all")
+        monkeypatch.setenv("WOOF_SCRATCH_POISON", "a5")
+        _reset()
+        assert scratch.facade_empty_fill() == 0xA5
+        monkeypatch.delenv("WOOF_SCRATCH_POISON")
+        _reset()
+        assert scratch.facade_empty_fill() == "none"
+        monkeypatch.delenv("WOOF_METAL_SCRATCH_UNINIT")
+        _reset()
+        assert scratch.facade_empty_fill() is None
+    finally:
+        monkeypatch.delenv("WOOF_METAL_SCRATCH_UNINIT", raising=False)
         monkeypatch.delenv("WOOF_SCRATCH_POISON", raising=False)
         _reset()
