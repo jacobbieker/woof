@@ -152,7 +152,10 @@ contributors and Google Open Buildings under CC BY 4.0, Microsoft Global ML
 Building Footprints under ODbL); read the per-dataset and per-licence counts
 in the sidecar and see <https://docs.overturemaps.org/attribution/> before
 you publish a product or database derived from it. woof ships no Overture
-data. Releases are large; the box keeps the download to the row groups
+data. The first fetch of a small box took about five minutes
+(it reads the footers of the release's 512 files); later runs use the cache.
+This is a known cost, not yet optimised. Without a pyarrow that has S3
+support the command refuses and says so. Releases are large; the box keeps the download to the row groups
 under it.
 
 The receipt is printed and stored in the product. It gives the box, the
