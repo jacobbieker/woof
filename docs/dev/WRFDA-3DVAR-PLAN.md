@@ -1464,3 +1464,447 @@ Machine learning and DA (section 6):
   quality control: a proof-of-concept study. *Geophys. Res. Lett.*, 51,
   e2023GL107938,
   [doi:10.1029/2023GL107938](https://doi.org/10.1029/2023GL107938).
+
+## 11. Satellite imagers: SatWeave and native imager radiances
+
+Status: design (2026-11-19). The user asked for SatWeave's radiances and
+brightness temperatures, and those of other imagers, to reach woof's initial
+conditions. This section states how. The pieces land as small PRs in the
+order of section 11.10. The forward operator feeds the LETKF first (path A),
+which needs no adjoint. The tangent-linear and adjoint feed 3D-Var at V4
+(path B). Everything in this section is opt-in. No default forecast word
+changes, and the default wheel carries no CRTM, no cloud-storage client and
+no coefficient file.
+
+### 11.1 SatWeave as published
+
+[SatWeave](https://developers.google.com/weathernext/guides/satweave) is a
+global geostationary mosaic made by Google DeepMind and Google Research. It
+blends GOES-East, GOES-West, Meteosat 0°, Meteosat IODC and Himawari
+onto one grid.
+
+- **Grid:** 0.1° equirectangular (EPSG:4326), 1801 x 3600. Latitude runs
+  90 to -90 (north first) and longitude 0 to 359.9.
+- **Bands:** 17 float32 bands.
+  - Seven reflectances in %: `mosaic_470_nm`, `509`, `640`, `863`, `1370`,
+    `1610` and `2250`.
+  - Ten brightness temperatures in K: `mosaic_3830_nm`, `6200`, `6900`,
+    `7330`, `8590`, `9620`, `10400`, `11200`, `12400` and `13300`.
+  - Each band's attributes name the source channels, e.g. for 6200 nm:
+    "GOES-East (ABI B08), GOES-West (ABI B08), Himawari (AHI B08),
+    Meteosat Prime & IODC (SEVIRI WV6.2)". Each band also carries a
+    `valid_range` (150-350 K for the infrared).
+- **Stores:**
+  - `gs://satweave_1/zarr/2016_to_2025/mosaic.zarr` has 30-minute steps
+    (175 344 of them). Its time is in `minutes since 2016-01-01`.
+  - From 2026, `gs://satweave_1/zarr/2026_to_present/<YYYYMMDDTHHMMSS>/mosaic.zarr`
+    holds one store per hour, available about 1 h after the hour. Its time
+    is in `days since <that hour>`, so a reader has to decode the CF units
+    of each store.
+- **Format (measured 2026-11-19):**
+  - Zarr v3 with consolidated metadata. The chunk shape is
+    `(1, 1801, 3600)`, i.e. one whole-globe chunk per band per step.
+  - Each chunk is the `bytes` codec (little-endian) followed by `zstd`.
+    One 6.2 µm chunk is 8.2 MB on the wire.
+  - Anonymous HTTPS reads work
+    (`https://storage.googleapis.com/satweave_1/...`), so the reader needs
+    no Google account and no GCS client.
+  - A bounding box still costs a whole chunk per band per step, because the
+    store has no spatial chunking.
+- **Licence:** CC BY 4.0. The third-party credits are EUMETSAT (Meteosat,
+  modified by Google), NOAA (GOES-R, via Google Cloud Public Datasets) and
+  JMA (Himawari 8 and 9, via NOAA NODD, modified by Google). woof's
+  provenance records carry that attribution. woof commits and ships no
+  SatWeave data.
+- **NaNs:**
+  - beyond the geostationary disc (the 2026-11-18T12 6.2 µm chunk is 69 %
+    finite: 73 % of the 70° rows, 10 % of the 80° rows);
+  - for bands a sector's satellite does not carry;
+  - for reflectances at night;
+  - in 2016-2017, at the 30-minute steps between the legacy imagers'
+    3-hourly scans over the Americas.
+- **Not published:** a per-pixel satellite id, the view geometry and the
+  scan time.
+- **Known artefacts:** limb artefacts in the MSG infrared, glint, missing
+  scan lines, seams along overlaps and outlier pixels.
+- **Sensor eras:**
+  - 2016 to July 2017: the five-band legacy GOES-13/15 imagers.
+  - From July 2017: GOES-16 ABI in the East.
+  - From November 2018: GOES-17, later GOES-18, ABI in the West.
+
+### 11.2 Recovering the satellite and the view geometry per pixel
+
+The operator needs the view zenith angle and the sensor. Both follow from
+which satellite saw the pixel. SatWeave does not publish that, so woof
+reconstructs it in three steps.
+
+1. **Band availability.** Some bands are carried by only some satellites,
+   so the NaN pattern names the sector.
+   - 1370 nm: only GOES.
+   - 509 nm: only Himawari.
+   - 470, 2250, 6900 and 10400 nm: GOES and Himawari, never Meteosat.
+   - So a pixel with a finite 6200 nm value and a NaN 6900 nm value is in
+     a Meteosat sector. That test works at night, from the infrared alone.
+2. **Nominal sub-satellite longitudes, per era.** woof keeps a dated table:
+   - GOES-East at 75.2° W: GOES-16, then GOES-19 from 2025-04-07.
+   - GOES-West at 137.2° W: GOES-17 from 2019-02-12, then GOES-18 from
+     2023-01-04.
+   - Himawari at 140.7° E: Himawari-8, then Himawari-9 from 2022-12-13.
+   - Meteosat 0°: Meteosat-11 (SEVIRI) from 2018-02-20.
+   - Meteosat IODC: Meteosat-8 at 41.5° E, then Meteosat-9 at 45.5° E from
+     2022-06-01.
+
+   PR R2 cites each row against the operator's notice. It also confirms
+   whether the 0° service has moved to Meteosat-12 (FCI), and which
+   instrument SatWeave uses after that date; the band attributes still name
+   SEVIRI. A date outside the table is refused by name, never guessed. Within the band-availability
+   class, a pixel's satellite is the candidate with the smallest view
+   zenith angle, which is the usual mosaic rule.
+3. **Geometry.** For a geostationary satellite at height 35 786 km above
+   the equator at longitude `lambda_s`, the view zenith, view azimuth and
+   instrument scan (nadir) angle of each pixel are closed-form. The
+   reconstruction stores them with the satellite id. The solar zenith comes
+   from the nominal time.
+
+**Overlaps.** SatWeave blends overlapping sectors, so in an overlap a value
+is a mixture of two instruments at two view angles. The reconstruction flags
+every pixel where a second satellite sees it with a view zenith under 70°.
+Path A rejects flagged pixels at first. Later they are used with an error
+inflated by a representativeness term (11.7), estimated from the O-B
+difference between flagged and unflagged pixels of the same sector.
+
+**Time.** A full-disc scan takes about 10 min (ABI, AHI) or 12-15 min
+(SEVIRI), so a pixel's true time is up to about 15 min from the nominal one.
+FGAT pairing takes the nominal time. The timing error enters as a
+representativeness term that scales with the band's local tendency. That
+term is measured as the O-B difference between consecutive 30-minute archive
+steps, not assumed.
+
+### 11.3 RTM coefficients for a cross-calibrated mosaic
+
+SatWeave cross-calibrates its sources to one another, and does not publish
+how. woof simulates each pixel with its own sector's instrument coefficients
+in CRTM, and treats the cross-calibration as a bias:
+
+| SatWeave band | ABI (GOES-16/18/19) | AHI (Himawari-8/9) | SEVIRI (Meteosat) |
+|---|---|---|---|
+| 3830 nm | ch 7 | band 7 | IR3.9 (ch 4) |
+| 6200 nm | ch 8 | band 8 | WV6.2 (ch 5) |
+| 6900 nm | ch 9 | band 9 | not carried |
+| 7330 nm | ch 10 | band 10 | WV7.3 (ch 6) |
+| 8590 nm | ch 11 | band 11 | IR8.7 (ch 7) |
+| 9620 nm | ch 12 | band 12 | IR9.7 (ch 8) |
+| 10400 nm | ch 13 | band 13 | not carried |
+| 11200 nm | ch 14 | band 14 | IR10.8 (ch 9) |
+| 12400 nm | ch 15 | band 15 | IR12.0 (ch 10) |
+| 13300 nm | ch 16 | band 16 | IR13.4 (ch 11) |
+
+- The bias model is `b(band, sector) = b0 + sum_k beta_k p_k`. The
+  predictors are the usual ones: view zenith, the band's own simulated
+  brightness temperature, and layer thicknesses for the sounding bands.
+- Path A estimates `b0` and the `beta` as a static correction, by least
+  squares on clear-sky O-B over a training window. It is stored per
+  `(band, sector, era)` with the window's digest.
+- Path B makes the `beta` VarBC control variables (section 1.9).
+- SEVIRI's 10.8 µm channel standing in for 11.2 µm, and 13.4 µm for
+  13.3 µm, is where the sector bias is largest. That is why the bias is
+  per sector and not per band.
+- **Measured (2026-11-19):**
+  - CRTM 2.4.1's coefficient package (`crtm_coefficients_2.4.1_skylab_4.0`)
+    has `abi_g16`, `abi_g17`, `abi_g18`, `ahi_himawari8`, `ahi_himawari9`
+    and `seviri_m08`-`m11`, but no GOES-19.
+  - The `abi_g19` files that CRTM's maintainers posted separately do not
+    work with v2.4.1. The 2024 binary gives infinite brightness
+    temperatures, and the 2026 SpcCoeff fails its byte-order check.
+  - So until a v2.4-readable GOES-19 file exists, the GOES-East sector from
+    2025-04-07 uses `abi_g16`. The two ABIs are built to the same
+    specification, and the residual goes into the sector bias. The
+    provenance records the substitution.
+
+### 11.4 Superobbing and thinning onto the model grid
+
+- **The model grid is coarser than 0.1° (dx > 11 km).**
+  - Average the clear pixels inside each model column's cell, which gives
+    a superob.
+  - Require a minimum clear fraction, 2/3 at first.
+  - Keep the pixel standard deviation as a representativeness indicator.
+- **The grid is finer (dx < 11 km).**
+  - Interpolate the model to the pixel instead, by taking the model column
+    nearest the pixel centre.
+  - Thin to one observation per box of `thin_km`, 30 km at first. Imager
+    errors are horizontally correlated over tens of kilometres, and a
+    diagonal `R` with every pixel would overweight them.
+  - Within each box keep the pixel nearest the box centre, not the
+    "best" one, so the choice does not depend on the innovation.
+- **Every grid.**
+  - Thin in time to one step per analysis window, the step nearest the
+    analysis time.
+  - Columns in the regional boundary zone (the relaxation rows) are never
+    used. P0's `ObsSet` enforces the same rule.
+
+### 11.5 Clear-sky first, all-sky later
+
+Path A is clear-sky. Cloud screening is symmetric: an observation is used
+only if both the observation and the background are clear. That avoids the
+one-sided bias of observation-only screening (Geer et al. 2018).
+
+- **Observation-side tests**, all on superob boxes:
+  - The 11.2 µm window O-B is below `-3 K`. Cloud is colder than the clear
+    simulation.
+  - The 11.2 µm spatial standard deviation inside the box exceeds 1 K,
+    which marks cloud edges.
+  - The split window, 11.2 minus 12.4 µm, flags thin cirrus.
+  - At night only, 3.83 minus 11.2 µm flags low cloud and fog.
+- **Background-side test:** the member-mean column condensate is above a
+  threshold (`qc + qi + qs` path > 5 g m-2, the `obsop_cwp` operator).
+- **Water-vapour bands above cloud.** A cloud below a band's weighting
+  function does not affect it.
+  1. Estimate the cloud-top pressure by matching the 11.2 µm brightness
+     temperature to the background temperature profile.
+  2. Keep the 6.2 µm band if that pressure is more than 100 hPa below
+     (higher pressure than) the band's Jacobian peak.
+
+  This keeps the band over low cloud, where most of its information is.
+- **All-sky later.**
+  - CRTM's cloud scattering needs the CloudCoeff file and per-species
+    effective radii from the microphysics.
+  - The error model is symmetric and cloud-dependent: Okamoto et al. 2014
+    for the infrared, and Minamide and Zhang 2017 for adaptive inflation.
+  - Honda et al. 2018 assimilated all-sky Himawari-8 infrared radiances
+    with an LETKF, the same kind of filter as woof's. That is the
+    reference for the all-sky step.
+
+### 11.6 Which bands first
+
+1. **Water vapour 6.2, 7.3 and 6.9 µm, clear-sky.** 6.2 and 7.3 come from
+   all five satellites, 6.9 from three. Over the US standard-like test
+   profile, CRTM 2.4.1 puts their Jacobian peaks at about 315, 560 and
+   380 hPa (ABI, measured in section 11.8). The surface sensitivity of 6.2
+   and 6.9 is nil, so their only surface concern is high terrain for 7.3.
+   They constrain the humidity the conventional network misses.
+2. **Infrared windows 10.4, 11.2 and 12.4 µm, clear-sky over sea.** These
+   are skin-temperature and low-level-humidity information, and the sea
+   emissivity is known (CRTM's Nalli model). Over land they wait for an
+   emissivity atlas (11.7).
+3. **13.3 µm (CO2), 8.59 µm, 9.62 µm (ozone; needs a model ozone profile),
+   and 3.83 µm at night.** The 3.83 µm band is solar-contaminated by day.
+4. **Reflectances, last.** They need a visible RT or a neural observation
+   operator (11.9).
+
+### 11.7 Error model and quality control
+
+- **Initial errors (standard deviations, clear-sky):**
+  - water vapour: 1.5 K;
+  - windows: 2.0 K;
+  - others: 2.5 K.
+
+  Desroziers et al. (2005) diagnostics then tune each `(band, sector)`
+  from the first month of O-B and O-A.
+- **Inflation:**
+  - by the superob's pixel standard deviation, added in quadrature;
+  - by the timing term (11.2);
+  - by the overlap term once overlaps are used.
+- **Gross check:** after bias correction, `|O - B| > 3 sigma` is rejected.
+  The rejection is recorded per observation, as P0's frozen QC does.
+- **Limb:**
+  - View zenith above 65° is rejected.
+  - From 55° to 65° the error is inflated linearly to twice its value.
+  - Meteosat sectors stop at 55° because of the published MSG infrared
+    limb artefacts.
+- **Glint:** 3.83 µm is rejected where the glint angle is under 25° and
+  the sun is up. The other infrared bands are unaffected.
+- **Surface:**
+  - Window bands over land wait for an emissivity atlas. The CRTM IR land
+    model is per surface class, which is too coarse over deserts.
+  - Any band whose skin-temperature Jacobian `dBT/dT_skin` exceeds 0.1 in
+    the background is rejected over land and sea ice. CRTM's K-matrix
+    gives that Jacobian directly.
+  - The test drops 7.3 µm over the Tibetan plateau and the Andes and keeps
+    it elsewhere.
+- **Model top:** a band whose Jacobian peaks above the model's top level
+  is rejected. CRTM adds climatological layers above the model top, but
+  the analysis cannot correct them.
+- **Inter-channel correlation:** the water-vapour bands' errors are
+  correlated. Path A keeps `R` diagonal and gives each band 1.3 times the
+  error above, then measures the correlation (Desroziers) before any
+  non-diagonal `R`.
+- **Artefacts:** the published 150-350 K `valid_range` is applied. A pixel
+  outside it is dropped and counted, not clipped.
+
+### 11.8 The forward operator (CRTM, opt-in)
+
+The operator is JCSDA CRTM v2.4 or later, which is CC0 (section 1.11).
+woof links it through a small Fortran shim with C bindings (11.10, R4).
+
+- **Measured (2026-11-19, M3 Max):**
+  - CRTM v2.4.1 (tag `v2.4.1-jedi.2`, 203 sources) compiles with gfortran
+    16 and netCDF-Fortran in under a minute. No ecbuild is needed: woof's
+    builder reads CRTM's own source list from `src/CMakeLists.txt` and
+    orders it by module dependency.
+  - The clear-sky forward and K-matrix calls run for `abi_g16`, `abi_g18`,
+    `ahi_himawari9` and `seviri_m11`.
+  - On a test profile, the ABI water-vapour Jacobian peaks are at 315 hPa
+    (ch 8), 381 hPa (ch 9) and 563 hPa (ch 10).
+  - Drying the column by 70 % warms ch 8 by 9.1 K.
+- **Profiles from woof's state:**
+  - Layer pressure, temperature from `theta` and `p`, water vapour as a
+    mass mixing ratio in g/kg, and level pressures at the eta interfaces.
+  - Ozone from the WRF ozone climatology woof's RRTMG uses
+    (`wrf_ozone.py`) when the run has it; otherwise CRTM's US standard
+    climatology.
+  - Skin temperature from `TSK`. Land, water, snow and ice fractions from
+    `LANDMASK`, `SNOWC` and `XICE`. Wind from `U10`/`V10`.
+- **Coefficients:**
+  - The user downloads them: CRTM's coefficient release, or the
+    per-sensor files. woof never ships them.
+  - woof records the SHA-256 of every file it loaded. The path is
+    `WOOF_CRTM_COEFFS` or an explicit argument.
+- **Calls:**
+  - Forward returns the brightness temperature per `(profile, channel)`.
+  - K-matrix returns `dBT/dT`, `dBT/dq` and `dBT/dO3` per layer, and
+    `dBT/dT_skin`.
+  - Path A uses K for screening, for the vertical placement of the
+    observation (11.9) and for diagnostics.
+  - Path B uses K as the operator's tangent-linear and adjoint: for a
+    column operator, `H' dx = K dx` and `H'^T dy = K^T dy`.
+
+### 11.9 Two paths into the analysis
+
+**A. Forward-only, into the existing LETKF (this work).**
+
+- The LETKF needs `H(x_k)` for each member and nothing else.
+- The adapter (`woof/da/obs_radiance.py`, like `obs_goes.py`) runs the
+  forward operator on every member's full state.
+- It places each superob as a column observation at one level, the level
+  of the member-mean Jacobian peak, as `obs_goes.py` places CWP.
+  Localisation does the rest. The vertical radius has to span the
+  weighting function's width, and the adapter records the ratio. Honda et
+  al. (2018) used the same convention.
+- It returns `GriddedObs` batches, one per `(band, sector)`, each carrying
+  its own localisation.
+- The analysis goes through `woof.da.letkf` to member checkpoints and an
+  analysis bundle, and reaches a forecast through the existing
+  `woof run --analysis` door. No forecast code changes.
+
+**B. Tangent-linear and adjoint, into 3D-Var at V4 (V4.3 and V4.4).**
+
+- The 3D-Var worker owns `woof/da/var/`. Its `obsop/` wraps woof's
+  radiance operator as an `ObsStencil`-like column operator:
+  - `tl` is `K dx` over the column's layers;
+  - `ad` is `K^T dy`, scattered in fixed order;
+  - K is computed once at the innovation step, from the background.
+- VarBC (V4.4) takes the static bias of 11.3 as its cold start.
+- The 3D-Var worker's GV4 gate compares O-B per channel with WRFDA's CRTM
+  path built on the same CRTM version. WRFDA's ingest is BUFR from the
+  sounders, not imagers. So woof's imager O-B is checked against its own
+  path-A numbers and against published O-B statistics, and the WRFDA
+  comparison waits for an AMSU-A or ABI BUFR case.
+
+**Interfaces between the two owners** (recorded in the
+WRFDA-3DVAR-HANDOFF.md working notes):
+
+| module | owner | what the other side calls |
+|---|---|---|
+| `woof/obs/satweave.py`, the imager readers | this work | `read_window(...) -> ImagerScene` (11.10) |
+| `woof/rtm/` | this work | `ClearSkyOperator(sensors, coeffs).simulate(profiles, geometry) -> bt` and `.jacobian(...) -> K` (layers top-down, numpy) |
+| `woof/rtm/profiles.py` | this work | `profiles_from_wrf_state(state, setup, columns)` |
+| `woof/da/obs_radiance.py` | this work | the LETKF adapter (path A) |
+| `woof/da/var/` and `be.dat` | the 3D-Var worker | V4.3 wraps `woof.rtm` as TL/AD; V4.4 VarBC |
+
+### 11.10 Readers, the scene schema, and the PR sequence
+
+Every reader returns one in-memory **`ImagerScene`**:
+
+- `band_um` and the source band name;
+- `time` (the nominal time, plus the per-pixel scan time where known);
+- `lat` and `lon`;
+- `value` (K or %);
+- `satellite` and `sensor` (CRTM sensor id), per pixel;
+- `view_zenith`, `view_azimuth`, `scan_angle`, `solar_zenith`;
+- `flags` (overlap, limb, NaN cause);
+- `provenance` (source, licence, attribution text, byte digests).
+
+SatWeave fills the geometry by reconstruction (11.2), and the native
+readers fill it exactly.
+
+**Native imagers, alongside SatWeave:**
+
+| imager | source | licence and access |
+|---|---|---|
+| GOES ABI (16-19) L1b `RadF`/`RadC`, L2 `CMIPF` | NOAA NODD: `s3://noaa-goes{16,17,18,19}` (AWS), `gs://gcp-public-data-goes-{16,17,18,19}` (GCP); netCDF-4 | open, no account; NOAA requests attribution of unaltered data and no implied endorsement (AWS Open Data registry entry `noaa-goes`) |
+| Himawari AHI (8/9) L1b full disc | NOAA NODD: `s3://noaa-himawari{8,9}`, `AHI-L1b-FLDK`; Himawari Standard Data segments, bzip2 | JMA data distributed by NOAA; NOAA and JMA request attribution of unaltered data and no implied endorsement (registry entry `noaa-himawari`) |
+| MSG SEVIRI L1.5, MTG FCI L1C | EUMETSAT Data Store (a free EUMETSAT account and API key) | EUMETSAT Data Policy (amended 27 June 2024): Core data, including hourly Level 1 SEVIRI and FCI, free and unrestricted under CC BY 4.0, attribution "[Contains modified] EUMETSAT Meteosat data [year]"; higher-frequency Level 1 data are "Recommended" data with conditions, and redistribution is excluded from "any use" |
+
+- **Polar sounders** (ATMS, CrIS, IASI, AMSU-A/MHS) are a follow-on. They
+  share the operator, but they need BUFR ingest, scan-dependent bias and
+  channel selection. WRFDA's V4.3 starts with AMSU-A, which is that
+  follow-on.
+- **CRTM coefficients for FCI** are not in the v2.4.1 package (measured),
+  so FCI waits for v2.4-readable coefficients.
+
+**PR sequence:**
+
+| PR | content |
+|---|---|
+| R1 | this section |
+| R2 | `woof/obs/satweave.py`: time, bounding box and band subsetting over anonymous HTTPS (or obstore when installed); both store layouts; the NaN rules; the 11.2 reconstruction; a local cache under the obs cache with a provenance record (CC BY 4.0 attribution, chunk digests); `woof fetch satweave` |
+| R3 | native readers: GOES ABI L1b/CMIP from NODD first, then Himawari AHI HSD; the same `ImagerScene` with true geometry |
+| R4 | `woof/rtm/`: the CRTM opt-in builder and shim, `ClearSkyOperator`, profiles from woof's state, coefficient digests; O-B per band per sector on a real case |
+| R5 | `woof/da/obs_radiance.py`: superobs, thinning, QC, cloud screening, bias; radiance batches through the LETKF into an analysis bundle; one regional case showing a smaller first-guess departure in the water-vapour bands and no worse conventional scorecard |
+| R6 (plan only) | 3D-Var TL/AD with VarBC (V4.3, V4.4); all-sky; reflectances through a visible RT or a neural operator (section 6.2: Scheck 2021); the hex route through the same column operator on hex columns |
+
+### 11.11 Gates
+
+- **GR4 (operator).** Clear-sky O-B per `(band, sector)` on a real case,
+  after the static bias. The bias and standard deviation are reported, and
+  each standard deviation is checked against the expected range for a
+  regional model: 1-2 K for the water-vapour bands and 1.5-3 K for the
+  windows. A band outside its range blocks that band, not the PR.
+- **GR5 (impact).** On one regional case, the analysis reduces the
+  water-vapour bands' RMS first-guess departure against the next SatWeave
+  step (an independent time), and the conventional-observation scorecard
+  (P0's `J_o` against the bkr/obs stores, and the surface and upper-air
+  referees) is no worse beyond its member-to-member noise.
+- **Default identity.** Nothing on a forecast path imports `woof.rtm`,
+  `woof.obs.satweave` or `woof.da.obs_radiance`, and an import-graph test
+  checks it. A wheel-content test checks that no CRTM file or symbol is in
+  the wheel (GV4's test, shared).
+
+References for this section:
+
+- Schmit, T. J., et al., 2017: A closer look at the ABI on the GOES-R
+  series. *Bull. Amer. Meteor. Soc.*, 98, 681-698,
+  [doi:10.1175/BAMS-D-15-00230.1](https://doi.org/10.1175/BAMS-D-15-00230.1).
+- Bessho, K., et al., 2016: An introduction to Himawari-8/9: Japan's
+  new-generation geostationary meteorological satellites. *J. Meteor. Soc.
+  Japan*, 94, 151-183,
+  [doi:10.2151/jmsj.2016-009](https://doi.org/10.2151/jmsj.2016-009).
+- Schmetz, J., et al., 2002: An introduction to Meteosat Second Generation
+  (MSG). *Bull. Amer. Meteor. Soc.*, 83, 977-992,
+  [doi:10.1175/1520-0477(2002)083<0977:AITMSG>2.3.CO;2](https://doi.org/10.1175/1520-0477(2002)083%3C0977:AITMSG%3E2.3.CO;2).
+- Geer, A. J., et al., 2018: All-sky satellite data assimilation at
+  operational weather forecasting centres. *Quart. J. Roy. Meteor. Soc.*,
+  144, 1191-1217, [doi:10.1002/qj.3202](https://doi.org/10.1002/qj.3202).
+- Okamoto, K., A. P. McNally and W. Bell, 2014: Progress towards the
+  assimilation of all-sky infrared radiances: an evaluation of cloud
+  effects. *Quart. J. Roy. Meteor. Soc.*, 140, 1603-1614,
+  [doi:10.1002/qj.2242](https://doi.org/10.1002/qj.2242).
+- Honda, T., et al., 2018: Assimilating all-sky Himawari-8 satellite
+  infrared radiances: a case of Typhoon Soudelor (2015). *Mon. Wea. Rev.*,
+  146, 213-229,
+  [doi:10.1175/MWR-D-16-0357.1](https://doi.org/10.1175/MWR-D-16-0357.1).
+- Minamide, M., and F. Zhang, 2017: Adaptive observation error inflation
+  for assimilating all-sky satellite radiance. *Mon. Wea. Rev.*, 145,
+  1063-1081,
+  [doi:10.1175/MWR-D-16-0257.1](https://doi.org/10.1175/MWR-D-16-0257.1).
+- Desroziers, G., L. Berre, B. Chapnik and P. Poli, 2005: Diagnosis of
+  observation, background and analysis-error statistics in observation
+  space. *Quart. J. Roy. Meteor. Soc.*, 131, 3385-3396,
+  [doi:10.1256/qj.05.108](https://doi.org/10.1256/qj.05.108).
+- Harris, B. A., and G. Kelly, 2001: A satellite radiance-bias correction
+  scheme for data assimilation. *Quart. J. Roy. Meteor. Soc.*, 127,
+  1453-1468,
+  [doi:10.1002/qj.49712757418](https://doi.org/10.1002/qj.49712757418).
+- Han, Y., P. van Delst, Q. Liu, F. Weng, B. Yan, R. Treadon and J. Derber,
+  2006: JCSDA Community Radiative Transfer Model (CRTM), version 1. NOAA
+  Technical Report NESDIS 122.
