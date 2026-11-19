@@ -31,7 +31,8 @@ match, refusing the rest:
 Refusals, before any physics runs: a grid that is not the domain's
 (shape, and latitude/longitude and DX/DY where both sides carry them); a
 ``Time`` axis longer than one; masked or non-finite values on any urban
-column; and, for option 1, the morphology on which WRF's NUDAPT arm
+column whose ``HGT_URB2D > 0`` (elsewhere urban_var_init zeroes the
+column, as WRF does); and, for option 1, the morphology on which WRF's NUDAPT arm
 (``module_sf_urban.F:649-788``) is not finite: a column it would run on
 (urban, ``HGT_URB2D > 0``, ``MH_URB2D > 0``) with ``LP_URB2D`` outside
 (0, 1), a ``LF_URB2D`` sector <= 0, or a negative ``LB_URB2D`` or
@@ -98,6 +99,7 @@ class UrbanMorphology:
     hi: np.ndarray
     frc: np.ndarray | None
     source: str
+    sha256: str = ""
 
 
 def _plain(var) -> np.ndarray:
@@ -303,24 +305,42 @@ def load_urban_morphology(path, *, option: int, ivgtyp, urban, mminlu: str,
     ``ivgtyp`` is the route's land-use category grid and ``urban`` the
     UTYPE_URB2D > 0 mask urban_var_init will use (from the same IVGTYP).
     """
+    from woof.file_digest import sha256_file
+
     ivgtyp = np.asarray(ivgtyp)
     shape = ivgtyp.shape
+    try:
+        digest = sha256_file(Path(path), block_bytes=1024 * 1024)
+    except OSError as exc:
+        raise UrbanParamError(
+            f"urban_param_file {str(path)!r} does not exist or is "
+            "unreadable") from exc
     block, frc, grid = read_urban_param(path, shape=shape)
     _check_grid(grid, path, latitude=latitude, longitude=longitude,
                 dx=dx, dy=dy)
     morph = split_urb_param(block, option)
     urban = np.asarray(urban, bool)
-    names = ("lp", "lb", "hgt", "mh", "stdh", "lf", "hi")
+    # urban_var_init keeps the morphology only where HGT_URB2D > 0 (a NaN
+    # compares false, so WRF zeroes such a column and runs it on the table
+    # -- partial-coverage files masked outside NUDAPT run).  A non-finite
+    # value on a column WRF keeps would reach the canopy model: refused.
+    kept = urban & (morph["hgt"] > 0)
+    names = ("lp", "lb", "mh", "stdh", "lf", "hi")
     for name in names:
         value = morph[name]
-        cols = urban if value.ndim == 2 else urban[None]
+        cols = kept if value.ndim == 2 else kept[None]
         bad = cols & ~np.isfinite(value)
         if bad.any():
             raise UrbanParamError(
                 f"{path}: {name.upper()}_URB2D is missing or non-finite on "
                 f"{int(bad.any(axis=0).sum() if value.ndim == 3 else bad.sum())}"
-                " urban columns; WRF would carry the value into the canopy "
-                "model, so the file is refused rather than guessed at")
+                " urban columns whose HGT_URB2D > 0; WRF would carry the "
+                "value into the canopy model, so the file is refused rather "
+                "than guessed at")
+    # Masked/NaN slots elsewhere become urban_var_init's zero, as in WRF.
+    for name in names + ("hgt",):
+        morph[name] = np.where(np.isfinite(morph[name]), morph[name],
+                               np.float32(0.0)).astype(np.float32)
     if frc is not None:
         bad = ~np.isfinite(frc)
         if bad.any():
@@ -337,4 +357,4 @@ def load_urban_morphology(path, *, option: int, ivgtyp, urban, mminlu: str,
                 "wrfinput real.exe made from this geo_em, or give a file "
                 "without FRC_URB2D (the route's urban fraction is then kept)")
         frc = real_frc_fill(frc, ivgtyp, mminlu)
-    return UrbanMorphology(frc=frc, source=str(path), **morph)
+    return UrbanMorphology(frc=frc, source=str(path), sha256=digest, **morph)

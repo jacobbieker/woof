@@ -461,7 +461,6 @@ def init_state(state, params, *, tlayer0, tsurface0, tdeep0, smois,
 # ---------------------------------------------------------------------------
 
 _PTR_CACHE: dict = {}
-_MORPH_PLAIN: dict = {}
 
 
 def _width_planes(params, utype):
@@ -495,10 +494,6 @@ def _morph_table(state, params):
     import cupy as cp
 
     held = getattr(state, "_ucm_morph", None)
-    if held is None:
-        cached = _MORPH_PLAIN.get(id(state))
-        if cached is not None and cached[0] is state:
-            held = cached[1]
     if held is not None:
         return held[0], held[1]
     mh = _get(state, "mh_urb2d")
@@ -527,9 +522,10 @@ def _morph_table(state, params):
     try:
         state._ucm_morph = held
     except (AttributeError, TypeError):
-        # A plain mapping (the oracle replays hand one over): keyed by
-        # identity and held with the state, which lives as long as the test.
-        _MORPH_PLAIN[id(state)] = (state, held)
+        # A plain mapping (the oracle replays hand a fresh one over per
+        # call): rebuilt each call rather than cached, so nothing outlives
+        # the mapping.
+        pass
     return int(nudapt), table
 
 

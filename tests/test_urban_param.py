@@ -217,13 +217,20 @@ def test_loader_checks_lat_lon_and_dx(tmp_path):
 
 def test_loader_refuses_non_finite_on_urban_columns_only(tmp_path):
     block = _morph_block()
-    block[94 - 1, 0, 0] = np.nan                       # HGT on column (0, 0)
+    block[91 - 1, 0, 0] = np.nan                       # LP on column (0, 0)
     path = _write(tmp_path / "u.nc", block)
-    with pytest.raises(UrbanParamError, match="HGT_URB2D is missing"):
+    with pytest.raises(UrbanParamError, match="LP_URB2D is missing"):
         _load(path)
     rural = np.ones((NY, NX), bool)
     rural[0, 0] = False
     _load(path, urban=rural)                           # (0, 0) not urban
+    # A column whose HGT is masked is one WRF's urban_var_init zeroes
+    # (NaN > 0 is false): the file runs, the column takes the table.
+    block[94 - 1, 0, 0] = np.nan
+    path = _write(tmp_path / "masked.nc", block)
+    out = _load(path)
+    assert out.hgt[0, 0] == 0 and out.lp[0, 0] == 0
+    assert len(out.sha256) == 64
     block = _morph_block()
     block[120 - 1, 1, 1] = np.inf                      # an HI bin
     path = _write(tmp_path / "hi.nc", block)

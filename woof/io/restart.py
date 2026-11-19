@@ -4353,7 +4353,12 @@ def physics_setup_identity(state, cfg) -> dict:
     urban = getattr(driver, "urban", None)
     if urban is not None and (getattr(cfg, "urban_ucm_generation", "wrf_471") == "wrf_480" or getattr(cfg, "urban_table_dir", "")):
         from woof.core.urban_ucm import pack_params
-        identity["urban_parameters"] = _packed_parameters_identity(pack_params(urban.params), label="urban canopy", attribute="urban.params")
+        # ``widths`` (the NUDAPT arm's fallback table widths) joined
+        # UcmParams with urban_param_file; it is read only when a column
+        # carries MH_URB2D > 0, and those bytes are bound by
+        # identity["urban_param"] below, so the pre-existing identity of
+        # every earlier checkpoint is unchanged.
+        identity["urban_parameters"] = _packed_parameters_identity(pack_params(urban.params), label="urban canopy", attribute="urban.params", exclude_fields=("widths",))
         identity["urban_parameters"]["table_sha256"] = urban.params.sha256
     surface = getattr(driver, "surface_analysis", None)
     if cfg.sst_update:
@@ -4402,16 +4407,21 @@ def physics_setup_identity(state, cfg) -> dict:
     # re-reads urban_param_file at resume before the checkpoint's urban
     # arrays are restored, so the bytes are bound and a resume against
     # another file refuses.  Unset adds no key.
+    # The digest is the one taken when the file was loaded (so a file
+    # rewritten mid-run cannot be bound in place of the bytes the state came
+    # from); a domain not yet attached binds the file it will load.
     if urban is not None and getattr(cfg, "urban_param_file", ""):
-        from woof.file_digest import sha256_file
-        path = Path(cfg.urban_param_file)
-        try:
-            digest = sha256_file(path, block_bytes=1024 * 1024)
-        except OSError as exc:
-            raise RestartManifestError(
-                f"urban_param_file {str(path)!r} is unreadable; the "
-                "checkpoint cannot bind the urban morphology it runs with") \
-                from exc
+        digest = getattr(urban, "urban_param_sha256", None)
+        if digest is None:
+            from woof.file_digest import sha256_file
+            path = Path(cfg.urban_param_file)
+            try:
+                digest = sha256_file(path, block_bytes=1024 * 1024)
+            except OSError as exc:
+                raise RestartManifestError(
+                    f"urban_param_file {str(path)!r} is unreadable; the "
+                    "checkpoint cannot bind the urban morphology it runs "
+                    "with") from exc
         identity["urban_param"] = {"policy": "wrf471-real-split-v1",
                                    "file_sha256": digest}
     return identity

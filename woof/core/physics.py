@@ -8313,6 +8313,9 @@ def _attach_urban(driver: PhysicsDriver, state: DomainState,
     urban = init_urban_state(cfg, params, categories, f,
                              nz=int(state.p.shape[0]), frc_urb2d=frc_urb2d,
                              module=module, morphology=morphology)
+    if morphology is not None:
+        # The bytes the state came from, for the checkpoint identity.
+        urban.urban_param_sha256 = loaded.sha256
     driver.urban = urban
     driver._urban_cfg = cfg
     driver.urban_coupler = UrbanCoupler(

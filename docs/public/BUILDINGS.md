@@ -62,7 +62,8 @@ Refused before any physics runs, with the reason named:
 
 - a grid that is not the domain's (shape, latitude/longitude and DX/DY
   where the file carries them), or more than one time;
-- missing or non-finite values on an urban column;
+- missing or non-finite values on an urban column with `HGT_URB2D > 0`
+  (a column whose HGT is masked is zeroed and runs on the table, as in WRF);
 - a file on which real.exe would reclassify a column to urban
   (`FRC_URB2D >= 0.5` on a non-urban category). woof has already built the
   land surface from the route's land use by then, so it cannot match this.
