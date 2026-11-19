@@ -184,7 +184,9 @@ Hex's MICM chemistry with `"photolysis": "tuvx"` (woof.chem_tuvx, the TUV-x v0.1
 same factor on every bin of its wavelength grid (156 bins, 120-735 nm for the shipped
 configuration), multiplying the extraterrestrial flux before the actinic flux is formed. As for
 Fast-TUV the factors are not renormalised, and TUV-x keeps its own solar files and Earth-Sun
-distance. The factor is evaluated at the start of each chemistry interval; off (or with
+distance. `solar_ssi_opt` keeps its radiation rule here too: the run's shortwave must be legacy
+RRTMG or RRTMG-K on hex's generic column seam. The factor is evaluated at the start of each
+chemistry interval; off (or with
 `photolysis` as `j_max` numbers) no spectrum is read and the rates are the port's word for word.
 Solar maximum 2014-02-25 against minimum 2019-12-15 (the CDR; a standard column to 30 km,
 completed to 120 km as the hex route does, solar zenith 20-70 degrees):

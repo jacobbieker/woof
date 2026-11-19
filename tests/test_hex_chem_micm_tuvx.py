@@ -122,13 +122,14 @@ def test_a_step_hands_micm_the_ports_rates(tmp_path, monkeypatch):
 
 def _spectrum_file(path, first):
     """A NOAA CDR-layout SSI file over three days from ``first``: the cycle-24 mean spectrum with 290-420 nm
-    3 % above it."""
+    0, 6 and 12 % above it on the three days (so the factor moves with the valid time)."""
     netCDF4 = pytest.importorskip("netCDF4")
     from woof.spacewx import solar_spectrum as ss
     wl, dw, frac = ss.reference_spectrum()
     tsi, days = 1361.0, 3
     start = (first - datetime.datetime(1610, 1, 1)).days
-    ssi = tsi * frac * np.where((wl > 290.0) & (wl < 420.0), 1.03, 1.0)
+    uv = (wl > 290.0) & (wl < 420.0)
+    ssi = np.stack([tsi * frac * np.where(uv, 1.0 + 0.06 * d, 1.0) for d in range(days)])
     with netCDF4.Dataset(path, "w") as data:
         data.createDimension("time", days)
         data.createDimension("wavelength", wl.size)
@@ -140,7 +141,7 @@ def _spectrum_file(path, first):
         b[:] = np.stack([start + np.arange(days), start + 1 + np.arange(days)], axis=1)
         data.createVariable("wavelength", "f8", ("wavelength",))[:] = wl
         data.createVariable("Wavelength_Band_Width", "f8", ("wavelength",))[:] = dw
-        data.createVariable("SSI", "f8", ("time", "wavelength"))[:] = np.tile(ssi, (days, 1))
+        data.createVariable("SSI", "f8", ("time", "wavelength"))[:] = ssi
         data.createVariable("TSI", "f8", ("time",))[:] = np.full(days, tsi)
     return path
 
@@ -178,9 +179,12 @@ def test_solar_ssi_opt_scales_tuvxs_flux_word_for_word(tmp_path):
 
     core = chem_tuvx.Tuvx(json.loads(TUVX_CONFIG.read_text()), root=root)
     bins = tuple(zip(core.grid.edge[:-1].tolist(), core.grid.edge[1:].tolist()))
-    factor = ss.PhotolysisSpectrum.for_run(solar, START, bins, "tuvx").factor(0.0)
+    spectrum = ss.PhotolysisSpectrum.for_run(solar, START, bins, "tuvx")
+    factor = spectrum.factor(0.0)            # the first interval's start: 10 UTC, 22/24 of the way to day 2
     mid = core.grid.mid
-    assert np.all(factor[(mid > 292.0) & (mid < 418.0)] > 1.029)
+    band = (mid > 292.0) & (mid < 418.0)
+    assert np.all(factor[band] > 1.05) and np.all(factor[band] < 1.06)
+    assert not np.array_equal(spectrum.factor(DT)[band], factor[band])     # the interval's end differs
     np.testing.assert_allclose(factor[mid > 425.0], 1.0, rtol=1e-12)
     cosz = cp.asnumpy(chem_micm_hex.cos_sza(on.lat, on.lon, START.timetuple().tm_yday, 10.0))
     sza = np.degrees(np.arccos(np.clip(cosz, -1.0, 1.0)))
@@ -201,6 +205,6 @@ def test_solar_ssi_opt_scales_tuvxs_flux_word_for_word(tmp_path):
         assert ones[name].tobytes() == plain[name].tobytes(), label
     j = on.mech.parameters.index("PHOTO.jNO2")
     ratio = prm_on[:, j].reshape(NZ, NC)[:, lit] / prm_off[:, j].reshape(NZ, NC)[:, lit]
-    assert np.all(ratio > 1.01) and np.all(ratio < 1.031)
+    assert np.all(ratio > 1.02) and np.all(ratio < 1.061)
     with pytest.raises(chem_tuvx.TuvxPortError, match="etf_factor"):
         core.run(*inputs, sza, esd, np.ones(3))
