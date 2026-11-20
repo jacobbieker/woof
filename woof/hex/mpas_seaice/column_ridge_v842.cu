@@ -513,6 +513,8 @@ extern "C" __global__ void seaice_column_ice_strength_v842(
                     h2rdg = A(A(M(hrmin[n - 1], hrmin[n - 1]), M(M(2.0, hrmin[n - 1]), hrexp[n - 1])),
                               M(M(2.0, hrexp[n - 1]), hrexp[n - 1]));
                 } else {
+                    // unreachable: column_ridge_v842.check_config refuses any other
+                    // config_ridging_redistribution_function before the launch
                     continue;
                 }
                 double dh2rdg = A(-M(hi, hi), D(h2rdg, krdg[n - 1]));

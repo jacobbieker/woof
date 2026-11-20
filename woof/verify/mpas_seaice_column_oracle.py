@@ -329,6 +329,8 @@ STEP_CASES = (
 )
 
 _SEAICE_STEP = "seaice_step"
+#: run_gpu's output for a ``seaice_step`` case: the step it stopped at (the oracle's ``TOBJ STEP``)
+SEAICE_STEP_KEY = "oracle/step"
 #: the velocity solver's settings of the time-step oracle's cases (mpas_seaice_step_oracle)
 _DYNAMICS = {
     "config_use_velocity_solver": True, "config_stress_divergence_scheme": "variational",
@@ -1217,11 +1219,13 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
         cv.init_column_itd(dev, state)
         state.abort = cstep.run(dev, config, state, int(config["oracle_n_steps"]))
     elif stage == _SEAICE_STEP:
-        state.abort, state.step = _run_seaice_step(dev, config)
+        state.abort, step = _run_seaice_step(dev, config)
     else:
         raise ValueError(f"unknown stage {stage}")
     outputs = {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]
                if kind in (REAL, INT) and dev[pool][name] is not None}
+    if stage == _SEAICE_STEP:
+        outputs[SEAICE_STEP_KEY] = np.array([step])
     return outputs, state
 
 
@@ -1255,7 +1259,7 @@ def measure_coupled(reference: dict | None = None, logs: dict | None = None, *, 
         log = logs[case["name"]]
         got, state = run_gpu(case)
         row = {"abort": int(tuple(state.abort) != oracle_step_abort(log)),
-               "step": int(state.step != log["tracer_object"]["STEP"][0])}
+               "step": int(got[SEAICE_STEP_KEY][0] != log["tracer_object"]["STEP"][0])}
         want = expected_outputs(case, reference.get(case["name"], {}))
         row.update({key: word_mismatches(got[key], want[key]) for key in want})
         mine = state.tracers.log_rows()

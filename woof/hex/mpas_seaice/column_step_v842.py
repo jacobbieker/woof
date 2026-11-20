@@ -105,6 +105,7 @@ def check_config(configs: dict) -> None:
         _refuse("config_stress_divergence_scheme", "weak",
                 "the weak-form stress divergence's pool (velocity_weak) is not ported",
                 "config_stress_divergence_scheme = 'variational'")
+    crdg.check_config(c)
     cprep.check_config(c)
 
 

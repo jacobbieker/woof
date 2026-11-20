@@ -259,8 +259,17 @@ def _written_params() -> tuple[bool, ...]:
     text = files("woof.hex.mpas_seaice").joinpath("column_therm_v842.cu").read_text(encoding="utf-8")
     head = text.split("void seaice_column_vertical_thermodynamics_v842(", 1)[1].split("{", 1)[0]
     head = " ".join(line.split("//", 1)[0] for line in head.splitlines()).rsplit(")", 1)[0]
-    params = [p.strip() for p in head.split(",")]
-    return tuple("*" in p and not p.startswith("const ") for p in params)
+    return tuple(_is_written(p) for p in head.split(","))
+
+
+def _is_written(param: str) -> bool:
+    """Whether a kernel parameter is an array the kernel may write: a pointer
+    whose pointee is not ``const`` (``const double *__restrict__ x`` and
+    ``double const *x`` are read only; ``double *__restrict__ const x`` is
+    written)."""
+    if "*" not in param:
+        return False
+    return "const" not in param.split("*", 1)[0].split()
 
 
 def _keep_after_abort(written: list, before: list, first: int, n_solve: int) -> None:

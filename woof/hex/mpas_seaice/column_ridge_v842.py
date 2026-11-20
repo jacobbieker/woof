@@ -43,7 +43,7 @@ from importlib.resources import files
 import numpy as np
 
 from woof.hex import numerics as _hex_numerics
-from woof.hex.errors import MpasPortError
+from woof.hex.errors import ConfigurationRefusal, MpasPortError
 
 from . import column_itd_v842 as citd
 from . import column_v842 as cv
@@ -123,6 +123,7 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
     of the cells' warnings this port grades, in log order: ridge_ice's
     ``Repeat ridging`` lines and zap_snow_temperature's out-of-bounds lines.
     Needs ``init_column_itd`` to have run (the thickness limits)."""
+    check_config(configs)
     import cupy as cp
 
     d = state.dims
@@ -205,6 +206,26 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
     return SEAICE_ERROR_COL_RIDGING, cell, "column_ridging: " + STOP_LABELS[int(codes[last])]
 
 
+#: the names v8.4.2's column package maps to colpkg's integers (anything else
+#: aborts ``seaice_column_init`` there); the ridging kernels and
+#: ``colpkg_ice_strength``'s carry exactly these
+NAMED_OPTIONS = ("config_ice_strength_formulation", "config_ridging_participation_function",
+                 "config_ridging_redistribution_function")
+
+
+def check_config(configs: dict) -> None:
+    """Refuse, by name and before any pool is touched, a strength formulation
+    or a ridging participation or redistribution function that is missing or
+    not one v8.4.2 names."""
+    for knob in NAMED_OPTIONS:
+        names = cv._CICE_INT[knob]
+        value = configs.get(knob)
+        if value not in names:
+            raise ConfigurationRefusal(
+                knob=knob, value=value, reason=f"v8.4.2's column package names only {sorted(names)}",
+                declaration=" or ".join(f"{knob} = '{name}'" for name in names))
+
+
 def ice_strength(pools: dict, configs: dict, n_ice_layers: int) -> None:
     """``ice_strength`` under the column package's vertical thermodynamics,
     in place (``mpas_seaice_velocity_solver.F:1359-1379``): ``icePressure``
@@ -216,10 +237,9 @@ def ice_strength(pools: dict, configs: dict, n_ice_layers: int) -> None:
     ``config_ridiging_efolding_scale``; or ``Hibler79``). Its ``Cf`` is the
     column constants' 17, as v8.4.2 does not read
     ``config_ratio_ridging_work_to_PE``. RKIND 8 only."""
+    check_config(configs)
     ints = cv._CICE_INT
-    strength = configs.get("config_ice_strength_formulation", "Rothrock75")
-    if strength not in ints["config_ice_strength_formulation"]:
-        raise ValueError(f"config_ice_strength_formulation is 'Hibler79' or 'Rothrock75', not {strength!r}")
+    strength = configs["config_ice_strength_formulation"]
     solver, aggregate = pools["velocity_solver"], pools["tracers_aggregate"]
     pressure = solver["icePressure"]
     n_cells = pressure.shape[0]

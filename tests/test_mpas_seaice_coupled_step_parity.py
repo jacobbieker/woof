@@ -139,9 +139,39 @@ def test_the_column_package_at_rkind_4_is_refused():
         ts._column_precision(pools)
 
 
-def test_an_unknown_ice_strength_is_refused():
-    with pytest.raises(ValueError, match="config_ice_strength_formulation"):
-        crdg.ice_strength({}, {"config_ice_strength_formulation": "Hibler1979"}, 7)
+_MISSING = object()
+
+
+@pytest.mark.parametrize("knob", crdg.NAMED_OPTIONS)
+@pytest.mark.parametrize("value", ["Hibler1979", 2, _MISSING])
+def test_a_strength_or_ridging_name_v842_does_not_have_is_refused_up_front(knob, value):
+    """Before predynamics touches a pool: at check_config, not in the solver."""
+    config = dict(_case("seaice_bl99_dedd_rothrock")["config"])
+    if value is _MISSING:
+        del config[knob]
+    else:
+        config[knob] = value
+    with pytest.raises(ConfigurationRefusal, match=knob):
+        ts.check_config(config)
+
+
+@pytest.mark.parametrize("knob", ["config_ice_strength_formulation", "config_ridging_redistribution_function"])
+def test_the_strength_kernel_never_sees_an_unnamed_option(knob):
+    """The kernel's redistribution branch has no third case: ice_strength (and
+    the ridging) refuse before any pool is read, as check_config does."""
+    config = {**_case("seaice_bl99_dedd_rothrock")["config"], knob: "Hibler1979"}
+    with pytest.raises(ConfigurationRefusal, match=knob):
+        crdg.ice_strength({}, config, 7)
+    with pytest.raises(ConfigurationRefusal, match=knob):
+        crdg.ridging({}, config, None)
+
+
+@pytest.mark.parametrize("param, written", [
+    ("double *__restrict__ x", True), ("const double *__restrict__ x", False), ("double const *x", False),
+    ("double *__restrict__ const x", True), ("int n", False), ("const int *mask", False),
+])
+def test_the_abort_snapshot_reads_which_parameters_the_kernel_writes(param, written):
+    assert ct._is_written(param) is written
 
 
 def test_the_abort_names_its_step_cell_and_message():
