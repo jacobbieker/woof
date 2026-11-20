@@ -842,8 +842,12 @@ def _first_at_or_after(times, target, lo=0, hi=None):
     hi = times.shape[0] if hi is None else hi
     while hi - lo > SAT_SCAN_SAMPLE * 4:
         mid = (lo + hi) // 2
-        sample = _times(times, np.arange(mid, min(mid + SAT_SCAN_SAMPLE, times.shape[0])))
-        sample = sample[~np.isnat(sample)]
+        sample = np.array([], "datetime64[s]")
+        for probe in range(mid, hi, SAT_SCAN_SAMPLE):  # step past blocks with no time at all
+            sample = _times(times, np.arange(probe, min(probe + SAT_SCAN_SAMPLE, times.shape[0])))
+            sample = sample[~np.isnat(sample)]
+            if sample.size:
+                break
         if sample.size and np.median(sample.astype(np.int64)) < target.astype(np.int64):
             lo = mid
         else:
@@ -921,6 +925,8 @@ def amv_reports(root, start, end, box, counts: Counter) -> list[Report]:
     ok = _quality_ok(group, "quality_flag", index, counts, "amv") \
         & _templates_ok(group, index, AMV_TEMPLATES, counts, "amv")
     index, time = index[ok], time[ok]
+    if index.size == 0:
+        return []
     sat = _column(group["satellite_identifier"], index)
     instrument = _column(group["satellite_instruments"], index) if "satellite_instruments" in group \
         else np.full(len(index), np.nan)
@@ -977,6 +983,8 @@ def scat_reports(root, start, end, box, counts: Counter) -> list[Report]:
     ok = _quality_ok(group, "quality_flag", index, counts, "scat") \
         & _templates_ok(group, index, SCAT_TEMPLATES, counts, "scat")
     index, time = index[ok], time[ok]
+    if index.size == 0:
+        return []
     selected = _column(group["index_of_selected_wind_vector"], index)
     ambiguities = _column(group["number_of_vector_ambiguities"], index)
     usable = np.isfinite(selected) & (selected >= 1) & (selected <= np.nan_to_num(ambiguities, nan=0.0))
@@ -1042,7 +1050,8 @@ def thin_satellite_winds(reports, thin_km: float, counts: Counter) -> list[Repor
             out.append(rep)
             continue
         row = int(np.floor((rep.lat + 90.0) / step))
-        ring = max(1, int(np.floor(360.0 * np.cos(np.radians(min(89.9, abs(rep.lat) + step / 2))) / step)))
+        edge = max(abs(row * step - 90.0), abs((row + 1) * step - 90.0))  # the row's poleward edge
+        ring = max(1, int(np.floor(360.0 * np.cos(np.radians(min(89.9, edge))) / step)))
         col = int(np.floor(((rep.lon + 180.0) % 360.0) / 360.0 * ring))
         layer = int(rep.p[0] // AMV_THIN_LAYER_PA) if rep.family == "amv" else 0
         key = (rep.family, row, col, layer)

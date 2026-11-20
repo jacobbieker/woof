@@ -517,3 +517,27 @@ def test_satellite_winds_in_the_table_and_obs_gts(tmp_path):
                             time_window_min="2008-02-05_11:00:00", time_window_max="2008-02-05_13:00:00")
     counts = obs.counts()
     assert (counts["geoamv"], counts["polaramv"], counts["qscat"]) == (2, 1, 2)
+
+
+def test_satellite_groups_with_every_row_refused():
+    root = {**_amv(), **_scat()}
+    root["satellite/amv"]["bufr_template"] = Arr(["310014"] * 9)
+    root["satellite/scatterometer"]["quality_flag"] = _flags([16] * 7)
+    counts = Counter()
+    assert wis2.amv_reports(root, START, END, BOX, counts) == []
+    assert wis2.scat_reports(root, START, END, BOX, counts) == []
+    assert counts["amv_template_310014_not_vetted"] == 9 and counts["scat_position_invalid"] == 7
+
+
+def test_thinning_boxes_are_fixed_per_latitude_row():
+    def amv(lat, lon, qi):
+        return wis2.Report(family="amv", fm=88, station="GEO-71", name="x", lat=lat, lon=lon, elev=np.nan,
+                           time=np.datetime64("2008-02-05T12:00:00"), received=np.datetime64("NaT", "s"), p=[50000.0],
+                           z=[np.nan], t=[np.nan], td=[np.nan], rh=[np.nan], spd=[5.0], wdir=[90.0],
+                           surface=False, extras={"qi": qi})
+    # Two AMVs in one 100 km row at 70N, 0.1 degree of longitude apart: one box, whatever their latitudes.
+    step = 100.0 / 111.2
+    row_lat = np.floor((70.0 + 90.0) / step) * step - 90.0
+    kept = wis2.thin_satellite_winds([amv(row_lat + 0.01, 10.0, 90.0), amv(row_lat + step - 0.01, 10.1, 95.0)],
+                                     100.0, Counter())
+    assert [r.extras["qi"] for r in kept] == [95.0]
