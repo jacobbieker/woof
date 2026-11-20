@@ -323,7 +323,22 @@ matched exchange unless asked.
    DMS, MacroMolecules and CFC tracers are refused by name, and so are the
    cases E3SM writes or reads out of bounds (the active-wave stress without
    the waves two ways, an o2x field it writes but the list lacks,
-   `nGlcZLevels` above `glc_nzoc`). The sea ice's: still to port.
+   `nGlcZLevels` above `glc_nzoc`). The sea ice's is ported
+   (`woof/hex/coupled/ice_coupling_e3sm.py`,
+   `tests/test_e3sm_seaice_coupling_parity.py`): `mpassi_cpl_indices_set`
+   with MCT's stops, `ice_import_mct` (Icepack's sea freezing temperature
+   for every `tfrz_option`, `frazil_mass` with the mush liquidus and
+   enthalpy or BL99's, the aerosols bulk and modal, the z-aerosols, the
+   waves two ways) and `ice_export_mct` (the fraction, basal pressure with
+   the ponds, the stresses rotated back to the geographic grid, the fluxes
+   with the frazil adjustment, icebergs, floe size), real(r8), on CUDA and
+   Metal, against the routines compiled verbatim with the pinned Icepack.
+   The rotation's sin/cos/asin/atan2 are glibc's in E3SM: the port takes
+   their words as an input (the tests feed the oracle's), and
+   `rotation_trig` makes them with the host libm (glibc's words on Linux).
+   The coupled column biogeochemistry, the z-aerosols coupled without it
+   (E3SM reads through an unset pool pointer) and `nFrequencies` above
+   `wav_nfreq` are refused by name.
 5. The coupled ocean + sea-ice step on `woof/hex/coupled`, with the exchange
    checked against the E3SM merge. The sea ice's time step with the
    column package is ported (above); the coupled step is not built yet.

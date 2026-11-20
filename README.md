@@ -402,6 +402,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     forcing. real(r8), word-exact on CUDA and Metal against the routines
     compiled verbatim; the BGC, DMS, MacroMolecules and CFC tracers are
     refused by name, and so is what E3SM writes or reads out of bounds.
+  - MPAS-Seaice's coupler import and export, E3SM v3.2.0's `ice_import_mct`
+    and `ice_export_mct` with `mpassi_cpl_indices_set`
+    (`woof/hex/coupled/ice_coupling_e3sm.py`, opt-in): x2i into the ocean,
+    atmosphere, aerosol, z-aerosol and wave arrays (Icepack's sea freezing
+    temperature, the frazil mass) and i2x from the fraction, the basal
+    pressure, the stresses rotated back to the geographic grid and the
+    fluxes. real(r8), word-exact on CUDA and Metal against the routines
+    compiled verbatim with the pinned Icepack; the rotation's libm words are
+    an input. The coupled column biogeochemistry is refused by name, and so
+    is what E3SM reads out of bounds or through an unset pointer.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
