@@ -143,7 +143,8 @@ def itd_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
     if state.hi_min is None:
         raise ValueError("column_itd_thermodynamics needs init_column_itd (hi_min) first")
     n_cells, n_solve, ncat, nil = d["nCells"], d["nCellsSolve"], d["nCategories"], d["nIceLayers"]
-    day = ct.day_of_year(configs["config_start_time"]) if day is None else day
+    day = (ct.day_of_year(configs["config_start_time"], configs["config_calendar_type"]) if day is None
+           else day)
     to = state.tracers
     nt = to.n_tracers
     c1, cc, cat1 = (n_cells + 1,), (n_cells + 1, ncat), (n_cells + 1, ncat, 1)

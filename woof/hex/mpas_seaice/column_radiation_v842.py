@@ -75,6 +75,7 @@ import numpy as np
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
+from . import column_therm_v842 as ct
 from . import column_v842 as cv
 from .velocity_v842 import COMPILE_OPTIONS, _grid
 
@@ -195,26 +196,6 @@ def seconds_into_day(start_time: str) -> int:
     return int(start_time[11:13]) * 3600 + int(start_time[14:16]) * 60 + int(start_time[17:19])
 
 
-_NOLEAP_MONTH_DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-
-
-def day_of_year(start_time: str, calendar: str) -> float:
-    """``get_day_of_year`` at the clock's start on MPAS's calendars: the
-    Gregorian day, or the day of a 365-day year (``gregorian_noleap``, the
-    Registry default, where 29 February does not exist)."""
-    from . import column_therm_v842 as ct
-    if calendar == "gregorian":
-        return ct.day_of_year(start_time)
-    if calendar == "gregorian_noleap":
-        month, day = int(start_time[5:7]), int(start_time[8:10])
-        if month == 2 and day == 29:
-            _refuse("config_start_time", start_time, "29 February does not exist in the gregorian_noleap calendar",
-                    "a date of the 365-day year")
-        return float(sum(_NOLEAP_MONTH_DAYS[:month - 1]) + day)
-    _refuse("config_calendar_type", calendar, "get_day_of_year is ported for MPAS's gregorian and "
-            "gregorian_noleap calendars", "config_calendar_type = 'gregorian' or 'gregorian_noleap'")
-
-
 def _dedd_parameters(configs: dict, day: float) -> np.ndarray:
     c = configs
     par = np.zeros(12, np.float64)
@@ -255,7 +236,7 @@ def _radiation_dedd(pools: dict, configs: dict, state: "cv.ColumnState", initial
     d = state.dims
     n1, n_solve, ncat, nil, nsl = d["nCells"] + 1, d["nCellsSolve"], d["nCategories"], d["nIceLayers"], d["nSnowLayers"]
     cat1, cat = (n1, ncat, 1), (n1, ncat)
-    day = day_of_year(c["config_start_time"], c["config_calendar_type"]) if day is None else float(day)
+    day = ct.day_of_year(c["config_start_time"], c["config_calendar_type"]) if day is None else float(day)
     sec = seconds_into_day(c["config_start_time"]) if sec is None else int(sec)
     t = pools["tracers"]
     area, volume, snow, tsfc = (cv._need(t, k, cat1) for k in ("iceAreaCategory", "iceVolumeCategory",

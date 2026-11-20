@@ -210,3 +210,187 @@ def lbc_ad(adj_state, traj, adj, geom: LBCGeometry):
 
 def _named(label, names, d):
     return [(label, n, d[n]) for n in names]
+
+
+# ---------------------------------------------------------------- item 7b
+#: spec_bdy_final: the field it overwrites on the specified rows, the
+#: acoustic carrier muts and the eight side tables (active), and the
+#: coupling constants (passive).
+LF_STATE = ("target",)
+LF_ACTIVE = ("muts",) + LB_TABLES
+LF_PASSIVE = ("c1h", "c2h", "c1f", "c2f", "msft", "msfu", "msfv")
+LF_KINDS = ("u", "v", "theta", "phi", "w", "mu")
+
+
+@dataclass(frozen=True)
+class FinalGeometry:
+    """One field of WRF spec_bdy_final as woof's strict finalize_state_field
+    (GPUWM_WRF_EXACT: the specified rows only, coupled with the acoustic
+    muts) or, for mu, install_mu_boundary.  ``has_msf``: u, v and w take
+    msfu, msfv and msft."""
+    nz: int
+    ny: int
+    nx: int
+    kind: str
+    width: int = 5
+    spec_zone: int = 1
+    dtbc: float = 0.0
+    has_msf: int = 0
+
+    @property
+    def field(self) -> tuple[int, int, int]:
+        return LBCGeometry(self.nz, self.ny, self.nx, self.kind).field
+
+    def validate(self) -> None:
+        for name in ("nz", "ny", "nx"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be >= 1, got {getattr(self, name)}")
+        if self.kind not in LF_KINDS:
+            raise ValueError(f"kind {self.kind!r} is not a dry field")
+        if not 1 <= self.spec_zone <= self.width:
+            raise ValueError("need 1 <= spec_zone <= width")
+        _, fy, fx = self.field
+        if min(fy, fx) < 2 * self.spec_zone + 1:
+            raise ValueError("domain too small for the specified frame")
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        nz, ny, nx = self.field
+        return (r(self.dtbc), i(LB_KINDS[self.kind]), i(self.width), i(self.spec_zone),
+                i(self.has_msf), i(nz), i(ny), i(nx))
+
+
+def lf_shapes(geom: FinalGeometry) -> dict:
+    fz, fy, fx = geom.field
+    nz, ny, nx, w = geom.nz, geom.ny, geom.nx, geom.width
+    sh = {"target": geom.field, "muts": (ny, nx), "c1h": (nz,), "c2h": (nz,),
+          "c1f": (nz + 1,), "c2f": (nz + 1,), "msft": (ny, nx), "msfu": (ny, nx + 1),
+          "msfv": (ny + 1, nx)}
+    for side in ("west", "east"):
+        sh[side] = sh[side + "_t"] = (fz, fy, w)
+    for side in ("south", "north"):
+        sh[side] = sh[side + "_t"] = (fz, w, fx)
+    return sh
+
+
+def _lf_cells(geom) -> int:
+    fz, fy, fx = geom.field
+    return fz * _rings(fy, fx, geom.spec_zone)
+
+
+def lbf_tl(state, pert_state, traj, pert, geom: FinalGeometry, *, nl=True):
+    """WRFPLUS g_spec_bdy_final on one field: the specified rows of
+    ``target`` take the coupled table value."""
+    geom.validate()
+    _check(geom, _named("state", LF_STATE, state) + _named("pert", LF_STATE, pert_state)
+           + _named("traj", LF_ACTIVE + LF_PASSIVE, traj)
+           + _named("pert", LF_ACTIVE, pert), lf_shapes(geom), min_nz=1)
+    arrs = ((state["target"], pert_state["target"])
+            + tuple(traj[n] for n in LB_TABLES) + tuple(pert[n] for n in LB_TABLES)
+            + (traj["muts"], pert["muts"]) + tuple(traj[n] for n in LF_PASSIVE))
+    dtype = _dtype(arrs)
+    _kernel("lbf_tl", dtype)(_blocks(_lf_cells(geom)), (THREADS,),
+                             arrs + (np.int32(bool(nl)),) + geom.args(dtype))
+
+
+def lbf_ad(adj_state, traj, adj, geom: FinalGeometry):
+    """Adjoint of :func:`lbf_tl`: the specified rows' target adjoint is
+    consumed into the tables' and muts' adjoints (added into ``adj``)."""
+    geom.validate()
+    _check(geom, _named("adj", LF_STATE, adj_state)
+           + _named("traj", LF_ACTIVE + LF_PASSIVE, traj)
+           + _named("adj", LF_ACTIVE, adj), lf_shapes(geom), min_nz=1)
+    passive = tuple(traj[n] for n in LF_PASSIVE)
+    tables = tuple(traj[n] for n in LB_TABLES)
+    dtype = _dtype((adj_state["target"], traj["muts"]) + tables + passive
+                   + tuple(adj[n] for n in LF_ACTIVE))
+    g = geom.args(dtype)
+    if geom.kind != "mu":
+        _kernel("lbf_ad_muts", dtype)(_blocks(geom.ny * geom.nx), (THREADS,),
+                                      (adj["muts"], adj_state["target"]) + tables
+                                      + (traj["muts"],) + passive + g)
+    _kernel("lbf_ad_cell", dtype)(_blocks(_lf_cells(geom)), (THREADS,),
+                                  (adj_state["target"],) + tuple(adj[n] for n in LB_TABLES)
+                                  + (traj["muts"],) + passive + g)
+
+
+#: spec_bdyupdate_ph + zero_grad_bdy(w) + the frame's calc_p_rho.
+SP_STATE = ("ph_pp", "w_pp", "p_pp", "al_pp")
+SP_ACTIVE = ("rph_t", "php", "rmu_t", "muts", "th_pp", "mu_pp", "thp", "alt", "c2a")
+SP_PASSIVE = ("rdnw", "c1h", "c2h", "c1f", "c2f")
+
+
+@dataclass(frozen=True)
+class SpecPhiGeometry:
+    """woof's strict advance_specified_phi_w: one acoustic substep's
+    specified-frame ph'' update (WRF spec_bdyupdate_ph), the frame's
+    zero-gradient w'' (zero_grad_bdy) and calc_p_rho on the frame columns
+    (the interior's is advance_w's)."""
+    nz: int
+    ny: int
+    nx: int
+    dtau: float
+    spec_zone: int = 1
+
+    def validate(self) -> None:
+        for name in ("nz", "ny", "nx"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be >= 1, got {getattr(self, name)}")
+        if self.spec_zone < 1:
+            raise ValueError("spec_zone must be >= 1")
+        if min(self.ny, self.nx) < 2 * self.spec_zone + 1:
+            # the zero-gradient source column must be interior
+            raise ValueError("domain too small for the specified frame")
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        return (r(self.dtau), i(self.spec_zone), i(self.nz), i(self.ny), i(self.nx))
+
+
+def sp_shapes(geom: SpecPhiGeometry) -> dict:
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    wl, ml, col = (nz + 1, ny, nx), (nz, ny, nx), (ny, nx)
+    return {"ph_pp": wl, "w_pp": wl, "p_pp": ml, "al_pp": ml, "rph_t": wl, "php": wl,
+            "rmu_t": col, "muts": col, "th_pp": ml, "mu_pp": col, "thp": ml, "alt": ml,
+            "c2a": ml, "rdnw": (nz,), "c1h": (nz,), "c2h": (nz,), "c1f": (nz + 1,),
+            "c2f": (nz + 1,)}
+
+
+def sph_tl(state, pert_state, traj, pert, geom: SpecPhiGeometry, *, nl=True):
+    """WRFPLUS g_spec_bdyupdate_ph, g_zero_grad_bdy (w) and g_calc_p_rho on
+    the specified frame columns."""
+    geom.validate()
+    _check(geom, _named("state", SP_STATE, state) + _named("pert", SP_STATE, pert_state)
+           + _named("traj", SP_ACTIVE + SP_PASSIVE, traj)
+           + _named("pert", SP_ACTIVE, pert), sp_shapes(geom), min_nz=1)
+    st = tuple(x for n in SP_STATE for x in (state[n], pert_state[n]))
+    act = tuple(x for n in SP_ACTIVE for x in (traj[n], pert[n]))
+    arrs = st + act + tuple(traj[n] for n in SP_PASSIVE)
+    dtype = _dtype(arrs)
+    _kernel("sph_tl", dtype)(_blocks(geom.ny * geom.nx), (THREADS,),
+                             arrs + (np.int32(bool(nl)),) + geom.args(dtype))
+
+
+def sph_ad(adj_state, state, traj, adj, geom: SpecPhiGeometry):
+    """Adjoint of :func:`sph_tl`: ``adj_state`` maps back in place
+    (``state`` holds the input ph''); the :data:`SP_ACTIVE` adjoints are
+    added into ``adj``."""
+    geom.validate()
+    sh = sp_shapes(geom)
+    _check(geom, _named("adj", SP_STATE, adj_state) + [("state", "ph_pp", state["ph_pp"])]
+           + _named("traj", SP_ACTIVE + SP_PASSIVE, traj)
+           + _named("adj", SP_ACTIVE, adj), sh, min_nz=1)
+    dtype = _dtype(tuple(adj_state[n] for n in SP_STATE) + (state["ph_pp"],)
+                   + tuple(traj[n] for n in SP_ACTIVE + SP_PASSIVE)
+                   + tuple(adj[n] for n in SP_ACTIVE))
+    g = geom.args(dtype)
+    _kernel("sph_ad_w", dtype)(_blocks((geom.nz + 1) * geom.ny * geom.nx), (THREADS,),
+                               (adj_state["w_pp"],) + g)
+    _kernel("sph_ad_col", dtype)(
+        _blocks(geom.ny * geom.nx), (THREADS,),
+        (adj_state["ph_pp"], adj_state["w_pp"], adj_state["p_pp"], adj_state["al_pp"])
+        + tuple(adj[n] for n in ("rph_t", "php", "rmu_t", "muts", "th_pp", "mu_pp", "thp",
+                                 "alt", "c2a"))
+        + (state["ph_pp"],) + tuple(traj[n] for n in ("rph_t", "php", "rmu_t", "muts",
+                                                     "th_pp", "mu_pp", "thp", "alt", "c2a"))
+        + tuple(traj[n] for n in SP_PASSIVE) + g)

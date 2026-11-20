@@ -154,6 +154,17 @@ Ordered by how self-contained each piece is:
    `tests/test_mpas_seaice_column_dedd_parity.py`). Its orbit and solar
    zenith angle call glibc's sin, cos, atan and asin, so it needs the LGPL
    opt-in; aerosols and the bioabsorption stay refused.
+   Also ported: the coupling preparation, `seaice_column_coupling_prep` with
+   `seaice_column_scale_fluxes` (the saved freezing/melting potential, the
+   cell albedos and effective pond area, the pond freshwater feedback, the
+   per-area copies, the shortwave scaling factor, then the fluxes per unit
+   ice area or the open-water values;
+   `woof/hex/mpas_seaice/coupling_prep_v842.py`,
+   `tests/test_mpas_seaice_coupling_prep_parity.py`). Cut out of
+   `mpas_seaice_column.F`, the two routines compile at RKIND 4 too, so this
+   piece is word-exact at both precisions. It calls no libm. The ocean mixed
+   layer (`config_use_ocean_mixed_layer`, `.true.` in the Registry, off when
+   coupled to an ocean) and the column biogeochemistry are refused by name.
    Still to port: mushy vertical
    thermodynamics, the melt
    ponds' own physics, the other `ice_atmo` options, then the column time

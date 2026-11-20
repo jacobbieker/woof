@@ -2,7 +2,9 @@
 
 Written by `tools/mpas_seaice_oracle/build.sh` and
 `make_column_fixture.py --cases therm` on pb (Linux 6.12 x86_64, glibc 2.44),
-2026-11-15.
+2026-11-15; regenerated 2026-11-20 with the calendar-aware clock
+(`freezeOnset`/`meltOnset` of the 2000 cases moved a day; the two
+`vt_bl99_first_year_north_*` cases added).
 
 - MPAS source: MPAS-Model v8.4.2 (`f34984b2`), every file checked against
   `tools/mpas_seaice_oracle/SOURCES.sha256`. The build is the same as
@@ -14,14 +16,21 @@ Written by `tools/mpas_seaice_oracle/build.sh` and
   `seaice_init_column_physics_package_parameters`, then `colpkg_init_thermo`
   (which sets `l_brine` and `heat_capacity`), then
   `seaice_column_vertical_thermodynamics`. The abort status is logged as
-  `TOBJ IERR`.
+  `TOBJ IERR`. Before the clock it calls `mpas_timekeeping_init` with
+  `config_calendar_type`, as MPAS's framework does
+  (`mpas_framework.F:111-116`); the stub time manager
+  (`tools/mpas_ocean_oracle/stubs.F90`) counts the 365-day year for
+  `gregorian_noleap` and stops on a date the calendar lacks.
 - Cases: `woof.verify.mpas_seaice_column_oracle.VT_CASES`:
   - bubbly and MU71 conductivity (MU71 with highfreq and three atmosphere
     iterations);
   - the coupled surface temperature (`config_use_surface_temperature`
     false);
   - melting;
-  - first-year ice reset in each hemisphere;
+  - first-year ice reset in each hemisphere. The north's is at day 259 on
+    `config_calendar_type`'s calendar: 2000-09-16 on `gregorian_noleap` (the
+    Registry default; 260 on a Gregorian count), 2000-09-15 on `gregorian`,
+    while 2000-09-15 on `gregorian_noleap` is day 258 and does not reset;
   - one layer and one category;
   - an abort on low starting salinity (cell 6, `init_vertical_profile`).
 
