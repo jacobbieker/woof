@@ -361,7 +361,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     surface and conductive fluxes, the ice velocity in the boundary layer
     (a vertex's u and no v), CCSM3's absorbed shortwave over `ncat`
     layers, and the delta-Eddington's infinite extinction in ice without
-    volume. The elastic subcycles check
+    volume. The column package's part of the time step chains these over
+    several steps, word for word with v8.4.2: the diagnostics' and fluxes'
+    re-initialisations, the pre-dynamics (shortwave preparation, vertical
+    and ITD thermodynamics), the column dynamics (ridging), the
+    post-dynamics (shortwave and coupling preparation) and the stop on an
+    abort, with the day and time read from the step's clock
+    (`column_step_v842`; the coupled step with the velocity solver is
+    still refused). The elastic subcycles check
     their arrays once per solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
