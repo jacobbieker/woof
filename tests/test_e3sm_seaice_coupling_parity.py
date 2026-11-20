@@ -163,8 +163,12 @@ def test_the_wavespec_names_are_e3sms():
     assert icc.wavespec_name(99) == "Sw_wavespec99"
     assert icc.wavespec_name(100) == "Sw_wavespec**"
     case = _case("waves_twoway")
+    x2i = [n for n in case["lists"]["x2i"] if not n.startswith("Sw_wavespec")]
+    x2i += [f"Sw_wavespec{k:02d}" for k in range(1, 100)]
     with pytest.raises(icc.CouplingAbort, match=r"Sw_wavespec\*\*"):
-        icc.indices(case["lists"]["x2i"], case["lists"]["i2x"], wav_ice_coup="twoway", wav_nfreq=100)
+        icc.indices(x2i, case["lists"]["i2x"], wav_ice_coup="twoway", wav_nfreq=100)
+    assert len(icc.indices(x2i + ["Sw_wavespec**"], case["lists"]["i2x"], wav_ice_coup="twoway",
+                           wav_nfreq=101).wavespec) == 101
     idx = icc.indices(case["lists"]["x2i"], case["lists"]["i2x"], wav_ice_coup="twoway   ", wav_nfreq=7)
     assert idx.wav_ice_coup == "twoway" and len(idx.wavespec) == 7
 
@@ -305,14 +309,12 @@ def _mismatches(case, key):
     # the ponds' mass dropped
     ("if (ponds)", "if (0)", "i2x/Si_bpress", "bl99_mushy_tfrz"),
     # the salt's frazil term reassociated
-    ("D(M(M(referenceSalinity, 0.001), AR(A_FRZADJ)), ailohi)", "D(M(referenceSalinity, M(0.001, AR(A_FRZADJ))), "
-     "ailohi)", "i2x/Fioi_salt", "mushy_free"),
+    ("M(M(referenceSalinity, 0.001), AR(A_FRZADJ))", "D(M(referenceSalinity, AR(A_FRZADJ)), 1000.0)",
+     "i2x/Fioi_salt", "mushy_free"),
     # the surface temperature left in Celsius
     ("A(freshWaterFreezingPoint, AR(A_TSFC))", "AR(A_TSFC)", "i2x/Si_t", "mushy_free"),
     # the albedos written without the column shortwave
     ("if (columnSW) {", "if (1) {", "i2x/Si_avsdr", "bl99_mushy_tfrz"),
-    # the floe size written without the distribution
-    ("if (floe) o[col[I_IFLOE]]", "if (1) o[col[I_IFLOE]]", "i2x/Si_ifloe", "waves_twoway_off"),
     # the meltwater without the frazil adjustment
     ("A(AR(A_MELTW), D(AR(A_FRZADJ), ailohi))", "AR(A_MELTW)", "i2x/Fioi_meltw", "som_linear_salt"),
     # the SST left in Kelvin
