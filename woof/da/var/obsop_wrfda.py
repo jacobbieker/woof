@@ -29,6 +29,9 @@ Derived from WRFDA 4.7.1 (``da_transform_xtoy_*``, ``da_interp_lin_*``,
 
 from __future__ import annotations
 
+from functools import lru_cache
+from types import SimpleNamespace
+
 import numpy as np
 
 from . import innov_wrfda as iw
@@ -214,7 +217,10 @@ class _Satem:
     adjoint is the exact adjoint of this H')."""
 
     def __init__(self, t, xb, lm):
-        self.lm = lm
+        # Every log argument here is a background ratio, the same each call:
+        # memoising the (correctly rounded, decimal) log returns the same words
+        # and takes it out of the per-iteration cost.
+        self.lm = SimpleNamespace(log=lru_cache(maxsize=None)(lm.log))
         self.xb = xb
         self.w = list(zip(*iw._w(t.info)))
         self.off = t.offsets
