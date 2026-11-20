@@ -135,6 +135,10 @@ woof var --be be.dat --first-guess fg --out bundle --window-minutes 180 \
   - `--max-ext-its` above 1: WRFDA 4.7.1 re-reads `fgNN` and `fg` from
     disk in every outer loop, which drops the earlier loops' increments.
   - Radiances: WRFDA bins them by time slot, and that is not ported.
+  - The hybrid (ensemble) B: WRFDA bins the ensemble by time slot only in
+    4DEnVar (`use_4denvar`), which is not ported.
+  - An analysis-time first guess (`--first-guess`) that is not at one of
+    the slot times (WRFDA's `itime_ana`).
   - Mixing `--obs` with `--fgat-obs`.
 - **The bundle.** Each slot's file names and SHA-256 go into `recipe_sha256`
   and are listed under `notes.var.fgat`.
@@ -146,11 +150,12 @@ observations. The first guesses come from a WRF 4.7.1 forecast from the 12Z
 `wrfinput`, and the analysis is at 15Z.
 
 - **Innovations.** The qc flags equal WRFDA's everywhere. Every innovation
-  agrees to 1e-10 relative, except metar `p` at 3e-10 (its O-B is small).
-  These are the crmath-against-glibc ulps of O5.
+  agrees to 1e-10 relative. The exception is metar `p`, whose O-B is small:
+  it is measured at 2.3e-10 and tested to 3e-10. These differences are the
+  crmath-against-glibc ulps of O5.
 - **Initial cost.** `Jo` at the background is WRFDA's `J_0` to 1e-13.
-- **Minimisation.** It takes WRFDA's 31 iterations to its final `J`
-  within 1e-15.
+- **Minimisation.** It takes WRFDA's 31 iterations to its final `J`,
+  tested to 1e-12 relative (measured 5e-16).
 - **Analysis.** The increments against `wrfvar_output` have max
   |difference| at most 8.4e-5 of the RMS (PSFC; the other fields at most
   1.1e-5) and correlation of at least 0.999999998.

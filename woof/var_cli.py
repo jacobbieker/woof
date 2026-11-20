@@ -125,6 +125,9 @@ def main(args) -> int:
     rad_kw = _radiance_kwargs(args) if args.radiance_scene else {}
     try:
         fgat_kw, fgat_recipe = _fgat_kwargs(args)
+        if fgat_kw and (args.ensemble_member or args.ep_dir):
+            raise ValueError("FGAT with the hybrid (--ensemble-member/--ep-dir) is not ported: WRFDA bins "
+                             "the ensemble by time slot only in 4DEnVar (use_4denvar)")
         hyb_kw, hyb_recipe = _hybrid_kwargs(args)
     except ValueError as exc:
         print(f"var: {exc}", file=sys.stderr)
@@ -205,12 +208,12 @@ def _fgat_kwargs(args) -> tuple[dict, dict | None]:
         raise ValueError("FGAT with --radiance-scene is not ported (WRFDA bins radiances by time slot)")
     from woof.da.var import fgat as fm
     from woof.da.var.analysis import obs_window
-    from woof.da.var.hybrid import wrf_times
 
-    window = obs_window(types.SimpleNamespace(times=wrf_times(args.first_guess)[0]), args.window_minutes)
+    window = obs_window(types.SimpleNamespace(times=fm.first_guess_time(args.first_guess)), args.window_minutes)
     try:
-        fm.check_fgat(len(obs), [wrf_times(f)[0] for f in fgs], time_window_min=window["time_window_min"],
-                      time_window_max=window["time_window_max"], max_ext_its=args.max_ext_its)
+        fm.check_fgat(len(obs), [fm.first_guess_time(f) for f in fgs], time_window_min=window["time_window_min"],
+                      time_window_max=window["time_window_max"], max_ext_its=args.max_ext_its,
+                      analysis_date=window["analysis_date"])
     except NotImplementedError as exc:
         raise ValueError(str(exc)) from None
     recipe = {"obs": [{"name": Path(p).name, "sha256": _sha256(p)} for p in obs],

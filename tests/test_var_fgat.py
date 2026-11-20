@@ -11,10 +11,11 @@ files are pinned in ``tests/data/wrfda471/manifest.json`` (``fgat``).
 GV5, measured:
 
 - the innovations of every slot against its own first guess: qc flags equal
-  WRFDA's everywhere, ``inv`` to 1e-10 relative (2.3e-10 for metar ``p``,
-  whose O-B is small; the crmath-against-glibc ulps of O5);
+  WRFDA's everywhere, ``inv`` to 1e-10 relative (metar ``p``, whose O-B is
+  small: measured 2.3e-10, tested to 3e-10; the crmath-against-glibc ulps of O5);
 - ``Jo`` at the background is WRFDA's ``J_0`` to 1e-13;
-- the minimisation takes WRFDA's 31 iterations to its final ``J`` (1e-12),
+- the minimisation takes WRFDA's 31 iterations to its final ``J`` (tested to
+  1e-12, measured 5e-16),
   and the increments meet O7's criteria against ``wrfvar_output``.
 """
 
@@ -53,37 +54,58 @@ def test_time_slots_are_wrfdas():
     assert list(fm.slot_minutes(7, W[0], W[2]) - ts[0]) == [0.0, 60.0, 120.0, 180.0, 240.0, 300.0, 360.0]
 
 
+def _report(i, j, p, t):
+    return dict(i=i, j=j, dx=0.25, dy=0.5, h=[M], p=[p],
+                fields={"u": [(5.0, 0, 2.0)], "v": [(-2.0, 0, 2.0)], "t": [(t, 0, 3.0)], "q": [(0.005, 0, 0.001)]})
+
+
 def _sound(p, t=280.0):
-    return syn.obs_type("sound", [dict(
-        i=3, j=4, dx=0.25, dy=0.5, h=[M], p=[p],
-        fields={"u": [(5.0, 0, 2.0)], "v": [(-2.0, 0, 2.0)], "t": [(t, 0, 3.0)], "q": [(0.005, 0, 0.001)]})])
+    return syn.obs_type("sound", [_report(3, 4, p, t)])
+
+
+def _p_at(xb, i, j):
+    """A pressure between mass levels 4 and 5 of the column at 1-based ``(i, j)``."""
+    col = iw._hcol(xb["p"], i - 1, j - 1, 0.25, 0.5, 0.75, 0.5)
+    return 0.5 * (col[4] + col[5])
 
 
 def _two_slots(xb):
-    col = iw._hcol(xb["p"], 2, 3, 0.25, 0.5, 0.75, 0.5)
-    p = 0.5 * (col[4] + col[5])
+    p = _p_at(xb, 3, 4)
     return fm.concat([syn.obs({"sound": _sound(p)}), syn.obs({"sound": _sound(p, 281.0)})])
 
 
 def test_each_slot_is_compared_with_its_own_first_guess():
+    """Slot 2's first guess differs in t, p and height, and has a warm anomaly over
+    slot 2's second report: that report passes the background check against
+    the analysis-time first guess and fails it only against its own slot's."""
     xb1 = syn.background()
-    xb2 = dict(xb1, t=xb1["t"] + 1.0)
-    obs = _two_slots(xb1)
-    assert list(obs.plocal["sound"]) == [0, 1, 2]
+    t2 = xb1["t"] + 1.0
+    t2[4:6, 3:5, :] += 20.0      # the columns of report B at (5, 4)
+    xb2 = dict(xb1, t=t2, p=xb1["p"] * 1.02, h=xb1["h"] + 30.0, hf=xb1["hf"] + 30.0, terr=xb1["terr"] + 30.0)
+    pa, pb = _p_at(xb1, 3, 4), _p_at(xb1, 5, 4)
+    tb = float(np.mean(iw._hcol(xb1["t"], 4, 3, 0.25, 0.5, 0.75, 0.5)[4:6]))   # about xb1's own t there
+    obs = fm.concat([syn.obs({"sound": syn.obs_type("sound", [_report(3, 4, pa, 280.0)])}),
+                     syn.obs({"sound": syn.obs_type("sound", [_report(3, 4, pa, 281.0),
+                                                              _report(5, 4, pb, tb)])})])
+    assert list(obs.plocal["sound"]) == [0, 1, 3]
     iv = fm.innovations_fgat(obs, [xb1, xb2])
     one = iw.innovations(fm.slot(obs, 0), xb1)["sound"]
     two = iw.innovations(fm.slot(obs, 1), xb2)["sound"]
+    two_at_fg = iw.innovations(fm.slot(obs, 1), xb1)["sound"]
     s = iv["sound"]
     for v in ("u", "v", "t", "q"):
         assert np.array_equal(s.fields[v].inv, np.concatenate([one.fields[v].inv, two.fields[v].inv])), v
         assert np.array_equal(s.fields[v].qc, np.concatenate([one.fields[v].qc, two.fields[v].qc])), v
-    # slot 2's observation is 1 K warmer and so is its background: the same O-B as slot 1
-    assert s.fields["t"].inv[1] == pytest.approx(s.fields["t"].inv[0], abs=1e-9)
-    # against the analysis-time background it would be 1 K larger
-    assert iw.innovations(fm.slot(obs, 1), xb1)["sound"].fields["t"].inv[0] == pytest.approx(
-        s.fields["t"].inv[0] + 1.0, abs=1e-9)
+    # the vertical positions come from each slot's own pressure
+    assert np.array_equal(s.extra["zk"], np.concatenate([one.extra["zk"], two.extra["zk"]]))
+    assert not np.array_equal(two.extra["zk"], two_at_fg.extra["zk"])
+    assert not np.array_equal(two.fields["t"].inv, two_at_fg.fields["t"].inv)
+    # report B: the background check fails against its own slot's first guess only
+    assert two_at_fg.fields["t"].qc[1] >= 0, two_at_fg.fields["t"].inv[1]
+    assert s.fields["t"].qc[2] == iw.FAILS_ERROR_MAX, s.fields["t"].inv[2]
+    assert s.fields["t"].qc[0] >= 0 and s.fields["t"].qc[1] >= 0
     geo = s.extra["geometry"]
-    assert geo.nrep == 2 and np.array_equal(geo.zk, s.extra["zk"])
+    assert geo.nrep == 3 and np.array_equal(geo.zk, s.extra["zk"])
     assert np.array_equal(iw.interp_lin_3d(xb1["t"], geo),
                           np.concatenate([iw.interp_lin_3d(xb1["t"], one.extra["geometry"]),
                                           iw.interp_lin_3d(xb1["t"], two.extra["geometry"])]))
@@ -125,6 +147,10 @@ def test_check_fgat_refusals():
         fm.check_fgat(7, bad, **kw)
     with pytest.raises(NotImplementedError, match="max_ext_its"):
         fm.check_fgat(7, times, max_ext_its=2, **kw)
+    # the analysis-time first guess must sit at a slot time (WRFDA's itime_ana)
+    fm.check_fgat(7, times, analysis_date="2008-02-05_15:00:00", **kw)
+    with pytest.raises(ValueError, match="14:30:00, which is not one of the 7 slot times"):
+        fm.check_fgat(7, times, analysis_date="2008-02-05_14:30:00", **kw)
 
 
 def _cli_args(**kw):
@@ -144,6 +170,52 @@ def _wrf_file(path: Path, stamp: str) -> Path:
         t = nc.createVariable("Times", "S1", ("Time", "DateStrLen"))
         t[0] = np.array(list(stamp), dtype="S1")
     return path
+
+
+def _slot_files(tmp_path):
+    fgs = [_wrf_file(tmp_path / f"fg0{n}", f"2008-02-05_{11 + n}:00:00") for n in range(1, 8)]
+    obs = []
+    for n in range(1, 8):
+        (tmp_path / f"ob0{n}.ascii").write_text(f"slot {n}\n")
+        obs.append(tmp_path / f"ob0{n}.ascii")
+    return obs, fgs
+
+
+def test_first_guess_time_is_one_helper(tmp_path):
+    from woof.da.var.analysis import FirstGuess
+
+    f = _wrf_file(tmp_path / "fg", "2008-02-05_15:00:00")
+    assert fm.first_guess_time(f) == "2008-02-05_15:00:00"
+    assert fm.first_guess_time(FirstGuess(path=f, fields={}, attrs={}, times="2008-02-05_15:00:00")) == \
+        "2008-02-05_15:00:00"
+
+
+def test_analyse_refuses_fgat_setups_before_reading_anything(tmp_path):
+    """Every FGAT refusal of ``analyse`` runs on the files' times alone: the
+    ``be.dat`` here does not exist and is never opened."""
+    from woof.da.var.analysis import analyse
+
+    obs, fgs = _slot_files(tmp_path)
+    be, fg = tmp_path / "missing-be.dat", fgs[3]
+    kw = dict(fgat=fgs, window_minutes=180.0)
+    with pytest.raises(NotImplementedError, match="max_ext_its"):
+        analyse(be, obs, fg, max_ext_its=2, **kw)
+    with pytest.raises(ValueError, match="slot 2"):
+        analyse(be, obs, fg, fgat=[fgs[0]] + fgs[:-1], window_minutes=180.0)
+    with pytest.raises(NotImplementedError, match="radiances"):
+        analyse(be, obs, fg, radiances=[object()], **kw)
+    with pytest.raises(ValueError, match="xb_override"):
+        analyse(be, obs, fg, xb_override={"t": 0.0}, **kw)
+    with pytest.raises(NotImplementedError, match="hybrid"):
+        analyse(be, obs, fg, ensemble=object(), **kw)
+    with pytest.raises(NotImplementedError, match="hybrid"):
+        analyse(be, obs, fg, hybrid=object(), **kw)
+    with pytest.raises(ValueError, match="6 observation files for 7"):
+        analyse(be, obs[:-1], fg, **kw)
+    # with an explicit window, an analysis-time first guess between the slot times
+    off = _wrf_file(tmp_path / "fg-1430", "2008-02-05_14:30:00")
+    with pytest.raises(ValueError, match="14:30:00, which is not one of the 7 slot times"):
+        analyse(be, obs, off, fgat=fgs, time_window=(W[0], W[2]))
 
 
 def test_cli_fgat_flags(tmp_path):
@@ -173,6 +245,24 @@ def test_cli_fgat_flags(tmp_path):
             _fgat_kwargs(_cli_args(**bad))
 
 
+def test_cli_refuses_fgat_with_the_hybrid(tmp_path, capsys):
+    import argparse
+
+    from woof.var_cli import main, register_cli
+
+    obs, fgs = _slot_files(tmp_path)
+    (tmp_path / "be.dat").write_bytes(b"")
+    parser = argparse.ArgumentParser()
+    register_cli(parser.add_subparsers())
+    argv = ["var", "--be", str(tmp_path / "be.dat"), "--first-guess", str(fgs[3]), "--out", str(tmp_path / "out"),
+            "--window-minutes", "180", "--ensemble-member", str(fgs[3]), "--je-factor", "2"]
+    for o, f in zip(obs, fgs):
+        argv += ["--fgat-obs", str(o), "--fgat-first-guess", str(f)]
+    assert main(parser.parse_args(argv)) == 2
+    assert "FGAT with the hybrid" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
 # --------------------------------------------------------------------------- oracle (GV5)
 def _manifest() -> dict:
     return json.loads(MANIFEST.read_text())["fgat"]
@@ -191,6 +281,17 @@ def _dir() -> Path:
     for name, want in man["files_sha256"].items():
         got = hashlib.sha256((d / name).read_bytes()).hexdigest()
         assert got == want, f"{d / name} has sha256 {got[:12]}..., not the manifest's {want[:12]}...: another run"
+    # the run's own record (run_fgat.sh writes files.sha256) ties its woof_iv.bin to these inputs
+    listed = {}
+    if (d / "files.sha256").is_file():
+        for line in (d / "files.sha256").read_text().splitlines():
+            sha, name = line.split()
+            listed[name] = sha
+    assert listed, f"{d} has no files.sha256 (run_fgat.sh writes it with the dumps)"
+    for name, want in man["files_sha256"].items():
+        assert listed.get(name) == want, f"{d}/files.sha256 lists {name} as {listed.get(name)}, not the pinned input"
+    got = hashlib.sha256((d / "woof_iv.bin").read_bytes()).hexdigest()
+    assert listed.get("woof_iv.bin") == got, f"{d}/woof_iv.bin is not the dump its run recorded in files.sha256"
     return d
 
 
@@ -201,7 +302,6 @@ def _slots(d: Path):
 @lru_cache(maxsize=1)
 def _innovations():
     from woof.da.var.analysis import read_first_guess, wrftoxb
-    from woof.da.var.oracle import read_dump
 
     d = _dir()
     obs_paths, fg_paths = _slots(d)
@@ -209,7 +309,10 @@ def _innovations():
     proj = ow.LambertWRFDA.from_attributes(fg.attrs)
     obs = fm.read_obs_ascii_fgat(obs_paths, proj, **_manifest()["window"])
     xbs = [wrftoxb(read_first_guess(p))[0] for p in fg_paths]
-    return obs, xbs, wrftoxb(fg)[0], proj, read_dump(d / "woof_iv.bin"), fm.innovations_fgat(obs, xbs)
+    from test_var_obs_wrfda import iv_dump
+
+    dump = iv_dump(d, _manifest()["iv_dump_digest"])
+    return obs, xbs, wrftoxb(fg)[0], proj, dump, fm.innovations_fgat(obs, xbs)
 
 
 #: GV5's inv tolerance (relative to the oracle's |inv|); metar p's O-B is small, so its ulps weigh more.

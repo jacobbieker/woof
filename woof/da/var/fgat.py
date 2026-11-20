@@ -46,7 +46,7 @@ import numpy as np
 from .obs_wrfda import Field, ObsType, WrfdaObs, _date_minutes, read_obs_ascii
 
 __all__ = ["time_slots", "slot_minutes", "read_obs_ascii_fgat", "slot", "concat", "innovations_fgat",
-           "check_fgat"]
+           "check_fgat", "first_guess_time"]
 
 #: ``extra`` arrays per report and per level (anything else is refused rather than guessed).
 _EXTRA_PER_REPORT = ("ref_p",)
@@ -212,13 +212,27 @@ def innovations_fgat(obs: WrfdaObs, xbs: Sequence[dict], **kw) -> WrfdaObs:
     return out
 
 
+def first_guess_time(f) -> str:
+    """A first guess's valid time, ``YYYY-MM-DD_hh:mm:ss``: a
+    :class:`~woof.da.var.analysis.FirstGuess`'s ``times``, or a WRF file's
+    first ``Times`` record (its ``START_DATE`` without one), as
+    :func:`~woof.da.var.analysis.read_first_guess` reads it."""
+    if hasattr(f, "times"):
+        return str(f.times)[:19]
+    from .hybrid import wrf_times
+
+    return wrf_times(f)[0][:19]
+
+
 def check_fgat(n_obs: int, first_guess_times: Sequence[str], *, time_window_min: str, time_window_max: str,
-               max_ext_its: int = 1) -> None:
+               max_ext_its: int = 1, analysis_date: str | None = None) -> None:
     """Refuse an FGAT set-up WRFDA would run wrongly or that this port does not cover.
 
     One observation file and one first guess per slot, at least two slots,
     each first guess at its slot's time (WRFDA reads ``fgNN`` without
-    checking its date), and one outer loop.
+    checking its date), the analysis (``fg``'s time, ``analysis_date``) at
+    one of the slot times (WRFDA's ``itime_ana``, :func:`time_slots`), and
+    one outer loop.
     """
     nt = len(first_guess_times)
     if nt < 2:
@@ -231,6 +245,10 @@ def check_fgat(n_obs: int, first_guess_times: Sequence[str], *, time_window_min:
             raise ValueError(f"FGAT slot {n}: the first guess is at {t[:19]}, the slot at "
                              f"{w - _date_minutes(time_window_min):+.1f} min from {time_window_min[:19]} "
                              f"(fg01 at the window's start, the last at its end, evenly spaced)")
+    if analysis_date is not None and time_slots(nt, time_window_min, analysis_date, time_window_max)[1] is None:
+        raise ValueError(f"FGAT: the analysis-time first guess is at {analysis_date[:19]}, which is not one of "
+                         f"the {nt} slot times from {time_window_min[:19]} to {time_window_max[:19]}; "
+                         f"give a first guess at a slot time (or a window that puts one there)")
     if max_ext_its != 1:
         raise NotImplementedError(
             "FGAT with max_ext_its > 1 is not ported: WRFDA 4.7.1 re-reads fgNN and fg in every outer loop, "

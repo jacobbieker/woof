@@ -140,7 +140,8 @@
   "comment": "V1.1: the tutorial ob.ascii (testdata ob/2008020512/ob.ascii) read by woof.da.var.obs_wrfda with the default correctly rounded libm; counts are WRFDA 4.7.1 rsl.out local counts. first_guess_attributes are rc/2008020512/wrfinput_d01 global attributes (float32 values).",
   "ob_ascii_sha256": "979988a26f0da056a59e3f243edcf796eed416dda4d69c74107848c0ca7c43ba",
   "iv_dump_sha256": "42a3888814a0f24bc1c9fe4e8b8c189be9fb1bdfe6f90d149151e5e868743f4f",
-  "iv_dump_comment": "woof_iv.bin from the WRFDA 4.7.1 dump build with tools/wrfda_oracle/woof_dump.inc as of bd11ed5a1 (gpsref p, t, q dumped). A dump from an older build lacks gpsref%p and is refused by tests/test_var_obs_wrfda.iv_dump. iv_dump_sha256 is the measured file's, for reference only: the dump's unused k/dz/dzm slots are uninitialised, so a rerun writes a different file.",
+  "iv_dump_digest": "501f9024058957258e4059c9f65646a6ef2246bd50896da23a196ce33373ae8c",
+  "iv_dump_comment": "woof_iv.bin from the WRFDA 4.7.1 dump build with tools/wrfda_oracle/woof_dump.inc as of bd11ed5a1 (gpsref p, t, q dumped). A dump from an older build lacks gpsref%p and is refused by tests/test_var_obs_wrfda.iv_dump. iv_dump_sha256 is the measured file's, for reference only: the dump's unused k/dz/dzm slots are uninitialised, so a rerun writes a different file. iv_dump_digest (tests/test_var_obs_wrfda.iv_digest: n, levels, inv, qc, error) is pinned and does not change between reruns.",
   "first_guess_attributes": {
    "MAP_PROJ": 1,
    "CEN_LAT": 40.000008,
@@ -278,7 +279,8 @@
    "ob06.ascii": "4f8d93f9ffab55b0434ff73bdf7d46e8e1d9fde6ce5998c975d5bfc42529800b",
    "ob07.ascii": "f2b93b3ec23207b5d57549ee7c97a7d02472c985a261c210035b44a3c611c20c"
   },
-  "iv_dump_comment": "woof_iv.bin is not pinned (uninitialised k/dz/dzm slots differ run to run); the inputs are.",
+  "iv_dump_comment": "woof_iv.bin's bytes are not pinned (uninitialised k/dz/dzm slots differ run to run); iv_dump_digest pins its initialised arrays (tests/test_var_obs_wrfda.iv_digest), and the run's own files.sha256 must list this woof_iv.bin and the pinned inputs.",
+  "iv_dump_digest": "aef362087415c2f016f4f5c243d67804691c825d27dc4fbd46529791256adf03",
   "xb_dump_sha256": "d668d82f0166d0e0bb1777149b58bf53ab4cc054785c548f563917d1f4419f43",
   "final_dump_sha256": "483d47556d7420aa4c10b356f4840e2a1ef604e124ca9aba43e68c6b43700700",
   "j0": "5.724318321438522D+04",
