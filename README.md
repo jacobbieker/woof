@@ -929,7 +929,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `advance_uv` in binary64 (CUDA, host) and binary32 (CUDA, Metal). They
   pass the dot-product test to 1e-15 and agree with WRFPLUS 4.7.1's
   `g_/a_advance_uv` to about 1e-16, using a driver in
-  `tools/wrfplus_oracle`. The forecast path does not import it.
+  `tools/wrfplus_oracle`. `advance_w` with `calc_p_rho` (woof's
+  `advance_w_phi`) follows the same pattern: dot-product test to about
+  1e-14, WRFPLUS `g_/a_advance_w` and `g_/a_calc_p_rho` to about 1e-15,
+  and the float build reproduces the strict primal's words. The w damper
+  (`damp_opt=3`) is refused, since WRFPLUS has none. The forecast path
+  does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
@@ -950,8 +955,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   8,913 of the file's 9,061 reports as WRFDA, in the same order, with the
   same grid indices and errors. `VarCost` and `minimise_cg` add the cost
   function, its gradient and WRFDA's conjugate-gradient minimiser in
-  WRFDA's operation order, printing WRFDA's iteration log. There is no
-  analysis command yet. Section 11 plans geostationary imager
+  WRFDA's operation order, printing WRFDA's iteration log.
+  It computes WRFDA's innovations, background
+  check and `Jo` for the surface, sounding, aircraft, wind-profile, AMV,
+  scatterometer, GNSS precipitable water, GNSS-RO refractivity and satem
+  thickness types, with the same accepted observations as WRFDA and its
+  initial cost `J_0` on the tutorial case, and their linearised operators
+  and adjoints.
+  There is no analysis command yet. Section 11 plans geostationary imager
   radiances for initial conditions: Google's SatWeave mosaic and the native
   GOES ABI, Himawari AHI and Meteosat imagers, through an opt-in CRTM into
   the LETKF first and into 3D-Var later. Default runs are not changed.

@@ -1894,7 +1894,10 @@ def _validate_prior(xp, prior, fields, work_dtype):
             "  A one-member 'ensemble' has no covariance to update with."
         )
     def _checked(f):
-        arr = xp.asarray(prior[f], dtype=work_dtype)
+        # C order: the increments take the prior's layout (zeros_like) and
+        # are written through reshape(members, -1) views, which a strided
+        # prior would turn into copies, losing every write.
+        arr = xp.ascontiguousarray(xp.asarray(prior[f], dtype=work_dtype))
         return arr, bool(xp.all(xp.isfinite(arr)))
 
     out = {}
