@@ -76,21 +76,22 @@ def _real(dtype) -> str:
     raise TypeError(f"TL/AD kernels run in float64 or float32, not {dtype}")
 
 
-def _module(unit: str, real: str):
+def _module(unit: str, real: str, defines: tuple = ()):
     import cupy as cp
-    return _device_module(unit, real, cp.cuda.Device().id)
+    return _device_module(unit, real, cp.cuda.Device().id, defines)
 
 
 @lru_cache(maxsize=None)
-def _device_module(unit: str, real: str, device: int):
+def _device_module(unit: str, real: str, device: int, defines: tuple = ()):
     import cupy as cp
     source = (KERNELS / f"{unit}.cu").read_text(encoding="utf-8")
     return cp.RawModule(code=source,
-                        options=("--fmad=false", f"-DWRFPLUS_REAL={real}"))
+                        options=("--fmad=false", f"-DWRFPLUS_REAL={real}")
+                        + tuple(f"-D{k}={v}" for k, v in defines))
 
 
-def _kernel(unit: str, name: str, dtype):
-    return _module(unit, _real(dtype)).get_function(name)
+def _kernel(unit: str, name: str, dtype, defines: tuple = ()):
+    return _module(unit, _real(dtype), defines).get_function(name)
 
 
 def _blocks(n: int) -> tuple[int]:
@@ -104,12 +105,13 @@ def _dtype(arrays) -> np.dtype:
     return kinds.pop()
 
 
-def _check(geom: UVGeometry, named) -> None:
+def _check(geom, named, shapes=None) -> None:
     """Shapes, contiguity and distinct buffers: the kernels index raw
     C-order memory and declare every pointer ``__restrict__``."""
     if geom.nz < 3:
-        raise ValueError("advance_uv needs nz >= 3 (dpn reads levels 0-2)")
-    shapes = uv_shapes(geom)
+        raise ValueError("advance_uv/advance_w need nz >= 3 (they read "
+                         "u/v levels 0-2)")
+    shapes = uv_shapes(geom) if shapes is None else shapes
     seen = {}
     for label, name, a in named:
         if tuple(a.shape) != shapes[name]:
@@ -191,4 +193,130 @@ def uv_shapes(geom: UVGeometry) -> dict[str, tuple[int, ...]]:
         "c1h": (nz,), "c2h": (nz,), "fnm": (nz + 1,), "fnp": (nz + 1,),
         "rdnw": (nz,), "cqu": (nz, ny, nx + 1), "cqv": (nz, ny + 1, nx),
         "mudf": col, "msfu": (ny, nx + 1), "msfv": (ny + 1, nx),
+    }
+
+
+#: Trajectory arrays of advance_w (with calc_p_rho), in kernel argument
+#: order, as woof/core/acoustic.py passes them to advance_w_phi.
+W_TRAJECTORY = ("rw_t", "rph_t", "ww_pp", "mu_pp", "mu_pp_old", "th_pp",
+                "th_pp_old", "thp", "php", "phb", "alt", "c2a", "a", "alpha",
+                "gam", "mup", "u_pp", "v_pp", "ht", "rdn", "rdnw", "fnm",
+                "fnp", "c1h", "c2h", "c1f", "c2f", "mub2d", "cqw")
+
+#: The perturbed inputs of advance_w besides the state (w_pp, ph_pp,
+#: p_pp, al_pp), in kernel order.
+W_ACTIVE = ("rw_t", "rph_t", "ww_pp", "mu_pp", "mu_pp_old", "th_pp",
+            "th_pp_old", "thp", "php", "alt", "c2a", "a", "alpha", "gam",
+            "mup", "u_pp", "v_pp", "cqw")
+
+#: advance_w's in/out state.  p_pp and al_pp are outputs on the solved
+#: columns and pass through on the frame, as in the primal.
+W_STATE = ("w_pp", "ph_pp", "p_pp", "al_pp")
+
+
+@dataclass(frozen=True)
+class WGeometry:
+    """advance_w_phi's scalars (msf == 1, no damper: WRFPLUS has damp_opt
+    0 only; ``dampmag`` other than 0 is refused)."""
+    nz: int
+    ny: int
+    nx: int
+    rdx: float
+    rdy: float
+    dtau: float
+    epssm: float = 0.1
+    cf1: float = 0.0
+    cf2: float = 0.0
+    cf3: float = 0.0
+    spec_zone: int = 0
+    base3d: int = 1
+    top_lid: int = 0
+    moist_cq: int = 0
+    boundary_x: int = 0
+    boundary_y: int = 0
+    dampmag: float = 0.0
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        return (i(self.nz), i(self.ny), i(self.nx), i(self.spec_zone),
+                i(self.base3d), i(self.top_lid), i(self.moist_cq),
+                i(self.boundary_x), i(self.boundary_y), r(self.cf1),
+                r(self.cf2), r(self.cf3), r(self.rdx), r(self.rdy),
+                r(self.dtau), r(self.epssm))
+
+
+def _w_defines(geom: WGeometry) -> tuple:
+    if geom.dampmag != 0.0:
+        raise NotImplementedError("advance_w TL/AD: the damp_opt=3 w damper "
+                                  "is not linearised (WRFPLUS has none)")
+    return (("WV_LEV", geom.nz + 1),)
+
+
+def advance_w_tl(state: dict, pert_state: dict, traj: dict, pert: dict,
+                 geom: WGeometry, *, nl: bool = True) -> None:
+    """WRFPLUS g_advance_w then g_calc_p_rho (step 0): update
+    ``pert_state`` (and ``state`` when ``nl``) in place, both dicts of
+    :data:`W_STATE`.  ``pert`` holds the perturbations of
+    :data:`W_ACTIVE`, by name."""
+    defines = _w_defines(geom)
+    sh = w_shapes(geom)
+    st = tuple(state[n] for n in W_STATE)
+    sd = tuple(pert_state[n] for n in W_STATE)
+    traj_args = tuple(traj[n] for n in W_TRAJECTORY)
+    pert_args = tuple(pert[n] for n in W_ACTIVE)
+    _check(geom, [("state", n, state[n]) for n in W_STATE]
+           + [("pert", n, pert_state[n]) for n in W_STATE]
+           + [("traj", n, traj[n]) for n in W_TRAJECTORY]
+           + [("pert", n, pert[n]) for n in W_ACTIVE], sh)
+    dtype = _dtype(st + sd + traj_args + pert_args)
+    g = geom
+    _kernel("advance_w", "advance_w_tl", dtype, defines)(
+        _blocks(g.ny * g.nx), (THREADS,),
+        st + sd + traj_args + pert_args + (np.int32(bool(nl)),)
+        + g.args(dtype))
+
+
+def advance_w_ad(adj_state: dict, state: dict, traj: dict, adj: dict,
+                 geom: WGeometry) -> None:
+    """WRFPLUS a_calc_p_rho then a_advance_w.  ``adj_state`` (the
+    :data:`W_STATE` adjoints) maps output adjoints to input adjoints in
+    place; ``state`` holds the input w_pp/ph_pp; the adjoints of
+    :data:`W_ACTIVE` are added into ``adj``."""
+    import cupy as cp
+    defines = _w_defines(geom)
+    sh = w_shapes(geom)
+    sa = tuple(adj_state[n] for n in W_STATE)
+    s0 = (state["w_pp"], state["ph_pp"])
+    traj_args = tuple(traj[n] for n in W_TRAJECTORY)
+    _check(geom, [("adj", n, adj_state[n]) for n in W_STATE]
+           + [("state", n, state[n]) for n in ("w_pp", "ph_pp")]
+           + [("traj", n, traj[n]) for n in W_TRAJECTORY]
+           + [("adj", n, adj[n]) for n in W_ACTIVE], sh)
+    dtype = _dtype(sa + s0 + traj_args + tuple(adj[n] for n in W_ACTIVE))
+    g = geom
+    geo = g.args(dtype)
+    aw0 = cp.empty((g.ny, g.nx), dtype=dtype)
+    col = tuple(adj[n] for n in W_ACTIVE if n not in ("u_pp", "v_pp"))
+    _kernel("advance_w", "advance_w_ad", dtype, defines)(
+        _blocks(g.ny * g.nx), (THREADS,),
+        sa + s0 + traj_args + col + (aw0,) + geo)
+    _kernel("advance_w", "advance_w_ad_bc", dtype, defines)(
+        _blocks(3 * (g.ny + 1) * (g.nx + 1)), (THREADS,),
+        (aw0, traj["ht"], adj["u_pp"], adj["v_pp"]) + geo)
+
+
+def w_shapes(geom: WGeometry) -> dict[str, tuple[int, ...]]:
+    """Array shapes of advance_w's state and trajectory, by name."""
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    mass, wlev, col = (nz, ny, nx), (nz + 1, ny, nx), (ny, nx)
+    return {
+        "w_pp": wlev, "ph_pp": wlev, "p_pp": mass, "al_pp": mass,
+        "rw_t": wlev, "rph_t": wlev, "ww_pp": wlev,
+        "mu_pp": col, "mu_pp_old": col, "th_pp": mass, "th_pp_old": mass,
+        "thp": mass, "php": wlev, "phb": wlev if geom.base3d else (nz + 1,),
+        "alt": mass, "c2a": mass, "a": wlev, "alpha": wlev, "gam": wlev,
+        "mup": col, "u_pp": (nz, ny, nx + 1), "v_pp": (nz, ny + 1, nx),
+        "ht": col, "rdn": (nz,), "rdnw": (nz,), "fnm": (nz + 1,),
+        "fnp": (nz + 1,), "c1h": (nz,), "c2h": (nz,), "c1f": (nz + 1,),
+        "c2f": (nz + 1,), "mub2d": col, "cqw": wlev,
     }
