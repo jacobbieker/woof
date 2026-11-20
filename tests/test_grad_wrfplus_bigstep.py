@@ -1,16 +1,18 @@
 """Big-step tendency TL/AD (P3a item 5, woof.grad.wrfplus.bigstep): WRF
-horizontal_pressure_gradient and pg_buoy_w on woof's strict slow_pgf and
-slow_buoyancy (dry), with periodic, open and specified axes, the lid
-extrapolation, map factors and hybrid levels.
+horizontal_pressure_gradient, pg_buoy_w and rhs_ph on woof's strict
+slow_pgf, slow_buoyancy (dry) and slow_geopotential, with periodic, open
+and specified axes, the lid extrapolation, map factors, hybrid levels and
+(rhs_ph) every h_sca_adv_order.
 
 Breakage this prevents:
 - an adjoint that is not the transpose of its TL (dot-product test);
-- an adjoint that overwrites instead of adding into its inputs;
+- an adjoint that overwrites instead of adding into its inputs, or that
+  does not consume the rhs_ph top level the primal overwrites;
 - a TL that is not the derivative of the base-state update
   (TL vs finite differences);
 - a TL/AD that drifts from WRFPLUS 4.7.1's G_/A_HORIZONTAL_PRESSURE_
-  GRADIENT and g_/a_pg_buoy_w (tests/data/wrfplus/bigstep.npz, made by
-  tools/wrfplus_oracle);
+  GRADIENT, g_/a_pg_buoy_w and g_/a_rhs_ph (tests/data/wrfplus/bigstep.npz
+  and rhsph.npz, made by tools/wrfplus_oracle);
 - a TL/AD base state that drifts from woof's own strict primal (the
   float build must give the primal's words).
 
@@ -26,7 +28,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURE = ROOT / "tests/data/wrfplus/bigstep.npz"
+FIXTURES = [ROOT / "tests/data/wrfplus/bigstep.npz", ROOT / "tests/data/wrfplus/rhsph.npz"]
 
 
 def _has_cuda() -> bool:
@@ -58,6 +60,14 @@ CONFIGS = {
             dict(boundary_y=1, top_lid=1), dict(nz=3, ny=1, nx=2, top_lid=1),
             dict(ny=2, nx=1, boundary_y=1), dict(nz=4, ny=3, nx=3, boundary_x=1, boundary_y=1)],
     "buoy": [dict(), dict(has_msf=1), dict(nz=1, ny=1, nx=1, has_msf=1), dict(nz=2, ny=3, nx=1)],
+    # every h_sca_adv_order; open (one axis, both), specified (with WRF's
+    # second x pickup at orders 3-4), map factors, the 2-level and
+    # smallest-axis minimums
+    "geo": [dict(), dict(specified=1, has_msf=1), dict(open_x=1),
+            dict(open_x=1, open_y=1, order=3), dict(specified=1, order=3),
+            dict(specified=1, order=4, has_msf=1), dict(order=6),
+            dict(open_y=1, order=2), dict(open_x=1, order=0, has_msf=1),
+            dict(nz=2, ny=7, nx=7, specified=1), dict(nz=3, ny=5, nx=5, order=4)],
 }
 
 
@@ -73,7 +83,9 @@ def _run(backend, body, tmp_path, extra_env=None):
         " 'pgf': (B.PGF_STATE, B.PGF_ACTIVE, C.pgf_geometry, C.pgf_trajectory,\n"
         "         C.pgf_perturbation, B.pgf_tl, B.pgf_ad, B.PGFGeometry),\n"
         " 'buoy': (B.BUOY_STATE, B.BUOY_ACTIVE, C.buoy_geometry, C.buoy_trajectory,\n"
-        "          C.buoy_perturbation, B.buoy_tl, B.buoy_ad, B.BuoyGeometry)}\n"
+        "          C.buoy_perturbation, B.buoy_tl, B.buoy_ad, B.BuoyGeometry),\n"
+        " 'geo': (B.GEO_STATE, B.GEO_ACTIVE, C.geo_geometry, C.geo_trajectory,\n"
+        "         C.geo_perturbation, B.geo_tl, B.geo_ad, B.GeoGeometry)}\n"
         "def dev(d):\n"
         "    return {k: cp.asarray(v) for k, v in d.items()}\n"
         "def run_tl(op, g, tr, pe, nl):\n"
@@ -132,7 +144,8 @@ for dtn in {dtypes!r}:
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_adjoint_accumulates(backend, tmp_path):
     """The AD adds into ``adj`` and leaves the tendencies' adjoints (which
-    pass through, the tendencies being accumulated) unchanged."""
+    pass through, the tendencies being accumulated) unchanged, except
+    rhs_ph's top level, which the primal overwrites: its adjoint is 0."""
     dtn = "float32" if backend == "mlx" else "float64"
     out = _run(backend, f'''
 dt = np.dtype({dtn!r})
@@ -146,7 +159,10 @@ for op, cfgs in {CONFIGS!r}.items():
         sa, zero = run_ad(op, g, tr, q)
         _, adj = run_ad(op, g, tr, q, {{n: s[n].copy() for n in X}})
         for n in St:
-            out[f"{{op}}/{{i}}/{{n}}"] = float(cp.abs(sa[n] - q[n]).max())
+            want = q[n].copy()
+            if op == "geo":
+                want[-1] = 0
+            out[f"{{op}}/{{i}}/{{n}}"] = float(cp.abs(sa[n] - want).max())
         for n in X:
             want = cp.asnumpy(s[n]).astype(np.float64) + cp.asnumpy(zero[n])
             got = cp.asnumpy(adj[n]).astype(np.float64)
@@ -187,20 +203,26 @@ for op, cfgs in {CONFIGS!r}.items():
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_wrfplus_oracle_agreement(backend, tmp_path):
     """woof's TL/AD reproduce WRFPLUS 4.7.1 G_/A_HORIZONTAL_PRESSURE_
-    GRADIENT and g_/a_pg_buoy_w on the fixture (6 cases: periodic,
-    specified and open axes, the lid, map factors; WRFPLUS's versions are
-    not hybrid).  With the lid, WRFPLUS's adjoint of p at the top three
+    GRADIENT and g_/a_pg_buoy_w (6 cases: periodic, specified and open
+    axes, the lid, map factors) and g_/a_rhs_ph (10 cases: every
+    h_sca_adv_order, the same axes, map factors).  WRFPLUS's versions are
+    not hybrid.  With the lid, WRFPLUS's adjoint of p at the top three
     levels is not the transpose of its own TL: the reverse sweep of
     A_HORIZONTAL_PRESSURE_GRADIENT still applies the pre-2016 lid
     extrapolation (cf1-cf3 on kde-1..kde-3) where the forward sweep and the
     TL use cfn/cfn1.  Those levels are left out; woof's AD there is held
-    to woof's TL (which matches WRFPLUS's TL) by the dot-product test."""
+    to woof's TL (which matches WRFPLUS's TL) by the dot-product test.
+    rhs_ph: for orders 2-4 WRFPLUS ends a bounded axis's interior one
+    point early (the fixture's mask, with the seed zeroed there), and its
+    a_rhs_ph overruns its order-3/4 trajectory arrays on a periodic y or
+    specified x axis, so those cases are TL only (tools/wrfplus_oracle/
+    rhsph.F90)."""
     dtn = "float32" if backend == "mlx" else "float64"
     out = _run(backend, f'''
 import json as J
-z = np.load({str(FIXTURE)!r})
 dt = np.dtype({dtn!r})
-for case in sorted({{k.split("/")[0] for k in z.files if "/" in k}}):
+for z in [np.load(f) for f in {[str(f) for f in FIXTURES]!r}]:
+  for case in sorted({{k.split("/")[0] for k in z.files if "/" in k}}):
     pre = case + "/"
     op = str(z[pre + "op"])
     St, X, Geo = OPS[op][0], OPS[op][1], OPS[op][7]
@@ -209,10 +231,10 @@ for case in sorted({{k.split("/")[0] for k in z.files if "/" in k}}):
                           for k in z.files if k.startswith(pre + kind + "/")}}
     tr, pe, sd = pick("traj"), pick("pert"), pick("seed")
     st, dd = run_tl(op, g, tr, pe, True)
-    _, adj = run_ad(op, g, tr, sd)
+    sa, adj = run_ad(op, g, tr, sd)
     got = {{}}
     for n in St:
-        got["tl_" + n], got["tl_d_" + n] = st[n], dd[n]
+        got["tl_" + n], got["tl_d_" + n], got["adst_" + n] = st[n], dd[n], sa[n]
     for n in X:
         got["ad_" + n] = adj[n]
     for k in z.files:
@@ -222,6 +244,8 @@ for case in sorted({{k.split("/")[0] for k in z.files if "/" in k}}):
         e, w = z[k].copy(), cp.asnumpy(got[name]).astype(np.float64)
         if op == "pgf" and g.top_lid and name == "ad_p":
             e, w = e[:g.nz - 3], w[:g.nz - 3]
+        if pre + "mask" in z.files and name.startswith("tl_"):
+            e, w = e[z[pre + "mask"]], w[z[pre + "mask"]]
         scale = max(float(np.abs(e).max()), 1e-300)
         out[pre + name] = float(np.abs(w - e).max()) / scale
 ''', tmp_path)
@@ -232,19 +256,26 @@ for case in sorted({{k.split("/")[0] for k in z.files if "/" in k}}):
     # loses about 3e4 / 70 ulps there.  Host and CUDA binary32 give the
     # same 1.3e-5 to 2.3e-5 as Metal, and removing each level's mean phb
     # (which leaves every difference unchanged) brings it to 2e-7: this is
-    # the strict primal's own cancellation, not a Metal difference.
+    # the strict primal's own cancellation, not a Metal difference.  rhs_ph's
+    # u and v adjoints take the same across-face difference of phb + php
+    # (host and CUDA binary32: 6.5e-6 to 1.6e-5; under 2e-6 with each
+    # level's mean phb removed).
     loose = {"pgf_open_x/ad_mup", "pgf_open_y_lid/ad_mup", "pgf_periodic/ad_mup",
              "pgf_spec_lid/ad_mup"}
+    loose |= {f"{c}/ad_{n}" for n in "uv" for c in (
+        "geo_periodic", "geo_spec_msf", "geo_open_x", "geo_open_y_msf", "geo_order6",
+        "geo_order4_open", "geo_order2_open")}
     bad = {k: v for k, v in out.items()
            if not v < (1e-4 if backend == "mlx" and k in loose else limit)}
     assert not bad, sorted(bad.items())
-    assert len(out) == 4 * 9 + 2 * 4
+    assert len(out) == 4 * 9 + 2 * 4 + 7 * 9 + 3 * 2
 
 
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
 def test_float_base_state_is_the_strict_primal(backend, tmp_path):
-    """The float build's base state gives woof's strict slow_pgf and
-    slow_buoyancy words (GPUWM_WRF_EXACT, dry, 3-D base), so the adjoint is
+    """The float build's base state gives woof's strict slow_pgf,
+    slow_buoyancy and slow_geopotential (open and, for order 5, fused)
+    words (GPUWM_WRF_EXACT, dry, 3-D base), so the adjoint is
     bound to the model woof runs: a primal edit fails here until the TL/AD
     is re-derived.  Host and CUDA; Metal is not checked here."""
     out = _run(backend, f'''
@@ -279,17 +310,48 @@ for i, over in enumerate({CONFIGS["buoy"]!r}):
         tr["c1f"], tr["c1f"], tr["msft"], i32(0), i32(g.has_msf), i32(1), i32(nz), i32(ny),
         i32(nx)))
     out[f"buoy/{{i}}"] = diff(st["rw_t"], rw)
+for i, over in enumerate({CONFIGS["geo"]!r}):
+    g = C.geo_geometry(quarter_rdx=float(f32(0.25 / dx)), quarter_rdy=float(f32(0.25 / dy)),
+                       **over)
+    tr = dev(C.geo_trajectory(g, 71 + i, f32, hybrid=bool(i % 2)))
+    st, _ = run_tl("geo", g, tr, {{n: cp.zeros_like(tr[n]) for n in B.GEO_ACTIVE}}, True)
+    nz, ny, nx = g.nz, g.ny, g.nx
+    n = nz * ny * nx
+    head = (tr["ww"], tr["w"], tr["u"], tr["v"], tr["php"], tr["phb"], tr["mup"], tr["mub"],
+            tr["rdnw"], tr["fnm"], tr["fnp"], tr["c1f"], tr["c2f"], f32(g.cfn), f32(g.cfn1),
+            tr["msft"], tr["msfu"], tr["msfv"])
+    # dycore._launch_slow_geopotential: the fused kernel for order 5 unless
+    # an axis is open without specified forcing, the open one otherwise
+    # (which covers every case).
+    r = tr["rph_t"].copy()
+    get_kernel("dycore", "slow_geopotential_open")(((n + 255) // 256,), (256,), (r,) + head + (
+        tr["mup"], tr["mup"], f32(g.quarter_rdx), f32(g.quarter_rdy), i32(g.has_msf),
+        i32(g.boundary_x), i32(g.boundary_y), i32(g.specified), i32(0), i32(1), i32(g.order),
+        i32(1), i32(nz), i32(ny), i32(nx)))
+    out[f"geo/{{i}}/open"] = diff(st["rph_t"], r)
+    if g.order == 5 and not ((g.open_x or g.open_y) and not g.specified):
+        r = tr["rph_t"].copy()
+        get_kernel("dycore", "slow_geopotential")(((n + 255) // 256,), (256,), (r,) + head + (
+            f32(g.quarter_rdx), f32(g.quarter_rdy), i32(g.has_msf), i32(g.boundary_x),
+            i32(g.boundary_y), i32(g.specified), i32(g.order), i32(1), i32(1), i32(nz),
+            i32(ny), i32(nx)))
+        out[f"geo/{{i}}/fused"] = diff(st["rph_t"], r)
 ''', tmp_path, extra_env={"GPUWM_WRF_EXACT": "1"})
-    assert len(out) == sum(len(c) for c in CONFIGS.values())
+    fused = sum(1 for c in CONFIGS["geo"] if c.get("order", 5) == 5
+                and not ((c.get("open_x") or c.get("open_y")) and not c.get("specified")))
+    assert len(out) == sum(len(c) for c in CONFIGS.values()) + fused
     bad = {k: v for k, v in out.items() if v}
     assert not bad, bad
 
 
 def test_geometry_rejects_unported_options():
     """A pressure gradient under 3 levels (the bottom extrapolation reads
-    levels 0-2) and empty axes are refused, not run."""
+    levels 0-2), rhs_ph under 2 levels, on axes too short for its stencil
+    or with an unknown order, and empty axes are refused, not run."""
     from woof.grad.wrfplus import cases as C
     for make, over in ((C.pgf_geometry, dict(nz=2)), (C.pgf_geometry, dict(nx=0)),
-                       (C.buoy_geometry, dict(ny=0))):
+                       (C.buoy_geometry, dict(ny=0)), (C.geo_geometry, dict(nz=1)),
+                       (C.geo_geometry, dict(nx=6)), (C.geo_geometry, dict(ny=4, order=4)),
+                       (C.geo_geometry, dict(order=7))):
         with pytest.raises(ValueError):
             make(**over).validate()

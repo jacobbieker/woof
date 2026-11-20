@@ -735,3 +735,47 @@ def buoy_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     scale = {"p": 50.0, "mup": 200.0}
     return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
             for n in BUOY_ACTIVE}
+
+
+# rhs_ph (P3a item 5).
+
+_GEO_SCALES = {"rph_t": (0.0, 5.0), "ww": (0.0, 5.0), "w": (0.0, 1.0), "u": (5.0, 10.0),
+               "v": (-3.0, 10.0), "php": (0.0, 20.0), "mup": (0.0, 200.0),
+               "mub": (9.0e4, 2e3)}
+
+
+def geo_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .bigstep import GeoGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, quarter_rdx=0.25 / 3000.0, quarter_rdy=0.25 / 2500.0,
+                cfn=1.5, cfn1=-0.5)
+    base.update(overrides)
+    return GeoGeometry(**base)
+
+
+def geo_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of slow_geopotential: winds with a mean flow, a base
+    geopotential rising with height, map factors near 1; ``hybrid`` gives
+    hybrid c1f/c2f and stretched levels."""
+    from .bigstep import GEO_ACTIVE, GEO_PASSIVE, GEO_STATE, geo_shapes
+    rng = np.random.default_rng(seed)
+    sh = geo_shapes(geom)
+    out = _bs_levels(geom.nz, rng, hybrid)
+    out["c2f"] = (1.0 - out["c1f"]) * 5000.0 if hybrid else np.zeros(geom.nz + 1)
+    for n in GEO_STATE + GEO_ACTIVE + ("mub",):
+        c, s = _GEO_SCALES[n]
+        out[n] = c + s * rng.standard_normal(sh[n])
+    k = np.arange(geom.nz + 1)[:, None, None]
+    out["phb"] = 4.0e3 * k + 50.0 * rng.standard_normal(sh["phb"])
+    for n in ("msft", "msfu", "msfv"):
+        out[n] = 1.0 + 0.02 * rng.standard_normal(sh[n])
+    keep = GEO_STATE + GEO_ACTIVE + GEO_PASSIVE
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def geo_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .bigstep import GEO_ACTIVE, geo_shapes
+    rng = np.random.default_rng(seed)
+    sh = geo_shapes(geom)
+    scale = {"ww": 5.0, "w": 1.0, "u": 10.0, "v": 10.0, "php": 20.0, "mup": 200.0}
+    return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in GEO_ACTIVE}

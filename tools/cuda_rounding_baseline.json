@@ -4805,7 +4805,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/bigstep.cu",
-    "sha256": "4924e387a9248e66a8d1945c944931fc2f38ad977487cb54b4ec536805072066"
+    "sha256": "b9a8d8e17905ba279b0a9743cc3ff70af8f9afd1ad40e482462018edbe4f195d"
    },
    {
     "file": "woof/grad/wrfplus/kernels/calc_coef_w.cu",
@@ -5647,7 +5647,7 @@
    },
    {
     "file": "woof/grad/wrfplus/bigstep.py",
-    "sha256": "749d1f125581fb7949ed54115ba66919e46201b5d30930f43160ef5b35ab1126"
+    "sha256": "47871d80c2f266659b6171518a4313f1cb2c3a6e9d115dacbbcfc4ced711c1f8"
    },
    {
     "file": "woof/grad/wrfplus/stage.py",

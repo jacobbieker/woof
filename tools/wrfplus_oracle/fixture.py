@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -1329,10 +1329,161 @@ def bigstep(exe: str, runner: list[str], seed: int = 20261126) -> dict:
     return out
 
 
+#: rhsph: rhs_ph for each h_sca_adv_order on periodic, specified and open
+#: axes, with and without map factors.  WRFPLUS's rhs_ph is not hybrid
+#: (c1f = 1, c2f = 0).  The order-3/4 cases on a periodic y or specified
+#: x axis are TL only: WRFPLUS's a_rhs_ph overruns its trajectory arrays
+#: there (rhsph.F90's header).
+RP_CASES = {
+    "geo_periodic": dict(),
+    "geo_spec_msf": dict(specified=1, has_msf=1),
+    "geo_open_x": dict(open_x=1),
+    "geo_open_y_msf": dict(open_y=1, has_msf=1),
+    "geo_order6": dict(order=6),
+    "geo_order3": dict(order=3, tl_only=1),
+    "geo_order4_open": dict(order=4, open_x=1, open_y=1, has_msf=1),
+    "geo_order2_open": dict(order=2, open_x=1, open_y=1),
+    "geo_spec_o3": dict(order=3, specified=1, tl_only=1),
+    "geo_spec_o4_msf": dict(order=4, specified=1, has_msf=1, tl_only=1),
+}
+RP_DIMS = dict(nz=8, ny=9, nx=10)
+
+
+def rp_mask(geom):
+    """rph_t points WRFPLUS's g_/a_rhs_ph treat as woof (and WRF's own
+    rhs_ph) do.  For h_sca_adv_order <= 4 WRFPLUS ends the interior loop of
+    a bounded axis at min(ite, ide-1) - 2 (order 2) or - 3 (orders 3-4)
+    where rhs_ph ends it at ite - 2 or ite - 3, one point earlier with the
+    tile reaching ide: it drops the term at woof's pos n-2 (order 2) or
+    n-3 (orders 3-4).  For orders 3-4 the x loop does this on open_xe
+    only, as both versions move the x end only there."""
+    from woof.grad.wrfplus.bigstep import geo_shapes
+    m = np.ones(geo_shapes(geom)["rph_t"], dtype=bool)
+    if geom.order <= 4:
+        back = 2 if geom.order <= 2 else 3
+        if geom.boundary_y:
+            m[:, geom.ny - back, :] = False
+        if geom.boundary_x and (geom.order <= 2 or not geom.specified):
+            m[:, :, geom.nx - back] = False
+    return m
+
+
+def _rp_pad2(L, a, end):
+    _, yi, xi = L._maps((1,) + a.shape, end)
+    return a[np.ix_(yi, xi)].T
+
+
+def _rp_fold2(L, x, shape, end):
+    _, yi, xi = L._maps((1,) + shape, end)
+    out = np.zeros(shape)
+    np.add.at(out, np.ix_(yi, xi), x.T)
+    return out
+
+
+def _rp_record(geom, tr, pe, seed, tl_only=0):
+    """rhsph.F90's input.  Every halo wraps the periodic woof field, open
+    and specified axes included: woof's strict slow_geopotential reads the
+    wrapped field wherever a stencil leaves the domain (only the specified
+    order-3/4 x edges do), so WRF then reads the same values.  The u (v)
+    end face keeps woof's own index n on a bounded axis, where woof reads
+    it, and wraps to 0 on a periodic one."""
+    from types import SimpleNamespace as NS
+    assert np.all(tr["c1f"] == 1) and not np.any(tr["c2f"]), "oracle needs c1f=1, c2f=0"
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    bx, by = geom.boundary_x, geom.boundary_y
+    L = AdvLayout(NS(nz=nz, ny=ny, nx=nx, open_x=0, open_y=0))
+    flags = int(not bx) | (int(not by) << 1) | (int(bool(geom.specified)) << 2)
+    if geom.open_x and not geom.specified:
+        flags |= (1 << 4) | (1 << 5)
+    if geom.open_y and not geom.specified:
+        flags |= (1 << 6) | (1 << 7)
+    flags |= int(bool(tl_only)) << 8
+    head = np.array([nx, ny, nz, flags, geom.order], dtype=np.int32)
+    sc = [4.0 * geom.quarter_rdx, 4.0 * geom.quarter_rdy, geom.cfn, geom.cfn1]
+    blob = head.tobytes() + np.array(sc).astype("<f8").tobytes()
+    mut = tr["mup"] + tr["mub"]
+    ones = lambda n: np.ones(tr[n].shape)
+    msf = {n: (tr[n] if geom.has_msf else ones(n)) for n in ("msft", "msfu", "msfv")}
+    a3 = [L.place3(tr["rph_t"]), L.place3(seed["rph_t"]),
+          L.pad3(tr["u"], end=bx), L.pad3(pe["u"], end=bx),
+          L.pad3(tr["v"], end=by), L.pad3(pe["v"], end=by),
+          L.pad3(tr["ww"]), L.pad3(pe["ww"]), L.pad3(tr["php"]), L.pad3(pe["php"]),
+          L.pad3(tr["phb"]), L.pad3(tr["w"]), L.pad3(pe["w"])]
+    a2 = [L.pad2(mut), L.pad2(pe["mup"]),
+          _rp_pad2(L, _bs_faces(mut, 1, nx), bx), _rp_pad2(L, _bs_faces(pe["mup"], 1, nx), bx),
+          _rp_pad2(L, _bs_faces(mut, 0, ny), by), _rp_pad2(L, _bs_faces(pe["mup"], 0, ny), by),
+          _rp_pad2(L, msf["msfu"], bx), _rp_pad2(L, msf["msfv"], by), L.pad2(msf["msft"])]
+    for a in a3 + a2:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    for n in ("fnm", "fnp", "rdnw"):
+        blob += np.concatenate([tr[n], [0.0]]).astype("<f8").tobytes()
+    return blob, L
+
+
+def _rp_expected(geom, out, L, tl_only=0):
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    bx, by = geom.boundary_x, geom.boundary_y
+    n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+    vals = np.frombuffer(out, dtype="<f8")
+    assert vals.size == 9 * n3 + 3 * n2, (vals.size, n3, n2)
+    x = [vals[i * n3:(i + 1) * n3].reshape(L.s3, order="F") for i in range(9)]
+    y = [vals[9 * n3 + i * n2:9 * n3 + (i + 1) * n2].reshape(L.s2, order="F")
+         for i in range(3)]
+    wlev = (nz + 1, ny, nx)
+    amup = (_rp_fold2(L, y[0], (ny, nx), True)
+            + _bs_faces_t(_rp_fold2(L, y[1], (ny, nx + 1), bx), 1, nx)
+            + _bs_faces_t(_rp_fold2(L, y[2], (ny + 1, nx), by), 0, ny))
+    tl = {"tl_rph_t": L.take3(x[0], wlev), "tl_d_rph_t": L.take3(x[1], wlev)}
+    if tl_only:
+        return tl
+    return {**tl, "adst_rph_t": L.take3(x[2], wlev),
+            "ad_u": L.fold3(x[3], (nz, ny, nx + 1), end=bx),
+            "ad_v": L.fold3(x[4], (nz, ny + 1, nx), end=by),
+            "ad_ww": L.fold3(x[5], wlev), "ad_php": L.fold3(x[6], wlev) + L.fold3(x[7], wlev),
+            "ad_w": L.fold3(x[8], wlev), "ad_mup": amup}
+
+
+def rhsph(exe: str, runner: list[str], seed: int = 20261127) -> dict:
+    from woof.grad.wrfplus import bigstep as B
+    out = {}
+    for n, (name, over) in enumerate(RP_CASES.items()):
+        over = dict(over)
+        tl_only = over.pop("tl_only", 0)
+        geom = cases.geo_geometry(**RP_DIMS, **over)
+        geom.validate()
+        tr = cases.geo_trajectory(geom, seed + 10 * n)
+        pe = cases.geo_perturbation(geom, seed + 10 * n + 1)
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        mask = rp_mask(geom)
+        # Seeds vanish where WRFPLUS drops a term, so both adjoints see
+        # the same operator; the TL is compared on the mask.
+        seeds = {"rph_t": rng.standard_normal(B.geo_shapes(geom)["rph_t"]) * mask}
+        blob, L = _rp_record(geom, tr, pe, seeds, tl_only)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _rp_expected(geom, result, L, tl_only)
+        prefix = f"{name}/"
+        out[prefix + "op"] = np.array("geo")
+        out[prefix + "mask"] = mask
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for k, v in seeds.items():
+            out[prefix + "seed/" + k] = v
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
             "small_step": small_step, "rk_stage": rk_stage,
-            "advect": advect, "bigstep": bigstep}
+            "advect": advect, "bigstep": bigstep, "rhsph": rhsph}
 
 
 def main(argv=None) -> int:
