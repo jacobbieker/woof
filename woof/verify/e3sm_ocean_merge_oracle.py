@@ -101,22 +101,31 @@ _SPECS = (
 )
 
 
+def _uniform(rng, low: float, high: float, n) -> np.ndarray:
+    """Uniform draws built from ``rng.random`` with separate numpy operations:
+    ``Generator.uniform`` and ``normal`` are C code a compiler may contract
+    into fused multiply-adds (clang does on arm64), so their words differ
+    between machines; ``random`` is exact and numpy's ufuncs round each
+    operation."""
+    return (rng.random(n) * (high - low)) + low
+
+
 def _fractions(rng, lsize: int, names: list[str]) -> np.ndarray:
     """afrac, ifrac, ofrac, ifrad, ofrad: open ocean, full ice, partial ice,
     land (both zero), sums other than one, radiative fractions of their own."""
     out = np.zeros((lsize, len(names)))
     col = {n: names.index(n) for n in names}
     kind = np.arange(lsize) % 6
-    ifrac = np.where(kind == 0, 0.0, np.where(kind == 1, 1.0, rng.uniform(0.0, 1.0, lsize)))
+    ifrac = np.where(kind == 0, 0.0, np.where(kind == 1, 1.0, _uniform(rng, 0.0, 1.0, lsize)))
     ofrac = np.where(kind == 1, 0.0, 1.0 - ifrac)
-    ofrac = np.where(kind == 3, rng.uniform(0.1, 0.6, lsize), ofrac)  # the sum is not one
+    ofrac = np.where(kind == 3, _uniform(rng, 0.1, 0.6, lsize), ofrac)  # the sum is not one
     ifrac = np.where(kind == 2, 0.0, ifrac)
     ofrac = np.where(kind == 2, 0.0, ofrac)  # land: both zero, left as they are
     ifrad = np.where(kind == 4, np.clip(ifrac + 0.137, 0, 1), ifrac)
     ofrad = np.where(kind == 4, 1.0 - ifrad, ofrac)
     ofrad = np.where(kind == 5, ofrad * 0.75, ofrad)  # radiative sum not one
     for name, values in (("ifrac", ifrac), ("ofrac", ofrac), ("ifrad", ifrad), ("ofrad", ofrad),
-                         ("afrac", rng.uniform(0, 1, lsize))):
+                         ("afrac", _uniform(rng, 0, 1, lsize))):
         if name in col:
             out[:, col[name]] = values
     return out
@@ -124,14 +133,14 @@ def _fractions(rng, lsize: int, names: list[str]) -> np.ndarray:
 
 def _vector(rng, names: list[str]) -> callable:
     def make(lsize: int) -> np.ndarray:
-        out = rng.normal(0.0, 150.0, (lsize, len(names)))
+        out = _uniform(rng, -300.0, 300.0, (lsize, len(names)))
         for k, name in enumerate(names):
             if name.startswith(("So_a", "Si_a")):  # albedos
-                out[:, k] = rng.uniform(0.02, 0.9, lsize)
+                out[:, k] = _uniform(rng, 0.02, 0.9, lsize)
             elif name.startswith("Faxa_sw"):
-                out[:, k] = rng.uniform(0.0, 400.0, lsize)
+                out[:, k] = _uniform(rng, 0.0, 400.0, lsize)
             elif name.startswith(("Faxa_rain", "Faxa_snow", "Forr_", "Fogg_", "Flrr_")):
-                out[:, k] = rng.uniform(0.0, 1.0e-4, lsize)
+                out[:, k] = _uniform(rng, 0.0, 1.0e-4, lsize)
         return out
     return make
 
