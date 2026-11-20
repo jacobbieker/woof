@@ -192,15 +192,15 @@ bytes are outside the numerical oracle.
   `-ftz=true` to whatever the caller passed, at
   `cupy.cuda.compiler` line 585 (`options += ('-ftz=true',)`), after the
   caller's options, and NVRTC honours the last occurrence.
-  The inventory records 14 distinct caller-supplied option tuples across the
-  313 compile sites in the shipped package, each listed here with a site
+  The inventory records 15 distinct caller-supplied option tuples across the
+  319 compile sites in the shipped package, each listed here with a site
   that supplies it:
   - no caller options -- `woof/backend/__init__.py:243` (self.xp.RawModule),
-    and 247 other site(s)
+    and 251 other site(s)
   - `--std=c++17` -- `woof/ensemble/batch_perturbation.py:51`
     (xp.RawModule), and 18 other site(s)
   - `-std=c++17` -- `woof/core/acoustic_fusion.py:405` (cp.RawModule), and
-    17 other site(s)
+    18 other site(s)
   - `--std=c++11` -- `woof/hex/cuda_courant_fullstep_lts.py:52`
     (cp.RawKernel), and 5 other site(s)
   - `-std=c++17` `--ftz=false` -- `woof/core/chem_plumerise_cache.py:37`
@@ -211,17 +211,19 @@ bytes are outside the numerical oracle.
     other site(s)
   - `--std=c++17` `--use_fast_math` -- `woof/hex/waves.py:486`
     (cp.RawModule), and 1 other site(s)
-  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:1308`
+  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:1315`
     (cp.RawModule), and 1 other site(s)
   - `-std=c++17` `--fmad=false` `--ftz=false` --
     `woof/core/thompson_fork.py:109` (compiler.compile_using_nvrtc), and 1
     other site(s)
   - `--fmad=false` `-std=c++14` -- `woof/da/letkf_device.py:363`
     (cp.RawModule)
+  - `--fmad=false` a target flag built from the device architecture at run
+    time -- `woof/grad/wrfplus/acoustic.py:88` (cp.RawModule)
   - `--std=c++17` a target flag built from the device architecture at run
     time -- `woof/ocean/waves/model.py:73` (cp.RawModule)
   - `-std=c++17` `--maxrregcount=112` --
-    `woof/core/kernels/__init__.py:1280` (cp.RawModule)
+    `woof/core/kernels/__init__.py:1287` (cp.RawModule)
   - a target flag built from the device architecture at run time a target
     flag built from the device architecture at run time --
     `woof/hex/mpasphys/surface_update_v842.py:150`
@@ -1815,7 +1817,13 @@ PNG it writes carries an `experimental` stamp.
   `da_transform_xtogpsref_lin`/`_adj`, `da_tv_profile_tl`/`_adj`,
   `da_find_layer_tl`/`_adj`, `da_thickness_tl`/`_adj`,
   `da_interp_lin_3d_adj`, `da_interp_lin_2d_adj`,
-  `da_transform_xtoy_adj`'s type order), and `tools/wrfda_oracle/woof_dump.inc` (debug
+  `da_transform_xtoy_adj`'s type order),
+  `woof/da/var/cost.py` (`da_calculate_j`,
+  `da_calculate_gradj`, `da_calculate_residual`/`da_residual`,
+  `da_calculate_grady`, `da_jo_and_grady` and its per-type `jo` sums,
+  `da_transform_vtoy(_adj)` for 3D-Var, `da_check_gradient`),
+  `woof/da/var/minimise.py` (`da_minimise_cg` with its stdout formats, and
+  `da_solve`'s outer loop), and `tools/wrfda_oracle/woof_dump.inc` (debug
   dumps hooked into a copy of the WRFDA tree, never the pinned tree).
   `woof/da/var/crmath.py` is woof's own: correctly rounded `sin`, `cos`,
   `tan`, `exp`, `log`, `log10` and `pow`, evaluated in Python's `decimal`, with no

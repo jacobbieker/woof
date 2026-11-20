@@ -161,6 +161,12 @@ MP28_ACCUMULATOR_REWORK = "lane/cut286-mp28-g3 (2.8.6)"
 # Compiler request strings: batch007-compiled-pin-preview-review.json.
 # Numerical qualification remains in the lane and integration gates.
 BASELINE_PINNED: dict[str, str] = {
+    # WRF 4.7.1 RRTMG-K (ra_lw/ra_sw_physics = 14, #601 2cac082e1): the
+    # three units as they merged, bitwise to compiled WRF on the oracle
+    # columns; pinned here so an edit is a reviewed re-pin, not a silent one.
+    "rrtmgk_lw": "887e276ea96ee776f0a32a70e38e76ab1bba4e7bac70a4ea4e992dfdfb1b1ecf",
+    "rrtmgk_prep": "2df3ca5b115cc58d9a68bfb914321db666c54d23a483838957ac79f75999b5b6",
+    "rrtmgk_sw": "a56b6b3b2254967ca4a767dd99766df1c7bce186b35bc9a69fd3031ee7574ab0",
     "gbmpbl": "20fb754c8290e50e8962e2be2786956b7b3ae3fdb0e875860854c8b979811a57",
     # HRRR initial helper: all 3456 native output words, both selectors.
     "gsd_initial_reflectivity": '9f9af95b259d978647dca1992f2b14e4bafaea5c781d269e53dca93fbb2a3419',
