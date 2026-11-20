@@ -326,10 +326,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     lateral melt, rebinning and zapping, with level, CESM or topo ponds),
     and its ridging (both participation and both redistribution functions,
     the ridging iterations and the cleanup after them), neither of which
-    needs an opt-in, and its shortwave without delta-Eddington (the CCSM3
-    shortwave with constant or computed albedos, the coupled shortwave,
-    `column_prep_radiation` and the initial shortwave). Only the computed
-    albedos need the opt-in, for glibc's atan. The elastic subcycles check
+    needs an opt-in, and its shortwave: the delta-Eddington shortwave (the
+    Registry default: the orbit, the solar zenith angle and `run_dEdd` with
+    level, CESM, topo or no ponds, on BL99, mushy or zero-layer ice), the
+    CCSM3 shortwave with constant or computed albedos, the coupled
+    shortwave, `column_prep_radiation` and the initial shortwave. The
+    computed albedos need the opt-in for glibc's atan, and the
+    delta-Eddington shortwave needs it for glibc's sin, cos, atan and asin
+    (the opt-in now carries asin). The elastic subcycles check
     their arrays once per solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
@@ -1145,8 +1149,8 @@ The default build and the published wheels (`metal-woof`, `recast-woof`)
 carry none of the following. Each is off until selected:
 
 - **LGPL glibc 2.39 libm** (`WOOF_GLIBC239_LIBM64`, `WOOF_GLIBC239_TRIG64`):
-  glibc's binary64 words on the GPU and host. It lifts some MALI and
-  MPAS-Ocean RKIND 8 refusals.
+  glibc's binary64 words on the GPU and host. It lifts some MALI,
+  MPAS-Ocean and MPAS-Seaice RKIND 8 refusals.
 - **NVIDIA-derived `powf`**: CUDA's transcription for Metal strict numerics.
   The default is WOOF's own correctly rounded `powf`.
 - **WRF-Hydro** (`WOOF_ENABLE_WRF_HYDRO=1`), **NEMO**

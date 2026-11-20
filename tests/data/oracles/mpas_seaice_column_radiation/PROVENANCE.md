@@ -61,7 +61,8 @@ glibc 2.44), 2026-11-15.
   refused by name; the cases that need it are `RADIATION_TRIG_CASES`. The
   constant albedos, the coupled runs and `column_prep_radiation` need no
   opt-in. delta-Eddington with `config_calc_surface_temperature` true (the orbit
-  and `coszen`: `sin`, `cos`, `asin`, `atan`) is not ported and refused.
+  and `coszen`: `sin`, `cos`, `asin`, `atan`) is graded in
+  `../mpas_seaice_column_dedd/`.
 
 ## Licence
 
