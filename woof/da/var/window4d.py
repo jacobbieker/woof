@@ -24,10 +24,19 @@ adjoint sums the slots' forcings).  WRFDA's TL model advects ``g_qv``, so
 this is not the L1 lane for moisture; it is meant for the dry OSSE (L2)
 until the window carries moisture.
 
-The window is linearised about its own base (its start state and
-:meth:`Window.forward`); the slots' ``H'`` about the slots' first guesses
-(:class:`~woof.da.var.fourd.FourDObsTerm`).  Making the two the same
-trajectory is the caller's (the L2 OSSE's) business.
+**Two trajectories.**  The window is linearised about ITS OWN base (its
+start state run forward by :meth:`Window.forward`), but each slot's ``H'``
+and ``wrftltoxa`` are linearised about THAT SLOT'S first guess ``xb``
+(:class:`~woof.da.var.fourd.FourDObsTerm`).  Nothing here makes the two
+the same: if the window's base at slot ``n`` is not ``fgNN``, the 4D-Var
+gradient mixes two trajectories and is not WRFDA's.  WRFDA makes them one
+(WRFPLUS writes the trajectory the slots read).  Pass ``base=`` (the slots'
+``(xb, grid)``) to compare the window's base with each slot's ``grid`` at
+construction and refuse a mismatch over ``base_rtol``; the L1/L0 lanes
+should turn it on.
+
+The window must be binary64: a binary32 window's adjoint is only its
+transpose to about 1e-6, and the minimiser needs 1e-12.
 """
 
 from __future__ import annotations
@@ -43,6 +52,9 @@ __all__ = ["WindowModel", "to_window", "from_window"]
 #: WRFDA's TL names -> the window's names (the slot read-back; the start
 #: goes through ``wrfda_tl_start``).
 _NAMES = {"u_2": "u", "v_2": "v", "w_2": "w", "t_2": "thp", "mu_2": "mup", "ph_2": "php"}
+
+#: WRF's state names (``wrftoxb``'s ``grid``) -> the window's, for the base check.
+_BASE = {**_NAMES, "p": "p_pert"}
 
 
 def to_window(a: np.ndarray) -> np.ndarray:
@@ -78,24 +90,67 @@ class WindowModel:
 
     ``to_device``/``to_host`` move arrays between the host and the window
     (cupy, or woof's facade, by default); tests pass their own.
+
+    ``base`` (optional): the slots' ``(xb, grid)`` pairs, as
+    :class:`~woof.da.var.fourd.FourDObsTerm` takes them; the window's base
+    at each slot is compared with that slot's ``grid`` (see the module
+    docstring) and a relative difference over ``base_rtol`` is refused.
     """
 
-    def __init__(self, window, steps_per_slot: int, *, moisture: str = "persist", to_device=None, to_host=None):
+    def __init__(self, window, steps_per_slot: int, *, moisture: str = "persist", to_device=None, to_host=None,
+                 base: Sequence | None = None, base_rtol: float = 1e-5):
         if moisture != "persist":
             raise NotImplementedError(f"moisture={moisture!r}: the window is dry; only 'persist' is ported")
         if steps_per_slot < 1:
             raise ValueError(f"steps_per_slot must be >= 1, not {steps_per_slot}")
         self.window = window
         self.sps = int(steps_per_slot)
-        self.dtype = window._start["u"].dtype
+        self.dtype = np.dtype(str(window._start["u"].dtype))
+        if self.dtype != np.float64:
+            raise TypeError(f"the window is {self.dtype}; 4D-Var needs a binary64 window "
+                            "(a binary32 window's adjoint is its transpose to only ~1e-6)")
         self._dev = to_device or (lambda a: _default_to_device(a, self.dtype))
         self._host = to_host or _default_to_host
         if getattr(window, "_checkpoints", None) is None:
             window.forward()
+        self.base_diff = None
+        if base is not None:
+            self.base_diff = self.check_base(base, rtol=base_rtol)
+
+    def check_base(self, slots: Sequence, *, rtol: float = 1e-5) -> dict:
+        """The window's base at each slot against that slot's ``grid``:
+        ``{(n, name): max|base - grid| / max|grid|}``; refuses any over
+        ``rtol``.  Reruns :meth:`Window.forward` (the base the TL and AD
+        then use is unchanged) and needs a checkpoint at every slot state."""
+        states = self._slots(len(slots))
+        every = int(getattr(self.window, "every", 1))
+        if self.sps % every:
+            raise ValueError(f"the base check needs a checkpoint at every slot: checkpoint_every={every} "
+                             f"does not divide steps_per_slot={self.sps}")
+        final = self.window.forward()
+        out, bad = {}, []
+        for n, (k, (_, grid)) in enumerate(zip(states, slots)):
+            st = final if k == self.window.nsteps else self.window._checkpoints[k]
+            for g, w in _BASE.items():
+                ref = np.asarray(grid[g], dtype=np.float64)
+                got = from_window(self._host(st[w]))
+                if got.shape != ref.shape:
+                    raise ValueError(f"slot {n}: the window's {w} is {got.shape[::-1]} (k, j, i), "
+                                     f"the slot's {g} {ref.shape} (i, j, k)")
+                scale = float(np.max(np.abs(ref))) or 1.0
+                r = float(np.max(np.abs(got - ref))) / scale
+                out[(n, g)] = r
+                if not r <= rtol:
+                    bad.append(f"slot {n} {g}: {r:.3g}")
+        if bad:
+            raise ValueError("the window's base is not the slots' first guesses (two trajectories): "
+                             + "; ".join(bad) + f" > rtol {rtol:g}")
+        return out
 
     def _slots(self, nslots: int) -> list:
-        if nslots < 1:
-            raise ValueError("no slots")
+        if nslots < 2:
+            raise ValueError(f"{nslots} slot(s): 4D-Var over a window needs at least 2 slots "
+                             "(the start and the end); one slot is 3D-Var")
         if self.window.nsteps != self.sps * (nslots - 1):
             raise ValueError(f"{nslots} slots {self.sps} steps apart need a window of "
                              f"{self.sps * (nslots - 1)} steps; it has {self.window.nsteps}")
@@ -144,6 +199,9 @@ class WindowModel:
                 qv = np.array(f["qv"], dtype=np.float64) if qv is None else qv + f["qv"]
         a = self.window.ad(None, forcing)
         a0 = wrfda_tl_start_ad(a)
+        # php is not one of wrfda_tl_start's fields (WRFDA starts g_ph at
+        # zero; ph="hydrostatic" sets it here, outside that map), so a0 has
+        # no php: its adjoint is the window's own, a["php"]
         out = {"u_2": a0["u"], "v_2": a0["v"], "w_2": a0["w"], "t_2": a0["thp"], "mu_2": a0["mup"],
                "p": a0["p"], "ph_2": a["php"]}
         out = {k: from_window(self._host(v)) for k, v in out.items()}

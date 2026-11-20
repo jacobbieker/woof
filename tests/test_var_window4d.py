@@ -11,8 +11,11 @@ Breakage this prevents:
   into ``mup`` and ``muts``): slot 0 reads back ``g0``;
 - :class:`~woof.da.var.fourd.FourDObsTerm` over the window not being its
   own transpose;
-- a window whose length does not fit the slots, or a moisture option the dry
-  window cannot honour, running anyway.
+- a window whose length does not fit the slots, fewer than 2 slots, a
+  binary32 window (its adjoint is a transpose to only ~1e-6), or a moisture
+  option the dry window cannot honour, running anyway;
+- the optional base check (the window's base against the slots' first
+  guesses) passing a mismatch or comparing the wrong state.
 """
 
 from __future__ import annotations
@@ -40,16 +43,20 @@ class FakeWindow:
     (numpy, its names and shapes): each step rolls every field along ``i``
     and feeds ``p_pert`` into ``p`` and ``thp`` and ``muts`` into ``mup``."""
 
-    def __init__(self, nx, ny, nz, nsteps):
+    def __init__(self, nx, ny, nz, nsteps, dtype=np.float64, every=1):
         mass, two = (nz, ny, nx), (ny, nx)
         shapes = {"u": (nz, ny, nx + 1), "v": (nz, ny + 1, nx), "w": (nz + 1, ny, nx), "php": (nz + 1, ny, nx),
                   "thp": mass, "p": mass, "al": mass, "alt": mass, "p_pert": mass, "mup": two, "muts": two}
-        self._start = {n: np.ones(shapes[n]) for n in STEP_INPUTS}
+        self._start = {n: np.ones(shapes[n], dtype=dtype) for n in STEP_INPUTS}
         self.nsteps = nsteps
+        self.every = every
         self._checkpoints = None
 
     def forward(self):
-        self._checkpoints = {0: True}
+        """The base: the start plus ``k`` in every field at state ``k``."""
+        self._checkpoints = {k: {n: v + k for n, v in self._start.items()}
+                             for k in range(0, self.nsteps, self.every)}
+        return {n: v + self.nsteps for n, v in self._start.items()}
 
     @staticmethod
     def _step(d):
@@ -143,12 +150,43 @@ def test_refusals():
     g0 = _tl_state(np.random.default_rng(2), *dims)
     with pytest.raises(ValueError, match="need a window of 2 steps"):
         model.tl(g0, 2)
+    with pytest.raises(ValueError, match="at least 2 slots"):
+        model.tl(g0, 1)
+    with pytest.raises(ValueError, match="at least 2 slots"):
+        model.ad([g0])
+    with pytest.raises(TypeError, match="binary64 window"):
+        w4.WindowModel(FakeWindow(*dims, 4, dtype=np.float32), 2, to_device=np.asarray, to_host=np.asarray)
     with pytest.raises(ValueError, match="lacks"):
         model.tl({k: v for k, v in g0.items() if k != "qv"}, 3)
     with pytest.raises(NotImplementedError, match="dry"):
         w4.WindowModel(model.window, 2, moisture="advect", to_device=np.asarray, to_host=np.asarray)
     with pytest.raises(ValueError, match="steps_per_slot"):
         w4.WindowModel(model.window, 0, to_device=np.asarray, to_host=np.asarray)
+
+
+def _grids(nx, ny, nz, nslots, sps):
+    """Each slot's ``grid`` equal to the fake window's base there."""
+    shapes = {k: v.shape for k, v in _tl_state(np.random.default_rng(0), nx, ny, nz).items()}
+    return [(None, {g: np.full(shapes[g], 1.0 + n * sps) for g in w4._BASE}) for n in range(nslots)]
+
+
+def test_base_check():
+    """Off by default; with ``base=`` the window's base at each slot is the
+    slot's ``grid`` or the model is refused, by slot and name."""
+    nx, ny, nz = 5, 4, 3
+    mk = lambda **kw: w4.WindowModel(FakeWindow(nx, ny, nz, 4, every=kw.pop("every", 1)), 2,
+                                      to_device=np.asarray, to_host=np.asarray, **kw)
+    assert mk().base_diff is None
+    slots = _grids(nx, ny, nz, 3, 2)
+    m = mk(base=slots)
+    assert len(m.base_diff) == 3 * len(w4._BASE) and max(m.base_diff.values()) == 0.0
+    assert mk(base=slots, every=2).base_diff == m.base_diff
+    slots[1][1]["t_2"] = slots[1][1]["t_2"] * 1.01
+    with pytest.raises(ValueError, match="two trajectories.*slot 1 t_2"):
+        mk(base=slots)
+    assert mk(base=slots, base_rtol=0.02).base_diff[(1, "t_2")] == pytest.approx(0.01 / 1.01)
+    with pytest.raises(ValueError, match="checkpoint_every=3"):
+        mk(base=_grids(nx, ny, nz, 3, 2), every=3)
 
 
 @pytest.mark.parametrize("press,ph", [("wrfda", "zero"), ("dnw", "hydrostatic")])
