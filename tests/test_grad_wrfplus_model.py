@@ -255,15 +255,18 @@ def test_step_refuses_what_it_does_not_cover(backend, tmp_path):
     out = _run(backend, '''
 cases = {"flat": dict(terrain_opt=0), "open": dict(open_x=True, terrain_opt=1),
          "earth": dict(terrain_opt=1), "pbl": dict(terrain_opt=1, bl_pbl_physics=1),
-         "odd": dict(terrain_opt=1, time_step_sound=5)}
+         "odd": dict(terrain_opt=1, time_step_sound=5), "rot": dict(terrain_opt=1)}
 for key, over in cases.items():
     cfg = H.make_config(8, 6, 6, h_sca_adv_order=5, **over)
     geo = None
     if over.get("terrain_opt"):
         geo = H.make_geography(cfg) if key == "earth" else H.neutral_geography(cfg)
+    if key == "rot":
+        geo = dataclasses.replace(geo, f=np.full((6, 8), 1e-4))
     try:
-        M.step_geometry(H.make_state(cfg, 1, geography=geo), cfg)
-        out[key] = "accepted"
+        st = H.make_state(cfg, 1, geography=geo)
+        g = M.step_geometry(st, cfg)
+        out[key] = f"accepted rotational={st.rotational} cc={g.stages[0].cc is not None}"
     except NotImplementedError as e:
         out[key] = str(e)
 ''', tmp_path)
@@ -272,6 +275,7 @@ for key, over in cases.items():
     assert "map factors" in out["earth"], out
     assert "physics" in out["pbl"], out
     assert "odd time_step_sound" in out["odd"], out
+    assert out["rot"] == "accepted rotational=True cc=True", out
 
 
 def test_forecast_path_does_not_import_the_step_adjoint():
