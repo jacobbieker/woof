@@ -91,7 +91,9 @@ def test_the_ocean_door_verify_grades_the_ported_piece():
                                                      "vertical_transport_r4", "vertical_transport_r8",
                                                      "barotropic_stage_r4", "barotropic_stage_r8",
                                                      "split_explicit_step_r4", "split_explicit_step_r8",
-                                                     "forward_mode_r4", "forward_mode_r8"]
+                                                     "forward_mode_r4", "forward_mode_r8",
+                                                     "frazil_formation_r4", "frazil_formation_r8",
+                                                     "forward_mode_frazil_r4", "forward_mode_frazil_r8"]
 
 
 @requires_gpu

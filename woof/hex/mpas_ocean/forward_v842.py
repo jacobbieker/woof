@@ -15,7 +15,9 @@
   advection and reconstruction coefficients and the mesh scaling, is the
   input's);
 - each step: the clock advanced, the absorbed fractions
-  (:func:`~woof.hex.mpas_ocean.forcing_v842.fraction_absorbed`), the step
+  (:func:`~woof.hex.mpas_ocean.forcing_v842.fraction_absorbed`), the frazil
+  arrays (:func:`~woof.hex.mpas_ocean.frazil_v842.build_arrays`, under
+  ``config_use_frazil_ice_formation``), the step
   (:mod:`~woof.hex.mpas_ocean.split_step_v842`), ``xtime`` and
   ``daysSinceStartOfSim`` (``ocn_timestep``), and the state's two time levels
   shifted (``mpas_pool_shift_time_levels``: ``NAME`` and ``NAME@2`` trade
@@ -45,7 +47,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import diagnostics_v842, forcing_v842, split_step_v842
+from . import diagnostics_v842, forcing_v842, frazil_v842, split_step_v842
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
 
 SOURCE_FILES = (
@@ -171,6 +173,15 @@ def check_config(configs: dict) -> None:
                                    declaration="config_do_restart = .false.; restart with read_restart")
 
 
+def _two_level(pools: dict) -> dict:
+    """The two-level fields present: :data:`TWO_LEVEL` and the frazil package's."""
+    names = dict(TWO_LEVEL)
+    frazil = tuple(n for n in frazil_v842.TWO_LEVEL if pools["state"].get(n) is not None)
+    if frazil:
+        names["state"] = names["state"] + frazil
+    return names
+
+
 def _state(pools: dict, level: int) -> dict:
     st = pools["state"]
     return {n: st[n if level == 1 else f"{n}@2"] for n in ("layerThickness", "normalVelocity", "ssh")}
@@ -221,7 +232,7 @@ def cold_start(*, pools: dict, configs: dict) -> Clock:
         i32(nl)))
     _launch(precision, "ocn_fw_init_cells_v842", nc, (tr["activeTracers"], m["maxLevelCell"], i32(nc), i32(nl),
                                                        i32(nt)))
-    for pool, names in TWO_LEVEL.items():
+    for pool, names in _two_level(pools).items():
         for name in names:
             pools[pool][f"{name}@2"][...] = pools[pool][name]
     return clock
@@ -229,7 +240,7 @@ def cold_start(*, pools: dict, configs: dict) -> Clock:
 
 def _shift(pools: dict) -> None:
     """``mpas_pool_shift_time_levels``: each two-level field's arrays trade names."""
-    for pool, names in TWO_LEVEL.items():
+    for pool, names in _two_level(pools).items():
         p = pools[pool]
         for name in names:
             p[name], p[f"{name}@2"] = p[f"{name}@2"], p[name]
@@ -250,6 +261,8 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int) -> None:
         clock.now += clock.step
         forcing_v842.fraction_absorbed(mesh=pools["mesh"], layer_thickness=st["layerThickness"], diagnostics=d,
                                        forcing=pools["forcing"])
+        frazil_v842.build_arrays(dt=dt, mesh=pools["mesh"], state=st, tracers=_tracers(pools, 1), diagnostics=d,
+                                 forcing=pools["forcing"], configs=configs)
         split_step_v842.split_step(dt=dt, n_btr_subcycles=n_btr, pools=pools, configs=configs)
         # ocn_timestep: xtime, and the days since the simulation's start
         d["xtime"] = clock.time_stamp

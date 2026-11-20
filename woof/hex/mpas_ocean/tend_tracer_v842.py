@@ -13,7 +13,10 @@ active tracers on one block, in the Fortran's order:
    the runoff flux);
 5. Jerlov short-wave absorption (``config_sw_absorption_type`` 'jerlov') or
    none;
-6. the active-tracer budgets (``config_compute_active_tracer_budgets``).
+6. the active-tracer budgets (``config_compute_active_tracer_budgets``);
+7. frazil (``ocn_frazil_forcing_tracers``,
+   :func:`~woof.hex.mpas_ocean.frazil_v842.active_tracers_tend`) under
+   ``config_use_frazil_ice_formation``.
 
 The kernels (``tend_tracer_v842.cu`` and those of the modules above) are held
 word for word to the v8.4.2 routines, ``mpas_ocn_tendency.F`` compiled
@@ -28,8 +31,8 @@ integers, a field whose package is off is ``None``.
 
 Refused by name, as not ported: KPP's non-local flux (``config_use_cvmix_kpp``),
 surface and interior restoring, exponential decay, ideal age and TTD for the
-active tracers, the ohlmann00 short-wave absorption, land-ice fluxes and
-frazil (their routines return at once when off), and every other tracer group
+active tracers, the ohlmann00 short-wave absorption, land-ice fluxes (their
+routines return at once when off), and every other tracer group
 (this port carries ``activeTracers``). Short-wave absorption without the bulk
 forcing raises, as v8.4.2's init aborts.
 """
@@ -43,7 +46,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import eos_v842, tracer_advection_v842, tracer_hmix_v842
+from . import eos_v842, frazil_v842, tracer_advection_v842, tracer_hmix_v842
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
 
 SOURCE_FILES = (
@@ -114,9 +117,6 @@ def check_config(configs: dict, groups=("activeTracers",)) -> None:
     if mode in ("standalone", "coupled"):
         _refuse("config_land_ice_flux_mode", mode, "the land-ice tracer fluxes are not ported",
                 "config_land_ice_flux_mode = 'off' | 'pressure_only'")
-    if configs.get("config_use_frazil_ice_formation", False):
-        _refuse("config_use_frazil_ice_formation", True, "frazil is not ported",
-                "config_use_frazil_ice_formation = .false.")
     sw = configs.get("config_sw_absorption_type", "none")
     if sw not in ("none", "jerlov"):
         _refuse("config_sw_absorption_type", sw,
@@ -207,3 +207,5 @@ def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_te
     if budgets:
         sw = d["temperatureShortWaveTendency"]
         sw[:n_cells] = tend[:n_cells, :, it - 1] - sw[:n_cells]
+    frazil_v842.active_tracers_tend(mesh=mesh, forcing=f, tend=tend, index_temperature=it, index_salinity=isal,
+                                    configs=configs)
