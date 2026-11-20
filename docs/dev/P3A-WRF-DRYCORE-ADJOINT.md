@@ -245,6 +245,25 @@ Each step is one small PR, taken to merged before the next widens.
 4. RK-stage glue: `rk_step_prep` (`couple_momentum`, `calc_ww_cp`),
    `calc_p_rho_phi`, `rk_addtend_dry`, `set_w_surface`, periodic
    physical BCs, plus a per-stage test with tendencies frozen.
+   - Done in `woof/grad/wrfplus/stage.py`, with the chained
+     `rk_stage_tl`/`rk_stage_ad`.
+   - woof's arrays carry no halo, so the periodic physical BCs are the
+     kernels' wrapped face and terrain indices. There is no separate
+     operator; the oracle's halo columns carry the wrapped neighbours.
+   - `rk_addtend_dry` follows woof's decomposition: the held tendf are
+     already divided by the map factor, and the heating carries the
+     hybrid c1h/c2h. The oracle maps WRF's tendf to woof's tendf times
+     msf, at rk_step 2. The rk_step 1 save fold belongs to item 7
+     (lateral boundaries).
+   - Not covered yet, all for item 7: on rk_step 1 with a non-periodic
+     axis, the strict `stage_fluxes(first_stage=True)` takes the
+     boundary-face mu from `carried_wrf_mu_halo`, where these kernels
+     clamp; `_capture_wrf_muts` has a boundary-zone branch the chain
+     does not take (it forms muts = mub + mup + mu'' everywhere).
+   - The chained stage runs calc_p_rho_phi, rk_step_prep,
+     rk_addtend_dry, small_step_init, calc_coef_w, the substeps and
+     small_step_finish, and no others. It leaves out `set_w_surface` (checked on its own),
+     the lateral boundary update and `w_damp` (item 5).
 5. Big-step tendencies: `horizontal_pressure_gradient`, `pg_buoy_w`,
    `rhs_ph`, `coriolis`, `curvature`, `w_damp`.
 6. Advection `advect_u/v/w/scalar` (non-PD, orders 2-6). This is the
@@ -343,7 +362,11 @@ Other jobs share that card.
 | advance_w + calc_p_rho (advance_w_phi) | #669 | 3.5-3.7x | 2.3x | 9.3-9.8x |
 | calc_coef_w (calc_coefs) | #675 | 4.8x | 3.2x | 21-23x |
 | advance_mu_t + spec_bdyupdate (advance_mu_th + advance_exact_frame_mu_t) | advance_mu_t PR | 3.35x (3.2-3.5) | 2.0x | 8.2x |
-| small_step_prep + calc_p_rho, small_step_finish (small_step_{init,finish}_{uv,column}) | this PR | 4.8x (4.7-5.0) | 2.1x | 7.7-8.0x |
+| small_step_prep + calc_p_rho, small_step_finish (small_step_{init,finish}_{uv,column}) | #685 | 4.8x (4.7-5.0) | 2.1x | 7.7-8.0x |
+| calc_p_rho_phi (calc_p_alpha_carried_muts) | this PR | 3.2x (3.1-3.5) | 1.0x | 4.9x |
+| rk_step_prep: couple_momentum + calc_ww_cp (stage_fluxes, CuPy) | this PR | 0.85x (0.82-0.86) | 0.32x | 1.2x |
+| rk_addtend_dry (dry tendency add + add_held_heating) | this PR | 1.0x | 1.7x | 2.2x |
+| set_w_surface (set_surface_w) | this PR | 2.1x (2.0-2.3) | 1.2x | 4.0x |
 
 advance_uv's 3.7x in the projection is the midpoint of its range. The
 advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
@@ -352,6 +375,18 @@ understates the weight. For spec_zone >= 2 the TL/AD follow woof's
 primal, which treats the whole spec_zone ring as frame; WRFPLUS
 integrates from ids+1 whatever spec_zone is, and the oracle runs
 spec_zone = 1 only.
+
+The RK-stage glue (item 4) is cheap next to the acoustic kernels. Its
+four operators together run at 1.8x AD32 over their primal (0.95x TL32).
+rk_step_prep's primal is CuPy (stage_fluxes' face masses and
+elementwise couplings), so its fused TL and AD kernels run faster than
+the forward. In a dry step only calc_p_alpha_carried_muts has a share
+that matters: 5.8% of the strict step (0.93 ms for its four calls,
+CUPTI on the same card, 2026-11-20). It was part of "other woof
+kernels" below. set_surface_w is 0.03%. add_held_heating does not run
+without microphysics, and the held-tendency add without a mixing
+package. stage_fluxes sits inside the 6.8% CuPy share, which is left
+unmeasured below; at 0.85x it can only lower the projection.
 
 small_step's ratio is over all four primal kernels (init and finish).
 Most of its adjoint time is the init column adjoint (3.3 ms of about
@@ -379,22 +414,39 @@ activity tagged by woof kernel and the minimum over 10 steps
 | other woof kernels | 8.5% | 6.1% |
 | CuPy kernels and copies | 6.8% | 3.0% |
 
+flux_div is measured with a prototype rather than a port: a TL and a
+gather-form AD (one writer per word, no atomics) of the periodic
+flux_div_scalar (flux5 horizontal, vorder 3 vertical, no map factor),
+kept out of the tree. It passes a float64 dot test (3e-16) and an FD
+test of its TL (relative error 4e-12 at eps 1e-3), and its float32
+primal is within 2e-7 of the production kernel. At 200x200x49 on pb,
+over the production float32 kernel under GPUWM_WRF_EXACT=1, three runs
+on a shared card gave AD32 2.4-2.7x (2.56x median), TL32 1.8-2.1x and
+AD64 27-29x. AD64 is compute bound on the A6000's 1/32-rate float64;
+the glue and acoustic kernels are memory bound and do not show this.
+Hoisting the 1/60 and 1/12 divisions out of the gather loop took AD32
+from 4.2x to 2.4x. The u, v and w kernels are taken at the scalar's
+ratio: they average their advecting velocities but have the same
+stencils. The open and specified boundary paths are not in the
+prototype.
+
 The projection is the per-step adjoint cost over the forward step:
 1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
-far (65.0% of the strict step), Σ share x AD32 = 2.45, on top of the
-forward recompute's 1. The rest is projected at a range of ratios:
+far (85.2% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
+set_w_surface's 0.03% and flux_div's 14.4%), Σ share x AD32 = 3.01, on
+top of the forward recompute's 1. The rest is projected at a range of
+ratios:
 
-| ratio for the unmeasured 35.0% | projection |
+| ratio for the unmeasured 14.8% | projection |
 |---|---|
-| 2.2x (memory-traffic floor) | 4.2x |
-| 3.0x | 4.5x |
-| 3.8x (the measured share-weighted mean) | 4.8x |
+| 2.2x (memory-traffic floor) | 4.3x |
+| 3.0x | 4.4x |
+| 3.5x (the measured share-weighted mean) | 4.5x |
 
-The 5x limit holds while the rest averages at most about 4.4x. The
-margin has narrowed: small_step at 4.8x moved the break-even down from
-4.5x, and flux_div (14.4%, item 6) is the largest unmeasured share. This is a
+The 5x limit holds while the rest averages at most about 6.7x (4.7x
+before flux_div was measured). This is a
 projection from kernel GPU time, not a measured step ratio: launch gaps
-are not counted, the ratios come from a shared card, and 35.0% of the
+are not counted, the ratios come from a shared card, and 14.8% of the
 step is not yet ported. calc_coefs and small_step are each about 4.8x;
 at 2.3% and 8.2% of the step they add about 0.11 and 0.39. Each later kernel PR replaces a
 projected share with a measured one.

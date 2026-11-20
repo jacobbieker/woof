@@ -13,6 +13,11 @@ from .acoustic import (CW_ACTIVE, CW_STATE, MT_ACTIVE, MT_ALIAS, MT_STATE,
                        W_STATE, CWGeometry, MTGeometry, SSGeometry, UVGeometry,
                        WGeometry, cw_shapes, mt_shapes, ss_shapes, uv_shapes,
                        w_shapes)
+from .stage import (AT_ACTIVE, AT_ALIAS, AT_PASSIVE, AT_STATE, PRP_ACTIVE,
+                    PRP_ALIAS, PRP_PASSIVE, PRP_STATE, RSP_ACTIVE, RSP_ALIAS,
+                    RSP_PASSIVE, RSP_STATE, ATGeometry, PRPGeometry,
+                    RSPGeometry, StageGeometry, SWGeometry, at_shapes,
+                    prp_shapes, rsp_shapes, sw_shapes)
 
 # (centre, spread) per field, roughly a mid-latitude 1-3 km grid.
 _UV_SCALES = {
@@ -360,3 +365,235 @@ def substep_perturbation(geoms: tuple, seed: int, dtype=np.float64) -> dict:
     out.update(uv_perturbation(uvg, seed + 1, dtype))
     out.update(w_perturbation(wg, seed, dtype))
     return {n: out[n] for n in substep_active(geoms)}
+
+
+# ---------------------------------------------------------------- RK stage
+# calc_p_rho_phi, rk_step_prep, rk_addtend_dry and set_w_surface (P3a item
+# 4), on woof's strict primal names.
+
+_RK_SCALES = {
+    "thp": (10.0, 5.0), "php": (0.0, 20.0), "mup": (0.0, 200.0),
+    "mub": (9.0e4, 2e3), "u": (5.0, 5.0), "v": (-2.0, 5.0),
+    "w": (0.0, 1.0), "h_diabatic": (0.0, 1e-3),
+    "p": (8.0e4, 1e4), "al": (0.0, 1e-3), "alt": (1.0, 0.2),
+    "p_pp": (0.0, 50.0), "ru": (0.0, 4e5), "rv": (0.0, 4e5),
+    "ww": (0.0, 10.0),
+    "ru_t": (0.0, 50.0), "rv_t": (0.0, 50.0), "rw_t": (0.0, 5.0),
+    "rph_t": (0.0, 50.0), "rth_t": (0.0, 50.0), "rmu_t": (0.0, 0.5),
+    "ru_tf": (0.0, 50.0), "rv_tf": (0.0, 50.0), "rw_tf": (0.0, 5.0),
+    "rph_tf": (0.0, 50.0), "rth_tf": (0.0, 50.0), "rmu_tf": (0.0, 0.5),
+}
+
+
+def _vertical(nz, rng, hybrid):
+    eta = np.linspace(1.0, 0.0, nz + 1)
+    dnw = np.diff(eta) * (1.0 + 0.2 * (rng.random(nz) - 0.5))
+    eta = np.concatenate(([1.0], 1.0 + np.cumsum(dnw)))
+    znu = 0.5 * (eta[1:] + eta[:-1])
+    out = {"dnw": dnw, "rdnw": 1.0 / dnw, "znw": eta, "znu": znu}
+    if hybrid:
+        out["c1h"] = np.sqrt(np.clip(znu, 0.0, None))
+        out["c2h"] = (1.0 - out["c1h"]) * 5000.0
+    else:
+        out["c1h"], out["c2h"] = np.ones(nz), np.zeros(nz)
+    # hypsometric_opt 2's pressure coefficients (non-hybrid: c3 = eta,
+    # c4 = 0; hybrid: c3 = c1, c4 = c2 times the column scale, as WRF).
+    c1f = np.sqrt(np.clip(eta, 0.0, None)) if hybrid else np.ones(nz + 1)
+    out["c3h"] = out["c1h"] * znu if hybrid else znu.copy()
+    out["c4h"] = out["c2h"] * znu if hybrid else np.zeros(nz)
+    out["c3f"] = c1f * eta if hybrid else eta.copy()
+    out["c4f"] = (1.0 - c1f) * 5000.0 * eta if hybrid else np.zeros(nz + 1)
+    return out
+
+
+def prp_geometry(nz=7, ny=8, nx=9, **overrides) -> PRPGeometry:
+    base = dict(nz=nz, ny=ny, nx=nx, p_top=5000.0)
+    base.update(overrides)
+    return PRPGeometry(**base)
+
+
+def prp_trajectory(geom: PRPGeometry, seed: int, dtype=np.float64, *,
+                   hybrid: bool = False) -> dict:
+    """Host base state of calc_p_rho_phi: a hydrostatic base (phb, alb,
+    pb) built from mub on the hypsometric_opt 2 pressures, so both
+    hypsometric options give small perturbations."""
+    rng = np.random.default_rng(seed)
+    sh = prp_shapes(geom)
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    out = _vertical(nz, rng, hybrid)
+    for n in ("thp", "php", "mup", "mub"):
+        c, s = _RK_SCALES[n]
+        out[n] = c + s * rng.standard_normal(sh[n])
+    out["muts"] = out["mub"] + out["mup"] + 20.0 * rng.standard_normal(sh["muts"])
+    mb = out["mub"] if geom.base3d else np.full((1, 1), float(out["mub"].mean()))
+    pf = out["c3f"][:, None, None] * mb + out["c4f"][:, None, None] + geom.p_top
+    ph = out["c3h"][:, None, None] * mb + out["c4h"][:, None, None] + geom.p_top
+    alb = RK_T0_RD * (1.0 + 0.05 * rng.standard_normal(ph.shape)) / ph
+    dphb = alb * ph * np.log(pf[:-1] / pf[1:])
+    phb = np.concatenate((np.zeros((1,) + ph.shape[1:]), np.cumsum(dphb, 0)))
+    pb = 1.0e5 * (287.0 * 310.0 / (1.0e5 * alb)) ** 1.4
+    if not geom.base3d:
+        alb, phb, pb = alb[:, 0, 0], phb[:, 0, 0], pb[:, 0, 0]
+    out.update(alb=alb, phb=phb, pb=pb)
+    for n in PRP_STATE:
+        c, s = _RK_SCALES[n]
+        out[n] = c + s * rng.standard_normal(sh[n])
+    keep = PRP_STATE + PRP_ACTIVE + PRP_PASSIVE
+    return {k: np.ascontiguousarray(out[k], dtype=dtype) for k in keep}
+
+
+RK_T0_RD = 287.0 * 300.0
+
+
+def _rk_perturbation(names, shapes, seed, dtype):
+    rng = np.random.default_rng(seed)
+    out = {}
+    for n in names:
+        s = _RK_SCALES[n][1] if n != "muts" else 200.0
+        out[n] = np.ascontiguousarray(s * rng.standard_normal(shapes[n]),
+                                      dtype=dtype)
+    return out
+
+
+def prp_perturbation(geom: PRPGeometry, seed: int, dtype=np.float64) -> dict:
+    return _rk_perturbation(PRP_STATE + PRP_ACTIVE, prp_shapes(geom), seed,
+                            dtype)
+
+
+def rsp_geometry(nz=7, ny=8, nx=9, **overrides) -> RSPGeometry:
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0,
+                boundary_x=1, boundary_y=1)
+    base.update(overrides)
+    return RSPGeometry(**base)
+
+
+def _msf(out, rng, shapes, names, mapped):
+    for n in names:
+        out[n] = (1.0 + 0.02 * rng.standard_normal(shapes[n]) if mapped
+                  else np.ones(shapes[n]))
+
+
+def rsp_trajectory(geom: RSPGeometry, seed: int, dtype=np.float64, *,
+                   hybrid: bool = False) -> dict:
+    """Host base state of rk_step_prep; ``msfv`` is msfv_inv."""
+    rng = np.random.default_rng(seed)
+    sh = rsp_shapes(geom)
+    out = _vertical(geom.nz, rng, hybrid)
+    for n in RSP_STATE + RSP_ACTIVE + ("mub",):
+        c, s = _RK_SCALES[n]
+        out[n] = c + s * rng.standard_normal(sh[n])
+    _msf(out, rng, sh, ("msfu", "msfv", "msft"), geom.has_msf)
+    keep = RSP_STATE + RSP_ACTIVE + RSP_PASSIVE
+    return {k: np.ascontiguousarray(out[k], dtype=dtype) for k in keep}
+
+
+def rsp_perturbation(geom: RSPGeometry, seed: int, dtype=np.float64) -> dict:
+    return _rk_perturbation(RSP_STATE + RSP_ACTIVE, rsp_shapes(geom), seed,
+                            dtype)
+
+
+def at_geometry(nz=7, ny=8, nx=9, **overrides) -> ATGeometry:
+    base = dict(nz=nz, ny=ny, nx=nx)
+    base.update(overrides)
+    return ATGeometry(**base)
+
+
+def at_trajectory(geom: ATGeometry, seed: int, dtype=np.float64, *,
+                  hybrid: bool = False) -> dict:
+    rng = np.random.default_rng(seed)
+    sh = at_shapes(geom)
+    out = _vertical(geom.nz, rng, hybrid)
+    for n in AT_STATE + AT_ACTIVE + ("mub",):
+        c, s = _RK_SCALES[n]
+        out[n] = c + s * rng.standard_normal(sh[n])
+    _msf(out, rng, sh, ("msft",), geom.has_msf)
+    keep = AT_STATE + AT_ACTIVE + AT_PASSIVE
+    return {k: np.ascontiguousarray(out[k], dtype=dtype) for k in keep}
+
+
+def at_perturbation(geom: ATGeometry, seed: int, dtype=np.float64) -> dict:
+    return _rk_perturbation(AT_STATE + AT_ACTIVE, at_shapes(geom), seed, dtype)
+
+
+def sw_geometry(nz=7, ny=8, nx=9, **overrides) -> SWGeometry:
+    base = dict(nz=nz, ny=ny, nx=nx, cf1=1.6, cf2=-0.75, cf3=0.15,
+                half_rdx=0.5 / 3000.0, half_rdy=0.5 / 2500.0,
+                boundary_x=1, boundary_y=1)
+    base.update(overrides)
+    return SWGeometry(**base)
+
+
+def sw_trajectory(geom: SWGeometry, seed: int, dtype=np.float64) -> dict:
+    rng = np.random.default_rng(seed)
+    sh = sw_shapes(geom)
+    out = {}
+    for n in ("w", "u", "v"):
+        c, s = _RK_SCALES[n]
+        out[n] = c + s * rng.standard_normal(sh[n])
+    out["ht"] = 500.0 + 300.0 * rng.standard_normal(sh["ht"])
+    _msf(out, rng, sh, ("msft",), geom.mapped)
+    return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in out.items()}
+
+
+def sw_perturbation(geom: SWGeometry, seed: int, dtype=np.float64) -> dict:
+    return _rk_perturbation(("w", "u", "v"), sw_shapes(geom), seed, dtype)
+
+
+# One RK stage (woof.grad.wrfplus.stage.rk_stage_tl): periodic, msf 1, the
+# glue operators' draws under the stage's names, then small_step's,
+# calc_coef_w's and the substep's; calc_p_rho_phi's hydrostatic base
+# (phb, alb, pb; 3-D, as advance_uv's pb always is) and carried muts are
+# kept.
+def stage_geometry(nz=7, ny=8, nx=9, *, rk_step=2, nsub=2, top_lid=0,
+                   hypso=1) -> StageGeometry:
+    sub = substep_geometries(nz, ny, nx, top_lid=top_lid)
+    uvg = sub[0]
+    return StageGeometry(
+        prp=prp_geometry(nz, ny, nx, hypso=hypso),
+        rsp=rsp_geometry(nz, ny, nx, boundary_x=0, boundary_y=0,
+                         rdx=uvg.rdx, rdy=uvg.rdy),
+        at=at_geometry(nz, ny, nx),
+        ss=ss_geometry(nz, ny, nx, boundary_x=0, boundary_y=0, rk_step=rk_step),
+        cw=cw_geometry(nz, ny, nx, top_lid=top_lid),
+        substep=sub, nsub=nsub)
+
+
+def _aliased(d, alias):
+    return {alias.get(n, n): v for n, v in d.items()}
+
+
+def stage_trajectory(geom: StageGeometry, seed: int, dtype=np.float64, *,
+                     hybrid: bool = False) -> dict:
+    prp = _aliased(prp_trajectory(geom.prp, seed + 3, dtype, hybrid=hybrid),
+                   PRP_ALIAS)
+    out = dict(prp)
+    out.update(_aliased(rsp_trajectory(geom.rsp, seed + 4, dtype, hybrid=hybrid),
+                        RSP_ALIAS))
+    out.update(_aliased(at_trajectory(geom.at, seed + 5, dtype, hybrid=hybrid),
+                        AT_ALIAS))
+    out.update(ss_trajectory(geom.ss, seed + 6, dtype, hybrid=hybrid))
+    out.update(cw_trajectory(geom.cw, seed + 7, dtype, hybrid=hybrid))
+    out.update(substep_trajectory(geom.substep, seed, dtype, hybrid=hybrid))
+    for n in ("phb", "alb", "pb", "muts", "c3h", "c4h", "c3f", "c4f"):
+        out[n] = prp[n]
+    out["dnw"] = np.ascontiguousarray(1.0 / out["rdnw"], dtype=dtype)
+    return out
+
+
+def stage_active(geom: StageGeometry) -> tuple:
+    """Every name one stage reads or writes that is perturbed."""
+    names = (tuple(PRP_ALIAS.get(n, n) for n in PRP_STATE + PRP_ACTIVE)
+             + tuple(RSP_ALIAS.get(n, n) for n in RSP_STATE + RSP_ACTIVE)
+             + AT_STATE + AT_ACTIVE + SI_STATE + SI_ACTIVE + CW_STATE
+             + CW_ACTIVE + substep_active(geom.substep) + SF_STATE + SF_ACTIVE)
+    return tuple(dict.fromkeys(names))
+
+
+def stage_perturbation(geom: StageGeometry, seed: int, dtype=np.float64) -> dict:
+    out = _aliased(prp_perturbation(geom.prp, seed + 3, dtype), PRP_ALIAS)
+    out.update(_aliased(rsp_perturbation(geom.rsp, seed + 4, dtype), RSP_ALIAS))
+    out.update(at_perturbation(geom.at, seed + 5, dtype))
+    out.update(ss_perturbation(geom.ss, seed + 6, dtype))
+    out.update(cw_perturbation(geom.cw, seed + 7, dtype))
+    out.update(substep_perturbation(geom.substep, seed, dtype))
+    return {n: out[n] for n in stage_active(geom)}

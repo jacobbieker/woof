@@ -111,8 +111,8 @@ def _check(geom, named, shapes=None, min_nz: int = 3) -> None:
     if geom.nz < 1:
         raise ValueError("nz must be >= 1")
     if geom.nz < min_nz:
-        raise ValueError("advance_uv/advance_w need nz >= 3 (they read "
-                         "u/v levels 0-2)")
+        raise ValueError(f"nz must be >= {min_nz} here (advance_uv, "
+                         "advance_w and set_w_surface read u/v levels 0-2)")
     shapes = uv_shapes(geom) if shapes is None else shapes
     seen = {}
     for label, name, a in named:

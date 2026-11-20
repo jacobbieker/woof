@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -781,9 +781,202 @@ def small_step(exe: str, runner: list[str], seed: int = 20261123) -> dict:
     return out
 
 
+#: rk_stage: one geometry per case for the four glue operators; WRFPLUS
+#: has no hybrid coordinate (c1 = 1, c2 = 0) and a 3-D base.
+RK_CASES = {
+    "clamped_h1": dict(nz=7, ny=5, nx=6, boundary_x=1, boundary_y=1, has_msf=0,
+                       hypso=1, carried=1),
+    "periodic_msf_h2": dict(nz=12, ny=4, nx=5, boundary_x=0, boundary_y=0,
+                            has_msf=1, hypso=2, carried=1),
+    "small_mixed": dict(nz=3, ny=2, nx=3, boundary_x=0, boundary_y=1, has_msf=1,
+                        hypso=1, carried=0),
+    "mixed_h2_formed": dict(nz=9, ny=3, nx=4, boundary_x=1, boundary_y=0,
+                            has_msf=0, hypso=2, carried=0),
+}
+RK_DX, RK_DY = 3000.0, 2500.0
+AT_NAMES = ("ru", "rv", "rw", "rph", "rth")
+
+
+def _rk_geometries(c):
+    nz, ny, nx = c["nz"], c["ny"], c["nx"]
+    bx, by, msf = c["boundary_x"], c["boundary_y"], c["has_msf"]
+    return {
+        "prp": cases.prp_geometry(nz, ny, nx, hypso=c["hypso"], carried=c["carried"]),
+        "rsp": cases.rsp_geometry(nz, ny, nx, has_msf=msf, boundary_x=bx,
+                                  boundary_y=by, rdx=1.0 / RK_DX, rdy=1.0 / RK_DY),
+        "at": cases.at_geometry(nz, ny, nx, has_msf=msf),
+        "sw": cases.sw_geometry(nz, ny, nx, mapped=msf, boundary_x=bx,
+                                boundary_y=by, half_rdx=0.5 / RK_DX,
+                                half_rdy=0.5 / RK_DY),
+    }
+
+
+def _rk_at_factor(n, tr):
+    """WRF's held tendf is woof's times the map factor woof divided by
+    (u/v faces: rk_step_prep's msfu and msfv_inv of the same case)."""
+    if n == "ru":
+        return tr["rsp"]["msfu"]
+    if n == "rv":
+        return 1.0 / tr["rsp"]["msfv"]
+    return tr["at"]["msft"]
+
+
+def _rk_record(c, G, tr, pe, sd):
+    nz, ny, nx = c["nz"], c["ny"], c["nx"]
+    L = Layout(nz, ny, nx)
+    sg = G["rsp"]                       # boundary flags for the halos
+    halo = lambda m: _ss_halo(sg, L, m)  # noqa: E731
+    head = np.array([nx, ny, nz, c["hypso"], 1 - c["boundary_x"],
+                     1 - c["boundary_y"]], dtype=np.int32)
+    swg = G["sw"]
+    reals = np.array([1.0 / RK_DX, 1.0 / RK_DY, G["prp"].p_top, swg.cf1, swg.cf2,
+                      swg.cf3])
+    blob = head.tobytes() + reals.astype("<f8").tobytes()
+    pad = lambda v: np.concatenate([v, np.zeros(nz + 1 - v.size)])  # noqa: E731
+    r, q, a, w = tr["rsp"], tr["prp"], tr["at"], tr["sw"]
+    for v in (pad(r["dnw"]), pad(q["rdnw"]), pad(q["c3h"]), q["c3f"]):
+        blob += np.asarray(v, dtype="<f8").tobytes()
+    a3, a2 = [], []
+    # rk_step_prep
+    rp, rs = pe["rsp"], sd["rsp"]
+    a3 = [r["u"], rp["u"], r["v"], rp["v"], rs["ru"], rs["rv"], rs["ww"]]
+    a2 = [halo(r["mup"]), halo(rp["mup"]), halo(r["mub"]), L.w2(r["msfu"]),
+          L.w2(r["msfv"]), L.w2(r["msft"])]
+    blob += _rk_pack(L, a3, a2)
+    # calc_p_rho_phi
+    qp, qs = pe["prp"], sd["prp"]
+    if c["carried"]:
+        muts, g_muts = q["muts"], qp["muts"]
+    else:
+        muts, g_muts = q["mub"] + q["mup"], qp["mup"]
+    a3 = [q["thp"], qp["thp"], q["php"], qp["php"], q["phb"], q["alb"], q["pb"],
+          qs["al"] + qs["alt"], qs["p"] + qs["p_pp"]]
+    a2 = [L.w2(q["mup"]), L.w2(qp["mup"]), L.w2(muts), L.w2(g_muts)]
+    blob += _rk_pack(L, a3, a2)
+    # rk_addtend_dry (rk_step 2)
+    ap, as_ = pe["at"], sd["at"]
+    a3 = [a[n + "_t"] for n in AT_NAMES] + [ap[n + "_t"] for n in AT_NAMES]
+    a3 += [a[n + "_tf"] * _rk_at_factor(n, tr) for n in AT_NAMES]
+    a3 += [ap[n + "_tf"] * _rk_at_factor(n, tr) for n in AT_NAMES]
+    a3 += [a["h_diabatic"], ap["h_diabatic"]] + [as_[n + "_t"] for n in AT_NAMES]
+    a2 = [L.w2(a["rmu_t"]), L.w2(ap["rmu_t"]), L.w2(a["rmu_tf"]), L.w2(ap["rmu_tf"]),
+          L.w2(as_["rmu_t"]), L.w2(a["mub"] + a["mup"]), L.w2(ap["mup"]),
+          L.w2(r["msfu"]), L.w2(r["msfv"]), L.w2(a["msft"])]
+    blob += _rk_pack(L, a3, a2)
+    # set_w_surface
+    wp, ws = pe["sw"], sd["sw"]
+    a3 = [w["w"], wp["w"], w["u"], wp["u"], w["v"], wp["v"], ws["w"]]
+    a2 = [halo(w["ht"]), L.w2(w["msft"])]
+    blob += _rk_pack(L, a3, a2)
+    return blob, L
+
+
+def _rk_pack(L, a3, a2):
+    blob = b""
+    for x in a3:
+        blob += L.w3(x).astype("<f8").tobytes(order="F")
+    for x in a2:
+        blob += np.asarray(x, dtype="<f8").tobytes(order="F")
+    return blob
+
+
+def _rk_expected(c, G, out, L, tr):
+    """WRFPLUS outputs mapped to woof names: <op>/<tl_|tl_d_|ad_>name.
+    The halo adjoints of mu fold onto woof's neighbours; WRF's p and al
+    adjoints stand for woof's p + p_pp and al + alt."""
+    n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+    vals = np.frombuffer(out, dtype="<f8")
+    off = [0]
+
+    def take(n, s):
+        x = vals[off[0]:off[0] + n].reshape(s, order="F")
+        off[0] += n
+        return x
+
+    sh = {op: f(G[op]) for op, f in (("rsp", cases.rsp_shapes),
+                                     ("prp", cases.prp_shapes),
+                                     ("at", cases.at_shapes),
+                                     ("sw", cases.sw_shapes))}
+    t3 = lambda op, n: L.from3(take(n3, L.s3), sh[op][n])  # noqa: E731
+    r2 = lambda: take(n2, L.s2)  # noqa: E731
+    e = {}
+    for n in ("ru", "rv", "ww"):
+        e["rsp/tl_" + n] = t3("rsp", n)
+        e["rsp/tl_d_" + n] = t3("rsp", n)
+    for n in ("u", "v", "ru", "rv", "ww"):
+        e["rsp/ad_" + n] = t3("rsp", n)
+    e["rsp/ad_mup"] = _ss_fold(G["rsp"], r2())
+    al, gal, p, gp = (t3("prp", "al") for _ in range(4))
+    e["prp/tl_al"], e["prp/tl_d_al"], e["prp/tl_d_alt"] = al, gal, gal
+    e["prp/tl_p_pp"], e["prp/tl_d_p_pp"], e["prp/tl_d_p"] = p, gp, gp
+    e["prp/ad_thp"] = t3("prp", "thp")
+    e["prp/ad_php"] = t3("prp", "php")
+    sal, sp = t3("prp", "al"), t3("prp", "p")
+    for n, v in (("al", sal), ("alt", sal), ("p", sp), ("p_pp", sp)):
+        e["prp/ad_" + n] = v
+    a_mu, a_muts = L.from2(r2(), (L.ny, L.nx)), L.from2(r2(), (L.ny, L.nx))
+    if c["carried"]:
+        e["prp/ad_mup"], e["prp/ad_muts"] = a_mu, a_muts
+    else:
+        e["prp/ad_mup"], e["prp/ad_muts"] = a_mu + a_muts, np.zeros_like(a_mu)
+    for n in AT_NAMES:
+        e[f"at/tl_{n}_t"] = t3("at", n + "_t")
+        e[f"at/tl_d_{n}_t"] = t3("at", n + "_t")
+    e["at/tl_rmu_t"] = L.from2(r2(), (L.ny, L.nx))
+    e["at/tl_d_rmu_t"] = L.from2(r2(), (L.ny, L.nx))
+    for n in AT_NAMES:
+        e[f"at/ad_{n}_tf"] = t3("at", n + "_tf") * _rk_at_factor(n, tr)
+    e["at/ad_h_diabatic"] = t3("at", "h_diabatic")
+    for n in AT_NAMES:
+        e[f"at/ad_{n}_t"] = t3("at", n + "_t")
+    e["at/ad_rmu_tf"] = L.from2(r2(), (L.ny, L.nx))
+    e["at/ad_rmu_t"] = L.from2(r2(), (L.ny, L.nx))
+    e["at/ad_mup"] = L.from2(r2(), (L.ny, L.nx))
+    e["sw/tl_w"] = t3("sw", "w")
+    e["sw/tl_d_w"] = t3("sw", "w")
+    for n in ("u", "v", "w"):
+        e["sw/ad_" + n] = t3("sw", n)
+    assert off[0] == vals.size, (off[0], vals.size)
+    return e
+
+
+def rk_stage(exe: str, runner: list[str], seed: int = 20261124) -> dict:
+    out = {}
+    for name, c in RK_CASES.items():
+        G = _rk_geometries(c)
+        tr = {op: getattr(cases, op + "_trajectory")(G[op], seed + 10 * k)
+              for k, op in enumerate(G)}
+        pe = {op: getattr(cases, op + "_perturbation")(G[op], seed + 10 * k + 1)
+              for k, op in enumerate(G)}
+        sd = {op: getattr(cases, op + "_perturbation")(G[op], seed + 10 * k + 2)
+              for k, op in enumerate(G)}
+        blob, L = _rk_record(c, G, tr, pe, sd)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _rk_expected(c, G, result, L, tr)
+        prefix = f"{name}/"
+        out[prefix + "case"] = np.array(json.dumps(c))
+        for op in G:
+            out[prefix + op + "/geometry"] = np.array(
+                json.dumps(dataclasses.asdict(G[op])))
+            for k, v in tr[op].items():
+                out[prefix + op + "/traj/" + k] = v
+            for k, v in pe[op].items():
+                out[prefix + op + "/pert/" + k] = v
+            for k, v in sd[op].items():
+                out[prefix + op + "/seed/" + k] = v
+        for k, v in exp.items():
+            op, rest = k.split("/", 1)
+            out[prefix + op + "/wrfplus/" + rest] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
-            "small_step": small_step}
+            "small_step": small_step, "rk_stage": rk_stage}
 
 
 def main(argv=None) -> int:

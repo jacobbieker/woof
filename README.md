@@ -947,9 +947,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   with map factors. `small_step_prep` with `calc_p_rho` and
   `small_step_finish` (woof's `small_step_init_*`/`_finish_*`) match
   WRFPLUS within the oracle test's 1e-12, and a chained test checks whole acoustic
-  substeps. The binary32 adjoint costs 3.3-5.0x the forward kernel; the
-  measured step projection (4.2-4.8x) is in the design note. The
-  forecast path does not import any of it.
+  substeps. The RK-stage glue (`calc_p_rho_phi`, `rk_step_prep`'s
+  `couple_momentum` and `calc_ww_cp`, `rk_addtend_dry`, `set_w_surface`)
+  matches WRFPLUS within 1e-12 and, in strict mode
+  (`GPUWM_WRF_EXACT=1`), the primal word for word. A
+  chained test runs one whole RK stage with the big-step tendencies held.
+  The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels and
+  0.85-3.2x the glue; the measured step projection (4.3-4.5x, with flux_div measured by a prototype) is in the
+  design note. The forecast path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
