@@ -18,7 +18,7 @@ cadence and a held PBL cadence:
 * E4: the coupled TKE (and scalar) rate bank is on the restart manifest
   (``driver/pbl_tendencies/extra_scalars/*``); a restore continues bit for
   bit, and at a held cadence (restored in the middle of a hold) zeroing the
-  bank changes the next step, so the bank is load-bearing.
+  bank changes the next step, so the bank is required.
 """
 
 from __future__ import annotations
@@ -210,7 +210,7 @@ def test_rate_bank_restarts_bit_for_bit(pbl_seconds):
 
     if pbl_seconds == DT:
         return
-    # The bank is load-bearing: the step after the restart is a held step,
+    # The bank is required: the step after the restart is a held step,
     # and a payload without the held TKE rate resumes differently.
     assert not frames[2]["pbl_ran"]
     dropped = dict(payload, arrays=dict(payload["arrays"]))

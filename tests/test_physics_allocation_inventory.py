@@ -1103,9 +1103,15 @@ _PHYSICS_ALLOCATION_INVENTORY = {
     # ``_run_columns480`` is the same oracle-test entry for the explicit
     # WRF 4.8 canopy generation (urban_ucm_generation = "wrf_480"): one
     # status word per test column, never the forecast path.
+    # ``_morph_table`` is one 12-word pointer table per urban state, built
+    # once at init (the NUDAPT arm's planes, or a placeholder the kernel
+    # never reads); its two width planes, when a column carries MH_URB2D
+    # > 0, are priced in urban_array_shapes.  ``run_columns``' third site
+    # is the same placeholder for the oracle-test entry.
     'woof/core/urban_ucm.py': {
+        '_morph_table': 1,
         '_status_word': 1,
-        'run_columns': 2,
+        'run_columns': 3,
         '_run_columns480': 1,
     },
     'woof/core/ysu.py': {

@@ -2,8 +2,8 @@
 
 The expansion (zero fill plus a scatter of the boundary support) is the same
 for every stage of one interval; ``start`` and ``advance`` drop the held
-expansions.  WOOF_HEX_LBC_TEND_CACHE_MB caps the bytes held (0, the default,
-expands on every call).
+expansions.  WOOF_HEX_LBC_TEND_CACHE_MB caps the bytes held (256 MiB by
+default; 0 expands on every call).
 """
 
 import numpy as np
@@ -71,6 +71,10 @@ def test_cap_bounds_what_is_held(cp):
 def test_cap_switch(monkeypatch):
     from woof.hex.cuda_regional_forecast_v841 import _tend_cache_bytes
     monkeypatch.delenv("WOOF_HEX_LBC_TEND_CACHE_MB", raising=False)
+    assert _tend_cache_bytes() == 256 * 2**20
+    monkeypatch.setenv("WOOF_HEX_LBC_TEND_CACHE_MB", " ")
+    assert _tend_cache_bytes() == 256 * 2**20
+    monkeypatch.setenv("WOOF_HEX_LBC_TEND_CACHE_MB", "0")
     assert _tend_cache_bytes() == 0
     monkeypatch.setenv("WOOF_HEX_LBC_TEND_CACHE_MB", "64")
     assert _tend_cache_bytes() == 64 * 2**20

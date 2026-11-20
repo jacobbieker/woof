@@ -1721,6 +1721,12 @@ ROUTE_FORECAST_TOML_FIELDS: Mapping[str, str] = MappingProxyType({
         "woof/core/obstacles.py build_coefficients, the canopy drag"),
     "obstacle_wall_z0": (
         "woof/core/obstacles.py build_coefficients, the wall roughness"),
+    # THE GRIDDED URBAN MORPHOLOGY (woof's urban_param_file; WRF reads
+    # URB_PARAM out of met_em, which the route's namelist pair cannot name).
+    # Preparation reads no morphology: the physics init loads the file the
+    # bound TOML names.
+    "urban_param_file": (
+        "woof/core/urban_param.py, the URB_PARAM read at urban init"),
     # The moving nest's fixed-frame precipitation archive (tc/nest, 1.1.1):
     # a woof policy WRF has no namelist key for, so the pair cannot spell
     # it.  Preparation-inert (prepared_cache PREPARATION_INERT_RUN_FIELDS);

@@ -843,8 +843,22 @@ class RegionalContract:
 #: launch once per contiguous run of driven species; with no supplied chemistry rows the one run is
 #: (0, 0, driven), the launches as they were). Equality on the card, not assumed: see the PR for the pb runs.
 #: Re-derived by tools/repin_source_tables.py; not a new mint.
+#: (42) 2026-11-19: since (41), four members moved, all host-side Python with no CUDA source string in this set
+#: edited: cuda_backend/aot.py (cache_identity); cuda_driver.py and cuda_regional_forecast_v841.py (step-path
+#: outputs as scratch, #614; the LBC tendency cache on by default, #640; the opt-in w_damping (#420), inflow
+#: perturbation (#428) and adaptive readmission hooks); cuda_regional_v841.py. Card evidence is in those PRs
+#: (#614 0xFF poison vs ordinary on pb, #640 byte-identical on CUDA and Metal). cuda_regional_forecast_v841's
+#: _regional_edge_values now launches transport_edge_values_regional_hoist_v841 by default (#530, words identical
+#: fast and strict on both backends); that kernel's text is in cuda_regional_hoist_v841.py, which is NOT a member
+#: of this set, so an edit to it does not move this digest (open item for the regional owner). Re-derived by
+#: tools/repin_source_tables.py; not a new mint.
+#: (43) 2026-11-20 (perf/rrfs-recover-fold): cuda_driver.py moves the recovered candidate's specified-zone w
+#: zeroing into a method (_zero_recovered_speczone_w) the RRFS driver overrides, so the RRFS driver drops its copy
+#: of _recover_candidate. Host routing only, no CUDA source string changed; measured equal: Alps hex VR 1 h on pb,
+#: 131 history and 109 diag variables at 0 differing bytes against the base, twice each. Re-derived by
+#: tools/repin_source_tables.py; not a new mint.
 MINTED_KERNEL_SET_SHA256 = (
-    "25e3cd3b1ab1503681c14a095350feb0274eb2b397efc2c3c968173d689545a8"
+    "4d75f4a3a80a69d4e53b9fe5c95dfb68429e02e6a60da4c6a5d20d3a3f86e3ce"
 )
 
 _DRY_MINT_CAVEAT = (

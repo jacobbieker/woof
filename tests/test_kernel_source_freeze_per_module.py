@@ -161,6 +161,12 @@ MP28_ACCUMULATOR_REWORK = "lane/cut286-mp28-g3 (2.8.6)"
 # Compiler request strings: batch007-compiled-pin-preview-review.json.
 # Numerical qualification remains in the lane and integration gates.
 BASELINE_PINNED: dict[str, str] = {
+    # WRF 4.7.1 RRTMG-K (ra_lw/ra_sw_physics = 14, #601 2cac082e1): the
+    # three units as they merged, bitwise to compiled WRF on the oracle
+    # columns; pinned here so an edit is a reviewed re-pin, not a silent one.
+    "rrtmgk_lw": "887e276ea96ee776f0a32a70e38e76ab1bba4e7bac70a4ea4e992dfdfb1b1ecf",
+    "rrtmgk_prep": "2df3ca5b115cc58d9a68bfb914321db666c54d23a483838957ac79f75999b5b6",
+    "rrtmgk_sw": "a56b6b3b2254967ca4a767dd99766df1c7bce186b35bc9a69fd3031ee7574ab0",
     "gbmpbl": "20fb754c8290e50e8962e2be2786956b7b3ae3fdb0e875860854c8b979811a57",
     # HRRR initial helper: all 3456 native output words, both selectors.
     "gsd_initial_reflectivity": '9f9af95b259d978647dca1992f2b14e4bafaea5c781d269e53dca93fbb2a3419',
@@ -1032,8 +1038,15 @@ BASELINE_PINNED: dict[str, str] = {
     # Reference comments now record the original WRF v4.6.1 authority and
     # shared native twin. No executable statement changed; both oracles
     # retain exact float32 output words. Previously 30436e47.
+    # Moved on buildings2-urbparam 2026-11-19: the NUDAPT gridded-morphology
+    # arm (module_sf_urban.F:649-788) is transcribed behind a nudapt flag
+    # and MH_URB2D > 0 (urban_param_file); bitwise against WRF v4.7.1 on
+    # 2,688 column steps (tests/test_urban_ucm_nudapt_parity.py).  Without
+    # a file the arm is never entered: every existing ucm oracle stays
+    # bitwise and tests/test_urban_param_runs.py holds the run byte-identical
+    # under fast/strict and WRF_EXACT 0/1.  Previously ee5bb8e4.
     "urban_ucm":
-        "ee5bb8e48b297b0d5304047b7d764103a5c22bc1fb307df13670c122c39e588b",
+        "be7d1058e4578338a46713e3725862c4b8c82ccf617857d0820d9832b86431f7",
     # a28017016 feat(urban-bep): MYJURB (MYJ under BEP/BEP+BEM), word-identical
     # to WRF v4.7.1 (tests/test_myjurb_wrf471_parity.py)
     # Re-pinned for A146 on development branch: the flag_bep lower
@@ -1557,7 +1570,7 @@ PINNED_HEADERS = {
 
     "urban_ucm480_support.cuh": "6b5db2885a7e00d5c8ec65f7e3857efc9cf30c2264c9e5512020373e891089d6",
     "urban_ucm480.cuh": "bcb062c9ad2854e54ae2205ad898f26aa6153a8144729491577a631ebcc5cfaa",
-    "urban_ucm.cu": "ee5bb8e48b297b0d5304047b7d764103a5c22bc1fb307df13670c122c39e588b",
+    "urban_ucm.cu": "be7d1058e4578338a46713e3725862c4b8c82ccf617857d0820d9832b86431f7",
     # Lake lower bounds, REAL kinds and division rounding are part of the
     # column contract; test_lake_contract regenerates the WRF statements.
     # ABS sign clearing includes negative zero, subnormals and signed NaNs;
@@ -1971,6 +1984,10 @@ def test_mosaic_ucm_composed_source_is_pinned():
     # WRF 4.8 water balance and the inherited source-scoped no-FTZ loader.
     # Legacy full-field hashes match the prior kernel; the new store terms
     # match the release Fortran oracle. Other WRF 4.8 physics is outside it.
+    # Moved with urban_ucm.cu's NUDAPT arm (buildings2-urbparam): the mosaic
+    # tile calls the ucm_urban wrapper, which never enters the arm, and the
+    # configuration refuses urban_param_file with mosaic.  Previously
+    # d04c1a03.
     from woof.core.noah_mosaic import mosaic_ucm_source
     assert hashlib.sha256(mosaic_ucm_source().encode()).hexdigest() == (
-        'd04c1a03a496be7ac829c36d194aa29016824c2c453ccc2fd9fa0aaa04db9bbd')
+        'ebf5a3d14b34e8d8a1f40245033db71dda9733fb385e926fdf27fc45480fc7df')

@@ -138,6 +138,7 @@ woof = [
     "ocean/*.cu",
     "timeline/*.json",
     "hydro/*.cu",
+    "da/var/kernels/*.cu",
     "hydro/*.cuh",
     "hydro/PET-LICENSE",
     "hydro/PET-TERMS.md",
@@ -189,6 +190,8 @@ woof = [
 "woof.hex.mpas_seaice" = ["data/*.json", "*.cu"]
 "woof.hex.mpas_ocean" = ["data/*.json", "*.cu"]
 "woof.hex.mpas_ice" = ["data/*.json", "*.cu"]
+# The opt-in CRTM builder compiles this shim against a user-supplied CC0 CRTM tree (woof/rtm/crtm_build.py)
+"woof.rtm" = ["*.f90"]
 tools = ["prepare_hrrr_*.sh", "hydro_world/data/sources.v1.json", "hydro_world/data/recipes.v1.json",
          "hydro_world_params/data/params.v1.json"]
 tilestream = ["output-scaling.json"]

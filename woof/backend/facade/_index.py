@@ -70,8 +70,14 @@ def _advanced_key(key):
                 out.extend(mx.array(i.astype(np.int64)) for i in np.nonzero(k))
                 continue
             out.append(mx.array(k.astype(np.int64)))
-        elif isinstance(k, list):
-            out.append(mx.array(np.asarray(k, dtype=np.int64)))
+        elif isinstance(k, (list, tuple)):
+            # a sequence inside a key indexes like a list: a[:, (0, -1)];
+            # a boolean one is a mask, as an np.ndarray mask is above
+            host = np.asarray(k)
+            if host.dtype == np.bool_:
+                out.extend(mx.array(i.astype(np.int64)) for i in np.nonzero(host))
+                continue
+            out.append(mx.array(host.astype(np.int64)))
         else:
             out.append(k)
     return tuple(out) if isinstance(key, tuple) or len(out) != 1 else out[0]

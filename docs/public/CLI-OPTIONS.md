@@ -2450,6 +2450,34 @@ Takes no options of its own.
 | `--timeout S` | network timeout in seconds (default 120) |
 | `--valid-time ISO8601` | the valid time to match, with its zone (2026-10-05T12:00Z). Required unless --list-stations |
 
+## `woof obs geo`
+
+Takes no options of its own.
+
+## `woof obs geo fetch`
+
+| option | what it does |
+|---|---|
+| `--bbox` | west,south,east,north in degrees (west > east crosses 180); default the full disc |
+| `--cache` | cache directory (default $WOOF_GEO_CACHE or ~/.woof/cache/geo) |
+| `--channels` | comma-separated ABI channels (C08 or 8) or band wavelengths (default C08,C09,C10,C14) |
+| `--refresh` | re-read even when the cache holds the subset |
+| `--root` | store root: s3://us-west-2.opendata.source.coop/bkr/geo (default) or a local mirror ($WOOF_GEO_ROOT) |
+| `--satellite {16,17,18,19}` | GOES satellite number |
+| `--summary-json` | write the scene summary and provenance here |
+| `--time` | UTC time with offset, e.g. 2025-06-01T18:00Z |
+| `--tolerance-minutes` | nearest scan accepted within this many minutes (default 5) |
+
+## `woof obs geo list`
+
+| option | what it does |
+|---|---|
+| `--channel` | ABI channel for --satellite (default 8) |
+| `--coverage` | open each store and print its readable snapshot and time coverage (slow) |
+| `--root` | store root (as for fetch) |
+| `--satellite {16,17,18,19}` | only this GOES satellite's segments of --channel |
+| `--subdir` | sub-prefix to list (default virtualized; '' = top level) |
+
 ## `woof obs glm`
 
 | argument | what it does |
@@ -2580,6 +2608,26 @@ Takes no options of its own.
 | `ARGS ...` | arguments passed to the instrument's binary unchanged, --help included; woof's own flags must come before the instrument name |
 
 Takes no options of its own.
+
+## `woof obs satweave`
+
+Takes no options of its own.
+
+## `woof obs satweave fetch`
+
+| option | what it does |
+|---|---|
+| `--bands` | comma-separated wavelengths or names (default 6200,6900,7330,11200) |
+| `--bbox` | west,south,east,north in degrees (west > east crosses 180); default the globe |
+| `--cache` | cache directory (default $WOOF_SATWEAVE_CACHE or ~/.woof/cache/satweave) |
+| `--end` | last time of a span (inclusive); every step from --time |
+| `--every-minutes` | span step in minutes (default the store's own: 30 or 60) |
+| `--nearest` | round --time to the nearest published step instead of refusing |
+| `--no-identify` | do not read 6200/6900 nm to attribute satellites (geometry only) |
+| `--refresh` | re-read even when the cache holds the subset |
+| `--root` | store root: an https:// or gs:// URL or a directory (default $WOOF_SATWEAVE_ROOT or https://storage.googleapis.com/satweave_1) |
+| `--summary-json` | write every scene's summary here |
+| `--time` | UTC time with offset, e.g. 2026-11-18T12:00Z (archive: :00/:30; 2026 on: hourly) |
 
 ## `woof obs scorecard`
 

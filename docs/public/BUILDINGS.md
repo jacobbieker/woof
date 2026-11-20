@@ -29,9 +29,66 @@ nothing runs unless you ask for it.
 2 flow along +x+y, 3 east-west flow, 4 flow along +x-y) and 118-132
 `HI_URB2D`. Every other index is zero. A raster carries no
 building identity, so `MH_URB2D` is the plan-area-weighted mean, the same as
-`HGT_URB2D`; NUDAPT's index 92 is a per-building mean. The fork's urban
-schemes do not read `URB_PARAM` yet (they use the URBPARM table's
-morphology); that ingest is a later change.
+`HGT_URB2D`; NUDAPT's index 92 is a per-building mean.
+
+## Using it in the urban schemes (`urban_param_file`)
+
+Set `urban_param_file` on a domain (with `sf_urban_physics` 1, 2 or 3) to
+a `woof-buildings.v1` product, a `geo_em` or a `met_em` on that domain's
+own mass grid. woof then does what WRF 4.7.1 does with `URB_PARAM`
+(`woof.core.urban_param`):
+
+- **The split** (`module_initialize_real.F:3189-3215`): LP, LB and HGT for
+  every option; MH, STDH and the four LF sectors for the single-layer UCM
+  (option 1); the 15 HI bins for BEP and BEP+BEM (options 2 and 3).
+- **urban_var_init's keep/zero rule** (`module_sf_urban.F:2788-2833`): an
+  urban column keeps the morphology when `HGT_URB2D > 0`; otherwise it is
+  zeroed and the column runs on the URBPARM table, as in WRF. Columns that
+  are not urban are zeroed.
+- **The SLUCM's NUDAPT arm** (`module_sf_urban.F:649-788`, where
+  `MH_URB2D > 0`): building and street widths from the gridded fractions,
+  the frontal-area sector chosen by the wind, Macdonald roughness and
+  displacement, and the sky-view factor. It is transcribed into the CUDA
+  and Metal kernel and matches a gfortran build of WRF's own routine bit for
+  bit (`tests/test_urban_ucm_nudapt_parity.py`).
+- **BEP and BEP+BEM** already carried WRF's gridded-morphology branches
+  (`param`, `icBEPHI_XY`). They now receive the file's LP/LB/HGT/HI.
+
+`FRC_URB2D`: a `geo_em`/`met_em` carries one, and it replaces the route's
+urban fraction after real.exe's fill (0 on an urban category becomes 0.9).
+The woof product has none, so the route's fraction is kept.
+
+Refused before any physics runs, with the reason named:
+
+- a grid that is not the domain's (shape, latitude/longitude and DX/DY
+  where the file carries them), or more than one time;
+- missing or non-finite values on an urban column with `HGT_URB2D > 0`
+  (a column whose HGT is masked is zeroed and runs on the table, as in WRF);
+- a file on which real.exe would reclassify a column to urban
+  (`FRC_URB2D >= 0.5` on a non-urban category). woof has already built the
+  land surface from the route's land use by then, so it cannot match this.
+  Run from a `wrfinput` that real.exe made, or give a file without
+  `FRC_URB2D`;
+- for option 1, morphology on which WRF's own NUDAPT arm goes non-finite:
+  `LP` outside (0, 1), an `LF` sector <= 0, or a negative `LB` or `STDH`;
+- `urban_ucm_generation = "wrf_480"` (that column has no NUDAPT arm),
+  `sf_surface_mosaic = 1` with option 1 (the mosaic urban tile calls the
+  column without the morphology), and `sf_urban_physics = 0`.
+
+**One deliberate difference from WRF.** WRF picks the LF sector from
+`ATAN2(U10, V10)` *before* `urban` writes U10/V10 (they are `INTENT(OUT)`),
+so it reads whatever the caller's variables held: in the Noah driver, the
+previous column's 10 m wind. That read is undefined, so woof uses the
+column's own lowest-level wind, `ATAN2(U1, V1)`. The oracle sets `U10 = U1`,
+`V10 = V1` before each call, so the comparison grades exactly that choice.
+The arm's `ELSEIF (SW.lt.0.0.or.BW.lt.0.0)` width branch
+(`module_sf_urban.F:693`) also reads two values before they are written.
+It assigns exactly what the `ELSE` assigns (the table's first widths), so
+WRF's result does not depend on that read, and woof folds the two arms
+into one.
+
+Without `urban_param_file` the run is byte-identical to before, in fast and
+strict numerics, on CUDA and Metal (`tests/test_urban_param_runs.py`).
 
 The file's attributes carry the sources used, their licences and their
 attribution strings, and a receipt of the filters and counts.

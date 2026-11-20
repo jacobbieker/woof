@@ -1758,8 +1758,17 @@ FROZEN_MODULE_DIGESTS = {
         # passes 162 of 162, and a 360 s legacy-RRTMG forecast with a 50 hPa
         # top (133x125x50, 18 UTC) writes byte-identical wrfout files with
         # either kernel.  Previously 44a83f0e/c9e02eea.
-        '43134d6d6d2be4b3e668c7ab92d5850f1f992a09812dd09c9536fce5d9ab791e',
-        '663d12d7556f379bdd0724bb4f018113450ce45666e13f3ec3220615409acd08'),
+        # Re-pinned 2026-11-19 (perf/spcvmc-running-vrtqdr): rsw_spcvmc_body
+        # hands rsw_vrtqdr_running the layer transmittances and that keeps
+        # the cumulative direct-beam products ptdbt, ztdn and prdnd in
+        # registers (the same multiplies on the same operands in the same
+        # order; the flux loop fused into the ztdn/prdnd loop).  rsw_vrtqdr
+        # itself is unchanged (RRTMG-K uses it).  Digests (synthetic inputs, seed
+        # 20261119) of every flux output match the previous kernel in fast, strict and
+        # GPUWM_WRF_EXACT, nlay 45 and 60, on pb CUDA and Mac Metal.
+        # Previously 43134d6d/663d12d7.
+        '502dfc9b15481742ff5d56a7730c372502904dd4abe37dd131a953e4a35f8122',
+        'fbbaebbf9c7a773228db9dbbf771a52a4eb9a3502e12b8bde7780139fda955f8'),
     'rrtmgp_cloud': (
         # Re-pinned for fused profile preparation, broadcasts, temperature casts and flux copies.
         # Exact-array gates and all five seeded digests match the base.

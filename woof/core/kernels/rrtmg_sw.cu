@@ -1679,6 +1679,83 @@ __device__ void rsw_vrtqdr(int klev, PA pref, PA prefd,
     }
 }
 
+// Level jk's fluxes: rsw_vrtqdr's last loop body, operands passed in.
+template <class PA>
+__device__ __forceinline__ void rsw_vrtqdr_flux(int jk, real tdn, real rdnd,
+                                                real tdbt, PA prup, PA prupd,
+                                                PA pfd_col, PA pfu_col)
+{
+    real zreflect = DV(1.0f, SU(1.0f, MU(rdnd, prupd[jk])));
+    pfu_col[jk] = MU(AD(MU(tdbt, prup[jk]),
+                        MU(SU(tdn, tdbt), prupd[jk])),
+                     zreflect);
+    pfd_col[jk] = AD(tdbt,
+        MU(AD(SU(tdn, tdbt),
+              MU(MU(tdbt, prup[jk]), rdnd)), zreflect));
+}
+
+// rsw_vrtqdr for rsw_spcvmc_body: the same statements in the same order,
+// with three profiles carried in registers instead of workspace.  ptdbt is
+// the cumulative product ptdbt[j+1] = pdbt[j] * ptdbt[j] (the layer pass
+// used to store it); both downward loops read it in ascending j, so a
+// running product rebuilds every value with the identical multiply.  The
+// flux loop is fused into the ztdn/prdnd loop: level jk's fluxes read only
+// ztdn[jk], prdnd[jk] (just formed) and prup/prupd[jk] (the upward loop's),
+// so neither ztdn nor prdnd is stored.  Each value is the same rounded
+// expression of the same operands as in rsw_vrtqdr.
+template <class PA>
+__device__ void rsw_vrtqdr_running(int klev, PA pref, PA prefd,
+                                   PA ptra, PA ptrad, PA pdbt,
+                                   PA prup, PA prupd,
+                                   PA pfd_col, PA pfu_col)
+{
+    real zreflect = DV(1.0f, SU(1.0f, MU(prefd[klev], prefd[klev - 1])));
+    prup[klev - 1] = AD(pref[klev - 1],
+        MU(MU(ptrad[klev - 1],
+              AD(MU(SU(ptra[klev - 1], pdbt[klev - 1]), prefd[klev]),
+                 MU(pdbt[klev - 1], pref[klev]))), zreflect));
+    prupd[klev - 1] = AD(prefd[klev - 1],
+        MU(MU(MU(ptrad[klev - 1], ptrad[klev - 1]), prefd[klev]), zreflect));
+
+    for (int jk = 1; jk < klev; ++jk) {
+        int ikp = klev + 1 - jk;
+        int ikx = ikp - 1;
+        zreflect = DV(1.0f, SU(1.0f, MU(prupd[ikp - 1], prefd[ikx - 1])));
+        prup[ikx - 1] = AD(pref[ikx - 1],
+            MU(MU(ptrad[ikx - 1],
+                  AD(MU(SU(ptra[ikx - 1], pdbt[ikx - 1]), prupd[ikp - 1]),
+                     MU(pdbt[ikx - 1], prup[ikp - 1]))), zreflect));
+        prupd[ikx - 1] = AD(prefd[ikx - 1],
+            MU(MU(MU(ptrad[ikx - 1], ptrad[ikx - 1]), prupd[ikp - 1]),
+               zreflect));
+    }
+
+    real tdbt = 1.0f;                       // ptdbt[0]
+    real tdn = 1.0f;                        // ztdn[0]
+    real rdnd = 0.0f;                       // prdnd[0]
+    rsw_vrtqdr_flux(0, tdn, rdnd, tdbt, prup, prupd, pfd_col, pfu_col);
+    tdbt = MU(pdbt[0], tdbt);               // ptdbt[1]
+    tdn = ptra[0];                          // ztdn[1]
+    rdnd = prefd[0];                        // prdnd[1]
+    rsw_vrtqdr_flux(1, tdn, rdnd, tdbt, prup, prupd, pfd_col, pfu_col);
+    for (int jk = 2; jk <= klev; ++jk) {
+        // tdbt is ptdbt[jk - 1]; tdn, rdnd are ztdn/prdnd[jk - 1]
+        zreflect = DV(1.0f, SU(1.0f, MU(prefd[jk - 1], rdnd)));
+        real tdn_next = AD(MU(tdbt, ptra[jk - 1]),
+            MU(MU(ptrad[jk - 1],
+                  AD(SU(tdn, tdbt),
+                     MU(MU(tdbt, pref[jk - 1]), rdnd))),
+               zreflect));
+        real rdnd_next = AD(prefd[jk - 1],
+            MU(MU(MU(ptrad[jk - 1], ptrad[jk - 1]), rdnd),
+               zreflect));
+        tdbt = MU(pdbt[jk - 1], tdbt);      // ptdbt[jk]
+        tdn = tdn_next;
+        rdnd = rdnd_next;
+        rsw_vrtqdr_flux(jk, tdn, rdnd, tdbt, prup, prupd, pfd_col, pfu_col);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // spcvmc_sw per-g-point pipeline: one thread per g-point.
 // Inputs are the same arrays the NumPy port takes.  Per-thread state
@@ -1731,7 +1808,12 @@ __device__ void rsw_spcvmc_body(int iw1, int nlayers,
     const real repclc = 1.0e-12f;
 
     const int n1 = nlayers + 1;
-    // Sixteen profiles survive the fused layer pass. Flags use registers.
+    // Twelve profiles survive the fused layer pass. Flags use registers;
+    // the cumulative direct-beam products and vrtqdr's downward ztdn/prdnd
+    // live in registers inside rsw_vrtqdr_running.  The workspace keeps
+    // RSW_SPCVMC_WK = 16 arrays per thread: the engine allocates it once for
+    // this body and rrtmgk_sw.cu's (woof/core/rrtmgk.py CudaSWK), which still
+    // carves all sixteen; this body touches the first twelve.
     const rsw_wk_t zrefc{wk + (size_t)0 * n1 * wks, wks};
     const rsw_wk_t zrefdc{wk + (size_t)1 * n1 * wks, wks};
     const rsw_wk_t ztrac{wk + (size_t)2 * n1 * wks, wks};
@@ -1741,13 +1823,9 @@ __device__ void rsw_spcvmc_body(int iw1, int nlayers,
     const rsw_wk_t ztra{wk + (size_t)6 * n1 * wks, wks};
     const rsw_wk_t ztrad{wk + (size_t)7 * n1 * wks, wks};
     const rsw_wk_t zdbtc{wk + (size_t)8 * n1 * wks, wks};
-    const rsw_wk_t ztdbtc{wk + (size_t)9 * n1 * wks, wks};
-    const rsw_wk_t zdbt{wk + (size_t)10 * n1 * wks, wks};
-    const rsw_wk_t ztdbt{wk + (size_t)11 * n1 * wks, wks};
-    const rsw_wk_t zrdnd{wk + (size_t)12 * n1 * wks, wks};
-    const rsw_wk_t zrup{wk + (size_t)13 * n1 * wks, wks};
-    const rsw_wk_t zrupd{wk + (size_t)14 * n1 * wks, wks};
-    const rsw_wk_t ztdn{wk + (size_t)15 * n1 * wks, wks};
+    const rsw_wk_t zdbt{wk + (size_t)9 * n1 * wks, wks};
+    const rsw_wk_t zrup{wk + (size_t)10 * n1 * wks, wks};
+    const rsw_wk_t zrupd{wk + (size_t)11 * n1 * wks, wks};
     // vrtqdr writes fluxes directly to the existing output slabs, using the
     // same final arithmetic statements. The scalar nodel products likewise
     // write their output levels as the ascending recurrence completes.
@@ -1763,13 +1841,11 @@ __device__ void rsw_spcvmc_body(int iw1, int nlayers,
     nodel_t[0] = ztdbt_nodel;
     zincflx[iw1] = MU(MU(adjflux[ibm - 1], sfluxzen[iw1]), prmu0);
 
-    ztdbtc[0] = 1.0f;
     zdbtc[klev] = 0.0f;
     ztrac[klev] = 0.0f;
     ztradc[klev] = 0.0f;
     zrefc[klev] = palbp[ibm - 1];
     zrefdc[klev] = palbd[ibm - 1];
-    ztdbt[0] = 1.0f;
     zdbt[klev] = 0.0f;
     ztra[klev] = 0.0f;
     ztrad[klev] = 0.0f;
@@ -1850,24 +1926,22 @@ __device__ void rsw_spcvmc_body(int iw1, int nlayers,
             real ze1 = DV(ztauc, prmu0);
             real zdbtmc = rsw_etbl(exp_tbl, ze1);
             zdbtc[J] = zdbtmc;
-            ztdbtc[J + 1] = MU(zdbtc[J], ztdbtc[J]);
 
             ze1 = DV(ztauo, prmu0);
             real zdbtmo = rsw_etbl(exp_tbl, ze1);
             zdbt[J] = AD(MU(zclear, zdbtmc), MU(zcloud, zdbtmo));
-            ztdbt[J + 1] = MU(zdbt[J], ztdbt[J]);
         }
     }
 
 
-    rsw_vrtqdr(klev, zrefc, zrefdc, ztrac, ztradc, zdbtc, zrdnd, zrup,
-               zrupd, ztdbtc, clear_fd, clear_fu, ztdn);
+    rsw_vrtqdr_running(klev, zrefc, zrefdc, ztrac, ztradc, zdbtc, zrup,
+                       zrupd, clear_fd, clear_fu);
     // The two vrtqdr calls share scratch, fully written before each read.
     // Restore the total surface values formerly held in separate clear scratch.
     zrup[klev] = palbp[ibm - 1];
     zrupd[klev] = palbd[ibm - 1];
-    rsw_vrtqdr(klev, zref, zrefd, ztra, ztrad, zdbt, zrdnd, zrup,
-               zrupd, ztdbt, total_fd, total_fu, ztdn);
+    rsw_vrtqdr_running(klev, zref, zrefd, ztra, ztrad, zdbt, zrup,
+                       zrupd, total_fd, total_fu);
 }
 
 extern "C" __global__

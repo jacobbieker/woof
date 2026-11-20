@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 453,
+**Which keys a `[[domain]]` table may override.** Exactly these 454,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -408,7 +408,7 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
     gf_deep_rain_evaporation_booking
     obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
-    obstacle_drag_coefficient  obstacle_wall_z0
+    obstacle_drag_coefficient  obstacle_wall_z0  urban_param_file
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
     radt_minutes  bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics
     ra_rrtmg_variant  wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat
@@ -1194,6 +1194,7 @@ namelist uses the Registry default for its WRF line when the key is omitted.
 | `urban_table_dir` | empty (bundled pinned tables) | `[shared]` directory of explicit URBPARM tables for the selected generation. Table hashes and packed coefficients bind restart identity; custom tables use the same parser and bounds checks. The first-level height admission reads the selected tables |
 | `sf_surface_mosaic`, `mosaic_cat` | 0, 3 | Noah land-use tiles; enabled only at 1, positive tile count; requires LANDUSEF; urban option 1 runs per tile; urban options 2 and 3 are refused as in WRF |
 | `mosaic_urban_canopy` | "dominant" | woof key, per domain: where mosaic runs urban option 1. "dominant" is WRF's rule (only cells whose dominant category is urban); "every_tile" also runs the town tiles of mostly rural cells at their own land-use weights, sharing the URBPARM urban fraction of the largest urban tile's type; needs `sf_surface_mosaic = 1` and `sf_urban_physics = 1` |
+| `urban_param_file` | "" (default, off) | woof key, per domain: a NetCDF on this domain's own mass grid carrying WPS's `URB_PARAM(132)` gridded urban morphology. This can be a `woof-buildings.v1` product, a `geo_em` or a `met_em`. The urban scheme reads it as WRF 4.7.1's real.exe and `urban_var_init` do: LP/LB/HGT (91, 95, 94) for all options, MH/STDH/LF (92, 93, 96-99) for option 1 (the SLUCM's NUDAPT arm, bitwise WRF), HI (118-132) for options 2 and 3. Urban columns with `HGT_URB2D <= 0` fall back to the URBPARM table. A file `FRC_URB2D` replaces the route's urban fraction after real.exe's 0.9 fill. A product without one keeps the route's. Refused: `sf_urban_physics = 0`, `urban_ucm_generation = "wrf_480"`, mosaic with option 1, another grid, non-finite values on urban columns with `HGT_URB2D > 0`, columns real.exe would reclassify to urban (`FRC_URB2D >= 0.5` on a non-urban category: not reproducible after the land surface is built), and option-1 morphology on which WRF's arm is non-finite. The NUDAPT sector uses the column's own `ATAN2(U1, V1)` where WRF reads an undefined `ATAN2(U10, V10)`. Bound into the restart identity by the file's sha256. See [BUILDINGS.md](BUILDINGS.md#using-it-in-the-urban-schemes-urban_param_file) |
 | `use_mp_re` | 1 | microphysics effective radii reach radiation per WRF's scheme table |
 | `o3input` | 2 | CAM climatological ozone (RRTMG spectra) |
 | `ghg_input` | 0 | analytic year-formula trace gases (no CAMtr reader) |
@@ -1517,7 +1518,7 @@ each one off, the run executes no new code. The design and the planned layers
 | `solar_tsi_opt` | `0` | `1` scales every shortwave output of each radiation call by `TSI(t) / reference`. Shortwave transfer is linear in the top-of-atmosphere flux, so this equals changing WRF's `SOLCON = 1370 * ECCFAC` for every shortwave scheme. |
 | `solar_tsi_source` | `""` | The TSI series. A CSV of `YYYY-MM-DD,W m-2` daily means, a NOAA CDR netCDF (`TSI`, `time` in days since 1610-01-01), several paths joined by `:`, or `"nrlssi2"`, which fetches the NOAA NRLSSI2 daily CDR files for the run's years into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`). Daily means sit at noon UTC and are interpolated linearly. A run time outside the series, or in a gap longer than a day, is refused. |
 | `solar_tsi_mode` | `"absolute"` | `"absolute"`: the reference is 1370 W m-2, so the measured TSI replaces WRF's constant. `"relative"`: the reference is 1360.8 W m-2 (the TIM cycle mean), which keeps WRF's calibration and adds only the variability. |
-| `solar_ssi_opt` | `0` | `1` moves RRTMG SW's source between its 14 bands with the day's solar spectrum: band b takes `[S_b(t)/TSI(t)] / [S_b/TSI over solar cycle 24]`, renormalised so the total is unchanged (`solar_tsi_opt` sets the total). The 200-263 nm band is about 2.5 % stronger in 2024 than the cycle mean. RRTMG (`ra_sw_physics = 4` with `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (`14`) only. |
+| `solar_ssi_opt` | `0` | `1` moves RRTMG SW's source between its 14 bands with the day's solar spectrum: band b takes `[S_b(t)/TSI(t)] / [S_b/TSI over solar cycle 24]`, renormalised so the total is unchanged (`solar_tsi_opt` sets the total). The 200-263 nm band is about 2.5 % stronger in 2024 than the cycle mean. RRTMG (`ra_sw_physics = 4` with `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (`14`) only. With RADM2 chemistry it also scales Fast-TUV's extraterrestrial flux in each of its 17 bins by `[S_i(t)/TSI(t)] / [S_i/TSI over cycle 24]` (not renormalised; see docs/spacewx.md), and with hex's MICM chemistry and `"photolysis": "tuvx"` it scales TUV-x's flux the same way on its 156 bins. |
 | `solar_ssi_source` | `""` | The spectral series: `"nrlssi2"` fetches the NOAA CDR daily SSI files (about 13 MB a year) for the run's years into the space-weather cache, or NOAA CDR SSI netCDF paths joined by `:`. Daily means sit at noon UTC and are interpolated linearly; a time outside the series or in a gap is refused. |
 | `spacewx_ionosphere_opt` | `0` | `1` adds the climatological ionosphere to every history frame: `IONO_TEC` (vertical TEC, 60-2000 km, TECU), `IONO_FOF2` and `IONO_FOE` (MHz), `IONO_HMF2` (km) and `IONO_NMF2` (m-3), on the domain's columns at the frame's valid time. It is a diagnostic: the atmosphere integrates identically. |
 | `spacewx_f107_source` | `""` | The F10.7 that drives it. `""` or `"gfz"` fetches GFZ's `Kp_ap_Ap_SN_F107_since_1932.txt` into the space-weather cache. A path reads a file in that format, and a number is a fixed flux in sfu. The value at the run's start is held for the whole run (persistence). |
@@ -1542,7 +1543,8 @@ forward.
 refused with any shortwave other than legacy RRTMG or RRTMG-K (RTE+RRTMGP's
 g-point source has its own bands), with `dfi_opt` (the filter's CUDA graph
 would freeze the first call's factor), with FARMS (`swint_opt = 2`, whose
-surface shortwave would not see the band shares) and on hex.
+surface shortwave would not see the band shares) and on hex's MPAS-native suites (hex's
+generic column seam takes it).
 
 The `spacewx_f107_*` and `spacewx_ionosphere_maps` keys are refused while
 `spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 1` is refused without a

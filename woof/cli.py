@@ -317,10 +317,19 @@ _VERSION_ALIAS = "--version"
 
 
 def _rewrite_version_alias(argv: list[str]) -> list[str]:
-    """``woof --version [...]`` -> ``woof version [...]``."""
+    """``woof --version [...]`` -> ``woof version [...]``; ``woof fetch satweave`` -> ``woof obs satweave fetch``;
+    ``woof fetch geo`` -> ``woof obs geo fetch``."""
 
     if argv and argv[0] == _VERSION_ALIAS:
         return ["version", *argv[1:]]
+    if argv[:2] == ["fetch", "satweave"]:
+        # SatWeave is an observation mosaic, not a model source, so its
+        # door is `woof obs satweave fetch`; `woof fetch` has no positional
+        # source, so this spelling cannot collide with a model fetch.
+        return ["obs", "satweave", "fetch", *argv[2:]]
+    if argv[:2] == ["fetch", "geo"]:
+        # The bkr/geo imager stores are observations too (woof/obs/geo_icechunk.py).
+        return ["obs", "geo", "fetch", *argv[2:]]
     return list(argv)
 
 
