@@ -50,6 +50,7 @@ DEFAULT_CONFIGS = {
     "config_specific_heat_sea_water": 3.996e3, "config_frazil_maximum_depth": 100.0,
     "config_frazil_sea_ice_reference_salinity": 4.0, "config_frazil_land_ice_reference_salinity": 0.0,
     "config_frazil_maximum_freezing_temperature": 0.0, "config_frazil_use_surface_pressure": True,
+    "config_density0": 1026.0,
 }
 #: the state's frazil fields, two time levels each (NAME and NAME@2)
 TWO_LEVEL = ("accumulatedFrazilIceMass", "accumulatedFrazilIceSalinity", "accumulatedLandIceFrazilMass")
@@ -116,7 +117,7 @@ def build_arrays(*, dt: float, mesh: dict, state: dict, tracers: dict, diagnosti
     nl = int(mesh["nVertLevels"])
     n_cells = int(mesh["nCellsArray"][1])
     group = tracers["activeTracers"]
-    rho_sw = real(configs["config_density0"])
+    rho_sw = real(_config(configs, "config_density0"))
     params = cp.asarray(np.array([
         _config(configs, "config_frazil_heat_of_fusion"), _config(configs, "config_frazil_ice_density"),
         _config(configs, "config_frazil_fractional_thickness_limit"), _config(configs, "config_frazil_maximum_depth"),

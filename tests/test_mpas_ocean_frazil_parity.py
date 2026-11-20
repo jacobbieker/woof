@@ -81,7 +81,11 @@ def test_fixture_covers_the_branches(precision):
                 assert (th[:solved][~mask] == 0).all()
         sp = out["forcing/frazilSurfacePressure"]
         if case["config"]["config_frazil_use_surface_pressure"]:
-            assert (sp[:solved] == case["pools"]["forcing"]["frazilSurfacePressure"][:solved]).sum() < solved
+            # the weight of the accumulated frazil, one rounded product per cell (numpy's is IEEE)
+            real = sp.dtype.type
+            want = state["state/accumulatedFrazilIceMass@2"][:solved] * real(9.80616)
+            assert oo.word_mismatches(sp[:solved], want) == 0
+            assert (sp[solved:] == case["pools"]["forcing"]["frazilSurfacePressure"][solved:]).all()
         else:
             assert (sp == case["pools"]["forcing"]["frazilSurfacePressure"]).all()
     assert halo >= 1 and skipped_warm >= 1
@@ -188,15 +192,28 @@ def test_a_mutated_kernel_is_caught(monkeypatch, precision, original, mutated, f
 @requires_gpu
 def test_the_tendencies_add_in_place(monkeypatch):
     """The thickness and tracer tendencies are added into what the tendency
-    arrays hold (the last terms of ocn_tend_thick and ocn_tend_tracer)."""
+    arrays hold (the last terms of ocn_tend_thick and ocn_tend_tracer): the
+    oracle's tendencies move from their inputs only where a frazil tendency
+    is nonzero (cells 1..nCellsArray(2), levels 1..maxLevelCell), and without
+    the adds the port leaves them as they came."""
     from woof.hex.mpas_ocean import frazil_v842
     monkeypatch.setattr(frazil_v842, "layer_thickness_tend", lambda **kw: None)
     monkeypatch.setattr(frazil_v842, "active_tracers_tend", lambda **kw: None)
-    case = oo.cases("r8")[0]
-    got = oo.run_gpu(case)
-    want = oo.load_fixture("r8")[case["name"]]
-    assert oo.word_mismatches(got["tend/layerThickness"], want["tend/layerThickness"]) > 0
-    assert oo.word_mismatches(got["tracersTend/activeTracersTend"], want["tracersTend/activeTracersTend"]) > 0
+    moved = 0
+    for case in oo.cases("r8"):
+        got = oo.run_gpu(case)
+        want = oo.load_fixture("r8")[case["name"]]
+        tend, given = want["tend/layerThickness"], case["pools"]["tend"]["layerThickness"]
+        solved = int(case["pools"]["mesh"]["nCellsArray"][1])
+        mlc = case["pools"]["mesh"]["maxLevelCell"]
+        reach = (np.arange(tend.shape[0])[:, None] < solved) & (np.arange(tend.shape[1])[None, :] < mlc[:, None])
+        changed = tend != given
+        assert not (changed & ~(reach & (want[TH] != 0))).any(), case["name"]
+        moved += int(changed.sum())
+        assert oo.word_mismatches(got["tend/layerThickness"], given) == 0
+        assert oo.word_mismatches(got["tracersTend/activeTracersTend"],
+                                  case["pools"]["tracersTend"]["activeTracersTend"]) == 0
+    assert moved > 0
 
 
 def _oracle_toolchain() -> tuple[str, Path] | None:
