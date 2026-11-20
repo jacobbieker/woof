@@ -112,13 +112,20 @@ VOCABULARY: dict[str, tuple[str, str]] = {
     "hfx": ("W m-2", "2d"), "qfx": ("kg m-2 s-1", "2d"), "lh": ("W m-2", "2d"),
     "ust": ("m s-1", "2d"), "znt": ("m", "2d"), "pblh": ("m", "2d"),
     "tsk": ("K", "2d"), "xland": ("1", "2d"), "psfc": ("Pa", "2d"),
+    "dx": ("m", "2d"),             # the cell's spacing, sqrt(areaCell): one model serves a variable mesh
+    "coszr": ("1", "2d"),          # cosine of the solar zenith angle at the last radiation call
+    "gsw": ("W m-2", "2d"),        # net shortwave at the ground (last radiation call)
+    "glw": ("W m-2", "2d"),        # downward longwave at the ground (last radiation call)
 }
+#: MPAS's Earth radius (m): a unit-sphere mesh's areaCell is scaled by it for dx.
+EARTH_RADIUS_M = 6371229.0
 #: Vocabulary names read from the physics session's pools: (pool, name).
 POOL_FIELDS: dict[str, tuple[str, str]] = {
     "p": ("diag", "pressure"), "u": ("diag", "uReconstructZonal"), "v": ("diag", "uReconstructMeridional"),
     "hfx": ("diag_physics", "hfx"), "qfx": ("diag_physics", "qfx"), "lh": ("diag_physics", "lh"),
     "ust": ("diag_physics", "ust"), "znt": ("diag_physics", "znt"), "pblh": ("diag_physics", "hpbl"),
     "tsk": ("sfc_input", "skintemp"), "xland": ("sfc_input", "xland"), "psfc": ("diag", "surface_pressure"),
+    "coszr": ("diag_physics", "coszr"), "gsw": ("diag_physics", "gsw"), "glw": ("diag_physics", "glw"),
 }
 OUTPUTS: dict[str, str] = {
     "dtheta": "K s-1", "dtheta_m": "K s-1",
@@ -222,7 +229,7 @@ class HexColumnSeat:
 
     def __init__(self, settings: NNSettings, *, cp, names, n_cells: int, n_levels: int, zgrid, zz=None,
                  bdy_mask=None, dt: float, mode: str = "correct", fields: Callable | None = None,
-                 resume: bool = False, tap=None):
+                 resume: bool = False, tap=None, area=None, sphere_radius=None):
         self.settings = settings
         self.cp = cp
         self.names = tuple(names)
@@ -275,6 +282,19 @@ class HexColumnSeat:
         self._z = cp.asarray(((z[:-1] + z[1:]) * 0.5 - z[0]).astype(f32))
         self._dz = cp.asarray((z[1:] - z[:-1]).astype(f32))
         self._hgt = cp.asarray(z[:1].astype(f32))
+        self._dx = None
+        if "dx" in self.input_names:
+            # Only a model that reads dx needs the mesh's areas (checked here, before the first step).
+            if area is None:
+                raise NNConfigError("--nn input 'dx' needs the mesh's areaCell, which this run does not lend")
+            cells = np.asarray(_host(area), dtype=np.float64).reshape(-1)[:self.nc]
+            if cells.shape != (self.nc,) or not np.all(cells > 0):
+                raise NNConfigError(f"--nn: areaCell {np.shape(area)} does not give a positive area for "
+                                    f"each of {self.nc} cells")
+            spacing = np.sqrt(cells)
+            if sphere_radius is not None and 0.0 < float(sphere_radius) < 1.0e3:
+                spacing = spacing * (EARTH_RADIUS_M / float(sphere_radius))   # a unit-sphere mesh's areas
+            self._dx = cp.asarray(spacing[None, :].astype(f32))
         self._zz = None if zz is None else cp.ascontiguousarray(cp.asarray(zz)[:self.levels, :self.nc])
         self.pool = interior_pool(self.nc, bdy_mask)
         self.ncol = min(settings.tap_columns, self.pool.size)
@@ -405,6 +425,8 @@ class HexColumnSeat:
                 rows.append(take(self._dz))
             elif name == "hgt":
                 rows.append(take(self._hgt))
+            elif name == "dx":
+                rows.append(take(self._dx))
             else:
                 rows.append(take(self._field(name).reshape(1, -1)))
         species = {name[1:] for name in self.output_names if name.startswith("dq")} | {"qv"}
@@ -583,7 +605,9 @@ def attach(coupling, *, config, mesh, n_cells: int, vertical, dt: float, executi
                          n_levels=int(state.rho.shape[0]), zgrid=vertical.zgrid,
                          zz=getattr(getattr(coupling.dycore.atmosphere, "vertical", None), "zz", None),
                          bdy_mask=bdy, dt=dt, mode=getattr(config, "mode", "exact"),
-                         fields=_reader(session, int(n_cells)), resume=resumed)
+                         fields=_reader(session, int(n_cells)), resume=resumed,
+                         area=mesh.arrays.get("areaCell") if hasattr(mesh, "arrays") else None,
+                         sphere_radius=(getattr(mesh, "attrs", None) or {}).get("sphere_radius"))
     if resumed:
         check_carried(seat.identity(), carried)
     coupling.nn_seat = seat

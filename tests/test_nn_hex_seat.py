@@ -524,3 +524,32 @@ def test_the_seat_on_the_device_matches_the_host(tmp_path):
         results.append((host(w.sources.rho_theta), host(w.sources.scalars), tap.rows[0][0], tap.rows[0][1]))
     for a, b in zip(*results):
         np.testing.assert_allclose(b, a, rtol=2e-6, atol=1e-12)
+
+
+# ------------------------------------------------- P2.6: context inputs --
+
+def test_dx_and_radiation_context_inputs():
+    w = _world()
+    w.pools[("diag_physics", "coszr")] = np.linspace(-0.2, 0.9, NC).astype(np.float32)
+    area = np.linspace(9e6, 1.44e8, NC + 1)                 # 3 km .. 12 km cells, padded
+    tap = _Tap()
+    seat = HexColumnSeat(_settings(inputs=("theta", "dx", "coszr")), cp=np, names=NAMES, n_cells=NC,
+                         n_levels=NZ, zgrid=w.zgrid, zz=w.zz, bdy_mask=BDY, dt=30.0,
+                         fields=lambda pool, name: w.pools[(pool, name)], tap=tap, area=area)
+    seat.stage(w.sources, state=w.state, saved=w.saved, time_seconds=0.0)
+    x, _, _, _, cells = tap.rows[0]
+    np.testing.assert_allclose(x[NZ], np.sqrt(area[cells]), rtol=1e-6)
+    np.testing.assert_array_equal(x[NZ + 1], w.pools[("diag_physics", "coszr")][cells])
+    # a dx model without areas is refused when the seat is built, not at its first step
+    with pytest.raises(launch.NNConfigError, match="areaCell"):
+        _seat(w, _settings(inputs=("dx",)), tap=_Tap())
+    with pytest.raises(launch.NNConfigError, match="positive area"):
+        HexColumnSeat(_settings(inputs=("dx",)), cp=np, names=NAMES, n_cells=NC, n_levels=NZ, zgrid=w.zgrid,
+                      bdy_mask=BDY, dt=30.0, tap=_Tap(), area=np.zeros(NC))
+    # a model that does not read dx ignores the areas, even degenerate ones
+    HexColumnSeat(_settings(inputs=("theta",)), cp=np, names=NAMES, n_cells=NC, n_levels=NZ, zgrid=w.zgrid,
+                  bdy_mask=BDY, dt=30.0, tap=_Tap(), area=np.zeros(NC))
+    # a unit-sphere mesh's areas are scaled to metres
+    unit = HexColumnSeat(_settings(inputs=("dx",)), cp=np, names=NAMES, n_cells=NC, n_levels=NZ, zgrid=w.zgrid,
+                         bdy_mask=BDY, dt=30.0, tap=_Tap(), area=area / 6371229.0 ** 2, sphere_radius=1.0)
+    np.testing.assert_allclose(unit._dx[0], np.sqrt(area[:NC]), rtol=1e-5)

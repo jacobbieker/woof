@@ -337,7 +337,13 @@ are:
 - `z` (layer centre above the ground), `dz`.
 
 The cell inputs are `hgt`, `hfx`, `qfx`, `lh`, `ust`, `znt`, `pblh`, `tsk`,
-`xland` and `psfc`. They are read from the MPAS physics pools.
+`xland` and `psfc`, plus the radiation context `coszr` (cosine of the solar
+zenith angle), `gsw` (net shortwave at the ground) and `glw` (downward
+longwave at the ground), all as of the last radiation call (a run without
+radiation leaves them at zero). They are read from the MPAS physics pools. `dx` is the cell's spacing in metres,
+`sqrt(areaCell)` from the mesh (scaled by the Earth's radius on a
+unit-sphere mesh): one model can then serve a variable-resolution mesh, or be
+trained on taps pooled from meshes of different spacing.
 
 On a limited-area mesh the columns follow the boundary rings:
 
