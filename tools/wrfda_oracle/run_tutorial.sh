@@ -6,7 +6,10 @@
 #   data/         the unpacked WRFDAV3.9-testdata tarball
 # DUMP=1 additionally requires woof_be.bin, woof_xb.bin, woof_u.bin and
 #        woof_iv.bin in the run directory (use with the patched WRFV4.7.1-dump).
-# usage: [DUMP=1] run_tutorial.sh NAME [extra wrfvar10 settings, e.g. test_transforms=true,]
+# WRFVAR15 / WRFVAR19 (optional) are comma-terminated namelist lines inserted into
+#        &wrfvar15 / &wrfvar19, e.g. WRFVAR15='num_pseudo=1,pseudo_x=45.3,' WRFVAR19='pseudo_var="t",'
+#        (the single-observation tests; use TREE=WRFV4.7.1, the undumped build).
+# usage: [DUMP=1] [WRFVAR15=...] [WRFVAR19=...] run_tutorial.sh NAME [extra wrfvar10 settings, e.g. test_transforms=true,]
 set -eux
 NAME=${1:?usage: run_tutorial.sh NAME [extra wrfvar10 settings]}
 EXTRA=${2:-}
@@ -24,6 +27,11 @@ grep -q "^test_transforms=false," "$NL" || { echo "$NL has no test_transforms=fa
 grep -q "^start_year=2008," "$NL" || { echo "$NL has no start_year=2008, line" >&2; exit 2; }
 sed "s/^test_transforms=false,/test_transforms=false,${EXTRA}/" "$NL" \
   | sed "s/^start_year=2008,/force_use_old_data=.true.,\nstart_year=2008,/" > namelist.input
+for g in 15 19; do
+  v=WRFVAR$g; v=${!v:-}
+  case "$v" in */*|*\&*|*\\*) echo "WRFVAR$g must not contain / & or \\" >&2; exit 2;; esac
+  [ -z "$v" ] || sed -i "s/^&wrfvar$g\$/\&wrfvar$g\n$v/" namelist.input
+done
 status=0
 /usr/bin/time -v ./da_wrfvar.exe > wrfda.out 2> time.txt || status=$?
 grep -E "Elapsed|Maximum resident" time.txt

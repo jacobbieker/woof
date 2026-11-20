@@ -78,11 +78,11 @@ JO_FIELDS = {
     "airep": ("u", "v", "t", "q"), "pilot": ("u", "v"), "satem": ("thickness",),
     "metar": ("u", "v", "t", "p", "q"), "ships": ("u", "v", "t", "p", "q"),
     "gpspw": ("tpw",), "qscat": ("u", "v"), "profiler": ("u", "v"),
-    "buoy": ("u", "v", "t", "p", "q"), "gpsref": ("ref",),
+    "buoy": ("u", "v", "t", "p", "q"), "gpsref": ("ref",), "pseudo": ("u", "v", "t", "p", "q"),
 }
 #: ``jo%total``'s summation order.
 JO_ORDER = ("sound", "sonde_sfc", "geoamv", "polaramv", "synop", "satem", "pilot", "airep",
-            "metar", "ships", "gpspw", "qscat", "profiler", "buoy", "gpsref")
+            "metar", "ships", "gpspw", "qscat", "profiler", "buoy", "gpsref", "pseudo")
 
 
 @dataclass(frozen=True)
@@ -803,7 +803,7 @@ def _satem(t, ob, xb, o, lm):
 
 # --------------------------------------------------------------------------- driver
 IMPLEMENTED = SURFACE_TYPES + ("qscat", "sound", "airep", "pilot", "profiler", "geoamv", "polaramv",
-                               "gpspw", "gpsref", "satem")
+                               "gpspw", "gpsref", "satem", "pseudo")
 _UPPER = {"sound": "sound", "airep": "sound", "pilot": "pilot", "profiler": "pilot",
           "geoamv": "amv", "polaramv": "amv"}
 
@@ -845,6 +845,8 @@ def innovations(obs: WrfdaObs, xb: dict, *, libm: str = "correctly-rounded",
             geo = _gpsref(t, ob, xb, o, lm)
         elif name == "satem":
             geo = _satem(t, ob, xb, o, lm)
+        elif name == "pseudo":
+            geo = Geometry.of(t, xb["p"].shape[2])  # da_get_innov_vector_pseudo: inv stays pseudo_val
         else:
             raise NotImplementedError(f"{name}: not ported")
         t.extra["geometry"] = geo
