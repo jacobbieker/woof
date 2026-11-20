@@ -472,3 +472,59 @@ extern "C" __global__ void seaice_column_ridging_v842(
     nwarn[c] = warnings;
     nrepeat[c] = repeats;
 }
+
+// ice_strength's column branch (mpas_seaice_velocity_solver.F:1359-1379)
+// with colpkg_ice_strength (ice_colpkg.F90:3298-3410), one owned cell per
+// thread: icePressure is zeroed, then, where the stress is solved, the
+// strength of Rothrock (1975) (kstrength = 1: ridge_itd's participation and
+// ridges, the potential-energy change per category, Cf*Cp/aksum) or of
+// Hibler (1979) (kstrength = 0). Cf and Cp are the column constants'
+// (ice_constants_colpkg), not config_ratio_ridging_work_to_PE, which v8.4.2
+// does not read. asum_ridging's sum is computed and unused, as in v8.4.2.
+extern "C" __global__ void seaice_column_ice_strength_v842(
+    double *icePressure, const int *solveStress, const double *iceAreaCell, const double *iceVolumeCell,
+    const double *openWaterArea, const double *iceAreaCategory, const double *iceVolumeCategory, int ncat,
+    int kstrength, int krdg_partic, int krdg_redist, double mu_rdg, int nCellsSolve)
+{
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= nCellsSolve) return;
+    icePressure[c] = 0.0;
+    if (solveStress[c] != 1) return;
+    const double *aicen = iceAreaCategory + c * ncat;
+    const double *vicen = iceVolumeCategory + c * ncat;
+    double strength = 0.0;
+    if (kstrength == 1) {
+        double aksum;
+        double apartic[ITD_MAXCAT + 1], hrmin[ITD_MAXCAT], hrmax[ITD_MAXCAT], hrexp[ITD_MAXCAT], krdg[ITD_MAXCAT];
+        double aparticn[ITD_MAXCAT], krdgn[ITD_MAXCAT], mraft[ITD_MAXCAT];
+        (void)rdg_asum(ncat, aicen, openWaterArea[c]);
+        rdg_ridge_itd(ncat, openWaterArea[c], aicen, vicen, krdg_partic, krdg_redist, mu_rdg, &aksum, apartic,
+                      hrmin, hrmax, hrexp, krdg, aparticn, krdgn, mraft);
+        const double p333 = D(1.0, 3.0);
+        for (int n = 1; n <= ncat; ++n) {
+            if (aicen[n - 1] > PUNY && apartic[n] > 0.0) {
+                double hi = D(vicen[n - 1], aicen[n - 1]);
+                double h2rdg;
+                if (krdg_redist == 0) {
+                    // x**3 is __powidf2's x*(x*x)
+                    double xmax = hrmax[n - 1], xmin = hrmin[n - 1];
+                    h2rdg = D(M(p333, S(M(xmax, M(xmax, xmax)), M(xmin, M(xmin, xmin)))), S(xmax, xmin));
+                } else if (krdg_redist == 1) {
+                    h2rdg = A(A(M(hrmin[n - 1], hrmin[n - 1]), M(M(2.0, hrmin[n - 1]), hrexp[n - 1])),
+                              M(M(2.0, hrexp[n - 1]), hrexp[n - 1]));
+                } else {
+                    continue;
+                }
+                double dh2rdg = A(-M(hi, hi), D(h2rdg, krdg[n - 1]));
+                strength = A(strength, M(apartic[n], dh2rdg));
+            }
+        }
+        // Cp = 0.5*gravit*(rhow-rhoi)*rhoi/rhow; Cf*Cp folded
+        const double cp_pe = D(M(M(M(0.5, 9.80616), S(RHOW, RHOI)), RHOI), RHOW);
+        strength = D(M(M(17.0, cp_pe), strength), aksum);
+    } else {
+        // Pstar*vice*exp(-Cstar*(c1-aice))
+        strength = M(M(2.75e4, iceVolumeCell[c]), glibc_exp(-M(20.0, S(1.0, iceAreaCell[c]))));
+    }
+    icePressure[c] = strength;
+}

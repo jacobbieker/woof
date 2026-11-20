@@ -597,6 +597,7 @@ class ColumnState:
     hi_min: float | None = None
     #: column_therm_v842.vertical_thermodynamics' (ierr, cell, message)
     abort: tuple | None = None
+    step: int | None = None
     #: the warnings the last column routine logged (column_itd_v842: zap_snow_temperature's
     #: count; column_ridge_v842: the graded lines, in log order)
     warnings: int | list = 0

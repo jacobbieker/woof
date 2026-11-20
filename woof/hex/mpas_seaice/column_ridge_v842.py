@@ -203,3 +203,48 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
     if int(codes[last]) in RUNTIME_ERRORS:
         raise FortranRuntimeError(RUNTIME_ERRORS[int(codes[last])], cell)
     return SEAICE_ERROR_COL_RIDGING, cell, "column_ridging: " + STOP_LABELS[int(codes[last])]
+
+
+def ice_strength(pools: dict, configs: dict, n_ice_layers: int) -> None:
+    """``ice_strength`` under the column package's vertical thermodynamics,
+    in place (``mpas_seaice_velocity_solver.F:1359-1379``): ``icePressure``
+    of the owned cells zeroed, then, where ``solveStress`` is 1,
+    ``colpkg_ice_strength``'s (``config_ice_strength_formulation``:
+    ``Rothrock75``, the Registry default, from ``ridge_itd``'s participation
+    and ridges with ``config_ridging_participation_function``,
+    ``config_ridging_redistribution_function`` and
+    ``config_ridiging_efolding_scale``; or ``Hibler79``). Its ``Cf`` is the
+    column constants' 17, as v8.4.2 does not read
+    ``config_ratio_ridging_work_to_PE``. RKIND 8 only."""
+    ints = cv._CICE_INT
+    strength = configs.get("config_ice_strength_formulation", "Rothrock75")
+    if strength not in ints["config_ice_strength_formulation"]:
+        raise ValueError(f"config_ice_strength_formulation is 'Hibler79' or 'Rothrock75', not {strength!r}")
+    solver, aggregate = pools["velocity_solver"], pools["tracers_aggregate"]
+    pressure = solver["icePressure"]
+    n_cells = pressure.shape[0]
+    area, volume = pools["tracers"]["iceAreaCategory"], pools["tracers"]["iceVolumeCategory"]
+    ncat = area.shape[1]
+    n_solve = int(pools["mesh"]["nCellsSolve"])
+    if not 0 <= n_solve <= n_cells:
+        raise ValueError("nCellsSolve must lie within nCells")
+    if ncat > citd.ITD_MAXCAT:
+        raise ValueError(f"colpkg_ice_strength here carries at most {citd.ITD_MAXCAT} categories")
+    for name, a, shape in (("icePressure", pressure, (n_cells,)),
+                           ("iceAreaCell", aggregate["iceAreaCell"], (n_cells,)),
+                           ("iceVolumeCell", aggregate["iceVolumeCell"], (n_cells,)),
+                           ("openWaterArea", pools["icestate"]["openWaterArea"], (n_cells,))):
+        cv._need({name: a}, name, shape)
+    for name, a in (("iceAreaCategory", area), ("iceVolumeCategory", volume)):
+        if a.size != n_cells * ncat:
+            raise ValueError(f"{name} must hold nCategories values per cell")
+        cv._need({name: a.reshape(n_cells, ncat)}, name, (n_cells, ncat))
+    cv._need_int({"solveStress": solver["solveStress"]}, "solveStress", (n_cells,))
+    partic = ints["config_ridging_participation_function"][configs["config_ridging_participation_function"]]
+    redist = ints["config_ridging_redistribution_function"][configs["config_ridging_redistribution_function"]]
+    if n_solve:
+        _function("seaice_column_ice_strength_v842", n_ice_layers)(_grid(n_solve), (_BLOCK,), (
+            pressure, solver["solveStress"], aggregate["iceAreaCell"], aggregate["iceVolumeCell"],
+            pools["icestate"]["openWaterArea"], area, volume, np.int32(ncat),
+            np.int32(ints["config_ice_strength_formulation"][strength]), np.int32(partic), np.int32(redist),
+            np.float64(configs["config_ridiging_efolding_scale"]), np.int32(n_solve)))

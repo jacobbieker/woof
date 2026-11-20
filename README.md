@@ -367,8 +367,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     and ITD thermodynamics), the column dynamics (ridging), the
     post-dynamics (shortwave and coupling preparation) and the stop on an
     abort, with the day and time read from the step's clock
-    (`column_step_v842`; the coupled step with the velocity solver is
-    still refused). The elastic subcycles check
+    (`column_step_v842`). The forward time step runs it with the velocity
+    solver, as v8.4.2's `seaice_timestep` does under
+    `config_use_column_package` (`timestep_v842`, RKIND 8): the solver's
+    ice strength is the column package's `colpkg_ice_strength` (Rothrock75's
+    ridging energy or Hibler79's), the fluxes are finalised after each step
+    (or left for a coupler after the last), and an abort raises
+    `ColumnAbort` with its step, cell and message, word for word with
+    v8.4.2 on CUDA and Metal. The elastic subcycles check
     their arrays once per solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean

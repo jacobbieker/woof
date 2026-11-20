@@ -1,10 +1,12 @@
 ! Stand-ins for the MPAS-Seaice modules the time-step oracle (run_seaice_step)
 ! compiles against but does not drive: the variational basis setup
-! (Wachspress, PWL: the driver gives the basis arrays), the weak-form solver,
-! the column package's ice strength and the unit tests.  Each stops by name
-! if reached.  (Incremental-remap advection is compiled verbatim; its
-! stand-ins are remap_standins.F90 and rbf_standins.F90.)  The
-! framework is tools/mpas_ocean_oracle/stubs.F90, shared with the ocean.
+! (Wachspress, PWL: the driver gives the basis arrays), the weak-form solver
+! and the unit tests.  Each stops by name if reached.  (Incremental-remap
+! advection is compiled verbatim; its stand-ins are remap_standins.F90 and
+! rbf_standins.F90.  The column package's ice strength is
+! colpkg_standin.F90's, which the column oracle replaces with the column
+! package itself.)  The framework is tools/mpas_ocean_oracle/stubs.F90,
+! shared with the ocean.
 module seaice_velocity_solver_wachspress
   use mpas_derived_types
   implicit none
@@ -73,30 +75,6 @@ contains
   end subroutine seaice_final_divergence_shear_weak
 
 end module seaice_velocity_solver_weak
-
-module ice_colpkg
-  use mpas_kind_types
-  implicit none
-  private
-  public :: colpkg_ice_strength
-
-contains
-
-  subroutine colpkg_ice_strength(ncat, aice, vice, aice0, aicen, vicen, strength)
-    ! The real colpkg routine takes dbl_kind arguments, so an RKIND 4 build
-    ! of the velocity solver links only against a stand-in.  ice_strength
-    ! calls it only under the column package's vertical thermodynamics, which
-    ! run_presubcycle.F90 drives without ice_strength (the GPU port refuses
-    ! that configuration's ice strength by name).
-    integer, intent(in) :: ncat
-    real(kind=RKIND), intent(in) :: aice, vice, aice0
-    real(kind=RKIND), dimension(:), intent(in) :: aicen, vicen
-    real(kind=RKIND), intent(inout) :: strength
-    print *, 'oracle stub: colpkg_ice_strength is not part of this oracle'
-    stop 6
-  end subroutine colpkg_ice_strength
-
-end module ice_colpkg
 
 module seaice_unit_test
   use mpas_derived_types

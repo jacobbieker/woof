@@ -113,6 +113,7 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" "${seaice}/column/constants/cice/ice_constants_colpkg.F90"
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_constants.F"
       "${fc[@]}" "${flags[@]}" "${script_dir}/step_standins.F90"
+      "${fc[@]}" "${flags[@]}" "${script_dir}/colpkg_standin.F90"
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_constitutive_relation.F"
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_variational.F"
       { cat "${script_dir}/diagnostics_cut_head.F90"
@@ -163,7 +164,7 @@ for precision in r4 r8; do
           mpas_seaice_advection.o mpas_seaice_advection_incremental_remap.o \
           mpas_seaice_advection_incremental_remap_tracers.o remap_standins.o rbf_standins.o \
           mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o \
-          step_standins.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
+          step_standins.o colpkg_standin.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
           seaice_mesh_interpolation.o oracle_stream.o stubs.o mpas_kind_types.o \
           ${step_libm[@]+"${step_libm[@]}"}
       "${fc[@]}" -o "${build_dir}/run_coupling_prep_${precision}" run_coupling_prep.o seaice_column_coupling_cut.o \
@@ -262,6 +263,29 @@ done
       reset_ocean_coupler_fluxes
   printf 'end module seaice_forcing\n'; } > seaice_forcing_cut.F
 "${fc[@]}" "${flags[@]}" seaice_forcing_cut.F
+# the time step with the column package (run_column's seaice_step stage): the
+# velocity solver, incremental remap and seaice_timestep compiled or cut
+# verbatim as for run_seaice_step, here on the column package itself (its
+# colpkg_ice_strength) and the verbatim mpas_seaice_column.F
+"${fc[@]}" "${flags[@]}" "${mesh_cut}"
+"${fc[@]}" "${flags[@]}" "${script_dir}/step_standins.F90"
+"${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_constitutive_relation.F"
+"${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_variational.F"
+{ cat "${script_dir}/diagnostics_cut_head.F90"
+  cut "${seaice}/shared/mpas_seaice_diagnostics.F" seaice_initialize_time_diagnostics \
+      seaice_set_time_diagnostics seaice_check_state seaice_load_balance_timers
+  echo "end module seaice_diagnostics"; } > seaice_diagnostics_cut.F
+"${fc[@]}" "${flags[@]}" seaice_diagnostics_cut.F
+"${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver.F"
+"${fc[@]}" "${flags[@]}" "${script_dir}/rbf_standins.F90"
+"${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_advection_incremental_remap_tracers.F"
+"${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_advection_incremental_remap.F"
+"${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_advection.F"
+{ cat "${script_dir}/timestep_cut_head.F90"
+  cut "${seaice}/shared/mpas_seaice_time_integration.F" seaice_timestep store_timestep_counter \
+      seaice_timestep_finalize
+  echo "end module seaice_time_integration"; } > seaice_time_integration_cut.F
+"${fc[@]}" "${flags[@]}" seaice_time_integration_cut.F
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_column.F90"
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_init_thermo.F90"
 column_libm=()
@@ -274,6 +298,11 @@ if command -v objdump >/dev/null; then
     fi
 fi
 "${fc[@]}" -o "${build_dir}/run_column_r8" run_column.o seaice_forcing_cut.o seaice_initialize_cut.o \
+    seaice_time_integration_cut.o mpas_seaice_velocity_solver.o seaice_diagnostics_cut.o \
+    mpas_seaice_advection.o mpas_seaice_advection_incremental_remap.o \
+    mpas_seaice_advection_incremental_remap_tracers.o rbf_standins.o \
+    mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o \
+    step_standins.o seaice_mesh_interpolation.o \
     mpas_seaice_column.o remap_standins.o mpas_seaice_constants.o ice_*.o oracle_stream.o stubs.o \
     mpas_kind_types.o ${column_libm[@]+"${column_libm[@]}"}
 "${fc[@]}" -o "${build_dir}/run_init_thermo_r8" run_init_thermo.o ice_*.o \
