@@ -162,8 +162,8 @@ __device__ __forceinline__ double psixhu(double xd)
 }
 
 // ice_atmo: atmo_boundary_layer for sfctype 'ice' without form drag (refused),
-// as colpkg_atm_boundary calls it (uvel = uVelocity, vvel = 0: its second
-// "if (present(uvel)) worku = uvel" never sets workv). The opt-in correction
+// as colpkg_atm_boundary calls it (uvel = uVelocity, vvel = 0: it drops the
+// vvel passed in, its second "if (present(uvel)) worku = uvel" never sets workv). The opt-in correction
 // ice_velocity_at_cell passes the cell's ice velocity instead (both components).
 __device__ void atmo_boundary_layer_ice(const vt_params &p, double Tsf, double potT, double uatm, double vatm,
                                         double wind, double zlvl, double Qa, double rhoa, double *strx,

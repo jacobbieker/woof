@@ -361,8 +361,8 @@ CORRECTIONS = {
         "other way round; the correction passes them in set_sfcflux's order"),
     "ice_velocity_at_cell": (
         "column_vertical_thermodynamics hands colpkg the vertex field uVelocity at the cell's index "
-        "(mpas_seaice_column.F:1511-1512) and colpkg_atm_boundary drops vvel (its second "
-        "'if (present(uvel)) worku = uvel', ice_colpkg.F90:3474-3479), so the ice velocity in the "
+        "(mpas_seaice_column.F:1511-1512), and colpkg_atm_boundary drops the vvel passed in (it sets "
+        "worku = uvel twice, ice_colpkg.F90:3474-3479, and workv stays 0), so the ice velocity in the "
         "atmosphere's relative wind is another vertex's u and no v; the correction uses the cell's ice "
         "velocity, both components (seaice_interpolate_vertex_to_cell)"),
     "ccsm3_absorbed_solar_layers": (
@@ -384,10 +384,16 @@ def corrections(configs: dict) -> frozenset[str]:
     names = configs.get("woof_v842_corrections", ())
     if isinstance(names, str):
         names = (names,)
+    declaration = "names from woof.hex.mpas_seaice.column_v842.CORRECTIONS: " + ", ".join(sorted(CORRECTIONS))
+    try:
+        names = tuple(names)
+        if not all(isinstance(name, str) for name in names):
+            raise TypeError
+    except TypeError:
+        _refuse("woof_v842_corrections", names, "the corrections are a name or a sequence of names", declaration)
     unknown = sorted(set(names) - CORRECTIONS.keys())
     if unknown:
-        _refuse("woof_v842_corrections", unknown, "these are not corrections of the column port",
-                "names from woof.hex.mpas_seaice.column_v842.CORRECTIONS: " + ", ".join(sorted(CORRECTIONS)))
+        _refuse("woof_v842_corrections", unknown, "these are not corrections of the column port", declaration)
     return frozenset(names)
 
 

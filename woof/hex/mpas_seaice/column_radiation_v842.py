@@ -104,6 +104,15 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         _refuse("config_shortwave_type", "dEdd",
                 rkind.trig_refusal("the orbit and the solar zenith angle call glibc's double sin, cos, atan and asin"),
                 "WOOF_GLIBC239_LIBM64=1, config_shortwave_type = 'ccsm3' or config_calc_surface_temperature = .false.")
+    fixes = cv.corrections(c)
+    if "ccsm3_absorbed_solar_layers" in fixes and not (calc_tsfc and not dedd):
+        _refuse("woof_v842_corrections", "ccsm3_absorbed_solar_layers",
+                "it corrects shortwave_ccsm3, which this configuration does not run",
+                "config_shortwave_type = 'ccsm3' with config_calc_surface_temperature = .true., or without it")
+    if "dedd_zero_volume_ice" in fixes and not dedd:
+        _refuse("woof_v842_corrections", "dedd_zero_volume_ice",
+                "it corrects the delta-Eddington shortwave, which this configuration does not run",
+                "config_shortwave_type = 'dEdd' with config_calc_surface_temperature = .true., or without it")
     if c["config_use_aerosols"]:
         _refuse("config_use_aerosols", True, "the aerosols in the shortwave are not ported",
                 "config_use_aerosols = .false.")

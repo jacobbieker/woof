@@ -50,6 +50,31 @@ def test_every_correction_is_named_and_unknown_names_are_refused():
         assert "v8.4.2" in why or ".F90" in why or ".F:" in why, name
 
 
+@pytest.mark.parametrize("value", [None, 3, ("set_sfcflux_order", None), (["set_sfcflux_order"],)])
+def test_corrections_that_are_not_names_are_refused(value):
+    with pytest.raises(ConfigurationRefusal, match="a name or a sequence of names"):
+        cv.corrections({KEY: value})
+
+
+@pytest.mark.parametrize("name, shortwave, calc_tsfc", [
+    ("ccsm3_absorbed_solar_layers", "dEdd", True), ("ccsm3_absorbed_solar_layers", "ccsm3", False),
+    ("dedd_zero_volume_ice", "ccsm3", True), ("dedd_zero_volume_ice", "dEdd", False)])
+def test_a_shortwave_correction_for_a_scheme_that_does_not_run_is_refused(name, shortwave, calc_tsfc, glibc239):
+    case = _case(co.RADIATION_CASES, "rad_ccsm3_constant_albedos")
+    config = {**case["config"], "config_shortwave_type": shortwave, "config_calc_surface_temperature": calc_tsfc,
+              KEY: (name,)}
+    with pytest.raises(ConfigurationRefusal, match="does not run"):
+        crad.refuse_unported(config, case["dims"])
+
+
+@requires_gpu
+def test_ice_velocity_at_cell_without_the_vertex_fields_is_refused(glibc239):
+    case = _velocity_case(0.5, -0.25, 0.5, -0.25, corrected=True)
+    case["pools"]["velocity_solver"]["vVelocity"] = None
+    with pytest.raises(ConfigurationRefusal, match="velocity_solver/vVelocity"):
+        co.run_gpu(case)
+
+
 def test_ccsm3_with_more_categories_than_layers_is_refused_unless_corrected():
     case = _case(co.RADIATION_CASES, "rad_ccsm3_constant_albedos")
     dims = {**case["dims"], "nCategories": case["dims"]["nIceLayers"] + 1}

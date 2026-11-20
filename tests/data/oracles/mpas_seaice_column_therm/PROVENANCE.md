@@ -47,9 +47,10 @@ Written by `tools/mpas_seaice_oracle/build.sh` and
     it is; the test gives the corrected run the two fluxes under their own
     names and gets v8.4.2's run word for word;
   - `colpkg_atm_boundary` gets `uVelocity`, a vertex field, at the cell's
-    index (`mpas_seaice_column.F:1511-1512`) and passes `uvel` for `vvel`
-    (`ice_colpkg.F90:3474-3479`), so high-frequency coupling's stress is
-    against another point's u and no v. `ice_velocity_at_cell` passes both
+    index (`mpas_seaice_column.F:1511-1512`), and drops the `vvel` passed
+    in (`ice_colpkg.F90:3474-3479` sets `worku = uvel` twice and leaves
+    `workv` 0), so high-frequency coupling's stress is against another
+    point's u and no v. `ice_velocity_at_cell` passes both
     components of the cell's ice velocity
     (`seaice_interpolate_vertex_to_cell`); the tests check that ice
     drifting with the wind feels no stress and that the stress follows the

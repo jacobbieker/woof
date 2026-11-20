@@ -50,7 +50,8 @@ Two v8.4.2 bugs are kept by default and corrected on request
   corrected, each is read as what it is;
 - ``ice_velocity_at_cell``: ``colpkg_atm_boundary`` gets the vertex field
   ``uVelocity`` at the cell's index (``mpas_seaice_column.F:1511-1512``) and
-  no v (``ice_colpkg.F90:3474-3479`` passes ``uvel`` twice); corrected, it
+  drops the ``vvel`` passed in (``ice_colpkg.F90:3474-3479`` sets ``worku =
+  uvel`` twice and leaves ``workv`` 0); corrected, it
   gets both components of the cell's ice velocity, the ``areaTriangle``
   weighted mean of the interior vertices
   (``seaice_interpolate_vertex_to_cell``), so high-frequency coupling's
@@ -229,6 +230,13 @@ def _ice_velocity(pools: dict, configs: dict, n_vertices: int, n_cells: int, dum
     if "ice_velocity_at_cell" not in cv.corrections(configs):
         return u, dummy
     from . import velocity_v842 as vel
+    missing = [name for name, there in (("boundary/interiorVertex", (pools.get("boundary") or {}).get(
+        "interiorVertex") is not None), ("velocity_solver/vVelocity", vs.get("vVelocity") is not None)) if not there]
+    if missing:
+        cv._refuse("woof_v842_corrections", "ice_velocity_at_cell",
+                   "the cell's ice velocity is interpolated from the vertices' u and v over the interior vertices; "
+                   "the pools lack " + ", ".join(missing),
+                   "pools with boundary/interiorVertex and velocity_solver/vVelocity, or without the correction")
     v = cv._need(vs, "vVelocity", (n_vertices + 1,))
     mesh = {k: pools["mesh"][k] for k in ("nEdgesOnCell", "verticesOnCell", "areaTriangle")}
     mesh = {k: cp.ascontiguousarray(cp.asarray(a)[:n_cells] if k != "areaTriangle" else cp.asarray(a)[:n_vertices])
