@@ -308,8 +308,8 @@ def _mismatches(case, key):
     ("-AR(A_OCNU), -AR(A_OCNV)", "AR(A_OCNU), AR(A_OCNV)", "i2x/Fioi_tauy", "mushy_free"),
     # the ponds' mass dropped
     ("if (ponds)", "if (0)", "i2x/Si_bpress", "bl99_mushy_tfrz"),
-    # the salt's frazil term reassociated
-    ("M(M(referenceSalinity, 0.001), AR(A_FRZADJ))", "D(M(referenceSalinity, AR(A_FRZADJ)), 1000.0)",
+    # the salt's frazil term in kg/kg, not g/kg
+    ("M(M(referenceSalinity, 0.001), AR(A_FRZADJ))", "M(M(referenceSalinity, 0.01), AR(A_FRZADJ))",
      "i2x/Fioi_salt", "mushy_free"),
     # the surface temperature left in Celsius
     ("A(freshWaterFreezingPoint, AR(A_TSFC))", "AR(A_TSFC)", "i2x/Si_t", "mushy_free"),
