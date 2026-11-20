@@ -987,7 +987,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   grids, the `w_damp` vertical-velocity limiter, and the lateral-boundary
   relaxation and specified zone (woof's strict `state_relaxation_multi`,
   WRF `relax_bdy_dry` and `spec_bdy_dry`, with the boundary tables'
-  adjoint as an output). In binary64 they match WRFPLUS to about 1e-15
+  adjoint as an output) and its end-of-step and acoustic frame updates
+  (`finalize_state_field` and `advance_specified_phi_w`, WRF
+  `spec_bdy_final`, `spec_bdyupdate_ph` and `zero_grad_bdy`). In binary64 they match WRFPLUS to about 1e-15
   on non-hybrid cases (WRFPLUS has no hybrid coordinate; the exclusions
   are listed in the design note). The comparison found a lid bug in
   WRFPLUS's own pressure-gradient adjoint and, in its `rhs_ph`, a heap
@@ -995,7 +997,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   axes, all described in the design note.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
   0.85-3.2x the glue, 3.3-4.5x advection, 1.3-4.4x the big-step
-  tendencies and 2.5x the lateral boundaries. The measured step projection (4.7x) is in the design
+  tendencies and 2.5-3.7x the lateral boundaries. The measured step projection (4.7x) is in the design
   note. The forecast path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
