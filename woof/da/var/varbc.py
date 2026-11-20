@@ -66,6 +66,13 @@ GAS_CONSTANT = 287.0
 QC_VARBC_BAD = -1
 #: Families whose scan predictors are the satellite zenith (``varbc_scan = 0``).
 GEO_FAMILIES = ("abi", "ahi", "seviri", "fci")
+#: CRTM channel minus VARBC.in's ``Chanl_nb`` (WRFDA numbers SEVIRI's IR channels 1-8, CRTM 4-11).
+CHANNEL_OFFSET = {"seviri": 3}
+
+
+def varbc_channel(sensor: str, channel: int) -> int:
+    """A CRTM channel number as ``VARBC.in``/``radiance_info`` number it."""
+    return int(channel) - CHANNEL_OFFSET.get(family(sensor), 0)
 
 #: (platform_id, satellite_id, sensor_id) as WRFDA's ``VARBC.in`` and
 #: ``radiance_info`` name them (RTTOV numbering).  Others go through ``ids=``.
@@ -147,6 +154,8 @@ def template(sensor: str, channels: Sequence[int], *, ids: tuple | None = None, 
              chanl_ids: Sequence[int] | None = None) -> InstrumentBC:
     """A cold instrument as WRFDA's geostationary ``VARBC.in`` entries set it up.
 
+    ``channels`` are CRTM numbers; the file keeps WRFDA's (:func:`varbc_channel`).
+
     Predictors 1-5 (constant, the two thicknesses, skin temperature, TPW)
     used and cold; 6-8 (zenith or scan position powers) unused.  For a
     microwave sounder whose scan bias matters, pass a ``pred_use`` of your
@@ -160,7 +169,7 @@ def template(sensor: str, channels: Sequence[int], *, ids: tuple | None = None, 
     return InstrumentBC(ids=tuple(int(i) for i in ids), nchanl=len(channels), npredmax=NPREDMAX,
                         pred_mean=np.zeros(NPREDMAX), pred_std=np.zeros(NPREDMAX),
                         nbgerr=np.full(NPREDMAX, nbgerr, dtype=np.int64),
-                        channels=[ChannelBC(int(k), int(c), use.copy(), np.zeros(5))
+                        channels=[ChannelBC(int(k), varbc_channel(sensor, c), use.copy(), np.zeros(5))
                                   for k, c in zip(chanl_ids, channels)])
 
 
@@ -364,7 +373,7 @@ class VarBC:
         pred = self._normalise(inst, pred)
         self._pred[id(batch)] = pred
         for c, ch in enumerate(batch.channels.tolist()):
-            bc = inst.channel(ch)
+            bc = inst.channel(varbc_channel(batch.sensor, ch))
             if bc is None or bc.npred <= 0:
                 continue
             ip = bc.ipred
@@ -379,7 +388,7 @@ class VarBC:
         nbins, maxhist = 200, 10.0
         zbin = 2.0 * maxhist / nbins
         for c, ch in enumerate(batch.channels.tolist()):
-            bc = inst.channel(ch)
+            bc = inst.channel(varbc_channel(batch.sensor, ch))
             if bc is None or bc.npred <= 0 or np.all(bc.pred_use != 0):
                 continue
             bc.param = np.where(bc.pred_use[bc.ipred] == 0, 0.0, bc.param)
@@ -427,7 +436,7 @@ class VarBC:
                 continue
             pred = self._pred[id(b)]
             for c, ch in enumerate(b.channels.tolist()):
-                bc = inst.channel(ch)
+                bc = inst.channel(varbc_channel(b.sensor, ch))
                 if bc is None or bc.npred <= 0:
                     continue
                 ip, npred = bc.ipred, bc.npred

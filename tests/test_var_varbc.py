@@ -386,3 +386,12 @@ def test_analyse_door_with_radiances_on_the_tutorial():
     conv, conv0 = res.fit["conventional"], base.fit["conventional"]
     assert conv["n"] == conv0["n"] and conv0["oma_rms"] < conv["oma_rms"] <= 1.05 * conv0["oma_rms"] < conv["omb_rms"]
     assert res.radiance["varbc_controls"] == 15
+
+
+def test_seviri_channels_are_wrfdas_numbers_in_varbc_files(tmp_path):
+    inst = vbc.template("seviri_m10", [5, 6, 9])
+    assert [c.channel for c in inst.channels] == [2, 3, 6]
+    vbc.write_varbc(tmp_path / "VARBC.out", [inst])
+    back = vbc.read_varbc(tmp_path / "VARBC.out")[vbc.VARBC_IDS["seviri_m10"]]
+    assert back.channel(vbc.varbc_channel("seviri_m10", 6)) is not None
+    assert vbc.varbc_channel("abi_g16", 8) == 8

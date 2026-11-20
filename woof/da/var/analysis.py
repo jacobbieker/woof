@@ -457,7 +457,7 @@ class VarResult:
     timings: dict = field(default_factory=dict)
     #: The radiance door's report (counts per sensor, Jo, VarBC), or None.
     radiance: dict | None = None
-    #: O-B and O-A (linearised, ``d - H' U cvt``) per term over the used observations.
+    #: With radiances: O-B and O-A (linearised, ``d - H' U cvt``) per term over the used observations.
     fit: dict = field(default_factory=dict)
 
 
@@ -532,10 +532,10 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
 
         cp.cuda.Stream.null.synchronize()
     timings["minimise_s"] = time.perf_counter() - t1
-    fit = _fit(cost, d0, cvt, terms)
+    fit = _fit(cost, d0, cvt, terms) if rterm is not None else {}
     cvt = np.asarray(cvt.get() if hasattr(cvt, "get") else cvt, dtype=np.float64)
     if rterm is not None:
-        rreport["jo_final"] = results[-1].j_final
+        rreport["j_final"] = results[-1].j_final
         if varbc is not None and rterm.control_size:
             varbc.update(rterm, cvt[cost.cv_u:])
             rreport["varbc_controls"] = int(rterm.control_size)

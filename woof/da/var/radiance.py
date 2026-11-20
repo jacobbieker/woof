@@ -487,7 +487,9 @@ def background_columns(xb: dict, surface: Mapping, h: tuple) -> Columns:
         kk = nz - k  # 1-based model level kte-k
         lev[:, k] = ((p[:, k] - p[:, k - 1]) / (sigmah[kk - 1] - sigmah[kk])
                      * (sigmaf[kk] - sigmah[kk]) + p[:, k - 1])
-    ok = np.all(lev[:, 1:] > lev[:, :-1], axis=1)
+    # CRTM's Profiles also needs each layer strictly inside its interfaces
+    ok = (np.all(lev[:, 1:] > lev[:, :-1], axis=1) & np.all(p > lev[:, :-1], axis=1)
+          & np.all(p < lev[:, 1:], axis=1))
     mr = 1000.0 * q / (1.0 - q)
     u10 = _hcol(np.asarray(surface["U10"], float), h)
     v10 = _hcol(np.asarray(surface["V10"], float), h)
@@ -805,13 +807,19 @@ def radiance_term(obs: Sequence[RadianceObs], xb: dict, surface: Mapping, proj, 
                            "omitted": ["surface-pressure Jacobian (not in woof's CRTM shim)"]}
     for rec in obs:
         counts = {"read": rec.n}
-        keep = np.isfinite(rec.sensor_zenith) & (rec.sensor_zenith <= settings.max_zenith_deg)
-        counts["zenith"] = int((~keep).sum())
+        geometry_ok = np.ones(rec.n, bool)
+        for a in (rec.lat, rec.lon, rec.sensor_scan, rec.sensor_azimuth, rec.solar_zenith, rec.solar_azimuth):
+            geometry_ok &= np.isfinite(a)
+        counts["geometry_missing"] = int((~geometry_ok).sum())
+        keep = geometry_ok & np.isfinite(rec.sensor_zenith) & (rec.sensor_zenith <= settings.max_zenith_deg)
+        counts["zenith"] = int((geometry_ok & ~keep).sum())
         rec = rec.subset(np.flatnonzero(keep))
         loc = locate(proj, rec.lat, rec.lon)
         counts["outside_domain"] = int((~loc["inside"]).sum())
         rec, loc = rec.subset(np.flatnonzero(loc["inside"])), {k: v[loc["inside"]] for k, v in loc.items()}
         if settings.thinning and rec.n:
+            if xb.get("lat") is None or xb.get("lon") is None:
+                raise ValueError("thinning needs the first guess's XLAT and XLONG (xb lat/lon)")
             kept = gsi_thin(rec.lat, rec.lon, settings.thinning_mesh_km, xb["lat"], xb["lon"])
             counts["thinned"] = int(rec.n - kept.size)
             rec, loc = rec.subset(kept), {k: v[kept] for k, v in loc.items()}
