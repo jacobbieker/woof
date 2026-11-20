@@ -137,8 +137,8 @@ def _run(mesh, fields, configs):
     dev = {k: cp.asarray(v) for k, v in fields.items()}
     tend = dev.pop("tend")
     fo.vel_forcing_tend(mesh={k: cp.asarray(v) for k, v in mesh.items()},
-                        surface_flux_attenuation_coefficient=cp.ones(N_CELLS),
-                        surface_stress=cp.zeros(N_EDGES), tend=tend,
+                        surface_flux_attenuation_coefficient=cp.ones(N_CELLS, dtype=cp.float64),
+                        surface_stress=cp.zeros(N_EDGES, dtype=cp.float64), tend=tend,
                         configs={"config_disable_vel_surface_stress": True, **configs}, **dev)
     return cp.asnumpy(tend)
 
