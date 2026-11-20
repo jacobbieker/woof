@@ -41,6 +41,7 @@ from pathlib import Path
 import numpy as np
 
 from woof.core.device_cache import cuda_cache
+from woof.core import mcica_seed as _mcica_seed
 from woof.core import rrtmg_lw as _lw
 from woof.core import rrtmg_sw as _sw
 
@@ -693,10 +694,12 @@ def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
         M = {k: cp.empty((n, nl, NGPTLW), f32)
              for k in ("cldfmcl", "ciwpmcl", "clwpmcl", "cswpmcl")}
         cdf = cp.empty((n, NSUB28, nl), f32)
+        _mcica_seed.set_context(base=c0)
         _kernel("prep", "rkp_mcica")(
             ((n * NSUB28 + 127) // 128,), (128,),
             (np.int32(n), np.int32(nl), np.int32(PERMUTESEED),
-             P["play"], P["cldfrac"], P["ciwp"], P["clwp"], P["cswp"], cdf,
+             _mcica_seed.seed_play(P["play"], _mcica_seed.RRTMGK_STREAM),
+             P["cldfrac"], P["ciwp"], P["clwp"], P["cswp"], cdf,
              M["cldfmcl"], M["ciwpmcl"], M["clwpmcl"], M["cswpmcl"], err))
         del cdf
         gas = {k: cp.full((n, nl), v, f32) for k, v in table.items()}
@@ -1042,6 +1045,7 @@ class RRTMGKRadiation:
             f_qc=True, f_qi=f_qi, f_qs=f_qs, mp_physics=mp_physics)
 
         valid_time = self.start_time + timedelta(seconds=float(state.elapsed_seconds))
+        _mcica_seed.set_context(time_seconds=state.elapsed_seconds)
         julday = int(valid_time.timetuple().tm_yday)
         hour = (valid_time.hour + valid_time.minute / 60.0
                 + valid_time.second / 3600.0 + valid_time.microsecond / 3.6e9)

@@ -143,6 +143,7 @@ from woof.core.mynn_radiation import (
 from woof.core import rrtmg_legacy_prep as _prep
 from woof.core import rrtmg_legacy_device as _prep_device
 from woof.core import rrtmg_lw as _lw
+from woof.core import mcica_seed as _mcica_seed
 from woof.core import rrtmg_mcica as _mcica
 from woof.core import rrtmg_sw as _sw
 from woof.core import rrtmg_aerosol_optics as _aer3
@@ -2673,6 +2674,7 @@ class RRTMGLegacyRadiation:
             # and the windows below pass logical offsets c0 + w0 to the
             # output kernel, which the adapter's kernel source interleaves.
             sel = slice(c0, c1)
+            _mcica_seed.set_context(time_seconds=state.elapsed_seconds, base=c0)
             kw = chunk_inputs(sel)
             cldfra_cols[c0:c1] = kw["cldfra3d"]
             # The wrapper glue on the device: rrtmg_legacy_device holds
@@ -2846,6 +2848,7 @@ class RRTMGLegacyRadiation:
                     cp.ascontiguousarray(aer1_grid[sel]), nz + 1, self._sw_tables)
                 if diagnostic_sink is not None:
                     diagnostic_aerosol = dict(aerod=aer1_grid[sel], aodtot=aodtot[sel])
+            _mcica_seed.set_context(time_seconds=state.elapsed_seconds, ids=sel)
             ps = _prep_device.swrad_prep_batch_device(
                 **kw, albedo=surf["albedo"][sel],
                 xcoszen=coszen_d[sel], solcon=solcon,

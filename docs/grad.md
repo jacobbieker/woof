@@ -154,6 +154,67 @@ QC thresholds respond nonlinearly. On a 9 km regional case, a 1 K `thp`
 blob gave a derivative that held steady only for amplitudes of about
 0.4 K and above. Below that, the noise dominated.
 
+## Frozen McICA seeds (`--mcica-seed-mode cell`)
+
+RRTMG's McICA cloud generator seeds each column from the fractional digits
+of its bottom four layer pressures, `(p_hPa - int(p_hPa)) * 1e9`. That is
+upstream behaviour (MPAS `module_ra_rrtmg_lw.F:2432-2440` and the SW
+equivalent, WRF's `generate_stochastic_clouds`), and woof keeps it by
+default. A one-ulp change in pressure, such as any perturbation of the
+initial state makes, therefore draws a new sub-grid cloud realisation in
+every cloudy column. On hex, a 3e-5 K theta change (one float32 ulp) moved
+`J` by +6.1 and -5.0, whatever its sign. That noise is independent of
+the perturbation amplitude, so it sets the floor of every finite-difference
+and ensemble-sensitivity leg.
+
+For those legs only, `--mcica-seed-mode cell` replaces the seeds with a
+fixed hash of the column id, the radiation call time (model seconds) and
+the stream (LW, SW, or RRTMG-K), so the cloud draws no longer depend on
+the model state at all. Each seed lies in [1, 999999998], inside the range
+the pressure rule produces. The mode is not upstream physics, and it is not
+the default; no forecast takes this path unless asked.
+
+| route | how to ask |
+|---|---|
+| hex | `woof hex ... --forecast-arg=--mcica-seed-mode=cell` (or `--mcica-seed-mode cell` on the forecast door) |
+| WRF | `woof go CONFIG --mcica-seed-mode cell` |
+| either | `WOOF_MCICA_SEED_MODE=cell` in the environment |
+
+Rules for using it:
+
+- Run the base, the reference and every plus/minus leg in the same mode,
+  and with the same column order and time steps. The seeds depend on the
+  column's index in the radiation call (the mesh cell on hex, the flattened
+  (j, i) point on WRF) and on the call time, not on the state.
+- It covers RRTMG (`ra_lw_physics = ra_sw_physics = 4`), RRTMG-K (14) and
+  hex's RRTMG LW/SW. RRTMGP (24) refuses it rather than seeding from
+  pressure.
+- It removes the seed noise only. Convection and QC thresholds still
+  respond nonlinearly (see the scale table above).
+
+Demonstration on hex (12 km regional case around Edinburgh, `mesoscale_reference`,
+GFS 2026-11-07 00Z, restart at 03 Z, J_o over 07-12 Z, 4,965 observations, a 60 km
+theta blob at level 8 with 879 cells, CUDA fast numerics on an A6000). Base, scale-0
+reference and every leg ran with `--mcica-seed-mode cell`, and every leg was scored
+with the base's accepted observations:
+
+| leg | J | J - base |
+|---|---|---|
+| base and scale 0 | 1637.976 | 0 (bit for bit) |
+| +0.1 K | 1632.734 | -5.241 |
+| -0.1 K | 1642.338 | +4.362 |
+| +0.5 K | 1633.002 | -4.974 |
+| -0.5 K | 1640.774 | +2.798 |
+| +1 ulp of theta (3e-5 K) on the 879 cells | 1638.017 | +0.041 |
+| -1 ulp of theta on the 879 cells | 1638.019 | +0.043 |
+| +1 ulp in one word | 1637.817 | -0.159 |
+
+The +-0.1 K pair is now antisymmetric (central difference -48.0 J/K, symmetric
+residue -0.44 J), and the one-ulp legs move `J` by at most 0.16 J. With upstream
+seeds, the same ulp legs moved `J` by +6.1, -5.0 and -0.8. The +-0.5 K
+pair (central difference -7.8 J/K) still differs from the +-0.1 K pair: what remains
+is the forecast's own nonlinearity, not seed noise.
+
 ## Ensemble sensitivity and EFSO
 
 `woof grad members` draws K centred initial perturbations from

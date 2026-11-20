@@ -201,6 +201,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from woof.core import mcica_seed as _mcica_seed
 from woof.core.rrtmg_lw import F
 from woof.core.rrtmg_mcica import (
     NBNDLW, NBNDSW, LW_PERMUTESEED, SW_PERMUTESEED,
@@ -743,7 +744,7 @@ def lwrad_prep(*, p3d, p8w, t3d, t8w, dz8w,
     # ---- McICA subcolumn generator (permuteseed = 150) ----
     mc = generate_lw_subcolumns(
         1, ncol, nlay, icld, LW_PERMUTESEED, 0,
-        play[None, :], cldfrac[None, :], ciwpth[None, :], clwpth[None, :],
+        _mcica_seed.seed_play(play[None, :], _mcica_seed.LW_STREAM), cldfrac[None, :], ciwpth[None, :], clwpth[None, :],
         cswpth[None, :], rei[None, :], rel[None, :], res[None, :],
         taucld[:, None, :], hgt[None, :], int(idcor), juldat, F(xlat))
 
@@ -991,7 +992,7 @@ def swrad_prep(*, p3d, p8w, t3d, t8w, dz8w,
 
     mc = generate_sw_subcolumns(
         1, ncol, nlay, icld, SW_PERMUTESEED, 0,
-        play[None, :], cldfrac[None, :], ciwpth[None, :], clwpth[None, :],
+        _mcica_seed.seed_play(play[None, :], _mcica_seed.SW_STREAM), cldfrac[None, :], ciwpth[None, :], clwpth[None, :],
         cswpth[None, :], rei[None, :], rel[None, :], res[None, :],
         taucld[:, None, :], ssacld[:, None, :], asmcld[:, None, :],
         fsfcld[:, None, :], hgt[None, :], int(idcor), juldat, F(xlat))
@@ -1769,8 +1770,8 @@ def lwrad_prep_batch(*, p3d, p8w, t3d, t8w, dz8w,
          else subcolumn_generator),
         ncol, nlayers, icld, LW_PERMUTESEED,
         int(idcor), juldat, np.ascontiguousarray(hb(xlat)),
-        (hb(play), cldfrac_h, ciwpth_h, clwpth_h, cswpth_h, rei_h,
-         rel_h, res_h),
+        (_mcica_seed.seed_play(hb(play), _mcica_seed.LW_STREAM), cldfrac_h,
+         ciwpth_h, clwpth_h, cswpth_h, rei_h, rel_h, res_h),
         (taucld_h,), hb(hgt))
     if xp is not np:
         mc = {k: xp.asarray(v) for k, v in mc.items()}
@@ -2060,8 +2061,8 @@ def swrad_prep_batch(*, p3d, p8w, t3d, t8w, dz8w,
          else subcolumn_generator),
         ncol, nlay, icld, SW_PERMUTESEED,
         int(idcor), juldat, np.ascontiguousarray(hb(xlat)),
-        (play_h, cldfrac_h, ciwpth_h, clwpth_h, cswpth_h, rei_h, rel_h,
-         res_h),
+        (_mcica_seed.seed_play(play_h, _mcica_seed.SW_STREAM), cldfrac_h,
+         ciwpth_h, clwpth_h, cswpth_h, rei_h, rel_h, res_h),
         (taucld_h, ssacld_h, asmcld_h, fsfcld_h), hgt_h)
     if xp is not np:
         mc = {k: xp.asarray(v) for k, v in mc.items()}

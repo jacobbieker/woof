@@ -277,7 +277,8 @@ class ResidentRadiationSlot:
             icloud=1, julday=int(p.native.get_table('mpas_atmphys_manager.julday')[0][()]),
             cldovrlp=overlap, idcor=idcor,
             has_reqc=int(flags['has_reqc']), has_reqi=int(flags['has_reqi']), has_reqs=int(flags['has_reqs']),
-            o3input=o3input, pin=pin, ozone=ozone, retain_profiles=False)
+            o3input=o3input, pin=pin, ozone=ozone, retain_profiles=False,
+            time_seconds=call.time_seconds)
         copies = [(diag['olrtoa' if n == 'olr' else n][:nc], result[n]) for n in lw.FLUX_FIELDS]
         copies.append((p['tend_physics']['rthratenlw'][:, :nc], result['rthratenlw'].T))
         if o3vmr is not None:
