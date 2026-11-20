@@ -4,8 +4,8 @@ woof can read geostationary imager brightness temperatures and reflectances
 so that later stages can assimilate them into initial conditions. The plan,
 with its sources and gates, is section 11 of
 [dev/WRFDA-3DVAR-PLAN.md](dev/WRFDA-3DVAR-PLAN.md). This page covers what
-exists today: the SatWeave reader and the GOES ABI and Himawari AHI readers
-for the `bkr/geo` Icechunk stores.
+exists today: the SatWeave reader and the GOES ABI, Himawari AHI and Meteosat
+SEVIRI readers for the `bkr/geo` Icechunk stores.
 
 ## SatWeave
 
@@ -149,7 +149,7 @@ woof obs geo list --satellite 19 --channel 8 --coverage
   asks for attribution. The command prints it.
 
 Docs for developers: section 11.12 of the plan lists every `bkr/geo` store
-and its coverage, including GK-2A, Meteosat and MTG, which come next.
+and its coverage, including GK-2A, Meteosat and MTG.
 
 ## Himawari AHI from the `bkr/geo` Icechunk stores
 
@@ -187,6 +187,49 @@ On 2025-03-01 at 18 UTC over 120-160 E, 10 S-30 N, the native reader and
 SatWeave's Himawari sector agree to -0.06 K in the mean (cell-mean of the
 native pixels against SatWeave's 0.1° cell, 6.2 to 11.2 µm), so the
 navigation and the calibration match.
+
+## Meteosat SEVIRI from the `bkr/geo` Satpy stores
+
+```
+woof obs geo fetch --satellite msg --time 2025-03-01T18:00Z --channels C05,C06,C09 --bbox -10,20,25,50
+woof obs geo list --satellite msg --coverage
+```
+
+`--satellite` also takes `rss` (the 5-minute rapid scan at 9.5 E) and
+`odegree` (the 0° archive, 2018-01 to 2022-04, 27 % of 15-minute scans).
+The reader is `woof.obs.geo_icechunk.read_meteosat_scene`. The stores are the
+top-level `msg_3000m`, `rss_3000m` and `odegree_3000m`: Satpy-calibrated
+SEVIRI Level 1.5 on the 3 km grid, one array per channel, with real data in
+the repository (not references to someone else's files).
+
+- **Channels.** SEVIRI's own numbers 1-11 (`C05` is 6.2 µm; this differs
+  from ABI's `C08`) or wavelengths (`6200`). Channels 4-11 are brightness
+  temperature in K, 1-3 reflectance in %. HRV is not read. The default
+  channels are 6200, 7330 and 11200, and SEVIRI has no 6.9 µm.
+- **Precision.** The stores keep values as float16. A temperature near
+  250 K is quantised at 0.125 K, and near 300 K at 0.25 K.
+- **Satellite.** The store names each scan's satellite (Meteosat-8 to 11),
+  so the CRTM sensor (`seviri_m08` to `m11`) and the sector (0°, rapid scan
+  or IODC, from the projection longitude) come from the data. On
+  2025-03-01 the 0° store held Meteosat-10, and the rapid scan held
+  Meteosat-11.
+- **Time.** The scan is matched by the store's nominal time label, which is
+  the end of its 15-minute slot: the scan observed 17:45-17:58 is "18:00".
+  The scene's time is the middle of the observation bounds. The archive
+  store has only the nominal bounds. Row time runs south to north.
+- **Geometry.** The store carries each scan's geostationary coordinates and
+  the satellite's actual longitude. woof navigates on MSG's reference
+  ellipsoid, and takes view angles from the actual longitude.
+- **Cost.** The stores hold one whole-disc chunk per channel and scan, so a
+  small box costs a full chunk per channel (about 25 s for three channels).
+- **Licence.** EUMETSAT's data policy applies, which depends on how fresh
+  and how frequent the data are. `bkr/geo` names no licence of its own. The
+  provenance and the command say so, and woof never redistributes the data.
+
+On 2025-03-01 at 18 UTC over 10 W-25 E, 20-50 N, the native reader and
+SatWeave's Meteosat sector agree to -0.10, -0.05 and 0.34 K in the mean at
+6.2, 7.3 and 11.2 µm (cell means of the native pixels against SatWeave's
+0.1° cells).
 
 ## What woof refuses, and why
 
@@ -265,6 +308,7 @@ Values are O-B mean / standard deviation in K:
 | SatWeave, Himawari, 120-160 E 10 S-30 N | `ahi_himawari9` | 2970 | 0.03 / 0.91 | 0.89 / 0.84 | -0.13 / 0.70 | -0.23 / 0.78 |
 | native AHI (`bkr/geo`), Himawari-9, same box | `ahi_himawari9` | 5365 | 0.02 / 0.98 | 0.84 / 0.88 | -0.15 / 0.72 | -0.16 / 0.74 |
 | SatWeave, Meteosat 0°, 10 W-25 E 20-50 N | `seviri_m11` | 2111 | 0.41 / 0.80 | - | 0.09 / 0.97 | 0.25 / 1.40 |
+| native SEVIRI (`bkr/geo` `msg_3000m`), same box | `seviri_m10` | 3902 | 0.00 / 0.87 | - | -0.10 / 0.91 | 0.62 / 1.26 |
 | SatWeave, Meteosat IODC, 40-70 E 0-30 N | `seviri_m09` | 4023 | 0.39 / 1.05 | - | 0.27 / 0.76 | 0.01 / 1.28 |
 
 Over the same box at the same time, SatWeave minus native ABI averages
@@ -350,6 +394,6 @@ is wired up correctly; it does not show forecast skill.
 
 These come next, in the plan's order:
 
-- GK-2A AMI and Meteosat SEVIRI/FCI from the other `bkr/geo` stores;
+- MTG FCI from the `bkr/geo` Satpy stores (CRTM v2.4 has no FCI file);
 - variational bias correction, and the radiance operator for woof's
   3D-Var (plan section 11).
