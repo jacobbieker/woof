@@ -198,7 +198,7 @@ def _arrays(rng, spec, x2o_names) -> dict:
     tsv[:, 0] = _uniform(rng, 0.0, 40.0, nc)  # salinity
     tsv[:, 1] = _uniform(rng, -5.0, 5.0, nc)
     tsv[:, 2] = _uniform(rng, 268.0, 300.0, nc)  # temperature, K
-    tsv[:6, 2] = (271.0, 271.25, 272.5, 273.15, 290.0, 268.5)
+    tsv[:6, 2] = (271.0, 290.0, 268.5, 273.15, 271.25, 272.5)
     forcing["avgTracersSurfaceValue"] = (6, tsv)
     forcing["avgSurfaceVelocity"] = (6, _uniform(rng, -2.0, 2.0, (nc, 2)))
     forcing["avgSSHGradient"] = (6, _uniform(rng, -1.0e-4, 1.0e-4, (nc, 2)))
@@ -227,7 +227,7 @@ def _arrays(rng, spec, x2o_names) -> dict:
     pools["forcing"] = forcing
     state = {"ssh": (5, _uniform(rng, -2.0, 2.0, nc))}
     lt = _uniform(rng, 0.0, 20.0, (nc, 4))
-    lt[1, 0] = 0.0
+    lt[1:3, 0] = 0.0  # a zero energy of either sign into min(.., 0)
     state["layerThickness"] = (6, lt)
     if spec["frazil"]:
         acc = _uniform(rng, -5.0, 5.0, nc)
