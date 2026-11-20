@@ -154,6 +154,17 @@ def _host(a):
     return a.get() if hasattr(a, "get") else np.asarray(a)
 
 
+def _on_device(term, tier: str):
+    """A :class:`~woof.da.var.obsop_wrfda.FlatObsTerm` as its device form (the same words), else ``term``."""
+    from woof.da.var.obsop_wrfda import FlatObsTerm
+
+    if isinstance(term, FlatObsTerm) and term.term.xtoxa is None:
+        from woof.da.var.obsop_device import DeviceObsTerm
+
+        return DeviceObsTerm(term, tier)
+    return term
+
+
 class SparseObsTerm:
     """A linear ``H'``: observation ``i`` is ``sum_k w[i, k] * x[field[i, k]].flat[index[i, k]]``.
 
@@ -251,6 +262,12 @@ class _HostOps:
     def axpy(self, a, x, y):
         y[...] = y + np.float64(a) * x
 
+    def dot_device(self, x, y) -> float:
+        return self.dot(x, y)
+
+    def axpy_neg(self, s, x, y):
+        self.axpy(-s, x, y)
+
     def div(self, x, a):
         return x / np.float64(a)
 
@@ -305,6 +322,18 @@ class _DeviceOps:
 
         axpy(a, x, y)
 
+    def dot_device(self, x, y):
+        """The dot left on the device (no host sync), for :meth:`axpy_neg`."""
+        from woof.da.var.control import dot_device
+
+        return dot_device(x, y, self.reduction)
+
+    def axpy_neg(self, s, x, y):
+        """``y = y + (-s) x`` with ``s`` a :meth:`dot_device` value."""
+        from woof.da.var.control import axpy_neg_device
+
+        axpy_neg_device(s, x, y)
+
     def div(self, x, a):
         out = self.zeros(x.size)
         self._go("var_div_scalar", x.size, out, x, self.dtype(a), np.int64(x.size))
@@ -344,7 +373,8 @@ class VarCost:
     (``dot`` in the tier's reduction) that :mod:`woof.da.var.minimise` uses.
     """
 
-    def __init__(self, u, obs, *, tier: str = "reference", jb_factor: float = 1.0, reduction: str | None = None):
+    def __init__(self, u, obs, *, tier: str = "reference", jb_factor: float = 1.0, reduction: str | None = None,
+                 device_obs: bool = True):
         if tier not in TIERS:
             raise ValueError(f"tier must be one of {TIERS}, not {tier!r}")
         self.u = u
@@ -352,6 +382,8 @@ class VarCost:
         self.jb_factor = float(jb_factor)
         terms = [obs] if not isinstance(obs, (list, tuple)) else list(obs)
         self.terms = [as_obs_term(t) for t in terms]
+        if tier != "reference" and device_obs:
+            self.terms = [_on_device(t, tier) for t in self.terms]
         if tier == "reference":
             self.ops = _HostOps()
         else:

@@ -102,6 +102,19 @@ extern "C" __global__ void var_axpy(real* __restrict__ y, const real* __restrict
     GRID_LOOP(t, n) { y[t] = R_ADD(y[t], R_MUL(a, x[t])); }
 }
 
+// y = y + a x with a = -s[0] (one binary64 value on the device, the result of
+// a dot) rounded once to the real type: da_minimise_cg's re-orthonormalisation
+// ghat = ghat - gdot qhat(i) without a round trip to the host
+extern "C" __global__ void var_axpy_neg_dev(real* __restrict__ y, const real* __restrict__ x,
+                                            const double* __restrict__ s, const long long n) {
+#ifdef VAR_F64
+    const real a = -s[0];
+#else
+    const real a = __double2float_rn(-s[0]);
+#endif
+    GRID_LOOP(t, n) { y[t] = R_ADD(y[t], R_MUL(a, x[t])); }
+}
+
 // out = x / a  (da_minimise_cg: qhat = ghat / sqrt(rrmold), a division, not
 // a product with the reciprocal)
 extern "C" __global__ void var_div_scalar(real* __restrict__ out, const real* __restrict__ x, const real a,

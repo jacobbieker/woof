@@ -185,7 +185,9 @@ class _Gpspw:
             y[n] = iw._hcol(tpw, *w) + 0.1 * dpw
         return y
 
-    def ad(self, g, gtpw, yv):
+    def ad_terms(self, gtpw, yv):
+        """The adjoint report by report: scatters into ``gtpw`` and yields each
+        term's ``(w, k, mdq, mdrho)`` for the ``q``/``rho`` corners, in order."""
         for n, (w, (branch, _, terms)) in enumerate(zip(self.w, self.pieces)):
             i0, j0, dx, dy, dxm, dym = w
             gy = yv[n]
@@ -195,14 +197,17 @@ class _Gpspw:
             gtpw[i0, j0 + 1] = gtpw[i0, j0 + 1] + dxm * dy * gy
             gtpw[i0 + 1, j0 + 1] = gtpw[i0 + 1, j0 + 1] + dx * dy * gy
             for k, rk, qk, dz in terms:
-                mdq = rk * dz * dpw
-                mdrho = qk * dz * dpw
-                for f, val in (("q", mdq), ("rho", mdrho)):
-                    a = g[f]
-                    a[i0, j0, k] = a[i0, j0, k] + dym * dxm * val
-                    a[i0 + 1, j0, k] = a[i0 + 1, j0, k] + dym * dx * val
-                    a[i0, j0 + 1, k] = a[i0, j0 + 1, k] + dy * dxm * val
-                    a[i0 + 1, j0 + 1, k] = a[i0 + 1, j0 + 1, k] + dy * dx * val
+                yield w, k, rk * dz * dpw, qk * dz * dpw
+
+    def ad(self, g, gtpw, yv):
+        for w, k, mdq, mdrho in self.ad_terms(gtpw, yv):
+            i0, j0, dx, dy, dxm, dym = w
+            for f, val in (("q", mdq), ("rho", mdrho)):
+                a = g[f]
+                a[i0, j0, k] = a[i0, j0, k] + dym * dxm * val
+                a[i0 + 1, j0, k] = a[i0 + 1, j0, k] + dym * dx * val
+                a[i0, j0 + 1, k] = a[i0, j0 + 1, k] + dy * dxm * val
+                a[i0 + 1, j0 + 1, k] = a[i0 + 1, j0 + 1, k] + dy * dx * val
 
 
 # --------------------------------------------------------------------------- satem
@@ -289,6 +294,26 @@ class _Satem:
         return y
 
     def ad(self, g, yv):
+        xb = self.xb
+        for w, ap_s, atv_s in self.ad_reports(yv):
+            i0, j0, dx, dy, dxm, dym = w
+            atm = {(0, 0): dym * dxm * atv_s, (1, 0): dym * dx * atv_s,
+                   (0, 1): dy * dxm * atv_s, (1, 1): dy * dx * atv_s}
+            gp = g["p"]
+            gp[i0, j0] = gp[i0, j0] + dym * dxm * ap_s
+            gp[i0 + 1, j0] = gp[i0 + 1, j0] + dym * dx * ap_s
+            gp[i0, j0 + 1] = gp[i0, j0 + 1] + dy * dxm * ap_s
+            gp[i0 + 1, j0 + 1] = gp[i0 + 1, j0 + 1] + dy * dx * ap_s
+            for di in (0, 1):
+                for dj in (0, 1):
+                    a, b = i0 + di, j0 + dj
+                    g["t"][a, b] = g["t"][a, b] + atm[(di, dj)] * (1.0 + 0.61 * xb["q"][a, b])
+                    g["q"][a, b] = g["q"][a, b] + 0.61 * xb["t"][a, b] * atm[(di, dj)]
+
+    def ad_reports(self, yv):
+        """The adjoint's per-report part: yields each report's weights and its
+        ``p``/``tv`` profile adjoints (``ap``, ``atv`` over ``1..kte``), which
+        :meth:`ad` scatters to the four columns (da_tv_profile_adj)."""
         lm, xb = self.lm, self.xb
         kte = xb["p"].shape[2]
         ap = np.zeros(kte + 2)
@@ -339,22 +364,10 @@ class _Satem:
             find_adj(self.ref_p[n], pre_ma, tv_ma, atv2)
             atv2 = 0.0
             # da_tv_profile_adj
-            i0, j0, dx, dy, dxm, dym = w
             s = slice(1, kte + 1)
-            atm = {(0, 0): dym * dxm * atv[s], (1, 0): dym * dx * atv[s],
-                   (0, 1): dy * dxm * atv[s], (1, 1): dy * dx * atv[s]}
-            gp = g["p"]
-            gp[i0, j0] = gp[i0, j0] + dym * dxm * ap[s]
-            gp[i0 + 1, j0] = gp[i0 + 1, j0] + dym * dx * ap[s]
-            gp[i0, j0 + 1] = gp[i0, j0 + 1] + dy * dxm * ap[s]
-            gp[i0 + 1, j0 + 1] = gp[i0 + 1, j0 + 1] + dy * dx * ap[s]
+            yield w, ap[s].copy(), atv[s].copy()
             atv[s] = 0.0
             ap[s] = 0.0
-            for di in (0, 1):
-                for dj in (0, 1):
-                    a, b = i0 + di, j0 + dj
-                    g["t"][a, b] = g["t"][a, b] + atm[(di, dj)] * (1.0 + 0.61 * xb["q"][a, b])
-                    g["q"][a, b] = g["q"][a, b] + 0.61 * xb["t"][a, b] * atm[(di, dj)]
 
 
 class ObsStencil:

@@ -28,7 +28,9 @@ import numpy as np
 __all__ = ["DeviceU", "PRECISIONS", "psichi_adj_plan"]
 
 PRECISIONS = ("oracle", "production")
-_SOURCE = Path(__file__).with_name("kernels") / "var_u.cu"
+_KERNELS = Path(__file__).with_name("kernels")
+#: the translation units: U, U^T and the control-vector operations; H' and H'^T
+UNITS = ("var_u.cu", "var_obs.cu")
 _THREADS = 256
 _MAX_BLOCKS = 65535
 #: CUDA keeps binary32 subnormals for this unit (woof.cuda_subnormals), and
@@ -37,13 +39,15 @@ _MARKER = "#define GPUWM_RETAIN_SUBNORMALS 1\n"
 XA_KEYS = ("u", "v", "t", "q", "psfc", "p", "rho")
 
 
-def _source(precision: str) -> str:
+def _source(precision: str, unit: str = "var_u.cu") -> str:
+    if unit not in UNITS:
+        raise ValueError(f"unknown woof var kernel unit {unit!r}")
     head = _MARKER + ("#define VAR_F64 1\n" if precision == "oracle" else "")
-    return head + _SOURCE.read_text(encoding="utf-8")
+    return head + (_KERNELS / unit).read_text(encoding="utf-8")
 
 
 @lru_cache(maxsize=None)
-def _module(precision: str):
+def _module(precision: str, unit: str = "var_u.cu"):
     import cupy as cp
 
     from woof import backend
@@ -52,11 +56,11 @@ def _module(precision: str):
         from woof import cuda_subnormals
 
         cuda_subnormals.install()
-    return cp.RawModule(code=_source(precision), options=("-std=c++17",))
+    return cp.RawModule(code=_source(precision, unit), options=("-std=c++17",))
 
 
-def kernel(precision: str, name: str):
-    return _module(precision).get_function(name)
+def kernel(precision: str, name: str, unit: str = "var_u.cu"):
+    return _module(precision, unit).get_function(name)
 
 
 def blocks(total: int) -> int:
