@@ -50,6 +50,10 @@ module seq_flds_mod
   ! the component field lists and the ocean-to-land switch mpaso_cpl_indices reads
   character(len=16384) :: seq_flds_x2o_fields = '', seq_flds_o2x_fields = ''
   logical :: ocn_lnd_one_way = .false.
+  ! the sea ice's: its field lists, the wave coupling and the wave spectrum's length
+  character(len=80) :: wav_ice_coup = 'none'
+  integer :: wav_nfreq = 0
+  character(len=16384) :: seq_flds_x2i_fields = '', seq_flds_i2x_fields = ''
 end module seq_flds_mod
 
 ! the two coupler settings the ocean's import and export read
