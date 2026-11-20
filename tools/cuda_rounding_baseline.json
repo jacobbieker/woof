@@ -5651,7 +5651,7 @@
    },
    {
     "file": "woof/hex/cuda_driver.py",
-    "sha256": "7c0ddd54648b449430c1cdef49667cf1a17ac7959e2c1f138847fd610820c7bd"
+    "sha256": "f81c67a58796c540a620b74fd64320bed6fd246098e7cc742cfe81919d753c75"
    },
    {
     "file": "woof/hex/cuda_dynamics_rrfs.py",
@@ -6248,6 +6248,10 @@
    {
     "file": "woof/hex/obs_nudging.py",
     "sha256": "59e6814d0c54ed84b074e5152a8209b3eb5c361cfc16fba66940ef089c61430a"
+   },
+   {
+    "file": "woof/hex/obstacles.py",
+    "sha256": "59eae00af0eb68768cfdca9f136076179bfef8560fb1a4f7ef59fa529ebe889b"
    },
    {
     "file": "woof/hex/ocean_mixed_layer.py",
@@ -8598,6 +8602,10 @@
    {
     "file": "woof/hex/obs_nudging.py",
     "sha256": "d7996509c4f0115c3b7f2580524565b3e9f9c3408490d21484774a38cf945eb3"
+   },
+   {
+    "file": "woof/hex/obstacles.py",
+    "sha256": "38224b931e56b625af0798e021b52142d7c1995ef3d1c3a106d606f8d2b05461"
    },
    {
     "file": "woof/hex/partition_overlap_v841.py",

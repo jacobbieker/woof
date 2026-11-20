@@ -4463,6 +4463,28 @@ Takes no options of its own.
 |---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 
+## `woof var`
+
+| option | what it does |
+|---|---|
+| `--be` | WRFDA background-error file (be.dat, cv_options = 5) |
+| `--check-rh {0,1}` | WRFDA check_rh in the analysis transfer (0 or 1; default 0) |
+| `--eps` | gradient reduction target (WRFDA eps; default 0.01) |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--first-guess` | WRF first guess (wrfinput_d01 or a wrfout), WRFDA's fg |
+| `--grid-id` | the bundle's grid name (default: the first guess's file name) |
+| `--iau-window-s` | record an IAU window in the bundle (seconds); default: insert at once |
+| `--landuse-table` | LANDUSE.TBL for the roughness (default: woof's packaged WRF table) |
+| `--log` | also write the minimiser log to this file |
+| `--max-ext-its` | outer loops (WRFDA max_ext_its; default 1) |
+| `--no-orthonorm-gradient` | turn off WRFDA's orthonorm_gradient (on by default, as in the tutorial) |
+| `--ntmax` | inner iterations per outer loop (WRFDA ntmax; default 50) |
+| `--obs` | OBSPROC observations (ob.ascii) |
+| `--out` | analysis bundle directory to write (must not exist) |
+| `--ph {analysis,balance}` | bundle PH: WRFDA's hydrostatic PH (analysis, default) or rebuilt by the bundle (balance) |
+| `--tier {reference,oracle,production}` | reference: NumPy binary64 (default); oracle: GPU binary64 with WRFDA's serial dot product; production: GPU binary32 |
+| `--window-minutes` | observation window half-width around the first guess's time (default 60) |
+
 ## `woof verify`
 
 | argument | what it does |

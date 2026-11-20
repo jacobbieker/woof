@@ -499,7 +499,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   momentum tendencies. A street-canyon benchmark gives the H/W = 1 vortex,
   and a cube benchmark gives the wake and horseshoe. Off, or with no
   buildings, nothing launches and runs are bit-identical. Momentum only,
-  regional grid only. A real-data check over Manhattan places the model's
+  regional grid only. The hex (MPAS) dycore takes the same option on the
+  WOOF-physics route (`woof hex forecast --obstacle-opt 1`), on the Voronoi
+  edges and w faces: a cube on a test sphere at 15 cells per H reattaches
+  at 1.80 H. A real-data check over Manhattan places the model's
   buildings at their footprint heights (r = 0.99 at 25 m). In lower and
   midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
   50 m does not open the streets. A domain with buildings (or an urban
@@ -969,7 +972,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   thickness types, with the same accepted observations as WRFDA and its
   initial cost `J_0` on the tutorial case, and their linearised operators
   and adjoints.
-  There is no analysis command yet. Section 11 plans geostationary imager
+  `woof var --be be.dat --obs ob.ascii --first-guess wrfinput_d01 --out
+  BUNDLE` (experimental) runs the whole 3D-Var and writes a
+  `wrf-analysis-bundle/1` that `woof run --analysis BUNDLE` starts from
+  ([docs/var.md](docs/var.md)). On the tutorial case it takes the same 29
+  iterations as WRFDA, with every logged cost and gradient within 1e-14
+  relative, and its analysis rounds to WRFDA's `wrfvar_output` word for word.
+  `--tier oracle` runs on CUDA or Metal with the same words;
+  `--tier production` (binary32) gives one digest on both. Section 11 plans geostationary imager
   radiances for initial conditions: Google's SatWeave mosaic and the native
   GOES ABI, Himawari AHI and Meteosat imagers, through an opt-in CRTM into
   the LETKF first and into 3D-Var later. Default runs are not changed.

@@ -1823,7 +1823,11 @@ PNG it writes carries an `experimental` stamp.
   `da_calculate_grady`, `da_jo_and_grady` and its per-type `jo` sums,
   `da_transform_vtoy(_adj)` for 3D-Var, `da_check_gradient`),
   `woof/da/var/minimise.py` (`da_minimise_cg` with its stdout formats, and
-  `da_solve`'s outer loop), and `tools/wrfda_oracle/woof_dump.inc` (debug
+  `da_solve`'s outer loop), `woof/da/var/analysis.py`
+  (`da_transfer_wrftoxb`, `da_setup_firstguess`'s map coefficients,
+  `da_roughness_from_lanu`, `da_tpq_to_rh`'s `es`/`qs`, `da_integrat_dz`,
+  `da_transform_xtogpsref`'s `ref`, `da_transform_vtox`,
+  `da_transfer_xatowrf`, `da_check_rh_simple`), and `tools/wrfda_oracle/woof_dump.inc` (debug
   dumps hooked into a copy of the WRFDA tree, never the pinned tree).
   `woof/da/var/crmath.py` is woof's own: correctly rounded `sin`, `cos`,
   `tan`, `exp`, `log`, `log10` and `pow`, evaluated in Python's `decimal`, with no
@@ -1836,7 +1840,9 @@ PNG it writes carries an `experimental` stamp.
   `tests/data/wrfda471/manifest.json` records the `be.dat` hash and the
   gate digests. No WRFDA data file is committed.
 - **Scope**: experimental; nothing here is on a forecast path
-  (`tests/test_var_import_graph.py`).
+  (`tests/test_var_import_graph.py`): only the `woof var` door
+  (`woof/var_cli.py`) imports it, and its analysis reaches a forecast only as
+  a `wrf-analysis-bundle/1` read by `woof run --analysis`.
 
 ## Attribution defects in this repository's own history (2026-07-26)
 
