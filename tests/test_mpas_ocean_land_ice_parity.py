@@ -131,8 +131,8 @@ def test_fixture_covers_the_diagnostic_branches(precision):
         tv_moved = (out["diagnostics/landIceTracerTransferVelocities"] != d["landIceTracerTransferVelocities"]).any()
         assert tv_moved == (formulation == "Jenkins"), name
         weighted += int(cfg["config_land_ice_flux_boundaryLayerNeighborWeight"] > 0)
-        mask = out["forcing/landIceMask"] == 1
-        coefficient = out["diagnostics/surfaceFluxAttenuationCoefficient"]
+        mask = out["forcing/landIceMask"][:case["dims"]["nCells"]] == 1
+        coefficient = out["diagnostics/surfaceFluxAttenuationCoefficient"][:case["dims"]["nCells"]]
         want = coefficient.dtype.type(cfg["config_land_ice_flux_attenuation_coefficient"])
         attenuated += int(mask.any() and (coefficient[mask] == want).all())
     assert formulations == {"ISOMIP", "Jenkins"} and weighted >= 2 and attenuated == len(fixture)
@@ -140,7 +140,7 @@ def test_fixture_covers_the_diagnostic_branches(precision):
 
 def test_unported_formulations_are_refused_by_name():
     from woof.hex.mpas_ocean import land_ice_v842 as li
-    from woof.hex.mpas_ocean.refusal import ConfigurationRefusal
+    from woof.hex.errors import ConfigurationRefusal
     base = {"config_land_ice_flux_mode": "standalone"}
     with pytest.raises(ConfigurationRefusal, match="HollandJenkins"):
         li.check_config({**base, "config_land_ice_flux_formulation": "HollandJenkins"})
