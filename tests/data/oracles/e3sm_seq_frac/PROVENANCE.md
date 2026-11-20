@@ -55,6 +55,10 @@ every host builds the same bytes.
 | `abort_ice_bound`, `abort_ocn_bound`, `abort_atm_sum`, `abort_atm_lfrin` | | | each check stopping the coupler |
 | `abort_ice_float32_eps`, `abort_atm_sum_float32_eps` | | | a bound and the sum between E3SM's single-precision eps and a double 0.01 |
 | `abort_i2x_without_si_ifrac` | | | MCT's copy stopping on a missing `Si_ifrac` |
+| `checked_fields_in_bounds` | rearrange | matrix | every fraction `seq_frac_check` tests present (the ice vector gains `lfrin` and `gfrac`, the ocean's `gfrac`, `rfrac`, `wfrac`, `zfrac` and `lfrin`), within bounds |
+| `abort_ice_lfrin`, `abort_ice_gfrac`, `abort_ocn_gfrac`, `abort_ocn_rfrac`, `abort_ocn_wfrac`, `abort_ocn_zfrac`, `abort_ocn_lfrin` | | | each of those bounds stopping the coupler on its own |
+| `nan_passes` | rearrange | matrix | NaN in `Si_ifrac`, an ocean `gfrac`, an atmosphere `lfrac` and `lfrin`: no stop |
+| `abort_nan_beside_bound` | | | a NaN in `Si_ifrac` beside a value below the bound: the stop |
 
 `aborts.json` keeps each stop's line; `<case>/reported` the stages the dead
 models report.
@@ -63,10 +67,14 @@ Not a case: an ice domain without `frac`. `seq_frac_set` looks it up with
 `perrWith`, so MCT only reports it and returns 0, and the product reads
 `rAttr(0,:)`, outside the vector. The port refuses it.
 
-NaN inputs are outside the word-for-word claim, and no case has one.
+NaN fractions pass, as in E3SM: gfortran's `minval`/`maxval` skip NaN
+(all NaN gives NaN) and a comparison with NaN is false, so the checks stop
+only on the other points. A NaN's payload after an operation is the
+processor's (the default quiet NaN from x86 here), so the grading compares
+NaN words as NaN; every other word bit for bit.
 
 ## Grading
 
 `tests/test_e3sm_seq_frac_parity.py` runs `woof.hex.coupled.seq_frac_e3sm`:
-every word of the three vectors must be bit-identical, the reported stages
+every word of the three vectors must be bit-identical (a NaN matching a NaN), the reported stages
 the same, and each stop the same stage or MCT message.
