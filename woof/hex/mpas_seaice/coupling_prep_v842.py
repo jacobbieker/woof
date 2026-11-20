@@ -1,0 +1,176 @@
+"""MPAS-Seaice v8.4.2: the column package's coupling preparation on the GPU.
+
+:func:`coupling_prep` is ``seaice_column_coupling_prep``
+(``mpas_seaice_column.F``), the last thing
+``seaice_column_postdynamics_time_integration`` does each step when the column
+package is on. It works per cell over ``nCellsSolve``:
+
+- it saves the freezing/melting potential;
+- it sums the category albedos (and the bare-ice, snow and pond albedos where
+  the sun is up) and the effective pond area into the cell values, weighting
+  each category by its ice area;
+- it feeds the pond freshwater back into the ocean freshwater flux
+  (``config_include_pond_freshwater_feedback``);
+- it copies the albedos and ocean fluxes, which are per unit grid-cell area,
+  into their ``*Area`` fields;
+- it forms the shortwave scaling factor.
+
+It then runs ``seaice_column_scale_fluxes``. Where there is ice, that divides
+the air stress, the atmospheric and ocean fluxes, the reference
+temperature/humidity and the cell albedos by the ice area. Where there is
+none, it zeroes them, sets the open-water upward longwave at the sea's
+freezing point, and takes the reference values from the air.
+
+The kernels (``coupling_prep_v842.cu``) are held word for word to v8.4.2.
+Both routines are cut verbatim out of ``mpas_seaice_column.F`` and compiled
+with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
+(``tools/mpas_seaice_oracle/run_coupling_prep.F90``,
+``tests/test_mpas_seaice_coupling_prep_parity.py``).
+
+Refused by name:
+
+- ``config_use_ocean_mixed_layer`` (``seaice_column_ocean_mixed_layer``:
+  ``colpkg_atm_boundary``'s stability iteration and
+  ``colpkg_ocn_mixed_layer``, not ported). Its Registry default is
+  ``.true.`` for stand-alone runs. A run coupled to an ocean model turns it
+  off, because the ocean supplies the sea surface.
+- ``config_use_column_biogeochemistry`` (the BGC ocean fluxes, not ported).
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+from importlib.resources import files
+
+import numpy as np
+
+from woof.hex.errors import ConfigurationRefusal
+
+from .velocity_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
+
+SOURCE_FILES = (
+    "src/core_seaice/shared/mpas_seaice_column.F:3634-4041",
+    "src/core_seaice/shared/mpas_seaice_column.F:4055-4306",
+    "src/core_seaice/shared/mpas_seaice_constants.F",
+    "src/core_seaice/column/constants/cice/ice_constants_colpkg.F90",
+)
+MODULE_OPTIONS = COMPILE_OPTIONS
+_BLOCK = 128
+#: seaice_constants: colpkg dbl_kind parameters (puny, rhofresh, stefan_boltzmann, Tffresh)
+PUNY = 1.0e-11
+DENSITY_FRESHWATER = 1000.0
+STEFAN_BOLTZMANN = 567.0e-10
+FRESH_WATER_FREEZING_POINT = 273.15
+#: Registry.xml defaults (v8.4.2) of the configs the routines read
+DEFAULT_CONFIGS = {"config_use_ocean_mixed_layer": True, "config_include_pond_freshwater_feedback": False,
+                   "config_use_column_biogeochemistry": False}
+#: the fields each pool must hold
+FIELDS = {
+    "ocean_coupling": ("freezingMeltingPotential", "seaFreezingTemperature"),
+    "diagnostics": ("freezingMeltingPotentialInitial",),
+    "tracers": ("iceAreaCategory",),
+    "tracers_aggregate": ("iceAreaCell",),
+    "shortwave": ("albedoVisibleDirectCell", "albedoVisibleDiffuseCell", "albedoIRDirectCell", "albedoIRDiffuseCell",
+                  "albedoVisibleDirectCategory", "albedoVisibleDiffuseCategory", "albedoIRDirectCategory",
+                  "albedoIRDiffuseCategory", "albedoVisibleDirectArea", "albedoVisibleDiffuseArea",
+                  "albedoIRDirectArea", "albedoIRDiffuseArea", "solarZenithAngleCosine", "bareIceAlbedoCell",
+                  "snowAlbedoCell", "pondAlbedoCell", "bareIceAlbedoCategory", "snowAlbedoCategory",
+                  "pondAlbedoCategory", "effectivePondAreaCell", "effectivePondAreaCategory",
+                  "shortwaveScalingFactor", "absorbedShortwaveFlux"),
+    "atmos_coupling": ("shortwaveVisibleDirectDown", "shortwaveVisibleDiffuseDown", "shortwaveIRDirectDown",
+                       "shortwaveIRDiffuseDown", "atmosReferenceHumidity2m", "atmosReferenceTemperature2m",
+                       "airTemperature", "airSpecificHumidity"),
+    "ponds": ("pondFreshWaterFlux",),
+    "ocean_fluxes": ("oceanFreshWaterFlux", "oceanSaltFlux", "oceanHeatFlux", "oceanShortwaveFlux",
+                     "oceanFreshWaterFluxArea", "oceanSaltFluxArea", "oceanHeatFluxArea", "oceanShortwaveFluxArea"),
+    "velocity_solver": ("airStressCellU", "airStressCellV"),
+    "atmos_fluxes": ("sensibleHeatFlux", "latentHeatFlux", "evaporativeWaterFlux", "longwaveUp"),
+}
+
+
+def module_source(precision: str = "r4") -> str:
+    if precision not in PRECISIONS:
+        raise ValueError(f"precision must be one of {sorted(PRECISIONS)}")
+    body = files("woof.hex.mpas_seaice").joinpath("coupling_prep_v842.cu").read_text(encoding="utf-8")
+    return ("#define MPAS_RKIND8 1\n" if precision == "r8" else "") + body
+
+
+@lru_cache(maxsize=None)
+def _module_on(device: int, precision: str, options: tuple[str, ...]):
+    import cupy as cp
+    from woof.nvrtc_ptx_cache import compile_using_nvrtc
+
+    image, _ = compile_using_nvrtc(module_source(precision), options, None,
+                                   f"seaice_coupling_prep_v842_{precision}.cu")
+    with cp.cuda.Device(device):
+        module = cp.cuda.function.Module()
+        module.load(image.encode() if isinstance(image, str) else image)
+    return module
+
+
+def _launch(precision: str, name: str, n: int, args: tuple) -> None:
+    import cupy as cp
+    if n > 0:
+        _module_on(cp.cuda.Device().id, precision, launch_options(COMPILE_OPTIONS)).get_function(name)(
+            ((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,), args)
+
+
+def _config(configs: dict, name: str):
+    return configs.get(name, DEFAULT_CONFIGS[name])
+
+
+def check_config(configs: dict) -> None:
+    """Refuse, by name, what this port does not carry."""
+    if _config(configs, "config_use_ocean_mixed_layer"):
+        raise ConfigurationRefusal(
+            knob="config_use_ocean_mixed_layer", value=True,
+            reason="seaice_column_ocean_mixed_layer (colpkg_atm_boundary's stability iteration and "
+                   "colpkg_ocn_mixed_layer) is not ported; a run coupled to an ocean turns it off",
+            declaration="config_use_ocean_mixed_layer = .false.")
+    if _config(configs, "config_use_column_biogeochemistry"):
+        raise ConfigurationRefusal(
+            knob="config_use_column_biogeochemistry", value=True,
+            reason="the column biogeochemistry's ocean fluxes are not ported",
+            declaration="config_use_column_biogeochemistry = .false.")
+
+
+def coupling_prep(*, pools: dict, n_cells_solve: int, n_cells_solve_aggregate: int | None = None,
+                  dt: float, configs: dict) -> None:
+    """``seaice_column_coupling_prep`` then ``seaice_column_scale_fluxes``, in place on ``pools``.
+
+    ``pools`` maps the Registry struct names in :data:`FIELDS` to their device
+    arrays (``iceAreaCategory`` at time level 1). ``n_cells_solve`` is the
+    tracers pool's ``nCellsSolve`` and ``n_cells_solve_aggregate`` is
+    tracers_aggregate's (the same by default). ``dt`` is ``config_dt``.
+    """
+    check_config(configs)
+    sw, oc, of, ac = pools["shortwave"], pools["ocean_coupling"], pools["ocean_fluxes"], pools["atmos_coupling"]
+    area_category = pools["tracers"]["iceAreaCategory"]
+    precision = _precision_of(area_category)
+    real = PRECISIONS[precision]
+    i32 = np.int32
+    n_categories = int(area_category.shape[1])
+    feedback = bool(_config(configs, "config_include_pond_freshwater_feedback"))
+    _launch(precision, "seaice_coupling_prep_v842", n_cells_solve, (
+        pools["diagnostics"]["freezingMeltingPotentialInitial"], oc["freezingMeltingPotential"], area_category,
+        sw["albedoVisibleDirectCell"], sw["albedoVisibleDiffuseCell"], sw["albedoIRDirectCell"],
+        sw["albedoIRDiffuseCell"], sw["albedoVisibleDirectCategory"], sw["albedoVisibleDiffuseCategory"],
+        sw["albedoIRDirectCategory"], sw["albedoIRDiffuseCategory"], sw["albedoVisibleDirectArea"],
+        sw["albedoVisibleDiffuseArea"], sw["albedoIRDirectArea"], sw["albedoIRDiffuseArea"],
+        sw["solarZenithAngleCosine"], sw["bareIceAlbedoCell"], sw["snowAlbedoCell"], sw["pondAlbedoCell"],
+        sw["bareIceAlbedoCategory"], sw["snowAlbedoCategory"], sw["pondAlbedoCategory"],
+        sw["effectivePondAreaCell"], sw["effectivePondAreaCategory"], pools["ponds"]["pondFreshWaterFlux"],
+        of["oceanFreshWaterFlux"], of["oceanSaltFlux"], of["oceanHeatFlux"], of["oceanShortwaveFlux"],
+        of["oceanFreshWaterFluxArea"], of["oceanSaltFluxArea"], of["oceanHeatFluxArea"],
+        of["oceanShortwaveFluxArea"], sw["shortwaveScalingFactor"], ac["shortwaveVisibleDirectDown"],
+        ac["shortwaveVisibleDiffuseDown"], ac["shortwaveIRDirectDown"], ac["shortwaveIRDiffuseDown"],
+        i32(n_cells_solve), i32(n_categories), i32(feedback), real(PUNY), real(DENSITY_FRESHWATER), real(dt)))
+    vs, af = pools["velocity_solver"], pools["atmos_fluxes"]
+    n_aggregate = n_cells_solve if n_cells_solve_aggregate is None else n_cells_solve_aggregate
+    _launch(precision, "seaice_scale_fluxes_v842", n_aggregate, (
+        pools["tracers_aggregate"]["iceAreaCell"], vs["airStressCellU"], vs["airStressCellV"],
+        af["sensibleHeatFlux"], af["latentHeatFlux"], sw["absorbedShortwaveFlux"], af["longwaveUp"],
+        af["evaporativeWaterFlux"], ac["atmosReferenceTemperature2m"], ac["atmosReferenceHumidity2m"],
+        of["oceanFreshWaterFlux"], of["oceanSaltFlux"], of["oceanHeatFlux"], of["oceanShortwaveFlux"],
+        sw["albedoVisibleDirectCell"], sw["albedoIRDirectCell"], sw["albedoVisibleDiffuseCell"],
+        sw["albedoIRDiffuseCell"], ac["airTemperature"], ac["airSpecificHumidity"], oc["seaFreezingTemperature"],
+        i32(n_aggregate), real(STEFAN_BOLTZMANN), real(FRESH_WATER_FREEZING_POINT)))
