@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -1597,11 +1597,83 @@ def coriolis(exe: str, runner: list[str], seed: int = 20261128) -> dict:
     return out
 
 
+#: w_damp: WRF's w_damping = 1 limiter.  WRFPLUS couples with the column
+#: mass mut and uses w_beta = 1 as onset and excess reference, so the
+#: cases use c1f = 1, c2f = 0 and w_damp_on = w_crit_cfl = 1.
+WD_CASES = {
+    "wd_a": dict(),
+    "wd_b": dict(dt=30.0),
+    "wd_c": dict(nz=3, ny=5, nx=4, dt=12.0),
+}
+WD_DIMS = dict(nz=8, ny=9, nx=10)
+
+
+def _wd_record(geom, tr, pe, seeds):
+    from types import SimpleNamespace as NS
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    L = AdvLayout(NS(nz=nz, ny=ny, nx=nx, open_x=0, open_y=0))
+    blob = np.array([nx, ny, nz], dtype=np.int32).tobytes()
+    blob += np.array([geom.dt]).astype("<f8").tobytes()
+    mut = tr["mub"] + tr["mup"]
+    a3 = [L.place3(tr["rw_t"]), L.place3(seeds["rw_t"]), L.place3(tr["ww"]),
+          L.place3(pe["ww"]), L.place3(tr["w"])]
+    for a in a3 + [L.pad2(mut), L.pad2(pe["mup"])]:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    blob += np.concatenate([tr["rdnw"], [0.0]]).astype("<f8").tobytes()
+    return blob, L
+
+
+def _wd_expected(geom, out, L):
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+    vals = np.frombuffer(out, dtype="<f8")
+    assert vals.size == 4 * n3 + n2, (vals.size, n3, n2)
+    x = [vals[i * n3:(i + 1) * n3].reshape(L.s3, order="F") for i in range(4)]
+    m2 = vals[4 * n3:].reshape(L.s2, order="F")
+    wl = (nz + 1, ny, nx)
+    return {"tl_rw_t": L.take3(x[0], wl), "tl_d_rw_t": L.take3(x[1], wl),
+            "adst_rw_t": L.take3(x[2], wl), "ad_ww": L.take3(x[3], wl),
+            "ad_mup": np.ascontiguousarray(m2[4:4 + nx, 4:4 + ny].T)}
+
+
+def w_damp(exe: str, runner: list[str], seed: int = 20261129) -> dict:
+    from woof.grad.wrfplus import bigstep as B
+    out = {}
+    for n, (name, over) in enumerate(WD_CASES.items()):
+        dims = dict(WD_DIMS)
+        dims.update(over)
+        geom = cases.wd_geometry(**dims)
+        geom.validate()
+        tr = cases.wd_trajectory(geom, seed + 10 * n)
+        pe = cases.wd_perturbation(geom, seed + 10 * n + 1)
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        seeds = {"rw_t": rng.standard_normal(B.wd_shapes(geom)["rw_t"])}
+        blob, L = _wd_record(geom, tr, pe, seeds)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _wd_expected(geom, result, L)
+        prefix = f"{name}/"
+        out[prefix + "op"] = np.array("wd")
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for k, v in seeds.items():
+            out[prefix + "seed/" + k] = v
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
             "small_step": small_step, "rk_stage": rk_stage,
             "advect": advect, "bigstep": bigstep, "rhsph": rhsph,
-            "coriolis": coriolis}
+            "coriolis": coriolis, "w_damp": w_damp}
 
 
 def main(argv=None) -> int:

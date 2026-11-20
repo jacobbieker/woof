@@ -1,6 +1,6 @@
 """Big-step tendency TL/AD (P3a item 5): WRF horizontal_pressure_gradient,
-pg_buoy_w, rhs_ph, coriolis and curvature on woof's strict slow_pgf,
-slow_buoyancy, slow_geopotential and coriolis_curvature
+pg_buoy_w, rhs_ph, coriolis, curvature and w_damp on woof's strict
+slow_pgf, slow_buoyancy, slow_geopotential, coriolis_curvature and w_damp
 (docs/dev/P3A-WRF-DRYCORE-ADJOINT.md section 5, item 5).
 
 Same conventions as :mod:`woof.grad.wrfplus.acoustic`: dicts of arrays by
@@ -9,7 +9,8 @@ perturbation (and the base state when ``nl``), ``*_ad`` adds into the
 inputs' adjoints.  The pressure gradient and buoyancy add into the
 momentum tendencies, so the tendencies' adjoints pass through unchanged;
 rhs_ph adds too but overwrites the top w level, whose adjoint it zeroes;
-coriolis/curvature add into all three momentum tendencies.
+coriolis/curvature add into all three momentum tendencies and w_damp
+into the w tendency.
 
 ``p`` is the perturbation pressure (the strict diagnosis's p'), ``php``
 the w-level perturbation geopotential and ``mup`` the perturbation
@@ -416,3 +417,70 @@ def cc_ad(adj_state, traj, adj, geom: CCGeometry):
     _kernel("cc_ad_v", dtype)(_blocks(nz * (ny + 1) * nx), (THREADS,), a)
     _kernel("cc_ad_w", dtype)(_blocks((nz + 1) * ny * nx), (THREADS,), a)
     _kernel("cc_ad_mut", dtype)(_blocks(ny * nx), (THREADS,), a)
+
+
+# ---------------------------------------------------------------- w_damp
+
+WD_STATE = ("rw_t",)
+WD_ACTIVE = ("ww", "mup")
+WD_PASSIVE = ("w", "mub", "c1f", "c2f", "rdnw")
+
+#: WRF share/module_model_constants.F w_alpha (woof openbc.cu W_DAMP_ALPHA).
+W_ALPHA = 0.3
+
+
+@dataclass(frozen=True)
+class WDampGeometry:
+    """w_damp's scalars: the time step, the onset ``w_damp_on``
+    (dycore.w_damp_onset: w_beta = 1, or w_crit_cfl under
+    zadvect_implicit) and ``w_crit_cfl``, from which the excess is
+    measured."""
+    nz: int
+    ny: int
+    nx: int
+    dt: float
+    w_damp_on: float = 1.0
+    w_crit_cfl: float = 1.0
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        return (r(self.dt), r(self.w_damp_on), r(self.w_crit_cfl), r(W_ALPHA),
+                i(self.nz), i(self.ny), i(self.nx))
+
+    def validate(self) -> None:
+        _axes(self)
+
+
+def wd_shapes(geom) -> dict:
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    wlev, col = (nz + 1, ny, nx), (ny, nx)
+    return {"rw_t": wlev, "ww": wlev, "w": wlev, "mup": col, "mub": col,
+            "c1f": (nz + 1,), "c2f": (nz + 1,), "rdnw": (nz,)}
+
+
+def wd_tl(state, pert_state, traj, pert, geom: WDampGeometry, *, nl=True):
+    """WRFPLUS g_w_damp (w_damping = 1) on woof's strict w_damp: where the
+    base state's vertical Courant number exceeds the onset, rw_t loses
+    sign(w) w_alpha (vert_cfl - w_crit_cfl) times the column mass."""
+    geom.validate()
+    _check(geom, _named("state", WD_STATE, state) + _named("pert", WD_STATE, pert_state)
+           + _named("traj", WD_ACTIVE + WD_PASSIVE, traj)
+           + _named("pert", WD_ACTIVE, pert), wd_shapes(geom), min_nz=1)
+    arrs = ((state["rw_t"], pert_state["rw_t"], traj["ww"], pert["ww"], traj["mup"],
+             pert["mup"]) + tuple(traj[n] for n in WD_PASSIVE))
+    dtype = _dtype(arrs)
+    _kernel("wd_tl", dtype)(_blocks(max(geom.nz - 1, 1) * geom.ny * geom.nx), (THREADS,),
+                            arrs + (np.int32(bool(nl)),) + geom.args(dtype))
+
+
+def wd_ad(adj_state, traj, adj, geom: WDampGeometry):
+    """Adjoint of :func:`wd_tl`: add into ``adj`` (ww, mup) from the rw_t
+    adjoint, which is unchanged."""
+    geom.validate()
+    _check(geom, _named("adj", WD_STATE, adj_state)
+           + _named("traj", WD_ACTIVE + WD_PASSIVE, traj)
+           + _named("adj", WD_ACTIVE, adj), wd_shapes(geom), min_nz=1)
+    arrs = ((adj_state["rw_t"], traj["ww"], traj["mup"], adj["ww"], adj["mup"])
+            + tuple(traj[n] for n in WD_PASSIVE))
+    dtype = _dtype(arrs)
+    _kernel("wd_ad", dtype)(_blocks(geom.ny * geom.nx), (THREADS,), arrs + geom.args(dtype))
