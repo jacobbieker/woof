@@ -6194,6 +6194,9 @@ def _go_wrfinput(args) -> int:
 @_ledger_main
 def go_main(args, *, observer=None) -> int:
     """Choose native WRF handoff or the existing CONFIG preparation chain."""
+    if getattr(args, "mcica_seed_mode", None):
+        # Stage subprocesses inherit the environment (woof.core.mcica_seed).
+        os.environ["WOOF_MCICA_SEED_MODE"] = args.mcica_seed_mode
     # [model] engine = "hex" runs the hex model (woof.go_hex); a CONFIG
     # without [model], or naming "wrf", takes the WRF path below unchanged.
     from woof.go_hex import HexGoRefusal, configured_engine
@@ -8156,6 +8159,12 @@ def _add_go_arguments(parser) -> None:
                              "its folder (default 1, enough to resume); 0 keeps "
                              "every hourly set, which a later branch or downscale "
                              "from an earlier checkpoint needs")
+    parser.add_argument("--mcica-seed-mode", choices=("pressure", "cell"), default=None,
+                        dest="mcica_seed_mode",
+                        help="RRTMG McICA seeding: pressure (default, upstream) or cell, "
+                             "a fixed hash of column id and radiation call time for "
+                             "`woof grad` finite-difference and ensemble legs "
+                             "(docs/grad.md); not upstream physics")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run",
                         help="validate the route and show how to launch it; fetch "
                              "and run nothing")

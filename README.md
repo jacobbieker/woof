@@ -908,6 +908,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `woof grad ens`, `woof grad letkf` and `woof grad efso` give ensemble
   sensitivities and each observation's impact on the forecast cost
   (EFSO), using the LETKF's own weights ([docs/grad.md](docs/grad.md)).
+  An opt-in `--mcica-seed-mode cell` (`woof go`, hex forecast door, or
+  `WOOF_MCICA_SEED_MODE`) freezes RRTMG's McICA cloud seeds to a hash of column
+  and call time, removing the +-5 J seed noise that one pressure ulp adds to a
+  leg; the default keeps upstream's pressure-digit seeding byte for byte, and
+  RRTMGP refuses the mode.
   On a regional case, the finite-difference and ensemble sensitivities
   agree in sign and pattern on the WRF route at 9 km and at 3 km, though
   ES and EFSO at the most-correlated points overstate magnitudes by about
