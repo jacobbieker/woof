@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from .acoustic import (CW_ACTIVE, CW_STATE, UV_ACTIVE, W_ACTIVE, W_STATE,
-                       CWGeometry, UVGeometry, WGeometry, cw_shapes,
-                       uv_shapes, w_shapes)
+from .acoustic import (CW_ACTIVE, CW_STATE, MT_ACTIVE, MT_STATE, UV_ACTIVE,
+                       W_ACTIVE, W_STATE, CWGeometry, MTGeometry, UVGeometry,
+                       WGeometry, cw_shapes, mt_shapes, uv_shapes, w_shapes)
 
 # (centre, spread) per field, roughly a mid-latitude 1-3 km grid.
 _UV_SCALES = {
@@ -191,3 +191,64 @@ def cw_perturbation(geom: CWGeometry, seed: int, dtype=np.float64) -> dict:
     return {n: np.ascontiguousarray(
         _CW_SCALES[n][1] * rng.standard_normal(shapes[n]), dtype=dtype)
         for n in CW_STATE + CW_ACTIVE}
+
+
+# advance_mu_t: coupled momenta u_pp/v_pp against full-mass reference
+# winds u/v; thp is theta - t0; msfv is the strict path's msfv_inv.
+_MT_SCALES = {
+    "mu_pp": (0.0, 20.0), "th_pp": (0.0, 100.0), "mu_old": (0.0, 20.0),
+    "th_old": (0.0, 100.0), "p_old": (0.0, 50.0), "mudf": (0.0, 1.0),
+    "ww_pp": (0.0, 10.0), "muts": (9.0e4, 2e3),
+    "u_pp": (0.0, 50.0), "v_pp": (0.0, 50.0), "u": (5.0, 5.0),
+    "v": (-2.0, 5.0), "mup": (0.0, 200.0), "rmu_t": (0.0, 1.0),
+    "thp": (10.0, 5.0), "rth_t": (0.0, 50.0), "ww_ref": (0.0, 10.0),
+    "p_pp": (0.0, 50.0), "mub2d": (9.0e4, 2e3), "msft": (1.0, 0.02),
+    "msfu": (1.0, 0.02), "msfv": (1.0, 0.02),
+}
+
+
+def mt_geometry(nz=7, ny=8, nx=9, **overrides) -> MTGeometry:
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 3000.0,
+                dtau=3.0)
+    base.update(overrides)
+    return MTGeometry(**base)
+
+
+def mt_trajectory(geom: MTGeometry, seed: int, dtype=np.float64, *,
+                  hybrid: bool = False) -> dict:
+    """Host trajectory and state start of advance_mu_th, by name
+    (``hybrid=False``: c1 = 1, c2 = 0, the coordinate WRFPLUS has).
+    Without ``geom.mapped`` the map factors are 1, as advance_mu_th
+    passes them."""
+    rng = np.random.default_rng(seed)
+    shapes = mt_shapes(geom)
+    out = {}
+    for name, (c, s) in _MT_SCALES.items():
+        out[name] = c + s * rng.standard_normal(shapes[name])
+    if not geom.mapped:
+        for name in ("msft", "msfu", "msfv"):
+            out[name] = np.ones(shapes[name])
+    nz = geom.nz
+    eta = np.linspace(1.0, 0.0, nz + 1)
+    dnw = np.diff(eta) * (1.0 + 0.2 * (rng.random(nz) - 0.5))
+    out["dnw"] = dnw
+    out["rdnw"] = 1.0 / dnw
+    w = rng.random(nz + 1)
+    out["fnm"] = 0.5 + 0.1 * (w - 0.5)
+    out["fnp"] = 1.0 - out["fnm"]
+    znu = 0.5 * (eta[1:] + eta[:-1])
+    if hybrid:
+        out["c1h"] = np.sqrt(znu)
+        out["c2h"] = (1.0 - out["c1h"]) * 5000.0
+    else:
+        out["c1h"], out["c2h"] = np.ones(nz), np.zeros(nz)
+    return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in out.items()}
+
+
+def mt_perturbation(geom: MTGeometry, seed: int, dtype=np.float64) -> dict:
+    """Scaled perturbations of :data:`MT_STATE` and :data:`MT_ACTIVE`."""
+    rng = np.random.default_rng(seed)
+    shapes = mt_shapes(geom)
+    return {n: np.ascontiguousarray(
+        _MT_SCALES[n][1] * rng.standard_normal(shapes[n]), dtype=dtype)
+        for n in MT_STATE + MT_ACTIVE}
