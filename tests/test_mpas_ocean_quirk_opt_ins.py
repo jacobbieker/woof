@@ -87,10 +87,12 @@ def test_isomip_freezing_point_at_the_boundary_layer_salinity():
         assert (out["forcing/landIceHeatFlux"][on] == (f["landIceFraction"] * heat)[on]).all()
         # cells off the mask or beyond nCellsSolve are left as they came
         assert (got_it[~on] == f["landIceInterfaceTracers"][:, iit - 1][~on]).all()
-    # physical: at sea-water salinity the freezing point lies below -1.8 C and
-    # falls with depth; v8.4.2's reading (the temperature as salinity) does not
+    # physical: at sea-water salinity (30-35 psu) the freezing point lies
+    # between -1.6 C (the surface) and -4.5 C (8 MPa), below v8.4.2's reading
     sea = on & (bls > 30.0)
-    assert sea.any() and (fixed["forcing/landIceInterfaceTracers"][sea, iit - 1] < -1.8).all()
+    tf_fixed = fixed["forcing/landIceInterfaceTracers"][sea, iit - 1]
+    assert sea.any() and ((tf_fixed < -1.6) & (tf_fixed > -4.5)).all()
+    assert (tf_fixed < default["forcing/landIceInterfaceTracers"][sea, iit - 1]).all()
     # only the interface temperature and the fluxes it drives change
     changed = {k for k in default if default[k].tobytes() != fixed[k].tobytes()}
     assert {"forcing/landIceInterfaceTracers", "forcing/landIceFreshwaterFlux", "forcing/landIceHeatFlux"} <= changed
