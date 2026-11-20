@@ -12,9 +12,8 @@ typedef double r8;
 #define S(a,b) __dsub_rn((a),(b))
 #define M(a,b) __dmul_rn((a),(b))
 
-// fractions_i: ifrac = Si_ifrac * frac (mct_aVect_copy, then the product;
-// without Si_ifrac in i2x the copy copies nothing, kif < 0, and ifrac is the
-// vector's own); ofrac = frac - ifrac
+// fractions_i: ifrac = Si_ifrac * frac (mct_aVect_copy, then the product);
+// ofrac = frac - ifrac
 extern "C" __global__ void seq_frac_ice(
     r8* __restrict__ fi, int nfi, int ki, int ko, const r8* __restrict__ i2x, int ni2x, int kif,
     const r8* __restrict__ dom, int ndom, int kf, int n)
@@ -22,7 +21,7 @@ extern "C" __global__ void seq_frac_ice(
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
     const r8 frac = dom[(size_t)i * ndom + kf];
-    const r8 ifrac = M(kif >= 0 ? i2x[(size_t)i * ni2x + kif] : fi[(size_t)i * nfi + ki], frac);
+    const r8 ifrac = M(i2x[(size_t)i * ni2x + kif], frac);
     fi[(size_t)i * nfi + ki] = ifrac;
     fi[(size_t)i * nfi + ko] = S(frac, ifrac);
 }

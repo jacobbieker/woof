@@ -16,9 +16,9 @@ matrix with unsorted and repeated elements, empty rows and a -0 product);
 each component absent; ice fractions of 0, -0, 1, tiny, and exactly at the
 lower bound (``-eps_fracval``, a single-precision 0.01, whose ``ofrac`` is
 exactly ``1 + eps_fracval``);
-land and coastal ice domain points; i2x without ``Si_ifrac`` (MCT's copy
-copies nothing); each of the three checks stopping the coupler (a bound and
-the sum); and the dead models reporting all three without stopping.
+land and coastal ice domain points; each of the three checks stopping the
+coupler (a bound and the sum); MCT stopping on an i2x without ``Si_ifrac``;
+and the dead models reporting all three without stopping.
 """
 from __future__ import annotations
 
@@ -69,8 +69,8 @@ SPECS = (
     _spec("abort_ocn_bound", seed=9, aborts=True, poke=(("fo_afrac", 2, 1.0101),)),
     _spec("abort_atm_sum", seed=10, aborts=True, poke=(("fa_lfrac_add", 4, 0.02),)),
     _spec("abort_atm_lfrin", seed=11, aborts=True, poke=(("fa_lfrin", 3, -0.0101),)),
-    # no Si_ifrac: mct_aVect_copy copies nothing, so ifrac is the vector's own, times frac
-    _spec("i2x_without_si_ifrac", seed=12, i2x_fields=("Si_t", "Si_avsdr", "Si_snowh")),
+    # no Si_ifrac: mct_aVect_copy's shared-index lookup stops
+    _spec("abort_i2x_without_si_ifrac", seed=12, aborts=True, i2x_fields=("Si_t", "Si_avsdr", "Si_snowh")),
 )
 
 
@@ -139,8 +139,7 @@ def _build(spec) -> dict:
     for key, nd in (("i2o", no), ("i2a", na)):
         if spec[key] == "matrix":
             matrices[key] = _matrix(rng, nd, ni, empty=2)
-    fi = np.column_stack([_uniform(rng, 0.0, 1.0, ni), np.full(ni, 9.5) if "Si_ifrac" in i2x_fields else sif,
-                          np.full(ni, -9.5)])
+    fi = np.column_stack([_uniform(rng, 0.0, 1.0, ni), np.full(ni, 9.5), np.full(ni, -9.5)])
     fo = np.column_stack([_uniform(rng, 0.0, 1.0, no), np.full(no, 8.5), np.full(no, -8.5),
                           _uniform(rng, 0.0, 1.0, no), _uniform(rng, 0.0, 1.0, no)])
     covered = _mapped(spec["i2a"], matrices.get("i2a"), frac, na)

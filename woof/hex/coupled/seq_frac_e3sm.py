@@ -24,11 +24,11 @@ the single-precision literal ``1.0e-02`` widened to double, as E3SM's
 parameters are, so 0.009999999776482582, not 0.01); unless the models are dead (``seq_frac_dead``), when it only reports.
 Here that is :class:`FracAbort`, or the stages returned.
 
-Kept as E3SM has it: an i2x without ``Si_ifrac`` (MCT's copy copies
-nothing) leaves ``ifrac`` as the vector had it, times ``frac``. Refused: an
-ice domain without ``frac`` (E3SM reads ``rAttr(0,:)``, outside the
-vector); a copy or rearrangement between grids of different sizes (MCT
-stops); a missing ``ifrac`` or ``ofrac`` (MCT stops).
+Where MCT stops (an i2x without ``Si_ifrac``, a fractions vector without
+``ifrac`` or ``ofrac``) this raises :class:`CouplingAbort` with MCT's
+message. Refused: an ice domain without ``frac`` (E3SM's lookup only
+reports it and ``seq_frac_set`` reads ``rAttr(0,:)``, outside the vector);
+a copy or rearrangement between grids of different sizes (MCT stops).
 
 ``atm_frac_correct`` is a ``.false.`` parameter in v3.2.0, so its branch is
 dead and not ported. The nonlinear maps (``seq_nlmap_mod``) are not reached
@@ -69,6 +69,10 @@ EPS_FRACVAL = float(np.float32(1.0e-02))
 CHECKED = ("afrac", "lfrac", "ofrac", "ifrac", "gfrac", "rfrac", "wfrac", "zfrac", "lfrin")
 STAGES = ("ice set", "ocn set", "atm set")
 KINDS = ("copy", "rearrange", "matrix")
+
+
+class CouplingAbort(RuntimeError):
+    """MCT stopping the coupler (``die``), with its message."""
 
 
 class FracAbort(RuntimeError):
@@ -163,7 +167,7 @@ def _av(name, array, fields, n=None):
 
 def _need(pos, name, av):
     if name not in pos:
-        raise ValueError(f'm_AttrVect::indexRA_:: FATAL--attribute not found: "{name}" ({av})')
+        raise CouplingAbort(f'm_AttrVect::indexRA_:: FATAL--attribute not found: "{name}" ({av})')
     return pos[name]
 
 
@@ -224,8 +228,10 @@ def seq_frac_set(*, i2x, i2x_fields, dom, dom_fields, fractions_i, fi_fields, fr
     errors: list[str] = []
     if not ice_present:
         return errors
-    # mct_aVect_copy(i2x_i, fractions_i, "Si_ifrac", "ifrac"): nothing without Si_ifrac (kept)
-    kif = ipos.get("Si_ifrac", -1)
+    # mct_aVect_copy(i2x_i, fractions_i, "Si_ifrac", "ifrac")
+    if "Si_ifrac" not in ipos:
+        raise CouplingAbort('MCT(MPEU)::m_List::get_indices_:: FATAL--item "Si_ifrac" not found.')
+    kif = ipos["Si_ifrac"]
     ki, ko = _need(fipos, "ifrac", "fractions_i"), _need(fipos, "ofrac", "fractions_i")
     if "frac" not in dpos:
         raise ValueError('the ice domain has no "frac": E3SM\'s indexRA (perrWith) reports it and returns 0, '
