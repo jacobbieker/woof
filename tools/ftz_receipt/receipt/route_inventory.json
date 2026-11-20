@@ -9634,7 +9634,7 @@
     },
     {
       "file": "woof/grad/wrfplus/acoustic.py",
-      "line": 88,
+      "line": 91,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9642,7 +9642,7 @@
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
-      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\")\n                        + tuple(f\"-D{k}={v}\" for k, v in defines)",
+      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\")\n                        + tuple(f\"-D{k}={v}\" for k, v in defines) + build",
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
@@ -9650,7 +9650,7 @@
     },
     {
       "file": "woof/grad/wrfplus/advect.py",
-      "line": 98,
+      "line": 99,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9658,23 +9658,15 @@
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
-      "options_expression": "(\n        \"--fmad=false\", f\"-DWRFPLUS_REAL={real}\", f\"-DADV_H={horder}\")",
-      "options": [
-        "--fmad=false",
-        null,
-        null
-      ],
-      "options_element_expressions": [
-        "\"--fmad=false\"",
-        "f\"-DWRFPLUS_REAL={real}\"",
-        "f\"-DADV_H={horder}\""
-      ],
+      "options_expression": "(\n        \"--fmad=false\", f\"-DWRFPLUS_REAL={real}\", f\"-DADV_H={horder}\") + build",
+      "options": null,
+      "options_element_expressions": null,
       "options_are_literal": false,
       "text": "return cp.RawModule(code=source, options=("
     },
     {
       "file": "woof/grad/wrfplus/bigstep.py",
-      "line": 42,
+      "line": 43,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9682,21 +9674,15 @@
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
-      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\")",
-      "options": [
-        "--fmad=false",
-        null
-      ],
-      "options_element_expressions": [
-        "\"--fmad=false\"",
-        "f\"-DWRFPLUS_REAL={real}\""
-      ],
+      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\") + build",
+      "options": null,
+      "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "return cp.RawModule(code=source, options=(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\"))"
+      "text": "return cp.RawModule(code=source,"
     },
     {
       "file": "woof/grad/wrfplus/lbc.py",
-      "line": 49,
+      "line": 50,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9704,21 +9690,15 @@
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
-      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\")",
-      "options": [
-        "--fmad=false",
-        null
-      ],
-      "options_element_expressions": [
-        "\"--fmad=false\"",
-        "f\"-DWRFPLUS_REAL={real}\""
-      ],
+      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\") + build",
+      "options": null,
+      "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "return cp.RawModule(code=source, options=(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\"))"
+      "text": "return cp.RawModule(code=source,"
     },
     {
       "file": "woof/grad/wrfplus/stage.py",
-      "line": 35,
+      "line": 36,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9726,17 +9706,9 @@
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
-      "options_expression": "(\n        \"--fmad=false\", f\"-DWRFPLUS_REAL={real}\", f\"-DRK_KCHUNK={AD_KCHUNK}\")",
-      "options": [
-        "--fmad=false",
-        null,
-        null
-      ],
-      "options_element_expressions": [
-        "\"--fmad=false\"",
-        "f\"-DWRFPLUS_REAL={real}\"",
-        "f\"-DRK_KCHUNK={AD_KCHUNK}\""
-      ],
+      "options_expression": "(\n        \"--fmad=false\", f\"-DWRFPLUS_REAL={real}\", f\"-DRK_KCHUNK={AD_KCHUNK}\") + build",
+      "options": null,
+      "options_element_expressions": null,
       "options_are_literal": false,
       "text": "return cp.RawModule(code=source, options=("
     },
@@ -10534,7 +10506,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/forcing_v842.py",
-      "line": 115,
+      "line": 140,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
