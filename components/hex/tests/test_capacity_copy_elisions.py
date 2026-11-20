@@ -45,7 +45,7 @@ EXPECTED_SOURCE_SHA256 = {
     # Re-derived 2026-10-19 after f65ab11c specialized immutable kernel
     # dimensions. The read-only velocity alias checks below still apply.
     SRC / "cuda_driver.py": (
-        "aff8e84cce85b0fa6664ae3474edf8053870176d68623f014fa8ba4572d9218d"
+        "7c0ddd54648b449430c1cdef49667cf1a17ac7959e2c1f138847fd610820c7bd"
     ),
     SRC / "cuda_horizontal.py": (
         "f94137176db65d24df0d9ff1d491c278d6c835bb08cd76dc43c5cfcbf323a345"

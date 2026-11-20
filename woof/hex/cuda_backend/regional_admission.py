@@ -858,7 +858,7 @@ class RegionalContract:
 #: 131 history and 109 diag variables at 0 differing bytes against the base, twice each. Re-derived by
 #: tools/repin_source_tables.py; not a new mint.
 MINTED_KERNEL_SET_SHA256 = (
-    "7fe561d53023958260c1d554c247e1ea5f7153a799521a152c740d4675b8facb"
+    "4d75f4a3a80a69d4e53b9fe5c95dfb68429e02e6a60da4c6a5d20d3a3f86e3ce"
 )
 
 _DRY_MINT_CAVEAT = (

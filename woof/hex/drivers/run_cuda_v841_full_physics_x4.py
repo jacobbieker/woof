@@ -481,7 +481,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # taken host-side merges (scratch outputs #614, opt-in w_damping #420,
     # adaptive readmission); their card evidence is in those PRs, not here.
     "src/hexcore/cuda_driver.py": (
-        "aff8e84cce85b0fa6664ae3474edf8053870176d68623f014fa8ba4572d9218d"
+        "7c0ddd54648b449430c1cdef49667cf1a17ac7959e2c1f138847fd610820c7bd"
     ),
     # THE BREAKAGE THIS PREVENTS: cuda_driver.py now executes host
     # preparation through woof.hex.prep_cache.  Unpinned, an edit to the key

@@ -3983,7 +3983,8 @@ class CudaDryDycoreDriver:
         A dycore variant whose boundary law differs overrides this alone.
         """
 
-        self.regional_v841.zero_speczone_w(vertical_velocity)
+        if self.regional_v841 is not None:
+            self.regional_v841.zero_speczone_w(vertical_velocity)
 
     def _copy_state(
         self, source: DevicePrognosticState, *, share_scalars: bool = False
