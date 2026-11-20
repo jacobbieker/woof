@@ -294,15 +294,26 @@ a, b = w.tl(part, save_at=(1,), partial=True), w.tl(full, save_at=(1,))
 out["same"] = sum(int((cp.asnumpy(a[k][n]) != cp.asnumpy(b[k][n])).sum())
                   for k in (1, 2) for n in IN)
 f = rnd(w._start, rng)
+# binary32 (Metal): scale by the inner products of the magnitudes, the
+# roundoff bound when the terms cancel, as K.dot_product(terms=True) does
+# for the other binary32 dot tests; binary64 scales by the result.
+def mag(x, y):
+    if {dtn!r} != "float32":
+        return 0.0
+    h = lambda z: np.abs(cp.asnumpy(z).astype(np.float64))
+    return float(np.vdot(h(x), h(y)))
 lhs = sum(dot(a[2][n], f[n]) for n in IN)
+lmag = sum(mag(a[2][n], f[n]) for n in IN)
 adj = w.ad(f)
 rhs = sum(dot(part[n], adj[n]) for n in part)
-out["dot"] = abs(lhs - rhs) / max(abs(lhs), 1e-300)
+rmag = sum(mag(part[n], adj[n]) for n in part)
+out["dot"] = abs(lhs - rhs) / max(abs(lhs), lmag, rmag, 1e-300)
 # the helpers' pair: <TL(start(g)), f> == <g, start_ad(AD(f))>
 g = {{n: dx[n] for n in W.WRFDA_TL_FIELDS}}
 ga = W.wrfda_tl_start_ad(adj)
 rhs = sum(dot(g[n], ga[n]) for n in g)
-out["dot_helper"] = abs(lhs - rhs) / max(abs(lhs), 1e-300)
+rmag = sum(mag(g[n], ga[n]) for n in g)
+out["dot_helper"] = abs(lhs - rhs) / max(abs(lhs), lmag, rmag, 1e-300)
 out["shared"] = int(part["p_pert"] is part["p"] and part["muts"] is part["mup"])
 for key, bad, kw in (("missing", part, {{}}), ("unknown", {{**full, "qv": full["u"]}}, {{}}),
                      ("empty", {{}}, {{"partial": True}})):
@@ -314,6 +325,9 @@ for key, bad, kw in (("missing", part, {{}}), ("unknown", {{**full, "qv": full["
 """, tmp_path)
     assert out["same"] == 0
     for key in ("dot", "dot_helper"):
+        # binary32 on Metal: 1e-5 of the magnitude-scaled misfit, as
+        # test_window_adjoint_with_forcing uses (scaled by the result it
+        # measured 2e-5 here, from cancellation across the terms)
         assert out[key] < (1e-5 if backend == "mlx" else 1e-12), (key, out[key])
     assert out["shared"] == 1
     assert "dx0 is empty" in out["empty"], out["empty"]
