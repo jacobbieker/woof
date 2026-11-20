@@ -5266,9 +5266,10 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             if getattr(arguments, "w_damping", False):
                 raise ValueError("--w-damping is carried by the WOOF-physics route's dycore driver; the MPAS "
                                  "suite route (matrix item 4.2 follow-up) would accept it and never apply it")
-            if getattr(arguments, "obstacle_opt", None):
-                raise ValueError("--obstacle-opt is carried by the WOOF-physics route's dycore driver; the MPAS "
-                                 "suite route would accept it and never apply it")
+            if getattr(arguments, "obstacle_opt", None) or getattr(arguments, "obstacle_file", None) is not None \
+                    or any(getattr(arguments, key, None) is not None for key in _OBSTACLE_KEYS):
+                raise ValueError("--obstacle-opt and the other --obstacle-* flags are carried by the WOOF-physics "
+                                 "route's dycore driver; the MPAS suite route would accept them and never apply them")
             if getattr(arguments, "inflow_perturbation", False):
                 raise ValueError("--inflow-perturbation is carried by the WOOF-physics route's regional runtime; "
                                  "the MPAS suite route (matrix item 5.7 follow-up) would accept it and never apply it")

@@ -291,9 +291,9 @@ log law.
 | | horseshoe separation / H | 0.05 | 0.05 | |
 | | wind inside the cube / U(2H) | 0.003 | 0.003 | 0 |
 | cube, variable mesh (2.1 m at the cube, coarser away) | reattachment / H, separation / H | 1.79, 0.33 | | |
-| canyon H/W = 1, 2.7 m cells | recirculation cells up the canyon | 1 | | 1 |
-| | vortex centre x/W, z/H | 0.45, 0.81 | | about 0.5 and 0.5 to 0.6 |
-| | floor wind / U(2H), roof wind / U(2H) | -0.03, +0.02 | | WRF route -0.09, +0.20 |
+| canyon H/W = 1, 2.7 m cells | recirculation cells up the canyon | 1 | 1 | 1 |
+| | vortex centre x/W, z/H | 0.45, 0.81 | 0.25, 0.94 | about 0.5 and 0.5 to 0.6 |
+| | floor wind / U(2H), roof wind / U(2H) | -0.03, +0.02 | -0.05, +0.01 | WRF route -0.09, +0.20 |
 | canyon H/W = 1, 1.3 m cells | recirculation cells, vortex centre x/W, z/H | 1; 0.35, 0.81 | | |
 | | floor wind / U(2H), roof wind / U(2H) | -0.04, +0.06 | | |
 
@@ -302,8 +302,9 @@ the street still sees under half of the WRF route's floor wind and under a
 third of its roof wind. The canyon bars run almost pole to pole
 (|lat| < 88°). Bars that stop at 60° leave the street open at both ends,
 and the street fills with a uniform back-flow of -0.2 U(2H) and no vortex,
-at both 2.7 m and 1.3 m. Metal ran the 2.7 m cube only. CUDA and Metal agree on it to within the
-spread of a turbulent wake (reattachment 2.12 and 2.18 H), not to the bit.
+at both 2.7 m and 1.3 m. Metal ran the 2.7 m cases only. CUDA and Metal agree on the cube to within
+the spread of a turbulent wake (reattachment 2.12 and 2.18 H), not to the
+bit; both canyons form one vortex, but its centre is placed differently.
 With obstacles off, each reproduces its earlier runs bit for bit.
 
 The test sphere (`graded_sphere_mesh` in the hex tests) ships zero

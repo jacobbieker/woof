@@ -126,6 +126,54 @@ def test_a_product_for_another_mesh_or_a_coarse_mesh_is_refused():
         build_coefficients(_host(coarse), _column(coarse, 7, 20.0), ObstacleSettings())
 
 
+def test_wall_laws_are_evaluated_only_where_a_wall_stands():
+    """A padded column's zero dz, or a thin layer far from any building, is
+    never put through the wall law's z0 check."""
+    from woof.hex.obstacles import ObstacleSettings, build_coefficients
+
+    mesh = _mesh()
+    host = _host(mesh)
+    xyz = np.stack([np.asarray(mesh.arrays[k], np.float64) for k in ("xCell", "yCell", "zCell")], 1)
+    far = int(np.argmax(np.linalg.norm(xyz - xyz[7], axis=1)))
+    host.z_w[:, far] = 0.0                                  # a padded column: dz = 0
+    host.valid_cell[far] = False
+    edges, _, _ = build_coefficients(host, _column(mesh, 7, 20.0), ObstacleSettings())
+    assert edges[0].size > 0
+    # z0 = 1 m is too rough for the 5 m layers, but only where a wall stands.
+    with pytest.raises(ValueError, match="too rough"):
+        build_coefficients(host, _column(mesh, 7, 20.0), ObstacleSettings(obstacle_wall_z0=1.0))
+    empty = _column(mesh, 7, 0.0)
+    edges, wfaces, _ = build_coefficients(host, empty, ObstacleSettings(obstacle_wall_z0=1.0))
+    assert edges[0].size == 0 and wfaces[0].size == 0
+
+
+def test_voronoi_grid_neighbours_and_outside_points():
+    from woof.static.buildings import VoronoiGrid
+
+    mesh = _mesh()
+    a = mesh.arrays
+    grid = VoronoiGrid.from_mesh(mesh)
+    one = np.zeros((1, grid.n_cells), bool)
+    one[0, 7] = True
+    grown = grid.dilate(one)[0]
+    coc = np.asarray(a["cellsOnCell"], np.int64)[7, :int(a["nEdgesOnCell"][7])]
+    assert set(np.flatnonzero(grown).tolist()) == {7, *coc.tolist()}
+    # The Delaunay fallback finds the same neighbours.
+    bare = VoronoiGrid(a["latCell"], a["lonCell"], a["areaCell"], radius=grid.radius)
+    assert np.array_equal(bare.dilate(one), grid.dilate(one))
+    # A limited-area grid (one cell and its ring) puts far points outside.
+    keep = np.flatnonzero(grown)
+    patch = VoronoiGrid(np.asarray(a["latCell"])[keep], np.asarray(a["lonCell"])[keep],
+                        np.asarray(a["areaCell"])[keep], radius=grid.radius)
+    lat = np.asarray(a["latCell"], np.float64)
+    lon = np.asarray(a["lonCell"], np.float64)
+    got = patch.cells(np.degrees(lon), np.degrees(lat), "EPSG:4326")
+    assert np.array_equal(got[keep], np.arange(keep.size))
+    far = np.arccos(np.clip(np.sin(lat) * np.sin(lat[7])
+                            + np.cos(lat) * np.cos(lat[7]) * np.cos(lon - lon[7]), -1, 1)) > 1.0
+    assert far.any() and np.all(got[far] == -1)
+
+
 def test_voronoi_aggregation_puts_the_cube_in_the_cells_under_it():
     from woof.verify.cases import hex_obstacles as case
     from woof.verify.cases.hex_obstacles import H, RADIUS

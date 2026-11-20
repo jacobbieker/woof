@@ -235,11 +235,21 @@ def build_coefficients(mesh: HostMesh, morph, settings: ObstacleSettings, *,
     dc = np.asarray(mesh.dc_edge, np.float64)
     dv = np.asarray(mesh.dv_edge, np.float64)
     area = np.asarray(mesh.area_cell, np.float64)
-    touched = np.unique(slot_edge[other_ok])
+    # Wall laws only where a wall stands (and z0 is checked only there): an
+    # edge to a cell that is solid in some layer, a layer over a solid one,
+    # and the ground row when asked.  A padded column's zero dz, or a thin
+    # layer or short edge far from any building, is never evaluated.
+    any_solid = solid.any(axis=0)
+    touched = np.unique(slot_edge[other_ok & valid[:, None] & any_solid[other]])
     law = np.zeros(ne)
     law[touched] = _wall_law(dc[touched], z0)
     wall = np.where(other_ok, law[slot_edge] * dv[slot_edge] / area[:, None], 0.0)
-    wz = _wall(dz, z0)                                  # (nlev, nc), per metre
+    needs_wz = np.zeros((nlev, nc), bool)              # (nlev, nc), per metre
+    needs_wz[1:] = solid[:-1] & valid[None]
+    if ground_wall:
+        needs_wz[0] = valid
+    wz = np.zeros((nlev, nc))
+    wz[needs_wz] = _wall(dz[needs_wz], z0)
     slot_angle = angle[slot_edge]
 
     frontal = []
@@ -314,6 +324,7 @@ class HexObstacles:
     shape: tuple                   # (nlev, nEdges, nCells, maxEdges)
     cache: object
     receipt: dict = field(default_factory=dict)
+    #: host launch calls; a captured subcycle graph replays them uncounted.
     launches: int = 0
 
     def _kernel(self, name):
@@ -357,9 +368,9 @@ def host_mesh_from_driver(driver) -> HostMesh:
     valid = np.ones(nc, bool)
     regional = getattr(driver, "regional_v841", None)
     if regional is not None:
-        # A limited-area mesh keeps every boundary ring (bdyMaskCell > 0)
-        # and the padded column free of obstacles, as phase 1 keeps the
-        # relaxation zone plus one.
+        # A limited-area mesh keeps every boundary ring (bdyMaskCell > 0),
+        # the padded column and one more ring free of obstacles, as phase 1
+        # keeps the relaxation zone plus one.
         solve = int(regional.n_cells_solve)
         valid[solve:] = False
         mask = get(regional.masks.bdy_mask_cell).ravel()
@@ -367,8 +378,16 @@ def host_mesh_from_driver(driver) -> HostMesh:
     eoc = get(mesh.edges_on_cell)
     if eoc.shape[0] != nc:
         raise ValueError("the resident edgesOnCell is not (nCells, maxEdges)")
+    coe = get(mesh.cells_on_edge).reshape(-1, 2)
+    if regional is not None:
+        neoc = get(mesh.n_edges_on_cell)
+        used = np.arange(eoc.shape[1])[None, :] < neoc[:, None]
+        pair = coe[np.where(used, eoc, 0)]                       # (nc, maxEdges, 2)
+        inside = (pair >= 0) & (pair < nc)
+        near_invalid = (inside & ~valid[np.clip(pair, 0, nc - 1)]) | ~inside
+        valid &= ~(near_invalid.any(axis=2) & used).any(axis=1)
     return HostMesh(
-        cells_on_edge=get(mesh.cells_on_edge).reshape(-1, 2),
+        cells_on_edge=coe,
         edges_on_cell=eoc, n_edges_on_cell=get(mesh.n_edges_on_cell),
         dc_edge=get(mesh.dc_edge), dv_edge=get(mesh.dv_edge),
         area_cell=get(mesh.area_cell), angle_edge=get(mesh.angle_edge),

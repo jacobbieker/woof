@@ -248,20 +248,44 @@ class VoronoiGrid:
     ``plane_origin`` (lat, lon in degrees; azimuthal equidistant on the
     mesh's own ``radius``), x east and y north, metres.  ``dx``/``dy`` are
     the mean cell spacing, which only sets the raster supersampling.
+
+    A point farther than twice its nearest cell's equivalent radius from
+    that cell's centre is outside the grid (-1): on a limited-area mesh the
+    boundary cells do not take everything beyond the domain.  Neighbours
+    come from ``cellsOnCell`` (``from_mesh``) or else from the spherical
+    Delaunay triangulation of the centres.
     """
 
     def __init__(self, lat_cell, lon_cell, area_cell, *, radius: float,
-                 plane_origin: tuple[float, float] | None = None):
+                 plane_origin: tuple[float, float] | None = None,
+                 cells_on_cell=None, n_edges_on_cell=None):
         lat = np.asarray(lat_cell, np.float64)
         lon = np.asarray(lon_cell, np.float64)
+        area = np.asarray(area_cell, np.float64)
         self.n_cells = int(lat.size)
         self.nx, self.ny = self.n_cells, 1
         self.radius = float(radius)
-        spacing = float(np.sqrt(np.mean(np.asarray(area_cell, np.float64))))
+        spacing = float(np.sqrt(np.mean(area)))
         self.dx = self.dy = spacing
         self.plane_origin = plane_origin
+        # Chord reach on the unit sphere: twice the equivalent-disc radius.
+        self._reach = 2.0 * np.sqrt(area / math.pi) / self.radius
+        self._transformers: dict = {}
         from scipy.spatial import cKDTree
-        self._tree = cKDTree(_unit(lat, lon))
+        unit = _unit(lat, lon)
+        self._tree = cKDTree(unit)
+        if cells_on_cell is not None:
+            coc = np.asarray(cells_on_cell, np.int64)
+            used = np.arange(coc.shape[1])[None, :] < np.asarray(
+                n_edges_on_cell, np.int64)[:, None]
+            used &= (coc >= 0) & (coc < self.n_cells)
+            rows = np.broadcast_to(np.arange(self.n_cells)[:, None], coc.shape)
+            pairs = np.stack([rows[used], coc[used]], axis=1)
+        else:
+            from scipy.spatial import ConvexHull
+            tri = ConvexHull(unit).simplices
+            pairs = np.concatenate([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]])
+        self._pairs = np.unique(np.sort(pairs, axis=1), axis=0)
 
     @classmethod
     def from_mesh(cls, mesh, **kwargs) -> "VoronoiGrid":
@@ -270,8 +294,20 @@ class VoronoiGrid:
         radius = kwargs.pop("radius", None)
         if radius is None:
             radius = float(mesh.attrs["sphere_radius"])
+        if "cellsOnCell" in a and "nEdgesOnCell" in a:
+            kwargs.setdefault("cells_on_cell", a["cellsOnCell"])
+            kwargs.setdefault("n_edges_on_cell", a["nEdgesOnCell"])
         return cls(a["latCell"], a["lonCell"], a["areaCell"], radius=radius,
                    **kwargs)
+
+    def dilate(self, mask) -> np.ndarray:
+        """``mask`` (1, nCells) grown by one ring of mesh neighbours."""
+        m = np.asarray(mask, bool).reshape(-1)
+        out = m.copy()
+        a, b = self._pairs[:, 0], self._pairs[:, 1]
+        out[a[m[b]]] = True
+        out[b[m[a]]] = True
+        return out.reshape(1, -1)
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -301,28 +337,37 @@ class VoronoiGrid:
                     np.degrees(np.arcsin(np.clip(p[..., 2], -1.0, 1.0))))
         if _is_geographic(crs):
             return x, y
-        from pyproj import Transformer
-        tr = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+        tr = self._transformers.get(crs)
+        if tr is None:
+            from pyproj import Transformer
+            tr = self._transformers[crs] = Transformer.from_crs(
+                crs, "EPSG:4326", always_xy=True)
         return tr.transform(x, y)
 
     def cells(self, x, y, crs) -> np.ndarray:
         lon, lat = self._lonlat(x, y, crs)
-        _, index = self._tree.query(_unit(np.radians(lat), np.radians(lon)))
-        return np.asarray(index, np.int64)
+        dist, index = self._tree.query(_unit(np.radians(lat), np.radians(lon)))
+        index = np.asarray(index, np.int64)
+        return np.where(np.asarray(dist) <= self._reach[index], index, -1)
 
     def fractional_ij(self, x, y, crs):
         cell = self.cells(x, y, crs)
         return cell + 0.5, np.full(cell.shape, 0.5)
 
     def model_cells(self, raster: HeightRaster, densify: int = 64) -> np.ndarray:
-        """The (1, nCells) mask of cells holding a sample of the raster."""
+        """The (1, nCells) mask of cells holding a sample of the raster,
+        sampled at least every half cell spacing (and at ``densify`` points)
+        along each axis."""
         rows, cols = raster.shape
-        r = np.linspace(0, rows - 1, min(rows, densify)).round().astype(int)
-        c = np.linspace(0, cols - 1, min(cols, densify)).round().astype(int)
+        per_axis = lambda n, step: min(n, max(densify, int(math.ceil(
+            2.0 * n * step / self.dx)) + 1))
+        r = np.linspace(0, rows - 1, per_axis(rows, raster.py)).round().astype(int)
+        c = np.linspace(0, cols - 1, per_axis(cols, raster.px)).round().astype(int)
         xs, ys = raster.centres()
         X, Y = np.meshgrid(xs[c], ys[r])
+        cell = self.cells(X.ravel(), Y.ravel(), raster.crs)
         mask = np.zeros(self.n_cells, bool)
-        mask[self.cells(X.ravel(), Y.ravel(), raster.crs)] = True
+        mask[cell[cell >= 0]] = True
         return mask[None]
 
     def axis_rotation(self, raster: HeightRaster) -> float:
@@ -1066,7 +1111,10 @@ def aggregate(rasters: Iterable[HeightRaster], grid, *,
         # Each lattice reaches the union of its members' cells, not the
         # box around them, so a gap between tiles stays open.
         reach = [cells for _, cells in groups.values()]
-        near = [ndimage.binary_dilation(m, np.ones((3, 3), bool))
+        # A grid with its own adjacency (a hex mesh) grows by its neighbours.
+        dilate = getattr(grid, "dilate", None)
+        near = [dilate(m) if dilate is not None
+                else ndimage.binary_dilation(m, np.ones((3, 3), bool))
                 for m in reach]
     for a in range(len(mosaics)):
         for b in range(a):
