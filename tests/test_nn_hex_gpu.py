@@ -8,7 +8,11 @@ variable-resolution mesh, each run in its own child process, held to:
   record holds interior columns only;
 * a residual model that returns zero leaves the forecast byte-identical;
 * a constant dry-theta residual heats the interior's model levels it spans
-  by about rate x time, and leaves the levels above it near the plain run.
+  by about rate x time, and leaves the levels above it near the plain run;
+* a run with analysis nudging that taps the nudging's increment
+  (``tap_target = "nudging"``) is byte-identical to the nudged run without
+  ``--nn``, under fast and under strict numerics (the analyses are the
+  case's own initial state, valid at the start and at the end).
 
 Opt in with ``WOOF_HEX_VARRES_CASE=<work dir>`` naming cases prepared by
 ``python tools/hex_varres.py prep NAME --work-dir DIR`` (mesh and
@@ -74,7 +78,8 @@ def _toml(path: Path, body: str) -> Path:
     return path
 
 
-def _run(name: str, tag: str, scratch: Path, *, nn: Path | None = None, numerics: str = "fast") -> Path:
+def _run(name: str, tag: str, scratch: Path, *, nn: Path | None = None, numerics: str = "fast",
+         extra: tuple = ()) -> Path:
     key = (name, tag, numerics)
     if key in _RUNS:
         return _RUNS[key]
@@ -95,6 +100,7 @@ def _run(name: str, tag: str, scratch: Path, *, nn: Path | None = None, numerics
             SUITE, "--no-products"]
     if nn is not None:
         argv.append(f"--forecast-arg=--nn={nn}")
+    argv += [f"--forecast-arg={value}" for value in extra]
     env = {k: v for k, v in os.environ.items() if k not in ("WOOF_NN_CONFIG", "GPUWM_WRF_EXACT")}
     env["WOOF_HEX_NUMERICS"] = numerics
     done = subprocess.run(argv, cwd=str(REPO), capture_output=True, text=True, env=env)
@@ -230,3 +236,47 @@ def test_residual_models_on_the_held_source(name, scratch):
           f"{high:.4f} K above")
     assert 0.6 * expected < low < 1.4 * expected
     assert high < 0.25 * expected
+
+
+def _nudging(name: str, scratch: Path) -> tuple:
+    """--nudging arguments: grid nudging over the whole run toward the case's
+    initial state, given as analyses valid at the start and at the end."""
+    from datetime import datetime, timedelta
+
+    init = Path(ROOT) / name / "init" / "init.nc"
+    folder = scratch / f"analyses-{name}"
+    folder.mkdir(exist_ok=True)
+    start = folder / "a0.nc"
+    end = folder / "a1.nc"
+    shutil.copyfile(init, start)
+    shutil.copyfile(init, end)
+    with netCDF4.Dataset(str(end), "r+") as d:
+        raw = np.asarray(d["xtime"][0]).tobytes().decode("ascii").strip("\x00 ")
+        valid = datetime.strptime(raw, "%Y-%m-%d_%H:%M:%S") + timedelta(hours=HOURS)
+        xtime = d["xtime"]
+        xtime.set_auto_chartostring(False)
+        text = valid.strftime("%Y-%m-%d_%H:%M:%S").encode("ascii").ljust(xtime.shape[1])
+        xtime[0, :] = np.frombuffer(text, dtype="S1")
+    config = folder / "nudging.toml"
+    config.write_text(f"[nudging]\nmode = 'grid'\nguv = 0.0003\ngt = 0.0003\ngq = 0.0003\n"
+                      f"gfdda_interval_m = {HOURS * 60.0:g}\ngfdda_end_h = {HOURS:g}\n", encoding="utf-8")
+    return (f"--nudging={config}", f"--nudging-analysis={start}", f"--nudging-analysis={end}")
+
+
+@pytest.mark.parametrize("numerics", ["fast", "strict"])
+@pytest.mark.parametrize("name", CASES)
+def test_tapping_the_nudging_increment_is_byte_identical(name, numerics, scratch):
+    from woof.nn.tap import read_tap
+
+    extra = _nudging(name, scratch)
+    base = _run(name, "nudged", scratch, numerics=numerics, extra=extra)
+    store = scratch / f"{name}-{numerics}-nudging.zarr"
+    nn = _toml(scratch / f"ntap-{name}-{numerics}.toml",
+               f'mode = "tap"\nscheme = "total"\ntap_target = "nudging"\ntap = "{store}"\n'
+               'tap_columns = 64\noutputs = ["dtheta", "dqv"]\n')
+    tapped = _run(name, "nudged-tap", scratch, nn=nn, numerics=numerics, extra=extra)
+    _assert_identical(base, tapped, f"{name} {numerics}: tapping the nudging increment changed the forecast")
+    record = read_tap(store)
+    assert record["attrs"]["target"] == "nudging" and record["inputs"].shape[0] > 0
+    assert np.isfinite(record["targets"]).all() and np.abs(record["targets"]).max() > 0.0, \
+        "the nudging added no increment"

@@ -117,7 +117,7 @@ class TendencyTap:
                            f"({type(error).__name__}: {error})") from error
         if exists:
             for key in ("schema", "inputs", "outputs", "columns", "route", "scheme", "grid",
-                        "levels", "tap_every", "tap_seed"):
+                        "levels", "tap_every", "tap_seed", "target"):
                 if key in self.attrs and stored.get(key) != self.attrs[key]:
                     raise TapError(f"tap store {self.path} was written with a different {key} "
                                    f"({stored.get(key)!r}); a resumed run appends only to its own record")

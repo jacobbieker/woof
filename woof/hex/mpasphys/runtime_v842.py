@@ -346,9 +346,15 @@ class ResidentNativeCoupling:
                                             solve=self.solve_extent)
             if self.nudging is not None:
                 # WRF grid/spectral analysis nudging (woof.hex.nudging) at the same seat, after IAU.
+                # --nn tap_target = "nudging" (woof.nn.hex_seat) records its increment; a read only.
+                nn_seat = getattr(self, 'nn_seat', None)
+                if nn_seat is not None:
+                    nn_seat.before_nudging(self.sources)
                 self.nudging.add(0, self.sources, float(self.dycore.atmosphere.state.time_seconds),
                                  self.nudging.dt, rho_edge=diagnostics.h_edge,
                                  normal_velocity=saved.normal_velocity, state=state, theta_m=saved.theta_m)
+                if nn_seat is not None:
+                    nn_seat.after_nudging(self.sources)
             if self.exchange_sources is not None:
                 self.sources=self.exchange_sources(self.sources)
             # The driver's held copy of physics_get_tend's result is dead from here (the RRFS driver's

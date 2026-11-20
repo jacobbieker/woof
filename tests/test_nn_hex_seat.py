@@ -553,3 +553,63 @@ def test_dx_and_radiation_context_inputs():
     unit = HexColumnSeat(_settings(inputs=("dx",)), cp=np, names=NAMES, n_cells=NC, n_levels=NZ, zgrid=w.zgrid,
                          bdy_mask=BDY, dt=30.0, tap=_Tap(), area=area / 6371229.0 ** 2, sphere_radius=1.0)
     np.testing.assert_allclose(unit._dx[0], np.sqrt(area[:NC]), rtol=1e-5)
+
+
+def test_nudging_target_records_the_nudging_increment_not_the_physics():
+    w = _world()
+    tap = _Tap()
+    seat = _seat(w, _settings(tap_target="nudging", outputs=("dtheta", "dqv")), tap=tap)
+    physics = {k: getattr(w.sources, k).copy() for k in ("rho_theta", "scalars")}
+    seat.stage(w.sources, state=w.state, saved=w.saved, time_seconds=0.0)
+    assert tap.rows == []                                    # waits for the nudging
+    seat.before_nudging(w.sources)
+    mass, theta_m, qv = w.state.rho, w.saved.theta_m, w.state.scalars[0]
+    nudge_t = np.full((NZ, NC + 1), 3e-5, dtype=np.float32)
+    nudge_q = np.full((NZ, NC + 1), -2e-8, dtype=np.float32)
+    d_theta, d_q = hex_seat.couple_increment(np, {"dtheta": nudge_t, "dqv": nudge_q}, mass=mass,
+                                             theta_m=theta_m, qv=qv)
+    w.sources.rho_theta += d_theta
+    w.sources.scalars[0] += d_q["qv"]
+    seat.after_nudging(w.sources)
+    (x, y, t, step, cells), = tap.rows
+    np.testing.assert_allclose(y[:NZ], 3e-5, rtol=2e-3)
+    np.testing.assert_allclose(y[NZ:], -2e-8, rtol=2e-3)
+    # the record changed nothing, and a step with no pending record does nothing
+    np.testing.assert_array_equal(w.sources.rho_theta, physics["rho_theta"] + d_theta)
+    seat.before_nudging(w.sources)
+    seat.after_nudging(w.sources)
+    assert len(tap.rows) == 1
+
+
+def test_nudging_target_needs_nudging_and_the_wrf_route_refuses_it(tmp_path):
+    path = tmp_path / "nn.toml"
+    path.write_text('[nn]\nmode = "tap"\nscheme = "total"\ntap = "t.zarr"\ntap_target = "nudging"\n')
+    settings = launch.read_settings(path)
+    assert settings.tap_target == "nudging"
+    w = _world()
+    coupling = SimpleNamespace(session=SimpleNamespace(native=None), cp=np, names=NAMES, nudging=None,
+                               dycore=SimpleNamespace(atmosphere=SimpleNamespace(state=w.state, vertical=None)))
+    mesh = SimpleNamespace(arrays={"bdyMaskCell": BDY})
+    with pytest.raises(launch.NNConfigError, match="no analysis nudging"):
+        hex_seat.attach(coupling, config=SimpleNamespace(mode="correct"), mesh=mesh, n_cells=NC,
+                        vertical=SimpleNamespace(zgrid=w.zgrid), dt=30.0, settings=settings)
+    path.write_text('[nn]\nmode = "tap"\nscheme = "total"\ntap = "t.zarr"\ntap_target = "analysis"\n')
+    with pytest.raises(launch.NNConfigError, match="tap_target must be one of"):
+        launch.read_settings(path)
+    path.write_text('[nn]\nmode = "residual"\nscheme = "total"\nmodel = "m"\ntap_target = "nudging"\n')
+    with pytest.raises(launch.NNConfigError, match="does not take"):
+        launch.read_settings(path)
+    from woof.nn.wrf_seat import WrfColumnSeat
+    with pytest.raises(launch.NNConfigError, match="WRF route"):
+        WrfColumnSeat(SimpleNamespace(p=np.zeros((2, 3, 3))), None, _settings(tap_target="nudging"))
+
+
+def test_a_model_trained_for_one_mode_is_refused_in_the_other(tmp_path):
+    w = _world()
+    path = _artefact(tmp_path / "corr")
+    manifest = json.loads((path / "manifest.json").read_text())
+    manifest["training"] = {"intended_mode": "residual", "target": "the analysis nudging's increment"}
+    (path / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(launch.NNConfigError, match="trained for mode = 'residual'"):
+        _seat(w, _settings(mode="replace", model=path, inputs=None, outputs=None))
+    _seat(w, _settings(mode="residual", model=path, inputs=None, outputs=None))

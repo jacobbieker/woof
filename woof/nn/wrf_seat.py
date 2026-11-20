@@ -197,6 +197,10 @@ class WrfColumnSeat:
         self.settings = settings
         self.scheme = settings.scheme
         self.applies = settings.applies
+        if settings.tap_target != "physics":
+            raise NNConfigError(
+                f"--nn tap_target = {settings.tap_target!r} on the WRF route: the nudging-increment target is "
+                "recorded on hex (woof hex forecast --nudging); the WRF route's tap records the scheme's tendency")
         nz, ny, nx = state.p.shape
         self.shape = (nz, ny, nx)
         self.model = self.manifest = self.policy = None
