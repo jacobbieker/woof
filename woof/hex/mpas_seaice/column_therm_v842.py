@@ -127,11 +127,28 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
                 "WOOF_GLIBC239_LIBM64=1 (the vertical thermodynamics need glibc's atan)")
 
 
-def day_of_year(start_time: str) -> float:
+_NOLEAP_MONTH_START = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)
+
+
+def day_of_year(start_time: str, calendar: str) -> float:
     """``get_day_of_year`` at the clock's start: the integer day (1 on
-    1 January) as a real."""
-    date = _dt.date(int(start_time[0:4]), int(start_time[5:7]), int(start_time[8:10]))
-    return float(date.timetuple().tm_yday)
+    1 January) as a real, on ``config_calendar_type``'s calendar
+    (``mpas_timekeeping_init``): the Gregorian day, or the day of the 365-day
+    year of ``gregorian_noleap`` (the Registry default). A date the calendar
+    lacks (29 February without leap years) is refused, as ``isValidDate``
+    rejects it and MPAS leaves the time unset; so is the 360-day calendar,
+    which v8.4.2's built-in ESMF lacks, and any other."""
+    year, month, day = int(start_time[0:4]), int(start_time[5:7]), int(start_time[8:10])
+    if calendar == "gregorian":
+        return float(_dt.date(year, month, day).timetuple().tm_yday)
+    if calendar == "gregorian_noleap":
+        if month == 2 and day == 29:
+            _refuse("config_start_time", start_time, "29 February does not exist in the gregorian_noleap calendar",
+                    "a date of the 365-day year")
+        _dt.date(2001, month, day)  # any other day the year lacks raises, as for gregorian
+        return float(_NOLEAP_MONTH_START[month - 1] + day)
+    _refuse("config_calendar_type", calendar, "the time manager is ported for MPAS's gregorian and "
+            "gregorian_noleap calendars", "config_calendar_type = 'gregorian' or 'gregorian_noleap'")
 
 
 @lru_cache(maxsize=None)
@@ -194,7 +211,7 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
     refuse_unported(configs, d)
     n_cells, n_solve, ncat, nil, nsl = (d["nCells"], d["nCellsSolve"], d["nCategories"], d["nIceLayers"],
                                        d["nSnowLayers"])
-    day = day_of_year(configs["config_start_time"]) if day is None else day
+    day = day_of_year(configs["config_start_time"], configs["config_calendar_type"]) if day is None else day
     folded = folded_constants()
     c1, cc, ci, cs = (n_cells + 1,), (n_cells + 1, ncat), (n_cells + 1, ncat, nil), (n_cells + 1, ncat, nsl)
     cat1 = (n_cells + 1, ncat, 1)

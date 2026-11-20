@@ -23,6 +23,13 @@
 #ifndef WRFPLUS_REAL
 #define WRFPLUS_REAL double
 #endif
+
+// WRFPLUS_TL 0 builds the base-only forward (model.step_base): every
+// perturbation store of the TL kernels is skipped, so the compiler drops
+// the tangent arithmetic and loads; the base words are unchanged.
+#ifndef WRFPLUS_TL
+#define WRFPLUS_TL 1
+#endif
 typedef WRFPLUS_REAL wreal;
 
 #ifndef WV_LEV
@@ -312,8 +319,8 @@ void advance_w_tl(wreal* __restrict__ w_pp, wreal* __restrict__ ph_pp,
                    + alt[h] * (th_d[h] - c1h[k] * (mupp_d[c] * th_ref + mu_pp[c] * thp_d[h]));
         wreal dv_d = chm_d * (WT0 + th_ref) + chm * thp_d[h];
         wreal v_dd = (nv_d - v * dv_d) / dv;
-        p_d[h] = c2a_d[h] * (v - al) + c2a[h] * (v_dd - ald);
-        al_d[h] = ald;
+        if (WRFPLUS_TL) p_d[h] = c2a_d[h] * (v - al) + c2a[h] * (v_dd - ald);
+        if (WRFPLUS_TL) al_d[h] = ald;
         if (nl) {
             al_pp[h] = al;
             p_pp[h] = c2a[h] * (alt[h] * (th_pp[h] - (c1h[k] * mu_pp[c]) * th_ref)
@@ -322,8 +329,8 @@ void advance_w_tl(wreal* __restrict__ w_pp, wreal* __restrict__ ph_pp,
     }
     for (int k = 0; k <= nz; ++k) {
         size_t f = (size_t)k * st + c;
-        w_d[f] = wld[k];
-        if (k >= 1) ph_d[f] = phld[k];
+        if (WRFPLUS_TL) w_d[f] = wld[k];
+        if (WRFPLUS_TL && k >= 1) ph_d[f] = phld[k];
         if (nl) {
             w_pp[f] = wl[k];
             if (k >= 1) ph_pp[f] = phl[k];

@@ -11,6 +11,10 @@
   ``ocn_forcing_transmission``), the explicit bottom drag and Rayleigh
   friction;
 - ``ocn_thick_surface_flux_tend``;
+- the land-ice terms ``ocn_surface_land_ice_fluxes_vel`` and
+  ``ocn_surface_land_ice_fluxes_thick``
+  (:mod:`~woof.hex.mpas_ocean.land_ice_v842`) in the 'standalone' and
+  'coupled' land-ice modes;
 - ``ocn_frazil_forcing_layer_thickness``
   (:func:`~woof.hex.mpas_ocean.frazil_v842.layer_thickness_tend`) under
   ``config_use_frazil_ice_formation``;
@@ -35,8 +39,6 @@ Refused by name:
   equals them. ``WOOF_GLIBC239_LIBM64=1`` (:mod:`woof.core.glibc239_gpu`, a
   source checkout) prepends the LGPL transcription of glibc 2.39's and lifts
   the refusal;
-- land-ice fluxes (``config_land_ice_flux_mode`` 'standalone' or 'coupled'),
-  not ported;
 - the explicit bottom drag, or Rayleigh bottom friction, on a mesh with an
   edge whose ``maxLevelEdgeTop`` is 0: v8.4.2 indexes level 0 of that edge,
   outside the array (a word of the previous edge's column, or before the
@@ -52,7 +54,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import frazil_v842, pgrad_hmix_v842, tend_v842
+from . import frazil_v842, land_ice_v842, pgrad_hmix_v842, tend_v842
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, loop_extent, launch_options
 
 SOURCE_FILES = (
@@ -138,11 +140,7 @@ def _configs(configs: dict | None) -> dict:
 
 def refuse_unported(configs: dict, precision: str) -> None:
     """Refuse, by name, a switch whose term is not ported."""
-    if configs["config_land_ice_flux_mode"] in ("standalone", "coupled"):
-        raise ConfigurationRefusal(
-            knob="config_land_ice_flux_mode", value=configs["config_land_ice_flux_mode"],
-            reason="the land-ice flux terms (mpas_ocn_surface_land_ice_fluxes.F) are not ported",
-            declaration="config_land_ice_flux_mode = 'off' | 'pressure_only' | 'data'")
+    land_ice_v842.check_config(configs)
     if configs["config_use_bulk_wind_stress"] and precision == "r8":
         from woof.hex.mpas_ice import rkind
         if not rkind.trig64():
@@ -286,6 +284,9 @@ def tend_vel(*, mesh: dict, state: dict, diagnostics: dict, forcing: dict, tend,
         _function(precision, "ocn_bulk_wind_stress_cells_v842")(_grid(n_cells_loop), (_BLOCK,), (
             magnitude, forcing["windStressZonal"], forcing["windStressMeridional"], np.int32(n_cells_loop)))
     d = diagnostics
+    land_ice_v842.vel_tend(diagnostics=d, surface_stress=surface_stress, surface_stress_magnitude=magnitude,
+                           n_edges=int(mesh.get("nEdges", n_edges)), n_cells=int(mesh.get("nCells", n_cells)),
+                           configs=c)
     tend_v842.vel_coriolis_tend(
         mesh=mesh, normalized_relative_vorticity_edge=d["normalizedRelativeVorticityEdge"],
         normalized_planetary_vorticity_edge=d["normalizedPlanetaryVorticityEdge"],
@@ -351,6 +352,8 @@ def tend_thick(*, mesh: dict, diagnostics: dict, forcing: dict, tend, configs: d
         n_cells_loop = loop_extent("cells", 3, n_cells)
         _function(precision, "ocn_bulk_thickness_flux_v842")(_grid(n_cells_loop), (_BLOCK,), (
             flux, runoff, *(forcing[n] for n in names), rho_sw(c, precision), np.int32(n_cells_loop)))
+    land_ice_v842.thick_tend(forcing=forcing, surface_thickness_flux=flux, n_cells=int(mesh.get("nCells", n_cells)),
+                             configs=c)
     d = diagnostics
     tend_v842.thick_hadv_tend(mesh=mesh, normal_velocity=d["normalTransportVelocity"],
                               layer_thickness_edge=d["layerThicknessEdge"], tend=tend,

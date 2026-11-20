@@ -444,9 +444,42 @@ Each step is one small PR, taken to merged before the next widens.
    - The domain must hold the relaxation frames (2 (relax_zone + 1) + 1
      cells across) and spec_zone must be at least 1: at spec_zone 0 the
      primal's stencil reads outside the row (as WRF's does). u and v rows
-     do not take the msft divide. Not covered yet: `spec_bdy_final`,
-     `spec_bdyupdate_ph`, `zero_grad_bdy` (item 7b), moist and scalar
+     do not take the msft divide. Not covered yet: moist and scalar
      rows, nested time-t sources, streamed tile seams.
+   - Item 7b, also in `lbc.py`:
+     - `lbf_tl`/`lbf_ad` are `spec_bdy_final` on one field, over woof's
+       strict `finalize_state_field` (GPUWM_WRF_EXACT: specified rows
+       only, coupled with the acoustic muts; face means of muts for u
+       and v, c1 mass + c2, msfu/msfv/msft) or `install_mu_boundary` for
+       mu. The active inputs are muts and the eight side tables; the
+       state is the field.
+     - `sph_tl`/`sph_ad` are `spec_bdyupdate_ph`, `zero_grad_bdy` on w
+       and the frame columns' `calc_p_rho`, over woof's strict
+       `advance_specified_phi_w`. The state is ph'', w'', p'' and al'';
+       the active inputs are rph, php, rmu, muts, th'', mu'', theta', alt
+       and c2a.
+     - The TL and the cell AD launch frame threads only. The AD is a
+       gather: muts per mass column (u and v faces counted per face) and
+       w'' per interior source column of the zero-gradient copy, so no
+       atomics.
+     - Checks: dot-product (1e-12 binary64, 1e-5 binary32) and FD tests
+       over 16 configurations, including the state inputs (every kind,
+       map factors, hybrid levels, spec_zone 1-3, one level, 3x3
+       columns). The float base state is the strict primal's words (0
+       differing, host and CUDA).
+     - WRFPLUS 4.7.1 oracle (`tools/wrfplus_oracle/lbc_final.F90`):
+       g_/a_SPEC_BDY_FINAL on 9 cases (u, v, w with map factors, theta,
+       phi, mu; theta, u and v at spec_zone 2) agree to 3e-16. g_spec_bdyupdate_ph,
+       g_zero_grad_bdy(w), g_calc_p_rho and their adjoints in reverse
+       agree to 1.4e-15 on 2 cases (spec_zone 1 and 2).
+     - WRFPLUS's versions are not hybrid and spec_bdy_final takes the
+       coupling mass as given, so the cases are not hybrid and the
+       fixture forms the u/v face masses. calc_p_rho covers the whole
+       domain in WRFPLUS, so p'' and al'' are compared on the frame, with
+       their seeds zero inside.
+     - Binary32 agrees to 2e-7, except php's adjoint at 2.2e-4. That
+       adjoint is the seed times mu_old/muts - 1, which WRF also forms by
+       subtraction. No WRFPLUS bugs found.
 8. Step and window driver (`woof/grad/wrfplus/model.py`):
    - per-step dot-product and Taylor tests;
    - TL vs nonlinear perturbation growth over 1-6 h on a 12 km dry
@@ -455,6 +488,84 @@ Each step is one small PR, taken to merged before the next widens.
    - the adjoint/forward cost ratio on CUDA and Metal.
 
    This is where G3 is decided.
+
+   **8a, the step (done).** `step_tl` chains the ported operators in the
+   strict step's order: the time-t save, then per RK stage the zeroed
+   tendencies, the diagnosis (reused on stage 1 with WRF's carried muts),
+   rk_step_prep, the four advection kinds, slow_pgf, slow_buoyancy,
+   slow_geopotential, w_damp, small_step_init, the stage muts, calc_coefs,
+   the acoustic substeps (the first with smdiv 0), the captured muts and
+   small_step_finish; then the epilogue diagnosis, set_w_surface and the
+   periodic alias closure. With a tape it snapshots each operator's
+   written arrays before it runs, and `step_ad` pops them in reverse.
+   - Scope: periodic axes, no map factors, no rotation, dry, no physics
+     or mixing package, none of the other work `_step_body` can add
+     (use_theta_m, a moving frame, obstacles, polar filtering, lightning,
+     avgflx, IAU or spectral nudging), `rk_ord = 3`, an even
+     time_step_sound, orders 3-6, and a 3-D base state.
+     `step_geometry` refuses everything else. `step_geometries` gives a
+     chain's geometries: the first step follows the state (a cold one
+     diagnoses on rk_step 1), every later one reuses the previous step's
+     diagnosis and carried muts. On a 1-D base (no terrain)
+     the primal's slow_pgf takes another arithmetic path, so the step
+     would not reproduce its words. Rotation, map factors and
+     specified boundaries come in 8b.
+   - Each scalar is rounded the way its primal launcher rounds it (for
+     example rdx = f32(1/dx) but rk_step_prep's f32(1)/f32(dx)), so the
+     binary32 base reproduces `dycore.step` word for word on the
+     prognostics, p, al, alt, p', muts and the scratch the next step
+     reads. This holds on CUDA and the host backend, for the
+     hybrid coordinate, w_damping, hypsometric_opt 2 without a lid and
+     other orders, nsub 3 and 6, and over three chained steps from a
+     warm and a cold state (`tests/test_grad_wrfplus_model.py`, a
+     16x12x10 ridge).
+   - Binary64 dot product 3e-15 to 1.2e-14 per step and over the chains; the finite-difference ratio reaches 1 to 1e-9-2e-8.
+   - Measured cost on the pb A6000 at 200x200x49 (a ridge, periodic,
+     strict, 2026-11-20, card idle), over `dycore.step` at 14.5 ms:
+
+     | | binary32 | binary64 |
+     |---|---|---|
+     | TL step | 1.9x | 10.2x |
+     | TL step with tape | 2.3x | 10.8x |
+     | adjoint sweep | 3.3x | 10.0x |
+     | taped recompute + sweep | 5.6x | 20.8x |
+
+     The sweep alone (3.3x) is under the projection's 3.64. The
+     projection counted the recompute at 1x, but the step recomputes
+     through the joint TL kernels (1.9x) and spends 0.35x on snapshots,
+     which puts the full adjoint step over the 5x limit at 5.6x. Two
+     ways back under it:
+     - a base-only taped forward (the primal's own kernels with
+       snapshots, about 1.35x), which would give about 4.7x;
+     - in incremental 4D-Var, storing the outer loop's trajectory once
+       as WRFPLUS does, so that each inner iteration pays only the sweep
+       (3.3x) plus tape reads.
+     Metal cost, rotation, map factors and specified boundaries in the
+     step, the window driver with checkpoints and the 12 km TL growth
+     test are 8b and later.
+
+   **8b, the base-only recompute (done).** Each kernel unit compiles a
+   second build with `-DWRFPLUS_TL=0`, in which every perturbation store
+   of the TL kernels is skipped (`if (WRFPLUS_TL)`), so the compiler
+   drops the tangent arithmetic and loads. `model.step_base` runs the
+   step through that build (`_mode.base_only()` picks it per thread), and
+   skips the step's own perturbation copies. It advances the base to the
+   joint build's words and tapes the same snapshots, bit for bit, in
+   binary64 and binary32, for every variant and both chains (host and
+   CUDA). The default build's compile options are unchanged.
+
+   Measured as above (A6000, 200x200x49, idle card, two runs):
+
+   | | binary32 | binary64 |
+   |---|---|---|
+   | base-only step | 1.16-1.18x | 6.1-6.2x |
+   | base-only step with tape | 1.50-1.53x | 6.7-6.9x |
+   | adjoint sweep | 3.27-3.30x | 9.8-10.0x |
+   | **full adjoint step (base recompute + sweep)** | **4.76-4.82x** | 16.5-16.9x |
+
+   The binary32 adjoint step is under the 5x limit, with about 0.2x of
+   margin. The snapshots (0.35x) are the next thing to cut if a later
+   item adds cost.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
@@ -549,7 +660,9 @@ it idle (under 10% utilisation for 20 s before the run).
 | rhs_ph (slow_geopotential, fused or open) | #702 | 4.2x (4.1-4.4) | 1.2-1.3x | 13-15x |
 | coriolis + curvature (coriolis_curvature) | #706 | 3.4x | 2.0x | 13x |
 | w_damp (w_damp) | #708 | 1.6x | 1.7x | 7.1x |
-| relax_bdy_dry + spec_bdy_dry (state_relaxation_multi, 3 stages) | this PR | 2.5x (2.5-2.6) | 1.6x | 4.1x |
+| relax_bdy_dry + spec_bdy_dry (state_relaxation_multi, 3 stages) | #709 | 2.5x (2.5-2.6) | 1.6x | 4.1x |
+| spec_bdy_final (finalize_state_field x5 + install_mu_boundary) | item 7b | 3.7x | 0.41x | 11x |
+| spec_bdyupdate_ph + zero_grad_bdy + frame calc_p_rho (advance_specified_phi_w, 7 substeps) | item 7b | 3.5x | 2.0x | 12x |
 
 advance_uv's 3.7x in the projection is the midpoint of its range. The
 advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
@@ -628,6 +741,19 @@ stages 2-3, no w rows); at 200x200x49 the three launches take 0.37 ms,
 ratios are over those launches, timed as CUDA graphs so host dispatch
 of the per-row TL/AD calls (18 rows, 4-7 kernels each) is not counted.
 
+The item 7b kernels run only on specified domains, and the profiled dry
+step is periodic. Their idle-card primals (2026-11-20, CUDA graphs) are
+therefore counted as time added to the 16 ms step rather than as a
+share of it:
+- spec_bdy_final: 0.105 ms per step (five finalize_state_field launches
+  over the whole grid, plus install_mu_boundary);
+- advance_specified_phi_w: 0.554 ms for 7 substeps. It launches one
+  thread per column, and only the frame's columns do work.
+
+Their TL launches frame threads only, so spec_bdy_final's TL32 is under
+1x. With them added, a specified-boundary step projects to 4.67-4.70x
+over 16.66 ms.
+
 The projection is the per-step adjoint cost over the forward step:
 1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
 far (98.1% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
@@ -649,3 +775,11 @@ are not counted, most ratios come from a shared card, and 1.9% of the
 step is not yet ported. calc_coefs and small_step are each about 4.8x;
 at 2.3% and 8.2% of the step they add about 0.11 and 0.39. Each later kernel PR replaces a
 projected share with a measured one.
+
+**Measured step (item 8a, 2026-11-20).** The chained periodic step's
+adjoint sweep runs at 3.3x `dycore.step` in binary32, under the 3.64 the
+kernels project for it. The recompute is the gap: through the joint TL
+kernels with snapshots it costs 2.3x, not the 1x assumed above, so the
+full adjoint step measures 5.6x. That is over the 5x limit. Item 8b's
+base-only taped forward (1.5x) brings it to **4.76-4.82x**, under the
+limit. A stored trajectory would cost about 3.3x per inner iteration.

@@ -31,6 +31,13 @@
 #ifndef WRFPLUS_REAL
 #define WRFPLUS_REAL double
 #endif
+
+// WRFPLUS_TL 0 builds the base-only forward (model.step_base): every
+// perturbation store of the TL kernels is skipped, so the compiler drops
+// the tangent arithmetic and loads; the base words are unchanged.
+#ifndef WRFPLUS_TL
+#define WRFPLUS_TL 1
+#endif
 typedef WRFPLUS_REAL wreal;
 
 #ifndef RK_KCHUNK
@@ -143,10 +150,10 @@ void calc_p_rho_phi_tl(PRP_STATE(), PRP_STATE(_d), PRP_ACTIVE(), PRP_ACTIVE(_d),
         wreal pp = pw * RK_P0 - pb[b];
         wreal r_d = (RK_RD * thp_d[h] - r * RK_P0 * ap_d) / (RK_P0 * a);
         wreal pp_d = RK_P0 * RK_GAMMA * pw / r * r_d;
-        alt_d[h] = ap_d;
-        al_d[h] = ap_d;
-        p_pp_d[h] = pp_d;
-        p_d[h] = pp_d;
+        if (WRFPLUS_TL) alt_d[h] = ap_d;
+        if (WRFPLUS_TL) al_d[h] = ap_d;
+        if (WRFPLUS_TL) p_pp_d[h] = pp_d;
+        if (WRFPLUS_TL) p_d[h] = pp_d;
         if (nl) {
             alt[h] = a;
             al[h] = ap;
@@ -286,7 +293,7 @@ void rk_step_prep_flux_tl(RSP_STATE(), RSP_STATE(_d), RSP_ACTIVE(), RSP_ACTIVE(_
             f = f / m;
             f_d = f_d / m;
         }
-        ru_d[ix] = f_d;
+        if (WRFPLUS_TL) ru_d[ix] = f_d;
         if (nl) ru[ix] = f;
     }
     if (i < nx) {
@@ -303,7 +310,7 @@ void rk_step_prep_flux_tl(RSP_STATE(), RSP_STATE(_d), RSP_ACTIVE(), RSP_ACTIVE(_
             f = f * m;
             f_d = f_d * m;
         }
-        rv_d[ix] = f_d;
+        if (WRFPLUS_TL) rv_d[ix] = f_d;
         if (nl) rv[ix] = f;
     }
 }
@@ -373,24 +380,24 @@ void rk_step_prep_ww_tl(RSP_STATE(), RSP_STATE(_d), RSP_ACTIVE(), RSP_ACTIVE(_d)
         wreal divv_d = W * (rdx * (f1d - f0d) + rdy * (g1d - g0d));
         dmdt = dmdt + divv;
         dmdt_d = dmdt_d + divv_d;
-        ww_d[(size_t)(k + 1) * st + c] = divv_d;
+        if (WRFPLUS_TL) ww_d[(size_t)(k + 1) * st + c] = divv_d;
         if (nl) ww[(size_t)(k + 1) * st + c] = divv;
     }
     wreal w = 0, w_d = 0;
-    ww_d[c] = 0;
+    if (WRFPLUS_TL) ww_d[c] = 0;
     if (nl) ww[c] = 0;
     for (int k = 1; k < nz; ++k) {
         size_t at = (size_t)k * st + c;
         wreal divv_d = ww_d[at];
         w_d = (w_d - (dnw[k - 1] * c1h[k - 1]) * dmdt_d) - divv_d;
-        ww_d[at] = w_d;
+        if (WRFPLUS_TL) ww_d[at] = w_d;
         if (nl) {
             wreal divv = ww[at];
             w = (w - (dnw[k - 1] * c1h[k - 1]) * dmdt) - divv;
             ww[at] = w;
         }
     }
-    ww_d[(size_t)nz * st + c] = 0;
+    if (WRFPLUS_TL) ww_d[(size_t)nz * st + c] = 0;
     if (nl) ww[(size_t)nz * st + c] = 0;
 }
 
@@ -540,13 +547,13 @@ void rk_addtend_dry_tl(AT_STATE(), AT_STATE(_d), AT_ACTIVE(), AT_ACTIVE(_d),
     size_t nu = (size_t)nz * ny * (nx + 1), nv = (size_t)nz * (ny + 1) * nx;
     size_t nw = (size_t)(nz + 1) * ny * nx, nm = (size_t)nz * ny * nx;
     size_t st = (size_t)ny * nx;
-    if (t < nu) { ru_t_d[t] += ru_tf_d[t]; if (nl) ru_t[t] = ru_t[t] + ru_tf[t]; }
-    if (t < nv) { rv_t_d[t] += rv_tf_d[t]; if (nl) rv_t[t] = rv_t[t] + rv_tf[t]; }
+    if (t < nu) { if (WRFPLUS_TL) ru_t_d[t] += ru_tf_d[t]; if (nl) ru_t[t] = ru_t[t] + ru_tf[t]; }
+    if (t < nv) { if (WRFPLUS_TL) rv_t_d[t] += rv_tf_d[t]; if (nl) rv_t[t] = rv_t[t] + rv_tf[t]; }
     if (t < nw) {
-        rw_t_d[t] += rw_tf_d[t]; rph_t_d[t] += rph_tf_d[t];
+        if (WRFPLUS_TL) { rw_t_d[t] += rw_tf_d[t]; rph_t_d[t] += rph_tf_d[t]; }
         if (nl) { rw_t[t] = rw_t[t] + rw_tf[t]; rph_t[t] = rph_t[t] + rph_tf[t]; }
     }
-    if (t < st) { rmu_t_d[t] += rmu_tf_d[t]; if (nl) rmu_t[t] = rmu_t[t] + rmu_tf[t]; }
+    if (t < st) { if (WRFPLUS_TL) rmu_t_d[t] += rmu_tf_d[t]; if (nl) rmu_t[t] = rmu_t[t] + rmu_tf[t]; }
     if (t < nm) {
         int c = (int)(t % st);
         int k = (int)(t / st);
@@ -564,7 +571,7 @@ void rk_addtend_dry_tl(AT_STATE(), AT_STATE(_d), AT_ACTIVE(), AT_ACTIVE(_d),
             th = th + hd;
             th_d = th_d + hd_d;
         }
-        rth_t_d[t] = th_d;
+        if (WRFPLUS_TL) rth_t_d[t] = th_d;
         if (nl) rth_t[t] = th;
     }
 }
@@ -658,7 +665,7 @@ void set_w_surface_tl(wreal* __restrict__ w, wreal* __restrict__ w_d,
 #define SW_V(a, o) ((cf1 * a[o] + cf2 * a[vp + o]) + cf3 * a[2 * vp + o])
     wreal y_d = s.cy * (s.dyn * SW_V(v_d, vb + nx) + s.dys * SW_V(v_d, vb));
     wreal x_d = s.cx * (s.dxe * SW_C(u_d, ul + 1) + s.dxw * SW_C(u_d, ul));
-    w_d[col] = y_d + x_d;
+    if (WRFPLUS_TL) w_d[col] = y_d + x_d;
     if (nl) {
         wreal y = s.cy * (s.dyn * SW_V(v, vb + nx) + s.dys * SW_V(v, vb));
         wreal x = s.cx * (s.dxe * SW_C(u, ul + 1) + s.dxw * SW_C(u, ul));

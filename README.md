@@ -288,7 +288,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     ice formation (`config_use_frazil_ice_formation`, off by default as in
     v8.4.2's Registry: open ocean and under land ice, its tendencies, the
     accumulated mass and the surface pressure; standalone and over forward
-    steps, in fast and strict numerics). The step
+    steps, in fast and strict numerics), and the land-ice fluxes
+    (`config_land_ice_flux_mode` 'standalone' and 'coupled', off by default:
+    ISOMIP and Jenkins melt, the top drag, the boundary layer, the thickness,
+    velocity and tracer forcing, the effective density in land ice and the
+    coupler's land-ice means; standalone, in the diagnostics and over forward
+    steps; 'HollandJenkins' is refused by name). The step
     checks its barotropic halo copies against the mesh once per mesh, not
     with two device reads per stage: on an 8,300-cell, 60-level torus a
     step takes 36 instead of 130 ms on an A6000 and 110 instead of 245 ms
@@ -337,7 +342,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     shortwave, `column_prep_radiation` and the initial shortwave. The
     computed albedos need the opt-in for glibc's atan, and the
     delta-Eddington shortwave needs it for glibc's sin, cos, atan and asin
-    (the opt-in now carries asin). The elastic subcycles check
+    (the opt-in now carries asin). Also the coupling preparation
+    (`seaice_column_coupling_prep` and `seaice_column_scale_fluxes`: cell
+    albedos, pond freshwater feedback, shortwave scaling, fluxes per unit
+    ice area; RKIND 4 and 8, no opt-in; the ocean mixed layer is refused by
+    name). The elastic subcycles check
     their arrays once per solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
@@ -995,7 +1004,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   grids, the `w_damp` vertical-velocity limiter, and the lateral-boundary
   relaxation and specified zone (woof's strict `state_relaxation_multi`,
   WRF `relax_bdy_dry` and `spec_bdy_dry`, with the boundary tables'
-  adjoint as an output). In binary64 they match WRFPLUS to about 1e-15
+  adjoint as an output) and its end-of-step and acoustic frame updates
+  (`finalize_state_field` and `advance_specified_phi_w`, WRF
+  `spec_bdy_final`, `spec_bdyupdate_ph` and `zero_grad_bdy`). In binary64 they match WRFPLUS to about 1e-15
   on non-hybrid cases (WRFPLUS has no hybrid coordinate; the exclusions
   are listed in the design note). The comparison found a lid bug in
   WRFPLUS's own pressure-gradient adjoint and, in its `rhs_ph`, a heap
@@ -1003,8 +1014,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   axes, all described in the design note.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
   0.85-3.2x the glue, 3.3-4.5x advection, 1.3-4.4x the big-step
-  tendencies and 2.5x the lateral boundaries. The measured step projection (4.7x) is in the design
-  note. The forecast path does not import any of it.
+  tendencies and 2.5-3.7x the lateral boundaries. The kernels chain into
+  one strict dry step (`woof.grad.wrfplus.model`, periodic and without
+  rotation or map factors so far) whose binary32 base state reproduces
+  `dycore.step` word for word, and whose binary64 dot-product and
+  finite-difference tests pass. Measured at 200x200x49 on an A6000, the
+  step's adjoint sweep costs 3.3x the forward step, and 4.8x with its
+  taped forward recompute through a base-only build of the kernels
+  (details in the design note). The forecast
+  path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable

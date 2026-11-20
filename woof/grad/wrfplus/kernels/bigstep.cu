@@ -39,6 +39,13 @@
 #ifndef WRFPLUS_REAL
 #define WRFPLUS_REAL double
 #endif
+
+// WRFPLUS_TL 0 builds the base-only forward (model.step_base): every
+// perturbation store of the TL kernels is skipped, so the compiler drops
+// the tangent arithmetic and loads; the base words are unchanged.
+#ifndef WRFPLUS_TL
+#define WRFPLUS_TL 1
+#endif
 typedef WRFPLUS_REAL wreal;
 
 #define R3(k, j, i, nyy, nxx) \
@@ -175,7 +182,7 @@ void pgf_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_d,
                            cf1, cf2, cf3, top_lid, cfn, cfn1);
         size_t out = R3(k, j, i, ny, nxf);
         if (nl) ru_t[out] = ru_t[out] - t.v;
-        ru_d[out] = ru_d[out] - t.d;
+        if (WRFPLUS_TL) ru_d[out] = ru_d[out] - t.d;
     }
     if (i < nx && ((!bnd_y && j <= ny) || (bnd_y && j > 0 && j < ny))) {
         int ja = j % ny, jb = (j - 1 + ny) % ny;
@@ -185,7 +192,7 @@ void pgf_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_d,
                            cf1, cf2, cf3, top_lid, cfn, cfn1);
         size_t out = R3(k, j, i, nyf, nx);
         if (nl) rv_t[out] = rv_t[out] - t.v;
-        rv_d[out] = rv_d[out] - t.d;
+        if (WRFPLUS_TL) rv_d[out] = rv_d[out] - t.d;
     }
 }
 
@@ -487,7 +494,7 @@ void buoy_tl(wreal* __restrict__ rw_t, wreal* __restrict__ rw_d,
     }
     Dl buoy = buoy_scale(msft, c, has_msf) * term;
     if (nl) rw_t[ix] = rw_t[ix] + buoy.v;
-    rw_d[ix] = rw_d[ix] + buoy.d;
+    if (WRFPLUS_TL) rw_d[ix] = rw_d[ix] + buoy.d;
 }
 
 // p and mup of one column.
@@ -786,7 +793,7 @@ void geo_tl(wreal* __restrict__ rph_t, wreal* __restrict__ rph_d,
         tend = tend - (O.rd * mass) * (O.speed * O.diff);
     }
     if (nl) rph_t[ix] = tend.v;
-    rph_d[ix] = tend.d;
+    if (WRFPLUS_TL) rph_d[ix] = tend.d;
 }
 
 // ---- adjoint
@@ -1299,7 +1306,7 @@ void cc_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_td,
         t = (t + fh * rv4) - (eh * ch) * rw4;
         t = (t + vx * rv4) - (ld(u, ud, o) * rerad) * rw4;
         if (nl) ru_t[o] = t.v;
-        ru_td[o] = t.d;
+        if (WRFPLUS_TL) ru_td[o] = t.d;
     }
     if (i < nx && (!bnd_y || (j > 0 && j < ny))) {
         int jc = j % ny, jmc = (j - 1 + ny) % ny;
@@ -1319,7 +1326,7 @@ void cc_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_td,
         t = (t - fh * ru4) + (eh * sh) * rw4;
         t = (t - vx * ru4) - (ld(v, vd, o) * rerad) * rw4;
         if (nl) rv_t[o] = t.v;
-        rv_td[o] = t.d;
+        if (WRFPLUS_TL) rv_td[o] = t.d;
     }
     if (i < nx && j < ny && k >= 1) {
         size_t c = (size_t)j * nx + i;
@@ -1334,7 +1341,7 @@ void cc_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_td,
         t = t + e[c] * (cosa[c] * ruf - sina[c] * rvf);
         t = t + rerad * (ruf * uf + rvf * vf);
         if (nl) rw_t[o] = t.v;
-        rw_td[o] = t.d;
+        if (WRFPLUS_TL) rw_td[o] = t.d;
     }
 }
 
@@ -1626,7 +1633,7 @@ void wd_tl(wreal* __restrict__ rw_t, wreal* __restrict__ rw_d,
         wreal damp = wd_sign(w[ix]) * w_alpha;
         Dl t = (damp * dl(vc - w_crit_cfl, vcd)) * m;
         if (nl) rw_t[ix] = rw_t[ix] - t.v;
-        rw_d[ix] = rw_d[ix] - t.d;
+        if (WRFPLUS_TL) rw_d[ix] = rw_d[ix] - t.d;
     }
 }
 

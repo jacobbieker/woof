@@ -19,15 +19,13 @@ glibc 2.44), 2026-11-20.
     `seaice_init_column_shortwave` (the orbit, the radiation with
     `initonly`, then the cell albedos).
   The clock is `config_start_time`: `get_day_of_year` and
-  `get_seconds_into_day` read it. The oracle's stub clock
-  (`tools/mpas_ocean_oracle/stubs.F90`) counts Gregorian days whatever
-  `config_calendar_type` says, while MPAS's default calendar is
-  `gregorian_noleap` (2000-03-01 is day 60 there, 61 in the stub). So the
-  `gregorian_noleap` cases sit in January or in 2001, where both count the
-  same, and two cases (`dedd_bl99_level_ponds_noon`,
-  `init_shortwave_dedd_topo_ponds` on 2000-02-29) declare `gregorian`. The
-  port counts the 365-day year for `gregorian_noleap`, refuses 29 February
-  there, and refuses other calendars.
+  `get_seconds_into_day` read it. The driver sets the calendar
+  from `config_calendar_type` (`mpas_timekeeping_init`), and the stub
+  clock (`tools/mpas_ocean_oracle/stubs.F90`) counts the 365-day year of
+  `gregorian_noleap` (the Registry default) as MPAS does; two cases
+  (`dedd_bl99_level_ponds_noon`, `init_shortwave_dedd_topo_ponds` on
+  2000-02-29) declare `gregorian`. The port refuses 29 February on
+  `gregorian_noleap` and the other calendars.
 - Cases: `woof.verify.mpas_seaice_column_oracle.DEDD_CASES`, all
   `config_shortwave_type = 'dEdd'` with `config_calc_surface_temperature`
   true, at several dates and times of day:
@@ -39,6 +37,8 @@ glibc 2.44), 2026-11-20.
   - BL99 with one layer and three categories, and with twelve layers;
   - zero-layer thermodynamics (no heat capacity), without and with topo
     ponds;
+  - the Registry defaults on 2000-03-01, day 60 of `gregorian_noleap`'s
+    365-day year (61 on a Gregorian count);
   - `seaice_init_column_shortwave` with level ponds (`initonly`) and with
     topo ponds.
 
