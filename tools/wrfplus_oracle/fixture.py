@@ -219,11 +219,14 @@ def advance_uv(exe: str, runner: list[str], seed: int = 20261119) -> dict:
 
 
 #: advance_w's fixture configurations (spec_zone >= 1, as above; c1 = 1,
-#: c2 = 0; no damper).
+#: c2 = 0; no damper).  The mapped cases pass msft as msftx and msfty.
 W_CASES = {
     "plain": dict(spec_zone=1),
     "lid_moist": dict(spec_zone=1, top_lid=1, moist_cq=1, base3d=0),
     "deep_moist": dict(nz=12, ny=7, nx=6, spec_zone=1, moist_cq=1, epssm=0.3),
+    "mapped": dict(spec_zone=1, has_msf=1),
+    "mapped_lid_moist": dict(nz=10, ny=7, nx=6, spec_zone=1, top_lid=1, moist_cq=1,
+                             base3d=0, epssm=0.3, has_msf=1),
 }
 
 #: The driver's 3-D adjoint outputs after the state's four, in order.
@@ -257,7 +260,8 @@ def _w_record(geom, tr, pe, seeds):
           + pair("rph_t") + pair("c2a") + [cqw, cqwd] + pair("alt") + pair("a")
           + pair("alpha") + pair("gam") + pair("u_pp") + pair("v_pp")
           + [seeds[n] for n in W_STATE])
-    a2 = [mut, mutd, muts, mutsd, muave, muaved, tr["mu_pp"], pe["mu_pp"], tr["ht"]]
+    a2 = [mut, mutd, muts, mutsd, muave, muaved, tr["mu_pp"], pe["mu_pp"], tr["ht"],
+          tr["msft"]]
     blob = head.tobytes() + reals.astype("<f8").tobytes()
     for a in a3:
         blob += L.w3(a).astype("<f8").tobytes(order="F")

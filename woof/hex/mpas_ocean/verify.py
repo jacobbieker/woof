@@ -16,10 +16,12 @@ def verify() -> dict:
                              mpas_ocean_tend_oracle, mpas_ocean_tendency_oracle, mpas_ocean_tracer_advection_oracle,
                              mpas_ocean_tracer_hmix_oracle, mpas_ocean_tend_tracer_oracle, mpas_ocean_vmix_oracle,
                              mpas_ocean_vert_transport_oracle, mpas_ocean_frazil_oracle,
-                             mpas_ocean_forward_frazil_oracle)
+                             mpas_ocean_forward_frazil_oracle, mpas_ocean_land_ice_oracle,
+                             mpas_ocean_land_ice_diagnostics_oracle, mpas_ocean_forward_land_ice_oracle)
 
     from . import (btr_subcycle_v842, diagnostics_v842, forward_v842, split_step_v842, eos_v842, forcing_v842, pgrad_hmix_v842, tend_tracer_v842, tend_v842,
-                   tracer_advection_v842, tracer_hmix_v842, vert_transport_v842, vmix_v842, frazil_v842)
+                   tracer_advection_v842, tracer_hmix_v842, vert_transport_v842, vmix_v842, frazil_v842,
+                   land_ice_v842)
 
     pieces = []
     for label, oracle_module, port in (("tendency_terms", mpas_ocean_tend_oracle, tend_v842),
@@ -38,7 +40,11 @@ def verify() -> dict:
                                        ("split_explicit_step", mpas_ocean_split_step_oracle, split_step_v842),
                                        ("forward_mode", mpas_ocean_forward_oracle, forward_v842),
                                        ("frazil_formation", mpas_ocean_frazil_oracle, frazil_v842),
-                                       ("forward_mode_frazil", mpas_ocean_forward_frazil_oracle, frazil_v842)):
+                                       ("forward_mode_frazil", mpas_ocean_forward_frazil_oracle, frazil_v842),
+                                       ("land_ice_fluxes", mpas_ocean_land_ice_oracle, land_ice_v842),
+                                       ("land_ice_diagnostics", mpas_ocean_land_ice_diagnostics_oracle,
+                                        land_ice_v842),
+                                       ("forward_mode_land_ice", mpas_ocean_forward_land_ice_oracle, land_ice_v842)):
         fixture_dir = oracle_module.FIXTURE_DIR
         for precision in oracle_module.PRECISIONS:
             if not (fixture_dir / f"oracle-{precision}.npz").is_file():

@@ -90,7 +90,7 @@ FIELDS = (
     ("diagnostics", "inSituThermalExpansionCoeff", REAL, ("L", "C1")),
     ("diagnostics", "inSituSalineContractionCoeff", REAL, ("L", "C1")),
     ("forcing", "seaIcePressure", REAL, ("C1",)), ("forcing", "atmosphericPressure", REAL, ("C1",)),
-    # landIcePressurePKG (config_land_ice_flux_mode 'pressure_only') and frazilIce
+    # landIcePressurePKG (config_land_ice_flux_mode other than 'off') and frazilIce
     ("forcing", "landIcePressure", REAL, ("C1",)), ("forcing", "landIceDraft", REAL, ("C1",)),
     ("forcing", "landIceFraction", REAL, ("C1",)), ("forcing", "landIceMask", INT, ("C1",)),
     ("forcing", "frazilSurfacePressure", REAL, ("C1",)),
@@ -144,7 +144,7 @@ def shape(case: dict, fortran_shape: tuple) -> tuple[int, ...]:
 def present(case: dict, name: str) -> bool:
     """Whether a forcing field's package is on (MPAS allocates it only then)."""
     if name in LAND_ICE_FIELDS:
-        return case["config"]["config_land_ice_flux_mode"] == "pressure_only"
+        return case["config"]["config_land_ice_flux_mode"] != "off"
     if name == "frazilSurfacePressure":
         return case["config"]["config_use_frazil_ice_formation"]
     return True

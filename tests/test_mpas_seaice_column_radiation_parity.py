@@ -192,7 +192,7 @@ def test_gpu_matches_the_v842_oracle_word_for_word_with_glibc_s_atan(glibc239):
 @requires_gpu
 @pytest.mark.parametrize("original, mutated, field, case", [
     # absorbed_solar's layer count "fixed" to nilyr
-    ("sw_absorbed_solar(heat_capacity, ncat,", "sw_absorbed_solar(heat_capacity, nilyr,",
+    ("(flags & SW_FIX_LAYERS) ? nilyr : ncat,", "(flags & SW_FIX_LAYERS) ? nilyr : nilyr,",
      "shortwave/absorbedShortwaveIceLayer", "rad_ccsm3_constant_albedos"),
     # compute_albedos' intent(out) snow albedos on bare ice "fixed" to 0 (v8.4.2 keeps the caller's albocn)
     ("double alvdrns = SW_ALBOCN, alidrns = SW_ALBOCN, alvdfns = SW_ALBOCN, alidfns = SW_ALBOCN;",

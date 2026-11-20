@@ -25,6 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ._mode import tl_options
 from .acoustic import _check, _dtype, _real
 
 KERNELS = Path(__file__).resolve().parent / "kernels"
@@ -92,16 +93,17 @@ def adv_shapes(geom: AdvGeometry) -> dict:
 
 
 @lru_cache(maxsize=None)
-def _device_module(real: str, horder: int, device: int):
+def _device_module(real: str, horder: int, device: int, build: tuple = ()):
     import cupy as cp
     source = (KERNELS / "advect.cu").read_text(encoding="utf-8")
     return cp.RawModule(code=source, options=(
-        "--fmad=false", f"-DWRFPLUS_REAL={real}", f"-DADV_H={horder}"))
+        "--fmad=false", f"-DWRFPLUS_REAL={real}", f"-DADV_H={horder}") + build)
 
 
 def _kernel(name: str, dtype, horder: int):
     import cupy as cp
-    return _device_module(_real(dtype), horder, cp.cuda.Device().id).get_function(name)
+    return _device_module(_real(dtype), horder, cp.cuda.Device().id,
+                          tl_options()).get_function(name)
 
 
 def _grid(ni: int, nj: int, nk: int) -> tuple:

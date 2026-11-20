@@ -22,6 +22,13 @@
 #ifndef WRFPLUS_REAL
 #define WRFPLUS_REAL double
 #endif
+
+// WRFPLUS_TL 0 builds the base-only forward (model.step_base): every
+// perturbation store of the TL kernels is skipped, so the compiler drops
+// the tangent arithmetic and loads; the base words are unchanged.
+#ifndef WRFPLUS_TL
+#define WRFPLUS_TL 1
+#endif
 typedef WRFPLUS_REAL wreal;
 
 #ifndef WV_LEV
@@ -124,7 +131,7 @@ void calc_coef_w_tl(wreal* __restrict__ c2a, wreal* __restrict__ a,
         wreal dend = bd - ald[k] * gl[k - 1] - al_[k] * gd[k - 1];
         wreal alv = (wreal)1.0 / den;
         wreal alvd = -dend * alv * alv;
-        alpha_d[(size_t)k * st + c] = alvd;
+        if (WRFPLUS_TL) alpha_d[(size_t)k * st + c] = alvd;
         if (nl) alpha[(size_t)k * st + c] = alv;
         gl[k] = cc * alv;
         gd[k] = ccd * alv + cc * alvd;
@@ -141,21 +148,21 @@ void calc_coef_w_tl(wreal* __restrict__ c2a, wreal* __restrict__ a,
         wreal den = b_top - al_[nz] * gl[nz - 1];
         wreal dend = bd - ald[nz] * gl[nz - 1] - al_[nz] * gd[nz - 1];
         wreal alv = (wreal)1.0 / den;
-        alpha_d[(size_t)nz * st + c] = -dend * alv * alv;
+        if (WRFPLUS_TL) alpha_d[(size_t)nz * st + c] = -dend * alv * alv;
         if (nl) alpha[(size_t)nz * st + c] = alv;
         gl[nz] = 0; gd[nz] = 0;
     }
     for (int k = 0; k < nz; ++k) {
         size_t h = (size_t)k * st + c;
-        c2a_d[h] = cd[k];
+        if (WRFPLUS_TL) c2a_d[h] = cd[k];
         if (nl) c2a[h] = cl[k];
     }
     for (int k = 0; k <= nz; ++k) {
         size_t f = (size_t)k * st + c;
-        gam_d[f] = gd[k];
+        if (WRFPLUS_TL) gam_d[f] = gd[k];
         if (nl) gam[f] = gl[k];
         if (k >= 1) {
-            a_d[f] = ald[k];
+            if (WRFPLUS_TL) a_d[f] = ald[k];
             if (nl) a[f] = al_[k];
         }
     }

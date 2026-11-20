@@ -42,7 +42,11 @@ glibc 2.44), 2026-11-15.
   - `shortwave_ccsm3` passes `ncat` as `absorbed_solar`'s `nilyr`
     (`ice_shortwave.F90:236`): the light is spread over `ncat` layers of
     `hi/ncat` and the layers below stay zero. With `ncat > nilyr` v8.4.2
-    writes past the array, so the port refuses that by name;
+    writes past the array, so the port refuses that by name. The opt-in
+    correction `woof_v842_corrections = ('ccsm3_absorbed_solar_layers',)`
+    (not the default, not in the oracle) passes `nilyr` and lifts the
+    refusal; `tests/test_mpas_seaice_column_corrections.py` checks it
+    against Beer's law through every layer (numpy reference);
   - `shortwave_ccsm3` sets `coszen` to 0.5, and `colpkg_step_radiation`
     zeroes `bioTracerShortwave`;
   - `compute_albedos`' intent(out) snow albedos keep the caller's ocean

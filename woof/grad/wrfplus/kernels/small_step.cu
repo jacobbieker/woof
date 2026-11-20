@@ -24,6 +24,13 @@
 #ifndef WRFPLUS_REAL
 #define WRFPLUS_REAL double
 #endif
+
+// WRFPLUS_TL 0 builds the base-only forward (model.step_base): every
+// perturbation store of the TL kernels is skipped, so the compiler drops
+// the tangent arithmetic and loads; the base words are unchanged.
+#ifndef WRFPLUS_TL
+#define WRFPLUS_TL 1
+#endif
 typedef WRFPLUS_REAL wreal;
 
 #define WGAMMA ((wreal)1.4)
@@ -131,7 +138,7 @@ void small_step_init_uv_tl(SI_STATE(), SI_STATE(_d), SI_TRAJ(), SI_TRAJ(_d),
             vd = vd / msfu[(size_t)j * nxf + i];
         }
         if (nl) u_pp[ix] = value;
-        u_pp_d[ix] = vd;
+        if (WRFPLUS_TL) u_pp_d[ix] = vd;
     }
     if (i < nx) {
         size_t ca = (size_t)ss_cell_a(j, ny, boundary_y) * nx + i;
@@ -151,7 +158,7 @@ void small_step_init_uv_tl(SI_STATE(), SI_STATE(_d), SI_TRAJ(), SI_TRAJ(_d),
             vd = vd * msfv[(size_t)j * nx + i];
         }
         if (nl) v_pp[ix] = value;
-        v_pp_d[ix] = vd;
+        if (WRFPLUS_TL) v_pp_d[ix] = vd;
     }
 }
 
@@ -168,7 +175,7 @@ void small_step_init_column_tl(SI_STATE(), SI_STATE(_d), SI_TRAJ(), SI_TRAJ(_d),
     wreal mut_d = mup0_d[c], mus_d = mup_d[c];
     wreal mupp_d = mup0_d[c] - mup_d[c];
     if (nl) mu_pp[c] = mupp;
-    mu_pp_d[c] = mupp_d;
+    if (WRFPLUS_TL) mu_pp_d[c] = mupp_d;
     for (int k = 0; k <= nz; ++k) {
         size_t f = (size_t)k * st + c;
         wreal cft = c1f[k] * mut + c2f[k];
@@ -178,8 +185,8 @@ void small_step_init_column_tl(SI_STATE(), SI_STATE(_d), SI_TRAJ(), SI_TRAJ(_d),
                  - c1f[k] * mus_d * w[f] - cfs * w_d[f];
         if (has_msf) { value = value / msft[c]; vd = vd / msft[c]; }
         if (nl) { w_pp[f] = value; ph_pp[f] = php0[f] - php[f]; }
-        w_pp_d[f] = vd;
-        ph_pp_d[f] = php0_d[f] - php_d[f];
+        if (WRFPLUS_TL) w_pp_d[f] = vd;
+        if (WRFPLUS_TL) ph_pp_d[f] = php0_d[f] - php_d[f];
     }
     for (int k = 0; k < nz; ++k) {
         size_t h = (size_t)k * st + c;
@@ -217,8 +224,8 @@ void small_step_init_column_tl(SI_STATE(), SI_STATE(_d), SI_TRAJ(), SI_TRAJ(_d),
         if (nl) {
             th_pp[h] = thpp; al_pp[h] = al; p_pp[h] = pnew; p_pp_old[h] = pnew;
         }
-        th_pp_d[h] = thpp_d; al_pp_d[h] = al_d; p_pp_d[h] = pnew_d;
-        p_pp_old_d[h] = pnew_d;
+        if (WRFPLUS_TL) { th_pp_d[h] = thpp_d; al_pp_d[h] = al_d; p_pp_d[h] = pnew_d; }
+        if (WRFPLUS_TL) p_pp_old_d[h] = pnew_d;
     }
 }
 
@@ -535,7 +542,7 @@ void small_step_finish_uv_tl(SF_STATE(), SF_STATE(_d), SF_IN(), SF_IN(_d),
         wreal un = (cs * u[ix] + pp) / cn;
         wreal ud = (c1h[k] * msf_d * u[ix] + cs * u_d[ix] + pp_d
                     - un * c1h[k] * mnf_d) / cn;
-        u_d[ix] = ud;
+        if (WRFPLUS_TL) u_d[ix] = ud;
         if (nl) u[ix] = un;
     }
     if (i < nx) {
@@ -556,7 +563,7 @@ void small_step_finish_uv_tl(SF_STATE(), SF_STATE(_d), SF_IN(), SF_IN(_d),
         wreal vn = (cs * v[ix] + pp) / cn;
         wreal vd = (c1h[k] * msf_d * v[ix] + cs * v_d[ix] + pp_d
                     - vn * c1h[k] * mnf_d) / cn;
-        v_d[ix] = vd;
+        if (WRFPLUS_TL) v_d[ix] = vd;
         if (nl) v[ix] = vn;
     }
 }
@@ -578,8 +585,9 @@ void small_step_finish_column_tl(SF_STATE(), SF_STATE(_d), SF_IN(), SF_IN(_d),
         wreal cs = c1f[k] * mus + c2f[k];
         wreal cn = c1f[k] * mun + c2f[k];
         wreal wn = (cs * w[f] + pp) / cn;
-        w_d[f] = (c1f[k] * mus_d * w[f] + cs * w_d[f] + pp_d - wn * c1f[k] * mun_d) / cn;
-        php_d[f] = php_d[f] + ph_pp_d[f];
+        if (WRFPLUS_TL)
+            w_d[f] = (c1f[k] * mus_d * w[f] + cs * w_d[f] + pp_d - wn * c1f[k] * mun_d) / cn;
+        if (WRFPLUS_TL) php_d[f] = php_d[f] + ph_pp_d[f];
         if (nl) { w[f] = wn; php[f] = php[f] + ph_pp[f]; }
     }
     for (int k = 0; k < nz; ++k) {
@@ -598,10 +606,10 @@ void small_step_finish_column_tl(SF_STATE(), SF_STATE(_d), SF_IN(), SF_IN(_d),
         num_d += thp_d[h] * cs + theta * cs_d;
         wreal cn = c1h[k] * mun + c2h[k];
         wreal tn = numerator / cn;
-        thp_d[h] = (num_d - tn * c1h[k] * mun_d) / cn;
+        if (WRFPLUS_TL) thp_d[h] = (num_d - tn * c1h[k] * mun_d) / cn;
         if (nl) thp[h] = tn;
     }
-    mup_d[c] = mup_d[c] + mu_pp_d[c];
+    if (WRFPLUS_TL) mup_d[c] = mup_d[c] + mu_pp_d[c];
     if (nl) mup[c] = mup[c] + mu_pp[c];
 }
 

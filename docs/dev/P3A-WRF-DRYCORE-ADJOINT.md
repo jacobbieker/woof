@@ -75,7 +75,7 @@ routines are named `g_*` (TL) and `a_*` (AD).
 |---|---|---|
 | `advance_uv` | `g_/a_advance_uv` (small_step) | `advance_uv` |
 | `advance_mu_t` | `g_/a_advance_mu_t` | `advance_mu_th` (strict: `wrf_advance_mu_theta`) |
-| `advance_w` | `g_/a_advance_w` | `advance_w_phi` |
+| `advance_w` | `g_/a_advance_w` | `advance_w_phi`, `advance_w_phi_msf` |
 | `calc_p_rho` | `g_/a_calc_p_rho` | inside `advance_w_phi` / `calc_p_alpha` |
 | `calc_coef_w` | `g_/a_calc_coef_w` | `calc_coefs` |
 | `small_step_prep` | `g_/a_small_step_prep` | `small_step_init_uv`, `small_step_init_column` |
@@ -498,7 +498,7 @@ Each step is one small PR, taken to merged before the next widens.
    small_step_finish; then the epilogue diagnosis, set_w_surface and the
    periodic alias closure. With a tape it snapshots each operator's
    written arrays before it runs, and `step_ad` pops them in reverse.
-   - Scope: periodic axes, no map factors, no rotation, dry, no physics
+   - Scope: periodic axes, no map factors, no rotation (8b adds it), dry, no physics
      or mixing package, none of the other work `_step_body` can add
      (use_theta_m, a moving frame, obstacles, polar filtering, lightning,
      avgflx, IAU or spectral nudging), `rk_ord = 3`, an even
@@ -543,6 +543,129 @@ Each step is one small PR, taken to merged before the next widens.
      Metal cost, rotation, map factors and specified boundaries in the
      step, the window driver with checkpoints and the 12 km TL growth
      test are 8b and later.
+
+   **8b, the base-only recompute (done).** Each kernel unit compiles a
+   second build with `-DWRFPLUS_TL=0`, in which every perturbation store
+   of the TL kernels is skipped (`if (WRFPLUS_TL)`), so the compiler
+   drops the tangent arithmetic and loads. `model.step_base` runs the
+   step through that build (`_mode.base_only()` picks it per thread), and
+   skips the step's own perturbation copies. It advances the base to the
+   joint build's words and tapes the same snapshots, bit for bit, in
+   binary64 and binary32, for every variant and both chains (host and
+   CUDA). The default build's compile options are unchanged.
+
+   Measured as above (A6000, 200x200x49, idle card, two runs):
+
+   | | binary32 | binary64 |
+   |---|---|---|
+   | base-only step | 1.16-1.18x | 6.1-6.2x |
+   | base-only step with tape | 1.50-1.53x | 6.7-6.9x |
+   | adjoint sweep | 3.27-3.30x | 9.8-10.0x |
+   | **full adjoint step (base recompute + sweep)** | **4.76-4.82x** | 16.5-16.9x |
+
+   The binary32 adjoint step is under the 5x limit, with about 0.2x of
+   margin. The snapshots (0.35x) are the next thing to cut if a later
+   item adds cost.
+
+   **8b, rotation in the step (done).** On rotational grids with msf 1
+   (Coriolis f and e, a rotated grid's sina/cosa), each stage runs
+   coriolis_curvature after w_damp, with its total dry mass
+   (`DomainState.total_mu`, mub + mu') formed as a pseudo-operator. The
+   binary32 base reproduces `dycore.step`, and the dot-product, finite-
+   difference and base-only tests take it as a seventh variant.
+
+   **What is still refused, and why.** WRFDA's real 4D-Var cases are
+   regional, with map factors and specified boundaries, so both are
+   needed before its tutorial case can serve as the oracle.
+   - Map factors: with has_msf the strict path runs `advance_w_phi_msf`.
+     Its TL/AD is now ported (item 8d below), but the step does not yet
+     bind it or the other operators' map-factor arguments, so the step
+     still refuses map factors.
+   - Specified boundaries: the step must also take the relaxation folded
+     into the held tendencies (`fold_lateral_relaxation` into
+     rk_addtend_dry), the per-stage `state_relaxation_multi` rows on the
+     state's boundary tables, the exact frame and
+     `advance_specified_phi_w` in every substep, and `spec_bdy_final` in
+     the epilogue. The kernels are ported (items 5 and 7); the binding is
+     not.
+   - Order agreed on 2026-11-20: the window driver next, then map
+     factors, then specified boundaries.
+
+   **8c, the window driver (done; `woof/grad/wrfplus/window.py`).** The
+   interface 4D-Var plans against:
+
+   ```python
+   w = Window(state, cfg, nsteps, dtype=np.float64, checkpoint_every=1)
+   xN = w.forward(x0=None)                 # base; keeps the checkpoints
+   dx = w.tl(dx0, save_at=(k1, k2, ...))   # {k: dx_k}, always with nsteps
+   ax0 = w.ad(ax_final=None, forcing={k: ax_obs_k})
+   ```
+
+   - States in and out are dicts over `model.STEP_INPUTS` (the
+     prognostics and the previous step's diagnosis). State k is the
+     state after k steps. `forcing[k]` is added to the adjoint of state k
+     before the sweep goes on backwards, which is where a 4D-Var
+     observation term at that time enters.
+   - The window refuses whatever `step_geometry` refuses, and names it.
+     Today that includes map factors and specified boundaries, so a
+     regional WRFDA case is refused until both are in.
+   - Checkpoints hold a state's STEP_INPUTS only. A step reads nothing
+     else its predecessor wrote: it writes its scratch before reading
+     it. A test pins this. With every other written array poisoned with
+     NaN, one step's outputs and its adjoint's equal the clean run's, bit
+     for bit. Every step therefore runs in one work dict.
+   - The adjoint reruns each segment of `checkpoint_every` steps from its
+     checkpoint (base-only build) to recover the step-start states. It
+     then tapes each step and sweeps it in reverse. Memory is one
+     checkpoint per segment, one segment's step-start states, the work
+     dict and one step's tape.
+   - Tests (`tests/test_grad_wrfplus_window.py`, host and CUDA):
+     - the binary32 forward is N `dycore.step` calls word for word (warm
+       start, cold start, rotation; checkpoints every 1 or 3);
+     - sum over k of <TL dx_k, f_k> equals <dx_0, AD(f)> with forcing at
+       states 0, 1, 3 and N (1e-16 in binary64);
+     - the adjoint is bit for bit the same for every checkpoint interval.
+   - Cost (A6000, 200x200x49, 6 steps, per step over `dycore.step`):
+
+     | checkpoint_every | forward | adjoint | binary64 adjoint |
+     |---|---|---|---|
+     | 1 | 1.30x | 5.14x | 19.0x |
+     | 3 | 1.31x | 6.00x | 24.7x |
+     | 6 | 1.31x | 6.22x | 26.6x |
+
+     The forward is the base-only step plus the checkpoint copies.
+     Longer intervals trade memory for one more base-only rerun per step.
+     At `checkpoint_every = 1` the window adds almost nothing to the bare
+     step: a checkpoint load (0.02x) and, before the fix in #718's
+     follow-up commit, a redundant step-start copy (0.02x). Over the same
+     6-step loop, the window adjoint and a bare `_load` + `step_base`
+     (tape) + `step_ad` loop measure within 0.04x of each other (5.00x
+     against 5.04x). The gap to the single-step 4.8x comes from the
+     denominator and the host. This table divides by a 6-step
+     back-to-back `dycore.step` average, which is about 3% faster than
+     the single synced step item 8b divides by (14.06 against 14.53 ms):
+     about 0.15x. Against the single-step denominator, the same fused
+     step measures 4.83-4.93x. The rest is run-to-run spread under
+     another job's host load (15-29), which moves the same measurement
+     by 0.1x and more between runs a minute apart.
+8d. Map factors in advance_w: `advance_w_tl/_ad` take `WGeometry.has_msf`
+   and a passive `msft`, as `advance_w_phi_msf` does. WRF advance_w's
+   msfty multiplies the phi'' coupling, the terrain lower condition and
+   the phi'' update, and msft_inv = 1/msfty multiplies the implicit
+   forcing rows. msftx = msfty = msft, since woof carries one mass-point
+   factor. With has_msf 0 each factor is an exact 1 and msft is not
+   read, so the msf-free kernel's words are unchanged.
+   - Tests (`tests/test_grad_wrfplus_advance_w.py`): three mapped
+     configurations join the dot-product, accumulation and FD tests. The
+     float build gives `advance_w_phi_msf`'s words. The WRFPLUS fixture
+     gains two mapped cases (`mapped`, `mapped_lid_moist`, the driver
+     passing msft as msftx and msfty), and its old cases are unchanged
+     bit for bit. On the mapped cases woof's TL/AD agrees with
+     g_/a_advance_w to 4e-16. With the factors dropped the misfit is
+     4e-3, so the cases do test the factors.
+   - Next: bind map factors in the step (advance_w, advance_mu_t,
+     advance_uv, small_step, rk_stage and the advection carry has_msf
+     already), and add a mapped step variant.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
@@ -757,6 +880,6 @@ projected share with a measured one.
 adjoint sweep runs at 3.3x `dycore.step` in binary32, under the 3.64 the
 kernels project for it. The recompute is the gap: through the joint TL
 kernels with snapshots it costs 2.3x, not the 1x assumed above, so the
-full adjoint step measures 5.6x. That is over the 5x limit. Item 8
-section 5 lists the two ways back under it (a base-only taped forward at
-about 4.7x, or a stored trajectory at about 3.3x per inner iteration).
+full adjoint step measures 5.6x. That is over the 5x limit. Item 8b's
+base-only taped forward (1.5x) brings it to **4.76-4.82x**, under the
+limit. A stored trajectory would cost about 3.3x per inner iteration.
