@@ -31,7 +31,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = [ROOT / "tests/data/wrfplus/bigstep.npz", ROOT / "tests/data/wrfplus/rhsph.npz",
-            ROOT / "tests/data/wrfplus/coriolis.npz"]
+            ROOT / "tests/data/wrfplus/coriolis.npz", ROOT / "tests/data/wrfplus/w_damp.npz"]
 
 
 def _has_cuda() -> bool:
@@ -74,6 +74,10 @@ CONFIGS = {
     # periodic, bounded (one axis, both), one level, single-cell lines
     "cc": [dict(), dict(boundary_x=1), dict(boundary_y=1), dict(boundary_x=1, boundary_y=1),
            dict(nz=1), dict(nz=2, ny=2, nx=1), dict(ny=1, nx=3, boundary_x=1)],
+    # w_damp: onset = excess reference (WRF's w_beta), a lower and a higher
+    # onset than w_crit_cfl (zadvect_implicit), one interior level
+    "wd": [dict(), dict(w_damp_on=0.8), dict(w_damp_on=1.2, w_crit_cfl=0.9),
+           dict(nz=2, ny=3, nx=2), dict(nz=5, ny=12, nx=4)],
 }
 
 
@@ -100,7 +104,9 @@ def _run(backend, body, tmp_path, extra_env=None):
         " 'geo': (B.GEO_STATE, B.GEO_ACTIVE, C.geo_geometry, C.geo_trajectory,\n"
         "         C.geo_perturbation, B.geo_tl, B.geo_ad, B.GeoGeometry),\n"
         " 'cc': (B.CC_STATE, B.CC_ACTIVE, C.cc_geometry, C.cc_trajectory,\n"
-        "        C.cc_perturbation, B.cc_tl, B.cc_ad, B.CCGeometry)}\n"
+        "        C.cc_perturbation, B.cc_tl, B.cc_ad, B.CCGeometry),\n"
+        " 'wd': (B.WD_STATE, B.WD_ACTIVE, C.wd_geometry, C.wd_trajectory,\n"
+        "        C.wd_perturbation, B.wd_tl, B.wd_ad, B.WDampGeometry)}\n"
         "def dev(d):\n"
         "    return {k: cp.asarray(v) for k, v in d.items()}\n"
         "def run_tl(op, g, tr, pe, nl):\n"
@@ -237,7 +243,9 @@ def test_wrfplus_oracle_agreement(backend, tmp_path):
     open and specified axes, a rotated grid, hybrid levels; the fixture
     forms WRF's coupled rw from w and mut): a periodic axis's end face
     repeats face 0, which WRF reads through its halo, so the two faces'
-    adjoints are compared as a sum."""
+    adjoints are compared as a sum.  g_/a_w_damp (3 cases; WRFPLUS couples
+    with mut and uses w_beta = 1 as onset and excess reference, so the
+    cases are not hybrid and take w_damp_on = w_crit_cfl = 1)."""
     dtn = "float32" if backend == "mlx" else "float64"
     out = _run(backend, f'''
 import json as J
@@ -294,14 +302,14 @@ for z in [np.load(f) for f in {[str(f) for f in FIXTURES]!r}]:
     bad = {k: v for k, v in out.items()
            if not v < (1e-4 if backend == "mlx" and k in loose else limit)}
     assert not bad, sorted(bad.items())
-    assert len(out) == 4 * 9 + 2 * 4 + 7 * 9 + 3 * 2 + 5 * 15
+    assert len(out) == 4 * 9 + 2 * 4 + 7 * 9 + 3 * 2 + 5 * 15 + 3 * 5
 
 
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
 def test_float_base_state_is_the_strict_primal(backend, tmp_path):
     """The float build's base state gives woof's strict slow_pgf,
     slow_buoyancy, slow_geopotential (open and, for order 5, fused) and
-    coriolis_curvature words (GPUWM_WRF_EXACT, dry, 3-D base), so the adjoint is
+    coriolis_curvature and w_damp words (GPUWM_WRF_EXACT, dry, 3-D base), so the adjoint is
     bound to the model woof runs: a primal edit fails here until the TL/AD
     is re-derived.  Host and CUDA; Metal is not checked here."""
     out = _run(backend, f'''
@@ -375,6 +383,18 @@ for i, over in enumerate({CONFIGS["cc"]!r}):
         tr["fnp"], f32(1 / dx), f32(1 / dy), r["ru_t"], r["rv_t"], r["rw_t"],
         i32(g.boundary_x), i32(g.boundary_y), i32(nz), i32(ny), i32(nx)))
     out[f"cc/{{i}}"] = sum(diff(st[n], r[n]) for n in B.CC_STATE)
+for i, over in enumerate({CONFIGS["wd"]!r}):
+    g = C.wd_geometry(**over)
+    tr = dev(C.wd_trajectory(g, 91 + i, f32, hybrid=bool(i % 2)))
+    st, _ = run_tl("wd", g, tr, {{n: cp.zeros_like(tr[n]) for n in B.WD_ACTIVE}}, True)
+    r = tr["rw_t"].copy()
+    nz, ny, nx = g.nz, g.ny, g.nx
+    n = (nz - 1) * ny * nx
+    get_kernel("openbc", "w_damp")(((n + 255) // 256,), (256,), (
+        r, tr["ww"], tr["w"], tr["mup"], tr["mub"], tr["c1f"], tr["c2f"], tr["rdnw"],
+        f32(g.dt), f32(g.w_damp_on), f32(g.w_crit_cfl), i32(nz), i32(ny), i32(nx)))
+    # the limiter must act somewhere, or the check is empty
+    out[f"wd/{{i}}"] = diff(st["rw_t"], r) + int(not bool((r != tr["rw_t"]).any()))
 ''', tmp_path, extra_env=STRICT_ENV)
     fused = sum(1 for c in CONFIGS["geo"] if c.get("order", 5) == 5
                 and not ((c.get("open_x") or c.get("open_y")) and not c.get("specified")))
@@ -393,6 +413,7 @@ def test_geometry_rejects_unported_options():
                        (C.buoy_geometry, dict(ny=0)), (C.geo_geometry, dict(nz=1)),
                        (C.geo_geometry, dict(nx=6)), (C.geo_geometry, dict(ny=4, order=4)),
                        (C.geo_geometry, dict(order=7)), (C.cc_geometry, dict(nz=0)),
-                       (C.cc_geometry, dict(rerad=1.0 / 6371.0e3))):
+                       (C.cc_geometry, dict(rerad=1.0 / 6371.0e3)),
+                       (C.wd_geometry, dict(nz=0))):
         with pytest.raises(ValueError):
             make(**over).validate()

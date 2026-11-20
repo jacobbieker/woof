@@ -12,9 +12,11 @@
 //                    fused slow_geopotential; 3-D base state.
 //   coriolis + curvature  woof coriolis_curvature (the
 //                    GPUWM_WRF_EXACT_C_BIGSTEP path), map_proj != 6.
+//   w_damp           woof w_damp (openbc.cu), w_damping = 1.
 //
 // The oracle is WRFPLUS 4.7.1 G_/A_HORIZONTAL_PRESSURE_GRADIENT,
-// g_/a_pg_buoy_w, g_/a_rhs_ph and G_/A_CORIOLIS + G_/A_CURVATURE; see
+// g_/a_pg_buoy_w, g_/a_rhs_ph, G_/A_CORIOLIS + G_/A_CURVATURE and
+// g_/a_w_damp; see
 // docs/dev/P3A-WRF-DRYCORE-ADJOINT.md.
 //
 // wreal is binary64 unless the unit is built with -DWRFPLUS_REAL=float.
@@ -1580,4 +1582,76 @@ void cc_ad_mut(CC_GATHER_ARGS)
     for (int kf = 0; kf <= nz; ++kf)
         s += c1f[kf] * w[(size_t)kf * st + c] * srw[(size_t)kf * st + c];
     amut[c] += wdiv(s, msft[c]);
+}
+
+// ================================================================ w_damp
+//
+// woof's strict w_damp (woof/core/kernels/openbc.cu, w_damping = 1): on
+// interior w levels where vert_cfl = |ww/(c1f mut + c2f) rdnw dt| exceeds
+// w_damp_on, rw_t -= sign(1, w) w_alpha (vert_cfl - w_crit_cfl)
+// (c1f mut + c2f).  Active: ww and mup (w enters through its sign only).
+// The switch is taken on the base state, as WRFPLUS does.
+
+#define WD_PASSIVE                                                          \
+    const wreal* __restrict__ w, const wreal* __restrict__ mub,             \
+    const wreal* __restrict__ c1f, const wreal* __restrict__ c2f,           \
+    const wreal* __restrict__ rdnw
+
+#define WD_GEOM wreal dt, wreal w_damp_on, wreal w_crit_cfl, wreal w_alpha, int nz, int ny, int nx
+
+static __device__ __forceinline__ wreal wd_sign(wreal x)
+{
+    return signbit(x) ? (wreal)-1 : (wreal)1;
+}
+
+extern "C" __global__
+void wd_tl(wreal* __restrict__ rw_t, wreal* __restrict__ rw_d,
+           const wreal* __restrict__ ww, const wreal* __restrict__ wwd,
+           const wreal* __restrict__ mup, const wreal* __restrict__ mupd,
+           WD_PASSIVE, int nl, WD_GEOM)
+{
+    size_t st = (size_t)ny * nx;
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (nz < 2 || tid >= (size_t)(nz - 1) * st) return;
+    int k = (int)(tid / st) + 1;
+    size_t c = tid - (size_t)(k - 1) * st;
+    size_t ix = (size_t)k * st + c;
+    Dl m = c1f[k] * (dl(mub[c], (wreal)0) + ld(mup, mupd, c)) + c2f[k];
+    wreal q = wdiv(ww[ix], m.v);
+    wreal qd = wdiv(wwd[ix] - q * m.d, m.v);
+    wreal x = (q * rdnw[k]) * dt;
+    wreal vc = fabs(x);
+    if (vc > w_damp_on) {
+        wreal vcd = wd_sign(x) * ((qd * rdnw[k]) * dt);
+        wreal damp = wd_sign(w[ix]) * w_alpha;
+        Dl t = (damp * dl(vc - w_crit_cfl, vcd)) * m;
+        if (nl) rw_t[ix] = rw_t[ix] - t.v;
+        rw_d[ix] = rw_d[ix] - t.d;
+    }
+}
+
+// One thread per column: the column's ww words and its mup word.
+extern "C" __global__
+void wd_ad(const wreal* __restrict__ rw_a, const wreal* __restrict__ ww,
+           const wreal* __restrict__ mup, wreal* __restrict__ aww,
+           wreal* __restrict__ amup, WD_PASSIVE, WD_GEOM)
+{
+    size_t st = (size_t)ny * nx;
+    size_t c = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= st) return;
+    wreal am = (wreal)0;
+    for (int k = 1; k <= nz - 1; ++k) {
+        size_t ix = (size_t)k * st + c;
+        wreal m = c1f[k] * (mub[c] + mup[c]) + c2f[k];
+        wreal q = wdiv(ww[ix], m);
+        wreal x = (q * rdnw[k]) * dt;
+        wreal vc = fabs(x);
+        if (!(vc > w_damp_on)) continue;
+        wreal sa = wd_sign(w[ix]) * w_alpha;
+        wreal a = -rw_a[ix];
+        wreal aq = a * sa * m * wd_sign(x) * rdnw[k] * dt;
+        aww[ix] += wdiv(aq, m);
+        am += c1f[k] * (a * sa * (vc - w_crit_cfl) - wdiv(aq * q, m));
+    }
+    amup[c] += am;
 }

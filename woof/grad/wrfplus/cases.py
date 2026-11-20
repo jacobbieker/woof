@@ -824,3 +824,45 @@ def cc_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     scale = {"ru": 9.0e5, "rv": 9.0e5, "u": 10.0, "v": 10.0, "w": 1.0, "mut": 200.0}
     return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
             for n in CC_ACTIVE}
+
+
+def wd_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .bigstep import WDampGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, dt=20.0)
+    base.update(overrides)
+    return WDampGeometry(**base)
+
+
+def wd_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of w_damp: an eta mass flux ww whose vertical Courant
+    number spreads over 0-2.5, so about half the points are damped; no
+    point lies within 2% of the onset (so the switch does not move under
+    the FD perturbation or a binary32 rounding)."""
+    from .bigstep import WD_ACTIVE, WD_PASSIVE, WD_STATE, wd_shapes
+    rng = np.random.default_rng(seed)
+    sh = wd_shapes(geom)
+    out = _bs_levels(geom.nz, rng, hybrid)
+    out["c2f"] = (1.0 - out["c1f"]) * 5000.0 if hybrid else np.zeros(geom.nz + 1)
+    out["mub"] = 9.0e4 + 2e3 * rng.standard_normal(sh["mub"])
+    out["mup"] = 200.0 * rng.standard_normal(sh["mup"])
+    out["rw_t"] = 20.0 * rng.standard_normal(sh["rw_t"])
+    out["w"] = rng.standard_normal(sh["w"])
+    m = out["c1f"][:, None, None] * (out["mub"] + out["mup"]) + out["c2f"][:, None, None]
+    scale = np.abs(m / (np.concatenate([out["rdnw"], [out["rdnw"][-1]]])[:, None, None]
+                        * geom.dt))
+    cfl = rng.uniform(0.0, 2.5, sh["ww"])
+    for onset in (geom.w_damp_on, geom.w_crit_cfl):
+        near = np.abs(cfl - onset) < 0.02 * onset
+        cfl[near] += 0.05 * onset
+    out["ww"] = np.where(rng.random(sh["ww"]) < 0.5, -1.0, 1.0) * cfl * scale
+    keep = WD_STATE + WD_ACTIVE + WD_PASSIVE
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def wd_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .bigstep import WD_ACTIVE, wd_shapes
+    rng = np.random.default_rng(seed)
+    sh = wd_shapes(geom)
+    scale = {"ww": 50.0, "mup": 200.0}
+    return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in WD_ACTIVE}
