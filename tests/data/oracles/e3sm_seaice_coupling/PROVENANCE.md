@@ -68,7 +68,9 @@ Arrays are `halo` cells longer than `nCellsSolve` (3, or 0 in
 noise, so the export's zeroing is checked. The ice area's first cells are
 0, -0, 1, 1.25, -1e-300, 3e-300 and 0.5; x2i's salinity and freezing
 potential pairs reach both Si0new branches, both liquidus branches and a
-potential of 0, -0 and below.
+potential of 0, -0 and below. The cells' positions come from Taylor
+polynomials for sine and cosine (numpy multiplies and adds), not the host's
+libm, so every host builds the same input bytes.
 
 | case | cells | what it covers |
 |---|---|---|
