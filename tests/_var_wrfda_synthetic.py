@@ -10,25 +10,25 @@ from woof.da.var import obs_wrfda as ow
 NX, NY, NZ = 8, 7, 40
 
 
-def background(seed: int = 0) -> dict:
+def background(seed: int = 0, nz: int = NZ) -> dict:
     rng = np.random.default_rng(seed)
     ii, jj = np.meshgrid(np.arange(NX), np.arange(NY), indexing="ij")
     terr = 100.0 + 20.0 * ii + 15.0 * jj
-    hf = terr[:, :, None] + np.concatenate([[0.0], np.cumsum(np.linspace(40.0, 900.0, NZ))])[None, None, :]
+    hf = terr[:, :, None] + np.concatenate([[0.0], np.cumsum(np.linspace(40.0, 900.0, nz))])[None, None, :]
     h = 0.5 * (hf[:, :, :-1] + hf[:, :, 1:])
     p = 101000.0 * np.exp(-h / 8000.0)
-    t = 290.0 - 0.0065 * h + 0.3 * rng.standard_normal((NX, NY, NZ))
+    t = 290.0 - 0.0065 * h + 0.3 * rng.standard_normal((NX, NY, nz))
     q = 0.012 * np.exp(-h / 2200.0)
     rho = p / (287.0 * t)
     psfc = 101000.0 * np.exp(-terr / 8000.0)
     tpw = np.zeros((NX, NY))
-    for k in range(NZ):
+    for k in range(nz):
         tpw = tpw + (hf[:, :, k + 1] - hf[:, :, k]) * q[:, :, k] * rho[:, :, k]
     tpw = 0.1 * tpw
     coeff = (3.73e-3 * 1.0e8) / 77.6
     ref = 0.776 * p / t * (1.0 + coeff * q / (t * (0.622 + 0.378 * q)))
     return dict(
-        u=5.0 + rng.standard_normal((NX, NY, NZ)), v=-2.0 + rng.standard_normal((NX, NY, NZ)),
+        u=5.0 + rng.standard_normal((NX, NY, nz)), v=-2.0 + rng.standard_normal((NX, NY, nz)),
         t=t, q=q, p=p, h=h, hf=hf, rho=rho, ref=ref, reflog=np.log(ref), psfc=psfc, terr=terr,
         rough=np.full((NX, NY), 0.1), tpw=tpw, landmask=np.zeros((NX, NY)), ptop=5000.0)
 

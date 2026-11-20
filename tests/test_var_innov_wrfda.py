@@ -219,3 +219,37 @@ WRFDA_J0 = 29710.45778742540
 def test_total_jo_at_the_background_is_wrfdas_initial_cost():
     obs, xb, dump, iv = _tutorial()
     assert iw.jo_total(iw.jo(iv)) == pytest.approx(WRFDA_J0, rel=1e-13)
+
+
+def test_vertical_levels_follow_the_first_guess_not_40():
+    """``da_convert_zk`` clips to the first guess's ``kte - 1``: with 30 levels
+    an ob on the top level has ``zk = 30`` and interpolates with ``k = 29``,
+    ``dz = 1`` (clipping to 39 would read past the top)."""
+    xb = syn.background(nz=30)
+    col = iw._hcol(xb["p"], 2, 3, 0.25, 0.5, 0.75, 0.5)
+    tcol = iw._hcol(xb["t"], 2, 3, 0.25, 0.5, 0.75, 0.5)
+    iv = iw.innovations(syn.obs({"sound": _sound(xb, [col[29], 0.5 * (col[27] + col[28])],
+                                                 [tcol[29] + 1.0, 250.0], terr=3.0)}), xb,
+                        options=iw.Options(check_max_iv=False))
+    geo = iv["sound"].extra["geometry"]
+    assert iv["sound"].extra["zk"][0] == 30.0
+    assert geo.k.tolist() == [29, 28] and geo.dz[0] == 1.0
+    assert iv["sound"].fields["t"].inv[0] == pytest.approx(1.0, rel=1e-9)
+    k, _, _ = iw.convert_zk(np.array([30.0]), 30)
+    assert k.tolist() == [29]
+
+
+def test_satem_land_reset_skips_reports_without_levels():
+    """A zero-level report over land must not zero the next report's first level."""
+    xb = syn.background()
+    xb["landmask"] = np.zeros_like(xb["landmask"])
+    xb["landmask"][1:3, 1:3] = 1.0  # land under the empty report only
+    pcol = iw._hcol(xb["p"], 3, 2, 0.2, 0.8, 0.8, 0.2)
+    ps = [0.5 * (pcol[k] + pcol[k + 1]) for k in (4, 12)]
+    sat = syn.obs_type("satem", [dict(i=2, j=2, dx=0.5, dy=0.5, p=[], fields={"thickness": []}),
+                                 dict(i=4, j=3, dx=0.2, dy=0.8, p=ps,
+                                      fields={"thickness": [(0.0, 0, 10.0)] * 2})])
+    sat.extra["ref_p"] = np.array([pcol[0] + 300.0, pcol[0] + 300.0])
+    iv = iw.innovations(syn.obs({"satem": sat}), xb, options=iw.Options(check_max_iv=False))
+    inv = iv["satem"].fields["thickness"].inv
+    assert inv[0] != 0.0 and inv[1] != 0.0

@@ -189,11 +189,11 @@ class Geometry:
         return len(self.h[0])
 
     @classmethod
-    def of(cls, t) -> "Geometry":
+    def of(cls, t, kte: int) -> "Geometry":
         lev = np.asarray(t.info["levels"], dtype=np.int64)
         rep = np.repeat(np.arange(len(lev)), lev)
         zk = t.extra["zk"]
-        k, dz, dzm = convert_zk(zk)
+        k, dz, dzm = convert_zk(zk, kte)
         return cls(_w(t.info), rep, k, dz, dzm, zk)
 
 
@@ -215,8 +215,9 @@ def to_zk(obs_v: float, mdl_v: np.ndarray, by_pressure: bool) -> float:
     return float(k + 1) + (mdl_v[k] - obs_v) / (mdl_v[k] - mdl_v[k + 1])
 
 
-def convert_zk(zk: np.ndarray, kte: int = 40):
-    """``da_convert_zk``: ``(k, dz, dzm)`` (k 1-based, 0 for missing)."""
+def convert_zk(zk: np.ndarray, kte: int):
+    """``da_convert_zk``: ``(k, dz, dzm)`` (k 1-based, 0 for missing; ``k``
+    clipped to ``1..kte-1`` with ``kte`` the first guess's level count)."""
     zk = np.asarray(zk, dtype=np.float64)
     ok = (zk > 0.0) & (zk != MISSING_R)
     k = np.zeros(zk.shape, dtype=np.int64)
@@ -426,7 +427,7 @@ def _surface(t, ob, xb, o, lm):
                 F["p"].qc[n] = MISSING_DATA
                 zk[n] = 1.0 + 1.0e-6
     t.extra["zk"] = zk
-    geo = Geometry.of(t)
+    geo = Geometry.of(t, xb["p"].shape[2])
     for v in ("u", "v", "t", "q", "p"):
         F[v].qc[zk < 0.0] = MISSING_DATA
     model = {v: interp_lin_3d(xb[v], geo) for v in ("u", "v", "t", "q", "p")}
@@ -469,7 +470,7 @@ def _upper(t, ob, xb, o, *, kind):
             elif kind == "pilot" and h[lv] > MISSING_R:
                 zk[lv] = to_zk(h[lv], cols["h"][n], False)
     t.extra["zk"] = zk
-    geo = Geometry.of(t)
+    geo = Geometry.of(t, xb["p"].shape[2])
     fields = [v for v in ("u", "v", "t", "q") if v in F]
     bad = zk < 0.0
     for v in fields:
@@ -500,7 +501,7 @@ def _qscat(t, ob, xb, o):
             if zk[n] < 1.0:
                 zk[n] = 1.0
     t.extra["zk"] = zk
-    geo = Geometry.of(t)
+    geo = Geometry.of(t, xb["p"].shape[2])
     F = t.fields
     for v in ("u", "v"):
         F[v].qc[zk < 0.0] = MISSING_DATA
@@ -540,7 +541,7 @@ def _gpspw_dpw(w, elv, xb):
 
 def _gpspw(t, ob, xb, o):
     t.extra["zk"] = np.full(t.nlocal, MISSING_R)
-    geo = Geometry.of(t)
+    geo = Geometry.of(t, xb["p"].shape[2])
     F = t.fields["tpw"]
     W = _w(t.info)
     model_tpw = _hcol(xb["tpw"], *W)
@@ -593,7 +594,7 @@ def _gpsref(t, ob, xb, o, lm):
                 ob["p"][lv] = pf.inv[lv]
                 pf.qc[lv] = -5
     t.extra["zk"] = zk
-    geo = Geometry.of(t)
+    geo = Geometry.of(t, xb["p"].shape[2])
     model_ref = np.array([lm.exp(x) for x in interp_lin_3d(xb["reflog"], geo)])
     ref.inv[:] = 0.0
     ok = (ob["ref"] > MISSING_R) & (ref.qc != MISSING_DATA)
@@ -764,7 +765,7 @@ def thickness(pre_ma, tv_ma, tv1, tv2, layer1, layer2, pre1, pre2, lm):
 
 def _satem(t, ob, xb, o, lm):
     t.extra["zk"] = np.full(len(t.fields["thickness"]), MISSING_R)
-    geo = Geometry.of(t)
+    geo = Geometry.of(t, xb["p"].shape[2])
     off = t.offsets
     F = t.fields["thickness"]
     p = t.coords["p"]
@@ -791,6 +792,8 @@ def _satem(t, ob, xb, o, lm):
         _max_error_qc(F, F.qc >= 0, o.max_error_thickness)
     lmask = xb["landmask"]
     for n in range(t.nlocal):
+        if off[n + 1] == off[n]:
+            continue  # no level: off[n] is the next report's first
         i0, j0 = W[0][n], W[1][n]
         if (lmask[i0, j0] != 0.0 or lmask[i0 + 1, j0] != 0.0 or lmask[i0, j0 + 1] != 0.0
                 or lmask[i0 + 1, j0 + 1] != 0.0):
@@ -828,7 +831,7 @@ def innovations(obs: WrfdaObs, xb: dict, *, libm: str = "correctly-rounded",
         ob = {k: f.inv.copy() for k, f in obs.types[name].fields.items()}
         if t.nlocal == 0:
             t.extra["zk"] = np.zeros(0)
-            t.extra["geometry"] = Geometry.of(t)
+            t.extra["geometry"] = Geometry.of(t, xb["p"].shape[2])
             continue
         if name in SURFACE_TYPES:
             geo = _surface(t, ob, xb, o, lm)
