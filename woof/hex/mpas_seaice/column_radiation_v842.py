@@ -48,7 +48,11 @@ stored (gfortran passes it by reference); ``shortwave_dEdd`` raises the solar
 zenith cosine to ``puny`` and ``column_radiation`` writes it back; the
 zero-heat-capacity fold of the top layers' absorption into the surface runs
 on each surface type's sums so far; categories without ice keep their
-bare-ice, snow and pond albedos.
+bare-ice, snow and pond albedos. Ice without volume (``aice > puny``,
+``vice = 0``) has layers without thickness, and v8.4.2's
+``kalg*(0.5/dzk(klev))`` makes NaN there, as the port does; a NaN's payload
+is the host's, so those words are not compared. The day of the year follows
+``config_calendar_type`` (``gregorian`` or ``gregorian_noleap``).
 
 ``exp`` is ``glibc_exp`` (the MIT transcription of glibc's binary64 exp).
 """
@@ -176,6 +180,26 @@ def seconds_into_day(start_time: str) -> int:
     return int(start_time[11:13]) * 3600 + int(start_time[14:16]) * 60 + int(start_time[17:19])
 
 
+_NOLEAP_MONTH_DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+
+def day_of_year(start_time: str, calendar: str) -> float:
+    """``get_day_of_year`` at the clock's start on MPAS's calendars: the
+    Gregorian day, or the day of a 365-day year (``gregorian_noleap``, the
+    Registry default, where 29 February does not exist)."""
+    from . import column_therm_v842 as ct
+    if calendar == "gregorian":
+        return ct.day_of_year(start_time)
+    if calendar == "gregorian_noleap":
+        month, day = int(start_time[5:7]), int(start_time[8:10])
+        if month == 2 and day == 29:
+            _refuse("config_start_time", start_time, "29 February does not exist in the gregorian_noleap calendar",
+                    "a date of the 365-day year")
+        return float(sum(_NOLEAP_MONTH_DAYS[:month - 1]) + day)
+    _refuse("config_calendar_type", calendar, "get_day_of_year is ported for MPAS's gregorian and "
+            "gregorian_noleap calendars", "config_calendar_type = 'gregorian' or 'gregorian_noleap'")
+
+
 def _dedd_parameters(configs: dict, day: float) -> np.ndarray:
     c = configs
     par = np.zeros(12, np.float64)
@@ -188,9 +212,13 @@ def _dedd_parameters(configs: dict, day: float) -> np.ndarray:
     return par
 
 
-def orbit() -> "object":
+def _orbit() -> "object":
     """``colpkg_init_orbit``'s ``shr_orb_params`` for 1950 on the device:
     eccen, obliqr, lambm0, mvelpp, obliq and mvelp."""
+    from woof.hex.mpas_ice import rkind
+    if not rkind.trig64():
+        _refuse("config_shortwave_type", "dEdd", rkind.trig_refusal("shr_orb_params calls glibc's double sin, cos "
+                                                                   "and atan"), "WOOF_GLIBC239_LIBM64=1")
     import cupy as cp
     out = cp.zeros(6, np.float64)
     _function("seaice_column_init_orbit_v842")((1,), (1,), (out,))
@@ -201,13 +229,12 @@ def _radiation_dedd(pools: dict, configs: dict, state: "cv.ColumnState", initial
                     day: float | None, sec: int | None) -> None:
     """``column_radiation``'s ``run_dEdd``, with ``colpkg_init_orbit``'s orbit."""
     import cupy as cp
-    from . import column_therm_v842 as ct
 
     c = configs
     d = state.dims
     n1, n_solve, ncat, nil, nsl = d["nCells"] + 1, d["nCellsSolve"], d["nCategories"], d["nIceLayers"], d["nSnowLayers"]
     cat1, cat = (n1, ncat, 1), (n1, ncat)
-    day = ct.day_of_year(c["config_start_time"]) if day is None else float(day)
+    day = day_of_year(c["config_start_time"], c["config_calendar_type"]) if day is None else float(day)
     sec = seconds_into_day(c["config_start_time"]) if sec is None else int(sec)
     t = pools["tracers"]
     area, volume, snow, tsfc = (cv._need(t, k, cat1) for k in ("iceAreaCategory", "iceVolumeCategory",
@@ -233,7 +260,7 @@ def _radiation_dedd(pools: dict, configs: dict, state: "cv.ColumnState", initial
     flags = (int(cesm) | int(level) << 1 | int(topo) << 2 | int(bool(initialization)) << 3
              | int(state.ktherm != 0) << 4)
     par = cp.asarray(_dedd_parameters(c, day))
-    orb = orbit()
+    orb = _orbit()
     args = (np.int32(ncat), np.int32(nil), np.int32(nsl), np.int32(nbio), np.int32(flags), np.int32(sec),
             np.int32(n_solve), par, orb, lat, lon, area, volume, snow, tsfc, alvl, apnd, hpnd, ipnd, ffrac,
             fsnow, *_down(pools, d), coszen,

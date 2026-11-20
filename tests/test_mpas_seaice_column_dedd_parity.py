@@ -155,6 +155,22 @@ def test_the_opt_in_carries_the_delta_eddington_shortwave(glibc239):
             crad.refuse_unported({**case["config"], **overrides}, case["dims"])
 
 
+def test_the_default_build_refuses_the_orbit(default_build):
+    with pytest.raises(ConfigurationRefusal, match="sin, cos and atan.*WOOF_GLIBC239_LIBM64=1"):
+        crad._orbit()
+
+
+def test_the_day_of_the_year_follows_the_calendar():
+    assert crad.day_of_year("2000-03-01_00:00:00", "gregorian") == 61.0
+    assert crad.day_of_year("2000-03-01_00:00:00", "gregorian_noleap") == 60.0
+    assert crad.day_of_year("2001-12-31_23:59:59", "gregorian_noleap") == 365.0
+    assert crad.day_of_year("2000-02-29_07:00:00", "gregorian") == 60.0
+    with pytest.raises(ConfigurationRefusal, match="29 February"):
+        crad.day_of_year("2000-02-29_07:00:00", "gregorian_noleap")
+    with pytest.raises(ConfigurationRefusal, match="config_calendar_type"):
+        crad.day_of_year("2001-06-21_12:00:00", "360_day")
+
+
 @requires_gpu
 def test_gpu_matches_the_v842_oracle_word_for_word(glibc239):
     report = co.measure_dedd()

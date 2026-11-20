@@ -236,33 +236,34 @@ _TOPO_ONLY = {"config_use_level_meltponds": False, "config_use_topo_meltponds": 
 #: sin, cos, atan and asin (the orbit and the solar zenith angle).
 DEDD_CASES = (
     ("dedd_default_level_ponds", 20261993, "radiation", {}),
-    ("dedd_bl99_level_ponds_noon", 20261994, "radiation", {**_BL99, "config_start_time": "2000-06-21_12:00:00"}),
+    ("dedd_bl99_level_ponds_noon", 20261994, "radiation", {
+        **_BL99, "config_calendar_type": "gregorian", "config_start_time": "2000-06-21_12:00:00"}),
     ("dedd_cesm_ponds_snow_transition", 20261995, "radiation", {
         **_CESM, "config_snow_to_ice_transition_depth": 0.03, "config_start_time": "2001-07-15_06:30:15"}),
-    ("dedd_topo_ponds", 20261996, "radiation", {**_BL99, **_TOPO_ONLY, "config_start_time": "2000-12-21_23:59:59"}),
+    ("dedd_topo_ponds", 20261996, "radiation", {**_BL99, **_TOPO_ONLY, "config_start_time": "2001-12-21_23:59:59"}),
     ("dedd_no_ponds_snow_transition", 20261997, "radiation", {
-        **_NO_PONDS, "config_snow_to_ice_transition_depth": 0.05, "config_start_time": "2000-03-20_18:00:00"}),
+        **_NO_PONDS, "config_snow_to_ice_transition_depth": 0.05, "config_start_time": "2001-03-20_18:00:00"}),
     ("dedd_negative_tuning", 20261998, "radiation", {
         "config_ice_shortwave_tuning_parameter": -1.5, "config_pond_shortwave_tuning_parameter": -2.5,
-        "config_snow_shortwave_tuning_parameter": -1.0, "config_start_time": "2000-05-01_09:00:00"}),
+        "config_snow_shortwave_tuning_parameter": -1.0, "config_start_time": "2001-05-01_09:00:00"}),
     ("dedd_positive_tuning_no_algae", 20261999, "radiation", {
         **_CESM, "config_ice_shortwave_tuning_parameter": 1.0, "config_pond_shortwave_tuning_parameter": 1.5,
         "config_snow_shortwave_tuning_parameter": 2.0, "config_algae_absorption_coefficient": 0.0,
         "config_temp_change_snow_grain_radius_change": 3.0, "config_max_melting_snow_grain_radius": 900.0,
-        "config_start_time": "2000-08-10_15:45:00"}),
+        "config_start_time": "2001-08-10_15:45:00"}),
     ("dedd_bl99_one_layer_three_categories", 20262000, "radiation", {
-        **_BL99, "config_nIceLayers": 1, "config_nCategories": 3, "config_start_time": "2000-06-01_03:00:00"}),
+        **_BL99, "config_nIceLayers": 1, "config_nCategories": 3, "config_start_time": "2001-06-01_03:00:00"}),
     ("dedd_bl99_twelve_layers", 20262001, "radiation", {
-        **_BL99, "config_nIceLayers": 12, "config_start_time": "2000-04-15_21:00:00"}),
+        **_BL99, "config_nIceLayers": 12, "config_start_time": "2001-04-15_21:00:00"}),
     ("dedd_zero_layer", 20262002, "radiation", {
         "config_thermodynamics_type": "zero layer", "config_sea_freezing_temperature_type": "linear_salt",
-        "config_start_time": "2000-06-21_00:00:00"}),
+        "config_start_time": "2001-06-21_00:00:00"}),
     ("dedd_zero_layer_topo_ponds", 20262003, "radiation", {
         **_TOPO_ONLY, "config_thermodynamics_type": "zero layer", "config_sea_freezing_temperature_type": "linear_salt",
         "config_start_time": "2000-01-10_12:00:00"}),
-    ("init_shortwave_dedd_level_ponds", 20262004, "init_shortwave", {"config_start_time": "2000-06-21_12:00:00"}),
+    ("init_shortwave_dedd_level_ponds", 20262004, "init_shortwave", {"config_start_time": "2001-06-21_12:00:00"}),
     ("init_shortwave_dedd_topo_ponds", 20262005, "init_shortwave", {
-        **_BL99, **_TOPO_ONLY, "config_start_time": "2000-02-29_07:00:00"}),
+        **_BL99, **_TOPO_ONLY, "config_calendar_type": "gregorian", "config_start_time": "2000-02-29_07:00:00"}),
 )
 
 

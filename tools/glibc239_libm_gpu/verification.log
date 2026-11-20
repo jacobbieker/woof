@@ -40,3 +40,7 @@ pinned: 59 glibc 2.39 words: 0 mismatches
 # gpu, CUDA (RTX A6000, NVRTC --fmad=true): WOOF_BACKEND=cuda ... grade_trig.py gpu --count 268435456 --functions asin (pb)
 gpu asin: 268435456 arguments; device vs host transcription: 0 mismatches; vs glibc 2.44: 0 mismatches below 105414350
 pinned: 59 glibc 2.39 words: 0 mismatches
+
+# gpu, Metal (Apple M3 Max, soft binary64): pixi run -e mlx python ... grade_trig.py gpu --count 268435456 --functions asin (mac)
+gpu asin: 268435456 arguments; device vs host transcription: 0 mismatches; no glibc on this host
+pinned: 59 glibc 2.39 words: 0 mismatches

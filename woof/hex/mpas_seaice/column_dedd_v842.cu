@@ -757,54 +757,43 @@ __device__ void dedd_shortwave(int nslyr, int nilyr, double *coszen, bool heat_c
     for (int k = 0; k <= nilyr; ++k) fswpenl[k] = 0.0;
     for (int k = 0; k < nslyr; ++k) Sswabs[k] = 0.0;
     for (int k = 0; k < nilyr; ++k) Iswabs[k] = 0.0;
-    double netsw = A(A(A(swvdr, swidr), swvdf), swidf);
-    if (netsw > PUNY) {
+    // the bare-ice (0), snow (1) and ponded-ice (2) blocks in their order, through one
+    // compute_dEdd call site; hi is reset to 0 before the ponded-ice block, as in v8.4.2
+    double netsw = 0.0;
+    for (int srftyp = 0; srftyp < 3; ++srftyp) {
+        if (srftyp == 2) hi = 0.0;
+        netsw = A(A(A(swvdr, swidr), swvdf), swidf);
+        if (!(netsw > PUNY)) continue;
         *coszen = sw_max(PUNY, *coszen);
-        hi = D(vice, aice);
-        fi = S(S(1.0, fs), fp);
-        if (fi > 0.0) {
-            dedd_compute(nilyr, nslyr, klev, klevp, heat_capacity, fnidr, *coszen, R_ice, R_pnd, kalg, exp_min,
-                         swvdr, swvdf, swidr, swidf, 0, hstmp, rhosnw, rsnw, hi, hp, fi, &avdrl, &avdfl, &aidrl,
-                         &aidfl, fswsfc, fswint, fswthru, Sswabs, Iswabs, fswpenl);
-            *alvdr = A(*alvdr, M(avdrl, fi));
-            *alvdf = A(*alvdf, M(avdfl, fi));
-            *alidr = A(*alidr, M(aidrl, fi));
-            *alidf = A(*alidf, M(aidfl, fi));
-            *albice = A(A(A(A(*albice, M(SW_AWTVDR, avdrl)), M(SW_AWTIDR, aidrl)), M(SW_AWTVDF, avdfl)),
-                        M(SW_AWTIDF, aidfl));
+        double frac, hsx;
+        double *alb;
+        if (srftyp == 0) {
+            hi = D(vice, aice);
+            fi = S(S(1.0, fs), fp);
+            if (!(fi > 0.0)) continue;
+            frac = fi;
+            hsx = hstmp;
+            alb = albice;
+        } else if (srftyp == 1) {
+            if (!(fs > 0.0)) continue;
+            frac = fs;
+            hsx = hs;
+            alb = albsno;
+        } else {
+            hi = D(vice, aice);
+            if (!(fp > PUNY)) continue;
+            frac = fp;
+            hsx = hs;
+            alb = albpnd;
         }
-    }
-    netsw = A(A(A(swvdr, swidr), swvdf), swidf);
-    if (netsw > PUNY) {
-        *coszen = sw_max(PUNY, *coszen);
-        if (fs > 0.0) {
-            dedd_compute(nilyr, nslyr, klev, klevp, heat_capacity, fnidr, *coszen, R_ice, R_pnd, kalg, exp_min,
-                         swvdr, swvdf, swidr, swidf, 1, hs, rhosnw, rsnw, hi, hp, fs, &avdrl, &avdfl, &aidrl, &aidfl,
-                         fswsfc, fswint, fswthru, Sswabs, Iswabs, fswpenl);
-            *alvdr = A(*alvdr, M(avdrl, fs));
-            *alvdf = A(*alvdf, M(avdfl, fs));
-            *alidr = A(*alidr, M(aidrl, fs));
-            *alidf = A(*alidf, M(aidfl, fs));
-            *albsno = A(A(A(A(*albsno, M(SW_AWTVDR, avdrl)), M(SW_AWTIDR, aidrl)), M(SW_AWTVDF, avdfl)),
-                        M(SW_AWTIDF, aidfl));
-        }
-    }
-    hi = 0.0;
-    netsw = A(A(A(swvdr, swidr), swvdf), swidf);
-    if (netsw > PUNY) {
-        *coszen = sw_max(PUNY, *coszen);
-        hi = D(vice, aice);
-        if (fp > PUNY) {
-            dedd_compute(nilyr, nslyr, klev, klevp, heat_capacity, fnidr, *coszen, R_ice, R_pnd, kalg, exp_min,
-                         swvdr, swvdf, swidr, swidf, 2, hs, rhosnw, rsnw, hi, hp, fp, &avdrl, &avdfl, &aidrl, &aidfl,
-                         fswsfc, fswint, fswthru, Sswabs, Iswabs, fswpenl);
-            *alvdr = A(*alvdr, M(avdrl, fp));
-            *alvdf = A(*alvdf, M(avdfl, fp));
-            *alidr = A(*alidr, M(aidrl, fp));
-            *alidf = A(*alidf, M(aidfl, fp));
-            *albpnd = A(A(A(A(*albpnd, M(SW_AWTVDR, avdrl)), M(SW_AWTIDR, aidrl)), M(SW_AWTVDF, avdfl)),
-                        M(SW_AWTIDF, aidfl));
-        }
+        dedd_compute(nilyr, nslyr, klev, klevp, heat_capacity, fnidr, *coszen, R_ice, R_pnd, kalg, exp_min, swvdr,
+                     swvdf, swidr, swidf, srftyp, hsx, rhosnw, rsnw, hi, hp, frac, &avdrl, &avdfl, &aidrl, &aidfl,
+                     fswsfc, fswint, fswthru, Sswabs, Iswabs, fswpenl);
+        *alvdr = A(*alvdr, M(avdrl, frac));
+        *alvdf = A(*alvdf, M(avdfl, frac));
+        *alidr = A(*alidr, M(aidrl, frac));
+        *alidf = A(*alidf, M(aidfl, frac));
+        *alb = A(A(A(A(*alb, M(SW_AWTVDR, avdrl)), M(SW_AWTIDR, aidrl)), M(SW_AWTVDF, avdfl)), M(SW_AWTIDF, aidfl));
     }
     netsw = A(A(A(swvdr, swidr), swvdf), swidf);
     if (netsw <= PUNY) {
