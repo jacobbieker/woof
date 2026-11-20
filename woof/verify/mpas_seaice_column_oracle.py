@@ -329,6 +329,9 @@ def field_rows(config: dict) -> tuple[list, dict[str, int], dict[str, bool]]:
     rows = [("mesh", name, DIM, ()) for name in sorted(dims)]
     rows += [("mesh", name, DIM, ()) for name in ("nCellsSolve", "nEdgesSolve", "nVerticesSolve")]
     rows += [("tracers_aggregate", "nCellsSolve", DIM, ())]
+    if config.get("oracle_stage") == _STEP:
+        # seaice_column_coupling_prep reads its dimensions from the tracers pool
+        rows += [("tracers", "nCellsSolve", DIM, ()), ("tracers", "nCategories", DIM, ())]
     stage = config.get("oracle_stage")
     pools = VT_POOLS if stage == "vertical_thermodynamics" else STEP_POOLS if stage == _STEP else POOLS
     # The Registry allocates a var by its own packages: gen_inc.c's parse_var never reads
