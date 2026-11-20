@@ -306,7 +306,15 @@ matched exchange unless asked.
    are refused by name.
 2. The fractions on the ocean grid (`seq_frac_set`, `ifrac`/`ofrac` from the
    ice's `Si_ifrac`) and the radiative fractions (`ifrad`/`ofrad`, from
-   `seq_flux_ocnalb_mct`). Still to port.
+   `seq_flux_ocnalb_mct`). `seq_frac_set` is ported
+   (`woof/hex/coupled/seq_frac_e3sm.py`, `tests/test_e3sm_seq_frac_parity.py`):
+   the ice grid's fractions from `Si_ifrac` and the domain's `frac`, their
+   maps to the ocean and atmosphere grids through `seq_map_map` (copy,
+   rearrangement, or the sparse matrix multiply in MCT's element order) and
+   `seq_frac_check`'s stops (or, with dead models, its reports), real(r8),
+   on CUDA and Metal, against the routines compiled verbatim on the pinned
+   MCT. Its eps is E3SM's single-precision `1.0e-02`. The radiative
+   fractions are still to port.
 3. The atmosphere/ocean fluxes, `xao` (`seq_flux_atmocn_mct`, `shr_flux_atmocn`).
    Still to port.
 4. The ocean's and the sea ice's import and export

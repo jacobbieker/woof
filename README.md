@@ -412,6 +412,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     compiled verbatim with the pinned Icepack; the rotation's libm words are
     an input. The coupled column biogeochemistry is refused by name, and so
     is what E3SM reads out of bounds or through an unset pointer.
+  - The coupler's surface fractions update, E3SM v3.2.0's `seq_frac_set`
+    (`woof/hex/coupled/seq_frac_e3sm.py`, opt-in): the ice grid's `ifrac`
+    and `ofrac` from `Si_ifrac` and the domain fraction, mapped to the ocean
+    and atmosphere grids (copy, rearrangement or MCT's sparse matrix
+    multiply in its own element order), with `seq_frac_check`'s stops.
+    real(r8), word-exact on CUDA and Metal against the routines compiled
+    verbatim on MCT.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
