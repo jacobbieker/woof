@@ -316,7 +316,18 @@ matched exchange unless asked.
    MCT. Its eps is E3SM's single-precision `1.0e-02`. The radiative
    fractions are still to port.
 3. The atmosphere/ocean fluxes, `xao` (`seq_flux_atmocn_mct`, `shr_flux_atmocn`).
-   Still to port.
+   Ported (`woof/hex/coupled/flux_atmocn_e3sm.py`,
+   `tests/test_e3sm_flux_atmocn_parity.py`): `seq_flux_init_mct`'s mask,
+   `emask` (E3SM's single-precision `1.0e-12` density limit), the E3SMv1
+   scheme (`ocn_surface_flux_scheme = 0`) with the explicit and implicit
+   stress (`shr_flux_update_stress`), gustiness, the cold-air outbreak
+   scaling, `flux_convergence`/`flux_max_iteration`, the minimum wind and
+   dead models, and E3SM's and MCT's stops, real(r8), on CUDA and Metal,
+   against the routines compiled verbatim on the pinned MCT. `psimhu` calls
+   glibc's atan, so the port needs the opt-in glibc 2.39 transcription
+   (`WOOF_GLIBC239_LIBM64=1`) and is refused by name without it; exp, log
+   and pow are the MIT transcriptions. COARE (1), UA (2), the diurnal cycle,
+   the two-way wave drag and the water isotopes are refused by name.
 4. The ocean's and the sea ice's import and export
    (`components/mpas-ocean/driver/ocn_comp_mct.F`,
    `components/mpas-seaice/driver/ice_comp_mct.F`). The ocean's is ported

@@ -419,6 +419,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     multiply in its own element order), with `seq_frac_check`'s stops.
     real(r8), word-exact on CUDA and Metal against the routines compiled
     verbatim on MCT.
+  - The coupler's atmosphere-ocean flux, E3SM v3.2.0's
+    `seq_flux_atmocn_mct` over `shr_flux_atmOcn`
+    (`woof/hex/coupled/flux_atmocn_e3sm.py`, opt-in): `seq_flux_init_mct`'s
+    mask and the E3SMv1 scheme into `xao`, with the implicit stress,
+    gustiness, the cold-air outbreak scaling, the convergence switches and
+    dead models, and E3SM's and MCT's stops. real(r8), word-exact on CUDA
+    and Metal against the routines compiled verbatim on MCT. It calls
+    glibc's atan, so it runs only with `WOOF_GLIBC239_LIBM64=1` and is
+    refused by name without it. COARE, UA, the diurnal cycle, the two-way
+    wave drag and the water isotopes are refused by name.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
@@ -1287,7 +1297,8 @@ carry none of the following. Each is off until selected:
 
 - **LGPL glibc 2.39 libm** (`WOOF_GLIBC239_LIBM64`, `WOOF_GLIBC239_TRIG64`):
   glibc's binary64 words on the GPU and host. It lifts some MALI,
-  MPAS-Ocean and MPAS-Seaice RKIND 8 refusals.
+  MPAS-Ocean and MPAS-Seaice RKIND 8 refusals, and E3SM's
+  atmosphere-ocean flux.
 - **NVIDIA-derived `powf`**: CUDA's transcription for Metal strict numerics.
   The default is WOOF's own correctly rounded `powf`.
 - **WRF-Hydro** (`WOOF_ENABLE_WRF_HYDRO=1`), **NEMO**
