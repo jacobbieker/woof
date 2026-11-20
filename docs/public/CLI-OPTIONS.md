@@ -2715,7 +2715,7 @@ Takes no options of its own.
 |---|---|
 | `--bbox ('SOUTH', 'NORTH', 'WEST', 'EAST')` | _(the parser declares no help text for this option)_ |
 | `--end` | window end, ISO 8601 UTC |
-| `--families` | comma list of land, ocean, sonde, aircraft, profiler, amv, scat; the satellite point winds (amv, scat) are read only when named |
+| `--families` | comma list of land, ocean, sonde, aircraft, profiler, amv, scat, ro; the satellite families (amv, scat, ro: point winds and GNSS-RO refractivity) are read only when named |
 | `--obs-gts` | write OBSPROC obs_gts ASCII here (for 3D-Var / WRFDA) |
 | `--receipt` | also write the JSON receipt here |
 | `--snapshot` | read this Icechunk snapshot id instead of main's head |

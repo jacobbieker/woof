@@ -541,3 +541,104 @@ def test_thinning_boxes_are_fixed_per_latitude_row():
     kept = wis2.thin_satellite_winds([amv(row_lat + 0.01, 10.0, 90.0), amv(row_lat + step - 0.01, 10.1, 95.0)],
                                      100.0, Counter())
     assert [r.extras["qi"] for r in kept] == [95.0]
+
+
+def _ro():
+    """Made-up occultations (template 310026 layout: bending-angle levels with their tangent points, then
+    refractivity levels): 0 four levels (one 0 % confident, one with no height), 1 a later copy of 0,
+    2 a profile under 100 % confidence, 3 flagged refractivity non-nominal (0-33-039 bit 6), 4 bending
+    angles only, 5 bending-angle and refractivity counts that differ (levels at the occultation point)."""
+    n = 6
+    heights = [1000, 3000, I32, 15000]
+    refr = [[300.0, np.nan, 250.0, np.nan, 200.0, np.nan, 50.0, np.nan]]
+    h = [heights] * 4 + [[I32] * 4, [2000, 8000, I32, I32]]
+    ref = refr * 4 + [[np.nan] * 8, [280.0, np.nan, 150.0, np.nan] + [np.nan] * 4]
+    rep = [[4, 4, 0]] * 4 + [[4, 0, 0], [3, 2, 0]]
+    lat = [[40.0, 40.1, 40.2, 40.3, 40.4]] * 4 + [[40.0] * 5, [35.0, 36.0, 36.1, 36.2, np.nan]]
+    lon = [[-95.0, -95.1, -95.2, -95.3, -95.4]] * 4 + [[-95.0] * 5, [-100.0, -101.0, -101.1, -101.2, np.nan]]
+    conf = [[100] + [90] * 4 + [80, 0, 70, 60] + [I32] * 3]
+    conf = conf + conf + [[50] + [90] * 8 + [I32] * 3] + conf + conf + [[100] + [90] * 3 + [80, 80] + [I32] * 6]
+    return {"satellite/gnss_ro": {
+        "time": _ms(["2008-02-05T12:00:00"] * n),
+        "first_arrival_time": _times(["2008-02-05T12:20:00", "2008-02-05T12:50:00"] + ["2008-02-05T12:20:00"] * 4,
+                                     SEC),
+        "latitude": Arr(lat), "longitude": Arr(lon),
+        "quality_flag": _flags([0] * n),
+        "bufr_template": Arr(["310026"] * n),
+        "radio_occultation_data_quality_flags": Arr(np.array([64, 64, 0, 1 << (16 - 6), 0, 8256], np.int32),
+                                                    _FillValue=I32),
+        "satellite_identifier": Arr(np.array([750, 750, 751, 523, 3, 44], np.int32), _FillValue=I32),
+        "platform_transmitter_id_number": Arr(np.array([21, 21, 5, 7, 9, 11], np.int32), _FillValue=I32),
+        "extended_delayed_descriptor_replication_factor": Arr(np.array(rep, np.int32), _FillValue=I32),
+        "percent_confidence": Arr(np.array(conf, np.int32), _FillValue=I32),
+        "height": Arr(np.array(h, np.int32), _FillValue=I32),
+        "atmospheric_refractivity": Arr(np.array(ref)),
+    }}
+
+
+def test_ro_profiles_confidence_flags_copies_and_locations():
+    counts = Counter()
+    reports = wis2.ro_reports(_ro(), START, END, BOX, counts)
+    by = {r.station: r for r in reports}
+    assert set(by) == {"75021", "04411"}
+    a = by["75021"]
+    assert a.fm == 116 and a.received == np.datetime64("2008-02-05T12:20:00")  # the first copy
+    assert a.z.tolist() == [1000.0, 15000.0]  # the 0 % level and the level with no height are dropped
+    assert a.extras["refractivity"].tolist() == [300.0, 50.0]
+    assert a.level_lat.tolist() == [40.1, 40.4] and a.level_lon.tolist() == [-95.1, -95.4]  # tangent points
+    assert (a.lat, a.lon) == (40.0, -95.0)
+    b = by["04411"]  # counts differ: every level at the occultation point
+    assert b.level_lat.tolist() == [35.0, 35.0] and b.extras["refractivity"].tolist() == [280.0, 150.0]
+    assert counts["ro_duplicate_copy"] == 1 and counts["ro_profile_confidence_below_100"] == 1
+    assert counts["ro_flag_refractivity_non_nominal"] == 1 and counts["ro_bending_angle_only"] == 1
+    assert counts["ro_profiles_at_occultation_point"] == 1 and counts["ro_level_confidence_zero"] == 1
+
+
+def test_gpsref_error_is_wrfdas():
+    from woof.obs.obserr_wrfda import gpsref_error
+    assert gpsref_error(100.0, 15000.0, 10.0) == pytest.approx(0.3)
+    # 3 km at 45 degrees: halfway between the pole's 1.2 % and the equator's 2.3 % of N.
+    assert gpsref_error(250.0, 3000.0, 45.0) == pytest.approx(250.0 * 0.0175)
+    assert gpsref_error(300.0, 1000.0, 0.0) == pytest.approx(300.0 * 0.025)
+    assert gpsref_error(300.0, 1000.0, 90.0) == pytest.approx(300.0 * 0.01 * (1.2 * 11000.0 / 12000.0 + 0.3))
+
+
+def test_ro_in_the_table_and_obs_gts(tmp_path):
+    from woof.da.var import obs_wrfda as ow
+    from woof.obs.neutral_table import decode_neutral_csv
+    from woof.obs.obserr_wrfda import gpsref_error
+    reports, counts = wis2.read_reports(_ro(), START, END, BOX, ("ro",))
+    assert counts["ro_reports"] == 2
+    rows, row_counts = wis2.neutral_rows(reports, ObsErrTable.load())
+    assert row_counts["rows_ro_refractivity_n"] == 4
+    path = tmp_path / "ro.csv"
+    wis2.write_table(rows, path)
+    _, decoded, counters = decode_neutral_csv(path.read_text())
+    assert len(decoded) == 4 and counters["rows_unknown_measurement"] == 0
+    low = next(r for r in decoded if r.station_id == "75021" and r.elevation_m == 1000.0)
+    assert low.variable == "refractivity_n" and low.measurement == "ro_refractivity_tangent_point"
+    assert low.value == 300.0 and low.error == pytest.approx(gpsref_error(300.0, 1000.0, 40.1))
+    assert (low.latitude_deg, low.longitude_deg) == (40.1, -95.1)
+    assert len({r.identity() for r in decoded}) == 4  # each level its own measurement
+    out = tmp_path / "ob.ascii"
+    assert wis2.write_obs_gts(reports, out, ObsErrTable.load()) == Counter({116: 2})
+    assert "GPSRF =      2" in out.read_text()
+    proj = ow.LambertWRFDA(cen_lat=40.0, cen_lon=-95.0, stand_lon=-95.0, truelat1=30.0, truelat2=60.0,
+                           moad_cen_lat=40.0, dx=60000.0, ide=89, jde=59)
+    obs = ow.read_obs_ascii(out, proj, analysis_date="2008-02-05_12:00:00",
+                            time_window_min="2008-02-05_11:00:00", time_window_max="2008-02-05_13:00:00")
+    assert obs.counts()["gpsref"] == 2
+    ref = obs["gpsref"].fields["ref"]
+    assert sorted(np.asarray(ref.inv).tolist()) == [50.0, 150.0, 280.0, 300.0]
+    k = int(np.nonzero(np.asarray(ref.inv) == 300.0)[0][0])
+    assert ref.error[k] == pytest.approx(gpsref_error(300.0, 1000.0, 40.0), abs=5e-3) and ref.qc[k] == 0
+
+
+def test_ro_gradient_check_refuses_a_duct():
+    h = np.arange(0.0, 5000.0, 200.0)
+    n = 300.0 * np.exp(-h / 7000.0)
+    assert wis2.ro_gradient_ok(h, n).all()  # -43 N/km at the surface: no super-refraction
+    ducted = n.copy()
+    ducted[:3] += [40.0, 25.0, 0.0]  # -100 N/km near the surface
+    ok = wis2.ro_gradient_ok(h, ducted)
+    assert not ok[:3].any() and ok[6:].all()

@@ -30,7 +30,12 @@ family          groups                        WRFDA   neutral measurement
 ``sonde``       upper_air/soundings           FM-35   sonde_level
 ``aircraft``    aircraft                      FM-42   aircraft_level (opt-in)
 ``profiler``    upper_air/wind_profiler       FM-132  (obs_gts only: no pressure)
+``amv``         satellite/amv                 FM-88   amv_assigned_pressure
+``scat``        satellite/scatterometer       FM-281  scatterometer_wind_10m
+``ro``          satellite/gnss_ro             FM-116  ro_refractivity_tangent_point
 ==============  ============================  ======  ==========================
+
+``amv``, ``scat`` and ``ro`` are read only when named.
 
 Quality control, in order (each refusal is counted by name):
 
@@ -86,8 +91,10 @@ PREFIX = "bkr/obs/wis2.icechunk"
 REGION = "us-west-2"
 SOURCE = "wis2"
 FAMILIES = ("land", "ocean", "sonde", "aircraft", "profiler")
-# Satellite point winds (opt-in by name; not in the default list).
-SATELLITE_FAMILIES = ("amv", "scat")
+# Satellite families (opt-in by name; not in the default list): the point winds, which
+# --thin-km thins, and GNSS-RO refractivity profiles.
+SATELLITE_FAMILIES = ("amv", "scat", "ro")
+THINNED_FAMILIES = ("amv", "scat")
 # quality_flag bits (the store's flag_meanings); every bit but time_too_old refuses.
 QUALITY_BITS = ("outside_physical_range", "outside_plausible_range", "internally_inconsistent",
                 "vertically_inconsistent", "position_invalid", "position_suspect", "time_invalid",
@@ -1046,7 +1053,7 @@ def thin_satellite_winds(reports, thin_km: float, counts: Counter) -> list[Repor
     step = thin_km / 111.2
     best, out = {}, []
     for rep in reports:
-        if rep.family not in SATELLITE_FAMILIES:
+        if rep.family not in THINNED_FAMILIES:
             out.append(rep)
             continue
         row = int(np.floor((rep.lat + 90.0) / step))
@@ -1058,15 +1065,149 @@ def thin_satellite_winds(reports, thin_km: float, counts: Counter) -> list[Repor
         prior = best.get(key)
         if prior is None or rep.extras.get("qi", 0.0) > prior.extras.get("qi", 0.0):
             best[key] = rep
-    for family in SATELLITE_FAMILIES:
+    for family in THINNED_FAMILIES:
         kept = sum(1 for k in best if k[0] == family)
         counts[f"{family}_thinned"] += sum(1 for r in reports if r.family == family) - kept
     return out + list(best.values())
 
 
+# --------------------------------------------------------------------------- GNSS-RO
+RO_TEMPLATES = ("310026", "001016 310026")  # EUMETSAT's second form carries bending angles only
+# 0-33-039 (16 bits, bit 1 the most significant): the bits that refuse a profile.
+RO_FLAG_BITS = {1: "non_nominal", 4: "excess_phase_non_nominal", 5: "bending_angle_non_nominal",
+                6: "refractivity_non_nominal", 15: "background_profile_not_retrieved"}
+RO_PCCF_MIN = 100.0  # da_read_obs_bufrgpsro skips a profile below 100 % confidence
+RO_HEIGHT_RANGE_M = (0.0, 30000.0)  # WRFDA's bot_km_gpsro and top_km_gpsro defaults
+RO_DNDZ_MIN = -50.0  # N/km; da_qc_gpsref's gpsref_qc_dndz_thresh (super-refraction)
+RO_DNDZ2_MAX = 100.0  # N/km^2; gpsref_qc_dndz2_thresh
+
+
+def ro_gradient_ok(height_m, refractivity):
+    """False at levels whose observed dN/dz is below -50 N/km or whose |d2N/dz2| exceeds 100 N/km^2,
+    as ``da_qc_gpsref`` computes them (one-sided at the ends, centred inside, per km)."""
+    h, n = np.asarray(height_m, float), np.asarray(refractivity, float)
+    top = len(h)
+    if top <= 2:
+        return np.ones(top, bool)
+    zd = np.empty(top)
+    zd[0], zd[-1] = h[1] - h[0], h[-1] - h[-2]
+    zd[1:-1] = h[2:] - h[:-2]
+    zd *= 0.001
+
+    def deriv(a):
+        d = np.empty(top)
+        d[0], d[-1] = (a[1] - a[0]) / zd[0], (a[-1] - a[-2]) / zd[-1]
+        d[1:-1] = (a[2:] - a[:-2]) / zd[1:-1]
+        return d
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        d1 = deriv(n)
+        d2 = deriv(d1)
+    return ~((d1 < RO_DNDZ_MIN) | (np.abs(d2) > RO_DNDZ2_MAX))
+
+
+def ro_reports(root, start, end, box, counts: Counter) -> list[Report]:
+    """GNSS-RO refractivity profiles against height above mean sea level (WRFDA gpsref).
+
+    Template 310026 (ROPP) lists the bending-angle levels (each with its
+    tangent point's latitude and longitude), then the refractivity levels.
+    As WRFDA's BUFR reader does, refractivity level k takes bending-angle
+    level k's location when the two counts agree; otherwise every level
+    takes the occultation point.  A profile under 100 % confidence or with
+    a non-nominal flag is refused whole.  A level is dropped with 0 %
+    confidence, outside 0-30 km (WRFDA's defaults), or where the observed
+    profile fails ``da_qc_gpsref``'s gradient checks
+    (:func:`ro_gradient_ok`; super-refraction).  Each copy of an occultation (satellite, transmitter, time)
+    is kept once, the first to arrive.
+    """
+    group = _group(root, "satellite/gnss_ro")
+    index, time = _sat_select(group, start, end, box, counts, "ro")
+    counts["ro_in_window"] += len(index)
+    if index.size == 0:
+        return []
+    ok = _quality_ok(group, "quality_flag", index, counts, "ro") \
+        & _templates_ok(group, index, RO_TEMPLATES, counts, "ro")
+    if "radio_occultation_data_quality_flags" in group:
+        flags = _column(group["radio_occultation_data_quality_flags"], index)
+        bits = np.where(np.isfinite(flags), flags, 0).astype(np.int64)
+        for bit, meaning in RO_FLAG_BITS.items():
+            hit = (bits & (1 << (16 - bit))) != 0
+            counts[f"ro_flag_{meaning}"] += int((hit & ok).sum())
+            ok &= ~hit
+    index, time = index[ok], time[ok]
+    if index.size == 0:
+        return []
+
+    def table(name):
+        return np.atleast_2d(_numbers(group[name], index).reshape(len(index), -1))
+
+    sat = _column(group["satellite_identifier"], index)
+    ptid = _column(group["platform_transmitter_id_number"], index)
+    conf, counts_rep = table("percent_confidence"), table("extended_delayed_descriptor_replication_factor")
+    height, refr = table("height"), table("atmospheric_refractivity")
+    lat, lon = table("latitude"), table("longitude")
+    received = _received(group, index)
+    out, seen = [], set()
+    for n in np.argsort(received.astype(np.int64), kind="stable"):  # the first arrival of a copy wins
+        sid = int(sat[n]) if np.isfinite(sat[n]) else -1
+        tx = int(ptid[n]) if np.isfinite(ptid[n]) else -1
+        key = (sid, tx, time[n])
+        if key in seen:
+            counts["ro_duplicate_copy"] += 1
+            continue
+        seen.add(key)
+        if not (np.isfinite(conf[n, 0]) and conf[n, 0] >= RO_PCCF_MIN):
+            counts["ro_profile_confidence_below_100"] += 1
+            continue
+        n_bend, n_ref = counts_rep[n, 0], counts_rep[n, 1] if counts_rep.shape[1] > 1 else np.nan
+        if not (np.isfinite(n_bend) and np.isfinite(n_ref)) or n_ref > min(height.shape[1], refr.shape[1] // 2):
+            counts["ro_level_counts_missing"] += 1
+            continue
+        if n_ref < 1:
+            counts["ro_bending_angle_only"] += 1  # no refractivity levels; no bending-angle operator here
+            continue
+        n_bend, n_ref = int(n_bend), int(n_ref)
+        h = height[n, :n_ref]
+        value = refr[n, 0:2 * n_ref:2]  # each level: N, then its error
+        level_conf = conf[n, 1 + n_bend:1 + n_bend + n_ref]
+        level_conf = np.concatenate([level_conf, np.full(n_ref - level_conf.size, np.nan)])
+        if n_bend == n_ref and lat.shape[1] > n_ref:
+            llat, llon = lat[n, 1:1 + n_ref], lon[n, 1:1 + n_ref]
+            off = ~(np.isfinite(llat) & np.isfinite(llon))
+            llat, llon = np.where(off, lat[n, 0], llat), np.where(off, lon[n, 0], llon)
+        else:
+            counts["ro_profiles_at_occultation_point"] += 1
+            llat, llon = np.full(n_ref, lat[n, 0]), np.full(n_ref, lon[n, 0])
+        good = np.isfinite(h) & np.isfinite(value)
+        zero = good & (level_conf == 0)
+        counts["ro_level_confidence_zero"] += int(zero.sum())
+        good &= ~zero
+        outside = good & ((h < RO_HEIGHT_RANGE_M[0]) | (h > RO_HEIGHT_RANGE_M[1]))
+        counts["ro_level_outside_0_30_km"] += int(outside.sum())
+        good &= ~outside
+        if good.sum() > 2:
+            kept = np.nonzero(good)[0]
+            kept = kept[np.argsort(h[kept], kind="stable")]
+            steep = ~ro_gradient_ok(h[kept], value[kept])
+            counts["ro_level_gradient_check"] += int(steep.sum())
+            good[kept[steep]] = False
+        if not good.any():
+            counts["ro_no_usable_level"] += 1
+            continue
+        m = int(good.sum())
+        nan = np.full(m, np.nan)
+        out.append(Report(
+            family="ro", fm=116, station=f"{sid:03d}{tx:02d}", name=f"GNSS-RO {sid} G{tx}",
+            lat=float(lat[n, 0]), lon=float(lon[n, 0]), elev=float("nan"), time=time[n], received=received[n],
+            p=nan, z=h[good], t=nan, td=nan, rh=nan, spd=nan, wdir=nan, level_lat=llat[good],
+            level_lon=llon[good], group="satellite/gnss_ro", surface=False,
+            extras={"refractivity": value[good]}))
+    return out
+
+
 READERS = {"land": land_reports, "ocean": ocean_reports, "sonde": sonde_reports,
            "aircraft": aircraft_reports, "profiler": profiler_reports, "amv": amv_reports,
-           "scat": scat_reports}
+           "scat": scat_reports, "ro": ro_reports}
 
 
 def read_reports(root, start, end, box, families=FAMILIES) -> tuple[list[Report], Counter]:
@@ -1146,9 +1287,14 @@ def neutral_rows(reports, table) -> tuple[list, Counter]:
 
     Profiler levels carry a height and no pressure, and obs_point's point
     operators are pressure-level only, so they stay out of the table (they
-    are in the obs_gts file).
+    are in the obs_gts file).  GNSS-RO levels are ``refractivity_n`` rows at
+    their tangent point, anchored at their height (``elevation_m``), with
+    WRFDA's :func:`~woof.obs.obserr_wrfda.gpsref_error`; ``level_pa`` is the
+    height's standard-atmosphere pressure, which only keeps the levels'
+    identities apart (the operator reads the height).
     """
     from woof.obs.neutral_table import ObsRow
+    from woof.obs.obserr_wrfda import gpsref_error
     rows, counts = [], Counter()
     for rep in reports:
         if rep.family == "profiler":
@@ -1156,6 +1302,21 @@ def neutral_rows(reports, table) -> tuple[list, Counter]:
             continue
         source = f"{SOURCE}.{rep.family}"
         received = _aware(rep.received)
+        if rep.family == "ro":
+            ref = rep.extras["refractivity"]
+            level_p = isa_pressure(rep.z)
+            for k in range(len(rep.z)):
+                if not (np.isfinite(rep.z[k]) and np.isfinite(ref[k])):
+                    continue
+                rows.append(ObsRow(
+                    variable="refractivity_n", value=float(ref[k]),
+                    error=float(gpsref_error(ref[k], rep.z[k], rep.level_lat[k])),
+                    measurement="ro_refractivity_tangent_point", source=source, station_id=rep.station,
+                    latitude_deg=float(rep.level_lat[k]), longitude_deg=float(rep.level_lon[k]),
+                    elevation_m=float(rep.z[k]), level_pa=float(level_p[k]), valid_time=_aware(rep.level_time[k]),
+                    nominal_time=_aware(rep.time), received_time=received, revision=rep.group))
+                counts["rows_ro_refractivity_n"] += 1
+            continue
         if rep.surface and not np.isfinite(rep.elev):
             counts[f"{rep.family}_surface_without_elevation"] += 1  # the table needs it on every row
             continue
@@ -1223,10 +1384,11 @@ def write_table(rows, path) -> None:
 
 # --------------------------------------------------------------------------- OBSPROC obs_gts
 FM_PLATFORM = {12: "FM-12 SYNOP", 13: "FM-13 SHIP", 18: "FM-18 BUOY", 35: "FM-35 TEMP",
-               42: "FM-42 AMDAR", 88: "FM-88 SATOB", 132: "FM-132 PROFL", 281: "FM-281 QSCAT"}
+               42: "FM-42 AMDAR", 88: "FM-88 SATOB", 116: "FM-116 GPSRF", 132: "FM-132 PROFL",
+               281: "FM-281 QSCAT"}
 HEADER_COUNTS = (("SYNOP", 12), ("METAR", None), ("SHIP", 13), ("BUOY", 18), ("BOGUS", None),
                  ("TEMP", 35), ("AMDAR", 42), ("AIREP", None), ("TAMDAR", None), ("PILOT", None),
-                 ("SATEM", None), ("SATOB", 88), ("GPSPW", None), ("GPSZD", None), ("GPSRF", None),
+                 ("SATEM", None), ("SATOB", 88), ("GPSPW", None), ("GPSZD", None), ("GPSRF", 116),
                  ("GPSEP", None), ("SSMT1", None), ("SSMT2", None), ("TOVS", None), ("QSCAT", 281),
                  ("PROFL", 132), ("AIRSR", None), ("OTHER", None))
 INFO_FMT = "(A12,1X,A19,1X,A40,1X,I6,3(F12.3,11X),6X,A40)"
@@ -1289,7 +1451,7 @@ def obs_gts_report(rep: Report, table) -> list[str]:
     order = np.nonzero(np.isfinite(rep.p) | np.isfinite(rep.z))[0]
     if rep.fm == 35:
         order = order[np.argsort(-rep.p[order], kind="stable")]
-    elif rep.fm == 132:
+    elif rep.fm in (116, 132):
         order = order[np.argsort(rep.z[order], kind="stable")]
     lon = ((rep.lon + 180.0) % 360.0) - 180.0
     date = str(np.datetime64(rep.time, "s")).replace("T", "_")
@@ -1301,6 +1463,14 @@ def obs_gts_report(rep: Report, table) -> list[str]:
     slp = rep.slp if np.isfinite(rep.slp) else None
     srfc = _triple(slp, SLP_ERROR_PA) + _f(MISSING, 12, 3) + f"{MISSING_QC:4d}" + _f(PW_ERROR_CM, 7, 3)
     lines = [info, srfc]
+    if rep.fm == 116:  # WRFDA's ascii gpsref: refractivity in the dew point slot, its height above sea level
+        from woof.obs.obserr_wrfda import gpsref_error
+        ref = rep.extras["refractivity"]
+        for k in order:
+            error = gpsref_error(ref[k], rep.z[k], rep.lat)
+            lines.append(_triple(None, 0.0) * 3 + " " * 11 + _triple(rep.z[k], 0.0) + _triple(None, 0.0)
+                         + _triple(ref[k], error) + " " * 11 + _triple(None, 0.0))
+        return lines
     for k in order:
         p = rep.p[k] if np.isfinite(rep.p[k]) else None
         z = rep.z[k] if np.isfinite(rep.z[k]) else None
@@ -1318,6 +1488,9 @@ def write_obs_gts(reports, path, table, *, domain: dict | None = None) -> Counte
 
     A polar AMV from an imager other than AVHRR or MODIS is left out: WRFDA
     would read it as a geostationary one (it keys polaramv on those names).
+    A GNSS-RO profile is one FM-116 report at its occultation point (the
+    ascii reader has one location per report), errors as
+    :func:`~woof.obs.obserr_wrfda.gpsref_error` gives them there.
     """
     kept = []
     for rep in reports:
@@ -1392,8 +1565,9 @@ def register_cli(obs_sub) -> None:
     fetch_p.add_argument("--end", required=True, help="window end, ISO 8601 UTC")
     fetch_p.add_argument("--bbox", required=True, nargs=4, type=float, metavar=("SOUTH", "NORTH", "WEST", "EAST"))
     fetch_p.add_argument("--families", default=",".join(FAMILIES),
-                         help=f"comma list of {', '.join(FAMILIES + SATELLITE_FAMILIES)}; the satellite point "
-                              f"winds ({', '.join(SATELLITE_FAMILIES)}) are read only when named")
+                         help=f"comma list of {', '.join(FAMILIES + SATELLITE_FAMILIES)}; the satellite "
+                              f"families ({', '.join(SATELLITE_FAMILIES)}: point winds and GNSS-RO "
+                              f"refractivity) are read only when named")
     fetch_p.add_argument("--table", help="write gpuwm-obs.table.v2 CSV here (for the ensemble filter)")
     fetch_p.add_argument("--obs-gts", help="write OBSPROC obs_gts ASCII here (for 3D-Var / WRFDA)")
     fetch_p.add_argument("--receipt", help="also write the JSON receipt here")
@@ -1406,5 +1580,5 @@ def register_cli(obs_sub) -> None:
 
 __all__ = ["FAMILIES", "Report", "Wis2Error", "aircraft_reports", "fetch", "land_reports", "neutral_rows",
            "obs_gts_header", "obs_gts_report", "ocean_reports", "open_store", "part_label", "pressure_scale_fault",
-           "profiler_reports", "read_reports", "register_cli", "rh_from_dewpoint", "sonde_reports",
+           "profiler_reports", "read_reports", "register_cli", "rh_from_dewpoint", "ro_gradient_ok", "ro_reports", "sonde_reports",
            "write_obs_gts", "write_table"]
