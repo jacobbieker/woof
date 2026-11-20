@@ -17,7 +17,8 @@ each component absent; ice fractions of 0, -0, 1, tiny, and exactly at the
 lower bound (``-eps_fracval``, a single-precision 0.01, whose ``ofrac`` is
 exactly ``1 + eps_fracval``);
 land and coastal ice domain points; each of the three checks stopping the
-coupler (a bound and the sum); MCT stopping on an i2x without ``Si_ifrac``;
+coupler (a bound and the sum, and each between the single-precision
+``eps`` E3SM has and a double 0.01); MCT stopping on an i2x without ``Si_ifrac``;
 and the dead models reporting all three without stopping.
 """
 from __future__ import annotations
@@ -69,6 +70,9 @@ SPECS = (
     _spec("abort_ocn_bound", seed=9, aborts=True, poke=(("fo_afrac", 2, 1.0101),)),
     _spec("abort_atm_sum", seed=10, aborts=True, poke=(("fa_lfrac_add", 4, 0.02),)),
     _spec("abort_atm_lfrin", seed=11, aborts=True, poke=(("fa_lfrin", 3, -0.0101),)),
+    # between the single-precision eps and 0.01: E3SM stops; a double 0.01 would not
+    _spec("abort_ice_float32_eps", seed=13, aborts=True, poke=(("Si_ifrac", 6, -0.0099999999),)),
+    _spec("abort_atm_sum_float32_eps", seed=14, aborts=True, i2a="copy", poke=(("fa_lfrac", 0, 0.0099999999),)),
     # no Si_ifrac: mct_aVect_copy's shared-index lookup stops
     _spec("abort_i2x_without_si_ifrac", seed=12, aborts=True, i2x_fields=("Si_t", "Si_avsdr", "Si_snowh")),
 )
@@ -153,6 +157,8 @@ def _build(spec) -> dict:
             fo[k, 0] = v
         elif what == "fa_lfrac_add":
             fa[k, 3] = fa[k, 3] + v
+        elif what == "fa_lfrac":
+            fa[k, 3] = v
         elif what == "fa_lfrin":
             fa[k, 4] = v
     return dict(name=spec["name"], spec=spec, aborts=spec["aborts"], i2x_fields=i2x_fields, dom_fields=dom_fields,
