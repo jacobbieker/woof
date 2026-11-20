@@ -505,8 +505,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   at 1.80 H. A real-data check over Manhattan places the model's
   buildings at their footprint heights (r = 0.99 at 25 m). In lower and
   midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
-  50 m does not open the streets. A domain with buildings (or an urban
-  canopy under LES) takes bare-earth 3DEP terrain instead of the sub-km
+  50 m leaves only about a third of the street area fully open, against
+  nearly half at 25 m. A two-hour rerun on Overture footprints finds a
+  street-canyon vortex in 43-45% of canyons at 25 m, against 30-39% at
+  50 m and none without buildings. The same case runs on Metal through
+  `woof sim`, about 2.4 times slower than a shared A6000. A domain with
+  buildings (or an urban canopy under LES) takes bare-earth 3DEP terrain instead of the sub-km
   GLO-30 default, which has the buildings in it, and is refused outside
   3DEP unless a terrain source is named.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
