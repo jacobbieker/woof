@@ -32,9 +32,10 @@ cosine, arcsine and two-argument arctangent are glibc's in E3SM; they come
 in as ``trig`` (per cell, sin and cos of the latitude, the longitude, and
 the rotated grid's latitude and longitude), so no libm runs on the device.
 :func:`rotation_trig` makes them with Python's ``math`` module, which is the
-platform libm: on Linux with glibc its words are E3SM's; on other hosts
-(macOS's libm) they may differ in the last place. The parity tests feed the
-oracle's recorded words.
+platform libm: under the glibc the oracle was recorded with
+(:data:`TRIG_GLIBC`, 2.44) its words are the oracle's; under another glibc
+release or another libm (macOS's) they may differ in the last place, and it
+warns. The parity tests feed the oracle's recorded words.
 
 Refused by name (see QUIRKS in the module's tests): the column
 biogeochemistry coupled to the ocean (``config_use_column_biogeochemistry``
@@ -64,6 +65,8 @@ pinned Icepack's column physics, built with gfortran ``-O0
 from __future__ import annotations
 
 import math
+import platform
+import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
@@ -105,6 +108,11 @@ TOCNFRZ = -1.8  # seaiceFreezingTemperatureConstant
 FRAZIL_SALINITY_REDUCTION = 3.0
 FRAZIL_ICE_POROSITY = 0.75
 
+#: the glibc release the oracle's trigonometric words were recorded with
+TRIG_GLIBC = "2.44"
+#: mpas_seaice_initialize's ocean surfaces ("free"; the rest is the slab ocean) and seq_flds_mod's wave couplings
+OCEAN_SURFACES = ("free", "mixed_layer")
+WAV_ICE_COUPLINGS = ("none", "oneway", "twoway")
 KTHERM = {"zero layer": 0, "BL99": 1, "mushy": 2}
 TFRZ = {"mushy": 0, "linear_salt": 1, "constant": 2, "minus1p8": 3}
 R_COPY, R_SUM, R_ZERO, R_SST, R_TF, R_FRAZIL = range(6)
@@ -166,6 +174,10 @@ def indices(x2i_fields, i2x_fields, *, wav_ice_coup: str = "none", wav_nfreq: in
             raise CouplingAbort(f'm_AttrVect::indexRA_:: FATAL--attribute not found: "{name}"')
         return pos[name]
 
+    if wav_ice_coup.rstrip() not in WAV_ICE_COUPLINGS:
+        raise ValueError(f"unknown wav_ice_coup {wav_ice_coup!r}: one of {WAV_ICE_COUPLINGS}")
+    if int(wav_nfreq) < 0:
+        raise ValueError(f"wav_nfreq must not be negative; it is {wav_nfreq}")
     twoway = wav_ice_coup.rstrip() == "twoway"  # Fortran's .eq. ignores trailing blanks
     for name in _I2X_REQUIRED:
         need(ipos, name)
@@ -206,6 +218,9 @@ class Options:
         if self.config_sea_freezing_temperature_type.rstrip() not in TFRZ:
             raise ValueError(f"unknown tfrz_option {self.config_sea_freezing_temperature_type!r}: "
                              "Icepack's icepack_sea_freezing_temperature aborts")
+        if self.config_ocean_surface_type.rstrip() not in OCEAN_SURFACES:
+            raise ValueError(f"unknown config_ocean_surface_type {self.config_ocean_surface_type!r}: one of "
+                             f"{OCEAN_SURFACES} (E3SM takes anything but 'free' as the slab ocean)")
         if self.config_use_column_biogeochemistry and self.config_couple_biogeochemistry_fields:
             raise ValueError("the column biogeochemistry coupled to the ocean is not ported (its x2i and i2x "
                              "columns are looked up quietly, so an absent field is written at column 0)")
@@ -320,6 +335,9 @@ def _ints(values):
 
 
 def _f64(name, array, shape=None):
+    import cupy as cp
+    if not isinstance(array, cp.ndarray):
+        raise TypeError(f"{name} must be a cupy (device) array; it is {type(array).__name__}")
     if array.dtype != np.float64 or not array.flags.c_contiguous or (shape is not None and array.shape != shape):
         raise ValueError(f"{name} must be C-contiguous float64" + (f" of shape {shape}" if shape else ""))
     return array
@@ -346,6 +364,9 @@ def import_x2i(idx: Indices, opts: Options, x2i, *, n_cells_solve: int, pools: d
     order). ``n_frequencies`` is the ``nFrequencies`` dimension."""
     import cupy as cp
     opts.check()
+    if n_cells_solve < 0 or n_frequencies < 0:
+        raise ValueError(f"nCellsSolve ({n_cells_solve}) and nFrequencies ({n_frequencies}) must not be negative")
+    _f64("x2i", x2i)
     if int(x2i.shape[0]) != n_cells_solve:
         raise ValueError("x2i's lsize must be nCellsSolve (one block)")
     _f64("x2i", x2i, (n_cells_solve, idx.nx2i))
@@ -378,11 +399,12 @@ def import_x2i(idx: Indices, opts: Options, x2i, *, n_cells_solve: int, pools: d
         np.float64(RHOI), np.float64(LATICE), np.float64(FRAZIL_SALINITY_REDUCTION), np.float64(FRAZIL_ICE_POROSITY),
         np.float64(RHOI), np.float64(RHOW), np.float64(CP_ICE), np.float64(CP_OCN), np.float64(LFRESH),
         np.float64(DEPRESS_T), np.float64(TOCNFRZ), np.float64(PUNY)))
+    # the solve cells only: the halo is E3SM's to leave alone
     for j, (pool, name, comp, *_) in enumerate(rows):
         if comp is None:
-            pools[pool][name][...] = buf[j]
+            pools[pool][name][:n_cells_solve] = buf[j, :n_cells_solve]
         else:
-            pools[pool][name][:, comp] = buf[j]
+            pools[pool][name][:n_cells_solve, comp] = buf[j, :n_cells_solve]
 
 
 #: the export's i2x columns, in the kernel's I_* order
@@ -412,6 +434,9 @@ def export_i2x(idx: Indices, opts: Options, i2x, *, n_cells_solve: int, pools: d
     (:func:`rotation_trig`, or the words E3SM's libm makes)."""
     import cupy as cp
     opts.check()
+    if n_cells_solve < 0:
+        raise ValueError(f"nCellsSolve ({n_cells_solve}) must not be negative")
+    _f64("i2x", i2x)
     if int(i2x.shape[0]) != n_cells_solve:
         raise ValueError("i2x's lsize must be nCellsSolve (one block)")
     _f64("i2x", i2x, (n_cells_solve, idx.ni2x))
@@ -449,13 +474,24 @@ def rotation_trig(lat_cell, lon_cell, x_cell, y_cell, z_cell, sphere_radius: flo
     """``trig`` for :func:`export_i2x`, as ``seaice_latlon_vector_rotation_backward``
     makes it: ``seaice_grid_rotation_forward``, ``latp = asin(zp / r)``,
     ``lonp = atan2(yp, xp)``, then sin and cos of ``lat``, ``lon``, ``latp``
-    and ``lonp``. Host arrays; Python's ``math`` is the platform libm: on
-    Linux with glibc the words are E3SM's, elsewhere (macOS's libm) they may
-    differ in the last place."""
+    and ``lonp``. Host arrays; Python's ``math`` is the platform libm: under
+    glibc :data:`TRIG_GLIBC` the words are the oracle's; under another glibc
+    or another libm (macOS's) they may differ in the last place, and a
+    ``RuntimeWarning`` says so."""
+    r = float(sphere_radius)
+    if not r > 0.0:
+        raise ValueError(f"sphere_radius must be positive; it is {sphere_radius}")
+    if n_cells_solve < 0:
+        raise ValueError(f"nCellsSolve ({n_cells_solve}) must not be negative")
     lat, lon = np.asarray(lat_cell, dtype=np.float64), np.asarray(lon_cell, dtype=np.float64)
     xs, ys, zs = (np.asarray(a, dtype=np.float64) for a in (x_cell, y_cell, z_cell))
+    for name, a in (("lat_cell", lat), ("lon_cell", lon), ("x_cell", xs), ("y_cell", ys), ("z_cell", zs)):
+        if a.ndim != 1 or a.shape[0] < n_cells_solve:
+            raise ValueError(f"{name} must be 1-D with at least nCellsSolve ({n_cells_solve}) cells; it is {a.shape}")
+    if platform.libc_ver() != ("glibc", TRIG_GLIBC):
+        warnings.warn(f"rotation_trig uses this host's libm ({platform.libc_ver()}), not glibc {TRIG_GLIBC}: its "
+                      "words may differ from E3SM's in the last place", RuntimeWarning, stacklevel=2)
     out = np.empty((n_cells_solve, 8), dtype=np.float64)
-    r = float(sphere_radius)
     for i in range(n_cells_solve):
         x, y, z = float(xs[i]), float(ys[i]), float(zs[i])
         xp, yp, zp = (-z, y, x) if rotate else (x, y, z)

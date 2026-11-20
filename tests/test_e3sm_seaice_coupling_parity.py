@@ -15,7 +15,7 @@ The stress rotation's sine, cosine, arcsine and arctangent are glibc's in
 the oracle; the port takes their words as an input (``trig``), and these
 tests feed the words the oracle recorded, so the parity claim does not rest
 on the host's libm. ``rotation_trig`` (Python's ``math``) is checked against
-them where the host libm is glibc.
+them under the glibc release they were recorded with (2.44).
 
 THE BREAKAGES THESE PREVENT
 ---------------------------
@@ -31,7 +31,8 @@ THE BREAKAGES THESE PREVENT
 4. An index plan that drifts from E3SM's: each stop must be refused with
    MCT's message; what E3SM gets wrong (quiet lookups written at column 0,
    reads past bounds, a pool pointer never set) is refused by name.
-5. A gate that cannot fail: mutated kernels and constants must mismatch.
+5. A gate that cannot fail: mutated kernels, constants and row plans must
+   mismatch; a kernel that runs past nCellsSolve must be caught writing.
 6. The default changed: nothing in woof/ calls this import or export.
 
 QUIRKS (E3SM v3.2.0, ice_comp_mct.F / mpassi_cpl_indices.F)
@@ -185,6 +186,8 @@ def _refusal_setup(name="mushy_free", **changes):
     (dict(config_thermodynamics_type="zero_layer"), "config_thermodynamics_type"),
     (dict(config_sea_freezing_temperature_type="linear"), "tfrz_option"),
     (dict(config_sea_freezing_temperature_type=" mushy"), "tfrz_option"),
+    (dict(config_ocean_surface_type="fre"), "config_ocean_surface_type"),
+    (dict(config_ocean_surface_type="slab"), "config_ocean_surface_type"),
 ])
 def test_what_e3sm_gets_wrong_or_aborts_on_is_refused(change, match):
     _, _, opts = _refusal_setup(**change)
@@ -201,6 +204,16 @@ def test_the_known_types_are_taken():
         _, _, opts = _refusal_setup(config_sea_freezing_temperature_type=tfrz)
         opts.check()
         assert opts.tfrz == k
+    for surface in ("free", "mixed_layer  "):
+        _refusal_setup(config_ocean_surface_type=surface)[2].check()
+    case = _case("mushy_free")
+    for wav in ("none", "oneway", "twoway "):
+        icc.indices(case["lists"]["x2i"] + ["Sw_Hs"], case["lists"]["i2x"] + ["Si_ifloe"], wav_ice_coup=wav)
+    for wav in ("two-way", "TwoWay", ""):
+        with pytest.raises(ValueError, match="wav_ice_coup"):
+            icc.indices(case["lists"]["x2i"], case["lists"]["i2x"], wav_ice_coup=wav)
+    with pytest.raises(ValueError, match="wav_nfreq"):
+        icc.indices(case["lists"]["x2i"], case["lists"]["i2x"], wav_nfreq=-1)
     # column BGC alone and the z-aerosols alone are taken
     _refusal_setup(config_use_column_biogeochemistry=True)[2].check()
     _refusal_setup(config_use_zaerosols=True)[2].check()
@@ -226,8 +239,8 @@ def test_the_default_path_does_not_call_the_coupling():
     subprocess.run([sys.executable, "-c", code], check=True, cwd=ROOT)
 
 
-@pytest.mark.skipif(platform.system() != "Linux" or platform.libc_ver()[0] != "glibc",
-                    reason="rotation_trig is the platform libm; its words are E3SM's only on glibc")
+@pytest.mark.skipif(platform.libc_ver() != ("glibc", icc.TRIG_GLIBC),
+                    reason=f"rotation_trig is the platform libm; the oracle's words are glibc {icc.TRIG_GLIBC}'s")
 def test_rotation_trig_is_the_oracles_on_glibc():
     outputs, _ = si.load_fixture()
     for case in si.cases():
@@ -237,6 +250,34 @@ def test_rotation_trig_is_the_oracles_on_glibc():
         got = icc.rotation_trig(m["latCell"][1], m["lonCell"][1], m["xCell"][1], m["yCell"][1], m["zCell"][1],
                                 m["sphere_radius"][1], case["spec"]["rotate"], case["lsize"])
         assert si.word_mismatches(got, outputs[case["name"]]["trig"]) == 0, case["name"]
+
+
+def test_rotation_trig_refuses_what_it_cannot_make():
+    m = _case("mushy_free")["pools"]["mesh"]
+    args = [m[k][1] for k in ("latCell", "lonCell", "xCell", "yCell", "zCell")]
+    n = _case("mushy_free")["lsize"]
+    for radius in (0.0, -1.0, float("nan")):
+        with pytest.raises(ValueError, match="sphere_radius"):
+            icc.rotation_trig(*args, radius, True, n)
+    short = list(args)
+    short[2] = short[2][:n - 1]
+    with pytest.raises(ValueError, match="x_cell must be 1-D with at least"):
+        icc.rotation_trig(*short, m["sphere_radius"][1], True, n)
+    with pytest.raises(ValueError, match="negative"):
+        icc.rotation_trig(*args, m["sphere_radius"][1], True, -1)
+
+
+def test_rotation_trig_warns_off_the_recorded_glibc(monkeypatch):
+    m = _case("mushy_free")["pools"]["mesh"]
+    args = [m[k][1] for k in ("latCell", "lonCell", "xCell", "yCell", "zCell")]
+    monkeypatch.setattr(icc.platform, "libc_ver", lambda: ("", ""))
+    with pytest.warns(RuntimeWarning, match="last place"):
+        icc.rotation_trig(*args, m["sphere_radius"][1], True, 3)
+    monkeypatch.setattr(icc.platform, "libc_ver", lambda: ("glibc", icc.TRIG_GLIBC))
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        icc.rotation_trig(*args, m["sphere_radius"][1], True, 3)
 
 
 @requires_gpu
@@ -345,6 +386,16 @@ def _mismatches(case, key):
     # a sum's first term dropped
     ("for (int m = 1; m < nc[j]; ++m)", "for (int m = 2; m < nc[j]; ++m)", "aerosols/atmosAerosolFlux",
      "aerosols_bulk"),
+    # the ponds' water at the ice's density, and their lids at the sea water's
+    ("M(M(AR(A_PDEPTH), AR(A_PAREA)), densitySeaWater)", "M(M(AR(A_PDEPTH), AR(A_PAREA)), densityIce)",
+     "i2x/Si_bpress", "bl99_mushy_tfrz"),
+    ("M(M(AR(A_PLID), AR(A_PAREA)), densityIce)", "M(M(AR(A_PLID), AR(A_PAREA)), densitySeaWater)",
+     "i2x/Si_bpress", "bl99_mushy_tfrz"),
+    # the z-aerosol ocean concentrations left as they were, or zeroed with a sign
+    ("case R_ZERO: *dst = 0.0; break;", "case R_ZERO: break;",
+     "biogeochemistry/oceanZAerosolConc", "aerosols_modal_zaer"),
+    ("case R_ZERO: *dst = 0.0; break;", "case R_ZERO: *dst = -0.0; break;",
+     "biogeochemistry/oceanZAerosolConc", "zaer_bulk_column_bgc"),
 ])
 def test_a_mutated_kernel_is_caught(monkeypatch, original, mutated, key, case):
     real = icc.module_source
@@ -367,10 +418,180 @@ def test_a_mutated_kernel_is_caught(monkeypatch, original, mutated, key, case):
     ("REF_SALINITY", 5.0, "i2x/Fioi_salt", "mushy_free"),
     ("DEPRESS_T", 0.0545, "ocean_coupling/seaFreezingTemperature", "som_linear_salt"),
     ("FRAZIL_ICE_POROSITY", 0.7, "ocean_coupling/frazilMassAdjust", "mushy_free"),
+    ("RHOI", 900.0, "i2x/Si_bpress", "mushy_free"),
+    ("RHOI", 900.0, "ocean_coupling/frazilMassAdjust", "mushy_free"),  # BL99's cancels: p*rhoi/(rhoi*L)
+    ("RHOW", 1025.0, "i2x/Si_bpress", "bl99_mushy_tfrz"),
+    ("RHOW", 1025.0, "ocean_coupling/frazilMassAdjust", "mushy_free"),
+    ("CP_OCN", 3974.0, "ocean_coupling/frazilMassAdjust", "mushy_free"),
+    ("LFRESH", 3.34e5, "ocean_coupling/frazilMassAdjust", "mushy_free"),
+    ("PUNY", 10.0, "ocean_coupling/frazilMassAdjust", "mushy_free"),
+    ("TOCNFRZ", -1.9, "ocean_coupling/seaFreezingTemperature", "bl99_constant"),
+    ("FRAZIL_SALINITY_REDUCTION", 4.0, "ocean_coupling/frazilMassAdjust", "mushy_free"),
 ])
 def test_a_mutated_constant_is_caught(monkeypatch, name, value, key, case):
     monkeypatch.setattr(icc, name, value)
     assert _mismatches(case, key) > 0
+
+
+@requires_gpu
+def test_a_mutated_wave_row_plan_is_caught(monkeypatch):
+    real = icc.import_rows
+
+    def shifted(idx, opts, n_frequencies):
+        rows = real(idx, opts, n_frequencies)
+        spec = [r for r in rows if r[1] == "waveSpectra"]
+        assert len(spec) == n_frequencies > 1
+        cols = [r[4] for r in spec]
+        return [r if r[1] != "waveSpectra" else r[:4] + (cols[(r[2] + 1) % len(cols)],) for r in rows]
+
+    monkeypatch.setattr(icc, "import_rows", shifted)
+    assert _mismatches("waves_twoway", "wave_coupling/waveSpectra") > 0
+    monkeypatch.setattr(icc, "import_rows", lambda *a: [r for r in real(*a) if r[1] != "significantWaveHeight"])
+    assert _mismatches("waves_twoway", "wave_coupling/significantWaveHeight") > 0
+
+
+_PROBE = '''
+extern "C" __global__ void ice_coupling_probe(double* o)
+{
+    o[0] = fmax_first(-0.0, 0.0); o[1] = fmax_first(0.0, -0.0);
+    o[2] = fmin_first(-0.0, 0.0); o[3] = fmin_first(0.0, -0.0);
+    o[4] = fmax_first(1.0, 2.0); o[5] = fmin_first(1.0, 2.0);
+}
+'''
+
+
+def _probe(monkeypatch, original=None, mutated=None):
+    import cupy as cp
+    real = icc.module_source
+    src = real() if original is None else real().replace(original, mutated)
+    monkeypatch.setattr(icc, "module_source", lambda: src + _PROBE)
+    icc._module_on.cache_clear()
+    try:
+        out = cp.zeros(6, dtype=np.float64)
+        icc._module_on(cp.cuda.Device().id, icc._options()).get_function("ice_coupling_probe")((1,), (1,), (out,))
+        return cp.asnumpy(out)
+    finally:
+        icc._module_on.cache_clear()
+        monkeypatch.undo()
+
+
+@requires_gpu
+@pytest.mark.parametrize("original, mutated", [
+    ("b > a ? __double_as_longlong(b)", "b >= a ? __double_as_longlong(b)"),
+    ("b < a ? __double_as_longlong(b)", "b <= a ? __double_as_longlong(b)"),
+])
+def test_max_and_min_keep_the_first_on_ties(monkeypatch, original, mutated):
+    """gfortran's MAX and MIN keep the first argument on a tie (signed zeros).
+    No case reaches a tie (the brine salinity is capped at puny first, the
+    fraction at 1), so the helpers are held on their own."""
+    want = np.array([-0.0, 0.0, -0.0, 0.0, 2.0, 1.0])
+    assert si.word_mismatches(_probe(monkeypatch), want) == 0
+    assert si.word_mismatches(_probe(monkeypatch, original, mutated), want) > 0
+
+
+@requires_gpu
+def test_the_export_stays_inside_ncellssolve(monkeypatch):
+    """i2x is a view of a larger buffer: rows past nCellsSolve stay as they
+    were, and a kernel that runs one cell further is caught writing there."""
+    import cupy as cp
+    case = _case("mushy_free")
+    idx, opts, n = si.indices_for(case), si.options_for(case), case["lsize"]
+    assert n % 128 != 0
+    pools = _device_pools(case)
+    trig = cp.asarray(si.load_fixture()[0]["mushy_free"]["trig"])
+
+    def tail(guard=None):
+        big = cp.full((n + 4, idx.ni2x), 7.0, dtype=np.float64)
+        if guard is not None:
+            real = icc.module_source
+            monkeypatch.setattr(icc, "module_source", lambda: real().replace(*guard))
+        icc._module_on.cache_clear()
+        try:
+            icc.export_i2x(idx, opts, big[:n], n_cells_solve=n, pools=pools, trig=trig)
+        finally:
+            icc._module_on.cache_clear()
+            monkeypatch.undo()
+        return cp.asnumpy(big[n:])
+
+    assert (tail() == 7.0).all()
+    guard = "    if (i >= nCellsSolve) return;\n    r8* o = i2x"
+    assert icc.module_source().count(guard) == 1
+    assert (tail((guard, guard.replace("nCellsSolve)", "nCellsSolve + 1)"))) != 7.0).any()
+
+
+@requires_gpu
+def test_the_import_writes_only_the_solve_cells(monkeypatch):
+    """A halo cell changed after the import has copied its arrays stays
+    changed: only the solve cells are written back."""
+    import cupy as cp
+    case = _case("mushy_free")
+    idx, opts, n = si.indices_for(case), si.options_for(case), case["lsize"]
+    pools = _device_pools(case)
+    sst = pools["ocean_coupling"]["seaSurfaceTemperature"]
+    assert sst.shape[0] > n and not (cp.asnumpy(sst[n:]) == 5.0).any()
+    real_stack = cp.stack
+
+    def stacking(arrays, *a, **k):
+        out = real_stack(arrays, *a, **k)
+        sst[n:] = 5.0
+        return out
+
+    monkeypatch.setattr(cp, "stack", stacking)
+    icc.import_x2i(idx, opts, cp.asarray(case["x2i"]), n_cells_solve=n, pools=pools)
+    monkeypatch.undo()
+    assert (cp.asnumpy(sst[n:]) == 5.0).all()
+
+
+def _device_pools(case):
+    import cupy as cp
+    return {p: {k: cp.asarray(np.ascontiguousarray(v, dtype=np.float64)) for k, (kind, v) in arrays.items()
+                if kind in (5, 6)} for p, arrays in case["pools"].items()}
+
+
+@requires_gpu
+def test_bad_shapes_kinds_and_sizes_are_refused():
+    import cupy as cp
+    case = _case("aerosols_bulk")
+    idx, opts, n = si.indices_for(case), si.options_for(case), case["lsize"]
+    x2i, i2x = cp.asarray(case["x2i"]), cp.asarray(case["i2x"])
+    trig = cp.asarray(si.load_fixture()[0]["aerosols_bulk"]["trig"])
+    # a 1-based component index past the array's components
+    pools = _device_pools(case)
+    pools["aerosols"]["atmosAerosolFlux"] = cp.ascontiguousarray(pools["aerosols"]["atmosAerosolFlux"][:, :2])
+    with pytest.raises(ValueError, match="1-based index 3 is outside it"):
+        icc.import_x2i(idx, opts, x2i, n_cells_solve=n, pools=pools)
+    # the wrong number of dimensions, on the import and the export
+    pools = _device_pools(case)
+    pools["ocean_coupling"]["seaSurfaceSalinity"] = pools["ocean_coupling"]["seaSurfaceSalinity"][:, None].copy()
+    with pytest.raises(ValueError, match="must be 1-D over the"):
+        icc.import_x2i(idx, opts, x2i, n_cells_solve=n, pools=pools)
+    pools = _device_pools(case)
+    pools["aerosols"]["atmosAerosolFlux"] = cp.ascontiguousarray(pools["aerosols"]["atmosAerosolFlux"][:, 0])
+    with pytest.raises(ValueError, match="must be 2-D over the"):
+        icc.import_x2i(idx, opts, x2i, n_cells_solve=n, pools=pools)
+    pools = _device_pools(case)
+    pools["tracers_aggregate"]["iceAreaCell"] = pools["tracers_aggregate"]["iceAreaCell"][:, None].copy()
+    with pytest.raises(ValueError, match="must be 1-D with at least"):
+        icc.export_i2x(idx, opts, i2x, n_cells_solve=n, pools=pools, trig=trig)
+    # host (numpy) arrays
+    pools = _device_pools(case)
+    with pytest.raises(TypeError, match="x2i must be a cupy"):
+        icc.import_x2i(idx, opts, case["x2i"], n_cells_solve=n, pools=pools)
+    with pytest.raises(TypeError, match="i2x must be a cupy"):
+        icc.export_i2x(idx, opts, case["i2x"], n_cells_solve=n, pools=pools, trig=trig)
+    with pytest.raises(TypeError, match="trig must be a cupy"):
+        icc.export_i2x(idx, opts, i2x, n_cells_solve=n, pools=pools, trig=cp.asnumpy(trig))
+    pools["ocean_coupling"]["seaSurfaceSalinity"] = cp.asnumpy(pools["ocean_coupling"]["seaSurfaceSalinity"])
+    with pytest.raises(TypeError, match="seaSurfaceSalinity must be a cupy"):
+        icc.import_x2i(idx, opts, x2i, n_cells_solve=n, pools=pools)
+    # negative sizes
+    pools = _device_pools(case)
+    with pytest.raises(ValueError, match="negative"):
+        icc.import_x2i(idx, opts, x2i, n_cells_solve=-1, pools=pools)
+    with pytest.raises(ValueError, match="negative"):
+        icc.import_x2i(idx, opts, x2i, n_cells_solve=n, pools=pools, n_frequencies=-1)
+    with pytest.raises(ValueError, match="negative"):
+        icc.export_i2x(idx, opts, i2x, n_cells_solve=-1, pools=pools, trig=trig)
 
 
 def _oracle_toolchain():

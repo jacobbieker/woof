@@ -56,8 +56,9 @@ E3SM's `seaice_latlon_vector_rotation_backward` calls `sin`, `cos`, `asin`
 and `atan2`. The port takes their words as an input, and the parity tests
 feed the ones recorded here, so the claim does not rest on the host's libm.
 `ice_coupling_e3sm.rotation_trig` makes them with Python's `math` (the
-platform libm): equal to these on Linux with glibc (tested there); on other
-hosts (macOS's libm) the words may differ in the last place. A glibc
+platform libm): equal to these under glibc 2.44 (`TRIG_GLIBC`; tested
+there only); under another glibc release or another libm (macOS's) the
+words may differ in the last place, and it warns. A glibc
 transcription of `atan2` behind `WOOF_GLIBC239_LIBM64` would close that if
 it matters; it is not done, and would never be a default.
 
