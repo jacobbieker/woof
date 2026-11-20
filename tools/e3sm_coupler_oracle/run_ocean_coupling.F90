@@ -21,7 +21,9 @@
 !   nEntries, then per entry: pool (1 configs, 2 packages, 3 mesh, 4 forcing,
 !     5 state), kind (1 logical, 2 real, 3 character, 4 integer dimension,
 !     5 real 1-D, 6 real 2-D, 7 integer 1-D, 8 an absent real 1-D field,
-!     9 an absent real 2-D field), its name (64 characters), and its value:
+!     9 an absent real 2-D field, 10 an absent integer 1-D array, which
+!     mpas_pool_get_array returns disassociated), its name (64 characters),
+!     and its value:
 !     int32 0/1, r8, 64 characters, int32, or the extents (int32) and the
 !     array.
 ! OUTPUT: o2x after ocn_export_mct, then every array entry (kinds 5, 6, 7) in
@@ -70,6 +72,7 @@ program run_ocean_coupling
   real(kind=RKIND), pointer :: rval
   character(len=StrKIND), pointer :: cval
   integer, pointer :: dval
+  integer, dimension(:), pointer :: inull => null()
 
   call get_command_argument(1, path_in)
   call get_command_argument(2, path_out)
@@ -184,6 +187,8 @@ program run_ocean_coupling
         call stub_pool_put_array(target_pool(pool), trim(name), i1(nArrays) % a)
         arrayPool(nArrays) = pool
         arrayKind(nArrays) = kind
+     case (10)
+        call stub_pool_put_array(target_pool(pool), trim(name), inull)
      case default
         stop 9
      end select
