@@ -1342,7 +1342,8 @@ def fetch(start, end, box, *, families=FAMILIES, table_path=None, obs_gts_path=N
     errors = ObsErrTable.load()
     receipt = {"schema": "woof.obs.wis2-fetch/v1", "store": f"s3://{BUCKET}/{PREFIX}", "snapshot": snapshot_id,
                "start": str(start), "end": str(end), "box": list(box), "families": list(families),
-               "thin_km": thin_km, "errors": "WRF 4.7.1 OBSPROC obserr.txt (woof/obs/data/wrfda_obserr.txt)", "qc": dict(counts)}
+               "thin_km": thin_km, "errors": "WRF 4.7.1 OBSPROC obserr.txt (woof/obs/data/wrfda_obserr.txt)",
+               "qc": dict(counts)}
     if table_path:
         rows, row_counts = neutral_rows(reports, errors)
         write_table(rows, table_path)
