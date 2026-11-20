@@ -61,7 +61,7 @@ def _freezing(salinity, pressure, c):
 def test_isomip_freezing_point_at_the_boundary_layer_salinity():
     from woof.hex.mpas_ocean import land_ice_v842 as li
     case, default, eos = _isomip_run(None)
-    named, _, _ = _isomip_run("boundary_layer_temperature")
+    _, named, _ = _isomip_run("boundary_layer_temperature")
     _, fixed, _ = _isomip_run("boundary_layer_salinity")
     for key in default:  # naming the default changes nothing
         assert default[key].tobytes() == named[key].tobytes(), key
