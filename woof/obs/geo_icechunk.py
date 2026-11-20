@@ -965,7 +965,7 @@ def _read_satpy_scan(arrays, name, snap, written, depth, containers, wanted, whe
         key, quantity, array = by_channel[channel]
         raw = np.asarray(array[index, rows, cols])
         values = raw.astype("f4")
-        bad = ~(values > 0.0) if quantity == "brightness_temperature" else ~(values >= 0.0)
+        bad = ~np.isfinite(values) | (~(values > 0.0) if quantity == "brightness_temperature" else ~(values >= 0.0))
         values[bad] = np.nan
         digest = hashlib.sha256(np.ascontiguousarray(raw).tobytes()).hexdigest()
         return _ChannelRead(channel, name, snap, written, depth, index, meta["start"], meta["end"], values,
