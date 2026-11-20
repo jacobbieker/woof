@@ -544,3 +544,410 @@ void lbc_ad_mup(wreal* __restrict__ mupa, const wreal* __restrict__ sm, int n2, 
     }
     mupa[c] += s;
 }
+
+// ====================================================================
+// Item 7b.  WRF spec_bdy_final (woof's strict finalize_state_field /
+// finalize_state_multi, the GPUWM_WRF_EXACT branch, and install_mu_boundary
+// for mu) and spec_bdyupdate_ph + zero_grad_bdy(w) with the frame's
+// calc_p_rho (woof's strict advance_specified_phi_w).
+// ====================================================================
+
+static __device__ __forceinline__ Dl operator/(Dl a, Dl b)
+{
+    wreal v = wdiv(a.v, b.v);
+    return dl(v, wdiv(a.d - v * b.d, b.v));
+}
+static __device__ __forceinline__ Dl operator-(Dl a, wreal b) { return dl(a.v - b, a.d); }
+static __device__ __forceinline__ Dl operator+(wreal a, Dl b) { return dl(a + b.v, b.d); }
+
+static __device__ __forceinline__ wreal* lb_side_w(int side, wreal* s, wreal* n, wreal* w,
+                                                   wreal* e)
+{
+    return side == 0 ? s : side == 1 ? n : side == 2 ? w : e;
+}
+
+// ------------------------------------------------------ spec_bdy_final
+// Specified cells only: target = (xmsf * bfield) / xmu, bfield = table +
+// dtbc * table tendency, xmu = c1 * mass + c2 with mass the acoustic
+// carrier muts (u, v: the calc_mu_uv_1 face mean 0.5 (r + l)), xmsf msfu,
+// msfv or msft for u, v, w (has_msf); mu takes bfield.  Every other cell
+// keeps its value.
+
+#define LF_PASSIVE                                                           \
+    const wreal* __restrict__ c1h, const wreal* __restrict__ c2h,            \
+    const wreal* __restrict__ c1f, const wreal* __restrict__ c2f,            \
+    const wreal* __restrict__ msft, const wreal* __restrict__ msfu,          \
+    const wreal* __restrict__ msfv
+
+#define LF_GEOM wreal dtbc, int kind, int width, int spec_zone, int has_msf, \
+    int nz, int ny, int nx
+
+#define LF_ATABLES                                                           \
+    wreal* __restrict__ westa, wreal* __restrict__ west_ta,                  \
+    wreal* __restrict__ easta, wreal* __restrict__ east_ta,                  \
+    wreal* __restrict__ southa, wreal* __restrict__ south_ta,                \
+    wreal* __restrict__ northa, wreal* __restrict__ north_ta
+
+static __device__ __forceinline__ size_t lf_tidx(int side, int k, int j, int i, int d, int ny,
+                                                 int nx, int width)
+{
+    return side < 2 ? lb_tidx(side, k, d, i, ny, nx, width)
+                    : lb_tidx(side, k, j, d, ny, nx, width);
+}
+
+static __device__ __forceinline__ wreal lf_msf(int kind, int j, int i, int nx, int has_msf,
+                                               const wreal* msft, const wreal* msfu,
+                                               const wreal* msfv)
+{
+    if (!has_msf) return (wreal)1;
+    size_t c = (size_t)j * nx + i;
+    if (kind == LB_U) return msfu[c];
+    if (kind == LB_V) return msfv[c];
+    if (kind == LB_W) return msft[c];
+    return (wreal)1;
+}
+
+static __device__ __forceinline__ bool lf_msf_kind(int kind, int has_msf)
+{
+    return has_msf && (kind == LB_U || kind == LB_V || kind == LB_W);
+}
+
+// The cell's coupling mass xmu (value and tangent).
+static __device__ __forceinline__ Dl lf_xmu(int kind, int k, int j, int i, const wreal* muts,
+                                            const wreal* mutsd, const wreal* c1h,
+                                            const wreal* c2h, const wreal* c1f,
+                                            const wreal* c2f, int mny, int mnx)
+{
+    Dl mass;
+    if (kind == LB_U) {
+        size_t r = (size_t)j * mnx + min(i, mnx - 1);
+        size_t l = (size_t)j * mnx + max(i - 1, 0);
+        mass = (wreal)0.5 * (ld(muts, mutsd, r) + ld(muts, mutsd, l));
+    } else if (kind == LB_V) {
+        size_t n = (size_t)min(j, mny - 1) * mnx + i;
+        size_t s = (size_t)max(j - 1, 0) * mnx + i;
+        mass = (wreal)0.5 * (ld(muts, mutsd, n) + ld(muts, mutsd, s));
+    } else {
+        mass = ld(muts, mutsd, (size_t)j * mnx + i);
+    }
+    bool full = kind == LB_W || kind == LB_PHI;
+    return (full ? c1f[k] : c1h[k]) * mass + (full ? c2f[k] : c2h[k]);
+}
+
+static __device__ __forceinline__ void lf_mass_dims(int kind, int ny, int nx, int* mny,
+                                                    int* mnx)
+{
+    *mny = kind == LB_V ? ny - 1 : ny;
+    *mnx = kind == LB_U ? nx - 1 : nx;
+}
+
+extern "C" __global__
+void lbf_tl(wreal* __restrict__ target, wreal* __restrict__ targetd, LB_TABLES, LB_DTABLES,
+            const wreal* __restrict__ muts, const wreal* __restrict__ mutsd, LF_PASSIVE,
+            int nl, LF_GEOM)
+{
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    int k, j, i, side, d;
+    if (!lb_cell(tid, nz, ny, nx, spec_zone, &k, &j, &i)) return;
+    if (lb_class(j, i, ny, nx, spec_zone, spec_zone, &side, &d) != 1) return;
+    int mny, mnx;
+    lf_mass_dims(kind, ny, nx, &mny, &mnx);
+    size_t b = lf_tidx(side, k, j, i, d, ny, nx, width);
+    Dl bf = ld(lb_side(side, south, north, west, east), lb_side(side, southd, northd, westd, eastd), b)
+          + dtbc * ld(lb_side(side, south_t, north_t, west_t, east_t),
+                      lb_side(side, south_td, north_td, west_td, east_td), b);
+    Dl out = bf;
+    if (kind != LB_MU) {
+        Dl xmu = lf_xmu(kind, k, j, i, muts, mutsd, c1h, c2h, c1f, c2f, mny, mnx);
+        Dl num = lf_msf_kind(kind, has_msf)
+                     ? lf_msf(kind, j, i, nx, has_msf, msft, msfu, msfv) * bf : bf;
+        out = num / xmu;
+    }
+    size_t idx = ((size_t)k * ny + j) * nx + i;
+    if (nl) target[idx] = out.v;
+    targetd[idx] = out.d;
+}
+
+// d(xmu) adjoint of a specified cell (0 elsewhere): -a * out / xmu.
+static __device__ __forceinline__ wreal lf_axmu(int k, int j, int i, const wreal* targeta,
+                                                LB_TABLES, const wreal* muts, LF_PASSIVE,
+                                                int mny, int mnx, LF_GEOM)
+{
+    int side, d;
+    if (j < 0 || j >= ny || i < 0 || i >= nx) return (wreal)0;
+    if (lb_class(j, i, ny, nx, spec_zone, spec_zone, &side, &d) != 1) return (wreal)0;
+    size_t b = lf_tidx(side, k, j, i, d, ny, nx, width);
+    wreal bf = lb_side(side, south, north, west, east)[b]
+             + dtbc * lb_side(side, south_t, north_t, west_t, east_t)[b];
+    Dl xmu = lf_xmu(kind, k, j, i, muts, muts, c1h, c2h, c1f, c2f, mny, mnx);
+    wreal num = lf_msf_kind(kind, has_msf)
+                    ? lf_msf(kind, j, i, nx, has_msf, msft, msfu, msfv) * bf : bf;
+    wreal out = wdiv(num, xmu.v);
+    return -targeta[((size_t)k * ny + j) * nx + i] * out / xmu.v;
+}
+
+// muts adjoint, one thread per mass column: every specified cell whose
+// coupling mass reads it (u, v: the two faces, edge faces counted twice).
+extern "C" __global__
+void lbf_ad_muts(wreal* __restrict__ mutsa, const wreal* __restrict__ targeta, LB_TABLES,
+                 const wreal* __restrict__ muts, LF_PASSIVE, LF_GEOM)
+{
+    int mny, mnx;
+    lf_mass_dims(kind, ny, nx, &mny, &mnx);
+    size_t c = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (kind == LB_MU || c >= (size_t)mny * mnx) return;
+    int j = (int)(c / mnx), i = (int)(c - (size_t)j * mnx);
+    bool full = kind == LB_W || kind == LB_PHI;
+    wreal s = (wreal)0;
+    for (int k = 0; k < nz; ++k) {
+        wreal c1 = full ? c1f[k] : c1h[k];
+        if (kind == LB_U || kind == LB_V) {
+            for (int q = 0; q < 2; ++q) {
+                int fj = kind == LB_V ? j + q : j, fi = kind == LB_U ? i + q : i;
+                int self = kind == LB_U ? i : j;
+                int f = kind == LB_U ? fi : fj, last = kind == LB_U ? mnx - 1 : mny - 1;
+                int cnt = (min(f, last) == self) + (max(f - 1, 0) == self);
+                if (cnt == 0) continue;
+                wreal a = lf_axmu(k, fj, fi, targeta, west, west_t, east, east_t, south,
+                                  south_t, north, north_t, muts, c1h, c2h, c1f, c2f, msft,
+                                  msfu, msfv, mny, mnx, dtbc, kind, width, spec_zone, has_msf,
+                                  nz, ny, nx);
+                s += (wreal)0.5 * (wreal)cnt * (c1 * a);
+            }
+        } else {
+            s += c1 * lf_axmu(k, j, i, targeta, west, west_t, east, east_t, south, south_t,
+                              north, north_t, muts, c1h, c2h, c1f, c2f, msft, msfu, msfv,
+                              mny, mnx, dtbc, kind, width, spec_zone, has_msf, nz, ny, nx);
+        }
+    }
+    mutsa[c] += s;
+}
+
+// Table adjoints, one thread per specified cell (each table entry is read
+// by at most one cell); the cell's target adjoint is consumed.  Runs after
+// lbf_ad_muts, which reads it.
+extern "C" __global__
+void lbf_ad_cell(wreal* __restrict__ targeta, LF_ATABLES, const wreal* __restrict__ muts,
+                 LF_PASSIVE, LF_GEOM)
+{
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    int k, j, i, side, d;
+    if (!lb_cell(tid, nz, ny, nx, spec_zone, &k, &j, &i)) return;
+    if (lb_class(j, i, ny, nx, spec_zone, spec_zone, &side, &d) != 1) return;
+    int mny, mnx;
+    lf_mass_dims(kind, ny, nx, &mny, &mnx);
+    size_t idx = ((size_t)k * ny + j) * nx + i;
+    wreal a = targeta[idx];
+    wreal abf = a;
+    if (kind != LB_MU) {
+        Dl xmu = lf_xmu(kind, k, j, i, muts, muts, c1h, c2h, c1f, c2f, mny, mnx);
+        abf = a / xmu.v;
+        if (lf_msf_kind(kind, has_msf)) abf = abf * lf_msf(kind, j, i, nx, has_msf, msft, msfu, msfv);
+    }
+    size_t b = lf_tidx(side, k, j, i, d, ny, nx, width);
+    lb_side_w(side, southa, northa, westa, easta)[b] += abf;
+    lb_side_w(side, south_ta, north_ta, west_ta, east_ta)[b] += dtbc * abf;
+    targeta[idx] = (wreal)0;
+}
+
+// ------------------------------------- spec_bdyupdate_ph + zero_grad_bdy
+// One thread per spec_zone frame column, as advance_specified_phi_w: for
+// k = 0..nz, ph'' = (ph'' num) / den + (dtau rph) / den + php (num / den -
+// 1) with num = c1f mu_old + c2f, den = c1f muts + c2f, mu_old = muts -
+// dtau rmu_t; w'' copies the clamped interior column; then the column's
+// calc_p_rho on the new ph'' (diagnose_p_column_muts).
+
+#define SP_GEOM wreal dtau, int spec_zone, int nz, int ny, int nx
+
+static __device__ __forceinline__ bool sp_frame(int j, int i, int ny, int nx, int spec_zone)
+{
+    return !(i >= spec_zone && i < nx - spec_zone && j >= spec_zone && j < ny - spec_zone);
+}
+
+static __device__ __forceinline__ Dl sp_phi(Dl ph, Dl rph, Dl php, Dl mts, Dl mo, wreal c1,
+                                            wreal c2, wreal dtau)
+{
+    Dl num = c1 * mo + c2;
+    Dl den = c1 * mts + c2;
+    Dl ratio = num / den;
+    Dl v0 = (ph * num) / den;
+    Dl v2 = (dtau * rph) / (c1 * mts + c2);
+    return (v0 + v2) + php * (ratio - (wreal)1);
+}
+
+extern "C" __global__
+void sph_tl(wreal* __restrict__ ph, wreal* __restrict__ phd, wreal* __restrict__ w,
+            wreal* __restrict__ wd, wreal* __restrict__ p, wreal* __restrict__ pd,
+            wreal* __restrict__ al, wreal* __restrict__ ald,
+            const wreal* __restrict__ rph, const wreal* __restrict__ rphd,
+            const wreal* __restrict__ php, const wreal* __restrict__ phpd,
+            const wreal* __restrict__ rmu, const wreal* __restrict__ rmud,
+            const wreal* __restrict__ muts, const wreal* __restrict__ mutsd,
+            const wreal* __restrict__ th, const wreal* __restrict__ thd,
+            const wreal* __restrict__ mupp, const wreal* __restrict__ muppd,
+            const wreal* __restrict__ thp, const wreal* __restrict__ thpd,
+            const wreal* __restrict__ alt, const wreal* __restrict__ altd,
+            const wreal* __restrict__ c2a, const wreal* __restrict__ c2ad,
+            const wreal* __restrict__ rdnw, const wreal* __restrict__ c1h,
+            const wreal* __restrict__ c2h, const wreal* __restrict__ c1f,
+            const wreal* __restrict__ c2f, int nl, SP_GEOM)
+{
+    size_t st = (size_t)ny * nx;
+    size_t c = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= st) return;
+    int j = (int)(c / nx), i = (int)(c - (size_t)j * nx);
+    if (!sp_frame(j, i, ny, nx, spec_zone)) return;
+    Dl mts = ld(muts, mutsd, c);
+    Dl mo = mts - dtau * ld(rmu, rmud, c);
+    int sj = min(max(j, spec_zone), ny - 1 - spec_zone);
+    int si = min(max(i, spec_zone), nx - 1 - spec_zone);
+    size_t sc = (size_t)sj * nx + si;
+    Dl mu = ld(mupp, muppd, c);
+    Dl prev = dl((wreal)0, (wreal)0);
+    for (int k = 0; k <= nz; ++k) {
+        size_t f = (size_t)k * st + c;
+        Dl phn = sp_phi(ld(ph, phd, f), ld(rph, rphd, f), ld(php, phpd, f), mts, mo, c1f[k],
+                        c2f[k], dtau);
+        if (nl) {
+            ph[f] = phn.v;
+            w[f] = w[(size_t)k * st + sc];
+        }
+        phd[f] = phn.d;
+        wd[f] = wd[(size_t)k * st + sc];
+        if (k > 0) {
+            int h = k - 1;
+            size_t t = (size_t)h * st + c;
+            Dl chm = c1h[h] * mts + c2h[h];
+            Dl thr = ld(thp, thpd, t);
+            Dl cm = c1h[h] * mu;
+            Dl a = ld(alt, altd, t);
+            Dl s = a * cm + rdnw[h] * (phn - prev);
+            Dl alv = (dl((wreal)-1, (wreal)0) / chm) * s;
+            Dl q = (a * (ld(th, thd, t) - cm * thr)) / (chm * ((wreal)300 + thr));
+            Dl pv = ld(c2a, c2ad, t) * (q - alv);
+            if (nl) {
+                al[t] = alv.v;
+                p[t] = pv.v;
+            }
+            ald[t] = alv.d;
+            pd[t] = pv.d;
+        }
+        prev = phn;
+    }
+}
+
+// w'' adjoint of the zero-gradient copy, one thread per (level, interior
+// cell): the frame cells whose clamped source it is.  Runs before
+// sph_ad_col, which consumes the frame cells' adjoints.
+extern "C" __global__
+void sph_ad_w(wreal* __restrict__ wa, SP_GEOM)
+{
+    size_t st = (size_t)ny * nx;
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= (size_t)(nz + 1) * st) return;
+    int k = (int)(tid / st);
+    size_t c = tid - (size_t)k * st;
+    int j = (int)(c / nx), i = (int)(c - (size_t)j * nx);
+    if (sp_frame(j, i, ny, nx, spec_zone)) return;
+    int jlo = j == spec_zone ? 0 : j, jhi = j == ny - 1 - spec_zone ? ny - 1 : j;
+    int ilo = i == spec_zone ? 0 : i, ihi = i == nx - 1 - spec_zone ? nx - 1 : i;
+    if (jlo == jhi && ilo == ihi) return;
+    wreal s = (wreal)0;
+    for (int fj = jlo; fj <= jhi; ++fj)
+        for (int fi = ilo; fi <= ihi; ++fi)
+            if (sp_frame(fj, fi, ny, nx, spec_zone)) s += wa[(size_t)k * st + (size_t)fj * nx + fi];
+    wa[tid] += s;
+}
+
+extern "C" __global__
+void sph_ad_col(wreal* __restrict__ pha, wreal* __restrict__ wa, wreal* __restrict__ pa,
+                wreal* __restrict__ ala, wreal* __restrict__ rpha, wreal* __restrict__ phpa,
+                wreal* __restrict__ rmua, wreal* __restrict__ mutsa, wreal* __restrict__ tha,
+                wreal* __restrict__ muppa, wreal* __restrict__ thpa, wreal* __restrict__ alta,
+                wreal* __restrict__ c2aa, const wreal* __restrict__ ph,
+                const wreal* __restrict__ rph, const wreal* __restrict__ php,
+                const wreal* __restrict__ rmu, const wreal* __restrict__ muts,
+                const wreal* __restrict__ th, const wreal* __restrict__ mupp,
+                const wreal* __restrict__ thp, const wreal* __restrict__ alt,
+                const wreal* __restrict__ c2a, const wreal* __restrict__ rdnw,
+                const wreal* __restrict__ c1h, const wreal* __restrict__ c2h,
+                const wreal* __restrict__ c1f, const wreal* __restrict__ c2f, SP_GEOM)
+{
+    size_t st = (size_t)ny * nx;
+    size_t c = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= st) return;
+    int j = (int)(c / nx), i = (int)(c - (size_t)j * nx);
+    if (!sp_frame(j, i, ny, nx, spec_zone)) return;
+    wreal mts = muts[c];
+    wreal mo = mts - dtau * rmu[c];
+    wreal mu = mupp[c];
+    wreal amts = 0, amu = 0;
+    // calc_p_rho on the new ph'' (recomputed level by level).
+    wreal z = (wreal)0;
+    wreal phlo = sp_phi(dl(ph[c], z), dl(rph[c], z), dl(php[c], z), dl(mts, z), dl(mo, z),
+                        c1f[0], c2f[0], dtau).v;
+    for (int h = 0; h < nz; ++h) {
+        size_t t = (size_t)h * st + c, f = (size_t)(h + 1) * st + c;
+        wreal phhi = sp_phi(dl(ph[f], z), dl(rph[f], z), dl(php[f], z), dl(mts, z), dl(mo, z),
+                            c1f[h + 1], c2f[h + 1], dtau).v;
+        wreal chm = c1h[h] * mts + c2h[h];
+        wreal thr = thp[t];
+        wreal cm = c1h[h] * mu;
+        wreal s = alt[t] * cm + rdnw[h] * (phhi - phlo);
+        wreal inv = wdiv((wreal)-1, chm);
+        wreal alv = inv * s;
+        wreal nv = alt[t] * (th[t] - cm * thr);
+        wreal dv = chm * ((wreal)300 + thr);
+        wreal q = wdiv(nv, dv);
+        wreal ap = pa[t];
+        wreal aal = ala[t] - ap * c2a[t];
+        c2aa[t] += ap * (q - alv);
+        wreal aq = ap * c2a[t];
+        wreal anv = aq / dv;
+        wreal adv = -aq * q / dv;
+        wreal achm = adv * ((wreal)300 + thr);
+        wreal athr = adv * chm - anv * alt[t] * cm;
+        wreal acm = -anv * alt[t] * thr;
+        wreal aalt = anv * (th[t] - cm * thr);
+        tha[t] += anv * alt[t];
+        wreal ainv = aal * s;
+        wreal as = aal * inv;
+        achm += ainv * inv * inv;
+        aalt += as * cm;
+        acm += as * alt[t];
+        pha[f] += as * rdnw[h];
+        pha[t] -= as * rdnw[h];
+        amu += acm * c1h[h];
+        amts += achm * c1h[h];
+        thpa[t] += athr;
+        alta[t] += aalt;
+        pa[t] = 0;
+        ala[t] = 0;
+        phlo = phhi;
+    }
+    // spec_bdyupdate_ph, level by level; the zero-gradient w is consumed.
+    wreal amo = 0;
+    for (int k = 0; k <= nz; ++k) {
+        size_t f = (size_t)k * st + c;
+        wreal c1 = c1f[k], c2 = c2f[k];
+        wreal num = c1 * mo + c2, den = c1 * mts + c2;
+        wreal ratio = num / den;
+        wreal v0 = (ph[f] * num) / den;
+        wreal v2 = (dtau * rph[f]) / den;
+        wreal a = pha[f];
+        phpa[f] += a * (ratio - (wreal)1);
+        wreal aratio = a * php[f];
+        wreal aden = -a * v2 / den - a * v0 / den - aratio * ratio / den;
+        rpha[f] += dtau * (a / den);
+        wreal apn = a / den;
+        wreal anum = apn * ph[f] + aratio / den;
+        pha[f] = apn * num;
+        amo += anum * c1;
+        amts += aden * c1;
+        wa[f] = 0;
+    }
+    amts += amo;
+    rmua[c] += -dtau * amo;
+    mutsa[c] += amts;
+    muppa[c] += amu;
+}

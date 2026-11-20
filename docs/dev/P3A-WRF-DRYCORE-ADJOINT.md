@@ -444,9 +444,42 @@ Each step is one small PR, taken to merged before the next widens.
    - The domain must hold the relaxation frames (2 (relax_zone + 1) + 1
      cells across) and spec_zone must be at least 1: at spec_zone 0 the
      primal's stencil reads outside the row (as WRF's does). u and v rows
-     do not take the msft divide. Not covered yet: `spec_bdy_final`,
-     `spec_bdyupdate_ph`, `zero_grad_bdy` (item 7b), moist and scalar
+     do not take the msft divide. Not covered yet: moist and scalar
      rows, nested time-t sources, streamed tile seams.
+   - Item 7b, also in `lbc.py`:
+     - `lbf_tl`/`lbf_ad` are `spec_bdy_final` on one field, over woof's
+       strict `finalize_state_field` (GPUWM_WRF_EXACT: specified rows
+       only, coupled with the acoustic muts; face means of muts for u
+       and v, c1 mass + c2, msfu/msfv/msft) or `install_mu_boundary` for
+       mu. The active inputs are muts and the eight side tables; the
+       state is the field.
+     - `sph_tl`/`sph_ad` are `spec_bdyupdate_ph`, `zero_grad_bdy` on w
+       and the frame columns' `calc_p_rho`, over woof's strict
+       `advance_specified_phi_w`. The state is ph'', w'', p'' and al'';
+       the active inputs are rph, php, rmu, muts, th'', mu'', theta', alt
+       and c2a.
+     - The TL and the cell AD launch frame threads only. The AD is a
+       gather: muts per mass column (u and v faces counted per face) and
+       w'' per interior source column of the zero-gradient copy, so no
+       atomics.
+     - Checks: dot-product (1e-12 binary64, 1e-5 binary32) and FD tests
+       over 16 configurations, including the state inputs (every kind,
+       map factors, hybrid levels, spec_zone 1-3, one level, 3x3
+       columns). The float base state is the strict primal's words (0
+       differing, host and CUDA).
+     - WRFPLUS 4.7.1 oracle (`tools/wrfplus_oracle/lbc_final.F90`):
+       g_/a_SPEC_BDY_FINAL on 9 cases (u, v, w with map factors, theta,
+       phi, mu; theta, u and v at spec_zone 2) agree to 3e-16. g_spec_bdyupdate_ph,
+       g_zero_grad_bdy(w), g_calc_p_rho and their adjoints in reverse
+       agree to 1.4e-15 on 2 cases (spec_zone 1 and 2).
+     - WRFPLUS's versions are not hybrid and spec_bdy_final takes the
+       coupling mass as given, so the cases are not hybrid and the
+       fixture forms the u/v face masses. calc_p_rho covers the whole
+       domain in WRFPLUS, so p'' and al'' are compared on the frame, with
+       their seeds zero inside.
+     - Binary32 agrees to 2e-7, except php's adjoint at 2.2e-4. That
+       adjoint is the seed times mu_old/muts - 1, which WRF also forms by
+       subtraction. No WRFPLUS bugs found.
 8. Step and window driver (`woof/grad/wrfplus/model.py`):
    - per-step dot-product and Taylor tests;
    - TL vs nonlinear perturbation growth over 1-6 h on a 12 km dry
@@ -549,7 +582,9 @@ it idle (under 10% utilisation for 20 s before the run).
 | rhs_ph (slow_geopotential, fused or open) | #702 | 4.2x (4.1-4.4) | 1.2-1.3x | 13-15x |
 | coriolis + curvature (coriolis_curvature) | #706 | 3.4x | 2.0x | 13x |
 | w_damp (w_damp) | #708 | 1.6x | 1.7x | 7.1x |
-| relax_bdy_dry + spec_bdy_dry (state_relaxation_multi, 3 stages) | this PR | 2.5x (2.5-2.6) | 1.6x | 4.1x |
+| relax_bdy_dry + spec_bdy_dry (state_relaxation_multi, 3 stages) | #709 | 2.5x (2.5-2.6) | 1.6x | 4.1x |
+| spec_bdy_final (finalize_state_field x5 + install_mu_boundary) | item 7b | 3.7x | 0.41x | 11x |
+| spec_bdyupdate_ph + zero_grad_bdy + frame calc_p_rho (advance_specified_phi_w, 7 substeps) | item 7b | 3.5x | 2.0x | 12x |
 
 advance_uv's 3.7x in the projection is the midpoint of its range. The
 advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
@@ -627,6 +662,19 @@ stages 2-3, no w rows); at 200x200x49 the three launches take 0.37 ms,
 2.3% of the strict step, also taken out of "other woof kernels". Their
 ratios are over those launches, timed as CUDA graphs so host dispatch
 of the per-row TL/AD calls (18 rows, 4-7 kernels each) is not counted.
+
+The item 7b kernels run only on specified domains, and the profiled dry
+step is periodic. Their idle-card primals (2026-11-20, CUDA graphs) are
+therefore counted as time added to the 16 ms step rather than as a
+share of it:
+- spec_bdy_final: 0.105 ms per step (five finalize_state_field launches
+  over the whole grid, plus install_mu_boundary);
+- advance_specified_phi_w: 0.554 ms for 7 substeps. It launches one
+  thread per column, and only the frame's columns do work.
+
+Their TL launches frame threads only, so spec_bdy_final's TL32 is under
+1x. With them added, a specified-boundary step projects to 4.67-4.70x
+over 16.66 ms.
 
 The projection is the per-step adjoint cost over the forward step:
 1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
