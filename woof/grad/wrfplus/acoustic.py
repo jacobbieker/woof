@@ -105,10 +105,12 @@ def _dtype(arrays) -> np.dtype:
     return kinds.pop()
 
 
-def _check(geom, named, shapes=None) -> None:
+def _check(geom, named, shapes=None, min_nz: int = 3) -> None:
     """Shapes, contiguity and distinct buffers: the kernels index raw
     C-order memory and declare every pointer ``__restrict__``."""
-    if geom.nz < 3:
+    if geom.nz < 1:
+        raise ValueError("nz must be >= 1")
+    if geom.nz < min_nz:
         raise ValueError("advance_uv/advance_w need nz >= 3 (they read "
                          "u/v levels 0-2)")
     shapes = uv_shapes(geom) if shapes is None else shapes
@@ -515,3 +517,271 @@ def advance_mu_t_ad(adj_state: dict, traj: dict, adj: dict,
     _kernel("advance_mu_t", "advance_mu_t_ad_gather", dtype, defines)(
         blocks, (THREADS,),
         tr + aa + ps + (scratch_d, scratch_h) + g.args(dtype))
+
+
+#: small_step_init's outputs (woof small_step_init_uv + _column: WRF
+#: small_step_prep, then calc_p_rho at step 0), active inputs (u0/v0/w0/
+#: thp0/php0/mup0 the stage-start state, u/v/w/thp/php/mup the current
+#: one) and passive constants, in kernel order.
+SI_STATE = ("u_pp", "v_pp", "w_pp", "th_pp", "ph_pp", "mu_pp", "al_pp",
+            "p_pp", "p_pp_old")
+SI_ACTIVE = ("u0", "v0", "u", "v", "w0", "w", "thp0", "thp", "php0", "php",
+             "p", "alt", "mup0", "mup")
+SI_PASSIVE = ("mub2d", "c1h", "c2h", "c1f", "c2f", "rdnw", "msfu", "msfv",
+              "msft")
+
+#: small_step_finish's in/out state, active inputs (muts is WRF's
+#: grid%muts, the strict launcher's muts_wrf) and passive constants.
+SF_STATE = ("u", "v", "w", "thp", "php", "mup")
+SF_ACTIVE = ("u_pp", "v_pp", "w_pp", "th_pp", "ph_pp", "mu_pp", "muts",
+             "h_diabatic")
+SF_PASSIVE = ("mub2d", "c1h", "c2h", "c1f", "c2f", "msfu", "msfv", "msft")
+
+
+@dataclass(frozen=True)
+class SSGeometry:
+    """The strict small_step_init_*/finish_* scalars, as
+    woof/core/dycore.py passes them.  ``boundary_x``/``boundary_y`` clamp
+    the face masses at the edges (non-periodic).  The traj's ``msfv`` is
+    what the strict launcher passes: MSFV_INV to init and msfv to finish,
+    a multiplier in both."""
+    nz: int
+    ny: int
+    nx: int
+    has_msf: int = 0
+    boundary_x: int = 1
+    boundary_y: int = 1
+    rk_step: int = 1
+    remove_hdiab: int = 0
+    hdiab_dt: float = 0.0
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        return (i(self.nz), i(self.ny), i(self.nx), i(self.has_msf),
+                i(self.boundary_x), i(self.boundary_y), i(self.rk_step),
+                i(self.remove_hdiab), r(self.hdiab_dt))
+
+
+def ss_shapes(geom: SSGeometry) -> dict[str, tuple[int, ...]]:
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    mass, wlev, col = (nz, ny, nx), (nz + 1, ny, nx), (ny, nx)
+    us, vs = (nz, ny, nx + 1), (nz, ny + 1, nx)
+    return {"u_pp": us, "v_pp": vs, "w_pp": wlev, "th_pp": mass,
+            "ph_pp": wlev, "mu_pp": col, "al_pp": mass, "p_pp": mass,
+            "p_pp_old": mass, "u0": us, "v0": vs, "u": us, "v": vs,
+            "w0": wlev, "w": wlev, "thp0": mass, "thp": mass, "php0": wlev,
+            "php": wlev, "p": mass, "alt": mass, "mup0": col, "mup": col,
+            "muts": col, "h_diabatic": mass, "mub2d": col, "c1h": (nz,),
+            "c2h": (nz,), "c1f": (nz + 1,), "c2f": (nz + 1,),
+            "rdnw": (nz,), "msfu": (ny, nx + 1), "msfv": (ny + 1, nx),
+            "msft": col}
+
+
+def _ss_launch(geom, names, sh):
+    _check(geom, names, sh, min_nz=1)
+
+
+def _ss_nck(geom) -> int:
+    return -(-geom.nz // AD_KCHUNK)
+
+
+def _ss_scratch(geom, dtype):
+    """The chunked adjoints' scratch: per-chunk face sums (u faces x2, v
+    faces x2), column partials (x2) and the chunk-boundary ph'' adjoints.
+    Every slot read by the gather is written first."""
+    import cupy as cp
+    g, n = geom, _ss_nck(geom)
+    e = lambda *s: cp.empty(s, dtype=dtype)  # noqa: E731
+    return (e(n, g.ny, g.nx + 1), e(n, g.ny, g.nx + 1), e(n, g.ny + 1, g.nx),
+            e(n, g.ny + 1, g.nx), e(n, g.ny, g.nx), e(n, g.ny, g.nx),
+            e(n, g.ny, g.nx))
+
+
+_SS_DEFINES = (("SS_KCHUNK", AD_KCHUNK),)
+
+
+def small_step_init_tl(state: dict, pert_state: dict, traj: dict, pert: dict,
+                       geom: SSGeometry, *, nl: bool = True) -> None:
+    """woof's strict small_step_init_uv + small_step_init_column (WRFPLUS
+    g_small_step_prep, then g_calc_p_rho at step 0): write ``pert_state``
+    (and ``state`` when ``nl``), dicts of :data:`SI_STATE`; ``pert`` holds
+    the perturbations of :data:`SI_ACTIVE`."""
+    sh = ss_shapes(geom)
+    st = tuple(state[n] for n in SI_STATE)
+    sd = tuple(pert_state[n] for n in SI_STATE)
+    tr = tuple(traj[n] for n in SI_ACTIVE)
+    pe = tuple(pert[n] for n in SI_ACTIVE)
+    ps = tuple(traj[n] for n in SI_PASSIVE)
+    _ss_launch(geom, [("state", n, state[n]) for n in SI_STATE]
+               + [("pert", n, pert_state[n]) for n in SI_STATE]
+               + [("traj", n, traj[n]) for n in SI_ACTIVE + SI_PASSIVE]
+               + [("pert", n, pert[n]) for n in SI_ACTIVE], sh)
+    dtype = _dtype(st + sd + tr + pe + ps)
+    g = geom
+    args = st + sd + tr + pe + ps + (np.int32(bool(nl)),) + g.args(dtype)
+    _kernel("small_step", "small_step_init_uv_tl", dtype)(
+        _blocks(g.nz * (g.ny + 1) * (g.nx + 1)), (THREADS,), args)
+    _kernel("small_step", "small_step_init_column_tl", dtype)(
+        _blocks(g.ny * g.nx), (THREADS,), args)
+
+
+def small_step_init_ad(adj_state: dict, traj: dict, adj: dict,
+                       geom: SSGeometry) -> None:
+    """Adjoint of :func:`small_step_init_tl`: consume the :data:`SI_STATE`
+    adjoints and add those of :data:`SI_ACTIVE` into ``adj``."""
+    sh = ss_shapes(geom)
+    sa = tuple(adj_state[n] for n in SI_STATE)
+    tr = tuple(traj[n] for n in SI_ACTIVE)
+    aa = tuple(adj[n] for n in SI_ACTIVE)
+    ps = tuple(traj[n] for n in SI_PASSIVE)
+    _ss_launch(geom, [("adj", n, adj_state[n]) for n in SI_STATE]
+               + [("traj", n, traj[n]) for n in SI_ACTIVE + SI_PASSIVE]
+               + [("adj", n, adj[n]) for n in SI_ACTIVE], sh)
+    dtype = _dtype(sa + tr + aa + ps)
+    g = geom
+    scr = _ss_scratch(g, dtype)
+    faces, chunk = scr[:4], scr[4:]
+    n = _ss_nck(g)
+    k = lambda name: _kernel("small_step", name, dtype, _SS_DEFINES)  # noqa: E731
+    k("small_step_init_column_ad")(
+        _blocks(n * g.ny * g.nx), (THREADS,),
+        sa + tr + aa + chunk + ps + g.args(dtype))
+    k("small_step_init_uv_ad")(
+        _blocks(n * (g.ny + 1) * (g.nx + 1)), (THREADS,),
+        sa + tr + aa + faces + ps + g.args(dtype))
+    # ``pre`` (adj_state mu_pp, already consumed) is unused when init.
+    k("small_step_mass_gather")(
+        _blocks(g.ny * g.nx), (THREADS,),
+        (adj["mup"], adj["mup0"], adj_state["mu_pp"], adj["php0"], adj["php"]) + faces
+        + chunk + (np.int32(0),) + g.args(dtype))
+
+
+def small_step_finish_tl(state: dict, pert_state: dict, traj: dict,
+                         pert: dict, geom: SSGeometry, *,
+                         nl: bool = True) -> None:
+    """woof's strict small_step_finish_uv + small_step_finish_column
+    (WRFPLUS G_SMALL_STEP_FINISH, with muus/muvs from calc_mu_uv_1 of
+    muts): update ``pert_state`` (and ``state`` when ``nl``) in place,
+    dicts of :data:`SF_STATE`; ``pert`` holds those of :data:`SF_ACTIVE`."""
+    sh = ss_shapes(geom)
+    st = tuple(state[n] for n in SF_STATE)
+    sd = tuple(pert_state[n] for n in SF_STATE)
+    tr = tuple(traj[n] for n in SF_ACTIVE)
+    pe = tuple(pert[n] for n in SF_ACTIVE)
+    ps = tuple(traj[n] for n in SF_PASSIVE)
+    _ss_launch(geom, [("state", n, state[n]) for n in SF_STATE]
+               + [("pert", n, pert_state[n]) for n in SF_STATE]
+               + [("traj", n, traj[n]) for n in SF_ACTIVE + SF_PASSIVE]
+               + [("pert", n, pert[n]) for n in SF_ACTIVE], sh)
+    dtype = _dtype(st + sd + tr + pe + ps)
+    g = geom
+    args = st + sd + tr + pe + ps + (np.int32(bool(nl)),) + g.args(dtype)
+    # The face pass reads mup before the column pass updates it.
+    _kernel("small_step", "small_step_finish_uv_tl", dtype)(
+        _blocks(g.nz * (g.ny + 1) * (g.nx + 1)), (THREADS,), args)
+    _kernel("small_step", "small_step_finish_column_tl", dtype)(
+        _blocks(g.ny * g.nx), (THREADS,), args)
+
+
+def small_step_finish_ad(adj_state: dict, state: dict, traj: dict,
+                         adj: dict, geom: SSGeometry) -> None:
+    """Adjoint of :func:`small_step_finish_tl` about the pre-update
+    ``state``: map the :data:`SF_STATE` adjoints in place and add those of
+    :data:`SF_ACTIVE` into ``adj``."""
+    sh = ss_shapes(geom)
+    sa = tuple(adj_state[n] for n in SF_STATE)
+    sb = tuple(state[n] for n in SF_STATE)
+    tr = tuple(traj[n] for n in SF_ACTIVE)
+    aa = tuple(adj[n] for n in SF_ACTIVE)
+    ps = tuple(traj[n] for n in SF_PASSIVE)
+    _ss_launch(geom, [("adj", n, adj_state[n]) for n in SF_STATE]
+               + [("state", n, state[n]) for n in SF_STATE]
+               + [("traj", n, traj[n]) for n in SF_ACTIVE + SF_PASSIVE]
+               + [("adj", n, adj[n]) for n in SF_ACTIVE], sh)
+    dtype = _dtype(sa + sb + tr + aa + ps)
+    g = geom
+    scr = _ss_scratch(g, dtype)
+    faces, chunk = scr[:4], scr[4:]
+    n = _ss_nck(g)
+    k = lambda name: _kernel("small_step", name, dtype, _SS_DEFINES)  # noqa: E731
+    k("small_step_finish_column_ad")(
+        _blocks(n * g.ny * g.nx), (THREADS,),
+        sa + sb + tr + aa + chunk + ps + g.args(dtype))
+    k("small_step_finish_uv_ad")(
+        _blocks(n * (g.ny + 1) * (g.nx + 1)), (THREADS,),
+        sa + sb + tr + aa + faces + ps + g.args(dtype))
+    # mu_pp's adjoint takes mup's output adjoint before the gather adds
+    # the face-mass and column terms of the input mup; the ph slots
+    # (th_pp, ph_pp) are unused when finishing.
+    k("small_step_mass_gather")(
+        _blocks(g.ny * g.nx), (THREADS,),
+        (adj_state["mup"], adj["muts"], adj["mu_pp"], adj["th_pp"],
+         adj["ph_pp"]) + faces + chunk + (np.int32(1),) + g.args(dtype))
+
+
+#: advance_mu_t's names for the arrays advance_uv/advance_w call by the
+#: strict primal's state names (woof's acoustic_mu_pp_old/_th_pp_old
+#: scratch and state.p_pp_old).
+MT_ALIAS = {"mu_old": "mu_pp_old", "th_old": "th_pp_old",
+            "p_old": "p_pp_old"}
+
+
+def _mt_view(d: dict) -> dict:
+    return {n: d[MT_ALIAS.get(n, n)]
+            for n in MT_STATE + MT_ACTIVE + MT_PASSIVE
+            if MT_ALIAS.get(n, n) in d}
+
+
+def _substep_written(geoms) -> tuple:
+    return (("u_pp", "v_pp"),
+            tuple(MT_ALIAS.get(n, n) for n in MT_STATE),
+            W_STATE)
+
+
+def acoustic_substep_tl(state: dict, pert: dict, geoms: tuple,
+                        tape: list | None = None) -> None:
+    """One acoustic substep in woof's strict order (advance_uv, then
+    advance_mu_t, then advance_w with calc_p_rho), on dicts keyed by the
+    strict primal's names (advance_mu_t's mu_old/th_old/p_old are
+    mu_pp_old/th_pp_old/p_pp_old; ww_ref is the stage-start Omega).
+
+    ``state`` advances along the trajectory (each operator is linearised
+    about its own entry state) and ``pert`` maps to the substep's output
+    perturbation, both in place.  When ``tape`` is a list, each
+    operator's written state is appended before it runs, for
+    :func:`acoustic_substep_ad`.  ``geoms`` is (UVGeometry, MTGeometry,
+    WGeometry).
+    """
+    uvg, mtg, wg = geoms
+    written = _substep_written(geoms)
+    snap = (lambda k: tape.append({n: state[n].copy() for n in written[k]})) \
+        if tape is not None else (lambda k: None)
+    snap(0)
+    advance_uv_tl(state["u_pp"], state["v_pp"], pert["u_pp"], pert["v_pp"],
+                  state, pert, uvg, nl=True)
+    snap(1)
+    advance_mu_t_tl(_mt_view(state), _mt_view(pert), _mt_view(state),
+                    _mt_view(pert), mtg, nl=True)
+    snap(2)
+    advance_w_tl(state, pert, state, pert, wg, nl=True)
+
+
+def acoustic_substep_ad(adj: dict, state: dict, tape: list,
+                        geoms: tuple) -> dict:
+    """Adjoint of :func:`acoustic_substep_tl`: ``adj`` (every state and
+    active name, :func:`woof.grad.wrfplus.cases.substep_active`, muts
+    included even without a frame) maps from the output adjoint to the input adjoint in
+    place.  ``state`` is the base after the substep and ``tape`` the
+    three snapshots its TL appended (consumed from the end).  Returns
+    the base before the substep (views of ``state`` and the tape), the
+    ``state`` of the previous substep's adjoint."""
+    uvg, mtg, wg = geoms
+    entries, cur = [], dict(state)
+    for _ in range(3):
+        cur = {**cur, **tape.pop()}
+        entries.append(cur)
+    w_in, mt_in, uv_in = entries
+    advance_w_ad(adj, w_in, w_in, adj, wg)
+    advance_mu_t_ad(_mt_view(adj), _mt_view(mt_in), _mt_view(adj), mtg)
+    advance_uv_ad(adj["u_pp"], adj["v_pp"], uv_in, adj, uvg)
+    return uv_in
