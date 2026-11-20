@@ -513,8 +513,294 @@ def _qscat(t, ob, xb, o):
     return geo
 
 
+# --------------------------------------------------------------------------- gpspw
+def _gpspw_dpw(w, elv, xb):
+    """The station-height correction's pieces (``da_get_innov_vector_gpspw``):
+    ``(branch, model_terr, [(k, rho_k, q_k, dz_k)])`` with 0-based ``k``;
+    branch 1 is ``obs_terr <= model_terr`` (``dz`` is ``obs - model``)."""
+    obs_terr = elv
+    model_terr = float(_hcol(xb["terr"], *w))
+    if obs_terr <= model_terr:
+        q1 = float(_hcol(xb["q"][:, :, 0], *w))
+        rho1 = float(_hcol(xb["rho"][:, :, 0], *w))
+        return 1, model_terr, [(0, rho1, q1, obs_terr - model_terr)]
+    kte = xb["q"].shape[2]
+    z = [float(_hcol(xb["hf"][:, :, 0], *w))]
+    terms = []
+    for k in range(kte):
+        if z[k] >= obs_terr:
+            break
+        z.append(float(_hcol(xb["hf"][:, :, k + 1], *w)))
+        qk = float(_hcol(xb["q"][:, :, k], *w))
+        rk = float(_hcol(xb["rho"][:, :, k], *w))
+        dz = (z[k + 1] - z[k]) if z[k + 1] <= obs_terr else (obs_terr - z[k])
+        terms.append((k, rk, qk, dz))
+    return 2, model_terr, terms
+
+
+def _gpspw(t, ob, xb, o):
+    t.extra["zk"] = np.full(t.nlocal, MISSING_R)
+    geo = Geometry.of(t)
+    F = t.fields["tpw"]
+    W = _w(t.info)
+    model_tpw = _hcol(xb["tpw"], *W)
+    F.inv[:] = 0.0
+    for n in range(t.nlocal):
+        if ob["tpw"][n] > MISSING_R and F.qc[n] >= 0:
+            w = tuple(a[n] for a in W)
+            branch, _, terms = _gpspw_dpw(w, float(t.info["elv"][n]), xb)
+            if branch == 1:
+                _, rho1, q1, dz = terms[0]
+                dpw = rho1 * q1 * dz
+            else:
+                dpw = 0.0
+                for _, rk, qk, dz in terms:
+                    dpw = dpw + rk * qk * dz
+            F.inv[n] = ob["tpw"][n] - model_tpw[n] + 0.1 * dpw
+    if o.check_max_iv:
+        _max_error_qc(F, F.qc >= 0, o.max_error_pw)
+    return geo
+
+
+# --------------------------------------------------------------------------- gpsref
+QCFLAG_PCNT_BELOW, QCFLAG_PCNT_MIDDLE, QCFLAG_PCNT_ABOVE = -31, -32, -33
+QCFLAG_DNDZ, QCFLAG_DNDZ2, QCFLAG_CUTOFF = -34, -35, -36
+
+
+def _gpsref(t, ob, xb, o, lm):
+    off = t.offsets
+    h = t.coords["h"]
+    F = t.fields
+    ref, pf = F["ref"], F["p"]
+    zk = np.full(len(ref), MISSING_R)
+    cols = _columns(t, xb, ("h", "p"))
+    kte = xb["p"].shape[2]
+    ob = dict(ob)
+    ob["p"] = ob["p"].copy()
+    for n in range(t.nlocal):
+        v_h, v_p = cols["h"][n], cols["p"][n]
+        for lv in range(off[n], off[n + 1]):
+            if h[lv] > 0.0:
+                zk[lv] = to_zk(h[lv], v_h, False)
+            if zk[lv] < 0.0:
+                ref.qc[lv] = MISSING_DATA
+        for lv in range(off[n], off[n + 1]):
+            kk = int(zk[lv])
+            if kk >= 1 and kk + 1 <= kte:
+                dz = zk[lv] - float(kk)
+                dzm = 1.0 - dz
+                pf.inv[lv] = v_p[kk - 1] * dzm + v_p[kk] * dz
+                ob["p"][lv] = pf.inv[lv]
+                pf.qc[lv] = -5
+    t.extra["zk"] = zk
+    geo = Geometry.of(t)
+    model_ref = np.array([lm.exp(x) for x in interp_lin_3d(xb["reflog"], geo)])
+    ref.inv[:] = 0.0
+    ok = (ob["ref"] > MISSING_R) & (ref.qc != MISSING_DATA)
+    ref.inv[ok] = ob["ref"][ok] - model_ref[ok]
+    _qc_gpsref(t, ob["ref"], xb, geo, o, lm)
+    return geo
+
+
+def _qc_gpsref(t, obref, xb, geo, o, lm):
+    """``da_qc_gpsref`` (first outer loop)."""
+    off = t.offsets
+    lev = t.info["levels"]
+    h = t.coords["h"]
+    f = t.fields["ref"]
+    model_ref = np.where(f.qc != MISSING_DATA, obref - f.inv, 0.0)
+    if o.check_max_iv:
+        thr = f.error * o.max_error_ref
+        f.qc[(f.qc >= 0) & (np.abs(f.inv) > thr)] = FAILS_ERROR_MAX
+    if o.gpsref_qc_dndz_opt == 1 or o.gpsref_qc_dndz2_opt == 1:
+        for n in range(t.nlocal):
+            if lev[n] <= 2:
+                continue
+            s = off[n]
+            top = 0
+            for k in range(lev[n]):
+                if model_ref[s + k] > 0.0:
+                    top = k + 1
+            if top <= 2:
+                continue
+            hh, ob_, mo = h[s:s + top], obref[s:s + top], model_ref[s:s + top]
+            zd = np.empty(top)
+            zd[0] = hh[1] - hh[0]
+            zd[top - 1] = hh[top - 1] - hh[top - 2]
+            zd[1:top - 1] = hh[2:top] - hh[0:top - 2]
+            zd = zd * 0.001
+
+            def deriv(a):
+                d = np.empty(top)
+                d[0] = (a[1] - a[0]) / zd[0]
+                d[top - 1] = (a[top - 1] - a[top - 2]) / zd[top - 1]
+                d[1:top - 1] = (a[2:top] - a[0:top - 2]) / zd[1:top - 1]
+                return d
+
+            dno, dnm = deriv(ob_), deriv(mo)
+            qc = f.qc[s:s + top]
+            if o.gpsref_qc_dndz_opt == 1:
+                bad = (qc != MISSING_DATA) & ((dno < o.gpsref_qc_dndz_thresh) | (dnm < o.gpsref_qc_dndz_thresh))
+                qc[bad] = QCFLAG_DNDZ
+            if o.gpsref_qc_dndz2_opt == 1:
+                d2o, d2m = deriv(dno), deriv(dnm)
+                th = o.gpsref_qc_dndz2_thresh
+                bad = (qc != MISSING_DATA) & ((np.abs(d2o) > th) | (np.abs(d2m) > th))
+                qc[bad] = QCFLAG_DNDZ2
+    if o.gpsref_qc_gsi_opt == 1:
+        model_t = interp_lin_3d(xb["t"], geo)
+        cutoff = stddev = 0.0  # Fortran locals carry over between levels
+        for n in range(t.nlocal):
+            g_lat = lm.cos(RADIAN * float(t.info["lat"][n]))
+            for lv in range(off[n], off[n + 1]):
+                g = h[lv]
+                mt = model_t[lv]
+                gsi_t = 0.5 if mt <= 240.0 else 0.001 * mt * mt - 0.455 * mt + 52.075
+                if 0.0 <= g < 4000.0:
+                    cutoff, stddev = 1.0, 1.0 + 2.5 * g_lat
+                elif 4000.0 <= g < 6000.0:
+                    cutoff = 3.0
+                    stddev = (6000.0 - g) / 2000.0 * (1.0 + 2.5 * g_lat) + (g - 4000.0) / 2000.0 * gsi_t
+                elif 6000.0 <= g < 9000.0:
+                    cutoff, stddev = 3.0, gsi_t
+                elif 9000.0 <= g < 11000.0:
+                    cutoff = 3.0
+                    stddev = (11000.0 - g) / 2000.0 * gsi_t + (g - 9000.0) / 2000.0 * (0.25 + 0.5 * g_lat)
+                elif 11000.0 <= g < 30000.0:
+                    cutoff, stddev = 3.0, 0.25 + 0.5 * g_lat
+                elif g >= 30000.0:
+                    cutoff = 0.0
+                if f.qc[lv] != MISSING_DATA and abs(f.inv[lv]) >= stddev * cutoff:
+                    f.qc[lv] = QCFLAG_CUTOFF
+    if o.gpsref_qc_pcnt_opt == 1:
+        h1, h2 = o.gpsref_qc_pcnt_h1, o.gpsref_qc_pcnt_h2
+        # transcribed as WRFDA has them: pcnt2 is the "above" value, used in
+        # the middle band, and pcnt3 the "middle" value, used above h2
+        pcnt1, pcnt2, pcnt3 = o.gpsref_qc_pcnt_below, o.gpsref_qc_pcnt_above, o.gpsref_qc_pcnt_middle
+        with np.errstate(divide="ignore", invalid="ignore"):
+            percnt = 2.0 * np.abs(f.inv / (obref + model_ref))
+        on = f.qc != MISSING_DATA
+        f.qc[on & (h < h1) & (percnt > pcnt1)] = QCFLAG_PCNT_BELOW
+        f.qc[on & (h > h2) & (percnt > pcnt3)] = QCFLAG_PCNT_ABOVE
+        f.qc[on & (h >= h1) & (h <= h2) & (percnt > pcnt2)] = QCFLAG_PCNT_MIDDLE
+        names = [str(x) for x in t.info["name"]]
+        if lev.max(initial=0) > 1:
+            below = []
+            for n in range(t.nlocal):
+                hb = 0.0
+                for lv in range(off[n], off[n + 1]):
+                    if f.qc[lv] == QCFLAG_PCNT_BELOW:
+                        hb = max(h[lv], hb)
+                if hb != 0.0:
+                    below.append((names[n], hb))
+            for n in range(t.nlocal):
+                for nm, hb in below:
+                    if names[n] == nm:
+                        for lv in range(off[n], off[n + 1]):
+                            if h[lv] < hb and f.qc[lv] != MISSING_DATA:
+                                f.qc[lv] = QCFLAG_PCNT_BELOW
+                        break
+        else:
+            ids = [str(x) for x in t.info["id"]]
+            for na in range(t.nlocal):
+                if f.qc[off[na]] == QCFLAG_PCNT_BELOW:
+                    for nb in range(t.nlocal):
+                        if (ids[nb] == ids[na] and names[nb] == names[na]
+                                and f.qc[off[nb]] != MISSING_DATA and h[off[nb]] <= h[off[na]]):
+                            f.qc[off[nb]] = QCFLAG_PCNT_BELOW
+
+
+# --------------------------------------------------------------------------- satem
+THK = 0.5 * GAS_CONSTANT / GRAVITY
+
+
+def tv_profile(xb, w):
+    """``da_tv_profile``: ``pre_ma``, ``tv_ma`` indexed ``kts-1..kte+1`` (0..kte+1)."""
+    kte = xb["p"].shape[2]
+    pre_ma = np.full(kte + 2, np.nan)
+    tv_ma = np.full(kte + 2, np.nan)
+    i0, j0 = w[0], w[1]
+    tv = xb["t"][i0:i0 + 2, j0:j0 + 2] * (1.0 + 0.61 * xb["q"][i0:i0 + 2, j0:j0 + 2])
+    ww = (0, 0, *w[2:])
+    pre_ma[1:kte + 1] = _hcol(xb["p"][i0:i0 + 2, j0:j0 + 2], *ww)
+    tv_ma[1:kte + 1] = _hcol(tv, *ww)
+    return pre_ma, tv_ma
+
+
+def find_layer(pre, pre_ma, tv_ma, lm):
+    """``da_find_layer`` (Fortran indices; mutates ``pre_ma``'s ghost cells).
+    Returns ``(layer, tv, k0)``: ``k0`` is the bracketing level used."""
+    ks, ke = 1, len(pre_ma) - 2
+    if pre >= pre_ma[ks]:
+        a, b, layer = ks, ks + 1, ks
+        alpha = lm.log(pre_ma[a] / pre) / lm.log(pre_ma[a] / pre_ma[b])
+        tv = tv_ma[a] * (1.0 - alpha) + tv_ma[b] * alpha
+        pre_ma[ks - 1] = pre
+        return layer, tv, a
+    if pre <= pre_ma[ke]:
+        a, b, layer = ke - 1, ke, ke + 1
+        alpha = lm.log(pre_ma[a] / pre) / lm.log(pre_ma[a] / pre_ma[b])
+        tv = tv_ma[a] * (1.0 - alpha) + tv_ma[b] * alpha
+        pre_ma[ke + 1] = pre
+        return layer, tv, a
+    for k in range(ks, ke):
+        if pre >= pre_ma[k + 1] and pre < pre_ma[k]:
+            alpha = lm.log(pre_ma[k] / pre) / lm.log(pre_ma[k] / pre_ma[k + 1])
+            return k + 1, tv_ma[k] * (1.0 - alpha) + tv_ma[k + 1] * alpha, k
+    raise ValueError(f"da_find_layer: no layer for {pre!r}")
+
+
+def thickness(pre_ma, tv_ma, tv1, tv2, layer1, layer2, pre1, pre2, lm):
+    """``da_thickness``."""
+    thk = THK * (tv1 * lm.log(pre_ma[layer1 - 1] / pre1) + tv2 * lm.log(pre2 / pre_ma[layer2]))
+    p_tmp = {layer1: pre1}
+    p_tmp[layer2 - 1] = pre2
+    for k in range(layer2, layer1):
+        p_tmp[k] = pre_ma[k]
+    for k in range(layer2, layer1):
+        thk = thk + THK * tv_ma[k] * lm.log(p_tmp[k - 1] / p_tmp[k + 1])
+    return thk
+
+
+def _satem(t, ob, xb, o, lm):
+    t.extra["zk"] = np.full(len(t.fields["thickness"]), MISSING_R)
+    geo = Geometry.of(t)
+    off = t.offsets
+    F = t.fields["thickness"]
+    p = t.coords["p"]
+    ref_p = t.extra["ref_p"]
+    W = _w(t.info)
+    ptop = float(xb["ptop"])
+    for n in range(t.nlocal):
+        if off[n + 1] - off[n] < 1:
+            continue
+        pre_ma, tv_ma = tv_profile(xb, tuple(a[n] for a in W))
+        layer2, tv2, _ = find_layer(ref_p[n], pre_ma, tv_ma, lm)
+        pres2 = ref_p[n]
+        for lv in range(off[n], off[n + 1]):
+            F.inv[lv] = 0.0
+            if p[lv] >= ptop:
+                layer1, tv1, _ = find_layer(p[lv], pre_ma, tv_ma, lm)
+                thk = thickness(pre_ma, tv_ma, tv1, tv2, layer1, layer2, p[lv], pres2, lm)
+                if abs(ob["thickness"][lv] - MISSING_R) > 1.0 and F.qc[lv] != MISSING_DATA:
+                    F.inv[lv] = ob["thickness"][lv] - thk
+                pres2, layer2, tv2 = p[lv], layer1, tv1
+            else:
+                F.qc[lv] = ABOVE_MODEL_LID
+    if o.check_max_iv:
+        _max_error_qc(F, F.qc >= 0, o.max_error_thickness)
+    lmask = xb["landmask"]
+    for n in range(t.nlocal):
+        i0, j0 = W[0][n], W[1][n]
+        if (lmask[i0, j0] != 0.0 or lmask[i0 + 1, j0] != 0.0 or lmask[i0, j0 + 1] != 0.0
+                or lmask[i0 + 1, j0 + 1] != 0.0):
+            F.inv[off[n]] = 0.0
+    return geo
+
+
 # --------------------------------------------------------------------------- driver
-IMPLEMENTED = SURFACE_TYPES + ("qscat", "sound", "airep", "pilot", "profiler", "geoamv", "polaramv")
+IMPLEMENTED = SURFACE_TYPES + ("qscat", "sound", "airep", "pilot", "profiler", "geoamv", "polaramv",
+                               "gpspw", "gpsref", "satem")
 _UPPER = {"sound": "sound", "airep": "sound", "pilot": "pilot", "profiler": "pilot",
           "geoamv": "amv", "polaramv": "amv"}
 
@@ -550,8 +836,14 @@ def innovations(obs: WrfdaObs, xb: dict, *, libm: str = "correctly-rounded",
             geo = _upper(t, ob, xb, o, kind=_UPPER[name])
         elif name == "qscat":
             geo = _qscat(t, ob, xb, o)
+        elif name == "gpspw":
+            geo = _gpspw(t, ob, xb, o)
+        elif name == "gpsref":
+            geo = _gpsref(t, ob, xb, o, lm)
+        elif name == "satem":
+            geo = _satem(t, ob, xb, o, lm)
         else:
-            raise NotImplementedError(f"{name}: not ported yet")
+            raise NotImplementedError(f"{name}: not ported")
         t.extra["geometry"] = geo
     return iv
 

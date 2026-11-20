@@ -1805,12 +1805,16 @@ PNG it writes carries an `experimental` stamp.
   `da_msl2geo1`, the transfer part of `da_fill_obs_structures`,
   `da_store_obs_grid_info`), `woof/da/var/innov_wrfda.py`
   (`da_get_innov_vector_{synop,metar,ships,buoy,sonde_sfc,sound,airep,pilot,profiler,geoamv,polaramv,qscat}`,
-  `da_to_zk`, `da_convert_zk`, `da_interp_lin_3d`, `da_interp_lin_2d`,
+  `da_get_innov_vector_{gpspw,gpsref,satem}`, `da_qc_gpsref`,
+  `da_tv_profile`, `da_find_layer`, `da_thickness`, `da_to_zk`, `da_convert_zk`, `da_interp_lin_3d`, `da_interp_lin_2d`,
   `da_obs_sfc_correction`, `da_mo_correction`, `da_intpsfc_prs`,
   `da_intpsfc_tem`, `da_check_max_iv_*`, `da_max_error_qc`,
   `da_residual`, `da_jo_and_grady_*`, `da_jo_*_uvtq`, `da_jo_and_grady`'s
   sum), `woof/da/var/obsop_wrfda.py` (`da_transform_xtoy_*` and `_adj` for
-  those types, `da_interp_lin_3d_adj`, `da_interp_lin_2d_adj`,
+  those types and for gpspw, gpsref and satem, `da_transform_xtotpw(_adj)`,
+  `da_transform_xtogpsref_lin`/`_adj`, `da_tv_profile_tl`/`_adj`,
+  `da_find_layer_tl`/`_adj`, `da_thickness_tl`/`_adj`,
+  `da_interp_lin_3d_adj`, `da_interp_lin_2d_adj`,
   `da_transform_xtoy_adj`'s type order), and `tools/wrfda_oracle/woof_dump.inc` (debug
   dumps hooked into a copy of the WRFDA tree, never the pinned tree).
   `woof/da/var/crmath.py` is woof's own: correctly rounded `sin`, `cos`,

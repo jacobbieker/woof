@@ -8,8 +8,11 @@ O5: per type and field the qc flags equal the oracle's everywhere (so the
 accepted sets are equal) and ``inv`` agrees to 1e-10 relative. The words
 are not all identical: the observation positions and rotated winds carry the
 libm ulps documented in ``test_var_obs_wrfda.py`` (crmath against glibc), and
-the surface correction's ``**``/``exp`` add their own. With the oracle's
-own ``dx``/``dy`` injected, the upper-air types agree word for word.
+the surface correction's ``**``/``exp`` add their own, and so do gpsref's
+``exp`` of the interpolated ``log N`` and satem's thickness ``log`` (at
+most 2 ulps per call, giving 2.7e-11 and 5.1e-12 relative in ``inv``).
+With the oracle's own ``dx``/``dy`` injected, the upper-air types and
+gpspw agree word for word.
 """
 
 from __future__ import annotations
@@ -169,7 +172,7 @@ def test_o5_qc_and_innovations_against_the_oracle(name):
         assert rel.max(initial=0.0) <= INV_RTOL, (name, v, rel.max())
 
 
-@pytest.mark.parametrize("name", ["sound", "pilot", "profiler", "airep", "geoamv", "buoy"])
+@pytest.mark.parametrize("name", ["sound", "pilot", "profiler", "airep", "geoamv", "buoy", "gpspw"])
 def test_o5_word_for_word_with_the_oracles_positions(name):
     """With the oracle's own ``dx``/``dy`` the innovation arithmetic itself is
     WRFDA's word for word (apart from the rotated winds' libm ulps)."""
@@ -207,3 +210,12 @@ def test_jo_at_the_background_per_type_against_the_oracles_innovations():
     for name in ours:
         if name in iw.IMPLEMENTED:
             assert ours[name]["_"] == pytest.approx(ref[name]["_"], rel=1e-11), name
+
+
+#: WRFDA 4.7.1's tutorial ``J_0`` (``Initial cost function``, Jo at x_b).
+WRFDA_J0 = 29710.45778742540
+
+
+def test_total_jo_at_the_background_is_wrfdas_initial_cost():
+    obs, xb, dump, iv = _tutorial()
+    assert iw.jo_total(iw.jo(iv)) == pytest.approx(WRFDA_J0, rel=1e-13)

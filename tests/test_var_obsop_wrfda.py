@@ -156,3 +156,128 @@ def test_o3_tutorial_per_type_and_combined():
     res = _o3(st, xb["u"].shape, 2026)
     for n, r in res.items():
         assert r <= O3_RTOL, (n, r)
+
+
+# --------------------------------------------------------------------------- nonlinear types
+def _nonlinear_obs():
+    """gpspw (both station-height branches), gpsref and satem on the synthetic grid."""
+    xb = syn.background()
+    terr = iw._hcol(xb["terr"], 1, 1, 0.5, 0.5, 0.5, 0.5)
+    hcol = iw._hcol(xb["h"], 2, 3, 0.4, 0.3, 0.6, 0.7)
+    pcol = iw._hcol(xb["p"], 3, 2, 0.2, 0.8, 0.8, 0.2)
+    gpsref = [dict(i=3, j=4, dx=0.4, dy=0.3, h=[hcol[k] + 15.0 for k in (2, 9, 20, 33)],
+                   fields={"ref": [(0.0, 0, 5.0)] * 4})]
+    types = {
+        "gpspw": syn.obs_type("gpspw", [dict(i=2, j=2, dx=0.5, dy=0.5, elv=terr - 25.0,
+                                             fields={"tpw": [(0.0, 0, 0.2)]}),
+                                        dict(i=5, j=3, dx=0.3, dy=0.6, elv=terr + 900.0,
+                                             fields={"tpw": [(0.0, 0, 0.2)]})]),
+        "gpsref": syn.obs_type("gpsref", gpsref),
+        "satem": syn.obs_type("satem", [dict(i=4, j=3, dx=0.2, dy=0.8,
+                                             p=[0.5 * (pcol[k] + pcol[k + 1]) for k in (4, 12, 25)],
+                                             fields={"thickness": [(0.0, 0, 10.0)] * 3})]),
+    }
+    types["satem"].extra["ref_p"] = np.array([pcol[0] + 300.0])
+    return xb, iw.innovations(syn.obs(types), xb, options=iw.Options(check_max_iv=False))
+
+
+def test_o3_synthetic_nonlinear_types():
+    xb, iv = _nonlinear_obs()
+    st = oo.ObsStencil(iv, xb)
+    assert set(st.types) == {"gpspw", "gpsref", "satem"}
+    for n, r in _o3(st, xb["u"].shape, 21).items():
+        assert r <= O3_RTOL, (n, r)
+
+
+def _taylor(h, tl, x0, dx):
+    """``|H(x+e dx) - H(x) - e H'dx| / |e H'dx|`` falls like ``e``."""
+    lin = tl(dx)
+    r = []
+    for e in (1e-3, 1e-4, 1e-5):
+        x1 = {k: v + e * dx[k] for k, v in x0.items()}
+        r.append(np.linalg.norm(h(x1) - h(x0) - e * lin) / np.linalg.norm(e * lin))
+    assert r[2] < 2e-4 and r[1] < 2e-3 and r[2] < 0.2 * r[0], r
+
+
+def _dx(xb, keys, seed, scale):
+    rng = np.random.default_rng(seed)
+    return {k: scale[k] * rng.standard_normal(xb[k].shape) for k in keys}
+
+
+def _x_of(st, xb, dx):
+    x = {k: np.zeros_like(xb[k]) for k in ("u", "v", "t", "q", "p", "rho")}
+    x["psfc"] = np.zeros_like(xb["psfc"])
+    x.update(dx)
+    return x
+
+
+def test_taylor_gpspw():
+    """H = interp(0.1 sum dz q rho) + 0.1 dpw: the TL's sign of the station-height
+    term (da_transform_xtoy_gpspw adds it, the innovation subtracts it)."""
+    xb, iv = _nonlinear_obs()
+    st = oo.ObsStencil(iv, xb)
+    W = list(zip(*iw._w(iv.types["gpspw"].info)))
+    elv = iv.types["gpspw"].info["elv"]
+
+    dhf = np.diff(xb["hf"], axis=2)
+
+    def h(x):
+        b = dict(xb, q=x["q"], rho=x["rho"])
+        pw = np.zeros(xb["psfc"].shape)
+        for k in range(dhf.shape[2]):
+            pw = pw + dhf[:, :, k] * (b["q"][:, :, k] * b["rho"][:, :, k])
+        tpw = 0.1 * pw
+        out = []
+        for w, e in zip(W, elv):
+            branch, _, terms = iw._gpspw_dpw(w, float(e), b)
+            dpw = 0.0
+            for _, rk, qk, dz in terms:
+                dpw = rk * qk * dz if branch == 1 else dpw + rk * qk * dz
+            out.append(iw._hcol(tpw, *w) + 0.1 * dpw)
+        return np.array(out)
+
+    dx = _dx(xb, ("q", "rho"), 4, {"q": 1e-3, "rho": 1e-2})
+    _taylor(h, lambda d: st.tl(_x_of(st, xb, d))["gpspw"]["tpw"], {"q": xb["q"], "rho": xb["rho"]}, dx)
+
+
+def test_taylor_gpsref():
+    """H = interp_lin_3d(N(p_b, t, q)); xa%p does not enter WRFDA's ref TL
+    (the innovation interpolates log N, the TL N itself)."""
+    xb, iv = _nonlinear_obs()
+    st = oo.ObsStencil(iv, xb)
+    geo = iv.types["gpsref"].extra["geometry"]
+
+    def h(x):
+        t, q = x["t"], x["q"]
+        n = 0.776 * xb["p"] / t * (1.0 + oo.COEFF * q / (t * (0.622 + 0.378 * q)))
+        return iw.interp_lin_3d(n, geo)
+
+    dx = _dx(xb, ("t", "q"), 6, {"t": 1.0, "q": 1e-3})
+    _taylor(h, lambda d: st.tl(_x_of(st, xb, d))["gpsref"]["ref"], {"t": xb["t"], "q": xb["q"]}, dx)
+
+
+def test_taylor_satem_first_level():
+    """H = da_thickness at each report's first level, along t, q, p. Above it
+    WRFDA's TL keeps TGL_tv2 at ref_p's value while tv2 moves up a level, so
+    H' is the derivative only on the first level (the adjoint is still H'^T)."""
+    xb, iv = _nonlinear_obs()
+    st = oo.ObsStencil(iv, xb)
+    t = iv.types["satem"]
+    lm = iw._libm("correctly-rounded")
+    W = list(zip(*iw._w(t.info)))
+    first = t.offsets[:-1]
+
+    def h(x):
+        b = dict(xb, t=x["t"], q=x["q"], p=x["p"])
+        out = []
+        for n, w in enumerate(W):
+            pre_ma, tv_ma = iw.tv_profile(b, w)
+            l2, tv2, _ = iw.find_layer(t.extra["ref_p"][n], pre_ma, tv_ma, lm)
+            p1 = t.coords["p"][first[n]]
+            l1, tv1, _ = iw.find_layer(p1, pre_ma, tv_ma, lm)
+            out.append(iw.thickness(pre_ma, tv_ma, tv1, tv2, l1, l2, p1, t.extra["ref_p"][n], lm))
+        return np.array(out)
+
+    dx = _dx(xb, ("t", "q", "p"), 8, {"t": 1.0, "q": 1e-3, "p": 50.0})
+    _taylor(h, lambda d: st.tl(_x_of(st, xb, d))["satem"]["thickness"][first],
+            {k: xb[k] for k in ("t", "q", "p")}, dx)
