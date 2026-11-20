@@ -152,13 +152,81 @@ Docs for developers: section 11.12 of the plan lists every `bkr/geo` store
 and its coverage, including Himawari, GK-2A, Meteosat and MTG, which come
 next.
 
+## Clear-sky brightness temperatures from CRTM (opt-in)
+
+`woof.rtm` simulates clear-sky infrared brightness temperatures, and their
+Jacobians, with JCSDA CRTM v2.4 or later. CRTM is public domain (CC0). woof
+ships no CRTM, no compiled library and no coefficients. You build the
+library yourself from a CRTM checkout:
+
+```
+git clone --branch v2.4.1-jedi.2 https://github.com/JCSDA/crtm CRTM_SRC
+pixi exec -s netcdf-fortran -s gfortran -- python -m woof.rtm.crtm_build --source CRTM_SRC --out CRTM_LIB
+```
+
+JCSDA tags the 2.4.1 release `v2.4.1-jedi.N`; woof is tested with
+`v2.4.1-jedi.2`. The builder refuses a tree that is not the CC0 CRTM v2.4+. That includes
+the CRTM 2.3.0 copy inside WRF, which carries GPL files. The builder writes
+`libwoof_crtm` and a `build-receipt.json` with the version, the licence
+hash and the library hash.
+
+The coefficients come from CRTM's own coefficient package. Put each
+sensor's `<sensor>.SpcCoeff.bin` and `<sensor>.TauCoeff.bin` (ODPS) and the
+infrared emissivity files in one directory. Then set `WOOF_CRTM_LIB` (the
+library or its directory) and `WOOF_CRTM_COEFFS` (that directory).
+
+- `woof.rtm.profiles.profiles_from_wrf_state` turns woof's prognostic
+  columns into CRTM layers: `T`, `P`/`PB`, `QVAPOR`, `PSFC`, `P_TOP`,
+  `TSK`, `U10`/`V10`, `LANDMASK`, `XICE`, `SNOWC` and `HGT`. woof carries
+  no ozone, so ozone is an approximate US Standard Atmosphere profile
+  unless you pass one in.
+- `profiles_from_pressure_levels` does the same from an isobaric analysis,
+  such as GFS or ERA5.
+- `woof.rtm.crtm.ClearSkyOperator(sensors).simulate(...)` returns the
+  brightness temperatures. With `jacobian=True` it also returns dBT/dT,
+  dBT/dq, dBT/dO3 and dBT/dTskin.
+- Each scene's platform names its CRTM sensor: `abi_g16`, `abi_g17`,
+  `abi_g18`, `ahi_himawari8`, `ahi_himawari9`, `seviri_m08` to `seviri_m11`.
+  GOES-19 uses `abi_g16`, because the `abi_g19` file in 2.4.1 is broken.
+- CRTM keeps module state, so only one operator can be open per process.
+- Columns viewed at more than 65 degrees sensor zenith are refused.
+
+### Measured first-guess departures
+
+This is one case, run on 2025-03-01 at 18 UTC. The background is the GFS
+0.25° analysis, put on 80 terrain-following layers with GFS ozone. The
+observations are thinned to about 0.3° and limited to sensor zenith below
+65°. Clear sky is decided by two tests: the 11.2 µm brightness temperature
+is uniform over the 3x3 neighbourhood, and its O-B is within 3 K. The
+second test cuts the tails of the 11.2 µm statistics, which is why the
+other bands are the fairer read.
+
+Values are O-B mean / standard deviation in K:
+
+| source and sector | sensor | clear | 6.2 µm | 6.9 µm | 7.3 µm | 11.2 µm |
+|---|---|---|---|---|---|---|
+| native ABI (`bkr/geo`), GOES-East, 105-80 W 25-45 N | `abi_g16` | 1035 | -0.02 / 0.94 | 0.77 / 0.90 | -0.26 / 0.75 | 0.24 / 1.29 |
+| SatWeave, GOES-East, same box | `abi_g16` | 588 | -0.19 / 0.83 | 0.68 / 0.81 | -0.35 / 0.69 | 0.60 / 1.37 |
+| SatWeave, GOES-West, 150-125 W 20-45 N | `abi_g18` | 843 | 0.16 / 1.27 | 0.57 / 1.15 | -0.29 / 0.79 | -0.46 / 0.64 |
+| SatWeave, Himawari, 120-160 E 10 S-30 N | `ahi_himawari9` | 2970 | 0.03 / 0.91 | 0.89 / 0.84 | -0.13 / 0.70 | -0.23 / 0.78 |
+| SatWeave, Meteosat 0°, 10 W-25 E 20-50 N | `seviri_m11` | 2111 | 0.41 / 0.80 | - | 0.09 / 0.97 | 0.25 / 1.40 |
+| SatWeave, Meteosat IODC, 40-70 E 0-30 N | `seviri_m09` | 4023 | 0.39 / 1.05 | - | 0.27 / 0.76 | 0.01 / 1.28 |
+
+Over the same box at the same time, SatWeave minus native ABI averages
+0.00 K in every band, with a standard deviation of 0.2 to 0.6 K in the
+water-vapour bands. So the two GOES-East rows differ in which pixels pass
+the screen, not in calibration.
+
+The 6.9 µm band is 0.6 to 0.9 K warm on both ABI and AHI. That is a
+background or operator bias, the kind variational bias correction (VarBC)
+removes.
+
 ## Not yet
 
 These come next, in the plan's order:
 
 - Himawari AHI, GK-2A AMI and Meteosat SEVIRI/FCI from the other
   `bkr/geo` stores;
-- the opt-in CRTM forward operator;
 - the LETKF radiance adapter.
 
 Until then these scenes do not reach an analysis.
