@@ -4768,6 +4768,10 @@
     "sha256": "50448499a6460327fe36d7f7230374db3d81a3a085a751c8312402024eabf7cf"
    },
    {
+    "file": "woof/grad/wrfplus/kernels/calc_coef_w.cu",
+    "sha256": "ce6c0131cd77e23c8719708216a6c2d33b77271f5347b114ccc49f07314fe46b"
+   },
+   {
     "file": "woof/hex/chem_transport.cu",
     "sha256": "15c9587672645d5cc887280064a8d7722c72a566c17da8e4c4d5c340dd12f076"
    },
@@ -5587,7 +5591,7 @@
    },
    {
     "file": "woof/grad/wrfplus/acoustic.py",
-    "sha256": "d462a72b615ff5bfa9775e8c3ba71d0bacafbeb0c5f2e554efd5a43967d8c912"
+    "sha256": "fb708f3722a64112e820855918db1083a26bdf96e9a114b2281a475377f516d6"
    },
    {
     "file": "woof/hex/cuda_acoustic.py",

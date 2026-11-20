@@ -1050,7 +1050,9 @@ training data and a residual-target trainer.
 
 **Gate G3:** per-kernel and per-step dot-product tests pass in binary64;
 TL against nonlinear perturbation growth over 1-6 h matches as WRFPLUS's
-checks do; adjoint step at most 4x the forward step; WRFPLUS oracle
+checks do; adjoint step at most about 5x the forward step (relaxed from
+4x by the user's decision of 2026-11-20, after advance_uv and advance_w
+measured about 3.5-3.7x each in binary32); WRFPLUS oracle
 agreement per kernel. A no at G3 (adjoint too slow, or TL invalid beyond
 an hour at the target resolution) ends the plan at P2 plus P0's
 sensitivities.

@@ -320,3 +320,77 @@ def w_shapes(geom: WGeometry) -> dict[str, tuple[int, ...]]:
         "fnp": (nz + 1,), "c1h": (nz,), "c2h": (nz,), "c1f": (nz + 1,),
         "c2f": (nz + 1,), "mub2d": col, "cqw": wlev,
     }
+
+
+#: calc_coef_w's outputs (WRF small_step_prep's c2a and calc_coef_w's
+#: factors, as woof's calc_coefs fuses them), active inputs and passive
+#: column constants, in kernel order.
+CW_STATE = ("c2a", "a", "alpha", "gam")
+CW_ACTIVE = ("p", "alt", "mup", "cqw")
+CW_PASSIVE = ("rdn", "rdnw", "c1h", "c2h", "c1f", "c2f", "mub2d")
+
+
+@dataclass(frozen=True)
+class CWGeometry:
+    """calc_coefs's scalars, as woof/core/acoustic.py passes them."""
+    nz: int
+    ny: int
+    nx: int
+    dtau: float
+    epssm: float = 0.1
+    moist_cq: int = 0
+    top_lid: int = 0
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        return (i(self.nz), i(self.ny), i(self.nx), i(self.moist_cq),
+                i(self.top_lid), r(self.dtau), r(self.epssm))
+
+
+def cw_shapes(geom: CWGeometry) -> dict[str, tuple[int, ...]]:
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    mass, wlev, col = (nz, ny, nx), (nz + 1, ny, nx), (ny, nx)
+    return {"c2a": mass, "a": wlev, "alpha": wlev, "gam": wlev,
+            "p": mass, "alt": mass, "mup": col, "cqw": wlev,
+            "rdn": (nz,), "rdnw": (nz,), "c1h": (nz,), "c2h": (nz,),
+            "c1f": (nz + 1,), "c2f": (nz + 1,), "mub2d": col}
+
+
+def calc_coef_w_tl(state: dict, pert_state: dict, traj: dict, pert: dict,
+                   geom: CWGeometry, *, nl: bool = True) -> None:
+    """woof calc_coefs' TL (c2a, then WRFPLUS g_calc_coef_w): write
+    ``pert_state`` (and ``state`` when ``nl``), dicts of :data:`CW_STATE`;
+    ``pert`` holds the perturbations of :data:`CW_ACTIVE`."""
+    sh = cw_shapes(geom)
+    st = tuple(state[n] for n in CW_STATE)
+    sd = tuple(pert_state[n] for n in CW_STATE)
+    tr = tuple(traj[n] for n in CW_ACTIVE)
+    pe = tuple(pert[n] for n in CW_ACTIVE)
+    ps = tuple(traj[n] for n in CW_PASSIVE)
+    _check(geom, [("state", n, state[n]) for n in CW_STATE]
+           + [("pert", n, pert_state[n]) for n in CW_STATE]
+           + [("traj", n, traj[n]) for n in CW_ACTIVE + CW_PASSIVE]
+           + [("pert", n, pert[n]) for n in CW_ACTIVE], sh)
+    dtype = _dtype(st + sd + tr + pe + ps)
+    _kernel("calc_coef_w", "calc_coef_w_tl", dtype, (("WV_LEV", geom.nz + 1),))(
+        _blocks(geom.ny * geom.nx), (THREADS,),
+        st + sd + tr + pe + ps + (np.int32(bool(nl)),) + geom.args(dtype))
+
+
+def calc_coef_w_ad(adj_state: dict, traj: dict, adj: dict,
+                   geom: CWGeometry) -> None:
+    """Adjoint of :func:`calc_coef_w_tl`: consume the :data:`CW_STATE`
+    adjoints of the written entries and add those of :data:`CW_ACTIVE`
+    into ``adj``."""
+    sh = cw_shapes(geom)
+    sa = tuple(adj_state[n] for n in CW_STATE)
+    tr = tuple(traj[n] for n in CW_ACTIVE)
+    aa = tuple(adj[n] for n in CW_ACTIVE)
+    ps = tuple(traj[n] for n in CW_PASSIVE)
+    _check(geom, [("adj", n, adj_state[n]) for n in CW_STATE]
+           + [("traj", n, traj[n]) for n in CW_ACTIVE + CW_PASSIVE]
+           + [("adj", n, adj[n]) for n in CW_ACTIVE], sh)
+    dtype = _dtype(sa + tr + aa + ps)
+    _kernel("calc_coef_w", "calc_coef_w_ad", dtype, (("WV_LEV", geom.nz + 1),))(
+        _blocks(geom.ny * geom.nx), (THREADS,),
+        sa + tr + aa + ps + geom.args(dtype))

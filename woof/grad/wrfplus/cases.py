@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from .acoustic import (UV_ACTIVE, W_ACTIVE, W_STATE, UVGeometry, WGeometry,
+from .acoustic import (CW_ACTIVE, CW_STATE, UV_ACTIVE, W_ACTIVE, W_STATE,
+                       CWGeometry, UVGeometry, WGeometry, cw_shapes,
                        uv_shapes, w_shapes)
 
 # (centre, spread) per field, roughly a mid-latitude 1-3 km grid.
@@ -152,3 +153,41 @@ def w_perturbation(geom: WGeometry, seed: int, dtype=np.float64) -> dict:
     return {n: np.ascontiguousarray(
         _W_SCALES.get(n, (0.0, 1.0))[1] * rng.standard_normal(shapes[n]),
         dtype=dtype) for n in names}
+
+
+# calc_coef_w: full pressure and inverse density of a column.
+_CW_SCALES = {
+    "c2a": (1.4e5, 1e3), "a": (-0.1, 0.02), "alpha": (0.8, 0.05),
+    "gam": (-0.1, 0.02), "p": (6.0e4, 2e3), "alt": (1.2, 0.1),
+    "mup": (0.0, 200.0), "cqw": (1.0, 0.01), "mub2d": (9.0e4, 2e3),
+}
+
+
+def cw_geometry(nz=7, ny=8, nx=9, **overrides) -> CWGeometry:
+    base = dict(nz=nz, ny=ny, nx=nx, dtau=3.0, epssm=0.1)
+    base.update(overrides)
+    return CWGeometry(**base)
+
+
+def cw_trajectory(geom: CWGeometry, seed: int, dtype=np.float64, *,
+                  hybrid: bool = False) -> dict:
+    """Host trajectory of calc_coefs (and the outputs' prior words)."""
+    rng = np.random.default_rng(seed)
+    shapes = cw_shapes(geom)
+    out = {}
+    for name, (c, s) in _CW_SCALES.items():
+        out[name] = c + s * rng.standard_normal(shapes[name])
+    w = w_trajectory(WGeometry(nz=geom.nz, ny=geom.ny, nx=geom.nx, rdx=1.0,
+                               rdy=1.0, dtau=geom.dtau), seed, hybrid=hybrid)
+    for name in ("rdn", "rdnw", "c1h", "c2h", "c1f", "c2f"):
+        out[name] = w[name]
+    return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in out.items()}
+
+
+def cw_perturbation(geom: CWGeometry, seed: int, dtype=np.float64) -> dict:
+    """Scaled perturbations of :data:`CW_STATE` and :data:`CW_ACTIVE`."""
+    rng = np.random.default_rng(seed)
+    shapes = cw_shapes(geom)
+    return {n: np.ascontiguousarray(
+        _CW_SCALES[n][1] * rng.standard_normal(shapes[n]), dtype=dtype)
+        for n in CW_STATE + CW_ACTIVE}
