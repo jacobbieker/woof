@@ -89,11 +89,15 @@ module mpas_pool_routines
   type field1DReal
     real(kind=RKIND), dimension(:), pointer :: array => null()
     integer, dimension(1) :: dimSizes = 0
+    ! .false. for a field whose package is off (the E3SM ocean's coupler
+    ! import reads it)
+    logical :: isActive = .true.
   end type field1DReal
 
   type field2DReal
     real(kind=RKIND), dimension(:,:), pointer :: array => null()
     integer, dimension(2) :: dimSizes = 0
+    logical :: isActive = .true.
   end type field2DReal
 
   type field3DReal
@@ -636,6 +640,7 @@ contains
     else if (.not. associated(p % e(i) % f1) .and. p % e(i) % absent) then
       ! a field whose package is off: MPAS's field with no array
       allocate(p % e(i) % f1)
+      p % e(i) % f1 % isActive = .false.
     end if
     f => p % e(i) % f1
   end subroutine get_field_1d
@@ -665,6 +670,7 @@ contains
     else if (.not. associated(p % e(i) % f2) .and. p % e(i) % absent) then
       ! a field whose package is off: MPAS's field with no array
       allocate(p % e(i) % f2)
+      p % e(i) % f2 % isActive = .false.
     end if
     f => p % e(i) % f2
   end subroutine get_field_2d
@@ -876,6 +882,7 @@ module mpas_derived_types
   type domain_type
     type(block_type), pointer :: blocklist => null()
     type(MPAS_pool_type), pointer :: configs => null()
+    type(MPAS_pool_type), pointer :: packages => null()
     type(MPAS_Clock_type), pointer :: clock => null()
     type(dm_info), pointer :: dminfo => null()
   end type domain_type
