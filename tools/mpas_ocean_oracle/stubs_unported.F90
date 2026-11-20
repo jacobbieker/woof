@@ -1,68 +1,14 @@
 ! Stand-ins for the MPAS-Ocean modules mpas_ocn_tendency.F USEs that no
-! oracle here compiles for real: land-ice fluxes, the high-frequency
-! thickness filter, tracer restoring, decay, ideal age and TTD, the
-! ecosystem tracer groups (with stand-ins for their tracer indices), vertical mixing, and the variable (ohlmann00)
-! short-wave absorption.
+! oracle here compiles for real: the high-frequency thickness filter, tracer
+! restoring, decay, ideal age and TTD, the ecosystem tracer groups (with
+! stand-ins for their tracer indices), vertical mixing, and the variable
+! (ohlmann00) short-wave absorption.  The land-ice fluxes' stand-in is
+! stubs_land_ice.F90's.
 !
-! The land-ice flux routines return at once when their switch is off
-! (config_land_ice_flux_mode neither 'standalone' nor 'coupled'), as the
-! real ones do, and the
-! stand-ins do the same: they read the switch by name and stop, naming the
-! routine, when it is on.  Every other routine stops by name.  The dummy
+! Every routine stops by name.  The dummy
 ! declarations are copied from the v8.4.2 sources so that mpas_ocn_tendency.F
 ! and mpas_ocn_tracer_short_wave_absorption.F compile against them
 ! unmodified.  Nothing here carries arithmetic.
-
-module ocn_surface_land_ice_fluxes
-  use mpas_kind_types
-  use mpas_pool_routines
-  use ocn_constants
-  implicit none
-  private
-  public :: ocn_surface_land_ice_fluxes_vel, ocn_surface_land_ice_fluxes_thick, ocn_surface_land_ice_fluxes_tracers
-
-contains
-
-  ! landIceFluxesOn as ocn_surface_land_ice_fluxes_init sets it
-  subroutine stop_if_on(name)
-    character(len=*), intent(in) :: name
-    character(len=StrKIND), pointer :: config_land_ice_flux_mode
-    call mpas_pool_get_config(ocnConfigs, 'config_land_ice_flux_mode', config_land_ice_flux_mode)
-    if (trim(config_land_ice_flux_mode) == 'standalone' .or. trim(config_land_ice_flux_mode) == 'coupled') then
-      print *, 'oracle stub: ', name, ' is not compiled here'
-      stop 8
-    end if
-  end subroutine stop_if_on
-
-  subroutine ocn_surface_land_ice_fluxes_vel(meshPool, diagnosticsPool, surfaceStress, surfaceStressMagnitude, err)
-    type (mpas_pool_type), intent(in) :: meshPool
-    type (mpas_pool_type), intent(in) :: diagnosticsPool
-    real (kind=RKIND), dimension(:), intent(inout) :: surfaceStress, surfaceStressMagnitude
-    integer, intent(out) :: err
-    err = 0
-    call stop_if_on('ocn_surface_land_ice_fluxes_vel')
-  end subroutine ocn_surface_land_ice_fluxes_vel
-
-  subroutine ocn_surface_land_ice_fluxes_thick(meshPool, forcingPool, surfaceThicknessFlux, err)
-    type (mpas_pool_type), intent(in) :: meshPool
-    type (mpas_pool_type), intent(inout) :: forcingPool
-    real (kind=RKIND), dimension(:), intent(inout) :: surfaceThicknessFlux
-    integer, intent(out) :: err
-    err = 0
-    call stop_if_on('ocn_surface_land_ice_fluxes_thick')
-  end subroutine ocn_surface_land_ice_fluxes_thick
-
-  subroutine ocn_surface_land_ice_fluxes_tracers(meshPool, groupName, forcingPool, tracersSurfaceFlux, err)
-    type (mpas_pool_type), intent(in) :: meshPool
-    character (len=*) :: groupName
-    type (mpas_pool_type), intent(inout) :: forcingPool
-    real (kind=RKIND), dimension(:,:), intent(inout) :: tracersSurfaceFlux
-    integer, intent(out) :: err
-    err = 0
-    call stop_if_on('ocn_surface_land_ice_fluxes_tracers')
-  end subroutine ocn_surface_land_ice_fluxes_tracers
-
-end module ocn_surface_land_ice_fluxes
 
 module ocn_high_freq_thickness_hmix_del2
   use mpas_kind_types

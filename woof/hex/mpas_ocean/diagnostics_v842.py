@@ -18,7 +18,9 @@ for one block, in the Fortran's order and over each loop's own halo extent
 7. the Brunt-Vaisala frequency and the Richardson number;
 8. the surface values, KPP's surface-layer averages when
    ``config_use_cvmix_kpp`` is on, the attenuation coefficients, the land-ice
-   mask ('pressure_only'), ``pressureAdjustedSSH`` and ``gradSSH``.
+   mask (any land-ice mode), the land-ice flux input fields ('standalone',
+   'coupled'; :func:`~woof.hex.mpas_ocean.land_ice_v842.input_fields`),
+   ``pressureAdjustedSSH`` and ``gradSSH``.
 
 The kernels (``diagnostics_v842.cu``) are held word for word to the v8.4.2
 routines, compiled verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND 4
@@ -45,8 +47,9 @@ nCells+1)`` is C-order ``(nCells+1, nVertLevels)``. The dimension entries
 (``nCellsArray`` ...) are host integers. A forcing field whose package is off
 is ``None``.
 
-Refused by name: the land-ice flux modes that compute fluxes ('standalone',
-'coupled') and any mode v8.4.2 does not allocate the land-ice fields for.
+Refused by name: a land-ice mode v8.4.2 does not allocate the land-ice
+fields for, and what :func:`~woof.hex.mpas_ocean.land_ice_v842.check_config`
+refuses (the Holland and Jenkins formulation).
 """
 from __future__ import annotations
 
@@ -57,16 +60,16 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import eos_v842
+from . import eos_v842, land_ice_v842
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
 
 SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_diagnostics.F:90-870,1279-1308,1541-1830",
     "src/core_ocean/shared/mpas_ocn_diagnostics_routines.F:67-142",
-) + eos_v842.SOURCE_FILES
+) + eos_v842.SOURCE_FILES + land_ice_v842.SOURCE_FILES
 MODULE_OPTIONS = COMPILE_OPTIONS
 GRAVITY = 9.80616
-LAND_ICE_MODES = ("off", "pressure_only")
+LAND_ICE_MODES = land_ice_v842.MODES
 _BLOCK = 128
 
 
@@ -102,13 +105,7 @@ def _launch(precision: str, name: str, n: int, args: tuple) -> None:
 
 def check_config(configs: dict) -> None:
     """Refuse, by name, what this port does not carry."""
-    mode = configs.get("config_land_ice_flux_mode", "off")
-    if mode not in LAND_ICE_MODES:
-        raise ConfigurationRefusal(
-            knob="config_land_ice_flux_mode", value=mode,
-            reason="the land-ice fluxes ('standalone', 'coupled') are not ported, and v8.4.2 allocates no land-ice "
-                   "fields for another mode",
-            declaration="config_land_ice_flux_mode = 'off' | 'pressure_only'")
+    land_ice_v842.check_config(configs)
     eos_v842.eos_type(configs)
     pgrad = configs.get("config_pressure_gradient_type", "pressure_and_zmid")
     if pgrad not in ("pressure_and_zmid", "MontgomeryPotential", "MontgomeryPotential_and_density",
@@ -220,7 +217,7 @@ def diagnostic_solve(*, dt: float, mesh: dict, state: dict, tracers: dict, diagn
                                        **eos_args)
 
     # the Montgomery potential, or pressure and the layer heights
-    with_land_ice = configs.get("config_land_ice_flux_mode", "off") == "pressure_only"
+    with_land_ice = configs.get("config_land_ice_flux_mode", "off") != "off"
     with_frazil = bool(configs.get("config_use_frazil_ice_formation", False))
     if pgrad == "MontgomeryPotential":
         _launch(precision, "ocn_diag_montgomery_v842", n_cells, (
@@ -257,6 +254,7 @@ def diagnostic_solve(*, dt: float, mesh: dict, state: dict, tracers: dict, diagn
     if with_land_ice:
         _launch(precision, "ocn_diag_land_ice_mask_v842", int(m["nCells"]), (
             f["landIceFraction"], f["landIceMask"], i32(m["nCells"])))
+        land_ice_v842.input_fields(mesh=m, state=state, tracers=tracers, diagnostics=d, forcing=f, configs=configs)
     _launch(precision, "ocn_diag_pressure_adjusted_ssh_v842", cells[1], (
         d["pressureAdjustedSSH"], state["ssh"], f["seaIcePressure"], f["landIceDraft"] if with_land_ice
         else f["seaIcePressure"], i32(cells[1]), i32(with_land_ice), real(real(GRAVITY) * rho_sw)))

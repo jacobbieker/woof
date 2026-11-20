@@ -7,8 +7,9 @@
 ! oracle_stream.F90's layout.  mpas_ocn_tendency.F is compiled verbatim
 ! against the real tracer modules (advection, mixing, surface flux,
 ! short-wave absorption, non-local flux), bulk forcing, diagnostics and
-! equation of state; stubs_unported.F90 stands in for the rest (land-ice
-! fluxes and frazil return when switched off).  The driver makes the
+! equation of state, the land-ice fluxes and frazil (their switches are off:
+! the driver does not initialise them); stubs_unported.F90 stands in for the
+! rest.  The driver makes the
 ! _init calls ocn_forward_mode_init makes for these, then the call:
 !
 !   ocn_constants_init, ocn_surface_bulk_forcing_init, ocn_tracer_advection_init,

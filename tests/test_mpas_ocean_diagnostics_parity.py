@@ -107,8 +107,9 @@ def test_unported_options_are_refused_by_name():
     from woof.hex.mpas_ocean import diagnostics_v842 as dg
     base = dict(oo.BASE_CONFIG)
     dg.check_config(base)
-    for knob, value in (("config_land_ice_flux_mode", "standalone"), ("config_land_ice_flux_mode", "coupled"),
-                        ("config_land_ice_flux_mode", "data"), ("config_eos_type", "wright"),
+    for mode in ("standalone", "coupled"):  # ported (land_ice_v842)
+        dg.check_config(dict(base, config_land_ice_flux_mode=mode))
+    for knob, value in (("config_land_ice_flux_mode", "data"), ("config_eos_type", "wright"),
                         ("config_pressure_gradient_type", "Jacobian_POM")):
         with pytest.raises(ConfigurationRefusal) as exc:
             dg.check_config(dict(base, **{knob: value}))
