@@ -326,6 +326,30 @@ Each step is one small PR, taken to merged before the next widens.
      WRFPLUS to 6.5e-6 to 1.6e-5 on host and CUDA. Removing each level's
      mean phb brings that under 2e-6. The Metal oracle limit is 1e-4 for
      those keys, as for the pressure gradient's mu' adjoint.
+   - `coriolis` and `curvature` are done in the same module (`cc_tl`,
+     `cc_ad`). They cover woof's strict `coriolis_curvature`
+     (GPUWM_WRF_EXACT_C_BIGSTEP: coriolis, then curvature, each with its
+     own add) on periodic, open and specified axes, with a rotated grid
+     (sina/cosa), map factors and hybrid levels. The active inputs are
+     ru, rv, u, v, w and the total column mass mut, from which the primal
+     forms rw = (c1f mut + c2f) w / msft.
+   - The AD writes each face's adjoints of its local averages to scratch
+     (rv4, rw4, vxgm and the own wind on u faces; the same on v faces; the
+     four half->full averages on w levels). A vxgm gather then sums the
+     mass-point vxgm adjoints. Gathers for u and ru, v and rv, w (which
+     keeps the rw adjoint) and the column mass collect the rest, one
+     writer per word.
+   - Checks: dot-product test about 2e-15 (binary64) and 6e-8
+     (binary32) and FD for 7 configurations. The float base state is the
+     strict primal's words (0 differing, host and CUDA). WRFPLUS 4.7.1
+     G_/A_CORIOLIS then G_/A_CURVATURE (`tools/wrfplus_oracle/coriolis.F90`)
+     agree to about 5e-16 on 5 cases, hybrid ones included: WRFPLUS takes
+     the coupled rw, which the fixture forms from w and mut with its
+     tangent and adjoint. A periodic axis's end face repeats face 0, which
+     WRF reads through its halo, so the two faces' adjoints are compared
+     as a sum. Binary32 agrees to 2.3e-6 or better.
+   - Not covered: the polar / map_proj 6 branch of curvature (tan(lat)),
+     which woof's primal does not port either.
 6. Advection `advect_u/v/w/scalar` (non-PD, h orders 3-6, v orders 2-6). This is the
    largest group; once the pattern is set, the mechanical ports go to
    Sonnet sub-agents.
@@ -460,7 +484,8 @@ it idle (under 10% utilisation for 20 s before the run).
 | advect_scalar/u/v/w (flux_div_{scalar,u,v,w}) | #700 | 3.9x (3.3-4.5) | 1.5-1.8x | 19-27x |
 | horizontal_pressure_gradient (slow_pgf) | #701 | 4.0x (3.9-4.1) | 1.9x | 14-15x |
 | pg_buoy_w (slow_buoyancy) | #701 | 1.3x | 1.9x | 2.1x |
-| rhs_ph (slow_geopotential, fused or open) | this PR | 4.2x (4.1-4.4) | 1.2-1.3x | 13-15x |
+| rhs_ph (slow_geopotential, fused or open) | #702 | 4.2x (4.1-4.4) | 1.2-1.3x | 13-15x |
+| coriolis + curvature (coriolis_curvature) | this PR | 3.4x | 2.0x | 13x |
 
 advance_uv's 3.7x in the projection is the midpoint of its range. The
 advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
@@ -528,24 +553,27 @@ other 2.3% is slow_geopotential); slow_buoyancy sits in "other woof
 kernels". slow_geopotential's idle-card primal is 0.20-0.24 ms (fused
 for specified and periodic axes, the open kernel for open ones); its
 row above is over the kernel the strict path dispatches.
+coriolis_curvature runs once per RK stage on rotational grids. Its
+idle-card primal (0.20 ms) gives 3.8% of the strict step for three
+calls, taken out of "other woof kernels".
 
 The projection is the per-step adjoint cost over the forward step:
 1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
-far (91.1% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
+far (94.9% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
 set_w_surface's 0.03%, flux_div's 14.4%, slow_pgf's 2.9%,
-slow_geopotential's 2.3% and slow_buoyancy's 0.7%), Σ share x AD32 =
-3.43, on top of the forward recompute's 1. The rest is projected at a
-range of ratios:
+slow_geopotential's 2.3%, coriolis_curvature's 3.8% and slow_buoyancy's
+0.7%), Σ share x AD32 = 3.56, on top of the forward recompute's 1. The
+rest is projected at a range of ratios:
 
-| ratio for the unmeasured 8.9% | projection |
+| ratio for the unmeasured 5.1% | projection |
 |---|---|
-| 2.2x (memory-traffic floor) | 4.6x |
+| 2.2x (memory-traffic floor) | 4.7x |
 | 3.0x | 4.7x |
-| 3.8x (the measured share-weighted mean) | 4.8x |
+| 3.75x (the measured share-weighted mean) | 4.7x |
 
-The 5x limit holds while the rest averages at most about 6.4x. This is a
+The 5x limit holds while the rest averages at most about 8.7x. This is a
 projection from kernel GPU time, not a measured step ratio: launch gaps
-are not counted, most ratios come from a shared card, and 8.9% of the
+are not counted, most ratios come from a shared card, and 5.1% of the
 step is not yet ported. calc_coefs and small_step are each about 4.8x;
 at 2.3% and 8.2% of the step they add about 0.11 and 0.39. Each later kernel PR replaces a
 projected share with a measured one.

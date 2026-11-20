@@ -1,13 +1,15 @@
 """Big-step tendency TL/AD (P3a item 5): WRF horizontal_pressure_gradient,
-pg_buoy_w and rhs_ph on woof's strict slow_pgf, slow_buoyancy and
-slow_geopotential (docs/dev/P3A-WRF-DRYCORE-ADJOINT.md section 5, item 5).
+pg_buoy_w, rhs_ph, coriolis and curvature on woof's strict slow_pgf,
+slow_buoyancy, slow_geopotential and coriolis_curvature
+(docs/dev/P3A-WRF-DRYCORE-ADJOINT.md section 5, item 5).
 
 Same conventions as :mod:`woof.grad.wrfplus.acoustic`: dicts of arrays by
 name, ``*_tl(state, pert_state, traj, pert, geom, nl=True)`` updates the
 perturbation (and the base state when ``nl``), ``*_ad`` adds into the
 inputs' adjoints.  The pressure gradient and buoyancy add into the
 momentum tendencies, so the tendencies' adjoints pass through unchanged;
-rhs_ph adds too but overwrites the top w level, whose adjoint it zeroes.
+rhs_ph adds too but overwrites the top w level, whose adjoint it zeroes;
+coriolis/curvature add into all three momentum tendencies.
 
 ``p`` is the perturbation pressure (the strict diagnosis's p'), ``php``
 the w-level perturbation geopotential and ``mup`` the perturbation

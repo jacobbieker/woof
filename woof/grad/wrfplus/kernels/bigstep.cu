@@ -10,9 +10,12 @@
 //                    add_vertical = 1), which for h_sca_adv_order 5 on
 //                    periodic or specified axes gives the words of the
 //                    fused slow_geopotential; 3-D base state.
+//   coriolis + curvature  woof coriolis_curvature (the
+//                    GPUWM_WRF_EXACT_C_BIGSTEP path), map_proj != 6.
 //
 // The oracle is WRFPLUS 4.7.1 G_/A_HORIZONTAL_PRESSURE_GRADIENT,
-// g_/a_pg_buoy_w and g_/a_rhs_ph; see docs/dev/P3A-WRF-DRYCORE-ADJOINT.md.
+// g_/a_pg_buoy_w, g_/a_rhs_ph and G_/A_CORIOLIS + G_/A_CURVATURE; see
+// docs/dev/P3A-WRF-DRYCORE-ADJOINT.md.
 //
 // wreal is binary64 unless the unit is built with -DWRFPLUS_REAL=float.
 // The TL kernels are the strict primal statements on a value/tangent pair
