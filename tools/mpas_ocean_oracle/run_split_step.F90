@@ -25,6 +25,8 @@ program run_split_step
   use ocn_tendency
   use ocn_forcing
   use ocn_surface_bulk_forcing
+  use ocn_surface_land_ice_fluxes
+  use ocn_frazil_forcing
   use ocn_thick_hadv
   use ocn_thick_vadv
   use ocn_thick_surface_flux
@@ -75,6 +77,8 @@ program run_split_step
   call ocn_tendency_init(err)
   call ocn_forcing_init(err)
   call ocn_surface_bulk_forcing_init(err)
+  call ocn_surface_land_ice_fluxes_init(err)
+  call ocn_frazil_forcing_init(err)
   call ocn_thick_hadv_init(err)
   call ocn_thick_vadv_init(err)
   call ocn_thick_surface_flux_init(err)

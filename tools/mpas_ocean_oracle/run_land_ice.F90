@@ -11,6 +11,7 @@
 ! their order:
 !
 !   ocn_surface_land_ice_fluxes_init(err)
+!   (the four flux calls only when config_land_ice_flux_mode is 'standalone' or 'coupled')
 !   ocn_surface_land_ice_fluxes_build_arrays(mesh, diagnostics, forcing, scratch, state, dt, err)
 !   ocn_surface_land_ice_fluxes_thick(mesh, forcing, forcing % surfaceThicknessFlux, err)
 !   ocn_surface_land_ice_fluxes_vel(mesh, diagnostics, forcing % surfaceStress,
@@ -39,6 +40,7 @@ program run_land_ice
   real(kind=RKIND), dimension(:), pointer :: surfaceThicknessFlux, surfaceStress, surfaceStressMagnitude
   real(kind=RKIND), dimension(:,:), pointer :: tracersSurfaceFlux
   character(len=1024) :: inPath, outPath
+  character(len=StrKIND), pointer :: mode
 
   call get_command_argument(1, inPath)
   call get_command_argument(2, outPath)
@@ -54,19 +56,25 @@ program run_land_ice
   if (err /= 0) stop 13
   call ocn_surface_land_ice_fluxes_init(err)
   if (err /= 0) stop 13
-  call ocn_surface_land_ice_fluxes_build_arrays(meshPool, diagnosticsPool, forcingPool, scratchPool, statePool, &
-       dt, err)
-  if (err /= 0) stop 9
-  call mpas_pool_get_array(forcingPool, 'surfaceThicknessFlux', surfaceThicknessFlux)
-  call ocn_surface_land_ice_fluxes_thick(meshPool, forcingPool, surfaceThicknessFlux, err)
-  if (err /= 0) stop 9
-  call mpas_pool_get_array(forcingPool, 'surfaceStress', surfaceStress)
-  call mpas_pool_get_array(forcingPool, 'surfaceStressMagnitude', surfaceStressMagnitude)
-  call ocn_surface_land_ice_fluxes_vel(meshPool, diagnosticsPool, surfaceStress, surfaceStressMagnitude, err)
-  if (err /= 0) stop 9
-  call mpas_pool_get_array(pool_named(pools, 'tracersSurfaceFlux'), 'activeTracersSurfaceFlux', tracersSurfaceFlux)
-  call ocn_surface_land_ice_fluxes_tracers(meshPool, 'activeTracers', forcingPool, tracersSurfaceFlux, err)
-  if (err /= 0) stop 9
+  ! ocn_surface_land_ice_fluxes_init sets standaloneOn only for 'standalone'
+  ! and 'coupled' (it returns first otherwise), so the flux routines run only
+  ! in those modes; every one of them returns at once in the others
+  call mpas_pool_get_config(pools % configs, 'config_land_ice_flux_mode', mode)
+  if (trim(mode) == 'standalone' .or. trim(mode) == 'coupled') then
+    call ocn_surface_land_ice_fluxes_build_arrays(meshPool, diagnosticsPool, forcingPool, scratchPool, statePool, &
+         dt, err)
+    if (err /= 0) stop 9
+    call mpas_pool_get_array(forcingPool, 'surfaceThicknessFlux', surfaceThicknessFlux)
+    call ocn_surface_land_ice_fluxes_thick(meshPool, forcingPool, surfaceThicknessFlux, err)
+    if (err /= 0) stop 9
+    call mpas_pool_get_array(forcingPool, 'surfaceStress', surfaceStress)
+    call mpas_pool_get_array(forcingPool, 'surfaceStressMagnitude', surfaceStressMagnitude)
+    call ocn_surface_land_ice_fluxes_vel(meshPool, diagnosticsPool, surfaceStress, surfaceStressMagnitude, err)
+    if (err /= 0) stop 9
+    call mpas_pool_get_array(pool_named(pools, 'tracersSurfaceFlux'), 'activeTracersSurfaceFlux', tracersSurfaceFlux)
+    call ocn_surface_land_ice_fluxes_tracers(meshPool, 'activeTracers', forcingPool, tracersSurfaceFlux, err)
+    if (err /= 0) stop 9
+  end if
   call ocn_effective_density_in_land_ice_update(meshPool, forcingPool, statePool, scratchPool, err)
   if (err /= 0) stop 9
   call write_stream(outPath, fields)

@@ -7,12 +7,14 @@
 ! oracle_stream.F90's layout.  mpas_ocn_tendency.F is compiled verbatim
 ! against the real tracer modules (advection, mixing, surface flux,
 ! short-wave absorption, non-local flux), bulk forcing, diagnostics and
-! equation of state, the land-ice fluxes and frazil (their switches are off:
-! the driver does not initialise them); stubs_unported.F90 stands in for the
+! equation of state, the land-ice fluxes and frazil (their switches come from
+! the stream's config_land_ice_flux_mode and config_use_frazil_ice_formation,
+! through their own _init); stubs_unported.F90 stands in for the
 ! rest.  The driver makes the
 ! _init calls ocn_forward_mode_init makes for these, then the call:
 !
-!   ocn_constants_init, ocn_surface_bulk_forcing_init, ocn_tracer_advection_init,
+!   ocn_constants_init, ocn_surface_bulk_forcing_init, ocn_surface_land_ice_fluxes_init,
+!   ocn_frazil_forcing_init, ocn_tracer_advection_init,
 !   ocn_tracer_hmix_init, ocn_tracer_hmix_redi_init, ocn_tracer_surface_flux_init,
 !   ocn_tracer_short_wave_absorption_init(domain, err)
 !   ocn_tend_tracer(tend, state, forcing, diagnostics, mesh, swForcing, scratch, dt,
@@ -24,6 +26,8 @@ program run_tend_tracer
   use mpas_pool_routines
   use ocn_constants
   use ocn_surface_bulk_forcing
+  use ocn_surface_land_ice_fluxes
+  use ocn_frazil_forcing
   use ocn_tracer_advection
   use ocn_tracer_hmix
   use ocn_tracer_hmix_redi
@@ -45,6 +49,10 @@ program run_tend_tracer
   call read_stream(inPath, dt, pools, fields)
   call ocn_constants_init(pools % configs, pools % packages)
   call ocn_surface_bulk_forcing_init(err)
+  if (err /= 0) stop 13
+  call ocn_surface_land_ice_fluxes_init(err)
+  if (err /= 0) stop 13
+  call ocn_frazil_forcing_init(err)
   if (err /= 0) stop 13
   err = 0
   call ocn_tracer_advection_init(err)
