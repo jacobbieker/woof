@@ -47,7 +47,40 @@ from . import model as M
 #: from start_em's ``muts = mub + mu'``, so its tangent there is g_mu:
 #: pass ``dx0["muts"] = dx0["mup"]``.  With ``Window.tl(dx0,
 #: partial=True)`` the rest (phi', al and alt) start at zero.
+#:
+#: So on input the ``p`` and ``p_pert`` tangents are one array (g_p), and
+#: ``muts`` and ``mup`` are one (g_mu); the adjoint of that copy is a sum:
+#: g_p's adjoint is ``adj["p"] + adj["p_pert"]`` and g_mu's
+#: ``adj["mup"] + adj["muts"]``.  :func:`wrfda_tl_start` and
+#: :func:`wrfda_tl_start_ad` build and restrict them.
 WRFDA_TL_START = ("u", "v", "w", "thp", "mup", "p", "p_pert", "muts")
+
+#: What :func:`wrfda_tl_start` takes: WRFDA's g_u, g_v, g_w, g_t (as
+#: theta'), g_mu and g_p, by woof's names.
+WRFDA_TL_FIELDS = ("u", "v", "w", "thp", "mup", "p")
+
+#: The copies WRFDA's start makes: target <- source.
+_WRFDA_COPIES = {"p_pert": "p", "muts": "mup"}
+
+
+def wrfda_tl_start(g: dict) -> dict:
+    """WRFDA's TL start for ``Window.tl(..., partial=True)`` from
+    ``g`` over :data:`WRFDA_TL_FIELDS` (no other name): g_p into both
+    pressure carriers and g_mu into ``muts`` too (the arrays are shared,
+    not copied; ``Window.tl`` only reads them)."""
+    if set(g) != set(WRFDA_TL_FIELDS):
+        raise ValueError(f"wrfda_tl_start takes {list(WRFDA_TL_FIELDS)}, got {sorted(g)}")
+    return {**g, **{t: g[src] for t, src in _WRFDA_COPIES.items()}}
+
+
+def wrfda_tl_start_ad(adj: dict) -> dict:
+    """The adjoint of :func:`wrfda_tl_start`: :data:`WRFDA_TL_FIELDS` of
+    ``adj`` (a ``Window.ad`` result), with each copy's adjoint summed back
+    into its source (``p + p_pert``, ``mup + muts``); new arrays."""
+    out = {n: adj[n].copy() for n in WRFDA_TL_FIELDS}
+    for t, src in _WRFDA_COPIES.items():
+        out[src] += adj[t]
+    return out
 
 
 def _copy(d: dict, names=None) -> dict:
@@ -151,6 +184,9 @@ class Window:
         :data:`WRFDA_TL_START`).  Returns ``{k: dx_k}`` (STEP_INPUTS) for
         every ``k`` in ``save_at`` and for ``nsteps``."""
         import cupy as cp
+        if partial and not dx0:
+            raise ValueError("dx0 is empty: partial=True still needs at least "
+                             "one STEP_INPUTS name")
         self._check(dx0, "dx0", partial)
         save = set(int(k) for k in save_at) | {self.nsteps}
         bad = [k for k in save if not 0 <= k <= self.nsteps]

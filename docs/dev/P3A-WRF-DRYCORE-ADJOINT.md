@@ -613,6 +613,14 @@ Each step is one small PR, taken to merged before the next widens.
        `p_pert`.
      - `muts` takes g_mu. WRFDA's window starts cold, from `start_em`'s
        `muts = mub + mu'`.
+     - So the `p`/`p_pert` tangents are one array, and so are the
+       `mup`/`muts` tangents. Their adjoints sum: the adjoint of g_p is
+       `adj["p"] + adj["p_pert"]`, and that of g_mu is
+       `adj["mup"] + adj["muts"]`.
+     - `wrfda_tl_start(g)` builds the start from g over
+       `WRFDA_TL_FIELDS`. `wrfda_tl_start_ad(adj)` is its adjoint. A dot
+       test pins the pair.
+     - `partial=True` with an empty `dx0` is refused.
      - The adjoint of the zero fill is a restriction, so a caller takes
        the same names from `ad`'s result. A dot test pins this.
      - An incomplete dict without `partial`, or a name outside

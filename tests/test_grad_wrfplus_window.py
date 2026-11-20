@@ -286,8 +286,7 @@ w = W.Window(state, cfg, 2, dtype=np.dtype({dtn!r}))
 w.forward()
 rng = np.random.default_rng(5)
 dx = rnd(w._start, rng)
-dx["muts"] = dx["mup"].copy()   # a cold start's muts' is mu'
-part = {{n: dx[n] for n in W.WRFDA_TL_START}}
+part = W.wrfda_tl_start({{n: dx[n] for n in W.WRFDA_TL_FIELDS}})
 full = {{n: dx[n] if n in part else cp.zeros_like(dx[n]) for n in IN}}
 a, b = w.tl(part, save_at=(1,), partial=True), w.tl(full, save_at=(1,))
 out["same"] = sum(int((cp.asnumpy(a[k][n]) != cp.asnumpy(b[k][n])).sum())
@@ -297,15 +296,25 @@ lhs = sum(float(cp.vdot(a[2][n].ravel(), f[n].ravel())) for n in IN)
 adj = w.ad(f)
 rhs = sum(float(cp.vdot(part[n].ravel(), adj[n].ravel())) for n in part)
 out["dot"] = abs(lhs - rhs) / max(abs(lhs), 1e-300)
-for key, bad in (("missing", part), ("unknown", {{**full, "qv": full["u"]}})):
+# the helpers' pair: <TL(start(g)), f> == <g, start_ad(AD(f))>
+g = {{n: dx[n] for n in W.WRFDA_TL_FIELDS}}
+ga = W.wrfda_tl_start_ad(adj)
+rhs = sum(float(cp.vdot(g[n].ravel(), ga[n].ravel())) for n in g)
+out["dot_helper"] = abs(lhs - rhs) / max(abs(lhs), 1e-300)
+out["shared"] = int(part["p_pert"] is part["p"] and part["muts"] is part["mup"])
+for key, bad, kw in (("missing", part, {{}}), ("unknown", {{**full, "qv": full["u"]}}, {{}}),
+                     ("empty", {{}}, {{"partial": True}})):
     try:
-        w.tl(bad)
+        w.tl(bad, **kw)
         out[key] = ""
     except ValueError as e:
         out[key] = str(e)
 """, tmp_path)
     assert out["same"] == 0
-    assert out["dot"] < (1e-5 if backend == "mlx" else 1e-12), out["dot"]
+    for key in ("dot", "dot_helper"):
+        assert out[key] < (1e-5 if backend == "mlx" else 1e-12), (key, out[key])
+    assert out["shared"] == 1
+    assert "dx0 is empty" in out["empty"], out["empty"]
     assert "lacks ['php', 'al', 'alt']" in out["missing"], out["missing"]
     assert "partial=True" in out["missing"]
     assert "['qv']" in out["unknown"], out["unknown"]
