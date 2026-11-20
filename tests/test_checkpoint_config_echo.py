@@ -105,6 +105,11 @@ MOVED = {
     "gf_deep_rain_evaporation_booking": (
         dict(gf_deep_rain_evaporation_booking=True),
         {"gf_deep_rain_evaporation_booking"}),
+    # The gridded urban morphology rides the single-layer UCM.
+    "urban_param_file": (dict(sf_surface_physics=2, sf_urban_physics=1,
+                              urban_param_file="geo_em.d01.nc"),
+                         {"urban_param_file", "urban_water_balance",
+                          *_SEAICE_BOUND}),
     "obstacle_opt": (dict(obstacle_opt=1, obstacle_file="city.nc",
                           dx=5.0, dy=5.0),
                      {"obstacle_opt", "obstacle_file"}),
@@ -226,6 +231,8 @@ DEFAULT_OFF = frozenset({
     "solar_ssi_opt", "solar_ssi_source",
     # The opt-in solar-proton chemistry source (woof.spacewx), absent while off.
     "spacewx_epp_opt", "spacewx_epp_source",
+    # The gridded urban morphology (woof.core.urban_param), absent unset.
+    "urban_param_file",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The RUC sea-ice threshold switch, absent at 0 as in a 2.8.5 header.

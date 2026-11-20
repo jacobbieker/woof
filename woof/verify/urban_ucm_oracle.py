@@ -42,11 +42,26 @@ __all__ = [
     "replay",
     "carried_replay",
     "ulp_table",
+    "UCM_NUDAPT_DIR",
+    "NUDAPT_VARIANTS",
+    "NUDAPT_MORPH_COLUMNS",
+    "nudapt_morph",
+    "load_init",
 ]
 
 # Test data in a source checkout, not package data (woof.verify.wrf471_fixtures).
 UCM_ORACLE_DIR = (Path(__file__).resolve().parents[2] / "tests" / "data"
                   / "oracles" / "urban" / "ucm")
+
+#: The gridded-morphology (NUDAPT arm) oracle, written by
+#: ``tools/urban_wrf471_oracle/build_ucm_nudapt.sh``: same row layout plus
+#: the morphology inputs (``morph`` names the set), and ``init-*.csv`` for
+#: urban_var_init's keep/zero rule.
+UCM_NUDAPT_DIR = UCM_ORACLE_DIR.parent / "ucm_nudapt"
+NUDAPT_VARIANTS = ("nudapt-nlcd-main", "nudapt-lcz-main", "nudapt-nlcd-probe")
+#: The arm's per-column inputs as the fixture names them.
+NUDAPT_MORPH_COLUMNS = ("mh_urb", "stdh_urb", "lf_urb1", "lf_urb2", "lf_urb3",
+                        "lf_urb4", "lp_urb", "hgt_urb", "lb_urb", "frc_urb")
 
 #: Every variant ``build_ucm.sh`` writes.  The ``gr`` ones are the
 #: ``-finit-real=zero`` build (the ETR defined read, see its header).
@@ -82,7 +97,8 @@ OUTPUT_COLUMNS = ("ts", "qs", "sh", "lh", "lh_kinematic", "sw", "alb", "lw",
                   "g", "rn", "psim", "psih", "gz1oz0", "u10", "v10", "th2",
                   "q2", "ust", "znt")
 
-_INT_COLUMNS = ("utype", "scenario", "step", "jmonth")
+_INT_COLUMNS = ("utype", "scenario", "step", "jmonth", "morph", "col",
+                "ivgtyp")
 
 
 def _f32(text: str) -> np.float32:
@@ -182,23 +198,49 @@ def _reference(rows, sel):
     return ref
 
 
-def replay(name: str, root: Path | None = None, *, generation="wrf_471"):
-    """Every row from its own ``*_in`` state: ``(port, ref, codes)``."""
-    from woof.core.urban_ucm import run_columns
+def nudapt_morph(rows, sel):
+    """The NUDAPT fixture's morphology inputs for ``run_columns(morph=)``."""
+    return {name: rows[name][sel] for name in NUDAPT_MORPH_COLUMNS}
 
+
+def _run(runner, params, rows, sel, state, generation, nudapt):
+    if runner is None:
+        from woof.core.urban_ucm import run_columns as runner
+    kwargs = {"generation": generation}
+    if nudapt:
+        kwargs["morph"] = nudapt_morph(rows, sel)
+    return runner(params, _inputs(rows, sel), state, **kwargs)
+
+
+def replay(name: str, root: Path | None = None, *, generation="wrf_471",
+           runner=None, select=None):
+    """Every row from its own ``*_in`` state: ``(port, ref, codes)``.
+
+    A ``nudapt-*`` name reads :data:`UCM_NUDAPT_DIR` and hands the kernel
+    the row's morphology.  ``runner`` defaults to the device
+    ``run_columns`` (the CPU twin's has the same signature); ``select``
+    filters the rows (``rows -> bool array``).
+    """
+    nudapt = name.startswith("nudapt-")
+    if nudapt and root is None:
+        root = UCM_NUDAPT_DIR
     rows, table, switches = load_variant(name, root)
     params = port_params(table, switches)
     sel = np.ones(rows["ta"].shape[0], dtype=bool)
-    outputs, after, codes = run_columns(params, _inputs(rows, sel),
-                                        _state_from(rows, sel, "_in"), generation=generation)
+    if select is not None:
+        sel &= np.asarray(select(rows), bool)
+    outputs, after, codes = _run(runner, params, rows, sel,
+                                 _state_from(rows, sel, "_in"), generation, nudapt)
     return _flatten(outputs, after), _reference(rows, sel), codes
 
 
-def carried_replay(name: str, root: Path | None = None, *, generation="wrf_471"):
+def carried_replay(name: str, root: Path | None = None, *, generation="wrf_471",
+                   runner=None):
     """Each column's first step from the fixture, later steps from the
     port's OWN state: the prognostic layers must stay on WRF's words."""
-    from woof.core.urban_ucm import run_columns
-
+    nudapt = name.startswith("nudapt-")
+    if nudapt and root is None:
+        root = UCM_NUDAPT_DIR
     rows, table, switches = load_variant(name, root)
     params = port_params(table, switches)
     steps = rows["step"]
@@ -210,8 +252,8 @@ def carried_replay(name: str, root: Path | None = None, *, generation="wrf_471")
         idx = order + (step - int(steps.min()))
         if not np.all(rows["step"][idx] == step):
             raise ValueError(f"{name}: rows are not step-major within a column")
-        outputs, after, codes = run_columns(params, _inputs(rows, idx), state,
-                                           generation=generation)
+        outputs, after, codes = _run(runner, params, rows, idx, state,
+                                     generation, nudapt)
         if np.any(codes):
             raise RuntimeError(f"{name}: kernel error codes {np.unique(codes)}")
         state = after
@@ -439,3 +481,18 @@ def noahmp_replay(params, *, carried: bool, root: Path | None = None):
     Returns ``(port, ref, untouched)`` as :func:`noah_replay`.
     """
     return _coupled_replay(params, lsm=4, carried=carried, root=root)
+
+
+def load_init(option: int, use_wudapt_lcz: int, root: Path | None = None):
+    """The NUDAPT oracle's urban_var_init rows for one option: a dict of
+    numpy arrays (``col ivgtyp utype`` int32, the rest float32)."""
+    d = require_fixture_dir(root if root is not None else UCM_NUDAPT_DIR,
+                            "urban UCM NUDAPT")
+    raw = _read_csv(d / f"init-opt{int(option)}-lcz{int(use_wudapt_lcz)}.csv")
+    out = {}
+    for key in raw[0]:
+        if key in _INT_COLUMNS:
+            out[key] = np.asarray([int(r[key]) for r in raw], dtype=np.int32)
+        else:
+            out[key] = np.asarray([_f32(r[key]) for r in raw], dtype=np.float32)
+    return out

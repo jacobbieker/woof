@@ -91,14 +91,17 @@ struct FaceTerms {
     wreal dpxy;
 };
 
+// face_terms with dpn at level k given (dn) and at k+1 returned (up), so a
+// loop over k computes each dpn once.
 static __device__
-FaceTerms face_terms(size_t cA, size_t cB, int k, size_t st, wreal rd,
-                     const wreal* ph_pp, const wreal* php, const wreal* phb,
-                     const wreal* alt, const wreal* al_pp, const wreal* pb,
-                     const wreal* p_pp, const wreal* p_old,
-                     const wreal* mup, const wreal* mu_pp, const wreal* mub2d,
-                     const wreal* c1h, const wreal* c2h, const wreal* fnm,
-                     const wreal* fnp, const wreal* rdnw, const UVGeom& g)
+FaceTerms face_terms_dn(size_t cA, size_t cB, int k, size_t st, wreal rd,
+                        const wreal* ph_pp, const wreal* php, const wreal* phb,
+                        const wreal* alt, const wreal* al_pp, const wreal* pb,
+                        const wreal* p_pp, const wreal* p_old,
+                        const wreal* mup, const wreal* mu_pp, const wreal* mub2d,
+                        const wreal* c1h, const wreal* c2h, const wreal* fnm,
+                        const wreal* fnp, const wreal* rdnw, const UVGeom& g,
+                        wreal dn, wreal* up_out)
 {
     FaceTerms t;
     int nz = g.nz;
@@ -113,8 +116,7 @@ FaceTerms face_terms(size_t cA, size_t cB, int k, size_t st, wreal rd,
     wreal dpxy = t.aco * t.b;
     wreal up = dpn_(p_pp, p_old, g.smdiv, k + 1, nz, cA, cB, st, fnm, fnp,
                     g.cf1, g.cf2, g.cf3, g.top_lid);
-    wreal dn = dpn_(p_pp, p_old, g.smdiv, k, nz, cA, cB, st, fnm, fnp,
-                    g.cf1, g.cf2, g.cf3, g.top_lid);
+    *up_out = up;
     size_t ba = g.base3d ? a : (size_t)k;
     size_t bb = g.base3d ? b : (size_t)k;
     size_t bst = g.base3d ? st : 1;
@@ -126,6 +128,23 @@ FaceTerms face_terms(size_t cA, size_t cB, int k, size_t st, wreal rd,
     dpxy += t.cc * t.d;
     t.dpxy = dpxy;
     return t;
+}
+
+static __device__
+FaceTerms face_terms(size_t cA, size_t cB, int k, size_t st, wreal rd,
+                     const wreal* ph_pp, const wreal* php, const wreal* phb,
+                     const wreal* alt, const wreal* al_pp, const wreal* pb,
+                     const wreal* p_pp, const wreal* p_old,
+                     const wreal* mup, const wreal* mu_pp, const wreal* mub2d,
+                     const wreal* c1h, const wreal* c2h, const wreal* fnm,
+                     const wreal* fnp, const wreal* rdnw, const UVGeom& g)
+{
+    wreal dn = dpn_(p_pp, p_old, g.smdiv, k, g.nz, cA, cB, st, fnm, fnp,
+                    g.cf1, g.cf2, g.cf3, g.top_lid);
+    wreal up;
+    return face_terms_dn(cA, cB, k, st, rd, ph_pp, php, phb, alt, al_pp, pb,
+                         p_pp, p_old, mup, mu_pp, mub2d, c1h, c2h, fnm, fnp,
+                         rdnw, g, dn, &up);
 }
 
 // TL of face_terms' dpxy at the base state t.
@@ -278,13 +297,18 @@ void advance_uv_tl(wreal* __restrict__ u_pp, wreal* __restrict__ v_pp,
     }
 }
 
-// Adjoint, pass 1 of 3: one thread per face.  Pointwise adjoints of ru_t,
-// rv_t, cqu, cqv, and the face seeds the gather passes read:
+// Adjoint, pass 1 of 2: one thread per (k chunk, face column (j, i)) of
+// the (ny+1) x (nx+1) face grid, looping over the chunk's kc levels so
+// that each level's dpn is computed once per chunk.  Pointwise adjoints
+// of ru_t, rv_t, cqu, cqv, and the seeds the gather reads.  Per level (planes 0-2 of su/sv, nz levels):
 //   s_b  = g*aco        (adjoint of b)
 //   s_cc = g*d          (adjoint of cc = rd*dphp)
 //   s_d  = g*cc         (adjoint of d)
-//   s_m  = g*b*0.5*rd*c1h (adjoint of muf)
-//   s_e  = c1h*scale(/msf)*ua (adjoint of mudf difference)
+// and per chunk and face column (3 planes per chunk after the 3*nz level
+// planes; the gather adds the chunks in order):
+//   sum_k g*b*0.5*rd*c1h          (adjoint of muf)
+//   sum_k -0.5*c1h*s_d            (the mu_pp share of d)
+//   sum_k c1h*scale(/msf)*ua      (adjoint of the mudf difference)
 // with g = -dtau*cq*ua the adjoint of dpxy.  u_a/v_a are unchanged (the
 // update is u_out = u_in + ...).
 extern "C" __global__
@@ -293,137 +317,156 @@ void advance_uv_ad_face(const wreal* __restrict__ u_a, const wreal* __restrict__
                         wreal* __restrict__ ru_a, wreal* __restrict__ rv_a,
                         wreal* __restrict__ cqu_a, wreal* __restrict__ cqv_a,
                         wreal* __restrict__ su, wreal* __restrict__ sv,
-                        UV_GEOM_PARAMS)
+                        int kc, UV_GEOM_PARAMS)
 {
     UV_GEOM_INIT;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int nyf = ny + 1, nxf = nx + 1;
-    if (tid >= nz * nyf * nxf) return;
-    int k = tid / (nyf * nxf);
-    int r = tid - k * nyf * nxf;
+    int nch = (nz + kc - 1) / kc;
+    if (tid >= nch * nyf * nxf) return;
+    int ch = tid / (nyf * nxf);
+    int r = tid - ch * nyf * nxf;
     int j = r / nxf;
     int i = r - j * nxf;
+    int k0 = ch * kc, k1 = k0 + kc < nz ? k0 + kc : nz;
     size_t st = (size_t)ny * nx;
-    size_t nu = (size_t)nz * ny * nxf, nv = (size_t)nz * nyf * nx;
+    size_t lu = (size_t)ny * nxf, lv = (size_t)nyf * nx;
+    size_t nu = (size_t)nz * lu, nv = (size_t)nz * lv;
 
     if (j < ny) {
-        size_t uix = W3(k, j, i, ny, nxf);
-        wreal ua = u_a[uix];
-        ru_a[uix] += dtau * ua;
-        wreal sb = 0, scc = 0, sd = 0, sm = 0, se = 0;
-        if (j >= spec_zone && j < ny - spec_zone
-            && i >= spec_zone && i <= nx - spec_zone) {
-            int iA = i % nx, iB = (i - 1 + nx) % nx;
-            size_t cA = (size_t)j * nx + iA, cB = (size_t)j * nx + iB;
-            FaceTerms t = UV_FACE_TERMS(cA, cB, k, rdx);
-            wreal cq = moist_cq ? cqu[uix] : (wreal)1.0;
-            if (moist_cq) cqu_a[uix] += -dtau * t.dpxy * ua;
-            wreal gg = -dtau * cq * ua;
-            sb = gg * t.aco;
-            scc = gg * t.d;
-            sd = gg * t.cc;
-            sm = gg * t.b * (wreal)0.5 * rdx * c1h[k];
-            if (use_emdiv) {
-                se = c1h[k] * xscale * ua;
-                if (has_msf) se = se / msfu[(size_t)j * nxf + i];
+        size_t base = (size_t)j * nxf + i;
+        int inner = j >= spec_zone && j < ny - spec_zone
+                 && i >= spec_zone && i <= nx - spec_zone;
+        int iA = i % nx, iB = (i - 1 + nx) % nx;
+        size_t cA = (size_t)j * nx + iA, cB = (size_t)j * nx + iB;
+        wreal dn = 0, cm = 0, cmu = 0, ce = 0;
+        if (inner)
+            dn = dpn_(p_pp, p_pp_old, smdiv, k0, nz, cA, cB, st, fnm, fnp,
+                      cf1, cf2, cf3, top_lid);
+        for (int k = k0; k < k1; ++k) {
+            size_t uix = (size_t)k * lu + base;
+            wreal ua = u_a[uix];
+            ru_a[uix] += dtau * ua;
+            wreal sb = 0, scc = 0, sd = 0;
+            if (inner) {
+                wreal up;
+                FaceTerms t = face_terms_dn(cA, cB, k, st, rdx, ph_pp, php, phb,
+                                            alt, al_pp, pb, p_pp, p_pp_old, mup,
+                                            mu_pp, mub2d, c1h, c2h, fnm, fnp,
+                                            rdnw, g, dn, &up);
+                dn = up;
+                wreal cq = moist_cq ? cqu[uix] : (wreal)1.0;
+                if (moist_cq) cqu_a[uix] += -dtau * t.dpxy * ua;
+                wreal gg = -dtau * cq * ua;
+                sb = gg * t.aco;
+                scc = gg * t.d;
+                sd = gg * t.cc;
+                cm += gg * t.b * (wreal)0.5 * rdx * c1h[k];
+                cmu += (wreal)-0.5 * c1h[k] * sd;
+                if (use_emdiv) {
+                    wreal se = c1h[k] * xscale * ua;
+                    if (has_msf) se = se / msfu[base];
+                    ce += se;
+                }
             }
+            su[uix] = sb; su[nu + uix] = scc; su[2 * nu + uix] = sd;
         }
-        su[uix] = sb; su[nu + uix] = scc; su[2 * nu + uix] = sd;
-        su[3 * nu + uix] = sm; su[4 * nu + uix] = se;
+        size_t cs = 3 * nu + (size_t)ch * 3 * lu + base;
+        su[cs] = cm; su[cs + lu] = cmu; su[cs + 2 * lu] = ce;
     }
     if (i < nx) {
-        size_t vix = W3(k, j, i, nyf, nx);
-        wreal va = v_a[vix];
-        rv_a[vix] += dtau * va;
-        wreal sb = 0, scc = 0, sd = 0, sm = 0, se = 0;
-        if (i >= spec_zone && i < nx - spec_zone
-            && j >= spec_zone && j <= ny - spec_zone) {
-            int jA = j % ny, jB = (j - 1 + ny) % ny;
-            size_t cA = (size_t)jA * nx + i, cB = (size_t)jB * nx + i;
-            FaceTerms t = UV_FACE_TERMS(cA, cB, k, rdy);
-            wreal cq = moist_cq ? cqv[vix] : (wreal)1.0;
-            if (moist_cq) cqv_a[vix] += -dtau * t.dpxy * va;
-            wreal gg = -dtau * cq * va;
-            sb = gg * t.aco;
-            scc = gg * t.d;
-            sd = gg * t.cc;
-            sm = gg * t.b * (wreal)0.5 * rdy * c1h[k];
-            if (use_emdiv) {
-                se = c1h[k] * yscale * va;
-                if (has_msf) se = se * msfv[(size_t)j * nx + i];
+        size_t base = (size_t)j * nx + i;
+        int inner = i >= spec_zone && i < nx - spec_zone
+                 && j >= spec_zone && j <= ny - spec_zone;
+        int jA = j % ny, jB = (j - 1 + ny) % ny;
+        size_t cA = (size_t)jA * nx + i, cB = (size_t)jB * nx + i;
+        wreal dn = 0, cm = 0, cmu = 0, ce = 0;
+        if (inner)
+            dn = dpn_(p_pp, p_pp_old, smdiv, k0, nz, cA, cB, st, fnm, fnp,
+                      cf1, cf2, cf3, top_lid);
+        for (int k = k0; k < k1; ++k) {
+            size_t vix = (size_t)k * lv + base;
+            wreal va = v_a[vix];
+            rv_a[vix] += dtau * va;
+            wreal sb = 0, scc = 0, sd = 0;
+            if (inner) {
+                wreal up;
+                FaceTerms t = face_terms_dn(cA, cB, k, st, rdy, ph_pp, php, phb,
+                                            alt, al_pp, pb, p_pp, p_pp_old, mup,
+                                            mu_pp, mub2d, c1h, c2h, fnm, fnp,
+                                            rdnw, g, dn, &up);
+                dn = up;
+                wreal cq = moist_cq ? cqv[vix] : (wreal)1.0;
+                if (moist_cq) cqv_a[vix] += -dtau * t.dpxy * va;
+                wreal gg = -dtau * cq * va;
+                sb = gg * t.aco;
+                scc = gg * t.d;
+                sd = gg * t.cc;
+                cm += gg * t.b * (wreal)0.5 * rdy * c1h[k];
+                cmu += (wreal)-0.5 * c1h[k] * sd;
+                if (use_emdiv) {
+                    wreal se = c1h[k] * yscale * va;
+                    if (has_msf) se = se * msfv[base];
+                    ce += se;
+                }
             }
+            sv[vix] = sb; sv[nv + vix] = scc; sv[2 * nv + vix] = sd;
         }
-        sv[vix] = sb; sv[nv + vix] = scc; sv[2 * nv + vix] = sd;
-        sv[3 * nv + vix] = sm; sv[4 * nv + vix] = se;
+        size_t cs = 3 * nv + (size_t)ch * 3 * lv + base;
+        sv[cs] = cm; sv[cs + lv] = cmu; sv[cs + 2 * lv] = ce;
     }
 }
 
-// A face that reads mass column c: its seed offset and the sign of c in
-// the face's differences (+1 for cA, -1 for cB).
-struct FaceRef { size_t base; wreal sign; int isv; };
-
-// Up to 4 u faces and 4 v faces touch a column; under periodic wrap the
-// same face can reach c from both sides (nx == 1), so each (face, side)
-// pair is listed separately and the list is deduplicated by face index.
-static __device__
-int column_faces(int j, int i, const UVGeom& g, FaceRef* out)
-{
-    int n = 0, nx = g.nx, ny = g.ny, sz = g.spec_zone;
-    int cand[4] = {i, i + 1, i == 0 ? nx : -1, i == nx - 1 ? 0 : -1};
-    for (int q = 0; q < 4; ++q) {
-        int fi = cand[q];
-        if (fi < 0) continue;
-        int dup = 0;
-        for (int p = 0; p < q; ++p) dup |= (cand[p] == fi);
-        if (dup) continue;
-        if (!(j >= sz && j < ny - sz && fi >= sz && fi <= nx - sz)) continue;
-        int iA = fi % nx, iB = (fi - 1 + nx) % nx;
-        size_t base = (size_t)j * (nx + 1) + fi;
-        if (iA == i) { out[n].base = base; out[n].sign = (wreal)1.0; out[n].isv = 0; ++n; }
-        if (iB == i) { out[n].base = base; out[n].sign = (wreal)-1.0; out[n].isv = 0; ++n; }
-    }
-    int candj[4] = {j, j + 1, j == 0 ? ny : -1, j == ny - 1 ? 0 : -1};
-    for (int q = 0; q < 4; ++q) {
-        int fj = candj[q];
-        if (fj < 0) continue;
-        int dup = 0;
-        for (int p = 0; p < q; ++p) dup |= (candj[p] == fj);
-        if (dup) continue;
-        if (!(i >= sz && i < nx - sz && fj >= sz && fj <= ny - sz)) continue;
-        int jA = fj % ny, jB = (fj - 1 + ny) % ny;
-        size_t base = (size_t)fj * nx + i;
-        if (jA == j) { out[n].base = base; out[n].sign = (wreal)1.0; out[n].isv = 1; ++n; }
-        if (jB == j) { out[n].base = base; out[n].sign = (wreal)-1.0; out[n].isv = 1; ++n; }
-    }
-    return n;
-}
-
-// The other column of a face (to rebuild dpe, salt, dpb in the gather).
+// Slot q in [0, 16) of mass column (j, i): u faces for q < 8, v faces
+// after; candidate face (q >> 1) & 3 of {x, x+1, n if x == 0, 0 if
+// x == n-1} along the face normal; side q & 1 (0: the column is the
+// face's cA, sign +1; 1: its cB, sign -1).  Under periodic wrap the same
+// face can reach a column from both sides (n == 1), so sides are separate
+// slots and repeated candidates are skipped.  Returns 0 for an empty
+// slot; else the face's seed offset, the sign, u/v, and the face's other
+// column.
 static __device__ __forceinline__
-size_t other_column(const FaceRef& f, const UVGeom& g)
+int column_slot(int q, int j, int i, const UVGeom& g, size_t* base,
+                wreal* sign, int* isv, size_t* other)
 {
-    int nx = g.nx, ny = g.ny;
-    if (f.isv == 0) {
-        int fi = (int)(f.base % (size_t)(nx + 1)), j = (int)(f.base / (size_t)(nx + 1));
-        int iA = fi % nx, iB = (fi - 1 + nx) % nx;
-        return (size_t)j * nx + (f.sign > 0 ? iB : iA);
+    int v = q >= 8, c = (q >> 1) & 3, side = q & 1;
+    int n = v ? g.ny : g.nx, x = v ? j : i;
+    int y = v ? i : j, nn = v ? g.nx : g.ny, sz = g.spec_zone;
+    int c0 = x, c1 = x + 1, c2 = x == 0 ? n : -1, c3 = x == n - 1 ? 0 : -1;
+    int f = c == 0 ? c0 : c == 1 ? c1 : c == 2 ? c2 : c3;
+    if (f < 0) return 0;
+    if ((c >= 1 && f == c0) || (c >= 2 && f == c1) || (c >= 3 && f == c2))
+        return 0;
+    if (!(y >= sz && y < nn - sz && f >= sz && f <= n - sz)) return 0;
+    int fA = f % n, fB = (f - 1 + n) % n;
+    if ((side ? fB : fA) != x) return 0;
+    int o = side ? fA : fB;
+    *sign = side ? (wreal)-1.0 : (wreal)1.0;
+    *isv = v;
+    if (v) {
+        *base = (size_t)f * g.nx + i;
+        *other = (size_t)o * g.nx + i;
+    } else {
+        *base = (size_t)j * (g.nx + 1) + f;
+        *other = (size_t)j * g.nx + o;
     }
-    int i = (int)(f.base % (size_t)nx), fj = (int)(f.base / (size_t)nx);
-    int jA = fj % ny, jB = (fj - 1 + ny) % ny;
-    return (size_t)(f.sign > 0 ? jB : jA) * nx + i;
+    return 1;
 }
 
-// Adjoint, pass 2 of 3: one thread per (level, column) over w levels
-// 0..nz.  Gathers ph_pp and php at w level k, and alt, al_pp, p_pp and
-// p_pp_old at mass level k (k < nz), from the face seeds.  Deterministic:
-// each output word is written by one thread in a fixed order.
+// Adjoint, pass 2 of 2: one thread per (level, column) over w levels
+// 0..nz.  Gathers ph_pp and php at w level k, alt, al_pp, p_pp and
+// p_pp_old at mass level k (k < nz), and, on the top w level's threads,
+// mup, mu_pp and mudf from the face columns' chunk sums.  Deterministic: each
+// output word is written by one thread in a fixed order.
 extern "C" __global__
 void advance_uv_ad_gather(UV_TRAJ_PARAMS,
                           const wreal* __restrict__ su, const wreal* __restrict__ sv,
                           wreal* __restrict__ ph_a, wreal* __restrict__ php_a,
                           wreal* __restrict__ alt_a, wreal* __restrict__ al_a,
                           wreal* __restrict__ p_a, wreal* __restrict__ pold_a,
-                          UV_GEOM_PARAMS)
+                          wreal* __restrict__ mup_a, wreal* __restrict__ mupp_a,
+                          wreal* __restrict__ mudf_a,
+                          int kc, UV_GEOM_PARAMS)
 {
     UV_GEOM_INIT;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -432,45 +475,48 @@ void advance_uv_ad_gather(UV_TRAJ_PARAMS,
     int c = tid - k * ny * nx;
     int j = c / nx, i = c - j * nx;
     size_t st = (size_t)ny * nx;
-    size_t nu = (size_t)nz * ny * (nx + 1), nv = (size_t)nz * (ny + 1) * nx;
     size_t lu = (size_t)ny * (nx + 1), lv = (size_t)(ny + 1) * nx;
-    FaceRef f[16];
-    int nf = column_faces(j, i, g, f);
-
-    // w level k: ph_pp and php enter faces at levels k (as [a]) and k-1
-    // (as [a+st]).
-    wreal aph = 0, aphp = 0;
-    for (int q = 0; q < nf; ++q) {
-        const wreal* s = f[q].isv ? sv : su;
-        size_t ns = f[q].isv ? nv : nu, ls = f[q].isv ? lv : lu;
+    size_t nu = (size_t)nz * lu, nv = (size_t)nz * lv;
+    size_t a = (size_t)k * st + c;
+    wreal aph = 0, aphp = 0, aalt = 0, aal = 0, aP = 0;
+    wreal am = 0, amu = 0, amd = 0;
+    for (int q = 0; q < 16; ++q) {
+        size_t fb, oc;
+        wreal sg;
+        int isv;
+        if (!column_slot(q, j, i, g, &fb, &sg, &isv, &oc)) continue;
+        const wreal* s = isv ? sv : su;
+        size_t ns = isv ? nv : nu, ls = isv ? lv : lu;
+        wreal rd = isv ? rdy : rdx;
+        // w level k: ph_pp and php enter faces at levels k (as [a]) and
+        // k-1 (as [a+st]).
         for (int kk = k - 1; kk <= k; ++kk) {
             if (kk < 0 || kk >= nz) continue;
-            size_t x = (size_t)kk * ls + f[q].base;
-            aph += f[q].sign * s[x];
-            aphp += f[q].sign * (wreal)0.5 * (f[q].isv ? rdy : rdx) * s[ns + x];
+            size_t x = (size_t)kk * ls + fb;
+            aph += sg * s[x];
+            aphp += sg * (wreal)0.5 * rd * s[ns + x];
         }
-    }
-    ph_a[tid] += aph;
-    php_a[tid] += aphp;
-    if (k >= nz) return;
-
-    // mass level k.
-    size_t a = (size_t)k * st + c;
-    wreal aalt = 0, aal = 0, aP = 0;
-    for (int q = 0; q < nf; ++q) {
-        const wreal* s = f[q].isv ? sv : su;
-        size_t ns = f[q].isv ? nv : nu, ls = f[q].isv ? lv : lu;
-        size_t x = (size_t)k * ls + f[q].base;
-        size_t o = other_column(f[q], g);
-        size_t b = (size_t)k * st + o;
-        // Rebuild the face's dpe/dpb with this column's sign convention.
-        size_t fa = f[q].sign > 0 ? a : b, fb = f[q].sign > 0 ? b : a;
-        wreal dpe = pd_(p_pp, p_pp_old, fa, smdiv) - pd_(p_pp, p_pp_old, fb, smdiv);
-        wreal dpb = base3d ? (pb[fa] - pb[fb]) : (wreal)0.0;
+        if (k >= nz) {
+            int nch = (nz + kc - 1) / kc;
+            for (int ch = 0; ch < nch; ++ch) {
+                size_t cs = 3 * ns + (size_t)ch * 3 * ls + fb;
+                am += (wreal)0.5 * s[cs];
+                amu += s[cs + ls];
+                amd += sg * s[cs + 2 * ls];
+            }
+            continue;
+        }
+        // mass level k.  Rebuild the face's dpe/dpb with this column's
+        // sign convention.
+        size_t x = (size_t)k * ls + fb;
+        size_t b = (size_t)k * st + oc;
+        size_t fa = sg > 0 ? a : b, fbb = sg > 0 ? b : a;
+        wreal dpe = pd_(p_pp, p_pp_old, fa, smdiv) - pd_(p_pp, p_pp_old, fbb, smdiv);
+        wreal dpb = base3d ? (pb[fa] - pb[fbb]) : (wreal)0.0;
         wreal sb = s[x];
         aalt += sb * dpe;
         aal += sb * dpb;
-        aP += f[q].sign * sb * (alt[a] + alt[b]);
+        aP += sg * sb * (alt[a] + alt[b]);
         // dpn: level m = k of this column enters dpn at full levels kf;
         // dpn(kf) is read by faces kf-1 (as up, +rdnw) and kf (as dn, -rdnw).
         int kfs[4] = {k, k + 1, 0, nz};
@@ -482,44 +528,21 @@ void advance_uv_ad_gather(UV_TRAJ_PARAMS,
             wreal w = dpn_weight(kf, k, nz, fnm, fnp, cf1, cf2, cf3, top_lid);
             if (w == (wreal)0.0) continue;
             wreal adpn = 0;
-            if (kf >= 1) adpn += rdnw[kf - 1] * s[2 * ns + (size_t)(kf - 1) * ls + f[q].base];
-            if (kf <= nz - 1) adpn -= rdnw[kf] * s[2 * ns + (size_t)kf * ls + f[q].base];
+            if (kf >= 1) adpn += rdnw[kf - 1] * s[2 * ns + (size_t)(kf - 1) * ls + fb];
+            if (kf <= nz - 1) adpn -= rdnw[kf] * s[2 * ns + (size_t)kf * ls + fb];
             aP += (wreal)0.5 * w * adpn;
         }
+    }
+    ph_a[tid] += aph;
+    php_a[tid] += aphp;
+    if (k >= nz) {
+        mup_a[c] += am;
+        mupp_a[c] += amu;
+        if (use_emdiv) mudf_a[c] += amd;
+        return;
     }
     alt_a[a] += aalt;
     al_a[a] += aal;
     p_a[a] += aP + smdiv * aP;
     pold_a[a] += -smdiv * aP;
-}
-
-// Adjoint, pass 3 of 3: one thread per column.  mup, mu_pp and mudf.
-extern "C" __global__
-void advance_uv_ad_column(const wreal* __restrict__ c1h,
-                          const wreal* __restrict__ su, const wreal* __restrict__ sv,
-                          wreal* __restrict__ mup_a, wreal* __restrict__ mupp_a,
-                          wreal* __restrict__ mudf_a, UV_GEOM_PARAMS)
-{
-    UV_GEOM_INIT;
-    int c = blockIdx.x * blockDim.x + threadIdx.x;
-    if (c >= ny * nx) return;
-    int j = c / nx, i = c - j * nx;
-    size_t nu = (size_t)nz * ny * (nx + 1), nv = (size_t)nz * (ny + 1) * nx;
-    size_t lu = (size_t)ny * (nx + 1), lv = (size_t)(ny + 1) * nx;
-    FaceRef f[16];
-    int nf = column_faces(j, i, g, f);
-    wreal am = 0, amu = 0, amd = 0;
-    for (int q = 0; q < nf; ++q) {
-        const wreal* s = f[q].isv ? sv : su;
-        size_t ns = f[q].isv ? nv : nu, ls = f[q].isv ? lv : lu;
-        for (int k = 0; k < nz; ++k) {
-            size_t x = (size_t)k * ls + f[q].base;
-            am += (wreal)0.5 * s[3 * ns + x];
-            amu += (wreal)-0.5 * c1h[k] * s[2 * ns + x];
-            amd += f[q].sign * s[4 * ns + x];
-        }
-    }
-    mup_a[c] += am;
-    mupp_a[c] += amu;
-    if (use_emdiv) mudf_a[c] += amd;
 }
