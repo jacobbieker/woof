@@ -252,6 +252,23 @@ def _ice_velocity(pools: dict, configs: dict, n_vertices: int, n_cells: int, dum
     return tuple(out)
 
 
+@lru_cache(maxsize=None)
+def _written_params() -> tuple[bool, ...]:
+    """Per parameter of ``seaice_column_vertical_thermodynamics_v842``: whether
+    it is an array the kernel may write (a pointer that is not ``const``)."""
+    text = files("woof.hex.mpas_seaice").joinpath("column_therm_v842.cu").read_text(encoding="utf-8")
+    head = text.split("void seaice_column_vertical_thermodynamics_v842(", 1)[1].split("{", 1)[0]
+    head = " ".join(line.split("//", 1)[0] for line in head.splitlines()).rsplit(")", 1)[0]
+    params = [p.strip() for p in head.split(",")]
+    return tuple("*" in p and not p.startswith("const ") for p in params)
+
+
+def _keep_after_abort(written: list, before: list, first: int, n_solve: int) -> None:
+    """The owned cells after the first aborting one get their words back."""
+    for array, saved in zip(written, before):
+        array[first + 1:n_solve] = saved[first + 1:]
+
+
 def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
                             day: float | None = None) -> tuple[int, int | None, str | None]:
     """``column_vertical_thermodynamics``: returns ``(ierr, cell, message)``,
@@ -320,9 +337,13 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
         need(sw, "absorbedShortwaveSnowLayer", cs), need(sw, "absorbedShortwaveIceLayer", ci),
         need(dg, "meltOnset", c1), need(dg, "freezeOnset", c1),
     )
-    # the per-cell arrays the kernel may write, as they were: MPAS returns at the first
-    # aborting cell, so the later cells keep their words
-    written = [a for a in args[1:] if isinstance(a, cp.ndarray) and a.ndim and a.shape[0] == n_cells + 1]
+    # the per-cell arrays the kernel writes (its non-const pointers), as they were: MPAS
+    # returns at the first aborting cell, so the later cells keep their words. The kernel
+    # writes in place, so the words are kept before it runs, whether or not a cell aborts.
+    if len(args) != len(_written_params()):
+        raise RuntimeError("the vertical thermodynamics' arguments do not match its kernel's parameters")
+    written = [a for a, out in zip(args, _written_params())
+               if out and a.ndim and a.shape[0] == n_cells + 1]
     before = [a[:n_solve].copy() for a in written]
     if n_solve:
         _function("seaice_column_vertical_thermodynamics_v842", nil)(_grid(n_solve), (_BLOCK,), args)
@@ -331,8 +352,7 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
     if not bad.size:
         return 0, None, None
     first = int(bad[0])
-    for array, saved in zip(written, before):
-        array[first + 1:n_solve] = saved[first + 1:]
+    _keep_after_abort(written, before, first, n_solve)
     cell = int(cp.asnumpy(pools["mesh"]["indexToCellID"][first:first + 1])[0])
     message = "column_vertical_thermodynamics: ice: Vertical thermo error: " + STOP_LABELS[int(codes[first])]
     return SEAICE_ERROR_COL_VERT_THERM, cell, message

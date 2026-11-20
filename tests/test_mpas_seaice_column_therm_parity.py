@@ -212,6 +212,18 @@ def test_a_mutated_evaluation_order_is_caught(monkeypatch, glibc239, original, m
         ct._module_on.cache_clear()
 
 
+@requires_gpu
+def test_dropping_the_abort_restore_is_caught(monkeypatch, glibc239):
+    """Without the restore, the owned cells after the aborting one keep the
+    kernel's words, which v8.4.2 never writes."""
+    case = _case("vt_bl99_abort_salinity")
+    monkeypatch.setattr(ct, "_keep_after_abort", lambda *args: None)
+    got, state = co.run_gpu(case)
+    assert state.abort[0] == ct.SEAICE_ERROR_COL_VERT_THERM
+    want = co.expected_outputs(case, co.load_fixture(FIXTURE).get(case["name"], {}))
+    assert sum(co.word_mismatches(got[key], want[key]) for key in want) > 0
+
+
 def _oracle_toolchain() -> tuple[str, Path] | None:
     source = os.environ.get("WOOF_MPAS_V842_SOURCE")
     gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
