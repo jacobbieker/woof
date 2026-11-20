@@ -1,8 +1,9 @@
 """Big-step tendency TL/AD (P3a item 5, woof.grad.wrfplus.bigstep): WRF
-horizontal_pressure_gradient, pg_buoy_w and rhs_ph on woof's strict
-slow_pgf, slow_buoyancy (dry) and slow_geopotential, with periodic, open
-and specified axes, the lid extrapolation, map factors, hybrid levels and
-(rhs_ph) every h_sca_adv_order.
+horizontal_pressure_gradient, pg_buoy_w, rhs_ph, coriolis and curvature
+on woof's strict slow_pgf, slow_buoyancy (dry), slow_geopotential and
+coriolis_curvature, with periodic, open and specified axes, the lid
+extrapolation, map factors, hybrid levels and (rhs_ph) every
+h_sca_adv_order.
 
 Breakage this prevents:
 - an adjoint that is not the transpose of its TL (dot-product test);
@@ -11,8 +12,9 @@ Breakage this prevents:
 - a TL that is not the derivative of the base-state update
   (TL vs finite differences);
 - a TL/AD that drifts from WRFPLUS 4.7.1's G_/A_HORIZONTAL_PRESSURE_
-  GRADIENT, g_/a_pg_buoy_w and g_/a_rhs_ph (tests/data/wrfplus/bigstep.npz
-  and rhsph.npz, made by tools/wrfplus_oracle);
+  GRADIENT, g_/a_pg_buoy_w, g_/a_rhs_ph and G_/A_CORIOLIS + G_/A_CURVATURE
+  (tests/data/wrfplus/bigstep.npz, rhsph.npz and coriolis.npz, made by
+  tools/wrfplus_oracle);
 - a TL/AD base state that drifts from woof's own strict primal (the
   float build must give the primal's words).
 
@@ -28,7 +30,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = [ROOT / "tests/data/wrfplus/bigstep.npz", ROOT / "tests/data/wrfplus/rhsph.npz"]
+FIXTURES = [ROOT / "tests/data/wrfplus/bigstep.npz", ROOT / "tests/data/wrfplus/rhsph.npz",
+            ROOT / "tests/data/wrfplus/coriolis.npz"]
 
 
 def _has_cuda() -> bool:
@@ -68,6 +71,9 @@ CONFIGS = {
             dict(specified=1, order=4, has_msf=1), dict(order=6),
             dict(open_y=1, order=2), dict(open_x=1, order=0, has_msf=1),
             dict(nz=2, ny=7, nx=7, specified=1), dict(nz=3, ny=5, nx=5, order=4)],
+    # periodic, bounded (one axis, both), one level, single-cell lines
+    "cc": [dict(), dict(boundary_x=1), dict(boundary_y=1), dict(boundary_x=1, boundary_y=1),
+           dict(nz=1), dict(nz=2, ny=2, nx=1), dict(ny=1, nx=3, boundary_x=1)],
 }
 
 
@@ -85,7 +91,9 @@ def _run(backend, body, tmp_path, extra_env=None):
         " 'buoy': (B.BUOY_STATE, B.BUOY_ACTIVE, C.buoy_geometry, C.buoy_trajectory,\n"
         "          C.buoy_perturbation, B.buoy_tl, B.buoy_ad, B.BuoyGeometry),\n"
         " 'geo': (B.GEO_STATE, B.GEO_ACTIVE, C.geo_geometry, C.geo_trajectory,\n"
-        "         C.geo_perturbation, B.geo_tl, B.geo_ad, B.GeoGeometry)}\n"
+        "         C.geo_perturbation, B.geo_tl, B.geo_ad, B.GeoGeometry),\n"
+        " 'cc': (B.CC_STATE, B.CC_ACTIVE, C.cc_geometry, C.cc_trajectory,\n"
+        "        C.cc_perturbation, B.cc_tl, B.cc_ad, B.CCGeometry)}\n"
         "def dev(d):\n"
         "    return {k: cp.asarray(v) for k, v in d.items()}\n"
         "def run_tl(op, g, tr, pe, nl):\n"
@@ -216,7 +224,11 @@ def test_wrfplus_oracle_agreement(backend, tmp_path):
     point early (the fixture's mask, with the seed zeroed there), and its
     a_rhs_ph overruns its order-3/4 trajectory arrays on a periodic y or
     specified x axis, so those cases are TL only (tools/wrfplus_oracle/
-    rhsph.F90)."""
+    rhsph.F90).  G_/A_CORIOLIS then G_/A_CURVATURE (5 cases: periodic,
+    open and specified axes, a rotated grid, hybrid levels; the fixture
+    forms WRF's coupled rw from w and mut): a periodic axis's end face
+    repeats face 0, which WRF reads through its halo, so the two faces'
+    adjoints are compared as a sum."""
     dtn = "float32" if backend == "mlx" else "float64"
     out = _run(backend, f'''
 import json as J
@@ -246,6 +258,11 @@ for z in [np.load(f) for f in {[str(f) for f in FIXTURES]!r}]:
             e, w = e[:g.nz - 3], w[:g.nz - 3]
         if pre + "mask" in z.files and name.startswith("tl_"):
             e, w = e[z[pre + "mask"]], w[z[pre + "mask"]]
+        for x in (e, w) if op == "cc" else ():
+            if name in ("ad_ru", "ad_u") and not g.boundary_x:
+                x[..., 0] += x[..., -1]; x[..., -1] = 0
+            if name in ("ad_rv", "ad_v") and not g.boundary_y:
+                x[..., 0, :] += x[..., -1, :]; x[..., -1, :] = 0
         scale = max(float(np.abs(e).max()), 1e-300)
         out[pre + name] = float(np.abs(w - e).max()) / scale
 ''', tmp_path)
@@ -268,14 +285,14 @@ for z in [np.load(f) for f in {[str(f) for f in FIXTURES]!r}]:
     bad = {k: v for k, v in out.items()
            if not v < (1e-4 if backend == "mlx" and k in loose else limit)}
     assert not bad, sorted(bad.items())
-    assert len(out) == 4 * 9 + 2 * 4 + 7 * 9 + 3 * 2
+    assert len(out) == 4 * 9 + 2 * 4 + 7 * 9 + 3 * 2 + 5 * 15
 
 
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
 def test_float_base_state_is_the_strict_primal(backend, tmp_path):
     """The float build's base state gives woof's strict slow_pgf,
-    slow_buoyancy and slow_geopotential (open and, for order 5, fused)
-    words (GPUWM_WRF_EXACT, dry, 3-D base), so the adjoint is
+    slow_buoyancy, slow_geopotential (open and, for order 5, fused) and
+    coriolis_curvature words (GPUWM_WRF_EXACT, dry, 3-D base), so the adjoint is
     bound to the model woof runs: a primal edit fails here until the TL/AD
     is re-derived.  Host and CUDA; Metal is not checked here."""
     out = _run(backend, f'''
@@ -336,6 +353,19 @@ for i, over in enumerate({CONFIGS["geo"]!r}):
             i32(g.boundary_y), i32(g.specified), i32(g.order), i32(1), i32(1), i32(nz),
             i32(ny), i32(nx)))
         out[f"geo/{{i}}/fused"] = diff(st["rph_t"], r)
+for i, over in enumerate({CONFIGS["cc"]!r}):
+    g = C.cc_geometry(rdx=float(f32(1 / dx)), rdy=float(f32(1 / dy)), **over)
+    tr = dev(C.cc_trajectory(g, 81 + i, f32, hybrid=bool(i % 2)))
+    st, _ = run_tl("cc", g, tr, {{n: cp.zeros_like(tr[n]) for n in B.CC_ACTIVE}}, True)
+    r = {{n: tr[n].copy() for n in B.CC_STATE}}
+    nz, ny, nx = g.nz, g.ny, g.nx
+    n = nz * (ny + 1) * (nx + 1)
+    get_kernel("coriolis_map", "coriolis_curvature")(((n + 255) // 256,), (256,), (
+        tr["ru"], tr["rv"], tr["u"], tr["v"], tr["w"], tr["mut"], tr["msft"], tr["msfu"],
+        tr["msfv"], tr["f"], tr["e"], tr["sina"], tr["cosa"], tr["c1f"], tr["c2f"], tr["fnm"],
+        tr["fnp"], f32(1 / dx), f32(1 / dy), r["ru_t"], r["rv_t"], r["rw_t"],
+        i32(g.boundary_x), i32(g.boundary_y), i32(nz), i32(ny), i32(nx)))
+    out[f"cc/{{i}}"] = sum(diff(st[n], r[n]) for n in B.CC_STATE)
 ''', tmp_path, extra_env={"GPUWM_WRF_EXACT": "1"})
     fused = sum(1 for c in CONFIGS["geo"] if c.get("order", 5) == 5
                 and not ((c.get("open_x") or c.get("open_y")) and not c.get("specified")))
@@ -347,11 +377,13 @@ for i, over in enumerate({CONFIGS["geo"]!r}):
 def test_geometry_rejects_unported_options():
     """A pressure gradient under 3 levels (the bottom extrapolation reads
     levels 0-2), rhs_ph under 2 levels, on axes too short for its stencil
-    or with an unknown order, and empty axes are refused, not run."""
+    or with an unknown order, coriolis/curvature with another earth radius,
+    and empty axes are refused, not run."""
     from woof.grad.wrfplus import cases as C
     for make, over in ((C.pgf_geometry, dict(nz=2)), (C.pgf_geometry, dict(nx=0)),
                        (C.buoy_geometry, dict(ny=0)), (C.geo_geometry, dict(nz=1)),
                        (C.geo_geometry, dict(nx=6)), (C.geo_geometry, dict(ny=4, order=4)),
-                       (C.geo_geometry, dict(order=7))):
+                       (C.geo_geometry, dict(order=7)), (C.cc_geometry, dict(nz=0)),
+                       (C.cc_geometry, dict(rerad=1.0 / 6371.0e3))):
         with pytest.raises(ValueError):
             make(**over).validate()

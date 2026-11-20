@@ -1181,3 +1181,400 @@ extern "C" __global__ void geo_ad_top(wreal* __restrict__ rph_a, int nz, int ny,
     if (c >= st) return;
     rph_a[(size_t)nz * st + c] = (wreal)0;
 }
+
+// ================================================== coriolis + curvature
+//
+// woof's strict coriolis_curvature (woof/core/kernels/coriolis_map.cu,
+// the GPUWM_WRF_EXACT_C_BIGSTEP path: coriolis then curvature, each its
+// own add/subtract): ru_t, rv_t and rw_t gain WRF's coriolis and
+// curvature terms.  Active: the coupled momenta ru, rv, the winds u, v, w
+// and the total column mass mut (rw = (c1f mut + c2f) w / msft is formed
+// inline).  The boundary-normal faces of a bounded axis are left alone.
+
+#define CC_PASSIVE                                                          \
+    const wreal* __restrict__ msft, const wreal* __restrict__ msfu,         \
+    const wreal* __restrict__ msfv, const wreal* __restrict__ f,            \
+    const wreal* __restrict__ e, const wreal* __restrict__ sina,            \
+    const wreal* __restrict__ cosa, const wreal* __restrict__ c1f,          \
+    const wreal* __restrict__ c2f, const wreal* __restrict__ fzm,           \
+    const wreal* __restrict__ fzp
+
+#define CC_GEOM wreal rdx, wreal rdy, wreal rerad, int bnd_x, int bnd_y, int nz, int ny, int nx
+
+static __device__ __forceinline__ Dl cc_rw(const wreal* w, const wreal* wd, const wreal* mut,
+                                           const wreal* mutd, const wreal* msft,
+                                           const wreal* c1f, const wreal* c2f, int kf,
+                                           size_t c, size_t st)
+{
+    Dl mass = c1f[kf] * ld(mut, mutd, c) + c2f[kf];
+    return (mass * ld(w, wd, (size_t)kf * st + c)) / msft[c];
+}
+
+// vxgm at mass point (j, i): u and v faces read directly (no wrap).
+static __device__ __forceinline__ Dl cc_vxgm(const wreal* u, const wreal* ud, const wreal* v,
+                                             const wreal* vd, const wreal* msfu,
+                                             const wreal* msfv, wreal rdx, wreal rdy, int k,
+                                             int j, int i, int ny, int nx)
+{
+    Dl ub = (wreal)0.5 * (ld(u, ud, R3(k, j, i, ny, nx + 1)) + ld(u, ud, R3(k, j, i + 1, ny, nx + 1)));
+    Dl vb = (wreal)0.5 * (ld(v, vd, R3(k, j, i, ny + 1, nx)) + ld(v, vd, R3(k, j + 1, i, ny + 1, nx)));
+    wreal dmv = msfv[(size_t)(j + 1) * nx + i] - msfv[(size_t)j * nx + i];
+    wreal dmu = msfu[(size_t)j * (nx + 1) + i + 1] - msfu[(size_t)j * (nx + 1) + i];
+    return (ub * dmv) * rdy - (vb * dmu) * rdx;
+}
+
+// 4-point rw at levels k, k+1 of cells cb (first) and ca, the primal's
+// strict order.
+static __device__ __forceinline__ Dl cc_rw4(const wreal* w, const wreal* wd, const wreal* mut,
+                                            const wreal* mutd, const wreal* msft,
+                                            const wreal* c1f, const wreal* c2f, int k,
+                                            size_t ca, size_t cb, size_t st)
+{
+    return (wreal)0.25 * (((cc_rw(w, wd, mut, mutd, msft, c1f, c2f, k + 1, cb, st)
+                            + cc_rw(w, wd, mut, mutd, msft, c1f, c2f, k, cb, st))
+                           + cc_rw(w, wd, mut, mutd, msft, c1f, c2f, k + 1, ca, st))
+                          + cc_rw(w, wd, mut, mutd, msft, c1f, c2f, k, ca, st));
+}
+
+// The half->full interpolation 0.5 (fzm (a + b)_k + fzp (a + b)_{k-1}).
+static __device__ __forceinline__ Dl cc_full(const wreal* a, const wreal* ad, size_t p0,
+                                             size_t p1, size_t lev, int k, const wreal* fzm,
+                                             const wreal* fzp)
+{
+    Dl hi = fzm[k] * (ld(a, ad, p0 + (size_t)k * lev) + ld(a, ad, p1 + (size_t)k * lev));
+    Dl lo = fzp[k] * (ld(a, ad, p0 + (size_t)(k - 1) * lev) + ld(a, ad, p1 + (size_t)(k - 1) * lev));
+    return (wreal)0.5 * (hi + lo);
+}
+
+struct CCPos { int k, j, i; };
+
+static __device__ __forceinline__ CCPos cc_pos(size_t tid, int ny, int nx)
+{
+    size_t plane = (size_t)(ny + 1) * (nx + 1);
+    CCPos p;
+    p.k = (int)(tid / plane);
+    size_t r = tid - (size_t)p.k * plane;
+    p.j = (int)(r / (nx + 1));
+    p.i = (int)(r - (size_t)p.j * (nx + 1));
+    return p;
+}
+
+extern "C" __global__
+void cc_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_td,
+           wreal* __restrict__ rv_t, wreal* __restrict__ rv_td,
+           wreal* __restrict__ rw_t, wreal* __restrict__ rw_td,
+           const wreal* __restrict__ ru, const wreal* __restrict__ rud,
+           const wreal* __restrict__ rv, const wreal* __restrict__ rvd,
+           const wreal* __restrict__ u, const wreal* __restrict__ ud,
+           const wreal* __restrict__ v, const wreal* __restrict__ vd,
+           const wreal* __restrict__ w, const wreal* __restrict__ wd,
+           const wreal* __restrict__ mut, const wreal* __restrict__ mutd,
+           CC_PASSIVE, int nl, CC_GEOM)
+{
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= (size_t)nz * (ny + 1) * (nx + 1)) return;
+    CCPos q = cc_pos(tid, ny, nx);
+    int k = q.k, j = q.j, i = q.i;
+    size_t st = (size_t)ny * nx;
+    if (j < ny && (!bnd_x || (i > 0 && i < nx))) {
+        int ic = i % nx, imc = (i - 1 + nx) % nx;
+        size_t ca = (size_t)j * nx + ic, cb = (size_t)j * nx + imc;
+        Dl rv4 = (wreal)0.25 * (((ld(rv, rvd, R3(k, j + 1, imc, ny + 1, nx))
+                                  + ld(rv, rvd, R3(k, j + 1, ic, ny + 1, nx)))
+                                 + ld(rv, rvd, R3(k, j, imc, ny + 1, nx)))
+                                + ld(rv, rvd, R3(k, j, ic, ny + 1, nx)));
+        Dl rw4 = cc_rw4(w, wd, mut, mutd, msft, c1f, c2f, k, ca, cb, st);
+        wreal fh = (wreal)0.5 * (f[ca] + f[cb]);
+        wreal eh = (wreal)0.5 * (e[ca] + e[cb]);
+        wreal ch = (wreal)0.5 * (cosa[ca] + cosa[cb]);
+        Dl vx = (wreal)0.5 * (cc_vxgm(u, ud, v, vd, msfu, msfv, rdx, rdy, k, j, ic, ny, nx)
+                              + cc_vxgm(u, ud, v, vd, msfu, msfv, rdx, rdy, k, j, imc, ny, nx));
+        size_t o = R3(k, j, i, ny, nx + 1);
+        Dl t = ld(ru_t, ru_td, o);
+        t = (t + fh * rv4) - (eh * ch) * rw4;
+        t = (t + vx * rv4) - (ld(u, ud, o) * rerad) * rw4;
+        if (nl) ru_t[o] = t.v;
+        ru_td[o] = t.d;
+    }
+    if (i < nx && (!bnd_y || (j > 0 && j < ny))) {
+        int jc = j % ny, jmc = (j - 1 + ny) % ny;
+        size_t ca = (size_t)jc * nx + i, cb = (size_t)jmc * nx + i;
+        Dl ru4 = (wreal)0.25 * (((ld(ru, rud, R3(k, jc, i, ny, nx + 1))
+                                  + ld(ru, rud, R3(k, jc, i + 1, ny, nx + 1)))
+                                 + ld(ru, rud, R3(k, jmc, i, ny, nx + 1)))
+                                + ld(ru, rud, R3(k, jmc, i + 1, ny, nx + 1)));
+        Dl rw4 = cc_rw4(w, wd, mut, mutd, msft, c1f, c2f, k, ca, cb, st);
+        wreal fh = (wreal)0.5 * (f[ca] + f[cb]);
+        wreal eh = (wreal)0.5 * (e[ca] + e[cb]);
+        wreal sh = (wreal)0.5 * (sina[ca] + sina[cb]);
+        Dl vx = (wreal)0.5 * (cc_vxgm(u, ud, v, vd, msfu, msfv, rdx, rdy, k, jc, i, ny, nx)
+                              + cc_vxgm(u, ud, v, vd, msfu, msfv, rdx, rdy, k, jmc, i, ny, nx));
+        size_t o = R3(k, j, i, ny + 1, nx);
+        Dl t = ld(rv_t, rv_td, o);
+        t = (t - fh * ru4) + (eh * sh) * rw4;
+        t = (t - vx * ru4) - (ld(v, vd, o) * rerad) * rw4;
+        if (nl) rv_t[o] = t.v;
+        rv_td[o] = t.d;
+    }
+    if (i < nx && j < ny && k >= 1) {
+        size_t c = (size_t)j * nx + i;
+        size_t ul = (size_t)ny * (nx + 1), vl = (size_t)(ny + 1) * nx;
+        size_t u0 = (size_t)j * (nx + 1) + i, v0 = (size_t)j * nx + i;
+        Dl ruf = cc_full(ru, rud, u0, u0 + 1, ul, k, fzm, fzp);
+        Dl uf = cc_full(u, ud, u0, u0 + 1, ul, k, fzm, fzp);
+        Dl rvf = cc_full(rv, rvd, v0, v0 + nx, vl, k, fzm, fzp);
+        Dl vf = cc_full(v, vd, v0, v0 + nx, vl, k, fzm, fzp);
+        size_t o = (size_t)k * st + c;
+        Dl t = ld(rw_t, rw_td, o);
+        t = t + e[c] * (cosa[c] * ruf - sina[c] * rvf);
+        t = t + rerad * (ruf * uf + rvf * vf);
+        if (nl) rw_t[o] = t.v;
+        rw_td[o] = t.d;
+    }
+}
+
+// AD pass 1, one thread per (k, j, i) of the union grid: each output's
+// adjoint times the partials of its local intermediates.
+//   su (4, nz, ny, nx+1): a_rv4, a_rw4, a_vx, a_u (own face)
+//   sv (4, nz, ny+1, nx): a_ru4, a_rw4, a_vx, a_v (own face)
+//   sw (4, nz, ny, nx):   a_ruf, a_uf, a_rvf, a_vf (zero at k = 0)
+// Every word is written (zero on the faces the primal skips).
+extern "C" __global__
+void cc_ad_face(const wreal* __restrict__ ru_a, const wreal* __restrict__ rv_a,
+                const wreal* __restrict__ rw_a, const wreal* __restrict__ ru,
+                const wreal* __restrict__ rv, const wreal* __restrict__ u,
+                const wreal* __restrict__ v, const wreal* __restrict__ w,
+                const wreal* __restrict__ mut, wreal* __restrict__ su,
+                wreal* __restrict__ sv, wreal* __restrict__ sw, CC_PASSIVE, CC_GEOM)
+{
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= (size_t)nz * (ny + 1) * (nx + 1)) return;
+    CCPos q = cc_pos(tid, ny, nx);
+    int k = q.k, j = q.j, i = q.i;
+    size_t st = (size_t)ny * nx;
+    wreal zero = (wreal)0;
+    if (j < ny) {
+        size_t o = R3(k, j, i, ny, nx + 1), n = (size_t)nz * ny * (nx + 1);
+        wreal s0 = zero, s1 = zero, s2 = zero, s3 = zero;
+        if (!bnd_x || (i > 0 && i < nx)) {
+            int ic = i % nx, imc = (i - 1 + nx) % nx;
+            size_t ca = (size_t)j * nx + ic, cb = (size_t)j * nx + imc;
+            wreal rv4 = (wreal)0.25 * (((rv[R3(k, j + 1, imc, ny + 1, nx)]
+                                         + rv[R3(k, j + 1, ic, ny + 1, nx)])
+                                        + rv[R3(k, j, imc, ny + 1, nx)])
+                                       + rv[R3(k, j, ic, ny + 1, nx)]);
+            wreal rw4 = cc_rw4(w, w, mut, mut, msft, c1f, c2f, k, ca, cb, st).v;
+            wreal fh = (wreal)0.5 * (f[ca] + f[cb]);
+            wreal eh = (wreal)0.5 * (e[ca] + e[cb]);
+            wreal ch = (wreal)0.5 * (cosa[ca] + cosa[cb]);
+            wreal vx = (wreal)0.5 * (cc_vxgm(u, u, v, v, msfu, msfv, rdx, rdy, k, j, ic, ny, nx).v
+                                     + cc_vxgm(u, u, v, v, msfu, msfv, rdx, rdy, k, j, imc, ny, nx).v);
+            wreal a = ru_a[o];
+            s0 = a * (fh + vx);
+            s1 = -a * (eh * ch + u[o] * rerad);
+            s2 = a * rv4;
+            s3 = -a * rerad * rw4;
+        }
+        su[o] = s0;
+        su[n + o] = s1;
+        su[2 * n + o] = s2;
+        su[3 * n + o] = s3;
+    }
+    if (i < nx) {
+        size_t o = R3(k, j, i, ny + 1, nx), n = (size_t)nz * (ny + 1) * nx;
+        wreal s0 = zero, s1 = zero, s2 = zero, s3 = zero;
+        if (!bnd_y || (j > 0 && j < ny)) {
+            int jc = j % ny, jmc = (j - 1 + ny) % ny;
+            size_t ca = (size_t)jc * nx + i, cb = (size_t)jmc * nx + i;
+            wreal ru4 = (wreal)0.25 * (((ru[R3(k, jc, i, ny, nx + 1)]
+                                         + ru[R3(k, jc, i + 1, ny, nx + 1)])
+                                        + ru[R3(k, jmc, i, ny, nx + 1)])
+                                       + ru[R3(k, jmc, i + 1, ny, nx + 1)]);
+            wreal rw4 = cc_rw4(w, w, mut, mut, msft, c1f, c2f, k, ca, cb, st).v;
+            wreal fh = (wreal)0.5 * (f[ca] + f[cb]);
+            wreal eh = (wreal)0.5 * (e[ca] + e[cb]);
+            wreal sh = (wreal)0.5 * (sina[ca] + sina[cb]);
+            wreal vx = (wreal)0.5 * (cc_vxgm(u, u, v, v, msfu, msfv, rdx, rdy, k, jc, i, ny, nx).v
+                                     + cc_vxgm(u, u, v, v, msfu, msfv, rdx, rdy, k, jmc, i, ny, nx).v);
+            wreal a = rv_a[o];
+            s0 = -a * (fh + vx);
+            s1 = a * (eh * sh - v[o] * rerad);
+            s2 = -a * ru4;
+            s3 = -a * rerad * rw4;
+        }
+        sv[o] = s0;
+        sv[n + o] = s1;
+        sv[2 * n + o] = s2;
+        sv[3 * n + o] = s3;
+    }
+    if (i < nx && j < ny) {
+        size_t c = (size_t)j * nx + i, o = (size_t)k * st + c, n = (size_t)nz * st;
+        wreal s0 = zero, s1 = zero, s2 = zero, s3 = zero;
+        if (k >= 1) {
+            size_t ul = (size_t)ny * (nx + 1), vl = (size_t)(ny + 1) * nx;
+            size_t u0 = (size_t)j * (nx + 1) + i, v0 = (size_t)j * nx + i;
+            wreal ruf = cc_full(ru, ru, u0, u0 + 1, ul, k, fzm, fzp).v;
+            wreal uf = cc_full(u, u, u0, u0 + 1, ul, k, fzm, fzp).v;
+            wreal rvf = cc_full(rv, rv, v0, v0 + nx, vl, k, fzm, fzp).v;
+            wreal vf = cc_full(v, v, v0, v0 + nx, vl, k, fzm, fzp).v;
+            wreal a = rw_a[o];
+            s0 = a * (e[c] * cosa[c] + rerad * uf);
+            s1 = a * rerad * ruf;
+            s2 = a * (rerad * vf - e[c] * sina[c]);
+            s3 = a * rerad * rvf;
+        }
+        sw[o] = s0;
+        sw[n + o] = s1;
+        sw[2 * n + o] = s2;
+        sw[3 * n + o] = s3;
+    }
+}
+
+// a_vxgm at mass point (k, j, c): the u faces whose ic or imc is c and the
+// v rows whose jc or jmc is j (each read counted once).  sg (nz, ny, nx).
+extern "C" __global__
+void cc_ad_vxgm(const wreal* __restrict__ su, const wreal* __restrict__ sv,
+                wreal* __restrict__ sg, int nz, int ny, int nx)
+{
+    size_t st = (size_t)ny * nx;
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= (size_t)nz * st) return;
+    int k = (int)(tid / st);
+    int j = (int)((tid - (size_t)k * st) / nx);
+    int c = (int)(tid - (size_t)k * st - (size_t)j * nx);
+    const wreal* ux = su + 2 * (size_t)nz * ny * (nx + 1);
+    const wreal* vx = sv + 2 * (size_t)nz * (ny + 1) * nx;
+    wreal s = ux[R3(k, j, c, ny, nx + 1)] + ux[R3(k, j, c + 1, ny, nx + 1)];
+    if (c == 0) s += ux[R3(k, j, nx, ny, nx + 1)];
+    if (c == nx - 1) s += ux[R3(k, j, 0, ny, nx + 1)];
+    s += vx[R3(k, j, c, ny + 1, nx)] + vx[R3(k, j + 1, c, ny + 1, nx)];
+    if (j == 0) s += vx[R3(k, ny, c, ny + 1, nx)];
+    if (j == ny - 1) s += vx[R3(k, 0, c, ny + 1, nx)];
+    sg[tid] = (wreal)0.5 * s;
+}
+
+#define CC_GATHER_ARGS                                                      \
+    const wreal* __restrict__ w, const wreal* __restrict__ mut,             \
+    const wreal* __restrict__ su, const wreal* __restrict__ sv,             \
+    const wreal* __restrict__ sw, const wreal* __restrict__ sg,             \
+    wreal* __restrict__ srw, wreal* __restrict__ aru, wreal* __restrict__ arv, \
+    wreal* __restrict__ au, wreal* __restrict__ av, wreal* __restrict__ aw, \
+    wreal* __restrict__ amut, CC_PASSIVE, CC_GEOM
+
+// u face (k, j, i): a_u and a_ru.
+extern "C" __global__
+void cc_ad_u(CC_GATHER_ARGS)
+{
+    size_t ul = (size_t)ny * (nx + 1);
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= (size_t)nz * ul) return;
+    int k = (int)(tid / ul);
+    int j = (int)((tid - (size_t)k * ul) / (nx + 1));
+    int i = (int)(tid - (size_t)k * ul - (size_t)j * (nx + 1));
+    size_t st = (size_t)ny * nx, nw = (size_t)nz * st;
+    wreal gu = su[3 * (size_t)nz * ul + tid];
+    wreal gr = (wreal)0;
+    // vxgm at mass points i (left face) and i - 1 (right face).
+    for (int s = 0; s < 2; ++s) {
+        int c = i - s;
+        if (c < 0 || c >= nx) continue;
+        wreal dmv = msfv[(size_t)(j + 1) * nx + c] - msfv[(size_t)j * nx + c];
+        gu += (wreal)0.5 * dmv * rdy * sg[(size_t)k * st + (size_t)j * nx + c];
+        // w levels k (fzm) and k + 1 (fzp) of cell (j, c).
+        size_t cc = (size_t)j * nx + c;
+        if (k >= 1) {
+            gu += (wreal)0.5 * fzm[k] * sw[nw + (size_t)k * st + cc];
+            gr += (wreal)0.5 * fzm[k] * sw[(size_t)k * st + cc];
+        }
+        if (k + 1 <= nz - 1) {
+            gu += (wreal)0.5 * fzp[k + 1] * sw[nw + (size_t)(k + 1) * st + cc];
+            gr += (wreal)0.5 * fzp[k + 1] * sw[(size_t)(k + 1) * st + cc];
+        }
+        // v faces of column c whose jc or jmc is j.
+        wreal r = sv[R3(k, j, c, ny + 1, nx)] + sv[R3(k, j + 1, c, ny + 1, nx)];
+        if (j == 0) r += sv[R3(k, ny, c, ny + 1, nx)];
+        if (j == ny - 1) r += sv[R3(k, 0, c, ny + 1, nx)];
+        gr += (wreal)0.25 * r;
+    }
+    au[tid] += gu;
+    aru[tid] += gr;
+}
+
+// v face (k, j, i): a_v and a_rv.
+extern "C" __global__
+void cc_ad_v(CC_GATHER_ARGS)
+{
+    size_t vl = (size_t)(ny + 1) * nx;
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= (size_t)nz * vl) return;
+    int k = (int)(tid / vl);
+    int j = (int)((tid - (size_t)k * vl) / nx);
+    int i = (int)(tid - (size_t)k * vl - (size_t)j * nx);
+    size_t st = (size_t)ny * nx, nw = (size_t)nz * st;
+    wreal gv = sv[3 * (size_t)nz * vl + tid];
+    wreal gr = (wreal)0;
+    for (int s = 0; s < 2; ++s) {
+        int r = j - s;
+        if (r < 0 || r >= ny) continue;
+        size_t cr = (size_t)r * nx + i;
+        wreal dmu = msfu[(size_t)r * (nx + 1) + i + 1] - msfu[(size_t)r * (nx + 1) + i];
+        gv -= (wreal)0.5 * dmu * rdx * sg[(size_t)k * st + cr];
+        if (k >= 1) {
+            gv += (wreal)0.5 * fzm[k] * sw[3 * nw + (size_t)k * st + cr];
+            gr += (wreal)0.5 * fzm[k] * sw[2 * nw + (size_t)k * st + cr];
+        }
+        if (k + 1 <= nz - 1) {
+            gv += (wreal)0.5 * fzp[k + 1] * sw[3 * nw + (size_t)(k + 1) * st + cr];
+            gr += (wreal)0.5 * fzp[k + 1] * sw[2 * nw + (size_t)(k + 1) * st + cr];
+        }
+        // u faces of row r whose ic or imc is i.
+        wreal q = su[R3(k, r, i, ny, nx + 1)] + su[R3(k, r, i + 1, ny, nx + 1)];
+        if (i == 0) q += su[R3(k, r, nx, ny, nx + 1)];
+        if (i == nx - 1) q += su[R3(k, r, 0, ny, nx + 1)];
+        gr += (wreal)0.25 * q;
+    }
+    av[tid] += gv;
+    arv[tid] += gr;
+}
+
+// w level (kf, j, i): a_rw from the faces' rw4, then a_w; a_rw kept in
+// srw (nz+1, ny, nx) for the column mass.
+extern "C" __global__
+void cc_ad_w(CC_GATHER_ARGS)
+{
+    size_t st = (size_t)ny * nx;
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= (size_t)(nz + 1) * st) return;
+    int kf = (int)(tid / st);
+    size_t c = tid - (size_t)kf * st;
+    int j = (int)(c / nx), i = (int)(c - (size_t)j * nx);
+    size_t ul = (size_t)ny * (nx + 1), vl = (size_t)(ny + 1) * nx;
+    const wreal* ur = su + (size_t)nz * ul;
+    const wreal* vr = sv + (size_t)nz * vl;
+    wreal s = (wreal)0;
+    for (int d = 0; d < 2; ++d) {
+        int k = kf - d;
+        if (k < 0 || k >= nz) continue;
+        s += ur[R3(k, j, i, ny, nx + 1)] + ur[R3(k, j, i + 1, ny, nx + 1)];
+        if (i == 0) s += ur[R3(k, j, nx, ny, nx + 1)];
+        if (i == nx - 1) s += ur[R3(k, j, 0, ny, nx + 1)];
+        s += vr[R3(k, j, i, ny + 1, nx)] + vr[R3(k, j + 1, i, ny + 1, nx)];
+        if (j == 0) s += vr[R3(k, ny, i, ny + 1, nx)];
+        if (j == ny - 1) s += vr[R3(k, 0, i, ny + 1, nx)];
+    }
+    wreal arw = (wreal)0.25 * s;
+    srw[tid] = arw;
+    aw[tid] += wdiv((c1f[kf] * mut[c] + c2f[kf]) * arw, msft[c]);
+}
+
+extern "C" __global__
+void cc_ad_mut(CC_GATHER_ARGS)
+{
+    size_t st = (size_t)ny * nx;
+    size_t c = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= st) return;
+    wreal s = (wreal)0;
+    for (int kf = 0; kf <= nz; ++kf)
+        s += c1f[kf] * w[(size_t)kf * st + c] * srw[(size_t)kf * st + c];
+    amut[c] += wdiv(s, msft[c]);
+}

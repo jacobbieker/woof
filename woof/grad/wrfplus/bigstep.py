@@ -25,6 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
+from woof.core.constants import RERADIUS
+
 from .acoustic import THREADS, _blocks, _check, _dtype, _real
 
 KERNELS = Path(__file__).resolve().parent / "kernels"
@@ -318,3 +320,97 @@ def geo_ad(adj_state, traj, adj, geom: GeoGeometry):
     _kernel("geo_ad_mup", dtype)(_blocks(ny * nx), (THREADS,), a)
     _kernel("geo_ad_top", dtype)(_blocks(ny * nx), (THREADS,),
                                  (seed, np.int32(nz), np.int32(ny), np.int32(nx)))
+
+
+# ---------------------------------------------------- coriolis + curvature
+
+CC_STATE = ("ru_t", "rv_t", "rw_t")
+CC_ACTIVE = ("ru", "rv", "u", "v", "w", "mut")
+CC_PASSIVE = ("msft", "msfu", "msfv", "f", "e", "sina", "cosa", "c1f", "c2f", "fnm", "fnp")
+
+
+@dataclass(frozen=True)
+class CCGeometry:
+    """coriolis_curvature's scalars: ``rdx = 1/dx`` and ``rdy`` as the
+    primal rounds them, and the bounded axes (open or specified), whose
+    boundary-normal faces the primal leaves to the lateral boundary code.
+    ``rerad`` is woof's RERADIUS (1/6370 km)."""
+    nz: int
+    ny: int
+    nx: int
+    rdx: float
+    rdy: float
+    boundary_x: int = 0
+    boundary_y: int = 0
+    rerad: float = RERADIUS
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        return (r(self.rdx), r(self.rdy), r(self.rerad), i(self.boundary_x),
+                i(self.boundary_y), i(self.nz), i(self.ny), i(self.nx))
+
+    def validate(self) -> None:
+        _axes(self)
+        if self.rerad != RERADIUS:
+            raise ValueError(f"rerad {self.rerad!r} is not woof's RERADIUS {RERADIUS!r}")
+
+
+def cc_shapes(geom) -> dict:
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    u, v, wlev, col = (nz, ny, nx + 1), (nz, ny + 1, nx), (nz + 1, ny, nx), (ny, nx)
+    return {"ru_t": u, "rv_t": v, "rw_t": wlev, "ru": u, "rv": v, "u": u, "v": v,
+            "w": wlev, "mut": col, "msft": col, "msfu": (ny, nx + 1), "msfv": (ny + 1, nx),
+            "f": col, "e": col, "sina": col, "cosa": col, "c1f": (nz + 1,), "c2f": (nz + 1,),
+            "fnm": (nz,), "fnp": (nz,)}
+
+
+def cc_tl(state, pert_state, traj, pert, geom: CCGeometry, *, nl=True):
+    """WRFPLUS G_CORIOLIS then G_CURVATURE on woof's strict
+    coriolis_curvature: ru_t, rv_t, rw_t gain the Coriolis and curvature
+    terms of ru, rv, u, v and rw = (c1f mut + c2f) w / msft."""
+    geom.validate()
+    _check(geom, _named("state", CC_STATE, state) + _named("pert", CC_STATE, pert_state)
+           + _named("traj", CC_ACTIVE + CC_PASSIVE, traj)
+           + _named("pert", CC_ACTIVE, pert), cc_shapes(geom), min_nz=1)
+    pairs = ()
+    for n in CC_STATE:
+        pairs += (state[n], pert_state[n])
+    for n in CC_ACTIVE:
+        pairs += (traj[n], pert[n])
+    arrs = pairs + tuple(traj[n] for n in CC_PASSIVE)
+    dtype = _dtype(arrs)
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    _kernel("cc_tl", dtype)(_blocks(nz * (ny + 1) * (nx + 1)), (THREADS,),
+                            arrs + (np.int32(bool(nl)),) + geom.args(dtype))
+
+
+def cc_ad(adj_state, traj, adj, geom: CCGeometry):
+    """Adjoint of :func:`cc_tl`: add into ``adj`` (ru, rv, u, v, w, mut)
+    from the tendencies' adjoints, which pass through unchanged."""
+    geom.validate()
+    _check(geom, _named("adj", CC_STATE, adj_state)
+           + _named("traj", CC_ACTIVE + CC_PASSIVE, traj)
+           + _named("adj", CC_ACTIVE, adj), cc_shapes(geom), min_nz=1)
+    import cupy as cp
+    passive = tuple(traj[n] for n in CC_PASSIVE)
+    seeds = tuple(adj_state[n] for n in CC_STATE)
+    ins = tuple(traj[n] for n in CC_ACTIVE)
+    outs = tuple(adj[n] for n in CC_ACTIVE)
+    dtype = _dtype(seeds + ins + outs + passive)
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    # Per-face adjoints (see kernels/bigstep.cu); cc_ad_face writes every word.
+    su = cp.empty((4, nz, ny, nx + 1), dtype=dtype)
+    sv = cp.empty((4, nz, ny + 1, nx), dtype=dtype)
+    sw = cp.empty((4, nz, ny, nx), dtype=dtype)
+    sg = cp.empty((nz, ny, nx), dtype=dtype)
+    srw = cp.empty((nz + 1, ny, nx), dtype=dtype)
+    g = geom.args(dtype)
+    _kernel("cc_ad_face", dtype)(_blocks(nz * (ny + 1) * (nx + 1)), (THREADS,),
+                                 seeds + ins + (su, sv, sw) + passive + g)
+    _kernel("cc_ad_vxgm", dtype)(_blocks(nz * ny * nx), (THREADS,),
+                                 (su, sv, sg, np.int32(nz), np.int32(ny), np.int32(nx)))
+    a = (traj["w"], traj["mut"], su, sv, sw, sg, srw) + outs + passive + g
+    _kernel("cc_ad_u", dtype)(_blocks(nz * ny * (nx + 1)), (THREADS,), a)
+    _kernel("cc_ad_v", dtype)(_blocks(nz * (ny + 1) * nx), (THREADS,), a)
+    _kernel("cc_ad_w", dtype)(_blocks((nz + 1) * ny * nx), (THREADS,), a)
+    _kernel("cc_ad_mut", dtype)(_blocks(ny * nx), (THREADS,), a)
