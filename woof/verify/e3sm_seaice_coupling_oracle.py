@@ -236,6 +236,8 @@ _POOL_ORDER = ("configs", "dimensions", "mesh", "ocean_coupling", "atmos_couplin
 
 
 def _entries(case):
+    for pool in _POOL_ORDER[2:]:
+        yield pool, "", 7, None  # every subpool exists, as in E3SM
     for pool in _POOL_ORDER:
         for name, (kind, value) in case["pools"][pool].items():
             yield pool, name, kind, value

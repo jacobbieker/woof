@@ -11,7 +11,8 @@
 !     lsize) and i2x (ni2x, lsize) as r8;
 !   nEntries, then per entry: its pool (32 characters: configs, dimensions,
 !     or a subpool of the block's structs by name), kind (1 logical, 2 real,
-!     3 character, 4 integer dimension, 5 real 1-D, 6 real 2-D, 8 an absent
+!     3 character, 4 integer dimension, 5 real 1-D, 6 real 2-D, 7 the pool
+!     alone (no value), 8 an absent
 !     real 1-D field, 9 an absent real 2-D field), its name (64 characters),
 !     and its value: int32 0/1, r8, 64 characters, int32, or the extents
 !     (int32) and the array.
@@ -157,6 +158,8 @@ program run_seaice_coupling
         call stub_pool_put_array(p, trim(name), r2(nArrays) % a)
         if (kind == 9) call stub_pool_mark_absent(p, trim(name))
         arrayKind(nArrays) = kind
+     case (7)
+        ! the pool alone (E3SM's routines get some subpools they read nothing from)
      case default
         stop 9
      end select
