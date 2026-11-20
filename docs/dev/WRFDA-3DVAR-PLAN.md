@@ -2223,7 +2223,7 @@ work (12.7).
 | `aircraft` | airep or AMDAR (42) | `temperature_k`, `wind_u/v_m_s` (`aircraft_level`), pressure from flight level (ICAO) | T 1.0 K, wind 3.6 m/s (AIREPS) | one row per `report_id`; WRFDA's aircraft thinning is a later option |
 | `satellite/amv`, `ahi_amv` | geoamv or polaramv (88) | `wind_u/v_m_s` (`amv_assigned_pressure`) | WRFDA's satob error by pressure (confirmed against `da_read_obs_ascii` in PR C) | QI (without forecast) at least 80; pressure 100-1000 hPa; WRFDA's AMV level and land rules |
 | `satellite/scatterometer` | qscat (281) | `wind_u/v_m_s` at 10 m over sea (`scatterometer_wind_10m`, new label) | WRFDA's qscat error floor (in `obs_wrfda.read_obs_ascii`) | selected ambiguity only; `wind_vector_cell_quality` clear; land and ice cells refused |
-| `satellite/gnss_ro` | gpsref (116) | `refractivity_n` (`ro_refractivity_tangent_point`) | WRFDA's gpsref error profile (OBSPROC `gpsref` rule, ported in PR E) | `percent_confidence` and the RO quality flags; tangent height 0 to 30 km; the lowest 2 km refused over land (super-refraction) |
+| `satellite/gnss_ro` | gpsref (116) | `refractivity_n` (`ro_refractivity_tangent_point`) | WRFDA's gpsref error profile (`da_read_obs_bufrgpsro` `err_opt = 1`, ported in PR E as `obserr_wrfda.gpsref_error`) | profile `percent_confidence` 100 and the RO quality flags; tangent height 0 to 30 km; `da_qc_gpsref`'s observed-gradient checks (super-refraction) |
 | MW sounders (`amsua`, `mhs`, `atms`, `mwhs2`, `mwts2`, `mws`) | radiance | `brightness_temperature_k` with the stream's own operator | WRFDA `radiance_info` per channel | clear-sky over sea first: scattering and cloud-liquid indices, channel and surface screens; VarBC later |
 | IR sounders (`iasi`, `cris`) | radiance | per selected channel | WRFDA `radiance_info` | clear-sky channel screen (McNally-Watts), channel selection (later) |
 | geo radiances (`seviri_asr`, `fci_asr`, `ami_csr`) | radiance | as the imagers of section 11 | section 11.7 | CRTM has no FCI or AMI coefficients (section 11.12); SEVIRI only |
@@ -2430,6 +2430,32 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
    `obs_radiance`. IASI and CrIS come after, with a channel selection.
 5. **PR E: GNSS-RO refractivity.** The local 1-D operator is the existing
    one; the reader and the WRFDA gpsref error are new. Bending angle comes
-   later, if warranted.
+   later, if warranted. As built (opt-in family `ro`):
+   - Template 310026 lists the bending-angle levels (each with its tangent
+     point), then the refractivity levels; the counts are the row's
+     `extended_delayed_descriptor_replication_factor`, and
+     `percent_confidence` is the profile's, then one per bending-angle
+     level, then one per refractivity level. As `da_read_obs_bufrgpsro`
+     does, refractivity level k takes bending-angle level k's location when
+     the counts agree. WRFDA skips a profile whose counts differ; here it
+     is kept at the occultation point, and counted.
+   - A profile is refused under 100 % confidence (WRFDA's rule) or with
+     0-33-039 bits 1, 4, 5, 6 or 15 set (non-nominal, excess phase, bending
+     angle or refractivity processing non-nominal, background profile).
+     A level is dropped at 0 % confidence, outside 0-30 km, or where the
+     observed dN/dz is below -50 N/km or |d2N/dz2| above 100 N/km^2 (the
+     observed half of `da_qc_gpsref`'s gradient checks).
+   - Copies (satellite, transmitter, time) are one profile, first arrival.
+   - Errors: `gpsref_error`, 1 % of N scaled by height and latitude
+     (`err_opt = 1`).
+   - The table rows carry the height in `elevation_m` and its
+     standard-atmosphere pressure in `level_pa`, which only keeps the
+     levels' identities apart. `obs_gts` has one FM-116 report per profile
+     at the occultation point (the ascii reader has one location per
+     report), refractivity in the dew point slot, its error not below
+     0.01 N (the F7.2 field; near 30 km WRFDA's error is smaller).
+   - On 2026-10-28 09-15Z globally: 2,568 profiles in the window, 1,502
+     used (207,599 levels); 1,001 are EUMETSAT bending-angle-only
+     products, which need a bending-angle operator.
 6. **PR F: impact.** One real case, as in #657: O-B and O-A per family,
    and a radiosonde and surface scorecard showing no degradation.

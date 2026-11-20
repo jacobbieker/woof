@@ -1035,8 +1035,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   refused), with WRFDA's SATOB and QSCAT errors and an optional
   `--thin-km`. AMVs go to both outputs. Scatterometer winds go to
   `obs_gts`, and to the table under a label the LETKF has no operator for
-  yet. WIS2 has no GOES AMVs. MW radiances and GNSS-RO come next
-  ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)).
+  yet. WIS2 has no GOES AMVs. `--families ro` reads GNSS-RO refractivity
+  profiles (template 310026: COSMIC-2, FY-3, PAZ and others relayed by JMA
+  and CMA; EUMETSAT's products carry bending angles only and are counted,
+  not used). Each level sits at its tangent point, 0-30 km, with WRFDA's
+  gpsref error and the observed-gradient (super-refraction) checks of
+  `da_qc_gpsref`. Profiles go to the table (`ro_refractivity_tangent_point`,
+  the LETKF's existing refractivity operator) and to `obs_gts` as FM-116.
+  MW radiances come next ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA

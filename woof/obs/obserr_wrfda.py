@@ -36,7 +36,8 @@ How OBSPROC does it, and what is ported
 
 Not ported: SSMT1/SSMT2/SSMI/GPS refractivity and TC bogus (FM 135), whose
 errors depend on more than a table lookup; ``errors`` raises for those FM
-codes.  The qv error OBSPROC derives afterwards is not part of obs_gts errors
+codes.  GNSS-RO refractivity has its own function, :func:`gpsref_error`: the
+error WRFDA's GNSS-RO BUFR reader assigns (OBSPROC writes no FM-116 reports).  The qv error OBSPROC derives afterwards is not part of obs_gts errors
 here either.
 
 Precision: OBSPROC is ``real*4`` throughout (tables, pressures, interpolation);
@@ -312,3 +313,24 @@ class ObsErrTable:
             out["thickness"] = out["height"]
         return out
 
+
+def gpsref_error(refractivity_n: float, height_m: float, lat_deg: float) -> float:
+    """The GNSS-RO refractivity error (N units) of WRFDA's ``da_read_obs_bufrgpsro`` (``err_opt = 1``,
+    "WRF-Var/obsproc"): 1 % of N, scaled by a height factor that runs from the
+    equator's profile to the pole's in ``|lat|``; 0.3 at and above 12 km.
+
+    Height is the level's height above mean sea level (m), as the reader takes it.
+    """
+    ref_error = refractivity_n * 0.01
+    if height_m >= 12000.0:
+        return ref_error * 0.3
+    erh90 = (0.3 - 1.5) * (height_m - 12000.0) / (12000.0 - 0.0) + 0.3
+    if height_m >= 5500.0:
+        erh0 = (0.3 - 1.3) * (height_m - 12000.0) / (12000.0 - 5500.0) + 0.3
+    elif height_m >= 2500.0:
+        erh0 = (1.3 - 2.5) * (height_m - 5500.0) / (5500.0 - 2500.0) + 1.3
+    else:
+        erh0 = 2.5
+    err90 = ref_error * erh90
+    err0 = ref_error * erh0
+    return err90 - (1.0 - abs(lat_deg) / 90.0) * (err90 - err0)
