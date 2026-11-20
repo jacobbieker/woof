@@ -561,7 +561,7 @@ def longwave_slot(call):
     result = lw.rrtmg_lwrad_device(*lw.radiation_lw_from_mpas(state),pools["rrtmg_lw_tables"],
         icloud=int(pools["icloud"]),julday=int(pools["julday"]),cldovrlp=overlap,idcor=idcor,
         has_reqc=int(flags["has_reqc"]),has_reqi=int(flags["has_reqi"]),has_reqs=int(flags["has_reqs"]),
-        o3input=o3input,pin=pin,ozone=ozone,retain_profiles=False)
+        o3input=o3input,pin=pin,ozone=ozone,retain_profiles=False,time_seconds=call.time_seconds)
     out = lw.radiation_lw_to_mpas(result)
     for n in lw.FLUX_FIELDS:
         diag["olrtoa" if n=="olr" else n][:nc] = out[n]

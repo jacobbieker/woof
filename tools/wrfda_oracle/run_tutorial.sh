@@ -6,17 +6,27 @@
 #   data/         the unpacked WRFDAV3.9-testdata tarball
 # DUMP=1 additionally requires woof_be.bin, woof_xb.bin, woof_u.bin and
 #        woof_iv.bin in the run directory (use with the patched WRFV4.7.1-dump).
-# usage: [DUMP=1] run_tutorial.sh NAME [extra wrfvar10 settings, e.g. test_transforms=true,]
+# WRFVAR1 / WRFVAR5 / WRFVAR15 / WRFVAR19 (optional) are comma-terminated namelist lines inserted into
+#        &wrfvar1 / &wrfvar5 / &wrfvar15 / &wrfvar19, e.g. WRFVAR15='num_pseudo=1,pseudo_x=45.3,' WRFVAR19='pseudo_var="t",'
+#        (the single-observation tests; use TREE=WRFV4.7.1, the undumped build).
+# BE=FILE uses FILE (an existing path inside the container; it is resolved before the run directory is
+#        reset, and must not be inside $W/run/NAME) instead of the tutorial be.dat.  The tutorial namelist is
+#        cv_options=5, so FILE must be a cv5 be.dat (run_gen_be.sh 5), not a cv7 one.
+# usage: [DUMP=1] [BE=FILE] [WRFVAR1=...] [WRFVAR5=...] [WRFVAR15=...] [WRFVAR19=...] run_tutorial.sh NAME [extra wrfvar10 settings, e.g. test_transforms=true,]
 set -eux
 NAME=${1:?usage: run_tutorial.sh NAME [extra wrfvar10 settings]}
 EXTRA=${2:-}
 case "$NAME" in */*|.*) echo "NAME must be a plain directory name" >&2; exit 2;; esac
 case "$EXTRA" in */*|*\&*|*\\*) echo "extra settings must not contain / & or \\" >&2; exit 2;; esac
 W=${W:-/d/scratch/wrfda}; W=$(cd "$W" && pwd); S=$W/src/${TREE:-WRFV4.7.1}; D=$W/data; R=$W/run/$NAME
+BE_SRC=${BE:-$D/be/be.dat}
+[ -f "$BE_SRC" ] || { echo "BE file $BE_SRC not found" >&2; exit 2; }
+BE_SRC=$(cd "$(dirname "$BE_SRC")" && pwd)/$(basename "$BE_SRC")
+case "$BE_SRC" in "$R"/*) echo "BE must not be inside the run directory $R (it is deleted first)" >&2; exit 2;; esac
 rm -rf "$R"; mkdir -p "$R"; cd "$R"
 ln -sf "$S/var/build/da_wrfvar.exe" .
 ln -sf "$S/run/LANDUSE.TBL" .
-cp "$D/be/be.dat" be.dat
+cp "$BE_SRC" be.dat
 cp "$D/ob/2008020512/ob.ascii" ob.ascii
 cp "$D/rc/2008020512/wrfinput_d01" fg
 NL=$S/var/test/tutorial/namelist.input
@@ -24,6 +34,17 @@ grep -q "^test_transforms=false," "$NL" || { echo "$NL has no test_transforms=fa
 grep -q "^start_year=2008," "$NL" || { echo "$NL has no start_year=2008, line" >&2; exit 2; }
 sed "s/^test_transforms=false,/test_transforms=false,${EXTRA}/" "$NL" \
   | sed "s/^start_year=2008,/force_use_old_data=.true.,\nstart_year=2008,/" > namelist.input
+for g in 1 5 15 19; do
+  v=WRFVAR$g; v=${!v:-}
+  case "$v" in */*|*\&*|*\\*) echo "WRFVAR$g must not contain / & or \\" >&2; exit 2;; esac
+  [ -z "$v" ] || sed -i "s/^&wrfvar$g\$/\&wrfvar$g\n$v/" namelist.input
+  # every inserted key must be in the namelist exactly once (a later line of the same key would override it)
+  for kv in ${v//,/ }; do
+    k=${kv%%=*}
+    [ "$(grep -c "^[[:space:]]*$k[[:space:]]*=" namelist.input)" = 1 ] \
+      || { echo "namelist key $k is not present exactly once after the insertion" >&2; exit 2; }
+  done
+done
 status=0
 /usr/bin/time -v ./da_wrfvar.exe > wrfda.out 2> time.txt || status=$?
 grep -E "Elapsed|Maximum resident" time.txt

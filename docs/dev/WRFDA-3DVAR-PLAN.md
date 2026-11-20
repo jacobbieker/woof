@@ -1157,6 +1157,19 @@ physically shaped. Over a 10-day cycle on one woof domain, the analysis
 fits independent observations no worse than with WRFDA's tutorial-style
 default `B`.
 
+*Status (2026-11-20):* V2.1-V2.3 for cv5 and cv7, `bin_type` 5
+(`woof/da/var/gen_be.py`, `tests/test_var_gen_be.py`). WRFDA's gen_be is
+linked from the pinned build's objects (`tools/wrfda_oracle/link_gen_be.sh`,
+the stock link line lacks `-lnetcdff`) and run on the 20 sample forecasts
+(`run_gen_be.sh`). Measured: regressions within 1.0e-7, eigenvalues 5.5e-8,
+length scales 7.4e-8 (cv5; `fft661`'s tables use `pi = 3.1415926`, woof's
+sine transform is exact) and 3e-12 with identical length scales (cv7).
+WRFDA's tutorial 3D-Var with the woof-made cv5 file: final J 21497.748
+against 21497.749 with WRFDA's, 30 iterations each, increments within 2e-6
+of the largest (binary32 output); woof's 3D-Var with the woof-made file
+reproduces that WRFDA log. Open: other `bin_type`s and cv6, a device tier,
+the single-observation and 10-day cycling parts of GV2.
+
 ### V3. Hybrid 3DEnVar with the LETKF ensemble (3-4 w)
 
 | PR | content | effort |
@@ -2444,6 +2457,65 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
 4. **PR D: MW radiances.** CRTM v2.4 MW clear-sky for AMSU-A, MHS and
    ATMS (FY-3 where coefficients exist), over sea first, through
    `obs_radiance`. IASI and CrIS come after, with a channel selection.
+   As built (reader `woof obs wis2 radiances`, adapter `woof.da.obs_mw`,
+   LETKF only):
+   - Groups `satellite/amsua`, `mhs` and `atms`, windowed as in PR C. The
+     store's `quality_flag` and per-channel quality refuse rows or
+     channels, and so does a BT outside 100-340 K. A field of view must be
+     inside the scan and the sensor zenith at most 65 degrees. Copies
+     (satellite, time, field of view, location) are one footprint, first
+     arrival. The scan angle is `(fov - (n+1)/2) x step`.
+   - Satellites map to CRTM sensors by BUFR id: Metop-B and -C
+     (`amsua_`/`mhs_metop-b`, `-c`), S-NPP `atms_npp`, NOAA-20 `atms_n20`
+     and NOAA-21 `atms_j2`. The reader also maps Metop-A, NOAA-15, -18
+     and -19, and Aqua. A satellite with no CRTM sensor is counted and
+     refused by the reader. A sensor whose coefficients CRTM has not
+     opened is counted and refused by the adapter. WIS2 has none of those
+     older platforms in this window. FY-3 (`mwts2`, `mwhs2`, `mws`) waits
+     for coefficients.
+   - A missing per-channel quality value does not refuse the channel.
+     Only a set one does.
+   - Coefficients come from CRTM's REL-2.4.1 fix tarball, kept outside
+     the repository: ODAS TauCoeff for AMSU-A and MHS on Metop-B and -C
+     and for `atms_npp`, ODPS for `atms_n20` and `atms_j2`, SpcCoeff for
+     all seven, FASTEM6 and the MW water LUT. The tarball's
+     `amsua_metop-b.SpcCoeff.bin` says version 3 in its header but has
+     the version-2 record layout. CRTM refuses to read it until byte 20
+     is patched to 2.
+   - The adapter keeps open sea only: the mean column has no land, sea
+     ice or snow. It runs H(x) per member and one Jacobian on the mean.
+     It applies WRFDA's channels and errors (`radiance_info`: AMSU-A 5-9,
+     MHS 3-5, ATMS 6-10 and 18-22) and WRFDA's v4.7.1 screens. Those
+     are scan edges, the scattering index, background cloud liquid of
+     0.2 kg/m2 (when the caller passes it), and 15 K and 3 sigma
+     departures. Each channel sits at its Jacobian peak; a channel
+     peaking in the model's top layer is refused. Metop-B AMSU-A channel
+     15 is dead, so where the scattering index cannot be formed GSI's
+     channel 1-2 cloud liquid retrieval (0.2 kg/m2) stands in. An ATMS
+     screen that cannot be formed refuses its channels. The scattering
+     indices use the raw observations. ATMS's O-B screens use the
+     bias-corrected departure, which is WRFDA's `tb_inv`.
+   - Thinning keeps the nearest footprint to every `thin`-th column.
+     Limb footprints, and footprints with no valid channel, are left out
+     first, so they never take a column that a neighbour could serve.
+   - On 2026-10-28 11-13Z globally the reader passes 55,455 AMSU-A,
+     656,513 MHS and 1,083,892 ATMS footprints. CRTM on the GEFS control
+     (f006, 0.5 degree), at sea within 55 degrees of the equator and
+     after the screens, gives these O-B values:
+     - AMSU-A channels 5-9: means of -1.4 to +0.4 K and standard
+       deviations of 0.23-0.33 K. The exception is Metop-C channel 8, at
+       3.3 K: that channel is noisy, and the 3-sigma check (0.81 K) refuses its
+       outliers.
+     - MHS: standard deviations of 1.9-2.1 K.
+     - ATMS channels 6-10: standard deviations of 0.22-0.43 K and means
+       of -1.2 to +0.2 K.
+     - ATMS channels 18-22: standard deviations of 1.6-2.2 K.
+
+     These sit near WRFDA's errors. The means are the static bias
+     correction's job (`bias_k`).
+   - The 3D-Var radiance term (an `ObsTerm` in `woof/da/var/cost.py`)
+     needs the CRTM layer Jacobians mapped onto the increment grid. It is
+     plan V4, not this PR.
 5. **PR E: GNSS-RO refractivity.** The local 1-D operator is the existing
    one; the reader and the WRFDA gpsref error are new. Bending angle comes
    later, if warranted. As built (opt-in family `ro`):
@@ -2474,4 +2546,301 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      used (207,599 levels); 1,001 are EUMETSAT bending-angle-only
      products, which need a bending-angle operator.
 6. **PR F: impact.** One real case, as in #657: O-B and O-A per family,
-   and a radiosonde and surface scorecard showing no degradation.
+   and a radiosonde and surface scorecard showing no degradation. As
+   run (a scratch script; no observation data in the repository):
+   - **Ensemble:** 31 GEFS members, the 06Z run's 6-hour forecast valid
+     2026-10-28 12Z, on 31 levels at 0.5 degree over 30-65 N, 40 W-30 E.
+   - **LETKF settings:** 200 km and 6 km localisation, RTPS 0.9.
+   - **Observations:** WIS2 AMVs (`--thin-km 50`), aircraft
+     (`assimilate_aircraft`) and GNSS-RO through `woof.da.obs_point`; MW
+     radiances through `woof.da.obs_mw` (thin 2, static bias from the
+     domain's mean O-B).
+   - **Held out:** radiosondes are not assimilated; they are the
+     scorecard. The surface half needs 2 m and 10 m diagnostics of the
+     analysis, which this isobaric case does not have.
+   - **Arrival:** the run is retrospective, so arrival times are ignored.
+     About 37 % of the rows arrived after 12Z.
+   - **Run time:** the solve needs `solve_namespace=np` (host staging,
+     the forked chunk loop: 12 workers, under 2 minutes for 31 members and
+     38,000 observations). Without it the host path is one process and
+     took 20 minutes at 4 members.
+   - **The window matters most.** The LETKF is 3-D (no FGAT), so an
+     observation 3 hours old is compared with the 12Z state. With
+     09-12Z observations the analysis made the sondes' v at 400-200 hPa
+     worse: RMS 2.47 to 3.09 m/s, mean -0.29 to -1.10. Denial runs gave
+     the same sign for aircraft alone (2.94) and AMVs alone (2.81).
+     The aircraft v O-B mean was +0.67 m/s, while the sondes' was
+     -0.29. The runs below use 11-12Z (1 hour).
+   - O-B and O-A RMS per family (assimilated observations; MW split into
+     the assimilated lattice and the columns between):
+
+     | family | n | O-B | O-A |
+     |---|---|---|---|
+     | aircraft T (K) | 1602 | 1.02 | 0.87 |
+     | aircraft u / v (m/s) | 1602 | 2.46 / 2.49 | 2.09 / 2.08 |
+     | AMV u / v (m/s) | 13424 / 13151 | 5.01 / 4.96 | 4.10 / 4.08 |
+     | GNSS-RO N | 114 | 5.27 | 4.10 |
+     | AMSU-A, assimilated / independent (K) | 1939 / 5751 | 0.31 / 0.30 | 0.30 / 0.29 |
+     | MHS, assimilated / independent (K) | 2550 / 7705 | 1.85 / 1.88 | 1.45 / 1.65 |
+     | ATMS, assimilated / independent (K) | 1283 / 3847 | 0.73 / 0.76 | 0.55 / 0.67 |
+
+   - Radiosonde scorecard, background to analysis RMS (1241 T and 1236
+     wind reports; one gross rejection):
+
+     | | all families | without AMVs |
+     |---|---|---|
+     | T 850-500 hPa (K) | 0.854 to 0.850 | 0.854 to 0.842 |
+     | T 400-200 hPa (K) | 0.716 to 0.709 | 0.716 to 0.710 |
+     | u 400-200 hPa (m/s) | 1.958 to 2.023 | 1.958 to 1.964 |
+     | v 400-200 hPa (m/s) | 2.465 to 2.558 | 2.465 to 2.496 |
+     | v, all levels (m/s) | 2.459 to 2.496 | 2.459 to 2.470 |
+
+   - **Reading.** Without AMVs the scorecard is neutral to slightly
+     better. With AMVs, upper-level winds are 3-4 % worse. Their u O-B
+     mean is +0.41 m/s, which points to height assignment or a bias that
+     a static error does not absorb. The follow-ups are AMV error
+     inflation or tighter thinning, and a 4-D (FGAT) operator before
+     using the full window.
+   - The RO O-B was +1.8 % of N at 20-30 km until #698, which converts
+     geometric tangent heights to geopotential.
+
+## 13. Satellite radiances in 3D-Var (V4.3 and V4.4): design as built
+
+Section 11.9 path B, made concrete (2026-11-20). It adds clear-sky
+satellite radiances and WRFDA-style variational bias correction (VarBC)
+to `woof/da/var/`. The work reuses the readers (#642 SatWeave, #644 GOES
+ABI from `bkr/geo/virtualized/`, #671 AHI, #673 SEVIRI) and the CRTM
+operator (#651, CRTM v2.4.1, CC0, opt-in). It never uses the GPL CRTM 2.3.0
+in the WRF tree, and never RTTOV. Microwave sounders (AMSU-A, MHS, ATMS)
+come from WIS2 PR D's reader; this section only defines how they plug in.
+
+### 13.1 Modules
+
+| module | content |
+|---|---|
+| `woof/da/var/radiance.py` | `RadianceObs` (one sensor's observations), the adapters from `ImagerScene` and from MW footprints, GSI thinning, the background columns, `RadianceTerm` (the `ObsTerm`) and WRFDA's QC |
+| `woof/da/var/varbc.py` | predictors, cold and warm start, `VARBC.in`/`VARBC.out`, the preconditioning and the `Jp` control block |
+| `woof/da/var/cost.py` | control blocks after `U`'s control vector (`cv = [v_U, v_p]`) and `Jp` |
+
+None of these modules is imported by a forecast path or by `woof var`
+without its opt-in, and none imports `woof.rtm` at module level, so
+`tests/test_var_import_graph.py` keeps holding.
+
+### 13.2 The observation record and the MW interface
+
+`RadianceObs` holds one CRTM sensor id (`abi_g16`, `ahi_himawari9`,
+`seviri_m11`, `amsua_metop-b`, ...) and `n` locations:
+
+- `channels` `(nchan,)`: the instrument channel numbers, as CRTM numbers them;
+- `bt` `(n, nchan)` in K, NaN where missing;
+- `lat`, `lon`, `sensor_zenith`, `sensor_azimuth`, `sensor_scan`,
+  `solar_zenith`, `solar_azimuth` `(n,)` in degrees;
+- `scanpos` `(n,)`: the field of view for scanning sounders (WRFDA's
+  `scanpos`, a VarBC predictor), 0 for imagers;
+- `time`, and `provenance` (reader, attribution, counts).
+
+There are two adapters:
+
+- `from_imager_scene(scene, bands=...)` splits a scene by CRTM sensor and
+  maps each band to its channel through `woof.obs.imager_scene.band`.
+- `from_footprints(fp)` takes any object with the attributes WIS2 PR D's
+  `MwFootprints` has (`sensor`, `channels`, `lat`, `lon`, `fov`,
+  `scan_angle`, `sensor_zenith`, `sensor_azimuth`, `solar_zenith`,
+  `solar_azimuth`, `bt`). It is duck-typed, so `woof/da/var` imports nothing
+  from `woof.obs.wis2*` and PR D needs no change. The MW screens (Grody's
+  cloud liquid water, the scattering index, WRFDA's per-instrument channel
+  sets and errors) stay in PR D's module. PR D passes its accepted mask
+  and per-channel errors through `RadianceObs.qc` and `.error`, and the
+  3D-Var term keeps them.
+
+### 13.3 Background columns and the K-matrix
+
+The profile is WRFDA's (`da_get_innov_vector_crtm`):
+
+- Horizontal: bilinear in the WRFDA weights at the observation's grid
+  position (`LambertWRFDA.llxy`, `da_interp_2d_partial`'s order).
+- Layers, top first: layer `l` is model level `nz - l`. Pressure and
+  temperature are `xb%p`, `xb%t`, and water vapour is the mixing ratio
+  `1000 q / (1 - q)` g/kg.
+- Interfaces: the top is `ptop` and the bottom `psfc`. The ones between are
+  interpolated linearly in sigma between half levels (`sigmah`/`sigmaf`,
+  WRFDA's formula). A non-monotonic column is skipped and counted.
+- Surface: skin temperature `TSK`, wind `U10`/`V10`, and the fractions and
+  surface type from `da_detsurtyp`'s four-corner rule (`isflg` 0-7; 4-7 are
+  mixed surfaces).
+- Ozone: the standard profile of `woof.rtm.profiles`.
+
+CRTM is called once per outer loop at the background. It returns `H(x_b)`
+and the K-matrix `dBT/dT` and `dBT/dr` (r in g/kg), kept in binary64.
+
+### 13.4 The observation term
+
+`RadianceTerm` implements the `ObsTerm` protocol of `cost.py` (`d`, `err`,
+`mask`, `tl`, `ad`, `jo_split`). Observations are flattened
+location-major, channels within a location. The TL is WRFDA's K-matrix
+branch (`da_transform_xtoy_crtm`, `use_crtm_kmatrix`):
+
+```
+dBT(c) = sum over layers l = 2..nz of  Kt(c, l) dT(l) + Kr(c, l) dr(l)
+dr(l)  = 1000 / (1 - q_b(l))^2 dq(l),  0 where p_b(l) < 75 hPa
+```
+
+Here `dT` and `dq` are the bilinear interpolations of `xa%t` and `xa%q`.
+WRFDA zeroes the top layer (`kts+1:kte`), and so does woof. The AD is the
+exact transpose: it scatters per observation in a fixed serial order into
+the four corners, with no atomics. Arithmetic is on the host in the tier's
+real type, like `SparseObsTerm`, so CUDA and Metal give the same words.
+
+- **Surface pressure.** WRFDA also adds `ps_jacobian * 0.01 dpsfc`. woof's
+  CRTM shim (#651) returns no surface-pressure Jacobian, so that term is
+  absent. For the water-vapour bands it is negligible; for window and MW
+  surface channels it is a gap, recorded in the term's provenance.
+- **Jo.** The type name is `radiance`, in `JO_ORDER`'s place for WRFDA's
+  `jo%rad`. There is one Jo group per sensor (variable `tb`).
+
+### 13.5 QC and thinning
+
+The order is WRFDA's (`da_get_innov_vector`): innovations, predictors, VarBC
+cold start, bias applied (`da_varbc_direct`), QC, then preconditioning.
+
+- **Thinning.** WRFDA's GSI thinning (`makegrids`/`map2grids`,
+  `thinning_mesh` km, default 60). It uses an equal-area latitude/longitude
+  box grid over the domain's lat/lon range. In each box it keeps the
+  observation with the smallest `crit * dist`, `dist` being the distance
+  from the box centre in box units plus one half. `crit = 1` for every
+  imager, so the pixel nearest the box centre wins and the first one wins
+  a tie. That is the plan's 11.4 rule, and it does not depend on the
+  innovation.
+- **Geostationary IR** (`da_qc_goesabi`, `da_qc_ahi`, `da_qc_seviri`
+  without the optional Zhuge-Zou cloud test, whose default is off):
+  - channels with `iuse = -1` in WRFDA's `radiance_info` are rejected.
+    The defaults are WRFDA's 4.7.1 files: ABI 8, 9 and 10 (errors 1.79,
+    1.92, 1.74 K); AHI 8 (1.70 K); SEVIRI WV6.2 and WV7.3 (2.5, 2.25 K).
+    The caller may widen the channel set and give errors;
+  - ABI and AHI reject a mixed surface (`isflg` 4-7) and a background
+    cloud liquid water path at or above 0.2 kg m-2 (the sum of `QCLOUD dp/g`
+    below 100 hPa);
+  - all three reject `|O - B| > 15 K` and `|O - B| > 3 sigma`, with O-B
+    after bias correction;
+  - a rejected observation has `qc = -1` and is out of Jo and VarBC;
+  - optional, off by default, and recorded when on: the plan's 11.5
+    window-band screen (11.2 um O-B below -3 K) and the 3 x 3 uniformity
+    test.
+- **MW** keeps PR D's screens (13.2), then applies the same gross checks.
+- **Limb:** CRTM's 65 degree limit (#651) is applied before CRTM is called.
+
+### 13.6 VarBC
+
+This is WRFDA's `da_varbc` (Auligné et al. 2007), channel by channel.
+
+- **Predictors** (`da_varbc_pred`, `da_predictor_crtm`):
+  1. a constant 1;
+  2. the 1000-300 hPa thickness;
+  3. the 200-50 hPa thickness;
+  4. the skin temperature;
+  5. the total column water;
+  6-8. powers of the scan position (polar sensors) or of the sensor zenith
+     angle (geostationary sensors), off in WRFDA's `VARBC.in` for imagers.
+  They are computed from the background profile, and normalised by the
+  predictor mean and standard deviation (`da_varbc_coldstart`).
+- **Cold and warm start.**
+  - A channel whose `pred_use` entries are all 0 starts cold: the offset is
+    the mode of the O-B histogram (200 bins over +-10 K), and the other
+    coefficients start at 0.
+  - `VARBC.in` and `VARBC.out` keep WRFDA's text format, so a WRFDA file
+    warm-starts woof and the reverse. The ids (platform, satellite, sensor)
+    are WRFDA's: GOES 4/nn/44, Himawari 31/n/56, MSG 12/n/21. MW ids come
+    with PR D.
+- **Control block.** For each VarBC channel with `npred` predictors there
+  are `npred` control variables after `U`'s. The bias increment is
+  `dbeta = V v_p`. The TL adds `sum_i dbeta_i pred_i` to every good
+  observation (`da_varbc_tl`), and the AD is its transpose (`da_varbc_adj`).
+- **Preconditioning** (`da_varbc_precond`). `V` is `Hess^-1/2`, where the
+  Hessian estimate is the sum over good observations of
+  `pred_i pred_j / err^2`, plus a background term `1 / bgerr_i` with
+  `bgerr_i = mean(err^2) / varbc_nbgerr` (`varbc_nbgerr = 5000`), all
+  divided by `varbc_factor^2`. The inverse square root uses a cyclic Jacobi
+  eigensolver in binary64 on the host (not LAPACK), so the same inputs give
+  the same `V` on every machine.
+- **Jp.** WRFDA's `da_calculate_j` computes
+  `z_i = (v_i + xhat_i) * sum_j V_ij / sqrt(bgerr_i)` (Fortran `SUM` of a
+  scalar times a row of `V`) and `Jp = 0.5 sum_i z_i^2`. woof's default
+  (`jp_form="wrfda"`) is that `Jp`, with its exact gradient
+  `z_i * sum_j V_ij / sqrt(bgerr_i)`. `jp_form="matrix"` gives the
+  textbook prior on the coefficients, `0.5 |diag(bgerr)^-1/2 V v|^2`, with
+  gradient `V^T diag(1/bgerr) V v`. The two agree when `npred = 1`.
+  - *Deviation from WRFDA:* `da_calculate_gradj` uses
+    `v_i * sum_j V_ij / sqrt(bgerr_i)`, which is not the gradient of its own
+    `Jp`. With it, a Taylor test of J including VarBC fails.
+  - The difference is in the background term only. That term is weak:
+    `nbgerr = 5000` observations' worth.
+  - `bgerr` uses the namelist `varbc_nbgerr`, as WRFDA does. The per-predictor
+    `nbgerr` line of `VARBC.in` only switches the term on or off.
+- **Update** (`da_varbc_update`). `beta = beta_b + V v_p` after each outer
+  loop. A channel with at least `varbc_nobsmin` (10) good observations has
+  its `pred_use` set to 1 in `VARBC.out`.
+
+### 13.7 Precision and identity
+
+- The obs term, the VarBC block, `Jp` and its gradient are host arithmetic
+  in the tier's real type, in a fixed order, like `SparseObsTerm`. A
+  production run's words are therefore the same under fast and strict
+  numerics and on CUDA and Metal, *given the same K and innovations*.
+- CRTM itself runs on the CPU (gfortran, the platform libm). Its
+  brightness temperatures and Jacobians are not bitwise identical between
+  the Mac and pb. The identity gates therefore use a fixed K (a
+  deterministic synthetic K-matrix, or a saved one), not a live CRTM call.
+
+### 13.8 Gates
+
+| gate | what |
+|---|---|
+| GR-V1 | dot-product test `<H' dx, dy> = <dx, H'^T dy>` of `RadianceTerm`, with and without the VarBC block, to 1e-13 in binary64 |
+| GR-V2 | `check_gradient` (WRFDA's Taylor test) of J = Jb + Jo(conventional + radiance) + Jp: best ratio within 1e-6 of 1 |
+| GR-V3 | one real case: the analysis reduces the water-vapour channels' O-A against O-B, and the radiosonde O-A is no worse than the conventional-only analysis's |
+| GR-V4 | production CG words with the radiance term and VarBC: the same SHA-256 under fast and strict, on CUDA and on Metal |
+| GR-V5 | VarBC on a synthetic case with a known bias: the coefficients converge to it, and `VARBC.out` round-trips |
+
+GR-V3 is `tests/test_var_radiance_case.py`.  It is gated on `WOOF_GRV3_DIR`
+(`be.dat`, `fg`, `ob.ascii`, `scene`) and on CRTM, and nothing of the case is
+in the repository.  It runs on the reference tier and prints one `GRV3` JSON
+line.  `VarResult.fit` gives O-B and O-A per conventional type and variable
+(`sound:t` ...) as well as per radiance channel.
+
+Status (2026-11-20): not yet run, because no case has both data sources.
+WIS2 sondes start on 2026-10-26.  The `bkr/geo/virtualized` GOES-18 and -19
+ABI stores are readable only up to 2026-07-08: the live repositories' newest
+snapshots point at missing objects, and the next segment does not exist yet.
+The planned case is 2026-10-28T12 on the tutorial grid, with 62 TEMP and
+5012 SYNOP reports in a ±1 h window.  It runs once the store is readable
+again.
+
+The case's conventional-only half has run.  The setup:
+
+- the first guess is woof's own GFS 0.25° f000 initialisation on the
+  tutorial grid (89x59x40, `ZNW` identical to the tutorial's);
+- the background error is the tutorial `be.dat`;
+- the solve is on the reference tier, `ntmax` 50.
+
+It converged in 27 iterations.
+
+| type:var | n | O-B rms | O-A rms |
+|---|---|---|---|
+| all conventional | 27026 | 22.63 | 16.08 |
+| sound:u (m/s) | 2918 | 2.375 | 2.006 |
+| sound:v (m/s) | 2920 | 2.326 | 2.015 |
+| sound:t (K) | 3032 | 0.904 | 0.696 |
+| sound:q (kg/kg) | 3031 | 7.0e-4 | 5.0e-4 |
+| synop:t (K) | 3032 | 2.525 | 1.426 |
+| synop:p (Pa) | 3042 | 66.8 | 47.3 |
+
+This run exposed a crash in the SATEM operator when there are no SATEM
+reports (`extra["ref_p"]` missing), now fixed.
+
+### 13.9 PR sequence
+
+1. This section.
+2. `radiance.py`: the record, the adapters, thinning, the columns, the term
+   and QC; GR-V1 without VarBC.
+3. `varbc.py` and the cost's control block; GR-V1 with VarBC, GR-V2, GR-V4,
+   GR-V5; the real-case gate GR-V3 and an opt-in radiance door for `woof var`.

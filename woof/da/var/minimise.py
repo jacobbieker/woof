@@ -77,7 +77,9 @@ class CGResult:
 def _precon(cost, ghat, j0_total: float, precondition_factor: float):
     """``precondition_cg``'s diagonal by control-variable level block (blocks v1..v5, then the hybrid's alpha)."""
     ops = cost.ops
-    g_total = ops.dot(ghat, ghat)
+    cv_u = getattr(cost, "cv_u", cost.cv_size)
+    gu = ghat if cv_u == cost.cv_size else ghat[:cv_u]  # U's levels only; VarBC blocks keep 1
+    g_total = ops.dot(gu, gu)
     blocks = getattr(cost.u, "precon_blocks", None)
     if blocks is None:
         blocks = [(m, cost.nx * cost.ny) for m in cost.u.cv_mz[:5]]

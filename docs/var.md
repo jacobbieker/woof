@@ -94,6 +94,20 @@ the whole tutorial run.
 - The `oracle` tier keeps `da_dot`'s serial order: a block forms the
   products and one thread adds them. Its time is recorded, not gated.
 
+## Single-observation tests
+
+`woof.da.var.pseudo_wrfda.pseudo_obs` is WRFDA's pseudo observation (`num_pseudo = 1`, `pseudo_var`
+`u`, `v`, `t`, `p` or `q`): one report at a fractional grid position and level with a given innovation and
+error, and nothing else. `analyse` takes it in place of an `ob.ascii`. Tested against WRFDA on the tutorial
+(`tests/test_var_pseudo.py`, `WOOF_WRFDA471_PSEUDO_DIR`; position 40.4, 30.6, level 15.3; `u`, `v`, `t`
+with value and error 1, `q` with 0.001 and 0.0005):
+
+- `J_0`, `|g_0|`, the final `J` and the one iteration match WRFDA's log (reference tier 1e-12 relative; the
+  binary32 production tier 1e-6);
+- all eight WRF fields of the analysis are `wrfvar_output`'s float32 words to at most 0.5 ulp of the field's
+  largest value, on both tiers (the limit is 1 ulp of the field's maximum); where WRFDA's increment is
+  non-zero ours is non-zero with correlation at least 0.9999.
+
 ## Checked against WRFDA 4.7.1
 
 The reference is a serial GNU WRFDA 4.7.1 on the WRFDA tutorial case:
@@ -117,6 +131,15 @@ The reference is a serial GNU WRFDA 4.7.1 on the WRFDA tutorial case:
     words.
   - The bundle's `analysis.nc` carries those words, and the
     `woof run --analysis` door accepts the bundle.
+- **A forecast from the analysis** (`tests/test_var_forecast.py`). A 6 h woof forecast
+  (the tutorial's physics, direct insertion) from the reference-tier analysis and one from WRFDA's
+  `wrfvar_output` give byte-identical `wrfout` files at the three history times (12, 15, 18 UTC), and a run without the analysis differs from both. WRFDA's
+  analysis enters as the first guess with its eight updated fields replaced, because `wrfvar_output`'s `TITLE`
+  is not the audited pre-hybrid writer's and the bundle writer refuses its `HYBRID_OPT = -1`.
+  A one-off measurement on Metal (12 h, not a test): the binary32 production tier differs at float32 noise at the
+  start and the difference grows with the tutorial's convection: 3% of the no-assimilation difference at 6 h
+  and 13-30% at 12 h. The forecast is
+  deterministic, so that is the model's sensitivity.
 - **Known residual in the background.** `wrftoxb` from the first guess
   is not WRFDA's `xb` word for word. Most fields are exact, but some differ
   by a few ulps, at most 9e-14 relative:
@@ -129,10 +152,34 @@ The reference is a serial GNU WRFDA 4.7.1 on the WRFDA tutorial case:
   - The minimiser's `J` and `|g|` are within 1.5e-15 of WRFDA's. The float32
     analysis is still WRFDA's words.
 
+## Desroziers diagnostics
+
+`woof.da.var.desroziers` (plan gate G4a, tests in `tests/test_var_desroziers.py`). `run` solves the
+cost twice, once as is and once with Gaussian noise `sigma z` on the observations, and gives:
+
+- WRFDA's randomised-trace table (`da_tune_obs_desroziers`): per type and variable the trace
+  `Tr(HK) = sum (y_p - y) z / sigma`, the expected `Jo = (n - Tr(HK)) / 2`, the actual `Jo` and the error
+  factor `sqrt(Jo_actual / Jo_expected)`, with the totals. `format_report` prints it as the tool does.
+- The classic O-B / O-A / A-B statistics (`classic`): `<(O-A)(O-B)>` against the specified error variance and
+  `<(A-B)(O-B)>` for `H B H^T`.
+
+On the tutorial (the noise is read from WRFDA's `rand_obs_error`, so both use one draw), against the tool
+run on WRFDA's own runs (`tools/wrfda_oracle/run_desroziers.sh`):
+
+- all 210 numbers of the table and the totals agree with the tool to 3e-5 absolute plus 1e-6 relative (it
+  prints five decimals and sums in binary32; at most 2e-5 apart measured);
+- `H'(xhat)` agrees with WRFDA's `unpert_obs` to the file's seven digits (4e-7 of the largest value);
+- the classic statistics agree with those computed from WRFDA's own `gts_omb_oma` O-B and O-A, within the
+  file's printed precision.
+
+On the tutorial the specified errors are too small for the wind, too large for scatterometer, satellite
+thickness and GNSS refractivity: the error factors range from 0.34 (satem) to 1.95 (ships v), and the total
+`Jo` factor is 0.978. These tune `R` only; `Jb` has the tool's own `NaN` factor here because 4.7.1 does not
+print `Jb factor used`.
+
 ## Not yet
 
 - Radar, GOES, radiances and hybrid 3DEnVar (plan sections 6-11).
-- Desroziers diagnostics (plan G4a).
 - `cv_options` other than 5.
-- WRFDA's `A2C`, `var4d`, cloud control variables and pseudo-observations.
+- WRFDA's `A2C`, `var4d` and cloud control variables; pseudo-observations other than `u`, `v`, `t`, `q`.
 - Nested domains.

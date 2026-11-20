@@ -134,15 +134,16 @@ def test_station_pressure_and_sea_level_pressure_are_not_lowest_level_pressure()
 
 def test_refractivity_uses_tangent_height_and_shared_operator():
     from woof.obs.column_operators import refractivity_n
+    from woof.da.var.obs_wrfda import msl2geo1
     col = columns()[0]
-    height = 1000.
+    height = msl2geo1(1.0, 1.) * 1000.  # the model reads the geopotential of a 1 km tangent point
     z = np.array([500., 2000.])
     p = np.exp(np.interp(height, z, np.log(col['p'][:, 1, 1])))
     t = np.interp(height, z, col['t'][:, 1, 1])
     q = np.interp(height, z, col['q'][:, 1, 1])
     expected = float(refractivity_n(p, t, q))
     batches, _ = adapt([row(variable='refractivity_n', measurement='ro_refractivity_tangent_point',
-                           elevation_m=height, value=expected, error=5.)])
+                           elevation_m=1000., value=expected, error=5.)])
     idx = tuple(np.argwhere(batches[0].mask)[0])
     assert batches[0].simulated[(0, *idx)] == pytest.approx(expected)
 
@@ -170,17 +171,40 @@ def test_refractivity_pressure_is_read_between_layer_interfaces():
     layer-mean heights it used without them put each mass-level pressure
     too high in the column, so the pressure read there was too high."""
     from woof.obs.column_operators import refractivity_n
+    from woof.da.var.obs_wrfda import msl2geo1
     g, cols, dnw, (psfc, scale_height) = _eta_column()
-    height = 5500.
+    height = msl2geo1(5.5, 1.) * 1000.
     truth = float(refractivity_n(psfc * np.exp(-height / scale_height), 250., 0.))
     common = dict(grid=g, columns=cols, states=[{}, {}])
     rows = [row(variable='refractivity_n', measurement='ro_refractivity_tangent_point',
-                elevation_m=height, value=truth, error=5.)]
+                elevation_m=5500., value=truth, error=5.)]
     batches, _ = adapt(rows, setup={'dnw': dnw}, **common)
     idx = tuple(np.argwhere(batches[0].mask)[0])
     assert batches[0].simulated[(0, *idx)] == pytest.approx(truth, rel=1e-9)
     paired, _ = adapt(rows, setup={}, **common)
     assert paired[0].simulated[(0, *idx)] > truth * (1 + 1e-4)
+
+
+def test_refractivity_tangent_height_is_geometric_and_converted_to_geopotential():
+    """A tangent height is geometric (above mean sea level); z_w is
+    geopotential height.  As WRFDA's da_msl2geo1, the operator converts:
+    at 45 N and 25 km the geopotential is about 100 m lower, and N there
+    about 1.4 % higher than at the unconverted height."""
+    from woof.da.var.obs_wrfda import msl2geo1
+    from woof.obs.column_operators import refractivity_n
+    g, cols, dnw, (psfc, scale_height) = _eta_column(nz=60, p_top=1000.)
+    geometric = 25000.
+    geopotential = msl2geo1(geometric / 1000., 45.) * 1000.
+    assert 60. < geometric - geopotential < 140.
+    g.mass_index = lambda lat, lon: (np.asarray(1.), np.asarray(1.))
+    truth = float(refractivity_n(psfc * np.exp(-geopotential / scale_height), 250., 0.))
+    rows = [row(variable='refractivity_n', measurement='ro_refractivity_tangent_point', latitude_deg=45.,
+                elevation_m=geometric, value=truth, error=5.)]
+    batches, _ = adapt(rows, setup={'dnw': dnw}, grid=g, columns=cols, states=[{}, {}])
+    idx = tuple(np.argwhere(batches[0].mask)[0])
+    assert batches[0].simulated[(0, *idx)] == pytest.approx(truth, rel=1e-9)
+    unconverted = float(refractivity_n(psfc * np.exp(-geometric / scale_height), 250., 0.))
+    assert truth / unconverted - 1 > 0.01
 
 
 def test_surface_sensor_height_semantics_not_guessed():

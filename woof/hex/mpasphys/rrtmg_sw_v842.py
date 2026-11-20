@@ -21,6 +21,7 @@ def _ranks_on_card(cp):
 from woof.hex import numerics as _hex_numerics
 
 import numpy as np
+from woof.core import mcica_seed as _mcica_seed
 from woof.core.rrtmg_sw import CudaSW, _pack_cuda_tables, spectral_source
 
 # MPAS module_ra_rrtmg_sw.F:10026-10664 argument roster.
@@ -362,6 +363,7 @@ class MPASShortwave(CudaSW):
             idcor = int(decor == "latitude_varying")
         # One host read for the four scalars (was two). THE BREAKAGE THIS PREVENTS: each read is a
         # full stream sync on the radiation step (G2).
+        _mcica_seed.set_context(time_seconds=xtime_s)
         words = self.cp.empty(4, dtype=self.cp.float32)
         self._launch("mpas_sw_driver_times", 1,
                      (np.float32(xtime_s), np.float32(dt_radtsw), words[:2]))
@@ -564,7 +566,7 @@ class MPASShortwave(CudaSW):
         return max(1, min(int(nd), width))
 
     # MPAS module_ra_rrtmg_sw.F:1403-2012 with the wrapper's irng=0, permuteseed=1.
-    def _wrapper_mcica(self, n, nl, cldovrlp, idcor, julday, layers, height, latitude):
+    def _wrapper_mcica(self, n, nl, cldovrlp, idcor, julday, layers, height, latitude, ids=None):
         """The (8, n, nl, 112) McICA slab: cloud, ice, liquid and snow paths from the generator,
         then the band optics slots at their clear values (tau 0, ssa 1, asym 0, fsf 0) that the
         solver's cloud-property step fills. icld 0 leaves the generator slots zero, as native's
@@ -589,6 +591,11 @@ class MPASShortwave(CudaSW):
         self._launch("mpas_sw_mcica_seeds", n,
                      tuple(np.int32(v) for v in (n, nl, cldovrlp, idcor, julday, 1))
                      + (layers[0], height, latitude, seeds, weights))
+        if _mcica_seed.active():
+            # Opt-in frozen seeds (woof.core.mcica_seed); the default path never reaches this.
+            cell = _mcica_seed.context_ids(n) if ids is None else ids
+            seeds[:] = cp.asarray(_mcica_seed.seed_words(
+                cell.get() if hasattr(cell, 'get') else cell, _mcica_seed.SW_STREAM))
         draws = mcica_draws_per_gpoint(cldovrlp, nl)
         self._launch("mpas_sw_mcica_gpoint", n * 112,
                      tuple(np.int32(v) for v in (n, nl, cldovrlp, draws))
@@ -709,7 +716,7 @@ class MPASShortwave(CudaSW):
             it = cp.ascontiguousarray(interfaces[:, cols, :])
             m = self._wrapper_mcica(n, nl, cldovrlp, idcor, julday, l,
                                     cp.ascontiguousarray(height[cols]),
-                                    cp.ascontiguousarray(s[0, cols]))
+                                    cp.ascontiguousarray(s[0, cols]), ids=cols)
             optics = None
             if sources is not None:
                 # MPAS module_ra_rrtmg_sw.F:10562-10572 copies only model

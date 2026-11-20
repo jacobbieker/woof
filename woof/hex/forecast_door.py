@@ -3420,6 +3420,8 @@ def _cycling_argv(arguments: Any) -> tuple[str, ...]:
             argv += [flag, str(Path(value).expanduser().absolute())]
     if getattr(arguments, "jedi_background", False):
         argv.append("--jedi-background")
+    if getattr(arguments, "mcica_seed_mode", None):
+        argv += ["--mcica-seed-mode", str(arguments.mcica_seed_mode)]
     soil_levels = getattr(arguments, "jedi_soil_levels", None)
     if soil_levels is not None:
         argv += ["--jedi-soil-levels", str(soil_levels)]
@@ -4518,6 +4520,9 @@ def mpas_suite_lts_refusal(arguments: argparse.Namespace, environ=None) -> str |
 
 
 def run_forecast(arguments: argparse.Namespace) -> int:
+    if getattr(arguments, "mcica_seed_mode", None):
+        # Read by woof.core.mcica_seed in this process and in any child it starts.
+        os.environ["WOOF_MCICA_SEED_MODE"] = arguments.mcica_seed_mode
     from woof.output_formats import command_scope
     from .wave_options import environment as wave_environment
     from woof.wrf_hydro_route import launch_scope as wrf_hydro_scope
@@ -6182,6 +6187,11 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--jedi-background", action="store_true",
         help="at every history frame also write the JEDI background file")
+    parser.add_argument(
+        "--mcica-seed-mode", choices=("pressure", "cell"), default=None,
+        help="RRTMG McICA seeding: pressure (default, upstream) or cell, a fixed hash of "
+             "cell id and call time for `woof grad` finite-difference and ensemble legs "
+             "(docs/grad.md); not upstream physics")
     parser.add_argument(
         "--jedi-soil-levels", type=int, choices=(4, 9), default=None,
         help="soil layers in the JEDI background; 4 preserves native Noah/Noah-MP, "

@@ -5585,6 +5585,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--mcica-seed-mode",
+        choices=("pressure", "cell"),
+        default=None,
+        help=(
+            "RRTMG McICA seeding: pressure (default, upstream) or cell, a fixed "
+            "hash of cell id and radiation call time (woof.core.mcica_seed), "
+            "for woof grad finite-difference and ensemble legs"
+        ),
+    )
+    parser.add_argument(
         "--jedi-soil-levels",
         type=int,
         default=9,
@@ -5726,6 +5736,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="write balance-series.jsonl: surface-pressure tendency statistics "
                              "at every macro boundary (initialization-shock measure)")
     args = parser.parse_args(argv)
+    if args.mcica_seed_mode:
+        # Process-wide, and inherited by any child this run starts (woof.core.mcica_seed).
+        os.environ["WOOF_MCICA_SEED_MODE"] = args.mcica_seed_mode
     if args.obs_nudging_input is not None and args.obs_nudging is None:
         parser.error("--obs-nudging-input names the observation file of --obs-nudging; give the configuration too")
     if (args.nudging is None) != (not args.nudging_analysis):

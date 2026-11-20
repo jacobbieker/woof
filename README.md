@@ -505,8 +505,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   at 1.80 H. A real-data check over Manhattan places the model's
   buildings at their footprint heights (r = 0.99 at 25 m). In lower and
   midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
-  50 m does not open the streets. A domain with buildings (or an urban
-  canopy under LES) takes bare-earth 3DEP terrain instead of the sub-km
+  50 m leaves only about a third of the street area fully open, against
+  nearly half at 25 m. A two-hour rerun on Overture footprints finds a
+  street-canyon vortex in 43-45% of canyons at 25 m, against 30-39% at
+  50 m and none without buildings. The same case runs on Metal through
+  `woof sim`, about 2.4 times slower than a shared A6000. A domain with
+  buildings (or an urban canopy under LES) takes bare-earth 3DEP terrain instead of the sub-km
   GLO-30 default, which has the buildings in it, and is refused outside
   3DEP unless a terrain source is named.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
@@ -908,6 +912,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `woof grad ens`, `woof grad letkf` and `woof grad efso` give ensemble
   sensitivities and each observation's impact on the forecast cost
   (EFSO), using the LETKF's own weights ([docs/grad.md](docs/grad.md)).
+  An opt-in `--mcica-seed-mode cell` (`woof go`, hex forecast door, or
+  `WOOF_MCICA_SEED_MODE`) freezes RRTMG's McICA cloud seeds to a hash of column
+  and call time, removing the +-5 J seed noise that one pressure ulp adds to a
+  leg; the default keeps upstream's pressure-digit seeding byte for byte, and
+  RRTMGP refuses the mode.
   On a regional case, the finite-difference and ensemble sensitivities
   agree in sign and pattern on the WRF route at 9 km and at 3 km, though
   ES and EFSO at the most-correlated points overstate magnitudes by about
@@ -947,9 +956,33 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   with map factors. `small_step_prep` with `calc_p_rho` and
   `small_step_finish` (woof's `small_step_init_*`/`_finish_*`) match
   WRFPLUS within the oracle test's 1e-12, and a chained test checks whole acoustic
-  substeps. The binary32 adjoint costs 3.3-5.0x the forward kernel; the
-  measured step projection (4.2-4.8x) is in the design note. The
-  forecast path does not import any of it.
+  substeps. The RK-stage glue (`calc_p_rho_phi`, `rk_step_prep`'s
+  `couple_momentum` and `calc_ww_cp`, `rk_addtend_dry`, `set_w_surface`)
+  matches WRFPLUS within 1e-12 and, in strict mode
+  (`GPUWM_WRF_EXACT=1`), the primal word for word. A
+  chained test runs one whole RK stage with the big-step tendencies held.
+  Flux-form advection (woof's strict `flux_div_{scalar,u,v,w}`, WRF
+  `advect_scalar/u/v/w`) has its TL/AD for periodic, open and specified
+  boundaries, map factors, horizontal orders 3-6 and vertical orders 2-6.
+  It matches WRFPLUS `g_/a_advect_*` to about 1e-16 on the points where
+  woof and WRF compute the same thing (see the design note), and the float build
+  reproduces the strict primal's words. The big-step pressure gradient
+  and buoyancy (woof's strict `slow_pgf` and `slow_buoyancy`, WRF
+  `horizontal_pressure_gradient` and `pg_buoy_w`) follow, with the lid,
+  open and specified boundaries, map factors and hybrid levels, and so
+  does the geopotential tendency (`slow_geopotential`, WRF `rhs_ph`) for
+  every `h_sca_adv_order`, the Coriolis and curvature terms
+  (`coriolis_curvature`, WRF `coriolis` and `curvature`) on rotated
+  grids, and the `w_damp` vertical-velocity limiter. In binary64 they match WRFPLUS to about 1e-15
+  on non-hybrid cases (WRFPLUS has no hybrid coordinate; the exclusions
+  are listed in the design note). The comparison found a lid bug in
+  WRFPLUS's own pressure-gradient adjoint and, in its `rhs_ph`, a heap
+  overrun in the order-3/4 adjoint and a short interior loop on bounded
+  axes, all described in the design note.
+  The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
+  0.85-3.2x the glue, 3.3-4.5x advection and 1.3-4.4x the big-step
+  tendencies. The measured step projection (4.7x) is in the design
+  note. The forecast path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
@@ -996,7 +1029,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   or ensemble members already on the device. On the tutorial case with ten
   members it follows a compiled WRFDA 4.7.1 hybrid run's 50 iterations to
   3.5e-14 relative; the oracle tier gives the reference's words on the
-  device and the production tier one digest under fast and strict numerics. Section 11 plans geostationary imager
+  device and the production tier one digest under fast and strict numerics.
+  `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
+  `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
+  ensemble members minus their mean): WRFDA's gen_be stages for
+  `cv_options` 5 and 7 with `bin_type` 5 only. On WRFDA's own gen_be sample
+  forecasts it reproduces WRFDA 4.7.1's gen_be to 1e-7 relative (cv5; the
+  residual is WRFDA's `pi = 3.1415926` sine-transform tables in psi and chi)
+  and to 3e-12 for cv7, and WRFDA's 3D-Var runs the woof-made file as its own.
+  Section 11 plans geostationary imager
   radiances for initial conditions: Google's SatWeave mosaic and the native
   GOES ABI, Himawari AHI and Meteosat imagers, through an opt-in CRTM into
   the LETKF first and into 3D-Var later. Default runs are not changed.
@@ -1023,8 +1064,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   into LETKF batches. It thins the scene, runs H(x) per member through
   CRTM, screens for clear sky, applies a static bias correction and a gross
   check, and places each observation at its weighting-function peak.
-  Variational bias correction and the 3D-Var radiance operator come next
-  (plan section 11).
+  `woof var --radiance-scene DIR` (opt-in) assimilates clear-sky imager
+  radiances in 3D-Var. It uses WRFDA's channel selection and errors, its
+  clear-sky QC, GSI thinning and the CRTM K-matrix, and adds VarBC. The bias
+  coefficients join the control vector with WRFDA's predictors,
+  preconditioning and `VARBC.in`/`VARBC.out` files
+  (plan section 13). The adjoint holds to 1e-13 and the gradient check to
+  1e-6, and the production-tier words are the same under fast and strict
+  numerics. The microwave sounder (WIS2) records plug into the same term.
 - **WIS2 observation reader (opt-in; in-situ families first).**
   `woof obs wis2 fetch` reads the WIS2 Global Cache archive
   (`bkr/obs/wis2.icechunk` on Source Cooperative, anonymous). It covers
@@ -1055,7 +1102,23 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   gpsref error and the observed-gradient (super-refraction) checks of
   `da_qc_gpsref`. Profiles go to the table (`ro_refractivity_tangent_point`,
   the LETKF's existing refractivity operator) and to `obs_gts` as FM-116.
-  MW radiances come next ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)).
+  `woof obs wis2 radiances` reads AMSU-A, MHS and ATMS footprints (Metop-B
+  and -C, S-NPP, NOAA-20 and -21) to one `.npz` per instrument. Sensors
+  CRTM has no coefficients for are counted and refused.
+  `woof.da.obs_mw` (opt-in) turns them into LETKF batches. It uses CRTM
+  v2.4 clear sky over open sea, WRFDA's channels, errors and screens
+  (`da_qc_amsua`, `da_qc_mhs`, `da_qc_atms`: scan edges, scattering
+  index, background cloud, 15 K and 3 sigma), and a static bias
+  correction. Each channel sits at its Jacobian peak. Metop-B's channel 15
+  is dead, so its scattering check uses the channel 1-2 cloud liquid
+  retrieval instead. The 3D-Var radiance term comes later
+  ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)). In one real case
+  (GEFS ensemble, Europe and the North Atlantic, 2026-10-28 12Z) the
+  WIS2 satellite and aircraft families reduce their own O-A, and
+  MHS and ATMS departures fall on columns that were not assimilated as
+  well. Against held-out radiosondes the analysis is neutral to slightly
+  better without AMVs. With AMVs, upper-level winds are 3-4 % worse
+  (plan 12.8 item 6).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
@@ -1084,9 +1147,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   budget. Trained on six cycles over four seasons (P2.6), the model
   passes the plan's G2 gate. T2 is not worse than the physics run at 95 %
   on either mesh, and better on the uniform mesh on CUDA (-0.06 K).
-  Most column calls (94-97 %) still fall back to the schemes in the
-  evaluation week, because its stratosphere lies outside the training
-  range. Results and per-step costs are in
+  Most column calls (94-97 %) still fell back to the schemes in the
+  evaluation week, because its stratosphere lay outside the training
+  range. Training on the lowest 44 levels (P2.7) cuts the fallback to
+  21 % on a fresh cycle (66 % on the variable mesh, whose `dx` is out of
+  range), but T2 is then no better than the physics run (+0.04 K, CI
+  spanning zero): no evidence of skill. Results and per-step costs are in
   [docs/nn-physics.md](docs/nn-physics.md).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
