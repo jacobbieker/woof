@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -1489,6 +1489,8 @@ CC_CASES = {
     "cc_open_y": dict(boundary_y=1, hybrid=1),
     "cc_open_xy": dict(boundary_x=1, boundary_y=1),
     "cc_spec": dict(boundary_x=1, boundary_y=1, spec=1, hybrid=1),
+    # f = e = 0: curvature alone, so binary32 (Metal) is held on its scale
+    "cc_curvature": dict(nocor=1),
 }
 CC_DIMS = dict(nz=8, ny=9, nx=10)
 
@@ -1555,7 +1557,12 @@ def _cc_expected(geom, out, L, tr):
             "tl_rw_t": L.take3(x[4], wl), "tl_d_rw_t": L.take3(x[5], wl),
             "adst_ru_t": L.take3(x[6], us), "adst_rv_t": L.take3(x[7], vs),
             "adst_rw_t": L.take3(x[8], wl),
-            "ad_ru": L.fold3(x[9], us, end=bx), "ad_rv": L.fold3(x[10], vs, end=by),
+            # ru, rv: a periodic end face keeps WRF's column ide (jde), read
+            # where woof reads face nx (ny), so faces 0 and n are compared
+            # apart.  u, v: WRF and woof split their reads of the repeated
+            # face differently between 0 and n, so face n folds onto 0 and
+            # the test sums woof's two faces.
+            "ad_ru": L.fold3(x[9], us), "ad_rv": L.fold3(x[10], vs),
             "ad_u": L.fold3(x[12], us, end=bx), "ad_v": L.fold3(x[13], vs, end=by),
             "ad_w": (c1 * tr["mut"] + c2) * arw / tr["msft"],
             "ad_mut": (c1 * tr["w"] * arw).sum(axis=0) / tr["msft"]}
@@ -1567,9 +1574,13 @@ def coriolis(exe: str, runner: list[str], seed: int = 20261128) -> dict:
     for n, (name, over) in enumerate(CC_CASES.items()):
         over = dict(over)
         spec, hybrid = over.pop("spec", 0), over.pop("hybrid", 0)
+        nocor = over.pop("nocor", 0)
         geom = cases.cc_geometry(**CC_DIMS, **over)
         geom.validate()
         tr = cases.cc_trajectory(geom, seed + 10 * n, hybrid=bool(hybrid))
+        if nocor:
+            tr["f"][...] = 0.0
+            tr["e"][...] = 0.0
         pe = cases.cc_perturbation(geom, seed + 10 * n + 1)
         cc_periodic_ends(geom, tr)
         cc_periodic_ends(geom, pe)
@@ -1669,11 +1680,192 @@ def w_damp(exe: str, runner: list[str], seed: int = 20261129) -> dict:
     return out
 
 
+#: lbc: relax_bdytend then spec_bdytend on one coupled field, as woof's
+#: direct-form row (apply_relax + target).  WRFPLUS takes the coupled
+#: field; the fixture forms it from the row's field and mu' (hybrid
+#: levels, map factors) with its tangent and adjoint.
+LB_CASES = {
+    "lb_u": dict(kind="u", has_msf=1),
+    "lb_u_nomsf": dict(kind="u", hybrid=1),
+    "lb_v": dict(kind="v", has_msf=1, hybrid=1),
+    "lb_theta": dict(kind="theta", hybrid=1),
+    "lb_phi": dict(kind="phi"),
+    "lb_w": dict(kind="w", hybrid=1),
+    "lb_mu": dict(kind="mu"),
+    "lb_wide": dict(kind="theta", spec_zone=2, relax_zone=5, width=7, ny=14, nx=15),
+}
+LB_DIMS = dict(nz=4, ny=12, nx=13)
+_LB_VAR = {"u": 0, "v": 1, "theta": 2, "phi": 3, "w": 3, "mu": 4}
+
+
+def _lb_faces(geom, tr):
+    """(ia, ib) mass columns of each u or v face (WRF calc_mu_uv, edge
+    columns doubled)."""
+    ny, nx = geom.ny, geom.nx
+    if geom.kind == "u":
+        i = np.arange(nx + 1)
+        jj = np.arange(ny)[:, None]
+        return jj * nx + np.minimum(i, nx - 1)[None], jj * nx + np.maximum(i - 1, 0)[None]
+    j = np.arange(ny + 1)
+    ii = np.arange(nx)[None]
+    return np.minimum(j, ny - 1)[:, None] * nx + ii, np.maximum(j - 1, 0)[:, None] * nx + ii
+
+
+def _lb_coupled(geom, tr, pe=None, adj=None):
+    """woof's strict coupled_current: the value, its tangent (``pe``) or
+    the (src, mup) adjoint of a coupled-field adjoint ``adj``."""
+    kind = geom.kind
+    mub, mup = tr["mub"].ravel(), tr["mup"].ravel()
+    src = tr["src"]
+    if kind == "mu":
+        if adj is not None:
+            return np.zeros_like(src), adj[0].copy()
+        return (pe["mup"] if pe is not None else tr["mup"])[None].copy()
+    if kind in ("u", "v"):
+        a, b = _lb_faces(geom, tr)
+        mass = 0.5 * (((mup[a] + mup[b]) + mub[a]) + mub[b])
+        c1, c2 = tr["c1h"][:, None, None], tr["c2h"][:, None, None]
+        scale = 1.0
+        if geom.has_msf:
+            scale = 1.0 / tr["msfu"] if kind == "u" else tr["msfv"]
+        ch = c1 * mass + c2
+        if adj is not None:
+            t = adj * scale
+            amass = (c1 * src * t).sum(axis=0)
+            amup = np.zeros(mup.size)
+            np.add.at(amup, a.ravel(), 0.5 * amass.ravel())
+            np.add.at(amup, b.ravel(), 0.5 * amass.ravel())
+            return ch * t, amup.reshape(tr["mup"].shape)
+        if pe is None:
+            return ch * src * scale
+        dmass = 0.5 * (pe["mup"].ravel()[a] + pe["mup"].ravel()[b])
+        return (c1 * dmass * src + ch * pe["src"]) * scale
+    full = kind in ("phi", "w")
+    c1 = (tr["c1f"] if full else tr["c1h"])[:, None, None]
+    c2 = (tr["c2f"] if full else tr["c2h"])[:, None, None]
+    mass = tr["mub"] + tr["mup"]
+    ch = c1 * mass + c2
+    if adj is not None:
+        return ch * adj, (c1 * src * adj).sum(axis=0)
+    if pe is None:
+        return ch * src
+    return c1 * pe["mup"] * src + ch * pe["src"]
+
+
+def _lb_record(geom, tr, pe, seeds):
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    fz, fy, fx = geom.field
+    nk = 1 if geom.kind == "mu" else nz + 1
+    w = geom.width
+    head = np.array([nx, ny, nz, _LB_VAR[geom.kind], w, geom.spec_zone, geom.relax_zone, nk],
+                    dtype=np.int32)
+    blob = head.tobytes() + np.array([geom.dtbc]).astype("<f8").tobytes()
+    blob += np.asarray(tr["fcx"], "<f8").tobytes() + np.asarray(tr["gcx"], "<f8").tobytes()
+
+    def f3(a):
+        out = np.zeros((nx + 8, nk, ny + 8))
+        out[4:4 + fx, :fz, 4:4 + fy] = np.transpose(a, (2, 0, 1))
+        return out
+
+    def tx(a):  # (fz, fy, w) -> (jms:jme, nk, w)
+        out = np.zeros((ny + 8, nk, w))
+        out[4:4 + fy, :fz, :] = np.transpose(a, (1, 0, 2))
+        return out
+
+    def ty(a):  # (fz, w, fx) -> (ims:ime, nk, w)
+        out = np.zeros((nx + 8, nk, w))
+        out[4:4 + fx, :fz, :] = np.transpose(a, (2, 0, 1))
+        return out
+
+    arrs = [f3(_lb_coupled(geom, tr)), f3(_lb_coupled(geom, tr, pe)), f3(tr["tend"]),
+            f3(seeds["tend"])]
+    for d in (tr, pe):
+        arrs += [tx(d["west"]), tx(d["east"]), ty(d["south"]), ty(d["north"]),
+                 tx(d["west_t"]), tx(d["east_t"]), ty(d["south_t"]), ty(d["north_t"])]
+    for a in arrs:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    return blob, (f3, tx, ty, nk)
+
+
+def _lb_expected(geom, out, L, tr, seeds):
+    f3, tx, ty, nk = L
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    fz, fy, fx = geom.field
+    w = geom.width
+    vals = np.frombuffer(out, dtype="<f8")
+    n3, nxs, nys = (nx + 8) * nk * (ny + 8), (ny + 8) * nk * w, (nx + 8) * nk * w
+    assert vals.size == 4 * n3 + 4 * nxs + 4 * nys, vals.size
+    at = 0
+    x3 = []
+    for _ in range(4):
+        x3.append(vals[at:at + n3].reshape((nx + 8, nk, ny + 8), order="F"))
+        at += n3
+    tabs = []
+    for shape in [(ny + 8, nk, w)] * 2 + [(nx + 8, nk, w)] * 2 + [(ny + 8, nk, w)] * 2 + [
+            (nx + 8, nk, w)] * 2:
+        size = int(np.prod(shape))
+        tabs.append(vals[at:at + size].reshape(shape, order="F"))
+        at += size
+
+    def b3(x):
+        return np.ascontiguousarray(np.transpose(x[4:4 + fx, :fz, 4:4 + fy], (1, 2, 0)))
+
+    def bx(x):
+        return np.ascontiguousarray(np.transpose(x[4:4 + fy, :fz, :], (1, 0, 2)))
+
+    def by(x):
+        return np.ascontiguousarray(np.transpose(x[4:4 + fx, :fz, :], (1, 2, 0)))
+
+    asrc, amup = _lb_coupled(geom, tr, adj=b3(x3[3]))
+    exp = {"tl_tend": b3(x3[0]), "tl_d_tend": b3(x3[1]), "adst_tend": b3(x3[2]),
+           "tl_held": tr["held"], "tl_d_held": np.zeros_like(tr["held"]),
+           "adst_held": seeds["held"], "ad_src": asrc, "ad_mup": amup}
+    names = ("west", "east", "south", "north", "west_t", "east_t", "south_t", "north_t")
+    for name, x in zip(names, tabs):
+        exp["ad_" + name] = bx(x) if name.startswith(("west", "east")) else by(x)
+    return exp
+
+
+def lbc(exe: str, runner: list[str], seed: int = 20261130) -> dict:
+    out = {}
+    for n, (name, over) in enumerate(LB_CASES.items()):
+        over = dict(over)
+        hybrid = over.pop("hybrid", 0)
+        dims = dict(LB_DIMS)
+        dims.update({k: over.pop(k) for k in ("ny", "nx") if k in over})
+        geom = cases.lbc_geometry(**dims, apply_relax=1, **over)
+        geom.validate()
+        tr = cases.lbc_trajectory(geom, seed + 10 * n, hybrid=bool(hybrid))
+        pe = cases.lbc_perturbation(geom, seed + 10 * n + 1)
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        seeds = {s: rng.standard_normal(geom.field) for s in ("tend", "held")}
+        blob, L = _lb_record(geom, tr, pe, seeds)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _lb_expected(geom, result, L, tr, seeds)
+        prefix = f"{name}/"
+        out[prefix + "op"] = np.array("lbc")
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for k, v in seeds.items():
+            out[prefix + "seed/" + k] = v
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
             "small_step": small_step, "rk_stage": rk_stage,
             "advect": advect, "bigstep": bigstep, "rhsph": rhsph,
-            "coriolis": coriolis, "w_damp": w_damp}
+            "coriolis": coriolis, "w_damp": w_damp,
+            "lbc": lbc}
 
 
 def main(argv=None) -> int:

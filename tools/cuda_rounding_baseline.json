@@ -2246,6 +2246,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "dd8d577435e9cc5448cf99be773dd63b1de7d74e928b5e8c31329c3492d09f9d",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "1e1f989c466acb32da7ad2fdfd9aeae8a6c9bcbc5230cd1b6ef03e7e604014ed",
+    "file": "woof/grad/wrfplus/lbc.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "ddf65c12fcc2a96a07091f3a704ee42bc6880b31db8ff81d67e78e229e388288",
     "constructor": "ElementwiseKernel",
     "factory": "_sequential_sum",
@@ -4777,7 +4785,7 @@
    },
    {
     "file": "woof/da/var/kernels/var_u.cu",
-    "sha256": "be27bd95ef3427ce0457a5e354edb0bfa0f8fd24e6f160dd629e98ba4b36d816"
+    "sha256": "5683b674456aab5839117a4142400e34b56c6f6bd8e56d3d546c94ff19ca0267"
    },
    {
     "file": "woof/data/gbmpbl/constants.cuh",
@@ -4834,6 +4842,10 @@
    {
     "file": "woof/grad/wrfplus/kernels/calc_coef_w.cu",
     "sha256": "ce6c0131cd77e23c8719708216a6c2d33b77271f5347b114ccc49f07314fe46b"
+   },
+   {
+    "file": "woof/grad/wrfplus/kernels/lbc.cu",
+    "sha256": "7d9715aaff01d0b7c583303458893df5201a7bfd6e3d234b67c38e9115d37d3b"
    },
    {
     "file": "woof/grad/wrfplus/kernels/rk_stage.cu",
@@ -4990,6 +5002,10 @@
    {
     "file": "woof/hex/mpas_ocean/vmix_v842.cu",
     "sha256": "c1a253e775826ab249a894dd987c2b698099b6334b58b42eefaa307b5abf428d"
+   },
+   {
+    "file": "woof/hex/mpas_seaice/column_dedd_v842.cu",
+    "sha256": "478890e23d8163c74a3b75c46ae1fa32859ab090921fb74d2672f512919109df"
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.cu",
@@ -5583,7 +5599,7 @@
    },
    {
     "file": "woof/da/var/transforms.py",
-    "sha256": "cdc21f8a94568b3beabfb1b99afa6b64ddfaab6efd7018f7d497332961375469"
+    "sha256": "995bff89e979aa6a54767f79208ea6e1c959c8df17be3c97d0e20c241309d2b6"
    },
    {
     "file": "woof/doctor.py",
@@ -5683,7 +5699,11 @@
    },
    {
     "file": "woof/grad/wrfplus/bigstep.py",
-    "sha256": "f03d0d5f37a176616e55ea0a5540f2afed92370face7ed4e999f455b2c981063"
+    "sha256": "e40665b3128a35745df69140f1b1c9c20c47ff5b2e3f83e6546410b686972284"
+   },
+   {
+    "file": "woof/grad/wrfplus/lbc.py",
+    "sha256": "fcfe1f76bbd3496fbfb00fe88168c1c83d25c3c605fbe23c6ee0934e201e982e"
    },
    {
     "file": "woof/grad/wrfplus/stage.py",
@@ -6023,7 +6043,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
-    "sha256": "d6bef72faaedb0b3b3133ad0ab9134a2b2f91b8c778dcc345ef91386602439e4"
+    "sha256": "70fe524f8ffe36c6f2f7142a99aa413d7d0bad8fb35599b788a3181bc10adb7b"
    },
    {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.py",

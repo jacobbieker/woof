@@ -1,7 +1,8 @@
 """Grade tools/glibc239_libm_gpu/glibc239_trig_flt64.cuh word for word.
 
-The transcription (``g239::g239_sin``, ``g239_cos``, ``g239_atan``) is glibc
-2.39's binary64 sin, cos and atan as its x86-64 FMA variants compute them.
+The transcription (``g239::g239_sin``, ``g239_cos``, ``g239_atan``,
+``g239_asin``) is glibc 2.39's binary64 sin, cos, atan and asin as its
+x86-64 FMA variants compute them.
 It is held to the oracle host's libm (glibc 2.44, the same sources) and to
 the repository's Rust transcription's pinned words.
 
@@ -22,6 +23,7 @@ outside the branred range, or any device/host transcription mismatch.
 
     pixi run -e default python tools/glibc239_libm_gpu/grade_trig.py cpu --count 4294967296
     pixi run -e default python tools/glibc239_libm_gpu/grade_trig.py gpu --count 268435456
+    pixi run -e default python tools/glibc239_libm_gpu/grade_trig.py cpu --count 4294967296 --functions asin
 """
 from __future__ import annotations
 
@@ -41,7 +43,7 @@ HERE = Path(__file__).resolve().parent
 HEADER = HERE / "glibc239_trig_flt64.cuh"
 ARGS = HERE / "grade_trig_args.h"
 CHUNK = 1 << 26
-FUNCTIONS = ("sin", "cos", "atan")
+FUNCTIONS = ("sin", "cos", "atan", "asin")
 BRANRED = 105414350.0
 
 KERNEL = r'''
@@ -51,7 +53,8 @@ extern "C" __global__ void trig_grade(int f, unsigned long long start, unsigned 
     if (i >= n) return;
     double a = trig_arg(f, start + i);
     x[i] = a;
-    y[i] = f == 0 ? g239::g239_sin(a) : f == 1 ? g239::g239_cos(a) : g239::g239_atan(a);
+    y[i] = f == 0 ? g239::g239_sin(a) : f == 1 ? g239::g239_cos(a) : f == 2 ? g239::g239_atan(a)
+                                                                 : g239::g239_asin(a);
 }
 '''
 
@@ -60,12 +63,13 @@ extern "C" __global__ void trig_pin(int f, unsigned long long n, const double *x
 {
     unsigned long long i = (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
-    y[i] = f == 0 ? g239::g239_sin(x[i]) : f == 1 ? g239::g239_cos(x[i]) : g239::g239_atan(x[i]);
+    y[i] = f == 0 ? g239::g239_sin(x[i]) : f == 1 ? g239::g239_cos(x[i])
+         : f == 2 ? g239::g239_atan(x[i]) : g239::g239_asin(x[i]);
 }
 '''
 
 #: (function, argument word, glibc 2.39 x86-64 result word): the Rust
-#: crate's pins (tools/rustwx/crates/glibc239-libm/src/sincos.rs, atan.rs).
+#: crate's pins (tools/rustwx/crates/glibc239-libm/src/sincos.rs, atan.rs, asin.rs).
 #: The last three sin/cos arguments are huge ones where glibc 2.44 differs.
 PINNED = [
     *((f, x, w) for x, s, c in (
@@ -92,6 +96,17 @@ PINNED = [
         (0xc01d000000000000, 0xbff6f08f07435fec), (0x402ffae147ae147b, 0x3ff82227a313716c),
         (0x4030000000000000, 0x3ff82250768ac529), (0xc0934a0000000000, 0xbff91ea9efa2930a),
         (0x432550f7dca70000, 0x3ff921fb54442d17), (0xfe37e43c8800759c, 0xbff921fb54442d18),
+    )),
+    *((3, x, w) for x, w in (
+        (0x3e4fffffffffffff, 0x3e4fffffffffffff), (0x3fbfffffffffffff, 0x3fc00abe0c129e1e),
+        (0x3fc0000000000000, 0x3fc00abe0c129e1e), (0x3fd0000000000000, 0x3fd02be9ce0b87cd),
+        (0x3fdfffffffffffff, 0x3fe0c152382d7365), (0x3fe0000000000000, 0x3fe0c152382d7366),
+        (0x3fe8000000000000, 0x3feb235315c680dc), (0x3fed800000000000, 0x3ff2c42a3a3c7a87),
+        (0x3fee800000000000, 0x3ff436e4418e69c0), (0x3fef000000000000, 0x3ff51f4bd13f8591),
+        (0x3fefffffffffffff, 0x3ff921fb50442d18), (0xbfe6a09e667f3bcd, 0xbfe921fb54442d19),
+        (0xbfefe00000000001, 0xbff7b7d33b928c60), (0x3c87ffffffffffff, 0x3c87ffffffffffff),
+        (0x3ff0000000000000, 0x3ff921fb54442d18), (0xbff0000000000000, 0xbff921fb54442d18),
+        (0x8000000000000000, 0x8000000000000000),
     )),
 ]
 
@@ -131,7 +146,7 @@ def mismatches(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def pinned_check(evaluate) -> int:
     """evaluate(f, x array) -> result array; every pinned word must match."""
     bad = 0
-    for f in range(3):
+    for f in range(len(FUNCTIONS)):
         rows = [(x, w) for g, x, w in PINNED if g == f]
         x = np.array([r[0] for r in rows], dtype=np.uint64).view(np.float64)
         want = np.array([r[1] for r in rows], dtype=np.uint64)
@@ -152,12 +167,14 @@ def _host_evaluate(lib):
     return evaluate
 
 
-def cpu(lib, count: int) -> int:
+def cpu(lib, count: int, functions=FUNCTIONS) -> int:
     if not lib.trig_bind_host_libm():
         raise SystemExit("the cpu leg needs a glibc host (libm.so.6)")
     print(f"host libm: glibc {'.'.join(map(str, glibc_version() or ()))}; {platform.processor() or platform.machine()}")
     total = 0
     for f, name in enumerate(FUNCTIONS):
+        if name not in functions:
+            continue
         sums = np.zeros(3, dtype=np.uint64)
         for start in range(0, count, CHUNK):
             n = min(CHUNK, count - start)
@@ -174,7 +191,7 @@ def cpu(lib, count: int) -> int:
     return total + pinned_check(_host_evaluate(lib))
 
 
-def gpu(lib, count: int) -> int:
+def gpu(lib, count: int, functions=FUNCTIONS) -> int:
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     from woof.backend import install
@@ -191,6 +208,8 @@ def gpu(lib, count: int) -> int:
     kernel = module.get_function("trig_grade")
     total = 0
     for f, name in enumerate(FUNCTIONS):
+        if name not in functions:
+            continue
         bad_host = bad_libm = huge_libm = 0
         for start in range(0, count, CHUNK):
             n = min(CHUNK, count - start)
@@ -236,10 +255,12 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("leg", choices=("cpu", "gpu"))
     parser.add_argument("--count", type=int, default=1 << 26)
+    parser.add_argument("--functions", nargs="+", choices=FUNCTIONS, default=FUNCTIONS,
+                        help="grade only these (default: all); the pinned words are always checked")
     args = parser.parse_args(argv)
     with tempfile.TemporaryDirectory() as tmp:
         lib = build(Path(tmp))
-        bad = cpu(lib, args.count) if args.leg == "cpu" else gpu(lib, args.count)
+        bad = (cpu if args.leg == "cpu" else gpu)(lib, args.count, tuple(args.functions))
     return 1 if bad else 0
 
 

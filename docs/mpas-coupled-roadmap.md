@@ -148,6 +148,12 @@ Ordered by how self-contained each piece is:
    exp is the MIT transcription; `compute_albedos`' atan needs the LGPL
    opt-in. v8.4.2 passes `ncat` as `absorbed_solar`'s layer count; the port
    keeps that and refuses `ncat > nilyr`, where v8.4.2 writes past the array.
+   Also ported: the delta-Eddington shortwave with a computed surface
+   temperature (`colpkg_init_orbit`, `compute_coszen`, `run_dEdd` with
+   level, CESM, topo or no ponds; `column_dedd_v842.cu`,
+   `tests/test_mpas_seaice_column_dedd_parity.py`). Its orbit and solar
+   zenith angle call glibc's sin, cos, atan and asin, so it needs the LGPL
+   opt-in; aerosols and the bioabsorption stay refused.
    Also ported: the coupling preparation, `seaice_column_coupling_prep` with
    `seaice_column_scale_fluxes` (the saved freezing/melting potential, the
    cell albedos and effective pond area, the pond freshwater feedback, the
@@ -160,8 +166,7 @@ Ordered by how self-contained each piece is:
    layer (`config_use_ocean_mixed_layer`, `.true.` in the Registry, off when
    coupled to an ocean) and the column biogeochemistry are refused by name.
    Still to port: mushy vertical
-   thermodynamics, `ice_shortwave`'s delta-Eddington (with the orbit and
-   `compute_coszen`), the melt
+   thermodynamics, the melt
    ponds' own physics, the other `ice_atmo` options, then the column time
    step.
 7. Biogeochemistry (`ice_zbgc*`, `ice_algae`, `ice_aerosol`). Refused by name

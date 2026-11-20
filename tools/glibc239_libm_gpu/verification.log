@@ -26,3 +26,21 @@ gpu sin: 268435456 arguments; device vs host transcription: 0 mismatches; no gli
 gpu cos: 268435456 arguments; device vs host transcription: 0 mismatches; no glibc on this host
 gpu atan: 268435456 arguments; device vs host transcription: 0 mismatches; no glibc on this host
 pinned: 42 glibc 2.39 words: 0 mismatches
+
+# asin (e_asin.c's __ieee754_asin, x86-64 __ieee754_asin_fma), 2026-11-20.  glibc 2.44's e_asin.c,
+# asincos.tbl, root.tbl, powtwo.tbl and uasncs.h are glibc 2.39's.  Argument stream: asin_arg in
+# grade_trig_args.h (eight families: every binary64 word; |x| <= 1; 2^-26..1/8; 1/8..0.96875 (the table);
+# 0.96875..1 (the root); every branch point +- 2^23 ulp; |x| < 0.40625; within 2^40 ulp below 1).  The
+# "below 105414350" wording is sin's and cos's range split; every asin argument is below it.
+# cpu: pixi run -e default python tools/glibc239_libm_gpu/grade_trig.py cpu --count 4294967296 --functions asin (pb)
+host libm: glibc 2.44; x86_64
+cpu asin: 4294967296 arguments; transcription vs glibc: 0 mismatches below 105414350
+pinned: 59 glibc 2.39 words: 0 mismatches
+
+# gpu, CUDA (RTX A6000, NVRTC --fmad=true): WOOF_BACKEND=cuda ... grade_trig.py gpu --count 268435456 --functions asin (pb)
+gpu asin: 268435456 arguments; device vs host transcription: 0 mismatches; vs glibc 2.44: 0 mismatches below 105414350
+pinned: 59 glibc 2.39 words: 0 mismatches
+
+# gpu, Metal (Apple M3 Max, soft binary64): pixi run -e mlx python ... grade_trig.py gpu --count 268435456 --functions asin (mac)
+gpu asin: 268435456 arguments; device vs host transcription: 0 mismatches; no glibc on this host
+pinned: 59 glibc 2.39 words: 0 mismatches

@@ -64,6 +64,8 @@ ITD_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_itd"
 RIDGE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_ridge"
 #: the shortwave's fixture (RADIATION_CASES)
 RADIATION_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_radiation"
+#: the delta-Eddington shortwave's fixture (DEDD_CASES)
+DEDD_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_dedd"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -227,6 +229,42 @@ RADIATION_CASES = (
 #: the cases that call glibc's atan (the ccsm3 albedos with a computed surface temperature)
 RADIATION_TRIG_CASES = ("rad_ccsm3_albedos", "rad_ccsm3_albedos_thickness_limit", "init_shortwave_ccsm3_albedos")
 _RADIATION_STAGES = ("radiation", "prep_radiation", "init_shortwave")
+_CESM = {"config_use_level_meltponds": False, "config_use_cesm_meltponds": True, "config_pond_refreezing_type": "cesm"}
+_TOPO_ONLY = {"config_use_level_meltponds": False, "config_use_topo_meltponds": True}
+#: the delta-Eddington shortwave with a computed surface temperature (colpkg stage
+#: 5b; the Registry default): name, seed, stage, overrides. Every case calls glibc's
+#: sin, cos, atan and asin (the orbit and the solar zenith angle).
+DEDD_CASES = (
+    ("dedd_default_level_ponds", 20261993, "radiation", {}),
+    ("dedd_bl99_level_ponds_noon", 20261994, "radiation", {
+        **_BL99, "config_calendar_type": "gregorian", "config_start_time": "2000-06-21_12:00:00"}),
+    ("dedd_cesm_ponds_snow_transition", 20261995, "radiation", {
+        **_CESM, "config_snow_to_ice_transition_depth": 0.03, "config_start_time": "2001-07-15_06:30:15"}),
+    ("dedd_topo_ponds", 20261996, "radiation", {**_BL99, **_TOPO_ONLY, "config_start_time": "2001-12-21_23:59:59"}),
+    ("dedd_no_ponds_snow_transition", 20261997, "radiation", {
+        **_NO_PONDS, "config_snow_to_ice_transition_depth": 0.05, "config_start_time": "2001-03-20_18:00:00"}),
+    ("dedd_negative_tuning", 20261998, "radiation", {
+        "config_ice_shortwave_tuning_parameter": -1.5, "config_pond_shortwave_tuning_parameter": -2.5,
+        "config_snow_shortwave_tuning_parameter": -1.0, "config_start_time": "2001-05-01_09:00:00"}),
+    ("dedd_positive_tuning_no_algae", 20261999, "radiation", {
+        **_CESM, "config_ice_shortwave_tuning_parameter": 1.0, "config_pond_shortwave_tuning_parameter": 1.5,
+        "config_snow_shortwave_tuning_parameter": 2.0, "config_algae_absorption_coefficient": 0.0,
+        "config_temp_change_snow_grain_radius_change": 3.0, "config_max_melting_snow_grain_radius": 900.0,
+        "config_start_time": "2001-08-10_15:45:00"}),
+    ("dedd_bl99_one_layer_three_categories", 20262000, "radiation", {
+        **_BL99, "config_nIceLayers": 1, "config_nCategories": 3, "config_start_time": "2001-06-01_03:00:00"}),
+    ("dedd_bl99_twelve_layers", 20262001, "radiation", {
+        **_BL99, "config_nIceLayers": 12, "config_start_time": "2001-04-15_21:00:00"}),
+    ("dedd_zero_layer", 20262002, "radiation", {
+        "config_thermodynamics_type": "zero layer", "config_sea_freezing_temperature_type": "linear_salt",
+        "config_start_time": "2001-06-21_00:00:00"}),
+    ("dedd_zero_layer_topo_ponds", 20262003, "radiation", {
+        **_TOPO_ONLY, "config_thermodynamics_type": "zero layer", "config_sea_freezing_temperature_type": "linear_salt",
+        "config_start_time": "2000-01-10_12:00:00"}),
+    ("init_shortwave_dedd_level_ponds", 20262004, "init_shortwave", {"config_start_time": "2001-06-21_12:00:00"}),
+    ("init_shortwave_dedd_topo_ponds", 20262005, "init_shortwave", {
+        **_BL99, **_TOPO_ONLY, "config_calendar_type": "gregorian", "config_start_time": "2000-02-29_07:00:00"}),
+)
 
 
 def configs_of(overrides: dict, stage: str) -> dict:
@@ -744,6 +782,54 @@ def _radiation_state(rs, case: dict) -> None:
         lid[2] = hp1
         t["pondLidThickness"] = lid
     pools["mesh"]["indexToCellID"] = np.arange(1, n1 + 1, dtype=np.int32)
+    if case["stage"] != "prep_radiation" and config["config_shortwave_type"] == "dEdd" \
+            and config["config_calc_surface_temperature"]:
+        _dedd_state(rs, case)
+
+
+def _dedd_state(rs, case: dict) -> None:
+    """The delta-Eddington shortwave's inputs on _radiation_state's (its draws
+    only for these cases, so the other cases' bytes stay):
+
+    - ice with volume everywhere: run_dEdd's ice without volume has no layer
+      thickness and its bottom layer's chlorophyll absorption kalg*(0.5/0)
+      makes NaN, whose payload is the host's;
+    - longitudes over [0, 2 pi) with one at pi and two above it (the wrap);
+    - a category just above and one just below hs_min, a surface between
+      -dT_mlt and the melting point (melting snow grains);
+    - ponds shallower than hpmin, between hpmin and hp0 and deeper; level
+      ponds under deep snow (rp < 0.15) and lids with and without snow on
+      them; topo lids straddling config_critical_pond_ice_thickness."""
+    pools, dims = case["pools"], case["dims"]
+    nc, ncat = dims["nCells"], dims["nCategories"]
+    n1 = nc + 1
+    u = _uniform(rs)
+    t = pools["tracers"]
+    area, volume, snow = t["iceAreaCategory"], t["iceVolumeCategory"], t["snowVolumeCategory"]
+    volume[5, -1] = area[5, -1] * 1.2
+    snow[2, 0] = area[2, 0] * 5.0e-5
+    if ncat >= 2:
+        snow[2, 1] = area[2, 1] * 2.0e-4
+    t["surfaceTemperature"][6, 0] = -0.7
+    t["surfaceTemperature"][8, :] = u(-1.4, 0.0, (ncat, 1))
+    lon = u(0.0, 2.0 * np.pi, (n1,))
+    lon[0], lon[1], lon[2] = np.pi, 1.5 * np.pi, 2.0 * np.pi - 1.0e-9
+    pools["mesh"]["lonCell"] = lon
+    fsnow = u(0.0, 1.0e-6, (n1,))
+    fsnow[5] = 0.0
+    pools["atmos_coupling"]["snowfallRate"] = fsnow
+    if t.get("pondDepth") is not None:
+        depth = t["pondDepth"]
+        depth[2] = 0.003
+        depth[4] = u(0.005, 0.2, depth[4].shape)
+        depth[6] = 0.01
+    ponds = pools["ponds"]
+    if ponds.get("pondSnowDepthDifference") is not None:
+        dhs = u(0.0, 0.05, (n1, ncat))
+        dhs[:3] = 0.0
+        ponds["pondSnowDepthDifference"] = dhs
+    if ponds.get("pondLidMeltFluxFraction") is not None:
+        ponds["pondLidMeltFluxFraction"] = u(0.0, 1.0, (n1, ncat))
 
 
 def make_case(name, seed, stage, overrides) -> dict:
@@ -1042,6 +1128,13 @@ def measure_radiation(reference: dict | None = None, logs: dict | None = None, *
                       fixture_dir: Path = RADIATION_FIXTURE_DIR) -> dict[str, dict[str, int]]:
     """Per shortwave case and field, the words the GPU gets wrong, and the
     tracer object's integers that differ from the oracle's."""
+    return measure(reference, logs, rows=rows, fixture_dir=fixture_dir)
+
+
+def measure_dedd(reference: dict | None = None, logs: dict | None = None, *, rows=DEDD_CASES,
+                 fixture_dir: Path = DEDD_FIXTURE_DIR) -> dict[str, dict[str, int]]:
+    """Per delta-Eddington case and field, the words the GPU gets wrong, and
+    the tracer object's integers that differ from the oracle's."""
     return measure(reference, logs, rows=rows, fixture_dir=fixture_dir)
 
 

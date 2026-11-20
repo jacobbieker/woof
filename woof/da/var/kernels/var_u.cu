@@ -576,6 +576,117 @@ extern "C" __global__ void var_xtoxa_adj(real* __restrict__ pa, real* __restrict
     }
 }
 
+// ------------------------------------------------ hybrid: the alpha CV
+//
+// The ensemble part of U (woof/da/var/hybrid.py): ne members, the alpha
+// control variable's vv (nx, ny, ne * mz) (member-major after the point, so
+// var_cv_block and var_rf_lines5 serve it with mz' = ne * mz), its vp and the
+// perturbations ep (nx, ny, nz, ne), ep_ps (nx, ny, ne).
+
+// da_transform_vvtovp for each member: vp(i,j,k,n) = sum_m (evec(j,k,m) *
+// val(j,m)) * vv(i,j,n,m), m ascending from 0
+extern "C" __global__ void var_alpha_vvtovp(const real* __restrict__ evec, const real* __restrict__ val,
+                                            const real* __restrict__ vv, real* __restrict__ vp,
+                                            const int nx, const int ny, const int nz, const int mz,
+                                            const int ne, const int nke, const int mze, const int mzv) {
+    const long long total = (long long)nx * ny * nz * ne;
+    GRID_LOOP(t, total) {
+        const int n = (int)(t % ne);
+        const int k = (int)((t / ne) % nz);
+        const long long ij = t / ((long long)ne * nz);
+        const int j = (int)(ij % ny);
+        const real* e = evec + ((long long)j * nke + k) * mze;
+        const real* v = val + (long long)j * mzv;
+        const real* w = vv + (ij * ne + n) * mz;
+        real acc = R_ZERO;
+        for (int m = 0; m < mz; ++m) acc = R_ADD(acc, R_MUL(R_MUL(e[m], v[m]), w[m]));
+        vp[t] = acc;
+    }
+}
+
+// da_transform_vvtovp_adj for each member: vv(i,j,n,m) = sum_k (evec(j,k,m) *
+// val(j,m)) * vp(i,j,k,n), k ascending from 0
+extern "C" __global__ void var_alpha_vvtovp_adj(const real* __restrict__ evec, const real* __restrict__ val,
+                                                const real* __restrict__ vp, real* __restrict__ vv,
+                                                const int nx, const int ny, const int nz, const int mz,
+                                                const int ne, const int nke, const int mze, const int mzv) {
+    const long long total = (long long)nx * ny * ne * mz;
+    GRID_LOOP(t, total) {
+        const int m = (int)(t % mz);
+        const int n = (int)((t / mz) % ne);
+        const long long ij = t / ((long long)mz * ne);
+        const int j = (int)(ij % ny);
+        const real vm = val[(long long)j * mzv + m];
+        const real* p = vp + ij * nz * ne + n;
+        real acc = R_ZERO;
+        for (int k = 0; k < nz; ++k) {
+            const real e = evec[((long long)j * nke + k) * mze + m];
+            acc = R_ADD(acc, R_MUL(R_MUL(e, vm), p[(long long)k * ne]));
+        }
+        vv[t] = acc;
+    }
+}
+
+// da_calc_flow_dependence_xa then da_add_xa: xa_ens = 0 + sum_n alpha * ep,
+// n ascending, and xa = xa + xa_ens for u, v, t, q (one thread per point)
+// and psfc (the k = 0 thread, alpha at the lowest level)
+extern "C" __global__ void var_flow_xa(const real* __restrict__ alpha, const real* __restrict__ e1,
+                                       const real* __restrict__ e2, const real* __restrict__ e3,
+                                       const real* __restrict__ e4, const real* __restrict__ e5,
+                                       real* __restrict__ u, real* __restrict__ v, real* __restrict__ tt,
+                                       real* __restrict__ q, real* __restrict__ psfc,
+                                       const int nx, const int ny, const int nz, const int ne) {
+    const long long total = (long long)nx * ny * nz;
+    GRID_LOOP(t, total) {
+        const long long o = t * ne;
+        real su = R_ZERO, sv = R_ZERO, st = R_ZERO, sq = R_ZERO;
+        for (int n = 0; n < ne; ++n) {
+            const real a = alpha[o + n];
+            su = R_ADD(su, R_MUL(a, e1[o + n]));
+            sv = R_ADD(sv, R_MUL(a, e2[o + n]));
+            st = R_ADD(st, R_MUL(a, e3[o + n]));
+            sq = R_ADD(sq, R_MUL(a, e4[o + n]));
+        }
+        u[t] = R_ADD(u[t], su);
+        v[t] = R_ADD(v[t], sv);
+        tt[t] = R_ADD(tt[t], st);
+        q[t] = R_ADD(q[t], sq);
+        if (t % nz == 0) {
+            const long long ij = t / nz;
+            real sp = R_ZERO;
+            for (int n = 0; n < ne; ++n) sp = R_ADD(sp, R_MUL(alpha[o + n], e5[ij * ne + n]));
+            psfc[ij] = R_ADD(psfc[ij], sp);
+        }
+    }
+}
+
+// da_calc_flow_dependence_xa_adj into a zeroed vp%alpha: at the lowest level
+// (0 + ep_ps * psfc) first, then (((0 + e4 q) + e3 t) + e2 v) + e1 u
+extern "C" __global__ void var_flow_xa_adj(real* __restrict__ alpha, const real* __restrict__ e1,
+                                           const real* __restrict__ e2, const real* __restrict__ e3,
+                                           const real* __restrict__ e4, const real* __restrict__ e5,
+                                           const real* __restrict__ u, const real* __restrict__ v,
+                                           const real* __restrict__ tt, const real* __restrict__ q,
+                                           const real* __restrict__ psfc,
+                                           const int nx, const int ny, const int nz, const int ne) {
+    const long long total = (long long)nx * ny * nz * ne;
+    GRID_LOOP(t, total) {
+        const int n = (int)(t % ne);
+        const long long p = t / ne;
+        real out = R_ZERO;
+        if (p % nz == 0) {
+            const long long ij = p / nz;
+            out = R_ADD(out, R_MUL(e5[ij * ne + n], psfc[ij]));
+        }
+        real a = R_ZERO;
+        a = R_ADD(a, R_MUL(e4[t], q[p]));
+        a = R_ADD(a, R_MUL(e3[t], tt[p]));
+        a = R_ADD(a, R_MUL(e2[t], v[p]));
+        a = R_ADD(a, R_MUL(e1[t], u[p]));
+        alpha[t] = R_ADD(out, a);
+    }
+}
+
 // --------------------------------------------------------- control layout
 
 // cv block (Fortran order, (nx, ny, mz)) <-> C-order field; dir 0 cv -> field

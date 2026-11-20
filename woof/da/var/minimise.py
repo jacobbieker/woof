@@ -75,21 +75,30 @@ class CGResult:
 
 
 def _precon(cost, ghat, j0_total: float, precondition_factor: float):
-    """``precondition_cg``'s diagonal by control-variable level block (no ensemble: blocks v1..v5)."""
+    """``precondition_cg``'s diagonal by control-variable level block (blocks v1..v5, then the hybrid's alpha)."""
     ops = cost.ops
     cv_u = getattr(cost, "cv_u", cost.cv_size)
     gu = ghat if cv_u == cost.cv_size else ghat[:cv_u]  # U's levels only; VarBC blocks keep 1
     g_total = ops.dot(gu, gu)
-    mz = list(cost.u.cv_mz[:5])
-    nn = cost.nx * cost.ny
+    blocks = getattr(cost.u, "precon_blocks", None)
+    if blocks is None:
+        blocks = [(m, cost.nx * cost.ny) for m in cost.u.cv_mz[:5]]
+    # jo_partial = j0_total / SUM(be%cv_mz(1:nv_precon)): every block's mode
+    # count, the hybrid's alpha%mz (not mz*ne) included.  A block with no modes
+    # (max_vert_var5 = 0, or full-ensemble mode's static blocks) has no
+    # elements; WRFDA's nn = sz(nv) / be%cv_mz(nv) divides by zero there, woof
+    # skips it.
+    modes = sum(m for m, _ in blocks)
     values = np.ones(cost.cv_size, dtype=np.float64)
     iend = 0
-    for nv in range(len(mz)):
-        for _ in range(mz[nv]):
+    for count, nn in blocks:
+        if count == 0:
+            continue
+        for _ in range(count):
             istart = iend
             iend = istart + nn
             g_partial = ops.dot(ghat[istart:iend], ghat[istart:iend])
-            jo_partial = j0_total / sum(mz)
+            jo_partial = j0_total / modes
             values[istart:iend] = 1.0 / (1.0 + precondition_factor * (g_partial / g_total) / (jo_partial / j0_total))
     return ops.asarray(values)
 

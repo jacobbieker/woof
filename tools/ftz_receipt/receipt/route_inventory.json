@@ -9,11 +9,11 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 705,
+  "site_count": 706,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 47,
     "cupy.RawKernel": 120,
-    "cupy.RawModule": 309,
+    "cupy.RawModule": 310,
     "cupy.ReductionKernel": 22,
     "cupy.cuda.compiler.compile_using_nvrtc": 207
   },
@@ -27,7 +27,7 @@
     "package": {
       "cupy.ElementwiseKernel": 35,
       "cupy.RawKernel": 39,
-      "cupy.RawModule": 110,
+      "cupy.RawModule": 111,
       "cupy.ReductionKernel": 9,
       "cupy.cuda.compiler.compile_using_nvrtc": 132
     },
@@ -5338,7 +5338,7 @@
     },
     {
       "file": "tools/glibc239_libm_gpu/grade_trig.py",
-      "line": 188,
+      "line": 205,
       "column": 15,
       "surface": "tools",
       "constructor": "compile_using_nvrtc",
@@ -5360,7 +5360,7 @@
     },
     {
       "file": "tools/glibc239_libm_gpu/grade_trig.py",
-      "line": 222,
+      "line": 241,
       "column": 19,
       "surface": "tools",
       "constructor": "compile_using_nvrtc",
@@ -9695,6 +9695,28 @@
       "text": "return cp.RawModule(code=source, options=(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\"))"
     },
     {
+      "file": "woof/grad/wrfplus/lbc.py",
+      "line": 49,
+      "column": 11,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_device_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\")",
+      "options": [
+        "--fmad=false",
+        null
+      ],
+      "options_element_expressions": [
+        "\"--fmad=false\"",
+        "f\"-DWRFPLUS_REAL={real}\""
+      ],
+      "options_are_literal": false,
+      "text": "return cp.RawModule(code=source, options=(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\"))"
+    },
+    {
       "file": "woof/grad/wrfplus/stage.py",
       "line": 35,
       "column": 11,
@@ -10704,7 +10726,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
-      "line": 116,
+      "line": 137,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
