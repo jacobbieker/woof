@@ -102,6 +102,20 @@ extern "C" __global__ void var_axpy(real* __restrict__ y, const real* __restrict
     GRID_LOOP(t, n) { y[t] = R_ADD(y[t], R_MUL(a, x[t])); }
 }
 
+// out = x / a  (da_minimise_cg: qhat = ghat / sqrt(rrmold), a division, not
+// a product with the reciprocal)
+extern "C" __global__ void var_div_scalar(real* __restrict__ out, const real* __restrict__ x, const real a,
+                                          const long long n) {
+    GRID_LOOP(t, n) { out[t] = R_DIV(x[t], a); }
+}
+
+// p = -t + b p  (da_minimise_cg: phat = -precon * ghat + ratio * phat, with
+// t = precon * ghat; da_calculate_gradj: grad = -grad_jo + jb_factor * cv)
+extern "C" __global__ void var_neg_axpby(real* __restrict__ p, const real* __restrict__ t, const real b,
+                                         const long long n) {
+    GRID_LOOP(i, n) { p[i] = R_ADD(-t[i], R_MUL(b, p[i])); }
+}
+
 // ----------------------------------------------------- recursive filter lines
 //
 // da_recursive_filter_1d / _adj, in place along one line of n values at
