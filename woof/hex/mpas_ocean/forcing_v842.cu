@@ -141,6 +141,9 @@ extern "C" __global__ void ocn_vel_forcing_explicit_bottom_drag_v842(
     if (iEdge >= nEdges) return;
     const int c1 = cellsOnEdge[iEdge * 2] - 1, c2 = cellsOnEdge[iEdge * 2 + 1] - 1;
     const int k = maxLevelEdgeTop[iEdge] - 1;
+    // a dry edge (maxLevelEdgeTop = 0): v8.4.2 reads level 0, which the host
+    // refuses by default; woof_bottom_drag_dry_edges = 'skip' leaves it be
+    if (k < 0) return;
     const int p = iEdge * nVertLevels + k;
     const rk drag = SQRT(A(kineticEnergyCell[c1 * nVertLevels + k], kineticEnergyCell[c2 * nVertLevels + k]));
     tend[p] = S(tend[p], D(M(M(coef, drag), normalVelocity[p]), layerThicknessEdge[p]));
@@ -148,20 +151,25 @@ extern "C" __global__ void ocn_vel_forcing_explicit_bottom_drag_v842(
 
 // ocn_vel_forcing_rayleigh_tend: one thread per edge. The bottom term, as the
 // Fortran writes it, uses rayleighDampingCoef (not the bottom coefficient) and
-// runs only when the interior friction is on; bottom != 0 asks for it.
+// runs only when the interior friction is on; bottom != 0 asks for it, with
+// bottomCoef = coef and interior = 1 for v8.4.2's words. The corrected opt-in
+// (woof_rayleigh_bottom_friction) passes the bottom coefficient, and interior
+// = 0 when only the bottom friction is on. A dry edge (maxLevelEdgeTop = 0)
+// gets no bottom term (the host refuses it unless asked to skip).
 extern "C" __global__ void ocn_vel_forcing_rayleigh_v842(
     rk *tend, const rk *normalVelocity, const int *maxLevelEdgeTop, rk coef, int bottom,
-    int nEdges, int nVertLevels)
+    int nEdges, int nVertLevels, int interior, rk bottomCoef)
 {
     int iEdge = blockIdx.x * blockDim.x + threadIdx.x;
     if (iEdge >= nEdges) return;
     const int base = iEdge * nVertLevels;
     const int kmax = maxLevelEdgeTop[iEdge];
-    for (int k = 0; k < kmax; ++k)
-        tend[base + k] = S(tend[base + k], M(coef, normalVelocity[base + k]));
-    if (bottom) {
+    if (interior)
+        for (int k = 0; k < kmax; ++k)
+            tend[base + k] = S(tend[base + k], M(coef, normalVelocity[base + k]));
+    if (bottom && kmax > 0) {
         const int p = base + kmax - 1;
-        tend[p] = S(tend[p], M(coef, normalVelocity[p]));
+        tend[p] = S(tend[p], M(bottomCoef, normalVelocity[p]));
     }
 }
 

@@ -295,7 +295,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     ISOMIP and Jenkins melt, the top drag, the boundary layer, the thickness,
     velocity and tracer forcing, the effective density in land ice and the
     coupler's land-ice means; standalone, in the diagnostics and over forward
-    steps; 'HollandJenkins' is refused by name). The step
+    steps; 'HollandJenkins' is refused by name). Three v8.4.2 quirks keep
+    their words by default and have corrected opt-ins, each tested on its
+    own: the ISOMIP freezing point taken at the boundary layer's salinity
+    rather than its temperature
+    (`woof_land_ice_isomip_freezing_salinity = 'boundary_layer_salinity'`),
+    the Rayleigh bottom friction with its own coefficient and without the
+    interior friction (`woof_rayleigh_bottom_friction = 'corrected'`), and
+    no bottom drag on a dry edge instead of the refusal
+    (`woof_bottom_drag_dry_edges = 'skip'`). The step
     checks its barotropic halo copies against the mesh once per mesh, not
     with two device reads per stage: on an 8,300-cell, 60-level torus a
     step takes 36 instead of 130 ms on an A6000 and 110 instead of 245 ms

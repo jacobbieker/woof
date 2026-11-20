@@ -184,19 +184,23 @@ extern "C" __global__ void ocn_li_attenuation_v842(
 // p = rho_sw, cp_sw, latent_heat_fusion_mks, ISOMIP gammaT, cp_land_ice;
 // cavity = the land-ice cavity's five freezing coefficients
 
-// ISOMIP, cells 1..nCellsSolve (v8.4.2 passes the boundary-layer temperature
-// as the freezing point's salinity)
+// ISOMIP, cells 1..nCellsSolve. v8.4.2 passes the boundary-layer temperature
+// as the freezing point's salinity (an oracle quirk): indexFreezeS is indexBLT
+// for that word-exact default, indexBLS for the corrected opt-in
+// (woof_land_ice_isomip_freezing_salinity), which takes the freezing point at
+// the boundary layer's salinity.
 extern "C" __global__ void ocn_li_isomip_v842(
     rk *landIceInterfaceTracers, rk *landIceFreshwaterFlux, rk *landIceHeatFlux, rk *heatFluxToLandIce,
     const rk *landIceBoundaryLayerTracers, const rk *landIcePressure, const rk *landIceFraction,
-    const int *landIceMask, const rk *p, const rk *cavity, int nCells, int indexBLT, int indexIT)
+    const int *landIceMask, const rk *p, const rk *cavity, int nCells, int indexBLT, int indexIT, int indexFreezeS)
 {
     const int iCell = li_thread();
     if (iCell >= nCells) return;
     if (landIceMask[iCell] == 0) return;
     const rk rhoSw = p[0], cpSw = p[1], latent = p[2], gammaT = p[3];
     const rk blt = landIceBoundaryLayerTracers[(size_t)iCell * 2 + indexBLT - 1];
-    const rk it = li_freezing(blt, landIcePressure[iCell], cavity);
+    const rk it = li_freezing(landIceBoundaryLayerTracers[(size_t)iCell * 2 + indexFreezeS - 1],
+                              landIcePressure[iCell], cavity);
     landIceInterfaceTracers[(size_t)iCell * 2 + indexIT - 1] = it;
     const rk freshwaterFlux = -M(M(M(rhoSw, gammaT), D(cpSw, latent)), S(it, blt));
     landIceFreshwaterFlux[iCell] = M(landIceFraction[iCell], freshwaterFlux);

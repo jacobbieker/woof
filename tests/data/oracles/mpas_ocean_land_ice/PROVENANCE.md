@@ -44,3 +44,15 @@ routines write start from noise.
 
 `tests/test_mpas_ocean_land_ice_parity.py` and `woof hex ocean verify` run
 `woof.hex.mpas_ocean.land_ice_v842`, and every word must be bit-identical.
+
+## A quirk kept, and its corrected opt-in
+
+v8.4.2's ISOMIP branch of `ocn_surface_land_ice_fluxes_build_arrays` calls
+`ocn_freezing_temperature` with `salinity =
+landIceBoundaryLayerTracers(indexBLT, iCell)`, the boundary layer's
+temperature where its salinity belongs. The fixture holds that, and the
+default keeps it word for word. The corrected form,
+`woof_land_ice_isomip_freezing_salinity = 'boundary_layer_salinity'` (not an
+MPAS config, so not in the stream), takes `indexBLS`; it is checked on its own
+against a numpy reference and physical bounds in
+`tests/test_mpas_ocean_quirk_opt_ins.py`, not against this fixture.

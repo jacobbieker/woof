@@ -79,3 +79,16 @@ absorbed-fraction column sums on both sides of 1.
 `vel_forcing_tend`, `thick_surface_flux_tend`), and every word must be
 bit-identical. On 2026-11-08 the result was 0 differing words in every field,
 case and precision on CUDA (RTX A6000).
+
+## Quirks kept, and their corrected opt-ins
+
+Two v8.4.2 behaviours are kept word for word by default, and the fixture
+holds them: `ocn_vel_forcing_rayleigh_tend` applies the bottom friction with
+`config_Rayleigh_damping_coeff` (not `config_Rayleigh_bottom_damping_coeff`)
+and only inside the interior-friction branch; and the explicit bottom drag and
+Rayleigh bottom friction index level `maxLevelEdgeTop` = 0 on a dry edge,
+outside the array, which woof refuses. The corrected forms are opt-ins that
+are not MPAS configs and do not enter the stream:
+`woof_rayleigh_bottom_friction = 'corrected'` and
+`woof_bottom_drag_dry_edges = 'skip'`. They are tested on their own against
+numpy references in `tests/test_mpas_ocean_quirk_opt_ins.py`.
