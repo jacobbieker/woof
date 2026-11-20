@@ -250,8 +250,8 @@ for dtn in {dtypes!r}:
 
 @pytest.mark.parametrize("backend", BACKENDS[:1])
 def test_window_names_what_it_refuses(backend, tmp_path):
-    """A regional case (specified boundaries, with map factors) is refused
-    by name, and the adjoint without a forward run says what is missing."""
+    """A regional case without boundary tables (specified, with map
+    factors) is refused by name, and the adjoint without a forward run says what is missing."""
     out = _run(backend, '''
 cfg = H.make_config(8, 6, 6, h_sca_adv_order=5, terrain_opt=1, specified=True)
 try:
@@ -267,6 +267,6 @@ try:
 except RuntimeError as e:
     out["order"] = str(e)
 ''', tmp_path)
-    assert "lateral boundaries other than periodic" in out["spec"], out
+    assert "specified lateral boundaries without attached tables" in out["spec"], out
     assert "map factors" not in out["spec"], out
     assert "forward first" in out["order"], out

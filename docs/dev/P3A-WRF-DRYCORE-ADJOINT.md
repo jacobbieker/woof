@@ -579,13 +579,8 @@ Each step is one small PR, taken to merged before the next widens.
    needed before its tutorial case can serve as the oracle.
    - Map factors: bound in the step since item 8e (below); no longer
      refused.
-   - Specified boundaries: the step must also take the relaxation folded
-     into the held tendencies (`fold_lateral_relaxation` into
-     rk_addtend_dry), the per-stage `state_relaxation_multi` rows on the
-     state's boundary tables, the exact frame and
-     `advance_specified_phi_w` in every substep, and `spec_bdy_final` in
-     the epilogue. The kernels are ported (items 5 and 7); the binding is
-     not.
+   - Specified boundaries: bound in the step since item 8f (below); no
+     longer refused.
    - Order agreed on 2026-11-20: the window driver next, then map
      factors, then specified boundaries.
 
@@ -605,8 +600,11 @@ Each step is one small PR, taken to merged before the next widens.
      before the sweep goes on backwards, which is where a 4D-Var
      observation term at that time enters.
    - The window refuses whatever `step_geometry` refuses, and names it.
-     Today that includes map factors and specified boundaries, so a
-     regional WRFDA case is refused until both are in.
+     Map factors (8e) and specified boundaries (8f) are bound. On a
+     specified domain the state also carries the mu halo, and the
+     interval's boundary tables are window parameters (`Window.params`):
+     `tl` takes their perturbation in `dx0`, and `ad` returns their
+     adjoint with state 0's.
    - Checkpoints hold a state's STEP_INPUTS only. A step reads nothing
      else its predecessor wrote: it writes its scratch before reading
      it. A test pins this. With every other written array poisoned with
@@ -676,8 +674,53 @@ Each step is one small PR, taken to merged before the next widens.
      step gives `dycore.step`'s words on a mapped state. With msfv passed
      where the strict path passes MSFV_INV, about 2000 words per
      prognostic differ, so the test pins the choice.
-   - Still refused: lateral boundaries other than periodic (specified
-     boundaries next), so WRFDA's regional tutorial case cannot run yet.
+   - Still refused then: lateral boundaries other than periodic (bound
+     in 8f).
+8f. Specified boundaries in the step (DA item 3): `step_geometry` binds
+   woof's strict specified step on a domain whose tables are attached
+   (`attach_lateral_boundaries`).
+   - Per stage, after the slow tendencies:
+     - stage 1 only: `fold_lateral_relaxation` on u, v and theta (the
+       held relax rows times msfu/msfv, then the mixing map-factor
+       coupling: /msfu, *msfv_inv, /msft);
+     - every stage: `_apply_state_lateral_boundaries_wrf`'s rows on the
+       state tables (u, v, theta target; phi held compute and store on
+       stage 1, held read later; mu with its relaxation on stage 1).
+   - After each substep: `advance_specified_phi_w`.
+   - Epilogue: the halo takes mup, then `spec_bdy_final` (mu first, then
+     u, v, theta and phi coupled with the captured muts). The periodic
+     alias close is skipped.
+   - rk_step 1 of a carried step reads WRF's mu halo on the boundary
+     faces' ghost operand (`_calc_ww_cp_fluxes`). `rk_step_prep` gains a
+     `halo` flag, and its adjoint routes each boundary face's ghost share
+     to the halo's adjoint. `model.HALO` ("mu_halo") is a step input
+     (`step_inputs(geom)`).
+   - The interval's tables (`lbc_<field>_<side>[_t]`,
+     `step_parameters(geom)`) are inputs no step writes: their TL is
+     carried, and their adjoint accumulates over the window.
+   - Each step has its own geometry, because its boundary time (dtbc,
+     the unbound clock: stage rows at the step start, `spec_bdy_final`
+     at its end) differs per step.
+   - Refused by name: nested boundaries, open boundaries that are not
+     specified, specified without tables, a bound `DomainClock`, time
+     laws other than linear, relax_w, DFI boundary forcing, streamed
+     tile seams, spec_zone 0, and a window crossing a boundary interval.
+   - Tests (`tests/test_grad_wrfplus_spec_step.py`, host and CUDA): three
+     cases on a 20x18x8 ridge with relax_zone 4 (a warm step, a cold
+     three-step chain, a warm two-step chain with map factors and the
+     carried halo moved 3 Pa off the ring).
+     - The binary32 base reproduces `dycore.step`'s words on every input
+       and the next step's scratch. Ablations each move words: without
+       the fold 22148, without `advance_specified_phi_w` 20653, without
+       `spec_bdy_final` 6137, without the stage rows 24413, and without
+       the halo operand 12072 on the shifted case (0 with it).
+     - The dot test perturbs the state, the halo and every table (1e-12
+       in binary64, 1e-5 terms-scaled in binary32).
+     - Binary64 finite differences converge, and the base-only build is
+       the joint base.
+     - The window's binary32 forward is N primal steps, and its dot test
+       with forcing covers the tables' adjoint.
+     - The refusals are named.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 

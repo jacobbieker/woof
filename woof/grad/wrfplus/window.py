@@ -2,8 +2,12 @@
 its adjoint over N steps with checkpoints (P3a item 8, for 4D-Var).
 
 States in and out are dicts over :data:`model.STEP_INPUTS` (the
-prognostics and the previous step's diagnosis).  State ``k`` is the state
-after ``k`` steps, ``0 <= k <= nsteps``.
+prognostics and the previous step's diagnosis; :func:`model.step_inputs`
+adds the carried mu halo on a specified domain).  State ``k`` is the state
+after ``k`` steps, ``0 <= k <= nsteps``.  A specified domain's boundary
+tables (:data:`model.LBC_INPUTS`, ``Window.params``) are inputs no step
+writes: :meth:`Window.tl` takes their perturbation in ``dx0`` (zero where
+absent) and :meth:`Window.ad` returns their adjoint with state 0's.
 
 - :meth:`Window.forward` runs the base and keeps a checkpoint every
   ``checkpoint_every`` steps.
@@ -52,10 +56,12 @@ class Window:
         self.nsteps = int(nsteps)
         self.every = int(checkpoint_every)
         self.geoms = M.step_geometries(state, cfg, self.nsteps)
+        self.inputs = M.step_inputs(self.geoms[0])
+        self.params = M.step_parameters(self.geoms[0])
         self._start = M.run_state(state, cfg, dtype)
         self._scratch = None
         self._mutable = self._written_names()
-        missing = set(M.STEP_INPUTS) - set(self._mutable)
+        missing = set(self.inputs) - set(self._mutable)
         if missing:   # the work dict would write into the shared start arrays
             raise AssertionError(f"a step does not write {sorted(missing)}")
         # the one dict every step runs in: the window's constant arrays
@@ -81,9 +87,10 @@ class Window:
         return tuple(n for n in self._start if n in names)
 
     def _check(self, d: dict, what: str) -> None:
-        """``d`` holds every STEP_INPUTS name, shaped and typed as the
-        window's (no silent cast or broadcast)."""
-        for n in M.STEP_INPUTS:
+        """``d`` holds every state input, shaped and typed as the
+        window's (no silent cast or broadcast), and any boundary table
+        it holds is shaped and typed as the window's too."""
+        for n in self.inputs + tuple(p for p in self.params if p in d):
             a, ref = d[n], self._start[n]
             if a.shape != ref.shape or a.dtype != ref.dtype:
                 raise ValueError(f"{what}[{n!r}] is {a.dtype}{tuple(a.shape)}, "
@@ -91,12 +98,12 @@ class Window:
 
     def _load(self, ck: dict) -> dict:
         """The work dict holding state ``ck`` (STEP_INPUTS)."""
-        for n in M.STEP_INPUTS:
+        for n in self.inputs:
             self._work[n][...] = ck[n]
         return self._work
 
     def _inputs(self, d: dict) -> dict:
-        return {n: d[n] for n in M.STEP_INPUTS}
+        return {n: d[n] for n in self.inputs}
 
     # ---------------------------------------------------------------- forward
 
@@ -106,6 +113,10 @@ class Window:
         Returns the final state's STEP_INPUTS."""
         if x0 is not None:
             self._check(x0, "x0")
+            given = [p for p in self.params if p in x0]
+            if given:   # the base runs on the window's own tables
+                raise ValueError(f"x0 holds boundary tables {given}: the window's "
+                                 "base runs on the tables it was built with")
         x = self._load(self._inputs(self._start) if x0 is None else x0)
         self._checkpoints = {}
         for k, g in enumerate(self.geoms):
@@ -119,7 +130,8 @@ class Window:
     def tl(self, dx0: dict, save_at=()) -> dict:
         """Map ``dx0`` (STEP_INPUTS of state 0) through the window, from
         the base the last :meth:`forward` ran (the start state if none).
-        Returns ``{k: dx_k}`` (STEP_INPUTS) for every ``k`` in ``save_at``
+        ``dx0`` may also hold boundary tables (``params``; zero where
+        absent).  Returns ``{k: dx_k}`` (state inputs) for every ``k`` in ``save_at``
         and for ``nsteps``."""
         import cupy as cp
         self._check(dx0, "dx0")
@@ -130,7 +142,7 @@ class Window:
         start = self._checkpoints.get(0) if self._checkpoints else None
         x = self._load(start if start is not None else self._inputs(self._start))
         dx = {n: cp.zeros_like(v) for n, v in x.items()}
-        for n in M.STEP_INPUTS:
+        for n in self.inputs + tuple(p for p in self.params if p in dx0):
             dx[n][...] = dx0[n]
         out = {}
         if 0 in save:
@@ -147,7 +159,8 @@ class Window:
         """The adjoint of the window: ``ax_final`` (STEP_INPUTS of state
         ``nsteps``; zero if None) plus ``forcing`` ``{k: STEP_INPUTS}``
         added at state ``k`` (``0 <= k <= nsteps``), mapped back to state
-        0.  Needs :meth:`forward` first.  Returns state 0's STEP_INPUTS."""
+        0.  Needs :meth:`forward` first.  Returns state 0's inputs and the
+        boundary tables' adjoint (``params``)."""
         import cupy as cp
         if self._checkpoints is None:
             raise RuntimeError("Window.ad needs Window.forward first (its checkpoints)")
@@ -163,7 +176,7 @@ class Window:
 
         def add(k, a):
             if a is not None:
-                for n in M.STEP_INPUTS:
+                for n in self.inputs:
                     ax[n] += a[n]
 
         add(self.nsteps, ax_final)
@@ -185,4 +198,4 @@ class Window:
                 M.step_ad(ax, x, tape, self.geoms[k])
                 del tape
                 add(k, forcing.get(k))
-        return _copy(self._inputs(ax))
+        return _copy(ax, self.inputs + self.params)
