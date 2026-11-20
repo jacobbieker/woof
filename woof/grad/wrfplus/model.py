@@ -11,7 +11,7 @@ before the operator runs, and :func:`step_ad` consumes that tape in
 reverse (recompute, then tape: the step's own NL is rerun from its
 start).
 
-Covered: periodic axes, no map factors, no rotation, dry, no physics or
+Covered: periodic axes, no map factors, Coriolis and curvature, dry, no physics or
 mixing, ``rk_ord = 3``, ``h_*_adv_order`` 3-6, a 3-D base state (terrain)
 and the w_damp limiter.
 Everything else is refused by :func:`step_geometry`.
@@ -32,11 +32,12 @@ from .acoustic import (CW_ACTIVE, CW_PASSIVE, CW_STATE, MT_ALIAS, MT_ACTIVE,
                        small_step_finish_ad, small_step_finish_tl,
                        small_step_init_ad, small_step_init_tl)
 from .advect import ADV_ACTIVE, ADV_PASSIVE, ADV_STATE, AdvGeometry, adv_ad, adv_tl
-from .bigstep import (BUOY_ACTIVE, BUOY_PASSIVE, BUOY_STATE, GEO_ACTIVE,
-                      GEO_PASSIVE, GEO_STATE, PGF_ACTIVE, PGF_PASSIVE,
-                      PGF_STATE, WD_ACTIVE, WD_PASSIVE, WD_STATE, BuoyGeometry,
-                      GeoGeometry, PGFGeometry, WDampGeometry, buoy_ad,
-                      buoy_tl, geo_ad, geo_tl, pgf_ad, pgf_tl, wd_ad, wd_tl)
+from .bigstep import (BUOY_ACTIVE, BUOY_PASSIVE, BUOY_STATE, CC_ACTIVE,
+                      CC_PASSIVE, CC_STATE, GEO_ACTIVE, GEO_PASSIVE, GEO_STATE,
+                      PGF_ACTIVE, PGF_PASSIVE, PGF_STATE, WD_ACTIVE, WD_PASSIVE,
+                      WD_STATE, BuoyGeometry, CCGeometry, GeoGeometry,
+                      PGFGeometry, WDampGeometry, buoy_ad, buoy_tl, cc_ad, cc_tl,
+                      geo_ad, geo_tl, pgf_ad, pgf_tl, wd_ad, wd_tl)
 from .stage import (PRP_ACTIVE, PRP_ALIAS, PRP_PASSIVE, PRP_STATE,
                     RSP_ACTIVE, RSP_ALIAS, RSP_PASSIVE, RSP_STATE,
                     SW_ACTIVE, SW_PASSIVE, PRPGeometry, RSPGeometry,
@@ -84,6 +85,7 @@ class StageSpec:
     buoy: BuoyGeometry
     geo: GeoGeometry
     wd: object                # WDampGeometry or None
+    cc: object                # CCGeometry on rotational grids, else None
     ss: SSGeometry
     cw: CWGeometry
     first: tuple              # (UVGeometry, MTGeometry, WGeometry)
@@ -106,7 +108,6 @@ def _refuse(cfg, state) -> None:
         "lateral boundaries other than periodic": bool(
             cfg.open_x or cfg.open_y or cfg.specified or getattr(cfg, "nested", False)),
         "map factors": bool(state.has_msf),
-        "rotation (coriolis/curvature)": bool(state.rotational),
         "moisture": state.qv is not None,   # the primal's test (dycore._step_body)
         "microphysics": bool(cfg.mp_physics),
         "rk_ord 2": getattr(cfg, "rk_ord", 3) != 3,
@@ -195,6 +196,7 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
                            w_damp_on=float(f32(D.w_damp_onset(cfg))),
                            w_crit_cfl=float(f32(cfg.w_crit_cfl)))
     rsp = RSPGeometry(nz, ny, nx, rdx=float(f32(1) / f32(dx)), rdy=float(f32(1) / f32(dy)))
+    cc = CCGeometry(nz, ny, nx, rdx=rdx, rdy=rdy) if state.rotational else None
     stages = []
     for istage, (nsub, dtau) in enumerate(D._rk_acoustic_stages(cfg)):
         dtau = float(f32(dtau))
@@ -211,7 +213,7 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
                               **cf))
         stages.append(StageSpec(
             rk_step=istage + 1, nsub=int(nsub), diagnose=prp, rsp=rsp, adv=adv, pgf=pgf,
-            buoy=buoy, geo=geo, wd=wd,
+            buoy=buoy, geo=geo, wd=wd, cc=cc,
             ss=SSGeometry(nz, ny, nx, boundary_x=0, boundary_y=0, rk_step=istage + 1),
             cw=CWGeometry(nz, ny, nx, dtau, epssm=float(f32(cfg.epssm)), top_lid=top_lid),
             first=sub(0.0), later=sub(float(f32(cfg.smdiv)))))
@@ -235,6 +237,7 @@ def _names() -> tuple:
     out += al(BUOY_STATE + BUOY_ACTIVE + BUOY_PASSIVE, _BUOY_ALIAS)
     out += al(GEO_STATE + GEO_ACTIVE + GEO_PASSIVE, _GEO_ALIAS)
     out += al(WD_STATE + WD_ACTIVE + WD_PASSIVE, _WD_ALIAS)
+    out += CC_STATE + CC_ACTIVE + CC_PASSIVE
     out += SI_STATE + SI_ACTIVE + SI_PASSIVE + CW_STATE + CW_ACTIVE + CW_PASSIVE
     out += SF_STATE + SF_ACTIVE + SF_PASSIVE
     out += ("u_pp", "v_pp") + UV_TRAJECTORY + W_STATE + W_TRAJECTORY
@@ -247,7 +250,7 @@ def _shapes(nz, ny, nx) -> dict:
     m, u, v, w, c = (nz, ny, nx), (nz, ny, nx + 1), (nz, ny + 1, nx), (nz + 1, ny, nx), (ny, nx)
     return {"cqu": u, "cqv": v, "cqw": w, "mudf": c, "h_diabatic": m, "ru": u, "rv": v,
             "ww_ref": w, "mu_pp_old": c, "th_pp_old": m, "c2a": m, "a": w, "alpha": w,
-            "gam": w, "muts": c, "p_pert": m}
+            "gam": w, "muts": c, "p_pert": m, "mut": c}
 
 
 def run_state(state, cfg, dtype=np.float64) -> dict:
@@ -266,7 +269,7 @@ def run_state(state, cfg, dtype=np.float64) -> dict:
                "gam": "acoustic_gamma"}
     out = {}
     for n in _names():
-        if n in ("cqu", "cqv", "cqw", "mudf", "h_diabatic"):
+        if n in ("cqu", "cqv", "cqw", "mudf", "h_diabatic", "mut"):
             a = cp.zeros(sh[n])
         elif n in scratch:
             a = state.scratch(sh[n], scratch[n])
@@ -314,7 +317,23 @@ def _op_table(spec: StageSpec):
     ops.append(("geo", geo_tl, geo_ad, _GEO_ALIAS, spec.geo, GEO_STATE))
     if spec.wd is not None:
         ops.append(("wd", wd_tl, wd_ad, _WD_ALIAS, spec.wd, WD_STATE))
+    if spec.cc is not None:
+        ops.append(("mut", _mut_tl, _mut_ad, {}, None, ("mut",)))
+        ops.append(("cc", cc_tl, cc_ad, {}, spec.cc, CC_STATE))
     return ops
+
+
+def _mut_tl(state, pert_state, traj, pert, geom, *, nl=True):
+    """coriolis_curvature's total dry mass (DomainState.total_mu)."""
+    import cupy as cp
+    if nl:
+        cp.add(state["mub2d"], state["mup"], out=state["mut"])
+    pert_state["mut"][...] = pert["mup"]
+
+
+def _mut_ad(adj_state, traj, adj, geom):
+    adj["mup"] += adj_state["mut"]
+    adj_state["mut"][...] = 0
 
 
 def _written(alias, names):

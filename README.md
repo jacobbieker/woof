@@ -1007,14 +1007,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
   0.85-3.2x the glue, 3.3-4.5x advection, 1.3-4.4x the big-step
   tendencies and 2.5-3.7x the lateral boundaries. The kernels chain into
-  one strict dry step (`woof.grad.wrfplus.model`, periodic and without
-  rotation or map factors so far) whose binary32 base state reproduces
+  one strict dry step (`woof.grad.wrfplus.model`, periodic, with
+  Coriolis and curvature but without map factors so far) whose binary32 base state reproduces
   `dycore.step` word for word, and whose binary64 dot-product and
   finite-difference tests pass. Measured at 200x200x49 on an A6000, the
   step's adjoint sweep costs 3.3x the forward step, and 4.8x with its
   taped forward recompute through a base-only build of the kernels
-  (details in the design note). The forecast
-  path does not import any of it.
+  (details in the design note). A window driver
+  (`woof.grad.wrfplus.window.Window`) runs the forward, TL and adjoint
+  over N steps with checkpoints, and takes adjoint forcing at
+  intermediate states for 4D-Var. The forecast path does not import any
+  of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
