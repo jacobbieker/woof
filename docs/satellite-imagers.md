@@ -188,6 +188,24 @@ SatWeave's Himawari sector agree to -0.06 K in the mean (cell-mean of the
 native pixels against SatWeave's 0.1° cell, 6.2 to 11.2 µm), so the
 navigation and the calibration match.
 
+## What woof refuses, and why
+
+CRTM v2.4 coefficients decide which imagers can be assimilated. On
+2026-11-20 the TauCoeff listing of CRTM's own 2.4.1 package
+(`fix_REL-2.4.1_20221109.tgz`, from SSEC) was read, and the plan's measured
+inventory of the JCSDA skylab 2.4.1 package (section 11.3) was consulted:
+
+- **GK-2A AMI.** Neither has an `ami_gk2a` file. The CRTM 3 sensor
+  list names `ami_gk2`, in a format v2.4 cannot read. So
+  `--satellite gk2a` is refused by name, and no AMI reader exists. The
+  `bkr/geo` AMI stores (`virtualized/gk2a_ami_fd_*`) hold only about 12 days
+  a year in any case.
+- **GOES-19.** Still on the `abi_g16` stand-in. CRTM maintainers' separate
+  `abi_g19` files do not work with v2.4.1. Re-measured today: the 2024
+  binary opens but gives `-inf` brightness temperature in every channel
+  (channel 8 `nan`), and the 2026 SpcCoeff, in either byte order, fails
+  CRTM's byte-order check.
+
 ## Clear-sky brightness temperatures from CRTM (opt-in)
 
 `woof.rtm` simulates clear-sky infrared brightness temperatures, and their

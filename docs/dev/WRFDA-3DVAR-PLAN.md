@@ -2009,8 +2009,10 @@ ignored.
     (`ahi_himawari8/9`) and SEVIRI (`seviri_m08`-`m11`) are in the v2.4.1
     package.
   - FCI is not: the package has no `fci_*` file. Whether it has an AMI
-    file (`ami_gk2a`) is not yet checked. FCI, and AMI if it is missing,
-    wait for v2.4-readable files, or a proxy-plus-bias like GOES-19's.
+    file (`ami_gk2a`): checked 2026-11-20 in `fix_REL-2.4.1_20221109`'s TauCoeff
+    listing, it has none either (CRTM 3 lists `ami_gk2`); the skylab inventory in 11.3 names none. FCI and
+    AMI wait for v2.4-readable files, or a proxy-plus-bias like GOES-19's.
+    woof refuses `--satellite gk2a` by name.
 - **MTG-IRS** is the natural later hyperspectral-sounder target. It needs
   the same operator with an IRS coefficient file, channel selection, and
   the polar-sounder machinery of 11.10.

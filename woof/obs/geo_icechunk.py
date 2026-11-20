@@ -835,6 +835,15 @@ def coverage(name: str, subdir: str = "virtualized", root: str | None = None) ->
 
 
 # --------------------------------------------------------------------------- command line
+#: Imagers whose radiances woof cannot simulate, so a scene would be unusable for assimilation.
+#: Checked against CRTM v2.4.1's coefficient packages on 2026-11-20 (docs/satellite-imagers.md).
+NO_CRTM_COEFFICIENTS = {
+    "gk2a": "GK-2A AMI: CRTM v2.4.1's coefficient package has no ami_gk2a file (its sensor list holds "
+            "only the CRTM 3 name ami_gk2, in a format v2.4 cannot read), so woof has no operator to "
+            "simulate AMI radiances and does not read them for assimilation",
+}
+
+
 def _satellite_arg(text: str):
     """``16``-``19`` (GOES, an int) or ``himawari8``/``himawari9`` (``h8``, ``h9``; a str)."""
 
@@ -844,6 +853,8 @@ def _satellite_arg(text: str):
     m = re.fullmatch(r"(?:himawari|h)-?([89])", t)
     if m:
         return f"himawari{m[1]}"
+    if t in ("gk2a", "gk-2a", "ami"):
+        raise argparse.ArgumentTypeError(NO_CRTM_COEFFICIENTS["gk2a"])
     raise argparse.ArgumentTypeError(f"{text!r}: use 16, 17, 18, 19, himawari8 or himawari9")
 
 

@@ -219,3 +219,12 @@ def test_fetch_door_and_list_door(mirror, tmp_path, capsys):
     rows = [json.loads(x) for x in capsys.readouterr().out.strip().splitlines()]
     assert [r["store"] for r in rows] == ["himawari9_isatss_C13_2024-12-31", "himawari9_isatss_C13"]
     assert rows[1]["scans"] == 3 and rows[1]["first"].startswith("2026-01-01T00:00")
+
+
+def test_gk2a_is_refused_by_name_with_the_missing_coefficients(capsys):
+    from woof.cli import main
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["fetch", "geo", "--satellite", "gk2a", "--time", "2025-01-02T00:00Z"])
+    assert exit_info.value.code == 2
+    assert "no ami_gk2a" in capsys.readouterr().err
