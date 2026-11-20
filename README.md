@@ -341,7 +341,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     (`seaice_column_coupling_prep` and `seaice_column_scale_fluxes`: cell
     albedos, pond freshwater feedback, shortwave scaling, fluxes per unit
     ice area; RKIND 4 and 8, no opt-in; the ocean mixed layer is refused by
-    name). The elastic subcycles check
+    name). Four v8.4.2 column bugs keep their words by default and have
+    named opt-in corrections (`woof_v842_corrections`): the swapped coupled
+    surface and conductive fluxes, the ice velocity in the boundary layer
+    (a vertex's u and no v), CCSM3's absorbed shortwave over `ncat`
+    layers, and the delta-Eddington's infinite extinction in ice without
+    volume. The elastic subcycles check
     their arrays once per solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
