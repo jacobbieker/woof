@@ -158,6 +158,7 @@ def test_default_dense_route_goes_parallel_automatically(monkeypatch):
     reference, _ = _solve_dense(prior, obs, grid, cfg, monkeypatch)
     monkeypatch.setattr(hp, "HOST_PARALLEL_MIN_PAIRS", 0)
     monkeypatch.setattr(hp, "available_cpus", lambda: 4)
+    monkeypatch.setattr(hp, "automatic_fork_safe", lambda: True)
     result, diag = _solve_dense(prior, obs, grid, cfg)
     assert diag.host_workers == 4, diag.host_workers_reason
     assert "automatic" in diag.host_workers_reason
@@ -174,9 +175,94 @@ def test_dense_workers_are_capped_by_host_memory(monkeypatch):
     assert hp.limit_by_host_memory(8, "r", 64 << 30)[0] == 1
     monkeypatch.setattr(hp, "host_available_bytes", lambda: None)
     assert hp.limit_by_host_memory(8, "r", 64 << 30) == (8, "r")
-    monkeypatch.undo()
-    avail = hp.host_available_bytes()
-    assert avail is None or avail > 0
+
+
+def test_host_memory_is_known_here_and_without_psutil(monkeypatch):
+    import sys
+
+    psutil = pytest.importorskip("psutil")
+    total = psutil.virtual_memory().total
+    real = hp.host_available_bytes()
+    assert real is not None and 0 < real <= total
+    # The real cap on this box: a scratch larger than all of memory leaves one worker.
+    assert hp.limit_by_host_memory(8, "r", 2 * total)[0] == 1
+    monkeypatch.setitem(sys.modules, "psutil", None)  # import psutil now raises
+    fallback = hp._system_available_bytes()
+    if sys.platform.startswith("linux"):
+        assert fallback is not None and 0 < fallback <= total
+    else:
+        assert fallback is None or fallback > 0
+
+
+def test_cgroup_v2_limit_bounds_the_memory(tmp_path, monkeypatch):
+    root = tmp_path / "cg"
+    leaf = root / "user.slice" / "job"
+    leaf.mkdir(parents=True)
+    proc = tmp_path / "cgroup"
+    proc.write_text("0::/user.slice/job\n")
+    assert hp.cgroup_headroom_bytes(root, proc) is None  # no memory files: no limit
+    (leaf / "memory.max").write_text("max\n")
+    (leaf / "memory.current").write_text("100\n")
+    assert hp.cgroup_headroom_bytes(root, proc) is None
+    (root / "user.slice" / "memory.max").write_text(f"{3 << 30}\n")
+    (root / "user.slice" / "memory.current").write_text(f"{1 << 30}\n")
+    assert hp.cgroup_headroom_bytes(root, proc) == 2 << 30
+    (leaf / "memory.max").write_text(f"{(1 << 30) + 100}\n")
+    assert hp.cgroup_headroom_bytes(root, proc) == 1 << 30
+    proc.write_text("1:name=systemd:/x\n")  # cgroup v1 only
+    assert hp.cgroup_headroom_bytes(root, proc) is None
+    monkeypatch.setattr(hp, "_system_available_bytes", lambda: 8 << 30)
+    monkeypatch.setattr(hp, "cgroup_headroom_bytes", lambda: 1 << 30)
+    assert hp.host_available_bytes() == 1 << 30
+    monkeypatch.setattr(hp, "cgroup_headroom_bytes", lambda: None)
+    assert hp.host_available_bytes() == 8 << 30
+
+
+def _pool_threads(_index):
+    from threadpoolctl import threadpool_info
+
+    import os
+    return ([i["num_threads"] for i in threadpool_info()],
+            [os.environ.get(k) for k in hp.WORKER_THREAD_ENV])
+
+
+@needs_fork
+def test_the_one_thread_pin_holds_in_workers_and_in_process():
+    from threadpoolctl import threadpool_info
+
+    assert threadpool_info(), "no BLAS/OpenMP library is visible to threadpoolctl here"
+    results = list(hp.run(_pool_threads, range(4), 2))
+    assert len(results) == 4
+    for threads, env in results:
+        assert threads and set(threads) == {1}, threads
+        assert env == ["1"] * len(hp.WORKER_THREAD_ENV)
+    with hp.one_blas_thread():
+        assert {i["num_threads"] for i in threadpool_info()} == {1}
+    with hp.one_blas_thread(hp.blas_controller()):
+        assert {i["num_threads"] for i in threadpool_info()} == {1}
+
+
+def test_the_controller_is_rebuilt_after_new_imports(monkeypatch):
+    import sys
+    import types
+
+    first = hp.blas_controller()
+    assert hp.blas_controller() is first
+    monkeypatch.setitem(sys.modules, "woof_test_fresh_module", types.ModuleType("woof_test_fresh_module"))
+    assert hp.blas_controller() is not first
+
+
+def test_a_failed_worker_pin_is_logged(monkeypatch, caplog):
+    import threadpoolctl
+
+    def refuse(*a, **k):
+        raise RuntimeError("no pin")
+    monkeypatch.setattr(threadpoolctl, "threadpool_limits", refuse)
+    for name in hp.WORKER_THREAD_ENV:
+        monkeypatch.setenv(name, "8")
+    with caplog.at_level("WARNING", logger=hp.__name__):
+        hp._initializer()
+    assert "could not pin" in caplog.text and "no pin" in caplog.text
 
 
 @needs_fork
@@ -236,11 +322,18 @@ def test_resolver_sizes_from_the_request_the_environment_and_the_work(monkeypatc
     monkeypatch.delenv(hp.HOST_WORKERS_ENV, raising=False)
     monkeypatch.setattr(hp, "fork_available", lambda: True)
     monkeypatch.setattr(hp, "available_cpus", lambda: 256)
+    monkeypatch.setattr(hp, "automatic_fork_safe", lambda: True)
     big = hp.HOST_PARALLEL_MIN_PAIRS
     assert hp.resolve_host_workers(None, tasks=500, pairs=big)[0] == hp.HOST_WORKERS_AUTO_CAP
     assert hp.resolve_host_workers(None, tasks=10, pairs=big)[0] == 10
     workers, reason = hp.resolve_host_workers(None, tasks=500, pairs=big - 1)
     assert workers == 1 and "below" in reason
+    # Off Linux the automatic mode stays in one process; a request still forks.
+    monkeypatch.setattr(hp, "automatic_fork_safe", lambda: False)
+    workers, reason = hp.resolve_host_workers(None, tasks=500, pairs=big)
+    assert workers == 1 and "unsafe off Linux" in reason
+    assert hp.resolve_host_workers(8, tasks=500, pairs=big)[0] == 8
+    monkeypatch.setattr(hp, "automatic_fork_safe", lambda: True)
     # An explicit request is honoured even for a small analysis.
     assert hp.resolve_host_workers(8, tasks=500, pairs=1)[0] == 8
     assert hp.resolve_host_workers(1, tasks=500, pairs=big)[0] == 1

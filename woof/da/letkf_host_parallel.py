@@ -48,12 +48,34 @@ Fork is required (the workers inherit the prior, the observations and the
 closures without a copy).  Where fork is unavailable the loop runs in one
 process and the receipt says why.  Workers never touch a device: this path
 is taken only when the solve namespace is numpy.
+
+Platforms.  The automatic worker count forks only on Linux.  On macOS the
+parent may already run Accelerate/libdispatch threads, and fork does not
+reproduce them in the child, so there the analysis stays in one process
+unless ``host_workers`` or ``WOOF_DA_HOST_WORKERS`` asks for workers (the
+caller's choice; the tests do).
+
+BLAS threads.  Every host chunk solve runs with one BLAS thread, in the
+workers and in the single-process loop (:func:`one_blas_thread`).  That
+makes the bytes independent of the worker count and the core count.  It
+also means a host analysis below the automatic threshold, or one with
+``host_workers=1``, solves on one core where a threaded BLAS used several.
+That is a speed trade-off made for determinism.  threadpoolctl pins
+OpenBLAS, MKL, BLIS and OpenMP, which covers conda-forge numpy on Linux and
+macOS.  It cannot pin Apple's Accelerate (vecLib), which reads
+``VECLIB_MAXIMUM_THREADS`` once when it loads.  A numpy linked to
+Accelerate is therefore not pinned in a process that loaded it before the
+analysis.  Workers set the thread environment variables for anything they
+load after the fork.
 """
 from __future__ import annotations
 
+import logging
 import mmap
 import multiprocessing
 import os
+import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -74,6 +96,17 @@ HOST_WORKERS_ENV = "WOOF_DA_HOST_WORKERS"
 HOST_PARALLEL_MIN_PAIRS = 200_000_000
 
 _TASK = None
+
+_LOG = logging.getLogger(__name__)
+
+#: Thread-count variables a worker sets for libraries it loads after the fork.
+WORKER_THREAD_ENV = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                     "VECLIB_MAXIMUM_THREADS", "BLIS_NUM_THREADS")
+
+
+def automatic_fork_safe() -> bool:
+    """Whether the automatic worker count may fork here (Linux only; see the module notes)."""
+    return sys.platform.startswith("linux")
 
 
 def fork_available() -> bool:
@@ -117,6 +150,10 @@ def resolve_host_workers(requested, *, tasks: int,
         if int(pairs) < HOST_PARALLEL_MIN_PAIRS:
             return 1, (f"automatic: {int(pairs)} gridpoint-slot pairs is "
                        f"below {HOST_PARALLEL_MIN_PAIRS}, so one process")
+        if not automatic_fork_safe():
+            return 1, (f"automatic: one process on {sys.platform} (forking after "
+                       "the BLAS/dispatch threads start is unsafe off Linux); "
+                       "set host_workers or WOOF_DA_HOST_WORKERS to fork")
     if want <= 1:
         return 1, source
     if tasks <= 1:
@@ -134,8 +171,14 @@ def resolve_host_workers(requested, *, tasks: int,
 HOST_MEMORY_FRACTION = 0.5
 
 
-def host_available_bytes() -> int | None:
-    """Available host memory: ``MemAvailable`` on Linux, else free pages; None if unknown."""
+def _system_available_bytes() -> int | None:
+    """The system's available memory: psutil, else ``MemAvailable``, else free pages."""
+    try:
+        import psutil  # noqa: PLC0415
+
+        return int(psutil.virtual_memory().available)
+    except Exception:  # noqa: BLE001 - psutil missing or refusing: use the fallbacks
+        pass
     try:
         with open("/proc/meminfo", encoding="ascii") as fh:
             for line in fh:
@@ -147,6 +190,50 @@ def host_available_bytes() -> int | None:
         return int(os.sysconf("SC_AVPHYS_PAGES")) * int(os.sysconf("SC_PAGE_SIZE"))
     except (AttributeError, OSError, ValueError):
         return None
+
+
+def cgroup_headroom_bytes(root: Path = Path("/sys/fs/cgroup"),
+                          proc_cgroup: Path = Path("/proc/self/cgroup")) -> int | None:
+    """The least ``memory.max - memory.current`` over this process's cgroup v2 and its ancestors.
+
+    None without cgroup v2 or without a limit (``max``) anywhere on the path.
+    """
+    try:
+        rel = None
+        for line in proc_cgroup.read_text(encoding="ascii").splitlines():
+            if line.startswith("0::"):
+                rel = line[3:].strip()
+        if rel is None:
+            return None
+    except OSError:
+        return None
+    node = root / rel.lstrip("/")
+    least = None
+    while True:
+        try:
+            limit = (node / "memory.max").read_text(encoding="ascii").strip()
+            if limit != "max":
+                used = int((node / "memory.current").read_text(encoding="ascii").strip())
+                room = max(0, int(limit) - used)
+                least = room if least is None else min(least, room)
+        except (OSError, ValueError):
+            pass
+        if node == root or root not in node.parents:
+            break
+        node = node.parent
+    return least
+
+
+def host_available_bytes() -> int | None:
+    """Memory this process may still use: the system's available memory, bounded by its cgroup's limit.
+
+    None if neither is known.
+    """
+    avail = _system_available_bytes()
+    room = cgroup_headroom_bytes()
+    if room is None:
+        return avail
+    return room if avail is None else min(avail, room)
 
 
 def limit_by_host_memory(workers: int, reason: str,
@@ -183,33 +270,57 @@ def shared_copy(array: np.ndarray) -> np.ndarray:
 
 
 _CONTROLLER = None
+_CONTROLLER_MODULES = -1
 
 
-def one_blas_thread():
+def blas_controller():
+    """A threadpoolctl controller over the BLAS/OpenMP libraries loaded now.
+
+    Building one scans the process's libraries (0.2-10 ms, more than a small
+    analysis's whole solve), so it is cached.  It is rebuilt whenever
+    ``sys.modules`` has grown since, because libraries that bring their own
+    BLAS or OpenMP (torch, mlx, scipy) arrive with an import.
+    """
+    global _CONTROLLER, _CONTROLLER_MODULES
+    if _CONTROLLER is None or len(sys.modules) != _CONTROLLER_MODULES:
+        from threadpoolctl import ThreadpoolController  # noqa: PLC0415
+
+        _CONTROLLER = ThreadpoolController()
+        _CONTROLLER_MODULES = len(sys.modules)
+    return _CONTROLLER
+
+
+def one_blas_thread(controller=None):
     """A context with the BLAS/OpenMP pools at one thread (the workers' setting).
 
     The single-process chunk loop runs under it too: OpenBLAS partitions a
     gemm or an eigensolve by its thread count, and on a 32-thread pool the
     dense route's increments differed from the one-thread ones by up to
-    1e-14 (pb, 20 members, 164 local observations), so without it the bytes
-    depended on the box's core count, and no worker count could match them.
+    1e-14 (pb, 20 members, 164 local observations).  Without the pin the
+    bytes depended on the box's core count, and no worker count could match
+    them.  ``controller`` is a :func:`blas_controller`, by default the
+    current one, so libraries imported since an earlier call (torch, mlx)
+    are pinned too.  The analysis builds one per call in its set-up and enters the pin
+    once around its whole chunk loop.  Accelerate is not pinned (see the
+    module notes).
     """
-    global _CONTROLLER
-    if _CONTROLLER is None:
-        from threadpoolctl import ThreadpoolController  # noqa: PLC0415
-
-        _CONTROLLER = ThreadpoolController()
-    return _CONTROLLER.limit(limits=1)
+    return (controller or blas_controller()).limit(limits=1)
 
 
 def _initializer() -> None:
     # One BLAS thread per worker: the workers ARE the parallelism, and a
     # BLAS pool per worker would oversubscribe the cores many times over.
+    # The variables reach libraries loaded after the fork; threadpoolctl
+    # pins the ones already loaded.
+    for name in WORKER_THREAD_ENV:
+        os.environ[name] = "1"
     try:
         from threadpoolctl import threadpool_limits     # noqa: PLC0415
         threadpool_limits(1)
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 - the solve still runs; say the pin failed
+        _LOG.warning("host LETKF worker %d could not pin its BLAS threads to 1; "
+                     "its bytes may differ from the single-process loop's",
+                     os.getpid(), exc_info=True)
 
 
 def _call(index):
