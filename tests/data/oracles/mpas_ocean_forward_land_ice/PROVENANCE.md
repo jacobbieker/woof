@@ -8,7 +8,8 @@ glibc 2.44), 2026-11-20.
   `f34984b2c89353cf31c235b08d3b4acd96b37bb3`, byte-unmodified. build.sh checks
   `tools/mpas_ocean_oracle/SOURCES.sha256`.
 - The forward oracle's binary (`run_forward.F90`), which calls
-  `ocn_surface_land_ice_fluxes_init` and, per step before the frazil build,
+  `ocn_surface_land_ice_fluxes_init`, the startup build after the cold start
+  (`mpas_ocn_init_routines.F:690-696`) and, per step before the frazil build,
   `ocn_surface_land_ice_fluxes_build_arrays` as `ocn_forward_mode_run` does.
   Every module is compiled verbatim, `mpas_ocn_surface_land_ice_fluxes.F`
   and `mpas_ocn_effective_density_in_land_ice.F` included, so the
@@ -26,6 +27,7 @@ glibc 2.44), 2026-11-20.
 | `standalone_jenkins_three_steps` | 7 x 6 | 8 | 3 | 'standalone', Jenkins, neighbour weight 0.3 |
 | `standalone_isomip_nested_halos` | 12 x 6 | 8 | 3 | 'standalone', ISOMIP, a 30 m boundary layer, nested halos |
 | `coupled_jenkins_two_steps` | 6 x 5 | 6 | 2 | 'coupled': the effective density, the coupler's means, attenuation 25 |
+| `standalone_jenkins_startup` | 6 x 6 | 6 | 0 | no step: the startup build `ocn_init_routines_block` makes for output |
 
 About half the cells lie under land ice. The land-ice mask starts as integer
 noise (the diagnostics rewrite it from the fraction).
