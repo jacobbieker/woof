@@ -10,6 +10,9 @@ Scope is the WRFDA 4.7.1 regional 3D-Var the port gates on (cv5, the
 conventional observation types, GPS PW/refractivity and SATEM); see
 docs/var.md.  Clear-sky geostationary radiances with VarBC are opt-in
 (``--radiance-scene``; CRTM from ``WOOF_CRTM_LIB``/``WOOF_CRTM_COEFFS``).
+Hybrid 3DEnVar is opt-in: ``--ensemble-member`` (members' history files,
+``gen_be_ep2``'s perturbations) or ``--ep-dir`` (WRFDA ``ep`` files) with
+``--je-factor``.
 """
 
 from __future__ import annotations
@@ -70,6 +73,26 @@ def register_cli(subparsers):
                    help="WRFDA VARBC.in; default: a cold start for every sensor")
     r.add_argument("--varbc-out", type=Path, default=None, help="write the updated coefficients (VARBC.out)")
     r.add_argument("--no-varbc", dest="varbc", action="store_false", help="radiances without bias correction")
+    h = p.add_argument_group("hybrid 3DEnVar (opt-in; WRFDA's alpha control variable)")
+    h.add_argument("--ensemble-member", type=Path, action="append", default=[],
+                   help="a member's history file (wrfout) valid at the analysis time; repeat for each member "
+                        "(perturbations as WRFDA's gen_be_ep2)")
+    h.add_argument("--ep-dir", type=Path, default=None,
+                   help="WRFDA ensemble perturbation files (u.e001 ... as gen_be_ep2 writes them) instead of members")
+    h.add_argument("--ensdim-alpha", type=positive_int, default=None,
+                   help="members to read from --ep-dir (WRFDA ensdim_alpha)")
+    h.add_argument("--ep-format", type=int, choices=(1, 11), default=None, help="--ep-dir's ep_format (default 1)")
+    h.add_argument("--je-factor", type=positive_float, default=None,
+                   help="WRFDA je_factor (required with an ensemble): Jb is weighted je/(je-1); <= 1 is "
+                        "full-ensemble mode (no static B)")
+    h.add_argument("--alpha-corr-scale", type=positive_float, default=None,
+                   help="horizontal localisation, km (WRFDA alpha_corr_scale; default 200)")
+    h.add_argument("--alpha-vertloc-opt", type=int, choices=(0, 1, 2), default=None,
+                   help="vertical localisation: 0 none, 1 --be-vertloc file, 2 log-p (default)")
+    h.add_argument("--be-vertloc", type=Path, default=None, help="WRFDA be.vertloc.dat (--alpha-vertloc-opt 1)")
+    h.add_argument("--max-vert-var-alpha", type=positive_float, default=None,
+                   help="percent of the localisation's variance kept (WRFDA max_vert_var_alpha; default 99)")
+    h.add_argument("--alpha-std-dev", type=positive_float, default=None, help="WRFDA alpha_std_dev (default 1)")
     p.set_defaults(func=main)
     return p
 
@@ -89,6 +112,12 @@ def main(args) -> int:
         print(line, flush=True)
 
     rad_kw = _radiance_kwargs(args) if args.radiance_scene else {}
+    try:
+        hyb_kw, hyb_recipe = _hybrid_kwargs(args)
+    except ValueError as exc:
+        print(f"var: {exc}", file=sys.stderr)
+        return 2
+    rad_kw.update(hyb_kw)
     result = analyse(args.be, args.obs, args.first_guess, tier=args.tier, ntmax=args.ntmax, eps=args.eps,
                      max_ext_its=args.max_ext_its, orthonorm_gradient=args.orthonorm_gradient,
                      check_rh=args.check_rh, window_minutes=args.window_minutes,
@@ -97,12 +126,11 @@ def main(args) -> int:
         rad_kw["varbc"].write(args.varbc_out)
     if args.log is not None:
         Path(args.log).write_text("\n".join(line for r in result.cg for line in r.lines) + "\n")
-    recipe = {"door": "woof var", "tier": args.tier, "ntmax": args.ntmax, "eps": args.eps,
-              "max_ext_its": args.max_ext_its, "orthonorm_gradient": args.orthonorm_gradient,
-              "check_rh": args.check_rh, "window_minutes": args.window_minutes,
-              "be": Path(args.be).name, "obs": Path(args.obs).name}
+    recipe = _recipe(args, hyb_recipe)
     notes = {"var": {"nobs": result.nobs, "iterations": [r.iterations for r in result.cg],
                      "j_final": [r.j_final for r in result.cg], "timings_s": result.timings}}
+    if hyb_recipe:
+        notes["var"]["hybrid"] = hyb_recipe
     if result.radiance is not None:
         recipe["radiance_scenes"] = [Path(d).name for d in args.radiance_scene]
         recipe["varbc"] = bool(args.varbc)
@@ -114,6 +142,108 @@ def main(args) -> int:
           f"minimise {result.timings['minimise_s']:.1f} s; bundle {args.out}")
     print(json.dumps({"bundle": str(args.out), "valid_time": bundle.manifest.get("valid_time")}))
     return 0
+
+
+def _recipe(args, hybrid: dict | None) -> dict:
+    """The door's settings digested into the bundle's ``recipe_sha256`` (radiances are added by ``main``)."""
+    recipe = {"door": "woof var", "tier": args.tier, "ntmax": args.ntmax, "eps": args.eps,
+              "max_ext_its": args.max_ext_its, "orthonorm_gradient": args.orthonorm_gradient,
+              "check_rh": args.check_rh, "window_minutes": args.window_minutes,
+              "be": Path(args.be).name, "obs": Path(args.obs).name}
+    if hybrid:
+        recipe["hybrid"] = hybrid
+    return recipe
+
+
+#: Hybrid flags that mean nothing without an ensemble, and the ones that belong to --ep-dir.
+_ALPHA_FLAGS = (("--je-factor", "je_factor"), ("--be-vertloc", "be_vertloc"), ("--ensdim-alpha", "ensdim_alpha"),
+                ("--ep-format", "ep_format"), ("--alpha-corr-scale", "alpha_corr_scale"),
+                ("--alpha-vertloc-opt", "alpha_vertloc_opt"), ("--max-vert-var-alpha", "max_vert_var_alpha"),
+                ("--alpha-std-dev", "alpha_std_dev"))
+_EP_DIR_FLAGS = (("--ensdim-alpha", "ensdim_alpha"), ("--ep-format", "ep_format"))
+
+
+def _hybrid_kwargs(args) -> tuple[dict, dict | None]:
+    """``analyse``'s ``ensemble``/``hybrid``/``vertloc`` from the hybrid flags, and their recipe entry.
+
+    ``({}, None)`` without an ensemble.  Every refusal is a ValueError the
+    door prints as ``var: ...``.  The recipe entry digests what the
+    analysis uses: the perturbations' words (so a changed member or ep file
+    changes it) and ``be.vertloc.dat``'s bytes.
+    """
+    import hashlib
+
+    members, ep_dir = list(args.ensemble_member), args.ep_dir
+    if not members and ep_dir is None:
+        given = [flag for flag, key in _ALPHA_FLAGS if getattr(args, key) is not None]
+        if given:
+            raise ValueError(f"{', '.join(given)} need an ensemble (--ensemble-member or --ep-dir)")
+        return {}, None
+    if members and ep_dir is not None:
+        raise ValueError("give --ensemble-member or --ep-dir, not both")
+    if members:
+        given = [flag for flag, key in _EP_DIR_FLAGS if getattr(args, key) is not None]
+        if given:
+            raise ValueError(f"{', '.join(given)} belong to --ep-dir; with --ensemble-member every member is used")
+    if args.je_factor is None:
+        raise ValueError("an ensemble needs --je-factor (WRFDA's default 1.0 is full-ensemble mode; "
+                         "2 weights the static and ensemble B equally)")
+    from woof.da.var import hybrid as hy
+
+    fg_times = hy.wrf_times(args.first_guess)
+    fg_shape = _mass_shape(args.first_guess)
+    recipe = {}
+    if members:
+        indices = []
+        for m in members:
+            if not Path(m).is_file():
+                raise ValueError(f"--ensemble-member {m} is not a file")
+            times = hy.wrf_times(m)
+            if fg_times[0] not in times:
+                raise ValueError(f"--ensemble-member {m} has no record at the first guess's time {fg_times[0]} "
+                                 f"(its times: {', '.join(times)})")
+            indices.append(times.index(fg_times[0]))
+        perts = hy.ep_from_wrf(members, time_index=indices)
+        recipe["members"] = [Path(m).name for m in members]
+        recipe["member_time"] = fg_times[0]
+    else:
+        if args.ensdim_alpha is None:
+            raise ValueError("--ep-dir needs --ensdim-alpha")
+        ep_format = 1 if args.ep_format is None else args.ep_format
+        hy.ep_paths(ep_dir, args.ensdim_alpha, ep_format)
+        perts = hy.read_ep(ep_dir, args.ensdim_alpha, ep_format=ep_format, shape=fg_shape)
+        recipe["ep_dir"] = Path(ep_dir).name
+        recipe["ep_format"] = ep_format
+    if perts["t"].shape[1:] != fg_shape:
+        raise ValueError(f"the ensemble is on {perts['t'].shape[1:]}, the first guess on {fg_shape}")
+    cfg_kw = {k: getattr(args, k) for k in ("alpha_corr_scale", "alpha_std_dev", "alpha_vertloc_opt",
+                                             "max_vert_var_alpha") if getattr(args, k) is not None}
+    cfg = hy.HybridConfig(je_factor=args.je_factor, **cfg_kw)
+    cfg.check()
+    vertloc = None
+    if cfg.alpha_vertloc_opt == 1:
+        if args.be_vertloc is None:
+            raise ValueError("--alpha-vertloc-opt 1 needs --be-vertloc")
+        if not Path(args.be_vertloc).is_file():
+            raise ValueError(f"--be-vertloc {args.be_vertloc} is not a file")
+        vertloc = hy.read_vertloc(args.be_vertloc)
+        recipe["be_vertloc_sha256"] = hashlib.sha256(Path(args.be_vertloc).read_bytes()).hexdigest()
+    elif args.be_vertloc is not None:
+        raise ValueError("--be-vertloc is read only with --alpha-vertloc-opt 1")
+    ensemble = hy.Ensemble.from_perturbations(perts)
+    recipe.update(ensdim_alpha=ensemble.ne, perturbations_sha256=hy.perturbations_sha256(perts),
+                  je_factor=cfg.je_factor, alpha_corr_scale=cfg.alpha_corr_scale,
+                  alpha_vertloc_opt=cfg.alpha_vertloc_opt, max_vert_var_alpha=cfg.max_vert_var_alpha,
+                  alpha_std_dev=cfg.alpha_std_dev)
+    return {"ensemble": ensemble, "hybrid": cfg, "vertloc": vertloc}, recipe
+
+
+def _mass_shape(path) -> tuple:
+    """A WRF file's mass-point ``(west_east, south_north, bottom_top)``."""
+    import netCDF4
+
+    with netCDF4.Dataset(Path(path)) as nc:
+        return tuple(len(nc.dimensions[d]) for d in ("west_east", "south_north", "bottom_top"))
 
 
 def _radiance_kwargs(args) -> dict:

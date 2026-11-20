@@ -473,7 +473,8 @@ def obs_window(fg: FirstGuess, minutes: float = 60.0) -> dict:
 def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01, max_ext_its: int = 1,
             orthonorm_gradient: bool = True, precondition_cg: bool = False, check_rh: int = 0,
             window_minutes: float = 60.0, landuse_table=None, xb_override: dict | None = None,
-            write=None, radiances=None, crtm=None, radiance_qc=None, varbc=None, report_fit: bool | None = None) -> VarResult:
+            write=None, radiances=None, crtm=None, radiance_qc=None, varbc=None, report_fit: bool | None = None,
+            ensemble=None, hybrid=None, vertloc=None) -> VarResult:
     """3D-Var from files: ``be.dat``, OBSPROC's ``ob.ascii`` and a WRF first guess.
 
     ``tier`` is ``reference`` (NumPy binary64), ``oracle`` (device binary64,
@@ -492,6 +493,15 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     :class:`~woof.da.var.varbc.VarBC` whose coefficients are updated in
     place.  Without ``radiances`` nothing here changes.  ``report_fit``
     (default: with radiances) fills :attr:`VarResult.fit` at the cost of one more ``H' U``.
+
+    Hybrid 3DEnVar (opt-in, plan V3): ``ensemble`` is a
+    :class:`~woof.da.var.hybrid.Ensemble` (e.g. from
+    :func:`~woof.da.var.hybrid.ep_from_wrf` or ``read_ep``) on the first
+    guess's grid and ``hybrid`` its :class:`~woof.da.var.hybrid.HybridConfig`
+    (``je_factor`` given); ``vertloc`` WRFDA's ``be.vertloc.dat`` contents
+    for ``alpha_vertloc_opt = 1`` (option 2 computes it).  The alpha control
+    variable follows the static one; the analysis is ``U_s v_s + sum_n alpha_n
+    o x'_n`` in binary64.
     """
     from . import be_dat as bd
     from . import innov_wrfda as iw
@@ -522,7 +532,21 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
         terms.append(rterm)
     xbu = {k: xb[k] for k in ("grid_box_area", "coefx", "coefy", "qs", "q", "psac", "dnw", "rho", "p", "t",
                               "c1h", "c2h")}
-    cost = VarCost.reference(b, xbu, terms) if tier == "reference" else VarCost.device(b, xbu, terms, tier)
+    hu = None
+    if ensemble is not None:
+        from . import hybrid as hy
+
+        if hybrid is None:
+            raise ValueError("an ensemble needs a HybridConfig (hybrid=...) with je_factor")
+        if ensemble.shape != (nx, ny, nz):
+            raise ValueError(f"the ensemble is on {ensemble.shape}, the first guess on {(nx, ny, nz)}")
+        cost = hy.hybrid_cost(b, dict(xbu, ds=xb["ds"], znw=xb["znw"], ptop=xb["ptop"]), terms, ensemble, hybrid,
+                              tier=tier, vertloc=vertloc)
+        hu = cost.u if tier == "reference" else hy.HybridReferenceU(b, cost.u.alpha, ensemble, xbu, cost.u.jb_factor)
+    elif hybrid is not None:
+        raise ValueError("a HybridConfig needs an ensemble")
+    else:
+        cost = VarCost.reference(b, xbu, terms) if tier == "reference" else VarCost.device(b, xbu, terms, tier)
     timings["setup_s"] = time.perf_counter() - t0
     t1 = time.perf_counter()
     d0 = [np.array(d, dtype=np.float64) for d in cost.d]
@@ -542,7 +566,7 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
             rreport["varbc_controls"] = int(rterm.control_size)
         cvt = cvt[:cost.cv_u]
     t2 = time.perf_counter()
-    xa = xa_from_cv(b, xbu, cvt)
+    xa = xa_from_cv(b, xbu, cvt) if hu is None else hu.apply(cvt)["xa"]
     wrf = xatowrf(grid, xb, xa, check_rh=check_rh)
     timings["transfer_s"] = time.perf_counter() - t2
     log = "".join(r.log for r in results)
