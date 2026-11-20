@@ -55,6 +55,10 @@ def _model_t2(obs, frames, pairing):
     return out
 
 
+def _host(a):
+    return np.asarray(a.get() if hasattr(a, "get") else a)
+
+
 def rmse(d):
     return float(np.sqrt(np.mean(np.square(d)))) if d.size else float("nan")
 
@@ -110,12 +114,22 @@ def main(argv=None) -> int:
               "base": [str(Path(p).resolve()) for p in args.base], "lapse_K_per_m": LAPSE_K_PER_M,
               "gross_K": args.gross, "counts": pairing.counts, "tests": {}}
     labels = args.label or [f"test{i}" for i in range(len(args.test))]
-    for label, runs in zip(labels, args.test):
+    if len(labels) != len(args.test):
+        raise SystemExit(f"{len(labels)} --label for {len(args.test)} --test")
+    if len(set(labels)) != len(labels):
+        raise SystemExit(f"--label names repeat: {labels}")
+    errors = []
+    for runs in args.test:
         frames = _frames(runs, args.mesh)
         if [f.valid for f in frames] != [f.valid for f in base]:
             raise SystemExit(f"{runs}: its frames' valid times are not the base run's")
-        test_err = _model_t2(obs, frames, pairing) - y
-        ok = good & np.isfinite(test_err)
+        if not np.array_equal(_host(frames[0].terrain), _host(base[0].terrain)):
+            raise SystemExit(f"{runs}: its cells are not the base run's (terrain differs)")
+        errors.append(_model_t2(obs, frames, pairing) - y)
+    ok = good & np.all([np.isfinite(e) for e in errors], axis=0)       # every arm on the same pairs
+    if not ok.any():
+        raise SystemExit("no pair survives the gross check in every arm")
+    for label, runs, test_err in zip(labels, args.test, errors):
         result = station_bootstrap(station[ok], base_err[ok], test_err[ok], draws=args.draws, seed=args.seed,
                                    level=args.level)
         result.update(runs=[str(Path(p).resolve()) for p in runs], pairs=int(ok.sum()),
