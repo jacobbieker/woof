@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -1163,10 +1163,176 @@ def advect(exe: str, runner: list[str], seed: int = 20261125) -> dict:
     return out
 
 
+#: bigstep: horizontal_pressure_gradient on periodic, specified and open
+#: axes, with and without the lid extrapolation, and pg_buoy_w with and
+#: without map factors.  WRFPLUS's versions are not hybrid (c1 = 1, c2 = 0).
+BS_CASES = {
+    "pgf_periodic": dict(op="pgf"),
+    "pgf_spec_lid": dict(op="pgf", boundary_x=1, boundary_y=1, top_lid=1, spec=1),
+    "pgf_open_x": dict(op="pgf", boundary_x=1),
+    "pgf_open_y_lid": dict(op="pgf", boundary_y=1, top_lid=1),
+    "buoy": dict(op="buoy"),
+    "buoy_msf": dict(op="buoy", has_msf=1),
+}
+BS_DIMS = dict(nz=8, ny=9, nx=10)
+
+
+def _bs_faces(m, axis, n):
+    """calc_mu_uv's face values 0.5 * (m_a + m_b) on the periodic face
+    index (faces 0..n along ``axis`` of a (ny, nx) column field)."""
+    f = np.arange(n + 1)
+    a, b = f % n, (f - 1) % n
+    return 0.5 * (np.take(m, a, axis=axis) + np.take(m, b, axis=axis))
+
+
+def _bs_faces_t(af, axis, n):
+    out = np.zeros(af.shape[:axis] + (n,) + af.shape[axis + 1:])
+    f = np.arange(n + 1)
+    for idx, cells in ((f, f % n), (f, (f - 1) % n)):
+        for q, c in zip(idx, cells):
+            sl = [slice(None)] * af.ndim
+            so = [slice(None)] * af.ndim
+            sl[axis], so[axis] = q, c
+            out[tuple(so)] += 0.5 * af[tuple(sl)]
+    return out
+
+
+def _bs_fold2(L, x, shape):
+    _, yi, xi = L._maps((1,) + shape)
+    out = np.zeros(shape)
+    np.add.at(out, np.ix_(yi, xi), x.T)
+    return out
+
+
+def _bs_take2(L, x, shape):
+    # bigstep.F90 dimensions 2-D fields from ims = jms = -3, so woof's
+    # (0, 0) sits at offset 4 on both axes.
+    nj, ni = shape
+    return np.ascontiguousarray(x[4:4 + ni, 4:4 + nj].T)
+
+
+def _bs_record(op, geom, tr, pe, seeds, spec):
+    from types import SimpleNamespace as NS
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    if op == "pgf":
+        # WRFPLUS's pressure gradient is not hybrid: it has no c1h/c2h.
+        assert np.all(tr["c1h"] == 1) and not np.any(tr["c2h"]), "oracle needs c1h=1, c2h=0"
+    bx, by = (geom.boundary_x, geom.boundary_y) if op == "pgf" else (0, 0)
+    L = AdvLayout(NS(nz=nz, ny=ny, nx=nx, open_x=bx, open_y=by))
+    flags = int(not bx) | (int(not by) << 1) | (int(bool(spec)) << 2)
+    if bx and not spec:
+        flags |= (1 << 4) | (1 << 5)
+    if by and not spec:
+        flags |= (1 << 6) | (1 << 7)
+    lid = getattr(geom, "top_lid", 0)
+    head = np.array([1 if op == "pgf" else 2, nx, ny, nz, flags, lid], dtype=np.int32)
+    g = geom if op == "pgf" else None
+    sc = [g.rdx, g.rdy, g.cf1, g.cf2, g.cf3, g.cfn, g.cfn1] if g else [0.0] * 7
+    blob = head.tobytes() + np.array(sc).astype("<f8").tobytes()
+    z3 = np.zeros((nz, ny, nx))
+    zw = np.zeros((nz + 1, ny, nx))
+    if op == "pgf":
+        half = 0.5 * (tr["phb"][:-1] + tr["phb"][1:] + tr["php"][:-1] + tr["php"][1:])
+        halfd = 0.5 * (pe["php"][:-1] + pe["php"][1:])
+        mut = tr["mup"] + tr["mub"]
+        muu, muud = _bs_faces(mut, 1, nx), _bs_faces(pe["mup"], 1, nx)
+        muv, muvd = _bs_faces(mut, 0, ny), _bs_faces(pe["mup"], 0, ny)
+        a3 = [tr["php"], pe["php"], tr["alt"], pe["alt"], tr["p"], pe["p"], tr["pb"],
+              tr["al"], pe["al"], half, halfd]
+        a3 = [L.pad3(x) for x in a3]
+        a3 += [L.place3(tr["ru_t"]), L.place3(seeds["ru_t"]), L.place3(tr["rv_t"]),
+               L.place3(seeds["rv_t"]), L.place3(zw), L.place3(zw)]
+        a2 = [L.pad2(muu), L.pad2(muud), L.pad2(muv), L.pad2(muvd), L.pad2(tr["mup"]),
+              L.pad2(pe["mup"]), L.pad2(tr["mub"]), np.ones(L.s2)]
+        lev = [tr["fnm"], tr["fnp"], tr["rdnw"], np.zeros(nz)]
+    else:
+        a3 = [L.pad3(zw), L.pad3(zw), L.pad3(z3), L.pad3(z3), L.pad3(tr["p"]), L.pad3(pe["p"]),
+              L.pad3(z3), L.pad3(z3), L.pad3(z3), L.pad3(z3), L.pad3(z3)]
+        a3 += [L.place3(np.zeros((nz, ny, nx + 1))), L.place3(np.zeros((nz, ny, nx + 1))),
+               L.place3(np.zeros((nz, ny + 1, nx))), L.place3(np.zeros((nz, ny + 1, nx))),
+               L.place3(tr["rw_t"]), L.place3(seeds["rw_t"])]
+        msft = tr["msft"] if geom.has_msf else np.ones((ny, nx))
+        a2 = [np.zeros(L.s2)] * 4 + [L.pad2(tr["mup"]), L.pad2(pe["mup"]), np.zeros(L.s2),
+                                     L.pad2(msft)]
+        lev = [np.zeros(nz), np.zeros(nz), tr["rdnw"], tr["rdn"]]
+    for a in a3 + a2:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    for x in lev:
+        blob += np.concatenate([x, [0.0]]).astype("<f8").tobytes()
+    return blob, L
+
+
+def _bs_expected(op, geom, out, L):
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+    vals = np.frombuffer(out, dtype="<f8")
+    assert vals.size == 11 * n3 + 3 * n2, (vals.size, n3, n2)
+    x = [vals[i * n3:(i + 1) * n3].reshape(L.s3, order="F") for i in range(11)]
+    y = [vals[11 * n3 + i * n2:11 * n3 + (i + 1) * n2].reshape(L.s2, order="F")
+         for i in range(3)]
+    mass, wlev = (nz, ny, nx), (nz + 1, ny, nx)
+    if op == "buoy":
+        return {"tl_rw_t": L.take3(x[4], wlev), "tl_d_rw_t": L.take3(x[5], wlev),
+                "ad_p": L.fold3(x[8], mass), "ad_mup": _bs_fold2(L, y[2], (ny, nx))}
+    aphp = L.fold3(x[6], wlev)
+    ahalf = L.fold3(x[10], mass)
+    aphp[:-1] += 0.5 * ahalf
+    aphp[1:] += 0.5 * ahalf
+    amup = (_bs_fold2(L, y[2], (ny, nx))
+            + _bs_faces_t(_bs_take2(L, y[0], (ny, nx + 1)), 1, nx)
+            + _bs_faces_t(_bs_take2(L, y[1], (ny + 1, nx)), 0, ny))
+    return {"tl_ru_t": L.take3(x[0], (nz, ny, nx + 1)),
+            "tl_d_ru_t": L.take3(x[1], (nz, ny, nx + 1)),
+            "tl_rv_t": L.take3(x[2], (nz, ny + 1, nx)),
+            "tl_d_rv_t": L.take3(x[3], (nz, ny + 1, nx)),
+            "ad_php": aphp, "ad_alt": L.fold3(x[7], mass), "ad_p": L.fold3(x[8], mass),
+            "ad_al": L.fold3(x[9], mass), "ad_mup": amup}
+
+
+def bigstep(exe: str, runner: list[str], seed: int = 20261126) -> dict:
+    from woof.grad.wrfplus import bigstep as B
+    out = {}
+    for n, (name, over) in enumerate(BS_CASES.items()):
+        over = dict(over)
+        op, spec = over.pop("op"), over.pop("spec", 0)
+        if op == "pgf":
+            geom = cases.pgf_geometry(**BS_DIMS, **over)
+            tr = cases.pgf_trajectory(geom, seed + 10 * n)
+            pe = cases.pgf_perturbation(geom, seed + 10 * n + 1)
+            sh, states = B.pgf_shapes(geom), B.PGF_STATE
+        else:
+            geom = cases.buoy_geometry(**BS_DIMS, **over)
+            tr = cases.buoy_trajectory(geom, seed + 10 * n)
+            pe = cases.buoy_perturbation(geom, seed + 10 * n + 1)
+            sh, states = B.buoy_shapes(geom), B.BUOY_STATE
+        geom.validate()
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        seeds = {s: rng.standard_normal(sh[s]) for s in states}
+        blob, L = _bs_record(op, geom, tr, pe, seeds, spec)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _bs_expected(op, geom, result, L)
+        prefix = f"{name}/"
+        out[prefix + "op"] = np.array(op)
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for k, v in seeds.items():
+            out[prefix + "seed/" + k] = v
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
             "small_step": small_step, "rk_stage": rk_stage,
-            "advect": advect}
+            "advect": advect, "bigstep": bigstep}
 
 
 def main(argv=None) -> int:

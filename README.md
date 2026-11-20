@@ -966,10 +966,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   boundaries, map factors, horizontal orders 3-6 and vertical orders 2-6.
   It matches WRFPLUS `g_/a_advect_*` to about 1e-16 on the points where
   woof and WRF compute the same thing (see the design note), and the float build
-  reproduces the strict primal's words.
+  reproduces the strict primal's words. The big-step pressure gradient
+  and buoyancy (woof's strict `slow_pgf` and `slow_buoyancy`, WRF
+  `horizontal_pressure_gradient` and `pg_buoy_w`) follow, with the lid,
+  open and specified boundaries, map factors and hybrid levels. In
+  binary64 they match WRFPLUS to about 1e-15 on six non-hybrid cases
+  (WRFPLUS has no hybrid coordinate; with the lid, the top three levels
+  of the p adjoint are left out, see below). The comparison found a lid bug in
+  WRFPLUS's own pressure-gradient adjoint, described in the design note.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
-  0.85-3.2x the glue and 4.0-5.2x advection (on a shared card). The
-  measured step projection (4.6-4.9x) is in the design note. The forecast path does not import any of it.
+  0.85-3.2x the glue, 3.3-4.5x advection and 1.3-4.1x the big-step
+  tendencies. The measured step projection (4.6-4.7x) is in the design
+  note. The forecast path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable

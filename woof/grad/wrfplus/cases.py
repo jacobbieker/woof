@@ -649,3 +649,89 @@ def adv_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     shapes = adv_shapes(geom)
     return {n: np.ascontiguousarray(_ADV_SCALES[n][1] * rng.standard_normal(shapes[n]),
                                     dtype=dtype) for n in ADV_ACTIVE}
+
+
+# ------------------------------------------------------- big-step tendencies
+# horizontal_pressure_gradient and pg_buoy_w (P3a item 5).
+
+_BS_SCALES = {"ru_t": (0.0, 50.0), "rv_t": (0.0, 50.0), "rw_t": (0.0, 5.0),
+              "p": (0.0, 50.0), "al": (0.0, 1e-4), "alt": (1.0, 0.2),
+              "php": (0.0, 20.0), "mup": (0.0, 200.0), "mub": (9.0e4, 2e3)}
+
+
+def pgf_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .bigstep import PGFGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0, cf1=1.6,
+                cf2=-0.8, cf3=0.2, cfn=1.5, cfn1=-0.5)
+    base.update(overrides)
+    return PGFGeometry(**base)
+
+
+def _bs_levels(nz, rng, hybrid):
+    v = _vertical(nz, rng, hybrid)
+    znu, dnw = v["znu"], v["dnw"]
+    dn = np.zeros(nz)
+    dn[1:] = np.diff(znu)
+    fnm, fnp, rdn = np.zeros(nz), np.zeros(nz), np.zeros(nz)
+    fnm[1:] = 0.5 * dnw[:-1] / dn[1:]
+    fnp[1:] = 0.5 * dnw[1:] / dn[1:]
+    rdn[1:] = 1.0 / dn[1:]
+    c1f = np.sqrt(np.clip(v["znw"], 0.0, None)) if hybrid else np.ones(nz + 1)
+    return dict(c1h=v["c1h"], c2h=v["c2h"], rdnw=v["rdnw"], fnm=fnm, fnp=fnp, rdn=rdn,
+                c1f=c1f)
+
+
+def pgf_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of slow_pgf: p' and al small, alt near 1, a base pressure
+    falling and a base geopotential rising with height; ``hybrid`` gives
+    hybrid c1h/c2h and stretched levels."""
+    from .bigstep import PGF_ACTIVE, PGF_PASSIVE, PGF_STATE, pgf_shapes
+    rng = np.random.default_rng(seed)
+    sh = pgf_shapes(geom)
+    out = _bs_levels(geom.nz, rng, hybrid)
+    for n in PGF_STATE + PGF_ACTIVE + ("mub",):
+        c, s = _BS_SCALES[n]
+        out[n] = c + s * rng.standard_normal(sh[n])
+    k = np.arange(geom.nz + 1)[:, None, None]
+    out["pb"] = 9.0e4 - 6.0e3 * k[:-1] + 300.0 * rng.standard_normal(sh["pb"])
+    out["phb"] = 4.0e3 * k + 50.0 * rng.standard_normal(sh["phb"])
+    keep = PGF_STATE + PGF_ACTIVE + PGF_PASSIVE
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def pgf_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .bigstep import PGF_ACTIVE, pgf_shapes
+    rng = np.random.default_rng(seed)
+    sh = pgf_shapes(geom)
+    scale = {"p": 50.0, "al": 1e-4, "alt": 0.05, "php": 20.0, "mup": 200.0}
+    return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in PGF_ACTIVE}
+
+
+def buoy_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .bigstep import BuoyGeometry
+    base = dict(nz=nz, ny=ny, nx=nx)
+    base.update(overrides)
+    return BuoyGeometry(**base)
+
+
+def buoy_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    from .bigstep import BUOY_ACTIVE, BUOY_PASSIVE, BUOY_STATE, buoy_shapes
+    rng = np.random.default_rng(seed)
+    sh = buoy_shapes(geom)
+    out = _bs_levels(geom.nz, rng, hybrid)
+    for n in BUOY_STATE + BUOY_ACTIVE:
+        c, s = _BS_SCALES[n]
+        out[n] = c + s * rng.standard_normal(sh[n])
+    out["msft"] = 1.0 + 0.02 * rng.standard_normal(sh["msft"])
+    keep = BUOY_STATE + BUOY_ACTIVE + BUOY_PASSIVE
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def buoy_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .bigstep import BUOY_ACTIVE, buoy_shapes
+    rng = np.random.default_rng(seed)
+    sh = buoy_shapes(geom)
+    scale = {"p": 50.0, "mup": 200.0}
+    return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in BUOY_ACTIVE}

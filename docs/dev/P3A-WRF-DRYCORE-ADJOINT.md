@@ -266,6 +266,33 @@ Each step is one small PR, taken to merged before the next widens.
      the lateral boundary update and `w_damp` (item 5).
 5. Big-step tendencies: `horizontal_pressure_gradient`, `pg_buoy_w`,
    `rhs_ph`, `coriolis`, `curvature`, `w_damp`.
+   - `horizontal_pressure_gradient` and `pg_buoy_w` are done in
+     `woof/grad/wrfplus/bigstep.py`. They cover woof's strict `slow_pgf`
+     and `slow_buoyancy`, dry, on periodic, open and specified axes, with
+     the lid extrapolation, map factors and hybrid levels. p is the strict
+     diagnosis's p'.
+   - The pgf AD runs in two passes. One thread per face writes the
+     face's four local adjoints (bracket, layer mass, half-level
+     geopotential difference, vertical term) to scratch, and three gathers
+     (cells, w levels, columns) sum them. That is 2x faster than
+     recomputing the faces in the gathers.
+   - Checks: dot-product test about 1e-16 and FD for 11 configurations.
+     The float base state is the strict primal's words (0 differing, host
+     and CUDA). WRFPLUS 4.7.1 (`tools/wrfplus_oracle/bigstep.F90`) agrees
+     to about 6e-16 on 6 cases.
+   - WRFPLUS's versions are not hybrid (no c1/c2), so the oracle cases
+     use c1 = 1, c2 = 0. The driver forms WRF's precomputed face masses
+     (calc_mu_uv) and half-level geopotential (calc_php) in the fixture,
+     with their transposes.
+   - WRFPLUS bug, found here: with `top_lid`, the reverse sweep of
+     `A_HORIZONTAL_PRESSURE_GRADIENT` still applies the pre-2016 lid
+     extrapolation (cf1-cf3 on kde-1..kde-3). Its forward sweep and the TL
+     use cfn/cfn1, so its adjoint of p at the top three levels is not the
+     transpose of its TL. The oracle leaves those levels out there. The
+     dot-product test holds woof's AD to woof's TL, which matches WRFPLUS's
+     TL.
+   - Not covered: the moist cqu/cqv/cqw factors, the hydrostatic option
+     and a 1-D base state.
 6. Advection `advect_u/v/w/scalar` (non-PD, h orders 3-6, v orders 2-6). This is the
    largest group; once the pattern is set, the mechanical ports go to
    Sonnet sub-agents.
@@ -383,7 +410,8 @@ decision of 2026-11-20.
 
 These kernel ratios are AD and TL time over the binary32 primal. They were
 measured on the pb A6000 at 200x200x49, as interleaved A/B in one process.
-Other jobs share that card.
+Other jobs share that card; the advect and big-step rows were timed with
+it idle (under 10% utilisation for 20 s before the run).
 
 | kernel (woof primal) | PR | AD32 | TL32 | AD64 |
 |---|---|---|---|---|
@@ -396,7 +424,9 @@ Other jobs share that card.
 | rk_step_prep: couple_momentum + calc_ww_cp (stage_fluxes, CuPy) | #691 | 0.85x (0.82-0.86) | 0.32x | 1.2x |
 | rk_addtend_dry (dry tendency add + add_held_heating) | #691 | 1.0x | 1.7x | 2.2x |
 | set_w_surface (set_surface_w) | #691 | 2.1x (2.0-2.3) | 1.2x | 4.0x |
-| advect_scalar/u/v/w (flux_div_{scalar,u,v,w}) | this PR | 4.6x (4.0-5.2) | 1.4-2.3x | 21-32x |
+| advect_scalar/u/v/w (flux_div_{scalar,u,v,w}) | #700 | 3.9x (3.3-4.5) | 1.5-1.8x | 19-27x |
+| horizontal_pressure_gradient (slow_pgf) | this PR | 4.0x (3.9-4.1) | 1.9x | 14-15x |
+| pg_buoy_w (slow_buoyancy) | this PR | 1.3x | 1.9x | 2.1x |
 
 advance_uv's 3.7x in the projection is the midpoint of its range. The
 advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
@@ -447,35 +477,38 @@ activity tagged by woof kernel and the minimum over 10 steps
 flux_div is now measured on the in-tree port (item 6):
 TL and AD over woof's production float32 `flux_div_{scalar,u,v,w}`
 under GPUWM_WRF_EXACT=1, summed over the four kinds at 200x200x49 on pb,
-for periodic and for open+specified boundaries. Two runs of each on a card
-another job held at 73-80% gave AD32 4.0-5.2x (4.6x is used below),
-TL32 1.4-2.3x and AD64 21-32x. On an idle card the six AD kernels took
-2.3 ms against 0.76 ms of primal (about 3.0x), so the 4.6x is likely
-high. AD64 is compute bound on the A6000's 1/32-rate float64; the glue
+for periodic and for open+specified boundaries. On an idle card
+(2026-11-20) AD32 was 4.5x with open+specified boundaries and 3.3x
+periodic (3.9x is used below), TL32 1.5-1.8x and AD64 19-27x. A card
+another job held at 73-80% gave AD32 4.0-5.2x. AD64 is compute bound on the A6000's 1/32-rate float64; the glue
 and acoustic kernels are memory bound and do not show this. The earlier
 out-of-tree prototype (periodic flux_div_scalar only) gave 2.56x; the
 port is dearer because the u and v field gathers average their
 advecting mass fluxes and visit both wrapped end faces, and the
 boundary paths add branches.
 
+slow_pgf and slow_buoyancy run once per RK stage. Their idle-card
+primals (0.154 ms and 0.038 ms) give 2.9% and 0.7% of the strict step's
+16 ms for three calls. slow_pgf is part of the 5.2% row above (the
+other 2.3% is slow_geopotential); slow_buoyancy sits in "other woof
+kernels".
+
 The projection is the per-step adjoint cost over the forward step:
 1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
-far (85.2% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
-set_w_surface's 0.03% and flux_div's 14.4%), Σ share x AD32 = 3.30, on
-top of the forward recompute's 1. The rest is projected at a range of
-ratios:
+far (88.8% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
+set_w_surface's 0.03%, flux_div's 14.4%, slow_pgf's 2.9% and
+slow_buoyancy's 0.7%), Σ share x AD32 = 3.33, on top of the forward
+recompute's 1. The rest is projected at a range of ratios:
 
-| ratio for the unmeasured 14.8% | projection |
+| ratio for the unmeasured 11.2% | projection |
 |---|---|
 | 2.2x (memory-traffic floor) | 4.6x |
 | 3.0x | 4.7x |
-| 3.9x (the measured share-weighted mean) | 4.9x |
+| 3.7x (the measured share-weighted mean) | 4.7x |
 
-The 5x limit holds while the rest averages at most about 4.7x (6.7x
-with the prototype's flux_div). With flux_div at its idle-card 3.0x,
-the projection is 4.4-4.6x. This is a
+The 5x limit holds while the rest averages at most about 6.0x. This is a
 projection from kernel GPU time, not a measured step ratio: launch gaps
-are not counted, the ratios come from a shared card, and 14.8% of the
+are not counted, most ratios come from a shared card, and 11.2% of the
 step is not yet ported. calc_coefs and small_step are each about 4.8x;
 at 2.3% and 8.2% of the step they add about 0.11 and 0.39. Each later kernel PR replaces a
 projected share with a measured one.
