@@ -1157,6 +1157,19 @@ physically shaped. Over a 10-day cycle on one woof domain, the analysis
 fits independent observations no worse than with WRFDA's tutorial-style
 default `B`.
 
+*Status (2026-11-20):* V2.1-V2.3 for cv5 and cv7, `bin_type` 5
+(`woof/da/var/gen_be.py`, `tests/test_var_gen_be.py`). WRFDA's gen_be is
+linked from the pinned build's objects (`tools/wrfda_oracle/link_gen_be.sh`,
+the stock link line lacks `-lnetcdff`) and run on the 20 sample forecasts
+(`run_gen_be.sh`). Measured: regressions within 1.0e-7, eigenvalues 5.5e-8,
+length scales 7.4e-8 (cv5; `fft661`'s tables use `pi = 3.1415926`, woof's
+sine transform is exact) and 3e-12 with identical length scales (cv7).
+WRFDA's tutorial 3D-Var with the woof-made cv5 file: final J 21497.748
+against 21497.749 with WRFDA's, 30 iterations each, increments within 2e-6
+of the largest (binary32 output); woof's 3D-Var with the woof-made file
+reproduces that WRFDA log. Open: other `bin_type`s and cv6, a device tier,
+the single-observation and 10-day cycling parts of GV2.
+
 ### V3. Hybrid 3DEnVar with the LETKF ensemble (3-4 w)
 
 | PR | content | effort |

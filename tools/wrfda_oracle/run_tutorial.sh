@@ -6,17 +6,24 @@
 #   data/         the unpacked WRFDAV3.9-testdata tarball
 # DUMP=1 additionally requires woof_be.bin, woof_xb.bin, woof_u.bin and
 #        woof_iv.bin in the run directory (use with the patched WRFV4.7.1-dump).
-# usage: [DUMP=1] run_tutorial.sh NAME [extra wrfvar10 settings, e.g. test_transforms=true,]
+# BE=FILE uses FILE (an existing path inside the container; it is resolved before the run directory is
+#        reset, and must not be inside $W/run/NAME) instead of the tutorial be.dat.  The tutorial namelist is
+#        cv_options=5, so FILE must be a cv5 be.dat (run_gen_be.sh 5), not a cv7 one.
+# usage: [DUMP=1] [BE=FILE] run_tutorial.sh NAME [extra wrfvar10 settings, e.g. test_transforms=true,]
 set -eux
 NAME=${1:?usage: run_tutorial.sh NAME [extra wrfvar10 settings]}
 EXTRA=${2:-}
 case "$NAME" in */*|.*) echo "NAME must be a plain directory name" >&2; exit 2;; esac
 case "$EXTRA" in */*|*\&*|*\\*) echo "extra settings must not contain / & or \\" >&2; exit 2;; esac
 W=${W:-/d/scratch/wrfda}; W=$(cd "$W" && pwd); S=$W/src/${TREE:-WRFV4.7.1}; D=$W/data; R=$W/run/$NAME
+BE_SRC=${BE:-$D/be/be.dat}
+[ -f "$BE_SRC" ] || { echo "BE file $BE_SRC not found" >&2; exit 2; }
+BE_SRC=$(cd "$(dirname "$BE_SRC")" && pwd)/$(basename "$BE_SRC")
+case "$BE_SRC" in "$R"/*) echo "BE must not be inside the run directory $R (it is deleted first)" >&2; exit 2;; esac
 rm -rf "$R"; mkdir -p "$R"; cd "$R"
 ln -sf "$S/var/build/da_wrfvar.exe" .
 ln -sf "$S/run/LANDUSE.TBL" .
-cp "$D/be/be.dat" be.dat
+cp "$BE_SRC" be.dat
 cp "$D/ob/2008020512/ob.ascii" ob.ascii
 cp "$D/rc/2008020512/wrfinput_d01" fg
 NL=$S/var/test/tutorial/namelist.input

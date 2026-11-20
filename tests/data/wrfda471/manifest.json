@@ -154,5 +154,14 @@
    "Final:  29 iter, J= 2.166324942823930D+04, g= 3.234612332907232D+00",
    "----------------------------------------------------------------------"
   ]
+ },
+ "gen_be": {
+  "comment": "GV2 (tests/test_var_gen_be.py): WRFDA 4.7.1 gen_be (gen_be.ksh, NMC 24 h - 12 h, bin_type 5, defaults otherwise; tools/wrfda_oracle/run_gen_be.sh) on the WRFDA gen_be sample forecasts, ten valid times 2008020400-2008020812.",
+  "forecasts": {
+   "url": "https://www2.mmm.ucar.edu/wrf/users/wrfda/download/V39/gen_be_forecasts_200802.tar.gz",
+   "sha256": "22db28a1cee96f74519a5d769d0125a898af16c56661dfe207ca4ea6083f71ed"
+  },
+  "oracle_cv5_be_dat_sha256": "e381dddb532bdd856e0d023b58a251749900b9893e406da4811f122350867d75",
+  "oracle_cv7_be_dat_sha256": "8dc42b75d9a4b01fb39841f17393225f28f5f118a8cd9d041384fa1256016183"
  }
 }

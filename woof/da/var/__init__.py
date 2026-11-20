@@ -20,6 +20,8 @@ Modules (landed phase by phase):
 - :mod:`woof.da.var.cost` -- ``VarCost``: J and grad J in WRFDA's order
   (``da_calculate_j``, ``da_calculate_gradj``), against an ``ObsTerm``.
 - :mod:`woof.da.var.minimise` -- ``da_minimise_cg`` and the outer loop.
+- :mod:`woof.da.var.gen_be` -- WRFDA's gen_be (``be.dat`` from NMC pairs or
+  ensemble perturbations, cv5 and cv7, ``bin_type`` 5), host binary64.
 - :mod:`woof.da.var.oracle` -- reader for the oracle build's array dumps
   (``tools/wrfda_oracle``).
 """
