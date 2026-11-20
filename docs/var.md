@@ -52,6 +52,12 @@ The port lives in `woof.da.var`. Only this command and its tests import it
    - `--ph balance` lets the bundle writer rebuild `PH` instead of keeping
      WRFDA's.
    - `--iau-window-s` records an IAU window.
+   - A first guess from the middle of a forecast keeps the forecast's
+     `START_DATE`. As WRFDA's `wrfvar_output` does, the analysis is
+     restamped to start at its valid time: `START_DATE`,
+     `SIMULATION_START_DATE`, `GMT`, `JULYR` and `JULDAY`. A first guess
+     that already starts at its valid time is written byte for byte as
+     before.
 
 ## Hybrid 3DEnVar (opt-in)
 
