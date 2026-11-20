@@ -1048,8 +1048,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `da_qc_gpsref`. Profiles go to the table (`ro_refractivity_tangent_point`,
   the LETKF's existing refractivity operator) and to `obs_gts` as FM-116.
   `woof obs wis2 radiances` reads AMSU-A, MHS and ATMS footprints (Metop-B
-  and -C, S-NPP, NOAA-20 and -21; satellites CRTM has no coefficients for
-  are counted and refused) to an `.npz` per instrument.
+  and -C, S-NPP, NOAA-20 and -21) to one `.npz` per instrument. Sensors
+  CRTM has no coefficients for are counted and refused.
   `woof.da.obs_mw` (opt-in) turns them into LETKF batches. It uses CRTM
   v2.4 clear sky over open sea, WRFDA's channels, errors and screens
   (`da_qc_amsua`, `da_qc_mhs`, `da_qc_atms`: scan edges, scattering

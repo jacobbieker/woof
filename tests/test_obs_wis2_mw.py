@@ -205,8 +205,16 @@ def test_land_limb_scattering_and_departure_screens():
     _, prov = _run(_footprints(lat, lon, members), lat, lon, members, p)
     assert prov["counts"]["not_open_sea"] == 8 and prov["batches"]["mw_amsua_metop-b_ch5"]["assimilated"] == 12
     members, p = _members(lat)
-    _, prov = _run(_footprints(lat, lon, members, fov=2), lat, lon, members, p)
-    assert prov["counts"]["limb"] == 20 and prov["batches"]["mw_amsua_metop-b_ch5"]["assimilated"] == 0
+    batches, prov = _run(_footprints(lat, lon, members, fov=2), lat, lon, members, p)
+    assert prov["counts"]["limb_footprints"] == 80 and prov["counts"].get("with_footprint", 0) == 0
+    assert all(b.mask.sum() == 0 for b in batches)
+    # a limb footprint nearer a column gives way to an inner one further off
+    fov = np.full(lat.size, 15)
+    fov[1::2] = 2
+    two = _footprints(lat, lon, members, fov=fov)
+    _, prov = _run(two, lat, lon, members, p, settings=dict(max_distance_km=150.0))
+    assert prov["counts"]["limb_footprints"] == 40 and prov["counts"]["limb"] == 0
+    assert prov["batches"]["mw_amsua_metop-b_ch5"]["assimilated"] > 0
 
     def scatter(bt):
         bt[:, 0] = bt[:, 14] + 4.0  # 23.8 GHz 4 K above 89 GHz: precipitation scattering

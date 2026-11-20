@@ -125,8 +125,13 @@ def select_footprints(fp: MwFootprints, lat, lon, settings: MwSettings) -> dict:
     half = settings.thin // 2
     jj, ii = np.meshgrid(np.arange(half, ny, settings.thin), np.arange(half, nx, settings.thin), indexing="ij")
     jj, ii = jj.ravel(), ii.ravel()
-    usable = np.flatnonzero(np.isfinite(fp.lat) & np.isfinite(fp.lon))
-    counts = dict(model_columns=int(jj.size), footprints=int(fp.count))
+    # a limb footprint, or one with no channel at all, never takes a column a neighbour could serve
+    lo, hi = LIMB_POSITIONS[fp.instrument]
+    limb = (fp.fov <= lo) | (fp.fov >= hi)
+    empty = ~np.isfinite(fp.bt).any(axis=1)
+    usable = np.flatnonzero(np.isfinite(fp.lat) & np.isfinite(fp.lon) & ~limb & ~empty)
+    counts = dict(model_columns=int(jj.size), footprints=int(fp.count), limb_footprints=int(limb.sum()),
+                  footprints_without_channels=int((empty & ~limb).sum()))
     if usable.size == 0:
         return dict(jj=jj[:0], ii=ii[:0], footprint=usable, counts=counts)
     tree = cKDTree(_unit_vectors(fp.lat[usable], fp.lon[usable]))
@@ -257,7 +262,9 @@ def mw_to_gridded_obs(fp: MwFootprints, *, lat, lon, pressure_pa, columns: Colum
         return obs[:, col[c]]
 
     def departure(c):
-        return observed(c) - hbar[:, sidx[c]]
+        # bias-corrected, as WRFDA's tb_inv is when da_qc_atms reads it
+        bias = np.array([float(settings.bias_k.get(f"{s}:{c}", 0.0)) for s in sensors])
+        return observed(c) - bias - hbar[:, sidx[c]]
 
     with np.errstate(invalid="ignore"):
         if instrument in ("amsua", "mhs"):
@@ -278,9 +285,9 @@ def mw_to_gridded_obs(fp: MwFootprints, *, lat, lon, pressure_pa, columns: Colum
             refuse(np.abs(departure(3)) >= 5.0, list(range(1, 9)) + list(range(16, 23)), "scattering_omb_ch3")
             refuse(observed(16) - observed(17) >= settings.scattering_k, range(16, 23), "scattering_index_16_17")
             # a screen that cannot be formed does not clear its channels
-            refuse(~np.isfinite(departure(1) + departure(3)), list(range(1, 9)) + list(range(16, 23)),
-                   "scattering_screen_missing")
-            refuse(~np.isfinite(observed(16) - observed(17)), range(16, 23), "scattering_screen_missing")
+            low = ~np.isfinite(departure(1) + departure(3))
+            refuse(low, list(range(1, 9)) + list(range(16, 23)), "scattering_screen_missing")
+            refuse(~low & ~np.isfinite(observed(16) - observed(17)), range(16, 23), "scattering_screen_missing")
     cloud_note = "skipped: no background cloud liquid supplied"
     if cloud_liquid_kgm2 is not None and n:
         clwp = _column_clwp(cloud_liquid_kgm2, pressure, jj, ii)

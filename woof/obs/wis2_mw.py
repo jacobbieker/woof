@@ -148,7 +148,7 @@ def read_mw(root, instrument: str, start, end, box, counts: Counter | None = Non
     bt = np.atleast_2d(wis2._numbers(group["brightness_temperature"], index).reshape(len(index), -1))
     if "brightness_temperature_quality" in group:
         q = np.atleast_2d(wis2._numbers(group["brightness_temperature_quality"], index).reshape(len(index), -1))
-        flagged = np.isfinite(q) & (q != 0) & np.isfinite(bt)
+        flagged = np.isfinite(q) & (q != 0) & np.isfinite(bt)  # a missing quality value does not refuse
         counts[f"{label}_brightness_temperature_quality"] += int(flagged.sum())
         bt = np.where(flagged, np.nan, bt)
     gross = np.isfinite(bt) & ((bt < BT_BOUNDS[0]) | (bt > BT_BOUNDS[1]))
@@ -163,7 +163,8 @@ def read_mw(root, instrument: str, start, end, box, counts: Counter | None = Non
     lat, lon = wis2._column(group["latitude"], index), wis2._column(group["longitude"], index)
     received = wis2._received(group, index)
     keep, seen, sensors = [], set(), []
-    for n in np.argsort(received.astype(np.int64), kind="stable"):  # the first arrival of a copy wins
+    arrival = np.where(np.isnat(received), np.iinfo(np.int64).max, received.astype(np.int64))
+    for n in np.argsort(arrival, kind="stable"):  # the first arrival of a copy wins (unknown arrival last)
         sid = int(sat[n]) if np.isfinite(sat[n]) else -1
         sensor = spec["sensors"].get(sid)
         if sensor is None:

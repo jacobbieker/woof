@@ -2438,9 +2438,14 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      arrival. The scan angle is `(fov - (n+1)/2) x step`.
    - Satellites map to CRTM sensors by BUFR id: Metop-B and -C
      (`amsua_`/`mhs_metop-b`, `-c`), S-NPP `atms_npp`, NOAA-20 `atms_n20`
-     and NOAA-21 `atms_j2`. Other satellites are counted and refused.
-     WIS2 has no NOAA-15/18/19 or Aqua AMSU-A in this window, and FY-3
-     (`mwts2`, `mwhs2`, `mws`) waits for coefficients.
+     and NOAA-21 `atms_j2`. The reader also maps Metop-A, NOAA-15, -18
+     and -19, and Aqua. A satellite with no CRTM sensor is counted and
+     refused by the reader. A sensor whose coefficients CRTM has not
+     opened is counted and refused by the adapter. WIS2 has none of those
+     older platforms in this window. FY-3 (`mwts2`, `mwhs2`, `mws`) waits
+     for coefficients.
+   - A missing per-channel quality value does not refuse the channel.
+     Only a set one does.
    - Coefficients come from CRTM's REL-2.4.1 fix tarball, kept outside
      the repository: ODAS TauCoeff for AMSU-A and MHS on Metop-B and -C
      and for `atms_npp`, ODPS for `atms_n20` and `atms_j2`, SpcCoeff for
@@ -2458,7 +2463,12 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      peaking in the model's top layer is refused. Metop-B AMSU-A channel
      15 is dead, so where the scattering index cannot be formed GSI's
      channel 1-2 cloud liquid retrieval (0.2 kg/m2) stands in. An ATMS
-     screen that cannot be formed refuses its channels.
+     screen that cannot be formed refuses its channels. The scattering
+     indices use the raw observations. ATMS's O-B screens use the
+     bias-corrected departure, which is WRFDA's `tb_inv`.
+   - Thinning keeps the nearest footprint to every `thin`-th column.
+     Limb footprints, and footprints with no valid channel, are left out
+     first, so they never take a column that a neighbour could serve.
    - On 2026-10-28 11-13Z globally the reader passes 55,455 AMSU-A,
      656,513 MHS and 1,083,892 ATMS footprints. CRTM on the GEFS control
      (f006, 0.5 degree), at sea within 55 degrees of the equator and
