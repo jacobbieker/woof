@@ -551,7 +551,8 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
 
 
 def _fit(cost, d0, cvt, terms) -> dict:
-    """RMS of O-B and of the linearised O-A (``d - H' U cvt``) per term, and per radiance sensor and channel."""
+    """RMS of O-B and of the linearised O-A (``d - H' U cvt``) per term, per conventional type and
+    variable, and per radiance sensor and channel."""
     ys = cost.vtoy(cvt)
     out = {}
     for n, (t, d, y) in enumerate(zip(terms, d0, ys)):
@@ -561,6 +562,14 @@ def _fit(cost, d0, cvt, terms) -> dict:
         name = "radiance" if n else "conventional"
         rms = (lambda v, k: float(np.sqrt(np.mean(v[k] ** 2))) if k.any() else float("nan"))
         out[name] = {"n": int(m.sum()), "omb_rms": rms(d, m), "oma_rms": rms(a, m)}
+        if not n:  # per conventional type and variable (``sound:t`` ...), in the term's Jo groups
+            for kind, variables in t.jo_split():
+                for var, idx in variables:
+                    idx = np.asarray(idx, dtype=np.int64)
+                    k = np.zeros(m.size, bool)
+                    k[idx] = m[idx]
+                    if k.any():
+                        out[f"{kind}:{var}"] = {"n": int(k.sum()), "omb_rms": rms(d, k), "oma_rms": rms(a, k)}
         if n and hasattr(t, "batches"):
             for k, b in enumerate(t.batches):
                 sl = slice(int(t.offsets[k]), int(t.offsets[k + 1]))

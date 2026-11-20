@@ -386,6 +386,10 @@ def test_analyse_door_with_radiances_on_the_tutorial():
     conv, conv0 = res.fit["conventional"], base.fit["conventional"]
     assert conv["n"] == conv0["n"] and conv0["oma_rms"] < conv["oma_rms"] <= 1.05 * conv0["oma_rms"] < conv["omb_rms"]
     assert res.radiance["varbc_controls"] == 15
+    # per conventional type and variable, partitioning the conventional observations
+    parts = [v for k, v in base.fit.items() if ":" in k]
+    assert base.fit["sound:t"]["oma_rms"] < base.fit["sound:t"]["omb_rms"]
+    assert sum(v["n"] for v in parts) == conv0["n"]
 
 
 def test_seviri_channels_are_wrfdas_numbers_in_varbc_files(tmp_path):

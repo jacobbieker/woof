@@ -231,7 +231,7 @@ class _Satem:
         self.w = list(zip(*iw._w(t.info)))
         self.off = t.offsets
         self.p = t.coords["p"]
-        self.ref_p = t.extra["ref_p"]
+        self.ref_p = t.extra.get("ref_p", np.empty(0))  # absent when there is no SATEM report
         self.n = len(self.p)
 
     def _levels(self, n):
