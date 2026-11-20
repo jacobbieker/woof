@@ -107,6 +107,54 @@ WRFDA's gen_be sample forecasts, `je_factor = 2` and `alpha_corr_scale =
   |difference| at most 4.7e-5 of the RMS (PSFC; the other fields at most
   7.2e-6) and correlation of at least 0.9999999996.
 
+## FGAT (opt-in)
+
+WRFDA's FGAT (`num_fgat_time > 1`, first guess at appropriate time) compares
+each observation with the first guess at its time slot, not at the analysis
+time. The increment, `H'` and the analysis stay at the analysis time. Only
+the innovations change. `woof var` runs it with one observation file and one
+first guess per slot (`woof.da.var.fgat`; the Python door is
+`analyse(..., fgat=[fg01, ...])` with `obs=[ob01.ascii, ...]`):
+
+```
+woof var --be be.dat --first-guess fg --out bundle --window-minutes 180 \
+    --fgat-obs ob01.ascii --fgat-first-guess fg01 \
+    --fgat-obs ob02.ascii --fgat-first-guess fg02 ...
+```
+
+- **Slots.** As in WRFDA, `fg01` is at the window's start and the last
+  first guess at its end, evenly spaced between. Each `obNN.ascii` is
+  filtered by the whole window, not by its slot (`da_read_obs_ascii`). woof
+  refuses a first guess that is not at its slot's time; WRFDA reads `fgNN`
+  without checking.
+- **Per slot.** Each slot gets its own vertical positions, background check,
+  surface correction and GNSS-RO QC, against its own first guess
+  (`da_get_innov_vector`). `--first-guess` is the analysis-time background
+  that `H'` is linearised about and the analysis is added to.
+- **Refused.**
+  - `--max-ext-its` above 1: WRFDA 4.7.1 re-reads `fgNN` and `fg` from
+    disk in every outer loop, which drops the earlier loops' increments.
+  - Radiances: WRFDA bins them by time slot, and that is not ported.
+  - Mixing `--obs` with `--fgat-obs`.
+- **The bundle.** Each slot's file names and SHA-256 go into `recipe_sha256`
+  and are listed under `notes.var.fgat`.
+
+Checked against WRFDA 4.7.1 FGAT (`tests/test_var_fgat.py`;
+`tools/wrfda_oracle/run_fgat.sh`; `WOOF_WRFDA471_FGAT_DIR`). The case uses the
+testdata's 4D-Var observations: seven hourly files from 12 to 18Z, 69,144
+observations. The first guesses come from a WRF 4.7.1 forecast from the 12Z
+`wrfinput`, and the analysis is at 15Z.
+
+- **Innovations.** The qc flags equal WRFDA's everywhere. Every innovation
+  agrees to 1e-10 relative, except metar `p` at 3e-10 (its O-B is small).
+  These are the crmath-against-glibc ulps of O5.
+- **Initial cost.** `Jo` at the background is WRFDA's `J_0` to 1e-13.
+- **Minimisation.** It takes WRFDA's 31 iterations to its final `J`
+  within 1e-15.
+- **Analysis.** The increments against `wrfvar_output` have max
+  |difference| at most 8.4e-5 of the RMS (PSFC; the other fields at most
+  1.1e-5) and correlation of at least 0.999999998.
+
 ## Tiers
 
 | `--tier` | arithmetic | where |
@@ -236,5 +284,6 @@ print `Jb factor used`.
 - Radar and GOES (plan sections 6-11); hydrometeor perturbations in the hybrid
   (`alpha_hydrometeors`).
 - `cv_options` other than 5.
+- FGAT with outer loops, radiances or PREPBUFR observations.
 - WRFDA's `A2C`, `var4d` and cloud control variables; pseudo-observations other than `u`, `v`, `t`, `q`.
 - Nested domains.

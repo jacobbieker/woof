@@ -12,7 +12,8 @@ docs/var.md.  Clear-sky geostationary radiances with VarBC are opt-in
 (``--radiance-scene``; CRTM from ``WOOF_CRTM_LIB``/``WOOF_CRTM_COEFFS``).
 Hybrid 3DEnVar is opt-in: ``--ensemble-member`` (members' history files,
 ``gen_be_ep2``'s perturbations) or ``--ep-dir`` (WRFDA ``ep`` files) with
-``--je-factor``.
+``--je-factor``.  FGAT is opt-in: one ``--fgat-obs`` and one
+``--fgat-first-guess`` per time slot (WRFDA's ``obNN.ascii`` and ``fgNN``).
 """
 
 from __future__ import annotations
@@ -35,7 +36,8 @@ def register_cli(subparsers):
             "observations and WRFDA's be.dat, print WRFDA's minimiser log, and write the "
             "analysis as a wrf-analysis-bundle/1 for `woof run --analysis BUNDLE`.  Experimental."))
     p.add_argument("--be", required=True, type=Path, help="WRFDA background-error file (be.dat, cv_options = 5)")
-    p.add_argument("--obs", required=True, type=Path, help="OBSPROC observations (ob.ascii)")
+    p.add_argument("--obs", type=Path, default=None,
+                   help="OBSPROC observations (ob.ascii); with FGAT give --fgat-obs per slot instead")
     p.add_argument("--first-guess", required=True, type=Path,
                    help="WRF first guess (wrfinput_d01 or a wrfout), WRFDA's fg")
     p.add_argument("--out", required=True, type=Path, help="analysis bundle directory to write (must not exist)")
@@ -51,7 +53,8 @@ def register_cli(subparsers):
     p.add_argument("--check-rh", type=int, choices=(0, 1), default=0,
                    help="WRFDA check_rh in the analysis transfer (0 or 1; default 0)")
     p.add_argument("--window-minutes", type=positive_float, default=60.0,
-                   help="observation window half-width around the first guess's time (default 60)")
+                   help="observation window half-width around the first guess's time (default 60; WRFDA's "
+                        "time_window_min/max)")
     p.add_argument("--landuse-table", type=Path,
                    help="LANDUSE.TBL for the roughness (default: woof's packaged WRF table)")
     p.add_argument("--grid-id", default=None,
@@ -93,6 +96,14 @@ def register_cli(subparsers):
     h.add_argument("--max-vert-var-alpha", type=positive_float, default=None,
                    help="percent of the localisation's variance kept (WRFDA max_vert_var_alpha; default 99)")
     h.add_argument("--alpha-std-dev", type=positive_float, default=None, help="WRFDA alpha_std_dev (default 1)")
+    f = p.add_argument_group("FGAT (opt-in; WRFDA num_fgat_time > 1)")
+    f.add_argument("--fgat-obs", type=Path, action="append", default=[],
+                   help="one time slot's OBSPROC file (ob01.ascii, ob02.ascii, ...), in slot order; repeat for "
+                        "each slot (instead of --obs)")
+    f.add_argument("--fgat-first-guess", type=Path, action="append", default=[],
+                   help="one time slot's first guess (fg01, fg02, ...), in slot order, one per --fgat-obs: the "
+                        "window's start, then evenly spaced, the last at its end.  --first-guess stays the "
+                        "analysis-time background")
     p.set_defaults(func=main)
     return p
 
@@ -101,7 +112,7 @@ def main(args) -> int:
     from woof.da.var.analysis import analyse, write_bundle
 
     for flag, path in (("--be", args.be), ("--obs", args.obs), ("--first-guess", args.first_guess)):
-        if not Path(path).is_file():
+        if path is not None and not Path(path).is_file():
             print(f"var: {flag} {path} is not a file", file=sys.stderr)
             return 2
     if Path(args.out).exists():
@@ -113,12 +124,15 @@ def main(args) -> int:
 
     rad_kw = _radiance_kwargs(args) if args.radiance_scene else {}
     try:
+        fgat_kw, fgat_recipe = _fgat_kwargs(args)
         hyb_kw, hyb_recipe = _hybrid_kwargs(args)
     except ValueError as exc:
         print(f"var: {exc}", file=sys.stderr)
         return 2
     rad_kw.update(hyb_kw)
-    result = analyse(args.be, args.obs, args.first_guess, tier=args.tier, ntmax=args.ntmax, eps=args.eps,
+    rad_kw.update(fgat_kw)
+    obs = args.fgat_obs if fgat_kw else args.obs
+    result = analyse(args.be, obs, args.first_guess, tier=args.tier, ntmax=args.ntmax, eps=args.eps,
                      max_ext_its=args.max_ext_its, orthonorm_gradient=args.orthonorm_gradient,
                      check_rh=args.check_rh, window_minutes=args.window_minutes,
                      landuse_table=args.landuse_table, write=write, **rad_kw)
@@ -131,6 +145,9 @@ def main(args) -> int:
                      "j_final": [r.j_final for r in result.cg], "timings_s": result.timings}}
     if hyb_recipe:
         notes["var"]["hybrid"] = hyb_recipe
+    if fgat_recipe:
+        recipe["fgat"] = fgat_recipe
+        notes["var"]["fgat"] = fgat_recipe
     if result.radiance is not None:
         recipe["radiance_scenes"] = [Path(d).name for d in args.radiance_scene]
         recipe["varbc"] = bool(args.varbc)
@@ -149,10 +166,56 @@ def _recipe(args, hybrid: dict | None) -> dict:
     recipe = {"door": "woof var", "tier": args.tier, "ntmax": args.ntmax, "eps": args.eps,
               "max_ext_its": args.max_ext_its, "orthonorm_gradient": args.orthonorm_gradient,
               "check_rh": args.check_rh, "window_minutes": args.window_minutes,
-              "be": Path(args.be).name, "obs": Path(args.obs).name}
+              "be": Path(args.be).name, "obs": Path(args.obs).name if args.obs is not None else None}
     if hybrid:
         recipe["hybrid"] = hybrid
     return recipe
+
+
+def _sha256(path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _fgat_kwargs(args) -> tuple[dict, dict | None]:
+    """``analyse``'s ``fgat`` from --fgat-obs/--fgat-first-guess, and the recipe entry
+    (each slot's file names and sha256).  ``({}, None)`` for 3D-Var; every
+    refusal is a ValueError the door prints as ``var: ...``."""
+    import types
+
+    obs, fgs = list(args.fgat_obs), list(args.fgat_first_guess)
+    if not obs and not fgs:
+        if args.obs is None:
+            raise ValueError("give --obs (3D-Var) or one --fgat-obs per time slot (FGAT)")
+        return {}, None
+    if args.obs is not None:
+        raise ValueError("give --obs or --fgat-obs, not both")
+    if not obs or not fgs:
+        raise ValueError("FGAT needs --fgat-obs and --fgat-first-guess for every time slot")
+    for flag, paths in (("--fgat-obs", obs), ("--fgat-first-guess", fgs)):
+        for path in paths:
+            if not Path(path).is_file():
+                raise ValueError(f"{flag} {path} is not a file")
+    if args.radiance_scene:
+        raise ValueError("FGAT with --radiance-scene is not ported (WRFDA bins radiances by time slot)")
+    from woof.da.var import fgat as fm
+    from woof.da.var.analysis import obs_window
+    from woof.da.var.hybrid import wrf_times
+
+    window = obs_window(types.SimpleNamespace(times=wrf_times(args.first_guess)[0]), args.window_minutes)
+    try:
+        fm.check_fgat(len(obs), [wrf_times(f)[0] for f in fgs], time_window_min=window["time_window_min"],
+                      time_window_max=window["time_window_max"], max_ext_its=args.max_ext_its)
+    except NotImplementedError as exc:
+        raise ValueError(str(exc)) from None
+    recipe = {"obs": [{"name": Path(p).name, "sha256": _sha256(p)} for p in obs],
+              "first_guesses": [{"name": Path(p).name, "sha256": _sha256(p)} for p in fgs]}
+    return {"fgat": fgs}, recipe
 
 
 #: Hybrid flags that mean nothing without an ensemble, and the ones that belong to --ep-dir.

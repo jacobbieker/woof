@@ -14,7 +14,6 @@ for word. The exception is the GNSS-RO heights (see the module docstring).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -254,22 +253,25 @@ def _tutorial_dir():
 
 
 def iv_dump(d: Path) -> dict:
-    """``woof_iv.bin`` from ``d``, refused unless it is the dump the manifest pins.
+    """``woof_iv.bin`` from ``d``, refused when it predates the current ``woof_dump.inc``.
 
-    A dump from a WRFDA build older than the current ``woof_dump.inc``
-    lacks fields (gpsref ``p``, ``t``, ``q``).  Comparing against it fails
-    with a KeyError that says nothing about the cause.
+    A dump from a WRFDA build older than bd11ed5a1's ``woof_dump.inc``
+    lacks gpsref ``p``, ``t`` and ``q``; comparing against it would fail
+    with a KeyError that says nothing about the cause.  The file's bytes are
+    not pinned: its unused ``k``/``dz``/``dzm`` slots (past each report's
+    levels) are uninitialised memory, so rerunning the same build writes the
+    same values in a different file.  The manifest records the measured
+    dump's sha256 for reference.
     """
     path = d / "woof_iv.bin"
     if not path.is_file():
         pytest.skip("woof_iv.bin (oracle dump) not in WOOF_WRFDA471_DIR")
-    sha = hashlib.sha256(path.read_bytes()).hexdigest()
-    want = json.loads(MANIFEST.read_text())["obs"]["iv_dump_sha256"]
-    assert sha == want, (f"{path} has sha256 {sha}, not the manifest's {want}: an oracle dump from an older "
-                         "woof_dump.inc (see the manifest's iv_dump_comment); patch a copy of WRFV4.7.1 with "
-                         "tools/wrfda_oracle/apply_dump_patch.sh, run ./compile all_wrfvar in it, then "
-                         "run_tutorial.sh with that patched tree's da_wrfvar.exe")
-    return read_dump(path)
+    dump = read_dump(path)
+    missing = [k for k in ("gpsref%p%inv", "gpsref%t%inv", "gpsref%q%inv") if "gpsrf%levels" in dump and k not in dump]
+    assert not missing, (f"{path} lacks {missing}: an oracle dump from an older woof_dump.inc (see the manifest's "
+                         "iv_dump_comment); patch a copy of WRFV4.7.1 with tools/wrfda_oracle/apply_dump_patch.sh, "
+                         "run ./compile all_wrfvar in it, then run_tutorial.sh with that patched tree's da_wrfvar.exe")
+    return dump
 
 
 def _digests(obs) -> dict:

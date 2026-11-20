@@ -140,7 +140,7 @@
   "comment": "V1.1: the tutorial ob.ascii (testdata ob/2008020512/ob.ascii) read by woof.da.var.obs_wrfda with the default correctly rounded libm; counts are WRFDA 4.7.1 rsl.out local counts. first_guess_attributes are rc/2008020512/wrfinput_d01 global attributes (float32 values).",
   "ob_ascii_sha256": "979988a26f0da056a59e3f243edcf796eed416dda4d69c74107848c0ca7c43ba",
   "iv_dump_sha256": "42a3888814a0f24bc1c9fe4e8b8c189be9fb1bdfe6f90d149151e5e868743f4f",
-  "iv_dump_comment": "woof_iv.bin from the WRFDA 4.7.1 dump build with tools/wrfda_oracle/woof_dump.inc as of bd11ed5a1 (gpsref p, t, q dumped). A dump from an older build lacks gpsref%p and is refused by tests/test_var_obs_wrfda.iv_dump.",
+  "iv_dump_comment": "woof_iv.bin from the WRFDA 4.7.1 dump build with tools/wrfda_oracle/woof_dump.inc as of bd11ed5a1 (gpsref p, t, q dumped). A dump from an older build lacks gpsref%p and is refused by tests/test_var_obs_wrfda.iv_dump. iv_dump_sha256 is the measured file's, for reference only: the dump's unused k/dz/dzm slots are uninitialised, so a rerun writes a different file.",
   "first_guess_attributes": {
    "MAP_PROJ": 1,
    "CEN_LAT": 40.000008,
@@ -253,5 +253,39 @@
   },
   "oracle_cv5_be_dat_sha256": "e381dddb532bdd856e0d023b58a251749900b9893e406da4811f122350867d75",
   "oracle_cv7_be_dat_sha256": "8dc42b75d9a4b01fb39841f17393225f28f5f118a8cd9d041384fa1256016183"
+ },
+ "fgat": {
+  "comment": "V5.1/GV5: WRFDA 4.7.1 FGAT (num_fgat_time=7) on the testdata's 4D-Var observations (ob/20080205HH/obNN.ascii, 12-18Z hourly), tools/wrfda_oracle/run_fgat.sh: first guesses fg01 (the testdata's 12Z wrfinput) and fg02-fg07 (WRF 4.7.1 em_real from it, 13-18Z, write_input); analysis_date 15Z (fg = fg04), window 12Z-18Z, the tutorial namelist otherwise (max_ext_its=1, ntmax=50, orthonorm_gradient, cv_options=5, check_max_iv). pb /mnt/NVME2/woof-work/scratch/wrfda/run/fgat/da (the dump build).",
+  "window": {
+   "analysis_date": "2008-02-05_15:00:00",
+   "time_window_min": "2008-02-05_12:00:00",
+   "time_window_max": "2008-02-05_18:00:00"
+  },
+  "files_sha256": {
+   "fg": "b88f2bc7eed11ad27cc565fc0fd22d7b5424243f13799b2f85e1a70d70a5b983",
+   "fg01": "c635a24b45b3df11dc47e322b0b2f3abcb36fdea87acbfb3548686037bdf6705",
+   "fg02": "48a618c0e4b4e8f6d16377d2419225b68392d82397400ea36c8e303788036067",
+   "fg03": "4d4cc94d2175602acf42388d3f00c4d83016099f2a40f4d89f3ef783a91c5617",
+   "fg04": "b88f2bc7eed11ad27cc565fc0fd22d7b5424243f13799b2f85e1a70d70a5b983",
+   "fg05": "a743df94180bf515ed5d51c7b4fa8ec895fff1a63dd6b938305f2b22fad4ccb5",
+   "fg06": "265e8fceca1a34fc6985b9c7ac8770baa48d7f3d5be64d138bd9fb451954fa8a",
+   "fg07": "7bdeac4bbb9e852aac2269332a6b1019c4f98bdc041649877582e813b64ad70f",
+   "ob01.ascii": "ceb36eea03e7151e970e6ae7ff87ebdae1259f343cb7226ede0a86ec50753159",
+   "ob02.ascii": "e44df1fef3c471f9e3f7865f9d38eb537e365be68b5dbc1af10b3955196d1618",
+   "ob03.ascii": "2a4e199ef4fac74ee045d95a400bff8885b591d4a3cf70ae8d88c0c0a074a967",
+   "ob04.ascii": "c99529ecf6c4114321c14a67b9723de10b4921e8d0822b747d000e11f525cbcf",
+   "ob05.ascii": "13880221f1232060b4ce418244df022dfabfd3e73705d71f64d48f61f4fb1161",
+   "ob06.ascii": "4f8d93f9ffab55b0434ff73bdf7d46e8e1d9fde6ce5998c975d5bfc42529800b",
+   "ob07.ascii": "f2b93b3ec23207b5d57549ee7c97a7d02472c985a261c210035b44a3c611c20c"
+  },
+  "iv_dump_comment": "woof_iv.bin is not pinned (uninitialised k/dz/dzm slots differ run to run); the inputs are.",
+  "xb_dump_sha256": "d668d82f0166d0e0bb1777149b58bf53ab4cc054785c548f563917d1f4419f43",
+  "final_dump_sha256": "483d47556d7420aa4c10b356f4840e2a1ef604e124ca9aba43e68c6b43700700",
+  "j0": "5.724318321438522D+04",
+  "g0": "1.605386422300738D+03",
+  "iterations": 31,
+  "j_final": "3.758752997385805D+04",
+  "g_final": "1.428304476833126D+01",
+  "nobs": 69144
  }
 }

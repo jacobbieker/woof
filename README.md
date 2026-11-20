@@ -1133,6 +1133,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   as WRFDA's `gen_be_ep2` does (to 2.8e-13 K in `t`; the rest word for
   word). Its analysis matches WRFDA's `wrfvar_output` to O7's tolerances:
   max |difference| at most 4.7e-5 of the RMS.
+  FGAT (experimental; `woof var --fgat-obs obNN.ascii --fgat-first-guess fgNN`
+  per time slot) compares each observation with the first guess at its
+  slot's time, as WRFDA's `num_fgat_time` does. On a 7-slot 12-18Z case
+  with first guesses from a WRF 4.7.1 forecast, it takes WRFDA 4.7.1
+  FGAT's 31 iterations to its final cost, and the analysis meets O7's
+  tolerances.
   `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
   `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
   ensemble members minus their mean): WRFDA's gen_be stages for

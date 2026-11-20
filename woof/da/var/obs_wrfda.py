@@ -455,6 +455,9 @@ class WrfdaObs:
     types: dict
     ntotal: dict
     analysis_minutes: float
+    #: FGAT: per type, WRFDA's ``iv%info%plocal(0:num_fgat_time)`` (the
+    #: cumulative report counts at the end of each time slot); None for one slot.
+    plocal: dict | None = None
 
     def __getitem__(self, name: str) -> ObsType:
         return self.types[name]
@@ -569,12 +572,15 @@ _EACH_KEYS = ("p", "speed", "v", "height", "height_qc", "height_error", "t", "td
 
 def read_obs_ascii(path, proj: LambertWRFDA, *, analysis_date: str, time_window_min: str,
                    time_window_max: str, top_km_gpsro: float = 30.0, bot_km_gpsro: float = 0.0,
-                   use: tuple[str, ...] = TYPES) -> WrfdaObs:
+                   use: tuple[str, ...] = TYPES, ntotal0: dict | None = None) -> WrfdaObs:
     """Read OBSPROC's ``obs_gts`` ASCII as WRFDA 4.7.1 does (one FGAT slot).
 
     ``analysis_date`` and the window bounds are WRFDA namelist strings
     (``2008-02-05_12:00:00``...). ``use`` lists the types to keep (WRFDA's
-    ``use_*obs``); the default is every type this port fills.
+    ``use_*obs``); the default is every type this port fills.  ``ntotal0``
+    is the per-type ``ntotal`` the earlier FGAT slots left
+    (``iv%info%ptotal(time-1)``), which numbers ``obs_global_index``
+    (:func:`woof.da.var.fgat.read_obs_ascii_fgat`).
     """
     lines = Path(path).read_text(encoding="latin-1").splitlines()
     pos = 0
@@ -602,7 +608,7 @@ def read_obs_ascii(path, proj: LambertWRFDA, *, analysis_date: str, time_window_
     ite, jte = ide, jde
 
     builders = {name: _Builder(name) for name in TYPES}
-    ntotal = {name: 0 for name in TYPES}
+    ntotal = {name: int((ntotal0 or {}).get(name, 0)) for name in TYPES}
 
     while pos < len(lines):
         rec = _read_record(lines[pos], fmt_info)
