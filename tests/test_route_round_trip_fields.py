@@ -708,3 +708,16 @@ def test_obstacles_are_read_from_the_toml(tmp_path):
                        obstacle_file=str(tmp_path / "bld.nc"))
     assert {"obstacle_opt", "obstacle_file"} <= set(ROUTE_FORECAST_TOML_FIELDS)
     verify_round_trip(exp, paths["wps_namelist"], paths["namelist_input"])
+
+
+def test_urban_param_file_is_read_from_the_toml(tmp_path):
+    """urban_param_file has no WRF namelist spelling (real.exe reads
+    URB_PARAM out of geo_em/met_em), so it is a TOML-read field.  The HRRR
+    pair writes sf_urban_physics = 0, so an urban run is refused on that
+    selector -- never for the gridded-morphology key's silence."""
+    assert "urban_param_file" in set(ROUTE_FORECAST_TOML_FIELDS)
+    with pytest.raises(HrrrRouteInputError) as caught:
+        _emit(tmp_path, "urban-param", sf_urban_physics=1,
+              urban_param_file=str(tmp_path / "geo_em.d01.nc"))
+    assert "sf_urban_physics" in str(caught.value)
+    assert "urban_param_file" not in str(caught.value)

@@ -2383,6 +2383,14 @@ class RunConfig:
     # changes the chemistry.  0 runs no new code.
     spacewx_epp_opt: int = _config_field(default=0, kw_only=True)
     spacewx_epp_source: str = _config_field(default="", kw_only=True)
+    # urban_param_file names a NetCDF on this domain's mass grid holding
+    # WPS's gridded urban morphology URB_PARAM(132) (a geo_em, a met_em or
+    # a woof-buildings.v1 product).  The urban scheme then reads it as WRF
+    # 4.7.1's real.exe and urban_var_init do (woof.core.urban_param): LP,
+    # LB, HGT (91, 95, 94) for every option, MH, STDH, LF (92, 93, 96-99)
+    # for the single-layer UCM's NUDAPT arm, HI (118-132) for BEP and
+    # BEP+BEM.  Empty runs the URBPARM table morphology, as before.
+    urban_param_file: str = _config_field(default="", kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -3215,11 +3223,36 @@ def validate_urban_config(cfg) -> None:
         raise ConfigurationRefused(
             "sf_urban_physics must be 0 (none), 1 (single-layer UCM), 2 (BEP) "
             f"or 3 (BEP+BEM), WRF numbering, got {option}.")
+    morphology = getattr(cfg, "urban_param_file", "")
+    if type(morphology) is not str:
+        raise ConfigurationRefused(
+            f"urban_param_file must be a path string, got {morphology!r}")
     if option == 0:
+        if morphology:
+            raise ConfigurationRefused(
+                "urban_param_file is set but sf_urban_physics = 0: no urban "
+                "scheme would read the gridded morphology; set "
+                "sf_urban_physics = 1, 2 or 3 or drop it")
         return
     generation = getattr(cfg, "urban_ucm_generation", "wrf_471")
     if generation not in ("wrf_471", "wrf_480"):
         raise ValueError("urban_ucm_generation must be wrf_471 or wrf_480")
+    if morphology and option == 1 and generation == "wrf_480":
+        raise ConfigurationRefused(
+            "urban_param_file with urban_ucm_generation = wrf_480: the "
+            "WRF 4.8 canopy column in this build does not carry the NUDAPT "
+            "gridded-morphology arm (MH_URB2D > 0), so the column would run "
+            "on table morphology while the file claims gridded; use "
+            "urban_ucm_generation = wrf_471 (whose arm is transcribed from "
+            "WRF 4.7.1) or drop urban_param_file")
+    if (morphology and option == 1
+            and int(getattr(cfg, "sf_surface_mosaic", 0) or 0)):
+        raise ConfigurationRefused(
+            "urban_param_file with sf_surface_mosaic = 1 and "
+            "sf_urban_physics = 1: the Noah mosaic's urban tile calls the "
+            "canopy column without the gridded morphology, so its tiles "
+            "would run on table morphology while the file claims gridded; "
+            "set sf_surface_mosaic = 0 or drop urban_param_file")
     if generation != "wrf_471" and option != 1:
         raise ValueError("urban_ucm_generation=wrf_480 requires sf_urban_physics=1; the new BEP/BEM generations are not implemented")
     if generation == "wrf_480" and getattr(cfg, "sf_surface_mosaic", 0):
@@ -3242,9 +3275,11 @@ def validate_urban_config(cfg) -> None:
         raise ConfigurationRefused(
             f"num_urban_hi={bins}: the BEP/BEM kernels in this build index "
             f"HI_URB2D with WRF's default {URBAN_HEIGHT_BINS}-bin stride, and "
-            "the gridded morphology (URB_PARAM) that alone could fill another "
-            "bin count is not ingested, so any other count would read past "
-            "the array the kernels were built for.")
+            "the gridded morphology (urban_param_file) fills exactly "
+            f"{URBAN_HEIGHT_BINS} bins, URB_PARAM(118-132), as WRF 4.7.1's "
+            "real.exe does (module_initialize_real.F:3194-3196), so any "
+            "other count would read past the array the kernels were built "
+            "for.")
     lsm = int(cfg.sf_surface_physics)
     if lsm not in URBAN_LAND_SURFACE_SCHEMES:
         raise ConfigurationRefused(
