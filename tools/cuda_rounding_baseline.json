@@ -1278,6 +1278,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "7b881639050546bafbb33e4f13f441ddfacc6af861c8f2d8acd1601ca8381c93",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "a95c2d14b6803d51d02ec61ce9244c8a7664726e5749bac5014a53e9ae98618f",
+    "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "7d42dc427b7c99d85a49126c09f84d67124c6e102409752c7daec561d3487902",
     "constructor": "compile_using_nvrtc",
     "factory": "_direct_module",
@@ -4992,6 +5000,10 @@
     "sha256": "6af8c75ba54fd5ce0ec3589ef3d36a3702224c0be3084484d88ca9be3e2ed048"
    },
    {
+    "file": "woof/hex/mpas_seaice/column_radiation_v842.cu",
+    "sha256": "c37899ab99620f0bd86014ee69baf65b045b1fb67fdaad6303b2918e30ff2a55"
+   },
+   {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.cu",
     "sha256": "448102670c2b4e0ce1038210a10889b8ea1dd54baa4132cb553c6cdfda4087ac"
    },
@@ -5967,7 +5979,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/forward_v842.py",
-    "sha256": "ab18146747e4711f9e76db541d5d46a735b47e27ef951cbc24466af910d7749a"
+    "sha256": "bef73d8ce49347eafc429bc3d97d8152ebb368e8bc042b4fb86afc22078d351b"
    },
    {
     "file": "woof/hex/mpas_ocean/frazil_v842.py",
@@ -6012,6 +6024,10 @@
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.py",
     "sha256": "6b5fc6e5ea475caeb7a1a3c5682253fbf689a668e06abe5d5eeb8f3aca19189e"
+   },
+   {
+    "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
+    "sha256": "d6bef72faaedb0b3b3133ad0ab9134a2b2f91b8c778dcc345ef91386602439e4"
    },
    {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.py",

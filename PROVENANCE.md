@@ -192,11 +192,11 @@ bytes are outside the numerical oracle.
   `-ftz=true` to whatever the caller passed, at
   `cupy.cuda.compiler` line 585 (`options += ('-ftz=true',)`), after the
   caller's options, and NVRTC honours the last occurrence.
-  The inventory records 15 distinct caller-supplied option tuples across the
-  321 compile sites in the shipped package, each listed here with a site
+  The inventory records 16 distinct caller-supplied option tuples across the
+  325 compile sites in the shipped package, each listed here with a site
   that supplies it:
   - no caller options -- `woof/backend/__init__.py:243` (self.xp.RawModule),
-    and 253 other site(s)
+    and 255 other site(s)
   - `--std=c++17` -- `woof/ensemble/batch_perturbation.py:51`
     (xp.RawModule), and 18 other site(s)
   - `-std=c++17` -- `woof/core/acoustic_fusion.py:405` (cp.RawModule), and
@@ -209,6 +209,9 @@ bytes are outside the numerical oracle.
     site(s)
   - `-fmad=false` -- `woof/core/dycore.py:327` (cp.ElementwiseKernel), and 2
     other site(s)
+  - `--fmad=false` a target flag built from the device architecture at run
+    time a target flag built from the device architecture at run time --
+    `woof/grad/wrfplus/advect.py:98` (cp.RawModule), and 1 other site(s)
   - `--std=c++17` `--use_fast_math` -- `woof/hex/waves.py:486`
     (cp.RawModule), and 1 other site(s)
   - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:1315`
@@ -219,7 +222,7 @@ bytes are outside the numerical oracle.
   - `--fmad=false` `-std=c++14` -- `woof/da/letkf_device.py:363`
     (cp.RawModule)
   - `--fmad=false` a target flag built from the device architecture at run
-    time -- `woof/grad/wrfplus/acoustic.py:88` (cp.RawModule)
+    time -- `woof/grad/wrfplus/bigstep.py:42` (cp.RawModule)
   - `--std=c++17` a target flag built from the device architecture at run
     time -- `woof/ocean/waves/model.py:73` (cp.RawModule)
   - `-std=c++17` `--maxrregcount=112` --
