@@ -499,7 +499,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   momentum tendencies. A street-canyon benchmark gives the H/W = 1 vortex,
   and a cube benchmark gives the wake and horseshoe. Off, or with no
   buildings, nothing launches and runs are bit-identical. Momentum only,
-  regional grid only. A real-data check over Manhattan places the model's
+  regional grid only. The hex (MPAS) dycore takes the same option on the
+  WOOF-physics route (`woof hex forecast --obstacle-opt 1`), on the Voronoi
+  edges and w faces: a cube on a test sphere at 15 cells per H reattaches
+  at 1.80 H. A real-data check over Manhattan places the model's
   buildings at their footprint heights (r = 0.99 at 25 m). In lower and
   midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
   50 m does not open the streets. A domain with buildings (or an urban

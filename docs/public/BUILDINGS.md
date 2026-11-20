@@ -294,6 +294,83 @@ runs a surface layer on the ground. Eight cells per H under-resolve the
 horseshoe; Martinuzzi and Tropea's 1.0 H is a channel flow at
 Re_H = 4e4.
 
+### On the hex (MPAS) dycore
+
+`woof hex forecast` takes the same option on the WOOF-physics route:
+
+```bash
+woof hex forecast ... --obstacle-opt 1 --obstacle-file buildings_hex.nc
+```
+
+`--obstacle-solid-fraction`, `--obstacle-relax-factor`,
+`--obstacle-drag-coefficient` and `--obstacle-wall-z0` take the same names
+and defaults as above. The product is a `woof-buildings.v1` file made on the
+mesh's own cells: `aggregate(rasters, VoronoiGrid.from_mesh(mesh))` in
+`woof.static.buildings` gives shape `(1, nCells)`. `woof buildings` makes
+products for WRF grids only, so for now a hex product is made from Python.
+
+The method is the one above, moved onto the C-grid. The Voronoi edges carry
+the normal momentum `rho_u` and the cells' w faces carry `rho_w`. An edge
+is blocked when either of its two cells is solid in that layer, and a w face
+when the layer above or below it is solid. Canopy drag uses the frontal
+area index for flow along the edge normal. Wall stress counts each cell's
+solid neighbours, weighted by wall length over cell area and by the angle
+between wall and flow. Each RK stage of each dynamics substep subtracts
+`k / (1 + k dt)` times the stage's momentum after its other slow
+tendencies, with dt the substep, and the acoustic steps carry it as held
+forcing. Two kernels (`woof/hex/obstacles.py`, CUDA and Metal) work on
+sparse lists of the edges and w faces that touch an obstacle. Off, the
+module is never imported and nothing launches; with `--obstacle-opt 1` and an
+empty product, no obstacle kernel launches and the state stays unchanged. Either
+way the run steps to the same bits as before (checked in child processes in fast,
+strict and wrf_exact numerics, on CUDA and Metal).
+
+Refused, by name: any obstacle flag without `--obstacle-opt 1`; opt 1
+without a file or with a missing file; a product that is not `(1, nCells)`;
+obstacle cells with spacing over 500 m; the MPAS suite route; the
+partitioned executor; local time stepping and partial nests (the obstacles
+would never be applied); the RRFS fork dycore and the pre-v8.4.1 step loop.
+A regional mesh keeps buildings out of its boundary rings.
+
+**Benchmarks** (`woof.verify.cases.hex_obstacles`). There is no planar
+periodic hex mesh, so the cases run on a small icosahedral sphere whose
+equator is 12 H long (H = 20 m). The flow is a solid-body rotation held at
+5 m/s above 2 H by a body force, with the planet's rotation set so that it
+needs no pressure gradient. The dry v8.4.1 dycore runs with 2-D Smagorinsky
+plus an explicit vertical Smagorinsky term, and the ground gets the walls'
+log law.
+
+| case | measure | CUDA (A6000) | Metal (Mac) | reference |
+|---|---|---|---|---|
+| cube, 1.3 m cells (15 per H) | reattachment / H | 1.80 | | about 1.6 to 1.7; WRF route 1.70 |
+| | horseshoe separation / H | 0.36 | | WRF route 0.5 |
+| | wind inside the cube / U(2H) | 0.002 | | 0 |
+| cube, 2.7 m cells (7.5 per H) | reattachment / H | 2.12 | 2.18 | |
+| | horseshoe separation / H | 0.05 | 0.05 | |
+| | wind inside the cube / U(2H) | 0.003 | 0.003 | 0 |
+| cube, variable mesh (2.1 m at the cube, coarser away) | reattachment / H, separation / H | 1.79, 0.33 | | |
+| canyon H/W = 1, 2.7 m cells | recirculation cells up the canyon | 1 | 1 | 1 |
+| | vortex centre x/W, z/H | 0.45, 0.81 | 0.25, 0.94 | about 0.5 and 0.5 to 0.6 |
+| | floor wind / U(2H), roof wind / U(2H) | -0.03, +0.02 | -0.05, +0.01 | WRF route -0.09, +0.20 |
+| canyon H/W = 1, 1.3 m cells | recirculation cells, vortex centre x/W, z/H | 1; 0.35, 0.81 | | |
+| | floor wind / U(2H), roof wind / U(2H) | -0.04, +0.06 | | |
+
+The canyon vortex is weak. It strengthens with resolution, but at 1.3 m
+the street still sees under half of the WRF route's floor wind and under a
+third of its roof wind. The canyon bars run almost pole to pole
+(|lat| < 88°). Bars that stop at 60° leave the street open at both ends,
+and the street fills with a uniform back-flow of -0.2 U(2H) and no vortex,
+at both 2.7 m and 1.3 m. Metal ran the 2.7 m cases only. CUDA and Metal agree on the cube to within
+the spread of a turbulent wake (reattachment 2.12 and 2.18 H), not to the
+bit; both canyons form one vortex, but its centre is placed differently.
+With obstacles off, each reproduces its earlier runs bit for bit.
+
+The test sphere (`graded_sphere_mesh` in the hex tests) ships zero
+`weightsOnEdge` and unoriented `verticesOnEdge`, which removes the
+vorticity flux, Coriolis and tangential wind. The case fills in Thuburn
+weights and orients each edge as MPAS does. With both in place a balanced
+solid body holds to 0.01 m/s.
+
 ## Terrain under buildings
 
 Resolved buildings (and an urban canopy under LES) sit on top of the
