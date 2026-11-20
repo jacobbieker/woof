@@ -589,6 +589,54 @@ Each step is one small PR, taken to merged before the next widens.
      not.
    - Order agreed on 2026-11-20: the window driver next, then map
      factors, then specified boundaries.
+
+   **8c, the window driver (done; `woof/grad/wrfplus/window.py`).** The
+   interface 4D-Var plans against:
+
+   ```python
+   w = Window(state, cfg, nsteps, dtype=np.float64, checkpoint_every=1)
+   xN = w.forward(x0=None)                 # base; keeps the checkpoints
+   dx = w.tl(dx0, save_at=(k1, k2, ...))   # {k: dx_k}, always with nsteps
+   ax0 = w.ad(ax_final=None, forcing={k: ax_obs_k})
+   ```
+
+   - States in and out are dicts over `model.STEP_INPUTS` (the
+     prognostics and the previous step's diagnosis). State k is the
+     state after k steps. `forcing[k]` is added to the adjoint of state k
+     before the sweep goes on backwards, which is where a 4D-Var
+     observation term at that time enters.
+   - The window refuses whatever `step_geometry` refuses, and names it.
+     Today that includes map factors and specified boundaries, so a
+     regional WRFDA case is refused until both are in.
+   - Checkpoints hold a state's STEP_INPUTS only. A step reads nothing
+     else its predecessor wrote: it writes its scratch before reading
+     it. A test pins this. With every other written array poisoned with
+     NaN, one step's outputs and its adjoint's equal the clean run's, bit
+     for bit. Every step therefore runs in one work dict.
+   - The adjoint reruns each segment of `checkpoint_every` steps from its
+     checkpoint (base-only build) to recover the step-start states. It
+     then tapes each step and sweeps it in reverse. Memory is one
+     checkpoint per segment, one segment's step-start states, the work
+     dict and one step's tape.
+   - Tests (`tests/test_grad_wrfplus_window.py`, host and CUDA):
+     - the binary32 forward is N `dycore.step` calls word for word (warm
+       start, cold start, rotation; checkpoints every 1 or 3);
+     - sum over k of <TL dx_k, f_k> equals <dx_0, AD(f)> with forcing at
+       states 0, 1, 3 and N (1e-16 in binary64);
+     - the adjoint is bit for bit the same for every checkpoint interval.
+   - Cost (A6000, 200x200x49, 6 steps, per step over `dycore.step`):
+
+     | checkpoint_every | forward | adjoint | binary64 adjoint |
+     |---|---|---|---|
+     | 1 | 1.30x | 5.14x | 19.0x |
+     | 3 | 1.31x | 6.00x | 24.7x |
+     | 6 | 1.31x | 6.22x | 26.6x |
+
+     The forward is the base-only step plus the checkpoint copies. At
+     `checkpoint_every = 1` the adjoint is the single-step adjoint (4.8x)
+     plus the checkpoint loads. Longer intervals trade memory for one
+     more base-only rerun per step. Measured with another job on the
+     host CPUs (load 29), which inflates host dispatch.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
