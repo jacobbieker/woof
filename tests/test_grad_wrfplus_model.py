@@ -182,6 +182,39 @@ for dtn in {dtypes!r}:
         assert rel < limit, (key, rel)
 
 
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_base_only_step_is_the_joint_base(backend, tmp_path):
+    """step_base (the base-only kernel build) advances the base to the
+    joint TL build's words and tapes the same snapshots, so an adjoint
+    over its tape is the adjoint over the TL's: binary64 and binary32,
+    one step per variant and the chains of three."""
+    dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
+    cases = [(v, 1, 2) for v in VARIANTS] + CHAINS
+    out = _run(backend, f'''
+for dtn in {dtypes!r}:
+    for i, (over, nstep, warm) in enumerate({cases!r}):
+        cfg, state = build(over, warm)
+        geoms = M.step_geometries(state, cfg, nstep)
+        x0 = M.run_state(state, cfg, np.dtype(dtn))
+        ta, tb = [[] for _ in geoms], [[] for _ in geoms]
+        xa, _ = run_tl(x0, pert(x0, 40 + i), geoms, ta)
+        xb, scr = copy(x0), None
+        for g, tape in zip(geoms, tb):
+            scr = M.step_base(xb, g, tape, scr)
+        words = lambda a: cp.asnumpy(a).view(np.uint64 if dtn == "float64" else np.uint32)
+        bad = sum(int((words(xa[n]) != words(xb[n])).sum()) for n in xa)
+        for sa, sb in zip(ta, tb):
+            assert len(sa) == len(sb)
+            for da, db in zip(sa, sb):
+                assert sorted(da) == sorted(db)
+                bad += sum(int((words(da[n]) != words(db[n])).sum()) for n in da)
+        out[f"{{dtn}}/{{i}}"] = bad
+''', tmp_path)
+    assert len(out) == len(cases) * (1 if backend == "mlx" else 2)
+    bad = {k: v for k, v in out.items() if v}
+    assert not bad, bad
+
+
 @pytest.mark.parametrize("backend", NO_MLX)
 def test_step_tl_matches_finite_differences(backend, tmp_path):
     """||NL(x + a dx) - NL(x)|| / ||a TL dx|| -> 1 in binary64, for one step

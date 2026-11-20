@@ -543,6 +543,29 @@ Each step is one small PR, taken to merged before the next widens.
      Metal cost, rotation, map factors and specified boundaries in the
      step, the window driver with checkpoints and the 12 km TL growth
      test are 8b and later.
+
+   **8b, the base-only recompute (done).** Each kernel unit compiles a
+   second build with `-DWRFPLUS_TL=0`, in which every perturbation store
+   of the TL kernels is skipped (`if (WRFPLUS_TL)`), so the compiler
+   drops the tangent arithmetic and loads. `model.step_base` runs the
+   step through that build (`_mode.base_only()` picks it per thread), and
+   skips the step's own perturbation copies. It advances the base to the
+   joint build's words and tapes the same snapshots, bit for bit, in
+   binary64 and binary32, for every variant and both chains (host and
+   CUDA). The default build's compile options are unchanged.
+
+   Measured as above (A6000, 200x200x49, idle card, two runs):
+
+   | | binary32 | binary64 |
+   |---|---|---|
+   | base-only step | 1.16-1.18x | 6.1-6.2x |
+   | base-only step with tape | 1.50-1.53x | 6.7-6.9x |
+   | adjoint sweep | 3.27-3.30x | 9.8-10.0x |
+   | **full adjoint step (base recompute + sweep)** | **4.76-4.82x** | 16.5-16.9x |
+
+   The binary32 adjoint step is under the 5x limit, with about 0.2x of
+   margin. The snapshots (0.35x) are the next thing to cut if a later
+   item adds cost.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
@@ -757,6 +780,6 @@ projected share with a measured one.
 adjoint sweep runs at 3.3x `dycore.step` in binary32, under the 3.64 the
 kernels project for it. The recompute is the gap: through the joint TL
 kernels with snapshots it costs 2.3x, not the 1x assumed above, so the
-full adjoint step measures 5.6x. That is over the 5x limit. Item 8
-section 5 lists the two ways back under it (a base-only taped forward at
-about 4.7x, or a stored trajectory at about 3.3x per inner iteration).
+full adjoint step measures 5.6x. That is over the 5x limit. Item 8b's
+base-only taped forward (1.5x) brings it to **4.76-4.82x**, under the
+limit. A stored trajectory would cost about 3.3x per inner iteration.

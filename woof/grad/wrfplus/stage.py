@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ._mode import tl_options
 from .acoustic import AD_KCHUNK, THREADS, _blocks, _check, _dtype, _real
 
 KERNELS = Path(__file__).resolve().parent / "kernels"
@@ -23,7 +24,7 @@ LIBM = Path(__file__).resolve().parents[2] / "core" / "kernels" / "glibc_flt32.c
 
 
 @lru_cache(maxsize=None)
-def _device_module(real: str, device: int):
+def _device_module(real: str, device: int, build: tuple = ()):
     import cupy as cp
     source = (KERNELS / "rk_stage.cu").read_text(encoding="utf-8")
     if real == "float":
@@ -33,12 +34,12 @@ def _device_module(real: str, device: int):
         source = (LIBM.read_text(encoding="utf-8")
                   + "\n#define WRFPLUS_FLOAT_LIBM 1\n" + source)
     return cp.RawModule(code=source, options=(
-        "--fmad=false", f"-DWRFPLUS_REAL={real}", f"-DRK_KCHUNK={AD_KCHUNK}"))
+        "--fmad=false", f"-DWRFPLUS_REAL={real}", f"-DRK_KCHUNK={AD_KCHUNK}") + build)
 
 
 def _kernel(name: str, dtype):
     import cupy as cp
-    return _device_module(_real(dtype), cp.cuda.Device().id).get_function(name)
+    return _device_module(_real(dtype), cp.cuda.Device().id, tl_options()).get_function(name)
 
 
 def _named(label, names, d):

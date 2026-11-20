@@ -35,6 +35,13 @@
 #ifndef WRFPLUS_REAL
 #define WRFPLUS_REAL double
 #endif
+
+// WRFPLUS_TL 0 builds the base-only forward (model.step_base): every
+// perturbation store of the TL kernels is skipped, so the compiler drops
+// the tangent arithmetic and loads; the base words are unchanged.
+#ifndef WRFPLUS_TL
+#define WRFPLUS_TL 1
+#endif
 typedef WRFPLUS_REAL wreal;
 
 #ifndef WV_LEV
@@ -91,14 +98,14 @@ void advance_mu_t_tl(MT_STATE(), MT_STATE(_d), MT_TRAJ(), MT_TRAJ(_d),
     int j = c / nx, i = c - j * nx;
     size_t st = (size_t)ny * nx;
     if (nl) mu_old[c] = mu_pp[c];
-    mu_old_d[c] = mu_pp_d[c];
+    if (WRFPLUS_TL) mu_old_d[c] = mu_pp_d[c];
     for (int k = 0; k < nz; ++k) {
         size_t h = (size_t)k * st + c;
         if (nl) { th_old[h] = th_pp[h]; p_old[h] = p_pp[h]; }
-        th_old_d[h] = th_pp_d[h]; p_old_d[h] = p_pp_d[h];
+        if (WRFPLUS_TL) { th_old_d[h] = th_pp_d[h]; p_old_d[h] = p_pp_d[h]; }
     }
     if (mt_frame(j, i, ny, nx, spec_zone)) {
-        if (write_mudf) { if (nl) mudf[c] = (wreal)0.0; mudf_d[c] = 0; }
+        if (write_mudf) { if (nl) mudf[c] = (wreal)0.0; if (WRFPLUS_TL) mudf_d[c] = 0; }
         return;
     }
     int ip = open_x ? min(i + 1, nx - 1) : (i + 1) % nx;
@@ -144,10 +151,10 @@ void advance_mu_t_tl(MT_STATE(), MT_STATE(_d), MT_TRAJ(), MT_TRAJ(_d),
         dmdt_d = dmdt_d + dnw[k] * dvd[k];
     }
     if (nl) mu_pp[c] = mu_pp[c] + dtau * (dmdt + rmu_t[c]);
-    mu_pp_d[c] = mu_pp_d[c] + dtau * (dmdt_d + rmu_t_d[c]);
+    if (WRFPLUS_TL) mu_pp_d[c] = mu_pp_d[c] + dtau * (dmdt_d + rmu_t_d[c]);
     if (write_mudf) {
         if (nl) mudf[c] = dmdt + rmu_t[c];
-        mudf_d[c] = dmdt_d + rmu_t_d[c];
+        if (WRFPLUS_TL) mudf_d[c] = dmdt_d + rmu_t_d[c];
     }
     wreal wl[WV_LEV], wd[WV_LEV];
     wreal total_ww = 0, total_d = 0;
@@ -163,7 +170,7 @@ void advance_mu_t_tl(MT_STATE(), MT_STATE(_d), MT_TRAJ(), MT_TRAJ(_d),
     wl[nz] = (wreal)0.0; wd[nz] = 0;
     for (int kk = 0; kk <= nz; ++kk) {
         if (nl) ww_pp[(size_t)kk * st + c] = wl[kk];
-        ww_pp_d[(size_t)kk * st + c] = wd[kk];
+        if (WRFPLUS_TL) ww_pp_d[(size_t)kk * st + c] = wd[kk];
     }
     wreal wdtn = 0, wdtn_d = 0;
     for (int k = 0; k < nz; ++k) {
@@ -194,7 +201,7 @@ void advance_mu_t_tl(MT_STATE(), MT_STATE(_d), MT_TRAJ(), MT_TRAJ(_d),
             wreal t = th_pp[h] + mc * dtau * rth_t[h];
             th_pp[h] = t - dtau * mc * (mc * (hy + hx) + rdnw[k] * (wdtn_up - wdtn));
         }
-        th_pp_d[h] = th_pp_d[h] + mc * dtau * rth_t_d[h]
+        if (WRFPLUS_TL) th_pp_d[h] = th_pp_d[h] + mc * dtau * rth_t_d[h]
                    - dtau * mc * (mc * (hy_d + hx_d) + rdnw[k] * (wdtn_up_d - wdtn_d));
         wdtn = wdtn_up; wdtn_d = wdtn_up_d;
     }
@@ -443,20 +450,20 @@ void frame_mu_t_tl(wreal* __restrict__ mu_pp, wreal* __restrict__ th_pp,
     int j = c / nx, i = c - j * nx;
     if (!mt_spec_frame(j, i, ny, nx, spec_zone, open_x)) {
         if (nl) muts[c] = (mub2d[c] + mup[c]) + mu_pp[c];
-        muts_d[c] = mup_d[c] + mu_pp_d[c];
+        if (WRFPLUS_TL) muts_d[c] = mup_d[c] + mu_pp_d[c];
         return;
     }
     if (nl) {
         muts[c] = muts[c] + dtau * rmu_t[c];
         mu_pp[c] = mu_pp[c] + dtau * rmu_t[c];
     }
-    muts_d[c] = muts_d[c] + dtau * rmu_t_d[c];
-    mu_pp_d[c] = mu_pp_d[c] + dtau * rmu_t_d[c];
+    if (WRFPLUS_TL) muts_d[c] = muts_d[c] + dtau * rmu_t_d[c];
+    if (WRFPLUS_TL) mu_pp_d[c] = mu_pp_d[c] + dtau * rmu_t_d[c];
     size_t st = (size_t)ny * nx;
     for (int k = 0; k < nz; ++k) {
         size_t h = (size_t)k * st + c;
         if (nl) th_pp[h] = th_pp[h] + dtau * rth_t[h];
-        th_pp_d[h] = th_pp_d[h] + dtau * rth_t_d[h];
+        if (WRFPLUS_TL) th_pp_d[h] = th_pp_d[h] + dtau * rth_t_d[h];
     }
 }
 

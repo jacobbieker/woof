@@ -20,6 +20,13 @@
 #ifndef WRFPLUS_REAL
 #define WRFPLUS_REAL double
 #endif
+
+// WRFPLUS_TL 0 builds the base-only forward (model.step_base): every
+// perturbation store of the TL kernels is skipped, so the compiler drops
+// the tangent arithmetic and loads; the base words are unchanged.
+#ifndef WRFPLUS_TL
+#define WRFPLUS_TL 1
+#endif
 typedef WRFPLUS_REAL wreal;
 
 #define W3(k, j, i, ny, nxs) ((size_t)(k) * (ny) * (nxs) + (size_t)(j) * (nxs) + (i))
@@ -254,10 +261,10 @@ void advance_uv_tl(wreal* __restrict__ u_pp, wreal* __restrict__ v_pp,
                 u = u + c1h[k] * gx;
                 ud = ud + c1h[k] * gx_d;
             }
-            u_d[uix] = ud;
+            if (WRFPLUS_TL) u_d[uix] = ud;
             if (nl) u_pp[uix] = u;
         } else {
-            u_d[uix] = u_d[uix] + dtau * ru_d[uix];
+            if (WRFPLUS_TL) u_d[uix] = u_d[uix] + dtau * ru_d[uix];
             if (nl) u_pp[uix] = u_pp[uix] + dtau * ru_t[uix];
         }
     }
@@ -288,10 +295,10 @@ void advance_uv_tl(wreal* __restrict__ u_pp, wreal* __restrict__ v_pp,
                 v = v + c1h[k] * gy;
                 vd = vd + c1h[k] * gy_d;
             }
-            v_d[vix] = vd;
+            if (WRFPLUS_TL) v_d[vix] = vd;
             if (nl) v_pp[vix] = v;
         } else {
-            v_d[vix] = v_d[vix] + dtau * rv_d[vix];
+            if (WRFPLUS_TL) v_d[vix] = v_d[vix] + dtau * rv_d[vix];
             if (nl) v_pp[vix] = v_pp[vix] + dtau * rv_t[vix];
         }
     }

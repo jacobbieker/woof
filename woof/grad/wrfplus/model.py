@@ -328,6 +328,28 @@ def step_tl(x: dict, dx: dict, geom: StepGeometry, tape: list | None = None,
     name of ``x`` (zeros where unperturbed).  With a ``tape`` each
     operator's written arrays are appended before it runs.  ``observe``
     (a debugging aid) is called with a label and ``x`` after each part."""
+    _step(x, dx, geom, tape, observe, tl=True)
+
+
+def step_base(x: dict, geom: StepGeometry, tape: list | None = None,
+              scratch: dict | None = None) -> dict:
+    """The base state of :func:`step_tl` alone, through the base-only
+    kernel build (no tangent arithmetic, loads or stores): ``x`` advances
+    to the same words, and ``tape`` gets the same snapshots, so this is
+    the recompute an adjoint step takes.  ``scratch`` (any dict of arrays
+    shaped as ``x``'s, never read or written by the kernels) stands in
+    for the perturbation arguments; one is allocated when not given, and
+    returned for reuse."""
+    import cupy as cp
+    from ._mode import base_only
+    if scratch is None:
+        scratch = {n: cp.empty_like(v) for n, v in x.items()}
+    with base_only():
+        _step(x, scratch, geom, tape, None, tl=False)
+    return scratch
+
+
+def _step(x, dx, geom, tape, observe, *, tl):
     import cupy as cp
     seen = observe or (lambda label, d: None)
 
@@ -339,18 +361,20 @@ def step_tl(x: dict, dx: dict, geom: StepGeometry, tape: list | None = None,
         snap(dst)
         for d, s in zip(dst, src):
             x[d][...] = x[s]
-            dx[d][...] = dx[s]
+            if tl:
+                dx[d][...] = dx[s]
 
     copy_names(tuple(n + "0" for n in PROGNOSTICS), PROGNOSTICS)   # _save_time_t
     for spec in geom.stages:
         snap(TENDENCIES)                                          # zero_tendencies
         for n in TENDENCIES:
             x[n][...] = 0
-            dx[n][...] = 0
-        for name, tl, _ad, alias, g, state_names in _op_table(spec):
+            if tl:
+                dx[n][...] = 0
+        for name, op_tl, _ad, alias, g, state_names in _op_table(spec):
             snap(_written(alias, state_names))
             s, p = _view(x, alias), _view(dx, alias)
-            tl(s, p, s, p, g, nl=True)
+            op_tl(s, p, s, p, g, nl=True)
             seen(name, x)
         snap(SI_STATE)
         small_step_init_tl(x, dx, x, dx, spec.ss, nl=True)
@@ -358,7 +382,8 @@ def step_tl(x: dict, dx: dict, geom: StepGeometry, tape: list | None = None,
         snap(("muts",))
         src = "mup" if spec.rk_step == 1 else "mup0"
         cp.add(x["mub2d"], x[src], out=x["muts"])
-        dx["muts"][...] = dx[src]
+        if tl:
+            dx["muts"][...] = dx[src]
         snap(CW_STATE)
         calc_coef_w_tl(x, dx, x, dx, spec.cw, nl=True)
         seen("cw", x)
@@ -368,7 +393,8 @@ def step_tl(x: dict, dx: dict, geom: StepGeometry, tape: list | None = None,
             seen("substep", x)
         snap(("muts",))
         cp.add(cp.add(x["mub2d"], x["mup"]), x["mu_pp"], out=x["muts"])
-        cp.add(dx["mup"], dx["mu_pp"], out=dx["muts"])
+        if tl:
+            cp.add(dx["mup"], dx["mu_pp"], out=dx["muts"])
         snap(SF_STATE)
         small_step_finish_tl(x, dx, x, dx, spec.ss, nl=True)
         seen("sf", x)
@@ -378,7 +404,7 @@ def step_tl(x: dict, dx: dict, geom: StepGeometry, tape: list | None = None,
     snap(("w",))
     set_w_surface_tl(x, dx, x, dx, geom.sw, nl=True)
     snap(("u", "v"))                                              # close_periodic_alias
-    for d in (x, dx):
+    for d in ((x, dx) if tl else (x,)):
         d["u"][..., -1] = d["u"][..., 0]
         d["v"][..., -1, :] = d["v"][..., 0, :]
 
