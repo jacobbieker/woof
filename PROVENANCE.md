@@ -1803,10 +1803,18 @@ PNG it writes carries an `experimental` stamp.
   `da_llxy_lc`, `da_map_set`/`da_set_lc`/`da_lc_cone`, `da_togrid`,
   `da_get_julian_time`, `da_tp_to_qs`, `da_get_q_error`, `f_qv_from_rh`,
   `da_msl2geo1`, the transfer part of `da_fill_obs_structures`,
-  `da_store_obs_grid_info`), and `tools/wrfda_oracle/woof_dump.inc` (debug
+  `da_store_obs_grid_info`), `woof/da/var/innov_wrfda.py`
+  (`da_get_innov_vector_{synop,metar,ships,buoy,sonde_sfc,sound,airep,pilot,profiler,geoamv,polaramv,qscat}`,
+  `da_to_zk`, `da_convert_zk`, `da_interp_lin_3d`, `da_interp_lin_2d`,
+  `da_obs_sfc_correction`, `da_mo_correction`, `da_intpsfc_prs`,
+  `da_intpsfc_tem`, `da_check_max_iv_*`, `da_max_error_qc`,
+  `da_residual`, `da_jo_and_grady_*`, `da_jo_*_uvtq`, `da_jo_and_grady`'s
+  sum), `woof/da/var/obsop_wrfda.py` (`da_transform_xtoy_*` and `_adj` for
+  those types, `da_interp_lin_3d_adj`, `da_interp_lin_2d_adj`,
+  `da_transform_xtoy_adj`'s type order), and `tools/wrfda_oracle/woof_dump.inc` (debug
   dumps hooked into a copy of the WRFDA tree, never the pinned tree).
   `woof/da/var/crmath.py` is woof's own: correctly rounded `sin`, `cos`,
-  `tan`, `exp`, `log10` and `pow`, evaluated in Python's `decimal`, with no
+  `tan`, `exp`, `log`, `log10` and `pow`, evaluated in Python's `decimal`, with no
   libm code in it.
 - **Not used**: the CRTM 2.3.0 copy bundled in WRF (it carries GPL-headed
   files) is never compiled, linked or vendored by woof.

@@ -944,7 +944,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   time window, domain check, wind rotation, `q` from `rh`, and the
   per-type error rules. On the tutorial case it keeps the same
   8,913 of the file's 9,061 reports as WRFDA, in the same order, with the
-  same grid indices and errors. There is no analysis command yet, and default runs are not
+  same grid indices and errors. It computes WRFDA's innovations, background
+  check and `Jo` for the surface, sounding, aircraft, wind-profile, AMV and
+  scatterometer types, with the same accepted observations as WRFDA, and
+  their linearised operators and adjoints. There is no analysis command yet, and default runs are not
   changed.
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
