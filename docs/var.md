@@ -117,6 +117,14 @@ The reference is a serial GNU WRFDA 4.7.1 on the WRFDA tutorial case:
     words.
   - The bundle's `analysis.nc` carries those words, and the
     `woof run --analysis` door accepts the bundle.
+- **A forecast from the analysis** (`tests/test_var_forecast.py`). A 6 h woof forecast
+  (the tutorial's physics, direct insertion) from the reference-tier analysis and one from WRFDA's
+  `wrfvar_output` give byte-identical `wrfout` files at every history time (also at 12 h on Metal). WRFDA's
+  analysis enters as the first guess with its eight updated fields replaced, because `wrfvar_output`'s `TITLE`
+  is not the audited pre-hybrid writer's and the bundle writer refuses its `HYBRID_OPT = -1`.
+  The binary32 production tier differs at float32 noise at the start and the difference grows with the
+  tutorial's convection: 3% of the no-assimilation difference at 6 h and 13-30% at 12 h. The forecast is
+  deterministic, so that is the model's sensitivity.
 - **Known residual in the background.** `wrftoxb` from the first guess
   is not WRFDA's `xb` word for word. Most fields are exact, but some differ
   by a few ulps, at most 9e-14 relative:
