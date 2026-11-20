@@ -57,11 +57,13 @@ STRICT = dict(GPUWM_WRF_EXACT="1", WOOF_WRF_EXACT_DIAGNOSTICS="1",
 # The harness case and the step's option branches: hybrid coordinate,
 # the w_damp limiter, hypsometric_opt 2 without a lid, other orders, and
 # more substeps (nsub 3 and 6 against the default 2 and 4) with another
-# divergence damping, and rotation (Coriolis and curvature).
+# divergence damping, rotation (Coriolis and curvature), and map factors
+# (with curvature from them, as a Lambert or Mercator grid has).
 VARIANTS = [dict(), dict(hybrid_opt=2), dict(w_damping=1),
             dict(hypsometric_opt=2, top_lid=False),
             dict(h_mom_adv_order=3, h_sca_adv_order=4, v_mom_adv_order=5),
-            dict(time_step_sound=6, smdiv=0.2), dict(_rot=1)]
+            dict(time_step_sound=6, smdiv=0.2), dict(_rot=1), dict(_msf=1),
+            dict(_msf=1, _rot=1, hybrid_opt=2, w_damping=1)]
 # Chains of three steps: from a warm state (the previous step's diagnosis
 # reused on rk_step 1) and from a cold one (diagnosed on the first step
 # only), each followed by warm steps.
@@ -86,6 +88,7 @@ def _run(backend, body, tmp_path):
         "def build(over, warm=2, nx=16, ny=12, nz=10, seed=1, hill=400.0):\n"
         "    o = dict(h_sca_adv_order=5, terrain_opt=1); o.update(over)\n"
         "    rot = o.pop('_rot', 0)\n"
+        "    msf = o.pop('_msf', 0)\n"
         "    cfg = H.make_config(nx, ny, nz, **o)\n"
         "    jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')\n"
         "    ridge = hill * np.exp(-(((ii - nx / 2) / (nx / 5)) ** 2\n"
@@ -95,6 +98,13 @@ def _run(backend, body, tmp_path):
         "        ang = 0.3 + 0.01 * ii\n"
         "        geo = dataclasses.replace(geo, f=1e-4 + 1e-6 * jj, e=np.full((ny, nx), 5e-5),\n"
         "                                  sina=np.sin(ang), cosa=np.cos(ang))\n"
+        "    if msf:  # smooth periodic map factors, a few percent from 1\n"
+        "        def m(j, i):\n"
+        "            return (1.0 + 0.03 * np.cos(2 * np.pi * j / ny)\n"
+        "                    + 0.01 * np.sin(2 * np.pi * i / nx))\n"
+        "        jf, iu = np.meshgrid(np.arange(ny), np.arange(nx + 1) - 0.5, indexing='ij')\n"
+        "        jv, iv = np.meshgrid(np.arange(ny + 1) - 0.5, np.arange(nx), indexing='ij')\n"
+        "        geo = dataclasses.replace(geo, msft=m(jj, ii), msfu=m(jf, iu), msfv=m(jv, iv))\n"
         "    state = H.make_state(cfg, seed, geography=geo)\n"
         "    for _ in range(warm):\n"
         "        D.step(state, cfg)\n"
@@ -122,6 +132,9 @@ def _run(backend, body, tmp_path):
         "        a[n][...] = v\n"
         "    for k in reversed(range(len(geoms))):\n"
         "        x = M.step_ad(a, x, tapes[k], geoms[k])\n"
+        "    # the map factors are passive: no adjoint lands on them\n"
+        "    for n in ('msft', 'msfu', 'msfv', 'msfv_inv'):\n"
+        "        assert not bool(cp.any(a[n] != 0)), n\n"
         "    return [a[n] for n in IN]\n"
         "# the identity taken out of the prognostics only: the diagnosis\n"
         "# inputs are dead when rk_step 1 reuses them, and an identity there\n"
@@ -249,9 +262,9 @@ for i, (over, nstep, warm) in enumerate({cases!r}):
 
 @pytest.mark.parametrize("backend", NO_MLX[:1])
 def test_step_refuses_what_it_does_not_cover(backend, tmp_path):
-    """A flat base (1-D columns), open boundaries, map factors,
-    physics or an odd time_step_sound raise rather than return a step that
-    is not the strict primal's."""
+    """A flat base (1-D columns), open boundaries, physics or an odd
+    time_step_sound raise rather than return a step that is not the
+    strict primal's; rotation and map factors are accepted."""
     out = _run(backend, '''
 cases = {"flat": dict(terrain_opt=0), "open": dict(open_x=True, terrain_opt=1),
          "earth": dict(terrain_opt=1), "pbl": dict(terrain_opt=1, bl_pbl_physics=1),
@@ -266,16 +279,17 @@ for key, over in cases.items():
     try:
         st = H.make_state(cfg, 1, geography=geo)
         g = M.step_geometry(st, cfg)
-        out[key] = f"accepted rotational={st.rotational} cc={g.stages[0].cc is not None}"
+        out[key] = (f"accepted rotational={st.rotational} cc={g.stages[0].cc is not None}"
+                    f" msf={g.stages[0].first[2].has_msf}")
     except NotImplementedError as e:
         out[key] = str(e)
 ''', tmp_path)
     assert "1-D base" in out["flat"], out
     assert "lateral boundaries" in out["open"], out
-    assert "map factors" in out["earth"], out
+    assert out["earth"] == "accepted rotational=True cc=True msf=1", out
     assert "physics" in out["pbl"], out
     assert "odd time_step_sound" in out["odd"], out
-    assert out["rot"] == "accepted rotational=True cc=True", out
+    assert out["rot"] == "accepted rotational=True cc=True msf=0", out
 
 
 def test_forecast_path_does_not_import_the_step_adjoint():

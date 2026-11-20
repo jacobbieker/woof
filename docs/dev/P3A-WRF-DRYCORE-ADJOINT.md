@@ -577,10 +577,8 @@ Each step is one small PR, taken to merged before the next widens.
    **What is still refused, and why.** WRFDA's real 4D-Var cases are
    regional, with map factors and specified boundaries, so both are
    needed before its tutorial case can serve as the oracle.
-   - Map factors: with has_msf the strict path runs `advance_w_phi_msf`.
-     Its TL/AD is now ported (item 8d below), but the step does not yet
-     bind it or the other operators' map-factor arguments, so the step
-     still refuses map factors.
+   - Map factors: bound in the step since item 8e (below); no longer
+     refused.
    - Specified boundaries: the step must also take the relaxation folded
      into the held tendencies (`fold_lateral_relaxation` into
      rk_addtend_dry), the per-stage `state_relaxation_multi` rows on the
@@ -663,9 +661,23 @@ Each step is one small PR, taken to merged before the next widens.
      bit for bit. On the mapped cases woof's TL/AD agrees with
      g_/a_advance_w to 4e-16. With the factors dropped the misfit is
      4e-3, so the cases do test the factors.
-   - Next: bind map factors in the step (advance_w, advance_mu_t,
-     advance_uv, small_step, rk_stage and the advection carry has_msf
-     already), and add a mapped step variant.
+8e. Map factors in the step: `step_geometry` sets has_msf (or `mapped`)
+   on every operator that takes it when `state.has_msf`, and the step
+   passes msfv as each strict launcher does. rk_step_prep's v coupling,
+   small_step_init, advance_uv and advance_mu_th take MSFV_INV
+   (`DomainState.msfv_inv`). small_step_finish, the advection,
+   slow_geopotential, coriolis_curvature and set_w_surface take msfv.
+   slow_pgf has no map factor, which is right for isotropic factors (WRF's
+   msfux/msfuy is 1).
+   - Tests: two mapped variants join the step's words, dot-product,
+     base-only and FD tests: smooth periodic factors, a few percent from
+     1, alone and with rotation, the hybrid coordinate and w_damp. The
+     window's rotation case now has map factors as well. The binary32
+     step gives `dycore.step`'s words on a mapped state. With msfv passed
+     where the strict path passes MSFV_INV, about 2000 words per
+     prognostic differ, so the test pins the choice.
+   - Still refused: lateral boundaries other than periodic (specified
+     boundaries next), so WRFDA's regional tutorial case cannot run yet.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 

@@ -11,7 +11,7 @@ before the operator runs, and :func:`step_ad` consumes that tape in
 reverse (recompute, then tape: the step's own NL is rerun from its
 start).
 
-Covered: periodic axes, no map factors, Coriolis and curvature, dry, no physics or
+Covered: periodic axes, map factors, Coriolis and curvature, dry, no physics or
 mixing, ``rk_ord = 3``, ``h_*_adv_order`` 3-6, a 3-D base state (terrain)
 and the w_damp limiter.
 Everything else is refused by :func:`step_geometry`.
@@ -63,6 +63,13 @@ _ADV_ALIAS = {
     "w": {"tend": "rw_t", "q": "w", "rw": "ww_ref", "msf": "msft", "rdz": "rdn"},
 }
 _PGF_ALIAS = {"p": "p_pert", "mub": "mub2d"}
+#: The strict launchers pass MSFV_INV (DomainState.msfv_inv, WRF's
+#: MF_VX_INV) where these operators name msfv: rk_step_prep's v coupling,
+#: small_step_init, advance_uv and advance_mu_th.  small_step_finish, the
+#: advection, slow_geopotential, coriolis_curvature and set_w_surface take
+#: msfv itself.
+_INV = {"msfv": "msfv_inv"}
+_RSP_ALIAS = {**RSP_ALIAS, **_INV}
 _BUOY_ALIAS = {"p": "p_pert"}
 _GEO_ALIAS = {"ww": "ww_ref", "mub": "mub2d"}
 _WD_ALIAS = {"ww": "ww_ref", "mub": "mub2d"}
@@ -107,7 +114,6 @@ def _refuse(cfg, state) -> None:
     checks = {
         "lateral boundaries other than periodic": bool(
             cfg.open_x or cfg.open_y or cfg.specified or getattr(cfg, "nested", False)),
-        "map factors": bool(state.has_msf),
         "moisture": state.qv is not None,   # the primal's test (dycore._step_body)
         "microphysics": bool(cfg.mp_physics),
         "rk_ord 2": getattr(cfg, "rk_ord", 3) != 3,
@@ -169,6 +175,7 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
     from woof.core.advection import scalar_horizontal_order, vertical_orders
     _refuse(cfg, state)
     f32 = np.float32
+    msf = int(bool(state.has_msf))
     nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
     dx, dy = float(cfg.dx), float(cfg.dy)
     rdx, rdy = float(f32(1.0 / dx)), float(f32(1.0 / dy))
@@ -187,15 +194,17 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
                 for kind, v, h in (("scalar", vsca, hsca), ("u", vmom, hmom),
                                    ("v", vmom, hmom), ("w", vsca, hsca)))
     pgf = PGFGeometry(nz, ny, nx, rdx, rdy, cfn=cfn, cfn1=cfn1, top_lid=top_lid, **cf)
-    buoy = BuoyGeometry(nz, ny, nx)
+    buoy = BuoyGeometry(nz, ny, nx, has_msf=msf)
     geo = GeoGeometry(nz, ny, nx, quarter_rdx=float(f32(0.25 / dx)),
-                      quarter_rdy=float(f32(0.25 / dy)), cfn=cfn, cfn1=cfn1, order=hsca)
+                      quarter_rdy=float(f32(0.25 / dy)), cfn=cfn, cfn1=cfn1, order=hsca,
+                      has_msf=msf)
     wd = None
     if cfg.w_damping == 1:
         wd = WDampGeometry(nz, ny, nx, dt=float(f32(cfg.dt)),
                            w_damp_on=float(f32(D.w_damp_onset(cfg))),
                            w_crit_cfl=float(f32(cfg.w_crit_cfl)))
-    rsp = RSPGeometry(nz, ny, nx, rdx=float(f32(1) / f32(dx)), rdy=float(f32(1) / f32(dy)))
+    rsp = RSPGeometry(nz, ny, nx, rdx=float(f32(1) / f32(dx)), rdy=float(f32(1) / f32(dy)),
+                      has_msf=msf)
     cc = CCGeometry(nz, ny, nx, rdx=rdx, rdy=rdy) if state.rotational else None
     stages = []
     for istage, (nsub, dtau) in enumerate(D._rk_acoustic_stages(cfg)):
@@ -206,22 +215,24 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
                               p_top=p_top)
 
         def sub(smdiv):
-            return (UVGeometry(nz, ny, nx, rdx, rdy, dtau, smdiv=smdiv, top_lid=top_lid, **cf),
-                    MTGeometry(nz, ny, nx, rdx, rdy, dtau, write_mudf=0),
+            return (UVGeometry(nz, ny, nx, rdx, rdy, dtau, smdiv=smdiv, top_lid=top_lid,
+                               has_msf=msf, **cf),
+                    MTGeometry(nz, ny, nx, rdx, rdy, dtau, write_mudf=0, mapped=msf),
                     WGeometry(nz, ny, nx, rdx, rdy, dtau, epssm=float(f32(cfg.epssm)),
                               top_lid=top_lid, dampmag=float(damp_magnitude(cfg, dtau)),
-                              **cf))
+                              has_msf=msf, **cf))
         stages.append(StageSpec(
             rk_step=istage + 1, nsub=int(nsub), diagnose=prp, rsp=rsp, adv=adv, pgf=pgf,
             buoy=buoy, geo=geo, wd=wd, cc=cc,
-            ss=SSGeometry(nz, ny, nx, boundary_x=0, boundary_y=0, rk_step=istage + 1),
+            ss=SSGeometry(nz, ny, nx, has_msf=msf, boundary_x=0, boundary_y=0,
+                          rk_step=istage + 1),
             cw=CWGeometry(nz, ny, nx, dtau, epssm=float(f32(cfg.epssm)), top_lid=top_lid),
             first=sub(0.0), later=sub(float(f32(cfg.smdiv)))))
     return StepGeometry(
         nz, ny, nx, tuple(stages),
         end_prp=PRPGeometry(nz, ny, nx, hypso=hypso, carried=1, p_top=p_top),
         sw=SWGeometry(nz, ny, nx, half_rdx=float(f32(0.5 / dx)),
-                      half_rdy=float(f32(0.5 / dy)), **cf))
+                      half_rdy=float(f32(0.5 / dy)), mapped=msf, **cf))
 
 
 def _names() -> tuple:
@@ -230,7 +241,7 @@ def _names() -> tuple:
         return tuple(alias.get(n, n) for n in names)
     out = PROGNOSTICS + tuple(n + "0" for n in PROGNOSTICS) + TENDENCIES + ("muts",)
     out += al(PRP_STATE + PRP_ACTIVE + PRP_PASSIVE, PRP_ALIAS)
-    out += al(RSP_STATE + RSP_ACTIVE + RSP_PASSIVE, RSP_ALIAS)
+    out += al(RSP_STATE + RSP_ACTIVE + RSP_PASSIVE, _RSP_ALIAS) + ("msfv",)
     for kind, alias in _ADV_ALIAS.items():
         out += al(ADV_STATE + ADV_ACTIVE + ADV_PASSIVE, alias)
     out += al(PGF_STATE + PGF_ACTIVE + PGF_PASSIVE, _PGF_ALIAS)
@@ -292,8 +303,14 @@ def run_state(state, cfg, dtype=np.float64) -> dict:
 
 def _acoustic(d: dict) -> dict:
     """``d`` as the acoustic substep's operators name it (fnm and fnp on
-    nz + 1 levels; the primal never reads the last)."""
-    return {**d, "fnm": d["fnm_w"], "fnp": d["fnp_w"]}
+    nz + 1 levels, the primal never reading the last; msfv is MSFV_INV,
+    as advance_uv and advance_mu_th take it)."""
+    return {**d, "fnm": d["fnm_w"], "fnp": d["fnp_w"], "msfv": d["msfv_inv"]}
+
+
+def _inv(d: dict) -> dict:
+    """``d`` with msfv as MSFV_INV (small_step_init's argument)."""
+    return {**d, "msfv": d["msfv_inv"]}
 
 
 def state_inputs(x: dict) -> dict:
@@ -309,7 +326,7 @@ def _op_table(spec: StageSpec):
     if spec.diagnose is not None:
         ops.append(("prp", calc_p_rho_phi_tl, calc_p_rho_phi_ad, PRP_ALIAS, spec.diagnose,
                     PRP_STATE))
-    ops.append(("rsp", rk_step_prep_tl, rk_step_prep_ad, RSP_ALIAS, spec.rsp, RSP_STATE))
+    ops.append(("rsp", rk_step_prep_tl, rk_step_prep_ad, _RSP_ALIAS, spec.rsp, RSP_STATE))
     for g in spec.adv:
         ops.append(("adv_" + g.kind, adv_tl, adv_ad, _ADV_ALIAS[g.kind], g, ADV_STATE))
     ops.append(("pgf", pgf_tl, pgf_ad, _PGF_ALIAS, spec.pgf, PGF_STATE))
@@ -396,7 +413,7 @@ def _step(x, dx, geom, tape, observe, *, tl):
             op_tl(s, p, s, p, g, nl=True)
             seen(name, x)
         snap(SI_STATE)
-        small_step_init_tl(x, dx, x, dx, spec.ss, nl=True)
+        small_step_init_tl(_inv(x), _inv(dx), _inv(x), _inv(dx), spec.ss, nl=True)
         seen("si", x)
         snap(("muts",))
         src = "mup" if spec.rk_step == 1 else "mup0"
@@ -460,7 +477,7 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
         for i in reversed(range(spec.nsub)):
             cur = acoustic_substep_ad(_acoustic(ax), _acoustic(cur), tape,
                                       spec.first if i == 0 else spec.later)
-            cur.update(fnm=x["fnm"], fnp=x["fnp"])
+            cur.update(fnm=x["fnm"], fnp=x["fnp"], msfv=x["msfv"])
         base = back()                                             # cw
         calc_coef_w_ad(ax, base, ax, spec.cw)
         back()                                                    # small_step_prep's muts
@@ -468,7 +485,7 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
         ax[src] += ax["muts"]
         ax["muts"][...] = 0
         base = back()                                             # si
-        small_step_init_ad(ax, base, ax, spec.ss)
+        small_step_init_ad(_inv(ax), _inv(base), _inv(ax), spec.ss)
         for _, _, ad, alias, g, _ in reversed(_op_table(spec)):
             base = back()
             a = _view(ax, alias)
