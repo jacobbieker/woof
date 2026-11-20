@@ -185,6 +185,18 @@ def seconds_into_day(start_time: str) -> int:
     return int(start_time[11:13]) * 3600 + int(start_time[14:16]) * 60 + int(start_time[17:19])
 
 
+def _dedd_parameters(configs: dict, day: float) -> np.ndarray:
+    c = configs
+    par = np.zeros(12, np.float64)
+    par[:] = (c["config_ice_shortwave_tuning_parameter"], c["config_pond_shortwave_tuning_parameter"],
+              c["config_snow_shortwave_tuning_parameter"], c["config_temp_change_snow_grain_radius_change"],
+              c["config_max_melting_snow_grain_radius"], c["config_algae_absorption_coefficient"],
+              c["config_snow_to_ice_transition_depth"], c["config_snow_on_pond_ice_tapering_parameter"],
+              c["config_critical_pond_ice_thickness"], c["config_pond_depth_to_fraction_ratio"],
+              c["config_dt"], day)
+    return par
+
+
 def _orbit() -> "object":
     """``colpkg_init_orbit``'s ``shr_orb_params`` for 1950 on the device:
     eccen, obliqr, lambm0, mvelpp, obliq and mvelp."""
