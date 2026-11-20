@@ -184,7 +184,7 @@ def test_gpu_matches_the_v842_oracle_word_for_word(glibc239):
      "surfaceHeatFluxCategory[cn] = M(surfaceHeatFluxCouple[cn], 1.0);",
      "atmos_fluxes/surfaceHeatFlux", "vt_bl99_coupled_surface_temperature"),
     # colpkg_atm_boundary's vvel = 0 "fixed" (high-frequency coupling)
-    ("&Cdn_atm_ratio_n, uVelocity[c], 0.0,", "&Cdn_atm_ratio_n, uVelocity[c], uVelocity[c],",
+    ("p.fix_ice_velocity ? vVelocityCell[c] : 0.0,", "p.fix_ice_velocity ? vVelocityCell[c] : uVelocity[c],",
      "velocity_solver/airStressCellV", "vt_bl99_mu71_highfreq"),
     # TsfK**4 as three multiplications instead of __powidf2's two squarings
     ("__device__ __forceinline__ double powi4(double x) { double t = M(x, x); return M(t, t); }",
