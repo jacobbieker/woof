@@ -371,7 +371,7 @@ def test_analyse_door_with_radiances_on_the_tutorial():
     moist = ((ii > nx // 2) & (jj > ny // 2))[:, None] * np.full(3, -0.3)
     rec.bt = b0.hx + 1.0 + moist + 0.05 * rng.standard_normal((n, 3))
     common = dict(tier="reference", ntmax=30, eps=0.01)
-    base = analyse(d / "be.dat", d / "ob.ascii", d / "fg", **common)
+    base = analyse(d / "be.dat", d / "ob.ascii", d / "fg", report_fit=True, **common)
     vb = vbc.VarBC({"abi_g16": vbc.template("abi_g16", range(7, 17))})
     qc = rad.RadianceQC(thinning=False, error_k={8: 0.3, 9: 0.3, 10: 0.3})
     res = analyse(d / "be.dat", d / "ob.ascii", d / "fg", radiances=[rec], crtm=_LinearCRTM(), radiance_qc=qc,

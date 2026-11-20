@@ -473,7 +473,7 @@ def obs_window(fg: FirstGuess, minutes: float = 60.0) -> dict:
 def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01, max_ext_its: int = 1,
             orthonorm_gradient: bool = True, precondition_cg: bool = False, check_rh: int = 0,
             window_minutes: float = 60.0, landuse_table=None, xb_override: dict | None = None,
-            write=None, radiances=None, crtm=None, radiance_qc=None, varbc=None) -> VarResult:
+            write=None, radiances=None, crtm=None, radiance_qc=None, varbc=None, report_fit: bool | None = None) -> VarResult:
     """3D-Var from files: ``be.dat``, OBSPROC's ``ob.ascii`` and a WRF first guess.
 
     ``tier`` is ``reference`` (NumPy binary64), ``oracle`` (device binary64,
@@ -490,7 +490,8 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     from ``WOOF_CRTM_LIB``/``WOOF_CRTM_COEFFS`` when None); ``radiance_qc``
     a :class:`~woof.da.var.radiance.RadianceQC`; ``varbc`` a
     :class:`~woof.da.var.varbc.VarBC` whose coefficients are updated in
-    place.  Without ``radiances`` nothing here changes.
+    place.  Without ``radiances`` nothing here changes.  ``report_fit``
+    (default: with radiances) fills :attr:`VarResult.fit` at the cost of one more ``H' U``.
     """
     from . import be_dat as bd
     from . import innov_wrfda as iw
@@ -532,7 +533,7 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
 
         cp.cuda.Stream.null.synchronize()
     timings["minimise_s"] = time.perf_counter() - t1
-    fit = _fit(cost, d0, cvt, terms) if rterm is not None else {}
+    fit = _fit(cost, d0, cvt, terms) if (rterm is not None if report_fit is None else report_fit) else {}
     cvt = np.asarray(cvt.get() if hasattr(cvt, "get") else cvt, dtype=np.float64)
     if rterm is not None:
         rreport["j_final"] = results[-1].j_final
