@@ -967,10 +967,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `horizontal_pressure_gradient` and `pg_buoy_w`) follow, with the lid,
   open and specified boundaries, map factors and hybrid levels, and so
   does the geopotential tendency (`slow_geopotential`, WRF `rhs_ph`) for
-  every `h_sca_adv_order`. They match WRFPLUS to about 1e-15. The
-  comparison found a lid bug in WRFPLUS's own pressure-gradient adjoint
-  and, in its `rhs_ph`, a heap overrun in the order-3/4 adjoint and a
-  short interior loop on bounded axes, all described in the design note.
+  every `h_sca_adv_order`. In binary64 they match WRFPLUS to about 1e-15
+  on non-hybrid cases (WRFPLUS has no hybrid coordinate; the exclusions
+  are listed in the design note). The comparison found a lid bug in
+  WRFPLUS's own pressure-gradient adjoint and, in its `rhs_ph`, a heap
+  overrun in the order-3/4 adjoint and a short interior loop on bounded
+  axes, all described in the design note.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
   0.85-3.2x the glue, 3.3-4.5x advection and 1.3-4.4x the big-step
   tendencies. The measured step projection (4.6-4.8x) is in the design

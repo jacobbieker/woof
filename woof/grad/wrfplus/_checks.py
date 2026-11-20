@@ -66,6 +66,22 @@ def tl_convergence(model, tl, x, dx, alphas) -> list[tuple[float, float]]:
     return out
 
 
+def tl_residual(model, tl, x, dx, alphas) -> list[tuple[float, float]]:
+    """``||M(x + a dx) - M(x) - a TL dx|| / ||a TL dx||`` for each ``a``;
+    -> 0.  Unlike :func:`tl_convergence` it sees the tangent's sign."""
+    base = [_host(y).astype(np.float64) for y in model(x)]
+    lin = [_host(y).astype(np.float64) for y in tl(dx)]
+    lin_norm = math.sqrt(sum(float(np.vdot(y, y)) for y in lin))
+    out = []
+    for a in alphas:
+        xp = [xi + a * di for xi, di in zip(x, dx, strict=True)]
+        moved = [_host(y).astype(np.float64) for y in model(xp)]
+        res = [(m - b) - a * y for m, b, y in zip(moved, base, lin, strict=True)]
+        norm = math.sqrt(sum(float(np.vdot(r, r)) for r in res))
+        out.append((float(a), norm / (abs(a) * lin_norm)))
+    return out
+
+
 def taylor(cost, grad, x, h, alphas) -> list[tuple[float, float]]:
     """``(J(x + a h) - J(x)) / (a <grad J(x), h>)`` for each ``a``; -> 1."""
     j0 = float(cost(x))

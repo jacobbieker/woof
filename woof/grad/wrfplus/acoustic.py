@@ -124,9 +124,13 @@ def _check(geom, named, shapes=None, min_nz: int = 3) -> None:
             raise ValueError(f"{label} {name} is not C-contiguous")
         ptr = getattr(getattr(a, "data", None), "ptr", None)
         if ptr is not None:
-            if ptr in seen:
-                raise ValueError(f"{label} {name} aliases {seen[ptr]}")
-            seen[ptr] = f"{label} {name}"
+            # Byte ranges, not start addresses: two views that overlap
+            # without sharing a start would still alias under __restrict__.
+            end = ptr + max(int(getattr(a, "nbytes", 0)), 1)
+            for (lo, hi), other in seen.items():
+                if ptr < hi and lo < end:
+                    raise ValueError(f"{label} {name} aliases {other}")
+            seen[(ptr, end)] = f"{label} {name}"
 
 
 def advance_uv_tl(u_pp, v_pp, u_d, v_d, traj: dict, pert: dict,

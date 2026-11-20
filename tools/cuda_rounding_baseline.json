@@ -4805,7 +4805,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/bigstep.cu",
-    "sha256": "b9a8d8e17905ba279b0a9743cc3ff70af8f9afd1ad40e482462018edbe4f195d"
+    "sha256": "7a8bc0b8ba5c38fef862536e5c05cfa2e9ee5f60971905a78cc74b8202ff9742"
    },
    {
     "file": "woof/grad/wrfplus/kernels/calc_coef_w.cu",
@@ -5639,7 +5639,7 @@
    },
    {
     "file": "woof/grad/wrfplus/acoustic.py",
-    "sha256": "91eb3d79de1854c8146bdf33e2eed446e11955b7d7728a8e7d14b3dc8194b8d5"
+    "sha256": "940b5c9370471783acdef2d331947bd30bb953b091b38e8e36289bbca3881280"
    },
    {
     "file": "woof/grad/wrfplus/advect.py",

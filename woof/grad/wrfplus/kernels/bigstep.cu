@@ -158,9 +158,9 @@ void pgf_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_d,
     size_t lay = (size_t)nyf * nxf;
     if (tid >= (size_t)nz * lay) return;
     int k = (int)(tid / lay);
-    int rem = (int)(tid - (size_t)k * lay);
-    int j = rem / nxf;
-    int i = rem - j * nxf;
+    size_t rem = tid - (size_t)k * lay;
+    int j = (int)(rem / nxf);
+    int i = (int)(rem - (size_t)j * nxf);
     size_t st = (size_t)ny * nx;
     if (j < ny && ((!bnd_x && i <= nx) || (bnd_x && i > 0 && i < nx))) {
         int ia = i % nx, ib = (i - 1 + nx) % nx;
@@ -297,9 +297,9 @@ void pgf_ad_face(const wreal* __restrict__ ru_a, const wreal* __restrict__ rv_a,
     size_t lay = (size_t)nyf * nxf;
     if (tid >= (size_t)nz * lay) return;
     int k = (int)(tid / lay);
-    int rem = (int)(tid - (size_t)k * lay);
-    int j = rem / nxf;
-    int i = rem - j * nxf;
+    size_t rem = tid - (size_t)k * lay;
+    int j = (int)(rem / nxf);
+    int i = (int)(rem - (size_t)j * nxf);
     size_t st = (size_t)ny * nx;
     size_t nu = (size_t)nz * ny * nxf, nv = (size_t)nz * nyf * nx;
     for (int dir = 0; dir < 2; ++dir) {
