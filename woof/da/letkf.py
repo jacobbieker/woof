@@ -184,6 +184,7 @@ anywhere in the computed increments.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import time
 from dataclasses import dataclass, field
@@ -897,7 +898,8 @@ class LetkfConfig:
     #: See :data:`MATMUL_MODES`.  Last in the field list so no positional
     #: caller of this dataclass moves.
     matmul: str = "fixed-order"
-    #: Worker processes for the HOST solve (numpy, host-staged).  ``None``
+    #: Worker processes for the HOST solve (numpy: the dense default route
+    #: and the host-staged one).  ``None``
     #: is automatic: the CPUs this process may run on, capped at
     #: :data:`HOST_WORKERS_AUTO_CAP` and by the number of chunks, and
     #: overridden by the ``WOOF_DA_HOST_WORKERS`` environment variable.
@@ -3025,6 +3027,12 @@ def analyze(
                     for lo_, hi_, picked in tasks)
         workers, reason = hp.resolve_host_workers(
             config.host_workers, tasks=len(tasks), pairs=pairs)
+        if not host_staging and workers > 1:
+            # The dense route cannot split a chunk (its packed width is the
+            # chunk's), so each worker holds a whole chunk's scratch: as many
+            # workers as the host's available memory holds such chunks.
+            workers, reason = hp.limit_by_host_memory(
+                workers, reason, per_point * chunk)
         diagnostics.host_workers = workers
         diagnostics.host_workers_reason = reason
         if workers <= 1:
@@ -3045,12 +3053,16 @@ def analyze(
             setattr(diagnostics, name, getattr(diagnostics, name) + value)
         n_chunks = len(tasks) + counters["reach_chunks_skipped"]
 
-        # The workers share the scratch promise the single-process loop made.
-        per_worker = max(1, int(device_budget) // workers)
+        if host_staging:
+            # The workers share the scratch promise the single-process loop made.
+            per_worker = max(1, int(device_budget) // workers)
+            host_split["row_block"] = max(
+                1, hp.block_bytes(per_worker) // max(1, host_per_point))
+            host_split["piece_bytes"] = hp.piece_bytes(per_worker)
+        else:
+            # Dense: whole chunks, each worker the single-process loop's scratch.
+            per_worker = int(per_point * chunk)
         diagnostics.host_worker_budget_bytes = per_worker
-        host_split["row_block"] = max(
-            1, hp.block_bytes(per_worker) // max(1, host_per_point))
-        host_split["piece_bytes"] = hp.piece_bytes(per_worker)
         for f in fields:
             increments[f] = hp.shared_copy(increments[f])
             incr_flat[f] = increments[f].reshape(members, -1)
@@ -3128,8 +3140,11 @@ def analyze(
     start = 0
     completed_chunks = 0
     report_progress(0, 0, 0, force=True)
-    if host_staging and solve_xp is np:
-        # The host solve: the same chunks on many cores, same bytes.
+    from woof.da import letkf_host_parallel as hp
+
+    if solve_xp is np:
+        # The host solve, dense (the default for host arrays) or host-staged:
+        # the same chunks on many cores, same bytes.
         start, completed_chunks = _host_parallel_loop()
     while start < npts:
         if pool_cap is not None and pool.total_bytes() > pool_cap:
@@ -3170,7 +3185,11 @@ def analyze(
         diagnostics.reach_batches_evaluated += len(span)
         diagnostics.reach_batches_skipped += len(stencils) - len(span)
         try:
-            ng, local_max, sweeps = _solve_chunk(start, stop, span)
+            # One BLAS thread on the host, as in the workers: a multi-threaded
+            # gemm/eigh partitions by thread count, which moved words by ~1e-14
+            # with the box's core count (letkf_host_parallel.one_blas_thread).
+            with (hp.one_blas_thread() if solve_xp is np else contextlib.nullcontext()):
+                ng, local_max, sweeps = _solve_chunk(start, stop, span)
         except Exception as exc:
             if not _is_device_memory_error(exc):
                 raise

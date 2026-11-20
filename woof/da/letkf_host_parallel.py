@@ -1,7 +1,8 @@
 """Host-parallel LETKF: the chunk loop of :func:`woof.da.letkf.analyze` on
 many cores, producing the same bytes as one core.
 
-WHY.  The host solve (``solve_device="host"``, and the host half of the
+WHY.  The host solve (host arrays with no ``solve_namespace``, the dense
+default route; ``solve_device="host"``; and the host half of the
 host-staged device solve) walked its chunks one after another in one
 process.  On a 241 x 241 x 49 grid with 32 members that is one core busy
 for tens of minutes while the rest of a 64-core box idles.  The local
@@ -31,11 +32,17 @@ Both claims are measured, not assumed: tests/test_letkf_host_parallel.py
 compares every worker count against the single-process loop byte for byte,
 and the real-case receipt does the same at 8, 32 and 64 workers.
 
+The dense route (host arrays, no ``solve_namespace``) runs the same plan
+with whole chunks per worker and no row blocks or pieces, so each gridpoint
+gets exactly the single-process loop's arithmetic.
+
 Memory.  The configured ``memory_budget_mib`` is the solve's scratch
-promise.  Workers share it: each gets ``budget / workers`` for its row
+promise.  On the host-staged route the workers share it: each gets ``budget / workers`` for its row
 blocks and pieces, so the sum stays the promise the single-process loop
 made.  The increments live once, in shared memory, and are returned as
-ordinary numpy arrays over it.
+ordinary numpy arrays over it.  The dense route cannot split a chunk, so
+each worker holds one chunk's scratch and the worker count is capped by
+:func:`limit_by_host_memory`.
 
 Fork is required (the workers inherit the prior, the observations and the
 closures without a copy).  Where fork is unavailable the loop runs in one
@@ -122,6 +129,43 @@ def resolve_host_workers(requested, *, tasks: int,
     return workers, source
 
 
+#: Fraction of the host's available memory the dense route's workers may
+#: hold in chunk scratch between them.
+HOST_MEMORY_FRACTION = 0.5
+
+
+def host_available_bytes() -> int | None:
+    """Available host memory: ``MemAvailable`` on Linux, else free pages; None if unknown."""
+    try:
+        with open("/proc/meminfo", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    try:
+        return int(os.sysconf("SC_AVPHYS_PAGES")) * int(os.sysconf("SC_PAGE_SIZE"))
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def limit_by_host_memory(workers: int, reason: str,
+                         scratch_bytes: int) -> tuple[int, str]:
+    """``(workers, reason)`` with at most as many workers as hold ``scratch_bytes`` each.
+
+    Bounded by :data:`HOST_MEMORY_FRACTION` of :func:`host_available_bytes`;
+    unchanged when that is unknown.
+    """
+    avail = host_available_bytes()
+    if avail is None or workers <= 1:
+        return workers, reason
+    fit = max(1, int(avail * HOST_MEMORY_FRACTION) // max(1, int(scratch_bytes)))
+    if fit >= workers:
+        return workers, reason
+    return fit, (f"{reason}; limited to {fit} by host memory ({avail >> 20} MiB "
+                 f"available, {int(scratch_bytes) >> 20} MiB chunk scratch per worker)")
+
+
 def shared_copy(array: np.ndarray) -> np.ndarray:
     """A C-contiguous copy of ``array`` in anonymous shared memory.
 
@@ -136,6 +180,26 @@ def shared_copy(array: np.ndarray) -> np.ndarray:
     if array.size and np.any(array):
         np.copyto(out, array)
     return out
+
+
+_CONTROLLER = None
+
+
+def one_blas_thread():
+    """A context with the BLAS/OpenMP pools at one thread (the workers' setting).
+
+    The single-process chunk loop runs under it too: OpenBLAS partitions a
+    gemm or an eigensolve by its thread count, and on a 32-thread pool the
+    dense route's increments differed from the one-thread ones by up to
+    1e-14 (pb, 20 members, 164 local observations), so without it the bytes
+    depended on the box's core count, and no worker count could match them.
+    """
+    global _CONTROLLER
+    if _CONTROLLER is None:
+        from threadpoolctl import ThreadpoolController  # noqa: PLC0415
+
+        _CONTROLLER = ThreadpoolController()
+    return _CONTROLLER.limit(limits=1)
 
 
 def _initializer() -> None:

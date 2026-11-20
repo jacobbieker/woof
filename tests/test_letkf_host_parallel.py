@@ -115,6 +115,70 @@ def test_every_worker_count_gives_the_single_process_bytes(workers, search,
     assert diag.posterior_spread == ref_diag.posterior_spread
 
 
+def _solve_dense(prior, obs, grid, cfg, monkeypatch=None):
+    """The default route: host arrays, no ``solve_namespace`` (dense transform)."""
+    diag = LetkfDiagnostics()
+    if monkeypatch is None:
+        return letkf.analyze(prior, obs, grid, cfg, diag), diag
+    with monkeypatch.context() as m:
+        m.setenv(hp.HOST_WORKERS_ENV, "1")
+        out = letkf.analyze(prior, obs, grid, cfg, diag)
+    return out, diag
+
+
+@needs_fork
+@pytest.mark.parametrize("workers", [2, 3, 7])
+def test_default_dense_route_gives_the_single_process_bytes(workers, monkeypatch):
+    monkeypatch.delenv(hp.HOST_WORKERS_ENV, raising=False)
+    prior, obs, grid, cfg = geodesic_problem()
+    reference, ref_diag = _solve_dense(prior, obs, grid, cfg, monkeypatch)
+    assert ref_diag.host_workers == 1 and not ref_diag.host_staging
+    result, diag = _solve_dense(prior, obs, grid, replace(cfg, host_workers=workers))
+    assert diag.host_workers == workers and not diag.host_staging
+    assert diag.host_row_blocks == 0 and diag.host_transform_pieces == 0
+    for name in prior:
+        assert result[name].dtype == reference[name].dtype
+        assert result[name].tobytes() == reference[name].tobytes(), name
+    for name in ("active_points", "max_local_obs", "batches", "reach_chunks_skipped",
+                 "reach_span_splits", "reach_batches_evaluated", "reach_batches_skipped",
+                 "max_jacobi_sweeps"):
+        assert getattr(diag, name) == getattr(ref_diag, name), name
+    assert diag.mean_increment_rms == ref_diag.mean_increment_rms
+    assert diag.posterior_spread == ref_diag.posterior_spread
+
+
+@needs_fork
+def test_default_dense_route_goes_parallel_automatically(monkeypatch):
+    """host_workers=None on host arrays: many processes once the work is large, same bytes."""
+    monkeypatch.delenv(hp.HOST_WORKERS_ENV, raising=False)
+    prior, obs, grid, cfg = geodesic_problem(fields=3, batches=3, seed=91)
+    prior = {k: v.astype(np.float32) for k, v in prior.items()}
+    obs = [replace(o, simulated=np.asarray(o.simulated, np.float32)) for o in obs]
+    cfg = replace(cfg, host_workers=None, prior_inflation=1.15, relaxation="rtpp")
+    reference, _ = _solve_dense(prior, obs, grid, cfg, monkeypatch)
+    monkeypatch.setattr(hp, "HOST_PARALLEL_MIN_PAIRS", 0)
+    monkeypatch.setattr(hp, "available_cpus", lambda: 4)
+    result, diag = _solve_dense(prior, obs, grid, cfg)
+    assert diag.host_workers == 4, diag.host_workers_reason
+    assert "automatic" in diag.host_workers_reason
+    for name in prior:
+        assert result[name].dtype == np.float32
+        assert result[name].tobytes() == reference[name].tobytes(), name
+
+
+def test_dense_workers_are_capped_by_host_memory(monkeypatch):
+    monkeypatch.setattr(hp, "host_available_bytes", lambda: 10 << 30)
+    workers, reason = hp.limit_by_host_memory(8, "r", 1 << 30)
+    assert workers == 5 and "host memory" in reason
+    assert hp.limit_by_host_memory(4, "r", 1 << 30) == (4, "r")
+    assert hp.limit_by_host_memory(8, "r", 64 << 30)[0] == 1
+    monkeypatch.setattr(hp, "host_available_bytes", lambda: None)
+    assert hp.limit_by_host_memory(8, "r", 64 << 30) == (8, "r")
+    monkeypatch.undo()
+    avail = hp.host_available_bytes()
+    assert avail is None or avail > 0
+
+
 @needs_fork
 def test_inflated_prior_and_float32_state_stay_identical(monkeypatch):
     monkeypatch.delenv(hp.HOST_WORKERS_ENV, raising=False)
