@@ -72,12 +72,18 @@ def test_fixture_covers_the_branches(precision):
         assert case["config"]["oracle_n_steps"] >= 2
         days = float(out["diagnostics/daysSinceStartOfSim"])
         from woof.hex.mpas_ocean import forward_v842 as fw
-        elapsed = (fw.parse_time(case["config"]["config_start_time"]) - fw.parse_time(
-            case["config"]["diagnostics:simulationStartTime"]) + case["config"]["oracle_n_steps"] * case["dt"])
+        # on the case's calendar (config_calendar_type; the Registry default is the 365-day year)
+        calendar = fw.calendar_of(case["config"])
+        elapsed = (fw.parse_time(case["config"]["config_start_time"], calendar) - fw.parse_time(
+            case["config"]["diagnostics:simulationStartTime"], calendar) + case["config"]["oracle_n_steps"] * case["dt"])
         assert abs(days - elapsed / 86400.0) < 1e-5 * max(1.0, days)
         assert np.isfinite(out["state/ssh"][:nc]).all() and np.isfinite(out["state/ssh@2"][:nc]).all()
     assert any(case["config"]["oracle_n_steps"] % 2 for case in cases.values())
     assert any(case["config"]["oracle_n_steps"] % 2 == 0 for case in cases.values())
+    # both calendars, with a February between the simulation's start and the run's
+    assert {fw.calendar_of(case["config"]) for case in cases.values()} == set(fw.CALENDARS)
+    assert {round(float(fixture[name]["diagnostics/daysSinceStartOfSim"])) for name in
+            ("split_noleap_after_february", "split_gregorian_after_february")} == {28, 29}
 
 
 def test_rk4_and_mpas_restarts_are_refused_by_name():
