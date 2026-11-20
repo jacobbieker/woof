@@ -14,7 +14,6 @@ for word. The exception is the GNSS-RO heights (see the module docstring).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -253,23 +252,52 @@ def _tutorial_dir():
     return Path(d)
 
 
-def iv_dump(d: Path) -> dict:
-    """``woof_iv.bin`` from ``d``, refused unless it is the dump the manifest pins.
+#: The dump arrays WRFDA fills completely: per-type counts and levels, and every
+#: field's inv, qc and error.  The geometry's k/dz/dzm carry uninitialised
+#: slots past each report's levels, so they are left out of the digest.
+IV_DIGEST_KEYS = ("n", "levels", "inv", "qc", "error")
 
-    A dump from a WRFDA build older than the current ``woof_dump.inc``
-    lacks fields (gpsref ``p``, ``t``, ``q``).  Comparing against it fails
-    with a KeyError that says nothing about the cause.
+
+def iv_digest(dump: dict) -> str:
+    """SHA-256 over the initialised arrays of a ``woof_iv.bin`` (:data:`IV_DIGEST_KEYS`):
+    name, dtype, shape and bytes of each, in key order.  Reruns of one build agree."""
+    import hashlib
+
+    h = hashlib.sha256()
+    for k in sorted(dump):
+        if k.rsplit("%", 1)[-1] in IV_DIGEST_KEYS:
+            a = np.ascontiguousarray(dump[k])
+            for part in (k, str(a.dtype), str(a.shape)):
+                h.update(part.encode())
+            h.update(a.tobytes())
+    return h.hexdigest()
+
+
+def iv_dump(d: Path, want: str | None = None) -> dict:
+    """``woof_iv.bin`` from ``d``, checked against ``want`` (the manifest's
+    ``iv_dump_digest``, :func:`iv_digest`; the tutorial's by default).
+
+    The file's bytes cannot be pinned: its unused ``k``/``dz``/``dzm`` slots
+    (past each report's levels) are uninitialised memory, so rerunning the
+    same build writes the same values in a different file.  The digest
+    covers every initialised array instead, so an older dump (one from a
+    ``woof_dump.inc`` before bd11ed5a1 lacks gpsref ``p``, ``t`` and ``q``)
+    or another run's is refused.
     """
     path = d / "woof_iv.bin"
     if not path.is_file():
         pytest.skip("woof_iv.bin (oracle dump) not in WOOF_WRFDA471_DIR")
-    sha = hashlib.sha256(path.read_bytes()).hexdigest()
-    want = json.loads(MANIFEST.read_text())["obs"]["iv_dump_sha256"]
-    assert sha == want, (f"{path} has sha256 {sha}, not the manifest's {want}: an oracle dump from an older "
-                         "woof_dump.inc (see the manifest's iv_dump_comment); patch a copy of WRFV4.7.1 with "
-                         "tools/wrfda_oracle/apply_dump_patch.sh, run ./compile all_wrfvar in it, then "
-                         "run_tutorial.sh with that patched tree's da_wrfvar.exe")
-    return read_dump(path)
+    dump = read_dump(path)
+    missing = [k for k in ("gpsref%p%inv", "gpsref%t%inv", "gpsref%q%inv") if "gpsrf%levels" in dump and k not in dump]
+    assert not missing, (f"{path} lacks {missing}: an oracle dump from an older woof_dump.inc (see the manifest's "
+                         "iv_dump_comment); patch a copy of WRFV4.7.1 with tools/wrfda_oracle/apply_dump_patch.sh, "
+                         "run ./compile all_wrfvar in it, then run_tutorial.sh with that patched tree's da_wrfvar.exe")
+    if want is None:
+        want = json.loads(MANIFEST.read_text())["obs"]["iv_dump_digest"]
+    got = iv_digest(dump)
+    assert got == want, (f"{path}'s initialised arrays digest to {got[:12]}..., not the manifest's {want[:12]}...: "
+                         "a dump from another run or build (see the manifest's iv_dump_comment)")
+    return dump
 
 
 def _digests(obs) -> dict:

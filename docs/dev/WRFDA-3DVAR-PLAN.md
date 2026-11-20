@@ -1230,6 +1230,16 @@ pairing and the OSSE half of GV3.
 residual, as for GV3). 4D-Var waits for the
 differentiable plan's G3.
 
+Status (2026-11-20): V5.1 landed as `woof.da.var.fgat` and `woof var
+--fgat-obs/--fgat-first-guess`, and GV5 passes for FGAT
+(`tests/test_var_fgat.py`, docs/var.md "FGAT"). It does not use P0's
+`pair`: WRFDA's ASCII FGAT takes the slot from the file, not from the
+observation time, and woof follows that. The oracle is
+`tools/wrfda_oracle/run_fgat.sh`: the testdata's 4D-Var observations, first
+guesses from a WRF 4.7.1 forecast, and the analysis at 15Z. Outer loops with
+FGAT are refused; WRFDA 4.7.1 re-reads `fgNN` and drops the earlier
+increments.
+
 ### Effort summary
 
 | phase | effort | depends on | gate |

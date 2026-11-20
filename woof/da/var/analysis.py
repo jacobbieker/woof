@@ -474,7 +474,8 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
             orthonorm_gradient: bool = True, precondition_cg: bool = False, check_rh: int = 0,
             window_minutes: float = 60.0, landuse_table=None, xb_override: dict | None = None,
             write=None, radiances=None, crtm=None, radiance_qc=None, varbc=None, report_fit: bool | None = None,
-            ensemble=None, hybrid=None, vertloc=None) -> VarResult:
+            ensemble=None, hybrid=None, vertloc=None, fgat=None,
+            time_window: tuple[str, str] | None = None) -> VarResult:
     """3D-Var from files: ``be.dat``, OBSPROC's ``ob.ascii`` and a WRF first guess.
 
     ``tier`` is ``reference`` (NumPy binary64), ``oracle`` (device binary64,
@@ -502,6 +503,18 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     for ``alpha_vertloc_opt = 1`` (option 2 computes it).  The alpha control
     variable follows the static one; the analysis is ``U_s v_s + sum_n alpha_n
     o x'_n`` in binary64.
+
+    FGAT (opt-in, plan V5.1; WRFDA ``num_fgat_time > 1``): ``fgat`` is the
+    first guesses at the slot times (``fg01`` .. ``fgNN``: the window's
+    start, evenly spaced, its end) and ``obs`` the matching ``ob01.ascii``
+    .. ``obNN.ascii``.  Each slot's innovations, QC and vertical positions
+    are computed against its own first guess
+    (:mod:`woof.da.var.fgat`); ``H'``, the increment and the analysis stay
+    at ``first_guess``'s time, which must be one of the slot times.  One
+    outer loop; no radiances, no hybrid.
+
+    ``time_window`` is WRFDA's ``(time_window_min, time_window_max)``; by
+    default the first guess's time plus and minus ``window_minutes``.
     """
     from . import be_dat as bd
     from . import innov_wrfda as iw
@@ -510,6 +523,10 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     from .minimise import minimise
     from .obsop_wrfda import FlatObsTerm
 
+    if fgat is not None:   # every FGAT refusal, before anything is read
+        _fgat_refusals(obs, fgat, first_guess, window_minutes=window_minutes, time_window=time_window,
+                       max_ext_its=max_ext_its, radiances=radiances, xb_override=xb_override,
+                       ensemble=ensemble, hybrid=hybrid)
     timings = {}
     t0 = time.perf_counter()
     fg = first_guess if isinstance(first_guess, FirstGuess) else read_first_guess(first_guess)
@@ -520,8 +537,14 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     b = bd.setup_be_regional(be if not isinstance(be, (str, Path)) else bd.read_be_dat(be),
                              ix=nx, jy=ny, kz=nz, ds=float(xb["ds"]))
     proj = ow.LambertWRFDA.from_attributes(fg.attrs)
-    wobs = obs if not isinstance(obs, (str, Path)) else ow.read_obs_ascii(obs, proj, **obs_window(fg, window_minutes))
-    iv = iw.innovations(wobs, xb)
+    window = obs_window(fg, window_minutes)
+    if time_window is not None:
+        window.update(time_window_min=time_window[0], time_window_max=time_window[1])
+    if fgat is None:
+        wobs = obs if not isinstance(obs, (str, Path)) else ow.read_obs_ascii(obs, proj, **window)
+        iv = iw.innovations(wobs, xb)
+    else:
+        iv = _fgat_innovations(obs, fgat, xb, proj, window, landuse_table=landuse_table)
     term = FlatObsTerm(iv, xb)
     terms = [term]
     rterm = rreport = None
@@ -572,6 +595,49 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     log = "".join(r.log for r in results)
     return VarResult(log=log, cg=results, cvt=cvt, xa=xa, wrf=wrf, xb=xb, grid=grid, nobs=int(term.mask.sum()),
                      timings=timings, radiance=rreport, fit=fit)
+
+
+def _fgat_refusals(obs, fgat, first_guess, *, window_minutes, time_window, max_ext_its, radiances, xb_override,
+                   ensemble, hybrid):
+    """What FGAT refuses, from the arguments and the files' times alone."""
+    import types
+
+    from . import fgat as fm
+
+    if radiances:
+        raise NotImplementedError("FGAT with radiances is not ported (WRFDA bins radiances by time slot)")
+    if ensemble is not None or hybrid is not None:
+        raise NotImplementedError("FGAT with the hybrid (ensemble) B is not ported: WRFDA bins the ensemble "
+                                  "by time slot only in 4DEnVar (use_4denvar)")
+    if xb_override is not None:
+        raise ValueError("xb_override replaces the analysis-time background only; it is not FGAT's slots")
+    window = obs_window(types.SimpleNamespace(times=fm.first_guess_time(first_guess)), window_minutes)
+    if time_window is not None:
+        window.update(time_window_min=time_window[0], time_window_max=time_window[1])
+    paths = [obs] if isinstance(obs, (str, Path)) else list(obs)
+    fm.check_fgat(len(paths), [fm.first_guess_time(f) for f in fgat], time_window_min=window["time_window_min"],
+                  time_window_max=window["time_window_max"], max_ext_its=max_ext_its,
+                  analysis_date=window["analysis_date"])
+
+
+def _fgat_innovations(obs, fgat, xb, proj, window, *, landuse_table):
+    """FGAT's innovation vector: each slot's observations against its own first guess
+    (after :func:`_fgat_refusals`)."""
+    from . import fgat as fm
+    from . import obs_wrfda as ow
+
+    fgs = [f if isinstance(f, FirstGuess) else read_first_guess(f) for f in fgat]
+    paths = [obs] if isinstance(obs, (str, Path)) else list(obs)
+    xbs = []
+    for n, f in enumerate(fgs, start=1):
+        if ow.LambertWRFDA.from_attributes(f.attrs) != proj:
+            raise ValueError(f"FGAT slot {n}: {f.path.name} is not on the first guess's projection")
+        x, _ = wrftoxb(f, landuse_table=landuse_table)
+        if x["t"].shape != xb["t"].shape:
+            raise ValueError(f"FGAT slot {n}: {f.path.name} is {x['t'].shape}, the first guess {xb['t'].shape}")
+        xbs.append(x)
+    wobs = fm.read_obs_ascii_fgat(paths, proj, **window)
+    return fm.innovations_fgat(wobs, xbs)
 
 
 def _fit(cost, d0, cvt, terms) -> dict:
