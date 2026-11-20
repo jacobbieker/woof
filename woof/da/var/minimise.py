@@ -81,13 +81,17 @@ def _precon(cost, ghat, j0_total: float, precondition_factor: float):
     blocks = getattr(cost.u, "precon_blocks", None)
     if blocks is None:
         blocks = [(m, cost.nx * cost.ny) for m in cost.u.cv_mz[:5]]
-    if any(m == 0 for m, _ in blocks) and len(blocks) > 5:
-        # WRFDA divides sz by cv_mz = 0 here (full-ensemble mode)
-        raise NotImplementedError("woof var: precondition_cg with a zero-mode control variable (je_factor <= 1)")
+    # jo_partial = j0_total / SUM(be%cv_mz(1:nv_precon)): every block's mode
+    # count, the hybrid's alpha%mz (not mz*ne) included.  A block with no modes
+    # (max_vert_var5 = 0, or full-ensemble mode's static blocks) has no
+    # elements; WRFDA's nn = sz(nv) / be%cv_mz(nv) divides by zero there, woof
+    # skips it.
     modes = sum(m for m, _ in blocks)
     values = np.ones(cost.cv_size, dtype=np.float64)
     iend = 0
     for count, nn in blocks:
+        if count == 0:
+            continue
         for _ in range(count):
             istart = iend
             iend = istart + nn

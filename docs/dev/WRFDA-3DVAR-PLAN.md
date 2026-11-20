@@ -1184,7 +1184,9 @@ The oracle tier equals the reference word for word on the device; the
 production tier meets the final `J` to 7e-8 with the same 50 iterations and
 one digest in fast and strict. The full-ensemble branch (`je_factor <= 1`,
 `jb_factor = -999`, static control variables dropped) builds its cost, but
-WRFDA's `precondition_cg` divides by zero there, so woof refuses to precondition it. Still open: the LETKF-cycling
+WRFDA's `precondition_cg` divides by zero there, so woof skips the empty blocks
+(as for `max_vert_var5 = 0`). O6's namelist leaves `precondition_cg` off; its
+diagonal is checked against a transcription of `da_minimise_cg`'s loop. Still open: the LETKF-cycling
 pairing and the OSSE half of GV3.
 
 ### V4. Hydrometeor CVs, radar, GOES, radiances (9.5-16 w)

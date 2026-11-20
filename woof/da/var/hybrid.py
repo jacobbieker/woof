@@ -75,9 +75,16 @@ FIELDS = ("u", "v", "t", "q", "ps")
 
 @dataclass(frozen=True)
 class HybridConfig:
-    """The ``&wrfvar7``/``&wrfvar13``/``&wrfvar16`` keys of the hybrid (WRFDA names, defaults)."""
+    """The ``&wrfvar7``/``&wrfvar13``/``&wrfvar16`` keys of the hybrid (WRFDA names, defaults).
 
-    je_factor: float = 1.0
+    ``je_factor`` has no default: WRFDA's (``Registry/registry.var``: 1.0)
+    selects full-ensemble mode, since ``da_setup_background_errors`` takes
+    every ``je_factor <= 1`` (including 0 < je_factor < 1, which it neither
+    clamps nor resets) to ``jb_factor = -999`` and drops the static ``B``.
+    Pass it explicitly: e.g. 2 for an even hybrid, 1 for full ensemble.
+    """
+
+    je_factor: float | None = None
     alpha_corr_scale: float = 200.0  # km
     alpha_std_dev: float = 1.0
     alpha_vertloc_opt: int = 2
@@ -88,6 +95,16 @@ class HybridConfig:
     use_4denvar: bool = False
 
     def check(self) -> None:
+        """:meth:`check_options` and a given, positive ``je_factor`` (WRFDA has no check for <= 0)."""
+        self.check_options()
+        if self.je_factor is None:
+            raise ValueError("HybridConfig.je_factor must be given: WRFDA's default 1.0 is full-ensemble mode "
+                             "(jb_factor = -999, no static B)")
+        if not self.je_factor > 0.0:
+            raise ValueError(f"je_factor must be > 0 (got {self.je_factor})")
+
+    def check_options(self) -> None:
+        """The options this port implements (everything but the weights)."""
         for key, bad in (
             ("alphacv_method = 1 (vp space)", self.alphacv_method != 2),
             ("alpha_hydrometeors", self.alpha_hydrometeors),
@@ -250,9 +267,10 @@ def setup_alpha(ne: int, *, jy: int, kz: int, ds: float, config: HybridConfig = 
     """
     from woof.da.var.be_dat import _vertical_truncation
 
-    config.check()
-    if ne <= 0:
-        raise ValueError("the alpha control variable needs ensdim_alpha > 0")
+    config.check_options()
+    if ne < 2:
+        raise ValueError(f"the alpha control variable needs ensdim_alpha >= 2 (got {ne}; ep is scaled by "
+                         "1/sqrt(ne-1))")
     opt = config.alpha_vertloc_opt
     if opt > 0:
         if vertloc is None:
@@ -265,6 +283,9 @@ def setup_alpha(ne: int, *, jy: int, kz: int, ds: float, config: HybridConfig = 
         a_evec = np.asarray(vertloc[1], dtype=np.float64)
         if a_val.size != kz or a_evec.shape != (kz, kz):
             raise ValueError(f"vertical localisation is for {a_val.size} levels, the domain has {kz}")
+        # WRFDA truncates on the sqrt-eigenvalues: da_get_alpha_vertloc stores
+        # eval = sqrt(eval) as alpha_val (and writes those to be.vertloc.dat),
+        # and da_setup_be_regional passes alpha_val to da_get_vertical_truncation
         mz = _vertical_truncation(config.max_vert_var_alpha, a_val, kz)
     else:
         mz = 1
@@ -314,6 +335,20 @@ class Ensemble:
     def arrays(self):
         return (self.u, self.v, self.t, self.q, self.ps)
 
+    def __post_init__(self):
+        # the device kernels index ep by these shapes: a mismatch would read out of bounds
+        shape = tuple(int(n) for n in np.shape(self.u))
+        if len(shape) != 4:
+            raise ValueError(f"ensemble u must be (nx, ny, nz, ne), got {shape}")
+        for k in ("v", "t", "q"):
+            if tuple(int(n) for n in np.shape(getattr(self, k))) != shape:
+                raise ValueError(f"ensemble {k} is {np.shape(getattr(self, k))}, u is {shape}")
+        want = shape[:2] + shape[3:]
+        if tuple(int(n) for n in np.shape(self.ps)) != want:
+            raise ValueError(f"ensemble ps is {np.shape(self.ps)}, want {want} (nx, ny, ne)")
+        if shape[3] < 2:
+            raise ValueError(f"the ensemble needs at least 2 members (got {shape[3]})")
+
     @classmethod
     def from_perturbations(cls, perts: dict) -> "Ensemble":
         """``ep = (1/sqrt(ne-1)) * x'`` from unscaled perturbation stacks.
@@ -323,9 +358,9 @@ class Ensemble:
         """
         xp = _xp(perts["u"])
         ne = int(perts["u"].shape[0])
-        scale = 1.0
-        if ne > 1:
-            scale = 1.0 / np.sqrt(float(ne - 1))
+        if ne < 2:
+            raise ValueError(f"the ensemble needs at least 2 members (got {ne}; ep is scaled by 1/sqrt(ne-1))")
+        scale = 1.0 / np.sqrt(float(ne - 1))
         out = {}
         for k in FIELDS:
             a = xp.asarray(perts[k], dtype=xp.float64)
@@ -435,7 +470,16 @@ def flow_xa_adj(xa: dict, ep: Ensemble) -> np.ndarray:
 class _HybridLayout:
     """The control vector: the static blocks v1..v5, then alpha (nx, ny, mz, ne) in Fortran order."""
 
-    def _layout(self, b, alpha: AlphaB, nx: int, ny: int, nz: int, jb_factor: float):
+    def _layout(self, b, alpha: AlphaB, ep: "Ensemble", nx: int, ny: int, nz: int, jb_factor: float):
+        if ep.shape != (nx, ny, nz) or ep.ne != alpha.ne:
+            raise ValueError(f"ensemble {ep.shape} x {ep.ne} does not match the domain ({nx}, {ny}, {nz}) "
+                             f"x {alpha.ne}")
+        mz = int(alpha.mz)
+        for name, got, want in (("val", np.shape(alpha.val), (ny, mz)), ("evec", np.shape(alpha.evec), (ny, nz, mz))):
+            if tuple(got) != want:
+                raise ValueError(f"alpha {name} is {tuple(got)}, the domain needs {want}")
+        if not 1 <= mz <= nz or np.size(alpha.rf_alpha) < mz:
+            raise ValueError(f"alpha mz {mz} needs 1 <= mz <= {nz} and {mz} rf_alpha values")
         self.nx, self.ny, self.nz = nx, ny, nz
         self.alpha = alpha
         self.jb_factor = float(jb_factor)
@@ -445,8 +489,13 @@ class _HybridLayout:
         self.cv_size_jb = nx * ny * sum(self.static_mz)
         self.cv_size_je = nx * ny * alpha.mz * alpha.ne
         self.cv_size = self.cv_size_jb + self.cv_size_je
-        # da_minimise_cg's precondition_cg blocks: per static mode one nx*ny
-        # block, then alpha's mz blocks of nx*ny*ne (sz / cv_mz)
+        # da_minimise_cg's precondition_cg blocks (WRFDA 4.7.1
+        # var/da/da_minimisation/da_minimise_cg.inc, lines 113-126): per static
+        # mode one nx*ny chunk, then sz(nv_precon) = size_alphac split into
+        # cv_mz = alpha%mz contiguous chunks of nn = nx*ny*ne.  WRFDA's alpha cv is
+        # (ix, jy, mz, ne) in Fortran order (da_cv_to_vv.inc, line 163), so
+        # with mz > 1 those chunks cross level and member boundaries; this is
+        # WRFDA's grouping, kept as it is (the cv here has the same order).
         self.precon_blocks = [(m, nx * ny) for m in self.static_mz] + [(alpha.mz, nx * ny * alpha.ne)]
 
 
@@ -458,10 +507,7 @@ class HybridReferenceU(_HybridLayout):
 
     def __init__(self, b, alpha: AlphaB, ep: Ensemble, xb: dict, jb_factor: float):
         nx, ny = (int(n) for n in np.shape(xb["grid_box_area"]))
-        if ep.shape != (nx, ny, int(b.kz)) or ep.ne != alpha.ne:
-            raise ValueError(f"ensemble {ep.shape} x {ep.ne} does not match the domain ({nx}, {ny}, {b.kz}) "
-                             f"x {alpha.ne}")
-        self._layout(b, alpha, nx, ny, int(b.kz), jb_factor)
+        self._layout(b, alpha, ep, nx, ny, int(b.kz), jb_factor)
         self.ep = Ensemble(*(np.asarray(_host(a), dtype=np.float64) for a in ep.arrays()))
         self.xb = xb
 
@@ -534,10 +580,7 @@ class HybridDeviceU(_HybridLayout):
         from woof.da.var.transforms import DeviceU
 
         nx, ny = (int(n) for n in np.shape(xb["grid_box_area"]))
-        if ep.shape != (nx, ny, int(b.kz)) or ep.ne != alpha.ne:
-            raise ValueError(f"ensemble {ep.shape} x {ep.ne} does not match the domain ({nx}, {ny}, {b.kz}) "
-                             f"x {alpha.ne}")
-        self._layout(b, alpha, nx, ny, int(b.kz), jb_factor)
+        self._layout(b, alpha, ep, nx, ny, int(b.kz), jb_factor)
         self.static = DeviceU(self.b, xb, precision)
         self.precision = precision
         self.dtype = self.static.dtype
@@ -629,7 +672,7 @@ class HybridDeviceU(_HybridLayout):
 # ------------------------------------------------------------ the cost
 
 
-def hybrid_cost(b, xb: dict, obs, ep: Ensemble, config: HybridConfig = HybridConfig(), *, tier: str = "reference",
+def hybrid_cost(b, xb: dict, obs, ep: Ensemble, config: HybridConfig, *, tier: str = "reference",
                 vertloc=None, **kw):
     """A :class:`~woof.da.var.cost.VarCost` with the alpha control variable.
 

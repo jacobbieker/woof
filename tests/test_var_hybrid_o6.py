@@ -19,9 +19,12 @@ What is asserted, and why it is enough:
   ``znw`` and ``ptop``, no file) meets the same O6 tolerances.
 - **Device tiers.** The oracle tier's first iterations are the reference's
   words; the production tier (binary32) meets O6's final ``J`` and
-  iteration count (7e-8 measured on CUDA) and its words, the same in fast
-  and strict child processes, hash to a constant that CUDA and Metal both
-  reproduce (O8).
+  iteration count (7e-8 measured on CUDA).  Its words hash to a constant,
+  measured on CUDA in fast and strict child processes; on Metal only the
+  strict lane is held to it (O8).
+- WRFDA's namelist here leaves ``precondition_cg`` at its default
+  (``.false.``), so O6 does not exercise the preconditioner;
+  ``test_var_hybrid`` checks its diagonal against ``da_minimise_cg``'s loop.
 """
 
 from __future__ import annotations
@@ -45,7 +48,7 @@ MANIFEST = Path(__file__).parent / "data" / "wrfda471" / "manifest.json"
 
 #: SHA-256 of the production tier's per-iteration (J, |g|, step) words, the
 #: final J and |g| and the float32 xhat; measured on CUDA (A6000, fast and
-#: strict) and Metal (strict).
+#: strict); Metal's strict lane must give the same words.
 PRODUCTION_DIGEST = "71f42528632c45405ebe5ebb1aa3723ce20294186e07c3f88f0509d86a1d1216"
 
 
@@ -60,6 +63,8 @@ def _man():
 def _dirs():
     d = os.environ.get("WOOF_WRFDA471_DIR")
     h = os.environ.get("WOOF_WRFDA471_HYBRID_DIR")
+    if bool(d) != bool(h):
+        pytest.fail("set both WOOF_WRFDA471_DIR and WOOF_WRFDA471_HYBRID_DIR, or neither")
     if not d or not all((Path(d) / n).is_file() for n in ("be.dat", "ob.ascii", "woof_xb.bin")):
         pytest.skip("WOOF_WRFDA471_DIR with be.dat, ob.ascii and woof_xb.bin is not set")
     if not h or not (Path(h) / "ep").is_dir() or not (Path(h) / "be.vertloc.dat").is_file():
@@ -143,7 +148,9 @@ def test_hybrid_o6_reference_tier_against_wrfdas_log(reference):
     fin = _man()["final"]
     print(f"hybrid O6 reference: worst line {worst:.2e}; J {j.total:.5f} Jo {j.jo:.5f} Jb {j.jb:.5f} Je {j.je:.5f}")
     for key, ours in (("j", j.total), ("jo", j.jo), ("jb", j.jb), ("je", j.je)):
-        assert abs(ours - float(fin[key])) <= 1e-5 * max(1.0, abs(ours)), (key, ours, fin[key])
+        # WRFDA prints 5 decimals: half a unit there (5e-6) plus 1e-10 relative.
+        # Measured: |J|, Jo, Jb, Je within 3.2e-6, 5.0e-6, 3.8e-6, 4.4e-6 of the print.
+        assert abs(ours - float(fin[key])) <= 5e-6 + 1e-10 * abs(ours), (key, ours, fin[key])
     assert worst <= 1e-12
 
 

@@ -15,17 +15,24 @@ What is asserted, and why it is enough:
   full-ensemble weights, with and without vertical localisation.
 - **Single observation:** the minimiser's increment is the closed form
   ``B h d / (h^T B h + r^2)`` with ``B = U_s U_s^T / jb_factor + U_e U_e^T /
-  je_factor``, and the ensemble part is the localised ensemble covariance:
-  ``sum_n x'_n(x) x'_n(x0) C(x, x0)`` with ``C`` the alpha correlation, which
-  is about 1 at the observation and decays with ``alpha_corr_scale``.
-- **Device tiers:** the oracle tier's U, U^T, J and grad J are the
-  reference's words on CUDA and Metal; the production tier is within
-  binary32 of them and its words, in fast and strict child processes, hash
-  to a constant both backends reproduce.
+  je_factor`` (independent: the minimiser against ``U``).  The ensemble
+  part's Schur-product structure, ``sum_n x'_n(x) x'_n(x0) C(x, x0)`` with
+  ``C`` built from the same alpha transforms, is an internal consistency
+  check only, not an independent check of ``C``.
+- **Preconditioner:** ``precondition_cg``'s diagonal equals a literal
+  transcription of ``da_minimise_cg``'s loop (``sz``/``cv_mz`` chunks over
+  WRFDA's (ix, jy, mz, ne) alpha order), for a case with ``alpha%mz != ne``.
+- **Inputs:** mismatched ensemble or alpha shapes, ``ne < 2`` and a missing
+  or non-positive ``je_factor`` are refused.
+- **Device tiers:** the oracle tier's U, U^T (with the alpha stages), J and
+  grad J are the reference's words on CUDA and Metal; the production tier is
+  within binary32 of them.  Its words are the same in fast and strict child
+  processes on CUDA; on Metal only the strict lane is held to the digest.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -49,7 +56,7 @@ NX, NY, NZ, NE = 13, 11, 6, 5
 
 #: SHA-256 of the production tier's xa (U v) and cv (U^T x) words for
 #: :func:`_dev_case` (je_factor 2 and 1); measured on CUDA (A6000, fast and
-#: strict) and Metal (strict).
+#: strict); Metal's strict lane must give the same words.
 PRODUCTION_DIGESTS = {
     "production2": "9ce5c74fca38e30e36bf2da6fd8b97fedbadba2a38b5b6999377f941dbeffc3f",
     "production1": "4023ced4bc5b6213c5e70c6403cd4d3719d2e420ac660d7287daa5cc50a4cbad",
@@ -149,7 +156,37 @@ def test_setup_alpha_options():
     with pytest.raises(ValueError):
         hy.setup_alpha(NE, jy=NY, kz=NZ, ds=3000.0, config=hy.HybridConfig(alpha_vertloc_opt=1))
     with pytest.raises(NotImplementedError):
-        hy.HybridConfig(alphacv_method=1).check()
+        hy.HybridConfig(alphacv_method=1, je_factor=2.0).check()
+    with pytest.raises(ValueError):
+        hy.setup_alpha(1, jy=NY, kz=NZ, ds=3000.0, config=hy.HybridConfig(alpha_vertloc_opt=0))
+
+
+def test_je_factor_must_be_given_and_positive():
+    with pytest.raises(ValueError, match="full-ensemble"):
+        hy.HybridConfig().check()
+    for bad in (0.0, -1.0):
+        with pytest.raises(ValueError):
+            hy.HybridConfig(je_factor=bad).check()
+    hy.HybridConfig(je_factor=0.5).check()  # WRFDA: full ensemble, as je_factor = 1
+
+
+def test_shapes_and_member_count_are_checked():
+    good = _ensemble(dict.fromkeys(hy.FIELDS, 1.0))
+    with pytest.raises(ValueError):
+        hy.Ensemble.from_perturbations({k: v[:1] for k, v in good.items()})
+    for key, cut in (("v", np.s_[:, :, :, :-1]), ("q", np.s_[:, :-1]), ("ps", np.s_[:, :, :-1]), ("t", np.s_[:-1])):
+        bad = dict(good, **{key: good[key][cut]})
+        with pytest.raises(ValueError):
+            hy.Ensemble.from_perturbations(bad)
+    b, xb, ep, cfg, obs = _setup(2.0, 0)
+    alpha = hy.setup_alpha(NE, jy=NY, kz=NZ, ds=3000.0, config=cfg)
+    xbu = {k: xb[k] for k in ("grid_box_area", "coefx", "coefy", "qs", "q", "psac", "dnw", "rho", "p", "t", "c1h",
+                              "c2h")}
+    small = hy.Ensemble(*(a[..., :-1] for a in ep.arrays()))
+    with pytest.raises(ValueError):
+        hy.HybridReferenceU(b, alpha, small, xbu, 2.0)
+    with pytest.raises(ValueError):
+        hy.HybridReferenceU(b, dataclasses.replace(alpha, val=alpha.val[:-1]), ep, xbu, 2.0)
 
 
 # ------------------------------------------------------------ reference tier
@@ -207,7 +244,7 @@ def _single_ob(i0, j0, k0, d=1.0, err=0.5):
                          np.array([d]), np.array([err]), groups=[("sound", [("t", np.arange(1))])])
 
 
-def test_single_ob_hybrid_increment_structure():
+def test_single_ob_hybrid_increment_closed_form_and_consistency():
     i0, j0, k0 = 6, 5, 2
     obs = _single_ob(i0, j0, k0)
     b, xb, ep, cfg, _ = _setup(2.0, 2, scale=3.0, obs=obs)
@@ -226,7 +263,8 @@ def test_single_ob_hybrid_increment_structure():
     gain = 1.0 / (hbh + 0.5**2)
     for k in ("u", "v", "t", "q", "psfc"):
         np.testing.assert_allclose(xa[k], gain * bh[k], rtol=0, atol=1e-9 * np.abs(bh[k]).max())
-    # the ensemble part: sum_n x'_n(x) x'_n(x0) C(x, x0) / je_factor
+    # internal consistency only (C uses the same alpha transforms as U): the
+    # ensemble part is sum_n x'_n(x) x'_n(x0) C(x, x0) / je_factor
     we = np.concatenate([np.zeros(nb), uth[nb:]])
     ens = u.apply(we)["xa"]
     ue = hy.HybridReferenceU(b, u.alpha, ep, u.xb, u.jb_factor)
@@ -254,15 +292,43 @@ def test_single_ob_hybrid_increment_structure():
     assert st / cost.jb_factor + ens["t"][i0, j0, k0] / cost.je_factor == pytest.approx(hbh, rel=1e-12)
 
 
-def test_precondition_cg_blocks_include_alpha():
-    b, xb, ep, cfg, obs = _setup(2.0, 2)
+def _wrfda_precon(ghat, j0_total, factor, cv_mz, sizes):
+    """da_minimise_cg.inc's [1.1] loop, transcribed: sz(nv) / cv_mz(nv) contiguous chunks per block."""
+    precon = np.ones(ghat.size)
+    g_total = _serial(ghat, ghat)
+    iend = 0
+    for nv, sz in enumerate(sizes):
+        if cv_mz[nv] == 0:  # WRFDA divides by zero here; such a block has no elements
+            assert sz == 0
+            continue
+        nn = sz // cv_mz[nv]
+        for _ in range(cv_mz[nv]):
+            istart, iend = iend, iend + nn
+            g_partial = _serial(ghat[istart:iend], ghat[istart:iend])
+            jo_partial = j0_total / sum(cv_mz)
+            precon[istart:iend] = 1.0 / (1.0 + factor * (g_partial / g_total) / (jo_partial / j0_total))
+    return precon
+
+
+@pytest.mark.parametrize("je_factor,opt", [(2.0, 2), (2.0, 0), (1.0, 2)])
+def test_precondition_cg_diagonal_is_wrfdas(je_factor, opt):
+    from woof.da.var.minimise import _precon
+
+    b, xb, ep, cfg, obs = _setup(je_factor, opt)
     cost = hy.hybrid_cost(b, xb, obs, ep, cfg)
-    r = minimise_cg(cost, ntmax=5, precondition_cg=True)
-    assert r.j_final < r.j[0]
-    b, xb, ep, cfg, obs = _setup(1.0, 2)
-    cost = hy.hybrid_cost(b, xb, obs, ep, cfg)
-    with pytest.raises(NotImplementedError):
-        minimise_cg(cost, ntmax=5, precondition_cg=True)
+    u = cost.u
+    assert u.alpha.mz != NE  # a wrong (ne, nx*ny*mz) grouping would differ
+    ij = NX * NY
+    # be%cv%size1..5 and size_alphac = ij * alpha%mz * ne; cv_mz(1:nv_precon) leaves out ne
+    cv_mz = list(u.static_mz) + [u.alpha.mz]
+    sizes = [ij * m for m in u.static_mz] + [ij * u.alpha.mz * NE]
+    ghat = np.random.default_rng(11).standard_normal(cost.cv_size)
+    ghat[u.cv_size_jb:] *= np.repeat(np.linspace(0.2, 3.0, u.alpha.mz * NE), ij)  # chunks differ
+    got = np.asarray(_precon(cost, ghat, 123.5, 1.7))
+    want = _wrfda_precon(ghat, 123.5, 1.7, cv_mz, sizes)
+    np.testing.assert_allclose(got, want, rtol=1e-13, atol=0)
+    r = minimise_cg(cost, ntmax=3, precondition_cg=True)
+    assert np.isfinite(r.j_final)
 
 
 # ------------------------------------------------------------ device tiers
@@ -289,8 +355,11 @@ def _device_words(je_factor, precision):
         pairs.append((f"U.{k}", ds[k], rs[k].reshape(ds[k].shape) if k == "alpha_vp" else
                       np.moveaxis(rs[k], 3, 2).reshape(ds[k].shape)))
     pairs += [(f"U.xa.{k}", ds["xa"][k], rs["xa"][k]) for k in ("u", "v", "t", "q", "psfc", "p", "rho")]
-    ra = rc.u.adjoint(x)
-    da = dc.u.adjoint({k: cp.asarray(a, dtype=dc.dtype) for k, a in x.items()})
+    ra = rc.u.adjoint(x, stages=True)
+    da = dc.u.adjoint({k: cp.asarray(a, dtype=dc.dtype) for k, a in x.items()}, stages=True)
+    pairs.append(("UT.alpha_vp", da["alpha_vp"], ra["alpha_vp"]))
+    for k in ("alpha_vv_eof", "alpha_vv"):
+        pairs.append((f"UT.{k}", da[k], np.moveaxis(ra[k], 3, 2).reshape(da[k].shape)))
     pairs.append(("UT.cv", da["cv"], ra["cv"]))
     jr, gr = rc.value_and_gradient(v)
     jd, gd = dc.value_and_gradient(dc.asarray(v))
