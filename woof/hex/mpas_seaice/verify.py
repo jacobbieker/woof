@@ -12,6 +12,7 @@ def verify() -> dict:
     from woof import backend
     from woof.hex.coupled import oracle, registry
     from woof.verify import mpas_seaice_column_oracle as column_oracle
+    from woof.verify import mpas_seaice_coupling_prep_oracle as coupling_prep_oracle
     from woof.verify import mpas_seaice_evp_oracle as evp_oracle
     from woof.verify import mpas_seaice_presubcycle_oracle as presubcycle_oracle
     from woof.verify import mpas_seaice_remap_checks_oracle as remap_checks_oracle
@@ -23,7 +24,8 @@ def verify() -> dict:
     from woof.verify import mpas_seaice_step_remap_sphere_oracle as step_remap_sphere_oracle
     from woof.verify import mpas_seaice_velocity_oracle as velocity_oracle
 
-    from . import column_v842, evp_v842, presubcycle_v842, remap_init_v842, remap_v842, timestep_v842, velocity_v842
+    from . import (column_v842, coupling_prep_v842, evp_v842, presubcycle_v842, remap_init_v842, remap_v842,
+                   timestep_v842, velocity_v842)
 
     for fixture in (evp_oracle.FIXTURE_DIR / "oracle-r4.npz", velocity_oracle.FIXTURE_DIR / "oracle-r4.npz",
                     presubcycle_oracle.FIXTURE_DIR / "oracle-r4.npz", step_oracle.FIXTURE_DIR / "oracle-r4.npz",
@@ -31,7 +33,8 @@ def verify() -> dict:
                     remap_sphere_oracle.FIXTURE_DIR / "oracle-r4.npz",
                     step_remap_sphere_oracle.FIXTURE_DIR / "oracle-r4.npz",
                     remap_checks_oracle.FIXTURE_DIR / "oracle-r4.npz",
-                    remap_init_oracle.FIXTURE_DIR / "oracle-r4.npz", column_oracle.FIXTURE_DIR / "oracle-r8.npz"):
+                    remap_init_oracle.FIXTURE_DIR / "oracle-r4.npz", column_oracle.FIXTURE_DIR / "oracle-r8.npz",
+                    coupling_prep_oracle.FIXTURE_DIR / "oracle-r4.npz"):
         if not fixture.is_file():
             raise FileNotFoundError(
                 f"the MPAS-Seaice oracle fixture is not here ({fixture.parent}); it ships with the "
@@ -82,6 +85,9 @@ def verify() -> dict:
     pieces.append(piece("column_init_thermo_profiles_r8", column_v842, column_oracle,
                         {f"nIceLayers={n}": {"initialSalinityProfile": bad} for n, bad in thermo.items()
                          if n not in column_v842.COS_REFUSED_LAYERS}))
+    for precision in ("r4", "r8"):
+        pieces.append(piece(f"column_coupling_prep_{precision}", coupling_prep_v842, coupling_prep_oracle,
+                            coupling_prep_oracle.measure(precision)))
     return {
         "model": "seaice",
         "status": registry.component("seaice").status,

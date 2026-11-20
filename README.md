@@ -337,7 +337,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     shortwave, `column_prep_radiation` and the initial shortwave. The
     computed albedos need the opt-in for glibc's atan, and the
     delta-Eddington shortwave needs it for glibc's sin, cos, atan and asin
-    (the opt-in now carries asin). The elastic subcycles check
+    (the opt-in now carries asin). Also the coupling preparation
+    (`seaice_column_coupling_prep` and `seaice_column_scale_fluxes`: cell
+    albedos, pond freshwater feedback, shortwave scaling, fluxes per unit
+    ice area; RKIND 4 and 8, no opt-in; the ocean mixed layer is refused by
+    name). The elastic subcycles check
     their arrays once per solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean

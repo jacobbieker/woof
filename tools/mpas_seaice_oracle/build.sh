@@ -18,7 +18,9 @@
 # in the stream manager and is not built.  stubs.F90 supplies the framework
 # types the routines walk; run_oracle.F90 drives the internal stress,
 # run_subcycle.F90 the velocity solve and run_presubcycle.F90 the pre-subcycle
-# routines.  The objects must contain no FMA instruction (checked with objdump
+# routines; run_coupling_prep.F90 the column package's coupling preparation
+# (seaice_column_coupling_prep and seaice_column_scale_fluxes, cut verbatim).
+# The objects must contain no FMA instruction (checked with objdump
 # when it is present).  expf (RKIND 4) and exp (RKIND 8), which ice_strength
 # calls, are the host glibc's, or tools/oracle_libm's transcriptions of them on
 # a host whose libm is not glibc.  The column-package oracles (run_column,
@@ -144,6 +146,12 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" seaice_time_integration_cut.F
       "${fc[@]}" "${flags[@]}" "${script_dir}/run_seaice_step.F90"
       "${fc[@]}" "${flags[@]}" "${script_dir}/run_incremental_remap.F90"
+      # the coupling preparation, cut verbatim (coupling_cut_head.F90)
+      { cat "${script_dir}/coupling_cut_head.F90"
+        cut "${seaice}/shared/mpas_seaice_column.F" seaice_column_coupling_prep seaice_column_scale_fluxes
+        echo "end module seaice_column_coupling"; } > seaice_column_coupling_cut.F
+      "${fc[@]}" "${flags[@]}" seaice_column_coupling_cut.F
+      "${fc[@]}" "${flags[@]}" "${script_dir}/run_coupling_prep.F90"
       if command -v objdump >/dev/null; then
           if objdump -d mpas_seaice_*.o seaice_*.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
               echo "a time-step oracle object contains an FMA instruction; refusing" >&2
@@ -158,6 +166,8 @@ for precision in r4 r8; do
           step_standins.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
           seaice_mesh_interpolation.o oracle_stream.o stubs.o mpas_kind_types.o \
           ${step_libm[@]+"${step_libm[@]}"}
+      "${fc[@]}" -o "${build_dir}/run_coupling_prep_${precision}" run_coupling_prep.o seaice_column_coupling_cut.o \
+          mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o oracle_stream.o stubs.o mpas_kind_types.o
       "${fc[@]}" -o "${build_dir}/run_incremental_remap_${precision}" run_incremental_remap.o \
           mpas_seaice_advection_incremental_remap.o mpas_seaice_advection_incremental_remap_tracers.o \
           remap_standins.o rbf_standins.o seaice_diagnostics_cut.o oracle_stream.o stubs.o mpas_kind_types.o
@@ -280,5 +290,5 @@ cd "${build_dir}"
 } > "${build_dir}/TOOLCHAIN.txt"
 echo "built ${build_dir}/run_oracle_r{4,8} ${build_dir}/run_subcycle_r{4,8} ${build_dir}/run_presubcycle_r{4,8}" \
      "${build_dir}/run_seaice_step_r{4,8} ${build_dir}/run_incremental_remap_r{4,8}" \
-     "${build_dir}/run_incremental_remap_init_r{4,8}" "${build_dir}/run_column_r8" \
+     "${build_dir}/run_incremental_remap_init_r{4,8}" "${build_dir}/run_coupling_prep_r{4,8}" "${build_dir}/run_column_r8" \
      "${build_dir}/run_init_thermo_r8"
