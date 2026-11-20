@@ -241,9 +241,13 @@ def test_wrfplus_oracle_agreement(backend, tmp_path):
     specified x axis, so those cases are TL only (tools/wrfplus_oracle/
     rhsph.F90).  G_/A_CORIOLIS then G_/A_CURVATURE (5 cases: periodic,
     open and specified axes, a rotated grid, hybrid levels; the fixture
-    forms WRF's coupled rw from w and mut): a periodic axis's end face
-    repeats face 0, which WRF reads through its halo, so the two faces'
-    adjoints are compared as a sum.  g_/a_w_damp (3 cases; WRFPLUS couples
+    forms WRF's coupled rw from w and mut).  A periodic axis's end face
+    repeats face 0: the ru and rv adjoints of faces 0 and nx (ny) are
+    compared apart (woof's face nx is WRF's column ide); WRF and woof
+    split their u and v reads of the repeated face differently, so those
+    two faces' u and v adjoints are compared as a sum.  A curvature-only
+    case (f = e = 0) holds binary32 to curvature's own scale, which
+    Coriolis would swamp.  g_/a_w_damp (3 cases; WRFPLUS couples
     with mut and uses w_beta = 1 as onset and excess reference, so the
     cases are not hybrid and take w_damp_on = w_crit_cfl = 1)."""
     dtn = "float32" if backend == "mlx" else "float64"
@@ -276,9 +280,9 @@ for z in [np.load(f) for f in {[str(f) for f in FIXTURES]!r}]:
         if pre + "mask" in z.files and name.startswith("tl_"):
             e, w = e[z[pre + "mask"]], w[z[pre + "mask"]]
         for x in (e, w) if op == "cc" else ():
-            if name in ("ad_ru", "ad_u") and not g.boundary_x:
+            if name == "ad_u" and not g.boundary_x:
                 x[..., 0] += x[..., -1]; x[..., -1] = 0
-            if name in ("ad_rv", "ad_v") and not g.boundary_y:
+            if name == "ad_v" and not g.boundary_y:
                 x[..., 0, :] += x[..., -1, :]; x[..., -1, :] = 0
         scale = max(float(np.abs(e).max()), 1e-300)
         out[pre + name] = float(np.abs(w - e).max()) / scale
@@ -302,7 +306,7 @@ for z in [np.load(f) for f in {[str(f) for f in FIXTURES]!r}]:
     bad = {k: v for k, v in out.items()
            if not v < (1e-4 if backend == "mlx" and k in loose else limit)}
     assert not bad, sorted(bad.items())
-    assert len(out) == 4 * 9 + 2 * 4 + 7 * 9 + 3 * 2 + 5 * 15 + 3 * 5
+    assert len(out) == 4 * 9 + 2 * 4 + 7 * 9 + 3 * 2 + 6 * 15 + 3 * 5
 
 
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])

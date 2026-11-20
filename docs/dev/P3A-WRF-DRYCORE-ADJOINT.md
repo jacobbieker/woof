@@ -343,11 +343,15 @@ Each step is one small PR, taken to merged before the next widens.
      (binary32) and FD for 7 configurations. The float base state is the
      strict primal's words (0 differing, host and CUDA). WRFPLUS 4.7.1
      G_/A_CORIOLIS then G_/A_CURVATURE (`tools/wrfplus_oracle/coriolis.F90`)
-     agree to about 5e-16 on 5 cases, hybrid ones included: WRFPLUS takes
+     agree to about 5e-16 on 6 cases, hybrid ones included: WRFPLUS takes
      the coupled rw, which the fixture forms from w and mut with its
-     tangent and adjoint. A periodic axis's end face repeats face 0, which
-     WRF reads through its halo, so the two faces' adjoints are compared
-     as a sum. Binary32 agrees to 2.3e-6 or better.
+     tangent and adjoint. One case sets f = e = 0, so curvature alone is
+     compared and binary32 (Metal) is held on its scale rather than
+     Coriolis's. A periodic axis's end face repeats face 0. The ru and rv
+     adjoints of faces 0 and nx (ny) are compared apart (woof's face nx
+     is WRF's column ide); WRF and woof split their reads of the repeated
+     u and v face differently, so those two faces' u and v adjoints are
+     compared as a sum. Binary32 agrees to 2.3e-6 or better.
    - Not covered: the polar / map_proj 6 branch of curvature (tan(lat)),
      which woof's primal does not port either.
    - `w_damp` (w_damping = 1) is done in the same module (`wd_tl`,
@@ -406,6 +410,43 @@ Each step is one small PR, taken to merged before the next widens.
 7. Lateral boundaries: `relax_bdy_dry`, `spec_bdy_dry`,
    `spec_bdyupdate(_ph)`, `zero_grad_bdy`, `spec_bdy_final`, with LBC
    perturbations as an AD output (4D-Var's `var4d_lbc`).
+   - Done in `woof/grad/wrfplus/lbc.py` (`lbc_tl`, `lbc_ad`):
+     `relax_bdy_dry` and `spec_bdy_dry` over woof's strict
+     `state_relaxation_multi` (lbc_state.cu), one row per call. A row is
+     a field kind (u, v, theta, phi, w, mu) and the flags the strict stage
+     uses: the stage-1 held capture of u, v, theta (and w), the specified
+     target, phi's stage-1 held compute (with the msft divide) and its
+     later held read, and mu's direct relaxation. The state is the row's
+     tendency and held buffer; the active inputs are the field, mu' and
+     the eight side tables (value and tendency per side), so the LBC
+     perturbation is an AD output. The coupled field is woof's strict
+     `coupled_current` (face mass for u and v, c1 mass + c2, msfu and
+     msfv_inv), its TL taken in the same operation order.
+   - The TL is one kernel. Frame cells take the first threads (the
+     primal's remap); rows without a held pass launch only those. The AD
+     is a gather in four kernels: the per-cell stencil weights (scratch),
+     the field adjoint and per-cell mass adjoint over the stencil's
+     relax_zone + 1 rings, the side tables, and mu' (u and v face masses
+     counted per face). Rows that do not relax (specified target, held
+     read) skip the field and mass gathers.
+   - Checks: dot-product test about 4e-15 (binary64) and 1e-8 (binary32)
+     and FD for 34 configurations (every row type and kind, map factors,
+     hybrid levels, spec_zone 2 with relax_zone 5, relax_zone 1). The
+     float base state is the strict primal's words (0 differing, host and
+     CUDA). WRFPLUS 4.7.1 g_relax_bdytend then g_spec_bdytend, and
+     a_spec_bdytend then a_relax_bdytend (`tools/wrfplus_oracle/lbc.F90`),
+     agree to about 3e-16 on 8 direct-form cases (u with and without map
+     factors, v with them, theta, phi, w, mu, a wider zone). WRFPLUS's relax_bdy_dry is
+     not hybrid and takes ru/rv as given, so the driver calls the core
+     routines on woof's coupled field, which the fixture forms with its
+     tangent and adjoint. Binary32 agrees to 2.1e-7 or better. No WRFPLUS
+     bugs found.
+   - The domain must hold the relaxation frames (2 (relax_zone + 1) + 1
+     cells across) and spec_zone must be at least 1: at spec_zone 0 the
+     primal's stencil reads outside the row (as WRF's does). u and v rows
+     do not take the msft divide. Not covered yet: `spec_bdy_final`,
+     `spec_bdyupdate_ph`, `zero_grad_bdy` (item 7b), moist and scalar
+     rows, nested time-t sources, streamed tile seams.
 8. Step and window driver (`woof/grad/wrfplus/model.py`):
    - per-step dot-product and Taylor tests;
    - TL vs nonlinear perturbation growth over 1-6 h on a 12 km dry
@@ -507,7 +548,8 @@ it idle (under 10% utilisation for 20 s before the run).
 | pg_buoy_w (slow_buoyancy) | #701 | 1.3x | 1.9x | 2.1x |
 | rhs_ph (slow_geopotential, fused or open) | #702 | 4.2x (4.1-4.4) | 1.2-1.3x | 13-15x |
 | coriolis + curvature (coriolis_curvature) | #706 | 3.4x | 2.0x | 13x |
-| w_damp (w_damp) | this PR | 1.6x | 1.7x | 7.1x |
+| w_damp (w_damp) | #708 | 1.6x | 1.7x | 7.1x |
+| relax_bdy_dry + spec_bdy_dry (state_relaxation_multi, 3 stages) | this PR | 2.5x (2.5-2.6) | 1.6x | 4.1x |
 
 advance_uv's 3.7x in the projection is the midpoint of its range. The
 advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
@@ -579,25 +621,31 @@ coriolis_curvature runs once per RK stage on rotational grids. Its
 idle-card primal (0.20 ms) gives 3.8% of the strict step for three
 calls, taken out of "other woof kernels". w_damp (w_damping = 1) also
 runs once per stage; its idle-card primal (0.047 ms) gives 0.9%, also
-taken out of "other woof kernels".
+taken out of "other woof kernels". The lateral-boundary rows run as one
+state_relaxation_multi launch per RK stage (8 rows on stage 1, 5 on
+stages 2-3, no w rows); at 200x200x49 the three launches take 0.37 ms,
+2.3% of the strict step, also taken out of "other woof kernels". Their
+ratios are over those launches, timed as CUDA graphs so host dispatch
+of the per-row TL/AD calls (18 rows, 4-7 kernels each) is not counted.
 
 The projection is the per-step adjoint cost over the forward step:
 1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
-far (95.8% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
+far (98.1% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
 set_w_surface's 0.03%, flux_div's 14.4%, slow_pgf's 2.9%,
-slow_geopotential's 2.3%, coriolis_curvature's 3.8%, w_damp's 0.9% and
-slow_buoyancy's 0.7%), Σ share x AD32 = 3.57, on top of the forward
-recompute's 1. The rest is projected at a range of ratios:
+slow_geopotential's 2.3%, coriolis_curvature's 3.8%, the lateral
+boundaries' 2.3%, w_damp's 0.9% and slow_buoyancy's 0.7%), Σ share x
+AD32 = 3.64, on top of the forward recompute's 1. The rest is projected
+at a range of ratios:
 
-| ratio for the unmeasured 4.2% | projection |
+| ratio for the unmeasured 1.9% | projection |
 |---|---|
-| 2.2x (memory-traffic floor) | 4.67x |
-| 3.0x | 4.70x |
-| 3.73x (the measured share-weighted mean) | 4.73x |
+| 2.2x (memory-traffic floor) | 4.68x |
+| 3.0x | 4.69x |
+| 3.71x (the measured share-weighted mean) | 4.71x |
 
-The 5x limit holds while the rest averages at most about 10x. This is a
+The 5x limit holds while the rest averages at most about 19x. This is a
 projection from kernel GPU time, not a measured step ratio: launch gaps
-are not counted, most ratios come from a shared card, and 4.2% of the
+are not counted, most ratios come from a shared card, and 1.9% of the
 step is not yet ported. calc_coefs and small_step are each about 4.8x;
 at 2.3% and 8.2% of the step they add about 0.11 and 0.39. Each later kernel PR replaces a
 projected share with a measured one.
