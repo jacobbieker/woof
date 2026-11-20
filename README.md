@@ -371,14 +371,22 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
-    subglacial hydrology and one forward-Euler time step.
+    subglacial hydrology and one forward-Euler time step;
+  - the coupler's ocean import merge, E3SM v3.2.0's `prep_ocn_merge`
+    (`woof/hex/coupled/prep_ocn_merge_e3sm.py`, opt-in, not called by the
+    coupled step): x2o built from the atmosphere, sea ice, runoff, waves,
+    land ice and the atmosphere/ocean fluxes, weighted by the ice and
+    open-ocean fractions, with E3SM's own field matching and aborts.
+    real(r8), word-exact on CUDA and Metal against the routine compiled
+    verbatim on the pinned MCT (`tools/e3sm_coupler_oracle`); the water
+    isotopes are refused by name.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
   meshes by name. The sea-ice column physics' time step (mushy vertical thermodynamics,
   shortwave), ocean KPP and GM/Redi,
-  and the coupler import and export are not ported. A few RKIND 8 cases need the LGPL libm
+  and the coupler import and export (other than the ocean merge) are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
 - **Further WRF physics,** each held word for word to compiled WRF Fortran

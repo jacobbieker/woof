@@ -282,6 +282,34 @@ Ordered by how self-contained each piece is:
    the FO viscosity and the basal friction residual) are the first
    candidates.
 
+## The coupler (E3SM v3.2.0, `driver-mct`)
+
+MPAS's ocean and sea ice exchange fluxes through E3SM's coupler, not through
+anything in MPAS-Model. The coupler pieces are transcribed from E3SM tag
+v3.2.0 (`648b167b`) and held to the routines compiled verbatim with gfortran
+-O0 -ffp-contract=off on the MCT commit that tag pins (`82b0071`), in
+`tools/e3sm_coupler_oracle/`. Each is opt-in: the coupled step keeps its
+matched exchange unless asked.
+
+1. The ocean import merge, `prep_ocn_merge` (`driver-mct/main/prep_ocn_mod.F90`).
+   Ported (`woof/hex/coupled/prep_ocn_merge_e3sm.py`,
+   `tests/test_e3sm_ocean_merge_parity.py`): the field matching and its
+   aborts, the zero and shared-name copies, the shortwave, precipitation and
+   runoff, the nutrients, the per-category fields and the generic
+   fraction-weighted merge, real(r8), on CUDA and Metal. The water isotopes
+   are refused by name.
+2. The fractions on the ocean grid (`seq_frac_set`, `ifrac`/`ofrac` from the
+   ice's `Si_ifrac`) and the radiative fractions (`ifrad`/`ofrad`, from
+   `seq_flux_ocnalb_mct`). Still to port.
+3. The atmosphere/ocean fluxes, `xao` (`seq_flux_atmocn_mct`, `shr_flux_atmocn`).
+   Still to port.
+4. The ocean's and the sea ice's import and export
+   (`components/mpas-ocean/driver/ocn_comp_mct.F`,
+   `components/mpas-seaice/driver/ice_comp_mct.F`). Still to port.
+5. The coupled ocean + sea-ice step on `woof/hex/coupled`, with the exchange
+   checked against the E3SM merge. It needs the sea ice's assembled column
+   time step (above, still to port), so it is not built yet.
+
 ## Status
 
 | Core | Ported pieces | Status |
