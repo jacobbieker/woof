@@ -159,8 +159,8 @@ def minimise_cg(cost, it: int = 1, xhat=None, cv=None, *, ntmax: int = 75, eps: 
         ops.axpy(step, phat, xhat)
         if orthonorm_gradient:
             for i in range(iteration - 1, -1, -1):
-                gdot = ops.dot(pg(), qhat[i])
-                ops.axpy(-gdot, qhat[i], ghat)  # ghat - gdot * qhat(i)
+                gdot = ops.dot_device(pg(), qhat[i])  # stays on the device: no sync per vector
+                ops.axpy_neg(gdot, qhat[i], ghat)  # ghat - gdot * qhat(i)
         rrmnew = ops.dot(pg(), ghat)
         rrmnew_norm = math.sqrt(rrmnew)
         ratio = 0.0

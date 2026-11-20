@@ -2278,6 +2278,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "e753cf856adb844ea0080ca482ef58893ba4a07d158eb652733414785a08a26c",
+    "constructor": "RawModule",
+    "factory": "_module",
+    "factory_sha256": "bc855426d7c4964ffb23775e1ad752cd2e30ea86a56eacf67bc6ac3654480018",
+    "file": "woof/da/var/transforms.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "e7d710f3ebf623c81f5a94bc55db87c5bb4092064002967c169d01a60090858a",
     "constructor": "compile_using_nvrtc",
     "factory": "module",
@@ -2587,14 +2595,6 @@
     "factory": "__init__",
     "factory_sha256": "1f52f60740f4cb1f4d11c09c28b98166a73beecf4e40de1b236b68d13cd83451",
     "file": "woof/hex/iau_forcing.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "fa9e0a16659fcb764d1104c1350f47476f5985e6cb3b108b34d28e3a04a6ec53",
-    "constructor": "RawModule",
-    "factory": "_module",
-    "factory_sha256": "3d6331d57be27ea1003a1c1478bc261f837b117e3270a0210c366953337e4454",
-    "file": "woof/da/var/transforms.py",
     "status": "unresolved"
    },
    {
@@ -4724,8 +4724,12 @@
     "sha256": "ed125e770df19cb3161c4a8bed53e55cc0d740f521f318cf9166e2a1063ddd25"
    },
    {
+    "file": "woof/da/var/kernels/var_obs.cu",
+    "sha256": "c59bace21cb5cbf6e608f21a7d05c0c133c34990b25ca46cb4f12d1dc4d02be9"
+   },
+   {
     "file": "woof/da/var/kernels/var_u.cu",
-    "sha256": "a8c55dfe3e836629154ac275f176c49bc64e60f6a920dbc57a1f5ec4467f6194"
+    "sha256": "be27bd95ef3427ce0457a5e354edb0bfa0f8fd24e6f160dd629e98ba4b36d816"
    },
    {
     "file": "woof/data/gbmpbl/constants.cuh",
@@ -5499,7 +5503,7 @@
    },
    {
     "file": "woof/da/var/transforms.py",
-    "sha256": "a4d41dd0809fa5411a4f74395029aec61ccb25f99a52ad5ee8c45578e161c3a5"
+    "sha256": "cdc21f8a94568b3beabfb1b99afa6b64ddfaab6efd7018f7d497332961375469"
    },
    {
     "file": "woof/doctor.py",

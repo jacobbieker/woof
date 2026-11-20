@@ -102,6 +102,19 @@ extern "C" __global__ void var_axpy(real* __restrict__ y, const real* __restrict
     GRID_LOOP(t, n) { y[t] = R_ADD(y[t], R_MUL(a, x[t])); }
 }
 
+// y = y + a x with a = -s[0] (one binary64 value on the device, the result of
+// a dot) rounded once to the real type: da_minimise_cg's re-orthonormalisation
+// ghat = ghat - gdot qhat(i) without a round trip to the host
+extern "C" __global__ void var_axpy_neg_dev(real* __restrict__ y, const real* __restrict__ x,
+                                            const double* __restrict__ s, const long long n) {
+#ifdef VAR_F64
+    const real a = -s[0];
+#else
+    const real a = __double2float_rn(-s[0]);
+#endif
+    GRID_LOOP(t, n) { y[t] = R_ADD(y[t], R_MUL(a, x[t])); }
+}
+
 // out = x / a  (da_minimise_cg: qhat = ghat / sqrt(rrmold), a division, not
 // a product with the reciprocal)
 extern "C" __global__ void var_div_scalar(real* __restrict__ out, const real* __restrict__ x, const real a,
@@ -222,6 +235,70 @@ extern "C" __global__ void var_rf_lines(real* __restrict__ f, const real* __rest
             for (int p = npass; p >= 1; --p) rf_adjoint(f + base, s, n, p, a);
         } else {
             for (int p = 1; p <= npass; ++p) rf_forward(f + base, s, n, p, a);
+        }
+    }
+}
+
+// The same for up to five fields (v1..v5) in one launch: the lines of field
+// q follow those of fields 0..q-1 (mz[q] = 0 skips a field).  Each line runs
+// exactly var_rf_lines' recursion, so the words are the same; one launch
+// gives the card every variable's lines at once (section 4.12).  pre and
+// post fold var_scale_2d in: each value of the line is divided by (op 0) or
+// multiplied by (op 1) px(i, j) before the passes (pre) or after them (post);
+// -1 leaves it.  Every value lies on exactly one line of a sweep, so this is
+// var_scale_2d's arithmetic, value for value.
+extern "C" __global__ void var_rf_lines5(real* __restrict__ f0, real* __restrict__ f1, real* __restrict__ f2,
+                                         real* __restrict__ f3, real* __restrict__ f4,
+                                         const real* __restrict__ a0, const real* __restrict__ a1,
+                                         const real* __restrict__ a2, const real* __restrict__ a3,
+                                         const real* __restrict__ a4, const int mz0, const int mz1,
+                                         const int mz2, const int mz3, const int mz4, const int nx, const int ny,
+                                         const int axis, const int npass, const int adjoint,
+                                         const real* __restrict__ px, const int pre, const int post) {
+    const long long per = axis == 0 ? (long long)ny : (long long)nx;
+    const int mzs[5] = {mz0, mz1, mz2, mz3, mz4};
+    long long total = 0;
+    for (int q = 0; q < 5; ++q) total += per * mzs[q];
+    GRID_LOOP(t, total) {
+        long long u = t;
+        int q = 0;
+        while (u >= per * mzs[q]) {
+            u -= per * mzs[q];
+            ++q;
+        }
+        real* f = q == 0 ? f0 : q == 1 ? f1 : q == 2 ? f2 : q == 3 ? f3 : f4;
+        const real* alpha = q == 0 ? a0 : q == 1 ? a1 : q == 2 ? a2 : q == 3 ? a3 : a4;
+        const int mz = mzs[q];
+        const int m = (int)(u % mz);
+        const long long other = u / mz;
+        long long base, s;
+        int n;
+        if (axis == 0) {
+            base = other * mz + m;
+            s = (long long)ny * mz;
+            n = nx;
+        } else {
+            base = other * ny * mz + m;
+            s = mz;
+            n = ny;
+        }
+        const real a = alpha[m];
+        if (pre >= 0) {
+            for (int j = 0; j < n; ++j) {
+                const long long e = base + (long long)j * s;
+                f[e] = pre == 0 ? R_DIV(f[e], px[e / mz]) : R_MUL(f[e], px[e / mz]);
+            }
+        }
+        if (adjoint) {
+            for (int p = npass; p >= 1; --p) rf_adjoint(f + base, s, n, p, a);
+        } else {
+            for (int p = 1; p <= npass; ++p) rf_forward(f + base, s, n, p, a);
+        }
+        if (post >= 0) {
+            for (int j = 0; j < n; ++j) {
+                const long long e = base + (long long)j * s;
+                f[e] = post == 0 ? R_DIV(f[e], px[e / mz]) : R_MUL(f[e], px[e / mz]);
+            }
         }
     }
 }
@@ -521,18 +598,33 @@ extern "C" __global__ void var_cv_block(real* __restrict__ cv, real* __restrict_
 // Products and sums in binary64 for both real types (a binary32 product is
 // exact in binary64).
 
-// wrfda-serial: da_dot's order, one long left-to-right sum, one thread
-extern "C" __global__ void var_dot_serial(const real* __restrict__ x, const real* __restrict__ y,
-                                          const long long n, double* __restrict__ out) {
-    if (blockIdx.x != 0 || threadIdx.x != 0) return;
-    double acc = 0.0;
-    for (long long i = 0; i < n; ++i) acc = __dadd_rn(acc, __dmul_rn((double)x[i], (double)y[i]));
-    out[0] = acc;
-}
-
 #define VAR_DOT_THREADS 256
 #define VAR_DOT_PER_THREAD 16
 #define VAR_DOT_CHUNK (VAR_DOT_THREADS * VAR_DOT_PER_THREAD)
+
+// wrfda-serial: da_dot's order, one long left-to-right sum.  Launch one
+// block of VAR_DOT_THREADS: the block forms a tile of products (each exact
+// in binary64, one rounding each, as the serial loop forms them) in shared
+// memory, then thread 0 adds the tile to the running sum in index order.
+// The additions are the serial loop's, one after another; only the loads
+// and products run in parallel.
+#define VAR_SERIAL_TILE 2048
+extern "C" __global__ void var_dot_serial(const real* __restrict__ x, const real* __restrict__ y,
+                                          const long long n, double* __restrict__ out) {
+    __shared__ double tile[VAR_SERIAL_TILE];
+    if (blockIdx.x != 0) return;
+    double acc = 0.0;
+    for (long long start = 0; start < n; start += VAR_SERIAL_TILE) {
+        const long long len = n - start < VAR_SERIAL_TILE ? n - start : VAR_SERIAL_TILE;
+        for (long long q = threadIdx.x; q < len; q += blockDim.x)
+            tile[q] = __dmul_rn((double)x[start + q], (double)y[start + q]);
+        __syncthreads();
+        if (threadIdx.x == 0)
+            for (long long q = 0; q < len; ++q) acc = __dadd_rn(acc, tile[q]);
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) out[0] = acc;
+}
 
 __device__ __forceinline__ void tree_256(double* sh) {
     for (int s = VAR_DOT_THREADS / 2; s > 0; s >>= 1) {
