@@ -96,7 +96,9 @@ def test_isomip_freezing_point_at_the_boundary_layer_salinity():
     # only the interface temperature and the fluxes it drives change
     changed = {k for k in default if default[k].tobytes() != fixed[k].tobytes()}
     assert {"forcing/landIceInterfaceTracers", "forcing/landIceFreshwaterFlux", "forcing/landIceHeatFlux"} <= changed
-    assert not {k for k in changed if k.split("/")[0] in ("mesh", "diagnostics", "state")}
+    # (and what they feed: the accumulated mass and the surface fluxes); the
+    # mesh and the boundary layer are inputs
+    assert not {k for k in changed if k.split("/")[0] in ("mesh", "diagnostics")}
 
 
 def test_isomip_opt_in_values_are_named():
