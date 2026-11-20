@@ -23,8 +23,8 @@ are the two routines, word for word:
   temperature in Kelvin, the basal pressure (with the topographic ponds),
   the 10 m and 2 m references, the snow and ice thicknesses, the
   atmosphere and ocean stresses rotated back to the geographic grid, the
-  atmosphere fluxes, the albedos (column shortwave), the ocean fluxes with
-  the frazil mass adjustment, and the dust iron (coupled z-aerosols).
+  atmosphere fluxes, the albedos (column shortwave) and the ocean fluxes
+  with the frazil mass adjustment.
 
 This is not called by any default path. ``real(r8)`` only. The halo
 exchanges are the identity on one block. The stress rotation's sine,
@@ -40,8 +40,9 @@ Refused by name (see QUIRKS in the module's tests): the column
 biogeochemistry coupled to the ocean (``config_use_column_biogeochemistry``
 with ``config_couple_biogeochemistry_fields``; its ``i2x``/``x2i`` columns
 are looked up quietly, so an absent field is written at column 0, and its
-branches are not ported); the coupled z-aerosols without ``Fioi_dust1``
-(written at column 0); more ``nFrequencies`` than ``wav_nfreq`` under the
+branches are not ported); the z-aerosols coupled without it (the export
+reads ``oceanDustIronFlux`` through a pool pointer only the column
+biogeochemistry sets: E3SM faults; so ``Fioi_dust1`` is never written); more ``nFrequencies`` than ``wav_nfreq`` under the
 waves coupled two ways with the column waves (E3SM reads past
 ``index_x2i_Sw_wavespec``); an unknown thermodynamics or freezing type.
 Kept as E3SM has them: ``Si_u10withgusts`` is ``Si_u10``; under an ocean
@@ -208,6 +209,9 @@ class Options:
         if self.config_use_column_biogeochemistry and self.config_couple_biogeochemistry_fields:
             raise ValueError("the column biogeochemistry coupled to the ocean is not ported (its x2i and i2x "
                              "columns are looked up quietly, so an absent field is written at column 0)")
+        if self.config_use_zaerosols and self.config_couple_biogeochemistry_fields:
+            raise ValueError("the coupled z-aerosols without the column biogeochemistry: E3SM's export reads "
+                             "oceanDustIronFlux through a biogeochemistry pool pointer it never sets")
 
     @property
     def ktherm(self) -> int:
@@ -224,10 +228,6 @@ class Options:
     @property
     def free_surface(self) -> bool:
         return self.config_ocean_surface_type.rstrip() == "free"
-
-    @property
-    def coupled_dust(self) -> bool:
-        return self.config_use_zaerosols and self.config_couple_biogeochemistry_fields
 
 
 _DUST_WET = tuple(f"Faxa_dstwet{k}" for k in range(1, 5))
@@ -389,7 +389,7 @@ def import_x2i(idx: Indices, opts: Options, x2i, *, n_cells_solve: int, pools: d
 _I_ORDER = ("Si_ifrac", "PFioi_bergw", "PFioi_bergh", "Si_ifloe", "Si_t", "Si_bpress", "Si_u10", "Si_u10withgusts",
             "Si_tref", "Si_qref", "Si_snowh", "Si_ithick", "Faii_taux", "Faii_tauy", "Faii_lat", "Faii_sen",
             "Faii_lwup", "Faii_evap", "Faii_swnet", "Si_avsdr", "Si_anidr", "Si_avsdf", "Si_anidf", "Fioi_melth",
-            "Fioi_swpen", "Fioi_meltw", "Fioi_salt", "Fioi_taux", "Fioi_tauy", "Fioi_dust1")
+            "Fioi_swpen", "Fioi_meltw", "Fioi_salt", "Fioi_taux", "Fioi_tauy")
 #: the export's arrays, in the kernel's A_* order: (pool, name)
 _A_ORDER = tuple((p, n) for p, names in (
     ("tracers_aggregate", "iceAreaCell iceVolumeCell snowVolumeCell pondDepthCell pondLidThicknessCell pondAreaCell "
@@ -402,8 +402,7 @@ _A_ORDER = tuple((p, n) for p, names in (
     ("atmos_fluxes", "latentHeatFlux sensibleHeatFlux longwaveUp evaporativeWaterFlux"),
     ("ocean_fluxes", "oceanHeatFlux oceanShortwaveFlux oceanFreshWaterFlux oceanSaltFlux"),
     ("berg_fluxes", "bergFreshwaterFlux bergLatentHeatFlux"),
-    ("floe_size_distribution", "floeSizeDiameter"),
-    ("biogeochemistry", "oceanDustIronFlux")) for n in names.split())
+    ("floe_size_distribution", "floeSizeDiameter")) for n in names.split())
 
 
 def export_i2x(idx: Indices, opts: Options, i2x, *, n_cells_solve: int, pools: dict, trig) -> None:
@@ -418,11 +417,7 @@ def export_i2x(idx: Indices, opts: Options, i2x, *, n_cells_solve: int, pools: d
     _f64("i2x", i2x, (n_cells_solve, idx.ni2x))
     _f64("trig", trig, (n_cells_solve, 8))
     floe = idx.wav_ice_coup == "twoway" and opts.config_use_floe_size_distribution
-    if opts.coupled_dust and idx.i("Fioi_dust1") < 0:
-        raise ValueError("the coupled z-aerosols write Fioi_dust1, which the i2x list lacks (E3SM looks it up "
-                         "quietly and writes column 0)")
-    on = {"berg_fluxes": opts.config_use_data_icebergs, "floe_size_distribution": opts.config_use_floe_size_distribution,
-          "biogeochemistry": opts.coupled_dust}
+    on = {"berg_fluxes": opts.config_use_data_icebergs, "floe_size_distribution": opts.config_use_floe_size_distribution}
     stacked = []
     for pool, name in _A_ORDER:
         if not on.get(pool, True):
@@ -438,7 +433,7 @@ def export_i2x(idx: Indices, opts: Options, i2x, *, n_cells_solve: int, pools: d
         i2x, np.int32(idx.ni2x), _ints(idx.i(n) for n in _I_ORDER), np.int32(n_cells_solve), arr, trig,
         np.int32(opts.config_rotate_cartesian_grid), np.int32(opts.config_use_topo_meltponds),
         np.int32(opts.config_use_column_shortwave), np.int32(opts.config_use_data_icebergs), np.int32(floe),
-        np.int32(opts.coupled_dust), np.float64(TFFRESH), np.float64(RHOI), np.float64(RHOS), np.float64(RHOW),
+        np.float64(TFFRESH), np.float64(RHOI), np.float64(RHOS), np.float64(RHOW),
         np.float64(GRAVITY), np.float64(REF_SALINITY)))
 
 

@@ -17,8 +17,7 @@ and not, both Si0new branches and both liquidus branches) and not; every
 ``linear_salt``, ``constant``, ``minus1p8``); ice fractions of 0, -0, below,
 at and above 1; the rotated and unrotated grids (with a pole and the
 ``atan2(0, -0)`` point); topographic ponds; the column shortwave; icebergs;
-the bulk and modal aerosols and the z-aerosols (with their coupled dust
-iron); the waves coupled two ways with and without the column waves and
+the bulk and modal aerosols and the z-aerosols; the waves coupled two ways with and without the column waves and
 the floe size distribution; halo cells; and the stops MCT makes on a list
 that lacks a required field.
 """
@@ -88,11 +87,10 @@ SPECS = (
     # constant and -1.8 freezing points; BL99's frazil enthalpy
     _spec("bl99_constant", lsize=13, halo=0, thermo="BL99", tfrz="constant", seed=4),
     _spec("zero_layer_minus1p8", lsize=11, thermo="zero layer", tfrz="minus1p8", ponds=True, seed=5),
-    # the aerosols: bulk, then modal with the z-aerosols and their coupled dust iron, and the column BGC
+    # the aerosols: bulk, then modal with the z-aerosols, and the column BGC
     # (uncoupled: only the z-aerosol concentrations zeroed)
     _spec("aerosols_bulk", lsize=19, aerosols=True, seed=6),
-    _spec("aerosols_modal_zaer", lsize=21, aerosols=True, modal=True, zaer=True, couple_bgc=True,
-          i2x_extra=["Fioi_dust1"], seed=7),
+    _spec("aerosols_modal_zaer", lsize=21, aerosols=True, modal=True, zaer=True, seed=7),
     _spec("zaer_bulk_column_bgc", lsize=15, zaer=True, column_bgc=True, seed=8),
     # the waves two ways: the column waves and the floe sizes, then neither (Si_ifloe stays 0)
     _spec("waves_twoway", lsize=25, wav="twoway", nfreq=7, column_waves=True, n_frequencies=7, fsd=True,
@@ -198,8 +196,6 @@ def _build(spec) -> dict:
         for name, k in ZAEROSOL:
             if spec["zaer"] or name == "oceanZAerosolConc":
                 pools["biogeochemistry"][name] = (6, _uniform(rng, -1, 1, (nh, k)))
-    if spec["zaer"] and spec["couple_bgc"]:
-        pools["biogeochemistry"]["oceanDustIronFlux"] = (5, _uniform(rng, -1, 1, nh))
     if spec["fsd"]:
         pools["floe_size_distribution"]["floeSizeDiameter"] = (5, _uniform(rng, 0, 500, nh))
     if spec["bergs"]:

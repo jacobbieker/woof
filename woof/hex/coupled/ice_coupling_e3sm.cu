@@ -165,11 +165,11 @@ extern "C" __global__ void ice_import_e3sm(
 // the export's i2x columns (-1 when not written)
 enum { I_IFRAC, I_BERGW, I_BERGH, I_IFLOE, I_T, I_BPRESS, I_U10, I_U10G, I_TREF, I_QREF, I_SNOWH, I_ITHICK,
        I_TAUXA, I_TAUYA, I_LAT, I_SEN, I_LWUP, I_EVAP, I_SWNET, I_AVSDR, I_ANIDR, I_AVSDF, I_ANIDF, I_MELTH,
-       I_SWPEN, I_MELTW, I_SALT, I_TAUXO, I_TAUYO, I_DUST1, I_N };
+       I_SWPEN, I_MELTW, I_SALT, I_TAUXO, I_TAUYO, I_N };
 // the export's 1-D arrays, in this order: arr is (A_N, nCellsSolve)
 enum { A_AREA, A_IVOL, A_SVOL, A_PDEPTH, A_PLID, A_PAREA, A_TSFC, A_AIRU, A_AIRV, A_OCNU, A_OCNV,
        A_AVSDR, A_ANIDR, A_AVSDF, A_ANIDF, A_SWABS, A_U10, A_TREF, A_QREF, A_FRZADJ, A_LAT, A_SEN, A_LWUP,
-       A_EVAP, A_MELTH, A_SWPEN, A_MELTW, A_SALT, A_BERGW, A_BERGH, A_FLOE, A_DUST, A_N };
+       A_EVAP, A_MELTH, A_SWPEN, A_MELTW, A_SALT, A_BERGW, A_BERGH, A_FLOE, A_N };
 
 // seaice_latlon_vector_rotation_backward with its trigonometric words
 // t = sin/cos of lat, of lon, of the rotated grid's lat, of its lon
@@ -196,7 +196,7 @@ __device__ void rotate_backward(r8& u, r8& v, r8 up, r8 vp, const r8* t, int rot
 extern "C" __global__ void ice_export_e3sm(
     r8* __restrict__ i2x, int ni2x, const int* __restrict__ col, int nCellsSolve,
     const r8* __restrict__ arr, const r8* __restrict__ trig, int rotate, int ponds, int columnSW,
-    int bergs, int floe, int dust,
+    int bergs, int floe,
     r8 freshWaterFreezingPoint, r8 densityIce, r8 densitySnow, r8 densitySeaWater, r8 gravity,
     r8 referenceSalinity)
 {
@@ -254,7 +254,6 @@ extern "C" __global__ void ice_export_e3sm(
         o[col[I_SALT]] = A(AR(A_SALT), D(M(M(referenceSalinity, 0.001), AR(A_FRZADJ)), ailohi));
         o[col[I_TAUXO]] = tauxo;
         o[col[I_TAUYO]] = tauyo;
-        if (dust) o[col[I_DUST1]] = AR(A_DUST);
     }
 #undef AR
 }
