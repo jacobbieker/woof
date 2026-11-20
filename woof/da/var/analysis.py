@@ -455,6 +455,10 @@ class VarResult:
     grid: dict
     nobs: int
     timings: dict = field(default_factory=dict)
+    #: The radiance door's report (counts per sensor, Jo, VarBC), or None.
+    radiance: dict | None = None
+    #: O-B and O-A (linearised, ``d - H' U cvt``) per term over the used observations.
+    fit: dict = field(default_factory=dict)
 
 
 def obs_window(fg: FirstGuess, minutes: float = 60.0) -> dict:
@@ -469,7 +473,7 @@ def obs_window(fg: FirstGuess, minutes: float = 60.0) -> dict:
 def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01, max_ext_its: int = 1,
             orthonorm_gradient: bool = True, precondition_cg: bool = False, check_rh: int = 0,
             window_minutes: float = 60.0, landuse_table=None, xb_override: dict | None = None,
-            write=None) -> VarResult:
+            write=None, radiances=None, crtm=None, radiance_qc=None, varbc=None) -> VarResult:
     """3D-Var from files: ``be.dat``, OBSPROC's ``ob.ascii`` and a WRF first guess.
 
     ``tier`` is ``reference`` (NumPy binary64), ``oracle`` (device binary64,
@@ -479,6 +483,14 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     ``xb`` dump, for the oracle tests).  With one outer loop the innovations
     are the nonlinear ones at ``x_b``; later loops relinearise ``H'`` about
     the previous loop's analysis (the linear update ``d - H' U xhat``).
+
+    Radiances (opt-in, plan section 13): ``radiances`` is a list of
+    :class:`~woof.da.var.radiance.RadianceObs`; ``crtm`` an open
+    :class:`woof.rtm.crtm.ClearSkyOperator` with their sensors (one is opened
+    from ``WOOF_CRTM_LIB``/``WOOF_CRTM_COEFFS`` when None); ``radiance_qc``
+    a :class:`~woof.da.var.radiance.RadianceQC`; ``varbc`` a
+    :class:`~woof.da.var.varbc.VarBC` whose coefficients are updated in
+    place.  Without ``radiances`` nothing here changes.
     """
     from . import be_dat as bd
     from . import innov_wrfda as iw
@@ -500,11 +512,19 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     wobs = obs if not isinstance(obs, (str, Path)) else ow.read_obs_ascii(obs, proj, **obs_window(fg, window_minutes))
     iv = iw.innovations(wobs, xb)
     term = FlatObsTerm(iv, xb)
+    terms = [term]
+    rterm = rreport = None
+    if radiances:
+        from . import radiance as rad
+
+        rterm, rreport = _radiance_term(rad, radiances, xb, fg, proj, crtm, radiance_qc, varbc)
+        terms.append(rterm)
     xbu = {k: xb[k] for k in ("grid_box_area", "coefx", "coefy", "qs", "q", "psac", "dnw", "rho", "p", "t",
                               "c1h", "c2h")}
-    cost = VarCost.reference(b, xbu, term) if tier == "reference" else VarCost.device(b, xbu, term, tier)
+    cost = VarCost.reference(b, xbu, terms) if tier == "reference" else VarCost.device(b, xbu, terms, tier)
     timings["setup_s"] = time.perf_counter() - t0
     t1 = time.perf_counter()
+    d0 = [np.array(d, dtype=np.float64) for d in cost.d]
     results, cvt = minimise(cost, max_ext_its=max_ext_its, ntmax=ntmax, eps=eps,
                             orthonorm_gradient=orthonorm_gradient, precondition_cg=precondition_cg, write=write)
     if tier != "reference":
@@ -512,14 +532,60 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
 
         cp.cuda.Stream.null.synchronize()
     timings["minimise_s"] = time.perf_counter() - t1
+    fit = _fit(cost, d0, cvt, terms)
     cvt = np.asarray(cvt.get() if hasattr(cvt, "get") else cvt, dtype=np.float64)
+    if rterm is not None:
+        rreport["jo_final"] = results[-1].j_final
+        if varbc is not None and rterm.control_size:
+            varbc.update(rterm, cvt[cost.cv_u:])
+            rreport["varbc_controls"] = int(rterm.control_size)
+        cvt = cvt[:cost.cv_u]
     t2 = time.perf_counter()
     xa = xa_from_cv(b, xbu, cvt)
     wrf = xatowrf(grid, xb, xa, check_rh=check_rh)
     timings["transfer_s"] = time.perf_counter() - t2
     log = "".join(r.log for r in results)
     return VarResult(log=log, cg=results, cvt=cvt, xa=xa, wrf=wrf, xb=xb, grid=grid, nobs=int(term.mask.sum()),
-                     timings=timings)
+                     timings=timings, radiance=rreport, fit=fit)
+
+
+def _fit(cost, d0, cvt, terms) -> dict:
+    """RMS of O-B and of the linearised O-A (``d - H' U cvt``) per term, and per radiance sensor and channel."""
+    ys = cost.vtoy(cvt)
+    out = {}
+    for n, (t, d, y) in enumerate(zip(terms, d0, ys)):
+        m = np.asarray(t.mask, bool)
+        d = np.asarray(d, np.float64)
+        a = d - np.asarray(y, np.float64)
+        name = "radiance" if n else "conventional"
+        rms = (lambda v, k: float(np.sqrt(np.mean(v[k] ** 2))) if k.any() else float("nan"))
+        out[name] = {"n": int(m.sum()), "omb_rms": rms(d, m), "oma_rms": rms(a, m)}
+        if n and hasattr(t, "batches"):
+            for k, b in enumerate(t.batches):
+                sl = slice(int(t.offsets[k]), int(t.offsets[k + 1]))
+                dd, aa, mm = (v[sl].reshape(b.n, -1) for v in (d, a, m))
+                for c, ch in enumerate(b.channels.tolist()):
+                    out[f"{b.sensor}:{ch}"] = {"n": int(mm[:, c].sum()), "omb_rms": rms(dd[:, c], mm[:, c]),
+                                               "oma_rms": rms(aa[:, c], mm[:, c])}
+    return out
+
+
+def _radiance_term(rad, radiances, xb, fg, proj, crtm, qc, varbc):
+    """The radiance term at ``x_b`` (and VarBC's block), opening CRTM when the caller did not."""
+    surface = rad.read_surface(fg.path)
+    sensors = sorted({r.sensor for r in radiances})
+    bias = None if varbc is None else varbc.bias
+    if crtm is None:
+        from woof.rtm.crtm import ClearSkyOperator
+
+        with ClearSkyOperator(sensors) as op:
+            term, report = rad.radiance_term(radiances, xb, surface, proj, op, settings=qc, bias=bias)
+    else:
+        term, report = rad.radiance_term(radiances, xb, surface, proj, crtm, settings=qc, bias=bias)
+    if varbc is not None:
+        varbc.attach(term)
+    report["used"] = int(term.mask.sum())
+    return term, report
 
 
 # --------------------------------------------------------------------------- the bundle

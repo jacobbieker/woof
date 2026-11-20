@@ -60,6 +60,7 @@ __all__ = [
     "locate",
     "qc_wrfda",
     "radiance_term",
+    "read_surface",
 ]
 
 QC_GOOD = 1
@@ -669,6 +670,20 @@ class RadianceTerm:
         self.err = np.asarray(cat("error"), dtype=np.float64)
         self.mask = np.asarray(cat("qc")) >= 0 if self.batches else np.zeros(0, bool)
         self._f = [b.tl_factors() for b in self.batches]
+        #: The VarBC control block (:meth:`woof.da.var.varbc.VarBC.attach`), or None.
+        self.varbc = None
+
+    @property
+    def control_size(self) -> int:
+        """The size of this term's block of the control vector (VarBC's coefficients; 0 without)."""
+        return 0 if self.varbc is None else self.varbc.size
+
+    def jp(self, v) -> float:
+        """``Jp`` of the block ``v`` (``cv + xhat``)."""
+        return self.varbc.jp(v)
+
+    def jp_grad(self, v):
+        return self.varbc.jp_grad(v)
 
     @property
     def m(self) -> int:
@@ -699,8 +714,10 @@ class RadianceTerm:
             y = np.zeros((b.n, b.channels.size), dtype=dt)
             for layer in range(1, ta.shape[1]):               # kts+1 .. kte
                 y = y + kt[:, :, layer] * ta[:, None, layer] + kr[:, :, layer] * qa[:, None, layer]
-            out.append(y.ravel())
-        return np.concatenate(out) if out else np.zeros(0, dtype=dt)
+            out.append(y)
+        if self.varbc is not None and x.get("varbc") is not None:
+            self.varbc.tl_add(out, _host(x["varbc"]))
+        return np.concatenate([y.ravel() for y in out]) if out else np.zeros(0, dtype=dt)
 
     # -------------------------------------------------------------- AD
 
@@ -732,10 +749,43 @@ class RadianceTerm:
             order = np.stack(idx, axis=1).ravel()              # (location, corner, level)
             np.add.at(ft, order, np.stack(vt, axis=1).ravel())
             np.add.at(fq, order, np.stack(vq, axis=1).ravel())
-        return {"t": ft.reshape(nx, ny, nz), "q": fq.reshape(nx, ny, nz)}
+        out = {"t": ft.reshape(nx, ny, nz), "q": fq.reshape(nx, ny, nz)}
+        if self.varbc is not None:
+            out["varbc"] = self.varbc.ad([y[self.offsets[k]:self.offsets[k + 1]].reshape(b.n, b.channels.size)
+                                          for k, b in enumerate(self.batches)])
+        return out
 
 
 # --------------------------------------------------------------------------- the door
+
+#: The first-guess fields the CRTM surface needs beyond ``wrftoxb``'s.
+SURFACE_FIELDS = ("TSK", "U10", "V10", "LANDMASK", "XICE", "SNOWC", "QCLOUD")
+
+
+def read_surface(path) -> dict:
+    """``SURFACE_FIELDS`` from a WRF first guess, first record, ``(i, j[, k])`` binary64.
+
+    A missing ``U10``/``V10``/``XICE``/``SNOWC`` is zero; a missing
+    ``QCLOUD`` skips the cloud-water test (WRFDA reads all of them).
+    """
+    import netCDF4
+
+    out = {}
+    with netCDF4.Dataset(path) as nc:
+        nc.set_auto_mask(False)
+        shape = None
+        for name in SURFACE_FIELDS:
+            if name in nc.variables:
+                out[name] = np.asarray(nc.variables[name][0], dtype=np.float64).transpose()
+                if out[name].ndim == 2:
+                    shape = out[name].shape
+    if "TSK" not in out or "LANDMASK" not in out:
+        raise ValueError(f"{path}: the radiance door needs TSK and LANDMASK")
+    for name in ("U10", "V10", "XICE", "SNOWC"):
+        out.setdefault(name, np.zeros(shape))
+    out.setdefault("QCLOUD", None)
+    return out
+
 
 def radiance_term(obs: Sequence[RadianceObs], xb: dict, surface: Mapping, proj, operator, *,
                   settings: RadianceQC | None = None, bias=None) -> tuple[RadianceTerm, dict]:
