@@ -102,12 +102,16 @@ def test_fixture_covers_the_branches(precision):
     assert all(seen.values()), seen
 
 
-def test_unported_options_are_refused_by_name():
+def test_unported_options_are_refused_by_name(monkeypatch):
     from woof.hex.errors import ConfigurationRefusal
     from woof.hex.mpas_seaice import coupling_prep_v842 as cpl
     assert cpl.DEFAULT_CONFIGS["config_use_ocean_mixed_layer"] is True
+    # the mixed layer (the Registry default) needs glibc's atan: refused without the opt-in
+    monkeypatch.delenv("WOOF_GLIBC239_LIBM64", raising=False)
     with pytest.raises(ConfigurationRefusal, match="config_use_ocean_mixed_layer"):
         cpl.check_config({})
+    with pytest.raises(ConfigurationRefusal, match="config_atmos_boundary_method"):
+        cpl.check_config({"config_atmos_boundary_method": "constant"})
     with pytest.raises(ConfigurationRefusal, match="config_use_column_biogeochemistry"):
         cpl.check_config({"config_use_ocean_mixed_layer": False, "config_use_column_biogeochemistry": True})
     cpl.check_config(dict(oo.BASE_CONFIG))

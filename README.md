@@ -355,8 +355,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     (the opt-in now carries asin). Also the coupling preparation
     (`seaice_column_coupling_prep` and `seaice_column_scale_fluxes`: cell
     albedos, pond freshwater feedback, shortwave scaling, fluxes per unit
-    ice area; RKIND 4 and 8, no opt-in; the ocean mixed layer is refused by
-    name). Four v8.4.2 column bugs keep their words by default and have
+    ice area; RKIND 4 and 8, no opt-in), with the stand-alone ocean mixed
+    layer it runs first by default (`ocean_mixed_layer_v842`: the open
+    ocean's boundary layer and `colpkg_ocn_mixed_layer`'s SST and
+    freezing/melting potential; RKIND 8, and it needs the opt-in for
+    glibc's atan). Four v8.4.2 column bugs keep their words by default and have
     named opt-in corrections (`woof_v842_corrections`): the swapped coupled
     surface and conductive fluxes, the ice velocity in the boundary layer
     (a vertex's u and no v), CCSM3's absorbed shortwave over `ncat`
