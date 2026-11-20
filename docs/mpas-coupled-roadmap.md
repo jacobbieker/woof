@@ -165,10 +165,14 @@ Ordered by how self-contained each piece is:
    piece is word-exact at both precisions. It calls no libm. The ocean mixed
    layer (`config_use_ocean_mixed_layer`, `.true.` in the Registry, off when
    coupled to an ocean) and the column biogeochemistry are refused by name.
-   Still to port: mushy vertical
-   thermodynamics, the melt
-   ponds' own physics, the other `ice_atmo` options, then the column time
-   step.
+   Also ported: the column part of the time step (the diagnostics' and
+   fluxes' re-initialisations, `seaice_column_predynamics_time_integration`,
+   `_dynamics_` and `_postdynamics_`, over several steps on the clock's day
+   and time; `woof/hex/mpas_seaice/column_step_v842.py`,
+   `tests/test_mpas_seaice_column_step_parity.py`). Still to port: coupling it
+   into the time step with the velocity solver, mushy vertical
+   thermodynamics, the melt ponds' own physics, and the other `ice_atmo`
+   options.
 7. Biogeochemistry (`ice_zbgc*`, `ice_algae`, `ice_aerosol`). Refused by name
    until ported.
 

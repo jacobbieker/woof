@@ -33,6 +33,9 @@ Written by `tools/mpas_seaice_oracle/build.sh` and
     while 2000-09-15 on `gregorian_noleap` is day 258 and does not reset;
   - one layer and one category;
   - an abort on low starting salinity (cell 6, `init_vertical_profile`).
+    `seaice_column_vertical_thermodynamics` returns at the first aborting
+    cell, so the owned cells after it keep their input words; the port
+    restores them, and the comparison covers this case's fields too.
 
   Every cell's state is consistent with BL99: the snow-layer shortwave is
   zero where hsn <= 1e-4, and the interior shortwave is the sum of the layer
