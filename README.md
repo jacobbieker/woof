@@ -980,15 +980,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   does the geopotential tendency (`slow_geopotential`, WRF `rhs_ph`) for
   every `h_sca_adv_order`, the Coriolis and curvature terms
   (`coriolis_curvature`, WRF `coriolis` and `curvature`) on rotated
-  grids, and the `w_damp` vertical-velocity limiter. In binary64 they match WRFPLUS to about 1e-15
+  grids, the `w_damp` vertical-velocity limiter, and the lateral-boundary
+  relaxation and specified zone (woof's strict `state_relaxation_multi`,
+  WRF `relax_bdy_dry` and `spec_bdy_dry`, with the boundary tables'
+  adjoint as an output). In binary64 they match WRFPLUS to about 1e-15
   on non-hybrid cases (WRFPLUS has no hybrid coordinate; the exclusions
   are listed in the design note). The comparison found a lid bug in
   WRFPLUS's own pressure-gradient adjoint and, in its `rhs_ph`, a heap
   overrun in the order-3/4 adjoint and a short interior loop on bounded
   axes, all described in the design note.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
-  0.85-3.2x the glue, 3.3-4.5x advection and 1.3-4.4x the big-step
-  tendencies. The measured step projection (4.7x) is in the design
+  0.85-3.2x the glue, 3.3-4.5x advection, 1.3-4.4x the big-step
+  tendencies and 2.5x the lateral boundaries. The measured step projection (4.7x) is in the design
   note. The forecast path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
