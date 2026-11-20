@@ -958,8 +958,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   record) over anonymous HTTPS. It reconstructs each pixel's satellite and
   view geometry, which SatWeave does not publish, from band availability
   and the sectors' sub-satellite longitudes
-  ([docs/satellite-imagers.md](docs/satellite-imagers.md)). The scenes do
-  not reach an analysis yet: the CRTM operator and the LETKF adapter come
+  ([docs/satellite-imagers.md](docs/satellite-imagers.md)). `woof fetch geo`
+  reads native GOES ABI L1b (GOES-16 to 19) from the `bkr/geo` virtual
+  Icechunk stores on Source Cooperative, which reference NOAA's own files.
+  It keeps NOAA's calibration and quality flags and gives the true per-pixel
+  geometry. The scenes do not reach an analysis yet: the CRTM operator and the LETKF adapter come
   next (plan section 11).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
