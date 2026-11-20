@@ -988,7 +988,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   tier's 50-iteration minimisation on a synthetic 200x200x50 case with
   ~10^5 observations takes 3.1 s on an M3 Max (Metal) and 3.2-4.5 s on a shared
   A6000 (targets 20 s and 5 s; the tutorial case: 1.4 s and 2.3 s), with
-  H' and H'^T on the device as an ordered gather (no atomics). Section 11 plans geostationary imager
+  H' and H'^T on the device as an ordered gather (no atomics).
+  `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
+  `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
+  ensemble members minus their mean): WRFDA's gen_be stages for
+  `cv_options` 5 and 7 with `bin_type` 5 only. On WRFDA's own gen_be sample
+  forecasts it reproduces WRFDA 4.7.1's gen_be to 1e-7 relative (cv5; the
+  residual is WRFDA's `pi = 3.1415926` sine-transform tables in psi and chi)
+  and to 3e-12 for cv7, and WRFDA's 3D-Var runs the woof-made file as its own.
+  Section 11 plans geostationary imager
   radiances for initial conditions: Google's SatWeave mosaic and the native
   GOES ABI, Himawari AHI and Meteosat imagers, through an opt-in CRTM into
   the LETKF first and into 3D-Var later. Default runs are not changed.
