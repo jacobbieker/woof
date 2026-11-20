@@ -281,12 +281,12 @@ def test_window_partial_tl_start(backend, tmp_path):
     STEP_INPUTS, is refused by name."""
     dtn = "float32" if backend == "mlx" else "float64"
     out = _run(backend, f"""
-over, warm = {CASES[0]!r}
-cfg, state = build(over, warm)
+cfg, state = build({{}}, 0)   # WRFDA's window starts cold
 w = W.Window(state, cfg, 2, dtype=np.dtype({dtn!r}))
 w.forward()
 rng = np.random.default_rng(5)
 dx = rnd(w._start, rng)
+dx["muts"] = dx["mup"].copy()   # a cold start's muts' is mu'
 part = {{n: dx[n] for n in W.WRFDA_TL_START}}
 full = {{n: dx[n] if n in part else cp.zeros_like(dx[n]) for n in IN}}
 a, b = w.tl(part, save_at=(1,), partial=True), w.tl(full, save_at=(1,))
@@ -306,6 +306,6 @@ for key, bad in (("missing", part), ("unknown", {{**full, "qv": full["u"]}})):
 """, tmp_path)
     assert out["same"] == 0
     assert out["dot"] < (1e-5 if backend == "mlx" else 1e-12), out["dot"]
-    assert "lacks ['php', 'al', 'alt', 'muts']" in out["missing"], out["missing"]
+    assert "lacks ['php', 'al', 'alt']" in out["missing"], out["missing"]
     assert "partial=True" in out["missing"]
     assert "['qv']" in out["unknown"], out["unknown"]

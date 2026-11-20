@@ -1063,7 +1063,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (details in the design note). A window driver
   (`woof.grad.wrfplus.window.Window`) runs the forward, TL and adjoint
   over N steps with checkpoints, and takes adjoint forcing at
-  intermediate states for 4D-Var. The forecast path does not import any
+  intermediate states for 4D-Var. Its TL can start from part of the
+  state, with the rest zero, as WRFDA's TL start does
+  (`Window.tl(dx0, partial=True)`). The forecast path does not import any
   of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its

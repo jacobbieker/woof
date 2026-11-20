@@ -11,7 +11,8 @@ after ``k`` steps, ``0 <= k <= nsteps``.
   returns the perturbation at the requested states.  With
   ``partial=True`` the perturbation may name any subset of STEP_INPUTS
   and the rest start at zero: WRFDA's TL start, which passes the
-  prognostics and p' with g_ph = g_al = 0 (:data:`WRFDA_TL_START`).  The
+  prognostics and p' with g_ph = g_al = 0 (:data:`WRFDA_TL_START`).
+  Names outside STEP_INPUTS are refused on every call.  The
   adjoint of that zero fill is a restriction, so :meth:`Window.ad` needs
   no counterpart: take the same names from its result.
 - :meth:`Window.ad` takes the adjoint at the final state and adjoint
@@ -41,12 +42,12 @@ from . import model as M
 #: The names WRFDA's TL start perturbs (da_transfer_xatowrftl): the
 #: prognostics but phi' (g_ph_2 = 0), and g_p.  woof carries WRF's
 #: perturbation pressure as ``p_pert`` and the full pressure as ``p``;
-#: both have the tangent g_p, so both take it.  With
-#: ``Window.tl(dx0, partial=True)`` the rest (phi', al, alt and muts)
-#: start at zero.  muts is WRF's carried ``MUT + MU''``: a start whose
-#: muts is ``mub + mu'`` (a cold state) has the tangent mu' there, which
-#: the caller passes as ``muts`` if its start is one.
-WRFDA_TL_START = ("u", "v", "w", "thp", "mup", "p", "p_pert")
+#: both have the tangent g_p, so both take it.  ``muts`` is WRF's carried
+#: ``MUT + MU''``; WRFDA's window starts where its nonlinear run does,
+#: from start_em's ``muts = mub + mu'``, so its tangent there is g_mu:
+#: pass ``dx0["muts"] = dx0["mup"]``.  With ``Window.tl(dx0,
+#: partial=True)`` the rest (phi', al and alt) start at zero.
+WRFDA_TL_START = ("u", "v", "w", "thp", "mup", "p", "p_pert", "muts")
 
 
 def _copy(d: dict, names=None) -> dict:

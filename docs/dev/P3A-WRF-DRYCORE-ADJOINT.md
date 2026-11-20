@@ -596,6 +596,7 @@ Each step is one small PR, taken to merged before the next widens.
    w = Window(state, cfg, nsteps, dtype=np.float64, checkpoint_every=1)
    xN = w.forward(x0=None)                 # base; keeps the checkpoints
    dx = w.tl(dx0, save_at=(k1, k2, ...))   # {k: dx_k}, always with nsteps
+   dx = w.tl({n: g[n] for n in WRFDA_TL_START}, partial=True)  # WRFDA's start
    ax0 = w.ad(ax_final=None, forcing={k: ax_obs_k})
    ```
 
@@ -604,9 +605,21 @@ Each step is one small PR, taken to merged before the next widens.
      state after k steps. `forcing[k]` is added to the adjoint of state k
      before the sweep goes on backwards, which is where a 4D-Var
      observation term at that time enters.
+   - `tl(dx0, partial=True)` lets `dx0` name any subset of STEP_INPUTS;
+     the rest start at zero. This is WRFDA's TL start: in
+     `da_transfer_xatowrftl` the prognostics are perturbed but phi'
+     (`g_ph_2 = 0`), and g_p is perturbed too.
+     - `WRFDA_TL_START` names those inputs. g_p goes into both `p` and
+       `p_pert`.
+     - `muts` takes g_mu. WRFDA's window starts cold, from `start_em`'s
+       `muts = mub + mu'`.
+     - The adjoint of the zero fill is a restriction, so a caller takes
+       the same names from `ad`'s result. A dot test pins this.
+     - An incomplete dict without `partial`, or a name outside
+       STEP_INPUTS, is refused by name.
    - The window refuses whatever `step_geometry` refuses, and names it.
-     Today that includes map factors and specified boundaries, so a
-     regional WRFDA case is refused until both are in.
+     Map factors are in (#723). Specified boundaries are refused until
+     they are in, so a regional WRFDA case is still refused.
    - Checkpoints hold a state's STEP_INPUTS only. A step reads nothing
      else its predecessor wrote: it writes its scratch before reading
      it. A test pins this. With every other written array poisoned with
