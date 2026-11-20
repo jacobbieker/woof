@@ -579,6 +579,11 @@ def test_nudging_target_records_the_nudging_increment_not_the_physics():
     seat.before_nudging(w.sources)
     seat.after_nudging(w.sources)
     assert len(tap.rows) == 1
+    # a sampled step the nudging left alone (past gfdda_end_h) records nothing, not a zero target
+    seat.stage(w.sources, state=w.state, saved=w.saved, time_seconds=30.0)
+    seat.before_nudging(w.sources)
+    seat.after_nudging(w.sources, applied=False)
+    assert len(tap.rows) == 1 and seat._pending is None
 
 
 def test_nudging_target_needs_nudging_and_the_wrf_route_refuses_it(tmp_path):

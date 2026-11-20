@@ -227,8 +227,9 @@ tap only reads: a nudged run that taps is byte-identical to the same
 nudged run without `--nn`. `tap_target = "nudging"` is refused without
 nudging, on the WRF route, and in an applying mode. The trainer marks each
 artefact's `training.intended_mode` as `replace` (a physics tap) or
-`residual` (a nudging tap), and the hex seat refuses an artefact in the
-other mode.
+`residual` (a nudging tap), and both seats refuse an artefact in the
+other mode. A sampled step the nudging leaves alone (past `gfdda_end_h`)
+records nothing, so the record holds no false zero targets.
 Samples are ordered by model time before the split, and a time recorded
 twice (a resumed run appends) keeps its last record.
 

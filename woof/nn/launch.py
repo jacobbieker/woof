@@ -130,6 +130,18 @@ def add_arguments(parser) -> None:
              "apply a column model, which makes the run not WRF-identical")
 
 
+def check_intended_mode(manifest, settings) -> None:
+    """Refuse an artefact the trainer marked for the other applying mode
+    (``training.intended_mode``: ``replace`` for an emulator of the
+    scheme, ``residual`` for a correction trained on the nudging
+    increment).  An artefact without the mark is admitted."""
+    intended = (manifest.training or {}).get("intended_mode")
+    if intended in ("residual", "replace") and intended != settings.mode:
+        raise NNConfigError(
+            f"--nn model {manifest.name} was trained for mode = {intended!r} "
+            f"({(manifest.training or {}).get('target')}); this run asks for mode = {settings.mode!r}")
+
+
 def read_settings(path) -> NNSettings:
     """Parse and check the ``[nn]`` table of ``path``; paths in it are
     anchored at the file."""

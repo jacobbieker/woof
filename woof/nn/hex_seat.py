@@ -84,7 +84,8 @@ from typing import Any, Callable, Mapping
 import numpy as np
 
 from woof.nn import NOT_WRF_IDENTICAL
-from woof.nn.launch import NNConfigError, NNSettings, configured, read_settings, refuse_identity_door
+from woof.nn.launch import (NNConfigError, NNSettings, check_intended_mode, configured, read_settings,
+                            refuse_identity_door)
 from woof.nn.manifest import FieldSpec
 
 #: MPAS's ``rvord`` in float32, as the couplers take it (461.6 / 287).
@@ -332,11 +333,7 @@ class HexColumnSeat:
             raise NNConfigError(f"--nn model {m.name}: every 3-D field and output must span the same "
                                 f"number of levels; the artefact has {sorted(depths)}")
         self.levels = depths.pop()
-        intended = (m.training or {}).get("intended_mode")
-        if intended in ("residual", "replace") and intended != settings.mode:
-            raise NNConfigError(
-                f"--nn model {m.name} was trained for mode = {intended!r} ({(m.training or {}).get('target')}); "
-                f"this run asks for mode = {settings.mode!r}")
+        check_intended_mode(m, settings)
         self.policy = SafetyPolicy(out_of_range=settings.out_of_range, margin=settings.margin,
                                    limit_outputs=settings.limit_outputs, positivity=settings.positivity,
                                    fixer=settings.fixer)
@@ -492,12 +489,14 @@ class HexColumnSeat:
         if self._pending is not None:
             self._pending["before"] = self._held(sources, self._pending["cells"])
 
-    def after_nudging(self, sources) -> None:
+    def after_nudging(self, sources, *, applied: bool = True) -> None:
         """``tap_target = "nudging"``: record the nudging's increment to the
         held sources as physical rates, decoupled as the scheme's are (so
-        coupling the recorded rate as a residual adds the same source)."""
+        coupling the recorded rate as a residual adds the same source).
+        ``applied`` is False on a step the nudging left alone (past
+        ``gfdda_end_h``): no record, rather than a zero target."""
         pending, self._pending = self._pending, None
-        if pending is None or "before" not in pending:
+        if pending is None or "before" not in pending or not applied:
             return
         after = self._held(sources, pending["cells"])
         before = pending["before"]
