@@ -208,3 +208,14 @@ def test_dewpoint_above_reported_temperature_rejected():
     batches, receipt = adapt([row(value=281.), r])
     assert receipt['counts']['supersaturated_report'] == 1
     assert all('dewpoint' not in b.name for b in batches)
+
+
+def test_aircraft_level_rows_are_refused_unless_requested():
+    rows = [row(measurement='aircraft_level', station_id='a1')]
+    _, receipt = adapt(rows)  # the default is unchanged: no operator for the label
+    assert receipt['counts']['unknown_measurement_operator'] == 1 and not receipt['counts'].get('accepted')
+    batches, receipt = adapt(rows, aircraft_level=True)
+    assert receipt['counts']['accepted'] == 1 and 'unknown_measurement_operator' not in receipt['counts']
+    sonde, _ = adapt([row()])
+    index = tuple(np.argwhere(sonde[0].mask)[0])
+    np.testing.assert_allclose(batches[0].simulated[(slice(None), *index)], sonde[0].simulated[(slice(None), *index)])

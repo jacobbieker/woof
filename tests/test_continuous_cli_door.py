@@ -135,3 +135,13 @@ def test_the_documents_describe_the_continuous_door():
     reference = (root / 'docs' / 'public' / 'CLI-OPTIONS.md').read_text(encoding='utf-8')
     assert '| `--continuous WINDOWS` |' in reference or '| `--continuous` |' in reference
     assert '| `--status' in reference and '| `--stop' in reference
+
+
+def test_aircraft_assimilation_is_off_unless_requested():
+    from dataclasses import replace
+    raw = dict(schema=REQUEST_SCHEMA, epoch='2026-09-10T12:00:00Z', point=[35.2, -97.4], card=dict(vram_gib=16.))
+    assert request_from_json(raw).assimilate_aircraft is False
+    assert request_from_json({**raw, 'assimilate_aircraft': True}).assimilate_aircraft is True
+    assert 'assimilate_aircraft' in protocol_document()['request_fields']
+    with pytest.raises(PlanError, match='assimilate_aircraft must be true or false'):
+        replace(request(), assimilate_aircraft=1).validate()

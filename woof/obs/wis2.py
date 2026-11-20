@@ -17,10 +17,10 @@ This is the archive, not the live broker: the ``wis2`` stream of
 store layout, its QC flags and the family-to-type mapping are in section 12
 of docs/dev/WRFDA-3DVAR-PLAN.md.  Rows whose label ``obs_point`` has no
 operator for yet (ocean platforms, aircraft) are written with their true
-label and refused by name there; enabling ``aircraft_level`` in
-``obs_point`` would also start assimilating the ACARS and PrepBUFR aircraft
-rows other doors already write, so it is a separate change.  Families read
-here:
+label and refused by name there.  ``aircraft_level`` is used only with the
+opt-in ``assimilate_aircraft`` request field (``woof local-da
+--assimilate-aircraft``), which applies to every aircraft source alike.
+Families read here:
 
 ==============  ============================  ======  ==========================
 family          groups                        WRFDA   neutral measurement
@@ -28,7 +28,7 @@ family          groups                        WRFDA   neutral measurement
 ``land``        land/reports, land/synop_tac  FM-12   screen_temperature_2m, ...
 ``ocean``       ocean/surface, ocean/ship_tac FM-13/18 platform_* (no operator)
 ``sonde``       upper_air/soundings           FM-35   sonde_level
-``aircraft``    aircraft                      FM-42   aircraft_level (no operator)
+``aircraft``    aircraft                      FM-42   aircraft_level (opt-in)
 ``profiler``    upper_air/wind_profiler       FM-132  (obs_gts only: no pressure)
 ==============  ============================  ======  ==========================
 
