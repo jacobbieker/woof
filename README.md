@@ -1033,8 +1033,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   into LETKF batches. It thins the scene, runs H(x) per member through
   CRTM, screens for clear sky, applies a static bias correction and a gross
   check, and places each observation at its weighting-function peak.
-  Variational bias correction and the 3D-Var radiance operator come next
-  (plan section 11).
+  `woof var --radiance-scene DIR` (opt-in) assimilates clear-sky imager
+  radiances in 3D-Var. It uses WRFDA's channel selection and errors, its
+  clear-sky QC, GSI thinning and the CRTM K-matrix, and adds VarBC. The bias
+  coefficients join the control vector with WRFDA's predictors,
+  preconditioning and `VARBC.in`/`VARBC.out` files
+  (plan section 13). The adjoint holds to 1e-13 and the gradient check to
+  1e-6, and the production-tier words are the same under fast and strict
+  numerics. The microwave sounder (WIS2) records plug into the same term.
 - **WIS2 observation reader (opt-in; in-situ families first).**
   `woof obs wis2 fetch` reads the WIS2 Global Cache archive
   (`bkr/obs/wis2.icechunk` on Source Cooperative, anonymous). It covers

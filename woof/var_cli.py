@@ -8,7 +8,8 @@ minimiser log (``da_minimise_cg``'s lines) as the iterations run.
 
 Scope is the WRFDA 4.7.1 regional 3D-Var the port gates on (cv5, the
 conventional observation types, GPS PW/refractivity and SATEM); see
-docs/var.md.
+docs/var.md.  Clear-sky geostationary radiances with VarBC are opt-in
+(``--radiance-scene``; CRTM from ``WOOF_CRTM_LIB``/``WOOF_CRTM_COEFFS``).
 """
 
 from __future__ import annotations
@@ -57,6 +58,18 @@ def register_cli(subparsers):
     p.add_argument("--iau-window-s", type=positive_float, default=None,
                    help="record an IAU window in the bundle (seconds); default: insert at once")
     p.add_argument("--log", type=Path, default=None, help="also write the minimiser log to this file")
+    r = p.add_argument_group("radiances (opt-in; plan section 13)")
+    r.add_argument("--radiance-scene", type=Path, action="append", default=[],
+                   help="a cached imager scene directory (woof.obs.imager_scene: SatWeave, GOES ABI, AHI, SEVIRI); "
+                        "repeat for several")
+    r.add_argument("--radiance-bands", default="6200,6900,7330,11200",
+                   help="imager bands in nm (default: the three WV bands and the 11.2 um window)")
+    r.add_argument("--thinning-km", type=positive_float, default=60.0,
+                   help="GSI thinning mesh (WRFDA thinning_mesh; default 60 km)")
+    r.add_argument("--varbc-in", type=Path, default=None,
+                   help="WRFDA VARBC.in; default: a cold start for every sensor")
+    r.add_argument("--varbc-out", type=Path, default=None, help="write the updated coefficients (VARBC.out)")
+    r.add_argument("--no-varbc", dest="varbc", action="store_false", help="radiances without bias correction")
     p.set_defaults(func=main)
     return p
 
@@ -75,10 +88,13 @@ def main(args) -> int:
     def write(line: str) -> None:
         print(line, flush=True)
 
+    rad_kw = _radiance_kwargs(args) if args.radiance_scene else {}
     result = analyse(args.be, args.obs, args.first_guess, tier=args.tier, ntmax=args.ntmax, eps=args.eps,
                      max_ext_its=args.max_ext_its, orthonorm_gradient=args.orthonorm_gradient,
                      check_rh=args.check_rh, window_minutes=args.window_minutes,
-                     landuse_table=args.landuse_table, write=write)
+                     landuse_table=args.landuse_table, write=write, **rad_kw)
+    if rad_kw.get("varbc") is not None and args.varbc_out is not None:
+        rad_kw["varbc"].write(args.varbc_out)
     if args.log is not None:
         Path(args.log).write_text("\n".join(line for r in result.cg for line in r.lines) + "\n")
     recipe = {"door": "woof var", "tier": args.tier, "ntmax": args.ntmax, "eps": args.eps,
@@ -87,6 +103,10 @@ def main(args) -> int:
               "be": Path(args.be).name, "obs": Path(args.obs).name}
     notes = {"var": {"nobs": result.nobs, "iterations": [r.iterations for r in result.cg],
                      "j_final": [r.j_final for r in result.cg], "timings_s": result.timings}}
+    if result.radiance is not None:
+        recipe["radiance_scenes"] = [Path(d).name for d in args.radiance_scene]
+        recipe["varbc"] = bool(args.varbc)
+        notes["var"]["radiance"] = result.radiance
     bundle, _ = write_bundle(args.out, args.first_guess, result.wrf, recipe=recipe,
                              grid_id=args.grid_id or Path(args.first_guess).name, ph=args.ph,
                              iau_window_s=args.iau_window_s, notes=notes)
@@ -94,3 +114,26 @@ def main(args) -> int:
           f"minimise {result.timings['minimise_s']:.1f} s; bundle {args.out}")
     print(json.dumps({"bundle": str(args.out), "valid_time": bundle.manifest.get("valid_time")}))
     return 0
+
+
+def _radiance_kwargs(args) -> dict:
+    from woof.da.var import radiance as rad
+    from woof.da.var import varbc as vbc
+    from woof.obs.imager_scene import read_scene_netcdf
+
+    bands = tuple(int(b) for b in str(args.radiance_bands).split(","))
+    records = []
+    for d in args.radiance_scene:
+        records += rad.from_imager_scene(read_scene_netcdf(d), bands)
+    kw = {"radiances": records, "radiance_qc": rad.RadianceQC(thinning_mesh_km=args.thinning_km)}
+    if args.varbc:
+        sensors = sorted({r.sensor for r in records})
+        if args.varbc_in is not None:
+            vb = vbc.VarBC.from_file(args.varbc_in, sensors)
+        else:
+            vb = vbc.VarBC({})
+        for r in records:  # a sensor VARBC.in lacks starts cold, with the channels it has
+            if r.sensor not in vb.instruments and r.sensor in vbc.VARBC_IDS:
+                vb.instruments[r.sensor] = vbc.template(r.sensor, list(r.channels))
+        kw["varbc"] = vb
+    return kw

@@ -101,6 +101,13 @@ class ObsTerm(Protocol):
         ``da_jo_and_grady_<type>``'s order, each with the flat indices of
         ``y`` that type's Jo sums over, in its loop order (reports, then
         levels; ``proc_domain`` reports only).
+
+    Optional control block (VarBC): a term with ``control_size > 0`` owns
+    that many control variables after ``U``'s (``cv = [v_U, v_1, ...]`` in
+    term order).  Its ``tl`` then also reads ``x["varbc"]`` (host
+    binary64), its ``ad`` also returns ``"varbc"``, and ``jp(v)`` and
+    ``jp_grad(v)`` give its background term and gradient; ``Jb`` stays over
+    ``v_U``.  Without such a term nothing changes, word for word.
     """
 
     d: np.ndarray
@@ -362,6 +369,8 @@ class JCost:
     jb: float
     jo: float
     jo_types: dict = field(default_factory=dict)
+    #: VarBC's background term (0 without a control block).
+    jp: float = 0.0
 
 
 class VarCost:
@@ -392,6 +401,14 @@ class VarCost:
             self.ops = _DeviceOps(tier, reduction)
         self.dtype = self.ops.dtype
         self.cv_size = int(u.cv_size)
+        # terms with a block of their own in the control vector (VarBC), after U's
+        self.cv_u = self.cv_size
+        self._blocks = []
+        for n, t in enumerate(self.terms):
+            size = int(getattr(t, "control_size", 0) or 0)
+            if size:
+                self._blocks.append((n, self.cv_size, size))
+                self.cv_size += size
         self.nx, self.ny, self.nz = int(u.nx), int(u.ny), int(u.nz)
         self.set_innovations([t.d for t in self.terms])
         self._groups = self._jo_groups()
@@ -461,21 +478,53 @@ class VarCost:
 
     def vtoy(self, cv) -> list:
         """``da_transform_vtoy``: ``y = H' U cv`` per term, host arrays of the tier's type."""
-        xa = self.u.apply(cv)["xa"]
-        return [np.asarray(_host(t.tl(xa)), dtype=self.dtype).ravel() for t in self.terms]
+        if not self._blocks:
+            xa = self.u.apply(cv)["xa"]
+            return [np.asarray(_host(t.tl(xa)), dtype=self.dtype).ravel() for t in self.terms]
+        xa = self.u.apply(cv[:self.cv_u])["xa"]
+        block = {n: np.asarray(_host(cv[o:o + k]), dtype=np.float64) for n, o, k in self._blocks}
+        return [np.asarray(_host(t.tl(dict(xa, varbc=block[n]) if n in block else xa)), dtype=self.dtype).ravel()
+                for n, t in enumerate(self.terms)]
 
     def vtoy_adj(self, gs: Sequence):
         """``da_transform_vtoy_adj``: ``U^T H'^T g``, the terms' scatters summed in list order."""
         xa = None
-        for t, g in zip(self.terms, gs):
+        blocks = {}
+        for n, (t, g) in enumerate(zip(self.terms, gs)):
             gd = g if self.tier == "reference" or not isinstance(g, np.ndarray) else self._to_device(g)
-            part = self._fields(t.ad(gd))
+            ad = t.ad(gd)
+            if self._blocks and "varbc" in ad:
+                blocks[n] = np.asarray(_host(ad["varbc"]), dtype=np.float64)
+            part = self._fields(ad)
             if xa is None:
                 xa = part
             else:
                 for k in XA_KEYS:
                     self.ops.add_into(xa[k].reshape(-1), part[k].reshape(-1))
-        return self.ops.asarray(self.u.adjoint(xa)["cv"])
+        if not self._blocks:
+            return self.ops.asarray(self.u.adjoint(xa)["cv"])
+        cv_u = _host(self.u.adjoint(xa)["cv"])
+        parts = [blocks.get(n, np.zeros(k)) for n, _, k in self._blocks]
+        return self.ops.asarray(np.concatenate([np.asarray(cv_u, dtype=self.dtype)]
+                                               + [p.astype(self.dtype) for p in parts]))
+
+    def _jp(self, cvx) -> float:
+        """``j % jp``: the terms' background terms over their blocks of ``cv + xhat``, in term order."""
+        jp = 0.0
+        for n, o, k in self._blocks:
+            jp = jp + self.terms[n].jp(np.asarray(_host(cvx[o:o + k]), dtype=np.float64))
+        return jp
+
+    def _set_block_gradient(self, grad, adj, cv, sign: float):
+        """Replace ``jb_factor * cv`` in each block of ``grad`` by ``grad Jp``: ``sign * adj + grad_jp(cv)``."""
+        if not self._blocks:
+            return grad
+        host = np.array(_host(grad), dtype=self.dtype)
+        for n, o, k in self._blocks:
+            a = np.asarray(_host(adj[o:o + k]), dtype=np.float64)
+            g = self.terms[n].jp_grad(np.asarray(_host(cv[o:o + k]), dtype=np.float64))
+            host[o:o + k] = (sign * a + g).astype(self.dtype)
+        return self.ops.asarray(host)
 
     def _to_device(self, a):
         import cupy as cp
@@ -539,8 +588,13 @@ class VarCost:
         cvx = self.ops.copy(xhat)
         if cv is not None:
             self.ops.axpy(1.0, cv, cvx)  # cv + xhat: 1.0 * cv is exact
-        jb = self.jb_factor * 0.5 * self.ops.dot(cvx, cvx)
-        return JCost(total=jb + jo, jb=jb, jo=jo, jo_types=per_type)
+        if not self._blocks:
+            jb = self.jb_factor * 0.5 * self.ops.dot(cvx, cvx)
+            return JCost(total=jb + jo, jb=jb, jo=jo, jo_types=per_type)
+        u = cvx[:self.cv_u]
+        jb = self.jb_factor * 0.5 * self.ops.dot(u, u)
+        jp = self._jp(cvx)
+        return JCost(total=jb + jo + jp, jb=jb, jo=jo, jo_types=per_type, jp=jp)
 
     def calculate_gradj(self, cv, re=None):
         """``da_calculate_gradj``: with ``re`` the gradient, without it ``(I + U^T H'^T R^-1 H' U) cv``."""
@@ -548,7 +602,7 @@ class VarCost:
             adj = self.vtoy_adj(self.grady(re))
             grad = self.ops.copy(adj)
             self.ops.axpy(self.jb_factor, cv, grad)  # grad_jo + jb_factor * cv
-            return grad
+            return self._set_block_gradient(grad, adj, cv, 1.0)
         if self._dev_grady is not None:
             # H' U cv, grady and H'^T without leaving the device (the host's words)
             xa = self.u.apply(cv)["xa"]
@@ -559,7 +613,7 @@ class VarCost:
             adj = self.vtoy_adj(self.grady(ys))
         grad = self.ops.copy(cv)
         self.ops.neg_axpby(grad, adj, self.jb_factor)  # -grad_jo + jb_factor * cv
-        return grad
+        return self._set_block_gradient(grad, adj, cv, -1.0)
 
     # ------------------------------------------------------------ conveniences
 
