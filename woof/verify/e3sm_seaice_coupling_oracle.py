@@ -123,6 +123,23 @@ def _uniform(rng, low: float, high: float, n) -> np.ndarray:
     return (rng.random(n) * (high - low)) + low
 
 
+def _sin_cos(t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """sin and cos as Taylor polynomials in separate numpy multiplies and adds.
+
+    The cells' positions only need to be near the sphere, but their words
+    must not depend on the host's libm (numpy's sin and cos differ between
+    glibc and macOS), so the cases are the same bytes everywhere.
+    """
+    t = np.where(t > math.pi, t - 2.0 * math.pi, t)
+    t2 = t * t
+    s = np.zeros_like(t)
+    c = np.zeros_like(t)
+    for k in range(14, -1, -1):  # through t**29 and t**28
+        s = (s * t2) + ((-1.0) ** k / math.factorial(2 * k + 1))
+        c = (c * t2) + ((-1.0) ** k / math.factorial(2 * k))
+    return s * t, c
+
+
 def _mesh(rng, n: int, radius: float):
     lat = _uniform(rng, -1.5, 1.5, n)
     lon = _uniform(rng, -3.1, 6.2, n)
@@ -130,10 +147,11 @@ def _mesh(rng, n: int, radius: float):
     if n > 2:
         lat[1], lon[1] = math.pi / 2, 1.0  # the geographic pole
         lat[2], lon[2] = -0.7, math.pi
-    cl = np.cos(lat)
-    x = (radius * cl) * np.cos(lon)
-    y = (radius * cl) * np.sin(lon)
-    z = radius * np.sin(lat)
+    sl, cl = _sin_cos(lat)
+    so, co = _sin_cos(lon)
+    x = (radius * cl) * co
+    y = (radius * cl) * so
+    z = radius * sl
     if n > 2:
         x[0], y[0], z[0] = radius, 0.0, 0.0
         x[1], y[1], z[1] = 0.0, 0.0, radius
