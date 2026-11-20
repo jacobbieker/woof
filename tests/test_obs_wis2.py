@@ -642,3 +642,21 @@ def test_ro_gradient_check_refuses_a_duct():
     ducted[:3] += [40.0, 25.0, 0.0]  # -100 N/km near the surface
     ok = wis2.ro_gradient_ok(h, ducted)
     assert not ok[:3].any() and ok[6:].all()
+
+
+def test_ro_obs_gts_error_never_prints_as_zero(tmp_path):
+    from woof.da.var import obs_wrfda as ow
+    rep = wis2.Report(family="ro", fm=116, station="75021", name="GNSS-RO 750 G21", lat=40.0, lon=-95.0,
+                      elev=np.nan, time=np.datetime64("2008-02-05T12:00:00"), received=np.datetime64("NaT", "s"),
+                      p=[np.nan, np.nan], z=[29000.0, 5000.0], t=[np.nan] * 2, td=[np.nan] * 2, rh=[np.nan] * 2,
+                      spd=[np.nan] * 2, wdir=[np.nan] * 2, surface=False, extras={"refractivity": np.array([2.0, 150.0])})
+    out = tmp_path / "ob.ascii"
+    wis2.write_obs_gts([rep], out, ObsErrTable.load())
+    proj = ow.LambertWRFDA(cen_lat=40.0, cen_lon=-95.0, stand_lon=-95.0, truelat1=30.0, truelat2=60.0,
+                           moad_cen_lat=40.0, dx=60000.0, ide=89, jde=59)
+    obs = ow.read_obs_ascii(out, proj, analysis_date="2008-02-05_12:00:00",
+                            time_window_min="2008-02-05_11:00:00", time_window_max="2008-02-05_13:00:00")
+    ref = obs["gpsref"].fields["ref"]
+    by = dict(zip(np.asarray(ref.inv).tolist(), np.asarray(ref.error).tolist()))
+    assert by[2.0] == pytest.approx(0.01)  # 2 N * 1 % * 0.3 = 0.006, floored at the format's 0.01
+    assert by[150.0] > 0.5

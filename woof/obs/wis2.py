@@ -1080,6 +1080,7 @@ RO_PCCF_MIN = 100.0  # da_read_obs_bufrgpsro skips a profile below 100 % confide
 RO_HEIGHT_RANGE_M = (0.0, 30000.0)  # WRFDA's bot_km_gpsro and top_km_gpsro defaults
 RO_DNDZ_MIN = -50.0  # N/km; da_qc_gpsref's gpsref_qc_dndz_thresh (super-refraction)
 RO_DNDZ2_MAX = 100.0  # N/km^2; gpsref_qc_dndz2_thresh
+RO_OBS_GTS_MIN_ERROR = 0.01  # obs_gts prints errors as F7.2: a smaller one would read as 0
 
 
 def ro_gradient_ok(height_m, refractivity):
@@ -1178,7 +1179,7 @@ def ro_reports(root, start, end, box, counts: Counter) -> list[Report]:
         else:
             counts["ro_profiles_at_occultation_point"] += 1
             llat, llon = np.full(n_ref, lat[n, 0]), np.full(n_ref, lon[n, 0])
-        good = np.isfinite(h) & np.isfinite(value)
+        good = np.isfinite(h) & np.isfinite(value) & (value > 0.0)
         zero = good & (level_conf == 0)
         counts["ro_level_confidence_zero"] += int(zero.sum())
         good &= ~zero
@@ -1467,7 +1468,7 @@ def obs_gts_report(rep: Report, table) -> list[str]:
         from woof.obs.obserr_wrfda import gpsref_error
         ref = rep.extras["refractivity"]
         for k in order:
-            error = gpsref_error(ref[k], rep.z[k], rep.lat)
+            error = max(gpsref_error(ref[k], rep.z[k], rep.lat), RO_OBS_GTS_MIN_ERROR)
             lines.append(_triple(None, 0.0) * 3 + " " * 11 + _triple(rep.z[k], 0.0) + _triple(None, 0.0)
                          + _triple(ref[k], error) + " " * 11 + _triple(None, 0.0))
         return lines
@@ -1490,7 +1491,8 @@ def write_obs_gts(reports, path, table, *, domain: dict | None = None) -> Counte
     would read it as a geostationary one (it keys polaramv on those names).
     A GNSS-RO profile is one FM-116 report at its occultation point (the
     ascii reader has one location per report), errors as
-    :func:`~woof.obs.obserr_wrfda.gpsref_error` gives them there.
+    :func:`~woof.obs.obserr_wrfda.gpsref_error` gives them there, but not
+    below 0.01 N (the format's resolution; near 30 km the error is smaller).
     """
     kept = []
     for rep in reports:

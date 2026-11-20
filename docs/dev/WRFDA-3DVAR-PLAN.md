@@ -2437,7 +2437,8 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      `percent_confidence` is the profile's, then one per bending-angle
      level, then one per refractivity level. As `da_read_obs_bufrgpsro`
      does, refractivity level k takes bending-angle level k's location when
-     the counts agree, else the occultation point.
+     the counts agree. WRFDA skips a profile whose counts differ; here it
+     is kept at the occultation point, and counted.
    - A profile is refused under 100 % confidence (WRFDA's rule) or with
      0-33-039 bits 1, 4, 5, 6 or 15 set (non-nominal, excess phase, bending
      angle or refractivity processing non-nominal, background profile).
@@ -2451,7 +2452,8 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      standard-atmosphere pressure in `level_pa`, which only keeps the
      levels' identities apart. `obs_gts` has one FM-116 report per profile
      at the occultation point (the ascii reader has one location per
-     report), refractivity in the dew point slot.
+     report), refractivity in the dew point slot, its error not below
+     0.01 N (the F7.2 field; near 30 km WRFDA's error is smaller).
    - On 2026-10-28 09-15Z globally: 2,568 profiles in the window, 1,502
      used (207,599 levels); 1,001 are EUMETSAT bending-angle-only
      products, which need a bending-angle operator.
