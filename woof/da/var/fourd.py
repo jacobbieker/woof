@@ -20,7 +20,8 @@ start, and ``da_transfer_xatowrftl_adj`` gives ``xa_0``'s gradient.
 :class:`~woof.da.var.cost.ObsTerm`; the model is pluggable
 (:class:`TLModel`).  :class:`IdentityModel` is WRFPLUS's
 ``enable_identity``: every slot's perturbation is the initial one, the
-adjoint sums the forcings.  P3a's ``Window`` (PR 4D.3) is the next model.
+adjoint sums the forcings.  :class:`woof.da.var.window4d.WindowModel`
+is P3a's dry ``Window`` as the model (PR 4D.3).
 
 The observations and innovations are FGAT's (:mod:`woof.da.var.fgat`):
 one file and one first guess per slot, ``plocal`` slot boundaries,
