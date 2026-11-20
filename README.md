@@ -907,7 +907,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (EFSO), using the LETKF's own weights ([docs/grad.md](docs/grad.md)).
   On a regional case, the finite-difference and ensemble sensitivities
   agree in sign and pattern on the WRF route at 9 km and at 3 km, though
-  ES and EFSO overstate magnitudes by about 2-8x. On hex they are
+  ES and EFSO at the most-correlated points overstate magnitudes by about
+  2-8x; an independent member set is within about 0.3-3x. On hex they are
   dominated by noise at 12 km as well as at 3-5 km, so the problem is the
   route, not the resolution. Later gradient work may use 3 km on the WRF
   route, and hex gradient work waits on a diagnosis (plan, gate G0 and

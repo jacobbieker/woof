@@ -733,6 +733,7 @@ Effort is in focused engineer-weeks (w).
 | P0.2 | Trajectory sizes: record restart-payload bytes per route and grid (replaces 1.3's estimates). | 0.5 w |
 | P0.3 | `woof grad fd`: central-difference sensitivities of `J_o` to named parameters and to a few initial-state patterns, via `woof branch` from a shared checkpoint; strict-numerics noise floor measured. | 1 w |
 | P0.4 | `woof grad ens`: ensemble sensitivity `cov(J, x0)/var(x0)` with localisation, on batched members; EFSO from the LETKF weights. | 1.5-2 w |
+| P0.5 | Route vs resolution: hex at 12 km and WRF at 3 km on the WRF 9 km case, same method (measured below; no code). | 0.5 w |
 
 **Gate G0:** FD and ensemble sensitivities agree in sign and pattern for at
 least three directions on one regional case, on both routes, uniform and
@@ -816,15 +817,20 @@ point, and the finite difference (FD) is the central difference at 1 and
   - At 150 km, synop temperature (-378) and dewpoint (-183) carry most of
     the benefit, with 90% of those observations beneficial, followed by
     aircraft temperature (-57) and wind (-36).
-- **J_o against the scorecard: met on hex uniform 5 km (P0.1) and on
-  the WRF route at 9 km (P0.5).** On hex the station-wind and sonde RMSEs
-  are identical pair for pair. On the WRF 9 km base run, all 48
-  station-wind pairs are identical (RMSE 0.6941 on both sides, and
-  `J` = ½ n RMSE² at sigma 1). Of the 12 sonde temperature pairs at 12 Z,
-  8 are identical. The other 4 differ by design: `J_o` uses FGAT (each
-  level at its own time, so the 11 Z frame) and the sonde's drifted
-  position, while the referee reads the launch-site column at 12 Z. On
-  the same frame and column they agree. The VR mesh has not been checked.
+- **J_o against the scorecard: met on hex uniform 5 km (P0.1); on the
+  WRF route at 9 km, met for station wind, and the sondes differ in
+  their pairing (P0.5).**
+  - On hex the station-wind and sonde RMSEs are identical pair for pair.
+  - On the WRF 9 km base run, all 48 station-wind pairs are identical
+    (RMSE 0.6941 on both sides, and `J` = ½ n RMSE² at sigma 1).
+  - Of the 12 sonde temperature pairs at 12 Z, 8 are identical. The other
+    4 are not the same pairs: `J_o` uses FGAT (each level at its own time,
+    so the 11 Z frame) and the sonde's drifted position, while the
+    referee reads the launch-site column at 12 Z.
+  - Re-paired on the same frame and column, the values are equal (for
+    example, 251.258 K at 500 hPa on both sides). The sonde RMSEs as the
+    two tools pair them are therefore not equal.
+  - The WRF 3 km cell and the VR mesh have not been checked.
 - **Costs on pb (A6000, shared).**
   - One WRF restart leg (3 to 12 h, 100x80x49): 45-68 s.
   - One hex restart leg (1 to 6 h): 116 s uniform, 249 s VR.
@@ -843,38 +849,57 @@ confounds above. Every cell uses the same case and the same method. All
 runs were on the pb A6000 (CUDA).
 - Case: GFS cycle 2026-11-07 00 Z, restart at 03 Z, `J_o` over 07-12 Z.
 - Observations: one "core" set of 5,031 observations (synop, aircraft
-  and sondes) inside the hex 12 km mesh's interior. Each cell scores the
-  part its domain covers.
+  and sondes) owned by the hex 12 km mesh's interior cells.
+  - Each cell accepts the part its domain covers, after the usual
+    checks. On hex, 72 surface observations fail the elevation check and
+    18 fail the operator, leaving 4,941.
+  - On WRF 3 km, 1,642 fall outside the domain and 9 fail the operator,
+    leaving 3,380.
 - Members: two independent sets of 24 `theta`-only members each (0.5 K,
   random fields at the grid spacing). Directions are picked from set A
   only, so set B gives an unselected ES estimate.
 - FD: central differences at 1 and 0.5 K at the point, plus a ±0.1 K
   pair for the noise floor.
-- Reproducibility: the cross-validation column takes the top 1% of
-  points by |r| in one set and compares their sign in the other set.
+- Reproducibility:
+  - "Map corr" is the correlation of the whole set-A and set-B `S` maps.
+    It is low everywhere, because most points carry no signal.
+  - The top-1% columns take the 1% of points with the largest |r| in one
+    set and compare them in the other, given as A in B / B in A.
+- ES(AB) is the pooled 48-member estimate at the picked point, and ES(B)
+  the unselected set-B one. Ranges are over the responding directions
+  and both FD scales.
 
-| cell | grid | obs | J spread | ES map corr A vs B | top-1% sign agree | FD agrees in sign | ES(AB) / FD | ES(B) / FD |
-|---|---|---|---|---|---|---|---|---|
-| WRF 9 km | 100x80x49 | 4,775 | 84 | 0.02 | 0.60 / 0.78 | 4 of 8 (4 of 6 tropospheric) | 1.4-7.7 | 0.8-2.9 |
-| WRF 3 km | 170x170x49, `cu_physics=0` | 3,380 | 72 | 0.23 | 0.98 / 0.72 | 6 of 6 | 2.1-4.1 | 0.3-2.1 |
-| hex 12 km | 2,107 cells (1,243 interior), 55 levels, `mesoscale_reference` | 4,941 | 75 | 0.08 | 0.57 / 0.59 | 1 of 6 (2 opposite) | 2.9 | 1.4-2.8 |
+| cell | grid | obs | J spread | map corr | top-1% sign agree | top-1% corr | FD agrees in sign | ES(AB) / FD | ES(B) / FD |
+|---|---|---|---|---|---|---|---|---|---|
+| WRF 9 km | 100x80x49 | 4,775 | 84 | 0.02 | 0.60 / 0.78 | 0.59 / 0.36 | 4 of 8 (4 of 6 tropospheric) | 1.4-7.7 | 0.8-2.9 |
+| WRF 3 km | 170x170x49, `cu_physics=0` | 3,380 | 72 | 0.23 | 0.98 / 0.72 | 0.33 / 0.80 | 6 of 6 | 2.1-4.1 | 0.3-2.1 |
+| hex 12 km | 2,107 cells (1,243 interior), 55 levels, `mesoscale_reference` | 4,941 | 75 | 0.08 | 0.57 / 0.59 | 0.08 / -0.06 | 1 of 6 (2 opposite) | 2.9-5.8 | 1.4-2.8 |
 
-- **WRF 3 km: G0 met, and more cleanly than at 9 km.**
+- **WRF 3 km: G0's sign-and-pattern test met, and more cleanly than at
+  9 km.** The scorecard test was not repeated at 3 km (it uses the same
+  `J_o` code), and the WRF route has no VR mesh.
   - All six directions respond with the ES sign, and the FD hardly
     changes between scales: -20/-22, -26/-27, -21/-28, -19/-20, -23/-23
     and -41/-40 at 1 / 0.5 K.
   - Across observation types, the ES and FD responses correlate at
     0.71-0.98.
-  - The ±0.1 K pair gives -23.5, the same slope as at 1 K, so the
-    response stays linear down to 0.1 K.
+  - On d1, the ±0.1 K pair gives -23.5, close to the slope at 1 and
+    0.5 K (-20 / -22). Its legs move `J` by only -2.7 and +2.0, inside the
+    ±1.5-4 band called noise below, so one pair does not lower the 0.4 K
+    rule. At 9 km the same pair gave +6.6 against -4.1 at 1 K, which is
+    noise.
   - The ES maps reproduce between sets: in the top 1%, sign agreement is
     0.98 / 0.72 and the correlation 0.33 / 0.80.
   - The domain is smaller than the hex interior, so 1,642 core
     observations fall outside it. The direction picks were spaced 80 km
     apart, not 120 km, to fit six into the domain.
-- **WRF 9 km: G0 met again, with this method.**
+- **WRF 9 km: the sign-and-pattern test met again, with this method.**
   - Four of the six tropospheric directions respond with the ES sign,
-    with a pattern correlation of 0.81-0.99. The two stratospheric picks
+    with a pattern correlation of 0.81-0.99.
+  - The whole-map correlation between sets is low (0.02, below hex's
+    0.08). At the 1% of points that carry signal, though, the two sets
+    correlate at 0.59 / 0.36 with sign agreement 0.60 / 0.78. Hex's are
+    0.08 / -0.06 and 0.57 / 0.59. The two stratospheric picks
     and two tropospheric ones do not respond.
   - The unselected set-B estimate is within 0.8-2.9x of the FD. The
     3.8-6.8x overstatement in P0.3 is mostly selection bias.
@@ -899,15 +924,16 @@ runs were on the pb A6000 (CUDA).
     - The central difference cancels the common offset but not its
       spread of about ±2-3 per run. At ±0.1 K that spread gives d6's FD
       -16, the opposite sign to its 1 and 0.5 K values.
-    - WRF has no such jump. On the 3 km cell the ±0.1 K legs sit at -2.7
-      and +2.0 from the base, which is the linear response.
+    - WRF has no such sign-independent jump. On the 3 km cell the ±0.1 K
+      legs sit at -2.7 and +2.0 from the base.
 - **Verdict: the problem is the route, not the resolution.** With
   everything else held fixed, WRF passes G0 at 3 km (6 of 6) and at
   9 km, and hex fails at 12 km. The stop rule's trigger ("noise at 3 km")
   did not occur on the WRF route.
   - Recommendation:
-    - Lift the convective-scale stop for the WRF route: P1-P4 may use
-      3 km there. The cost table, not G0, still sets the window length.
+    - Lift the convective-scale stop for the WRF route: G0 no longer
+      limits P1-P4 there to 9-15 km. P4's 1-6 h windows at 9-15 km stay,
+      for the cost reasons in section 3(e), not because of noise.
     - Hold hex gradient and ES work until its "any perturbation" jump in
       `J` is explained. Start by diffing a ±0.1 K leg against the base,
       field by field and step by step, from the restart onwards. This is
