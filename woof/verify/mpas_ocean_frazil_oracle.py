@@ -54,7 +54,7 @@ FIELDS = (
 #: Registry.xml defaults (v8.4.2) of the frazil, equation-of-state and clock configs the driver reads
 BASE_CONFIG = {
     **_eos.DEFAULTS, "config_eos_type": "linear",
-    "config_start_time": "0001-01-01_00:00:00", "config_dt": "00:10:00",
+    "config_start_time": "0001-01-01_00:00:00", "config_dt": "00:10:00", "config_calendar_type": "gregorian_noleap",
     "config_use_frazil_ice_formation": True, "config_frazil_in_open_ocean": True,
     "config_frazil_under_land_ice": True, "config_frazil_heat_of_fusion": 3.34e5,
     "config_frazil_ice_density": 1000.0, "config_frazil_fractional_thickness_limit": 0.1,

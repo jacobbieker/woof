@@ -86,7 +86,7 @@ BASE_CONFIG = {
     "config_use_surface_tilt": True, "config_geostrophic_surface_tilt": True, "config_use_halo_exch": False,
     "config_aggregate_halo_exch": False, "config_reuse_halo_exch": False, "config_check_state": False,
     "config_use_forcing": False, "config_dynamics_subcycle_number": 1, "config_elastic_subcycle_number": 30,
-    "config_use_ice_age": False,
+    "config_use_ice_age": False, "config_calendar_type": "gregorian_noleap",  # the Registry default
 }
 #: (name, seed, (nq, nr), owned columns, steps, config_dt [s], config overrides)
 CASES = (
@@ -96,6 +96,14 @@ CASES = (
     ("no_air_no_tilt", 20261603, (10, 5), 3, 2, 1800.0, {
         "config_use_air_stress": False, "config_use_surface_tilt": False, "config_use_ocean_stress": False,
         "config_start_time": "2000-02-28_23:30:00", "diagnostics:simulationStartTime": "2000-01-01_00:00:00"}),
+    # a run started on 1 February 2000 and continued from 1 March: the days
+    # since its start are 28 on the default 365-day calendar, 29 on the
+    # Gregorian one, which has 29 February
+    ("evp_noleap_after_february", 20261604, (10, 5), 3, 2, 1800.0, {
+        "config_start_time": "2000-03-01_00:00:00", "diagnostics:simulationStartTime": "2000-02-01_00:00:00"}),
+    ("evp_gregorian_after_february", 20261605, (10, 5), 3, 2, 1800.0, {
+        "config_calendar_type": "gregorian", "config_start_time": "2000-03-01_00:00:00",
+        "diagnostics:simulationStartTime": "2000-02-01_00:00:00"}),
 )
 
 

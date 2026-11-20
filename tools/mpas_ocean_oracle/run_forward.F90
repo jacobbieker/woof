@@ -71,7 +71,7 @@ program run_forward
   real(kind=RKIND), dimension(:), pointer :: areaCell
   real(kind=RKIND), dimension(:,:), pointer :: layerThickness, normalVelocity, normalTransportVelocity
   real(kind=RKIND), dimension(:,:,:), pointer :: activeTracers
-  character(len=StrKIND), pointer :: config_start_time, config_dt
+  character(len=StrKIND), pointer :: config_start_time, config_dt, config_calendar_type
   character(len=StrKIND) :: timeStamp
   character(len=1024) :: inPath, outPath
 
@@ -99,6 +99,9 @@ program run_forward
   diagnosticsPool => pool_named(pools, 'diagnostics')
   forcingPool => pool_named(pools, 'forcing')
 
+  ! the framework sets the calendar before the clock (mpas_framework.F:111-116)
+  call mpas_pool_get_config(pools % configs, 'config_calendar_type', config_calendar_type)
+  call mpas_timekeeping_init(config_calendar_type)
   ! the clock: config_start_time, config_dt; dt as ocn_forward_mode_run takes it
   call mpas_pool_get_config(pools % configs, 'config_start_time', config_start_time)
   call mpas_pool_get_config(pools % configs, 'config_dt', config_dt)

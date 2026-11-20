@@ -33,7 +33,7 @@ program run_frazil
   integer :: err
   real(kind=RKIND), dimension(:,:), pointer :: tendThickness
   real(kind=RKIND), dimension(:,:,:), pointer :: tendTracers
-  character(len=StrKIND), pointer :: config_start_time, config_dt
+  character(len=StrKIND), pointer :: config_start_time, config_dt, config_calendar_type
   character(len=1024) :: inPath, outPath
 
   call get_command_argument(1, inPath)
@@ -46,6 +46,9 @@ program run_frazil
   statePool => pool_named(pools, 'state')
   diagnosticsPool => pool_named(pools, 'diagnostics')
   forcingPool => pool_named(pools, 'forcing')
+  ! the framework sets the calendar before the clock (mpas_framework.F:111-116)
+  call mpas_pool_get_config(pools % configs, 'config_calendar_type', config_calendar_type)
+  call mpas_timekeeping_init(config_calendar_type)
   call mpas_pool_get_config(pools % configs, 'config_start_time', config_start_time)
   call mpas_pool_get_config(pools % configs, 'config_dt', config_dt)
   call mpas_set_clock(domain % clock, config_start_time, config_dt)

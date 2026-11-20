@@ -4,7 +4,9 @@
 ``ocn_forward_mode_run`` (``mpas_ocn_forward_mode.F``) do to the state:
 
 - the clock (:class:`Clock`): ``config_start_time`` and ``config_dt`` on
-  MPAS's default calendar (proleptic Gregorian), in whole seconds;
+  ``config_calendar_type``'s calendar (``mpas_timekeeping_init``): the
+  Registry default ``gregorian_noleap``, a 365-day year without 29 February,
+  or ``gregorian`` (proleptic); in whole seconds;
 - ``ocn_time_integration_split_init``: the barotropic subcycle count from
   ``config_dt`` and ``config_btr_dt`` (:func:`btr_subcycle_count`) and, on a
   cold start, the initial velocity split into barotropic and baroclinic
@@ -94,8 +96,35 @@ def _launch(precision: str, name: str, n: int, args: tuple) -> None:
 # ---------------------------------------------------------------- the clock
 
 
-def _days_from_civil(y: int, m: int, d: int) -> int:
-    """Days since 0001-01-01 on the proleptic Gregorian calendar."""
+#: the calendars mpas_timekeeping_init sets (mpas_timekeeping.F:87-127) that the
+#: clock carries; v8.4.2's built-in ESMF has no 360-day calendar
+CALENDARS = ("gregorian", "gregorian_noleap")
+#: config_calendar_type's Registry default (both cores)
+DEFAULT_CALENDAR = "gregorian_noleap"
+_NOLEAP_MONTH_START = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)
+_MONTH_DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+
+def calendar_of(configs: dict) -> str:
+    """``config_calendar_type`` (the Registry default when absent), refused by
+    name unless the clock carries it."""
+    calendar = configs.get("config_calendar_type", DEFAULT_CALENDAR)
+    if calendar not in CALENDARS:
+        raise ConfigurationRefusal(knob="config_calendar_type", value=calendar,
+                                   reason="the clock carries MPAS's gregorian and gregorian_noleap calendars only",
+                                   declaration="config_calendar_type = 'gregorian_noleap' | 'gregorian'")
+    return calendar
+
+
+def _is_leap(y: int) -> bool:
+    return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+
+
+def _days_from_civil(y: int, m: int, d: int, calendar: str = "gregorian") -> int:
+    """Days since 0001-01-01 on the proleptic Gregorian calendar, or on the
+    365-day year (``gregorian_noleap``)."""
+    if calendar == "gregorian_noleap":
+        return (y - 1) * 365 + _NOLEAP_MONTH_START[m - 1] + d - 1
     y -= m <= 2
     era = y // 400
     yoe = y - era * 400
@@ -104,16 +133,33 @@ def _days_from_civil(y: int, m: int, d: int) -> int:
     return era * 146097 + doe - 306
 
 
-def parse_time(text: str) -> int:
-    """An MPAS date-time string 'YYYY-MM-DD_hh:mm:ss' in seconds since 0001-01-01."""
+def parse_time(text: str, calendar: str = "gregorian") -> int:
+    """An MPAS date-time string 'YYYY-MM-DD_hh:mm:ss' in seconds since
+    0001-01-01 on ``calendar``. A date the calendar does not have (29 February
+    of the 365-day year) is refused, as ``isValidDate`` rejects it
+    (``mpas_timekeeping.F:2146-2185``)."""
+    if calendar not in CALENDARS:
+        raise ValueError(f"calendar {calendar!r} is not one of {CALENDARS}")
     date, clock = text.split("_")
     y, m, d = (int(x) for x in date.split("-"))
     hh, mm, ss = (int(x) for x in clock.split(":"))
-    return ((_days_from_civil(y, m, d) * 24 + hh) * 60 + mm) * 60 + ss
+    days = _MONTH_DAYS[m - 1] + (calendar == "gregorian" and m == 2 and _is_leap(y)) if 1 <= m <= 12 else 0
+    if not 1 <= d <= days:
+        raise ConfigurationRefusal(knob="config_start_time", value=text,
+                                   reason=f"MPAS_setTime: {text} is not a date of the {calendar} calendar",
+                                   declaration="a date of config_calendar_type's calendar")
+    return ((_days_from_civil(y, m, d, calendar) * 24 + hh) * 60 + mm) * 60 + ss
 
 
-def format_time(seconds: int) -> str:
+def format_time(seconds: int, calendar: str = "gregorian") -> str:
     days, rest = divmod(seconds, 86400)
+    clock = f"{rest // 3600:02d}:{rest % 3600 // 60:02d}:{rest % 60:02d}"
+    if calendar == "gregorian_noleap":
+        y, yday = divmod(days, 365)
+        m = max(i for i, first in enumerate(_NOLEAP_MONTH_START) if first <= yday)
+        return f"{y + 1:04d}-{m + 1:02d}-{yday - _NOLEAP_MONTH_START[m] + 1:02d}_{clock}"
+    if calendar != "gregorian":
+        raise ValueError(f"calendar {calendar!r} is not one of {CALENDARS}")
     z = days + 306
     era = z // 146097
     doe = z - era * 146097
@@ -124,7 +170,7 @@ def format_time(seconds: int) -> str:
     d = doy - (153 * mp + 2) // 5 + 1
     m = mp + 3 if mp < 10 else mp - 9
     y += m <= 2
-    return f"{y:04d}-{m:02d}-{d:02d}_{rest // 3600:02d}:{rest % 3600 // 60:02d}:{rest % 60:02d}"
+    return f"{y:04d}-{m:02d}-{d:02d}_{clock}"
 
 
 def interval_seconds(text: str) -> int:
@@ -136,19 +182,25 @@ def interval_seconds(text: str) -> int:
 
 @dataclass
 class Clock:
-    """MPAS's clock on whole seconds since 0001-01-01_00:00:00."""
+    """MPAS's clock on whole seconds since 0001-01-01_00:00:00 of its calendar."""
     start: int
     now: int
     step: int
+    calendar: str = "gregorian"
 
     @classmethod
     def from_configs(cls, configs: dict) -> "Clock":
-        start = parse_time(configs["config_start_time"])
-        return cls(start, start, interval_seconds(configs["config_dt"]))
+        calendar = calendar_of(configs)
+        start = parse_time(configs["config_start_time"], calendar)
+        return cls(start, start, interval_seconds(configs["config_dt"]), calendar)
 
     @property
     def time_stamp(self) -> str:
-        return format_time(self.now)
+        return format_time(self.now, self.calendar)
+
+    def seconds(self, text: str) -> int:
+        """A date-time string in seconds on the clock's calendar."""
+        return parse_time(text, self.calendar)
 
 
 def btr_subcycle_count(config_dt: str, config_btr_dt: str) -> int:
@@ -255,7 +307,7 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int) -> None:
     real = PRECISIONS[precision]
     n_btr = btr_subcycle_count(configs["config_dt"], configs["config_btr_dt"])
     dt = float(clock.step)
-    start = parse_time(configs["diagnostics:simulationStartTime"])
+    start = clock.seconds(configs["diagnostics:simulationStartTime"])
     days_per_second = real(real(1.0) / real(86400.0))
     for _ in range(n_steps):
         clock.now += clock.step
@@ -277,7 +329,8 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int) -> None:
 def write_restart(path, *, pools: dict, clock: Clock) -> None:
     """Every pool array word for word, every dimension and the clock, to ``path`` (.npz)."""
     import cupy as cp
-    arrays: dict[str, np.ndarray] = {"clock": np.array([clock.start, clock.now, clock.step], np.int64)}
+    arrays: dict[str, np.ndarray] = {"clock": np.array([clock.start, clock.now, clock.step], np.int64),
+                                     "clock_calendar": np.array(clock.calendar)}
     for pool, fields in pools.items():
         for name, value in fields.items():
             key = f"{pool}/{name}"
@@ -301,7 +354,7 @@ def read_restart(path, *, like: dict) -> tuple[dict, Clock]:
     with np.load(Path(path)) as data:
         pools: dict[str, dict] = {pool: {name: None for name in fields} for pool, fields in like.items()}
         for key in data.files:
-            if key == "clock":
+            if key in ("clock", "clock_calendar"):
                 continue
             kind, full = key.split(":", 1)
             pool, name = full.split("/", 1)
@@ -310,4 +363,6 @@ def read_restart(path, *, like: dict) -> tuple[dict, Clock]:
                                                 "host": lambda v: v.copy(),
                                                 "dev": lambda v: cp.asarray(v)}[kind](value)
         start, now, step = (int(x) for x in data["clock"])
-    return pools, Clock(start, now, step)
+        # a restart written before the clock carried its calendar is Gregorian
+        calendar = str(data["clock_calendar"]) if "clock_calendar" in data.files else "gregorian"
+    return pools, Clock(start, now, step, calendar)

@@ -47,7 +47,7 @@ program run_seaice_step
   real(kind=RKIND) :: inputDt
   real(kind=RKIND), pointer :: config_dt, dynamicsTimeStep, elasticTimeStep
   integer, pointer :: nSteps, config_dynamics_subcycle_number, config_elastic_subcycle_number
-  character(len=StrKIND), pointer :: config_start_time, clockStep
+  character(len=StrKIND), pointer :: config_start_time, clockStep, config_calendar_type
   integer :: itimestep, ierr, p
   character(len=24), parameter :: structNames(24) = [character(len=24) :: 'mesh', 'boundary', 'velocity_solver', &
        'velocity_variational', 'velocity_weak', 'icestate', 'tracers', 'tracers_aggregate', 'atmos_coupling', &
@@ -73,6 +73,9 @@ program run_seaice_step
           pool_named(pools, trim(structNames(p))))
   end do
 
+  ! the framework sets the calendar before the clock (mpas_framework.F:111-116)
+  call mpas_pool_get_config(pools % configs, 'config_calendar_type', config_calendar_type)
+  call mpas_timekeeping_init(config_calendar_type)
   call mpas_pool_get_config(pools % configs, 'config_start_time', config_start_time)
   call mpas_pool_get_config(pools % configs, 'oracle_clock_step', clockStep)
   call mpas_set_clock(domain % clock, config_start_time, clockStep)

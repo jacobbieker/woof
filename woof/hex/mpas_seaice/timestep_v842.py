@@ -50,7 +50,7 @@ import logging
 import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
-from woof.hex.mpas_ocean.forward_v842 import Clock, parse_time, read_restart, write_restart
+from woof.hex.mpas_ocean.forward_v842 import Clock, calendar_of, parse_time, read_restart, write_restart
 
 from . import evp_v842, presubcycle_v842, remap_v842, velocity_v842
 
@@ -111,12 +111,15 @@ def advection_tree(pools: dict, configs: dict):
 
 
 def clock_from_configs(configs: dict) -> Clock:
-    """The clock: ``config_start_time``, the step ``config_dt`` (whole seconds)."""
+    """The clock: ``config_start_time``, the step ``config_dt`` (whole seconds),
+    on ``config_calendar_type``'s calendar (the Registry default
+    ``gregorian_noleap``, or ``gregorian``)."""
     dt = float(configs["config_dt"])
     if dt != int(dt):
         _refuse("config_dt", dt, "the clock runs on whole seconds", "config_dt a whole number of seconds")
-    start = parse_time(configs["config_start_time"])
-    return Clock(start, start, int(dt))
+    calendar = calendar_of(configs)
+    start = parse_time(configs["config_start_time"], calendar)
+    return Clock(start, start, int(dt), calendar)
 
 
 def _tilt(configs: dict) -> str:
@@ -219,7 +222,7 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
         clock.now += clock.step
         # seaice_set_time_diagnostics
         d["xtime"] = clock.time_stamp
-        days = real(real(clock.now - parse_time(d["simulationStartTime"])) * days_per_second)
+        days = real(real(clock.now - clock.seconds(d["simulationStartTime"])) * days_per_second)
         d["daysSinceStartOfSim"][...] = cp.asarray(days)
         # store_timestep_counter
         m["itimestep"][0] = itimestep
