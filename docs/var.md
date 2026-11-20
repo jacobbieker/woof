@@ -53,6 +53,52 @@ The port lives in `woof.da.var`. Only this command and its tests import it
      WRFDA's.
    - `--iau-window-s` records an IAU window.
 
+## Hybrid 3DEnVar (opt-in)
+
+WRFDA's hybrid adds the alpha control variable to the cost. Jb is weighted
+by `jb_factor = je/(je-1)` and the ensemble term Je by `je_factor`. The
+increment is `U_s v_s + sum_n alpha_n o x'_n`. With an
+ensemble, `woof var` runs it (the Python door is
+`analyse(..., ensemble=, hybrid=, vertloc=)`):
+
+```
+woof var --be be.dat --obs ob.ascii --first-guess fg --out bundle \
+    --ensemble-member m01/wrfout --ensemble-member m02/wrfout ... --je-factor 2
+```
+
+- **Members.**
+  - `--ensemble-member` (repeated) takes the members' history files, valid
+    at the analysis time. The perturbations are `gen_be_ep2`'s
+    (`woof.da.var.hybrid.ep_from_wrf`): `u` and `v` at mass points, `t`
+    from theta and pressure, `q` as specific humidity, and `PSFC`, each
+    about the members' running mean.
+  - `--ep-dir` with `--ensdim-alpha` (and `--ep-format` 1 or 11) instead
+    reads WRFDA `ep` files.
+  - Hydrometeor perturbations are not used.
+- **`--je-factor` is required.** WRFDA's default of 1.0 means a pure
+  ensemble `B` (`jb_factor` -999, no static term), so woof asks rather than
+  assuming it. 2 weights the two equally.
+- **Localisation.**
+  - `--alpha-corr-scale` is the horizontal scale in km (default 200).
+  - `--alpha-vertloc-opt` selects the vertical localisation:
+    - 2 (default): WRFDA's log-p function from `znw` and `ptop`;
+    - 1: a `be.vertloc.dat` given with `--be-vertloc`;
+    - 0: none.
+  - `--max-vert-var-alpha` sets the share of eigenvalues kept (default 99%).
+- **The bundle.** The hybrid settings are digested into `recipe_sha256` and
+  listed under `notes.var.hybrid`.
+
+Checked against WRFDA 4.7.1 on the tutorial case, with ten members of
+WRFDA's gen_be sample forecasts, `je_factor = 2` and `alpha_corr_scale =
+200` (`tests/test_var_hybrid_o6.py`, `tests/test_var_hybrid_cli.py`):
+
+- `ep_from_wrf` is `gen_be_ep2`'s files. `u`, `v`, `q` and `ps` match word
+  for word; `t` is within 2.8e-13 K, from `**kappa`.
+- The 50 iterations follow WRFDA's log to 3.5e-14 relative.
+- The analysis increments against WRFDA's `wrfvar_output` have max
+  |difference| at most 4.7e-5 of the RMS (PSFC; the other fields at most
+  7.2e-6) and correlation of at least 0.9999999996.
+
 ## Tiers
 
 | `--tier` | arithmetic | where |
@@ -179,7 +225,8 @@ print `Jb factor used`.
 
 ## Not yet
 
-- Radar, GOES, radiances and hybrid 3DEnVar (plan sections 6-11).
+- Radar and GOES (plan sections 6-11); hydrometeor perturbations in the hybrid
+  (`alpha_hydrometeors`).
 - `cv_options` other than 5.
 - WRFDA's `A2C`, `var4d` and cloud control variables; pseudo-observations other than `u`, `v`, `t`, `q`.
 - Nested domains.

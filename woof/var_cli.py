@@ -10,6 +10,9 @@ Scope is the WRFDA 4.7.1 regional 3D-Var the port gates on (cv5, the
 conventional observation types, GPS PW/refractivity and SATEM); see
 docs/var.md.  Clear-sky geostationary radiances with VarBC are opt-in
 (``--radiance-scene``; CRTM from ``WOOF_CRTM_LIB``/``WOOF_CRTM_COEFFS``).
+Hybrid 3DEnVar is opt-in: ``--ensemble-member`` (members' history files,
+``gen_be_ep2``'s perturbations) or ``--ep-dir`` (WRFDA ``ep`` files) with
+``--je-factor``.
 """
 
 from __future__ import annotations
@@ -70,6 +73,26 @@ def register_cli(subparsers):
                    help="WRFDA VARBC.in; default: a cold start for every sensor")
     r.add_argument("--varbc-out", type=Path, default=None, help="write the updated coefficients (VARBC.out)")
     r.add_argument("--no-varbc", dest="varbc", action="store_false", help="radiances without bias correction")
+    h = p.add_argument_group("hybrid 3DEnVar (opt-in; WRFDA's alpha control variable)")
+    h.add_argument("--ensemble-member", type=Path, action="append", default=[],
+                   help="a member's history file (wrfout) valid at the analysis time; repeat for each member "
+                        "(perturbations as WRFDA's gen_be_ep2)")
+    h.add_argument("--ep-dir", type=Path, default=None,
+                   help="WRFDA ensemble perturbation files (u.e001 ... as gen_be_ep2 writes them) instead of members")
+    h.add_argument("--ensdim-alpha", type=positive_int, default=None,
+                   help="members to read from --ep-dir (WRFDA ensdim_alpha)")
+    h.add_argument("--ep-format", type=int, choices=(1, 11), default=1, help="--ep-dir's ep_format (default 1)")
+    h.add_argument("--je-factor", type=positive_float, default=None,
+                   help="WRFDA je_factor (required with an ensemble): Jb is weighted je/(je-1); <= 1 is "
+                        "full-ensemble mode (no static B)")
+    h.add_argument("--alpha-corr-scale", type=positive_float, default=200.0,
+                   help="horizontal localisation, km (WRFDA alpha_corr_scale; default 200)")
+    h.add_argument("--alpha-vertloc-opt", type=int, choices=(0, 1, 2), default=2,
+                   help="vertical localisation: 0 none, 1 --be-vertloc file, 2 log-p (default)")
+    h.add_argument("--be-vertloc", type=Path, default=None, help="WRFDA be.vertloc.dat (--alpha-vertloc-opt 1)")
+    h.add_argument("--max-vert-var-alpha", type=positive_float, default=99.0,
+                   help="percent of the localisation's variance kept (WRFDA max_vert_var_alpha; default 99)")
+    h.add_argument("--alpha-std-dev", type=positive_float, default=1.0, help="WRFDA alpha_std_dev (default 1)")
     p.set_defaults(func=main)
     return p
 
@@ -89,6 +112,12 @@ def main(args) -> int:
         print(line, flush=True)
 
     rad_kw = _radiance_kwargs(args) if args.radiance_scene else {}
+    try:
+        hyb_kw = _hybrid_kwargs(args)
+    except ValueError as exc:
+        print(f"var: {exc}", file=sys.stderr)
+        return 2
+    rad_kw.update(hyb_kw)
     result = analyse(args.be, args.obs, args.first_guess, tier=args.tier, ntmax=args.ntmax, eps=args.eps,
                      max_ext_its=args.max_ext_its, orthonorm_gradient=args.orthonorm_gradient,
                      check_rh=args.check_rh, window_minutes=args.window_minutes,
@@ -103,6 +132,14 @@ def main(args) -> int:
               "be": Path(args.be).name, "obs": Path(args.obs).name}
     notes = {"var": {"nobs": result.nobs, "iterations": [r.iterations for r in result.cg],
                      "j_final": [r.j_final for r in result.cg], "timings_s": result.timings}}
+    if hyb_kw:
+        cfg = hyb_kw["hybrid"]
+        recipe["hybrid"] = {"ensdim_alpha": hyb_kw["ensemble"].ne, "je_factor": cfg.je_factor,
+                            "alpha_corr_scale": cfg.alpha_corr_scale, "alpha_vertloc_opt": cfg.alpha_vertloc_opt,
+                            "max_vert_var_alpha": cfg.max_vert_var_alpha, "alpha_std_dev": cfg.alpha_std_dev,
+                            "members": [Path(m).name for m in args.ensemble_member] or None,
+                            "ep_dir": None if args.ep_dir is None else Path(args.ep_dir).name}
+        notes["var"]["hybrid"] = recipe["hybrid"]
     if result.radiance is not None:
         recipe["radiance_scenes"] = [Path(d).name for d in args.radiance_scene]
         recipe["varbc"] = bool(args.varbc)
@@ -114,6 +151,43 @@ def main(args) -> int:
           f"minimise {result.timings['minimise_s']:.1f} s; bundle {args.out}")
     print(json.dumps({"bundle": str(args.out), "valid_time": bundle.manifest.get("valid_time")}))
     return 0
+
+
+def _hybrid_kwargs(args) -> dict:
+    """``analyse``'s ``ensemble``/``hybrid``/``vertloc`` from the hybrid flags ({} without an ensemble)."""
+    members, ep_dir = list(args.ensemble_member), args.ep_dir
+    if not members and ep_dir is None:
+        if args.je_factor is not None or args.be_vertloc is not None or args.ensdim_alpha is not None:
+            raise ValueError("--je-factor, --be-vertloc and --ensdim-alpha need --ensemble-member or --ep-dir")
+        return {}
+    if members and ep_dir is not None:
+        raise ValueError("give --ensemble-member or --ep-dir, not both")
+    if args.je_factor is None:
+        raise ValueError("an ensemble needs --je-factor (WRFDA's default 1.0 is full-ensemble mode; "
+                         "2 weights the static and ensemble B equally)")
+    from woof.da.var import hybrid as hy
+
+    if members:
+        for m in members:
+            if not Path(m).is_file():
+                raise ValueError(f"--ensemble-member {m} is not a file")
+        perts = hy.ep_from_wrf(members)
+    else:
+        if args.ensdim_alpha is None:
+            raise ValueError("--ep-dir needs --ensdim-alpha")
+        perts = hy.read_ep(ep_dir, args.ensdim_alpha, ep_format=args.ep_format)
+    vertloc = None
+    if args.alpha_vertloc_opt == 1:
+        if args.be_vertloc is None:
+            raise ValueError("--alpha-vertloc-opt 1 needs --be-vertloc")
+        vertloc = hy.read_vertloc(args.be_vertloc)
+    elif args.be_vertloc is not None:
+        raise ValueError("--be-vertloc is read only with --alpha-vertloc-opt 1")
+    cfg = hy.HybridConfig(je_factor=args.je_factor, alpha_corr_scale=args.alpha_corr_scale,
+                          alpha_std_dev=args.alpha_std_dev, alpha_vertloc_opt=args.alpha_vertloc_opt,
+                          max_vert_var_alpha=args.max_vert_var_alpha)
+    cfg.check()
+    return {"ensemble": hy.Ensemble.from_perturbations(perts), "hybrid": cfg, "vertloc": vertloc}
 
 
 def _radiance_kwargs(args) -> dict:

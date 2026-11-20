@@ -56,6 +56,7 @@ __all__ = [
     "HybridReferenceU",
     "alpha_vertloc",
     "drop_static",
+    "ep_from_wrf",
     "flow_xa",
     "flow_xa_adj",
     "hybrid_cost",
@@ -412,6 +413,49 @@ def read_ep(directory, ne: int, ep_format: int = 1, shape=None) -> dict:
             a = a.reshape((ni, nj) if key == "ps" else (ni, nj, nk), order="F")
             out[key].append(a)
     return {k: np.stack(v) for k, v in out.items()}
+
+
+def ep_from_wrf(paths, *, time_index: int = 0) -> dict:
+    """``gen_be_ep2``: unscaled perturbations of WRF history files about their mean.
+
+    ``paths`` are the members' history files (``wrfout``, or a woof history
+    file with the same variables), valid at the analysis time, in member
+    order.  Per member, as ``gen_be_ep2.f90``: ``u`` and ``v`` averaged to
+    mass points, ``t`` from ``theta = 300 + T`` and ``p = PB + P``
+    (``da_get_trh``), ``q = QVAPOR / (1 + QVAPOR)`` and ``PSFC``; the mean is
+    its running form ``((n - 1) mean + x) / n`` (``1/n`` first), and each
+    member's perturbation ``x - mean``.  Returns the stacks
+    :meth:`Ensemble.from_perturbations` takes, as :func:`read_ep` does.
+    Hydrometeor perturbations (``mp_physics > 0``) are not read
+    (``alpha_hydrometeors`` is not implemented).
+    """
+    from woof.da.var import gen_be as gb
+
+    paths = [Path(x) for x in paths]
+    if len(paths) < 2:
+        raise ValueError(f"the ensemble needs at least 2 members (got {len(paths)})")
+    members = []
+    shape = None
+    for path in paths:
+        f = gb.read_wrf_history(path, time_index)
+        big_u, big_v = f["U"], f["V"]
+        dim1, dim2 = big_u.shape[0] - 1, big_v.shape[1] - 1
+        theta = gb.T0 + f["T"]
+        pres = f["PB"] + f["P"]
+        x = f["QVAPOR"]
+        m = {"u": 0.5 * (big_u[0:dim1] + big_u[1:dim1 + 1]), "v": 0.5 * (big_v[:, 0:dim2] + big_v[:, 1:dim2 + 1]),
+             "t": theta * np.power(pres / gb.BASE_PRES, gb.KAPPA), "q": x / (1.0 + x), "ps": f["PSFC"].copy()}
+        if shape is None:
+            shape = m["t"].shape
+        elif m["t"].shape != shape:
+            raise ValueError(f"{path.name} is {m['t'].shape}, the first member {shape}")
+        members.append(m)
+    mean = {k: np.zeros_like(members[0][k]) for k in FIELDS}
+    for n, m in enumerate(members, start=1):
+        inv = 1.0 / float(n)
+        for k in FIELDS:
+            mean[k] = (float(n - 1) * mean[k] + m[k]) * inv
+    return {k: np.stack([m[k] - mean[k] for m in members]) for k in FIELDS}
 
 
 def write_ep(directory, perts: dict, ep_format: int = 1, endian: str = ">") -> None:
