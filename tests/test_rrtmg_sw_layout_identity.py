@@ -198,10 +198,17 @@ def test_fused_arithmetic_statement_correspondence():
                            ('ztdn[ikp-1]', 'realtdn_next'), ('prdnd[ikp-1]', 'realrdnd_next')):
         original_down = original_down.replace(name, register)
     original_down = original_down.replace('intikp=jk+1;', '')
-    running_down = squash(running[running.index('for (int jk = 2; jk <= klev; ++jk) {'):])
-    assert running_down.startswith(original_down[:-1])
-    assert squash(running).count('tdbt=MU(pdbt[0],tdbt);') == 1
-    assert squash(running).count('tdbt=MU(pdbt[jk-1],tdbt);') == 1
+    # The register schedule itself, whole: levels 0 and 1, then each later
+    # level's ztdn/prdnd from level jk-1's values before ptdbt[jk] is formed,
+    # then that level's fluxes.
+    assert squash(running)[squash(running).index('realtdbt=1.0f;'):] == (
+        'realtdbt=1.0f;realtdn=1.0f;realrdnd=0.0f;'
+        'rsw_vrtqdr_flux(0,tdn,rdnd,tdbt,prup,prupd,pfd_col,pfu_col);'
+        'tdbt=MU(pdbt[0],tdbt);tdn=ptra[0];rdnd=prefd[0];'
+        'rsw_vrtqdr_flux(1,tdn,rdnd,tdbt,prup,prupd,pfd_col,pfu_col);'
+        'for(intjk=2;jk<=klev;++jk){' + original_down[len('for(intjk=2;jk<=klev;++jk){'):-1]
+        + 'tdbt=MU(pdbt[jk-1],tdbt);tdn=tdn_next;rdnd=rdnd_next;'
+        'rsw_vrtqdr_flux(jk,tdn,rdnd,tdbt,prup,prupd,pfd_col,pfu_col);}}')
     assert SPCVMC_WK_ARRAYS == 16 and SPCVMC_WKC_ARRAYS == 0
     assert re.search(r'#define RSW_SPCVMC_WK 16\b', source)
     assert re.search(r'#define RSW_SPCVMC_WKC 0\b', source)
