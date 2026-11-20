@@ -25,7 +25,7 @@ from __future__ import annotations
 import decimal
 import math
 
-__all__ = ["sin", "cos", "tan", "exp", "log10", "pow_", "sqrt"]
+__all__ = ["sin", "cos", "tan", "exp", "log", "log10", "pow_", "sqrt"]
 
 _C = decimal.Context(prec=80, rounding=decimal.ROUND_HALF_EVEN, Emax=999999, Emin=-999999)
 _TINY = decimal.Decimal("1e-85")
@@ -91,6 +91,12 @@ def tan(x: float) -> float:
 
 def exp(x: float) -> float:
     return float(_C.exp(decimal.Decimal(x)))
+
+
+def log(x: float) -> float:
+    if not x > 0.0:
+        raise ValueError(f"log of {x!r}")
+    return float(_C.ln(decimal.Decimal(x)))
 
 
 def log10(x: float) -> float:
