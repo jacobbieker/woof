@@ -488,6 +488,61 @@ Each step is one small PR, taken to merged before the next widens.
    - the adjoint/forward cost ratio on CUDA and Metal.
 
    This is where G3 is decided.
+
+   **8a, the step (done).** `step_tl` chains the ported operators in the
+   strict step's order: the time-t save, then per RK stage the zeroed
+   tendencies, the diagnosis (reused on stage 1 with WRF's carried muts),
+   rk_step_prep, the four advection kinds, slow_pgf, slow_buoyancy,
+   slow_geopotential, w_damp, small_step_init, the stage muts, calc_coefs,
+   the acoustic substeps (the first with smdiv 0), the captured muts and
+   small_step_finish; then the epilogue diagnosis, set_w_surface and the
+   periodic alias closure. With a tape it snapshots each operator's
+   written arrays before it runs, and `step_ad` pops them in reverse.
+   - Scope: periodic axes, no map factors, no rotation, dry, no physics
+     or mixing package, none of the other work `_step_body` can add
+     (use_theta_m, a moving frame, obstacles, polar filtering, lightning,
+     avgflx, IAU or spectral nudging), `rk_ord = 3`, an even
+     time_step_sound, orders 3-6, and a 3-D base state.
+     `step_geometry` refuses everything else. `step_geometries` gives a
+     chain's geometries: the first step follows the state (a cold one
+     diagnoses on rk_step 1), every later one reuses the previous step's
+     diagnosis and carried muts. On a 1-D base (no terrain)
+     the primal's slow_pgf takes another arithmetic path, so the step
+     would not reproduce its words. Rotation, map factors and
+     specified boundaries come in 8b.
+   - Each scalar is rounded the way its primal launcher rounds it (for
+     example rdx = f32(1/dx) but rk_step_prep's f32(1)/f32(dx)), so the
+     binary32 base reproduces `dycore.step` word for word on the
+     prognostics, p, al, alt, p', muts and the scratch the next step
+     reads. This holds on CUDA and the host backend, for the
+     hybrid coordinate, w_damping, hypsometric_opt 2 without a lid and
+     other orders, nsub 3 and 6, and over three chained steps from a
+     warm and a cold state (`tests/test_grad_wrfplus_model.py`, a
+     16x12x10 ridge).
+   - Binary64 dot product 3e-15 to 1.2e-14 per step and over the chains; the finite-difference ratio reaches 1 to 1e-9-2e-8.
+   - Measured cost on the pb A6000 at 200x200x49 (a ridge, periodic,
+     strict, 2026-11-20, card idle), over `dycore.step` at 14.5 ms:
+
+     | | binary32 | binary64 |
+     |---|---|---|
+     | TL step | 1.9x | 10.2x |
+     | TL step with tape | 2.3x | 10.8x |
+     | adjoint sweep | 3.3x | 10.0x |
+     | taped recompute + sweep | 5.6x | 20.8x |
+
+     The sweep alone (3.3x) is under the projection's 3.64. The
+     projection counted the recompute at 1x, but the step recomputes
+     through the joint TL kernels (1.9x) and spends 0.35x on snapshots,
+     which puts the full adjoint step over the 5x limit at 5.6x. Two
+     ways back under it:
+     - a base-only taped forward (the primal's own kernels with
+       snapshots, about 1.35x), which would give about 4.7x;
+     - in incremental 4D-Var, storing the outer loop's trajectory once
+       as WRFPLUS does, so that each inner iteration pays only the sweep
+       (3.3x) plus tape reads.
+     Metal cost, rotation, map factors and specified boundaries in the
+     step, the window driver with checkpoints and the 12 km TL growth
+     test are 8b and later.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
@@ -697,3 +752,11 @@ are not counted, most ratios come from a shared card, and 1.9% of the
 step is not yet ported. calc_coefs and small_step are each about 4.8x;
 at 2.3% and 8.2% of the step they add about 0.11 and 0.39. Each later kernel PR replaces a
 projected share with a measured one.
+
+**Measured step (item 8a, 2026-11-20).** The chained periodic step's
+adjoint sweep runs at 3.3x `dycore.step` in binary32, under the 3.64 the
+kernels project for it. The recompute is the gap: through the joint TL
+kernels with snapshots it costs 2.3x, not the 1x assumed above, so the
+full adjoint step measures 5.6x. That is over the 5x limit. Item 8
+section 5 lists the two ways back under it (a base-only taped forward at
+about 4.7x, or a stored trajectory at about 3.3x per inner iteration).
