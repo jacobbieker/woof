@@ -251,6 +251,12 @@ def urban_array_shapes(cfg, *, urban_columns: int | None = None
     # new, which over-counts by at most seven planes.
     for name in ("psim", "psih", "gz1oz0", "akhs", "akms"):
         shapes.setdefault(f"override_{name}", (ny, nx))
+    if option == 1 and getattr(cfg, "urban_param_file", ""):
+        # The NUDAPT arm's per-column table widths, BUILDING_WIDTH(1) and
+        # STREET_WIDTH(1) gathered by UTYPE (woof.core.urban_ucm
+        # _width_planes), held for the run when a column has MH_URB2D > 0.
+        shapes["nudapt_building_width1"] = (ny, nx)
+        shapes["nudapt_street_width1"] = (ny, nx)
     if option == 3:
         # The direct/diffuse surface shortwave BEP_BEM reads.
         shapes["swddir"] = (ny, nx)
@@ -477,13 +483,51 @@ def _validate_urban_types(utype, use_wudapt_lcz: int, *,
                          "1-3 are not the three NLCD urban classes)")
 
 
+def _apply_morphology(out, morphology, switch, *, option: int,
+                      num_urban_hi: int) -> None:
+    """urban_var_init's keep/zero rule over the gridded morphology
+    (module_sf_urban.F:2788-2833), into ``out`` in place."""
+    f4 = np.float32
+    shape = switch.shape
+    planes = {"lp": "lp_urb2d", "lb": "lb_urb2d", "hgt": "hgt_urb2d"}
+    if option == 1:
+        planes.update(mh="mh_urb2d", stdh="stdh_urb2d", lf="lf_urb2d")
+    else:
+        planes.update(hi="hi_urb2d")
+    hgt = np.asarray(morphology["hgt"], dtype=f4)
+    if hgt.shape != shape:
+        raise ValueError(f"gridded HGT_URB2D shape {hgt.shape} is not the "
+                         f"domain's {shape}")
+    keep = switch & (hgt > 0)
+    for key, name in planes.items():
+        value = np.asarray(morphology[key], dtype=f4)
+        target = out[name]
+        if key == "hi":
+            if int(num_urban_hi) != value.shape[0]:
+                raise ValueError(
+                    f"num_urban_hi={num_urban_hi} but URB_PARAM fills "
+                    f"{value.shape[0]} height bins (118-132)")
+        if value.shape != target.shape:
+            raise ValueError(f"gridded {name} shape {value.shape} is not the "
+                             f"state's {target.shape}")
+        mask = keep if value.ndim == 2 else keep[None]
+        target[...] = np.where(mask, value, f4(0.0))
+    if option == 1:
+        from woof.core.urban_param import check_nudapt_columns
+        check_nudapt_columns(
+            {"lp": out["lp_urb2d"], "lb": out["lb_urb2d"],
+             "mh": out["mh_urb2d"], "stdh": out["stdh_urb2d"],
+             "lf": out["lf_urb2d"]}, switch)
+
+
 def urban_var_init_host(*, option: int, use_wudapt_lcz: int,
                         params: UrbanParams, categories: UrbanCategories,
                         ivgtyp, tsk, tslb, tmn, smois, frc_urb2d=None,
                         num_urban_hi: int = 15, nz: int = 1,
                         dims: Mapping[str, int] | None = None,
                         spec: Mapping | None = None,
-                        restart: bool = False) -> dict[str, np.ndarray]:
+                        restart: bool = False,
+                        morphology: Mapping | None = None) -> dict[str, np.ndarray]:
     """``urban_var_init`` (module_sf_urban.F:2557-3052) for one domain.
 
     Returns every array of ``spec`` (default: :func:`option_spec`) plus the
@@ -491,6 +535,15 @@ def urban_var_init_host(*, option: int, use_wudapt_lcz: int,
     Inputs are host arrays: ``ivgtyp`` (ny, nx) int, ``tsk``/``tmn`` (ny, nx),
     ``tslb``/``smois`` (4, ny, nx), optional ``frc_urb2d`` (ny, nx) from the
     input file (zeros when the input has none, which is WRF's stock case).
+
+    ``morphology`` is real.exe's split of ``URB_PARAM``
+    (:func:`woof.core.urban_param.split_urb_param`: ``lp lb hgt mh stdh``
+    (ny, nx), ``lf`` (4, ny, nx), ``hi`` (15, ny, nx)), or None for WRF's
+    stock case of no gridded morphology (every array zero).  It goes through
+    urban_var_init's rule (:2788-2833): an urban column keeps it when
+    ``HGT_URB2D > 0``, otherwise its LP/LB/HGT and the option's own arrays
+    (MH/STDH/LF for option 1, HI for 2/3) are zeroed ("USING DEFAULT URBAN
+    MORPHOLOGY"); a column that is not urban has them all zeroed.
 
     ``distributed_aerodynamics_option`` (``slucm_distributed_drag``) is off:
     the namelist door refuses it, because its arm is not transcribed.
@@ -522,6 +575,9 @@ def urban_var_init_host(*, option: int, use_wudapt_lcz: int,
     out["utype_urb2d"][...] = utype
     out["frc_urb2d"][...] = urban_fraction(utype, out["frc_urb2d"],
                                            params.FRC_URB_TBL)
+    if morphology is not None:
+        _apply_morphology(out, morphology, switch, option=option,
+                          num_urban_hi=num_urban_hi)
     if "qc_urb2d" in out:
         out["qc_urb2d"][...] = f4(0.01)          # :2801, even on restart
     if not restart:
@@ -630,14 +686,16 @@ class UrbanState:
 
 def init_urban_state(cfg, params: UrbanParams, categories: UrbanCategories,
                      fields: dict, *, nz: int, frc_urb2d=None,
-                     restart: bool = False, module=None) -> UrbanState:
+                     restart: bool = False, module=None,
+                     morphology: Mapping | None = None) -> UrbanState:
     """Build one domain's :class:`UrbanState` into ``fields`` (in place).
 
     Runs :func:`urban_var_init_host` on the LSM's initialized ``tsk``,
     ``tslb``, ``tmn`` and ``smois`` (WRF calls it after LSMINIT /
     NOAHMP_INIT, module_physics_init.F:3294, 3437), uploads each array into
     ``fields`` under its Registry name, then lets the model lane's
-    ``init_state`` hook finish anything option-specific.
+    ``init_state`` hook finish anything option-specific.  ``morphology``
+    is the real.exe split of ``urban_param_file`` (None: none).
     """
     import cupy as cp
 
@@ -655,7 +713,7 @@ def init_urban_state(cfg, params: UrbanParams, categories: UrbanCategories,
         frc_urb2d=(None if frc_urb2d is None
                    else cp.asnumpy(cp.asarray(frc_urb2d))),
         num_urban_hi=int(cfg.num_urban_hi), nz=int(nz), dims=dims,
-        spec=spec, restart=restart)
+        spec=spec, restart=restart, morphology=morphology)
     names = []
     for name, value in host.items():
         if name in PBL_TERM_NAMES:

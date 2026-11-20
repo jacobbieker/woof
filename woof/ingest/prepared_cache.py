@@ -1080,6 +1080,11 @@ PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
     "run.obstacle_opt", "run.obstacle_file", "run.obstacle_solid_fraction",
     "run.obstacle_relax_factor", "run.obstacle_drag_coefficient",
     "run.obstacle_wall_z0",
+    # The gridded urban morphology (woof.core.urban_param): read when the
+    # physics initialises the urban model, never by preparation, so one
+    # prepared bundle serves a run with and without it.  The restart
+    # identity binds the file's digest (woof/io/restart.py).
+    "run.urban_param_file",
     # The per-run smoke-off sentence (woof/smoke_execution.py): launch
     # metadata for the receipts; chem_sets carries the physics it
     # describes, so one prepared bundle serves either value.  It rides the

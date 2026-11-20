@@ -99,6 +99,9 @@ struct FtuvModule {
     int *xcnt;
     double *xfrac;
     int *xi;
+#if GPUWM_FTUV_ETF
+    const double *etf_factor; // woof: photoin's etf *= etf_factor, (nw - 1) bins
+#endif
     double *ws_d, *ws_d_end;  // workspace stack (binary64 arrays)
     int *ws_i, *ws_i_end;     // workspace stack (integer arrays)
     int f2cu_fatal;  // first source line of a wrf_error_fatal/stop, or 0
@@ -930,6 +933,9 @@ __device__ void tv_photoin(FtuvModule &mod, int chem_opt, int nz, double zen, do
     double *radxx = mod.ws_d; mod.ws_d += (((nz-1)+1))*(17);
     if ((mod.ws_d > mod.ws_d_end || mod.ws_i > mod.ws_i_end) && mod.f2cu_fatal == 0) mod.f2cu_fatal = -234;  // workspace overrun
     for (int f2cu_i29 = 0; f2cu_i29 < 17; ++f2cu_i29) etf[((1+f2cu_i29)-1)] = DMUL(tv_m_sflx[((1+f2cu_i29)-1)],esfact); // 355
+#if GPUWM_FTUV_ETF
+    for (int q = 0; q < TV_NW - 1; ++q) etf[q] = DMUL(etf[q], mod.etf_factor[q]);  // woof: solar_ssi_opt
+#endif
     tv_setair(mod, nz, z, airlev, dtrl, colinc, o2top); // 359
     tv_setozo(mod, nz, z, tlay, dto3, to3, o3, airlev, o3top, o3toms); // 363
     tv_setcld(mod, nz, z, xlwc, dtcld, omcld, gcld); // 367
@@ -2161,6 +2167,8 @@ extern "C" __global__ void chem_ftuv_init(double *shared_d, int *shared_i, doubl
 // kts = 1 .. kte; ws_* hold ws_*_per words per thread.  gmt, julday and
 // curr_secs as ftuv_driver receives them.  fatal[t]: a column's first
 // fatal source line (negative: workspace overrun), or 0.
+// GPUWM_FTUV_ETF tier (solar_ssi_opt): photoin's extraterrestrial flux is
+// multiplied by etf_factor[0 .. TV_NW - 2], one factor per wavelength bin.
 extern "C" __global__ void chem_ftuv(const double *shared_d, const int *shared_i,
                                      const double *scal_d, const int *scal_i,
                                      double *ws_d, int *ws_i,
@@ -2168,7 +2176,11 @@ extern "C" __global__ void chem_ftuv(const double *shared_d, const int *shared_i
                                      const float *in, float *out, int *fatal,
                                      int col0, int ncols, int nx, int ny, int kte, int nzm,
                                      int chem_opt, int aer_ra_feedback, int julday,
-                                     float gmt, double curr_secs) {
+                                     float gmt, double curr_secs
+#if GPUWM_FTUV_ETF
+                                     , const double *etf_factor
+#endif
+                                     ) {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= ncols) return;
     int c = col0 + t;
@@ -2178,6 +2190,9 @@ extern "C" __global__ void chem_ftuv(const double *shared_d, const int *shared_i
     tv_bind_shared(mod, (double *)shared_d, (int *)shared_i, nzm);
     mod.dobson = scal_d[0]; mod.kcon = scal_i[0]; mod.nintervals = scal_i[1]; mod.nz = scal_i[2];
     mod.f2cu_fatal = 0;
+#if GPUWM_FTUV_ETF
+    mod.etf_factor = etf_factor;
+#endif
     double *wsd = ws_d + (long long)t * ws_d_per;
     int *wsi = ws_i + (long long)t * ws_i_per;
     mod.ws_d_end = wsd + ws_d_per;

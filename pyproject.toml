@@ -138,6 +138,7 @@ woof = [
     "ocean/*.cu",
     "timeline/*.json",
     "hydro/*.cu",
+    "da/var/kernels/*.cu",
     "hydro/*.cuh",
     "hydro/PET-LICENSE",
     "hydro/PET-TERMS.md",

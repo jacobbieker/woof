@@ -326,6 +326,8 @@ _DOMAIN_RUN_OVERRIDES = (
     "gf_deep_rain_evaporation_booking",
     # The opt-in resolved obstacles: buildings belong to one domain's grid
     # (an LES nest), so every obstacle key is per-domain.
+    # WPS's gridded urban morphology is on one domain's grid.
+    "urban_param_file",
     "obstacle_opt", "obstacle_file", "obstacle_solid_fraction",
     "obstacle_relax_factor", "obstacle_drag_coefficient", "obstacle_wall_z0",
     "kf_edrates",
@@ -6367,6 +6369,7 @@ def _public_config_value(value):
                                   ("spacewx_aurora_opt", 0), ("spacewx_kp_source", ""),
                                   ("solar_ssi_opt", 0), ("solar_ssi_source", ""),
                                   ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
+                                  ("urban_param_file", ""),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

@@ -34,13 +34,13 @@ def uninitialized(shape, dtype=np.float32):
     """A C-contiguous facade array of ``shape`` whose words are unspecified."""
     from woof.backend.facade._array import (MAX_ELEMENTS, Storage, ndarray, storage_dtype,
                                             storage_mx_dtype)
-    from woof.backend.facade._ops import empty
+    from woof.backend.facade._ops import zeros
     dtype = np.dtype(dtype)
     shape = (int(shape),) if isinstance(shape, (int, np.integer)) else tuple(int(n) for n in shape)
     n = functools.reduce(operator.mul, shape, 1)
     words = n * dtype.itemsize // storage_dtype(dtype).itemsize
     if words == 0 or n > MAX_ELEMENTS or words > MAX_ELEMENTS:
-        return empty(shape, dtype)          # the ordinary path (and its refusal)
+        return zeros(shape, dtype)          # the ordinary path (and its refusal)
     kernel, flag = _kernel()
     (arr,) = kernel(inputs=[flag], grid=(1, 1, 1), threadgroup=(1, 1, 1),
                     output_shapes=[(words,)], output_dtypes=[storage_mx_dtype(dtype)])

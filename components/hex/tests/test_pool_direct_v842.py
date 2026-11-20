@@ -3,7 +3,7 @@
 ``prepare_mpas_transport_source_baseline_v842(out=...)`` gives the words of its
 own allocation in a caller's (poisoned) buffer, and
 ``NativeDevicePoolViews.resident_target`` answers only for a whole-array copy,
-whose ``write_field`` is then a no-op.  WOOF_HEX_POOL_DIRECT=1 opts in.
+whose ``write_field`` is then a no-op.  On by default; WOOF_HEX_POOL_DIRECT=0 restores the copy.
 The forecast-level evidence (Alps hex VR, fast and strict, CUDA and Metal) is
 in the PR.
 """
@@ -76,7 +76,7 @@ def test_write_field_of_the_target_itself_is_a_no_op(cp):
         views.write_field("tend_physics", "rqvdynten", cp.ones((4, 11), cp.float32))
 
 
-def test_pool_direct_is_opt_in(monkeypatch):
+def test_pool_direct_switch(monkeypatch):
     from types import SimpleNamespace
     from woof.hex.mpasphys import runtime_v842
     asked = []
@@ -89,3 +89,18 @@ def test_pool_direct_is_opt_in(monkeypatch):
     assert pool_target(coupling, "tend_physics", "rqvdynten", None) == "target"
     views.resident = False
     assert pool_target(coupling, "tend_physics", "rqvdynten", None) is None
+
+
+def test_pool_direct_is_on_by_default():
+    """Unset or empty is on; 0/false/no/off turns it off (read at import, so in a child)."""
+    import os
+    import subprocess
+    import sys
+    code = "from woof.hex.mpasphys import runtime_v842 as r; print(r._POOL_DIRECT)"
+    for value, want in ((None, "True"), ("", "True"), ("1", "True"), ("0", "False"), ("off", "False")):
+        env = {k: v for k, v in os.environ.items() if k != "WOOF_HEX_POOL_DIRECT"}
+        if value is not None:
+            env["WOOF_HEX_POOL_DIRECT"] = value
+        out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=600)
+        assert out.returncode == 0, out.stderr[-2000:]
+        assert out.stdout.strip().splitlines()[-1] == want, (value, out.stdout)
