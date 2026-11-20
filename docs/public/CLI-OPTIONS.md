@@ -1436,6 +1436,7 @@ Takes no options of its own.
 | `--late-after-minutes MIN` | download routes only: how far past its scheduled time a lead may be before the run stops with exit 75; wins over the config's [fetch] late_after_minutes and the source row's budget |
 | `--live-products-width` | _(accepted, but not listed by --help)_ |
 | `--max-lag-hours` | oldest lagged cycle (0 disables lags) |
+| `--mcica-seed-mode {pressure,cell}` | RRTMG McICA seeding: pressure (default, upstream) or cell, a fixed hash of column id and radiation call time for `woof grad` finite-difference and ensemble legs (docs/grad.md); not upstream physics |
 | `--member ID` | select one generated source trajectory; fetch accepts member lists |
 | `--member-sharing {auto,mps,contexts}` | how co-resident checkpoint branches share a card: a private MPS controller for this launch, or one CUDA context per member (default auto: MPS where the controller exists) |
 | `--members N` | make an N-member ensemble with aggregate products |
@@ -1820,6 +1821,7 @@ Takes no options of its own.
 | `--late-after-minutes MIN` | download routes only: how far past its scheduled time a lead may be before the run stops with exit 75; wins over the config's [fetch] late_after_minutes and the source row's budget |
 | `--live-products-width` | _(accepted, but not listed by --help)_ |
 | `--max-lag-hours` | oldest lagged cycle (0 disables lags) |
+| `--mcica-seed-mode {pressure,cell}` | RRTMG McICA seeding: pressure (default, upstream) or cell, a fixed hash of column id and radiation call time for `woof grad` finite-difference and ensemble legs (docs/grad.md); not upstream physics |
 | `--member ID` | select one generated source trajectory; fetch accepts member lists |
 | `--member-sharing {auto,mps,contexts}` | how co-resident checkpoint branches share a card: a private MPS controller for this launch, or one CUDA context per member (default auto: MPS where the controller exists) |
 | `--members N` | make an N-member ensemble with aggregate products |
@@ -4491,11 +4493,17 @@ Takes no options of its own.
 | `--log` | also write the minimiser log to this file |
 | `--max-ext-its` | outer loops (WRFDA max_ext_its; default 1) |
 | `--no-orthonorm-gradient` | turn off WRFDA's orthonorm_gradient (on by default, as in the tutorial) |
+| `--no-varbc` | radiances without bias correction |
 | `--ntmax` | inner iterations per outer loop (WRFDA ntmax; default 50) |
 | `--obs` | OBSPROC observations (ob.ascii) |
 | `--out` | analysis bundle directory to write (must not exist) |
 | `--ph {analysis,balance}` | bundle PH: WRFDA's hydrostatic PH (analysis, default) or rebuilt by the bundle (balance) |
+| `--radiance-bands` | imager bands in nm (default: the three WV bands and the 11.2 um window) |
+| `--radiance-scene` | a cached imager scene directory (woof.obs.imager_scene: SatWeave, GOES ABI, AHI, SEVIRI); repeat for several |
+| `--thinning-km` | GSI thinning mesh (WRFDA thinning_mesh; default 60 km) |
 | `--tier {reference,oracle,production}` | reference: NumPy binary64 (default); oracle: GPU binary64 with WRFDA's serial dot product; production: GPU binary32 |
+| `--varbc-in` | WRFDA VARBC.in; default: a cold start for every sensor |
+| `--varbc-out` | write the updated coefficients (VARBC.out) |
 | `--window-minutes` | observation window half-width around the first guess's time (default 60) |
 
 ## `woof verify`
