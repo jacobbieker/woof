@@ -53,9 +53,9 @@ def test_the_clock_is_mpas_calendar():
     epoch = datetime.datetime(1, 1, 1)
     for text in ("0001-01-01_00:00:00", "2000-02-28_23:58:00", "2000-02-29_12:00:01", "1900-03-01_00:00:00",
                  "2024-12-31_23:59:59", "9999-12-31_23:59:59"):
-        seconds = fw.parse_time(text)
+        seconds = fw.parse_time(text, "gregorian")
         assert seconds == int((datetime.datetime.strptime(text, "%Y-%m-%d_%H:%M:%S") - epoch).total_seconds())
-        assert fw.format_time(seconds) == text
+        assert fw.format_time(seconds, "gregorian") == text
     assert fw.interval_seconds("0000_00:00:50") == 50 and fw.interval_seconds("01:02:03") == 3723
     assert fw.btr_subcycle_count("00:02:00", "0000_00:00:50") == 3
     assert fw.btr_subcycle_count("00:03:00", "0000_00:01:00") == 3
@@ -116,7 +116,7 @@ def test_a_restart_continues_the_run_bitwise(tmp_path, precision):
     clock = fw.cold_start(pools=dev, configs=case["config"])
     fw.advance(pools=dev, configs=case["config"], clock=clock, n_steps=1)
     fw.write_restart(tmp_path / "restart.npz", pools=dev, clock=clock)
-    pools, clock = fw.read_restart(tmp_path / "restart.npz", like=dev)
+    pools, clock = fw.read_restart(tmp_path / "restart.npz", like=dev, configs=case["config"])
     del dev
     assert clock.now - clock.start == clock.step and pools["diagnostics"]["xtime"] == clock.time_stamp
     fw.advance(pools=pools, configs=case["config"], clock=clock, n_steps=n - 1)

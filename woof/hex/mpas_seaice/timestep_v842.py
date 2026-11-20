@@ -203,6 +203,7 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
     place on the pools and clock; returns the next step's number."""
     import cupy as cp
     check_config(configs)
+    clock.check_calendar(configs)
     m, d = pools["mesh"], pools["diagnostics"]
     solver = pools["velocity_solver"]
     precision = _precision_of(solver["uVelocity"])
@@ -222,7 +223,8 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
         clock.now += clock.step
         # seaice_set_time_diagnostics
         d["xtime"] = clock.time_stamp
-        days = real(real(clock.now - clock.seconds(d["simulationStartTime"])) * days_per_second)
+        days = real(real(clock.now - clock.seconds(d["simulationStartTime"], "diagnostics:simulationStartTime"))
+                    * days_per_second)
         d["daysSinceStartOfSim"][...] = cp.asarray(days)
         # store_timestep_counter
         m["itimestep"][0] = itimestep

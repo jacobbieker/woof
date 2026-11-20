@@ -26,8 +26,10 @@
   arrays).
 
 :func:`write_restart` and :func:`read_restart` round-trip a run: every pool
-array, word for word, and the clock; a run restarted from them continues
-bitwise as if never stopped.
+array, word for word, and the clock with its calendar; a run restarted from
+them continues bitwise as if never stopped. A restart is resumed only on its
+own calendar (``config_calendar_type``), and one written before the clock
+carried its calendar only under an explicit ``'gregorian'``.
 
 Held word for word over N steps to v8.4.2 (``ocn_timestep`` and
 ``ocn_time_integration_split_init`` cut verbatim, every module the step
@@ -120,7 +122,7 @@ def _is_leap(y: int) -> bool:
     return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
 
 
-def _days_from_civil(y: int, m: int, d: int, calendar: str = "gregorian") -> int:
+def _days_from_civil(y: int, m: int, d: int, calendar: str) -> int:
     """Days since 0001-01-01 on the proleptic Gregorian calendar, or on the
     365-day year (``gregorian_noleap``)."""
     if calendar == "gregorian_noleap":
@@ -133,11 +135,12 @@ def _days_from_civil(y: int, m: int, d: int, calendar: str = "gregorian") -> int
     return era * 146097 + doe - 306
 
 
-def parse_time(text: str, calendar: str = "gregorian") -> int:
+def parse_time(text: str, calendar: str, knob: str = "config_start_time") -> int:
     """An MPAS date-time string 'YYYY-MM-DD_hh:mm:ss' in seconds since
-    0001-01-01 on ``calendar``. A date the calendar does not have (29 February
-    of the 365-day year) is refused, as ``isValidDate`` rejects it
-    (``mpas_timekeeping.F:2146-2185``)."""
+    0001-01-01 on ``calendar`` (one of :data:`CALENDARS`; there is no
+    default). A date the calendar does not have (29 February of the 365-day
+    year) is refused, as ``isValidDate`` rejects it
+    (``mpas_timekeeping.F:2146-2185``), naming ``knob``, where the string came from."""
     if calendar not in CALENDARS:
         raise ValueError(f"calendar {calendar!r} is not one of {CALENDARS}")
     date, clock = text.split("_")
@@ -145,13 +148,14 @@ def parse_time(text: str, calendar: str = "gregorian") -> int:
     hh, mm, ss = (int(x) for x in clock.split(":"))
     days = _MONTH_DAYS[m - 1] + (calendar == "gregorian" and m == 2 and _is_leap(y)) if 1 <= m <= 12 else 0
     if not 1 <= d <= days:
-        raise ConfigurationRefusal(knob="config_start_time", value=text,
+        raise ConfigurationRefusal(knob=knob, value=text,
                                    reason=f"MPAS_setTime: {text} is not a date of the {calendar} calendar",
                                    declaration="a date of config_calendar_type's calendar")
     return ((_days_from_civil(y, m, d, calendar) * 24 + hh) * 60 + mm) * 60 + ss
 
 
-def format_time(seconds: int, calendar: str = "gregorian") -> str:
+def format_time(seconds: int, calendar: str) -> str:
+    """Seconds since 0001-01-01 on ``calendar`` as 'YYYY-MM-DD_hh:mm:ss'."""
     days, rest = divmod(seconds, 86400)
     clock = f"{rest // 3600:02d}:{rest % 3600 // 60:02d}:{rest % 60:02d}"
     if calendar == "gregorian_noleap":
@@ -182,11 +186,16 @@ def interval_seconds(text: str) -> int:
 
 @dataclass
 class Clock:
-    """MPAS's clock on whole seconds since 0001-01-01_00:00:00 of its calendar."""
+    """MPAS's clock on whole seconds since 0001-01-01_00:00:00 of its
+    calendar, which every clock names (one of :data:`CALENDARS`)."""
     start: int
     now: int
     step: int
-    calendar: str = "gregorian"
+    calendar: str
+
+    def __post_init__(self):
+        if self.calendar not in CALENDARS:
+            raise ValueError(f"calendar {self.calendar!r} is not one of {CALENDARS}")
 
     @classmethod
     def from_configs(cls, configs: dict) -> "Clock":
@@ -198,9 +207,21 @@ class Clock:
     def time_stamp(self) -> str:
         return format_time(self.now, self.calendar)
 
-    def seconds(self, text: str) -> int:
-        """A date-time string in seconds on the clock's calendar."""
-        return parse_time(text, self.calendar)
+    def seconds(self, text: str, knob: str = "config_start_time") -> int:
+        """A date-time string in seconds on the clock's calendar (``knob``
+        names where it came from, for a refusal)."""
+        return parse_time(text, self.calendar, knob)
+
+    def check_calendar(self, configs: dict) -> None:
+        """Refuse a clock on another calendar than ``config_calendar_type``'s:
+        its seconds count other dates."""
+        calendar = calendar_of(configs)
+        if self.calendar != calendar:
+            raise ConfigurationRefusal(
+                knob="config_calendar_type", value=calendar,
+                reason=f"the clock runs on the {self.calendar} calendar (its restart's or its own), and its "
+                       f"seconds are dates of that calendar only",
+                declaration=f"config_calendar_type = '{self.calendar}', or a cold start")
 
 
 def btr_subcycle_count(config_dt: str, config_btr_dt: str) -> int:
@@ -307,7 +328,8 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int) -> None:
     real = PRECISIONS[precision]
     n_btr = btr_subcycle_count(configs["config_dt"], configs["config_btr_dt"])
     dt = float(clock.step)
-    start = clock.seconds(configs["diagnostics:simulationStartTime"])
+    clock.check_calendar(configs)
+    start = clock.seconds(configs["diagnostics:simulationStartTime"], "diagnostics:simulationStartTime")
     days_per_second = real(real(1.0) / real(86400.0))
     for _ in range(n_steps):
         clock.now += clock.step
@@ -327,8 +349,9 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int) -> None:
 
 
 def write_restart(path, *, pools: dict, clock: Clock) -> None:
-    """Every pool array word for word, every dimension and the clock, to ``path`` (.npz)."""
-    import cupy as cp
+    """Every pool array word for word, every dimension and the clock with its
+    calendar, to ``path`` (.npz). Host pools (numpy arrays, strings and
+    integers) need no GPU."""
     arrays: dict[str, np.ndarray] = {"clock": np.array([clock.start, clock.now, clock.step], np.int64),
                                      "clock_calendar": np.array(clock.calendar)}
     for pool, fields in pools.items():
@@ -343,14 +366,30 @@ def write_restart(path, *, pools: dict, clock: Clock) -> None:
             elif isinstance(value, np.ndarray):
                 arrays[f"host:{key}"] = value
             else:
+                import cupy as cp
                 arrays[f"dev:{key}"] = cp.asnumpy(value)
     np.savez(Path(path), **arrays)
 
 
-def read_restart(path, *, like: dict) -> tuple[dict, Clock]:
-    """The pools and clock :func:`write_restart` wrote; ``like`` (pools of the
-    same layout) names the fields that are absent (``None``)."""
+def _device(value):
     import cupy as cp
+    return cp.asarray(value)
+
+
+#: a restart written before the clock carried its calendar counts Gregorian seconds
+LEGACY_RESTART_CALENDAR = "gregorian"
+
+
+def read_restart(path, *, like: dict, configs: dict) -> tuple[dict, Clock]:
+    """The pools and clock :func:`write_restart` wrote; ``like`` (pools of the
+    same layout) names the fields that are absent (``None``).
+
+    The clock's calendar must be ``configs``' (``config_calendar_type``, the
+    Registry default when absent): a restart resumed on another calendar is
+    refused by name. A restart written before the clock carried its calendar
+    counts Gregorian seconds: it resumes only under an explicit
+    ``config_calendar_type = 'gregorian'``, and is refused otherwise (the
+    default would silently read its seconds as other dates)."""
     with np.load(Path(path)) as data:
         pools: dict[str, dict] = {pool: {name: None for name in fields} for pool, fields in like.items()}
         for key in data.files:
@@ -361,8 +400,17 @@ def read_restart(path, *, like: dict) -> tuple[dict, Clock]:
             value = data[key]
             pools.setdefault(pool, {})[name] = {"str": lambda v: str(v), "int": lambda v: int(v),
                                                 "host": lambda v: v.copy(),
-                                                "dev": lambda v: cp.asarray(v)}[kind](value)
+                                                "dev": _device}[kind](value)
         start, now, step = (int(x) for x in data["clock"])
-        # a restart written before the clock carried its calendar is Gregorian
-        calendar = str(data["clock_calendar"]) if "clock_calendar" in data.files else "gregorian"
-    return pools, Clock(start, now, step, calendar)
+        legacy = "clock_calendar" not in data.files
+        calendar = LEGACY_RESTART_CALENDAR if legacy else str(data["clock_calendar"])
+    if legacy and configs.get("config_calendar_type") != LEGACY_RESTART_CALENDAR:
+        raise ConfigurationRefusal(
+            knob="config_calendar_type", value=configs.get("config_calendar_type"),
+            reason=f"{Path(path).name} was written before the clock carried its calendar and counts seconds on "
+                   "the Gregorian calendar; resuming it needs config_calendar_type set to 'gregorian' explicitly "
+                   "(the default gregorian_noleap would read its seconds as other dates)",
+            declaration="config_calendar_type = 'gregorian' to resume it, or a cold start on another calendar")
+    clock = Clock(start, now, step, calendar)
+    clock.check_calendar(configs)
+    return pools, clock
