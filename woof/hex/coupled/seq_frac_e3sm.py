@@ -18,9 +18,10 @@ the same grid, so on one task a copy; MPAS-Ocean and MPAS-Seaice share a
 mesh) or a sparse matrix (``seq_map_avNormArr`` with ``norm=.false.`` over
 ``mct_sMat_avMult``): see :class:`Mapper`. ``seq_frac_check`` stops the
 coupler (``shr_sys_abort``) when a checked fraction is below ``-eps`` or
-above ``1 + eps`` (``eps_fracval`` 1e-2) or, on a grid with the land, ice
-and ocean fractions, when their sum is more than ``eps_fracsum`` (1e-2) from
-1; unless the models are dead (``seq_frac_dead``), when it only reports.
+above ``1 + eps`` (``eps_fracval``) or, on a grid with the land, ice and
+ocean fractions, when their sum is more than ``eps_fracsum`` from 1 (both
+the single-precision literal ``1.0e-02`` widened to double, as E3SM's
+parameters are, so 0.009999999776482582, not 0.01); unless the models are dead (``seq_frac_dead``), when it only reports.
 Here that is :class:`FracAbort`, or the stages returned.
 
 Kept as E3SM has it: an i2x without ``Si_ifrac`` (MCT's copy copies
@@ -60,8 +61,10 @@ COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false", "--prec-div=tru
 MODULE_OPTIONS = COMPILE_OPTIONS
 _BLOCK = 128
 
-EPS_FRACSUM = 1.0e-02
-EPS_FRACVAL = 1.0e-02
+#: seq_frac_mct's eps_fracsum and eps_fracval are ``real(r8), parameter``s set from the
+#: default-real literal ``1.0e-02``: float32(0.01) widened, 0.009999999776482582
+EPS_FRACSUM = float(np.float32(1.0e-02))
+EPS_FRACVAL = float(np.float32(1.0e-02))
 #: the fractions seq_frac_check tests the bounds of, in its order
 CHECKED = ("afrac", "lfrac", "ofrac", "ifrac", "gfrac", "rfrac", "wfrac", "zfrac", "lfrin")
 STAGES = ("ice set", "ocn set", "atm set")

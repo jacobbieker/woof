@@ -14,7 +14,8 @@ its log.
 The cases reach: each mapper kind on each map (copy, rearrangement, sparse
 matrix with unsorted and repeated elements, empty rows and a -0 product);
 each component absent; ice fractions of 0, -0, 1, tiny, and exactly at the
-lower bound (``-eps_fracval``, whose ``ofrac`` is exactly ``1 + eps``);
+lower bound (``-eps_fracval``, a single-precision 0.01, whose ``ofrac`` is
+exactly ``1 + eps_fracval``);
 land and coastal ice domain points; i2x without ``Si_ifrac`` (MCT's copy
 copies nothing); each of the three checks stopping the coupler (a bound and
 the sum); and the dead models reporting all three without stopping.
@@ -52,7 +53,9 @@ def _spec(name, *, seed, ni=37, no=None, na=23, i2o="rearrange", i2a="matrix", a
                 i2x_fields=tuple(i2x_fields))
 
 
-_BELOW = float(np.nextafter(-0.01, -1.0))
+#: seq_frac_mct's eps_fracval: the default-real literal 1.0e-02, so float32(0.01) widened
+EPS = float(np.float32(1.0e-02))
+_BELOW = float(np.nextafter(-EPS, -1.0))
 SPECS = (
     _spec("mpas_default", seed=1),
     _spec("ocean_matrix_atm_copy", seed=2, ni=29, no=33, i2o="matrix", i2a="copy"),
@@ -126,7 +129,7 @@ def _build(spec) -> dict:
     i2x_fields = spec["i2x_fields"]
     i2x = _uniform(rng, -2.0, 300.0, (ni, len(i2x_fields)))
     sif = _uniform(rng, 0.0, 1.0, ni)
-    sif[:6] = (0.0, -0.0, 1.0, 1e-300, -0.01, 0.5)  # -0.01: exactly the lower bound, ofrac exactly 1 + eps
+    sif[:6] = (0.0, -0.0, 1.0, 1e-300, -EPS, 0.5)  # -EPS: exactly the lower bound, ofrac exactly 1 + EPS
     frac[:6] = 1.0
     if "frac" in spec["dom_other"]:
         dom[:6, dom_fields.index("frac")] = 1.0
