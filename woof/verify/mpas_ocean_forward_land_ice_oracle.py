@@ -66,6 +66,8 @@ CASES = (
     ("coupled_jenkins_two_steps", 20262303, (6, 5), 6, 2, "00:03:00", "0000_00:01:00", {
         **_ON, "config_land_ice_flux_mode": "coupled", "config_land_ice_flux_boundaryLayerNeighborWeight": 1.0,
         "config_land_ice_flux_attenuation_coefficient": 25.0}),
+    # no step: the startup build ocn_init_routines_block makes for output
+    ("standalone_jenkins_startup", 20262304, (6, 6), 6, 0, "00:02:00", "0000_00:00:40", dict(_ON)),
 )
 
 
