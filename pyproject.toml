@@ -160,6 +160,7 @@ woof = [
 "woof.ocean.seaice" = ["*.cu", "README.md"]
 "woof.ocean.mixed_layer" = ["*.cu", "*.md", "WRF-NOTICE.txt"]
 "woof.hydro" = ["kernels/*.cu", "kernels/t-route-LICENSE.txt", "kernels/t-route-TERMS.txt"]
+"woof.grad.wrfplus" = ["kernels/*.cu"]
 "woof.hydro.noahowp" = ["*.cu", "schema.json", "LICENSE", "UPSTREAM-TERMS.md", "NOTICE", "parameters/*.TBL"]
 "woof.native_step" = ["*.c", "README.md"]
 # The Apple-silicon backend's runtime sources: the translator's CUDA

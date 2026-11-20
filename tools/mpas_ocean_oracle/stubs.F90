@@ -1119,7 +1119,8 @@ module mpas_timekeeping
   private
   public :: MPAS_Time_type, MPAS_TimeInterval_type, MPAS_Clock_type, MPAS_NOW, MPAS_START_TIME, &
             mpas_get_clock_time, mpas_set_timeInterval, mpas_interval_division, mpas_set_time, mpas_get_time, &
-            mpas_get_timeInterval, mpas_advance_clock, mpas_set_clock, operator(>), operator(-), &
+            mpas_get_timeInterval, mpas_advance_clock, mpas_set_clock, mpas_get_clock_timestep, &
+            operator(>), operator(-), &
             isLeapYear, daysInMonth, daysInMonthLeap
 
   integer, parameter :: MPAS_NOW = 1, MPAS_START_TIME = 2
@@ -1156,6 +1157,15 @@ contains
     if (whichTime == MPAS_START_TIME) t % s = clock % start
     if (present(ierr)) ierr = 0
   end function mpas_get_clock_time
+
+  ! the clock's step (ocn_frazil_forcing_build_arrays reads dt from it)
+  function mpas_get_clock_timestep(clock, ierr) result(dt)
+    type(MPAS_Clock_type), intent(in) :: clock
+    integer, intent(out), optional :: ierr
+    type(MPAS_TimeInterval_type) :: dt
+    dt % s = clock % step
+    if (present(ierr)) ierr = 0
+  end function mpas_get_clock_timestep
 
   subroutine mpas_set_clock(clock, startString, stepString)
     type(MPAS_Clock_type), intent(inout) :: clock
