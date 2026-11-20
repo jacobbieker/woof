@@ -2729,6 +2729,20 @@ This is WRFDA's `da_varbc` (Auligné et al. 2007), channel by channel.
 | GR-V4 | production CG words with the radiance term and VarBC: the same SHA-256 under fast and strict, on CUDA and on Metal |
 | GR-V5 | VarBC on a synthetic case with a known bias: the coefficients converge to it, and `VARBC.out` round-trips |
 
+GR-V3 is `tests/test_var_radiance_case.py`.  It is gated on `WOOF_GRV3_DIR`
+(`be.dat`, `fg`, `ob.ascii`, `scene`) and on CRTM, and nothing of the case is
+in the repository.  It runs on the reference tier and prints one `GRV3` JSON
+line.  `VarResult.fit` gives O-B and O-A per conventional type and variable
+(`sound:t` ...) as well as per radiance channel.
+
+Status (2026-11-20): not yet run, because no case has both data sources.
+WIS2 sondes start on 2026-10-26.  The `bkr/geo/virtualized` GOES-18 and -19
+ABI stores are readable only up to 2026-07-08: the live repositories' newest
+snapshots point at missing objects, and the next segment does not exist yet.
+The planned case is 2026-10-28T12 on the tutorial grid, with 62 TEMP and
+5012 SYNOP reports in a ±1 h window.  It runs once the store is readable
+again.
+
 ### 13.9 PR sequence
 
 1. This section.
