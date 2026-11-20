@@ -4913,7 +4913,7 @@
    },
    {
     "file": "woof/hex/coupled/seq_frac_e3sm.cu",
-    "sha256": "2c59a6bbc29caa5f5718ac342bbf7cf427198244d3c5e27bbb5adabbdd1c122a"
+    "sha256": "2aa45a8e8c741b44322b7b42294a29640a3f68e30a32055a5fb7b772a72f76b9"
    },
    {
     "file": "woof/hex/data/mpasphys-maths/glibc_flt32.cuh",
@@ -5783,7 +5783,7 @@
    },
    {
     "file": "woof/hex/coupled/seq_frac_e3sm.py",
-    "sha256": "378f141eac183c62b299ab6bce1206c6454aa468caf1b75e8afceeaf27ae9f4c"
+    "sha256": "1dec1b9f7546bfeaf4342cf3a42a285aab1f18817a5af953086dd3cac14f4063"
    },
    {
     "file": "woof/hex/cuda_acoustic.py",
