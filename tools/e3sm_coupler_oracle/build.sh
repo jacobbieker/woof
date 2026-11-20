@@ -210,7 +210,7 @@ echo "built ${build_dir}/run_ocean_coupling"
 # for byte out of components/mpas-seaice/driver/ice_comp_mct.F into a module
 # (ice_comp_mct_cut) whose head names the modules they use (the host
 # module's own use lines for seaice_constants, seaice_mesh and icepack_intfc,
-# lines 58-68, 74 and 78) and carries the host module's declaration of the
+# lines 58-68, 75 and 78) and carries the host module's declaration of the
 # domain (line 124).  seaice_latlon_vector_rotation_backward and the five
 # routines it calls are cut the same way out of mpas_seaice_mesh.F into
 # seaice_mesh.  Compiled verbatim: mpassi_cpl_indices.F,
@@ -235,7 +235,7 @@ cp "${obj}/../merge/mct_mod.F90" mct_mod.F90
     done
     printf 'end module seaice_mesh\n'
 } > seaice_mesh_cut.F90
-host_use=$(sed -n '58,68p;74p;78p' "${src}/driver/ice_comp_mct.F")
+host_use=$(sed -n '58,68p;75p;78p' "${src}/driver/ice_comp_mct.F")
 host_decl=$(sed -n '124p' "${src}/driver/ice_comp_mct.F")
 {
     printf 'module ice_comp_mct_cut\n'
