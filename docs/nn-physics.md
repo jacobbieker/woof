@@ -497,6 +497,102 @@ Passing the scorecard criterion needs broader training data (several
 cycles and seasons, both meshes) so that fewer columns fall back, and a
 better trainer than the NumPy example.
 
+#### P2.6: broader data, a residual target, a dx input (G2 re-run)
+
+The re-run follows the steps above with the same meshes, scorecard
+(`tools/nn_g2_scorecard.py`) and tests. Every cycle is a 00 UTC GFS cycle in 2026. Training cycles,
+validation cycle and evaluation cycle are disjoint, and the mode, model
+and margin were chosen on the validation cycle alone:
+
+- training: 02-10, 04-20, 07-15, 08-25, 10-12 and 11-02 (48 h uniform-mesh
+  taps; 24 h variable-mesh taps of 02-10, 07-15 and 11-02);
+- validation: 10-28 (120 h uniform, 72 h variable);
+- evaluation: 11-07, 120 h. The WIS2 observations of that window end 59 h
+  into the run, so the scored leads are 0-59 h.
+
+The inputs add `dx` and the radiation context `coszr`, `gsw` and `glw`.
+
+1. **Data breadth.** Offline fallback at `margin = 0.1` on the validation
+   tap (uniform mesh, `replace`), against the number of training cycles:
+
+   | cycles | columns outside the range | dtheta R² |
+   |---|---|---|
+   | 1 | 100 % | -0.81 |
+   | 2 | 16 % | -0.51 |
+   | 4 | 10 % | 0.20 |
+   | 6 | 6.3 % | 0.31 (dqv 0.11, dqc 0.31) |
+
+2. **Residual target.** `tap_target = "nudging"` (grid nudging toward
+   6-hourly GFS analyses on the same mesh, 3e-4 s⁻¹) recorded the nudging
+   increment on the same six cycles, and a `residual` model was trained on
+   it (held-out dtheta R² 0.24, 0.25 against a zero model). Online on the
+   validation cycle (uniform, 120 h, 15814 pairs at 132 stations, physics
+   T2 RMSE 2.12 K):
+
+   | arm | margin | T2 RMSE NN - physics (K), 95 % CI | calls falling back |
+   |---|---|---|---|
+   | replace | 0.1 | -0.069 [-0.111, -0.026] | 38 % |
+   | replace | 0.3 | -0.066 [-0.113, -0.017] | 33 % |
+   | replace | 1.0 | -0.062 [-0.110, -0.012] | 33 % |
+   | residual (nudging increment) | 0.3 | +0.239 [+0.176, +0.305] | 21 % |
+   | residual, 18 inputs | 0.3 | +0.172 [+0.120, +0.229] | 36 % |
+
+   The residual arms cooled T2 by about 0.9 K. `replace` with margin 0.1
+   was chosen.
+3. **dx and the variable mesh.** A model pooled from the six uniform taps
+   and the three variable-mesh taps covers the variable mesh's `dx`
+   (14 % offline fallback on its validation tap, against 81 % for the
+   uniform-only model, which falls back wherever `dx` is not 12 km). Online
+   on the variable mesh's validation cycle (72 h, 5659 pairs at 78
+   stations, physics 1.77 K) it was much worse, +1.09 [+0.97, +1.21] K
+   (T2 bias -0.69 to -1.89 K). The uniform-only model was not worse,
+   +0.03 [-0.04, +0.10] K, with 69 % of calls falling back. The
+   uniform-only model was chosen for both meshes.
+4. **Evaluation** (11-07, 120 h, `replace`, margin 0.1):
+
+   | mesh, backend | stable 120 h | T2 RMSE physics / NN (K) | NN - physics, 95 % CI | pairs, stations | calls falling back |
+   |---|---|---|---|---|---|
+   | uniform, CUDA (torch) | yes | 2.056 / 2.000 | -0.056 [-0.094, -0.020] (better) | 7907, 133 | 94 % |
+   | uniform, Metal (MLX) | yes | 2.005 / 1.979 | -0.026 [-0.069, +0.019] | 7907, 133 | 94 % |
+   | variable, CUDA (torch) | yes | 1.621 / 1.579 | -0.042 [-0.096, +0.010] | 4628, 78 | 97 % |
+
+   Mass budget (interior area means against the physics run, maxima over
+   the hourly frames):
+
+   | mesh, backend | psfc change, physics / NN (Pa) | max \|NN - physics\| psfc | max \|NN - physics\| PW |
+   |---|---|---|---|
+   | uniform, CUDA | -1728.4 / -1726.3 | 8.6 Pa | 0.39 mm |
+   | uniform, Metal | -1728.1 / -1727.8 | 8.7 Pa | 0.39 mm |
+   | variable, CUDA | -1690.2 / -1690.2 | 10.0 Pa | 0.14 mm |
+
+   In the evaluation week nearly every column falls back. The cause is
+   the top ten levels (about 40-10 hPa): early-November stratospheric
+   theta and pressure lie below the range of all six training cycles.
+   Below them, the columns lie inside it. On the validation
+   week, 6 % of the tap's columns fell outside offline. Online, as the
+   NN run's state drifted from the tap's, 33-38 % fell outside (69 % on the
+   variable mesh). Nothing was chosen on the evaluation week.
+5. **Cost** (plain and NN 6 h runs of the evaluation cycle in pairs,
+   uniform mesh; median step):
+
+   | backend | plain step | NN step, minus plain, per pair |
+   |---|---|---|
+   | Metal (MLX) | 188-197 ms | +0.6, +1.0, +3.6 ms (0.3-1.9 %) |
+   | CUDA (A6000 shared with another job), torch | 91-93 ms | +7.3, +5.4, +8.0 ms (6-9 %) |
+
+The gate's verdict: **met on its stated criteria.** With the option
+absent, the identity tests are unchanged. The NN runs are stable for 5
+days on both meshes (and on Metal on the uniform one). The mass budget
+closes to the physics run's level, and cost is measured on both backends.
+The T2 scorecard is not worse than the physics run at 95 % on either
+mesh or backend, and is better at 95 % on the uniform mesh on CUDA.
+
+The result is weak evidence of skill: 94-97 % of column calls fell back to
+the schemes in the evaluation week. The next step is a model whose screen
+covers the stratosphere: train only the lowest 44 levels (`--levels
+44`; the schemes keep the levels above), or tap winter cycles. It needs a fresh evaluation
+cycle, because this one has now been seen.
+
 ### A column model as a backend row
 
 `woof.nn.hex_backend.NNColumnBackend` is an example
