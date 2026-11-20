@@ -237,6 +237,114 @@ class ProjectionGrid:
         return -math.atan2(float(gy[1] - gy[0]), float(gx[1] - gx[0]))
 
 
+class VoronoiGrid:
+    """The cells of an MPAS (hex) mesh as a one-row grid, shape (1, nCells).
+
+    A point belongs to the cell whose centre is nearest (a Voronoi cell is
+    exactly that set), found with a KD-tree on unit vectors.  The model axes
+    x/y are local east/north, so ``frontal_x``/``frontal_y`` face flow along
+    east and north.  A georeferenced raster goes to lon/lat with pyproj; an
+    idealised raster (``crs=None``) lies on the plane tangent at
+    ``plane_origin`` (lat, lon in degrees; azimuthal equidistant on the
+    mesh's own ``radius``), x east and y north, metres.  ``dx``/``dy`` are
+    the mean cell spacing, which only sets the raster supersampling.
+    """
+
+    def __init__(self, lat_cell, lon_cell, area_cell, *, radius: float,
+                 plane_origin: tuple[float, float] | None = None):
+        lat = np.asarray(lat_cell, np.float64)
+        lon = np.asarray(lon_cell, np.float64)
+        self.n_cells = int(lat.size)
+        self.nx, self.ny = self.n_cells, 1
+        self.radius = float(radius)
+        spacing = float(np.sqrt(np.mean(np.asarray(area_cell, np.float64))))
+        self.dx = self.dy = spacing
+        self.plane_origin = plane_origin
+        from scipy.spatial import cKDTree
+        self._tree = cKDTree(_unit(lat, lon))
+
+    @classmethod
+    def from_mesh(cls, mesh, **kwargs) -> "VoronoiGrid":
+        """From an MPAS mesh object (``arrays`` by MPAS name, ``attrs``)."""
+        a = mesh.arrays
+        radius = kwargs.pop("radius", None)
+        if radius is None:
+            radius = float(mesh.attrs["sphere_radius"])
+        return cls(a["latCell"], a["lonCell"], a["areaCell"], radius=radius,
+                   **kwargs)
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return 1, self.n_cells
+
+    def _lonlat(self, x, y, crs):
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        if crs is None:
+            if self.plane_origin is None:
+                raise ValueError("an idealised raster (crs=None) needs the "
+                                 "VoronoiGrid's plane_origin")
+            lat0, lon0 = (math.radians(v) for v in self.plane_origin)
+            up = np.array([math.cos(lat0) * math.cos(lon0),
+                           math.cos(lat0) * math.sin(lon0), math.sin(lat0)])
+            east = np.array([-math.sin(lon0), math.cos(lon0), 0.0])
+            north = np.cross(up, east)
+            dist = np.hypot(x, y)
+            ang = dist / self.radius
+            with np.errstate(invalid="ignore", divide="ignore"):
+                ux = np.where(dist > 0, x / dist, 0.0)
+                uy = np.where(dist > 0, y / dist, 0.0)
+            p = (np.cos(ang)[..., None] * up
+                 + np.sin(ang)[..., None] * (ux[..., None] * east
+                                             + uy[..., None] * north))
+            return (np.degrees(np.arctan2(p[..., 1], p[..., 0])),
+                    np.degrees(np.arcsin(np.clip(p[..., 2], -1.0, 1.0))))
+        if _is_geographic(crs):
+            return x, y
+        from pyproj import Transformer
+        tr = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+        return tr.transform(x, y)
+
+    def cells(self, x, y, crs) -> np.ndarray:
+        lon, lat = self._lonlat(x, y, crs)
+        _, index = self._tree.query(_unit(np.radians(lat), np.radians(lon)))
+        return np.asarray(index, np.int64)
+
+    def fractional_ij(self, x, y, crs):
+        cell = self.cells(x, y, crs)
+        return cell + 0.5, np.full(cell.shape, 0.5)
+
+    def model_cells(self, raster: HeightRaster, densify: int = 64) -> np.ndarray:
+        """The (1, nCells) mask of cells holding a sample of the raster."""
+        rows, cols = raster.shape
+        r = np.linspace(0, rows - 1, min(rows, densify)).round().astype(int)
+        c = np.linspace(0, cols - 1, min(cols, densify)).round().astype(int)
+        xs, ys = raster.centres()
+        X, Y = np.meshgrid(xs[c], ys[r])
+        mask = np.zeros(self.n_cells, bool)
+        mask[self.cells(X.ravel(), Y.ravel(), raster.crs)] = True
+        return mask[None]
+
+    def axis_rotation(self, raster: HeightRaster) -> float:
+        """Angle from the raster's +x axis to local east at its centre."""
+        if raster.crs is None or _is_geographic(raster.crs):
+            return 0.0
+        rows, cols = raster.shape
+        xc = raster.x0 + 0.5 * cols * raster.px
+        yc = raster.y0 - 0.5 * rows * raster.py
+        step = 10.0 * raster.px
+        lon, lat = self._lonlat([xc, xc + step], [yc, yc], raster.crs)
+        east = (lon[1] - lon[0]) * math.cos(math.radians(lat[0]))
+        return -math.atan2(float(lat[1] - lat[0]), float(east))
+
+
+def _unit(lat, lon):
+    lat = np.asarray(lat, np.float64)
+    lon = np.asarray(lon, np.float64)
+    return np.stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon),
+                     np.sin(lat)], axis=-1)
+
+
 def _is_geographic(crs) -> bool:
     if crs in ("EPSG:4326", "OGC:CRS84"):
         return True
@@ -882,6 +990,9 @@ def _model_cells(raster: HeightRaster, grid, densify: int = 256):
     mask), from its densified outline mapped onto the grid (a projected
     edge can bow).  An outline lying exactly on a cell edge does not reach
     the cell beyond it; a raster off the grid reaches none."""
+    custom = getattr(grid, "model_cells", None)
+    if custom is not None:
+        return custom(raster)
     from affine import Affine
     from rasterio import features
 
@@ -1171,5 +1282,5 @@ __all__ = [
     "SCHEMA", "URB_PARAM_INDEX", "URB_PARAM_SIZE", "aggregate",
     "block_raster", "gem15_building_rasters", "ndsm_heights", "parse_wkb",
     "rasterize_footprints", "read_footprints", "read_product", "urb_param",
-    "utm_raster", "write_product",
+    "utm_raster", "VoronoiGrid", "write_product",
 ]

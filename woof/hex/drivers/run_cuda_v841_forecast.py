@@ -3970,6 +3970,13 @@ def execute_forecast(
         stack["driver"].w_damping = WDamping(w_crit_cfl=float(host["w_damping"]["w_crit_cfl"]))
         print(json.dumps({"w_damping": {"w_crit_cfl": float(host["w_damping"]["w_crit_cfl"]),
                                         "w_damp_on": WDamping().w_damp_on}}), flush=True)
+    if host.get("obstacles") is not None:
+        # woof's obstacle_opt = 1: buildings as porous immersed obstacles (woof.hex.obstacles).
+        from woof.hex.obstacles import ObstacleSettings, attach as attach_obstacles
+        settings = dict(host["obstacles"])
+        settings.pop("obstacle_opt", None)
+        print(json.dumps({"obstacles": attach_obstacles(stack["driver"], ObstacleSettings(**settings))},
+                         default=str), flush=True)
     # --wrf-hydro (woof.wrf_hydro_route): the routing on its own LSM grid through the conservative cell <-> grid
     # exchange (woof.hex.wrf_hydro_hex); returns at once unless the launch asked for it.
     from woof.hex.wrf_hydro_hex import attach_host as attach_wrf_hydro
@@ -5555,6 +5562,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--wind-farms", default=None)
     parser.add_argument("--w-damping", action="store_true")
     parser.add_argument("--inflow-perturbation", default=None)
+    parser.add_argument("--obstacles", default=None)
     parser.add_argument("--w-crit-cfl", type=float, default=1.0)
     parser.add_argument(
         "--source-table",
@@ -6441,6 +6449,8 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
         host["w_damping"] = {"w_crit_cfl": float(args.w_crit_cfl)}
     if getattr(args, "inflow_perturbation", None):
         host["inflow_perturbation"] = json.loads(args.inflow_perturbation)
+    if getattr(args, "obstacles", None):
+        host["obstacles"] = json.loads(args.obstacles)
     host["stochastic"] = resolve_options(args.stochastic).json()
     if args.preflight_only or not DEFER_PREPARED_FINGERPRINT:
         join_prepared_fingerprint(host)

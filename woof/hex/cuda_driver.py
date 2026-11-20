@@ -3704,6 +3704,10 @@ class CudaDryDycoreDriver:
     #: the forecast door when --w-damping is given; None leaves every
     #: tendency exactly as it was.
     w_damping = None
+    #: woof's opt-in porous immersed obstacles (woof.hex.obstacles.HexObstacles),
+    #: attached by the forecast door when --obstacle-opt 1 is given; None
+    #: leaves every tendency exactly as it was.
+    obstacles = None
 
     def _w_tendency(self, state: DevicePrognosticState, w: Any) -> Any:
         result = self._w_tendency_dynamics(state, w)
@@ -4467,6 +4471,14 @@ class CudaDryDycoreDriver:
                 self.held_suarez_momentum.apply(
                     tend_ru, current_state.rho_u,
                     current_diag.pressure_perturbation)
+            if self.obstacles is not None:
+                # woof.hex.obstacles: the implicit obstacle rate on the
+                # stage's complete edge tendency, held through the acoustic
+                # steps like the rest of it.
+                self.obstacles.apply_edges(
+                    tend_ru, current_state.rho_u, current_diag.normal_velocity,
+                    cached_v, current_diag.vertical_velocity,
+                    dt=final_stage.large_timestep)
             tend_rt = self._theta_tendency(
                 current_state,
                 current_diag.theta_m,
@@ -4514,6 +4526,10 @@ class CudaDryDycoreDriver:
                 current_state, current_diag.vertical_velocity
             )
             self._add(tend_rw, saved_euler_rw)
+            if self.obstacles is not None:
+                self.obstacles.apply_wfaces(
+                    tend_rw, current_state.rho_w, current_diag.normal_velocity,
+                    current_diag.vertical_velocity, dt=final_stage.large_timestep)
             tend_omega = convert_w_tendency_to_omega_cuda(
                 self.atmosphere.mesh,
                 tend_rw,
@@ -5816,6 +5832,10 @@ class CudaDryDycoreDriver:
                     "step_device_with_physics(validated_held_tendencies)",
                 )
             return self._step_device_v841()
+        if self.obstacles is not None:
+            raise ConfigurationRefusal(
+                "obstacle_opt", 1, "the pre-v8.4.1 dry RK loop does not carry the obstacle tendency",
+                "the v8.4.1 dycore lane")
         self.mixing_config = (
             _mixing_config(self.config)
             if self.config.config_horiz_mixing == "2d_smagorinsky"

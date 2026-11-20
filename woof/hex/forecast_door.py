@@ -972,6 +972,9 @@ class ForecastRequest:
     wind_farms: str | None = field(default=None, kw_only=True)
     #: WRF's w_crit_cfl when --w-damping asked for the limiter (woof.hex.cuda_w_damping), else None.
     w_damping: float | None = field(default=None, kw_only=True)
+    #: woof's obstacle_opt = 1 settings (woof.hex.obstacles.ObstacleSettings.as_dict()) when
+    #: --obstacle-opt 1 asked for buildings as porous obstacles, else None.
+    obstacles: dict | None = field(default=None, kw_only=True)
     #: WRF's inflow perturbation controls when --inflow-perturbation asked for it
     #: (woof.hex.inflow_perturbation), else None.
     inflow_perturbation: dict | None = field(default=None, kw_only=True)
@@ -2621,6 +2624,7 @@ def resolve_request(
         chemistry_config=getattr(arguments, "chemistry_config", None),
         wind_farms=getattr(arguments, "wind_farms", None),
         w_damping=_resolve_w_damping(arguments),
+        obstacles=_resolve_obstacles(arguments),
         inflow_perturbation=_resolve_inflow_perturbation(arguments),
         input_problems=tuple(collected or ()),
         preset=preset.name,
@@ -3242,6 +3246,9 @@ def _partitioned_samehost_refusal(request) -> str | None:
     if request.w_damping is not None:
         return ("--w-damping acts in the one-card resident dycore driver; the partitioned same-host executor's "
                 f"rank drivers do not carry it ({one_card})")
+    if getattr(request, "obstacles", None) is not None:
+        return ("--obstacle-opt acts in the one-card resident dycore driver; the partitioned same-host executor's "
+                f"rank drivers do not carry it ({one_card})")
     if request.inflow_perturbation is not None:
         return ("--inflow-perturbation acts in the one-card regional runtime; the partitioned same-host "
                 f"executor's rank runtimes do not carry it ({one_card})")
@@ -3265,6 +3272,44 @@ def _resolve_w_damping(arguments) -> float | None:
                 f"--w-damping acts in the resident dycore driver; --{flag.replace('_', '-')} runs its own drivers "
                 "that do not carry it, so the limiter would be accepted and never applied")
     return crit
+
+
+_OBSTACLE_KEYS = ("obstacle_solid_fraction", "obstacle_relax_factor", "obstacle_drag_coefficient",
+                  "obstacle_wall_z0")
+
+
+def _resolve_obstacles(arguments) -> dict | None:
+    """woof's obstacle_opt = 1 settings when ``--obstacle-opt 1``, else None; refuses what it cannot honour."""
+
+    opt = getattr(arguments, "obstacle_opt", None)
+    path = getattr(arguments, "obstacle_file", None)
+    given = {key: getattr(arguments, key, None) for key in _OBSTACLE_KEYS}
+    if not opt:
+        named = [f"--{key.replace('_', '-')}" for key, value in given.items() if value is not None]
+        if path is not None:
+            named.insert(0, "--obstacle-file")
+        if named:
+            raise _refuse(f"{', '.join(named)} read only with --obstacle-opt 1; it would be accepted and never read")
+        return None
+    if opt != 1:
+        raise _refuse(f"--obstacle-opt {opt!r}: only 0 (off) and 1 (porous immersed obstacles) exist")
+    if path is None:
+        raise _refuse("--obstacle-opt 1 needs --obstacle-file (a `woof buildings` product on this mesh)")
+    if not Path(path).is_file():
+        raise _refuse(f"--obstacle-file {str(path)!r} does not exist")
+    for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
+        if getattr(arguments, flag, False):
+            raise _refuse(
+                f"--obstacle-opt acts in the resident dycore driver; --{flag.replace('_', '-')} runs its own "
+                "drivers that do not carry it, so the obstacles would be accepted and never applied")
+    from .obstacles import ObstacleSettings
+
+    try:
+        settings = ObstacleSettings(obstacle_file=str(Path(path).resolve()),
+                                    **{key: float(value) for key, value in given.items() if value is not None})
+    except ValueError as error:
+        raise _refuse(str(error)) from error
+    return settings.as_dict()
 
 
 def _resolve_inflow_perturbation(arguments) -> dict | None:
@@ -3506,6 +3551,8 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
         argv += ["--wind-farms", request.wind_farms]
     if request.w_damping is not None:
         argv += ["--w-damping", "--w-crit-cfl", repr(float(request.w_damping))]
+    if request.obstacles is not None:
+        argv += ["--obstacles", json.dumps(request.obstacles, sort_keys=True)]
     if request.inflow_perturbation is not None:
         argv += ["--inflow-perturbation", json.dumps(request.inflow_perturbation, sort_keys=True)]
     if request.source_table is not None:
@@ -3877,6 +3924,7 @@ def build_receipt(
             **({} if request.surface_statics is None else
                {"surface_statics": str(request.surface_statics)}),
             **({} if request.w_damping is None else {"w_damping": {"w_crit_cfl": request.w_damping}}),
+            **({} if request.obstacles is None else {"obstacles": dict(request.obstacles)}),
             **({} if request.inflow_perturbation is None else
                {"inflow_perturbation": dict(request.inflow_perturbation)}),
             "source_table": (
@@ -5218,6 +5266,9 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             if getattr(arguments, "w_damping", False):
                 raise ValueError("--w-damping is carried by the WOOF-physics route's dycore driver; the MPAS "
                                  "suite route (matrix item 4.2 follow-up) would accept it and never apply it")
+            if getattr(arguments, "obstacle_opt", None):
+                raise ValueError("--obstacle-opt is carried by the WOOF-physics route's dycore driver; the MPAS "
+                                 "suite route would accept it and never apply it")
             if getattr(arguments, "inflow_perturbation", False):
                 raise ValueError("--inflow-perturbation is carried by the WOOF-physics route's regional runtime; "
                                  "the MPAS suite route (matrix item 5.7 follow-up) would accept it and never apply it")
@@ -5797,6 +5848,18 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                              "WOOF-physics route only; default off")
     parser.add_argument("--w-crit-cfl", type=float, default=None, metavar="CFL",
                         help="WRF's w_crit_cfl for --w-damping (default 1.0, WOOF's)")
+    parser.add_argument("--obstacle-opt", type=int, default=None, choices=(0, 1), metavar="N",
+                        help="1: buildings as porous immersed obstacles (implicit Brinkman relaxation plus "
+                             "frontal drag and a wall law) from --obstacle-file; WOOF-physics route only; "
+                             "default off")
+    parser.add_argument("--obstacle-file", type=Path, default=None, metavar="PRODUCT",
+                        help="a `woof buildings` building product on this mesh, for --obstacle-opt 1")
+    for key, text in (("obstacle_solid_fraction", "layer fraction above which a cell layer is solid (default 0.5)"),
+                      ("obstacle_relax_factor", "solid relaxation rate as a multiple of 1/dt (default 10)"),
+                      ("obstacle_drag_coefficient", "frontal drag coefficient (default 0.4)"),
+                      ("obstacle_wall_z0", "wall roughness length in metres (default 0.01)")):
+        parser.add_argument(f"--{key.replace('_', '-')}", type=float, default=None, metavar="X",
+                            help=f"{text}; read only with --obstacle-opt 1")
     parser.add_argument("--inflow-perturbation", action="store_true",
                         help="WRF's inflow perturbation on a regional mesh: cell-blocked theta increments "
                              "(Eckert amplitude, PBL depth, 100 s holds) on the inflow faces' relaxation-zone "
