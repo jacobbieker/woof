@@ -51,8 +51,9 @@ STRICT = dict(GPUWM_WRF_EXACT="1", WOOF_WRF_EXACT_DIAGNOSTICS="1",
               WOOF_WRF_EXACT_ADVECTION="1", GPUWM_WRF_EXACT_DIFFUSION="1",
               GPUWM_WRF_EXACT_BIGSTEP="1")
 
-# (case, warm-up primal steps): a warm and a cold start, and rotation.
-CASES = [(dict(), 1), (dict(), 0), (dict(_rot=1), 1)]
+# (case, warm-up primal steps): a warm and a cold start, and rotation
+# with map factors.
+CASES = [(dict(), 1), (dict(), 0), (dict(_rot=1, _msf=1), 1)]
 N = 4
 
 
@@ -72,6 +73,7 @@ def _run(backend, body, tmp_path):
         "def build(over, warm, nx=16, ny=12, nz=10, seed=1, hill=400.0):\n"
         "    o = dict(h_sca_adv_order=5, terrain_opt=1); o.update(over)\n"
         "    rot = o.pop('_rot', 0)\n"
+        "    msf = o.pop('_msf', 0)\n"
         "    cfg = H.make_config(nx, ny, nz, **o)\n"
         "    jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')\n"
         "    ridge = hill * np.exp(-(((ii - nx / 2) / (nx / 5)) ** 2\n"
@@ -81,6 +83,13 @@ def _run(backend, body, tmp_path):
         "        ang = 0.3 + 0.01 * ii\n"
         "        geo = dataclasses.replace(geo, f=1e-4 + 1e-6 * jj, e=np.full((ny, nx), 5e-5),\n"
         "                                  sina=np.sin(ang), cosa=np.cos(ang))\n"
+        "    if msf:  # smooth periodic map factors, a few percent from 1\n"
+        "        def m(j, i):\n"
+        "            return (1.0 + 0.03 * np.cos(2 * np.pi * j / ny)\n"
+        "                    + 0.01 * np.sin(2 * np.pi * i / nx))\n"
+        "        jf, iu = np.meshgrid(np.arange(ny), np.arange(nx + 1) - 0.5, indexing='ij')\n"
+        "        jv, iv = np.meshgrid(np.arange(ny + 1) - 0.5, np.arange(nx), indexing='ij')\n"
+        "        geo = dataclasses.replace(geo, msft=m(jj, ii), msfu=m(jf, iu), msfv=m(jv, iv))\n"
         "    state = H.make_state(cfg, seed, geography=geo)\n"
         "    for _ in range(warm):\n"
         "        D.step(state, cfg)\n"
@@ -241,15 +250,15 @@ for dtn in {dtypes!r}:
 
 @pytest.mark.parametrize("backend", BACKENDS[:1])
 def test_window_names_what_it_refuses(backend, tmp_path):
-    """A regional case (map factors) is refused by name, and the adjoint
-    without a forward run says what is missing."""
+    """A regional case (specified boundaries, with map factors) is refused
+    by name, and the adjoint without a forward run says what is missing."""
     out = _run(backend, '''
-cfg = H.make_config(8, 6, 6, h_sca_adv_order=5, terrain_opt=1)
+cfg = H.make_config(8, 6, 6, h_sca_adv_order=5, terrain_opt=1, specified=True)
 try:
     W.Window(H.make_state(cfg, 1, geography=H.make_geography(cfg)), cfg, 2)
-    out["msf"] = "accepted"
+    out["spec"] = "accepted"
 except NotImplementedError as e:
-    out["msf"] = str(e)
+    out["spec"] = str(e)
 cfg, state = build({}, 1)
 w = W.Window(state, cfg, 2)
 try:
@@ -258,5 +267,6 @@ try:
 except RuntimeError as e:
     out["order"] = str(e)
 ''', tmp_path)
-    assert "map factors" in out["msf"], out
+    assert "lateral boundaries other than periodic" in out["spec"], out
+    assert "map factors" not in out["spec"], out
     assert "forward first" in out["order"], out
