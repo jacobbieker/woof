@@ -1,0 +1,2 @@
+GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0
+ldd (GNU libc) 2.44

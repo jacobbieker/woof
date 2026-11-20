@@ -12,7 +12,10 @@ Metal.  woof's ``cupy`` is the facade over MLX (:mod:`woof.backend.facade`):
 each array is a view of an ``mx.array``.  :func:`to_mlx` returns that
 ``mx.array`` (lazy, no copy) and :func:`from_mlx` wraps an MLX result as a
 new facade array in its own storage, so the model's graph joins woof's
-lazy graph without a host round trip.
+lazy graph without a host round trip.  PyTorch on Metal runs on ``mps``:
+:func:`to_torch` shares the facade's buffer through DLPack and
+:func:`from_torch` copies the result back once on the device
+(:mod:`woof.grad.bridge` documents the ordering).
 
 Host.  NumPy arrays pass through (the reference runner and tests).
 
@@ -60,8 +63,8 @@ def host_view(array: Any) -> np.ndarray:
 # ---------------------------------------------------------------- PyTorch
 def to_torch(array: Any):
     """A torch tensor sharing ``array``'s memory (CuPy via DLPack, NumPy via
-    ``from_numpy``).  The facade has no device pointer PyTorch can use:
-    refused, the MLX runner is the Metal route."""
+    ``from_numpy``, a facade array as a torch-MPS tensor through DLPack,
+    after the MLX queue drains: :func:`woof.grad.bridge.to_torch`)."""
     import torch
     kind = array_kind(array)
     if kind == "numpy":
@@ -69,8 +72,12 @@ def to_torch(array: Any):
     if kind == "host":
         return torch.from_numpy(np.ascontiguousarray(host_view(array)))
     if kind == "facade":
-        raise TypeError("a Metal (facade) array cannot be handed to PyTorch without a host copy; "
-                        "use backend = \"mlx\" on Metal")
+        from woof.grad import bridge as grad_bridge
+        if np.dtype(array.dtype) == np.float64:
+            array = array.astype(np.float32)          # in MLX: torch-MPS has no float64
+        if not torch.backends.mps.is_available():
+            return grad_bridge.to_torch(array, device="cpu", copy=True)
+        return grad_bridge.to_torch(array)
     return torch.from_dlpack(array)
 
 
@@ -80,6 +87,9 @@ def from_torch(tensor: Any, like: Any):
     kind = array_kind(like)
     if kind == "numpy":
         return tensor.detach().cpu().numpy()
+    if kind == "facade":
+        from woof.grad import bridge as grad_bridge
+        return grad_bridge.from_torch(tensor.detach(), like, copy=True)
     import cupy
     if kind == "host":
         return cupy.asarray(tensor.detach().cpu().numpy())

@@ -40,7 +40,8 @@ from functools import reduce
 
 import numpy as np
 
-#: Storages rebound since the last launch (strong refs; cleared by flush()).
+#: Storages rebound since the last launch (strong refs).  Appended from any thread; drained only by
+#: drain_pending (flush_pending before an in-place launch, synchronize).
 PENDING: list = []
 
 #: Elements one facade allocation may hold: MLX sizes an array with int32.
@@ -406,14 +407,33 @@ def _materialize(arr):
     return mx.contiguous(arr.reshape(-1))
 
 
+_PENDING_DRAIN = threading.Lock()
+
+
+def drain_pending(evaluate) -> int:
+    """Take every pending storage value and encode it (``evaluate``: ``mx.async_eval`` or ``mx.eval``).
+
+    Storages are appended from any thread (an allocation, a rebind).  Taking
+    and encoding happen under one lock, so a drain on another thread cannot
+    find the list empty and launch, or synchronize, while values taken here
+    are not yet encoded.  Only the first ``n`` items are removed: a storage
+    appended meanwhile (appends go to the end, without the lock) stays
+    pending.  Every drain goes through here; never copy-then-clear PENDING.
+    Returns the number of values encoded.
+    """
+    with _PENDING_DRAIN:
+        n = len(PENDING)
+        if not n:
+            return 0
+        arrays = [s.arr for s in PENDING[:n]]
+        del PENDING[:n]
+        evaluate(*arrays)
+    return n
+
+
 def flush_pending():
     """Encode every pending storage value (before an in-place launch)."""
-    if not PENDING:
-        return
-    mx = _mx()
-    arrays = [s.arr for s in PENDING]
-    PENDING.clear()
-    mx.async_eval(*arrays)
+    drain_pending(_mx().async_eval)
 
 
 def _contiguous_strides(shape, itemsize):

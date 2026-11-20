@@ -245,6 +245,19 @@ PBL_ARRAYS = ("a_u_bep", "a_v_bep", "a_t_bep", "a_q_bep", "a_e_bep",
               "dlg_bep", "dl_u_bep", "sf_bep", "vl_bep")
 
 
+MORPHOLOGY_ARRAYS = ("lp_urb2d", "lb_urb2d", "hgt_urb2d", "hi_urb2d")
+
+
+def _fixture_morphology(fx) -> dict:
+    """The fixture's gridded morphology as real.exe's split hands it to
+    urban_var_init (option 3: no MH/STDH/LF)."""
+    morph = {name[:-6]: to_gpuwm(fx[f"state0/{name}"])
+             for name in MORPHOLOGY_ARRAYS}
+    zero = np.zeros_like(morph["lp"])
+    return dict(morph, mh=zero, stdh=zero,
+                lf=np.zeros((4, *zero.shape), np.float32))
+
+
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_option3_cold_start_is_urban_var_init(variant):
     """The option-3 initial state woof builds is WRF's, word for word.
@@ -256,11 +269,10 @@ def test_option3_cold_start_is_urban_var_init(variant):
     ``init_state`` adds nothing to it.  Graded here against the state WRF's
     own ``urban_var_init`` left before BEP_BEM's first call.
 
-    The gridded-morphology inputs (``HGT/LP/LB/HI_URB2D``, two columns of
-    every fixture) are not compared: woof does not ingest gridded
-    morphology yet (DESIGN 2, named follow-up), so its cold start takes
-    WRF's default-morphology arm there, and those columns are driven with
-    the fixture's own morphology in the column tests above.
+    The gridded morphology (``HGT/LP/LB/HI_URB2D``, two columns of every
+    fixture) goes in as ``urban_param_file`` hands it over -- real.exe's
+    split -- and comes out through urban_var_init's keep/zero rule
+    (:2788-2833) as WRF left it.
     """
     from woof.core import urban_bem as ub
     from woof.core.urban_state import (option_spec, resolve_dimensions,
@@ -280,8 +292,10 @@ def test_option3_cold_start_is_urban_var_init(variant):
         tmn=to_gpuwm(fx["init/tmn"]), smois=to_gpuwm(fx["init/smois"]),
         frc_urb2d=to_gpuwm(fx["init/frc_urb2d_in"]),
         num_urban_hi=int(fx["num_urban_hi"][0]), nz=nz,
-        dims=resolve_dimensions(3, ub), spec=option_spec(3, ub))
-    for name in STATE_ARRAYS + PBL_ARRAYS + ("frc_urb2d", "utype_urb2d"):
+        dims=resolve_dimensions(3, ub), spec=option_spec(3, ub),
+        morphology=_fixture_morphology(fx))
+    for name in STATE_ARRAYS + PBL_ARRAYS + ("frc_urb2d", "utype_urb2d",
+                                             *MORPHOLOGY_ARRAYS):
         want = to_gpuwm(fx[f"state0/{name}"])
         if name in PBL_ARRAYS:
             want = want[:nz + 1 if name == "sf_bep" else nz]
@@ -419,11 +433,7 @@ def _after_lsm_first_call():
         cfg, params, UrbanCategories(isurban=13, natural=14,
                                      lcz=tuple(range(51, 62))),
         fields, nz=nz, frc_urb2d=cp.asarray(to_gpuwm(fx["init/frc_urb2d_in"])),
-        module=ub)
-    # woof does not ingest gridded morphology yet; hand the column the
-    # fixture's, as WRF had it.
-    for name in ("lp_urb2d", "lb_urb2d", "hgt_urb2d", "hi_urb2d"):
-        state.fields[name][...] = cp.asarray(to_gpuwm(fx[f"state0/{name}"]))
+        module=ub, morphology=_fixture_morphology(fx))
     ny, nx = state.fields["frc_urb2d"].shape
     for name in ("swdown", "glw", "swddir", "swddif", "rainbl"):
         fields[name] = cp.asarray(to_gpuwm(fx[f"{tag}/{name}"]))
