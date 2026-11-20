@@ -9,7 +9,8 @@ Synthetic, no oracle data:
   ``wrftltoxa``, ``rho`` from ``xtoxa``), slot by slot;
 - the Jo groups run over all slots in ``iv`` order;
 - the identity model's adjoint is the sum of the forcings;
-- ``analyse(var4d=...)`` refuses what it does not port before reading anything;
+- ``analyse(var4d=...)`` refuses what it does not port from the arguments and
+  the files' headers, before any field or ``be.dat`` is read;
 - on the tutorial first guess (``WOOF_WRFDA471_DIR``), ``xatowrf``'s
   ``var4d`` branch leaves ``P`` unchanged.
 
@@ -171,19 +172,30 @@ def test_term_refusals():
         f4.FourDObsTerm(iv, slots, start, press="dn")
 
 
-def _wrf_file(path: Path, stamp: str) -> Path:
+def _wrf_file(path: Path, stamp: str, *, dn=True, **attrs) -> Path:
+    """A header-only WRF file: ``Times``, ``START_DATE``, ``attrs``, and a
+    ``DN`` variable with no data written."""
     import netCDF4
 
     with netCDF4.Dataset(path, "w") as nc:
         nc.createDimension("Time", None)
         nc.createDimension("DateStrLen", 19)
+        nc.createDimension("bottom_top", 3)
         nc.START_DATE = stamp
+        for k, v in attrs.items():
+            nc.setncattr(k, v)
         t = nc.createVariable("Times", "S1", ("Time", "DateStrLen"))
         t[0] = np.array(list(stamp), dtype="S1")
+        if dn:
+            nc.createVariable("DN", "f4", ("Time", "bottom_top"))
     return path
 
 
 def test_analyse_refuses_var4d_setups_before_reading_anything(tmp_path):
+    """Every refusal here fires from the arguments and the files' headers
+    (``Times``, global attributes, variable names): the first guesses hold
+    no fields and ``be.dat`` does not exist, so a refusal that needed either
+    would fail differently."""
     from woof.da.var.analysis import analyse
 
     fgs = [_wrf_file(tmp_path / f"fg0{n}", f"2008-02-05_{11 + n}:00:00") for n in range(1, 8)]
@@ -201,6 +213,23 @@ def test_analyse_refuses_var4d_setups_before_reading_anything(tmp_path):
         analyse(be, obs, fgs[0], fgat=fgs, time_window=window, max_ext_its=2, var4d=f4.Var4D())
     with pytest.raises(NotImplementedError, match="hybrid"):
         analyse(be, obs, fgs[0], fgat=fgs, time_window=window, ensemble=object(), var4d=f4.Var4D())
+    for tier in ("oracle", "production"):
+        with pytest.raises(NotImplementedError, match=f"tier='{tier}'"):
+            analyse(be, obs, fgs[0], fgat=fgs, time_window=window, tier=tier, var4d=f4.Var4D())
+    with pytest.raises(ValueError, match="var4d.press"):
+        analyse(be, obs, fgs[0], fgat=fgs, time_window=window, var4d=f4.Var4D(press="dz"))
+    with pytest.raises(ValueError, match="var4d.ph"):
+        analyse(be, obs, fgs[0], fgat=fgs, time_window=window, var4d=f4.Var4D(ph="full"))
+    hyb = list(fgs)
+    hyb[4] = _wrf_file(tmp_path / "fg05h", "2008-02-05_16:00:00", HYBRID_OPT=2)
+    with pytest.raises(NotImplementedError, match="fg05h has HYBRID_OPT = 2"):
+        analyse(be, obs, fgs[0], fgat=hyb, time_window=window, var4d=f4.Var4D())
+    nodn = _wrf_file(tmp_path / "fg01n", "2008-02-05_12:00:00", dn=False)
+    with pytest.raises(ValueError, match="fg01n has no DN"):
+        analyse(be, obs, nodn, fgat=[nodn, *fgs[1:]], time_window=window, var4d=f4.Var4D())
+    # FGAT alone (no var4d) gets past these to reading the first guess
+    with pytest.raises(ValueError, match="not a WRF first guess"):
+        analyse(be, obs, nodn, fgat=[nodn, *fgs[1:]], time_window=window, tier="oracle")
 
 
 def test_tutorial_var4d_analysis_has_no_pressure_increment():

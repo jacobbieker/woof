@@ -20,7 +20,9 @@ start, and ``da_transfer_xatowrftl_adj`` gives ``xa_0``'s gradient.
 :class:`~woof.da.var.cost.ObsTerm`; the model is pluggable
 (:class:`TLModel`).  :class:`IdentityModel` is WRFPLUS's
 ``enable_identity``: every slot's perturbation is the initial one, the
-adjoint sums the forcings.  P3a's ``Window`` (PR 4D.3) is the next model.
+adjoint sums the forcings.  That this is what ``enable_identity`` does,
+and that the TL round trip matches WRFDA's, are not yet checked against
+WRFDA: the 4D.0 identity lane (L-id) is the gate for both.  P3a's ``Window`` (PR 4D.3) is the next model.
 
 The observations and innovations are FGAT's (:mod:`woof.da.var.fgat`):
 one file and one first guess per slot, ``plocal`` slot boundaries,
@@ -125,6 +127,11 @@ class FourDObsTerm:
     first guess, at the window's start).  ``x`` is ``u v t q psfc`` at the
     start (``p`` and ``rho`` are not read: WRFDA's transfer recomputes
     ``p`` and the TL model carries it); :meth:`ad` returns zero for them.
+
+    The constructor runs :func:`~woof.da.var.transfer4d.check_supported` on
+    the read states; :func:`~woof.da.var.analysis.analyse` refuses what it
+    can from the headers first (``analysis._var4d_refusals`` lists where
+    each refusal lives).
     """
 
     def __init__(self, iv, slots: Sequence, start: tuple, *, model: TLModel | None = None, press: str = "wrfda",

@@ -525,7 +525,9 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     (:class:`~woof.da.var.fourd.FourDObsTerm`); the analysis is
     ``first_guess`` plus the increment, with no pressure increment
     (``da_transfer_xatowrf``'s ``var4d`` branch).  The lateral boundary
-    perturbation is not ported.  FGAT's refusals apply.
+    perturbation is not ported.  FGAT's refusals apply.  4D-Var's own
+    refusals and where each is enforced are listed in :func:`_var4d_refusals`;
+    the ``reference`` tier only.
 
     ``time_window`` is WRFDA's ``(time_window_min, time_window_max)``; by
     default the first guess's time plus and minus ``window_minutes``.
@@ -542,7 +544,7 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     if fgat is not None:   # every FGAT refusal, before anything is read
         _fgat_refusals(obs, fgat, first_guess, window_minutes=window_minutes, time_window=time_window,
                        max_ext_its=max_ext_its, radiances=radiances, xb_override=xb_override,
-                       ensemble=ensemble, hybrid=hybrid, var4d=var4d)
+                       ensemble=ensemble, hybrid=hybrid, var4d=var4d, tier=tier)
     timings = {}
     t0 = time.perf_counter()
     fg = first_guess if isinstance(first_guess, FirstGuess) else read_first_guess(first_guess)
@@ -619,11 +621,16 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
 
 
 def _fgat_refusals(obs, fgat, first_guess, *, window_minutes, time_window, max_ext_its, radiances, xb_override,
-                   ensemble, hybrid, var4d=None):
-    """What FGAT refuses, from the arguments and the files' times alone."""
+                   ensemble, hybrid, var4d=None, tier="reference"):
+    """What FGAT (and 4D-Var) refuses, from the arguments and the files'
+    headers alone (``Times``, global attributes, variable names): no field
+    and no ``be.dat`` is read."""
     import types
 
     from . import fgat as fm
+
+    if var4d is not None:
+        _var4d_refusals(var4d, tier, [first_guess, *fgat])
 
     if radiances:
         raise NotImplementedError("FGAT with radiances is not ported (WRFDA bins radiances by time slot)")
@@ -645,6 +652,59 @@ def _fgat_refusals(obs, fgat, first_guess, *, window_minutes, time_window, max_e
         if abs(_date_minutes(window["analysis_date"]) - _date_minutes(window["time_window_min"])) >= 0.1:
             raise ValueError(f"4D-Var: the first guess is at {window['analysis_date'][:19]}, not at the window's "
                              f"start {window['time_window_min'][:19]} (the TL model starts from the analysis)")
+
+
+def _var4d_refusals(var4d, tier, first_guesses) -> None:
+    """4D-Var's refusals from the options and the first guesses' headers.
+
+    Where each of the 4D-Var plan's refusals is enforced:
+
+    - here, before anything is read: a device ``tier`` (the 4D-Var term is
+      host binary64 and has no device-tier comparison yet), ``press`` and
+      ``ph`` values, ``HYBRID_OPT > 0`` and a first guess without ``DN``;
+    - :func:`_fgat_refusals` (also before reading): radiances, the hybrid
+      (ensemble) B, more than one outer loop, ``xb_override``, a first guess
+      not at the window's start;
+    - :class:`~woof.da.var.fourd.FourDObsTerm` (after the files are read):
+      :func:`~woof.da.var.transfer4d.check_supported` again on the read
+      states (the ``c1``..``c4`` coefficients themselves, ``DN``, binary64,
+      at least 2 points each way);
+    - not options of :func:`analyse` at all, so nothing can ask for them:
+      ``cloud_cv_options`` (always 0 here; the hydrometeor transfers are
+      not ported), rain observations (``use_rainobs``), ``var4d_lbc``,
+      ``jcdfi_use`` and ``multi_inc``.
+    """
+    from . import transfer4d as t4
+
+    if tier != "reference":
+        raise NotImplementedError(f"4D-Var with tier={tier!r}: the 4D-Var observation term runs on the host in "
+                                  "binary64 and has no device-tier comparison yet; use tier='reference'")
+    if var4d.press not in t4._PRESS:
+        raise ValueError(f"var4d.press must be one of {t4._PRESS}, not {var4d.press!r}")
+    if var4d.ph not in t4._PH:
+        raise ValueError(f"var4d.ph must be one of {t4._PH}, not {var4d.ph!r}")
+    for f in first_guesses:
+        attrs, names = _header(f)
+        if int(attrs.get("HYBRID_OPT", 0)) > 0:
+            raise NotImplementedError(f"4D-Var: {_name(f)} has HYBRID_OPT = {attrs['HYBRID_OPT']}; WRFDA's TL "
+                                      "transfer assumes terrain-following eta (hybrid_opt <= 0)")
+        if names is not None and "DN" not in names:
+            raise ValueError(f"4D-Var: {_name(f)} has no DN, which da_transfer_xatowrftl integrates with")
+
+
+def _name(f) -> str:
+    return Path(getattr(f, "path", f)).name
+
+
+def _header(f) -> tuple[dict, set | None]:
+    """A first guess's global attributes and variable names (``None``: not
+    known without reading, for an in-memory :class:`FirstGuess`)."""
+    if isinstance(f, FirstGuess):
+        return dict(f.attrs), set(f.fields)
+    import netCDF4
+
+    with netCDF4.Dataset(Path(f)) as nc:
+        return {k: nc.getncattr(k) for k in nc.ncattrs()}, set(nc.variables)
 
 
 def _fgat_innovations(obs, fgat, xb, proj, window, *, landuse_table):
