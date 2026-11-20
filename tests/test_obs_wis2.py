@@ -382,3 +382,162 @@ def test_obs_gts_names_are_ascii(tmp_path):
     wis2.write_obs_gts(reports, path, ObsErrTable.load())
     text = path.read_text(encoding="ascii")
     assert "??????" in text and "\t" not in text
+
+
+# ----------------------------------------------------------------------------- satellite point winds
+MS = {"units": "milliseconds since 1970-01-01", "_FillValue": np.iinfo(np.int64).min}
+I32 = np.iinfo(np.int32).max
+
+
+def _ms(texts):
+    return Arr([np.datetime64(x, "ms").astype(np.int64) for x in texts], **MS)
+
+
+def _amv():
+    """Made-up AMVs: rows 0-1 geostationary (QI 85 and 99), 2 polar AVHRR, 3 polar VIIRS,
+    4 a later copy of 0, 5 QI 40, 6 an unknown platform, 7 an unvetted template, 8 above 100 hPa."""
+    fill4 = [I32] * 4
+    sga = [[6, 5, 4, I32], [4, 5, 6, 7], [6, 5, 4, I32], [6, 5, 4, I32], [6, 5, 4, I32], [6, 5, 4, I32],
+           [6, 5, 4, I32], [6, 5, 4, I32], [6, 5, 4, I32]]
+    pc = [[35, 85, I32, I32], [100, 99, 97, 54], [90, 88, I32, I32], [90, 88, I32, I32], [35, 85, I32, I32],
+          [90, 40, I32, I32], [90, 90, I32, I32], [90, 90, I32, I32], [90, 90, I32, I32]]
+    n = len(sga)
+    return {"satellite/amv": {
+        "time": _ms(["2008-02-05T12:00:00"] * n),
+        "first_arrival_time": _times(["2008-02-05T12:10:00", "2008-02-05T12:10:00", "2008-02-05T12:10:00",
+                                      "2008-02-05T12:10:00", "2008-02-05T12:30:00"] + ["2008-02-05T12:10:00"] * 4,
+                                     SEC),
+        "latitude": Arr([[40.0, np.nan, 40.0, np.nan], [41.0] * 4, [42.0] * 4, [43.0] * 4, [40.0, np.nan, 40.0, np.nan],
+                         [39.0] * 4, [38.0] * 4, [37.0] * 4, [36.0] * 4]),
+        "longitude": Arr([[-95.0] * 4, [-96.0] * 4, [-97.0] * 4, [-98.0] * 4, [-95.0] * 4, [-94.0] * 4,
+                          [-93.0] * 4, [-92.0] * 4, [-91.0] * 4]),
+        "quality_flag": _flags([0] * n),
+        "bufr_template": Arr(["310077"] * 7 + ["310014", "310077"]),
+        "satellite_identifier": Arr(np.array([[71] + fill4, [811] + fill4, [852] + fill4, [224] + fill4,
+                                              [71] + fill4, [71] + fill4, [999] + fill4, [71] + fill4,
+                                              [71] + fill4], np.int32), _FillValue=I32),
+        "satellite_instruments": Arr(np.array([fill4, fill4, [591] * 4, [616] * 4, fill4, fill4, fill4, fill4,
+                                               fill4], np.int32), _FillValue=I32),
+        "pressure": Arr([[50000.0] + [np.nan] * 14] * 8 + [[5000.0] + [np.nan] * 14]),
+        "wind_speed": Arr([10.0, 20.0, 15.0, 12.0, 10.0, 8.0, 9.0, 9.0, 30.0]),
+        "wind_direction": Arr(np.array([270, 250, 300, 180, 270, 90, 90, 90, 270], np.int32), _FillValue=I32),
+        "standard_generating_application": Arr(np.array(sga, np.int32), _FillValue=I32),
+        "percent_confidence": Arr(np.array(pc, np.int32), _FillValue=I32),
+    }}
+
+
+def _scat():
+    """Made-up ASCAT cells: 0 selected ambiguity 2, 1 no retrieval, 2 land bit (9), 3 low-speed bit
+    (13) only, 4 ice, 5 land fraction, 6 a relay copy of 0."""
+    n = 7
+    land_bit, low_bit = 1 << (24 - 9), 1 << (24 - 13)
+    return {"satellite/scatterometer": {
+        "time": _ms(["2008-02-05T12:00:00"] * n),
+        "first_arrival_time": _times(["2008-02-05T12:40:00"] * n, SEC),
+        "latitude": Arr([40.0, 40.5, 41.0, 41.5, 42.0, 42.5, 40.0]),
+        "longitude": Arr([-95.0, -95.5, -96.0, -96.5, -97.0, -97.5, -95.0]),
+        "quality_flag": _flags([0] * n),
+        "bufr_template": Arr(["312061"] * n),
+        "satellite_identifier": Arr(np.array([5] * n, np.int32), _FillValue=I32),
+        "index_of_selected_wind_vector": Arr(np.array([2, I32, 1, 1, 1, 1, 2], np.int32), _FillValue=I32),
+        "number_of_vector_ambiguities": Arr(np.array([2, 0, 2, 2, 2, 2, 2], np.int32), _FillValue=I32),
+        "wind_speed_at10_m": Arr([[7.0, 8.0, np.nan, np.nan]] * n),
+        "wind_direction_at10_m": Arr([[10.0, 190.0, np.nan, np.nan]] * n),
+        "wind_vector_cell_quality": Arr(np.array([0, 0, land_bit, low_bit, 0, 0, 0], np.int32), _FillValue=I32),
+        "land_fraction": Arr([[0.0] * 3] * 5 + [[0.0, 0.2, 0.0]] + [[0.0] * 3]),
+        "ice_probability": Arr([np.nan, np.nan, 0.0, 0.0, 0.6, 0.0, np.nan]),
+    }}
+
+
+def test_amv_quality_index_platforms_and_copies():
+    counts = Counter()
+    reports = wis2.amv_reports(_amv(), START, END, BOX, counts)
+    by = {r.station: r for r in reports}
+    assert set(by) == {"GEO-71", "GEO-811", "AVHRR-852", "VIIRS-224"}
+    assert by["GEO-71"].extras["qi"] == 85.0 and by["GEO-811"].extras["qi"] == 99.0
+    assert by["GEO-71"].received == np.datetime64("2008-02-05T12:10:00")  # the first copy
+    assert counts["amv_duplicate_copy"] == 1 and counts["amv_qi_below_minimum"] == 1
+    assert counts["amv_platform_999_unknown"] == 1 and counts["amv_template_310014_not_vetted"] == 1
+    assert counts["amv_pressure_out_of_bounds"] == 1 and counts["ahi_amv_group_skipped_no_quality_index"] == 0
+    assert by["AVHRR-852"].p[0] == 50000.0 and by["AVHRR-852"].spd[0] == 15.0
+
+
+def test_scatterometer_selected_ambiguity_and_cell_flags():
+    counts = Counter()
+    reports = wis2.scat_reports(_scat(), START, END, BOX, counts)
+    assert [(r.lat, r.spd[0], r.wdir[0]) for r in reports] == [(40.0, 8.0, 190.0), (41.5, 7.0, 10.0)]
+    assert counts["scat_no_selected_wind"] == 1 and counts["scat_wind_vector_cell_quality"] == 1
+    assert counts["scat_ice"] == 1 and counts["scat_land"] == 1 and counts["scat_duplicate_copy"] == 1
+    assert reports[0].z[0] == 10.0 and reports[0].fm == 281
+
+
+def test_satellite_rows_found_by_bisection(monkeypatch):
+    n = 20000
+    times = np.datetime64("2008-02-05T00:00:00", "ms") + np.arange(n) * np.timedelta64(10, "s")
+    group = {"time": Arr(times.astype(np.int64), **MS), "latitude": Arr(np.full(n, 40.0)),
+             "longitude": Arr(np.full(n, -95.0))}
+    monkeypatch.setattr(wis2, "SAT_SCAN_SMALL", 0)
+    monkeypatch.setattr(wis2, "SAT_SCAN_SAMPLE", 10)
+    monkeypatch.setattr(wis2, "SAT_SCAN_MARGIN", np.timedelta64(1, "h"))
+    counts = Counter()
+    index, when = wis2._sat_select(group, START, END, BOX, counts, "x")
+    brute = np.nonzero((times >= np.datetime64(START)) & (times <= np.datetime64(END)))[0]
+    assert np.array_equal(index, brute) and counts["x_rows_scanned"] < n
+
+
+def test_thinning_keeps_the_best_amv_per_box_and_layer():
+    reports, counts = wis2.read_reports(_amv(), START, END, BOX, ("amv",))
+    thinned = wis2.thin_satellite_winds(reports, 500.0, counts)
+    assert len(thinned) < len(reports) and counts["amv_thinned"] == len(reports) - len(thinned)
+    assert max(r.extras["qi"] for r in thinned) == 99.0
+    assert wis2.thin_satellite_winds(reports, 0.0, counts) == reports
+
+
+def test_satellite_winds_in_the_table_and_obs_gts(tmp_path):
+    from woof.da.var import obs_wrfda as ow
+    from woof.obs.neutral_table import decode_neutral_csv
+    reports, _ = wis2.read_reports({**_amv(), **_scat()}, START, END, BOX, ("amv", "scat"))
+    table = ObsErrTable.load()
+    rows, _ = wis2.neutral_rows(reports, table)
+    path = tmp_path / "w.csv"
+    wis2.write_table(rows, path)
+    _, decoded, counters = decode_neutral_csv(path.read_text())
+    assert len(decoded) == len(rows) and counters["rows_unknown_measurement"] == 0
+    amv = next(r for r in decoded if r.station_id == "GEO-71" and r.variable == "wind_u_m_s")
+    assert amv.measurement == "amv_assigned_pressure" and amv.level_pa == 50000.0
+    assert amv.elevation_m == pytest.approx(5574.4, abs=1.0)  # the standard atmosphere's 500 hPa
+    assert amv.error == table.errors(88, 50000.0)["u"]
+    assert {r.measurement for r in decoded if r.source == "wis2.scat"} == {"scatterometer_wind_10m"}
+    out = tmp_path / "ob.ascii"
+    fm = wis2.write_obs_gts(reports, out, table)
+    assert fm == Counter({88: 3, 281: 2})  # the VIIRS AMV is left out
+    proj = ow.LambertWRFDA(cen_lat=40.0, cen_lon=-95.0, stand_lon=-95.0, truelat1=30.0, truelat2=60.0,
+                           moad_cen_lat=40.0, dx=60000.0, ide=89, jde=59)
+    obs = ow.read_obs_ascii(out, proj, analysis_date="2008-02-05_12:00:00",
+                            time_window_min="2008-02-05_11:00:00", time_window_max="2008-02-05_13:00:00")
+    counts = obs.counts()
+    assert (counts["geoamv"], counts["polaramv"], counts["qscat"]) == (2, 1, 2)
+
+
+def test_satellite_groups_with_every_row_refused():
+    root = {**_amv(), **_scat()}
+    root["satellite/amv"]["bufr_template"] = Arr(["310014"] * 9)
+    root["satellite/scatterometer"]["quality_flag"] = _flags([16] * 7)
+    counts = Counter()
+    assert wis2.amv_reports(root, START, END, BOX, counts) == []
+    assert wis2.scat_reports(root, START, END, BOX, counts) == []
+    assert counts["amv_template_310014_not_vetted"] == 9 and counts["scat_position_invalid"] == 7
+
+
+def test_thinning_boxes_are_fixed_per_latitude_row():
+    def amv(lat, lon, qi):
+        return wis2.Report(family="amv", fm=88, station="GEO-71", name="x", lat=lat, lon=lon, elev=np.nan,
+                           time=np.datetime64("2008-02-05T12:00:00"), received=np.datetime64("NaT", "s"), p=[50000.0],
+                           z=[np.nan], t=[np.nan], td=[np.nan], rh=[np.nan], spd=[5.0], wdir=[90.0],
+                           surface=False, extras={"qi": qi})
+    # Two AMVs in one 100 km row at 70N, 0.1 degree of longitude apart: one box, whatever their latitudes.
+    step = 100.0 / 111.2
+    row_lat = np.floor((70.0 + 90.0) / step) * step - 90.0
+    kept = wis2.thin_satellite_winds([amv(row_lat + 0.01, 10.0, 90.0), amv(row_lat + step - 0.01, 10.1, 95.0)],
+                                     100.0, Counter())
+    assert [r.extras["qi"] for r in kept] == [95.0]

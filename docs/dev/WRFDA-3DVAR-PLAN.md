@@ -2404,7 +2404,27 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
    carry labels `obs_point` has no operator for yet. Tests use synthetic
    fixtures.
 3. **PR C: point winds.** AMVs (`amv`, `ahi_amv`) and scatterometer winds
-   enter as point winds with WRFDA's AMV and qscat errors.
+   enter as point winds with WRFDA's AMV and qscat errors. As built
+   (opt-in families `amv` and `scat`):
+   - The satellite groups are found by bisection on their nearly sorted
+     `time` (milliseconds), with a 6 h margin for late arrivals.
+   - AMVs: template 310077 only. The QI is the `percent_confidence` whose
+     `standard_generating_application` (0-01-044) in the same column is 5
+     (QI without forecast), at least 80. Pressure 100-1000 hPa. Geostationary
+     by satellite id; polar by imager (AVHRR, MODIS, VIIRS). Copies relayed
+     by several centres are one AMV (first arrival). VIIRS AMVs stay out of
+     `obs_gts`, because WRFDA keys polaramv on AVHRR or MODIS.
+   - `ahi_amv` (JMA's template) decodes no quality index here, so it is
+     skipped and counted.
+   - Scatterometer: ASCAT (template 312061), the selected ambiguity.
+     `wind_vector_cell_quality` (0-21-155) bits 1-11 and 16-18 refuse a
+     cell; an empirical check on 2026-10-28 matched bit 9 to land, bits
+     10, 11 and 18 to ice and bit 13 to speeds of 3 m/s or less. Land and ice
+     fractions are checked directly as well.
+   - `--thin-km` (default 0) keeps one AMV per box and 50 hPa layer (the
+     highest QI) and one scatterometer wind per box.
+   - On 2026-10-28 11-13Z globally: 1,276,760 AMVs and 13,733 ASCAT winds
+     pass. WIS2 has no GOES AMVs, so a CONUS box gets none.
 4. **PR D: MW radiances.** CRTM v2.4 MW clear-sky for AMSU-A, MHS and
    ATMS (FY-3 where coefficients exist), over sea first, through
    `obs_radiance`. IASI and CrIS come after, with a channel selection.

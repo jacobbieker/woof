@@ -144,6 +144,9 @@ MEASUREMENT_TABLE: dict[str, str] = {
     "platform_wind":
         "a wind at the platform's own anemometer height, not reduced to 10 m "
         "(ship, buoy, coastal platform, mesonet)",
+    # Written by the Python WIS2 reader (woof.obs.wis2); no Rust door writes it.
+    "scatterometer_wind_10m":
+        "a scatterometer's equivalent-neutral 10 m wind, the selected ambiguity (ASCAT)",
     "station_pressure_from_sea_level":
         "station pressure computed by NCEP from the reported sea-level pressure "
         "and the station elevation through the standard atmosphere",

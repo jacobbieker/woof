@@ -1023,8 +1023,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   only to `obs_gts`, because the LETKF's point operators are
   pressure-level only. The LETKF uses aircraft rows (WIS2, ACARS and
   PrepBUFR alike) only with `woof local-da --assimilate-aircraft` (opt-in);
-  ship rows have no operator yet. WIS2 has no US AMDAR. Satellite families (MW
-  radiances, AMVs, scatterometer winds, GNSS-RO) come next
+  ship rows have no operator yet. WIS2 has no US AMDAR. Satellite point
+  winds are opt-in families: `--families amv,scat` reads atmospheric
+  motion vectors (WMO template 310077 only; quality index without forecast
+  at least 80; geostationary, plus polar AVHRR, MODIS and VIIRS) and ASCAT
+  10 m winds (the selected ambiguity; land, ice and cell-quality flags
+  refused), with WRFDA's SATOB and QSCAT errors and an optional
+  `--thin-km`. AMVs go to both outputs. Scatterometer winds go to
+  `obs_gts`, and to the table under a label the LETKF has no operator for
+  yet. WIS2 has no GOES AMVs. MW radiances and GNSS-RO come next
   ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
