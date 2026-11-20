@@ -4,8 +4,8 @@ woof can read geostationary imager brightness temperatures and reflectances
 so that later stages can assimilate them into initial conditions. The plan,
 with its sources and gates, is section 11 of
 [dev/WRFDA-3DVAR-PLAN.md](dev/WRFDA-3DVAR-PLAN.md). This page covers what
-exists today: the SatWeave reader and the GOES ABI reader for the `bkr/geo`
-Icechunk stores.
+exists today: the SatWeave reader and the GOES ABI and Himawari AHI readers
+for the `bkr/geo` Icechunk stores.
 
 ## SatWeave
 
@@ -149,8 +149,44 @@ woof obs geo list --satellite 19 --channel 8 --coverage
   asks for attribution. The command prints it.
 
 Docs for developers: section 11.12 of the plan lists every `bkr/geo` store
-and its coverage, including Himawari, GK-2A, Meteosat and MTG, which come
-next.
+and its coverage, including GK-2A, Meteosat and MTG, which come next.
+
+## Himawari AHI from the `bkr/geo` Icechunk stores
+
+```
+woof obs geo fetch --satellite himawari9 --time 2025-03-01T18:00Z --channels C08,C09,C10,C14 --bbox 120,-10,160,30
+woof obs geo list --satellite himawari9 --channel 8 --coverage
+```
+
+`--satellite` takes `himawari8` or `himawari9` (`h8`, `h9`), beside the GOES
+numbers. The reader is `woof.obs.geo_icechunk.read_himawari_scene`. It reads
+`virtualized/himawari{8,9}_isatss_C{01..16}[_<date>]`, with the same dated
+segments, snapshot fallback, cache, `--refresh` and anonymous access as the
+GOES reader. What differs is what the stores hold:
+
+- **What they are.** NOAA/STAR's "sectorized" full-disk CMI products,
+  referenced from `s3://noaa-himawari{8,9}/`. They are not L1b radiances:
+  the store has no raw counts, Planck constants or quality flag.
+- **Values.**
+  - Channels 7-16 are brightness temperature in K, as the store holds it.
+    The store quantises it in steps of 0.06 to 0.12 K.
+  - Channels 1-6 are reflectance factor, put in %.
+  - A pixel is NaN where the store holds its fill value or a non-physical
+    value. The provenance counts them as `dqf_rejected`.
+  - The 0.5 and 1 km channels (1-4) are averaged onto the 2 km grid.
+- **Geometry.** The store names a y-sweep geostationary projection (origin
+  140.7 E, height 35785831 m, GRS80). The reader refuses any other
+  projection. Pixels are navigated with the GOES-R fixed-grid formulae.
+- **Time.** The store gives only the scene start time (minutes since the
+  segment's year). The scan end is taken as 10 minutes later, and row time
+  is linear over it, north to south. A scene's time is the middle of that.
+- **Licence.** JMA's data, distributed by NOAA. The command prints the
+  attribution.
+
+On 2025-03-01 at 18 UTC over 120-160 E, 10 S-30 N, the native reader and
+SatWeave's Himawari sector agree to -0.06 K in the mean (cell-mean of the
+native pixels against SatWeave's 0.1° cell, 6.2 to 11.2 µm), so the
+navigation and the calibration match.
 
 ## Clear-sky brightness temperatures from CRTM (opt-in)
 
@@ -209,6 +245,7 @@ Values are O-B mean / standard deviation in K:
 | SatWeave, GOES-East, same box | `abi_g16` | 588 | -0.19 / 0.83 | 0.68 / 0.81 | -0.35 / 0.69 | 0.60 / 1.37 |
 | SatWeave, GOES-West, 150-125 W 20-45 N | `abi_g18` | 843 | 0.16 / 1.27 | 0.57 / 1.15 | -0.29 / 0.79 | -0.46 / 0.64 |
 | SatWeave, Himawari, 120-160 E 10 S-30 N | `ahi_himawari9` | 2970 | 0.03 / 0.91 | 0.89 / 0.84 | -0.13 / 0.70 | -0.23 / 0.78 |
+| native AHI (`bkr/geo`), Himawari-9, same box | `ahi_himawari9` | 5365 | 0.02 / 0.98 | 0.84 / 0.88 | -0.15 / 0.72 | -0.16 / 0.74 |
 | SatWeave, Meteosat 0°, 10 W-25 E 20-50 N | `seviri_m11` | 2111 | 0.41 / 0.80 | - | 0.09 / 0.97 | 0.25 / 1.40 |
 | SatWeave, Meteosat IODC, 40-70 E 0-30 N | `seviri_m09` | 4023 | 0.39 / 1.05 | - | 0.27 / 0.76 | 0.01 / 1.28 |
 
@@ -295,7 +332,6 @@ is wired up correctly; it does not show forecast skill.
 
 These come next, in the plan's order:
 
-- Himawari AHI, GK-2A AMI and Meteosat SEVIRI/FCI from the other
-  `bkr/geo` stores;
+- GK-2A AMI and Meteosat SEVIRI/FCI from the other `bkr/geo` stores;
 - variational bias correction, and the radiance operator for woof's
   3D-Var (plan section 11).

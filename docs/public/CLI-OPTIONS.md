@@ -2460,10 +2460,10 @@ Takes no options of its own.
 |---|---|
 | `--bbox` | west,south,east,north in degrees (west > east crosses 180); default the full disc |
 | `--cache` | cache directory (default $WOOF_GEO_CACHE or ~/.woof/cache/geo) |
-| `--channels` | comma-separated ABI channels (C08 or 8) or band wavelengths (default C08,C09,C10,C14) |
+| `--channels` | comma-separated channels (C08 or 8) or band wavelengths (default C08,C09,C10,C14) |
 | `--refresh` | re-read even when the cache holds the subset |
 | `--root` | store root: s3://us-west-2.opendata.source.coop/bkr/geo (default) or a local mirror ($WOOF_GEO_ROOT) |
-| `--satellite {16,17,18,19}` | GOES satellite number |
+| `--satellite` | GOES satellite number (16-19) or himawari8 / himawari9 |
 | `--summary-json` | write the scene summary and provenance here |
 | `--time` | UTC time with offset, e.g. 2025-06-01T18:00Z |
 | `--tolerance-minutes` | nearest scan accepted within this many minutes (default 5) |
@@ -2472,10 +2472,10 @@ Takes no options of its own.
 
 | option | what it does |
 |---|---|
-| `--channel` | ABI channel for --satellite (default 8) |
+| `--channel` | ABI or AHI channel for --satellite (default 8) |
 | `--coverage` | open each store and print its readable snapshot and time coverage (slow) |
 | `--root` | store root (as for fetch) |
-| `--satellite {16,17,18,19}` | only this GOES satellite's segments of --channel |
+| `--satellite` | only this satellite's segments of --channel (16-19, himawari8, himawari9) |
 | `--subdir` | sub-prefix to list (default virtualized; '' = top level) |
 
 ## `woof obs glm`
