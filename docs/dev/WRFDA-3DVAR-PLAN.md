@@ -2729,4 +2729,4 @@ This is WRFDA's `da_varbc` (Auligné et al. 2007), channel by channel.
 2. `radiance.py`: the record, the adapters, thinning, the columns, the term
    and QC; GR-V1 without VarBC.
 3. `varbc.py` and the cost's control block; GR-V1 with VarBC, GR-V2, GR-V4,
-   GR-V5; the real-case gate GR-V3 and the `woof var --radiances` opt-in.
+   GR-V5; the real-case gate GR-V3 and an opt-in radiance door for `woof var`.
