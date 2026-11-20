@@ -4996,6 +4996,10 @@
     "sha256": "c1a253e775826ab249a894dd987c2b698099b6334b58b42eefaa307b5abf428d"
    },
    {
+    "file": "woof/hex/mpas_seaice/column_dedd_v842.cu",
+    "sha256": "478890e23d8163c74a3b75c46ae1fa32859ab090921fb74d2672f512919109df"
+   },
+   {
     "file": "woof/hex/mpas_seaice/column_itd_v842.cu",
     "sha256": "6af8c75ba54fd5ce0ec3589ef3d36a3702224c0be3084484d88ca9be3e2ed048"
    },
@@ -6027,7 +6031,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
-    "sha256": "d6bef72faaedb0b3b3133ad0ab9134a2b2f91b8c778dcc345ef91386602439e4"
+    "sha256": "70fe524f8ffe36c6f2f7142a99aa413d7d0bad8fb35599b788a3181bc10adb7b"
    },
    {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.py",
