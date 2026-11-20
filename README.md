@@ -1013,8 +1013,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   finite-difference tests pass. Measured at 200x200x49 on an A6000, the
   step's adjoint sweep costs 3.3x the forward step, and 4.8x with its
   taped forward recompute through a base-only build of the kernels
-  (details in the design note). The forecast
-  path does not import any of it.
+  (details in the design note). A window driver
+  (`woof.grad.wrfplus.window.Window`) runs the forward, TL and adjoint
+  over N steps with checkpoints, and takes adjoint forcing at
+  intermediate states for 4D-Var. The forecast path does not import any
+  of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
