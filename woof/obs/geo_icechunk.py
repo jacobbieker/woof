@@ -40,6 +40,7 @@ name when missing.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -73,6 +74,10 @@ ALLOWED_CONTAINER = re.compile(r"s3://noaa-[a-z0-9-]+/")
 SNAPSHOT_FALLBACK = 8
 J2000 = datetime(2000, 1, 1, 12, tzinfo=timezone.utc)
 GOES_STORE = re.compile(r"^goes(?P<sat>1[6-9])_radf_C(?P<ch>\d\d)(?:_(?P<end>\d{4}-\d\d-\d\d))?$")
+LICENCE_EUMETSAT = ("EUMETSAT data policy: Core data (hourly level 1, and all data older than a stated age) are "
+                    "CC BY 4.0; higher-frequency level 1 data (15-minute and 5-minute SEVIRI) are 'Recommended' "
+                    "data, free for non-commercial use with conditions on redistribution.  bkr/geo names no "
+                    "licence of its own.  woof caches locally and never redistributes")
 HIMAWARI_STORE = re.compile(
     r"^himawari(?P<sat>[89])_isatss_C(?P<ch>\d\d)(?:_(?P<end>\d{4}-\d\d-\d\d))?$")
 #: A Himawari full-disk scan is nominally 10 minutes from the store's scene start time.
@@ -236,7 +241,7 @@ class _Arrays:
             raise GeoIcechunkError(f"the store has no {name!r} (by name or source_name)") from None
 
 
-def _open_snapshot(repo, label: str):
+def _open_snapshot(repo, label: str, time_name: str = "t"):
     """The newest readable snapshot of ``main``: (arrays, snapshot id, written, fallback depth).
 
     Readable means its time coordinate's first and last chunks can be read; a
@@ -251,7 +256,7 @@ def _open_snapshot(repo, label: str):
         try:
             group = zarr.open_group(repo.readonly_session(snapshot_id=snapshot.id).store, mode="r")
             arrays = _Arrays(group)
-            t = arrays["t"]
+            t = arrays[time_name]
             if t.shape[0]:
                 np.asarray(t[0]), np.asarray(t[t.shape[0] - 1])
         except Exception as error:  # a manifest or chunk the snapshot names but the bucket lacks
@@ -276,11 +281,12 @@ def _time_axis(t_array) -> tuple[datetime, float]:
     """The epoch and the seconds per unit of a CF time array (``minutes since 2025-01-01 00:00:00``)."""
 
     units = str(t_array.attrs.get("units", ""))
-    m = re.fullmatch(r"\s*(seconds|minutes|hours|days)\s+since\s+(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d:\d\d)\s*(?:UTC|Z)?\s*", units)
+    m = re.fullmatch(r"\s*(nanoseconds|seconds|minutes|hours|days)\s+since\s+(\d{4}-\d\d-\d\d)(?:[T ](\d\d:\d\d:\d\d))?"
+                     r"\s*(?:UTC|Z)?\s*", units)
     if not m:
-        raise GeoIcechunkError(f"the time coordinate's units {units!r} are not '<unit> since <date> <time>'")
-    epoch = datetime.fromisoformat(f"{m[2]}T{m[3]}").replace(tzinfo=timezone.utc)
-    return epoch, {"seconds": 1.0, "minutes": 60.0, "hours": 3600.0, "days": 86400.0}[m[1]]
+        raise GeoIcechunkError(f"the time coordinate's units {units!r} are not '<unit> since <date> [<time>]'")
+    epoch = datetime.fromisoformat(f"{m[2]}T{m[3] or '00:00:00'}").replace(tzinfo=timezone.utc)
+    return epoch, {"nanoseconds": 1e-9, "seconds": 1.0, "minutes": 60.0, "hours": 3600.0, "days": 86400.0}[m[1]]
 
 
 def _cf_scaled(array, values=None) -> np.ndarray:
@@ -296,26 +302,28 @@ def _cf_scaled(array, values=None) -> np.ndarray:
 
 
 # --------------------------------------------------------------------------- geometry
-def fixed_grid_latlon(x_rad, y_rad, origin_lon_deg: float, height_m: float | None = None):
+def fixed_grid_latlon(x_rad, y_rad, origin_lon_deg: float, height_m: float | None = None,
+                      semi_major_m: float = _A, semi_minor_m: float = _B):
     """Latitude and longitude (degrees, NaN off the disc) of fixed-grid angles (GOES-R PUG).
 
     ``height_m`` is the perspective height above the ellipsoid; the default is
     ABI's 35786023 m (Himawari's sectorized grid names its own).
     """
 
-    _H = _A + (35786023.0 if height_m is None else float(height_m))
+    ea, eb = float(semi_major_m), float(semi_minor_m)
+    eh = ea + (35786023.0 if height_m is None else float(height_m))
     x, y = np.meshgrid(np.asarray(x_rad, float), np.asarray(y_rad, float))
-    a = np.sin(x) ** 2 + np.cos(x) ** 2 * (np.cos(y) ** 2 + (_A / _B) ** 2 * np.sin(y) ** 2)
-    b = -2.0 * _H * np.cos(x) * np.cos(y)
-    c = _H ** 2 - _A ** 2
+    a = np.sin(x) ** 2 + np.cos(x) ** 2 * (np.cos(y) ** 2 + (ea / eb) ** 2 * np.sin(y) ** 2)
+    b = -2.0 * eh * np.cos(x) * np.cos(y)
+    c = eh ** 2 - ea ** 2
     disc = b * b - 4.0 * a * c
     with np.errstate(invalid="ignore"):
         rs = (-b - np.sqrt(disc)) / (2.0 * a)
         sx = rs * np.cos(x) * np.cos(y)
         sy = -rs * np.sin(x)
         sz = rs * np.cos(x) * np.sin(y)
-        lat = np.degrees(np.arctan((_A / _B) ** 2 * sz / np.sqrt((_H - sx) ** 2 + sy ** 2)))
-        lon = origin_lon_deg - np.degrees(np.arctan(sy / (_H - sx)))
+        lat = np.degrees(np.arctan((ea / eb) ** 2 * sz / np.sqrt((eh - sx) ** 2 + sy ** 2)))
+        lon = origin_lon_deg - np.degrees(np.arctan(sy / (eh - sx)))
     lat[disc < 0] = np.nan
     lon[disc < 0] = np.nan
     lon = ((lon + 180.0) % 360.0) - 180.0
@@ -330,14 +338,14 @@ def _in_bbox(lat, lon, bbox):
     return inside & ((lon >= west) | (lon <= east))
 
 
-def _window(x, y, origin, bbox, step=16, height_m=None):
+def _window(x, y, origin, bbox, step=16, height_m=None, ellipsoid=(_A, _B)):
     """Row and column slices of the fixed grid covering ``bbox`` (``None`` = the whole disc)."""
 
     if bbox is None:
         return slice(0, len(y)), slice(0, len(x))
     rows = np.arange(0, len(y), step)
     cols = np.arange(0, len(x), step)
-    lat, lon = fixed_grid_latlon(x[cols], y[rows], origin, height_m)
+    lat, lon = fixed_grid_latlon(x[cols], y[rows], origin, height_m, *ellipsoid)
     hit = _in_bbox(lat, lon, bbox)
     if not hit.any():
         raise GeoIcechunkError(f"the box {bbox} is not on this satellite's disc (or is smaller than "
@@ -410,6 +418,10 @@ class _ChannelRead:
     rows: slice = None
     cols: slice = None
     height: float | None = None   # perspective height above the ellipsoid (None: ABI's)
+    ellipsoid: tuple = (_A, _B)   # semi-major and semi-minor axes of the navigation ellipsoid
+    #: Per window row, the fraction of the scan elapsed when it was observed (None: north-first,
+    #: by row index, as ABI and AHI sweep).
+    row_frac: np.ndarray | None = None
 
 
 def _nearest(times: np.ndarray, when: datetime, tolerance: timedelta, label: str) -> int:
@@ -635,7 +647,7 @@ def _to_coarse(values: np.ndarray, factor: int) -> np.ndarray:
     return v.mean(axis=(1, 3))
 
 
-def _assemble(reads, *, platform_of, family, when, box, source, attribution, geometry):
+def _assemble(reads, *, platform_of, family, when, box, source, attribution, geometry, licence=LICENCE):
     """The :class:`ImagerScene` of one scan's channel reads (all on one fixed grid)."""
 
     starts = {r.channel: r.scan_start for r in reads}
@@ -654,7 +666,7 @@ def _assemble(reads, *, platform_of, family, when, box, source, attribution, geo
         out = np.full((base.y.size, base.x.size), np.nan, dtype="f4")
         out[:ny, :nx] = v[:ny, :nx]
         values[_band_nm(r.channel, family)] = out
-    lat, lon = fixed_grid_latlon(base.x, base.y, base.origin, base.height)
+    lat, lon = fixed_grid_latlon(base.x, base.y, base.origin, base.height, *base.ellipsoid)
     platform = platform_of(base.sub_lon)
     zenith, azimuth, _ = geostationary_view(lat, lon, base.sub_lon)
     xx, yy = np.meshgrid(base.x, base.y)
@@ -662,7 +674,8 @@ def _assemble(reads, *, platform_of, family, when, box, source, attribution, geo
     scene_time = base.scan_start + (base.scan_end - base.scan_start) / 2
     # a full disk is swept north to south; the row time is taken as linear between the
     # scan's bounds over the full disk's rows (a documented approximation of the swath timeline).
-    row_frac = (base.first_row + np.arange(base.y.size)) / base.full_rows
+    row_frac = (base.first_row + np.arange(base.y.size)) / base.full_rows if base.row_frac is None \
+        else base.row_frac
     offset = (base.scan_start - scene_time).total_seconds() + row_frac * (base.scan_end - base.scan_start).total_seconds()
     scan_offset = np.repeat(offset[:, None], base.x.size, axis=1).astype("f4")
     finite = np.isfinite(lat)
@@ -675,7 +688,7 @@ def _assemble(reads, *, platform_of, family, when, box, source, attribution, geo
     platform_index = np.where(finite, 0, -1).astype(np.int16)
     provenance = dict(
         schema=PROVENANCE_SCHEMA, source=source,
-        licence=LICENCE, attribution=attribution, satellite=platform.name,
+        licence=licence, attribution=attribution, satellite=platform.name,
         requested_time=when.isoformat(), bbox=box, geometry=geometry,
         channels={f"C{r.channel:02d}": dict(
             store=r.segment, snapshot=r.snapshot, snapshot_written=r.snapshot_written,
@@ -806,6 +819,163 @@ def read_himawari_scene(satellite: int, when, *, channels: Iterable = (8, 9, 10,
     return scene
 
 
+# --------------------------------------------------------------------------- Satpy L1b stores
+#: The Satpy-processed top-level stores of ``bkr/geo`` that hold Meteosat SEVIRI (one array per
+#: channel, brightness temperature in K or reflectance in %, stored as float16, 3 km).  The
+#: stores name the satellite of each scan themselves.
+METEOSAT_STORES = {"msg": "msg_3000m", "rss": "rss_3000m", "odegree": "odegree_3000m"}
+EPOCH_1970 = datetime(1970, 1, 1, tzinfo=timezone.utc)
+SEVIRI_SENSORS = {f"Meteosat-{n}": f"seviri_m{n:02d}" for n in (8, 9, 10, 11)}
+SATPY_ATTRIBUTION = ("Contains modified EUMETSAT Meteosat data, processed with Satpy; Icechunk stores from "
+                     "bkr/geo on Source Cooperative.")
+_SATPY_CHANNEL = re.compile(r"^channel_(\d\d)_(reflectance|brightness_temperature)_\d")
+
+
+def _ns_datetime(value) -> datetime:
+    """A datetime from nanoseconds since 1970 (an int64 or a datetime64[ns])."""
+
+    return EPOCH_1970 + timedelta(microseconds=int(np.asarray(value).astype("i8")) / 1000.0)
+
+
+def _satpy_scan(arrays: "_Arrays", index: int) -> dict:
+    """One scan's platform, projection longitude, actual sub-longitude and observation bounds."""
+
+    if "observation_start_time" in arrays:
+        start, end = (_ns_datetime(arrays[k][index]) for k in ("observation_start_time", "observation_end_time"))
+        platform = str(np.asarray(arrays["instrument"][index]))
+        origin = float(np.asarray(arrays["projection_longitude"][index]))
+        actual = float(np.asarray(arrays["satellite_actual_longitude"][index]))
+        height = float(np.asarray(arrays["projection_altitude"][index]))
+        bounds = "observation start and end"
+    else:   # the archive store keeps the orbit as a Python-literal string and only nominal times
+        orbit = ast.literal_eval(str(np.asarray(arrays["orbital_parameters"][index])))
+        start, end = (_ns_datetime(arrays[k][index]) for k in ("start_time", "end_time"))
+        platform = str(np.asarray(arrays["platform_name"][index]))
+        origin = float(orbit["projection_longitude"])
+        actual = float(orbit["satellite_actual_longitude"])
+        height = float(orbit["projection_altitude"])
+        bounds = "nominal start and end"
+    if not (np.isfinite(origin) and np.isfinite(actual) and -180.0 <= origin <= 180.0):
+        raise GeoIcechunkError(f"scan {index}: projection longitude {origin} / satellite longitude {actual}")
+    return dict(platform=platform, origin=origin, actual=actual, height=height, start=start, end=end,
+                bounds=bounds)
+
+
+def read_meteosat_scene(service: str, when, *, channels: Iterable = ("6200", "7330", "11200"), bbox=None,
+                        tolerance: timedelta = timedelta(minutes=5), root: str | None = None,
+                        cache: Path | str | None = None, refresh: bool = False,
+                        use_cache: bool = True) -> ImagerScene:
+    """One Meteosat SEVIRI scan near ``when`` over ``bbox``, from a ``bkr/geo`` Satpy store.
+
+    ``service`` is ``msg`` (``msg_3000m``, 2025 on), ``rss`` (``rss_3000m``, the
+    5-minute rapid scan at 9.5 E) or ``odegree`` (``odegree_3000m``, the 0 degree
+    archive, 2018-2022).  The satellite of each scan (Meteosat-8 to 11) is the
+    store's own and names the CRTM sensor.  Channels are SEVIRI numbers
+    (``C05`` or ``5``) or wavelengths (``6200``); values are brightness
+    temperature (K) for channels 4-11 and reflectance (%) for 1-3, as Satpy
+    calibrated them from the L1.5 native files, stored as float16 (so a 250 K
+    temperature is quantised at 0.125 K).  The scan is matched by the
+    store's nominal time label, which is the end of its slot (the scan
+    observed 17:45-17:58 is "18:00"); the scene's time is the midpoint of
+    the scan's observation bounds (the archive store has only nominal
+    bounds), row time runs south to north across them, and a pixel is NaN
+    where the store is.  The cache and
+    ``refresh`` work as for :func:`read_goes_scene`.
+    """
+
+    when = utc(when)
+    root = root or default_root()
+    if service not in METEOSAT_STORES:
+        raise GeoIcechunkError(f"Meteosat service {service!r}: use one of {sorted(METEOSAT_STORES)}")
+    wanted = sorted({_band_channel(c, "seviri") for c in channels})
+    box = [float(v) for v in bbox] if bbox is not None else None
+    key = hashlib.sha256(json.dumps(["seviri", service, when.isoformat(), wanted, box,
+                                     tolerance.total_seconds(), root]).encode()).hexdigest()[:24]
+    directory = Path(cache).expanduser() if cache else cache_root()
+    entry = directory / f"meteosat-{service}" / when.strftime("%Y%m%dT%H%M") / key
+    if use_cache and not refresh and (entry / "provenance.json").is_file():
+        try:
+            return _read_cached(entry)
+        except (ValueError, KeyError, OSError):
+            pass  # a tampered, truncated or half-written entry is a cache miss: re-read and rewrite
+    name = METEOSAT_STORES[service]
+    try:
+        repo, containers, _ = _open_repository(name, "", root)
+        arrays, snap, written, depth = _open_snapshot(repo, name, "time")
+        reads, meta = _read_satpy_scan(arrays, name, snap, written, depth, containers, wanted, when, box,
+                                       tolerance, "seviri")
+    except GeoIcechunkError:
+        raise
+    except Exception as error:  # icechunk / zarr errors
+        raise GeoIcechunkError(f"{name} at {when.isoformat()}: read failed ({type(error).__name__}: "
+                               f"{str(error).splitlines()[0][:160] if str(error) else ''})") from error
+    sensor = SEVIRI_SENSORS.get(meta["platform"])
+    if sensor is None:
+        raise GeoIcechunkError(f"{name}: the scan's platform {meta['platform']!r} is not Meteosat-8 to 11")
+    origin = meta["origin"]
+    sector = "meteosat_rss" if abs(origin - 9.5) < 1.0 else "meteosat_iodc" if origin > 30.0 else "meteosat_0"
+    platform = Platform(meta["platform"], sector, "seviri", sensor, origin)
+    scene = _assemble(reads, platform_of=lambda sub_lon: platform, family="seviri", when=when, box=box,
+                      source=f"s3://{BUCKET}/{PREFIX}" if _is_remote(root) else root,
+                      attribution=SATPY_ATTRIBUTION, licence=LICENCE_EUMETSAT,
+                      geometry=f"navigation from the store's per-scan geostationary coordinates (MSG "
+                               f"ellipsoid); view angles from the satellite's actual longitude; scan time "
+                               f"is the midpoint of the {meta['bounds']}, row time linear south to north")
+    if use_cache:
+        write_scene_netcdf(entry, scene, licence=LICENCE_EUMETSAT, attribution=SATPY_ATTRIBUTION)
+    return scene
+
+
+#: MSG's reference ellipsoid (Satpy's ``a=6378169``, ``rf=295.488065897014``) and FCI's WGS84.
+_ELLIPSOIDS = {"seviri": (6378169.0, 6378169.0 * (1.0 - 1.0 / 295.488065897014)), "fci": (_A, _B)}
+
+
+def _read_satpy_scan(arrays, name, snap, written, depth, containers, wanted, when, box, tolerance, family):
+    """The wanted channels of the scan nearest ``when`` in a Satpy store, over one window.
+
+    Returns the per-channel reads (on the store's 3 km grid, navigated with the scan's own
+    geostationary coordinates) and the scan's metadata.
+    """
+
+    # the scan is matched by its nominal time label, the end of its slot (the 17:45 scan is "18:00")
+    index = _locate(arrays["time"], when, tolerance, name, epoch=EPOCH_1970, unit_s=1e-9)
+    meta = _satpy_scan(arrays, index)
+    ellipsoid = _ELLIPSOIDS[family]
+    height = meta["height"]
+    x_m = np.asarray(arrays["x_geostationary_coordinates"][index], dtype="f8")
+    y_m = np.asarray(arrays["y_geostationary_coordinates"][index], dtype="f8")
+    if not (np.isfinite(x_m).all() and np.isfinite(y_m).all() and 3.0e7 < height < 4.0e7):
+        raise GeoIcechunkError(f"{name} (snapshot {snap}): scan {index} has no usable geostationary "
+                               f"coordinates (height {height})")
+    x, y = x_m / height, y_m / height
+    rows, cols = _window(x, y, meta["origin"], box, height_m=height, ellipsoid=ellipsoid)
+    # the instrument scans south to north: the fraction of the scan elapsed at each row
+    row_frac = (y[rows] - y.min()) / (y.max() - y.min())
+    by_channel = {}
+    for key, array in arrays.by_source.items():
+        m = _SATPY_CHANNEL.match(key)
+        if m and array.ndim == 3:
+            by_channel[int(m[1])] = (key, m[2], array)
+    missing = [c for c in wanted if c not in by_channel]
+    if missing:
+        raise GeoIcechunkError(f"{name} has no channel {missing} (it holds {sorted(by_channel)})")
+    from concurrent.futures import ThreadPoolExecutor
+
+    def read(channel):
+        key, quantity, array = by_channel[channel]
+        raw = np.asarray(array[index, rows, cols])
+        values = raw.astype("f4")
+        bad = ~(values > 0.0) if quantity == "brightness_temperature" else ~(values >= 0.0)
+        values[bad] = np.nan
+        digest = hashlib.sha256(np.ascontiguousarray(raw).tobytes()).hexdigest()
+        return _ChannelRead(channel, name, snap, written, depth, index, meta["start"], meta["end"], values,
+                            int(bad.sum()), digest, containers, meta["actual"], meta["origin"], x[cols],
+                            y[rows], rows.start, len(y), rows, cols, height, ellipsoid, row_frac)
+
+    with ThreadPoolExecutor(max_workers=max(min(len(wanted), 8), 1)) as pool:
+        return list(pool.map(read, wanted)), meta
+
+
 def _read_cached(entry: Path) -> ImagerScene:
     scene = read_scene_netcdf(entry)
     scene.provenance["cached"] = True
@@ -818,12 +988,13 @@ def coverage(name: str, subdir: str = "virtualized", root: str | None = None) ->
 
     root = root or default_root()
     repo, containers, allowed = _open_repository(name, subdir, root)
-    arrays, snap, written, depth = _open_snapshot(repo, name)
+    time_name = "time" if subdir == "" else "t"   # the Satpy top-level stores name it ``time``
+    arrays, snap, written, depth = _open_snapshot(repo, name, time_name)
     try:
-        epoch, unit_s = _time_axis(arrays["t"])
+        epoch, unit_s = _time_axis(arrays[time_name])
     except GeoIcechunkError:
         epoch, unit_s = J2000, 1.0   # the ABI stores' J2000 seconds
-    times = _j2000(np.asarray(arrays["t"][:]), epoch, unit_s, floor=-1.0 if epoch != J2000 else 0.0)
+    times = _j2000(np.asarray(arrays[time_name][:]), epoch, unit_s, floor=-1.0 if epoch != J2000 else 0.0)
     finite = times[~np.isnat(times)]
     steps = np.diff(np.sort(finite)).astype("timedelta64[s]").astype("f8") if finite.size > 1 else np.array([])
     return dict(store=name, snapshot=snap, snapshot_written=written, snapshot_fallback=depth,
@@ -845,7 +1016,8 @@ NO_CRTM_COEFFICIENTS = {
 
 
 def _satellite_arg(text: str):
-    """``16``-``19`` (GOES, an int) or ``himawari8``/``himawari9`` (``h8``, ``h9``; a str)."""
+    """``16``-``19`` (GOES, an int), ``himawari8``/``himawari9`` (``h8``, ``h9``) or a Meteosat
+    service (``msg``, ``rss``, ``odegree``); the last two kinds are strings."""
 
     t = str(text).strip().lower()
     if t in ("16", "17", "18", "19"):
@@ -853,23 +1025,28 @@ def _satellite_arg(text: str):
     m = re.fullmatch(r"(?:himawari|h)-?([89])", t)
     if m:
         return f"himawari{m[1]}"
+    if t in METEOSAT_STORES:
+        return t
     if t in ("gk2a", "gk-2a", "ami"):
         raise argparse.ArgumentTypeError(NO_CRTM_COEFFICIENTS["gk2a"])
-    raise argparse.ArgumentTypeError(f"{text!r}: use 16, 17, 18, 19, himawari8 or himawari9")
+    raise argparse.ArgumentTypeError(f"{text!r}: use 16, 17, 18, 19, himawari8, himawari9, msg, rss or odegree")
 
 
 def fetch_main(args) -> int:
     import sys
 
     try:
-        if isinstance(args.satellite, str):
-            scene = read_himawari_scene(int(args.satellite[-1]), args.time, channels=args.channels,
-                                        bbox=args.bbox, tolerance=timedelta(minutes=args.tolerance_minutes),
-                                        root=args.root, cache=args.cache, refresh=args.refresh)
+        common = dict(bbox=args.bbox, tolerance=timedelta(minutes=args.tolerance_minutes), root=args.root,
+                      cache=args.cache, refresh=args.refresh)
+        if args.satellite in METEOSAT_STORES:
+            scene = read_meteosat_scene(args.satellite, args.time, channels=args.channels or ("6200", "7330", "11200"),
+                                        **common)
+        elif isinstance(args.satellite, str):
+            scene = read_himawari_scene(int(args.satellite[-1]), args.time,
+                                        channels=args.channels or ["C08", "C09", "C10", "C14"], **common)
         else:
-            scene = read_goes_scene(args.satellite, args.time, channels=args.channels, bbox=args.bbox,
-                                    tolerance=timedelta(minutes=args.tolerance_minutes), root=args.root,
-                                    cache=args.cache, refresh=args.refresh)
+            scene = read_goes_scene(args.satellite, args.time, channels=args.channels or ["C08", "C09", "C10", "C14"],
+                                    **common)
     except (GeoIcechunkError, KeyError) as error:
         print(f"woof obs geo fetch: {error}", file=sys.stderr)
         return 2
@@ -881,8 +1058,8 @@ def fetch_main(args) -> int:
                       "cached": bool(scene.provenance.get("cached"))}))
     if args.summary_json:
         Path(args.summary_json).write_text(json.dumps(summary, indent=2, default=str) + "\n")
-    print(f"{'Himawari' if isinstance(args.satellite, str) else 'GOES'} data: {LICENCE}. "
-          f"{scene.provenance['attribution']}", file=sys.stderr)
+    print(f"{'Meteosat' if args.satellite in METEOSAT_STORES else 'Himawari' if isinstance(args.satellite, str) else 'GOES'} "
+          f"data: {scene.provenance['licence']}. {scene.provenance['attribution']}", file=sys.stderr)
     return 0
 
 
@@ -890,9 +1067,13 @@ def list_main(args) -> int:
     import sys
 
     try:
+        if args.satellite in METEOSAT_STORES:
+            args.subdir = ""
         names = list_stores(args.subdir, args.root)
         if args.satellite:
-            if isinstance(args.satellite, str):
+            if args.satellite in METEOSAT_STORES:
+                names = [n for n in names if n == METEOSAT_STORES[args.satellite]]
+            elif isinstance(args.satellite, str):
                 names = [s.name for s in himawari_segments(int(args.satellite[-1]), args.channel or 8, names=names)]
             else:
                 names = [s.name for s in goes_segments(args.satellite, args.channel or 8, names=names)]
@@ -921,12 +1102,13 @@ def register_cli(obs_sub) -> None:
     sub = parser.add_subparsers(dest="geo_command", required=True)
     fetch = sub.add_parser("fetch", help="read ABI channels near a time over a box into the local cache")
     fetch.add_argument("--satellite", type=_satellite_arg, required=True,
-                       help="GOES satellite number (16-19) or himawari8 / himawari9")
+                       help="GOES satellite number (16-19), himawari8 / himawari9, or a Meteosat SEVIRI "
+                            "service: msg (0 degrees, 2025 on), rss (rapid scan), odegree (0 degrees, 2018-2022)")
     fetch.add_argument("--time", required=True, type=_satweave_time("--time"),
                        help="UTC time with offset, e.g. 2025-06-01T18:00Z")
-    fetch.add_argument("--channels", type=lambda v: [c for c in v.split(",") if c.strip()],
-                       default=["C08", "C09", "C10", "C14"],
-                       help="comma-separated channels (C08 or 8) or band wavelengths (default C08,C09,C10,C14)")
+    fetch.add_argument("--channels", type=lambda v: [c for c in v.split(",") if c.strip()], default=None,
+                       help="comma-separated channels of the instrument (C08 or 8; SEVIRI numbers its own 1-11) or "
+                            "band wavelengths (default C08,C09,C10,C14 for ABI and AHI; 6200,7330,11200 for SEVIRI)")
     fetch.add_argument("--bbox", type=_bbox_wrapping, default=None,
                        help="west,south,east,north in degrees (west > east crosses 180); default the full disc")
     fetch.add_argument("--tolerance-minutes", type=float, default=5.0,

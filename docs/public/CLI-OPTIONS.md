@@ -2460,10 +2460,10 @@ Takes no options of its own.
 |---|---|
 | `--bbox` | west,south,east,north in degrees (west > east crosses 180); default the full disc |
 | `--cache` | cache directory (default $WOOF_GEO_CACHE or ~/.woof/cache/geo) |
-| `--channels` | comma-separated channels (C08 or 8) or band wavelengths (default C08,C09,C10,C14) |
+| `--channels` | comma-separated channels of the instrument (C08 or 8; SEVIRI numbers its own 1-11) or band wavelengths (default C08,C09,C10,C14 for ABI and AHI; 6200,7330,11200 for SEVIRI) |
 | `--refresh` | re-read even when the cache holds the subset |
 | `--root` | store root: s3://us-west-2.opendata.source.coop/bkr/geo (default) or a local mirror ($WOOF_GEO_ROOT) |
-| `--satellite` | GOES satellite number (16-19) or himawari8 / himawari9 |
+| `--satellite` | GOES satellite number (16-19), himawari8 / himawari9, or a Meteosat SEVIRI service: msg (0 degrees, 2025 on), rss (rapid scan), odegree (0 degrees, 2018-2022) |
 | `--summary-json` | write the scene summary and provenance here |
 | `--time` | UTC time with offset, e.g. 2025-06-01T18:00Z |
 | `--tolerance-minutes` | nearest scan accepted within this many minutes (default 5) |
