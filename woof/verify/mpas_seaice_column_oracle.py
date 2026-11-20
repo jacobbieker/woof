@@ -1158,7 +1158,7 @@ def oracle_abort(log: dict, routine: str = "column_vertical_thermodynamics") -> 
 def measure_vt(reference: dict | None = None, logs: dict | None = None, *, rows=VT_CASES,
                fixture_dir: Path = VT_FIXTURE_DIR) -> dict[str, dict[str, int]]:
     """Per vertical-thermodynamics case: the words the GPU gets wrong per
-    field (cases the oracle completes), whether its abort (ierr, first
+    field (an aborting case's too), whether its abort (ierr, first
     aborting cell, message) differs from the oracle's, and the tracer
     object's integers that differ."""
     reference = load_fixture(fixture_dir) if reference is None else reference
@@ -1169,9 +1169,9 @@ def measure_vt(reference: dict | None = None, logs: dict | None = None, *, rows=
         log = logs[case["name"]]
         oracle = oracle_abort(log)
         row = {"abort": int(tuple(state.abort) != oracle)}
-        if not oracle[0]:
-            want = expected_outputs(case, reference.get(case["name"], {}))
-            row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        # an aborting case's too: the cells after the abort keep their words
+        want = expected_outputs(case, reference.get(case["name"], {}))
+        row.update({key: word_mismatches(got[key], want[key]) for key in want})
         mine = state.tracers.log_rows()
         row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
         report[case["name"]] = row
