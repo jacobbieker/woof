@@ -1578,6 +1578,8 @@ def register_cli(obs_sub) -> None:
                               "scatterometer wind per box; 0 (the default) keeps them all")
     fetch_p.add_argument("--snapshot", help="read this Icechunk snapshot id instead of main's head")
     fetch_p.set_defaults(func=_cli_fetch)
+    from woof.obs import wis2_mw
+    wis2_mw.register_cli(sub)
 
 
 __all__ = ["FAMILIES", "Report", "Wis2Error", "aircraft_reports", "fetch", "land_reports", "neutral_rows",
