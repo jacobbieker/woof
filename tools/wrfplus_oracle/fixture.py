@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from woof.grad.wrfplus import cases  # noqa: E402
-from woof.grad.wrfplus.acoustic import UV_ACTIVE, W_STATE  # noqa: E402
+from woof.grad.wrfplus.acoustic import CW_STATE, UV_ACTIVE, W_STATE  # noqa: E402
 
 #: The configurations each advance_uv fixture holds (WRFPLUS needs the
 #: terrain-following coordinate and a specified boundary, spec_zone >= 1).
@@ -334,7 +334,99 @@ def advance_w(exe: str, runner: list[str], seed: int = 20261120) -> dict:
     return out
 
 
-ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w}
+#: calc_coef_w's fixture configurations (c1 = 1, c2 = 0; every column).
+CW_CASES = {
+    "plain": dict(),
+    "lid_moist": dict(top_lid=1, moist_cq=1, epssm=0.3),
+    "deep_moist": dict(nz=12, ny=5, nx=6, moist_cq=1),
+}
+GAMMA = 1.4
+
+
+def _cw_record(geom, tr, pe, seeds):
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    L = Layout(nz, ny, nx)
+    c2a = GAMMA * tr["p"] / tr["alt"]
+    c2ad = GAMMA * (pe["p"] - tr["p"] / tr["alt"] * pe["alt"]) / tr["alt"]
+    one = np.ones_like(tr["cqw"])
+    cqw = tr["cqw"] if geom.moist_cq else one
+    cqwd = pe["cqw"] if geom.moist_cq else 0 * one
+    k1 = lambda a: np.concatenate([a, np.zeros(nz + 1 - a.size)])  # noqa: E731
+    head = np.array([nx, ny, nz, geom.top_lid], dtype=np.int32)
+    reals = np.array([geom.dtau, geom.epssm])
+    a3 = [tr["a"], pe["a"], tr["alpha"], pe["alpha"], tr["gam"], pe["gam"], cqw, cqwd,
+          c2a, c2ad, seeds["a"], seeds["alpha"], seeds["gam"]]
+    a2 = [tr["mub2d"] + tr["mup"], pe["mup"]]
+    blob = head.tobytes() + reals.astype("<f8").tobytes()
+    for a in a3:
+        blob += L.w3(a).astype("<f8").tobytes(order="F")
+    for a in a2:
+        blob += L.w2(a).astype("<f8").tobytes(order="F")
+    for a in (k1(tr["rdn"]), k1(tr["rdnw"])):
+        blob += np.asarray(a, dtype="<f8").tobytes()
+    return blob, L, c2a, c2ad
+
+
+def _cw_expected(geom, out, L, tr, seeds, c2a, c2ad):
+    n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+    vals = np.frombuffer(out, dtype="<f8")
+    off = [0]
+
+    def take(n, s):
+        x = vals[off[0]:off[0] + n].reshape(s, order="F")
+        off[0] += n
+        return x
+
+    shapes = cases.cw_shapes(geom)
+    t3 = lambda name: L.from3(take(n3, L.s3), shapes[name])  # noqa: E731
+    e = {"tl_c2a": c2a, "tl_d_c2a": c2ad}
+    for n in ("a", "alpha", "gam"):
+        e["tl_" + n] = t3(n)
+        e["tl_d_" + n] = t3(n)
+    for n in ("a", "alpha", "gam"):
+        e["ad_" + n] = t3(n)
+    a_c2a = seeds["c2a"] + t3("c2a")
+    a_cqw = t3("cqw")
+    a_mut = L.from2(take(n2, L.s2), shapes["mup"])
+    assert off[0] == vals.size, (off[0], vals.size)
+    e["ad_c2a"] = np.zeros(shapes["c2a"])
+    e["ad_p"] = a_c2a * GAMMA / tr["alt"]
+    e["ad_alt"] = -a_c2a * c2a / tr["alt"]
+    e["ad_mup"] = a_mut
+    e["ad_cqw"] = a_cqw if geom.moist_cq else np.zeros(shapes["cqw"])
+    return e
+
+
+def calc_coef_w(exe: str, runner: list[str], seed: int = 20261121) -> dict:
+    out = {}
+    for name, over in CW_CASES.items():
+        geom = cases.cw_geometry(**over)
+        tr = cases.cw_trajectory(geom, seed)
+        pe = cases.cw_perturbation(geom, seed + 1)
+        seeds = cases.cw_perturbation(geom, seed + 2)
+        blob, L, c2a, c2ad = _cw_record(geom, tr, pe, seeds)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _cw_expected(geom, result, L, tr, seeds, c2a, c2ad)
+        prefix = f"{name}/"
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for n in CW_STATE:
+            out[prefix + "seed/" + n] = seeds[n]
+        out[prefix + "mask/col"] = np.ones((geom.ny, geom.nx), bool)
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
+ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
+            "calc_coef_w": calc_coef_w}
 
 
 def main(argv=None) -> int:

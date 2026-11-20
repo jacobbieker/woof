@@ -314,9 +314,12 @@ Diffusion (item 9) is extra: 1-1.5 w.
 
 ## 8. Risks for G3, watched from the start
 
+G3's cost limit is about 5x the forward step. It was 4x until the user's
+decision of 2026-11-20.
+
 - **Cost.** The binary64 adjoint on the A6000 runs at 1/32 fp64
-  throughput. The adjoint step may exceed 4x the float32 forward step
-  even if it is about 3x in operation count.
+  throughput. The adjoint step may exceed the limit over the float32
+  forward step even if it is about 3x in operation count.
   - Fallback: a binary32 adjoint for production gradients, checked
     against the binary64 tests.
   - The kernel ratios are measured from item 2, and reported early.
@@ -324,3 +327,50 @@ Diffusion (item 9) is extra: 1-1.5 w.
   first, then 3 km. Dry TL validity is an upper bound on the moist one.
 - **WRFPLUS has no hybrid coordinate.** `hybrid_opt = 2` gets no
   oracle evidence (section 1).
+
+### Measured cost and the step projection
+
+These kernel ratios are AD and TL time over the binary32 primal. They were
+measured on the pb A6000 at 200x200x49, as interleaved A/B in one process.
+Other jobs share that card.
+
+| kernel (woof primal) | PR | AD32 | TL32 | AD64 |
+|---|---|---|---|---|
+| advance_uv | #652, #655 | 3.4-4.0x | ~3x | 12-15x |
+| advance_w + calc_p_rho (advance_w_phi) | #669 | 3.5-3.7x | 2.3x | 9.3-9.8x |
+| calc_coef_w (calc_coefs) | this PR | 4.8x | 3.2x | 21-23x |
+
+The shares below are each kernel's part of the forward step's GPU kernel
+time. They come from a dry step at 200x200x49, using CUPTI kernel
+activity tagged by woof kernel and the minimum over 10 steps
+(`tools/launch_profile`).
+
+| kernel | strict | fast |
+|---|---|---|
+| advance_w_phi | 34.5% | 32.9% |
+| advance_mu_th | 11.4% | 12.2% |
+| advance_uv | 8.6% | 10.5% |
+| flux_div_{u,v,w,scalar} | 14.4% | 15.9% |
+| small_step_{init,finish}_* | 8.2% | 10.5% |
+| slow_pgf, slow_geopotential | 5.2% | 6.0% |
+| calc_coefs | 2.3% | 3.0% |
+| other woof kernels | 8.5% | 6.1% |
+| CuPy kernels and copies | 6.8% | 3.0% |
+
+The projection is the per-step adjoint cost over the forward step:
+1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
+far (45.4% of the strict step), Σ share x AD32 = 1.67, on top of the
+forward recompute's 1. The rest is projected at a range of ratios:
+
+| ratio for the unmeasured 54.6% | projection |
+|---|---|
+| 2.2x (memory-traffic floor) | 3.9x |
+| 3.0x | 4.3x |
+| 3.7x (as measured so far) | 4.7x |
+
+The 5x limit holds while the rest averages at most about 4.3x. This is a
+projection from kernel GPU time, not a measured step ratio: launch gaps
+are not counted, the ratios come from a shared card, and 54.6% of the
+step is not yet ported. calc_coefs alone is 4.8x, above the limit, but at
+2.3% of the step it adds about 0.11. Each later kernel PR replaces a
+projected share with a measured one.

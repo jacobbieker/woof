@@ -936,7 +936,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `advance_w_phi`) follows the same pattern: dot-product test to about
   1e-14, WRFPLUS `g_/a_advance_w` and `g_/a_calc_p_rho` to about 1e-15,
   and the float build reproduces the strict primal's words. The w damper
-  (`damp_opt=3`) is refused, since WRFPLUS has none. The forecast path
+  (`damp_opt=3`) is refused, since WRFPLUS has none. `calc_coef_w`
+  (woof's `calc_coefs`: c2a and the implicit w factors) matches WRFPLUS
+  `g_/a_calc_coef_w` to about 1e-15. The binary32 adjoint costs
+  3.4-4.8x the forward kernel; the measured step projection is in the
+  design note. The forecast path
   does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
