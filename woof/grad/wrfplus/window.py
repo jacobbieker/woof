@@ -87,6 +87,37 @@ def wrfda_tl_start_ad(adj: dict) -> dict:
     return out
 
 
+def lbc_from_ends(start: dict, end: dict, seconds: float) -> dict:
+    """WRFDA's boundary perturbation under ``var4d_lbc``: the window's
+    tables (``Window.params``) from the perturbation of each value table
+    at the interval's start (``start``) and end (``end``), both dicts over
+    the value-table names (``lbc_<field>_<side>``, in the tables' stored
+    form): the value is ``start`` and the tendency ``(end - start) /
+    seconds``, as WRF's ``bt`` ties to the next record.  ``seconds`` is
+    the interval's length (``Window.lbc_seconds``).  Without ``var4d_lbc``
+    WRFDA perturbs the start only and keeps the tendency: pass the value
+    tables alone in ``dx0`` (the ``_t`` tables then start at zero)."""
+    if set(start) != set(end):
+        raise ValueError(f"start and end name other tables: {sorted(set(start) ^ set(end))}")
+    out = {}
+    for n, a in start.items():
+        out[n] = a.copy()
+        out[n + "_t"] = (end[n] - a) / seconds
+    return out
+
+
+def lbc_from_ends_ad(adj: dict, names, seconds: float) -> tuple:
+    """The adjoint of :func:`lbc_from_ends` over the value tables
+    ``names``: ``adj`` (a ``Window.ad`` result) folded into the start's
+    and the end's adjoints, ``(start_adj, end_adj)``; new arrays."""
+    start, end = {}, {}
+    for n in names:
+        tend = adj[n + "_t"] / seconds
+        start[n] = adj[n] - tend
+        end[n] = tend.copy()
+    return start, end
+
+
 def _copy(d: dict, names=None) -> dict:
     return {n: d[n].copy() for n in (d if names is None else names)}
 
@@ -108,6 +139,11 @@ class Window:
         self.geoms = M.step_geometries(state, cfg, self.nsteps)
         self.inputs = M.step_inputs(self.geoms[0])
         self.params = M.step_parameters(self.geoms[0])
+        #: the boundary interval's length (lbc_from_ends), specified only
+        self.lbc_seconds = None
+        if self.params:
+            iv = state.lateral_boundaries.interval_at(state.elapsed_seconds)
+            self.lbc_seconds = float(iv.end_seconds - iv.start_seconds)
         self._start = M.run_state(state, cfg, dtype)
         self._scratch = None
         self._mutable = self._written_names()

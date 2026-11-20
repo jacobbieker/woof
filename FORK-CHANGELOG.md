@@ -38,7 +38,9 @@ New:
   every substep, `spec_bdy_final`, and WRF's mu halo on rk_step 1's
   boundary faces. Its binary32 base reproduces strict `dycore.step` word
   for word. The interval's boundary tables are inputs: the TL takes their
-  perturbation and the adjoint returns theirs. Nested domains, a bound
+  perturbation and the adjoint returns theirs, and `lbc_from_ends` (with
+  its adjoint) builds WRFDA's `var4d_lbc` perturbation from the interval's
+  ends. Nested domains, a bound
   boundary clock, relax_w, DFI forcing, streamed seams and a window
   crossing a boundary interval are refused by name. The forecast path is
   unchanged.

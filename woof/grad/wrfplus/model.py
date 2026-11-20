@@ -227,8 +227,16 @@ def _refuse_specified(cfg, state) -> dict:
                                 or bool(getattr(cfg, "dfi_constant_bc", False)),
         "streamed tile seams": bool(getattr(bounds, "seam_sides", ()) or ()),
         "spec_zone 0": int(cfg.spec_zone) < 1,
+        # the binding assumes both axes bounded (dycore._boundary_x/_y)
+        "a specified domain with a periodic axis": not (
+            _dycore_boundary(cfg, "x") and _dycore_boundary(cfg, "y")),
     })
     return out
+
+
+def _dycore_boundary(cfg, axis: str) -> bool:
+    from woof.core import dycore as D
+    return bool(D._boundary_x(cfg) if axis == "x" else D._boundary_y(cfg))
 
 
 def step_geometries(state, cfg, nstep: int) -> tuple:
@@ -249,7 +257,10 @@ def _boundary_times(state, cfg, step: int) -> tuple:
     lateral_bc._served_external_interval): the stage rows' at the step
     start and spec_bdy_final's at its end (apply_state_boundary_values),
     elapsed time accumulated as dycore.step does.  Both must fall in the
-    interval the window starts in: its tables are the step's inputs."""
+    interval the window starts in: its tables are the step's inputs.  A
+    step ending on the interval's end is accepted when the primal serves
+    that time from the same interval (the last one, interval_index) and
+    refused when it serves it from the next one."""
     bounds = state.lateral_boundaries
     first = bounds.interval_at(state.elapsed_seconds)
     t = state.elapsed_seconds
@@ -263,9 +274,9 @@ def _boundary_times(state, cfg, step: int) -> tuple:
             return None
     if at(t) is not first or at(end) is not first:
         raise NotImplementedError(
-            "the P3a step TL/AD does not cover: a window crossing a boundary "
-            f"interval (step {step} ends at {end} s; the interval runs "
-            f"{first.start_seconds}-{first.end_seconds} s)")
+            "the P3a step TL/AD does not cover: a window reaching another boundary "
+            f"interval (step {step} ends at {end} s, which the primal serves from "
+            f"another interval than {first.start_seconds}-{first.end_seconds} s)")
     return t - first.start_seconds, end - first.start_seconds
 
 

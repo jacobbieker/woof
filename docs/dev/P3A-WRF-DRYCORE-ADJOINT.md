@@ -722,25 +722,44 @@ Each step is one small PR, taken to merged before the next widens.
    - Each step has its own geometry, because its boundary time (dtbc,
      the unbound clock: stage rows at the step start, `spec_bdy_final`
      at its end) differs per step.
+   - `Window.lbc_seconds` is the interval's length. `lbc_from_ends(start,
+     end, seconds)` builds WRFDA's `var4d_lbc` table perturbation (value
+     = start, tendency = (end - start) / seconds, as WRF's bt ties to the
+     next record), and `lbc_from_ends_ad` folds the tables' adjoint into
+     the start's and the end's. Without `var4d_lbc`, pass the value tables
+     alone in `dx0`: the `_t` tables start at zero.
    - Refused by name: nested boundaries, open boundaries that are not
-     specified, specified without tables, a bound `DomainClock`, time
-     laws other than linear, relax_w, DFI boundary forcing, streamed
-     tile seams, spec_zone 0, and a window crossing a boundary interval.
-   - Tests (`tests/test_grad_wrfplus_spec_step.py`, host and CUDA): three
+     specified, specified without tables, a periodic axis, a bound
+     `DomainClock`, time laws other than linear, relax_w, DFI boundary
+     forcing, streamed tile seams, spec_zone 0, and a window reaching
+     another boundary interval. A step ending on its interval's end is
+     accepted when the primal serves that time from the same (last)
+     interval, and refused when it serves it from the next.
+   - Tests (`tests/test_grad_wrfplus_spec_step.py`, host and CUDA): four
      cases on a 20x18x8 ridge with relax_zone 4 (a warm step, a cold
      three-step chain, a warm two-step chain with map factors and the
-     carried halo moved 3 Pa off the ring).
+     carried halo moved 3 Pa off the ring, and a cold chain ending on its
+     interval's end). The boundary snapshots move every field (mu and phi
+     too) between the two times and vary along the ring, so every table,
+     tendency and the relaxation's Laplacian term carries signal.
      - The binary32 base reproduces `dycore.step`'s words on every input
-       and the next step's scratch. Ablations each move words: without
-       the fold 22148, without `advance_specified_phi_w` 20653, without
-       `spec_bdy_final` 6137, without the stage rows 24413, and without
-       the halo operand 12072 on the shifted case (0 with it).
-     - The dot test perturbs the state, the halo and every table (1e-12
-       in binary64, 1e-5 terms-scaled in binary32).
+       and the next step's scratch. Dropping each part of the binding in
+       turn (the fold, `advance_specified_phi_w`, `spec_bdy_final`, the
+       stage rows, the halo operand on the shifted case) moves words; the
+       test asserts each.
+     - The dot test perturbs the state, the halo and every table at 1e-3
+       of its scale (1e-12 in binary64, 1e-5 terms-scaled in binary32).
+       In binary64 each of the 40 tables also passes its own dot test
+       with a nonzero share.
      - Binary64 finite differences converge, and the base-only build is
        the joint base.
-     - The window's binary32 forward is N primal steps, and its dot test
-       with forcing covers the tables' adjoint.
+     - The window's binary32 forward is N primal steps; its dot test
+       with forcing covers the tables' adjoint; omitted tables equal zero
+       ones bit for bit; and `lbc_from_ends` passes its dot test alone
+       and through the window.
+     - With the written arrays (held rows, fold slots) and the mu row's
+       unread source poisoned with NaN, a step's outputs and adjoint are
+       the clean run's; the tables are never written.
      - The refusals are named.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
