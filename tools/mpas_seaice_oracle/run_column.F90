@@ -70,7 +70,7 @@
 !                 (the shortwave and seaice_column_coupling_prep).  The last
 !                 step is not finalized, so the stream carries the fluxes the
 !                 coupler reads.  Each step returns on ierr > 0 as
-!                 seaice_timestep does; ierr is logged as above.
+!                 seaice_timestep does; ierr is logged as above;
 !   seaice_step   the column setup of column_step, then run_seaice_step.F90's
 !                 (seaice_init_velocity_solver's time steps, seaice_init_evp,
 !                 seaice_init_advection, seaice_initialize_time_diagnostics),
@@ -81,7 +81,12 @@
 !                 package's own) and seaice_timestep_finalize, the last step's
 !                 only under oracle_finalize_last.  On ierr > 0 the loop stops
 !                 (seaice_check_critical_error would stop the model); ierr and
-!                 the step are logged ('TOBJ IERR n', 'TOBJ STEP n').
+!                 the step are logged ('TOBJ IERR n', 'TOBJ STEP n');
+!   ocean_mixed_layer
+!                 seaice_column_ocean_mixed_layer (colpkg_atm_boundary for the
+!                 open ocean, colpkg_ocn_mixed_layer, and the test ice shelf's
+!                 zeroing), as seaice_column_coupling_prep runs it first under
+!                 config_use_ocean_mixed_layer.
 !
 ! The Registry struct alternative_atmos_forcing is longer than the stream's
 ! 24-character pool names; the stream spells it 'alternative_atmos_forcin'
@@ -281,6 +286,8 @@ program run_column
      end do
      call write_ints('IERR', [ierr])
      call write_ints('STEP', [min(iStep, nSteps)])
+  case ('ocean_mixed_layer')
+     call seaice_column_ocean_mixed_layer(domain)
   case default
      print *, 'run_column: unknown oracle_stage ', trim(stage)
      stop 2
