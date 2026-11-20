@@ -953,8 +953,31 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   scatterometer, GNSS precipitable water, GNSS-RO refractivity and satem
   thickness types, with the same accepted observations as WRFDA and its
   initial cost `J_0` on the tutorial case, and their linearised operators
-  and adjoints. There is no analysis command yet, and default runs are not
-  changed.
+  and adjoints.
+  There is no analysis command yet. Section 11 plans geostationary imager
+  radiances for initial conditions: Google's SatWeave mosaic and the native
+  GOES ABI, Himawari AHI and Meteosat imagers, through an opt-in CRTM into
+  the LETKF first and into 3D-Var later. Default runs are not changed.
+- **SatWeave imager reader (opt-in; in progress).** `woof fetch satweave`
+  subsets and caches Google's SatWeave geostationary mosaic (17 bands at
+  0.1°, 2016 onward; CC BY 4.0, attribution kept in every provenance
+  record) over anonymous HTTPS. It reconstructs each pixel's satellite and
+  view geometry, which SatWeave does not publish, from band availability
+  and the sectors' sub-satellite longitudes
+  ([docs/satellite-imagers.md](docs/satellite-imagers.md)). `woof fetch geo`
+  reads native GOES ABI L1b (GOES-16 to 19) from the `bkr/geo` virtual
+  Icechunk stores on Source Cooperative, which reference NOAA's own files.
+  It keeps NOAA's calibration and quality flags and gives the true per-pixel
+  geometry. `woof.rtm` adds an opt-in clear-sky
+  infrared operator. It uses JCSDA CRTM v2.4+ (CC0), which you build
+  yourself with `python -m woof.rtm.crtm_build`, together with CRTM's own
+  coefficients. It gives brightness temperatures and Jacobians from woof
+  columns or from an isobaric analysis. `woof.da.obs_radiance` (opt-in) turns a scene
+  into LETKF batches. It thins the scene, runs H(x) per member through
+  CRTM, screens for clear sky, applies a static bias correction and a gross
+  check, and places each observation at its weighting-function peak.
+  Variational bias correction and the 3D-Var radiance operator come next
+  (plan section 11).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
