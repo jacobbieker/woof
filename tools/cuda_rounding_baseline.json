@@ -2190,6 +2190,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "cf73de38d62524fd60534c62d6afb43dafe09b1d379151bfd10558a833dcb6a6",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "342d8c79de708fd8830df5e1e8a6671f01a3f2b2ada1f4fec6de3acec1686bce",
+    "file": "woof/hex/coupled/ocn_coupling_e3sm.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "d3c3f0905fb91ea39352d9005c0cbedf9ed45b4dd060dbe54c085bffadf89a26",
     "constructor": "compile_using_nvrtc",
     "factory": "compile_mrf_module",
@@ -4876,6 +4884,10 @@
     "sha256": "15c9587672645d5cc887280064a8d7722c72a566c17da8e4c4d5c340dd12f076"
    },
    {
+    "file": "woof/hex/coupled/ocn_coupling_e3sm.cu",
+    "sha256": "d1a2e0630e744a0e90e2d1cb19ed0cb1fd7b2b09965b32c82f44a7c5030eb33a"
+   },
+   {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.cu",
     "sha256": "34b752cd152fd8a3fb699ce182480d6a8eccc8b4eb44fcaa8f4f6f2559994418"
    },
@@ -5734,6 +5746,10 @@
     "sha256": "2eea386d069903bda1264979b6a0c575cbfbae24c596b8e7de1ffbfd18d8ab80"
    },
    {
+    "file": "woof/hex/coupled/ocn_coupling_e3sm.py",
+    "sha256": "c856d6dfcf1345e16fe180733d912f30ba373943b9d6dbde662d5c6254898641"
+   },
+   {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.py",
     "sha256": "fba045a94745828c98be18fdd3a9685f34432a890d48079b3ce6abc2b75da42e"
    },
@@ -6035,7 +6051,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/land_ice_v842.py",
-    "sha256": "6fe2adf77d86b125b2eb1ba33700e12ad963c3e35075dfd52a10bcd4247c5872"
+    "sha256": "83a114dce8eb36fae6fe6c076ec829119a76261aeeabbbf0955810ce20f8f2c4"
    },
    {
     "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
