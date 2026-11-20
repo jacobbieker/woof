@@ -107,6 +107,14 @@ def test_isomip_opt_in_values_are_named():
     assert li.isomip_salinity_corrected({"woof_land_ice_isomip_freezing_salinity": "boundary_layer_salinity"})
     with pytest.raises(ConfigurationRefusal):
         li.isomip_salinity_corrected({"woof_land_ice_isomip_freezing_salinity": "salinity"})
+    # check_config refuses a typo outside the ISOMIP branch too (Jenkins, and no fluxes at all)
+    jenkins = {"config_land_ice_flux_mode": "standalone", "config_land_ice_flux_formulation": "Jenkins",
+               "config_land_ice_flux_useHollandJenkinsAdvDiff": False}
+    for configs in (jenkins, {"config_land_ice_flux_mode": "off"}):
+        li.check_config(configs)
+        li.check_config(dict(configs, woof_land_ice_isomip_freezing_salinity="boundary_layer_salinity"))
+        with pytest.raises(ConfigurationRefusal, match="woof_land_ice_isomip_freezing_salinity"):
+            li.check_config(dict(configs, woof_land_ice_isomip_freezing_salinity="boundary_layer_salnity"))
 
 
 # ------------------------------------------------------------ bottom drag and Rayleigh friction

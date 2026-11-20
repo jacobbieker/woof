@@ -309,7 +309,19 @@ matched exchange unless asked.
    Still to port.
 4. The ocean's and the sea ice's import and export
    (`components/mpas-ocean/driver/ocn_comp_mct.F`,
-   `components/mpas-seaice/driver/ice_comp_mct.F`). Still to port.
+   `components/mpas-seaice/driver/ice_comp_mct.F`). The ocean's is ported
+   (`woof/hex/coupled/ocn_coupling_e3sm.py`,
+   `tests/test_e3sm_ocean_coupling_parity.py`): `mpaso_cpl_indices_set` with
+   MCT's stops, `ocn_import_mct` (absent arrays left alone, the removed
+   Antarctic runoff, `precip_fact`, the sea-ice pressure cap with
+   `mpas_constants`' float32 gravity, the waves two ways and the active-wave
+   stress, the 10 m wind) and `ocn_export_mct` (the surface state, the
+   frazil's three branches and its reset, the land-ice modes, the removed
+   runoff, the 3-D thermal forcing), real(r8), on CUDA and Metal. The BGC,
+   DMS, MacroMolecules and CFC tracers are refused by name, and so are the
+   cases E3SM writes or reads out of bounds (the active-wave stress without
+   the waves two ways, an o2x field it writes but the list lacks,
+   `nGlcZLevels` above `glc_nzoc`). The sea ice's: still to port.
 5. The coupled ocean + sea-ice step on `woof/hex/coupled`, with the exchange
    checked against the E3SM merge. It needs the sea ice's assembled column
    time step (above, still to port), so it is not built yet.

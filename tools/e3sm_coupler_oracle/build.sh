@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Build the E3SM v3.2.0 coupler oracle: the ocean merge, prep_ocn_merge.
+# Build the E3SM v3.2.0 coupler oracles: the ocean merge, prep_ocn_merge
+# (run_ocean_merge), and MPAS-Ocean's coupler import and export,
+# ocn_import_mct and ocn_export_mct (run_ocean_coupling).
 #
 #   bash tools/e3sm_coupler_oracle/build.sh E3SM_SOURCE_ROOT MCT_SOURCE_ROOT BUILD_DIR
 #
@@ -112,3 +114,84 @@ if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|asin|acos|cbrt|erf)[fl]?\b' und
     exit 6
 fi
 echo "built ${build_dir}/run_ocean_merge"
+
+# ---------------------------------------------------------------- the ocean's import and export
+# ocn_import_mct and ocn_export_mct are cut byte for byte out of
+# components/mpas-ocean/driver/ocn_comp_mct.F into a module
+# (ocn_comp_mct_cut) whose head names the modules they use and carries the
+# host module's own declarations of the variables they read (lines 107-109,
+# 119, 125-127 and 129 of the pinned file).  ocn_freezing_temperature is cut
+# the same way out of mpas_ocn_equation_of_state.F.  Compiled verbatim:
+# shr_kind_mod, shr_const_mod, glc_zocnclass_mod (with NDEBUG), MPAS's
+# mpas_kind_types and mpas_constants, mpaso_cpl_indices.F and
+# mpas_ocn_constants.F (with MPAS_ESM_SHR_CONST, as E3SM builds MPAS).  The
+# MPAS framework is tools/mpas_ocean_oracle/stubs.F90 (pools by name, one
+# block, halo exchanges the identity); ocean_standins.F90 and
+# e3sm_standins.F90 hold the rest.  real(RKIND) is real(8), as E3SM runs.
+obj="${build_dir}/ocean"
+rm -rf "${obj}" && mkdir -p "${obj}" && cd "${obj}"
+src="${e3sm}/components/mpas-ocean"
+oflags=(-c -cpp -O0 -ffp-contract=off -ffree-line-length-none -DNDEBUG -I"${e3sm}/share/include" "${mctinc[@]}")
+mpas=(-ffree-form)
+cp "${obj}/../merge/mct_mod.F90" mct_mod.F90
+{
+    printf 'module ocn_equation_of_state\n  use mpas_kind_types\n  use ocn_config\n  implicit none\n  private\n'
+    printf '  public :: ocn_freezing_temperature\ncontains\n'
+    awk '/^    real \(kind=RKIND\) function ocn_freezing_temperature\(/{on=1} on{print} /^    end function ocn_freezing_temperature!/{on=0}' \
+        "${src}/src/shared/mpas_ocn_equation_of_state.F"
+    printf 'end module ocn_equation_of_state\n'
+} > ocn_freezing_cut.F90
+host=$(sed -n '107,109p;119p;125,127p;129p' "${src}/driver/ocn_comp_mct.F")
+{
+    printf 'module ocn_comp_mct_cut\n'
+    printf '  use seq_flds_mod\n  use seq_infodata_mod\n  use mpaso_cpl_indices\n  use mpas_derived_types\n'
+    printf '  use mpas_pool_routines\n  use mpas_kind_types\n  use mpas_dmpar\n  use mpas_constants\n'
+    printf '  use ocn_constants\n  use ocn_config\n  use ocn_equation_of_state\n  use ocn_diagnostics_variables\n'
+    printf '  implicit none\n  public\n'
+    printf '%s\n' "${host}"
+    printf 'contains\n'
+    awk '/^ subroutine ocn_import_mct\(/{on=1} on{print} /^ end subroutine ocn_import_mct!/{on=0}' "${src}/driver/ocn_comp_mct.F"
+    awk '/^ subroutine ocn_export_mct\(/{on=1} on{print} /^ end subroutine ocn_export_mct!/{on=0}' "${src}/driver/ocn_comp_mct.F"
+    printf 'end module ocn_comp_mct_cut\n'
+} > ocn_comp_mct_cut.F90
+for want in 'subroutine ocn_import_mct(' 'end subroutine ocn_import_mct!' 'subroutine ocn_export_mct(' \
+            'end subroutine ocn_export_mct!' 'function ocn_freezing_temperature(' 'end function ocn_freezing_temperature!'; do
+    if [[ $(cat ocn_comp_mct_cut.F90 ocn_freezing_cut.F90 | grep -cF "${want}") -ne 1 ]]; then
+        echo "a routine was not cut out whole (${want})" >&2
+        exit 3
+    fi
+done
+if [[ $(printf '%s\n' "${host}" | grep -cE 'saved_accumulatedFrazilIceMass\(:\)$|saved_frazil_allocated_size = 0$|saved_frazil_initialized = \.false\.$|pointer :: infodata$|pointer:: domain$|itimestep, &|ocn_cpl_dt +!|:: precFactor $') -ne 8 ]]; then
+    echo "ocn_comp_mct.F's module declarations moved" >&2
+    exit 3
+fi
+"${fc[@]}" "${oflags[@]}" "${e3sm}/share/util/shr_kind_mod.F90"
+"${fc[@]}" "${oflags[@]}" "${e3sm}/share/util/shr_const_mod.F90"
+"${fc[@]}" "${oflags[@]}" "${mpas[@]}" "${e3sm}/components/mpas-framework/src/framework/mpas_kind_types.F"
+"${fc[@]}" "${oflags[@]}" "${script_dir}/../mpas_ocean_oracle/stubs.F90"
+"${fc[@]}" "${oflags[@]}" "${mpas[@]}" "${e3sm}/components/mpas-framework/src/framework/mpas_constants.F"
+"${fc[@]}" "${oflags[@]}" "${script_dir}/e3sm_standins.F90"
+"${fc[@]}" "${oflags[@]}" "${script_dir}/ocean_standins.F90"
+"${fc[@]}" "${oflags[@]}" mct_mod.F90
+"${fc[@]}" "${oflags[@]}" "${e3sm}/driver-mct/shr/glc_zocnclass_mod.F90"
+"${fc[@]}" "${oflags[@]}" "${mpas[@]}" "${src}/driver/mpaso_cpl_indices.F"
+"${fc[@]}" "${oflags[@]}" "${mpas[@]}" -DMPAS_ESM_SHR_CONST "${src}/src/shared/mpas_ocn_constants.F"
+"${fc[@]}" "${oflags[@]}" ocn_freezing_cut.F90
+"${fc[@]}" "${oflags[@]}" ocn_comp_mct_cut.F90
+"${fc[@]}" "${oflags[@]}" "${script_dir}/run_ocean_coupling.F90"
+"${fc[@]}" -o "${build_dir}/run_ocean_coupling" ./*.o "${mctlib[@]}"
+if command -v objdump >/dev/null; then
+    objdump -d ocn_comp_mct_cut.o ocn_freezing_cut.o mpas_ocn_constants.o run_ocean_coupling.o > disassembly.txt
+    if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
+        echo "an object contains an FMA instruction (${obj}/fma.txt)" >&2
+        exit 5
+    fi
+fi
+# the import's sqrt (the 10 m wind speed) is IEEE's correctly rounded square
+# root, an instruction or glibc's; nothing else may reach libm
+nm -u ocn_comp_mct_cut.o ocn_freezing_cut.o > undefined.txt
+if grep -E '\b(exp|log|pow|sin|cos|tan|atan|asin|acos|cbrt|erf)[fl]?\b' undefined.txt; then
+    echo "the ocean's import or export calls libm" >&2
+    exit 6
+fi
+echo "built ${build_dir}/run_ocean_coupling"

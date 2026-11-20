@@ -1,13 +1,17 @@
-"""Run the built E3SM ocean-merge oracle on every case and write the fixture.
+"""Run a built E3SM coupler oracle on every case and write its fixture.
 
-    python tools/e3sm_coupler_oracle/make_fixture.py BUILD_DIR [--out DIR]
+    python tools/e3sm_coupler_oracle/make_fixture.py BUILD_DIR [--oracle merge|coupling] [--out DIR]
 
-BUILD_DIR holds ``run_ocean_merge`` from build.sh. Writes ``oracle-r8.npz``
-(``<case>/call<i>``: x2o's rAttr after each call, ``(lsize, nflds)``),
+BUILD_DIR holds build.sh's binaries. ``--oracle merge`` (the default) runs
+``run_ocean_merge`` and writes ``oracle-r8.npz`` (``<case>/call<i>``: x2o's
+rAttr after each call, ``(lsize, nflds)``) into
+``tests/data/oracles/e3sm_ocean_merge``; ``--oracle coupling`` runs
+``run_ocean_coupling`` and writes ``oracle-r8.npz`` (``<case>/o2x`` after the
+export and ``<case>/<pool>/<name>`` for every array after the import and
+export) into ``tests/data/oracles/e3sm_ocean_coupling``. Both write
 ``aborts.json`` (each case that must stop: the line E3SM or MCT writes as it
-stops) and ``inputs.sha256`` (every case's input stream),
-into ``tests/data/oracles/e3sm_ocean_merge`` unless ``--out`` names another
-directory.
+stops) and ``inputs.sha256`` (every case's input stream). ``--out`` names
+another directory.
 """
 from __future__ import annotations
 
@@ -24,17 +28,20 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from woof.verify import e3sm_ocean_coupling_oracle as oc  # noqa: E402
 from woof.verify import e3sm_ocean_merge_oracle as oo  # noqa: E402
 
+ORACLES = {"merge": (oo, "run_ocean_merge"), "coupling": (oc, "run_ocean_coupling")}
 
-def run_case(binary: Path, case: dict) -> tuple[int, list[np.ndarray] | None, str]:
+
+def run_case(binary: Path, case: dict, oo=oo) -> tuple[int, object, str]:
     with tempfile.TemporaryDirectory() as tmp:
         src, dst = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
         src.write_bytes(oo.input_bytes(case))
         done = subprocess.run([str(binary), str(src), str(dst)], capture_output=True, text=True)
         # MCT's die ends through mpi-serial's MPI_Abort, which exits with status 0:
         # a stop is a nonzero status or a FATAL line with no calls written
-        if done.returncode != 0 or ("FATAL" in done.stderr and not dst.stat().st_size):
+        if done.returncode != 0 or ("FATAL" in done.stderr and (not dst.exists() or not dst.stat().st_size)):
             return done.returncode or -1, None, done.stderr
         return 0, oo.read_outputs(dst.read_bytes(), case), done.stderr
 
@@ -49,13 +56,16 @@ def abort_line(stderr: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("build_dir", type=Path)
-    parser.add_argument("--out", type=Path, default=oo.FIXTURE_DIR)
+    parser.add_argument("--oracle", choices=sorted(ORACLES), default="merge")
+    parser.add_argument("--out", type=Path)
     args = parser.parse_args()
-    binary = args.build_dir / "run_ocean_merge"
+    oo, name = ORACLES[args.oracle]
+    args.out = args.out or oo.FIXTURE_DIR
+    binary = args.build_dir / name
     args.out.mkdir(parents=True, exist_ok=True)
     arrays, aborts, digests = {}, {}, []
     for case in oo.cases():
-        status, outputs, stderr = run_case(binary, case)
+        status, outputs, stderr = run_case(binary, case, oo)
         if case["aborts"]:
             if status == 0:
                 raise RuntimeError(f"{case['name']} was meant to stop and did not")
@@ -63,8 +73,12 @@ def main() -> int:
         else:
             if status != 0:
                 raise RuntimeError(f"{case['name']} stopped ({status}): {stderr}")
-            for i, x2o in enumerate(outputs):
-                arrays[f"{case['name']}/call{i}"] = x2o
+            if isinstance(outputs, dict):
+                for key, value in outputs.items():
+                    arrays[f"{case['name']}/{key}"] = value
+            else:
+                for i, x2o in enumerate(outputs):
+                    arrays[f"{case['name']}/call{i}"] = x2o
         digests.append(f"{oo.input_digest(case)}  {case['name']}")
     np.savez(args.out / "oracle-r8.npz", **arrays)
     (args.out / "aborts.json").write_text(json.dumps(aborts, indent=1, sort_keys=True) + "\n", encoding="utf-8")

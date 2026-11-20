@@ -2,8 +2,12 @@
 !
 ! None of them does arithmetic.  shr_sys_abort stops the oracle with its
 ! message; seq_comm_setptrs reports the root task (the oracle is one task);
-! seq_flds_mod holds the three coupler field flags the merge reads, set by the
-! driver; prep_glc_mod's routine is named in a use statement and never called.
+! seq_flds_mod holds the coupler field flags and lists the merge and the
+! ocean's index set read, set by the driver; seq_infodata_mod the precipitation
+! factor and the ocean-to-glc thermal forcing switch the ocean's import and
+! export read; shr_log_mod and shr_assert_mod what glc_zocnclass_mod uses
+! (built with NDEBUG, as its assertions only check an array's bound);
+! prep_glc_mod's routine is named in a use statement and never called.
 ! mct_mod is not a stand-in: build.sh writes it from the pinned
 ! share/util/mct_mod.F90's own m_AttrVect renames, over the pinned MCT.
 
@@ -43,7 +47,49 @@ module seq_flds_mod
   character(len=80) :: wav_ocn_coup = 'none'
   logical :: rof2ocn_nutrients = .false.
   logical :: seq_flds_i2o_per_cat = .false.
+  ! the component field lists and the ocean-to-land switch mpaso_cpl_indices reads
+  character(len=16384) :: seq_flds_x2o_fields = '', seq_flds_o2x_fields = ''
+  logical :: ocn_lnd_one_way = .false.
 end module seq_flds_mod
+
+! the two coupler settings the ocean's import and export read
+module seq_infodata_mod
+  use shr_kind_mod, only: SHR_KIND_R8
+  implicit none
+  private
+  public :: seq_infodata_type, seq_infodata_GetData
+  type seq_infodata_type
+    real(SHR_KIND_R8) :: precip_fact = 1.0_SHR_KIND_R8
+    logical :: ocn_c2_glctf = .false.
+  end type seq_infodata_type
+contains
+  subroutine seq_infodata_GetData(infodata, precip_fact, ocn_c2_glctf)
+    type(seq_infodata_type), intent(in) :: infodata
+    real(SHR_KIND_R8), optional, intent(out) :: precip_fact
+    logical, optional, intent(out) :: ocn_c2_glctf
+    if (present(precip_fact)) precip_fact = infodata % precip_fact
+    if (present(ocn_c2_glctf)) ocn_c2_glctf = infodata % ocn_c2_glctf
+  end subroutine seq_infodata_GetData
+end module seq_infodata_mod
+
+! glc_zocnclass_mod's error-message helper and the module its (NDEBUG-empty)
+! assertion macros use
+module shr_log_mod
+  implicit none
+  private
+  public :: shr_log_errMsg
+contains
+  function shr_log_errMsg(file, line) result(msg)
+    character(len=*), intent(in) :: file
+    integer, intent(in) :: line
+    character(len=512) :: msg
+    write(msg, '(a, i0)') trim(file)//':', line
+  end function shr_log_errMsg
+end module shr_log_mod
+
+module shr_assert_mod
+  implicit none
+end module shr_assert_mod
 
 module prep_glc_mod
   implicit none

@@ -386,14 +386,23 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     open-ocean fractions, with E3SM's own field matching and aborts.
     real(r8), word-exact on CUDA and Metal against the routine compiled
     verbatim on the pinned MCT (`tools/e3sm_coupler_oracle`); the water
-    isotopes are refused by name.
+    isotopes are refused by name;
+  - MPAS-Ocean's coupler import and export, E3SM v3.2.0's `ocn_import_mct`
+    and `ocn_export_mct` with `mpaso_cpl_indices_set`
+    (`woof/hex/coupled/ocn_coupling_e3sm.py`, opt-in): x2o into the forcing
+    arrays (the removed Antarctic runoff, the precipitation factor, the
+    sea-ice pressure cap, the waves coupled two ways, the 10 m wind) and o2x
+    from the surface state, the frazil, the land ice and the 3-D thermal
+    forcing. real(r8), word-exact on CUDA and Metal against the routines
+    compiled verbatim; the BGC, DMS, MacroMolecules and CFC tracers are
+    refused by name, and so is what E3SM writes or reads out of bounds.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
   meshes by name. The sea-ice column physics' time step (mushy vertical thermodynamics,
   shortwave), ocean KPP and GM/Redi,
-  and the coupler import and export (other than the ocean merge) are not ported. A few RKIND 8 cases need the LGPL libm
+  and the coupler pieces other than the ocean merge and the ocean's import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
 - **Further WRF physics,** each held word for word to compiled WRF Fortran
