@@ -616,11 +616,23 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
                     str(tmp_path / "build"), str(icepack)], check=True, env={**os.environ, "GFORTRAN": gfortran})
     subprocess.run([sys.executable, str(ROOT / "tools" / "e3sm_coupler_oracle" / "make_fixture.py"),
                     str(tmp_path / "build"), "--oracle", "seaice", "--out", str(tmp_path / "fixture")], check=True)
+    # the rotation's words (trig, and the stresses rotated with them) are glibc 2.44's
+    # libm: a rebuild on another libm may differ there and nowhere else
+    recorded_libm = platform.libc_ver() == ("glibc", icc.TRIG_GLIBC)
+    rotated = ("Faii_taux", "Faii_tauy", "Fioi_taux", "Fioi_tauy")
+    lists = {c["name"]: c["lists"]["i2x"] for c in si.cases()}
     for name in ("oracle-r8.npz", "aborts.json", "inputs.sha256"):
         if name.endswith(".npz"):
             fresh, pinned = np.load(tmp_path / "fixture" / name), np.load(si.FIXTURE_DIR / name)
             assert sorted(fresh.files) == sorted(pinned.files)
             for key in pinned.files:
-                assert si.word_mismatches(fresh[key], pinned[key]) == 0, key
+                case, _, what = key.partition("/")
+                a, b = fresh[key], pinned[key]
+                if not recorded_libm and what == "trig":
+                    continue
+                if not recorded_libm and what == "i2x":
+                    keep = [k for k, f in enumerate(lists[case]) if f not in rotated]
+                    a, b = a[:, keep], b[:, keep]
+                assert si.word_mismatches(a, b) == 0, key
         else:
             assert (tmp_path / "fixture" / name).read_text() == (si.FIXTURE_DIR / name).read_text()

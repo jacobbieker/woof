@@ -335,7 +335,8 @@ matched exchange unless asked.
    Metal, against the routines compiled verbatim with the pinned Icepack.
    The rotation's sin/cos/asin/atan2 are glibc's in E3SM: the port takes
    their words as an input (the tests feed the oracle's), and
-   `rotation_trig` makes them with the host libm (glibc's words on Linux).
+   `rotation_trig` makes them with the host libm (the oracle's words under
+   glibc 2.44, the release they were recorded with; elsewhere it warns).
    The coupled column biogeochemistry, the z-aerosols coupled without it
    (E3SM reads through an unset pool pointer) and `nFrequencies` above
    `wav_nfreq` are refused by name.
