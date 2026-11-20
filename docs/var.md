@@ -65,15 +65,15 @@ The port lives in `woof.da.var`. Only this command and its tests import it
 
 Minimisation only (no I/O, no innovation step), the tutorial's namelist
 (50 iterations at most, `orthonorm_gradient`), measured 2026-11-20. The
-A6000 was shared with two other jobs at 100% utilisation, so its times
-are upper bounds.
+A6000 was shared with two or three other jobs, so its times are upper
+bounds and vary with the load.
 
 | case | tier | M3 Max (Metal) | A6000 (CUDA) |
 |---|---|---|---|
 | tutorial, 90x60x41, 41,857 observations, 29 iterations | `reference` | 10.5 s | 13.4 s |
 | | `oracle` | 81 s | 29 s |
-| | `production` | 1.4 s | 2.3 s |
-| synthetic 200x200x50, 101,000 obs values, 50 iterations | `production` | 2.9-3.1 s | 3.6-3.7 s |
+| | `production` | 1.4 s | 2.3-2.4 s |
+| synthetic 200x200x50, 101,000 obs values, 50 iterations | `production` | 2.9-3.1 s | 3.2-4.5 s |
 
 The plan's targets (section 4.12) are 20 s on the M3 Max and 5 s on the
 A6000 for the 200x200x50 case. `WOOF_VAR_PERF=1 pytest

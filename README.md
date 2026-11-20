@@ -978,7 +978,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `--tier oracle` runs on CUDA or Metal with the same words;
   `--tier production` (binary32) gives one digest on both. The production
   tier's 50-iteration minimisation on a synthetic 200x200x50 case with
-  ~10^5 observations takes 3.1 s on an M3 Max (Metal) and 3.6 s on a shared
+  ~10^5 observations takes 3.1 s on an M3 Max (Metal) and 3.2-4.5 s on a shared
   A6000 (targets 20 s and 5 s; the tutorial case: 1.4 s and 2.3 s), with
   H' and H'^T on the device as an ordered gather (no atomics). Section 11 plans geostationary imager
   radiances for initial conditions: Google's SatWeave mosaic and the native
