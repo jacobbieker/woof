@@ -19,8 +19,9 @@ THE BREAKAGES THESE PREVENT
 3. A fixture that misses a branch: each mapper kind on each map, each
    component absent, a sparse matrix in an unsorted file order with
    repeated elements and empty rows, ice fractions of 0, -0, 1, tiny and at
-   the bound, land and coastal points, each check stopping the coupler, and
-   the dead models reporting.
+   the bound, land and coastal points, each check stopping the coupler
+   (every checked fraction's bound on its own), NaN passing as in E3SM and
+   not hiding a bad value, and the dead models reporting.
 4. A check that drifts from E3SM's: the stops (stage and MCT's message), the
    reports of the dead models, the single-precision eps.
 5. A gate that cannot fail: mutated kernels, constants and element orders
@@ -44,6 +45,9 @@ QUIRKS (E3SM v3.2.0, seq_frac_mct.F90 / MCT)
   shuffled and repeat elements).
 - A -0 ice fraction stays -0 through a copy or rearrangement and becomes +0
   through the matrix (the row's sum starts from 0).
+- NaN fractions pass seq_frac_check: gfortran's minval/maxval skip NaN and
+  a comparison with NaN is false (kept; a NaN's payload is the processor's,
+  so NaN words compare as NaN).
 """
 from __future__ import annotations
 
@@ -105,6 +109,15 @@ def test_fixture_covers_the_branches():
     assert not ((a == 0) & np.signbit(a)).any()
     # the lower bound exactly: ifrac -eps, ofrac 1 + eps, both kept
     assert d["fractions_i"][4, 1] == -sf.EPS and d["fractions_i"][4, 2] == 1.0 + sf.EPS
+    # every checked fraction's bound stops the coupler on its own grid
+    poked = {what.split(":")[1] for c in cases.values() if c["aborts"] for what, _, _ in c["spec"]["poke"]
+             if ":" in what}
+    assert {"gfrac", "rfrac", "wfrac", "zfrac", "lfrin"} <= poked
+    assert set(sfe.CHECKED) <= set().union(*(c["spec"][k] for c in cases.values()
+                                             for k in ("fi_fields", "fo_fields", "fa_fields")))
+    # NaN passes (gfortran's minval/maxval skip it) and does not hide a bad value
+    assert all(np.isnan(outputs["nan_passes"][k]).any() for k in ("fractions_i", "fractions_o", "fractions_a"))
+    assert aborts["abort_nan_beside_bound"].startswith("(seq_frac_check) [ice set]")
     # absent components leave their vectors alone
     for name, key in (("atm_absent", "fractions_a"), ("ocn_absent", "fractions_o")):
         assert sf.word_mismatches(outputs[name][key], _case(name)[key]) == 0
@@ -162,8 +175,8 @@ def _device(case, **override):
     i2o, i2a = sf.mappers_for(case)
     s = case["spec"]
     kw = dict(i2x=dev["i2x"], i2x_fields=case["i2x_fields"], dom=dev["dom"], dom_fields=case["dom_fields"],
-              fractions_i=dev["fractions_i"], fi_fields=sf.FI_FIELDS, fractions_o=dev["fractions_o"],
-              fo_fields=sf.FO_FIELDS, fractions_a=dev["fractions_a"], fa_fields=sf.FA_FIELDS, mapper_i2o=i2o,
+              fractions_i=dev["fractions_i"], fi_fields=s["fi_fields"], fractions_o=dev["fractions_o"],
+              fo_fields=s["fo_fields"], fractions_a=dev["fractions_a"], fa_fields=s["fa_fields"], mapper_i2o=i2o,
               mapper_i2a=i2a, atm_present=s["atm"], ice_present=s["ice"], ocn_present=s["ocn"], dead=s["dead"])
     kw.update(override)
     return kw
@@ -235,6 +248,31 @@ def test_what_e3sm_gets_wrong_or_mct_stops_on_is_refused():
         sfe.seq_frac_set(**kw)
     with pytest.raises(TypeError, match="Mapper"):
         sfe.seq_frac_set(**_device(case, mapper_i2a="matrix"))
+    # a fraction vector sharing memory with another array
+    kw = _device(case)
+    kw.update(fractions_o=kw["fractions_i"], fo_fields=sf.FI_FIELDS)
+    with pytest.raises(ValueError, match="share memory"):
+        sfe.seq_frac_set(**kw)
+    kw = _device(case)
+    with pytest.raises(ValueError, match="share memory"):
+        sfe.seq_frac_set(**dict(kw, fractions_a=kw["i2x"], fa_fields=case["i2x_fields"]))
+
+
+@requires_gpu
+def test_an_array_on_another_device_is_refused(monkeypatch):
+    monkeypatch.setattr(sfe, "_device_of", lambda a: 99)
+    with pytest.raises(ValueError, match="device 99"):
+        sfe.seq_frac_set(**_device(_case("mpas_default")))
+
+
+def test_the_mapper_takes_arrays_and_keeps_them_read_only():
+    rows, cols, w = np.array([2, 1, 2]), np.array([1, 2, 2]), np.array([0.25, 0.5, 0.75])
+    a = sfe.Mapper("matrix", rows, cols, w, n_dst=2, n_src=2)
+    b = sfe.Mapper("matrix", tuple(rows.tolist()), tuple(cols.tolist()), tuple(w.tolist()), n_dst=2, n_src=2)
+    for x, y in zip(a._csr, b._csr):
+        assert np.array_equal(x, y)
+    rows[0] = 1  # the mapper holds its own copy
+    assert a.rows[0] == 2 and not a.rows.flags.writeable and not a.weights.flags.writeable
 
 
 def _outcome(case):
@@ -305,16 +343,8 @@ def test_a_mutated_constant_is_caught(monkeypatch, name, value, case):
 def test_the_file_order_is_not_the_summation_order(monkeypatch):
     """Summing each row in the mapping file's order (not MCT's sorted one)
     changes words."""
-    real = np.lexsort
-
-    def by_row_only(keys):
-        return np.argsort(keys[-1], kind="stable")
-
-    monkeypatch.setattr(sfe.np, "lexsort", by_row_only)
-    try:
-        assert _caught("mpas_default") or _caught("ocean_matrix_atm_copy")
-    finally:
-        monkeypatch.setattr(sfe.np, "lexsort", real)
+    monkeypatch.setattr(sfe, "_sort", lambda rows, cols: np.argsort(rows, kind="stable"))
+    assert _caught("mpas_default")
 
 
 def _oracle_toolchain():

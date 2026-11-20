@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from woof.verify.e3sm_ocean_merge_oracle import word_mismatches  # noqa: F401
+from woof.verify.e3sm_ocean_merge_oracle import word_mismatches as _bit_mismatches
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "e3sm_seq_frac"
 
@@ -46,17 +46,27 @@ KIND_CODES = {"copy": 0, "rearrange": 1, "matrix": 2}
 
 
 def _spec(name, *, seed, ni=37, no=None, na=23, i2o="rearrange", i2a="matrix", atm=True, ice=True, ocn=True,
-          dead=False, aborts=False, poke=(), dom_other=DOM_OTHER, i2x_fields=I2X_FIELDS):
+          dead=False, aborts=False, poke=(), dom_other=DOM_OTHER, i2x_fields=I2X_FIELDS, fi_more=(), fo_more=(),
+          fa_more=()):
     no = ni if no is None or i2o != "matrix" else no
     na = ni if i2a != "matrix" else na
     return dict(name=name, seed=seed, ni=ni, no=no, na=na, i2o=i2o, i2a=i2a, atm=atm,
                 ice=ice, ocn=ocn, dead=dead, aborts=aborts, poke=tuple(poke), dom_other=tuple(dom_other),
-                i2x_fields=tuple(i2x_fields))
+                i2x_fields=tuple(i2x_fields), fi_fields=FI_FIELDS + tuple(fi_more),
+                fo_fields=FO_FIELDS + tuple(fo_more), fa_fields=FA_FIELDS + tuple(fa_more))
+
+
+#: the fractions seq_frac_check tests that seq_frac_init's lists here lack:
+#: added to the ice and ocean vectors so each bound is exercised
+FI_MORE = ("lfrin", "gfrac")
+FO_MORE = ("gfrac", "rfrac", "wfrac", "zfrac", "lfrin")
 
 
 #: seq_frac_mct's eps_fracval: the default-real literal 1.0e-02, so float32(0.01) widened
 EPS = float(np.float32(1.0e-02))
 _BELOW = float(np.nextafter(-EPS, -1.0))
+#: the default quiet NaN (x86's and gfortran's ieee_quiet_nan)
+NAN = struct.unpack("<d", struct.pack("<Q", 0x7FF8000000000000))[0]
 SPECS = (
     _spec("mpas_default", seed=1),
     _spec("ocean_matrix_atm_copy", seed=2, ni=29, no=33, i2o="matrix", i2a="copy"),
@@ -75,6 +85,21 @@ SPECS = (
     _spec("abort_atm_sum_float32_eps", seed=14, aborts=True, i2a="copy", poke=(("fa_lfrac", 0, 0.0099999999),)),
     # no Si_ifrac: mct_aVect_copy's shared-index lookup stops
     _spec("abort_i2x_without_si_ifrac", seed=12, aborts=True, i2x_fields=("Si_t", "Si_avsdr", "Si_snowh")),
+    # every checked fraction present on the ice and ocean grids, within bounds
+    _spec("checked_fields_in_bounds", seed=15, fi_more=FI_MORE, fo_more=FO_MORE),
+    # each of them out of bounds on its own
+    _spec("abort_ice_lfrin", seed=16, aborts=True, fi_more=FI_MORE, poke=(("fi:lfrin", 5, -0.0101),)),
+    _spec("abort_ice_gfrac", seed=17, aborts=True, fi_more=FI_MORE, poke=(("fi:gfrac", 9, 1.0101),)),
+    _spec("abort_ocn_gfrac", seed=18, aborts=True, fo_more=FO_MORE, poke=(("fo:gfrac", 3, -0.0101),)),
+    _spec("abort_ocn_rfrac", seed=19, aborts=True, fo_more=FO_MORE, poke=(("fo:rfrac", 7, 1.0101),)),
+    _spec("abort_ocn_wfrac", seed=20, aborts=True, fo_more=FO_MORE, poke=(("fo:wfrac", 11, -0.0101),)),
+    _spec("abort_ocn_zfrac", seed=21, aborts=True, fo_more=FO_MORE, poke=(("fo:zfrac", 13, 1.0101),)),
+    _spec("abort_ocn_lfrin", seed=22, aborts=True, fo_more=FO_MORE, poke=(("fo:lfrin", 17, -0.0101),)),
+    # NaN: gfortran's minval/maxval skip it and a comparison with it is false, so E3SM goes on
+    _spec("nan_passes", seed=23, fo_more=FO_MORE,
+          poke=(("Si_ifrac", 9, NAN), ("fo:gfrac", 4, NAN), ("fa:lfrac", 5, NAN), ("fa:lfrin", 6, NAN))),
+    # ... and a NaN beside an out-of-bounds value does not hide it
+    _spec("abort_nan_beside_bound", seed=24, aborts=True, poke=(("Si_ifrac", 9, NAN), ("Si_ifrac", 6, _BELOW))),
 )
 
 
@@ -150,8 +175,19 @@ def _build(spec) -> dict:
     lfrac = np.clip((1.0 - covered) + _uniform(rng, -0.004, 0.004, na), 0.0, 1.0)
     fa = np.column_stack([_uniform(rng, 0.0, 1.0, na), np.full(na, 7.5), np.full(na, -7.5), lfrac,
                           _uniform(rng, 0.0, 1.0, na)])
+    extra = np.random.default_rng(5000 + spec["seed"])
+    vectors = {"fi": fi, "fo": fo, "fa": fa}
+    for key, base in (("fi", FI_FIELDS), ("fo", FO_FIELDS), ("fa", FA_FIELDS)):
+        more = spec[key + "_fields"][len(base):]
+        if more:
+            v = vectors[key]
+            vectors[key] = np.column_stack([v] + [_uniform(extra, 0.0, 1.0, v.shape[0]) for _ in more])
+    fi, fo, fa = vectors["fi"], vectors["fo"], vectors["fa"]
     for what, k, v in spec["poke"]:
-        if what == "Si_ifrac":
+        if what[:3] in ("fi:", "fo:", "fa:"):
+            vec = {"fi": fi, "fo": fo, "fa": fa}[what[:2]]
+            vec[k, spec[what[:2] + "_fields"].index(what[3:])] = v
+        elif what == "Si_ifrac":
             i2x[k, i2x_fields.index("Si_ifrac")] = v
         elif what == "fo_afrac":
             fo[k, 0] = v
@@ -173,7 +209,7 @@ def input_bytes(case: dict) -> bytes:
     s = case["spec"]
     out = [struct.pack("<9i", int(s["atm"]), int(s["ice"]), int(s["ocn"]), int(s["dead"]),
                        KIND_CODES[s["i2o"]], KIND_CODES[s["i2a"]], s["ni"], s["no"], s["na"])]
-    lists = (case["i2x_fields"], s["dom_other"], FI_FIELDS, FO_FIELDS, FA_FIELDS)
+    lists = (case["i2x_fields"], s["dom_other"], s["fi_fields"], s["fo_fields"], s["fa_fields"])
     arrays = (case["i2x"], case["dom"], case["fractions_i"], case["fractions_o"], case["fractions_a"])
     for names, a in zip(lists, arrays):
         text = ":".join(names).encode()
@@ -194,8 +230,8 @@ def input_digest(case: dict) -> str:
 def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     s = case["spec"]
     out, at = {}, 0
-    for key, n, nf in (("fractions_i", s["ni"], len(FI_FIELDS)), ("fractions_o", s["no"], len(FO_FIELDS)),
-                       ("fractions_a", s["na"], len(FA_FIELDS))):
+    for key, n, nf in (("fractions_i", s["ni"], len(s["fi_fields"])), ("fractions_o", s["no"], len(s["fo_fields"])),
+                       ("fractions_a", s["na"], len(s["fa_fields"]))):
         out[key] = np.frombuffer(raw, dtype="<f8", count=n * nf, offset=at).reshape(n, nf).astype(np.float64)
         at += 8 * n * nf
     if at != len(raw):
@@ -238,8 +274,7 @@ def mappers_for(case: dict):
     for key, nd in (("i2o", s["no"]), ("i2a", s["na"])):
         if s[key] == "matrix":
             rows, cols, w = case["matrices"][key]
-            out.append(sf.Mapper("matrix", tuple(rows.tolist()), tuple(cols.tolist()), tuple(w.tolist()),
-                                 n_dst=nd, n_src=s["ni"]))
+            out.append(sf.Mapper("matrix", rows, cols, w, n_dst=nd, n_src=s["ni"]))
         else:
             out.append(sf.Mapper(s[key]))
     return out
@@ -255,13 +290,24 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     dev = {k: cp.asarray(np.ascontiguousarray(case[k], dtype=np.float64))
            for k in ("i2x", "dom", "fractions_i", "fractions_o", "fractions_a")}
     reported = sf.seq_frac_set(i2x=dev["i2x"], i2x_fields=case["i2x_fields"], dom=dev["dom"],
-                               dom_fields=case["dom_fields"], fractions_i=dev["fractions_i"], fi_fields=FI_FIELDS,
-                               fractions_o=dev["fractions_o"], fo_fields=FO_FIELDS,
-                               fractions_a=dev["fractions_a"], fa_fields=FA_FIELDS, mapper_i2o=i2o, mapper_i2a=i2a,
+                               dom_fields=case["dom_fields"], fractions_i=dev["fractions_i"], fi_fields=s["fi_fields"],
+                               fractions_o=dev["fractions_o"], fo_fields=s["fo_fields"],
+                               fractions_a=dev["fractions_a"], fa_fields=s["fa_fields"], mapper_i2o=i2o, mapper_i2a=i2a,
                                atm_present=s["atm"], ice_present=s["ice"], ocn_present=s["ocn"], dead=s["dead"])
     out = {k: cp.asnumpy(dev[k]) for k in ("fractions_i", "fractions_o", "fractions_a")}
     out["reported"] = np.array(reported, dtype="<U8")
     return out
+
+
+def word_mismatches(got, want) -> int:
+    """Words that differ, a NaN matching any NaN: E3SM lets NaN fractions
+    through, and the word a NaN takes through an operation (its payload) is
+    the processor's, x86's or the GPU's, outside the word-for-word claim."""
+    got, want = np.asarray(got, dtype=np.float64), np.asarray(want, dtype=np.float64)
+    if got.shape != want.shape:
+        return _bit_mismatches(got, want)
+    both = np.isnan(got) & np.isnan(want)
+    return _bit_mismatches(np.where(both, 0.0, got), np.where(both, 0.0, want))
 
 
 def measure() -> dict[str, dict[str, int]]:

@@ -32,9 +32,14 @@ a copy or rearrangement between grids of different sizes (MCT stops).
 
 ``atm_frac_correct`` is a ``.false.`` parameter in v3.2.0, so its branch is
 dead and not ported. The nonlinear maps (``seq_nlmap_mod``) are not reached
-(``omit_nonlinear``). NaN inputs are outside the word-for-word claim
-(``seq_frac_check``'s ``minval``/``maxval`` and the GPU's comparisons treat
-a NaN differently).
+(``omit_nonlinear``).
+
+NaN fractions pass, as in E3SM: gfortran's ``minval``/``maxval`` skip NaN
+(an all-NaN field gives NaN) and every comparison with NaN is false, so
+``seq_frac_check`` stops only on the other points' values, as the
+point-by-point test here does (``nan_passes``, ``abort_nan_beside_bound``).
+Where a NaN goes, a NaN comes out; its payload is the processor's (x86's in
+the oracle, the GPU's here), the one word outside the word-for-word claim.
 
 This is not called by any default path. ``real(r8)`` only, one task (one
 block). The kernels (``seq_frac_e3sm.cu``) are held word for word to E3SM's
@@ -83,21 +88,22 @@ class FracAbort(RuntimeError):
         self.stage = stage
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Mapper:
     """A ``seq_map`` as one task holds it.
 
     ``kind`` is ``"copy"`` (``copy_only``), ``"rearrange"``
     (``rearrange_only``; on one task the identity) or ``"matrix"``: the
     mapping file's elements, ``rows`` and ``cols`` 1-based global indices
-    and ``weights``, in the file's order, onto ``n_dst`` points. MCT keeps
+    and ``weights`` (arrays or sequences; held as read-only numpy arrays),
+    in the file's order, onto ``n_dst`` points. MCT keeps
     them sorted by row and then column (stable: repeated elements keep the
     file's order), and that is each row's summation order."""
 
     kind: str
-    rows: tuple = ()
-    cols: tuple = ()
-    weights: tuple = ()
+    rows: object = ()
+    cols: object = ()
+    weights: object = ()
     n_dst: int = 0
     n_src: int = 0
     _csr: tuple = field(default=(), compare=False, repr=False)
@@ -107,19 +113,27 @@ class Mapper:
             raise ValueError(f"unknown mapper kind {self.kind!r}: one of {KINDS}")
         if self.kind != "matrix":
             return
-        rows, cols = np.asarray(self.rows, dtype=np.int64), np.asarray(self.cols, dtype=np.int64)
-        w = np.asarray(self.weights, dtype=np.float64)
+        rows, cols = np.array(self.rows, dtype=np.int64), np.array(self.cols, dtype=np.int64)
+        w = np.array(self.weights, dtype=np.float64)
+        for name, a in (("rows", rows), ("cols", cols), ("weights", w)):
+            a.setflags(write=False)
+            object.__setattr__(self, name, a)
         if not (rows.ndim == cols.ndim == w.ndim == 1 and rows.size == cols.size == w.size):
             raise ValueError("rows, cols and weights must be 1-D and the same length")
         if self.n_dst < 0 or self.n_src < 0:
             raise ValueError("n_dst and n_src must not be negative")
         if rows.size and (rows.min() < 1 or rows.max() > self.n_dst or cols.min() < 1 or cols.max() > self.n_src):
             raise ValueError("a matrix element's row or column is outside the grids (1-based)")
-        order = np.lexsort((cols, rows))  # stable: by row, then column, then the file's order
+        order = _sort(rows, cols)
         start = np.zeros(self.n_dst + 1, dtype=np.int32)
         np.cumsum(np.bincount(rows - 1, minlength=self.n_dst), out=start[1:])
         object.__setattr__(self, "_csr", (start, (cols[order] - 1).astype(np.int32),
                                           np.ascontiguousarray(w[order])))
+
+
+def _sort(rows, cols):
+    """MCT's element order: by row, then column, then the file's order (stable)."""
+    return np.lexsort((cols, rows))
 
 
 def module_source() -> str:
@@ -143,8 +157,16 @@ def _options() -> tuple[str, ...]:
     return _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True, numerics=_hex_numerics._bind())
 
 
+def _device_of(a) -> int:
+    return int(a.device.id)
+
+
 def _launch(kernel: str, n: int, args) -> None:
     import cupy as cp
+    device = cp.cuda.Device().id
+    for a in args:
+        if isinstance(a, cp.ndarray) and _device_of(a) != device:
+            raise ValueError(f"an array of {kernel} is on device {_device_of(a)}; the current device is {device}")
     if n > 0:
         _module_on(cp.cuda.Device().id, _options()).get_function(kernel)(
             ((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,), tuple(args))
@@ -163,6 +185,25 @@ def _av(name, array, fields, n=None):
     if n is not None and int(array.shape[0]) != n:
         raise ValueError(f"{name} must have {n} points; it has {array.shape[0]}")
     return {f: k for k, f in enumerate(fields)}
+
+
+def _span(a):
+    start = int(a.data.ptr)
+    return start, start + int(a.nbytes)
+
+
+def _refuse_aliases(arrays: dict) -> None:
+    """The kernels write the fraction vectors and read the others: no
+    fraction vector may share memory with another array (i2x and the domain
+    are only read)."""
+    names = [k for k, a in arrays.items() if a.size]
+    for j, x in enumerate(names):
+        for y in names[j + 1:]:
+            if {x, y} == {"i2x", "dom"}:
+                continue
+            (a0, a1), (b0, b1) = _span(arrays[x]), _span(arrays[y])
+            if a0 < b1 and b0 < a1:
+                raise ValueError(f"{x} and {y} share memory; seq_frac_set needs separate vectors")
 
 
 def _need(pos, name, av):
@@ -225,6 +266,8 @@ def seq_frac_set(*, i2x, i2x_fields, dom, dom_fields, fractions_i, fi_fields, fr
     for m in (mapper_i2o, mapper_i2a):
         if not isinstance(m, Mapper):
             raise TypeError("the mappers must be seq_frac_e3sm.Mapper")
+    _refuse_aliases({"i2x": i2x, "dom": dom, "fractions_i": fractions_i, "fractions_o": fractions_o,
+                     "fractions_a": fractions_a})
     errors: list[str] = []
     if not ice_present:
         return errors

@@ -63,7 +63,8 @@ extern "C" __global__ void seq_frac_matrix(
 // vector lacks it) is below 0 - eps_fracval or above 1 + eps_fracval, or,
 // with lfrac, ofrac and ifrac all present, |1 - (ofrac + lfrac + ifrac)|
 // exceeds eps_fracsum. The Fortran tests the vector's minimum and maximum;
-// with no NaN that is the same as testing every point.
+// that is the same as testing every point, NaN included: gfortran's
+// minval/maxval skip NaN and a comparison with NaN is false.
 extern "C" __global__ void seq_frac_check(
     const r8* __restrict__ av, int nf, const int* __restrict__ k, int nk, int kl, int ko, int ki,
     r8 eps_fracval, r8 eps_fracsum, int* __restrict__ bad, int n)
