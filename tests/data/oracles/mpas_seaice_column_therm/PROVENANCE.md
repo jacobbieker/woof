@@ -29,6 +29,22 @@ Written by `tools/mpas_seaice_oracle/build.sh` and
   zero where hsn <= 1e-4, and the interior shortwave is the sum of the layer
   terms. Some cells are ice-free, sub-puny or have no snow, and one cell
   forms snow ice.
+- v8.4.2's own bugs, kept word for word by default, each with an opt-in
+  correction (`woof_v842_corrections`; not in the oracle, tested in
+  `tests/test_mpas_seaice_column_corrections.py`):
+  - `colpkg_step_therm1` passes `set_sfcflux` the coupled conductive flux
+    as the surface flux and the reverse (`ice_colpkg.F90:2095-2101` against
+    `ice_flux_colpkg.F90:169-177`). `set_sfcflux_order` reads each as what
+    it is; the test gives the corrected run the two fluxes under their own
+    names and gets v8.4.2's run word for word;
+  - `colpkg_atm_boundary` gets `uVelocity`, a vertex field, at the cell's
+    index (`mpas_seaice_column.F:1511-1512`) and passes `uvel` for `vvel`
+    (`ice_colpkg.F90:3474-3479`), so high-frequency coupling's stress is
+    against another point's u and no v. `ice_velocity_at_cell` passes both
+    components of the cell's ice velocity
+    (`seaice_interpolate_vertex_to_cell`); the tests check that ice
+    drifting with the wind feels no stress and that the stress follows the
+    wind relative to the areaTriangle-weighted vertex mean.
 - `oracle-r8.npz`: per case, every output field whose words differ from the
   input's. `column-logs.json`: the tracer object and the log lines.
   `inputs.sha256`: the input-stream digests.

@@ -35,7 +35,8 @@
 // v8.4.2 passes ncat as absorbed_solar's nilyr (ice_shortwave.F90:236): the
 // penetrating light is spread over ncat layers of thickness hi/ncat, and the
 // ice layers below the ncat-th keep 0. The host refuses ncat > nilyr, where
-// absorbed_solar writes past the category's layers.
+// absorbed_solar writes past the category's layers. The opt-in correction
+// ccsm3_absorbed_solar_layers (SW_FIX_LAYERS) passes nilyr.
 //
 // One thread is one owned cell: a(nCategories, nCells) is a[c*ncat + n] and
 // a(nLayers, nCategories, nCells) is a[(c*ncat + n)*nLayers + k].
@@ -63,6 +64,7 @@
 #define SW_ALBEDO_CONSTANT 2    // albedo_type == 'constant'
 #define SW_CALC_TSFC 4          // calc_Tsfc
 #define SW_POND_TOPO 8          // tr_pond_topo
+#define SW_FIX_LAYERS 16        // opt-in correction ccsm3_absorbed_solar_layers: nilyr, not ncat
 
 // gfortran's MIN/MAX: mvar = a; if (b < mvar || isnan(mvar)) mvar = b
 __device__ __forceinline__ double sw_min(double a, double b) { return (b < a || isnan(a)) ? b : a; }
@@ -280,7 +282,7 @@ extern "C" __global__ void seaice_column_radiation_v842(
                                        albsnowi, ahmax, &alvdrni, &alidrni, &alvdfni, &alidfni, &alvdrns,
                                        &alidrns, &alvdfns, &alidfns, &alvdrn[n], &alidrn[n], &alvdfn[n],
                                        &alidfn[n], &albin[n], &albsn[n]);
-                sw_absorbed_solar(heat_capacity, ncat, aicen[n], vicen[n], vsnon[n], swvdr, swvdf, swidr, swidf,
+                sw_absorbed_solar(heat_capacity, (flags & SW_FIX_LAYERS) ? nilyr : ncat, aicen[n], vicen[n], vsnon[n], swvdr, swvdf, swidr, swidf,
                                   alvdrni, alvdfni, alidrni, alidfni, alvdrns, alvdfns, alidrns, alidfns,
                                   &fswsfcn[n], &fswintn[n], &fswthrun[n], &fswpenln[n * (nilyr + 1)],
                                   &Iswabsn[n * nilyr]);

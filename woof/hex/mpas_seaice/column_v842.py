@@ -349,6 +349,48 @@ def _refuse(knob: str, value, reason: str, declaration: str):
     raise ConfigurationRefusal(knob=knob, value=value, reason=reason, declaration=declaration)
 
 
+#: Opt-in corrections of v8.4.2 bugs the column port otherwise keeps word for word.
+#: ``configs["woof_v842_corrections"]`` names the ones to apply (default none: the
+#: oracle's words). Each is documented where v8.4.2's behaviour is, and tested on its
+#: own for physical sanity; none is held to the oracle.
+CORRECTIONS = {
+    "set_sfcflux_order": (
+        "colpkg_step_therm1 passes set_sfcflux its coupled fluxes in the wrong order "
+        "(ice_colpkg.F90:2095-2101 against ice_flux_colpkg.F90:169-177), so with "
+        "config_calc_surface_temperature off the coupled conductive flux becomes the surface flux and the "
+        "other way round; the correction passes them in set_sfcflux's order"),
+    "ice_velocity_at_cell": (
+        "column_vertical_thermodynamics hands colpkg the vertex field uVelocity at the cell's index "
+        "(mpas_seaice_column.F:1511-1512) and colpkg_atm_boundary drops vvel (its second "
+        "'if (present(uvel)) worku = uvel', ice_colpkg.F90:3474-3479), so the ice velocity in the "
+        "atmosphere's relative wind is another vertex's u and no v; the correction uses the cell's ice "
+        "velocity, both components (seaice_interpolate_vertex_to_cell)"),
+    "ccsm3_absorbed_solar_layers": (
+        "shortwave_ccsm3 passes ncat as absorbed_solar's nilyr (ice_shortwave.F90:236), so the penetrating "
+        "light is spread over ncat layers of thickness hi/ncat (and past the category's layers when "
+        "ncat > nilyr); the correction passes nilyr"),
+    "dedd_zero_volume_ice": (
+        "compute_dEdd's chlorophyll absorption kalg*(0.5/dzk(klev)) (ice_shortwave.F90:2212) divides by a zero "
+        "layer thickness when a category has area but no volume: the bottom layer's extinction is infinite, so "
+        "with algae the visible light reaching it is absorbed in ice that is not there, and with kalg = 0 "
+        "(0*Inf) the category's shortwave is NaN; the correction gives layers without thickness no "
+        "chlorophyll absorption, so they are transparent"),
+}
+
+
+def corrections(configs: dict) -> frozenset[str]:
+    """The opt-in corrections ``configs`` names (``woof_v842_corrections``),
+    refusing names that are not in :data:`CORRECTIONS`."""
+    names = configs.get("woof_v842_corrections", ())
+    if isinstance(names, str):
+        names = (names,)
+    unknown = sorted(set(names) - CORRECTIONS.keys())
+    if unknown:
+        _refuse("woof_v842_corrections", unknown, "these are not corrections of the column port",
+                "names from woof.hex.mpas_seaice.column_v842.CORRECTIONS: " + ", ".join(sorted(CORRECTIONS)))
+    return frozenset(names)
+
+
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what this stage of the column port does not carry."""
     c = configs

@@ -29,7 +29,7 @@ What it refuses, by name:
   the biogeochemistry);
 - ``shortwave_ccsm3`` with more categories than ice layers: v8.4.2 passes
   ``ncat`` as ``absorbed_solar``'s ``nilyr`` (``ice_shortwave.F90:236``) and
-  then writes past the category's layers;
+  then writes past the category's layers (unless corrected, below);
 - the ``ccsm3`` albedos (the Registry default) in the default build:
   ``compute_albedos`` calls glibc's binary64 ``atan``, which is not correctly
   rounded and is LGPL, so it compiles only with ``WOOF_GLIBC239_LIBM64=1``
@@ -50,9 +50,18 @@ zero-heat-capacity fold of the top layers' absorption into the surface runs
 on each surface type's sums so far; categories without ice keep their
 bare-ice, snow and pond albedos. Ice without volume (``aice > puny``,
 ``vice = 0``) has layers without thickness, and v8.4.2's
-``kalg*(0.5/dzk(klev))`` makes NaN there, as the port does; a NaN's payload
-is the host's, so those words are not compared. The day of the year follows
+``kalg*(0.5/dzk(klev))`` makes the bottom layer's extinction infinite there,
+as the port does: with algae the visible light reaching it is absorbed in ice
+that is not there, and with ``kalg = 0`` the category's shortwave is NaN (a
+NaN's payload is the host's, so those words are not compared). The day of the year follows
 ``config_calendar_type`` (``gregorian`` or ``gregorian_noleap``).
+
+Opt-in corrections (``configs["woof_v842_corrections"]``, named in
+:data:`column_v842.CORRECTIONS`; the default is v8.4.2's words):
+``ccsm3_absorbed_solar_layers`` passes the category's ``nilyr`` to
+``absorbed_solar`` (and lifts the ``ncat > nilyr`` refusal), and
+``dedd_zero_volume_ice`` gives the delta-Eddington layers without thickness
+no chlorophyll absorption, so ice without volume is transparent.
 
 ``exp`` is ``glibc_exp`` (the MIT transcription of glibc's binary64 exp).
 """
@@ -101,11 +110,13 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         _refuse("config_use_shortwave_bioabsorption", True,
                 "the shortwave bioabsorption (compute_shortwave_trcr) is not ported",
                 "config_use_shortwave_bioabsorption = .false.")
-    if calc_tsfc and not dedd and dims["nCategories"] > dims["nIceLayers"]:
+    if calc_tsfc and not dedd and dims["nCategories"] > dims["nIceLayers"] and \
+            "ccsm3_absorbed_solar_layers" not in cv.corrections(c):
         _refuse("config_nCategories", dims["nCategories"],
                 "shortwave_ccsm3 passes ncat as absorbed_solar's nilyr (ice_shortwave.F90:236), which then "
                 "writes past the category's ice layers",
-                "config_nCategories <= config_nIceLayers")
+                "config_nCategories <= config_nIceLayers, or the opt-in correction "
+                "woof_v842_corrections = ('ccsm3_absorbed_solar_layers',)")
     if calc_tsfc and not dedd and c["config_albedo_type"] == "ccsm3" and not rkind.trig64():
         _refuse("config_albedo_type", "ccsm3", rkind.trig_refusal("compute_albedos calls glibc's double atan"),
                 "WOOF_GLIBC239_LIBM64=1 or config_albedo_type = 'constant'")
@@ -154,7 +165,7 @@ def _function(name: str):
 
 def _flags(configs: dict, state: "cv.ColumnState") -> int:
     bits = (state.ktherm != 0, configs["config_albedo_type"] == "constant", state.calc_tsfc,
-            configs["config_use_topo_meltponds"])
+            configs["config_use_topo_meltponds"], "ccsm3_absorbed_solar_layers" in cv.corrections(configs))
     return sum(int(bool(b)) << i for i, b in enumerate(bits))
 
 
@@ -268,7 +279,7 @@ def _radiation_dedd(pools: dict, configs: dict, state: "cv.ColumnState", initial
     snowfrac = cv._need(sw, "snowFractionCategory", cat)
     bio, nbio = _bio(pools, n1, ncat, dummy)
     flags = (int(cesm) | int(level) << 1 | int(topo) << 2 | int(bool(initialization)) << 3
-             | int(state.ktherm != 0) << 4)
+             | int(state.ktherm != 0) << 4 | int("dedd_zero_volume_ice" in cv.corrections(c)) << 5)
     par = cp.asarray(_dedd_parameters(c, day))
     orb = _orbit()
     args = (np.int32(ncat), np.int32(nil), np.int32(nsl), np.int32(nbio), np.int32(flags), np.int32(sec),

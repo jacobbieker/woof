@@ -4997,7 +4997,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_dedd_v842.cu",
-    "sha256": "478890e23d8163c74a3b75c46ae1fa32859ab090921fb74d2672f512919109df"
+    "sha256": "bd66ee7571ab22bdb105fce8d8868101388f333611bf70e04b16af9be772594f"
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.cu",
@@ -5005,7 +5005,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.cu",
-    "sha256": "c37899ab99620f0bd86014ee69baf65b045b1fb67fdaad6303b2918e30ff2a55"
+    "sha256": "8f202e8cce4645483887f2b77618bd23c274bcbf567acfe3e731c40149ffd517"
    },
    {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.cu",
@@ -5013,7 +5013,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_therm_v842.cu",
-    "sha256": "2eb0460257ea3e4c6bb2c2359e51bfaa98396274ebe4becab36af35fa8743935"
+    "sha256": "5703a62e6700ba445875d761eaaa0d408c36cc87aff001f72c524a82bba83088"
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.cu",
@@ -6031,7 +6031,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
-    "sha256": "70fe524f8ffe36c6f2f7142a99aa413d7d0bad8fb35599b788a3181bc10adb7b"
+    "sha256": "0445b1dc931f8a0b2567ea4a94fa0927b95dd9a8530c72019ff0e6f01cbcd5dd"
    },
    {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.py",
@@ -6039,11 +6039,11 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_therm_v842.py",
-    "sha256": "72c3246f98927b8a63f1fec3f9d2b329e5d51a05c8c822532b71fb849277d11c"
+    "sha256": "c29515f12fc87c8d14854c71453eb81663dc015a3066d29efbf2c11db7f08a4b"
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.py",
-    "sha256": "1bcd243acefa4a886f6e8e48397480c363b86f97dc25097d3177b0d8c06a5595"
+    "sha256": "552cff87c2c650ba8f1feed1c430144f91dcffd9a7162911d4945749b90c3a52"
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
