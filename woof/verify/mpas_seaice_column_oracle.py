@@ -895,7 +895,7 @@ def _step_state(rs, case: dict) -> None:
     thermodynamics, which sets it), the ridging forcing and
     ``dynamicsTimeStep``, the down shortwave (a cell without sun), the area
     albedos and the previous net shortwave prep_radiation scales by, the
-    longitudes and the rain. Ice has volume everywhere (the
+    longitudes, the rain and the initial salinity profile new ice takes. Ice has volume everywhere (the
     delta-Eddington shortwave's ice without volume, see :func:`_dedd_state`)."""
     _thermo_state(rs, case)
     pools, dims, config = case["pools"], case["dims"], case["config"]
@@ -931,6 +931,11 @@ def _step_state(rs, case: dict) -> None:
     sw["shortwaveScalingFactor"] = u(50.0, 400.0, (n1,))
     sw["solarZenithAngleCosine"] = u(0.05, 0.9, (n1,))
     pools["mesh"]["lonCell"] = u(0.0, 2.0 * np.pi, (n1,))
+    # seaice_init_column_physics_package_variables' profiles, which the new ice takes
+    nil = dims["nIceLayers"]
+    initial = pools["initial"]
+    initial["initialSalinityProfile"] = u(0.5, 3.5, (n1, nil + 1))
+    initial["initialMeltingTemperatureProfile"] = -_DEPRESST * initial["initialSalinityProfile"]
     for key, (a, b) in (("iceAge", (0.0, 3.0e7)), ("firstYearIceArea", (0.0, 1.0)),
                         ("levelIceArea", (0.2, 1.0)), ("levelIceVolume", (0.2, 1.0)),
                         ("pondArea", (0.0, 0.3)), ("pondDepth", (0.0, 0.2)),
