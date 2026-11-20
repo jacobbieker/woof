@@ -998,6 +998,22 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   check, and places each observation at its weighting-function peak.
   Variational bias correction and the 3D-Var radiance operator come next
   (plan section 11).
+- **WIS2 observation reader (opt-in; in-situ families first).**
+  `woof obs wis2 fetch` reads the WIS2 Global Cache archive
+  (`bkr/obs/wis2.icechunk` on Source Cooperative, anonymous). It covers
+  land stations (BUFR and SYNOP TAC), ships and buoys, radiosondes,
+  aircraft and wind profilers in a time window and box. It applies the
+  store's quality flags and keeps the latest correction of each report.
+  It merges each sounding's TEMP parts, and it checks every part against
+  the rest of its launch. A part whose pressures are ten times too large is
+  detected and refused; the US Part D (`TEMP_DD`) objects in the store
+  have this fault. Errors are WRFDA's OBSPROC table (`obserr.txt`). It
+  writes a `gpuwm-obs.table.v2` table for the LETKF (`--table`) and
+  OBSPROC's `obs_gts` ASCII for `woof.da.var` (`--obs-gts`). Profilers go
+  only to `obs_gts`, because the LETKF's point operators are
+  pressure-level only. WIS2 has no US AMDAR. Satellite families (MW
+  radiances, AMVs, scatterometer winds, GNSS-RO) come next
+  ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA

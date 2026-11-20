@@ -2704,6 +2704,23 @@ Takes no options of its own.
 |---|---|
 | `--dir` | the directory `fetch` wrote the streams under |
 
+## `woof obs wis2`
+
+Takes no options of its own.
+
+## `woof obs wis2 fetch`
+
+| option | what it does |
+|---|---|
+| `--bbox ('SOUTH', 'NORTH', 'WEST', 'EAST')` | _(the parser declares no help text for this option)_ |
+| `--end` | window end, ISO 8601 UTC |
+| `--families` | comma list of land, ocean, sonde, aircraft, profiler |
+| `--obs-gts` | write OBSPROC obs_gts ASCII here (for 3D-Var / WRFDA) |
+| `--receipt` | also write the JSON receipt here |
+| `--snapshot` | read this Icechunk snapshot id instead of main's head |
+| `--start` | window start, ISO 8601 UTC |
+| `--table` | write gpuwm-obs.table.v2 CSV here (for the ensemble filter) |
+
 ## `woof ocean`
 
 | option | what it does |

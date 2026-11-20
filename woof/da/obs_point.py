@@ -195,7 +195,7 @@ def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
                     t = np.interp(height, z_m, col['t'][:, j, i])
                     q = np.interp(height, z_m, col['q'][:, j, i])
                 h.append(float(refractivity_n(p, t, q)))
-        elif pressure is not None and label in ('sonde_level', 'amv_assigned_pressure', ''):
+        elif pressure is not None and label in ('sonde_level', 'amv_assigned_pressure', 'aircraft_level', ''):
             if row.variable not in ('temperature_k', 'wind_u_m_s', 'wind_v_m_s', 'dewpoint_k'):
                 counts['no_pressure_level_operator'] += 1
                 continue
