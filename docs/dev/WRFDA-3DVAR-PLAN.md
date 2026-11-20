@@ -2690,14 +2690,20 @@ This is WRFDA's `da_varbc` (Auligné et al. 2007), channel by channel.
   divided by `varbc_factor^2`. The inverse square root uses a cyclic Jacobi
   eigensolver in binary64 on the host (not LAPACK), so the same inputs give
   the same `V` on every machine.
-- **Jp.** WRFDA's `Jp = 0.5 sum_i (V v)_i^2 / bgerr_i`. woof uses the same
-  `Jp` and its exact gradient, `V^T diag(1/bgerr) V v`.
+- **Jp.** WRFDA's `da_calculate_j` computes
+  `z_i = (v_i + xhat_i) * sum_j V_ij / sqrt(bgerr_i)` (Fortran `SUM` of a
+  scalar times a row of `V`) and `Jp = 0.5 sum_i z_i^2`. woof's default
+  (`jp_form="wrfda"`) is that `Jp`, with its exact gradient
+  `z_i * sum_j V_ij / sqrt(bgerr_i)`. `jp_form="matrix"` gives the
+  textbook prior on the coefficients, `0.5 |diag(bgerr)^-1/2 V v|^2`, with
+  gradient `V^T diag(1/bgerr) V v`. The two agree when `npred = 1`.
   - *Deviation from WRFDA:* `da_calculate_gradj` uses
-    `(V v)_i / sqrt(bgerr_i)`, which is not the gradient of its own `Jp`
-    unless `V` is diagonal and `bgerr = 1`. With it, a Taylor test of J
-    including VarBC fails.
-  - The difference is in the background term only, which is weak
-    (`nbgerr = 5000` observations' worth).
+    `v_i * sum_j V_ij / sqrt(bgerr_i)`, which is not the gradient of its own
+    `Jp`. With it, a Taylor test of J including VarBC fails.
+  - The difference is in the background term only. That term is weak:
+    `nbgerr = 5000` observations' worth.
+  - `bgerr` uses the namelist `varbc_nbgerr`, as WRFDA does. The per-predictor
+    `nbgerr` line of `VARBC.in` only switches the term on or off.
 - **Update** (`da_varbc_update`). `beta = beta_b + V v_p` after each outer
   loop. A channel with at least `varbc_nobsmin` (10) good observations has
   its `pred_use` set to 1 in `VARBC.out`.
