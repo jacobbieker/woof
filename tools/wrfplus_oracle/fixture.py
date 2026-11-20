@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -1480,10 +1480,128 @@ def rhsph(exe: str, runner: list[str], seed: int = 20261127) -> dict:
     return out
 
 
+#: coriolis: WRF's coriolis then curvature (map_proj 1) on periodic, open
+#: and specified axes.  WRFPLUS takes the coupled rw; the fixture forms it
+#: from w and mut (hybrid c1f/c2f), with its tangent and adjoint.
+CC_CASES = {
+    "cc_periodic": dict(hybrid=1),
+    "cc_open_x": dict(boundary_x=1),
+    "cc_open_y": dict(boundary_y=1, hybrid=1),
+    "cc_open_xy": dict(boundary_x=1, boundary_y=1),
+    "cc_spec": dict(boundary_x=1, boundary_y=1, spec=1, hybrid=1),
+}
+CC_DIMS = dict(nz=8, ny=9, nx=10)
+
+
+def cc_periodic_ends(geom, d):
+    """A periodic axis's end face repeats face 0 (WRF reads its halo copy
+    of face 0 where woof reads its own face n): make them one value."""
+    for n in ("ru", "u", "msfu"):
+        if n in d and not geom.boundary_x:
+            d[n][..., -1] = d[n][..., 0]
+    for n in ("rv", "v", "msfv"):
+        if n in d and not geom.boundary_y:
+            d[n][..., -1, :] = d[n][..., 0, :]
+
+
+def _cc_rw(tr, pe=None):
+    c1, c2 = tr["c1f"][:, None, None], tr["c2f"][:, None, None]
+    mass = c1 * tr["mut"] + c2
+    if pe is None:
+        return mass * tr["w"] / tr["msft"]
+    return (c1 * pe["mut"] * tr["w"] + mass * pe["w"]) / tr["msft"]
+
+
+def _cc_record(geom, tr, pe, seeds, spec):
+    from types import SimpleNamespace as NS
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    bx, by = geom.boundary_x, geom.boundary_y
+    L = AdvLayout(NS(nz=nz, ny=ny, nx=nx, open_x=0, open_y=0))
+    flags = int(not bx) | (int(not by) << 1) | (int(bool(spec)) << 2)
+    if bx and not spec:
+        flags |= (1 << 4) | (1 << 5)
+    if by and not spec:
+        flags |= (1 << 6) | (1 << 7)
+    head = np.array([nx, ny, nz, flags], dtype=np.int32)
+    blob = head.tobytes() + np.array([geom.rdx, geom.rdy]).astype("<f8").tobytes()
+    a3 = [L.place3(tr["ru_t"]), L.place3(seeds["ru_t"]), L.place3(tr["rv_t"]),
+          L.place3(seeds["rv_t"]), L.place3(tr["rw_t"]), L.place3(seeds["rw_t"]),
+          L.pad3(tr["ru"], end=bx), L.pad3(pe["ru"], end=bx),
+          L.pad3(tr["rv"], end=by), L.pad3(pe["rv"], end=by),
+          L.pad3(_cc_rw(tr)), L.pad3(_cc_rw(tr, pe)),
+          L.pad3(tr["u"], end=bx), L.pad3(pe["u"], end=bx),
+          L.pad3(tr["v"], end=by), L.pad3(pe["v"], end=by)]
+    a2 = [_rp_pad2(L, tr["msfu"], bx), _rp_pad2(L, tr["msfv"], by)] + [
+        L.pad2(tr[n]) for n in ("msft", "f", "e", "sina", "cosa")]
+    for a in a3 + a2:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    for n in ("fnm", "fnp"):
+        blob += np.concatenate([tr[n], [0.0]]).astype("<f8").tobytes()
+    return blob, L
+
+
+def _cc_expected(geom, out, L, tr):
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    bx, by = geom.boundary_x, geom.boundary_y
+    n3 = int(np.prod(L.s3))
+    vals = np.frombuffer(out, dtype="<f8")
+    assert vals.size == 14 * n3, (vals.size, n3)
+    x = [vals[i * n3:(i + 1) * n3].reshape(L.s3, order="F") for i in range(14)]
+    us, vs, wl = (nz, ny, nx + 1), (nz, ny + 1, nx), (nz + 1, ny, nx)
+    arw = L.fold3(x[11], wl)
+    c1, c2 = tr["c1f"][:, None, None], tr["c2f"][:, None, None]
+    return {"tl_ru_t": L.take3(x[0], us), "tl_d_ru_t": L.take3(x[1], us),
+            "tl_rv_t": L.take3(x[2], vs), "tl_d_rv_t": L.take3(x[3], vs),
+            "tl_rw_t": L.take3(x[4], wl), "tl_d_rw_t": L.take3(x[5], wl),
+            "adst_ru_t": L.take3(x[6], us), "adst_rv_t": L.take3(x[7], vs),
+            "adst_rw_t": L.take3(x[8], wl),
+            "ad_ru": L.fold3(x[9], us, end=bx), "ad_rv": L.fold3(x[10], vs, end=by),
+            "ad_u": L.fold3(x[12], us, end=bx), "ad_v": L.fold3(x[13], vs, end=by),
+            "ad_w": (c1 * tr["mut"] + c2) * arw / tr["msft"],
+            "ad_mut": (c1 * tr["w"] * arw).sum(axis=0) / tr["msft"]}
+
+
+def coriolis(exe: str, runner: list[str], seed: int = 20261128) -> dict:
+    from woof.grad.wrfplus import bigstep as B
+    out = {}
+    for n, (name, over) in enumerate(CC_CASES.items()):
+        over = dict(over)
+        spec, hybrid = over.pop("spec", 0), over.pop("hybrid", 0)
+        geom = cases.cc_geometry(**CC_DIMS, **over)
+        geom.validate()
+        tr = cases.cc_trajectory(geom, seed + 10 * n, hybrid=bool(hybrid))
+        pe = cases.cc_perturbation(geom, seed + 10 * n + 1)
+        cc_periodic_ends(geom, tr)
+        cc_periodic_ends(geom, pe)
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        sh = B.cc_shapes(geom)
+        seeds = {s: rng.standard_normal(sh[s]) for s in B.CC_STATE}
+        blob, L = _cc_record(geom, tr, pe, seeds, spec)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _cc_expected(geom, result, L, tr)
+        prefix = f"{name}/"
+        out[prefix + "op"] = np.array("cc")
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for k, v in seeds.items():
+            out[prefix + "seed/" + k] = v
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
             "small_step": small_step, "rk_stage": rk_stage,
-            "advect": advect, "bigstep": bigstep, "rhsph": rhsph}
+            "advect": advect, "bigstep": bigstep, "rhsph": rhsph,
+            "coriolis": coriolis}
 
 
 def main(argv=None) -> int:

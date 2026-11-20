@@ -779,3 +779,48 @@ def geo_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     scale = {"ww": 5.0, "w": 1.0, "u": 10.0, "v": 10.0, "php": 20.0, "mup": 200.0}
     return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
             for n in GEO_ACTIVE}
+
+
+_CC_SCALES = {"ru_t": (0.0, 50.0), "rv_t": (0.0, 50.0), "rw_t": (0.0, 20.0),
+              "ru": (9.0e5, 9.0e5), "rv": (-3.0e5, 9.0e5), "u": (10.0, 10.0),
+              "v": (-3.0, 10.0), "w": (0.0, 1.0), "mut": (9.0e4, 2e3)}
+
+
+def cc_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .bigstep import CCGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0)
+    base.update(overrides)
+    return CCGeometry(**base)
+
+
+def cc_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of coriolis_curvature: coupled momenta of mass x wind,
+    Coriolis parameters of mid latitudes, a rotated grid (sina up to
+    about 0.3) and map factors near 1; ``hybrid`` gives hybrid c1f/c2f
+    and stretched levels."""
+    from .bigstep import CC_ACTIVE, CC_PASSIVE, CC_STATE, cc_shapes
+    rng = np.random.default_rng(seed)
+    sh = cc_shapes(geom)
+    out = _bs_levels(geom.nz, rng, hybrid)
+    out["c2f"] = (1.0 - out["c1f"]) * 5000.0 if hybrid else np.zeros(geom.nz + 1)
+    for n in CC_STATE + CC_ACTIVE:
+        c, s = _CC_SCALES[n]
+        out[n] = c + s * rng.standard_normal(sh[n])
+    lat = np.deg2rad(40.0 + 5.0 * rng.standard_normal(sh["f"]))
+    out["f"] = 2.0 * 7.292e-5 * np.sin(lat)
+    out["e"] = 2.0 * 7.292e-5 * np.cos(lat)
+    alpha = 0.3 * rng.uniform(-1.0, 1.0, sh["f"])
+    out["sina"], out["cosa"] = np.sin(alpha), np.cos(alpha)
+    for n in ("msft", "msfu", "msfv"):
+        out[n] = 1.0 + 0.02 * rng.standard_normal(sh[n])
+    keep = CC_STATE + CC_ACTIVE + CC_PASSIVE
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def cc_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .bigstep import CC_ACTIVE, cc_shapes
+    rng = np.random.default_rng(seed)
+    sh = cc_shapes(geom)
+    scale = {"ru": 9.0e5, "rv": 9.0e5, "u": 10.0, "v": 10.0, "w": 1.0, "mut": 200.0}
+    return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in CC_ACTIVE}
