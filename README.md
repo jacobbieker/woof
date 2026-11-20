@@ -1032,6 +1032,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   ~10^5 observations takes 3.1 s on an M3 Max (Metal) and 3.2-4.5 s on a shared
   A6000 (targets 20 s and 5 s; the tutorial case: 1.4 s and 2.3 s), with
   H' and H'^T on the device as an ordered gather (no atomics).
+  `woof.da.var.hybrid` (experimental, Python API) adds WRFDA's hybrid
+  3DEnVar: the alpha control variable with its `alpha_corr_scale`
+  recursive filter and vertical localisation (`alpha_vertloc_opt`), blended
+  with the static `B` through `je_factor`/`jb_factor`, from WRFDA `ep` files
+  or ensemble members already on the device. On the tutorial case with ten
+  members it follows a compiled WRFDA 4.7.1 hybrid run's 50 iterations to
+  3.5e-14 relative; the oracle tier gives the reference's words on the
+  device and the production tier one digest under fast and strict numerics.
   `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
   `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
   ensemble members minus their mean): WRFDA's gen_be stages for
