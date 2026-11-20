@@ -846,7 +846,11 @@ def innovations(obs: WrfdaObs, xb: dict, *, libm: str = "correctly-rounded",
         elif name == "satem":
             geo = _satem(t, ob, xb, o, lm)
         elif name == "pseudo":
-            geo = Geometry.of(t, xb["p"].shape[2])  # da_get_innov_vector_pseudo: inv stays pseudo_val
+            nx, ny, nz = xb["p"].shape
+            i, j, zk = int(t.info["i"][0]), int(t.info["j"][0]), float(t.extra["zk"][0])
+            if not (1 <= i < nx and 1 <= j < ny and 1.0 <= zk <= nz):  # da_setup_pseudo_obs: outside the tile
+                raise ValueError(f"pseudo observation at i={i}, j={j}, zk={zk} is outside the {nx}x{ny}x{nz} tile")
+            geo = Geometry.of(t, nz)  # da_get_innov_vector_pseudo: inv stays pseudo_val
         else:
             raise NotImplementedError(f"{name}: not ported")
         t.extra["geometry"] = geo

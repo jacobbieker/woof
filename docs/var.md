@@ -105,7 +105,8 @@ with value and error 1, `q` with 0.001 and 0.0005):
 - `J_0`, `|g_0|`, the final `J` and the one iteration match WRFDA's log (reference tier 1e-12 relative; the
   binary32 production tier 1e-6);
 - all eight WRF fields of the analysis are `wrfvar_output`'s float32 words to at most 0.5 ulp of the field's
-  largest value, on both tiers; the fields a case leaves alone are exact.
+  largest value, on both tiers (the limit is 1 ulp of the field's maximum); where WRFDA's increment is
+  non-zero ours is non-zero with correlation at least 0.9999.
 
 ## Checked against WRFDA 4.7.1
 

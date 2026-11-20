@@ -19,14 +19,18 @@ Derived from WRFDA 4.7.1 (``da_setup_pseudo_obs``, ``da_get_innov_vector_pseudo`
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from .obs_wrfda import MISSING_DATA, MISSING_R, Field, ObsType, WrfdaObs
 
-__all__ = ["pseudo_obs", "PSEUDO_FIELDS"]
+__all__ = ["pseudo_obs", "PSEUDO_FIELDS", "PSEUDO_VARS"]
 
 #: ``iv%pseudo(n)%``'s fields, in ``da_jo_and_grady_pseudo``'s order.
 PSEUDO_FIELDS = ("u", "v", "t", "p", "q")
+#: ``pseudo_var`` values this port runs and tests (WRFDA also has ``p``, the hydrometeors, ``tpw``, ``ztd``, ``ref``).
+PSEUDO_VARS = ("u", "v", "t", "q")
 
 
 def pseudo_obs(var: str, x: float, y: float, z: float, val: float = 1.0, err: float = 1.0, *,
@@ -39,8 +43,12 @@ def pseudo_obs(var: str, x: float, y: float, z: float, val: float = 1.0, err: fl
     needs ``int(x)+1`` and ``int(y)+1`` inside the tile.
     """
     var = var.strip().lower()
-    if var not in PSEUDO_FIELDS:
-        raise ValueError(f"pseudo_var {var!r}: expected one of {PSEUDO_FIELDS}")
+    if var not in PSEUDO_VARS:
+        raise ValueError(f"pseudo_var {var!r}: expected one of {PSEUDO_VARS}")
+    if not (math.isfinite(err) and err > 0.0 and math.isfinite(val)):
+        raise ValueError(f"pseudo_err must be finite and positive, pseudo_val finite (got {err}, {val})")
+    if not (math.isfinite(x) and math.isfinite(y) and math.isfinite(z) and x >= 1.0 and y >= 1.0 and z >= 1.0):
+        raise ValueError(f"pseudo_x, pseudo_y, pseudo_z are 1-based grid indices and levels, got {x}, {y}, {z}")
     i, j = int(x), int(y)
     dx, dy = x - float(i), y - float(j)
     info = {
@@ -51,6 +59,8 @@ def pseudo_obs(var: str, x: float, y: float, z: float, val: float = 1.0, err: fl
         "dxm": np.array([1.0 - dx]), "dym": np.array([1.0 - dy]), "proc_domain": np.array([True]),
         "obs_global_index": np.array([1], dtype=np.int64), "levels": np.array([1], dtype=np.int64),
     }
+    # da_setup_pseudo_obs: every field starts as inv = error = missing_r, qc = missing_data; only the selected
+    # variable gets (pseudo_val, 0, pseudo_err).  The others never enter Jo (qc < 0) but H' still interpolates them.
     fields = {}
     for v in PSEUDO_FIELDS:
         sel = v == var

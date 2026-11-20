@@ -31,6 +31,12 @@ for g in 1 5 15 19; do
   v=WRFVAR$g; v=${!v:-}
   case "$v" in */*|*\&*|*\\*) echo "WRFVAR$g must not contain / & or \\" >&2; exit 2;; esac
   [ -z "$v" ] || sed -i "s/^&wrfvar$g\$/\&wrfvar$g\n$v/" namelist.input
+  # every inserted key must be in the namelist exactly once (a later line of the same key would override it)
+  for kv in ${v//,/ }; do
+    k=${kv%%=*}
+    [ "$(grep -c "^[[:space:]]*$k[[:space:]]*=" namelist.input)" = 1 ] \
+      || { echo "namelist key $k is not present exactly once after the insertion" >&2; exit 2; }
+  done
 done
 status=0
 /usr/bin/time -v ./da_wrfvar.exe > wrfda.out 2> time.txt || status=$?
