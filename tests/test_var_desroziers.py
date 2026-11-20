@@ -1,6 +1,9 @@
 """Desroziers diagnostics (plan gate G4a) against WRFDA 4.7.1's own ``da_tune_obs_desroziers``.
 
-``WOOF_WRFDA471_DESROZIERS_DIR`` holds the tutorial's ``be.dat``, ``ob.ascii`` and ``fg`` and the files of
+``WOOF_WRFDA471_DESROZIERS_DIR`` is one directory with the files below, or the oracle's run directory
+(on pb ``/mnt/NVME2/woof-work/scratch/wrfda/run``: ``des-unpert/`` has ``be.dat``, ``ob.ascii``, ``fg``,
+``unpert_obs.0000``, ``gts_omb_oma_01.0000``; ``des-pert/`` has ``rand_obs_error``; ``des-tool/`` has ``tool.out``).
+It holds the tutorial's ``be.dat``, ``ob.ascii`` and ``fg`` and the files of
 WRFDA's randomised-trace workflow (``tools/wrfda_oracle/run_tutorial.sh`` twice, with
 ``WRFVAR1='write_unpert_obs=.true.,'`` and the second with ``WRFVAR5='omb_add_noise=.true.,'``, then the tool
 with ``fort.45..49`` = ``rand_obs_error``, ``pert_obs.0000``, ``unpert_obs.0000``, the ``jo`` file and the
@@ -8,7 +11,7 @@ unperturbed ``wrfda.out`` each ending in a ``*****`` line): ``rand_obs_error``, 
 ``gts_omb_oma_01.0000`` (the unperturbed run's O, O-B and O-A) and ``tool.out`` (the tool's printed table).
 
 Asserted: the table (``Jo`` expected and actual, the error factors, the totals, the report counts) is the tool's
-to its printed five decimals (the tool sums in binary32; measured differences are at most 2e-5 absolute);
+to 3e-5 absolute plus 1e-6 relative (the tool prints five decimals and sums in binary32; measured at most 2e-5);
 ``H'(xhat)`` is WRFDA's ``unpert_obs`` to the file's seven digits; and the classic ``<(O-A)(O-B)>``,
 ``<(A-B)(O-B)>`` statistics equal those computed from WRFDA's own O-B and O-A.
 """
@@ -29,9 +32,25 @@ GTS_FIELDS = {"synop": 5, "metar": 5, "ships": 5, "buoy": 5, "sonde_sfc": 5, "ge
               "airep": 4, "pilot": 2, "satem": 1, "qscat": 2, "profiler": 2, "gpsref": 1}
 
 
+_SUB = ("", "des-unpert", "des-pert", "des-tool")
+
+
+def _find(d: Path, name: str) -> Path:
+    for sub in _SUB:
+        if (d / sub / name).is_file():
+            return d / sub / name
+    raise FileNotFoundError(name)
+
+
 def _dir() -> Path:
     d = os.environ.get("WOOF_WRFDA471_DESROZIERS_DIR")
-    if not d or not all((Path(d) / n).is_file() for n in NEED):
+    if d:
+        try:
+            for n in NEED:
+                _find(Path(d), n)
+        except FileNotFoundError:
+            d = None
+    if not d:
         pytest.skip("WOOF_WRFDA471_DESROZIERS_DIR with the tutorial and the randomised-trace files is not set")
     return Path(d)
 
@@ -41,7 +60,8 @@ def _run(d: str):
     from woof.da.var import desroziers as D
 
     p = Path(d)
-    return D.run(p / "be.dat", p / "ob.ascii", p / "fg", p / "rand_obs_error")
+    return D.run(_find(p, "be.dat"), _find(p, "ob.ascii"), _find(p, "fg"), _find(p, "rand_obs_error"),
+                 check_state=True)
 
 
 def test_noise_and_obs_space_readers_on_a_toy_file(tmp_path):
@@ -67,7 +87,7 @@ def test_table_is_da_tune_obs_desroziers():
 
     res, _, _, _, _ = _run(str(d))
     mine = D.format_report(res).split("\n")
-    tool = (d / "tool.out").read_text().split("\n")
+    tool = _find(d, "tool.out").read_text().split("\n")
 
     def rows(lines):
         out = {}
@@ -80,9 +100,11 @@ def test_table_is_da_tune_obs_desroziers():
 
     a, b = rows(mine), rows(tool)
     assert a.keys() == b.keys() and len(a) == 3 * 14
+    assert len(a) > 0
     worst = 0.0
     for k in a:
         assert a[k][:2] == b[k][:2], k
+        assert len(a[k][2]) == len(b[k][2]) == 5, k
         for x, y in zip(a[k][2], b[k][2]):
             worst = max(worst, abs(x - y))
             assert abs(x - y) <= 3e-5 + 1e-6 * abs(y), (k, x, y)
@@ -102,7 +124,7 @@ def test_obs_space_increment_is_wrfdas_unpert_obs():
     from woof.da.var import desroziers as D
 
     _, _, term, y, _ = _run(str(d))
-    theirs = D.read_obs_space_file(d / "unpert_obs.0000")
+    theirs = D.read_obs_space_file(_find(d, "unpert_obs.0000"))
     worst = 0.0
     for n, v, a, b in term.slots:
         if b == a:
@@ -150,7 +172,9 @@ def test_classic_statistics_are_those_of_wrfdas_omb_oma():
     from woof.da.var import desroziers as D
 
     _, cl, term, _, _ = _run(str(d))
-    gts = _gts(d / "gts_omb_oma_01.0000")
+    assert len(cl) > 0
+    gts = _gts(_find(d, "gts_omb_oma_01.0000"))
+    assert {n for n, _ in cl} == {n for n in gts if len(gts[n]) and (gts[n][:, :, 2] >= 0).any()}
     worst = 0.0
     for (n, v), row in cl.items():
         k = D.FILE_FIELDS[n].index(v) if n != "airep" else ("u", "v", "t", "q").index(v)

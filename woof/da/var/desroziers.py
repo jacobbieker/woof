@@ -44,12 +44,18 @@ FILE_FIELDS = {
     "gpsref": ("ref",),
 }
 #: The tool's print order and names (first five characters of the type, as ``da_calc_new_factors1``).
-TOOL_NAMES = (("synop", "synop"), ("metar", "metar"), ("ships", "ships"), ("geoamv", "geoam"), ("gpspw", "gpspw"),
+TOOL_NAMES = (("synop", "synop"), ("metar", "metar"), ("ships", "ships"), ("geoamv", "geoam"),
+              ("polaramv", "polar"), ("gpspw", "gpspw"),
               ("sound", "sound"), ("airep", "airep"), ("pilot", "pilot"), ("satem", "satem"), ("buoy", "buoy "),
               ("sonde_sfc", "sonde"), ("profiler", "profi"), ("qscat", "qscat"), ("gpsref", "gpsre"))
-_TOOL_FIELDS = {"synop": 5, "metar": 5, "ships": 5, "buoy": 5, "sonde_sfc": 5, "geoamv": 2, "gpspw": 1,
+_TOOL_FIELDS = {"synop": 5, "metar": 5, "ships": 5, "buoy": 5, "sonde_sfc": 5, "geoamv": 2, "polaramv": 2, "gpspw": 1,
                 "sound": 4, "airep": 3, "pilot": 2, "satem": 1, "qscat": 2, "profiler": 2, "gpsref": 1}
 _MISSING = -888888.0
+
+
+def _in_table(n: str, v: str) -> bool:
+    """The tool tabulates (and totals) the first ``_TOOL_FIELDS[n]`` variables of its types: airep has no ``q``."""
+    return n in _TOOL_FIELDS and v in FILE_FIELDS[n][: _TOOL_FIELDS[n]]
 
 
 def _blocks(path):
@@ -168,15 +174,17 @@ def randomised(term, y, y_pert, z, *, jb: float | None = None) -> DesroziersResu
         err, d = term.err[a:b], term.d[a:b]
         count = int(m.sum())
         trace = float(np.sum(((yp[a:b] - y[a:b]) * z[n][v] / err)[m])) if count else 0.0
-        jo_a = 0.5 * float(np.sum(((d - y[a:b]) ** 2 / (err * err))[term.mask[a:b]]))
+        jo_a = 0.5 * float(np.sum(((d - y[a:b]) ** 2 / (err * err))[m]))
         res.rows[(n, v)] = {"n": count, "trace": trace, "jo_expected": 0.5 * (count - trace), "jo_actual": jo_a,
                             "factor": math.sqrt(jo_a / (0.5 * (count - trace))) if 0.5 * (count - trace) > 0 else 1.0}
-        total_obs += count
-        trace_total += trace
-        jo_total += jo_a
+        if _in_table(n, v):  # the totals cover what the table does
+            total_obs += count
+            trace_total += trace
+            jo_total += jo_a
     res.totals = {"total_obs": total_obs, "trace_total": trace_total, "j_expected": 0.5 * total_obs,
                   "jo_actual": jo_total, "jo_expected": 0.5 * (total_obs - trace_total),
-                  "jo_factor": math.sqrt(jo_total / (0.5 * (total_obs - trace_total))),
+                  "jo_factor": (math.sqrt(jo_total / (0.5 * (total_obs - trace_total)))
+                                if total_obs - trace_total > 0 else math.nan),
                   "jb_expected": 0.5 * trace_total}
     if jb is not None:
         res.totals["jb_actual"] = jb
@@ -189,7 +197,7 @@ def format_report(res: DesroziersResult) -> str:
     out = []
     for n, tool in TOOL_NAMES:
         fields = [v for v in FILE_FIELDS[n] if (n, v) in res.rows][: _TOOL_FIELDS[n]]
-        if not fields:
+        if not fields or not any(res.rows[(n, v)]["n"] for v in fields):  # the tool prints types it has reports of
             continue
         ex, ac, fa = ([0.0] * 5 for _ in range(3))
         for k, v in enumerate(fields):
@@ -217,7 +225,7 @@ def format_report(res: DesroziersResult) -> str:
 
 
 def run(be, obs, first_guess, rand_obs_error, *, tier: str = "reference", ntmax=50, eps=0.01, window_minutes=60.0,
-        orthonorm_gradient: bool = True):
+        orthonorm_gradient: bool = True, check_state: bool = False):
     """The unperturbed and the perturbed 3-D-Var analyses of the same cost, and the diagnostics.
 
     ``rand_obs_error`` is WRFDA's noise file of an ``omb_add_noise`` run (the draws ``z`` and the
@@ -257,7 +265,7 @@ def run(be, obs, first_guess, rand_obs_error, *, tier: str = "reference", ntmax=
     z = {}
     dp = term.d.copy()
     for n, v, a, c in term.slots:
-        if c == a and n not in noise:
+        if c == a:
             z[(n, v)] = np.zeros(0)
             continue
         err, zz = noise[n]
@@ -266,6 +274,9 @@ def run(be, obs, first_guess, rand_obs_error, *, tier: str = "reference", ntmax=
             raise ValueError(f"{n}: {len(zz)} noise records for {c - a} levels")
         z[(n, v)] = zz[:, k]
         use = term.mask[a:c] & np.isfinite(zz[:, k])
+        # the draw must belong to these observations: the file's error is the run's sigma (printed to 7 digits)
+        if not np.allclose(err[use, k], term.err[a:c][use], rtol=1e-5, atol=0.0):
+            raise ValueError(f"{n} {v}: rand_obs_error's errors differ from this run's observation errors")
         dp[a:c][use] += term.err[a:c][use] * zz[:, k][use]
     zz = {}
     for (n, v), a in z.items():
@@ -273,6 +284,10 @@ def run(be, obs, first_guess, rand_obs_error, *, tier: str = "reference", ntmax=
     cost.set_innovations([dp])
     _, y_pert = solve()
     cost.set_innovations([term.d])
+    if check_state:
+        _, y_again = solve()
+        if not np.array_equal(y_again, y):
+            raise RuntimeError("the cost carries state between solves: a repeat solve differs from the first")
     res = randomised(term, y, y_pert, zz, jb=jb)
     res.reports = {n: int(np.sum(iv.types[n].info["proc_domain"])) for n, _ in TOOL_NAMES if n in iv.types}
     return res, classic(term, y), term, y, y_pert

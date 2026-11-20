@@ -143,8 +143,8 @@ cost twice, once as is and once with Gaussian noise `sigma z` on the observation
 On the tutorial (the noise is read from WRFDA's `rand_obs_error`, so both use one draw), against the tool
 run on WRFDA's own runs (`tools/wrfda_oracle/run_desroziers.sh`):
 
-- all 210 numbers of the table agree to the tool's five printed decimals (at most 1e-5 apart; the tool
-  sums in binary32);
+- all 210 numbers of the table and the totals agree with the tool to 3e-5 absolute plus 1e-6 relative (it
+  prints five decimals and sums in binary32; at most 2e-5 apart measured);
 - `H'(xhat)` agrees with WRFDA's `unpert_obs` to the file's seven digits (4e-7 of the largest value);
 - the classic statistics agree with those computed from WRFDA's own `gts_omb_oma` O-B and O-A, within the
   file's printed precision.
