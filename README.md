@@ -915,8 +915,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   infrared operator. It uses JCSDA CRTM v2.4+ (CC0), which you build
   yourself with `python -m woof.rtm.crtm_build`, together with CRTM's own
   coefficients. It gives brightness temperatures and Jacobians from woof
-  columns or from an isobaric analysis. The scenes do not reach an analysis
-  yet: the LETKF adapter comes next (plan section 11).
+  columns or from an isobaric analysis. `woof.da.obs_radiance` (opt-in) turns a scene
+  into LETKF batches. It thins the scene, runs H(x) per member through
+  CRTM, screens for clear sky, applies a static bias correction and a gross
+  check, and places each observation at its weighting-function peak.
+  Variational bias correction and the 3D-Var radiance operator come next
+  (plan section 11).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
