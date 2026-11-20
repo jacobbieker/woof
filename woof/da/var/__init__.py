@@ -22,6 +22,9 @@ Modules (landed phase by phase):
 - :mod:`woof.da.var.minimise` -- ``da_minimise_cg`` and the outer loop.
 - :mod:`woof.da.var.gen_be` -- WRFDA's gen_be (``be.dat`` from NMC pairs or
   ensemble perturbations, cv5 and cv7, ``bin_type`` 5), host binary64.
+- :mod:`woof.da.var.radiance` -- clear-sky satellite radiances (opt-in):
+  records from the imager and MW readers, GSI thinning, WRFDA's CRTM
+  columns, QC and the K-matrix obs term (plan section 13).
 - :mod:`woof.da.var.oracle` -- reader for the oracle build's array dumps
   (``tools/wrfda_oracle``).
 """
