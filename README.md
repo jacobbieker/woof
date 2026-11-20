@@ -1076,9 +1076,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   budget. Trained on six cycles over four seasons (P2.6), the model
   passes the plan's G2 gate. T2 is not worse than the physics run at 95 %
   on either mesh, and better on the uniform mesh on CUDA (-0.06 K).
-  Most column calls (94-97 %) still fall back to the schemes in the
-  evaluation week, because its stratosphere lies outside the training
-  range. Results and per-step costs are in
+  Most column calls (94-97 %) still fell back to the schemes in the
+  evaluation week, because its stratosphere lay outside the training
+  range. Training on the lowest 44 levels (P2.7) cuts the fallback to
+  21 % on a fresh cycle (66 % on the variable mesh, whose `dx` is out of
+  range), but T2 is then no better than the physics run (+0.04 K, CI
+  spanning zero): no evidence of skill. Results and per-step costs are in
   [docs/nn-physics.md](docs/nn-physics.md).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
