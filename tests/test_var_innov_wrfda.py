@@ -143,7 +143,9 @@ def _tutorial():
     proj = ow.LambertWRFDA.from_attributes(man["first_guess_attributes"])
     obs = ow.read_obs_ascii(d / "ob.ascii", proj, **man["window"])
     xb = read_dump(d / "woof_xb.bin")
-    dump = read_dump(d / "woof_iv.bin")
+    from test_var_obs_wrfda import iv_dump
+
+    dump = iv_dump(d)
     return obs, xb, dump, iw.innovations(obs, xb)
 
 

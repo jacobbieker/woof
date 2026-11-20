@@ -133,8 +133,7 @@ def test_station_pressure_and_sea_level_pressure_are_not_lowest_level_pressure()
 
 
 def test_refractivity_uses_tangent_height_and_shared_operator():
-    from woof.obs.column_operators import refractivity_n
-    from woof.da.var.obs_wrfda import msl2geo1
+    from woof.obs.column_operators import msl2geo1, refractivity_n
     col = columns()[0]
     height = msl2geo1(1.0, 1.) * 1000.  # the model reads the geopotential of a 1 km tangent point
     z = np.array([500., 2000.])
@@ -170,8 +169,7 @@ def test_refractivity_pressure_is_read_between_layer_interfaces():
     operator's pressure at the tangent height is the column's own; the
     layer-mean heights it used without them put each mass-level pressure
     too high in the column, so the pressure read there was too high."""
-    from woof.obs.column_operators import refractivity_n
-    from woof.da.var.obs_wrfda import msl2geo1
+    from woof.obs.column_operators import msl2geo1, refractivity_n
     g, cols, dnw, (psfc, scale_height) = _eta_column()
     height = msl2geo1(5.5, 1.) * 1000.
     truth = float(refractivity_n(psfc * np.exp(-height / scale_height), 250., 0.))
@@ -190,8 +188,7 @@ def test_refractivity_tangent_height_is_geometric_and_converted_to_geopotential(
     geopotential height.  As WRFDA's da_msl2geo1, the operator converts:
     at 45 N and 25 km the geopotential is about 100 m lower, and N there
     about 1.4 % higher than at the unconverted height."""
-    from woof.da.var.obs_wrfda import msl2geo1
-    from woof.obs.column_operators import refractivity_n
+    from woof.obs.column_operators import msl2geo1, refractivity_n
     g, cols, dnw, (psfc, scale_height) = _eta_column(nz=60, p_top=1000.)
     geometric = 25000.
     geopotential = msl2geo1(geometric / 1000., 45.) * 1000.

@@ -14,6 +14,7 @@ for word. The exception is the GNSS-RO heights (see the module docstring).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -23,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from woof.da.var import crmath
+from woof.core import crmath
 from woof.da.var import obs_wrfda as ow
 from woof.da.var.oracle import array_digest, read_dump
 
@@ -228,6 +229,16 @@ def test_to_obsset(synthetic):
     assert np.all(np.isfinite(o.value)) and np.all(o.error > 0)
 
 
+def test_msl2geo1_is_the_shared_column_operator():
+    """obs_wrfda's ``da_msl2geo1`` and the copy obs_point uses are one function, same words."""
+    from woof.obs.column_operators import msl2geo1
+
+    for z, lat in ((0.0, 0.0), (1.0, 1.0), (12.5, 45.3), (30.0, -71.9), (55.0, 89.99), (-999.0, 10.0)):
+        assert ow.msl2geo1(z, lat) == msl2geo1(z, lat) == msl2geo1(z, lat, crmath), (z, lat)
+        assert ow.msl2geo1(z, lat, "host") == msl2geo1(z, lat, ow._libm("host")), (z, lat)
+    assert msl2geo1(-999.0, 30.0) == -999.0
+
+
 def test_unknown_libm_is_refused():
     with pytest.raises(ValueError):
         ow.LambertWRFDA(**PROJ, libm="fast")
@@ -240,6 +251,25 @@ def _tutorial_dir():
     if not d or not (Path(d) / "ob.ascii").is_file():
         pytest.skip("WOOF_WRFDA471_DIR with the WRFDA tutorial ob.ascii is not set")
     return Path(d)
+
+
+def iv_dump(d: Path) -> dict:
+    """``woof_iv.bin`` from ``d``, refused unless it is the dump the manifest pins.
+
+    A dump from a WRFDA build older than the current ``woof_dump.inc``
+    lacks fields (gpsref ``p``, ``t``, ``q``).  Comparing against it fails
+    with a KeyError that says nothing about the cause.
+    """
+    path = d / "woof_iv.bin"
+    if not path.is_file():
+        pytest.skip("woof_iv.bin (oracle dump) not in WOOF_WRFDA471_DIR")
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    want = json.loads(MANIFEST.read_text())["obs"]["iv_dump_sha256"]
+    assert sha == want, (f"{path} has sha256 {sha}, not the manifest's {want}: an oracle dump from an older "
+                         "woof_dump.inc (see the manifest's iv_dump_comment); patch a copy of WRFV4.7.1 with "
+                         "tools/wrfda_oracle/apply_dump_patch.sh, run ./compile all_wrfvar in it, then "
+                         "run_tutorial.sh with that patched tree's da_wrfvar.exe")
+    return read_dump(path)
 
 
 def _digests(obs) -> dict:
@@ -316,14 +346,10 @@ def _compare(obs, dump, exact: bool):
 
 def test_tutorial_against_the_oracle_dump():
     d, _, obs = _read_tutorial()
-    if not (d / "woof_iv.bin").is_file():
-        pytest.skip("woof_iv.bin (oracle dump) not in WOOF_WRFDA471_DIR")
-    _compare(obs, read_dump(d / "woof_iv.bin"), exact=False)
+    _compare(obs, iv_dump(d), exact=False)
 
 
 @pytest.mark.skipif(platform.libc_ver()[0] != "glibc", reason="the oracle's words need glibc's libm")
 def test_tutorial_host_glibc_is_the_oracle_word_for_word():
     d, _, obs = _read_tutorial(libm="host")
-    if not (d / "woof_iv.bin").is_file():
-        pytest.skip("woof_iv.bin (oracle dump) not in WOOF_WRFDA471_DIR")
-    _compare(obs, read_dump(d / "woof_iv.bin"), exact=True)
+    _compare(obs, iv_dump(d), exact=True)
