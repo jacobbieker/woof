@@ -15,7 +15,12 @@ anonymously and read-only, and writes:
 This is the archive, not the live broker: the ``wis2`` stream of
 :mod:`woof.obs.streams` subscribes to the broker through ``rw_wis2``.  The
 store layout, its QC flags and the family-to-type mapping are in section 12
-of docs/dev/WRFDA-3DVAR-PLAN.md.  Families read here:
+of docs/dev/WRFDA-3DVAR-PLAN.md.  Rows whose label ``obs_point`` has no
+operator for yet (ocean platforms, aircraft) are written with their true
+label and refused by name there; enabling ``aircraft_level`` in
+``obs_point`` would also start assimilating the ACARS and PrepBUFR aircraft
+rows other doors already write, so it is a separate change.  Families read
+here:
 
 ==============  ============================  ======  ==========================
 family          groups                        WRFDA   neutral measurement
@@ -23,7 +28,7 @@ family          groups                        WRFDA   neutral measurement
 ``land``        land/reports, land/synop_tac  FM-12   screen_temperature_2m, ...
 ``ocean``       ocean/surface, ocean/ship_tac FM-13/18 platform_* (no operator)
 ``sonde``       upper_air/soundings           FM-35   sonde_level
-``aircraft``    aircraft                      FM-42   aircraft_level
+``aircraft``    aircraft                      FM-42   aircraft_level (no operator)
 ``profiler``    upper_air/wind_profiler       FM-132  (obs_gts only: no pressure)
 ==============  ============================  ======  ==========================
 
@@ -33,18 +38,23 @@ Quality control, in order (each refusal is counted by name):
    ``quality_flag`` / ``level_quality_flag`` other than ``time_too_old``
    (256) is set; a value is refused when its ``<variable>_quality`` is
    non-zero.  The store never alters a value, so these are its only verdict.
-2. Gross bounds of the neutral vocabulary, sensor heights (2 m screen
+2. Gross bounds on every family (temperature and dewpoint 150-350 K,
+   pressure up to 1100 hPa, sea-level pressure 850-1100 hPa, station
+   elevation -500 to 9000 m; a report with neither a pressure nor a height
+   is dropped), sensor heights (2 m screen
    temperature 1-3 m, 10 m wind 8-12 m, as the station referees), wind
    speed 0-120 m/s, a direction of 0 with a non-zero speed.
 3. Soundings: the TEMP parts of one launch are merged.  A part whose
    levels sit at ten times their pressure is detected and refused
    (:func:`pressure_scale_fault`): a part that by its own label holds only
-   levels above 100 hPa (Part C or D) but has levels below it, or a part
+   levels above 100 hPa (Part C or D) but has levels below it, any part
+   with a level above 1100 hPa, or a part
    whose temperatures disagree with the launch's other parts unless every
    pressure is divided by ten.  The Global Cache archive holds such parts
    (section 12.6); the check keys on the data, not on a centre.
 4. Duplicates: corrections replace originals (highest
-   ``update_sequence_number``), a text-only report repeating a BUFR report
+   ``update_sequence_number``; a flagged correction does not revive the
+   original), a text-only report repeating a BUFR report
    of the same station and time is dropped, aircraft by ``report_id``.
 
 The background check is the analysis's (``obs_point``'s or WRFDA's
@@ -97,6 +107,12 @@ SONDE_SAME_ASCENT = np.timedelta64(90, "m")
 PART_DISAGREE_K = 10.0
 PART_RESCALED_AGREE_K = 3.0
 PART_MIN_OVERLAP = 3
+PRESSURE_MAX_PA = 110000.0  # no station pressure exceeds 1100 hPa
+# Gross bounds on every family before either writer (OBSPROC's range checks, loosely).
+T_BOUNDS = (150.0, 350.0)
+SLP_BOUNDS = (85000.0, 110000.0)
+ELEV_BOUNDS = (-500.0, 9000.0)
+HEIGHT_BOUNDS = (-500.0, 60000.0)
 L_OVER_RV = 5418.12  # OBSPROC constants.inc
 MISSING = -888888.0
 MISSING_QC = -88
@@ -342,11 +358,12 @@ def land_reports(root, start, end, box, counts: Counter) -> list[Report]:
             else np.zeros(len(index))
         best = {}
         for k in np.lexsort((np.nan_to_num(seq, nan=-1.0), when.astype(np.int64), sid.astype(str))):
-            if ok[k]:
-                best[(sid[k], when[k])] = k  # the highest sequence number of a (station, time) wins
-        superseded = int(ok.sum()) - len(best)
-        counts[f"{label}_superseded_correction"] += superseded
-        keep = np.array(sorted(best.values()), np.int64)
+            best[(sid[k], when[k])] = k  # the highest sequence number of a (station, time) wins
+        counts[f"{label}_superseded_correction"] += len(index) - len(best)
+        # The latest correction stands or falls alone: a flagged correction does not revive the original.
+        keep = np.array(sorted(k for k in best.values() if ok[k]), np.int64)
+        if keep.size == 0:
+            continue
         rows = index[keep]
         get = lambda name: _value(group, name, rows, counts, label)  # noqa: E731
         t2, td2, rh2 = get("2m_temperature"), get("2m_dewpoint_temperature"), get("2m_relative_humidity")
@@ -364,7 +381,7 @@ def land_reports(root, start, end, box, counts: Counter) -> list[Report]:
         received = _received(group, rows)
         lat, lon = _numbers(group["latitude"], rows), _numbers(group["longitude"], rows)
         for n, row in enumerate(rows):
-            key = (sid[keep][n], when[keep][n])
+            key = (_wmo(sid[keep][n]), when[keep][n])
             if key in seen:
                 counts[f"{label}_duplicate_of_bufr"] += 1
                 continue
@@ -437,7 +454,7 @@ def ocean_reports(root, start, end, box, counts: Counter) -> list[Report]:
 
 
 # --------------------------------------------------------------------------- soundings
-_PART = re.compile(r"(?:TEMP|PILOT)_(AA|BB|CC|DD)_|\b(?:TT|PP)(AA|BB|CC|DD)\b")
+_PART = re.compile(r"(?:TEMP|PILOT)_(AA|BB|CC|DD)_|\b(?:TT|PP)(AA|BB|CC|DD)(?=\d|\b)")
 
 
 def part_label(source_key: str, heading: str = "") -> str:
@@ -473,6 +490,9 @@ def _interp_lnp(p_ref, x_ref, p, max_ratio=1.15):
 def pressure_scale_fault(label: str, p, t, ref_p=None, ref_t=None) -> str:
     """Why a TEMP part's pressures are wrong, or '' when they are not.
 
+    * ``'pressure_out_of_range'``: any part with a level above
+      :data:`PRESSURE_MAX_PA` or at a non-positive pressure (a whole sounding
+      stored at ten times its pressure, with nothing to compare it with).
     * ``'part_above_100hpa'``: a Part C or D holds only levels above
       100 hPa by definition, yet has a level below it (allowing 1 hPa).
     * ``'pressure_scale_x10'``: over the levels where the launch's other
@@ -482,6 +502,8 @@ def pressure_scale_fault(label: str, p, t, ref_p=None, ref_t=None) -> str:
     * ``'inconsistent_part'``: they disagree, and rescaling does not help.
     """
     p, t = np.asarray(p, float), np.asarray(t, float)
+    if np.any(np.isfinite(p) & ((p > PRESSURE_MAX_PA) | (p <= 0.0))):
+        return "pressure_out_of_range"
     if label in ("CC", "DD") and np.any(np.isfinite(p) & (p > 10100.0)):
         return "part_above_100hpa"
     if ref_p is None or len(ref_p) == 0:
@@ -507,6 +529,8 @@ def sonde_reports(root, start, end, box, counts: Counter) -> list[Report]:
         return []
     ok = _quality_ok(group, "quality_flag", index, counts, "sonde")
     index = index[ok]
+    if index.size == 0:
+        return []
     first = _numbers(group["first_level"], index).astype(np.int64)
     count = _numbers(group["level_count"], index).astype(np.int64)
     sid = _texts(group["station_id"], index)
@@ -605,11 +629,17 @@ def _latest_per_label(members, received, counts):
         prior = by_label.get(label)
         if prior is not None:
             counts["sonde_part_repeated"] += 1
-            later = received[member[1]] >= received[prior[1]] if not np.isnat(received[member[1]]) else False
+            mine, theirs = received[member[1]], received[prior[1]]
+            later = np.isnat(theirs) or (not np.isnat(mine) and mine >= theirs)
             if not later:
                 continue
         by_label[label] = member
     return out + [by_label[k] for k in sorted(by_label)]
+
+
+PAIRED = (("pressure",), ("temperature", "dewpoint_temperature"), ("geopotential_height",),
+          ("wind_speed", "wind_direction"), ("time_since_launch",), ("latitude_displacement",),
+          ("longitude_displacement",))
 
 
 def _merge_parts(station, when, accepted, lat, lon, elev, received, counts) -> Report | None:
@@ -630,9 +660,11 @@ def _merge_parts(station, when, accepted, lat, lon, elev, received, counts) -> R
         p = stack["pressure"][r]
         if levels and abs(levels[-1]["pressure"] - p) <= 50.0:
             merged = levels[-1]
-            for k in names:
-                if not np.isfinite(merged[k]) and np.isfinite(stack[k][r]):
-                    merged[k] = stack[k][r]
+            for group_names in PAIRED:  # a pair (t and td, speed and direction) comes from one part
+                if not any(np.isfinite(merged[k]) for k in group_names) \
+                        and any(np.isfinite(stack[k][r]) for k in group_names):
+                    for k in group_names:
+                        merged[k] = stack[k][r]
             merged["vss"] |= int(vss[r])
             continue
         levels.append({**{k: float(stack[k][r]) for k in names}, "vss": int(vss[r])})
@@ -780,10 +812,42 @@ def read_reports(root, start, end, box, families=FAMILIES) -> tuple[list[Report]
     for family in families:
         if family not in READERS:
             raise Wis2Error(f"unknown family {family!r}; known: {', '.join(FAMILIES)}")
-        part = READERS[family](root, start, end, box, counts)
+        part = [rep for rep in READERS[family](root, start, end, box, counts) if _gross_bounds(rep, counts)]
         counts[f"{family}_reports"] += len(part)
         reports.extend(part)
     return reports, counts
+
+
+def _outside(values, bounds):
+    values = np.asarray(values, float)
+    return np.isfinite(values) & ((values < bounds[0]) | (values > bounds[1]))
+
+
+def _gross_bounds(rep: Report, counts: Counter) -> bool:
+    """Blank values outside the gross bounds (counted per family and variable); False when no level
+    keeps a pressure or a height, which both writers need to place it."""
+    label = rep.family
+    for name, bounds in (("t", T_BOUNDS), ("td", T_BOUNDS), ("p", (1.0, PRESSURE_MAX_PA)),
+                         ("z", HEIGHT_BOUNDS)):
+        bad = _outside(getattr(rep, name), bounds)
+        if bad.any():
+            counts[f"{label}_{name}_out_of_bounds"] += int(bad.sum())
+            setattr(rep, name, np.where(bad, np.nan, getattr(rep, name)))
+            if name in ("t", "td"):
+                rep.rh = np.where(bad, np.nan, rep.rh)  # rh derived from a bad t or td
+    if _outside(rep.slp, SLP_BOUNDS):
+        counts[f"{label}_slp_out_of_bounds"] += 1
+        rep.slp = float("nan")
+    if _outside(rep.elev, ELEV_BOUNDS):
+        counts[f"{label}_elevation_out_of_bounds"] += 1
+        rep.elev = float("nan")
+        if rep.surface:
+            rep.z = np.full(len(rep.p), np.nan)
+    placed = np.isfinite(rep.p) | np.isfinite(rep.z)
+    if not placed.any():
+        counts[f"{label}_no_pressure_or_height"] += 1
+        return False
+    return True
 
 
 # --------------------------------------------------------------------------- neutral table
@@ -827,8 +891,14 @@ def neutral_rows(reports, table) -> tuple[list, Counter]:
             continue
         source = f"{SOURCE}.{rep.family}"
         received = _aware(rep.received)
+        if rep.surface and not np.isfinite(rep.elev):
+            counts[f"{rep.family}_surface_without_elevation"] += 1  # the table needs it on every row
+            continue
         for k in range(len(rep.p)):
             p = rep.p[k]
+            if not (np.isfinite(p) or np.isfinite(rep.z[k])):
+                counts[f"{rep.family}_level_without_pressure_or_height"] += 1
+                continue
             err = table.errors(rep.fm, p if np.isfinite(p) else None,
                                rep.z[k] if np.isfinite(rep.z[k]) else None)
             when = _aware(rep.level_time[k])
@@ -941,19 +1011,25 @@ def obs_gts_header(counts: Counter, domain: dict | None = None) -> list[str]:
     return lines
 
 
+def _ascii(text) -> str:
+    """Printable ASCII for a fixed-width text field (names arrive in any script)."""
+    return "".join(c if " " <= c <= "~" else "?" for c in str(text))
+
+
 def obs_gts_report(rep: Report, table) -> list[str]:
     """One report as OBSPROC writes it: INFO, SRFC, then one EACH line per level (decreasing pressure)."""
-    order = np.arange(len(rep.p))
+    order = np.nonzero(np.isfinite(rep.p) | np.isfinite(rep.z))[0]
     if rep.fm == 35:
-        order = np.argsort(-rep.p, kind="stable")
+        order = order[np.argsort(-rep.p[order], kind="stable")]
     elif rep.fm == 132:
-        order = np.argsort(rep.z, kind="stable")
+        order = order[np.argsort(rep.z[order], kind="stable")]
     lon = ((rep.lon + 180.0) % 360.0) - 180.0
     date = str(np.datetime64(rep.time, "s")).replace("T", "_")
-    name = rep.name[:40]
+    name = _ascii(rep.name)[:40]
     elev = rep.elev if np.isfinite(rep.elev) else MISSING
     info = (f"{FM_PLATFORM[rep.fm]:<12} {date:<19} {name:<40} {len(order):6d}"
-            + "".join(_f(x, 12, 3) + " " * 11 for x in (rep.lat, lon, elev)) + " " * 6 + f"{rep.station[:40]:<40}")
+            + "".join(_f(x, 12, 3) + " " * 11 for x in (rep.lat, lon, elev)) + " " * 6
+            + f"{_ascii(rep.station)[:40]:<40}")
     slp = rep.slp if np.isfinite(rep.slp) else None
     srfc = _triple(slp, SLP_ERROR_PA) + _f(MISSING, 12, 3) + f"{MISSING_QC:4d}" + _f(PW_ERROR_CM, 7, 3)
     lines = [info, srfc]

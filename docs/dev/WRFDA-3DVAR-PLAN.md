@@ -2239,8 +2239,10 @@ work (12.7).
 
 `obs_point` lacks two things:
 
-- the `aircraft_level` and `profiler_level` labels, which its
-  pressure-level branch should accept (PR B adds them);
+- the `aircraft_level` and `profiler_level` labels in its pressure-level
+  branch. PR B writes `aircraft_level` rows but does not enable the label:
+  the ACARS and PrepBUFR doors already write it, so enabling it changes
+  existing ensemble-filter runs and is its own PR;
 - surface dewpoint and station-pressure operators. These rows are written,
   and refused by name until those operators exist.
 
@@ -2321,7 +2323,9 @@ cause is in the data, and it is the same in `wis2.icechunk` and in
 - **woof's rule (PR B, `woof.obs.wis2.pressure_scale_fault`).**
   - The label rule: a Part C or Part D (TTCC or TTDD) holds levels above
     100 hPa by definition, so a part with a level at more than 101 hPa is
-    refused whole and counted as `sonde_part_part_above_100hpa`.
+    refused whole and counted as `sonde_part_part_above_100hpa`. Any part
+    with a level above 1100 hPa is refused as `pressure_out_of_range`,
+    which catches a whole sounding at ten times its pressure.
   - The detection, for parts with no label (BUFR soundings) or a label
     that passes: each part is compared, in ln p, with the union of the
     same launch's other parts, only between reference levels at most 15%
@@ -2393,7 +2397,8 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
    synop_tac, ocean/surface, ship_tac, upper_air/soundings,
    wind_profiler and aircraft. It applies 12.2's flags, OBSPROC's errors
    and gross checks, and the Part D rule. It writes neutral table v2 and
-   `obs_gts`. `obs_point` gains the `aircraft_level` label; profilers
+   `obs_gts`. Aircraft rows carry `aircraft_level`, which `obs_point`
+   does not enable yet (12.5); profilers
    (heights, no pressure) go to `obs_gts` only, and ocean platform rows
    carry labels `obs_point` has no operator for yet. Tests use synthetic
    fixtures.

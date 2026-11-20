@@ -1011,7 +1011,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   writes a `gpuwm-obs.table.v2` table for the LETKF (`--table`) and
   OBSPROC's `obs_gts` ASCII for `woof.da.var` (`--obs-gts`). Profilers go
   only to `obs_gts`, because the LETKF's point operators are
-  pressure-level only. WIS2 has no US AMDAR. Satellite families (MW
+  pressure-level only. The LETKF does not yet use the aircraft and ship
+  rows; enabling them is a separate change. WIS2 has no US AMDAR. Satellite families (MW
   radiances, AMVs, scatterometer winds, GNSS-RO) come next
   ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)).
 - **Neural-network column physics (opt-in, inference only; in progress).**

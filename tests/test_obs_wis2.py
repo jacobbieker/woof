@@ -60,6 +60,8 @@ def _t_of(p):
 def test_part_label_from_object_name_or_heading():
     assert wis2.part_label("data/us-noaa-nws/x/temp/TEMP_DD_72340_abc.bufr4") == "DD"
     assert wis2.part_label("", "TTBB 72340") == "BB"
+    assert wis2.part_label("", "TTDD72 KWBC 281200") == "DD"  # a WMO heading with its sequence number
+    assert wis2.part_label("", "TTDDX KWBC") == ""
     assert wis2.part_label("data/de-dwd-gts-to-wis2/x/sounding.bufr4") == ""
 
 
@@ -75,6 +77,9 @@ def test_pressure_scale_fault_label_rule_and_signature():
     assert wis2.pressure_scale_fault("", true_p * 10.0, true_t, ref_p, ref_t) == "pressure_scale_x10"
     assert wis2.pressure_scale_fault("", true_p, true_t, ref_p, ref_t) == ""
     assert wis2.pressure_scale_fault("", true_p, true_t + 25.0, ref_p, ref_t) == "inconsistent_part"
+    # A whole sounding at ten times its pressure has nothing to compare with: refused outright.
+    assert wis2.pressure_scale_fault("AA", [9.84e5, 9.25e5], [290.0, 288.0]) == "pressure_out_of_range"
+    assert wis2.pressure_scale_fault("", [9.84e5, 9.25e5], [290.0, 288.0]) == "pressure_out_of_range"
     # Too few overlapping levels: no verdict.
     assert wis2.pressure_scale_fault("", true_p[:2] * 10.0, true_t[:2], ref_p, ref_t) == ""
 
@@ -334,3 +339,46 @@ def test_obs_gts_reads_back_through_the_3dvar_reader(tmp_path):
     k = int(np.nonzero(np.asarray(p) == 50000.0)[0][0])
     assert t.inv[k] == pytest.approx(260.75) and t.error[k] == pytest.approx(table.errors(35, 50000.0)["t"], abs=5e-3)
     assert np.all(np.asarray(t.inv)[(np.asarray(p) >= 40000.0) & (np.asarray(t.qc) >= 0)] > 230.0)
+
+
+def test_sondes_all_parts_flagged():
+    root = _soundings()
+    root["upper_air/soundings"]["quality_flag"] = _flags([16] * 5)
+    counts = Counter()
+    assert wis2.sonde_reports(root, START, END, BOX, counts) == []
+    assert counts["sonde_position_invalid"] == 5
+
+
+def test_flagged_correction_does_not_revive_the_original_and_tac_ids_match_wigos():
+    root = _land()
+    group = root["land/reports"]
+    group["quality_flag"] = _flags([0, 2, 0, 256, 1])  # the correction of 72340 is implausible
+    root["land/synop_tac"]["station_id"] = Arr(["72649", "72700"])  # TAC with bare WMO ids
+    counts = Counter()
+    by = {r.station: r for r in wis2.land_reports(root, START, END, BOX, counts)}
+    assert "72340" not in by
+    assert counts["synop_tac_duplicate_of_bufr"] == 1
+
+
+def test_gross_bounds_and_unplaced_reports():
+    root = _land()
+    group = root["land/reports"]
+    group["2m_temperature"] = Arr([281.0, 281.0, 9999.0, 276.0, 277.0])
+    group["mean_sea_level_pressure"] = Arr([101000.0, 101000.0, 9.99e9, 101000.0, 101000.0])
+    group["surface_pressure"] = Arr([98000.0, 98000.0, 97000.0, np.nan, 97600.0])
+    group["station_elevation"] = Arr([191.0, 191.0, 300.0, np.nan, 260.0])
+    reports, counts = wis2.read_reports(root, START, END, BOX, ("land",))
+    by = {r.station: r for r in reports}
+    assert np.isnan(by["72649"].t[0]) and np.isnan(by["72649"].rh[0]) and np.isnan(by["72649"].slp)
+    assert counts["land_t_out_of_bounds"] == 1 and counts["land_slp_out_of_bounds"] == 1
+    assert "72650" not in by and counts["land_no_pressure_or_height"] == 1
+
+
+def test_obs_gts_names_are_ascii(tmp_path):
+    root = _land()
+    root["land/reports"]["station_name"] = Arr(["Москва", "Москва", "東京\tX", "C", "D"])
+    reports, _ = wis2.read_reports(root, START, END, BOX, ("land",))
+    path = tmp_path / "ob.ascii"
+    wis2.write_obs_gts(reports, path, ObsErrTable.load())
+    text = path.read_text(encoding="ascii")
+    assert "??????" in text and "\t" not in text
