@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from woof.backend.scratch import facade_empty_fill as _facade_empty_fill, poison_fill as _poison_fill
 from woof.backend.facade._array import (ndarray, on_host, storage_mx_dtype, to_storage_values,
                                         values_shape)
 
@@ -105,13 +106,25 @@ def _host(x):
 # ---------------------------------------------------------------- creation
 
 def empty(shape, dtype=np.float32, order="C"):
+    """CuPy's ``empty``.  MLX has no uninitialized allocation, so it is
+    ``zeros`` unless ``WOOF_METAL_SCRATCH_UNINIT=all`` (woof.backend.scratch)
+    leaves a C-ordered buffer unfilled, or ``all`` with WOOF_SCRATCH_POISON
+    poisons it (either order)."""
+    fill = _facade_empty_fill()
+    if fill is None:
+        return zeros(shape, dtype, order)
     if order == "F":
-        return _fortran_from_host(np.zeros(shape, dtype=dtype, order="F"))
-    return ndarray(shape, dtype)
+        out = zeros(shape, dtype, order)
+    else:
+        from woof.backend.facade._scratch import uninitialized
+        out = uninitialized(shape, dtype)
+    return out if fill == "none" else _poison_fill(out, fill)
 
 
 def zeros(shape, dtype=np.float32, order="C"):
-    return empty(shape, dtype, order)
+    if order == "F":
+        return _fortran_from_host(np.zeros(shape, dtype=dtype, order="F"))
+    return ndarray(shape, dtype)
 
 
 def ones(shape, dtype=np.float32, order="C"):
@@ -557,7 +570,18 @@ def where_(cond, x=None, y=None):
     return _wrap(mx.where(c, xv, yv), result_dtype)
 
 
-def clip(a, a_min, a_max, out=None):
+def clip(a, a_min=None, a_max=None, out=None, *, min=None, max=None):
+    # min=/max= are NumPy 2.1's np.clip and ndarray.clip spelling
+    if min is not None:
+        if a_min is not None:
+            raise TypeError("clip: pass a_min or min, not both")
+        a_min = min
+    if max is not None:
+        if a_max is not None:
+            raise TypeError("clip: pass a_max or max, not both")
+        a_max = max
+    if a_min is None and a_max is None:
+        raise ValueError("One of max or min must be given")
     r = a
     if a_min is not None:
         r = UFUNCS["maximum"](r, a_min)

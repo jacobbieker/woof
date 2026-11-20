@@ -6,22 +6,6 @@
  "inventory": {
   "compile_sites": [
    {
-    "call_sha256": "6545f899483c3186fa4c979e195575594fae4bae1c74f3f7c2c721dca4f91e4d",
-    "constructor": "RawModule",
-    "factory": "__call__",
-    "factory_sha256": "a7617f79a249a59448d3331a27c25a8adaf0c480894c38ed8154a9f9fb3a08bf",
-    "file": "woof/backend/facade/_elementwise.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "6d12418565a64a0e50341d6528ad50a1e7119770107a87a34ea305d49c94071c",
-    "constructor": "RawModule",
-    "factory": "_split_call",
-    "factory_sha256": "a90719a10618386b4f0431062779e94c0672def23d9530ba5a01dc1828b17b83",
-    "file": "woof/backend/facade/_elementwise.py",
-    "status": "unresolved"
-   },
-   {
     "call_sha256": "00ae93a39da3ba70a7c427c9275367060475cb282919e165ab826b3e68a4dc41",
     "constructor": "compile_using_nvrtc",
     "factory": "__init__",
@@ -865,7 +849,7 @@
     "call_sha256": "5004d0454501a98395939411abbfe58e1e9b231abfff8fa83985186eeffc46d8",
     "constructor": "compile_using_nvrtc",
     "factory": "_load_module_preserving_subnormals",
-    "factory_sha256": "5a3edef4009a0127f9d0764f3a872a6c017637a8b82974f4efd1b667a96e67aa",
+    "factory_sha256": "2f0cd2a65d3b830edb8b878c080f944c20bdf3ed0d64b2b71b3e4f532c30f0f4",
     "file": "woof/core/kernels/__init__.py",
     "status": "unresolved"
    },
@@ -1086,6 +1070,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "6545f899483c3186fa4c979e195575594fae4bae1c74f3f7c2c721dca4f91e4d",
+    "constructor": "RawModule",
+    "factory": "__call__",
+    "factory_sha256": "a7617f79a249a59448d3331a27c25a8adaf0c480894c38ed8154a9f9fb3a08bf",
+    "file": "woof/backend/facade/_elementwise.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "654f9bd5962d97fb679ba544c9d9af5b7ce7e44c8d9f614d1e3b2d8b06b0618d",
     "constructor": "RawKernel",
     "factory": "_kernel",
@@ -1123,6 +1115,14 @@
     "factory": "_kernel",
     "factory_sha256": "43b46d23917e9116105f91bfc4dfbfae4cf692df9fe0be86cc20e6de5a4a3590",
     "file": "woof/hex/ocean_mixed_layer.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "6d12418565a64a0e50341d6528ad50a1e7119770107a87a34ea305d49c94071c",
+    "constructor": "RawModule",
+    "factory": "_split_call",
+    "factory_sha256": "a90719a10618386b4f0431062779e94c0672def23d9530ba5a01dc1828b17b83",
+    "file": "woof/backend/facade/_elementwise.py",
     "status": "unresolved"
    },
    {
@@ -2198,6 +2198,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "dd8d577435e9cc5448cf99be773dd63b1de7d74e928b5e8c31329c3492d09f9d",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "059c7dcacd9e2ee80d633939543a26af57e95fa9c54d8f64817478a491c25ac4",
+    "file": "woof/grad/wrfplus/acoustic.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "ddf65c12fcc2a96a07091f3a704ee42bc6880b31db8ff81d67e78e229e388288",
     "constructor": "ElementwiseKernel",
     "factory": "_sequential_sum",
@@ -2241,7 +2249,7 @@
     "call_sha256": "e54d51d13267608d6a21bdfa3459d8ec6e2ab9d4d77298b2623c44ee48009846",
     "constructor": "RawModule",
     "factory": "load_module_int_defines",
-    "factory_sha256": "661a119957a61ff90a58a634424bfcdbea63258bef88d698690a479426c1368f",
+    "factory_sha256": "3c24540795ef48f094c945ab69f7ff0aba4097b2624829b86c65c61a9ab9fec4",
     "file": "woof/core/kernels/__init__.py",
     "status": "unresolved"
    },
@@ -2582,6 +2590,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "fa9e0a16659fcb764d1104c1350f47476f5985e6cb3b108b34d28e3a04a6ec53",
+    "constructor": "RawModule",
+    "factory": "_module",
+    "factory_sha256": "3d6331d57be27ea1003a1c1478bc261f837b117e3270a0210c366953337e4454",
+    "file": "woof/da/var/transforms.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "fb1e3ee1c28c1633330196530df3cb124226ce31bfaf9f81dbf441b4523079a6",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
@@ -2749,7 +2765,7 @@
    },
    {
     "file": "woof/core/kernels/chem_ftuv.cu",
-    "sha256": "c5ce548ac34c9570d7b57a43abd47e8f679910506cfabbb876c610f563867270"
+    "sha256": "938f998fda2d5bca4bdbb1a12555e8b3f4f257bec2ea1d3b23f451a29fdd9735"
    },
    {
     "file": "woof/core/kernels/chem_inventory.cu",
@@ -3824,6 +3840,10 @@
     "sha256": "546d938c218d63951a4475a5539e48e1e7271b62d4cc96583af09b17983da499"
    },
    {
+    "file": "woof/core/kernels/obstacle_drag.cu",
+    "sha256": "8d267bf826a42f2737397864eb190b3a6c1c34ad7f63d2e3c787698e32088598"
+   },
+   {
     "file": "woof/core/kernels/oml.cu",
     "sha256": "ce97181b17e72439ceb7cab26a9e088013669bb94e42b786b1b14293e4241728"
    },
@@ -4521,7 +4541,7 @@
    },
    {
     "file": "woof/core/kernels/urban_ucm.cu",
-    "sha256": "ee5bb8e48b297b0d5304047b7d764103a5c22bc1fb307df13670c122c39e588b"
+    "sha256": "be7d1058e4578338a46713e3725862c4b8c82ccf617857d0820d9832b86431f7"
    },
    {
     "file": "woof/core/kernels/urban_ucm480.cu",
@@ -4704,6 +4724,10 @@
     "sha256": "ed125e770df19cb3161c4a8bed53e55cc0d740f521f318cf9166e2a1063ddd25"
    },
    {
+    "file": "woof/da/var/kernels/var_u.cu",
+    "sha256": "982019de6841403f85b93c810fa011af68b6830710a838029f5ee6123c387470"
+   },
+   {
     "file": "woof/data/gbmpbl/constants.cuh",
     "sha256": "ae3379d57ef2311b659ce811a583b24c6b4f5f495904b5fef2024b4bcd248c82"
    },
@@ -4734,6 +4758,10 @@
    {
     "file": "woof/fddaobs/kernels.cu",
     "sha256": "74fcf8427fb8fe6234de12070a0d88f840be33467fd9b4706802dca8575785e6"
+   },
+   {
+    "file": "woof/grad/wrfplus/kernels/advance_uv.cu",
+    "sha256": "056a96e3aba68aa645d8fc6b05c958b5098bcbe78d2c39549e72b90bcee3639b"
    },
    {
     "file": "woof/hex/chem_transport.cu",
@@ -5038,10 +5066,6 @@
    {
     "file": "woof/spectral_nudging/surface_forecast.cu",
     "sha256": "4fb2330ab076f7f65dfd8d79a43802cfed4d3ed4425063517fd51612c174ebd9"
-   },
-   {
-    "file": "woof/core/kernels/obstacle_drag.cu",
-    "sha256": "8d267bf826a42f2737397864eb190b3a6c1c34ad7f63d2e3c787698e32088598"
    }
   ],
   "python_compiler_files": [
@@ -5063,11 +5087,11 @@
    },
    {
     "file": "woof/backend/facade/_ops.py",
-    "sha256": "054da647db781f1bb053608106a979d5f28aa8bdf208514ccd7abdcae5b277cc"
+    "sha256": "e8b88f3d42a15bbbce5dd19978de965ab4caf6791c45bf29e94b42bbf089cced"
    },
    {
     "file": "woof/backend/facade/cuda.py",
-    "sha256": "729cb404f0cc4fb68b019e87efe5aa0189bfb8070834e5332b09784db0c45345"
+    "sha256": "11966e5789f44eac7244e5508aec6eb006ce26aa5f5c894b89cf377dd1823e17"
    },
    {
     "file": "woof/backend/host/loader.py",
@@ -5143,7 +5167,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "e1324b99dcac17cc2f03758f43473af155400ebcc9144ca18a09edfa8d212ec8"
+    "sha256": "f50adb70fa5e73bd95ee355527094433666f08c16a869b097e65286ca1cc5331"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5183,7 +5207,7 @@
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "e3589244adc44d2fee7fc7f38938cc3fec25dc13905b410f1a427c2db2bc2700"
+    "sha256": "b36275fe458d0c2afa2a5b753431fe1cc2f92deaee93ab96576dbd9bd1b076d5"
    },
    {
     "file": "woof/core/kernels/no_ftz.py",
@@ -5299,7 +5323,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "7f74a4174ab3c78bb9a3caceb0c483017eeccf37ff3ee4d346422489f456bff5"
+    "sha256": "514e6a94703045eb4b862f06dfdd47f4dc530c6195d04e96156e8f678fd776a1"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5466,6 +5490,10 @@
     "sha256": "bea1ace4b8df937fa8a0d11659efb6b7438516cbf18cf129ab90c5580a023f7d"
    },
    {
+    "file": "woof/da/var/transforms.py",
+    "sha256": "a4d41dd0809fa5411a4f74395029aec61ccb25f99a52ad5ee8c45578e161c3a5"
+   },
+   {
     "file": "woof/doctor.py",
     "sha256": "9a14b7018d591f222630e364083081f7183da0af545cd1e035f5c2c740609b7b"
    },
@@ -5554,6 +5582,10 @@
     "sha256": "d226f5b1d1cfba2f0743131a2190aaf9208993f20b05616659f879a128dff00c"
    },
    {
+    "file": "woof/grad/wrfplus/acoustic.py",
+    "sha256": "eb5850ccad974f4b9d7fabdbf13c0794756cdce3b1d730b3215e60ab983d1253"
+   },
+   {
     "file": "woof/hex/cuda_acoustic.py",
     "sha256": "112d5fdf160bc7b5853baff0d721651d12e21f3086eaf7c8b4c602dbfe0a2d96"
    },
@@ -5591,7 +5623,7 @@
    },
    {
     "file": "woof/hex/cuda_backend/recovery.py",
-    "sha256": "1a5a85585ebc72867904f852ee54c541ace5fc2ac26f0ef89dabd179096cc041"
+    "sha256": "d47e5523a9ea997367565a9756573b98912bb149599827101dafe7980608f4d5"
    },
    {
     "file": "woof/hex/cuda_backend/runtime.py",
@@ -5599,7 +5631,7 @@
    },
    {
     "file": "woof/hex/cuda_compensated_recovery.py",
-    "sha256": "f076673925dc4761c7bd77380722f8badc1ffdbdec228cbb4c3c573edb2f6129"
+    "sha256": "4a2a31e9e64107d899f3fe76224fdf08ce771f463bdd189a54fe806054e22f69"
    },
    {
     "file": "woof/hex/cuda_compile_rrfs.py",
@@ -9301,15 +9333,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "3c684aaf3bf84358be5c989dbb9f1faf8d684b3a8659c70675c21248668c463b",
+    "sha256": "0f76ef0ba2983afb5c4e52e03502e660aa53d16d845a03bd7efb778a6af9904d",
     "sites": {
-     "100": 2513
+     "100": 2585
     }
    },
    "native_differences": {
-    "sha256": "0450b3b57eeaa0f321eabdeed5df767ceb4cfb27535fcc70efda87a36e683528",
+    "sha256": "b764f6aeda4fa75e0a4b8c886b26f168ec82236e3fc71075505b259fcaf431e3",
     "sites": {
-     "100": 462
+     "100": 468
     }
    },
    "native_errors": {},
@@ -9331,7 +9363,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "d04c1a03a496be7ac829c36d194aa29016824c2c453ccc2fd9fa0aaa04db9bbd"
+   "source_sha256": "ebf5a3d14b34e8d8a1f40245033db71dda9733fb385e926fdf27fc45480fc7df"
   },
   "composed:noah_sfcdiags": {
    "assessment": "static_diagnostic_only",
@@ -11624,15 +11656,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "eb0fb4dacb582a1ffcd14b3f0bc12765acdcf019d40afbf1066d5333de4edd82",
+    "sha256": "503d4505129272b017ae716f1a79eb767fe172f3078e32f31031625c57679277",
     "sites": {
-     "100": 890
+     "100": 905
     }
    },
    "native_differences": {
-    "sha256": "4265122c38ef8a584ecb79ec393fa373f74aaeef6c916b1670780d867d710ed9",
+    "sha256": "b4d9d63827c623c7bd754d4b25bdc4389a10ac8d8ec6b824a48b3b75fbe34f86",
     "sites": {
-     "100": 1985
+     "100": 2333
     }
    },
    "native_errors": {},
@@ -11654,7 +11686,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "d166d48bb75c8b8eb0674c5c0d849c9f9ed4a87f2a6722ec884905861bfc1f24"
+   "source_sha256": "5b5267af376244df59707717aba316ed466b38d3c3de434331cd6a1b23745e2d"
   },
   "kernels:chem_inventory": {
    "assessment": "static_diagnostic_only",
@@ -24513,15 +24545,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "54f5e149c75a1cf7eb8788dfb9afcdccf26e1abeecb60f2aa86b468c60ae078d",
+    "sha256": "5588cd04a1c443bc8cfdc8a347b1b96d1c640dc582293f9f684c39cca52cca63",
     "sites": {
-     "100": 1279
+     "100": 1351
     }
    },
    "native_differences": {
-    "sha256": "eb845523a09b2edeaffb18e6eba1b3038daec3942e9e2074ee13c73cfb3e6e5e",
+    "sha256": "4b0a29a98027fd01c5c9d1c4ed2e6ea6646a016ce6135bd2a64e55af72b33ca5",
     "sites": {
-     "100": 283
+     "100": 289
     }
    },
    "native_errors": {},
@@ -24541,7 +24573,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "4973c76c4dd3ced4c8635bd3f5cbd8c9a7c6750763781a7a046ecab22b9da3e2"
+   "source_sha256": "612894684be775e294bb744b74d57d161168132cb64b9819000c945efb48f6fb"
   },
   "kernels:urban_ucm480": {
    "assessment": "static_diagnostic_only",
@@ -24560,15 +24592,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "86f1ac6de64ba85c4e31b12aec5b782a9817cc0713dd9e87a3806f11a1590536",
+    "sha256": "5da37a7a0081f94679819d8f7195b8b874fa543eec22f00ca98ac84effd0d00e",
     "sites": {
-     "100": 4384
+     "100": 4456
     }
    },
    "native_differences": {
-    "sha256": "edac3cb4bbea89217533a29ed648370305c6bcdf9af2f691072a4a6660a24016",
+    "sha256": "b48e43f0b7c1ac078a5a1d490d396d7a78d06045237af716f6a119a9e61124f8",
     "sites": {
-     "100": 856
+     "100": 862
     }
    },
    "native_errors": {},
@@ -24590,7 +24622,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "0058449686e20cfe71423bf44e42cdaaa69365bf80c071174e6914ff21fc328b"
+   "source_sha256": "cf199ae34e288c7bc6fd9dbbb6c048b5d136004fb64c50e21cb3a81168e70955"
   },
   "kernels:uwpbl": {
    "assessment": "static_diagnostic_only",
