@@ -582,8 +582,8 @@ over the same two hours. Outputs are 10-minute frames.
 | resolved, under 250 m2 | 52% | 72% |
 | resolved, 1,000-2,500 m2 | 69% | 95% |
 
-Overture's footprints are finer-grained than the OSM extract, so slightly
-less street is fully open at 50 m. The conclusion is unchanged: 25 m is
+Overture's footprints are finer-grained than the OSM extract, so less
+street is fully open (27% against 33% at 50 m, 44% against 46% at 25 m). The conclusion is unchanged: 25 m is
 the spacing that opens the canyons.
 
 **25 m against 50 m.** Mean wind over the 25 m nest's area. The 25 m
@@ -629,7 +629,7 @@ should hold one vortex. 25 m finds a vortex in more canyons, and its
 upwind-wall updraft is the textbook sense of rotation. 50 m catches only
 the wider canyons.
 
-**Tower wakes.** Speed deficit 200 m and 400 m downwind of six towers at
+**Tower wakes.** Speed deficit 200 m and 400 m downwind of five towers at
 60 m, relative to the upwind wind at 60 m. Window 19:20-20:00:
 
 | tower | no buildings, 50 m | buildings, 50 m | buildings, 25 m |
@@ -640,7 +640,8 @@ the wider canyons.
 | Bank of America Tower | -0.01 / 0.01 | 0.90 / 0.84 | 0.82 / 0.85 |
 | 30 Hudson Yards | 0.02 / 0.00 | 0.85 / 0.90 | 0.26 / 0.51 |
 
-The towers leave strong wakes that last at least 400 m. The neighbouring
+Most towers leave deficits of 0.45-0.9 out to 400 m; 30 Hudson Yards at
+25 m is the exception (0.26 at 200 m). The neighbouring
 blocks are in the same wake, though, so the deficit is the canopy's and
 the tower's together, not the tower's alone. The Chrysler Building is
 left out: in the product it is only 132 m tall at 50 m and 10 m at 25 m.
@@ -676,8 +677,8 @@ on the A6000:
 | | CUDA (shared A6000) | Metal (M3 Max) |
 |---|---|---|
 | integration time, 19:00-19:10 | 2,199 s | 5,252 s |
-| 50 m step | 0.30 s | 1.24 s |
-| 25 m step | 0.29 s | 0.41 s |
+| 50 m, mean time per logged step | 0.30 s | 1.24 s |
+| 25 m, mean time per logged step | 0.29 s | 0.41 s |
 | peak memory | 21 GB (GPU) | 16.7 GB (resident) |
 
 The runs are not bit-identical, and should not be expected to be:
@@ -687,7 +688,7 @@ The runs are not bit-identical, and should not be expected to be:
   and the Mac).
 - At 19:10 the turbulence has decorrelated. The rms difference in U is
   0.27 m/s on the 50 m domain and 0.52 m/s on the 25 m domain, against
-  field rms values of about 4.7 m/s.
+  field rms values of about 4.8 m/s.
 
 `woof go` refuses a forecast on Metal, because its readiness gate probes
 NVRTC. To run one, prepare with `woof go --prepare-only`, then run
