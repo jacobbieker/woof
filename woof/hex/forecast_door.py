@@ -2624,7 +2624,7 @@ def resolve_request(
         chemistry_config=getattr(arguments, "chemistry_config", None),
         wind_farms=getattr(arguments, "wind_farms", None),
         w_damping=_resolve_w_damping(arguments),
-        obstacles=_resolve_obstacles(arguments),
+        obstacles=_resolve_obstacles(arguments, collected),
         inflow_perturbation=_resolve_inflow_perturbation(arguments),
         input_problems=tuple(collected or ()),
         preset=preset.name,
@@ -3278,8 +3278,11 @@ _OBSTACLE_KEYS = ("obstacle_solid_fraction", "obstacle_relax_factor", "obstacle_
                   "obstacle_wall_z0")
 
 
-def _resolve_obstacles(arguments) -> dict | None:
-    """woof's obstacle_opt = 1 settings when ``--obstacle-opt 1``, else None; refuses what it cannot honour."""
+def _resolve_obstacles(arguments, collected: list[str] | None = None) -> dict | None:
+    """woof's obstacle_opt = 1 settings when ``--obstacle-opt 1``, else None; refuses what it cannot honour.
+
+    ``collected`` is the preflight seam: a missing product is recorded there, not raised.
+    """
 
     opt = getattr(arguments, "obstacle_opt", None)
     path = getattr(arguments, "obstacle_file", None)
@@ -3294,9 +3297,13 @@ def _resolve_obstacles(arguments) -> dict | None:
     if opt != 1:
         raise _refuse(f"--obstacle-opt {opt!r}: only 0 (off) and 1 (porous immersed obstacles) exist")
     if path is None:
-        raise _refuse("--obstacle-opt 1 needs --obstacle-file (a `woof buildings` product on this mesh)")
+        raise _refuse("--obstacle-opt 1 needs --obstacle-file (a hex building product of shape (1, nCells), "
+                      "built with woof.static.buildings.VoronoiGrid)")
     if not Path(path).is_file():
-        raise _refuse(f"--obstacle-file {str(path)!r} does not exist")
+        problem = f"--obstacle-file {str(path)!r} does not exist"
+        if collected is None:
+            raise _refuse(problem)
+        collected.append(problem)
     for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
         if getattr(arguments, flag, False):
             raise _refuse(
@@ -5854,7 +5861,8 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                              "frontal drag and a wall law) from --obstacle-file; WOOF-physics route only; "
                              "default off")
     parser.add_argument("--obstacle-file", type=Path, default=None, metavar="PRODUCT",
-                        help="a `woof buildings` building product on this mesh, for --obstacle-opt 1")
+                        help="a hex building product of shape (1, nCells) built with woof.static.buildings.VoronoiGrid, "
+                             "for --obstacle-opt 1")
     for key, text in (("obstacle_solid_fraction", "layer fraction above which a cell layer is solid (default 0.5)"),
                       ("obstacle_relax_factor", "solid relaxation rate as a multiple of 1/dt (default 10)"),
                       ("obstacle_drag_coefficient", "frontal drag coefficient (default 0.4)"),

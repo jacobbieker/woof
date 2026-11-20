@@ -319,9 +319,10 @@ between wall and flow. Each RK stage of each dynamics substep subtracts
 `k / (1 + k dt)` times the stage's momentum after its other slow
 tendencies, with dt the substep, and the acoustic steps carry it as held
 forcing. Two kernels (`woof/hex/obstacles.py`, CUDA and Metal) work on
-sparse lists of the edges and w faces that touch an obstacle. Off, or with
-no buildings, the module is never imported and nothing launches, and the
-run steps to the same bits as before (checked in child processes in fast,
+sparse lists of the edges and w faces that touch an obstacle. Off, the
+module is never imported and nothing launches; with `--obstacle-opt 1` and an
+empty product, no obstacle kernel launches and the state stays unchanged. Either
+way the run steps to the same bits as before (checked in child processes in fast,
 strict and wrf_exact numerics, on CUDA and Metal).
 
 Refused, by name: any obstacle flag without `--obstacle-opt 1`; opt 1

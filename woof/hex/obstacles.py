@@ -245,9 +245,9 @@ def build_coefficients(mesh: HostMesh, morph, settings: ObstacleSettings, *,
     law[touched] = _wall_law(dc[touched], z0)
     wall = np.where(other_ok, law[slot_edge] * dv[slot_edge] / area[:, None], 0.0)
     needs_wz = np.zeros((nlev, nc), bool)              # (nlev, nc), per metre
-    needs_wz[1:] = solid[:-1] & valid[None]
+    needs_wz[1:] = solid[:-1] & valid[None] & open_cell[1:]
     if ground_wall:
-        needs_wz[0] = valid
+        needs_wz[0] = valid & open_cell[0]
     wz = np.zeros((nlev, nc))
     wz[needs_wz] = _wall(dz[needs_wz], z0)
     slot_angle = angle[slot_edge]
@@ -285,9 +285,14 @@ def build_coefficients(mesh: HostMesh, morph, settings: ObstacleSettings, *,
     w_a[1:nlev] = relax * (solid[:-1] | solid[1:]) * valid[None]
     w_b[1:nlev] = (w_a[1:nlev] == 0) * 0.5 * (lateral[:-1] + lateral[1:]) * valid[None]
 
-    if (edge_a > 0).any() or (edge_b > 0).any():
+    w_used = ((w_a > 0) | (w_b > 0)).any(axis=0)
+    if (edge_a > 0).any() or (edge_b > 0).any() or w_used.any():
         used = (edge_a > 0) | (edge_b > 0)
-        spacing = float(dc[used.any(axis=0)].max())
+        spacing = float(dc[used.any(axis=0)].max()) if used.any() else 0.0
+        if w_used.any():
+            # A vertical-only attachment stands on its cell's incident edges too.
+            cell_dc = np.where(slot_used, dc[slot_edge], 0.0).max(axis=1)
+            spacing = max(spacing, float(cell_dc[w_used].max()))
         if spacing > MAX_SPACING_M:
             raise ValueError(
                 f"obstacles on edges with dcEdge up to {spacing:.0f} m: resolved obstacles "
@@ -419,6 +424,9 @@ def attach(driver, settings: ObstacleSettings, morph=None, *, ground_wall=False,
     obstacle face attaches nothing (``driver.obstacles`` stays None).
     """
     refuse_driver(driver)
+    if getattr(driver, "subcycle_graphs", None) is not None:
+        raise RuntimeError("--obstacle-opt attaches before the subcycle graphs: a captured graph "
+                           "would replay without the obstacle work")
     digest = None
     if morph is None:
         from pathlib import Path

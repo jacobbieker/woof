@@ -5,7 +5,9 @@ The phase-1 cube and street canyon (:mod:`woof.verify.cases.obstacle_cube`,
 has no planar periodic mesh (its mesh checks and LES weights are spherical
 only), so the closed domain is a small sphere: an icosahedral Voronoi mesh of
 radius ``R = 12 H / (2 pi)``, so the equator is the phase-1 box length 12H
-and pole to pole is 6H, with no Coriolis.  The flow is a solid-body zonal
+and pole to pole is 6H.  By default (``balanced=True``) the frame rotates at
+``-U_REF / (2 R)``, so Coriolis terms are nonzero and balance the solid-body
+wind; ``balanced=False`` is the zero-Coriolis case.  The flow is a solid-body zonal
 wind, held at ``U_REF`` above 2H on the equator by a body-force drive (the
 phase-1 constant-flow-rate drive).  The dycore is the v8.4.1 dry resident
 driver with 2-D Smagorinsky mixing; the ground takes the obstacles' own wall
@@ -274,11 +276,14 @@ class Drive:
     balanced rotation.
     """
 
-    def __init__(self, driver, mesh, frames, *, dt):
+    def __init__(self, driver, mesh, frames, *, dt, height=H):
         cp = driver.cp
         self.cp = cp
         z_mass = 0.5 * (frames["z_w"][1:] + frames["z_w"][:-1])
-        self.upper = cp.asarray(np.flatnonzero(z_mass > 2 * H))
+        upper = np.flatnonzero(z_mass > 2 * height)
+        if upper.size == 0:
+            raise ValueError(f"no level above twice the building height {height:g} m to hold the drive")
+        self.upper = cp.asarray(upper)
         a = mesh.arrays
         w = (np.asarray(a["dcEdge"], np.float64) * np.asarray(a["dvEdge"], np.float64)
              * (np.abs(np.asarray(a["latEdge"], np.float64)) < 0.5))
@@ -385,6 +390,11 @@ def canyon_morphology(mesh, *, width=H, building=H, height=H, lat_extent=60.0):
     lon = np.asarray(a["lonCell"], np.float64)
     lat = np.asarray(a["latCell"], np.float64)
     period = width + building
+    if lat_extent > 0:
+        bars = 2.0 * math.pi * mesh_radius(mesh) / period
+        if abs(bars - round(bars)) > 1e-6:
+            raise ValueError(f"the equator ({2.0 * math.pi * mesh_radius(mesh):g} m) is not a whole "
+                             f"number of {period:g} m periods; the longitude seam would split a bar")
     x = np.mod(lon * mesh_radius(mesh), period)
     built = (x >= width) & (np.abs(np.degrees(lat)) < lat_extent)
     one = lambda v: np.asarray(v, np.float32)[None]
@@ -449,12 +459,15 @@ def run_cube(*, level=4, zoom=1.0, minutes=15.0, average_minutes=6.0, dt=0.1,
     lon = np.asarray(a["lonCell"], np.float64)
     x = lon * mesh_radius(mesh)
     y = lat * mesh_radius(mesh)
-    spacing = float(np.sqrt(np.asarray(a["areaCell"], np.float64)[np.abs(x) < 3 * H].mean()))
+    spacing = float(np.sqrt(np.asarray(a["areaCell"], np.float64)[
+        (np.abs(x) < 3 * H) & (np.abs(y) < 3 * H)].mean()))
     centre = np.flatnonzero((np.abs(y) < 0.6 * spacing) & (np.abs(x) < 6 * H))
     z_mass = 0.5 * (frames["z_w"][1:] + frames["z_w"][:-1])
     k_cube = int(np.searchsorted(z_mass, H))
     inside = np.flatnonzero((np.abs(x) < 0.5 * H - spacing) & (np.abs(y) < 0.5 * H - spacing))
     ref_levels = (z_mass > 1.9 * H) & (z_mass < 2.1 * H)
+    if not ref_levels.any():
+        raise ValueError("no mass level between 1.9 H and 2.1 H to take the reference wind from")
     n_total = int(round(minutes * 60.0 / dt))
     n_avg = int(round(average_minutes * 60.0 / dt))
     sampled = _sample_steps(n_total, n_avg)
@@ -508,7 +521,7 @@ def run_canyon(*, level=4, zoom=1.0, minutes=10.0, average_minutes=4.0, dt=0.1,
     receipt = hex_obstacles.attach(driver, hex_obstacles.ObstacleSettings(),
                                    canyon_morphology(mesh, height=height, lat_extent=lat_extent),
                                    ground_wall=True)
-    drive = Drive(driver, mesh, frames, dt=dt)
+    drive = Drive(driver, mesh, frames, dt=dt, height=height)
     if vertical_mixing:
         drive.enable_vertical_mixing(mesh, frames, dt=dt)
     slot, pinv = cell_wind_operator(mesh)
@@ -551,10 +564,12 @@ def run_canyon(*, level=4, zoom=1.0, minutes=10.0, average_minutes=4.0, dt=0.1,
     kz, ix = np.unravel_index(np.argmin(sub), sub.shape)
     centre_col = nbins // 2
     column = u_bins[in_canyon, centre_col]
+    vortices = int(np.count_nonzero(np.diff(np.sign(column)) != 0))
     roof = int(np.argmin(np.abs(z_mass - height)))
-    return dict(vortex_x=float((ix + 0.5) / nbins), vortex_z=float(z_mass[kz] / height),
+    return dict(vortex_x=float((ix + 0.5) / nbins) if vortices else None,
+                vortex_z=float(z_mass[kz] / height) if vortices else None,
                 floor_u=float(u_bins[0, centre_col] / ref), roof_u=float(u_bins[roof, centre_col] / ref),
-                vortices=int(np.count_nonzero(np.diff(np.sign(column)) != 0)),
+                vortices=vortices,
                 centre_u=(column / ref).tolist(), u_ref=ref, cells=int(lat.size),
                 spacing_m=spacing, seconds=seconds, steps=n_total, obstacles=receipt,
                 nan=not bool(cp.all(cp.isfinite(driver.atmosphere.saved.normal_velocity))),

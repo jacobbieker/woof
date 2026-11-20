@@ -3975,8 +3975,12 @@ def execute_forecast(
         from woof.hex.obstacles import ObstacleSettings, attach as attach_obstacles
         settings = dict(host["obstacles"])
         settings.pop("obstacle_opt", None)
-        print(json.dumps({"obstacles": attach_obstacles(stack["driver"], ObstacleSettings(**settings))},
-                         default=str), flush=True)
+        obstacle_receipt = attach_obstacles(stack["driver"], ObstacleSettings(**settings))
+        print(json.dumps({"obstacles": obstacle_receipt}, default=str), flush=True)
+        output_root.mkdir(parents=True, exist_ok=True)
+        (output_root / "obstacles-receipt.json").write_text(
+            json.dumps(obstacle_receipt, indent=2, sort_keys=True, default=str) + "\n",
+            encoding="utf-8", newline="\n")
     # --wrf-hydro (woof.wrf_hydro_route): the routing on its own LSM grid through the conservative cell <-> grid
     # exchange (woof.hex.wrf_hydro_hex); returns at once unless the launch asked for it.
     from woof.hex.wrf_hydro_hex import attach_host as attach_wrf_hydro
@@ -6450,6 +6454,9 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
     if getattr(args, "inflow_perturbation", None):
         host["inflow_perturbation"] = json.loads(args.inflow_perturbation)
     if getattr(args, "obstacles", None):
+        if getattr(args, "fullstep_local_timestep", False) or getattr(args, "local_timestep", False):
+            raise ConfigurationRefusal("obstacle_opt", 1, "the local-time-step executors do not carry the "
+                                       "obstacle tendency", "--obstacle-opt 0")
         host["obstacles"] = json.loads(args.obstacles)
     host["stochastic"] = resolve_options(args.stochastic).json()
     if args.preflight_only or not DEFER_PREPARED_FINGERPRINT:

@@ -62,6 +62,9 @@ def test_settings_take_phase_ones_defaults_and_refuse_bad_values():
     got = ObstacleSettings().as_dict()
     assert got["obstacle_opt"] == 1
     assert {k: got[k] for k in DEFAULTS} == DEFAULTS
+    assert {k: got[k] for k in DEFAULTS} == dict(
+        obstacle_solid_fraction=0.5, obstacle_relax_factor=10.0,
+        obstacle_drag_coefficient=0.4, obstacle_wall_z0=0.01)
     for bad in (dict(obstacle_solid_fraction=0.0), dict(obstacle_solid_fraction=1.5),
                 dict(obstacle_relax_factor=-1.0), dict(obstacle_wall_z0=float("nan")),
                 dict(obstacle_drag_coefficient=0.0)):

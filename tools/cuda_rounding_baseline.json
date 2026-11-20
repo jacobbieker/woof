@@ -6243,7 +6243,7 @@
    },
    {
     "file": "woof/hex/obstacles.py",
-    "sha256": "e043faed89fc1c2773ac2a628bba4abab3395a9760eb03e4897577f7e8d2e8fd"
+    "sha256": "59eae00af0eb68768cfdca9f136076179bfef8560fb1a4f7ef59fa529ebe889b"
    },
    {
     "file": "woof/hex/ocean_mixed_layer.py",
