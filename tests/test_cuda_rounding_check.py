@@ -5,6 +5,8 @@ import json
 import shutil
 import subprocess
 import sys
+import sysconfig
+import time
 
 import pytest
 
@@ -13,7 +15,10 @@ from tools.cuda_rounding_check import (floating_signatures, inventory,
                                        capture_compiler_sources, compare_unit,
                                        audit_inventory, inventory_changes,
                                        audit_record, source_units, composed_units,
-                                       operation_units)
+                                       operation_units, find_nvdisasm,
+                                       find_nvrtc_library, compiler_identity,
+                                       receipt_key, load_receipt, store_receipt,
+                                       run_units, HEAVY_UNITS, wait_for_memory)
 from tools.literal_division_census import Unit
 from tools.cuda_rounding_dataflow import ptx_dataflow_signatures, dataflow_differences
 from tools.cuda_rounding_native import sass_floating_signatures, sass_dataflow_signatures
@@ -250,6 +255,24 @@ def test_actual_source_capture_keeps_options_and_restores_hooks_on_error(tmp_pat
     assert units[1]["options"] == ["-arch=compute_120", "--ftz=false"]
 
 
+def test_operation_probe_types_index_placeholders_and_closes_the_expression():
+    from types import SimpleNamespace
+    from tools.cuda_rounding_check import elementwise_operation_unit
+
+    def parameter(name, ctype, dtype, raw=False, is_const=True):
+        return SimpleNamespace(name=name, ctype=ctype, dtype=dtype, raw=raw, is_const=is_const)
+
+    kernel = SimpleNamespace(
+        in_params=[parameter("edges", "I", None, raw=True), parameter("a", "float", "float32")],
+        out_params=[parameter("out", "T", None, is_const=False)],
+        operation="out = __fmul_rn(a, (T)edges[i])", preamble="")
+    source = elementwise_operation_unit("probe", kernel).source
+    assert "typedef int I;" in source and "typedef int T;" not in source
+    assert "out = __fmul_rn(a, (T)edges[i]);" in source
+    closed = SimpleNamespace(**dict(vars(kernel), operation="out = a;"))
+    assert "out = a;;" not in elementwise_operation_unit("probe", closed).source
+
+
 @pytest.fixture(scope="module")
 def compiled_rounding_audit(tmp_path_factory):
     # Compilation is CPU-only and is enabled whenever a capable toolkit is
@@ -258,8 +281,14 @@ def compiled_rounding_audit(tmp_path_factory):
     environment = dict(os.environ, CUDA_VISIBLE_DEVICES="", GPUWM_NO_LOCAL_GPU="1",
                        TMPDIR=str(temporary), OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1",
                        MKL_NUM_THREADS="1", RAYON_NUM_THREADS="1")
+    # The baseline records the default build: fast numerics, no WRF-exact
+    # controls, the default referee glibc. tests/conftest.py names strict for
+    # the battery, which would audit (and fail on) the strict compositions.
+    environment["GPUWM_NUMERICS"] = "fast"
+    for variable in ("GPUWM_WRF_EXACT", "GPUWM_WRF_GLIBC", "WOOF_FMAD_OFF"):
+        environment.pop(variable, None)
     probe = subprocess.run([sys.executable, "-m", "tools.cuda_rounding_check", "--compiler-info"],
-                           cwd=ROOT, env=environment, capture_output=True, text=True, timeout=60)
+                           cwd=ROOT, env=environment, capture_output=True, text=True, timeout=600)
     assert probe.returncode == 0, probe.stderr[-4000:]
     information = json.loads(probe.stdout)
     if "unavailable" in information:
@@ -267,30 +296,51 @@ def compiled_rounding_audit(tmp_path_factory):
     if not {100, 120}.issubset(information["supported_architectures"]):
         pytest.skip("installed NVRTC cannot target both sm_100 and sm_120")
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
-    library = os.environ.get("WOOF_NVRTC_LIBRARY")
-    native_tool = os.environ.get("WOOF_NVDISASM") or shutil.which("nvdisasm")
-    if not library and os.environ.get("CUDA_PATH"):
-        candidate = Path(os.environ["CUDA_PATH"]) / "lib" / "libnvrtc.so.13"
-        if candidate.exists():
-            library = str(candidate)
+    library = find_nvrtc_library()
+    native_tool = find_nvdisasm()
     if native_tool and not library:
         pytest.fail("nvdisasm is installed, but the matching NVRTC library was not found")
     result_file = temporary / "audit.json"
+    # Unchanged units reuse a content-addressed receipt (source, options,
+    # targets, compiler and analysis code are all bound), so only changed
+    # units recompile. Put the cache on a large disk with WOOF_ROUNDING_CACHE.
+    cache = Path(os.environ.get("WOOF_ROUNDING_CACHE")
+                 or Path.home() / ".cache" / "woof" / "rounding-audit")
     command = [sys.executable, "-m", "tools.cuda_rounding_check", "--root", str(ROOT),
-               "--arch", "120", "--arch", "100", "--operations", "--workers", "4",
-               "--json", str(result_file),
+               "--arch", "120", "--arch", "100", "--operations",
+               "--workers", os.environ.get("WOOF_ROUNDING_WORKERS", "4"),
+               "--cache-dir", str(cache), "--json", str(result_file),
                "--report-only"]
     if native_tool:
         command += ["--nvrtc-library", library, "--nvdisasm", native_tool]
-    process = subprocess.run(command, cwd=ROOT, env=environment, capture_output=True, text=True,
-                             timeout=3600)
-    assert process.returncode == 0, process.stderr[-4000:]
+    # No fixed wall-clock bound: a cold sweep scales with the units compiled
+    # and a loaded host is slow. A hung compiler is caught by stall detection:
+    # every finished unit rewrites the result file and prints a line.
+    stall = float(os.environ.get("WOOF_ROUNDING_STALL_S", "10800"))
+    log = temporary / "audit.log"
+    with open(log, "w", encoding="utf-8") as sink:
+        process = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=sink,
+                                   stderr=subprocess.STDOUT, text=True)
+        last = (log.stat().st_size, time.monotonic())
+        while process.poll() is None:
+            time.sleep(5)
+            size = log.stat().st_size
+            if size != last[0]:
+                last = (size, time.monotonic())
+            elif time.monotonic() - last[1] > stall:
+                process.kill()
+                process.wait()
+                pytest.fail(f"rounding audit made no progress for {stall:.0f} s: "
+                            + log.read_text(encoding="utf-8")[-2000:])
+    assert process.returncode == 0, log.read_text(encoding="utf-8")[-4000:]
     compiled = json.loads(result_file.read_text(encoding="utf-8"))
     results = [(row["unit"], audit_record(row)) for row in compiled["units"]]
     return baseline, results, bool(native_tool)
 
 
-@pytest.mark.timeout(3700)  # Let the fixture's bounded 3600 s audit finish.
+# The native sweep of ~460 units took 1 h 45 min on four workers on a shared
+# host (load 25-50, 2026-11-15), so the bound is two hours.
+@pytest.mark.timeout(0)  # The fixture bounds itself by stall detection.
 def test_every_compiled_source_keeps_its_sm100_sm120_rounding_diagnostics(compiled_rounding_audit):
     baseline, results, native = compiled_rounding_audit
     changes = []
@@ -314,3 +364,152 @@ def test_every_compiled_source_keeps_its_sm100_sm120_rounding_diagnostics(compil
         "Target rounding diagnostics changed. Equal FFMA totals do not establish identity; "
         "review the operand DAG and replay changed weather kernels before refreshing the audit.\n"
         + "\n".join(changes[:30]))
+
+
+def _unit(source="__global__ void k(float *a) { a[0] = a[0] * 2.0f + 1.0f; }",
+          options=("-std=c++17",), key="t.cu"):
+    return Unit(key, source, options)
+
+
+def _row(unit, arches=(120, 100)):
+    import hashlib
+    from tools.cuda_rounding_check import _options
+    return {"unit": unit.key, "source_sha256": hashlib.sha256(unit.source.encode()).hexdigest(),
+            "compiled": {str(a): {"options": list(_options(unit, a))} for a in arches},
+            "errors": {}, "native_errors": {}, "differences": {}, "dataflow_differences": {},
+            "native_differences": {}, "native_dataflow_differences": {}, "status": "same_signatures"}
+
+
+def test_receipt_cache_hits_only_for_identical_source_options_targets_and_compiler(tmp_path):
+    arches, identity = (120, 100), {"nvrtc_version": [13, 0], "nvdisasm_sha256": "a"}
+    unit = _unit()
+    store_receipt(tmp_path, unit, arches, identity, _row(unit))
+    assert load_receipt(tmp_path, unit, arches, identity)["unit"] == "t.cu"
+    # a changed source, option, target list, native mode or compiler never hits
+    assert load_receipt(tmp_path, _unit(source=unit.source.replace("2.0f", "3.0f")), arches, identity) is None
+    assert load_receipt(tmp_path, _unit(options=("-std=c++17", "--fmad=false")), arches, identity) is None
+    assert load_receipt(tmp_path, unit, (120, 100, 89), identity) is None
+    assert load_receipt(tmp_path, unit, (100, 120), identity) is None
+    assert load_receipt(tmp_path, unit, arches, identity, native_only=True) is None
+    assert load_receipt(tmp_path, unit, arches, dict(identity, nvrtc_version=[13, 1])) is None
+    assert load_receipt(tmp_path, unit, arches, dict(identity, nvdisasm_sha256="b")) is None
+
+
+def test_receipt_cache_rejects_tampered_failed_and_misfiled_receipts(tmp_path):
+    arches, identity = (120, 100), {"nvrtc_version": [13, 0]}
+    unit = _unit()
+    failed = dict(_row(unit), errors={"100": "compile failed"})
+    store_receipt(tmp_path, unit, arches, identity, failed)
+    assert not list(tmp_path.glob("*.json"))
+    store_receipt(tmp_path, unit, arches, identity, _row(unit))
+    path = tmp_path / f"{receipt_key(unit, arches, identity)}.json"
+    stored = json.loads(path.read_text())
+    # a receipt whose row names other source bytes, or other options, is refused
+    for edit in (lambda r: r.update(source_sha256="0" * 64),
+                 lambda r: r["compiled"]["100"].update(options=["-std=c++14"]),
+                 lambda r: r.update(unit="other.cu"),
+                 lambda r: r.update(errors={"120": "x"})):
+        row = json.loads(json.dumps(stored["row"]))
+        edit(row)
+        path.write_text(json.dumps({"cache_key": stored["cache_key"], "row": row}))
+        assert load_receipt(tmp_path, unit, arches, identity) is None
+    # a receipt copied under another unit's key is refused
+    path.write_text(json.dumps({"cache_key": "f" * 64, "row": stored["row"]}))
+    assert load_receipt(tmp_path, unit, arches, identity) is None
+    path.write_text("not json")
+    assert load_receipt(tmp_path, unit, arches, identity) is None
+    for row in ({**stored["row"], "compiled": []}, [], "x"):
+        path.write_text(json.dumps({"cache_key": stored["cache_key"], "row": row}))
+        assert load_receipt(tmp_path, unit, arches, identity) is None
+
+
+def test_compiler_identity_changes_with_analysis_code_and_tool_bytes(tmp_path):
+    for name in ("tools/cuda_rounding_check.py", "tools/cuda_rounding_dataflow.py",
+                 "tools/cuda_rounding_native.py", "tools/literal_division_census.py",
+                 "woof/nvrtc_cache_key.py", "woof/cuda_subnormals.py"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("# analysis\n")
+    library = tmp_path / "libnvrtc.so.13"
+    library.write_bytes(b"one")
+    before = compiler_identity(tmp_path, library)
+    assert compiler_identity(tmp_path, library) == before
+    (tmp_path / "tools/cuda_rounding_dataflow.py").write_text("# changed\n")
+    assert compiler_identity(tmp_path, library) != before
+    (tmp_path / "tools/cuda_rounding_dataflow.py").write_text("# analysis\n")
+    library.write_bytes(b"two")
+    assert compiler_identity(tmp_path, library) != before
+
+
+def test_touched_unit_misses_the_cache_and_is_recompiled_while_others_hit(tmp_path):
+    arches, identity = (120, 100), {"nvrtc_version": [13, 0]}
+    units = [_unit(key="a.cu"), _unit(source="__global__ void b() {}", key="b.cu")]
+    for unit in units:
+        store_receipt(tmp_path, unit, arches, identity, _row(unit))
+    touched = _unit(source=units[0].source + "\n// touched", key="a.cu")
+    misses = [u.key for u in (touched, units[1])
+              if load_receipt(tmp_path, u, arches, identity) is None]
+    assert misses == ["a.cu"]
+
+
+def _flaky_job(payload):
+    unit, arches, options = payload
+    flag = Path(options["flag"])
+    if unit.key == "die.cu" and not flag.exists():
+        flag.write_text("died")
+        os._exit(9)  # as the OOM killer would
+    return {"unit": unit.key, "pid": os.getpid()}
+
+
+def test_pool_retries_unfinished_units_after_a_killed_worker_and_runs_heavy_units_alone(tmp_path, monkeypatch):
+    monkeypatch.setenv("WOOF_ROUNDING_HEAVY_GIB", "0")  # never wait on this host's memory
+    units = [_unit(key=k) for k in ("a.cu", "die.cu", "b.cu", f"x/{HEAVY_UNITS[0]}.cu")]
+    done = {}
+    run_units(units, (120, 100), {"flag": str(tmp_path / "flag")}, 2,
+              lambda unit, row: done.__setitem__(unit.key, row), job=_flaky_job)
+    # one worker still goes through the pool, so a kill is retried too
+    (tmp_path / "flag").unlink()
+    done.clear()
+    run_units(units, (120, 100), {"flag": str(tmp_path / "flag")}, 1,
+              lambda unit, row: done.__setitem__(unit.key, row), job=_flaky_job)
+    assert set(done) == {unit.key for unit in units}
+    (tmp_path / "flag").unlink()
+    done.clear()
+    run_units(units, (120, 100), {"flag": str(tmp_path / "flag")}, 2,
+              lambda unit, row: done.__setitem__(unit.key, row), job=_flaky_job)
+    assert set(done) == {unit.key for unit in units}
+    assert (tmp_path / "flag").exists()
+    # a worker that dies every time is reported, never silently dropped
+    (tmp_path / "flag").unlink()
+    (tmp_path / "flag").write_text("x")
+    from concurrent.futures.process import BrokenProcessPool
+    with pytest.raises(BrokenProcessPool):
+        run_units([_unit(key="die.cu")], (120, 100), {"flag": str(tmp_path / "nope")}, 2,
+                  lambda unit, row: None, job=_always_dies, retries=1)
+
+
+def _always_dies(payload):
+    os._exit(9)
+
+
+def test_nvdisasm_and_nvrtc_are_found_without_environment_help(tmp_path):
+    cuda = tmp_path / "cuda"
+    (cuda / "bin").mkdir(parents=True)
+    (cuda / "lib64").mkdir()
+    (cuda / "bin/nvdisasm").write_text("#!/bin/sh\n")
+    (cuda / "lib64/libnvrtc.so.13").write_text("")
+    assert find_nvdisasm({"PATH": "", "CUDA_HOME": str(cuda)}) == str(cuda / "bin/nvdisasm")
+    assert find_nvdisasm({"PATH": "", "WOOF_NVDISASM": "/x/nvdisasm"}) == "/x/nvdisasm"
+    found = find_nvrtc_library({"CUDA_HOME": str(cuda)})
+    assert found == str(cuda / "lib64/libnvrtc.so.13") or found.endswith("nvidia/cu13/lib/libnvrtc.so.13")
+    assert find_nvdisasm({"PATH": ""}) in (None, "/opt/cuda/bin/nvdisasm", "/usr/local/cuda/bin/nvdisasm")
+
+
+def test_heavy_units_wait_for_memory_then_proceed_even_if_it_never_frees():
+    now, readings = [0.0], iter([4.0, 9.0, 30.0])
+    assert wait_for_memory(20, 600, read=lambda: next(readings),
+                           sleep=lambda s: now.__setitem__(0, now[0] + s), clock=lambda: now[0])
+    assert now[0] == 120.0  # polled twice, then proceeded
+    now[0] = 0.0
+    assert not wait_for_memory(20, 120, read=lambda: 1.0,
+                               sleep=lambda s: now.__setitem__(0, now[0] + s), clock=lambda: now[0])
+    assert wait_for_memory(20, 120, read=lambda: None)

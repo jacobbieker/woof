@@ -60,6 +60,12 @@ _TPB = 256
 
 
 @lru_cache(maxsize=1)
+def _isolated() -> bool:
+    from woof.backend.metal import ext
+    return ext.gpu_times_isolated()
+
+
+@lru_cache(maxsize=1)
 def _compiled():
     from woof.backend.metal import ext
     ext.load().compile(_KEY, _SOURCE, [f"woof_{kind}_{w}" for kind in ("copy", "fill")
@@ -121,9 +127,16 @@ def write(view, values) -> None:
     flush_pending()
     st = view._st
     kernel = f"woof_{'fill' if fill else 'copy'}_{item}"
-    (out,) = ext.load().launch(_KEY, _SOURCE, kernel, ((n + _TPB - 1) // _TPB, 1, 1),
+    module = ext.load()
+    if _isolated():
+        module.set_gpu_label(ext.call_site())
+    try:
+        (out,) = module.launch(_KEY, _SOURCE, kernel, ((n + _TPB - 1) // _TPB, 1, 1),
                                (_TPB, 1, 1), [st.arr, src], [0, 0], [True, False], [0, 1], -1,
                                [blob], [2], 0, 0)
+    finally:
+        if _isolated():
+            module.set_gpu_label("")
     st.rebind_written(out)
 
 
@@ -262,5 +275,153 @@ def arith_in_place(np_name, view, other) -> bool:
     (out,) = ext.load().launch(_ARITH_KEY, _ARITH_SOURCE, kernel, ((n + _TPB - 1) // _TPB, 1, 1),
                                (_TPB, 1, 1), [st.arr, src], [0, 0], [True, False], [0, 1], -1,
                                [blob], [2], 0, 0)
+    st.rebind_written(out)
+    return True
+
+
+#: ``a[..., idx] = v``: one kernel storing the selected elements in place, where
+#: the general path scattered into a copy of the whole array (MLX) and wrote
+#: every element back (woof_copy).  A word copy either way: the same bytes land.
+_SCATTER_SOURCE = """#include <metal_stdlib>
+struct WoofScatter { long n; long m; long offset; long ndim; long shape[8]; long stride[8];
+                     long last_n; long last_stride; long index_offset; long src_mod; };
+// L is the element-number type: 32-bit where n fits (Metal emulates 64-bit / and %)
+template <typename T, typename I, typename L>
+inline void woof_scatter_body(device T* dst, const device T* src, const device I* index,
+                              constant WoofScatter& c, L i) {
+  L m = (L)c.m;
+  long k = (long)index[c.index_offset + (long)(i % m)];
+  if (k < 0) k += c.last_n;
+  if (k < 0 || k >= c.last_n) return;
+  L rem = i / m;
+  long off = c.offset + k * c.last_stride;
+  for (long d = c.ndim - 1; d > 0; --d) {
+    L extent = (L)c.shape[d];
+    off += (long)(rem % extent) * c.stride[d];
+    rem /= extent;
+  }
+  off += (long)rem * c.stride[0];
+  // src_mod: 1 for a scalar, m for one row over the outer axes, n for a full source
+  L j = c.src_mod == 1 ? (L)0 : (c.src_mod == c.n ? i : i % (L)c.src_mod);
+  dst[off] = src[j];
+}
+#define WOOF_SCATTER(NAME, T, I)                                                        \\
+[[kernel]] void NAME(device T* dst [[buffer(0)]], const device T* src [[buffer(1)]],    \\
+                     const device I* index [[buffer(2)]],                               \\
+                     constant WoofScatter& c [[buffer(3)]],                             \\
+                     uint3 tid [[thread_position_in_threadgroup]],                      \\
+                     uint3 bid [[threadgroup_position_in_grid]],                        \\
+                     uint3 bd [[threads_per_threadgroup]]) {                            \\
+  long i = (long)bid.x * (long)bd.x + (long)tid.x;                                     \\
+  if (i >= c.n) return;                                                                 \\
+  if (c.n <= 0xFFFFFFFFl) woof_scatter_body<T, I, uint>(dst, src, index, c, (uint)i);  \\
+  else woof_scatter_body<T, I, long>(dst, src, index, c, i);                            \\
+}
+WOOF_SCATTER(woof_scatter_4_i4, uint, int)
+WOOF_SCATTER(woof_scatter_4_i8, uint, long)
+WOOF_SCATTER(woof_scatter_8_i4, ulong, int)
+WOOF_SCATTER(woof_scatter_8_i8, ulong, long)
+"""
+_SCATTER_KEY = "woof:facade-scatter-last:v2"
+
+
+@lru_cache(maxsize=1)
+def _scatter_compiled():
+    from woof.backend.metal import ext
+    ext.load().compile(_SCATTER_KEY, _SCATTER_SOURCE,
+                       [f"woof_scatter_{w}_i{i}" for w in (4, 8) for i in (4, 8)], 0)
+    return True
+
+
+@lru_cache(maxsize=1)
+def scatter_enabled() -> bool:
+    """``WOOF_METAL_SCATTER_INPLACE=0`` restores the whole-array scatter and write-back."""
+    import os
+    return os.environ.get("WOOF_METAL_SCATTER_INPLACE", "1") != "0"
+
+
+def scatter_last(a, key, value) -> bool:
+    """``a[prefix..., index] = value`` in place, for an integer facade ``index``
+    (one dimension, contiguous) on the last axis after a basic prefix (slices
+    and ``...``).  False (nothing done) where the general path must run.
+
+    Same semantics as the general path: negative indices count from the end,
+    and a repeated index stores one of its values (which one is unspecified,
+    as in MLX's and CUDA's scatter)."""
+    import mlx.core as mx
+    from woof.backend.facade._array import flush_pending, ndarray
+    from woof.backend.facade._index import basic_view
+    from woof.backend.facade._ops import operand_values
+    from woof.backend.metal import ext
+    if not scatter_enabled():
+        return False
+    items = key if isinstance(key, tuple) else (key,)
+    index = items[-1]
+    prefix = items[:-1]
+    if not isinstance(index, ndarray) or index.ndim != 1 or index.dtype not in (np.int32, np.int64):
+        return False
+    if index._st.dtype != index.dtype or index.strides != (index.itemsize,) \
+            or index._offset % index.itemsize:
+        return False
+    if any(not (k is Ellipsis or isinstance(k, slice)) for k in prefix) or prefix.count(Ellipsis) > 1:
+        return False
+    n_basic = sum(1 for k in prefix if k is not Ellipsis)
+    if a.ndim < 1 or n_basic > a.ndim - 1 or (Ellipsis not in prefix and n_basic != a.ndim - 1):
+        return False
+    item = a.itemsize
+    if item not in (4, 8) or a.dtype == np.complex128 or a._st.dtype.itemsize != item:
+        return False
+    if index._st.buffer_root() is a._st.buffer_root():
+        return False
+    if isinstance(value, ndarray) and value._st.buffer_root() is a._st.buffer_root():
+        return False
+    # the destination with its last axis whole: slices keep every axis
+    view = basic_view(a, tuple(prefix) + (slice(None),))
+    if view._offset % item or any(s % item for s in view.strides):
+        return False
+    m = index.size
+    target = tuple(view.shape[:-1]) + (m,)
+    count = int(np.prod(target))
+    if count == 0:
+        return False             # nothing to store: the general path checks the value's shape
+    outer_shape = list(view.shape[:-1]) or [1]
+    outer_strides = [s // item for s in view.strides[:-1]] or [0]
+    outer_shape, outer_strides = _collapsed(outer_shape, outer_strides)
+    if len(outer_shape) > MAX_DIMS:
+        return False
+    values = operand_values(value, a.dtype)
+    try:
+        if np.broadcast_shapes(tuple(values.shape), target) != target:
+            return False
+    except ValueError:
+        return False
+    # a scalar or one row is read in place (src_mod), not broadcast to the target
+    shape = tuple(values.shape)
+    if values.size == 1:
+        src, src_mod = values.reshape(-1), 1
+    elif shape[-1:] == (m,) and all(s == 1 for s in shape[:-1]):
+        src, src_mod = values.reshape(-1), m
+    else:
+        src, src_mod = mx.broadcast_to(values, target).reshape(-1), count
+    src = mx.contiguous(src).view(_width_dtype(item))
+    blob = struct.pack("<qqqq", count, m, view._offset // item, len(outer_shape))
+    blob += struct.pack(f"<{MAX_DIMS}q", *(list(outer_shape) + [1] * (MAX_DIMS - len(outer_shape))))
+    blob += struct.pack(f"<{MAX_DIMS}q", *(list(outer_strides) + [0] * (MAX_DIMS - len(outer_strides))))
+    blob += struct.pack("<qqqq", int(view.shape[-1]), view.strides[-1] // item,
+                        index._offset // index.itemsize, src_mod)
+    _scatter_compiled()
+    flush_pending()
+    st = a._st
+    kernel = f"woof_scatter_{item}_i{index.itemsize}"
+    module = ext.load()
+    if _isolated():
+        module.set_gpu_label(ext.call_site())
+    try:
+        (out,) = module.launch(_SCATTER_KEY, _SCATTER_SOURCE, kernel, ((count + _TPB - 1) // _TPB, 1, 1),
+                               (_TPB, 1, 1), [st.arr, src, index._st.arr], [0, 0, 0], [True, False, False],
+                               [0, 1, 2], -1, [blob], [3], 0, 0)
+    finally:
+        if _isolated():
+            module.set_gpu_label("")
     st.rebind_written(out)
     return True

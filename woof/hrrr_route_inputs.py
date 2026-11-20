@@ -1704,6 +1704,29 @@ ROUTE_FORECAST_TOML_FIELDS: Mapping[str, str] = MappingProxyType({
     # a rented box, 2026-10-21).
     "smoke_off_reason": (
         "woof/smoke_receipts.py, the run receipt's smoke-off sentence"),
+    # THE RESOLVED OBSTACLES (opt-in obstacle_opt = 1, woof's own; WRF has
+    # no namelist key for them, so the route's pair cannot spell them).
+    # Preparation reads no buildings: the forecast attaches the product
+    # named in the bound TOML when the dycore starts, and the mirrored WRF
+    # arm has no obstacles to run.  Before these entries every HRRR-route LES nest
+    # with buildings was refused at emission ("d04 obstacle_opt: config 1
+    # vs namelist 0").
+    "obstacle_opt": "woof/core/obstacles.py, the dycore's obstacle attach",
+    "obstacle_file": "woof/core/obstacles.py, the buildings product read",
+    "obstacle_solid_fraction": (
+        "woof/core/obstacles.py build_coefficients, the solid threshold"),
+    "obstacle_relax_factor": (
+        "woof/core/obstacles.py build_coefficients, the blocking rate"),
+    "obstacle_drag_coefficient": (
+        "woof/core/obstacles.py build_coefficients, the canopy drag"),
+    "obstacle_wall_z0": (
+        "woof/core/obstacles.py build_coefficients, the wall roughness"),
+    # THE GRIDDED URBAN MORPHOLOGY (woof's urban_param_file; WRF reads
+    # URB_PARAM out of met_em, which the route's namelist pair cannot name).
+    # Preparation reads no morphology: the physics init loads the file the
+    # bound TOML names.
+    "urban_param_file": (
+        "woof/core/urban_param.py, the URB_PARAM read at urban init"),
     # The moving nest's fixed-frame precipitation archive (tc/nest, 1.1.1):
     # a woof policy WRF has no namelist key for, so the pair cannot spell
     # it.  Preparation-inert (prepared_cache PREPARATION_INERT_RUN_FIELDS);
@@ -1823,6 +1846,11 @@ def verify_round_trip(exp, wps_namelist: Path, namelist_input: Path) -> None:
             for key, value in every_field.items():
                 if key not in exempt:
                     run.setdefault(key, value)
+            # Group (b) is never compared, even if a future identity table
+            # stops dropping one of its keys (a guard: today the effective
+            # prepared identity already drops every exempt key).
+            for key in exempt:
+                run.pop(key, None)
             # Dead Noah-mosaic state, on the experiment fingerprint's own
             # rule (woof/core/model.py): with mosaic off nothing reads the
             # tile count or the canopy rule, and the importer writes

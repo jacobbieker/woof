@@ -4619,7 +4619,8 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
                                 relqmcl, resnmcl, tauaer, C,
                                 column_chunk=None, _stage_probe=None, *,
                                 mcica_layout="gpoint", _march="inline",
-                                spectral_output="none"):
+                                spectral_output="none", spectral_levels="all",
+                                taumol_post=None):
     """Batched full LW chain, device-resident: same kernels, same compile
     path, same launch-side numerics as gpu_rrtmg_lw -- the only changes
     are grid sizes (ncol > 1) and host plumbing.  Inputs numpy or cupy
@@ -4638,6 +4639,11 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
     (_march_inline_source); ``"staged"`` runs the taut and prol kernels and
     the coalesced march it replaced, kept as the in-suite reference.  Same
     bits.
+    ``taumol_post`` (default None: nothing runs) is called once per chunk
+    right after the sixteen band kernels as
+    ``taumol_post(nc, nl, laytrop_d, fs_d, isv_d, wx_d, K, taug_d,
+    fracs_d)``; RRTMG-K (woof.core.rrtmgk) rewrites its one changed band
+    there.
     """
     if mcica_layout not in ("gpoint", "column"):
         raise ValueError("mcica_layout must be gpoint or column")
@@ -4666,7 +4672,11 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
         raise ValueError(f"rrtmg_spectral_output must be none, bands or gpoints, not {spectral_output!r}")
     # LW has band output only: a g-point is a quadrature point, not a
     # wavelength interval, and WRF's clear-sky bookkeeping is per band
-    lw_band = (cp.empty((len(LW_SPECTRAL_QUANTITIES), ncol, nl + 1, NBNDLW), dtype=cp.float32)
+    # spectral_levels "boundary" keeps the surface and the top only
+    # (rrtmg_sw.spectral_level_count): the same words as those two levels.
+    from woof.core.rrtmg_sw import spectral_level_count
+    nlo = spectral_level_count(spectral_levels, nl + 1)
+    lw_band = (cp.empty((len(LW_SPECTRAL_QUANTITIES), ncol, nlo, NBNDLW), dtype=cp.float32)
                if spectral_output != "none" else None)
     uflx = cp.zeros((ncol, nl + 1), dtype=cp.float32)
     dflx = cp.zeros((ncol, nl + 1), dtype=cp.float32)
@@ -4792,6 +4802,9 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
             (blocks, 16), (128,),
             (i32(nc), i32(nl), laytrop_d, fs_d, isv_d, wx_d,
              K["chi"], K["oneminus"], K["bandptrs"], taug_d, fracs_d))
+        if taumol_post is not None:
+            taumol_post(nc, nl, laytrop_d, fs_d, isv_d, wx_d, K, taug_d,
+                        fracs_d)
         if _stage_probe is not None:
             _stage_probe("bands")
         # FV/IV close over the two slabs, so they are released by
@@ -4875,11 +4888,11 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
              totuflux, totdflux, totuclfl, totdclfl))
         if lw_band is not None:
             # a separate launch over the same inputs (broadband unchanged)
-            part = cp.empty((len(LW_SPECTRAL_QUANTITIES), nc, nl + 1, NBNDLW), dtype=cp.float32)
-            total = nc * (nl + 1) * NBNDLW
+            part = cp.empty((len(LW_SPECTRAL_QUANTITIES), nc, nlo, NBNDLW), dtype=cp.float32)
+            total = nc * nlo * NBNDLW
             _gpu_kernel("rlw_rtrn_band_rows", maxlay)(
                 ((total + 127) // 128,), (128,),
-                (i32(nc), i32(nl), radld_p, radclrd_p, radlu_p, radclru_p,
+                (i32(nc), i32(nl), i32(nlo), radld_p, radclrd_p, radlu_p, radclru_p,
                  iclddn_p, radlu_sfc, radclru_sfc,
                  K["ngs"], K["delwave"], WTDIFF, K["fluxfac"], part))
             lw_band[:, rows] = part

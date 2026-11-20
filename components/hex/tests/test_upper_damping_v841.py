@@ -19,9 +19,10 @@ def production_case():
 
 
 def native_deck():
-    folder=os.environ.get("WOOF_HEX_NATIVE_UPPER_FIXTURE")
-    if not folder:pytest.skip("set WOOF_HEX_NATIVE_UPPER_FIXTURE to the compiled native block deck")
-    folder=Path(folder)
+    # Default: MPAS-A v8.4.2's own CAM and Rayleigh lines compiled by gfortran in the pinned container
+    # (fixtures/native_upper_damping_v842/provenance.txt, tools/build_native_upper_damping_deck.sh).
+    folder=Path(os.environ.get("WOOF_HEX_NATIVE_UPPER_FIXTURE")
+        or Path(__file__).with_name("fixtures")/"native_upper_damping_v842")
     initial=np.fromfile(folder/"upper-input.bin",np.float32).reshape(4,3,59).transpose(0,2,1).copy()
     expected=np.fromfile(folder/"upper-output.bin",np.float32).reshape(2,3,59).transpose(0,2,1).copy()
     return initial,expected

@@ -3133,6 +3133,13 @@ def _mcica_cloud_masks(play, cldfra, ngpt, permuteseed, *, validate, out):
     ``(ncol,nlay,ngpt)`` mask; ``play`` must be bottom-to-top in Pa,
     matching the generator's seed requirement.
     """
+    from woof.core import mcica_seed
+    if mcica_seed.active():
+        # RRTMGP's chunked windows carry no column ids; refuse rather than
+        # silently seed from pressure.
+        raise NotImplementedError(
+            "mcica_seed_mode=cell is implemented for RRTMG (ra_*_physics=4) "
+            "and RRTMG-K (14), not RRTMGP")
     import cupy as cp
     from woof.core.kernels import get_kernel
 

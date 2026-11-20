@@ -609,6 +609,12 @@ STATE_INFRA_ATTRS = frozenset({
     # names/bytes, not this preparation selector, own forecast forcing and
     # are already covered by setup_fingerprint/lateral prefix identity.
     "_external_scalar_boundary_fields",
+    # The opt-in obstacles' device face lists and host receipt
+    # (woof.core.obstacles.attach): rebuilt from obstacle_file and the base
+    # state at the first stage, and the product's bytes are bound by the
+    # physics setup identity; the expected digest is that binding, pinned
+    # by the restore for the attach to check.
+    "_obstacles", "_obstacles_receipt", "_obstacles_expected_sha256",
     # Config binds speed; restored U/V already use this frame (see restore).
     "_moving_frame_velocity", "_moving_frame_initialized",
     # The HAILCAST generation a resumed run keeps (woof.core.hail
@@ -761,6 +767,13 @@ STATE_INFRA_ATTRS = frozenset({
     # so any checkpoint written inside a window, and the final trajectory
     # digest of every IAU run on the tree route, raised RestartManifestError.
     "_iau_forcing",
+    # --nn (woof.nn.wrf_seat): the launch attaches the seat from its --nn
+    # file at every start and resume.  INFRA: it carries no state across a
+    # step (a tap only records; an applying seat recomputes its increment
+    # from the time-t state every step), and an applying seat's identity
+    # -- the artefact's hashes and the safety settings -- is bound in the
+    # checkpoint header ("nn_column_seat", _validate_nn_column_checkpoint).
+    "_nn_column_seat",
     # woof.da.iau.IAU_AFTER_STEP_ATTRIBUTE: the analysis door's post-step
     # acts for a STREAMED root (its dry-mass share of the IAU window and its
     # balance probe, served per compute window by woof.da.iau
@@ -1486,6 +1499,22 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # Rebuilt geometry/kernel; all held undimmed arrays alias fields/*,
     # including the initialized marker used to preserve radiation cadence.
     "eclipse",
+    # The opt-in TSI forcing (woof.spacewx): rebuilt from the resumed
+    # RunConfig; stateless (the factor is read from the series at each
+    # radiation call's model time), so a resumed run scales identically.
+    "solar_variability",
+    # The opt-in band shares (woof.spacewx.solar_spectrum), the same: the
+    # factor is set on the SW leaf before each call from that call's time.
+    "solar_spectrum",
+    # The opt-in ionosphere history (woof.spacewx.history): rebuilt from the
+    # resumed RunConfig; its rows are recomputed at each frame's valid time
+    # from the run start's F10.7, so a resumed run writes the same rows.
+    "spacewx_ionosphere",
+    # The opt-in auroral oval history (woof.spacewx.aurora_history), the
+    # same contract: rebuilt from the RunConfig.  A fetched Kp is held per
+    # (source, start) in the space-weather cache, so a resume on the same
+    # host reads the Kp the first start found.
+    "spacewx_aurora",
     # WRF's topo_wind / gwd_opt (woof.core.terrain_drag): initialize_physics
     # rebuilds it from the resumed RunConfig and the prepared statics; it
     # holds only static coefficients and statistics, never a value a step
@@ -2945,6 +2974,9 @@ def _radiation_setup_identity(driver, cfg) -> dict:
     if (lw_id, sw_id) == (7, 7):
         from woof.core.radiation_composition import adapter_restart_identity
         identity["flg"] = adapter_restart_identity(scheme)
+    if (lw_id, sw_id) == (14, 14):
+        # RRTMG-K's own operands: o3input, ozone routing and assets.
+        identity["rrtmgk"] = scheme.restart_identity()
     if (lw_id, sw_id) == (4, 4) and not legacy_rrtmg:
         try:
             identity.update({
@@ -3089,6 +3121,12 @@ def _packed_parameters_identity(params, *, label: str,
 #: the switch apart, which is all the restart walk needs.
 _DIGEST_DROPPED_DIAGNOSTIC_FIELDS = frozenset(
     {"hailcast_opt", "haildt", "hailcast_version", "nwp_diagnostics", "tke_budget", "sase_flux_diag", "surface_energy_diag",
+     # The opt-in ionosphere history: output-only, and dropped while off by
+     # _drop_default_off_run_keys, so no earlier digest carried them.
+     "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
+     "spacewx_ionosphere_maps",
+     # The opt-in auroral oval history: the same.
+     "spacewx_aurora_opt", "spacewx_kp_source",
      # Correct mode WB1: output-only and on by default from 2.9.0, so it is
      # dropped rather than held at a default no earlier digest carried.
      "thompson_cloud_surface_booking",
@@ -3442,6 +3480,42 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # header ran, so it is omitted there and echoed only when selected.
     if values.get("gf_deep_rain_evaporation_booking", False) is False:
         values.pop("gf_deep_rain_evaporation_booking", None)
+    # The opt-in resolved obstacles (woof.core.obstacles): every key at its
+    # default is what every earlier header ran, so each is echoed only when
+    # it differs; obstacle_opt = 1 always echoes with its file.
+    from woof.config import OBSTACLE_RUN_DEFAULTS
+    for key, default in OBSTACLE_RUN_DEFAULTS.items():
+        if values.get(key, default) == default:
+            values.pop(key, None)
+    # The opt-in TSI forcing (woof.spacewx): off is what every earlier
+    # header ran, so its keys are omitted there and echoed only when on.
+    if values.get("solar_tsi_opt", 0) == 0:
+        for name, default in (("solar_tsi_opt", 0), ("solar_tsi_source", ""),
+                              ("solar_tsi_mode", "absolute")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    # The opt-in ionosphere history (woof.spacewx), the same contract.
+    if values.get("spacewx_ionosphere_opt", 0) == 0:
+        for name, default in (("spacewx_ionosphere_opt", 0), ("spacewx_f107_source", ""),
+                              ("spacewx_f107_mode", "81day"),
+                              ("spacewx_ionosphere_maps", "ccir")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    if values.get("spacewx_aurora_opt", 0) == 0:
+        for name, default in (("spacewx_aurora_opt", 0), ("spacewx_kp_source", "")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    # The opt-in solar spectral variability (woof.spacewx), the same contract.
+    if values.get("solar_ssi_opt", 0) == 0:
+        for name, default in (("solar_ssi_opt", 0), ("solar_ssi_source", "")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    # The opt-in solar-proton chemistry source (woof.spacewx.epp_chem): the
+    # same contract as the TSI forcing, absent while off.
+    if values.get("spacewx_epp_opt", 0) == 0:
+        for name, default in (("spacewx_epp_opt", 0), ("spacewx_epp_source", "")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
     if values.get("bl_mynn_cloud_tendency_form", "wrf_461") == "wrf_461":
         values.pop("bl_mynn_cloud_tendency_form", None)
     # WRF's cycling flag: omitted at its .false. default.
@@ -3457,6 +3531,9 @@ def _drop_default_off_run_keys(values: dict) -> None:
             values.pop(name, None)
     if values.get("urban_table_dir", "") == "":
         values.pop("urban_table_dir", None)
+    # The gridded urban morphology (woof.core.urban_param): absent unset.
+    if values.get("urban_param_file", "") == "":
+        values.pop("urban_param_file", None)
     # The sixth-order filter form and the fork's second factor (unset at
     # the WRF v4.6.1 form), and mp_zero_out with its threshold and array
     # switch (off), are omitted at their defaults: every earlier header
@@ -3645,7 +3722,8 @@ def _configuration_digest_values(config: Mapping) -> dict:
 #: :func:`_configuration_digest_values`.
 _URBAN_DIGEST_FIELDS = ("sf_urban_physics", "use_wudapt_lcz", "num_urban_hi",
                         "urban_water_balance",
-                        "urban_ucm_generation", "urban_treeoption", "urban_ttscheme", "urban_fvg", "urban_table_dir")
+                        "urban_ucm_generation", "urban_treeoption", "urban_ttscheme", "urban_fvg", "urban_table_dir",
+                        "urban_param_file")
 
 
 def _configuration_fingerprint(cfg) -> str:
@@ -4275,7 +4353,12 @@ def physics_setup_identity(state, cfg) -> dict:
     urban = getattr(driver, "urban", None)
     if urban is not None and (getattr(cfg, "urban_ucm_generation", "wrf_471") == "wrf_480" or getattr(cfg, "urban_table_dir", "")):
         from woof.core.urban_ucm import pack_params
-        identity["urban_parameters"] = _packed_parameters_identity(pack_params(urban.params), label="urban canopy", attribute="urban.params")
+        # ``widths`` (the NUDAPT arm's fallback table widths) joined
+        # UcmParams with urban_param_file; it is read only when a column
+        # carries MH_URB2D > 0, and those bytes are bound by
+        # identity["urban_param"] below, so the pre-existing identity of
+        # every earlier checkpoint is unchanged.
+        identity["urban_parameters"] = _packed_parameters_identity(pack_params(urban.params), label="urban canopy", attribute="urban.params", exclude_fields=("widths",))
         identity["urban_parameters"]["table_sha256"] = urban.params.sha256
     surface = getattr(driver, "surface_analysis", None)
     if cfg.sst_update:
@@ -4293,6 +4376,54 @@ def physics_setup_identity(state, cfg) -> dict:
     parameters = parameter_receipt()
     if parameters is not None:
         identity["physics_params"] = parameters
+    # The opt-in resolved obstacles (woof.core.obstacles): the coefficients
+    # are rebuilt at resume from the woof-buildings.v1 product, so the bytes
+    # of the product the domain loaded are bound here and a resume against
+    # other bytes refuses.  A domain not yet attached (the coefficients
+    # build at its first stage) binds the file it will load.  Off adds no
+    # key, so every earlier checkpoint's setup bytes are unchanged.
+    if int(getattr(cfg, "obstacle_opt", 0) or 0):
+        receipt = getattr(state, "_obstacles_receipt", None)
+        if receipt is not None:
+            digest = receipt.get("product_sha256")
+            if digest is None:
+                raise RestartManifestError(
+                    "the obstacles were attached from a morphology in "
+                    "memory, not obstacle_file; a checkpoint cannot bind "
+                    "the buildings it ran with")
+        else:
+            from woof.file_digest import sha256_file
+            path = Path(cfg.obstacle_file)
+            try:
+                digest = sha256_file(path, block_bytes=1024 * 1024)
+            except OSError as exc:
+                raise RestartManifestError(
+                    f"obstacle_file {str(path)!r} is unreadable; the "
+                    "checkpoint cannot bind the buildings it runs with") \
+                    from exc
+        identity["obstacles"] = {"policy": "porous-immersed-v1",
+                                 "product_sha256": digest}
+    # The gridded urban morphology (woof.core.urban_param): urban_var_init
+    # re-reads urban_param_file at resume before the checkpoint's urban
+    # arrays are restored, so the bytes are bound and a resume against
+    # another file refuses.  Unset adds no key.
+    # The digest is the one taken when the file was loaded (so a file
+    # rewritten mid-run cannot be bound in place of the bytes the state came
+    # from); a domain not yet attached binds the file it will load.
+    if urban is not None and getattr(cfg, "urban_param_file", ""):
+        digest = getattr(urban, "urban_param_sha256", None)
+        if digest is None:
+            from woof.file_digest import sha256_file
+            path = Path(cfg.urban_param_file)
+            try:
+                digest = sha256_file(path, block_bytes=1024 * 1024)
+            except OSError as exc:
+                raise RestartManifestError(
+                    f"urban_param_file {str(path)!r} is unreadable; the "
+                    "checkpoint cannot bind the urban morphology it runs "
+                    "with") from exc
+        identity["urban_param"] = {"policy": "wrf471-real-split-v1",
+                                   "file_sha256": digest}
     return identity
 
 
@@ -5306,6 +5437,9 @@ def _prepare_restart(path, state, cfg, *, run_trackers=None,
     header[HAILCAST_VERSION_HEADER_KEY] = _hail_generation(state, cfg)
     if stochastic_header is not None:
         header["ensemble_stochastic"] = stochastic_header
+    nn_seat = getattr(state, "_nn_column_seat", None)
+    if nn_seat is not None and nn_seat.identity() is not None:
+        header["nn_column_seat"] = nn_seat.identity()
     if forcing_contract:
         header.update({
             "forcing_extension_mode": (PRESERVED_FORCING_PREFIX_MODE if preserved_forcing_prefix
@@ -5623,6 +5757,25 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'bl_mynn_cloud_tendency_form': 'wrf_461',
     'bl_mynn_gsd41_unsquared_qtke': False,
     'gf_deep_rain_evaporation_booking': False,
+    'obstacle_opt': 0,
+    'obstacle_file': '',
+    'obstacle_solid_fraction': 0.5,
+    'obstacle_relax_factor': 10.0,
+    'obstacle_drag_coefficient': 0.4,
+    'obstacle_wall_z0': 0.01,
+    'solar_tsi_opt': 0,
+    'solar_tsi_source': '',
+    'solar_tsi_mode': 'absolute',
+    'spacewx_ionosphere_opt': 0,
+    'spacewx_f107_source': '',
+    'spacewx_f107_mode': '81day',
+    'spacewx_ionosphere_maps': 'ccir',
+    'spacewx_aurora_opt': 0,
+    'spacewx_kp_source': '',
+    'solar_ssi_opt': 0,
+    'solar_ssi_source': '',
+    'spacewx_epp_opt': 0,
+    'spacewx_epp_source': '',
     'ruc_soilprop': 'wrf_45',
     'rrtmg_cloud_optics_form': 'wrf_461',
     'rrtmg_aer3_type_source': 'rural',
@@ -5635,6 +5788,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'mynn_sfclay_variant': 'wrf_461',
     'urban_ucm_generation': 'wrf_471',
     'urban_table_dir': '',
+    'urban_param_file': '',
     'use_rap_aero_icbc': False,
     'ruc_snow': 'wrf_461',
     'ruc_2m_diagnostic': 'flux',
@@ -6189,6 +6343,20 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "noahmp_snow_age": "wrf_461",
                           "urban_water_balance": "wrf_471",
                           "gf_deep_rain_evaporation_booking": False,
+                          "obstacle_opt": 0, "obstacle_file": "",
+                          "obstacle_solid_fraction": 0.5,
+                          "obstacle_relax_factor": 10.0,
+                          "obstacle_drag_coefficient": 0.4,
+                          "obstacle_wall_z0": 0.01,
+                          "solar_tsi_opt": 0, "solar_tsi_source": "",
+                          "solar_tsi_mode": "absolute",
+                          "spacewx_ionosphere_opt": 0, "spacewx_f107_source": "",
+                          "spacewx_f107_mode": "81day",
+                          "spacewx_ionosphere_maps": "ccir",
+                          "spacewx_aurora_opt": 0, "spacewx_kp_source": "",
+                          "solar_ssi_opt": 0, "solar_ssi_source": "",
+                          "spacewx_epp_opt": 0, "spacewx_epp_source": "",
+                          "urban_param_file": "",
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without
                           # the key ran the exact arithmetic.
@@ -6348,6 +6516,13 @@ def _require_physics_setup_match(header: dict, state, cfg, path) -> None:
             f"restart file {path} physics setup schema "
             f"{stored.get('schema_version')!r} is not supported by this "
             f"build (expected {PHYSICS_SETUP_SCHEMA_VERSION})")
+    # A resumed obstacle domain attaches at its first stage, after this
+    # check: pin the product the checkpoint bound, so the attach refuses a
+    # file replaced in between (woof.core.obstacles.attach).
+    pinned = stored.get("obstacles")
+    if (isinstance(pinned, Mapping)
+            and getattr(state, "_obstacles", False) is False):
+        state._obstacles_expected_sha256 = pinned.get("product_sha256")
     try:
         live = physics_setup_identity(state, cfg)
         # Serialisability is part of the contract, and the comparison
@@ -9256,6 +9431,42 @@ def _validate_ensemble_stochastic_checkpoint(header, stored, state):
         raise RestartMismatchError(f"stochastic checkpoint is incompatible: {error}") from error
 
 
+def _validate_nn_column_checkpoint(header) -> None:
+    """An applying --nn seat's identity against the launch's.
+
+    Read from the launch (WOOF_NN_CONFIG), not from an attached seat: a
+    route may restore before it attaches.  A trajectory that applied a
+    column model resumes only under the same artefact and settings, and
+    one that did not resumes only without one; a tap changes nothing and
+    binds nothing."""
+    stored = header.get("nn_column_seat")
+    from os import environ
+    live = None
+    if environ.get("WOOF_NN_CONFIG"):
+        from woof.nn.launch import read_settings
+        settings = read_settings(environ["WOOF_NN_CONFIG"])
+        if settings.applies:
+            from woof.nn.manifest import load_manifest
+            live = {**settings.identity(), "model": load_manifest(settings.model).identity()}
+    if stored is None and live is None:
+        return
+    if stored is None:
+        raise RestartMismatchError(
+            "this checkpoint was written without a neural-network column model, and the launch "
+            f"applies one ({live['mode']} of {live['scheme']} by {live['model']['name']}); resuming "
+            "would splice two trajectories. Resume without --nn, or with mode = \"tap\"")
+    if live is None:
+        raise RestartMismatchError(
+            f"this checkpoint was written by a run that applied a neural-network column model "
+            f"({stored.get('mode')} of {stored.get('scheme')} by {stored.get('model', {}).get('name')}); "
+            "resume it with the same --nn file")
+    if stored != live:
+        changed = sorted(k for k in set(stored) | set(live) if stored.get(k) != live.get(k))
+        raise RestartMismatchError(
+            f"this checkpoint's neural-network column model differs from the launch's in {changed}; "
+            "resume it with the artefact and settings that wrote it")
+
+
 def validate_strict_mass_cold(header) -> bool:
     """Validate the optional first-acoustic-step marker before any restore."""
     value = header.get("wrf_mass_carriers_cold", False)
@@ -9327,6 +9538,7 @@ def _validate_restart(path, state, cfg, *,
     if "native_wrf_moisture" in header and header["native_wrf_moisture"] is not True:
         raise RestartMismatchError("malformed native WRF signed-moisture provenance")
     _validate_ensemble_stochastic_checkpoint(header, stored, state)
+    _validate_nn_column_checkpoint(header)
     from woof.core.trajectory_contract import validate_checkpoint as _validate_trajectory_checkpoint
     _validate_trajectory_checkpoint(header, stored, cfg)
     try:

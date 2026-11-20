@@ -66,6 +66,17 @@ def legacy_radiation_adapter(adapter):
                  and type(item).__name__ == "RRTMGLegacyRadiation"), None)
 
 
+def retained_ozone_adapter(adapter):
+    """The adapter that retains the o33d it radiated (legacy RRTMG or
+    RRTMG-K, which shares legacy's retained-ozone contract), or None."""
+    legacy = legacy_radiation_adapter(adapter)
+    if legacy is not None:
+        return legacy
+    return next((item for item in radiation_adapters(adapter)
+                 if type(item).__module__ == "woof.core.rrtmgk"
+                 and type(item).__name__ == "RRTMGKRadiation"), None)
+
+
 class ComposedRadiation:
     """Keep each spectrum's own heating, flux and restart authority."""
     @property
@@ -323,6 +334,17 @@ def make_radiation(cfg, start_time, latitude_deg, longitude_deg, *,
     if not (lw or sw):
         return None
     args = (start_time, latitude_deg, longitude_deg)
+    if 14 in (lw, sw):
+        # WRF RRTMG-K: one rad_rrtmg_driver call computes both spectra
+        # (config.validate_rrtmgk_config admits only the 14/14 pair).
+        if (lw, sw) != (14, 14):
+            raise ValueError("RRTMG-K runs only as ra_lw_physics=ra_sw_physics=14")
+        from woof.core.rrtmgk import RRTMGKRadiation
+        return RRTMGKRadiation(*args, o3input=cfg.o3input, icloud=cfg.icloud,
+                               ghg_input=int(getattr(cfg, "ghg_input", 0) or 0),
+                               column_chunk=column_chunk,
+                               ozone_parent=ozone_parent,
+                               ozone_routing=ozone_routing, p_top=p_top)
     # Additional paired column engines are declared by their registry row.
     from woof import physics_registry
     for option in physics_registry.physics_registry()['components']['radiation']['options'].values():

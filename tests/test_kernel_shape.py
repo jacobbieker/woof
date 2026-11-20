@@ -23,11 +23,13 @@ void advance_nested_phi_w(
 { float x = 0; for (int k=0; k<nz; ++k) x += k; }
 void advance_w_phi_msf(int nz,int ny,int nx) { return; }
 void advance_mu_th_msf(int nz,int ny,int nx) { return; }
+void advance_w_phi_msf_kpar(int nz,int ny,int nx) { return; }
+void advance_frame_phi_w_ring(int nz,int ny,int nx) { return; }
 '''
     defs = shape_defines("acoustic", "advance_nested_phi_w", (44, 70, 120))
     shaped = specialize_source("acoustic", source, defs)
-    assert shaped.count("int gpuwm_runtime_nz") == 4
-    assert shaped.count("constexpr int nz = 44;") == 3
+    assert shaped.count("int gpuwm_runtime_nz") == 6
+    assert shaped.count("constexpr int nz = 44;") == 5
     assert "// void advance_nested_phi_w(int nz) { misleading comment" in shaped
     assert "for (int k=0; k<nz; ++k) x += k;" in shaped
     assert "const float* muts)" in shaped

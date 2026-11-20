@@ -100,7 +100,11 @@ def test_columns_v842_reads_outside_are_refused():
 
 @requires_gpu
 @pytest.mark.parametrize("precision", BOTH)
-def test_gpu_matches_the_v842_oracle_word_for_word(precision):
+@pytest.mark.parametrize("lanes", ("1", "32"))
+def test_gpu_matches_the_v842_oracle_word_for_word(monkeypatch, precision, lanes):
+    """Both vertical layouts, a thread per column (lanes 1, Metal's default)
+    and a thread per cell and level (lanes 32, CUDA's), on either backend."""
+    monkeypatch.setenv("WOOF_OCEAN_COLUMN_LANES", lanes)
     report = oo.measure(precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad

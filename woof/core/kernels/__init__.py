@@ -449,6 +449,12 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # wrf_smag_hd_w with each face stress stored once (smag2d_w_faces.cu);
     # composes smag2d.cu the same way, so smag2d.cu keeps every byte.
     "smag2d_w_faces": ("glibc_flt32.cuh", "smag2d.cu"),
+    # wrf_smag_hd_u / wrf_smag_hd_v with each horizontal stress coefficient
+    # stored once (smag2d_uv_faces.cu); composes smag2d.cu the same way.
+    "smag2d_uv_faces": ("glibc_flt32.cuh", "smag2d.cu"),
+    # wrf_tke_rhs with each defor13 / defor23 face stored once
+    # (smag2d_tke_faces.cu); composes smag2d.cu the same way.
+    "smag2d_tke_faces": ("glibc_flt32.cuh", "smag2d.cu"),
     "myjsfc": ("glibc_flt32.cuh", "flt32_expf_fma.cuh"),
     "mynn_surface": ("mynn_libm.cuh", "surface_subnormal.cuh"),
     "sfclay": ("glibc_flt32.cuh", "sfclay_classic.cuh"),
@@ -1119,7 +1125,8 @@ def module_options(name: str) -> tuple[str, ...]:
 
 
 _DIFFUSION_MODULES = frozenset(("smag2d", "sfs_output", "km5", "km5_geometry", "diffusion", "diff_opt1", "diff6", "diff6_seam",
-                                "smag2d_theta_m", "smag2d_w_faces"))
+                                "smag2d_theta_m", "smag2d_w_faces",
+                                "smag2d_uv_faces", "smag2d_tke_faces"))
 
 DIFFUSION_OPTIONS = ("-std=c++17", "--fmad=false", "--ftz=false",
                      "--prec-div=true", "--prec-sqrt=true",
@@ -1371,7 +1378,7 @@ def compile_cam_module_no_ftz(name: str, src: str, options: tuple[str, ...] | No
 
 
 
-def _load_module_preserving_subnormals(name: str, src: str, options):
+def _load_module_preserving_subnormals(name: str, src: str, options, key=None):
     """Use the shared direct NVRTC cache so CuPy cannot append FTZ=true."""
     import cupy as cp
     from woof import nvrtc_ptx_cache as compiler
@@ -1379,7 +1386,7 @@ def _load_module_preserving_subnormals(name: str, src: str, options):
     from woof.kernel_compile_notice import observe_module_compile
     from woof.physics_params import note_compiled
 
-    key = f"{MODULE_KEY_ROOT}:{name}"
+    key = key or f"{MODULE_KEY_ROOT}:{name}"
     with observe_module_compile(key):
         binary, _ = compiler.compile_using_nvrtc(src, options, None, f"{name}.cu")
         mod = cp.cuda.function.Module()
@@ -1585,6 +1592,12 @@ def load_module_int_defines(
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}[{tier}]")
     if name in _DIFFUSION_MODULES:
         return _load_diffusion_module(name, normalized)
+    if name == "chem_ftuv":
+        # solar_ssi_opt's GPUWM_FTUV_ETF tier: the default module's options and
+        # direct NVRTC route (no FMA contraction, subnormals kept).
+        tier = ",".join(f"{key}={value}" for key, value in normalized)
+        return _load_module_preserving_subnormals(
+            name, src, module_options(name), key=f"{MODULE_KEY_ROOT}:{name}[{tier}]")
     if name in ("camzm", "cammgmp", "uwshcu"):
         tier = ",".join(f"{key}={value}" for key, value in normalized)
         return compile_cam_module_no_ftz(name, src, suffix=f"[{tier}]")

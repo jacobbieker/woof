@@ -266,7 +266,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
     "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
     "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "5207221df126f3f5c7d3d310d6b7fc07884834ff251f6afd9ed57f8f595ec1b8",
+    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "65110452c735e79b9e88f07eca288c45de96dd5b646f4171054a8478c8e7904d",
     # Native upper damping: Rust and CUDA match compiled source blocks.
     "src/hexcore/native/upper_damping.rs": "5483b2c1e7da45317ffe4213c5879b583070d9e28d591ec52a9c697a052e81f1",
     "src/hexcore/upper_damping_v841.py": "947f477d5f56b41d95fb5a0b92adb21d68be95b5fac19ba524181cb373710860",
@@ -293,7 +293,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
         "a0ae4d9b3e639bfe02a8de57458fac4407c6e48f1bc12e2e698626e9a9069d2c"
     ),
     "src/hexcore/cuda_gwdo_v841.py": (
-        "6f619095a10bf6787ca38c57304765561519d452aa8c1ee7b654b63e8062cb74"
+        "f6ff7d030e18ea341b01cc0b5226949cc211533ccbcd3210b3e1cb91cd2d4423"
     ),
     # Re-frozen 2026-10-11: commit_wsm6_state_v841_f32 takes the species
     # row's block length in place of the literal 6.  THE BREAKAGE: a
@@ -320,8 +320,12 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # compile-platform binding alone (compile_contract.kernel_cache_platform) instead of a full
     # manifest JSON round trip at every coupling launch.  No kernel, launch or operand changed;
     # 2 h the storm LTS forecast 0 of 1,167,818,735 words differ (HEX-HOST-BOUND-2026-10-27).
+    # Re-frozen 2026-11-18 (R4-H pool-direct): prepare_mpas_transport_source_baseline_v842 gained an
+    # optional ``out`` operand (validated: shape, dtype, no overlap with source or before); no kernel
+    # changed, and with out=None the launch is the old one.  What re-ran: Alps hex VR 1 h on CUDA, fast
+    # and hex-strict, WOOF_HEX_POOL_DIRECT 0 vs 1, TOTAL_DIFFER 0.  The x4 proof was not re-run.
     "src/hexcore/cuda_physics_v841.py": (
-        "8140553c0bec161af26c5c4f66ff8a54f1f18762810d36460cf447996ee64b44"
+        "9bfd4c75271254f5dcb0d0a913242afc31da70bf650127dab272c97d0b6fe526"
     ),
     # Re-frozen during the 12 GiB capacity work: the dynamics subcycle stopped
     # copying a scalar block nothing writes, stopped taking a private image of
@@ -473,8 +477,11 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # 0.4.0 release scrub of one comment line (an owner ruling in place of a
     # person).  No code line differs from the copy the H1 identities above
     # ran on.  No card run for this merge.
+    # Re-derived 2026-11-19 (tools/repin_source_tables.py): the file has since
+    # taken host-side merges (scratch outputs #614, opt-in w_damping #420,
+    # adaptive readmission); their card evidence is in those PRs, not here.
     "src/hexcore/cuda_driver.py": (
-        "f453eee1152aa33392b09ecfde1d16ee33ec53cf17d754ecd076736088630fea"
+        "7c0ddd54648b449430c1cdef49667cf1a17ac7959e2c1f138847fd610820c7bd"
     ),
     # THE BREAKAGE THIS PREVENTS: cuda_driver.py now executes host
     # preparation through woof.hex.prep_cache.  Unpinned, an edit to the key
@@ -506,8 +513,15 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # certified a driver digest while the recovery module underneath it moved
     # freely, so a later edit to the pressure-diagnostic path could change
     # forecast bytes with every proof still reporting frozen sources.
+    # Re-frozen 2026-11-18 (R4-H scratch outputs): recover_state's eight
+    # outputs come from scratch_like instead of cupy.empty_like.  On CUDA that
+    # is the same cupy.empty call (no new bytes); on Metal it drops the zero
+    # fill.  Every recovery kernel writes each element of its output.  What
+    # re-ran: Alps hex VR 1 h on CUDA, fast and strict, with WOOF_SCRATCH_POISON
+    # ff/a5 against unpoisoned runs (TOTAL_DIFFER 0).  The x4 full-physics
+    # proof and the regional mints were not re-run.
     "src/hexcore/cuda_backend/recovery.py": (
-        "1a5a85585ebc72867904f852ee54c541ace5fc2ac26f0ef89dabd179096cc041"
+        "d47e5523a9ea997367565a9756573b98912bb149599827101dafe7980608f4d5"
     ),
     # Re-frozen for the regional CPU authority lane: the v8.4.1
     # config admits config_apply_lbcs and config_moist_physics behind the
@@ -841,7 +855,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # parked asynchronous history-ready seam; digest of the merged file.
     # Re-derived for the merge of the fork onto WOOF 1.1.0: digest of the merged file.
     "src/hexcore/cuda_arwen_physics_v841.py": (
-        "8550e4e3bdec9366744738f787feb28fb617c5ba4775a3e512f2887553d302f6"
+        "a344b171c59644fe9a75bc1124c9771daf4e18cb00caffba9b92338d01971206"
     ),
     # New pin 2026-10-05: the New Tiedtke row's seam (the frozen column-batch
     # class subclassed, driver built at cu_physics=16, raw cumulus momentum
@@ -920,8 +934,12 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # anchored timestep, wrapping _recover_candidate, so the execution of the
     # sub-anchor lane depends on these bytes.  Outside the regional kernel
     # set by design: kernel_set_sha256 does not move.
+    # Re-frozen 2026-11-18 (R4-H scratch outputs): the fold and residual
+    # outputs, when no *_out buffer is passed, come from scratch_like (a full
+    # write by compensated_fold_f32 / compensated_residual_f32).  Same evidence
+    # as the recovery.py re-freeze above; the x4 proof was not re-run.
     "src/hexcore/cuda_compensated_recovery.py": (
-        "f076673925dc4761c7bd77380722f8badc1ffdbdec228cbb4c3c573edb2f6129"
+        "4a2a31e9e64107d899f3fe76224fdf08ce771f463bdd189a54fe806054e22f69"
     ),
     "src/hexcore/cuda_horizontal.py": (
         "f94137176db65d24df0d9ff1d491c278d6c835bb08cd76dc43c5cfcbf323a345"
@@ -3072,6 +3090,54 @@ def _verify_backend_rollback_boundary(
             )
 
 
+#: Health sites the composite step defers to its pre-commit drain on top of
+#: the dycore's resident list (woof.core.health_ledger.RESIDENT_SITES).  The
+#: step is a transaction: whatever runs after a failed check is discarded by
+#: the rollback the drain's refusal triggers, so a site qualifies when the
+#: rest of the step stays bounded on its bad output.
+#:
+#: * ``grell-freitas``: GF's output finiteness (as KF's on the resident
+#:   list).  Non-finite tendencies reach the RK stages and phase two, whose
+#:   loops are bounded by the mesh and the column depth.
+#: * ``noahmp_static_surface_identity``: the rest of the step runs on the
+#:   layout bound at the start, then the drain refuses.
+#: * ``lagged-heating``: the SG2 heating rate's finiteness, checked in phase
+#:   two; only recovery runs before the drain.
+HEX_EXTRA_RESIDENT_SITES = (
+    "grell-freitas", "noahmp_static_surface_identity", "lagged-heating")
+
+
+_DEVICE_PRESENT: list[bool] = []
+
+
+def _resident_health(health_ledger: Any, *, exchanged: bool = False) -> Any:
+    """The composite step's resident ledger scope, or ``None`` to keep the
+    immediate reads.
+
+    A host with no device (the transaction tests' fakes on a CPU runner)
+    has no status words to defer; that is decided once per process.  A step
+    that exchanges halos with other ranks or LTS classes before its commit
+    (``before_phase_two``) keeps the immediate reads: there a failing
+    scheme must stop its rank before the exchange, or its peers would
+    receive its rejected fields and commit the step while it rolls back.
+    """
+    if not _DEVICE_PRESENT:
+        try:
+            import cupy as cp
+
+            cp.cuda.runtime.getDevice()
+            _DEVICE_PRESENT.append(True)
+        except Exception:  # noqa: BLE001 - no cupy, or no device
+            _DEVICE_PRESENT.append(False)
+    if not _DEVICE_PRESENT[0]:
+        return None
+    if exchanged:
+        health_ledger.count_immediate("exchanged")
+        return None
+    return health_ledger.resident_step(
+        health_ledger.RESIDENT_SITES + HEX_EXTRA_RESIDENT_SITES)
+
+
 @timed_arwen_step
 def execute_composite_step(
     *,
@@ -3151,7 +3217,20 @@ def execute_composite_step(
     # GPUWM_HEX_RELEASE_HEADROOM): then radiation blocks and the WSM6 frame
     # store are not held through the dycore half of the step.
     from woof.hex.device_memory_release import phase_release
+    from woof.core import health_ledger
 
+    # Deferred scheme health reads (woof.core.health_ledger.resident_step).
+    # The admitted sites record their status words on the device and the
+    # ledger is drained ONCE, just before the driver commit below, so a
+    # failure is still refused by the step that produced it and rolled back
+    # exactly as an immediate refusal is; only how far into the step the
+    # model ran before saying so moves.  The same ledger skips the carrier
+    # contract's consumer-footprint read on the healthy path.
+    # WOOF_HEALTH_READBACK=immediate restores the per-site reads.
+    health = _resident_health(health_ledger, exchanged=before_phase_two is not None)
+    health_open = health is not None
+    if health_open:
+        health.__enter__()
     try:
         with phase_release("arwen:phase1"):
             raw = backend.begin_step(
@@ -3240,6 +3319,11 @@ def execute_composite_step(
         # Drop the consumed update before commit rebuilds saved diagnostics,
         # so its temporary dry theta need not overlap that workspace.
         del update
+        # The detection bound: every deferred health word of this step is
+        # read here, before anything is published.
+        if health_open:
+            health_open = False
+            health.__exit__(None, None, None)
         committed = driver.commit_post_wsm6_candidate(candidate, recovery)
         driver_committed = True
         backend.commit_step()
@@ -3257,6 +3341,15 @@ def execute_composite_step(
             dynamics_tendencies=next_dynamics_tendencies,
         )
     except Exception as error:
+        if health_open:
+            # A deferred refusal recorded earlier in this step is what an
+            # immediate read would have raised first; it replaces the
+            # step's own exception, chained to it (resident_step._drain).
+            health_open = False
+            try:
+                health.__exit__(type(error), error, error.__traceback__)
+            except Exception as deferred:
+                error = deferred
         rollback_errors: list[str] = []
         if physics_park is not None and physics_park.is_parked:
             # The seam's own rollback reads the arrays this park emptied.
@@ -3347,6 +3440,13 @@ def execute_composite_step(
         raise CompositeTransactionError(
             f"composite step at {start_time} s was aborted without publication"
         ) from error
+    except BaseException:
+        # An interrupt must not leave this thread's resident ledger
+        # installed for whatever runs next.
+        if health_open:
+            health_open = False
+            health.__exit__(*sys.exc_info())
+        raise
 
 
 def _host_array(value: Any, cp: Any) -> np.ndarray:

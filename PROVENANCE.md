@@ -192,36 +192,38 @@ bytes are outside the numerical oracle.
   `-ftz=true` to whatever the caller passed, at
   `cupy.cuda.compiler` line 585 (`options += ('-ftz=true',)`), after the
   caller's options, and NVRTC honours the last occurrence.
-  The inventory records 14 distinct caller-supplied option tuples across the
-  286 compile sites in the shipped package, each listed here with a site
+  The inventory records 15 distinct caller-supplied option tuples across the
+  319 compile sites in the shipped package, each listed here with a site
   that supplies it:
   - no caller options -- `woof/backend/__init__.py:243` (self.xp.RawModule),
-    and 220 other site(s)
+    and 251 other site(s)
   - `--std=c++17` -- `woof/ensemble/batch_perturbation.py:51`
     (xp.RawModule), and 18 other site(s)
   - `-std=c++17` -- `woof/core/acoustic_fusion.py:405` (cp.RawModule), and
-    17 other site(s)
+    18 other site(s)
   - `--std=c++11` -- `woof/hex/cuda_courant_fullstep_lts.py:52`
     (cp.RawKernel), and 5 other site(s)
   - `-std=c++17` `--ftz=false` -- `woof/core/chem_plumerise_cache.py:37`
     (compiler.compile_using_nvrtc), and 5 other site(s)
   - `--fmad=false` -- `woof/chem_micm.py:684` (cp.RawKernel), and 2 other
     site(s)
-  - `-fmad=false` -- `woof/core/dycore.py:323` (cp.ElementwiseKernel), and 2
+  - `-fmad=false` -- `woof/core/dycore.py:327` (cp.ElementwiseKernel), and 2
     other site(s)
   - `--std=c++17` `--use_fast_math` -- `woof/hex/waves.py:486`
     (cp.RawModule), and 1 other site(s)
-  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:1308`
+  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:1315`
     (cp.RawModule), and 1 other site(s)
   - `-std=c++17` `--fmad=false` `--ftz=false` --
     `woof/core/thompson_fork.py:109` (compiler.compile_using_nvrtc), and 1
     other site(s)
   - `--fmad=false` `-std=c++14` -- `woof/da/letkf_device.py:363`
     (cp.RawModule)
+  - `--fmad=false` a target flag built from the device architecture at run
+    time -- `woof/grad/wrfplus/acoustic.py:88` (cp.RawModule)
   - `--std=c++17` a target flag built from the device architecture at run
     time -- `woof/ocean/waves/model.py:73` (cp.RawModule)
   - `-std=c++17` `--maxrregcount=112` --
-    `woof/core/kernels/__init__.py:1280` (cp.RawModule)
+    `woof/core/kernels/__init__.py:1287` (cp.RawModule)
   - a target flag built from the device architecture at run time a target
     flag built from the device architecture at run time --
     `woof/hex/mpasphys/surface_update_v842.py:150`
@@ -1780,6 +1782,67 @@ PNG it writes carries an `experimental` stamp.
   `DONE,complete` triggers a frame-inventory check of every admitted
   member against the manifest before anything renders, and stamps the
   override on every panel.
+
+## EXPERIMENTAL WRFDA 3D-Var (`woof.da.var`, docs/dev/WRFDA-3DVAR-PLAN.md)
+
+- **Source**: WRFDA as distributed in WRF v4.7.1 (`var/da/`), public
+  domain under the WRF Public Domain Notice
+  (`licenses/LICENSE-WRF-public-domain.txt`). The following files transcribe
+  WRFDA routines statement by statement, in WRFDA's operation order, so the
+  oracle tier can agree with a serial WRFDA build word for word:
+  `woof/da/var/be_dat.py` (`da_setup_be_regional`,
+  `da_get_vertical_truncation`, `da_allocate_background_errors`,
+  `da_rescale_background_errors`), `woof/da/var/reference.py`
+  (`da_recursive_filter_1d(_adj)`, `da_calculate_rf_factors`,
+  `da_transform_through_rf(_adj)`, `da_transform_vvtovp(_adj)`,
+  `da_transform_vptox(_adj)`, `da_psichi_to_uv(_adj)`,
+  `da_transform_xtoxa(_adj)`, `da_pt_to_rho_lin/_adj`, `da_cv_to_vv`,
+  `da_vv_to_cv`), `woof/da/var/kernels/var_u.cu` (the same transforms as
+  device kernels, in the reference's order), `woof/da/var/control.py`
+  (`da_dot`/`da_dot_cv` serial order as the `wrfda-serial` reduction),
+  `woof/da/var/obs_wrfda.py` (`da_read_obs_ascii`,
+  `da_obs_proc_station`, `da_ffdduv`, `da_llxy`, `da_llxy_wrf`,
+  `da_llxy_lc`, `da_map_set`/`da_set_lc`/`da_lc_cone`, `da_togrid`,
+  `da_get_julian_time`, `da_tp_to_qs`, `da_get_q_error`, `f_qv_from_rh`,
+  `da_msl2geo1`, the transfer part of `da_fill_obs_structures`,
+  `da_store_obs_grid_info`), `woof/da/var/innov_wrfda.py`
+  (`da_get_innov_vector_{synop,metar,ships,buoy,sonde_sfc,sound,airep,pilot,profiler,geoamv,polaramv,qscat}`,
+  `da_get_innov_vector_{gpspw,gpsref,satem}`, `da_qc_gpsref`,
+  `da_tv_profile`, `da_find_layer`, `da_thickness`, `da_to_zk`, `da_convert_zk`, `da_interp_lin_3d`, `da_interp_lin_2d`,
+  `da_obs_sfc_correction`, `da_mo_correction`, `da_intpsfc_prs`,
+  `da_intpsfc_tem`, `da_check_max_iv_*`, `da_max_error_qc`,
+  `da_residual`, `da_jo_and_grady_*`, `da_jo_*_uvtq`, `da_jo_and_grady`'s
+  sum), `woof/da/var/obsop_wrfda.py` (`da_transform_xtoy_*` and `_adj` for
+  those types and for gpspw, gpsref and satem, `da_transform_xtotpw(_adj)`,
+  `da_transform_xtogpsref_lin`/`_adj`, `da_tv_profile_tl`/`_adj`,
+  `da_find_layer_tl`/`_adj`, `da_thickness_tl`/`_adj`,
+  `da_interp_lin_3d_adj`, `da_interp_lin_2d_adj`,
+  `da_transform_xtoy_adj`'s type order),
+  `woof/da/var/cost.py` (`da_calculate_j`,
+  `da_calculate_gradj`, `da_calculate_residual`/`da_residual`,
+  `da_calculate_grady`, `da_jo_and_grady` and its per-type `jo` sums,
+  `da_transform_vtoy(_adj)` for 3D-Var, `da_check_gradient`),
+  `woof/da/var/minimise.py` (`da_minimise_cg` with its stdout formats, and
+  `da_solve`'s outer loop), `woof/da/var/analysis.py`
+  (`da_transfer_wrftoxb`, `da_setup_firstguess`'s map coefficients,
+  `da_roughness_from_lanu`, `da_tpq_to_rh`'s `es`/`qs`, `da_integrat_dz`,
+  `da_transform_xtogpsref`'s `ref`, `da_transform_vtox`,
+  `da_transfer_xatowrf`, `da_check_rh_simple`), and `tools/wrfda_oracle/woof_dump.inc` (debug
+  dumps hooked into a copy of the WRFDA tree, never the pinned tree).
+  `woof/da/var/crmath.py` is woof's own: correctly rounded `sin`, `cos`,
+  `tan`, `exp`, `log`, `log10` and `pow`, evaluated in Python's `decimal`, with no
+  libm code in it.
+- **Not used**: the CRTM 2.3.0 copy bundled in WRF (it carries GPL-headed
+  files) is never compiled, linked or vendored by woof.
+- **Oracle**: WRF v4.7.1 tarball, `./configure wrfda` option 32 (serial GNU,
+  `-fdefault-real-8`), tutorial case from `WRFDAV3.9-testdata.tar.gz`
+  (sha256 `c6467c17a0beb9c41b3660c0e6bcf5e6c671b002015daf576573ae18900ef9a0`);
+  `tests/data/wrfda471/manifest.json` records the `be.dat` hash and the
+  gate digests. No WRFDA data file is committed.
+- **Scope**: experimental; nothing here is on a forecast path
+  (`tests/test_var_import_graph.py`): only the `woof var` door
+  (`woof/var_cli.py`) imports it, and its analysis reaches a forecast only as
+  a `wrf-analysis-bundle/1` read by `woof run --analysis`.
 
 ## Attribution defects in this repository's own history (2026-07-26)
 

@@ -317,10 +317,19 @@ _VERSION_ALIAS = "--version"
 
 
 def _rewrite_version_alias(argv: list[str]) -> list[str]:
-    """``woof --version [...]`` -> ``woof version [...]``."""
+    """``woof --version [...]`` -> ``woof version [...]``; ``woof fetch satweave`` -> ``woof obs satweave fetch``;
+    ``woof fetch geo`` -> ``woof obs geo fetch``."""
 
     if argv and argv[0] == _VERSION_ALIAS:
         return ["version", *argv[1:]]
+    if argv[:2] == ["fetch", "satweave"]:
+        # SatWeave is an observation mosaic, not a model source, so its
+        # door is `woof obs satweave fetch`; `woof fetch` has no positional
+        # source, so this spelling cannot collide with a model fetch.
+        return ["obs", "satweave", "fetch", *argv[2:]]
+    if argv[:2] == ["fetch", "geo"]:
+        # The bkr/geo imager stores are observations too (woof/obs/geo_icechunk.py).
+        return ["obs", "geo", "fetch", *argv[2:]]
     return list(argv)
 
 
@@ -358,7 +367,7 @@ _INTERRUPT_EXIT_CODE = 130
 _LONG_RUNNING_COMMANDS = frozenset({
     "go", "go-job", "run", "run-plan", "resume", "branch", "fetch", "fetch-geog",
     "fetch-tables", "fetch-bridges", "setup", "verify", "downscale",
-    "enprod", "render", "dual-run", "certify", "spectral", "energy",
+    "enprod", "render", "dual-run", "certify", "spectral", "energy", "var",
     # The unbundled stages run for exactly as long as the welded ones
     # they were split out of: preprocessing is minutes of static build,
     # the forecast is the forecast.
@@ -489,6 +498,8 @@ def _register_run_parser(sub):
                           "a TOML file selects settings (as on woof go); without it the run has no hydro")
     from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
     add_wrf_hydro_arguments(run)
+    from woof.nn.launch import add_arguments as add_nn_arguments
+    add_nn_arguments(run)
     run.add_argument("--restart-from", type=Path, default=None, metavar="WRFRST",
                      help="continue a WRF run from its restart file (wrfrst_d01_<time>, any "
                           "suffix): the state, physics and clock are the file's, and the "
@@ -642,6 +653,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     fetch_register_cli(sub)
     _lazy_register("woof.hf_fetch")(sub)
     fire_static_register_cli(sub)
+    _lazy_register("woof.static.buildings_domain")(sub)
     _lazy_register("woof.fire_ignition")(sub)
     fire_ideal_register_cli(sub)
     ideal_plan_register_cli(sub)
@@ -663,6 +675,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     relocation_register_cli(sub)
     cyclone_setup_register_cli(sub)
     _lazy_register("woof.solar")(sub)
+    _lazy_register("woof.spacewx.cli")(sub)
     earth2_register_cli(sub)
     earth2_diagnostics_register_cli(sub)
     tc_tracks_register_cli(sub)
@@ -693,6 +706,9 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     simulated_radar_register_cli(sub)
     verification_visuals_register_cli(sub)
     enprod_register_cli(sub)
+    # WRFDA 3D-Var (experimental port) to an analysis bundle: the only
+    # importer of woof.da.var (tests/test_var_import_graph.py).
+    _lazy_register("woof.var_cli")(sub)
     downscale_register_cli(sub)
     energy_register_cli(sub)
     # Moving-nest LES runs along tracks, priced before a card is rented:
@@ -1258,6 +1274,8 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         # --wrf-hydro / [wrf_hydro] (woof.wrf_hydro_route): the launch's
         # environment, inherited by every process it starts.
         from woof.wrf_hydro_route import launch_scope as wrf_hydro_scope
+        # --nn (woof.nn.launch): likewise, as WOOF_NN_CONFIG.
+        from woof.nn.launch import launch_scope as nn_scope
         _config = getattr(args, "config", None)
         with memory_gate_override(getattr(args, "no_memory_gate", False)), waves_scope(
                 getattr(args, "waves", None), getattr(args, "waves_options", None)), \
@@ -1266,7 +1284,12 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
                                 _config if (args.command in ("run", "go") and _config
                                             and Path(str(_config)).suffix == ".toml"
                                             and Path(str(_config)).is_file()) else None,
-                                members=getattr(args, "members", None)):
+                                members=getattr(args, "members", None),
+                                gpu_exchange=getattr(args, "wrf_hydro_gpu_exchange", None)), \
+                nn_scope(getattr(args, "nn", None) if args.command in ("run", "go") else None,
+                         members=getattr(args, "members", None),
+                         resume=bool(getattr(args, "restart_from", None)
+                                     or getattr(args, "restart", None))):
             if args.command == "run" and getattr(args, "hydro", None) is not None:
                 from woof.hydro.runtime import run_scope
                 with run_scope(args.hydro, getattr(args, "config", None)):

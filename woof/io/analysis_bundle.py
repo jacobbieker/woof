@@ -384,6 +384,13 @@ def _grid_fingerprint(dims: Mapping[str, int], znw: Any, p_top: Any, attribute, 
     projection["map_proj"] = int(projection["map_proj"])
     hybrid = attribute("HYBRID_OPT")
     etac = attribute("ETAC")
+    if hybrid is not None and int(hybrid) == -1:
+        # WRF 3.9's pre-hybrid sigma sentinel (the WRFDA tutorial's first guess):
+        # the same audited reading as the wrfinput door's.
+        from woof.ingest.wrfinput_identity import effective_hybrid_opt
+
+        hybrid = effective_hybrid_opt({"HYBRID_OPT": -1, "TITLE": attribute("TITLE") or "",
+                                       "ETAC": -1 if etac is None else etac})
     return {
         "nx": int(dims["west_east"]), "ny": int(dims["south_north"]), "nz": int(dims["bottom_top"]),
         "dx_m": float(attribute("DX")), "dy_m": float(attribute("DY")),

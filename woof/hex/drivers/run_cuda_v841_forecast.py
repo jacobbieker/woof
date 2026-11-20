@@ -608,6 +608,27 @@ def _init_mminlu(init_path) -> str | None:
     return None
 
 
+def _topo_wind_cell_neighbours(mesh: Any, *, is_regional: bool) -> tuple[np.ndarray, np.ndarray]:
+    """The physics columns' ``(cellsOnCell, nEdgesOnCell)``, zero-based, for topo_wind = 1.
+
+    A negative entry (a neighbour beyond a limited-area mesh's boundary) is kept: the laplacian reads it as
+    the cell itself, WRF's clamp at a non-periodic boundary.  A regional mesh's padded garbage column gets no
+    edges, so its laplacian is 0; it holds no atmosphere and is scrubbed.
+    """
+    cells = np.asarray(proof._mesh_value(mesh, "cellsOnCell"), dtype=np.int64)
+    counts = np.asarray(proof._mesh_value(mesh, "nEdgesOnCell"), dtype=np.int64).reshape(-1)
+    if cells.ndim != 2 or cells.shape[0] != counts.size:
+        cells = cells.T
+    if cells.ndim != 2 or cells.shape[0] != counts.size:
+        raise ValueError(f"cellsOnCell {cells.shape} does not fit nEdgesOnCell {counts.shape}")
+    # MPAS-A's "outside" index (nCells + 1, one-based) and any sentinel read as the cell itself.
+    cells = np.where((cells < 0) | (cells >= counts.size), -1, cells)
+    if is_regional:
+        cells = np.concatenate([cells, np.full((1, cells.shape[1]), -1, np.int64)], axis=0)
+        counts = np.concatenate([counts, np.zeros(1, np.int64)])
+    return cells.astype(np.int32), counts.astype(np.int32)
+
+
 def _suite_host(
     adapter: Any,
     row_name: str,
@@ -678,6 +699,10 @@ def _suite_host(
             "shdmax (follow-up: carry it in the suite seam's statics)"
         )
     extra = {}
+    if mesh is not None and int((suite.get("physics") or {}).get("topo_wind", 0) or 0) == 1:
+        # topo_wind = 1's terrain laplacian over the mesh's own neighbours, not
+        # the (1, nCells) layout's index order (woof.core.terrain_drag).
+        extra["cell_neighbours"] = _topo_wind_cell_neighbours(mesh, is_regional=is_regional)
     if interior_column is not None:
         # Read by wind_farm_scheme = "fitch_wrf" alone (woof.hex.wind_farm); an adapter that
         # predates it is handed exactly the keywords it was handed before.
@@ -3789,7 +3814,11 @@ def execute_forecast(
     # longer pins sm_120 (``required_compute``), because that pin named no
     # breakage.  The receipt records whether the card holds an anchor
     # (``architecture`` below, woof.hex.cuda_backend.arch_admission).
-    capability = require_cuda(min_compute=(12, 0), cache_dir=cache_root)
+    from woof.hex.cuda_backend.cupy_cache import forecast_directory
+
+    # The box's kernel image cache, not this run's scratch (WOOF_HEX_SHARED_KERNEL_IMAGES).
+    images = forecast_directory(cache_root)
+    capability = require_cuda(min_compute=(12, 0), cache_dir=images)
     import cupy as cp
 
     # ``required_free_bytes`` is the forecast door's own admission sum,
@@ -3818,7 +3847,7 @@ def execute_forecast(
             stochastic_bytes + tc_allowance + obs_bytes)
     else:
         memory = proof.gpu_memory_admission(cp, minimum=int(required_free_bytes))
-    cache = KernelCache(capability=capability, cache_dir=cache_root)
+    cache = KernelCache(capability=capability, cache_dir=images)
     # RRFS v2 stage H6: a resumed run (plain restart or DA-cycling restart).
     stochastic_restart = None
     start_step = 0
@@ -3941,6 +3970,17 @@ def execute_forecast(
         stack["driver"].w_damping = WDamping(w_crit_cfl=float(host["w_damping"]["w_crit_cfl"]))
         print(json.dumps({"w_damping": {"w_crit_cfl": float(host["w_damping"]["w_crit_cfl"]),
                                         "w_damp_on": WDamping().w_damp_on}}), flush=True)
+    if host.get("obstacles") is not None:
+        # woof's obstacle_opt = 1: buildings as porous immersed obstacles (woof.hex.obstacles).
+        from woof.hex.obstacles import ObstacleSettings, attach as attach_obstacles
+        settings = dict(host["obstacles"])
+        settings.pop("obstacle_opt", None)
+        obstacle_receipt = attach_obstacles(stack["driver"], ObstacleSettings(**settings))
+        print(json.dumps({"obstacles": obstacle_receipt}, default=str), flush=True)
+        output_root.mkdir(parents=True, exist_ok=True)
+        (output_root / "obstacles-receipt.json").write_text(
+            json.dumps(obstacle_receipt, indent=2, sort_keys=True, default=str) + "\n",
+            encoding="utf-8", newline="\n")
     # --wrf-hydro (woof.wrf_hydro_route): the routing on its own LSM grid through the conservative cell <-> grid
     # exchange (woof.hex.wrf_hydro_hex); returns at once unless the launch asked for it.
     from woof.hex.wrf_hydro_hex import attach_host as attach_wrf_hydro
@@ -5526,6 +5566,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--wind-farms", default=None)
     parser.add_argument("--w-damping", action="store_true")
     parser.add_argument("--inflow-perturbation", default=None)
+    parser.add_argument("--obstacles", default=None)
     parser.add_argument("--w-crit-cfl", type=float, default=1.0)
     parser.add_argument(
         "--source-table",
@@ -5541,6 +5582,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "background stream RRFS v2's MPAS-JEDI reads, in native MPAS form "
             "(CDF-5, MPAS names and dimensions), with a per-field provenance "
             "receipt (woof.hex.jedi_contract)"
+        ),
+    )
+    parser.add_argument(
+        "--mcica-seed-mode",
+        choices=("pressure", "cell"),
+        default=None,
+        help=(
+            "RRTMG McICA seeding: pressure (default, upstream) or cell, a fixed "
+            "hash of cell id and radiation call time (woof.core.mcica_seed), "
+            "for woof grad finite-difference and ensemble legs"
         ),
     )
     parser.add_argument(
@@ -5685,6 +5736,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="write balance-series.jsonl: surface-pressure tendency statistics "
                              "at every macro boundary (initialization-shock measure)")
     args = parser.parse_args(argv)
+    if args.mcica_seed_mode:
+        # Process-wide, and inherited by any child this run starts (woof.core.mcica_seed).
+        os.environ["WOOF_MCICA_SEED_MODE"] = args.mcica_seed_mode
     if args.obs_nudging_input is not None and args.obs_nudging is None:
         parser.error("--obs-nudging-input names the observation file of --obs-nudging; give the configuration too")
     if (args.nudging is None) != (not args.nudging_analysis):
@@ -6412,6 +6466,11 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
         host["w_damping"] = {"w_crit_cfl": float(args.w_crit_cfl)}
     if getattr(args, "inflow_perturbation", None):
         host["inflow_perturbation"] = json.loads(args.inflow_perturbation)
+    if getattr(args, "obstacles", None):
+        if getattr(args, "fullstep_local_timestep", False) or getattr(args, "local_timestep", False):
+            raise ConfigurationRefusal("obstacle_opt", 1, "the local-time-step executors do not carry the "
+                                       "obstacle tendency", "--obstacle-opt 0")
+        host["obstacles"] = json.loads(args.obstacles)
     host["stochastic"] = resolve_options(args.stochastic).json()
     if args.preflight_only or not DEFER_PREPARED_FINGERPRINT:
         join_prepared_fingerprint(host)

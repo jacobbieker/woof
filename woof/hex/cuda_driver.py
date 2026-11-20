@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from woof.backend.scratch import scratch_empty as _scratch, scratch_like as _scratch_like
+
 from . import host_parallel
 from .host_parallel import all_finite, active_indices_in_range
 from .cuda_fp32 import CUDA_FTZ_HELPERS
@@ -3515,8 +3517,8 @@ class CudaDryDycoreDriver:
 
     def _vertical_u(self, u: Any, rw: Any) -> Any:
         cp = self.cp
-        flux = cp.empty((self.nlev + 1, self.nedges), dtype=cp.float32)
-        result = cp.empty((self.nlev, self.nedges), dtype=cp.float32)
+        flux = _scratch(cp, (self.nlev + 1, self.nedges), cp.float32)
+        result = _scratch(cp, (self.nlev, self.nedges), cp.float32)
         self._launch(
             "vertical_u_flux_f32",
             self.nedges * (self.nlev + 1),
@@ -3604,9 +3606,8 @@ class CudaDryDycoreDriver:
         cp = self.cp
         coefficient = self.coefficients
         width = int(coefficient.adv_coefs.shape[1])
-        edge_flux = cp.empty_like(state.rho_u)
-        vertical_flux = cp.empty_like(state.rho_w)
-        result = cp.empty_like(state.rho)
+        edge_flux = _scratch_like(cp, state.rho_u)
+        vertical_flux = _scratch_like(cp, state.rho_w)
         # v8.4.1 accumulates the RK correction in a separate cell loop
         # (native F:6814-6874; dycore-match 8322a3f).  A full-step LTS class
         # driver keeps it inside the edge flux instead: its interface capture
@@ -3645,7 +3646,7 @@ class CudaDryDycoreDriver:
             self._launch("theta_edge_flux_hoist_f32", self.nedges * cuda_edge_hoist.chunks(self.nlev, lpt),
                          (*theta_arguments, edge_flux, np.int32(lpt)))
             if cuda_edge_hoist.check_wanted("theta_edge_flux_hoist_f32", cp):
-                element = cp.empty_like(edge_flux)
+                element = _scratch_like(cp, edge_flux)
                 self._launch("theta_edge_flux_f32", self.nedges * self.nlev, (*theta_arguments, element))
                 cuda_edge_hoist.compare("theta_edge_flux_hoist_f32", edge_flux, element, cp)
         else:
@@ -3678,6 +3679,7 @@ class CudaDryDycoreDriver:
                 if rk_step > 1 and separate_correction else None,
                 kernel_cache=self.cache,
             )
+        result = _scratch_like(cp, state.rho)
         self._launch(
             "theta_finish_f32",
             self.ncells,
@@ -3702,6 +3704,10 @@ class CudaDryDycoreDriver:
     #: the forecast door when --w-damping is given; None leaves every
     #: tendency exactly as it was.
     w_damping = None
+    #: woof's opt-in porous immersed obstacles (woof.hex.obstacles.HexObstacles),
+    #: attached by the forecast door when --obstacle-opt 1 is given; None
+    #: leaves every tendency exactly as it was.
+    obstacles = None
 
     def _w_tendency(self, state: DevicePrognosticState, w: Any) -> Any:
         result = self._w_tendency_dynamics(state, w)
@@ -3718,9 +3724,8 @@ class CudaDryDycoreDriver:
         cp = self.cp
         coefficient = self.coefficients
         width = int(coefficient.adv_coefs.shape[1])
-        edge_flux = cp.empty((self.nlev + 1, self.nedges), dtype=cp.float32)
-        vertical_flux = cp.empty_like(state.rho_w)
-        result = cp.empty_like(state.rho_w)
+        edge_flux = _scratch(cp, (self.nlev + 1, self.nedges), cp.float32)
+        vertical_flux = _scratch_like(cp, state.rho_w)
         w_arguments = (
             np.int32(self.nlev),
             np.int32(self.ncells),
@@ -3745,7 +3750,7 @@ class CudaDryDycoreDriver:
             self._launch("w_edge_flux_hoist_f32", self.nedges * cuda_edge_hoist.chunks(self.nlev + 1, lpt),
                          (*w_arguments, edge_flux, np.int32(lpt)))
             if cuda_edge_hoist.check_wanted("w_edge_flux_hoist_f32", cp):
-                element = cp.empty_like(edge_flux)
+                element = _scratch_like(cp, edge_flux)
                 self._launch("w_edge_flux_f32", self.nedges * (self.nlev + 1), (*w_arguments, element))
                 cuda_edge_hoist.compare("w_edge_flux_hoist_f32", edge_flux, element, cp)
         else:
@@ -3765,6 +3770,7 @@ class CudaDryDycoreDriver:
                 n_vert_levels=self.nlev,
                 kernel_cache=self.cache,
             )
+        result = _scratch_like(cp, state.rho_w)
         self._launch(
             "w_finish_f32",
             self.ncells,
@@ -3837,15 +3843,15 @@ class CudaDryDycoreDriver:
         # Once acoustic stepping is complete its cell increments and averaged
         # fluxes can hold the recovered outputs. The caller's output callback
         # still receives the unchanged ru_p and rw_p arrays.
-        rho = acoustic.rho_pp if consume_acoustic else cp.empty_like(saved_state.rho)
-        rtheta = acoustic.rtheta_pp if consume_acoustic else cp.empty_like(saved_state.rho_theta)
+        rho = acoustic.rho_pp if consume_acoustic else _scratch_like(cp, saved_state.rho)
+        rtheta = acoustic.rtheta_pp if consume_acoustic else _scratch_like(cp, saved_state.rho_theta)
         if consume_acoustic:
             acoustic.rtheta_pp_old = None
-        rho_p = cp.empty_like(saved_state.rho)
-        rtheta_p = cp.empty_like(saved_state.rho_theta)
-        theta = cp.empty_like(saved_state.rho)
-        exner = cp.empty_like(saved_diag.exner)
-        pressure_p = cp.empty_like(saved_diag.pressure_perturbation)
+        rho_p = _scratch_like(cp, saved_state.rho)
+        rtheta_p = _scratch_like(cp, saved_state.rho_theta)
+        theta = _scratch_like(cp, saved_state.rho)
+        exner = _scratch_like(cp, saved_diag.exner)
+        pressure_p = _scratch_like(cp, saved_diag.pressure_perturbation)
         self._launch(
             "recover_cells_f32",
             self.ncells * self.nlev,
@@ -3878,8 +3884,8 @@ class CudaDryDycoreDriver:
                 pressure_p,
             ),
         )
-        ru = cp.empty_like(saved_state.rho_u)
-        flux_u = acoustic.ru_avg if consume_acoustic else cp.empty_like(saved_state.rho_u)
+        ru = _scratch_like(cp, saved_state.rho_u)
+        flux_u = acoustic.ru_avg if consume_acoustic else _scratch_like(cp, saved_state.rho_u)
         self._launch(
             "recover_edges_f32",
             self.nedges * self.nlev,
@@ -3894,8 +3900,8 @@ class CudaDryDycoreDriver:
                 flux_u,
             ),
         )
-        rw = cp.empty_like(saved_state.rho_w)
-        flux_w = acoustic.ww_avg if consume_acoustic else cp.empty_like(saved_state.rho_w)
+        rw = _scratch_like(cp, saved_state.rho_w)
+        flux_w = acoustic.ww_avg if consume_acoustic else _scratch_like(cp, saved_state.rho_w)
         self._launch(
             "recover_interfaces_f32",
             self.ncells * (self.nlev + 1),
@@ -3961,9 +3967,7 @@ class CudaDryDycoreDriver:
             self.regional_v841.overwrite_speczone_u(
                 recovered.normal_velocity, regional_u_overwrite
             )
-            # Recovery skips specified-zone terrain flux. Whole-column zeroing
-            # matches native at the step boundary; nearest is applied after solve.
-            self.regional_v841.zero_speczone_w(recovered.vertical_velocity)
+            self._zero_recovered_speczone_w(recovered.vertical_velocity)
         diagnostics = self._device_saved(
             theta,
             exner,
@@ -3974,6 +3978,17 @@ class CudaDryDycoreDriver:
             recovered.vertical_velocity,
         )
         return state, diagnostics, flux_u, flux_w
+
+    def _zero_recovered_speczone_w(self, vertical_velocity: Any) -> None:
+        """The recovered candidate's specified-zone w (regional runs only).
+
+        Recovery skips specified-zone terrain flux. Whole-column zeroing
+        matches native at the step boundary; nearest is applied after solve.
+        A dycore variant whose boundary law differs overrides this alone.
+        """
+
+        if self.regional_v841 is not None:
+            self.regional_v841.zero_speczone_w(vertical_velocity)
 
     def _copy_state(
         self, source: DevicePrognosticState, *, share_scalars: bool = False
@@ -4465,6 +4480,14 @@ class CudaDryDycoreDriver:
                 self.held_suarez_momentum.apply(
                     tend_ru, current_state.rho_u,
                     current_diag.pressure_perturbation)
+            if self.obstacles is not None:
+                # woof.hex.obstacles: the implicit obstacle rate on the
+                # stage's complete edge tendency, held through the acoustic
+                # steps like the rest of it.
+                self.obstacles.apply_edges(
+                    tend_ru, current_state.rho_u, current_diag.normal_velocity,
+                    cached_v, current_diag.vertical_velocity,
+                    dt=final_stage.large_timestep)
             tend_rt = self._theta_tendency(
                 current_state,
                 current_diag.theta_m,
@@ -4512,6 +4535,10 @@ class CudaDryDycoreDriver:
                 current_state, current_diag.vertical_velocity
             )
             self._add(tend_rw, saved_euler_rw)
+            if self.obstacles is not None:
+                self.obstacles.apply_wfaces(
+                    tend_rw, current_state.rho_w, current_diag.normal_velocity,
+                    current_diag.vertical_velocity, dt=final_stage.large_timestep)
             tend_omega = convert_w_tendency_to_omega_cuda(
                 self.atmosphere.mesh,
                 tend_rw,
@@ -5814,6 +5841,10 @@ class CudaDryDycoreDriver:
                     "step_device_with_physics(validated_held_tendencies)",
                 )
             return self._step_device_v841()
+        if self.obstacles is not None:
+            raise ConfigurationRefusal(
+                "obstacle_opt", 1, "the pre-v8.4.1 dry RK loop does not carry the obstacle tendency",
+                "the v8.4.1 dycore lane")
         self.mixing_config = (
             _mixing_config(self.config)
             if self.config.config_horiz_mixing == "2d_smagorinsky"

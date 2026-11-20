@@ -640,7 +640,7 @@ def test_the_sdist_ships_the_advertised_installers_and_public_pages(
     expected.update(p for p in docs if p.startswith("docs/public/")
                     and p.endswith(".md") and not p.endswith("-DRAFT.md"))
     for source in ("README.md",):
-        for ref in re.findall(r"docs/[A-Za-z0-9_./-]+",
+        for ref in re.findall(r"(?<![A-Za-z0-9_./-])docs/[A-Za-z0-9_./-]+",
                               Path(source).read_text(encoding="utf-8")):
             ref = ref.rstrip(".")
             path = Path(ref)

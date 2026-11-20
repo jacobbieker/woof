@@ -6,6 +6,8 @@ import pytest
 
 cp = pytest.importorskip("cupy")
 
+import _numerics_child
+
 
 def test_accumulate_scaled_matches_the_two_ufuncs_word_for_word():
     from woof.core.bandwidth_glue import accumulate_scaled
@@ -30,3 +32,12 @@ def test_accumulate_scaled_leaves_unsupported_operands_to_the_caller():
     flat = a.reshape(-1)
     assert not accumulate_scaled(flat[1:], flat[:-1], np.float32(2))   # contiguous, overlapping
     assert bool((a == 1).all())
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_identity_holds_under_each_numerics(numerics, exact):
+    """accumulate_scaled against CuPy's multiply then add.
+    The battery runs strict; production runs fast.  Each mode in its own
+    child process (tests/_numerics_child.py)."""
+    _numerics_child.run(__file__, ['test_accumulate_scaled_matches_the_two_ufuncs_word_for_word'], numerics, exact)

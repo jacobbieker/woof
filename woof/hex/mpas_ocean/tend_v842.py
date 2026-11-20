@@ -97,9 +97,51 @@ def _precision_of(array) -> str:
     raise ValueError(f"tendency arrays must be float32 (r4) or float64 (r8), not {array.dtype}")
 
 
+#: the numerics mode -> COMPILE_OPTIONS in it (launch_options)
+_LAUNCH_OPTIONS: dict[str, tuple[str, ...]] = {}
+
+
+def launch_options() -> tuple[str, ...]:
+    """``_hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)``, worked out once
+    per numerics mode: every launch of the ocean's units asks for it, and the
+    split step launches some 800 kernels a step."""
+    mode = _hex_numerics._bind()
+    options = _LAUNCH_OPTIONS.get(mode)
+    if options is None:
+        options = _LAUNCH_OPTIONS[mode] = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True, numerics=mode)
+    return options
+
+
+def column_lanes() -> int:
+    """Threads per column for the level sums of btr_transport and the split
+    step's ss_bcl, and for monotone vertical advection: a warp (32) on CUDA,
+    where the column's loads then coalesce (and advection runs a thread per
+    cell and level), one elsewhere (Metal's serial loops are faster). Both
+    keep the Fortran's order, so both give the same words;
+    ``WOOF_OCEAN_COLUMN_LANES`` (1 or 32) picks one. 32 needs a 32-wide warp
+    or SIMD group with its shuffles, so only CUDA (not CuPy-ROCm, whose
+    wavefronts are 64 wide) and Metal take it."""
+    import os
+    from woof import backend
+    name = backend.active()
+    if name == "cuda":
+        import cupy as cp
+        if cp.cuda.runtime.is_hip:
+            name = "hip"   # CuPy-ROCm under the default backend: a 64-wide wavefront
+    lanes = os.environ.get("WOOF_OCEAN_COLUMN_LANES", "").strip()
+    if not lanes:
+        return 32 if name == "cuda" else 1
+    if lanes == "1" or (lanes == "32" and name in ("cuda", "mlx")):
+        return int(lanes)
+    raise ConfigurationRefusal(
+        knob="WOOF_OCEAN_COLUMN_LANES", value=lanes,
+        reason=f"the column sums run a warp (32, CUDA and Metal only) or a thread (1) per edge; backend {name!r}",
+        declaration="WOOF_OCEAN_COLUMN_LANES=1, or 32 on CUDA or Metal")
+
+
 def _function(precision: str, name: str):
     import cupy as cp
-    options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+    options = launch_options()
     return _module_on(cp.cuda.Device().id, precision, options).get_function(name)
 
 
@@ -170,7 +212,7 @@ def vel_coriolis_tend(*, mesh: dict, normalized_relative_vorticity_edge, normali
     _check("dcEdge", mesh["dcEdge"], dtype, (n_edges,))
     _check("edgeMask", mesh["edgeMask"], cp.int32, (n_edges, n_levels))
     n_edges_loop = loop_extent("edges", 1, n_edges)
-    _function(precision, "ocn_vel_coriolis_tend_v842")(_grid(n_edges_loop), (_BLOCK,), (
+    _function(precision, "ocn_vel_coriolis_tend_v842")(_grid(n_edges_loop * n_levels), (_BLOCK,), (
         tend, normalized_relative_vorticity_edge, normalized_planetary_vorticity_edge, layer_thickness_edge,
         normal_velocity, kinetic_energy_cell, mesh["maxLevelEdgeTop"], mesh["nEdgesOnEdge"],
         mesh["cellsOnEdge"], mesh["edgesOnEdge"], mesh["weightsOnEdge"], mesh["dcEdge"], mesh["edgeMask"],
@@ -196,7 +238,7 @@ def vel_vadv_tend(*, mesh: dict, normal_velocity, layer_thickness_edge, vert_ale
     _check("cellsOnEdge", mesh["cellsOnEdge"], cp.int32, (n_edges, 2))
     _check("edgeMask", mesh["edgeMask"], cp.int32, (n_edges, n_levels))
     n_edges_loop = loop_extent("edges", 1, n_edges)
-    _function(precision, "ocn_vel_vadv_tend_v842")(_grid(n_edges_loop), (_BLOCK,), (
+    _function(precision, "ocn_vel_vadv_tend_v842")(_grid(n_edges_loop * n_levels), (_BLOCK,), (
         tend, normal_velocity, layer_thickness_edge, vert_ale_transport_top, mesh["maxLevelEdgeTop"],
         mesh["cellsOnEdge"], mesh["edgeMask"], np.int32(n_edges_loop), np.int32(n_levels)))
 
@@ -224,7 +266,7 @@ def thick_hadv_tend(*, mesh: dict, normal_velocity, layer_thickness_edge, tend,
     _check("dvEdge", mesh["dvEdge"], dtype, (n_edges,))
     _check("areaCell", mesh["areaCell"], dtype, (n_cells,))
     n_cells_loop = loop_extent("cells", 1, n_cells)
-    _function(precision, "ocn_thick_hadv_tend_v842")(_grid(n_cells_loop), (_BLOCK,), (
+    _function(precision, "ocn_thick_hadv_tend_v842")(_grid(n_cells_loop * n_levels), (_BLOCK,), (
         tend, normal_velocity, layer_thickness_edge, mesh["maxLevelEdgeBot"], mesh["nEdgesOnCell"],
         mesh["edgesOnCell"], mesh["edgeSignOnCell"], mesh["dvEdge"], mesh["areaCell"],
         np.int32(n_cells_loop), np.int32(n_levels), np.int32(max_edges)))

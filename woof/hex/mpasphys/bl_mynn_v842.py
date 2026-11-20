@@ -941,6 +941,30 @@ def _column_batch(ncol, stride, processors, free_bytes, *, shared_card=False):
     return min(((ncol + 63) // 64) * 64, max(64, (64 if shared_card else 256) * processors), affordable)
 
 
+def _compact_workers(ncol, stride, processors, free_bytes, *, metal):
+    """Worker cap of the compact (borrowed) arena.
+
+    CUDA keeps 128 workers per SM.  Metal reports its GPU cores as processors (40 on an M-series Max), and 128 per
+    core left 5,120 workers striding over a 14,751-column Alps mesh: mynn_mmm_run took 112 ms/step there against
+    50 ms/step with a worker per column (R2-D, 2026-11-16).  On Metal every column gets a worker, still within the
+    one-eighth-of-free-memory bound.  Words do not depend on the worker count (each column is computed in its own
+    worker's private arena).  ``WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR`` overrides the per-processor cap on either
+    backend.
+    """
+    import os
+    budget = max(64 * stride, free_bytes // 8)
+    affordable = max(64, (budget // stride // 64) * 64)
+    columns = ((ncol + 63) // 64) * 64
+    override = os.environ.get('WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR', '').strip()
+    if override:
+        per = max(1, int(override))
+    elif metal:
+        return min(columns, affordable)
+    else:
+        per = 128
+    return min(columns, max(64, per * processors), affordable)
+
+
 _STATIC_COLUMNS = (
     "const int worker = blockIdx.x*blockDim.x+threadIdx.x;\n"
     "for (int thread = worker; thread < batch_count; thread += blockDim.x*gridDim.x) {\n")
@@ -1079,12 +1103,18 @@ class MynnCudaModule:
             import os
             narrow = os.environ.get('WOOF_HEX_MEMBER_MEMORY', 'compact').strip().lower() == 'shared-card'
             idle = cp.get_default_memory_pool().free_bytes()
-            batch = _column_batch(ncol, stride, processors, free_bytes + idle, shared_card=narrow)
-            if not narrow:
-                batch = min(batch, 128 * processors)
+            if narrow:
+                batch = _column_batch(ncol, stride, processors, free_bytes + idle, shared_card=True)
+            else:
+                from woof import backend
+                batch = _compact_workers(ncol, stride, processors, free_bytes + idle,
+                                         metal=backend.active() == "mlx")
             held = self._workers = (key, batch)
         batch = held[1]
-        return (cp.empty(batch * stride, dtype=cp.uint8),
+        # The arena is each worker's automatic arrays, written before read (CUDA hands it out as
+        # garbage); on Metal it is allocated without the fill an empty costs there.
+        from woof.backend.scratch import scratch_empty
+        return (scratch_empty(cp, batch * stride, cp.uint8),
                 cp.empty(ncol, dtype=cp.int32), batch)
 
     @property
@@ -10038,11 +10068,38 @@ error_flags[batch_first+thread]=errflg;
 #: and 2020-01-01 at t=6672600 s, delp(kts) = 0.0 in both).  The corrected thickness is the layer's
 #: own hydrostatic weight rho*g*dz, the formula the NOAA-GSL MYNN-EDMF uses for every level
 #: (module_bl_mynnedmf.F90:4270), so it is positive with the hydrostatic interior thicknesses.
+#: RP8: qsat_blend (mynn_shared.F90:90,93,97,98) is 0.622*e/(p-e) with no guard, so it has a pole where
+#: the saturation vapour pressure reaches the air pressure.  Below a 30 km lid that never happens; under
+#: a 50 km lid (s2s80-v1) the top levels sit at 70-90 Pa and 248 K, where liquid e is ~82 Pa: qsat goes
+#: through the pole to large negative values, and MYNN's tendencies, variances and mixing go NaN in that
+#: column (x1.40962 120 km, 2026-11-05T00 at step 51, then refused by the dycore with ~4,800 columns
+#: non-finite).  The guarded form caps e at 0.15 p and the denominator at 1e-5 Pa, which changes nothing
+#: where e < 0.15 p (under the 30 km lid it binds only at the dry top level, qv/qsat < 1e-9).
 MYNN_TEXT_CORRECTIONS = {
     "RP7": (
         ("delp(kts) = mpas_sub(psfc, mpas_div(mpas_add(mpas_mul(p(((kts) + (1))), dz(kts)), "
          "mpas_mul(p(kts), dz(((kts) + (1))))), mpas_add(dz(kts), dz(((kts) + (1))))));",
          "delp(kts) = mpas_mul(mpas_mul(rho(kts), grav), dz(kts));", 1),
+    ),
+    # RP8: the qsat_blend guards of the NOAA-GSL MYNN-EDMF (module_bl_mynnedmf.F90:7650-7662), placed in
+    # MPAS's own branches; the polynomials, branch limits and blend weight stay MPAS v8.4.2's.
+    "RP8": (
+        ("qsat_blend = mpas_div(mpas_mul(0.622f, esl), mpas_sub(p, esl));",
+         "esl = mynn_min(((float)(esl)), ((float)(mpas_mul(p, 0.15f)))); "
+         "qsat_blend = mpas_div(mpas_mul(0.622f, esl), mynn_max(((float)(mpas_sub(p, esl))), ((float)(1e-5f))));",
+         1),
+        ("qsat_blend = mpas_div(mpas_mul(0.622f, esi), mpas_sub(p, esi));",
+         "esi = mynn_min(((float)(esi)), ((float)(mpas_mul(p, 0.15f)))); "
+         "qsat_blend = mpas_div(mpas_mul(0.622f, esi), mynn_max(((float)(mpas_sub(p, esi))), ((float)(1e-5f))));",
+         1),
+        ("rslf = mpas_div(mpas_mul(0.622f, esl), mpas_sub(p, esl));",
+         "esl = mynn_min(((float)(esl)), ((float)(mpas_mul(p, 0.15f)))); "
+         "rslf = mpas_div(mpas_mul(0.622f, esl), mynn_max(((float)(mpas_sub(p, esl))), ((float)(1e-5f))));",
+         1),
+        ("rsif = mpas_div(mpas_mul(0.622f, esi), mpas_sub(p, esi));",
+         "esi = mynn_min(((float)(esi)), ((float)(mpas_mul(p, 0.15f)))); "
+         "rsif = mpas_div(mpas_mul(0.622f, esi), mynn_max(((float)(mpas_sub(p, esi))), ((float)(1e-5f))));",
+         1),
     ),
 }
 

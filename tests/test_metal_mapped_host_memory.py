@@ -56,3 +56,32 @@ def test_mapped_host_bytes_are_the_device_array():
         assert cp.cuda.runtime.pointerGetAttributes(other.data.ptr).type == cp.cuda.runtime.memoryTypeDevice
     finally:
         cp.cuda.runtime.freeHost(ptr)
+
+
+def test_writes_into_a_host_block_are_complete_on_return():
+    """cudaMemset and cudaMemcpy(Async) into a hostAlloc block by its device
+    address (cudaPointerGetAttributes, the mapped-memory route): the host
+    reads the block's bytes in place with no synchronize between, as CUDA's
+    page-locked memory allows.  Before the fix the facade write was only
+    queued, and the host read the old bytes (every trial)."""
+    from woof import backend
+    if backend.active() != "mlx":
+        pytest.skip("runs under WOOF_BACKEND=mlx")
+    import cupy as cp
+
+    n = 1 << 16
+    ptr = cp.cuda.runtime.hostAlloc(n * 4, 0)
+    try:
+        dptr = cp.cuda.runtime.pointerGetAttributes(ptr).devicePointer
+        host = np.ctypeslib.as_array((np.ctypeslib.ctypes.c_float * n).from_address(ptr))
+        want = np.arange(1, n + 1, dtype=np.float32)
+        for trial in range(3):
+            host[:] = -1.0
+            cp.cuda.runtime.memset(dptr, 0, n * 4)
+            assert not host.any(), trial
+            cp.cuda.runtime.memcpyAsync(dptr, want.ctypes.data, n * 4,
+                                        cp.cuda.runtime.memcpyHostToDevice, 0)
+            assert np.array_equal(host, want), trial
+            cp.cuda.runtime.deviceSynchronize()
+    finally:
+        cp.cuda.runtime.freeHost(ptr)

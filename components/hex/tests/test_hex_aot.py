@@ -193,7 +193,7 @@ def test_direct_physics_inventory_covers_both_surface_variants_and_numerics():
                                  "wsm6", "wsm6_workspace", "rrfs_wsm6_radar", "rrfs_wsm6_relhum", "ntiedtke", "ysu", "ysu_gwdo", "ugwp_ngw",
                                  "rrfs_smoke", "nssl_rrfs", "rrfs_cu_gfl_bf6a4b0", *fast_only, *strict_only}
         assert families.count("sf_mynn") == families.count("sfclay_mm5") == 2
-        # MYNN: exact text and every correct-mode text set (RP7, the MPAS-route default).
+        # MYNN: exact text and every correct-mode text set (RP7 and RP8, the MPAS-route default).
         from woof.hex.mpasphys.bl_mynn_v842 import MYNN_TEXT_CORRECTIONS
         assert families.count("bl_mynn") == 2 ** len(MYNN_TEXT_CORRECTIONS) >= 2
         assert all(families.count(name) == 1 for name in
@@ -950,7 +950,8 @@ def test_compile_workers_end_with_the_process_that_opened_them(end):
 
 
 @pytest.mark.parametrize('mode', ['strict', 'fast'])
-@pytest.mark.parametrize('corrections', [frozenset(), frozenset({'RP7'})])
+@pytest.mark.parametrize('corrections', [frozenset(), frozenset({'RP7'}), frozenset({'RP8'}),
+                                         frozenset({'RP7', 'RP8'})])
 def test_mynn_inventory_matches_the_forecast_source(mode, corrections, monkeypatch):
     import sys
     import types

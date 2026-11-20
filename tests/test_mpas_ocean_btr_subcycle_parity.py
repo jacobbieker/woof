@@ -102,6 +102,65 @@ def test_an_uncopied_corrector_neighbour_is_refused():
         bt._check_copies(dev["mesh"], bt.halo_schedule(case["config"], case["config"]["nBtrSubcycles"]))
 
 
+def _copies_refused_by_brute_force(mesh: dict, schedule: list[dict]) -> bool:
+    """The copy check as it was written first: every corrector, every neighbour."""
+    import cupy as cp
+    edges = [int(x) for x in mesh["nEdgesArray"]]
+    n_eoe, eoe = cp.asnumpy(mesh["nEdgesOnEdge"]), cp.asnumpy(mesh["edgesOnEdge"])
+    for step in schedule:
+        for copied, computed in step["correctors"]:
+            n = edges[computed - 1]
+            cols = np.arange(eoe.shape[1])[None, :] < n_eoe[:n, None]
+            if (eoe[:n][cols] > edges[copied - 1] + 1).any():
+                return True
+    return False
+
+
+@requires_gpu
+def test_the_copy_check_is_the_brute_force_check_and_reads_a_mesh_once(monkeypatch):
+    """The running-maximum check refuses exactly where the per-corrector scan
+    does (the pinned meshes and mutated ones), and reads a mesh's connectivity
+    from the device once, not twice per barotropic stage."""
+    import cupy as cp
+    from woof.verify import mpas_ocean_stream as stream
+    from woof.hex.mpas_ocean import btr_subcycle_v842 as bt
+    rs = np.random.RandomState(20261117)
+    checked = refused = 0
+    for case in oo.cases():
+        if case["config"]["config_time_integrator"] != "split_explicit":
+            continue
+        schedule = bt.halo_schedule(case["config"], case["config"]["nBtrSubcycles"])
+        if not any(step["correctors"] for step in schedule):
+            continue
+        for trial in range(6):
+            eoe = case["pools"]["mesh"]["edgesOnEdge"].copy()
+            n_edges = case["dims"]["nEdges"]
+            if trial:   # an edge reading another, the outermost layer on odd trials
+                inner = int(case["pools"]["mesh"]["nEdgesArray"][0])
+                eoe[rs.randint(0, inner), rs.randint(0, eoe.shape[1])] = (
+                    n_edges if trial % 2 else rs.randint(1, n_edges + 1))
+            mesh = dict(stream.on_device(oo.FIELDS, case)["mesh"], edgesOnEdge=cp.asarray(eoe))
+            want = _copies_refused_by_brute_force(mesh, schedule)
+            try:
+                bt._check_copies(mesh, schedule)
+                got = False
+            except ConfigurationRefusal:
+                got = True
+            assert got == want, (case["name"], trial)
+            checked += 1
+            refused += got
+    assert checked and refused, (checked, refused)
+    case = next(c for c in oo.cases() if c["name"] == "nested_halos")
+    mesh = stream.on_device(oo.FIELDS, case)["mesh"]
+    schedule = bt.halo_schedule(case["config"], case["config"]["nBtrSubcycles"])
+    reads = []
+    real = cp.asnumpy
+    monkeypatch.setattr(cp, "asnumpy", lambda a, *k, **kw: reads.append(1) or real(a, *k, **kw))
+    for _ in range(3):
+        bt._check_copies(mesh, schedule)
+    assert len(reads) == 2
+
+
 @requires_gpu
 @pytest.mark.parametrize("precision", BOTH)
 def test_gpu_matches_the_v842_oracle_word_for_word(precision):
@@ -173,3 +232,69 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
         assert sorted(fresh.files) == sorted(pinned.files)
         for key in pinned.files:
             assert oo.word_mismatches(fresh[key], pinned[key]) == 0, (precision, key)
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", BOTH)
+def test_the_captured_stage_writes_the_eager_words(monkeypatch, precision):
+    """CUDA: the split-explicit stage captured as a graph on its key's second
+    sighting and replayed after writes the eager stage's words in every
+    array. Metal keeps its launches and captures nothing."""
+    from woof import backend
+    from woof.hex.mpas_ocean import btr_subcycle_v842 as bt
+    from woof.verify import mpas_ocean_forward_oracle as fo
+    case = next(c for c in fo.cases(precision) if c["name"] == "split_nested_halos")
+    from woof.hip_backend import supports_graphs
+    captures = backend.active() == "cuda" and supports_graphs()
+    for off in ("0", "false", "off", "no", " OFF "):
+        monkeypatch.setenv("WOOF_OCEAN_CUDA_GRAPHS", off)
+        assert not bt._graphs_on()
+    bt._GRAPHS.clear()
+    try:
+        monkeypatch.setenv("WOOF_OCEAN_CUDA_GRAPHS", "0")
+        eager = fo.run_gpu(case)
+        assert not bt._GRAPHS
+        monkeypatch.setenv("WOOF_OCEAN_CUDA_GRAPHS", "1")
+        graphed = fo.run_gpu(case)
+        if captures:
+            assert any(entry.graph is not None and entry.seen >= 3 for entry in bt._GRAPHS.values())
+        else:
+            assert not bt._GRAPHS
+        bt._GRAPHS.clear()
+        # a refused capture leaves its key eager for good, with the same words
+        calls = []
+        monkeypatch.setattr(bt, "_capture", lambda launches: calls.append(1))
+        refused = fo.run_gpu(case)
+        if captures:
+            assert calls and all(entry.refused for entry in bt._GRAPHS.values() if entry.seen >= 2)
+            assert len(calls) == sum(1 for entry in bt._GRAPHS.values() if entry.seen >= 2)
+    finally:
+        bt._GRAPHS.clear()
+    assert eager.keys() == graphed.keys() == refused.keys()
+    for name, want in eager.items():
+        assert graphed[name].tobytes() == want.tobytes(), name
+        assert refused[name].tobytes() == want.tobytes(), name
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", BOTH)
+def test_a_warp_per_column_writes_the_serial_words(monkeypatch, precision):
+    """btr_transport and ss_bcl add their columns in level order with a warp
+    per edge (lanes 32, CUDA's default) or a thread per edge (lanes 1,
+    Metal's), and monotone vertical advection runs a thread per cell and
+    level or per column: the forward steps write the same words in every
+    array either way, and a lane count other than 1 or 32 is refused by
+    name."""
+    from woof.hex.mpas_ocean import tend_v842
+    from woof.verify import mpas_ocean_forward_oracle as fo
+    case = next(c for c in fo.cases(precision) if c["name"] == "split_nested_halos")
+    monkeypatch.setenv("WOOF_OCEAN_COLUMN_LANES", "1")
+    serial = fo.run_gpu(case)
+    monkeypatch.setenv("WOOF_OCEAN_COLUMN_LANES", "32")
+    warp = fo.run_gpu(case)
+    assert serial.keys() == warp.keys()
+    for name, want in serial.items():
+        assert warp[name].tobytes() == want.tobytes(), name
+    monkeypatch.setenv("WOOF_OCEAN_COLUMN_LANES", "8")
+    with pytest.raises(ConfigurationRefusal, match="WOOF_OCEAN_COLUMN_LANES"):
+        tend_v842.column_lanes()

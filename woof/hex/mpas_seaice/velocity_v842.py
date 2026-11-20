@@ -88,9 +88,24 @@ def _precision_of(array) -> str:
     raise ValueError(f"velocity arrays must be float32 (r4) or float64 (r8), not {array.dtype}")
 
 
+#: (numerics mode, strict options) -> the options in that mode (launch_options)
+_LAUNCH_OPTIONS: dict[tuple[str, tuple[str, ...]], tuple[str, ...]] = {}
+
+
+def launch_options(strict: tuple[str, ...] = COMPILE_OPTIONS) -> tuple[str, ...]:
+    """``_hex_numerics.options(strict, keep_ftz=True)``, worked out once per
+    numerics mode: every launch of the dynamics' units asks for it, and the
+    elastic subcycles launch some 500 kernels a step (120 subcycles)."""
+    key = (_hex_numerics._bind(), strict)
+    options = _LAUNCH_OPTIONS.get(key)
+    if options is None:
+        options = _LAUNCH_OPTIONS[key] = _hex_numerics.options(strict, keep_ftz=True, numerics=key[0])
+    return options
+
+
 def _function(precision: str, name: str):
     import cupy as cp
-    options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+    options = launch_options()
     return _module_on(cp.cuda.Device().id, precision, options).get_function(name)
 
 
@@ -186,7 +201,8 @@ def pre_subcycle(*, mesh: dict, icestate: dict, solver: dict, variational: dict,
 
 
 def velocity_update(*, mesh: dict, icestate: dict, solver: dict, inertia, use_ocean_stress: bool,
-                    revised_evp: bool, elastic_time_step: float, dynamics_time_step: float) -> None:
+                    revised_evp: bool, elastic_time_step: float, dynamics_time_step: float,
+                    check: bool = True) -> None:
     """One subcycle's ``ocean_stress_coefficient`` then ``solve_velocity``
     (or ``solve_velocity_revised``), in place.
 
@@ -194,7 +210,9 @@ def velocity_update(*, mesh: dict, icestate: dict, solver: dict, inertia, use_oc
     additionally needs ``uVelocityInitial``, ``vVelocityInitial``,
     ``airStressVertexU/V`` and ``surfaceTiltForceU/V``. ``inertia`` is a
     one-word device array holding ``numericalInertiaCoefficient`` (the revised
-    solve reads it), e.g. ``evp_v842.init_evp(...)[1:2]``.
+    solve reads it), e.g. ``evp_v842.init_evp(...)[1:2]``. ``check=False``
+    skips the arrays' checks, for a subcycle loop that checked the same arrays
+    on its first pass.
     """
     import cupy as cp
     precision = _precision_of(solver["uVelocity"])
@@ -202,27 +220,27 @@ def velocity_update(*, mesh: dict, icestate: dict, solver: dict, inertia, use_oc
     n_vertices = solver["uVelocity"].shape[0]
     nvs = int(mesh["nVerticesSolve"])
     _solve_bounds(nvs, n_vertices)
-    _vertex_fields(solver, ("uVelocity", "vVelocity", "uVelocityInitial", "vVelocityInitial",
-                            "totalMassVertexfVertex", "oceanStressU", "oceanStressV", "oceanStressCoeff",
-                            "uOceanVelocityVertex", "vOceanVelocityVertex", "stressDivergenceU",
-                            "stressDivergenceV", "airStressVertexU", "airStressVertexV",
-                            "surfaceTiltForceU", "surfaceTiltForceV"), n_vertices, dtype)
-    for name in ("totalMassVertex", "iceAreaVertex"):
-        _check(name, icestate[name], dtype, (n_vertices,))
-    _check("solveVelocity", solver["solveVelocity"], cp.int32, (n_vertices,))
-    _check("inertia", inertia, dtype, (1,))
+    if check:
+        _vertex_fields(solver, ("uVelocity", "vVelocity", "uVelocityInitial", "vVelocityInitial",
+                                "totalMassVertexfVertex", "oceanStressU", "oceanStressV", "oceanStressCoeff",
+                                "uOceanVelocityVertex", "vOceanVelocityVertex", "stressDivergenceU",
+                                "stressDivergenceV", "airStressVertexU", "airStressVertexV",
+                                "surfaceTiltForceU", "surfaceTiltForceV"), n_vertices, dtype)
+        for name in ("totalMassVertex", "iceAreaVertex"):
+            _check(name, icestate[name], dtype, (n_vertices,))
+        _check("solveVelocity", solver["solveVelocity"], cp.int32, (n_vertices,))
+        _check("inertia", inertia, dtype, (1,))
     s = solver
-    _function(precision, "seaice_ocean_stress_coefficient_v842")(_grid(n_vertices), (_BLOCK,), (
-        s["oceanStressCoeff"], s["uOceanVelocityVertex"], s["vOceanVelocityVertex"], s["uVelocity"],
-        s["vVelocity"], icestate["iceAreaVertex"], s["solveVelocity"], np.int32(bool(use_ocean_stress)),
-        np.int32(nvs), np.int32(n_vertices)))
     time_step = dtype(dynamics_time_step if revised_evp else elastic_time_step)
-    _function(precision, "seaice_solve_velocity_v842")(_grid(nvs), (_BLOCK,), (
+    # ocean_stress_coefficient and the solve, one launch (per vertex, in order)
+    _function(precision, "seaice_velocity_update_v842")(_grid(n_vertices), (_BLOCK,), (
         s["uVelocity"], s["vVelocity"], s["uVelocityInitial"], s["vVelocityInitial"],
         icestate["totalMassVertex"], s["totalMassVertexfVertex"], s["stressDivergenceU"],
         s["stressDivergenceV"], s["airStressVertexU"], s["airStressVertexV"], s["surfaceTiltForceU"],
         s["surfaceTiltForceV"], s["oceanStressU"], s["oceanStressV"], s["oceanStressCoeff"],
-        s["solveVelocity"], inertia, time_step, np.int32(bool(revised_evp)), np.int32(nvs)))
+        s["solveVelocity"], inertia, time_step, np.int32(bool(revised_evp)), np.int32(nvs),
+        s["uOceanVelocityVertex"], s["vOceanVelocityVertex"], icestate["iceAreaVertex"],
+        np.int32(bool(use_ocean_stress)), np.int32(n_vertices)))
 
 
 def principal_stresses(*, mesh: dict, variational: dict) -> None:
@@ -337,12 +355,15 @@ def subcycle(*, mesh: dict, boundary: dict, icestate: dict, solver: dict, variat
     pre_subcycle(mesh=mesh, icestate=icestate, solver=solver, variational=variational,
                  use_ocean_stress=use_ocean_stress)
     inertia = cp.ascontiguousarray(consts[1:2])
-    for _ in range(int(n_subcycles)):
+    # the subcycles run on the same arrays, so the first one checks them for all
+    for n in range(int(n_subcycles)):
         evp.internal_stress_variational(mesh=mesh, solver=solver, variational=variational, consts=consts,
-                                        elastic_time_step=elastic_time_step, revised_evp=revised_evp)
+                                        elastic_time_step=elastic_time_step, revised_evp=revised_evp,
+                                        check=n == 0)
         velocity_update(mesh=mesh, icestate=icestate, solver=solver, inertia=inertia,
                         use_ocean_stress=use_ocean_stress, revised_evp=revised_evp,
-                        elastic_time_step=elastic_time_step, dynamics_time_step=dynamics_time_step)
+                        elastic_time_step=elastic_time_step, dynamics_time_step=dynamics_time_step,
+                        check=n == 0)
     evp.final_divergence_shear_variational(mesh=mesh, solver=solver, variational=variational, ridging=ridging,
                                            use_column_package=use_column_package)
     principal_stresses(mesh=mesh, variational=variational)

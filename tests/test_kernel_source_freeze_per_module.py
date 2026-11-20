@@ -161,6 +161,12 @@ MP28_ACCUMULATOR_REWORK = "lane/cut286-mp28-g3 (2.8.6)"
 # Compiler request strings: batch007-compiled-pin-preview-review.json.
 # Numerical qualification remains in the lane and integration gates.
 BASELINE_PINNED: dict[str, str] = {
+    # WRF 4.7.1 RRTMG-K (ra_lw/ra_sw_physics = 14, #601 2cac082e1): the
+    # three units as they merged, bitwise to compiled WRF on the oracle
+    # columns; pinned here so an edit is a reviewed re-pin, not a silent one.
+    "rrtmgk_lw": "887e276ea96ee776f0a32a70e38e76ab1bba4e7bac70a4ea4e992dfdfb1b1ecf",
+    "rrtmgk_prep": "2df3ca5b115cc58d9a68bfb914321db666c54d23a483838957ac79f75999b5b6",
+    "rrtmgk_sw": "a56b6b3b2254967ca4a767dd99766df1c7bce186b35bc9a69fd3031ee7574ab0",
     "gbmpbl": "20fb754c8290e50e8962e2be2786956b7b3ae3fdb0e875860854c8b979811a57",
     # HRRR initial helper: all 3456 native output words, both selectors.
     "gsd_initial_reflectivity": '9f9af95b259d978647dca1992f2b14e4bafaea5c781d269e53dca93fbb2a3419',
@@ -269,10 +275,24 @@ BASELINE_PINNED: dict[str, str] = {
     # existing unit keeps its bytes.
     "theta_m_cumulus": "580dfc42c040cb87474f33a32a15427681e92feac2c1bf7283ed9418d923f7d3",
     "smag2d_theta_m": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a",
-    # wrf_smag_hd_w on stored tau13/tau23 faces (composes smag2d.cu, which
-    # keeps its bytes): the same tendency words (tests/test_smag2d_w_faces.py,
+    # wrf_smag_hd_w on stored defor13/defor23 faces, the stresses' density
+    # and K averages at the reader (composes smag2d.cu, which keeps its
+    # bytes): the same tendency words (tests/test_smag2d_w_faces.py, CUDA and
+    # Metal, fast and strict numerics, GPUWM_WRF_EXACT=0 and 1).
+    "smag2d_w_faces": "09a35fbd19ac813b0bbc73c6eab5bc513dc5b565de8abdb13f19787ca00b4060",
+    # wrf_smag_hd_u / wrf_smag_hd_v on stored stress coefficients (rho K,
+    # rhoavg kavg; composes smag2d.cu, which keeps its bytes): the same
+    # tendency words (tests/test_smag2d_uv_faces.py, CUDA and Metal, fast and
+    # strict numerics, GPUWM_WRF_EXACT=0 and 1).
+    "smag2d_uv_faces": "dc9828ca72bc7c7b6acb02b382c7326f33fd3f9eb16ab365e7f3e19a400dabfd",
+    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu, which
+    # keeps its bytes): the same TKE source words (tests/test_smag2d_tke_faces.py,
     # CUDA and Metal, GPUWM_WRF_EXACT=0 and 1).
-    "smag2d_w_faces": "7a318dcdb9d8322e06469cdd30e56bac5f999b128a52fa50cdf33de3d0152a34",
+    "smag2d_tke_faces": "421c718311e7724d3fd5ba733bfd3c59eca0cf828a753d284bac6e3142128f59",
+    # The opt-in porous immersed obstacles (obstacle_opt = 1, woof's own,
+    # beyond WRF): a new unit, launched only when a domain has buildings
+    # (tests/test_obstacles.py; off and zero-obstacle runs never load it).
+    "obstacle_drag": "8d267bf826a42f2737397864eb190b3a6c1c34ad7f63d2e3c787698e32088598",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":
@@ -1018,8 +1038,15 @@ BASELINE_PINNED: dict[str, str] = {
     # Reference comments now record the original WRF v4.6.1 authority and
     # shared native twin. No executable statement changed; both oracles
     # retain exact float32 output words. Previously 30436e47.
+    # Moved on buildings2-urbparam 2026-11-19: the NUDAPT gridded-morphology
+    # arm (module_sf_urban.F:649-788) is transcribed behind a nudapt flag
+    # and MH_URB2D > 0 (urban_param_file); bitwise against WRF v4.7.1 on
+    # 2,688 column steps (tests/test_urban_ucm_nudapt_parity.py).  Without
+    # a file the arm is never entered: every existing ucm oracle stays
+    # bitwise and tests/test_urban_param_runs.py holds the run byte-identical
+    # under fast/strict and WRF_EXACT 0/1.  Previously ee5bb8e4.
     "urban_ucm":
-        "ee5bb8e48b297b0d5304047b7d764103a5c22bc1fb307df13670c122c39e588b",
+        "be7d1058e4578338a46713e3725862c4b8c82ccf617857d0820d9832b86431f7",
     # a28017016 feat(urban-bep): MYJURB (MYJ under BEP/BEP+BEM), word-identical
     # to WRF v4.7.1 (tests/test_myjurb_wrf471_parity.py)
     # Re-pinned for A146 on development branch: the flag_bep lower
@@ -1052,7 +1079,7 @@ BASELINE_PINNED: dict[str, str] = {
     # Previously 5da35b59.
     # RE-PINNED at the 1.1.6 upstream merge: the fork's 256-level source on upstream 1.1.6's edits.
     "terrain_drag":
-        '575ed16c15529e6de4b6cf34a31c75917f6a2a27577e11da5721fb3a7afdb2da',
+        'ca3fd7768ff2a02ba1da2629f32ca0ac866af0a4566abdb571f36e6e026bc560',
     # feat/windfarm-fitch-kernel: the Fitch et al. (2012) wind-farm drag
     # from WRF v4.7.1 phys/module_wind_fitch.F (windfarm_opt = 1), word for
     # word against WRF's own Fortran and the binary32 CPU mirror
@@ -1187,16 +1214,26 @@ BASELINE_PINNED: dict[str, str] = {
     # unchanged text.  Its words equal compiled WRF v4.6.1 rtrnmc's per-band
     # terms (tests/test_rrtmg_spectral_output.py), CUDA and Metal.
     # RE-PINNED at the 1.1.6 upstream merge: the fork's 256-level source on upstream 1.1.6's edits.
+    # RE-PINNED on perf/rrtmg-spectral-boundary-levels: rlw_rtrn_band_rows can
+    # write only the surface and top levels (nlo == 2); no physics changed, the
+    # kept words equal the full slab's (test_lw_boundary_levels_* in
+    # tests/test_rrtmg_spectral_output.py, fast, strict and wrf_exact).
     "rrtmg_lw_zbatched":
-        "dfe3b824da5e8af04366dc873654368fb687a26075ddad898f48e3a6a2a367e6",
+        "f1bb5d25fd9855ba377a6dc9298fc213876eb811b42061b8dc48b1413aab0f9f",
     # The clean-room spectral solver (woof/radtran, docs/dev/radtran.md);
     # its words are tests/data/radtran/kernel_words.npz on host, CUDA and
     # Metal, and its fluxes are held to uvspec 2.0.6.  Moved once on
     # radtran-opac: the body became rt_problem, and radtran_disort_modes +
     # _finish spread radiance Fourier modes over threads (same words, held
     # by tests/test_radtran_kernel_words_gpu.py on both device paths).
+    # Moved again: the solver, its helpers and its exp/cos are out of line
+    # under NVRTC (RT_OUTLINE), so the unit compiles in about a minute
+    # instead of over an hour; same words on host, CUDA and Metal.
+    # Moved again: the per-problem workspace is interleaved across the
+    # launch's threads on CUDA and the host build (rt_w), so a warp's loads
+    # coalesce; only addresses change, same words.
     "radtran_disort":
-        "9b4efb5acb2c165a38fd0c4f92870418eb34c58f7faba7ffaa6ec51f3fe23a06",
+        "7f7018c0c2bfd12a547645163a6f2ca5ce96ab8965e67b5e505850def8babd02",
     # development branch (A158): WRF 4.7.1's implicit-explicit
     # vertical advection, graded word for word against WRF's compiled
     # routines by tests/test_zadvect_implicit.py.  Moved once on the lane:
@@ -1533,7 +1570,7 @@ PINNED_HEADERS = {
 
     "urban_ucm480_support.cuh": "6b5db2885a7e00d5c8ec65f7e3857efc9cf30c2264c9e5512020373e891089d6",
     "urban_ucm480.cuh": "bcb062c9ad2854e54ae2205ad898f26aa6153a8144729491577a631ebcc5cfaa",
-    "urban_ucm.cu": "ee5bb8e48b297b0d5304047b7d764103a5c22bc1fb307df13670c122c39e588b",
+    "urban_ucm.cu": "be7d1058e4578338a46713e3725862c4b8c82ccf617857d0820d9832b86431f7",
     # Lake lower bounds, REAL kinds and division rounding are part of the
     # column contract; test_lake_contract regenerates the WRF statements.
     # ABS sign clearing includes negative zero, subnormals and signed NaNs;
@@ -1725,7 +1762,7 @@ PINNED_HEADERS = {
     'nsas_constants.cuh': 'e50bd02c62e11ec3c4bf5619bab6e30805832401df930c1235a136db2fb4c907',
     'radar_backscatter_common.cuh': '7564e059e3e99be94134b97c625d85a9a74fdee872bba193197ade7196d9fd72',
     'refl.cu': '1e2c45699a721b4b042769f9f868d85d8a6eb4960fc547ce9affb59b69f43f66',
-    'smag2d.cu': '6ee9ec60dd39deba2c8ddcea7ad0e717b94101879ab55fd33eb5fe9c5968c137',
+    'smag2d.cu': '379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f',
     'swint.cu': '9a79b7e43cb92553ae454975a943acedc3d8510b5c7eae59ec2c5bb8c8b47c5b',
     'temf_log10_flt32.cuh': '61c2596ef9b7456c1328eb5b9064c84b72f15acad698b084b87a831c478bb69f',
     'wdm_common.cuh': '77590100c6d6066bda9bb347caa318839a107104fceaf1c7690ba184779b01f8',
@@ -1947,6 +1984,10 @@ def test_mosaic_ucm_composed_source_is_pinned():
     # WRF 4.8 water balance and the inherited source-scoped no-FTZ loader.
     # Legacy full-field hashes match the prior kernel; the new store terms
     # match the release Fortran oracle. Other WRF 4.8 physics is outside it.
+    # Moved with urban_ucm.cu's NUDAPT arm (buildings2-urbparam): the mosaic
+    # tile calls the ucm_urban wrapper, which never enters the arm, and the
+    # configuration refuses urban_param_file with mosaic.  Previously
+    # d04c1a03.
     from woof.core.noah_mosaic import mosaic_ucm_source
     assert hashlib.sha256(mosaic_ucm_source().encode()).hexdigest() == (
-        'd04c1a03a496be7ac829c36d194aa29016824c2c453ccc2fd9fa0aaa04db9bbd')
+        'ebf5a3d14b34e8d8a1f40245033db71dda9733fb385e926fdf27fc45480fc7df')

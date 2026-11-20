@@ -267,13 +267,13 @@ substitution (see the end of this page).
 
 **A rung grades one OPTION, and most of the tree sits on the same
 rung.** `implemented-unverified` is not a mark against any particular
-scheme. It is carried by **67 of the registry's 108 component options**:
+scheme. It is carried by **68 of the registry's 109 component options**:
 PBL: ACM2 PBL; BouLac PBL; CCPP scale-aware TKE moist EDMF; EEPS PBL (TKE-dissipation); GBM moist TKE PBL; GFS PBL; K-epsilon PBL; MRF PBL; MYJ PBL; MYNN PBL; QNSE PBL (with the EDMF shallow mass flux); SASE PBL; Shin-Hong PBL; TEMF pbl; UW moist-turbulence PBL; YSU PBL.
 surface layer: Eta similarity surface layer; GFS surface layer; MYNN surface layer; QNSE surface layer; TEMF surface layer.
 microphysics: CAM 5.1 Morrison-Gettelman (WRF CAMMGMP); FAST_SBM spectral bin / MP30; Ferrier-Aligo advected rime / MP15; Ferrier-Aligo / MP5; Goddard GCE three-ice / MP97; Purdue Lin six-class / MP2; RCON / MP29; Milbrandt-Yau two-moment / MP9; Morrison two-moment / MP10; NTU multi-moment / MP56; P3 one-category / MP50; P3 two-category / MP52; TEMPO (Thompson-Eidhammer, RRFS v2) / named scheme "tempo"; Thompson aerosol-aware / MP28; Thompson graupel-hail / MP38; WDM6 double-moment warm rain / MP16; WSM3 simple ice / MP3; WSM5 / MP4; WSM6R revised WSM6 / MP106; WSM7 single-moment with hail / MP24.
 land surface: Four-layer Noah LSM; Noah-MP land-surface model; RUC land-surface model.
 cumulus: Betts-Miller-Janjic; CAM Zhang-McFarlane deep convection; GFS SAS; Grell 3D; Grell-Devenyi; Grell-Freitas; Kain-Fritsch (previous scheme, cu_physics=99); New SAS (YSU) with NSCV shallow convection; New Tiedtke; Original cu6 cumulus.
-radiation: WRF Fu-Liou-Gu longwave and shortwave; WRF 4.6.1 New Goddard longwave and shortwave; WRF idealized thermal relaxation and Rayleigh friction; WRF CAM3 longwave and shortwave; WRF RRTM longwave + Dudhia shortwave.
+radiation: WRF Fu-Liou-Gu longwave and shortwave; WRF 4.6.1 New Goddard longwave and shortwave; WRF RRTMG-K longwave and shortwave; WRF idealized thermal relaxation and Rayleigh friction; WRF CAM3 longwave and shortwave; WRF RRTM longwave + Dudhia shortwave.
 urban canopy: bep; bep-bem; slucm.
 turbulence: no km_opt operator (closure-supplied mixing); constant K (khdif/kvdif); 2-D Smagorinsky; 3-D Smagorinsky; 1.5-order prognostic TKE.
 It says
@@ -331,7 +331,7 @@ verdict. `docs/public/receipts/physics-composition-walk.json` is that
 record, and `tests/test_physics_composition_walk.py` regenerates it on
 every release cut and compares it byte for byte. As measured:
 
-- **71078 of 582653 admission attempts are accepted**, covering **71068 distinct
+- **71881 of 718313 admission attempts are accepted**, covering **71871 distinct
   accepted suites**, against 51 registered templates. The presets are a
   corner of the space, not the space.
 - **Every accepted run keeps every switch the file set**, checked
@@ -344,7 +344,7 @@ every release cut and compares it byte for byte. As measured:
   `ra_lw_physics = 1` (WRF RRTM longwave) was the last unported one;
   1.9 ports it, and it now reaches 7719 distinct accepted suites,
   including 860 paired with Dudhia shortwave.
-- **511575 refusals fall into 48 distinct rules**, every one of which
+- **646432 refusals fall into 50 distinct rules**, every one of which
   names the selector to change, and each of which has a
   demonstrated remedy -- the receipt carries a before/after pair per
   rule showing that doing what the message says reaches an accepted
@@ -1941,7 +1941,7 @@ calls (`tests/test_sfclayrev_nonfinite.py`,
 All five run. In plain words: `template` means **a preset exists**, and
 `component-override` means **a preset exists** on the routes that
 declare it and you **type it in your config** anywhere else -- which is
-how the revised MM5 row's 20337 distinct accepted combinations were measured.
+how the revised MM5 row's 20559 distinct accepted combinations were measured.
 Maturity and reachability are separate registry axes, quoted verbatim
 from the registry: `maturity` is the option's evidence tier and
 `reachability.state` is how a NAMED route can offer it. Neither column
@@ -2150,6 +2150,7 @@ one line:
 | Original GSFC SW | any supported LW / 2 | experimental-runtime | WRF v4.7.1 `module_ra_gsfcsw.F`, identical to the v4.6.1 source; strict replay of four night and daylight tiles captured from a native forecast matches all 25,088 output words. A three-hour 30 km forecast completed through `woof go` and was viewed beside native WRF and surface observations. Complete-adapter timing is 1.049× isolated New Goddard shortwave; restart, both nest feedback modes and production ensemble products are checked; see below. |
 | WRF RRTM + Dudhia | 1/1 | implemented-unverified | RRTM longwave: line transcription of WRF v4.6.1 `module_ra_rrtm.F`, **equal to the unmodified Fortran word for word (0 ULP)** on a 79-column oracle (storms, nights, snow and ice, ocean, terrain, edge cases), every output and every intermediate, on GPU and CPU (`tests/test_rrtm_lw_wrf461_parity.py`); no matched forecast run; the Dudhia half is graded on its own |
 
+| WRF RRTMG-K | 14/14 | implemented-unverified | WRF 4.7.1 `rad_rrtmg_driver` (`module_ra_rrtmg_lwk.F`, `module_ra_rrtmg_swk.F`, `module_ra_effective_radius.F`, built with `BUILD_RRTMK=1`): the legacy RRTMG engines with K's wrapper (effectRad radii, one layer above the top to 1e-5 hPa, one 28-subcolumn McICA call for both spectra), K's taugb7 and LW heat capacity, and K's shortwave cloud optics and two-stream. Graded against a compiled WRF 4.7.1 column oracle (`tools/rrtmg_k_column_oracle`). Runs microphysics carrying snow, `aer_opt=0`, `icloud=1`, no subgrid or convective cloud merge; `rrtmg_spectral_output` is refused. `ghg_input=1` is a woof extension beyond WRF (WRF's `rad_rrtmg_driver` never reads it): each call then takes CO2, N2O, CH4, CFC-11 and CFC-12 from the CAMtr table as legacy RRTMG does (`read_CAMgases`), narrowed to the same REAL(4) values, into both spectra; O2, CFC-22 and CCl4 stay the driver's fixed values. `ghg_input=0` is the driver's fixed gases, unchanged. A K-only WRF namelist imports without `ghg_input`, as wrf.exe ran; a WRF tree mixing K with a legacy RRTMG, CAM or GSFC domain under `ghg_input=1` refuses at import, since woof's one tree-wide value would give its K domains gases wrf.exe's K never read. |
 | WRF Fu-Liou-Gu | 7/7 | implemented-unverified | Full CUDA `RAD_FLG` and `rad_all`, with all 198 pinned coefficient tables. Strict replay of twelve columns captured from a real WRF 4.6.1 run: 4,320 words, zero differences. A three-hour 73 x 60 x 32 forecast from stock WRF inputs completed through `woof go`, with hourly native and station comparisons. This is one case, not a general skill qualification. |
 
 \* "verification tier" is this page's own term, not registry

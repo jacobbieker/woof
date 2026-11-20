@@ -2118,6 +2118,10 @@ def local_memory_profile_from_device(cp, *, device_id: int = 0) -> DeviceLocalMe
     name = props["name"]
     hip = bool(cp.cuda.runtime.is_hip)
     stack_limit = 0 if hip else int(cp.cuda.runtime.deviceGetLimit(0))
+    from woof import backend as _backend
+    # The Metal facade answers CUDA's queries; its tiles are priced by the
+    # Metal rules (ysu_column_workspace_bytes).
+    kind = "hip" if hip else ("mlx" if _backend._active == "mlx" else "cuda")
     return DeviceLocalMemoryProfile(
         name=name.decode() if isinstance(name, bytes) else str(name),
         multiprocessor_count=int(props["multiProcessorCount"]),
@@ -2125,7 +2129,7 @@ def local_memory_profile_from_device(cp, *, device_id: int = 0) -> DeviceLocalMe
             props["maxThreadsPerMultiProcessor"]),
         default_stack_limit_bytes=stack_limit,
         compile_platform=None if hip else read_compile_platform(),
-        backend="hip" if hip else "cuda",
+        backend=kind,
     )
 
 
@@ -2760,6 +2764,12 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
 
     "cldfra3": 0,
     "solar_eclipse": 32,
+    # The ionosphere history (woof.spacewx.history), RTX A6000 sm_86,
+    # NVRTC 12.9, fast and strict, 2026-11-17: 96 B (the profile's locals).
+    "spacewx_ionosphere": 96,
+    # The auroral oval (woof.spacewx.aurora_history), same card and
+    # reading: 32 B.
+    "spacewx_aurora": 32,
     "cu_radiation": 0,  # test host B sm_120 / NVRTC 13.4.92, both modes.
     "wrf_stock_aer3": 0,  # same reading, both optics and diagnostics.
     "farms": 136,
@@ -2898,6 +2908,15 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # wrf_smag_hd_w on stored face stresses (composes smag2d.cu), RTX A6000,
     # default and strict numerics, 2026-11-08: 0 B.
     "smag2d_w_faces": 0,
+    # wrf_smag_hd_u / wrf_smag_hd_v on stored stress coefficients (composes smag2d.cu),
+    # RTX A6000, default and strict numerics, 2026-11-15: 0 B.
+    "smag2d_uv_faces": 0,
+    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu), RTX
+    # A6000, default and strict numerics, 2026-11-15: 0 B.
+    "smag2d_tke_faces": 0,
+    # The opt-in porous immersed obstacles (kernels/obstacle_drag.cu), RTX
+    # A6000, default and strict numerics, 2026-11-17: 0 B.
+    "obstacle_drag": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,
@@ -3392,6 +3411,10 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     "rrtmg_sw", "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
     "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
     "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16",
+    # RRTMG-K's fragments: each compiles only inside its composed unit
+    # (woof.core.rrtmgk prep_source / lw_post_source / sw_source), priced
+    # as rrtmgk_{prep,lw,sw}_unit in CHAINED_TRANSLATION_UNIT_FRAMES.
+    "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw",
     # BEP+BEM's column kernel needs urban_bem.cuh and the glibc headers
     # woof/core/urban_bem.py composes; priced as urban_bem_composed.
     "urban_bep_bem",
@@ -3550,6 +3573,18 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         # store on every path (fix/rrtmg-sw-sfluxzen): all 17 kernels 0 B
         # on sm_120 (RTX 5070 Ti) at NVRTC 13.4.92, before and after.
         covers=frozenset({"rrtmg_sw"})),
+    # RRTMG-K (14/14), woof.core.rrtmgk._load: every kernel of each
+    # composed unit read 0 B on sm_86 (RTX A6000) at NVRTC 12.9.86,
+    # 2026-11-16 (driver CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES).
+    "rrtmgk_prep_unit": ChainedTranslationUnitFrame(
+        module="rrtmgk_prep_unit", max_local_size_bytes=0,
+        covers=frozenset({"rrtmgk_prep"})),
+    "rrtmgk_lw_unit": ChainedTranslationUnitFrame(
+        module="rrtmgk_lw_unit", max_local_size_bytes=0,
+        covers=frozenset({"rrtmgk_lw"})),
+    "rrtmgk_sw_unit": ChainedTranslationUnitFrame(
+        module="rrtmgk_sw_unit", max_local_size_bytes=0,
+        covers=frozenset({"rrtmgk_sw"})),
     # P3 one-category (mp=50).  ``noahmp_leaves.cu`` + ``p3.cu`` compiled as
     # ONE unit by woof/core/p3_device.p3_source(), the same shape the
     # legacy-RRTMG chain and the Noah-MP driver use.
@@ -4260,6 +4295,8 @@ _RADIATION_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
     1: ("noahmp_libm_slab_composed", "dudhia_sw"),
     4: ("rrtmgp_cloud", "rrtmgp_gas", "rrtmgp_mcica", "rrtmgp_rte"),
     5: ("goddard",),
+    # RRTMG-K: only as the 14/14 pair (physics_compat refuses a mix).
+    14: (),
     # Selector 31 (Held-Suarez relaxation, radiation_composition.py): the
     # temperature relaxation and its sigma Rayleigh momentum partner are both
     # in idealized_forcing.cu.
@@ -4276,6 +4313,17 @@ _RADIATION_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
 _RRTMG_LEGACY_KERNEL_MODULES: tuple[str, ...] = (
     "rrtmg_mcica_wrf", "rrtmg_lw_legacy_chain", "rrtmg_sw_legacy",
     "rrtmg_legacy_adapter", "rrtmg_legacy_prep", "rrtmg_legacy_solar")
+
+
+#: What the RRTMG-K pair (14/14) launches: the legacy LW chain (with K's
+#: band-7 taumol_post hook from ``rrtmgk_lw_unit``), K's own prep and SW
+#: units (all three chained units, CHAINED_TRANSLATION_UNIT_FRAMES),
+#: the legacy adapter's glue and solar geometry, and cal_cldfra1's slab
+#: libm unit.
+_RRTMGK_KERNEL_MODULES: tuple[str, ...] = (
+    "rrtmg_lw_legacy_chain", "rrtmgk_prep_unit", "rrtmgk_lw_unit",
+    "rrtmgk_sw_unit", "rrtmg_legacy_adapter", "rrtmg_legacy_solar",
+    "noahmp_libm_slab_composed")
 
 
 def _radiation_44_kernel_modules(run) -> tuple[str, ...]:
@@ -4319,6 +4367,8 @@ def _radiation_kernel_modules(run, grid_id: int) -> frozenset[str]:
             # Retain the existing complete implementation ceiling even
             # when only one spectrum uses it.
             modules.update(_radiation_44_kernel_modules(run))
+        elif value == 14:
+            modules.update(_RRTMGK_KERNEL_MODULES)
         else:
             modules.update(_RADIATION_KERNEL_MODULES[value])
     return frozenset(modules)
@@ -4458,6 +4508,10 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.update(("swint", "farms"))
     if int(dc.run.ra_sw_eclipse):
         modules.add("solar_eclipse")
+    if int(getattr(dc.run, "spacewx_ionosphere_opt", 0) or 0):
+        modules.add("spacewx_ionosphere")   # woof/spacewx/history.py
+    if int(getattr(dc.run, "spacewx_aurora_opt", 0) or 0):
+        modules.add("spacewx_aurora")   # woof/spacewx/aurora_history.py
     if dc.run.cu_rad_feedback:
         modules.add("cu_radiation")
     if int(getattr(dc.run, "icloud", 1)) == 3:
@@ -5180,9 +5234,11 @@ def column_cumulus_workspace_bytes(
     for dc in exp.domains:
         if int(dc.run.cu_physics) not in COLUMN_CUMULUS_SCHEMES:
             continue
+        args = (int(dc.run.cu_physics), int(dc.run.nz),
+                int(dc.run.nx) * int(dc.run.ny), profile.multiprocessor_count)
+        # A Metal device launches the Metal tile (tile_columns).
         worst = max(worst, workspace_bytes(
-            int(dc.run.cu_physics), int(dc.run.nz),
-            int(dc.run.nx) * int(dc.run.ny), profile.multiprocessor_count))
+            *args, metal=getattr(profile, "backend", "cuda") == "mlx"))
     return int(worst)
 
 
@@ -5359,16 +5415,23 @@ def mrf_column_workspace_bytes(
     for every configuration that does not select ``bl_pbl_physics = 99``.
     """
     from woof.core.physics_inventory import (
-        MRF_BLOCK, MRF_TILE_BLOCKS_PER_SM, mrf_workspace_floats)
+        MRF_BLOCK, MRF_TILE_BLOCKS_PER_SM, metal_column_tile_columns,
+        mrf_workspace_floats)
 
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
     tile_cap = (profile.multiprocessor_count * MRF_TILE_BLOCKS_PER_SM
                 * MRF_BLOCK)
+    # A Metal device launches the wider Metal tile (mrf.mrf_tile_columns).
+    metal = getattr(profile, "backend", "cuda") == "mlx"
     worst = 0
     for dc in exp.domains:
         if int(dc.run.bl_pbl_physics) != MRF_PBL_SCHEME:
             continue
-        columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
+        ncol = int(dc.run.nx) * int(dc.run.ny)
+        columns = (metal_column_tile_columns(
+                       profile.multiprocessor_count, ncol, MRF_BLOCK,
+                       block_bytes=mrf_workspace_floats(int(dc.run.nz), MRF_BLOCK) * 4)
+                   if metal else min(ncol, tile_cap))
         worst = max(worst, mrf_workspace_floats(int(dc.run.nz), columns) * 4)
     return int(worst)
 def ksas_column_workspace_bytes(exp: ExperimentConfig) -> int:
@@ -5525,7 +5588,8 @@ def ysu_column_workspace_bytes(
     default.  ``woof/core/kernels/ysu.cu`` keeps the scheme's column
     arrays in a global workspace instead of the per-thread local frame,
     and ``woof/core/ysu.py`` sizes it to the columns it keeps in flight
-    -- ``SMs x YSU_TILE_BLOCKS_PER_SM x YSU_BLOCK`` -- rather than to the
+    -- ``SMs x YSU_TILE_BLOCKS_PER_SM x YSU_BLOCK`` (on Metal the wider
+    ``physics_inventory.ysu_metal_tile_columns``) -- rather than to the
     resident-thread capacity the driver charged.
 
     MEASURED on test host A (RTX 5070 Ti, 70 SMs x 1,536,
@@ -5543,16 +5607,25 @@ def ysu_column_workspace_bytes(
     # scope and this pricing must be readable on installs with no GPU
     # runtime (the wizard's estimator runs here).
     from woof.core.physics_inventory import (
-        YSU_BLOCK, YSU_TILE_BLOCKS_PER_SM, ysu_workspace_floats)
+        YSU_BLOCK, YSU_TILE_BLOCKS_PER_SM, ysu_metal_tile_columns,
+        ysu_workspace_floats)
 
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
     tile_cap = (profile.multiprocessor_count * YSU_TILE_BLOCKS_PER_SM
                 * YSU_BLOCK)
+    # A Metal device launches the wider Metal tile (ysu.ysu_tile_columns);
+    # price whichever rule is wider, so pricing never falls below it.  A
+    # CUDA card priced from a Metal process keeps CUDA's rule.
+    metal = getattr(profile, "backend", "cuda") == "mlx"
     worst = 0
     for dc in exp.domains:
         if int(dc.run.bl_pbl_physics) != 1:
             continue
-        columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
+        ncol = int(dc.run.nx) * int(dc.run.ny)
+        columns = min(ncol, tile_cap)
+        if metal:
+            columns = max(columns, ysu_metal_tile_columns(
+                profile.multiprocessor_count, ncol, int(dc.run.nz)))
         worst = max(worst, ysu_workspace_floats(int(dc.run.nz), columns) * 4)
     return int(worst)
 
@@ -5560,14 +5633,26 @@ def ysu_column_workspace_bytes(
 def eeps_column_workspace_bytes(
         exp: ExperimentConfig, *,
         profile: DeviceLocalMemoryProfile | None = None) -> int:
-    """Conservative EEPS tile allocation without importing a GPU runtime."""
+    """Conservative EEPS tile allocation without importing a GPU runtime.
+
+    A Metal profile prices the wider Metal tile (eeps_pbl.tile_columns:
+    :func:`woof.core.physics_inventory.metal_column_tile_columns`)."""
     from woof.core.physics_inventory import (
-        EEPS_BLOCK, EEPS_TILE_BLOCKS_PER_SM, eeps_workspace_floats)
+        EEPS_BLOCK, EEPS_TILE_BLOCKS_PER_SM, eeps_workspace_floats,
+        metal_column_tile_columns)
 
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
     capacity = profile.multiprocessor_count * EEPS_TILE_BLOCKS_PER_SM * EEPS_BLOCK
-    return max((eeps_workspace_floats(int(dc.run.nz),
-                min(int(dc.run.nx) * int(dc.run.ny), capacity)) * 4
+    metal = getattr(profile, "backend", "cuda") == "mlx"
+
+    def columns(dc):
+        ncol = int(dc.run.nx) * int(dc.run.ny)
+        if metal:
+            return metal_column_tile_columns(
+                profile.multiprocessor_count, ncol, EEPS_BLOCK,
+                block_bytes=eeps_workspace_floats(int(dc.run.nz), EEPS_BLOCK) * 4)
+        return min(ncol, capacity)
+    return max((eeps_workspace_floats(int(dc.run.nz), columns(dc)) * 4
                 for dc in exp.domains if int(dc.run.bl_pbl_physics) == EEPS_PBL_SCHEME),
                default=0)
 
@@ -5639,20 +5724,28 @@ def column_kernel_cumulus_workspace_bytes(
     Read off the scheme's registry ``column_kernel`` row and the launcher's
     own tile rule (woof/core/column_cumulus.py), never restated: the
     workspace is ``workspace_slots * nz`` floats per column in flight, the
-    tile at most ``_TILE_BLOCKS_PER_SM`` blocks per SM, and the tables are
+    tile at most ``_TILE_BLOCKS_PER_SM`` blocks per SM on CUDA and
+    :func:`woof.core.physics_inventory.metal_column_tile_columns` on a
+    Metal profile, and the tables are
     ``tables.floats`` words held for the run.
     """
     from woof.core.column_cumulus import _TILE_BLOCKS_PER_SM, column_kernel_spec
+    from woof.core.physics_inventory import metal_column_tile_columns
 
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
+    # A Metal device launches the wider Metal tile (registry_tile_columns).
+    metal = getattr(profile, "backend", "cuda") == "mlx"
     worst = 0
     for dc in exp.domains:
         spec = column_kernel_spec(int(dc.run.cu_physics))
         if spec is None:
             continue
-        columns = min(int(dc.run.nx) * int(dc.run.ny),
-                      int(profile.multiprocessor_count)
-                      * _TILE_BLOCKS_PER_SM * spec.block)
+        ncol = int(dc.run.nx) * int(dc.run.ny)
+        columns = (metal_column_tile_columns(
+                       profile.multiprocessor_count, ncol, spec.block,
+                       block_bytes=4 * spec.workspace_slots * int(dc.run.nz) * spec.block)
+                   if metal else min(ncol, int(profile.multiprocessor_count)
+                                     * _TILE_BLOCKS_PER_SM * spec.block))
         held = int(spec.tables["floats"]) if spec.tables else 0
         initialization = (int(spec.tables["grid"]) * int(spec.tables["block"])
                           * int(spec.tables["scratch_floats_per_thread"])
@@ -6776,12 +6869,12 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
         shapes["radiation/_ozone_vmr"] = (60,)
     if 7 in (ra_lw_physics, ra_sw_physics):
         shapes["radiation_flux_diagnostics"] = (11, ny, nx)
-    if ra_lw_physics in (1, 4, 7, 99):
+    if ra_lw_physics in (1, 4, 7, 14, 99):
         # The OLR publication buffer (physics.py PhysicsDriver __init__):
         # one resident (ny, nx) FP32 driver persistent holding WRF's TOA
         # outgoing longwave for output, allocated when the attached
         # longwave adapter declares ``publishes_olr``.  BOTH built-in 4/4
-        # adapters declare it, and so does the 1/1 WRF RRTM + Dudhia
+        # adapters declare it, as do RRTMG-K (14/14) and the 1/1 WRF RRTM + Dudhia
         # composition, which is what this gate reproduces; a
         # caller-injected adapter that does not leaves this counted but
         # unallocated, and over-counting by one 2-D field is the safe
@@ -6805,12 +6898,12 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
         shapes["aod5503d"] = m
         for key in ("AOD5502D", "ANGEXP2D", "AERSSA2D", "AERASY2D"):
             shapes[key] = s2
-    if ra_lw_physics in (1, 4, 7, 99) or ra_sw_physics in (2, 4, 7, 99) or (int(cfg.icloud) == 3 and (ra_lw_physics or ra_sw_physics)) or (int(cfg.swint_opt) == 2 and int(cfg.icloud) == 3):
+    if ra_lw_physics in (1, 4, 7, 14, 99) or ra_sw_physics in (2, 4, 7, 14, 99) or (int(cfg.icloud) == 3 and (ra_lw_physics or ra_sw_physics)) or (int(cfg.swint_opt) == 2 and int(cfg.icloud) == 3):
         # The CLDFRA publication buffer (physics.py PhysicsDriver
         # __init__): one resident (nz, ny, nx) FP32 driver persistent
         # holding the radiation cloud fraction for output, allocated when
         # the attached radiation callable declares ``publishes_cldfra``.
-        # RTE+RRTMGP and legacy RRTMG declare it on either spectrum, the
+        # RTE+RRTMGP, legacy RRTMG and RRTMG-K declare it on either spectrum, the
         # classic RRTM longwave on its own; Dudhia alone computes no
         # fraction.  Over-counting a caller-injected adapter that does not
         # declare it is the safe direction for a VRAM estimate.
@@ -7888,6 +7981,15 @@ def scratch_slot_registry(cfg: RunConfig, *,
         for extra in range(1, SMAG_MULTI_ROWS):
             slots[f"smag_fx_{extra}"] = xs
             slots[f"smag_fy_{extra}"] = ys
+        # The u/v stress divergences read the stress coefficients stored
+        # once per step (dycore.launch_wrf_smag_uv_faces): rho K at the
+        # mass points, rhoavg kavg at the corners.  km_opt=5 (km5.compute,
+        # which returns ahead of the diff_opt test) reaches that launch
+        # through its u/v rows; diff_opt=1's coordinate route never does.
+        from woof.core.dycore import _smag_uv_faces_enabled
+        if ((cfg.km_opt == 5 or cfg.diff_opt != 1)
+                and _smag_uv_faces_enabled()):
+            slots.update(smag_cm=m, smag_c12=(nz, ny + 1, nx + 1))
     if cfg.diff_6th_opt:
         slots.update(diff6_z=fl, diff6_m=m)
         # The NOAA WRFV3.9 fork's edge-to-edge form (diff_6th_form =
@@ -8469,12 +8571,21 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "after the step that wrote them (drain ends the window), and both "
         "are float64 while ScratchArena is float32-only"),
     ScratchSlotLifetime(
+        ("smag_cm", "smag_c12"), "write_before_read",
+        "woof/core/dycore.py:launch_wrf_smag_uv_faces",
+        "the stored horizontal stress coefficients are written once per "
+        "step and read by the u and v divergence launches that follow "
+        "within the same step"),
+    ScratchSlotLifetime(
         ("smag_fx_1", "smag_fy_1", "smag_fx_2", "smag_fy_2",
          "smag_fx_3", "smag_fy_3"),
         "write_before_read", "woof/core/dycore.py:launch_wrf_smag2d_hd_multi",
         "the multi-row Smagorinsky scalar launch writes a chunk's H1/H2 "
         "face fluxes and reads them in the divergence launch that follows "
-        "within the same step; diff6_x/y are the chunk's first pair"),
+        "within the same step; diff6_x/y are the chunk's first pair; "
+        "earlier in the same step km_opt=2's launch_wrf_tke_km stores the "
+        "defor13/defor23 faces in the first pair for the tke_rhs launch "
+        "that follows it"),
     ScratchSlotLifetime(
         ("diff6_x", "diff6_y", "diff6_z", "diff6_m"),
         "write_before_read", "woof/core/dycore.py:prepare_fixed_tendencies; "
@@ -10403,6 +10514,19 @@ def estimate_domain(dc: DomainConfig, *, spec_bdy_width: int | None = None,
     items += _items("transient", ksas_output_transient_shapes(run))
 
     items += _items("transient", cloud_farms_transient_shapes(run))
+    if int(getattr(run, "spacewx_ionosphere_opt", 0) or 0):
+        # The ionosphere history's held geometry, outputs and rows.
+        from woof.spacewx.history import device_shapes as spacewx_shapes
+        items += _items("physics", spacewx_shapes(run))
+    if int(getattr(run, "spacewx_aurora_opt", 0) or 0):
+        # The auroral oval history's held columns, frame, outputs and rows.
+        from woof.spacewx.aurora_history import device_shapes as aurora_shapes
+        items += _items("physics", aurora_shapes(run))
+    if int(getattr(run, "spacewx_epp_opt", 0) or 0):
+        # The solar-proton chemistry source's held mask and its step's peak.
+        from woof.spacewx import epp_chem
+        items += _items("physics", epp_chem.device_shapes(run))
+        items += _items("transient", epp_chem.transient_shapes(run))
     items += _items("transient", ysu_output_transient_shapes(run))
     items += _items("transient", mynn_scalar_transient_shapes(run))
     items += _items("transient", tracer_pbl_transient_shapes(run))
@@ -12376,6 +12500,20 @@ def estimate_experiment(
             if (4 in radiation_scheme_ids(dc.run)
                 and rrtmg_variant(dc.run) == RRTMG_VARIANT_LEGACY) else 0
             for dc in exp.domains)
+        legacy_envelope = max(legacy_calls, default=0)
+    if any(14 in radiation_scheme_ids(dc.run) for dc in exp.domains):
+        # RRTMG-K's call peak (woof.core.rrtmgk.rrtmgk_vram_bytes), priced
+        # into the same per-domain call-peak lane as the legacy adapter.
+        from woof.core.rrtmgk import rrtmgk_vram_bytes
+        k_calls = tuple(
+            rrtmgk_vram_bytes(
+                ncol=dc.run.ny * dc.run.nx, nz=dc.run.nz,
+                column_chunk=column_chunk,
+                resident_threads=device_profile.resident_thread_capacity)
+            if 14 in radiation_scheme_ids(dc.run) else 0
+            for dc in exp.domains)
+        legacy_calls = (tuple(max(a, b) for a, b in zip(legacy_calls, k_calls))
+                        if legacy_calls else k_calls)
         legacy_envelope = max(legacy_calls, default=0)
     from woof.core.flg_radiation import flg_radiation_vram_bytes
     flg_storage = sum(flg_radiation_vram_bytes(dc.run.nx*dc.run.ny, dc.run.nz)

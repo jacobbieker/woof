@@ -286,26 +286,46 @@ class NativeDevicePoolViews(Mapping):
         if self.resident and factory is not None:
             factory().free_all_blocks()
 
-    def write_field(self, pool, name, value, *, level=1):
-        """Update the authoritative device allocation without a host round trip."""
+    def _field_at(self, pool, name, level):
         old = self.level
         self.level = level
         try:
-            target = self.field(pool, name)
-            source = self.cp.asarray(value)
-            if source.shape == target.shape:
-                target[...] = source
-            elif (source.shape[:-1] == target.shape[:-1]
-                  and (source.shape[-1] == target.shape[-1] + 1
-                       or (getattr(self.session.layout, 'samehost_partition', False)
-                           and source.shape[-1] > target.shape[-1]))):
-                # The native dummy column, or on a same-host rank the halo
-                # columns: owned entities come first in a rank's local order.
-                target[...] = source[..., :target.shape[-1]]
-            else:
-                raise ValueError(f'resident {pool}.{name} extent differs: {source.shape} != {target.shape}')
+            return self.field(pool, name)
         finally:
             self.level = old
+
+    def resident_target(self, pool, name, like, *, level=1):
+        """The allocation ``write_field(pool, name, like, level=level)`` copies into, when that copy is a
+        whole-array one (same shape and dtype, C-contiguous); otherwise None.
+
+        A producer that writes every element can write it there directly: the pool then holds the words
+        the copy would have put there, and ``write_field`` of that same array is a no-op.
+        """
+        if not self.resident:
+            return None
+        target = self._field_at(pool, name, level)
+        if (tuple(target.shape) == tuple(like.shape) and target.dtype == like.dtype
+                and target.flags.c_contiguous):
+            return target
+        return None
+
+    def write_field(self, pool, name, value, *, level=1):
+        """Update the authoritative device allocation without a host round trip."""
+        target = self._field_at(pool, name, level)
+        source = self.cp.asarray(value)
+        if source is target:
+            return  # written in place (resident_target)
+        if source.shape == target.shape:
+            target[...] = source
+        elif (source.shape[:-1] == target.shape[:-1]
+              and (source.shape[-1] == target.shape[-1] + 1
+                   or (getattr(self.session.layout, 'samehost_partition', False)
+                       and source.shape[-1] > target.shape[-1]))):
+            # The native dummy column, or on a same-host rank the halo
+            # columns: owned entities come first in a rank's local order.
+            target[...] = source[..., :target.shape[-1]]
+        else:
+            raise ValueError(f'resident {pool}.{name} extent differs: {source.shape} != {target.shape}')
 
     def publish(self):
         """Copy persistent pool words at an explicit output/checkpoint boundary.

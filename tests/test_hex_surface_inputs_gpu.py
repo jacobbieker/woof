@@ -655,7 +655,9 @@ def test_hex_land_columns_are_the_wrf_ports_on_the_same_inputs(scheme, mapping, 
 def test_hex_topo_wind_1_columns_are_wrf_topo_wind_coefficients():
     """topo_wind = 1 on the hex generic seam: the seam's CTOPO/CTOPO2 are
     woof.core.terrain_drag.topo_wind_coefficients (WRF start_em's kernel) on the
-    same terrain, land mask and VAR_SSO, bit for bit."""
+    same terrain, land mask and VAR_SSO, bit for bit, with the terrain
+    laplacian taken over the mesh's cellsOnCell, not the columns' index order;
+    without the neighbours the seam refuses."""
     from woof.core.terrain_drag import topo_wind_coefficients
 
     physics = dict(suite.MPAS_DEFAULT_PHYSICS, topo_wind=1)
@@ -663,17 +665,132 @@ def test_hex_topo_wind_1_columns_are_wrf_topo_wind_coefficients():
     rng = np.random.default_rng(5)
     var_sso = rng.uniform(50.0, 90000.0, NCOL).astype(np.float32)
     values["orographic_statistics"] = {"VAR_SSO": var_sso}
+    with pytest.raises(ValueError, match="cell_neighbours"):
+        _seal(values)
+    # A shuffled neighbour table, so index order and cellsOnCell disagree.
+    order = rng.permutation(NCOL)
+    cells = np.full((NCOL, 6), -1, np.int32)
+    counts = np.zeros(NCOL, np.int32)
+    for slot, shift in enumerate((1, -1, 2, -2)):
+        cells[order, slot] = order[(np.arange(NCOL) + shift) % NCOL]
+    counts[:] = 4
+    counts[order[0]] = 3
+    values["cell_neighbours"] = (cells, counts)
     kwargs = _seal(values).arwen_kwargs()
     seam = suite.run_mpas_column_physics(**kwargs)
     drag = seam._driver.terrain_drag
     assert drag is not None and drag.topo_wind == 1
+    assert 0.0 <= seam.topo_wind_zeroed_land_fraction <= 1.0
     ht = np.asarray(values["terrain_height_m"], np.float32).reshape(1, NCOL)
     xland = np.asarray(values["xland"], np.float32).reshape(1, NCOL)
     want = topo_wind_coefficients(
         cp.asarray(ht), cp.asarray(xland), topo_wind=1,
+        var_sso=cp.asarray(var_sso.reshape(1, NCOL)),
+        cells_on_cell=cells, n_edges_on_cell=counts)
+    index_order = topo_wind_coefficients(
+        cp.asarray(ht), cp.asarray(xland), topo_wind=1,
         var_sso=cp.asarray(var_sso.reshape(1, NCOL)))
+    assert not np.array_equal(_host(want[2]), _host(index_order[2]))
     for got, ref in zip((drag.ctopo, drag.ctopo2), want[:2]):
         np.testing.assert_array_equal(
             _host(got).reshape(-1).view(np.uint32),
             _host(ref).reshape(-1).view(np.uint32))
     assert np.any(_host(drag.ctopo) != 1.0)
+
+
+def test_hex_lake_initial_state_is_wrf_lakeini_from_the_same_source(monkeypatch, tmp_path):
+    """lake_state_source on hex R1: the seam binds the source's lake state
+    through the same initialize_surface the WRF route runs, and the CLM
+    columns are WRF lakeini's from that initial state, bit for bit.  One lake
+    cell carries forcing ice, so the source row's ice authority (water dropped,
+    source ice kept at the forcing's concentration) is covered too."""
+    from types import SimpleNamespace
+    from woof.core.lake import initialize_lake
+    from woof.ingest import lake_state
+
+    monkeypatch.setenv("WOOF_LAKE_RECEIPT_DIR", str(tmp_path))
+    targets = int(LAKES.sum())
+    icy = 1  # the second lake cell: forcing ice below xice_threshold
+    ramp = np.arange(targets, dtype=np.float64)
+    source = {
+        "water_temperature": 279.25 + 1.25 * ramp,
+        "bottom_temperature": 277.5 - 0.25 * ramp,
+        "mixed_layer_depth": 8.0 + 2.5 * ramp,
+        "temperature_shape_factor": 0.6 + 0.05 * ramp,
+        "ice_thickness": np.where(ramp == icy, 0.25, 0.0),
+        "ice_fraction": np.where(ramp == icy, 1.0, 0.0),
+        "ice_temperature": np.where(ramp == icy, 270.5, 273.16),
+    }
+    asked = []
+
+    def fake(name, valid_time, lat, lon, *, forcing_ice=None, **kwargs):
+        asked.append((name, len(lat), None if forcing_ice is None
+                      else np.asarray(forcing_ice).copy()))
+        values = {k: v.copy() for k, v in source.items()}
+        counts = lake_state.apply_ice_authority(values, forcing_ice)
+        return values, dict(schema="gpuwm.lake-init.v1", status="bound", source=name,
+                            ice_authority=dict(rule="forcing", **counts))
+
+    monkeypatch.setattr(lake_state, "load_state", fake)
+    physics = dict(_physics(), lake_state_source="era5")
+    mapping = _mapping(physics, _inputs())
+    forcing_ice = np.zeros(targets, np.float32)
+    forcing_ice[icy] = 0.3
+    xice = np.asarray(mapping["xice"], np.float32).reshape(-1).copy()
+    xice[LAKES] = forcing_ice
+    mapping["xice"] = xice.reshape(np.shape(mapping["xice"]))
+    sealed = _seal(mapping)
+    kwargs = sealed.arwen_kwargs()
+    seam = suite.run_mpas_column_physics(**kwargs)
+    driver = seam._driver
+    assert [entry[:2] for entry in asked] == [("era5", targets)]
+    np.testing.assert_array_equal(asked[0][2], forcing_ice)
+    receipt = driver.lake_initialization_receipt
+    assert receipt["temperature_bound_cells"] == targets - 1
+    assert receipt["ice_authority"] == dict(rule="forcing", forcing_ice_cells=1,
+                                            source_ice_kept_cells=1)
+    tsk = _host(driver.fields["tsk"]).reshape(-1)[LAKES]
+    open_water = np.arange(targets) != icy
+    np.testing.assert_array_equal(
+        tsk[open_water], source["water_temperature"][open_water].astype(np.float32))
+    assert tsk[icy] == np.float32(270.5)
+
+    def grid(values):
+        return cp.asarray(np.asarray(values).reshape(GRID))
+
+    # WRF: the WRF route's own initialize_surface on a (2, 4) grid of the
+    # same cells, then lakeini from the initial state it returns.
+    host = kwargs["surface"]
+    wrf = {"tsk": grid(np.asarray(host["tsk"], np.float32)),
+           "sst": grid(np.asarray(host["tsk"], np.float32)),
+           "isltyp": grid(host["isltyp"]), "snow": grid(host["snow"]),
+           "xice": grid(np.asarray(host["xice"], np.float32)),
+           "xicem": grid(np.asarray(host["xice"], np.float32)),
+           "lakemask": grid(host["lakemask"])}
+    initial_state, _ = lake_state.initialize_surface(
+        wrf, SimpleNamespace(lake_state_source="era5"), valid_time=kwargs["start_time"],
+        latitude=grid(kwargs["latitude_deg"]), longitude=grid(kwargs["longitude_deg"]))
+    np.testing.assert_array_equal(asked[1][2], forcing_ice)
+    initialize_lake(
+        wrf, latitude=grid(kwargs["latitude_deg"]),
+        lake_depth=grid(host["lake_depth"]), lake_depth_flag=1,
+        use_lakedepth=1, lakedepth_default=50.0, iswater=17, xice_threshold=0.5,
+        initial_state=initial_state)
+    for name in ("tsk", "xice"):
+        np.testing.assert_array_equal(
+            _host(wrf[name]).reshape(-1)[LAKES].view(np.uint32),
+            _host(driver.fields[name]).reshape(-1)[LAKES].view(np.uint32), err_msg=name)
+    for name in ("lake_columns", "lake_static"):
+        value = _host(driver.fields[name])
+        np.testing.assert_array_equal(
+            _host(wrf[name]).view(np.uint32),
+            value.reshape(value.shape[:-2] + GRID).view(np.uint32), err_msg=name)
+
+
+def test_hex_explicit_lake_source_without_a_lake_mask_is_refused():
+    """Without sf_lake_physics = 1 the column route stages no lake mask, so an
+    explicit lake_state_source would be accepted and never read."""
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, lake_state_source="era5")
+    kwargs = _seal(_mapping(physics, None)).arwen_kwargs()
+    with pytest.raises(ValueError, match="accepted and never read"):
+        suite.run_mpas_column_physics(**kwargs)

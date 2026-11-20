@@ -143,6 +143,7 @@ from woof.core.mynn_radiation import (
 from woof.core import rrtmg_legacy_prep as _prep
 from woof.core import rrtmg_legacy_device as _prep_device
 from woof.core import rrtmg_lw as _lw
+from woof.core import mcica_seed as _mcica_seed
 from woof.core import rrtmg_mcica as _mcica
 from woof.core import rrtmg_sw as _sw
 from woof.core import rrtmg_aerosol_optics as _aer3
@@ -1455,6 +1456,11 @@ class RRTMGLegacyRadiation:
     """
 
     native_eclipse = True  # WRF dims incoming SCON before SW transport.
+    #: solar_ssi_opt (woof.spacewx.solar_spectrum): PhysicsDriver sets
+    #: ``sw_band_factor`` (14 floats, bands 16..29) before each call; None
+    #: is WRF's fixed Kurucz band shares.
+    accepts_sw_band_factor = True
+    sw_band_factor = None
 
     #: RRTMG_LWRAD's ``OLR`` (TOA outgoing longwave, W m-2) is
     #: ``TOTUFLUX`` at the top level -- ``lwrad_outputs_batch`` already maps
@@ -2668,6 +2674,7 @@ class RRTMGLegacyRadiation:
             # and the windows below pass logical offsets c0 + w0 to the
             # output kernel, which the adapter's kernel source interleaves.
             sel = slice(c0, c1)
+            _mcica_seed.set_context(time_seconds=state.elapsed_seconds, base=c0)
             kw = chunk_inputs(sel)
             cldfra_cols[c0:c1] = kw["cldfra3d"]
             # The wrapper glue on the device: rrtmg_legacy_device holds
@@ -2715,7 +2722,9 @@ class RRTMGLegacyRadiation:
                     mc["reicmcl"], mc["relqmcl"], mc["resnmcl"],
                     tauaer, self._C, column_chunk=chunk_lw,
                     mcica_layout="column", _stage_probe=self._stage_probe,
-                    spectral_output=spectral_mode if spectral_out else "none")
+                    spectral_output=spectral_mode if spectral_out else "none",
+                    # history reads the surface and the top only
+                    spectral_levels="boundary")
                 del mc, tauaer
                 if "lw_band" in res:
                     for base, (q, level) in LW_SPECTRAL_FLUXES.items():
@@ -2839,6 +2848,7 @@ class RRTMGLegacyRadiation:
                     cp.ascontiguousarray(aer1_grid[sel]), nz + 1, self._sw_tables)
                 if diagnostic_sink is not None:
                     diagnostic_aerosol = dict(aerod=aer1_grid[sel], aodtot=aodtot[sel])
+            _mcica_seed.set_context(time_seconds=state.elapsed_seconds, ids=sel)
             ps = _prep_device.swrad_prep_batch_device(
                 **kw, albedo=surf["albedo"][sel],
                 xcoszen=coszen_d[sel], solcon=solcon,
@@ -2876,6 +2886,8 @@ class RRTMGLegacyRadiation:
                 engine = _cuda_sw(self._sw_tables)
                 engine.spectral_output = (spectral_mode if any(n.startswith("sw") for n in spectral_out)
                                           else "none")
+                # history reads the surface and the top only
+                engine.spectral_levels = "boundary"
                 res = engine.rrtmg_sw_batched_device(
                     nc, ps["nlay"], ps["icld"], ps["play"][rows],
                     ps["plev"][rows], ps["tlay"][rows], ps["tlev"][rows],
@@ -2893,7 +2905,7 @@ class RRTMGLegacyRadiation:
                              (0 if aerosol_w is None else self.aer_opt)),
                     aerosol=aerosol_w,
                     column_chunk=chunk_sw, _stage_probe=self._stage_probe,
-                    mcica_layout="column")
+                    mcica_layout="column", band_factor=self.sw_band_factor)
                 if spectral is not None:
                     for key, output, _, _ in spectral_bindings:
                         # The device engine returns total and direct spectral
@@ -2907,6 +2919,7 @@ class RRTMGLegacyRadiation:
                             value = res[output][:, 0]
                         spectral[key][selw] = value
                 engine.spectral_output = "none"
+                engine.spectral_levels = "all"
                 del mc, aerosol_w
                 slab = res.get("sw_band", res.get("sw_gpt"))
                 if slab is not None:

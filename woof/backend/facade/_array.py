@@ -33,12 +33,15 @@ from __future__ import annotations
 
 import operator
 import os
+import threading
 import weakref
+from functools import lru_cache
 from functools import reduce
 
 import numpy as np
 
-#: Storages rebound since the last launch (strong refs; cleared by flush()).
+#: Storages rebound since the last launch (strong refs).  Appended from any thread; drained only by
+#: drain_pending (flush_pending before an in-place launch, synchronize).
 PENDING: list = []
 
 #: Elements one facade allocation may hold: MLX sizes an array with int32.
@@ -134,18 +137,23 @@ class Storage:
 
     __slots__ = ("arr", "dtype", "_aliases", "_alias_of", "_memory", "_address", "__weakref__")
 
-    def __init__(self, arr, dtype: np.dtype, *, fresh: bool = False):
+    def __init__(self, arr, dtype: np.dtype, *, fresh: bool = False, ready: bool = False):
         """``fresh``: ``arr`` is a newly computed value no other array holds
         (an upload, an operation's result).  Otherwise it is copied: MLX may
         return an input unchanged from a no-op (reshape, astype to the same
         dtype, contiguous), and two storages sharing one buffer would see
-        each other's in-place writes."""
+        each other's in-place writes.  ``ready``: ``arr`` is already the
+        flat, row-contiguous value, built from host memory
+        (host_storage_values), and is held as it is."""
         from woof.backend.facade import _capture
         if _capture.recording() is not None:
             _capture.refuse("a facade array allocation or operation")
         mx = _mx()
-        flat = _materialize(arr)
-        self.arr = flat if fresh else mx.array(flat)
+        if ready:
+            self.arr = arr
+        else:
+            flat = _materialize(arr)
+            self.arr = flat if fresh else mx.array(flat)
         self.dtype = storage_dtype(dtype)
         self._aliases = None
         self._alias_of = None         # the storage this one reinterprets (alias)
@@ -186,6 +194,9 @@ class Storage:
         if _capture.recording() is not None:
             _capture.refuse("an in-place write into a facade array (a[...] = v, fill, copy)")
         self.arr = out
+        if _gpu_times_isolated():
+            _isolated_eval(out)
+            return
         mx.async_eval(out)
 
     def alias(self, dtype) -> "Storage":
@@ -230,10 +241,48 @@ class Storage:
         # Evaluating for it again waited on every launch still writing the
         # buffer: the microphysics ring copy's table key asked for 390
         # addresses per model step, each a host sync on Metal.
-        if _ADDRESSES.get(base) is None or _ADDRESSES[base]() is not self:
-            _ADDRESSES[base] = weakref.ref(self)
-            _ADDRESS_INDEX[0] = None          # the index is stale
+        current = _ADDRESSES.get(base)
+        if current is None or current() is not self:
+            with _ADDRESS_LOCK:               # one check-and-set against _forget_address
+                current = _ADDRESSES.get(base)
+                if current is None or current() is not self:
+                    _ADDRESSES[base] = weakref.ref(self)
+                    _ADDRESS_INDEX[0] = None  # the index is stale
         return base
+
+
+#: WOOF_METAL_DEVICE_COPY=0: ``MemoryPointer.copy_from_device(_async)``
+#: between two storages goes through the host (get, then set), as before
+#: 2026-11-16, instead of one device copy the facade orders.
+_DEVICE_COPY = os.environ.get("WOOF_METAL_DEVICE_COPY", "1") != "0"
+
+#: WOOF_METAL_DIRECT_OUT=0: ``get(out=)`` copies to a host array and then
+#: into ``out``, as before 2026-11-16 (two host copies instead of one).
+_DIRECT_OUT = os.environ.get("WOOF_METAL_DIRECT_OUT", "1") != "0"
+
+#: WOOF_METAL_READY_UPLOADS=0: a host upload's storage value is
+#: ``mx.contiguous`` of the uploaded array, as before 2026-11-16.  That is a
+#: lazy primitive on the GPU stream, so the first evaluation of a new upload
+#: (a device address table's words, read at its launch) waited for every
+#: launch queued ahead of it: about 14 ms a step on the hex Edinburgh
+#: variable-resolution mesh, for the WSM6 recovery's species table.
+_READY_UPLOADS = os.environ.get("WOOF_METAL_READY_UPLOADS", "1") != "0"
+
+
+def host_storage_values(host: np.ndarray):
+    """C-contiguous ``host`` as the flat mx.array a Storage holds, built
+    from host memory and so already computed; None where its storage needs
+    a conversion (the caller takes the general path)."""
+    if not _READY_UPLOADS or host.size == 0:
+        return None
+    mx = _mx()
+    flat = host.reshape(-1)
+    if host.dtype in (np.float64, np.complex128):
+        flat = flat.view(np.uint64)  # binary64 words; complex128 as (real, imaginary) pairs
+    values = mx.array(flat)
+    if values.dtype != storage_mx_dtype(host.dtype) or values.shape != (flat.size,):
+        return None
+    return values
 
 
 #: WOOF_METAL_ADDRESS_ASYNC=0: Storage.address waits for the buffer's value
@@ -266,8 +315,30 @@ def _gpu_address(arr) -> int:
     return int(ext.load().gpu_address(arr))
 
 
+@lru_cache(maxsize=1)
+def _gpu_times_isolated() -> bool:
+    from woof.backend.metal import ext
+    return ext.gpu_times_isolated()
+
+
+def _isolated_eval(out) -> None:
+    """WOOF_METAL_GPU_TIMES_ISOLATE: finish earlier work, then run each
+    launch ``out`` still needs (``out`` itself included) alone, after the
+    lazy inputs it reads, in command buffers counted apart, waiting for each
+    (woof.backend.metal.ext.run_launches_apart; launch.cpp)."""
+    from woof.backend.metal import ext
+    module = ext.load()
+    ext.run_launches_apart(module, [out])
+    ext.raw("eval")(out)
+    ext.raw("synchronize")()
+
+
 #: GPU base address -> the storage that handed it out (Storage.address)
 _ADDRESSES: dict = {}
+
+#: Serializes a registration (Storage.address) against a removal (_forget_address), so a removal never drops a
+#: storage registered at the same base in between.
+_ADDRESS_LOCK = threading.Lock()
 
 #: _ADDRESSES as [built, sorted bases, their references]; every change to
 #: _ADDRESSES clears ``built`` (a dead entry dropped, a base registered)
@@ -304,19 +375,28 @@ def storages_holding(words) -> list:
     return list(found.values())
 
 
+def _forget_address(base: int, ref) -> None:
+    """Drop ``base``'s entry if it is still ``ref``.  THE BREAKAGE THIS PREVENTS (Milton 2024 hex moving on
+    Metal, 2026-11-16): two threads (an LTS class thread and the history writer) found the same dead entry and
+    both deleted it; the second ``del`` raised KeyError and aborted the segment.  A base registered again in
+    between (a new storage at a reused address) keeps its new entry."""
+    with _ADDRESS_LOCK:
+        if _ADDRESSES.get(base) is ref:
+            del _ADDRESSES[base]
+        _ADDRESS_INDEX[0] = None
+
+
 def storage_at(address: int):
     """(storage, byte offset) of a GPU address a storage handed out, or None."""
     from woof.backend.metal import ext
     for base, ref in list(_ADDRESSES.items()):
         st = ref()
         if st is None:
-            del _ADDRESSES[base]
-            _ADDRESS_INDEX[0] = None
+            _forget_address(base, ref)
             continue
         if base <= address < base + max(st.nbytes, 1):
             if int(ext.load().gpu_address(st.arr)) != base:   # rebound since
-                del _ADDRESSES[base]
-                _ADDRESS_INDEX[0] = None
+                _forget_address(base, ref)
                 continue
             return st, address - base
     return None
@@ -327,14 +407,33 @@ def _materialize(arr):
     return mx.contiguous(arr.reshape(-1))
 
 
+_PENDING_DRAIN = threading.Lock()
+
+
+def drain_pending(evaluate) -> int:
+    """Take every pending storage value and encode it (``evaluate``: ``mx.async_eval`` or ``mx.eval``).
+
+    Storages are appended from any thread (an allocation, a rebind).  Taking
+    and encoding happen under one lock, so a drain on another thread cannot
+    find the list empty and launch, or synchronize, while values taken here
+    are not yet encoded.  Only the first ``n`` items are removed: a storage
+    appended meanwhile (appends go to the end, without the lock) stays
+    pending.  Every drain goes through here; never copy-then-clear PENDING.
+    Returns the number of values encoded.
+    """
+    with _PENDING_DRAIN:
+        n = len(PENDING)
+        if not n:
+            return 0
+        arrays = [s.arr for s in PENDING[:n]]
+        del PENDING[:n]
+        evaluate(*arrays)
+    return n
+
+
 def flush_pending():
     """Encode every pending storage value (before an in-place launch)."""
-    if not PENDING:
-        return
-    mx = _mx()
-    arrays = [s.arr for s in PENDING]
-    PENDING.clear()
-    mx.async_eval(*arrays)
+    drain_pending(_mx().async_eval)
 
 
 def _contiguous_strides(shape, itemsize):
@@ -523,6 +622,15 @@ class ndarray:
         mx = _mx()
         values = self._values()
         mx.eval(values)
+        if out is not None and _DIRECT_OUT and self.dtype != np.complex128 \
+                and isinstance(out, np.ndarray) and out.shape == self.shape:
+            # Unified memory: the evaluated buffer is host memory, read in
+            # place (a view, no copy) and copied once, into ``out``.
+            words = np.asarray(values)
+            if self.dtype == np.float64:
+                words = words.view(np.float64)
+            out[...] = words.reshape(self.shape)
+            return out
         host = np.array(values, copy=True)
         if self.dtype == np.float64:
             host = host.view(np.float64)
@@ -946,7 +1054,24 @@ class _Pointer:
 
     # CuPy's MemoryPointer copies, by raw address (cupy.cuda.runtime.memcpy)
     def copy_from_device(self, src, size, stream=None):
-        from woof.backend.facade.cuda import _memcpy
+        from woof.backend.facade.cuda import _HOST_BLOCKS, _bytes_view, _memcpy
+        size = int(size)
+        source = _bytes_view(_address(src), size) if size > 0 else None
+        target = _bytes_view(self.ptr, size) if source is not None else None
+        if target is not None:
+            roots = (target._st.buffer_root(), source._st.buffer_root())
+            if any(st.buffer_root() is r for _h, st in _HOST_BLOCKS.values() for r in roots):
+                # a page-locked host block (hostAlloc): the host may read it
+                # as soon as this returns, so the copy is complete by then
+                import mlx.core as mx
+                _memcpy(self.ptr, _address(src), size)
+                mx.eval(target._st.arr)
+                return
+            if _DEVICE_COPY and roots[0] is not roots[1]:
+                # a device copy the facade orders, not a host round trip
+                # that waits for the source (wrfout snapshots)
+                target._write(source._values())
+                return
         _memcpy(self.ptr, _address(src), size)
 
     def copy_from_host(self, mem, size, stream=None):

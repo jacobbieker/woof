@@ -71,7 +71,10 @@ __device__ __forceinline__ rk jacobian_common_level(const rk *rho1, const rk *rh
     return M(area, S(rhoL, rhoR));
 }
 
-// ocn_vel_pressure_grad_tend: one thread per edge. density0Inv = 1/rho_sw and
+// ocn_vel_pressure_grad_tend: one thread per (edge, level), the level fastest
+// so a warp reads a column's consecutive levels, for the per-level types; the
+// Jacobian types' sum runs down the column, so the edge's level-0 thread does
+// the edge. Launch nEdges * nVertLevels. density0Inv = 1/rho_sw and
 // gdensity0Inv = gravity/rho_sw are the RKIND words ocn_vel_pressure_grad_init
 // forms.
 extern "C" __global__ void ocn_vel_pressure_grad_tend_v842(
@@ -81,34 +84,35 @@ extern "C" __global__ void ocn_vel_pressure_grad_tend_v842(
     int pgradType, rk density0Inv, rk gdensity0Inv, rk gamma, int indexT, int indexS, int nTracers,
     int nEdges, int nVertLevels)
 {
-    int iEdge = blockIdx.x * blockDim.x + threadIdx.x;
+    // a thread per (edge, level) for the level-independent types; a thread
+    // per edge for the Jacobian types, whose sum walks down the column
+    const bool jacobian = pgradType != PGRAD_PRESSURE_AND_ZMID && pgradType != PGRAD_MONTGOMERY
+        && pgradType != PGRAD_MONTGOMERY_AND_DENSITY;
+    const int t = blockIdx.x * blockDim.x + threadIdx.x;
+    const int iEdge = jacobian ? t : t / nVertLevels;
     if (iEdge >= nEdges) return;
+    const int k = jacobian ? 0 : t - iEdge * nVertLevels;
     const int nl = nVertLevels;
     const int c1 = (cellsOnEdge[iEdge * 2] - 1) * nl;
     const int c2 = (cellsOnEdge[iEdge * 2 + 1] - 1) * nl;
-    const rk invdcEdge = D((rk)1.0, dcEdge[iEdge]);
     const int kmax = maxLevelEdgeTop[iEdge];
     const int base = iEdge * nl;
+    if (!jacobian && k >= kmax) return;
+    const rk invdcEdge = D((rk)1.0, dcEdge[iEdge]);
 
     if (pgradType == PGRAD_PRESSURE_AND_ZMID) {
-        for (int k = 0; k < kmax; ++k) {
-            const rk x = S(-M(density0Inv, S(pressure[c2 + k], pressure[c1 + k])),
-                           M(M(M(gdensity0Inv, (rk)0.5), A(density[c1 + k], density[c2 + k])),
-                             S(zMid[c2 + k], zMid[c1 + k])));
-            tend[base + k] = A(tend[base + k], M(M((rk)edgeMask[base + k], invdcEdge), x));
-        }
+        const rk x = S(-M(density0Inv, S(pressure[c2 + k], pressure[c1 + k])),
+                       M(M(M(gdensity0Inv, (rk)0.5), A(density[c1 + k], density[c2 + k])),
+                         S(zMid[c2 + k], zMid[c1 + k])));
+        tend[base + k] = A(tend[base + k], M(M((rk)edgeMask[base + k], invdcEdge), x));
     } else if (pgradType == PGRAD_MONTGOMERY) {
-        for (int k = 0; k < kmax; ++k) {
-            const rk x = -S(montgomeryPotential[c2 + k], montgomeryPotential[c1 + k]);
-            tend[base + k] = A(tend[base + k], M(M((rk)edgeMask[base + k], invdcEdge), x));
-        }
+        const rk x = -S(montgomeryPotential[c2 + k], montgomeryPotential[c1 + k]);
+        tend[base + k] = A(tend[base + k], M(M((rk)edgeMask[base + k], invdcEdge), x));
     } else if (pgradType == PGRAD_MONTGOMERY_AND_DENSITY) {
-        for (int k = 0; k < kmax; ++k) {
-            const rk x = A(-S(montgomeryPotential[c2 + k], montgomeryPotential[c1 + k]),
-                           M(M((rk)0.5, A(pressure[c1 + k], pressure[c2 + k])),
-                             S(D((rk)1.0, potentialDensity[c2 + k]), D((rk)1.0, potentialDensity[c1 + k]))));
-            tend[base + k] = A(tend[base + k], M(M((rk)edgeMask[base + k], invdcEdge), x));
-        }
+        const rk x = A(-S(montgomeryPotential[c2 + k], montgomeryPotential[c1 + k]),
+                       M(M((rk)0.5, A(pressure[c1 + k], pressure[c2 + k])),
+                         S(D((rk)1.0, potentialDensity[c2 + k]), D((rk)1.0, potentialDensity[c1 + k]))));
+        tend[base + k] = A(tend[base + k], M(M((rk)edgeMask[base + k], invdcEdge), x));
     } else {
         // Jacobian_from_density / Jacobian_from_TS: layer 1 from pressure and
         // zMid, whatever maxLevelEdgeTop is (the Fortran sets k = 1 outside
@@ -145,7 +149,7 @@ extern "C" __global__ void ocn_vel_pressure_grad_tend_v842(
 }
 
 // ocn_vel_hmix_del2_tend (leith = 0) and ocn_vel_hmix_leith_tend (leith = 1):
-// one thread per edge. coef is config_mom_del2 or config_Leith_parameter;
+// one thread per (edge, level), the level fastest; launch nEdges * nVertLevels. coef is config_mom_del2 or config_Leith_parameter;
 // leithDx and visc2Max are config_Leith_dx and config_Leith_visc2_max.
 extern "C" __global__ void ocn_vel_hmix_del2_leith_tend_v842(
     rk *tend, rk *viscosity, const rk *divergence, const rk *relativeVorticity,
@@ -153,31 +157,31 @@ extern "C" __global__ void ocn_vel_hmix_del2_leith_tend_v842(
     const rk *meshScaling, const rk *dcEdge, const rk *dvEdge, const int *edgeMask,
     int leith, rk coef, rk leithDx, rk visc2Max, int nEdges, int nVertLevels)
 {
-    int iEdge = blockIdx.x * blockDim.x + threadIdx.x;
+    const int t = blockIdx.x * blockDim.x + threadIdx.x;
+    const int iEdge = t / nVertLevels;
     if (iEdge >= nEdges) return;
+    const int k = t - iEdge * nVertLevels;
+    if (k >= maxLevelEdgeTop[iEdge]) return;
     const int nl = nVertLevels;
     const int c1 = (cellsOnEdge[iEdge * 2] - 1) * nl, c2 = (cellsOnEdge[iEdge * 2 + 1] - 1) * nl;
     const int v1 = (verticesOnEdge[iEdge * 2] - 1) * nl, v2 = (verticesOnEdge[iEdge * 2 + 1] - 1) * nl;
     const rk invLength1 = D((rk)1.0, dcEdge[iEdge]);
     const rk invLength2 = D((rk)1.0, dvEdge[iEdge]);
-    const int kmax = maxLevelEdgeTop[iEdge];
     const int base = iEdge * nl;
-    for (int k = 0; k < kmax; ++k) {
-        const rk dRv = S(relativeVorticity[v2 + k], relativeVorticity[v1 + k]);
-        const rk uDiffusion = S(M(S(divergence[c2 + k], divergence[c1 + k]), invLength1), M(dRv, invLength2));
-        rk visc2;
-        if (leith) {
-            // x**3 is libgcc's __powisf2/__powidf2(x, 3) at -O0: x*(x*x)
-            const rk p = D(M(M(coef, leithDx), meshScaling[iEdge]), (rk)PII);
-            visc2 = M(M(M(M(p, M(p, p)), ABS(dRv)), invLength1), (rk)SQRT3);
-            // min(visc2, max): minss/minsd keeps visc2 unless max is smaller
-            visc2 = visc2 < visc2Max ? visc2 : visc2Max;
-        } else {
-            visc2 = M(coef, meshScaling[iEdge]);
-        }
-        tend[base + k] = A(tend[base + k], M(M((rk)edgeMask[base + k], visc2), uDiffusion));
-        viscosity[base + k] = A(viscosity[base + k], visc2);
+    const rk dRv = S(relativeVorticity[v2 + k], relativeVorticity[v1 + k]);
+    const rk uDiffusion = S(M(S(divergence[c2 + k], divergence[c1 + k]), invLength1), M(dRv, invLength2));
+    rk visc2;
+    if (leith) {
+        // x**3 is libgcc's __powisf2/__powidf2(x, 3) at -O0: x*(x*x)
+        const rk p = D(M(M(coef, leithDx), meshScaling[iEdge]), (rk)PII);
+        visc2 = M(M(M(M(p, M(p, p)), ABS(dRv)), invLength1), (rk)SQRT3);
+        // min(visc2, max): minss/minsd keeps visc2 unless max is smaller
+        visc2 = visc2 < visc2Max ? visc2 : visc2Max;
+    } else {
+        visc2 = M(coef, meshScaling[iEdge]);
     }
+    tend[base + k] = A(tend[base + k], M(M((rk)edgeMask[base + k], visc2), uDiffusion));
+    viscosity[base + k] = A(viscosity[base + k], visc2);
 }
 
 // ocn_vel_hmix_del4_tend, step 1 (every edge, nEdgesArray(3)): delsq_u,

@@ -26,11 +26,11 @@
     "nssl1_support.cuh": "aa531d60c33371850aa3c3594cf5567f1505d73d3b2a7d02537cedfd62ed3311",
     "ntu_parallel.cuh": "24778f06880ba750cc675208cc5e18ca20af83a2453b540196ef1109e0fd7c76",
     "p3_gnu239.cuh": "de99fb11c7f14f1b2dad93419c97e36bc0bc0e727a1c360e0572f7cfb658c9da",
-    "rrtmg_sw_spectral.cuh": "5ea756c7d433fa382657f484179adfcb6dfd4b83a4d774061a11d3e968d72340",
+    "rrtmg_sw_spectral.cuh": "965ab0c8e92cedf1d201be58426b7e5b357dccd32fa9fd040aca21b74f0ef67f",
     "sas_fast.cuh": "f966b0fb610f42d835b173814c8001bad6bded634cbebc2166a9ae9e533c8f76"
   },
   "headers": {
-    "acoustic.cu": "97a7e1646a217ad7e19c17f52a70e7d6c7cb1837b557e1ab6168084932dc3876",
+    "acoustic.cu": "4d9d324788e875c15524219bed9a24ec17579cb8b0219a0618b7deecc9128591",
     "cam5_error_function.cuh": "84dc6bbd775ca002b91243849eca0912df66fcfed1a3a747f3c07e851c4d0e89",
     "cam5_support.cuh": "5e8e1dbf0719d8caff7870cba086cf9115ae28d1970ffdba8f6577b4fec75482",
     "cammgmp_aero.cuh": "de3188f43a8cb8c879c89bcc5521ea0e6bd85758016c324b0fa00e171293cf1f",
@@ -72,7 +72,7 @@
     "rrtmg_aer3.cu": "0ab8dab99a9b49c93699c0e3ce6778d63a6e8e1eb39966a1db49d4847db10dd3",
     "scalar_atan.cuh": "47e93ec8e1f6aa039191962a2add455dec0508f45cf715ec33cc9b65ae97f804",
     "sinhf_flt32.cuh": "cff7b61810ad14c46916c9dbd864f26565ccab1c932c1780c856e307aa831827",
-    "smag2d.cu": "6ee9ec60dd39deba2c8ddcea7ad0e717b94101879ab55fd33eb5fe9c5968c137",
+    "smag2d.cu": "379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f",
     "swint.cu": "9a79b7e43cb92553ae454975a943acedc3d8510b5c7eae59ec2c5bb8c8b47c5b",
     "temf_log10_flt32.cuh": "61c2596ef9b7456c1328eb5b9064c84b72f15acad698b084b87a831c478bb69f",
     "thompson_collision_constants.cuh": "01225b95f51e08a3127cd7703ce6915529ac0df7863d104af6193eeb20014e98",
@@ -376,6 +376,14 @@
       "glibc_flt32.cuh",
       "smag2d.cu"
     ],
+    "smag2d_uv_faces": [
+      "glibc_flt32.cuh",
+      "smag2d.cu"
+    ],
+    "smag2d_tke_faces": [
+      "glibc_flt32.cuh",
+      "smag2d.cu"
+    ],
     "solar_diag": [
       "glibc_flt32.cuh",
       "glibc_trig_flt32.cuh"
@@ -464,7 +472,7 @@
     "chem_radiation": "171ca03a6063038e78547fabb6f780e98ee304066c6cf6c9ce797802c0f7c7d1",
     "chem_radm2": "1a2e3482687d2378d3cfbe204801f7985755e6c8cf5f6d62c61d84d3bf56bb02",
     "chem_sorgam": "a1889e818c576a7e865b129d6d3b27a54e3c522063f7891d81e3e67124efd435",
-    "chem_ftuv": "c5ce548ac34c9570d7b57a43abd47e8f679910506cfabbb876c610f563867270",
+    "chem_ftuv": "938f998fda2d5bca4bdbb1a12555e8b3f4f257bec2ea1d3b23f451a29fdd9735",
     "cldfra3": "137f7a20037dcbf35a8aa399a5384a0bc74b7a6ee1fbfb8fc5f4a9ae5693f826",
     "cldfra3_wrf471": "8ed60f16c949aaa68cf08f4b8735d1002493808466963f05c0b55479bef021d0",
     "clwrf": "e5c127d49c339adee26087e237113bb2093219fae34ef614c1393b990f66b303",
@@ -561,7 +569,10 @@
     "shcu_nscv": "32520656523e8728f4456253c58a22ce3b624ba6e6bee51b2e09b6d0f018e6ab",
     "slab": "b8eec66caf0178220a5cf9e44b43c8b54be6e62b9c18b697a3b6320309e7ddda",
     "smag2d_theta_m": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a",
-    "smag2d_w_faces": "7a318dcdb9d8322e06469cdd30e56bac5f999b128a52fa50cdf33de3d0152a34",
+    "smag2d_w_faces": "09a35fbd19ac813b0bbc73c6eab5bc513dc5b565de8abdb13f19787ca00b4060",
+    "smag2d_uv_faces": "dc9828ca72bc7c7b6acb02b382c7326f33fd3f9eb16ab365e7f3e19a400dabfd",
+    "smag2d_tke_faces": "421c718311e7724d3fd5ba733bfd3c59eca0cf828a753d284bac6e3142128f59",
+    "obstacle_drag": "8d267bf826a42f2737397864eb190b3a6c1c34ad7f63d2e3c787698e32088598",
     "soil_points": "50ec337be67c7f2d15bd031608622ccb72c503523cc8eeeb0040243eb31b888b",
     "solar_diag": "20ab14d004c6edb77d27426eee7a151a8634f442b1c40158f7979bda07ce6d5b",
     "solar_eclipse": "61705513ff6b75df038761c71206e8d36f2d692a271a729f56c695ca5d5be5f4",
@@ -597,7 +608,9 @@
     "wsm6r": "0551464ba27713acf90df5ece69ef3c9ab9cedb191ef838ed63fe506d48d0c2c",
     "chem_radm2_emiss": "77443617d519d649a5640c7bbf9926ba558b91a6f377327a51013fb97790ae5d",
     "chem_activation": "bbccda68823fcae78ba55cf36cf4ee649f5d298044bc7eaa78339818ba03ccc5",
-    "chem_modal_optics": "d320574ffe24079ab5d05a1555e2d8d4b68c054f479806fe4074d19593df797b"
+    "chem_modal_optics": "d320574ffe24079ab5d05a1555e2d8d4b68c054f479806fe4074d19593df797b",
+    "spacewx_ionosphere": "c1bbe87bf9dd168b9f6d302c2ccc2f6dbca8adf9d8f42b3757b8f27c63ecddf2",
+    "spacewx_aurora": "6ad45bcc356142e5d87cde5733d81f785ee97baf61889b60884730d1f227a571"
   },
   "schema": "gpuwm-kernel-source-pins-v1"
 }

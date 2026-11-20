@@ -168,9 +168,47 @@ def test_fused_arithmetic_statement_correspondence():
     helper = section('__device__ __forceinline__ void rsw_reftra_layer(', '// ztdn is caller-provided')
     fused = section('__device__ void rsw_spcvmc_body(', 'extern "C" __global__\nvoid rsw_spcvmc_gpt(')
     assert statements(helper) == expected['reftra_layer']
-    assert statements(fused) == expected['spcvmc_layer']
-    vrtqdr = section('__device__ void rsw_vrtqdr(', '// ---------------------------------------------------------------------------\n// spcvmc_sw')
+    # The two cumulative direct-beam products moved from the layer pass into
+    # rsw_vrtqdr_running as register running products (checked below).
+    layer = dict(expected['spcvmc_layer'])
+    for moved in ('ztdbt=MU(zdbt,ztdbt);', 'ztdbtc=MU(zdbtc,ztdbtc);'):
+        assert layer.pop(moved) == 1
+    assert statements(fused) == layer
+    assert fused.count('rsw_vrtqdr_running(') == 2 and 'rsw_vrtqdr(' not in fused
+    vrtqdr = section('__device__ void rsw_vrtqdr(', "// Level jk's fluxes")
     assert hashlib.sha256(re.sub(r'\s+', '', vrtqdr).encode()).hexdigest() == expected['vrtqdr_sha256']
+
+    # rsw_vrtqdr_running is rsw_vrtqdr with ptdbt, ztdn and prdnd held in
+    # registers: the same statements once those are renamed.
+    def squash(text):
+        return re.sub(r'\s+', '', re.sub(r'//[^\n]*', '', text))
+    running = section('__device__ void rsw_vrtqdr_running(', '// ---------------------------------------------------------------------------\n// spcvmc_sw')
+    flux = section('__device__ __forceinline__ void rsw_vrtqdr_flux(', '// rsw_vrtqdr for rsw_spcvmc_body')
+    def upward(body, end):
+        body = squash(body)
+        return body[body.index('realzreflect'):body.index(end)]
+    assert upward(running, 'realtdbt=1.0f;') == upward(vrtqdr, 'ztdn[0]=1.0f;')
+    original_flux = squash(vrtqdr[vrtqdr.index('for (int jk = 0; jk <= klev; ++jk) {'):])
+    original_flux = original_flux[len('for(intjk=0;jk<=klev;++jk){'):].rstrip('}')
+    for name, register in (('ptdbt[jk]', 'tdbt'), ('ztdn[jk]', 'tdn'), ('prdnd[jk]', 'rdnd')):
+        original_flux = original_flux.replace(name, register)
+    assert squash(flux[flux.index('{') + 1:]).rstrip('}').replace('realzreflect', 'zreflect') == original_flux
+    original_down = squash(vrtqdr[vrtqdr.index('for (int jk = 2; jk <= klev; ++jk) {'):vrtqdr.index('for (int jk = 0; jk <= klev; ++jk) {')])
+    for name, register in (('ptdbt[jk-1]', 'tdbt'), ('ztdn[jk-1]', 'tdn'), ('prdnd[jk-1]', 'rdnd'),
+                           ('ztdn[ikp-1]', 'realtdn_next'), ('prdnd[ikp-1]', 'realrdnd_next')):
+        original_down = original_down.replace(name, register)
+    original_down = original_down.replace('intikp=jk+1;', '')
+    # The register schedule itself, whole: levels 0 and 1, then each later
+    # level's ztdn/prdnd from level jk-1's values before ptdbt[jk] is formed,
+    # then that level's fluxes.
+    assert squash(running)[squash(running).index('realtdbt=1.0f;'):] == (
+        'realtdbt=1.0f;realtdn=1.0f;realrdnd=0.0f;'
+        'rsw_vrtqdr_flux(0,tdn,rdnd,tdbt,prup,prupd,pfd_col,pfu_col);'
+        'tdbt=MU(pdbt[0],tdbt);tdn=ptra[0];rdnd=prefd[0];'
+        'rsw_vrtqdr_flux(1,tdn,rdnd,tdbt,prup,prupd,pfd_col,pfu_col);'
+        'for(intjk=2;jk<=klev;++jk){' + original_down[len('for(intjk=2;jk<=klev;++jk){'):-1]
+        + 'tdbt=MU(pdbt[jk-1],tdbt);tdn=tdn_next;rdnd=rdnd_next;'
+        'rsw_vrtqdr_flux(jk,tdn,rdnd,tdbt,prup,prupd,pfd_col,pfu_col);}}')
     assert SPCVMC_WK_ARRAYS == 16 and SPCVMC_WKC_ARRAYS == 0
     assert re.search(r'#define RSW_SPCVMC_WK 16\b', source)
     assert re.search(r'#define RSW_SPCVMC_WKC 0\b', source)

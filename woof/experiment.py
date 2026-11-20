@@ -324,6 +324,12 @@ _DOMAIN_RUN_OVERRIDES = (
     # The opt-in GF deep evaporation booking, on the same terms: a [shared]
     # value reaches the cu_physics = 3 domains only.
     "gf_deep_rain_evaporation_booking",
+    # The opt-in resolved obstacles: buildings belong to one domain's grid
+    # (an LES nest), so every obstacle key is per-domain.
+    # WPS's gridded urban morphology is on one domain's grid.
+    "urban_param_file",
+    "obstacle_opt", "obstacle_file", "obstacle_solid_fraction",
+    "obstacle_relax_factor", "obstacle_drag_coefficient", "obstacle_wall_z0",
     "kf_edrates",
     "maxiens", "maxens", "maxens2", "maxens3", "ensdim", "cu_diag", "convtrans_avglen_m",
     # The SAS-family keys, on the Grell keys' terms (tree_runs_sas below):
@@ -2217,9 +2223,16 @@ def build_experiment_from_config_tables(raw: dict, *, source: str,
         fill_omitted_generation_selectors(raw, fetch_table)
     case_table = raw.pop("case_data", None)
     if case_table is not None:
-        from woof.case_data import build_case_data
-        build_case_data(case_table, source=source, base_dir=base_dir,
-                        require_inputs=False)
+        from woof.case_data import (
+            build_case_data, is_gfs_policy_table, optional_case_data_from_tables)
+        if is_gfs_policy_table(case_table):
+            # A policy-only table (fetched-GFS preparation choices) names
+            # no inputs; its values are still validated.
+            optional_case_data_from_tables({"case_data": case_table},
+                                           source=source, base_dir=base_dir)
+        else:
+            build_case_data(case_table, source=source, base_dir=base_dir,
+                            require_inputs=False)
     static_table = raw.pop("static", None)
     if static_table is not None:
         from woof.static.highres_production import parse_static_table
@@ -5405,6 +5418,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     _assert_derived_copies(experiment, source)
     from woof.wrf_hydro_route import refuse_multiple_domains
     refuse_multiple_domains(len(experiment.domains))
+    from os import environ
+    if environ.get("WOOF_NN_CONFIG"):  # --nn (woof.nn.launch)
+        from woof.nn.launch import refuse_multiple_domains as refuse_nn_domains
+        refuse_nn_domains(len(experiment.domains))
     return _bind_physics_params(experiment, source)
 
 
@@ -6326,7 +6343,7 @@ def _public_config_value(value):
             # to radiation, the solar diagnostics, use_theta_m and
             # do_avgflx_em, and WRF-Solar EPS and MAD-WRF.  Moved, each
             # stays and binds.
-            from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+            from woof.config import MULTI_PERTURB_RUN_DEFAULTS, OBSTACLE_RUN_DEFAULTS
             for name, default in (("rrtmg_spectral_output", "none"),
                                   ("radtran_wavelengths", ()),
                                   ("radtran_interval_s", 3600.0),
@@ -6343,7 +6360,17 @@ def _public_config_value(value):
                                   *MULTI_PERTURB_RUN_DEFAULTS.items(),
                                   ("madwrf_opt", 0), ("madwrf_dt_relax", 60.0),
                                   ("madwrf_dt_nudge", 60.0), ("madwrf_cldinit", 0),
-                                  ("gf_deep_rain_evaporation_booking", False)):
+                                  ("gf_deep_rain_evaporation_booking", False),
+                                  ("solar_tsi_opt", 0), ("solar_tsi_source", ""),
+                                  ("solar_tsi_mode", "absolute"),
+                                  ("spacewx_ionosphere_opt", 0), ("spacewx_f107_source", ""),
+                                  ("spacewx_f107_mode", "81day"),
+                                  ("spacewx_ionosphere_maps", "ccir"),
+                                  ("spacewx_aurora_opt", 0), ("spacewx_kp_source", ""),
+                                  ("solar_ssi_opt", 0), ("solar_ssi_source", ""),
+                                  ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
+                                  ("urban_param_file", ""),
+                                  *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):
                     value = tuple(value)

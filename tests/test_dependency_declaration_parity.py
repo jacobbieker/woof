@@ -146,6 +146,11 @@ _PROVIDERS: dict[str, tuple[str, ...]] = {
     # NO distribution provides these either: tools/wrf_exact_localize's trace
     # hooks and comparer, reached by the exact chain's localization
     # instruments after a sys.path insert -- see _OPTIONAL_BY_DESIGN.
+    # NO distribution provides these: the PNNL opt-in package and tests/'s
+    # selection menu -- see _OPTIONAL_BY_DESIGN.
+    "woof_wrfchem_pnnl": (),
+    "mpas_column_physics_cases": (),
+    "wrf_hydro_synthetic": (),
     "cmpphys": (),
     "woof_hook": (),
     "woof_hook2": (),
@@ -369,7 +374,6 @@ _OPTIONAL_BY_DESIGN: dict[str, str] = {
         "the reverse, and a WOOF store never reaches the import."
     ),
     "earth2studio": _EARTH2_INTERPRETER,
-    "torch": _EARTH2_INTERPRETER,
     "xarray": _EARTH2_INTERPRETER,
     "torch_harmonics": (
         "woof/earth2_runner.py imports torch_harmonics inside a try/except "
@@ -382,6 +386,21 @@ _OPTIONAL_BY_DESIGN: dict[str, str] = {
         "inventory a maintainer runs from a checkout to rebuild the model "
         "table. No woof door imports it (woof hf-fetch downloads with "
         "urllib), so a user's install never reaches it."
+    ),
+    "woof_wrfchem_pnnl": (
+        "woof/core/chem_activation.py imports woof_wrfchem_pnnl only after woof.optin.load('wrfchem_pnnl') "
+        "(WOOF_ENABLE_WRFCHEM_PNNL=1, the graded PNNL-terms opt-in door); the default build uses the "
+        "clean-room activation, and the opt-in package is never a wheel dependency."
+    ),
+    "mpas_column_physics_cases": (
+        "tools/hex_option_matrix.py puts tests/ on sys.path to read the selection menu in "
+        "tests/mpas_column_physics_cases.py; tests/ does not ship, and the option matrix is a "
+        "checkout instrument no wheel-user path reaches."
+    ),
+    "wrf_hydro_synthetic": (
+        "tools/bench_hex_hydro_exchange.py puts tests/ on sys.path to build the synthetic WRF-Hydro "
+        "domain of tests/wrf_hydro_synthetic.py; tests/ does not ship, and the exchange benchmark is a "
+        "checkout instrument no wheel-user path reaches."
     ),
     "cmpphys": (
         "the WRF exact chain's localization instruments (2.9.1): tools/coupled_exact_trace.py, tools/coupled_gf_receipt.py and tools/coupled_trace_receipt.py put tools/wrf_exact_localize on sys.path and import its trace hooks and comparer by bare name. That directory does not ship (packages.find names `tools`, not `tools*`), so from a wheel the import fails by name; the scripts are maintainer instruments that replay a recorded WRF run from a checkout, and no wheel-user path reaches them."
@@ -485,6 +504,14 @@ _EXTRA_GATED: dict[str, tuple[tuple[str, ...], str]] = {
         "forecast. The import is lazy and its absence raises "
         "DynamicalUnavailable naming `pip install 'recast-woof[obs]'`; no "
         "forecast or preprocessing route reaches it, and [all-*] carries it.",
+    ),
+    "torch": (
+        ("nn-torch",),
+        "Opt-in neural-network column physics on CUDA (woof/nn/models.py, docs/nn-physics.md): "
+        "imported inside TorchColumnModel only when a configuration names an [nn] model, and its "
+        "absence raises ModelUnavailable naming `pip install 'recast-woof[nn-torch]'`; "
+        "tests/test_nn_default_path_imports.py holds every default door free of it. The Earth2 "
+        "runner scripts also import it, in the separate interpreter WOOF_EARTH2_PYTHON names.",
     ),
     "py7zr": (
         ("hydro-conus",),
@@ -1029,6 +1056,10 @@ def test_all_covers_every_extra_a_forecast_user_needs(declaration, pyproject):
                "would be dead weight in the one-liner. The agent that "
                "does need it is told the extra by name in the guarded "
                "import's remedy sentence and in docs/mcp-server.md.",
+        "nn-torch": "PyTorch for opt-in NN column physics on CUDA "
+                    "(woof.nn): a multi-GiB stack no default forecast "
+                    "imports, named by the refusal of the one door that "
+                    "needs it and by docs/nn-physics.md.",
         "gpu-mlx": "the Apple-silicon backend, which [all-cu12] and "
                    "[all-cu13] exclude as they exclude each other's CuPy: "
                    "a CUDA install never runs Metal, and its own aggregate "

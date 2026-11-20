@@ -110,7 +110,8 @@ def _columns(seed=7, nl=NL, nc=NC):
         zgrid=z.astype(f), p=p.astype(f), fzm=fzm.astype(f), fzp=fzp,
         rho_zz=(p / f(287.0) / f(270.0)).astype(f), zz=np.full((nl, nc), 1.0, f),
         qv=rng.uniform(0, 0.015, (nl, nc)).astype(f), qg=rng.uniform(0, 2e-3, (nl, nc)).astype(f),
-        qr=rng.uniform(0, 1e-3, (nl, nc)).astype(f), nr=rng.uniform(1e3, 1e6, (nl, nc)).astype(f),
+        qr=rng.uniform(0, 1e-3, (nl, nc)).astype(f), qs=rng.uniform(0, 1e-3, (nl, nc)).astype(f),
+        theta=(np.linspace(295, 380, nl, dtype=f)[:, None] * rng.uniform(0.99, 1.01, nc).astype(f)[None, :]), nr=rng.uniform(1e3, 1e6, (nl, nc)).astype(f),
         zm=zm.astype(f))
 
 
@@ -135,7 +136,7 @@ class _Utils:
         return name in self.written
 
 
-def _owner(cp, col, mp="mp_thompson", scalars=("qv", "qr", "qg", "nr")):
+def _owner(cp, col, mp="mp_thompson", scalars=("qv", "qr", "qg", "nr", "qs")):
     fields = {}
     buffers = {}
 
@@ -145,10 +146,11 @@ def _owner(cp, col, mp="mp_thompson", scalars=("qv", "qr", "qg", "nr")):
     for name in ("zgrid", "fzm", "fzp", "zz"):
         put("mesh", name, col[name])
     put("state", "rho_zz", col["rho_zz"])
+    put("diag", "theta", col["theta"])
     put("diag", "pressure_base", col["p"] - np.float32(37.0))
     put("diag", "pressure_p", np.full_like(col["p"], 37.0))
     layout_fields = [dict(pool=p, pool_name=n) for p, n in
-                     (("diag_physics", "u10"), ("diag_physics", "v10"), ("diag_physics", "t2m"),
+                     (("diag", "theta"), ("diag_physics", "u10"), ("diag_physics", "v10"), ("diag_physics", "t2m"),
                       ("diag_physics", "hpbl"), ("diag_physics", "refl10cm"))]
     names = list(scalars)
     stack = cp.asarray(np.stack([col[n] for n in names]))
@@ -184,7 +186,7 @@ def cp():
     return pytest.importorskip("cupy")
 
 
-def _module(cp, mp="mp_thompson", scalars=("qv", "qr", "qg", "nr"), seed=7):
+def _module(cp, mp="mp_thompson", scalars=("qv", "qr", "qg", "nr", "qs"), seed=7):
     col = _columns(seed)
     owner = _owner(cp, col, mp, scalars)
     module = nwp.NwpDiagnosticsModule(owner)
@@ -414,3 +416,65 @@ def test_refl10cm_is_read_from_diag_physics_only(cp):
     _feed(o_owner, inputs)
     other.update()
     assert not cp.asnumpy(other.acc["refd_max"]).any()
+
+
+@pytest.mark.gpu
+def test_minus10c_reflectivity_equals_the_wrf_gsd_kernel_column_by_column(cp):
+    """REFDM10C_MAX is gsd_columns' own word: the same kernel on the columns as a (ny, nx) WRF grid."""
+    from woof.core.kernels import get_kernel
+    module, owner, utils, col = _module(cp)
+    assert module.m10
+    st = _structured(col, None, cp)
+    ny, nx, sh = st["ny"], st["nx"], st["sh"]
+    f = np.float32
+    D = lambda a: cp.asarray(np.ascontiguousarray(a, dtype=f))
+    z = lambda *shape: cp.zeros(shape, f)
+    n = ny * nx
+    rng = np.random.default_rng(13)
+    want = z(ny, nx)
+    for step in range(3):
+        inputs = _step_inputs(rng)
+        _feed(owner, inputs)
+        module.update()
+        rho = D(sh(col["rho_zz"] * col["zz"]))
+        rho = D(sh(f(1) / (col["rho_zz"] * col["zz"])))      # alt
+        dens = D(sh(col["rho_zz"] * col["zz"] * (f(1) + col["qv"])))
+        ones = D(np.ones((ny, nx)))
+        outs = [z(ny, nx) for _ in range(31)]
+        args = (D(np.zeros((NL, ny, nx + 1))), D(np.zeros((NL, ny + 1, nx))), D(sh(inputs["w"])),
+                z(NL + 1, ny, nx), D(st["phb"]), np.int32(1), D(sh(col["theta"])), z(NL, ny, nx), np.int32(1),
+                D(st["p"]), rho, D(st["qv"]), z(NL, ny, nx), D(sh(col["qr"])), z(NL, ny, nx),
+                D(sh(col["qs"])), D(st["qg"]), z(NL, ny, nx), z(NL + 1), dens, z(NL, ny, nx), z(NL, ny, nx),
+                z(NL, ny, nx), ones, z(NL, ny, nx), z(NL, ny, nx), D(sh(inputs["u10"])), D(sh(inputs["v10"])),
+                z(NL + 1, ny, nx))
+        tail = (np.int32(nx), np.int32(ny), np.int32(NL), f(0), np.int32(0), np.int32(0), np.int32(0))
+        # outputs: 10 before refm10, refm10 (carried across steps), 10 after
+        get_kernel("gsd_diagnostics", "gsd_columns")(((n + 127) // 128,), (128,),
+            args + tuple(outs[:10]) + (want,) + tuple(outs[10:21]) + tail)
+    got = cp.asnumpy(module.acc["refdm10c_max"])
+    ref = cp.asnumpy(want).reshape(-1)
+    np.testing.assert_array_equal(got.view(np.uint32), ref.view(np.uint32))
+    assert (got != 0).any() and np.isfinite(got).all()
+    # published when a due stream carries it, then zeroed after the frame
+    utils.written = {"refdm10c_max"}
+    module.compute()
+    np.testing.assert_array_equal(cp.asnumpy(owner.buffers["diag", "refdm10c_max"])[:NC], got)
+    module.reset()
+    assert not cp.asnumpy(module.acc["refdm10c_max"]).any()
+
+
+@pytest.mark.gpu
+def test_minus10c_is_off_unless_a_stream_carries_it_and_needs_rain(cp):
+    module, owner, utils, col = _module(cp)
+    quiet = _Utils()
+    quiet.stream_inclusion_count = lambda name, direction=None, **kw: 0 if name == "refdm10c_max" else 1
+    off = nwp.NwpDiagnosticsModule(owner)
+    off.setup(quiet)
+    assert not off.m10
+    _feed(owner, _step_inputs(np.random.default_rng(4)))
+    off.update()
+    assert not cp.asnumpy(off.acc["refdm10c_max"]).any()
+    norain, n_owner, _, _ = _module(cp, "mp_kessler", ("qv",))
+    _feed(n_owner, _step_inputs(np.random.default_rng(4)))
+    norain.update()
+    assert not cp.asnumpy(norain.acc["refdm10c_max"]).any()

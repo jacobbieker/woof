@@ -972,6 +972,9 @@ class ForecastRequest:
     wind_farms: str | None = field(default=None, kw_only=True)
     #: WRF's w_crit_cfl when --w-damping asked for the limiter (woof.hex.cuda_w_damping), else None.
     w_damping: float | None = field(default=None, kw_only=True)
+    #: woof's obstacle_opt = 1 settings (woof.hex.obstacles.ObstacleSettings.as_dict()) when
+    #: --obstacle-opt 1 asked for buildings as porous obstacles, else None.
+    obstacles: dict | None = field(default=None, kw_only=True)
     #: WRF's inflow perturbation controls when --inflow-perturbation asked for it
     #: (woof.hex.inflow_perturbation), else None.
     inflow_perturbation: dict | None = field(default=None, kw_only=True)
@@ -2621,6 +2624,7 @@ def resolve_request(
         chemistry_config=getattr(arguments, "chemistry_config", None),
         wind_farms=getattr(arguments, "wind_farms", None),
         w_damping=_resolve_w_damping(arguments),
+        obstacles=_resolve_obstacles(arguments, collected),
         inflow_perturbation=_resolve_inflow_perturbation(arguments),
         input_problems=tuple(collected or ()),
         preset=preset.name,
@@ -3166,6 +3170,18 @@ def resolve_surface_statics(arguments, physics, mesh, grid, collected):
     given = getattr(arguments, "surface_statics", None)
     profile = None if physics is None else physics.column_profile
     selection = None if profile is None else profile.get("physics")
+    lake_source = (selection or {}).get("lake_state_source", "auto")
+    if (lake_source not in ("auto", "forcing")
+            and int((selection or {}).get("sf_lake_physics", 0) or 0) != 1):
+        # Only sf_lake_physics = 1 stages a lake mask on the mesh, so an
+        # explicit source would mark no lake cell: accepted and never read.
+        problem = (
+            f"lake_state_source={lake_source} binds lake cells, but without "
+            "sf_lake_physics=1 this run stages no lake mask, so the source "
+            "would be accepted and never read")
+        if collected is None:
+            raise _refuse(problem)
+        collected.append(problem)
     needed = surface_inputs.reads_surface_statics(selection)
     if (not needed and given is not None and physics is not None
             and physics.column_profile is not None
@@ -3230,6 +3246,9 @@ def _partitioned_samehost_refusal(request) -> str | None:
     if request.w_damping is not None:
         return ("--w-damping acts in the one-card resident dycore driver; the partitioned same-host executor's "
                 f"rank drivers do not carry it ({one_card})")
+    if getattr(request, "obstacles", None) is not None:
+        return ("--obstacle-opt acts in the one-card resident dycore driver; the partitioned same-host executor's "
+                f"rank drivers do not carry it ({one_card})")
     if request.inflow_perturbation is not None:
         return ("--inflow-perturbation acts in the one-card regional runtime; the partitioned same-host "
                 f"executor's rank runtimes do not carry it ({one_card})")
@@ -3253,6 +3272,51 @@ def _resolve_w_damping(arguments) -> float | None:
                 f"--w-damping acts in the resident dycore driver; --{flag.replace('_', '-')} runs its own drivers "
                 "that do not carry it, so the limiter would be accepted and never applied")
     return crit
+
+
+_OBSTACLE_KEYS = ("obstacle_solid_fraction", "obstacle_relax_factor", "obstacle_drag_coefficient",
+                  "obstacle_wall_z0")
+
+
+def _resolve_obstacles(arguments, collected: list[str] | None = None) -> dict | None:
+    """woof's obstacle_opt = 1 settings when ``--obstacle-opt 1``, else None; refuses what it cannot honour.
+
+    ``collected`` is the preflight seam: a missing product is recorded there, not raised.
+    """
+
+    opt = getattr(arguments, "obstacle_opt", None)
+    path = getattr(arguments, "obstacle_file", None)
+    given = {key: getattr(arguments, key, None) for key in _OBSTACLE_KEYS}
+    if not opt:
+        named = [f"--{key.replace('_', '-')}" for key, value in given.items() if value is not None]
+        if path is not None:
+            named.insert(0, "--obstacle-file")
+        if named:
+            raise _refuse(f"{', '.join(named)} read only with --obstacle-opt 1; it would be accepted and never read")
+        return None
+    if opt != 1:
+        raise _refuse(f"--obstacle-opt {opt!r}: only 0 (off) and 1 (porous immersed obstacles) exist")
+    if path is None:
+        raise _refuse("--obstacle-opt 1 needs --obstacle-file (a hex building product of shape (1, nCells), "
+                      "built with woof.static.buildings.VoronoiGrid)")
+    if not Path(path).is_file():
+        problem = f"--obstacle-file {str(path)!r} does not exist"
+        if collected is None:
+            raise _refuse(problem)
+        collected.append(problem)
+    for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
+        if getattr(arguments, flag, False):
+            raise _refuse(
+                f"--obstacle-opt acts in the resident dycore driver; --{flag.replace('_', '-')} runs its own "
+                "drivers that do not carry it, so the obstacles would be accepted and never applied")
+    from .obstacles import ObstacleSettings
+
+    try:
+        settings = ObstacleSettings(obstacle_file=str(Path(path).resolve()),
+                                    **{key: float(value) for key, value in given.items() if value is not None})
+    except ValueError as error:
+        raise _refuse(str(error)) from error
+    return settings.as_dict()
 
 
 def _resolve_inflow_perturbation(arguments) -> dict | None:
@@ -3356,6 +3420,8 @@ def _cycling_argv(arguments: Any) -> tuple[str, ...]:
             argv += [flag, str(Path(value).expanduser().absolute())]
     if getattr(arguments, "jedi_background", False):
         argv.append("--jedi-background")
+    if getattr(arguments, "mcica_seed_mode", None):
+        argv += ["--mcica-seed-mode", str(arguments.mcica_seed_mode)]
     soil_levels = getattr(arguments, "jedi_soil_levels", None)
     if soil_levels is not None:
         argv += ["--jedi-soil-levels", str(soil_levels)]
@@ -3494,6 +3560,8 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
         argv += ["--wind-farms", request.wind_farms]
     if request.w_damping is not None:
         argv += ["--w-damping", "--w-crit-cfl", repr(float(request.w_damping))]
+    if request.obstacles is not None:
+        argv += ["--obstacles", json.dumps(request.obstacles, sort_keys=True)]
     if request.inflow_perturbation is not None:
         argv += ["--inflow-perturbation", json.dumps(request.inflow_perturbation, sort_keys=True)]
     if request.source_table is not None:
@@ -3865,6 +3933,7 @@ def build_receipt(
             **({} if request.surface_statics is None else
                {"surface_statics": str(request.surface_statics)}),
             **({} if request.w_damping is None else {"w_damping": {"w_crit_cfl": request.w_damping}}),
+            **({} if request.obstacles is None else {"obstacles": dict(request.obstacles)}),
             **({} if request.inflow_perturbation is None else
                {"inflow_perturbation": dict(request.inflow_perturbation)}),
             "source_table": (
@@ -4451,14 +4520,43 @@ def mpas_suite_lts_refusal(arguments: argparse.Namespace, environ=None) -> str |
 
 
 def run_forecast(arguments: argparse.Namespace) -> int:
+    if getattr(arguments, "mcica_seed_mode", None):
+        # Read by woof.core.mcica_seed in this process and in any child it starts.
+        os.environ["WOOF_MCICA_SEED_MODE"] = arguments.mcica_seed_mode
     from woof.output_formats import command_scope
     from .wave_options import environment as wave_environment
     from woof.wrf_hydro_route import launch_scope as wrf_hydro_scope
+    nn = getattr(arguments, "nn", None)
+    if nn is not None:
+        _refuse_nn_launch(arguments)
+    from contextlib import nullcontext
+    if nn is None:
+        nn_scope = nullcontext()
+    else:
+        from woof.nn.launch import launch_scope
+        # The door cannot tell every resume (a native restart's continuation and a moving segment's checkpoint
+        # become resumes later), so the seat refuses an existing tap store unless the run did resume
+        # (woof.nn.hex_seat.attach; TendencyTap).
+        nn_scope = launch_scope(nn, resume=True)
     with wave_environment(arguments), wrf_hydro_scope(getattr(arguments, "wrf_hydro", None),
-                                                      getattr(arguments, "wrf_hydro_output", None)), \
-            command_scope(arguments, engine="woof hex") as scope:
+                                                      getattr(arguments, "wrf_hydro_output", None),
+                                                      gpu_exchange=getattr(arguments, "wrf_hydro_gpu_exchange",
+                                                                           None)), \
+            nn_scope, command_scope(arguments, engine="woof hex") as scope:
         result = _run_forecast_with_outputs(arguments)
         return scope.finish(result) if scope else result
+
+
+def _refuse_nn_launch(arguments: argparse.Namespace) -> None:
+    """``--nn`` on the runs its seat cannot attach to, refused at the door (woof.nn.hex_seat says why)."""
+    if getattr(arguments, "members", None) is not None:
+        raise ForecastDoorRefusal("--nn with a --members roster: the NN seat attaches to a single deterministic "
+                                  "forecast (every member would write the one tap store)")
+    for name, flag in (("samehost_devices", "--samehost-devices"), ("hosts", "--hosts")):
+        if getattr(arguments, name, None) is not None:
+            raise ForecastDoorRefusal(f"--nn with {flag}: the hex NN seat runs on one card's whole mesh")
+    if getattr(arguments, "fullstep_local_timestep", False):
+        raise ForecastDoorRefusal("--nn with --fullstep-local-timestep: the hex NN seat runs on one step clock")
 
 
 def _run_forecast_with_outputs(arguments: argparse.Namespace) -> int:
@@ -4904,7 +5002,75 @@ def bind_native_dynamics(arguments: argparse.Namespace, native_text: str) -> str
         print("woof hex: MPAS suite dycore schedule " + ", ".join(f"{k}={v}" for k, v in options.items())
               + " (explicit flags)", file=sys.stderr, flush=True)
         native_text = set_namelist_options(native_text, {"nhyd_model": options})
+    native_text = bind_native_damping(arguments, native_text)
     return bind_native_dynamics_overrides(arguments, native_text)
+
+
+#: The door's upper-damping flags, the MPAS &damping option each one names and the flag's default
+#: (forecast parser), which is also MPAS-A v8.4.2's Registry default (Registry.xml:291-325).
+NATIVE_DAMPING_FLAGS = (
+    ("cam_coefficient", "--cam-coefficient", "config_mpas_cam_coef", 0.0),
+    ("cam_damping_levels", "--cam-damping-levels", "config_number_cam_damping_levels", 4),
+    ("rayleigh_u", "--rayleigh-u", "config_rayleigh_damp_u", False),
+    ("damping_start_m", "--damping-start-m", "config_zd", 22000.0),
+)
+
+
+def bind_native_damping(arguments: argparse.Namespace, native_text: str) -> str:
+    """The MPAS suite route's upper damping: each door flag set off its default becomes its &damping option.
+
+    MPAS-A v8.4.2 reads config_mpas_cam_coef and config_number_cam_damping_levels (the CAM viscosity floor in
+    the top levels, mpas_atm_time_integration.F:6400-6402), config_rayleigh_damp_u with
+    config_number_rayleigh_damp_u_levels and config_rayleigh_damp_u_timescale_days (the horizontal Rayleigh
+    damping of u, :6608-6630) and config_zd (the w damping's base) from &damping; the route's dycore runs each
+    of them (cuda_driver.py).  The two Rayleigh knobs without a flag of their own come through ``--dynamics``.
+    THE BREAKAGE THIS PREVENTS (obs D1, 2026-11-16): this route returns before resolve_request, the only reader
+    of these four flags, so the 80-level high-top declaration's runtime block (vertical_spec.forecast_arguments)
+    could not run on the MPAS suite: its --dynamics level count was refused and its flags would have been
+    dropped.  A flag at its default leaves the namelist (or the Registry default, the same value) in charge; a
+    namelist naming a different value is refused as two values for one run.
+    """
+    from .mpasphys.forecast_v842 import namelist_option, set_namelist_options
+
+    options: dict[str, Any] = {}
+    for attribute, flag, option, default in NATIVE_DAMPING_FLAGS:
+        given = getattr(arguments, attribute, default)
+        if given is None or given == default:
+            continue
+        value = type(default)(given)
+        named = namelist_option(native_text, "damping", option)
+        if named is not None:
+            if not _namelist_value_matches(named, value):
+                raise ValueError(f"{flag} {given} and the namelist {option} {named} name two values for one run")
+            continue
+        options[option] = value
+    if options:
+        print("woof hex: MPAS suite upper damping " + ", ".join(f"{k}={v}" for k, v in options.items())
+              + " (explicit flags)", file=sys.stderr, flush=True)
+        native_text = set_namelist_options(native_text, {"damping": options})
+    seconds = getattr(arguments, "radiation_seconds", None)
+    if seconds is not None:
+        # The route's radiation interval is the namelist's config_radtlw/radtsw_interval (MPAS default 30 min);
+        # a different --radiation-seconds would be recorded and not run, so it is refused, as --dt is.
+        from .mpasphys.driver_v842 import interval_seconds
+        for option in ("config_radtlw_interval", "config_radtsw_interval"):
+            named = namelist_option(native_text, "physics", option)
+            if named in (None, ""):
+                have = float(mpas_defaults.DEFAULT_RADIATION_SECONDS)
+            elif str(named).strip() == "none":
+                # An explicit 'none' calls radiation every dynamics step (PhysicsManager: scheme_dt = dt).
+                step = namelist_option(native_text, "nhyd_model", "config_dt")
+                if step is None:
+                    raise ValueError(f"the MPAS suite's {option} is 'none' (every dynamics step) and no config_dt "
+                                     f"is named, so --radiation-seconds {float(seconds):g} cannot be checked")
+                have = float(step)
+            else:
+                have = float(interval_seconds(named))
+            if float(seconds) != have:
+                raise ValueError(f"--radiation-seconds {float(seconds):g} and the MPAS suite's {option} "
+                                 f"({have:g} s) name two radiation intervals; set the interval in the "
+                                 "--physics-namelist's &physics")
+    return native_text
 
 
 #: The namelist groups ``--dynamics`` reaches on the MPAS suite route: the dycore's own.  The other groups a
@@ -5094,6 +5260,12 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             # Every other host starts now, so its preparation runs beside this host's (woof.hex.multihost).
             from . import multihost
             multihost.begin(arguments)
+        if native_config is None and os.environ.get("WOOF_NN_CONFIG"):
+            # The seat sits on the MPAS route's held sources (woof.nn.hex_seat); the WOOF-physics route would accept
+            # the file and never apply it.  A column model there runs as a woof.hex.rows backend (docs/nn-physics.md).
+            raise ValueError("--nn runs on the MPAS suite route (the hex default physics) only; the WOOF-physics "
+                             "route (--physics-suite arwen_*, --physics ...) has no NN seat. A column model there "
+                             "is a woof.hex.rows physics backend (docs/nn-physics.md)")
         if native_config is not None and (getattr(arguments, "nudging", None) is None) != (
                 not getattr(arguments, "nudging_analysis", None)):
             raise ValueError("--nudging and --nudging-analysis go together: a nudging configuration reads its "
@@ -5106,6 +5278,10 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             if getattr(arguments, "w_damping", False):
                 raise ValueError("--w-damping is carried by the WOOF-physics route's dycore driver; the MPAS "
                                  "suite route (matrix item 4.2 follow-up) would accept it and never apply it")
+            if getattr(arguments, "obstacle_opt", None) or getattr(arguments, "obstacle_file", None) is not None \
+                    or any(getattr(arguments, key, None) is not None for key in _OBSTACLE_KEYS):
+                raise ValueError("--obstacle-opt and the other --obstacle-* flags are carried by the WOOF-physics "
+                                 "route's dycore driver; the MPAS suite route would accept them and never apply them")
             if getattr(arguments, "inflow_perturbation", False):
                 raise ValueError("--inflow-perturbation is carried by the WOOF-physics route's regional runtime; "
                                  "the MPAS suite route (matrix item 5.7 follow-up) would accept it and never apply it")
@@ -5685,6 +5861,19 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                              "WOOF-physics route only; default off")
     parser.add_argument("--w-crit-cfl", type=float, default=None, metavar="CFL",
                         help="WRF's w_crit_cfl for --w-damping (default 1.0, WOOF's)")
+    parser.add_argument("--obstacle-opt", type=int, default=None, choices=(0, 1), metavar="N",
+                        help="1: buildings as porous immersed obstacles (implicit Brinkman relaxation plus "
+                             "frontal drag and a wall law) from --obstacle-file; WOOF-physics route only; "
+                             "default off")
+    parser.add_argument("--obstacle-file", type=Path, default=None, metavar="PRODUCT",
+                        help="a hex building product of shape (1, nCells) built with woof.static.buildings.VoronoiGrid, "
+                             "for --obstacle-opt 1")
+    for key, text in (("obstacle_solid_fraction", "layer fraction above which a cell layer is solid (default 0.5)"),
+                      ("obstacle_relax_factor", "solid relaxation rate as a multiple of 1/dt (default 10)"),
+                      ("obstacle_drag_coefficient", "frontal drag coefficient (default 0.4)"),
+                      ("obstacle_wall_z0", "wall roughness length in metres (default 0.01)")):
+        parser.add_argument(f"--{key.replace('_', '-')}", type=float, default=None, metavar="X",
+                            help=f"{text}; read only with --obstacle-opt 1")
     parser.add_argument("--inflow-perturbation", action="store_true",
                         help="WRF's inflow perturbation on a regional mesh: cell-blocked theta increments "
                              "(Eckert amplitude, PBL depth, 100 s holds) on the inflow faces' relaxation-zone "
@@ -5701,6 +5890,16 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     # through the conservative cell <-> grid exchange (woof.hex.wrf_hydro_hex; WOOF route only).
     from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
     add_wrf_hydro_arguments(parser)
+    # --nn NN.toml: the opt-in NN column seat on the MPAS route's held physics sources (woof.nn.hex_seat), exported
+    # as WOOF_NN_CONFIG for the forecast's processes (woof.nn.launch.launch_scope).
+    # Declared here, not by woof.nn.launch.add_arguments: parsing a forecast without --nn imports nothing from
+    # woof.nn (tests/test_nn_default_path_imports.py builds this parser).
+    parser.add_argument(
+        "--nn", default=None, metavar="NN.toml",
+        help="opt-in neural-network column physics on the MPAS route from the [nn] table of this TOML file "
+             "(docs/nn-physics.md); mode = \"tap\" records the held physics source as training data and leaves "
+             "the forecast unchanged; \"residual\" and \"replace\" apply a column model, which makes the run "
+             "not MPAS-identical")
     parser.add_argument(
         "--source-table", type=Path, default=None, metavar="FILE",
         help="a point-source table the selected row's seam releases from "
@@ -5988,6 +6187,11 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--jedi-background", action="store_true",
         help="at every history frame also write the JEDI background file")
+    parser.add_argument(
+        "--mcica-seed-mode", choices=("pressure", "cell"), default=None,
+        help="RRTMG McICA seeding: pressure (default, upstream) or cell, a fixed hash of "
+             "cell id and call time for `woof grad` finite-difference and ensemble legs "
+             "(docs/grad.md); not upstream physics")
     parser.add_argument(
         "--jedi-soil-levels", type=int, choices=(4, 9), default=None,
         help="soil layers in the JEDI background; 4 preserves native Noah/Noah-MP, "

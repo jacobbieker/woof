@@ -254,6 +254,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     wired into the forecast route (`--wrf-hydro`, `[wrf_hydro]`), and into
     hex through a conservative cell-to-routing-grid exchange. Unported
     `hydro.namelist` options are refused by name.
+  - Hex's cell-to-grid exchange runs on the GPU by default. The overlap
+    weights stay on the device and nothing goes through the host at the LSM
+    step. Its words match the host route's on the same machine: it sums in
+    scipy's order and copies that host's use of FMA.
+    `--no-wrf-hydro-gpu-exchange` (`[wrf_hydro] gpu_exchange = false`) keeps
+    the host route, which also runs, with a log line, when there is no GPU
+    backend. Measured on a 128x128 1-km LSM grid with a 96k-cell
+    hex mesh: on pb the exchange went from 230 ms (host) to 0.4 ms (A6000),
+    and the whole coupling cycle from 528 to 196 ms. On the M3 Max it went
+    from 15-27 ms to 4 ms; there the routing (about 650 ms) dominates.
   - NEMO 5.0.2: the equation of state, TKE mixing, vertical and lateral
     tracer diffusion, FCT advection and solar penetration. A coupled column
     ocean is driven by WRF's ocean-coupler exchange (SST only for now); a
@@ -274,7 +284,30 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     thickness tendencies, tracer tendencies, monotone tracer advection,
     implicit vertical mixing, vertical transport velocity, the
     split-explicit barotropic stage and whole split-explicit step, and
-    forward mode (clock, cold start, N steps, bitwise restart);
+    forward mode (clock, cold start, N steps, bitwise restart). The step
+    checks its barotropic halo copies against the mesh once per mesh, not
+    with two device reads per stage: on an 8,300-cell, 60-level torus a
+    step takes 36 instead of 130 ms on an A6000 and 110 instead of 245 ms
+    on an M3 Max, with the same words. Its level-independent loops
+    (Coriolis, thickness flux, pressure gradient, del2/Leith, vertical
+    momentum advection, stability, reconstruction and the split step's
+    edge updates) run a thread per edge or cell and level, so a warp reads
+    a column's consecutive levels: a 33,000-cell, 60-level step runs about
+    1.9 times as fast on a (shared) A6000, the same words. Each barotropic
+    subcycle's velocity kernels also add the thickness flux, the
+    corrector's velocity copy and the running sum, so in the default
+    configuration (predictor, two corrector iterations, no SSH2) a
+    subcycle launches 4 kernels instead of 8, the same words: on
+    an M3 Max the 8,300-cell step takes about 44 instead of 52 ms. On CUDA
+    the barotropic stage is captured as a CUDA graph and replayed (the
+    same kernels and arguments, so the same words; switch:
+    `WOOF_OCEAN_CUDA_GRAPHS=0`): 9.9 instead of 10.7 ms on an A6000 at
+    8,300 cells. On CUDA the barotropic transport and baroclinic update
+    also run a warp per edge (the level sums still added in level order)
+    and monotone vertical advection a thread per cell and level, so a
+    column's loads coalesce: the 33,000-cell step takes 42 instead of 58 ms
+    on an A6000, the same words. Metal keeps a thread per column,
+    which is faster there (switch: `WOOF_OCEAN_COLUMN_LANES=1` or `32`);
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
@@ -296,7 +329,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     needs an opt-in, and its shortwave without delta-Eddington (the CCSM3
     shortwave with constant or computed albedos, the coupled shortwave,
     `column_prep_radiation` and the initial shortwave). Only the computed
-    albedos need the opt-in, for glibc's atan;
+    albedos need the opt-in, for glibc's atan. The elastic subcycles check
+    their arrays once per solve and work out their compile options once per numerics mode:
+    120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
+    an M3 Max, with the same words. Each subcycle computes the ocean
+    stress coefficient and solves the velocity in one launch (a vertex's
+    solve reads only its own coefficient), so the step launches 120 fewer
+    kernels: about 30 instead of 33 ms on an M3 Max, the same words;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -318,7 +357,20 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `wind_farm_scheme = "fitch_wrf"` beside upstream's `fitch`, also on hex's
     unequal-area cells;
   - coupled fire spread and smoke;
-  - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`).
+  - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`);
+  - RRTMG-K (`ra_lw_physics = ra_sw_physics = 14`, only as the pair), held
+    bit for bit to compiled WRF 4.7.1 on oracle columns. It reuses the
+    legacy RRTMG kernels and ports only K's differences. `aer_opt`,
+    `icloud = 2/3` and `rrtmg_spectral_output` are refused with K by name.
+    Beyond WRF, whose K ignores it, `ghg_input = 1` gives K legacy RRTMG's
+    time-varying CO2, N2O, CH4, CFC-11 and CFC-12 from the CAMtr table at
+    every radiation call, in both spectra and on both routes; unset, K
+    keeps WRF's fixed gases bit for bit. A K-only WRF namelist still
+    imports without it, as wrf.exe ran; a WRF tree mixing K with another
+    RRTMG-family domain under `ghg_input = 1` refuses at import. Hex runs it on its generic column seam (R1), bit for
+    bit with the WRF route's adapter on the same columns; a 1 h forecast on
+    the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
+    and 0.282 s/step on Metal (M3 Max).
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
@@ -329,6 +381,27 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     at 1 mm falls by 0.02. Evidence:
     [declared-divergences.md](components/hex/docs/declared-divergences.md)
     section 2.
+  - `global-120km-high-top` (or `--vertical-spec` with
+    `woof/hex/data/countries/s2s80-v1.json` on a `--physics-row arwen`
+    global row) for the polar stratospheric drift. The default global rows
+    use MPAS-A v8.4.2's 55 levels and 30 km lid, and native MPAS drifts the
+    same way.
+    On seven held-out 72 h cases scored against WIS2 radiosondes, the
+    90-60S 20 hPa bias goes from −9.98 to −1.75 K and the RMSE from 11.44
+    to 2.32 K. The cost is about +0.3 K at 100 hPa, already present at
+    hour 0. UGWP non-orographic drag does not help. Evidence:
+    [declared-divergences.md](components/hex/docs/declared-divergences.md)
+    section 1.
+  - On the MPAS suite route the 50 km lid needs correction RP8. MPAS
+    v8.4.2's MYNN `qsat_blend` has a pole where p reaches the saturation
+    vapour pressure, which happens above about 35 km. RP8 adds the
+    NOAA-GSL MYNN-EDMF guards. It is on in correct mode (the route's
+    default), and `--physics-correct-skip RP8` turns it off.
+  - The MPAS suite route also runs the declaration's upper damping as
+    MPAS v8.4.2's `&damping` options (`config_mpas_cam_coef`,
+    `config_rayleigh_damp_u` and their level counts and timescale). The
+    operators match MPAS-8.4.2's own lines, compiled natively, bit for
+    bit.
 - **Hex (MPAS) parity with WRF's options.** The goal is for the hex model
   to accept the options WRF does, reusing WRF's column implementations
   rather than copies, and to refuse by name what it cannot yet do. Landed:
@@ -342,7 +415,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - surface inputs on the generic column seam: CLM lake, SLUCM urban on
     per-cell fractions, WUDAPT LCZ classes, Noah and RUC mosaic, Pleim-Xiu
     and the slab with their soil inits, irrigation and `topo_wind = 1`
-    ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md));
+    ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md)).
+    `topo_wind = 1` forms WRF's terrain Laplacian from the mesh's own
+    neighbours (`cellsOnCell`), which is WRF's 5-point form on a quad
+    neighbourhood. It is not recommended on the 120 km globe: WRF's
+    -30 m cut-off removes the surface drag in 32 % of land cells there,
+    and against WIS2 stations it raised the 10 m wind bias by 0.5 m/s.
+    The seam warns above 4 km
+    ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md));
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
     station series, `prec_acc_dt` windows and `acc_phy_tend`, AFWA
@@ -355,6 +435,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `woof hex products` draws these, the AFWA fields and the PSD hail sizes
     whenever a run writes them (HAILCAST and PSD hail on the renderer's hail
     maps; lightning and AFWA as plain field maps with generic colour scales),
+    plus the -10 C reflectivity maximum (`REFDM10C_MAX`: the WRF route's gsd
+    kernel on mesh columns, written when a stream asks for it; max vertical
+    vorticity is not on hex because WRF's grid stencil does not carry over),
     beside the regional severe set (MLCAPE, SRH, shear, EHI, STP, lightning
     threat, gust);
   - `aer_opt = 1, 2`, `w_damping`, grid and spectral analysis nudging, and
@@ -395,6 +478,44 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and excluded regions are refused by name
   ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md),
   [docs/public/HIGHRES-TERRAIN.md](docs/public/HIGHRES-TERRAIN.md)).
+- **Building morphology (opt-in input).** `woof.static.buildings` turns
+  GEM-15 heights (surface minus terrain, with tree and noise filters) and
+  open footprint files (Overture Maps, Microsoft, Google Open Buildings,
+  OSM; GeoJSON or GeoParquet) into per-cell building statistics on the model
+  grid. These are plan and frontal area indices, a height histogram, and
+  WRF's NUDAPT `URB_PARAM` block. Each source's licence and attribution
+  travel with the file. `woof buildings` builds the product for one
+  domain of a WPS namelist. Footprints are read from local files, or
+  fetched for the domain from the public Overture Maps release
+  (`--overture`, anonymous S3, cached, ODbL-1.0 with per-record source
+  licences recorded; `--offline` uses the cache only). With
+  `urban_param_file` set, the SLUCM, BEP and BEP+BEM read that file's
+  `URB_PARAM` (or a `geo_em`'s) as WRF 4.7.1's real.exe and
+  `urban_var_init` do. This includes the SLUCM's NUDAPT arm, which matches
+  WRF bit for bit. Files that cannot be matched are refused
+  ([docs/public/BUILDINGS.md](docs/public/BUILDINGS.md)).
+- **Resolved buildings in LES (`obstacle_opt = 1`, opt-in).** On a domain
+  with spacing up to 500 m, the building product becomes porous immersed
+  obstacles on the WRF route. Faces of solid cells are blocked (Brinkman
+  penalisation), partly built cells get canopy drag, and walls and roofs
+  get log-law stress. One fused CUDA/Metal kernel acts on the RK-stage
+  momentum tendencies. A street-canyon benchmark gives the H/W = 1 vortex,
+  and a cube benchmark gives the wake and horseshoe. Off, or with no
+  buildings, nothing launches and runs are bit-identical. Momentum only,
+  regional grid only. The hex (MPAS) dycore takes the same option on the
+  WOOF-physics route (`woof hex forecast --obstacle-opt 1`), on the Voronoi
+  edges and w faces: a cube on a test sphere at 15 cells per H reattaches
+  at 1.80 H. A real-data check over Manhattan places the model's
+  buildings at their footprint heights (r = 0.99 at 25 m). In lower and
+  midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
+  50 m leaves only about a third of the street area fully open, against
+  nearly half at 25 m. A two-hour rerun on Overture footprints finds a
+  street-canyon vortex in 43-45% of canyons at 25 m, against 30-39% at
+  50 m and none without buildings. The same case runs on Metal through
+  `woof sim`, about 2.4 times slower than a shared A6000. A domain with
+  buildings (or an urban canopy under LES) takes bare-earth 3DEP terrain instead of the sub-km
+  GLO-30 default, which has the buildings in it, and is refused outside
+  3DEP unless a terrain source is named.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
@@ -410,6 +531,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   checkpoints and cannot resume.
 - **More data sources:** the Met Office global and UKV models, DWD ICON
   (global and the machine-learning variant) and additional mapped routes.
+- **GFS lake and snow choices on a downloaded run.** A `[case_data]` table
+  that holds only `gfs_lake_skin`, `gfs_lake_ice` or `gfs_snow_convention`
+  stays on `woof go`'s fetch route (including `--prepare-only`); upstream
+  sends any `[case_data]` table to the declared-inputs route, where a GFS
+  download cannot run. A table with any other key routes as upstream's does.
 - **Applied tooling:** wind-energy siting, hindcasts and power products,
   storm-track planning, and delete-after-commit backpressure and domain
   selection for upstream's Icechunk store export
@@ -420,9 +546,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     at the mandatory levels, by latitude band and lead, including the drift
     per 24 h. The sondes are IGRA v2 and WIS2, read from the Source
     Cooperative icechunk stores.
+  - `woof.hex.station_wind_referee` scores the 10 m wind speed against
+    WIS2 land SYNOP reports by latitude band and lead, globally.
   - `woof.hex.qpe_cell_referee` scores 24 h precipitation against Stage-IV,
     averaged onto the model's cells.
-  - Both compare two arms with a case-paired bootstrap
+  - All three compare two arms with a case-paired bootstrap
     ([obs-referee.md](components/hex/docs/obs-referee.md)).
 - **Performance work.** Metal: out-of-line compilation of the largest units,
   compile prefetch and persisted translations, fewer host syncs per step,
@@ -434,15 +562,35 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   wall per forecast hour, Edinburgh 3 km about 2 %; `WOOF_DIFF6_MULTI=0`
   restores the per-field launches). Advection folds each species' tendency
   zero-fill into its first accumulating launch (`zero_first`, word-identical
-  on CUDA and Metal). Its advection receipts for the RTX 5090 and RTX PRO 6000
+  on CUDA and Metal). On CUDA the four flux-divergence launches take 32 x 4
+  thread blocks instead of 128-wide rows (word-identical; 6-14 % less kernel
+  time at 150-260 points per row on the A6000; Metal keeps the rows). The
+  positive-definite flux and renormalisation launches take 64 x 4 blocks
+  on CUDA (word-identical in fast and strict; 3-11 % less kernel time,
+  e.g. 257 -> 230 us at 50x150x186; `WOOF_PD_BLOCK=BXxBY` overrides, width
+  a multiple of 32; Metal keeps the rows). Its advection receipts for the RTX 5090 and RTX PRO 6000
   (Blackwell) are **not re-pinned**: no Blackwell card was available, so
   `certified_unrepinned` in each fixture's `gpu-receipts.json` records the
-  pins and the commit, and the gate warns rather than fails for those pins. An RK stage's lateral specified/relaxation
+  pins and the commit, and the gate warns rather than fails for those pins.
+  They are marked stale pending a re-record on an RTX 5090; until then the
+  RTX A6000 receipt stands in and gates kernel edits (`certified_stand_in`). An RK stage's lateral specified/relaxation
   rows (u, v, theta, phi, w, mu) are one launch that also absorbs their held
   zero-fills and interior ufuncs (`state_relaxation_multi`, byte-identical;
   about 33 launches, 15 memsets and 15 strided adds fewer per nested domain
   step on the LES, 34 launches fewer per step on a 3 km specified domain;
-  `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches). WRF-Solar's
+  `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches). The launch walks
+  each level's frame rings first and the interior after, so the relaxation
+  runs in dense warps (word-identical; 243 -> 145 us per nested-stage
+  launch at 49x120x150, 479 -> 121 us at 49x120x120; CUPTI kernel time on
+  a shared A6000, default numerics, against the merge base). The step-end
+  `spec_bdy_final` takes its forced fields (u, v, theta, phi, moist scalars,
+  w on a nest) in one table-driven launch while every field has at most 1M
+  cells (`finalize_state_multi`; each cell runs the per-field kernel's own
+  body, byte-identical in fast, strict and WRF-exact on CUDA and Metal;
+  10 fields at 50 levels, CUDA-event minimum on a shared A6000: 73 -> 46 us
+  at 60x60, 160 -> 138 us at 100x120; larger domains keep the per-field
+  launches, which are faster there; `WOOF_LBC_FINAL_MULTI=0` restores them,
+  `WOOF_LBC_FINAL_MULTI_MAX_CELLS` moves the cut). WRF-Solar's
   FARMS surface irradiance (`swint_opt = 2`) is one launch per step: the
   column kernel composes the cloud fraction per cell, merges the MYNN
   boundary-layer cloud, scales the microphysics radii and writes the six
@@ -453,10 +601,59 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   horizontal flux and divergence launches four rows at a time with the face
   and cell metrics formed once (`wrf_smag_flux_s_multi`/`wrf_smag_hd_s_multi`,
   byte-identical; `WOOF_SMAG_MULTI=0` restores one launch pair per row).
+  The u and v Smagorinsky stress divergences read the stress coefficients
+  (rho K, rhoavg kavg) stored once per step (`smag2d_uv_faces`,
+  byte-identical in fast and strict numerics) where each point re-evaluated
+  up to ten of them: the u+v pair 1.3 -> 0.44 ms at 49x120x150 and
+  9.5 -> 2.1 ms at 49x300x300 on an A6000, 4.0 -> 2.0 ms and 32 -> 18 ms on
+  an M3 Max (`WOOF_SMAG_UV_FACES=0` restores the per-point kernels).
+  `km_opt = 2`'s TKE source reads the defor13/defor23 faces stored once
+  (`smag2d_tke_faces`, the `wrf_tke_rhs` statements on the stored words,
+  byte-identical in fast and strict numerics) where each mass point
+  re-evaluated up to six of them (`WOOF_TKE_FACES=0` restores the
+  per-point kernel). The w stress divergence reads the defor13/defor23
+  faces stored once and keeps the stresses' density and K averages at the
+  reader (`smag2d_w_faces`, byte-identical in fast and strict numerics; the
+  earlier stored-stress route moved fast-numerics words through FMA
+  contraction): 9.0 -> 2.6 ms at 49x120x150 and 60 -> 17 ms at 49x300x300
+  on an A6000, 18 -> 3.4 ms and 75 -> 22 ms on an M3 Max
+  (`WOOF_SMAG_W_FACES=0` restores the per-point kernel).
   `WOOF_ACOUSTIC_KPAR=1` takes a level-parallel w''-phi'' solve (32 columns
   x 8 lanes per block; 1.7-2.2x the column kernel's speed per launch on an
   A6000): opt-in, because on CUDA its words are the column kernel's generic
-  build's, not the shape-specialized build's that runs by default. Hex: CUDA
+  build's, not the shape-specialized build's that runs by default. The
+  column w''-phi'' solve itself takes its forward sweep in the forcing loop
+  and its back substitution, damper, phi'' update and p''/alpha''
+  diagnosis in one top-down pass (byte-identical in fast and strict
+  numerics on CUDA and Metal): 725 -> 655 us per launch at 49x228x276 and
+  367 -> 329 us at 49x150x186 on an A6000 (CUPTI kernel time per launch,
+  default numerics and shape-specialized build, this change against its
+  merge base, on a shared GPU; output words compared equal). The specified/nested frame's
+  phi'', w'' and p'' update launches over the ring's columns with level
+  lanes instead of one thread per column of the domain
+  (`advance_frame_phi_w_ring`, byte-identical in fast and strict
+  numerics): 108 -> 25 us per substep at 49x150x186 and 116 -> 33 us at a
+  nested 49x228x276 on an A6000 under the same conditions. On Metal the
+  YSU boundary layer launches 64 column blocks per GPU core per tile
+  (workspace capped at 512 MiB), so on a 40-core M3 Max a 228 x 276
+  domain is one launch instead of four (byte-identical in fast,
+  strict and WRF-exact numerics; Alps 3-1 km on an M3 Max: `ysu_column`
+  46 -> 32 ms of isolated GPU time per d01 step, 10 -> 3 launches;
+  `WOOF_METAL_YSU_TILE_BLOCKS=16` restores CUDA's width, and CUDA keeps
+  its occupancy-bounded 16 per SM). On Metal the Smagorinsky deformation
+  reads u/msfu and v/msfv stored once per face instead of dividing at
+  every stencil point, in every K launcher (km_opt 1, 2, 3, 4 and 5;
+  9-11 % off the 2-D launch, TKE K 15.5 -> 14.4 ms and 3-D Smagorinsky K
+  23.0 -> 21.9 ms at 49x228x276 on an M3 Max, the same words;
+  `WOOF_SMAG_DEFORM_HAT=0` restores the old kernel; CUDA keeps it,
+  because the extra pass did not pay there). MRF, New SAS and the
+  registry column cumulus (BMJ and its siblings) take the same Metal tile
+  rule as YSU, 2,048 columns per core under the byte cap (byte-identical
+  in every numerics mode; 49x228x276 on an M3 Max: MRF 8.4 -> 6.5 ms,
+  New SAS 54.6 -> 33.1 ms per launch, BMJ 16.3 -> 12.5 ms on 63k
+  columns, EEPS 14.4 -> 11.6 ms at 49 levels;
+  `WOOF_METAL_COLUMN_TILE_BLOCKS` sets the width in 32-column units;
+  CUDA keeps its occupancy-bounded tiles). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
@@ -467,8 +664,475 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`WOOF_METAL_ADDRESS_ASYNC=0` restores the eval). Together they remove
   about 96 % of the queue drains on that mesh, and the hour takes 0.59x the
   wall time on edi-vr and 0.64x on a uniform 12 km mesh. Both are
+  byte-identical. Hex on CUDA: a forecast keeps its kernel images in the
+  box's kernel cache (`<kernel cache root>/cupy`) instead of each run's
+  `--scratch`, so a regional run in a fresh work dir no longer recompiles
+  in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
+  byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
+  cache).
+  Hex regional scalar transport reads each edge's advection stencil once
+  per (edge, level chunk) and walks the tracers
+  (`transport_edge_values_regional_hoist_v841`, byte-identical in fast and
+  strict numerics on CUDA and Metal; Alps 3 km variable-resolution, 11
+  tracers: 28 -> 2-3 ms per launch on an M3 Max, 15 -> 0.55 ms on an A6000;
+  `WOOF_HEX_REGIONAL_EDGE_HOIST=0` restores the element kernel).
+  Hex regional forecasts keep each LBC interval's expanded driving
+  tendencies for the whole interval (up to 256 MiB per rank;
+  `WOOF_HEX_LBC_TEND_CACHE_MB` sets the cap, 0 expands on every call), and
+  MPAS physics producers that write a whole resident pool field write it in
+  place instead of copying through a private buffer
+  (`WOOF_HEX_POOL_DIRECT=0` restores the copy). Both are byte-identical in
+  fast and strict numerics on CUDA and Metal (Alps VR 1 h: Metal median
+  step 241 ms against 245-294 ms off).
+  Hex MYNN on Metal gives every column its own worker (within the
+  one-eighth-of-free-memory bound) instead of 128 per GPU core, so the
+  column loop no longer strides: on the 14,751-cell Alps VR mesh
+  `mynn_mmm_run` drops from 112 to 50 ms a step, byte-identical
+  (`WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR` sets the per-processor cap on
+  either backend; CUDA keeps 128 per SM).
+  Hex `woof hex moving`: the resident forecast process prepares the next
+  region beside the running one only when the host has room for a second
+  copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
+  `WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB`, default 2, is the room kept
+  free; the copy is priced at the last preparation's peak growth times
+  `WOOF_HEX_MOVING_PREPARE_HOST_MARGIN`, default 1.25), and on Linux it gives the freed heap back at each move. A skipped
+  preparation makes the move slower; the words are the same.
+  The Metal facade's `get(out=)` reads the evaluated buffer in
+  place from unified memory and copies once, into `out`: the history
+  writers' per-field staging into page-locked blocks takes about half the
+  time (40 Edinburgh 3 km fields: 51-86 ms against 111-143 ms median,
+  byte-identical; `WOOF_METAL_DIRECT_OUT=0` restores the two copies).
+  WRF on Metal: the Smagorinsky row kernels' by-value address
+  tables beside their grid pointers, and the spec-zone ring copy's device
+  table, are resolved to the buffers they name and ordered by MLX instead
+  of a queue drain before and after each launch (Edinburgh 3 km: 26.5 to
+  10.8 blocking drains per step, byte-identical;
+  `WOOF_METAL_RESOLVE_DEVICE_TABLES=0` restores the drains). Hex on Metal:
+  the solve-region checks, the physics seam's per-species tables and the
+  MPAS sea-ice driver tables are resolved the same way (Edinburgh 3 km
+  variable-resolution: 23 to 0 drains around those launches per step,
+  byte-identical). A host upload (`cp.asarray`) is held as the array
+  built from host memory, not as a lazy contiguous copy, so reading a
+  freshly uploaded table no longer waits for the GPU queue (hex Edinburgh
+  3 km variable-resolution: the WSM6 recovery table's read from 14 to
+  0.1 ms per step, byte-identical; `WOOF_METAL_READY_UPLOADS=0` restores
+  the old path).
+  A device-to-device `copy_from_device(_async)` between facade arrays (the
+  wrfout writer's per-field snapshot) is one ordered device copy instead of
+  a read back and a write: the writer's host time per Edinburgh 3 km frame
+  falls from 761-1061 ms to 470-576 ms, byte-identical
+  (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
+  Metal: woof's glibc binary32 `logf`, `expf` and `powf` ports
+  (`gfk_log`, `gfk_exp`, `gfk_pow`) compute in binary64, which Metal
+  emulates in integer arithmetic. They now first evaluate the same
+  formula in float pairs and keep that word only when no binary32 rounding
+  boundary lies within its error bound, and otherwise run the binary64
+  body. The words are identical by construction, and every binary32
+  input (logf, expf, and powf at 20 exponents) plus 2^30 random powf
+  pairs was checked under both subnormal modes
+  (`tools/metal_gfk_fast_grade.py`). The surface-layer kernel
+  `sfclayrev` is 5.5x faster (55x83: 11.70 to 2.14 ms). On the hex
+  Edinburgh 3 km variable-resolution forecast, WSM6 drops from 22.5 to
+  5.2 ms per step, the surface layer from 21.0 to 6.6 ms and Grell-Freitas
+  from 8.3 to 4.6 ms; one forecast hour integrates in 44-47 s instead of
+  50-57 s, with byte-identical history.
+  `WOOF_METAL_GFK_FAST=0` restores the binary64-only path.
+  The Metal facade's `ReductionKernel` folded each output on one thread.
+  An exact, order-free and idempotent fold (`a | b`, `a || b`, `a & b`,
+  `a && b`, a concrete reduce type and an `out = a` post-map) over 4096
+  or more elements per output, with fewer than 2048 outputs, is now folded
+  in slices and then across the slices, giving the same value (hex Edinburgh 3 km
+  variable-resolution: Noah-MP's surface identity check from 3.6 ms to
+  0.16 ms per step and the transport species-word check from 1.4 ms to
+  0.18 ms, byte-identical; `WOOF_METAL_SPLIT_REDUCTIONS=0` restores the
+  serial fold).
+  `WOOF_METAL_GPU_TIMES` times each kernel. Its per-launch command
+  buffers also hold the lazy MLX work the launch waited on, and their GPU
+  intervals overlap, so a facade write (`woof_copy_4`) used to carry other
+  work's time (on the Alps 3 km/1 km pair, 883 of 2047 timed ms per step).
+  `WOOF_METAL_GPU_TIMES_ISOLATE=1` is a profiling mode with the same words:
+  each launch runs alone, after its lazy inputs are evaluated and counted
+  apart, and writes are keyed by their Python call site. There the facade's
+  writes cost 45 ms of 1357 per step (Alps hex variable-resolution mesh:
+  65 of 667 ms, where `mynn_mmm_run` is the top kernel at 107 ms).
+  The open-boundary frame zero and copy (`zero_frame`, `copy_frame`)
+  launch one thread per frame element instead of one per buffer element,
+  storing the same words (Alps 1 km nest: about 13x faster on Metal and 7x
+  less kernel time on CUDA).
+  The `woof.radtran` spectral diagnostic (`radtran_*`) is cheaper, keeping
+  the same words. `radtran_disort.cu` compiles in about 6 minutes in
+  0.55 GB, against over an hour in over 17 GB before: its helpers are kept
+  out of line on CUDA. Its workspace is interleaved across threads on CUDA,
+  and on CUDA its chunk is sized from free device memory. Together these
+  make the 16-stream solver about 9x faster on an A6000. The Hu & Stamnes cloud optics
+  are evaluated vectorized, with `np.interp`'s own multiply-add (fused or
+  not, as numpy was built). The layer optics run on host threads over
+  blocks of columns. On the Alps 3 km/1 km pair, one 550 nm call fell from
+  about 190 s to 11 s, and a three-wavelength call from about 570 s to
+  28 s. With an output every 10 minutes, the hour costs 209 s instead of
+  2,578 s; with no diagnostic it costs 61 s. Eight wavelengths in one call
+  on such a domain used to hold over 13 GB of host memory. The
+  representative wavelengths are now solved in groups bounded by
+  `WOOF_RADTRAN_GROUP_BYTES` (default 2 GiB), with the same words: 6,000
+  columns x 8 wavelengths peak at 2.6 GB instead of 3.6 GB.
+  Each block of columns runs every wavelength of a group with one cache of
+  what does not depend on wavelength. That cache holds the layer air and
+  gas columns, the cloud radius selections and the REPTRAN pressure,
+  temperature and vmr brackets. All eight REPTRAN lookups share one grid,
+  so one bracket serves every species looked up without a vmr (H2O, looked
+  up with its vmr, takes its own vmr-interpolated bracket). The blocks write straight into
+  the solver's arrays, and the AFGL splice is written in place. The words
+  are unchanged: 30,000 columns x 8 wavelengths take 15 s instead of 23 s
+  on the A6000 host. Night columns are dropped before the AFGL splice,
+  cloud and aerosol preparation, not only before the solve, and every day
+  column keeps the AFGL levels of the whole set (the same words). That
+  saves about 0.35 s of a 4.1 s call at 100,000 columns with 30 % in
+  daylight (M3 Max).
+  The RRTMG band and g-point output (`rrtmg_spectral_output = "bands"` or
+  `"gpoints"`) keeps only the surface and top levels it publishes, with the
+  same words: a 12,000-column shortwave call with g-points fell from about
+  2.9 s to 0.3 s on an A6000, and with bands from about 0.5 s to 0.15 s.
+  Multi-scale Kain-Fritsch (`cu_physics = 11`) launches 256 columns per SM
+  instead of 64, so both of its resident blocks stay busy: `mskf_column`
+  fell from 32.5 to 11.0 ms per step on Edinburgh 3 km (A6000),
   byte-identical.
-  `WOOF_METAL_GPU_TIMES` times each kernel.
+  Hex: the composite step's scheme health checks (microphysics, YSU,
+  Grell-Freitas, Noah-MP's surface identity, the lagged heating rate and
+  the radiative-carrier finiteness) record on the device and are read
+  once, just before the step commits, so a failure is still refused and
+  rolled back by the step that produced it (Edinburgh 3 km on Metal: 257
+  to 247 ms per step, byte-identical; `WOOF_HEALTH_READBACK=immediate`
+  restores the per-check reads).
+- **Lakes.** `lake_state_source = "era5"` or `"auto+era5"` (opt-in) starts
+  lakes outside GLSEA from ERA5's FLake lake state (keyless, Google ARCO),
+  including the CLM lake column's profile, instead of the forcing's skin (on
+  the GFS route, the nearest GFS water: 286-291 K for the Alpine lakes on
+  2026-11-09). The forcing's ice analysis stays in charge of which lakes are
+  frozen. Against Eawag's Simstrat on six Swiss lakes, the error of the
+  starting lake temperature falls from 4.5 K (warm) to 2.7 K (mostly cold),
+  but ERA5 is worse at Constance and Maggiore
+  ([docs/lake-state-initialization.md](docs/lake-state-initialization.md)).
+  `woof go --lakes clm` turns on WRF's CLM lake model with WPS bathymetry and
+  this initial state on every domain in one opt-in; `--lakes ic` sets only the
+  initial state ([docs/lakes.md](docs/lakes.md)).
+  `[static.highres] fields = "lakes"` (opt-in) takes the lake extent from
+  CGLC-MODIS-LCZ 100 m land cover. WPS's 30-arc-second lakes cover glacier
+  and rock and sit about 1 km north of the shoreline: on the Alps 1 km
+  domain, 480 lake cells above 2000 m became 8 real reservoirs
+  ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md)).
+  **Recommended on the WRF route where lakes matter:** `--lakes clm` with
+  `fields = "lakes"` (both stay opt-in). On the Alps 1 km case, lake-shore
+  T2 bias/RMSE went from +1.66/2.34 K to +0.43/1.49 K and 10 m wind RMSE
+  from 1.86 to 1.44 m/s (25 SMN stations, 24 h). Caveats
+  ([docs/lakes.md](docs/lakes.md#recommended-settings)): the Great Lakes cool
+  2-3 times as fast as GLSEA (WRF's CLM lake), lake-effect cores are
+  over-intense (50 mm FSS .81 to .70 at 9 km on Buffalo, Nov 2022),
+  `lake_depth` needs `woof fetch-geog` (unless `use_lakedepth = 0`), and hex
+  R2 lakes start about 1.4 K
+  cold.
+  On the hex MPAS-suite route, `--physics config_clm_lake_backend=hex-cuda`
+  (opt-in) runs WRF's CLM lake on the LAKEMASK cells of `--surface-statics`,
+  bitwise to WRF's lake kernel on the same inputs. It starts from lakeini and
+  is refused with SST updates, OML, restarts, checkpoints, moving regions and
+  multi-rank or LTS runs
+  ([mpas-physics-seam.md](components/hex/docs/manual/mpas-physics-seam.md)).
+- **Space weather (opt-in, beyond WRF/MPAS).** `solar_tsi_opt = 1` drives
+  every shortwave scheme with a time-varying total solar irradiance (the NOAA
+  NRLSSI2 CDR with `solar_tsi_source = "nrlssi2"`, or your own CSV/netCDF)
+  instead of WRF's fixed 1370 W m-2. `solar_tsi_mode = "absolute"` uses the
+  measured TSI (about -0.6 % shortwave); `"relative"` keeps 1370 and adds only
+  the solar-cycle and sunspot variability (TSI fell by about 2 W m-2
+  between 1 and 8 May 2024). It works on the WRF route and on hex's generic column seam
+  (`--physics solar_tsi_opt=1`), but not yet on hex's MPAS-native
+  radiation suite, and it is refused with FARMS (`swint_opt = 2`).
+  `solar_ssi_opt = 1` adds the spectral change: the NOAA CDR's daily solar
+  spectrum moves RRTMG SW's source between its 14 bands (200-263 nm about
+  +2.5 % in 2024 against the cycle-24 mean) with the total unchanged, for
+  legacy RRTMG and RRTMG-K; NRLSSI2's 200-263 nm band follows SORCE's observed
+  one (daily correlation 0.79, the same 27-day amplitude). With RADM2
+  chemistry it also scales Fast-TUV's extraterrestrial flux per wavelength
+  bin: solar maximum against minimum moves J(O1D) by about 0.2 % and J(NO2)
+  and J(HCHO) by about 0.1 % in the troposphere. Hex's generic column seam
+  takes both, bit for bit the WRF route's, and hex's MICM chemistry with
+  TUV-x photolysis takes the same factor on TUV-x's 156 bins (120-735 nm).
+  `woof spacewx ionosphere` computes an IRI-type climatological ionosphere on
+  the GPU on a global grid: foF2, hmF2, foE, F1 and vertical TEC, from the
+  CCIR/URSI maps, IGRF-14 and F10.7 (GFZ). Against the IGS GNSS TEC maps it
+  has a correlation of 0.90 on 1-3 May 2024 and 0.81 during the 10-12 May
+  storm, and it reads about 25 % low at this solar maximum
+  (`tools/spacewx_gim_validate.py`). `--storm` adds a storm-time foF2
+  correction, woof's own fit of filtered ap on CODE GNSS maps (2015-2023).
+  In the 2024 storms it raises the pattern correlation with GNSS TEC, and
+  it lowers the storm-hour foF2 RMSE at 12 ionosondes from 2.46 to 2.14 MHz.
+  It overshoots the May 2024 negative phase.
+  `spacewx_ionosphere_opt = 1` writes the
+  same ionosphere into every WRF-route history frame (`IONO_TEC`,
+  `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
+  forecast; hex and streamed domains refuse it for now. `woof spacewx aurora`
+  places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
+  observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
+  through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
+  oval (`AURORA_ZONE`, `AURORA_DIST`, `MAG_LAT`, `MAG_LT`) into every WRF-route
+  history frame from the start's Kp. `woof spacewx aurora --energy` adds the
+  precipitating electron and ion energy and number fluxes and the hemispheric
+  power of OVATION Prime 2010 (a port of NOAA's public-domain IDL code, which
+  reproduces its test outputs; the coefficients are fetched and pinned), and
+  the Knipp et al. 2004 Joule power from OMNI2's PC(N) and Dst. Against POES
+  TED electron flux over the 24-25 Oct 2011 storm, the per-pass correlation is
+  0.48-0.61 and the model reads about 2.5 times higher. `spacewx_aurora_opt =
+  2` adds OVATION's electron energy flux, mean energy and ion energy flux
+  (`AURORA_EFLUX`, `AURORA_EMEAN`, `AURORA_IFLUX`) to those history frames,
+  from the solar wind at the start. `woof spacewx particles` turns the GOES
+  integral proton flux (OMNI2 or SWPC real time) into polar-cap ion-pair rates
+  and NOx/HOx production during solar proton events (Bethe stopping in air,
+  35 eV per ion pair). Against the CMIP7 rates, the ratio is 0.4-1.0 at 0.1-100
+  hPa. `spacewx_epp_opt = 1` adds that NO, OH and HO2 to RADM2 chemistry in
+  the polar caps, from the GOES flux at the start. With `--electron-energy-flux`
+  and `--electron-mean-energy` (OVATION's eflux and mean energy) the command
+  adds the auroral electrons' ion-pair rates and NOx (Fang et al. 2010). They
+  deposit above about 85 km, so they are a diagnostic, not a forecast source
+  ([docs/spacewx.md](docs/spacewx.md)).
+- **A plan, not yet code, for gradients and hybrid physics.**
+  [docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md](docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md)
+  studies gradients of a forecast's fit to observations and opt-in
+  neural-network column physics. woof has no adjoint or autodiff code today.
+  The plan starts with adjoint-free sensitivities (finite-difference and
+  ensemble), then one differentiable column scheme, NN physics through the
+  existing column seams, and later a WRF dry-core adjoint checked against
+  WRFPLUS. Default runs are not changed.
+  The first tools exist (experimental, reached only through `woof grad`):
+  `woof grad obs` reads a forecast window's surface, upper-air, aircraft
+  and radio-occultation observations from the bkr/obs stores, and
+  `woof grad cost` scores a WRF or hex history against them as an
+  error-weighted observation cost `J_o`, pairing each observation with the
+  nearest history frame and freezing the accepted set so perturbed runs
+  are scored on the same observations. `woof grad direction`,
+  `woof grad perturb` and `woof grad fd` give finite-difference
+  sensitivities of `J_o`. They write a perturbed restart state, continued
+  with `woof go --restart` (WRF route) or `--restart-from` with
+  `--da-analysis` (hex), and turn the scored plus and minus runs into a
+  derivative, per scale and per observation type. `woof grad members`,
+  `woof grad ens`, `woof grad letkf` and `woof grad efso` give ensemble
+  sensitivities and each observation's impact on the forecast cost
+  (EFSO), using the LETKF's own weights ([docs/grad.md](docs/grad.md)).
+  An opt-in `--mcica-seed-mode cell` (`woof go`, hex forecast door, or
+  `WOOF_MCICA_SEED_MODE`) freezes RRTMG's McICA cloud seeds to a hash of column
+  and call time, removing the +-5 J seed noise that one pressure ulp adds to a
+  leg; the default keeps upstream's pressure-digit seeding byte for byte, and
+  RRTMGP refuses the mode.
+  On a regional case, the finite-difference and ensemble sensitivities
+  agree in sign and pattern on the WRF route at 9 km and at 3 km, though
+  ES and EFSO at the most-correlated points overstate magnitudes by about
+  2-8x; an independent member set is within about 0.3-3x. On hex they are
+  dominated by noise at 12 km as well as at 3-5 km, so the problem is the
+  route, not the resolution. Later gradient work may use 3 km on the WRF
+  route, and hex gradient work waits on a diagnosis (plan, gate G0 and
+  P0.5).
+  `woof.grad.bridge` hands woof's arrays to PyTorch and back: DLPack with
+  no copy on CUDA (with a stream handoff), no copy from Metal into
+  torch-MPS and one device copy back, and a refusal for any unnamed copy or
+  any shared view that autograd could see overwritten
+  ([docs/grad.md](docs/grad.md#the-tensor-bridge)).
+  `woof.grad.kessler` is WRF's Kessler warm-rain scheme written in PyTorch,
+  so autograd gives its tangent-linear and adjoint for a column batch. It
+  is checked against woof's own `kessler_column` kernel on the WRF oracle
+  fixture, passes the dot-product test (float64 to 1e-15, float32 to 1e-7
+  on CUDA) and runs as a column model on the NN seat. Its backward pass
+  costs 8x the kernel eager and 4-5x compiled on CUDA, so the 3x cost gate
+  is not met. `tools/grad_kessler_g1.py` measures all of this
+  ([docs/grad.md](docs/grad.md#a-differentiable-scheme-kessler)).
+  The WRF dry-core adjoint has started, kernel by kernel
+  ([docs/dev/P3A-WRF-DRYCORE-ADJOINT.md](docs/dev/P3A-WRF-DRYCORE-ADJOINT.md)).
+  `woof.grad.wrfplus` has the tangent-linear and adjoint of the acoustic
+  `advance_uv` in binary64 (CUDA, host) and binary32 (CUDA, Metal). They
+  pass the dot-product test to 1e-15 and agree with WRFPLUS 4.7.1's
+  `g_/a_advance_uv` to about 1e-16, using a driver in
+  `tools/wrfplus_oracle`. `advance_w` with `calc_p_rho` (woof's
+  `advance_w_phi`) follows the same pattern: dot-product test to about
+  1e-14, WRFPLUS `g_/a_advance_w` and `g_/a_calc_p_rho` to about 1e-15,
+  and the float build reproduces the strict primal's words. The w damper
+  (`damp_opt=3`) is refused, since WRFPLUS has none. `calc_coef_w`
+  (woof's `calc_coefs`: c2a and the implicit w factors) matches WRFPLUS
+  `g_/a_calc_coef_w` to about 1e-15. `advance_mu_t` (woof's
+  `advance_mu_th` and the specified-frame mu/theta/muts update) matches
+  WRFPLUS `g_/a_advance_mu_t` and `g_/a_spec_bdyupdate` to about 1e-15,
+  with map factors. `small_step_prep` with `calc_p_rho` and
+  `small_step_finish` (woof's `small_step_init_*`/`_finish_*`) match
+  WRFPLUS within the oracle test's 1e-12, and a chained test checks whole acoustic
+  substeps. The RK-stage glue (`calc_p_rho_phi`, `rk_step_prep`'s
+  `couple_momentum` and `calc_ww_cp`, `rk_addtend_dry`, `set_w_surface`)
+  matches WRFPLUS within 1e-12 and, in strict mode
+  (`GPUWM_WRF_EXACT=1`), the primal word for word. A
+  chained test runs one whole RK stage with the big-step tendencies held.
+  Flux-form advection (woof's strict `flux_div_{scalar,u,v,w}`, WRF
+  `advect_scalar/u/v/w`) has its TL/AD for periodic, open and specified
+  boundaries, map factors, horizontal orders 3-6 and vertical orders 2-6.
+  It matches WRFPLUS `g_/a_advect_*` to about 1e-16 on the points where
+  woof and WRF compute the same thing (see the design note), and the float build
+  reproduces the strict primal's words.
+  The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
+  0.85-3.2x the glue and 4.0-5.2x advection (on a shared card). The
+  measured step projection (4.6-4.9x) is in the design note. The forecast path does not import any of it.
+- **Variational data assimilation (planned; first pieces landing).**
+  [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
+  WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
+  transforms, a conventional-observation 3D-Var checked against compiled
+  WRFDA 4.7.1, background-error statistics from woof forecasts, and hybrid
+  3DEnVar with the LETKF members. Radar, GOES and radiances come later;
+  radiances need an opt-in CRTM. It also scopes opt-in gradient and
+  neural-network options inside the DA. 4D-Var waits for the adjoints in
+  the plan above. So far `woof.da.var` reads WRFDA's `be.dat` and has a
+  binary64 reference of the control-variable transform `U` and its
+  adjoint; on WRFDA's tutorial case both equal a compiled WRFDA 4.7.1 word
+  for word. `DeviceU` runs `U` and `U^T` as CUDA or Metal kernels: the
+  binary64 oracle tier gives the reference's words, and the binary32
+  production tier gives the same words on CUDA and Metal under strict
+  numerics. It also reads OBSPROC's `obs_gts` ASCII the way WRFDA does:
+  time window, domain check, wind rotation, `q` from `rh`, and the
+  per-type error rules. On the tutorial case it keeps the same
+  8,913 of the file's 9,061 reports as WRFDA, in the same order, with the
+  same grid indices and errors. `VarCost` and `minimise_cg` add the cost
+  function, its gradient and WRFDA's conjugate-gradient minimiser in
+  WRFDA's operation order, printing WRFDA's iteration log.
+  It computes WRFDA's innovations, background
+  check and `Jo` for the surface, sounding, aircraft, wind-profile, AMV,
+  scatterometer, GNSS precipitable water, GNSS-RO refractivity and satem
+  thickness types, with the same accepted observations as WRFDA and its
+  initial cost `J_0` on the tutorial case, and their linearised operators
+  and adjoints.
+  `woof var --be be.dat --obs ob.ascii --first-guess wrfinput_d01 --out
+  BUNDLE` (experimental) runs the whole 3D-Var and writes a
+  `wrf-analysis-bundle/1` that `woof run --analysis BUNDLE` starts from
+  ([docs/var.md](docs/var.md)). On the tutorial case it takes the same 29
+  iterations as WRFDA, with every logged cost and gradient within 1e-14
+  relative, and its analysis rounds to WRFDA's `wrfvar_output` word for word.
+  `--tier oracle` runs on CUDA or Metal with the same words;
+  `--tier production` (binary32) gives one digest on both. The production
+  tier's 50-iteration minimisation on a synthetic 200x200x50 case with
+  ~10^5 observations takes 3.1 s on an M3 Max (Metal) and 3.2-4.5 s on a shared
+  A6000 (targets 20 s and 5 s; the tutorial case: 1.4 s and 2.3 s), with
+  H' and H'^T on the device as an ordered gather (no atomics).
+  `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
+  `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
+  ensemble members minus their mean): WRFDA's gen_be stages for
+  `cv_options` 5 and 7 with `bin_type` 5 only. On WRFDA's own gen_be sample
+  forecasts it reproduces WRFDA 4.7.1's gen_be to 1e-7 relative (cv5; the
+  residual is WRFDA's `pi = 3.1415926` sine-transform tables in psi and chi)
+  and to 3e-12 for cv7, and WRFDA's 3D-Var runs the woof-made file as its own.
+  Section 11 plans geostationary imager
+  radiances for initial conditions: Google's SatWeave mosaic and the native
+  GOES ABI, Himawari AHI and Meteosat imagers, through an opt-in CRTM into
+  the LETKF first and into 3D-Var later. Default runs are not changed.
+- **SatWeave imager reader (opt-in; in progress).** `woof fetch satweave`
+  subsets and caches Google's SatWeave geostationary mosaic (17 bands at
+  0.1°, 2016 onward; CC BY 4.0, attribution kept in every provenance
+  record) over anonymous HTTPS. It reconstructs each pixel's satellite and
+  view geometry, which SatWeave does not publish, from band availability
+  and the sectors' sub-satellite longitudes
+  ([docs/satellite-imagers.md](docs/satellite-imagers.md)). `woof fetch geo`
+  reads native GOES ABI L1b (GOES-16 to 19) from the `bkr/geo` virtual
+  Icechunk stores on Source Cooperative, which reference NOAA's own files.
+  It keeps NOAA's calibration and quality flags and gives the true per-pixel
+  geometry. The same door reads Himawari-8/9 AHI (`--satellite himawari9`)
+  from NOAA/STAR's sectorized CMI stores, which hold brightness temperature
+  and reflectance with no quality flag, and Meteosat SEVIRI (`--satellite msg`,
+  `rss` or `odegree`) and MTG FCI (`--satellite fci`) from Satpy-calibrated
+  stores. GK-2A is refused, and FCI cannot be simulated: CRTM v2.4 has no AMI
+  or FCI coefficients. `woof.rtm` adds an opt-in clear-sky
+  infrared operator. It uses JCSDA CRTM v2.4+ (CC0), which you build
+  yourself with `python -m woof.rtm.crtm_build`, together with CRTM's own
+  coefficients. It gives brightness temperatures and Jacobians from woof
+  columns or from an isobaric analysis. `woof.da.obs_radiance` (opt-in) turns a scene
+  into LETKF batches. It thins the scene, runs H(x) per member through
+  CRTM, screens for clear sky, applies a static bias correction and a gross
+  check, and places each observation at its weighting-function peak.
+  `woof var --radiance-scene DIR` (opt-in) assimilates clear-sky imager
+  radiances in 3D-Var. It uses WRFDA's channel selection and errors, its
+  clear-sky QC, GSI thinning and the CRTM K-matrix, and adds VarBC. The bias
+  coefficients join the control vector with WRFDA's predictors,
+  preconditioning and `VARBC.in`/`VARBC.out` files
+  (plan section 13). The adjoint holds to 1e-13 and the gradient check to
+  1e-6, and the production-tier words are the same under fast and strict
+  numerics. The microwave sounder (WIS2) records plug into the same term.
+- **WIS2 observation reader (opt-in; in-situ families first).**
+  `woof obs wis2 fetch` reads the WIS2 Global Cache archive
+  (`bkr/obs/wis2.icechunk` on Source Cooperative, anonymous). It covers
+  land stations (BUFR and SYNOP TAC), ships and buoys, radiosondes,
+  aircraft and wind profilers in a time window and box. It applies the
+  store's quality flags and keeps the latest correction of each report.
+  It merges each sounding's TEMP parts, and it checks every part against
+  the rest of its launch. A part whose pressures are ten times too large is
+  detected and refused; the US Part D (`TEMP_DD`) objects in the store
+  have this fault. Errors are WRFDA's OBSPROC table (`obserr.txt`). It
+  writes a `gpuwm-obs.table.v2` table for the LETKF (`--table`) and
+  OBSPROC's `obs_gts` ASCII for `woof.da.var` (`--obs-gts`). Profilers go
+  only to `obs_gts`, because the LETKF's point operators are
+  pressure-level only. The LETKF uses aircraft rows (WIS2, ACARS and
+  PrepBUFR alike) only with `woof local-da --assimilate-aircraft` (opt-in);
+  ship rows have no operator yet. WIS2 has no US AMDAR. Satellite point
+  winds are opt-in families: `--families amv,scat` reads atmospheric
+  motion vectors (WMO template 310077 only; quality index without forecast
+  at least 80; geostationary, plus polar AVHRR, MODIS and VIIRS) and ASCAT
+  10 m winds (the selected ambiguity; land, ice and cell-quality flags
+  refused), with WRFDA's SATOB and QSCAT errors and an optional
+  `--thin-km`. AMVs go to both outputs. Scatterometer winds go to
+  `obs_gts`, and to the table under a label the LETKF has no operator for
+  yet. WIS2 has no GOES AMVs. `--families ro` reads GNSS-RO refractivity
+  profiles (template 310026: COSMIC-2, FY-3, PAZ and others relayed by JMA
+  and CMA; EUMETSAT's products carry bending angles only and are counted,
+  not used). Each level sits at its tangent point, 0-30 km, with WRFDA's
+  gpsref error and the observed-gradient (super-refraction) checks of
+  `da_qc_gpsref`. Profiles go to the table (`ro_refractivity_tangent_point`,
+  the LETKF's existing refractivity operator) and to `obs_gts` as FM-116.
+  `woof obs wis2 radiances` reads AMSU-A, MHS and ATMS footprints (Metop-B
+  and -C, S-NPP, NOAA-20 and -21) to one `.npz` per instrument. Sensors
+  CRTM has no coefficients for are counted and refused.
+  `woof.da.obs_mw` (opt-in) turns them into LETKF batches. It uses CRTM
+  v2.4 clear sky over open sea, WRFDA's channels, errors and screens
+  (`da_qc_amsua`, `da_qc_mhs`, `da_qc_atms`: scan edges, scattering
+  index, background cloud, 15 K and 3 sigma), and a static bias
+  correction. Each channel sits at its Jacobian peak. Metop-B's channel 15
+  is dead, so its scattering check uses the channel 1-2 cloud liquid
+  retrieval instead. The 3D-Var radiance term comes later
+  ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)). In one real case
+  (GEFS ensemble, Europe and the North Atlantic, 2026-10-28 12Z) the
+  WIS2 satellite and aircraft families reduce their own O-A, and
+  MHS and ATMS departures fall on columns that were not assimilated as
+  well. Against held-out radiosondes the analysis is neutral to slightly
+  better without AMVs. With AMVs, upper-level winds are 3-4 % worse
+  (plan 12.8 item 6).
+- **Neural-network column physics (opt-in, inference only; in progress).**
+  `woof.nn` loads a column model (a manifest with weights hash, units,
+  normalisation and trained input range) and runs it with PyTorch on CUDA
+  (DLPack, no copies; `recast-woof[nn-torch]`, never a base dependency) or
+  MLX on Metal (PyTorch artefacts also run there, on torch-MPS). A safety layer refuses, clips or falls back to the physics
+  scheme outside the trained range, and limits outputs, keeps moisture
+  positive and can fix column budgets. `woof run`/`woof go --nn NN.toml`
+  with `mode = "tap"` records a WRF-route scheme's column inputs and
+  physical-rate tendencies to Zarr or Icechunk as training data, leaving the
+  forecast byte-identical. `mode = "residual"` or `"replace"` applies a
+  model at the same seat through the couplers' own path, with a fallback to
+  the scheme outside the trained range. Such runs are not WRF-identical:
+  `GPUWM_WRF_EXACT=1` refuses them, and checkpoints bind the artefact.
+  `python -m woof.nn.train TAP OUT` trains a small MLP on a tap with NumPy
+  alone, and `tools/nn_seat_cost.py` measures the seat's per-step cost; a
+  worked 24 h, 9 km example (PBL emulator, CUDA and Metal) is in
+  [docs/nn-physics.md](docs/nn-physics.md). `woof hex forecast --nn`
+  puts the same seat on the hex MPAS route. It taps or adjusts the held
+  physics source (`scheme = "total"`, theta and moisture rates) before
+  SPPT, IAU and nudging. The tap uses interior cells only, an applying
+  model skips the specified zone, and the hex carrier binds the artefact.
+  `woof.nn.hex_backend` is an example `woof.hex.rows` backend that adds a
+  model to a column batch.
+  On hex, 5-day emulator runs on a uniform and a variable-resolution mesh
+  were stable on CUDA (the uniform one also on Metal) and kept the mass
+  budget. Trained on six cycles over four seasons (P2.6), the model
+  passes the plan's G2 gate. T2 is not worse than the physics run at 95 %
+  on either mesh, and better on the uniform mesh on CUDA (-0.06 K).
+  Most column calls (94-97 %) still fall back to the schemes in the
+  evaluation week, because its stratosphere lies outside the training
+  range. Results and per-step costs are in
+  [docs/nn-physics.md](docs/nn-physics.md).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
@@ -491,6 +1155,8 @@ carry none of the following. Each is off until selected:
 - WRF routines that are not freely licensed come from your own WRF tree
   (`WOOF_WRF_SOURCE`).
 - GEM-15 terrain is CC-BY-4.0 and needs its attribution.
+- Building footprints from Overture, Microsoft and OSM are ODbL-1.0; a
+  derived buildings file must carry their attribution.
 
 ### Install on a Mac
 
@@ -542,8 +1208,12 @@ on it:
     12 km geometry for 1 h took about 10 minutes of wall time), but some
     kernel units are refused by name: TEMPO on macOS, Grell-Freitas
     `gfl_columns` and RRFS `mynnedmf_run_l1` on Metal;
-  - the LTS executor's reserve census needs 64-bit atomic adds, which Apple
-    GPUs lack;
+  - the LTS executor's scalar kernels run without 64-bit atomics on Metal:
+    the reserve census counts with two 32-bit atomics and a carry (the same
+    words as CUDA), and the binary64 receipt sums are gathered per element
+    and summed in a fixed order (deterministic on Metal; CUDA's atomic sums
+    vary in the last bits from run to run). So `woof hex moving` and LTS
+    regional runs work on an Apple GPU;
   - the dynamics subcycle runs eager, because the facade has no CUDA graphs;
   - the MPAS WSM6 unit of the water-budget gates (binary64) once had not
     finished its cold compile after 1 h 45 min; it now compiles cold in

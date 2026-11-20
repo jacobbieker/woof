@@ -544,3 +544,62 @@ def test_scattered_bit_copies_handle_strided_indices_and_layers():
     for actual, wanted in zip(targets, expected):
         np.testing.assert_array_equal(cp.asnumpy(actual).view(np.uint32),
                                       cp.asnumpy(wanted).view(np.uint32))
+
+
+@requires_gpu
+def test_carved_slabs_are_disjoint_aligned_and_contiguous():
+    import cupy as cp
+    from woof.core.noahmp_slab_libm import carve_slabs
+
+    for n in (1, 7, 130):
+        widths = {"a": 1, "b": 4, "c": 1, "d": 3}
+        slabs = carve_slabs(n, widths, cp.float32, zero=True)
+        for name, width in widths.items():
+            slab = slabs[name]
+            assert slab.shape == ((n,) if width == 1 else (n, width))
+            assert slab.flags.c_contiguous
+            assert int(cp.count_nonzero(slab)) == 0
+            assert (slab.data.ptr - slabs["a"].data.ptr) % 256 == 0
+        # Each slab written with its own tag must keep exactly that tag.
+        for k, name in enumerate(widths):
+            slabs[name][...] = cp.float32(k + 1)
+        for k, name in enumerate(widths):
+            assert np.all(cp.asnumpy(slabs[name]) == np.float32(k + 1))
+
+
+@requires_gpu
+@pytest.mark.parametrize("masked", [False, True])
+def test_flag_bits_is_the_any_chain_it_replaces(masked):
+    import cupy as cp
+    from woof.core.noahmp_slab_libm import flag_bits
+
+    rng = np.random.default_rng(7)
+    n = 1000
+    for trial in range(12):
+        status = np.zeros(n, np.int32)
+        hot = rng.integers(0, n, size=trial % 4)
+        status[hot] = rng.integers(1, 4, size=hot.size)
+        values = rng.standard_normal(n).astype(np.float32)
+        values[rng.integers(0, n, 3)] = (np.nan, -0.0, 0.0)
+        if trial % 3 == 0:
+            values[...] = np.abs(values) + 1
+        wide = np.where(rng.random(n) < (0.002 if trial % 2 else 0.0), 5, 0).astype(np.int64)
+        active = rng.random(n) < 0.5
+        dev = {"status": cp.asarray(status), "values": cp.asarray(values),
+               "wide": cp.asarray(wide), "flagged": cp.asarray(values < -1.5)}
+        mask = cp.asarray(active) if masked else None
+        probes = [(dev["status"], "==", 1), (dev["status"], "==", 2),
+                  (dev["status"], "==", 3), (dev["values"], "<=", np.float32(0.0)),
+                  (dev["wide"], "!=", 0), (dev["flagged"], "!=", 0)]
+        compare = {"==": np.equal, "!=": np.not_equal, "<=": np.less_equal}
+        wanted = 0
+        for k, (array, op, value) in enumerate(probes):
+            hit = compare[op](cp.asnumpy(array), value)
+            if masked:
+                hit &= active
+            wanted |= int(hit.any()) << k
+        flags = flag_bits(probes, active=mask)
+        assert flags.shape == (1,) and flags.dtype == cp.uint32
+        assert int(cp.asnumpy(flags)[0]) == wanted
+    assert int(cp.asnumpy(flag_bits([(cp.zeros(0, cp.int32), "!=", 0)]))[0]) == 0
+    assert int(cp.asnumpy(flag_bits([]))[0]) == 0

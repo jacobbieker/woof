@@ -71,8 +71,14 @@ def state_columns(states, setup, grid):
 
 def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
                   surface=None, max_age_seconds=900., gross_sigma=4.,
-                  localization=None, used_identities=(), columns=None, error_inflation=1.):
+                  localization=None, used_identities=(), columns=None, error_inflation=1.,
+                  aircraft_level=False):
     """Return sparse gridded batches plus time, QC and attribution counts.
+
+    ``aircraft_level`` (opt-in, off by default) puts rows labelled
+    ``aircraft_level`` (ACARS, PrepBUFR and WIS2 aircraft) through the
+    pressure-level operator; off, they are counted as
+    ``unknown_measurement_operator`` as before.
 
     Each report is assigned to its first eligible analysis boundary, never
     to a later boundary a second time. Receipt and publication cutoffs are
@@ -81,6 +87,7 @@ def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
     """
     from woof.obs.neutral_table import VARIABLE_TABLE
     from woof.obs.column_operators import dewpoint_from_specific_humidity, refractivity_n
+    from woof.da.var.obs_wrfda import msl2geo1
     if not np.isfinite(max_age_seconds) or max_age_seconds <= 0 or not np.isfinite(gross_sigma) or gross_sigma <= 0:
         raise ValueError('Observation age and QC thresholds must be finite and positive; correct the analysis settings.')
     if not np.isfinite(error_inflation) or error_inflation < 1.:
@@ -90,6 +97,7 @@ def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
     if schedule != tuple(sorted(set(schedule))) or when not in schedule:
         raise ValueError('Analysis boundaries are duplicated, unordered or omit this cycle; use the cycle clock schedule.')
     localization = localization or Localization(horizontal_m=15000., vertical_m=3000.)
+    level_labels = ('sonde_level', 'amv_assigned_pressure', '') + (('aircraft_level',) if aircraft_level else ())
     counts, revisions = Counter(), {}
     used = set(used_identities)
     for row in rows:
@@ -170,7 +178,13 @@ def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
             continue
         if row.variable == 'refractivity_n' and label == 'ro_refractivity_tangent_point':
             z = .5 * (grid.z_w[:-1, j, i] + grid.z_w[1:, j, i])
-            height = row.elevation_m
+            # The tangent height is geometric (above mean sea level); the
+            # grid's z_w is geopotential height ((PH+PHB)/g).  WRFDA converts
+            # with da_msl2geo1 before its gpsref operator; without it the
+            # operator reads the column about 100 m too high at 25 km, where
+            # N falls 1.4 %, several times the 0.3 % observation error.
+            height = (msl2geo1(row.elevation_m / 1000.0, row.latitude_deg) * 1000.0
+                      if np.isfinite(row.elevation_m) else row.elevation_m)
             if not np.isfinite(height) or height < z[0] or height > z[-1]:
                 counts['outside_vertical_column'] += 1
                 continue
@@ -195,7 +209,7 @@ def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
                     t = np.interp(height, z_m, col['t'][:, j, i])
                     q = np.interp(height, z_m, col['q'][:, j, i])
                 h.append(float(refractivity_n(p, t, q)))
-        elif pressure is not None and label in ('sonde_level', 'amv_assigned_pressure', ''):
+        elif pressure is not None and label in level_labels:
             if row.variable not in ('temperature_k', 'wind_u_m_s', 'wind_v_m_s', 'dewpoint_k'):
                 counts['no_pressure_level_operator'] += 1
                 continue

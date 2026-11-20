@@ -339,14 +339,18 @@ def physics_inventory(numerics=None):
         edmf = importlib.import_module("woof.hex.mpasphys." + module)
         declarations.append(("bl_mynnedmf", CUDA_FTZ_HELPERS + mynn_glibc_source() + edmf.ARRAY_SUPPORT
                              + edmf.MODULE_CUDA, edmf.CUDA_OPTIONS, "rrfs_mynnedmf.cu"))
-    # The forecast applies RP7 before selecting the fast column scheduler.
+    # The forecast applies RP7 and RP8 before selecting the fast column scheduler.
     # A recorded fast run cannot supply strict/correct's different source:
     # 0.4.9 omitted that image and its first MYNN call compiled for ~499 s.
-    # Assemble every supported request with the production transformations,
-    # without changing either the kernel text or the process's numerics mode.
+    # Assemble every supported request (each subset of the text corrections, as
+    # config_physics_correct_skip can drop any of them) with the production
+    # transformations, without changing either the kernel text or the process's numerics mode.
+    from itertools import combinations
     from woof.hex.mpasphys.driver_v842 import correct_source
     mode = _hex_numerics.mode() if numerics is None else _hex_numerics.normalise(numerics)
-    for corrections in (frozenset(), frozenset({"RP7"})):
+    texts = sorted(bl.MYNN_TEXT_CORRECTIONS)
+    for corrections in (frozenset(chosen) for size in range(len(texts) + 1)
+                        for chosen in combinations(texts, size)):
         numerical = correct_source(bl.MYNN_MODULE_CUDA, bl.MYNN_TEXT_CORRECTIONS,
                                    corrections, "bl_mynn hex-cuda")
         if mode == "fast":

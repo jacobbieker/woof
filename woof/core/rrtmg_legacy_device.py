@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from woof.core import rrtmg_legacy_prep as ref
+from woof.core import mcica_seed
 from woof.core import rrtmg_mcica
 
 __all__ = ["lwrad_prep_batch_device", "swrad_prep_batch_device"]
@@ -254,8 +255,11 @@ def _prep(sw, kw):
     # over the whole batch (each column's stream depends on its own play
     # only), instead of a one-thread-per-column launch per window.
     base = getattr(generate, "func", generate)
+    # Opt-in frozen seeds (woof.core.mcica_seed): play itself when off.
+    seed_play = mcica_seed.seed_play(
+        out["play"], mcica_seed.SW_STREAM if sw else mcica_seed.LW_STREAM)
     span_states = (rrtmg_mcica.gpu_subcolumn_states(
-        ncol, nl, ngpt, seed, out["play"])
+        ncol, nl, ngpt, seed, seed_play)
         if defer and icld == rrtmg_mcica.MCICA_DEVICE_ICLD
         and base in rrtmg_mcica.DEVICE_GENERATORS else None)
 
@@ -267,7 +271,7 @@ def _prep(sw, kw):
         rows = slice(int(w0), int(w1))
         nw = int(w1) - int(w0)
         extra = {} if span_states is None else {"states": span_states[rows]}
-        mc = generate(1, nw, nl, icld, seed, 0, out["play"][rows],
+        mc = generate(1, nw, nl, icld, seed, 0, seed_play[rows],
                       cloud["cldfrac"][rows], cloud["ciwpth"][rows],
                       cloud["clwpth"][rows], cloud["cswpth"][rows],
                       cloud["rei"][rows], cloud["rel"][rows],

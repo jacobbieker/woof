@@ -18,6 +18,7 @@ import dataclasses
 import numpy as np
 import pytest
 
+import _numerics_child
 from conftest import requires_gpu
 
 
@@ -231,12 +232,15 @@ def _capture_plan(state, device):
 @pytest.mark.gpu
 @pytest.mark.parametrize("form", ["nested", "nested_store", "strict",
                                   "capture", "seam"])
-def test_every_row_form_matches_the_per_row_path(monkeypatch, form):
+@pytest.mark.parametrize("ny,nx", [(36, 40), (11, 13), (10, 12)])
+def test_every_row_form_matches_the_per_row_path(monkeypatch, form, ny, nx):
+    """Each row form, at shapes whose frame rings leave a wide, an odd
+    and a narrow interior (the kernel walks the rings first)."""
     import cupy as cp
 
     import woof.ingest.lateral_bc as lbc
 
-    cfg, state, boundaries = _setup(map_factors=True)
+    cfg, state, boundaries = _setup(ny=ny, nx=nx, map_factors=True)
     rng = np.random.default_rng(9)
     for name in ("u", "v", "w", "thp", "php", "mup"):
         src = getattr(state, name)
@@ -356,3 +360,14 @@ def test_overlapping_device_targets_fall_back_to_the_per_row_path():
     rows[1] = lbc._RelaxRow("theta", device.fields["theta"], target=apart,
                             apply_relax=True)
     assert lbc._relaxation_multi_rows(state, rows) is True
+
+
+@requires_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_identity_holds_under_each_numerics(numerics, exact):
+    """state_relaxation_multi against the per-row relaxation path.
+    The battery runs strict; production runs fast, where NVRTC drops
+    --fmad=false and Metal keeps fp contract(fast).  Each mode in its own
+    child process (tests/_numerics_child.py)."""
+    _numerics_child.run(__file__, ['test_stage_rows_match_the_per_row_path', 'test_every_row_form_matches_the_per_row_path', 'test_more_rows_than_one_table_take_further_launches'], numerics, exact)

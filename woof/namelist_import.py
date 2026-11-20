@@ -930,6 +930,7 @@ _RA_LW_MAP = {
     4: (4, "RRTMG", "RTE+RRTMGP"),
     5: (5, "New Goddard", "WRF New Goddard"),
     7: (7, "Fu-Liou-Gu", "WRF Fu-Liou-Gu"),
+    14: (14, "RRTMG-K", "WRF RRTMG-K"),
 }
 _RA_SW_MAP = {
     99: (99, "GFDL Eta", "WRF GFDL Eta"),
@@ -940,6 +941,7 @@ _RA_SW_MAP = {
     4: (4, "RRTMG", "RTE+RRTMGP"),
     5: (5, "New Goddard", "WRF New Goddard"),
     7: (7, "Fu-Liou-Gu", "WRF Fu-Liou-Gu"),
+    14: (14, "RRTMG-K", "WRF RRTMG-K"),
 }
 #: WRF values the importer may emit into a woof configuration.  These are
 #: the RUNNABLE sets, deliberately narrower than woof/config.py's schema
@@ -5777,6 +5779,38 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                 f"the only implemented value in the {adapter_label} "
                 f"adapter ({why})")
 
+    if any(14 in pair for pair in radiation_pairs):
+        # RRTMG-K (14/14): rad_rrtmg_driver reads o3input (0 or 2) and
+        # nothing of ghg_input, cldovrlp or idcor (fixed gases, its own
+        # McICA walk).
+        raw_o3input = ph.take("o3input")
+        if raw_o3input is not None:
+            value = int(_uniform("physics", "o3input", raw_o3input))
+            if value not in (0, 2):
+                raise _err("physics", "o3input", raw_o3input,
+                           "woof's RRTMG-K adapter implements o3input 0 "
+                           "(wrapper O3DATA) and 2 (CAM climatology).")
+            if value == 2:
+                fix("physics", "o3input", raw_o3input, 2,
+                    "the established CAM-climatology value in the RRTMG-K "
+                    "adapter")
+            else:
+                o3input = value
+        # A domain on another adapter that reads ghg_input keeps it for the
+        # shared reader below, and woof's K domains then follow it too (a
+        # declared extension beyond WRF, woof.core.rrtmgk).  A K-only
+        # namelist drops it: wrf.exe's K never read it, so the imported run
+        # keeps WRF's fixed gases; ghg_input=1 on K is opted into through
+        # woof's own config.  cldovrlp/idcor are already taken above by the
+        # 4/4 arm when one is selected.
+        shared = ("ghg_input",) if (any_rrtmg or any_cam or any_gsfc) else ()
+        for key in ("ghg_input", "cldovrlp", "idcor"):
+            if key in shared:
+                continue
+            drop("physics", key, ph.take(key),
+                 "wrf.exe's RRTMG-K rad_rrtmg_driver does not read it (fixed "
+                 "trace gases, its own McICA subcolumn walk); woof's K reads "
+                 "ghg_input only when its own config sets it")
     if any_rrtmg or any_cam or any_gsfc:
         raw_ghg = ph.take("ghg_input")
         if raw_ghg is not None:
@@ -5803,6 +5837,19 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                 reason="the namelist omits ghg_input; the WRF v4 Registry "
                        "default is 1 (time-varying CO2/N2O/CH4/CFCs from "
                        "CAMtr_volume_mixing_ratio, SSP245 as WRF ships it)"))
+        if ghg_input == 1 and any(14 in pair for pair in radiation_pairs):
+            # wrf.exe's K domains ignored it and radiated fixed gases; woof's
+            # one tree-wide ghg_input would give them CAMtr gases (woof's K
+            # follows it, beyond WRF), so the import cannot reproduce the run.
+            raise _err(
+                "physics", "ghg_input",
+                raw_ghg if raw_ghg is not None else "(omitted: WRF v4 default 1)",
+                "ghg_input is one tree-wide value in woof, and woof's RRTMG-K "
+                "(ra_lw/ra_sw_physics=14) follows it while wrf.exe's K never "
+                "read it, so this tree's K domains would radiate CAMtr gases "
+                "where wrf.exe ran fixed ones. Set ghg_input = 0 (fixed gases "
+                "on every domain), or opt K into CAMtr gases in woof's config "
+                "after import.")
         if ghg_input == 0:
             ghg_input = None  # the engine default: write nothing
     if not (any_rrtmg or any_cam) and any(5 in pair for pair in radiation_pairs):

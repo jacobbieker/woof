@@ -2209,6 +2209,22 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "kernels on sm_120 (RTX 5070 Ti) at NVRTC 13.4.92 on 2026-10-02, "
         "after rsw_sfluxzen_body's store on every path; bounded on a "
         "device by tests/test_rrtmg_sw_cuda.py (LOCAL_FRAME_BOUNDS).",
+    # RRTMG-K (ra_lw_physics = ra_sw_physics = 14).
+    "rrtmgk_prep_unit":
+        "glibc_flt32.cuh + rrtmg_mcica_wrf.cu + rrtmgk_prep.cu as one unit "
+        "(woof/core/rrtmgk.py prep_source); rrtmgk_prep.cu fails NVRTC "
+        "standalone.  Every kernel read 0 B on an RTX A6000, sm_86 / NVRTC "
+        "12.9.86, 2026-11-16.",
+    "rrtmgk_lw_unit":
+        "rrtmg_lw.cu + rrtmg_lw_taugb06_09.cu + rrtmgk_lw.cu as one unit "
+        "(woof/core/rrtmgk.py lw_post_source); rrtmgk_lw.cu fails NVRTC "
+        "standalone.  Every kernel read 0 B on an RTX A6000, sm_86 / NVRTC "
+        "12.9.86, 2026-11-16.",
+    "rrtmgk_sw_unit":
+        "K's packed-table defines + rrtmg_sw.cu + its spectral helpers + "
+        "rrtmgk_sw.cu as one unit (woof/core/rrtmgk.py sw_source); "
+        "rrtmgk_sw.cu fails NVRTC standalone.  Every kernel read 0 B on an "
+        "RTX A6000, sm_86 / NVRTC 12.9.86, 2026-11-16.",
     # BEP+BEM (sf_urban_physics = 3).
     "urban_bem_composed":
         "glibc_flt32.cuh + glibc_trig_flt32.cuh + urban_bem.cuh + "
@@ -2310,25 +2326,29 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
 # SPP) composition, re-taken at the 1.1.3 upstream merge and again at the
 # 1.1.6 merge, where sm_86 (RTX A6000, NVRTC 13.4) read the same frames:
 # 0 / 0 / 1,152 / 2,208 B.
+#
+# topo_wind_static_mesh (the hex mesh-neighbour LAP_HGT, 2026-11-15) holds no
+# per-thread array: 0 B, read on sm_86 (RTX A6000) with the source below; the
+# other rows carry the same 0, not re-read.
 TERRAIN_DRAG_COMPOSED_SOURCE_SHA256 = (
-    '74ceba8adee4b664ed957d69ad9094db6b3120dcd531121bed813e6768e1b3e9')
+    '43aeaf8da8a7670c4d1f966999a31300ce23bf915b93c2b4666cab19615e0ce0')
 
 TERRAIN_DRAG_COMPOSED_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
 TERRAIN_DRAG_COMPOSED_FRAME_READINGS = MappingProxyType({
     ("89", "13.4.59"): MappingProxyType({
-        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "topo_wind_static": 0, "topo_wind_static_mesh": 0, "terrain_pbl_top": 0,
         "gwdo_column": 640, "gwdo_gsl_column": 1184}),
     ("120", "13.4.59"): MappingProxyType({
-        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "topo_wind_static": 0, "topo_wind_static_mesh": 0, "terrain_pbl_top": 0,
         "gwdo_column": 640, "gwdo_gsl_column": 1184}),
     ("120", "13.4.92"): MappingProxyType({
-        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "topo_wind_static": 0, "topo_wind_static_mesh": 0, "terrain_pbl_top": 0,
         "gwdo_column": 640, "gwdo_gsl_column": 1184}),
     ("120", "12.9.86"): MappingProxyType({
-        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "topo_wind_static": 0, "topo_wind_static_mesh": 0, "terrain_pbl_top": 0,
         "gwdo_column": 640, "gwdo_gsl_column": 1184}),
     ("86", "12.9.86"): MappingProxyType({
-        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "topo_wind_static": 0, "topo_wind_static_mesh": 0, "terrain_pbl_top": 0,
         "gwdo_column": 1152, "gwdo_gsl_column": 2208}),
 })
 
@@ -3575,10 +3595,10 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     frames=MappingProxyType({"theta_m_cumulus": 0, "smag2d_theta_m": 0}),
 ),)
 
-# wrf_smag_hd_w on stored face stresses (kernels/smag2d_w_faces.cu, which
-# composes smag2d.cu), production loader, default and strict
-# (GPUWM_WRF_EXACT=1) numerics, read 2026-11-08 on the RTX A6000 CUDA host
-# with get_kernel + kernel_local_size_bytes: wrf_smag_w_tau_faces and
+# wrf_smag_hd_w on stored defor13/defor23 faces (kernels/smag2d_w_faces.cu,
+# which composes smag2d.cu), production loader, fast and strict numerics at
+# GPUWM_WRF_EXACT=0 and 1, read 2026-11-16 on the RTX A6000 CUDA host with
+# get_kernel + kernel_local_size_bytes: wrf_smag_w_defor_faces and
 # wrf_smag_hd_w_faces both 0 B.
 KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
     replace(row, complete=False)
@@ -3587,8 +3607,55 @@ KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
 KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     box="pb", device="NVIDIA RTX A6000",
     compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
-    measured="2026-11-08", complete=False,
+    measured="2026-11-16", complete=False,
     frames=MappingProxyType({"smag2d_w_faces": 0}),
+),)
+
+# wrf_smag_hd_u / wrf_smag_hd_v on stored stress coefficients
+# (kernels/smag2d_uv_faces.cu, which composes smag2d.cu), production loader,
+# default and strict (GPUWM_WRF_EXACT=1) numerics, read 2026-11-16 on the
+# RTX A6000 CUDA host with get_kernel + kernel_local_size_bytes: wrf_smag_uv_coef_faces,
+# wrf_smag_hd_u_faces and wrf_smag_hd_v_faces all 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if "smag2d_uv_faces" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
+    measured="2026-11-16", complete=False,
+    frames=MappingProxyType({"smag2d_uv_faces": 0}),
+),)
+
+# wrf_tke_rhs on stored defor13/defor23 faces (kernels/smag2d_tke_faces.cu,
+# which composes smag2d.cu), production loader, default and strict
+# (GPUWM_WRF_EXACT=1) numerics, read 2026-11-15 on the RTX A6000 CUDA host
+# with get_kernel + kernel_local_size_bytes: wrf_tke_defor_faces and
+# wrf_tke_rhs_faces both 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if "smag2d_tke_faces" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
+    measured="2026-11-15", complete=False,
+    frames=MappingProxyType({"smag2d_tke_faces": 0}),
+),)
+
+# The opt-in porous immersed obstacles (kernels/obstacle_drag.cu), production
+# loader (no contraction), default and strict
+# (GPUWM_WRF_EXACT=1) numerics, read 2026-11-17 on the RTX A6000 CUDA host
+# with kernel_local_size_bytes: obstacle_drag 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if "obstacle_drag" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"obstacle_drag": 0}),
 ),)
 
 # The Fitch wind-farm unit (labs/windfarm, 2.9.11), through the production
@@ -4234,4 +4301,33 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
     measured="2026-11-08", complete=False,
     frames=MappingProxyType({"chem_sorgam": 672}),
+),)
+
+# The climatological ionosphere (kernels/spacewx_ionosphere.cu, the
+# spacewx_ionosphere_opt history rows), production loader
+# (woof.core.kernels.get_kernel), RTX A6000 sm_86, NVRTC 12.9.86,
+# 2026-11-17, both GPUWM_WRF_EXACT modes: 96 B, 40 registers; re-measured
+# 2026-11-18 with the storm-time fo_scale argument: unchanged.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "spacewx_ionosphere" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"spacewx_ionosphere": 96}),
+),)
+
+# The auroral oval (kernels/spacewx_aurora.cu, woof spacewx aurora),
+# production loader (woof.core.kernels.get_kernel), RTX A6000 sm_86,
+# NVRTC 12.9.86, 2026-11-17, both GPUWM_WRF_EXACT modes: 32 B, 28-29
+# registers.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "spacewx_aurora" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"spacewx_aurora": 32}),
 ),)

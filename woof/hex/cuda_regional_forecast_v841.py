@@ -55,6 +55,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from woof.backend.scratch import scratch_empty
 from .cuda_backend.containers import DeviceAtmosphere, TransferStats
 from .cuda_regional_v841 import (
     CudaRegionalKernels,
@@ -1069,6 +1070,30 @@ class _PaddedMaskExtents:
         self.n_edges = int(n_edges)
 
 
+#: The default WOOF_HEX_LBC_TEND_CACHE_MB.
+_TEND_CACHE_DEFAULT_MB = 256
+
+
+def _tend_cache_bytes() -> int:
+    """WOOF_HEX_LBC_TEND_CACHE_MB: bytes of full-extent driving tendencies kept per LBC interval.
+
+    256 MiB by default: a regional Alps/edi rank's three fields fit many times over, and a conus3km
+    rank (about 590 MB for all three) holds what fits and expands the rest per call, so the cache
+    never adds more than this per rank.  0 turns it off (every call expands)."""
+
+    import math
+    import os
+
+    value = os.environ.get("WOOF_HEX_LBC_TEND_CACHE_MB", "").strip() or str(_TEND_CACHE_DEFAULT_MB)
+    try:
+        mib = float(value)
+    except ValueError:
+        mib = math.nan
+    if not math.isfinite(mib) or mib < 0:
+        raise ValueError(f"WOOF_HEX_LBC_TEND_CACHE_MB must be a finite, non-negative number of MiB, got {value!r}")
+    return int(mib * 2**20)
+
+
 def _ring_lbc_on() -> bool:
     """WOOF_HEX_REGIONAL_RING_LBC=0 restores the full-extent LBC admission derivation (A/B only)."""
 
@@ -1098,6 +1123,10 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
         super().__init__(*args, **kwargs)
         # _derive makes the zeros it needs; holding a full-extent edge array of zeros for the run bought nothing.
         self._rho_edge_zero = None
+        # tendency()'s full-extent expansions for the current interval, dropped by start() and advance().
+        self._tend_expanded: dict[str, Any] = {}
+        self._tend_expanded_bytes = 0
+        self._tend_cache_bytes = _tend_cache_bytes()
 
     # -- the boundary-support pool ------------------------------------------
     #
@@ -1194,8 +1223,43 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
         del state, scalars
         return compact, compact_scalars
 
+    def _drop_tend_expanded(self) -> None:
+        self._tend_expanded = {}
+        self._tend_expanded_bytes = 0
+
+    def start(self, when: datetime) -> None:
+        self._drop_tend_expanded()
+        super().start(when)
+
+    def advance(self, when: datetime | None = None) -> None:
+        # Dropped before the next interval is derived, so the held expansions
+        # do not add to the admission peak.
+        self._drop_tend_expanded()
+        super().advance(when)
+
     def tendency(self, name: str) -> Any:
-        return self._expand(name, super().tendency(name))
+        """The interval tendency at full extent.  Read-only: with the cache on,
+        every stage of the interval gets the same array.
+
+        The expansion (a zero fill and a scatter of the boundary support) is the
+        same for every stage and step of one LBC interval.  With
+        WOOF_HEX_LBC_TEND_CACHE_MB > 0 (256 by default) it is kept, within that many
+        MiB, until ``start`` or ``advance`` (a conus3km rank's three fields need
+        about 590 MB, so the default holds some of them).  0: every call
+        expands.  Every consumer reads it (speczone kernels, graph staging
+        copies).
+        """
+        compact = super().tendency(name)
+        if self._support is None or self._tend_cache_bytes <= 0:
+            return self._expand(name, compact)
+        held = self._tend_expanded.get(name)
+        if held is not None:
+            return held
+        out = self._expand(name, compact)
+        if self._tend_expanded_bytes + int(out.nbytes) <= self._tend_cache_bytes:
+            self._tend_expanded[name] = out
+            self._tend_expanded_bytes += int(out.nbytes)
+        return out
 
     def state_at(self, name: str, step_start: Any, delta_t: Any, out: Any = None) -> Any:
         return self._expand(name, super().state_at(name, step_start, delta_t), out=out)
@@ -1420,8 +1484,8 @@ def advance_acoustic_step_regional_cuda_v841(
     # acoustic_rs_ts_regional_v841 writes every (level, cell) of rs and ts,
     # the specified zone included (zero there), so the scratch needs no
     # memset of its own.
-    rs = cp.empty((nlev, ncells), dtype=cp.float32)
-    ts = cp.empty_like(rs)
+    rs = scratch_empty(cp, (nlev, ncells), cp.float32)
+    ts = scratch_empty(cp, (nlev, ncells), cp.float32)
     split = regional_acoustic_split_enabled()
 
     def rs_ts(slot_major: bool, rs_out: Any, ts_out: Any) -> None:
@@ -1687,19 +1751,16 @@ def advance_scalars_regional_cuda_v841(
             group_edges.fill(0.0)
             group_flux.fill(0.0)
         stage_group = scalar_stage[first:last]
-        runtime.kernels.launch(
-            "transport_edge_values_regional_v841",
-            group * nlev * nedges,
-            (
-                np.int32(group), np.int32(nlev), np.int32(ncells),
-                np.int32(nedges), np.int32(width),
-                np.float32(config_coef_3rd_order), runtime.bdy_mask_edge,
-                mesh.dv_edge, mesh.cells_on_edge, stage_group, uh_avg,
-                coefficients.adv_coefs, coefficients.adv_coefs_3rd,
-                coefficients.n_adv_cells_for_edge, coefficients.adv_cells_for_edge,
-                group_edges,
-            ),
+        edge_arguments = (
+            np.int32(group), np.int32(nlev), np.int32(ncells),
+            np.int32(nedges), np.int32(width),
+            np.float32(config_coef_3rd_order), runtime.bdy_mask_edge,
+            mesh.dv_edge, mesh.cells_on_edge, stage_group, uh_avg,
+            coefficients.adv_coefs, coefficients.adv_coefs_3rd,
+            coefficients.n_adv_cells_for_edge, coefficients.adv_cells_for_edge,
+            group_edges,
         )
+        _regional_edge_values(runtime, edge_arguments, group, nlev, nedges, cp)
         runtime.shared_transport_launch(
             "transport_vertical_flux",
             ncells,
@@ -1722,6 +1783,26 @@ def advance_scalars_regional_cuda_v841(
             ),
         )
     return output, target
+
+
+def _regional_edge_values(runtime: Any, arguments: tuple[Any, ...], group: int, nlev: int, nedges: int, cp: Any) -> None:
+    """The regional edge values: one thread per (edge, level chunk) walking the tracers
+    (woof.hex.cuda_regional_hoist_v841, the same words), or the element kernel under
+    WOOF_HEX_REGIONAL_EDGE_HOIST=0 / WOOF_HEX_EDGE_HOIST=0 / an edge count under the hoist size."""
+    from . import cuda_edge_hoist
+    from . import cuda_regional_hoist_v841 as hoist
+
+    if not (hoist.enabled() and cuda_edge_hoist.enabled(nedges)):
+        runtime.kernels.launch(hoist.ELEMENT_KERNEL, group * nlev * nedges, arguments)
+        return
+    cache = runtime.kernels.cache
+    lpt = cuda_edge_hoist.levels_per_thread(
+        hoist.KERNEL, group * nedges, nlev, lambda value: hoist.launch(cache, arguments, value), cp)
+    hoist.launch(cache, arguments, lpt)
+    if cuda_edge_hoist.check_wanted(hoist.KERNEL, cp):
+        element = cp.empty_like(arguments[-1])
+        runtime.kernels.launch(hoist.ELEMENT_KERNEL, group * nlev * nedges, (*arguments[:-1], element))
+        cuda_edge_hoist.compare(hoist.KERNEL, arguments[-1], element, cp)
 
 
 # THE BREAKAGE THIS PREVENTS (eight-card system 2026-10-29 06:46-07:54Z): NOAA conus3km hrrrv5 on 4 x RTX PRO 6000 (44c0849 row,

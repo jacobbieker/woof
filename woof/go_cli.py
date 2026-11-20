@@ -56,6 +56,7 @@ from woof import capabilities
 from woof.docs_links import tree_url as _docs_tree_url
 from woof import run_stamp as run_stamp_module
 from woof.explain import explain_enabled, layered, render
+
 # The default product spec, declared where the early render declares it
 # and re-exported below rather than written twice.  Safe at module
 # scope: first_products reaches back into this module only from inside
@@ -140,6 +141,17 @@ DOCS_BASE_URL = _docs_tree_url("blob")
 MANUAL_CHAIN = (
     f"docs/public/FIRST-LIGHT.md section 3a "
     f"({DOCS_BASE_URL}docs/public/FIRST-LIGHT.md)")
+
+
+def declares_case_inputs(payload) -> bool:
+    """:func:`woof.case_data.declares_case_inputs`, imported on first use.
+
+    A [case_data] table holding only the GFS policy keys stays on the
+    fetch route; any other [case_data] table routes as it always did.
+    """
+    from woof.case_data import declares_case_inputs as declares
+    return declares(payload)
+
 
 
 class GoRefusal(ValueError):
@@ -602,7 +614,7 @@ def plan_from_config(config: Path, *, outdir: Path | None = None,
         raise GoRefusal(f"{config} does not exist")
     payload = tomllib.loads(config.read_text(encoding="utf-8"))
 
-    if "case_data" in payload:
+    if declares_case_inputs(payload):
         # The remedy is spelled by the shared shell rule, and `woof run`
         # starts only when `woof check` passed: a literal `&&` here was a
         # Windows PowerShell 5.1 parser error.  The path is quoted for
@@ -4988,7 +5000,7 @@ def _registered_launch(args, *, config: Path, payload: dict,
     from woof.core.preflight import config_forcing_source
 
     prepared_root = getattr(args, "prepared_root", None)
-    declared_inputs = "case_data" in payload and prepared_root is None
+    declared_inputs = declares_case_inputs(payload) and prepared_root is None
     prepare_only = bool(getattr(args, "prepare_only", False))
     if prepare_only and (declared_inputs or prepared_root is not None
                          or getattr(args, "restart", None) is not None
@@ -5526,7 +5538,7 @@ def _at_flag_tiles(args, config: Path, payload: dict) -> tuple[Path, dict]:
     mode = getattr(args, "tiles", None)
     if mode is None or _prepared_launch(args):
         return config, payload
-    if "case_data" in payload:
+    if declares_case_inputs(payload):
         # Breakage it prevents: a [case_data] config cannot be re-stated in
         # another folder (its forcing paths are its own), so the flag
         # would be read by nothing.
@@ -5610,7 +5622,7 @@ def _streams_instead(args, gate: dict, config: Path,
             isinstance(row, dict) and "tiles" in row
             for row in payload.get("domain") or ()):
         return None
-    if "case_data" in payload:
+    if declares_case_inputs(payload):
         return None
     fetch_table = payload.get("fetch")
     if not isinstance(fetch_table, dict) or not {"source", "cycle"} <= fetch_table.keys():
@@ -5657,7 +5669,7 @@ def _extend_outdir(args, config: Path, payload: dict) -> None:
     """Hand a deep output folder to the chain in its extended spelling."""
     requested = (Path(args.outdir) if getattr(args, "outdir", None) is not None
                  else config.parent / f"{config.stem}-go")
-    downloads = (isinstance(payload.get("fetch"), dict) and "case_data" not in payload
+    downloads = (isinstance(payload.get("fetch"), dict) and not declares_case_inputs(payload)
                  and getattr(args, "prepared_root", None) is None
                  and getattr(args, "data_dir", None) is None)
     depth = download_depth(payload["fetch"]) if downloads else None
@@ -5696,7 +5708,7 @@ def _flag_cycle(args, payload: dict) -> str | None:
     fetch_table = payload.get("fetch")
     if (not isinstance(fetch_table, dict)
             or not {"source", "cycle"} <= fetch_table.keys()
-            or "case_data" in payload
+            or declares_case_inputs(payload)
             or any(getattr(args, key, None) is not None
                    for key in ("prepared_root", "restart", "wps_namelist"))):
         from woof import input_cycle
@@ -6182,6 +6194,9 @@ def _go_wrfinput(args) -> int:
 @_ledger_main
 def go_main(args, *, observer=None) -> int:
     """Choose native WRF handoff or the existing CONFIG preparation chain."""
+    if getattr(args, "mcica_seed_mode", None):
+        # Stage subprocesses inherit the environment (woof.core.mcica_seed).
+        os.environ["WOOF_MCICA_SEED_MODE"] = args.mcica_seed_mode
     # [model] engine = "hex" runs the hex model (woof.go_hex); a CONFIG
     # without [model], or naming "wrf", takes the WRF path below unchanged.
     from woof.go_hex import HexGoRefusal, configured_engine
@@ -6203,6 +6218,21 @@ def go_main(args, *, observer=None) -> int:
     return _go_config_main(args, observer=observer)
 
 
+def _refuse_lakes_off_configuration(args) -> None:
+    """``--lakes`` rewrites a TOML configuration; every directory route
+    (WRF input, met_em, namelist.input, global directory) carries its own
+    namelist and static fields and would launch with the switch ignored."""
+    if getattr(args, "lakes", None) is None:
+        return
+    config = getattr(args, "config", None)
+    if getattr(args, "wrfinput", None) is not None or (
+            config is not None and (Path(config).is_dir()
+                                    or Path(config).name == "namelist.input")):
+        raise GoRefusal("--lakes applies to a TOML configuration launch; a WRF input, "
+                        "met_em or namelist directory carries its own namelist and "
+                        "static fields. Next: drop --lakes, or launch from the configuration.")
+
+
 @_cyclone_go_scope
 @_hydro_go_scope(beside=True)
 def _go_config_main(args, *, observer=None) -> int:
@@ -6221,6 +6251,7 @@ def _go_config_main(args, *, observer=None) -> int:
     except ValueError as error:
         print(f"go: {error}", file=sys.stderr)
         return 2
+    _refuse_lakes_off_configuration(args)
     from woof.go_wrfinput import launch_if_global_directory
     native_status = launch_if_global_directory(args, observer=observer)
     if native_status is not None:
@@ -6278,18 +6309,26 @@ def _go_config_main(args, *, observer=None) -> int:
                         "configuration launches retain their stage workers")
     if getattr(args, "allow_shared_gpu", False):
         raise GoRefusal("--allow-shared-gpu currently requires WRF inputs")
+    if getattr(args, "native_shared_gpu", False):
+        raise GoRefusal("--native-shared-gpu requires WRF inputs")
     if getattr(args, "benchmark", False):
         raise GoRefusal("--benchmark requires WRF inputs")
     if getattr(args, "run_seconds", None) is not None:
         raise GoRefusal("--run-seconds requires WRF inputs")
     _at_flag_storm_nests(args)
     if getattr(args, "branch_from", None) is not None:
+        if getattr(args, "lakes", None) is not None:
+            raise GoRefusal("--lakes does not apply to --branch-from, which launches branches "
+                            "of an existing run. Next: drop --lakes.")
         from woof.ensemble.mass_launcher import run as run_branches
         return run_branches(args)
     # A future stage-only owner can answer before GPU admission. None is
     # the frozen no-op result; all existing callers take the same route.
     stage_result = SpeedHooks.stage_only(args, None)
     if stage_result is not None:
+        if getattr(args, "lakes", None) is not None:
+            raise GoRefusal("--lakes does not apply to a stage-only launch, which never "
+                            "reaches the lake configuration. Next: drop --lakes.")
         return stage_result
     # An acquisition owner can materialize its source-only domain using the
     # same wizard as CONFIG launches. The registry chooses it, not source ids.
@@ -6334,6 +6373,12 @@ def _go_config_main(args, *, observer=None) -> int:
     if getattr(args, "wind_farms", None) is not None:
         from woof.wind_inputs import prepare_launch as prepare_wind_launch
         prepare_wind_launch(args)
+    if getattr(args, "lakes", None) is not None:
+        from woof.lake_launch import prepare_launch as prepare_lake_launch
+        try:
+            prepare_lake_launch(args)
+        except ValueError as refusal:
+            raise GoRefusal(str(refusal)) from None
     from woof.core.resident_admission import memory_gate_override
     from woof.verification_visuals import verification_scope
     enabled = getattr(args, "verify_visuals", None)
@@ -6393,7 +6438,7 @@ def _go_config_main(args, *, observer=None) -> int:
     # the flags that name one trajectory's input by name.
     plain = member_inputs.needs_member_sources(request)
     runtime_ladder = (request is not None and request.recipe == "wofs" and
-                      "case_data" in __import__("tomllib").loads(Path(args.config).read_text()))
+                      declares_case_inputs(__import__("tomllib").loads(Path(args.config).read_text())))
     if request is not None and not runtime_ladder and (request.recipe is not None or plain):
         # Time-lagged, multi-model and operational-ensemble members: each
         # member's own source trajectory is prepared by its ordinary chain,
@@ -6656,7 +6701,7 @@ def _archive_dry_readiness(args, payload: dict, cycle) -> int | None:
     # These routes use their declared inputs, not the config's [fetch]
     # provenance. Probing that unused archive refused a valid local dry run
     # with exit 75 before _registered_launch could review it.
-    if ("case_data" in payload
+    if (declares_case_inputs(payload)
             or any(getattr(args, key, None) is not None
                    for key in ("prepared_root", "restart", "wps_namelist"))):
         return None
@@ -6691,7 +6736,7 @@ def _refuse_partial_nests(config: Path, payload: dict) -> None:
                                  refuse_real_partial_nests)
     from woof.experiment import load_experiment
     try:
-        if "case_data" in payload:
+        if declares_case_inputs(payload):
             refuse_real_partial_nests(load_experiment(config), "woof go ([case_data])")
         else:
             refuse_prepared_tree_partial_nests(load_experiment(config), "woof go")
@@ -6787,7 +6832,7 @@ def _go_launch(args, *, observer=None) -> int:
                                     observer=observer)
     resumed_config = (_checkpoint_run_bindings(args, config)
                       or _prepared_run_bindings(args, config))
-    if ("case_data" in payload or getattr(args, "prepared_root", None) is not None
+    if (declares_case_inputs(payload) or getattr(args, "prepared_root", None) is not None
             or getattr(args, "restart", None) is not None
             or getattr(args, "wps_namelist", None) is not None):
         return _registered_launch(args, config=config, payload=payload,
@@ -6833,7 +6878,7 @@ def _prepare_only_launch(args, *, config, payload, observer=None):
                + ", ".join(given) + "." if given else
                "this process is one member of an ensemble session. "
                "Next: run --prepare-only outside the session."))
-    if "case_data" in payload:
+    if declares_case_inputs(payload):
         # Breakage it prevents: a [case_data] config runs on the
         # experiment route, which prepares inside the forecast process and
         # has no seal to stop at, so the run would go on to the forecast.
@@ -7882,6 +7927,8 @@ def _add_go_arguments(parser) -> None:
     add_go_input_arguments(parser)
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",
                         help="opt-in Fitch turbine drag and TKE from USWTDB or a WRF/JSON turbine table")
+    from woof.lake_launch import add_argument as add_lake_argument
+    add_lake_argument(parser)
     parser.add_argument("--hydro", nargs="?", const="", default=None,
                         type=lambda value: "" if value == "on" else value,
                         metavar="on|off|SETTINGS.toml", help="hydro is opt-in: --hydro on couples NextGen hydro "
@@ -7889,6 +7936,8 @@ def _add_go_arguments(parser) -> None:
                         "forecast has no hydro")
     from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
     add_wrf_hydro_arguments(parser)
+    from woof.nn.launch import add_arguments as add_nn_arguments
+    add_nn_arguments(parser)
     from woof.source_adapters import ensemble_source_ids
     from woof.ensemble.wofs_recipe import source_spec_argument
     parser.add_argument("--source", type=source_spec_argument, default=None, metavar="SOURCE[:N],...",
@@ -8110,6 +8159,12 @@ def _add_go_arguments(parser) -> None:
                              "its folder (default 1, enough to resume); 0 keeps "
                              "every hourly set, which a later branch or downscale "
                              "from an earlier checkpoint needs")
+    parser.add_argument("--mcica-seed-mode", choices=("pressure", "cell"), default=None,
+                        dest="mcica_seed_mode",
+                        help="RRTMG McICA seeding: pressure (default, upstream) or cell, "
+                             "a fixed hash of column id and radiation call time for "
+                             "`woof grad` finite-difference and ensemble legs "
+                             "(docs/grad.md); not upstream physics")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run",
                         help="validate the route and show how to launch it; fetch "
                              "and run nothing")

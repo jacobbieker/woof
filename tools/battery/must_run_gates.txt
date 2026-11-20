@@ -237,6 +237,11 @@ tests/test_metal_hex_translation.py  needs the mlx package (an Apple-silicon Met
 tests/test_metal_facade_hex.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (16a201877).
 tests/test_metal_aot.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can.
 tests/test_metal_ext_build_lock.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can.
+tests/test_metal_facade_device_copy.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (3d401509d).
+tests/test_metal_facade_get_out.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (19cb1f543).
+tests/test_metal_facade_inplace_arith.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (9566d7978).
+tests/test_metal_facade_ready_uploads.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (bed8ae6ca).
+tests/test_metal_table_resolution.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (d2dd11b76).
 tests/test_posted_model_source.py  needs WOOF_POSTED_TEST_INPUTS naming real posted GRIB2 files and WOOF_POSTED_TEST_LIBRARY naming a built native GRIB2 reader, neither of which ships in this repository; a leg that stages both runs it (9c5ebdda9).
 tests/test_radtran_reference.py  needs a host C++ compiler (clang++, g++ or c++) on PATH to build the radiative-transfer reference; every hosted leg has one, so it runs there (cc980b540).
 tests/test_tui_worker.py  runs woof/tui_worker.py as a child process, and the Recast WOOF tree leaves that worker out (tests/_woof_left_out.txt: woof/tui_worker.py), so the module skips by that named rule; the engine's tree, which ships the worker, runs every case.
@@ -310,3 +315,9 @@ tests/test_hex_option_matrix_smoke.py  needs WOOF_HEX_OPTION_MATRIX_CASE naming 
 
 # A short hex forecast on a variable-resolution mesh (tools/hex_varres.py cases).
 tests/test_hex_varres_gpu.py  needs WOOF_HEX_VARRES_CASE naming a work dir prepared by `tools/hex_varres.py prep` (mesh, static, init and LBCs generated there, not committed) and a GPU backend; pb (CUDA) and the mac (Metal) ran it on edi-vr for the change that added it, and tests/test_hex_varres_tool.py covers the recipes and the diagnostics host-only.
+
+# Module-level skips added 2026-11-17/18 without an entry here (cleanup, 2026-11-19).
+tests/test_metal_facade_scatter_inplace.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (fc67696d8).
+tests/test_metal_lazy_events.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (ccb272144).
+tests/test_nn_hex_gpu.py  needs WOOF_HEX_VARRES_CASE naming a work dir prepared by `tools/hex_varres.py prep`, zarr, netCDF4 and a GPU backend; pb (CUDA) and the mac (Metal) ran it for the change that added it (741f2a79d).
+tests/test_nn_train.py  needs the zarr package, which the base-feature pixi environments (default, cuda12, mlx, cpu) carry and a bare pip install does not; every leg on those environments runs it (135d10969).

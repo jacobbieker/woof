@@ -75,6 +75,70 @@ refused because those initializers do not supply the required statistics.
 `topo_wind` with BEP or BEP+BEM is refused because
 that YSU arm does not contain the surface momentum term it would scale.
 
+## `topo_wind = 1` on hex meshes: measured, not recommended (2026-11-16)
+
+The hex generic column seam accepts `topo_wind = 1` with a `VAR_SSO`
+surface-statics file. On the 120 km global mesh it makes the 10 m wind
+worse, and it can make the run unstable. Do not use it there.
+
+**The measurement.**
+
+- Setup: four 72 h `global-120km --physics-row arwen` cases, 2026-10-28 to
+  2026-11-02. Both arms ran `gwd_opt = 0`, because the WOOF arm cannot yet
+  read `VAR_SSO` and the YSU drag statistics from one file.
+- Scoring: `woof.hex.station_wind_referee` against WIS2 land SYNOP,
+  globally, about 72,000 pairs per case.
+- Result: `topo_wind = 1` raises the 10 m wind bias by +0.52 m/s at 24 h
+  (95 % case-paired interval +0.43 to +0.60) and the RMSE by +0.87 m/s.
+  At 48 h the bias rises by +0.58 m/s and the RMSE by +1.00 m/s.
+- The baseline bias is +1.48 m/s at 24 h, so the option takes it to about
+  +2.0 m/s.
+- Two of the four runs stopped on the dynamical core's validation flag, at
+  34 h and 54 h. The two arms without `topo_wind` completed all four cases.
+
+For comparison, the YSU orographic drag (`gwd_opt = 1`, which the
+`global-120km --physics-row arwen` suite runs) lowers the bias by 0.23 m/s
+at 24 h and 0.31 m/s at 48 h.
+
+**Why.** WRF forms `LAP_HGT` from the four grid neighbours, in metres, and
+has no grid-spacing scale (`start_em.F:1558`). It then sets `CTOPO = 0` and
+`CTOPO2 = 0` where `LAP_HGT < -30` m. In YSU, `CTOPO` scales the surface
+momentum friction (`bl_ysu.F90:1308-1316`), so zero means a frictionless
+surface. The thresholds suit grids of a few kilometres. At 120 km on
+x1.40962:
+
+- 40 % of land cells fell to `CTOPO = 0` in the measured runs. Those runs
+  formed the Laplacian from cell-index neighbours (see below).
+- Their 72 h 10 m wind is 3.0 m/s faster than without the option.
+- Where `CTOPO > 1` the wind slows by 0.4 m/s, as intended.
+
+**The Laplacian now uses the mesh's own neighbours (2026-11-15).** The
+seam lays the columns out as one row, so WRF's kernel used to take i-1 and
+i+1 in cell-index order, which are not neighbours on the mesh. Hex now
+forms `LAP_HGT` from `cellsOnCell` with `topo_wind_static_mesh` in
+`woof/core/kernels/terrain_drag.cu`: the mean of the cell's edge
+neighbours minus its own height, in metres, with WRF's -10, -20 and -30 m
+thresholds unchanged.
+
+- On a quad neighbourhood listed (i+1, i-1, j+1, j-1) this is
+  `start_em.F:1558` word for word. The WRF 4.7.1 oracle fixture checks
+  `LAP_HGT`, `CTOPO` and `CTOPO2` bit for bit through the mesh kernel
+  (`tests/test_terrain_drag_wrf471_parity.py`).
+- On a regular hexagon of spacing dc and a paraboloid h = a r², both forms
+  give a dc². The -30 m threshold therefore means the same curvature at the
+  same spacing.
+- A neighbour outside the column set (beyond a regional boundary) counts as
+  the cell itself, which is WRF's clamp at a non-periodic edge.
+- The generic column seam refuses `topo_wind = 1` without the neighbours.
+
+The mesh neighbours do not rescue 120 km. On x1.40962, 3,674 of 11,492 land
+cells (32.0 %) fall to `CTOPO = 0`, against 39.8 % with index-order
+neighbours. The thresholds are in metres and do not scale with grid
+spacing, so the option stays selectable, as in WRF, but the seam warns
+whenever the mesh spacing exceeds 4 km. The warning gives the run's own
+zeroed fraction. The mesh form is the one to use on kilometre-scale
+regional hex meshes.
+
 The reproducible column authority is
 `tools/terrain_drag_wrf471_oracle/build.sh`; its WRF sources and fixture
 files are pinned by SHA-256. The comparison gates are

@@ -5016,6 +5016,17 @@ def registry_setting_names(registry: dict) -> set[str]:
     return names
 
 
+def label_names_setting(label: str, name: str) -> bool:
+    """Whether ``label`` names the setting ``name`` as a whole word.
+
+    A substring test reads 'Set shcu_physics=0.' as naming cu_physics too;
+    a setting name is bounded by characters that cannot continue one.
+    """
+
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
+                     label) is not None
+
+
 def _check_remedy_label_describes_its_edit(
         rule: dict, registry: dict, option_id: str) -> None:
     """A remedy's words and a remedy's edit must be the same remedy.
@@ -5037,7 +5048,8 @@ def _check_remedy_label_describes_its_edit(
     settings = rule.get("remedy_settings") or {}
     if not label or not settings:
         return
-    missing = sorted(name for name in settings if name not in label)
+    missing = sorted(name for name in settings
+                     if not label_names_setting(label, name))
     if missing:
         raise RuntimeError(
             f"microphysics/{option_id}: the remedy label does not name "
@@ -5045,7 +5057,7 @@ def _check_remedy_label_describes_its_edit(
             "reader offered this repair cannot tell what it changes.")
     extra = sorted(
         name for name in registry_setting_names(registry)
-        if name in label and name not in settings)
+        if label_names_setting(label, name) and name not in settings)
     if extra:
         raise RuntimeError(
             f"microphysics/{option_id}: the remedy label names "
@@ -5298,6 +5310,7 @@ _STOCK_CALLABLE_CLASSES: dict[str, dict[str, object]] = {
         "wrf-rrtm-dudhia": "woof.core.rrtm_lw.RRTMDudhiaRadiation",
         "new-goddard": "woof.core.radiation_composition.ColumnTableRadiation",
         "fu-liou-gu": "woof.core.flg_radiation.FLGRadiation",
+        "wrf-rrtmg-k": "woof.core.rrtmgk.RRTMGKRadiation",
         "wrf-gfdleta": "woof.core.gfdleta.GFDLEtaRadiation",
         "analytic-clear-sky":
             "woof.core.analytic_radiation.AnalyticClearSkyRadiation",
@@ -7526,6 +7539,47 @@ def _fu_liou_gu(registry):
             'licence':'WRF public domain statement, README.md at v4.7.1'}})
     registry['components']['radiation']['options']['fu-liou-gu']=row
 
+def _rrtmg_k(registry):
+    """WRF 4.7.1 RRTMG-K (14/14): rad_rrtmg_driver, woof.core.rrtmgk."""
+    row=copy.deepcopy(registry['components']['radiation']['options']['wrf-rrtm-dudhia'])
+    row.pop('consumers',None)
+    row.update(label='WRF RRTMG-K longwave and shortwave',
+        selectors={'ra_lw_physics':14,'ra_sw_physics':14},
+        implemented=True,maturity='implemented-unverified',scientific_evidence='none',
+        reachability={'state':'component-override'},
+        parameters={'ra_physics':0,'icloud':1,'aer_opt':0,
+                    'wrf_rrtmg_compatibility':'none'},
+        # woof.config.validate_rrtmgk_config's cloud-merge refusals, as rules
+        # plan review evaluates (the port radiates the resolved cloud only).
+        constraints={'required_settings':{'ra_physics':0},'refused_when':[
+            {'settings':{'bl_pbl_physics':[5],'icloud_bl':[1]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the MYNN subgrid-cloud merge (icloud_bl=1) is not ported for it.',
+             'remedy_label':'Set icloud_bl=0.','remedy_settings':{'icloud_bl':0}},
+            {'settings':{'cu_rad_feedback':[True]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the convective cloud merge (cu_rad_feedback=.true.) is not ported for it.',
+             'remedy_label':'Set cu_rad_feedback=.false.','remedy_settings':{'cu_rad_feedback':False}},
+            {'settings':{'bmj_rad_feedback':[True]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the BMJ convective cloud merge (bmj_rad_feedback=.true.) is not ported for it.',
+             'remedy_label':'Set bmj_rad_feedback=.false.','remedy_settings':{'bmj_rad_feedback':False}},
+            {'settings':{'cu_physics':[10]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the KF-CuP (cu_physics=10) cloud feedback is not ported for it.',
+             'remedy_label':'Set cu_physics=0.','remedy_settings':{'cu_physics':0}},
+            {'settings':{'shcu_physics':[5]},
+             'reason':'RRTMG-K radiates the resolved cloud only; the Deng shallow-cumulus cloud merge (shcu_physics=5) is not ported for it.',
+             'remedy_label':'Set shcu_physics=0.','remedy_settings':{'shcu_physics':0}},
+            {'settings':{'mp_physics':[11,95]},
+             'reason':'RRTMG-K: this microphysics supplies radiation clouds through a path rad_rrtmg_driver is not ported for.'}]},
+        warnings=['Native WRF executes both spectra through LW-14 (rad_rrtmg_driver) and its SW-14 case only adds the shortwave heating; only the 14/14 pair runs.',
+                  'Explicit selection only; never a default. The port runs microphysics carrying snow (rad_rrtmg_driver iceflag 5), aer_opt=0, icloud=1 and no subgrid or convective cloud merge; rrtmg_spectral_output is refused.',
+                  'ghg_input=1 goes beyond WRF (its rad_rrtmg_driver never reads it): the port then takes CO2, N2O, CH4, CFC-11 and CFC-12 from the CAMtr table at every call, as legacy RRTMG does; ghg_input=0 keeps the driver fixed gases.'],
+        extensions={'column_contract':{
+            'wrf_source':'WRF v4.7.1 phys/module_ra_rrtmg_lwk.F, phys/module_ra_rrtmg_swk.F, phys/module_ra_effective_radius.F (BUILD_RRTMK=1)',
+            'oracle':'tools/rrtmg_k_column_oracle',
+            'inputs':['T','P','P8W','RHO','QVAPOR','QCLOUD','QICE','QSNOW','QGRAUP','QNCLOUD','ALBEDO','EMISS','TSK','XLAT','XLONG','O3RAD'],
+            'outputs':['RTHRATENLW','RTHRATENSW','SWDOWN','GLW','GSW','OLR','COSZEN','CLDFRA','LWUPT','LWUPTC','LWDNT','LWDNTC','LWUPB','LWUPBC','LWDNB','LWDNBC','SWUPT','SWUPTC','SWDNT','SWDNTC','SWUPB','SWUPBC','SWDNB','SWDNBC'],
+            'licence':'WRF public domain statement, README.md at v4.7.1'}})
+    registry['components']['radiation']['options']['wrf-rrtmg-k']=row
+
 def _retimed_radiation_costs(registry):
     """Real forecast costs; these additional native solvers stay opt-in."""
     options = registry['components']['radiation']['options']
@@ -7886,12 +7940,15 @@ def build(registry: dict) -> dict:
     registry = seed_options(registry, load_seeds())
     from woof.spectral_nudging.surface_contract import registry_rows as surface_fdda_rows
     registry["analysis_nudging"] = surface_fdda_rows()
+    from woof.nn.launch import registry_rows as nn_column_rows
+    registry["nn_column_physics"] = nn_column_rows()
     from woof.knobs.physics import registry_row as physics_knob_registry_row
     registry["authority"]["regional_tuning_controls"] = physics_knob_registry_row()
     _new_goddard(registry)
     _kfcup_metadata(registry)
 
     _fu_liou_gu(registry)
+    _rrtmg_k(registry)
     _retimed_radiation_costs(registry)
     from woof.lightning_contract import LIGHTNING_DEFAULTS, LIGHTNING_OPTIONS, FIELD_METADATA
     registry["diagnostic_packages"] = {"lightning_option": {str(k): dict(v) for k,v in LIGHTNING_OPTIONS.items()}}
@@ -10223,7 +10280,7 @@ def build(registry: dict) -> dict:
         # It is the only registered longwave-on pairing that is not the
         # coupled RRTMG adapter, which is the point of listing it here.
         "radiation": [
-            "off", "dudhia-shortwave", "gsfc-shortwave", "wrf-rrtm-dudhia", "rte-rrtmgp", "new-goddard", "fu-liou-gu", "wrf-gfdleta", "wrf-cam3", "relaxation-31"],
+            "off", "dudhia-shortwave", "gsfc-shortwave", "wrf-rrtm-dudhia", "rte-rrtmgp", "new-goddard", "fu-liou-gu", "wrf-rrtmg-k", "wrf-gfdleta", "wrf-cam3", "relaxation-31"],
     }
     # The per-domain override surface names the WHOLE implemented cumulus
     # set, so it is derived from the options rather than typed: a typed
@@ -11148,12 +11205,6 @@ def build(registry: dict) -> dict:
     # LAST of all: every template and every route declaration above is
     # final, so the easiest path to each option is the one this computes.
     _phase2c_recompute_reachability(registry)
-    for option_id, old_line, new_line in (("tke-1.5-order", 1424, 1423),
-                                          ("smagorinsky-3d", 1518, 1517)):
-        row = registry["components"]["turbulence"]["options"][option_id]
-        row["warnings"] = [text.replace(f"woof/core/dycore.py:{old_line}",
-                                       f"woof/core/dycore.py:{new_line}")
-                           for text in row.get("warnings", [])]
     registry["template_aliases"] = dict(TEMPLATE_ID_ALIASES)
     for option in registry["components"]["cumulus"]["options"].values():
         constraints = option.get("constraints", {})

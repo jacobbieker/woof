@@ -34,6 +34,7 @@ from functools import lru_cache
 import numpy as np
 
 from woof.radtran import data
+from woof.radtran.optics import _memo
 
 
 def _hu_read(name):
@@ -59,29 +60,116 @@ def _hu():
     return _hu_read("wc.ext"), _hu_read("wc.ssa"), _hu_read("wc.asy")
 
 
-def _hu_prop(blocks, lam_um, reff):
+# np.interp(x, xp, fp) inside the table evaluates slope * (x - xp[j]) + fp[j]
+# with slope = (fp[j+1] - fp[j]) / (xp[j+1] - xp[j]); whether the multiply-add
+# is fused depends on how numpy was compiled (clang on arm64 contracts it, the
+# x86-64 wheels do not).  This canary differs between the two, so the mode
+# numpy actually uses is read off it once and every row is evaluated the same
+# way at once, from the two bracketing table columns only, instead of one
+# np.interp call per row over the whole table.
+_CANARY = (0.6123, (0.5, 0.7), (-0.3661071783200054, -1.8188992243902193))
+
+
+@lru_cache(maxsize=None)
+def _interp_mode():
+    x, xp, fp = _CANARY
+    if not hasattr(math, "fma"):                                   # Python < 3.13
+        return None
+    ref = float(np.interp(x, np.array(xp), np.array(fp)))
+    slope = (fp[1] - fp[0]) / (xp[1] - xp[0])
+    if ref == math.fma(slope, x - xp[0], fp[0]):
+        return "fused"
+    if ref == slope * (x - xp[0]) + fp[0]:
+        return "separate"
+    return None
+
+
+def _bracket(x, xp):
+    """Index j with xp[j] < x < xp[j+1] when the rows can be interpolated
+    vectorized (x strictly between two nodes of a strictly increasing table,
+    numpy's multiply-add mode known), else None."""
+    if _interp_mode() is None or not xp[0] < x < xp[-1] or not np.all(np.diff(xp) > 0):
+        return None
+    j = int(np.searchsorted(xp, x, side="right")) - 1
+    return None if xp[j] == x else j
+
+
+def _lerp(x, x0, x1, y0, y1):
+    """np.interp(x, [.., x0, x1, ..], [.., y0, y1, ..]) for x0 < x < x1, elementwise over y0, y1."""
+    slope = (y1 - y0) / (x1 - x0)
+    d = x - x0
+    if _interp_mode() == "separate":
+        return slope * d + y0
+    return np.array([math.fma(s, d, y) for s, y in zip(slope.tolist(), y0.tolist())], dtype=np.float64)
+
+
+def _hu_prop(blocks, lam_um, reff, cache=None):
+    """``cache`` (a dict kept for one ``reff``) holds each radius range's
+    selection and, per bracketing table pair, the rows' coefficients, across
+    wavelengths: the same expressions on the same radii, so the same words."""
     reff = np.asarray(reff, dtype=np.float64)
     out = np.zeros(reff.shape)
     for k, b in enumerate(blocks):
         lo, hi = b["r"]
-        sel = (reff >= lo) & (reff <= hi) if k == 0 else (reff > lo) & (reff <= hi)
-        if not np.any(sel):
+
+        def pick():
+            sel = (reff >= lo) & (reff <= hi) if k == 0 else (reff > lo) & (reff <= hi)
+            return sel, (reff[sel] if np.any(sel) else None)
+
+        sel, r = _memo(cache, (id(blocks), k), pick)
+        if r is None:
             continue
         rows = b["rows"]
-        r = reff[sel]
-        vals = rows[:, 1][None, :] * r[:, None] ** rows[:, 2][None, :] + rows[:, 3][None, :]
-        out[sel] = np.array([np.interp(lam_um, rows[:, 0], v) for v in vals])
+        xp = rows[:, 0]
+        coef = lambda c: c[:, 1][None, :] * r[:, None] ** c[:, 2][None, :] + c[:, 3][None, :]
+        j = _bracket(lam_um, xp)
+        if j is not None:
+            def pair():
+                # only the two tabulated wavelengths bracketing lam enter np.interp
+                vals = coef(rows[j:j + 2])
+                if not np.all(np.isfinite(vals)):
+                    return None
+                inverse = slice(None)
+                if _interp_mode() == "fused":
+                    # _lerp is a scalar fma per row here: evaluate it once per
+                    # distinct radius (cloud-free layers all carry the default)
+                    # when each radius group's rows are the same bits as its
+                    # first, and scatter back; the same words either way.
+                    _, first, inv = np.unique(r, return_index=True, return_inverse=True)
+                    inv = inv.ravel()
+                    if np.array_equal(vals.view(np.uint64), vals[first][inv].view(np.uint64)):
+                        vals, inverse = vals[first], inv
+                return vals, inverse
+
+            got = _memo(cache, (id(blocks), k, j), pair)
+            if got is not None:
+                vals, inverse = got
+                out[sel] = _lerp(lam_um, xp[j], xp[j + 1], vals[:, 0], vals[:, 1])[inverse]
+                continue
+        out[sel] = np.array([np.interp(lam_um, xp, v) for v in coef(rows)])
     return out
 
 
-def hu_stamnes(lam_nm: float, reff_um):
-    """(extinction per LWC [km^-1 / (g m^-3)], single-scattering albedo, g)."""
+def hu_stamnes(lam_nm: float, reff_um, *, cache: dict | None = None):
+    """(extinction per LWC [km^-1 / (g m^-3)], single-scattering albedo, g).
+
+    ``cache``: a dict kept for one ``reff_um`` across wavelengths
+    (:func:`_hu_prop`).  It is keyed on that array object, which must not
+    change while the cache is in use; another array starts it afresh."""
     reff = np.asarray(reff_um, dtype=np.float64)
-    if np.any((reff < 2.5) | (reff > 60.0)):
-        raise ValueError("Hu & Stamnes (1993) covers effective radii 2.5-60 um")
+    if cache is not None and cache.get("reff_of") is not reff_um:
+        # the cached selections belong to one radius array: a different one
+        # starts the cache afresh (and is range-checked)
+        cache.clear()
+        cache["reff_of"] = reff_um
+    if cache is None or "checked" not in cache:
+        if np.any((reff < 2.5) | (reff > 60.0)):
+            raise ValueError("Hu & Stamnes (1993) covers effective radii 2.5-60 um")
+        if cache is not None:
+            cache["checked"] = True
     ext, co, asy = _hu()
     lam = lam_nm * 1e-3
-    return _hu_prop(ext, lam, reff), 1.0 - _hu_prop(co, lam, reff), _hu_prop(asy, lam, reff)
+    return _hu_prop(ext, lam, reff, cache), 1.0 - _hu_prop(co, lam, reff, cache), _hu_prop(asy, lam, reff, cache)
 
 
 def _fu_read(name):

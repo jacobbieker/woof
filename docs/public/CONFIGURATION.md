@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 447,
+**Which keys a `[[domain]]` table may override.** Exactly these 454,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -407,6 +407,8 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
     gf_deep_rain_evaporation_booking
+    obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
+    obstacle_drag_coefficient  obstacle_wall_z0  urban_param_file
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
     radt_minutes  bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics
     ra_rrtmg_variant  wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat
@@ -547,9 +549,16 @@ domain (see the physics table below), and `hailcast_version` its stone
 model: `wrf_39_noaa` (default, the HAILCAST in NOAA's operational HRRR v4)
 or `wrf_461` (WRF v4.6.1's). `lake_state_source` picks the lake
 initial-state row from `woof/data/surface_obs/lake-state-sources.v1.toml`
-(`auto` and `forcing` are the two built-in choices); a research-only row
+(`auto` and `forcing` are the two built-in choices; `era5` reads ERA5's
+FLake lake state keylessly from the Google ARCO mirror, and `auto+era5` uses
+GLSEA where it covers and ERA5 elsewhere; see
+[lake-state-initialization.md](../lake-state-initialization.md)); a research-only row
 also needs `lake_state_path`, its acquired CF NetCDF file, and
 `lake_state_accept_licence` set to that row's licence string.
+`woof go --lakes clm|ic|off` writes `sf_lake_physics` and the lake-state keys
+in `[shared]` (removing them per domain) in a launched copy of the experiment;
+`use_lakedepth`, `lakedepth_default` and `lake_min_elev` are left as set
+([lakes.md](../lakes.md)).
 
 `clos_choice` and `ishallow` configure the Grell-Freitas cumulus scheme
 (`cu_physics = 3`): which closure the deep scheme uses (0, the default,
@@ -575,6 +584,22 @@ column budget closes; every tendency is unchanged. It is not a WRF
 namelist key, so it is set in the TOML (or as `--physics
 gf_deep_rain_evaporation_booking=true` on the hex WOOF arm). See the
 Grell-Freitas notes in [PHYSICS.md](PHYSICS.md#cumulus-cu_physics).
+
+`obstacle_opt` (default `0`) resolves buildings and other obstacles on an
+LES or other high-resolution domain. It is woof's own option, not a WRF
+one, and it is per domain because buildings belong to one grid.
+`obstacle_opt = 1` reads `obstacle_file`, a `woof-buildings.v1` product
+made on that domain's own mass grid (see [BUILDINGS.md](BUILDINGS.md)), and
+represents the buildings as porous immersed obstacles. A layer at least
+`obstacle_solid_fraction` (default `0.5`) full of building is solid, and
+momentum on its faces is relaxed to zero at `obstacle_relax_factor`/`dt`
+(default `10`). Partly built layers get canopy form drag with coefficient
+`obstacle_drag_coefficient` (default `0.4`, BEP's). Open faces beside or
+above a wall get log-law wall stress with roughness `obstacle_wall_z0` m
+(default `0.01`). The option is refused without a file, with a file and
+`obstacle_opt = 0`, above 500 m grid spacing (use `sf_urban_physics`
+there), on the global grid, and in a moving frame (`umove`, `vmove`). With `obstacle_opt = 0`, or a product
+with no buildings, no obstacle code runs.
 
 The eleven numerics from `diff_6th_slopeopt` through `tke_budget` are
 per domain because WRF declares every one of them `max_domains` and the
@@ -1169,6 +1194,7 @@ namelist uses the Registry default for its WRF line when the key is omitted.
 | `urban_table_dir` | empty (bundled pinned tables) | `[shared]` directory of explicit URBPARM tables for the selected generation. Table hashes and packed coefficients bind restart identity; custom tables use the same parser and bounds checks. The first-level height admission reads the selected tables |
 | `sf_surface_mosaic`, `mosaic_cat` | 0, 3 | Noah land-use tiles; enabled only at 1, positive tile count; requires LANDUSEF; urban option 1 runs per tile; urban options 2 and 3 are refused as in WRF |
 | `mosaic_urban_canopy` | "dominant" | woof key, per domain: where mosaic runs urban option 1. "dominant" is WRF's rule (only cells whose dominant category is urban); "every_tile" also runs the town tiles of mostly rural cells at their own land-use weights, sharing the URBPARM urban fraction of the largest urban tile's type; needs `sf_surface_mosaic = 1` and `sf_urban_physics = 1` |
+| `urban_param_file` | "" (default, off) | woof key, per domain: a NetCDF on this domain's own mass grid carrying WPS's `URB_PARAM(132)` gridded urban morphology. This can be a `woof-buildings.v1` product, a `geo_em` or a `met_em`. The urban scheme reads it as WRF 4.7.1's real.exe and `urban_var_init` do: LP/LB/HGT (91, 95, 94) for all options, MH/STDH/LF (92, 93, 96-99) for option 1 (the SLUCM's NUDAPT arm, bitwise WRF), HI (118-132) for options 2 and 3. Urban columns with `HGT_URB2D <= 0` fall back to the URBPARM table. A file `FRC_URB2D` replaces the route's urban fraction after real.exe's 0.9 fill. A product without one keeps the route's. Refused: `sf_urban_physics = 0`, `urban_ucm_generation = "wrf_480"`, mosaic with option 1, another grid, non-finite values on urban columns with `HGT_URB2D > 0`, columns real.exe would reclassify to urban (`FRC_URB2D >= 0.5` on a non-urban category: not reproducible after the land surface is built), and option-1 morphology on which WRF's arm is non-finite. The NUDAPT sector uses the column's own `ATAN2(U1, V1)` where WRF reads an undefined `ATAN2(U10, V10)`. Bound into the restart identity by the file's sha256. See [BUILDINGS.md](BUILDINGS.md#using-it-in-the-urban-schemes-urban_param_file) |
 | `use_mp_re` | 1 | microphysics effective radii reach radiation per WRF's scheme table |
 | `o3input` | 2 | CAM climatological ozone (RRTMG spectra) |
 | `ghg_input` | 0 | analytic year-formula trace gases (no CAMtr reader) |
@@ -1480,6 +1506,83 @@ draws them. Dust needs `woof fetch-geog --datasets chem-dust` once; CAMS
 sources need an Atmosphere Data Store key. Every option, refusal and output is
 in [SMOKE-AND-AIR-QUALITY.md](SMOKE-AND-AIR-QUALITY.md).
 
+## Space weather (`[shared]`, opt-in)
+
+These keys go beyond WRF and MPAS parity, so each one is off by default. With
+each one off, the run executes no new code. The design and the planned layers
+(ionosphere, aurora, particle precipitation) are in
+[../spacewx.md](../spacewx.md).
+
+| key | default | meaning |
+|---|---|---|
+| `solar_tsi_opt` | `0` | `1` scales every shortwave output of each radiation call by `TSI(t) / reference`. Shortwave transfer is linear in the top-of-atmosphere flux, so this equals changing WRF's `SOLCON = 1370 * ECCFAC` for every shortwave scheme. |
+| `solar_tsi_source` | `""` | The TSI series. A CSV of `YYYY-MM-DD,W m-2` daily means, a NOAA CDR netCDF (`TSI`, `time` in days since 1610-01-01), several paths joined by `:`, or `"nrlssi2"`, which fetches the NOAA NRLSSI2 daily CDR files for the run's years into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`). Daily means sit at noon UTC and are interpolated linearly. A run time outside the series, or in a gap longer than a day, is refused. |
+| `solar_tsi_mode` | `"absolute"` | `"absolute"`: the reference is 1370 W m-2, so the measured TSI replaces WRF's constant. `"relative"`: the reference is 1360.8 W m-2 (the TIM cycle mean), which keeps WRF's calibration and adds only the variability. |
+| `solar_ssi_opt` | `0` | `1` moves RRTMG SW's source between its 14 bands with the day's solar spectrum: band b takes `[S_b(t)/TSI(t)] / [S_b/TSI over solar cycle 24]`, renormalised so the total is unchanged (`solar_tsi_opt` sets the total). The 200-263 nm band is about 2.5 % stronger in 2024 than the cycle mean. RRTMG (`ra_sw_physics = 4` with `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (`14`) only. With RADM2 chemistry it also scales Fast-TUV's extraterrestrial flux in each of its 17 bins by `[S_i(t)/TSI(t)] / [S_i/TSI over cycle 24]` (not renormalised; see docs/spacewx.md), and with hex's MICM chemistry and `"photolysis": "tuvx"` it scales TUV-x's flux the same way on its 156 bins. |
+| `solar_ssi_source` | `""` | The spectral series: `"nrlssi2"` fetches the NOAA CDR daily SSI files (about 13 MB a year) for the run's years into the space-weather cache, or NOAA CDR SSI netCDF paths joined by `:`. Daily means sit at noon UTC and are interpolated linearly; a time outside the series or in a gap is refused. |
+| `spacewx_ionosphere_opt` | `0` | `1` adds the climatological ionosphere to every history frame: `IONO_TEC` (vertical TEC, 60-2000 km, TECU), `IONO_FOF2` and `IONO_FOE` (MHz), `IONO_HMF2` (km) and `IONO_NMF2` (m-3), on the domain's columns at the frame's valid time. It is a diagnostic: the atmosphere integrates identically. |
+| `spacewx_f107_source` | `""` | The F10.7 that drives it. `""` or `"gfz"` fetches GFZ's `Kp_ap_Ap_SN_F107_since_1932.txt` into the space-weather cache. A path reads a file in that format, and a number is a fixed flux in sfu. The value at the run's start is held for the whole run (persistence). |
+| `spacewx_f107_mode` | `"81day"` | `"81day"`: the mean observed F10.7 of the 81 UT days ending the day before the start. `"daily"`: the day before the start alone. |
+| `spacewx_ionosphere_maps` | `"ccir"` | The foF2 maps, `"ccir"` or `"ursi"`. |
+| `spacewx_aurora_opt` | `0` | `1` adds the auroral oval (Starkov 1994 on the IGRF-14 dipole) to every history frame: `AURORA_ZONE` (0 equatorward of the diffuse aurora, 1 diffuse aurora, 2 oval, 3 polar cap), `AURORA_DIST` (degrees poleward of the diffuse aurora's equatorward edge, the visibility line), `MAG_LAT` (degrees) and `MAG_LT` (hours), on the domain's columns at the frame's valid time. `2` also adds OVATION Prime 2010's precipitating particle energy flux: `AURORA_EFLUX` (electron energy flux, mW m-2), `AURORA_EMEAN` (electron mean energy, keV) and `AURORA_IFLUX` (ion energy flux, mW m-2), from the solar-wind coupling of the hours that have ended by the start; it needs `spacewx_kp_source = "omni"` or `"swpc"`. It is a diagnostic: the atmosphere integrates identically. |
+| `spacewx_kp_source` | `""` | The Kp that drives it, held at the run's start (persistence). `""` or `"gfz"`: the observed Kp of the latest 3-hour interval that has ended by the start, in GFZ's index file (fetched; a path reads a file in that format). `"omni"` or `"swpc"`: Kp estimated from the solar wind (NASA SPDF OMNI2 or NOAA SWPC real time) for the latest 3-hour interval whose fitted hours have ended by the start. A number is a fixed Kp in [0, 9]. Either way the Kp must lie within 24 h before the start. |
+| `spacewx_epp_opt` | `0` | `1` adds the NO, OH and HO2 that solar protons make in the polar caps (\|dipole magnetic latitude\| >= 60 deg) to the RADM2 rows `no`, `ho` and `ho2`, at each chemistry step, inside `emission.radm2` (booked as emitted): 1.25 NO and one OH plus one HO2 per ion pair, with the ion pairs from the GOES integral proton flux (Bethe stopping in air, 35 eV per pair; `woof spacewx particles` prints the same rates). Only an hour at or above NOAA's S1 threshold (10 pfu above 10 MeV) adds anything. It changes the chemistry; it needs `chem_sets` `radm2` or `radm2sorg`. |
+| `spacewx_epp_source` | `""` | The proton flux, held at the run's start (persistence): `"omni"` (NASA SPDF OMNI2, words 43-48), `"swpc"` (NOAA SWPC's GOES feed, the last 3 days) or OMNI2 file path(s) joined by `:`. The hour read is the last one that has ended by the domain's start; one whose >10 MeV flux is missing is refused (OMNI2's proton words are fill from 2021 on: use `"swpc"`). |
+
+`solar_tsi_source` and `solar_tsi_mode` are refused while `solar_tsi_opt = 0`,
+since they would do nothing. `solar_tsi_opt = 1` is refused without a
+shortwave scheme, and with `swint_opt = 2` (FARMS computes the surface
+shortwave every step from its own solar constant). On hex, the generic column
+seam takes the same keys (`woof hex forecast --physics solar_tsi_opt=1
+--physics solar_tsi_source=nrlssi2`). The MPAS-native radiation suite does not
+take them yet. The NOAA CDR lags real time by a few months, so a forecast for
+the coming days needs a CSV, for example the last measured value carried
+forward.
+
+`solar_ssi_source` is refused while `solar_ssi_opt = 0`. `solar_ssi_opt = 1` is
+refused with any shortwave other than legacy RRTMG or RRTMG-K (RTE+RRTMGP's
+g-point source has its own bands), with `dfi_opt` (the filter's CUDA graph
+would freeze the first call's factor), with FARMS (`swint_opt = 2`, whose
+surface shortwave would not see the band shares) and on hex's MPAS-native suites (hex's
+generic column seam takes it).
+
+The `spacewx_f107_*` and `spacewx_ionosphere_maps` keys are refused while
+`spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 1` is refused without a
+radiation scheme, since the ionosphere uses the radiation geometry's columns.
+It is also refused on a streamed (tiled) domain and on hex, where no history
+stream carries the rows yet. Its CCIR/URSI maps and IGRF-14 coefficients are
+fetched on first use into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`) and
+checked against pinned SHA-256 sums. The GFZ index file is a living record, so
+it has no pinned sum: it is fetched again when it ends before the day before the
+start (and once more when that day's flux is not yet released), its format is
+checked on reading, and its SHA-256 is printed with the rest of the
+ionosphere's receipt as the run starts (the `[spacewx ionosphere]` line).
+
+`spacewx_kp_source` is refused while `spacewx_aurora_opt = 0`;
+`spacewx_aurora_opt = 2` is refused unless `spacewx_kp_source` is `"omni"` or `"swpc"`, and
+`spacewx_aurora_opt = 1` or `2` is refused without a radiation scheme, on a streamed
+domain and on hex, for the same reasons as the ionosphere rows. For the aurora
+the GFZ file is fetched again when it lacks the latest 3-hour interval that has
+ended by the start, since the latest Kp is the one that matters (the cached file
+is kept if GFZ cannot be reached). A fetched Kp is held per source and start in
+the space-weather cache, so resumes and nests use the same value. The Kp, the interval it belongs to and the
+source are printed as the run starts (the `[spacewx aurora]` line), and with
+`2` also OVATION's dPhi/dt, the coefficients' SHA-256 and the hemispheric power.
+The OVATION Prime coefficients (NOAA's public-domain ovation-prime 2.3.0 zip,
+24 MB) are fetched on first use into the space-weather cache and checked
+against a pinned SHA-256. Both aurora
+keys are output-only, so a restart may switch the rows on or off.
+
+`spacewx_epp_source` is refused while `spacewx_epp_opt = 0`. `spacewx_epp_opt =
+1` is refused without RADM2 chemistry (the `emission.radm2` rows `no`, `ho`
+and `ho2`), with no radiation scheme (the polar caps are placed on the
+radiation geometry's xlat/xlong), on a streamed domain and on hex. Each domain
+holds the hour before its own start, kept per source and start in the
+space-weather cache (`epp-flux`), so a resume holds the same hour and a nest
+started with its parent holds its parent's. The hour, the source's SHA-256 and whether it is an event are
+printed as the run starts (the `[spacewx epp]` line). Both keys change the
+forecast, so they are part of the restart identity.
+
 ## What a WRF namelist setting becomes
 
 One rule: a namelist setting that changes the forecast either maps onto an
@@ -1531,7 +1634,7 @@ A lake GFS does not resolve takes the skin temperature of the nearest GFS
 water, as WPS metgrid and real.exe give it. This is the default,
 `gfs_lake_skin = "wps"`. To give such lakes the 2 m air temperature instead,
 as the inland-water reach does for other routes, add
-`gfs_lake_skin = "air_temperature"` to the complete `[case_data]` table. Other
+`gfs_lake_skin = "air_temperature"` to the `[case_data]` table (see below). Other
 inland water (enclosed water that is not a land-use lake) keeps the inland-water
 reach either way, and the preparation log counts the cells it fills.
 
@@ -1552,13 +1655,26 @@ SHA-256. The analysis is fetched without a key into
 without network access, put the file there under its own name. When no
 analysis can be read, the run prints a warning that names each file it tried,
 and keeps the forcing's ice for that run only. `gfs_lake_ice = "wps"` in the
-complete `[case_data]` table keeps the forcing's ice outright, which is what
+`[case_data]` table keeps the forcing's ice outright, which is what
 WPS and real.exe give.
+
+A config whose `[case_data]` table holds nothing but the GFS keys
+(`gfs_lake_skin`, `gfs_lake_ice`, `gfs_snow_convention`) stays on `woof go`'s
+fetch route, so a downloaded GFS run and `--prepare-only` both read them:
+
+```toml
+[case_data]
+gfs_lake_skin = "air_temperature"
+gfs_lake_ice = "wps"
+```
+
+Any other key in the table makes it a declared-inputs table, which needs the
+complete table (forcing, Vtable, namelist, geography) and runs through
+`woof run`, as before.
 
 The GFS decoder defaults to the WPS snow convention: `SNOW = 2 * WEASD` and
 `SNOWH = 0.005 * SNOW`. To retain the raw GFS WEASD and separately supplied SNOD,
-add `gfs_snow_convention = "raw"` to the experiment's complete `[case_data]`
-table. The table's other required input declarations still apply. The decoder
+add `gfs_snow_convention = "raw"` to the experiment's `[case_data]` table. The decoder
 records the convention and refuses a cached decoder result using another
 convention. Direct bridge callers can select the same behavior with
 `GPUWM_GFS_SNOW_CONVENTION=raw`; normal preparation uses the experiment policy.

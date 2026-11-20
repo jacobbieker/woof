@@ -26,6 +26,7 @@ which for air itself is the log-mean density times the thickness.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 
@@ -81,6 +82,16 @@ def afgl(name: str = "us") -> Column:
     return col
 
 
+@lru_cache(maxsize=None)
+def _afgl_ref(name: str) -> Column:
+    """:func:`afgl`, read once per process (the data directory is fixed per
+    process, :func:`woof.radtran.data.data_dir`) and read-only."""
+    col = afgl(name)
+    for a in (col.z, col.p, col.t, col.n_air, *col.dens.values()):
+        a.setflags(write=False)
+    return col
+
+
 def interp_vmr(src: Column, gas: str, z_km: np.ndarray) -> np.ndarray:
     """Mixing ratio of ``gas`` from ``src`` at altitudes z (linear in z)."""
     return np.interp(-np.asarray(z_km), -src.z, src.vmr(gas))
@@ -119,54 +130,64 @@ def model_column(z_km, p_hpa, t_k, *, h2o_vmr=None, o3_vmr=None, co2_vmr=None,
 
 
 def model_columns(z_km, p_hpa, t_k, *, h2o_vmr=None, o3_vmr=None, co2_vmr=None,
-                  above: str = "us", gap_km: float = 1.0) -> Column:
+                  above: str = "us", gap_km: float = 1.0, top_km: float | None = None) -> Column:
     """Many model columns (ncol, nlev), top first, spliced onto one AFGL profile.
 
     Every column receives the same AFGL levels: those more than ``gap_km``
     above the highest model top, so each column has the same number of
     levels (the gap layer between a column's top and the first AFGL level
     differs in thickness).  Gases the model does not supply take the AFGL
-    mixing ratio at the model levels.
+    mixing ratio at the model levels.  ``top_km`` replaces the highest model
+    top of these columns when they are a subset of a larger set that must
+    receive that set's AFGL levels (it must be at least their own top).
     """
     z = np.asarray(z_km, dtype=np.float64)
     p = np.asarray(p_hpa, dtype=np.float64)
     t = np.asarray(t_k, dtype=np.float64)
     if z.ndim != 2 or not np.all(np.diff(z, axis=1) < 0):
         raise ValueError("model columns must be (ncol, nlev) with altitudes strictly decreasing")
-    ncol = z.shape[0]
+    ncol, nlev = z.shape
     na = p * 100.0 / (KB * t) * 1e-6
-    ref = afgl(above)
-    top = ref.z > z[:, 0].max() + gap_km
+    ref = _afgl_ref(above)
+    highest = z[:, 0].max()
+    if top_km is not None:
+        if top_km < highest:
+            raise ValueError("top_km is below a column's own model top")
+        highest = top_km
+    top = ref.z > highest + gap_km
     nt = int(top.sum())
-    rep = lambda a: np.broadcast_to(a[top], (ncol, nt))
+
+    def spliced(upper, model=None):
+        # (the AFGL levels above, the model levels): written in place, the
+        # words of np.concatenate((broadcast upper, model), axis=1)
+        out = np.empty((ncol, nt + nlev))
+        out[:, :nt] = upper[top]
+        if model is not None:
+            out[:, nt:] = model
+        return out
+
     dens = {}
     given = {"H2O": h2o_vmr, "O3": o3_vmr, "CO2": co2_vmr}
+    mz, mref = -z, -ref.z
     for gas in GASES:
         if given.get(gas) is not None:
             v = np.broadcast_to(np.asarray(given[gas], dtype=np.float64), z.shape)
         else:
-            v = np.interp(-z, -ref.z, ref.vmr(gas))
-        dens[gas] = np.concatenate((rep(ref.dens[gas]), v * na), axis=1)
-    return Column(z=np.concatenate((rep(ref.z), z), axis=1), p=np.concatenate((rep(ref.p), p), axis=1),
-                  t=np.concatenate((rep(ref.t), t), axis=1), n_air=np.concatenate((rep(ref.n_air), na), axis=1),
+            v = np.interp(mz, mref, ref.vmr(gas))
+        dens[gas] = spliced(ref.dens[gas])
+        np.multiply(v, na, out=dens[gas][:, nt:])
+    return Column(z=spliced(ref.z, z), p=spliced(ref.p, p), t=spliced(ref.t, t), n_air=spliced(ref.n_air, na),
                   dens=dens)
 
 
-def layer_column(z_km, n_air, n_gas=None):
-    """Per-layer column [cm-2] (top first), exponential air x linear vmr.
-
-    Works on (..., nlev) arrays; ``n_gas=None`` gives the air column.
-    """
+def layer_air(z_km, n_air):
+    """The air-only factors of :func:`layer_column` for (..., nlev) levels:
+    (n_top, n_bottom, n_bottom dz, phi0, phi1).  Every gas column of the same
+    levels shares them, so one evaluation serves all of them."""
     z = np.asarray(z_km, dtype=np.float64)
     na = np.asarray(n_air, dtype=np.float64)
     nt, nb = na[..., :-1], na[..., 1:]
     dz = (z[..., :-1] - z[..., 1:]) * 1e5          # cm
-    if n_gas is None:
-        vt = np.ones_like(nt)
-        vb = np.ones_like(nb)
-    else:
-        ng = np.asarray(n_gas, dtype=np.float64)
-        vt, vb = ng[..., :-1] / nt, ng[..., 1:] / nb
     # x = dz/H = ln(n_b/n_t); with u = t/dz the integral is
     # n_b dz [v_b phi0(x) + (v_t - v_b) phi1(x)],
     # phi0 = (1 - e^-x)/x, phi1 = (1 - e^-x - x e^-x)/x^2.
@@ -177,4 +198,21 @@ def layer_column(z_km, n_air, n_gas=None):
     phi0 = np.where(small, 1.0 - x / 2 + x * x / 6 - x ** 3 / 24, em / xs)
     phi1 = np.where(small, 0.5 - x / 3 + x * x / 8 - x ** 3 / 30,
                     (em - xs * np.exp(-xs)) / (xs * xs))
-    return nb * dz * (vb * phi0 + (vt - vb) * phi1)
+    return nt, nb, nb * dz, phi0, phi1
+
+
+def layer_column(z_km, n_air, n_gas=None, *, air=None):
+    """Per-layer column [cm-2] (top first), exponential air x linear vmr.
+
+    Works on (..., nlev) arrays; ``n_gas=None`` gives the air column.
+    ``air`` is :func:`layer_air` of the same ``z_km`` and ``n_air``, when the
+    caller already has it (the same words as evaluating it here).
+    """
+    nt, nb, nbdz, phi0, phi1 = layer_air(z_km, n_air) if air is None else air
+    if n_gas is None:
+        vt = np.ones_like(nt)
+        vb = np.ones_like(nb)
+    else:
+        ng = np.asarray(n_gas, dtype=np.float64)
+        vt, vb = ng[..., :-1] / nt, ng[..., 1:] / nb
+    return nbdz * (vb * phi0 + (vt - vb) * phi1)

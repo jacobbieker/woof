@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import _numerics_child
 from conftest import requires_gpu
 
 NZ, NY, NX = 12, 9, 11
@@ -49,8 +50,9 @@ def _fields(rng):
         "qc_bl": u(0, 5e-4), "qi_bl": u(0, 5e-5), "cldfra_bl": u(0, 1),
     }
     fields["cldfra_bl"][:, ::4, :] = 0
+    # Poisoned outputs: each path must write every word it publishes.
     for name in ("swdown2", "swddir2", "swddni2", "swddif2", "swdownc2", "swddnic2"):
-        fields[name] = cp.zeros((NY, NX), cp.float32)
+        fields[name] = cp.full((NY, NX), np.nan, cp.float32)
     state = SimpleNamespace(
         effc=u(2, 30), effi=u(4, 60), effs=u(10, 200), elapsed_seconds=0.0)
     return atmosphere, fields, state
@@ -61,7 +63,7 @@ def _driver(fields, *, cldfra):
 
     return SimpleNamespace(
         fields=dict(fields), aodtot=None, aerosol2d=None,
-        cldfra=cp.zeros((NZ, NY, NX), cp.float32) if cldfra else None)
+        cldfra=cp.full((NZ, NY, NX), np.nan, cp.float32) if cldfra else None)
 
 
 def _farms():
@@ -102,6 +104,9 @@ def test_fused_step_matches_the_per_step_glue(monkeypatch, mynn, elapsed, cldfra
     results = {}
     for enabled in (False, True):
         monkeypatch.setattr(farms, "FARMS_FUSED_ENABLED", enabled)
+        # _driver copies the dict, not the arrays: poison each arm's outputs.
+        for name in ("swdown2", "swddir2", "swddni2", "swddif2", "swdownc2", "swddnic2"):
+            fields[name][...] = cp.float32(np.nan)
         driver = _driver(fields, cldfra=cldfra)
         scheme = _farms()
         before = {k: v.copy() for k, v in atmosphere.items()}
@@ -113,6 +118,7 @@ def test_fused_step_matches_the_per_step_glue(monkeypatch, mynn, elapsed, cldfra
     assert results[False].keys() == results[True].keys()
     for key in results[False]:
         assert np.array_equal(results[False][key], results[True][key]), key
+        assert np.all(np.isfinite(results[True][key].view(np.float32))), key
     # not vacuous: daylight columns carry flux
     assert results[True]["swdown2"].view(np.float32).max() > 0.0
     if cldfra:
@@ -182,3 +188,14 @@ def test_kernel_radius_scale_matches_the_host_multiply():
                                 has_reqc=1, has_reqi=1, has_reqs=1, re_scale=1.e-6)
     assert np.array_equal(cp.asnumpy(ref).view(np.uint32), cp.asnumpy(got).view(np.uint32))
     assert float(ref.max()) > 0.0
+
+
+@requires_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_identity_holds_under_each_numerics(numerics, exact):
+    """FARMS in one launch against the per-step glue.
+    The battery runs strict; production runs fast, where NVRTC drops
+    --fmad=false and Metal keeps fp contract(fast).  Each mode in its own
+    child process (tests/_numerics_child.py)."""
+    _numerics_child.run(__file__, ['test_fused_step_matches_the_per_step_glue', 'test_kernel_radius_scale_matches_the_host_multiply'], numerics, exact)

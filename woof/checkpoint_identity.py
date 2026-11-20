@@ -52,8 +52,8 @@ CAMPAIGN_IMPLICIT_RUN_KEYS = {
     "lake_state_source": "auto",
     "lake_state_path": "",
     "lake_state_accept_licence": "",
-    # 2.9.10 (fix/wrf461-2dom-exact): WRF's ghg_input, read only by legacy
-    # RRTMG and RRTM longwave; 0 (the engine's fixed gases) is absent so
+    # 2.9.10 (fix/wrf461-2dom-exact): WRF's ghg_input, read by legacy
+    # RRTMG and RRTM longwave (and, beyond WRF, woof's RRTMG-K); 0 (the engine's fixed gases) is absent so
     # every earlier checkpoint resumes and every public document keeps its
     # bytes, and 1 binds.  Named breakage: with it always present every
     # checkpoint digest, echo and public document moved (2.9.10 pass 2).
@@ -329,7 +329,16 @@ CONFIG_DIAGNOSTIC_FIELDS = frozenset(
      "uh_layers",
      # Correct mode WB1 (woof/correct_mode.py OUTPUT_ONLY_KEYS): books the
      # settled-cloud total CLOUDNC and changes no prognostic word.
-     "thompson_cloud_surface_booking"})
+     "thompson_cloud_surface_booking",
+     # The opt-in ionosphere history (woof.spacewx.history): IONO_* rows
+     # only, computed from the run start and the frame's valid time; no
+     # prognostic word moves (tests/test_spacewx_ionosphere_history.py).
+     "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
+     "spacewx_ionosphere_maps",
+     # The opt-in auroral oval history (woof.spacewx.aurora_history): AURORA_*
+     # and MAG_* rows only, from the start's Kp and the frame's valid time
+     # (tests/test_spacewx_aurora_history.py).
+     "spacewx_aurora_opt", "spacewx_kp_source"})
 
 #: Versioned semantic identities.  These are deliberately explicit instead
 #: of inferred from scheme numbers: a trajectory-changing implementation or
@@ -807,8 +816,13 @@ LAND_SURFACE_PARAMETER_SOURCES = {
                           "noahmp_genparm")),
     8: ("column_surface_params", ("ssib_vegetation", "noah_landuse")),
 }
+#: WRF 4.7.1 RRTMG-K (14/14): one rad_rrtmg_driver for both spectra, one
+#: radiation layer above the model top to 1e-5 hPa (woof.core.rrtmgk).
+RRTMGK_ALGORITHM_IDENTITY = "wrf-v4.7.1-rrtmg-k-lw-sw-v1"
+RRTMGK_ABOVE_ATMOSPHERE_POLICY = "wrf-v4.7.1-rrtmg-k-one-layer-to-1e-5-hpa-v1"
 LONGWAVE_ALGORITHM_IDENTITIES = {
     7: "wrf461-flg-rad-all-v1",
+    14: RRTMGK_ALGORITHM_IDENTITY,
     31: "wrf-v4.6.1-relaxation-31-v1",
     5: "wrf461-goddard-defined-visible-depth-v1",
     99: "wrf-v4.6.1-gfdleta-lw-v1",
@@ -820,6 +834,7 @@ LONGWAVE_ALGORITHM_IDENTITIES = {
 }
 SHORTWAVE_ALGORITHM_IDENTITIES = {
     7: "wrf461-flg-rad-all-v1",
+    14: RRTMGK_ALGORITHM_IDENTITY,
     5: "wrf461-goddard-defined-visible-depth-v1",
     99: "wrf-v4.6.1-gfdleta-sw-v1",
     2: "wrf-v4.7.1-gsfc-shortwave-v2",
@@ -834,6 +849,7 @@ SHORTWAVE_ALGORITHM_IDENTITIES = {
 #: the same packaged coefficient tables and solver.
 LONGWAVE_ABOVE_ATMOSPHERE_POLICIES = {
     7: "model-column-top-interface-no-added-cap",
+    14: RRTMGK_ABOVE_ATMOSPHERE_POLICY,
     31: "not-applicable-idealized-column-forcing",
     5: "model-column-top-interface-zero-hpa",
     99: "wrf-v4.6.1-gfdl-model-column",
@@ -845,6 +861,7 @@ LONGWAVE_ABOVE_ATMOSPHERE_POLICIES = {
 }
 SHORTWAVE_ABOVE_ATMOSPHERE_POLICIES = {
     7: "model-column-top-interface-no-added-cap",
+    14: RRTMGK_ABOVE_ATMOSPHERE_POLICY,
     5: "model-column-top-interface-zero-hpa",
     99: "wrf-v4.6.1-gfdl-model-column",
     2: "wrf-v4.7.1-gsfc-clear-top-layer-to-zero-pressure",

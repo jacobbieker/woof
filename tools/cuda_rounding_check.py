@@ -26,6 +26,7 @@ import ast
 from collections import Counter
 from contextlib import contextmanager
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 import functools
 import hashlib
@@ -37,6 +38,9 @@ import re
 import sys
 import threading
 import shutil
+import subprocess
+import sysconfig
+import tempfile
 from typing import Iterable
 
 from tools.literal_division_census import Unit, compile_ptx, production_units
@@ -303,6 +307,16 @@ def inventory(root: Path) -> dict:
                                                       for x in constructors)}}
 
 
+#: Kernel files the runtime compiles on their own routes, with their own
+#: headers, defines and options. The generic loader's composition of these
+#: files does not compile; composed_units audits what each route compiles.
+DEDICATED_ROUTES = frozenset({"acm2pbl", "eeps", "etanew", "gbmpbl", "nextgen_cfe",
+                              "nextgen_reservoirs", "snow_papers", "vortex_init"})
+#: EEPS's column depth is a compile-time define (woof/core/eeps_pbl.py). The
+#: audit compiles WRF's default 45 staggered levels, i.e. 44 mass levels.
+EEPS_AUDIT_NZ = 44
+
+
 def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit], dict]:
     """Existing exact-source factories, resolved literals and runtime captures.
 
@@ -318,10 +332,11 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
                  "windfarm_fitch", "fire_spread", "nest_vertical", "windfarm_fitch_cells",
                  "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
                  "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
-                 "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16"}
+                 "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16",
+                 "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw"}
     direct = {"rrtmg_legacy_prep", "rrtmg_legacy_adapter", "rrtmg_mcica_wrf", "ruc_spp"}
     stock = [unit for unit in stock
-             if unit.key not in {"kernels:" + name for name in fragments | direct}]
+             if unit.key not in {"kernels:" + name for name in fragments | direct | DEDICATED_ROUTES}]
     source_inventory = inventory(root)
     seen = {(unit.source, unit.options) for unit in stock}
     for record in source_inventory["compile_sites"]:
@@ -400,8 +415,10 @@ def composed_units(root: Path) -> list[Unit]:
         Unit("composed:p3_reflectivity", p3.p3_reflectivity_source(kernel_dir=kdir),
              tuple(p3.DEFAULT_OPTIONS)),
         Unit("composed:rrtmg_lw", lw._gpu_source(), ("-std=c++17", "--ftz=false")),
-        Unit("composed:rrtmg_sw", sw_defines + (kdir / "rrtmg_sw.cu").read_text(encoding="utf-8"),
-             ("-std=c++17", "--ftz=false")),
+        # The runtime compiles the spectral output kernels into the same
+        # unit (RRTMGSWDevice: defines + rrtmg_sw.cu + spectral_source()).
+        Unit("composed:rrtmg_sw", sw_defines + (kdir / "rrtmg_sw.cu").read_text(encoding="utf-8")
+             + sw.spectral_source(), ("-std=c++17", "--ftz=false")),
         Unit("composed:terrain_drag", terrain.module_source(), tuple(terrain.MODULE_OPTIONS)),
         Unit("composed:windfarm_fitch", fitch.module_source(), tuple(fitch.MODULE_OPTIONS)),
         Unit("composed:nest_vertical", vnest.module_source(), tuple(vnest.MODULE_OPTIONS)),
@@ -416,6 +433,12 @@ def composed_units(root: Path) -> list[Unit]:
         Unit("composed:nest", module_source("nest", kernel_dir=kdir),
              ("-std=c++17", "-fmad=false")),
     ]
+    # RRTMG-K's three units, as woof.core.rrtmgk._load compiles them.
+    rk = module("rrtmgk")
+    units.extend((
+        Unit("composed:rrtmgk_prep", rk.prep_source(), ("-std=c++17", "--ftz=false")),
+        Unit("composed:rrtmgk_lw", rk.lw_post_source(), ("-std=c++17", "--ftz=false")),
+        Unit("composed:rrtmgk_sw", rk.sw_source(), ("-std=c++17", "--ftz=false"))))
     for name in ("rrtmg_legacy_prep", "rrtmg_legacy_adapter", "rrtmg_mcica_wrf"):
         units.append(Unit("direct:" + name,
                           (kdir / f"{name}.cu").read_text(encoding="utf-8"),
@@ -423,6 +446,73 @@ def composed_units(root: Path) -> list[Unit]:
     ruc = module("ruc_spp")
     units.append(Unit("direct:ruc_spp", (kdir / "ruc_spp.cu").read_text(encoding="utf-8"),
                       tuple(ruc.MODULE_OPTIONS)))
+    units.extend(dedicated_route_units(root))
+    return units
+
+
+def dedicated_route_units(root: Path) -> list[Unit]:
+    """The DEDICATED_ROUTES kernels as their own loaders compile them.
+
+    Each route passes its options through woof.numerics.effective_options
+    (woof.nvrtc_ptx_cache.compile_using_nvrtc), which drops --fmad=false in
+    the default fast mode, so the audit applies it too.
+    """
+    root = Path(root).resolve()
+
+    def module(name):
+        value = importlib.import_module("woof." + name)
+        if not Path(value.__file__).resolve().is_relative_to(root):
+            raise RuntimeError(f"source factory {name} was imported outside the checked tree")
+        return value
+
+    from woof.numerics import effective_options, is_strict
+    from woof import wrf_exact
+    from woof.core import kernels as K
+    kdir = root / "woof" / "core" / "kernels"
+    strict = is_strict()
+    ieee = ("--fmad=false", "--prec-div=true", "--prec-sqrt=true") if strict else ()
+
+    def land(options):
+        # woof/core/ieee_module.py compile_module, through compile_using_nvrtc.
+        options = tuple(options)
+        return effective_options(wrf_exact.effective_options(options) if wrf_exact.ENABLED else options)
+
+    acm2 = module("core.acm2pbl")
+    etanew = module("core.etanew")
+    gbm = module("core.gbmpbl")
+    cfe = module("hydro.cfe")
+    reservoirs = module("hydro.reservoirs")
+    eeps_options = K.module_options("eeps")
+    if wrf_exact.ENABLED:
+        eeps_options = wrf_exact.effective_options(eeps_options)
+    units = [
+        # compile_no_ftz (woof/core/kernels/__init__.py) fixes these options.
+        Unit("composed:acm2pbl", acm2.module_source(),
+             effective_options(("-std=c++17", "--fmad=false", "--ftz=false"))),
+        Unit("composed:etanew", etanew.module_source(), effective_options(etanew.module_options())),
+        Unit("composed:gbmpbl", gbm.compile_source(cooperative=True),
+             effective_options(gbm.MODULE_OPTIONS)),
+        # eeps_pbl._module -> load_module_int_defines -> compile_noftz_module.
+        Unit(f"composed:eeps[EEPS_NZ={EEPS_AUDIT_NZ}]",
+             K.module_source_int_defines("eeps", (("EEPS_NZ", EEPS_AUDIT_NZ),), kernel_dir=kdir),
+             effective_options(eeps_options)),
+        # cfe._compile_cfe(strict).
+        Unit("composed:nextgen_cfe", cfe._cfe_source()[1],
+             effective_options(("-std=c++17", "--ftz=false") + ieee)),
+        # reservoirs.compile_unit(strict).
+        Unit("composed:nextgen_reservoirs", reservoirs.kernel_source(strict),
+             land(("--std=c++17", "--ftz=false") + ieee)),
+        # snow_papers._module, through noahmp_kernel_sources._compile_loaded_module.
+        Unit("composed:snow_papers", (kdir / "snow_papers.cu").read_text(),
+             land(("-std=c++17", "--ftz=false"))),
+        # woof/tc/vortex.py _module: a RawModule, which appends -ftz=true.
+        Unit("composed:vortex_init", (kdir / "vortex_init.cu").read_text(),
+             ("--std=c++17", "-ftz=true")),
+    ]
+    if not strict:
+        # The scalar fallback of the fast cooperative source (gbmpbl.py:209).
+        units.append(Unit("composed:gbmpbl[paired]", gbm.compile_source(cooperative=False),
+                          effective_options(gbm.MODULE_OPTIONS)))
     return units
 
 
@@ -444,11 +534,20 @@ def elementwise_operation_unit(key, kernel, options=()) -> Unit:
             parameters.append(ctype + "* output_" + name)
             setup.append(ctype + " " + name + ";")
             stores.append("output_" + name + "[i] = " + name + ";")
-    source = ("typedef float T;\n" + kernel.preamble
+    # T is the probed floating type. Other type placeholders (CuPy binds them
+    # from the arguments' dtypes) are index arrays here, so probe them as int.
+    placeholders = sorted({parameter.ctype for parameter in kernel.in_params + kernel.out_params
+                           if parameter.dtype is None and parameter.ctype != "T"})
+    # CuPy closes the operation with ';', so an expression without one compiles.
+    operation = kernel.operation
+    if not operation.rstrip().endswith((";", "}")):
+        operation += ";"
+    source = ("typedef float T;\n" + "".join(f"typedef int {name};\n" for name in placeholders)
+              + kernel.preamble
               + '\nextern "C" __global__ void operation_probe('
               + ", ".join(parameters) + ") {\n"
               + "const unsigned long long i = (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;\n"
-              + "\n".join(setup) + "\n" + kernel.operation + "\n" + "\n".join(stores) + "\n}\n")
+              + "\n".join(setup) + "\n" + operation + "\n" + "\n".join(stores) + "\n}\n")
     return Unit("operation:" + key, source, tuple(options) + ("-std=c++17", "-ftz=true"))
 
 
@@ -713,6 +812,212 @@ def _compare_job(payload):
     return compare_unit(unit, arches, **options)
 
 
+# --- content-addressed receipt cache and bounded compile pool -------------
+CACHE_FORMAT = 1
+#: Units whose NVRTC run needs many GB; never run beside other compiles.
+HEAVY_UNITS = ("radtran_disort",)
+#: Every module whose behaviour decides a receipt; a change invalidates all.
+_ANALYSIS_FILES = ("tools/cuda_rounding_check.py", "tools/cuda_rounding_dataflow.py",
+                   "tools/cuda_rounding_native.py", "tools/literal_division_census.py",
+                   "woof/nvrtc_cache_key.py", "woof/cuda_subnormals.py")
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def find_nvdisasm(environ=None) -> str | None:
+    """nvdisasm from WOOF_NVDISASM, PATH, CUDA_HOME/CUDA_PATH or /opt/cuda."""
+    environ = os.environ if environ is None else environ
+    if environ.get("WOOF_NVDISASM"):
+        return environ["WOOF_NVDISASM"]
+    found = shutil.which("nvdisasm", path=environ.get("PATH"))
+    if found:
+        return found
+    roots = [environ[key] for key in ("CUDA_HOME", "CUDA_PATH") if environ.get(key)]
+    for root in roots + ["/opt/cuda", "/usr/local/cuda"]:
+        candidate = Path(root) / "bin" / "nvdisasm"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def find_nvrtc_library(environ=None) -> str | None:
+    """libnvrtc.so.13 from WOOF_NVRTC_LIBRARY, a CUDA_PATH/CUDA_HOME, the env's wheel or /opt/cuda."""
+    environ = os.environ if environ is None else environ
+    if environ.get("WOOF_NVRTC_LIBRARY"):
+        return environ["WOOF_NVRTC_LIBRARY"]
+    # The PTX half compiles with CuPy's NVRTC, the environment's cu13 wheel;
+    # compile the cubins with the same library (an older toolkit's NVRTC moves
+    # native signatures), so the wheel precedes any CUDA_PATH.
+    wheel = Path(sysconfig.get_path("purelib")) / "nvidia/cu13/lib/libnvrtc.so.13"
+    if wheel.exists():
+        return str(wheel)
+    for key in ("CUDA_PATH", "CUDA_HOME"):
+        if environ.get(key):
+            for folder in ("lib", "lib64"):
+                candidate = Path(environ[key]) / folder / "libnvrtc.so.13"
+                if candidate.exists():
+                    return str(candidate)
+    for root in ("/opt/cuda", "/usr/local/cuda"):
+        candidate = Path(root) / "lib64" / "libnvrtc.so.13"
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def compiler_identity(root: Path, nvrtc_library=None, nvdisasm=None) -> dict:
+    """Everything outside a unit that can change its receipt."""
+    identity = {"cache_format": CACHE_FORMAT, "python": sys.version,
+                "analysis": {name: _file_sha256(root / name) for name in _ANALYSIS_FILES
+                             if (root / name).is_file()}}
+    try:
+        from cupy.cuda import nvrtc
+        identity["nvrtc_version"] = list(nvrtc.getVersion())
+    except Exception as exc:
+        identity["nvrtc_version"] = f"unavailable: {type(exc).__name__}"
+    # The library CuPy actually loaded compiles the PTX; bind its bytes.
+    loaded = set()
+    try:
+        for line in Path("/proc/self/maps").read_text().splitlines():
+            fields = line.split(maxsplit=5)
+            path = fields[5] if len(fields) == 6 else ""
+            if "libnvrtc" in path and path.startswith("/"):  # includes libnvrtc-builtins
+                loaded.add(path)
+    except OSError:
+        pass
+    identity["loaded_nvrtc"] = {Path(path).name: _file_sha256(Path(path)) for path in sorted(loaded)}
+    if nvrtc_library is not None:
+        identity["native_nvrtc_sha256"] = _file_sha256(Path(nvrtc_library))
+    if nvdisasm is not None:
+        identity["nvdisasm_sha256"] = _file_sha256(Path(nvdisasm))
+        version = subprocess.run([str(nvdisasm), "--version"], capture_output=True, text=True, timeout=60)
+        identity["nvdisasm_version"] = version.stdout.strip()
+    return identity
+
+
+def receipt_key(unit: Unit, arches, identity: dict, *, native_only: bool = False) -> str:
+    """Digest of the unit's source, per-target options, targets and compiler."""
+    arches = [int(arch) for arch in arches]
+    payload = {"unit": unit.key, "source_sha256": hashlib.sha256(unit.source.encode()).hexdigest(),
+               "options": {str(arch): list(_options(unit, arch)) for arch in arches},
+               "arches": arches, "native_only": bool(native_only), "identity": identity}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def load_receipt(cache: Path, unit: Unit, arches, identity: dict, *, native_only: bool = False):
+    """A cached row, or None. Re-derives and compares every bound input."""
+    key = receipt_key(unit, arches, identity, native_only=native_only)
+    try:
+        stored = json.loads((Path(cache) / f"{key}.json").read_text(encoding="utf-8"))
+        row = stored["row"]
+        if (not isinstance(row, dict) or not isinstance(row["compiled"], dict)
+                or stored["cache_key"] != key or row["unit"] != unit.key or row["errors"]
+                or row["native_errors"]
+                or row["source_sha256"] != hashlib.sha256(unit.source.encode()).hexdigest()
+                or any(row["compiled"].get(str(arch), {}).get("options") != list(_options(unit, arch))
+                       for arch in arches)):
+            return None
+        return row
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def store_receipt(cache: Path, unit: Unit, arches, identity: dict, row: dict,
+                  *, native_only: bool = False) -> None:
+    if row["errors"] or row["native_errors"]:
+        return  # a failed compile is never a receipt
+    key = receipt_key(unit, arches, identity, native_only=native_only)
+    cache = Path(cache)
+    cache.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", dir=cache, suffix=".tmp", delete=False, encoding="utf-8") as handle:
+        json.dump({"cache_key": key, "row": row}, handle)
+    os.replace(handle.name, cache / f"{key}.json")
+
+
+def available_gib() -> float | None:
+    """MemAvailable in GiB (Linux), or None where it cannot be read."""
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / (1 << 20)
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def wait_for_memory(needed_gib: float, timeout_s: float, *, read=available_gib,
+                    sleep=None, clock=None) -> bool:
+    """Block until ``needed_gib`` is available or ``timeout_s`` elapses.
+
+    A heavy unit on a shared host is OOM-killed when it starts into a full
+    machine; waiting is cheaper than three killed attempts. Returns whether the
+    memory was seen (True also when it cannot be measured).
+    """
+    import time
+    sleep, clock = sleep or time.sleep, clock or time.monotonic
+    deadline = clock() + timeout_s
+    while True:
+        free = read()
+        if free is None or free >= needed_gib:
+            return True
+        if clock() >= deadline:
+            print(f"only {free:.1f} GiB free after {timeout_s:.0f} s; starting anyway", flush=True)
+            return False
+        print(f"waiting for {needed_gib:.0f} GiB ({free:.1f} free) before a heavy unit", flush=True)
+        sleep(60)
+
+
+def run_units(units, arches, options, workers, on_row, *, heavy=HEAVY_UNITS, job=None,
+              retries: int = 2) -> None:
+    """Compile units with bounded memory.
+
+    Heavy units run alone in a one-process pool after the rest. A pool whose
+    worker was killed (BrokenProcessPool, typically the OOM killer) is rebuilt
+    with half the workers and only the units that never finished are retried.
+    ``on_row(unit, row)`` is called in this process for each finished unit.
+    """
+    job = job or _compare_job
+    light = [unit for unit in units if not any(name in unit.key for name in heavy)]
+    heavy_units = [unit for unit in units if unit not in light]
+    # Always use a pool, even for one worker: an OOM kill then takes down a
+    # worker that can be retried, not the whole audit.
+    for group, limit in ((light, workers), (heavy_units, 1)):
+        todo, width = list(group), limit
+        for _ in range(retries + 1):
+            if not todo:
+                break
+            done = set()
+            if group is heavy_units:
+                wait_for_memory(float(os.environ.get("WOOF_ROUNDING_HEAVY_GIB", "12")),
+                                float(os.environ.get("WOOF_ROUNDING_MEM_WAIT_S", "3600")))
+            try:
+                with ProcessPoolExecutor(max_workers=width) as executor:
+                    futures = {}
+                    for unit in todo:  # a worker can die while later units submit
+                        futures[executor.submit(job, (unit, arches, options))] = unit
+                    for future in as_completed(futures):
+                        try:
+                            row = future.result()
+                        except BrokenProcessPool:
+                            continue
+                        done.add(id(futures[future]))
+                        on_row(futures[future], row)
+            except BrokenProcessPool:
+                pass
+            todo = [unit for unit in todo if id(unit) not in done]
+            if todo:
+                width = max(1, width // 2)
+                print(f"pool broke; retrying {len(todo)} unfinished unit(s) with {width} worker(s)",
+                      flush=True)
+        if todo:
+            raise BrokenProcessPool("units never finished: " + ", ".join(unit.key for unit in todo))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=ROOT)
@@ -734,6 +1039,9 @@ def main(argv=None) -> int:
     parser.add_argument("--write-baseline", type=Path, help="save frozen diagnostics for review; never a numerical certification")
     parser.add_argument("--reuse-audit", type=Path,
                         help="reuse same-source/options/target receipts from this compiler installation")
+    parser.add_argument("--cache-dir", type=Path,
+                        help="content-addressed receipt cache; a receipt is reused only when the unit "
+                             "source, per-target options, targets, compiler/tool bytes and analysis code match")
     args = parser.parse_args(argv)
     if args.compiler_info:
         if os.environ.get("CUDA_VISIBLE_DEVICES") not in ("", "-1"):
@@ -781,16 +1089,33 @@ def main(argv=None) -> int:
                     continue
                 reused[row["unit"]] = row
 
-        def record(row):
+        def record(row, write=True):
             data["units"].append(row)
             comparison = row["native_differences"] if args.native_only else row["differences"]
             counts = {arch: len(sites) for arch, sites in comparison.items()}
             print(f"{row['unit']}: {row['status']} {counts}", flush=True)
             # A detached interrupted sweep retains every completed receipt.
-            args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+            if write:
+                args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+
+        identity = (compiler_identity(args.root, args.nvrtc_library, args.nvdisasm)
+                    if args.cache_dir and not args.keep_ptx else None)
+        cache_hits = 0
+
+        def finished(unit, row):
+            if identity is not None:
+                store_receipt(args.cache_dir, unit, data["architectures"], identity, row,
+                              native_only=args.native_only)
+            record(row)
 
         pending_units = []
         for unit in units:
+            cached = (load_receipt(args.cache_dir, unit, data["architectures"], identity,
+                                   native_only=args.native_only) if identity is not None else None)
+            if cached is not None:
+                cache_hits += 1
+                record(dict(cached, receipt_reused=True), write=False)
+                continue
             row = reused.get(unit.key)
             if (row is not None
                     and row["source_sha256"] == hashlib.sha256(unit.source.encode()).hexdigest()
@@ -799,17 +1124,13 @@ def main(argv=None) -> int:
                     and (not args.nvdisasm or all("sass_sha256" in row["compiled"].get(str(arch), {})
                                                  for arch in data["architectures"]))):
                 row = dict(row, receipt_reused=True)
-                record(row)
+                record(row, write=False)
             else:
                 pending_units.append(unit)
-        if args.workers == 1:
-            for unit in pending_units:
-                record(compare_unit(unit, data["architectures"], **options))
-        else:
-            with ProcessPoolExecutor(max_workers=args.workers) as executor:
-                futures = [executor.submit(_compare_job, (unit, data["architectures"], options)) for unit in pending_units]
-                for future in as_completed(futures):
-                    record(future.result())
+        # Reused rows are rewritten once, not once each (indent= JSON is slow).
+        args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+        print(f"receipt cache: {cache_hits} reused, {len(pending_units)} to compile", flush=True)
+        run_units(pending_units, data["architectures"], options, args.workers, finished)
         data["units"].sort(key=lambda row: row["unit"])
     args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
     if args.write_baseline:

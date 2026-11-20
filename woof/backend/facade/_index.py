@@ -70,8 +70,14 @@ def _advanced_key(key):
                 out.extend(mx.array(i.astype(np.int64)) for i in np.nonzero(k))
                 continue
             out.append(mx.array(k.astype(np.int64)))
-        elif isinstance(k, list):
-            out.append(mx.array(np.asarray(k, dtype=np.int64)))
+        elif isinstance(k, (list, tuple)):
+            # a sequence inside a key indexes like a list: a[:, (0, -1)];
+            # a boolean one is a mask, as an np.ndarray mask is above
+            host = np.asarray(k)
+            if host.dtype == np.bool_:
+                out.extend(mx.array(i.astype(np.int64)) for i in np.nonzero(host))
+                continue
+            out.append(mx.array(host.astype(np.int64)))
         else:
             out.append(k)
     return tuple(out) if isinstance(key, tuple) or len(out) != 1 else out[0]
@@ -112,6 +118,9 @@ def setitem(a: ndarray, key, value):
         host[_host_key(key)] = value.get() if isinstance(value, ndarray) else value
         a.set(host)
         return
+    from woof.backend.facade._write import scatter_last
+    if scatter_last(a, key, value):
+        return
     # Advanced: scatter into the full view, then write the view back.
     whole = a._values()
     values = operand_values(value, a.dtype)
@@ -122,7 +131,12 @@ def setitem(a: ndarray, key, value):
         # trailing axis carries past the key untouched.
         halves = whole.reshape(-1).view(mx.uint32).reshape(tuple(whole.shape) + (2,))
         v = values.reshape(-1).view(mx.uint32).reshape(tuple(values.shape) + (2,))
-        halves[_advanced_key(key)] = v
+        k = _advanced_key(key)
+        k = k if isinstance(k, tuple) else (k,)
+        # name the halves axis after an ellipsis, so no key form (an ellipsis,
+        # a short key, a newaxis) can reach it
+        k = k + ((slice(None),) if any(x is Ellipsis for x in k) else (Ellipsis, slice(None)))
+        halves[k] = v
         a._write(halves.reshape(-1).view(mx.uint64).reshape(tuple(whole.shape)))
         return
     whole[_advanced_key(key)] = values

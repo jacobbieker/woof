@@ -2508,6 +2508,44 @@ class PhysicsDriver:
         self.radiation_callable = radiation
         from woof.eclipse_windows import EclipseRadiation
         self.eclipse = EclipseRadiation.for_run(cfg, radiation)
+        # Opt-in TSI forcing (woof.spacewx); None, and no import, by default.
+        self.solar_variability = None
+        if int(getattr(cfg, "solar_tsi_opt", 0) or 0) and radiation is not None:
+            from woof.spacewx.solar_irradiance import SolarVariability
+            self.solar_variability = SolarVariability.for_run(
+                cfg, getattr(radiation, "start_time", None))
+            import json as _tsi_json
+            print("[spacewx tsi] " + _tsi_json.dumps(self.solar_variability.receipt(),
+                                                     sort_keys=True, default=str), flush=True)
+        # Opt-in solar spectral variability (woof.spacewx): RRTMG SW's band
+        # shares at each radiation call; None, and no import, by default.
+        self.solar_spectrum = None
+        if int(getattr(cfg, "solar_ssi_opt", 0) or 0) and radiation is not None:
+            from woof.spacewx.solar_spectrum import SpectralVariability
+            self.solar_spectrum = SpectralVariability.for_run(
+                cfg, getattr(radiation, "start_time", None), radiation)
+            import json as _ssi_json
+            print("[spacewx ssi] " + _ssi_json.dumps(self.solar_spectrum.receipt(),
+                                                     sort_keys=True, default=str), flush=True)
+        # Opt-in ionosphere history rows (woof.spacewx); None, and no import,
+        # by default.  Diagnostic only: nothing the step reads.
+        self.spacewx_ionosphere = None
+        if int(getattr(cfg, "spacewx_ionosphere_opt", 0) or 0) and radiation is not None:
+            from woof.spacewx.history import IonosphereHistory
+            self.spacewx_ionosphere = IonosphereHistory.for_run(cfg, radiation)
+            if self.spacewx_ionosphere is not None:
+                import json as _spacewx_json
+                print("[spacewx ionosphere] " + _spacewx_json.dumps(
+                    self.spacewx_ionosphere.receipt(), default=str), flush=True)
+        # Opt-in auroral oval rows (woof.spacewx), the same contract.
+        self.spacewx_aurora = None
+        if int(getattr(cfg, "spacewx_aurora_opt", 0) or 0) and radiation is not None:
+            from woof.spacewx.aurora_history import AuroraHistory
+            self.spacewx_aurora = AuroraHistory.for_run(cfg, radiation)
+            if self.spacewx_aurora is not None:
+                import json as _aurora_json
+                print("[spacewx aurora] " + _aurora_json.dumps(
+                    self.spacewx_aurora.receipt(), default=str), flush=True)
         self.cumulus_callable = cumulus
         # Producers declare their retained fields as rows before any carrier
         # inventory is built. A later scheme call only writes these buffers.
@@ -3243,10 +3281,18 @@ class PhysicsDriver:
                     self.fields, cp.asarray(cosine).reshape(self.fields["albedo"].shape),
                     initialize=initialize)
             radiation_fields = dict(radiation_fields, albedo=self.fields["albsol"])
+        if getattr(self, "solar_spectrum", None) is not None:
+            # The band shares at the call's model time, read by the SW leaf.
+            self.solar_spectrum.apply(self.radiation_callable, state.elapsed_seconds)
         result = self.radiation_callable(
             atmosphere=atmosphere, fields=radiation_fields, state=radiation_state, cfg=cfg)
         if not isinstance(result, RadiationResult):
             raise TypeError("radiation callable must return RadiationResult")
+        if getattr(self, "solar_variability", None) is not None:
+            # TSI(t)/reference on every shortwave output, before any consumer.
+            result = self.solar_variability.scale(result, state.elapsed_seconds)
+            # ...and on the shortwave outputs the scheme wrote into fields itself.
+            self.solar_variability.scale_direct_fields(radiation_fields, cfg.ra_sw_physics)
         if cloud_view is not None and int(cfg.icloud) == 3:
             result.cldfra = cloud_view.fraction
         nz, ny, nx = state.p.shape
@@ -7502,8 +7548,8 @@ class PhysicsDriver:
                 self.call_counts["radiation"] += 1
                 if (self.cam_ozone is not None
                         and self.cam_ozone.mode == "legacy-root"):
-                    from woof.core.radiation_composition import legacy_radiation_adapter
-                    legacy = legacy_radiation_adapter(self.radiation_callable)
+                    from woof.core.radiation_composition import retained_ozone_adapter
+                    legacy = retained_ozone_adapter(self.radiation_callable)
                     # Device to device: the adapter keeps its field on the
                     # card and a host round trip would copy the same bytes.
                     import cupy as _cp
@@ -8247,9 +8293,29 @@ def _attach_urban(driver: PhysicsDriver, state: DomainState,
     if lat is not None:
         lat = np.broadcast_to(lat, shape)
         lon = np.broadcast_to(lon, shape)
+    morphology = None
+    if getattr(cfg, "urban_param_file", ""):
+        # WPS's gridded URB_PARAM through real.exe's split and FRC_URB2D
+        # fill (woof.core.urban_param); urban_var_init's keep/zero rule is
+        # applied inside init_urban_state.
+        from woof.core.urban_param import load_urban_morphology
+        from woof.core.urban_state import urban_types
+        ivgtyp = cp.asnumpy(f["ivgtyp"])
+        loaded = load_urban_morphology(
+            cfg.urban_param_file, option=option, ivgtyp=ivgtyp,
+            urban=urban_types(ivgtyp, categories, int(cfg.use_wudapt_lcz)) > 0,
+            mminlu=landuse_dataset, latitude=lat, longitude=lon,
+            dx=getattr(cfg, "dx", None), dy=getattr(cfg, "dy", None))
+        morphology = {k: getattr(loaded, k)
+                      for k in ("lp", "lb", "hgt", "mh", "stdh", "lf", "hi")}
+        if loaded.frc is not None:
+            frc_urb2d = loaded.frc
     urban = init_urban_state(cfg, params, categories, f,
                              nz=int(state.p.shape[0]), frc_urb2d=frc_urb2d,
-                             module=module)
+                             module=module, morphology=morphology)
+    if morphology is not None:
+        # The bytes the state came from, for the checkpoint identity.
+        urban.urban_param_sha256 = loaded.sha256
     driver.urban = urban
     driver._urban_cfg = cfg
     driver.urban_coupler = UrbanCoupler(
@@ -8682,9 +8748,10 @@ def initialize_physics(
         latitude=radiation_latitude, longitude=radiation_longitude,
         cold_start=lsm_cold_start)
     if getattr(cfg, "sst_skin", 0):
-        f["sst"] = _as_2d(tsk if sst is None else sst, shape, "sst").copy()
-        # Bulk SST must stay independent if a device caller supplies the
-        # same array for SST and TSK; the skin write-back mutates TSK.
+        # f["sst"] is already its own copy (above), independent of TSK,
+        # which the skin write-back mutates; it is not rebuilt here, since
+        # a rebuild from the caller's arrays would discard the lake water
+        # temperature initialize_surface just bound.
         # WRF tools/gen_allocs.c initializes allocated REAL state to zero.
         # SSTSK has no later cold-start initializer before its first call.
         f["sstsk"] = cp.zeros(shape, dtype=DTYPE)
@@ -8788,11 +8855,12 @@ def initialize_physics(
     if int(cfg.sf_surface_physics) in (3, 8) or (int(cfg.sf_surface_physics) in (2, 4, 7) and cfg.fractional_seaice):
         # module_physics_init.F:3126-3131 initializes TSK_SAVE from TSK.
         # The open-water component comes from SST when the ingest carries it;
-        # otherwise the already repaired surface temperature is WRF's
-        # no-SST fallback.
+        # otherwise TSK is WRF's no-SST fallback.  Both are read from the
+        # fields after initialize_surface, so they carry the lake state it
+        # bound (water temperature in SST and TSK; ice temperature and the
+        # 273.15 K clamp in TSK), whatever array type the caller passed.
         f["tsk_save"] = cp.ascontiguousarray(f["tsk"].copy())
-        f["tsk_sea"] = _as_2d(
-            tsk if sst is None else sst, shape, "sst").copy()
+        f["tsk_sea"] = (f["tsk"] if sst is None else f["sst"]).copy()
         for name in ("znt", "ust", "mol", "zol", "flhc", "flqc", "cpm",
                      "cqs2", "chs2", "chs", "qsfc", "qgh", "hfx", "qfx",
                      "lh"):
@@ -9757,10 +9825,8 @@ def initialize_physics(
         import json as _wind_json
         print("[wind-farm detection] " + _wind_json.dumps(driver.wind_farm_detection), flush=True)
     if cfg.sst_update:
-        # Same bulk SST carrier name as the independent skin-SST port.
-        if "sst" not in driver.fields:
-            driver.fields["sst"] = _as_2d(sst if sst is not None else tsk,
-                                            shape, "sst").copy()
+        # Same bulk SST carrier name as the independent skin-SST port;
+        # f["sst"] is always built above, with any bound lake temperature.
         from woof.surface_analysis import bind_surface_analysis
         bind_surface_analysis(driver, cfg, radiation_start_time,
                               radiation_latitude, radiation_longitude)

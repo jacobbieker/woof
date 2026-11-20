@@ -83,17 +83,31 @@ extern "C" __global__ void ocn_btr_init_edges_v842(
     thicknessFlux[e] = C(0.0);
 }
 
-// the velocity predictor (corrector = 0: uPerp the old level, the SSH the
-// old level's) and corrector (corrector = 1: uPerp btrvel_temp, the SSH
-// (1 - gam2)*old + gam2*new); edges 1..nEdges
-extern "C" __global__ void ocn_btr_velocity_v842(
-    rk *uNew, const rk *uCur, const rk *uPerp, const rk *sshCur, const rk *sshNew, const rk *forcing,
-    const rk *fEdge, const rk *dcEdge, const rk *weightsOnEdge, const int *edgesOnEdge, const int *nEdgesOnEdge,
-    const int *cellsOnEdge, const int *edgeMask, int nEdges, int nl, int me2, int corrector,
-    rk dtn, rk gravity, rk omg2, rk g2)
+// an edge's thickness flux: the edge SSH from the old level (weighted = 0)
+// or the gam2 mix of old and new (weighted = 1)
+__device__ __forceinline__ rk bt_flux(
+    int e, const rk *uCur, const rk *uNew, const rk *sshCur, const rk *sshNew, const rk *bottomDepth,
+    const int *cellsOnEdge, int weighted, rk omg2, rk g2, rk omgv, rk gv)
 {
-    const int e = bt_thread();
-    if (e >= nEdges) return;
+    const int cell1 = cellsOnEdge[e * 2] - 1, cell2 = cellsOnEdge[e * 2 + 1] - 1;
+    rk sshEdge;
+    if (weighted) {
+        const rk ssh1 = A(M(omg2, sshCur[cell1]), M(g2, sshNew[cell1]));
+        const rk ssh2 = A(M(omg2, sshCur[cell2]), M(g2, sshNew[cell2]));
+        sshEdge = M(C(0.5), A(ssh1, ssh2));
+    } else {
+        sshEdge = M(C(0.5), A(sshCur[cell1], sshCur[cell2]));
+    }
+    const rk thicknessSum = A(sshEdge, bt_min(bottomDepth[cell1], bottomDepth[cell2]));
+    return M(A(M(omgv, uCur[e]), M(gv, uNew[e])), thicknessSum);
+}
+
+__device__ __forceinline__ void bt_velocity_edge(
+    int e, rk *uNew, const rk *uCur, const rk *uPerp, const rk *sshCur, const rk *sshNew, const rk *forcing,
+    const rk *fEdge, const rk *dcEdge, const rk *weightsOnEdge, const int *edgesOnEdge, const int *nEdgesOnEdge,
+    const int *cellsOnEdge, const int *edgeMask, int nl, int me2, int corrector, rk dtn, rk gravity, rk omg2,
+    rk g2)
+{
     const int tempMask = edgeMask[e * nl];
     const int cell1 = cellsOnEdge[e * 2] - 1, cell2 = cellsOnEdge[e * 2 + 1] - 1;
     rk coriolis = C(0.0);
@@ -113,30 +127,42 @@ extern "C" __global__ void ocn_btr_velocity_v842(
                 A(uCur[e], M(dtn, A(S(coriolis, D(M(gravity, S(ssh2, ssh1)), dcEdge[e])), forcing[e]))));
 }
 
+// the velocity predictor (corrector = 0: uPerp the old level, the SSH the
+// old level's) and corrector (corrector = 1: uPerp btrvel_temp, the SSH
+// (1 - gam2)*old + gam2*new); edges 1..nEdges.
+//
+// Folded in, each on its own edge's word after this thread wrote it (no other
+// thread writes it, and nothing the host would launch in between writes the
+// new level, the flux or the sum), so every word is the separate kernels':
+// the predictor's thickness flux sum (edges 1..nFlux; the old level's SSH, as
+// ocn_btr_flux_sum_v842 with weighted = 0); the next corrector's copy of the
+// new velocity into btrvel_temp (edges 1..nCopy); and the subcycle's running
+// sum of the barotropic velocity (edges 1..nAcc). A zero count skips one.
+extern "C" __global__ void ocn_btr_velocity_v842(
+    rk *uNew, const rk *uCur, const rk *uPerp, const rk *sshCur, const rk *sshNew, const rk *forcing,
+    const rk *fEdge, const rk *dcEdge, const rk *weightsOnEdge, const int *edgesOnEdge, const int *nEdgesOnEdge,
+    const int *cellsOnEdge, const int *edgeMask, int nEdges, int nl, int me2, int corrector,
+    rk dtn, rk gravity, rk omg2, rk g2,
+    rk *thicknessFlux, const rk *bottomDepth, int nFlux, rk omgv, rk gv, rk *tempNext, int nCopy,
+    rk *btrNew, int nAcc)
+{
+    const int e = bt_thread();
+    if (e < nEdges) bt_velocity_edge(e, uNew, uCur, uPerp, sshCur, sshNew, forcing, fEdge, dcEdge, weightsOnEdge,
+                                     edgesOnEdge, nEdgesOnEdge, cellsOnEdge, edgeMask, nl, me2, corrector, dtn,
+                                     gravity, omg2, g2);
+    if (e < nFlux)
+        thicknessFlux[e] = A(thicknessFlux[e],
+                             bt_flux(e, uCur, uNew, sshCur, sshNew, bottomDepth, cellsOnEdge, 0, C(0.0), C(0.0),
+                                     omgv, gv));
+    if (e < nCopy) tempNext[e] = uNew[e];
+    if (e < nAcc) btrNew[e] = A(btrNew[e], uNew[e]);
+}
+
 // the corrector's copy of the new velocity, edges 1..nEdges+1
 extern "C" __global__ void ocn_btr_copy_v842(rk *temp, const rk *uNew, int n)
 {
     const int e = bt_thread();
     if (e < n) temp[e] = uNew[e];
-}
-
-// an edge's thickness flux: the edge SSH from the old level (weighted = 0)
-// or the gam2 mix of old and new (weighted = 1)
-__device__ __forceinline__ rk bt_flux(
-    int e, const rk *uCur, const rk *uNew, const rk *sshCur, const rk *sshNew, const rk *bottomDepth,
-    const int *cellsOnEdge, int weighted, rk omg2, rk g2, rk omgv, rk gv)
-{
-    const int cell1 = cellsOnEdge[e * 2] - 1, cell2 = cellsOnEdge[e * 2 + 1] - 1;
-    rk sshEdge;
-    if (weighted) {
-        const rk ssh1 = A(M(omg2, sshCur[cell1]), M(g2, sshNew[cell1]));
-        const rk ssh2 = A(M(omg2, sshCur[cell2]), M(g2, sshNew[cell2]));
-        sshEdge = M(C(0.5), A(ssh1, ssh2));
-    } else {
-        sshEdge = M(C(0.5), A(sshCur[cell1], sshCur[cell2]));
-    }
-    const rk thicknessSum = A(sshEdge, bt_min(bottomDepth[cell1], bottomDepth[cell2]));
-    return M(A(M(omgv, uCur[e]), M(gv, uNew[e])), thicknessSum);
 }
 
 __device__ __forceinline__ void bt_ssh_cell(
@@ -209,24 +235,52 @@ extern "C" __global__ void ocn_btr_normalize_v842(rk *thicknessFlux, rk *btrNew,
     btrNew[e] = D(btrNew[e], (rk)(nSum + 1));
 }
 
+// lane j's word, for the warp-per-edge sums (lanes == 32, CUDA and Metal).
+// The host backend runs one lane per edge, so its scan never sees the
+// shuffle and its kernels need no fibers.
+#ifdef WOOF_HOST_SCAN
+#define BT_LANE_WORD(v, j) (v)
+#else
+#define BT_LANE_WORD(v, j) __shfl_sync(0xffffffffu, (v), (j))
+#endif
+
 // the transport velocity with the correction (F - sum h u)/sum h, edges
-// 1..nEdgesArray(config_num_halos)
+// 1..nEdgesArray(config_num_halos). With lanes == 32, a warp per edge: lane
+// l loads levels l, l+32, ... (a column's consecutive words, so the loads
+// coalesce) and forms their terms; every lane then adds the terms in level
+// order, each broadcast from its lane, so the sums are the serial loop's
+// words. With lanes == 1, a thread per edge runs the same loop serially.
 extern "C" __global__ void ocn_btr_transport_v842(
     rk *normalTransportVelocity, const rk *btrNew, const rk *bclNew, const rk *bolus,
     const rk *layerThicknessEdge, const rk *thicknessFlux, const int *maxLevelEdgeTop, const int *edgeMask,
-    int nEdges, int nl, int useVelocityCorrection)
+    int nEdges, int nl, int useVelocityCorrection, int lanes)
 {
-    const int e = bt_thread();
+    const int e = bt_thread() / lanes, lane = lanes == 1 ? 0 : (int)(threadIdx.x & 31);
     if (e >= nEdges) return;
     const int b = e * nl;
-    rk fluxSum = M(layerThicknessEdge[b], A(A(btrNew[e], bclNew[b]), bolus[b]));
-    rk thicknessSum = layerThicknessEdge[b];
-    for (int k = 1; k < maxLevelEdgeTop[e]; ++k) {
-        fluxSum = A(fluxSum, M(layerThicknessEdge[b + k], A(A(btrNew[e], bclNew[b + k]), bolus[b + k])));
-        thicknessSum = A(thicknessSum, layerThicknessEdge[b + k]);
+    const int top = maxLevelEdgeTop[e];
+    rk fluxSum = C(0.0), thicknessSum = C(0.0);
+    for (int k0 = 0; k0 < nl && (k0 == 0 || k0 < top); k0 += lanes) {
+        const int k = k0 + lane;
+        rk h = C(0.0), term = C(0.0);
+        if (k < nl && (k == 0 || k < top)) {
+            h = layerThicknessEdge[b + k];
+            term = M(layerThicknessEdge[b + k], A(A(btrNew[e], bclNew[b + k]), bolus[b + k]));
+        }
+        for (int j = 0; j < lanes && k0 + j < nl && (k0 + j == 0 || k0 + j < top); ++j) {
+            const rk hj = lanes == 1 ? h : BT_LANE_WORD(h, j);
+            const rk tj = lanes == 1 ? term : BT_LANE_WORD(term, j);
+            if (k0 + j == 0) {
+                fluxSum = tj;
+                thicknessSum = hj;
+            } else if (k0 + j < top) {
+                fluxSum = A(fluxSum, tj);
+                thicknessSum = A(thicknessSum, hj);
+            }
+        }
     }
     const rk correction = M((rk)useVelocityCorrection, D(S(thicknessFlux[e], fluxSum), thicknessSum));
-    for (int k = 0; k < nl; ++k)
+    for (int k = lane; k < nl; k += lanes)
         normalTransportVelocity[b + k] = M((rk)edgeMask[b + k],
                                            A(A(A(btrNew[e], bclNew[b + k]), bolus[b + k]), correction));
 }

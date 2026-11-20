@@ -112,19 +112,42 @@ def workspace_floats(scheme: ColumnCumulusScheme, nz: int, tile: int) -> int:
     return int(scheme.workspace_slots) * (int(nz) + 2) * int(tile)
 
 
-def tile_columns(ncol: int, multiprocessor_count: int) -> int:
-    """Columns in flight per launch: the card's width, never more than ncol."""
+def _metal_active() -> bool:
+    from woof import backend
+    return backend.active() == "mlx"
+
+
+def tile_columns(ncol: int, multiprocessor_count: int, *,
+                 scheme: ColumnCumulusScheme | None = None,
+                 nz: int | None = None, metal: bool | None = None) -> int:
+    """Columns in flight per launch: the card's width, never more than ncol.
+
+    On Metal (``metal``, default: the active backend) the tile is
+    :func:`woof.core.physics_inventory.metal_column_tile_columns`: 2,048
+    columns per core, held to whole blocks under the byte cap at this
+    ``nz`` when the ``scheme`` is given, and at least one block (so it can
+    exceed a domain smaller than one block; the launcher bounds its loop by
+    ``ncol``).  The tile only partitions independent columns.
+    """
+    if _metal_active() if metal is None else metal:
+        from woof.core.physics_inventory import metal_column_tile_columns
+        per_block = (None if scheme is None or nz is None
+                     else 4 * workspace_floats(scheme, nz, BLOCK))
+        return metal_column_tile_columns(multiprocessor_count, ncol, BLOCK,
+                                         block_bytes=per_block)
     tile = int(multiprocessor_count) * TILE_BLOCKS_PER_SM * BLOCK
     return max(1, min(int(ncol), tile))
 
 
 def workspace_bytes(cu_physics: int, nz: int, ncol: int,
-                    multiprocessor_count: int) -> int:
-    """Device bytes the launcher allocates for one call (preflight pricing)."""
+                    multiprocessor_count: int, *, metal: bool = False) -> int:
+    """Device bytes the launcher allocates for one call (preflight pricing;
+    ``metal`` prices the Metal tile)."""
     scheme = COLUMN_CUMULUS_SCHEMES[int(cu_physics)]
     if isinstance(scheme, _r8.ColumnCumulusScheme):
         return _r8.workspace_bytes(scheme, nz, ncol)
-    tile = tile_columns(ncol, multiprocessor_count)
+    tile = tile_columns(ncol, multiprocessor_count, scheme=scheme, nz=nz,
+                        metal=metal)
     return 4 * workspace_floats(scheme, nz, tile)
 
 
@@ -155,7 +178,7 @@ def launch_columns(scheme: ColumnCumulusScheme, *, mass, iface, sc, ic,
             (mass["p"], iface["p8w"], limits, np.int32(ncol),
              np.int32(nz), np.int32(row_width)))
     sms = int(cp.cuda.Device().attributes["MultiProcessorCount"])
-    tile = tile_columns(ncol, sms)
+    tile = tile_columns(ncol, sms, scheme=scheme, nz=nz)
     ws = cp.empty(workspace_floats(scheme, nz, tile), dtype=DTYPE)
     null = np.uint64(0)
     args_in = tuple(mass[n] for n in MASS_INPUTS) + tuple(
@@ -448,11 +471,19 @@ def column_tables(spec: ColumnKernelSpec, *, verify: bool = True):
 
 
 # ---------------------------------------------------------------- launch
-def registry_tile_columns(fn, ncol: int, block: int) -> int:
+def registry_tile_columns(fn, ncol: int, block: int, *,
+                          block_bytes: int | None = None) -> int:
+    """Columns per launch: the card's resident capacity for ``fn``; on
+    Metal :func:`woof.core.physics_inventory.metal_column_tile_columns`
+    (``block_bytes`` of workspace per ``block`` columns, under its cap)."""
     import cupy as cp
 
     dev = cp.cuda.Device()
     sms = dev.attributes["MultiProcessorCount"]
+    if _metal_active():
+        from woof.core.physics_inventory import metal_column_tile_columns
+        return metal_column_tile_columns(sms, ncol, block,
+                                         block_bytes=block_bytes)
     per_sm = _TILE_BLOCKS_PER_SM
     try:
         from cupy_backends.cuda.api import driver
@@ -517,7 +548,8 @@ def run_columns(spec: ColumnKernelSpec, *, level, interface, column, carried,
         out[name] = cp.empty((ncol,), dtype=cp.int32)
     fn = load_module(spec.module).get_function(spec.entry)
     block = spec.block
-    tile = ws_tile or registry_tile_columns(fn, ncol, block)
+    tile = ws_tile or registry_tile_columns(
+        fn, ncol, block, block_bytes=4 * spec.workspace_slots * nz * block)
     ws = cp.empty(spec.workspace_slots * nz * tile, dtype=DTYPE)
     tail = ([out[n] for n in spec.level_outputs]
             + [out[n] for n in spec.column_outputs]

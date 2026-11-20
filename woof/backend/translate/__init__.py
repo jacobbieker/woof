@@ -623,6 +623,7 @@ class _Rewriter:
         self._handled_literals: set[int] = set()
         #: spans already replaced by a folded constant (not visited again)
         self._folded: set = set()
+        self._const_spelled: set = set()
         #: program-scope constant tables whose `float` stays `float`
         self._keep_float_ranges: list = []
         #: declaration statement start -> (stmt, var usrs, function usr, default space)
@@ -976,16 +977,47 @@ class _Rewriter:
         if init and _is_double(cursor.type) and init[-1].kind.name not in ("INIT_LIST_EXPR", "FLOATING_LITERAL"):
             if self.fold_constant_double(init[-1]):
                 self._folded.add(self.span(init[-1]))
-        if init and self.retain and _is_float(cursor.type) \
-                and init[-1].kind.name not in ("INIT_LIST_EXPR", "FLOATING_LITERAL"):
-            # f32s arithmetic is not constexpr: the value, as a literal
-            v = self.const_eval(init[-1])
-            if v is not None and v[0] == "double":
-                import math
-                if math.isfinite(v[1]):
-                    s_, e_ = self.span(init[-1])
-                    self.edits.replace(s_, e_, f"{float(v[1]).hex()}f")
-                    self._folded.add(self.span(init[-1]))
+        if init and self.retain and _is_float(cursor.type):
+            self._fold_f32s_initialiser(init[-1])
+
+    def _fold_f32s_initialiser(self, init) -> bool:
+        """f32s arithmetic (and its conversion from an integer) is not
+        constexpr: a binary32 constant initialiser becomes its value, as a
+        hex literal, the word NVRTC folds.  False if it is not a constant."""
+        if init.kind.name in ("INIT_LIST_EXPR", "FLOATING_LITERAL"):
+            return False
+        v = self.const_eval(init)
+        if v is None or v[0] != "double":
+            return False
+        import math
+        if not math.isfinite(v[1]):
+            return False
+        s_, e_ = self.span(init)
+        self.edits.replace(s_, e_, f"{float(v[1]).hex()}f")
+        self._folded.add(self.span(init))
+        return True
+
+    def local_constexpr_float(self, node):
+        """``constexpr float c = 1.f / b;`` (or ``= 80``) in a function of a
+        subnormal-retaining unit: c is an f32s, whose arithmetic and integer
+        conversion are not constexpr (Metal: "constexpr variable must be
+        initialized by a constant expression"; strict hex MYNN's l0, rbm_st,
+        rbh_st).  The initialiser folds to its binary32 word; one that does
+        not fold keeps the same value as ``const``."""
+        if not _is_float(node.type):
+            return
+        toks = list(node.get_tokens())
+        constexpr = next((tk for tk in toks if tk.spelling == "constexpr"), None)
+        if constexpr is None:
+            return
+        init = [c for c in node.get_children() if c.kind.name not in ("TYPE_REF", "ANNOTATE_ATTR")]
+        if not init or init[-1].kind.name == "FLOATING_LITERAL" or self.span(init[-1]) in self._folded:
+            return              # a literal, or this declaration already seen (another instance)
+        if self.span(constexpr) in self._const_spelled:
+            return
+        self._const_spelled.add(self.span(constexpr))
+        if not self._fold_f32s_initialiser(init[-1]):
+            self.edits.replace(constexpr.extent.start.offset, constexpr.extent.end.offset, "const")
 
     def local_pointer_decl(self, node):
         """Local pointers and references need an address space in Metal.
@@ -3617,6 +3649,8 @@ class _Rewriter:
                 self.generic_cast(node)
             if kind == K.VAR_DECL and d > 0:
                 self.local_pointer_decl(node)
+                if self.retain:
+                    self.local_constexpr_float(node)
                 if node.storage_class == self.ci.StorageClass.STATIC and node.semantic_parent is not None \
                         and node.semantic_parent.kind.name in self._FUNCTION_KINDS:
                     self.static_local(node)
@@ -4813,9 +4847,147 @@ def _translation_cache(text, unit, contract, retain_subnormals, source, defines,
     return None, store
 
 
+#: WOOF_METAL_GFK_FAST=0: glibc_flt32.cuh's gfk_log, gfk_exp and gfk_pow
+#: run their binary64 bodies on every call, as before the shortcut.
+GFK_FAST_ENV = "WOOF_METAL_GFK_FAST"
+GFK_FAST = METAL_DIR / "gfk_fast.h"
+#: the three glibc binary32 routines (glibc_flt32.cuh, and its hex copy)
+#: whose binary64 bodies gfk_fast.h shortcuts, with their parameter lists
+_GFK_SHORTCUTS = (("gfk_log", "float x", "x"), ("gfk_exp", "float x", "x"),
+                  ("gfk_pow", "float x, float y", "x, y"))
+
+
+#: the reference: glibc_flt32.cuh, whose definitions gfk_fast.h reproduces
+GFK_REFERENCE = KERNEL_INCLUDE_DIRS[0] / "glibc_flt32.cuh"
+
+
+#: C tokens, so that a comparison ignores spacing but not token boundaries
+#: (``a - -b`` and ``a-- b`` stay different): preprocessing numbers (hex
+#: floats with their exponent signs), identifiers, multi-character
+#: operators, then any other character
+_GFK_TOKEN = re.compile(r"\.?\d(?:[eEpP][+-]|[\w.])*|[A-Za-z_]\w*"
+                        r"|->|\+\+|--|<<=|>>=|<<|>>|<=|>=|==|!=|&&|\|\||[-+*/%&|^]=|::|\S")
+#: the head of a definition: declaration words at the start of a line, then
+#: the defined name and its parameter list or array bound
+_GFK_HEAD = re.compile(r"(?m)^[ \t]*(?:[A-Za-z_]\w*[ \t\*&]+)+([A-Za-z_]\w*)\s*[\(\[]")
+_GFK_PREFIX = re.compile(r"[ \t]*(?:[A-Za-z_]\w*[ \t\*&]+)+")
+
+
+def gfk_fast_enabled() -> bool:
+    """``WOOF_METAL_GFK_FAST`` is not ``0``."""
+    return os.environ.get(GFK_FAST_ENV, "1").strip() != "0"
+
+
+def _gfk_definitions(text: str, names=None) -> dict[str, list[tuple[int, str]]]:
+    """Every definition in preprocessed ``text`` (a function body or a braced
+    array initializer) of each name in ``names`` (every name when None):
+    ``{name: [(start offset, its tokens joined by single spaces), ...]}``.
+    One pass over the text."""
+    found: dict[str, list[tuple[int, str]]] = {}
+    if names is None:
+        heads = _GFK_HEAD.finditer(text)
+    elif names:
+        heads = re.finditer(r"\b(%s)\s*[\(\[]" % "|".join(map(re.escape, sorted(names))), text)
+    else:
+        heads = ()
+    for m in heads:
+        name = m.group(1)
+        line = text.rfind("\n", 0, m.start(1)) + 1
+        if names is not None and not _GFK_PREFIX.fullmatch(text, line, m.start(1)):
+            continue
+        brace = text.find("{", m.end())
+        if brace < 0 or ";" in text[m.end():brace]:
+            continue
+        depth, j = 0, brace
+        while j < len(text):
+            depth += {"{": 1, "}": -1}.get(text[j], 0)
+            if depth == 0:
+                break
+            j += 1
+        found.setdefault(name, []).append(
+            (line, " ".join(_GFK_TOKEN.findall(text[line:j + 1]))))
+    return found
+
+
+@lru_cache(maxsize=1)
+def _gfk_reference() -> dict:
+    """For each shortcut, the definitions its word depends on in the
+    reference header: the routine and every function or table it reaches."""
+    text = preprocess(GFK_REFERENCE.read_text())
+    every = {name: found[0][1] for name, found in _gfk_definitions(text).items()}
+    closures = {}
+    for name, _, _ in _GFK_SHORTCUTS:
+        pending, seen = [name], {}
+        while pending:
+            ident = pending.pop()
+            if ident in seen:
+                continue
+            seen[ident] = every[ident]
+            pending.extend(ref for ref in set(_GFK_TOKEN.findall(every[ident]))
+                           if ref in every and ref not in seen)
+        closures[name] = seen
+    return closures
+
+
+def gfk_fast(text: str, enabled: bool | None = None) -> str:
+    """Route glibc_flt32.cuh's gfk_log/gfk_exp/gfk_pow through gfk_fast.h.
+
+    Each definition is renamed ``<name>_soft`` (its binary64 body, unchanged)
+    and preceded by a ``<name>`` that returns gfk_fast.h's binary32 word, or
+    calls ``<name>_soft`` where the shortcut defers.  The shortcut returns
+    the binary64 routine's word whenever it answers (gfk_fast.h), so the
+    unit's words do not change.  Only a definition identical to
+    glibc_flt32.cuh's, together with every function and table it reaches,
+    is rerouted, and only when exactly one definition carries the routine's
+    signature; anything else, or ``enabled`` False (by default
+    ``WOOF_METAL_GFK_FAST=0``), is left as it was."""
+    if enabled is None:
+        enabled = gfk_fast_enabled()
+    if not enabled or "gfk_" not in text:
+        return text
+    matches, definitions = [], None
+    for name, params, args in _GFK_SHORTCUTS:
+        # preprocessed text: __device__ has expanded to nothing
+        pattern = re.compile(r"^[ \t]*(?:__device__\s+)?float\s+%s\s*\(\s*%s\s*\)\s*\{"
+                             % (name, r"\s*,\s*".join(re.escape(p) for p in params.split(", "))),
+                             re.M)
+        found = list(pattern.finditer(text))
+        if len(found) != 1:
+            continue
+        # every definition of the routine and of what it reaches (in any
+        # namespace or scope) is glibc's, and the one rewritten is among them
+        reference = _gfk_reference()[name]
+        if definitions is None:
+            definitions = _gfk_definitions(
+                text, {ident for closure in _gfk_reference().values() for ident in closure})
+        if any(not definitions.get(ident)
+               or any(d != reference[ident] for _, d in definitions[ident])
+               for ident in reference) \
+                or found[0].start() not in {start for start, _ in definitions[name]}:
+            continue
+        matches.append((found[0], name, params, args))
+    for m, name, params, args in sorted(matches, key=lambda item: -item[0].start()):
+        wrapper = (f"float {name}_soft({params});\n"
+                   f"float {name}({params}) {{\n"
+                   f"    unsigned int __b = __woof_{name}({args});\n"
+                   f"    return __b == 0xFFFFFFFFu ? {name}_soft({args}) : __uint_as_float(__b);\n"
+                   f"}}\n"
+                   f"float {name}_soft({params}) {{")
+        text = text[:m.start()] + wrapper + text[m.end():]
+    return text
+
+
+def _with_gfk_fast(head: str, contract: bool) -> str:
+    """The prelude followed by gfk_fast.h, which always compiles uncontracted
+    (its float-pair sums are error-free only unfused); a contracting unit
+    gets its pragma back after it."""
+    return (head + "\n#pragma METAL fp contract(off)\n" + GFK_FAST.read_text()
+            + ("\n#pragma METAL fp contract(fast)\n" if contract else ""))
+
+
 def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
               retain_subnormals: bool = False, defines=(), include_dirs=(),
-              f64: str = "soft") -> TranslatedUnit:
+              f64: str = "soft", gfk: bool | None = None) -> TranslatedUnit:
     """CUDA unit text -> :class:`TranslatedUnit` (MSL plus kernel signatures).
 
     ``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual
@@ -4825,10 +4997,14 @@ def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
     ``df64``, the fast numerics' division, square root and libm through
     double-float (woof/backend/metal/f64_df64.h).  The translated body is
     the same text in both; the prelude and the vendored libm differ.
+    ``gfk``: route glibc_flt32.cuh's gfk_log/gfk_exp/gfk_pow through
+    gfk_fast.h (:func:`gfk_fast`, the same words); None reads
+    ``WOOF_METAL_GFK_FAST``.
     """
     text = preprocess(source, defines, include_dirs)
     if compose(source, text, f64) is not source:
         text = preprocess(compose(source, text, f64), defines, include_dirs)
+    text = gfk_fast(text, gfk)
     cached, store = _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64)
     if cached is not None:
         return cached
@@ -4848,8 +5024,10 @@ def _translate_preprocessed(text: str, source: str, *, unit: str, contract: bool
     tu = parse(text)
     result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,
                        macros=_integer_macros(source, defines)).run()
-    result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,
-                          ieee_helpers="__woof_ieee_" in result.msl, f64=f64)
-                  + "\n// ---- translated unit: " + unit + "\n" + result.msl)
+    head = prelude(contract=contract, retain_subnormals=retain_subnormals,
+                   ieee_helpers="__woof_ieee_" in result.msl, f64=f64)
+    if "__woof_gfk_" in result.msl:
+        head = _with_gfk_fast(head, contract)
+    result.msl = head + "\n// ---- translated unit: " + unit + "\n" + result.msl
     result.key = hashlib.sha256(result.msl.encode()).hexdigest()
     return result

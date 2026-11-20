@@ -117,7 +117,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
         "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
         "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-        "src/hexcore/data/profiles/engine-helper-sets.v1.json": "5207221df126f3f5c7d3d310d6b7fc07884834ff251f6afd9ed57f8f595ec1b8",
+        "src/hexcore/data/profiles/engine-helper-sets.v1.json": "65110452c735e79b9e88f07eca288c45de96dd5b646f4171054a8478c8e7904d",
         "src/hexcore/step_anchors.py": (
             "13f8bf3361b3fc5c25805d05d48e3c59841050e3d372c03c96f1498133399b72"
         ),
@@ -131,10 +131,10 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
             "a0ae4d9b3e639bfe02a8de57458fac4407c6e48f1bc12e2e698626e9a9069d2c"
         ),
         "src/hexcore/cuda_gwdo_v841.py": (
-            "6f619095a10bf6787ca38c57304765561519d452aa8c1ee7b654b63e8062cb74"
+            "f6ff7d030e18ea341b01cc0b5226949cc211533ccbcd3210b3e1cb91cd2d4423"
         ),
         "src/hexcore/cuda_physics_v841.py": (
-            "8140553c0bec161af26c5c4f66ff8a54f1f18762810d36460cf447996ee64b44"
+            "9bfd4c75271254f5dcb0d0a913242afc31da70bf650127dab272c97d0b6fe526"
         ),
         # Re-frozen 2026-08-26 for the convection ruling: the physics cadence
         # table reports convection: None when no scheme is selected; and again
@@ -149,7 +149,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # Re-frozen 2026-10-05 for the startup lane (host-preparation cache);
         # the rationale lives beside the runner's pin.
         "src/hexcore/cuda_driver.py": (
-            "f453eee1152aa33392b09ecfde1d16ee33ec53cf17d754ecd076736088630fea"
+            "7c0ddd54648b449430c1cdef49667cf1a17ac7959e2c1f138847fd610820c7bd"
         ),
         # New pin (startup lane, 2026-10-05): the frozen driver executes host
         # preparation through this module; the rationale lives beside the
@@ -158,7 +158,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
             "9e2014bee45c4e42e16b7afe5e8c7f6df5ef1ebf2f62a6269c01692aa6cc095e"
         ),
         "src/hexcore/cuda_backend/recovery.py": (
-            "1a5a85585ebc72867904f852ee54c541ace5fc2ac26f0ef89dabd179096cc041"
+            "d47e5523a9ea997367565a9756573b98912bb149599827101dafe7980608f4d5"
         ),
         # Re-frozen for the regional CPU authority lane, again
         # for timestep admission, and again 2026-08-26 for the
@@ -236,7 +236,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # (SWDDNI/SWDDIF/COSZR selected from the export's diag/ keys); the
         # rationale lives beside the runner's pin.
         "src/hexcore/cuda_arwen_physics_v841.py": (
-            "8550e4e3bdec9366744738f787feb28fb617c5ba4775a3e512f2887553d302f6"
+            "a344b171c59644fe9a75bc1124c9771daf4e18cb00caffba9b92338d01971206"
         ),
         # New pin 2026-10-05 (New Tiedtke row); the rationale lives beside the
         # runner's pin.
@@ -273,7 +273,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # stack below the smallest anchored timestep); the rationale lives
         # beside the runner's pin.
         "src/hexcore/cuda_compensated_recovery.py": (
-            "f076673925dc4761c7bd77380722f8badc1ffdbdec228cbb4c3c573edb2f6129"
+            "4a2a31e9e64107d899f3fe76224fdf08ce771f463bdd189a54fe806054e22f69"
         ),
         "src/hexcore/cuda_horizontal.py": (
             "f94137176db65d24df0d9ff1d491c278d6c835bb08cd76dc43c5cfcbf323a345"
@@ -1137,6 +1137,139 @@ def test_composite_transaction_rejects_incomplete_driver_rollback() -> None:
             recover=recover,
         )
     assert log[-2:] == ["driver_abort", "adapter_abort"]
+
+
+class _HealthBackend(_FakeBackend):
+    """Phase one and phase two report a status word through the ledger."""
+
+    def __init__(self, log, cp, *, site, phase, word, seen):
+        super().__init__(log)
+        self._cp, self._site, self._phase = cp, site, phase
+        self._word, self._seen = word, seen
+
+    def _report(self, phase):
+        from woof.core import health_ledger
+
+        if phase != self._phase:
+            return
+        self._seen["active"] = health_ledger.active() is not None
+        status = self._cp.asarray([self._word], dtype=self._cp.uint32)
+
+        def describe(flags):
+            raise FloatingPointError(
+                f"{self._site} flagged {flags:#x}" + health_ledger.deferred_note())
+
+        self._seen["returned"] = health_ledger.read_status(
+            status, site=self._site, describe=describe)
+
+    def begin_step(self, **kwargs):
+        raw = super().begin_step(**kwargs)
+        self._report("phase1")
+        return raw
+
+    def finish_step(self, **kwargs):
+        update = super().finish_step(**kwargs)
+        self._report("phase2")
+        return update
+
+
+def _health_step(runner, backend, log, **extra):
+    couple, clamp, recover = _transaction_callables(log)
+    return runner.execute_composite_step(
+        driver=_FakeDriver(log), backend=backend,
+        scalar_names=runner.SCALAR_NAMES, physics_geometry=object(),
+        kernel_cache=object(), previous_surface_updates=None,
+        couple=couple, clamp=clamp, recover=recover, **extra)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("site,phase", [
+    ("microphysics", "phase2"), ("ysu", "phase1"), ("grell-freitas", "phase1"),
+    ("noahmp_static_surface_identity", "phase1"), ("lagged-heating", "phase2")])
+def test_a_deferred_health_refusal_is_drained_before_the_commit(
+        site, phase, monkeypatch) -> None:
+    """The step's health words are read once, before publication: a
+    deferred refusal aborts the same step exactly as the immediate one."""
+    cp = pytest.importorskip("cupy")
+    from woof.core import health_ledger
+
+    monkeypatch.delenv(health_ledger.RESIDENT_ENV, raising=False)
+    runner = _load_runner()
+    log: list[str] = []
+    seen: dict[str, object] = {}
+    backend = _HealthBackend(log, cp, site=site, phase=phase, word=4, seen=seen)
+    with pytest.raises(runner.CompositeTransactionError,
+                       match="aborted without publication") as caught:
+        _health_step(runner, backend, log)
+    assert seen == {"active": True, "returned": 0}
+    cause = caught.value.__cause__
+    assert isinstance(cause, FloatingPointError)
+    assert f"{site} flagged 0x4" in str(cause)
+    assert "deferred health read at the end of this model step" in str(cause)
+    assert "driver_commit" not in log and "adapter_commit" not in log
+    assert log[-2:] == ["driver_abort", "adapter_abort"]
+    assert health_ledger.active() is None
+
+    # Healthy: deferred, nothing raised, the ledger is gone after the step.
+    log.clear()
+    seen.clear()
+    backend = _HealthBackend(log, cp, site=site, phase=phase, word=0, seen=seen)
+    _health_step(runner, backend, log)
+    assert seen == {"active": True, "returned": 0}
+    assert log[-2:] == ["driver_commit", "adapter_commit"]
+    assert health_ledger.active() is None
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("mode,site", [
+    ("immediate", "microphysics"), ("deferred", "rrtmgp")])
+def test_immediate_mode_and_unadmitted_sites_read_at_the_site(
+        mode, site, monkeypatch) -> None:
+    cp = pytest.importorskip("cupy")
+    from woof.core import health_ledger
+
+    monkeypatch.setenv(health_ledger.RESIDENT_ENV, mode)
+    runner = _load_runner()
+    log: list[str] = []
+    seen: dict[str, object] = {}
+    backend = _HealthBackend(log, cp, site=site, phase="phase2", word=4,
+                             seen=seen)
+    _health_step(runner, backend, log)
+    assert seen["returned"] == 4
+    assert log[-2:] == ["driver_commit", "adapter_commit"]
+    assert health_ledger.active() is None
+
+
+@pytest.mark.gpu
+def test_a_step_that_exchanges_halos_reads_at_the_site(monkeypatch) -> None:
+    """Same-host ranks and LTS classes exchange before phase two: a failing
+    scheme must stop its own rank there, so nothing is deferred."""
+    cp = pytest.importorskip("cupy")
+    from woof.core import health_ledger
+
+    monkeypatch.delenv(health_ledger.RESIDENT_ENV, raising=False)
+    runner = _load_runner()
+    log: list[str] = []
+    seen: dict[str, object] = {}
+    backend = _HealthBackend(log, cp, site="ysu", phase="phase1", word=4, seen=seen)
+    before = health_ledger.resident_receipt()["immediate_steps"].get("exchanged", 0)
+    _health_step(runner, backend, log, before_phase_two=lambda *args, **kwargs: None)
+    assert seen == {"active": False, "returned": 4}
+    assert health_ledger.resident_receipt()["immediate_steps"]["exchanged"] == before + 1
+    assert health_ledger.active() is None
+
+
+def test_the_hex_admitted_sites_are_real_call_sites() -> None:
+    """Each extra site the composite step admits is spelled exactly so by a
+    read_status call; a renamed site would silently fall back to the
+    immediate read and these tests would not notice."""
+    import woof
+
+    runner = _load_runner()
+    root = Path(woof.__file__).resolve().parent
+    text = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
+    for site in runner.HEX_EXTRA_RESIDENT_SITES:
+        assert f'site="{site}"' in text, site
 
 
 def test_native_gate_includes_physical_edge_u_interface_w_and_gwdo() -> None:

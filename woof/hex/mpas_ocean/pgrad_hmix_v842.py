@@ -37,10 +37,9 @@ from importlib.resources import files
 
 import numpy as np
 
-from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, loop_extent
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, loop_extent, launch_options
 
 SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_vel_pressure_grad.F:80-411,625-664",
@@ -116,7 +115,7 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 
 def _function(precision: str, name: str):
     import cupy as cp
-    options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
+    options = launch_options()
     return _module_on(cp.cuda.Device().id, precision, options).get_function(name)
 
 
@@ -161,7 +160,9 @@ def vel_pressure_grad_tend(*, mesh: dict, pressure, montgomery_potential, z_mid,
     _check("edgeMask", mesh["edgeMask"], cp.int32, (n_edges, n_levels))
     density0_inv, gdensity0_inv = pgrad_constants(config_density0, precision)
     n_edges_loop = loop_extent("edges", 1, n_edges)
-    _function(precision, "ocn_vel_pressure_grad_tend_v842")(_grid(n_edges_loop), (_BLOCK,), (
+    jacobian = code in (PGRAD_TYPES["Jacobian_from_density"], PGRAD_TYPES["Jacobian_from_TS"])
+    n_threads = n_edges_loop if jacobian else n_edges_loop * n_levels   # the Jacobian sum walks the column
+    _function(precision, "ocn_vel_pressure_grad_tend_v842")(_grid(n_threads), (_BLOCK,), (
         tend, pressure, montgomery_potential, z_mid, density, potential_density, tracers, alpha, beta,
         mesh["maxLevelEdgeTop"], mesh["cellsOnEdge"], mesh["dcEdge"], mesh["edgeMask"], np.int32(code),
         density0_inv, gdensity0_inv, dtype(config_common_level_weight), np.int32(index_temperature),
@@ -216,13 +217,13 @@ def vel_hmix_tend(*, mesh: dict, divergence, relative_vorticity, viscosity, tend
     n_edges_loop = loop_extent("edges", 1, n_edges)
     if del2_on:
         _check("meshScalingDel2", mesh["meshScalingDel2"], dtype, (n_edges,))
-        del2_leith(_grid(n_edges_loop), (_BLOCK,), (
+        del2_leith(_grid(n_edges_loop * n_levels), (_BLOCK,), (
             tend, viscosity, divergence, relative_vorticity, *common, mesh["meshScalingDel2"], mesh["dcEdge"],
             mesh["dvEdge"], mesh["edgeMask"], np.int32(0), dtype(config_mom_del2), dtype(0), dtype(0),
             np.int32(n_edges_loop), np.int32(n_levels)))
     if config_use_Leith_del2:
         _check("meshScaling", mesh["meshScaling"], dtype, (n_edges,))
-        del2_leith(_grid(n_edges_loop), (_BLOCK,), (
+        del2_leith(_grid(n_edges_loop * n_levels), (_BLOCK,), (
             tend, viscosity, divergence, relative_vorticity, *common, mesh["meshScaling"], mesh["dcEdge"],
             mesh["dvEdge"], mesh["edgeMask"], np.int32(1), dtype(config_Leith_parameter), dtype(config_Leith_dx),
             dtype(config_Leith_visc2_max), np.int32(n_edges_loop), np.int32(n_levels)))

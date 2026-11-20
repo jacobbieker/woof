@@ -305,6 +305,13 @@ def run_member(*, base_config, member_dir, index: int, seed: int,
     from woof.experiment import refuse_unrouted_spectral_numerics
     refuse_unrouted_spectral_numerics(
         exp, "ensemble member (frozen single-domain loop)")
+    from os import environ
+    if environ.get("WOOF_NN_CONFIG"):
+        # --nn (woof.nn.launch): every member would record into, or apply
+        # from, one launch-wide table it cannot tell apart from the others.
+        raise NotImplementedError(
+            "--nn with an ensemble member leg: the NN seat attaches to a single "
+            "deterministic forecast; run the member's forecast without --nn")
     summary = runtime.integrate_prepared_case(
         outdir, prepared, start_time=exp.start_time,
         output_title=data.output_title, domain_id=data.output_domain,

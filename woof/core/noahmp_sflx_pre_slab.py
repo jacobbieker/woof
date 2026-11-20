@@ -94,7 +94,7 @@ from __future__ import annotations
 
 from dataclasses import fields as dc_fields
 
-from woof.core.noahmp_slab_libm import copy_slab_slots, split_slab_slots
+from woof.core.noahmp_slab_libm import carve_slabs, copy_slab_slots, split_slab_slots
 
 import numpy as np
 
@@ -213,30 +213,31 @@ def evaluate_sflx_pre_slab(fields: dict, n: int, *, opt_snf=1, dveg=4, opt_crop=
     # invalid; nonzero IRRFRA geography is accepted with irrigation off. One
     # device-to-host transfer answers all five, so the slab pays one
     # synchronisation for the batch rather than one per column.
-    probes = [] if opt_crop else [("croptype", x["croptype"] != 0)]
+    probes = [] if opt_crop else [("croptype", x["croptype"], 0)]
     for name in (() if opt_irr else _IRRIGATION):
         value = fields.get(name)
         if value is not None:
-            probes.append((name, _column(cp, fields, name, n, cp.float32)
-                           != _ZERO))
+            probes.append((name, _column(cp, fields, name, n, cp.float32),
+                           _ZERO))
     from woof.core import health_ledger
     ledger = health_ledger.active()
     if ledger is not None:
-        names = tuple(name for name, _flag in probes)
+        names = tuple(name for name, _value, _zero in probes)
         def refuse(flags):
             bad = ", ".join(name for i, name in enumerate(names) if flags & (1 << i))
             raise ValueError(
                 f"{bad} must be zero under opt_crop=0/opt_irr=0; "
                 "the inactive crop/irrigation branches cannot consume them"
                 + health_ledger.deferred_note())
-        flags = cp.zeros(1, dtype=cp.uint32)
-        for i, (_name, flag) in enumerate(probes):
-            flags |= flag.any().astype(cp.uint32) << i
+        from woof.core.noahmp_slab_libm import flag_bits
+        flags = flag_bits([(value, "!=", zero) for _name, value, zero in probes])
         ledger.record("noahmp.pre.inactive_branches", flags, refuse)
         tripped = (False,) * len(probes)
     else:
-        tripped = cp.asnumpy(cp.stack([flag.any() for _name, flag in probes])) if probes else ()
-    for (name, _flag), bad in zip(probes, tripped):
+        tripped = (cp.asnumpy(cp.stack([(value != zero).any()
+                                        for _name, value, zero in probes]))
+                   if probes else ())
+    for (name, _value, _zero), bad in zip(probes, tripped):
         if not bad:
             continue
         if name == "croptype":
@@ -281,7 +282,7 @@ def evaluate_sflx_pre_slab(fields: dict, n: int, *, opt_snf=1, dveg=4, opt_crop=
     if type(dveg) is not int or dveg not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
         raise ValueError("selected phenology requires scalar dveg=1,2,3,4,5,6,7,8,9")
     urban = cp.ascontiguousarray((x["urban_flag"] != 0).astype(cp.int32))
-    phen = {name: cp.zeros(n, dtype=cp.float32) for name in _batch._PHEN_OUT}
+    phen = carve_slabs(n, dict.fromkeys(_batch._PHEN_OUT, 1), cp.float32, zero=True)
     phen_args = (np.int32(n), x["vegtyp"], x["yearlen"], x["iswater"],
              x["isbarren"], x["isice"], urban,
              x["snowh"], x["tv"], x["lat"], x["julian"],
@@ -340,7 +341,7 @@ def evaluate_sflx_pre_slab(fields: dict, n: int, *, opt_snf=1, dveg=4, opt_crop=
         atm["rain"]=irrigation["rain"]
 
     # ---- PRECIP_HEAT, 940-946 ---------------------------------------------
-    prcp = {name: cp.zeros(n, dtype=cp.float32) for name in _batch._PRCP_OUT}
+    prcp = carve_slabs(n, dict.fromkeys(_batch._PRCP_OUT, 1), cp.float32, zero=True)
     _launch(get_kernel("noahmp_vegprecip", "noahmp_precip_heat"), n,
             (np.int32(n), x["ist"], x["dt"], x["uu"], x["vv"],
              elai, esai, fveg,

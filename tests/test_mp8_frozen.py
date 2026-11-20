@@ -479,8 +479,23 @@ FROZEN_MODULE_DIGESTS = {
         # and Metal); the shape-specialized CUDA column build's words differ
         # from that generic build's by NVRTC's contraction on the folded loops
         # (PR #475).  Previously 14f8d637/5c720500.
-        '97a7e1646a217ad7e19c17f52a70e7d6c7cb1837b557e1ab6168084932dc3876',
-        'cfd6ba49dee0bce96b7cd472eafdd53d5c41e18e57dc04beefb92802d20dd4c3'),
+        # Re-pinned for advance_w_phi_msf's one-pass default arm: the forward
+        # sweep inside the forcing loop, then back substitution, damper,
+        # phi'' update and per-level p''/alpha'' diagnosis (diagnose_p_level)
+        # in one top-down pass, 3 resident blocks.  The same statements on
+        # the same operands; WPHI_SEPARATE_SWEEPS=1 keeps the old sweeps.
+        # Reading: whole-substep words equal the separate sweeps' in fast,
+        # strict and WRF-exact builds on CUDA (A6000) and Metal
+        # (tests/test_acoustic_wphi_one_pass.py).  Previously 97a7e164/cfd6ba49.
+        # Re-pinned for advance_frame_phi_w_ring: the specified/nested frame
+        # update over the ring's columns with level lanes, a new entry inside
+        # `#if !GPUWM_WRF_EXACT`; the column frame kernels' phi'' statements
+        # moved verbatim into frame_phi_level (arn_* asm).  Reading: its words
+        # equal advance_specified_phi_w's / advance_nested_phi_w's in fast
+        # and strict numerics on CUDA (A6000) and Metal
+        # (tests/test_acoustic_frame_ring.py).  Previously 02d25ba4/e3a2b71e.
+        '4d9d324788e875c15524219bed9a24ec17579cb8b0219a0618b7deecc9128591',
+        '49b42f2600ac7d45783bca1348c4f552716c611cb318c5eabc83a2e81f0e8790'),
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.
@@ -937,8 +952,21 @@ FROZEN_MODULE_DIGESTS = {
         # Re-read for the 32-bit cell index and the write-if-changed store
         # (integer and store logic only; the audit record was re-taken).
         # Previously b35120f7/1730a720.
-        'a5bc696d4f3e0ce4e04608bac1b956fd8c80fdfaa869082d70da1d7b7f7d213d',
-        'b83b8ec8b0ab60b5f7863a391d5b7cb6099302878bd4460ff164c2b5c758e82a'),
+        # Re-pinned for the ring-first thread walk: state_relaxation_multi
+        # hands its first threads to each level's frame rings and the rest
+        # to the interior, so the relaxation path runs in dense warps.  Only
+        # the integer cell mapping moved; every cell evaluates the same
+        # statements (tests/test_lbc_relax_multi.py against the per-row path,
+        # both backends and modes).  Previously a5bc696d/b83b8ec8.
+        # Re-pinned for finalize_state_multi: one spec_bdy_final's forced
+        # fields in one table-driven launch.  finalize_state_field's body
+        # moved verbatim into the device function finalize_state_cell, which
+        # the per-field kernel and the table kernel both call, so every cell
+        # evaluates the same statements (tests/test_lbc_finalize_multi.py
+        # against the per-field launches, both backends, fast/strict/exact).
+        # Previously 988a312e/66abb703.
+        '41efd3f809ff2d746aff66c20896ce5812b32ea675ac649a0bf0871c6d9bf298',
+        '171a660d6c4a537de8e6a73d9ecf215d163a1449714d48413f5f91dbfe4ab94b'),
     'morrison': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
@@ -1610,8 +1638,16 @@ FROZEN_MODULE_DIGESTS = {
         # the exact-C build on the HRRR-fork fixture's cases
         # (tests/test_advect_wrf_legacy_parity.py).
         # Previously 20a2dd79/b4832282.
-        'db86f46e0ae5d6e0040a49b6af11e638527e9fc0afb458729d32c6df23844af9',
-        '43d703b4b6fcc3440f534621950a45ecf5c525966e0b6724b0f1295bc42dcf01'),
+        # Re-pinned for the 64x4 CUDA block (perf/pd-block): pd_fluxes and
+        # pd_renorm_apply take j from blockIdx.y * blockDim.y + threadIdx.y.
+        # Every thread computes its own point and the warp exchange sees 32
+        # consecutive i of one row with its edges at the same i as the 128x1
+        # row block, so the words are unchanged (tests/test_pd_advection_block.py,
+        # both backends, fast/strict/exact; the RTX A6000 recapture reproduced
+        # every production word of both advection fixtures).
+        # Previously db86f46e/43d703b4.
+        '952e0f085ab73a69d8c3c6c9136fa5b6878b2689c4ac3dfba24ef72bc013ed76',
+        '6db2d481e14fcdde22252a414dca1f7524df057fd9214815767d0f6691ea9246'),
     'refl': (
         # Re-pinned for A146 (a98f2482e): every float division by a compile-time
         # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a
@@ -1722,8 +1758,17 @@ FROZEN_MODULE_DIGESTS = {
         # passes 162 of 162, and a 360 s legacy-RRTMG forecast with a 50 hPa
         # top (133x125x50, 18 UTC) writes byte-identical wrfout files with
         # either kernel.  Previously 44a83f0e/c9e02eea.
-        '43134d6d6d2be4b3e668c7ab92d5850f1f992a09812dd09c9536fce5d9ab791e',
-        '663d12d7556f379bdd0724bb4f018113450ce45666e13f3ec3220615409acd08'),
+        # Re-pinned 2026-11-19 (perf/spcvmc-running-vrtqdr): rsw_spcvmc_body
+        # hands rsw_vrtqdr_running the layer transmittances and that keeps
+        # the cumulative direct-beam products ptdbt, ztdn and prdnd in
+        # registers (the same multiplies on the same operands in the same
+        # order; the flux loop fused into the ztdn/prdnd loop).  rsw_vrtqdr
+        # itself is unchanged (RRTMG-K uses it).  Digests (synthetic inputs, seed
+        # 20261119) of every flux output match the previous kernel in fast, strict and
+        # GPUWM_WRF_EXACT, nlay 45 and 60, on pb CUDA and Mac Metal.
+        # Previously 43134d6d/663d12d7.
+        '502dfc9b15481742ff5d56a7730c372502904dd4abe37dd131a953e4a35f8122',
+        'fbbaebbf9c7a773228db9dbbf771a52a4eb9a3502e12b8bde7780139fda955f8'),
     'rrtmgp_cloud': (
         # Re-pinned for fused profile preparation, broadcasts, temperature casts and flux copies.
         # Exact-array gates and all five seeded digests match the base.
@@ -2035,10 +2080,20 @@ FROZEN_MODULE_DIGESTS = {
         # other entry is untouched text.  Each row's words equal the
         # per-row launches' (tests/test_smag_multi.py, CUDA and Metal, both
         # modes).  Previously db91a5f9/7dec200c.
-        '6ee9ec60dd39deba2c8ddcea7ad0e717b94101879ab55fd33eb5fe9c5968c137',
+        # Re-pinned for wrf_smag_uvhat / wrf_smag_deform_hat: u/msfu and
+        # v/msfv stored once per face and read by the deformation in place
+        # of the division (dycore.launch_wrf_smag2d_km, default on Metal
+        # only; WOOF_SMAG_DEFORM_HAT=0 restores wrf_smag_deform).  Every
+        # stored-hat line sits under GPUWM_SMAG_STORED_HAT, compiled only in
+        # that int-define tier, so the default module and the units composing
+        # smag2d.cu preprocess to the previous text (per-entry PTX equal to
+        # 6ee9ec60's on sm_86, fast and WRF-exact).  The tier's tensors equal
+        # wrf_smag_deform's (tests/test_smag_deform_hat.py, CUDA and Metal,
+        # every mode).  Previously 6ee9ec60/64164164.
+        '379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f',
         # smag2d's default composition keeps 2.9.1's glibc_flt32 text
         # (glibc_flt32_default.cuh); the exact chain's header is strict-only.
-        '64164164291fa1e59bf59592e73df3cc13b56a043be40725a3f57d937b9ae329'),
+        '31b03d4dae7e29b0aa327c2b7d016f18d8eb5a47e0449f2896bfcb2d5efb5d0e'),
     'spec_bdy': (
         'bcc7090fbbb8ea307bd6dd6c65ab9b8a3f56948c4752ae3d744127b450d20161',
         'bc03ed595bacc546d8e041fbb1d11b5bb3b3b90760ef06ea1dd1f0f18b4de931'),

@@ -31,6 +31,7 @@ from ..mpasdiag import lightning_diag_v842 as _lightning
 from ..mpasdiag import hailcast_diag_v842 as _hailcast
 from ..mpasdiag import reduction_diag_v842 as _reduce
 from . import wrfsolar_eps_v842 as _eps
+from . import clm_lake_v842 as _clm_lake
 
 SCHEMA = "mpas-port.physics-driver-v842/v1"
 _RELEASED_TENDENCIES = object()
@@ -76,6 +77,13 @@ CORRECTIONS_V842: Mapping[str, Mapping[str, Any]] = MappingProxyType({
                         "vapour tendency NaN in one column; the dycore then refused the step with ~4,100 whole "
                         "columns non-finite (x1.40962 120 km plain hex, 2021-07-01 start at day 19.2 and 2020-01-01 "
                         "start at day 77.2)"},
+    # RP8: qsat_blend (mynn_shared.F90:90-98) divides by p - e with no guard; under a 50 km lid the top levels
+    # reach the pole (bl_mynn_v842.MYNN_TEXT_CORRECTIONS).
+    "RP8": {"slots": {"pbl": ("bl_mynn",)},
+            "owners": {"pbl": "p12-bl-mynn"},
+            "breakage": "MYNN's saturation mixing ratio has a pole where the vapour pressure reaches the air "
+                        "pressure; under the 80-level, 50 km lid (s2s80-v1) the top levels reach it, MYNN goes NaN "
+                        "in one column and the dycore refuses the step (x1.40962 120 km, 2026-11-05T00 at step 51)"},
     # RP4: refused at resolution, see resolve_namelist (native correct mode refuses it too).
     "RP4": {"slots": {}, "owners": {},
             "breakage": "config_mynn_tkeadvect resets TKE to the never-advected qke_adv every call"},
@@ -532,6 +540,7 @@ def _active_corrections(selectors: Mapping[str, str], options: Mapping[str, Any]
     if on("pbl") and selectors["pbl"] == "bl_mynn":
         active.add("RP1")
         active.add("RP7")
+        active.add("RP8")
     if on("seaice") and on("land_surface") and options.get("config_frac_seaice", False):
         active.add("RP3")
     if on("pbl") and selectors["pbl"] == "bl_mynn" and options.get("config_mynn_tkeadvect", False):
@@ -646,6 +655,11 @@ def farms_enabled(config) -> bool:
     beside: WRF evaluates FARMS inside its radiation driver."""
     backend = getattr(config, "service_backends", {}).get("farms_sw", Backend.OFF)
     return backend != Backend.OFF and config.active("radiation_sw")
+
+
+def clm_lake_enabled(config) -> bool:
+    """WOOF-only CLM lake service selected (config_clm_lake_backend = 'hex-cuda'; clm_lake_v842)."""
+    return _clm_lake.enabled(config)
 
 
 def shcu_deng_enabled(config) -> bool:
@@ -806,6 +820,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
 
     def record(config: DriverConfig) -> DriverConfig:
         _check_convective_cloud(config)
+        _clm_lake.check(config)
         if radtran is not None:
             config = _replace(config, radtran=radtran)
         if spectral != "none":
@@ -1312,6 +1327,8 @@ class NativeDriverHooks:
                 operations.add("farms_sw")
             if shcu_deng_enabled(config):
                 operations.update(("shcu_deng", "shcu_deng_tend"))
+            if clm_lake_enabled(config):
+                operations.update(("clm_lake_init", "clm_lake"))
         if config.active("ngw") and not config.native_embedded("ngw"):
             operations.add("snapshot_gwdo_tendencies")
         return tuple(sorted(op for op in operations if op not in self.external
@@ -1402,6 +1419,7 @@ class PhysicsDriver:
         self._initialized = False
         self._tendencies_ready = False
         self._tendencies = None
+        self._clm_lake_started = False
 
     def _call(self, operation: str, step: int, time: float, flags: StepFlags,
               pools: Any, *, slot: str | None = None) -> Any:
@@ -1478,6 +1496,11 @@ class PhysicsDriver:
             glue("o3climatology_from_MPAS")
         if not c.driver_physics:
             return flags
+        if clm_lake_enabled(c) and not self._clm_lake_started:
+            # WOOF-only: WRF's lakeini (services.clm_lake, woof.hex.mpasphys.clm_lake_v842) once, before any
+            # surface scheme reads the lake cells, as WRF's phy_init runs it before the first step.
+            glue("clm_lake_init")
+            self._clm_lake_started = True
         glue("allocate_forall_physics")
         glue("MPAS_to_physics")
         if flags.radiation_lw or flags.radiation_sw:
@@ -1532,6 +1555,11 @@ class PhysicsDriver:
             glue("atmphys_sfc_diagnostics")
         if getattr(c, 'tc_surface', None) and c.active("surface_layer") and due:
             glue("tc_surface_spray")
+        # WOOF-only: WRF's CLM lake (services.clm_lake, woof.hex.mpasphys.clm_lake_v842) after the land surface,
+        # sea ice and surface diagnostics and before the PBL, on the lake cells, on the land surface's steps, as
+        # WRF's surface driver runs Lake after its LSM blocks (module_surface_driver.F:4394-4426).
+        if clm_lake_enabled(c) and c.active("land_surface") and due:
+            glue("clm_lake")
         if c.active("pbl") and c.active("surface_layer") and due:
             glue("allocate_pbl")
             run("pbl")
