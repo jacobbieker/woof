@@ -593,6 +593,42 @@ covers the stratosphere: train only the lowest 44 levels (`--levels
 44`; the schemes keep the levels above), or tap winter cycles. It needs a fresh evaluation
 cycle, because this one has now been seen.
 
+#### P2.7: the lowest 44 levels (fallback fix)
+
+The P2.6 model fell back on 94-97 % of column calls in the 11-07 week
+because the top ten levels lay outside the training range. P2.7 retrains
+the same six taps with `--levels 44` (the schemes keep the levels above);
+no new tap was needed, so it was the cheaper of the two routes (the other,
+winter taps, needs GPU recording runs of 48 h per cycle). Everything else
+is as P2.6 (same taps, validation cycle 10-28, `replace`, margin 0.1,
+uniform-mesh model for both meshes). On the validation cycle's tap the
+offline fallback is unchanged (6.2 %) and R² is lower (dtheta 0.20, dqv
+-0.03, dqc 0.16, against 0.31, 0.11, 0.30). The mechanism check is the 11-07
+tap, which the 55-level model fell outside on 90 % of columns at margin 0.1
+(theta and p) and the 44-level model on 0.17 %.
+
+The fresh evaluation cycle is 11-04, 120 h. The WIS2 store holds
+observations only from 10-27 to 11-09, so a cycle with observations that is
+neither a training tap, the validation cycle nor 11-07 has to sit in that
+window. 11-04 starts where the 11-02 tap ends. It shares weather with
+the 11-07 week, but nothing was chosen on it. 15902 pairs at 133 stations
+cover leads 0-119 h.
+
+| mesh, backend | T2 RMSE physics / NN (K) | NN - physics, 95 % CI | calls falling back |
+|---|---|---|---|
+| uniform, CUDA (torch) | 1.789 / 1.835 | +0.046 [-0.032, +0.122] | 21 % |
+| uniform, Metal (MLX) | 1.818 / 1.858 | +0.040 [-0.043, +0.123] | 21 % |
+| variable, CUDA (torch) | 1.703 / 1.733 | +0.030 [-0.052, +0.104] (9353 pairs, 78 stations) | 66 % |
+
+The fallback fell from 94-97 % to 21 % on the uniform mesh, but T2 is not
+better than the physics run (the P2.6 gain of -0.06 K on 11-07 does not
+reproduce; it is not worse at 95 % either, and the NN runs are 0.1-0.2 K
+colder in bias). The variable mesh still falls back on 66 % of calls:
+its `dx` lies outside the uniform-only model's range. The result is no
+evidence of skill. Cost, uniform mesh, 6 h plain/NN pairs of this
+cycle on an idle A6000 (no other process on the card): plain 80-85 ms per step, NN
++4.1, +1.3, +5.7 ms (2-7 %).
+
 ### A column model as a backend row
 
 `woof.nn.hex_backend.NNColumnBackend` is an example

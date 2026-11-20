@@ -11,6 +11,9 @@
   ``ocn_forcing_transmission``), the explicit bottom drag and Rayleigh
   friction;
 - ``ocn_thick_surface_flux_tend``;
+- ``ocn_frazil_forcing_layer_thickness``
+  (:func:`~woof.hex.mpas_ocean.frazil_v842.layer_thickness_tend`) under
+  ``config_use_frazil_ice_formation``;
 - ``ocn_forcing_build_fraction_absorbed_array`` (:func:`fraction_absorbed`).
 
 :func:`tend_vel` and :func:`tend_thick` compose them with the other ported
@@ -32,8 +35,8 @@ Refused by name:
   equals them. ``WOOF_GLIBC239_LIBM64=1`` (:mod:`woof.core.glibc239_gpu`, a
   source checkout) prepends the LGPL transcription of glibc 2.39's and lifts
   the refusal;
-- land-ice fluxes (``config_land_ice_flux_mode`` 'standalone' or 'coupled')
-  and frazil (``config_use_frazil_ice_formation``), not ported;
+- land-ice fluxes (``config_land_ice_flux_mode`` 'standalone' or 'coupled'),
+  not ported;
 - the explicit bottom drag, or Rayleigh bottom friction, on a mesh with an
   edge whose ``maxLevelEdgeTop`` is 0: v8.4.2 indexes level 0 of that edge,
   outside the array (a word of the previous edge's column, or before the
@@ -49,7 +52,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import pgrad_hmix_v842, tend_v842
+from . import frazil_v842, pgrad_hmix_v842, tend_v842
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, loop_extent, launch_options
 
 SOURCE_FILES = (
@@ -140,11 +143,6 @@ def refuse_unported(configs: dict, precision: str) -> None:
             knob="config_land_ice_flux_mode", value=configs["config_land_ice_flux_mode"],
             reason="the land-ice flux terms (mpas_ocn_surface_land_ice_fluxes.F) are not ported",
             declaration="config_land_ice_flux_mode = 'off' | 'pressure_only' | 'data'")
-    if configs["config_use_frazil_ice_formation"]:
-        raise ConfigurationRefusal(
-            knob="config_use_frazil_ice_formation", value=True,
-            reason="the frazil terms (mpas_ocn_frazil_forcing.F) are not ported",
-            declaration="config_use_frazil_ice_formation = .false.")
     if configs["config_use_bulk_wind_stress"] and precision == "r8":
         from woof.hex.mpas_ice import rkind
         if not rkind.trig64():
@@ -363,3 +361,4 @@ def tend_thick(*, mesh: dict, diagnostics: dict, forcing: dict, tend, configs: d
                             transmission_coefficients_runoff=forcing["fractionAbsorbedRunoff"],
                             surface_thickness_flux=flux, surface_thickness_flux_runoff=runoff, tend=tend,
                             configs=configs)
+    frazil_v842.layer_thickness_tend(mesh=mesh, forcing=forcing, tend=tend, configs=c)

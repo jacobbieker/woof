@@ -283,8 +283,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     diagnostics, pressure gradient and horizontal mixing, momentum and
     thickness tendencies, tracer tendencies, monotone tracer advection,
     implicit vertical mixing, vertical transport velocity, the
-    split-explicit barotropic stage and whole split-explicit step, and
-    forward mode (clock, cold start, N steps, bitwise restart). The step
+    split-explicit barotropic stage and whole split-explicit step,
+    forward mode (clock, cold start, N steps, bitwise restart), and frazil
+    ice formation (`config_use_frazil_ice_formation`, off by default as in
+    v8.4.2's Registry: open ocean and under land ice, its tendencies, the
+    accumulated mass and the surface pressure; standalone and over forward
+    steps, in fast and strict numerics). The step
     checks its barotropic halo copies against the mesh once per mesh, not
     with two device reads per stage: on an 8,300-cell, 60-level torus a
     step takes 36 instead of 130 ms on an A6000 and 110 instead of 245 ms
@@ -973,10 +977,23 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   boundaries, map factors, horizontal orders 3-6 and vertical orders 2-6.
   It matches WRFPLUS `g_/a_advect_*` to about 1e-16 on the points where
   woof and WRF compute the same thing (see the design note), and the float build
-  reproduces the strict primal's words.
+  reproduces the strict primal's words. The big-step pressure gradient
+  and buoyancy (woof's strict `slow_pgf` and `slow_buoyancy`, WRF
+  `horizontal_pressure_gradient` and `pg_buoy_w`) follow, with the lid,
+  open and specified boundaries, map factors and hybrid levels, and so
+  does the geopotential tendency (`slow_geopotential`, WRF `rhs_ph`) for
+  every `h_sca_adv_order`, the Coriolis and curvature terms
+  (`coriolis_curvature`, WRF `coriolis` and `curvature`) on rotated
+  grids, and the `w_damp` vertical-velocity limiter. In binary64 they match WRFPLUS to about 1e-15
+  on non-hybrid cases (WRFPLUS has no hybrid coordinate; the exclusions
+  are listed in the design note). The comparison found a lid bug in
+  WRFPLUS's own pressure-gradient adjoint and, in its `rhs_ph`, a heap
+  overrun in the order-3/4 adjoint and a short interior loop on bounded
+  axes, all described in the design note.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
-  0.85-3.2x the glue and 4.0-5.2x advection (on a shared card). The
-  measured step projection (4.6-4.9x) is in the design note. The forecast path does not import any of it.
+  0.85-3.2x the glue, 3.3-4.5x advection and 1.3-4.4x the big-step
+  tendencies. The measured step projection (4.7x) is in the design
+  note. The forecast path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
@@ -1133,9 +1150,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   budget. Trained on six cycles over four seasons (P2.6), the model
   passes the plan's G2 gate. T2 is not worse than the physics run at 95 %
   on either mesh, and better on the uniform mesh on CUDA (-0.06 K).
-  Most column calls (94-97 %) still fall back to the schemes in the
-  evaluation week, because its stratosphere lies outside the training
-  range. Results and per-step costs are in
+  Most column calls (94-97 %) still fell back to the schemes in the
+  evaluation week, because its stratosphere lay outside the training
+  range. Training on the lowest 44 levels (P2.7) cuts the fallback to
+  21 % on a fresh cycle (66 % on the variable mesh, whose `dx` is out of
+  range), but T2 is then no better than the physics run (+0.04 K, CI
+  spanning zero): no evidence of skill. Results and per-step costs are in
   [docs/nn-physics.md](docs/nn-physics.md).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
