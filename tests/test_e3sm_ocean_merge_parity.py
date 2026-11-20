@@ -79,6 +79,9 @@ def test_fixture_covers_the_branches():
     ifrac = np.where(total != 0, i / np.where(total != 0, total, 1.0), i)
     v = call["i2x"][:, cases["branches"]["lists"]["i2x"].index("Sx_shared")]
     assert oo.word_mismatches(branches[0][:, x2o.index("Sx_shared")], v + v * ifrac) == 0
+    # a field two senders carry: the later copy (xao after a2x) lands
+    xao = call["xao"][:, cases["branches"]["lists"]["xao"].index("Sa_pbot")]
+    assert oo.word_mismatches(branches[0][:, x2o.index("Sa_pbot")], xao) == 0
 
 
 def test_the_plan_refuses_what_e3sm_stops_on():

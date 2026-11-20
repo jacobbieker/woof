@@ -186,7 +186,7 @@ def plan(lists: dict, *, nutrients: bool = False, per_cat: bool = False, wav_ocn
     position = {name: ko for ko, name in enumerate(x2o)}
     copies = []
     for vector, code in _COPY_ORDER:
-        if vector == "w2x" and wav_ocn_coup != "twoway":
+        if vector == "w2x" and wav_ocn_coup.rstrip() != "twoway":  # Fortran's == ignores trailing blanks
             continue
         copies += [(code, k, position[name]) for k, name in enumerate(lists[vector]) if name in position]
     return Plan(lists=lists, copies=tuple(copies), explicit=tuple(explicit), nutrient_from=nutrient_from,
@@ -226,8 +226,8 @@ def merge(the_plan: Plan, vectors: dict, x2o, *, flux_epbalfact: float) -> None:
     import cupy as cp
     lsize = int(x2o.shape[0])
     no = len(the_plan.lists["x2o"])
-    if x2o.dtype != np.float64 or x2o.shape != (lsize, no):
-        raise ValueError(f"x2o must be float64 of shape ({lsize}, {no})")
+    if x2o.dtype != np.float64 or x2o.shape != (lsize, no) or not x2o.flags.c_contiguous:
+        raise ValueError(f"x2o must be C-contiguous float64 of shape ({lsize}, {no})")
     args = []
     for vector in ("a2x", "i2x", "r2x", "w2x", "g2x", "xao", "fractions"):
         width = len(the_plan.lists[vector])

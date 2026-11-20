@@ -23,7 +23,9 @@ Written by `tools/e3sm_coupler_oracle/build.sh` and
   `prep_glc_mod` (never called by `prep_ocn_merge`).
 - Compiler: GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0 (`mpas-oracle` pixi
   environment), `-O0 -ffp-contract=off`, for the merge, its stand-ins and MCT;
-  real(r8); no FMA instruction in any object; no libm call.
+  real(r8). build.sh checks the merge's own objects for fused multiply-adds
+  (none) and `prep_ocn_merge` for libm calls (none); MCT's routines used here
+  only zero and copy. Every MCT source file the build compiles is pinned.
 - Driver: `run_ocean_merge.F90`. It reads the switches and the eight
   attribute vectors' field lists, then calls `prep_ocn_merge` once per call
   in the stream (the first call works out the plan, as in a run) and writes
@@ -35,12 +37,13 @@ Written by `tools/e3sm_coupler_oracle/build.sh` and
 |---|---|---|---|
 | `gcase` | 61 | 3 | field lists modelled on `seq_flds_mod` for MPAS ocean + sea ice with a data atmosphere and runoff, no wave or land-ice coupling; `flux_epbalfact` 1 |
 | `gcase_epbal` | 40 | 2 | the same, `flux_epbalfact` 0.9873046875000123 |
-| `branches` | 53 | 2 | `rof2ocn_nutrients`, `seq_flds_i2o_per_cat`, `wav_ocn_coup = 'twoway'` (wave states copied), `Sx_tref`/`Sx_qref` merged from the ice and the atmosphere/ocean fluxes, `Sx_shared` copied from the ice and then merged onto |
+| `branches` | 53 | 2 | `rof2ocn_nutrients`, `seq_flds_i2o_per_cat`, `wav_ocn_coup = 'twoway'` (wave states copied), `Sx_tref`/`Sx_qref` merged from the ice and the atmosphere/ocean fluxes, `Sx_dens` merged from the atmosphere alone, `Sx_shared` copied from the ice and then merged onto, `Sa_pbot` carried by the atmosphere and the atmosphere/ocean fluxes (the later copy lands) |
 | `branches_wave_oneway` | 29 | 2 | the same lists with the switches off: the wave states are not copied |
 | `abort_multiple_matches` | 5 | 1 | two atmosphere fields end in `_lwdn`: `ERROR multiple ka field matches` |
 | `abort_atm_and_xao` | 5 | 1 | `Foxx_lat` matched by the atmosphere and the atmosphere/ocean fluxes: `ERROR aindx and xindx both non-zero` |
 | `abort_merge_logic` | 5 | 1 | `Faxa_lwdn` replaced from the atmosphere but added from the ice: `ERROR aindx and iindx merge logic error` |
-| `abort_missing_field` | 5 | 1 | no `Faxa_swvdr`: MCT's `indexRA` stops (`FATAL--attribute not found`) |
+| `abort_missing_field` | 5 | 1 | no `Faxa_swvdr` (the first lookup): MCT's `indexRA` stops (`FATAL--attribute not found`) |
+| `abort_missing_late_field` | 5 | 1 | no `Fogg_rofi` (a later lookup): the same stop |
 
 The fractions run through open ocean, full ice, partial ice, land (both
 fractions zero, left as they are), sums other than one, and radiative

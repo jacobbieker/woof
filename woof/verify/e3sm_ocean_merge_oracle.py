@@ -11,8 +11,9 @@ call works out the merge plan, the later ones reuse it, as in a run).
 The lists are modelled on what ``seq_flds_mod`` registers for an MPAS
 ocean + sea-ice case with a data atmosphere and runoff (``GCASE``), plus
 synthetic lists for the branches a G case does not reach (the nutrients, the
-per-category fields, the waves coupled two ways, an ``Sx_`` state merged from
-two senders, a state copied and then merged onto) and for E3SM's aborts.
+per-category fields, the waves coupled two ways, ``Sx_`` states merged from
+one sender and from two, a state copied and then merged onto, a field two
+senders carry) and for E3SM's aborts.
 """
 from __future__ import annotations
 
@@ -78,8 +79,9 @@ BRANCHES = _with(
     r2x=[f"Forr_rof{t}" for t in NUTRIENTS],
     w2x=["Sw_lamult", "Sw_ustokes", "Sw_vstokes", "Sw_hstokes"],
     i2x=["Sx_shared"],
+    xao=["Sa_pbot"],  # copied after a2x's Sa_pbot, so xao's word lands
     x2o=[f"Foxx_rof{t}" for t in NUTRIENTS] + ["Sf_afrac", "Sf_afracr", "Foxx_swnet_afracr", "Sw_lamult",
-                                                "Sw_ustokes", "Sx_tref", "Sx_qref", "Sx_shared"],
+                                                "Sw_ustokes", "Sx_tref", "Sx_qref", "Sx_shared", "Sx_dens"],
 )
 
 #: (name, lists, switches, lsize, ncalls, aborts)
@@ -97,6 +99,8 @@ _SPECS = (
     ("abort_merge_logic", _with(GCASE, i2x=["Fioi_lwdn"]),
      dict(flux_epbalfact=1.0, per_cat=False, nutrients=False, wav="none"), 5, 1, True),
     ("abort_missing_field", _without(GCASE, "a2x", "Faxa_swvdr"),
+     dict(flux_epbalfact=1.0, per_cat=False, nutrients=False, wav="none"), 5, 1, True),
+    ("abort_missing_late_field", _without(GCASE, "g2x", "Fogg_rofi"),
      dict(flux_epbalfact=1.0, per_cat=False, nutrients=False, wav="none"), 5, 1, True),
 )
 

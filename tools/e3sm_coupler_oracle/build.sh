@@ -47,13 +47,17 @@ check() {
 check "${e3sm}" e3sm
 check "${mct}" mct
 
-# MCT, out of tree: a copy of the pinned sources, configured and built here
-if [[ ! -f "${build_dir}/mct/mct/libmct.a" ]]; then
-    rm -rf "${build_dir}/mct" && cp -R "${mct}" "${build_dir}/mct"
-    ( cd "${build_dir}/mct" \
+# MCT, out of tree: a copy of the pinned sources, configured and built here;
+# rebuilt whenever the compilers, the flags or the sources' digests change
+stamp="FC=${fc[*]} $("${fc[@]}" --version | head -1) CC=${cc} $("${cc}" --version | head -1)"
+stamp+=" FCFLAGS=-O0 -ffp-contract=off CFLAGS=-O0 -std=gnu89 $(grep '  mct/' "${script_dir}/SOURCES.sha256" | cksum)"
+if [[ ! -f "${build_dir}/mct/mct/libmct.a" || "$(cat "${build_dir}/mct.stamp" 2>/dev/null)" != "${stamp}" ]]; then
+    rm -rf "${build_dir}/mct" "${build_dir}/mct.stamp" && cp -R "${mct}" "${build_dir}/mct"
+    ( cd "${build_dir}/mct" && rm -f Makefile.conf config.h config.status config.log \
         && ./configure --enable-mpiserial FC="${fc[*]}" CC="${cc}" FCFLAGS="-O0 -ffp-contract=off" \
                CFLAGS="-O0 -std=gnu89" > configure.log 2>&1 \
         && make > make.log 2>&1 ) || { echo "MCT did not build; see ${build_dir}/mct/*.log" >&2; exit 4; }
+    printf '%s' "${stamp}" > "${build_dir}/mct.stamp"
 fi
 mctinc=(-I"${build_dir}/mct/mct" -I"${build_dir}/mct/mpeu" -I"${build_dir}/mct/mpi-serial")
 mctlib=("${build_dir}/mct/mct/libmct.a" "${build_dir}/mct/mpeu/libmpeu.a" "${build_dir}/mct/mpi-serial/libmpi-serial.a")
@@ -79,6 +83,11 @@ rm -rf "${obj}" && mkdir -p "${obj}" && cd "${obj}"
         "${e3sm}/driver-mct/main/prep_ocn_mod.F90"
     printf 'end module prep_ocn_merge_cut\n'
 } > prep_ocn_merge_cut.F90
+if [[ $(grep -c '^  subroutine prep_ocn_merge(' prep_ocn_merge_cut.F90) -ne 1 \
+      || $(grep -c '^  end subroutine prep_ocn_merge$' prep_ocn_merge_cut.F90) -ne 1 ]]; then
+    echo "prep_ocn_merge was not cut out of prep_ocn_mod.F90 whole" >&2
+    exit 3
+fi
 flags=(-c -O0 -ffp-contract=off -ffree-line-length-none "${mctinc[@]}")
 "${fc[@]}" "${flags[@]}" "${e3sm}/share/util/shr_kind_mod.F90"
 "${fc[@]}" "${flags[@]}" "${script_dir}/e3sm_standins.F90"
@@ -87,8 +96,19 @@ flags=(-c -O0 -ffp-contract=off -ffree-line-length-none "${mctinc[@]}")
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_ocean_merge.F90"
 "${fc[@]}" -o "${build_dir}/run_ocean_merge" run_ocean_merge.o prep_ocn_merge_cut.o mct_mod.o e3sm_standins.o \
     shr_kind_mod.o "${mctlib[@]}"
-if command -v objdump >/dev/null && objdump -d ./*.o | grep -qiE '\bv?fn?m(add|sub)[0-9]'; then
-    echo "an object contains an FMA instruction" >&2
-    exit 5
+# the merge's own objects: no fused multiply-add (x86 vfmadd..., aarch64
+# fmadd/fmsub/fnmadd/fnmsub) and no libm call (MCT's routines used here only
+# zero and copy)
+if command -v objdump >/dev/null; then
+    objdump -d prep_ocn_merge_cut.o shr_kind_mod.o e3sm_standins.o run_ocean_merge.o > disassembly.txt
+    if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
+        echo "an object contains an FMA instruction (${obj}/fma.txt)" >&2
+        exit 5
+    fi
+fi
+nm -u prep_ocn_merge_cut.o > undefined.txt
+if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|asin|acos|cbrt|erf)[fl]?\b' undefined.txt; then
+    echo "prep_ocn_merge calls libm" >&2
+    exit 6
 fi
 echo "built ${build_dir}/run_ocean_merge"
