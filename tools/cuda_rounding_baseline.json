@@ -5711,7 +5711,7 @@
    },
    {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.py",
-    "sha256": "ad162e933e6c28bdf7674e1f1e7d9b2e9d3ae3f682393b2089c2477bf0b161d4"
+    "sha256": "fba045a94745828c98be18fdd3a9685f34432a890d48079b3ce6abc2b75da42e"
    },
    {
     "file": "woof/hex/cuda_acoustic.py",
