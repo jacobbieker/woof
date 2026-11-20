@@ -30,9 +30,15 @@
 //   ucm_noahmp_overrides   module_surface_driver.F 3383-3404
 //
 // NOT transcribed, refused on the host (gpuwm/core/urban_ucm.py): the
-// slucm_distributed_drag arm and the NUDAPT gridded-morphology arm
-// (mh_urb > 0, :649-788); both need gridded morphology the engine does not
-// carry.  SHADOW is hard-coded .false. at :610, so that arm is dead in WRF.
+// slucm_distributed_drag arm, whose Z0_URB2D/LF_URB2D_S inputs the engine
+// does not carry.  SHADOW is hard-coded .false. at :610, so that arm is dead
+// in WRF.
+//
+// The NUDAPT gridded-morphology arm (mh_urb > 0, :649-788) IS transcribed
+// (ucm_nudapt): it runs only when the launcher hands a morphology pointer
+// table (urban_param_file set, woof/core/urban_param.py) and the column's
+// MH_URB2D > 0.  Without the table no instruction of the arm executes and
+// every column reads read_param's table morphology, as before.
 //
 // Bitwise discipline (the reference is gfortran -O0 + glibc 2.43):
 //  * every float op is an explicit rounding intrinsic (FADD/FSUB/FMUL/FDIV/
@@ -46,12 +52,20 @@
 //    words, read off gfortran 15.2 itself (tools/urban_wrf471_oracle/
 //    build_ucm.sh), never re-folded by nvcc.
 //
-// Two WRF undefined reads get defined behaviour (urban_ucm.py says why):
+// Three WRF undefined reads get defined behaviour (urban_ucm.py says why):
 //  (a) ETR (:571) is read by SMFLX/SRT when the green-roof EPGR <= 0 on the
 //      first iteration, before TRANSP wrote it: ETR = 0 at entry;
 //  (b) tloc (:623-627) is written only when AHOPTION == 1 but read by the
 //      IRI_SCHEME == 1 arm (:874-883): computed by the same formula
 //      whenever either needs it.
+//  (c) the NUDAPT arm's wind sector reads ATAN2(U10,V10) (:709) before
+//      `urban` writes its INTENT(OUT) U10/V10 (:1640-1641); WRF's caller
+//      passes locals that still hold the PREVIOUS column's 10 m wind
+//      (module_sf_noahdrv.F U10_URB/V10_URB).  Defined as the column's own
+//      first-level wind direction ATAN2(U1,V1): the direction its own U10
+//      takes (U10 = U1*PSIX10/PSIX, :1640).  The oracle stores U1/V1 into
+//      U10/V10 before each call (tools/urban_wrf471_oracle/
+//      ucm_nudapt_oracle.F90).
 
 #define UCM_NL 4
 
@@ -77,6 +91,8 @@
 #define U_INV_4P1868  __uint_as_float(0x3E749405u)  // 1.0/4.1868
 #define U_RCP         __uint_as_float(0x3E924925u)  // r_d/cp, module_model_constants
 #define U_KARMAN      0.4f                          // module_model_constants KARMAN
+#define U_RAD2DEG     __uint_as_float(0x42652EEDu)  // 180.0/PI, PI = 3.14159 (:709)
+#define U_VONK2       __uint_as_float(0x3E23D70Bu)  // VonK**2, VonK = 0.4 (:744)
 
 // urban's own PARAMETERs (:326-338, :583-608)
 #define U_CPCGS   0.24f
@@ -206,6 +222,12 @@ struct UcmCol {
     float drelr, drelb, drelg, flxhumr, flxhumb, flxhumg;
     float ts, qs, sh, lh, lh_kin, sw, alb, lw, g, rn, psim, psih, gz1oz0;
     float u10, v10, th2, q2, ust;
+};
+
+// One column's gridded morphology (URB_PARAM through urban_var_init) and
+// read_param's BUILDING_WIDTH(1)/STREET_WIDTH(1) for its UTYPE.
+struct UcmMorph {
+    float mh, stdh, lf[4], lp, hgt, lb, frc, bw1, sw1;
 };
 
 // ---------------------------------------------------------------------------
@@ -810,9 +832,89 @@ __device__ float ucm_water_update(float prior, float flux, float rain1,
     return water;
 }
 
-__device__ int ucm_urban(const float* __restrict__ tab,
-                         const float* __restrict__ glob,
-                         const int* __restrict__ isw, UcmCol& c)
+// ---------------------------------------------------------------------------
+// NUDAPT arm, module_sf_urban.F:649-788 (Glotfelty 2012), mh_urb > 0 and no
+// distributed drag (refused on the host).  Replaces read_param's ZR, R, RW,
+// HGT, ZDC, Z0C, Z0R, Z0HC and SVF; SIGMA_ZED (= stdh_urb) is never read
+// after it and is not carried.  Evaluation is gfortran -O0's: left to right,
+// every real exponent a powf call (gfk_pow), Cd/alpha_macd/beta_macd run-time
+// locals (not folded), VonK**2 and 180.0/PI the folded PARAMETER words.
+//
+// :686-699.  SW is urban's INTENT(OUT) upward-shortwave argument reused as
+// the street width; BW is a local.  The `elseif (SW.lt.0.0.or.BW.lt.0.0)`
+// arm reads both before this call wrote them, but it assigns exactly what
+// the `else` arm assigns, so WRF's result does not depend on the read: both
+// collapse to the table widths here.
+// :709 reads ATAN2(U10,V10) before urban writes U10/V10: header (c).
+// ---------------------------------------------------------------------------
+__device__ void ucm_nudapt(const UcmMorph& m, float u1, float v1,
+                           float& zr, float& r, float& rw, float& hgt,
+                           float& zdc, float& z0c, float& z0r, float& z0hc,
+                           float& svf)
+{
+    float bw, sw;
+    if (m.lb > m.lp) {
+        bw = FDIV(FMUL(FMUL(2.0f, m.hgt), m.lp), FSUB(m.lb, m.lp));
+        sw = FDIV(FMUL(FMUL(FMUL(2.0f, m.hgt), m.lp), FSUB(FDIV(m.frc, m.lp), 1.0f)),
+                  FSUB(m.lb, m.lp));
+    } else {
+        bw = m.bw1;
+        sw = m.sw1;
+    }
+    zr = m.mh;
+    r = m.lp;
+    rw = FSUB(1.0f, r);
+    hgt = FDIV(m.mh, FADD(bw, sw));
+
+    // :709-733; atan2f rounded once from double, as u_atan (glibc 2.43+
+    // atan2f is correctly rounded)
+    float wdr = FMUL(U_RAD2DEG, __double2float_rn(atan2((double)u1, (double)v1)));
+    float lambda_f;
+    if (wdr >= 0.0f && wdr < 22.5f) lambda_f = m.lf[0];
+    else if (wdr >= -22.5f && wdr < 0.0f) lambda_f = m.lf[0];
+    else if (wdr > 157.5f && wdr <= 180.0f) lambda_f = m.lf[0];
+    else if (wdr < -157.5f) lambda_f = m.lf[0];
+    else if (wdr > 22.5f && wdr <= 67.5f) lambda_f = m.lf[1];
+    else if (wdr >= -157.5f && wdr < -112.5f) lambda_f = m.lf[1];
+    else if (wdr > 67.5f && wdr <= 112.5f) lambda_f = m.lf[2];
+    else if (wdr >= -112.5f && wdr < -67.5f) lambda_f = m.lf[2];
+    else if (wdr > 112.5f && wdr <= 157.5f) lambda_f = m.lf[3];
+    else if (wdr >= -67.5f && wdr < -22.5f) lambda_f = m.lf[3];
+    else lambda_f = m.lf[0];
+
+    // :736-760, Macdonald (1998)
+    const float cd = 1.2f, alpha_macd = 4.43f, beta_macd = 1.0f;
+    zdc = FMUL(zr, FADD(1.0f, FMUL(gfk_pow(alpha_macd, -r), FSUB(r, 1.0f))));
+    float a = FSUB(1.0f, FDIV(zdc, zr));
+    float drag = FDIV(FMUL(FMUL(0.5f, beta_macd), cd), U_VONK2);
+    z0c = FMUL(FMUL(zr, a),
+               gfk_exp(-gfk_pow(FMUL(FMUL(drag, a), lambda_f), -0.5f)));
+    float lambda_fr = FDIV(m.stdh, FADD(sw, bw));
+    z0r = FMUL(FMUL(zr, FSUB(1.0f, FDIV(zdc, zr))),
+               gfk_exp(-gfk_pow(FMUL(FMUL(drag, FSUB(1.0f, FDIV(zdc, zr))), lambda_fr), -0.5f)));
+    z0hc = FMUL(0.1f, z0c);
+
+    // :763-776 sky-view factor
+    float dhgt = FDIV(hgt, 100.0f);
+    float hgt2 = FSUB(hgt, FDIV(dhgt, 2.0f));
+    float vfws = 0.0f;
+    for (int k = 1; k <= 99; ++k) {
+        hgt2 = FSUB(hgt2, dhgt);
+        vfws = FADD(vfws, FMUL(0.25f, FSUB(1.0f, FDIV(hgt2,
+                   FSQRT(FADD(gfk_pow(hgt2, 2.0f), gfk_pow(rw, 2.0f)))))));
+    }
+    vfws = FDIV(vfws, 99.0f);
+    vfws = FMUL(vfws, 2.0f);
+    svf = FSUB(1.0f, FDIV(FMUL(FMUL(2.0f, vfws), hgt), rw));
+}
+
+// `nudapt` is 0 on every table-morphology path (the noah_mosaic tile and
+// every launch without urban_param_file); `m` is then never read and the arm
+// never runs.
+__device__ int ucm_urban_morph(const float* __restrict__ tab,
+                               const float* __restrict__ glob,
+                               const int* __restrict__ isw, UcmCol& c,
+                               const UcmMorph& m, int nudapt)
 {
     if (c.utype < 1 || c.utype > isw[SW_NUT]) return UCM_ERR_UTYPE;
     const float* pt = tab + (size_t)(c.utype - 1) * PT_NCOL;
@@ -861,6 +963,10 @@ __device__ int ucm_urban(const float* __restrict__ tab,
     float z0hb = pt[PT_Z0HB], z0hg = pt[PT_Z0HG];
     float trlend = pt[PT_TRLEND], tblend = pt[PT_TBLEND], tglend = pt[PT_TGLEND];
     float akanda = pt[PT_AKANDA];
+
+    // :649-788 NUDAPT
+    if (nudapt && m.mh > 0.0f)
+        ucm_nudapt(m, c.u1, c.v1, zr, r, rw, hgt, zdc, z0c, z0r, z0hc, svf);
 
     // :794-804
     if (ahoption == 1) ah = FMUL(ah, glob[PG_AHDIUPRF + tloc - 1]);
@@ -1461,6 +1567,16 @@ __device__ int ucm_urban(const float* __restrict__ tab,
     return UCM_OK;
 }
 
+// Table morphology: every caller without gridded morphology (noah_mosaic.cu).
+__device__ int ucm_urban(const float* __restrict__ tab,
+                         const float* __restrict__ glob,
+                         const int* __restrict__ isw, UcmCol& c)
+{
+    UcmMorph m;
+    m.mh = 0.0f;
+    return ucm_urban_morph(tab, glob, isw, c, m, 0);
+}
+
 // ---------------------------------------------------------------------------
 // state planes.  The launcher hands one device array of pointers, in the
 // order of gpuwm/core/urban_ucm.py UCM_STATE_PLANES; layered entries point at
@@ -1599,6 +1715,33 @@ __device__ void ucm_store_state(const unsigned long long* sp, size_t idx, size_t
     PLANE(sp, SP_CHC)[idx] = c.chc;
 }
 
+// Gridded-morphology planes (woof/core/urban_ucm.py UCM_MORPH_PLANES): the
+// urban_var_init-filtered URB_PARAM fields, FRC_URB2D, and read_param's
+// BUILDING_WIDTH(1)/STREET_WIDTH(1) gathered per column by UTYPE.
+#define MP_MH 0
+#define MP_STDH 1
+#define MP_LF 2
+#define MP_LP 6
+#define MP_HGT 7
+#define MP_LB 8
+#define MP_FRC 9
+#define MP_BW1 10
+#define MP_SW1 11
+#define MP_N 12
+
+__device__ void ucm_load_morph(const unsigned long long* mp, size_t idx, UcmMorph& m)
+{
+    m.mh = PLANE(mp, MP_MH)[idx];
+    m.stdh = PLANE(mp, MP_STDH)[idx];
+    for (int k = 0; k < 4; ++k) m.lf[k] = PLANE(mp, MP_LF + k)[idx];
+    m.lp = PLANE(mp, MP_LP)[idx];
+    m.hgt = PLANE(mp, MP_HGT)[idx];
+    m.lb = PLANE(mp, MP_LB)[idx];
+    m.frc = PLANE(mp, MP_FRC)[idx];
+    m.bw1 = PLANE(mp, MP_BW1)[idx];
+    m.sw1 = PLANE(mp, MP_SW1)[idx];
+}
+
 // One status word per launch: bit (code - 1) set for every code any column
 // returned, read by gpuwm.core.health_ledger (immediately, or deferred to the
 // tiled driver's drain) so the step never branches on device data.
@@ -1672,7 +1815,8 @@ extern "C" __global__ void ucm_noah_after_lsm(
     const unsigned long long* __restrict__ fields,
     const unsigned long long* __restrict__ state,
     const float* __restrict__ tab, const float* __restrict__ glob,
-    const int* __restrict__ isw, float dt, int jmonth, unsigned int* err,
+    const int* __restrict__ isw,
+    const unsigned long long* __restrict__ morph, int nudapt, float dt, int jmonth, unsigned int* err,
     int ny, int nx)
 {
     size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -1703,7 +1847,10 @@ extern "C" __global__ void ucm_noah_after_lsm(
     c.chs = chs[idx];
     c.chs2 = chs2[idx];
     ucm_load_state(state, idx, plane, c);
-    int code = ucm_urban(tab, glob, isw, c);
+    UcmMorph m;
+    m.mh = 0.0f;
+    if (nudapt) ucm_load_morph(morph, idx, m);
+    int code = ucm_urban_morph(tab, glob, isw, c, m, nudapt);
     if (code != UCM_OK) { ucm_flag(err, code); return; }
     float f = frc[idx];
     float omf = FSUB(1.0f, f);
@@ -1736,7 +1883,8 @@ extern "C" __global__ void ucm_noahmp_after_lsm(
     const unsigned long long* __restrict__ fields,
     const unsigned long long* __restrict__ state,
     const float* __restrict__ tab, const float* __restrict__ glob,
-    const int* __restrict__ isw, float dt, int jmonth, unsigned int* err,
+    const int* __restrict__ isw,
+    const unsigned long long* __restrict__ morph, int nudapt, float dt, int jmonth, unsigned int* err,
     int ny, int nx)
 {
     size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -1769,7 +1917,10 @@ extern "C" __global__ void ucm_noahmp_after_lsm(
     chs2[idx] = cqs2[idx];                         // :3445 CHS2(I,J)= CQS2(I,J)
     c.chs2 = chs2[idx];
     ucm_load_state(state, idx, plane, c);
-    int code = ucm_urban(tab, glob, isw, c);
+    UcmMorph m;
+    m.mh = 0.0f;
+    if (nudapt) ucm_load_morph(morph, idx, m);
+    int code = ucm_urban_morph(tab, glob, isw, c, m, nudapt);
     if (code != UCM_OK) { ucm_flag(err, code); return; }
     float f = frc[idx];
     float omf = FSUB(1.0f, f);
@@ -1859,7 +2010,7 @@ extern "C" __global__ void ucm_overrides(
 // ---------------------------------------------------------------------------
 // Column oracle entry: `urban` alone over n independent columns, every
 // argument an array in the order of gpuwm/core/urban_ucm.py
-// UCM_COLUMN_INPUTS / UCM_COLUMN_OUTPUTS.  Tests only; the forecast path
+// UCM_COLUMN_INPUTS / UCM_COLUMN_OUTPUTS (and UCM_MORPH_PLANES when nudapt).  Tests only; the forecast path
 // uses the three kernels above.
 // ---------------------------------------------------------------------------
 #define CI_UTYPE 0
@@ -1907,7 +2058,8 @@ extern "C" __global__ void ucm_column_test(
     const unsigned long long* __restrict__ out,
     const unsigned long long* __restrict__ state,
     const float* __restrict__ tab, const float* __restrict__ glob,
-    const int* __restrict__ isw, int* __restrict__ code_out, int n)
+    const int* __restrict__ isw, int* __restrict__ code_out,
+    const unsigned long long* __restrict__ morph, int nudapt, int n)
 {
     size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= (size_t)n) return;
@@ -1930,7 +2082,10 @@ extern "C" __global__ void ucm_column_test(
     c.chs = PLANE(in, CI_CHS)[idx];
     c.chs2 = PLANE(in, CI_CHS2)[idx];
     ucm_load_state(state, idx, (size_t)n, c);
-    int code = ucm_urban(tab, glob, isw, c);
+    UcmMorph m;
+    m.mh = 0.0f;
+    if (nudapt) ucm_load_morph(morph, idx, m);
+    int code = ucm_urban_morph(tab, glob, isw, c, m, nudapt);
     code_out[idx] = code;
     if (code != UCM_OK) return;
     PLANE(out, CO_TS)[idx] = c.ts;

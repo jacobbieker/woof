@@ -12,6 +12,7 @@ import numpy as np
 
 from woof.core.urban_ucm import (
     UCM_COLUMN_INPUTS, UCM_COLUMN_OUTPUTS, UCM_STATE_PLANES,
+    column_morph_planes,
 )
 
 
@@ -21,11 +22,15 @@ class HostTwin:
     def __init__(self, path: str | Path):
         self.lib = ctypes.CDLL(str(Path(path).resolve()))
         void = ctypes.c_void_p
-        self.lib.ucm_host_columns.argtypes = [void] * 7 + [ctypes.c_int]
+        self.lib.ucm_host_columns.argtypes = ([void] * 8
+                                              + [ctypes.c_int, ctypes.c_int])
         self.lib.ucm_host_columns.restype = None
 
-    def run_columns(self, params, inputs, state, *, generation=None):
-        """Return outputs, renewed state and status codes as host arrays."""
+    def run_columns(self, params, inputs, state, *, generation=None,
+                    morph=None):
+        """Return outputs, renewed state and status codes as host arrays.
+
+        ``morph`` as for :func:`woof.core.urban_ucm.run_columns`."""
         from woof.core.urban_ucm import water_balance_params
         params = water_balance_params(params, generation)
         n = int(np.asarray(inputs["ta"]).size)
@@ -36,6 +41,7 @@ class HostTwin:
             if array.shape != (n,):
                 raise ValueError(f"{name}: expected {(n,)}, got {array.shape}")
             incoming.append(array)
+        incoming_map = dict(zip(UCM_COLUMN_INPUTS, incoming))
         outgoing = [np.zeros(n, np.float32) for _ in UCM_COLUMN_OUTPUTS]
         renewed = []
         for name, layers in UCM_STATE_PLANES:
@@ -52,10 +58,14 @@ class HostTwin:
         outptrs = np.asarray([a.ctypes.data for a in outgoing], np.uint64)
         stateptrs = np.asarray([a.ctypes.data for a in renewed], np.uint64)
         codes = np.zeros(n, np.int32)
+        planes = ([] if morph is None
+                  else column_morph_planes(params, incoming_map, morph))
+        morphptrs = np.asarray([a.ctypes.data for a in planes] or [0],
+                               np.uint64)
         self.lib.ucm_host_columns(
             inptrs.ctypes.data, outptrs.ctypes.data, stateptrs.ctypes.data,
             table.ctypes.data, globals_.ctypes.data, switches.ctypes.data,
-            codes.ctypes.data, n,
+            codes.ctypes.data, morphptrs.ctypes.data, int(morph is not None), n,
         )
         return (dict(zip(UCM_COLUMN_OUTPUTS, outgoing)),
                 {name: a for (name, _), a in zip(UCM_STATE_PLANES, renewed)},

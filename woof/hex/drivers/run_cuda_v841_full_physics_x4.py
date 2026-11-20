@@ -266,7 +266,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
     "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
     "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "5207221df126f3f5c7d3d310d6b7fc07884834ff251f6afd9ed57f8f595ec1b8",
+    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "ccbc947504a1aa1428aa9f4e4120677f29172efa7ded282b726564fc3e9cb270",
     # Native upper damping: Rust and CUDA match compiled source blocks.
     "src/hexcore/native/upper_damping.rs": "5483b2c1e7da45317ffe4213c5879b583070d9e28d591ec52a9c697a052e81f1",
     "src/hexcore/upper_damping_v841.py": "947f477d5f56b41d95fb5a0b92adb21d68be95b5fac19ba524181cb373710860",
@@ -293,7 +293,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
         "a0ae4d9b3e639bfe02a8de57458fac4407c6e48f1bc12e2e698626e9a9069d2c"
     ),
     "src/hexcore/cuda_gwdo_v841.py": (
-        "6f619095a10bf6787ca38c57304765561519d452aa8c1ee7b654b63e8062cb74"
+        "f6ff7d030e18ea341b01cc0b5226949cc211533ccbcd3210b3e1cb91cd2d4423"
     ),
     # Re-frozen 2026-10-11: commit_wsm6_state_v841_f32 takes the species
     # row's block length in place of the literal 6.  THE BREAKAGE: a
@@ -477,8 +477,11 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # 0.4.0 release scrub of one comment line (an owner ruling in place of a
     # person).  No code line differs from the copy the H1 identities above
     # ran on.  No card run for this merge.
+    # Re-derived 2026-11-19 (tools/repin_source_tables.py): the file has since
+    # taken host-side merges (scratch outputs #614, opt-in w_damping #420,
+    # adaptive readmission); their card evidence is in those PRs, not here.
     "src/hexcore/cuda_driver.py": (
-        "f453eee1152aa33392b09ecfde1d16ee33ec53cf17d754ecd076736088630fea"
+        "7888ef788fb1b7e9600b798c30c5d3f939fbf272a1585bc0ece62bc01ee51d82"
     ),
     # THE BREAKAGE THIS PREVENTS: cuda_driver.py now executes host
     # preparation through woof.hex.prep_cache.  Unpinned, an edit to the key
@@ -852,7 +855,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # parked asynchronous history-ready seam; digest of the merged file.
     # Re-derived for the merge of the fork onto WOOF 1.1.0: digest of the merged file.
     "src/hexcore/cuda_arwen_physics_v841.py": (
-        "8550e4e3bdec9366744738f787feb28fb617c5ba4775a3e512f2887553d302f6"
+        "a344b171c59644fe9a75bc1124c9771daf4e18cb00caffba9b92338d01971206"
     ),
     # New pin 2026-10-05: the New Tiedtke row's seam (the frozen column-batch
     # class subclassed, driver built at cu_physics=16, raw cumulus momentum

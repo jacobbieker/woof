@@ -8293,9 +8293,29 @@ def _attach_urban(driver: PhysicsDriver, state: DomainState,
     if lat is not None:
         lat = np.broadcast_to(lat, shape)
         lon = np.broadcast_to(lon, shape)
+    morphology = None
+    if getattr(cfg, "urban_param_file", ""):
+        # WPS's gridded URB_PARAM through real.exe's split and FRC_URB2D
+        # fill (woof.core.urban_param); urban_var_init's keep/zero rule is
+        # applied inside init_urban_state.
+        from woof.core.urban_param import load_urban_morphology
+        from woof.core.urban_state import urban_types
+        ivgtyp = cp.asnumpy(f["ivgtyp"])
+        loaded = load_urban_morphology(
+            cfg.urban_param_file, option=option, ivgtyp=ivgtyp,
+            urban=urban_types(ivgtyp, categories, int(cfg.use_wudapt_lcz)) > 0,
+            mminlu=landuse_dataset, latitude=lat, longitude=lon,
+            dx=getattr(cfg, "dx", None), dy=getattr(cfg, "dy", None))
+        morphology = {k: getattr(loaded, k)
+                      for k in ("lp", "lb", "hgt", "mh", "stdh", "lf", "hi")}
+        if loaded.frc is not None:
+            frc_urb2d = loaded.frc
     urban = init_urban_state(cfg, params, categories, f,
                              nz=int(state.p.shape[0]), frc_urb2d=frc_urb2d,
-                             module=module)
+                             module=module, morphology=morphology)
+    if morphology is not None:
+        # The bytes the state came from, for the checkpoint identity.
+        urban.urban_param_sha256 = loaded.sha256
     driver.urban = urban
     driver._urban_cfg = cfg
     driver.urban_coupler = UrbanCoupler(
