@@ -19,7 +19,8 @@
 # types the routines walk; run_oracle.F90 drives the internal stress,
 # run_subcycle.F90 the velocity solve and run_presubcycle.F90 the pre-subcycle
 # routines; run_coupling_prep.F90 the column package's coupling preparation
-# (seaice_column_coupling_prep and seaice_column_scale_fluxes, cut verbatim).  The objects must contain no FMA instruction (checked with objdump
+# (seaice_column_coupling_prep and seaice_column_scale_fluxes, cut verbatim).
+# The objects must contain no FMA instruction (checked with objdump
 # when it is present).  expf (RKIND 4) and exp (RKIND 8), which ice_strength
 # calls, are the host glibc's, or tools/oracle_libm's transcriptions of them on
 # a host whose libm is not glibc.  The column-package oracles (run_column,

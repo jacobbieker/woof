@@ -17,12 +17,13 @@ THE BREAKAGES THESE PREVENT
 2. A case generator whose bytes drift. The input digests are pinned.
 3. A fixture that misses a branch. It must cover:
    - ice and open water (the open-water longwave);
-   - the sun up, down and exactly at the horizon;
+   - the sun up, down, exactly at the horizon, exactly at seaicePuny and
+     between the two;
    - the pond freshwater feedback on and off;
    - one category and five;
    - halo cells left alone.
 4. A gate that cannot fail. Each of these mutations must produce mismatches:
-   - a mutated sun test, shortwave scaling factor or pond feedback;
+   - a mutated sun test (three ways), shortwave scaling factor or pond feedback;
    - scaling by division instead of the inverse;
    - x**4 evaluated left to right.
 5. An unported option run silently. The ocean mixed layer (the Registry
@@ -60,7 +61,8 @@ def test_fixture_covers_the_branches(precision):
     fixture = oo.load_fixture(precision)
     cases = {case["name"]: case for case in oo.cases(precision)}
     assert set(fixture) == set(cases)
-    seen = {"open": 0, "ice": 0, "sun": 0, "dark": 0, "horizon": 0, "feedback": 0, "halo": 0, "one": 0}
+    seen = dict.fromkeys(("open", "ice", "sun", "dark", "horizon", "at_puny", "below_puny", "feedback", "halo",
+                          "one"), 0)
     for name, out in fixture.items():
         case = cases[name]
         pools, cfg = case["pools"], case["config"]
@@ -85,7 +87,10 @@ def test_fixture_covers_the_branches(precision):
         assert oo.word_mismatches(out["atmos_fluxes/longwaveUp"][:solved][open_water], want[open_water]) == 0
         seen["sun"] += int((coszen > real(cpl.PUNY)).sum())
         seen["dark"] += int((coszen <= real(cpl.PUNY)).sum())
-        seen["horizon"] += int((coszen == 0).sum())
+        ice = area > 0
+        seen["horizon"] += int(((coszen == 0) & ice).sum())
+        seen["at_puny"] += int(((coszen == real(cpl.PUNY)) & ice).sum())
+        seen["below_puny"] += int(((coszen > 0) & (coszen < real(cpl.PUNY)) & ice).sum())
         bare = out["shortwave/bareIceAlbedoCell"][:solved]
         assert (bare[coszen <= real(cpl.PUNY)] == 0).all()
         moved = out["ponds/pondFreshWaterFlux"][:solved] != pools["ponds"]["pondFreshWaterFlux"][:solved]
@@ -127,6 +132,12 @@ def test_word_exact_in_fast_and_strict_children(numerics, exact):
 @pytest.mark.parametrize("original, mutated, field", [
     # the sun counted as up at the horizon
     ("solarZenithAngleCosine[iCell] > puny;", "solarZenithAngleCosine[iCell] > -puny;",
+     "shortwave/bareIceAlbedoCell"),
+    # the sun counted as up at exactly seaicePuny
+    ("solarZenithAngleCosine[iCell] > puny;", "solarZenithAngleCosine[iCell] >= puny;",
+     "shortwave/bareIceAlbedoCell"),
+    # the sun counted as up below seaicePuny
+    ("solarZenithAngleCosine[iCell] > puny;", "solarZenithAngleCosine[iCell] > ZERO;",
      "shortwave/bareIceAlbedoCell"),
     # the shortwave scaling factor summed from the infrared end
     ("A(A(A(M(shortwaveVisibleDirectDown[iCell], S(ONE, visDir)),\n"

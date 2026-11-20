@@ -26,10 +26,10 @@ Written by `tools/mpas_seaice_oracle/build.sh` and
 
 | case | nCells (nCellsSolve) | categories | dt | what it covers |
 |---|---|---|---|---|
-| `five_categories` | 40 (40) | 5 | 3600 s | ice and open water, sun up and down (coszen exactly 0 included), no pond feedback |
+| `five_categories` | 40 (40) | 5 | 3600 s | ice and open water, sun up and down (coszen exactly 0, exactly seaicePuny and between them included), no pond feedback |
 | `pond_feedback_halo` | 48 (33) | 5 | 1800 s | the pond freshwater feedback; halo cells beyond nCellsSolve left alone |
 | `one_category_low_sun` | 30 (30) | 1 | 600 s | one category, the sun mostly down, the pond feedback |
 
 About 25% of the cells are open water and 10% have `solarZenithAngleCosine`
-exactly 0. The column biogeochemistry is off, so its fields are absent (null
+exactly 0, 5% exactly seaicePuny and 5% half of it. The column biogeochemistry is off, so its fields are absent (null
 pointers in the driver).

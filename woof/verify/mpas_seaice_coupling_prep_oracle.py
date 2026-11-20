@@ -11,7 +11,7 @@ The cases cover the following branches:
 - cells with ice and cells without (the open-water longwave, the reference
   values from the air);
 - the sun up and down (``solarZenithAngleCosine`` above and below
-  ``seaicePuny``, exactly zero included);
+  ``seaicePuny``, exactly zero, exactly ``seaicePuny`` and between them included);
 - the pond freshwater feedback on and off;
 - one category and five;
 - halo cells beyond ``nCellsSolve``, which must be left alone.
@@ -96,6 +96,10 @@ def make_case(name, seed, n_cells, solved, n_categories, dt, overrides, precisio
     if name == "one_category_low_sun":
         coszen = uniform(-1.0, 0.1, nc + 1)
     coszen[rs.random_sample(nc + 1) < 0.1] = 0.0
+    # the sun test's edge: exactly seaicePuny and between zero and it
+    edge = rs.random_sample(nc + 1)
+    coszen[edge < 0.05] = 1.0e-11
+    coszen[(edge >= 0.05) & (edge < 0.1)] = 0.5e-11
     values = dict(_BGC_DIMS)
     values.update({
         "nCellsSolve": solved, "nCategories": n_categories, "iceAreaCategory": area,
