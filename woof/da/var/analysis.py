@@ -24,9 +24,11 @@
 
 The arithmetic is element by element in WRFDA's statement order on the host,
 binary64; the column sums (``sdmd``, ``s1md``, ``tpw``) and the vertical
-recurrences (``p``, ``ph``) run level by level in WRFDA's order.  Real
-powers, ``log`` and ``exp`` are the host libm's (glibc on the oracle), so a
-non-glibc host may differ from WRFDA by an ulp in those.
+recurrences (``p``, ``ph``) run level by level in WRFDA's order.  On the
+tutorial :func:`wrftoxb` is the oracle's ``xb`` to a few ulps (9e-14
+relative at most, in ``p`` and what derives from it), on glibc and macOS
+alike; per-element glibc ``pow``/``log``/``exp`` give the same words, so
+the residual is not the maths library (docs/var.md).
 
 Derived from WRFDA 4.7.1 (``var/da/da_transfer_model/da_transfer_wrftoxb.inc``,
 ``da_transfer_xatowrf.inc``, ``da_transfer_xatoanalysis.inc``,

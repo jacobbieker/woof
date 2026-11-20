@@ -84,9 +84,17 @@ The reference is a serial GNU WRFDA 4.7.1 on the WRFDA tutorial case:
     words.
   - The bundle's `analysis.nc` carries those words, and the
     `woof run --analysis` door accepts the bundle.
-- **Platform maths.** Off glibc (macOS), the background fields that pass
-  through real powers, `log` and `exp` can differ from WRFDA's by an ulp
-  (at most 9e-14 relative).
+- **Known residual in the background.** `wrftoxb` from the first guess
+  is not WRFDA's `xb` word for word. Most fields are exact, but some differ
+  by a few ulps, at most 9e-14 relative:
+  - `p` differs at 22% of points; `t`, `es`, `qs` and `ref` follow from it;
+  - `rho`, `psac` and `h` differ at about 0.1% of points.
+  - The differences are the same on glibc (Linux) and macOS. They do not
+    come from the maths library: glibc's scalar `pow`, `log` and `exp` per
+    element give the same words. WRFDA's build does not use FMA. The source
+    is not yet found.
+  - The minimiser's `J` and `|g|` are within 1.5e-15 of WRFDA's. The float32
+    analysis is still WRFDA's words.
 
 ## Not yet
 

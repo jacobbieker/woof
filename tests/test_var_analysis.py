@@ -4,9 +4,11 @@ On the WRFDA 4.7.1 tutorial (``WOOF_WRFDA471_DIR`` with ``be.dat``,
 ``ob.ascii``, ``woof_xb.bin``, the first guess ``fg`` and WRFDA's
 ``wrfvar_output``; see docs/dev/WRFDA-3DVAR-PLAN.md section 8):
 
-- :func:`wrftoxb` from ``fg`` is the oracle's ``xb`` dump to 1e-12 relative
-  (exact for most fields; an ulp in the fields through real powers, ``log``
-  and ``exp`` off glibc).
+- :func:`wrftoxb` from ``fg`` is the oracle's ``xb`` dump to 1e-12 relative.
+  Most fields are exact; ``p`` (and ``t``, ``es``, ``qs``, ``ref`` from it)
+  is a few ulps off at 22% of points, 9e-14 at most, identically on glibc and
+  macOS.  Not the maths library (per-element glibc ``pow``/``log``/``exp``
+  give the same words); the source is open (docs/var.md).
 - **O7**: :func:`analyse` from the files (reference tier, the tutorial's
   namelist) then :func:`xatowrf`; per WRF field the increment (analysis
   minus ``fg``) against WRFDA's (``wrfvar_output`` minus ``fg``) has
