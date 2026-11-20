@@ -23,7 +23,15 @@ stage a case names (``oracle_stage``):
 - ``ridging``: ``colpkg_init_thermo`` and ``init_column_itd``, then
   ``column_ridging``, its ierr logged the same way. Its cases carry a
   thickness distribution after transport and the ridging forcing
-  (:func:`_ridge_state`).
+  (:func:`_ridge_state`);
+- ``column_step``: ``colpkg_init_thermo``, ``init_column_itd`` and, for the
+  delta-Eddington shortwave, ``colpkg_init_orbit``, then ``oracle_n_steps``
+  times the column package's part of ``seaice_timestep`` (the
+  re-initialisations, the pre-dynamics, each dynamics subcycle's column
+  dynamics and the post-dynamics, each step after the first preceded by
+  ``seaice_timestep_finalize``'s ``seaice_column_reinitialize_fluxes``), its
+  ierr logged the same way. Its cases carry a BL99 column state and forcing
+  (:func:`_step_state`).
 
 ``mpas_seaice_column.F``, ``mpas_seaice_initialize.F``'s and
 ``mpas_seaice_forcing.F``'s routines and the column package are compiled
@@ -51,6 +59,7 @@ import numpy as np
 from woof.hex.mpas_seaice import column_itd_v842 as citd
 from woof.hex.mpas_seaice import column_radiation_v842 as crad
 from woof.hex.mpas_seaice import column_ridge_v842 as crdg
+from woof.hex.mpas_seaice import column_step_v842 as cstep
 from woof.hex.mpas_seaice import column_therm_v842 as ct
 from woof.hex.mpas_seaice import column_v842 as cv
 from woof.verify import mpas_ocean_stream as _stream
@@ -66,6 +75,8 @@ RIDGE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_ridge"
 RADIATION_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_radiation"
 #: the delta-Eddington shortwave's fixture (DEDD_CASES)
 DEDD_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_dedd"
+#: the column step's fixture (STEP_CASES)
+STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_step"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -76,6 +87,13 @@ POOLS = ("mesh", "tracers", "tracers_aggregate", "icestate", "boundary", "veloci
 #: and the vertical thermodynamics' coupled surface fluxes (a pool only its cases carry,
 #: so the other cases' bytes are unchanged)
 VT_POOLS = POOLS + ("alternative_atmos_forcing",)
+#: and the variational principal stresses seaice_column_reinitialize_diagnostics_dynamics zeroes
+STEP_POOLS = VT_POOLS + ("velocity_variational",)
+#: the Registry's name_in_code, the name the routines look a field up by, where it is not the var's name
+NAME_IN_CODE = {("velocity_variational", f"{base}{tail}var"): f"{base}{tail}"
+                for base in ("strain", "stress") for tail in ("11", "22", "12")}
+NAME_IN_CODE.update({("velocity_variational", f"{name}Var"): name
+                     for name in ("principalStress1", "principalStress2", "replacementPressure")})
 #: the mesh block: one block's cells, owned and halo
 MESH = {"nCells": 12, "nCellsSolve": 9, "nEdges": 30, "nEdgesSolve": 24, "nVertices": 20, "nVerticesSolve": 16,
         "maxEdges": 6, "maxEdges2": 12, "vertexDegree": 3}
@@ -274,6 +292,29 @@ DEDD_CASES = (
     ("init_shortwave_dedd_topo_ponds", 20262005, "init_shortwave", {
         **_BL99, **_TOPO_ONLY, "config_calendar_type": "gregorian", "config_start_time": "2000-02-29_07:00:00"}),
 )
+_STEP = "column_step"
+#: the column step runs coupled to an ocean (the mixed layer is not ported)
+_STEP_BASE = {**_VT, "config_use_ocean_mixed_layer": False}
+#: the column package's part of seaice_timestep over several steps: name, seed, stage,
+#: overrides. The vertical thermodynamics are BL99 without ponds; every case with
+#: the computed surface temperature and the delta-Eddington shortwave calls glibc's
+#: atan, sin, cos and asin.
+STEP_CASES = (
+    ("step_bl99_dedd", 20262011, _STEP, {**_STEP_BASE, "oracle_n_steps": 3,
+                                         "config_start_time": "2001-06-01_10:00:00"}),
+    ("step_bl99_dedd_subcycles_gregorian", 20262012, _STEP, {
+        **_STEP_BASE, "oracle_n_steps": 3, "config_dynamics_subcycle_number": 2, "config_nIceLayers": 4,
+        "config_nCategories": 3, "config_calendar_type": "gregorian", "config_start_time": "2000-07-10_06:00:00"}),
+    ("step_bl99_ccsm3_constant_winter", 20262013, _STEP, {
+        **_STEP_BASE, **_CONSTANT, "oracle_n_steps": 4, "config_start_time": "2001-01-15_00:00:00"}),
+    ("step_bl99_coupled_surface_temperature", 20262014, _STEP, {**_STEP_BASE, **_COUPLED, "oracle_n_steps": 3}),
+    ("step_mushy_level_ponds_no_vertical_thermodynamics", 20262015, _STEP, {
+        "config_use_ocean_mixed_layer": False, "config_use_column_vertical_thermodynamics": False,
+        "oracle_n_steps": 2, "config_start_time": "2001-07-20_12:00:00"}),
+    ("step_bl99_dedd_melting", 20262016, _STEP, {**_STEP_BASE, "oracle_n_steps": 2,
+                                                 "config_start_time": "2001-07-10_12:00:00"}),
+    ("step_bl99_abort_salinity", 20262017, _STEP, {**_STEP_BASE, "oracle_n_steps": 2}),
+)
 
 
 def configs_of(overrides: dict, stage: str) -> dict:
@@ -288,12 +329,16 @@ def field_rows(config: dict) -> tuple[list, dict[str, int], dict[str, bool]]:
     rows = [("mesh", name, DIM, ()) for name in sorted(dims)]
     rows += [("mesh", name, DIM, ()) for name in ("nCellsSolve", "nEdgesSolve", "nVerticesSolve")]
     rows += [("tracers_aggregate", "nCellsSolve", DIM, ())]
-    pools = VT_POOLS if config.get("oracle_stage") == "vertical_thermodynamics" else POOLS
+    if config.get("oracle_stage") == _STEP:
+        # seaice_column_coupling_prep reads its dimensions from the tracers pool
+        rows += [("tracers", "nCellsSolve", DIM, ()), ("tracers", "nCategories", DIM, ())]
+    stage = config.get("oracle_stage")
+    pools = VT_POOLS if stage == "vertical_thermodynamics" else STEP_POOLS if stage == _STEP else POOLS
     # The Registry allocates a var by its own packages: gen_inc.c's parse_var never reads
     # the var_struct's (biogeochemistry's newlyFormedIce is the column package's).  The
     # earlier stages' cases keep the struct gate, which only drops fields their routines
     # never read, so their bytes (and fixtures) stay; the ITD stage reads newlyFormedIce.
-    var_packages_only = config.get("oracle_stage") in ("itd_thermodynamics", "ridging", *_RADIATION_STAGES)
+    var_packages_only = config.get("oracle_stage") in ("itd_thermodynamics", "ridging", *_RADIATION_STAGES, _STEP)
     for struct in cv.registry_fields()["var_structs"]:
         if struct["name"] not in pools:
             continue
@@ -305,6 +350,7 @@ def field_rows(config: dict) -> tuple[list, dict[str, int], dict[str, bool]]:
             fshape = tuple(_EXTENTS.get(d, dims.get(d)) for d in names)
             own = [p for p in package_text.split(";") if p]
             on = struct_on and (not own or any(active[f"{p}Active"] for p in own))
+            name = NAME_IN_CODE.get((struct["name"], name), name)
             rows.append((struct["name"], name, REAL if kind == "real" else INT, fshape, on))
     return rows, dims, active
 
@@ -841,6 +887,63 @@ def _dedd_state(rs, case: dict) -> None:
         ponds["pondLidMeltFluxFraction"] = u(0.0, 1.0, (n1, ncat))
 
 
+def _step_state(rs, case: dict) -> None:
+    """The column step's inputs: :func:`_thermo_state`'s BL99 column (its
+    draws first) and, on top, what the other stages read: the open water
+    (one minus the ice area), the thickness distribution before the
+    thermodynamics (the state itself, for a case without the vertical
+    thermodynamics, which sets it), the ridging forcing and
+    ``dynamicsTimeStep``, the down shortwave (a cell without sun), the area
+    albedos and the previous net shortwave prep_radiation scales by, the
+    longitudes, the rain and the initial salinity profile new ice takes. Ice has volume everywhere (the
+    delta-Eddington shortwave's ice without volume, see :func:`_dedd_state`)."""
+    _thermo_state(rs, case)
+    pools, dims, config = case["pools"], case["dims"], case["config"]
+    nc, ncat = dims["nCells"], dims["nCategories"]
+    n1 = nc + 1
+    u = _uniform(rs)
+    t, ist, ta = pools["tracers"], pools["icestate"], pools["tracers_aggregate"]
+    ist["openWaterArea"] = 1.0 - ta["iceAreaCell"]
+    volume = np.zeros(n1)
+    for n in range(ncat):
+        volume = volume + t["iceVolumeCategory"][:, n, 0]
+    ta["iceVolumeCell"] = volume
+    if not config["config_use_column_vertical_thermodynamics"]:
+        ist["iceAreaCellInitial"] = ta["iceAreaCell"].copy()
+        for key in ("iceAreaCategory", "iceVolumeCategory", "snowVolumeCategory"):
+            ist[f"{key}Initial"] = t[key][:, :, 0].copy()
+    rg = pools["ridging"]
+    conv, shear = u(0.0, 3.0e-6, (n1,)), u(0.0, 6.0e-6, (n1,))
+    conv[3] = 0.0
+    rg["ridgeConvergence"], rg["ridgeShear"] = conv, shear
+    pools["velocity_solver"]["dynamicsTimeStep"] = np.array(
+        float(config["config_dt"]) / config["config_dynamics_subcycle_number"])
+    ac = pools["atmos_coupling"]
+    for key, hi in (("shortwaveVisibleDirectDown", 250.0), ("shortwaveVisibleDiffuseDown", 120.0),
+                    ("shortwaveIRDirectDown", 200.0), ("shortwaveIRDiffuseDown", 100.0)):
+        value = u(0.0, hi, (n1,))
+        value[7] = 0.0
+        ac[key] = value
+    ac["rainfallRate"] = u(0.0, 2.0e-5, (n1,))
+    sw = pools["shortwave"]
+    for key in ("albedoVisibleDirectArea", "albedoVisibleDiffuseArea", "albedoIRDirectArea", "albedoIRDiffuseArea"):
+        sw[key] = u(0.0, 0.9, (n1,))
+    sw["shortwaveScalingFactor"] = u(50.0, 400.0, (n1,))
+    sw["solarZenithAngleCosine"] = u(0.05, 0.9, (n1,))
+    pools["mesh"]["lonCell"] = u(0.0, 2.0 * np.pi, (n1,))
+    # seaice_init_column_physics_package_variables' profiles, which the new ice takes
+    nil = dims["nIceLayers"]
+    initial = pools["initial"]
+    initial["initialSalinityProfile"] = u(0.5, 3.5, (n1, nil + 1))
+    initial["initialMeltingTemperatureProfile"] = -_DEPRESST * initial["initialSalinityProfile"]
+    for key, (a, b) in (("iceAge", (0.0, 3.0e7)), ("firstYearIceArea", (0.0, 1.0)),
+                        ("levelIceArea", (0.2, 1.0)), ("levelIceVolume", (0.2, 1.0)),
+                        ("pondArea", (0.0, 0.3)), ("pondDepth", (0.0, 0.2)),
+                        ("pondLidThickness", (0.0, 0.05))):
+        if t.get(key) is not None:
+            t[key] = u(a, b, t[key].shape)
+
+
 def make_case(name, seed, stage, overrides) -> dict:
     rs = np.random.RandomState(seed)
     config = configs_of(overrides, stage)
@@ -865,6 +968,8 @@ def make_case(name, seed, stage, overrides) -> dict:
     _tracers(rs, case["pools"], case["dims"])
     if stage == "vertical_thermodynamics":
         _thermo_state(rs, case)
+    if stage == _STEP:
+        _step_state(rs, case)
     if stage == "itd_thermodynamics":
         _itd_state(rs, case)
     if stage == "ridging":
@@ -1008,6 +1113,9 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
         crad.radiation(dev, config, state)
     elif stage == "init_shortwave":
         crad.init_shortwave(dev, config, state)
+    elif stage == _STEP:
+        cv.init_column_itd(dev, state)
+        state.abort = cstep.run(dev, config, state, int(config["oracle_n_steps"]))
     else:
         raise ValueError(f"unknown stage {stage}")
     outputs = {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]
@@ -1050,7 +1158,7 @@ def oracle_abort(log: dict, routine: str = "column_vertical_thermodynamics") -> 
 def measure_vt(reference: dict | None = None, logs: dict | None = None, *, rows=VT_CASES,
                fixture_dir: Path = VT_FIXTURE_DIR) -> dict[str, dict[str, int]]:
     """Per vertical-thermodynamics case: the words the GPU gets wrong per
-    field (cases the oracle completes), whether its abort (ierr, first
+    field (an aborting case's too), whether its abort (ierr, first
     aborting cell, message) differs from the oracle's, and the tracer
     object's integers that differ."""
     reference = load_fixture(fixture_dir) if reference is None else reference
@@ -1061,9 +1169,9 @@ def measure_vt(reference: dict | None = None, logs: dict | None = None, *, rows=
         log = logs[case["name"]]
         oracle = oracle_abort(log)
         row = {"abort": int(tuple(state.abort) != oracle)}
-        if not oracle[0]:
-            want = expected_outputs(case, reference.get(case["name"], {}))
-            row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        # an aborting case's too: the cells after the abort keep their words
+        want = expected_outputs(case, reference.get(case["name"], {}))
+        row.update({key: word_mismatches(got[key], want[key]) for key in want})
         mine = state.tracers.log_rows()
         row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
         report[case["name"]] = row
@@ -1176,3 +1284,39 @@ def thermo_profile_mismatches(want: np.ndarray, n_max: int = THERMO_LAYERS) -> d
 
 def load_thermo_profiles(fixture_dir: Path = FIXTURE_DIR) -> np.ndarray:
     return np.load(fixture_dir / "init-thermo-r8.npy")
+
+
+def oracle_step_abort(log: dict) -> tuple[int, int | None, str | None]:
+    """The oracle's column step outcome as :func:`woof.hex.mpas_seaice.column_step_v842.run`
+    returns it: the ierr, and for an abort the first aborting cell's
+    ``indexToCellID`` and the stage's logged error."""
+    ierr = log["tracer_object"]["IERR"][0]
+    if not ierr:
+        return 0, None, None
+    lines = log["log"]
+    message = next(line for line in lines if line.startswith("ERR column_"))[len("ERR "):]
+    cell = int(lines[lines.index("ERR iCell: $i") + 1].split()[1])
+    return ierr, cell, message
+
+
+def measure_step(reference: dict | None = None, logs: dict | None = None, *, rows=STEP_CASES,
+                 fixture_dir: Path = STEP_FIXTURE_DIR) -> dict[str, dict[str, int]]:
+    """Per column-step case: the words the GPU gets wrong per field (an
+    aborting case's too), whether its abort (ierr, first aborting cell,
+    message) differs from the oracle's, whether its graded warning lines
+    (the ITD's and the ridging's) do, and the tracer object's integers that
+    differ."""
+    reference = load_fixture(fixture_dir) if reference is None else reference
+    logs = load_logs(fixture_dir) if logs is None else logs
+    report: dict[str, dict[str, int]] = {}
+    for case in cases("r8", rows):
+        log = logs[case["name"]]
+        got, state = run_gpu(case)
+        row = {"abort": int(tuple(state.abort) != oracle_step_abort(log)),
+               "warnings": int(state.warnings != oracle_ridge_warnings(log))}
+        want = expected_outputs(case, reference.get(case["name"], {}))
+        row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        mine = state.tracers.log_rows()
+        row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
+        report[case["name"]] = row
+    return report

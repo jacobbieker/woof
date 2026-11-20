@@ -361,7 +361,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     surface and conductive fluxes, the ice velocity in the boundary layer
     (a vertex's u and no v), CCSM3's absorbed shortwave over `ncat`
     layers, and the delta-Eddington's infinite extinction in ice without
-    volume. The elastic subcycles check
+    volume. The column package's part of the time step chains these over
+    several steps, word for word with v8.4.2: the diagnostics' and fluxes'
+    re-initialisations, the pre-dynamics (shortwave preparation, vertical
+    and ITD thermodynamics), the column dynamics (ridging), the
+    post-dynamics (shortwave and coupling preparation) and the stop on an
+    abort, with the day and time read from the step's clock
+    (`column_step_v842`; the coupled step with the velocity solver is
+    still refused). The elastic subcycles check
     their arrays once per solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
@@ -1108,14 +1115,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   ~10^5 observations takes 3.1 s on an M3 Max (Metal) and 3.2-4.5 s on a shared
   A6000 (targets 20 s and 5 s; the tutorial case: 1.4 s and 2.3 s), with
   H' and H'^T on the device as an ordered gather (no atomics).
-  `woof.da.var.hybrid` (experimental, Python API) adds WRFDA's hybrid
-  3DEnVar: the alpha control variable with its `alpha_corr_scale`
+  Hybrid 3DEnVar (experimental; `woof var --ensemble-member ... --je-factor`,
+  or `woof.da.var.hybrid` from Python) adds WRFDA's: the alpha control variable with its `alpha_corr_scale`
   recursive filter and vertical localisation (`alpha_vertloc_opt`), blended
   with the static `B` through `je_factor`/`jb_factor`, from WRFDA `ep` files
   or ensemble members already on the device. On the tutorial case with ten
   members it follows a compiled WRFDA 4.7.1 hybrid run's 50 iterations to
   3.5e-14 relative; the oracle tier gives the reference's words on the
   device and the production tier one digest under fast and strict numerics.
+  The `woof var` door makes the perturbations from members' history files
+  as WRFDA's `gen_be_ep2` does (to 2.8e-13 K in `t`; the rest word for
+  word). Its analysis matches WRFDA's `wrfvar_output` to O7's tolerances:
+  max |difference| at most 4.7e-5 of the RMS.
   `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
   `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
   ensemble members minus their mean): WRFDA's gen_be stages for

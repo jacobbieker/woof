@@ -52,7 +52,25 @@
 !   init_shortwave
 !                 colpkg_init_thermo, then seaice_init_column_shortwave(domain,
 !                 clock) (the orbit for the delta-Eddington shortwave,
-!                 column_radiation at initialisation and the albedos).
+!                 column_radiation at initialisation and the albedos);
+!   column_step   colpkg_init_thermo, init_column_itd and, for the
+!                 delta-Eddington shortwave, colpkg_init_orbit (as seaice_init
+!                 runs them), then oracle_n_steps times the column package's
+!                 part of seaice_core_run (mpas_seaice_core.F,
+!                 mpas_seaice_time_integration.F:42-174,240-256): from the
+!                 second step on seaice_timestep_finalize's
+!                 seaice_column_reinitialize_fluxes, then the clock advanced,
+!                 seaice_column_reinitialize_diagnostics_thermodynamics and
+!                 _bgc, seaice_column_predynamics_time_integration,
+!                 config_dynamics_subcycle_number times
+!                 seaice_column_reinitialize_diagnostics_dynamics and
+!                 seaice_column_dynamics_time_integration (the velocity solver
+!                 and the advection between them are the dynamics' step, not
+!                 run here), and seaice_column_postdynamics_time_integration
+!                 (the shortwave and seaice_column_coupling_prep).  The last
+!                 step is not finalized, so the stream carries the fluxes the
+!                 coupler reads.  Each step returns on ierr > 0 as
+!                 seaice_timestep does; ierr is logged as above.
 !
 ! The Registry struct alternative_atmos_forcing is longer than the stream's
 ! 24-character pool names; the stream spells it 'alternative_atmos_forcin'
@@ -84,7 +102,9 @@ program run_column
   character(len=StrKIND), pointer :: shortwaveType
   logical :: orbitAbort
   character(len=StrKIND) :: orbitMessage
-  integer :: p, logUnit, ierr
+  integer :: p, logUnit, ierr, iStep, iSubcycle
+  integer, pointer :: nSteps, nSubcycles
+  logical, pointer :: useShortwave
   integer, pointer :: nIceLayers
   real(kind=RKIND), allocatable :: sprofile(:)
   character(len=1024) :: inPath, outPath, logPath
@@ -176,6 +196,38 @@ program run_column
      allocate(sprofile(nIceLayers + 1))
      call colpkg_init_thermo(nIceLayers, sprofile)
      call seaice_init_column_shortwave(domain, domain % clock)
+  case ('column_step')
+     call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nIceLayers', nIceLayers)
+     allocate(sprofile(nIceLayers + 1))
+     call colpkg_init_thermo(nIceLayers, sprofile)
+     call init_column_itd(domain)
+     call mpas_pool_get_config(pools % configs, 'config_shortwave_type', shortwaveType)
+     call mpas_pool_get_config(pools % configs, 'config_use_column_shortwave', useShortwave)
+     if (useShortwave .and. trim(shortwaveType) == 'dEdd') then
+        call colpkg_init_orbit(orbitAbort, orbitMessage)
+        if (orbitAbort) then
+           print *, 'run_column: colpkg_init_orbit: ', trim(orbitMessage)
+           stop 3
+        end if
+     end if
+     call mpas_pool_get_config(pools % configs, 'oracle_n_steps', nSteps)
+     call mpas_pool_get_config(pools % configs, 'config_dynamics_subcycle_number', nSubcycles)
+     ierr = 0
+     steps: do iStep = 1, nSteps
+        if (iStep > 1) call seaice_column_reinitialize_fluxes(domain)
+        call mpas_advance_clock(domain % clock)
+        call seaice_column_reinitialize_diagnostics_thermodynamics(domain)
+        call seaice_column_reinitialize_diagnostics_bgc(domain)
+        call seaice_column_predynamics_time_integration(domain, domain % clock, ierr)
+        if (ierr > 0) exit steps
+        do iSubcycle = 1, nSubcycles
+           call seaice_column_reinitialize_diagnostics_dynamics(domain)
+           call seaice_column_dynamics_time_integration(domain, domain % clock, ierr)
+           if (ierr > 0) exit steps
+        end do
+        call seaice_column_postdynamics_time_integration(domain, domain % clock)
+     end do steps
+     call write_ints('IERR', [ierr])
   case default
      print *, 'run_column: unknown oracle_stage ', trim(stage)
      stop 2
