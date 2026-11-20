@@ -965,7 +965,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   thickness types, with the same accepted observations as WRFDA and its
   initial cost `J_0` on the tutorial case, and their linearised operators
   and adjoints.
-  There is no analysis command yet. Section 11 plans geostationary imager
+  `woof var --be be.dat --obs ob.ascii --first-guess wrfinput_d01 --out
+  BUNDLE` (experimental) runs the whole 3D-Var and writes a
+  `wrf-analysis-bundle/1` that `woof run --analysis BUNDLE` starts from
+  ([docs/var.md](docs/var.md)). On the tutorial case it takes the same 29
+  iterations as WRFDA, with every logged cost and gradient within 1e-14
+  relative, and its analysis rounds to WRFDA's `wrfvar_output` word for word.
+  `--tier oracle` runs on CUDA or Metal with the same words;
+  `--tier production` (binary32) gives one digest on both. Section 11 plans geostationary imager
   radiances for initial conditions: Google's SatWeave mosaic and the native
   GOES ABI, Himawari AHI and Meteosat imagers, through an opt-in CRTM into
   the LETKF first and into 3D-Var later. Default runs are not changed.

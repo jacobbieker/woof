@@ -1840,7 +1840,9 @@ PNG it writes carries an `experimental` stamp.
   `tests/data/wrfda471/manifest.json` records the `be.dat` hash and the
   gate digests. No WRFDA data file is committed.
 - **Scope**: experimental; nothing here is on a forecast path
-  (`tests/test_var_import_graph.py`).
+  (`tests/test_var_import_graph.py`): only the `woof var` door
+  (`woof/var_cli.py`) imports it, and its analysis reaches a forecast only as
+  a `wrf-analysis-bundle/1` read by `woof run --analysis`.
 
 ## Attribution defects in this repository's own history (2026-07-26)
 
