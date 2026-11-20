@@ -2723,6 +2723,17 @@ Takes no options of its own.
 | `--table` | write gpuwm-obs.table.v2 CSV here (for the ensemble filter) |
 | `--thin-km` | keep one AMV per box of this size and 50 hPa layer (highest QI) and one scatterometer wind per box; 0 (the default) keeps them all |
 
+## `woof obs wis2 radiances`
+
+| option | what it does |
+|---|---|
+| `--bbox ('SOUTH', 'NORTH', 'WEST', 'EAST')` | _(the parser declares no help text for this option)_ |
+| `--end` | window end, ISO 8601 UTC |
+| `--instruments` | comma list of amsua, mhs, atms |
+| `--out` | directory for <instrument>.npz and receipt.json |
+| `--snapshot` | read this Icechunk snapshot id instead of main's head |
+| `--start` | window start, ISO 8601 UTC |
+
 ## `woof ocean`
 
 | option | what it does |

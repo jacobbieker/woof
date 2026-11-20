@@ -143,10 +143,34 @@ The reference is a serial GNU WRFDA 4.7.1 on the WRFDA tutorial case:
   - The minimiser's `J` and `|g|` are within 1.5e-15 of WRFDA's. The float32
     analysis is still WRFDA's words.
 
+## Desroziers diagnostics
+
+`woof.da.var.desroziers` (plan gate G4a, tests in `tests/test_var_desroziers.py`). `run` solves the
+cost twice, once as is and once with Gaussian noise `sigma z` on the observations, and gives:
+
+- WRFDA's randomised-trace table (`da_tune_obs_desroziers`): per type and variable the trace
+  `Tr(HK) = sum (y_p - y) z / sigma`, the expected `Jo = (n - Tr(HK)) / 2`, the actual `Jo` and the error
+  factor `sqrt(Jo_actual / Jo_expected)`, with the totals. `format_report` prints it as the tool does.
+- The classic O-B / O-A / A-B statistics (`classic`): `<(O-A)(O-B)>` against the specified error variance and
+  `<(A-B)(O-B)>` for `H B H^T`.
+
+On the tutorial (the noise is read from WRFDA's `rand_obs_error`, so both use one draw), against the tool
+run on WRFDA's own runs (`tools/wrfda_oracle/run_desroziers.sh`):
+
+- all 210 numbers of the table and the totals agree with the tool to 3e-5 absolute plus 1e-6 relative (it
+  prints five decimals and sums in binary32; at most 2e-5 apart measured);
+- `H'(xhat)` agrees with WRFDA's `unpert_obs` to the file's seven digits (4e-7 of the largest value);
+- the classic statistics agree with those computed from WRFDA's own `gts_omb_oma` O-B and O-A, within the
+  file's printed precision.
+
+On the tutorial the specified errors are too small for the wind, too large for scatterometer, satellite
+thickness and GNSS refractivity: the error factors range from 0.34 (satem) to 1.95 (ships v), and the total
+`Jo` factor is 0.978. These tune `R` only; `Jb` has the tool's own `NaN` factor here because 4.7.1 does not
+print `Jb factor used`.
+
 ## Not yet
 
 - Radar, GOES, radiances and hybrid 3DEnVar (plan sections 6-11).
-- Desroziers diagnostics (plan G4a).
 - `cv_options` other than 5.
 - WRFDA's `A2C`, `var4d` and cloud control variables; pseudo-observations other than `u`, `v`, `t`, `q`.
 - Nested domains.

@@ -1157,6 +1157,19 @@ physically shaped. Over a 10-day cycle on one woof domain, the analysis
 fits independent observations no worse than with WRFDA's tutorial-style
 default `B`.
 
+*Status (2026-11-20):* V2.1-V2.3 for cv5 and cv7, `bin_type` 5
+(`woof/da/var/gen_be.py`, `tests/test_var_gen_be.py`). WRFDA's gen_be is
+linked from the pinned build's objects (`tools/wrfda_oracle/link_gen_be.sh`,
+the stock link line lacks `-lnetcdff`) and run on the 20 sample forecasts
+(`run_gen_be.sh`). Measured: regressions within 1.0e-7, eigenvalues 5.5e-8,
+length scales 7.4e-8 (cv5; `fft661`'s tables use `pi = 3.1415926`, woof's
+sine transform is exact) and 3e-12 with identical length scales (cv7).
+WRFDA's tutorial 3D-Var with the woof-made cv5 file: final J 21497.748
+against 21497.749 with WRFDA's, 30 iterations each, increments within 2e-6
+of the largest (binary32 output); woof's 3D-Var with the woof-made file
+reproduces that WRFDA log. Open: other `bin_type`s and cv6, a device tier,
+the single-observation and 10-day cycling parts of GV2.
+
 ### V3. Hybrid 3DEnVar with the LETKF ensemble (3-4 w)
 
 | PR | content | effort |
@@ -2428,6 +2441,65 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
 4. **PR D: MW radiances.** CRTM v2.4 MW clear-sky for AMSU-A, MHS and
    ATMS (FY-3 where coefficients exist), over sea first, through
    `obs_radiance`. IASI and CrIS come after, with a channel selection.
+   As built (reader `woof obs wis2 radiances`, adapter `woof.da.obs_mw`,
+   LETKF only):
+   - Groups `satellite/amsua`, `mhs` and `atms`, windowed as in PR C. The
+     store's `quality_flag` and per-channel quality refuse rows or
+     channels, and so does a BT outside 100-340 K. A field of view must be
+     inside the scan and the sensor zenith at most 65 degrees. Copies
+     (satellite, time, field of view, location) are one footprint, first
+     arrival. The scan angle is `(fov - (n+1)/2) x step`.
+   - Satellites map to CRTM sensors by BUFR id: Metop-B and -C
+     (`amsua_`/`mhs_metop-b`, `-c`), S-NPP `atms_npp`, NOAA-20 `atms_n20`
+     and NOAA-21 `atms_j2`. The reader also maps Metop-A, NOAA-15, -18
+     and -19, and Aqua. A satellite with no CRTM sensor is counted and
+     refused by the reader. A sensor whose coefficients CRTM has not
+     opened is counted and refused by the adapter. WIS2 has none of those
+     older platforms in this window. FY-3 (`mwts2`, `mwhs2`, `mws`) waits
+     for coefficients.
+   - A missing per-channel quality value does not refuse the channel.
+     Only a set one does.
+   - Coefficients come from CRTM's REL-2.4.1 fix tarball, kept outside
+     the repository: ODAS TauCoeff for AMSU-A and MHS on Metop-B and -C
+     and for `atms_npp`, ODPS for `atms_n20` and `atms_j2`, SpcCoeff for
+     all seven, FASTEM6 and the MW water LUT. The tarball's
+     `amsua_metop-b.SpcCoeff.bin` says version 3 in its header but has
+     the version-2 record layout. CRTM refuses to read it until byte 20
+     is patched to 2.
+   - The adapter keeps open sea only: the mean column has no land, sea
+     ice or snow. It runs H(x) per member and one Jacobian on the mean.
+     It applies WRFDA's channels and errors (`radiance_info`: AMSU-A 5-9,
+     MHS 3-5, ATMS 6-10 and 18-22) and WRFDA's v4.7.1 screens. Those
+     are scan edges, the scattering index, background cloud liquid of
+     0.2 kg/m2 (when the caller passes it), and 15 K and 3 sigma
+     departures. Each channel sits at its Jacobian peak; a channel
+     peaking in the model's top layer is refused. Metop-B AMSU-A channel
+     15 is dead, so where the scattering index cannot be formed GSI's
+     channel 1-2 cloud liquid retrieval (0.2 kg/m2) stands in. An ATMS
+     screen that cannot be formed refuses its channels. The scattering
+     indices use the raw observations. ATMS's O-B screens use the
+     bias-corrected departure, which is WRFDA's `tb_inv`.
+   - Thinning keeps the nearest footprint to every `thin`-th column.
+     Limb footprints, and footprints with no valid channel, are left out
+     first, so they never take a column that a neighbour could serve.
+   - On 2026-10-28 11-13Z globally the reader passes 55,455 AMSU-A,
+     656,513 MHS and 1,083,892 ATMS footprints. CRTM on the GEFS control
+     (f006, 0.5 degree), at sea within 55 degrees of the equator and
+     after the screens, gives these O-B values:
+     - AMSU-A channels 5-9: means of -1.4 to +0.4 K and standard
+       deviations of 0.23-0.33 K. The exception is Metop-C channel 8, at
+       3.3 K: that channel is noisy, and the 3-sigma check (0.81 K) refuses its
+       outliers.
+     - MHS: standard deviations of 1.9-2.1 K.
+     - ATMS channels 6-10: standard deviations of 0.22-0.43 K and means
+       of -1.2 to +0.2 K.
+     - ATMS channels 18-22: standard deviations of 1.6-2.2 K.
+
+     These sit near WRFDA's errors. The means are the static bias
+     correction's job (`bias_k`).
+   - The 3D-Var radiance term (an `ObsTerm` in `woof/da/var/cost.py`)
+     needs the CRTM layer Jacobians mapped onto the increment grid. It is
+     plan V4, not this PR.
 5. **PR E: GNSS-RO refractivity.** The local 1-D operator is the existing
    one; the reader and the WRFDA gpsref error are new. Bending angle comes
    later, if warranted. As built (opt-in family `ro`):

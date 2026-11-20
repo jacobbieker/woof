@@ -9,17 +9,24 @@
 # WRFVAR1 / WRFVAR5 / WRFVAR15 / WRFVAR19 (optional) are comma-terminated namelist lines inserted into
 #        &wrfvar1 / &wrfvar5 / &wrfvar15 / &wrfvar19, e.g. WRFVAR15='num_pseudo=1,pseudo_x=45.3,' WRFVAR19='pseudo_var="t",'
 #        (the single-observation tests; use TREE=WRFV4.7.1, the undumped build).
-# usage: [DUMP=1] [WRFVAR1=...] [WRFVAR5=...] [WRFVAR15=...] [WRFVAR19=...] run_tutorial.sh NAME [extra wrfvar10 settings, e.g. test_transforms=true,]
+# BE=FILE uses FILE (an existing path inside the container; it is resolved before the run directory is
+#        reset, and must not be inside $W/run/NAME) instead of the tutorial be.dat.  The tutorial namelist is
+#        cv_options=5, so FILE must be a cv5 be.dat (run_gen_be.sh 5), not a cv7 one.
+# usage: [DUMP=1] [BE=FILE] [WRFVAR1=...] [WRFVAR5=...] [WRFVAR15=...] [WRFVAR19=...] run_tutorial.sh NAME [extra wrfvar10 settings, e.g. test_transforms=true,]
 set -eux
 NAME=${1:?usage: run_tutorial.sh NAME [extra wrfvar10 settings]}
 EXTRA=${2:-}
 case "$NAME" in */*|.*) echo "NAME must be a plain directory name" >&2; exit 2;; esac
 case "$EXTRA" in */*|*\&*|*\\*) echo "extra settings must not contain / & or \\" >&2; exit 2;; esac
 W=${W:-/d/scratch/wrfda}; W=$(cd "$W" && pwd); S=$W/src/${TREE:-WRFV4.7.1}; D=$W/data; R=$W/run/$NAME
+BE_SRC=${BE:-$D/be/be.dat}
+[ -f "$BE_SRC" ] || { echo "BE file $BE_SRC not found" >&2; exit 2; }
+BE_SRC=$(cd "$(dirname "$BE_SRC")" && pwd)/$(basename "$BE_SRC")
+case "$BE_SRC" in "$R"/*) echo "BE must not be inside the run directory $R (it is deleted first)" >&2; exit 2;; esac
 rm -rf "$R"; mkdir -p "$R"; cd "$R"
 ln -sf "$S/var/build/da_wrfvar.exe" .
 ln -sf "$S/run/LANDUSE.TBL" .
-cp "$D/be/be.dat" be.dat
+cp "$BE_SRC" be.dat
 cp "$D/ob/2008020512/ob.ascii" ob.ascii
 cp "$D/rc/2008020512/wrfinput_d01" fg
 NL=$S/var/test/tutorial/namelist.input
