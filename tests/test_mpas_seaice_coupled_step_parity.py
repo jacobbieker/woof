@@ -122,7 +122,7 @@ def test_fixture_covers_the_branches():
 @pytest.mark.parametrize("overrides, knob", [
     ({"config_ratio_ridging_work_to_PE": 15.0}, "config_ratio_ridging_work_to_PE"),
     ({"config_use_column_biogeochemistry": True}, "config_use_column_biogeochemistry"),
-    ({"config_use_ocean_mixed_layer": True}, "config_use_ocean_mixed_layer"),
+    ({"config_use_ocean_mixed_layer": True, "config_atmos_boundary_method": "constant"}, "atmo_boundary_const"),
     ({"config_use_vertical_tracers": True}, "config_use_vertical_tracers"),
     ({"config_stress_divergence_scheme": "weak"}, "config_stress_divergence_scheme"),
 ])

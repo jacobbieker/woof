@@ -67,7 +67,8 @@ Refused by name: upwind advection (v8.4.2 cannot run it), a periodic
 planar mesh under advection, forcing, the weak-form stress divergence, the
 unit tests, a restart start, halo exchanges, and what the column step
 refuses (the column biogeochemistry, the vertical snow and ice tracers, the
-ocean mixed layer). ``seaice_check_state`` changes no state and is not run.
+ocean mixed layer's constant boundary layer). ``seaice_check_state`` changes
+no state and is not run.
 """
 from __future__ import annotations
 

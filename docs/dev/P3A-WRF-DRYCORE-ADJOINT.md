@@ -591,6 +591,7 @@ Each step is one small PR, taken to merged before the next widens.
    w = Window(state, cfg, nsteps, dtype=np.float64, checkpoint_every=1)
    xN = w.forward(x0=None)                 # base; keeps the checkpoints
    dx = w.tl(dx0, save_at=(k1, k2, ...))   # {k: dx_k}, always with nsteps
+   dx = w.tl({n: g[n] for n in WRFDA_TL_START}, partial=True)  # WRFDA's start
    ax0 = w.ad(ax_final=None, forcing={k: ax_obs_k})
    ```
 
@@ -599,12 +600,32 @@ Each step is one small PR, taken to merged before the next widens.
      state after k steps. `forcing[k]` is added to the adjoint of state k
      before the sweep goes on backwards, which is where a 4D-Var
      observation term at that time enters.
+   - `tl(dx0, partial=True)` lets `dx0` name any subset of STEP_INPUTS;
+     the rest start at zero. This is WRFDA's TL start: in
+     `da_transfer_xatowrftl` the prognostics are perturbed but phi'
+     (`g_ph_2 = 0`), and g_p is perturbed too.
+     - `WRFDA_TL_START` names those inputs. g_p goes into both `p` and
+       `p_pert`.
+     - `muts` takes g_mu. WRFDA's window starts cold, from `start_em`'s
+       `muts = mub + mu'`.
+     - So the `p`/`p_pert` tangents are one array, and so are the
+       `mup`/`muts` tangents. Their adjoints sum: the adjoint of g_p is
+       `adj["p"] + adj["p_pert"]`, and that of g_mu is
+       `adj["mup"] + adj["muts"]`.
+     - `wrfda_tl_start(g)` builds the start from g over
+       `WRFDA_TL_FIELDS`. `wrfda_tl_start_ad(adj)` is its adjoint. A dot
+       test pins the pair.
+     - `partial=True` with an empty `dx0` is refused.
+     - The adjoint of the zero fill is a restriction, so a caller takes
+       the same names from `ad`'s result. A dot test pins this.
+     - An incomplete dict without `partial`, or a name outside
+       STEP_INPUTS, is refused by name.
    - The window refuses whatever `step_geometry` refuses, and names it.
-     Map factors (8e) and specified boundaries (8f) are bound. On a
-     specified domain the state also carries the mu halo, and the
+     Map factors (8e, #723) and specified boundaries (8f) are bound. On
+     a specified domain the state also carries the mu halo, and the
      interval's boundary tables are window parameters (`Window.params`):
-     `tl` takes their perturbation in `dx0`, and `ad` returns their
-     adjoint with state 0's.
+     `tl` takes their perturbation in `dx0` (with or without
+     `partial`), and `ad` returns their adjoint with state 0's.
    - Checkpoints hold a state's STEP_INPUTS only. A step reads nothing
      else its predecessor wrote: it writes its scratch before reading
      it. A test pins this. With every other written array poisoned with

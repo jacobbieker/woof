@@ -1,0 +1,17 @@
+{
+ "abort_atm_lfrin": "(seq_frac_check) [atm set] ERROR aborting",
+ "abort_atm_sum": "(seq_frac_check) [atm set] ERROR aborting",
+ "abort_atm_sum_float32_eps": "(seq_frac_check) [atm set] ERROR aborting",
+ "abort_i2x_without_si_ifrac": "MCT(MPEU)::m_List::get_indices_:: FATAL--item \"Si_ifrac\" not found.",
+ "abort_ice_bound": "(seq_frac_check) [ice set] ERROR aborting",
+ "abort_ice_float32_eps": "(seq_frac_check) [ice set] ERROR aborting",
+ "abort_ice_gfrac": "(seq_frac_check) [ice set] ERROR aborting",
+ "abort_ice_lfrin": "(seq_frac_check) [ice set] ERROR aborting",
+ "abort_nan_beside_bound": "(seq_frac_check) [ice set] ERROR aborting",
+ "abort_ocn_bound": "(seq_frac_check) [ocn set] ERROR aborting",
+ "abort_ocn_gfrac": "(seq_frac_check) [ocn set] ERROR aborting",
+ "abort_ocn_lfrin": "(seq_frac_check) [ocn set] ERROR aborting",
+ "abort_ocn_rfrac": "(seq_frac_check) [ocn set] ERROR aborting",
+ "abort_ocn_wfrac": "(seq_frac_check) [ocn set] ERROR aborting",
+ "abort_ocn_zfrac": "(seq_frac_check) [ocn set] ERROR aborting"
+}

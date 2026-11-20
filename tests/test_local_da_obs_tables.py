@@ -47,6 +47,21 @@ def columns():
     return result
 
 
+@pytest.fixture
+def isobaric_bridge():
+    """The RO operator reads pressure between layer interfaces through the
+    Rust isobaric-height library: skip, naming it, when it is not built and
+    WOOF_ISOBARIC_BRIDGE is unset (a set but missing path still fails)."""
+    import os
+    from woof import isobaric_bridge as ib
+    if os.environ.get(ib.ISOBARIC_BRIDGE_ENV):
+        return
+    try:
+        ib.resolve_isobaric_bridge()
+    except FileNotFoundError as exc:
+        pytest.skip(str(exc).split("; searched")[0] + f" (woof fetch-bridges, or set {ib.ISOBARIC_BRIDGE_ENV})")
+
+
 def adapt(rows, **kw):
     defaults = dict(states=[{}, {}], setup={}, grid=grid(), analysis_time=T,
                     analysis_times=[T, T + timedelta(minutes=15)], columns=columns())
@@ -164,7 +179,7 @@ def _eta_column(nz=24, psfc=100000., p_top=5000., scale_height=7600.):
     return g, [col, col], np.diff(znw), (psfc, scale_height)
 
 
-def test_refractivity_pressure_is_read_between_layer_interfaces():
+def test_refractivity_pressure_is_read_between_layer_interfaces(isobaric_bridge):
     """THE 2.8.6 DEFECT, pinned: with the eta layer thicknesses the RO
     operator's pressure at the tangent height is the column's own; the
     layer-mean heights it used without them put each mass-level pressure
@@ -183,7 +198,7 @@ def test_refractivity_pressure_is_read_between_layer_interfaces():
     assert paired[0].simulated[(0, *idx)] > truth * (1 + 1e-4)
 
 
-def test_refractivity_tangent_height_is_geometric_and_converted_to_geopotential():
+def test_refractivity_tangent_height_is_geometric_and_converted_to_geopotential(isobaric_bridge):
     """A tangent height is geometric (above mean sea level); z_w is
     geopotential height.  As WRFDA's da_msl2geo1, the operator converts:
     at 45 N and 25 km the geopotential is about 100 m lower, and N there

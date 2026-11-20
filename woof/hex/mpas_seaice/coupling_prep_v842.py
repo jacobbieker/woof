@@ -5,6 +5,10 @@
 ``seaice_column_postdynamics_time_integration`` does each step when the column
 package is on. It works per cell over ``nCellsSolve``:
 
+- under ``config_use_ocean_mixed_layer`` (the Registry default) it first
+  runs the stand-alone ocean mixed layer
+  (:func:`woof.hex.mpas_seaice.ocean_mixed_layer_v842.ocean_mixed_layer`,
+  RKIND 8 and the LGPL libm opt-in only);
 - it saves the freezing/melting potential;
 - it sums the category albedos (and the bare-ice, snow and pond albedos where
   the sun is up) and the effective pond area into the cell values, weighting
@@ -29,11 +33,8 @@ with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
 
 Refused by name:
 
-- ``config_use_ocean_mixed_layer`` (``seaice_column_ocean_mixed_layer``:
-  ``colpkg_atm_boundary``'s stability iteration and
-  ``colpkg_ocn_mixed_layer``, not ported). Its Registry default is
-  ``.true.`` for stand-alone runs. A run coupled to an ocean model turns it
-  off, because the ocean supplies the sea surface.
+- what :mod:`~woof.hex.mpas_seaice.ocean_mixed_layer_v842` refuses, under
+  ``config_use_ocean_mixed_layer``;
 - ``config_use_column_biogeochemistry`` (the BGC ocean fluxes, not ported).
 """
 from __future__ import annotations
@@ -121,11 +122,8 @@ def _config(configs: dict, name: str):
 def check_config(configs: dict) -> None:
     """Refuse, by name, what this port does not carry."""
     if _config(configs, "config_use_ocean_mixed_layer"):
-        raise ConfigurationRefusal(
-            knob="config_use_ocean_mixed_layer", value=True,
-            reason="seaice_column_ocean_mixed_layer (colpkg_atm_boundary's stability iteration and "
-                   "colpkg_ocn_mixed_layer) is not ported; a run coupled to an ocean turns it off",
-            declaration="config_use_ocean_mixed_layer = .false.")
+        from . import ocean_mixed_layer_v842 as oml
+        oml.check_config(configs)
     if _config(configs, "config_use_column_biogeochemistry"):
         raise ConfigurationRefusal(
             knob="config_use_column_biogeochemistry", value=True,
@@ -143,6 +141,9 @@ def coupling_prep(*, pools: dict, n_cells_solve: int, n_cells_solve_aggregate: i
     tracers_aggregate's (the same by default). ``dt`` is ``config_dt``.
     """
     check_config(configs)
+    if _config(configs, "config_use_ocean_mixed_layer"):
+        from . import ocean_mixed_layer_v842 as oml
+        oml.ocean_mixed_layer(pools, {**configs, "config_dt": dt}, n_cells_solve)
     sw, oc, of, ac = pools["shortwave"], pools["ocean_coupling"], pools["ocean_fluxes"], pools["atmos_coupling"]
     area_category = pools["tracers"]["iceAreaCategory"]
     precision = _precision_of(area_category)

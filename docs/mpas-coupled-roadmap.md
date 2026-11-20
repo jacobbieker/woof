@@ -162,9 +162,14 @@ Ordered by how self-contained each piece is:
    `woof/hex/mpas_seaice/coupling_prep_v842.py`,
    `tests/test_mpas_seaice_coupling_prep_parity.py`). Cut out of
    `mpas_seaice_column.F`, the two routines compile at RKIND 4 too, so this
-   piece is word-exact at both precisions. It calls no libm. The ocean mixed
-   layer (`config_use_ocean_mixed_layer`, `.true.` in the Registry, off when
-   coupled to an ocean) and the column biogeochemistry are refused by name.
+   piece is word-exact at both precisions. It calls no libm. The stand-alone
+   ocean mixed layer it runs first (`config_use_ocean_mixed_layer`, `.true.`
+   in the Registry, off when coupled to an ocean:
+   `seaice_column_ocean_mixed_layer`, the open ocean's `atmo_boundary_layer`
+   and `colpkg_ocn_mixed_layer`) is ported at RKIND 8, word-exact alone and
+   inside the column step (`woof/hex/mpas_seaice/ocean_mixed_layer_v842.py`,
+   `tests/test_mpas_seaice_ocean_mixed_layer_parity.py`; glibc's atan opt-in).
+   The column biogeochemistry is refused by name.
    Also ported: the column part of the time step (the diagnostics' and
    fluxes' re-initialisations, `seaice_column_predynamics_time_integration`,
    `_dynamics_` and `_postdynamics_`, over several steps on the clock's day
@@ -306,7 +311,15 @@ matched exchange unless asked.
    are refused by name.
 2. The fractions on the ocean grid (`seq_frac_set`, `ifrac`/`ofrac` from the
    ice's `Si_ifrac`) and the radiative fractions (`ifrad`/`ofrad`, from
-   `seq_flux_ocnalb_mct`). Still to port.
+   `seq_flux_ocnalb_mct`). `seq_frac_set` is ported
+   (`woof/hex/coupled/seq_frac_e3sm.py`, `tests/test_e3sm_seq_frac_parity.py`):
+   the ice grid's fractions from `Si_ifrac` and the domain's `frac`, their
+   maps to the ocean and atmosphere grids through `seq_map_map` (copy,
+   rearrangement, or the sparse matrix multiply in MCT's element order) and
+   `seq_frac_check`'s stops (or, with dead models, its reports), real(r8),
+   on CUDA and Metal, against the routines compiled verbatim on the pinned
+   MCT. Its eps is E3SM's single-precision `1.0e-02`. The radiative
+   fractions are still to port.
 3. The atmosphere/ocean fluxes, `xao` (`seq_flux_atmocn_mct`, `shr_flux_atmocn`).
    Still to port.
 4. The ocean's and the sea ice's import and export
@@ -323,7 +336,23 @@ matched exchange unless asked.
    DMS, MacroMolecules and CFC tracers are refused by name, and so are the
    cases E3SM writes or reads out of bounds (the active-wave stress without
    the waves two ways, an o2x field it writes but the list lacks,
-   `nGlcZLevels` above `glc_nzoc`). The sea ice's: still to port.
+   `nGlcZLevels` above `glc_nzoc`). The sea ice's is ported
+   (`woof/hex/coupled/ice_coupling_e3sm.py`,
+   `tests/test_e3sm_seaice_coupling_parity.py`): `mpassi_cpl_indices_set`
+   with MCT's stops, `ice_import_mct` (Icepack's sea freezing temperature
+   for every `tfrz_option`, `frazil_mass` with the mush liquidus and
+   enthalpy or BL99's, the aerosols bulk and modal, the z-aerosols, the
+   waves two ways) and `ice_export_mct` (the fraction, basal pressure with
+   the ponds, the stresses rotated back to the geographic grid, the fluxes
+   with the frazil adjustment, icebergs, floe size), real(r8), on CUDA and
+   Metal, against the routines compiled verbatim with the pinned Icepack.
+   The rotation's sin/cos/asin/atan2 are glibc's in E3SM: the port takes
+   their words as an input (the tests feed the oracle's), and
+   `rotation_trig` makes them with the host libm (the oracle's words under
+   glibc 2.44, the release they were recorded with; elsewhere it warns).
+   The coupled column biogeochemistry, the z-aerosols coupled without it
+   (E3SM reads through an unset pool pointer) and `nFrequencies` above
+   `wav_nfreq` are refused by name.
 5. The coupled ocean + sea-ice step on `woof/hex/coupled`, with the exchange
    checked against the E3SM merge. The sea ice's time step with the
    column package is ported (above); the coupled step is not built yet.

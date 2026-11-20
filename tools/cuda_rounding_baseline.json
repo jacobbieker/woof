@@ -982,6 +982,14 @@
     "status": "resolved_literal"
    },
    {
+    "call_sha256": "58157752011a885afce536cbb74503f07e703f1553fdd7fca52023886f433cef",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "00fbc4b11bfc0e23d11a6eabd5c4a53f9eb02194eb5d75625af77aaad0879e08",
+    "file": "woof/hex/coupled/seq_frac_e3sm.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "599e4c79e242352babc83992c23e3fc52b6fb7fe3e6e82ed5fdbed1416b0c87f",
     "constructor": "RawModule",
     "factory": "load_module",
@@ -1331,6 +1339,14 @@
     "factory": "_module",
     "factory_sha256": "3b6e4593d8aa0e4acdb957a9119601018c460aa73e62795e9c42552c87dd0fbd",
     "file": "woof/hex/mpasphys/kain_fritsch_v842.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "7e7512e17a3e58b41145817ab9b68ca8a21af02ca1b97b14a29b318a2984ab84",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "012c92d118a74349dd446a298faf7f00d229d6c92d0c86f1e45b05b26aec0b41",
+    "file": "woof/hex/coupled/ice_coupling_e3sm.py",
     "status": "unresolved"
    },
    {
@@ -4884,12 +4900,20 @@
     "sha256": "15c9587672645d5cc887280064a8d7722c72a566c17da8e4c4d5c340dd12f076"
    },
    {
+    "file": "woof/hex/coupled/ice_coupling_e3sm.cu",
+    "sha256": "ecff73adad07a1f455bca91e95148c54f05360b907a3fd0ae8c9caae7913ffdb"
+   },
+   {
     "file": "woof/hex/coupled/ocn_coupling_e3sm.cu",
     "sha256": "7eb1bcd641ea5ac79d59ff2012535e1c302dc196c34e8d1cbe1161541d206ce3"
    },
    {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.cu",
     "sha256": "34b752cd152fd8a3fb699ce182480d6a8eccc8b4eb44fcaa8f4f6f2559994418"
+   },
+   {
+    "file": "woof/hex/coupled/seq_frac_e3sm.cu",
+    "sha256": "2aa45a8e8c741b44322b7b42294a29640a3f68e30a32055a5fb7b772a72f76b9"
    },
    {
     "file": "woof/hex/data/mpasphys-maths/glibc_flt32.cuh",
@@ -5057,7 +5081,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_therm_v842.cu",
-    "sha256": "afe6dc9cc626876ca4e52999416ee0c5ecfbaf1dcc9f6a355d5693faad47b924"
+    "sha256": "3b33384a1d13fcca49f5af2c5d72f959f309fb0a6af7abc83e693f2750c142ce"
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.cu",
@@ -5746,12 +5770,20 @@
     "sha256": "1b715ee0af742b8508a84ce6814fea3513611fe441d611477d0c02002087670a"
    },
    {
+    "file": "woof/hex/coupled/ice_coupling_e3sm.py",
+    "sha256": "0d2ad29b7bfbcab54eeb8eeb9be45a6521c4fae7269554afcfd64595819f82f7"
+   },
+   {
     "file": "woof/hex/coupled/ocn_coupling_e3sm.py",
     "sha256": "429b6463254970ef436c1eba343f363ad9277ad129ea1cf19430c041c6399d37"
    },
    {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.py",
     "sha256": "fba045a94745828c98be18fdd3a9685f34432a890d48079b3ce6abc2b75da42e"
+   },
+   {
+    "file": "woof/hex/coupled/seq_frac_e3sm.py",
+    "sha256": "1dec1b9f7546bfeaf4342cf3a42a285aab1f18817a5af953086dd3cac14f4063"
    },
    {
     "file": "woof/hex/cuda_acoustic.py",
@@ -6107,7 +6139,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",
-    "sha256": "138dd8a67068205218715bb0725a93a5a6125647fe4d7c804cbf9d2e9f7dd38a"
+    "sha256": "9649b72fd038d9c669a8915fb42402f74bb95fbc652110b2b77df7fd8f83d4a6"
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",

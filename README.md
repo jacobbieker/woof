@@ -355,8 +355,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     (the opt-in now carries asin). Also the coupling preparation
     (`seaice_column_coupling_prep` and `seaice_column_scale_fluxes`: cell
     albedos, pond freshwater feedback, shortwave scaling, fluxes per unit
-    ice area; RKIND 4 and 8, no opt-in; the ocean mixed layer is refused by
-    name). Four v8.4.2 column bugs keep their words by default and have
+    ice area; RKIND 4 and 8, no opt-in), with the stand-alone ocean mixed
+    layer it runs first by default (`ocean_mixed_layer_v842`: the open
+    ocean's boundary layer and `colpkg_ocn_mixed_layer`'s SST and
+    freezing/melting potential; RKIND 8, and it needs the opt-in for
+    glibc's atan). Four v8.4.2 column bugs keep their words by default and have
     named opt-in corrections (`woof_v842_corrections`): the swapped coupled
     surface and conductive fluxes, the ice velocity in the boundary layer
     (a vertex's u and no v), CCSM3's absorbed shortwave over `ncat`
@@ -402,6 +405,23 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     forcing. real(r8), word-exact on CUDA and Metal against the routines
     compiled verbatim; the BGC, DMS, MacroMolecules and CFC tracers are
     refused by name, and so is what E3SM writes or reads out of bounds.
+  - MPAS-Seaice's coupler import and export, E3SM v3.2.0's `ice_import_mct`
+    and `ice_export_mct` with `mpassi_cpl_indices_set`
+    (`woof/hex/coupled/ice_coupling_e3sm.py`, opt-in): x2i into the ocean,
+    atmosphere, aerosol, z-aerosol and wave arrays (Icepack's sea freezing
+    temperature, the frazil mass) and i2x from the fraction, the basal
+    pressure, the stresses rotated back to the geographic grid and the
+    fluxes. real(r8), word-exact on CUDA and Metal against the routines
+    compiled verbatim with the pinned Icepack; the rotation's libm words are
+    an input. The coupled column biogeochemistry is refused by name, and so
+    is what E3SM reads out of bounds or through an unset pointer.
+  - The coupler's surface fractions update, E3SM v3.2.0's `seq_frac_set`
+    (`woof/hex/coupled/seq_frac_e3sm.py`, opt-in): the ice grid's `ifrac`
+    and `ofrac` from `Si_ifrac` and the domain fraction, mapped to the ocean
+    and atmosphere grids (copy, rearrangement or MCT's sparse matrix
+    multiply in its own element order), with `seq_frac_check`'s stops.
+    real(r8), word-exact on CUDA and Metal against the routines compiled
+    verbatim on MCT.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
@@ -1064,7 +1084,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (details in the design note). A window driver
   (`woof.grad.wrfplus.window.Window`) runs the forward, TL and adjoint
   over N steps with checkpoints, and takes adjoint forcing at
-  intermediate states for 4D-Var. The forecast path does not import any
+  intermediate states for 4D-Var. Its TL can start from part of the
+  state, with the rest zero, as WRFDA's TL start does
+  (`Window.tl(dx0, partial=True)`). The forecast path does not import any
   of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
@@ -1134,6 +1156,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   as WRFDA's `gen_be_ep2` does (to 2.8e-13 K in `t`; the rest word for
   word). Its analysis matches WRFDA's `wrfvar_output` to O7's tolerances:
   max |difference| at most 4.7e-5 of the RMS.
+  FGAT (experimental; `woof var --fgat-obs obNN.ascii --fgat-first-guess fgNN`
+  per time slot) compares each observation with the first guess at its
+  slot's time, as WRFDA's `num_fgat_time` does. On a 7-slot 12-18Z case
+  with first guesses from a WRF 4.7.1 forecast, it takes WRFDA 4.7.1
+  FGAT's 31 iterations to its final cost, and the analysis meets O7's
+  tolerances.
   `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
   `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
   ensemble members minus their mean): WRFDA's gen_be stages for

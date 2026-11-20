@@ -122,7 +122,7 @@ def test_fixture_covers_the_branches():
 @pytest.mark.parametrize("overrides, match", [
     ({"config_use_vertical_tracers": True}, "column_separate_snow_ice_tracers"),
     ({"config_use_column_biogeochemistry": True}, "biogeochemistry"),
-    ({"config_use_ocean_mixed_layer": True}, "colpkg_ocn_mixed_layer"),
+    ({"config_use_ocean_mixed_layer": True, "config_atmos_boundary_method": "constant"}, "atmo_boundary_const"),
     ({"config_stress_divergence_scheme": "weak"}, "velocity_weak"),
     ({"config_use_column_package": False}, "column package on"),
 ])
