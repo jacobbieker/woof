@@ -94,6 +94,8 @@ def make_case(name, seed, torus, n_levels, steps, dt, btr_dt, overrides, precisi
     f["landIcePressure"] = (uniform(1.0e5, 1.0e6, nc + 1) * (fraction >= 0.5)).astype(real)
     f["landIceDraft"] = (-uniform(10.0, 100.0, nc + 1) * (fraction >= 0.5)).astype(real)
     d["kineticEnergyCell"] = uniform(0.0, 0.1, d["kineticEnergyCell"].shape).astype(real)
+    # the diagnostics rewrite the mask from the fraction; it starts as integer noise
+    f["landIceMask"] = rs.randint(-3, 4, nc + 1).astype(np.int32)
     values = {
         "cellMask": (np.arange(nl)[None, :] < m["maxLevelCell"][:, None]).astype(np.int32),
         "accumulatedLandIceMass": uniform(0.0, 1.0e3, nc + 1), "accumulatedLandIceHeat": uniform(-1.0e8, 1.0e8, nc + 1),
