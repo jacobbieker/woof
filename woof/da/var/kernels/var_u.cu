@@ -598,18 +598,33 @@ extern "C" __global__ void var_cv_block(real* __restrict__ cv, real* __restrict_
 // Products and sums in binary64 for both real types (a binary32 product is
 // exact in binary64).
 
-// wrfda-serial: da_dot's order, one long left-to-right sum, one thread
-extern "C" __global__ void var_dot_serial(const real* __restrict__ x, const real* __restrict__ y,
-                                          const long long n, double* __restrict__ out) {
-    if (blockIdx.x != 0 || threadIdx.x != 0) return;
-    double acc = 0.0;
-    for (long long i = 0; i < n; ++i) acc = __dadd_rn(acc, __dmul_rn((double)x[i], (double)y[i]));
-    out[0] = acc;
-}
-
 #define VAR_DOT_THREADS 256
 #define VAR_DOT_PER_THREAD 16
 #define VAR_DOT_CHUNK (VAR_DOT_THREADS * VAR_DOT_PER_THREAD)
+
+// wrfda-serial: da_dot's order, one long left-to-right sum.  Launch one
+// block of VAR_DOT_THREADS: the block forms a tile of products (each exact
+// in binary64, one rounding each, as the serial loop forms them) in shared
+// memory, then thread 0 adds the tile to the running sum in index order.
+// The additions are the serial loop's, one after another; only the loads
+// and products run in parallel.
+#define VAR_SERIAL_TILE 2048
+extern "C" __global__ void var_dot_serial(const real* __restrict__ x, const real* __restrict__ y,
+                                          const long long n, double* __restrict__ out) {
+    __shared__ double tile[VAR_SERIAL_TILE];
+    if (blockIdx.x != 0) return;
+    double acc = 0.0;
+    for (long long start = 0; start < n; start += VAR_SERIAL_TILE) {
+        const long long len = n - start < VAR_SERIAL_TILE ? n - start : VAR_SERIAL_TILE;
+        for (long long q = threadIdx.x; q < len; q += blockDim.x)
+            tile[q] = __dmul_rn((double)x[start + q], (double)y[start + q]);
+        __syncthreads();
+        if (threadIdx.x == 0)
+            for (long long q = 0; q < len; ++q) acc = __dadd_rn(acc, tile[q]);
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) out[0] = acc;
+}
 
 __device__ __forceinline__ void tree_256(double* sh) {
     for (int s = VAR_DOT_THREADS / 2; s > 0; s >>= 1) {

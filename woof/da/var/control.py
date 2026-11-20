@@ -4,8 +4,9 @@
 Two reduction modes, both accumulating in binary64:
 
 ``wrfda-serial``
-    ``da_dot``'s order: one left-to-right sum of the products, on one
-    device thread.  The oracle tier's mode; slow, for comparison and tests.
+    ``da_dot``'s order: one left-to-right sum of the products, added by one
+    device thread (a block forms the products in parallel, tile by tile).
+    The oracle tier's mode; slow, for comparison and tests.
 ``fixed-tree``
     chunks of 4,096 values, each summed by one block (16 consecutive values
     per thread in index order, then a fixed binary tree over 256 threads),
@@ -53,7 +54,7 @@ def dot_device(x, y, reduction: str = "fixed-tree"):
     n = np.int64(x.size)
     out = cp.zeros(1, dtype=cp.float64)
     if reduction == "wrfda-serial":
-        kernel(prec, "var_dot_serial")((1,), (1,), (x, y, n, out))
+        kernel(prec, "var_dot_serial")((1,), (256,), (x, y, n, out))
     else:
         count = max(1, (int(n) + _CHUNK - 1) // _CHUNK)
         partial = cp.zeros(count, dtype=cp.float64)
