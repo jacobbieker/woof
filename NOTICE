@@ -1794,6 +1794,19 @@ a modified derivative, not the version available from the E3SM project, and
 neither the E3SM project, UChicago Argonne, LLC, UCAR nor the Department of
 Energy endorses it.
 
+woof/hex/coupled/ocn_coupling_e3sm.cu (and its Python wrapper) transcribe
+E3SM v3.2.0's MPAS-Ocean coupler import and export, ocn_import_mct and
+ocn_export_mct from components/mpas-ocean/driver/ocn_comp_mct.F, the field
+lookups of mpaso_cpl_indices.F and ocn_freezing_temperature from
+components/mpas-ocean/src/shared/mpas_ocn_equation_of_state.F (MPAS-Ocean:
+Copyright (c) 2013, Los Alamos National Security, LLC and UCAR, BSD 3-Clause;
+E3SM: Copyright 2024, UChicago Argonne, LLC, BSD 3-Clause). Its oracle,
+tools/e3sm_coupler_oracle/, compiles those routines verbatim. The terms are
+reproduced at licenses/LICENSE-E3SM-BSD-3-Clause.txt and
+licenses/LICENSE-MPAS-BSD-3-Clause.txt. This is a modified derivative, not
+the version available from the E3SM or MPAS projects, and none of their
+copyright holders nor the Department of Energy endorses it.
+
 MPAS-Atmosphere is developed by the Los Alamos National Laboratory and the
 University Corporation for Atmospheric Research / National Center for
 Atmospheric Research. It is distributed under the BSD-3-Clause terms

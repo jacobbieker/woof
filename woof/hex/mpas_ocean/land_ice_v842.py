@@ -131,6 +131,9 @@ def check_config(configs: dict) -> None:
             knob="config_land_ice_flux_mode", value=m,
             reason="v8.4.2 allocates no land-ice fields for another mode",
             declaration="config_land_ice_flux_mode = 'off' | 'pressure_only' | 'standalone' | 'coupled'")
+    # the opt-in's value is checked under every mode and formulation, so a typo
+    # is refused under Jenkins too and not only where ISOMIP reads it
+    isomip_salinity_corrected(configs)
     if not fluxes_on(configs):
         return
     formulation = _config(configs, "config_land_ice_flux_formulation")
