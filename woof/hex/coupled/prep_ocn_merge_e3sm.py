@@ -212,7 +212,7 @@ def _module_on(device: int, options: tuple[str, ...]):
 
 
 def _options() -> tuple[str, ...]:
-    from woof.hex import _hex_numerics
+    from woof.hex import numerics as _hex_numerics
     return _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True, numerics=_hex_numerics._bind())
 
 
