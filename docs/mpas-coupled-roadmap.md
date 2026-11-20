@@ -148,6 +148,17 @@ Ordered by how self-contained each piece is:
    exp is the MIT transcription; `compute_albedos`' atan needs the LGPL
    opt-in. v8.4.2 passes `ncat` as `absorbed_solar`'s layer count; the port
    keeps that and refuses `ncat > nilyr`, where v8.4.2 writes past the array.
+   Also ported: the coupling preparation, `seaice_column_coupling_prep` with
+   `seaice_column_scale_fluxes` (the saved freezing/melting potential, the
+   cell albedos and effective pond area, the pond freshwater feedback, the
+   per-area copies, the shortwave scaling factor, then the fluxes per unit
+   ice area or the open-water values;
+   `woof/hex/mpas_seaice/coupling_prep_v842.py`,
+   `tests/test_mpas_seaice_coupling_prep_parity.py`). Cut out of
+   `mpas_seaice_column.F`, the two routines compile at RKIND 4 too, so this
+   piece is word-exact at both precisions. It calls no libm. The ocean mixed
+   layer (`config_use_ocean_mixed_layer`, `.true.` in the Registry, off when
+   coupled to an ocean) and the column biogeochemistry are refused by name.
    Still to port: mushy vertical
    thermodynamics, `ice_shortwave`'s delta-Eddington (with the orbit and
    `compute_coszen`), the melt

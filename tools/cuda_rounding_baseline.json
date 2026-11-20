@@ -1926,6 +1926,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "b63336f08eb1e99220f0e661ffb2f6296d4e028060580685064b6501be3e93c8",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "108ead13400a9eb4d0d2da841d211e8181931fdf7a394ef8b126b26b65ac3771",
+    "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "b716c0ff8c7ba8441e590cc9f564b47e6f59bce66ea9c7690c131f8e0e6c79a0",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
@@ -5004,6 +5012,10 @@
     "sha256": "090287b41e448373b5e5eaa4869d5e31a01570bfc387b299999186f6a044f543"
    },
    {
+    "file": "woof/hex/mpas_seaice/coupling_prep_v842.cu",
+    "sha256": "b86a6e4f0bedd4c3ef49de67fc703e3ac45395a2c22728cafc3d80b1561224c4"
+   },
+   {
     "file": "woof/hex/mpas_seaice/evp_variational_v842.cu",
     "sha256": "c46b9b54299de54a01178590bf6fae320e8bb6a3fbeef3054b4206d21e51b6a2"
    },
@@ -6024,6 +6036,10 @@
    {
     "file": "woof/hex/mpas_seaice/column_v842.py",
     "sha256": "1bcd243acefa4a886f6e8e48397480c363b86f97dc25097d3177b0d8c06a5595"
+   },
+   {
+    "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",
+    "sha256": "138dd8a67068205218715bb0725a93a5a6125647fe4d7c804cbf9d2e9f7dd38a"
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
