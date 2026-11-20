@@ -71,6 +71,17 @@
 !                 step is not finalized, so the stream carries the fluxes the
 !                 coupler reads.  Each step returns on ierr > 0 as
 !                 seaice_timestep does; ierr is logged as above.
+!   seaice_step   the column setup of column_step, then run_seaice_step.F90's
+!                 (seaice_init_velocity_solver's time steps, seaice_init_evp,
+!                 seaice_init_advection, seaice_initialize_time_diagnostics),
+!                 then oracle_n_steps times seaice_core_run's loop: the clock
+!                 advanced, seaice_timestep (cut verbatim, with the column
+!                 package, the velocity solver and the incremental remap
+!                 compiled verbatim: colpkg_ice_strength is the column
+!                 package's own) and seaice_timestep_finalize, the last step's
+!                 only under oracle_finalize_last.  On ierr > 0 the loop stops
+!                 (seaice_check_critical_error would stop the model); ierr and
+!                 the step are logged ('TOBJ IERR n', 'TOBJ STEP n').
 !
 ! The Registry struct alternative_atmos_forcing is longer than the stream's
 ! 24-character pool names; the stream spells it 'alternative_atmos_forcin'
@@ -91,6 +102,10 @@ program run_column
   use seaice_forcing, only: seaice_reset_coupler_fluxes
   use ice_colpkg_tracers, only: nt_Tsfc, nt_fbri
   use ice_colpkg, only: colpkg_init_thermo, colpkg_init_orbit
+  use seaice_velocity_solver_constitutive_relation, only: seaice_init_evp
+  use seaice_diagnostics, only: seaice_initialize_time_diagnostics
+  use seaice_advection, only: seaice_init_advection
+  use seaice_time_integration, only: seaice_timestep, seaice_timestep_finalize
   use oracle_stream
   implicit none
   type(oracle_pools) :: pools
@@ -103,7 +118,9 @@ program run_column
   logical :: orbitAbort
   character(len=StrKIND) :: orbitMessage
   integer :: p, logUnit, ierr, iStep, iSubcycle
-  integer, pointer :: nSteps, nSubcycles
+  integer, pointer :: nSteps, nSubcycles, nElasticSubcycles
+  real(kind=RKIND), pointer :: config_dt, dynamicsTimeStep, elasticTimeStep
+  logical, pointer :: finalizeLast
   logical, pointer :: useShortwave
   integer, pointer :: nIceLayers
   real(kind=RKIND), allocatable :: sprofile(:)
@@ -228,6 +245,42 @@ program run_column
         call seaice_column_postdynamics_time_integration(domain, domain % clock)
      end do steps
      call write_ints('IERR', [ierr])
+  case ('seaice_step')
+     call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nIceLayers', nIceLayers)
+     allocate(sprofile(nIceLayers + 1))
+     call colpkg_init_thermo(nIceLayers, sprofile)
+     call init_column_itd(domain)
+     call mpas_pool_get_config(pools % configs, 'config_shortwave_type', shortwaveType)
+     call mpas_pool_get_config(pools % configs, 'config_use_column_shortwave', useShortwave)
+     if (useShortwave .and. trim(shortwaveType) == 'dEdd') then
+        call colpkg_init_orbit(orbitAbort, orbitMessage)
+        if (orbitAbort) then
+           print *, 'run_column: colpkg_init_orbit: ', trim(orbitMessage)
+           stop 3
+        end if
+     end if
+     ! seaice_init_velocity_solver's time steps (mpas_seaice_velocity_solver.F:126-127)
+     call mpas_pool_get_config(pools % configs, 'config_dt', config_dt)
+     call mpas_pool_get_config(pools % configs, 'config_dynamics_subcycle_number', nSubcycles)
+     call mpas_pool_get_config(pools % configs, 'config_elastic_subcycle_number', nElasticSubcycles)
+     call mpas_pool_get_array(pool_named(pools, 'velocity_solver'), 'dynamicsTimeStep', dynamicsTimeStep)
+     call mpas_pool_get_array(pool_named(pools, 'velocity_solver'), 'elasticTimeStep', elasticTimeStep)
+     dynamicsTimeStep = config_dt / real(nSubcycles,RKIND)
+     elasticTimeStep = dynamicsTimeStep / real(nElasticSubcycles,RKIND)
+     call seaice_init_evp(domain)
+     call seaice_init_advection(domain)
+     call seaice_initialize_time_diagnostics(domain)
+     call mpas_pool_get_config(pools % configs, 'oracle_n_steps', nSteps)
+     call mpas_pool_get_config(pools % configs, 'oracle_finalize_last', finalizeLast)
+     ierr = 0
+     do iStep = 1, nSteps
+        call mpas_advance_clock(domain % clock)
+        call seaice_timestep(domain, domain % clock, iStep, ierr)
+        if (ierr > 0) exit
+        if (iStep < nSteps .or. finalizeLast) call seaice_timestep_finalize(domain)
+     end do
+     call write_ints('IERR', [ierr])
+     call write_ints('STEP', [min(iStep, nSteps)])
   case default
      print *, 'run_column: unknown oracle_stage ', trim(stage)
      stop 2

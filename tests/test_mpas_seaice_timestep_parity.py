@@ -78,7 +78,7 @@ def test_fixture_covers_the_branches(precision):
 
 
 @pytest.mark.parametrize("knob, value", [
-    ("config_use_column_package", True), ("config_advection_type", "upwind"), ("config_use_forcing", True),
+    ("config_advection_type", "upwind"), ("config_use_forcing", True),
     ("config_perform_unit_test", True), ("config_do_restart", True), ("config_use_halo_exch", True),
     ("config_stress_divergence_scheme", "weak"),
 ])

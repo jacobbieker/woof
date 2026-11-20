@@ -31,7 +31,17 @@ stage a case names (``oracle_stage``):
   dynamics and the post-dynamics, each step after the first preceded by
   ``seaice_timestep_finalize``'s ``seaice_column_reinitialize_fluxes``), its
   ierr logged the same way. Its cases carry a BL99 column state and forcing
-  (:func:`_step_state`).
+  (:func:`_step_state`);
+- ``seaice_step``: the column step's setup and ``run_seaice_step.F90``'s
+  (the velocity solver's time steps, ``seaice_init_evp``,
+  ``seaice_init_advection``, ``seaice_initialize_time_diagnostics``), then
+  ``oracle_n_steps`` times the clock, ``seaice_timestep`` with the column
+  package and the velocity solver compiled verbatim and
+  ``seaice_timestep_finalize`` (the last step's under
+  ``oracle_finalize_last``), stopping on an abort; the ierr and the step are
+  logged (``TOBJ IERR``, ``TOBJ STEP``). Its cases (:data:`COUPLED_CASES`)
+  carry the column step's state on a culled hexagonal torus with the
+  time-step oracle's dynamics state (:func:`_coupled_dynamics`).
 
 ``mpas_seaice_column.F``, ``mpas_seaice_initialize.F``'s and
 ``mpas_seaice_forcing.F``'s routines and the column package are compiled
@@ -77,6 +87,8 @@ RADIATION_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_radiation"
 DEDD_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_dedd"
 #: the column step's fixture (STEP_CASES)
 STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_step"
+#: the time step with the column package (COUPLED_CASES)
+COUPLED_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_coupled_step"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -316,29 +328,69 @@ STEP_CASES = (
     ("step_bl99_abort_salinity", 20262017, _STEP, {**_STEP_BASE, "oracle_n_steps": 2}),
 )
 
+_SEAICE_STEP = "seaice_step"
+#: run_gpu's output for a ``seaice_step`` case: the step it stopped at (the oracle's ``TOBJ STEP``)
+SEAICE_STEP_KEY = "oracle/step"
+#: the velocity solver's settings of the time-step oracle's cases (mpas_seaice_step_oracle)
+_DYNAMICS = {
+    "config_use_velocity_solver": True, "config_stress_divergence_scheme": "variational",
+    "config_revised_evp": False, "config_use_air_stress": True, "config_use_ocean_stress": True,
+    "config_use_surface_tilt": True, "config_geostrophic_surface_tilt": True, "config_use_advection": False,
+    "config_elastic_subcycle_number": 30, "config_use_forcing": False, "config_do_restart": False,
+    "config_use_halo_exch": False, "config_perform_unit_test": False, "config_check_state": False,
+    "config_use_column_package": True, "oracle_finalize_last": True,
+}
+_COUPLED_BASE = {**_STEP_BASE, **_DYNAMICS, "config_dt": 1800.0, "oracle_clock_step": "0000_00:30:00"}
+#: the time step with the column package and the velocity solver: name, seed, stage,
+#: overrides, (nq, nr, owned columns) of the culled hexagonal torus
+COUPLED_CASES = (
+    ("seaice_bl99_dedd_rothrock", 20262101, _SEAICE_STEP, {
+        **_COUPLED_BASE, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"}, (12, 6, 3)),
+    ("seaice_bl99_dedd_two_subcycles_exponential_gregorian", 20262102, _SEAICE_STEP, {
+        **_COUPLED_BASE, "oracle_n_steps": 2, "config_dynamics_subcycle_number": 2,
+        "config_elastic_subcycle_number": 12, "config_revised_evp": True,
+        "config_ridging_participation_function": "exponential",
+        "config_ridging_redistribution_function": "exponential", "config_nCategories": 3, "config_nIceLayers": 4,
+        "config_calendar_type": "gregorian", "config_start_time": "2000-07-10_06:00:00"}, (12, 6, 3)),
+    ("seaice_bl99_hibler_strength_ccsm3_winter", 20262103, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_CONSTANT, "oracle_n_steps": 3, "config_ice_strength_formulation": "Hibler79",
+        "config_use_surface_tilt": False, "config_start_time": "2001-01-15_00:00:00"}, (10, 5, 3)),
+    ("seaice_mushy_level_ponds_no_vertical_thermodynamics", 20262104, _SEAICE_STEP, {
+        **{k: v for k, v in _COUPLED_BASE.items() if k not in _VT}, "config_use_column_vertical_thermodynamics": False,
+        "oracle_n_steps": 2, "config_start_time": "2001-07-20_12:00:00"}, (10, 5, 3)),
+    ("seaice_bl99_dedd_last_step_unfinalized", 20262105, _SEAICE_STEP, {
+        **_COUPLED_BASE, "oracle_n_steps": 2, "oracle_finalize_last": False,
+        "config_start_time": "2001-07-10_12:00:00"}, (10, 5, 3)),
+    ("seaice_bl99_abort_salinity", 20262106, _SEAICE_STEP, {**_COUPLED_BASE, "oracle_n_steps": 2},
+     (10, 5, 3)),
+)
+
 
 def configs_of(overrides: dict, stage: str) -> dict:
     return {**cv.default_configs(), **BASE_CONFIG, **overrides, "oracle_stage": stage}
 
 
-def field_rows(config: dict) -> tuple[list, dict[str, int], dict[str, bool]]:
-    """The stream's field table, the dimensions and the packages for ``config``."""
-    dims = cv.dimensions(config, {k: MESH[k] for k in ("nCells", "nEdges", "maxEdges", "maxEdges2", "nVertices",
+def field_rows(config: dict, mesh: dict = MESH) -> tuple[list, dict[str, int], dict[str, bool]]:
+    """The stream's field table, the dimensions and the packages for ``config``
+    (on ``mesh``'s dimensions)."""
+    dims = cv.dimensions(config, {k: mesh[k] for k in ("nCells", "nEdges", "maxEdges", "maxEdges2", "nVertices",
                                                         "vertexDegree")})
     active = cv.packages(config)
     rows = [("mesh", name, DIM, ()) for name in sorted(dims)]
     rows += [("mesh", name, DIM, ()) for name in ("nCellsSolve", "nEdgesSolve", "nVerticesSolve")]
     rows += [("tracers_aggregate", "nCellsSolve", DIM, ())]
-    if config.get("oracle_stage") == _STEP:
+    if config.get("oracle_stage") in (_STEP, _SEAICE_STEP):
         # seaice_column_coupling_prep reads its dimensions from the tracers pool
         rows += [("tracers", "nCellsSolve", DIM, ()), ("tracers", "nCategories", DIM, ())]
     stage = config.get("oracle_stage")
-    pools = VT_POOLS if stage == "vertical_thermodynamics" else STEP_POOLS if stage == _STEP else POOLS
+    pools = (VT_POOLS if stage == "vertical_thermodynamics" else STEP_POOLS if stage in (_STEP, _SEAICE_STEP)
+             else POOLS)
     # The Registry allocates a var by its own packages: gen_inc.c's parse_var never reads
     # the var_struct's (biogeochemistry's newlyFormedIce is the column package's).  The
     # earlier stages' cases keep the struct gate, which only drops fields their routines
     # never read, so their bytes (and fixtures) stay; the ITD stage reads newlyFormedIce.
-    var_packages_only = config.get("oracle_stage") in ("itd_thermodynamics", "ridging", *_RADIATION_STAGES, _STEP)
+    var_packages_only = config.get("oracle_stage") in ("itd_thermodynamics", "ridging", *_RADIATION_STAGES, _STEP,
+                                                       _SEAICE_STEP)
     for struct in cv.registry_fields()["var_structs"]:
         if struct["name"] not in pools:
             continue
@@ -944,18 +996,66 @@ def _step_state(rs, case: dict) -> None:
             t[key] = u(a, b, t[key].shape)
 
 
-def make_case(name, seed, stage, overrides) -> dict:
+def _coupled_dynamics(name: str, seed: int, torus: tuple, config: dict) -> tuple[dict, dict]:
+    """The time-step oracle's dynamics state (:mod:`woof.verify.mpas_seaice_step_oracle`)
+    on a culled hexagonal torus of ``torus = (nq, nr, owned columns)``: the
+    mesh's dimensions, and that case."""
+    from woof.verify import mpas_seaice_step_oracle as so
+    from woof.verify.mpas_ocean_hexmesh import hex_mesh
+    nq, nr, owned = torus
+    mesh = hex_mesh(nq, nr, 0.08, 1, np.random.RandomState(seed + 1), min_levels=1, owned_columns=owned)
+    dynamics = so.make_case(name, seed + 2, (nq, nr), owned, int(config["oracle_n_steps"]),
+                            float(config["config_dt"]), {}, precision="r8", mesh=mesh,
+                            n_categories=int(config["config_nCategories"]))
+    pools = dynamics["pools"]["mesh"]
+    dims = {k: int(pools[k]) for k in ("nCells", "nEdges", "nVertices", "nCellsSolve", "nEdgesSolve",
+                                       "nVerticesSolve", "maxEdges", "vertexDegree")}
+    dims["maxEdges2"] = 2 * dims["maxEdges"]
+    return dims, dynamics
+
+
+#: the column state the dynamics state does not replace
+_COLUMN_OWNED = ("tracers", "tracers_aggregate", "atmos_coupling", "ridging")
+
+
+def _overlay_dynamics(case: dict, dynamics: dict) -> None:
+    """The dynamics state over the column's: the mesh, the masks, the
+    variational basis, the velocities and the ocean forcing (not the
+    category state, the aggregates, the atmosphere, the ridging forcing, the
+    open water or the initial ice area, which are the column step's)."""
+    from woof.verify import mpas_seaice_step_oracle as so
+    pools = case["pools"]
+    for pool, field, kind, _ in so.FIELDS:
+        if kind == DIM or pool in _COLUMN_OWNED or (pool, field) in (
+                ("icestate", "openWaterArea"), ("icestate", "iceAreaCellInitial"),
+                ("velocity_solver", "dynamicsTimeStep"), ("velocity_solver", "elasticTimeStep")):
+            continue
+        value = np.asarray(dynamics["pools"][pool][field])
+        mine = pools[pool].get(field)
+        if mine is None or np.shape(mine) != value.shape:
+            raise ValueError(f"{pool}/{field}: the column stream carries {np.shape(mine)}, the dynamics {value.shape}")
+        pools[pool][field] = value.astype(np.asarray(mine).dtype)
+    nc = case["dims"]["nCells"]
+    pools["mesh"]["indexToCellID"] = np.arange(1, nc + 2, dtype=np.int32)
+
+
+def make_case(name, seed, stage, overrides, torus=None) -> dict:
     rs = np.random.RandomState(seed)
     config = configs_of(overrides, stage)
-    rows, dims, active = field_rows(config)
+    mesh, dynamics = MESH, None
+    if torus is not None:
+        mesh, dynamics = _coupled_dynamics(name, seed, torus, config)
+        config["diagnostics:xtime"] = config["config_start_time"]
+        config["diagnostics:simulationStartTime"] = config["config_start_time"]
+    rows, dims, active = field_rows(config, mesh)
     case = {"name": name, "precision": "r8", "stage": stage, "config": config,
             "dt": 1800.0 if stage == "update_state" else float(config["config_dt"]),
-            "dims": {**dims, "nCells": MESH["nCells"], "nCellsSolve": MESH["nCellsSolve"],
+            "dims": {**dims, "nCells": mesh["nCells"], "nCellsSolve": mesh["nCellsSolve"],
                      "nVertLevels": 0}, "pools": {}}
     for pool, fname, kind, fshape, *on in rows:
         p = case["pools"].setdefault(pool, {})
         if kind == DIM:
-            p[fname] = MESH.get(fname, dims.get(fname))
+            p[fname] = mesh.get(fname, dims.get(fname))
             continue
         if not on[0]:
             p[fname] = None
@@ -968,8 +1068,10 @@ def make_case(name, seed, stage, overrides) -> dict:
     _tracers(rs, case["pools"], case["dims"])
     if stage == "vertical_thermodynamics":
         _thermo_state(rs, case)
-    if stage == _STEP:
+    if stage in (_STEP, _SEAICE_STEP):
         _step_state(rs, case)
+    if dynamics is not None:
+        _overlay_dynamics(case, dynamics)
     if stage == "itd_thermodynamics":
         _itd_state(rs, case)
     if stage == "ridging":
@@ -1116,11 +1218,54 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     elif stage == _STEP:
         cv.init_column_itd(dev, state)
         state.abort = cstep.run(dev, config, state, int(config["oracle_n_steps"]))
+    elif stage == _SEAICE_STEP:
+        state.abort, step = _run_seaice_step(dev, config)
     else:
         raise ValueError(f"unknown stage {stage}")
     outputs = {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]
                if kind in (REAL, INT) and dev[pool][name] is not None}
+    if stage == _SEAICE_STEP:
+        outputs[SEAICE_STEP_KEY] = np.array([step])
     return outputs, state
+
+
+def _run_seaice_step(dev: dict, config: dict) -> tuple[tuple, int]:
+    """:func:`woof.hex.mpas_seaice.timestep_v842.advance` as the ``seaice_step``
+    stage drives ``seaice_timestep``: the abort (``(0, None, None)`` without
+    one) and the step it stopped at."""
+    from woof.hex.mpas_seaice import timestep_v842 as ts
+    dev["diagnostics"]["xtime"] = config["diagnostics:xtime"]
+    dev["diagnostics"]["simulationStartTime"] = config["diagnostics:simulationStartTime"]
+    clock = ts.initialize(pools=dev, configs=config)
+    n_steps = int(config["oracle_n_steps"])
+    try:
+        ts.advance(pools=dev, configs=config, clock=clock, n_steps=n_steps,
+                   finalize_last=bool(config["oracle_finalize_last"]))
+    except ts.ColumnAbort as abort:
+        return (abort.ierr, abort.cell, abort.message), abort.step
+    return (0, None, None), n_steps
+
+
+def measure_coupled(reference: dict | None = None, logs: dict | None = None, *, rows=COUPLED_CASES,
+                    fixture_dir: Path = COUPLED_FIXTURE_DIR) -> dict[str, dict[str, int]]:
+    """Per time-step case with the column package: the words the GPU gets
+    wrong per field (an aborting case's too), whether its abort (ierr, first
+    aborting cell, message) or the step it stopped at differs from the
+    oracle's, and the tracer object's integers that differ."""
+    reference = load_fixture(fixture_dir) if reference is None else reference
+    logs = load_logs(fixture_dir) if logs is None else logs
+    report: dict[str, dict[str, int]] = {}
+    for case in cases("r8", rows):
+        log = logs[case["name"]]
+        got, state = run_gpu(case)
+        row = {"abort": int(tuple(state.abort) != oracle_step_abort(log)),
+               "step": int(got[SEAICE_STEP_KEY][0] != log["tracer_object"]["STEP"][0])}
+        want = expected_outputs(case, reference.get(case["name"], {}))
+        row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        mine = state.tracers.log_rows()
+        row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
+        report[case["name"]] = row
+    return report
 
 
 def measure(reference: dict | None = None, logs: dict | None = None, *, rows=CASES,

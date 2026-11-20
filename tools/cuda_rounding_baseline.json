@@ -5053,7 +5053,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.cu",
-    "sha256": "448102670c2b4e0ce1038210a10889b8ea1dd54baa4132cb553c6cdfda4087ac"
+    "sha256": "1528af7dedbd0b99b4e8868f1c9f672475368fe9361540d59103b1f4e28703e0"
    },
    {
     "file": "woof/hex/mpas_seaice/column_therm_v842.cu",
@@ -6095,11 +6095,11 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.py",
-    "sha256": "97b1bc27a626dcd2496ed6e53103592f37957520b873bac1272800c10c932d46"
+    "sha256": "e6882d1bca6db5511a68fc1d1d96d81e99936941f618b03f396299f90edb4c58"
    },
    {
     "file": "woof/hex/mpas_seaice/column_therm_v842.py",
-    "sha256": "892151ab16c5fd5c4236888b6e2e10a45c8b281c4f1668a2639c7e8b5ad42ee6"
+    "sha256": "22bc9f493113b135d81df474fb81383f01d97607f6c62fca0b2d3a1a26c822ce"
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.py",
@@ -6115,7 +6115,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
-    "sha256": "1808464c340988a4aea66cd2386f30497a56a924004ccf0393f4c3edd5492a52"
+    "sha256": "33ea15cccbd03ad8ea011ea0721956a4f098d285060a340b850d3565f1e5ecaa"
    },
    {
     "file": "woof/hex/mpas_seaice/remap_v842.py",

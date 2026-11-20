@@ -23,12 +23,14 @@ RKIND 4 and RKIND 8 (``tools/mpas_seaice_oracle/run_presubcycle.F90``,
 glibc transcription: ``gfk_exp`` (``glibc_flt32.cuh``) at RKIND 4 and
 ``glibc_exp`` (``glibc_flt64.cuh``, MIT Arm optimized-routines) at RKIND 8.
 
-Refused by name: ``ice_strength`` under the column package's vertical
-thermodynamics (``config_use_column_package`` and
-``config_use_column_vertical_thermodynamics``), which calls the column
-package's ``colpkg_ice_strength`` (Rothrock 1975 by default, with the
-ridging participation functions); that is not ported. Halo exchanges are a
-one-rank no-op.
+Under the column package's vertical thermodynamics
+(``config_use_column_package`` and
+``config_use_column_vertical_thermodynamics``) ``ice_strength`` calls the
+column package's ``colpkg_ice_strength`` (Rothrock 1975 by default, with the
+ridging participation functions): :func:`pre_subcycle` takes it as a
+callable (:func:`~woof.hex.mpas_seaice.column_ridge_v842.ice_strength`, RKIND
+8 only, as the column package is), and refuses that configuration by name
+without one. Halo exchanges are a one-rank no-op.
 
 Arrays are device float32 (``r4``) or float64 (``r8``), with int32 masks and
 1-based connectivity, in the Fortran layout: ``a(maxEdges, nCells)`` is
@@ -298,22 +300,32 @@ def surface_tilt(*, mesh: dict, icestate: dict, ocean: dict, solver: dict, tilt:
 def pre_subcycle(*, mesh: dict, boundary: dict, tracers: dict, aggregate: dict, icestate: dict, ocean: dict,
                  atmos: dict, solver: dict, variational: dict, use_column_package: bool,
                  use_column_vertical_thermodynamics: bool, use_air_stress: bool, use_ocean_stress: bool,
-                 tilt: str) -> None:
+                 tilt: str, column_ice_strength=None) -> None:
     """``velocity_solver_pre_subcycle``, in place, in the model's order:
     the aggregates and masks, the new-ice velocities, the ice strength, the
     air stress, then :func:`velocity_v842.pre_subcycle`'s Coriolis
     coefficient and ocean stress, the surface tilt, and the subcycle
-    initialisation. The dicts carry the arrays the pieces name. Refuses the
-    column package's ice strength by name before touching anything."""
+    initialisation. The dicts carry the arrays the pieces name.
+
+    Under the column package's vertical thermodynamics the ice strength is
+    ``colpkg_ice_strength``'s: ``column_ice_strength`` is a callable that
+    computes it in place (the time step passes
+    :func:`~woof.hex.mpas_seaice.column_ridge_v842.ice_strength`). Without
+    one, that configuration is refused by name before anything is touched."""
     flags = {"use_column_package": use_column_package,
              "use_column_vertical_thermodynamics": use_column_vertical_thermodynamics}
-    refuse_unported(**flags)
+    column = use_column_package and use_column_vertical_thermodynamics
+    if not (column and column_ice_strength is not None):
+        refuse_unported(**flags)
     if tilt not in SURFACE_TILTS:
         raise ValueError(f"tilt must be one of {SURFACE_TILTS}")
     aggregate_and_masks(mesh=mesh, boundary=boundary, tracers=tracers, aggregate=aggregate, icestate=icestate,
                         ocean=ocean, solver=solver, **flags)
     new_ice_velocities(mesh=mesh, ocean=ocean, solver=solver)
-    ice_strength(mesh=mesh, aggregate=aggregate, solver=solver, **flags)
+    if column:
+        column_ice_strength()
+    else:
+        ice_strength(mesh=mesh, aggregate=aggregate, solver=solver, **flags)
     air_stress(mesh=mesh, atmos=atmos, aggregate=aggregate, solver=solver, use_air_stress=use_air_stress, **flags)
     velocity_v842.coriolis_and_ocean_stress(mesh=mesh, icestate=icestate, solver=solver,
                                             use_ocean_stress=use_ocean_stress)
