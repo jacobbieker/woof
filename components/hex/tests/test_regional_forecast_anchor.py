@@ -94,7 +94,7 @@ def test_the_named_forecast_pair_is_masked_digest_identical(receipts):
 SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
     "src/hexcore/cuda_driver.py": {
         "recorded": "cb6477ef2fd02ad551e9b6c8af0724c94fc4d90bdc712fff1378d218662f5d04",
-        "current": "7888ef788fb1b7e9600b798c30c5d3f939fbf272a1585bc0ece62bc01ee51d82",
+        "current": "7c0ddd54648b449430c1cdef49667cf1a17ac7959e2c1f138847fd610820c7bd",
         "why": (
             "2026-11-19 current-source refresh: host-side merges only "
             "(step-path outputs as scratch #614, the opt-in w_damping #420 "

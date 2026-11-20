@@ -149,7 +149,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # Re-frozen 2026-10-05 for the startup lane (host-preparation cache);
         # the rationale lives beside the runner's pin.
         "src/hexcore/cuda_driver.py": (
-            "7888ef788fb1b7e9600b798c30c5d3f939fbf272a1585bc0ece62bc01ee51d82"
+            "7c0ddd54648b449430c1cdef49667cf1a17ac7959e2c1f138847fd610820c7bd"
         ),
         # New pin (startup lane, 2026-10-05): the frozen driver executes host
         # preparation through this module; the rationale lives beside the

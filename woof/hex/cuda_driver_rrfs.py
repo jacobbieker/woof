@@ -8,7 +8,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 import numpy as np
-from woof.backend.scratch import scratch_like as _scratch_like
 from .cuda_driver import CudaDryDycoreDriver
 from .config_rrfs import RRFSDryDycoreConfig
 from .cuda_horizontal_rrfs import CudaHorizontalRRFS
@@ -361,159 +360,20 @@ class CudaRRFSDycoreDriver(CudaDryDycoreDriver):
             mesh_scaling_del2=getattr(self.horizontal,"rrfs_scaling_del2",None),mesh_scaling_del4=getattr(self.horizontal,"rrfs_scaling_del4",None),
             mixing_cell_solve_count=None if self.regional_v841 is None else self.regional_v841.n_cells_solve)
     # MPAS-Model-rrfs/src/core_atmosphere/dynamics/mpas_atm_time_integration.F:1928-7759 at 1d6e370e.
-    def _recover_candidate(
-        self,
-        saved_state: DevicePrognosticState,
-        saved_diag: DeviceSavedDiagnostics,
-        acoustic: CudaAcousticState,
-        stage: int,
-        acoustic_steps: int,
-        scalars: Any,
-        *, diabatic_theta: Any | None = None, large_timestep: float = 0.0,
-    ) -> tuple[DevicePrognosticState, DeviceSavedDiagnostics, Any, Any]:
-        cp = self.cp
-        rho = _scratch_like(cp, saved_state.rho)
-        rtheta = _scratch_like(cp, saved_state.rho_theta)
-        rho_p = _scratch_like(cp, saved_state.rho)
-        rtheta_p = _scratch_like(cp, saved_state.rho_theta)
-        theta = _scratch_like(cp, saved_state.rho)
-        exner = _scratch_like(cp, saved_diag.exner)
-        pressure_p = _scratch_like(cp, saved_diag.pressure_perturbation)
-        self._launch(
-            "recover_cells_f32",
-            self.ncells * self.nlev,
-            (
-                np.int32(self.nlev),
-                np.int32(self.ncells),
-                np.int32(stage),
-                np.int32(self.source_release == "v8.4.1"),
-                np.float32(287.0),
-                np.float32(1004.5),
-                np.float32(100_000.0),
-                saved_diag.density_perturbation,
-                saved_diag.rho_theta_perturbation,
-                acoustic.rho_pp,
-                acoustic.rtheta_pp,
-                np.int32(diabatic_theta is not None),
-                np.float32(large_timestep),
-                saved_diag.density_perturbation if diabatic_theta is None else diabatic_theta,
-                self.atmosphere.reference.rho_base,
-                self.atmosphere.reference.rho_theta_base,
-                self.atmosphere.reference.exner_base,
-                self.atmosphere.vertical.zz,
-                saved_diag.exner,
-                saved_diag.pressure_perturbation,
-                rho,
-                rtheta,
-                rho_p,
-                rtheta_p,
-                theta,
-                exner,
-                pressure_p,
-            ),
-        )
-        ru = _scratch_like(cp, saved_state.rho_u)
-        flux_u = _scratch_like(cp, saved_state.rho_u)
-        self._launch(
-            "recover_edges_f32",
-            self.nedges * self.nlev,
-            (
-                np.int32(self.nlev),
-                np.int32(self.nedges),
-                np.int32(acoustic_steps),
-                saved_state.rho_u,
-                acoustic.ru_p,
-                acoustic.ru_avg,
-                ru,
-                flux_u,
-            ),
-        )
-        rw = _scratch_like(cp, saved_state.rho_w)
-        flux_w = _scratch_like(cp, saved_state.rho_w)
-        self._launch(
-            "recover_interfaces_f32",
-            self.ncells * (self.nlev + 1),
-            (
-                np.int32(self.nlev),
-                np.int32(self.ncells),
-                np.int32(acoustic_steps),
-                saved_state.rho_w,
-                acoustic.rw_p,
-                acoustic.ww_avg,
-                rw,
-                flux_w,
-            ),
-        )
-        if self.v841_context is not None:
-            enforce_rw_endpoints_cuda_v841(rw, kernel_cache=self.cache)
-        regional_u_overwrite = None
-        if self.regional_v841 is not None:
-            # driver.py:2228-2265 and 2390-2394: every regional recover runs
-            # in native's padded memory model with rho_zz's garbage cell at
-            # 1.0 (F:4385-4392), so the shared recover_edges kernel divides a
-            # one-cell ring-7 edge by rho(present)+1.0 exactly as
-            # regional_normal_velocity does on the host.
-            self.regional_v841.bind_state_rho(rho)
-            # driver.py:2935-2937 -- the ru half of atm_srk3:2442-2485,
-            # before the candidate is validated and before u is recovered.
-            regional_u_overwrite = self.regional_v841.overwrite_speczone_rho_u(
-                ru, stage
-            )
-        # The candidate carries the caller's scalar block by reference.  Nothing
-        # between here and the transport stage writes through it: the acoustic
-        # solver, the tendency helpers and the recovery kernels all read the
-        # scalars and allocate their own outputs, and both callers REBIND
-        # ``.scalars`` to a transport result rather than filling it in place.
-        # Copying it here allocated a whole six-species block (nScalars x nlev x
-        # nCells) per RK stage, three times per dynamics subcycle, and every one
-        # of those copies was dropped unmodified.
-        state = self._device_state(rho, rtheta, ru, rw, scalars)
-        temporary = DeviceAtmosphere(
-            self.atmosphere.mesh,
-            state,
-            self.atmosphere.vertical,
-            self.atmosphere.reference,
-            saved_diag,
-            self.atmosphere.terrain,
-            self.atmosphere.h2d,
-        )
-        # Only normal_velocity and vertical_velocity are read below; theta,
-        # exner, pressure, rho_p, rtheta_p and pressure_p come from
-        # recover_cells_f32 above, so asking recover_state for its own copies
-        # allocated and filled six cell fields per stage for the bin.
-        recovered = recover_state(
-            temporary,
-            cache=self.cache,
-            warmup=0,
-            timing_repeats=0,
-            include_pressure=False,
-        )
-        if self.regional_v841 is not None:
-            # driver.py:3005-3009 -- the u half of the same native overwrite,
-            # with the SAME interpolated driving values the ru half used --
-            # and driver.py:2405, atm_zero_gradient_w_bdy (F:7868-7902).
-            self.regional_v841.overwrite_speczone_u(
-                recovered.normal_velocity, regional_u_overwrite
-            )
-            # Fork atm_recover_large_step_variables (mpas_atm_time_integration.F:3304-3405 at 1d6e370e) sets
-            # w(1) = 0 in every cell and adds the terrain-following lower-boundary flux only where bdyMaskCell <=
-            # nRelaxZone ("no spec zone update").  The fork's atm_zero_gradient_w_bdy then sets levels 2..nVertLevels
-            # alone (apply_w_boundary_cuda_rrfs), unlike v8.4.1's whole-column zero, so the specified zone's surface
-            # w must be the recovery's 0.  THE BREAKAGE THIS FIXES: hex kept the terrain flux there (lam7k step 1:
-            # 760 surface w words in rings 6-7, up to 0.03 m/s where native has 0).
-            masks = self.regional_v841.masks
-            if int(masks.n_spec_cells):
-                recovered.vertical_velocity[0, masks.spec_cells] = 0
-        diagnostics = self._device_saved(
-            theta,
-            exner,
-            rho_p,
-            rtheta_p,
-            pressure_p,
-            recovered.normal_velocity,
-            recovered.vertical_velocity,
-        )
-        return state, diagnostics, flux_u, flux_w
+    def _zero_recovered_speczone_w(self, vertical_velocity: Any) -> None:
+        """The fork's specified-zone surface w; the base driver's recovery does the rest.
+
+        Fork atm_recover_large_step_variables (mpas_atm_time_integration.F:3304-3405 at 1d6e370e) sets
+        w(1) = 0 in every cell and adds the terrain-following lower-boundary flux only where bdyMaskCell <=
+        nRelaxZone ("no spec zone update").  The fork's atm_zero_gradient_w_bdy then sets levels 2..nVertLevels
+        alone (apply_w_boundary_cuda_rrfs), unlike v8.4.1's whole-column zero, so the specified zone's surface
+        w must be the recovery's 0.  THE BREAKAGE THIS FIXES: hex kept the terrain flux there (lam7k step 1:
+        760 surface w words in rings 6-7, up to 0.03 m/s where native has 0).
+        """
+
+        masks = self.regional_v841.masks
+        if int(masks.n_spec_cells):
+            vertical_velocity[0, masks.spec_cells] = 0
 
     # MPAS-Model-rrfs/src/core_atmosphere/dynamics/mpas_atm_time_integration.F:1928-7759 at 1d6e370e.
     def _advance_dynamics_subcycle_v841(
@@ -959,6 +819,11 @@ class CudaRRFSDycoreDriver(CudaDryDycoreDriver):
                 stage.acoustic_steps,
                 current_state.scalars,
                 diabatic_theta=diabatic_theta, large_timestep=stage.large_timestep,
+                # Fresh outputs, as this driver's own copy of the recovery
+                # allocated them.  The base driver's consume_acoustic (the
+                # recovery writing into rho_pp/rtheta_pp/ru_avg/ww_avg) is not
+                # turned on here until an RRFS forecast shows it word-identical.
+                consume_acoustic=False,
             )
             if stage.stage == 3 and acoustic_output_callback is not None:
                 # Registry.xml (fork 1d6e370e) puts the final acoustic ru_p/rw_p in the restart stream, as v8.4.2

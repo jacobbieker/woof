@@ -852,8 +852,13 @@ class RegionalContract:
 #: fast and strict on both backends); that kernel's text is in cuda_regional_hoist_v841.py, which is NOT a member
 #: of this set, so an edit to it does not move this digest (open item for the regional owner). Re-derived by
 #: tools/repin_source_tables.py; not a new mint.
+#: (43) 2026-11-20 (perf/rrfs-recover-fold): cuda_driver.py moves the recovered candidate's specified-zone w
+#: zeroing into a method (_zero_recovered_speczone_w) the RRFS driver overrides, so the RRFS driver drops its copy
+#: of _recover_candidate. Host routing only, no CUDA source string changed; measured equal: Alps hex VR 1 h on pb,
+#: 131 history and 109 diag variables at 0 differing bytes against the base, twice each. Re-derived by
+#: tools/repin_source_tables.py; not a new mint.
 MINTED_KERNEL_SET_SHA256 = (
-    "585aaf909c6b7de02173fb8fce44480ab19345942b563aedff780c52965d343b"
+    "4d75f4a3a80a69d4e53b9fe5c95dfb68429e02e6a60da4c6a5d20d3a3f86e3ce"
 )
 
 _DRY_MINT_CAVEAT = (
