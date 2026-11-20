@@ -86,8 +86,7 @@ def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
     not represented as proof of causal availability.
     """
     from woof.obs.neutral_table import VARIABLE_TABLE
-    from woof.obs.column_operators import dewpoint_from_specific_humidity, refractivity_n
-    from woof.da.var.obs_wrfda import msl2geo1
+    from woof.obs.column_operators import dewpoint_from_specific_humidity, msl2geo1, refractivity_n
     if not np.isfinite(max_age_seconds) or max_age_seconds <= 0 or not np.isfinite(gross_sigma) or gross_sigma <= 0:
         raise ValueError('Observation age and QC thresholds must be finite and positive; correct the analysis settings.')
     if not np.isfinite(error_inflation) or error_inflation < 1.:

@@ -139,6 +139,8 @@
  "obs": {
   "comment": "V1.1: the tutorial ob.ascii (testdata ob/2008020512/ob.ascii) read by woof.da.var.obs_wrfda with the default correctly rounded libm; counts are WRFDA 4.7.1 rsl.out local counts. first_guess_attributes are rc/2008020512/wrfinput_d01 global attributes (float32 values).",
   "ob_ascii_sha256": "979988a26f0da056a59e3f243edcf796eed416dda4d69c74107848c0ca7c43ba",
+  "iv_dump_sha256": "42a3888814a0f24bc1c9fe4e8b8c189be9fb1bdfe6f90d149151e5e868743f4f",
+  "iv_dump_comment": "woof_iv.bin from the WRFDA 4.7.1 dump build with tools/wrfda_oracle/woof_dump.inc as of bd11ed5a1 (gpsref p, t, q dumped). A dump from an older build lacks gpsref%p and is refused by tests/test_var_obs_wrfda.iv_dump.",
   "first_guess_attributes": {
    "MAP_PROJ": 1,
    "CEN_LAT": 40.000008,

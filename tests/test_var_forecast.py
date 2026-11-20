@@ -58,9 +58,16 @@ def test_forecast_from_woof_analysis_is_wrfdas(tmp_path):
     d = _dir()
     from conftest import cpu_preprocess_gap, netcdf_bridge_gap, netcdf_writer_gap
 
+    from woof.static.rust_bridge import unavailable_reason
+
     for gap in (netcdf_bridge_gap(), netcdf_writer_gap(), cpu_preprocess_gap("gpuwm_analysis_binary_f64")):
         if gap:
             pytest.skip(gap)
+    # woof run builds the history grid's cell geometry with the Rust static-fields bridge
+    # (woof.io.history_layout.wrf_cell_geometry); without it every run here stops at step 0.
+    static_gap = unavailable_reason()
+    if static_gap:
+        pytest.skip(f"the Rust static-fields bridge woof run needs is not loadable here ({static_gap})")
     import netCDF4
 
     from woof.da.var.analysis import WRF_FIELDS, analyse, read_first_guess, write_bundle

@@ -1827,7 +1827,7 @@ PNG it writes carries an `experimental` stamp.
   `da_transform_xtogpsref`'s `ref`, `da_transform_vtox`,
   `da_transfer_xatowrf`, `da_check_rh_simple`), and `tools/wrfda_oracle/woof_dump.inc` (debug
   dumps hooked into a copy of the WRFDA tree, never the pinned tree).
-  `woof/da/var/crmath.py` is woof's own: correctly rounded `sin`, `cos`,
+  `woof/core/crmath.py` (moved from `woof/da/var/`) is woof's own: correctly rounded `sin`, `cos`,
   `tan`, `exp`, `log`, `log10` and `pow`, evaluated in Python's `decimal`, with no
   libm code in it.
 - **Not used**: the CRTM 2.3.0 copy bundled in WRF (it carries GPL-headed

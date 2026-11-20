@@ -19,7 +19,7 @@ innovation, for a regional Lambert-conformal ARW first guess on one tile, with
 
 Every arithmetic step is in WRFDA's order in binary64 (the oracle build is
 ``-fdefault-real-8``, no FMA). The transcendentals are correctly rounded by
-default (:mod:`woof.da.var.crmath`), so every host gets the same words. With
+default (:mod:`woof.core.crmath`), so every host gets the same words. With
 ``libm="host"`` on a glibc host, the result matches the oracle dump
 (``woof_iv.bin``) word for word, except the GNSS-RO heights (below).
 
@@ -52,7 +52,8 @@ from pathlib import Path
 import numpy as np
 
 
-from . import crmath
+from woof.core import crmath
+from woof.obs.column_operators import msl2geo1 as _msl2geo1
 
 #: :func:`read_obs_ascii`'s ``libm`` choices.
 LIBMS = ("correctly-rounded", "host")
@@ -62,7 +63,7 @@ LIBMS = ("correctly-rounded", "host")
 def _libm(name: str = "correctly-rounded"):
     """The transcendentals WRFDA's gfortran build calls.
 
-    ``"correctly-rounded"`` (the default, :mod:`woof.da.var.crmath`) gives the
+    ``"correctly-rounded"`` (the default, :mod:`woof.core.crmath`) gives the
     same words on every host, so the CUDA and Metal hosts preprocess
     identically. ``"host"`` is :func:`woof.core.host_libm.scalar`: the opt-in
     glibc 2.39 transcription where the bridge has it, else the host C
@@ -391,23 +392,12 @@ def get_q_error(p: float, t: float, q: float, t_error: float, rh_error: float,
 
 
 def msl2geo1(z_km: float, lat: float, libm: str = "correctly-rounded") -> float:
-    """``da_msl2geo1``: geometric to geopotential height (km)."""
-    cm = _libm(libm)
-    a, b = 6378.1370e3, 6356.7523142e3
-    gp, ge = 9.8321849378, 9.7803253359
-    omega, gm, grav, ecc = 7.292115e-5, 3.986004418e14, 9.80665, 0.081819
-    flattening = (a - b) / a
-    somigliana = (b / a) * (gp / ge) - 1.0
-    grav_ratio = (omega * omega * a * a * b) / gm
-    if z_km == -999.0:
-        return -999.0
-    latr = lat * (3.14159265358979 / 180.0)
-    zm = z_km * 1000.0
-    s = cm.sin(latr)
-    sin2 = s * s
-    termg = ge * ((1.0 + somigliana * sin2) / cm.sqrt(1.0 - ecc * ecc * sin2))
-    termr = a / (1.0 + flattening + grav_ratio - 2.0 * flattening * sin2)
-    return ((termg / grav) * ((termr * zm) / (termr + zm))) * 0.001
+    """``da_msl2geo1``: geometric to geopotential height (km), with :func:`_libm`'s ``libm``.
+
+    The arithmetic is :func:`woof.obs.column_operators.msl2geo1`, shared with
+    :mod:`woof.da.obs_point`.
+    """
+    return _msl2geo1(z_km, lat, _libm(libm))
 
 
 # --------------------------------------------------------------------------- containers

@@ -27,7 +27,7 @@ Every arithmetic step is binary64 in WRFDA's order (the oracle build is
 ``-fdefault-real-8``, gfortran ``-O2``, no FMA). Element-wise NumPy over an
 independent index rounds exactly as the Fortran loop does; reductions are
 left-to-right loops. ``log``, ``exp`` and real ``**`` are correctly rounded
-by default (:mod:`woof.da.var.crmath`); ``libm="host"`` uses the host C
+by default (:mod:`woof.core.crmath`); ``libm="host"`` uses the host C
 library, which on a glibc host is the oracle's. Constant expressions that
 gfortran folds at compile time (``log(40.0/0.05)``) are always correctly
 rounded, as MPFR folds them.
@@ -54,7 +54,7 @@ from functools import lru_cache
 
 import numpy as np
 
-from . import crmath
+from woof.core import crmath
 from .obs_wrfda import MISSING_DATA, MISSING_R, WrfdaObs
 
 __all__ = ["Options", "innovations", "jo", "jo_total", "to_zk", "convert_zk",
