@@ -157,12 +157,87 @@ def test_what_e3sm_gets_wrong_past_bounds_is_refused():
                        n_cells_solve=tf["lsize"], forcing={}, state={}, dims={"nGlcZLevels": 5}, diagnostics={})
 
 
+def _export_args(name):
+    """The export's arguments for a case, as host arrays (refused before any launch)."""
+    case = _case(name)
+    pools = {"forcing": {}, "state": {}}
+    for pool, key, kind, value in oc._entries(case):
+        if pool in pools and kind in (5, 6):
+            pools[pool][key] = np.ascontiguousarray(value, dtype=np.float64)
+        elif pool in pools and kind == 7:
+            pools[pool][key] = np.ascontiguousarray(value, dtype=np.int32)
+    dims = {n: v for n, (k, v) in case["pools"]["forcing"].items() if k == 4}
+    diagnostics = {"landIceBoundaryLayerTracers": case["blt"].astype(np.float64),
+                   "landIceTracerTransferVelocities": case["tv"].astype(np.float64),
+                   "indexBLT": 1, "indexBLS": 2, "indexHeatTrans": 1, "indexSaltTrans": 2}
+    o2x = case["o2x"].astype(np.float64)
+    return case, dict(idx=oc.indices_for(case), opts=oc.options_for(case), o2x=o2x), dict(
+        n_cells_solve=case["lsize"], forcing=pools["forcing"], state=pools["state"], dims=dims,
+        diagnostics=diagnostics)
+
+
+@requires_gpu
+@pytest.mark.parametrize("name, change, match", [
+    ("gcase", lambda a, n: a["forcing"].update(avgTracersSurfaceValue=a["forcing"]["avgTracersSurfaceValue"][:n - 1]
+                                               .copy()), "at least nCellsSolve"),
+    ("gcase", lambda a, n: a["dims"].update(index_avgSalinitySurfaceValue=4), "index 4 is outside"),
+    ("gcase", lambda a, n: a["dims"].update(index_avgSSHGradientZonal=0), "index 0 is outside"),
+    ("gcase", lambda a, n: a["state"].update(layerThickness=a["state"]["layerThickness"][:, 0].copy()), "2-D"),
+    ("gcase", lambda a, n: a["state"].update(ssh=a["state"]["ssh"][:n - 1].copy()), "ssh"),
+    ("standalone", lambda a, n: a["forcing"].update(landIceMask=a["forcing"]["landIceMask"][:n - 1].copy()),
+     "landIceMask"),
+    ("coupled_tf3d", lambda a, n: a["diagnostics"].update(indexHeatTrans=3), "index 3 is outside"),
+    ("coupled_tf3d", lambda a, n: a["diagnostics"].update(landIceBoundaryLayerTracers=a["diagnostics"][
+        "landIceBoundaryLayerTracers"][:n - 1].copy()), "landIceBoundaryLayerTracers"),
+    ("coupled_tf3d", lambda a, n: a["forcing"].update(avgThermalForcingAtZLevels=np.ascontiguousarray(
+        a["forcing"]["avgThermalForcingAtZLevels"][:, :2])), "index 3 is outside"),
+    ("coupled_tf3d", lambda a, n: a["forcing"].update(avgThermalForcingAtZLevelsMask=np.ascontiguousarray(
+        a["forcing"]["avgThermalForcingAtZLevelsMask"][:, :2])), "index 3 is outside"),
+])
+def test_the_export_refuses_arrays_it_would_read_past(name, change, match):
+    case, head, args = _export_args(name)
+    change(args, case["lsize"])
+    with pytest.raises(ValueError, match=match):
+        occ.export_o2x(head["idx"], head["opts"], head["o2x"], **args)
+
+
+@pytest.mark.parametrize("change, match", [
+    (dict(config_land_ice_flux_mode="Standalone"), "config_land_ice_flux_mode"),
+    (dict(config_land_ice_flux_mode="diagnostic"), "config_land_ice_flux_mode"),
+    (dict(config_land_ice_flux_mode=" coupled"), "config_land_ice_flux_mode"),
+    (dict(config_glc_thermal_forcing_coupling_mode="3D"), "config_glc_thermal_forcing_coupling_mode"),
+    (dict(config_glc_thermal_forcing_coupling_mode="2d"), "config_glc_thermal_forcing_coupling_mode"),
+])
+def test_unknown_modes_are_refused(change, match):
+    _, _, opts = _refusal_setup(**change)
+    with pytest.raises(ValueError, match=match):
+        opts.check()
+    if "land_ice" in match:
+        with pytest.raises(ValueError, match=match):
+            occ.export_columns(oc.indices_for(_case("gcase")), opts)
+
+
+def test_the_known_modes_are_taken():
+    for mode, li in (("off", 0), ("pressure_only", 0), ("standalone", 1), ("data", 2), ("coupled   ", 3)):
+        _, _, opts = _refusal_setup(config_land_ice_flux_mode=mode)
+        opts.check()
+        assert occ._land_ice_mode(mode) == li
+    assert occ._glc_3d("3d ") and not occ._glc_3d("off")
+
+
 def test_the_default_path_does_not_call_the_coupling():
     """Opt-in: nothing under woof/ imports it but its own oracle module."""
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "ocn_coupling_e3sm" in p.read_text(encoding="utf-8")
              and p.name not in ("ocn_coupling_e3sm.py", "e3sm_ocean_coupling_oracle.py")]
     assert users == []
+    # and importing the package and its siblings does not load it
+    siblings = sorted(p.stem for p in (ROOT / "woof" / "hex" / "coupled").glob("*.py")
+                      if p.stem not in ("__init__", "ocn_coupling_e3sm"))
+    code = ("import sys, importlib, woof, woof.hex, woof.hex.coupled\n"
+            f"for m in {siblings!r}: importlib.import_module('woof.hex.coupled.' + m)\n"
+            "assert 'woof.hex.coupled.ocn_coupling_e3sm' not in sys.modules, 'loaded'\n")
+    subprocess.run([sys.executable, "-c", code], check=True, cwd=ROOT)
 
 
 @requires_gpu
@@ -215,6 +290,25 @@ def _mismatches(case, key, run=None):
     ("D(M(coeff_mushy, salinity), S(1.0, D(salinity, 1e3)))", "M(coeff_mushy, salinity)", "o2x/Fioo_q", "gcase"),
     # the thermal-forcing mask threshold inclusive
     ("if (m > 0.9) {", "if (m >= 0.9) {", "o2x/So_tf3d_mask01", "coupled_tf3d"),
+    # the solid runoff removed south of 60S, not 57S
+    ("-0.99483767345", "-1.04719666667", "forcing/iceRunoffFlux", "standalone"),
+    # the sea-ice pressure not capped
+    ("fmin_first(x[c1[j]], M(M(density0, gravity), 5.0))", "x[c1[j]]", "forcing/seaIcePressure", "gcase"),
+    # the 10 m wind not square-rooted
+    ("case R_SQRT: *dst = __dsqrt_rn(x[c1[j]]);", "case R_SQRT: *dst = x[c1[j]];", "forcing/windSpeed10m",
+     "standalone"),
+    # Faoo_h2otemp without cp_sw
+    ("M(M(fwtf[i], rho_sw), cp_sw)", "M(fwtf[i], rho_sw)", "o2x/Faoo_h2otemp", "gcase"),
+    # the accumulated frazil's latent heat dropped
+    ("seaIceEnergy[i] = M(accumulated[i], heatOfFusion);", "seaIceEnergy[i] = accumulated[i];", "o2x/Fioo_q",
+     "gcase"),
+    # land ice data sends the boundary layer and not its own fluxes (modes 2 and 3 swapped)
+    ("bool standaloneOrData = liMode == 1 || liMode == 2;", "bool standaloneOrData = liMode == 1 || liMode == 3;",
+     "o2x/Foxo_ismw", "data"),
+    ("if (liMode == 1 || liMode == 3) {", "if (liMode == 1 || liMode == 2) {", "o2x/So_blt", "coupled_tf3d"),
+    # the land-ice frazil's heat without the latent heat
+    ("o[col[O_Q_LI]] = D(M(accumulated[i], heatOfFusion), dt);", "o[col[O_Q_LI]] = D(accumulated[i], dt);",
+     "o2x/Foxo_q_li", "standalone"),
 ])
 def test_a_mutated_kernel_is_caught(monkeypatch, original, mutated, key, case):
     real = occ.module_source

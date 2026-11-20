@@ -33,6 +33,12 @@ list lacks (``Faoo_h2otemp``, ``Fioo_q``, ``Foxo_*``: looked up quietly,
 written to column 0), more ``nGlcZLevels`` than ``glc_nzoc``, and the
 removed runoff or the 10 m wind switched on without their arrays.
 
+NaN inputs are outside the word-for-word claim. gfortran's MAX and MIN with
+a NaN argument depend on the code's shape (on the oracle compiler,
+``max(nan, z)`` with a variable ``z`` returns ``z`` but ``max(nan, 0.0)`` with
+the literal returns the NaN), and GPU arithmetic returns a canonical NaN
+where x86 keeps the operand's payload.
+
 The kernels (``ocn_coupling_e3sm.cu``) are held word for word to E3SM's
 routines cut verbatim out of ``ocn_comp_mct.F`` and run on the pinned
 framework stubs, built with gfortran ``-O0 -ffp-contract=off``
@@ -182,6 +188,8 @@ class Options:
             raise NotImplementedError(f"E3SM's {', '.join(refused)} coupling is not ported")
         if int(self.ocn_cpl_dt) != self.ocn_cpl_dt or self.ocn_cpl_dt == 0:
             raise ValueError("ocn_cpl_dt is the coupling interval in whole seconds, nonzero")
+        _land_ice_mode(self.config_land_ice_flux_mode)
+        _glc_3d(self.config_glc_thermal_forcing_coupling_mode)
 
 
 _IMPORT_COPIES = (
@@ -335,8 +343,25 @@ _O_ORDER = ("So_t", "So_s", "So_u", "So_v", "So_ssh", "So_dhdx", "So_dhdy", "Fao
             "Foxo_frazil_li", "So_blt", "So_bls", "So_htv", "So_stv", "So_rhoeff")
 
 
+#: config_land_ice_flux_mode's possible values (Registry.xml); E3SM stops on any other at init
+_LAND_ICE_MODES = {"off": 0, "pressure_only": 0, "standalone": 1, "data": 2, "coupled": 3}
+#: config_glc_thermal_forcing_coupling_mode's possible values
+_GLC_TF_MODES = ("off", "3d")
+
+
 def _land_ice_mode(mode: str) -> int:
-    return {"standalone": 1, "data": 2, "coupled": 3}.get(mode.rstrip(), 0)
+    key = mode.rstrip()  # Fortran's trim drops trailing blanks only
+    if key not in _LAND_ICE_MODES:
+        raise ValueError(f"config_land_ice_flux_mode {mode!r} is not one of {', '.join(_LAND_ICE_MODES)} "
+                         "(E3SM stops on it: 'unknown land_ice_flux_mode')")
+    return _LAND_ICE_MODES[key]
+
+
+def _glc_3d(mode: str) -> bool:
+    if mode.rstrip() not in _GLC_TF_MODES:
+        raise ValueError(f"config_glc_thermal_forcing_coupling_mode {mode!r} is not one of "
+                         f"{', '.join(_GLC_TF_MODES)}")
+    return mode.rstrip() == "3d"
 
 
 def export_columns(idx: Indices, opts: Options) -> list[str]:
@@ -373,7 +398,7 @@ def export_o2x(idx: Indices, opts: Options, o2x, *, n_cells_solve: int, forcing:
         raise ValueError(f"o2x lacks {', '.join(missing)}, which the export writes: E3SM looks them up quietly "
                          "and writes column 0 (out of bounds)")
     li = _land_ice_mode(opts.config_land_ice_flux_mode)
-    glc3d = opts.config_glc_thermal_forcing_coupling_mode.rstrip() == "3d"
+    glc3d = _glc_3d(opts.config_glc_thermal_forcing_coupling_mode)
     n_glc_z = int(dims.get("nGlcZLevels", 0)) if glc3d else 0
     if n_glc_z > idx.glc_nzoc:
         raise ValueError(f"nGlcZLevels ({n_glc_z}) exceeds glc_nzoc ({idx.glc_nzoc}): E3SM writes column 0")
@@ -382,33 +407,52 @@ def export_o2x(idx: Indices, opts: Options, o2x, *, n_cells_solve: int, forcing:
     dummy = cp.zeros(1, dtype=np.float64)
     idummy = cp.zeros(1, dtype=np.int32)
 
-    def arr(pool, name, on=True):
+    def arr(pool, name, on=True, columns=None):
+        """The array, its width; refuses what the kernel would read past:
+        fewer than nCellsSolve cells, or (``columns``: the 0-based
+        components it reads) a component outside a 2-D array."""
         if not on:
             return dummy, 1
         a = _f64(name, pool[name])
-        return a, (int(a.shape[1]) if a.ndim == 2 else 1)
+        if a.ndim != (1 if columns is None else 2) or int(a.shape[0]) < n_cells_solve:
+            raise ValueError(f"{name} must be {'1' if columns is None else '2'}-D with at least nCellsSolve "
+                             f"({n_cells_solve}) cells; it is {a.shape}")
+        width = int(a.shape[1]) if a.ndim == 2 else 1
+        bad = [k + 1 for k in (columns or ()) if not 0 <= k < width]
+        if bad:
+            raise ValueError(f"{name} has {width} components; 1-based index {bad[0]} is outside it")
+        return a, width
 
-    tsv, n_tsv = arr(forcing, "avgTracersSurfaceValue")
-    vel, n_vel = arr(forcing, "avgSurfaceVelocity")
-    grad, n_grad = arr(forcing, "avgSSHGradient")
+    def index(pool, name):
+        return int(pool.get(name, 1)) - 1
+
+    i_t, i_s = dims["index_avgTemperatureSurfaceValue"] - 1, dims["index_avgSalinitySurfaceValue"] - 1
+    i_u, i_v = dims["index_avgSurfaceVelocityZonal"] - 1, dims["index_avgSurfaceVelocityMeridional"] - 1
+    i_dx, i_dy = dims["index_avgSSHGradientZonal"] - 1, dims["index_avgSSHGradientMeridional"] - 1
+    i_blt, i_bls = index(diagnostics, "indexBLT"), index(diagnostics, "indexBLS")
+    i_ht, i_st = index(diagnostics, "indexHeatTrans"), index(diagnostics, "indexSaltTrans")
+    tsv, n_tsv = arr(forcing, "avgTracersSurfaceValue", columns=(i_t, i_s))
+    vel, n_vel = arr(forcing, "avgSurfaceVelocity", columns=(i_u, i_v))
+    grad, n_grad = arr(forcing, "avgSSHGradient", columns=(i_dx, i_dy))
     sa = li in (1, 2)
     frz = opts.frazil_ice_active
     mask = forcing.get("landIceMask") if frz else None
-    if mask is not None and (mask.dtype != np.int32 or not mask.flags.c_contiguous):
-        raise ValueError("landIceMask must be C-contiguous int32")
-    lt, n_vert = arr(state, "layerThickness", frz)
-    blt, n_blt = arr(diagnostics, "landIceBoundaryLayerTracers", li in (1, 3))
-    tv, n_tv = arr(diagnostics, "landIceTracerTransferVelocities", li in (1, 3))
-    tf, n_z = arr(forcing, "avgThermalForcingAtZLevels", glc3d)
-    tfm, _ = arr(forcing, "avgThermalForcingAtZLevelsMask", glc3d)
+    if mask is not None and (mask.dtype != np.int32 or not mask.flags.c_contiguous or mask.ndim != 1
+                             or int(mask.shape[0]) < n_cells_solve):
+        raise ValueError("landIceMask must be C-contiguous 1-D int32 with at least nCellsSolve cells")
+    lt, n_vert = arr(state, "layerThickness", frz, columns=(0,))
+    blt, n_blt = arr(diagnostics, "landIceBoundaryLayerTracers", li in (1, 3), columns=(i_blt, i_bls))
+    tv, n_tv = arr(diagnostics, "landIceTracerTransferVelocities", li in (1, 3), columns=(i_ht, i_st))
+    levels = tuple(range(n_glc_z))
+    tf, n_z = arr(forcing, "avgThermalForcingAtZLevels", glc3d, columns=levels)
+    tfm, _ = arr(forcing, "avgThermalForcingAtZLevelsMask", glc3d, columns=levels)
+    if glc3d and tfm.shape != tf.shape:
+        raise ValueError("avgThermalForcingAtZLevelsMask must have avgThermalForcingAtZLevels' shape")
     _launch("ocn_export_e3sm", n_cells_solve, (
         o2x, np.int32(idx.no2x), _ints(col), np.int32(n_cells_solve),
-        tsv, np.int32(n_tsv), np.int32(dims["index_avgTemperatureSurfaceValue"] - 1),
-        np.int32(dims["index_avgSalinitySurfaceValue"] - 1),
-        vel, np.int32(n_vel), np.int32(dims["index_avgSurfaceVelocityZonal"] - 1),
-        np.int32(dims["index_avgSurfaceVelocityMeridional"] - 1),
-        arr(state, "ssh")[0], grad, np.int32(n_grad), np.int32(dims["index_avgSSHGradientZonal"] - 1),
-        np.int32(dims["index_avgSSHGradientMeridional"] - 1),
+        tsv, np.int32(n_tsv), np.int32(i_t), np.int32(i_s),
+        vel, np.int32(n_vel), np.int32(i_u), np.int32(i_v),
+        arr(state, "ssh")[0], grad, np.int32(n_grad), np.int32(i_dx), np.int32(i_dy),
         arr(forcing, "avgTotalFreshWaterTemperatureFlux")[0], np.float64(RHO_SW), np.float64(CP_SW),
         np.float64(T0_KELVIN),
         np.int32(li), arr(forcing, "avgLandIceFreshwaterFlux", sa)[0], arr(forcing, "avgLandIceHeatFlux", sa)[0],
@@ -422,8 +466,6 @@ def export_o2x(idx: Indices, opts: Options, o2x, *, n_cells_solve: int, forcing:
         arr(state, "accumulatedFrazilIceMass", frz)[0], lt, np.int32(n_vert),
         np.float64(opts.config_frazil_heat_of_fusion), np.float64(int(opts.ocn_cpl_dt)),
         cp.asarray(np.array(opts.open_ocean_freezing, dtype=np.float64)),
-        blt, np.int32(n_blt), np.int32(diagnostics.get("indexBLT", 1) - 1),
-        np.int32(diagnostics.get("indexBLS", 1) - 1),
-        tv, np.int32(n_tv), np.int32(diagnostics.get("indexHeatTrans", 1) - 1),
-        np.int32(diagnostics.get("indexSaltTrans", 1) - 1),
+        blt, np.int32(n_blt), np.int32(i_blt), np.int32(i_bls),
+        tv, np.int32(n_tv), np.int32(i_ht), np.int32(i_st),
         np.int32(glc3d), np.int32(n_glc_z), _ints(idx.tf3d), _ints(idx.tf3d_mask), tf, tfm, np.int32(n_z)))

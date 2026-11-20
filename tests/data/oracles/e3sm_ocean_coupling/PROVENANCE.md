@@ -72,6 +72,12 @@ greater (smaller): `max(-0.0, 0.0)` is -0.0, `min(-0.0, 0.0)` is -0.0. MCT's
 `die` exits with status 0; make_fixture.py counts a `FATAL` line with no
 output as the stop. `aborts.json` keeps each stop's line.
 
+NaN inputs are outside the word-for-word claim, and no case has one.
+gfortran's MAX and MIN with a NaN depend on the code's shape: on this
+compiler `max(nan, z)` with a variable `z` returns `z`, but `max(nan, 0.0)`
+with the literal returns the NaN. GPU arithmetic also returns a canonical NaN
+where x86 keeps the operand's payload.
+
 ## Grading
 
 `tests/test_e3sm_ocean_coupling_parity.py` runs
