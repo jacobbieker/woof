@@ -61,6 +61,39 @@ The port lives in `woof.da.var`. Only this command and its tests import it
 | `oracle` | binary64, WRFDA's serial dot product | CUDA or Metal |
 | `production` | binary32, fixed-tree dot product | CUDA or Metal |
 
+## Speed
+
+Minimisation only (no I/O, no innovation step), the tutorial's namelist
+(50 iterations at most, `orthonorm_gradient`), measured 2026-11-20. The
+A6000 was shared with two other jobs at 100% utilisation, so its times
+are upper bounds.
+
+| case | tier | M3 Max (Metal) | A6000 (CUDA) |
+|---|---|---|---|
+| tutorial, 90x60x41, 41,857 observations, 29 iterations | `reference` | 10.5 s | 13.4 s |
+| | `oracle` | 81 s | 29 s |
+| | `production` | 1.4 s | 2.3 s |
+| synthetic 200x200x50, 101,000 obs values, 50 iterations | `production` | 2.9-3.1 s | 3.6-3.7 s |
+
+The plan's targets (section 4.12) are 20 s on the M3 Max and 5 s on the
+A6000 for the 200x200x50 case. `WOOF_VAR_PERF=1 pytest
+tests/test_var_perf.py` runs that gate; `tests/_var_perf_case.py` builds the
+case (a random cv5 `be.dat` through the writer, a smooth first guess and
+sound, synop, airep and geoamv innovations). Serial WRFDA takes 7.9 s for
+the whole tutorial run.
+
+- `H'` and `H'^T` run on the device (`kernels/var_obs.cu`). `H'` is a
+  gather. `H'^T` is WRFDA's scatter written as a gather: one thread per
+  model point adds its contributions in the serial loops' order, so there
+  are no atomics. The words are the host operators', in both tiers.
+  `gpspw` and `satem` keep their host code; they feed the same gather.
+- Per iteration at 200x200x50, production: `U` 10-13 ms, `U^T` 12-18 ms,
+  `H'` under 1 ms, `H'^T` about 4 ms. The re-orthonormalisation's dot
+  products stay on the device, so an iteration waits on the host three
+  times rather than once per stored gradient.
+- The `oracle` tier keeps `da_dot`'s serial order: a block forms the
+  products and one thread adds them. Its time is recorded, not gated.
+
 ## Checked against WRFDA 4.7.1
 
 The reference is a serial GNU WRFDA 4.7.1 on the WRFDA tutorial case:
