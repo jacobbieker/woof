@@ -65,8 +65,8 @@ from typing import Any, Callable
 import numpy as np
 
 from woof.nn import NOT_WRF_IDENTICAL
-from woof.nn.launch import (NNConfigError, NNSettings, configured, read_settings, refuse_identity_door,
-                            refuse_streamed)
+from woof.nn.launch import (NNConfigError, NNSettings, check_intended_mode, configured, read_settings,
+                            refuse_identity_door, refuse_streamed)
 from woof.nn.manifest import FieldSpec
 
 G = 9.81
@@ -197,6 +197,10 @@ class WrfColumnSeat:
         self.settings = settings
         self.scheme = settings.scheme
         self.applies = settings.applies
+        if settings.tap_target != "physics":
+            raise NNConfigError(
+                f"--nn tap_target = {settings.tap_target!r} on the WRF route: the nudging-increment target is "
+                "recorded on hex (woof hex forecast --nudging); the WRF route's tap records the scheme's tendency")
         nz, ny, nx = state.p.shape
         self.shape = (nz, ny, nx)
         self.model = self.manifest = self.policy = None
@@ -278,6 +282,7 @@ class WrfColumnSeat:
             raise NNConfigError(f"--nn model {m.name}: every 3-D field and output must span the same "
                                 f"number of levels; the artefact has {sorted(depths)}")
         self.levels = depths.pop()
+        check_intended_mode(m, settings)
         self.policy = SafetyPolicy(out_of_range=settings.out_of_range, margin=settings.margin,
                                    limit_outputs=settings.limit_outputs, positivity=settings.positivity,
                                    fixer=settings.fixer)

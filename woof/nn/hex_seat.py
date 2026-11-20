@@ -84,7 +84,8 @@ from typing import Any, Callable, Mapping
 import numpy as np
 
 from woof.nn import NOT_WRF_IDENTICAL
-from woof.nn.launch import NNConfigError, NNSettings, configured, read_settings, refuse_identity_door
+from woof.nn.launch import (NNConfigError, NNSettings, check_intended_mode, configured, read_settings,
+                            refuse_identity_door)
 from woof.nn.manifest import FieldSpec
 
 #: MPAS's ``rvord`` in float32, as the couplers take it (461.6 / 287).
@@ -303,6 +304,8 @@ class HexColumnSeat:
         self.applied_cells = self.nc if mask is None else int(mask.sum())
         self._resume = resume
         self.calls = 0
+        self.target = settings.tap_target
+        self._pending = None
         self.tap = tap
         if self.tap is None and settings.mode == "tap":
             from woof.nn.tap import TendencyTap
@@ -311,6 +314,7 @@ class HexColumnSeat:
                 attrs={"route": "hex", "scheme": self.scheme, "grid": [self.nz, self.nc], "dt": self.dt,
                        "levels": self.levels, "tap_every": settings.tap_every, "tap_seed": settings.tap_seed,
                        "interior_cells": int(self.pool.size),
+                       **({"target": "nudging"} if self.target == "nudging" else {}),
                        "column": "0-based cell index on the run's mesh (the real cells, no padding)"})
 
     scheme = "total"
@@ -329,6 +333,7 @@ class HexColumnSeat:
             raise NNConfigError(f"--nn model {m.name}: every 3-D field and output must span the same "
                                 f"number of levels; the artefact has {sorted(depths)}")
         self.levels = depths.pop()
+        check_intended_mode(m, settings)
         self.policy = SafetyPolicy(out_of_range=settings.out_of_range, margin=settings.margin,
                                    limit_outputs=settings.limit_outputs, positivity=settings.positivity,
                                    fixer=settings.fixer)
@@ -460,8 +465,49 @@ class HexColumnSeat:
             self.tap.truncate(float(time_seconds))
             self._resume = False
         cells = self.draw(time_seconds)
-        x, y, _ = self.columns(sources, state=state, saved=saved, cells=cells)
+        x, y, more = self.columns(sources, state=state, saved=saved, cells=cells)
+        if self.target == "nudging":
+            # The record waits for the nudging's increment (before_nudging / after_nudging).
+            self._pending = {"x": x, "cells": cells, "time": float(time_seconds), "step": step, "more": more}
+            return
         self.tap.append(_host(x), _host(y), time_seconds=float(time_seconds), step=step, column_index=cells)
+
+    def _held(self, sources, cells) -> dict:
+        """The drawn cells' held theta and moisture sources (copies)."""
+        cp, L, nc = self.cp, self.levels, self.nc
+        index = cp.asarray(np.asarray(cells, dtype=np.int32))
+        iq = {name: self.names.index(name) for name in self.names}
+        species = {name[1:] for name in self.output_names if name.startswith("dq")} | {"qv"}
+        out = {"rho_theta": cp.take(sources.rho_theta[:L, :nc], index, axis=1)}
+        for q in species:
+            out[q] = cp.take(sources.scalars[iq[q], :L, :nc], index, axis=1)
+        return out
+
+    def before_nudging(self, sources) -> None:
+        """``tap_target = "nudging"``: hold the drawn cells' sources as the
+        analysis nudging finds them (after SPPT/SKEB and IAU)."""
+        if self._pending is not None:
+            self._pending["before"] = self._held(sources, self._pending["cells"])
+
+    def after_nudging(self, sources, *, applied: bool = True) -> None:
+        """``tap_target = "nudging"``: record the nudging's increment to the
+        held sources as physical rates, decoupled as the scheme's are (so
+        coupling the recorded rate as a residual adds the same source).
+        ``applied`` is False on a step the nudging left alone (past
+        ``gfdda_end_h``): no record, rather than a zero target."""
+        pending, self._pending = self._pending, None
+        if pending is None or "before" not in pending or not applied:
+            return
+        after = self._held(sources, pending["cells"])
+        before = pending["before"]
+        more = pending["more"]
+        rates = decouple(self.cp, rho_theta=after["rho_theta"] - before["rho_theta"],
+                         scalars={q: after[q] - before[q] for q in after if q != "rho_theta"},
+                         mass=more["mass"], theta_m=more["theta_m"], qv=more["qv"])
+        f32 = np.float32
+        y = self.cp.concatenate([rates[name].astype(f32, copy=False) for name in self.output_names], axis=0)
+        self.tap.append(_host(pending["x"]), _host(y), time_seconds=pending["time"], step=pending["step"],
+                        column_index=pending["cells"])
 
     def apply(self, sources, *, state, saved) -> None:
         cp, L, nc, m = self.cp, self.levels, self.nc, self.manifest
@@ -610,6 +656,10 @@ def attach(coupling, *, config, mesh, n_cells: int, vertical, dt: float, executi
                          sphere_radius=(getattr(mesh, "attrs", None) or {}).get("sphere_radius"))
     if resumed:
         check_carried(seat.identity(), carried)
+    if settings.tap_target == "nudging" and getattr(coupling, "nudging", None) is None:
+        raise NNConfigError(
+            f"--nn {settings.source}: tap_target = \"nudging\" records the analysis nudging's increment, and "
+            "this run has no analysis nudging (add --nudging CFG --nudging-analysis INIT ...)")
     coupling.nn_seat = seat
     coupling.dycore.nn_seat = seat
     return seat

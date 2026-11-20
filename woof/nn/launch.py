@@ -39,6 +39,11 @@ imported by a forecast.
                  from the interior: a specified or nested domain's
                  ``spec_bdy_width`` ring is excluded.
 ``tap_seed``     the draw's seed (default 0).
+``tap_target``   what the ``targets`` record holds: ``"physics"`` (default),
+                 the scheme's tendency, the target of an emulator; or
+                 ``"nudging"`` (hex only, with ``--nudging``), the analysis
+                 nudging's increment to the same held sources, the target
+                 of a correction model (``mode = "residual"``).
 
 Applying modes only (the inputs, outputs and levels are the artefact's):
 
@@ -66,7 +71,8 @@ ENV_CONFIG = "WOOF_NN_CONFIG"
 MODES = ("tap", "residual", "replace")
 APPLYING = ("residual", "replace")
 SCHEMES = ("pbl", "radiation", "cumulus", "total")
-_TAP_KEYS = {"inputs", "outputs", "levels", "tap", "tap_every", "tap_columns", "tap_seed"}
+_TAP_KEYS = {"inputs", "outputs", "levels", "tap", "tap_every", "tap_columns", "tap_seed", "tap_target"}
+TAP_TARGETS = ("physics", "nudging")
 _APPLY_KEYS = {"model", "backend", "device", "out_of_range", "margin", "fixer", "limit_outputs",
                "positivity"}
 _KEYS = {"mode", "scheme"} | _TAP_KEYS | _APPLY_KEYS
@@ -88,6 +94,7 @@ class NNSettings:
     tap_every: int
     tap_columns: int
     tap_seed: int
+    tap_target: str = "physics"
     model: Path | None = None
     backend: str = "auto"
     device: str | None = None
@@ -121,6 +128,18 @@ def add_arguments(parser) -> None:
              "(docs/nn-physics.md); mode = \"tap\" records a scheme's inputs and tendencies "
              "as training data and leaves the forecast unchanged; \"residual\" and \"replace\" "
              "apply a column model, which makes the run not WRF-identical")
+
+
+def check_intended_mode(manifest, settings) -> None:
+    """Refuse an artefact the trainer marked for the other applying mode
+    (``training.intended_mode``: ``replace`` for an emulator of the
+    scheme, ``residual`` for a correction trained on the nudging
+    increment).  An artefact without the mark is admitted."""
+    intended = (manifest.training or {}).get("intended_mode")
+    if intended in ("residual", "replace") and intended != settings.mode:
+        raise NNConfigError(
+            f"--nn model {manifest.name} was trained for mode = {intended!r} "
+            f"({(manifest.training or {}).get('target')}); this run asks for mode = {settings.mode!r}")
 
 
 def read_settings(path) -> NNSettings:
@@ -177,6 +196,9 @@ def read_settings(path) -> NNSettings:
     seed = table.get("tap_seed", 0)
     if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
         raise NNConfigError(f"--nn {path}: tap_seed must be a non-negative integer; got {seed!r}")
+    tap_target = table.get("tap_target", "physics")
+    if tap_target not in TAP_TARGETS:
+        raise NNConfigError(f"--nn {path}: tap_target must be one of {TAP_TARGETS}; got {tap_target!r}")
     tap = table.get("tap")
     if mode == "tap" and not tap:
         raise NNConfigError(f"--nn {path}: mode = \"tap\" needs tap = \"<store directory>\"")
@@ -213,7 +235,7 @@ def read_settings(path) -> NNSettings:
         source=path, mode=mode, scheme=scheme, inputs=names("inputs"), outputs=names("outputs"),
         levels=positive("levels", None), tap=None if tap is None else (path.parent / tap).resolve(),
         tap_every=positive("tap_every", 1), tap_columns=positive("tap_columns", 256), tap_seed=seed,
-        **apply)
+        tap_target=tap_target, **apply)
 
 
 def refuse_identity_door(what: str) -> None:

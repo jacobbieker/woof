@@ -214,10 +214,22 @@ time. The manifest's statistics come from the training samples:
   hundredth of the field's largest level limit, so a level that never saw a
   non-zero target is not clamped to zero online).
 
-The tap's targets are the scheme's own tendency, so a trained artefact is
-an emulator of the scheme, for `mode = "replace"`. Under
-`mode = "residual"` its rate would be added on top of the scheme's; a
-residual model needs a reference target that the tap does not record.
+By default the tap's targets are the scheme's own tendency, so a trained
+artefact is an emulator of the scheme, for `mode = "replace"`. A residual
+model needs a reference target. On hex that target is the increment of
+analysis nudging. Run with `--nudging CFG --nudging-analysis INIT ...` (grid
+nudging toward analyses on the run's mesh, `woof.hex.nudging`) and tap with
+`tap_target = "nudging"`. The record then holds, at each sampled step, the
+nudging's increment to the held theta and moisture sources, decoupled into
+rates exactly as the scheme's are: what the model lacked to stay on the
+analyses. This follows Watt-Meyer et al.'s nudging-tendency correction. The
+tap only reads: a nudged run that taps is byte-identical to the same
+nudged run without `--nn`. `tap_target = "nudging"` is refused without
+nudging, on the WRF route, and in an applying mode. The trainer marks each
+artefact's `training.intended_mode` as `replace` (a physics tap) or
+`residual` (a nudging tap), and both seats refuse an artefact in the
+other mode. A sampled step the nudging leaves alone (past `gfdda_end_h`)
+records nothing, so the record holds no false zero targets.
 Samples are ordered by model time before the split, and a time recorded
 twice (a resumed run appends) keeps its last record.
 
