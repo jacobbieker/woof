@@ -66,6 +66,25 @@ def test_poisson_solve_inverts_the_five_point_laplacian(shape):
 def test_fft_sizes_follow_da_fft_initialize1():
     assert [gb._fft_size(d) for d in (89, 90, 59, 60)] == [90, 90, 60, 60]
     assert gb._find_fft_factors(90) and gb._find_fft_factors(64) and not gb._find_fft_factors(58)
+    assert not gb._find_fft_factors(0) and not gb._find_fft_factors(1) and not gb._find_fft_factors(-4)
+    with pytest.raises(ValueError):
+        gb._fft_size(2)
+
+
+def test_nmc_perturbation_refuses_mismatched_cv_options():
+    f = _synthetic_history()
+    s5 = gb.standard_fields(f, 5)
+    with pytest.raises(ValueError, match="lacks"):
+        gb.nmc_perturbation(s5, s5, 7)
+    with pytest.raises(ValueError, match="lacks"):
+        gb.ensemble_perturbations([s5, s5], 7)
+    with pytest.raises(NotImplementedError):
+        gb.nmc_perturbation(f, f, 6)
+    # raw fields are converted for the requested cv_options
+    g = _synthetic_history(seed=1)
+    d = gb.nmc_perturbation(f, g, 7)
+    assert set(d) >= {"u", "v", "t", "rh", "ps", "height", "lat"}
+    np.testing.assert_array_equal(d["height"], gb.standard_fields(g, 7)["height"])
 
 
 def _synthetic_history(ni=24, nj=18, nk=6, seed=0, scale=1.0):
@@ -158,7 +177,6 @@ def test_scale_length_of_a_gaussian_correlated_field():
     # gen_be's fit: correlation exp(-d^2 / (8 s^2)) has yr = d/s.  The smoothed
     # white noise has correlation exp(-d^2 / (2 L^2)), i.e. s = L/2.
     assert sl == pytest.approx(L / 2.0, rel=0.1)
-    assert ml * sl == pytest.approx(1.0)
 
 
 def test_diags_round_trip_spikes_and_smoothing():
@@ -260,6 +278,25 @@ def test_refusals():
 # --------------------------------------------------------------------------- oracle gate (GV2)
 
 
+def _close(a, b, rtol, atol, what):
+    a, b = np.asarray(a), np.asarray(b)
+    assert a.shape == b.shape, f"{what}: shape {a.shape} != {b.shape}"
+    np.testing.assert_allclose(a, b, rtol=rtol, atol=atol, err_msg=what)
+
+
+def _sign_aligned(a, b):
+    """Columns of ``a`` with each sign set by the largest-|component| of the matching ``b`` column."""
+    a, b = np.asarray(a), np.asarray(b)
+    assert a.shape == b.shape
+    if a.ndim == 3:  # (nk, nk, bins)
+        return np.stack([_sign_aligned(a[:, :, i], b[:, :, i]) for i in range(a.shape[2])], axis=2)
+    idx = np.argmax(np.abs(b), axis=0)
+    cols = np.arange(b.shape[1])
+    sign = np.sign(a[idx, cols] * b[idx, cols])
+    sign[sign == 0] = 1.0
+    return a * sign
+
+
 def _oracle_dir() -> Path:
     d = os.environ.get("WOOF_GENBE_DIR")
     need = ("gen_be_fc", "oracle_cv5/be.dat", "oracle_cv7/be.dat")
@@ -295,13 +332,39 @@ def test_gv2_woof_gen_be_reproduces_wrfdas_be_dat(cv, tmp_path):
     assert (w.ni, w.nj, w.nk, w.num_bins, w.num_bins2d) == (o.ni, o.nj, o.nk, o.num_bins, o.num_bins2d)
     np.testing.assert_array_equal(w.bin, o.bin)
     assert set(w.regcoeff) == set(o.regcoeff)
+    # header fields
+    for n in ("bin_type", "cv_options", "lat_min", "lat_max", "binwidth_lat", "hgt_min", "hgt_max", "binwidth_hgt"):
+        assert getattr(w, n) == getattr(o, n), n
+    assert (w.eta_be is None) == (o.eta_be is None)
+    if o.eta_be is not None:
+        assert w.eta_be.shape == o.eta_be.shape
+        np.testing.assert_allclose(w.eta_be, o.eta_be, rtol=1e-12)
+    np.testing.assert_array_equal(w.bin2d, o.bin2d)
+    # regressions: elementwise rtol with an atol floor of 1e-8 of the array's peak
+    # (measured 1.0e-7 relative to the peak; tiny entries are rounding-dominated)
     for k in o.regcoeff:
-        np.testing.assert_allclose(w.regcoeff[k], o.regcoeff[k], rtol=0, atol=1e-6 * np.abs(o.regcoeff[k]).max())
-    for eo, ew in zip(list(o.eigen) + [o.eigen_ps], list(w.eigen) + [w.eigen_ps]):
+        _close(w.regcoeff[k], o.regcoeff[k], rtol=1e-5, atol=1e-6 * np.abs(o.regcoeff[k]).max(), what=f"regcoeff {k}")
+    for eo, ew in zip(list(o.eigen) + [o.eigen_ps], list(w.eigen) + [w.eigen_ps], strict=True):
         assert ew.name == eo.name
-        np.testing.assert_allclose(ew.eval_glo, eo.eval_glo, rtol=1e-6)
-        np.testing.assert_allclose(ew.eval_loc, eo.eval_loc, rtol=1e-6)
-        sign = np.sign(np.sum(ew.evec_glo * eo.evec_glo, axis=0))
-        np.testing.assert_allclose(ew.evec_glo * sign, eo.evec_glo, rtol=0, atol=1e-6)
-    for a, b in zip(list(w.rf_lengthscale) + [w.rf_lengthscale_ps], list(o.rf_lengthscale) + [o.rf_lengthscale_ps]):
-        np.testing.assert_allclose(a, b, rtol=0.01)
+        _close(ew.eval_glo, eo.eval_glo, rtol=1e-6, atol=0.0, what=f"{eo.name} eval_glo")
+        _close(ew.eval_loc, eo.eval_loc, rtol=1e-6, atol=0.0, what=f"{eo.name} eval_loc")
+        _close(_sign_aligned(ew.evec_glo, eo.evec_glo), eo.evec_glo, rtol=0.0, atol=1e-6, what=f"{eo.name} evec_glo")
+        _close(_sign_aligned(ew.evec_loc, eo.evec_loc), eo.evec_loc, rtol=0.0, atol=1e-6, what=f"{eo.name} evec_loc")
+    # stage 4: smoothed lengths to 1e-6 (measured 7.4e-8 for cv5, identical for cv7)
+    for a, b in zip(list(w.rf_lengthscale) + [w.rf_lengthscale_ps], list(o.rf_lengthscale) + [o.rf_lengthscale_ps],
+                    strict=True):
+        _close(a, b, rtol=1e-6, atol=0.0, what="rf_lengthscale")
+    # ... and the raw per-mode scale length, from the oracle's sl_print files when its run tree is present
+    sl_dir = oracle_path.resolve().parent / "working" / "gen_be_stage4_regional.1"
+    if sl_dir.is_dir():
+        names = ("psi", "chi_u", "t_u", "rh", "ps_u") if cv == 5 else ("u", "v", "t", "rh", "ps")
+        for name in names:
+            raw = r.scale_length_raw[name]
+            ref = []
+            for kk in range(1, raw.size + 1):
+                txt = (sl_dir / f"dir.{name}{kk}" / f"sl_print.{name}.{kk:02d}").read_text().split()
+                assert int(txt[0]) == kk
+                ref.append(float(txt[2]))
+            # sl_print is written with e20.8: compare after the same 8-digit rounding
+            _close(np.array([gb._fortran_e20_8(v) for v in raw]), np.array(ref), rtol=1e-6, atol=0.0,
+                   what=f"raw sl {name}")

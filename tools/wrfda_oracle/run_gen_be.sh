@@ -19,7 +19,36 @@ export FC_DIR=$W/genbe/gen_be_fc
 export RUN_DIR=$W/genbe/run/cv${NL_CV_OPTIONS}
 export DOMAIN=01 FCST_RANGE1=24 FCST_RANGE2=12 INTERVAL=12 STRIDE=1 NUM_JOBS=${NUM_JOBS:-8}
 export USE_RFi=true
+# The forecast tarball must be the one the manifest pins (FC_TARBALL = the
+# downloaded gen_be_forecasts_200802.tar.gz; skipped with a note if unset).
+MANIFEST=${MANIFEST:-$(cd "$(dirname "$0")/../.." && pwd)/tests/data/wrfda471/manifest.json}
+if [ -n "${FC_TARBALL:-}" ]; then
+  want=$(grep -A3 '"forecasts"' "$MANIFEST" | sed -n 's/.*"sha256": *"\([0-9a-f]*\)".*/\1/p' | head -1)
+  got=$(sha256sum "$FC_TARBALL" | cut -d' ' -f1)
+  [ "$want" = "$got" ] || { echo "forecast tarball SHA $got != manifest $want" >&2; exit 1; }
+else
+  echo "run_gen_be.sh: FC_TARBALL not set; forecast tarball SHA not verified" >&2
+fi
 rm -rf "$RUN_DIR"; mkdir -p "$RUN_DIR"
-ksh "$SCRIPTS_DIR/gen_be/gen_be.ksh" > "$RUN_DIR/../gen_be.cv${NL_CV_OPTIONS}.log" 2>&1
+LOG="$RUN_DIR/../gen_be.cv${NL_CV_OPTIONS}.log"
+rc=0
+ksh "$SCRIPTS_DIR/gen_be/gen_be.ksh" > "$LOG" 2>&1 || rc=$?
+# gen_be.ksh does not stop on a failed stage: check the exit status, the
+# stage logs and logs' own error text, then each stage's expected output.
+[ "$rc" -eq 0 ] || { echo "gen_be.ksh exited $rc (see $LOG)" >&2; exit 1; }
+if grep -l -i -E "^ *(error|fatal)|forrtl|segmentation fault|Program received signal|STOP [1-9]|Abnormal termination|No such file" \
+     "$RUN_DIR"/gen_be_*.log "$LOG" 2>/dev/null | grep -q .; then
+  echo "gen_be stage failure; offending logs:" >&2
+  grep -l -i -E "^ *(error|fatal)|forrtl|segmentation fault|Program received signal|STOP [1-9]|Abnormal termination|No such file" \
+    "$RUN_DIR"/gen_be_*.log "$LOG" >&2
+  exit 1
+fi
+need="gen_be_stage1.log gen_be_stage4_regional.log gen_be_diags.log"
+[ "${NL_CV_OPTIONS}" = 5 ] && need="$need gen_be_stage2.log gen_be_stage2a.log gen_be_stage3.psi.log working/gen_be_stage2.dat"
+for f in $need; do
+  [ -s "$RUN_DIR/$f" ] || { echo "missing or empty stage output $RUN_DIR/$f" >&2; exit 1; }
+done
+nsl=$(find "$RUN_DIR/working/gen_be_stage4_regional.1" -name 'sl_print.*' 2>/dev/null | wc -l)
+[ "$nsl" -eq $((4 * NUM_LEVELS + 1)) ] || { echo "stage 4 wrote $nsl sl_print files, expected $((4 * NUM_LEVELS + 1))" >&2; exit 1; }
 [ -s "$RUN_DIR/be.dat" ] || { echo "gen_be did not write $RUN_DIR/be.dat" >&2; exit 1; }
 sha256sum "$RUN_DIR/be.dat"

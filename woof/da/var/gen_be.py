@@ -145,6 +145,8 @@ def read_wrf_history(path, time_index: int = 0) -> dict:
 
 def _find_fft_factors(n: int) -> bool:
     """``da_find_fft_factors``' verdict: ``n`` is a product of 2, 3 and 5."""
+    if n <= 1:
+        return False  # no FFT length below 2; also keeps the factor loop from spinning on 0
     nu = n
     for f in (6, 8, 5, 4, 3, 2):
         while nu % f == 0:
@@ -157,6 +159,8 @@ def _find_fft_factors(n: int) -> bool:
 def _fft_size(dim: int) -> int:
     """``da_fft_initialize1``: the first even 2-3-5 number from ``dim - 1``."""
     n0 = dim - 1
+    if n0 < 2:
+        raise ValueError(f"grid dimension {dim} is too small for the Poisson solve (needs at least 3 points)")
     for n in range(n0, n0 + 1001):
         if _find_fft_factors(n) and n % 2 == 0:
             return n
@@ -267,10 +271,21 @@ def nmc_perturbation(long: Mapping, short: Mapping, cv_options: int = 5) -> dict
     """An NMC sample: the long forecast's standard fields minus the short one's.
 
     Both are :func:`standard_fields` results (or WRF-named field dicts, which
-    are converted).  Height and latitude are the long forecast's.
+    are converted).  Height and latitude are the short forecast's, as in
+    ``gen_be_stage0_wrf``, which reads the second file's last (they do not
+    enter ``bin_type = 5``).
     """
+    if cv_options not in _PERT:
+        raise NotImplementedError(f"woof gen_be: cv_options={cv_options} is not implemented (5 and 7 are)")
     a = long if "t" in long else standard_fields(long, cv_options)
     b = short if "t" in short else standard_fields(short, cv_options)
+    for nm, d in (("long", a), ("short", b)):
+        missing = [n for n in _PERT[cv_options] if n not in d]
+        if missing:
+            raise ValueError(
+                f"nmc_perturbation: the {nm} forecast lacks {missing} for cv_options={cv_options}; "
+                "pass raw WRF-named fields (converted here) or standard_fields(..., cv_options) of the same cv_options"
+            )
     out = {n: a[n] - b[n] for n in _PERT[cv_options]}
     out["height"], out["lat"] = b["height"], b["lat"]
     return out
@@ -281,6 +296,10 @@ def ensemble_perturbations(members: Sequence[Mapping], cv_options: int = 5) -> l
     std = [m if "t" in m else standard_fields(m, cv_options) for m in members]
     if len(std) < 2:
         raise ValueError("the ensemble method needs at least two members")
+    for s in std:
+        missing = [n for n in _PERT[cv_options] if n not in s]
+        if missing:
+            raise ValueError(f"an ensemble member lacks {missing} for cv_options={cv_options}")
     mean = {n: np.zeros_like(std[0][n]) for n in _PERT[cv_options]}
     for c, s in enumerate(std, start=1):
         inv = 1.0 / float(c)
@@ -374,6 +393,11 @@ def _stage2(samples: Sequence[dict], nk: int):
     for m in range(nk):
         total = total + eval_[m]
     cumul = 0.0
+    # gen_be_stage2.f90 L304-311: mmax = nk; do m = 1, nk; cumul += eval(m)/total;
+    # if (cumul > 1 - threshold) then mmax = m - 1; exit.  With 0-based m this
+    # is mmax = m: the mode that crosses the threshold is dropped, and
+    # `do m = 1, mmax` (L319) keeps modes 1..m-1, i.e. lam[:mmax].  If the
+    # threshold is never crossed, mmax = nk keeps all modes.
     mmax = nk
     for m in range(nk):
         cumul = cumul + eval_[m] / total
