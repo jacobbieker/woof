@@ -41,12 +41,13 @@ __all__ = ["ObsStencil", "ObsTerm", "FlatObsTerm", "AD_ORDER", "xtotpw", "xtotpw
 
 #: ``da_transform_xtoy_adj``'s type order.
 AD_ORDER = ("sound", "sonde_sfc", "synop", "geoamv", "polaramv", "airep", "metar", "ships",
-            "gpspw", "pilot", "satem", "qscat", "profiler", "buoy", "gpsref")
+            "gpspw", "pilot", "satem", "qscat", "profiler", "buoy", "gpsref", "pseudo")
 _LINEAR = {
     "sound": ("u", "v", "t", "q"), "sonde_sfc": ("u", "v", "t", "q"), "synop": ("u", "v", "t", "q"),
     "geoamv": ("u", "v"), "polaramv": ("u", "v"), "airep": ("u", "v", "t", "q"),
     "metar": ("u", "v", "t", "q"), "ships": ("u", "v", "t", "q"), "pilot": ("u", "v"),
     "qscat": ("u", "v"), "profiler": ("u", "v"), "buoy": ("u", "v", "t", "q"),
+    "pseudo": ("u", "v", "t", "p", "q"),
 }
 X_FIELDS = ("u", "v", "t", "q", "psfc", "p", "rho")
 

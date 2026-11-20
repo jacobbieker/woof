@@ -94,6 +94,20 @@ the whole tutorial run.
 - The `oracle` tier keeps `da_dot`'s serial order: a block forms the
   products and one thread adds them. Its time is recorded, not gated.
 
+## Single-observation tests
+
+`woof.da.var.pseudo_wrfda.pseudo_obs` is WRFDA's pseudo observation (`num_pseudo = 1`, `pseudo_var`
+`u`, `v`, `t`, `p` or `q`): one report at a fractional grid position and level with a given innovation and
+error, and nothing else. `analyse` takes it in place of an `ob.ascii`. Tested against WRFDA on the tutorial
+(`tests/test_var_pseudo.py`, `WOOF_WRFDA471_PSEUDO_DIR`; position 40.4, 30.6, level 15.3; `u`, `v`, `t`
+with value and error 1, `q` with 0.001 and 0.0005):
+
+- `J_0`, `|g_0|`, the final `J` and the one iteration match WRFDA's log (reference tier 1e-12 relative; the
+  binary32 production tier 1e-6);
+- all eight WRF fields of the analysis are `wrfvar_output`'s float32 words to at most 0.5 ulp of the field's
+  largest value, on both tiers (the limit is 1 ulp of the field's maximum); where WRFDA's increment is
+  non-zero ours is non-zero with correlation at least 0.9999.
+
 ## Checked against WRFDA 4.7.1
 
 The reference is a serial GNU WRFDA 4.7.1 on the WRFDA tutorial case:
@@ -158,5 +172,5 @@ print `Jb factor used`.
 
 - Radar, GOES, radiances and hybrid 3DEnVar (plan sections 6-11).
 - `cv_options` other than 5.
-- WRFDA's `A2C`, `var4d`, cloud control variables and pseudo-observations.
+- WRFDA's `A2C`, `var4d` and cloud control variables; pseudo-observations other than `u`, `v`, `t`, `q`.
 - Nested domains.
