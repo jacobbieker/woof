@@ -961,9 +961,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   matches WRFPLUS within 1e-12 and, in strict mode
   (`GPUWM_WRF_EXACT=1`), the primal word for word. A
   chained test runs one whole RK stage with the big-step tendencies held.
-  The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels and
-  0.85-3.2x the glue; the measured step projection (4.3-4.5x, with flux_div measured by a prototype) is in the
-  design note. The forecast path does not import any of it.
+  Flux-form advection (woof's strict `flux_div_{scalar,u,v,w}`, WRF
+  `advect_scalar/u/v/w`) has its TL/AD for periodic, open and specified
+  boundaries, map factors, horizontal orders 3-6 and vertical orders 2-6.
+  It matches WRFPLUS `g_/a_advect_*` to about 1e-16 on the points where
+  woof and WRF compute the same thing (see the design note), and the float build
+  reproduces the strict primal's words.
+  The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
+  0.85-3.2x the glue and 4.0-5.2x advection (on a shared card). The
+  measured step projection (4.6-4.9x) is in the design note. The forecast path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable

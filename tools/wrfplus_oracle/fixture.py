@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -974,9 +974,199 @@ def rk_stage(exe: str, runner: list[str], seed: int = 20261124) -> dict:
     return out
 
 
+#: advect: one case per kind and lateral boundary, with the h/v orders
+#: spread over them.  open_* without spec are WRF's open_xs/xe/ys/ye.
+ADV_CASES = {
+    "scalar_periodic": dict(kind="scalar"),
+    "scalar_open_v5": dict(kind="scalar", open_x=1, open_y=1, vorder=5),
+    "scalar_spec_h6_v4": dict(kind="scalar", open_x=1, open_y=1, spec=1, horder=6, vorder=4),
+    "scalar_mixed_h3_v6": dict(kind="scalar", open_y=1, spec=1, horder=3, vorder=6),
+    "u_periodic_v5": dict(kind="u", vorder=5),
+    "u_open": dict(kind="u", open_x=1, open_y=1),
+    "u_spec_h4_v2": dict(kind="u", open_x=1, open_y=1, spec=1, horder=4, vorder=2),
+    "u_mixed_open_x_h6": dict(kind="u", open_x=1, horder=6, vorder=6),
+    "v_periodic_h3": dict(kind="v", horder=3, vorder=4),
+    "v_open_v5": dict(kind="v", open_x=1, open_y=1, vorder=5),
+    "v_spec": dict(kind="v", open_x=1, open_y=1, spec=1),
+    "v_mixed_open_y_h4": dict(kind="v", open_y=1, horder=4, vorder=2),
+    "w_periodic": dict(kind="w"),
+    "w_open_v5": dict(kind="w", open_x=1, open_y=1, vorder=5),
+    "w_spec_h6_v6": dict(kind="w", open_x=1, open_y=1, spec=1, horder=6, vorder=6),
+    "w_mixed_h4_v2": dict(kind="w", open_x=1, spec=1, horder=4, vorder=2),
+}
+ADV_MODE = {"scalar": 1, "u": 2, "v": 3, "w": 4}
+ADV_DIMS = dict(nz=8, ny=9, nx=10)
+
+
+def _adv_index(n, length, open_, end=True):
+    """woof index behind each Fortran memory column -3..n+4 (i.e. woof
+    -4..n+3) of an axis with n cells and ``length`` points: periodic axes
+    wrap the cells, open and specified axes copy the edge (WRF's
+    zero-gradient halo).  A periodic staggered end face keeps index n when
+    ``end`` (the mass fluxes, which woof reads there); the advected u (v)
+    wraps it to 0, as woof's flux_div_u (_v) reads it."""
+    idx = np.arange(-4, n + 4)
+    if open_:
+        return np.clip(idx, 0, length - 1)
+    out = idx % n
+    if length == n + 1 and end:
+        out[idx == n] = n
+    return out
+
+
+class AdvLayout:
+    """woof (k, j, i) <-> WRF (-3:nx+4, 1:nz+1, -3:ny+4)."""
+
+    def __init__(self, geom):
+        self.g = geom
+        self.s3 = (geom.nx + 8, geom.nz + 1, geom.ny + 8)
+        self.s2 = (geom.nx + 8, geom.ny + 8)
+
+    def _maps(self, shape, end=True):
+        g = self.g
+        nk, nj, ni = shape
+        return (np.clip(np.arange(g.nz + 1), 0, nk - 1),
+                _adv_index(g.ny, nj, g.open_y, end), _adv_index(g.nx, ni, g.open_x, end))
+
+    def pad3(self, a, end=True):
+        kz, yi, xi = self._maps(a.shape, end)
+        return np.transpose(a[np.ix_(kz, yi, xi)], (2, 0, 1))
+
+    def fold3(self, x, shape, end=True):
+        kz, yi, xi = self._maps(shape, end)
+        out = np.zeros(shape)
+        np.add.at(out, np.ix_(kz, yi, xi), np.transpose(x, (1, 2, 0)))
+        return out
+
+    def place3(self, a):
+        out = np.zeros(self.s3)
+        nk, nj, ni = a.shape
+        out[4:4 + ni, :nk, 4:4 + nj] = np.transpose(a, (2, 0, 1))
+        return out
+
+    def take3(self, x, shape):
+        nk, nj, ni = shape
+        return np.ascontiguousarray(np.transpose(x[4:4 + ni, :nk, 4:4 + nj], (1, 2, 0)))
+
+    def pad2(self, a):
+        _, yi, xi = self._maps((1,) + a.shape)
+        return a[np.ix_(yi, xi)].T
+
+
+def adv_mask(geom):
+    """woof tendency points WRF's advect_* treat as woof does: open
+    (non-specified) u/v boundary-normal faces carry WRF's cb terms, which
+    woof applies in its separate radiative boundary launch."""
+    from woof.grad.wrfplus.advect import adv_shapes
+    m = np.ones(adv_shapes(geom)["tend"], dtype=bool)
+    if not geom.spec:
+        if geom.kind == "u" and geom.open_x:
+            m[:, :, 0] = m[:, :, -1] = False
+        if geom.kind == "v" and geom.open_y:
+            m[:, 0, :] = m[:, -1, :] = False
+        # WRF's advect_w applies its open non-cb terms on the lid too;
+        # woof's strict flux_div_w forms them there but does not apply them.
+        if geom.kind == "w" and geom.open_x:
+            m[-1, :, 0] = m[-1, :, -1] = False
+        if geom.kind == "w" and geom.open_y:
+            m[-1, 0, :] = m[-1, -1, :] = False
+    # A periodic staggered end point repeats point 0 (woof reads the
+    # wrapped field there, WRF its own halo column).
+    if geom.kind == "u" and not geom.open_x:
+        m[:, :, -1] = False
+    if geom.kind == "v" and not geom.open_y:
+        m[:, -1, :] = False
+    return m
+
+
+def _adv_record(geom, tr, pe, seed, maps):
+    L = AdvLayout(geom)
+    sca, mom = geom.kind in ("scalar", "w"), geom.kind in ("u", "v")
+    flags = int(not geom.open_x) | (int(not geom.open_y) << 1) | (int(geom.spec) << 2)
+    if geom.open_x and not geom.spec:
+        flags |= (1 << 4) | (1 << 5)
+    if geom.open_y and not geom.spec:
+        flags |= (1 << 6) | (1 << 7)
+    h, v = geom.horder, geom.vorder
+    head = np.array([ADV_MODE[geom.kind], geom.nx, geom.ny, geom.nz, flags,
+                     h if mom else 5, v if mom else 3, h if sca else 5,
+                     v if sca else 3], dtype=np.int32)
+    blob = head.tobytes() + np.array([geom.rdx, geom.rdy]).astype("<f8").tobytes()
+    a3 = [L.pad3(tr["q"], False), L.pad3(pe["q"], False), L.pad3(tr["ru"]), L.pad3(pe["ru"]),
+          L.pad3(tr["rv"]), L.pad3(pe["rv"]), L.pad3(tr["rw"]), L.pad3(pe["rw"]),
+          L.place3(tr["tend"]), L.place3(seed)]
+    for a in a3:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    a2 = [np.full(L.s2, 9.0e4), L.pad2(maps["u"]), L.pad2(maps["u"]), L.pad2(maps["v"]),
+          L.pad2(maps["v"]), L.pad2(maps["t"]), L.pad2(maps["t"])]
+    for a in a2:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    for x in (tr["fnm"], tr["fnp"], tr["rdz"]):
+        blob += np.concatenate([x, [0.0]]).astype("<f8").tobytes()
+    return blob, L
+
+
+def _adv_expected(geom, out, L):
+    from woof.grad.wrfplus.advect import adv_shapes
+    sh = adv_shapes(geom)
+    n3 = int(np.prod(L.s3))
+    vals = np.frombuffer(out, dtype="<f8")
+    assert vals.size == 6 * n3, (vals.size, n3)
+    x = [vals[i * n3:(i + 1) * n3].reshape(L.s3, order="F") for i in range(6)]
+    return {"tl_tend": L.take3(x[0], sh["tend"]), "tl_d_tend": L.take3(x[1], sh["tend"]),
+            "ad_q": L.fold3(x[2], sh["q"], False), "ad_ru": L.fold3(x[3], sh["ru"]),
+            "ad_rv": L.fold3(x[4], sh["rv"]), "ad_rw": L.fold3(x[5], sh["rw"])}
+
+
+def advect(exe: str, runner: list[str], seed: int = 20261125) -> dict:
+    out = {}
+    for n, (name, over) in enumerate(ADV_CASES.items()):
+        over = dict(over)
+        kind = over.pop("kind")
+        geom = cases.adv_geometry(kind, **ADV_DIMS, **over)
+        geom.validate()
+        tr = cases.adv_trajectory(geom, seed + 10 * n)
+        pe = cases.adv_perturbation(geom, seed + 10 * n + 1)
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        nz, ny, nx = geom.nz, geom.ny, geom.nx
+        maps = {"u": 1.0 + 0.02 * rng.standard_normal((ny, nx + 1)),
+                "v": 1.0 + 0.02 * rng.standard_normal((ny + 1, nx)),
+                "t": 1.0 + 0.02 * rng.standard_normal((ny, nx))}
+        tr["msf"] = maps[{"scalar": "t", "w": "t", "u": "u", "v": "v"}[kind]]
+        # A periodic u (v) reads the mass flux at the end face through both
+        # copies (woof's column n, WRF's halo column 0): make them one
+        # value; the test compares their adjoints' sum.
+        for d in (tr, pe):
+            if kind == "u" and not geom.open_x:
+                d["ru"][:, :, -1] = d["ru"][:, :, 0]
+            if kind == "v" and not geom.open_y:
+                d["rv"][:, -1, :] = d["rv"][:, 0, :]
+        mask = adv_mask(geom)
+        at = np.where(mask, rng.standard_normal(mask.shape), 0.0)
+        blob, L = _adv_record(geom, tr, pe, at, maps)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _adv_expected(geom, result, L)
+        prefix = f"{name}/"
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        out[prefix + "mask"] = mask
+        out[prefix + "seed/tend"] = at
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
-            "small_step": small_step, "rk_stage": rk_stage}
+            "small_step": small_step, "rk_stage": rk_stage,
+            "advect": advect}
 
 
 def main(argv=None) -> int:
