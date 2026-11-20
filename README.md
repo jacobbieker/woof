@@ -1047,7 +1047,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   gpsref error and the observed-gradient (super-refraction) checks of
   `da_qc_gpsref`. Profiles go to the table (`ro_refractivity_tangent_point`,
   the LETKF's existing refractivity operator) and to `obs_gts` as FM-116.
-  MW radiances come next ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)).
+  `woof obs wis2 radiances` reads AMSU-A, MHS and ATMS footprints (Metop-B
+  and -C, S-NPP, NOAA-20 and -21; satellites CRTM has no coefficients for
+  are counted and refused) to an `.npz` per instrument.
+  `woof.da.obs_mw` (opt-in) turns them into LETKF batches. It uses CRTM
+  v2.4 clear sky over open sea, WRFDA's channels, errors and screens
+  (`da_qc_amsua`, `da_qc_mhs`, `da_qc_atms`: scan edges, scattering
+  index, background cloud, 15 K and 3 sigma), and a static bias
+  correction. Each channel sits at its Jacobian peak. Metop-B's channel 15
+  is dead, so its scattering check uses the channel 1-2 cloud liquid
+  retrieval instead. The 3D-Var radiance term comes later
+  ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
