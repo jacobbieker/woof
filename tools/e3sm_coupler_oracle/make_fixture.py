@@ -1,6 +1,6 @@
 """Run a built E3SM coupler oracle on every case and write its fixture.
 
-    python tools/e3sm_coupler_oracle/make_fixture.py BUILD_DIR [--oracle merge|coupling] [--out DIR]
+    python tools/e3sm_coupler_oracle/make_fixture.py BUILD_DIR [--oracle merge|coupling|seaice] [--out DIR]
 
 BUILD_DIR holds build.sh's binaries. ``--oracle merge`` (the default) runs
 ``run_ocean_merge`` and writes ``oracle-r8.npz`` (``<case>/call<i>``: x2o's
@@ -8,7 +8,10 @@ rAttr after each call, ``(lsize, nflds)``) into
 ``tests/data/oracles/e3sm_ocean_merge``; ``--oracle coupling`` runs
 ``run_ocean_coupling`` and writes ``oracle-r8.npz`` (``<case>/o2x`` after the
 export and ``<case>/<pool>/<name>`` for every array after the import and
-export) into ``tests/data/oracles/e3sm_ocean_coupling``. Both write
+export) into ``tests/data/oracles/e3sm_ocean_coupling``; ``--oracle seaice``
+runs ``run_seaice_coupling`` and writes ``<case>/i2x``, ``<case>/<pool>/<name>``
+and ``<case>/trig`` (the stress rotation's sine and cosine words) into
+``tests/data/oracles/e3sm_seaice_coupling``. Each writes
 ``aborts.json`` (each case that must stop: the line E3SM or MCT writes as it
 stops) and ``inputs.sha256`` (every case's input stream). ``--out`` names
 another directory.
@@ -30,8 +33,10 @@ if str(ROOT) not in sys.path:
 
 from woof.verify import e3sm_ocean_coupling_oracle as oc  # noqa: E402
 from woof.verify import e3sm_ocean_merge_oracle as oo  # noqa: E402
+from woof.verify import e3sm_seaice_coupling_oracle as si  # noqa: E402
 
-ORACLES = {"merge": (oo, "run_ocean_merge"), "coupling": (oc, "run_ocean_coupling")}
+ORACLES = {"merge": (oo, "run_ocean_merge"), "coupling": (oc, "run_ocean_coupling"),
+           "seaice": (si, "run_seaice_coupling")}
 
 
 def run_case(binary: Path, case: dict, oo=oo) -> tuple[int, object, str]:

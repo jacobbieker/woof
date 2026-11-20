@@ -1334,6 +1334,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "7e7512e17a3e58b41145817ab9b68ca8a21af02ca1b97b14a29b318a2984ab84",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "012c92d118a74349dd446a298faf7f00d229d6c92d0c86f1e45b05b26aec0b41",
+    "file": "woof/hex/coupled/ice_coupling_e3sm.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "7f647e8ba3ec3188bd8ffe361b0d540cccdce6d597959c656649e1443f45e985",
     "constructor": "RawModule",
     "factory": "_apply_urban",
@@ -4884,6 +4892,10 @@
     "sha256": "15c9587672645d5cc887280064a8d7722c72a566c17da8e4c4d5c340dd12f076"
    },
    {
+    "file": "woof/hex/coupled/ice_coupling_e3sm.cu",
+    "sha256": "ecff73adad07a1f455bca91e95148c54f05360b907a3fd0ae8c9caae7913ffdb"
+   },
+   {
     "file": "woof/hex/coupled/ocn_coupling_e3sm.cu",
     "sha256": "7eb1bcd641ea5ac79d59ff2012535e1c302dc196c34e8d1cbe1161541d206ce3"
    },
@@ -5744,6 +5756,10 @@
    {
     "file": "woof/grad/wrfplus/stage.py",
     "sha256": "2eea386d069903bda1264979b6a0c575cbfbae24c596b8e7de1ffbfd18d8ab80"
+   },
+   {
+    "file": "woof/hex/coupled/ice_coupling_e3sm.py",
+    "sha256": "0d2ad29b7bfbcab54eeb8eeb9be45a6521c4fae7269554afcfd64595819f82f7"
    },
    {
     "file": "woof/hex/coupled/ocn_coupling_e3sm.py",
