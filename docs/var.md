@@ -67,13 +67,19 @@ woof var --be be.dat --obs ob.ascii --first-guess fg --out bundle \
 ```
 
 - **Members.**
-  - `--ensemble-member` (repeated) takes the members' history files, valid
-    at the analysis time. The perturbations are `gen_be_ep2`'s
+  - `--ensemble-member` (repeated) takes the members' history files. Each
+    member's record at the first guess's time is used, and a member without
+    one is refused. The perturbations are `gen_be_ep2`'s
     (`woof.da.var.hybrid.ep_from_wrf`): `u` and `v` at mass points, `t`
     from theta and pressure, `q` as specific humidity, and `PSFC`, each
     about the members' running mean.
   - `--ep-dir` with `--ensdim-alpha` (and `--ep-format` 1 or 11) instead
-    reads WRFDA `ep` files.
+    reads WRFDA `ep` files. All the files must be present.
+  - Every alpha flag without an ensemble is refused, as is
+    `--ensdim-alpha` or `--ep-format` with members.
+  - The files hold unscaled `x - mean`. The `1/sqrt(N-1)` comes later, in
+    WRFDA's `da_setup_flow_predictors.inc` 43-44 and in
+    `Ensemble.from_perturbations`.
   - Hydrometeor perturbations are not used.
 - **`--je-factor` is required.** WRFDA's default of 1.0 means a pure
   ensemble `B` (`jb_factor` -999, no static term), so woof asks rather than
@@ -85,8 +91,10 @@ woof var --be be.dat --obs ob.ascii --first-guess fg --out bundle \
     - 1: a `be.vertloc.dat` given with `--be-vertloc`;
     - 0: none.
   - `--max-vert-var-alpha` sets the share of eigenvalues kept (default 99%).
-- **The bundle.** The hybrid settings are digested into `recipe_sha256` and
-  listed under `notes.var.hybrid`.
+- **The bundle.** The hybrid settings go into `recipe_sha256` and are listed
+  under `notes.var.hybrid`. That includes the SHA-256 of the perturbations'
+  words and of `be.vertloc.dat`, so changed member or `ep` contents change
+  the digest even when the names do not.
 
 Checked against WRFDA 4.7.1 on the tutorial case, with ten members of
 WRFDA's gen_be sample forecasts, `je_factor = 2` and `alpha_corr_scale =

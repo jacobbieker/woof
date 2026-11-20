@@ -57,13 +57,16 @@ __all__ = [
     "alpha_vertloc",
     "drop_static",
     "ep_from_wrf",
+    "ep_paths",
     "flow_xa",
     "flow_xa_adj",
     "hybrid_cost",
     "jb_factor_for",
+    "perturbations_sha256",
     "read_ep",
     "read_vertloc",
     "setup_alpha",
+    "wrf_times",
     "write_ep",
     "write_vertloc",
 ]
@@ -395,6 +398,49 @@ def _xp(a):
     return np
 
 
+def ep_paths(directory, ne: int, ep_format: int = 1) -> list:
+    """The ``ep`` files :func:`read_ep` reads, in its order.
+
+    Raises ValueError for a missing directory or file, naming the first.
+    """
+    if ep_format not in EP_FORMATS:
+        raise NotImplementedError(f"woof var hybrid: ep_format = {ep_format} is not implemented (1 and 11 are)")
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise ValueError(f"{directory} is not a directory")
+    out = [directory / f"{name}.e{n:03d}" for n in range(1, ne + 1) for name in EP_FORMATS[ep_format][0]]
+    missing = [f for f in out if not f.is_file()]
+    if missing:
+        raise ValueError(f"{directory} has {len(out) - len(missing)} of the {len(out)} ep files for {ne} members "
+                         f"(ep_format {ep_format}); the first missing is {missing[0].name}")
+    return out
+
+
+def perturbations_sha256(perts: dict) -> str:
+    """SHA-256 of unscaled perturbation stacks: each field's name, shape and little-endian binary64 words."""
+    import hashlib
+
+    h = hashlib.sha256()
+    for k in FIELDS:
+        a = np.ascontiguousarray(perts[k], dtype="<f8")
+        h.update(f"{k}{a.shape}".encode())
+        h.update(a.tobytes())
+    return h.hexdigest()
+
+
+def wrf_times(path) -> list:
+    """A WRF file's ``Times`` records as strings (its ``START_DATE`` if it has none)."""
+    import netCDF4
+
+    with netCDF4.Dataset(Path(path)) as nc:
+        nc.set_auto_mask(False)
+        if "Times" in nc.variables:
+            v = nc.variables["Times"]
+            v.set_auto_chartostring(False)
+            return [b"".join(np.asarray(r).ravel()).decode() for r in v[:]]
+        return [str(nc.getncattr("START_DATE"))]
+
+
 def read_ep(directory, ne: int, ep_format: int = 1, shape=None) -> dict:
     """WRFDA's ``ep`` files (``<dir>/<var>.e001`` ...) as unscaled stacks for :meth:`Ensemble.from_perturbations`."""
     if ep_format not in EP_FORMATS:
@@ -415,7 +461,7 @@ def read_ep(directory, ne: int, ep_format: int = 1, shape=None) -> dict:
     return {k: np.stack(v) for k, v in out.items()}
 
 
-def ep_from_wrf(paths, *, time_index: int = 0) -> dict:
+def ep_from_wrf(paths, *, time_index=0) -> dict:
     """``gen_be_ep2``: unscaled perturbations of WRF history files about their mean.
 
     ``paths`` are the members' history files (``wrfout``, or a woof history
@@ -424,7 +470,9 @@ def ep_from_wrf(paths, *, time_index: int = 0) -> dict:
     mass points, ``t`` from ``theta = 300 + T`` and ``p = PB + P``
     (``da_get_trh``), ``q = QVAPOR / (1 + QVAPOR)`` and ``PSFC``; the mean is
     its running form ``((n - 1) mean + x) / n`` (``1/n`` first), and each
-    member's perturbation ``x - mean``.  Returns the stacks
+    member's perturbation ``x - mean``.  ``time_index`` is the record read,
+    one for all members or one per member (``gen_be_ep2`` reads the first,
+    ``da_get_field.inc`` 47-50).  Returns the stacks
     :meth:`Ensemble.from_perturbations` takes, as :func:`read_ep` does.
     Hydrometeor perturbations (``mp_physics > 0``) are not read
     (``alpha_hydrometeors`` is not implemented).
@@ -434,10 +482,13 @@ def ep_from_wrf(paths, *, time_index: int = 0) -> dict:
     paths = [Path(x) for x in paths]
     if len(paths) < 2:
         raise ValueError(f"the ensemble needs at least 2 members (got {len(paths)})")
+    indices = [int(time_index)] * len(paths) if np.ndim(time_index) == 0 else [int(i) for i in time_index]
+    if len(indices) != len(paths):
+        raise ValueError(f"{len(indices)} time indices for {len(paths)} members")
     members = []
     shape = None
-    for path in paths:
-        f = gb.read_wrf_history(path, time_index)
+    for path, index in zip(paths, indices):
+        f = gb.read_wrf_history(path, index)
         big_u, big_v = f["U"], f["V"]
         dim1, dim2 = big_u.shape[0] - 1, big_v.shape[1] - 1
         theta = gb.T0 + f["T"]
