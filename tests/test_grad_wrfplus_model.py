@@ -57,11 +57,11 @@ STRICT = dict(GPUWM_WRF_EXACT="1", WOOF_WRF_EXACT_DIAGNOSTICS="1",
 # The harness case and the step's option branches: hybrid coordinate,
 # the w_damp limiter, hypsometric_opt 2 without a lid, other orders, and
 # more substeps (nsub 3 and 6 against the default 2 and 4) with another
-# divergence damping.
+# divergence damping, and rotation (Coriolis and curvature).
 VARIANTS = [dict(), dict(hybrid_opt=2), dict(w_damping=1),
             dict(hypsometric_opt=2, top_lid=False),
             dict(h_mom_adv_order=3, h_sca_adv_order=4, v_mom_adv_order=5),
-            dict(time_step_sound=6, smdiv=0.2)]
+            dict(time_step_sound=6, smdiv=0.2), dict(_rot=1)]
 # Chains of three steps: from a warm state (the previous step's diagnosis
 # reused on rk_step 1) and from a cold one (diagnosed on the first step
 # only), each followed by warm steps.
@@ -85,11 +85,16 @@ def _run(backend, body, tmp_path):
         "IN = M.STEP_INPUTS\n"
         "def build(over, warm=2, nx=16, ny=12, nz=10, seed=1, hill=400.0):\n"
         "    o = dict(h_sca_adv_order=5, terrain_opt=1); o.update(over)\n"
+        "    rot = o.pop('_rot', 0)\n"
         "    cfg = H.make_config(nx, ny, nz, **o)\n"
         "    jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')\n"
         "    ridge = hill * np.exp(-(((ii - nx / 2) / (nx / 5)) ** 2\n"
         "                           + ((jj - ny / 2) / (ny / 4)) ** 2))\n"
         "    geo = dataclasses.replace(H.neutral_geography(cfg), terrain=ridge)\n"
+        "    if rot:  # Coriolis, curvature (e) and a rotated grid; msf 1\n"
+        "        ang = 0.3 + 0.01 * ii\n"
+        "        geo = dataclasses.replace(geo, f=1e-4 + 1e-6 * jj, e=np.full((ny, nx), 5e-5),\n"
+        "                                  sina=np.sin(ang), cosa=np.cos(ang))\n"
         "    state = H.make_state(cfg, seed, geography=geo)\n"
         "    for _ in range(warm):\n"
         "        D.step(state, cfg)\n"
@@ -244,7 +249,7 @@ for i, (over, nstep, warm) in enumerate({cases!r}):
 
 @pytest.mark.parametrize("backend", NO_MLX[:1])
 def test_step_refuses_what_it_does_not_cover(backend, tmp_path):
-    """A flat base (1-D columns), open boundaries, map factors and rotation,
+    """A flat base (1-D columns), open boundaries, map factors,
     physics or an odd time_step_sound raise rather than return a step that
     is not the strict primal's."""
     out = _run(backend, '''
@@ -264,7 +269,7 @@ for key, over in cases.items():
 ''', tmp_path)
     assert "1-D base" in out["flat"], out
     assert "lateral boundaries" in out["open"], out
-    assert "map factors" in out["earth"] and "rotation" in out["earth"], out
+    assert "map factors" in out["earth"], out
     assert "physics" in out["pbl"], out
     assert "odd time_step_sound" in out["odd"], out
 

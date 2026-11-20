@@ -498,7 +498,7 @@ Each step is one small PR, taken to merged before the next widens.
    small_step_finish; then the epilogue diagnosis, set_w_surface and the
    periodic alias closure. With a tape it snapshots each operator's
    written arrays before it runs, and `step_ad` pops them in reverse.
-   - Scope: periodic axes, no map factors, no rotation, dry, no physics
+   - Scope: periodic axes, no map factors, no rotation (8b adds it), dry, no physics
      or mixing package, none of the other work `_step_body` can add
      (use_theta_m, a moving frame, obstacles, polar filtering, lightning,
      avgflx, IAU or spectral nudging), `rk_ord = 3`, an even
@@ -566,6 +566,29 @@ Each step is one small PR, taken to merged before the next widens.
    The binary32 adjoint step is under the 5x limit, with about 0.2x of
    margin. The snapshots (0.35x) are the next thing to cut if a later
    item adds cost.
+
+   **8b, rotation in the step (done).** On rotational grids with msf 1
+   (Coriolis f and e, a rotated grid's sina/cosa), each stage runs
+   coriolis_curvature after w_damp, with its total dry mass
+   (`DomainState.total_mu`, mub + mu') formed as a pseudo-operator. The
+   binary32 base reproduces `dycore.step`, and the dot-product, finite-
+   difference and base-only tests take it as a seventh variant.
+
+   **What is still refused, and why.** WRFDA's real 4D-Var cases are
+   regional, with map factors and specified boundaries, so both are
+   needed before its tutorial case can serve as the oracle.
+   - Map factors: with has_msf the strict path runs `advance_w_phi_msf`,
+     which has no TL/AD yet. It needs a kernel item of its own, against
+     WRFPLUS's g_/a_advance_w with map factors.
+   - Specified boundaries: the step must also take the relaxation folded
+     into the held tendencies (`fold_lateral_relaxation` into
+     rk_addtend_dry), the per-stage `state_relaxation_multi` rows on the
+     state's boundary tables, the exact frame and
+     `advance_specified_phi_w` in every substep, and `spec_bdy_final` in
+     the epilogue. The kernels are ported (items 5 and 7); the binding is
+     not.
+   - Order agreed on 2026-11-20: the window driver next, then map
+     factors, then specified boundaries.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
