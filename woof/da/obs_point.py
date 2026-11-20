@@ -71,8 +71,14 @@ def state_columns(states, setup, grid):
 
 def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
                   surface=None, max_age_seconds=900., gross_sigma=4.,
-                  localization=None, used_identities=(), columns=None, error_inflation=1.):
+                  localization=None, used_identities=(), columns=None, error_inflation=1.,
+                  aircraft_level=False):
     """Return sparse gridded batches plus time, QC and attribution counts.
+
+    ``aircraft_level`` (opt-in, off by default) puts rows labelled
+    ``aircraft_level`` (ACARS, PrepBUFR and WIS2 aircraft) through the
+    pressure-level operator; off, they are counted as
+    ``unknown_measurement_operator`` as before.
 
     Each report is assigned to its first eligible analysis boundary, never
     to a later boundary a second time. Receipt and publication cutoffs are
@@ -90,6 +96,7 @@ def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
     if schedule != tuple(sorted(set(schedule))) or when not in schedule:
         raise ValueError('Analysis boundaries are duplicated, unordered or omit this cycle; use the cycle clock schedule.')
     localization = localization or Localization(horizontal_m=15000., vertical_m=3000.)
+    level_labels = ('sonde_level', 'amv_assigned_pressure', '') + (('aircraft_level',) if aircraft_level else ())
     counts, revisions = Counter(), {}
     used = set(used_identities)
     for row in rows:
@@ -195,7 +202,7 @@ def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
                     t = np.interp(height, z_m, col['t'][:, j, i])
                     q = np.interp(height, z_m, col['q'][:, j, i])
                 h.append(float(refractivity_n(p, t, q)))
-        elif pressure is not None and label in ('sonde_level', 'amv_assigned_pressure', ''):
+        elif pressure is not None and label in level_labels:
             if row.variable not in ('temperature_k', 'wind_u_m_s', 'wind_v_m_s', 'dewpoint_k'):
                 counts['no_pressure_level_operator'] += 1
                 continue

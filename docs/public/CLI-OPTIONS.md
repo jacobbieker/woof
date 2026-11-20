@@ -2286,6 +2286,7 @@ Takes no options of its own.
 
 | option | what it does |
 |---|---|
+| `--assimilate-aircraft` | opt-in: assimilate aircraft_level rows of the observation tables (ACARS, PrepBUFR, WIS2) through the pressure-level operator; off, they are counted and refused |
 | `--budget-seconds` | advisory wall-time target for preparation, forecast and cycles; does not reduce cycles or impose a runtime deadline |
 | `--cadence-seconds` | exact requested whole-second cadence; otherwise derived from scale; never shortened to meet a cost estimate |
 | `--capabilities` | print the companion command and field contract without pricing |

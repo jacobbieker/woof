@@ -2240,9 +2240,10 @@ work (12.7).
 `obs_point` lacks two things:
 
 - the `aircraft_level` and `profiler_level` labels in its pressure-level
-  branch. PR B writes `aircraft_level` rows but does not enable the label:
-  the ACARS and PrepBUFR doors already write it, so enabling it changes
-  existing ensemble-filter runs and is its own PR;
+  branch. PR B writes `aircraft_level` rows; the label is enabled only by
+  the opt-in `assimilate_aircraft` request field (`woof local-da
+  --assimilate-aircraft`), because the ACARS and PrepBUFR doors already
+  write it and enabling it by default would change existing runs;
 - surface dewpoint and station-pressure operators. These rows are written,
   and refused by name until those operators exist.
 
@@ -2398,7 +2399,7 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
    wind_profiler and aircraft. It applies 12.2's flags, OBSPROC's errors
    and gross checks, and the Part D rule. It writes neutral table v2 and
    `obs_gts`. Aircraft rows carry `aircraft_level`, which `obs_point`
-   does not enable yet (12.5); profilers
+   uses only when `assimilate_aircraft` is set (12.5); profilers
    (heights, no pressure) go to `obs_gts` only, and ocean platform rows
    carry labels `obs_point` has no operator for yet. Tests use synthetic
    fixtures.
