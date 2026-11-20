@@ -80,13 +80,17 @@ def _run(backend, body, tmp_path, extra_env=None):
 
 
 # Frame widths, lids, moisture, 1-D base state, clamped/periodic bottom
-# neighbours, the 3-level minimum and a deeper column.
+# neighbours, the 3-level minimum, a deeper column, and map factors
+# (advance_w_phi_msf) with each of those.
 CONFIGS = [dict(), dict(spec_zone=1), dict(top_lid=1, moist_cq=1),
            dict(base3d=0, boundary_x=1, boundary_y=1),
            dict(spec_zone=1, top_lid=1, moist_cq=1, boundary_x=1, boundary_y=1),
            dict(nz=3, ny=3, nx=3, spec_zone=1, top_lid=1),
            dict(nz=3, ny=2, nx=1), dict(nz=19, ny=7, nx=6, moist_cq=1, spec_zone=2),
-           dict(nz=12, ny=4, nx=5, base3d=0, epssm=0.5, boundary_y=1)]
+           dict(nz=12, ny=4, nx=5, base3d=0, epssm=0.5, boundary_y=1),
+           dict(has_msf=1), dict(has_msf=1, spec_zone=1, top_lid=1, moist_cq=1),
+           dict(has_msf=1, nz=12, ny=5, nx=6, base3d=0, boundary_x=1, boundary_y=1,
+                moist_cq=1, epssm=0.3)]
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -200,13 +204,14 @@ for case in cases:
     limit = 1e-5 if backend == "mlx" else 1e-12
     bad = {k: v for k, v in out.items() if not v < limit}
     assert not bad, bad
-    assert len(out) >= 2 * 30
+    assert len(out) >= 5 * 30   # five fixture cases, two of them mapped
 
 
 @pytest.mark.parametrize("backend", ["host"])
 def test_float_base_state_is_the_strict_primal(backend, tmp_path):
     """The float build's base-state update gives woof's strict primal
-    advance_w_phi's words (w'', phi'', p'', alpha''), so the adjoint is
+    advance_w_phi's words (w'', phi'', p'', alpha''), and
+    advance_w_phi_msf's with map factors, so the adjoint is
     bound to the model woof runs: a primal edit fails here until the
     TL/AD is re-derived."""
     if not HAVE_CXX:
@@ -226,16 +231,20 @@ for i, over in enumerate({CONFIGS!r}):
             tr["phb"], tr["alt"], tr["c2a"], tr["a"], tr["alpha"], tr["gam"], tr["mup"],
             tr["u_pp"], tr["v_pp"], tr["w_pp"], tr["ht"], tr["rdn"], tr["rdnw"], tr["fnm"],
             tr["fnp"], tr["c1h"], tr["c2h"], tr["c1f"], tr["c2f"], tr["mub2d"], tr["cqw"],
-            i32(g.moist_cq), T["p_pp"], T["al_pp"], f32(g.cf1), f32(g.cf2), f32(g.cf3),
+            i32(g.moist_cq)) + ((tr["msft"],) if g.has_msf else ()) + (
+            T["p_pp"], T["al_pp"], f32(g.cf1), f32(g.cf2), f32(g.cf3),
             f32(g.rdx), f32(g.rdy), f32(g.dtau), f32(g.epssm), f32(0.0), f32(0.0),
             i32(g.boundary_x), i32(g.boundary_y), i32(g.spec_zone), i32(g.base3d),
             i32(g.top_lid), i32(g.nz), i32(g.ny), i32(g.nx))
-    _w_phi_kernel("advance_w_phi", g.nz)(((g.ny * g.nx + 255) // 256,), (256,), args)
+    name = "advance_w_phi_msf" if g.has_msf else "advance_w_phi"
+    assert (cp.asnumpy(tr["msft"]) != 1).any() == bool(g.has_msf)
+    _w_phi_kernel(name, g.nz)(((g.ny * g.nx + 255) // 256,), (256,), args)
     out[str(i)] = {{n: bool((cp.asnumpy(st[n]).view(np.uint32)
                              == cp.asnumpy(T[n]).view(np.uint32)).all()) for n in A.W_STATE}}
 ''', tmp_path, extra_env={"GPUWM_WRF_EXACT": "1"})
     bad = {k: v for k, v in out.items() if not all(v.values())}
     assert not bad, bad
+    assert len(out) == len(CONFIGS)
 
 
 def test_refuses_the_damper():

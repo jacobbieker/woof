@@ -4837,7 +4837,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/advance_w.cu",
-    "sha256": "018f1c303aa6e7cde3d2da6efa71dedee045f44d0fc56e517bdbf466e8c11d66"
+    "sha256": "7b69f6bc8cf6121193e455c2c59fefd8ebaceef6859b68d9e97c46435d2b37fc"
    },
    {
     "file": "woof/grad/wrfplus/kernels/advect.cu",
@@ -5703,7 +5703,7 @@
    },
    {
     "file": "woof/grad/wrfplus/acoustic.py",
-    "sha256": "98dfbf8ab3b7d2eb4bbbeb2938c69b9185be8add4f5f6d29a812d06ea5c54fe3"
+    "sha256": "071685089a99ce27c2f090f00121945a6bdd1742a3c575a733b60643d9a1be80"
    },
    {
     "file": "woof/grad/wrfplus/advect.py",
