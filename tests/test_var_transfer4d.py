@@ -5,6 +5,7 @@ when ``WOOF_WRFDA471_DIR`` is set):
 
 - each adjoint is the transpose of its tangent-linear transfer (dot-product
   tests, both ``press`` and both ``ph`` options, ``hypsometric_opt`` 1 and 2);
+- a 2x2x2 column worked by hand (independent of the implementation);
 - the defaults are WRFDA's statements: ``dn`` in the pressure column and no
   ``ph`` perturbation, and the reverse transfer inverts ``q``, ``psfc`` and
   ``t`` about the same first guess;
@@ -12,7 +13,8 @@ when ``WOOF_WRFDA471_DIR`` is set):
   default does not;
 - ``ph="hydrostatic"`` is the derivative of WRF's hypsometric equation
   (central differences of the nonlinear column);
-- what is not ported is refused.
+- what is not ported (hybrid c1/c2/c4 on half and full levels, missing
+  DN, hydrometeors) and non-binary64 input are refused.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import numpy as np
 import pytest
 
 from woof.da.var import transfer4d as t4
-from woof.da.var.analysis import KAPPA, T0
+from woof.da.var.analysis import GAS_CONSTANT, KAPPA, T0
 
 NX, NY, NZ = 5, 4, 7
 PTOP, P0 = 5000.0, 100000.0
@@ -45,7 +47,7 @@ def _column(hyps=2, seed=0):
     t = (T0 + t_2) * (p / P0) ** KAPPA
     grid = {"qv": qv, "mu_2": mu_2, "mub": mub, "t_2": t_2, "dnw": dnw, "base_pres": P0, "p_top": PTOP,
             "hypsometric_opt": hyps, "c1h": np.ones(NZ), "c2h": np.zeros(NZ), "c3h": znu, "c4h": np.zeros(NZ),
-            "c3f": znw, "c4f": np.zeros(NZ + 1)}
+            "c3f": znw, "c4f": np.zeros(NZ + 1), "c1f": np.ones(NZ + 1), "c2f": np.zeros(NZ + 1)}
     xb = {"t": t, "p": p, "q": qv / (1.0 + qv), "psac": mut, "dn": dn, "dnw": dnw}
     return xb, grid
 
@@ -155,8 +157,10 @@ def test_dnw_puts_psfc_at_the_surface_full_level(press):
 
 
 def _phi_total(t_2, qv, p, mu_2, grid):
-    """WRF's hydrostatic total geopotential from the surface (hypsometric_opt 1 or 2), nonlinear."""
-    alt = (287.0 / P0) * (T0 + t_2) * (1.0 + qv / t4.RD_OVER_RV) * (p / P0) ** t4.CVPM
+    """WRF's hydrostatic total geopotential from the surface (hypsometric_opt 1 or 2), nonlinear.
+
+    Eta only (c4 = 0): the transfers refuse anything else."""
+    alt = (GAS_CONSTANT / P0) * (T0 + t_2) * (1.0 + qv / t4.RD_OVER_RV) * (p / P0) ** t4.CVPM
     mut = grid["mub"] + mu_2
     phi = np.zeros(t_2.shape[:2] + (NZ + 1,))
     for k in range(NZ):
@@ -190,14 +194,86 @@ def test_refusals():
     xa = _xa(np.random.default_rng(7))
     with pytest.raises(NotImplementedError, match="cloud_cv_options"):
         t4.xa_to_tl(xa, xb, grid, cloud_cv_options=1)
-    with pytest.raises(NotImplementedError, match="hybrid"):
-        t4.tl_to_xa(_g(np.random.default_rng(8)), xb, {**grid, "c1h": np.linspace(1.0, 0.0, NZ)})
     with pytest.raises(ValueError, match="press"):
         t4.xa_to_tl(xa, xb, grid, press="dn")
     with pytest.raises(ValueError, match="ph"):
         t4.xa_to_tl_adj({}, xb, grid, ph="balanced")
-    with pytest.raises(ValueError, match="DN"):
-        t4.xa_to_tl(xa, {k: v for k, v in xb.items() if k != "dn"}, grid)
+    for bad in ({k: v for k, v in xb.items() if k != "dn"}, dict(xb, dn=None)):  # wrftoxb's f.get("DN")
+        with pytest.raises(ValueError, match="DN"):
+            t4.xa_to_tl(xa, bad, grid)
+
+
+@pytest.mark.parametrize("key,value", [("c1h", np.linspace(1.0, 0.0, NZ)), ("c2h", np.full(NZ, 5.0)),
+                                       ("c1f", np.linspace(1.0, 0.0, NZ + 1)), ("c2f", np.full(NZ + 1, 5.0)),
+                                       ("c4h", np.full(NZ, 100.0)), ("c4f", np.full(NZ + 1, 100.0)),
+                                       ("c1f", None)])
+@pytest.mark.parametrize("which", ["xa_to_tl", "tl_to_xa"])
+def test_hybrid_coordinates_are_refused(key, value, which):
+    xb, grid = _column()
+    rng = np.random.default_rng(10)
+    grid = dict(grid)
+    if value is None:
+        del grid[key]
+    else:
+        grid[key] = value
+    with pytest.raises((NotImplementedError, ValueError), match="hybrid" if value is not None else "c1f"):
+        if which == "xa_to_tl":
+            t4.xa_to_tl(_xa(rng), xb, grid)
+        else:
+            t4.tl_to_xa(_g(rng), xb, grid)
+
+
+def test_non_binary64_inputs_are_refused():
+    xb, grid = _column()
+    rng = np.random.default_rng(11)
+    xa = _xa(rng)
+    with pytest.raises(TypeError, match="xa\\['t'\\]"):
+        t4.xa_to_tl(dict(xa, t=xa["t"].astype(np.float32)), xb, grid)
+    with pytest.raises(TypeError, match="xb\\['p'\\]"):
+        t4.tl_to_xa(_g(rng), dict(xb, p=xb["p"].astype(np.float32)), grid)
+    with pytest.raises(TypeError, match="grid\\['qv'\\]"):
+        t4.xa_to_tl_adj(_g(rng), xb, dict(grid, qv=grid["qv"].astype(np.float32)))
+    with pytest.raises(TypeError, match="a\\['psfc'\\]"):
+        t4.tl_to_xa_adj(dict(xa, psfc=xa["psfc"].astype(np.float32)), xb, grid)
+
+
+def _hand_case():
+    """A 2x2x2 eta column with numbers a hand calculation follows (see the test below)."""
+    shape = (2, 2, 2)
+    grid = {"qv": np.zeros(shape), "mu_2": np.zeros((2, 2)), "mub": np.full((2, 2), 90000.0),
+            "t_2": np.zeros(shape), "dnw": np.array([-0.5, -0.5]), "base_pres": P0, "p_top": PTOP,
+            "hypsometric_opt": 1, "c1h": np.ones(2), "c2h": np.zeros(2), "c1f": np.ones(3), "c2f": np.zeros(3),
+            "c3h": np.array([0.75, 0.25]), "c4h": np.zeros(2), "c3f": np.array([1.0, 0.5, 0.0]), "c4f": np.zeros(3)}
+    xb = {"t": np.full(shape, 250.0), "p": np.full(shape, 50000.0), "q": np.zeros(shape),
+          "psac": np.full((2, 2), 90000.0), "dn": np.array([0.0, -0.5]), "dnw": np.array([-0.5, -0.5])}
+    xa = {"u": np.zeros(shape), "v": np.zeros(shape), "t": np.zeros(shape), "q": np.zeros(shape),
+          "psfc": np.full((2, 2), 100.0)}
+    xa["u"][0], xa["u"][1] = 1.0, 3.0
+    return xa, xb, grid
+
+
+def test_hand_computed_column():
+    """Worked by hand, not from the implementation's formulas.
+
+    psfc' = 100 Pa, no moisture: s1md = -1 and sdmd = 0, so mu' = 100.
+    WRFDA's dn column (dn = [0, -0.5]): the full levels from the top are
+    0, 50, 50 (dn(1) = 0 adds nothing), so p' = [50, 25]; with dnw
+    ([-0.5, -0.5]) they are 0, 50, 100 and p' = [75, 25], the surface full
+    level being psfc'.  theta' = -(T0) kappa p'/p_b with p_b = 50000:
+    -300 (2/7) 50/50000 at the bottom.  u = 1, 3 along x: the C grid is
+    (3*1 - 3)/2 = 0, (1 + 3)/2 = 2, (3*3 - 1)/2 = 4.
+    """
+    xa, xb, grid = _hand_case()
+    g = t4.xa_to_tl(xa, xb, grid)
+    np.testing.assert_allclose(g["mu_2"], 100.0, rtol=1e-15)
+    np.testing.assert_allclose(g["p"][0, 0], [50.0, 25.0], rtol=1e-15)
+    np.testing.assert_allclose(t4.xa_to_tl(xa, xb, grid, press="dnw")["p"][0, 0], [75.0, 25.0], rtol=1e-15)
+    np.testing.assert_allclose(g["t_2"][0, 0], [-300.0 * (2.0 / 7.0) * 50.0 / 50000.0,
+                                                -300.0 * (2.0 / 7.0) * 25.0 / 50000.0], rtol=1e-14)
+    np.testing.assert_allclose(g["u_2"][:, 0, 0], [0.0, 2.0, 4.0], rtol=0, atol=0)
+    back = t4.tl_to_xa(g, xb, grid)
+    np.testing.assert_allclose(back["psfc"], 100.0, rtol=1e-15)  # -psac*0 - 100*(-1)
+    np.testing.assert_allclose(back["u"][:, 0, 0], [1.0, 3.0], rtol=0, atol=0)  # (0+2)/2, (2+4)/2
 
 
 def _tutorial():

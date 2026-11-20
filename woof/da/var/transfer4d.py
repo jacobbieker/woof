@@ -41,7 +41,8 @@ non-terrain-following coordinates (``hybrid_opt > 0``, which the transfer
 ignores in WRFDA: it reads ``dnw`` and ``mub`` only), and the lateral
 boundary perturbation ``da_transfer_wrftl_lbc_t0`` (P3a's window is
 periodic).  ``xa%rho`` and the other derived fields come from
-``da_transform_xtoxa`` after :func:`tl_to_xa` (PR 4D.2).
+``da_transform_xtoxa`` after :func:`tl_to_xa` (PR 4D.2).  Inputs must be
+binary64; anything else is refused rather than cast.
 
 Derived from WRFDA 4.7.1 (``var/da/da_transfer_model/da_transfer_xatowrftl.inc``,
 ``da_transfer_xatowrftl_adj.inc``, ``da_transfer_wrftltoxa.inc``,
@@ -69,21 +70,41 @@ CVPM = -(1.0 - GAS_CONSTANT / CP)
 RVOVRD = 1.0 / RD_OVER_RV
 
 
+_XB_READ = ("t", "p", "q", "psac", "dn", "dnw")
+_GRID_READ = ("qv", "mu_2", "mub", "t_2", "dnw")
+_COORD = ("c1h", "c2h", "c1f", "c2f", "c4h", "c4f")
+
+
+def _require_f64(where: str, d: dict, keys) -> None:
+    for k in keys:
+        if k not in d:
+            continue
+        a = np.asarray(d[k])
+        if a.dtype != np.float64:
+            raise TypeError(f"{where}[{k!r}] is {a.dtype}; the transfers take binary64 (float64) only")
+
+
 def check_supported(xb: dict, grid: dict, *, cloud_cv_options: int = 0, press: str = "wrfda",
                     ph: str = "zero") -> None:
-    """Refuse what the port does not cover (see the module docstring)."""
+    """Refuse what the port does not cover (see the module docstring), and non-binary64 inputs."""
     if cloud_cv_options:
         raise NotImplementedError(f"cloud_cv_options = {cloud_cv_options}: the hydrometeor transfers are not ported")
     if press not in _PRESS:
         raise ValueError(f"press must be one of {_PRESS}, not {press!r}")
     if ph not in _PH:
         raise ValueError(f"ph must be one of {_PH}, not {ph!r}")
-    c1h, c2h = grid.get("c1h"), grid.get("c2h")
-    if c1h is not None and (np.any(np.asarray(c1h) != 1.0) or np.any(np.asarray(c2h) != 0.0)):
+    missing = [k for k in _COORD if grid.get(k) is None]
+    if missing:
+        raise ValueError(f"grid has no {missing}: pass the grid wrftoxb returns (it carries c1h..c4f)")
+    c = {k: np.asarray(grid[k]) for k in _COORD}
+    if (np.any(c["c1h"] != 1.0) or np.any(c["c1f"] != 1.0) or np.any(c["c2h"] != 0.0) or np.any(c["c2f"] != 0.0)
+            or np.any(c["c4h"] != 0.0) or np.any(c["c4f"] != 0.0)):
         raise NotImplementedError("a hybrid vertical coordinate (hybrid_opt > 0): WRFDA's transfer assumes "
-                                  "terrain-following eta (c1h = 1, c2h = 0)")
-    if "dn" not in xb:
+                                  "terrain-following eta (c1 = 1, c2 = 0, c4 = 0 on half and full levels)")
+    if xb.get("dn") is None:
         raise ValueError("the first guess has no DN, which da_transfer_xatowrftl integrates with")
+    _require_f64("xb", xb, _XB_READ)
+    _require_f64("grid", grid, _GRID_READ)
     nx, ny, _ = xb["t"].shape
     if nx < 2 or ny < 2:
         raise ValueError("the A- to C-grid wind transfer needs at least 2 points in each direction")
@@ -170,6 +191,8 @@ def hydrostatic_ph(g: dict, xb: dict, grid: dict) -> np.ndarray:
     ``2``: ``phi(k+1) = phi(k) + alt(k) phm(k) log(pfd/pfu)``, both with the
     surface fixed and ``alt`` from the equation of state.
     """
+    check_supported(xb, grid)
+    _require_f64("g", g, TL_KEYS)
     alt, theta, qvf = _alt(xb, grid)
     g_alt = alt * (g["t_2"] / theta + RVOVRD * g["qv"] / qvf + CVPM * g["p"] / xb["p"])
     mut = grid["mu_2"] + grid["mub"]
@@ -190,6 +213,8 @@ def hydrostatic_ph(g: dict, xb: dict, grid: dict) -> np.ndarray:
 
 def hydrostatic_ph_adj(a_ph: np.ndarray, xb: dict, grid: dict) -> dict:
     """The adjoint of :func:`hydrostatic_ph`: gradients for ``t_2``, ``qv``, ``p`` and ``mu_2``."""
+    check_supported(xb, grid)
+    _require_f64("a_ph", {"ph_2": a_ph}, ("ph_2",))
     alt, theta, qvf = _alt(xb, grid)
     mut = grid["mu_2"] + grid["mub"]
     nx, ny, nz = alt.shape
@@ -223,6 +248,7 @@ def xa_to_tl(xa: dict, xb: dict, grid: dict, *, press: str = "wrfda", ph: str = 
     (returned as ``g["p"]``).  ``xa["w"]`` is optional (zero if absent).
     """
     check_supported(xb, grid, cloud_cv_options=cloud_cv_options, press=press, ph=ph)
+    _require_f64("xa", xa, ("u", "v", "w", "t", "q", "psfc"))
     nx, ny, nz = xb["t"].shape
     xq, xbq = xa["q"], xb["q"]
     g_qv = np.empty((nx, ny, nz))
@@ -244,7 +270,7 @@ def xa_to_tl(xa: dict, xb: dict, grid: dict, *, press: str = "wrfda", ph: str = 
         g_p[..., k] = 0.5 * (g_press[..., k] + g_press[..., k + 1])
     g_t = (T0 + grid["t_2"]) * (xa["t"] / xb["t"] - KAPPA * g_p / xb["p"])
     g = {"u_2": _a_to_c(xa["u"], 0), "v_2": _a_to_c(xa["v"], 1),
-         "w_2": np.array(xa["w"], dtype=np.float64) if "w" in xa else np.zeros((nx, ny, nz + 1)),
+         "w_2": np.array(xa["w"]) if "w" in xa else np.zeros((nx, ny, nz + 1)),
          "t_2": g_t, "mu_2": g_mu, "qv": g_qv, "p": g_p}
     g["ph_2"] = hydrostatic_ph(g, xb, grid) if ph == "hydrostatic" else np.zeros((nx, ny, nz + 1))
     return g
@@ -258,6 +284,7 @@ def xa_to_tl_adj(a: dict, xb: dict, grid: dict, *, press: str = "wrfda", ph: str
     transfer does not read ``xa%p``).
     """
     check_supported(xb, grid, cloud_cv_options=cloud_cv_options, press=press, ph=ph)
+    _require_f64("a", a, TL_KEYS)
     nx, ny, nz = xb["t"].shape
 
     def get(key, shape):
@@ -306,6 +333,7 @@ def tl_to_xa(g: dict, xb: dict, grid: dict, *, cloud_cv_options: int = 0) -> dic
     ``g_ph_2`` is not read (WRFDA does not).
     """
     check_supported(xb, grid, cloud_cv_options=cloud_cv_options)
+    _require_f64("g", g, TL_KEYS)
     nx, ny, nz = xb["t"].shape
     g_qv = g["qv"]
     xa = {"q": g_qv * (1.0 - xb["q"]) ** 2}
@@ -330,6 +358,7 @@ def tl_to_xa_adj(a: dict, xb: dict, grid: dict, *, cloud_cv_options: int = 0) ->
     Missing keys of ``a`` are zero; ``ph_2`` of the result is zero.
     """
     check_supported(xb, grid, cloud_cv_options=cloud_cv_options)
+    _require_f64("a", a, XA4D_KEYS)
     nx, ny, nz = xb["t"].shape
 
     def get(key, shape):
