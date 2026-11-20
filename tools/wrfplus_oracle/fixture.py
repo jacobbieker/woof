@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -32,7 +32,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from woof.grad.wrfplus import cases  # noqa: E402
-from woof.grad.wrfplus.acoustic import CW_STATE, UV_ACTIVE, W_STATE  # noqa: E402
+from woof.grad.wrfplus.acoustic import (CW_STATE, MT_STATE, UV_ACTIVE,  # noqa: E402
+                                       W_STATE)
 
 #: The configurations each advance_uv fixture holds (WRFPLUS needs the
 #: terrain-following coordinate and a specified boundary, spec_zone >= 1).
@@ -425,8 +426,164 @@ def calc_coef_w(exe: str, runner: list[str], seed: int = 20261121) -> dict:
     return out
 
 
+#: advance_mu_t fixtures: WRFPLUS's specified boundary (spec_zone 1, open
+#: lateral sides, the exact frame), c1 = 1, with and without map factors.
+MT_CASES = {
+    "plain": dict(spec_zone=1, open_x=1, open_y=1),
+    "mapped": dict(spec_zone=1, open_x=1, open_y=1, mapped=1, nz=12),
+    "small_mapped": dict(nz=3, ny=4, nx=5, spec_zone=1, open_x=1, open_y=1,
+                         mapped=1),
+}
+
+
+def _mt_frame(geom):
+    j, i = np.mgrid[0:geom.ny, 0:geom.nx]
+    z = geom.spec_zone
+    return (i < z) | (i >= geom.nx - z) | (j < z) | (j >= geom.ny - z)
+
+
+def _mt_faces(geom, mut, axis):
+    """WRF muu (axis 1) / muv (axis 0) from the cell column mass: the
+    interior faces' two-cell mean, zero on the outer faces (unread)."""
+    ny, nx = mut.shape
+    if axis == 1:
+        out = np.zeros((ny, nx + 1))
+        out[:, 1:nx] = 0.5 * (mut[:, 1:] + mut[:, :-1])
+    else:
+        out = np.zeros((ny + 1, nx))
+        out[1:ny] = 0.5 * (mut[1:] + mut[:-1])
+    return out
+
+
+def _mt_record(geom, tr, pe, seeds):
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    L = Layout(nz, ny, nx)
+    k1 = lambda a: np.concatenate([a, np.zeros(nz + 1 - a.size)])  # noqa: E731
+    head = np.array([nx, ny, nz, geom.spec_zone], dtype=np.int32)
+    reals = np.array([geom.rdx, geom.rdy, geom.dtau, 0.1])
+    a3 = [tr["ww_pp"], pe["ww_pp"], tr["ww_ref"], pe["ww_ref"], tr["u_pp"], pe["u_pp"],
+          tr["u"], pe["u"], tr["v_pp"], pe["v_pp"], tr["v"], pe["v"], tr["th_pp"],
+          pe["th_pp"], tr["thp"], pe["thp"], tr["rth_t"], pe["rth_t"], seeds["ww_pp"],
+          seeds["th_pp"], seeds["th_old"]]
+    mut = tr["mub2d"] + tr["mup"]
+    a2 = [tr["mu_pp"], pe["mu_pp"], mut, pe["mup"], _mt_faces(geom, mut, 1),
+          _mt_faces(geom, pe["mup"], 1), _mt_faces(geom, mut, 0),
+          _mt_faces(geom, pe["mup"], 0), tr["muts"], pe["muts"], tr["rmu_t"],
+          pe["rmu_t"], tr["msft"], tr["msfu"], tr["msfv"], seeds["mu_pp"],
+          seeds["muts"], seeds["mudf"]]
+    blob = head.tobytes() + reals.astype("<f8").tobytes()
+    for a in a3:
+        blob += L.w3(a).astype("<f8").tobytes(order="F")
+    for a in a2:
+        blob += L.w2(a).astype("<f8").tobytes(order="F")
+    for a in (k1(tr["fnm"][:nz]), k1(tr["fnp"][:nz]), k1(tr["dnw"]), k1(tr["rdnw"])):
+        blob += np.asarray(a, dtype="<f8").tobytes()
+    return blob, L
+
+
+def _mt_expected(geom, out, L, tr, pe, seeds):
+    n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+    vals = np.frombuffer(out, dtype="<f8")
+    off = [0]
+
+    def take(n, s):
+        x = vals[off[0]:off[0] + n].reshape(s, order="F")
+        off[0] += n
+        return x
+
+    sh = cases.mt_shapes(geom)
+    t3 = lambda name: L.from3(take(n3, L.s3), sh[name])  # noqa: E731
+    t2 = lambda name: L.from2(take(n2, L.s2), sh[name])  # noqa: E731
+    frame = _mt_frame(geom)
+    e = {}
+    for n in ("ww_pp", "th_pp", "th_old"):
+        e["tl_" + n] = t3(n)
+        e["tl_d_" + n] = t3(n)
+    for n in ("mu_pp", "muts", "mudf"):
+        e["tl_" + n] = t2(n)
+        e["tl_d_" + n] = t2(n)
+    e["tl_mu_old"], e["tl_d_mu_old"] = tr["mu_pp"], pe["mu_pp"]
+    e["tl_p_old"], e["tl_d_p_old"] = tr["p_pp"], pe["p_pp"]
+    a_ww = t3("ww_pp")
+    e["ad_ww_ref"] = t3("ww_ref")
+    e["ad_u_pp"] = t3("u_pp")
+    e["ad_u"] = t3("u")
+    e["ad_v_pp"] = t3("v_pp")
+    e["ad_v"] = t3("v")
+    e["ad_th_pp"] = t3("th_pp")
+    e["ad_thp"] = t3("thp")
+    e["ad_th_old"] = t3("th_old")
+    e["ad_rth_t"] = t3("rth_t")
+    a_mu = t2("mu_pp")
+    a_mut = t2("mup")
+    a_muave = t2("mup")
+    a_muts = t2("muts")
+    a_muu = L.from2(take(n2, L.s2), (geom.ny, geom.nx + 1))
+    a_muv = L.from2(take(n2, L.s2), (geom.ny + 1, geom.nx))
+    a_mudf = t2("mudf")
+    e["ad_rmu_t"] = t2("rmu_t")
+    assert off[0] == vals.size, (off[0], vals.size)
+    assert not np.any(a_muave), "muave's adjoint was seeded with zero"
+    # Woof consumes Omega'' on the solved columns (all levels; WRF passes
+    # its untouched surface and top through) and leaves the frame alone.
+    e["ad_ww_pp"] = np.where(frame[None], seeds["ww_pp"], 0.0)
+    assert np.array_equal(np.where(frame[None], a_ww, 0.0)[:, :, :],
+                          e["ad_ww_pp"]), "WRFPLUS changed frame Omega adjoints"
+    # WRF saves t_ave on the solved columns only; woof's th_old copy
+    # covers the frame too (its adjoint consumed there as well).
+    f3 = frame[None]
+    assert np.allclose(e["tl_th_old"][:, ~frame], tr["th_pp"][:, ~frame], rtol=0, atol=0)
+    e["tl_th_old"], e["tl_d_th_old"] = tr["th_pp"], pe["th_pp"]
+    e["ad_th_pp"] = e["ad_th_pp"] + np.where(f3, seeds["th_old"], 0.0)
+    e["ad_th_old"] = np.zeros(sh["th_old"])
+    e["ad_mu_pp"] = a_mu + seeds["mu_old"]
+    e["ad_mu_old"] = np.zeros(sh["mu_old"])
+    e["ad_muts"] = a_muts
+    e["ad_mudf"] = np.where(frame, 0.0, a_mudf)       # woof writes 0 on the frame
+    e["ad_p_old"] = np.zeros(sh["p_old"])
+    e["ad_p_pp"] = seeds["p_old"].copy()
+    e["ad_mup"] = (a_mut + 0.5 * (a_muu[:, 1:] + a_muu[:, :-1])
+                   + 0.5 * (a_muv[1:] + a_muv[:-1]))
+    return e
+
+
+def advance_mu_t(exe: str, runner: list[str], seed: int = 20261122) -> dict:
+    out = {}
+    for name, over in MT_CASES.items():
+        geom = cases.mt_geometry(**over)
+        tr = cases.mt_trajectory(geom, seed)
+        pe = cases.mt_perturbation(geom, seed + 1)
+        seeds = cases.mt_perturbation(geom, seed + 2)
+        # WRF's Omega surface and top enter as zero (its ww(1) update
+        # subtracts ww_1 from the input; ww(kde) is not written).
+        for d in (tr, pe):
+            d["ww_pp"][0] = 0.0
+            d["ww_pp"][-1] = 0.0
+        blob, L = _mt_record(geom, tr, pe, seeds)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _mt_expected(geom, result, L, tr, pe, seeds)
+        prefix = f"{name}/"
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for n in MT_STATE:
+            out[prefix + "seed/" + n] = seeds[n]
+        interior = ~_mt_frame(geom)
+        out[prefix + "mask/tl_mudf"] = interior
+        out[prefix + "mask/tl_d_mudf"] = interior
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
-            "calc_coef_w": calc_coef_w}
+            "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t}
 
 
 def main(argv=None) -> int:

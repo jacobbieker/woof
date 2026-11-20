@@ -394,3 +394,124 @@ def calc_coef_w_ad(adj_state: dict, traj: dict, adj: dict,
     _kernel("calc_coef_w", "calc_coef_w_ad", dtype, (("WV_LEV", geom.nz + 1),))(
         _blocks(geom.ny * geom.nx), (THREADS,),
         sa + tr + aa + ps + geom.args(dtype))
+
+
+#: advance_mu_t's state (woof advance_mu_th's in/out and output arrays,
+#: plus muts for the specified-frame kernel), active inputs and passive
+#: constants, in kernel order.  thp is the theta the strict primal
+#: advects (WRF t_1) and ww_ref the stage-start Omega (WRF ww_1).
+MT_STATE = ("mu_pp", "th_pp", "mu_old", "th_old", "p_old", "mudf", "ww_pp",
+            "muts")
+MT_ACTIVE = ("u_pp", "v_pp", "u", "v", "mup", "rmu_t", "thp", "rth_t",
+             "ww_ref", "p_pp")
+MT_PASSIVE = ("dnw", "rdnw", "fnm", "fnp", "c1h", "c2h", "mub2d", "msft",
+              "msfu", "msfv")
+
+
+@dataclass(frozen=True)
+class MTGeometry:
+    """advance_mu_th's scalars, as woof/core/acoustic.py passes them.
+    ``mapped`` selects advance_mu_th_msf's map factors (msfv is the
+    strict path's msfv_inv, a multiplier); ``exact_frame`` adds
+    advance_exact_frame_mu_t when ``spec_zone > 0``, as the strict
+    launcher does."""
+    nz: int
+    ny: int
+    nx: int
+    rdx: float
+    rdy: float
+    dtau: float
+    spec_zone: int = 0
+    open_x: int = 0
+    open_y: int = 0
+    mapped: int = 0
+    write_mudf: int = 1
+    exact_frame: int = 1
+
+    @property
+    def frame(self) -> bool:
+        return bool(self.exact_frame) and self.spec_zone > 0
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        return (i(self.nz), i(self.ny), i(self.nx), i(self.open_x),
+                i(self.open_y), i(self.spec_zone), i(self.mapped),
+                i(self.write_mudf), r(self.rdx), r(self.rdy), r(self.dtau))
+
+
+def mt_shapes(geom: MTGeometry) -> dict[str, tuple[int, ...]]:
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    mass, wlev, col = (nz, ny, nx), (nz + 1, ny, nx), (ny, nx)
+    us, vs = (nz, ny, nx + 1), (nz, ny + 1, nx)
+    return {"mu_pp": col, "th_pp": mass, "mu_old": col, "th_old": mass,
+            "p_old": mass, "mudf": col, "ww_pp": wlev, "muts": col,
+            "u_pp": us, "v_pp": vs, "u": us, "v": vs, "mup": col,
+            "rmu_t": col, "thp": mass, "rth_t": mass, "ww_ref": wlev,
+            "p_pp": mass, "dnw": (nz,), "rdnw": (nz,), "fnm": (nz + 1,),
+            "fnp": (nz + 1,), "c1h": (nz,), "c2h": (nz,), "mub2d": col,
+            "msft": col, "msfu": (ny, nx + 1), "msfv": (ny + 1, nx)}
+
+
+def advance_mu_t_tl(state: dict, pert_state: dict, traj: dict, pert: dict,
+                    geom: MTGeometry, *, nl: bool = True) -> None:
+    """WRFPLUS g_advance_mu_t, then (``geom.frame``) the specified-frame
+    g_spec_bdyupdate of t_2, mu_2 and muts: update ``pert_state`` (and
+    ``state`` when ``nl``) in place, dicts of :data:`MT_STATE`; ``pert``
+    holds the perturbations of :data:`MT_ACTIVE`."""
+    sh = mt_shapes(geom)
+    st = tuple(state[n] for n in MT_STATE)
+    sd = tuple(pert_state[n] for n in MT_STATE)
+    tr = tuple(traj[n] for n in MT_ACTIVE)
+    pe = tuple(pert[n] for n in MT_ACTIVE)
+    ps = tuple(traj[n] for n in MT_PASSIVE)
+    _check(geom, [("state", n, state[n]) for n in MT_STATE]
+           + [("pert", n, pert_state[n]) for n in MT_STATE]
+           + [("traj", n, traj[n]) for n in MT_ACTIVE + MT_PASSIVE]
+           + [("pert", n, pert[n]) for n in MT_ACTIVE], sh)
+    dtype = _dtype(st + sd + tr + pe + ps)
+    defines = (("WV_LEV", geom.nz + 1),)
+    g = geom
+    blocks = _blocks(g.ny * g.nx)
+    _kernel("advance_mu_t", "advance_mu_t_tl", dtype, defines)(
+        blocks, (THREADS,),
+        st[:7] + sd[:7] + tr + pe + ps + (np.int32(bool(nl)),) + g.args(dtype))
+    if g.frame:
+        _kernel("advance_mu_t", "frame_mu_t_tl", dtype, defines)(
+            blocks, (THREADS,),
+            (state["mu_pp"], state["th_pp"], state["muts"], pert_state["mu_pp"],
+             pert_state["th_pp"], pert_state["muts"], traj["rmu_t"],
+             traj["rth_t"], traj["mup"], pert["rmu_t"], pert["rth_t"],
+             pert["mup"], traj["mub2d"], np.int32(bool(nl))) + g.args(dtype))
+
+
+def advance_mu_t_ad(adj_state: dict, traj: dict, adj: dict,
+                    geom: MTGeometry) -> None:
+    """Adjoint of :func:`advance_mu_t_tl`: map the :data:`MT_STATE`
+    adjoints in place (written entries consumed) and add those of
+    :data:`MT_ACTIVE` into ``adj``."""
+    import cupy as cp
+    sh = mt_shapes(geom)
+    sa = tuple(adj_state[n] for n in MT_STATE)
+    tr = tuple(traj[n] for n in MT_ACTIVE)
+    aa = tuple(adj[n] for n in MT_ACTIVE)
+    ps = tuple(traj[n] for n in MT_PASSIVE)
+    _check(geom, [("adj", n, adj_state[n]) for n in MT_STATE]
+           + [("traj", n, traj[n]) for n in MT_ACTIVE + MT_PASSIVE]
+           + [("adj", n, adj[n]) for n in MT_ACTIVE], sh)
+    dtype = _dtype(sa + tr + aa + ps)
+    defines = (("WV_LEV", geom.nz + 1),)
+    g = geom
+    blocks = _blocks(g.ny * g.nx)
+    if g.frame:
+        _kernel("advance_mu_t", "frame_mu_t_ad", dtype, defines)(
+            blocks, (THREADS,),
+            (adj_state["mu_pp"], adj_state["th_pp"], adj_state["muts"],
+             adj["rmu_t"], adj["rth_t"], adj["mup"]) + g.args(dtype))
+    scratch_d = cp.empty((g.nz, g.ny, g.nx), dtype=dtype)
+    scratch_h = cp.empty((g.nz, g.ny, g.nx), dtype=dtype)
+    _kernel("advance_mu_t", "advance_mu_t_ad", dtype, defines)(
+        blocks, (THREADS,),
+        sa[:7] + tr + aa + ps + (scratch_d, scratch_h) + g.args(dtype))
+    _kernel("advance_mu_t", "advance_mu_t_ad_gather", dtype, defines)(
+        blocks, (THREADS,),
+        tr + aa + ps + (scratch_d, scratch_h) + g.args(dtype))

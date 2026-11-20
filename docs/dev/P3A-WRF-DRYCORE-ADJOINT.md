@@ -338,7 +338,16 @@ Other jobs share that card.
 |---|---|---|---|---|
 | advance_uv | #652, #655 | 3.4-4.0x | ~3x | 12-15x |
 | advance_w + calc_p_rho (advance_w_phi) | #669 | 3.5-3.7x | 2.3x | 9.3-9.8x |
-| calc_coef_w (calc_coefs) | this PR | 4.8x | 3.2x | 21-23x |
+| calc_coef_w (calc_coefs) | #675 | 4.8x | 3.2x | 21-23x |
+| advance_mu_t + spec_bdyupdate (advance_mu_th + advance_exact_frame_mu_t) | this PR | 3.35x (3.2-3.5) | 2.0x | 8.2x |
+
+advance_uv's 3.7x in the projection is the midpoint of its range. The
+advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
+whose forward share sits in "other woof kernels", so its 11.4% slightly
+understates the weight. For spec_zone >= 2 the TL/AD follow woof's
+primal, which treats the whole spec_zone ring as frame; WRFPLUS
+integrates from ids+1 whatever spec_zone is, and the oracle runs
+spec_zone = 1 only.
 
 The shares below are each kernel's part of the forward step's GPU kernel
 time. They come from a dry step at 200x200x49, using CUPTI kernel
@@ -359,18 +368,18 @@ activity tagged by woof kernel and the minimum over 10 steps
 
 The projection is the per-step adjoint cost over the forward step:
 1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
-far (45.4% of the strict step), Σ share x AD32 = 1.67, on top of the
+far (56.8% of the strict step), Σ share x AD32 = 2.05, on top of the
 forward recompute's 1. The rest is projected at a range of ratios:
 
-| ratio for the unmeasured 54.6% | projection |
+| ratio for the unmeasured 43.2% | projection |
 |---|---|
-| 2.2x (memory-traffic floor) | 3.9x |
+| 2.2x (memory-traffic floor) | 4.0x |
 | 3.0x | 4.3x |
-| 3.7x (as measured so far) | 4.7x |
+| 3.6x (the measured share-weighted mean) | 4.6x |
 
-The 5x limit holds while the rest averages at most about 4.3x. This is a
+The 5x limit holds while the rest averages at most about 4.5x. This is a
 projection from kernel GPU time, not a measured step ratio: launch gaps
-are not counted, the ratios come from a shared card, and 54.6% of the
+are not counted, the ratios come from a shared card, and 43.2% of the
 step is not yet ported. calc_coefs alone is 4.8x, above the limit, but at
 2.3% of the step it adds about 0.11. Each later kernel PR replaces a
 projected share with a measured one.
