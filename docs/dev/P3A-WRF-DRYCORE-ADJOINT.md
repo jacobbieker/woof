@@ -699,6 +699,34 @@ Each step is one small PR, taken to merged before the next widens.
      prognostic differ, so the test pins the choice.
    - Still refused: lateral boundaries other than periodic (specified
      boundaries next), so WRFDA's regional tutorial case cannot run yet.
+8g. An external trajectory (DA item 1; WRFDA-4DVAR-PLAN section 3.1).
+   WRFPLUS linearises about the nonlinear run's states, read every time
+   step (`auxinput6`), from a run with full physics.
+   `Window.forward(trajectory=states)` does the same: `states[k]` (a
+   STEP_INPUTS dict, `k = 0..nsteps-1`, optionally state `nsteps` too)
+   is the base step `k` is linearised about, in place of the window's own
+   dry rerun.
+   - `tl` loads `states[k]` before step k. `ad` takes every state as a
+     checkpoint, so it reruns no segment; it tapes each step from its
+     supplied state.
+   - `Window.trajectory_state(state, cfg)` reads a DomainState (a woof
+     forecast's state after some steps) as an entry, in the window's
+     dtype. A WRF trajectory is mapped onto STEP_INPUTS by the caller.
+     Each entry must hold what its step reads: on a warm step the
+     previous step's diagnosis and carried muts.
+   - The geometry is still the window's (the `cfg` it was built with), so
+     a physics run's states are linearised by the dry step: the
+     adiabatic TL of WRFDA's lanes L1/L0 before item 6.
+   - `forward` returns state `nsteps`: the supplied one, or one window
+     step from the last. A plain `forward()` returns to the window's own
+     base.
+   - Tests (`test_window_external_trajectory`, host and CUDA): the
+     window's own states supplied as the trajectory give the same TL,
+     adjoint and end state bit for bit; another run's states (the primal
+     from a perturbed start) leave the TL at state 1 unchanged and move
+     it from state 2 on; the adjoint with forcing is the TL's (1e-12
+     binary64, 1e-5 binary32); a wrong length, or x0 with a trajectory,
+     is refused.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 

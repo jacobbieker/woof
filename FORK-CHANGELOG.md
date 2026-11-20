@@ -31,6 +31,14 @@ fork already had, upstream's keys and flags are now the only ones:
 
 New:
 
+- The WRF dry-step adjoint's window (`woof.grad.wrfplus.window.Window`)
+  can linearise about a supplied trajectory, as WRFPLUS does about the
+  nonlinear run's states: `forward(trajectory=states)` takes the state
+  each step starts from (a woof forecast with physics through
+  `trajectory_state`, or WRF's own), and `tl`/`ad` linearise step k about
+  `states[k]` instead of the window's own dry rerun. The forecast path is
+  unchanged.
+
 - Noah-MP is recorded as following WRF 4.7.1's Noah-MP submodule (e5c0859),
   at the user's request. No forecast answer changes, because the default
   already computes what e5c0859 computes. Of e5c0859's edits to the code
