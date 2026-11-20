@@ -146,6 +146,12 @@ VT_CASES = (
         "config_itd_conversion_type": "delta function", "config_use_ice_age": False,
         "config_use_first_year_ice": False, "config_use_level_ice": False}),
     ("vt_bl99_abort_salinity", 20261948, "vertical_thermodynamics", _VT),
+    # a leap year after February on the default gregorian_noleap calendar: 2000-09-16 is
+    # day 259 of the 365-day year (the north's reset), 260 on the Gregorian count
+    ("vt_bl99_first_year_north_leap_year", 20261949, "vertical_thermodynamics", {
+        **_VT, "config_start_time": "2000-09-16_00:00:00"}),
+    ("vt_bl99_first_year_north_gregorian", 20261950, "vertical_thermodynamics", {
+        **_VT, "config_calendar_type": "gregorian", "config_start_time": "2000-09-15_00:00:00"}),
 )
 _ITD = "itd_thermodynamics"
 _DELTA_NEW = {"config_itd_conversion_type": "delta function", "config_category_bounds_type": "new"}
@@ -261,6 +267,9 @@ DEDD_CASES = (
     ("dedd_zero_layer_topo_ponds", 20262003, "radiation", {
         **_TOPO_ONLY, "config_thermodynamics_type": "zero layer", "config_sea_freezing_temperature_type": "linear_salt",
         "config_start_time": "2000-01-10_12:00:00"}),
+    # a leap year after February on the default gregorian_noleap calendar: 2000-03-01 is
+    # day 60 of the 365-day year, 61 on the Gregorian count
+    ("dedd_default_noleap_leap_year", 20262006, "radiation", {"config_start_time": "2000-03-01_12:00:00"}),
     ("init_shortwave_dedd_level_ponds", 20262004, "init_shortwave", {"config_start_time": "2001-06-21_12:00:00"}),
     ("init_shortwave_dedd_topo_ponds", 20262005, "init_shortwave", {
         **_BL99, **_TOPO_ONLY, "config_calendar_type": "gregorian", "config_start_time": "2000-02-29_07:00:00"}),

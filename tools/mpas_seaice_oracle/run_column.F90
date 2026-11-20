@@ -80,7 +80,7 @@ program run_column
   type(domain_type), pointer :: domain
   real(kind=RKIND) :: inputDt
   real(kind=RKIND), pointer :: iceAgeTimeOffset
-  character(len=StrKIND), pointer :: stage, updateType, config_start_time, clockStep
+  character(len=StrKIND), pointer :: stage, updateType, config_start_time, clockStep, config_calendar_type
   character(len=StrKIND), pointer :: shortwaveType
   logical :: orbitAbort
   character(len=StrKIND) :: orbitMessage
@@ -110,6 +110,9 @@ program run_column
   end do
   call stub_pool_put_subpool(domain % blocklist % structs, 'alternative_atmos_forcing', &
        pool_named(pools, 'alternative_atmos_forcin'))
+  ! the framework sets the calendar before the clock (mpas_framework.F:111-116)
+  call mpas_pool_get_config(pools % configs, 'config_calendar_type', config_calendar_type)
+  call mpas_timekeeping_init(config_calendar_type)
   call mpas_pool_get_config(pools % configs, 'config_start_time', config_start_time)
   call mpas_pool_get_config(pools % configs, 'oracle_clock_step', clockStep)
   call mpas_set_clock(domain % clock, config_start_time, clockStep)
