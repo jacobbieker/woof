@@ -2239,8 +2239,10 @@ work (12.7).
 
 `obs_point` lacks two things:
 
-- the `aircraft_level` and `profiler_level` labels, which its
-  pressure-level branch should accept (PR B adds them);
+- the `aircraft_level` and `profiler_level` labels in its pressure-level
+  branch. PR B writes `aircraft_level` rows but does not enable the label:
+  the ACARS and PrepBUFR doors already write it, so enabling it changes
+  existing ensemble-filter runs and is its own PR;
 - surface dewpoint and station-pressure operators. These rows are written,
   and refused by name until those operators exist.
 
@@ -2318,15 +2320,27 @@ cause is in the data, and it is the same in `wis2.icechunk` and in
   - `obs_stores.wis2_upper_air` keeps, per station and launch, the part
     with the most levels. At these stations that was the TTDD part, and
     its "500 hPa" level is really 50 hPa.
-- **woof's rule (PR B).**
-  - A Part D or Part C row (TTDD or TTCC) holds levels above 100 hPa by
-    definition. Any of its levels at more than 100 hPa is refused, and
-    the whole part is counted as `part_d_pressure_scale`.
+- **woof's rule (PR B, `woof.obs.wis2.pressure_scale_fault`).**
+  - The label rule: a Part C or Part D (TTCC or TTDD) holds levels above
+    100 hPa by definition, so a part with a level at more than 101 hPa is
+    refused whole and counted as `sonde_part_part_above_100hpa`. Any part
+    with a level above 1100 hPa is refused as `pressure_out_of_range`,
+    which catches a whole sounding at ten times its pressure.
+  - The detection, for parts with no label (BUFR soundings) or a label
+    that passes: each part is compared, in ln p, with the union of the
+    same launch's other parts, only between reference levels at most 15%
+    apart in pressure. If the median temperature difference exceeds
+    10 K over at least 3 levels, but is within 3 K once the part's
+    pressures are divided by ten, the part is refused as
+    `sonde_part_pressure_scale_x10`. If rescaling does not help, the
+    worst part is refused as `inconsistent_part` (both, when only two
+    parts disagree).
   - woof does not rescale, because the store says values are as reported.
-  - Independently, every level must agree with the same launch's TTAA
-    mandatory level within OBSPROC's tolerances.
   - The background check (`check_max_iv` or `obs_point`'s) is the last
     net.
+  - On 2026-10-28 11-13Z over (25-50N, 110-85W) the 19 TTDD parts are
+    refused, and 72261, 72265, 72327 and 72340 have 260-291 K at
+    850-500 hPa.
 - **For the source.**
   - Either decode NWS Part D pressures with the right scale (tenths of hPa
     in the TAC; the BUFR reports them at ten times the value), or set
@@ -2335,8 +2349,10 @@ cause is in the data, and it is the same in `wis2.icechunk` and in
 ### 12.7 Interfaces
 
 - **LETKF.**
-  - `woof obs wis2 fetch --start --end --bbox --families ... --out
-    table.csv` (opt-in) writes `gpuwm-obs.table.v2`.
+  - `woof obs wis2 fetch --start --end --bbox S N W E --families ...
+    --table table.csv` (opt-in) writes `gpuwm-obs.table.v2`;
+    `--obs-gts ob.ascii` writes the 3D-Var file and `--receipt` a JSON
+    receipt (snapshot id, counts per QC rule).
   - `obs_point.read_tables` already reads that format, and `point_batches`
     applies the receipt cut-off from `received_time`.
   - Nothing changes when the command is not run.
@@ -2380,9 +2396,11 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
 2. **PR B: in-situ reader.** `woof obs wis2 fetch` covers land/reports,
    synop_tac, ocean/surface, ship_tac, upper_air/soundings,
    wind_profiler and aircraft. It applies 12.2's flags, OBSPROC's errors
-   and gross checks, and the Part D rule. It writes neutral table v2, plus
-   `obs_gts` once the interface is agreed. `obs_point` gains the
-   `aircraft_level` and `profiler_level` labels. Tests use synthetic
+   and gross checks, and the Part D rule. It writes neutral table v2 and
+   `obs_gts`. Aircraft rows carry `aircraft_level`, which `obs_point`
+   does not enable yet (12.5); profilers
+   (heights, no pressure) go to `obs_gts` only, and ocean platform rows
+   carry labels `obs_point` has no operator for yet. Tests use synthetic
    fixtures.
 3. **PR C: point winds.** AMVs (`amv`, `ahi_amv`) and scatterometer winds
    enter as point winds with WRFDA's AMV and qscat errors.

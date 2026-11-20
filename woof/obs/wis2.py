@@ -1,0 +1,1125 @@
+"""WIS2 in-situ observations from the ``bkr/obs/wis2.icechunk`` archive (opt-in).
+
+``woof obs wis2 fetch`` reads one time window and one latitude/longitude box
+from Source Cooperative's combined WIS2 store
+(``us-west-2.opendata.source.coop``, prefix ``bkr/obs/wis2.icechunk``),
+anonymously and read-only, and writes:
+
+* a ``gpuwm-obs.table.v2`` table (:mod:`woof.obs.neutral_table`) that the
+  ensemble filter's point operators (:func:`woof.da.obs_point.point_batches`)
+  read, with each report's Global Cache arrival as its ``received_time``;
+* optionally OBSPROC's ``obs_gts`` ASCII, the 3D-Var interface agreed with
+  the da.var work (docs/dev/WRFDA-3DVAR-PLAN.md section 12.7), which
+  :func:`woof.da.var.obs_wrfda.read_obs_ascii` and WRFDA itself read.
+
+This is the archive, not the live broker: the ``wis2`` stream of
+:mod:`woof.obs.streams` subscribes to the broker through ``rw_wis2``.  The
+store layout, its QC flags and the family-to-type mapping are in section 12
+of docs/dev/WRFDA-3DVAR-PLAN.md.  Rows whose label ``obs_point`` has no
+operator for yet (ocean platforms, aircraft) are written with their true
+label and refused by name there; enabling ``aircraft_level`` in
+``obs_point`` would also start assimilating the ACARS and PrepBUFR aircraft
+rows other doors already write, so it is a separate change.  Families read
+here:
+
+==============  ============================  ======  ==========================
+family          groups                        WRFDA   neutral measurement
+==============  ============================  ======  ==========================
+``land``        land/reports, land/synop_tac  FM-12   screen_temperature_2m, ...
+``ocean``       ocean/surface, ocean/ship_tac FM-13/18 platform_* (no operator)
+``sonde``       upper_air/soundings           FM-35   sonde_level
+``aircraft``    aircraft                      FM-42   aircraft_level (no operator)
+``profiler``    upper_air/wind_profiler       FM-132  (obs_gts only: no pressure)
+==============  ============================  ======  ==========================
+
+Quality control, in order (each refusal is counted by name):
+
+1. The store's own flags: a row or level is refused when any bit of
+   ``quality_flag`` / ``level_quality_flag`` other than ``time_too_old``
+   (256) is set; a value is refused when its ``<variable>_quality`` is
+   non-zero.  The store never alters a value, so these are its only verdict.
+2. Gross bounds on every family (temperature and dewpoint 150-350 K,
+   pressure up to 1100 hPa, sea-level pressure 850-1100 hPa, station
+   elevation -500 to 9000 m; a report with neither a pressure nor a height
+   is dropped), sensor heights (2 m screen
+   temperature 1-3 m, 10 m wind 8-12 m, as the station referees), wind
+   speed 0-120 m/s, a direction of 0 with a non-zero speed.
+3. Soundings: the TEMP parts of one launch are merged.  A part whose
+   levels sit at ten times their pressure is detected and refused
+   (:func:`pressure_scale_fault`): a part that by its own label holds only
+   levels above 100 hPa (Part C or D) but has levels below it, any part
+   with a level above 1100 hPa, or a part
+   whose temperatures disagree with the launch's other parts unless every
+   pressure is divided by ten.  The Global Cache archive holds such parts
+   (section 12.6); the check keys on the data, not on a centre.
+4. Duplicates: corrections replace originals (highest
+   ``update_sequence_number``; a flagged correction does not revive the
+   original), a text-only report repeating a BUFR report
+   of the same station and time is dropped, aircraft by ``report_id``.
+
+The background check is the analysis's (``obs_point``'s or WRFDA's
+``check_max_iv``), not this module's.
+
+Errors are WRFDA's: OBSPROC's ``obserr.txt`` through
+:mod:`woof.obs.obserr_wrfda`, so the obs_gts file carries what OBSPROC
+would have written and the neutral table the same numbers.
+
+``icechunk`` and ``zarr`` are imported only when the store is opened; the
+functions below also take any mapping of arrays laid out like the store
+(the tests build one in memory), so nothing is fetched in a test.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import json
+import math
+import re
+import sys
+from collections import Counter
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+
+BUCKET = "us-west-2.opendata.source.coop"
+PREFIX = "bkr/obs/wis2.icechunk"
+REGION = "us-west-2"
+SOURCE = "wis2"
+FAMILIES = ("land", "ocean", "sonde", "aircraft", "profiler")
+# quality_flag bits (the store's flag_meanings); every bit but time_too_old refuses.
+QUALITY_BITS = ("outside_physical_range", "outside_plausible_range", "internally_inconsistent",
+                "vertically_inconsistent", "position_invalid", "position_suspect", "time_invalid",
+                "time_in_future", "time_too_old", "duplicate", "provider_flagged")
+IGNORED_BITS = 256
+SPEED_BOUNDS = (0.0, 120.0)
+T2_SENSOR_M = (1.0, 3.0)
+WIND_SENSOR_M = (8.0, 12.0)
+# BUFR 0 08 042 (extended vertical sounding significance) bits.
+VSS_SURFACE = 131072
+VSS_STANDARD = 65536
+# A sounding filed for hour H is launched up to about 75 min before it; two
+# reports of one station launched this close together are one ascent.
+SONDE_LAUNCH_LEAD = np.timedelta64(150, "m")
+SONDE_SAME_ASCENT = np.timedelta64(90, "m")
+# Pressure-scale detection: parts disagreeing by more than this (median, K)
+# are inconsistent; dividing the pressures by ten must bring them within the
+# second figure for the fault to be named a pressure-scale fault.
+PART_DISAGREE_K = 10.0
+PART_RESCALED_AGREE_K = 3.0
+PART_MIN_OVERLAP = 3
+PRESSURE_MAX_PA = 110000.0  # no station pressure exceeds 1100 hPa
+# Gross bounds on every family before either writer (OBSPROC's range checks, loosely).
+T_BOUNDS = (150.0, 350.0)
+SLP_BOUNDS = (85000.0, 110000.0)
+ELEV_BOUNDS = (-500.0, 9000.0)
+HEIGHT_BOUNDS = (-500.0, 60000.0)
+L_OVER_RV = 5418.12  # OBSPROC constants.inc
+MISSING = -888888.0
+MISSING_QC = -88
+
+
+class Wis2Error(RuntimeError):
+    """The store cannot be read for the request."""
+
+
+# --------------------------------------------------------------------------- store access
+def open_store(*, snapshot: str | None = None):
+    """The archive's root group, anonymous and read-only (``icechunk`` and ``zarr`` needed)."""
+    try:
+        import icechunk
+        import zarr
+    except ImportError:
+        raise Wis2Error("the WIS2 archive reader needs icechunk and zarr "
+                        "(`pip install icechunk zarr`); nothing else in woof does") from None
+    storage = icechunk.s3_storage(bucket=BUCKET, prefix=PREFIX, region=REGION, anonymous=True)
+    repo = icechunk.Repository.open(storage)
+    session = repo.readonly_session(snapshot_id=snapshot) if snapshot else repo.readonly_session("main")
+    return zarr.open_group(session.store, mode="r"), session.snapshot_id
+
+
+def _group(root, path):
+    try:
+        return root[path]
+    except KeyError:
+        raise Wis2Error(f"the store has no group {path!r}") from None
+
+
+def _fill(attrs):
+    value = attrs.get("_FillValue") if hasattr(attrs, "get") else None
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _attrs(array):
+    return getattr(array, "attrs", {}) or {}
+
+
+def _read(array, index):
+    """``array`` at the sorted row ``index``: one block when dense, else the rows alone."""
+    index = np.asarray(index, np.int64)
+    if index.size == 0:
+        return np.zeros((0,) + tuple(array.shape[1:]))
+    lo, hi = int(index[0]), int(index[-1]) + 1
+    if hi - lo <= 4 * index.size or not hasattr(array, "oindex"):
+        return np.asarray(array[lo:hi])[index - lo]
+    return np.asarray(array.oindex[index])
+
+
+def _numbers(array, index):
+    """Float values with the array's fill value as NaN."""
+    raw = _read(array, index)
+    fill = _fill(_attrs(array))
+    out = np.asarray(raw, dtype=float)
+    if fill is not None:
+        out = np.where(np.asarray(raw) == fill, np.nan, out)
+    return out
+
+
+def _texts(array, index):
+    return np.asarray([str(v).strip() for v in _read(array, index).tolist()], dtype=object)
+
+
+def _times(array, index=None):
+    """datetime64[s] from the store's integer times (nanoseconds or seconds since 1970); NaT for fill."""
+    raw = np.asarray(array[:] if index is None else _read(array, index))
+    units = str(_attrs(array).get("units", "nanoseconds since 1970-01-01"))
+    raw = raw.astype(np.int64)
+    bad = raw == np.iinfo(np.int64).min
+    fill = _fill(_attrs(array))
+    if fill is not None:
+        bad |= raw == int(fill)
+    if units.startswith("nanoseconds"):
+        out = (raw // 1_000_000_000).astype("datetime64[s]")
+    elif units.startswith("seconds"):
+        out = raw.astype("datetime64[s]")
+    else:
+        raise Wis2Error(f"unknown time units {units!r}")
+    out[bad] = np.datetime64("NaT", "s")
+    return out
+
+
+def _quality_ok(group, name, index, counts, label):
+    """True where ``name`` (a quality_flag) has no refusing bit; counts each bit."""
+    if name not in group:
+        return np.ones(len(index), bool)
+    flags = _numbers(group[name], index)
+    flags = np.where(np.isfinite(flags), flags, 0).astype(np.int64)
+    for bit, meaning in enumerate(QUALITY_BITS):
+        hit = (flags >> bit) & 1
+        if (1 << bit) != IGNORED_BITS and hit.any():
+            counts[f"{label}_{meaning}"] += int(hit.sum())
+    return (flags & ~IGNORED_BITS) == 0
+
+
+def _value(group, name, index, counts, label):
+    """Float values of ``name`` with NaN where missing or where ``<name>_quality`` is set."""
+    if name not in group:
+        return np.full(len(index), np.nan)
+    values = _numbers(group[name], index)
+    quality = f"{name}_quality"
+    if quality in group:
+        q = _numbers(group[quality], index)
+        bad = np.isfinite(q) & (q != 0) & np.isfinite(values)
+        if bad.any():
+            counts[f"{label}_{name}_quality"] += int(bad.sum())
+            values = np.where(bad, np.nan, values)
+    return values
+
+
+def in_box(lat, lon, box):
+    """Inside (south, north, west, east); longitudes taken in [west, west + 360)."""
+    south, north, west, east = box
+    lat = np.asarray(lat, float)
+    lon = ((np.asarray(lon, float) - west) % 360.0) + west
+    return np.isfinite(lat) & (lat >= south) & (lat <= north) & (lon >= west) & (lon <= east)
+
+
+def _window(start, end):
+    return (np.datetime64(_naive(start), "s"), np.datetime64(_naive(end), "s"))
+
+
+def _naive(when):
+    if isinstance(when, str):
+        when = dt.datetime.fromisoformat(when.replace("Z", "+00:00"))
+    if when.tzinfo is not None:
+        when = when.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    return when
+
+
+# --------------------------------------------------------------------------- reports
+@dataclass
+class Report:
+    """One report in OBSPROC's shape: header plus levels (one level for a surface report).
+
+    Missing values are NaN; ``p`` in Pa, ``z`` in m above sea level, ``t``
+    and ``td`` in K, ``rh`` in %, ``spd`` in m/s, ``wdir`` in degrees from.
+    ``level_time``, ``level_lat`` and ``level_lon`` place each level (a
+    sonde's launch plus elapsed time and drift).
+    """
+
+    family: str
+    fm: int
+    station: str
+    name: str
+    lat: float
+    lon: float
+    elev: float
+    time: np.datetime64
+    received: np.datetime64
+    p: np.ndarray
+    z: np.ndarray
+    t: np.ndarray
+    td: np.ndarray
+    rh: np.ndarray
+    spd: np.ndarray
+    wdir: np.ndarray
+    slp: float = float("nan")
+    level_time: np.ndarray | None = None
+    level_lat: np.ndarray | None = None
+    level_lon: np.ndarray | None = None
+    group: str = ""
+    surface: bool = True
+    extras: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        n = len(self.p)
+        for name in ("z", "t", "td", "rh", "spd", "wdir"):
+            setattr(self, name, np.asarray(getattr(self, name), float).reshape(n))
+        self.p = np.asarray(self.p, float)
+        if self.level_time is None:
+            self.level_time = np.full(n, self.time)
+        if self.level_lat is None:
+            self.level_lat = np.full(n, self.lat)
+        if self.level_lon is None:
+            self.level_lon = np.full(n, self.lon)
+
+
+def _wind_ok(spd, wdir, counts, label):
+    good = np.isfinite(spd) & (spd >= SPEED_BOUNDS[0]) & (spd <= SPEED_BOUNDS[1]) \
+        & np.isfinite(wdir) & (wdir >= 0) & (wdir <= 360) & ~((spd > 0) & (wdir == 0))
+    bad = (np.isfinite(spd) | np.isfinite(wdir)) & ~good
+    if bad.any():
+        counts[f"{label}_wind_invalid"] += int(bad.sum())
+    return good
+
+
+def rh_from_dewpoint(t, td):
+    """OBSPROC's ``diagnostics_moist``: 100 exp(L/Rv (1/T - 1/Td)), clipped to (1e-6, 100]."""
+    t, td = np.asarray(t, float), np.asarray(td, float)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        rh = 100.0 * np.exp(L_OVER_RV * (1.0 / t - 1.0 / td))
+    return np.clip(rh, 1.0e-6, 100.0)
+
+
+def _moisture(t, td, rh):
+    """(td, rh): rh from t and td where it is missing (OBSPROC); td above t refused."""
+    td = np.where(np.isfinite(td) & np.isfinite(t) & (td > t + 0.05), np.nan, td)
+    rh = np.where(np.isfinite(rh), np.clip(rh, 1.0e-6, 100.0), np.nan)
+    derived = ~np.isfinite(rh) & np.isfinite(t) & np.isfinite(td)
+    rh = np.where(derived, rh_from_dewpoint(t, td), rh)
+    return td, rh
+
+
+def _select(group, start, end, box, *, time_name="time", lead=np.timedelta64(0, "s")):
+    lo, hi = _window(start, end)
+    time = _times(group[time_name])
+    lat = np.asarray(group["latitude"][:], float)
+    lon = np.asarray(group["longitude"][:], float)
+    keep = (time >= lo - lead) & (time <= hi) & in_box(lat, lon, box)
+    return np.nonzero(keep)[0], time
+
+
+def _received(group, index):
+    for name in ("first_arrival_time", "arrival_time", "arrived"):
+        if name in group:
+            return _times(group[name], index)
+    return np.full(len(index), np.datetime64("NaT"), "datetime64[s]")
+
+
+# ----------------------------------------------------------------- land: SYNOP BUFR and TAC
+def land_reports(root, start, end, box, counts: Counter) -> list[Report]:
+    out, seen = [], set()
+    for path, label in (("land/reports", "land"), ("land/synop_tac", "synop_tac")):
+        if path not in root:
+            continue
+        group = root[path]
+        index, time = _select(group, start, end, box)
+        counts[f"{label}_in_window"] += len(index)
+        if index.size == 0:
+            continue
+        ok = _quality_ok(group, "quality_flag", index, counts, label)
+        sid = _texts(group["station_id"], index)
+        when = time[index]
+        seq = _numbers(group["update_sequence_number"], index) if "update_sequence_number" in group \
+            else np.zeros(len(index))
+        best = {}
+        for k in np.lexsort((np.nan_to_num(seq, nan=-1.0), when.astype(np.int64), sid.astype(str))):
+            best[(sid[k], when[k])] = k  # the highest sequence number of a (station, time) wins
+        counts[f"{label}_superseded_correction"] += len(index) - len(best)
+        # The latest correction stands or falls alone: a flagged correction does not revive the original.
+        keep = np.array(sorted(k for k in best.values() if ok[k]), np.int64)
+        if keep.size == 0:
+            continue
+        rows = index[keep]
+        get = lambda name: _value(group, name, rows, counts, label)  # noqa: E731
+        t2, td2, rh2 = get("2m_temperature"), get("2m_dewpoint_temperature"), get("2m_relative_humidity")
+        spd, wdir = get("10m_wind_speed"), get("10m_wind_direction")
+        ps, slp, elev = get("surface_pressure"), get("mean_sea_level_pressure"), get("station_elevation")
+        th, wh = get("temperature_sensor_height"), get("wind_sensor_height")
+        t_ok = ~np.isfinite(th) | ((th >= T2_SENSOR_M[0]) & (th <= T2_SENSOR_M[1]))
+        w_ok = ~np.isfinite(wh) | ((wh >= WIND_SENSOR_M[0]) & (wh <= WIND_SENSOR_M[1]))
+        counts[f"{label}_temperature_sensor_height"] += int((~t_ok & np.isfinite(t2)).sum())
+        counts[f"{label}_wind_sensor_height"] += int((~w_ok & np.isfinite(spd)).sum())
+        t2 = np.where(t_ok, t2, np.nan)
+        td2 = np.where(t_ok, td2, np.nan)
+        good_w = _wind_ok(spd, wdir, counts, label) & w_ok
+        names = _texts(group["station_name"], rows) if "station_name" in group else sid[keep]
+        received = _received(group, rows)
+        lat, lon = _numbers(group["latitude"], rows), _numbers(group["longitude"], rows)
+        for n, row in enumerate(rows):
+            key = (_wmo(sid[keep][n]), when[keep][n])
+            if key in seen:
+                counts[f"{label}_duplicate_of_bufr"] += 1
+                continue
+            seen.add(key)
+            td_n, rh_n = _moisture(t2[n:n + 1], td2[n:n + 1], rh2[n:n + 1])
+            out.append(Report(
+                family="land", fm=12, station=_wmo(sid[keep][n]), name=str(names[n]) or sid[keep][n],
+                lat=float(lat[n]), lon=float(lon[n]), elev=float(elev[n]), time=when[keep][n], received=received[n],
+                p=[ps[n]], z=[elev[n]], t=[t2[n]], td=td_n, rh=rh_n,
+                spd=[spd[n] if good_w[n] else np.nan], wdir=[wdir[n] if good_w[n] else np.nan],
+                slp=float(slp[n]), group=path))
+    return out
+
+
+def _wmo(station_id: str) -> str:
+    """The WMO block and station of a WIGOS ``0-20000-0-NNNNN`` id; other ids unchanged."""
+    m = re.fullmatch(r"0-2000[01]-0-(\w+)", station_id)
+    return m.group(1) if m else station_id
+
+
+# --------------------------------------------------------------- ocean: ships, buoys, TAC
+BUOY_KINDS = ("buoy", "moored_buoy", "drifting_buoy", "wave_buoy", "uncrewed_surface_vehicle")
+
+
+def ocean_reports(root, start, end, box, counts: Counter) -> list[Report]:
+    out, seen = [], set()
+    for path, label in (("ocean/surface", "ocean"), ("ocean/ship_tac", "ship_tac")):
+        if path not in root:
+            continue
+        group = root[path]
+        index, time = _select(group, start, end, box)
+        counts[f"{label}_in_window"] += len(index)
+        if index.size == 0:
+            continue
+        ok = _quality_ok(group, "quality_flag", index, counts, label)
+        rows = index[ok]
+        get = lambda name: _value(group, name, rows, counts, label)  # noqa: E731
+        t, td, rh = get("air_temperature"), get("dewpoint_temperature"), get("relative_humidity")
+        spd, wdir = get("wind_speed"), get("wind_direction")
+        ps, slp = get("surface_air_pressure"), get("mean_sea_level_pressure")
+        good_w = _wind_ok(spd, wdir, counts, label)
+        kind = _texts(group["platform_kind"], rows) if "platform_kind" in group else np.full(len(rows), "ship")
+        ident = None
+        for name in ("call_sign", "wigos_id", "station_name"):
+            if name in group:
+                values = _texts(group[name], rows)
+                ident = values if ident is None else np.where(ident == "", values, ident)
+        ident = ident if ident is not None else np.full(len(rows), "")
+        lat, lon = _numbers(group["latitude"], rows), _numbers(group["longitude"], rows)
+        received = _received(group, rows)
+        for n, row in enumerate(rows):
+            if kind[n] not in ("ship",) + BUOY_KINDS:
+                counts[f"{label}_platform_{kind[n] or 'unknown'}"] += 1
+                continue
+            sid = str(ident[n]) or f"{label}-{int(row)}"
+            key = (sid, time[row])
+            if key in seen:
+                counts[f"{label}_duplicate"] += 1
+                continue
+            seen.add(key)
+            buoy = kind[n] in BUOY_KINDS
+            td_n, rh_n = _moisture(t[n:n + 1], td[n:n + 1], rh[n:n + 1])
+            out.append(Report(
+                family="ocean", fm=18 if buoy else 13, station=sid, name=sid, lat=float(lat[n]),
+                lon=float(lon[n]), elev=0.0, time=time[row], received=received[n],
+                p=[ps[n]], z=[0.0], t=[t[n]], td=td_n, rh=rh_n,
+                spd=[spd[n] if good_w[n] else np.nan], wdir=[wdir[n] if good_w[n] else np.nan],
+                slp=float(slp[n]), group=path))
+    return out
+
+
+# --------------------------------------------------------------------------- soundings
+_PART = re.compile(r"(?:TEMP|PILOT)_(AA|BB|CC|DD)_|\b(?:TT|PP)(AA|BB|CC|DD)(?=\d|\b)")
+
+
+def part_label(source_key: str, heading: str = "") -> str:
+    """'AA'..'DD' from the object name or the TAC heading; '' for a BUFR sounding."""
+    m = _PART.search(source_key) or _PART.search(heading)
+    return (m.group(1) or m.group(2)) if m else ""
+
+
+def _interp_lnp(p_ref, x_ref, p, max_ratio=1.15):
+    """``x_ref`` at ``p`` by ln p interpolation, only between reference levels at most ``max_ratio`` apart
+    in pressure (or within 0.5 hPa of one); NaN elsewhere, as the radiosonde referee's rule."""
+    ok = np.isfinite(p_ref) & np.isfinite(x_ref) & (p_ref > 0)
+    p = np.asarray(p, float)
+    out = np.full(p.shape, np.nan)
+    if ok.sum() < 1:
+        return out
+    order = np.argsort(p_ref[ok], kind="stable")
+    pp, xx = p_ref[ok][order], x_ref[ok][order]
+    for k, target in enumerate(p):
+        if not (np.isfinite(target) and target > 0):
+            continue
+        near = np.nonzero(np.abs(pp - target) <= 50.0)[0]
+        if near.size:
+            out[k] = xx[near[np.argmin(np.abs(pp[near] - target))]]
+            continue
+        hi = np.searchsorted(pp, target)
+        if 0 < hi < pp.size and pp[hi] / pp[hi - 1] <= max_ratio:
+            w = (np.log(target) - np.log(pp[hi - 1])) / (np.log(pp[hi]) - np.log(pp[hi - 1]))
+            out[k] = xx[hi - 1] + w * (xx[hi] - xx[hi - 1])
+    return out
+
+
+def pressure_scale_fault(label: str, p, t, ref_p=None, ref_t=None) -> str:
+    """Why a TEMP part's pressures are wrong, or '' when they are not.
+
+    * ``'pressure_out_of_range'``: any part with a level above
+      :data:`PRESSURE_MAX_PA` or at a non-positive pressure (a whole sounding
+      stored at ten times its pressure, with nothing to compare it with).
+    * ``'part_above_100hpa'``: a Part C or D holds only levels above
+      100 hPa by definition, yet has a level below it (allowing 1 hPa).
+    * ``'pressure_scale_x10'``: over the levels where the launch's other
+      parts (``ref_p``, ``ref_t``) overlap it, the part's temperatures
+      disagree by more than :data:`PART_DISAGREE_K` (median) and agree within
+      :data:`PART_RESCALED_AGREE_K` once every pressure is divided by ten.
+    * ``'inconsistent_part'``: they disagree, and rescaling does not help.
+    """
+    p, t = np.asarray(p, float), np.asarray(t, float)
+    if np.any(np.isfinite(p) & ((p > PRESSURE_MAX_PA) | (p <= 0.0))):
+        return "pressure_out_of_range"
+    if label in ("CC", "DD") and np.any(np.isfinite(p) & (p > 10100.0)):
+        return "part_above_100hpa"
+    if ref_p is None or len(ref_p) == 0:
+        return ""
+    ref_p, ref_t = np.asarray(ref_p, float), np.asarray(ref_t, float)
+    has_t = np.isfinite(p) & np.isfinite(t)
+    direct = _interp_lnp(ref_p, ref_t, p[has_t]) - t[has_t]
+    direct = direct[np.isfinite(direct)]
+    if direct.size < PART_MIN_OVERLAP or np.median(np.abs(direct)) <= PART_DISAGREE_K:
+        return ""
+    scaled = _interp_lnp(ref_p, ref_t, p[has_t] / 10.0) - t[has_t]
+    scaled = scaled[np.isfinite(scaled)]
+    if scaled.size >= PART_MIN_OVERLAP and np.median(np.abs(scaled)) <= PART_RESCALED_AGREE_K:
+        return "pressure_scale_x10"
+    return "inconsistent_part"
+
+
+def sonde_reports(root, start, end, box, counts: Counter) -> list[Report]:
+    group = _group(root, "upper_air/soundings")
+    index, launch = _select(group, start, end, box, time_name="launch_time", lead=SONDE_LAUNCH_LEAD)
+    counts["sonde_parts_in_window"] += len(index)
+    if index.size == 0:
+        return []
+    ok = _quality_ok(group, "quality_flag", index, counts, "sonde")
+    index = index[ok]
+    if index.size == 0:
+        return []
+    first = _numbers(group["first_level"], index).astype(np.int64)
+    count = _numbers(group["level_count"], index).astype(np.int64)
+    sid = _texts(group["station_id"], index)
+    keys = _texts(group["source_key"], index) if "source_key" in group else np.full(len(index), "")
+    heads = _texts(group["bulletin_heading"], index) if "bulletin_heading" in group else np.full(len(index), "")
+    lat, lon = _numbers(group["latitude"], index), _numbers(group["longitude"], index)
+    elev = _numbers(group["station_elevation"], index)
+    received = _received(group, index)
+    a, b = int(first.min()), int((first + count).max())
+    span = np.arange(a, b)
+    level_counts = Counter()
+    lv = {name: _value(group, name, span, level_counts, "sonde_level") for name in
+          ("pressure", "temperature", "dewpoint_temperature", "geopotential_height", "wind_speed",
+           "wind_direction", "time_since_launch", "latitude_displacement", "longitude_displacement")}
+    lv["ok"] = _quality_ok(group, "level_quality_flag", span, level_counts, "sonde_level")
+    lv["vss"] = np.nan_to_num(_numbers(group["vertical_sounding_significance"], span), nan=0).astype(np.int64) \
+        if "vertical_sounding_significance" in group else np.zeros(span.size, np.int64)
+    counts.update(level_counts)
+    parts = {}
+    for n in range(len(index)):
+        s0, s1 = int(first[n]) - a, int(first[n] + count[n]) - a
+        sl = {k: v[s0:s1] for k, v in lv.items()}
+        for k in ("pressure", "temperature", "dewpoint_temperature", "geopotential_height", "wind_speed",
+                  "wind_direction"):
+            sl[k] = np.where(sl["ok"], sl[k], np.nan)
+        parts.setdefault((sid[n], launch[index[n]]), []).append((part_label(keys[n], heads[n]), n, sl))
+    lo, hi = _window(start, end)
+    out = []
+    for (station, when), members in sorted(parts.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        accepted = _consistent_parts(_latest_per_label(members, received, counts), counts)
+        if not accepted:
+            continue
+        rep = _merge_parts(station, when, accepted, lat, lon, elev, received, counts)
+        if rep is not None and lo - SONDE_LAUNCH_LEAD <= rep.time <= hi:
+            out.append(rep)
+    return _one_per_ascent(out, counts)
+
+
+def _consistent_parts(members, counts):
+    """The parts of one launch whose pressures agree, by :func:`pressure_scale_fault`.
+
+    The label rule goes first. Then each part is compared with the union
+    of the others, and parts are refused one at a time: every part with
+    the ten-times signature, else the one that disagrees most, until
+    the rest agree. This way, one bad part in the union cannot condemn
+    the good ones. With two parts that disagree and no signature, neither
+    can be trusted.
+    """
+    parts = []
+    for member in members:
+        fault = pressure_scale_fault(member[0], member[2]["pressure"], member[2]["temperature"])
+        if fault:
+            counts[f"sonde_part_{fault}"] += 1
+        else:
+            parts.append(member)
+    while len(parts) > 1:
+        verdicts = []
+        for k, (label, _, sl) in enumerate(parts):
+            ref_p = np.concatenate([m[2]["pressure"] for j, m in enumerate(parts) if j != k])
+            ref_t = np.concatenate([m[2]["temperature"] for j, m in enumerate(parts) if j != k])
+            verdicts.append(pressure_scale_fault(label, sl["pressure"], sl["temperature"], ref_p, ref_t))
+        scaled = [k for k, v in enumerate(verdicts) if v == "pressure_scale_x10"]
+        if scaled:
+            counts["sonde_part_pressure_scale_x10"] += len(scaled)
+            parts = [m for k, m in enumerate(parts) if k not in scaled]
+            continue
+        bad = [k for k, v in enumerate(verdicts) if v == "inconsistent_part"]
+        if not bad:
+            break
+        if len(parts) == 2:
+            counts["sonde_part_inconsistent_part"] += 2
+            return []
+        worst = max(bad, key=lambda k: _median_disagreement(parts, k))
+        counts["sonde_part_inconsistent_part"] += 1
+        parts.pop(worst)
+    return parts
+
+
+def _median_disagreement(parts, k):
+    sl = parts[k][2]
+    ref_p = np.concatenate([m[2]["pressure"] for j, m in enumerate(parts) if j != k])
+    ref_t = np.concatenate([m[2]["temperature"] for j, m in enumerate(parts) if j != k])
+    d = _interp_lnp(ref_p, ref_t, sl["pressure"]) - sl["temperature"]
+    d = d[np.isfinite(d)]
+    return float(np.median(np.abs(d))) if d.size else 0.0
+
+
+def _latest_per_label(members, received, counts):
+    """One part per label (a correction or relay copy replaces an earlier arrival); BUFR soundings kept."""
+    by_label, out = {}, []
+    for member in members:
+        label = member[0]
+        if not label:
+            out.append(member)
+            continue
+        prior = by_label.get(label)
+        if prior is not None:
+            counts["sonde_part_repeated"] += 1
+            mine, theirs = received[member[1]], received[prior[1]]
+            later = np.isnat(theirs) or (not np.isnat(mine) and mine >= theirs)
+            if not later:
+                continue
+        by_label[label] = member
+    return out + [by_label[k] for k in sorted(by_label)]
+
+
+PAIRED = (("pressure",), ("temperature", "dewpoint_temperature"), ("geopotential_height",),
+          ("wind_speed", "wind_direction"), ("time_since_launch",), ("latitude_displacement",),
+          ("longitude_displacement",))
+
+
+def _merge_parts(station, when, accepted, lat, lon, elev, received, counts) -> Report | None:
+    """Merge a launch's parts into one profile, levels in decreasing pressure.
+
+    Levels within 0.5 hPa are one level; a standard level's values win, and
+    a value missing in one part is taken from another.
+    """
+    names = ("pressure", "temperature", "dewpoint_temperature", "geopotential_height", "wind_speed",
+             "wind_direction", "time_since_launch", "latitude_displacement", "longitude_displacement")
+    stack = {k: np.concatenate([sl[k] for _, _, sl in accepted]) for k in names}
+    vss = np.concatenate([sl["vss"] for _, _, sl in accepted])
+    valid = np.isfinite(stack["pressure"]) & (stack["pressure"] > 0)
+    order = np.lexsort((-(vss[valid] & VSS_STANDARD), -stack["pressure"][valid]))
+    rows = np.nonzero(valid)[0][order]
+    levels = []
+    for r in rows:
+        p = stack["pressure"][r]
+        if levels and abs(levels[-1]["pressure"] - p) <= 50.0:
+            merged = levels[-1]
+            for group_names in PAIRED:  # a pair (t and td, speed and direction) comes from one part
+                if not any(np.isfinite(merged[k]) for k in group_names) \
+                        and any(np.isfinite(stack[k][r]) for k in group_names):
+                    for k in group_names:
+                        merged[k] = stack[k][r]
+            merged["vss"] |= int(vss[r])
+            continue
+        levels.append({**{k: float(stack[k][r]) for k in names}, "vss": int(vss[r])})
+    if not levels:
+        counts["sonde_no_levels"] += 1
+        return None
+    n0 = accepted[0][1]
+    station_elev = float(elev[n0])
+    p = np.array([lev["pressure"] for lev in levels])
+    z = np.array([lev["geopotential_height"] for lev in levels])
+    for k, lev in enumerate(levels):
+        if lev["vss"] & VSS_SURFACE and np.isfinite(station_elev):
+            z[k] = station_elev  # WRFDA splits sonde_sfc on |elv - h| < 0.1
+    t = np.array([lev["temperature"] for lev in levels])
+    t = np.where((t >= 150.0) & (t <= 350.0), t, np.nan)
+    td, rh = _moisture(t, np.array([lev["dewpoint_temperature"] for lev in levels]),
+                       np.full(len(levels), np.nan))
+    spd = np.array([lev["wind_speed"] for lev in levels])
+    wdir = np.array([lev["wind_direction"] for lev in levels])
+    good = _wind_ok(spd, wdir, counts, "sonde_level")
+    since = np.array([lev["time_since_launch"] for lev in levels])
+    level_time = when + np.where(np.isfinite(since), np.round(since), 0).astype("timedelta64[s]")
+    dlat = np.nan_to_num(np.array([lev["latitude_displacement"] for lev in levels]))
+    dlon = np.nan_to_num(np.array([lev["longitude_displacement"] for lev in levels]))
+    arrivals = [received[n] for _, n, _ in accepted if not np.isnat(received[n])]
+    return Report(
+        family="sonde", fm=35, station=station, name=station, lat=float(lat[n0]), lon=float(lon[n0]),
+        elev=station_elev, time=when, received=max(arrivals) if arrivals else np.datetime64("NaT"),
+        p=p, z=z, t=t, td=td, rh=rh, spd=np.where(good, spd, np.nan), wdir=np.where(good, wdir, np.nan),
+        level_time=level_time, level_lat=lat[n0] + dlat, level_lon=lon[n0] + dlon,
+        group="upper_air/soundings", surface=False, extras={"parts": [lbl or "bufr" for lbl, _, _ in accepted]})
+
+
+def _one_per_ascent(reports, counts):
+    """A station's reports launched within :data:`SONDE_SAME_ASCENT` are one ascent: keep the richer."""
+    kept = []
+    for rep in sorted(reports, key=lambda r: (r.station, r.time)):
+        if kept and kept[-1].station == rep.station and abs(rep.time - kept[-1].time) <= SONDE_SAME_ASCENT:
+            counts["sonde_same_ascent"] += 1
+            if np.isfinite(rep.t).sum() > np.isfinite(kept[-1].t).sum():
+                kept[-1] = rep
+            continue
+        kept.append(rep)
+    return kept
+
+
+# --------------------------------------------------------------------------- aircraft
+def isa_pressure(height_m):
+    """ICAO standard-atmosphere pressure (Pa) of a pressure altitude (m), as neutral_table.isa_pressure_pa."""
+    from woof.obs.neutral_table import isa_pressure_pa
+    return np.array([isa_pressure_pa(float(h)) if np.isfinite(h) else np.nan for h in np.ravel(height_m)])
+
+
+def aircraft_reports(root, start, end, box, counts: Counter) -> list[Report]:
+    group = _group(root, "aircraft")
+    index, time = _select(group, start, end, box)
+    counts["aircraft_in_window"] += len(index)
+    if index.size == 0:
+        return []
+    ok = _quality_ok(group, "quality_flag", index, counts, "aircraft")
+    rows = index[ok]
+    rid = _texts(group["report_id"], rows) if "report_id" in group else np.array([str(r) for r in rows])
+    _, first = np.unique(rid.astype(str), return_index=True)
+    counts["aircraft_duplicate_report_id"] += len(rows) - len(first)
+    rows = rows[np.sort(first)]
+    get = lambda name: _value(group, name, rows, counts, "aircraft")  # noqa: E731
+    fl, t, td, rh = get("flight_level"), get("temperature"), get("dewpoint_temperature"), get("relative_humidity")
+    spd, wdir = get("wind_speed"), get("wind_direction")
+    good_fl = np.isfinite(fl) & (fl > -500.0) & (fl < 20000.0)
+    counts["aircraft_flight_level_invalid"] += int((~good_fl).sum())
+    good_w = _wind_ok(spd, wdir, counts, "aircraft")
+    ident = _texts(group["aircraft_identifier"], rows) if "aircraft_identifier" in group else rid
+    lat, lon = _numbers(group["latitude"], rows), _numbers(group["longitude"], rows)
+    received = _received(group, rows)
+    p = isa_pressure(fl)
+    out = []
+    for n in np.nonzero(good_fl)[0]:
+        t_n = t[n] if 150.0 <= t[n] <= 350.0 else np.nan
+        td_n, rh_n = _moisture(np.array([t_n]), td[n:n + 1], rh[n:n + 1])
+        out.append(Report(
+            family="aircraft", fm=42, station=str(ident[n]) or f"aircraft-{int(rows[n])}", name=str(ident[n]),
+            lat=float(lat[n]), lon=float(lon[n]), elev=float("nan"), time=time[rows[n]], received=received[n],
+            p=[p[n]], z=[fl[n]], t=[t_n], td=td_n, rh=rh_n,
+            spd=[spd[n] if good_w[n] else np.nan], wdir=[wdir[n] if good_w[n] else np.nan],
+            group="aircraft", surface=False))
+    return out
+
+
+# --------------------------------------------------------------------------- wind profilers
+def profiler_reports(root, start, end, box, counts: Counter) -> list[Report]:
+    group = _group(root, "upper_air/wind_profiler")
+    index, time = _select(group, start, end, box)
+    counts["profiler_in_window"] += len(index)
+    if index.size == 0:
+        return []
+    ok = _quality_ok(group, "quality_flag", index, counts, "profiler")
+    index = index[ok]
+    if index.size == 0:
+        return []
+    first = _numbers(group["first_level"], index).astype(np.int64)
+    count = _numbers(group["level_count"], index).astype(np.int64)
+    sid = _texts(group["station_id"], index)
+    lat, lon = _numbers(group["latitude"], index), _numbers(group["longitude"], index)
+    elev = _numbers(group["station_elevation"], index)
+    received = _received(group, index)
+    a, b = int(first.min()), int((first + count).max())
+    span = np.arange(a, b)
+    level_ok = _quality_ok(group, "level_quality_flag", span, counts, "profiler_level")
+    height = _value(group, "height", span, counts, "profiler_level")
+    # Most profilers report speed and direction (BUFR 0 11 002/0 11 001), some the components.
+    spd_all = _value(group, "wind_speed", span, counts, "profiler_level")
+    dir_all = _value(group, "wind_direction", span, counts, "profiler_level")
+    u = _value(group, "eastward_wind", span, counts, "profiler_level")
+    v = _value(group, "northward_wind", span, counts, "profiler_level")
+    from_uv = ~(np.isfinite(spd_all) & np.isfinite(dir_all)) & np.isfinite(u) & np.isfinite(v)
+    spd_all = np.where(from_uv, np.hypot(u, v), spd_all)
+    dir_all = np.where(from_uv, np.mod(np.degrees(np.arctan2(-u, -v)), 360.0), dir_all)
+    dir_all = np.where(from_uv & (spd_all > 0) & (dir_all == 0.0), 360.0, dir_all)
+    wind_ok = _wind_ok(spd_all, dir_all, counts, "profiler_level")
+    out = []
+    for n in range(len(index)):
+        s0, s1 = int(first[n]) - a, int(first[n] + count[n]) - a
+        good = level_ok[s0:s1] & np.isfinite(height[s0:s1]) & wind_ok[s0:s1]
+        if not good.any():
+            continue
+        spd, wdir, zz = spd_all[s0:s1][good], dir_all[s0:s1][good], height[s0:s1][good]
+        order = np.argsort(zz)
+        m = int(good.sum())
+        out.append(Report(
+            family="profiler", fm=132, station=_wmo(sid[n]), name=sid[n], lat=float(lat[n]), lon=float(lon[n]),
+            elev=float(elev[n]), time=time[index[n]], received=received[n], p=np.full(m, np.nan), z=zz[order],
+            t=np.full(m, np.nan), td=np.full(m, np.nan), rh=np.full(m, np.nan), spd=spd[order],
+            wdir=wdir[order], group="upper_air/wind_profiler", surface=False))
+    return out
+
+
+READERS = {"land": land_reports, "ocean": ocean_reports, "sonde": sonde_reports,
+           "aircraft": aircraft_reports, "profiler": profiler_reports}
+
+
+def read_reports(root, start, end, box, families=FAMILIES) -> tuple[list[Report], Counter]:
+    """Every requested family's reports in the window and box, with the QC counts."""
+    counts = Counter()
+    reports = []
+    for family in families:
+        if family not in READERS:
+            raise Wis2Error(f"unknown family {family!r}; known: {', '.join(FAMILIES)}")
+        part = [rep for rep in READERS[family](root, start, end, box, counts) if _gross_bounds(rep, counts)]
+        counts[f"{family}_reports"] += len(part)
+        reports.extend(part)
+    return reports, counts
+
+
+def _outside(values, bounds):
+    values = np.asarray(values, float)
+    return np.isfinite(values) & ((values < bounds[0]) | (values > bounds[1]))
+
+
+def _gross_bounds(rep: Report, counts: Counter) -> bool:
+    """Blank values outside the gross bounds (counted per family and variable); False when no level
+    keeps a pressure or a height, which both writers need to place it."""
+    label = rep.family
+    for name, bounds in (("t", T_BOUNDS), ("td", T_BOUNDS), ("p", (1.0, PRESSURE_MAX_PA)),
+                         ("z", HEIGHT_BOUNDS)):
+        bad = _outside(getattr(rep, name), bounds)
+        if bad.any():
+            counts[f"{label}_{name}_out_of_bounds"] += int(bad.sum())
+            setattr(rep, name, np.where(bad, np.nan, getattr(rep, name)))
+            if name in ("t", "td"):
+                rep.rh = np.where(bad, np.nan, rep.rh)  # rh derived from a bad t or td
+    if _outside(rep.slp, SLP_BOUNDS):
+        counts[f"{label}_slp_out_of_bounds"] += 1
+        rep.slp = float("nan")
+    if _outside(rep.elev, ELEV_BOUNDS):
+        counts[f"{label}_elevation_out_of_bounds"] += 1
+        rep.elev = float("nan")
+        if rep.surface:
+            rep.z = np.full(len(rep.p), np.nan)
+    placed = np.isfinite(rep.p) | np.isfinite(rep.z)
+    if not placed.any():
+        counts[f"{label}_no_pressure_or_height"] += 1
+        return False
+    return True
+
+
+# --------------------------------------------------------------------------- neutral table
+SURFACE_LABELS = {  # (family, variable) -> measurement
+    ("land", "temperature_k"): "screen_temperature_2m",
+    ("land", "dewpoint_k"): "screen_dewpoint_2m",
+    ("land", "wind"): "anemometer_wind_10m",
+    ("land", "surface_pressure_pa"): "station_pressure",
+    ("ocean", "temperature_k"): "platform_temperature",
+    ("ocean", "dewpoint_k"): "platform_dewpoint",
+    ("ocean", "wind"): "platform_wind",
+    ("ocean", "surface_pressure_pa"): "station_pressure",
+}
+ALOFT_LABELS = {"sonde": "sonde_level", "aircraft": "aircraft_level"}
+
+
+def _aware(when):
+    if np.isnat(when):
+        return None
+    return dt.datetime.fromisoformat(str(np.datetime64(when, "s"))).replace(tzinfo=dt.timezone.utc)
+
+
+def wind_components(spd, wdir):
+    """Earth-relative (u, v) from speed and the direction the wind blows from."""
+    rad = np.radians(wdir)
+    return -spd * np.sin(rad), -spd * np.cos(rad)
+
+
+def neutral_rows(reports, table) -> tuple[list, Counter]:
+    """``gpuwm-obs.table.v2`` rows (:class:`woof.obs.neutral_table.ObsRow`) with WRFDA's errors.
+
+    Profiler levels carry a height and no pressure, and obs_point's point
+    operators are pressure-level only, so they stay out of the table (they
+    are in the obs_gts file).
+    """
+    from woof.obs.neutral_table import ObsRow
+    rows, counts = [], Counter()
+    for rep in reports:
+        if rep.family == "profiler":
+            counts["profiler_obs_gts_only"] += len(rep.p)
+            continue
+        source = f"{SOURCE}.{rep.family}"
+        received = _aware(rep.received)
+        if rep.surface and not np.isfinite(rep.elev):
+            counts[f"{rep.family}_surface_without_elevation"] += 1  # the table needs it on every row
+            continue
+        for k in range(len(rep.p)):
+            p = rep.p[k]
+            if not (np.isfinite(p) or np.isfinite(rep.z[k])):
+                counts[f"{rep.family}_level_without_pressure_or_height"] += 1
+                continue
+            err = table.errors(rep.fm, p if np.isfinite(p) else None,
+                               rep.z[k] if np.isfinite(rep.z[k]) else None)
+            when = _aware(rep.level_time[k])
+            base = dict(source=source, station_id=rep.station, latitude_deg=float(rep.level_lat[k]),
+                        longitude_deg=float(rep.level_lon[k]), valid_time=when, nominal_time=_aware(rep.time),
+                        received_time=received, revision=rep.group)
+            if rep.surface:
+                base.update(elevation_m=float(rep.elev), level_pa=None)
+                label = lambda var: SURFACE_LABELS[(rep.family, var)]  # noqa: E731
+            else:
+                if not np.isfinite(p):
+                    continue
+                # The table needs an elevation on every row; a level without a height carries the
+                # station's (pressure-level operators key on level_pa, not on it).
+                base.update(elevation_m=float(rep.z[k]) if np.isfinite(rep.z[k]) else float(rep.elev),
+                            level_pa=float(p))
+                label = lambda var: ALOFT_LABELS[rep.family]  # noqa: E731
+            values = [("temperature_k", rep.t[k], err["t"]), ("dewpoint_k", rep.td[k], err["td"])]
+            if rep.surface:
+                values.append(("surface_pressure_pa", p, err["p"]))
+            if np.isfinite(rep.spd[k]) and np.isfinite(rep.wdir[k]):
+                u, v = wind_components(rep.spd[k], rep.wdir[k])
+                values += [("wind_u_m_s", u, err["u"], "wind"), ("wind_v_m_s", v, err["v"], "wind")]
+            for item in values:
+                variable, value, error = item[:3]
+                if not np.isfinite(value):
+                    continue
+                rows.append(ObsRow(variable=variable, value=float(value), error=float(error),
+                                   measurement=label(item[3] if len(item) > 3 else variable), **base))
+                counts[f"rows_{rep.family}_{variable}"] += 1
+    return rows, counts
+
+
+def write_table(rows, path) -> None:
+    """Write rows as ``gpuwm-obs.table.v2`` CSV (the header :data:`woof.obs.neutral_table.TABLE_HEADER`)."""
+    import csv
+    from woof.obs.neutral_table import TABLE_HEADER
+
+    def stamp(when):
+        return "" if when is None else when.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def number(value):
+        return "" if value is None or (isinstance(value, float) and not math.isfinite(value)) else repr(float(value))
+
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        out = csv.writer(handle)
+        out.writerow(TABLE_HEADER)
+        for r in rows:
+            out.writerow([r.source, r.station_id, number(r.latitude_deg), number(r.longitude_deg),
+                          number(r.elevation_m), number(r.level_pa), stamp(r.valid_time), r.variable,
+                          number(r.value), number(r.error), r.measurement, stamp(r.nominal_time),
+                          stamp(r.published_time), stamp(r.received_time), r.revision])
+
+
+# --------------------------------------------------------------------------- OBSPROC obs_gts
+FM_PLATFORM = {12: "FM-12 SYNOP", 13: "FM-13 SHIP", 18: "FM-18 BUOY", 35: "FM-35 TEMP",
+               42: "FM-42 AMDAR", 132: "FM-132 PROFL"}
+HEADER_COUNTS = (("SYNOP", 12), ("METAR", None), ("SHIP", 13), ("BUOY", 18), ("BOGUS", None),
+                 ("TEMP", 35), ("AMDAR", 42), ("AIREP", None), ("TAMDAR", None), ("PILOT", None),
+                 ("SATEM", None), ("SATOB", None), ("GPSPW", None), ("GPSZD", None), ("GPSRF", None),
+                 ("GPSEP", None), ("SSMT1", None), ("SSMT2", None), ("TOVS", None), ("QSCAT", None),
+                 ("PROFL", 132), ("AIRSR", None), ("OTHER", None))
+INFO_FMT = "(A12,1X,A19,1X,A40,1X,I6,3(F12.3,11X),6X,A40)"
+SRFC_FMT = "(F12.3,I4,F7.2,F12.3,I4,F7.3)"
+EACH_FMT = "(3(F12.3,I4,F7.2),11X,3(F12.3,I4,F7.2),11X,3(F12.3,I4,F7.2))"
+SLP_ERROR_PA = 200.0  # OBSPROC's sea-level-pressure error in obs_gts files
+PW_ERROR_CM = 0.2
+
+
+def _f(value, width, decimals):
+    text = f"{value:{width}.{decimals}f}"
+    if len(text) > width:
+        raise ValueError(f"{value} does not fit F{width}.{decimals}")
+    return text
+
+
+def _triple(value, error, decimals=2):
+    if value is None or not np.isfinite(value):
+        return _f(MISSING, 12, 3) + f"{MISSING_QC:4d}" + _f(error, 7, decimals)
+    return _f(value, 12, 3) + f"{0:4d}" + _f(error, 7, decimals)
+
+
+def obs_gts_header(counts: Counter, domain: dict | None = None) -> list[str]:
+    """OBSPROC's obs_gts header: totals, per-type counts, the domain lines and the three formats.
+
+    ``domain`` fills OBSPROC's projection lines (``PHIC``, ``XLONC``, ...);
+    WRFDA reads only the format lines, so absent values are written as 0.
+    """
+    d = {"PHIC": 0.0, "XLONC": 0.0, "TRUE1": 0.0, "TRUE2": 0.0, "XIM11": 1.0, "XJM11": 1.0,
+         "IXC": 0, "JXC": 0, "IPROJ": 0, "IDD": 1, "MAXNES": 1, "DIS": 0.0, **(domain or {})}
+    total = sum(counts.values())
+    lines = [f"TOTAL = {total:6d}, MISS. =-888888.,"]
+    cells = [f"{name:<6}= {sum(n for fm, n in counts.items() if fm == code) if code else 0:6d}, "
+             for name, code in HEADER_COUNTS]
+    for i in range(0, len(cells), 6):
+        lines.append("".join(cells[i:i + 6]))
+    lines += [f"PHIC  = {d['PHIC']:6.2f}, XLONC = {d['XLONC']:6.2f}, TRUE1 = {d['TRUE1']:6.2f}, "
+              f"TRUE2 = {d['TRUE2']:6.2f}, XIM11 = {d['XIM11']:6.2f}, XJM11 = {d['XJM11']:6.2f},",
+              "base_temp= 290.00, base_lapse=  50.00, PTOP  =  1000., base_pres=100000., "
+              "base_tropo_pres= 20000., base_strat_temp=   215.,",
+              f"IXC   = {d['IXC']:6d}, JXC   = {d['JXC']:6d}, IPROJ = {d['IPROJ']:6d}, "
+              f"IDD   = {d['IDD']:6d}, MAXNES= {d['MAXNES']:6d},",
+              f"NESTIX= {d['IXC']:6d}, ", f"NESTJX= {d['JXC']:6d}, ", f"NUMC  = {1:6d}, ",
+              f"DIS   = {d['DIS']:6.2f}, ", f"NESTI = {1:6d}, ", f"NESTJ = {1:6d}, ",
+              "INFO  = PLATFORM, DATE, NAME, LEVELS, LATITUDE, LONGITUDE, ELEVATION, ID.",
+              "SRFC  = SLP, PW (DATA,QC,ERROR).",
+              "EACH  = PRES, SPEED, DIR, HEIGHT, TEMP, DEW PT, HUMID (DATA,QC,ERROR)*LEVELS.",
+              f"INFO_FMT = {INFO_FMT}", f"SRFC_FMT = {SRFC_FMT}", f"EACH_FMT = {EACH_FMT}",
+              "#------------------------------------------------------------------------------#"]
+    return lines
+
+
+def _ascii(text) -> str:
+    """Printable ASCII for a fixed-width text field (names arrive in any script)."""
+    return "".join(c if " " <= c <= "~" else "?" for c in str(text))
+
+
+def obs_gts_report(rep: Report, table) -> list[str]:
+    """One report as OBSPROC writes it: INFO, SRFC, then one EACH line per level (decreasing pressure)."""
+    order = np.nonzero(np.isfinite(rep.p) | np.isfinite(rep.z))[0]
+    if rep.fm == 35:
+        order = order[np.argsort(-rep.p[order], kind="stable")]
+    elif rep.fm == 132:
+        order = order[np.argsort(rep.z[order], kind="stable")]
+    lon = ((rep.lon + 180.0) % 360.0) - 180.0
+    date = str(np.datetime64(rep.time, "s")).replace("T", "_")
+    name = _ascii(rep.name)[:40]
+    elev = rep.elev if np.isfinite(rep.elev) else MISSING
+    info = (f"{FM_PLATFORM[rep.fm]:<12} {date:<19} {name:<40} {len(order):6d}"
+            + "".join(_f(x, 12, 3) + " " * 11 for x in (rep.lat, lon, elev)) + " " * 6
+            + f"{_ascii(rep.station)[:40]:<40}")
+    slp = rep.slp if np.isfinite(rep.slp) else None
+    srfc = _triple(slp, SLP_ERROR_PA) + _f(MISSING, 12, 3) + f"{MISSING_QC:4d}" + _f(PW_ERROR_CM, 7, 3)
+    lines = [info, srfc]
+    for k in order:
+        p = rep.p[k] if np.isfinite(rep.p[k]) else None
+        z = rep.z[k] if np.isfinite(rep.z[k]) else None
+        err = table.errors(rep.fm, p, z)
+        wind = np.isfinite(rep.spd[k]) and np.isfinite(rep.wdir[k])
+        lines.append(_triple(p, err["p"]) + _triple(rep.spd[k] if wind else None, err["speed"])
+                     + _triple(rep.wdir[k] if wind else None, err["direction"]) + " " * 11
+                     + _triple(z, err["height"]) + _triple(rep.t[k], err["t"]) + _triple(rep.td[k], err["td"])
+                     + " " * 11 + _triple(rep.rh[k], err["rh"]))
+    return lines
+
+
+def write_obs_gts(reports, path, table, *, domain: dict | None = None) -> Counter:
+    """Write OBSPROC's ``obs_gts`` ASCII for the reports (WRFDA's ``ob.ascii``)."""
+    counts = Counter(rep.fm for rep in reports if rep.fm in FM_PLATFORM)
+    body = []
+    for rep in sorted(reports, key=lambda r: (r.time, r.fm, r.station)):
+        if rep.fm in FM_PLATFORM and len(rep.p):
+            body.extend(obs_gts_report(rep, table))
+    Path(path).write_text("\n".join(obs_gts_header(counts, domain) + body) + "\n", encoding="latin-1")
+    return counts
+
+
+# --------------------------------------------------------------------------- CLI
+def _parse_time(text):
+    return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def fetch(start, end, box, *, families=FAMILIES, table_path=None, obs_gts_path=None, domain=None,
+          root=None, snapshot=None) -> dict:
+    """Read, QC and write; returns the receipt (counts, store snapshot, outputs)."""
+    from woof.obs.obserr_wrfda import ObsErrTable
+
+    snapshot_id = snapshot
+    if root is None:
+        root, snapshot_id = open_store(snapshot=snapshot)
+    reports, counts = read_reports(root, start, end, box, families)
+    errors = ObsErrTable.load()
+    receipt = {"schema": "woof.obs.wis2-fetch/v1", "store": f"s3://{BUCKET}/{PREFIX}", "snapshot": snapshot_id,
+               "start": str(start), "end": str(end), "box": list(box), "families": list(families),
+               "errors": "WRF 4.7.1 OBSPROC obserr.txt (woof/obs/data/wrfda_obserr.txt)", "qc": dict(counts)}
+    if table_path:
+        rows, row_counts = neutral_rows(reports, errors)
+        write_table(rows, table_path)
+        receipt["table"] = {"path": str(table_path), "rows": len(rows), **row_counts}
+    if obs_gts_path:
+        fm_counts = write_obs_gts(reports, obs_gts_path, errors, domain=domain)
+        receipt["obs_gts"] = {"path": str(obs_gts_path), **{FM_PLATFORM[k]: v for k, v in sorted(fm_counts.items())}}
+    return receipt
+
+
+def _cli_fetch(args) -> int:
+    box = tuple(args.bbox)
+    families = tuple(f.strip() for f in args.families.split(",") if f.strip())
+    if not args.table and not args.obs_gts:
+        print("woof obs wis2 fetch: name --table and/or --obs-gts", file=sys.stderr)
+        return 2
+    try:
+        receipt = fetch(_parse_time(args.start), _parse_time(args.end), box, families=families,
+                        table_path=args.table, obs_gts_path=args.obs_gts, snapshot=args.snapshot)
+    except Wis2Error as error:
+        print(f"woof obs wis2 fetch: {error}", file=sys.stderr)
+        return 1
+    text = json.dumps(receipt, indent=2, sort_keys=True)
+    if args.receipt:
+        Path(args.receipt).write_text(text + "\n", encoding="utf-8")
+    print(text)
+    return 0
+
+
+def register_cli(obs_sub) -> None:
+    """``woof obs wis2 fetch``: the archive reader (opt-in; never run by a forecast)."""
+    wis2 = obs_sub.add_parser("wis2", help="WIS2 Global Cache archive (bkr/obs/wis2.icechunk) in-situ reader")
+    sub = wis2.add_subparsers(dest="obs_wis2_command", required=True)
+    fetch_p = sub.add_parser("fetch", help="read a window and box, QC, and write a neutral table and/or obs_gts")
+    fetch_p.add_argument("--start", required=True, help="window start, ISO 8601 UTC")
+    fetch_p.add_argument("--end", required=True, help="window end, ISO 8601 UTC")
+    fetch_p.add_argument("--bbox", required=True, nargs=4, type=float, metavar=("SOUTH", "NORTH", "WEST", "EAST"))
+    fetch_p.add_argument("--families", default=",".join(FAMILIES), help=f"comma list of {', '.join(FAMILIES)}")
+    fetch_p.add_argument("--table", help="write gpuwm-obs.table.v2 CSV here (for the ensemble filter)")
+    fetch_p.add_argument("--obs-gts", help="write OBSPROC obs_gts ASCII here (for 3D-Var / WRFDA)")
+    fetch_p.add_argument("--receipt", help="also write the JSON receipt here")
+    fetch_p.add_argument("--snapshot", help="read this Icechunk snapshot id instead of main's head")
+    fetch_p.set_defaults(func=_cli_fetch)
+
+
+__all__ = ["FAMILIES", "Report", "Wis2Error", "aircraft_reports", "fetch", "land_reports", "neutral_rows",
+           "obs_gts_header", "obs_gts_report", "ocean_reports", "open_store", "part_label", "pressure_scale_fault",
+           "profiler_reports", "read_reports", "register_cli", "rh_from_dewpoint", "sonde_reports",
+           "write_obs_gts", "write_table"]
