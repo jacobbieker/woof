@@ -17,6 +17,9 @@ Modules (landed phase by phase):
   ``da_setup_be_regional`` (binary64, host side).
 - :mod:`woof.da.var.reference` -- NumPy binary64 mirrors of the WRFDA
   routines, in WRFDA's operation order; the tests' and the kernels' reference.
+- :mod:`woof.da.var.cost` -- ``VarCost``: J and grad J in WRFDA's order
+  (``da_calculate_j``, ``da_calculate_gradj``), against an ``ObsTerm``.
+- :mod:`woof.da.var.minimise` -- ``da_minimise_cg`` and the outer loop.
 - :mod:`woof.da.var.oracle` -- reader for the oracle build's array dumps
   (``tools/wrfda_oracle``).
 """

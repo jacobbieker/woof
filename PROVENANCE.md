@@ -1803,7 +1803,12 @@ PNG it writes carries an `experimental` stamp.
   `da_llxy_lc`, `da_map_set`/`da_set_lc`/`da_lc_cone`, `da_togrid`,
   `da_get_julian_time`, `da_tp_to_qs`, `da_get_q_error`, `f_qv_from_rh`,
   `da_msl2geo1`, the transfer part of `da_fill_obs_structures`,
-  `da_store_obs_grid_info`), and `tools/wrfda_oracle/woof_dump.inc` (debug
+  `da_store_obs_grid_info`), `woof/da/var/cost.py` (`da_calculate_j`,
+  `da_calculate_gradj`, `da_calculate_residual`/`da_residual`,
+  `da_calculate_grady`, `da_jo_and_grady` and its per-type `jo` sums,
+  `da_transform_vtoy(_adj)` for 3D-Var, `da_check_gradient`),
+  `woof/da/var/minimise.py` (`da_minimise_cg` with its stdout formats, and
+  `da_solve`'s outer loop), and `tools/wrfda_oracle/woof_dump.inc` (debug
   dumps hooked into a copy of the WRFDA tree, never the pinned tree).
   `woof/da/var/crmath.py` is woof's own: correctly rounded `sin`, `cos`,
   `tan`, `exp`, `log10` and `pow`, evaluated in Python's `decimal`, with no
