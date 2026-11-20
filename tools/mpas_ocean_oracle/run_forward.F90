@@ -19,11 +19,12 @@
 !   initialised); the mesh part (signs, derivTwo, advection coefficients,
 !   mesh scaling, reconstruction coefficients) is the input's;
 !   then oracle_n_steps times: the clock advanced, the absorbed fractions
-!   (ocn_forcing_build_fraction_absorbed_array), ocn_timestep (verbatim),
-!   the state's time levels shifted.
+!   (ocn_forcing_build_fraction_absorbed_array), the frazil arrays
+!   (ocn_frazil_forcing_build_arrays, verbatim; it returns at once when
+!   frazil is off), ocn_timestep (verbatim), the state's time levels shifted.
 !
-! The land-ice and frazil array builders return at once when off (the
-! configurations the port refuses otherwise); analysis members, streams and
+! The land-ice array builder returns at once when off (the configurations
+! the port refuses otherwise); analysis members, streams and
 ! ocn_validate_state change no state and are not run.  The time manager is
 ! stubs.F90's (whole seconds).
 
@@ -52,6 +53,7 @@ program run_forward
   use ocn_equation_of_state
   use ocn_diagnostics
   use ocn_vmix
+  use ocn_frazil_forcing
   use ocn_split_step_cut
   use ocn_timestep_cut
   use oracle_stream
@@ -135,6 +137,8 @@ program run_forward
   if (err /= 0) stop 13
   call ocn_vmix_init(domain, err)
   if (err /= 0) stop 13
+  call ocn_frazil_forcing_init(err)
+  if (err /= 0) stop 13
   call ocn_time_integration_split_init(domain)
 
   ! ocn_init_routines_block's state part (mpas_ocn_init_routines.F:621-650,690)
@@ -172,6 +176,7 @@ program run_forward
      currTime = mpas_get_clock_time(domain % clock, MPAS_NOW, err)
      call mpas_get_time(curr_time=currTime, dateTimeString=timeStamp, ierr=err)
      call ocn_forcing_build_fraction_absorbed_array(meshPool, statePool, diagnosticsPool, forcingPool, err, 1)
+     call ocn_frazil_forcing_build_arrays(domain, meshPool, forcingPool, diagnosticsPool, statePool, err)
      call ocn_timestep(domain, dt, timeStamp)
      call mpas_pool_shift_time_levels(statePool)
   end do
