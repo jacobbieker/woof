@@ -113,10 +113,88 @@ def generate(lib, state, out):
     out.with_suffix(".json").write_text(json.dumps(meta,indent=2)+"\n")
 
 
+#: The specified zone and relaxation zone of the no-mixing relaxation cases.
+RELAX_SPEC_ZONE, RELAX_ZONE = 1, 4
+
+
+def _relax_ring(value, nz, ny, nx):
+    """``value`` on the relaxation rows of a crop, zero elsewhere.
+
+    relax_bdy_dry writes ``u_save`` etc. only between the specified zone
+    and the relaxation zone's inner edge; the spec rows and interior stay 0.
+    """
+    nk, nj, ni = value.shape
+    jj, ii = np.meshgrid(np.arange(nj), np.arange(ni), indexing="ij")
+    edge = np.minimum(np.minimum(jj, nj - 1 - jj), np.minimum(ii, ni - 1 - ii))
+    ring = (edge >= RELAX_SPEC_ZONE) & (edge < RELAX_SPEC_ZONE + RELAX_ZONE)
+    return np.where(ring[None], value, F32(0)).astype(F32)
+
+
+def generate_relax_fold(lib, state, out):
+    """No-mixing specified domain: rk_addtend_dry's fold of the relaxation.
+
+    With km_opt = 0 and no physics the held ``*_tendf`` are zero, so the
+    stage-1 relaxation (``u_save``/``v_save``/``w_save``/``t_save``) is the
+    whole held tendency.  rk_addtend_dry folds it on rk_step 1 and adds
+    the held tendency on every stage.  The three stages run in sequence on
+    the same held arrays, each from a fresh stage tendency, as solve_em
+    does.  ph_save is zero: woof relaxes phi outside the held slots.
+    """
+    p = np.load(state)
+    nz, ny, nx = p["T"].shape
+    ptr = np.ctypeslib.ndpointer(dtype=np.float32, flags="C_CONTIGUOUS")
+    library = ctypes.CDLL(str(lib.resolve()))
+    dry = library.oracle_rk_dry
+    dry.argtypes = [ctypes.c_int]*4 + [ptr]*8
+    c1 = np.pad(p["C1H"], (0,1), mode="edge")
+    c2 = np.pad(p["C2H"], (0,1), mode="edge")
+    maps = np.stack([pad2(p[k], nx, ny) for k in MAP_FIELDS])
+    mut = pad2(p["MU"]+p["MUB"],nx,ny)
+    held = np.stack([pad3(np.zeros_like(p[k]),nx,ny,nz,sentinel=True) for k in DRY_FIELDS])
+    save_scale = {"U":F32(1/512),"V":F32(1/512),"W":F32(1/8),"PH":F32(0),"T":F32(1/256)}
+    saves = np.stack([pad3(_relax_ring(p[k]*save_scale[k],*p[k].shape),nx,ny,nz)
+                      for k in DRY_FIELDS]+[pad3(np.zeros_like(p["T"]),nx,ny,nz)])
+    arrays = {"nx":np.array(nx), "ny":np.array(ny), "nz":np.array(nz),
+              "c1":c1, "c2":c2}
+    case_meta=[]
+    for case,(label,extreme) in enumerate([("nomix-relax",False),
+                                            ("nomix-relax-map-extremes",True)]):
+        mm = maps.copy()
+        if extreme:
+            factor = np.tile(np.array([0.25,0.5,1,2,4,8],np.float32),
+                             (ny+8,(nx+13)//6))[:,:nx+8]
+            for n in (0,1,2,3,4,6): mm[n]=factor
+            mm[5]=F32(1)/mm[4]
+        bb = held.copy()
+        prefix = f"relax{case}_"
+        for k,v in {"saves":saves,"maps":mm,"mut":mut}.items():
+            arrays[prefix+k]=v.copy()
+        for step in (1,2,3):
+            aa = np.stack([pad3(p[k]*F32(1/(32*step)),nx,ny,nz,sentinel=True)
+                           for k in DRY_FIELDS])
+            uu = np.stack([pad2(p["MU"]*F32(1/64),nx,ny),pad2(np.zeros_like(p["MU"]),nx,ny)])
+            arrays[f"{prefix}a{step}"]=aa.copy()
+            arrays[f"{prefix}mu{step}"]=uu.copy()
+            dry(nx,ny,nz,step,aa,bb,saves.copy(),mm,c1,c2,mut,uu)
+            arrays[f"{prefix}a{step}_wrf"]=aa
+        case_meta.append({"kind":"relax","id":case,"name":label,
+                          "spec_zone":RELAX_SPEC_ZONE,"relax_zone":RELAX_ZONE})
+    np.savez_compressed(out,**arrays)
+    meta={"schema":"bigstep-rk-relax-fold-wrf471-v1",
+          "fixture_sha256":hashlib.sha256(out.read_bytes()).hexdigest(),
+          "state_sha256":hashlib.sha256(state.read_bytes()).hexdigest(),"cases":case_meta,
+          "scope":"km_opt = 0, no physics: zero held tendf, relaxation-ring saves "
+                  "U/512, V/512, W/8, T/256 (ph_save and h_diabatic zero); RK "
+                  "stages 1-3 in sequence on one held set, stage tendency state/(32*step)"}
+    out.with_suffix(".json").write_text(json.dumps(meta,indent=2)+"\n")
+
+
 if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("library",type=Path)
     parser.add_argument("state",type=Path)
     parser.add_argument("output",type=Path)
+    parser.add_argument("--relax-fold",action="store_true",
+                        help="write the no-mixing relaxation-fold cases instead")
     args=parser.parse_args()
-    generate(args.library,args.state,args.output)
+    (generate_relax_fold if args.relax_fold else generate)(args.library,args.state,args.output)

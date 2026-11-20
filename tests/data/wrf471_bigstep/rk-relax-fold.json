@@ -1,0 +1,22 @@
+{
+  "schema": "bigstep-rk-relax-fold-wrf471-v1",
+  "fixture_sha256": "a4181da8ee6855130528cda86178b7a00497a7f247bdcca246ec4d1cb6a403bf",
+  "state_sha256": "744d7cffbdf37db5768fa4b620bfc0cbc15971d5bfa792b4adb6de0f6ad2b22e",
+  "cases": [
+    {
+      "kind": "relax",
+      "id": 0,
+      "name": "nomix-relax",
+      "spec_zone": 1,
+      "relax_zone": 4
+    },
+    {
+      "kind": "relax",
+      "id": 1,
+      "name": "nomix-relax-map-extremes",
+      "spec_zone": 1,
+      "relax_zone": 4
+    }
+  ],
+  "scope": "km_opt = 0, no physics: zero held tendf, relaxation-ring saves U/512, V/512, W/8, T/256 (ph_save and h_diabatic zero); RK stages 1-3 in sequence on one held set, stage tendency state/(32*step)"
+}
