@@ -15,8 +15,9 @@
   advection and reconstruction coefficients and the mesh scaling, is the
   input's);
 - each step: the clock advanced, the absorbed fractions
-  (:func:`~woof.hex.mpas_ocean.forcing_v842.fraction_absorbed`), the frazil
-  arrays (:func:`~woof.hex.mpas_ocean.frazil_v842.build_arrays`, under
+  (:func:`~woof.hex.mpas_ocean.forcing_v842.fraction_absorbed`), the
+  land-ice fluxes (:func:`~woof.hex.mpas_ocean.land_ice_v842.build_arrays`,
+  'standalone'), the frazil arrays (:func:`~woof.hex.mpas_ocean.frazil_v842.build_arrays`, under
   ``config_use_frazil_ice_formation``), the step
   (:mod:`~woof.hex.mpas_ocean.split_step_v842`), ``xtime`` and
   ``daysSinceStartOfSim`` (``ocn_timestep``), and the state's two time levels
@@ -47,7 +48,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import diagnostics_v842, forcing_v842, frazil_v842, split_step_v842
+from . import diagnostics_v842, forcing_v842, frazil_v842, land_ice_v842, split_step_v842
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
 
 SOURCE_FILES = (
@@ -55,7 +56,7 @@ SOURCE_FILES = (
     "src/core_ocean/mode_forward/mpas_ocn_time_integration.F:80-164",
     "src/core_ocean/mode_forward/mpas_ocn_time_integration_split.F:1940-2096",
     "src/core_ocean/shared/mpas_ocn_init_routines.F:529-700",
-)
+) + land_ice_v842.SOURCE_FILES[1:2]
 MODULE_OPTIONS = COMPILE_OPTIONS
 _BLOCK = 128
 #: the state's fields with two time levels (state pool, tracers pool)
@@ -174,11 +175,12 @@ def check_config(configs: dict) -> None:
 
 
 def _two_level(pools: dict) -> dict:
-    """The two-level fields present: :data:`TWO_LEVEL` and the frazil package's."""
+    """The two-level fields present: :data:`TWO_LEVEL` and the frazil and land-ice packages'."""
     names = dict(TWO_LEVEL)
-    frazil = tuple(n for n in frazil_v842.TWO_LEVEL if pools["state"].get(n) is not None)
-    if frazil:
-        names["state"] = names["state"] + frazil
+    packages = frazil_v842.TWO_LEVEL + land_ice_v842.TWO_LEVEL_FLUXES + land_ice_v842.TWO_LEVEL_COUPLING
+    present = tuple(n for n in packages if pools["state"].get(n) is not None)
+    if present:
+        names["state"] = names["state"] + present
     return names
 
 
@@ -235,6 +237,10 @@ def cold_start(*, pools: dict, configs: dict) -> Clock:
     for pool, names in _two_level(pools).items():
         for name in names:
             pools[pool][f"{name}@2"][...] = pools[pool][name]
+    # the land-ice fluxes for potential output at startup (mpas_ocn_init_routines.F:690-696)
+    forcing_v842.fraction_absorbed(mesh=m, layer_thickness=st["layerThickness"], diagnostics=d,
+                                   forcing=pools["forcing"])
+    land_ice_v842.build_arrays(dt=dt, mesh=m, state=st, diagnostics=d, forcing=pools["forcing"], configs=configs)
     return clock
 
 
@@ -261,6 +267,8 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int) -> None:
         clock.now += clock.step
         forcing_v842.fraction_absorbed(mesh=pools["mesh"], layer_thickness=st["layerThickness"], diagnostics=d,
                                        forcing=pools["forcing"])
+        land_ice_v842.build_arrays(dt=dt, mesh=pools["mesh"], state=st, diagnostics=d, forcing=pools["forcing"],
+                                   configs=configs)
         frazil_v842.build_arrays(dt=dt, mesh=pools["mesh"], state=st, tracers=_tracers(pools, 1), diagnostics=d,
                                  forcing=pools["forcing"], configs=configs)
         split_step_v842.split_step(dt=dt, n_btr_subcycles=n_btr, pools=pools, configs=configs)

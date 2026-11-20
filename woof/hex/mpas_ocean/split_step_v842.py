@@ -19,9 +19,12 @@
 3. the diagnostics and implicit vertical mixing
    (:mod:`~woof.hex.mpas_ocean.diagnostics_v842`,
    :mod:`~woof.hex.mpas_ocean.vmix_v842`), the prescribed velocity or
-   thickness, the diagnostics again, the cell-centred velocity and SSH
-   gradient (``mpas_reconstruct``), the coupler's surface fields and their
-   running means (``ocn_time_average_coupled_accumulate``).
+   thickness, the diagnostics again, the land-ice effective density
+   ('coupled'; ``ocn_effective_density_in_land_ice_update``), the
+   cell-centred velocity and SSH gradient (``mpas_reconstruct``), the
+   coupler's surface fields and their running means
+   (``ocn_time_average_coupled_accumulate``, the land-ice means in
+   'coupled').
 
 The pools are dicts of device arrays named as in MPAS (``mesh``, ``state``,
 ``tracers``, ``diagnostics``, ``forcing``, ``tend``, ``tracersTend``,
@@ -34,8 +37,7 @@ verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
 ``tests/test_mpas_ocean_split_step_parity.py``).
 
 Refused by name, beyond what the pieces refuse: the high-frequency thickness
-filter, GM (``config_use_standardGM``), the coupled land-ice effective
-density, a time integrator other than 'split_explicit' or
+filter, GM (``config_use_standardGM``), a time integrator other than 'split_explicit' or
 'unsplit_explicit', and the sphere's reconstruction at RKIND 8
 without the glibc 2.39 opt-in (``WOOF_GLIBC239_LIBM64=1``).
 """
@@ -50,7 +52,7 @@ import numpy as np
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ice import rkind
 
-from . import (btr_subcycle_v842, diagnostics_v842, forcing_v842, tend_tracer_v842, tend_v842,
+from . import (btr_subcycle_v842, diagnostics_v842, forcing_v842, land_ice_v842, tend_tracer_v842, tend_v842,
                vert_transport_v842, vmix_v842)
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, column_lanes, launch_options
 
@@ -59,7 +61,7 @@ SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_diagnostics.F:1062-1128",
     "src/operators/mpas_vector_reconstruction.F:205-339,489-588",
     "src/core_ocean/shared/mpas_ocn_time_average_coupled.F:202-412",
-)
+) + land_ice_v842.SOURCE_FILES[2:3]
 MODULE_OPTIONS = COMPILE_OPTIONS
 GRAVITY = 9.80616
 T0_KELVIN = 273.16
@@ -115,9 +117,6 @@ def check_config(configs: dict, precision: str, mesh: dict) -> None:
     if configs.get("config_use_standardGM", False):
         _refuse("config_use_standardGM", True, "GM (mpas_ocn_gm.F) is not ported",
                 "config_use_standardGM = .false.")
-    if configs.get("config_land_ice_flux_mode", "off") == "coupled":
-        _refuse("config_land_ice_flux_mode", "coupled", "the coupled land-ice effective density is not ported",
-                "config_land_ice_flux_mode = 'off' | 'pressure_only'")
     if configs.get("mesh:on_a_sphere", False) and precision == "r8" and not rkind.trig64():
         _refuse("on_a_sphere", True, rkind.trig_refusal("mpas_reconstruct calls glibc's double cos and sin"),
                 "on_a_sphere = .false. at RKIND 8, or WOOF_GLIBC239_LIBM64=1")
@@ -265,6 +264,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
         st["layerThickness@2"][:nc] = st["layerThickness"][:nc]
     diagnostics_v842.diagnostic_solve(dt=dt, mesh=m, state=state_at(2), tracers=tracers_at(2), diagnostics=d,
                                       forcing=f, configs=configs)
+    land_ice_v842.effective_density_update(mesh=m, forcing=f, state=st, configs=configs)
 
     sphere = i32(bool(configs.get("mesh:on_a_sphere", False)))
     for u, names, levels in ((st["normalVelocity@2"], ("velocityX", "velocityY", "velocityZ", "velocityZonal",
@@ -286,5 +286,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
         i32(f["avgTracersSurfaceValue"].shape[1]), i32(f["index_avgTemperatureSurfaceValue"]),
         i32(f["index_avgSSHGradientZonal"]), i32(f["index_avgSSHGradientMeridional"]),
         i32(f["nAccumulatedCoupled"]), real(T0_KELVIN)))
+    land_ice_v842.coupled_means(diagnostics=d, forcing=f, effective_density=st.get("effectiveDensityInLandIce@2"),
+                                n_cells=n_cells_forcing, n_accumulated=int(f["nAccumulatedCoupled"]), configs=configs)
     # ocn_time_average_coupled_accumulate counts the step in
     f["nAccumulatedCoupled"] = int(f["nAccumulatedCoupled"]) + 1

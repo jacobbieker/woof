@@ -76,13 +76,15 @@ def test_unported_switches_are_refused_by_name(monkeypatch):
     from woof.hex.mpas_ocean import forcing_v842 as fv
     monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "0")
     base = dict(fv.DEFAULT_CONFIGS)
-    for knob, value, precision in (("config_land_ice_flux_mode", "standalone", "r4"),
+    for knob, value, precision in (("config_land_ice_flux_mode", "data", "r4"),
                                    ("config_use_bulk_wind_stress", True, "r8")):
         with pytest.raises(ConfigurationRefusal) as exc:
             fv.refuse_unported({**base, knob: value}, precision)
         assert knob in str(exc.value)
     fv.refuse_unported({**base, "config_use_bulk_wind_stress": True}, "r4")
     fv.refuse_unported({**base, "config_use_frazil_ice_formation": True}, "r4")  # ported (frazil_v842)
+    for mode in ("standalone", "coupled"):  # ported (land_ice_v842)
+        fv.refuse_unported({**base, "config_land_ice_flux_mode": mode}, "r4")
     with pytest.raises(ValueError):
         fv._configs({"config_not_read": 1})
 

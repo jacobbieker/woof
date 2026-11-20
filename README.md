@@ -288,7 +288,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     ice formation (`config_use_frazil_ice_formation`, off by default as in
     v8.4.2's Registry: open ocean and under land ice, its tendencies, the
     accumulated mass and the surface pressure; standalone and over forward
-    steps, in fast and strict numerics). The step
+    steps, in fast and strict numerics), and the land-ice fluxes
+    (`config_land_ice_flux_mode` 'standalone' and 'coupled', off by default:
+    ISOMIP and Jenkins melt, the top drag, the boundary layer, the thickness,
+    velocity and tracer forcing, the effective density in land ice and the
+    coupler's land-ice means; standalone, in the diagnostics and over forward
+    steps; 'HollandJenkins' is refused by name). The step
     checks its barotropic halo copies against the mesh once per mesh, not
     with two device reads per stage: on an 8,300-cell, 60-level torus a
     step takes 36 instead of 130 ms on an A6000 and 110 instead of 245 ms
