@@ -87,6 +87,7 @@ def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
     """
     from woof.obs.neutral_table import VARIABLE_TABLE
     from woof.obs.column_operators import dewpoint_from_specific_humidity, refractivity_n
+    from woof.da.var.obs_wrfda import msl2geo1
     if not np.isfinite(max_age_seconds) or max_age_seconds <= 0 or not np.isfinite(gross_sigma) or gross_sigma <= 0:
         raise ValueError('Observation age and QC thresholds must be finite and positive; correct the analysis settings.')
     if not np.isfinite(error_inflation) or error_inflation < 1.:
@@ -177,7 +178,13 @@ def point_batches(rows, *, states, setup, grid, analysis_time, analysis_times,
             continue
         if row.variable == 'refractivity_n' and label == 'ro_refractivity_tangent_point':
             z = .5 * (grid.z_w[:-1, j, i] + grid.z_w[1:, j, i])
-            height = row.elevation_m
+            # The tangent height is geometric (above mean sea level); the
+            # grid's z_w is geopotential height ((PH+PHB)/g).  WRFDA converts
+            # with da_msl2geo1 before its gpsref operator; without it the
+            # operator reads the column about 100 m too high at 25 km, where
+            # N falls 1.4 %, several times the 0.3 % observation error.
+            height = (msl2geo1(row.elevation_m / 1000.0, row.latitude_deg) * 1000.0
+                      if np.isfinite(row.elevation_m) else row.elevation_m)
             if not np.isfinite(height) or height < z[0] or height > z[-1]:
                 counts['outside_vertical_column'] += 1
                 continue
