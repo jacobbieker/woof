@@ -192,9 +192,11 @@ def _mismatches(case, key, run=None):
 @requires_gpu
 @pytest.mark.parametrize("original, mutated, key, case", [
     # gfortran's MAX keeps the first argument on a tie (-0.0 stays)
-    ("return (b > a) ? b : a;", "return (a > b) ? a : b;", "forcing/shortWaveHeatFlux", "gcase"),
+    ("b > a ? __double_as_longlong(b) : __double_as_longlong(a)",
+     "a > b ? __double_as_longlong(a) : __double_as_longlong(b)", "forcing/shortWaveHeatFlux", "gcase"),
     # and MIN too
-    ("return (b < a) ? b : a;", "return (a < b) ? a : b;", "o2x/Fioo_q", "gcase"),
+    ("b < a ? __double_as_longlong(b) : __double_as_longlong(a)",
+     "a < b ? __double_as_longlong(a) : __double_as_longlong(b)", "o2x/Fioo_q", "gcase"),
     # the removal's latitude strictly south
     ("latCell[i] < (code[j]", "latCell[i] <= (code[j]", "forcing/riverRunoffFlux", "standalone"),
     # the precipitation factor dropped

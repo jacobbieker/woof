@@ -30,8 +30,14 @@ typedef double r8;
 #define M(a,b) __dmul_rn((a),(b))
 #define D(a,b) __ddiv_rn((a),(b))
 
-__device__ __forceinline__ r8 fmax_first(r8 a, r8 b) { return (b > a) ? b : a; }
-__device__ __forceinline__ r8 fmin_first(r8 a, r8 b) { return (b < a) ? b : a; }
+// chosen on the words as integer selects, so no compiler turns them into the
+// IEEE min/max instructions (which order -0.0 below 0.0)
+__device__ __forceinline__ r8 fmax_first(r8 a, r8 b) {
+    return __longlong_as_double(b > a ? __double_as_longlong(b) : __double_as_longlong(a));
+}
+__device__ __forceinline__ r8 fmin_first(r8 a, r8 b) {
+    return __longlong_as_double(b < a ? __double_as_longlong(b) : __double_as_longlong(a));
+}
 
 // the import's row codes
 enum { R_NONE = -1, R_COPY = 0, R_TAU_WAVE = 1, R_ROFL = 2, R_ROFI = 3, R_SWNET = 4, R_RAIN = 5, R_BPRESS = 6,
