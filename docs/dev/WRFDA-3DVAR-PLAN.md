@@ -2530,7 +2530,63 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      used (207,599 levels); 1,001 are EUMETSAT bending-angle-only
      products, which need a bending-angle operator.
 6. **PR F: impact.** One real case, as in #657: O-B and O-A per family,
-   and a radiosonde and surface scorecard showing no degradation.
+   and a radiosonde and surface scorecard showing no degradation. As
+   run (a scratch script; no observation data in the repository):
+   - **Ensemble:** 31 GEFS members, the 06Z run's 6-hour forecast valid
+     2026-10-28 12Z, on 31 levels at 0.5 degree over 30-65 N, 40 W-30 E.
+   - **LETKF settings:** 200 km and 6 km localisation, RTPS 0.9.
+   - **Observations:** WIS2 AMVs (`--thin-km 50`), aircraft
+     (`assimilate_aircraft`) and GNSS-RO through `woof.da.obs_point`; MW
+     radiances through `woof.da.obs_mw` (thin 2, static bias from the
+     domain's mean O-B).
+   - **Held out:** radiosondes are not assimilated; they are the
+     scorecard. The surface half needs 2 m and 10 m diagnostics of the
+     analysis, which this isobaric case does not have.
+   - **Arrival:** the run is retrospective, so arrival times are ignored.
+     About 37 % of the rows arrived after 12Z.
+   - **Run time:** the solve needs `solve_namespace=np` (host staging,
+     the forked chunk loop: 12 workers, under 2 minutes for 31 members and
+     38,000 observations). Without it the host path is one process and
+     took 20 minutes at 4 members.
+   - **The window matters most.** The LETKF is 3-D (no FGAT), so an
+     observation 3 hours old is compared with the 12Z state. With
+     09-12Z observations the analysis made the sondes' v at 400-200 hPa
+     worse: RMS 2.47 to 3.09 m/s, mean -0.29 to -1.10. Denial runs gave
+     the same sign for aircraft alone (2.94) and AMVs alone (2.81).
+     The aircraft v O-B mean was +0.67 m/s, while the sondes' was
+     -0.29. The runs below use 11-12Z (1 hour).
+   - O-B and O-A RMS per family (assimilated observations; MW split into
+     the assimilated lattice and the columns between):
+
+     | family | n | O-B | O-A |
+     |---|---|---|---|
+     | aircraft T (K) | 1602 | 1.02 | 0.87 |
+     | aircraft u / v (m/s) | 1602 | 2.46 / 2.49 | 2.09 / 2.08 |
+     | AMV u / v (m/s) | 13424 / 13151 | 5.01 / 4.96 | 4.10 / 4.08 |
+     | GNSS-RO N | 114 | 5.27 | 4.10 |
+     | AMSU-A, assimilated / independent (K) | 1939 / 5751 | 0.31 / 0.30 | 0.30 / 0.29 |
+     | MHS, assimilated / independent (K) | 2550 / 7705 | 1.85 / 1.88 | 1.45 / 1.65 |
+     | ATMS, assimilated / independent (K) | 1283 / 3847 | 0.73 / 0.76 | 0.55 / 0.67 |
+
+   - Radiosonde scorecard, background to analysis RMS (1241 T and 1236
+     wind reports; one gross rejection):
+
+     | | all families | without AMVs |
+     |---|---|---|
+     | T 850-500 hPa (K) | 0.854 to 0.850 | 0.854 to 0.842 |
+     | T 400-200 hPa (K) | 0.716 to 0.709 | 0.716 to 0.710 |
+     | u 400-200 hPa (m/s) | 1.958 to 2.023 | 1.958 to 1.964 |
+     | v 400-200 hPa (m/s) | 2.465 to 2.558 | 2.465 to 2.496 |
+     | v, all levels (m/s) | 2.459 to 2.496 | 2.459 to 2.470 |
+
+   - **Reading.** Without AMVs the scorecard is neutral to slightly
+     better. With AMVs, upper-level winds are 3-4 % worse. Their u O-B
+     mean is +0.41 m/s, which points to height assignment or a bias that
+     a static error does not absorb. The follow-ups are AMV error
+     inflation or tighter thinning, and a 4-D (FGAT) operator before
+     using the full window.
+   - The RO O-B was +1.8 % of N at 20-30 km until #698, which converts
+     geometric tangent heights to geopotential.
 
 ## 13. Satellite radiances in 3D-Var (V4.3 and V4.4): design as built
 

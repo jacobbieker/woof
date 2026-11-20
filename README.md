@@ -1091,7 +1091,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   correction. Each channel sits at its Jacobian peak. Metop-B's channel 15
   is dead, so its scattering check uses the channel 1-2 cloud liquid
   retrieval instead. The 3D-Var radiance term comes later
-  ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)).
+  ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)). In one real case
+  (GEFS ensemble, Europe and the North Atlantic, 2026-10-28 12Z) the
+  WIS2 satellite and aircraft families reduce their own O-A, and
+  MHS and ATMS departures fall on columns that were not assimilated as
+  well. Against held-out radiosondes the analysis is neutral to slightly
+  better without AMVs. With AMVs, upper-level winds are 3-4 % worse
+  (plan 12.8 item 6).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
