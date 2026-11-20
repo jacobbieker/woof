@@ -2,11 +2,14 @@
 
 ``python -m woof.nn.train TAP OUT`` reads a store written by ``--nn`` in
 ``mode = "tap"`` (:mod:`woof.nn.tap`) and writes an ``mlp-npz`` artefact
-(:mod:`woof.nn.manifest`) that runs on every backend.  The tap's targets
-are the scheme's own tendency, so the artefact emulates the scheme: it is
-for ``mode = "replace"``.  Under ``mode = "residual"`` its rate would be
-added on top of the scheme's (a residual model needs a reference target
-the tap does not record).  The trainer is deliberately small: a float32 MLP, Adam,
+(:mod:`woof.nn.manifest`) that runs on every backend.  A tap's targets
+are by default the scheme's own tendency, so the artefact emulates the
+scheme: it is for ``mode = "replace"``.  A hex tap recorded with
+``tap_target = "nudging"`` under analysis nudging holds the nudging's
+increment to the same sources instead -- what the model lacked to stay on
+the analyses -- and the artefact trained on it is a correction for
+``mode = "residual"``.  The manifest's ``training.intended_mode`` says
+which, and the hex seat refuses the other mode.  The trainer is deliberately small: a float32 MLP, Adam,
 minibatches, a held-out tail of the record (the last ``holdout`` fraction
 of recorded model times, so the score is out of sample in time; samples
 are ordered by model time first, and a time recorded twice, as a resumed
@@ -376,12 +379,15 @@ def train(tap, out, *, hidden=(128, 128), activation="tanh", epochs=30, batch=10
               "held_out_columns": int(x_test.shape[0]), "train_columns": int(x_train.shape[0]),
               "held_out": per_store}
     limit = _limits(np.abs(y_train).max(axis=0) * limit_factor, outputs)
-    what = "the scheme's tendency (an emulator: mode = \"replace\")"
+    target = attrs.get("target") or "physics"
+    mode = "residual" if target == "nudging" else "replace"
+    what = ("the analysis nudging's increment (a correction: mode = \"residual\")" if target == "nudging"
+            else "the scheme's tendency (an emulator: mode = \"replace\")")
     training = {"tap": data["path"] if len(stores) == 1 else [s["path"] for s in stores],
                 "validate": [s["path"] for s in checks], "tap_schema": attrs.get("schema"),
                 "route": attrs.get("route"), "scheme": attrs.get("scheme"), "grid": attrs.get("grid"),
                 "grids": sorted({str(s["attrs"].get("grid")) for s in stores}),
-                "target": what, "splits": splits,
+                "target": what, "intended_mode": mode, "splits": splits,
                 "steps_train": int(sum(s["steps_train"] for s in splits)),
                 "steps_held_out": int(sum(s["steps_held_out"] for s in splits)),
                 "held_out_from_seconds": splits[0]["held_out_from_seconds"], "hidden": list(hidden),

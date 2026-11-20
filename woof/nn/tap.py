@@ -117,8 +117,12 @@ class TendencyTap:
                            f"({type(error).__name__}: {error})") from error
         if exists:
             for key in ("schema", "inputs", "outputs", "columns", "route", "scheme", "grid",
-                        "levels", "tap_every", "tap_seed"):
-                if key in self.attrs and stored.get(key) != self.attrs[key]:
+                        "levels", "tap_every", "tap_seed", "target"):
+                if key == "target":     # absent means the scheme's tendency, on either side
+                    if (stored.get(key) or "physics") != (self.attrs.get(key) or "physics"):
+                        raise TapError(f"tap store {self.path} records the {stored.get(key) or 'physics'} "
+                                       f"target; this run taps the {self.attrs.get(key) or 'physics'} one")
+                elif key in self.attrs and stored.get(key) != self.attrs[key]:
                     raise TapError(f"tap store {self.path} was written with a different {key} "
                                    f"({stored.get(key)!r}); a resumed run appends only to its own record")
             # A flush interrupted part-way leaves the arrays of unequal

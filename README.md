@@ -906,10 +906,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   sensitivities and each observation's impact on the forecast cost
   (EFSO), using the LETKF's own weights ([docs/grad.md](docs/grad.md)).
   On a regional case, the finite-difference and ensemble sensitivities
-  agree in sign and pattern on the WRF route at 9 km, though ES and EFSO
-  overstate magnitudes by about 4-8x. On hex at 3-5 km they are dominated
-  by noise. Later gradient work therefore plans for 9-15 km for now
-  (plan, gate G0).
+  agree in sign and pattern on the WRF route at 9 km and at 3 km, though
+  ES and EFSO at the most-correlated points overstate magnitudes by about
+  2-8x; an independent member set is within about 0.3-3x. On hex they are
+  dominated by noise at 12 km as well as at 3-5 km, so the problem is the
+  route, not the resolution. Later gradient work may use 3 km on the WRF
+  route, and hex gradient work waits on a diagnosis (plan, gate G0 and
+  P0.5).
   `woof.grad.bridge` hands woof's arrays to PyTorch and back: DLPack with
   no copy on CUDA (with a stream handoff), no copy from Metal into
   torch-MPS and one device copy back, and a refusal for any unnamed copy or
@@ -929,7 +932,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `advance_uv` in binary64 (CUDA, host) and binary32 (CUDA, Metal). They
   pass the dot-product test to 1e-15 and agree with WRFPLUS 4.7.1's
   `g_/a_advance_uv` to about 1e-16, using a driver in
-  `tools/wrfplus_oracle`. The forecast path does not import it.
+  `tools/wrfplus_oracle`. `advance_w` with `calc_p_rho` (woof's
+  `advance_w_phi`) follows the same pattern: dot-product test to about
+  1e-14, WRFPLUS `g_/a_advance_w` and `g_/a_calc_p_rho` to about 1e-15,
+  and the float build reproduces the strict primal's words. The w damper
+  (`damp_opt=3`) is refused, since WRFPLUS has none. The forecast path
+  does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable

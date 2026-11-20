@@ -134,6 +134,10 @@ def test_tap_round_trip_resume_and_refusals(tmp_path, suffix):
     with pytest.raises(TapError, match="different grid"):
         TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5, attrs={**attrs, "grid": [3, 4, 6]},
                     resume=True)
+    # a physics record (no target attribute) is never resumed as a nudging one, nor the reverse
+    with pytest.raises(TapError, match="physics target"):
+        TendencyTap(path, inputs=SPECS_IN, outputs=SPECS_OUT, columns=5, attrs={**attrs, "target": "nudging"},
+                    resume=True)
 
 
 @pytest.mark.skipif(not HAS_ZARR, reason="zarr not installed")

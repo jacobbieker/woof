@@ -160,7 +160,10 @@ blob gave a derivative that held steady only for amplitudes of about
 `woof.da.perturb`. On the WRF route these are a Gaussian random `thp`
 field and a non-divergent wind, tapered at the rim. On hex they are
 `theta` only, drawn on a tangent plane and sampled at the cells. Each
-member is a direction applied with `--scale 1`.
+member is a direction applied with `--scale 1`. On a 9 km WRF case,
+`--wind-ms 0` (`thp` only) gave ES that finite differences confirmed in
+4 of 6 tropospheric directions, and the default wind perturbation in 1 of
+6 (plan, section 5, P0.5).
 
 `woof grad ens` regresses the members' costs on their states:
 
