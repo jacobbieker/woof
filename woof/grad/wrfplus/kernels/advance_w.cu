@@ -1,5 +1,7 @@
 // Tangent-linear and adjoint of woof's strict advance_w_phi
-// (woof/core/kernels/acoustic.cu, the GPUWM_WRF_EXACT branch, msf == 1),
+// (woof/core/kernels/acoustic.cu, the GPUWM_WRF_EXACT branch) and of
+// advance_w_phi_msf (the same, with WRF advance_w's msfty factors, when
+// has_msf; msftx = msfty = msft, as the primal carries one factor),
 // which is WRF 4.7.1 advance_w followed by calc_p_rho's non-hydrostatic
 // diagnosis (dyn_em/module_small_step_em.F).  The oracle is WRFPLUS 4.7.1
 // g_/a_advance_w and g_/a_calc_p_rho (wrftladj/module_small_step_em_
@@ -18,7 +20,9 @@
 // Active inputs: w_pp, ph_pp, rw_t, rph_t, ww_pp, mu_pp, mu_pp_old, th_pp,
 // th_pp_old, thp, php, alt, c2a, a, alpha, gam, mup, u_pp, v_pp, cqw (when
 // moist_cq).  Outputs: w_pp, ph_pp, p_pp, al_pp.  Passive: phb, ht, rdn,
-// rdnw, fnm, fnp, c1h, c2h, c1f, c2f, mub2d and the scalars.
+// rdnw, fnm, fnp, c1h, c2h, c1f, c2f, mub2d, msft and the scalars.  With
+// has_msf == 0 the factors are an exact 1 and msft is not read, so the
+// words are the msf-free kernel's.
 
 #ifndef WRFPLUS_REAL
 #define WRFPLUS_REAL double
@@ -55,12 +59,12 @@ typedef WRFPLUS_REAL wreal;
     const wreal* __restrict__ fnp, const wreal* __restrict__ c1h,          \
     const wreal* __restrict__ c2h, const wreal* __restrict__ c1f,          \
     const wreal* __restrict__ c2f, const wreal* __restrict__ mub2d,        \
-    const wreal* __restrict__ cqw
+    const wreal* __restrict__ cqw, const wreal* __restrict__ msft
 
 #define W_GEOM_PARAMS                                                       \
     int nz, int ny, int nx, int spec_zone, int base3d, int top_lid,        \
     int moist_cq, int boundary_x, int boundary_y, wreal cf1, wreal cf2,    \
-    wreal cf3, wreal rdx, wreal rdy, wreal dtau, wreal epssm
+    wreal cf3, wreal rdx, wreal rdy, wreal dtau, wreal epssm, int has_msf
 
 // WRF's t_2ave (acoustic.cu wrf_theta_average, strict).
 static __device__ __forceinline__
@@ -94,14 +98,14 @@ WBC w_bc(int j, int i, int ny, int nx, int boundary_x, int boundary_y)
 static __device__ __forceinline__
 wreal w_bottom(const wreal* u, const wreal* v, const wreal* ht, size_t c,
                const WBC& b, size_t lu, size_t lv, wreal cf1, wreal cf2,
-               wreal cf3, wreal rdx, wreal rdy)
+               wreal cf3, wreal rdx, wreal rdy, wreal msf)
 {
     wreal ue = cf1 * u[b.ue] + cf2 * u[b.ue + lu] + cf3 * u[b.ue + 2 * lu];
     wreal uw = cf1 * u[b.uw] + cf2 * u[b.uw + lu] + cf3 * u[b.uw + 2 * lu];
     wreal vn = cf1 * v[b.vn] + cf2 * v[b.vn + lv] + cf3 * v[b.vn + 2 * lv];
     wreal vs = cf1 * v[b.vs] + cf2 * v[b.vs + lv] + cf3 * v[b.vs + 2 * lv];
-    return (wreal)0.5 * rdy * ((ht[b.cjp] - ht[c]) * vn + (ht[c] - ht[b.cjm]) * vs)
-         + (wreal)0.5 * rdx * ((ht[b.cip] - ht[c]) * ue + (ht[c] - ht[b.cim]) * uw);
+    return msf * (wreal)0.5 * rdy * ((ht[b.cjp] - ht[c]) * vn + (ht[c] - ht[b.cjm]) * vs)
+         + msf * (wreal)0.5 * rdx * ((ht[b.cip] - ht[c]) * ue + (ht[c] - ht[b.cim]) * uw);
 }
 
 // Joint base-state and tangent-linear update (WRFPLUS g_advance_w then
@@ -133,6 +137,9 @@ void advance_w_tl(wreal* __restrict__ w_pp, wreal* __restrict__ ph_pp,
     size_t boff = base3d ? (size_t)c : 0;
     size_t lu = (size_t)ny * (nx + 1), lv = (size_t)(ny + 1) * nx;
     wreal e = epssm;
+    // WRF advance_w's msfty and msft_inv = 1/msfty (exact 1 without msf).
+    wreal msf = has_msf ? msft[c] : (wreal)1.0;
+    wreal msf_i = (wreal)1.0 / msf;
 
     wreal mut = mub2d[c] + mup[c];
     wreal muts = mut + mu_pp[c];
@@ -177,15 +184,16 @@ void advance_w_tl(wreal* __restrict__ w_pp, wreal* __restrict__ ph_pp,
     }
     for (int k = 1; k <= nz; ++k) {
         wreal bf = c1f[k] * mut + c2f[k];
-        rhsd[k] = phld[k] + rhsd[k] / bf - rhs[k] * c1f[k] * mut_d / (bf * bf);
-        rhs[k] = phl[k] + rhs[k] / bf;
+        rhsd[k] = phld[k] + msf * rhsd[k] / bf
+                - msf * rhs[k] * c1f[k] * mut_d / (bf * bf);
+        rhs[k] = phl[k] + msf * rhs[k] / bf;
     }
     if (top_lid) { rhs[nz] = 0; rhsd[nz] = 0; }
 
     // Bottom kinematic condition.
     WBC b = w_bc(j, i, ny, nx, boundary_x, boundary_y);
-    wl[0] = w_bottom(u_pp, v_pp, ht, c, b, lu, lv, cf1, cf2, cf3, rdx, rdy);
-    wld[0] = w_bottom(u_d, v_d, ht, c, b, lu, lv, cf1, cf2, cf3, rdx, rdy);
+    wl[0] = w_bottom(u_pp, v_pp, ht, c, b, lu, lv, cf1, cf2, cf3, rdx, rdy, msf);
+    wld[0] = w_bottom(u_d, v_d, ht, c, b, lu, lv, cf1, cf2, cf3, rdx, rdy, msf);
 
     // Forcing rows.
     wreal t2_dn = t2ave_(th_pp[c], th_pp_old[c], muave, c1h[0], c2h[0], muts,
@@ -233,24 +241,24 @@ void advance_w_tl(wreal* __restrict__ w_pp, wreal* __restrict__ ph_pp,
         wreal fd;
         if (moist_cq) {
             wl[k] = wl[k] + dtau * rw_t[f]
-                  + cqw[f] * ((wreal)0.5 * dtau * WG * rdn[k]
+                  + msf_i * cqw[f] * ((wreal)0.5 * dtau * WG * rdn[k]
                     * (c2a[h] * rdnw[k] / (c1h[k] * mut + c2h[k]) * dph_up
                        - c2a[hm] * rdnw[k - 1] / (c1h[k - 1] * mut + c2h[k - 1]) * dph_dn))
-                  + dtau * WG * (rdn[k] * (c2a[h] * alt[h] * t2_up
-                                          - c2a[hm] * alt[hm] * t2_dn)
-                                 - c1f[k] * muave);
-            fd = cqw_d[f] * pk * q + cqw[f] * pk * q_d;
+                  + dtau * WG * msf_i * (rdn[k] * (c2a[h] * alt[h] * t2_up
+                                                  - c2a[hm] * alt[hm] * t2_dn)
+                                         - c1f[k] * muave);
+            fd = msf_i * (cqw_d[f] * pk * q + cqw[f] * pk * q_d);
         } else {
             wl[k] = wl[k] + dtau * rw_t[f]
-                  + (wreal)0.5 * dtau * WG * rdn[k]
+                  + msf_i * ((wreal)0.5 * dtau * WG * rdn[k]
                     * (c2a[h] * rdnw[k] / (c1h[k] * mut + c2h[k]) * dph_up
-                       - c2a[hm] * rdnw[k - 1] / (c1h[k - 1] * mut + c2h[k - 1]) * dph_dn)
-                  + dtau * WG * (rdn[k] * (c2a[h] * alt[h] * t2_up
-                                          - c2a[hm] * alt[hm] * t2_dn)
-                                 - c1f[k] * muave);
-            fd = pk * q_d;
+                       - c2a[hm] * rdnw[k - 1] / (c1h[k - 1] * mut + c2h[k - 1]) * dph_dn))
+                  + dtau * WG * msf_i * (rdn[k] * (c2a[h] * alt[h] * t2_up
+                                                  - c2a[hm] * alt[hm] * t2_dn)
+                                         - c1f[k] * muave);
+            fd = msf_i * pk * q_d;
         }
-        wld[k] = wld[k] + dtau * rw_d[f] + fd + dtau * WG * r_d;
+        wld[k] = wld[k] + dtau * rw_d[f] + fd + dtau * WG * msf_i * r_d;
         t2_dn = t2_up; t2_dn_d = t2_up_d;
     }
     if (top_lid) {
@@ -271,11 +279,11 @@ void advance_w_tl(wreal* __restrict__ w_pp, wreal* __restrict__ ph_pp,
                                     + c2a[h] * alt[h] * t2_dn_d)
                                  + c1f[nz] * muave_d);
         wl[nz] = wl[nz] + dtau * rw_t[f]
-               + ((-(wreal)0.5 * dtau * WG) / (c1h[h1] * mut + c2h[h1])
+               + msf_i * ((-(wreal)0.5 * dtau * WG) / (c1h[h1] * mut + c2h[h1])
                   * (rdnw[h1] * rdnw[h1]) * (wreal)2.0 * c2a[h] * dph_dn
                   - dtau * WG * ((wreal)2.0 * rdnw[h1] * c2a[h] * alt[h] * t2_dn
                                  + c1f[nz] * muave));
-        wld[nz] = wld[nz] + dtau * rw_d[f] + t_d;
+        wld[nz] = wld[nz] + dtau * rw_d[f] + msf_i * t_d;
     }
 
     // Thomas solve.
@@ -295,9 +303,9 @@ void advance_w_tl(wreal* __restrict__ w_pp, wreal* __restrict__ ph_pp,
     // phi'' update.
     for (int k = 1; k <= nz; ++k) {
         wreal bs = c1f[k] * muts + c2f[k];
-        wreal cw = (wreal)0.5 * dtau * WG * ((wreal)1.0 + e);
+        wreal cw = msf * (wreal)0.5 * dtau * WG * ((wreal)1.0 + e);
         phld[k] = rhsd[k] + cw * (wld[k] / bs - wl[k] * c1f[k] * muts_d / (bs * bs));
-        phl[k] = rhs[k] + (wreal)0.5 * dtau * WG * ((wreal)1.0 + e) * wl[k]
+        phl[k] = rhs[k] + msf * (wreal)0.5 * dtau * WG * ((wreal)1.0 + e) * wl[k]
                         / (c1f[k] * muts + c2f[k]);
     }
 
@@ -372,6 +380,9 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
     size_t boff = base3d ? (size_t)c : 0;
     size_t lu = (size_t)ny * (nx + 1), lv = (size_t)(ny + 1) * nx;
     wreal e = epssm;
+    // WRF advance_w's msfty and msft_inv = 1/msfty (exact 1 without msf).
+    wreal msf = has_msf ? msft[c] : (wreal)1.0;
+    wreal msf_i = (wreal)1.0 / msf;
 
     // ---- Forward recompute (base state only). ----
     wreal mut = mub2d[c] + mup[c];
@@ -400,10 +411,10 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
     }
     rhs3[0] = 0;
     for (int k = 1; k <= nz; ++k)
-        rhs3[k] = phl[k] + rhs2[k] / (c1f[k] * mut + c2f[k]);
+        rhs3[k] = phl[k] + msf * rhs2[k] / (c1f[k] * mut + c2f[k]);
     if (top_lid) rhs3[nz] = 0;
     WBC b = w_bc(j, i, ny, nx, boundary_x, boundary_y);
-    w5[0] = w_bottom(u_pp, v_pp, ht, c, b, lu, lv, cf1, cf2, cf3, rdx, rdy);
+    w5[0] = w_bottom(u_pp, v_pp, ht, c, b, lu, lv, cf1, cf2, cf3, rdx, rdy, msf);
     for (int k = 0; k < nz; ++k) {
         size_t h = (size_t)k * st + c;
         t2[k] = t2ave_(th_pp[h], th_pp_old[h], muave, c1h[k], c2h[k], muts, thp[h], e);
@@ -417,9 +428,10 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
         wreal pq = (wreal)0.5 * dtau * WG * rdn[k]
                  * (c2a[h] * rdnw[k] / (c1h[k] * mut + c2h[k]) * dph_up
                     - c2a[hm] * rdnw[k - 1] / (c1h[k - 1] * mut + c2h[k - 1]) * dph_dn);
-        w5[k] = w_pp[h] + dtau * rw_t[h] + (moist_cq ? cqw[h] * pq : pq)
-              + dtau * WG * (rdn[k] * (c2a[h] * alt[h] * t2[k] - c2a[hm] * alt[hm] * t2[k - 1])
-                             - c1f[k] * muave);
+        w5[k] = w_pp[h] + dtau * rw_t[h] + (moist_cq ? msf_i * cqw[h] * pq : msf_i * pq)
+              + dtau * WG * msf_i
+                * (rdn[k] * (c2a[h] * alt[h] * t2[k] - c2a[hm] * alt[hm] * t2[k - 1])
+                   - c1f[k] * muave);
     }
     if (top_lid) {
         w5[nz] = 0;
@@ -429,7 +441,7 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
         wreal dph_dn = ((wreal)1.0 + e) * (rhs3[nz] - rhs3[nz - 1])
                      + ((wreal)1.0 - e) * (phl[nz] - phl[nz - 1]);
         w5[nz] = w_pp[f] + dtau * rw_t[f]
-               + ((-(wreal)0.5 * dtau * WG) / (c1h[h1] * mut + c2h[h1])
+               + msf_i * ((-(wreal)0.5 * dtau * WG) / (c1h[h1] * mut + c2h[h1])
                   * (rdnw[h1] * rdnw[h1]) * (wreal)2.0 * c2a[h] * dph_dn
                   - dtau * WG * ((wreal)2.0 * rdnw[h1] * c2a[h] * alt[h] * t2[h1]
                                  + c1f[nz] * muave));
@@ -446,7 +458,7 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
     }
     pho[0] = phl[0];
     for (int k = 1; k <= nz; ++k)
-        pho[k] = rhs3[k] + (wreal)0.5 * dtau * WG * ((wreal)1.0 + e) * w7[k]
+        pho[k] = rhs3[k] + msf * (wreal)0.5 * dtau * WG * ((wreal)1.0 + e) * w7[k]
                          / (c1f[k] * muts + c2f[k]);
 
     // ---- Reverse sweep. ----
@@ -497,7 +509,7 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
     aph[0] += apho[0];
     for (int k = 1; k <= nz; ++k) {
         wreal bs = c1f[k] * muts + c2f[k];
-        wreal cw = (wreal)0.5 * dtau * WG * ((wreal)1.0 + e);
+        wreal cw = msf * (wreal)0.5 * dtau * WG * ((wreal)1.0 + e);
         arhs[k] += apho[k];
         aw[k] += apho[k] * cw / bs;
         amuts += -apho[k] * cw * w7[k] * c1f[k] / (bs * bs);
@@ -528,9 +540,9 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
                      + ((wreal)1.0 - e) * (phl[nz] - phl[nz - 1]);
         wreal bh = c1h[h1] * mut + c2h[h1];
         wreal kk = -dtau * WG * rdnw[h1] * rdnw[h1];
-        wreal at = aw[nz];
-        awin[nz] += at;
-        rw_a[f] += dtau * at;
+        awin[nz] += aw[nz];
+        rw_a[f] += dtau * aw[nz];
+        wreal at = msf_i * aw[nz];        // the msft_inv-scaled terms
         c2a_a[h] += at * kk * dph_dn / bh
                   - at * dtau * WG * (wreal)2.0 * rdnw[h1] * alt[h] * t2[h1];
         amut += -at * kk * c2a[h] * dph_dn / (bh * bh) * c1h[h1];
@@ -559,12 +571,12 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
         rw_a[h] += dtau * a5;
         wreal aq;
         if (moist_cq) {
-            cqw_a[h] += a5 * pk * q;
-            aq = a5 * cqw[h] * pk;
+            cqw_a[h] += msf_i * a5 * pk * q;
+            aq = msf_i * a5 * cqw[h] * pk;
         } else {
-            aq = a5 * pk;
+            aq = msf_i * a5 * pk;
         }
-        wreal ar = dtau * WG * a5;
+        wreal ar = dtau * WG * msf_i * a5;
         wreal aeu = aq * dph_up, aed = -aq * dph_dn;
         wreal adu = aq * eu, add = -aq * ed;
         arhs[k + 1] += ((wreal)1.0 + e) * adu;
@@ -601,14 +613,14 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
         thp_a[h] += adn * (c1h[k] * muts + c2h[k]);
     }
     // Bottom condition.
-    aw0[c] = aw[0];
+    aw0[c] = msf * aw[0];
     // rhs3 = ph + rhs2 / bf  (rhs3[nz] = 0 under the lid).
     for (int k = 1; k <= nz; ++k) {
         if (top_lid && k == nz) { arhs[k] = 0; continue; }
         wreal bf = c1f[k] * mut + c2f[k];
         aph[k] += arhs[k];
-        amut += -arhs[k] * rhs2[k] * c1f[k] / (bf * bf);
-        arhs[k] = arhs[k] / bf;
+        amut += -arhs[k] * msf * rhs2[k] * c1f[k] / (bf * bf);
+        arhs[k] = msf * arhs[k] / bf;
     }
     // rhs2 = rhs1 - dtau*(fnm*wd[k] + fnp*wd[k-1]); wd from ww and php.
     for (int k = 1; k < nz; ++k) {

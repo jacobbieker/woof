@@ -951,7 +951,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `tools/wrfplus_oracle`. `advance_w` with `calc_p_rho` (woof's
   `advance_w_phi`) follows the same pattern: dot-product test to about
   1e-14, WRFPLUS `g_/a_advance_w` and `g_/a_calc_p_rho` to about 1e-15,
-  and the float build reproduces the strict primal's words. The w damper
+  and the float build reproduces the strict primal's words, with map
+  factors too (`advance_w_phi_msf`, against WRFPLUS with msftx = msfty =
+  msft). The w damper
   (`damp_opt=3`) is refused, since WRFPLUS has none. `calc_coef_w`
   (woof's `calc_coefs`: c2a and the implicit w factors) matches WRFPLUS
   `g_/a_calc_coef_w` to about 1e-15. `advance_mu_t` (woof's

@@ -75,7 +75,7 @@ routines are named `g_*` (TL) and `a_*` (AD).
 |---|---|---|
 | `advance_uv` | `g_/a_advance_uv` (small_step) | `advance_uv` |
 | `advance_mu_t` | `g_/a_advance_mu_t` | `advance_mu_th` (strict: `wrf_advance_mu_theta`) |
-| `advance_w` | `g_/a_advance_w` | `advance_w_phi` |
+| `advance_w` | `g_/a_advance_w` | `advance_w_phi`, `advance_w_phi_msf` |
 | `calc_p_rho` | `g_/a_calc_p_rho` | inside `advance_w_phi` / `calc_p_alpha` |
 | `calc_coef_w` | `g_/a_calc_coef_w` | `calc_coefs` |
 | `small_step_prep` | `g_/a_small_step_prep` | `small_step_init_uv`, `small_step_init_column` |
@@ -577,9 +577,10 @@ Each step is one small PR, taken to merged before the next widens.
    **What is still refused, and why.** WRFDA's real 4D-Var cases are
    regional, with map factors and specified boundaries, so both are
    needed before its tutorial case can serve as the oracle.
-   - Map factors: with has_msf the strict path runs `advance_w_phi_msf`,
-     which has no TL/AD yet. It needs a kernel item of its own, against
-     WRFPLUS's g_/a_advance_w with map factors.
+   - Map factors: with has_msf the strict path runs `advance_w_phi_msf`.
+     Its TL/AD is now ported (item 8d below), but the step does not yet
+     bind it or the other operators' map-factor arguments, so the step
+     still refuses map factors.
    - Specified boundaries: the step must also take the relaxation folded
      into the held tendencies (`fold_lateral_relaxation` into
      rk_addtend_dry), the per-stage `state_relaxation_multi` rows on the
@@ -647,6 +648,24 @@ Each step is one small PR, taken to merged before the next widens.
      step measures 4.83-4.93x. The rest is run-to-run spread under
      another job's host load (15-29), which moves the same measurement
      by 0.1x and more between runs a minute apart.
+8d. Map factors in advance_w: `advance_w_tl/_ad` take `WGeometry.has_msf`
+   and a passive `msft`, as `advance_w_phi_msf` does. WRF advance_w's
+   msfty multiplies the phi'' coupling, the terrain lower condition and
+   the phi'' update, and msft_inv = 1/msfty multiplies the implicit
+   forcing rows. msftx = msfty = msft, since woof carries one mass-point
+   factor. With has_msf 0 each factor is an exact 1 and msft is not
+   read, so the msf-free kernel's words are unchanged.
+   - Tests (`tests/test_grad_wrfplus_advance_w.py`): three mapped
+     configurations join the dot-product, accumulation and FD tests. The
+     float build gives `advance_w_phi_msf`'s words. The WRFPLUS fixture
+     gains two mapped cases (`mapped`, `mapped_lid_moist`, the driver
+     passing msft as msftx and msfty), and its old cases are unchanged
+     bit for bit. On the mapped cases woof's TL/AD agrees with
+     g_/a_advance_w to 4e-16. With the factors dropped the misfit is
+     4e-3, so the cases do test the factors.
+   - Next: bind map factors in the step (advance_w, advance_mu_t,
+     advance_uv, small_step, rk_stage and the advection carry has_msf
+     already), and add a mapped step variant.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
