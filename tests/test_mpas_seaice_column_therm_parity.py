@@ -109,13 +109,16 @@ def test_fixture_covers_the_branches():
     assert changed("vt_bl99_bubbly", "melt_growth_rates/snowiceFormation").any()
     assert (got("vt_bl99_bubbly", "ocean_fluxes/oceanHeatFluxIceBottom") < 0).any()
     # the first-year ice area resets on day 259 in the north and day 75 in the south only
-    for name, north in (("vt_bl99_first_year_north", True), ("vt_bl99_first_year_south", False)):
+    for name, north in (("vt_bl99_first_year_north_leap_year", True), ("vt_bl99_first_year_north_gregorian", True),
+                        ("vt_bl99_first_year_south", False)):
         lat = cases[name]["pools"]["mesh"]["latCell"][:n_solve]
         fy = got(name, "tracers/firstYearIceArea")[:, :, 0]
         area = cases[name]["pools"]["tracers"]["iceAreaCategory"][:n_solve, :, 0]
         hemisphere = np.broadcast_to((lat > 0 if north else lat <= 0)[:, None], fy.shape)
         assert (fy[hemisphere & (area > 1e-11)] == 0).all() and (fy[~hemisphere] != 0).any()
     assert "tracers/firstYearIceArea" not in fixture["vt_bl99_bubbly"]
+    # 2000-09-15 is day 258 of the 365-day year: no reset (the Gregorian count, 259, would reset)
+    assert "tracers/firstYearIceArea" not in fixture["vt_bl99_first_year_north"]
     # the coupled fluxes reach the category fluxes swapped (v8.4.2's set_sfcflux call)
     alt = cases["vt_bl99_coupled_surface_temperature"]["pools"]["alternative_atmos_forcing"]
     surface = got("vt_bl99_coupled_surface_temperature", "atmos_fluxes/surfaceHeatFluxCategory")
@@ -123,10 +126,22 @@ def test_fixture_covers_the_branches():
     assert (surface[iced > 1e-11] == alt["surfaceConductiveFluxCouple"][:n_solve][iced > 1e-11]).all()
 
 
-def test_the_day_of_year_is_the_clock_s():
-    assert ct.day_of_year("2000-01-01_00:00:00") == 1.0
-    assert ct.day_of_year("2000-09-15_00:00:00") == 259.0
-    assert ct.day_of_year("2001-03-16_00:00:00") == 75.0
+def test_the_day_of_year_is_the_clock_s_on_its_calendar():
+    for calendar in ("gregorian", "gregorian_noleap"):
+        assert ct.day_of_year("2000-01-01_00:00:00", calendar) == 1.0
+        assert ct.day_of_year("2001-03-16_00:00:00", calendar) == 75.0
+        assert ct.day_of_year("2001-09-16_00:00:00", calendar) == 259.0
+    # a leap year after February: the 365-day year (the Registry default) is a day behind
+    assert ct.day_of_year("2000-09-15_00:00:00", "gregorian") == 259.0
+    assert ct.day_of_year("2000-09-15_00:00:00", "gregorian_noleap") == 258.0
+    assert ct.day_of_year("2000-03-01_00:00:00", "gregorian_noleap") == 60.0
+    assert ct.day_of_year("2000-12-31_23:59:59", "gregorian") == 366.0
+    assert ct.day_of_year("2000-12-31_23:59:59", "gregorian_noleap") == 365.0
+    assert ct.day_of_year("2000-02-29_07:00:00", "gregorian") == 60.0
+    with pytest.raises(ConfigurationRefusal, match="29 February"):
+        ct.day_of_year("2000-02-29_07:00:00", "gregorian_noleap")
+    with pytest.raises(ConfigurationRefusal, match="config_calendar_type"):
+        ct.day_of_year("2001-06-21_12:00:00", "360day")
 
 
 @pytest.mark.parametrize("overrides, match", [

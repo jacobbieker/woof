@@ -1107,8 +1107,13 @@ end module mpas_tensor_operations
 
 module mpas_timekeeping
   ! The time manager the forward-mode oracle reaches, on whole seconds: a time
-  ! is the seconds since 0001-01-01_00:00:00 on the proleptic Gregorian
-  ! calendar (MPAS's default), an interval a count of seconds.  It parses and
+  ! is the seconds since 0001-01-01_00:00:00 on the calendar
+  ! mpas_timekeeping_init sets (mpas_timekeeping.F:87-127): the proleptic
+  ! Gregorian one until a driver calls it, or the 365-day year of
+  ! 'gregorian_noleap' (MPAS's config_calendar_type default); an interval is
+  ! a count of seconds.  The other calendars stop (v8.4.2's built-in ESMF has
+  ! no 360-day calendar), and so does a date isValidDate rejects
+  ! (mpas_timekeeping.F:2146-2185; MPAS logs it and leaves the time unset).  It parses and
   ! writes MPAS's strings ('YYYY-MM-DD_hh:mm:ss', '[DDDD_]hh:mm:ss').
   ! mpas_get_timeInterval's dt is the seconds as a real, as MPAS gives a whole
   ! interval.  ocn_forcing and ocn_surface_bulk_forcing USE the module and
@@ -1120,6 +1125,7 @@ module mpas_timekeeping
   public :: MPAS_Time_type, MPAS_TimeInterval_type, MPAS_Clock_type, MPAS_NOW, MPAS_START_TIME, &
             mpas_get_clock_time, mpas_set_timeInterval, mpas_interval_division, mpas_set_time, mpas_get_time, &
             mpas_get_timeInterval, mpas_advance_clock, mpas_set_clock, mpas_get_clock_timestep, &
+            mpas_timekeeping_init, &
             operator(>), operator(-), &
             isLeapYear, daysInMonth, daysInMonthLeap
 
@@ -1127,6 +1133,9 @@ module mpas_timekeeping
   ! mpas_timekeeping.F:25-26 (the column package's day counts read them)
   integer, dimension(12), parameter :: daysInMonth     = (/31,28,31,30,31,30,31,31,30,31,30,31/)
   integer, dimension(12), parameter :: daysInMonthLeap = (/31,29,31,30,31,30,31,31,30,31,30,31/)
+  ! the days before each month of the 365-day year
+  integer, dimension(12), parameter :: noleapMonthStart = (/0,31,59,90,120,151,181,212,243,273,304,334/)
+  logical, save :: noleap = .false.
 
   interface operator(>)
     module procedure interval_gt
@@ -1136,6 +1145,18 @@ module mpas_timekeeping
   end interface
 
 contains
+
+  subroutine mpas_timekeeping_init(calendar)
+    character(len=*), intent(in) :: calendar
+    if (trim(calendar) == 'gregorian') then
+      noleap = .false.
+    else if (trim(calendar) == 'gregorian_noleap') then
+      noleap = .true.
+    else
+      print *, 'oracle stub: mpas_timekeeping_init: calendar ', trim(calendar), ' is not compiled here'
+      stop 8
+    end if
+  end subroutine mpas_timekeeping_init
 
   logical function interval_gt(a, b)
     type(MPAS_TimeInterval_type), intent(in) :: a, b
@@ -1221,10 +1242,15 @@ contains
     if (present(ierr)) ierr = 0
   end subroutine mpas_get_timeInterval
 
-  ! days since 0001-01-01 on the proleptic Gregorian calendar
+  ! days since 0001-01-01 on the proleptic Gregorian calendar, or on the
+  ! 365-day year
   integer(kind=I8KIND) function civil_days(y, mo, d)
     integer, intent(in) :: y, mo, d
     integer(kind=I8KIND) :: yy, era, yoe, doy, doe
+    if (noleap) then
+      civil_days = (int(y, I8KIND) - 1) * 365 + noleapMonthStart(mo) + d - 1
+      return
+    end if
     yy = y
     if (mo <= 2) yy = yy - 1
     era = yy / 400
@@ -1246,6 +1272,10 @@ contains
     read(dateTimeString(12:13), *) h
     read(dateTimeString(15:16), *) m
     read(dateTimeString(18:19), *) sec
+    if (.not. valid_date(y, mo, d)) then
+      print *, 'oracle stub: MPAS_setTime : Invalid date ', trim(dateTimeString)
+      stop 8
+    end if
     curr_time % s = ((civil_days(y, mo, d) * 24 + h) * 60 + m) * 60 + sec
     if (present(ierr)) ierr = 0
   end subroutine mpas_set_time
@@ -1271,6 +1301,18 @@ contains
 
     end function isLeapYear
 
+  ! isValidDate (mpas_timekeeping.F:2146-2185) on the two calendars here
+  logical function valid_date(y, mo, d)
+    integer, intent(in) :: y, mo, d
+    valid_date = .false.
+    if (mo < 1 .or. mo > 12 .or. d < 1) return
+    if (.not. noleap .and. isLeapYear(y)) then
+      valid_date = d <= daysInMonthLeap(mo)
+    else
+      valid_date = d <= daysInMonth(mo)
+    end if
+  end function valid_date
+
   ! the calendar fields ESMF_TimeGet hands back (DoY counts from 1 on 1 January)
   subroutine mpas_get_time(curr_time, YYYY, MM, DD, DoY, H, M, S, dateTimeString, ierr)
     type(MPAS_Time_type), intent(in) :: curr_time
@@ -1280,6 +1322,18 @@ contains
     integer(kind=I8KIND) :: days, rest, z, era, doe, yoe, y, yday, mp, d, mo
     days = curr_time % s / 86400
     rest = curr_time % s - days * 86400
+    if (noleap) then
+      y = days / 365 + 1
+      yday = mod(days, 365_I8KIND)
+      mo = 12
+      do while (noleapMonthStart(mo) > yday)
+        mo = mo - 1
+      end do
+      d = yday - noleapMonthStart(mo) + 1
+      call write_fields()
+      if (present(DoY)) DoY = int(yday) + 1
+      return
+    end if
     z = days + 306
     era = z / 146097
     if (z < 0 .and. mod(z, 146097_I8KIND) /= 0) era = era - 1
@@ -1292,17 +1346,23 @@ contains
     mo = mp + 3
     if (mo > 12) mo = mo - 12
     if (mo <= 2) y = y + 1
-    if (present(dateTimeString)) &
-         write(dateTimeString, '(i4.4,"-",i2.2,"-",i2.2,"_",i2.2,":",i2.2,":",i2.2)') y, mo, d, rest / 3600, &
-         mod(rest, 3600_I8KIND) / 60, mod(rest, 60_I8KIND)
-    if (present(YYYY)) YYYY = int(y)
-    if (present(MM)) MM = int(mo)
-    if (present(DD)) DD = int(d)
+    call write_fields()
     if (present(DoY)) DoY = int(days - civil_days(int(y), 1, 1)) + 1
-    if (present(H)) H = int(rest / 3600)
-    if (present(M)) M = int(mod(rest, 3600_I8KIND) / 60)
-    if (present(S)) S = int(mod(rest, 60_I8KIND))
-    if (present(ierr)) ierr = 0
+
+  contains
+
+    subroutine write_fields()
+      if (present(dateTimeString)) &
+           write(dateTimeString, '(i4.4,"-",i2.2,"-",i2.2,"_",i2.2,":",i2.2,":",i2.2)') y, mo, d, rest / 3600, &
+           mod(rest, 3600_I8KIND) / 60, mod(rest, 60_I8KIND)
+      if (present(YYYY)) YYYY = int(y)
+      if (present(MM)) MM = int(mo)
+      if (present(DD)) DD = int(d)
+      if (present(H)) H = int(rest / 3600)
+      if (present(M)) M = int(mod(rest, 3600_I8KIND) / 60)
+      if (present(S)) S = int(mod(rest, 60_I8KIND))
+      if (present(ierr)) ierr = 0
+    end subroutine write_fields
   end subroutine mpas_get_time
 
 end module mpas_timekeeping
