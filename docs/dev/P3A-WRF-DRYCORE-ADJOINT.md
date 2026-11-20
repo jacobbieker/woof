@@ -317,6 +317,17 @@ Diffusion (item 9) is extra: 1-1.5 w.
 G3's cost limit is about 5x the forward step. It was 4x until the user's
 decision of 2026-11-20.
 
+- **Cost.** The binary64 adjoint on the A6000 runs at 1/32 fp64
+  throughput. The adjoint step may exceed the limit over the float32
+  forward step even if it is about 3x in operation count.
+  - Fallback: a binary32 adjoint for production gradients, checked
+    against the binary64 tests.
+  - The kernel ratios are measured from item 2, and reported early.
+- **TL validity at km scales.** Measured at item 8 on a 12 km dry case
+  first, then 3 km. Dry TL validity is an upper bound on the moist one.
+- **WRFPLUS has no hybrid coordinate.** `hybrid_opt = 2` gets no
+  oracle evidence (section 1).
+
 ### Measured cost and the step projection
 
 These kernel ratios are AD and TL time over the binary32 primal. They were
@@ -347,26 +358,19 @@ activity tagged by woof kernel and the minimum over 10 steps
 | CuPy kernels and copies | 6.8% | 3.0% |
 
 The projection is the per-step adjoint cost over the forward step:
-1 (forward recompute) + Σ share x AD32 ratio. Measured so far, in strict
-mode: 45.4% of the step gives 1.67. The rest is projected at a range of
-ratios:
+1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
+far (45.4% of the strict step), Σ share x AD32 = 1.67, on top of the
+forward recompute's 1. The rest is projected at a range of ratios:
 
 | ratio for the unmeasured 54.6% | projection |
 |---|---|
-| 2.2x (copy-probe floor) | 3.9x |
+| 2.2x (memory-traffic floor) | 3.9x |
 | 3.0x | 4.3x |
 | 3.7x (as measured so far) | 4.7x |
 
-The 5x limit holds while the rest averages at most about 4.3x.
-
-
-- **Cost.** The binary64 adjoint on the A6000 runs at 1/32 fp64
-  throughput. The adjoint step may exceed 4x the float32 forward step
-  even if it is about 3x in operation count.
-  - Fallback: a binary32 adjoint for production gradients, checked
-    against the binary64 tests.
-  - The kernel ratios are measured from item 2, and reported early.
-- **TL validity at km scales.** Measured at item 8 on a 12 km dry case
-  first, then 3 km. Dry TL validity is an upper bound on the moist one.
-- **WRFPLUS has no hybrid coordinate.** `hybrid_opt = 2` gets no
-  oracle evidence (section 1).
+The 5x limit holds while the rest averages at most about 4.3x. This is a
+projection from kernel GPU time, not a measured step ratio: launch gaps
+are not counted, the ratios come from a shared card, and 54.6% of the
+step is not yet ported. calc_coefs alone is 4.8x, above the limit, but at
+2.3% of the step it adds about 0.11. Each later kernel PR replaces a
+projected share with a measured one.

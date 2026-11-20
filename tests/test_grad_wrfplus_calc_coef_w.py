@@ -164,7 +164,10 @@ for i, over in enumerate({CONFIGS!r}):
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_wrfplus_oracle_agreement(backend, tmp_path):
     """woof's TL/AD reproduce WRFPLUS 4.7.1 g_/a_calc_coef_w on the
-    fixture, with c2a's own TL/AD mapped through c2a = gamma*p/alt."""
+    fixture, with c2a's own TL/AD mapped through c2a = gamma*p/alt.
+    WRFPLUS has no hybrid coordinate, so the fixture has c1 = 1, c2 = 0;
+    the c1h/c1f derivative terms are covered by the dot-product and
+    finite-difference tests only."""
     dtn = "float32" if backend == "mlx" else "float64"
     out = _run(backend, f'''
 import json as J
@@ -195,7 +198,7 @@ for case in cases:
     limit = 1e-5 if backend == "mlx" else 1e-12
     bad = {k: v for k, v in out.items() if not v < limit}
     assert not bad, bad
-    assert len(out) >= 2 * 12
+    assert len(out) == 3 * 16  # three fixture cases, 16 compared arrays each
 
 
 @pytest.mark.parametrize("backend", ["host"])

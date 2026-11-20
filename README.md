@@ -939,7 +939,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`damp_opt=3`) is refused, since WRFPLUS has none. `calc_coef_w`
   (woof's `calc_coefs`: c2a and the implicit w factors) matches WRFPLUS
   `g_/a_calc_coef_w` to about 1e-15. The binary32 adjoint costs
-  3.5-4.8x the forward kernel; the measured step projection is in the
+  3.4-4.8x the forward kernel; the measured step projection is in the
   design note. The forecast path
   does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
