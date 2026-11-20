@@ -46,3 +46,14 @@ def test_the_seed_fixes_the_interval():
     a = scorecard.station_bootstrap(station, base, test, draws=300, seed=7)
     b = scorecard.station_bootstrap(station, base, test, draws=300, seed=7)
     assert a == b
+
+
+def test_model_t2_is_moved_to_the_station_with_the_lapse_rate():
+    from types import SimpleNamespace
+
+    frame = SimpleNamespace(t2=np.array([280.0, 290.0]), terrain=np.array([500.0, 0.0]))
+    obs = SimpleNamespace(elevation_m=np.array([0.0, 1000.0]))
+    pairing = SimpleNamespace(obs_index=np.array([0, 1]), frame_index=np.array([0, 0]), column=np.array([0, 1]))
+    t2 = scorecard._model_t2(obs, [frame], pairing)
+    # a cell 500 m above its station warms by 3.25 K; a station 1000 m above its cell cools by 6.5 K
+    np.testing.assert_allclose(t2, [283.25, 283.5])

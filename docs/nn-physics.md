@@ -518,7 +518,7 @@ The inputs add `dx` and the radiation context `coszr`, `gsw` and `glw`.
    | cycles | columns outside the range | dtheta R² |
    |---|---|---|
    | 1 | 100 % | -0.81 |
-   | 2 | 16 % | |
+   | 2 | 16 % | -0.51 |
    | 4 | 10 % | 0.20 |
    | 6 | 6.3 % | 0.31 (dqv 0.11, dqc 0.31) |
 
@@ -534,8 +534,8 @@ The inputs add `dx` and the radiation context `coszr`, `gsw` and `glw`.
    | replace | 0.1 | -0.069 [-0.111, -0.026] | 38 % |
    | replace | 0.3 | -0.066 [-0.113, -0.017] | 33 % |
    | replace | 1.0 | -0.062 [-0.110, -0.012] | 33 % |
-   | residual (nudging increment) | 0.3 | +0.239 [+0.176, +0.305] | |
-   | residual, 18 inputs | 0.3 | +0.172 [+0.120, +0.229] | |
+   | residual (nudging increment) | 0.3 | +0.239 [+0.176, +0.305] | 21 % |
+   | residual, 18 inputs | 0.3 | +0.172 [+0.120, +0.229] | 36 % |
 
    The residual arms cooled T2 by about 0.9 K. `replace` with margin 0.1
    was chosen.
@@ -568,8 +568,10 @@ The inputs add `dx` and the radiation context `coszr`, `gsw` and `glw`.
    In the evaluation week nearly every column falls back. The cause is
    the top ten levels (about 40-10 hPa): early-November stratospheric
    theta and pressure lie below the range of all six training cycles.
-   Below them, the columns lie inside it. The validation week did not show
-   this (6 % offline), so it was not used to choose anything.
+   Below them, the columns lie inside it. On the validation
+   week, 6 % of the tap's columns fell outside offline. Online, as the
+   NN run's state drifted from the tap's, 33-38 % fell outside (69 % on the
+   variable mesh). Nothing was chosen on the evaluation week.
 5. **Cost** (plain and NN 6 h runs of the evaluation cycle in pairs,
    uniform mesh; median step):
 

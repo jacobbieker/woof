@@ -100,9 +100,6 @@ def main(argv=None) -> int:
     obs = obs.take(np.nonzero(obs.kind == "surface_temperature")[0])
     base = _frames(args.base, args.mesh)
     pairing = pair(obs, base, read_error_table(), start=args.start, end=args.end)
-    keep = obs.kind[pairing.obs_index] == "surface_temperature"
-    for name in ("obs_index", "frame_index", "column"):
-        setattr(pairing, name, getattr(pairing, name)[keep])
     y = obs.value[pairing.obs_index]
     base_err = _model_t2(obs, base, pairing) - y
     good = np.isfinite(base_err) & (np.abs(base_err) <= args.gross)
@@ -115,8 +112,8 @@ def main(argv=None) -> int:
     labels = args.label or [f"test{i}" for i in range(len(args.test))]
     for label, runs in zip(labels, args.test):
         frames = _frames(runs, args.mesh)
-        if [f.valid for f in frames[:len(base)]] != [f.valid for f in base[:len(frames)]]:
-            raise SystemExit(f"{runs}: its frames' valid times differ from the base run's")
+        if [f.valid for f in frames] != [f.valid for f in base]:
+            raise SystemExit(f"{runs}: its frames' valid times are not the base run's")
         test_err = _model_t2(obs, frames, pairing) - y
         ok = good & np.isfinite(test_err)
         result = station_bootstrap(station[ok], base_err[ok], test_err[ok], draws=args.draws, seed=args.seed,
