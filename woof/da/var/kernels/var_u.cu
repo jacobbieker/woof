@@ -239,6 +239,70 @@ extern "C" __global__ void var_rf_lines(real* __restrict__ f, const real* __rest
     }
 }
 
+// The same for up to five fields (v1..v5) in one launch: the lines of field
+// q follow those of fields 0..q-1 (mz[q] = 0 skips a field).  Each line runs
+// exactly var_rf_lines' recursion, so the words are the same; one launch
+// gives the card every variable's lines at once (section 4.12).  pre and
+// post fold var_scale_2d in: each value of the line is divided by (op 0) or
+// multiplied by (op 1) px(i, j) before the passes (pre) or after them (post);
+// -1 leaves it.  Every value lies on exactly one line of a sweep, so this is
+// var_scale_2d's arithmetic, value for value.
+extern "C" __global__ void var_rf_lines5(real* __restrict__ f0, real* __restrict__ f1, real* __restrict__ f2,
+                                         real* __restrict__ f3, real* __restrict__ f4,
+                                         const real* __restrict__ a0, const real* __restrict__ a1,
+                                         const real* __restrict__ a2, const real* __restrict__ a3,
+                                         const real* __restrict__ a4, const int mz0, const int mz1,
+                                         const int mz2, const int mz3, const int mz4, const int nx, const int ny,
+                                         const int axis, const int npass, const int adjoint,
+                                         const real* __restrict__ px, const int pre, const int post) {
+    const long long per = axis == 0 ? (long long)ny : (long long)nx;
+    const int mzs[5] = {mz0, mz1, mz2, mz3, mz4};
+    long long total = 0;
+    for (int q = 0; q < 5; ++q) total += per * mzs[q];
+    GRID_LOOP(t, total) {
+        long long u = t;
+        int q = 0;
+        while (u >= per * mzs[q]) {
+            u -= per * mzs[q];
+            ++q;
+        }
+        real* f = q == 0 ? f0 : q == 1 ? f1 : q == 2 ? f2 : q == 3 ? f3 : f4;
+        const real* alpha = q == 0 ? a0 : q == 1 ? a1 : q == 2 ? a2 : q == 3 ? a3 : a4;
+        const int mz = mzs[q];
+        const int m = (int)(u % mz);
+        const long long other = u / mz;
+        long long base, s;
+        int n;
+        if (axis == 0) {
+            base = other * mz + m;
+            s = (long long)ny * mz;
+            n = nx;
+        } else {
+            base = other * ny * mz + m;
+            s = mz;
+            n = ny;
+        }
+        const real a = alpha[m];
+        if (pre >= 0) {
+            for (int j = 0; j < n; ++j) {
+                const long long e = base + (long long)j * s;
+                f[e] = pre == 0 ? R_DIV(f[e], px[e / mz]) : R_MUL(f[e], px[e / mz]);
+            }
+        }
+        if (adjoint) {
+            for (int p = npass; p >= 1; --p) rf_adjoint(f + base, s, n, p, a);
+        } else {
+            for (int p = 1; p <= npass; ++p) rf_forward(f + base, s, n, p, a);
+        }
+        if (post >= 0) {
+            for (int j = 0; j < n; ++j) {
+                const long long e = base + (long long)j * s;
+                f[e] = post == 0 ? R_DIV(f[e], px[e / mz]) : R_MUL(f[e], px[e / mz]);
+            }
+        }
+    }
+}
+
 // ------------------------------------------------------------ vertical EOFs
 
 // vp(i,j,k) = sum_m (evec(j,k,m) * val(j,m)) * vv(i,j,m), m ascending from 0

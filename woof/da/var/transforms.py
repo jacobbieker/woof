@@ -175,16 +175,23 @@ class DeviceU:
 
         return cp.zeros(shape, dtype=self.dtype)
 
-    def _rf(self, f, alpha, mz, adjoint):
+    def _rf_all(self, fields, adjoint):
+        """:meth:`_rf` for every variable, each sweep one launch over all their lines."""
         nx, ny = self.nx, self.ny
         npass = self.b.rf_passes // 2
-        n2 = nx * ny * mz
-        self._launch("var_scale_2d", n2, f, self.px, *self._i(nx, ny, mz, 1 if adjoint else 0))
-        axes = (1, 0) if adjoint else (0, 1)
-        for axis in axes:
-            lines = ny * mz if axis == 0 else nx * mz
-            self._launch("var_rf_lines", lines, f, alpha, *self._i(nx, ny, mz, axis, npass, 1 if adjoint else 0))
-        self._launch("var_scale_2d", n2, f, self.px, *self._i(nx, ny, mz, 0 if adjoint else 1))
+        live = [(f, s) for f, s in zip(fields, self.v) if s["mz"]]
+        if not live:
+            return
+        pad = live + [(live[0][0], {"mz": 0, "alpha": live[0][1]["alpha"]})] * (5 - len(live))
+        ptrs = [f for f, _ in pad] + [s["alpha"] for _, s in pad]
+        mzs = [s["mz"] for _, s in pad]
+        # / sqrt(area) before the first sweep and * after the second (U^T: the reverse)
+        first, last = (1, 0) if adjoint else (0, 1)
+        for n, axis in enumerate((1, 0) if adjoint else (0, 1)):
+            lines = (ny if axis == 0 else nx) * sum(mzs)
+            pre, post = (first, -1) if n == 0 else (-1, last)
+            self._launch("var_rf_lines5", lines, *ptrs, *self._i(*mzs, nx, ny, axis, npass, 1 if adjoint else 0),
+                         self.px, *self._i(pre, post))
 
     # ------------------------------------------------------------ forward
 
@@ -205,8 +212,8 @@ class DeviceU:
                 block = cp.ascontiguousarray(cv[off: off + size])
                 self._launch("var_cv_block", size, block, f, *self._i(nx, ny, mz, 0))
                 off += size
-                self._rf(f, s["alpha"], mz, adjoint=False)
             vv[f"v{n}"] = f
+        self._rf_all([vv[f"v{n}"] for n in range(1, 6)], adjoint=False)
         out = {"vv": {k: a.copy() for k, a in vv.items()}} if stages else {}
         vp = {}
         for n, s in enumerate(self.v, start=1):
@@ -288,12 +295,12 @@ class DeviceU:
         if stages:
             out["vv_eof"] = {k: v.copy() for k, v in vv.items()}
         parts = []
+        self._rf_all([vv[f"v{n}"] for n in range(1, 6)], adjoint=True)
         for n, s in enumerate(self.v, start=1):
             mz = s["mz"]
             if not mz:
                 continue
             f = vv[f"v{n}"]
-            self._rf(f, s["alpha"], mz, adjoint=True)
             size = nx * ny * mz
             block = self._zeros(size)
             self._launch("var_cv_block", size, block, f, *self._i(nx, ny, mz, 1))
