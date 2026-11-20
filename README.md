@@ -906,10 +906,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   sensitivities and each observation's impact on the forecast cost
   (EFSO), using the LETKF's own weights ([docs/grad.md](docs/grad.md)).
   On a regional case, the finite-difference and ensemble sensitivities
-  agree in sign and pattern on the WRF route at 9 km, though ES and EFSO
-  overstate magnitudes by about 4-8x. On hex at 3-5 km they are dominated
-  by noise. Later gradient work therefore plans for 9-15 km for now
-  (plan, gate G0).
+  agree in sign and pattern on the WRF route at 9 km and at 3 km, though
+  ES and EFSO at the most-correlated points overstate magnitudes by about
+  2-8x; an independent member set is within about 0.3-3x. On hex they are
+  dominated by noise at 12 km as well as at 3-5 km, so the problem is the
+  route, not the resolution. Later gradient work may use 3 km on the WRF
+  route, and hex gradient work waits on a diagnosis (plan, gate G0 and
+  P0.5).
   `woof.grad.bridge` hands woof's arrays to PyTorch and back: DLPack with
   no copy on CUDA (with a stream handoff), no copy from Metal into
   torch-MPS and one device copy back, and a refusal for any unnamed copy or
