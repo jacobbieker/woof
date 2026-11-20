@@ -229,6 +229,24 @@ extern "C" __global__ void var_obs_tpw_adj(const double* __restrict__ tpw, doubl
     }
 }
 
+// da_calculate_grady on the device for the Hessian-vector product: y (H'x,
+// binary64) is rounded once to the real type, set to 0 where mask is 0, and
+// g = -y / (err * err), one rounding per operation in the real type, as the
+// host's NumPy statements in that type.
+extern "C" __global__ void var_obs_grady(const double* __restrict__ y, const int* __restrict__ mask,
+                                         const real* __restrict__ err, real* __restrict__ g, const long long n) {
+    GRID_LOOP(t, n) {
+        const real zero = (real)0;
+        const real r = mask[t] ? (real)TO_REAL(y[t]) : zero;
+        const real e = err[t];
+#ifdef VAR_F64
+        g[t] = __ddiv_rn(-r, __dmul_rn(e, e));
+#else
+        g[t] = __fdiv_rn(-r, __fmul_rn(e, e));
+#endif
+    }
+}
+
 // binary64 -> the tier's real type, one rounding (round to nearest even)
 extern "C" __global__ void var_obs_to_real(const double* __restrict__ a, real* __restrict__ out,
                                            const long long n) {

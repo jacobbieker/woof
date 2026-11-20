@@ -4725,7 +4725,7 @@
    },
    {
     "file": "woof/da/var/kernels/var_obs.cu",
-    "sha256": "c65a5fb5ca7a128d11c7ba2d7fb4495a8633f605bbbc111d0772a8257c58d5e1"
+    "sha256": "c59bace21cb5cbf6e608f21a7d05c0c133c34990b25ca46cb4f12d1dc4d02be9"
    },
    {
     "file": "woof/da/var/kernels/var_u.cu",

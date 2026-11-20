@@ -416,6 +416,11 @@ class VarCost:
         self.d = [np.asarray(d, dtype=np.float64).astype(self.dtype) for d in ds]
         self.err = [np.asarray(t.err, dtype=np.float64).astype(self.dtype) for t in self.terms]
         self.mask = [np.asarray(t.mask, dtype=bool) for t in self.terms]
+        self._dev_grady = None
+        if self.tier != "reference" and self.terms and all(hasattr(t, "grady") for t in self.terms):
+            import cupy as cp
+
+            self._dev_grady = [(cp.asarray(e), cp.asarray(m.astype(np.int32))) for e, m in zip(self.err, self.mask)]
 
     def _jo_groups(self):
         groups = []
@@ -463,7 +468,7 @@ class VarCost:
         """``da_transform_vtoy_adj``: ``U^T H'^T g``, the terms' scatters summed in list order."""
         xa = None
         for t, g in zip(self.terms, gs):
-            gd = g if self.tier == "reference" else self._to_device(g)
+            gd = g if self.tier == "reference" or not isinstance(g, np.ndarray) else self._to_device(g)
             part = self._fields(t.ad(gd))
             if xa is None:
                 xa = part
@@ -544,8 +549,14 @@ class VarCost:
             grad = self.ops.copy(adj)
             self.ops.axpy(self.jb_factor, cv, grad)  # grad_jo + jb_factor * cv
             return grad
-        ys = self.vtoy(cv)
-        adj = self.vtoy_adj(self.grady(ys))
+        if self._dev_grady is not None:
+            # H' U cv, grady and H'^T without leaving the device (the host's words)
+            xa = self.u.apply(cv)["xa"]
+            gs = [t.grady(t.tl(xa), e, m) for t, (e, m) in zip(self.terms, self._dev_grady)]
+            adj = self.vtoy_adj(gs)
+        else:
+            ys = self.vtoy(cv)
+            adj = self.vtoy_adj(self.grady(ys))
         grad = self.ops.copy(cv)
         self.ops.neg_axpby(grad, adj, self.jb_factor)  # -grad_jo + jb_factor * cv
         return grad

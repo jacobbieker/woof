@@ -253,6 +253,18 @@ class DeviceObsTerm:
                 y[a:b] = cp.asarray(np.asarray(vals, dtype=np.float64))
         return y
 
+    def grady(self, y, err, mask):
+        """``da_calculate_grady`` of ``y = tl(x)`` on the device: ``-y / err^2``, 0 where masked.
+
+        ``err`` (the tier's real type) and ``mask`` (int32) are device arrays.
+        """
+        import cupy as cp
+
+        g = cp.empty(self.size, dtype=self.dtype)
+        if self.size:
+            self._go("var_obs_grady", self.size, y, mask, err, g, np.int64(self.size))
+        return g
+
     # ---------------------------------------------------------------- H'^T
 
     def ad(self, y) -> dict:
