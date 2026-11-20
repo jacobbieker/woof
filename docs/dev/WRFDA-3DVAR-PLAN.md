@@ -1173,6 +1173,20 @@ default `B`.
   than both pure 3D-Var and pure LETKF at 95 % bootstrap confidence on at
   least one regime. If it is not, keep hybrid as an option and say so.
 
+Status (2026-11-20): V3.1 and the oracle half of V3.2 landed
+(`woof/da/var/hybrid.py`, `tests/test_var_hybrid.py`,
+`tests/test_var_hybrid_o6.py`, `tools/wrfda_oracle/run_hybrid.sh`). On the
+tutorial case with ten `gen_be` forecasts as members (`je_factor = 2`,
+`alpha_corr_scale = 200` km, `alpha_vertloc_opt = 2`) the reference tier
+matches all 51 of WRFDA's `minimize_cg` lines to 3.5e-14 relative, also
+with woof's own log-p vertical localisation in place of `be.vertloc.dat`.
+The oracle tier equals the reference word for word on the device; the
+production tier meets the final `J` to 7e-8 with the same 50 iterations and
+one digest in fast and strict. The full-ensemble branch (`je_factor <= 1`,
+`jb_factor = -999`, static control variables dropped) builds its cost, but
+WRFDA's `precondition_cg` divides by zero there, so woof refuses to precondition it. Still open: the LETKF-cycling
+pairing and the OSSE half of GV3.
+
 ### V4. Hydrometeor CVs, radar, GOES, radiances (9.5-16 w)
 
 | PR | content | effort |

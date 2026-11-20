@@ -988,7 +988,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   tier's 50-iteration minimisation on a synthetic 200x200x50 case with
   ~10^5 observations takes 3.1 s on an M3 Max (Metal) and 3.2-4.5 s on a shared
   A6000 (targets 20 s and 5 s; the tutorial case: 1.4 s and 2.3 s), with
-  H' and H'^T on the device as an ordered gather (no atomics). Section 11 plans geostationary imager
+  H' and H'^T on the device as an ordered gather (no atomics).
+  `woof.da.var.hybrid` (experimental, Python API) adds WRFDA's hybrid
+  3DEnVar: the alpha control variable with its `alpha_corr_scale`
+  recursive filter and vertical localisation (`alpha_vertloc_opt`), blended
+  with the static `B` through `je_factor`/`jb_factor`, from WRFDA `ep` files
+  or ensemble members already on the device. On the tutorial case with ten
+  members it follows a compiled WRFDA 4.7.1 hybrid run's 50 iterations to
+  3.5e-14 relative; the oracle tier gives the reference's words on the
+  device and the production tier one digest under fast and strict numerics. Section 11 plans geostationary imager
   radiances for initial conditions: Google's SatWeave mosaic and the native
   GOES ABI, Himawari AHI and Meteosat imagers, through an opt-in CRTM into
   the LETKF first and into 3D-Var later. Default runs are not changed.

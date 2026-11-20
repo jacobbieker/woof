@@ -20,6 +20,8 @@ Modules (landed phase by phase):
 - :mod:`woof.da.var.cost` -- ``VarCost``: J and grad J in WRFDA's order
   (``da_calculate_j``, ``da_calculate_gradj``), against an ``ObsTerm``.
 - :mod:`woof.da.var.minimise` -- ``da_minimise_cg`` and the outer loop.
+- :mod:`woof.da.var.hybrid` -- hybrid 3DEnVar: WRFDA's alpha control
+  variable, its localisation and the ``je_factor``/``jb_factor`` blend.
 - :mod:`woof.da.var.oracle` -- reader for the oracle build's array dumps
   (``tools/wrfda_oracle``).
 """

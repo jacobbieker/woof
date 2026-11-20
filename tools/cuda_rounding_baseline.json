@@ -4729,7 +4729,7 @@
    },
    {
     "file": "woof/da/var/kernels/var_u.cu",
-    "sha256": "be27bd95ef3427ce0457a5e354edb0bfa0f8fd24e6f160dd629e98ba4b36d816"
+    "sha256": "5683b674456aab5839117a4142400e34b56c6f6bd8e56d3d546c94ff19ca0267"
    },
    {
     "file": "woof/data/gbmpbl/constants.cuh",
@@ -5511,7 +5511,7 @@
    },
    {
     "file": "woof/da/var/transforms.py",
-    "sha256": "cdc21f8a94568b3beabfb1b99afa6b64ddfaab6efd7018f7d497332961375469"
+    "sha256": "995bff89e979aa6a54767f79208ea6e1c959c8df17be3c97d0e20c241309d2b6"
    },
    {
     "file": "woof/doctor.py",

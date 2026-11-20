@@ -434,11 +434,13 @@ def vv_to_cv(vv, cv_mz):
     return np.concatenate(parts) if parts else np.zeros(0)
 
 
-def transform_u(cv, b, xb):
+def transform_u(cv, b, xb, with_xtoxa: bool = True):
     """``U v``: vtovv (RF), vertical EOFs, vptox, xtoxa.  Returns dict of stages.
 
     ``b`` is a :class:`woof.da.var.be_dat.RegionalB`; ``xb`` holds
     grid_box_area, coefx, coefy, qs, q, psac, dnw, rho, p, t, c1h, c2h.
+    ``with_xtoxa=False`` stops after ``da_transform_vtox`` (xa u, v, t, q, psfc),
+    where the hybrid adds the ensemble increment.
     """
     nx, ny = xb["grid_box_area"].shape
     nz = b.kz
@@ -452,15 +454,23 @@ def transform_u(cv, b, xb):
         lev = 1 if n == 5 else nz
         vp[f"v{n}"] = vvtovp(s.evec, s.val, vv[f"v{n}"], lev) if s.mz > 0 else np.zeros((nx, ny, lev))
     vp_bal, xa = vptox(vp, b.reg, b.cv_options, xb["coefx"], xb["coefy"], xb["qs"])
-    xa = xtoxa(xa, xb, xb["c1h"], xb["c2h"])
+    if with_xtoxa:
+        xa = xtoxa(xa, xb, xb["c1h"], xb["c2h"])
     return {"vv": vv, "vp": vp, "vp_bal": vp_bal, "xa": xa}
 
 
-def transform_u_adj(xa, b, xb):
-    """``U^T x``: xtoxa_adj, vptox_adj, vertical EOF adjoint, RF adjoint, vv_to_cv."""
+def transform_u_adj(xa, b, xb, with_xtoxa: bool = True):
+    """``U^T x``: xtoxa_adj, vptox_adj, vertical EOF adjoint, RF adjoint, vv_to_cv.
+
+    ``with_xtoxa=False`` starts at ``da_transform_vtox_adj`` (``xa`` already
+    through ``da_transform_xtoxa_adj``).
+    """
     nx, ny, nz = xa["t"].shape
     rf_passes = b.rf_passes
-    xa1 = xtoxa_adj(xa, xb, xb["c1h"], xb["c2h"])
+    if with_xtoxa:
+        xa1 = xtoxa_adj(xa, xb, xb["c1h"], xb["c2h"])
+    else:
+        xa1 = {k: np.array(v, dtype=np.float64) for k, v in xa.items()}
     vp = vptox_adj(xa1, b.reg, b.cv_options, xb["coefx"], xb["coefy"], xb["qs"])
     vv = {}
     for n, s in enumerate(b.v, start=1):
