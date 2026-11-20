@@ -1,0 +1,6 @@
+{
+ "abort_atm_and_xao": "shr_sys_abort: (prep_ocn_merge)  ERROR aindx and xindx both non-zero",
+ "abort_merge_logic": "shr_sys_abort: (prep_ocn_merge)  ERROR aindx and iindx merge logic error",
+ "abort_missing_field": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Faxa_swvdr\" Traceback:",
+ "abort_multiple_matches": "shr_sys_abort: (prep_ocn_merge)  ERROR multiple ka field matches"
+}
