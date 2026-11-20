@@ -2063,3 +2063,334 @@ References for this section:
 - Han, Y., P. van Delst, Q. Liu, F. Weng, B. Yan, R. Treadon and J. Derber,
   2006: JCSDA Community Radiative Transfer Model (CRTM), version 1. NOAA
   Technical Report NESDIS 122.
+
+## 12. WIS2 observations from `bkr/obs/wis2.icechunk` (surveyed 2026-11-20)
+
+The user asked (2026-11-20) for data assimilation from the WIS2 store,
+<https://source.coop/bkr/obs/wis2.icechunk>. It holds many sensors,
+including radiances. This section covers:
+
+- what the store holds;
+- how each family maps onto woof's observation types, with WRFDA's errors
+  and QC;
+- which families reuse an existing operator and which need a new one;
+- the order of work.
+
+The numbers were *measured* on 2026-11-20 by opening the repository
+anonymously (bucket `us-west-2.opendata.source.coop`, prefix
+`bkr/obs/wis2.icechunk`) and reading its attributes and arrays. The
+observation data stays in the store. Nothing from it is committed, and the
+tests use synthetic fixtures.
+
+### 12.1 What `wis2.icechunk` is
+
+- **A newer, combined store, not a different dataset.**
+  - Its root attributes say it holds "Observations from the WMO WIS2 Global
+    Cache", with "one group per kind of observation".
+  - Its groups reuse the per-category stores' schemas unchanged:
+    - `wis2_land` root becomes `land/reports`, and its `synop_tac`,
+      `hydrometric` and `radar` groups become `land/*`;
+    - `wis2_upper_air` root becomes `upper_air/soundings`, and its
+      `wind_profiler` becomes `upper_air/wind_profiler`;
+    - `wis2_aircraft` becomes `aircraft`;
+    - `wis2_ocean/{surface,profiles,ship_tac}` becomes `ocean/*`;
+    - `wis2_satellite/*` becomes `satellite/*`.
+- **The per-category stores are frozen.**
+  - Their newest snapshots were written on 2026-11-09, with the
+    `wis2_20261109T1200Z` partition.
+  - `wis2.icechunk`'s history starts on 2026-11-10. It back-filled the
+    archive from `wis2_20261027T1200Z`, and on the survey day its head was
+    `wis2_20261120T0000Z` (65,723 snapshots, newest 2026-11-20 03:41Z).
+  - It is therefore a superset in time of the per-category stores, and the
+    only one still being written. woof reads `wis2.icechunk`. The
+    per-category stores stay readable for `woof grad obs`
+    (`woof/grad/obs_stores.py`), which predates it.
+- **Partitions.** Each group's `partitions_written` lists 12-hour archive
+  windows (`wis2_YYYYMMDDTHHZ`), 48 per group from 2026-10-27T12Z to
+  2026-11-20T00Z. `satellite/mws` starts at 2026-10-28T12Z, and
+  `satellite/swim_nadir` at 2026-11-02T12Z.
+- **Provenance per row.**
+  - `source_key` (the object in `s3://wis2globalcache`), `source_centre`
+    or `centre` (the WIS2 centre it came through), `originating_centre`.
+  - `arrival_time` and `first_arrival_time`, as the Global Cache arrival
+    times. woof maps `first_arrival_time` to the neutral table's
+    `received_time`, so `obs_point`'s causal cut-off applies.
+  - Correction bookkeeping: `update_sequence_number` on land reports, and
+    `report_id` or `observation_identity` hashes elsewhere.
+
+### 12.2 QC flags in the store
+
+Every observation group carries the same flags, and the store never alters
+or masks a value.
+
+- **`quality_flag`** (uint16) has eleven bits:
+  - 1 `outside_physical_range`;
+  - 2 `outside_plausible_range`;
+  - 4 `internally_inconsistent`;
+  - 8 `vertically_inconsistent`;
+  - 16 `position_invalid`;
+  - 32 `position_suspect`;
+  - 64 `time_invalid`;
+  - 128 `time_in_future`;
+  - 256 `time_too_old`;
+  - 512 `duplicate`;
+  - 1024 `provider_flagged`.
+
+  Profiles carry the same flags per level as `level_quality_flag`.
+- **`<variable>_quality`** (uint8) holds the first four bits for one
+  variable.
+
+woof's rule:
+
+- A row is refused when any bit other than 256 is set, either in its own
+  `quality_flag` (or `level_quality_flag`) or in the `<variable>_quality`
+  of the variable used.
+- Bit 256 is ignored, because woof selects its own time window.
+- The counts are recorded per bit, so a receipt shows what the store's QC
+  removed.
+
+The store's flags are necessary, not sufficient (12.6). woof's own checks
+follow:
+
+- OBSPROC's gross checks;
+- WRFDA's `check_max_iv` (3D-Var), or `obs_point`'s background check
+  (LETKF);
+- the Part D rule in 12.6.
+
+### 12.3 Inventory
+
+Rows per hour = rows / (12 h x partitions), an average over the archive.
+Radiance rows are fields of view, each carrying every channel.
+
+| group | rows | per hour | what one row is | key variables |
+|---|---:|---:|---|---|
+| `land/reports` | 8,319,511 | 14,400 | SYNOP/SYNOP-mobile BUFR report | `2m_temperature`, `2m_dewpoint_temperature`, `2m_relative_humidity`, `10m_wind_speed/direction`, `surface_pressure`, `mean_sea_level_pressure`, sensor heights, `station_elevation`, `update_sequence_number` |
+| `land/synop_tac` | 377,144 | 655 | SYNOP received only as text | as above, plus `report` |
+| `land/hydrometric` | 37,584,445 | 66,600 | Canadian gauge line | `discharge`, `water_level` (not for the atmosphere) |
+| `land/radar/<node>_<qty>` | per site | - | ODIM PVOL (BE, CA sites) | out of scope here (radar has its own door) |
+| `ocean/surface` | 2,651,960 | 4,600 | ship, buoy or drifter report | `air_temperature`, `dewpoint_temperature`, `surface_air_pressure`, `wind_speed/direction`, `sea_surface_temperature`, `platform_kind`, `data_buoy_type` |
+| `ocean/ship_tac` | 69,663 | 121 | ship text report | as above |
+| `ocean/profiles` | 220,874 profiles | 383 | Argo, XBT, CTD | sea-water T/S (ocean, not used) |
+| `upper_air/soundings` | 96,106 soundings; 66.6 M levels | 167 | one TEMP part or one BUFR sounding | `pressure`, `temperature`, `dewpoint_temperature`, `geopotential_height`, `wind_speed/direction`, `time_since_launch`, drift, `vertical_sounding_significance`, `radiosonde_type` |
+| `upper_air/wind_profiler` | 256,016 profiles; 6.0 M gates | 444 | profiler or radar wind profile | `height`, `eastward_wind`, `northward_wind`, `wind_quality_significance` |
+| `aircraft` | 2,236,130 | 3,900 | AMDAR report | `flight_level`, `temperature`, `wind_speed/direction`, `humidity_mixing_ratio`, `phase_of_flight`, `report_id` |
+| `satellite/amsua` | 27.5 M | 47,800 | AMSU-A FOV, 15 ch | `brightness_temperature`, angles, `satellite_identifier` 3/5 (Metop-B/C) |
+| `satellite/mhs` | 178.9 M | 311,000 | MHS FOV, 5 ch | Metop-B/C |
+| `satellite/atms` | 229.8 M | 399,000 | ATMS FOV, 22 ch | 225/226 (NOAA-20/21) |
+| `satellite/mws` | 76.4 M | 138,000 | MWS FOV, 24 ch | 24 (Metop-SG-A1) |
+| `satellite/mwhs2`, `mwts2` | 29.0 M, 6.9 M | 50,000, 12,000 | FY-3 MW FOV | 523/524 (FY-3D/E) |
+| `satellite/iasi` | 89.7 M | 156,000 | IASI FOV, 8,700 scaled radiances | Metop-C |
+| `satellite/cris` | 130.8 M | 227,000 | CrIS FOV, 2,211 radiances | NOAA-21 |
+| `satellite/amv` | 622.8 M | 1,080,000 | AMV (EUMETSAT, NOAA, KMA AMI) | `pressure`, `wind_speed`, `wind_direction`, `percent_confidence` (QI with and without forecast), `amv_quality_flag` |
+| `satellite/ahi_amv` | 32.7 M | 56,800 | Himawari AMV | as above, JMA layout |
+| `satellite/scatterometer` | 25.3 M | 43,900 | wind-vector cell (ASCAT on Metop-B/C, HY-2) | `wind_speed_at10_m`/`wind_direction_at10_m` (4 ambiguities), `index_of_selected_wind_vector`, `wind_vector_cell_quality` |
+| `satellite/gnss_ro` | 231,812 occultations | 402 | one occultation | `bending_angle` vs `impact_parameter`, `atmospheric_refractivity` vs `height`, `percent_confidence`, `radio_occultation_data_quality_flags` |
+| `satellite/seviri_asr`, `fci_asr`, `ami_csr` | 43.5 M, 302.7 M, 89.2 M | 75,600 to 525,000 | geostationary clear-sky or all-sky radiance segments | `brightness_temperature` per channel, cloud fraction in segment |
+| `satellite/altimetry`, `swim_nadir`, `sar_ocean`, `olci_wv` | | | altimeter, SWIM, SAR wave spectra, OLCI TCWV | waves and sea level (not atmospheric) or a retrieved product |
+
+Notes:
+
+- Sounding rows are *parts*, not launches.
+  - A US station's 12Z sounding appears as up to five rows: TTAA, TTBB,
+    TTCC, TTDD and a merged significant-level row.
+  - A reader merges them per (station, launch).
+  - `obs_stores.wis2_upper_air` keeps only the part with the most levels,
+    which is how it met the Part D fault (12.6).
+- The satellite rows are flattened BUFR, so several fields carry a
+  replication axis.
+  - `amv.pressure` is (n, 15) and `amv.percent_confidence` is (n, 4).
+  - The scatterometer keeps four wind ambiguities and the index of the
+    selected one.
+  - The readers pick the documented replication explicitly, never by
+    position alone.
+
+### 12.4 Mapping to woof types, errors and QC
+
+Errors are WRFDA's, from OBSPROC's `obserr.txt` (WRF 4.7.1,
+`var/obsproc/obserr.txt`). They are interpolated linearly in pressure
+between its levels (OBSPROC `intplin`, as `obs_err_afwa` does), and clamped
+at the end levels. "LETKF" means a `gpuwm-obs.table.v2` row for
+`woof.da.obs_point`. "3D-Var" means the interface agreed with the 3D-Var
+work (12.7).
+
+| WIS2 family | WRFDA type (FM) | woof variables (measurement) | WRFDA error (obserr.txt) | QC beyond 12.2 |
+|---|---|---|---|---|
+| `land/reports`, `synop_tac` | synop (12) | `temperature_k` (`screen_temperature_2m`), `wind_u/v_m_s` (`anemometer_wind_10m`), `dewpoint_k`, `surface_pressure_pa` (`station_pressure`) | T 2.0 K, wind 2.0-2.5 m/s (SURFACE LAND), RH 10 %, p 100 Pa | sensor heights 1-3 m (T) and 8-12 m (wind) as `obs_stores`; corrections by highest `update_sequence_number`; elevation mismatch over 200 m refused (`obs_point`) |
+| `ocean/surface` ship | ships (13) | as synop, `platform_wind` | T 2.0 K, p 160 Pa (SURFACE SHIP) | position bits 16 and 32; a duplicate in `ship_tac` is dropped by `observation_identity` |
+| `ocean/surface` buoy or drifter | buoy (18) | as ships, 5 m wind `anemometer_wind_5m_reduced_to_10m` where the height is stated | T 2.0 K, wind 2.5-2.7 m/s, p 10-20 Pa (BUOY) | as ships |
+| `upper_air/soundings` | sound (35) | `temperature_k`, `dewpoint_k`, `wind_u/v_m_s` (`sonde_level`) at reported levels, each at its launch-plus-elapsed time and drifted position | T 1.0 K, wind 2.1-3.0 m/s, RH 10-15 % (RAOBS) | the Part D rule (12.6); monotone pressure per part; superadiabatic and lapse-rate checks as OBSPROC `check_obs`; duplicate parts merged |
+| `upper_air/wind_profiler` | profiler (132) | `wind_u/v_m_s` (`profiler_level`) | 2.8 m/s (PROFL) | `wind_quality_significance`; height to pressure through the background column |
+| `aircraft` | airep or AMDAR (42) | `temperature_k`, `wind_u/v_m_s` (`aircraft_level`), pressure from flight level (ICAO) | T 1.0 K, wind 3.6 m/s (AIREPS) | one row per `report_id`; WRFDA's aircraft thinning is a later option |
+| `satellite/amv`, `ahi_amv` | geoamv or polaramv (88) | `wind_u/v_m_s` (`amv_assigned_pressure`) | WRFDA's satob error by pressure (confirmed against `da_read_obs_ascii` in PR C) | QI (without forecast) at least 80; pressure 100-1000 hPa; WRFDA's AMV level and land rules |
+| `satellite/scatterometer` | qscat (281) | `wind_u/v_m_s` at 10 m over sea (`scatterometer_wind_10m`, new label) | WRFDA's qscat error floor (in `obs_wrfda.read_obs_ascii`) | selected ambiguity only; `wind_vector_cell_quality` clear; land and ice cells refused |
+| `satellite/gnss_ro` | gpsref (116) | `refractivity_n` (`ro_refractivity_tangent_point`) | WRFDA's gpsref error profile (OBSPROC `gpsref` rule, ported in PR E) | `percent_confidence` and the RO quality flags; tangent height 0 to 30 km; the lowest 2 km refused over land (super-refraction) |
+| MW sounders (`amsua`, `mhs`, `atms`, `mwhs2`, `mwts2`, `mws`) | radiance | `brightness_temperature_k` with the stream's own operator | WRFDA `radiance_info` per channel | clear-sky over sea first: scattering and cloud-liquid indices, channel and surface screens; VarBC later |
+| IR sounders (`iasi`, `cris`) | radiance | per selected channel | WRFDA `radiance_info` | clear-sky channel screen (McNally-Watts), channel selection (later) |
+| geo radiances (`seviri_asr`, `fci_asr`, `ami_csr`) | radiance | as the imagers of section 11 | section 11.7 | CRTM has no FCI or AMI coefficients (section 11.12); SEVIRI only |
+
+### 12.5 Operators: what exists and what is new
+
+**Existing operators (reader only).** Every in-situ family uses
+`obs_point`'s operators:
+
+- log-p interpolation for `sonde_level`, `amv_assigned_pressure` and
+  pressure-level rows;
+- `t2`, `u10_earth` and `v10_earth` for surface rows.
+
+`obs_point` lacks two things:
+
+- the `aircraft_level` and `profiler_level` labels, which its
+  pressure-level branch should accept (PR B adds them);
+- surface dewpoint and station-pressure operators. These rows are written,
+  and refused by name until those operators exist.
+
+3D-Var already has TL/AD for all 15 conventional WRFDA types (#659), so
+synop, ships, buoy, sound, airep, profiler, geoamv, polaramv, qscat and
+gpsref need only the hand-off.
+
+**GNSS-RO refractivity.** `obs_point` already has a local refractivity
+operator at the tangent height (`refractivity_n` via
+`woof.obs.column_operators.refractivity_n`), as does 3D-Var's gpsref.
+
+- The store carries the retrieved `atmospheric_refractivity` against
+  `height`, so the local 1-D operator needs only a reader.
+- Bending angle (a non-local ray-path operator) waits on evidence that
+  refractivity is not enough.
+
+**Microwave radiances.** These need CRTM's microwave clear-sky path in
+`woof/rtm`:
+
+- the MW sensor IDs;
+- FASTEM-6 over water (its coefficient file is already staged);
+- MW land emissivity, refused at first;
+- a geometry adapter for scanning sounders (the FOV's own zenith and
+  azimuth, from the store).
+
+CRTM v2.4.1's fix set must hold SpcCoeff and TauCoeff for each
+sensor/platform, and woof checks the file before use, as for GK-2A in
+section 11.12. The candidates are:
+
+- `amsua_metop-b`, `amsua_metop-c`;
+- `mhs_metop-b`, `mhs_metop-c`;
+- `atms_n20`, `atms_n21`;
+- `mwhs2_fy3d`, `mwts2_fy3d`.
+
+A sensor without a file (expected: MWS on Metop-SG-A1, the FY-3E
+instruments) is refused by name, never mapped to a neighbour's
+coefficients.
+
+**AMVs and scatterometer winds.** These are point winds: the AMV at its
+assigned pressure, and the scatterometer at 10 m over sea. They use the
+existing operators.
+
+**Hyperspectral IR (IASI, CrIS).** CRTM IR is already there (#651). The new
+work is a channel selection, a cloud screen and data volume (8,700 IASI
+channels per FOV), so they come after MW.
+
+### 12.6 Known data fault: TTDD pressures ten times too large
+
+A reported case: on 2026-10-28 12Z, stations 72261, 72265, 72327 and 72340
+reported 200-214 K at 850-500 hPa, where the model gave 260-291 K. The
+cause is in the data, and it is the same in `wis2.icechunk` and in
+`wis2_upper_air`.
+
+- **What is wrong.**
+  - The bad levels are TEMP Part D objects:
+    `data/us-noaa-nws/.../temp/TEMP_DD_<station>_<uuid>.bufr4`, BUFR
+    template 309052, relayed by `us-noaa-nws`.
+  - Part D holds the significant levels above 100 hPa, yet every one of
+    these rows has pressures from about 98,400 Pa down to 6,700 Pa.
+  - The pressures are ten times too large: 98.4 hPa is stored as 984 hPa
+    (T 208 K), and 6.7 hPa as 67 hPa.
+  - Its wind levels run the same way, 981 to 67 "hPa".
+- **Extent.**
+  - All 9,694 `us-noaa-nws` TEMP_DD rows in the store have a level above
+    101 hPa.
+  - 8,895 of them have T < 225 K at a "pressure" of at least 600 hPa.
+  - The other parts (AA 10,733, BB 11,016 and CC 9,502 rows) and every
+    other centre have no such rows.
+- **Not flagged.**
+  - These levels carry `level_quality_flag = 0` and
+    `temperature_quality = 0`.
+  - The first-level pressures of some merged parts are not monotone: for
+    example, 400 Pa followed by 97,300 Pa.
+- **How the readers met it.**
+  - `obs_stores.wis2_upper_air` keeps, per station and launch, the part
+    with the most levels. At these stations that was the TTDD part, and
+    its "500 hPa" level is really 50 hPa.
+- **woof's rule (PR B).**
+  - A Part D or Part C row (TTDD or TTCC) holds levels above 100 hPa by
+    definition. Any of its levels at more than 100 hPa is refused, and
+    the whole part is counted as `part_d_pressure_scale`.
+  - woof does not rescale, because the store says values are as reported.
+  - Independently, every level must agree with the same launch's TTAA
+    mandatory level within OBSPROC's tolerances.
+  - The background check (`check_max_iv` or `obs_point`'s) is the last
+    net.
+- **For the source.**
+  - Either decode NWS Part D pressures with the right scale (tenths of hPa
+    in the TAC; the BUFR reports them at ten times the value), or set
+    `vertically_inconsistent` (bit 8) on those levels.
+
+### 12.7 Interfaces
+
+- **LETKF.**
+  - `woof obs wis2 fetch --start --end --bbox --families ... --out
+    table.csv` (opt-in) writes `gpuwm-obs.table.v2`.
+  - `obs_point.read_tables` already reads that format, and `point_batches`
+    applies the receipt cut-off from `received_time`.
+  - Nothing changes when the command is not run.
+- **3D-Var (agreed with the da.var owner on 2026-11-20).**
+  - The reader also writes OBSPROC's `obs_gts` ASCII. That file is read by
+    `woof.da.var.obs_wrfda.read_obs_ascii`, by `woof var --obs` and by
+    WRFDA's oracle lane. No Python objects cross the interface, and
+    `woof/da/var` gets no WIS2 code.
+  - Header. OBSPROC's header block is copied verbatim: the INFO, SRFC and
+    EACH format lines and the MISS and TOTAL lines. Every F field is
+    written with its decimal point, because a blank reads as 0 and a
+    value without a point gets implied decimals.
+  - INFO line. The platform is written as `FM-nn NAME`, with FM codes 12
+    synop, 13 ships, 18 buoy, 35 TEMP, 42 AMDAR and 132 profiler (not 32,
+    which is PILOT). The date is `YYYY-MM-DD_HH:MM:SS` inside the window
+    [t0, t1). Longitude is in [-180, 180). The level count equals the
+    number of EACH lines.
+  - Winds are written as speed and direction, never as u and v.
+  - Moisture is written as rh, because WRFDA derives q from rh, t and p;
+    a dewpoint alone gives no q.
+  - Missing is -888888.000 with qc -88.
+  - The errors are OBSPROC's `obserr.txt` interpolated with `intplin`,
+    and are used exactly as written (apart from WRFDA's qscat floor), so
+    their source is recorded in the file's provenance.
+  - Sondes include the surface level, with height exactly equal to elv.
+    Levels are written in decreasing pressure.
+  - GNSS-RO is FM-116, in a separate optional file. The refractivity goes
+    in the td slot and the impact height in the height slot.
+- **Radiances.**
+  - Each MW FOV becomes the same `ImagerScene`-like record that
+    `woof.da.obs_radiance` consumes: brightness temperatures per channel,
+    the FOV's own geometry and `crtm_sensor()`.
+  - For 3D-Var, the radiance operator plugs in at the ObsTerm seam
+    (`woof/da/var/cost.py`), as section 11.9 describes.
+
+### 12.8 Order of work
+
+Each step is one small PR, opt-in, and leaves default runs unchanged.
+
+1. **PR A: this section.**
+2. **PR B: in-situ reader.** `woof obs wis2 fetch` covers land/reports,
+   synop_tac, ocean/surface, ship_tac, upper_air/soundings,
+   wind_profiler and aircraft. It applies 12.2's flags, OBSPROC's errors
+   and gross checks, and the Part D rule. It writes neutral table v2, plus
+   `obs_gts` once the interface is agreed. `obs_point` gains the
+   `aircraft_level` and `profiler_level` labels. Tests use synthetic
+   fixtures.
+3. **PR C: point winds.** AMVs (`amv`, `ahi_amv`) and scatterometer winds
+   enter as point winds with WRFDA's AMV and qscat errors.
+4. **PR D: MW radiances.** CRTM v2.4 MW clear-sky for AMSU-A, MHS and
+   ATMS (FY-3 where coefficients exist), over sea first, through
+   `obs_radiance`. IASI and CrIS come after, with a channel selection.
+5. **PR E: GNSS-RO refractivity.** The local 1-D operator is the existing
+   one; the reader and the WRFDA gpsref error are new. Bending angle comes
+   later, if warranted.
+6. **PR F: impact.** One real case, as in #657: O-B and O-A per family,
+   and a radiosonde and surface scorecard showing no degradation.
