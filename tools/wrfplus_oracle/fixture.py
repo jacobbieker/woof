@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from woof.grad.wrfplus import cases  # noqa: E402
-from woof.grad.wrfplus.acoustic import UV_ACTIVE  # noqa: E402
+from woof.grad.wrfplus.acoustic import UV_ACTIVE, W_STATE  # noqa: E402
 
 #: The configurations each advance_uv fixture holds (WRFPLUS needs the
 #: terrain-following coordinate and a specified boundary, spec_zone >= 1).
@@ -216,16 +216,137 @@ def advance_uv(exe: str, runner: list[str], seed: int = 20261119) -> dict:
     return out
 
 
+#: advance_w's fixture configurations (spec_zone >= 1, as above; c1 = 1,
+#: c2 = 0; no damper).
+W_CASES = {
+    "plain": dict(spec_zone=1),
+    "lid_moist": dict(spec_zone=1, top_lid=1, moist_cq=1, base3d=0),
+    "deep_moist": dict(nz=12, ny=7, nx=6, spec_zone=1, moist_cq=1, epssm=0.3),
+}
+
+#: The driver's 3-D adjoint outputs after the state's four, in order.
+W_AD3 = ("rw_t", "ww_pp", "th_pp", "th_pp_old", "thp", "php", "rph_t", "c2a",
+         "cqw", "alt", "a", "alpha", "gam", "u_pp", "v_pp")
+
+
+def _w_record(geom, tr, pe, seeds):
+    """The driver's input stream (advance_w.F90 read order)."""
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    L = Layout(nz, ny, nx)
+    e = geom.epssm
+    phb = tr["phb"] if geom.base3d else np.broadcast_to(
+        tr["phb"][:, None, None], tr["php"].shape)
+    mut = tr["mub2d"] + tr["mup"]
+    muts = mut + tr["mu_pp"]
+    muave = 0.5 * ((1 + e) * tr["mu_pp"] + (1 - e) * tr["mu_pp_old"])
+    mutd = pe["mup"]
+    mutsd = pe["mup"] + pe["mu_pp"]
+    muaved = 0.5 * ((1 + e) * pe["mu_pp"] + (1 - e) * pe["mu_pp_old"])
+    one = np.ones_like(tr["cqw"])
+    cqw = tr["cqw"] if geom.moist_cq else one
+    cqwd = pe["cqw"] if geom.moist_cq else 0 * one
+    k1 = lambda a: np.concatenate([a, np.zeros(nz + 1 - a.size)])  # noqa: E731
+    head = np.array([nx, ny, nz, geom.top_lid], dtype=np.int32)
+    reals = np.array([geom.rdx, geom.rdy, geom.dtau, geom.cf1, geom.cf2, geom.cf3,
+                      geom.epssm])
+    pair = lambda n: [tr[n], pe[n]]  # noqa: E731
+    a3 = (pair("w_pp") + pair("ph_pp") + pair("rw_t") + pair("ww_pp")
+          + pair("th_pp") + pair("th_pp_old") + pair("thp") + pair("php") + [phb]
+          + pair("rph_t") + pair("c2a") + [cqw, cqwd] + pair("alt") + pair("a")
+          + pair("alpha") + pair("gam") + pair("u_pp") + pair("v_pp")
+          + [seeds[n] for n in W_STATE])
+    a2 = [mut, mutd, muts, mutsd, muave, muaved, tr["mu_pp"], pe["mu_pp"], tr["ht"]]
+    blob = head.tobytes() + reals.astype("<f8").tobytes()
+    for a in a3:
+        blob += L.w3(a).astype("<f8").tobytes(order="F")
+    for a in a2:
+        blob += L.w2(a).astype("<f8").tobytes(order="F")
+    for a in (tr["fnm"], tr["fnp"], k1(tr["rdnw"]), k1(tr["rdn"])):
+        blob += np.asarray(a, dtype="<f8").tobytes()
+    return blob, L
+
+
+def _w_expected(geom, out, L):
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+    vals = np.frombuffer(out, dtype="<f8")
+    off = [0]
+
+    def take(n, s):
+        x = vals[off[0]:off[0] + n].reshape(s, order="F")
+        off[0] += n
+        return x
+
+    shapes = cases.w_shapes(geom)
+    t3 = lambda name: L.from3(take(n3, L.s3), shapes[name])  # noqa: E731
+    t2 = lambda: L.from2(take(n2, L.s2), (ny, nx))  # noqa: E731
+    e = {}
+    for n in W_STATE:
+        e["tl_" + n] = t3(n)
+        e["tl_d_" + n] = t3(n)
+    for n in W_STATE:
+        e["ad_" + n] = t3(n)
+    for n in W_AD3:
+        e["ad_" + n] = t3(n)
+    a_mut, a_muts, a_muave, a_mu, _ = t2(), t2(), t2(), t2(), t2()
+    assert off[0] == vals.size, (off[0], vals.size)
+    ep = geom.epssm
+    e["ad_mup"] = a_mut + a_muts
+    e["ad_mu_pp"] = a_muts + 0.5 * (1 + ep) * a_muave + a_mu
+    e["ad_mu_pp_old"] = 0.5 * (1 - ep) * a_muave
+    if not geom.moist_cq:
+        e["ad_cqw"] = np.zeros(shapes["cqw"])
+    return e
+
+
+def advance_w(exe: str, runner: list[str], seed: int = 20261120) -> dict:
+    out = {}
+    for name, over in W_CASES.items():
+        geom = cases.w_geometry(**over)
+        tr = cases.w_trajectory(geom, seed)
+        pe = cases.w_perturbation(geom, seed + 1)
+        seeds = cases.w_perturbation(geom, seed + 2)
+        blob, L = _w_record(geom, tr, pe, seeds)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _w_expected(geom, result, L)
+        sz = geom.spec_zone
+        col = np.zeros((geom.ny, geom.nx), bool)
+        col[sz:geom.ny - sz, sz:geom.nx - sz] = True
+        prefix = f"{name}/"
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for n in W_STATE:
+            out[prefix + "seed/" + n] = seeds[n]
+        out[prefix + "mask/col"] = col
+        # The bottom condition's faces: every face, since both codes add
+        # only the solved columns' terms into a zero start.
+        out[prefix + "mask/ad_u_pp"] = np.ones(exp["ad_u_pp"].shape, bool)
+        out[prefix + "mask/ad_v_pp"] = np.ones(exp["ad_v_pp"].shape, bool)
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
+ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("routine", choices=["advance_uv"])
+    ap.add_argument("routine", choices=sorted(ROUTINES))
     ap.add_argument("--exe", required=True)
     ap.add_argument("--runner", default="")
     ap.add_argument("--wrfplus-digest", default="",
                     help="sha256 of the WRFPLUS source archive the driver links")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
-    data = advance_uv(args.exe, shlex.split(args.runner))
+    data = ROUTINES[args.routine](args.exe, shlex.split(args.runner))
     driver = ROOT / "tools/wrfplus_oracle" / f"{args.routine}.F90"
     data["provenance"] = np.array(
         f"WRFPLUS 4.7.1 (configure wrfplus 17, real*8, -O0 -ffp-contract=off); "
