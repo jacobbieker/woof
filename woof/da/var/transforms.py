@@ -195,8 +195,11 @@ class DeviceU:
 
     # ------------------------------------------------------------ forward
 
-    def apply(self, cv, stages: bool = False) -> dict:
-        """``x = U v``; returns ``{"xa": {...}}`` and, with ``stages``, vv, vp, vp_bal."""
+    def apply(self, cv, stages: bool = False, with_xtoxa: bool = True) -> dict:
+        """``x = U v``; returns ``{"xa": {...}}`` and, with ``stages``, vv, vp, vp_bal.
+
+        ``with_xtoxa=False`` stops after ``da_transform_vtox`` (no p, rho).
+        """
         import cupy as cp
 
         nx, ny, nz = self.nx, self.ny, self.nz
@@ -229,7 +232,8 @@ class DeviceU:
         xa = self._vptox(vp)
         if stages:
             out["vp_bal"] = vp
-        self._xtoxa(xa)
+        if with_xtoxa:
+            self._xtoxa(xa)
         out["xa"] = xa
         return out
 
@@ -266,18 +270,20 @@ class DeviceU:
 
     # ------------------------------------------------------------ adjoint
 
-    def adjoint(self, xa: dict, stages: bool = False) -> dict:
-        """``v = U^T x``; returns ``{"cv": ...}`` and, with ``stages``, xa, vp, vv_eof, vv."""
+    def adjoint(self, xa: dict, stages: bool = False, with_xtoxa: bool = True) -> dict:
+        """``v = U^T x``; returns ``{"cv": ...}`` and, with ``stages``, xa, vp, vv_eof, vv.
+
+        ``with_xtoxa=False`` starts at ``da_transform_vtox_adj`` (``xa`` is
+        already through ``da_transform_xtoxa_adj``).
+        """
         import cupy as cp
 
         nx, ny, nz = self.nx, self.ny, self.nz
         n3 = nx * ny * nz
         a = {k: cp.array(xa[k], dtype=self.dtype, copy=True, order="C") for k in XA_KEYS}
         a["psfc"] = cp.ascontiguousarray(a["psfc"].reshape(nx, ny))
-        x = self.xb
-        mra = self._zeros(nx, ny, nz)
-        self._launch("var_xtoxa_adj", nx * ny, a["p"], a["t"], a["rho"], a["psfc"], a["q"], mra, x["q"],
-                     x["psac"], x["dnw"], x["c1h"], x["c2h"], x["rho"], x["p"], x["t"], *self._i(nx, ny, nz))
+        if with_xtoxa:
+            self._xtoxa_adj(a)
         out = {"xa": {k: v.copy() for k, v in a.items()}} if stages else {}
         vp = self._vptox_adj(a)
         if stages:
@@ -309,6 +315,13 @@ class DeviceU:
             out["vv"] = vv
         out["cv"] = cp.concatenate(parts) if parts else self._zeros(0)
         return out
+
+    def _xtoxa_adj(self, a):
+        nx, ny, nz = self.nx, self.ny, self.nz
+        x = self.xb
+        mra = self._zeros(nx, ny, nz)
+        self._launch("var_xtoxa_adj", nx * ny, a["p"], a["t"], a["rho"], a["psfc"], a["q"], mra, x["q"],
+                     x["psac"], x["dnw"], x["c1h"], x["c2h"], x["rho"], x["p"], x["t"], *self._i(nx, ny, nz))
 
     def _vptox_adj(self, a) -> dict:
         nx, ny, nz = self.nx, self.ny, self.nz

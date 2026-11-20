@@ -140,7 +140,6 @@ def test_fixture_covers_the_branches():
 
 
 @pytest.mark.parametrize("overrides, match", [
-    ({"config_shortwave_type": "dEdd"}, "delta-Eddington"),
     ({"config_use_aerosols": True}, "aerosols"),
     ({"config_use_shortwave_bioabsorption": True}, "bioabsorption"),
     ({"config_use_column_biogeochemistry": True}, "biogeochemistry"),

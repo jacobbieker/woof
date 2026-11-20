@@ -866,3 +866,155 @@ def wd_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     scale = {"ww": 50.0, "mup": 200.0}
     return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
             for n in WD_ACTIVE}
+
+
+# The source field's (centre, spread) per row kind (u, v, theta', ph', w, mu').
+_LB_SRC = {"u": (5.0, 8.0), "v": (-2.0, 8.0), "theta": (0.0, 2.0), "phi": (0.0, 100.0),
+           "w": (0.0, 0.5), "mu": (0.0, 200.0)}
+
+
+def lbc_geometry(nz=4, ny=12, nx=13, kind="u", **overrides):
+    from .lbc import LBCGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, kind=kind, width=5, spec_zone=1, relax_zone=4,
+                dtbc=600.0)
+    base.update(overrides)
+    return LBCGeometry(**base)
+
+
+def lbc_weights(width, spec_zone, relax_zone, dt=20.0):
+    """WRF lbc_fcx_gcx's specified weights (spec_exp 0)."""
+    fcx, gcx = np.zeros(width), np.zeros(width)
+    for loop in range(spec_zone + 1, spec_zone + relax_zone + 1):
+        if loop - 1 >= width:
+            break
+        ramp = (spec_zone + relax_zone - loop) / max(relax_zone - 1, 1)
+        fcx[loop - 1] = 0.1 / dt * ramp
+        gcx[loop - 1] = 1.0 / dt / 50.0 * ramp
+    return fcx, gcx
+
+
+def lbc_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of one relaxation row: the row's field, mu', a base
+    column mass near 9e4, hybrid levels (``hybrid``) and side tables
+    holding the coupled field (mass times the field) a few per cent off
+    the current one, with tendencies over an hour."""
+    from .lbc import LB_ACTIVE, LB_PASSIVE, LB_STATE, LB_TABLES, lb_shapes
+    rng = np.random.default_rng(seed)
+    sh = lb_shapes(geom)
+    out = _bs_levels(geom.nz, rng, hybrid)
+    out["c2f"] = (1.0 - out["c1f"]) * 5000.0 if hybrid else np.zeros(geom.nz + 1)
+    out["mub"] = 9.0e4 + 2e3 * rng.standard_normal(sh["mub"])
+    out["mup"] = 200.0 * rng.standard_normal(sh["mup"])
+    c, s = _LB_SRC[geom.kind]
+    out["src"] = c + s * rng.standard_normal(sh["src"])
+    for n in ("msft", "msfu", "msfv"):
+        out[n] = 1.0 + 0.02 * rng.standard_normal(sh[n])
+    out["fcx"], out["gcx"] = lbc_weights(geom.width, geom.spec_zone, geom.relax_zone)
+    scale = 1.0 if geom.kind == "mu" else 9.0e4
+    for n in LB_TABLES:
+        if n.endswith("_t"):
+            out[n] = (scale * s / 3600.0) * rng.standard_normal(sh[n])
+        else:
+            out[n] = scale * (c + s * rng.standard_normal(sh[n]))
+    out["tend"] = 5e-2 * scale * rng.standard_normal(sh["tend"])
+    out["held"] = 5e-2 * scale * rng.standard_normal(sh["held"])
+    keep = LB_STATE + LB_ACTIVE + LB_PASSIVE
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def lbc_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .lbc import LB_ACTIVE, lb_shapes
+    rng = np.random.default_rng(seed)
+    sh = lb_shapes(geom)
+    c, s = _LB_SRC[geom.kind]
+    scale = 1.0 if geom.kind == "mu" else 9.0e4
+    out = {"src": 0.1 * s * rng.standard_normal(sh["src"]),
+           "mup": 20.0 * rng.standard_normal(sh["mup"])}
+    for n in LB_ACTIVE[2:]:
+        t = 1.0 / 60.0 if n.endswith("_t") else 1.0
+        out[n] = 0.1 * scale * s * t * rng.standard_normal(sh[n])
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in LB_ACTIVE}
+
+
+def lf_geometry(nz=4, ny=10, nx=11, kind="u", **overrides):
+    from .lbc import FinalGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, kind=kind, width=5, spec_zone=1, dtbc=600.0)
+    base.update(overrides)
+    return FinalGeometry(**base)
+
+
+def lf_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of one spec_bdy_final field: the field, an acoustic muts
+    near 9e4, hybrid levels (``hybrid``), map factors near 1 and side
+    tables holding the coupled field (mass times the field), with
+    tendencies over an hour."""
+    from .lbc import LB_TABLES, LF_ACTIVE, LF_PASSIVE, LF_STATE, lf_shapes
+    rng = np.random.default_rng(seed)
+    sh = lf_shapes(geom)
+    out = _bs_levels(geom.nz, rng, hybrid)
+    out["c2f"] = (1.0 - out["c1f"]) * 5000.0 if hybrid else np.zeros(geom.nz + 1)
+    out["muts"] = 9.0e4 + 2e3 * rng.standard_normal(sh["muts"])
+    for n in ("msft", "msfu", "msfv"):
+        out[n] = 1.0 + 0.02 * rng.standard_normal(sh[n])
+    c, s = _LB_SRC[geom.kind]
+    out["target"] = c + s * rng.standard_normal(sh["target"])
+    scale = 1.0 if geom.kind == "mu" else 9.0e4
+    for n in LB_TABLES:
+        if n.endswith("_t"):
+            out[n] = (scale * s / 3600.0) * rng.standard_normal(sh[n])
+        else:
+            out[n] = scale * (c + s * rng.standard_normal(sh[n]))
+    keep = LF_STATE + LF_ACTIVE + LF_PASSIVE
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def lf_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .lbc import LB_TABLES, LF_ACTIVE, lf_shapes
+    rng = np.random.default_rng(seed)
+    sh = lf_shapes(geom)
+    _, s = _LB_SRC[geom.kind]
+    scale = 1.0 if geom.kind == "mu" else 9.0e4
+    out = {"muts": 20.0 * rng.standard_normal(sh["muts"])}
+    for n in LB_TABLES:
+        t = 1.0 / 60.0 if n.endswith("_t") else 1.0
+        out[n] = 0.1 * scale * s * t * rng.standard_normal(sh[n])
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in LF_ACTIVE}
+
+
+def sp_geometry(nz=4, ny=8, nx=9, **overrides):
+    from .lbc import SpecPhiGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, dtau=4.0, spec_zone=1)
+    base.update(overrides)
+    return SpecPhiGeometry(**base)
+
+
+def sp_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of one specified-frame substep: phi'' and w'' small, a
+    coupled phi tendency, muts near 9e4 with a small mass tendency, the
+    coupled theta'' near mu'' theta', alt near 1 and c2a near gamma p /
+    alpha; ``hybrid`` gives hybrid levels."""
+    from .lbc import SP_ACTIVE, SP_PASSIVE, SP_STATE, sp_shapes
+    rng = np.random.default_rng(seed)
+    sh = sp_shapes(geom)
+    out = _bs_levels(geom.nz, rng, hybrid)
+    out["c2f"] = (1.0 - out["c1f"]) * 5000.0 if hybrid else np.zeros(geom.nz + 1)
+    n = rng.standard_normal
+    out.update(ph_pp=10.0 * n(sh["ph_pp"]), w_pp=0.5 * n(sh["w_pp"]),
+               p_pp=50.0 * n(sh["p_pp"]), al_pp=1e-3 * n(sh["al_pp"]),
+               rph_t=9.0e4 * n(sh["rph_t"]), php=100.0 * n(sh["php"]),
+               rmu_t=5.0 * n(sh["rmu_t"]), muts=9.0e4 + 2e3 * n(sh["muts"]),
+               mu_pp=50.0 * n(sh["mu_pp"]), thp=2.0 * n(sh["thp"]),
+               alt=1.0 + 0.1 * n(sh["alt"]), c2a=1.4e5 * (1.0 + 0.05 * n(sh["c2a"])))
+    out["th_pp"] = out["mu_pp"][None] * out["thp"] + 50.0 * n(sh["th_pp"])
+    keep = SP_STATE + SP_ACTIVE + SP_PASSIVE
+    return {k: np.ascontiguousarray(out[k], dtype=dtype) for k in keep}
+
+
+def sp_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .lbc import SP_ACTIVE, sp_shapes
+    rng = np.random.default_rng(seed)
+    sh = sp_shapes(geom)
+    scale = dict(rph_t=9.0e3, php=10.0, rmu_t=0.5, muts=20.0, th_pp=5.0, mu_pp=5.0,
+                 thp=0.2, alt=0.01, c2a=1.4e3)
+    return {k: np.ascontiguousarray(scale[k] * rng.standard_normal(sh[k]), dtype=dtype)
+            for k in SP_ACTIVE}

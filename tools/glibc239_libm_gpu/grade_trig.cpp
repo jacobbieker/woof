@@ -14,10 +14,11 @@
 
 extern "C" {
 
-static double (*host_fn[3])(double) = {nullptr, nullptr, nullptr};
+static double (*host_fn[4])(double) = {nullptr, nullptr, nullptr, nullptr};
 
 static inline double port(int f, double x) {
-    return f == 0 ? g239::g239_sin(x) : f == 1 ? g239::g239_cos(x) : g239::g239_atan(x);
+    return f == 0 ? g239::g239_sin(x) : f == 1 ? g239::g239_cos(x) : f == 2 ? g239::g239_atan(x)
+                                                                    : g239::g239_asin(x);
 }
 static inline uint64_t word(double x) { return (uint64_t)__double_as_longlong(x); }
 // The range where the oracle host's glibc 2.44 build of branred.c may differ.
@@ -34,7 +35,8 @@ int trig_bind_host_libm(void) {
     host_fn[0] = (double (*)(double))dlsym(h, "sin");
     host_fn[1] = (double (*)(double))dlsym(h, "cos");
     host_fn[2] = (double (*)(double))dlsym(h, "atan");
-    return host_fn[0] && host_fn[1] && host_fn[2];
+    host_fn[3] = (double (*)(double))dlsym(h, "asin");
+    return host_fn[0] && host_fn[1] && host_fn[2] && host_fn[3];
 }
 
 void trig_host_libm(int f, const double *x, uint64_t n, double *out) {

@@ -1,10 +1,14 @@
 """The 3D-Var cost function and its gradient in WRFDA's operation order
 (docs/dev/WRFDA-3DVAR-PLAN.md, sections 1.2, 4.6 and 4.7; plan item V1.4).
 
-``J(v) = Jb + Jo`` with ``Jb = jb_factor * 0.5 * v^T v`` (cv5/cv7, no
-ensemble, VarBC or other terms) and ``Jo = 0.5 * sum((d - H' U v) / err)^2``
-over the accepted observations, and the gradient ``v - U^T H'^T R^-1 (d - H'
-U v)``.  The routines follow WRFDA 4.7.1's statement by statement:
+``J(v) = Jb + Jo`` with ``Jb = jb_factor * 0.5 * v^T v`` (cv5/cv7, no VarBC
+or other terms) and ``Jo = 0.5 * sum((d - H' U v) / err)^2`` over the
+accepted observations, and the gradient ``v - U^T H'^T R^-1 (d - H' U v)``.
+With the hybrid's ``U`` (:mod:`woof.da.var.hybrid`) the alpha control
+variables follow the static ones and add ``Je = je_factor * 0.5 * v_a^T
+v_a`` (``J = Jb + Jo + Je``, as ``j%total`` sums them), their gradient
+weighted by ``je_factor``.  The routines follow WRFDA 4.7.1's statement by
+statement:
 
 - :meth:`VarCost.calculate_j` is ``da_calculate_j``: ``y = H' U xhat`` when
   ``iter > 0`` (``da_transform_vtoy``), ``re = inv - y`` where ``qc >= 0``
@@ -363,12 +367,13 @@ class _DeviceOps:
 
 @dataclass
 class JCost:
-    """``j_type``: the total and the parts this port has (Jb, Jo and Jo per type)."""
+    """``j_type``: the total and the parts this port has (Jb, Jo, Jo per type and the hybrid's Je)."""
 
     total: float
     jb: float
     jo: float
     jo_types: dict = field(default_factory=dict)
+    je: float = 0.0
     #: VarBC's background term (0 without a control block).
     jp: float = 0.0
 
@@ -382,13 +387,14 @@ class VarCost:
     (``dot`` in the tier's reduction) that :mod:`woof.da.var.minimise` uses.
     """
 
-    def __init__(self, u, obs, *, tier: str = "reference", jb_factor: float = 1.0, reduction: str | None = None,
-                 device_obs: bool = True):
+    def __init__(self, u, obs, *, tier: str = "reference", jb_factor: float = 1.0, je_factor: float = 1.0,
+                 reduction: str | None = None, device_obs: bool = True):
         if tier not in TIERS:
             raise ValueError(f"tier must be one of {TIERS}, not {tier!r}")
         self.u = u
         self.tier = tier
         self.jb_factor = float(jb_factor)
+        self.je_factor = float(je_factor)
         terms = [obs] if not isinstance(obs, (list, tuple)) else list(obs)
         self.terms = [as_obs_term(t) for t in terms]
         if tier != "reference" and device_obs:
@@ -401,6 +407,9 @@ class VarCost:
             self.ops = _DeviceOps(tier, reduction)
         self.dtype = self.ops.dtype
         self.cv_size = int(u.cv_size)
+        # the hybrid's U (woof.da.var.hybrid) puts the alpha CVs after the
+        # static ones: cv(1:cv_size_jb) is Jb's, the rest Je's
+        self.cv_size_jb = int(getattr(u, "cv_size_jb", self.cv_size))
         # terms with a block of their own in the control vector (VarBC), after U's
         self.cv_u = self.cv_size
         self._blocks = []
@@ -588,20 +597,26 @@ class VarCost:
         cvx = self.ops.copy(xhat)
         if cv is not None:
             self.ops.axpy(1.0, cv, cvx)  # cv + xhat: 1.0 * cv is exact
-        if not self._blocks:
+        nb = self.cv_size_jb
+        if nb == self.cv_u and not self._blocks:
             jb = self.jb_factor * 0.5 * self.ops.dot(cvx, cvx)
             return JCost(total=jb + jo, jb=jb, jo=jo, jo_types=per_type)
-        u = cvx[:self.cv_u]
-        jb = self.jb_factor * 0.5 * self.ops.dot(u, u)
-        jp = self._jp(cvx)
-        return JCost(total=jb + jo + jp, jb=jb, jo=jo, jo_types=per_type, jp=jp)
+        jb = 0.0
+        if nb > 0:
+            jb = self.jb_factor * 0.5 * self.ops.dot(cvx[:nb], cvx[:nb])
+        je = 0.0
+        if nb < self.cv_u:
+            je = self.je_factor * 0.5 * self.ops.dot(cvx[nb:self.cv_u], cvx[nb:self.cv_u])
+        jp = self._jp(cvx) if self._blocks else 0.0
+        return JCost(total=jb + jo + je + jp, jb=jb, jo=jo, jo_types=per_type, je=je, jp=jp)
 
     def calculate_gradj(self, cv, re=None):
         """``da_calculate_gradj``: with ``re`` the gradient, without it ``(I + U^T H'^T R^-1 H' U) cv``."""
         if re is not None:
             adj = self.vtoy_adj(self.grady(re))
             grad = self.ops.copy(adj)
-            self.ops.axpy(self.jb_factor, cv, grad)  # grad_jo + jb_factor * cv
+            for f, s in self._segments():
+                self.ops.axpy(f, cv[s], grad[s])  # grad_jo + jb_factor * cv (je_factor for alpha)
             return self._set_block_gradient(grad, adj, cv, 1.0)
         if self._dev_grady is not None:
             # H' U cv, grady and H'^T without leaving the device (the host's words)
@@ -612,8 +627,17 @@ class VarCost:
             ys = self.vtoy(cv)
             adj = self.vtoy_adj(self.grady(ys))
         grad = self.ops.copy(cv)
-        self.ops.neg_axpby(grad, adj, self.jb_factor)  # -grad_jo + jb_factor * cv
+        for f, s in self._segments():
+            self.ops.neg_axpby(grad[s], adj[s], f)  # -grad_jo + jb_factor * cv (je_factor for alpha)
         return self._set_block_gradient(grad, adj, cv, -1.0)
+
+    def _segments(self):
+        """``(factor, slice)`` of the non-empty Jb and Je parts of U's control vector (VarBC blocks follow)."""
+        nb = self.cv_size_jb
+        out = [(self.jb_factor, slice(0, nb))] if nb > 0 else []
+        if nb < self.cv_u:
+            out.append((self.je_factor, slice(nb, self.cv_u)))
+        return out
 
     # ------------------------------------------------------------ conveniences
 

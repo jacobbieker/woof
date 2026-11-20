@@ -425,8 +425,19 @@ WD_STATE = ("rw_t",)
 WD_ACTIVE = ("ww", "mup")
 WD_PASSIVE = ("w", "mub", "c1f", "c2f", "rdnw")
 
+def _w_damp_alpha() -> float:
+    """woof's W_DAMP_ALPHA, read from the primal's source (openbc.cu), so
+    the TL/AD cannot drift from the constant the forward uses."""
+    import re
+    src = (Path(__file__).resolve().parents[2] / "core/kernels/openbc.cu").read_text()
+    m = re.search(r"^#define\s+W_DAMP_ALPHA\s+([0-9.eE+-]+)f?\s*$", src, re.M)
+    if m is None:
+        raise RuntimeError("openbc.cu no longer defines W_DAMP_ALPHA")
+    return float(m.group(1))
+
+
 #: WRF share/module_model_constants.F w_alpha (woof openbc.cu W_DAMP_ALPHA).
-W_ALPHA = 0.3
+W_ALPHA = _w_damp_alpha()
 
 
 @dataclass(frozen=True)

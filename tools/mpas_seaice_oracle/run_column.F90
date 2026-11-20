@@ -45,7 +45,9 @@
 !                 (SEAICE_ERROR_COL_RIDGING after an abort);
 !   prep_radiation
 !                 column_prep_radiation;
-!   radiation     colpkg_init_thermo (heat_capacity), then
+!   radiation     colpkg_init_thermo (heat_capacity), colpkg_init_orbit for
+!                 the delta-Eddington shortwave (as
+!                 seaice_init_column_shortwave calls it), then
 !                 column_radiation(domain, clock, .false.);
 !   init_shortwave
 !                 colpkg_init_thermo, then seaice_init_column_shortwave(domain,
@@ -70,7 +72,7 @@ program run_column
   use seaice_initialize, only: init_ice_state, initialize_coupler_fields
   use seaice_forcing, only: seaice_reset_coupler_fluxes
   use ice_colpkg_tracers, only: nt_Tsfc, nt_fbri
-  use ice_colpkg, only: colpkg_init_thermo
+  use ice_colpkg, only: colpkg_init_thermo, colpkg_init_orbit
   use oracle_stream
   implicit none
   type(oracle_pools) :: pools
@@ -78,7 +80,10 @@ program run_column
   type(domain_type), pointer :: domain
   real(kind=RKIND) :: inputDt
   real(kind=RKIND), pointer :: iceAgeTimeOffset
-  character(len=StrKIND), pointer :: stage, updateType, config_start_time, clockStep
+  character(len=StrKIND), pointer :: stage, updateType, config_start_time, clockStep, config_calendar_type
+  character(len=StrKIND), pointer :: shortwaveType
+  logical :: orbitAbort
+  character(len=StrKIND) :: orbitMessage
   integer :: p, logUnit, ierr
   integer, pointer :: nIceLayers
   real(kind=RKIND), allocatable :: sprofile(:)
@@ -105,6 +110,9 @@ program run_column
   end do
   call stub_pool_put_subpool(domain % blocklist % structs, 'alternative_atmos_forcing', &
        pool_named(pools, 'alternative_atmos_forcin'))
+  ! the framework sets the calendar before the clock (mpas_framework.F:111-116)
+  call mpas_pool_get_config(pools % configs, 'config_calendar_type', config_calendar_type)
+  call mpas_timekeeping_init(config_calendar_type)
   call mpas_pool_get_config(pools % configs, 'config_start_time', config_start_time)
   call mpas_pool_get_config(pools % configs, 'oracle_clock_step', clockStep)
   call mpas_set_clock(domain % clock, config_start_time, clockStep)
@@ -154,6 +162,14 @@ program run_column
      call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nIceLayers', nIceLayers)
      allocate(sprofile(nIceLayers + 1))
      call colpkg_init_thermo(nIceLayers, sprofile)
+     call mpas_pool_get_config(pools % configs, 'config_shortwave_type', shortwaveType)
+     if (trim(shortwaveType) == 'dEdd') then
+        call colpkg_init_orbit(orbitAbort, orbitMessage)
+        if (orbitAbort) then
+           print *, 'run_column: colpkg_init_orbit: ', trim(orbitMessage)
+           stop 3
+        end if
+     end if
      call column_radiation(domain, domain % clock, .false.)
   case ('init_shortwave')
      call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nIceLayers', nIceLayers)

@@ -335,10 +335,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     lateral melt, rebinning and zapping, with level, CESM or topo ponds),
     and its ridging (both participation and both redistribution functions,
     the ridging iterations and the cleanup after them), neither of which
-    needs an opt-in, and its shortwave without delta-Eddington (the CCSM3
-    shortwave with constant or computed albedos, the coupled shortwave,
-    `column_prep_radiation` and the initial shortwave). Only the computed
-    albedos need the opt-in, for glibc's atan. The elastic subcycles check
+    needs an opt-in, and its shortwave: the delta-Eddington shortwave (the
+    Registry default: the orbit, the solar zenith angle and `run_dEdd` with
+    level, CESM, topo or no ponds, on BL99, mushy or zero-layer ice), the
+    CCSM3 shortwave with constant or computed albedos, the coupled
+    shortwave, `column_prep_radiation` and the initial shortwave. The
+    computed albedos need the opt-in for glibc's atan, and the
+    delta-Eddington shortwave needs it for glibc's sin, cos, atan and asin
+    (the opt-in now carries asin). Also the coupling preparation
+    (`seaice_column_coupling_prep` and `seaice_column_scale_fluxes`: cell
+    albedos, pond freshwater feedback, shortwave scaling, fluxes per unit
+    ice area; RKIND 4 and 8, no opt-in; the ocean mixed layer is refused by
+    name). The elastic subcycles check
     their arrays once per solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
@@ -985,16 +993,27 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   does the geopotential tendency (`slow_geopotential`, WRF `rhs_ph`) for
   every `h_sca_adv_order`, the Coriolis and curvature terms
   (`coriolis_curvature`, WRF `coriolis` and `curvature`) on rotated
-  grids, and the `w_damp` vertical-velocity limiter. In binary64 they match WRFPLUS to about 1e-15
+  grids, the `w_damp` vertical-velocity limiter, and the lateral-boundary
+  relaxation and specified zone (woof's strict `state_relaxation_multi`,
+  WRF `relax_bdy_dry` and `spec_bdy_dry`, with the boundary tables'
+  adjoint as an output) and its end-of-step and acoustic frame updates
+  (`finalize_state_field` and `advance_specified_phi_w`, WRF
+  `spec_bdy_final`, `spec_bdyupdate_ph` and `zero_grad_bdy`). In binary64 they match WRFPLUS to about 1e-15
   on non-hybrid cases (WRFPLUS has no hybrid coordinate; the exclusions
   are listed in the design note). The comparison found a lid bug in
   WRFPLUS's own pressure-gradient adjoint and, in its `rhs_ph`, a heap
   overrun in the order-3/4 adjoint and a short interior loop on bounded
   axes, all described in the design note.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
-  0.85-3.2x the glue, 3.3-4.5x advection and 1.3-4.4x the big-step
-  tendencies. The measured step projection (4.7x) is in the design
-  note. The forecast path does not import any of it.
+  0.85-3.2x the glue, 3.3-4.5x advection, 1.3-4.4x the big-step
+  tendencies and 2.5-3.7x the lateral boundaries. The kernels chain into
+  one strict dry step (`woof.grad.wrfplus.model`, periodic and without
+  rotation or map factors so far) whose binary32 base state reproduces
+  `dycore.step` word for word, and whose binary64 dot-product and
+  finite-difference tests pass. Measured at 200x200x49 on an A6000, the
+  step's adjoint sweep costs 3.3x the forward step and 5.6x with its
+  taped forward recompute (details in the design note). The forecast
+  path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
@@ -1034,6 +1053,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   ~10^5 observations takes 3.1 s on an M3 Max (Metal) and 3.2-4.5 s on a shared
   A6000 (targets 20 s and 5 s; the tutorial case: 1.4 s and 2.3 s), with
   H' and H'^T on the device as an ordered gather (no atomics).
+  `woof.da.var.hybrid` (experimental, Python API) adds WRFDA's hybrid
+  3DEnVar: the alpha control variable with its `alpha_corr_scale`
+  recursive filter and vertical localisation (`alpha_vertloc_opt`), blended
+  with the static `B` through `je_factor`/`jb_factor`, from WRFDA `ep` files
+  or ensemble members already on the device. On the tutorial case with ten
+  members it follows a compiled WRFDA 4.7.1 hybrid run's 50 iterations to
+  3.5e-14 relative; the oracle tier gives the reference's words on the
+  device and the production tier one digest under fast and strict numerics.
   `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
   `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
   ensemble members minus their mean): WRFDA's gen_be stages for
@@ -1170,8 +1197,8 @@ The default build and the published wheels (`metal-woof`, `recast-woof`)
 carry none of the following. Each is off until selected:
 
 - **LGPL glibc 2.39 libm** (`WOOF_GLIBC239_LIBM64`, `WOOF_GLIBC239_TRIG64`):
-  glibc's binary64 words on the GPU and host. It lifts some MALI and
-  MPAS-Ocean RKIND 8 refusals.
+  glibc's binary64 words on the GPU and host. It lifts some MALI,
+  MPAS-Ocean and MPAS-Seaice RKIND 8 refusals.
 - **NVIDIA-derived `powf`**: CUDA's transcription for Metal strict numerics.
   The default is WOOF's own correctly rounded `powf`.
 - **WRF-Hydro** (`WOOF_ENABLE_WRF_HYDRO=1`), **NEMO**
