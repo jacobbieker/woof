@@ -133,6 +133,31 @@ def test_psi_chi_reproduce_the_interior_vorticity_and_divergence():
     np.testing.assert_allclose(lap[2:-2, 2:-2], div[2:-2, 2:-2], rtol=0, atol=2e-6 * np.abs(div).max())
 
 
+def test_vorticity_of_solid_body_rotation():
+    # u = -a y, v = a x (C grid, unit map factors): corner vorticity is 2a everywhere inside
+    ni, nj, a, ds = 12, 10, 1e-4, 3.0e4
+    U = (-a * (np.arange(nj) + 0.5) * ds)[None, :] * np.ones((ni + 1, 1))
+    V = (a * (np.arange(ni) + 0.5) * ds)[:, None] * np.ones((1, nj + 1))
+    vor, div = gb._uv_to_vor_div(U, V, np.ones((ni + 1, nj)), np.ones((ni, nj + 1)), ds)
+    np.testing.assert_allclose(vor[1:ni, 1:nj], 2 * a, rtol=1e-12)
+    np.testing.assert_allclose(div, 0.0, atol=1e-15)
+
+
+def test_gen_be_input_guards():
+    samples, _, _ = _planted_samples(n=3)
+    bad = [dict(s) for s in samples]
+    bad[1]["ps"] = bad[1]["ps"][:-1]
+    with pytest.raises(ValueError, match="shape"):
+        gb.gen_be(bad)
+    zero = [{**s, "psi": s["psi"] * 0.0} for s in samples]
+    with pytest.raises(ValueError, match="no variance"):
+        gb.gen_be(zero)
+    # a one-level 3-D field keeps the EOF path (one mode field), not the 2-D bypass
+    one = [{k: (v[:, :, :1] if np.ndim(v) == 3 else v) for k, v in s.items()} for s in samples]
+    stats, modes = gb._stage3(one, "t", gb.GenBeConfig())
+    assert modes is not None and modes[0].shape == one[0]["t"].shape
+
+
 def _brute_pairs(f):
     """WRFDA's get_grid_info and get_covariance loops (stride 1, one bin), verbatim."""
     ni, nj = f.shape
@@ -299,10 +324,18 @@ def _sign_aligned(a, b):
 
 def _oracle_dir() -> Path:
     d = os.environ.get("WOOF_GENBE_DIR")
-    need = ("gen_be_fc", "oracle_cv5/be.dat", "oracle_cv7/be.dat")
-    if not d or not all((Path(d) / n).exists() for n in need):
-        pytest.skip("WOOF_GENBE_DIR with gen_be_fc/ and WRFDA's oracle_cv5/ and oracle_cv7/ be.dat is not set")
+    if not d:
+        pytest.skip("WOOF_GENBE_DIR is not set (gen_be_fc/ plus WRFDA's cv5 and cv7 be.dat)")
+    assert (Path(d) / "gen_be_fc").is_dir(), f"WOOF_GENBE_DIR={d} has no gen_be_fc/"
     return Path(d)
+
+
+def _oracle_be(d: Path, cv: int) -> Path:
+    """``oracle_cvN/be.dat`` (staged) or ``run/cvN/be.dat`` (run_gen_be.sh's own layout)."""
+    for rel in (f"oracle_cv{cv}/be.dat", f"run/cv{cv}/be.dat"):
+        if (d / rel).exists():
+            return d / rel
+    raise AssertionError(f"WOOF_GENBE_DIR={d} has neither oracle_cv{cv}/be.dat nor run/cv{cv}/be.dat")
 
 
 @lru_cache(maxsize=None)
@@ -322,7 +355,7 @@ def _woof_be(d: str, cv: int):
 @pytest.mark.parametrize("cv", [5, 7])
 def test_gv2_woof_gen_be_reproduces_wrfdas_be_dat(cv, tmp_path):
     d = _oracle_dir()
-    oracle_path = d / f"oracle_cv{cv}" / "be.dat"
+    oracle_path = _oracle_be(d, cv)
     pinned = json.loads(MANIFEST.read_text())["gen_be"][f"oracle_cv{cv}_be_dat_sha256"]
     assert hashlib.sha256(oracle_path.read_bytes()).hexdigest() == pinned
     o = bd.read_be_dat(oracle_path, cv)
@@ -340,10 +373,10 @@ def test_gv2_woof_gen_be_reproduces_wrfdas_be_dat(cv, tmp_path):
         assert w.eta_be.shape == o.eta_be.shape
         np.testing.assert_allclose(w.eta_be, o.eta_be, rtol=1e-12)
     np.testing.assert_array_equal(w.bin2d, o.bin2d)
-    # regressions: elementwise rtol with an atol floor of 1e-8 of the array's peak
-    # (measured 1.0e-7 relative to the peak; tiny entries are rounding-dominated)
+    # regressions (GV2: 1e-6): elementwise rtol 1e-6 with an atol floor of 1e-8 of the array's
+    # peak, for entries too small for a relative comparison to mean anything
     for k in o.regcoeff:
-        _close(w.regcoeff[k], o.regcoeff[k], rtol=1e-5, atol=1e-6 * np.abs(o.regcoeff[k]).max(), what=f"regcoeff {k}")
+        _close(w.regcoeff[k], o.regcoeff[k], rtol=1e-6, atol=1e-8 * np.abs(o.regcoeff[k]).max(), what=f"regcoeff {k}")
     for eo, ew in zip(list(o.eigen) + [o.eigen_ps], list(w.eigen) + [w.eigen_ps], strict=True):
         assert ew.name == eo.name
         _close(ew.eval_glo, eo.eval_glo, rtol=1e-6, atol=0.0, what=f"{eo.name} eval_glo")

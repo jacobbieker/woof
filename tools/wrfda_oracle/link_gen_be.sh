@@ -12,6 +12,7 @@ B=$T/var/build
 O=$W/genbe/bin
 mkdir -p "$O"
 cd "$B"
+[ -x "$B/da_advance_time.exe" ] || { echo "link_gen_be.sh: $B/da_advance_time.exe is missing or not executable (gen_be stage 0 needs it; build WRFDA first)" >&2; exit 1; }
 # gen_be_ep2 and gen_be_ensmean are the ensemble method's (be_method ENS) and
 # optional: the NMC gate does not run them, so a missing object is skipped.
 OPTIONAL="gen_be_ep2 gen_be_ensmean"

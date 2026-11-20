@@ -50,6 +50,7 @@ domain; see ``licenses/LICENSE-WRF-public-domain.txt``.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -286,6 +287,9 @@ def nmc_perturbation(long: Mapping, short: Mapping, cv_options: int = 5) -> dict
                 f"nmc_perturbation: the {nm} forecast lacks {missing} for cv_options={cv_options}; "
                 "pass raw WRF-named fields (converted here) or standard_fields(..., cv_options) of the same cv_options"
             )
+    for n in _PERT[cv_options]:
+        if np.shape(a[n]) != np.shape(b[n]):
+            raise ValueError(f"nmc_perturbation: {n} shapes differ: {np.shape(a[n])} vs {np.shape(b[n])}")
     out = {n: a[n] - b[n] for n in _PERT[cv_options]}
     out["height"], out["lat"] = b["height"], b["lat"]
     return out
@@ -300,6 +304,9 @@ def ensemble_perturbations(members: Sequence[Mapping], cv_options: int = 5) -> l
         missing = [n for n in _PERT[cv_options] if n not in s]
         if missing:
             raise ValueError(f"an ensemble member lacks {missing} for cv_options={cv_options}")
+    for n in _PERT[cv_options]:
+        if len({np.shape(s[n]) for s in std}) != 1:
+            raise ValueError(f"ensemble_perturbations: member {n} shapes differ")
     mean = {n: np.zeros_like(std[0][n]) for n in _PERT[cv_options]}
     for c, s in enumerate(std, start=1):
         inv = 1.0 / float(c)
@@ -383,6 +390,12 @@ def _stage2(samples: Sequence[dict], nk: int):
                 cp_ = coeffa * psi[i, j]
                 covar1 = coeffb * covar1 + cp_ * chi[i, j]
                 var1 = coeffb * var1 + cp_ * psi[i, j]
+    bad = np.flatnonzero(~(var1 > 0.0))
+    if bad.size:
+        raise ValueError(
+            f"gen_be stage 2: psi has no variance at level(s) {(bad + 1).tolist()}; the psi->chi, psi->T and "
+            "psi->ps regressions are not estimable (WRFDA divides by zero here)"
+        )
     covar2 = _running_outer(samples, lambda s: s["ps"], lambda s: s["psi"], (nk,))
     covar3 = _running_outer(samples, lambda s: s["t"], lambda s: s["psi"], (nk, nk))
     var2 = _running_outer(samples, lambda s: s["psi"], lambda s: s["psi"], (nk, nk))
@@ -436,6 +449,7 @@ def _stage2a(samples: Sequence[dict], reg: dict) -> list:
 def _stage3(samples: Sequence[dict], name: str, cfg: GenBeConfig):
     """``gen_be_stage3`` for one variable: EOFs and (3-D) the projected modes."""
     fields = []
+    is_2d = samples[0][name].ndim == 2
     for s in samples:
         f = s[name]
         f = f[:, :, None] if f.ndim == 2 else f
@@ -453,7 +467,7 @@ def _stage3(samples: Sequence[dict], name: str, cfg: GenBeConfig):
     work = bv / 1.0  # sum over num_bins2d = 1 bins, divided by num_bins2d
     e_vec, e_val = _dsyev(work)
     stats = (e_vec, e_val, e_vec_loc[:, :, None], e_val_loc[:, None])
-    if nk == 1:
+    if is_2d:  # surface pressure; a one-level 3-D field still gets its (single) mode field
         return stats, None
     ev, lv = (e_vec, e_val) if cfg.use_global_eofs else (e_vec_loc, e_val_loc)
     sq = np.sqrt(lv)
@@ -585,6 +599,14 @@ def gen_be(samples: Iterable[Mapping], config: GenBeConfig = GenBeConfig()) -> G
         if missing:
             raise ValueError(f"a gen_be sample lacks {missing} (cv_options={c.cv_options})")
     ni, nj, nk = samples[0][names[2]].shape
+    want = {n: np.shape(samples[0][n]) for n in names + ("height", "lat")}
+    for n in names:
+        if want[n] != ((ni, nj) if n == "ps" else (ni, nj, nk)):
+            raise ValueError(f"gen_be: sample field {n} has shape {want[n]}, expected {(ni, nj, nk)} (ps: {(ni, nj)})")
+    for i, smp in enumerate(samples):
+        for n, shp in want.items():
+            if np.shape(smp[n]) != shp:
+                raise ValueError(f"gen_be: sample {i} field {n} has shape {np.shape(smp[n])}, sample 0 has {shp}")
     pert = _stage1(samples, names)
     bins = np.broadcast_to(np.arange(1, nk + 1, dtype=np.int64), (ni, nj, nk)).copy()
     bins2d = np.ones((ni, nj), dtype=np.int64)
@@ -609,6 +631,17 @@ def gen_be(samples: Iterable[Mapping], config: GenBeConfig = GenBeConfig()) -> G
         sl = np.array([f[1] for f in fits])
         raw[name] = sl
         rfls.append(_diags_scale(ml, sl, c.n_smth_sl))
+        if np.any(rfls[-1] <= 0.0):
+            # gen_be_stage4_regional.f90 make_scale_length (coeff2 <= 0 branch) writes ml = sl = 0 as the
+            # missing value, and gen_be_diags fills it from the level below; level 1 (or the 2-D ps_u)
+            # stays 0, as in WRFDA.  Kept as WRFDA has it; the user is told.
+            warnings.warn(
+                f"gen_be: no horizontal correlation could be fitted for {name} (length scale 0 at level(s) "
+                f"{(np.flatnonzero(rfls[-1] <= 0.0) + 1).tolist()}, WRFDA's missing value); "
+                "3D-Var's recursive filter cannot use this be.dat as is",
+                RuntimeWarning,
+                stacklevel=2,
+            )
     be = BeDat(
         ni=ni, nj=nj, nk=nk, bin_type=c.bin_type, eta_be=None,
         lat_min=c.lat_min, lat_max=c.lat_max, binwidth_lat=c.binwidth_lat,
