@@ -330,8 +330,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     lateral melt, rebinning and zapping, with level, CESM or topo ponds),
     and its ridging (both participation and both redistribution functions,
     the ridging iterations and the cleanup after them), neither of which
-    needs an opt-in. The elastic subcycles check their arrays once per
-    solve and work out their compile options once per numerics mode:
+    needs an opt-in, and its shortwave without delta-Eddington (the CCSM3
+    shortwave with constant or computed albedos, the coupled shortwave,
+    `column_prep_radiation` and the initial shortwave). Only the computed
+    albedos need the opt-in, for glibc's atan. The elastic subcycles check
+    their arrays once per solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
     stress coefficient and solves the velocity in one launch (a vertex's

@@ -139,8 +139,18 @@ Ordered by how self-contained each piece is:
    `tests/test_mpas_seaice_column_ridge_parity.py`). Its `exp` is glibc's,
    transcribed under MIT, so it needs no opt-in. Where v8.4.2 itself dies
    (`ridge_shift`'s aborts hit a gfortran runtime error writing their label),
-   the port raises the same error. Still to port: mushy vertical
-   thermodynamics, `ice_shortwave` (delta-Eddington), the melt
+   the port raises the same error. Also ported: `column_radiation` without
+   delta-Eddington (`colpkg_step_radiation`: `shortwave_ccsm3` with
+   `constant_albedos` or `compute_albedos` and `absorbed_solar`, the coupled
+   shortwave), `column_prep_radiation` and `seaice_init_column_shortwave`
+   (`woof/hex/mpas_seaice/column_radiation_v842.py`,
+   `tests/test_mpas_seaice_column_radiation_parity.py`). `absorbed_solar`'s
+   exp is the MIT transcription; `compute_albedos`' atan needs the LGPL
+   opt-in. v8.4.2 passes `ncat` as `absorbed_solar`'s layer count; the port
+   keeps that and refuses `ncat > nilyr`, where v8.4.2 writes past the array.
+   Still to port: mushy vertical
+   thermodynamics, `ice_shortwave`'s delta-Eddington (with the orbit and
+   `compute_coszen`), the melt
    ponds' own physics, the other `ice_atmo` options, then the column time
    step.
 7. Biogeochemistry (`ice_zbgc*`, `ice_algae`, `ice_aerosol`). Refused by name

@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 700,
+  "site_count": 704,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 47,
     "cupy.RawKernel": 120,
-    "cupy.RawModule": 306,
+    "cupy.RawModule": 309,
     "cupy.ReductionKernel": 22,
-    "cupy.cuda.compiler.compile_using_nvrtc": 205
+    "cupy.cuda.compiler.compile_using_nvrtc": 206
   },
   "site_count_by_surface": {
     "other": {
@@ -27,9 +27,9 @@
     "package": {
       "cupy.ElementwiseKernel": 35,
       "cupy.RawKernel": 39,
-      "cupy.RawModule": 107,
+      "cupy.RawModule": 110,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 130
+      "cupy.cuda.compiler.compile_using_nvrtc": 131
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -8414,7 +8414,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1140,
+      "line": 1141,
       "column": 24,
       "surface": "package",
       "constructor": "_cc.compile_using_nvrtc",
@@ -8436,7 +8436,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy_device.py",
-      "line": 46,
+      "line": 47,
       "column": 17,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -8534,7 +8534,7 @@
     },
     {
       "file": "woof/core/rrtmgk.py",
-      "line": 395,
+      "line": 396,
       "column": 20,
       "surface": "package",
       "constructor": "_cc.compile_using_nvrtc",
@@ -9140,7 +9140,7 @@
     },
     {
       "file": "woof/da/var/transforms.py",
-      "line": 55,
+      "line": 59,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9156,7 +9156,7 @@
         "\"-std=c++17\""
       ],
       "options_are_literal": true,
-      "text": "return cp.RawModule(code=_source(precision), options=(\"-std=c++17\",))"
+      "text": "return cp.RawModule(code=_source(precision, unit), options=(\"-std=c++17\",))"
     },
     {
       "file": "woof/ensemble/batch_fluxes.py",
@@ -9642,6 +9642,46 @@
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
+      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\")\n                        + tuple(f\"-D{k}={v}\" for k, v in defines)",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "return cp.RawModule(code=source,"
+    },
+    {
+      "file": "woof/grad/wrfplus/advect.py",
+      "line": 98,
+      "column": 11,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_device_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\n        \"--fmad=false\", f\"-DWRFPLUS_REAL={real}\", f\"-DADV_H={horder}\")",
+      "options": [
+        "--fmad=false",
+        null,
+        null
+      ],
+      "options_element_expressions": [
+        "\"--fmad=false\"",
+        "f\"-DWRFPLUS_REAL={real}\"",
+        "f\"-DADV_H={horder}\""
+      ],
+      "options_are_literal": false,
+      "text": "return cp.RawModule(code=source, options=("
+    },
+    {
+      "file": "woof/grad/wrfplus/bigstep.py",
+      "line": 42,
+      "column": 11,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_device_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
       "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\")",
       "options": [
         "--fmad=false",
@@ -9652,7 +9692,31 @@
         "f\"-DWRFPLUS_REAL={real}\""
       ],
       "options_are_literal": false,
-      "text": "return cp.RawModule(code=source,"
+      "text": "return cp.RawModule(code=source, options=(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\"))"
+    },
+    {
+      "file": "woof/grad/wrfplus/stage.py",
+      "line": 35,
+      "column": 11,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_device_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\n        \"--fmad=false\", f\"-DWRFPLUS_REAL={real}\", f\"-DRK_KCHUNK={AD_KCHUNK}\")",
+      "options": [
+        "--fmad=false",
+        null,
+        null
+      ],
+      "options_element_expressions": [
+        "\"--fmad=false\"",
+        "f\"-DWRFPLUS_REAL={real}\"",
+        "f\"-DRK_KCHUNK={AD_KCHUNK}\""
+      ],
+      "options_are_literal": false,
+      "text": "return cp.RawModule(code=source, options=("
     },
     {
       "file": "woof/hex/cuda_acoustic_rrfs.py",
@@ -10639,6 +10703,22 @@
       "text": "image, _ = compile_using_nvrtc(module_source(n_ice_layers), options, None,"
     },
     {
+      "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
+      "line": 116,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"seaice_column_radiation_v842.cu\")"
+    },
+    {
       "file": "woof/hex/mpas_seaice/column_ridge_v842.py",
       "line": 105,
       "column": 15,
@@ -11128,7 +11208,7 @@
     },
     {
       "file": "woof/hex/mpasphys/rrtmg_lw_v842.py",
-      "line": 639,
+      "line": 640,
       "column": 17,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -11144,7 +11224,7 @@
     },
     {
       "file": "woof/hex/mpasphys/rrtmg_sw_v842.py",
-      "line": 215,
+      "line": 216,
       "column": 17,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -11160,7 +11240,7 @@
     },
     {
       "file": "woof/hex/mpasphys/rrtmg_sw_v842.py",
-      "line": 251,
+      "line": 252,
       "column": 21,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
