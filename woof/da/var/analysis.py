@@ -327,9 +327,11 @@ def check_rh_simple(xa_q, xb: dict, xa_p, xa_t):
     return out
 
 
-def xatowrf(grid: dict, xb: dict, xa: dict, *, check_rh: int = 0) -> dict:
+def xatowrf(grid: dict, xb: dict, xa: dict, *, check_rh: int = 0, var4d: bool = False) -> dict:
     """``da_transfer_xatowrf``: the analysed WRF fields (Fortran order, binary64).
 
+    With ``var4d`` WRFDA's 4D-Var branch: no pressure increment
+    (``xa%p = 0``; the boundary tendencies it also adds are not ported).
     Returns ``U V T QVAPOR MU P PH PSFC`` (the full WRF variables, ``T`` and
     ``PH`` as perturbations as in the file) and the internal ``xa%p`` it
     recomputes (``"xa_p"``), ``mu_cgrid``, ``q_cgrid``.
@@ -358,21 +360,22 @@ def xatowrf(grid: dict, xb: dict, xa: dict, *, check_rh: int = 0) -> dict:
         s1md = s1md + (1.0 + qv[..., k]) * dnw[k]
     mu_cgrid = -(xa_psfc + xb["psac"] * sdmd) / s1md
     # [3.0] pressure (Guo's TL of real.exe's p)
-    xa_p = np.empty((nx, ny, nz))
-    for k in range(nz - 1, -1, -1):
-        kk = k if k == nz - 1 else k + 1
-        qvf1 = 0.5 * (q_cgrid[..., k] + q_cgrid[..., kk])
-        qvf1_b = 0.5 * (qv[..., k] + qv[..., kk])
-        qvf2 = -qvf1 / ((1.0 + qvf1_b) * (1.0 + qvf1_b))
-        qvf2_b = 1.0 / (1.0 + qvf1_b)
-        qvf1 = qvf1 * qvf2_b + qvf1_b * qvf2
-        qvf1_b = qvf1_b * qvf2_b
-        term = ((c1f[k] * mu_cgrid + qvf1 * c1f[k] * mub) / qvf2_b
-                - (c1f[k] * mu_2 + qvf1_b * c1f[k] * mub) * qvf2 / (qvf2_b * qvf2_b))
-        if k == nz - 1:
-            xa_p[..., k] = (-0.5 / rdnw[k]) * term
-        else:
-            xa_p[..., k] = xa_p[..., k + 1] - (1.0 / rdn[k + 1]) * term
+    xa_p = np.zeros((nx, ny, nz))
+    if not var4d:
+        for k in range(nz - 1, -1, -1):
+            kk = k if k == nz - 1 else k + 1
+            qvf1 = 0.5 * (q_cgrid[..., k] + q_cgrid[..., kk])
+            qvf1_b = 0.5 * (qv[..., k] + qv[..., kk])
+            qvf2 = -qvf1 / ((1.0 + qvf1_b) * (1.0 + qvf1_b))
+            qvf2_b = 1.0 / (1.0 + qvf1_b)
+            qvf1 = qvf1 * qvf2_b + qvf1_b * qvf2
+            qvf1_b = qvf1_b * qvf2_b
+            term = ((c1f[k] * mu_cgrid + qvf1 * c1f[k] * mub) / qvf2_b
+                    - (c1f[k] * mu_2 + qvf1_b * c1f[k] * mub) * qvf2 / (qvf2_b * qvf2_b))
+            if k == nz - 1:
+                xa_p[..., k] = (-0.5 / rdnw[k]) * term
+            else:
+                xa_p[..., k] = xa_p[..., k + 1] - (1.0 / rdn[k + 1]) * term
     p_new = grid["p"] + xa_p
     if check_rh == 1:
         xa_q = check_rh_simple(xa_q, xb, xa_p, xa_t)
@@ -475,7 +478,7 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
             window_minutes: float = 60.0, landuse_table=None, xb_override: dict | None = None,
             write=None, radiances=None, crtm=None, radiance_qc=None, varbc=None, report_fit: bool | None = None,
             ensemble=None, hybrid=None, vertloc=None, fgat=None,
-            time_window: tuple[str, str] | None = None) -> VarResult:
+            time_window: tuple[str, str] | None = None, var4d=None) -> VarResult:
     """3D-Var from files: ``be.dat``, OBSPROC's ``ob.ascii`` and a WRF first guess.
 
     ``tier`` is ``reference`` (NumPy binary64), ``oracle`` (device binary64,
@@ -513,6 +516,17 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     at ``first_guess``'s time, which must be one of the slot times.  One
     outer loop; no radiances, no hybrid.
 
+    4D-Var (opt-in, EXPERIMENTAL; plan docs/dev/WRFDA-4DVAR-PLAN.md, WRFDA
+    ``var4d``): ``var4d`` is a :class:`~woof.da.var.fourd.Var4D` (the
+    tangent-linear model, the identity by default) and needs ``fgat``: the
+    trajectory's states at the slot times, with ``first_guess`` at the
+    window's start.  Each slot's ``H'`` is linearised about its own state
+    and applied to the TL model's perturbation there
+    (:class:`~woof.da.var.fourd.FourDObsTerm`); the analysis is
+    ``first_guess`` plus the increment, with no pressure increment
+    (``da_transfer_xatowrf``'s ``var4d`` branch).  The lateral boundary
+    perturbation is not ported.  FGAT's refusals apply.
+
     ``time_window`` is WRFDA's ``(time_window_min, time_window_max)``; by
     default the first guess's time plus and minus ``window_minutes``.
     """
@@ -523,10 +537,12 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     from .minimise import minimise
     from .obsop_wrfda import FlatObsTerm
 
+    if var4d is not None and fgat is None:
+        raise ValueError("var4d needs the trajectory: fgat=[fg01, ..., fgNN] at the slot times")
     if fgat is not None:   # every FGAT refusal, before anything is read
         _fgat_refusals(obs, fgat, first_guess, window_minutes=window_minutes, time_window=time_window,
                        max_ext_its=max_ext_its, radiances=radiances, xb_override=xb_override,
-                       ensemble=ensemble, hybrid=hybrid)
+                       ensemble=ensemble, hybrid=hybrid, var4d=var4d)
     timings = {}
     t0 = time.perf_counter()
     fg = first_guess if isinstance(first_guess, FirstGuess) else read_first_guess(first_guess)
@@ -544,8 +560,13 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
         wobs = obs if not isinstance(obs, (str, Path)) else ow.read_obs_ascii(obs, proj, **window)
         iv = iw.innovations(wobs, xb)
     else:
-        iv = _fgat_innovations(obs, fgat, xb, proj, window, landuse_table=landuse_table)
-    term = FlatObsTerm(iv, xb)
+        iv, slot_states = _fgat_innovations(obs, fgat, xb, proj, window, landuse_table=landuse_table)
+    if var4d is not None:
+        from .fourd import FourDObsTerm
+
+        term = FourDObsTerm(iv, slot_states, (xb, grid), model=var4d.model, press=var4d.press, ph=var4d.ph)
+    else:
+        term = FlatObsTerm(iv, xb)
     terms = [term]
     rterm = rreport = None
     if radiances:
@@ -590,7 +611,7 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
         cvt = cvt[:cost.cv_u]
     t2 = time.perf_counter()
     xa = xa_from_cv(b, xbu, cvt) if hu is None else hu.apply(cvt)["xa"]
-    wrf = xatowrf(grid, xb, xa, check_rh=check_rh)
+    wrf = xatowrf(grid, xb, xa, check_rh=check_rh, var4d=var4d is not None)
     timings["transfer_s"] = time.perf_counter() - t2
     log = "".join(r.log for r in results)
     return VarResult(log=log, cg=results, cvt=cvt, xa=xa, wrf=wrf, xb=xb, grid=grid, nobs=int(term.mask.sum()),
@@ -598,7 +619,7 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
 
 
 def _fgat_refusals(obs, fgat, first_guess, *, window_minutes, time_window, max_ext_its, radiances, xb_override,
-                   ensemble, hybrid):
+                   ensemble, hybrid, var4d=None):
     """What FGAT refuses, from the arguments and the files' times alone."""
     import types
 
@@ -618,26 +639,33 @@ def _fgat_refusals(obs, fgat, first_guess, *, window_minutes, time_window, max_e
     fm.check_fgat(len(paths), [fm.first_guess_time(f) for f in fgat], time_window_min=window["time_window_min"],
                   time_window_max=window["time_window_max"], max_ext_its=max_ext_its,
                   analysis_date=window["analysis_date"])
+    if var4d is not None:
+        from .obs_wrfda import _date_minutes
+
+        if abs(_date_minutes(window["analysis_date"]) - _date_minutes(window["time_window_min"])) >= 0.1:
+            raise ValueError(f"4D-Var: the first guess is at {window['analysis_date'][:19]}, not at the window's "
+                             f"start {window['time_window_min'][:19]} (the TL model starts from the analysis)")
 
 
 def _fgat_innovations(obs, fgat, xb, proj, window, *, landuse_table):
-    """FGAT's innovation vector: each slot's observations against its own first guess
-    (after :func:`_fgat_refusals`)."""
+    """FGAT's innovation vector, each slot's observations against its own first guess
+    (after :func:`_fgat_refusals`), and the slots' ``(xb, grid)``."""
     from . import fgat as fm
     from . import obs_wrfda as ow
 
     fgs = [f if isinstance(f, FirstGuess) else read_first_guess(f) for f in fgat]
     paths = [obs] if isinstance(obs, (str, Path)) else list(obs)
-    xbs = []
+    xbs, states = [], []
     for n, f in enumerate(fgs, start=1):
         if ow.LambertWRFDA.from_attributes(f.attrs) != proj:
             raise ValueError(f"FGAT slot {n}: {f.path.name} is not on the first guess's projection")
-        x, _ = wrftoxb(f, landuse_table=landuse_table)
+        x, g = wrftoxb(f, landuse_table=landuse_table)
         if x["t"].shape != xb["t"].shape:
             raise ValueError(f"FGAT slot {n}: {f.path.name} is {x['t'].shape}, the first guess {xb['t'].shape}")
         xbs.append(x)
+        states.append((x, g))
     wobs = fm.read_obs_ascii_fgat(paths, proj, **window)
-    return fm.innovations_fgat(wobs, xbs)
+    return fm.innovations_fgat(wobs, xbs), states
 
 
 def _fit(cost, d0, cvt, terms) -> dict:
