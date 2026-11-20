@@ -182,14 +182,14 @@
       "id": "recast-woof-1.1.6-fork-merge",
       "engine_commit": null,
       "sources": {
-        "woof/core/kernels/rrtmg_sw.cu": "43134d6d6d2be4b3e668c7ab92d5850f1f992a09812dd09c9536fce5d9ab791e",
+        "woof/core/kernels/rrtmg_sw.cu": "502dfc9b15481742ff5d56a7730c372502904dd4abe37dd131a953e4a35f8122",
         "woof/core/rrtmg_legacy_prep.py": "d2db40cfb4ab3650502ddc5003744f55afedf67d2c051fc2140e8be8e674e68e",
         "woof/core/rrtmg_lw.py": "0e32220aa7c66cf19374d440259b125035e84a45e7a0cb74ec149b9fc55510df",
         "woof/core/rrtmg_mcica.py": "d4b74af4a8b05e2807a806c78ef1c3270c43aa58c1afd0e7b2247f232b2bd54e",
         "woof/core/rrtmg_sw.py": "4ebda148df1f6c659ff7e1c303ea632a40f6f58b3250b122d2842c52be8a8836",
         "woof/ingest/wrf_ozone.py": "f3cb710640562cfffdd8e544547ab898309800b0d7aa2dff6209600b4b6c0c5d"
       },
-      "description": "Recast WOOF 1.1.6 merged with the fork's engine changes (the per-run RRTMG LW layer tier, the surface-solar carriers, the 256-level radiation ceilings and the per-band / per-g-point RRTMG flux outputs, whose spectral-output part comes from the SW scratch, and the RRTMG-K taumol_post hook, which runs nothing unless RRTMG-K passes it, and the solar_ssi_opt band_factor on adjflux, None by default, which leaves every output bitwise unchanged): the radiation helpers as this tree carries them. Admission establishes source identity only."
+      "description": "Recast WOOF 1.1.6 merged with the fork's engine changes (the per-run RRTMG LW layer tier, the surface-solar carriers, the 256-level radiation ceilings and the per-band / per-g-point RRTMG flux outputs, whose spectral-output part comes from the SW scratch, and the RRTMG-K taumol_post hook, which runs nothing unless RRTMG-K passes it, and the solar_ssi_opt band_factor on adjflux, None by default, which leaves every output bitwise unchanged, and rsw_spcvmc_gpt_b's direct-beam transmittance products carried in registers, the same words): the radiation helpers as this tree carries them. Admission establishes source identity only."
     }
   ]
 }
