@@ -353,3 +353,23 @@ def test_imager_scene_split_by_sensor():
     by = {r.sensor: r for r in recs}
     assert by["abi_g19"].channels.tolist() == [8, 9, 10, 14] and by["abi_g19"].n == 6
     assert by["seviri_m10"].channels.tolist() == [5, 6, 9]
+
+
+def test_from_footprints_with_wis2_mw_settings():
+    from woof.da.obs_mw import MwSettings, WRFDA_ERROR_K
+    from woof.obs.wis2_mw import MwFootprints
+
+    n = 4
+    t = np.array(["2026-10-28T12:00"] * n, dtype="datetime64[s]")
+    fp = MwFootprints(instrument="amsua", channels=np.arange(1, 16), sensor=np.array(["amsua_metop-b"] * n),
+                      lat=np.full(n, 50.0), lon=np.zeros(n), time=t, received=t, fov=np.array([1, 10, 15, 30]),
+                      scan_angle=np.zeros(n), sensor_zenith=np.zeros(n), sensor_azimuth=np.zeros(n),
+                      solar_zenith=np.zeros(n), solar_azimuth=np.zeros(n), bt=np.full((n, 15), 230.0))
+    (rec,) = rad.from_footprints(fp, settings=MwSettings())
+    used = np.isin(np.arange(1, 16), (5, 6, 7, 8, 9))
+    assert (rec.qc[0] == -1).all() and (rec.qc[3] == -1).all()  # limb positions 1 and 30
+    assert ((rec.qc[1] == 0) == used).all()
+    assert rec.error[1, 4] == WRFDA_ERROR_K["amsua"][5] and np.isnan(rec.error[1, 0])
+    qc, err, _ = rad.qc_wrfda(rec.sensor, rec.channels, rec.bt, rec.bt, np.zeros(rec.bt.shape), _cols(n),
+                              rad.RadianceQC(), rec.qc, rec.error)
+    assert ((qc[1] == 1) == used).all() and err[1, 4] == 0.3

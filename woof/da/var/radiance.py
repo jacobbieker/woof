@@ -218,7 +218,7 @@ def from_imager_scene(scene, bands: Sequence[int] = (6200, 6900, 7330, 11200), *
     return out
 
 
-def from_footprints(fp, *, time: datetime | None = None, qc=None, error=None) -> list[RadianceObs]:
+def from_footprints(fp, *, time: datetime | None = None, qc=None, error=None, settings=None) -> list[RadianceObs]:
     """Microwave sounder footprints (WIS2 ``MwFootprints``-like) as one record per CRTM sensor.
 
     ``fp`` needs ``sensor`` (per footprint), ``channels``, ``bt``, ``lat``,
@@ -226,7 +226,28 @@ def from_footprints(fp, *, time: datetime | None = None, qc=None, error=None) ->
     ``solar_zenith``, ``solar_azimuth`` and, unless ``time`` is given,
     ``time`` (datetime64 per footprint; the first one is used).  ``qc`` and
     ``error`` are the reader's own screens, ``(n, nchan)``.
+
+    ``settings`` (a :class:`woof.da.obs_mw.MwSettings`, WIS2's MW adapter)
+    supplies both when they are not given: WRFDA's assimilated channels and
+    errors (``radiance_info``), and the limb scan positions refused
+    (``LIMB_POSITIONS``).  Its static ``bias_k`` is not used; VarBC replaces it.
+    The cloud and scattering screens that need the background are not
+    applied here (``qc_wrfda``'s gross checks are).
     """
+    if settings is not None and (qc is None or error is None):
+        from woof.da.obs_mw import LIMB_POSITIONS
+
+        inst = str(fp.instrument)
+        chans = np.asarray(fp.channels, dtype=np.int64).ravel()
+        chosen = set(settings.chosen(inst))
+        fov = np.asarray(fp.fov)
+        lo, hi = LIMB_POSITIONS[inst]
+        limb = (fov <= lo) | (fov >= hi)
+        if qc is None:
+            qc = np.where(limb[:, None] | ~np.isin(chans, sorted(chosen))[None, :], -1, 0)
+        if error is None:
+            row = np.array([settings.error(inst, int(c)) if int(c) in chosen else np.nan for c in chans])
+            error = np.broadcast_to(row, (fov.size, chans.size)).copy()
     sensors = np.asarray(fp.sensor).astype(str)
     if time is None:
         t = np.asarray(fp.time).astype("datetime64[s]")
