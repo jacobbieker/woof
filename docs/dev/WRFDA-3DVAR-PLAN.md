@@ -2223,7 +2223,7 @@ work (12.7).
 | `aircraft` | airep or AMDAR (42) | `temperature_k`, `wind_u/v_m_s` (`aircraft_level`), pressure from flight level (ICAO) | T 1.0 K, wind 3.6 m/s (AIREPS) | one row per `report_id`; WRFDA's aircraft thinning is a later option |
 | `satellite/amv`, `ahi_amv` | geoamv or polaramv (88) | `wind_u/v_m_s` (`amv_assigned_pressure`) | WRFDA's satob error by pressure (confirmed against `da_read_obs_ascii` in PR C) | QI (without forecast) at least 80; pressure 100-1000 hPa; WRFDA's AMV level and land rules |
 | `satellite/scatterometer` | qscat (281) | `wind_u/v_m_s` at 10 m over sea (`scatterometer_wind_10m`, new label) | WRFDA's qscat error floor (in `obs_wrfda.read_obs_ascii`) | selected ambiguity only; `wind_vector_cell_quality` clear; land and ice cells refused |
-| `satellite/gnss_ro` | gpsref (116) | `refractivity_n` (`ro_refractivity_tangent_point`) | WRFDA's gpsref error profile (OBSPROC `gpsref` rule, ported in PR E) | `percent_confidence` and the RO quality flags; tangent height 0 to 30 km; the lowest 2 km refused over land (super-refraction) |
+| `satellite/gnss_ro` | gpsref (116) | `refractivity_n` (`ro_refractivity_tangent_point`) | WRFDA's gpsref error profile (`da_read_obs_bufrgpsro` `err_opt = 1`, ported in PR E as `obserr_wrfda.gpsref_error`) | profile `percent_confidence` 100 and the RO quality flags; tangent height 0 to 30 km; `da_qc_gpsref`'s observed-gradient checks (super-refraction) |
 | MW sounders (`amsua`, `mhs`, `atms`, `mwhs2`, `mwts2`, `mws`) | radiance | `brightness_temperature_k` with the stream's own operator | WRFDA `radiance_info` per channel | clear-sky over sea first: scattering and cloud-liquid indices, channel and surface screens; VarBC later |
 | IR sounders (`iasi`, `cris`) | radiance | per selected channel | WRFDA `radiance_info` | clear-sky channel screen (McNally-Watts), channel selection (later) |
 | geo radiances (`seviri_asr`, `fci_asr`, `ami_csr`) | radiance | as the imagers of section 11 | section 11.7 | CRTM has no FCI or AMI coefficients (section 11.12); SEVIRI only |
@@ -2239,8 +2239,11 @@ work (12.7).
 
 `obs_point` lacks two things:
 
-- the `aircraft_level` and `profiler_level` labels, which its
-  pressure-level branch should accept (PR B adds them);
+- the `aircraft_level` and `profiler_level` labels in its pressure-level
+  branch. PR B writes `aircraft_level` rows; the label is enabled only by
+  the opt-in `assimilate_aircraft` request field (`woof local-da
+  --assimilate-aircraft`), because the ACARS and PrepBUFR doors already
+  write it and enabling it by default would change existing runs;
 - surface dewpoint and station-pressure operators. These rows are written,
   and refused by name until those operators exist.
 
@@ -2318,15 +2321,27 @@ cause is in the data, and it is the same in `wis2.icechunk` and in
   - `obs_stores.wis2_upper_air` keeps, per station and launch, the part
     with the most levels. At these stations that was the TTDD part, and
     its "500 hPa" level is really 50 hPa.
-- **woof's rule (PR B).**
-  - A Part D or Part C row (TTDD or TTCC) holds levels above 100 hPa by
-    definition. Any of its levels at more than 100 hPa is refused, and
-    the whole part is counted as `part_d_pressure_scale`.
+- **woof's rule (PR B, `woof.obs.wis2.pressure_scale_fault`).**
+  - The label rule: a Part C or Part D (TTCC or TTDD) holds levels above
+    100 hPa by definition, so a part with a level at more than 101 hPa is
+    refused whole and counted as `sonde_part_part_above_100hpa`. Any part
+    with a level above 1100 hPa is refused as `pressure_out_of_range`,
+    which catches a whole sounding at ten times its pressure.
+  - The detection, for parts with no label (BUFR soundings) or a label
+    that passes: each part is compared, in ln p, with the union of the
+    same launch's other parts, only between reference levels at most 15%
+    apart in pressure. If the median temperature difference exceeds
+    10 K over at least 3 levels, but is within 3 K once the part's
+    pressures are divided by ten, the part is refused as
+    `sonde_part_pressure_scale_x10`. If rescaling does not help, the
+    worst part is refused as `inconsistent_part` (both, when only two
+    parts disagree).
   - woof does not rescale, because the store says values are as reported.
-  - Independently, every level must agree with the same launch's TTAA
-    mandatory level within OBSPROC's tolerances.
   - The background check (`check_max_iv` or `obs_point`'s) is the last
     net.
+  - On 2026-10-28 11-13Z over (25-50N, 110-85W) the 19 TTDD parts are
+    refused, and 72261, 72265, 72327 and 72340 have 260-291 K at
+    850-500 hPa.
 - **For the source.**
   - Either decode NWS Part D pressures with the right scale (tenths of hPa
     in the TAC; the BUFR reports them at ten times the value), or set
@@ -2335,8 +2350,10 @@ cause is in the data, and it is the same in `wis2.icechunk` and in
 ### 12.7 Interfaces
 
 - **LETKF.**
-  - `woof obs wis2 fetch --start --end --bbox --families ... --out
-    table.csv` (opt-in) writes `gpuwm-obs.table.v2`.
+  - `woof obs wis2 fetch --start --end --bbox S N W E --families ...
+    --table table.csv` (opt-in) writes `gpuwm-obs.table.v2`;
+    `--obs-gts ob.ascii` writes the 3D-Var file and `--receipt` a JSON
+    receipt (snapshot id, counts per QC rule).
   - `obs_point.read_tables` already reads that format, and `point_batches`
     applies the receipt cut-off from `received_time`.
   - Nothing changes when the command is not run.
@@ -2380,17 +2397,65 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
 2. **PR B: in-situ reader.** `woof obs wis2 fetch` covers land/reports,
    synop_tac, ocean/surface, ship_tac, upper_air/soundings,
    wind_profiler and aircraft. It applies 12.2's flags, OBSPROC's errors
-   and gross checks, and the Part D rule. It writes neutral table v2, plus
-   `obs_gts` once the interface is agreed. `obs_point` gains the
-   `aircraft_level` and `profiler_level` labels. Tests use synthetic
+   and gross checks, and the Part D rule. It writes neutral table v2 and
+   `obs_gts`. Aircraft rows carry `aircraft_level`, which `obs_point`
+   uses only when `assimilate_aircraft` is set (12.5); profilers
+   (heights, no pressure) go to `obs_gts` only, and ocean platform rows
+   carry labels `obs_point` has no operator for yet. Tests use synthetic
    fixtures.
 3. **PR C: point winds.** AMVs (`amv`, `ahi_amv`) and scatterometer winds
-   enter as point winds with WRFDA's AMV and qscat errors.
+   enter as point winds with WRFDA's AMV and qscat errors. As built
+   (opt-in families `amv` and `scat`):
+   - The satellite groups are found by bisection on their nearly sorted
+     `time` (milliseconds), with a 6 h margin for late arrivals.
+   - AMVs: template 310077 only. The QI is the `percent_confidence` whose
+     `standard_generating_application` (0-01-044) in the same column is 5
+     (QI without forecast), at least 80. Pressure 100-1000 hPa. Geostationary
+     by satellite id; polar by imager (AVHRR, MODIS, VIIRS). Copies relayed
+     by several centres are one AMV (first arrival). VIIRS AMVs stay out of
+     `obs_gts`, because WRFDA keys polaramv on AVHRR or MODIS.
+   - `ahi_amv` (JMA's template) decodes no quality index here, so it is
+     skipped and counted.
+   - Scatterometer: ASCAT (template 312061), the selected ambiguity.
+     `wind_vector_cell_quality` (0-21-155) bits 1-11 and 16-18 refuse a
+     cell; an empirical check on 2026-10-28 matched bit 9 to land, bits
+     10, 11 and 18 to ice and bit 13 to speeds of 3 m/s or less. Land and ice
+     fractions are checked directly as well.
+   - `--thin-km` (default 0) keeps one AMV per box and 50 hPa layer (the
+     highest QI) and one scatterometer wind per box.
+   - On 2026-10-28 11-13Z globally: 1,276,760 AMVs and 13,733 ASCAT winds
+     pass. WIS2 has no GOES AMVs, so a CONUS box gets none.
 4. **PR D: MW radiances.** CRTM v2.4 MW clear-sky for AMSU-A, MHS and
    ATMS (FY-3 where coefficients exist), over sea first, through
    `obs_radiance`. IASI and CrIS come after, with a channel selection.
 5. **PR E: GNSS-RO refractivity.** The local 1-D operator is the existing
    one; the reader and the WRFDA gpsref error are new. Bending angle comes
-   later, if warranted.
+   later, if warranted. As built (opt-in family `ro`):
+   - Template 310026 lists the bending-angle levels (each with its tangent
+     point), then the refractivity levels; the counts are the row's
+     `extended_delayed_descriptor_replication_factor`, and
+     `percent_confidence` is the profile's, then one per bending-angle
+     level, then one per refractivity level. As `da_read_obs_bufrgpsro`
+     does, refractivity level k takes bending-angle level k's location when
+     the counts agree. WRFDA skips a profile whose counts differ; here it
+     is kept at the occultation point, and counted.
+   - A profile is refused under 100 % confidence (WRFDA's rule) or with
+     0-33-039 bits 1, 4, 5, 6 or 15 set (non-nominal, excess phase, bending
+     angle or refractivity processing non-nominal, background profile).
+     A level is dropped at 0 % confidence, outside 0-30 km, or where the
+     observed dN/dz is below -50 N/km or |d2N/dz2| above 100 N/km^2 (the
+     observed half of `da_qc_gpsref`'s gradient checks).
+   - Copies (satellite, transmitter, time) are one profile, first arrival.
+   - Errors: `gpsref_error`, 1 % of N scaled by height and latitude
+     (`err_opt = 1`).
+   - The table rows carry the height in `elevation_m` and its
+     standard-atmosphere pressure in `level_pa`, which only keeps the
+     levels' identities apart. `obs_gts` has one FM-116 report per profile
+     at the occultation point (the ascii reader has one location per
+     report), refractivity in the dew point slot, its error not below
+     0.01 N (the F7.2 field; near 30 km WRFDA's error is smaller).
+   - On 2026-10-28 09-15Z globally: 2,568 profiles in the window, 1,502
+     used (207,599 levels); 1,001 are EUMETSAT bending-angle-only
+     products, which need a bending-angle operator.
 6. **PR F: impact.** One real case, as in #657: O-B and O-A per family,
    and a radiosonde and surface scorecard showing no degradation.

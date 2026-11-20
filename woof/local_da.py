@@ -235,10 +235,13 @@ class Request:
     satellite_grids: tuple[str, ...] = ()
     base_seed: int = 0
     continuous_windows: int = 0
+    assimilate_aircraft: bool = False
 
     def validate(self):
         if type(self.continuous_windows) is not int or self.continuous_windows < 0:
             raise PlanError('continuous_windows must be a whole number of analysis windows: 0 runs the reviewed finite cycle, N runs N continuous windows.')
+        if type(self.assimilate_aircraft) is not bool:
+            raise PlanError('assimilate_aircraft must be true or false; it is off unless requested.')
         utc(self.epoch)
         from woof.regional_preparation import validate_request
         validate_request(self)
@@ -879,7 +882,8 @@ def main(args) -> int:
                         supplements=tuple(args.supplement),
                         obs_tables=tuple(args.obs_table), radar_grids=tuple(args.radar_grid),
                         satellite_grids=tuple(args.satellite_grid), base_seed=args.seed,
-                        continuous_windows=args.continuous or 0)
+                        continuous_windows=args.continuous or 0,
+                        assimilate_aircraft=args.assimilate_aircraft)
                 from functools import lru_cache
                 from woof.fetch import _head_answer
                 # One review samples each URL once; launch keeps its exact
@@ -945,6 +949,7 @@ def register_cli(subparsers):
     p.add_argument('--profile', help='physics profile name resolved by the authoring authority; defaults to the profile that authority selects at the grid spacing of the selected rung')
     p.add_argument('--seed', type=int, default=0, help='base seed for member perturbation and the static covariance samples; the same seed reproduces the same analysis')
     p.add_argument('--obs-table', action='append', default=[], help='existing neutral observation table; repeatable')
+    p.add_argument('--assimilate-aircraft', action='store_true', help='opt-in: assimilate aircraft_level rows of the observation tables (ACARS, PrepBUFR, WIS2) through the pressure-level operator; off, they are counted and refused')
     p.add_argument('--radar-grid', action='append', default=[], help='existing radar-grid observation file; repeatable')
     p.add_argument('--satellite-grid', action='append', default=[], help='existing cloud-water-path grid; repeatable')
     p.add_argument('--capabilities', action='store_true', help='print the companion command and field contract without pricing')

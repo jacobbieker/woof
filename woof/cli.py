@@ -367,7 +367,7 @@ _INTERRUPT_EXIT_CODE = 130
 _LONG_RUNNING_COMMANDS = frozenset({
     "go", "go-job", "run", "run-plan", "resume", "branch", "fetch", "fetch-geog",
     "fetch-tables", "fetch-bridges", "setup", "verify", "downscale",
-    "enprod", "render", "dual-run", "certify", "spectral", "energy",
+    "enprod", "render", "dual-run", "certify", "spectral", "energy", "var",
     # The unbundled stages run for exactly as long as the welded ones
     # they were split out of: preprocessing is minutes of static build,
     # the forecast is the forecast.
@@ -706,6 +706,9 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     simulated_radar_register_cli(sub)
     verification_visuals_register_cli(sub)
     enprod_register_cli(sub)
+    # WRFDA 3D-Var (experimental port) to an analysis bundle: the only
+    # importer of woof.da.var (tests/test_var_import_graph.py).
+    _lazy_register("woof.var_cli")(sub)
     downscale_register_cli(sub)
     energy_register_cli(sub)
     # Moving-nest LES runs along tracks, priced before a card is rented:

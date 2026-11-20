@@ -187,9 +187,10 @@ RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
         "analysis, not a forecast step, record nothing and are not a "
         "translation unit the manifest freezes"),
     "woof/da/var/transforms.py": (
-        "the experimental 3D-Var's control-variable transform and inner "
-        "products (woof.da.var, kernels/var_u.cu), one RawModule per "
-        "precision compiled on first use; they run only under the woof var "
+        "the experimental 3D-Var's control-variable transform, inner "
+        "products and observation operators (woof.da.var, kernels/var_u.cu "
+        "and kernels/var_obs.cu), one RawModule per precision and unit "
+        "compiled on first use; they run only under the woof var "
         "door, never in a forecast step, record nothing and are graded word "
         "for word against WRFDA 4.7.1 instead (tests/test_var_transforms_gpu.py)"),
     "woof/da/radar_tten.py": (

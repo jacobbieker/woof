@@ -2286,6 +2286,7 @@ Takes no options of its own.
 
 | option | what it does |
 |---|---|
+| `--assimilate-aircraft` | opt-in: assimilate aircraft_level rows of the observation tables (ACARS, PrepBUFR, WIS2) through the pressure-level operator; off, they are counted and refused |
 | `--budget-seconds` | advisory wall-time target for preparation, forecast and cycles; does not reduce cycles or impose a runtime deadline |
 | `--cadence-seconds` | exact requested whole-second cadence; otherwise derived from scale; never shortened to meet a cost estimate |
 | `--capabilities` | print the companion command and field contract without pricing |
@@ -2703,6 +2704,24 @@ Takes no options of its own.
 | option | what it does |
 |---|---|
 | `--dir` | the directory `fetch` wrote the streams under |
+
+## `woof obs wis2`
+
+Takes no options of its own.
+
+## `woof obs wis2 fetch`
+
+| option | what it does |
+|---|---|
+| `--bbox ('SOUTH', 'NORTH', 'WEST', 'EAST')` | _(the parser declares no help text for this option)_ |
+| `--end` | window end, ISO 8601 UTC |
+| `--families` | comma list of land, ocean, sonde, aircraft, profiler, amv, scat, ro; the satellite families (amv, scat, ro: point winds and GNSS-RO refractivity) are read only when named |
+| `--obs-gts` | write OBSPROC obs_gts ASCII here (for 3D-Var / WRFDA) |
+| `--receipt` | also write the JSON receipt here |
+| `--snapshot` | read this Icechunk snapshot id instead of main's head |
+| `--start` | window start, ISO 8601 UTC |
+| `--table` | write gpuwm-obs.table.v2 CSV here (for the ensemble filter) |
+| `--thin-km` | keep one AMV per box of this size and 50 hPa layer (highest QI) and one scatterometer wind per box; 0 (the default) keeps them all |
 
 ## `woof ocean`
 
@@ -4445,6 +4464,28 @@ Takes no options of its own.
 | option | what it does |
 |---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof var`
+
+| option | what it does |
+|---|---|
+| `--be` | WRFDA background-error file (be.dat, cv_options = 5) |
+| `--check-rh {0,1}` | WRFDA check_rh in the analysis transfer (0 or 1; default 0) |
+| `--eps` | gradient reduction target (WRFDA eps; default 0.01) |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--first-guess` | WRF first guess (wrfinput_d01 or a wrfout), WRFDA's fg |
+| `--grid-id` | the bundle's grid name (default: the first guess's file name) |
+| `--iau-window-s` | record an IAU window in the bundle (seconds); default: insert at once |
+| `--landuse-table` | LANDUSE.TBL for the roughness (default: woof's packaged WRF table) |
+| `--log` | also write the minimiser log to this file |
+| `--max-ext-its` | outer loops (WRFDA max_ext_its; default 1) |
+| `--no-orthonorm-gradient` | turn off WRFDA's orthonorm_gradient (on by default, as in the tutorial) |
+| `--ntmax` | inner iterations per outer loop (WRFDA ntmax; default 50) |
+| `--obs` | OBSPROC observations (ob.ascii) |
+| `--out` | analysis bundle directory to write (must not exist) |
+| `--ph {analysis,balance}` | bundle PH: WRFDA's hydrostatic PH (analysis, default) or rebuilt by the bundle (balance) |
+| `--tier {reference,oracle,production}` | reference: NumPy binary64 (default); oracle: GPU binary64 with WRFDA's serial dot product; production: GPU binary32 |
+| `--window-minutes` | observation window half-width around the first guess's time (default 60) |
 
 ## `woof verify`
 

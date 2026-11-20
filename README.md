@@ -499,7 +499,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   momentum tendencies. A street-canyon benchmark gives the H/W = 1 vortex,
   and a cube benchmark gives the wake and horseshoe. Off, or with no
   buildings, nothing launches and runs are bit-identical. Momentum only,
-  regional grid only. A real-data check over Manhattan places the model's
+  regional grid only. The hex (MPAS) dycore takes the same option on the
+  WOOF-physics route (`woof hex forecast --obstacle-opt 1`), on the Voronoi
+  edges and w faces: a cube on a test sphere at 15 cells per H reattaches
+  at 1.80 H. A real-data check over Manhattan places the model's
   buildings at their footprint heights (r = 0.99 at 25 m). In lower and
   midtown Manhattan, 50 m resolves 59% of buildings and 25 m resolves 77%;
   50 m does not open the streets. A domain with buildings (or an urban
@@ -974,7 +977,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   thickness types, with the same accepted observations as WRFDA and its
   initial cost `J_0` on the tutorial case, and their linearised operators
   and adjoints.
-  There is no analysis command yet. Section 11 plans geostationary imager
+  `woof var --be be.dat --obs ob.ascii --first-guess wrfinput_d01 --out
+  BUNDLE` (experimental) runs the whole 3D-Var and writes a
+  `wrf-analysis-bundle/1` that `woof run --analysis BUNDLE` starts from
+  ([docs/var.md](docs/var.md)). On the tutorial case it takes the same 29
+  iterations as WRFDA, with every logged cost and gradient within 1e-14
+  relative, and its analysis rounds to WRFDA's `wrfvar_output` word for word.
+  `--tier oracle` runs on CUDA or Metal with the same words;
+  `--tier production` (binary32) gives one digest on both. The production
+  tier's 50-iteration minimisation on a synthetic 200x200x50 case with
+  ~10^5 observations takes 3.1 s on an M3 Max (Metal) and 3.2-4.5 s on a shared
+  A6000 (targets 20 s and 5 s; the tutorial case: 1.4 s and 2.3 s), with
+  H' and H'^T on the device as an ordered gather (no atomics). Section 11 plans geostationary imager
   radiances for initial conditions: Google's SatWeave mosaic and the native
   GOES ABI, Himawari AHI and Meteosat imagers, through an opt-in CRTM into
   the LETKF first and into 3D-Var later. Default runs are not changed.
@@ -1003,6 +1017,37 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   check, and places each observation at its weighting-function peak.
   Variational bias correction and the 3D-Var radiance operator come next
   (plan section 11).
+- **WIS2 observation reader (opt-in; in-situ families first).**
+  `woof obs wis2 fetch` reads the WIS2 Global Cache archive
+  (`bkr/obs/wis2.icechunk` on Source Cooperative, anonymous). It covers
+  land stations (BUFR and SYNOP TAC), ships and buoys, radiosondes,
+  aircraft and wind profilers in a time window and box. It applies the
+  store's quality flags and keeps the latest correction of each report.
+  It merges each sounding's TEMP parts, and it checks every part against
+  the rest of its launch. A part whose pressures are ten times too large is
+  detected and refused; the US Part D (`TEMP_DD`) objects in the store
+  have this fault. Errors are WRFDA's OBSPROC table (`obserr.txt`). It
+  writes a `gpuwm-obs.table.v2` table for the LETKF (`--table`) and
+  OBSPROC's `obs_gts` ASCII for `woof.da.var` (`--obs-gts`). Profilers go
+  only to `obs_gts`, because the LETKF's point operators are
+  pressure-level only. The LETKF uses aircraft rows (WIS2, ACARS and
+  PrepBUFR alike) only with `woof local-da --assimilate-aircraft` (opt-in);
+  ship rows have no operator yet. WIS2 has no US AMDAR. Satellite point
+  winds are opt-in families: `--families amv,scat` reads atmospheric
+  motion vectors (WMO template 310077 only; quality index without forecast
+  at least 80; geostationary, plus polar AVHRR, MODIS and VIIRS) and ASCAT
+  10 m winds (the selected ambiguity; land, ice and cell-quality flags
+  refused), with WRFDA's SATOB and QSCAT errors and an optional
+  `--thin-km`. AMVs go to both outputs. Scatterometer winds go to
+  `obs_gts`, and to the table under a label the LETKF has no operator for
+  yet. WIS2 has no GOES AMVs. `--families ro` reads GNSS-RO refractivity
+  profiles (template 310026: COSMIC-2, FY-3, PAZ and others relayed by JMA
+  and CMA; EUMETSAT's products carry bending angles only and are counted,
+  not used). Each level sits at its tangent point, 0-30 km, with WRFDA's
+  gpsref error and the observed-gradient (super-refraction) checks of
+  `da_qc_gpsref`. Profiles go to the table (`ro_refractivity_tangent_point`,
+  the LETKF's existing refractivity operator) and to `obs_gts` as FM-116.
+  MW radiances come next ([plan section 12](docs/dev/WRFDA-3DVAR-PLAN.md)).
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
@@ -1028,10 +1073,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   model to a column batch.
   On hex, 5-day emulator runs on a uniform and a variable-resolution mesh
   were stable on CUDA (the uniform one also on Metal) and kept the mass
-  budget. The plan's G2 scorecard criterion failed: T2 was worse at 95 %
-  on the uniform mesh, and most column calls (88-89 %) fell outside the
-  (margin-widened) five-day training range. Results and per-step costs
-  are in [docs/nn-physics.md](docs/nn-physics.md).
+  budget. Trained on six cycles over four seasons (P2.6), the model
+  passes the plan's G2 gate. T2 is not worse than the physics run at 95 %
+  on either mesh, and better on the uniform mesh on CUDA (-0.06 K).
+  Most column calls (94-97 %) still fall back to the schemes in the
+  evaluation week, because its stratosphere lies outside the training
+  range. Results and per-step costs are in
+  [docs/nn-physics.md](docs/nn-physics.md).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

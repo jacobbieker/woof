@@ -1031,6 +1031,23 @@ days of one mesh's tap do not cover the evaluation period. Details are in
 [docs/nn-physics.md](../nn-physics.md). Next: multi-cycle, multi-season
 training data and a residual-target trainer.
 
+G2 status (2026-11-20, P2.6 merged): met on its stated criteria, as weak
+evidence of skill. The model was trained on six cycles across four
+seasons, with `dx` and radiation inputs. `replace` beat a nudging-increment
+residual target on a separate validation cycle and was chosen there. On
+the evaluation cycle (11-07, 120 h), T2 RMSE NN minus physics was:
+
+- uniform mesh, CUDA: -0.056 K, 95 % CI [-0.094, -0.020], better;
+- uniform mesh, Metal: -0.026 K [-0.069, +0.019];
+- 3-96 km mesh, CUDA: -0.042 K [-0.096, +0.010].
+
+Stability, the mass budget (within 10 Pa and 0.4 mm) and cost
+(Metal 0.3-1.9 %, CUDA 6-9 % on a shared card) pass. 94-97 % of column
+calls still fell back: early-November stratospheric theta and pressure
+(top ten levels) lie below every training cycle's range. Next: a model
+over the lowest 44 levels or winter taps, scored on a fresh evaluation
+cycle. Details are in [docs/nn-physics.md](../nn-physics.md).
+
 ### P3. A dynamical-core adjoint (12-20 w)
 
 - **P3a, WRF dry core** (93 launches per step under CUPTI): TL/AD kernels ported from
