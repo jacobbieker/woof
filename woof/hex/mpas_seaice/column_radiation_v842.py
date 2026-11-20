@@ -141,11 +141,15 @@ def _module_on(device: int, options: tuple[str, ...], trig: bool):
     return module
 
 
-def _function(name: str):
+def _module():
     import cupy as cp
     from woof.hex.mpas_ice import rkind
     options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
-    return _module_on(cp.cuda.Device().id, options, rkind.trig64()).get_function(name)
+    return _module_on(cp.cuda.Device().id, options, rkind.trig64())
+
+
+def _function(name: str):
+    return _module().get_function(name)
 
 
 def _flags(configs: dict, state: "cv.ColumnState") -> int:
@@ -219,9 +223,15 @@ def _orbit() -> "object":
     if not rkind.trig64():
         _refuse("config_shortwave_type", "dEdd", rkind.trig_refusal("shr_orb_params calls glibc's double sin, cos "
                                                                    "and atan"), "WOOF_GLIBC239_LIBM64=1")
+    return _orbit_on(_module())
+
+
+@lru_cache(maxsize=8)
+def _orbit_on(module) -> "object":
+    """The orbit, launched once per compiled module (a new module, a new launch)."""
     import cupy as cp
     out = cp.zeros(6, np.float64)
-    _function("seaice_column_init_orbit_v842")((1,), (1,), (out,))
+    module.get_function("seaice_column_init_orbit_v842")((1,), (1,), (out,))
     return out
 
 

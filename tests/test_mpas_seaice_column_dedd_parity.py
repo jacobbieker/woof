@@ -106,7 +106,7 @@ def test_fixture_covers_the_branches():
     # no sun (row 7): ice-covered categories get albedo 1
     alb = got("dedd_default_level_ponds", "shortwave/albedoVisibleDirectCategory")
     area = cases["dedd_default_level_ponds"]["pools"]["tracers"]["iceAreaCategory"][:, :, 0]
-    assert (alb[7][area[7] > PUNY] == 1.0).all()
+    assert (area[7] > PUNY).any() and (alb[7][area[7] > PUNY] == 1.0).all()
     assert ((alb[:n_solve] > 0) & (alb[:n_solve] < 1)).any()
     # the snow fraction: whole with hs0 = 0, partial with a transition depth, 0 below hs_min
     snowfrac = got("dedd_no_ponds_snow_transition", "shortwave/snowFractionCategory")[:n_solve]
@@ -226,6 +226,9 @@ def test_fast_and_strict_numerics_both_match_the_oracle(glibc239):
     # set_pond's product reassociated
     ("fpn = M(M(0.3, fT), S(1.0, fsn));", "fpn = M(0.3, M(fT, S(1.0, fsn)));",
      "shortwave/effectivePondAreaCategory", "dedd_no_ponds_snow_transition"),
+    # set_snow's intent(out) fraction given a default below hs_min (v8.4.2 keeps the caller's 0)
+    ("    if (*hs >= DEDD_HS_MIN) {\n        *fs = 1.0;", "    *fs = 1.0;\n    if (*hs >= DEDD_HS_MIN) {",
+     "shortwave/snowFractionCategory", "dedd_no_ponds_snow_transition"),
     # the solar zenith cosine not written back
     ("coszenAll[c] = coszen;", "", "shortwave/solarZenithAngleCosine", "dedd_default_level_ponds"),
 ])
