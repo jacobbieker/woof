@@ -968,8 +968,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   geometry. The same door reads Himawari-8/9 AHI (`--satellite himawari9`)
   from NOAA/STAR's sectorized CMI stores, which hold brightness temperature
   and reflectance with no quality flag, and Meteosat SEVIRI (`--satellite msg`,
-  `rss` or `odegree`) from Satpy-calibrated stores. GK-2A is refused: CRTM
-  v2.4 has no AMI coefficients. `woof.rtm` adds an opt-in clear-sky
+  `rss` or `odegree`) and MTG FCI (`--satellite fci`) from Satpy-calibrated
+  stores. GK-2A is refused, and FCI cannot be simulated: CRTM v2.4 has no AMI
+  or FCI coefficients. `woof.rtm` adds an opt-in clear-sky
   infrared operator. It uses JCSDA CRTM v2.4+ (CC0), which you build
   yourself with `python -m woof.rtm.crtm_build`, together with CRTM's own
   coefficients. It gives brightness temperatures and Jacobians from woof

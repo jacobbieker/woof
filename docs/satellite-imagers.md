@@ -5,7 +5,7 @@ so that later stages can assimilate them into initial conditions. The plan,
 with its sources and gates, is section 11 of
 [dev/WRFDA-3DVAR-PLAN.md](dev/WRFDA-3DVAR-PLAN.md). This page covers what
 exists today: the SatWeave reader and the GOES ABI, Himawari AHI and Meteosat
-SEVIRI readers for the `bkr/geo` Icechunk stores.
+SEVIRI and MTG FCI readers for the `bkr/geo` Icechunk stores.
 
 ## SatWeave
 
@@ -231,6 +231,26 @@ SatWeave's Meteosat sector agree to -0.10, -0.05 and 0.34 K in the mean at
 6.2, 7.3 and 11.2 µm (cell means of the native pixels against SatWeave's
 0.1° cells).
 
+## MTG FCI from the `bkr/geo` Satpy store
+
+```
+woof obs geo fetch --satellite fci --time 2025-03-01T18:00Z --channels C10,C14 --bbox -10,20,25,50
+```
+
+The reader is `woof.obs.geo_icechunk.read_fci_scene`, over `mtg_2000m`
+(Meteosat-12, 2024-09 on, about 97 % of 10-minute scans). The store holds
+the eight infrared and water-vapour channels at 2 km as float16 brightness
+temperature. Channels are FCI's numbers in wavelength order (`C10` is
+6.3 µm, `C14` is 10.5 µm) or wavelengths (6200, 7330, 10400). FCI has no
+11.2 µm band. Time, geometry (WGS84) and caching are as for SEVIRI: the scan
+observed 17:50-17:59 is labelled "18:00".
+
+**FCI cannot be assimilated yet.** CRTM v2.4 has no FCI coefficient file
+(its TauCoeff listing and the CRTM 3 sensor list have none). The scene names
+`fci_mtg1` and says why in its platform note. Opening a CRTM operator for
+that sensor is refused by naming the missing `fci_mtg1.SpcCoeff.bin` and
+`.TauCoeff.bin`. The reader is for comparison and later use.
+
 ## What woof refuses, and why
 
 CRTM v2.4 coefficients decide which imagers can be assimilated. On
@@ -394,6 +414,6 @@ is wired up correctly; it does not show forecast skill.
 
 These come next, in the plan's order:
 
-- MTG FCI from the `bkr/geo` Satpy stores (CRTM v2.4 has no FCI file);
+- FCI coefficients, which CRTM v2.4 lacks;
 - variational bias correction, and the radiance operator for woof's
   3D-Var (plan section 11).
