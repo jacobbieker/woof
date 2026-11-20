@@ -284,7 +284,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     thickness tendencies, tracer tendencies, monotone tracer advection,
     implicit vertical mixing, vertical transport velocity, the
     split-explicit barotropic stage and whole split-explicit step,
-    forward mode (clock, cold start, N steps, bitwise restart), and frazil
+    forward mode (clock on `config_calendar_type`'s calendar, the 365-day
+    `gregorian_noleap` by default or `gregorian`; cold start, N steps,
+    bitwise restart), and frazil
     ice formation (`config_use_frazil_ice_formation`, off by default as in
     v8.4.2's Registry: open ocean and under land ice, its tendencies, the
     accumulated mass and the surface pressure; standalone and over forward

@@ -53,9 +53,9 @@ def test_the_clock_is_mpas_calendar():
     epoch = datetime.datetime(1, 1, 1)
     for text in ("0001-01-01_00:00:00", "2000-02-28_23:58:00", "2000-02-29_12:00:01", "1900-03-01_00:00:00",
                  "2024-12-31_23:59:59", "9999-12-31_23:59:59"):
-        seconds = fw.parse_time(text)
+        seconds = fw.parse_time(text, "gregorian")
         assert seconds == int((datetime.datetime.strptime(text, "%Y-%m-%d_%H:%M:%S") - epoch).total_seconds())
-        assert fw.format_time(seconds) == text
+        assert fw.format_time(seconds, "gregorian") == text
     assert fw.interval_seconds("0000_00:00:50") == 50 and fw.interval_seconds("01:02:03") == 3723
     assert fw.btr_subcycle_count("00:02:00", "0000_00:00:50") == 3
     assert fw.btr_subcycle_count("00:03:00", "0000_00:01:00") == 3
@@ -72,12 +72,18 @@ def test_fixture_covers_the_branches(precision):
         assert case["config"]["oracle_n_steps"] >= 2
         days = float(out["diagnostics/daysSinceStartOfSim"])
         from woof.hex.mpas_ocean import forward_v842 as fw
-        elapsed = (fw.parse_time(case["config"]["config_start_time"]) - fw.parse_time(
-            case["config"]["diagnostics:simulationStartTime"]) + case["config"]["oracle_n_steps"] * case["dt"])
+        # on the case's calendar (config_calendar_type; the Registry default is the 365-day year)
+        calendar = fw.calendar_of(case["config"])
+        elapsed = (fw.parse_time(case["config"]["config_start_time"], calendar) - fw.parse_time(
+            case["config"]["diagnostics:simulationStartTime"], calendar) + case["config"]["oracle_n_steps"] * case["dt"])
         assert abs(days - elapsed / 86400.0) < 1e-5 * max(1.0, days)
         assert np.isfinite(out["state/ssh"][:nc]).all() and np.isfinite(out["state/ssh@2"][:nc]).all()
     assert any(case["config"]["oracle_n_steps"] % 2 for case in cases.values())
     assert any(case["config"]["oracle_n_steps"] % 2 == 0 for case in cases.values())
+    # both calendars, with a February between the simulation's start and the run's
+    assert {fw.calendar_of(case["config"]) for case in cases.values()} == set(fw.CALENDARS)
+    assert {round(float(fixture[name]["diagnostics/daysSinceStartOfSim"])) for name in
+            ("split_noleap_after_february", "split_gregorian_after_february")} == {28, 29}
 
 
 def test_rk4_and_mpas_restarts_are_refused_by_name():
@@ -110,7 +116,7 @@ def test_a_restart_continues_the_run_bitwise(tmp_path, precision):
     clock = fw.cold_start(pools=dev, configs=case["config"])
     fw.advance(pools=dev, configs=case["config"], clock=clock, n_steps=1)
     fw.write_restart(tmp_path / "restart.npz", pools=dev, clock=clock)
-    pools, clock = fw.read_restart(tmp_path / "restart.npz", like=dev)
+    pools, clock = fw.read_restart(tmp_path / "restart.npz", like=dev, configs=case["config"])
     del dev
     assert clock.now - clock.start == clock.step and pools["diagnostics"]["xtime"] == clock.time_stamp
     fw.advance(pools=pools, configs=case["config"], clock=clock, n_steps=n - 1)

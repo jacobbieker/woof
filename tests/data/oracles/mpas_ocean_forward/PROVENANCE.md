@@ -25,8 +25,10 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
   - `oracle_n_steps` times: the clock advanced, the absorbed fractions,
     `ocn_timestep`, and `mpas_pool_shift_time_levels`.
 
-  The time manager is the stub's: whole seconds on the proleptic Gregorian
-  calendar. Every array is written back by the allocation it was given to, so
+  The time manager is the stub's: whole seconds on `config_calendar_type`'s
+  calendar, which the driver sets with `mpas_timekeeping_init` before the
+  clock, as `mpas_framework.F:111-116` does: the Registry default
+  `gregorian_noleap` (a 365-day year) or `gregorian` (proleptic). Every array is written back by the allocation it was given to, so
   after an odd number of steps `NAME` holds what MPAS then calls time level 2.
 
 ## Cases
@@ -37,7 +39,9 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
 | `split_jm_rich_bulk` | 8 x 6 | 10 | 4 | 180 s / 60 s | JM, Jacobian_from_TS, Richardson mixing, bulk forcing with Jerlov, budgets, tracer del2, the coupler's running means over four steps |
 | `unsplit_two_steps` | 6 x 5 | 6 | 2 | 60 s / 20 s | unsplit-explicit cold start, constant vertical mixing |
 | `split_nested_halos` | 12 x 6, 3 owned columns | 8 | 3 | 120 s / 30 s | one block of a decomposition: owned cells and three halo layers numbered by layer, nested `nCellsArray`/`nEdgesArray`/`nVerticesArray` (16/26/36/48 cells), the outermost halo pointing at the missing cell |
-| `split_filter_btr_mode` | 6 x 6 | 7 | 2 | 120 s / 40 s | `config_filter_btr_mode`'s cold start; the clock across a leap day (2000-02-28 23:58 to 2000-02-29), days since a start in January |
+| `split_filter_btr_mode` | 6 x 6 | 7 | 2 | 120 s / 40 s | `config_filter_btr_mode`'s cold start; the clock over midnight after 28 February 2000 (to 1 March on the default 365-day calendar), days since a start in January |
+| `split_noleap_after_february` | 6 x 5 | 6 | 2 | 120 s / 40 s | a run started on 1 February 2000 continued from 1 March on the default 365-day calendar: 28 days of February in `daysSinceStartOfSim` |
+| `split_gregorian_after_february` | 6 x 5 | 6 | 2 | 120 s / 40 s | the same on the Gregorian calendar: 29 days of February |
 
 The meshes are `woof.verify.mpas_ocean_hexmesh.hex_mesh`'s: hexagonal cells on
 a doubly periodic torus, with a sixth culled as land the way MPAS culls
