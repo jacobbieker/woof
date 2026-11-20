@@ -61,6 +61,13 @@ CONFIGS = {
 }
 
 
+# Strict mode with each of its four controls pinned on, so an inherited
+# =0 cannot leave the reference primal off WRF's order.
+STRICT_ENV = {"GPUWM_WRF_EXACT": "1", "WOOF_WRF_EXACT_DIAGNOSTICS": "1",
+              "WOOF_WRF_EXACT_ADVECTION": "1", "GPUWM_WRF_EXACT_DIFFUSION": "1",
+              "GPUWM_WRF_EXACT_BIGSTEP": "1"}
+
+
 def _run(backend, body, tmp_path, extra_env=None):
     env = dict(os.environ, WOOF_BACKEND=backend, PYTHONPATH=str(ROOT),
                WOOF_HOST_CACHE=str(tmp_path / "hostcache"), WOOF_HOST_THREADS="4")
@@ -160,7 +167,7 @@ for op, cfgs in {CONFIGS!r}.items():
 
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
 def test_tl_matches_finite_differences(backend, tmp_path):
-    """||NL(x + a dx) - NL(x)|| / ||a TL dx|| -> 1, the misfit O(a)."""
+    """||NL(x + a dx) - NL(x) - a TL dx|| / ||a TL dx|| -> 0 as O(a)."""
     out = _run(backend, f'''
 for op, cfgs in {CONFIGS!r}.items():
     St, X, G, T, P = OPS[op][:5]
@@ -174,12 +181,14 @@ for op, cfgs in {CONFIGS!r}.items():
             return [st[n] for n in St]
         def tl(dx):
             return [run_tl(op, g, tr, dict(zip(X, dx)), False)[1][n] for n in St]
-        out[f"{{op}}/{{i}}"] = K.tl_convergence(model, tl, [tr[n] for n in X],
-                                                [p[n] for n in X], [1e-3, 1e-5, 1e-7])
+        out[f"{{op}}/{{i}}"] = K.tl_residual(model, tl, [tr[n] for n in X],
+                                             [p[n] for n in X], [1e-3, 1e-5, 1e-7])
 ''', tmp_path)
     assert len(out) == sum(len(c) for c in CONFIGS.values())
     for key, rows in out.items():
-        misfits = [abs(r - 1.0) for _, r in rows]
+        # The signed residual: a TL of the wrong sign, whose norm ratio
+        # would still be 1, fails.
+        misfits = [r for _, r in rows]
         assert misfits[-1] < 1e-6, (key, rows)
         assert misfits[0] < 0.1, (key, rows)
 
@@ -279,7 +288,7 @@ for i, over in enumerate({CONFIGS["buoy"]!r}):
         tr["c1f"], tr["c1f"], tr["msft"], i32(0), i32(g.has_msf), i32(1), i32(nz), i32(ny),
         i32(nx)))
     out[f"buoy/{{i}}"] = diff(st["rw_t"], rw)
-''', tmp_path, extra_env={"GPUWM_WRF_EXACT": "1"})
+''', tmp_path, extra_env=STRICT_ENV)
     assert len(out) == sum(len(c) for c in CONFIGS.values())
     bad = {k: v for k, v in out.items() if v}
     assert not bad, bad
