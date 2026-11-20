@@ -7,8 +7,9 @@ The case is supplied by the caller and nothing of it is in the repository.
   (WRFDA's tutorial ``be.dat`` on the tutorial grid);
 - ``fg``: a WRF first guess (woof's own GFS initialisation);
 - ``ob.ascii``: OBSPROC ``obs_gts`` from ``woof obs wis2 fetch --obs-gts``;
-- ``scene``: a cached imager scene (``woof obs geo fetch``; GOES ABI from
-  ``bkr/geo`` only).
+- ``scene``: one cached imager scene, the entry directory
+  ``<cache>/goes<N>/<YYYYmmddTHHMM>/<key>`` that ``woof obs geo fetch --cache``
+  writes (GOES ABI from ``bkr/geo/virtualized`` only).
 
 CRTM comes from ``WOOF_CRTM_LIB``/``WOOF_CRTM_COEFFS``.  The test runs two
 analyses on the reference tier, conventional only and conventional plus
