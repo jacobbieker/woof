@@ -944,8 +944,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `g_/a_calc_coef_w` to about 1e-15. `advance_mu_t` (woof's
   `advance_mu_th` and the specified-frame mu/theta/muts update) matches
   WRFPLUS `g_/a_advance_mu_t` and `g_/a_spec_bdyupdate` to about 1e-15,
-  with map factors. The binary32 adjoint costs 3.3-4.8x the forward
-  kernel; the measured step projection is in the design note. The
+  with map factors. `small_step_prep` with `calc_p_rho` and
+  `small_step_finish` (woof's `small_step_init_*`/`_finish_*`) match
+  WRFPLUS within the oracle test's 1e-12, and a chained test checks whole acoustic
+  substeps. The binary32 adjoint costs 3.3-5.0x the forward kernel; the
+  measured step projection (4.2-4.8x) is in the design note. The
   forecast path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes

@@ -238,7 +238,10 @@ Each step is one small PR, taken to merged before the next widens.
    the pattern PR.
 2. `advance_mu_t`, `advance_w` (with `calc_p_rho`), `calc_coef_w`.
 3. `small_step_prep`, `small_step_finish`, `calc_mu_uv_1`, plus a
-   **per-acoustic-substep** chained dot-product test.
+   **per-acoustic-substep** chained dot-product test
+   (`acoustic_substep_tl/_ad`: advance_uv, advance_mu_t, advance_w in
+   woof's strict order, two substeps, with a finite-difference check of
+   the chain).
 4. RK-stage glue: `rk_step_prep` (`couple_momentum`, `calc_ww_cp`),
    `calc_p_rho_phi`, `rk_addtend_dry`, `set_w_surface`, periodic
    physical BCs, plus a per-stage test with tendencies frozen.
@@ -339,7 +342,8 @@ Other jobs share that card.
 | advance_uv | #652, #655 | 3.4-4.0x | ~3x | 12-15x |
 | advance_w + calc_p_rho (advance_w_phi) | #669 | 3.5-3.7x | 2.3x | 9.3-9.8x |
 | calc_coef_w (calc_coefs) | #675 | 4.8x | 3.2x | 21-23x |
-| advance_mu_t + spec_bdyupdate (advance_mu_th + advance_exact_frame_mu_t) | this PR | 3.35x (3.2-3.5) | 2.0x | 8.2x |
+| advance_mu_t + spec_bdyupdate (advance_mu_th + advance_exact_frame_mu_t) | advance_mu_t PR | 3.35x (3.2-3.5) | 2.0x | 8.2x |
+| small_step_prep + calc_p_rho, small_step_finish (small_step_{init,finish}_{uv,column}) | this PR | 4.8x (4.7-5.0) | 2.1x | 7.7-8.0x |
 
 advance_uv's 3.7x in the projection is the midpoint of its range. The
 advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
@@ -348,6 +352,15 @@ understates the weight. For spec_zone >= 2 the TL/AD follow woof's
 primal, which treats the whole spec_zone ring as frame; WRFPLUS
 integrates from ids+1 whatever spec_zone is, and the oracle runs
 spec_zone = 1 only.
+
+small_step's ratio is over all four primal kernels (init and finish).
+Most of its adjoint time is the init column adjoint (3.3 ms of about
+5.8 ms at this size, against 1.16 ms for the init column TL). Taking
+reciprocals in its forward recompute saved only about 6%, so the kernel
+looks bound by memory traffic rather than division. The finish pass runs first in
+the adjoint, init second, as WRFPLUS does. calc_mu_uv_1 has no woof
+kernel of its own in the strict path (small_step_finish's face masses
+are means of muts), so the finish TL/AD and its oracle cover it.
 
 The shares below are each kernel's part of the forward step's GPU kernel
 time. They come from a dry step at 200x200x49, using CUPTI kernel
@@ -368,18 +381,20 @@ activity tagged by woof kernel and the minimum over 10 steps
 
 The projection is the per-step adjoint cost over the forward step:
 1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
-far (56.8% of the strict step), Σ share x AD32 = 2.05, on top of the
+far (65.0% of the strict step), Σ share x AD32 = 2.45, on top of the
 forward recompute's 1. The rest is projected at a range of ratios:
 
-| ratio for the unmeasured 43.2% | projection |
+| ratio for the unmeasured 35.0% | projection |
 |---|---|
-| 2.2x (memory-traffic floor) | 4.0x |
-| 3.0x | 4.3x |
-| 3.6x (the measured share-weighted mean) | 4.6x |
+| 2.2x (memory-traffic floor) | 4.2x |
+| 3.0x | 4.5x |
+| 3.8x (the measured share-weighted mean) | 4.8x |
 
-The 5x limit holds while the rest averages at most about 4.5x. This is a
+The 5x limit holds while the rest averages at most about 4.4x. The
+margin has narrowed: small_step at 4.8x moved the break-even down from
+4.5x, and flux_div (14.4%, item 6) is the largest unmeasured share. This is a
 projection from kernel GPU time, not a measured step ratio: launch gaps
-are not counted, the ratios come from a shared card, and 43.2% of the
-step is not yet ported. calc_coefs alone is 4.8x, above the limit, but at
-2.3% of the step it adds about 0.11. Each later kernel PR replaces a
+are not counted, the ratios come from a shared card, and 35.0% of the
+step is not yet ported. calc_coefs and small_step are each about 4.8x;
+at 2.3% and 8.2% of the step they add about 0.11 and 0.39. Each later kernel PR replaces a
 projected share with a measured one.

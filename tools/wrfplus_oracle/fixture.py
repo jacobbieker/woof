@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -32,8 +32,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from woof.grad.wrfplus import cases  # noqa: E402
-from woof.grad.wrfplus.acoustic import (CW_STATE, MT_STATE, UV_ACTIVE,  # noqa: E402
-                                       W_STATE)
+from woof.grad.wrfplus.acoustic import (CW_STATE, MT_STATE, SF_ACTIVE,  # noqa: E402
+                                       SF_STATE, SI_ACTIVE, SI_STATE,
+                                       UV_ACTIVE, W_STATE)
 
 #: The configurations each advance_uv fixture holds (WRFPLUS needs the
 #: terrain-following coordinate and a specified boundary, spec_zone >= 1).
@@ -582,8 +583,207 @@ def advance_mu_t(exe: str, runner: list[str], seed: int = 20261122) -> dict:
     return out
 
 
+#: small_step cases.  WRFPLUS has c1 = 1, c2 = 0; small_step_finish drops
+#: h_diabatic on the last RK stage only, so remove_hdiab iff rk_step 3.
+#: The halo columns carry woof's clamped (boundary) or wrapped
+#: (periodic) neighbours, so both face-mass rules are checked.  There is
+#: no rk_step 1 case: WRF's small_step_prep copies the _2 state into _1
+#: at the first stage, so every init output and adjoint is zero there
+#: (checked: a first-stage case came back all zeros), and woof's rk_step
+#: 1 rule (mtf = msf) is checked by the dot and FD tests instead.
+SS_CASES = {
+    "clamped": dict(rk_step=2),
+    "periodic_msf_last": dict(rk_step=3, has_msf=1, boundary_x=0, boundary_y=0,
+                              remove_hdiab=1, hdiab_dt=6.0, nz=12),
+    "small_mixed": dict(nz=3, ny=2, nx=3, rk_step=2, has_msf=1, boundary_x=0),
+}
+RK_ORDER = 3
+
+
+def _ss_cells(f, n, bnd):
+    """Cells a (right) and b (left) of faces f on an n-cell axis."""
+    if bnd:
+        return np.minimum(f, n - 1), np.maximum(f - 1, 0)
+    return f % n, (f - 1) % n
+
+
+def _ss_faces(geom, m, axis):
+    """Face means of the cell field m on u (axis 1) or v (axis 0) faces."""
+    if axis == 1:
+        a, b = _ss_cells(np.arange(geom.nx + 1), geom.nx, geom.boundary_x)
+        return 0.5 * (m[:, a] + m[:, b])
+    a, b = _ss_cells(np.arange(geom.ny + 1), geom.ny, geom.boundary_y)
+    return 0.5 * (m[a] + m[b])
+
+
+def _ss_faces_t(geom, f, axis):
+    """Transpose of :func:`_ss_faces`."""
+    out = np.zeros((geom.ny, geom.nx))
+    if axis == 1:
+        a, b = _ss_cells(np.arange(geom.nx + 1), geom.nx, geom.boundary_x)
+        np.add.at(out, (slice(None), a), 0.5 * f)
+        np.add.at(out, (slice(None), b), 0.5 * f)
+    else:
+        a, b = _ss_cells(np.arange(geom.ny + 1), geom.ny, geom.boundary_y)
+        np.add.at(out, a, 0.5 * f)
+        np.add.at(out, b, 0.5 * f)
+    return out
+
+
+def _ss_halo_cells(geom):
+    """woof cells behind the Fortran halo columns 0 and n+1 of each axis."""
+    nx, ny = geom.nx, geom.ny
+    ix = (0, nx - 1) if geom.boundary_x else (nx - 1, 0)
+    jy = (0, ny - 1) if geom.boundary_y else (ny - 1, 0)
+    return ix, jy
+
+
+def _ss_halo(geom, L, m):
+    out = L.w2(m)
+    (il, ir), (jl, jr) = _ss_halo_cells(geom)
+    nx, ny = geom.nx, geom.ny
+    out[0, 1:1 + ny] = m[:, il]
+    out[nx + 1, 1:1 + ny] = m[:, ir]
+    out[1:1 + nx, 0] = m[jl, :]
+    out[1:1 + nx, ny + 1] = m[jr, :]
+    return out
+
+
+def _ss_fold(geom, x):
+    """woof cell adjoint of a Fortran column array with halo entries."""
+    nx, ny = geom.nx, geom.ny
+    out = x[1:1 + nx, 1:1 + ny].T.copy()
+    (il, ir), (jl, jr) = _ss_halo_cells(geom)
+    out[:, il] += x[0, 1:1 + ny]
+    out[:, ir] += x[nx + 1, 1:1 + ny]
+    out[jl, :] += x[1:1 + nx, 0]
+    out[jr, :] += x[1:1 + nx, ny + 1]
+    return out
+
+
+def _ss_record(geom, tr, pe, sd):
+    nz = geom.nz
+    L = Layout(nz, geom.ny, geom.nx)
+    head = np.array([geom.nx, geom.ny, nz, geom.rk_step, RK_ORDER], dtype=np.int32)
+    reals = np.array([geom.hdiab_dt])
+    mus = tr["mub2d"] + tr["mup"]
+    a3 = []
+    for n1, n2 in (("u0", "u"), ("v0", "v"), ("w0", "w"), ("thp0", "thp"),
+                   ("php0", "php")):
+        a3 += [tr[n1], pe[n1], tr[n2], pe[n2]]
+    a3 += [tr["p"], pe["p"], tr["alt"], pe["alt"]]
+    a3 += [sd[n] for n in ("u_pp", "v_pp", "w_pp", "th_pp", "ph_pp", "al_pp", "p_pp",
+                           "p_pp_old")]
+    for n in ("u_pp", "v_pp", "w_pp", "th_pp", "ph_pp", "u", "v", "w", "thp", "php",
+              "h_diabatic"):
+        a3 += [tr[n], pe[n]]
+    a3 += [sd[n] for n in ("u", "v", "w", "thp", "php")]
+    blob = head.tobytes() + reals.astype("<f8").tobytes()
+    for a in a3:
+        blob += L.w3(a).astype("<f8").tobytes(order="F")
+    a2 = [_ss_halo(geom, L, tr["mub2d"]), _ss_halo(geom, L, tr["mup0"]),
+          _ss_halo(geom, L, pe["mup0"]), _ss_halo(geom, L, tr["mup"]),
+          _ss_halo(geom, L, pe["mup"]), L.w2(_ss_faces(geom, mus, 1)),
+          L.w2(_ss_faces(geom, pe["mup"], 1)), L.w2(_ss_faces(geom, mus, 0)),
+          L.w2(_ss_faces(geom, pe["mup"], 0)), L.w2(mus), L.w2(pe["mup"]),
+          L.w2(tr["msfu"]), L.w2(tr["msfv"]), L.w2(tr["msft"]), L.w2(sd["mu_pp"])]
+    a2 += [L.w2(tr["mu_pp"]), L.w2(pe["mu_pp"]), L.w2(tr["mup"]), L.w2(pe["mup"]),
+           L.w2(mus), L.w2(pe["mup"]), L.w2(tr["muts"]), L.w2(pe["muts"]),
+           L.w2(_ss_faces(geom, mus, 1)), L.w2(_ss_faces(geom, pe["mup"], 1)),
+           L.w2(_ss_faces(geom, tr["muts"], 1)), L.w2(_ss_faces(geom, pe["muts"], 1)),
+           L.w2(_ss_faces(geom, mus, 0)), L.w2(_ss_faces(geom, pe["mup"], 0)),
+           L.w2(_ss_faces(geom, tr["muts"], 0)), L.w2(_ss_faces(geom, pe["muts"], 0)),
+           L.w2(tr["msfv"]), L.w2(sd["mup"])]
+    for a in a2:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    k1 = np.concatenate([tr["rdnw"], [0.0]])
+    blob += k1.astype("<f8").tobytes()
+    blob += np.concatenate([1.0 / tr["rdnw"], [0.0]]).astype("<f8").tobytes()
+    return blob, L
+
+
+def _ss_expected(geom, out, L, sh):
+    """WRFPLUS outputs mapped to woof names: init/<tl_|tl_d_|ad_>name and
+    finish/<...>name.  The halo adjoints fold onto woof's neighbours and
+    the face-mass adjoints onto the cells (the transpose of the faces)."""
+    n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+    vals = np.frombuffer(out, dtype="<f8")
+    off = [0]
+
+    def take(n, s):
+        x = vals[off[0]:off[0] + n].reshape(s, order="F")
+        off[0] += n
+        return x
+
+    t3 = lambda name: L.from3(take(n3, L.s3), sh[name])  # noqa: E731
+    r2 = lambda: take(n2, L.s2)  # noqa: E731
+    uf = lambda x: _ss_faces_t(geom, L.from2(x, (geom.ny, geom.nx + 1)), 1)  # noqa: E731
+    vf = lambda x: _ss_faces_t(geom, L.from2(x, (geom.ny + 1, geom.nx)), 0)  # noqa: E731
+    e = {}
+    for n in ("u_pp", "v_pp", "w_pp", "th_pp", "ph_pp", "al_pp", "p_pp", "p_pp_old"):
+        e["init/tl_" + n] = t3(n)
+        e["init/tl_d_" + n] = t3(n)
+    e["init/tl_mu_pp"] = L.from2(r2(), sh["mu_pp"])
+    e["init/tl_d_mu_pp"] = L.from2(r2(), sh["mu_pp"])
+    for n in ("u0", "u", "v0", "v", "w0", "w", "thp0", "thp", "php0", "php", "p", "alt"):
+        e["init/ad_" + n] = t3(n)
+    a_mu1, a_mu2, a_muu, a_muv, a_mut = r2(), r2(), r2(), r2(), r2()
+    e["init/ad_mup0"] = _ss_fold(geom, a_mu1)
+    e["init/ad_mup"] = (_ss_fold(geom, a_mu2) + L.from2(a_mut, sh["mup"])
+                        + uf(a_muu) + vf(a_muv))
+    for n in SI_STATE:
+        e["init/ad_" + n] = np.zeros(sh[n])
+    for n in ("u", "v", "w", "thp", "php"):
+        e["finish/tl_" + n] = t3(n)
+        e["finish/tl_d_" + n] = t3(n)
+    e["finish/tl_mup"] = L.from2(r2(), sh["mup"])
+    e["finish/tl_d_mup"] = L.from2(r2(), sh["mup"])
+    for pp, n in (("u_pp", "u"), ("v_pp", "v"), ("w_pp", "w"), ("th_pp", "thp"),
+                  ("ph_pp", "php")):
+        e["finish/ad_" + pp] = t3(pp)
+        e["finish/ad_" + n] = t3(n)
+    e["finish/ad_h_diabatic"] = t3("h_diabatic")
+    b_mu2, b_mus, b_mut, b_muts = r2(), r2(), r2(), r2()
+    b_muu, b_muus, b_muv, b_muvs = r2(), r2(), r2(), r2()
+    e["finish/ad_mu_pp"] = L.from2(b_mu2, sh["mu_pp"])
+    e["finish/ad_mup"] = (L.from2(b_mus, sh["mup"]) + L.from2(b_mut, sh["mup"])
+                          + uf(b_muu) + vf(b_muv))
+    e["finish/ad_muts"] = L.from2(b_muts, sh["muts"]) + uf(b_muus) + vf(b_muvs)
+    assert off[0] == vals.size, (off[0], vals.size)
+    return e
+
+
+def small_step(exe: str, runner: list[str], seed: int = 20261123) -> dict:
+    out = {}
+    for name, over in SS_CASES.items():
+        geom = cases.ss_geometry(**over)
+        assert bool(geom.remove_hdiab) == (geom.rk_step == RK_ORDER)
+        tr = cases.ss_trajectory(geom, seed)
+        pe = cases.ss_perturbation(geom, seed + 1)
+        sd = cases.ss_perturbation(geom, seed + 2)
+        blob, L = _ss_record(geom, tr, pe, sd)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _ss_expected(geom, result, L, cases.ss_shapes(geom))
+        prefix = f"{name}/"
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for k, v in sd.items():
+            out[prefix + "seed/" + k] = v
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
-            "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t}
+            "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
+            "small_step": small_step}
 
 
 def main(argv=None) -> int:

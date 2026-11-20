@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from .acoustic import (CW_ACTIVE, CW_STATE, MT_ACTIVE, MT_STATE, UV_ACTIVE,
-                       W_ACTIVE, W_STATE, CWGeometry, MTGeometry, UVGeometry,
-                       WGeometry, cw_shapes, mt_shapes, uv_shapes, w_shapes)
+from .acoustic import (CW_ACTIVE, CW_STATE, MT_ACTIVE, MT_ALIAS, MT_STATE,
+                       SF_ACTIVE,
+                       SF_STATE, SI_ACTIVE, SI_STATE, UV_ACTIVE, W_ACTIVE,
+                       W_STATE, CWGeometry, MTGeometry, SSGeometry, UVGeometry,
+                       WGeometry, cw_shapes, mt_shapes, ss_shapes, uv_shapes,
+                       w_shapes)
 
 # (centre, spread) per field, roughly a mid-latitude 1-3 km grid.
 _UV_SCALES = {
@@ -252,3 +255,108 @@ def mt_perturbation(geom: MTGeometry, seed: int, dtype=np.float64) -> dict:
     return {n: np.ascontiguousarray(
         _MT_SCALES[n][1] * rng.standard_normal(shapes[n]), dtype=dtype)
         for n in MT_STATE + MT_ACTIVE}
+
+
+# small_step_init/_finish: u0..mup0 the stage-start state, u..mup the
+# current one; p is the full pressure (c2a = gamma p / alt), thp/thp0
+# theta - t0, muts WRF's full column mass.
+_SS_SCALES = {
+    "u_pp": (0.0, 50.0), "v_pp": (0.0, 50.0), "w_pp": (0.0, 10.0),
+    "th_pp": (0.0, 100.0), "ph_pp": (0.0, 20.0), "mu_pp": (0.0, 20.0),
+    "al_pp": (0.0, 1e-3), "p_pp": (0.0, 50.0), "p_pp_old": (0.0, 50.0),
+    "u0": (5.0, 5.0), "v0": (-2.0, 5.0), "u": (5.0, 5.0), "v": (-2.0, 5.0),
+    "w0": (0.0, 1.0), "w": (0.0, 1.0), "thp0": (10.0, 5.0),
+    "thp": (10.0, 5.0), "php0": (0.0, 20.0), "php": (0.0, 20.0),
+    "p": (8.0e4, 1e4), "alt": (1.0, 0.2), "mup0": (0.0, 200.0),
+    "mup": (0.0, 200.0), "muts": (9.0e4, 2e3), "h_diabatic": (0.0, 1e-3),
+    "mub2d": (9.0e4, 2e3), "msft": (1.0, 0.02), "msfu": (1.0, 0.02),
+    "msfv": (1.0, 0.02),
+}
+
+
+def ss_geometry(nz=7, ny=8, nx=9, **overrides) -> SSGeometry:
+    base = dict(nz=nz, ny=ny, nx=nx)
+    base.update(overrides)
+    return SSGeometry(**base)
+
+
+def ss_trajectory(geom: SSGeometry, seed: int, dtype=np.float64, *,
+                  hybrid: bool = False) -> dict:
+    """Host trajectory (and state start) of small_step_init/_finish, by
+    name.  Without ``geom.has_msf`` the map factors are 1."""
+    rng = np.random.default_rng(seed)
+    shapes = ss_shapes(geom)
+    out = {}
+    for name, (c, s) in _SS_SCALES.items():
+        out[name] = c + s * rng.standard_normal(shapes[name])
+    if not geom.has_msf:
+        for name in ("msft", "msfu", "msfv"):
+            out[name] = np.ones(shapes[name])
+    nz = geom.nz
+    eta = np.linspace(1.0, 0.0, nz + 1)
+    dnw = np.diff(eta) * (1.0 + 0.2 * (rng.random(nz) - 0.5))
+    out["rdnw"] = 1.0 / dnw
+    znu = 0.5 * (eta[1:] + eta[:-1])
+    if hybrid:
+        out["c1h"] = np.sqrt(znu)
+        out["c2h"] = (1.0 - out["c1h"]) * 5000.0
+        out["c1f"] = np.sqrt(eta)
+        out["c2f"] = (1.0 - out["c1f"]) * 5000.0
+    else:
+        out["c1h"], out["c2h"] = np.ones(nz), np.zeros(nz)
+        out["c1f"], out["c2f"] = np.ones(nz + 1), np.zeros(nz + 1)
+    return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in out.items()}
+
+
+def ss_perturbation(geom: SSGeometry, seed: int, dtype=np.float64) -> dict:
+    """Scaled perturbations of every small_step state and active array."""
+    rng = np.random.default_rng(seed)
+    shapes = ss_shapes(geom)
+    names = dict.fromkeys(SI_STATE + SI_ACTIVE + SF_STATE + SF_ACTIVE)
+    return {n: np.ascontiguousarray(
+        _SS_SCALES[n][1] * rng.standard_normal(shapes[n]), dtype=dtype)
+        for n in names}
+
+
+# One acoustic substep (advance_uv -> advance_mu_t -> advance_w) on the
+# strict primal's names: periodic (spec_zone 0), msf 1, shared dtau and
+# off-centring, so the three operators see one consistent state.
+def substep_geometries(nz=7, ny=8, nx=9, *, base3d=1, top_lid=0,
+                       smdiv=0.1) -> tuple:
+    return (uv_geometry(nz, ny, nx, base3d=base3d, top_lid=top_lid,
+                        smdiv=smdiv),
+            mt_geometry(nz, ny, nx),
+            w_geometry(nz, ny, nx, base3d=base3d, top_lid=top_lid))
+
+
+def _mt_named(d: dict) -> dict:
+    return {MT_ALIAS.get(n, n): v for n, v in d.items()}
+
+
+def substep_trajectory(geoms: tuple, seed: int, dtype=np.float64, *,
+                       hybrid: bool = False) -> dict:
+    """Host base state of one substep: advance_mu_t's, then advance_uv's,
+    then advance_w's draws (the later win on shared names, so the
+    vertical constants are advance_w's); dnw = 1/rdnw."""
+    uvg, mtg, wg = geoms
+    out = _mt_named(mt_trajectory(mtg, seed + 2, dtype, hybrid=hybrid))
+    out.update(uv_trajectory(uvg, seed + 1, dtype, hybrid=hybrid))
+    out.update(w_trajectory(wg, seed, dtype, hybrid=hybrid))
+    out["dnw"] = np.ascontiguousarray(1.0 / out["rdnw"], dtype=dtype)
+    return out
+
+
+def substep_active(geoms: tuple) -> tuple:
+    """Every name one substep reads or writes that is perturbed."""
+    names = (("u_pp", "v_pp") + UV_ACTIVE
+             + tuple(MT_ALIAS.get(n, n) for n in MT_STATE + MT_ACTIVE)
+             + W_STATE + W_ACTIVE)
+    return tuple(dict.fromkeys(names))
+
+
+def substep_perturbation(geoms: tuple, seed: int, dtype=np.float64) -> dict:
+    uvg, mtg, wg = geoms
+    out = _mt_named(mt_perturbation(mtg, seed + 2, dtype))
+    out.update(uv_perturbation(uvg, seed + 1, dtype))
+    out.update(w_perturbation(wg, seed, dtype))
+    return {n: out[n] for n in substep_active(geoms)}
