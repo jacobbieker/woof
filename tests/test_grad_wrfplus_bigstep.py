@@ -226,7 +226,17 @@ for case in sorted({{k.split("/")[0] for k in z.files if "/" in k}}):
         out[pre + name] = float(np.abs(w - e).max()) / scale
 ''', tmp_path)
     limit = 1e-5 if backend == "mlx" else 1e-12
-    bad = {k: v for k, v in out.items() if not v < limit}
+    # The pressure gradient's mu' adjoint takes the across-face difference
+    # of the half-level geopotential phb + php: the fixture's phb reaches
+    # 3e4 at the top while the difference is about 50-100, so binary32
+    # loses about 3e4 / 70 ulps there.  Host and CUDA binary32 give the
+    # same 1.3e-5 to 2.3e-5 as Metal, and removing each level's mean phb
+    # (which leaves every difference unchanged) brings it to 2e-7: this is
+    # the strict primal's own cancellation, not a Metal difference.
+    loose = {"pgf_open_x/ad_mup", "pgf_open_y_lid/ad_mup", "pgf_periodic/ad_mup",
+             "pgf_spec_lid/ad_mup"}
+    bad = {k: v for k, v in out.items()
+           if not v < (1e-4 if backend == "mlx" and k in loose else limit)}
     assert not bad, sorted(bad.items())
     assert len(out) == 4 * 9 + 2 * 4
 
