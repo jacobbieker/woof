@@ -65,9 +65,19 @@ glibc 2.44), 2026-11-20.
   - the chlorophyll absorption without the biogeochemistry is
     `kalg*(0.5/dzk(klev))` in the bottom layer's visible band only.
 - Not in the cases: ice without volume (`aice > puny`, `vice = 0`). Its
-  layers have no thickness, so `kalg*(0.5/0)` and then `inf*0` make NaN in
-  v8.4.2 and in the port alike, but a NaN's payload is the host's, so its
-  words cannot be compared. `_dedd_state` gives that category volume.
+  layers have no thickness, so `kalg*(0.5/0)` is an infinite extinction in
+  the bottom layer in v8.4.2 and in the port alike: with algae the visible
+  light reaching it is absorbed in ice that is not there, and with
+  `kalg = 0` (`0*Inf`) the category's shortwave is NaN, whose payload is the
+  host's, so its words cannot be compared. `_dedd_state` gives that
+  category volume.
+- Opt-in correction (not the default, not in the oracle):
+  `woof_v842_corrections = ('dedd_zero_volume_ice',)` gives layers without
+  thickness no chlorophyll absorption, so ice without volume is
+  transparent. `tests/test_mpas_seaice_column_corrections.py` checks it
+  for both `kalg` cases: finite, no absorption in the missing ice, albedos
+  in [0, 1], and each category's absorbed shortwave equal to the incoming
+  minus the reflected.
 - `oracle-r8.npz`: per case, every output field whose words differ from the
   input's. `column-logs.json`: the tracer object and the log lines.
   `inputs.sha256`: the input-stream digests.
