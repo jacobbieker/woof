@@ -558,6 +558,149 @@ on a shared A6000:
 The 50 m domain takes most of the step. GPU memory was 17 GB without the
 nest and 21 GB with it.
 
+### Phase 2: two hours, Overture footprints
+
+The same case was rerun with two changes:
+- the run covers both model hours (19-21 UTC);
+- the products come from `woof buildings --overture 2026-11-18.0`:
+  - 50 m domain: 493,000 footprints;
+  - 25 m nest: 26,165 footprints;
+  - GEM-15 fills the missing heights.
+
+The products use the 5 m lattice cap. The no-buildings run was repeated
+over the same two hours. Outputs are 10-minute frames.
+
+**Resolved buildings with Overture.** Same measure and area as above
+(18,053 buildings in the 25 m nest's interior):
+
+| | 50 m | 25 m |
+|---|---|---|
+| buildings resolved | 58% | 78% |
+| footprint area in solid cells | 66% | 77% |
+| street area in fully open cells | 27% | 44% |
+| street area in solid cells | 21% | 15% |
+| resolved, under 250 m2 | 52% | 72% |
+| resolved, 1,000-2,500 m2 | 69% | 95% |
+
+Overture's footprints are finer-grained than the OSM extract, so slightly
+less street is fully open at 50 m. The conclusion is unchanged: 25 m is
+the spacing that opens the canyons.
+
+**25 m against 50 m.** Mean wind over the 25 m nest's area. The 25 m
+numbers come from the nest itself; the 50 m numbers come from the parent
+over the same area. All cells are counted, open and built:
+
+| window | height | 50 m: mean / p95 / w std | 25 m: mean / p95 / w std |
+|---|---|---|---|
+| 19:20-20:00 | 10 m | 0.98 / 3.6 / 0.06 m/s | 1.00 / 3.8 / 0.09 m/s |
+| 19:20-20:00 | 30 m | 1.59 / 4.6 / 0.14 m/s | 1.62 / 4.9 / 0.21 m/s |
+| 19:20-20:00 | 60 m | 2.93 / 6.1 / 0.23 m/s | 2.98 / 6.4 / 0.32 m/s |
+| 20:00-21:00 | 10 m | 0.81 / 3.0 / 0.05 m/s | 0.84 / 3.1 / 0.08 m/s |
+| 20:00-21:00 | 30 m | 1.29 / 3.8 / 0.11 m/s | 1.34 / 4.2 / 0.18 m/s |
+| 20:00-21:00 | 60 m | 2.42 / 5.0 / 0.19 m/s | 2.52 / 5.4 / 0.27 m/s |
+
+The mean wind is nearly the same at 25 m as at 50 m. The extra resolution
+goes into the turbulence: vertical-velocity spread is 40-70% larger and
+the gusts (p95) are 2-10% stronger.
+
+Without buildings, the same built cells of the 50 m domain over
+19:20-20:00 average 4.2, 5.6 and 7.0 m/s at 10, 30 and 60 m. That matches
+phase 1. With buildings they average 0.5, 1.2 and 2.6 m/s.
+Over 20:00-21:00 the wind weakens in both runs: 3.6, 4.8 and 6.2 m/s
+without buildings, and 0.4, 1.0 and 2.1 m/s with them.
+
+**Street canyons.** These are streamwise sections through the open cells
+between two solid blocks, using the mean wind over each window. A canyon
+holds a vortex when the flow in its lower half runs against the flow
+above the roofs:
+
+| window | domain | canyons | with a vortex | w up at the upwind wall |
+|---|---|---|---|---|
+| 19:20-20:00 | 50 m, no buildings | 222 | 0% | 50% |
+| 19:20-20:00 | 50 m | 222 | 30% | 53% |
+| 19:20-20:00 | 25 m | 1,700 | 43% | 64% |
+| 20:00-21:00 | 50 m, no buildings | 234 | 0% | 51% |
+| 20:00-21:00 | 50 m | 234 | 39% | 58% |
+| 20:00-21:00 | 25 m | 1,771 | 45% | 64% |
+
+At 25 m, the median canyon is 1.2 times as wide as its walls are tall,
+against 2.5 at 50 m. Under WRF's skimming-flow regime, a canyon that narrow
+should hold one vortex. 25 m finds a vortex in more canyons, and its
+upwind-wall updraft is the textbook sense of rotation. 50 m catches only
+the wider canyons.
+
+**Tower wakes.** Speed deficit 200 m and 400 m downwind of six towers at
+60 m, relative to the upwind wind at 60 m. Window 19:20-20:00:
+
+| tower | no buildings, 50 m | buildings, 50 m | buildings, 25 m |
+|---|---|---|---|
+| One World Trade Center | 0.01 / 0.01 | 0.89 / 0.73 | 0.77 / 0.82 |
+| Empire State | -0.04 / -0.04 | 0.89 / 0.62 | 0.84 / 0.45 |
+| One Vanderbilt | 0.10 / 0.12 | 0.69 / 0.46 | 0.76 / 0.48 |
+| Bank of America Tower | -0.01 / 0.01 | 0.90 / 0.84 | 0.82 / 0.85 |
+| 30 Hudson Yards | 0.02 / 0.00 | 0.85 / 0.90 | 0.26 / 0.51 |
+
+The towers leave strong wakes that last at least 400 m. The neighbouring
+blocks are in the same wake, though, so the deficit is the canopy's and
+the tower's together, not the tower's alone. The Chrysler Building is
+left out: in the product it is only 132 m tall at 50 m and 10 m at 25 m.
+Both its footprint and GEM-15 miss the spire, and GEM-15 has a hole under
+it.
+
+**Stations.** Model winds against the reports. The model value is the
+mean of the nearest five open cells over ±10 min:
+
+| station, report | report | no buildings, 50 m | buildings, 50 m | buildings, 25 m |
+|---|---|---|---|---|
+| KJRB, 19:56 | 4.1 m/s from 200° | 4.4 from 205° | 3.0 from 243° | 3.1 from 262° |
+| KJRB, 20:56 | 3.6 m/s from 220° | 3.7 from 211° | 2.5 from 247° | 2.6 from 268° |
+| LaGuardia, 20:51 | 4.6 m/s from 160° | 3.9 from 200° | 2.5 from 218° | outside the nest |
+| Central Park, 20:53 | 8.2 m/s from 240° | 4.6 from 206° | 1.7 from 212° | outside the nest |
+
+The buildings make every station's wind weaker and veer it more westerly.
+Without buildings, the 50 m domain is closer to the reports at all four.
+The model's open cells near the stations are street and waterfront cells
+below the roofs. The stations measure at the shore (KJRB), at an airfield
+(LaGuardia) and above the park's canopy (Central Park). Both the
+nearest-open-cell sample and the building heights are rough at this
+spacing, so treat this as a sanity check, not a verdict.
+
+2 m temperature agrees with and without buildings to within 0.3 K,
+because the obstacles exchange no heat: about 3 K cold at KJRB, and 0.8 K (LaGuardia)
+to 3.9 K (Central Park) warm.
+
+**Metal against CUDA.** The first 10 minutes of the buildings run
+(5-domain tree, to 19:10) were run on an Apple M3 Max (128 GB) as well as
+on the A6000:
+
+| | CUDA (shared A6000) | Metal (M3 Max) |
+|---|---|---|
+| integration time, 19:00-19:10 | 2,199 s | 5,252 s |
+| 50 m step | 0.30 s | 1.24 s |
+| 25 m step | 0.29 s | 0.41 s |
+| peak memory | 21 GB (GPU) | 16.7 GB (resident) |
+
+The runs are not bit-identical, and should not be expected to be:
+
+- The initial states already differ in 21 of 179 float fields, by up to
+  2e-4 in U and T. Preprocessing ran on different machines (the CUDA host
+  and the Mac).
+- At 19:10 the turbulence has decorrelated. The rms difference in U is
+  0.27 m/s on the 50 m domain and 0.52 m/s on the 25 m domain, against
+  field rms values of about 4.7 m/s.
+
+`woof go` refuses a forecast on Metal, because its readiness gate probes
+NVRTC. To run one, prepare with `woof go --prepare-only`, then run
+`woof sim --experiment-config <prepared>/experiment.toml --wps-namelist
+<prepared>/namelist.wps <prepared>`.
+
+**Cost, phase 2.** The two-hour buildings run with the 25 m nest took
+34,800 s of integration on an A6000 that other jobs were also using. That
+is about 17,400 s per simulated hour, in line with phase 1. The mean step
+was 0.40 s on the 50 m domain and 0.38 s on the 25 m domain. Wall time
+was 593 minutes for the two hours. The no-buildings rerun (4 domains, no
+nest) took 241 minutes on the same GPU.
+
 ## Licences
 
 | source | licence | attribution woof records |
