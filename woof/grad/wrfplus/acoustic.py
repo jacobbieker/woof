@@ -16,6 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._mode import tl_options
+
 KERNELS = Path(__file__).resolve().parent / "kernels"
 THREADS = 256
 #: Levels per thread in the adjoint's face pass: dpn is shared within a
@@ -78,16 +80,17 @@ def _real(dtype) -> str:
 
 def _module(unit: str, real: str, defines: tuple = ()):
     import cupy as cp
-    return _device_module(unit, real, cp.cuda.Device().id, defines)
+    return _device_module(unit, real, cp.cuda.Device().id, defines, tl_options())
 
 
 @lru_cache(maxsize=None)
-def _device_module(unit: str, real: str, device: int, defines: tuple = ()):
+def _device_module(unit: str, real: str, device: int, defines: tuple = (),
+                   build: tuple = ()):
     import cupy as cp
     source = (KERNELS / f"{unit}.cu").read_text(encoding="utf-8")
     return cp.RawModule(code=source,
                         options=("--fmad=false", f"-DWRFPLUS_REAL={real}")
-                        + tuple(f"-D{k}={v}" for k, v in defines))
+                        + tuple(f"-D{k}={v}" for k, v in defines) + build)
 
 
 def _kernel(unit: str, name: str, dtype, defines: tuple = ()):

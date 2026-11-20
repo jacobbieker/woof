@@ -33,6 +33,13 @@
 #ifndef WRFPLUS_REAL
 #define WRFPLUS_REAL double
 #endif
+
+// WRFPLUS_TL 0 builds the base-only forward (model.step_base): every
+// perturbation store of the TL kernels is skipped, so the compiler drops
+// the tangent arithmetic and loads; the base words are unchanged.
+#ifndef WRFPLUS_TL
+#define WRFPLUS_TL 1
+#endif
 typedef WRFPLUS_REAL wreal;
 
 static __device__ __forceinline__ float wdiv(float a, float b) { return __fdiv_rn(a, b); }
@@ -322,7 +329,7 @@ void lbc_tl(wreal* __restrict__ tend, wreal* __restrict__ tendd, wreal* __restri
         h = result;
         if (held_store) {
             if (nl) held[idx] = h.v;
-            heldd[idx] = h.d;
+            if (WRFPLUS_TL) heldd[idx] = h.d;
         }
     } else if (held_read) {
         h = ld(held, heldd, idx);
@@ -334,7 +341,7 @@ void lbc_tl(wreal* __restrict__ tend, wreal* __restrict__ tendd, wreal* __restri
         result = result + h;
     }
     if (nl) tend[idx] = result.v;
-    tendd[idx] = result.d;
+    if (WRFPLUS_TL) tendd[idx] = result.d;
 }
 
 // --------------------------------------------------------------- AD
@@ -665,7 +672,7 @@ void lbf_tl(wreal* __restrict__ target, wreal* __restrict__ targetd, LB_TABLES, 
     }
     size_t idx = ((size_t)k * ny + j) * nx + i;
     if (nl) target[idx] = out.v;
-    targetd[idx] = out.d;
+    if (WRFPLUS_TL) targetd[idx] = out.d;
 }
 
 // d(xmu) adjoint of a specified cell (0 elsewhere): -a * out / xmu.
@@ -812,8 +819,8 @@ void sph_tl(wreal* __restrict__ ph, wreal* __restrict__ phd, wreal* __restrict__
             ph[f] = phn.v;
             w[f] = w[(size_t)k * st + sc];
         }
-        phd[f] = phn.d;
-        wd[f] = wd[(size_t)k * st + sc];
+        if (WRFPLUS_TL) phd[f] = phn.d;
+        if (WRFPLUS_TL) wd[f] = wd[(size_t)k * st + sc];
         if (k > 0) {
             int h = k - 1;
             size_t t = (size_t)h * st + c;
@@ -829,8 +836,8 @@ void sph_tl(wreal* __restrict__ ph, wreal* __restrict__ phd, wreal* __restrict__
                 al[t] = alv.v;
                 p[t] = pv.v;
             }
-            ald[t] = alv.d;
-            pd[t] = pv.d;
+            if (WRFPLUS_TL) ald[t] = alv.d;
+            if (WRFPLUS_TL) pd[t] = pv.d;
         }
         prev = phn;
     }

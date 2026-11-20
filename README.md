@@ -995,8 +995,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   rotation or map factors so far) whose binary32 base state reproduces
   `dycore.step` word for word, and whose binary64 dot-product and
   finite-difference tests pass. Measured at 200x200x49 on an A6000, the
-  step's adjoint sweep costs 3.3x the forward step and 5.6x with its
-  taped forward recompute (details in the design note). The forecast
+  step's adjoint sweep costs 3.3x the forward step, and 4.8x with its
+  taped forward recompute through a base-only build of the kernels
+  (details in the design note). The forecast
   path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
