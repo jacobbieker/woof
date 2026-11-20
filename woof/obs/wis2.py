@@ -86,6 +86,8 @@ PREFIX = "bkr/obs/wis2.icechunk"
 REGION = "us-west-2"
 SOURCE = "wis2"
 FAMILIES = ("land", "ocean", "sonde", "aircraft", "profiler")
+# Satellite point winds (opt-in by name; not in the default list).
+SATELLITE_FAMILIES = ("amv", "scat")
 # quality_flag bits (the store's flag_meanings); every bit but time_too_old refuses.
 QUALITY_BITS = ("outside_physical_range", "outside_plausible_range", "internally_inconsistent",
                 "vertically_inconsistent", "position_invalid", "position_suspect", "time_invalid",
@@ -184,7 +186,7 @@ def _texts(array, index):
 
 
 def _times(array, index=None):
-    """datetime64[s] from the store's integer times (nanoseconds or seconds since 1970); NaT for fill."""
+    """datetime64[s] from the store's integer times (ns, ms or s since 1970); NaT for fill."""
     raw = np.asarray(array[:] if index is None else _read(array, index))
     units = str(_attrs(array).get("units", "nanoseconds since 1970-01-01"))
     raw = raw.astype(np.int64)
@@ -194,6 +196,8 @@ def _times(array, index=None):
         bad |= raw == int(fill)
     if units.startswith("nanoseconds"):
         out = (raw // 1_000_000_000).astype("datetime64[s]")
+    elif units.startswith("milliseconds"):
+        out = (raw // 1_000).astype("datetime64[s]")
     elif units.startswith("seconds"):
         out = raw.astype("datetime64[s]")
     else:
@@ -801,8 +805,259 @@ def profiler_reports(root, start, end, box, counts: Counter) -> list[Report]:
     return out
 
 
+# --------------------------------------------------------------------------- satellite point winds
+# The satellite groups are hundreds of millions of rows, appended partition by
+# partition, so their rows are nearly in time order: a bisection on sampled
+# times finds the rows of a window, with a margin for late arrivals.
+SAT_SCAN_MARGIN = np.timedelta64(6, "h")
+SAT_SCAN_SAMPLE = 1000
+SAT_SCAN_SMALL = 2_000_000  # read a group this small whole
+
+# AMVs: the WMO AMV template (310077) only; its percent confidences are
+# typed by 0-01-044 "standard generating application" in the same column.
+AMV_TEMPLATES = ("310077",)
+QI_WITHOUT_FORECAST = 5  # 0-01-044: quality index without forecast consistency
+AMV_QI_MIN = 80.0  # EUMETSAT and NWP SAF's threshold for QI without forecast
+AMV_PRESSURE_BOUNDS = (10000.0, 100000.0)
+# Polar imagers (0-02-019); WRFDA reads an AMV as polaramv when its name has
+# MODIS or its id has AVHRR, so other polar AMVs stay out of obs_gts.
+POLAR_INSTRUMENTS = {590: "AVHRR", 591: "AVHRR", 389: "MODIS", 616: "VIIRS"}
+# Geostationary satellites (0-01-007): Meteosat and MTG, MTSAT and Himawari,
+# GOES, COMS and GK-2A.
+GEO_SATELLITES = tuple(range(50, 80)) + tuple(range(171, 175)) + tuple(range(257, 280)) + (810, 811, 812)
+
+# Scatterometers: ASCAT's template (312061) only.  ``wind_vector_cell_quality``
+# is the 24-bit flag 0-21-155 (bit 1 the most significant); a cell is refused
+# when any bit from 1 to 11 or 16 to 18 is set (retrieval, monitoring, quality
+# control, land and ice), and kept with 12 to 15 alone (speed classes, rain
+# flag unused).  The land and ice fractions are also checked directly.
+SCAT_TEMPLATES = ("312061",)
+SCAT_WVC_REFUSE = sum(1 << (24 - bit) for bit in list(range(1, 12)) + [16, 17, 18])
+SCAT_ICE_MAX = 0.1
+SCAT_HEIGHT_M = 10.0  # equivalent-neutral 10 m wind
+
+
+def _first_at_or_after(times, target, lo=0, hi=None):
+    """The first row whose sampled time reaches ``target`` (bisection on a nearly sorted array)."""
+    hi = times.shape[0] if hi is None else hi
+    while hi - lo > SAT_SCAN_SAMPLE * 4:
+        mid = (lo + hi) // 2
+        sample = _times(times, np.arange(mid, min(mid + SAT_SCAN_SAMPLE, times.shape[0])))
+        sample = sample[~np.isnat(sample)]
+        if sample.size and np.median(sample.astype(np.int64)) < target.astype(np.int64):
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def _sat_select(group, start, end, box, counts, label):
+    """Rows of a satellite group in the window and box: (index, time at index)."""
+    lo, hi = _window(start, end)
+    times = group["time"]
+    n = times.shape[0]
+    if n <= SAT_SCAN_SMALL:
+        a, b = 0, n
+    else:
+        a = _first_at_or_after(times, lo - SAT_SCAN_MARGIN)
+        b = min(n, _first_at_or_after(times, hi + SAT_SCAN_MARGIN, lo=a) + SAT_SCAN_SAMPLE * 4)
+    counts[f"{label}_rows_scanned"] += b - a
+    when = _times(times, np.arange(a, b))
+    rows = np.nonzero((when >= lo) & (when <= hi))[0]
+    lat, lon = _column(group["latitude"], rows + a), _column(group["longitude"], rows + a)
+    keep = in_box(lat, lon, box)
+    return rows[keep] + a, when[rows[keep]]
+
+
+def _column(array, index, col=0):
+    """Column ``col`` of a 1-D or 2-D array at ``index`` (fill as NaN)."""
+    values = _numbers(array, index)
+    return values[:, col] if values.ndim == 2 else values
+
+
+def _quality_column(group, name, index, values, counts, label, col=None):
+    """``values`` with NaN where ``<name>_quality`` (the same column, or per-row ``col``) is set."""
+    quality = f"{name}_quality"
+    if quality not in group:
+        return values
+    q = _numbers(group[quality], index)
+    if q.ndim == 2:
+        q = q[np.arange(len(index)), col] if col is not None else q[:, 0]
+    bad = np.isfinite(q) & (q != 0) & np.isfinite(values)
+    if bad.any():
+        counts[f"{label}_{name}_quality"] += int(bad.sum())
+    return np.where(bad, np.nan, values)
+
+
+def isa_altitude_m(pressure_pa):
+    """The ICAO standard-atmosphere altitude of a pressure (the inverse of neutral_table.isa_pressure_pa)."""
+    from woof.obs import neutral_table as nt
+    p = np.asarray(pressure_pa, float)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        low = nt.ISA_SEA_LEVEL_K / nt.ISA_LAPSE_K_M * (1.0 - (p / nt.ISA_SEA_LEVEL_PA) ** (1.0 / nt.ISA_EXPONENT))
+        high = nt.ISA_TROPOPAUSE_M - nt.ISA_STRATOSPHERE_SCALE_M * np.log(p / nt.ISA_TROPOPAUSE_PA)
+    return np.where(p >= nt.ISA_TROPOPAUSE_PA, low, high)
+
+
+def _templates_ok(group, index, allowed, counts, label):
+    if "bufr_template" not in group:
+        return np.ones(len(index), bool)
+    templates = _texts(group["bufr_template"], index)
+    ok = np.isin(templates.astype(str), allowed)
+    for name, n in Counter(templates[~ok].tolist()).items():
+        counts[f"{label}_template_{name or 'unknown'}_not_vetted"] += n
+    return ok
+
+
+def amv_reports(root, start, end, box, counts: Counter) -> list[Report]:
+    """Atmospheric motion vectors at their assigned pressure (WRFDA geoamv and polaramv)."""
+    if "satellite/ahi_amv" in root:
+        counts["ahi_amv_group_skipped_no_quality_index"] += 1  # JMA's template decodes no QI here
+    group = _group(root, "satellite/amv")
+    index, time = _sat_select(group, start, end, box, counts, "amv")
+    counts["amv_in_window"] += len(index)
+    if index.size == 0:
+        return []
+    ok = _quality_ok(group, "quality_flag", index, counts, "amv") \
+        & _templates_ok(group, index, AMV_TEMPLATES, counts, "amv")
+    index, time = index[ok], time[ok]
+    sat = _column(group["satellite_identifier"], index)
+    instrument = _column(group["satellite_instruments"], index) if "satellite_instruments" in group \
+        else np.full(len(index), np.nan)
+    p = _quality_column(group, "pressure", index, _column(group["pressure"], index), counts, "amv")
+    spd = _value(group, "wind_speed", index, counts, "amv")
+    wdir = _value(group, "wind_direction", index, counts, "amv")
+    apps = np.atleast_2d(_numbers(group["standard_generating_application"], index).reshape(len(index), -1))
+    conf = np.atleast_2d(_numbers(group["percent_confidence"], index).reshape(len(index), -1))
+    width = min(apps.shape[1], conf.shape[1])
+    typed = np.where(apps[:, :width] == QI_WITHOUT_FORECAST, conf[:, :width], np.nan)
+    qi = np.array([row[np.isfinite(row)][0] if np.isfinite(row).any() else np.nan for row in typed])
+    lat, lon = _column(group["latitude"], index), _column(group["longitude"], index)
+    received = _received(group, index)
+    good_w = _wind_ok(spd, wdir, counts, "amv")
+    out, seen = [], set()
+    for n in np.argsort(received.astype(np.int64), kind="stable"):  # the first arrival of a copy wins
+        if not np.isfinite(qi[n]):
+            counts["amv_qi_missing"] += 1
+            continue
+        if qi[n] < AMV_QI_MIN:
+            counts["amv_qi_below_minimum"] += 1
+            continue
+        if not (np.isfinite(p[n]) and AMV_PRESSURE_BOUNDS[0] <= p[n] <= AMV_PRESSURE_BOUNDS[1]):
+            counts["amv_pressure_out_of_bounds"] += 1
+            continue
+        if not good_w[n]:
+            continue
+        sid = int(sat[n]) if np.isfinite(sat[n]) else -1
+        imager = POLAR_INSTRUMENTS.get(int(instrument[n]) if np.isfinite(instrument[n]) else -1)
+        if imager is None and sid not in GEO_SATELLITES:
+            counts[f"amv_platform_{sid}_unknown"] += 1
+            continue
+        key = (sid, time[n], round(float(lat[n]), 2), round(float(lon[n]), 2), round(float(p[n]) / 10.0))
+        if key in seen:
+            counts["amv_duplicate_copy"] += 1
+            continue
+        seen.add(key)
+        station = f"{imager}-{sid}" if imager else f"GEO-{sid}"
+        out.append(Report(
+            family="amv", fm=88, station=station, name=f"{imager or 'GEO'} AMV {sid}", lat=float(lat[n]),
+            lon=float(lon[n]), elev=float("nan"), time=time[n], received=received[n], p=[p[n]], z=[np.nan],
+            t=[np.nan], td=[np.nan], rh=[np.nan], spd=[spd[n]], wdir=[wdir[n]], group="satellite/amv",
+            surface=False, extras={"qi": float(qi[n]), "polar": imager is not None, "imager": imager or "geo"}))
+    return out
+
+
+def scat_reports(root, start, end, box, counts: Counter) -> list[Report]:
+    """Scatterometer 10 m winds, the selected ambiguity only (WRFDA qscat)."""
+    group = _group(root, "satellite/scatterometer")
+    index, time = _sat_select(group, start, end, box, counts, "scat")
+    counts["scat_in_window"] += len(index)
+    if index.size == 0:
+        return []
+    ok = _quality_ok(group, "quality_flag", index, counts, "scat") \
+        & _templates_ok(group, index, SCAT_TEMPLATES, counts, "scat")
+    index, time = index[ok], time[ok]
+    selected = _column(group["index_of_selected_wind_vector"], index)
+    ambiguities = _column(group["number_of_vector_ambiguities"], index)
+    usable = np.isfinite(selected) & (selected >= 1) & (selected <= np.nan_to_num(ambiguities, nan=0.0))
+    counts["scat_no_selected_wind"] += int((~usable).sum())
+    col = np.where(usable, selected - 1, 0).astype(np.int64)
+    rows = np.arange(len(index))
+    spd = np.atleast_2d(_numbers(group["wind_speed_at10_m"], index).reshape(len(index), -1))[rows, col]
+    wdir = np.atleast_2d(_numbers(group["wind_direction_at10_m"], index).reshape(len(index), -1))[rows, col]
+    spd = _quality_column(group, "wind_speed_at10_m", index, spd, counts, "scat", col)
+    wdir = _quality_column(group, "wind_direction_at10_m", index, wdir, counts, "scat", col)
+    wvc = _column(group["wind_vector_cell_quality"], index) if "wind_vector_cell_quality" in group \
+        else np.zeros(len(index))
+    wvc_bad = ~np.isfinite(wvc) | ((np.nan_to_num(wvc, nan=0.0).astype(np.int64) & SCAT_WVC_REFUSE) != 0)
+    land = np.nanmax(np.atleast_2d(_numbers(group["land_fraction"], index).reshape(len(index), -1)), axis=1) \
+        if "land_fraction" in group else np.zeros(len(index))
+    ice = _column(group["ice_probability"], index) if "ice_probability" in group else np.zeros(len(index))
+    sat = _column(group["satellite_identifier"], index)
+    lat, lon = _column(group["latitude"], index), _column(group["longitude"], index)
+    received = _received(group, index)
+    good_w = _wind_ok(np.where(usable, spd, np.nan), np.where(usable, wdir, np.nan), counts, "scat")
+    out, seen = [], set()
+    for n in range(len(index)):
+        if not usable[n]:
+            continue
+        if wvc_bad[n]:
+            counts["scat_wind_vector_cell_quality"] += 1
+            continue
+        if np.isfinite(land[n]) and land[n] > 0.0:
+            counts["scat_land"] += 1
+            continue
+        if np.isfinite(ice[n]) and ice[n] > SCAT_ICE_MAX:
+            counts["scat_ice"] += 1
+            continue
+        if not good_w[n]:
+            continue
+        sid = int(sat[n]) if np.isfinite(sat[n]) else -1
+        key = (sid, time[n], round(float(lat[n]), 3), round(float(lon[n]), 3))
+        if key in seen:
+            counts["scat_duplicate_copy"] += 1
+            continue
+        seen.add(key)
+        out.append(Report(
+            family="scat", fm=281, station=f"SCAT-{sid}", name=f"ASCAT {sid}", lat=float(lat[n]),
+            lon=float(lon[n]), elev=0.0, time=time[n], received=received[n], p=[np.nan], z=[SCAT_HEIGHT_M],
+            t=[np.nan], td=[np.nan], rh=[np.nan], spd=[spd[n]], wdir=[wdir[n]], group="satellite/scatterometer"))
+    return out
+
+
+AMV_THIN_LAYER_PA = 5000.0  # AMVs are thinned per 50 hPa layer
+
+
+def thin_satellite_winds(reports, thin_km: float, counts: Counter) -> list[Report]:
+    """Keep one AMV per ``thin_km`` box and 50 hPa layer (the highest QI) and one scatterometer wind
+    per ``thin_km`` box (the first); other reports pass. ``thin_km`` 0 keeps every report."""
+    if not thin_km:
+        return list(reports)
+    if thin_km < 0:
+        raise Wis2Error("the thinning distance must be positive (km), or 0 for none")
+    step = thin_km / 111.2
+    best, out = {}, []
+    for rep in reports:
+        if rep.family not in SATELLITE_FAMILIES:
+            out.append(rep)
+            continue
+        row = int(np.floor((rep.lat + 90.0) / step))
+        ring = max(1, int(np.floor(360.0 * np.cos(np.radians(min(89.9, abs(rep.lat) + step / 2))) / step)))
+        col = int(np.floor(((rep.lon + 180.0) % 360.0) / 360.0 * ring))
+        layer = int(rep.p[0] // AMV_THIN_LAYER_PA) if rep.family == "amv" else 0
+        key = (rep.family, row, col, layer)
+        prior = best.get(key)
+        if prior is None or rep.extras.get("qi", 0.0) > prior.extras.get("qi", 0.0):
+            best[key] = rep
+    for family in SATELLITE_FAMILIES:
+        kept = sum(1 for k in best if k[0] == family)
+        counts[f"{family}_thinned"] += sum(1 for r in reports if r.family == family) - kept
+    return out + list(best.values())
+
+
 READERS = {"land": land_reports, "ocean": ocean_reports, "sonde": sonde_reports,
-           "aircraft": aircraft_reports, "profiler": profiler_reports}
+           "aircraft": aircraft_reports, "profiler": profiler_reports, "amv": amv_reports,
+           "scat": scat_reports}
 
 
 def read_reports(root, start, end, box, families=FAMILIES) -> tuple[list[Report], Counter]:
@@ -811,7 +1066,7 @@ def read_reports(root, start, end, box, families=FAMILIES) -> tuple[list[Report]
     reports = []
     for family in families:
         if family not in READERS:
-            raise Wis2Error(f"unknown family {family!r}; known: {', '.join(FAMILIES)}")
+            raise Wis2Error(f"unknown family {family!r}; known: {', '.join(FAMILIES + SATELLITE_FAMILIES)}")
         part = [rep for rep in READERS[family](root, start, end, box, counts) if _gross_bounds(rep, counts)]
         counts[f"{family}_reports"] += len(part)
         reports.extend(part)
@@ -860,8 +1115,9 @@ SURFACE_LABELS = {  # (family, variable) -> measurement
     ("ocean", "dewpoint_k"): "platform_dewpoint",
     ("ocean", "wind"): "platform_wind",
     ("ocean", "surface_pressure_pa"): "station_pressure",
+    ("scat", "wind"): "scatterometer_wind_10m",
 }
-ALOFT_LABELS = {"sonde": "sonde_level", "aircraft": "aircraft_level"}
+ALOFT_LABELS = {"sonde": "sonde_level", "aircraft": "aircraft_level", "amv": "amv_assigned_pressure"}
 
 
 def _aware(when):
@@ -912,9 +1168,12 @@ def neutral_rows(reports, table) -> tuple[list, Counter]:
                 if not np.isfinite(p):
                     continue
                 # The table needs an elevation on every row; a level without a height carries the
-                # station's (pressure-level operators key on level_pa, not on it).
-                base.update(elevation_m=float(rep.z[k]) if np.isfinite(rep.z[k]) else float(rep.elev),
-                            level_pa=float(p))
+                # station's, or (an AMV) its pressure's standard-atmosphere altitude. Pressure-level
+                # operators key on level_pa, not on it.
+                elevation = rep.z[k] if np.isfinite(rep.z[k]) else rep.elev
+                if not np.isfinite(elevation):
+                    elevation = isa_altitude_m(p)
+                base.update(elevation_m=float(elevation), level_pa=float(p))
                 label = lambda var: ALOFT_LABELS[rep.family]  # noqa: E731
             values = [("temperature_k", rep.t[k], err["t"]), ("dewpoint_k", rep.td[k], err["td"])]
             if rep.surface:
@@ -955,11 +1214,11 @@ def write_table(rows, path) -> None:
 
 # --------------------------------------------------------------------------- OBSPROC obs_gts
 FM_PLATFORM = {12: "FM-12 SYNOP", 13: "FM-13 SHIP", 18: "FM-18 BUOY", 35: "FM-35 TEMP",
-               42: "FM-42 AMDAR", 132: "FM-132 PROFL"}
+               42: "FM-42 AMDAR", 88: "FM-88 SATOB", 132: "FM-132 PROFL", 281: "FM-281 QSCAT"}
 HEADER_COUNTS = (("SYNOP", 12), ("METAR", None), ("SHIP", 13), ("BUOY", 18), ("BOGUS", None),
                  ("TEMP", 35), ("AMDAR", 42), ("AIREP", None), ("TAMDAR", None), ("PILOT", None),
-                 ("SATEM", None), ("SATOB", None), ("GPSPW", None), ("GPSZD", None), ("GPSRF", None),
-                 ("GPSEP", None), ("SSMT1", None), ("SSMT2", None), ("TOVS", None), ("QSCAT", None),
+                 ("SATEM", None), ("SATOB", 88), ("GPSPW", None), ("GPSZD", None), ("GPSRF", None),
+                 ("GPSEP", None), ("SSMT1", None), ("SSMT2", None), ("TOVS", None), ("QSCAT", 281),
                  ("PROFL", 132), ("AIRSR", None), ("OTHER", None))
 INFO_FMT = "(A12,1X,A19,1X,A40,1X,I6,3(F12.3,11X),6X,A40)"
 SRFC_FMT = "(F12.3,I4,F7.2,F12.3,I4,F7.3)"
@@ -1046,12 +1305,21 @@ def obs_gts_report(rep: Report, table) -> list[str]:
 
 
 def write_obs_gts(reports, path, table, *, domain: dict | None = None) -> Counter:
-    """Write OBSPROC's ``obs_gts`` ASCII for the reports (WRFDA's ``ob.ascii``)."""
-    counts = Counter(rep.fm for rep in reports if rep.fm in FM_PLATFORM)
-    body = []
-    for rep in sorted(reports, key=lambda r: (r.time, r.fm, r.station)):
+    """Write OBSPROC's ``obs_gts`` ASCII for the reports (WRFDA's ``ob.ascii``).
+
+    A polar AMV from an imager other than AVHRR or MODIS is left out: WRFDA
+    would read it as a geostationary one (it keys polaramv on those names).
+    """
+    kept = []
+    for rep in reports:
+        if rep.fm == 88 and rep.extras.get("polar") and rep.extras.get("imager") not in ("AVHRR", "MODIS"):
+            continue
         if rep.fm in FM_PLATFORM and len(rep.p):
-            body.extend(obs_gts_report(rep, table))
+            kept.append(rep)
+    counts = Counter(rep.fm for rep in kept)
+    body = []
+    for rep in sorted(kept, key=lambda r: (r.time, r.fm, r.station)):
+        body.extend(obs_gts_report(rep, table))
     Path(path).write_text("\n".join(obs_gts_header(counts, domain) + body) + "\n", encoding="latin-1")
     return counts
 
@@ -1062,7 +1330,7 @@ def _parse_time(text):
 
 
 def fetch(start, end, box, *, families=FAMILIES, table_path=None, obs_gts_path=None, domain=None,
-          root=None, snapshot=None) -> dict:
+          root=None, snapshot=None, thin_km=0.0) -> dict:
     """Read, QC and write; returns the receipt (counts, store snapshot, outputs)."""
     from woof.obs.obserr_wrfda import ObsErrTable
 
@@ -1070,10 +1338,11 @@ def fetch(start, end, box, *, families=FAMILIES, table_path=None, obs_gts_path=N
     if root is None:
         root, snapshot_id = open_store(snapshot=snapshot)
     reports, counts = read_reports(root, start, end, box, families)
+    reports = thin_satellite_winds(reports, thin_km, counts)
     errors = ObsErrTable.load()
     receipt = {"schema": "woof.obs.wis2-fetch/v1", "store": f"s3://{BUCKET}/{PREFIX}", "snapshot": snapshot_id,
                "start": str(start), "end": str(end), "box": list(box), "families": list(families),
-               "errors": "WRF 4.7.1 OBSPROC obserr.txt (woof/obs/data/wrfda_obserr.txt)", "qc": dict(counts)}
+               "thin_km": thin_km, "errors": "WRF 4.7.1 OBSPROC obserr.txt (woof/obs/data/wrfda_obserr.txt)", "qc": dict(counts)}
     if table_path:
         rows, row_counts = neutral_rows(reports, errors)
         write_table(rows, table_path)
@@ -1092,7 +1361,8 @@ def _cli_fetch(args) -> int:
         return 2
     try:
         receipt = fetch(_parse_time(args.start), _parse_time(args.end), box, families=families,
-                        table_path=args.table, obs_gts_path=args.obs_gts, snapshot=args.snapshot)
+                        table_path=args.table, obs_gts_path=args.obs_gts, snapshot=args.snapshot,
+                        thin_km=args.thin_km)
     except Wis2Error as error:
         print(f"woof obs wis2 fetch: {error}", file=sys.stderr)
         return 1
@@ -1111,10 +1381,15 @@ def register_cli(obs_sub) -> None:
     fetch_p.add_argument("--start", required=True, help="window start, ISO 8601 UTC")
     fetch_p.add_argument("--end", required=True, help="window end, ISO 8601 UTC")
     fetch_p.add_argument("--bbox", required=True, nargs=4, type=float, metavar=("SOUTH", "NORTH", "WEST", "EAST"))
-    fetch_p.add_argument("--families", default=",".join(FAMILIES), help=f"comma list of {', '.join(FAMILIES)}")
+    fetch_p.add_argument("--families", default=",".join(FAMILIES),
+                         help=f"comma list of {', '.join(FAMILIES + SATELLITE_FAMILIES)}; the satellite point "
+                              f"winds ({', '.join(SATELLITE_FAMILIES)}) are read only when named")
     fetch_p.add_argument("--table", help="write gpuwm-obs.table.v2 CSV here (for the ensemble filter)")
     fetch_p.add_argument("--obs-gts", help="write OBSPROC obs_gts ASCII here (for 3D-Var / WRFDA)")
     fetch_p.add_argument("--receipt", help="also write the JSON receipt here")
+    fetch_p.add_argument("--thin-km", type=float, default=0.0,
+                         help="keep one AMV per box of this size and 50 hPa layer (highest QI) and one "
+                              "scatterometer wind per box; 0 (the default) keeps them all")
     fetch_p.add_argument("--snapshot", help="read this Icechunk snapshot id instead of main's head")
     fetch_p.set_defaults(func=_cli_fetch)
 

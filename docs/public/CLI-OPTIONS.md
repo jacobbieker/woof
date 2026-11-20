@@ -2714,12 +2714,13 @@ Takes no options of its own.
 |---|---|
 | `--bbox ('SOUTH', 'NORTH', 'WEST', 'EAST')` | _(the parser declares no help text for this option)_ |
 | `--end` | window end, ISO 8601 UTC |
-| `--families` | comma list of land, ocean, sonde, aircraft, profiler |
+| `--families` | comma list of land, ocean, sonde, aircraft, profiler, amv, scat; the satellite point winds (amv, scat) are read only when named |
 | `--obs-gts` | write OBSPROC obs_gts ASCII here (for 3D-Var / WRFDA) |
 | `--receipt` | also write the JSON receipt here |
 | `--snapshot` | read this Icechunk snapshot id instead of main's head |
 | `--start` | window start, ISO 8601 UTC |
 | `--table` | write gpuwm-obs.table.v2 CSV here (for the ensemble filter) |
+| `--thin-km` | keep one AMV per box of this size and 50 hPa layer (highest QI) and one scatterometer wind per box; 0 (the default) keeps them all |
 
 ## `woof ocean`
 
