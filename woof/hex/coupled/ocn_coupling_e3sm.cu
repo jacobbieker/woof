@@ -31,7 +31,9 @@ typedef double r8;
 #define D(a,b) __ddiv_rn((a),(b))
 
 // chosen on the words as integer selects, so no compiler turns them into the
-// IEEE min/max instructions (which order -0.0 below 0.0)
+// IEEE min/max instructions (which order -0.0 below 0.0). NVRTC still lowers
+// the MIN select to min.f64; that agrees with gfortran's MIN wherever the
+// second argument is +0.0 or the positive pressure cap, as it always is here.
 __device__ __forceinline__ r8 fmax_first(r8 a, r8 b) {
     return __longlong_as_double(b > a ? __double_as_longlong(b) : __double_as_longlong(a));
 }

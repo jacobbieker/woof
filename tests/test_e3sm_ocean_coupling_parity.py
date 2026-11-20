@@ -194,9 +194,9 @@ def _mismatches(case, key, run=None):
     # gfortran's MAX keeps the first argument on a tie (-0.0 stays)
     ("b > a ? __double_as_longlong(b) : __double_as_longlong(a)",
      "a > b ? __double_as_longlong(a) : __double_as_longlong(b)", "forcing/shortWaveHeatFlux", "gcase"),
-    # and MIN too
-    ("b < a ? __double_as_longlong(b) : __double_as_longlong(a)",
-     "a < b ? __double_as_longlong(a) : __double_as_longlong(b)", "o2x/Fioo_q", "gcase"),
+    # the frazil energy's MIN(.., 0) taken as MAX (NVRTC lowers either MIN tie form to min.f64, which
+    # agrees with gfortran wherever the second argument is +0.0 or the positive cap, as it always is here)
+    ("seaIceEnergy[i] = fmin_first(", "seaIceEnergy[i] = fmax_first(", "o2x/Fioo_q", "gcase"),
     # the removal's latitude strictly south
     ("latCell[i] < (code[j]", "latCell[i] <= (code[j]", "forcing/riverRunoffFlux", "standalone"),
     # the precipitation factor dropped
