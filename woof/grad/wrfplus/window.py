@@ -171,12 +171,13 @@ class Window:
         for c in sorted(self._checkpoints, reverse=True):
             seg = range(c, min(c + self.every, self.nsteps))
             # the segment's step-start states, from its checkpoint
-            starts = {}
-            x = self._load(self._checkpoints[c])
-            for k in seg:
-                starts[k] = _copy(self._inputs(x))
-                if k + 1 < seg.stop:
+            # (the first is the checkpoint itself, which _load only reads)
+            starts = {c: self._checkpoints[c]}
+            if len(seg) > 1:
+                x = self._load(self._checkpoints[c])
+                for k in seg[:-1]:
                     self._scratch = M.step_base(x, self.geoms[k], None, self._scratch)
+                    starts[k + 1] = _copy(self._inputs(x))
             for k in reversed(seg):
                 x = self._load(starts.pop(k))
                 tape = []

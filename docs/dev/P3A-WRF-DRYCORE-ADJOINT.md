@@ -632,11 +632,21 @@ Each step is one small PR, taken to merged before the next widens.
      | 3 | 1.31x | 6.00x | 24.7x |
      | 6 | 1.31x | 6.22x | 26.6x |
 
-     The forward is the base-only step plus the checkpoint copies. At
-     `checkpoint_every = 1` the adjoint is the single-step adjoint (4.8x)
-     plus the checkpoint loads. Longer intervals trade memory for one
-     more base-only rerun per step. Measured with another job on the
-     host CPUs (load 29), which inflates host dispatch.
+     The forward is the base-only step plus the checkpoint copies.
+     Longer intervals trade memory for one more base-only rerun per step.
+     At `checkpoint_every = 1` the window adds almost nothing to the bare
+     step: a checkpoint load (0.02x) and, before the fix in #718's
+     follow-up commit, a redundant step-start copy (0.02x). Over the same
+     6-step loop, the window adjoint and a bare `_load` + `step_base`
+     (tape) + `step_ad` loop measure within 0.04x of each other (5.00x
+     against 5.04x). The gap to the single-step 4.8x comes from the
+     denominator and the host. This table divides by a 6-step
+     back-to-back `dycore.step` average, which is about 3% faster than
+     the single synced step item 8b divides by (14.06 against 14.53 ms):
+     about 0.15x. Against the single-step denominator, the same fused
+     step measures 4.83-4.93x. The rest is run-to-run spread under
+     another job's host load (15-29), which moves the same measurement
+     by 0.1x and more between runs a minute apart.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
