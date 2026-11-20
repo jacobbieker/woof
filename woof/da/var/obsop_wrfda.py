@@ -33,7 +33,7 @@ import numpy as np
 
 from . import innov_wrfda as iw
 
-__all__ = ["ObsStencil", "ObsTerm", "AD_ORDER", "xtotpw", "xtotpw_adj",
+__all__ = ["ObsStencil", "ObsTerm", "FlatObsTerm", "AD_ORDER", "xtotpw", "xtotpw_adj",
            "xtogpsref_lin", "xtogpsref_adj"]
 
 #: ``da_transform_xtoy_adj``'s type order.
@@ -473,3 +473,66 @@ class ObsTerm:
     def jo_split(self, y: dict | None = None) -> dict:
         """Per-type ``Jo`` (``da_jo_and_grady``) at ``H'x = y``."""
         return iw.jo(self.iv, y)
+
+
+def _host(a):
+    return a.get() if hasattr(a, "get") else np.asarray(a)
+
+
+class FlatObsTerm:
+    """:class:`ObsTerm` as :class:`woof.da.var.cost.ObsTerm`: one flat vector.
+
+    ``y`` is every type's fields concatenated (types in :data:`AD_ORDER`,
+    each type's fields in :meth:`ObsStencil.fields`'s order, levels report
+    by report).  :meth:`jo_split` gives ``da_jo_and_grady``'s groups: per
+    type its fields in ``JO_FIELDS`` order, each over the ``proc_domain``
+    reports' levels.  ``tl``/``ad`` take host or device arrays and return
+    host binary64 arrays; the stencil runs on the host in binary64, so its
+    words do not depend on the backend.
+    """
+
+    def __init__(self, iv, xb: dict, *, xtoxa=None, libm: str = "correctly-rounded"):
+        self.term = ObsTerm(iv, xb, xtoxa=xtoxa, libm=libm)
+        st = self.term.stencil
+        self.slots = []  # (type, field, start, stop)
+        off = 0
+        for n in st.types:
+            for v in ObsStencil.fields(n):
+                m = len(self.term.d[n][v])
+                self.slots.append((n, v, off, off + m))
+                off += m
+        self.size = off
+
+        def cat(dd):
+            if not self.slots:
+                return np.zeros(0)
+            return np.concatenate([np.asarray(dd[n][v]) for n, v, _, _ in self.slots])
+
+        self.d = cat(self.term.d).astype(np.float64)
+        self.err = cat(self.term.err).astype(np.float64)
+        self.mask = cat(self.term.mask).astype(bool)
+        where = {(n, v): a for n, v, a, _ in self.slots}
+        self._groups = []
+        for n in iw.JO_ORDER:
+            if n not in st.types or iv.types[n].nlocal == 0:
+                continue
+            t = iv.types[n]
+            pd = np.repeat(np.asarray(t.info["proc_domain"], dtype=bool), t.info["levels"])
+            self._groups.append((n, [(v, where[(n, v)] + np.flatnonzero(pd)) for v in iw.JO_FIELDS[n]]))
+
+    def jo_split(self):
+        return self._groups
+
+    def tl(self, x: dict):
+        y = self.term.tl({k: np.asarray(_host(v), dtype=np.float64) for k, v in x.items()})
+        out = np.zeros(self.size, dtype=np.float64)
+        for n, v, a, b in self.slots:
+            out[a:b] = y[n][v]
+        return out
+
+    def ad(self, y) -> dict:
+        y = np.asarray(_host(y), dtype=np.float64)
+        yy: dict = {}
+        for n, v, a, b in self.slots:
+            yy.setdefault(n, {})[v] = y[a:b]
+        return self.term.ad(yy)
