@@ -307,10 +307,10 @@ Each step is one small PR, taken to merged before the next widens.
      columns) sum them, one writer per word. The top level is overwritten
      by the primal, so its incoming adjoint is zeroed.
    - Checks: dot-product test about 3e-15 (binary64) and 1.3e-8
-     (binary32) and FD for 12 configurations. The float base state is the
+     (binary32) and FD for 11 configurations. The float base state is the
      strict primal's words (0 differing, host and CUDA). WRFPLUS 4.7.1
      (`tools/wrfplus_oracle/rhsph.F90`) agrees to about 4e-16 on 10 cases,
-     every order. WRFPLUS's `rhs_ph` is not hybrid, so the cases use
+     orders 2-6 (order 0 has the dot-product, FD and primal checks only). WRFPLUS's `rhs_ph` is not hybrid, so the cases use
      c1 = 1, c2 = 0.
    - WRFPLUS bugs, found here. (a) `a_rhs_ph` declares its order-3/4
      trajectory arrays from jts+2 and its+2, but stores below those
