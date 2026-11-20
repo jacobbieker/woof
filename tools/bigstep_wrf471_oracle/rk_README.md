@@ -38,7 +38,31 @@ nice -n 10 python tools/bigstep_wrf471_oracle/rk_tendency_pack.py \
     tests/data/wrf471_bigstep/state-real.npz \
     tests/data/wrf471_bigstep/rk-tendency-stored-theta.npz \
     "$BUILD_DIR/stored-theta-run" --stored-theta
+nice -n 10 python tools/bigstep_wrf471_oracle/rk_pack.py --relax-fold \
+    "$BUILD_DIR/rk/rk_oracle.so" \
+    tests/data/wrf471_bigstep/state-real.npz \
+    tests/data/wrf471_bigstep/rk-relax-fold.npz
 ```
+
+`rk-relax-fold.npz` is a specified domain with no mixing (km_opt = 0) and
+no physics. Its held `*_tendf` are zero, so the stage-1 relaxation in
+`u_save`/`v_save`/`w_save`/`t_save` is the whole held tendency:
+- The saves are U/512, V/512, W/8 and T/256 on the relaxation rows (spec
+  zone 1, relaxation zone 4) and zero elsewhere.
+- ph_save and h_diabatic are zero.
+- `rk_addtend_dry` runs RK stages 1 to 3 in sequence on one held set. Each
+  stage starts from the stage tendency state/(32*step).
+- There are two cases: the real map factors, and the map-extremes tile.
+
+`tests/test_strict_relax_fold_wrf471.py` replays it through strict
+mode's `fold_lateral_relaxation` and `add_fixed_dry_tendencies`.
+
+The library for it was built on 2026-11-20 with gfortran 13.3, in the
+`wrf-oracle:u2404` container:
+- The sources were the WRFPLUS 4.7.1 tree's `module_em.F` and
+  `module_model_constants.F`. Both match the pins in `rk_build.py`.
+- `module_configure.mod` came from that tree.
+- That library regenerates `rk-cases.npz` byte for byte.
 
 The reference uses a real 12 by 10 by 49 state crop, native staggering,
 four horizontal halo rows, and the full top row. The dry cases use explicit
