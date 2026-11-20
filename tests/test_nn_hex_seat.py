@@ -540,9 +540,16 @@ def test_dx_and_radiation_context_inputs():
     x, _, _, _, cells = tap.rows[0]
     np.testing.assert_allclose(x[NZ], np.sqrt(area[cells]), rtol=1e-6)
     np.testing.assert_array_equal(x[NZ + 1], w.pools[("diag_physics", "coszr")][cells])
+    # a dx model without areas is refused when the seat is built, not at its first step
     with pytest.raises(launch.NNConfigError, match="areaCell"):
-        seat = _seat(w, _settings(inputs=("dx",)), tap=_Tap())
-        seat.stage(w.sources, state=w.state, saved=w.saved, time_seconds=0.0)
+        _seat(w, _settings(inputs=("dx",)), tap=_Tap())
     with pytest.raises(launch.NNConfigError, match="positive area"):
         HexColumnSeat(_settings(inputs=("dx",)), cp=np, names=NAMES, n_cells=NC, n_levels=NZ, zgrid=w.zgrid,
                       bdy_mask=BDY, dt=30.0, tap=_Tap(), area=np.zeros(NC))
+    # a model that does not read dx ignores the areas, even degenerate ones
+    HexColumnSeat(_settings(inputs=("theta",)), cp=np, names=NAMES, n_cells=NC, n_levels=NZ, zgrid=w.zgrid,
+                  bdy_mask=BDY, dt=30.0, tap=_Tap(), area=np.zeros(NC))
+    # a unit-sphere mesh's areas are scaled to metres
+    unit = HexColumnSeat(_settings(inputs=("dx",)), cp=np, names=NAMES, n_cells=NC, n_levels=NZ, zgrid=w.zgrid,
+                         bdy_mask=BDY, dt=30.0, tap=_Tap(), area=area / 6371229.0 ** 2, sphere_radius=1.0)
+    np.testing.assert_allclose(unit._dx[0], np.sqrt(area[:NC]), rtol=1e-5)
