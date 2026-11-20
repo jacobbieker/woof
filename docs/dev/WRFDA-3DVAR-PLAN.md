@@ -2743,6 +2743,28 @@ The planned case is 2026-10-28T12 on the tutorial grid, with 62 TEMP and
 5012 SYNOP reports in a ±1 h window.  It runs once the store is readable
 again.
 
+The case's conventional-only half has run.  The setup:
+
+- the first guess is woof's own GFS 0.25° f000 initialisation on the
+  tutorial grid (89x59x40, `ZNW` identical to the tutorial's);
+- the background error is the tutorial `be.dat`;
+- the solve is on the reference tier, `ntmax` 50.
+
+It converged in 27 iterations.
+
+| type:var | n | O-B rms | O-A rms |
+|---|---|---|---|
+| all conventional | 27026 | 22.63 | 16.08 |
+| sound:u (m/s) | 2918 | 2.375 | 2.006 |
+| sound:v (m/s) | 2920 | 2.326 | 2.015 |
+| sound:t (K) | 3032 | 0.904 | 0.696 |
+| sound:q (kg/kg) | 3031 | 7.0e-4 | 5.0e-4 |
+| synop:t (K) | 3032 | 2.525 | 1.426 |
+| synop:p (Pa) | 3042 | 66.8 | 47.3 |
+
+This run exposed a crash in the SATEM operator when there are no SATEM
+reports (`extra["ref_p"]` missing), now fixed.
+
 ### 13.9 PR sequence
 
 1. This section.
