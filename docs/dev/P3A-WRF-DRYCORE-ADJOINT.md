@@ -293,6 +293,39 @@ Each step is one small PR, taken to merged before the next widens.
      TL.
    - Not covered: the moist cqu/cqv/cqw factors, the hydrostatic option
      and a 1-D base state.
+   - `rhs_ph` is done in the same module (`geo_tl`, `geo_ad`). It covers
+     woof's strict `slow_geopotential_open` (3-D base, vertical term on,
+     no supplied face masses) for `h_sca_adv_order` 2-6 and 0, on periodic,
+     open and specified axes, with map factors and hybrid levels. For
+     order 5 on periodic or specified axes that kernel gives the fused
+     `slow_geopotential`'s words, and the float base state is checked
+     against both. The outer upwind faces take WRFPLUS's derivative of
+     the clip: min(s, 0) passes the tangent only for s < 0, max(s, 0) for
+     s >= 0.
+   - The AD writes each cell's face and stencil adjoints to y and x
+     scratch, then four gathers (w levels with php, u faces, v faces,
+     columns) sum them, one writer per word. The top level is overwritten
+     by the primal, so its incoming adjoint is zeroed.
+   - Checks: dot-product test about 3e-15 (binary64) and 1.3e-8
+     (binary32) and FD for 11 configurations. The float base state is the
+     strict primal's words (0 differing, host and CUDA). WRFPLUS 4.7.1
+     (`tools/wrfplus_oracle/rhsph.F90`) agrees to about 4e-16 on 10 cases,
+     orders 2-6 (order 0 has the dot-product, FD and primal checks only). WRFPLUS's `rhs_ph` is not hybrid, so the cases use
+     c1 = 1, c2 = 0.
+   - WRFPLUS bugs, found here. (a) `a_rhs_ph` declares its order-3/4
+     trajectory arrays from jts+2 and its+2, but stores below those
+     bounds on a periodic y axis or a specified x axis, which corrupts the
+     heap (SIGSEGV in free; -fcheck=bounds names tmpv4012 and tmpv4016).
+     Those three cases are TL only. (b) For orders 2-4 WRFPLUS ends a
+     bounded axis's interior loop at min(ite, ide-1)-2 (or -3), where
+     native WRF uses ite-2 (-3), so it drops the term one point inside
+     the end (for orders 3/4 in x only with open_xe). The fixture masks
+     those TL points and zeroes the seed there.
+   - Binary32: the u and v adjoints take the across-face difference of
+     phb + php (phb to 3e4, differences about 50-100), so they agree with
+     WRFPLUS to 6.5e-6 to 1.6e-5 on host and CUDA. Removing each level's
+     mean phb brings that under 2e-6. The Metal oracle limit is 1e-4 for
+     those keys, as for the pressure gradient's mu' adjoint.
 6. Advection `advect_u/v/w/scalar` (non-PD, h orders 3-6, v orders 2-6). This is the
    largest group; once the pattern is set, the mechanical ports go to
    Sonnet sub-agents.
@@ -425,8 +458,9 @@ it idle (under 10% utilisation for 20 s before the run).
 | rk_addtend_dry (dry tendency add + add_held_heating) | #691 | 1.0x | 1.7x | 2.2x |
 | set_w_surface (set_surface_w) | #691 | 2.1x (2.0-2.3) | 1.2x | 4.0x |
 | advect_scalar/u/v/w (flux_div_{scalar,u,v,w}) | #700 | 3.9x (3.3-4.5) | 1.5-1.8x | 19-27x |
-| horizontal_pressure_gradient (slow_pgf) | this PR | 4.0x (3.9-4.1) | 1.9x | 14-15x |
-| pg_buoy_w (slow_buoyancy) | this PR | 1.3x | 1.9x | 2.1x |
+| horizontal_pressure_gradient (slow_pgf) | #701 | 4.0x (3.9-4.1) | 1.9x | 14-15x |
+| pg_buoy_w (slow_buoyancy) | #701 | 1.3x | 1.9x | 2.1x |
+| rhs_ph (slow_geopotential, fused or open) | this PR | 4.2x (4.1-4.4) | 1.2-1.3x | 13-15x |
 
 advance_uv's 3.7x in the projection is the midpoint of its range. The
 advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
@@ -491,24 +525,27 @@ slow_pgf and slow_buoyancy run once per RK stage. Their idle-card
 primals (0.154 ms and 0.038 ms) give 2.9% and 0.7% of the strict step's
 16 ms for three calls. slow_pgf is part of the 5.2% row above (the
 other 2.3% is slow_geopotential); slow_buoyancy sits in "other woof
-kernels".
+kernels". slow_geopotential's idle-card primal is 0.20-0.24 ms (fused
+for specified and periodic axes, the open kernel for open ones); its
+row above is over the kernel the strict path dispatches.
 
 The projection is the per-step adjoint cost over the forward step:
 1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
-far (88.8% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
-set_w_surface's 0.03%, flux_div's 14.4%, slow_pgf's 2.9% and
-slow_buoyancy's 0.7%), Σ share x AD32 = 3.33, on top of the forward
-recompute's 1. The rest is projected at a range of ratios:
+far (91.1% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
+set_w_surface's 0.03%, flux_div's 14.4%, slow_pgf's 2.9%,
+slow_geopotential's 2.3% and slow_buoyancy's 0.7%), Σ share x AD32 =
+3.43, on top of the forward recompute's 1. The rest is projected at a
+range of ratios:
 
-| ratio for the unmeasured 11.2% | projection |
+| ratio for the unmeasured 8.9% | projection |
 |---|---|
 | 2.2x (memory-traffic floor) | 4.6x |
 | 3.0x | 4.7x |
-| 3.7x (the measured share-weighted mean) | 4.7x |
+| 3.8x (the measured share-weighted mean) | 4.8x |
 
-The 5x limit holds while the rest averages at most about 6.0x. This is a
+The 5x limit holds while the rest averages at most about 6.4x. This is a
 projection from kernel GPU time, not a measured step ratio: launch gaps
-are not counted, most ratios come from a shared card, and 11.2% of the
+are not counted, most ratios come from a shared card, and 8.9% of the
 step is not yet ported. calc_coefs and small_step are each about 4.8x;
 at 2.3% and 8.2% of the step they add about 0.11 and 0.39. Each later kernel PR replaces a
 projected share with a measured one.

@@ -1,12 +1,13 @@
-"""Big-step tendency TL/AD (P3a item 5): WRF horizontal_pressure_gradient
-and pg_buoy_w on woof's strict slow_pgf and slow_buoyancy
-(docs/dev/P3A-WRF-DRYCORE-ADJOINT.md section 5, item 5).
+"""Big-step tendency TL/AD (P3a item 5): WRF horizontal_pressure_gradient,
+pg_buoy_w and rhs_ph on woof's strict slow_pgf, slow_buoyancy and
+slow_geopotential (docs/dev/P3A-WRF-DRYCORE-ADJOINT.md section 5, item 5).
 
 Same conventions as :mod:`woof.grad.wrfplus.acoustic`: dicts of arrays by
 name, ``*_tl(state, pert_state, traj, pert, geom, nl=True)`` updates the
 perturbation (and the base state when ``nl``), ``*_ad`` adds into the
-inputs' adjoints.  Both operators add into the momentum tendencies, so
-the tendencies' adjoints pass through unchanged.
+inputs' adjoints.  The pressure gradient and buoyancy add into the
+momentum tendencies, so the tendencies' adjoints pass through unchanged;
+rhs_ph adds too but overwrites the top w level, whose adjoint it zeroes.
 
 ``p`` is the perturbation pressure (the strict diagnosis's p'), ``php``
 the w-level perturbation geopotential and ``mup`` the perturbation
@@ -202,3 +203,118 @@ def buoy_ad(adj_state, traj, adj, geom: BuoyGeometry):
             + tuple(traj[n] for n in BUOY_PASSIVE))
     dtype = _dtype(arrs)
     _kernel("buoy_ad", dtype)(_blocks(geom.ny * geom.nx), (THREADS,), arrs + geom.args())
+
+
+# ---------------------------------------------------------------- rhs_ph
+
+GEO_STATE = ("rph_t",)
+GEO_ACTIVE = ("ww", "w", "u", "v", "php", "mup")
+GEO_PASSIVE = ("phb", "mub", "rdnw", "fnm", "fnp", "c1f", "c2f", "msft", "msfu", "msfv")
+
+
+@dataclass(frozen=True)
+class GeoGeometry:
+    """slow_geopotential's scalars: ``quarter_rdx = 0.25/dx`` and
+    ``quarter_rdy`` as the primal rounds them, the lid extrapolation
+    weights cfn/cfn1, ``h_sca_adv_order`` (``order``), open axes and
+    ``specified`` (which makes both axes boundaries, as woof's
+    _boundary_x/_boundary_y do).  ``open_x``/``open_y`` drop both ends of
+    their axis; WRF's separate open_xs/open_xe are not ported.  The map
+    factors are read only when ``has_msf``, but the trajectory must still
+    carry them."""
+    nz: int
+    ny: int
+    nx: int
+    quarter_rdx: float
+    quarter_rdy: float
+    cfn: float
+    cfn1: float
+    order: int = 5
+    open_x: int = 0
+    open_y: int = 0
+    specified: int = 0
+    has_msf: int = 0
+
+    @property
+    def boundary_x(self) -> int:
+        return int(bool(self.open_x or self.specified))
+
+    @property
+    def boundary_y(self) -> int:
+        return int(bool(self.open_y or self.specified))
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        return (r(self.quarter_rdx), r(self.quarter_rdy), r(self.cfn), r(self.cfn1),
+                i(self.order), i(self.boundary_x), i(self.boundary_y), i(self.specified),
+                i(self.has_msf), i(self.nz), i(self.ny), i(self.nx))
+
+    def validate(self) -> None:
+        _axes(self)
+        if self.order not in (0, 2, 3, 4, 5, 6):
+            raise ValueError(f"h_sca_adv_order must be 0, 2, 3, 4, 5 or 6, got {self.order}")
+        need = 7 if self.order in (5, 6) else 5 if self.order in (3, 4) else 3
+        if min(self.nx, self.ny) < need:
+            raise ValueError(f"h_sca_adv_order={self.order} needs nx, ny >= {need}, "
+                             f"got {self.nx} x {self.ny}")
+        if self.nz < 2:
+            raise ValueError(f"rhs_ph needs nz >= 2 (the lid flux reads u levels "
+                             f"nz-1 and nz-2), got {self.nz}")
+
+
+def geo_shapes(geom) -> dict:
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    wlev, col = (nz + 1, ny, nx), (ny, nx)
+    return {"rph_t": wlev, "ww": wlev, "w": wlev, "u": (nz, ny, nx + 1),
+            "v": (nz, ny + 1, nx), "php": wlev, "mup": col, "phb": wlev, "mub": col,
+            "rdnw": (nz,), "fnm": (nz,), "fnp": (nz,), "c1f": (nz + 1,), "c2f": (nz + 1,),
+            "msft": col, "msfu": (ny, nx + 1), "msfv": (ny + 1, nx)}
+
+
+def geo_tl(state, pert_state, traj, pert, geom: GeoGeometry, *, nl=True):
+    """WRFPLUS g_rhs_ph (non-hydrostatic) on woof's strict
+    slow_geopotential: rph_t gains the geopotential advection by ww, u and
+    v and the g w term; the top w level is overwritten."""
+    geom.validate()
+    _check(geom, _named("state", GEO_STATE, state) + _named("pert", GEO_STATE, pert_state)
+           + _named("traj", GEO_ACTIVE + GEO_PASSIVE, traj)
+           + _named("pert", GEO_ACTIVE, pert), geo_shapes(geom), min_nz=2)
+    pairs = ()
+    for n in GEO_ACTIVE:
+        pairs += (traj[n], pert[n])
+    arrs = ((state["rph_t"], pert_state["rph_t"]) + pairs
+            + tuple(traj[n] for n in GEO_PASSIVE))
+    dtype = _dtype(arrs)
+    _kernel("geo_tl", dtype)(_blocks(geom.nz * geom.ny * geom.nx), (THREADS,),
+                             arrs + (np.int32(bool(nl)),) + geom.args(dtype))
+
+
+def geo_ad(adj_state, traj, adj, geom: GeoGeometry):
+    """Adjoint of :func:`geo_tl`: add into ``adj`` (ww, w, u, v, php, mup)
+    from the rph_t adjoint, whose top level is then zeroed (the primal
+    overwrites it); the other levels pass through."""
+    geom.validate()
+    _check(geom, _named("adj", GEO_STATE, adj_state)
+           + _named("traj", GEO_ACTIVE + GEO_PASSIVE, traj)
+           + _named("adj", GEO_ACTIVE, adj), geo_shapes(geom), min_nz=2)
+    import cupy as cp
+    ins = tuple(traj[n] for n in GEO_ACTIVE)
+    outs = tuple(adj[n] for n in GEO_ACTIVE)
+    passive = tuple(traj[n] for n in GEO_PASSIVE)
+    seed = adj_state["rph_t"]
+    dtype = _dtype((seed,) + ins + outs + passive)
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    # Per-cell pass adjoints (see kernels/bigstep.cu); geo_ad_cell writes
+    # every word.
+    sy = cp.empty((4, nz, ny, nx), dtype=dtype)
+    sx = cp.empty((6, nz, ny, nx), dtype=dtype)
+    g = geom.args(dtype)
+    _kernel("geo_ad_cell", dtype)(_blocks(nz * ny * nx), (THREADS,),
+                                  (seed,) + ins + (sy, sx) + passive + g)
+    a = (seed,) + ins + (sy, sx) + outs + passive + g
+    _kernel("geo_ad_lev", dtype)(_blocks((nz + 1) * ny * nx), (THREADS,), a)
+    _kernel("geo_ad_u", dtype)(_blocks(nz * ny * (nx + 1)), (THREADS,), a)
+    _kernel("geo_ad_v", dtype)(_blocks(nz * (ny + 1) * nx), (THREADS,), a)
+    _kernel("geo_ad_mup", dtype)(_blocks(ny * nx), (THREADS,), a)
+    _kernel("geo_ad_top", dtype)(_blocks(ny * nx), (THREADS,),
+                                 (seed, np.int32(nz), np.int32(ny), np.int32(nx)))
