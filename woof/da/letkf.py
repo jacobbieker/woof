@@ -184,6 +184,7 @@ anywhere in the computed increments.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import time
 from dataclasses import dataclass, field
@@ -897,10 +898,13 @@ class LetkfConfig:
     #: See :data:`MATMUL_MODES`.  Last in the field list so no positional
     #: caller of this dataclass moves.
     matmul: str = "fixed-order"
-    #: Worker processes for the HOST solve (numpy, host-staged).  ``None``
-    #: is automatic: the CPUs this process may run on, capped at
-    #: :data:`HOST_WORKERS_AUTO_CAP` and by the number of chunks, and
-    #: overridden by the ``WOOF_DA_HOST_WORKERS`` environment variable.
+    #: Worker processes for the HOST solve (numpy: the dense default route
+    #: and the host-staged one).  ``None``
+    #: is automatic: on Linux, the CPUs this process may run on, capped at
+    #: :data:`HOST_WORKERS_AUTO_CAP`, the number of chunks and host memory,
+    #: for analyses past ``HOST_PARALLEL_MIN_PAIRS``; one process
+    #: elsewhere.  The ``WOOF_DA_HOST_WORKERS`` environment variable
+    #: overrides it.
     #: ``1`` is the single-process loop.  Every worker count produces the
     #: same bytes (see :mod:`woof.da.letkf_host_parallel`); the setting
     #: only decides how many cores share the chunks.  Ignored on a device
@@ -3025,6 +3029,12 @@ def analyze(
                     for lo_, hi_, picked in tasks)
         workers, reason = hp.resolve_host_workers(
             config.host_workers, tasks=len(tasks), pairs=pairs)
+        if not host_staging and workers > 1:
+            # The dense route cannot split a chunk (its packed width is the
+            # chunk's), so each worker holds a whole chunk's scratch: as many
+            # workers as the host's available memory holds such chunks.
+            workers, reason = hp.limit_by_host_memory(
+                workers, reason, per_point * chunk)
         diagnostics.host_workers = workers
         diagnostics.host_workers_reason = reason
         if workers <= 1:
@@ -3045,12 +3055,16 @@ def analyze(
             setattr(diagnostics, name, getattr(diagnostics, name) + value)
         n_chunks = len(tasks) + counters["reach_chunks_skipped"]
 
-        # The workers share the scratch promise the single-process loop made.
-        per_worker = max(1, int(device_budget) // workers)
+        if host_staging:
+            # The workers share the scratch promise the single-process loop made.
+            per_worker = max(1, int(device_budget) // workers)
+            host_split["row_block"] = max(
+                1, hp.block_bytes(per_worker) // max(1, host_per_point))
+            host_split["piece_bytes"] = hp.piece_bytes(per_worker)
+        else:
+            # Dense: whole chunks, each worker the single-process loop's scratch.
+            per_worker = int(per_point * chunk)
         diagnostics.host_worker_budget_bytes = per_worker
-        host_split["row_block"] = max(
-            1, hp.block_bytes(per_worker) // max(1, host_per_point))
-        host_split["piece_bytes"] = hp.piece_bytes(per_worker)
         for f in fields:
             increments[f] = hp.shared_copy(increments[f])
             incr_flat[f] = increments[f].reshape(members, -1)
@@ -3123,102 +3137,116 @@ def analyze(
     # After the reachability helper is built, so setup_seconds covers the
     # whole of setup and the solve clock starts where the solve does.
     _sync_namespace(solve_xp)
+    from woof.da import letkf_host_parallel as hp
+
+    # Set-up, not solve: a new controller scans the loaded libraries (up to
+    # ~10 ms in a large process); it is rebuilt only after new imports.
+    blas_controller = hp.blas_controller() if solve_xp is np else None
     t_solve = time.perf_counter()
     diagnostics.setup_seconds = t_solve - t_enter
     start = 0
     completed_chunks = 0
     report_progress(0, 0, 0, force=True)
-    if host_staging and solve_xp is np:
-        # The host solve: the same chunks on many cores, same bytes.
+    if solve_xp is np:
+        # The host solve, dense (the default for host arrays) or host-staged:
+        # the same chunks on many cores, same bytes.
         start, completed_chunks = _host_parallel_loop()
-    while start < npts:
-        if pool_cap is not None and pool.total_bytes() > pool_cap:
-            pool.free_all_blocks()
-        stop = min(start + chunk, npts)
-        # Which radars can touch this span at all.  Host-side integer
-        # comparisons against boxes computed once per batch, so the reject
-        # costs nothing next to the gather it prevents.
-        span = _reaching(start, stop)
-        # What the budget actually bought: a number of (gridpoint, slot)
-        # pairs.  The arrays are (points x slots-reached-by-the-SPAN), not
-        # (points x slots-seen-by-a-POINT), so a span crossing from one
-        # radar's footprint into another's costs both for all its points.
-        # Bounding the product rather than the slot count keeps the real
-        # invariant -- a short span may reach several radars, a long one
-        # may reach a single radar, and both fit -- instead of forcing
-        # every span down to one radar's width and wasting the budget.
-        #
-        # Halving until it fits is free next to discovering the same fact
-        # as an allocation failure: it is host integer arithmetic and,
-        # unlike the OOM path, it costs no dead attempt.
-        budget_pairs = chunk * max(1, sizing_slots)
-        while (stop - start > 1
-               and (stop - start) * sum(st["nslots"] for st in span)
-               > budget_pairs):
-            stop = start + max(1, (stop - start) // 2)
+    # One BLAS thread for the whole host loop, entered once: a per-chunk
+    # pin costs ~10 us a chunk, which a many-chunk analysis notices.
+    with (hp.one_blas_thread(blas_controller) if blas_controller is not None
+          else contextlib.nullcontext()):
+        while start < npts:
+            if pool_cap is not None and pool.total_bytes() > pool_cap:
+                pool.free_all_blocks()
+            stop = min(start + chunk, npts)
+            # Which radars can touch this span at all.  Host-side integer
+            # comparisons against boxes computed once per batch, so the reject
+            # costs nothing next to the gather it prevents.
             span = _reaching(start, stop)
-            diagnostics.reach_span_splits += 1
-        if not span:
-            # No observation in the domain can influence any gridpoint in
-            # this span.  Over a CONUS grid that is most of the grid, and
-            # skipping it here is the whole point of the reach box.
-            diagnostics.reach_chunks_skipped += 1
+            # What the budget actually bought: a number of (gridpoint, slot)
+            # pairs.  The arrays are (points x slots-reached-by-the-SPAN), not
+            # (points x slots-seen-by-a-POINT), so a span crossing from one
+            # radar's footprint into another's costs both for all its points.
+            # Bounding the product rather than the slot count keeps the real
+            # invariant -- a short span may reach several radars, a long one
+            # may reach a single radar, and both fit -- instead of forcing
+            # every span down to one radar's width and wasting the budget.
+            #
+            # Halving until it fits is free next to discovering the same fact
+            # as an allocation failure: it is host integer arithmetic and,
+            # unlike the OOM path, it costs no dead attempt.
+            budget_pairs = chunk * max(1, sizing_slots)
+            while (stop - start > 1
+                   and (stop - start) * sum(st["nslots"] for st in span)
+                   > budget_pairs):
+                stop = start + max(1, (stop - start) // 2)
+                span = _reaching(start, stop)
+                diagnostics.reach_span_splits += 1
+            if not span:
+                # No observation in the domain can influence any gridpoint in
+                # this span.  Over a CONUS grid that is most of the grid, and
+                # skipping it here is the whole point of the reach box.
+                diagnostics.reach_chunks_skipped += 1
+                start = stop
+                completed_chunks += 1
+                report_progress(start, completed_chunks, nactive)
+                continue
+            diagnostics.reach_batches_evaluated += len(span)
+            diagnostics.reach_batches_skipped += len(stencils) - len(span)
+            try:
+                # One BLAS thread on the host (entered above), as in the workers:
+                # a multi-threaded gemm/eigh partitions by thread count, which
+                # moved words by ~1e-14 with the box's core count
+                # (letkf_host_parallel.one_blas_thread).
+                ng, local_max, sweeps = _solve_chunk(start, stop, span)
+            except Exception as exc:
+                if not _is_device_memory_error(exc):
+                    raise
+                if chunk <= 1:
+                    raise LetkfError(
+                        "the device refused an allocation with the chunk"
+                        " already at one gridpoint: the card does not have"
+                        " room for even the smallest batched solve"
+                        f" ({total_slots} stencil slots x {members} members,"
+                        f" {config.solve_dtype}, {per_point} bytes per point"
+                        " at peak by the sizing model).  Free memory on the"
+                        " card or shrink the localisation radius; raising"
+                        " memory_budget_mib cannot help here."
+                    ) from exc
+                chunk = max(1, chunk // 2)
+                diagnostics.chunk_oom_shrinks += 1
+                diagnostics.chunk_points = chunk
+                retrying = True
+            else:
+                retrying = False
+            if retrying:
+                # Outside the except block on purpose: while a handler runs,
+                # the interpreter still holds the failed attempt's traceback,
+                # and through it every array of the dead chunk.  Releasing the
+                # pool in there would return nothing.  Here the exception is
+                # cleared, the attempt's arrays are dead, and the pool can
+                # actually hand their blocks back before the smaller retry.
+                _release_device_scratch(solve_xp)
+                if pool_cap is not None:
+                    # And the new entitlement is read HERE, after the release,
+                    # for the same reason.  Inside the handler ``used_bytes()``
+                    # still counts the chunk that just failed, so a cap derived
+                    # from it would RISE by about one dead chunk on every
+                    # shrink -- loosening the one control that is supposed to
+                    # tighten, exactly when the card has said it is out of
+                    # room.
+                    pool_cap = pool.used_bytes() + (device_budget if packed_route else per_point * chunk)
+                continue
+            if ng:
+                nactive += ng
+                nbatch += 1
+                max_local = max(max_local, local_max)
+                max_sweeps = max(max_sweeps, sweeps)
             start = stop
             completed_chunks += 1
             report_progress(start, completed_chunks, nactive)
-            continue
-        diagnostics.reach_batches_evaluated += len(span)
-        diagnostics.reach_batches_skipped += len(stencils) - len(span)
-        try:
-            ng, local_max, sweeps = _solve_chunk(start, stop, span)
-        except Exception as exc:
-            if not _is_device_memory_error(exc):
-                raise
-            if chunk <= 1:
-                raise LetkfError(
-                    "the device refused an allocation with the chunk"
-                    " already at one gridpoint: the card does not have"
-                    " room for even the smallest batched solve"
-                    f" ({total_slots} stencil slots x {members} members,"
-                    f" {config.solve_dtype}, {per_point} bytes per point"
-                    " at peak by the sizing model).  Free memory on the"
-                    " card or shrink the localisation radius; raising"
-                    " memory_budget_mib cannot help here."
-                ) from exc
-            chunk = max(1, chunk // 2)
-            diagnostics.chunk_oom_shrinks += 1
-            diagnostics.chunk_points = chunk
-            retrying = True
-        else:
-            retrying = False
-        if retrying:
-            # Outside the except block on purpose: while a handler runs,
-            # the interpreter still holds the failed attempt's traceback,
-            # and through it every array of the dead chunk.  Releasing the
-            # pool in there would return nothing.  Here the exception is
-            # cleared, the attempt's arrays are dead, and the pool can
-            # actually hand their blocks back before the smaller retry.
-            _release_device_scratch(solve_xp)
-            if pool_cap is not None:
-                # And the new entitlement is read HERE, after the release,
-                # for the same reason.  Inside the handler ``used_bytes()``
-                # still counts the chunk that just failed, so a cap derived
-                # from it would RISE by about one dead chunk on every
-                # shrink -- loosening the one control that is supposed to
-                # tighten, exactly when the card has said it is out of
-                # room.
-                pool_cap = pool.used_bytes() + (device_budget if packed_route else per_point * chunk)
-            continue
-        if ng:
-            nactive += ng
-            nbatch += 1
-            max_local = max(max_local, local_max)
-            max_sweeps = max(max_sweeps, sweeps)
-        start = stop
-        completed_chunks += 1
-        report_progress(start, completed_chunks, nactive)
 
-    _sync_namespace(solve_xp)
+        _sync_namespace(solve_xp)
     t_finish = time.perf_counter()
     diagnostics.solve_seconds = t_finish - t_solve
 

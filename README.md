@@ -1025,6 +1025,23 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   over N steps with checkpoints, and takes adjoint forcing at
   intermediate states for 4D-Var. The forecast path does not import any
   of it.
+- **LETKF host solve on every core by default (Linux).** An analysis on host
+  arrays (no `solve_namespace`, the dense reference route) now runs its
+  chunks on forked worker processes once the work is large (2x10^8
+  gridpoint-slot pairs), as the host-staged route already did. Workers are
+  capped at 64, by the chunk count and by available memory (psutil, bounded
+  by the cgroup v2 `memory.max`), because each worker holds one chunk's
+  scratch. The automatic mode forks only on Linux. On macOS an analysis
+  stays in one process unless `host_workers` or `WOOF_DA_HOST_WORKERS` asks
+  for workers.
+- Every host chunk solve runs with one BLAS thread, so the increments are
+  the same bytes at any worker count and on any box. Before, a
+  multi-threaded BLAS made them depend on the core count by up to 1e-14, so
+  large host analyses change by that much once.
+- The trade-off: `host_workers=1`, and mid-size analyses below the
+  threshold, now solve with single-threaded BLAS. That is slower than a
+  threaded BLAS but deterministic. Apple's Accelerate is not covered:
+  threadpoolctl cannot limit it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable
