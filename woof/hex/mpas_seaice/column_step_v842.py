@@ -172,7 +172,7 @@ def reinitialize_diagnostics_dynamics(pools: dict, configs: dict) -> None:
           "stressDivergenceU", "stressDivergenceV", "surfaceTiltForceU", "surfaceTiltForceV")
     if configs.get("config_use_velocity_solver", True) and \
             configs.get("config_stress_divergence_scheme", "variational") == "variational":
-        _zero(pools["velocity_variational"], "principalStress1Var", "principalStress2Var", "replacementPressureVar")
+        _zero(pools["velocity_variational"], "principalStress1", "principalStress2", "replacementPressure")
     _zero(pools["ridging"], "areaLossRidge", "areaGainRidge", "iceVolumeRidged", "openingRateRidge")
     _tendency(pools["diagnostics"], pools["tracers_aggregate"], "Transport", bool(configs["config_use_ice_age"]))
 

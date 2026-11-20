@@ -89,6 +89,11 @@ POOLS = ("mesh", "tracers", "tracers_aggregate", "icestate", "boundary", "veloci
 VT_POOLS = POOLS + ("alternative_atmos_forcing",)
 #: and the variational principal stresses seaice_column_reinitialize_diagnostics_dynamics zeroes
 STEP_POOLS = VT_POOLS + ("velocity_variational",)
+#: the Registry's name_in_code, the name the routines look a field up by, where it is not the var's name
+NAME_IN_CODE = {("velocity_variational", f"{base}{tail}var"): f"{base}{tail}"
+                for base in ("strain", "stress") for tail in ("11", "22", "12")}
+NAME_IN_CODE.update({("velocity_variational", f"{name}Var"): name
+                     for name in ("principalStress1", "principalStress2", "replacementPressure")})
 #: the mesh block: one block's cells, owned and halo
 MESH = {"nCells": 12, "nCellsSolve": 9, "nEdges": 30, "nEdgesSolve": 24, "nVertices": 20, "nVerticesSolve": 16,
         "maxEdges": 6, "maxEdges2": 12, "vertexDegree": 3}
@@ -342,6 +347,7 @@ def field_rows(config: dict) -> tuple[list, dict[str, int], dict[str, bool]]:
             fshape = tuple(_EXTENTS.get(d, dims.get(d)) for d in names)
             own = [p for p in package_text.split(";") if p]
             on = struct_on and (not own or any(active[f"{p}Active"] for p in own))
+            name = NAME_IN_CODE.get((struct["name"], name), name)
             rows.append((struct["name"], name, REAL if kind == "real" else INT, fshape, on))
     return rows, dims, active
 
