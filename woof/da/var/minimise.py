@@ -77,7 +77,9 @@ class CGResult:
 def _precon(cost, ghat, j0_total: float, precondition_factor: float):
     """``precondition_cg``'s diagonal by control-variable level block (no ensemble: blocks v1..v5)."""
     ops = cost.ops
-    g_total = ops.dot(ghat, ghat)
+    cv_u = getattr(cost, "cv_u", cost.cv_size)
+    gu = ghat if cv_u == cost.cv_size else ghat[:cv_u]  # U's levels only; VarBC blocks keep 1
+    g_total = ops.dot(gu, gu)
     mz = list(cost.u.cv_mz[:5])
     nn = cost.nx * cost.ny
     values = np.ones(cost.cv_size, dtype=np.float64)

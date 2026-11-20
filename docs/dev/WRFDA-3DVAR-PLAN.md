@@ -2531,3 +2531,208 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      products, which need a bending-angle operator.
 6. **PR F: impact.** One real case, as in #657: O-B and O-A per family,
    and a radiosonde and surface scorecard showing no degradation.
+
+## 13. Satellite radiances in 3D-Var (V4.3 and V4.4): design as built
+
+Section 11.9 path B, made concrete (2026-11-20). It adds clear-sky
+satellite radiances and WRFDA-style variational bias correction (VarBC)
+to `woof/da/var/`. The work reuses the readers (#642 SatWeave, #644 GOES
+ABI from `bkr/geo/virtualized/`, #671 AHI, #673 SEVIRI) and the CRTM
+operator (#651, CRTM v2.4.1, CC0, opt-in). It never uses the GPL CRTM 2.3.0
+in the WRF tree, and never RTTOV. Microwave sounders (AMSU-A, MHS, ATMS)
+come from WIS2 PR D's reader; this section only defines how they plug in.
+
+### 13.1 Modules
+
+| module | content |
+|---|---|
+| `woof/da/var/radiance.py` | `RadianceObs` (one sensor's observations), the adapters from `ImagerScene` and from MW footprints, GSI thinning, the background columns, `RadianceTerm` (the `ObsTerm`) and WRFDA's QC |
+| `woof/da/var/varbc.py` | predictors, cold and warm start, `VARBC.in`/`VARBC.out`, the preconditioning and the `Jp` control block |
+| `woof/da/var/cost.py` | control blocks after `U`'s control vector (`cv = [v_U, v_p]`) and `Jp` |
+
+None of these modules is imported by a forecast path or by `woof var`
+without its opt-in, and none imports `woof.rtm` at module level, so
+`tests/test_var_import_graph.py` keeps holding.
+
+### 13.2 The observation record and the MW interface
+
+`RadianceObs` holds one CRTM sensor id (`abi_g16`, `ahi_himawari9`,
+`seviri_m11`, `amsua_metop-b`, ...) and `n` locations:
+
+- `channels` `(nchan,)`: the instrument channel numbers, as CRTM numbers them;
+- `bt` `(n, nchan)` in K, NaN where missing;
+- `lat`, `lon`, `sensor_zenith`, `sensor_azimuth`, `sensor_scan`,
+  `solar_zenith`, `solar_azimuth` `(n,)` in degrees;
+- `scanpos` `(n,)`: the field of view for scanning sounders (WRFDA's
+  `scanpos`, a VarBC predictor), 0 for imagers;
+- `time`, and `provenance` (reader, attribution, counts).
+
+There are two adapters:
+
+- `from_imager_scene(scene, bands=...)` splits a scene by CRTM sensor and
+  maps each band to its channel through `woof.obs.imager_scene.band`.
+- `from_footprints(fp)` takes any object with the attributes WIS2 PR D's
+  `MwFootprints` has (`sensor`, `channels`, `lat`, `lon`, `fov`,
+  `scan_angle`, `sensor_zenith`, `sensor_azimuth`, `solar_zenith`,
+  `solar_azimuth`, `bt`). It is duck-typed, so `woof/da/var` imports nothing
+  from `woof.obs.wis2*` and PR D needs no change. The MW screens (Grody's
+  cloud liquid water, the scattering index, WRFDA's per-instrument channel
+  sets and errors) stay in PR D's module. PR D passes its accepted mask
+  and per-channel errors through `RadianceObs.qc` and `.error`, and the
+  3D-Var term keeps them.
+
+### 13.3 Background columns and the K-matrix
+
+The profile is WRFDA's (`da_get_innov_vector_crtm`):
+
+- Horizontal: bilinear in the WRFDA weights at the observation's grid
+  position (`LambertWRFDA.llxy`, `da_interp_2d_partial`'s order).
+- Layers, top first: layer `l` is model level `nz - l`. Pressure and
+  temperature are `xb%p`, `xb%t`, and water vapour is the mixing ratio
+  `1000 q / (1 - q)` g/kg.
+- Interfaces: the top is `ptop` and the bottom `psfc`. The ones between are
+  interpolated linearly in sigma between half levels (`sigmah`/`sigmaf`,
+  WRFDA's formula). A non-monotonic column is skipped and counted.
+- Surface: skin temperature `TSK`, wind `U10`/`V10`, and the fractions and
+  surface type from `da_detsurtyp`'s four-corner rule (`isflg` 0-7; 4-7 are
+  mixed surfaces).
+- Ozone: the standard profile of `woof.rtm.profiles`.
+
+CRTM is called once per outer loop at the background. It returns `H(x_b)`
+and the K-matrix `dBT/dT` and `dBT/dr` (r in g/kg), kept in binary64.
+
+### 13.4 The observation term
+
+`RadianceTerm` implements the `ObsTerm` protocol of `cost.py` (`d`, `err`,
+`mask`, `tl`, `ad`, `jo_split`). Observations are flattened
+location-major, channels within a location. The TL is WRFDA's K-matrix
+branch (`da_transform_xtoy_crtm`, `use_crtm_kmatrix`):
+
+```
+dBT(c) = sum over layers l = 2..nz of  Kt(c, l) dT(l) + Kr(c, l) dr(l)
+dr(l)  = 1000 / (1 - q_b(l))^2 dq(l),  0 where p_b(l) < 75 hPa
+```
+
+Here `dT` and `dq` are the bilinear interpolations of `xa%t` and `xa%q`.
+WRFDA zeroes the top layer (`kts+1:kte`), and so does woof. The AD is the
+exact transpose: it scatters per observation in a fixed serial order into
+the four corners, with no atomics. Arithmetic is on the host in the tier's
+real type, like `SparseObsTerm`, so CUDA and Metal give the same words.
+
+- **Surface pressure.** WRFDA also adds `ps_jacobian * 0.01 dpsfc`. woof's
+  CRTM shim (#651) returns no surface-pressure Jacobian, so that term is
+  absent. For the water-vapour bands it is negligible; for window and MW
+  surface channels it is a gap, recorded in the term's provenance.
+- **Jo.** The type name is `radiance`, in `JO_ORDER`'s place for WRFDA's
+  `jo%rad`. There is one Jo group per sensor (variable `tb`).
+
+### 13.5 QC and thinning
+
+The order is WRFDA's (`da_get_innov_vector`): innovations, predictors, VarBC
+cold start, bias applied (`da_varbc_direct`), QC, then preconditioning.
+
+- **Thinning.** WRFDA's GSI thinning (`makegrids`/`map2grids`,
+  `thinning_mesh` km, default 60). It uses an equal-area latitude/longitude
+  box grid over the domain's lat/lon range. In each box it keeps the
+  observation with the smallest `crit * dist`, `dist` being the distance
+  from the box centre in box units plus one half. `crit = 1` for every
+  imager, so the pixel nearest the box centre wins and the first one wins
+  a tie. That is the plan's 11.4 rule, and it does not depend on the
+  innovation.
+- **Geostationary IR** (`da_qc_goesabi`, `da_qc_ahi`, `da_qc_seviri`
+  without the optional Zhuge-Zou cloud test, whose default is off):
+  - channels with `iuse = -1` in WRFDA's `radiance_info` are rejected.
+    The defaults are WRFDA's 4.7.1 files: ABI 8, 9 and 10 (errors 1.79,
+    1.92, 1.74 K); AHI 8 (1.70 K); SEVIRI WV6.2 and WV7.3 (2.5, 2.25 K).
+    The caller may widen the channel set and give errors;
+  - ABI and AHI reject a mixed surface (`isflg` 4-7) and a background
+    cloud liquid water path at or above 0.2 kg m-2 (the sum of `QCLOUD dp/g`
+    below 100 hPa);
+  - all three reject `|O - B| > 15 K` and `|O - B| > 3 sigma`, with O-B
+    after bias correction;
+  - a rejected observation has `qc = -1` and is out of Jo and VarBC;
+  - optional, off by default, and recorded when on: the plan's 11.5
+    window-band screen (11.2 um O-B below -3 K) and the 3 x 3 uniformity
+    test.
+- **MW** keeps PR D's screens (13.2), then applies the same gross checks.
+- **Limb:** CRTM's 65 degree limit (#651) is applied before CRTM is called.
+
+### 13.6 VarBC
+
+This is WRFDA's `da_varbc` (Auligné et al. 2007), channel by channel.
+
+- **Predictors** (`da_varbc_pred`, `da_predictor_crtm`):
+  1. a constant 1;
+  2. the 1000-300 hPa thickness;
+  3. the 200-50 hPa thickness;
+  4. the skin temperature;
+  5. the total column water;
+  6-8. powers of the scan position (polar sensors) or of the sensor zenith
+     angle (geostationary sensors), off in WRFDA's `VARBC.in` for imagers.
+  They are computed from the background profile, and normalised by the
+  predictor mean and standard deviation (`da_varbc_coldstart`).
+- **Cold and warm start.**
+  - A channel whose `pred_use` entries are all 0 starts cold: the offset is
+    the mode of the O-B histogram (200 bins over +-10 K), and the other
+    coefficients start at 0.
+  - `VARBC.in` and `VARBC.out` keep WRFDA's text format, so a WRFDA file
+    warm-starts woof and the reverse. The ids (platform, satellite, sensor)
+    are WRFDA's: GOES 4/nn/44, Himawari 31/n/56, MSG 12/n/21. MW ids come
+    with PR D.
+- **Control block.** For each VarBC channel with `npred` predictors there
+  are `npred` control variables after `U`'s. The bias increment is
+  `dbeta = V v_p`. The TL adds `sum_i dbeta_i pred_i` to every good
+  observation (`da_varbc_tl`), and the AD is its transpose (`da_varbc_adj`).
+- **Preconditioning** (`da_varbc_precond`). `V` is `Hess^-1/2`, where the
+  Hessian estimate is the sum over good observations of
+  `pred_i pred_j / err^2`, plus a background term `1 / bgerr_i` with
+  `bgerr_i = mean(err^2) / varbc_nbgerr` (`varbc_nbgerr = 5000`), all
+  divided by `varbc_factor^2`. The inverse square root uses a cyclic Jacobi
+  eigensolver in binary64 on the host (not LAPACK), so the same inputs give
+  the same `V` on every machine.
+- **Jp.** WRFDA's `da_calculate_j` computes
+  `z_i = (v_i + xhat_i) * sum_j V_ij / sqrt(bgerr_i)` (Fortran `SUM` of a
+  scalar times a row of `V`) and `Jp = 0.5 sum_i z_i^2`. woof's default
+  (`jp_form="wrfda"`) is that `Jp`, with its exact gradient
+  `z_i * sum_j V_ij / sqrt(bgerr_i)`. `jp_form="matrix"` gives the
+  textbook prior on the coefficients, `0.5 |diag(bgerr)^-1/2 V v|^2`, with
+  gradient `V^T diag(1/bgerr) V v`. The two agree when `npred = 1`.
+  - *Deviation from WRFDA:* `da_calculate_gradj` uses
+    `v_i * sum_j V_ij / sqrt(bgerr_i)`, which is not the gradient of its own
+    `Jp`. With it, a Taylor test of J including VarBC fails.
+  - The difference is in the background term only. That term is weak:
+    `nbgerr = 5000` observations' worth.
+  - `bgerr` uses the namelist `varbc_nbgerr`, as WRFDA does. The per-predictor
+    `nbgerr` line of `VARBC.in` only switches the term on or off.
+- **Update** (`da_varbc_update`). `beta = beta_b + V v_p` after each outer
+  loop. A channel with at least `varbc_nobsmin` (10) good observations has
+  its `pred_use` set to 1 in `VARBC.out`.
+
+### 13.7 Precision and identity
+
+- The obs term, the VarBC block, `Jp` and its gradient are host arithmetic
+  in the tier's real type, in a fixed order, like `SparseObsTerm`. A
+  production run's words are therefore the same under fast and strict
+  numerics and on CUDA and Metal, *given the same K and innovations*.
+- CRTM itself runs on the CPU (gfortran, the platform libm). Its
+  brightness temperatures and Jacobians are not bitwise identical between
+  the Mac and pb. The identity gates therefore use a fixed K (a
+  deterministic synthetic K-matrix, or a saved one), not a live CRTM call.
+
+### 13.8 Gates
+
+| gate | what |
+|---|---|
+| GR-V1 | dot-product test `<H' dx, dy> = <dx, H'^T dy>` of `RadianceTerm`, with and without the VarBC block, to 1e-13 in binary64 |
+| GR-V2 | `check_gradient` (WRFDA's Taylor test) of J = Jb + Jo(conventional + radiance) + Jp: best ratio within 1e-6 of 1 |
+| GR-V3 | one real case: the analysis reduces the water-vapour channels' O-A against O-B, and the radiosonde O-A is no worse than the conventional-only analysis's |
+| GR-V4 | production CG words with the radiance term and VarBC: the same SHA-256 under fast and strict, on CUDA and on Metal |
+| GR-V5 | VarBC on a synthetic case with a known bias: the coefficients converge to it, and `VARBC.out` round-trips |
+
+### 13.9 PR sequence
+
+1. This section.
+2. `radiance.py`: the record, the adapters, thinning, the columns, the term
+   and QC; GR-V1 without VarBC.
+3. `varbc.py` and the cost's control block; GR-V1 with VarBC, GR-V2, GR-V4,
+   GR-V5; the real-case gate GR-V3 and an opt-in radiance door for `woof var`.
