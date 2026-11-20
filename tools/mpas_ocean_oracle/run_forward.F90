@@ -145,7 +145,7 @@ program run_forward
   if (err /= 0) stop 13
   call ocn_time_integration_split_init(domain)
 
-  ! ocn_init_routines_block's state part (mpas_ocn_init_routines.F:621-650,690)
+  ! ocn_init_routines_block's state part (mpas_ocn_init_routines.F:621-650,690-696)
   call ocn_diagnostic_solve(dt, statePool, forcingPool, meshPool, diagnosticsPool, pool_named(pools, 'scratch'), &
        tracersPool)
   call mpas_pool_get_dimension(meshPool, 'nCells', nCells)
@@ -172,6 +172,12 @@ program run_forward
      normalTransportVelocity(:, iEdge) = normalVelocity(:, iEdge)
   end do
   call mpas_pool_initialize_time_levels(statePool)
+  ! the land-ice fluxes for potential output at startup (mpas_ocn_init_routines.F:690-696)
+  call ocn_forcing_build_fraction_absorbed_array(meshPool, statePool, diagnosticsPool, forcingPool, err, 1)
+  if (err /= 0) stop 9
+  call ocn_surface_land_ice_fluxes_build_arrays(meshPool, diagnosticsPool, forcingPool, pool_named(pools, 'scratch'), &
+       statePool, dt, err)
+  if (err /= 0) stop 9
 
   ! ocn_forward_mode_run's loop
   call mpas_pool_get_config(pools % configs, 'oracle_n_steps', nSteps)

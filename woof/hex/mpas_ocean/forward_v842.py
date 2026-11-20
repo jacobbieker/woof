@@ -237,6 +237,10 @@ def cold_start(*, pools: dict, configs: dict) -> Clock:
     for pool, names in _two_level(pools).items():
         for name in names:
             pools[pool][f"{name}@2"][...] = pools[pool][name]
+    # the land-ice fluxes for potential output at startup (mpas_ocn_init_routines.F:690-696)
+    forcing_v842.fraction_absorbed(mesh=m, layer_thickness=st["layerThickness"], diagnostics=d,
+                                   forcing=pools["forcing"])
+    land_ice_v842.build_arrays(dt=dt, mesh=m, state=st, diagnostics=d, forcing=pools["forcing"], configs=configs)
     return clock
 
 
