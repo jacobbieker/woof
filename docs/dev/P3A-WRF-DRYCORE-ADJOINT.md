@@ -266,9 +266,38 @@ Each step is one small PR, taken to merged before the next widens.
      the lateral boundary update and `w_damp` (item 5).
 5. Big-step tendencies: `horizontal_pressure_gradient`, `pg_buoy_w`,
    `rhs_ph`, `coriolis`, `curvature`, `w_damp`.
-6. Advection `advect_u/v/w/scalar` (non-PD, orders 2-6). This is the
+6. Advection `advect_u/v/w/scalar` (non-PD, h orders 3-6, v orders 2-6). This is the
    largest group; once the pattern is set, the mechanical ports go to
    Sonnet sub-agents.
+   - Done in `woof/grad/wrfplus/advect.py`: the TL/AD of woof's strict
+     `flux_div_{scalar,u,v,w}` (WRF `advect_scalar/u/v/w`) for periodic,
+     open and specified lateral boundaries, map factors,
+     h_*_adv_order 3-6 and v_*_adv_order 2-6. The TL is one kernel per
+     field kind. The AD is a gather (one writer per word, no atomics) in
+     six kernels: the advected field's x, y and z adjoints, then ru, rv
+     and rw. That is 16% faster than one kernel per output, because the
+     fused u/v field gather needed about 148 registers.
+   - Checks: dot-product test about 1e-15 and FD about 1e-10 for 4 kinds x
+     9 configurations. The float base state is the strict primal's words
+     (0 differing, host and CUDA). WRFPLUS 4.7.1 `g_/a_advect_*`
+     (`tools/wrfplus_oracle/advect.F90`) agrees to about 1e-16 on 16
+     cases.
+   - The oracle compares every point except three groups. (a) Open
+     non-specified u faces i = 0, nx and v faces j = 0, ny: WRF adds its
+     cb terms there, and woof adds them in the separate
+     `apply_open_radiative_bc` launch. (b) The periodic duplicate end point
+     (u i = nx, v j = ny): WRF reads its halo column, woof wraps, so the
+     fixture makes the two ru/rv end faces equal and compares the summed
+     adjoint of columns 0 and nx. (c) The open non-specified w lid's
+     boundary columns: see the primal finding below.
+   - Primal finding, not fixed here: woof's strict `flux_div_w` lid
+     (woof/core/kernels/advection.cu) forms the open non-cb x/y fluxes at
+     k = nz but applies them only under `GPUWM_NO_HADV`. WRF 4.7.1's
+     `advect_w` applies them at k = ktf+1. Fixing it changes production
+     output for open non-specified runs, so it needs its own PR. The TL/AD
+     follow woof's primal.
+   - Not covered: h_*_adv_order 2 (the legacy idealized path), WENO and
+     the monotonic or positive-definite limiters.
 7. Lateral boundaries: `relax_bdy_dry`, `spec_bdy_dry`,
    `spec_bdyupdate(_ph)`, `zero_grad_bdy`, `spec_bdy_final`, with LBC
    perturbations as an AD output (4D-Var's `var4d_lbc`).
@@ -363,10 +392,11 @@ Other jobs share that card.
 | calc_coef_w (calc_coefs) | #675 | 4.8x | 3.2x | 21-23x |
 | advance_mu_t + spec_bdyupdate (advance_mu_th + advance_exact_frame_mu_t) | advance_mu_t PR | 3.35x (3.2-3.5) | 2.0x | 8.2x |
 | small_step_prep + calc_p_rho, small_step_finish (small_step_{init,finish}_{uv,column}) | #685 | 4.8x (4.7-5.0) | 2.1x | 7.7-8.0x |
-| calc_p_rho_phi (calc_p_alpha_carried_muts) | this PR | 3.2x (3.1-3.5) | 1.0x | 4.9x |
-| rk_step_prep: couple_momentum + calc_ww_cp (stage_fluxes, CuPy) | this PR | 0.85x (0.82-0.86) | 0.32x | 1.2x |
-| rk_addtend_dry (dry tendency add + add_held_heating) | this PR | 1.0x | 1.7x | 2.2x |
-| set_w_surface (set_surface_w) | this PR | 2.1x (2.0-2.3) | 1.2x | 4.0x |
+| calc_p_rho_phi (calc_p_alpha_carried_muts) | #691 | 3.2x (3.1-3.5) | 1.0x | 4.9x |
+| rk_step_prep: couple_momentum + calc_ww_cp (stage_fluxes, CuPy) | #691 | 0.85x (0.82-0.86) | 0.32x | 1.2x |
+| rk_addtend_dry (dry tendency add + add_held_heating) | #691 | 1.0x | 1.7x | 2.2x |
+| set_w_surface (set_surface_w) | #691 | 2.1x (2.0-2.3) | 1.2x | 4.0x |
+| advect_scalar/u/v/w (flux_div_{scalar,u,v,w}) | this PR | 4.6x (4.0-5.2) | 1.4-2.3x | 21-32x |
 
 advance_uv's 3.7x in the projection is the midpoint of its range. The
 advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
@@ -414,37 +444,36 @@ activity tagged by woof kernel and the minimum over 10 steps
 | other woof kernels | 8.5% | 6.1% |
 | CuPy kernels and copies | 6.8% | 3.0% |
 
-flux_div is measured with a prototype rather than a port: a TL and a
-gather-form AD (one writer per word, no atomics) of the periodic
-flux_div_scalar (flux5 horizontal, vorder 3 vertical, no map factor),
-kept out of the tree. It passes a float64 dot test (3e-16) and an FD
-test of its TL (relative error 4e-12 at eps 1e-3), and its float32
-primal is within 2e-7 of the production kernel. At 200x200x49 on pb,
-over the production float32 kernel under GPUWM_WRF_EXACT=1, three runs
-on a shared card gave AD32 2.4-2.7x (2.56x median), TL32 1.8-2.1x and
-AD64 27-29x. AD64 is compute bound on the A6000's 1/32-rate float64;
-the glue and acoustic kernels are memory bound and do not show this.
-Hoisting the 1/60 and 1/12 divisions out of the gather loop took AD32
-from 4.2x to 2.4x. The u, v and w kernels are taken at the scalar's
-ratio: they average their advecting velocities but have the same
-stencils. The open and specified boundary paths are not in the
-prototype.
+flux_div is now measured on the in-tree port (item 6):
+TL and AD over woof's production float32 `flux_div_{scalar,u,v,w}`
+under GPUWM_WRF_EXACT=1, summed over the four kinds at 200x200x49 on pb,
+for periodic and for open+specified boundaries. Two runs of each on a card
+another job held at 73-80% gave AD32 4.0-5.2x (4.6x is used below),
+TL32 1.4-2.3x and AD64 21-32x. On an idle card the six AD kernels took
+2.3 ms against 0.76 ms of primal (about 3.0x), so the 4.6x is likely
+high. AD64 is compute bound on the A6000's 1/32-rate float64; the glue
+and acoustic kernels are memory bound and do not show this. The earlier
+out-of-tree prototype (periodic flux_div_scalar only) gave 2.56x; the
+port is dearer because the u and v field gathers average their
+advecting mass fluxes and visit both wrapped end faces, and the
+boundary paths add branches.
 
 The projection is the per-step adjoint cost over the forward step:
 1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
 far (85.2% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
-set_w_surface's 0.03% and flux_div's 14.4%), Σ share x AD32 = 3.01, on
+set_w_surface's 0.03% and flux_div's 14.4%), Σ share x AD32 = 3.30, on
 top of the forward recompute's 1. The rest is projected at a range of
 ratios:
 
 | ratio for the unmeasured 14.8% | projection |
 |---|---|
-| 2.2x (memory-traffic floor) | 4.3x |
-| 3.0x | 4.4x |
-| 3.5x (the measured share-weighted mean) | 4.5x |
+| 2.2x (memory-traffic floor) | 4.6x |
+| 3.0x | 4.7x |
+| 3.9x (the measured share-weighted mean) | 4.9x |
 
-The 5x limit holds while the rest averages at most about 6.7x (4.7x
-before flux_div was measured). This is a
+The 5x limit holds while the rest averages at most about 4.7x (6.7x
+with the prototype's flux_div). With flux_div at its idle-card 3.0x,
+the projection is 4.4-4.6x. This is a
 projection from kernel GPU time, not a measured step ratio: launch gaps
 are not counted, the ratios come from a shared card, and 14.8% of the
 step is not yet ported. calc_coefs and small_step are each about 4.8x;

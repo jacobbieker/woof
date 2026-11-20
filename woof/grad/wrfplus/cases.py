@@ -597,3 +597,55 @@ def stage_perturbation(geom: StageGeometry, seed: int, dtype=np.float64) -> dict
     out.update(cw_perturbation(geom.cw, seed + 7, dtype))
     out.update(substep_perturbation(geom.substep, seed, dtype))
     return {n: out[n] for n in stage_active(geom)}
+
+
+# ----------------------------------------------------------------- advection
+
+def adv_geometry(kind="scalar", nz=7, ny=8, nx=9, **overrides):
+    from .advect import AdvGeometry
+    base = dict(kind=kind, nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0)
+    base.update(overrides)
+    return AdvGeometry(**base)
+
+
+_ADV_SCALES = {"tend": (0.0, 1e-3), "q": (0.0, 1.0), "ru": (0.0, 2.0),
+               "rv": (0.0, 2.0), "rw": (0.0, 0.5), "msf": (1.0, 0.02)}
+
+
+def adv_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host trajectory (q, ru, rv, rw, msf, rdz, fnm, fnp) and the tendency
+    start.  ``hybrid`` stretches the levels (fnm != fnp)."""
+    from .advect import adv_shapes
+    rng = np.random.default_rng(seed)
+    shapes = adv_shapes(geom)
+    out = {}
+    for name, (c, s) in _ADV_SCALES.items():
+        out[name] = c + s * rng.standard_normal(shapes[name])
+    nz = geom.nz
+    eta = np.linspace(1.0, 0.0, nz + 1)
+    if hybrid:
+        eta = eta ** 1.3
+    dnw = np.diff(eta)
+    znu = 0.5 * (eta[1:] + eta[:-1])
+    dn = np.zeros(nz)
+    dn[1:] = np.diff(znu)
+    fnm = np.zeros(nz)
+    fnp = np.zeros(nz)
+    fnm[1:] = 0.5 * dnw[:-1] / dn[1:]
+    fnp[1:] = 0.5 * dnw[1:] / dn[1:]
+    if geom.kind == "w":
+        rdz = np.zeros(nz)
+        rdz[1:] = 1.0 / dn[1:]
+        rdz[0] = rdz[1] if nz > 1 else 1.0
+    else:
+        rdz = 1.0 / dnw
+    out.update(rdz=rdz, fnm=fnm, fnp=fnp)
+    return {n: np.ascontiguousarray(v, dtype=dtype) for n, v in out.items()}
+
+
+def adv_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .advect import ADV_ACTIVE, adv_shapes
+    rng = np.random.default_rng(seed)
+    shapes = adv_shapes(geom)
+    return {n: np.ascontiguousarray(_ADV_SCALES[n][1] * rng.standard_normal(shapes[n]),
+                                    dtype=dtype) for n in ADV_ACTIVE}
