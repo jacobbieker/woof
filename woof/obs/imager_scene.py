@@ -55,7 +55,7 @@ class Band:
     wavelength_nm: int
     quantity: str
     units: str
-    #: Channel numbers per sensor family ("abi", "ahi", "seviri"); absent = not carried.
+    #: Channel numbers per sensor family ("abi", "ahi", "seviri", "fci"); absent = not carried.
     channels: Mapping[str, int]
 
     @property
@@ -63,32 +63,34 @@ class Band:
         return f"mosaic_{self.wavelength_nm}_nm"
 
 
-def _band(nm, quantity, abi=None, ahi=None, seviri=None, *, himawari_only=False):
-    channels = {k: v for k, v in (("abi", abi), ("ahi", ahi), ("seviri", seviri)) if v is not None}
+def _band(nm, quantity, abi=None, ahi=None, seviri=None, fci=None, *, himawari_only=False):
+    channels = {k: v for k, v in (("abi", abi), ("ahi", ahi), ("seviri", seviri), ("fci", fci))
+                if v is not None}
     return Band(nm, quantity, "K" if quantity == BRIGHTNESS_TEMPERATURE else "%", channels)
 
 
 #: The 17 SatWeave bands.  Infrared channel numbers follow each band's
 #: ``satellite_sources`` attribute (ABI B08 for 6200 nm, SEVIRI WV6.2, ...);
-#: SEVIRI's numbering is its own 1-12 (4 = IR3.9 ... 11 = IR13.4).
+#: SEVIRI's numbering is its own 1-12 (4 = IR3.9 ... 11 = IR13.4); FCI's is its
+#: wavelength order (1 = VIS0.4 ... 16 = IR13.3).
 BANDS: Mapping[int, Band] = {b.wavelength_nm: b for b in (
-    _band(470, REFLECTANCE, abi=1, ahi=1),
-    _band(509, REFLECTANCE, ahi=2),
-    _band(640, REFLECTANCE, abi=2, ahi=3, seviri=1),
-    _band(863, REFLECTANCE, abi=3, ahi=4, seviri=2),
-    _band(1370, REFLECTANCE, abi=4),
-    _band(1610, REFLECTANCE, abi=5, ahi=5, seviri=3),
-    _band(2250, REFLECTANCE, abi=6, ahi=6),
-    _band(3830, BRIGHTNESS_TEMPERATURE, abi=7, ahi=7, seviri=4),
-    _band(6200, BRIGHTNESS_TEMPERATURE, abi=8, ahi=8, seviri=5),
+    _band(470, REFLECTANCE, abi=1, ahi=1, fci=1),
+    _band(509, REFLECTANCE, ahi=2, fci=2),
+    _band(640, REFLECTANCE, abi=2, ahi=3, seviri=1, fci=3),
+    _band(863, REFLECTANCE, abi=3, ahi=4, seviri=2, fci=4),
+    _band(1370, REFLECTANCE, abi=4, fci=6),
+    _band(1610, REFLECTANCE, abi=5, ahi=5, seviri=3, fci=7),
+    _band(2250, REFLECTANCE, abi=6, ahi=6, fci=8),
+    _band(3830, BRIGHTNESS_TEMPERATURE, abi=7, ahi=7, seviri=4, fci=9),
+    _band(6200, BRIGHTNESS_TEMPERATURE, abi=8, ahi=8, seviri=5, fci=10),
     _band(6900, BRIGHTNESS_TEMPERATURE, abi=9, ahi=9),
-    _band(7330, BRIGHTNESS_TEMPERATURE, abi=10, ahi=10, seviri=6),
-    _band(8590, BRIGHTNESS_TEMPERATURE, abi=11, ahi=11, seviri=7),
-    _band(9620, BRIGHTNESS_TEMPERATURE, abi=12, ahi=12, seviri=8),
-    _band(10400, BRIGHTNESS_TEMPERATURE, abi=13, ahi=13),
+    _band(7330, BRIGHTNESS_TEMPERATURE, abi=10, ahi=10, seviri=6, fci=11),
+    _band(8590, BRIGHTNESS_TEMPERATURE, abi=11, ahi=11, seviri=7, fci=12),
+    _band(9620, BRIGHTNESS_TEMPERATURE, abi=12, ahi=12, seviri=8, fci=13),
+    _band(10400, BRIGHTNESS_TEMPERATURE, abi=13, ahi=13, fci=14),
     _band(11200, BRIGHTNESS_TEMPERATURE, abi=14, ahi=14, seviri=9),
-    _band(12400, BRIGHTNESS_TEMPERATURE, abi=15, ahi=15, seviri=10),
-    _band(13300, BRIGHTNESS_TEMPERATURE, abi=16, ahi=16, seviri=11),
+    _band(12400, BRIGHTNESS_TEMPERATURE, abi=15, ahi=15, seviri=10, fci=15),
+    _band(13300, BRIGHTNESS_TEMPERATURE, abi=16, ahi=16, seviri=11, fci=16),
 )}
 
 
@@ -113,7 +115,7 @@ class Platform:
 
     name: str              # "GOES-16", "Himawari-9", "Meteosat-11", ...
     sector: str            # "goes_east", "goes_west", "himawari", "meteosat_0", "meteosat_iodc"
-    family: str            # "abi", "ahi", "seviri" (keys of Band.channels)
+    family: str            # "abi", "ahi", "seviri", "fci" (keys of Band.channels)
     crtm_sensor: str       # the CRTM sensor id whose coefficients simulate it
     sub_longitude_deg: float
     #: Why ``crtm_sensor`` is not this satellite's own (empty when it is).

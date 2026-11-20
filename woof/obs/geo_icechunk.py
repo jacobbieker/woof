@@ -829,6 +829,15 @@ SEVIRI_SENSORS = {f"Meteosat-{n}": f"seviri_m{n:02d}" for n in (8, 9, 10, 11)}
 SATPY_ATTRIBUTION = ("Contains modified EUMETSAT Meteosat data, processed with Satpy; Icechunk stores from "
                      "bkr/geo on Source Cooperative.")
 _SATPY_CHANNEL = re.compile(r"^channel_(\d\d)_(reflectance|brightness_temperature)_\d")
+#: MTG FCI's channels by Satpy name: (channel number in wavelength order, quantity).
+_FCI_CHANNELS = {
+    **{n: (i, "reflectance") for i, n in enumerate(
+        ("vis_04", "vis_05", "vis_06", "vis_08", "vis_09", "nir_13", "nir_16", "nir_22"), 1)},
+    **{n: (i, "brightness_temperature") for i, n in enumerate(
+        ("ir_38", "wv_63", "wv_73", "ir_87", "ir_97", "ir_105", "ir_123", "ir_133"), 9)},
+}
+FCI_STORE = "mtg_2000m"
+FCI_SENSORS = {"Meteosat-12": "fci_mtg1", "Meteosat-13": "fci_mtg2"}
 
 
 def _ns_datetime(value) -> datetime:
@@ -883,44 +892,87 @@ def read_meteosat_scene(service: str, when, *, channels: Iterable = ("6200", "73
     ``refresh`` work as for :func:`read_goes_scene`.
     """
 
-    when = utc(when)
-    root = root or default_root()
     if service not in METEOSAT_STORES:
         raise GeoIcechunkError(f"Meteosat service {service!r}: use one of {sorted(METEOSAT_STORES)}")
-    wanted = sorted({_band_channel(c, "seviri") for c in channels})
-    box = [float(v) for v in bbox] if bbox is not None else None
-    key = hashlib.sha256(json.dumps(["seviri", service, when.isoformat(), wanted, box,
-                                     tolerance.total_seconds(), root]).encode()).hexdigest()[:24]
-    directory = Path(cache).expanduser() if cache else cache_root()
-    entry = directory / f"meteosat-{service}" / when.strftime("%Y%m%dT%H%M") / key
-    if use_cache and not refresh and (entry / "provenance.json").is_file():
-        try:
-            return _read_cached(entry)
-        except (ValueError, KeyError, OSError):
-            pass  # a tampered, truncated or half-written entry is a cache miss: re-read and rewrite
-    name = METEOSAT_STORES[service]
-    try:
-        repo, containers, _ = _open_repository(name, "", root)
-        arrays, snap, written, depth = _open_snapshot(repo, name, "time")
-        reads, meta = _read_satpy_scan(arrays, name, snap, written, depth, containers, wanted, when, box,
-                                       tolerance, "seviri")
-    except GeoIcechunkError:
-        raise
-    except Exception as error:  # icechunk / zarr errors
-        raise GeoIcechunkError(f"{name} at {when.isoformat()}: read failed ({type(error).__name__}: "
-                               f"{str(error).splitlines()[0][:160] if str(error) else ''})") from error
+    return _satpy_scene("seviri", METEOSAT_STORES[service], f"meteosat-{service}", when, channels, bbox, tolerance,
+                        root, cache, refresh, use_cache, _seviri_platform)
+
+
+def read_fci_scene(when, *, channels: Iterable = ("6200", "7330", "10400"), bbox=None,
+                   tolerance: timedelta = timedelta(minutes=5), root: str | None = None,
+                   cache: Path | str | None = None, refresh: bool = False,
+                   use_cache: bool = True) -> ImagerScene:
+    """One MTG FCI (Meteosat-12) full-disc scan near ``when`` over ``bbox``, from ``mtg_2000m``.
+
+    The store holds the eight infrared and water-vapour channels at 2 km
+    (3.8, 6.3, 7.3, 8.7, 9.7, 10.5, 12.3 and 13.3 micron), as brightness
+    temperature in K, float16.  Channels are FCI's numbers in wavelength
+    order (``C14`` is 10.5 micron) or SatWeave wavelengths (10400); FCI has no 11.2
+    micron band.  Time, geometry and the cache are as for
+    :func:`read_meteosat_scene`, on WGS84.
+
+    CRTM v2.4 has no FCI coefficients, so the scene names ``fci_mtg1`` and
+    says so in its platform's ``coefficient_note``: the radiance adapter
+    refuses it when it opens the operator, by naming the missing files.
+    """
+
+    return _satpy_scene("fci", FCI_STORE, "mtg-fci", when, channels, bbox, tolerance, root, cache, refresh,
+                        use_cache, _fci_platform)
+
+
+def _seviri_platform(meta, name) -> Platform:
     sensor = SEVIRI_SENSORS.get(meta["platform"])
     if sensor is None:
         raise GeoIcechunkError(f"{name}: the scan's platform {meta['platform']!r} is not Meteosat-8 to 11")
     origin = meta["origin"]
     sector = "meteosat_rss" if abs(origin - 9.5) < 1.0 else "meteosat_iodc" if origin > 30.0 else "meteosat_0"
-    platform = Platform(meta["platform"], sector, "seviri", sensor, origin)
-    scene = _assemble(reads, platform_of=lambda sub_lon: platform, family="seviri", when=when, box=box,
+    return Platform(meta["platform"], sector, "seviri", sensor, origin)
+
+
+def _fci_platform(meta, name) -> Platform:
+    sensor = FCI_SENSORS.get(meta["platform"])
+    if sensor is None:
+        raise GeoIcechunkError(f"{name}: the scan's platform {meta['platform']!r} is not Meteosat-12 or 13")
+    return Platform(meta["platform"], "meteosat_0" if abs(meta["origin"]) < 1.0 else "meteosat_iodc", "fci",
+                    sensor, meta["origin"],
+                    "CRTM v2.4 has no FCI coefficients: the radiance adapter refuses this sensor")
+
+
+def _satpy_scene(family, name, label, when, channels, bbox, tolerance, root, cache, refresh, use_cache,
+                 make_platform) -> ImagerScene:
+    """Shared by the SEVIRI and FCI readers: the cache, the store read, the scene."""
+
+    when = utc(when)
+    root = root or default_root()
+    wanted = sorted({_band_channel(c, family) for c in channels})
+    box = [float(v) for v in bbox] if bbox is not None else None
+    key = hashlib.sha256(json.dumps([family, name, when.isoformat(), wanted, box,
+                                     tolerance.total_seconds(), root]).encode()).hexdigest()[:24]
+    directory = Path(cache).expanduser() if cache else cache_root()
+    entry = directory / label / when.strftime("%Y%m%dT%H%M") / key
+    if use_cache and not refresh and (entry / "provenance.json").is_file():
+        try:
+            return _read_cached(entry)
+        except (ValueError, KeyError, OSError):
+            pass  # a tampered, truncated or half-written entry is a cache miss: re-read and rewrite
+    try:
+        repo, containers, _ = _open_repository(name, "", root)
+        arrays, snap, written, depth = _open_snapshot(repo, name, "time")
+        reads, meta = _read_satpy_scan(arrays, name, snap, written, depth, containers, wanted, when, box,
+                                       tolerance, family)
+    except GeoIcechunkError:
+        raise
+    except Exception as error:  # icechunk / zarr errors
+        raise GeoIcechunkError(f"{name} at {when.isoformat()}: read failed ({type(error).__name__}: "
+                               f"{str(error).splitlines()[0][:160] if str(error) else ''})") from error
+    platform = make_platform(meta, name)
+    scene = _assemble(reads, platform_of=lambda sub_lon: platform, family=family, when=when, box=box,
                       source=f"s3://{BUCKET}/{PREFIX}" if _is_remote(root) else root,
                       attribution=SATPY_ATTRIBUTION, licence=LICENCE_EUMETSAT,
-                      geometry=f"navigation from the store's per-scan geostationary coordinates (MSG "
-                               f"ellipsoid); view angles from the satellite's actual longitude; scan time "
-                               f"is the midpoint of the {meta['bounds']}, row time linear south to north")
+                      geometry=f"navigation from the store's per-scan geostationary coordinates "
+                               f"({'MSG' if family == 'seviri' else 'WGS84'} ellipsoid); view angles from the "
+                               f"satellite's actual longitude; scan time is the midpoint of the "
+                               f"{meta['bounds']}, row time linear south to north")
     if use_cache:
         write_scene_netcdf(entry, scene, licence=LICENCE_EUMETSAT, attribution=SATPY_ATTRIBUTION)
     return scene
@@ -953,8 +1005,14 @@ def _read_satpy_scan(arrays, name, snap, written, depth, containers, wanted, whe
     row_frac = (y[rows] - y.min()) / (y.max() - y.min())
     by_channel = {}
     for key, array in arrays.by_source.items():
+        if array.ndim != 3:
+            continue
+        if family == "fci":
+            if key in _FCI_CHANNELS:
+                by_channel[_FCI_CHANNELS[key][0]] = (key, _FCI_CHANNELS[key][1], array)
+            continue
         m = _SATPY_CHANNEL.match(key)
-        if m and array.ndim == 3:
+        if m:
             by_channel[int(m[1])] = (key, m[2], array)
     missing = [c for c in wanted if c not in by_channel]
     if missing:
@@ -1027,9 +1085,11 @@ def _satellite_arg(text: str):
         return f"himawari{m[1]}"
     if t in METEOSAT_STORES:
         return t
+    if t in ("fci", "mtg"):
+        return "fci"
     if t in ("gk2a", "gk-2a", "ami"):
         raise argparse.ArgumentTypeError(NO_CRTM_COEFFICIENTS["gk2a"])
-    raise argparse.ArgumentTypeError(f"{text!r}: use 16, 17, 18, 19, himawari8, himawari9, msg, rss or odegree")
+    raise argparse.ArgumentTypeError(f"{text!r}: use 16, 17, 18, 19, himawari8, himawari9, msg, rss, odegree or fci")
 
 
 def fetch_main(args) -> int:
@@ -1038,7 +1098,9 @@ def fetch_main(args) -> int:
     try:
         common = dict(bbox=args.bbox, tolerance=timedelta(minutes=args.tolerance_minutes), root=args.root,
                       cache=args.cache, refresh=args.refresh)
-        if args.satellite in METEOSAT_STORES:
+        if args.satellite == "fci":
+            scene = read_fci_scene(args.time, channels=args.channels or ("6200", "7330", "10400"), **common)
+        elif args.satellite in METEOSAT_STORES:
             scene = read_meteosat_scene(args.satellite, args.time, channels=args.channels or ("6200", "7330", "11200"),
                                         **common)
         elif isinstance(args.satellite, str):
@@ -1058,7 +1120,7 @@ def fetch_main(args) -> int:
                       "cached": bool(scene.provenance.get("cached"))}))
     if args.summary_json:
         Path(args.summary_json).write_text(json.dumps(summary, indent=2, default=str) + "\n")
-    print(f"{'Meteosat' if args.satellite in METEOSAT_STORES else 'Himawari' if isinstance(args.satellite, str) else 'GOES'} "
+    print(f"{'Meteosat' if args.satellite in (*METEOSAT_STORES, 'fci') else 'Himawari' if isinstance(args.satellite, str) else 'GOES'} "
           f"data: {scene.provenance['licence']}. {scene.provenance['attribution']}", file=sys.stderr)
     return 0
 
@@ -1067,12 +1129,12 @@ def list_main(args) -> int:
     import sys
 
     try:
-        if args.satellite in METEOSAT_STORES:
+        if args.satellite in (*METEOSAT_STORES, "fci"):
             args.subdir = ""
         names = list_stores(args.subdir, args.root)
         if args.satellite:
-            if args.satellite in METEOSAT_STORES:
-                names = [n for n in names if n == METEOSAT_STORES[args.satellite]]
+            if args.satellite in (*METEOSAT_STORES, "fci"):
+                names = [n for n in names if n == {**METEOSAT_STORES, "fci": FCI_STORE}[args.satellite]]
             elif isinstance(args.satellite, str):
                 names = [s.name for s in himawari_segments(int(args.satellite[-1]), args.channel or 8, names=names)]
             else:
@@ -1103,12 +1165,14 @@ def register_cli(obs_sub) -> None:
     fetch = sub.add_parser("fetch", help="read ABI channels near a time over a box into the local cache")
     fetch.add_argument("--satellite", type=_satellite_arg, required=True,
                        help="GOES satellite number (16-19), himawari8 / himawari9, or a Meteosat SEVIRI "
-                            "service: msg (0 degrees, 2025 on), rss (rapid scan), odegree (0 degrees, 2018-2022)")
+                            "service: msg (0 degrees, 2025 on), rss (rapid scan), odegree (0 degrees, 2018-2022); "
+                            "or fci (MTG FCI, which woof cannot simulate)")
     fetch.add_argument("--time", required=True, type=_satweave_time("--time"),
                        help="UTC time with offset, e.g. 2025-06-01T18:00Z")
     fetch.add_argument("--channels", type=lambda v: [c for c in v.split(",") if c.strip()], default=None,
                        help="comma-separated channels of the instrument (C08 or 8; SEVIRI numbers its own 1-11) or "
-                            "band wavelengths (default C08,C09,C10,C14 for ABI and AHI; 6200,7330,11200 for SEVIRI)")
+                            "band wavelengths (default C08,C09,C10,C14 for ABI and AHI; 6200,7330,11200 for SEVIRI; "
+                            "6200,7330,10400 for FCI)")
     fetch.add_argument("--bbox", type=_bbox_wrapping, default=None,
                        help="west,south,east,north in degrees (west > east crosses 180); default the full disc")
     fetch.add_argument("--tolerance-minutes", type=float, default=5.0,

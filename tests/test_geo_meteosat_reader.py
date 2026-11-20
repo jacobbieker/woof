@@ -31,7 +31,7 @@ def _ns(when):
     return int(when.timestamp()) * NS
 
 
-def _write(path, scans, *, platform="Meteosat-10", origin=0.0, archive=False, bt=287.5, bad_rows=()):
+def _write(path, scans, *, platform="Meteosat-10", origin=0.0, archive=False, bt=287.5, bad_rows=(), fci=False):
     """``scans``: (nominal end, observation start, observation end) triples."""
 
     repo = icechunk.Repository.create(icechunk.local_filesystem_storage(str(path)))
@@ -45,14 +45,15 @@ def _write(path, scans, *, platform="Meteosat-10", origin=0.0, archive=False, bt
         a[...] = data
 
     grid = np.linspace(-HALF_M, HALF_M, N)
-    for nm, quantity, value in (("05_brightness_temperature_6_2um", "bt", 240.0),
-                                ("09_brightness_temperature_10_8um", "bt", bt),
-                                ("01_reflectance_0_6um", "refl", 12.5)):
+    channels = (("wv_63", "bt", 240.0), ("ir_105", "bt", bt)) if fci else (
+        ("channel_05_brightness_temperature_6_2um", "bt", 240.0),
+        ("channel_09_brightness_temperature_10_8um", "bt", bt), ("channel_01_reflectance_0_6um", "refl", 12.5))
+    for nm, quantity, value in channels:
         data = np.full((nt, N, N), value, dtype="f2")
         data[:, N // 2, :] = np.nan            # a missing row
         for r in bad_rows:
             data[:, r, :] = -1.0 if quantity == "bt" else np.nan
-        array(f"channel_{nm}", data, chunks=(1, N, N))
+        array(nm, data, chunks=(1, N, N))
     array("time", np.array([_ns(s[0]) for s in scans], dtype="i8"), {"units": "nanoseconds since 1970-01-01"})
     array("x_geostationary_coordinates", np.tile(grid, (nt, 1)))
     array("y_geostationary_coordinates", np.tile(grid, (nt, 1)))
@@ -86,6 +87,7 @@ def mirror(tmp_path):
     root.mkdir()
     _write(root / "msg_3000m.icechunk", [_scan(17, 45), _scan(18), _scan(18, 15)], bad_rows=(60,))
     _write(root / "rss_3000m.icechunk", [_scan(18, 5)], platform="Meteosat-11", origin=9.5)
+    _write(root / "mtg_2000m.icechunk", [_scan(18)], platform="Meteosat-12", fci=True)
     _write(root / "odegree_3000m.icechunk", [_scan(2, 15, day=2)], platform="Meteosat-11", archive=True)
     return root
 
@@ -183,3 +185,33 @@ def test_fetch_door_and_list_door(mirror, tmp_path, capsys):
     assert main(["obs", "geo", "list", "--root", str(mirror), "--satellite", "msg", "--coverage"]) == 0
     rows = [json.loads(x) for x in capsys.readouterr().out.strip().splitlines()]
     assert [r["store"] for r in rows] == ["msg_3000m"] and rows[0]["scans"] == 3
+
+
+def test_fci_reads_the_infrared_store_and_names_the_missing_coefficients(mirror, tmp_path):
+    scene = geo.read_fci_scene("2025-03-01T18:00Z", channels=["C10", "10400"], root=str(mirror),
+                               cache=tmp_path / "cache")
+    assert set(scene.values) == {6200, 10400}
+    assert np.allclose(scene.values[6200][np.isfinite(scene.values[6200])], 240.0)
+    p = scene.platforms[0]
+    assert (p.name, p.family, p.sector, p.crtm_sensor) == ("Meteosat-12", "fci", "meteosat_0", "fci_mtg1")
+    assert "no FCI coefficients" in p.coefficient_note
+    assert scene.provenance["channels"]["C14"]["store"] == "mtg_2000m"
+    with pytest.raises(geo.GeoIcechunkError, match="FCI does not carry"):
+        geo.read_fci_scene("2025-03-01T18:00Z", channels=[11200], root=str(mirror), use_cache=False)
+    with pytest.raises(geo.GeoIcechunkError, match="has no channel"):
+        geo.read_fci_scene("2025-03-01T18:00Z", channels=["C03"], root=str(mirror), use_cache=False)
+    # the operator refuses the scene's sensor by naming the files CRTM v2.4 does not have
+    from woof.rtm.crtm import CrtmError, ClearSkyOperator
+
+    with pytest.raises(CrtmError, match=r"missing CRTM coefficients.*fci_mtg1\.SpcCoeff\.bin"):
+        ClearSkyOperator([scene.platforms[0].crtm_sensor], coefficients=tmp_path)
+
+
+def test_fci_door(mirror, tmp_path, capsys):
+    from woof.cli import main
+
+    code = main(["fetch", "geo", "--satellite", "fci", "--time", "2025-03-01T18:00Z", "--channels", "C14",
+                 "--root", str(mirror), "--cache", str(tmp_path / "c")])
+    out = capsys.readouterr()
+    assert code == 0, out.err
+    assert json.loads(out.out.strip().splitlines()[-1])["satellite"] == "Meteosat-12"
