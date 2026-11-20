@@ -103,6 +103,8 @@ __device__ __forceinline__ double f_sign(double a, double b) { return copysign(f
 struct vt_params {
     double dt, yday, ustar_min, rdn_ice, al2;
     int ncat, l_brine, calc_tsfc, calc_strair, highfreq, natmiter, conduct_mu71, tr_iage, tr_fy;
+    // opt-in corrections of v8.4.2 bugs (column_v842.CORRECTIONS); 0 is v8.4.2 word for word
+    int fix_sfcflux_order, fix_ice_velocity;
 };
 
 // ice_therm_shared: calculate_Tin_from_qin
@@ -160,8 +162,9 @@ __device__ __forceinline__ double psixhu(double xd)
 }
 
 // ice_atmo: atmo_boundary_layer for sfctype 'ice' without form drag (refused),
-// as colpkg_atm_boundary calls it (uvel = uVelocity, vvel = 0: its second
-// "if (present(uvel)) worku = uvel" never sets workv).
+// as colpkg_atm_boundary calls it (uvel = uVelocity, vvel = 0: it drops the
+// vvel passed in, its second "if (present(uvel)) worku = uvel" never sets workv). The opt-in correction
+// ice_velocity_at_cell passes the cell's ice velocity instead (both components).
 __device__ void atmo_boundary_layer_ice(const vt_params &p, double Tsf, double potT, double uatm, double vatm,
                                         double wind, double zlvl, double Qa, double rhoa, double *strx,
                                         double *stry, double *Tref, double *Qref, double *delt, double *delq,
@@ -1023,7 +1026,7 @@ extern "C" __global__ void seaice_column_vertical_thermodynamics_v842(
     double *iceAreaCategory, double *iceVolumeCategory, double *snowVolumeCategory, double *surfaceTemperature,
     double *snowEnthalpy, double *iceEnthalpy, const double *iceSalinity, double *iceAge, double *firstYearIceArea,
     // velocity_solver
-    const double *uVelocity, double *airStressCellU, double *airStressCellV, const double *oceanStressCellU,
+    const double *uVelocity, const double *vVelocityCell, double *airStressCellU, double *airStressCellV, const double *oceanStressCellU,
     const double *oceanStressCellV,
     // atmos_coupling, atmos_forcing
     const double *uAirVelocity, const double *vAirVelocity, const double *airLevelHeight,
@@ -1065,6 +1068,7 @@ extern "C" __global__ void seaice_column_vertical_thermodynamics_v842(
     p.l_brine = (flags >> 0) & 1; p.calc_tsfc = (flags >> 1) & 1; p.calc_strair = (flags >> 2) & 1;
     p.highfreq = (flags >> 3) & 1; p.conduct_mu71 = (flags >> 4) & 1;
     p.tr_iage = (flags >> 5) & 1; p.tr_fy = (flags >> 6) & 1;
+    p.fix_sfcflux_order = (flags >> 7) & 1; p.fix_ice_velocity = (flags >> 8) & 1;
     const int ncat = p.ncat, nilyr = COL_NILYR, nslyr = COL_NSLYR;
     const int c = iCell;
     const double dt = p.dt;
@@ -1126,7 +1130,8 @@ extern "C" __global__ void seaice_column_vertical_thermodynamics_v842(
             atmo_boundary_layer_ice(p, surfaceTemperature[cn], airPotentialTemperature[c], uAirVelocity[c],
                                     vAirVelocity[c], windSpeed[c], airLevelHeight[c], airSpecificHumidity[c],
                                     airDensity[c], &strairxn, &strairyn, &Trefn, &Qrefn, &worka, &workb, &lhcoef,
-                                    &shcoef, &airDragCoefficient[c], &Cdn_atm_ratio_n, uVelocity[c], 0.0,
+                                    &shcoef, &airDragCoefficient[c], &Cdn_atm_ratio_n, uVelocity[c],
+                                    p.fix_ice_velocity ? vVelocityCell[c] : 0.0,
                                     &Urefn);
             if (p.tr_iage) iceAge[cn] = A(iceAge[cn], dt);
             if (p.tr_fy) {
@@ -1143,8 +1148,14 @@ extern "C" __global__ void seaice_column_vertical_thermodynamics_v842(
                 // set_sfcflux takes fsurfn_f and fsurfn_f where it takes fcondtopn_f
                 // (ice_colpkg.F90:2095-2101 against ice_flux_colpkg.F90:169-177), so fsurfn
                 // is the coupled conductive flux and fcondtopn the coupled surface flux.
-                surfaceHeatFluxCategory[cn] = M(surfaceConductiveFluxCouple[cn], 1.0);
-                surfaceConductiveFluxCategory[cn] = M(surfaceHeatFluxCouple[cn], 1.0);
+                // The opt-in correction set_sfcflux_order passes them in set_sfcflux's order.
+                if (p.fix_sfcflux_order) {
+                    surfaceHeatFluxCategory[cn] = M(surfaceHeatFluxCouple[cn], 1.0);
+                    surfaceConductiveFluxCategory[cn] = M(surfaceConductiveFluxCouple[cn], 1.0);
+                } else {
+                    surfaceHeatFluxCategory[cn] = M(surfaceConductiveFluxCouple[cn], 1.0);
+                    surfaceConductiveFluxCategory[cn] = M(surfaceHeatFluxCouple[cn], 1.0);
+                }
                 latentHeatFluxCategory[cn] = M(latentHeatFluxCouple[cn], 1.0);
                 sensibleHeatFluxCategory[cn] = M(sensibleHeatFluxCouple[cn], 1.0);
             }

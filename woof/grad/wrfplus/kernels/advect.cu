@@ -28,6 +28,13 @@
 #ifndef WRFPLUS_REAL
 #define WRFPLUS_REAL double
 #endif
+
+// WRFPLUS_TL 0 builds the base-only forward (model.step_base): every
+// perturbation store of the TL kernels is skipped, so the compiler drops
+// the tangent arithmetic and loads; the base words are unchanged.
+#ifndef WRFPLUS_TL
+#define WRFPLUS_TL 1
+#endif
 typedef WRFPLUS_REAL wreal;
 
 #ifndef ADV_H
@@ -319,7 +326,7 @@ extern "C" __global__ void adv_scalar_tl(TL_ARGS)
         res = r - rdz[k] * (fz[1] - fz[0]);
     }
 #undef Q
-    tendd[at] = res.d;
+    if (WRFPLUS_TL) tendd[at] = res.d;
     if (nl) tend[at] = res.v;
 }
 
@@ -449,7 +456,7 @@ extern "C" __global__ void adv_u_tl(TL_ARGS)
         res = r - rdz[k] * (fz[1] - fz[0]);
     }
 #undef U
-    tendd[at] = res.d;
+    if (WRFPLUS_TL) tendd[at] = res.d;
     if (nl) tend[at] = res.v;
 }
 
@@ -566,7 +573,7 @@ extern "C" __global__ void adv_v_tl(TL_ARGS)
         res = r - rdz[k] * (fz[1] - fz[0]);
     }
 #undef V
-    tendd[at] = res.d;
+    if (WRFPLUS_TL) tendd[at] = res.d;
     if (nl) tend[at] = res.v;
 }
 
@@ -716,7 +723,7 @@ extern "C" __global__ void adv_w_tl(TL_ARGS)
         res = r - rdz[k] * (fz[1] - fz[0]);
     }
 #undef W
-    tendd[at] = res.d;
+    if (WRFPLUS_TL) tendd[at] = res.d;
     if (nl) tend[at] = res.v;
 }
 

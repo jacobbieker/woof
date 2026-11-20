@@ -19,15 +19,13 @@ glibc 2.44), 2026-11-20.
     `seaice_init_column_shortwave` (the orbit, the radiation with
     `initonly`, then the cell albedos).
   The clock is `config_start_time`: `get_day_of_year` and
-  `get_seconds_into_day` read it. The oracle's stub clock
-  (`tools/mpas_ocean_oracle/stubs.F90`) counts Gregorian days whatever
-  `config_calendar_type` says, while MPAS's default calendar is
-  `gregorian_noleap` (2000-03-01 is day 60 there, 61 in the stub). So the
-  `gregorian_noleap` cases sit in January or in 2001, where both count the
-  same, and two cases (`dedd_bl99_level_ponds_noon`,
-  `init_shortwave_dedd_topo_ponds` on 2000-02-29) declare `gregorian`. The
-  port counts the 365-day year for `gregorian_noleap`, refuses 29 February
-  there, and refuses other calendars.
+  `get_seconds_into_day` read it. The driver sets the calendar
+  from `config_calendar_type` (`mpas_timekeeping_init`), and the stub
+  clock (`tools/mpas_ocean_oracle/stubs.F90`) counts the 365-day year of
+  `gregorian_noleap` (the Registry default) as MPAS does; two cases
+  (`dedd_bl99_level_ponds_noon`, `init_shortwave_dedd_topo_ponds` on
+  2000-02-29) declare `gregorian`. The port refuses 29 February on
+  `gregorian_noleap` and the other calendars.
 - Cases: `woof.verify.mpas_seaice_column_oracle.DEDD_CASES`, all
   `config_shortwave_type = 'dEdd'` with `config_calc_surface_temperature`
   true, at several dates and times of day:
@@ -39,6 +37,8 @@ glibc 2.44), 2026-11-20.
   - BL99 with one layer and three categories, and with twelve layers;
   - zero-layer thermodynamics (no heat capacity), without and with topo
     ponds;
+  - the Registry defaults on 2000-03-01, day 60 of `gregorian_noleap`'s
+    365-day year (61 on a Gregorian count);
   - `seaice_init_column_shortwave` with level ponds (`initonly`) and with
     topo ponds.
 
@@ -65,9 +65,19 @@ glibc 2.44), 2026-11-20.
   - the chlorophyll absorption without the biogeochemistry is
     `kalg*(0.5/dzk(klev))` in the bottom layer's visible band only.
 - Not in the cases: ice without volume (`aice > puny`, `vice = 0`). Its
-  layers have no thickness, so `kalg*(0.5/0)` and then `inf*0` make NaN in
-  v8.4.2 and in the port alike, but a NaN's payload is the host's, so its
-  words cannot be compared. `_dedd_state` gives that category volume.
+  layers have no thickness, so `kalg*(0.5/0)` is an infinite extinction in
+  the bottom layer in v8.4.2 and in the port alike: with algae the visible
+  light reaching it is absorbed in ice that is not there, and with
+  `kalg = 0` (`0*Inf`) the category's shortwave is NaN, whose payload is the
+  host's, so its words cannot be compared. `_dedd_state` gives that
+  category volume.
+- Opt-in correction (not the default, not in the oracle):
+  `woof_v842_corrections = ('dedd_zero_volume_ice',)` gives layers without
+  thickness no chlorophyll absorption, so ice without volume is
+  transparent. `tests/test_mpas_seaice_column_corrections.py` checks it
+  for both `kalg` cases: finite, no absorption in the missing ice, albedos
+  in [0, 1], and each category's absorbed shortwave equal to the incoming
+  minus the reflected.
 - `oracle-r8.npz`: per case, every output field whose words differ from the
   input's. `column-logs.json`: the tracer object and the log lines.
   `inputs.sha256`: the input-stream digests.

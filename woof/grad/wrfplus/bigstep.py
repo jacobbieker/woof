@@ -30,21 +30,23 @@ import numpy as np
 
 from woof.core.constants import RERADIUS
 
+from ._mode import tl_options
 from .acoustic import THREADS, _blocks, _check, _dtype, _real
 
 KERNELS = Path(__file__).resolve().parent / "kernels"
 
 
 @lru_cache(maxsize=None)
-def _device_module(real: str, device: int):
+def _device_module(real: str, device: int, build: tuple = ()):
     import cupy as cp
     source = (KERNELS / "bigstep.cu").read_text(encoding="utf-8")
-    return cp.RawModule(code=source, options=("--fmad=false", f"-DWRFPLUS_REAL={real}"))
+    return cp.RawModule(code=source,
+                        options=("--fmad=false", f"-DWRFPLUS_REAL={real}") + build)
 
 
 def _kernel(name: str, dtype):
     import cupy as cp
-    return _device_module(_real(dtype), cp.cuda.Device().id).get_function(name)
+    return _device_module(_real(dtype), cp.cuda.Device().id, tl_options()).get_function(name)
 
 
 def _named(label, names, d):

@@ -40,6 +40,23 @@ What it refuses, by name:
 (``vonkar/log(zref/iceruf)``, ``log(zref/zTrf)``) are folded on the host,
 each operation correctly rounded as MPFR does.
 
+Two v8.4.2 bugs are kept by default and corrected on request
+(``configs["woof_v842_corrections"]``, :data:`column_v842.CORRECTIONS`):
+
+- ``set_sfcflux_order``: with a coupled surface temperature,
+  ``colpkg_step_therm1`` passes ``set_sfcflux`` the coupled conductive flux
+  where it takes the surface flux and the reverse
+  (``ice_colpkg.F90:2095-2101`` against ``ice_flux_colpkg.F90:169-177``);
+  corrected, each is read as what it is;
+- ``ice_velocity_at_cell``: ``colpkg_atm_boundary`` gets the vertex field
+  ``uVelocity`` at the cell's index (``mpas_seaice_column.F:1511-1512``) and
+  drops the ``vvel`` passed in (``ice_colpkg.F90:3474-3479`` sets ``worku =
+  uvel`` twice and leaves ``workv`` 0); corrected, it
+  gets both components of the cell's ice velocity, the ``areaTriangle``
+  weighted mean of the interior vertices
+  (``seaice_interpolate_vertex_to_cell``), so high-frequency coupling's
+  stress follows the wind relative to the ice.
+
 On an abort (``l_stop``), MPAS logs the first aborting cell's message and
 returns from the whole routine; :func:`vertical_thermodynamics` returns that
 cell and message (the state is then not MPAS's: later cells have run).
@@ -127,11 +144,28 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
                 "WOOF_GLIBC239_LIBM64=1 (the vertical thermodynamics need glibc's atan)")
 
 
-def day_of_year(start_time: str) -> float:
+_NOLEAP_MONTH_START = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)
+
+
+def day_of_year(start_time: str, calendar: str) -> float:
     """``get_day_of_year`` at the clock's start: the integer day (1 on
-    1 January) as a real."""
-    date = _dt.date(int(start_time[0:4]), int(start_time[5:7]), int(start_time[8:10]))
-    return float(date.timetuple().tm_yday)
+    1 January) as a real, on ``config_calendar_type``'s calendar
+    (``mpas_timekeeping_init``): the Gregorian day, or the day of the 365-day
+    year of ``gregorian_noleap`` (the Registry default). A date the calendar
+    lacks (29 February without leap years) is refused, as ``isValidDate``
+    rejects it and MPAS leaves the time unset; so is the 360-day calendar,
+    which v8.4.2's built-in ESMF lacks, and any other."""
+    year, month, day = int(start_time[0:4]), int(start_time[5:7]), int(start_time[8:10])
+    if calendar == "gregorian":
+        return float(_dt.date(year, month, day).timetuple().tm_yday)
+    if calendar == "gregorian_noleap":
+        if month == 2 and day == 29:
+            _refuse("config_start_time", start_time, "29 February does not exist in the gregorian_noleap calendar",
+                    "a date of the 365-day year")
+        _dt.date(2001, month, day)  # any other day the year lacks raises, as for gregorian
+        return float(_NOLEAP_MONTH_START[month - 1] + day)
+    _refuse("config_calendar_type", calendar, "the time manager is ported for MPAS's gregorian and "
+            "gregorian_noleap calendars", "config_calendar_type = 'gregorian' or 'gregorian_noleap'")
 
 
 @lru_cache(maxsize=None)
@@ -180,7 +214,42 @@ def _flags(configs: dict, state: "cv.ColumnState") -> int:
             configs["config_use_high_frequency_coupling"], configs["config_heat_conductivity_type"] == "MU71",
             configs["config_use_ice_age"],
             configs["config_use_first_year_ice"])
+    fixes = cv.corrections(configs)
+    bits += ("set_sfcflux_order" in fixes, "ice_velocity_at_cell" in fixes)
     return sum(int(bool(b)) << i for i, b in enumerate(bits))
+
+
+def _ice_velocity(pools: dict, configs: dict, n_vertices: int, n_cells: int, dummy) -> tuple:
+    """The ice velocity colpkg_atm_boundary gets: v8.4.2's ``uVelocity`` (a
+    vertex field read at the cell's index, and no v), or with the
+    ``ice_velocity_at_cell`` correction both components interpolated to the
+    cells (``seaice_interpolate_vertex_to_cell``)."""
+    import cupy as cp
+    vs = pools["velocity_solver"]
+    u = cv._need(vs, "uVelocity", (n_vertices + 1,))
+    if "ice_velocity_at_cell" not in cv.corrections(configs):
+        return u, dummy
+    from . import velocity_v842 as vel
+    missing = [name for name, there in (("boundary/interiorVertex", (pools.get("boundary") or {}).get(
+        "interiorVertex") is not None), ("velocity_solver/vVelocity", vs.get("vVelocity") is not None)) if not there]
+    if missing:
+        cv._refuse("woof_v842_corrections", "ice_velocity_at_cell",
+                   "the cell's ice velocity is interpolated from the vertices' u and v over the interior vertices; "
+                   "the pools lack " + ", ".join(missing),
+                   "pools with boundary/interiorVertex and velocity_solver/vVelocity, or without the correction")
+    v = cv._need(vs, "vVelocity", (n_vertices + 1,))
+    mesh = {k: pools["mesh"][k] for k in ("nEdgesOnCell", "verticesOnCell", "areaTriangle")}
+    mesh = {k: cp.ascontiguousarray(cp.asarray(a)[:n_cells] if k != "areaTriangle" else cp.asarray(a)[:n_vertices])
+            for k, a in mesh.items()}
+    mesh["nCellsSolve"] = pools["mesh"]["nCellsSolve"]
+    boundary = {"interiorVertex": cp.ascontiguousarray(cp.asarray(pools["boundary"]["interiorVertex"])[:n_vertices])}
+    out = []
+    for vertex in (u, v):
+        cell = cp.zeros(n_cells + 1, np.float64)
+        vel.interpolate_vertex_to_cell(mesh=mesh, boundary=boundary, cell=cell[:n_cells],
+                                       vertex=cp.ascontiguousarray(vertex[:n_vertices]))
+        out.append(cell)
+    return tuple(out)
 
 
 def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
@@ -194,7 +263,7 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
     refuse_unported(configs, d)
     n_cells, n_solve, ncat, nil, nsl = (d["nCells"], d["nCellsSolve"], d["nCategories"], d["nIceLayers"],
                                        d["nSnowLayers"])
-    day = day_of_year(configs["config_start_time"]) if day is None else day
+    day = day_of_year(configs["config_start_time"], configs["config_calendar_type"]) if day is None else day
     folded = folded_constants()
     c1, cc, ci, cs = (n_cells + 1,), (n_cells + 1, ncat), (n_cells + 1, ncat, nil), (n_cells + 1, ncat, nsl)
     cat1 = (n_cells + 1, ncat, 1)
@@ -220,7 +289,7 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
         need(t, "surfaceTemperature", cat1), need(t, "snowEnthalpy", cs), need(t, "iceEnthalpy", ci),
         need(t, "iceSalinity", ci), need(t, "iceAge", cat1) if tr_iage else dummy,
         need(t, "firstYearIceArea", cat1) if tr_fy else dummy,
-        need(vs, "uVelocity", (n_vertices + 1,)), need(vs, "airStressCellU", c1), need(vs, "airStressCellV", c1),
+        *_ice_velocity(pools, configs, n_vertices, n_cells, dummy), need(vs, "airStressCellU", c1), need(vs, "airStressCellV", c1),
         need(vs, "oceanStressCellU", c1), need(vs, "oceanStressCellV", c1),
         need(ac, "uAirVelocity", c1), need(ac, "vAirVelocity", c1), need(ac, "airLevelHeight", c1),
         need(ac, "airSpecificHumidity", c1), need(ac, "airDensity", c1), need(ac, "airPotentialTemperature", c1),

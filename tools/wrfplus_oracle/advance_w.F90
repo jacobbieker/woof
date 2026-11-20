@@ -46,7 +46,7 @@ program wrfplus_advance_w
   call a3(gamd); call a3(u); call a3(ud); call a3(v); call a3(vd)
   call a3(sw); call a3(sph); call a3(sp); call a3(sal)
   call a2(mut); call a2(mutd); call a2(muts); call a2(mutsd); call a2(muave)
-  call a2(muaved); call a2(mu); call a2(mud); call a2(ht)
+  call a2(muaved); call a2(mu); call a2(mud); call a2(ht); call a2(msft)
   allocate(fnm(kms:kme), fnp(kms:kme), rdnw(kms:kme), rdn(kms:kme))
   read(iu) fnm, fnp, rdnw, rdn
   close(iu)
@@ -60,7 +60,8 @@ program wrfplus_advance_w
   cf%symmetric_ys = .false.; cf%symmetric_ye = .false.; cf%polar = .false.
   cf%damp_opt = 0; cf%dampcoef = 0.; cf%zdamp = 5000.
 
-  allocate(msft, mold=mut); msft = 1.
+  ! msftx = msfty = msft: woof carries one mass-point factor (ones
+  ! without map factors).
   allocate(p, pd, al, ald, pm1, pm1d, wsave, wsaved, alb, mold=w)
   p = 0; pd = 0; al = 0; ald = 0; pm1 = 0; pm1d = 0; wsave = 0; wsaved = 0; alb = 0
   allocate(w0, source=w); allocate(ph0, source=ph); allocate(thold0, source=thold)

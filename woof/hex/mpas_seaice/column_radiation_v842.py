@@ -29,7 +29,7 @@ What it refuses, by name:
   the biogeochemistry);
 - ``shortwave_ccsm3`` with more categories than ice layers: v8.4.2 passes
   ``ncat`` as ``absorbed_solar``'s ``nilyr`` (``ice_shortwave.F90:236``) and
-  then writes past the category's layers;
+  then writes past the category's layers (unless corrected, below);
 - the ``ccsm3`` albedos (the Registry default) in the default build:
   ``compute_albedos`` calls glibc's binary64 ``atan``, which is not correctly
   rounded and is LGPL, so it compiles only with ``WOOF_GLIBC239_LIBM64=1``
@@ -50,9 +50,18 @@ zero-heat-capacity fold of the top layers' absorption into the surface runs
 on each surface type's sums so far; categories without ice keep their
 bare-ice, snow and pond albedos. Ice without volume (``aice > puny``,
 ``vice = 0``) has layers without thickness, and v8.4.2's
-``kalg*(0.5/dzk(klev))`` makes NaN there, as the port does; a NaN's payload
-is the host's, so those words are not compared. The day of the year follows
+``kalg*(0.5/dzk(klev))`` makes the bottom layer's extinction infinite there,
+as the port does: with algae the visible light reaching it is absorbed in ice
+that is not there, and with ``kalg = 0`` the category's shortwave is NaN (a
+NaN's payload is the host's, so those words are not compared). The day of the year follows
 ``config_calendar_type`` (``gregorian`` or ``gregorian_noleap``).
+
+Opt-in corrections (``configs["woof_v842_corrections"]``, named in
+:data:`column_v842.CORRECTIONS`; the default is v8.4.2's words):
+``ccsm3_absorbed_solar_layers`` passes the category's ``nilyr`` to
+``absorbed_solar`` (and lifts the ``ncat > nilyr`` refusal), and
+``dedd_zero_volume_ice`` gives the delta-Eddington layers without thickness
+no chlorophyll absorption, so ice without volume is transparent.
 
 ``exp`` is ``glibc_exp`` (the MIT transcription of glibc's binary64 exp).
 """
@@ -66,6 +75,7 @@ import numpy as np
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
+from . import column_therm_v842 as ct
 from . import column_v842 as cv
 from .velocity_v842 import COMPILE_OPTIONS, _grid
 
@@ -94,6 +104,15 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         _refuse("config_shortwave_type", "dEdd",
                 rkind.trig_refusal("the orbit and the solar zenith angle call glibc's double sin, cos, atan and asin"),
                 "WOOF_GLIBC239_LIBM64=1, config_shortwave_type = 'ccsm3' or config_calc_surface_temperature = .false.")
+    fixes = cv.corrections(c)
+    if "ccsm3_absorbed_solar_layers" in fixes and not (calc_tsfc and not dedd):
+        _refuse("woof_v842_corrections", "ccsm3_absorbed_solar_layers",
+                "it corrects shortwave_ccsm3, which this configuration does not run",
+                "config_shortwave_type = 'ccsm3' with config_calc_surface_temperature = .true., or without it")
+    if "dedd_zero_volume_ice" in fixes and not dedd:
+        _refuse("woof_v842_corrections", "dedd_zero_volume_ice",
+                "it corrects the delta-Eddington shortwave, which this configuration does not run",
+                "config_shortwave_type = 'dEdd' with config_calc_surface_temperature = .true., or without it")
     if c["config_use_aerosols"]:
         _refuse("config_use_aerosols", True, "the aerosols in the shortwave are not ported",
                 "config_use_aerosols = .false.")
@@ -101,11 +120,13 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         _refuse("config_use_shortwave_bioabsorption", True,
                 "the shortwave bioabsorption (compute_shortwave_trcr) is not ported",
                 "config_use_shortwave_bioabsorption = .false.")
-    if calc_tsfc and not dedd and dims["nCategories"] > dims["nIceLayers"]:
+    if calc_tsfc and not dedd and dims["nCategories"] > dims["nIceLayers"] and \
+            "ccsm3_absorbed_solar_layers" not in cv.corrections(c):
         _refuse("config_nCategories", dims["nCategories"],
                 "shortwave_ccsm3 passes ncat as absorbed_solar's nilyr (ice_shortwave.F90:236), which then "
                 "writes past the category's ice layers",
-                "config_nCategories <= config_nIceLayers")
+                "config_nCategories <= config_nIceLayers, or the opt-in correction "
+                "woof_v842_corrections = ('ccsm3_absorbed_solar_layers',)")
     if calc_tsfc and not dedd and c["config_albedo_type"] == "ccsm3" and not rkind.trig64():
         _refuse("config_albedo_type", "ccsm3", rkind.trig_refusal("compute_albedos calls glibc's double atan"),
                 "WOOF_GLIBC239_LIBM64=1 or config_albedo_type = 'constant'")
@@ -154,7 +175,7 @@ def _function(name: str):
 
 def _flags(configs: dict, state: "cv.ColumnState") -> int:
     bits = (state.ktherm != 0, configs["config_albedo_type"] == "constant", state.calc_tsfc,
-            configs["config_use_topo_meltponds"])
+            configs["config_use_topo_meltponds"], "ccsm3_absorbed_solar_layers" in cv.corrections(configs))
     return sum(int(bool(b)) << i for i, b in enumerate(bits))
 
 
@@ -182,26 +203,6 @@ def _down(pools: dict, d: dict) -> list:
 def seconds_into_day(start_time: str) -> int:
     """``get_seconds_into_day`` at the clock's start."""
     return int(start_time[11:13]) * 3600 + int(start_time[14:16]) * 60 + int(start_time[17:19])
-
-
-_NOLEAP_MONTH_DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-
-
-def day_of_year(start_time: str, calendar: str) -> float:
-    """``get_day_of_year`` at the clock's start on MPAS's calendars: the
-    Gregorian day, or the day of a 365-day year (``gregorian_noleap``, the
-    Registry default, where 29 February does not exist)."""
-    from . import column_therm_v842 as ct
-    if calendar == "gregorian":
-        return ct.day_of_year(start_time)
-    if calendar == "gregorian_noleap":
-        month, day = int(start_time[5:7]), int(start_time[8:10])
-        if month == 2 and day == 29:
-            _refuse("config_start_time", start_time, "29 February does not exist in the gregorian_noleap calendar",
-                    "a date of the 365-day year")
-        return float(sum(_NOLEAP_MONTH_DAYS[:month - 1]) + day)
-    _refuse("config_calendar_type", calendar, "get_day_of_year is ported for MPAS's gregorian and "
-            "gregorian_noleap calendars", "config_calendar_type = 'gregorian' or 'gregorian_noleap'")
 
 
 def _dedd_parameters(configs: dict, day: float) -> np.ndarray:
@@ -244,7 +245,7 @@ def _radiation_dedd(pools: dict, configs: dict, state: "cv.ColumnState", initial
     d = state.dims
     n1, n_solve, ncat, nil, nsl = d["nCells"] + 1, d["nCellsSolve"], d["nCategories"], d["nIceLayers"], d["nSnowLayers"]
     cat1, cat = (n1, ncat, 1), (n1, ncat)
-    day = day_of_year(c["config_start_time"], c["config_calendar_type"]) if day is None else float(day)
+    day = ct.day_of_year(c["config_start_time"], c["config_calendar_type"]) if day is None else float(day)
     sec = seconds_into_day(c["config_start_time"]) if sec is None else int(sec)
     t = pools["tracers"]
     area, volume, snow, tsfc = (cv._need(t, k, cat1) for k in ("iceAreaCategory", "iceVolumeCategory",
@@ -268,7 +269,7 @@ def _radiation_dedd(pools: dict, configs: dict, state: "cv.ColumnState", initial
     snowfrac = cv._need(sw, "snowFractionCategory", cat)
     bio, nbio = _bio(pools, n1, ncat, dummy)
     flags = (int(cesm) | int(level) << 1 | int(topo) << 2 | int(bool(initialization)) << 3
-             | int(state.ktherm != 0) << 4)
+             | int(state.ktherm != 0) << 4 | int("dedd_zero_volume_ice" in cv.corrections(c)) << 5)
     par = cp.asarray(_dedd_parameters(c, day))
     orb = _orbit()
     args = (np.int32(ncat), np.int32(nil), np.int32(nsl), np.int32(nbio), np.int32(flags), np.int32(sec),

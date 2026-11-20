@@ -83,13 +83,13 @@ def test_fixture_covers_the_branches(precision):
     ({"config_time_integrator": "RK4"}, "config_time_integrator"),
     ({"config_use_freq_filtered_thickness": True}, "config_use_freq_filtered_thickness"),
     ({"config_use_standardGM": True}, "config_use_standardGM"),
-    ({"config_land_ice_flux_mode": "coupled"}, "config_land_ice_flux_mode"),
 ])
 def test_what_the_step_does_not_carry_is_refused_by_name(overrides, knob):
     from woof.hex.mpas_ocean import split_step_v842 as ss
     case = oo.cases()[0]
     mesh = case["pools"]["mesh"]
     ss.check_config(case["config"], "r4", mesh)
+    ss.check_config(dict(case["config"], config_land_ice_flux_mode="coupled"), "r4", mesh)  # ported (land_ice_v842)
     with pytest.raises(ConfigurationRefusal, match=knob):
         ss.check_config(dict(case["config"], **overrides), "r4", mesh)
     # nested halo extents run (tests/test_mpas_ocean_forward_parity.py holds them)
