@@ -119,13 +119,33 @@ def test_unported_configurations_are_refused_by_name(monkeypatch):
     cprep.check_config({**config, "config_use_ocean_mixed_layer": False})
 
 
-def test_the_mixed_layer_at_rkind_4_is_refused(monkeypatch):
-    monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "1")
-    pools = {name: {} for name in ("ocean_coupling", "atmos_coupling", "atmos_forcing", "drag", "ocean_fluxes",
-                                   "ocean_atmosphere")}
-    pools["ocean_coupling"]["seaSurfaceTemperature"] = np.zeros(4, np.float32)
-    with pytest.raises(ConfigurationRefusal, match="RKIND 8"):
-        oml.ocean_mixed_layer(pools, {"config_dt": 3600.0}, 3)
+def _host_pools(name="oml_test_ice_shelf_ten_iterations"):
+    case = _case(name)
+    return case["pools"], {**case["config"], "config_dt": case["dt"]}
+
+
+@pytest.mark.parametrize("pool, field", [(pool, names[i]) for pool, names in oml._FIELDS
+                                         for i in (0, len(names) - 1)])
+def test_the_mixed_layer_at_rkind_4_is_refused(pool, field):
+    # every field the kernel reads or writes is checked, before the glibc opt-in's refusal
+    pools, configs = _host_pools()
+    pools[pool][field] = pools[pool][field].astype(np.float32)
+    with pytest.raises(ConfigurationRefusal, match=f"{pool}/{field} is float32.*RKIND 8"):
+        oml.ocean_mixed_layer(pools, configs, 3)
+
+
+def test_a_non_integer_land_ice_mask_is_refused():
+    pools, configs = _host_pools()
+    pools["ocean_coupling"]["landIceMask"] = pools["ocean_coupling"]["landIceMask"].astype(np.float64)
+    with pytest.raises(ConfigurationRefusal, match="landIceMask is not int32"):
+        oml.ocean_mixed_layer(pools, configs, 3)
+
+
+@pytest.mark.parametrize("knob", ["config_dt", "config_nIceLayers"])
+def test_a_direct_call_without_the_step_configs_is_refused(knob):
+    pools, configs = _host_pools()
+    with pytest.raises(ConfigurationRefusal, match=knob):
+        oml.ocean_mixed_layer(pools, {k: v for k, v in configs.items() if k != knob}, 3)
 
 
 @requires_gpu

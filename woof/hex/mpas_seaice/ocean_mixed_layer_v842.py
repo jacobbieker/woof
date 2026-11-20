@@ -83,41 +83,73 @@ def check_config(configs: dict) -> None:
                 "WOOF_GLIBC239_LIBM64=1, or config_use_ocean_mixed_layer = .false.")
 
 
+#: the fields the kernel reads or writes, per pool, in its argument order
+#: (landIceMask, int32, only under config_use_test_ice_shelf)
+_FIELDS = (
+    ("ocean_coupling", ("seaSurfaceTemperature", "seaFreezingTemperature", "freezingMeltingPotential",
+                        "oceanMixedLayerDepth", "oceanHeatFluxConvergence")),
+    ("atmos_coupling", ("airPotentialTemperature", "uAirVelocity", "vAirVelocity")),
+    ("atmos_forcing", ("windSpeed",)),
+    ("atmos_coupling", ("airLevelHeight", "airSpecificHumidity", "airDensity", "longwaveDown",
+                        "shortwaveVisibleDirectDown", "shortwaveVisibleDiffuseDown", "shortwaveIRDirectDown",
+                        "shortwaveIRDiffuseDown")),
+    ("tracers_aggregate", ("iceAreaCell",)),
+    ("drag", ("airOceanDragCoefficientRatio",)),
+    ("ocean_fluxes", ("oceanHeatFlux", "oceanShortwaveFlux")),
+    ("ocean_atmosphere", ("airStressOceanU", "airStressOceanV", "atmosReferenceTemperature2mOcean",
+                          "atmosReferenceHumidity2mOcean", "albedoVisibleDirectOcean", "albedoIRDirectOcean",
+                          "albedoVisibleDiffuseOcean", "albedoIRDiffuseOcean", "longwaveUpOcean",
+                          "sensibleHeatFluxOcean", "latentHeatFluxOcean", "evaporativeWaterFluxOcean")),
+)
+#: the configs a direct call must pass (the column step's configs carry them)
+_REQUIRED = ("config_dt", "config_nIceLayers")
+
+
+def _fields(pools: dict, test_ice_shelf: bool) -> list:
+    """The kernel's arrays in argument order; refuses, by name, any that is
+    not the column package's precision (float64; landIceMask int32)."""
+    arrays = []
+    for pool, names in _FIELDS:
+        for name in names:
+            value = pools[pool][name]
+            if value.dtype != np.float64:
+                _refuse("config_use_ocean_mixed_layer", True,
+                        f"{pool}/{name} is {value.dtype}: the column package is RKIND 8 only "
+                        "(mpas_seaice_column.F does not compile at RKIND 4)",
+                        "float64 pools, or config_use_ocean_mixed_layer = .false.")
+            arrays.append(value)
+    if test_ice_shelf and pools["ocean_coupling"]["landIceMask"].dtype != np.int32:
+        _refuse("config_use_test_ice_shelf", True, "ocean_coupling/landIceMask is not int32 (MPAS's integer)",
+                "an int32 landIceMask, or config_use_test_ice_shelf = .false.")
+    return arrays
+
+
 def ocean_mixed_layer(pools: dict, configs: dict, n_cells_solve: int) -> None:
     """``seaice_column_ocean_mixed_layer``, in place on ``pools`` (the Registry
     structs ocean_coupling, atmos_coupling, atmos_forcing, tracers_aggregate,
-    drag, ocean_fluxes and ocean_atmosphere) over ``n_cells_solve`` cells."""
-    import cupy as cp
-
+    drag, ocean_fluxes and ocean_atmosphere) over ``n_cells_solve`` cells.
+    ``configs`` must carry ``config_dt`` and ``config_nIceLayers`` (the
+    latter picks the column module the rest of the step compiled; the mixed
+    layer's kernel does not read it)."""
+    missing = [name for name in _REQUIRED if name not in configs]
+    if missing:
+        _refuse(missing[0], None, f"a direct call must pass {', '.join(missing)} (no Registry default applies)",
+                f"{missing[0]} in configs")
+    test_ice_shelf = bool(_config(configs, "config_use_test_ice_shelf"))
+    arrays = _fields(pools, test_ice_shelf)
     check_config(configs)
-    oc, ac, af = pools["ocean_coupling"], pools["atmos_coupling"], pools["atmos_forcing"]
-    dg, of, oa = pools["drag"], pools["ocean_fluxes"], pools["ocean_atmosphere"]
-    sst = oc["seaSurfaceTemperature"]
-    if sst.dtype != np.float64:
-        _refuse("config_use_ocean_mixed_layer", True,
-                "the column package is RKIND 8 only (mpas_seaice_column.F does not compile at RKIND 4)",
-                "float64 pools, or config_use_ocean_mixed_layer = .false.")
-    n_cells = sst.shape[0]
+    n_cells = arrays[0].shape[0]
     if not 0 <= n_cells_solve <= n_cells:
         raise ValueError("nCellsSolve must lie within nCells")
     if not n_cells_solve:
         return
-    test_ice_shelf = bool(_config(configs, "config_use_test_ice_shelf"))
-    land_ice = oc["landIceMask"] if test_ice_shelf else cp.zeros(n_cells, np.int32)
+    import cupy as cp
+
+    land_ice = pools["ocean_coupling"]["landIceMask"] if test_ice_shelf else cp.zeros(n_cells, np.int32)
     folded = ct.folded_constants()
-    kernel = ct._function("seaice_column_ocean_mixed_layer_v842", int(configs.get("config_nIceLayers", 7)))
+    kernel = ct._function("seaice_column_ocean_mixed_layer_v842", int(configs["config_nIceLayers"]))
     kernel(((n_cells_solve + _BLOCK - 1) // _BLOCK,), (_BLOCK,), (
-        sst, oc["seaFreezingTemperature"], oc["freezingMeltingPotential"], oc["oceanMixedLayerDepth"],
-        oc["oceanHeatFluxConvergence"], ac["airPotentialTemperature"], ac["uAirVelocity"], ac["vAirVelocity"],
-        af["windSpeed"], ac["airLevelHeight"], ac["airSpecificHumidity"], ac["airDensity"], ac["longwaveDown"],
-        ac["shortwaveVisibleDirectDown"], ac["shortwaveVisibleDiffuseDown"], ac["shortwaveIRDirectDown"],
-        ac["shortwaveIRDiffuseDown"], pools["tracers_aggregate"]["iceAreaCell"],
-        dg["airOceanDragCoefficientRatio"], of["oceanHeatFlux"], of["oceanShortwaveFlux"],
-        oa["airStressOceanU"], oa["airStressOceanV"], oa["atmosReferenceTemperature2mOcean"],
-        oa["atmosReferenceHumidity2mOcean"], oa["albedoVisibleDirectOcean"], oa["albedoIRDirectOcean"],
-        oa["albedoVisibleDiffuseOcean"], oa["albedoIRDiffuseOcean"], oa["longwaveUpOcean"],
-        oa["sensibleHeatFluxOcean"], oa["latentHeatFluxOcean"], oa["evaporativeWaterFluxOcean"], land_ice,
-        np.float64(configs["config_dt"]), np.float64(folded["al2"]),
+        *arrays, land_ice, np.float64(configs["config_dt"]), np.float64(folded["al2"]),
         np.int32(_config(configs, "config_boundary_layer_iteration_number")),
         np.int32(bool(_config(configs, "config_calc_surface_stresses"))),
         np.int32(bool(_config(configs, "config_use_high_frequency_coupling"))), np.int32(test_ice_shelf),
