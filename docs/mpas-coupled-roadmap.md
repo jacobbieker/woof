@@ -162,9 +162,14 @@ Ordered by how self-contained each piece is:
    `woof/hex/mpas_seaice/coupling_prep_v842.py`,
    `tests/test_mpas_seaice_coupling_prep_parity.py`). Cut out of
    `mpas_seaice_column.F`, the two routines compile at RKIND 4 too, so this
-   piece is word-exact at both precisions. It calls no libm. The ocean mixed
-   layer (`config_use_ocean_mixed_layer`, `.true.` in the Registry, off when
-   coupled to an ocean) and the column biogeochemistry are refused by name.
+   piece is word-exact at both precisions. It calls no libm. The stand-alone
+   ocean mixed layer it runs first (`config_use_ocean_mixed_layer`, `.true.`
+   in the Registry, off when coupled to an ocean:
+   `seaice_column_ocean_mixed_layer`, the open ocean's `atmo_boundary_layer`
+   and `colpkg_ocn_mixed_layer`) is ported at RKIND 8, word-exact alone and
+   inside the column step (`woof/hex/mpas_seaice/ocean_mixed_layer_v842.py`,
+   `tests/test_mpas_seaice_ocean_mixed_layer_parity.py`; glibc's atan opt-in).
+   The column biogeochemistry is refused by name.
    Also ported: the column part of the time step (the diagnostics' and
    fluxes' re-initialisations, `seaice_column_predynamics_time_integration`,
    `_dynamics_` and `_postdynamics_`, over several steps on the clock's day

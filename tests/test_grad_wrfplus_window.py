@@ -270,3 +270,67 @@ except RuntimeError as e:
     assert "lateral boundaries other than periodic" in out["spec"], out
     assert "map factors" not in out["spec"], out
     assert "forward first" in out["order"], out
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_window_partial_tl_start(backend, tmp_path):
+    """WRFDA's TL start (W.WRFDA_TL_START, ``partial=True``): the names
+    dx0 omits start at zero, word for word the full dict with zeros there;
+    the adjoint of that zero fill is the restriction of Window.ad's result
+    (dot test); an incomplete dict without ``partial``, or a name outside
+    STEP_INPUTS, is refused by name."""
+    dtn = "float32" if backend == "mlx" else "float64"
+    out = _run(backend, f"""
+cfg, state = build({{}}, 0)   # WRFDA's window starts cold
+w = W.Window(state, cfg, 2, dtype=np.dtype({dtn!r}))
+w.forward()
+rng = np.random.default_rng(5)
+dx = rnd(w._start, rng)
+part = W.wrfda_tl_start({{n: dx[n] for n in W.WRFDA_TL_FIELDS}})
+def dot(x, y):  # on the host in binary64 (the Metal facade has no vdot)
+    return float(np.vdot(cp.asnumpy(x).astype(np.float64), cp.asnumpy(y).astype(np.float64)))
+full = {{n: dx[n] if n in part else cp.zeros_like(dx[n]) for n in IN}}
+a, b = w.tl(part, save_at=(1,), partial=True), w.tl(full, save_at=(1,))
+out["same"] = sum(int((cp.asnumpy(a[k][n]) != cp.asnumpy(b[k][n])).sum())
+                  for k in (1, 2) for n in IN)
+f = rnd(w._start, rng)
+# binary32 (Metal): scale by the inner products of the magnitudes, the
+# roundoff bound when the terms cancel, as K.dot_product(terms=True) does
+# for the other binary32 dot tests; binary64 scales by the result.
+def mag(x, y):
+    if {dtn!r} != "float32":
+        return 0.0
+    h = lambda z: np.abs(cp.asnumpy(z).astype(np.float64))
+    return float(np.vdot(h(x), h(y)))
+lhs = sum(dot(a[2][n], f[n]) for n in IN)
+lmag = sum(mag(a[2][n], f[n]) for n in IN)
+adj = w.ad(f)
+rhs = sum(dot(part[n], adj[n]) for n in part)
+rmag = sum(mag(part[n], adj[n]) for n in part)
+out["dot"] = abs(lhs - rhs) / max(abs(lhs), lmag, rmag, 1e-300)
+# the helpers' pair: <TL(start(g)), f> == <g, start_ad(AD(f))>
+g = {{n: dx[n] for n in W.WRFDA_TL_FIELDS}}
+ga = W.wrfda_tl_start_ad(adj)
+rhs = sum(dot(g[n], ga[n]) for n in g)
+rmag = sum(mag(g[n], ga[n]) for n in g)
+out["dot_helper"] = abs(lhs - rhs) / max(abs(lhs), lmag, rmag, 1e-300)
+out["shared"] = int(part["p_pert"] is part["p"] and part["muts"] is part["mup"])
+for key, bad, kw in (("missing", part, {{}}), ("unknown", {{**full, "qv": full["u"]}}, {{}}),
+                     ("empty", {{}}, {{"partial": True}})):
+    try:
+        w.tl(bad, **kw)
+        out[key] = ""
+    except ValueError as e:
+        out[key] = str(e)
+""", tmp_path)
+    assert out["same"] == 0
+    for key in ("dot", "dot_helper"):
+        # binary32 on Metal: 1e-5 of the magnitude-scaled misfit, as
+        # test_window_adjoint_with_forcing uses (scaled by the result it
+        # measured 2e-5 here, from cancellation across the terms)
+        assert out[key] < (1e-5 if backend == "mlx" else 1e-12), (key, out[key])
+    assert out["shared"] == 1
+    assert "dx0 is empty" in out["empty"], out["empty"]
+    assert "lacks ['php', 'al', 'alt']" in out["missing"], out["missing"]
+    assert "partial=True" in out["missing"]
+    assert "['qv']" in out["unknown"], out["unknown"]

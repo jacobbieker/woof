@@ -1230,6 +1230,16 @@ pairing and the OSSE half of GV3.
 residual, as for GV3). 4D-Var waits for the
 differentiable plan's G3.
 
+Status (2026-11-20): V5.1 landed as `woof.da.var.fgat` and `woof var
+--fgat-obs/--fgat-first-guess`, and GV5 passes for FGAT
+(`tests/test_var_fgat.py`, docs/var.md "FGAT"). It does not use P0's
+`pair`: WRFDA's ASCII FGAT takes the slot from the file, not from the
+observation time, and woof follows that. The oracle is
+`tools/wrfda_oracle/run_fgat.sh`: the testdata's 4D-Var observations, first
+guesses from a WRF 4.7.1 forecast, and the analysis at 15Z. Outer loops with
+FGAT are refused; WRFDA 4.7.1 re-reads `fgNN` and drops the earlier
+increments.
+
 ### Effort summary
 
 | phase | effort | depends on | gate |
@@ -2807,13 +2817,39 @@ in the repository.  It runs on the reference tier and prints one `GRV3` JSON
 line.  `VarResult.fit` gives O-B and O-A per conventional type and variable
 (`sound:t` ...) as well as per radiance channel.
 
-Status (2026-11-20): not yet run, because no case has both data sources.
-WIS2 sondes start on 2026-10-26.  The `bkr/geo/virtualized` GOES-18 and -19
-ABI stores are readable only up to 2026-07-08: the live repositories' newest
-snapshots point at missing objects, and the next segment does not exist yet.
-The planned case is 2026-10-28T12 on the tutorial grid, with 62 TEMP and
-5012 SYNOP reports in a ±1 h window.  It runs once the store is readable
-again.
+Status (2026-11-20): GR-V3 passes on the planned case, 2026-10-28T12 on the
+tutorial grid with 62 TEMP and 5012 SYNOP reports in a ±1 h window.  The
+`bkr/geo/virtualized` GOES-19 store became readable past 2026-07-08 again;
+the scene is the 11:55 full disc, read with `woof obs geo fetch
+--satellite 19 --time 2026-10-28T12:00Z --bbox=-135,15,-55,60`.  CRTM 2.4.1
+has no readable GOES-19 coefficients, so `abi_g16` stands in (11.3).
+Channels 8-10 are assimilated with VarBC from a cold start; channel 14 has
+`iuse = 0`, as in WRFDA's radiance info.  Of 4.6 M pixels, 2.35 M were thinned (60 km mesh) and 2.27 M
+fell outside the domain.  QC then removed 1560 mixed-surface, 437 gross
+(15 K) and 1238 3-sigma values, which left 10919 values at 4718 locations.
+With radiances the solve took 29 iterations; the conventional-only solve
+took 27.
+
+| channel | n | O-B rms (K) | O-A rms (K) |
+|---|---|---|---|
+| ABI 8 (6.2 µm) | 3918 | 1.526 | 1.058 |
+| ABI 9 (6.9 µm) | 3666 | 1.710 | 1.144 |
+| ABI 10 (7.3 µm) | 3335 | 1.512 | 1.069 |
+
+The radiosonde O-A, with radiances against conventional only, stays within
+the gate's 1 %:
+
+| var | conventional only | with radiances | change |
+|---|---|---|---|
+| sound:u (m/s) | 2.0056 | 2.0074 | +0.09 % |
+| sound:v (m/s) | 2.0145 | 2.0189 | +0.22 % |
+| sound:t (K) | 0.6960 | 0.6995 | +0.50 % |
+| sound:q (kg/kg) | 5.111e-4 | 5.125e-4 | +0.27 % |
+
+The radiances fit, but they do not yet improve the sondes on this
+single case.  The VarBC constants after one analysis are -0.59, +0.88 and
+-0.73 K for channels 8, 9 and 10.  The surface-pressure Jacobian is not in
+woof's CRTM shim and is omitted.
 
 The case's conventional-only half has run.  The setup:
 

@@ -41,7 +41,9 @@ stage a case names (``oracle_stage``):
   ``oracle_finalize_last``), stopping on an abort; the ierr and the step are
   logged (``TOBJ IERR``, ``TOBJ STEP``). Its cases (:data:`COUPLED_CASES`)
   carry the column step's state on a culled hexagonal torus with the
-  time-step oracle's dynamics state (:func:`_coupled_dynamics`).
+  time-step oracle's dynamics state (:func:`_coupled_dynamics`);
+- ``ocean_mixed_layer``: ``seaice_column_ocean_mixed_layer``. Its cases
+  carry the open ocean and the air above it (:func:`_oml_state`).
 
 ``mpas_seaice_column.F``, ``mpas_seaice_initialize.F``'s and
 ``mpas_seaice_forcing.F``'s routines and the column package are compiled
@@ -72,6 +74,7 @@ from woof.hex.mpas_seaice import column_ridge_v842 as crdg
 from woof.hex.mpas_seaice import column_step_v842 as cstep
 from woof.hex.mpas_seaice import column_therm_v842 as ct
 from woof.hex.mpas_seaice import column_v842 as cv
+from woof.hex.mpas_seaice import ocean_mixed_layer_v842 as oml
 from woof.verify import mpas_ocean_stream as _stream
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mpas_seaice_column"
@@ -89,6 +92,8 @@ DEDD_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_dedd"
 STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_step"
 #: the time step with the column package (COUPLED_CASES)
 COUPLED_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_coupled_step"
+#: the ocean mixed layer's fixture (OML_CASES and OML_STEP_CASES)
+OML_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_ocean_mixed_layer"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -364,6 +369,25 @@ COUPLED_CASES = (
     ("seaice_bl99_abort_salinity", 20262106, _SEAICE_STEP, {**_COUPLED_BASE, "oracle_n_steps": 2},
      (10, 5, 3)),
 )
+_OML = "ocean_mixed_layer"
+_OML_BASE = {**_VT, "config_use_ocean_mixed_layer": True}
+#: seaice_column_ocean_mixed_layer alone: name, seed, stage, overrides
+OML_CASES = (
+    ("oml_registry_defaults", 20262201, _OML, _OML_BASE),
+    ("oml_no_surface_stresses", 20262202, _OML, {**_OML_BASE, "config_calc_surface_stresses": False}),
+    ("oml_high_frequency_one_iteration", 20262203, _OML, {
+        **_OML_BASE, "config_use_high_frequency_coupling": True, "config_boundary_layer_iteration_number": 1}),
+    ("oml_test_ice_shelf_ten_iterations", 20262204, _OML, {
+        **_OML_BASE, "config_use_test_ice_shelf": True, "config_boundary_layer_iteration_number": 10}),
+)
+#: the column step with the mixed layer on (seaice_column_coupling_prep runs it first)
+OML_STEP_CASES = (
+    ("oml_step_bl99_dedd", 20262211, _STEP, {**_OML_BASE, "oracle_n_steps": 3,
+                                             "config_start_time": "2001-06-01_10:00:00"}),
+    ("oml_step_registry_defaults_no_vertical_thermodynamics", 20262212, _STEP, {
+        "config_use_column_vertical_thermodynamics": False, "oracle_n_steps": 2,
+        "config_start_time": "2001-07-20_12:00:00"}),
+)
 
 
 def configs_of(overrides: dict, stage: str) -> dict:
@@ -383,7 +407,10 @@ def field_rows(config: dict, mesh: dict = MESH) -> tuple[list, dict[str, int], d
         # seaice_column_coupling_prep reads its dimensions from the tracers pool
         rows += [("tracers", "nCellsSolve", DIM, ()), ("tracers", "nCategories", DIM, ())]
     stage = config.get("oracle_stage")
-    pools = (VT_POOLS if stage == "vertical_thermodynamics" else STEP_POOLS if stage in (_STEP, _SEAICE_STEP)
+    if stage in (_STEP, _OML) and config.get("config_use_ocean_mixed_layer"):
+        # seaice_column_ocean_mixed_layer reads its nCellsSolve from the ocean_coupling pool
+        rows += [("ocean_coupling", "nCellsSolve", DIM, ())]
+    pools = (VT_POOLS if stage in ("vertical_thermodynamics", _OML) else STEP_POOLS if stage in (_STEP, _SEAICE_STEP)
              else POOLS)
     # The Registry allocates a var by its own packages: gen_inc.c's parse_var never reads
     # the var_struct's (biogeochemistry's newlyFormedIce is the column package's).  The
@@ -1039,6 +1066,50 @@ def _overlay_dynamics(case: dict, dynamics: dict) -> None:
     pools["mesh"]["indexToCellID"] = np.arange(1, nc + 2, dtype=np.int32)
 
 
+def _oml_state(rs, case: dict) -> None:
+    """The open ocean under :func:`_thermo_state`'s air (its draws first): the
+    down shortwave (a cell without sun), the mixed layer's depth (a shallow
+    cell whose freezing/melting potential the +-1000 W m-2 clamp bounds), a
+    sea surface at, below and well above freezing, a warm-air cell (a stable
+    boundary layer over the sea), the deep heat flux convergence (positive
+    where the mixed layer is at freezing, so it is zeroed), the fluxes
+    through the ice and the drag ratio the call passes."""
+    _thermo_state(rs, case)
+    n1 = case["dims"]["nCells"] + 1
+    u = _uniform(rs)
+    ac = case["pools"]["atmos_coupling"]
+    for key, hi in (("shortwaveVisibleDirectDown", 250.0), ("shortwaveVisibleDiffuseDown", 120.0),
+                    ("shortwaveIRDirectDown", 200.0), ("shortwaveIRDiffuseDown", 100.0)):
+        value = u(0.0, hi, (n1,))
+        value[7] = 0.0
+        ac[key] = value
+    _oml_ocean(rs, case)
+
+
+def _oml_ocean(rs, case: dict) -> None:
+    """:func:`_oml_state`'s ocean (and the column step's, with the mixed layer on)."""
+    pools, dims = case["pools"], case["dims"]
+    n1 = dims["nCells"] + 1
+    u = _uniform(rs)
+    pools["atmos_coupling"]["airPotentialTemperature"][5] = 285.0
+    oc = pools["ocean_coupling"]
+    tf = oc["seaFreezingTemperature"]
+    sst = tf + u(0.0, 1.5, (n1,))
+    sst[1], sst[2] = tf[1] - 0.3, tf[2]
+    sst[4], sst[8] = 3.0, 6.0
+    oc["seaSurfaceTemperature"] = sst
+    hmix = u(5.0, 40.0, (n1,))
+    hmix[3] = 0.05
+    oc["oceanMixedLayerDepth"] = hmix
+    qdp = u(-30.0, 30.0, (n1,))
+    qdp[1], qdp[2] = 15.0, 25.0
+    oc["oceanHeatFluxConvergence"] = qdp
+    of = pools["ocean_fluxes"]
+    of["oceanHeatFlux"] = u(-60.0, 10.0, (n1,))
+    of["oceanShortwaveFlux"] = u(0.0, 20.0, (n1,))
+    pools["drag"]["airOceanDragCoefficientRatio"] = u(0.5, 1.5, (n1,))
+
+
 def make_case(name, seed, stage, overrides, torus=None) -> dict:
     rs = np.random.RandomState(seed)
     config = configs_of(overrides, stage)
@@ -1070,6 +1141,8 @@ def make_case(name, seed, stage, overrides, torus=None) -> dict:
         _thermo_state(rs, case)
     if stage in (_STEP, _SEAICE_STEP):
         _step_state(rs, case)
+        if config["config_use_ocean_mixed_layer"]:
+            _oml_ocean(rs, case)
     if dynamics is not None:
         _overlay_dynamics(case, dynamics)
     if stage == "itd_thermodynamics":
@@ -1078,6 +1151,8 @@ def make_case(name, seed, stage, overrides, torus=None) -> dict:
         _ridge_state(rs, case)
     if stage in _RADIATION_STAGES:
         _radiation_state(rs, case)
+    if stage == _OML:
+        _oml_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
     case["fields"] = [r[:4] for r in rows]
@@ -1220,6 +1295,8 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
         state.abort = cstep.run(dev, config, state, int(config["oracle_n_steps"]))
     elif stage == _SEAICE_STEP:
         state.abort, step = _run_seaice_step(dev, config)
+    elif stage == _OML:
+        oml.ocean_mixed_layer(dev, config, int(case["dims"]["nCellsSolve"]))
     else:
         raise ValueError(f"unknown stage {stage}")
     outputs = {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]
