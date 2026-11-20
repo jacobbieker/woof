@@ -221,12 +221,81 @@ The 6.9 µm band is 0.6 to 0.9 K warm on both ABI and AHI. That is a
 background or operator bias, the kind variational bias correction (VarBC)
 removes.
 
+## Into the LETKF (opt-in)
+
+`woof.da.obs_radiance.radiance_to_gridded_obs` turns one scene into LETKF
+observation batches, one per band. Its inputs are the scene, the
+background ensemble and an open CRTM operator. It works in five steps:
+
+1. **Thinning.** It keeps one pixel per `thin` x `thin` block of model
+   columns. That pixel must have every band, a sensor zenith below 65°, no
+   limb flag and an attributed satellite.
+2. **H(x) per member.** It runs CRTM on every member's column, using the
+   pixel's own satellite and geometry.
+3. **Clear-sky screening.** A column passes three tests:
+   - The 11.2 µm brightness temperature is uniform over the pixel's 3x3
+     neighbourhood.
+   - Its departure from the ensemble-mean H is within 3 K.
+   - If you pass the background condensate, the condensate path above the
+     level 100 hPa below the band's peak is small.
+4. **Bias correction and gross check.** It subtracts a static per-band
+   offset (`bias_k`), then drops departures beyond 3 sigma of the combined
+   observation and ensemble spread. Variational bias correction is not
+   implemented.
+5. **Placement.** Each observation goes at one level per column: the
+   model level nearest the peak of the ensemble-mean temperature Jacobian.
+   The vertical localisation radius stands in for the width of the
+   weighting function. This is the same one-level convention the GOES
+   cloud-water-path batch uses.
+
+`wrf_columns(members)` builds the CRTM columns from WRF-named member
+states. Any other state works through a function `columns(member, jj, ii)`
+that returns `Profiles`. The returned provenance records each band's
+counts, its departure statistics and its peak pressures.
+
+### Regional impact case
+
+A test case ran on 2026-10-28 at 12Z over the US Great Plains (28-45N,
+105-85W). The ensemble was 31 GEFS members (the 06Z run, 6-hour
+forecast), interpolated to a 31-level, 0.5 degree grid. The observations
+were SatWeave GOES-East water-vapour bands, with `abi_g16` as the proxy
+sensor. Of the 340 model columns, 175 passed the 3x3 uniformity test and
+167 also passed the window check, so 167 observations per band went in.
+In that run the background-cloud and gross screens rejected no further
+columns: the provenance `assimilated` count was 167 per band, equal to the
+window-clear count. The independent check uses the 523 pixels that passed
+the same uniformity and window tests and were not assimilated. The run used a static
+bias per band (the mean O-B: -0.10, +1.20 and -0.31 K), 2 K errors,
+400 km / 6 km localisation and RTPS 0.9.
+
+| Band | Assimilated O-B -> O-A RMS (K) | Independent O-B -> O-A RMS (K) |
+|---|---|---|
+| 6.2 um | 1.04 -> 0.65 | 1.03 -> 0.92 |
+| 6.9 um | 1.01 -> 0.62 | 1.00 -> 0.91 |
+| 7.3 um | 0.79 -> 0.59 | 0.79 -> 0.72 |
+
+The run was scored against WIS2 radiosondes (`wis2_upper_air`). Rows with
+an O-B above 10 K (temperature) or 15 m/s (wind) were excluded from both
+the background and the analysis score. There were no aircraft reports at
+that hour. The analysis did not degrade the radiosonde score:
+
+| Variable | Background RMS | Analysis RMS |
+|---|---|---|
+| T 850-500 hPa | 0.40 K | 0.40 K |
+| T 400-200 hPa | 2.41 K | 2.40 K |
+| u, all levels | 4.12 m/s | 4.11 m/s |
+| v, all levels | 3.41 m/s | 3.41 m/s |
+
+The increments are small, with an RMS of 0.02 K for temperature and
+0.07 m/s for wind. This is expected for three upper-tropospheric
+water-vapour channels with 2 K errors. The case shows that the operator
+is wired up correctly; it does not show forecast skill.
+
 ## Not yet
 
 These come next, in the plan's order:
 
 - Himawari AHI, GK-2A AMI and Meteosat SEVIRI/FCI from the other
   `bkr/geo` stores;
-- the LETKF radiance adapter.
-
-Until then these scenes do not reach an analysis.
+- variational bias correction, and the radiance operator for woof's
+  3D-Var (plan section 11).
