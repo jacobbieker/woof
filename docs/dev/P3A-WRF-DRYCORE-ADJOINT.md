@@ -567,11 +567,11 @@ rest is projected at a range of ratios:
 
 | ratio for the unmeasured 5.1% | projection |
 |---|---|
-| 2.2x (memory-traffic floor) | 4.7x |
-| 3.0x | 4.7x |
-| 3.75x (the measured share-weighted mean) | 4.7x |
+| 2.2x (memory-traffic floor) | 4.67x |
+| 3.0x | 4.71x |
+| 3.75x (the measured share-weighted mean) | 4.75x |
 
-The 5x limit holds while the rest averages at most about 8.7x. This is a
+The 5x limit holds while the rest averages at most about 8.6x. This is a
 projection from kernel GPU time, not a measured step ratio: launch gaps
 are not counted, most ratios come from a shared card, and 5.1% of the
 step is not yet ported. calc_coefs and small_step are each about 4.8x;

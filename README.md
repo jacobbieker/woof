@@ -977,7 +977,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   axes, all described in the design note.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
   0.85-3.2x the glue, 3.3-4.5x advection and 1.3-4.4x the big-step
-  tendencies. The measured step projection (4.7x) is in the design
+  tendencies. The measured step projection (4.7-4.8x) is in the design
   note. The forecast path does not import any of it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
