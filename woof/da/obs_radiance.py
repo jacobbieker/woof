@@ -38,6 +38,7 @@ the module is only reached by a caller that builds CRTM and asks for it.
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Callable, Mapping, Sequence
@@ -118,8 +119,11 @@ def _local_std(values):
     pad = np.pad(values, 1, mode="edge")
     ny, nx = values.shape
     stack = np.stack([pad[1 + a:1 + a + ny, 1 + b:1 + b + nx] for a in (-1, 0, 1) for b in (-1, 0, 1)])
-    with np.errstate(invalid="ignore"):
-        return np.nanstd(stack, axis=0)
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        std = np.nanstd(stack, axis=0)
+    # A window with fewer than 5 finite values is not shown to be uniform.
+    return np.where(np.isfinite(stack).sum(axis=0) >= 5, std, np.inf)
 
 
 def select_columns(scene: ImagerScene, lat, lon, settings: RadianceSettings) -> dict:
@@ -140,7 +144,7 @@ def select_columns(scene: ImagerScene, lat, lon, settings: RadianceSettings) -> 
     if absent:
         raise RadianceAdapterError(f"the scene carries no band {absent}")
     usable = ((scene.platform_index >= 0) & (scene.view_zenith < settings.max_zenith_deg)
-              & ((scene.flags & FLAG_LIMB) == 0) & np.isfinite(slat))
+              & ((scene.flags & FLAG_LIMB) == 0) & np.isfinite(slat) & np.isfinite(slon))
     for nm in wanted:
         usable &= np.isfinite(np.asarray(scene.values[nm], float))
     flat = np.flatnonzero(usable)
@@ -151,9 +155,17 @@ def select_columns(scene: ImagerScene, lat, lon, settings: RadianceSettings) -> 
     chord = 2.0 * np.sin(settings.max_distance_km / 6371.0 / 2.0)
     distance, nearest = tree.query(_unit_vectors(lat[jj, ii], lon[jj, ii]), distance_upper_bound=chord)
     found = np.isfinite(distance)
-    jj, ii, pixel = jj[found], ii[found], flat[nearest[found]]
+    jj, ii, pixel, distance = jj[found], ii[found], flat[nearest[found]], distance[found]
+    # Several model columns can share one scene pixel: keep the nearest column for each.
+    order = np.lexsort((distance, pixel))
+    first = np.ones(order.size, bool)
+    first[1:] = pixel[order][1:] != pixel[order][:-1]
+    survivor = np.zeros(order.size, bool)
+    survivor[order[first]] = True
+    duplicates = int((~survivor).sum())
+    jj, ii, pixel = jj[survivor], ii[survivor], pixel[survivor]
     uniform = _local_std(np.asarray(scene.values[settings.window_band], float)).ravel()[pixel] < settings.uniformity_k
-    counts.update(with_pixel=int(found.sum()), uniform=int(uniform.sum()))
+    counts.update(with_pixel=int(found.sum()), pixel_duplicates_dropped=duplicates, uniform=int(uniform.sum()))
     return dict(jj=jj[uniform], ii=ii[uniform], pixel=pixel[uniform], counts=counts)
 
 
@@ -161,10 +173,12 @@ def _mean_profiles(profiles: Sequence[Profiles]) -> Profiles:
     first = profiles[0]
     averaged = {k: np.mean([getattr(p, k) for p in profiles], axis=0)
                 for k in ("level_pressure_hpa", "pressure_hpa", "temperature_k", "water_vapour_gkg", "ozone_ppmv",
-                          "skin_temperature_k", "wind_speed_ms", "wind_direction_deg")}
-    return Profiles(land_fraction=first.land_fraction, water_fraction=first.water_fraction,
-                    snow_fraction=first.snow_fraction, ice_fraction=first.ice_fraction,
-                    surface_altitude_m=first.surface_altitude_m, **averaged)
+                          "skin_temperature_k", "wind_speed_ms", "land_fraction", "water_fraction",
+                          "snow_fraction", "ice_fraction")}
+    # Wind direction is circular: average the unit vectors, not the degrees.
+    rad = np.radians(np.stack([p.wind_direction_deg for p in profiles]))
+    direction = np.degrees(np.arctan2(np.sin(rad).mean(axis=0), np.cos(rad).mean(axis=0))) % 360.0
+    return Profiles(wind_direction_deg=direction, surface_altitude_m=first.surface_altitude_m, **averaged)
 
 
 def radiance_to_gridded_obs(scene: ImagerScene, *, lat, lon, pressure_pa, columns: ColumnBuilder, members: int,
@@ -247,8 +261,10 @@ def radiance_to_gridded_obs(scene: ImagerScene, *, lat, lon, pressure_pa, column
         error = float(settings.error_k[nm]) * settings.error_inflation
         corrected = obs[:, b] - float(settings.bias_k.get(nm, 0.0))
         departure = corrected - hbar[:, b]
-        gross = np.abs(departure) > settings.gross_sigma * np.sqrt(error ** 2 + spread2[:, b])
-        keep &= ~gross
+        finite = np.isfinite(hbar[:, b]) & np.isfinite(spread2[:, b]) & np.isfinite(departure)
+        with np.errstate(invalid="ignore"):
+            gross = finite & ~(np.abs(departure) <= settings.gross_sigma * np.sqrt(error ** 2 + spread2[:, b]))
+        keep &= finite & ~gross
         level = np.argmin(np.abs(np.log(model_p) - np.log(peak_hpa[:, b])[:, None]), axis=1)
         values = np.zeros(shape)
         errors = np.ones(shape)
@@ -259,13 +275,12 @@ def radiance_to_gridded_obs(scene: ImagerScene, *, lat, lon, pressure_pa, column
         errors[k_, j_, i_] = error
         mask[k_, j_, i_] = True
         sim[:, k_, j_, i_] = simulated[:, keep, b]
-        if np.count_nonzero(mask) != int(keep.sum()):
-            raise RadianceAdapterError(f"band {nm}: two observations landed on one gridpoint; thin must be >= 1")
         batches.append(GriddedObs(name=f"bt_{nm}", values=values, errors=errors, simulated=sim, mask=mask,
                                   localization=localization))
         kept_d = departure[keep]
         per_band[str(nm)] = dict(
-            assimilated=int(keep.sum()), gross_rejected=int((clear & gross).sum()), background_cloud=cloud_note,
+            assimilated=int(keep.sum()), gross_rejected=int((clear & gross).sum()),
+            nonfinite_rejected=int((clear & ~finite).sum()), background_cloud=cloud_note,
             error_k=error, bias_k=float(settings.bias_k.get(nm, 0.0)),
             omb_mean_k=float(kept_d.mean()) if kept_d.size else None,
             omb_std_k=float(kept_d.std()) if kept_d.size else None,

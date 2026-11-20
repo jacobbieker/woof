@@ -143,11 +143,63 @@ def test_background_cloud_and_limb_screens():
     cond[:, 3, 3] = 0.01          # 0.01 kg m-2 per layer: well above the threshold through the column
     batches, prov = radiance_to_gridded_obs(scene, lat=lat, lon=lon, pressure_pa=p, columns=wrf_columns(members),
                                             members=len(members), operator=FakeOperator(),
-                                            settings=RadianceSettings(thin=2), condensate_kgm2=cond)
+                                            settings=RadianceSettings(thin=2, max_distance_km=2000.0), condensate_kgm2=cond)
     observed = batches[0].mask.any(axis=0)
-    assert not observed[1].any()          # limb row
+    # With a huge search radius the limb screen alone keeps row 1 pixels out: those columns use a neighbour.
+    picked = select_columns(scene, lat, lon, RadianceSettings(thin=2, max_distance_km=2000.0))
+    assert 1 not in (picked["pixel"] // lat.shape[1]).tolist()
     assert not observed[3, 3]             # cloudy background column
-    assert observed.sum() == 20 - 5 - 1
+    assert observed.sum() == 20 - 1
+
+
+def test_nan_simulated_value_is_rejected():
+    lat, lon = _grid()
+    members, p = _members(lat)
+    scene = _scene(lat, lon, members)
+
+    class NanOperator(FakeOperator):
+        def simulate(self, sensor, profiles, geometry, when, *, channels=None, jacobian=False):
+            out = super().simulate(sensor, profiles, geometry, when, channels=channels, jacobian=jacobian)
+            if not jacobian and not hasattr(self, "done"):
+                self.done = True
+                out.brightness_temperature[0, 1] = np.nan      # member 0, first column, 6900 nm
+            return out
+
+    batches, prov = radiance_to_gridded_obs(scene, lat=lat, lon=lon, pressure_pa=p, columns=wrf_columns(members),
+                                            members=len(members), operator=NanOperator(),
+                                            settings=RadianceSettings(thin=2))
+    assert prov["bands"]["6900"]["nonfinite_rejected"] == 1
+    assert prov["bands"]["6900"]["assimilated"] == 19
+    assert prov["bands"]["6200"]["assimilated"] == 20
+    assert np.isfinite(batches[1].simulated[:, batches[1].mask]).all()
+
+
+def test_condensate_below_the_cutoff_is_not_a_cloud():
+    lat, lon = _grid()
+    members, p = _members(lat)
+    scene = _scene(lat, lon, members)
+    cond = np.zeros(p.shape)
+    cond[0, 3, 3] = 1.0                   # surface layer only, far below peak + 100 hPa for every band
+    batches, prov = radiance_to_gridded_obs(scene, lat=lat, lon=lon, pressure_pa=p, columns=wrf_columns(members),
+                                            members=len(members), operator=FakeOperator(),
+                                            settings=RadianceSettings(thin=2), condensate_kgm2=cond)
+    assert batches[0].mask.any(axis=0)[3, 3]
+    assert prov["bands"]["6200"]["assimilated"] == 20
+
+
+def test_pixel_deduplication_keeps_the_nearest_column():
+    lat, lon = _grid()
+    members, p = _members(lat)
+    # A scene of two pixels, so many model columns share a pixel.
+    scene = _scene(lat, lon, members)
+    keep = np.zeros(lat.shape, bool)
+    keep[1, 1] = keep[5, 5] = True
+    scene.flags[~keep] = FLAG_LIMB       # only two usable pixels
+    picked = select_columns(scene, lat, lon, RadianceSettings(thin=1, max_distance_km=5000.0))
+    assert picked["counts"]["with_pixel"] > 2 and picked["counts"]["pixel_duplicates_dropped"] > 0
+    got = set(zip(picked["jj"].tolist(), picked["ii"].tolist()))
+    assert len(picked["pixel"]) == len(set(picked["pixel"].tolist()))
+    assert got == {(1, 1), (5, 5)}
 
 
 def test_refusals():

@@ -257,7 +257,10 @@ forecast), interpolated to a 31-level, 0.5 degree grid. The observations
 were SatWeave GOES-East water-vapour bands, with `abi_g16` as the proxy
 sensor. Of the 340 model columns, 175 passed the 3x3 uniformity test and
 167 also passed the window check, so 167 observations per band went in.
-The independent check uses the 523 clear pixels that were not assimilated. The run used a static
+In that run the background-cloud and gross screens rejected no further
+columns: the provenance `assimilated` count was 167 per band, equal to the
+window-clear count. The independent check uses the 523 pixels that passed
+the same uniformity and window tests and were not assimilated. The run used a static
 bias per band (the mean O-B: -0.10, +1.20 and -0.31 K), 2 K errors,
 400 km / 6 km localisation and RTPS 0.9.
 
