@@ -8,7 +8,12 @@ after ``k`` steps, ``0 <= k <= nsteps``.
 - :meth:`Window.forward` runs the base and keeps a checkpoint every
   ``checkpoint_every`` steps.
 - :meth:`Window.tl` maps a perturbation of state 0 through the window and
-  returns the perturbation at the requested states.
+  returns the perturbation at the requested states.  With
+  ``partial=True`` the perturbation may name any subset of STEP_INPUTS
+  and the rest start at zero: WRFDA's TL start, which passes the
+  prognostics and p' with g_ph = g_al = 0 (:data:`WRFDA_TL_START`).  The
+  adjoint of that zero fill is a restriction, so :meth:`Window.ad` needs
+  no counterpart: take the same names from its result.
 - :meth:`Window.ad` takes the adjoint at the final state and adjoint
   forcing at any states (the observation terms of a 4D-Var cost), and
   returns the adjoint of state 0.
@@ -31,6 +36,17 @@ from __future__ import annotations
 import numpy as np
 
 from . import model as M
+
+
+#: The names WRFDA's TL start perturbs (da_transfer_xatowrftl): the
+#: prognostics but phi' (g_ph_2 = 0), and g_p.  woof carries WRF's
+#: perturbation pressure as ``p_pert`` and the full pressure as ``p``;
+#: both have the tangent g_p, so both take it.  With
+#: ``Window.tl(dx0, partial=True)`` the rest (phi', al, alt and muts)
+#: start at zero.  muts is WRF's carried ``MUT + MU''``: a start whose
+#: muts is ``mub + mu'`` (a cold state) has the tangent mu' there, which
+#: the caller passes as ``muts`` if its start is one.
+WRFDA_TL_START = ("u", "v", "w", "thp", "mup", "p", "p_pert")
 
 
 def _copy(d: dict, names=None) -> dict:
@@ -80,10 +96,20 @@ class Window:
         cp.get_default_memory_pool().free_all_blocks()
         return tuple(n for n in self._start if n in names)
 
-    def _check(self, d: dict, what: str) -> None:
-        """``d`` holds every STEP_INPUTS name, shaped and typed as the
-        window's (no silent cast or broadcast)."""
+    def _check(self, d: dict, what: str, partial: bool = False) -> None:
+        """``d`` holds every STEP_INPUTS name (any subset if ``partial``,
+        and no other name), shaped and typed as the window's (no silent
+        cast or broadcast)."""
+        unknown = sorted(set(d) - set(M.STEP_INPUTS))
+        if unknown:
+            raise ValueError(f"{what} names {unknown}, not STEP_INPUTS {list(M.STEP_INPUTS)}")
+        missing = [n for n in M.STEP_INPUTS if n not in d]
+        if missing and not partial:
+            raise ValueError(f"{what} lacks {missing}; pass partial=True to start "
+                             "them at zero")
         for n in M.STEP_INPUTS:
+            if n not in d:
+                continue
             a, ref = d[n], self._start[n]
             if a.shape != ref.shape or a.dtype != ref.dtype:
                 raise ValueError(f"{what}[{n!r}] is {a.dtype}{tuple(a.shape)}, "
@@ -116,13 +142,15 @@ class Window:
 
     # --------------------------------------------------------------------- TL
 
-    def tl(self, dx0: dict, save_at=()) -> dict:
+    def tl(self, dx0: dict, save_at=(), *, partial: bool = False) -> dict:
         """Map ``dx0`` (STEP_INPUTS of state 0) through the window, from
         the base the last :meth:`forward` ran (the start state if none).
-        Returns ``{k: dx_k}`` (STEP_INPUTS) for every ``k`` in ``save_at``
-        and for ``nsteps``."""
+        With ``partial`` ``dx0`` may hold any subset of STEP_INPUTS and
+        the names it omits start at zero (WRFDA's start,
+        :data:`WRFDA_TL_START`).  Returns ``{k: dx_k}`` (STEP_INPUTS) for
+        every ``k`` in ``save_at`` and for ``nsteps``."""
         import cupy as cp
-        self._check(dx0, "dx0")
+        self._check(dx0, "dx0", partial)
         save = set(int(k) for k in save_at) | {self.nsteps}
         bad = [k for k in save if not 0 <= k <= self.nsteps]
         if bad:
@@ -131,7 +159,8 @@ class Window:
         x = self._load(start if start is not None else self._inputs(self._start))
         dx = {n: cp.zeros_like(v) for n, v in x.items()}
         for n in M.STEP_INPUTS:
-            dx[n][...] = dx0[n]
+            if n in dx0:
+                dx[n][...] = dx0[n]
         out = {}
         if 0 in save:
             out[0] = _copy(self._inputs(dx))

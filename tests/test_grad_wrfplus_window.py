@@ -270,3 +270,42 @@ except RuntimeError as e:
     assert "lateral boundaries other than periodic" in out["spec"], out
     assert "map factors" not in out["spec"], out
     assert "forward first" in out["order"], out
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_window_partial_tl_start(backend, tmp_path):
+    """WRFDA's TL start (W.WRFDA_TL_START, ``partial=True``): the names
+    dx0 omits start at zero, word for word the full dict with zeros there;
+    the adjoint of that zero fill is the restriction of Window.ad's result
+    (dot test); an incomplete dict without ``partial``, or a name outside
+    STEP_INPUTS, is refused by name."""
+    dtn = "float32" if backend == "mlx" else "float64"
+    out = _run(backend, f"""
+over, warm = {CASES[0]!r}
+cfg, state = build(over, warm)
+w = W.Window(state, cfg, 2, dtype=np.dtype({dtn!r}))
+w.forward()
+rng = np.random.default_rng(5)
+dx = rnd(w._start, rng)
+part = {{n: dx[n] for n in W.WRFDA_TL_START}}
+full = {{n: dx[n] if n in part else cp.zeros_like(dx[n]) for n in IN}}
+a, b = w.tl(part, save_at=(1,), partial=True), w.tl(full, save_at=(1,))
+out["same"] = sum(int((cp.asnumpy(a[k][n]) != cp.asnumpy(b[k][n])).sum())
+                  for k in (1, 2) for n in IN)
+f = rnd(w._start, rng)
+lhs = sum(float(cp.vdot(a[2][n].ravel(), f[n].ravel())) for n in IN)
+adj = w.ad(f)
+rhs = sum(float(cp.vdot(part[n].ravel(), adj[n].ravel())) for n in part)
+out["dot"] = abs(lhs - rhs) / max(abs(lhs), 1e-300)
+for key, bad in (("missing", part), ("unknown", {{**full, "qv": full["u"]}})):
+    try:
+        w.tl(bad)
+        out[key] = ""
+    except ValueError as e:
+        out[key] = str(e)
+""", tmp_path)
+    assert out["same"] == 0
+    assert out["dot"] < (1e-5 if backend == "mlx" else 1e-12), out["dot"]
+    assert "lacks ['php', 'al', 'alt', 'muts']" in out["missing"], out["missing"]
+    assert "partial=True" in out["missing"]
+    assert "['qv']" in out["unknown"], out["unknown"]
