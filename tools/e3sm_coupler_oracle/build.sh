@@ -2,7 +2,8 @@
 # Build the E3SM v3.2.0 coupler oracles: the ocean merge, prep_ocn_merge
 # (run_ocean_merge), MPAS-Ocean's coupler import and export,
 # ocn_import_mct and ocn_export_mct (run_ocean_coupling), and, given Icepack,
-# MPAS-Seaice's, ice_import_mct and ice_export_mct (run_seaice_coupling).
+# MPAS-Seaice's, ice_import_mct and ice_export_mct (run_seaice_coupling),
+# and the coupler's surface fractions, seq_frac_set (run_seq_frac).
 #
 #   bash tools/e3sm_coupler_oracle/build.sh E3SM_SOURCE_ROOT MCT_SOURCE_ROOT BUILD_DIR [ICEPACK_SOURCE_ROOT]
 #
@@ -204,6 +205,105 @@ if grep -E '\b(exp|log|pow|sin|cos|tan|atan|asin|acos|cbrt|erf)[fl]?\b' undefine
     exit 6
 fi
 echo "built ${build_dir}/run_ocean_coupling"
+
+# ---------------------------------------------------------------- the surface fractions
+# seq_frac_set and seq_frac_check are cut byte for byte out of
+# driver-mct/main/seq_frac_mct.F90 into a module of the same name whose head
+# is the host module's own (lines 143-182 and 184-228: its use lines, its
+# switches, eps_* and the mapper pointers; seq_frac_init's public line left
+# out, as it is not cut) plus a harness setter for the private
+# seq_frac_dead.  seq_map_map, seq_map_avNormAvF and seq_map_avNormArr are
+# cut the same way out of seq_map_mod.F90 into a module of that name whose
+# head is the host's use lines (14-17 and 19-23; shr_mct_mod's map-file
+# readers are not reached) and its seq_map_avNorm interface (41-44).
+# seq_map_type_mod is the pinned type seq_map, cut out of its file.
+# mct_mod is written from the pinned share/util/mct_mod.F90's own `use m_*,
+# only:` renames, its two flags and its mct_rearr_rearrange_fldlist (cut
+# verbatim), over the pinned MCT and the share layer's stand-ins.
+# Compiled verbatim: shr_kind_mod and shr_const_mod.  frac_standins_base.F90
+# and frac_standins.F90 hold the rest (no arithmetic).
+obj="${build_dir}/frac"
+rm -rf "${obj}" && mkdir -p "${obj}" && cd "${obj}"
+drv="${e3sm}/driver-mct/main"
+cut() {  # cut FILE NAME KIND: a routine of that kind, from its first line to its end line
+    awk -v r="$2" -v k="$3" '$0 ~ "^ *"k" "r"\\(" {on=1} on{print} $0 ~ "^ *end "k" "r"( |$)" {on=0}' "$1"
+}
+{
+    printf 'module mct_mod\n'
+    grep -E '^ *use (shr_mpi_mod|shr_sys_mod) ' "${e3sm}/share/util/mct_mod.F90"
+    grep -E '^ *use m_[A-Za-z0-9_]+ +,only:' "${e3sm}/share/util/mct_mod.F90"
+    printf '  use shr_kind_mod, only: IN => SHR_KIND_IN\n  implicit none\n'
+    grep -E '^ *logical,public :: mct_use(alltoall|vector) = \.false\.$' "${e3sm}/share/util/mct_mod.F90"
+    printf 'contains\n'
+    cut "${e3sm}/share/util/mct_mod.F90" mct_rearr_rearrange_fldlist subroutine
+    printf 'end module mct_mod\n'
+} > mct_mod.F90
+{
+    printf 'module seq_map_type_mod\n'
+    sed -n '/^ *use shr_kind_mod *, only: R8/p;/^ *use shr_kind_mod *, only: CL/p' "${drv}/seq_map_type_mod.F90"
+    printf '  use mct_mod\n  implicit none\n'
+    awk '/^ *type seq_map *$/{on=1} on{print} /^ *end type seq_map *$/{on=0}' "${drv}/seq_map_type_mod.F90"
+    printf 'end module seq_map_type_mod\n'
+} > seq_map_type_cut.F90
+{
+    printf 'module seq_map_mod\n'
+    sed -n '14,17p;19,23p' "${drv}/seq_map_mod.F90"
+    printf '  implicit none\n  save\n  private\n  public :: seq_map_map\n'
+    sed -n '41,44p' "${drv}/seq_map_mod.F90"
+    printf 'contains\n'
+    for r in seq_map_map seq_map_avNormAvF seq_map_avNormArr; do cut "${drv}/seq_map_mod.F90" "${r}" subroutine; done
+    printf 'end module seq_map_mod\n'
+} > seq_map_cut.F90
+{
+    sed -n '143,182p;184,228p' "${drv}/seq_frac_mct.F90"
+    printf '  public seq_frac_oracle_set_dead\n'
+    sed -n '229p' "${drv}/seq_frac_mct.F90"
+    for r in seq_frac_set seq_frac_check; do cut "${drv}/seq_frac_mct.F90" "${r}" subroutine; done
+    printf '  ! the harness: seq_frac_init sets this from the coupler (dead models)\n'
+    printf '  subroutine seq_frac_oracle_set_dead(dead)\n    logical, intent(in) :: dead\n'
+    printf '    seq_frac_dead = dead\n  end subroutine seq_frac_oracle_set_dead\n'
+    printf 'end module seq_frac_mct\n'
+} > seq_frac_cut.F90
+for want in 'subroutine mct_rearr_rearrange_fldlist:mct_mod.F90' 'type seq_map:seq_map_type_cut.F90' \
+            'subroutine seq_map_map:seq_map_cut.F90' 'subroutine seq_map_avNormAvF:seq_map_cut.F90' \
+            'subroutine seq_map_avNormArr:seq_map_cut.F90' 'subroutine seq_frac_set:seq_frac_cut.F90' \
+            'subroutine seq_frac_check:seq_frac_cut.F90'; do
+    if [[ $(grep -cE "^ *(end )?${want%%:*}( |\\(|$)" "${want##*:}") -ne 2 ]]; then
+        echo "a routine was not cut out whole (${want%%:*})" >&2
+        exit 3
+    fi
+done
+if [[ "$(sed -n '143p;183p;229p' "${drv}/seq_frac_mct.F90" | tr -d ' ')" != $'moduleseq_frac_mct\npublicseq_frac_init\ncontains' \
+      || "$(sed -n '18p;41p;44p' "${drv}/seq_map_mod.F90" | tr -s ' ')" != \
+         $' use shr_mct_mod, only: shr_mct_sMatPInitnc, shr_mct_queryConfigFile\n interface seq_map_avNorm\n end interface seq_map_avNorm' ]]; then
+    echo "seq_frac_mct.F90's or seq_map_mod.F90's module head moved" >&2
+    exit 3
+fi
+fflags=(-c -cpp -O0 -ffp-contract=off -ffree-line-length-none "${mctinc[@]}")
+"${fc[@]}" "${fflags[@]}" "${e3sm}/share/util/shr_kind_mod.F90"
+"${fc[@]}" "${fflags[@]}" "${e3sm}/share/util/shr_const_mod.F90"
+"${fc[@]}" "${fflags[@]}" "${script_dir}/frac_standins_base.F90"
+"${fc[@]}" "${fflags[@]}" mct_mod.F90
+"${fc[@]}" "${fflags[@]}" seq_map_type_cut.F90
+"${fc[@]}" "${fflags[@]}" "${script_dir}/frac_standins.F90"
+"${fc[@]}" "${fflags[@]}" seq_map_cut.F90
+"${fc[@]}" "${fflags[@]}" seq_frac_cut.F90
+"${fc[@]}" "${fflags[@]}" "${script_dir}/run_seq_frac.F90"
+"${fc[@]}" -o "${build_dir}/run_seq_frac" ./*.o "${mctlib[@]}"
+if command -v objdump >/dev/null; then
+    objdump -d seq_frac_cut.o seq_map_cut.o mct_mod.o "${build_dir}/mct/mct/m_MatAttrVectMul.o" \
+        "${build_dir}/mct/mct/m_Rearranger.o" > disassembly.txt
+    if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
+        echo "an object contains an FMA instruction (${obj}/fma.txt)" >&2
+        exit 5
+    fi
+fi
+nm -u seq_frac_cut.o seq_map_cut.o > undefined.txt
+if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\b' undefined.txt; then
+    echo "seq_frac_set or seq_map_map calls libm" >&2
+    exit 6
+fi
+echo "built ${build_dir}/run_seq_frac"
 
 # ---------------------------------------------------------------- the sea ice's import and export
 # ice_import_mct, ice_export_mct, basal_pressure and frazil_mass are cut byte

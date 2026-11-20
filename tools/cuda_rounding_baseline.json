@@ -982,6 +982,14 @@
     "status": "resolved_literal"
    },
    {
+    "call_sha256": "58157752011a885afce536cbb74503f07e703f1553fdd7fca52023886f433cef",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "00fbc4b11bfc0e23d11a6eabd5c4a53f9eb02194eb5d75625af77aaad0879e08",
+    "file": "woof/hex/coupled/seq_frac_e3sm.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "599e4c79e242352babc83992c23e3fc52b6fb7fe3e6e82ed5fdbed1416b0c87f",
     "constructor": "RawModule",
     "factory": "load_module",
@@ -4904,6 +4912,10 @@
     "sha256": "34b752cd152fd8a3fb699ce182480d6a8eccc8b4eb44fcaa8f4f6f2559994418"
    },
    {
+    "file": "woof/hex/coupled/seq_frac_e3sm.cu",
+    "sha256": "2aa45a8e8c741b44322b7b42294a29640a3f68e30a32055a5fb7b772a72f76b9"
+   },
+   {
     "file": "woof/hex/data/mpasphys-maths/glibc_flt32.cuh",
     "sha256": "a576cad20c41610c64c096841ad0db65af0227affb85eae6a825cc78440ee06a"
    },
@@ -5768,6 +5780,10 @@
    {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.py",
     "sha256": "fba045a94745828c98be18fdd3a9685f34432a890d48079b3ce6abc2b75da42e"
+   },
+   {
+    "file": "woof/hex/coupled/seq_frac_e3sm.py",
+    "sha256": "1dec1b9f7546bfeaf4342cf3a42a285aab1f18817a5af953086dd3cac14f4063"
    },
    {
     "file": "woof/hex/cuda_acoustic.py",
