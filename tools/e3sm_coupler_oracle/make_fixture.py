@@ -4,8 +4,8 @@
 
 BUILD_DIR holds ``run_ocean_merge`` from build.sh. Writes ``oracle-r8.npz``
 (``<case>/call<i>``: x2o's rAttr after each call, ``(lsize, nflds)``),
-``aborts.json`` (each case that must stop: its exit status is nonzero and the
-line E3SM or MCT writes) and ``inputs.sha256`` (every case's input stream),
+``aborts.json`` (each case that must stop: the line E3SM or MCT writes as it
+stops) and ``inputs.sha256`` (every case's input stream),
 into ``tests/data/oracles/e3sm_ocean_merge`` unless ``--out`` names another
 directory.
 """
@@ -32,8 +32,10 @@ def run_case(binary: Path, case: dict) -> tuple[int, list[np.ndarray] | None, st
         src, dst = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
         src.write_bytes(oo.input_bytes(case))
         done = subprocess.run([str(binary), str(src), str(dst)], capture_output=True, text=True)
-        if done.returncode != 0:
-            return done.returncode, None, done.stderr
+        # MCT's die ends through mpi-serial's MPI_Abort, which exits with status 0:
+        # a stop is a nonzero status or a FATAL line with no calls written
+        if done.returncode != 0 or ("FATAL" in done.stderr and not dst.stat().st_size):
+            return done.returncode or -1, None, done.stderr
         return 0, oo.read_outputs(dst.read_bytes(), case), done.stderr
 
 
