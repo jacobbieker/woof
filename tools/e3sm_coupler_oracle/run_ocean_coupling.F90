@@ -114,7 +114,9 @@ program run_ocean_coupling
   call mpaso_cpl_indices_set()
 
   ! one block: structs holds mesh, forcing and state (state holds tracers)
-  allocate(domain, domain % blocklist, domain % blocklist % structs, domain % configs, domain % packages)
+  allocate(domain)
+  allocate(domain % blocklist)
+  allocate(domain % blocklist % structs, domain % configs, domain % packages)
   allocate(pools(5))
   sub => pools(3)
   call stub_pool_put_subpool(domain % blocklist % structs, 'mesh', sub)
