@@ -266,8 +266,9 @@ def iv_dump(d: Path) -> dict:
     sha = hashlib.sha256(path.read_bytes()).hexdigest()
     want = json.loads(MANIFEST.read_text())["obs"]["iv_dump_sha256"]
     assert sha == want, (f"{path} has sha256 {sha}, not the manifest's {want}: an oracle dump from an older "
-                         "woof_dump.inc (see the manifest's iv_dump_comment); rebuild it with "
-                         "tools/wrfda_oracle/apply_dump_patch.sh and run_tutorial.sh")
+                         "woof_dump.inc (see the manifest's iv_dump_comment); patch a copy of WRFV4.7.1 with "
+                         "tools/wrfda_oracle/apply_dump_patch.sh, run ./compile all_wrfvar in it, then "
+                         "run_tutorial.sh with that patched tree's da_wrfvar.exe")
     return read_dump(path)
 
 

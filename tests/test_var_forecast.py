@@ -48,7 +48,11 @@ def _dir() -> Path:
 def _forecast(run: Path, out: Path, bundle: Path | None):
     cmd = [sys.executable, "-m", "woof.cli", "run", "--wrfinput", str(run), "--run-seconds", str(RUN_SECONDS),
            "--outdir", str(out), "--products", "none", "--no-supervise"] + (["--analysis", str(bundle)] if bundle else [])
-    r = subprocess.run(cmd, cwd=REPO, env={**os.environ, "PYTHONPATH": str(REPO)}, capture_output=True, text=True)
+    env = {**os.environ, "PYTHONPATH": str(REPO)}
+    if env.get("WOOF_STATIC_BRIDGE"):
+        # The skip gate resolved it against pytest's cwd; the run uses cwd=REPO.
+        env["WOOF_STATIC_BRIDGE"] = str(Path(env["WOOF_STATIC_BRIDGE"]).resolve())
+    r = subprocess.run(cmd, cwd=REPO, env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
     return {t: out / "wrfout" / f"wrfout_d01_{t}" for t in TIMES}
 
