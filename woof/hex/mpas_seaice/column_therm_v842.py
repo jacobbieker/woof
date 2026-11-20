@@ -40,6 +40,23 @@ What it refuses, by name:
 (``vonkar/log(zref/iceruf)``, ``log(zref/zTrf)``) are folded on the host,
 each operation correctly rounded as MPFR does.
 
+Two v8.4.2 bugs are kept by default and corrected on request
+(``configs["woof_v842_corrections"]``, :data:`column_v842.CORRECTIONS`):
+
+- ``set_sfcflux_order``: with a coupled surface temperature,
+  ``colpkg_step_therm1`` passes ``set_sfcflux`` the coupled conductive flux
+  where it takes the surface flux and the reverse
+  (``ice_colpkg.F90:2095-2101`` against ``ice_flux_colpkg.F90:169-177``);
+  corrected, each is read as what it is;
+- ``ice_velocity_at_cell``: ``colpkg_atm_boundary`` gets the vertex field
+  ``uVelocity`` at the cell's index (``mpas_seaice_column.F:1511-1512``) and
+  drops the ``vvel`` passed in (``ice_colpkg.F90:3474-3479`` sets ``worku =
+  uvel`` twice and leaves ``workv`` 0); corrected, it
+  gets both components of the cell's ice velocity, the ``areaTriangle``
+  weighted mean of the interior vertices
+  (``seaice_interpolate_vertex_to_cell``), so high-frequency coupling's
+  stress follows the wind relative to the ice.
+
 On an abort (``l_stop``), MPAS logs the first aborting cell's message and
 returns from the whole routine; :func:`vertical_thermodynamics` returns that
 cell and message (the state is then not MPAS's: later cells have run).
@@ -197,7 +214,42 @@ def _flags(configs: dict, state: "cv.ColumnState") -> int:
             configs["config_use_high_frequency_coupling"], configs["config_heat_conductivity_type"] == "MU71",
             configs["config_use_ice_age"],
             configs["config_use_first_year_ice"])
+    fixes = cv.corrections(configs)
+    bits += ("set_sfcflux_order" in fixes, "ice_velocity_at_cell" in fixes)
     return sum(int(bool(b)) << i for i, b in enumerate(bits))
+
+
+def _ice_velocity(pools: dict, configs: dict, n_vertices: int, n_cells: int, dummy) -> tuple:
+    """The ice velocity colpkg_atm_boundary gets: v8.4.2's ``uVelocity`` (a
+    vertex field read at the cell's index, and no v), or with the
+    ``ice_velocity_at_cell`` correction both components interpolated to the
+    cells (``seaice_interpolate_vertex_to_cell``)."""
+    import cupy as cp
+    vs = pools["velocity_solver"]
+    u = cv._need(vs, "uVelocity", (n_vertices + 1,))
+    if "ice_velocity_at_cell" not in cv.corrections(configs):
+        return u, dummy
+    from . import velocity_v842 as vel
+    missing = [name for name, there in (("boundary/interiorVertex", (pools.get("boundary") or {}).get(
+        "interiorVertex") is not None), ("velocity_solver/vVelocity", vs.get("vVelocity") is not None)) if not there]
+    if missing:
+        cv._refuse("woof_v842_corrections", "ice_velocity_at_cell",
+                   "the cell's ice velocity is interpolated from the vertices' u and v over the interior vertices; "
+                   "the pools lack " + ", ".join(missing),
+                   "pools with boundary/interiorVertex and velocity_solver/vVelocity, or without the correction")
+    v = cv._need(vs, "vVelocity", (n_vertices + 1,))
+    mesh = {k: pools["mesh"][k] for k in ("nEdgesOnCell", "verticesOnCell", "areaTriangle")}
+    mesh = {k: cp.ascontiguousarray(cp.asarray(a)[:n_cells] if k != "areaTriangle" else cp.asarray(a)[:n_vertices])
+            for k, a in mesh.items()}
+    mesh["nCellsSolve"] = pools["mesh"]["nCellsSolve"]
+    boundary = {"interiorVertex": cp.ascontiguousarray(cp.asarray(pools["boundary"]["interiorVertex"])[:n_vertices])}
+    out = []
+    for vertex in (u, v):
+        cell = cp.zeros(n_cells + 1, np.float64)
+        vel.interpolate_vertex_to_cell(mesh=mesh, boundary=boundary, cell=cell[:n_cells],
+                                       vertex=cp.ascontiguousarray(vertex[:n_vertices]))
+        out.append(cell)
+    return tuple(out)
 
 
 def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
@@ -237,7 +289,7 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
         need(t, "surfaceTemperature", cat1), need(t, "snowEnthalpy", cs), need(t, "iceEnthalpy", ci),
         need(t, "iceSalinity", ci), need(t, "iceAge", cat1) if tr_iage else dummy,
         need(t, "firstYearIceArea", cat1) if tr_fy else dummy,
-        need(vs, "uVelocity", (n_vertices + 1,)), need(vs, "airStressCellU", c1), need(vs, "airStressCellV", c1),
+        *_ice_velocity(pools, configs, n_vertices, n_cells, dummy), need(vs, "airStressCellU", c1), need(vs, "airStressCellV", c1),
         need(vs, "oceanStressCellU", c1), need(vs, "oceanStressCellV", c1),
         need(ac, "uAirVelocity", c1), need(ac, "vAirVelocity", c1), need(ac, "airLevelHeight", c1),
         need(ac, "airSpecificHumidity", c1), need(ac, "airDensity", c1), need(ac, "airPotentialTemperature", c1),

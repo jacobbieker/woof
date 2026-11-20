@@ -187,7 +187,14 @@ Ordered by how self-contained each piece is:
    by name: land-ice fluxes (since ported, bar HollandJenkins), frazil (since ported), the RKIND 8 bulk wind stress (glibc's
    double `cos`/`sin` have no permissive equal), and the bottom drag or
    Rayleigh bottom friction on a mesh with a dry edge (v8.4.2 indexes level 0
-   there). Still to port: `ocn_tend_tracer`, then the barotropic subcycle
+   there; opt-in `woof_bottom_drag_dry_edges = 'skip'` runs them with no
+   drag on a dry edge). Rayleigh bottom friction keeps v8.4.2's interior
+   coefficient and gating by default; `woof_rayleigh_bottom_friction =
+   'corrected'` uses the bottom coefficient whenever the bottom friction is
+   on. The ISOMIP land-ice freezing point keeps v8.4.2's boundary-layer
+   temperature as its salinity by default;
+   `woof_land_ice_isomip_freezing_salinity = 'boundary_layer_salinity'`
+   corrects it. Still to port (at the time): `ocn_tend_tracer`, then the barotropic subcycle
    (`mode_forward/mpas_ocn_time_integration_split.F`).
 3. Equation of state (`equation_of_state_jm`, `_linear`) and diagnostics.
 4. Vertical mixing: constant and Richardson (`vmix_coefs_*`). CVMix (KPP) is

@@ -43,6 +43,16 @@ Refused by name:
   edge whose ``maxLevelEdgeTop`` is 0: v8.4.2 indexes level 0 of that edge,
   outside the array (a word of the previous edge's column, or before the
   array for the first edge), so its result is not defined by the source.
+  ``woof_bottom_drag_dry_edges = 'skip'`` (opt-in) runs them with no bottom
+  drag on a dry edge instead, which is what a dry edge should get.
+
+Rayleigh bottom friction, as v8.4.2 writes it (``ocn_vel_forcing_rayleigh_tend``),
+uses the interior coefficient ``config_Rayleigh_damping_coeff``, not
+``config_Rayleigh_bottom_damping_coeff`` (which ``_init`` reads and nothing
+uses), and runs only when the interior friction is on. That is the default,
+word for word. ``woof_rayleigh_bottom_friction = 'corrected'`` (opt-in) takes
+the bottom coefficient and runs whenever ``config_Rayleigh_bottom_friction``
+is on.
 """
 from __future__ import annotations
 
@@ -92,6 +102,21 @@ DEFAULT_CONFIGS = {
     "config_Rayleigh_bottom_friction": False, "config_Rayleigh_bottom_damping_coeff": 1.0e-4,
     "config_disable_thick_sflux": False,
 }
+#: woof's opt-in corrections of v8.4.2 quirks (not MPAS configs; their
+#: defaults keep v8.4.2's words or its refusal)
+WOOF_OPT_INS = {
+    # 'refuse' (default): the explicit bottom drag or Rayleigh bottom friction
+    # is refused on a mesh with a dry edge (maxLevelEdgeTop = 0), where v8.4.2
+    # reads level 0, outside the array; 'skip': no bottom drag on a dry edge
+    "woof_bottom_drag_dry_edges": "refuse",
+    # 'v842' (default): Rayleigh bottom friction as v8.4.2 writes it (the
+    # interior coefficient, and only when the interior friction is on);
+    # 'corrected': config_Rayleigh_bottom_damping_coeff, whenever
+    # config_Rayleigh_bottom_friction is on
+    "woof_rayleigh_bottom_friction": "v842",
+}
+_OPT_IN_VALUES = {"woof_bottom_drag_dry_edges": ("refuse", "skip"),
+                  "woof_rayleigh_bottom_friction": ("v842", "corrected")}
 
 
 def module_source(precision: str = "r4") -> str:
@@ -129,12 +154,16 @@ def _function(precision: str, name: str):
 
 
 def _configs(configs: dict | None) -> dict:
-    merged = dict(DEFAULT_CONFIGS)
+    merged = {**DEFAULT_CONFIGS, **WOOF_OPT_INS}
     if configs:
-        unknown = set(configs) - set(DEFAULT_CONFIGS)
+        unknown = set(configs) - set(merged)
         if unknown:
             raise ValueError(f"configs the composed tendencies do not read: {sorted(unknown)}")
         merged.update(configs)
+    for knob, values in _OPT_IN_VALUES.items():
+        if merged[knob] not in values:
+            raise ConfigurationRefusal(knob=knob, value=merged[knob], reason="not one of its values",
+                                       declaration=f"{knob} = " + " | ".join(repr(v) for v in values))
     return merged
 
 
@@ -191,19 +220,25 @@ def vel_forcing_tend(*, mesh: dict, normal_velocity, surface_flux_attenuation_co
             tend, surface_flux_attenuation_coefficient, surface_stress, layer_thickness_edge,
             mesh["maxLevelEdgeTop"], mesh["cellsOnEdge"], mesh["edgeMask"], rho_sw(c, precision),
             np.int32(n_edges_loop), np.int32(n_levels)))
+    skip_dry = c["woof_bottom_drag_dry_edges"] == "skip"
     if c["config_use_explicit_bottom_drag"] and not c["config_disable_vel_explicit_bottom_drag"]:
-        _refuse_level_zero("config_use_explicit_bottom_drag", mesh["maxLevelEdgeTop"][:n_edges_loop])
+        if not skip_dry:
+            _refuse_level_zero("config_use_explicit_bottom_drag", mesh["maxLevelEdgeTop"][:n_edges_loop])
         _function(precision, "ocn_vel_forcing_explicit_bottom_drag_v842")(*grid, (
             tend, normal_velocity, kinetic_energy_cell, layer_thickness_edge, mesh["maxLevelEdgeTop"],
             mesh["cellsOnEdge"], dtype(c["config_explicit_bottom_drag_coeff"]), np.int32(n_edges_loop),
             np.int32(n_levels)))
-    if c["config_Rayleigh_friction"]:
-        bottom = bool(c["config_Rayleigh_bottom_friction"])
-        if bottom:
+    corrected = c["woof_rayleigh_bottom_friction"] == "corrected"
+    interior = bool(c["config_Rayleigh_friction"])
+    bottom = bool(c["config_Rayleigh_bottom_friction"]) and (interior or corrected)
+    if interior or bottom:
+        if bottom and not skip_dry:
             _refuse_level_zero("config_Rayleigh_bottom_friction", mesh["maxLevelEdgeTop"][:n_edges_loop])
+        bottom_coef = c["config_Rayleigh_bottom_damping_coeff"] if corrected else c["config_Rayleigh_damping_coeff"]
         _function(precision, "ocn_vel_forcing_rayleigh_v842")(*grid, (
             tend, normal_velocity, mesh["maxLevelEdgeTop"], dtype(c["config_Rayleigh_damping_coeff"]),
-            np.int32(bottom), np.int32(n_edges_loop), np.int32(n_levels)))
+            np.int32(bottom), np.int32(n_edges_loop), np.int32(n_levels), np.int32(interior),
+            dtype(bottom_coef)))
 
 
 def fraction_absorbed(*, mesh: dict, layer_thickness, diagnostics: dict, forcing: dict) -> None:

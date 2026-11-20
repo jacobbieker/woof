@@ -284,7 +284,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     thickness tendencies, tracer tendencies, monotone tracer advection,
     implicit vertical mixing, vertical transport velocity, the
     split-explicit barotropic stage and whole split-explicit step,
-    forward mode (clock, cold start, N steps, bitwise restart), and frazil
+    forward mode (clock on `config_calendar_type`'s calendar, the 365-day
+    `gregorian_noleap` by default or `gregorian`; cold start, N steps,
+    bitwise restart), and frazil
     ice formation (`config_use_frazil_ice_formation`, off by default as in
     v8.4.2's Registry: open ocean and under land ice, its tendencies, the
     accumulated mass and the surface pressure; standalone and over forward
@@ -293,7 +295,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     ISOMIP and Jenkins melt, the top drag, the boundary layer, the thickness,
     velocity and tracer forcing, the effective density in land ice and the
     coupler's land-ice means; standalone, in the diagnostics and over forward
-    steps; 'HollandJenkins' is refused by name). The step
+    steps; 'HollandJenkins' is refused by name). Three v8.4.2 quirks keep
+    their words by default and have corrected opt-ins, each tested on its
+    own: the ISOMIP freezing point taken at the boundary layer's salinity
+    rather than its temperature
+    (`woof_land_ice_isomip_freezing_salinity = 'boundary_layer_salinity'`),
+    the Rayleigh bottom friction with its own coefficient and without the
+    interior friction (`woof_rayleigh_bottom_friction = 'corrected'`), and
+    no bottom drag on a dry edge instead of the refusal
+    (`woof_bottom_drag_dry_edges = 'skip'`). The step
     checks its barotropic halo copies against the mesh once per mesh, not
     with two device reads per stage: on an 8,300-cell, 60-level torus a
     step takes 36 instead of 130 ms on an A6000 and 110 instead of 245 ms
@@ -346,7 +356,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     (`seaice_column_coupling_prep` and `seaice_column_scale_fluxes`: cell
     albedos, pond freshwater feedback, shortwave scaling, fluxes per unit
     ice area; RKIND 4 and 8, no opt-in; the ocean mixed layer is refused by
-    name). The elastic subcycles check
+    name). Four v8.4.2 column bugs keep their words by default and have
+    named opt-in corrections (`woof_v842_corrections`): the swapped coupled
+    surface and conductive fluxes, the ice velocity in the boundary layer
+    (a vertex's u and no v), CCSM3's absorbed shortwave over `ncat`
+    layers, and the delta-Eddington's infinite extinction in ice without
+    volume. The elastic subcycles check
     their arrays once per solve and work out their compile options once per numerics mode:
     120 subcycles on a 9,200-cell torus take about 34 instead of 39-41 ms a step on
     an M3 Max, with the same words. Each subcycle computes the ocean
@@ -975,7 +990,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `tools/wrfplus_oracle`. `advance_w` with `calc_p_rho` (woof's
   `advance_w_phi`) follows the same pattern: dot-product test to about
   1e-14, WRFPLUS `g_/a_advance_w` and `g_/a_calc_p_rho` to about 1e-15,
-  and the float build reproduces the strict primal's words. The w damper
+  and the float build reproduces the strict primal's words, with map
+  factors too (`advance_w_phi_msf`, against WRFPLUS with msftx = msfty =
+  msft). The w damper
   (`damp_opt=3`) is refused, since WRFPLUS has none. `calc_coef_w`
   (woof's `calc_coefs`: c2a and the implicit w factors) matches WRFPLUS
   `g_/a_calc_coef_w` to about 1e-15. `advance_mu_t` (woof's
@@ -1015,14 +1032,34 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
   0.85-3.2x the glue, 3.3-4.5x advection, 1.3-4.4x the big-step
   tendencies and 2.5-3.7x the lateral boundaries. The kernels chain into
-  one strict dry step (`woof.grad.wrfplus.model`, periodic and without
-  rotation or map factors so far) whose binary32 base state reproduces
+  one strict dry step (`woof.grad.wrfplus.model`, periodic, with
+  Coriolis, curvature and map factors) whose binary32 base state reproduces
   `dycore.step` word for word, and whose binary64 dot-product and
   finite-difference tests pass. Measured at 200x200x49 on an A6000, the
   step's adjoint sweep costs 3.3x the forward step, and 4.8x with its
   taped forward recompute through a base-only build of the kernels
-  (details in the design note). The forecast
-  path does not import any of it.
+  (details in the design note). A window driver
+  (`woof.grad.wrfplus.window.Window`) runs the forward, TL and adjoint
+  over N steps with checkpoints, and takes adjoint forcing at
+  intermediate states for 4D-Var. The forecast path does not import any
+  of it.
+- **LETKF host solve on every core by default (Linux).** An analysis on host
+  arrays (no `solve_namespace`, the dense reference route) now runs its
+  chunks on forked worker processes once the work is large (2x10^8
+  gridpoint-slot pairs), as the host-staged route already did. Workers are
+  capped at 64, by the chunk count and by available memory (psutil, bounded
+  by the cgroup v2 `memory.max`), because each worker holds one chunk's
+  scratch. The automatic mode forks only on Linux. On macOS an analysis
+  stays in one process unless `host_workers` or `WOOF_DA_HOST_WORKERS` asks
+  for workers.
+- Every host chunk solve runs with one BLAS thread, so the increments are
+  the same bytes at any worker count and on any box. Before, a
+  multi-threaded BLAS made them depend on the core count by up to 1e-14, so
+  large host analyses change by that much once.
+- The trade-off: `host_workers=1`, and mid-size analyses below the
+  threshold, now solve with single-threaded BLAS. That is slower than a
+  threaded BLAS but deterministic. Apple's Accelerate is not covered:
+  threadpoolctl cannot limit it.
 - **Variational data assimilation (planned; first pieces landing).**
   [docs/dev/WRFDA-3DVAR-PLAN.md](docs/dev/WRFDA-3DVAR-PLAN.md) scopes
   WRFDA-style 3D-Var on the GPU: WRFDA's own `be.dat` and control-variable

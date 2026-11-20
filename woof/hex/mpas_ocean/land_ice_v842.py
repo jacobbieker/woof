@@ -152,6 +152,29 @@ def check_config(configs: dict) -> None:
             declaration="config_land_ice_flux_useHollandJenkinsAdvDiff = .false.")
 
 
+def isomip_salinity_corrected(configs: dict) -> bool:
+    """The corrected ISOMIP freezing point, opt-in (``woof_land_ice_isomip_freezing_salinity``).
+
+    v8.4.2's ``ocn_surface_land_ice_fluxes_build_arrays`` (ISOMIP) calls
+    ``ocn_freezing_temperature`` with ``salinity =
+    landIceBoundaryLayerTracers(indexBLT, iCell)``: the boundary layer's
+    temperature where its salinity belongs (E3SM v3.2.0 carries the same
+    line). The default keeps that, word for word. With
+    ``woof_land_ice_isomip_freezing_salinity = 'boundary_layer_salinity'`` the
+    freezing point is taken at ``indexBLS``, the boundary layer's salinity, as
+    the ISOMIP formulation (Holland and Jenkins 1999's one-equation form)
+    means; nothing else changes.
+    """
+    value = configs.get("woof_land_ice_isomip_freezing_salinity", "boundary_layer_temperature")
+    if value not in ("boundary_layer_temperature", "boundary_layer_salinity"):
+        raise ConfigurationRefusal(
+            knob="woof_land_ice_isomip_freezing_salinity", value=value,
+            reason="the ISOMIP freezing point takes the boundary layer's temperature (v8.4.2) or its salinity",
+            declaration="woof_land_ice_isomip_freezing_salinity = 'boundary_layer_temperature' | "
+                        "'boundary_layer_salinity'")
+    return value == "boundary_layer_salinity"
+
+
 def two_level(configs: dict) -> tuple[str, ...]:
     """The land-ice state fields with two time levels under ``configs``."""
     m = mode(configs)
@@ -249,7 +272,9 @@ def build_arrays(*, dt: float, mesh: dict, state: dict, diagnostics: dict, forci
         _launch(precision, "ocn_li_isomip_v842", n, (
             *fluxes, d["landIceBoundaryLayerTracers"], f["landIcePressure"], f["landIceFraction"], f["landIceMask"],
             params, cavity, i32(n), i32(d["index_landIceBoundaryLayerTemperature"]),
-            i32(f["index_landIceInterfaceTemperature"])))
+            i32(f["index_landIceInterfaceTemperature"]),
+            i32(d["index_landIceBoundaryLayer" + ("Salinity" if isomip_salinity_corrected(configs)
+                                                  else "Temperature")])))
     else:
         _launch(precision, "ocn_li_jenkins_melt_v842", n, (
             *fluxes, d["landIceBoundaryLayerTracers"], d["landIceTracerTransferVelocities"], f["landIcePressure"],

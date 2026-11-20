@@ -47,7 +47,9 @@
 // absorption into the surface runs once per surface type, on the sums so
 // far; the bare-ice, snow and pond albedos keep their words in categories
 // without ice; the chlorophyll absorption is kalg*(0.5/dzk(klev)) in the
-// bottom layer's visible band only.
+// bottom layer's visible band only (infinite in ice without volume, NaN with
+// kalg = 0; the opt-in correction dedd_zero_volume_ice makes such layers
+// transparent).
 //
 // One thread is one owned cell; nslyr is 1 (column_v842 refuses others), so
 // klev = nilyr + 2 and the level arrays hold DEDD_NL >= klevp + 1 words.
@@ -88,6 +90,7 @@
 #define DEDD_POND_TOPO 4
 #define DEDD_INITONLY 8
 #define DEDD_HEAT_CAPACITY 16
+#define DEDD_FIX_ZERO_DZ 32       // opt-in correction dedd_zero_volume_ice
 
 __device__ const double DEDD_RSNW_TAB[DEDD_NMBRAD] = {
     5., 7., 10., 15., 20., 30., 40., 50., 65., 80., 100., 120., 140., 170., 200., 240., 290., 350., 420., 500.,
@@ -469,7 +472,7 @@ __device__ void dedd_compute(int nilyr, int nslyr, int klev, int klevp, bool hea
                              double swvdf, double swidr, double swidf, int srftyp, double hs, const double *rhosnw,
                              const double *rsnw, double hi, double hp, double fi, double *alvdr, double *alvdf,
                              double *alidr, double *alidf, double *fswsfc, double *fswint, double *fswthru,
-                             double *Sswabs, double *Iswabs, double *fswpenl)
+                             double *Sswabs, double *Iswabs, double *fswpenl, bool fix_zero_dz)
 {
     double tau[DEDD_NL], w0[DEDD_NL], g[DEDD_NL], dzk[DEDD_NL];
     double trndir[DEDD_NL], trntdr[DEDD_NL], trndif[DEDD_NL], rupdir[DEDD_NL], rupdif[DEDD_NL], rdndif[DEDD_NL];
@@ -517,7 +520,10 @@ __device__ void dedd_compute(int nilyr, int nslyr, int klev, int klevp, bool hea
     }
     const int ksrf = srftyp == 1 ? 1 : nslyr + 2;
     // not (tr_bgc_N .and. dEdd_algae): kabs_chl(1,klev) only
-    const double kabs_chl_klev = M(kalg, D(0.50, dzk[klev]));
+    // v8.4.2 divides by a zero thickness when the category has no volume (an infinite
+    // extinction, NaN with kalg = 0); the opt-in correction dedd_zero_volume_ice gives
+    // such a layer no chlorophyll absorption
+    const double kabs_chl_klev = (fix_zero_dz && !(dzk[klev] > 0.0)) ? 0.0 : M(kalg, D(0.50, dzk[klev]));
 #define KCHL(ns, k) (((ns) == 0 && (k) == klev) ? kabs_chl_klev : 0.0)
 
     for (int ns = 0; ns < 3; ++ns) {
@@ -735,7 +741,8 @@ __device__ void dedd_shortwave(int nslyr, int nilyr, double *coszen, bool heat_c
                                double R_ice, double R_pnd, double kalg, double exp_min, double swvdr, double swvdf,
                                double swidr, double swidf, double *alvdr, double *alvdf, double *alidr,
                                double *alidf, double *fswsfc, double *fswint, double *fswthru, double *Sswabs,
-                               double *Iswabs, double *albice, double *albsno, double *albpnd, double *fswpenl)
+                               double *Iswabs, double *albice, double *albsno, double *albpnd, double *fswpenl,
+                               bool fix_zero_dz)
 {
     const int klev = nslyr + nilyr + 1;
     const int klevp = klev + 1;
@@ -788,7 +795,7 @@ __device__ void dedd_shortwave(int nslyr, int nilyr, double *coszen, bool heat_c
         }
         dedd_compute(nilyr, nslyr, klev, klevp, heat_capacity, fnidr, *coszen, R_ice, R_pnd, kalg, exp_min, swvdr,
                      swvdf, swidr, swidf, srftyp, hsx, rhosnw, rsnw, hi, hp, frac, &avdrl, &avdfl, &aidrl, &aidfl,
-                     fswsfc, fswint, fswthru, Sswabs, Iswabs, fswpenl);
+                     fswsfc, fswint, fswthru, Sswabs, Iswabs, fswpenl, fix_zero_dz);
         *alvdr = A(*alvdr, M(avdrl, frac));
         *alvdf = A(*alvdf, M(avdfl, frac));
         *alidr = A(*alidr, M(aidrl, frac));
@@ -945,7 +952,7 @@ extern "C" __global__ void seaice_column_radiation_dedd_v842(
                            hpn, R_ice, R_pnd, kalg, exp_min, swvdr, swvdf, swidr, swidf, &alvdrn[n], &alvdfn[n],
                            &alidrn[n], &alidfn[n], &fswsfcn[n], &fswintn[n], &fswthrun[n], &Sswabsn[n * nslyr],
                            &Iswabsn[n * nilyr], &albicenAll[cn + n], &albsnonAll[cn + n], &albpndnAll[cn + n],
-                           &fswpenln[n * (nilyr + 1)]);
+                           &fswpenln[n * (nilyr + 1)], (flags & DEDD_FIX_ZERO_DZ) != 0);
         }
     }
     coszenAll[c] = coszen;

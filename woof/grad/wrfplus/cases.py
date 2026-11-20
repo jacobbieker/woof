@@ -150,6 +150,7 @@ def w_trajectory(geom: WGeometry, seed: int, dtype=np.float64, *,
     else:
         out["c1h"], out["c2h"] = np.ones(nz), np.zeros(nz)
         out["c1f"], out["c2f"] = np.ones(nz + 1), np.zeros(nz + 1)
+    _msf(out, rng, shapes, ("msft",), geom.has_msf)   # last: earlier draws unchanged
     return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in out.items()}
 
 

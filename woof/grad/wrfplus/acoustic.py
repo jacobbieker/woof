@@ -210,7 +210,7 @@ def uv_shapes(geom: UVGeometry) -> dict[str, tuple[int, ...]]:
 W_TRAJECTORY = ("rw_t", "rph_t", "ww_pp", "mu_pp", "mu_pp_old", "th_pp",
                 "th_pp_old", "thp", "php", "phb", "alt", "c2a", "a", "alpha",
                 "gam", "mup", "u_pp", "v_pp", "ht", "rdn", "rdnw", "fnm",
-                "fnp", "c1h", "c2h", "c1f", "c2f", "mub2d", "cqw")
+                "fnp", "c1h", "c2h", "c1f", "c2f", "mub2d", "cqw", "msft")
 
 #: The perturbed inputs of advance_w besides the state (w_pp, ph_pp,
 #: p_pp, al_pp), in kernel order.
@@ -225,8 +225,11 @@ W_STATE = ("w_pp", "ph_pp", "p_pp", "al_pp")
 
 @dataclass(frozen=True)
 class WGeometry:
-    """advance_w_phi's scalars (msf == 1, no damper: WRFPLUS has damp_opt
-    0 only; ``dampmag`` other than 0 is refused)."""
+    """advance_w_phi's scalars (no damper: WRFPLUS has damp_opt 0 only;
+    ``dampmag`` other than 0 is refused).  ``has_msf`` selects
+    advance_w_phi_msf's map factors (WRF advance_w's msfty, with msftx =
+    msfty = msft); without it ``msft`` is not read, but the trajectory
+    must still carry an (ny, nx) array."""
     nz: int
     ny: int
     nx: int
@@ -244,6 +247,7 @@ class WGeometry:
     boundary_x: int = 0
     boundary_y: int = 0
     dampmag: float = 0.0
+    has_msf: int = 0
 
     def args(self, dtype) -> tuple:
         i, r = np.int32, np.dtype(dtype).type
@@ -251,7 +255,7 @@ class WGeometry:
                 i(self.base3d), i(self.top_lid), i(self.moist_cq),
                 i(self.boundary_x), i(self.boundary_y), r(self.cf1),
                 r(self.cf2), r(self.cf3), r(self.rdx), r(self.rdy),
-                r(self.dtau), r(self.epssm))
+                r(self.dtau), r(self.epssm), i(self.has_msf))
 
 
 def _w_defines(geom: WGeometry) -> tuple:
@@ -327,7 +331,7 @@ def w_shapes(geom: WGeometry) -> dict[str, tuple[int, ...]]:
         "mup": col, "u_pp": (nz, ny, nx + 1), "v_pp": (nz, ny + 1, nx),
         "ht": col, "rdn": (nz,), "rdnw": (nz,), "fnm": (nz + 1,),
         "fnp": (nz + 1,), "c1h": (nz,), "c2h": (nz,), "c1f": (nz + 1,),
-        "c2f": (nz + 1,), "mub2d": col, "cqw": wlev,
+        "c2f": (nz + 1,), "mub2d": col, "cqw": wlev, "msft": col,
     }
 
 

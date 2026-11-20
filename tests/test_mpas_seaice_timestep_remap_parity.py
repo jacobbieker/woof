@@ -90,7 +90,7 @@ def test_a_restart_continues_the_remapped_run_bitwise(tmp_path, precision):
     next_step = ts.advance(pools=dev, configs=config, clock=clock, n_steps=1)
     dev["diagnostics"]["oracle_next_step"] = next_step
     ts.write_restart(tmp_path / "restart.npz", pools=dev, clock=clock)
-    pools, clock = ts.read_restart(tmp_path / "restart.npz", like=dev)
+    pools, clock = ts.read_restart(tmp_path / "restart.npz", like=dev, configs=case["config"])
     del dev
     ts.advance(pools=pools, configs=config, clock=clock, n_steps=int(config["oracle_n_steps"]) - 1,
                first_step=int(pools["diagnostics"]["oracle_next_step"]))

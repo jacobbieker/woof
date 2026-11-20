@@ -86,7 +86,7 @@ BASE_CONFIG = {
     "config_use_surface_tilt": True, "config_geostrophic_surface_tilt": True, "config_use_halo_exch": False,
     "config_aggregate_halo_exch": False, "config_reuse_halo_exch": False, "config_check_state": False,
     "config_use_forcing": False, "config_dynamics_subcycle_number": 1, "config_elastic_subcycle_number": 30,
-    "config_use_ice_age": False,
+    "config_use_ice_age": False, "config_calendar_type": "gregorian_noleap",  # the Registry default
 }
 #: (name, seed, (nq, nr), owned columns, steps, config_dt [s], config overrides)
 CASES = (
