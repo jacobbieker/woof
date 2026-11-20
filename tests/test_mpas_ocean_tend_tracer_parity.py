@@ -95,12 +95,16 @@ def test_options_not_ported_are_refused_by_name():
                         ("config_use_activeTracers_exponential_decay", True),
                         ("config_use_activeTracers_idealAge_forcing", True),
                         ("config_use_activeTracers_ttd_forcing", True),
-                        ("config_land_ice_flux_formulation", "HollandJenkins"),
                         ("config_sw_absorption_type", "ohlmann00"),
                         ("config_use_standardGM", True), ("config_monotonic", False)):
         with pytest.raises(ConfigurationRefusal) as exc:
             tt.check_config(dict(base, **{knob: value}))
         assert knob in str(exc.value)
+    # the formulation is read only with the land-ice fluxes on
+    tt.check_config(dict(base, config_land_ice_flux_formulation="HollandJenkins"))
+    with pytest.raises(ConfigurationRefusal, match="HollandJenkins"):
+        tt.check_config(dict(base, config_land_ice_flux_mode="standalone",
+                             config_land_ice_flux_formulation="HollandJenkins"))
     with pytest.raises(ConfigurationRefusal, match="tracer group"):
         tt.check_config(base, groups=("activeTracers", "debugTracers"))
     with pytest.raises(ValueError, match="bulk forcing off"):

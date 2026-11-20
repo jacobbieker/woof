@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 700,
+  "site_count": 701,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 47,
     "cupy.RawKernel": 120,
     "cupy.RawModule": 306,
     "cupy.ReductionKernel": 22,
-    "cupy.cuda.compiler.compile_using_nvrtc": 205
+    "cupy.cuda.compiler.compile_using_nvrtc": 206
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 107,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 130
+      "cupy.cuda.compiler.compile_using_nvrtc": 131
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -10416,7 +10416,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
-      "line": 85,
+      "line": 88,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10448,7 +10448,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/forcing_v842.py",
-      "line": 113,
+      "line": 115,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10464,7 +10464,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/forward_v842.py",
-      "line": 79,
+      "line": 80,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10495,6 +10495,22 @@
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_frazil_v842_{precision}.cu\")"
     },
     {
+      "file": "woof/hex/mpas_ocean/land_ice_v842.py",
+      "line": 98,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_land_ice_v842_{precision}.cu\")"
+    },
+    {
       "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
       "line": 108,
       "column": 15,
@@ -10512,7 +10528,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/split_step_v842.py",
-      "line": 85,
+      "line": 87,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10528,7 +10544,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
-      "line": 84,
+      "line": 85,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
