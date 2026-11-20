@@ -4885,7 +4885,7 @@
    },
    {
     "file": "woof/hex/coupled/ocn_coupling_e3sm.cu",
-    "sha256": "017d4c5dc6cbf8434630214a959b73d313ef92a135b15b622c4746f607b52f02"
+    "sha256": "7eb1bcd641ea5ac79d59ff2012535e1c302dc196c34e8d1cbe1161541d206ce3"
    },
    {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.cu",
