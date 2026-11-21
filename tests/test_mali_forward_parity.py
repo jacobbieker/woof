@@ -64,7 +64,10 @@ def test_fixture_covers_the_branches(precision):
     cases = {case["name"]: case for case in fo.cases(precision)}
     assert set(fixture) == set(cases) == {f"{n}_{s}" for n, _, _ in fo.CASES for s, _ in fo.MESHES}
     configs = [c["config"] for c in cases.values()]
-    assert {c["config_velocity_solver"] for c in configs} == {"sia", "none"}
+    assert {c["config_velocity_solver"] for c in configs} == {"sia", "simple", "none"}
+    assert {c.get("config_simple_velocity_type") for c in configs} == {None, "uniform", "radial"}
+    assert {c["config_calving"] for c in configs if c["config_velocity_solver"] == "simple"} == {
+        "none", "floating", "topographic_threshold"}
     assert {c["config_thermal_solver"] for c in configs} == {"none", "temperature", "enthalpy"}
     assert {c["config_adaptive_timestep"] for c in configs} == {False, True}
     assert {c["config_calendar_type"] for c in configs} == {"gregorian", "gregorian_noleap"}
@@ -86,6 +89,8 @@ def test_fixture_covers_the_branches(precision):
         assert str(out["mesh/simulationStartTime"]) == case["config"]["config_start_time"]
         # the mesh's own words are left as they were
         for field in fo.MESH_INPUTS:
+            if field not in case["pools"]["mesh"]:
+                continue
             assert fo.word_mismatches(out[f"mesh/{field}"], case["pools"]["mesh"][field]) == 0, (name, field)
         # the time levels shifted after the last step: the old level holds the step's mask
         assert (out["geometry/vertexMask@2"] != 0).any()
@@ -95,6 +100,18 @@ def test_fixture_covers_the_branches(precision):
     assert fixture["dome_adaptive_varres"]["mesh/deltat"][()] < adaptive["mesh/deltat"][()]
     # calving took the floating margin
     assert (fixture["dome_calving_uniform"]["geometry/calvingThickness"] > 0).any()
+    # 'simple': the prescribed velocity moved the ice, the circular-shelf test reshaped the bed,
+    # and the Dirichlet mask it never reads came back as it went in
+    cases = {case["name"]: case for case in fo.cases(precision)}
+    for mesh, _ in fo.MESHES:
+        for name in ("simple_uniform", "simple_radial_shelf", "simple_rim"):
+            out, case = fixture[f"{name}_{mesh}"], cases[f"{name}_{mesh}"]
+            assert (out["velocity/normalVelocity"] != 0).any()
+            assert fo.word_mismatches(out["velocity/dirichletVelocityMask"],
+                                      case["pools"]["velocity"]["dirichletVelocityMask"]) == 0
+            changed = fo.word_mismatches(out["geometry/bedTopography"], case["pools"]["geometry"]["bedTopography"])
+            assert (changed > 0) == (name != "simple_uniform"), name
+        assert (fixture[f"simple_radial_shelf_{mesh}"]["geometry/bedTopography"] == -880.0).any()
     # the gregorian calendar's leap day lies inside EISMINT2's run
     assert str(fixture["eismint2_a_temperature_uniform"]["clock/now"]) == "2000-03-11_00:00:00"
 
@@ -436,3 +453,49 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
         assert sorted(fresh.files) == sorted(pinned.files)
         for key in pinned.files:
             assert fo.word_mismatches(fresh[key], pinned[key]) == 0, key
+
+
+@requires_gpu
+@pytest.mark.parametrize("name", ["simple_radial_shelf_uniform", "simple_rim_varres"])
+def test_the_simple_velocity_bed_correction_is_opt_in(name):
+    # v8.4.2's li_velocity_simple_block_init writes its circular-shelf test's bed
+    # (a -880 m spike, or a deepened rim) over the input's whenever calving is
+    # 'floating' or 'topographic_threshold'; 'corrected' keeps the input bed
+    from woof.hex.errors import ConfigurationRefusal
+    from woof.hex.mpas_ice import forward_v842 as fw
+    case = _case(name)
+    pinned = fo.load_fixture("r4")[case["name"]]
+    default = fo.run_gpu(case)
+    assert all(fo.word_mismatches(default[k], pinned[k]) == 0 for k in default)
+    corrected = fo.run_gpu(case, {"woof_simple_velocity_bed": "corrected"})
+    bed = case["pools"]["geometry"]["bedTopography"]
+    assert fo.word_mismatches(corrected["geometry/bedTopography"], bed) == 0
+    assert fo.word_mismatches(default["geometry/bedTopography"], bed) > 0
+    # the prescribed velocity does not depend on the bed
+    assert fo.word_mismatches(corrected["velocity/normalVelocityInitial"], pinned["velocity/normalVelocityInitial"]) == 0
+    assert all(np.isfinite(v).all() for k, v in corrected.items() if v.dtype.kind == "f")
+    with pytest.raises(ConfigurationRefusal, match="woof_simple_velocity_bed"):
+        fw.run(pools=fo.device_pools(case), config=dict(case["config"], woof_simple_velocity_bed="other"))
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+def test_the_simple_seam_edges_take_cell_twos_vector(monkeypatch, precision):
+    # edges stored across the periodic seam are longer than dcEdge from
+    # cellsOnEdge(1): the model takes the vector into cellsOnEdge(2), negated.
+    # Ignoring that branch leaves the oracle's words.
+    from woof.hex.mpas_ice import velocity_simple_v842 as vs
+    names = {f"simple_uniform_{m}" for m, _ in fo.MESHES}
+    mesh = fo.mesh_of(0.0)
+    x_edge, y_edge = fo.edge_points_of(0.0)
+    c1 = mesh["cellsOnEdge"][:, 0] - 1
+    far = np.hypot(x_edge - mesh["xCell"][c1], y_edge - mesh["yCell"][c1]) > mesh["dcEdge"]
+    assert far.any() and not far.all()
+    real = fo.PRECISIONS[precision]
+    original = vs.normal_velocity_initial
+
+    def never_far(**kw):
+        return original(**dict(kw, dc_edge=np.full(np.shape(kw["dc_edge"]), np.inf, real)))
+
+    monkeypatch.setattr(vs, "normal_velocity_initial", never_far)
+    assert _caught(precision, names, "velocity/normalVelocityInitial") > 0

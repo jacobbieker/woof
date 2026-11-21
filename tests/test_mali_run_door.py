@@ -46,7 +46,7 @@ def write_input(path, case: dict, skip: tuple[str, ...] = ()) -> None:
         ds.createDimension("R3", 3)
         ds.setncattr("on_a_sphere", "YES" if case["config"].get("on_a_sphere") else "NO")
         ds.setncattr("sphere_radius", float(case["config"].get("sphere_radius", 0.0)))
-        for pool, name, kind, shape in fo.FIELDS:
+        for pool, name, kind, shape in fo.fields(case):
             if kind == "d" or pool == "scratch" or "@" in name or name in skip:
                 continue
             value = case["pools"][pool][name]
@@ -89,7 +89,7 @@ def _run(tmp_path, case: dict, *extra: str, skip=()) -> int:
 @requires_gpu
 @pytest.mark.parametrize("name, precision", [
     ("dome_uniform", "r4"), ("hydro_radial_uniform", "r4"), ("eismint2_a_temperature_varres", "r8"),
-    ("dome_adaptive_varres", "r8"),
+    ("dome_adaptive_varres", "r8"), ("simple_radial_shelf_varres", "r4"), ("simple_rim_uniform", "r8"),
 ])
 def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
     case = _case(name, precision)
@@ -98,7 +98,7 @@ def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
     pinned = fo.load_fixture(precision)[case["name"]]
     assert got["clock/now"] == str(pinned["clock/now"])
     compared = 0
-    for pool, field in fo.OUTPUTS:
+    for pool, field in fo.outputs(case):
         key = f"{pool}/{field}"
         if key not in pinned or "@" in field:   # a second time level lives in restart.npz only
             continue
@@ -138,7 +138,8 @@ def test_the_door_refuses_by_name(tmp_path, capsys):
     for folder, variant, skip, words in (
             ("a", case, ("coeffs_reconstruct",), "coeffs_reconstruct"),
             ("b", dict(case, config=dict(case["config"], config_not_an_option=1)), (), "config_not_an_option"),
-            ("c", dict(case, config=dict(case["config"], config_velocity_solver="FO")), (), "config_velocity_solver")):
+            ("c", dict(case, config=dict(case["config"], config_velocity_solver="FO")), (), "config_velocity_solver"),
+            ("e", _case("simple_uniform_uniform"), ("xEdge",), "xEdge")):
         (tmp_path / folder).mkdir()
         capsys.readouterr()
         assert _run(tmp_path / folder, variant, skip=skip) == 2

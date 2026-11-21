@@ -416,7 +416,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     imports the ocean's floating basal mass balance
     (`woof/hex/mpas_ice/ocean_seam_v842.py`, graded by conservation); the
     land-ice core's registry status is now `ported_subset` (velocity
-    solvers 'sia' and 'none'). Two v8.4.2 quirks have opt-in corrections, off by
+    solvers 'sia', 'simple' and 'none'). Two v8.4.2 quirks have opt-in corrections, off by
     default: `woof_sgh_init_mask = 'corrected'` and
     `woof_enthalpy_advection_units = 'corrected'` (the advection converts
     enthalpy in Celsius, as the thermal solver does, so the EISMINT2
@@ -1182,9 +1182,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   over N steps with checkpoints, and takes adjoint forcing at
   intermediate states for 4D-Var. Its TL can start from part of the
   state, with the rest zero, as WRFDA's TL start does
-  (`Window.tl(dx0, partial=True)`). Moist scalar transport (sumflux and
-  the non-PD scalar update, `woof.grad.wrfplus.scalar`) is ported too,
-  not yet in the step. The forecast path does not import any of it.
+  (`Window.tl(dx0, partial=True)`). It can also linearise about a
+  supplied trajectory instead of its own dry rerun, as WRFPLUS does
+  about the nonlinear run's states (`Window.forward(trajectory=...)`).
+  Moist scalar transport (sumflux and the non-PD scalar update,
+  `woof.grad.wrfplus.scalar`) is ported too, not yet in the step. The
+  forecast path does not import any of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8

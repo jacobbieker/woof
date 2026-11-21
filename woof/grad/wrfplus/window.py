@@ -167,6 +167,7 @@ class Window:
         # (shared) and its own copies of what a step writes
         self._work = {**self._start, **_copy(self._start, self._mutable)}
         self._checkpoints: dict[int, dict] | None = None
+        self._external = False   # the base comes from forward(trajectory=)
 
     # ---------------------------------------------------------------- helpers
 
@@ -219,19 +220,64 @@ class Window:
 
     # ---------------------------------------------------------------- forward
 
-    def forward(self, x0: dict | None = None) -> dict:
+    def forward(self, x0: dict | None = None, *, trajectory=None) -> dict:
         """Run the base from state 0 (the window's start state, or
         ``x0``'s STEP_INPUTS) and keep the checkpoints the adjoint uses.
-        Returns the final state's STEP_INPUTS."""
+        Returns the final state's STEP_INPUTS.
+
+        With ``trajectory`` (a sequence of ``nsteps`` or ``nsteps + 1``
+        STEP_INPUTS dicts, state ``k`` at index ``k``; see
+        :meth:`trajectory_state`) the window runs no base of its own:
+        :meth:`tl` and :meth:`ad` linearise step ``k`` about
+        ``trajectory[k]``, as WRFPLUS linearises about the nonlinear run's
+        states (a forecast with physics, or WRF's own).  Each step's
+        geometry is still the window's (``cfg`` at construction), and
+        each state must hold what that step reads: the previous step's
+        diagnosis and carried muts where the step reuses them.  Returns
+        state ``nsteps`` (given, or one window step from the last)."""
+        if trajectory is not None:
+            if x0 is not None:
+                raise ValueError("forward takes x0 or trajectory, not both")
+            return self._use_trajectory(trajectory)
         if x0 is not None:
             # no tables: the base runs on the tables the window was built with
             self._check(x0, "x0")
+        self._external = False
         x = self._load(self._inputs(self._start) if x0 is None else x0)
         self._checkpoints = {}
         for k, g in enumerate(self.geoms):
             if k % self.every == 0:
                 self._checkpoints[k] = _copy(self._inputs(x))
             self._scratch = M.step_base(x, g, None, self._scratch)
+        return _copy(self._inputs(x))
+
+    def _use_trajectory(self, trajectory) -> dict:
+        states = list(trajectory)
+        if len(states) not in (self.nsteps, self.nsteps + 1):
+            raise ValueError(f"trajectory holds {len(states)} states; the window "
+                             f"needs {self.nsteps} (states 0..{self.nsteps - 1}) "
+                             f"or {self.nsteps + 1}")
+        for k, st in enumerate(states):
+            self._check(st, f"trajectory[{k}]")
+        # copies: a step reads its state through the work dict only
+        checkpoints = {k: _copy(self._inputs(st)) for k, st in enumerate(states)}
+        if len(states) > self.nsteps:
+            end = checkpoints.pop(self.nsteps)   # already a copy
+        else:
+            x = self._load(checkpoints[self.nsteps - 1])
+            self._scratch = M.step_base(x, self.geoms[-1], None, self._scratch)
+            end = _copy(self._inputs(x))
+        # switch the base only once the end state exists: a failed step
+        # leaves the window on its previous base
+        self._checkpoints = checkpoints
+        self._external = True
+        return end
+
+    def trajectory_state(self, state, cfg) -> dict:
+        """A trajectory entry from a DomainState (a woof forecast's state
+        after some steps), in the window's dtype: its STEP_INPUTS as
+        :func:`model.run_state` reads them."""
+        x = M.run_state(state, cfg, self._start["u"].dtype)
         return _copy(self._inputs(x))
 
     # --------------------------------------------------------------------- TL
@@ -263,6 +309,8 @@ class Window:
         if 0 in save:
             out[0] = _copy(self._inputs(dx))
         for k, g in enumerate(self.geoms):
+            if self._external and k:   # the supplied base, not this one's
+                x = self._load(self._checkpoints[k])
             M.step_tl(x, dx, g)
             if k + 1 in save:
                 out[k + 1] = _copy(self._inputs(dx))
@@ -296,8 +344,9 @@ class Window:
 
         add(self.nsteps, ax_final)
         add(self.nsteps, forcing.get(self.nsteps))
+        every = 1 if self._external else self.every   # every state is given
         for c in sorted(self._checkpoints, reverse=True):
-            seg = range(c, min(c + self.every, self.nsteps))
+            seg = range(c, min(c + every, self.nsteps))
             # the segment's step-start states, from its checkpoint
             # (the first is the checkpoint itself, which _load only reads)
             starts = {c: self._checkpoints[c]}
