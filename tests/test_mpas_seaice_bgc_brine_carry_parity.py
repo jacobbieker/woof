@@ -161,7 +161,8 @@ def test_the_correction_zeroes_only_the_fields_that_exist():
 def test_the_brine_height_is_carried_and_every_other_flag_refused_by_name(name, refuse):
     case = _case(name)
     refuse(case)
-    for flag in (f for f in cv._BGC_FLAGS if f not in cv.BGC_PORTED):
+    # (the vertical salinity is carried too: tests/test_mpas_seaice_bgc_zsal_carry_parity.py)
+    for flag in (f for f in cv._BGC_FLAGS if f not in cv.BGC_PORTED and f != cv.ZSAL_FLAG):
         other = {**case, "config": {**case["config"], flag: True}}
         with pytest.raises(ConfigurationRefusal, match=flag):
             refuse(other)
