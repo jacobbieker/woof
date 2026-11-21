@@ -1162,6 +1162,8 @@ def sf_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) ->
 
 def sf_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     return sf_trajectory(geom, seed, dtype)
+
+
 def flow_geometry(nz=3, ny=7, nx=8, **overrides):
     from .lbc import FlowGeometry
     base = dict(nz=nz, ny=ny, nx=nx, spec_zone=1)
