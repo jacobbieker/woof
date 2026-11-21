@@ -95,7 +95,9 @@ def test_fixture_covers_the_branches(precision):
         bary = (case["config"]["config_velocity_solver"] == "sia"
                 and case["config"]["config_sia_tangent_slope_calculation"] == "from_vertex_barycentric")
         assert (out["logErrors"][0] > 0) == bary, name
-        assert all(np.isfinite(v).all() for k, v in out.items() if v.dtype.kind == "f" and k != "velocity/eTheta")
+        # (an analysis member's mean over no ice is 0/0: NaN, as v8.4.2's)
+        assert all(np.isfinite(v).all() for k, v in out.items()
+                   if v.dtype.kind == "f" and k != "velocity/eTheta" and not k.startswith(fo.AM_POOLS + ("am/",)))
         # the run reached its stop time, one step at a time
         assert str(out["clock/now"]) == str(out["mesh/xtime"])
         assert int(out["mesh/timestepNumber"][()]) >= 2

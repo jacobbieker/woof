@@ -419,7 +419,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     solvers 'sia', 'simple' and 'none'), and its global statistics
     (`config_stats_interval`, `woof/hex/mpas_ice/statistics_v842.py`) match
     v8.4.2's log report character for character, with
-    `woof_statistics_extrema = 'ice'` as an opt-in correction. Two v8.4.2 quirks have opt-in corrections, off by
+    `woof_statistics_extrema = 'ice'` as an opt-in correction, and so do
+    its analysis members `globalStats` and `regionalStats`
+    (`woof/hex/mpas_ice/analysis_v842.py`: every word and every compute's
+    time against v8.4.2's driver and members compiled verbatim, their
+    alarms on the streams' reference times; the door writes each stream's
+    records), with `woof_analysis_empty = 'corrected'` (0 for a mean over no
+    ice, which v8.4.2 leaves NaN) as an opt-in correction. Two v8.4.2 quirks have opt-in corrections, off by
     default: `woof_sgh_init_mask = 'corrected'` and
     `woof_enthalpy_advection_units = 'corrected'` (the advection converts
     enthalpy in Celsius, as the thermal solver does, so the EISMINT2
