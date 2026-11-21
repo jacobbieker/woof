@@ -159,6 +159,34 @@ def test_the_default_refuses_by_name(monkeypatch):
 
 
 @requires_gpu
+def test_the_mask_needs_no_opt_in(monkeypatch):
+    import cupy as cp
+    case = _case("explicit_default")
+    kw = dict(dom=cp.asarray(case["dom"]), dom_fields=case["dom_fields"], fractions=cp.asarray(case["fractions"]),
+              fractions_fields=fx.FR_FIELDS)
+    monkeypatch.delenv("WOOF_GLIBC239_LIBM64", raising=False)
+    fxe._module_on.cache_clear()
+    try:
+        mask = cp.asnumpy(fxe.flux_mask(**kw))
+        monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "1")
+        fxe._module_on.cache_clear()
+        assert (mask == cp.asnumpy(fxe.flux_mask(**kw))).all()
+    finally:
+        fxe._module_on.cache_clear()
+    assert mask[[3, 17, 22, 5, 30, 31]].tolist() == [0] * 6 and mask[[21, 32]].tolist() == [1, 1]
+
+
+def test_the_options_are_typed():
+    for name in ("dead_comps", "flux_diurnal", "coldair_outbreak_mod", "atm_gustiness"):
+        with pytest.raises(TypeError, match=f"{name} must be a bool"):
+            fxe.FluxOptions(**{name: 1}).check()
+    with pytest.raises(TypeError, match="integer"):
+        fxe.FluxOptions(flux_max_iteration=2.0).check()
+    # E3SM's defaults (seq_infodata_mod.F90; drv's namelist_definition_drv.xml)
+    assert fxe.FluxOptions().flux_convergence == 0.0 and fxe.FluxOptions().flux_max_iteration == -1
+
+
+@requires_gpu
 @pytest.mark.usefixtures("glibc239")
 def test_gpu_matches_the_e3sm_oracle_word_for_word():
     report = fx.measure()
