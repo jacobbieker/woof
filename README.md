@@ -589,6 +589,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
+- **Corrections of WRF/MPAS quirks, each opt-in and off by default.**
+  The default stays word for word with the WRF 4.7.1 / MPAS v8.4.2
+  oracle; each key changes only the arithmetic it names.
+  - `ysu_surface_heat_exner` (YSU, `bl_pbl_physics = 1`, WRF route). WRF's YSU adds the surface sensible heat flux to
+    potential temperature as if it were a temperature flux and converts
+    back with pi, so the column gets `HFX*pi` instead of `HFX`. That loses
+    5% of the surface heating at 850 hPa and 15% at 600 hPa. The option
+    uses `HFX/pi(1)`. Checked by the column heat budget, not yet scored
+    against observations; the hex MPAS-suite YSU does not carry it yet.
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as

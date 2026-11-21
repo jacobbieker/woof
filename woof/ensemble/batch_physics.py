@@ -263,7 +263,8 @@ def ysu_output_plan(*, nz, ny, nx, members, reserved_bytes=0):
 
 def prepare_ysu_column_batch(inputs, *, members, ny, nx, dt, available_bytes,
                              topdown=1, array_module=None, reserved_bytes=0,
-                             shared_fields=(), ysu_version="wrf_480"):
+                             shared_fields=(), ysu_version="wrf_480",
+                             surface_heat_exner=False):
     """Bind the unchanged native YSU kernel over already packed columns.
 
     Inputs must already have member rings, static ownership and A-grid winds
@@ -305,7 +306,13 @@ def prepare_ysu_column_batch(inputs, *, members, ny, nx, dt, available_bytes,
         outputs[name] = array.reshape(shape)
     kernel, source_receipt = _native_column_kernel(module, "ysu_column", defines=defines,
         shared_pointers=shared_fields if members > 1 else (), member_columns=ny * nx)
-    args = tuple(inputs[name] for name in YSU_COLUMNS + YSU_SURFACES)
+    bound = dict(inputs)
+    if surface_heat_exner:
+        # RunConfig.ysu_surface_heat_exner (default off), as launch_ysu: the
+        # unchanged kernel reads the theta flux HFX/pi(1) from a private
+        # buffer refreshed before every launch.
+        bound["hfx"] = array_module.empty_like(inputs["hfx"])
+    args = tuple(bound[name] for name in YSU_COLUMNS + YSU_SURFACES)
     args += tuple(outputs[name] for name in ("du", "dv", "dtheta", "dqv", "dqc", "dqi", "hpbl", "kpbl", "exch_h", "exch_m", "wstar", "delta"))
     args += (np.float32(dt), outputs["topdown_radsum"], outputs["wstar3_2"], outputs["cloudflg"],
              np.int32(topdown), np.int32(nz), np.int32(members * ny), np.int32(nx),
@@ -315,6 +322,8 @@ def prepare_ysu_column_batch(inputs, *, members, ny, nx, dt, available_bytes,
     def launch():
         if int(array_module.cuda.runtime.getDevice()) != device:
             raise RuntimeError("YSU column launch uses a different current device")
+        if surface_heat_exner:
+            array_module.divide(inputs["hfx"], inputs["exner"][0], out=bound["hfx"])
         kernel(((columns + YSU_BLOCK - 1) // YSU_BLOCK,), (YSU_BLOCK,), args)
         return outputs
 
@@ -1416,6 +1425,7 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
               "xland": f["xland"], "u10": f["u10"], "v10": f["v10"]}
     ysu = prepare_ysu_column_batch(inputs, members=members, ny=ny, nx=nx, dt=driver.bldt_seconds,
         topdown=cfg.ysu_topdown_pblmix, ysu_version=cfg.ysu_version,
+        surface_heat_exner=getattr(cfg, "ysu_surface_heat_exner", False) is True,
         available_bytes=available_bytes - extras_plan.required_bytes(members),
         array_module=array_module, shared_fields=tuple(sorted(shared_surfaces & {"xland"})))
     sf_inputs = {"u": active["u"][0], "v": active["v"][0], "t": active["temperature"][0], "qv": active["qv"][0],
