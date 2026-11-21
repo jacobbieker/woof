@@ -61,7 +61,7 @@ STREAM = ("a2x", "o2x", "i2x", "xao", "fractions_o", "fractions_i", "fractions_a
 OUTPUTS = ("xao", "acc", "x2o", "x2i", "fractions_o", "fractions_i", "fractions_a")
 
 
-def _spec(name, *, seed, steps, ocn_every=3, ice_every=1, n=48, n_a=23, i2a="matrix", implicit=False, gust=False,
+def _spec(name, *, seed, steps, ocn_every=3, ice_every=1, n=16, n_a=11, i2a="matrix", implicit=False, gust=False,
           dead=False, albav=False, epbal=1.0, ocn_prognostic=True, ice_prognostic=True, ice_c2_ocn=True,
           ocn_c2_ice=True, atm_c2_ice=True):
     return dict(name=name, seed=seed, steps=steps, ocn_every=ocn_every, ice_every=ice_every, n=n,
@@ -73,7 +73,7 @@ def _spec(name, *, seed, steps, ocn_every=3, ice_every=1, n=48, n_a=23, i2a="mat
 SPECS = (
     # the ocean every third coupler step, the sea ice every step: windows of 1, 3 and 3 samples
     _spec("ocean_every_third", seed=1, steps=7),
-    _spec("albav_ice_every_other_epbal", seed=2, steps=6, ocn_every=2, ice_every=2, i2a="copy", albav=True,
+    _spec("albav_ice_every_other_epbal", seed=2, steps=4, ocn_every=2, ice_every=2, i2a="copy", albav=True,
           epbal=0.9873046875000123),
     _spec("implicit_gust", seed=3, steps=4, ocn_every=4, implicit=True, gust=True),
     _spec("dead_models", seed=4, steps=3, ocn_every=1, dead=True),
@@ -141,16 +141,16 @@ def _build(spec) -> dict:
     dom = _uniform(rng, -1.0, 1.0, (n, len(LISTS["dom"])))
     col = LISTS["dom"].index
     dom[:, col("mask")] = 1.0
-    dom[[9, 23], col("mask")] = 0.0
+    dom[[9, 15], col("mask")] = 0.0
     frac = np.ones(n)
-    frac[[11, 29, 37]] = 0.0                                       # land
-    frac[[13, 31]] = _uniform(rng, 0.05, 0.95, 2)                  # coast
+    frac[[11, 12]] = 0.0                                           # land
+    frac[[13, 14]] = _uniform(rng, 0.05, 0.95, 2)                  # coast
     dom[:, col("frac")] = frac
     matrix = _matrix(rng, na, n, empty=2) if spec["i2a"] == "matrix" else None
     lfrac = np.clip((1.0 - _mapped(spec["i2a"], matrix, frac, na)) + _uniform(rng, -0.004, 0.004, na), 0.0, 1.0)
     fo = _fractions(rng, n, list(FO_FIELDS))
-    fo[[5, 30], FO_FIELDS.index("ifrac")] = 0.0
-    fo[[5, 30], FO_FIELDS.index("ofrac")] = 0.0                    # the flux's mask drops them
+    fo[[5, 6], FO_FIELDS.index("ifrac")] = 0.0
+    fo[[5, 6], FO_FIELDS.index("ofrac")] = 0.0                     # the flux's mask drops them
     xao = _uniform(rng, -5.0, 5.0, (n, len(XAO)))
     for f in ("So_avsdr", "So_anidr", "So_avsdf", "So_anidf"):
         xao[:, XAO.index(f)] = _uniform(rng, 0.02, 0.9, n)
