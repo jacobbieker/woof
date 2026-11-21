@@ -424,7 +424,7 @@ else
                mpas_seaice_advection_incremental_remap_tracers.o rbf_standins.o
                mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o
                step_standins.o seaice_mesh_interpolation.o mpas_seaice_column.o remap_standins.o
-               mpas_seaice_constants.o ice_*.o oracle_stream.o stubs.o mpas_kind_types.o)
+               mpas_seaice_constants.o "ice_*.o" oracle_stream.o stubs.o mpas_kind_types.o)
     comp_paths=()
     for o in "${component[@]}"; do for f in "${col_obj}"/${o}; do comp_paths+=("${f}"); done; done
     libm_objects=()
