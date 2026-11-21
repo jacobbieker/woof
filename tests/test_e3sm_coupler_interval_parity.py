@@ -62,6 +62,7 @@ from _numerics_child import MODES, run as run_child
 from conftest import requires_gpu
 from woof.hex.coupled import flux_atmocn_e3sm as fxe
 from woof.hex.coupled import interval_e3sm as ie
+from woof.hex.coupled import ocn_accum_e3sm as oae
 from woof.verify import e3sm_coupler_interval_oracle as ci
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -126,6 +127,11 @@ def test_the_default_path_does_not_call_the_interval():
              if "interval_e3sm" in p.read_text(encoding="utf-8")
              and p.name not in ("interval_e3sm.py", "e3sm_coupler_interval_oracle.py")]
     assert users == []
+    # importing it loads none of the routines it chains
+    code = ("import sys, woof.hex.coupled.interval_e3sm\n"
+            "assert not [m for m in sys.modules if m.startswith('woof.hex.coupled.') and m.endswith('_e3sm')\n"
+            "            and m != 'woof.hex.coupled.interval_e3sm'], 'loaded'\n")
+    subprocess.run([sys.executable, "-c", code], check=True, cwd=ROOT)
 
 
 @requires_gpu
@@ -235,7 +241,7 @@ def test_a_reordered_or_rewired_chain_is_caught(glibc239, monkeypatch):
 
 @requires_gpu
 def test_the_accumulation_before_the_merge_is_caught(glibc239, monkeypatch):
-    real_accum = ie._accum.OceanAccumulator.accum
+    real_accum = oae.OceanAccumulator.accum
     pending = {}
 
     # accumulate the previous merge's x2o, then merge
@@ -243,7 +249,7 @@ def test_the_accumulation_before_the_merge_is_caught(glibc239, monkeypatch):
         prev = pending.get(id(self))
         pending[id(self)] = x2o.copy()
         real_accum(self, x2o if prev is None else prev)
-    monkeypatch.setattr(ie._accum.OceanAccumulator, "accum", late)
+    monkeypatch.setattr(oae.OceanAccumulator, "accum", late)
     assert _caught("ocean_every_third")
 
 

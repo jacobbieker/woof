@@ -132,7 +132,8 @@ def test_the_isotopes_and_bad_lists_are_refused():
 def test_nothing_calls_the_merge():
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "prep_ice_merge_e3sm" in p.read_text(encoding="utf-8")
-             and p.name not in ("prep_ice_merge_e3sm.py", "e3sm_ice_merge_oracle.py")]
+             and p.name not in ("prep_ice_merge_e3sm.py", "e3sm_ice_merge_oracle.py", "interval_e3sm.py",
+                                "e3sm_coupler_interval_oracle.py")]
     assert users == []
 
 

@@ -46,14 +46,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import numpy as np
+from types import SimpleNamespace
 
-from woof.hex.coupled import flux_atmocn_e3sm as _flux
-from woof.hex.coupled import ocn_accum_e3sm as _accum
-from woof.hex.coupled import ocnalb_e3sm as _alb
-from woof.hex.coupled import prep_ice_merge_e3sm as _imerge
-from woof.hex.coupled import prep_ocn_merge_e3sm as _omerge
-from woof.hex.coupled import seq_frac_e3sm as _frac
+import numpy as np
 
 E3SM_TAG = "v3.2.0"
 E3SM_COMMIT = "648b167b7f95267a159a9fdee25faf604c2bfc4f"
@@ -64,6 +59,15 @@ SOURCE_FILES = ("driver-mct/main/cime_comp_mod.F90:cime_run_atmocn_setup,cime_ru
 VECTORS = {"dom": "o", "a2x": "o", "o2x": "o", "i2x": "o", "xao": "o", "fractions_o": "o", "fractions_i": "o",
            "fractions_a": "a", "r2x_o": "o", "w2x_o": "o", "g2x_o": "o", "r2x_i": "o", "g2x_i": "o", "w2x_i": "o",
            "x2o": "o", "x2i": "o"}
+
+
+def _ported() -> SimpleNamespace:
+    """The ported routines, imported when an interval is used (so importing
+    the coupled package's other modules loads none of them)."""
+    from woof.hex.coupled import flux_atmocn_e3sm, ocn_accum_e3sm, ocnalb_e3sm, prep_ice_merge_e3sm
+    from woof.hex.coupled import prep_ocn_merge_e3sm, seq_frac_e3sm
+    return SimpleNamespace(flux=flux_atmocn_e3sm, accum=ocn_accum_e3sm, alb=ocnalb_e3sm, imerge=prep_ice_merge_e3sm,
+                           omerge=prep_ocn_merge_e3sm, frac=seq_frac_e3sm)
 
 
 class IntervalRefusal(ValueError):
@@ -123,9 +127,11 @@ class CouplerInterval:
     copied). The interval's arrays are its own device arrays, read with
     :meth:`vector`."""
 
-    def __init__(self, lists: dict, values: dict, *, n: int, n_a: int, mapper_i2a, flux: _flux.FluxOptions,
+    def __init__(self, lists: dict, values: dict, *, n: int, n_a: int, mapper_i2a, flux,
                  switches: Switches = Switches()):
         import cupy as cp
+        m = self._m = _ported()
+        _flux, _accum, _frac = m.flux, m.accum, m.frac
         if not isinstance(switches, Switches):
             raise TypeError("switches must be interval_e3sm.Switches")
         switches.check()
@@ -186,7 +192,8 @@ class CouplerInterval:
     # -- cime_run_atmocn_setup ------------------------------------------------
     def atmocn_setup(self, a2x) -> None:
         """``cime_run_atmocn_setup`` with this step's atmosphere export on the ocean grid."""
-        v, s = self._v, self.switches
+        v, s, m = self._v, self.switches, self._m
+        _flux, _omerge, _alb = m.flux, m.omerge, m.alb
         self._set("a2x", a2x)
         if s.ocn_prognostic and s.ice_c2_ocn:
             v["i2x_ox"][...] = v["i2x"]                      # prep_ocn_calc_i2x_ox: seq_map_map, copy_only
@@ -219,7 +226,7 @@ class CouplerInterval:
     # -- cime_run_ice_setup_send ----------------------------------------------
     def ice_setup_send(self) -> None:
         """``cime_run_ice_setup_send``: x2i from the ocean's and atmosphere's exports."""
-        v, s = self._v, self.switches
+        v, s, _imerge = self._v, self.switches, self._m.imerge
         if not s.ice_prognostic:
             return
         if s.ocn_c2_ice:
@@ -246,7 +253,7 @@ class CouplerInterval:
     # -- cime_run_update_fractions --------------------------------------------
     def update_fractions(self) -> None:
         """``cime_run_update_fractions``: ``seq_frac_set`` from the sea ice's export."""
-        v = self._v
+        v, _frac = self._v, self._m.frac
         self.frac_errors += _frac.seq_frac_set(
             i2x=v["i2x"], i2x_fields=self.lists["i2x"], dom=v["dom"], dom_fields=self.lists["dom"],
             fractions_i=v["fractions_i"], fi_fields=self.lists["fractions_i"], fractions_o=v["fractions_o"],
