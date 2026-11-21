@@ -3330,7 +3330,12 @@ def _resolve_obstacles(arguments, collected: list[str] | None = None) -> dict | 
 def _resolve_undriven_species_boundary(arguments) -> str | None:
     """``wrf-flow-dependent`` when asked for, else None (``free``, the default: nothing changes)."""
 
-    mode = getattr(arguments, "undriven_species_boundary", None)
+    from woof import quirk_corrections
+    try:
+        # --quirk-corrections all asks for wrf-flow-dependent on a regional run
+        mode = quirk_corrections.hex_undriven_species_boundary(arguments)
+    except ValueError as error:
+        raise _refuse(str(error)) from error
     if mode in (None, "free"):
         return None
     if mode != "wrf-flow-dependent":
@@ -5313,9 +5318,11 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             if getattr(arguments, "inflow_perturbation", False):
                 raise ValueError("--inflow-perturbation is carried by the WOOF-physics route's regional runtime; "
                                  "the MPAS suite route (matrix item 5.7 follow-up) would accept it and never apply it")
-            if getattr(arguments, "undriven_species_boundary", None) not in (None, "free"):
-                raise ValueError("--undriven-species-boundary wrf-flow-dependent is carried by the WOOF-physics "
-                                 "route's regional runtime; the MPAS suite route would accept it and never apply it")
+            from woof import quirk_corrections
+            if quirk_corrections.hex_undriven_species_boundary(arguments) not in (None, "free"):
+                raise ValueError("--undriven-species-boundary wrf-flow-dependent (or --quirk-corrections all on a "
+                                 "regional run) is carried by the WOOF-physics route's regional runtime; the MPAS "
+                                 "suite route would accept it and never apply it")
             from .mpasphys.resident_v842 import ported_route_refusal
             from .mpasphys.forecast_v842 import named_library_route
             suite_refusal = ported_route_refusal(native_config)
@@ -5915,11 +5922,15 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                         help="WRF's inflow_perturbation_amplitude_scale (default 1.0)")
     parser.add_argument("--inflow-perturbation-faces", default=None, choices=("inflow", "outflow"),
                         help="WRF's inflow_perturbation_faces (default inflow)")
-    parser.add_argument("--undriven-species-boundary", default="free", choices=("free", "wrf-flow-dependent"),
+    parser.add_argument("--undriven-species-boundary", default=None, choices=("free", "wrf-flow-dependent"),
                         help="the specified zone of the microphysics species the boundary stream does not drive: "
                              "free (default, transported like the interior) or wrf-flow-dependent (WRF's "
                              "flow_dep_bdy: outflow copies the first inner cell, inflow sets 0, or ccn_conc for "
                              "nn/qnn); regional mesh, WOOF-physics route only")
+    parser.add_argument("--quirk-corrections", default="none", choices=("none", "all"),
+                        help="woof_quirk_corrections: 'all' turns on every opt-in correction of a WRF/MPAS quirk "
+                             "the run carries (here --undriven-species-boundary wrf-flow-dependent on a regional "
+                             "run); default none (each key on its own)")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",
                         help="opt-in Fitch turbine drag and TKE from the shared turbine tables")
     # --wrf-hydro / --wrf-hydro-output: WRF-Hydro's routing on its own LSM grid, coupled to the hex land surface

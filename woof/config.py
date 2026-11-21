@@ -2402,6 +2402,12 @@ class RunConfig:
     # level's pi before the unchanged kernel reads it; False is WRF's
     # arithmetic word for word.  Read only where bl_pbl_physics = 1.
     ysu_surface_heat_exner: bool = _config_field(default=False, kw_only=True)
+    # The umbrella over the opt-in quirk corrections (woof.quirk_corrections),
+    # appended at 'none': each correction stays on its own key.  'all' turns
+    # on every RunConfig correction whose scheme the domain runs
+    # (woof.quirk_corrections.apply_run_corrections, which the TOML reader
+    # calls); one set to anything else next to 'all' is refused by name.
+    woof_quirk_corrections: str = _config_field(default="none", kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -9491,6 +9497,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "gf_deep_rain_evaporation_booking must be true or false")
     if type(cfg.ysu_surface_heat_exner) is not bool:
         raise ConfigurationRefused("ysu_surface_heat_exner must be true or false")
+    from woof.quirk_corrections import check_run_config
+    check_run_config(cfg)
     if cfg.ysu_surface_heat_exner and int(cfg.bl_pbl_physics) != 1:
         raise ConfigurationRefused(
             "ysu_surface_heat_exner corrects YSU's surface heat flux "

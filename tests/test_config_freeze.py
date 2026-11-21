@@ -343,6 +343,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The umbrella over the opt-in quirk corrections, appended at 'none'.
+    assert names.pop() == "woof_quirk_corrections"
+    assert RunConfig.__dataclass_fields__["woof_quirk_corrections"].default == "none"
+    assert RunConfig.__dataclass_fields__["woof_quirk_corrections"].kw_only
     # The opt-in YSU surface heat flux on theta (quirk pass), appended off.
     assert names.pop() == "ysu_surface_heat_exner"
     assert RunConfig.__dataclass_fields__["ysu_surface_heat_exner"].default is False
@@ -985,6 +989,8 @@ def _check_frozen_defaults(actual):
                          ("urban_param_file", ""),
                          # the opt-in YSU surface heat flux on theta, off
                          ("ysu_surface_heat_exner", False),
+                         # the umbrella over the opt-in quirk corrections, none
+                         ("woof_quirk_corrections", "none"),
                          # the opt-in resolved obstacles, off
                          *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field
