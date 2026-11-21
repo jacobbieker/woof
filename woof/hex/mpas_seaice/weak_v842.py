@@ -213,7 +213,7 @@ def _fma64(a: float, b: float, c: float) -> float:
     try:
         return float(exact)
     except OverflowError:
-        return math.copysign(math.inf, exact)
+        return math.inf if exact > 0 else -math.inf
 
 
 def _fma(a, b, c, real):
