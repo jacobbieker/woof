@@ -518,6 +518,21 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     fluxes, precipitation scaling, the BGC tracers) or left out with the
     reason (`Faoo_h2otemp` is sent as 0). E3SM's own MPAS-Ocean is not
     ported.
+  - The same hybrid for the sea ice (`woof/hex/coupled/hybrid_seaice.py`,
+    opt-in): the MPAS v8.4.2 sea ice (this fork's port, column package and
+    velocity solver) run as E3SM v3.2.0's `ice_init_mct` and `ice_run_mct`
+    run theirs. At start: `nextsw_cday`, the core's init, the coupling
+    preparation, the export, then the zero import. Each window: the fluxes
+    re-initialised once, the import, v8.4.2's post-atmospheric and
+    post-oceanic coupling, then the steps with the counter restarted and no
+    per-step finalize, then the export. The cap's constants are v8.4.2's
+    stand-alone column package's. real(r8), word-exact on CUDA against
+    E3SM's import and export cut verbatim and compiled against v8.4.2's
+    modules. `DIVERGENCES` lists every difference. v8.4.2's ESM build
+    (CCSMCOUPLED) is left out with its reason. Refused by name: Icepack,
+    the forcing streams, prescribed ice, icebergs, floe sizes, waves, the
+    scaled dib, the coupled BGC and aerosols, the slab ocean, restarts.
+    E3SM's own MPAS-Seaice is not ported.
     are the MALI port's ocean seam: `landIcePressure`, `landIceFraction` and
     `landIceMask` (int32), liquid and solid runoff in place of one mass
     channel, and `ocn2li_floating_basal_mass_bal` back in MALI's sign

@@ -502,7 +502,31 @@ matched exchange unless asked.
    cut verbatim and compiled against v8.4.2's modules, real(r8), on CUDA
    and Metal. `hybrid_ocean.DIVERGENCES` lists each place E3SM's loop or
    cap does something v8.4.2's lacks: ported, refused by name, or left out
-   with the reason. The sea ice under the same coupler is the next piece.
+   with the reason. The sea ice under the same coupler is
+   `woof/hex/coupled/hybrid_seaice.py` (`tests/test_e3sm_hybrid_seaice_parity.py`).
+   The MPAS v8.4.2 sea ice (column package, velocity solver) runs as
+   `ice_init_mct` and `ice_run_mct` run E3SM's.
+   - At start: `nextsw_cday` into `dayOfNextShortwaveCalculation`, the
+     core's init, v8.4.2's `seaice_column_coupling_prep` where E3SM calls
+     `seaice_icepack_coupling_prep`, the export, and the import of the
+     zeroed x2i.
+   - Each window: `seaice_column_reinitialize_fluxes` once, the import,
+     `nextsw_cday`, and v8.4.2's `post_atmospheric_coupling` and
+     `post_oceanic_coupling` (a new kernel, `post_coupling_v842`). Then
+     `ice_cpl_dt / config_dt` steps with the counter restarted and no
+     `seaice_timestep_finalize`. On the run's first step only,
+     `seaice_init_post_clock_advance` runs. Then the export.
+   - The cap's constants and Icepack's three functions are v8.4.2's
+     stand-alone column package's (cice constants: `cp_ice` 2106, `cp_ocn`
+     4218, `Lfresh` 334000). The oracle supplies them through renames only.
+   - `run_hybrid_seaice.F90` is that sequence around `run_column`'s
+     `seaice_step` build. Word-exact on CUDA on 4 cases: BL99 and mushy,
+     dEdd and ccsm3, 1 and 2 steps a window, rotated and unrotated.
+   - `hybrid_seaice.DIVERGENCES` lists each difference. v8.4.2's ESM build
+     (`-Dcoupled -DCCSMCOUPLED` and `constants/cesm`) is left out with its
+     reason; it is later work alongside (b). Under that build the zenith
+     angle comes from `nextsw_cday`, BL99's tolerances and `hi_min` differ,
+     and the constants are `shr_const`'s.
 7. Later work, option (b): port E3SM v3.2.0's own MPAS-Ocean
    (`components/mpas-ocean`) and MPAS-Seaice (`components/mpas-seaice`),
    which have moved away from MPAS-Model v8.4.2. Their land-ice fluxes,
