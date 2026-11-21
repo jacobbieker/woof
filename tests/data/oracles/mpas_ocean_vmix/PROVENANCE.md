@@ -20,7 +20,10 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
 - Driver: `run_vmix.F90` (stream: `oracle_stream.F90`). It calls
   `ocn_constants_init`, `ocn_equation_of_state_init`, `ocn_vmix_init` and
   `ocn_vmix_implicit(timeLevelIn=1)`, then writes every field back. GM's `k33`
-  is unassociated (its package is off).
+  is unassociated (its package is off) except in the `redi_*` cases, where
+  `config_use_standardGM` is on and `ocn_tracer_vmix_coefs_redi` adds it.
+  The `redi_*` cases were added on 2026-11-21 (same toolchain); the earlier
+  cases' words did not change.
 
 ## Cases
 
@@ -32,6 +35,8 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
 | `rich_diff_only_one_level_columns` | 36 | 12 | a third of the columns one level deep: one-level edges |
 | `vel_disabled` | 24 | 8 | `config_disable_vel_vmix`, the budget |
 | `tracers_disabled` | 24 | 8 | `config_disable_tr_vmix` |
+| `redi_const` | 40 | 14 | Redi's vertical diffusion (`k33`, v8.4.2: without `config_Redi_kappa`) on the constant coefficients |
+| `redi_rich_budgets` | 36 | 12 | Redi's `k33` on the Richardson coefficients, the budget |
 
 The meshes are random connectivity on one block (every halo extent the
 block's count). `maxLevelCell` is at least 1: for an empty column v8.4.2
@@ -41,3 +46,5 @@ writes `C(0)`, outside its array. Velocities are zero below `maxLevelEdgeTop`.
 
 `tests/test_mpas_ocean_vmix_parity.py` and `woof hex ocean verify` run
 `woof.hex.mpas_ocean.vmix_v842`, and every word must be bit-identical.
+The opt-in `woof_redi_k33 = 'kappa'` (not v8.4.2) is checked against
+`config_Redi_kappa * k33` added to the diffusivity without it.
