@@ -408,7 +408,7 @@ extern "C" __global__ void seaice_column_ridging_v842(
     double *oceanHeatFlux, double *ridgeParticipationFunction, double *ratioRidgeThicknessToIce,
     double *fractionNewRidgeArea, double *fractionNewRidgeVolume, double *areaLossRidgeCategory,
     double *areaGainRidgeCategory, double *iceVolumeRidgedCategory, double *raftingIceArea,
-    double *raftingIceVolume, int *newlyFormedIce)
+    double *raftingIceVolume, int *newlyFormedIce, int nblyr, double *zSalinityFlux)
 {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= nCellsSolve) return;
@@ -419,6 +419,11 @@ extern "C" __global__ void seaice_column_ridging_v842(
     T.nstrata = n_trcr_strata;
     T.strata = nt_strata;
     for (int i = 0; i < TI_COUNT; ++i) T.idx[i] = tidx[i];
+    // solve_zsal: cleanup_itd's zap_small_areas adds the zapped vertical salinity to fzsal
+    T.zsal = (flags & ITD_SOLVE_ZSAL) != 0;
+    T.nblyr = nblyr;
+    T.bgrid = categoryThicknessLimits;   // not read: only add_new_ice_bgc remaps (no grids here)
+    T.cgrid = categoryThicknessLimits;
 
     double aicen[ITD_MAXCAT], vicen[ITD_MAXCAT], vsnon[ITD_MAXCAT], hin_max[ITD_MAXCAT + 1];
     int first_ice[ITD_MAXCAT];
@@ -434,6 +439,7 @@ extern "C" __global__ void seaice_column_ridging_v842(
     double aice0 = openWaterArea[c], aice = iceAreaCell[c];
     double fpond = pondFreshWaterFlux[c], fresh = oceanFreshWaterFlux[c], fsalt = oceanSaltFlux[c];
     double fhocn = oceanHeatFlux[c];
+    double fzsal = T.zsal ? zSalinityFlux[c] : 0.0;
     double dardg1dt = areaLossRidge[c], dardg2dt = areaGainRidge[c], dvirdgdt = iceVolumeRidged[c];
     double opening = openingRateRidge[c];
     int warnings = 0, repeats = 0;
@@ -449,7 +455,7 @@ extern "C" __global__ void seaice_column_ridging_v842(
     if (code == RDG_OK) {
         double dtt = M(dt, (double)ndtd);
         if (itd_cleanup_itd(T, dtt, ncat, hin_max, aicen, trcrn, vicen, vsnon, &aice0, &aice, flags, first_ice,
-                            &fpond, &fresh, &fsalt, &fhocn, atrcrn, &warnings))
+                            &fpond, &fresh, &fsalt, &fhocn, atrcrn, &warnings, &fzsal))
             code = RDG_CLEANUP;
     }
 
@@ -465,6 +471,7 @@ extern "C" __global__ void seaice_column_ridging_v842(
     oceanFreshWaterFlux[c] = fresh;
     oceanSaltFlux[c] = fsalt;
     oceanHeatFlux[c] = fhocn;
+    if (T.zsal) zSalinityFlux[c] = fzsal;
     areaLossRidge[c] = dardg1dt;
     areaGainRidge[c] = dardg2dt;
     iceVolumeRidged[c] = dvirdgdt;

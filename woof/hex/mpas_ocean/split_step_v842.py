@@ -137,8 +137,13 @@ def _cut(pool: dict, sizes: dict) -> dict:
     return out
 
 
-def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -> None:
-    """``ocn_time_integrator_split`` for one block, in place on the pools."""
+def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict, t0_kelvin: float = T0_KELVIN) -> None:
+    """``ocn_time_integrator_split`` for one block, in place on the pools.
+
+    ``t0_kelvin`` is ocn_constants' ``T0_Kelvin``, which the coupler's running
+    mean adds to the surface temperature: v8.4.2's own 273.16 by default, or
+    shr_const_mod's 273.15 when the constants are E3SM's build's
+    (``MPAS_ESM_SHR_CONST``; :mod:`woof.hex.coupled.hybrid_ocean`)."""
     import cupy as cp
     m, st, tr = pools["mesh"], pools["state"], pools["tracers"]
     d, f, td = pools["diagnostics"], pools["forcing"], pools["tend"]
@@ -290,14 +295,28 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
         d["gradSSHMeridional"], i32(nc), i32(nl), i32(d["index_surfaceVelocityZonal"]),
         i32(d["index_surfaceVelocityMeridional"]), i32(d["index_SSHGradientZonal"]),
         i32(d["index_SSHGradientMeridional"])))
+    time_average_accumulate(diagnostics=d, forcing=f, effective_density=st.get("effectiveDensityInLandIce@2"),
+                            configs=configs, t0_kelvin=t0_kelvin)
+
+
+def time_average_accumulate(*, diagnostics: dict, forcing: dict, effective_density, configs: dict,
+                            t0_kelvin: float = T0_KELVIN) -> None:
+    """``ocn_time_average_coupled_accumulate``: the coupler's running means
+    of the surface fields (and the land-ice means in 'coupled') over the
+    forcing pool's cells, then the count moved on. ``effective_density`` is
+    the time level the caller's ``timeLevel`` names."""
+    d, f = diagnostics, forcing
+    precision = _precision_of(f["avgTracersSurfaceValue"])
+    real = PRECISIONS[precision]
+    i32 = np.int32
     n_cells_forcing = int(f["nCells"])
     _launch(precision, "ocn_ss_time_average_v842", n_cells_forcing, (
         f["avgTracersSurfaceValue"], f["avgSSHGradient"], f["avgSurfaceVelocity"], d["tracersSurfaceValue"],
         d["gradSSHZonal"], d["gradSSHMeridional"], d["surfaceVelocity"], i32(n_cells_forcing),
         i32(f["avgTracersSurfaceValue"].shape[1]), i32(f["index_avgTemperatureSurfaceValue"]),
         i32(f["index_avgSSHGradientZonal"]), i32(f["index_avgSSHGradientMeridional"]),
-        i32(f["nAccumulatedCoupled"]), real(T0_KELVIN)))
-    land_ice_v842.coupled_means(diagnostics=d, forcing=f, effective_density=st.get("effectiveDensityInLandIce@2"),
+        i32(f["nAccumulatedCoupled"]), real(t0_kelvin)))
+    land_ice_v842.coupled_means(diagnostics=d, forcing=f, effective_density=effective_density,
                                 n_cells=n_cells_forcing, n_accumulated=int(f["nAccumulatedCoupled"]), configs=configs)
     # ocn_time_average_coupled_accumulate counts the step in
     f["nAccumulatedCoupled"] = int(f["nAccumulatedCoupled"]) + 1

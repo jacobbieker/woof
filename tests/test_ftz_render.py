@@ -333,3 +333,25 @@ def test_the_sections_fallback_records_an_unplaceable_header(monkeypatch):
     assert result["available"] is False
     assert "EI_ABIVERSION 9" in result["reason"]
     assert [args[0] for args in calls] == ["-c"]
+
+
+def test_supplied_non_literal_options_are_not_no_caller_options():
+    def site(**kw):
+        base = {"file": "woof/x.py", "line": 1, "constructor": "cp.RawModule",
+                "options": None, "options_argument_present": False}
+        return {**base, **kw}
+
+    inventory = {"sites": [
+        site(line=1),
+        site(line=2, options_argument_present=True),
+        site(line=3, options=[], options_argument_present=True),
+        site(line=4, options=["--fmad=false"], options_argument_present=True),
+        site(file="tests/y.py", line=5, options_argument_present=True),
+    ]}
+    groups = dict(rs.package_tuples(inventory))
+    assert [r["line"] for r in groups[()]] == [1, 3]
+    assert [r["line"] for r in groups[rs._NON_LITERAL]] == [2]
+    assert len(groups) == 3
+    text = rs.render_tuples(inventory)
+    assert "no caller options -- `woof/x.py:1`" in text
+    assert "does not evaluate" in text

@@ -25,7 +25,14 @@ stopping) into ``tests/data/oracles/e3sm_seq_frac``; ``--oracle flux`` runs
 ``<case>/counts`` into ``tests/data/oracles/e3sm_ocn_accum``; ``--oracle
 interval`` runs ``run_coupler_interval`` and writes ``<case>/step<i>/xao``,
 ``/acc``, ``/x2o``, ``/x2i``, ``/fractions_o``, ``_i``, ``_a`` and
-``<case>/counts`` into ``tests/data/oracles/e3sm_coupler_interval``. Each writes
+``<case>/counts`` into ``tests/data/oracles/e3sm_coupler_interval``; ``--oracle
+hybrid`` runs ``run_hybrid_ocean_{e3sm,mpas}`` (the MPAS v8.4.2 ocean under
+E3SM v3.2.0's coupler, not an E3SM configuration) and writes ``<case>/o2x/<w>``
+(o2x after the init's export and each window's) and ``<case>/<pool>/<name>``
+into ``tests/data/oracles/e3sm_hybrid_ocean``; ``--oracle hybrid_seaice`` runs
+``run_hybrid_seaice`` (the MPAS v8.4.2 sea ice under E3SM v3.2.0's coupler)
+and writes ``<case>/i2x/<w>``, ``<case>/oracle/trig`` and the compared
+``<case>/<pool>/<name>`` into ``tests/data/oracles/e3sm_hybrid_seaice``. Each writes
 ``aborts.json`` (each case that must stop: the line E3SM or MCT writes as it
 stops) and ``inputs.sha256`` (every case's input stream). ``--out`` names
 another directory.
@@ -47,6 +54,8 @@ if str(ROOT) not in sys.path:
 
 from woof.verify import e3sm_coupler_interval_oracle as ci  # noqa: E402
 from woof.verify import e3sm_flux_atmocn_oracle as fx  # noqa: E402
+from woof.verify import e3sm_hybrid_ocean_oracle as ho  # noqa: E402
+from woof.verify import e3sm_hybrid_seaice_oracle as hs  # noqa: E402
 from woof.verify import e3sm_ice_merge_oracle as im  # noqa: E402
 from woof.verify import e3sm_ocean_coupling_oracle as oc  # noqa: E402
 from woof.verify import e3sm_ocean_merge_oracle as oo  # noqa: E402
@@ -59,7 +68,8 @@ ORACLES = {"merge": (oo, "run_ocean_merge"), "coupling": (oc, "run_ocean_couplin
            "seaice": (si, "run_seaice_coupling"), "frac": (sf, "run_seq_frac"),
            "flux": (fx, "run_flux_atmocn"), "ocnalb": (oa, "run_flux_ocnalb"),
            "icemerge": (im, "run_ice_merge"), "accum": (ac, "run_ocn_accum"),
-           "interval": (ci, "run_coupler_interval")}
+           "interval": (ci, "run_coupler_interval"), "hybrid": (ho, None),
+           "hybrid_seaice": (hs, None)}
 
 
 def run_case(binary: Path, case: dict, oo=oo) -> tuple[int, object, str]:
@@ -92,11 +102,14 @@ def main() -> int:
     args = parser.parse_args()
     oo, name = ORACLES[args.oracle]
     args.out = args.out or oo.FIXTURE_DIR
-    binary = args.build_dir / name
+    binary = args.build_dir / name if name else None
     args.out.mkdir(parents=True, exist_ok=True)
     arrays, aborts, digests = {}, {}, []
     for case in oo.cases():
-        status, outputs, stderr = run_case(binary, case, oo)
+        if hasattr(oo, "run_binary"):
+            status, outputs, stderr = oo.run_binary(args.build_dir, case)
+        else:
+            status, outputs, stderr = run_case(binary, case, oo)
         if case["aborts"]:
             if status == 0:
                 raise RuntimeError(f"{case['name']} was meant to stop and did not")

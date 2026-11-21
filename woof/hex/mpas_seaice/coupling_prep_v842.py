@@ -140,12 +140,14 @@ def check_config(configs: dict) -> None:
                 knob="config_use_column_package", value=False,
                 reason="the column biogeochemistry runs only with the column package on",
                 declaration="config_use_column_package = .true., or config_use_column_biogeochemistry = .false.")
+        # the vertical salinity is no biogeochemical tracer: colpkg_init_zbgc leaves it out of
+        # nbtrcr (nBioTracers), so its fluxes are not among oceanBioFluxes
         for flag in cv._BGC_FLAGS:
-            if flag not in cv.BGC_PORTED and c[flag]:
+            if flag not in cv.BGC_PORTED and flag != cv.ZSAL_FLAG and c[flag]:
                 raise ConfigurationRefusal(
                     knob=flag, value=True,
-                    reason="the column biogeochemistry's ocean fluxes are ported for the brine height only "
-                           "(no biogeochemical tracer)",
+                    reason="the column biogeochemistry's ocean fluxes are ported for the brine height and the "
+                           "vertical salinity only (no biogeochemical tracer)",
                     declaration=f"{flag} = .false.")
 
 
