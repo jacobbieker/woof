@@ -409,7 +409,9 @@ CORRECTIONS = {
         "config_use_vertical_zsalinity never solves the vertical salinity (the brine height runs "
         "compute_microS_mushy, BL99's dTemp stays 0.01, colpkg_init_zsalinity's sss*salt_loss never reaches the "
         "pool); the correction sets solve_zsal and copies the vertical salinity, so the init writes it, "
-        "column_biogeochemistry runs compute_microS and zsalinity and BL99 uses dTemp = 0.1. Held to the "
+        "column_biogeochemistry runs compute_microS and zsalinity, BL99 uses dTemp = 0.1, and the ITD and the "
+        "ridging run their solve_zsal branches (add_new_ice's salt loss, add_new_ice_bgc's adjust_tracer_profile, "
+        "lateral_melt_bgc, zap_small_areas' dfzsal). Held to the "
         "oracle built with tools/mpas_seaice_oracle/zsal_solve.patch"),
 }
 
