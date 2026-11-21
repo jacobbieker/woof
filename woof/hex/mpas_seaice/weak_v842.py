@@ -82,6 +82,10 @@ MODULE_OPTIONS = COMPILE_OPTIONS
 PRECISIONS = {"r4": np.float32, "r8": np.float64}
 METRIC_LIBMS = ("host", "correctly-rounded")
 CORRECTIONS = ("weak_ridge_delta",)
+#: the mesh fields (and the boundary pool's interiorVertex) the init reads
+MESH_FIELDS = ("nCells", "nVertices", "nVerticesSolve", "maxEdges", "vertexDegree", "nEdgesOnCell", "edgesOnCell",
+               "edgesOnVertex", "verticesOnEdge", "cellsOnEdge", "interiorVertex", "xEdge", "yEdge", "zEdge",
+               "xCell", "yCell", "zCell", "xVertex", "yVertex", "zVertex")
 #: the init's outputs, in the velocity_weak pool
 OUTPUTS = ("normalVectorPolygon", "normalVectorTriangle", "latCellRotated", "latVertexRotated")
 #: the velocity_weak pool's per-cell fields
@@ -357,6 +361,13 @@ def initialize(*, mesh: dict, configs: dict, real, out: dict | None = None,
     ``x/y/zVertex``. ``configs``: ``config_rotate_cartesian_grid``,
     ``mesh:on_a_sphere``, ``mesh:sphere_radius``. ``out`` holds
     :data:`OUTPUTS` to write in place; missing ones are allocated as zeros."""
+    _check_libm(metric_libm)
+    missing = [name for name in MESH_FIELDS if mesh.get(name) is None]
+    if missing:
+        _refuse("basis", "compute",
+                f"the weak form's normal vectors are computed from the mesh, and the mesh carries no {missing}",
+                "the mesh fields " + ", ".join(MESH_FIELDS) + ", or basis = 'input' with the normal vectors "
+                "and rotated latitudes in the velocity_weak pool")
     nc, nv, me, vd = (int(mesh[k]) for k in ("nCells", "nVertices", "maxEdges", "vertexDegree"))
     out = {} if out is None else out
     shapes = {"normalVectorPolygon": (nc + 1, me, 2), "normalVectorTriangle": (nv + 1, vd, 2),
@@ -381,8 +392,8 @@ def initialize_pools(pools: dict, configs: dict, *, metric_libm: str | None = No
     copied to the host, the velocity_weak pool's outputs computed in place
     (the words v8.4.2 does not write keep theirs) and copied back."""
     from .remap_init_v842 import _like
-    mesh = {k: _host(v) for k, v in pools["mesh"].items()}
-    mesh["interiorVertex"] = _host(pools["boundary"]["interiorVertex"])
+    mesh = {k: _host(pools["mesh"].get(k)) for k in MESH_FIELDS if k != "interiorVertex"}
+    mesh["interiorVertex"] = _host(pools.get("boundary", {}).get("interiorVertex"))
     vw = pools["velocity_weak"]
     out = {name: (None if vw.get(name) is None else np.array(_host(vw[name]), copy=True)) for name in OUTPUTS}
     real = pools["velocity_solver"]["uVelocity"].dtype.type

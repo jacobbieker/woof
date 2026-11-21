@@ -6287,7 +6287,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/weak_v842.py",
-    "sha256": "ad75fa786eff33e76e80b101cf8abafa2eb378fd7252647429a568e67e9b565d"
+    "sha256": "ac67ed7b45c6eefbe920e7271c8d109a362422eaa57e741b91682db0581ee176"
    },
    {
     "file": "woof/hex/mpasdiag/_kernels.py",

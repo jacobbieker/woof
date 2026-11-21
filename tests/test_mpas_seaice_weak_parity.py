@@ -152,6 +152,13 @@ def test_a_sphere_is_refused_without_a_libm():
         wo.run_init(sphere, metric_libm="glibc")
 
 
+def test_a_mesh_without_coordinates_is_refused_by_name():
+    case = next(c for c in wo.cases("r4") if c["name"] == "weak_planar_hex")
+    mesh = {k: v for k, v in case["pools"]["mesh"].items() if k not in ("xEdge", "edgesOnVertex")}
+    with pytest.raises(ConfigurationRefusal, match="xEdge"):
+        wv.initialize(mesh=mesh, configs=case["config"], real=np.float32)
+
+
 def test_the_weak_form_with_the_column_step_is_refused_by_name():
     from woof.hex.mpas_seaice import column_step_v842 as cs
     from woof.hex.mpas_seaice import timestep_v842 as ts
