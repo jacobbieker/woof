@@ -1182,8 +1182,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   over N steps with checkpoints, and takes adjoint forcing at
   intermediate states for 4D-Var. Its TL can start from part of the
   state, with the rest zero, as WRFDA's TL start does
-  (`Window.tl(dx0, partial=True)`). The forecast path does not import any
-  of it.
+  (`Window.tl(dx0, partial=True)`). Moist scalar transport (sumflux and
+  the non-PD scalar update, `woof.grad.wrfplus.scalar`) is ported too,
+  not yet in the step. The forecast path does not import any of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
