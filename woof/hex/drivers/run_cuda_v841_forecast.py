@@ -4299,7 +4299,10 @@ def execute_forecast(
     # spacewx_ionosphere_opt on the generic seam (woof.hex.spacewx_history): the seam's PhysicsDriver holds the
     # rows; each frame takes them at its own valid time.
     from woof.hex import spacewx_history
-    spacewx_rows = spacewx_history.seam_holders(getattr(stack["backend"], "_seam", None))
+    spacewx_rows = bool(spacewx_history.seam_holders(getattr(stack["backend"], "_seam", None)))
+    if spacewx_rows:
+        spacewx_history.preload(spacewx_history.seam_holders(stack["backend"]._seam),
+                                schedule["valid_times"].values())
     spacewx_frames = {}
     # Running-max updraft helicity (woof.hex.uh_layers): the 2-5 km maximum by default, as every MPAS-physics run
     # writes it; --uh-layers on adds 0-1/0-2/0-3 km, off writes none (uh_layers.arwen_names).
@@ -4560,8 +4563,10 @@ def execute_forecast(
         if wind is not None:
             wind_frames[step] = (wind.history_fields(), wind.metadata())
         if spacewx_rows:
+            # The current seam's holders: the backend rebuilds its seam after a refused step.
             spacewx_frames[step] = spacewx_history.cell_fields(
-                spacewx_rows, schedule["valid_times"][step], int(host["prepared"].mesh.n_cells))
+                spacewx_history.seam_holders(stack["backend"]._seam), schedule["valid_times"][step],
+                int(host["prepared"].mesh.n_cells))
         if uh_layers is not None:
             uh_frames[step] = uh_layers_module.arwen_history_arrays(uh_layers)
         if async_capture:

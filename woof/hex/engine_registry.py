@@ -246,14 +246,16 @@ def parameter_value(name: str, value: Any, checkout: str | Path | None = None) -
     return typed
 
 
-def _string_field(name: str) -> bool:
-    """Whether ``name`` is a RunConfig field declared ``str``."""
+@lru_cache(maxsize=1)
+def _string_fields() -> frozenset[str]:
+    """The RunConfig fields declared ``str``."""
     import dataclasses
     from woof.config import RunConfig
-    for item in dataclasses.fields(RunConfig):
-        if item.name == name:
-            return item.type in (str, "str")
-    return False
+    return frozenset(item.name for item in dataclasses.fields(RunConfig) if item.type in (str, "str"))
+
+
+def _string_field(name: str) -> bool:
+    return name in _string_fields()
 
 
 def setting_value(name: str, value: Any, checkout: str | Path | None = None) -> Any:
@@ -274,6 +276,9 @@ def setting_value(name: str, value: Any, checkout: str | Path | None = None) -> 
             return found.assignments[name]
     if parameter_row(name, checkout) is not None:
         return parameter_value(name, value, checkout)
+    if _string_field(name) and isinstance(value, (int, float)) and not isinstance(value, bool):
+        # A number given for a RunConfig string (a TOML/JSON spacewx_kp_source = 5) is that string.
+        return str(value)
     if isinstance(value, str):
         text = value.strip().strip("'\"")
         if _string_field(name):

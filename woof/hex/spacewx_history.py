@@ -13,7 +13,7 @@ rows its uninterrupted run would.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import numpy as np
 
@@ -25,14 +25,32 @@ def seam_holders(seam) -> tuple:
                  if h is not None)
 
 
+def refuse_unwired(backend, mode: str) -> None:
+    """Refuse a launch mode whose history writer does not carry these rows when the seam asks for them, rather than
+    run and write frames without them."""
+    if seam_holders(getattr(backend, "_seam", None)):
+        raise NotImplementedError(f"spacewx_ionosphere_opt / spacewx_aurora_opt with {mode}: that path's history "
+                                  "writer does not carry the space-weather rows yet; run on one card without active "
+                                  "local time stepping")
+
+
 def _when(valid_time) -> datetime:
-    if isinstance(valid_time, datetime):
-        when = valid_time
-    else:
-        when = datetime.strptime(str(valid_time), "%Y-%m-%d_%H:%M:%S")
-    if when.tzinfo is not None:
-        when = when.astimezone(timezone.utc).replace(tzinfo=None)
-    return when
+    from woof.spacewx.history import _naive_utc
+    if not isinstance(valid_time, datetime):
+        valid_time = datetime.strptime(str(valid_time), "%Y-%m-%d_%H:%M:%S")
+    return _naive_utc(valid_time)
+
+
+def preload(holders, valid_times) -> None:
+    """Load every monthly ionosphere map the frames blend before the time loop (the generic seam's RunConfig holds
+    no run length, so IonosphereHistory.for_run loaded only the start's), so no frame fetches one mid-forecast."""
+    from woof.spacewx.ionosphere import month_weights
+    for holder in holders:
+        iono = getattr(holder, "ionosphere", None)
+        if iono is None:
+            continue
+        for month in sorted({m for when in valid_times for m, _w in month_weights(_when(when))}):
+            iono.maps(month)
 
 
 def cell_fields(holders, valid_time, n_cells: int) -> dict:
@@ -60,4 +78,4 @@ def long_name(name: str) -> str:
     return REGISTRY_VAR_META[name][0]
 
 
-__all__ = ["cell_fields", "long_name", "seam_holders"]
+__all__ = ["cell_fields", "long_name", "preload", "refuse_unwired", "seam_holders"]

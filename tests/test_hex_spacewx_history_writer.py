@@ -47,3 +47,36 @@ def test_a_row_that_is_not_one_value_per_cell_is_refused(tmp_path, mesh):
                 "spacewx_fields": {"IONO_TEC": (np.zeros(N + 1, np.float32), ("nCells",), "TECU")}}
     with pytest.raises(ValueError, match="one value per history cell"):
         x4.write_snapshot_netcdf(tmp_path / "frame.nc", snapshot, _static())
+
+
+def _backend(ionosphere=None):
+    from types import SimpleNamespace
+    return SimpleNamespace(_seam=SimpleNamespace(_driver=SimpleNamespace(spacewx_ionosphere=ionosphere,
+                                                                         spacewx_aurora=None)))
+
+
+def test_launch_modes_without_the_rows_refuse_them():
+    from woof.hex import spacewx_history as sh
+    sh.refuse_unwired(_backend(), "a same-host rank run")            # off: nothing to refuse
+    with pytest.raises(NotImplementedError, match="same-host rank run.*does not carry"):
+        sh.refuse_unwired(_backend(object()), "a same-host rank run")
+
+
+def test_the_frames_maps_load_before_the_time_loop():
+    from types import SimpleNamespace
+    from woof.hex import spacewx_history as sh
+    from woof.spacewx.ionosphere import month_weights
+    loaded = []
+    holder = SimpleNamespace(ionosphere=SimpleNamespace(maps=loaded.append))
+    times = ["2026-03-30_00:00:00", "2026-04-02_12:00:00", "2026-04-20_00:00:00"]
+    sh.preload([holder, SimpleNamespace()], times)
+    want = sorted({m for t in times for m, _w in month_weights(sh._when(t))})
+    assert loaded == want and len(want) >= 2
+
+
+@pytest.mark.parametrize("value", [5, 5.0, "5", " '5' "])
+def test_a_runconfig_string_keeps_its_text_whatever_the_spelling(value):
+    from woof.hex.engine_registry import setting_value
+    assert setting_value("spacewx_kp_source", value) == ("5.0" if value == 5.0 and not isinstance(value, int)
+                                                        else "5")
+    assert setting_value("spacewx_aurora_opt", "2") == 2
