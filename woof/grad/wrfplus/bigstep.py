@@ -111,6 +111,8 @@ class PGFGeometry:
 
     def validate(self) -> None:
         _axes(self)
+        if self.moist_cq not in (0, 1):
+            raise ValueError(f"moist_cq is 0 or 1, got {self.moist_cq}")
         if self.nz < 3:
             raise ValueError(f"the pressure gradient needs nz >= 3 (the bottom "
                              f"extrapolation reads levels 0-2), got {self.nz}")
@@ -218,6 +220,9 @@ class BuoyGeometry:
 
     def validate(self) -> None:
         _axes(self)
+        if self.moist not in (0, 1):
+            raise ValueError(f"the buoyancy's TL/AD covers moist_mode 0 and 1 (qv, qc, qr), "
+                             f"got {self.moist}")
         if self.moist and self.nz < 2:
             raise ValueError(f"the moist buoyancy needs nz >= 2 (the top's cqw pairs "
                              f"levels nz-1 and nz-2), got {self.nz}")

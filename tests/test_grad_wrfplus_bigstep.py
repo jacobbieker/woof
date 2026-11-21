@@ -474,11 +474,12 @@ def test_geometry_rejects_unported_options():
     """A pressure gradient under 3 levels (the bottom extrapolation reads
     levels 0-2), rhs_ph under 2 levels, on axes too short for its stencil
     or with an unknown order, coriolis/curvature with another earth radius,
-    the moist buoyancy under 2 levels, calc_cq with the ice species
-    (n_mass 6) and empty axes are refused, not run."""
+    the moist buoyancy under 2 levels or with the ice species (moist 2),
+    calc_cq with the ice species (n_mass 6) and empty axes are refused, not run."""
     from woof.grad.wrfplus import cases as C
     for make, over in ((C.pgf_geometry, dict(nz=2)), (C.pgf_geometry, dict(nx=0)),
                        (C.buoy_geometry, dict(ny=0)), (C.buoym_geometry, dict(nz=1)),
+                       (C.buoy_geometry, dict(moist=2)), (C.pgf_geometry, dict(moist_cq=2)),
                        (C.cq_geometry, dict(n_mass=6)), (C.cq_geometry, dict(nx=0)),
                        (C.geo_geometry, dict(nz=1)),
                        (C.geo_geometry, dict(nx=6)), (C.geo_geometry, dict(ny=4, order=4)),
