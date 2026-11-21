@@ -9264,7 +9264,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 528,
+      "line": 544,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -9284,7 +9284,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 908,
+      "line": 924,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -9300,7 +9300,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 1065,
+      "line": 1081,
       "column": 21,
       "surface": "package",
       "constructor": "array_module.RawModule",
