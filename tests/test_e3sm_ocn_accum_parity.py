@@ -108,7 +108,7 @@ def test_word_exact_in_fast_and_strict_children(numerics, exact):
 def test_bad_arrays_are_refused(monkeypatch):
     import cupy as cp
     acc = oae.OceanAccumulator(4, ("a", "b"))
-    good = cp.zeros((4, 2))
+    good = cp.zeros((4, 2), dtype=cp.float64)  # the mlx facade's zeros default to float32
     with pytest.raises(ValueError, match="once"):
         oae.OceanAccumulator(4, ("a", "a"))
     with pytest.raises(ValueError, match="lsize"):
@@ -116,9 +116,9 @@ def test_bad_arrays_are_refused(monkeypatch):
     with pytest.raises(TypeError, match="cupy"):
         acc.accum(np.zeros((4, 2)))
     with pytest.raises(ValueError, match="shape"):
-        acc.accum(cp.zeros((4, 3)))
+        acc.accum(cp.zeros((4, 3), dtype=cp.float64))
     with pytest.raises(ValueError, match="shape"):
-        acc.accum(cp.asfortranarray(cp.zeros((4, 2))))
+        acc.accum(cp.asfortranarray(cp.zeros((4, 2), dtype=cp.float64)))
     with pytest.raises(ValueError, match="accumulator"):
         acc.accum_avg(acc.acc)
     monkeypatch.setattr(oae, "_device_of", lambda a: 99)
