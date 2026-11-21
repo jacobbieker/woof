@@ -878,6 +878,17 @@ Changed:
 
 Fixed:
 
+- **Strict mode with no mixing package now adds its held dry tendencies.**
+  With `GPUWM_WRF_EXACT=1`, the stage-1 lateral relaxation of a specified
+  or nested domain and the physics tendencies are folded into the held
+  `*_tendf` slots, as WRF's `rk_addtend_dry` does. When no mixing package,
+  diff6 or observation nudging ran, `add_fixed_dry_tendencies` returned
+  early, so both were dropped:
+  - The relaxation zone had no u, v, theta (or w) relaxation.
+  - The physics never reached u, v, theta or the moist scalars.
+  The held slots are now added whenever strict mode has folded something
+  into them. They are zeroed every step. The default (fast) path was not
+  affected, because it applies the relaxation and physics on their own.
 - **Adaptive-step runs with a cumulus scheme change answers.** On an
   adaptive clock, convective rain and the Kain-Fritsch hold stopped
   following WRF. WRF's `advance_ppt` (`RAINC += PRATEC*DT`, the KF `NCA`
