@@ -192,6 +192,7 @@ for precision in r4 r8; do
       "${fc[@]}" -o "${build_dir}/run_variational_basis_${precision}" run_variational_basis.o \
           mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_wachspress.o \
           mpas_seaice_velocity_solver_pwl.o mpas_seaice_velocity_solver_variational_shared.o mpas_seaice_numerics.o \
+          mpas_seaice_velocity_solver_constitutive_relation.o \
           seaice_mesh_interpolation.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
           oracle_stream.o stubs.o mpas_kind_types.o
       "${fc[@]}" -o "${build_dir}/run_incremental_remap_${precision}" run_incremental_remap.o \
