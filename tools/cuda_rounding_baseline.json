@@ -5105,7 +5105,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/gm_v842.cu",
-    "sha256": "daf5c68676f3fa599806a4cda49eed78e2de1482d5750c5b55b673f58f746667"
+    "sha256": "6e1c7777a0a68cde03794b3fd10a2933f91632c7cd8f6fad2af1aac1099d5bdd"
    },
    {
     "file": "woof/hex/mpas_ocean/land_ice_v842.cu",
