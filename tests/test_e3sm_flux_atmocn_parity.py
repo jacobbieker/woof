@@ -133,7 +133,8 @@ def test_the_constants_are_e3sms():
 def test_the_default_path_does_not_call_the_flux():
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "flux_atmocn_e3sm" in p.read_text(encoding="utf-8")
-             and p.name not in ("flux_atmocn_e3sm.py", "e3sm_flux_atmocn_oracle.py")]
+             and p.name not in ("flux_atmocn_e3sm.py", "e3sm_flux_atmocn_oracle.py", "interval_e3sm.py",
+                                "e3sm_coupler_interval_oracle.py")]
     assert users == []
     siblings = sorted(p.stem for p in (ROOT / "woof" / "hex" / "coupled").glob("*.py")
                       if p.stem not in ("__init__", "flux_atmocn_e3sm"))

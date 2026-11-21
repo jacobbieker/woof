@@ -87,7 +87,8 @@ def test_fixture_covers_the_branches():
 def test_the_default_path_does_not_call_the_accumulation():
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "ocn_accum_e3sm" in p.read_text(encoding="utf-8")
-             and p.name not in ("ocn_accum_e3sm.py", "e3sm_ocn_accum_oracle.py")]
+             and p.name not in ("ocn_accum_e3sm.py", "e3sm_ocn_accum_oracle.py", "interval_e3sm.py",
+                                "e3sm_coupler_interval_oracle.py")]
     assert users == []
 
 
