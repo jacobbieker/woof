@@ -12,7 +12,10 @@ conductivities (``bubbly``, ``MU71``), the constant ocean heat transfer
 (MPAS accepts ``Cdn_ocn`` only with form drag), high-frequency coupling, any number of boundary
 layer iterations, a computed or a coupled surface temperature
 (``config_calc_surface_temperature``; the coupled fluxes are
-``alternative_atmos_forcing``'s), the ice age and first-year ice tracers.
+``alternative_atmos_forcing``'s), the ice age and first-year ice tracers,
+and the column biogeochemistry's brine height (``config_use_brine``:
+``column_vertical_thermodynamics`` neither reads nor writes the brine
+fraction; the other biogeochemistry is refused).
 
 What it refuses, by name:
 
@@ -110,7 +113,7 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     from woof.hex.mpas_ice import rkind
 
     c = configs
-    cv.refuse_unported(c, dims)
+    cv.refuse_unported(c, dims, biogeochemistry=True)
     if c["config_thermodynamics_type"] != "BL99":
         _refuse("config_thermodynamics_type", c["config_thermodynamics_type"],
                 "the mushy and zero-layer vertical thermodynamics are not ported",

@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 716,
+  "site_count": 717,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 47,
     "cupy.RawKernel": 120,
     "cupy.RawModule": 310,
     "cupy.ReductionKernel": 22,
-    "cupy.cuda.compiler.compile_using_nvrtc": 217
+    "cupy.cuda.compiler.compile_using_nvrtc": 218
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 111,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 142
+      "cupy.cuda.compiler.compile_using_nvrtc": 143
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -7750,7 +7750,7 @@
     },
     {
       "file": "woof/core/kf.py",
-      "line": 364,
+      "line": 366,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -10458,7 +10458,7 @@
     },
     {
       "file": "woof/hex/mpas_ice/advection_v842.py",
-      "line": 60,
+      "line": 72,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10487,6 +10487,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"li_calving_v842_{precision}.cu\")"
+    },
+    {
+      "file": "woof/hex/mpas_ice/forward_v842.py",
+      "line": 102,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"li_forward_v842_{precision}.cu\")"
     },
     {
       "file": "woof/hex/mpas_ice/geometry_v842.py",
@@ -10842,7 +10858,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_itd_v842.py",
-      "line": 110,
+      "line": 114,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10858,7 +10874,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
-      "line": 158,
+      "line": 159,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10874,7 +10890,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_ridge_v842.py",
-      "line": 105,
+      "line": 106,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10890,7 +10906,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_therm_v842.py",
-      "line": 195,
+      "line": 198,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10906,7 +10922,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_v842.py",
-      "line": 716,
+      "line": 726,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10922,7 +10938,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",
-      "line": 103,
+      "line": 108,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",

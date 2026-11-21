@@ -390,13 +390,29 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     profiles and ocean concentrations, and `column_biogeochemistry`'s
     flushing, flooding and Darcy velocity, RKIND 8 with no opt-in, word for
     word with v8.4.2 on CUDA and Metal. v8.4.2's diatom carbon to nitrogen
-    ratio (the proteins') has a named correction (`zbgc_c2n_proteins`);
-    the other biogeochemistry flags, and the brine fraction in the ITD,
-    ridging and remap, are refused by name until their phases land;
+    ratio (the proteins') has a named correction (`zbgc_c2n_proteins`).
+    The brine fraction is carried through the ITD (new ice, the thickness
+    surplus, zapped categories), ridging, the remap, the column step and
+    the coupled step (the ocean biogeochemistry fluxes zeroed and scaled),
+    word for word on CUDA and Metal. v8.4.2's step writes the algae's
+    `totalChlorophyll` through a null pointer when the brine height runs
+    alone (it dies on every step), so the step refuses that configuration
+    unless the correction `bgc_inactive_diagnostics` is named; the other
+    biogeochemistry flags are refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
-    subglacial hydrology and one forward-Euler time step;
+    subglacial hydrology, one forward-Euler time step, and the forward mode
+    around it (the clock with its adaptive-step force alarm, the cold-start
+    initialisation, the initial solve and the time-step loop, with a
+    bitwise restart; `woof/hex/mpas_ice/forward_v842.py`), word-exact over
+    the dome, EISMINT2 A, hydrology and enthalpy-benchmark cases on uniform
+    and variable resolution meshes; the land-ice core's registry status is
+    now `partial`. Two v8.4.2 quirks have opt-in corrections, off by
+    default: `woof_sgh_init_mask = 'corrected'` and
+    `woof_enthalpy_advection_units = 'corrected'` (the advection converts
+    enthalpy in Celsius, as the thermal solver does, so the EISMINT2
+    enthalpy ice no longer melts away);
   - the coupler's ocean import merge, E3SM v3.2.0's `prep_ocn_merge`
     (`woof/hex/coupled/prep_ocn_merge_e3sm.py`, opt-in, not called by the
     coupled step): x2o built from the atmosphere, sea ice, runoff, waves,
@@ -459,6 +475,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     over the ocean's coupling window, averaged by E3SM's rounded `1/count`
     and copied back. real(r8), word-exact on CUDA and Metal against the
     routines compiled verbatim on MCT.
+  - One coupler interval chained (`woof/hex/coupled/interval_e3sm.py`,
+    opt-in): the ported routines above, run in E3SM v3.2.0's RASM_OPTION1
+    order over several coupler steps (the i2x map, the flux, the ocean
+    merge and accumulation, the albedos; the window's average on the
+    ocean's alarm; the o2x and a2x maps and the sea-ice merge on the sea
+    ice's; then the fractions), with the components' exports scripted.
+    real(r8), word-exact on CUDA and Metal against E3SM's own routines cut
+    verbatim, linked and driven in that order on MCT. Like the flux it needs
+    `WOOF_GLIBC239_LIBM64=1`; the wave couplings are refused by name.
   - The coupled exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
     are the MALI port's ocean seam: `landIcePressure`, `landIceFraction` and
     `landIceMask` (int32), liquid and solid runoff in place of one mass
