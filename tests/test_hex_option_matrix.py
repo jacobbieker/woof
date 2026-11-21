@@ -89,6 +89,16 @@ def test_classify_reads_the_door_verdicts():
     assert verdict["outcome"] == "error" and "KeyError" in verdict["reason"]
 
 
+def test_classify_keeps_a_multi_line_preflight_reason():
+    text = ("woof hex: the forecast driver stopped with "
+            "PhysicsVerticalPreflightError: resolved physics vertical "
+            "preflight failed:\n  - WSM3 needs x\n  - second\n"
+            "  Full traceback: /x\n")
+    verdict = matrix.classify_log(text, 1)
+    assert verdict["outcome"] == "refused"
+    assert verdict["reason"].endswith("failed: - WSM3 needs x - second")
+
+
 def _write_frame(path, rho, qv, rainnc, qfx, zgrid):
     netCDF4 = pytest.importorskip("netCDF4")
     with netCDF4.Dataset(path, "w") as ds:
