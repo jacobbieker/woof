@@ -13,7 +13,7 @@ that is named but not yet ported is refused by name.
 """
 
 from .clock import CoupledClock, CoupledInterval
-from .exchange import CHANNELS, FluxChannel, channels_for, check_matched
+from .exchange import CHANNELS, REFUSED, FluxChannel, channel, channels_for, check_matched
 from .registry import ComponentInfo, all_components, component, require_ported
 
 __all__ = [
@@ -22,7 +22,9 @@ __all__ = [
     "CoupledClock",
     "CoupledInterval",
     "FluxChannel",
+    "REFUSED",
     "all_components",
+    "channel",
     "channels_for",
     "check_matched",
     "component",

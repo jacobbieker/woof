@@ -494,6 +494,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     runs them. Each hand-over is a matched exchange, refused by its
     channel's name. Word-exact against the chained oracle with scripted
     components.
+  - The coupled exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
+    are the MALI port's ocean seam: `landIcePressure`, `landIceFraction` and
+    `landIceMask` (int32), liquid and solid runoff in place of one mass
+    channel, and `ocn2li_floating_basal_mass_bal` back in MALI's sign
+    (`landIceDraft` is a diagnostic only). Calving momentum is refused by
+    name.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
