@@ -355,6 +355,15 @@ def flux_trial_source(source, spec, members, *, layout="outermost", zero_tendenc
         raise BatchKernelUnsupported("the stencil trial only audits the four flux-divergence entries")
     declaration, _, _, body_start, body_end, _, _, _ = _entry_parts(source, spec)
     body = source[body_start + 1:body_end]
+    # advection.cu reads the incoming tendency through FLUX_DIV_TEND0(at) (the zero_first fold-in), a macro
+    # defined above the entry, where the address rewrites below cannot reach it.  Spell out the macro's
+    # default expansion so the tendency read is the same subscript they rewrite; the batch path never
+    # defines GPUWM_FLUX_DIV_ZERO_FIRST (its trials zero the tendency themselves).
+    if re.search(r"^\s*#\s*define\s+GPUWM_FLUX_DIV_ZERO_FIRST\b", source, re.M):
+        raise BatchKernelUnsupported("the stencil trial does not carry the zero_first advection build")
+    body = re.sub(r"\bFLUX_DIV_TEND0\((IDX3\(\s*k\s*,\s*j\s*,\s*i\s*\))\)", r"tend_out[\1]", body)
+    if re.search(r"\bFLUX_DIV_TEND0\s*\(", body):
+        raise BatchKernelUnsupported("a FLUX_DIV_TEND0 use the stencil trial does not audit")
     member_pointers = tuple(p.name for p in spec.pointers if p.role == "member")
     _helper_calls(body, member_pointers)
     if re.search(r"\b(?:__syncthreads|__syncwarp|atomic\w*|__shfl\w*)\b", _masked(body)):

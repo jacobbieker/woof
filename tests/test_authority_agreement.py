@@ -1557,28 +1557,56 @@ def test_every_implemented_option_carries_every_consumer_row():
                 f"{sorted(set(contract) - set(rows))}")
 
 
-@pytest.mark.skipif(
-    os.environ.get("GITHUB_ACTIONS") == "true",
-    reason="walks the full cross product of every component's options "
-           "(about 186 million tuples on the fork's registry, one "
-           "consumer_row_gaps call per implemented tuple); on a hosted runner "
-           "it holds its whole leg until the 150 min job timeout (leg 4, "
-           "2026-11-10 and 2026-11-11). The per-option row check above runs "
-           "on every leg; run this one on a workstation.")
+def _implemented_selectors(registry, component_id, option_id):
+    option = registry["components"][component_id]["options"][option_id]
+    return option, dict(option.get("selectors", {}))
+
+
 def test_the_consumer_row_gate_is_silent_for_every_implemented_tuple():
-    """After the registry carries every row the gate has nothing to say."""
+    """After the registry carries every row the gate has nothing to say.
+
+    ``consumer_row_gaps`` resolves each component to its option through that
+    component's own selectors and sums the per-component answers, so a tuple
+    is silent exactly when each of its options is.  The old walk took the
+    cross product of every component's options (about 186 million tuples on
+    the fork's registry, one call each: more than 4.5 h of CPU in a strict
+    env, and a stalled xdist worker) to ask that per-option question
+    186 million times.  This asks it once per implemented option, which is
+    every tuple's every component, and checks the additivity the argument
+    rests on against a seeded sample of whole tuples.
+    """
+
+    import random
+
+    from woof.physics_registry import consumer_row_gaps_for_option
 
     registry = physics_registry()
     options = _component_option_ids(registry)
-    for values in itertools.product(*(options[c] for c in sorted(options))):
-        settings = {}
-        for component_id, option_id in zip(sorted(options), values):
-            option = registry["components"][component_id]["options"][option_id]
+    per_option = {}
+    for component_id, option_ids in options.items():
+        for option_id in option_ids:
+            option, selectors = _implemented_selectors(registry, component_id, option_id)
             if option.get("implemented") is not True:
+                continue
+            settings = dict(selectors)
+            assert consumer_row_gaps(settings) == [], (component_id, option_id, settings)
+            per_option[component_id, option_id] = (option, selectors)
+    assert per_option, "the registry names no implemented option"
+
+    implemented = {component_id: [o for o in option_ids if (component_id, o) in per_option]
+                   for component_id, option_ids in options.items()}
+    chooser = random.Random(20261121)
+    for _ in range(2000):
+        settings, expected = {}, []
+        for component_id in sorted(implemented):
+            if not implemented[component_id]:
                 break
-            settings.update(option.get("selectors", {}))
+            option_id = chooser.choice(implemented[component_id])
+            option, selectors = per_option[component_id, option_id]
+            settings.update(selectors)
+            expected += consumer_row_gaps_for_option(component_id, option_id, option, selectors)
         else:
-            assert consumer_row_gaps(settings) == [], settings
+            assert consumer_row_gaps(settings) == expected == [], settings
 
 
 def test_the_consumer_row_gate_refuses_a_missing_row_before_step_0(monkeypatch):

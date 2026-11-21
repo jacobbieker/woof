@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from woof.ingest.lake_state import source_rows, load_state, sample_field
-from conftest import requires_gpu
+from conftest import requires_gpu, requires_netcdf_bridge, requires_water_blend_bridge
 
 
 def test_source_licence_and_missing_file_are_explicit(tmp_path):
@@ -15,6 +15,7 @@ def test_source_licence_and_missing_file_are_explicit(tmp_path):
         load_state('era5-land', datetime(2022,11,17), np.array([42.]), np.array([-80.]), cache=tmp_path)
 
 
+@requires_water_blend_bridge
 def test_native_coastal_sampling_units_and_no_extrapolation():
     result=sample_field([43.,42.],[-81.,-80.],[[10.,np.nan],[12.,14.]],
                         [42.5,44.,43.],[-80.5,-80.5,-80.],offset=273.15)
@@ -32,6 +33,7 @@ def test_native_coastal_sampling_units_and_no_extrapolation():
         sample_field([42.,43.,45.],[-81.,-80.],np.ones((3,2)),[42.5],[-80.5])
 
 
+@requires_water_blend_bridge
 def test_native_source_zero_roundoff_preserves_material_depths_and_missing():
     values=sample_field([43.,42.],[-81.,-80.],
         [[-2.16840486e-19,2.16840486e-19],[-.001,.001]],
@@ -74,6 +76,7 @@ def test_observed_surface_and_era_profile_ice_volume_and_restart(monkeypatch,tmp
         initialize_lake(fresh, latitude=plane(42), lake_depth=plane(.1), initial_state=initial)
 
 
+@requires_water_blend_bridge
 def test_buoy_water_temperature_and_nearby_water_only():
     from woof.ingest.lake_state import decode_buoy_temperature, nearest_lake_value
     text=b'#YY MM DD hh mm ATMP WTMP\n2022 11 17 12 00 -5.0 99.0\n2022 11 17 12 10 -6.0 10.5\n'
@@ -87,6 +90,7 @@ def test_buoy_water_temperature_and_nearby_water_only():
         nearest_lake_value([42.],[280.],[280.],[1.],42.,-79.,max_distance_km=3.)
 
 
+@requires_water_blend_bridge
 def test_diagnostic_coasts_and_missing_verification_pairs():
     from woof.ingest.lake_state import diagnostic_values, verification_scores
     water = diagnostic_values([273.15, 280., np.nan], [1., 0., 1.], scale=1.8, offset=-459.67)
@@ -100,6 +104,8 @@ def test_diagnostic_coasts_and_missing_verification_pairs():
     __import__('json').dumps(empty, allow_nan=False)
 
 
+@requires_water_blend_bridge
+@requires_netcdf_bridge
 def test_licensed_cf_file_fields_time_and_age(tmp_path):
     from woof.io.classic_product import ClassicProduct
     from datetime import timedelta
@@ -134,6 +140,7 @@ def test_licensed_cf_file_fields_time_and_age(tmp_path):
         load_state('era5-land', valid-timedelta(hours=1), np.array([42.2]), np.array([-80.6]), **kwargs)
 
 
+@requires_water_blend_bridge
 def test_native_request_coverage_wraps_longitude_and_ignores_missing():
     from woof.ingest.lake_state import coordinate_coverage
     row = source_rows()['glsea']
