@@ -7,7 +7,7 @@
 # Steps, each idempotent on a fresh tree:
 #   src      unpack the pinned tarball (checked by SHA-256) into
 #            $W/src/WRFPLUSV4.7.1 and $W/src/WRFDAV4.7.1-4dvar
-#   wrfplus  ./configure wrfplus; ./compile wrfplus  (wrf.exe is WRFPLUS)
+#   wrfplus  ./configure wrfplus; ./compile wrfplus  (main/wrfplus.exe)
 #   wrfda    ./configure 4dvar with WRFPLUS_DIR; ./compile all_wrfvar
 #   dump     copy the 4dvar tree to WRFDAV4.7.1-4dvar-dump, hook
 #            woof_dump.inc in (apply_dump_patch.sh) and build it
@@ -41,13 +41,13 @@ wrfplus)
     printf "%s\n" "$OPT" | ./configure wrfplus
   fi
   grep -q -- "-fdefault-real-8" configure.wrf || { echo "WRFPLUS is not built with 8-byte reals" >&2; exit 1; }
-  rm -f main/wrf.exe main/libwrflib.a
+  rm -f main/wrfplus.exe main/libwrflib.a
   /usr/bin/time -v ./compile -j "$JOBS" wrfplus > "$W/build-wrfplus.log" 2>&1 || true
   if grep -q "Killed signal terminated program" "$W/build-wrfplus.log"; then
     echo "a compiler was killed (out of memory?): retry with RESUME=1 and a smaller J" >&2
   fi
-  [ -x main/wrf.exe ] && [ -s main/libwrflib.a ] || { echo "WRFPLUS did not build: see $W/build-wrfplus.log" >&2; exit 1; }
-  ls -la main/wrf.exe main/libwrflib.a
+  [ -x main/wrfplus.exe ] && [ -s main/libwrflib.a ] || { echo "WRFPLUS did not build: see $W/build-wrfplus.log" >&2; exit 1; }
+  ls -la main/wrfplus.exe main/libwrflib.a
   ;;
 wrfda|dump)
   [ -s "$PLUS/main/libwrflib.a" ] || { echo "build WRFPLUS first (build_4dvar.sh wrfplus)" >&2; exit 2; }
