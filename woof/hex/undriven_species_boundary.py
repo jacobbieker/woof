@@ -258,6 +258,9 @@ class UndrivenSpeciesBoundary:
             "specified_cells": self.n_spec,
             "outer_edges_per_cell": {"min": int(self.counts.min(initial=0)),
                                      "max": int(self.counts.max(initial=0))},
+            # A specified cell with no edge to a higher ring or to no cell (a cull notch) has no outer face:
+            # its net outward flux is 0, which WRF's tie reads as inflow, so it always takes the inflow value.
+            "cells_without_outer_edge": int((self.counts == 0).sum()),
             "inner_cell": "nearestRelaxationCell (mpas_atm_boundaries.F:702-751)",
             "applications": self.applications,
         }
