@@ -1404,7 +1404,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   MHS and ATMS departures fall on columns that were not assimilated as
   well. Against held-out radiosondes the analysis is neutral to slightly
   better without AMVs. With AMVs, upper-level winds are 3-4 % worse
-  (plan 12.8 item 6).
+  (plan 12.8 item 6). The 31-member solve runs on host-staged arrays
+  (`solve_namespace=np`) with 12 forked workers, 237k active points: the
+  transform took 65 s, against 20 minutes in one process at 4 members.
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA

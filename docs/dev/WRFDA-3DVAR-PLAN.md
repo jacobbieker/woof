@@ -2574,6 +2574,11 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      the forked chunk loop: 12 workers, under 2 minutes for 31 members and
      38,000 observations). Without it the host path is one process and
      took 20 minutes at 4 members.
+     The 31-member run's diagnostics: `host_workers = 12` with
+     `host_workers_reason = 'host_workers=12'` (asked for; the automatic
+     mode also forks on Linux), 237,448 of 310,341 points active, 62
+     batches, `chunk_points` 8000, setup 2.7 s, transform 64.6 s. On macOS
+     the loop stays in one process unless `host_workers` is passed.
    - **The window matters most.** The LETKF is 3-D (no FGAT), so an
      observation 3 hours old is compared with the 12Z state. With
      09-12Z observations the analysis made the sondes' v at 400-200 hPa
