@@ -150,7 +150,8 @@ def test_the_opt_in_carries_the_delta_eddington_shortwave(glibc239):
     crad.refuse_unported(case["config"], {**case["dims"], "nCategories": 8})
     for overrides, match in (({"config_use_aerosols": True}, "aerosols"),
                              ({"config_use_shortwave_bioabsorption": True}, "bioabsorption"),
-                             ({"config_use_column_biogeochemistry": True}, "biogeochemistry")):
+                             ({"config_use_column_biogeochemistry": True, "config_use_skeletal_biochemistry": True},
+                              "config_use_skeletal_biochemistry")):
         with pytest.raises(ConfigurationRefusal, match=match):
             crad.refuse_unported({**case["config"], **overrides}, case["dims"])
 

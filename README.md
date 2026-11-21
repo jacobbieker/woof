@@ -390,13 +390,29 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     profiles and ocean concentrations, and `column_biogeochemistry`'s
     flushing, flooding and Darcy velocity, RKIND 8 with no opt-in, word for
     word with v8.4.2 on CUDA and Metal. v8.4.2's diatom carbon to nitrogen
-    ratio (the proteins') has a named correction (`zbgc_c2n_proteins`);
-    the other biogeochemistry flags, and the brine fraction in the ITD,
-    ridging and remap, are refused by name until their phases land;
+    ratio (the proteins') has a named correction (`zbgc_c2n_proteins`).
+    The brine fraction is carried through the ITD (new ice, the thickness
+    surplus, zapped categories), ridging, the remap, the column step and
+    the coupled step (the ocean biogeochemistry fluxes zeroed and scaled),
+    word for word on CUDA and Metal. v8.4.2's step writes the algae's
+    `totalChlorophyll` through a null pointer when the brine height runs
+    alone (it dies on every step), so the step refuses that configuration
+    unless the correction `bgc_inactive_diagnostics` is named; the other
+    biogeochemistry flags are refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
-    subglacial hydrology and one forward-Euler time step;
+    subglacial hydrology, one forward-Euler time step, and the forward mode
+    around it (the clock with its adaptive-step force alarm, the cold-start
+    initialisation, the initial solve and the time-step loop, with a
+    bitwise restart; `woof/hex/mpas_ice/forward_v842.py`), word-exact over
+    the dome, EISMINT2 A, hydrology and enthalpy-benchmark cases on uniform
+    and variable resolution meshes; the land-ice core's registry status is
+    now `partial`. Two v8.4.2 quirks have opt-in corrections, off by
+    default: `woof_sgh_init_mask = 'corrected'` and
+    `woof_enthalpy_advection_units = 'corrected'` (the advection converts
+    enthalpy in Celsius, as the thermal solver does, so the EISMINT2
+    enthalpy ice no longer melts away);
   - the coupler's ocean import merge, E3SM v3.2.0's `prep_ocn_merge`
     (`woof/hex/coupled/prep_ocn_merge_e3sm.py`, opt-in, not called by the
     coupled step): x2o built from the atmosphere, sea ice, runoff, waves,
@@ -586,6 +602,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     WRF's inflow perturbation on the regional relax rings
     (`woof hex forecast --inflow-perturbation`, which takes its depth from
     the run's own boundary-layer height since hex has no parent model);
+  - WRF's flow-dependent specified zone for the microphysics species a
+    regional boundary stream does not drive (`woof hex forecast
+    --undriven-species-boundary wrf-flow-dependent`: outflow copies the
+    first cell inside the zone, inflow sets 0, or `ccn_conc` for the CCN
+    number). The default, `free`, keeps MPAS's behaviour: those species
+    get no boundary step;
   - `woof resume` and `woof branch` for hex runs
     ([docs/branch-from-checkpoint.md](docs/branch-from-checkpoint.md));
   - GRIB2 and Earth2 export ([docs/grib2-export.md](docs/grib2-export.md));
@@ -599,7 +621,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     transition-band diagnostics. The step is set by the smallest cell, so
     a graded mesh costs about what its finest cells cost;
   - an option matrix that runs generic-seam column options through a real
-    hex forecast on CUDA and Metal.
+    hex forecast on CUDA and Metal. Every row now runs or is refused by
+    name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
+    the 149-level case (nominal eta), MAD-WRF (species row) and any
+    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5,
+    KF-CuP, BouLac and QNSE rows state their layer limits.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
