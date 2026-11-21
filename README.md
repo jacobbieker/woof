@@ -1192,6 +1192,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`Window.tl(dx0, partial=True)`). Moist scalar transport (sumflux and
   the non-PD scalar update, `woof.grad.wrfplus.scalar`) is ported too,
   not yet in the step. The forecast path does not import any of it.
+  (`Window.tl(dx0, partial=True)`). The moist boundary rows (qv's
+  relaxation and spec_bdy_final, flow_dep_bdy for hydrometeors) are ported
+  too, not yet in the step. The forecast path does not import any of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8

@@ -941,7 +941,7 @@ def wd_perturbation(geom, seed: int, dtype=np.float64) -> dict:
 
 # The source field's (centre, spread) per row kind (u, v, theta', ph', w, mu').
 _LB_SRC = {"u": (5.0, 8.0), "v": (-2.0, 8.0), "theta": (0.0, 2.0), "phi": (0.0, 100.0),
-           "w": (0.0, 0.5), "mu": (0.0, 200.0)}
+           "w": (0.0, 0.5), "mu": (0.0, 200.0), "qv": (0.01, 0.003)}
 
 
 def lbc_geometry(nz=4, ny=12, nx=13, kind="u", **overrides):
@@ -999,6 +999,10 @@ def lbc_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     sh = lb_shapes(geom)
     c, s = _LB_SRC[geom.kind]
     scale = 1.0 if geom.kind == "mu" else 9.0e4
+    if geom.kind == "qv":
+        # qv's coupled row is ~1e3 against tables of the same size: a
+        # larger step keeps binary64 roundoff out of the 1e-7 FD point
+        s *= 10.0
     out = {"src": 0.1 * s * rng.standard_normal(sh["src"]),
            "mup": 20.0 * rng.standard_normal(sh["mup"])}
     for n in LB_ACTIVE[2:]:
@@ -1158,3 +1162,20 @@ def sf_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) ->
 
 def sf_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     return sf_trajectory(geom, seed, dtype)
+def flow_geometry(nz=3, ny=7, nx=8, **overrides):
+    from .lbc import FlowGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, spec_zone=1)
+    base.update(overrides)
+    return FlowGeometry(**base)
+
+
+def flow_trajectory(geom, seed: int, dtype=np.float64) -> dict:
+    """A hydrometeor and mass fluxes of either sign, so every side has
+    outflow and inflow cells."""
+    from .lbc import flow_shapes
+    rng = np.random.default_rng(seed)
+    sh = flow_shapes(geom)
+    out = {"q": 1e-3 + 5e-4 * rng.standard_normal(sh["q"]),
+           "ru": 4e5 * rng.standard_normal(sh["ru"]),
+           "rv": 4e5 * rng.standard_normal(sh["rv"])}
+    return {n: np.ascontiguousarray(v, dtype=dtype) for n, v in out.items()}

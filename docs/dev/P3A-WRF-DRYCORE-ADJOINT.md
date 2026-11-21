@@ -855,6 +855,32 @@ Each step is one small PR, taken to merged before the next widens.
      - FD convergence;
      - the binary32 base gives `_advance_species_wrf`'s and the sumflux
        launches' words, and each update moves the species.
+8k. Moisture, part 4 (DA item 4): the moist boundary rows
+   (`woof.grad.wrfplus.lbc`), not yet in the step.
+   - qv's rows: `LBCGeometry`/`FinalGeometry` take kind `qv` (the
+     primal's code 5), a mass-grid row coupled as theta is under the
+     strict build, `(c1h mu + c2h) q`. moist.py's rk_step-1 capture is a
+     direct row (`apply_relax`) into qv's held tendency, from the time-t
+     qv and mu' (`source_field`, `source_mup`), and spec_bdy_final forces
+     qv back after phi. The kernels already took the mass-grid branches
+     for any kind other than u, v, w, phi and mu.
+   - flow_dep_bdy (`flow_tl/_ad`, `FlowGeometry`): the specified ring of a
+     hydrometeor without a table (qc and qr after every stage's update)
+     copies the first interior row or column on outflow and takes zero on
+     inflow, the y sides owning the corners (woof's strict
+     `flow_dependent_batch`). The fluxes only pick the branch, so they
+     are passive; the adjoint moves each copied cell's adjoint onto its
+     interior source.
+   - Tests:
+     - `tests/test_grad_wrfplus_lbc.py` and `_lbc_final.py` gain qv rows
+       (capture, with map factors, specified-only; final, with a wider
+       zone): dot product, accumulation, FD and the strict-primal words of
+       `state_relaxation_multi` and `finalize_state_field`.
+     - `tests/test_grad_wrfplus_moist_lbc.py`: flow_dep_bdy's dot product
+       and FD for ring widths 1-3, and the words of
+       `apply_flow_dependent_boundaries` (every ring cell moves) and of
+       qv's capture through the primal's own single-row
+       `_launch_state_relaxation` with the time-t source and mass.
      There is no WRFPLUS fixture.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).

@@ -42,6 +42,11 @@ New:
   rk_scalar_tend + rk_update_scalar, with the specified ring and the held
   boundary tendency. The binary32 base reproduces woof's strict primal
   word for word. It is not yet bound into the step. The forecast path is
+- The WRF dry-step adjoint's lateral-boundary rows (`woof.grad.wrfplus.lbc`)
+  gain the moist ones: qv's rk_step-1 relaxation capture and its
+  spec_bdy_final, and WRF's flow-dependent boundary for hydrometeors
+  without a table. The binary32 base reproduces woof's strict primal word
+  for word. They are not yet bound into the step. The forecast path is
   unchanged.
 
 - The WRF dry-step tangent-linear and adjoint (`woof.grad.wrfplus.model`
