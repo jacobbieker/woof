@@ -123,7 +123,10 @@ contains
 end module seq_comm_mct
 
 module seq_flds_mod
+  ! as E3SM's (public) seq_flds_mod: its use of seq_comm_mct reaches prep_ocn_merge
+  use seq_comm_mct, only: seq_comm_iamroot, seq_comm_setptrs, logunit
   implicit none
+  public
   character(len=80) :: atm_flux_method = 'explicit'
   logical :: atm_gustiness = .false.
   character(len=80) :: wav_ocn_coup = 'none'
