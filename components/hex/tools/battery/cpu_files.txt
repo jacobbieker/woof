@@ -1527,3 +1527,15 @@ tests/test_uh_layers_partitions.py
 # the R2 CLM lake service seam: selector, refusals, statics lookup and receipt,
 # all on host arrays with no card, no assets and no network (#532)
 tests/test_mpas_clm_lake_v842.py
+
+# Files that were on no tier list (tests/test_tier_membership.py named them).  Each runs under the tier-1
+# marker selector with no card, no assets and no network; the device-marked members of the mixed files stay
+# out of this tier by their gpu marks.
+tests/test_chem_micm_hex.py
+tests/test_chem_wrf.py
+tests/test_hex_static_highres_gem15.py
+tests/test_mpas_hailcast_diagnostics.py
+tests/test_mpas_lightning_diagnostics.py
+tests/test_output_diagnostics_produced.py
+tests/test_regional_terrain.py
+tests/test_wind_reconstruction_refusal.py
