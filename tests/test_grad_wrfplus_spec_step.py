@@ -56,13 +56,15 @@ STRICT = dict(GPUWM_WRF_EXACT="1", WOOF_WRF_EXACT_DIAGNOSTICS="1",
               GPUWM_WRF_EXACT_BIGSTEP="1")
 
 # (warm-up primal steps, chained steps, map factors, halo shift, table
-# times): a warm step, a cold start chained over three steps, a warm chain
-# with map factors and the carried halo moved off the boundary ring, and a
-# cold chain whose last step ends on its (last) interval's end, which the
-# primal serves from that interval.
+# times, moist): a warm step, a cold start chained over three steps, a
+# warm chain with map factors and the carried halo moved off the boundary
+# ring, a cold chain whose last step ends on its (last) interval's end,
+# which the primal serves from that interval, and moist states (qv, qc and
+# qr with qv's tables: qv's held capture and spec_bdy_final, flow_dep_bdy
+# for qc and qr), warm and as a cold mapped chain.
 HOUR = (0.0, 3600.0)
-CASES = [(2, 1, 0, 0.0, HOUR), (0, 3, 0, 0.0, HOUR), (2, 2, 1, 3.0, HOUR),
-         (0, 2, 0, 0.0, (0.0, 6.0))]
+CASES = [(2, 1, 0, 0.0, HOUR, 0), (0, 3, 0, 0.0, HOUR, 0), (2, 2, 1, 3.0, HOUR, 0),
+         (0, 2, 0, 0.0, (0.0, 6.0), 0), (2, 1, 0, 0.0, HOUR, 1), (0, 2, 1, 3.0, HOUR, 1)]
 
 
 def _run(backend, body, tmp_path):
@@ -79,7 +81,9 @@ def _run(backend, body, tmp_path):
         "import woof.ingest.lateral_bc as LBC\n"
         "out = {}\n"
         "def build(warm=2, msf=0, shift=0.0, nx=20, ny=18, nz=8, relax=4, hill=400.0,\n"
-        "          times=(0.0, 3600.0), attach=True, **over):\n"
+        "          times=(0.0, 3600.0), attach=True, moist=0, **over):\n"
+        "    if moist:\n"
+        "        over.update(moist=True, moist_adv_opt=0)\n"
         "    cfg = H.make_config(nx, ny, nz, h_sca_adv_order=5, terrain_opt=1, specified=True,\n"
         "                        spec_zone=1, relax_zone=relax, spec_bdy_width=relax + 1, **over)\n"
         "    jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')\n"
@@ -93,14 +97,21 @@ def _run(backend, body, tmp_path):
         "        jf, iu = np.meshgrid(np.arange(ny), np.arange(nx + 1) - 0.5, indexing='ij')\n"
         "        jv, iv = np.meshgrid(np.arange(ny + 1) - 0.5, np.arange(nx), indexing='ij')\n"
         "        geo = dataclasses.replace(geo, msft=m(jj, ii), msfu=m(jf, iu), msfv=m(jv, iv))\n"
-        "    state = H.make_state(cfg, 1, geography=geo)\n"
+        "    def make():\n"
+        "        s = H.make_state(cfg, 1, geography=geo)\n"
+        "        if moist:  # the harness seeds qv and qc; give qr a field too\n"
+        "            rng = np.random.default_rng(8)\n"
+        "            s.qr[...] = cp.asarray(np.maximum(2e-4 * rng.standard_normal(\n"
+        "                s.qr.shape), 0.0), dtype=s.qr.dtype)\n"
+        "        return s\n"
+        "    state = make()\n"
         "    if attach:\n"
         "        snaps = []\n"
         "        for n in range(len(times)):\n"
         "            # boundary states moving away from the start, every field\n"
         "            # (mu and phi too) and varying along the ring, so each table\n"
         "            # and tendency and the relaxation's Laplacian carry signal\n"
-        "            f = H.make_state(cfg, 1, geography=geo)\n"
+        "            f = make()\n"
         "            a = 1.0 + n\n"
         "            def wave(shape, k):\n"
         "                j = np.arange(shape[-2])[:, None]; i = np.arange(shape[-1])[None, :]\n"
@@ -111,6 +122,8 @@ def _run(backend, body, tmp_path):
         "            f.thp += cp.float32(1.0 * a) + cp.float32(0.3 * a) * wave(f.thp.shape, 1)\n"
         "            f.mup += cp.float32(20.0 * a) * (1 + wave(f.mup.shape, 2))\n"
         "            f.php += cp.float32(5.0 * a) * wave(f.php.shape, 3)\n"
+        "            if moist:\n"
+        "                f.qv *= cp.float32(1.0 + 0.05 * a) + cp.float32(0.02 * a) * wave(f.qv.shape, 2)\n"
         "            snaps.append(dict(LBC.domain_boundary_snapshot(f)))\n"
         "        LBC.attach_lateral_boundaries(state, LBC.build_lateral_boundaries(\n"
         "            snaps, list(times), spec_bdy_width=cfg.spec_bdy_width,\n"
@@ -170,8 +183,8 @@ def test_specified_step_reproduces_strict_primal_words(backend, tmp_path):
     operand with the halo off the ring) moves words, so the cases
     exercise each."""
     out = _run(backend, f'''
-for i, (warm, nstep, msf, shift, times) in enumerate({CASES!r}):
-    cfg, state = build(warm, msf, shift, times=times)
+for i, (warm, nstep, msf, shift, times, moist) in enumerate({CASES!r}):
+    cfg, state = build(warm, msf, shift, times=times, moist=moist)
     geoms = M.step_geometries(state, cfg, nstep)
     IN = M.step_inputs(geoms[0])
     x = M.run_state(state, cfg, np.float32)
@@ -180,7 +193,7 @@ for i, (warm, nstep, msf, shift, times) in enumerate({CASES!r}):
         M.step_tl(x, dx, g)
         D.step(state, cfg)
     y = M.run_state(state, cfg, np.float32)
-    for n in IN + ("w0", "u_pp", "mu_pp", "ww_ref"):
+    for n in IN + ("w0", "u_pp", "mu_pp", "ww_ref") + (("ru_m", "ww_m") if moist else ()):
         a, b = cp.asnumpy(x[n]), cp.asnumpy(y[n])
         out[f"{{i}}/{{n}}"] = int((a.view(np.uint32) != b.view(np.uint32)).sum())
 # each part of the binding dropped in turn must move words
@@ -194,10 +207,16 @@ def drop(g, part):
         return R(g, stages=tuple(R(s, sph=None) for s in g.stages))
     if part == "rows":
         return R(g, stages=tuple(R(s, lbc=()) for s in g.stages))
+    if part == "qv_final":
+        return R(g, final=tuple(f for f in g.final if f[0] != "qv"))
+    if part == "qv_capture":   # the held tendency left at zero
+        return R(g, stages=tuple(R(s, qv_capture=None) for s in g.stages))
+    if part == "flow":
+        return R(g, stages=tuple(R(s, flow=None) for s in g.stages))
     s0 = g.stages[0]
     return R(g, stages=(R(s0, rsp=R(s0.rsp, halo=0)),) + g.stages[1:])
-for part in ("fold", "final", "sph", "rows", "halo"):
-    cfg, state = build(2, 0, 3.0)
+for part in ("fold", "final", "sph", "rows", "halo", "qv_final", "qv_capture", "flow"):
+    cfg, state = build(2, 0, 3.0, moist=int(part in ("qv_final", "qv_capture", "flow")))
     g = drop(M.step_geometries(state, cfg, 1)[0], part)
     x = M.run_state(state, cfg, np.float32)
     M.step_tl(x, zeros(x), g)
@@ -205,12 +224,13 @@ for part in ("fold", "final", "sph", "rows", "halo"):
     y = M.run_state(state, cfg, np.float32)
     out["drop/" + part] = sum(int((cp.asnumpy(x[n]).view(np.uint32)
                                    != cp.asnumpy(y[n]).view(np.uint32)).sum())
-                              for n in M.STEP_INPUTS)
+                              for n in M.step_inputs(g))
 ''', tmp_path)
     drops = {k: out.pop(k) for k in list(out) if k.startswith("drop/")}
-    assert len(drops) == 5 and all(drops.values()), drops
-    # the step inputs (the 11 periodic ones and the halo) and 4 scratch
-    assert len(out) == len(CASES) * (11 + 1 + 4)
+    assert len(drops) == 8 and all(drops.values()), drops
+    # the step inputs (the 11 periodic ones and the halo) and 4 scratch,
+    # and on a moist state the species and two sumflux accumulators
+    assert len(out) == len(CASES) * (11 + 1 + 4) + sum(c[5] for c in CASES) * (3 + 2)
     bad = {k: v for k, v in out.items() if v}
     assert not bad, bad
 
@@ -224,14 +244,14 @@ def test_specified_step_dot_product(backend, tmp_path):
     dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
     out = _run(backend, f'''
 for dtn in {dtypes!r}:
-    for i, (warm, nstep, msf, shift, times) in enumerate({CASES!r}):
-        cfg, state = build(warm, msf, shift, times=times)
+    for i, (warm, nstep, msf, shift, times, moist) in enumerate({CASES!r}):
+        cfg, state = build(warm, msf, shift, times=times, moist=moist)
         geoms = M.step_geometries(state, cfg, nstep)
         IN, PAR = M.step_inputs(geoms[0]), M.step_parameters(geoms[0])
         assert PAR and M.HALO in IN
         x0 = M.run_state(state, cfg, np.dtype(dtn))
         ALL = IN + PAR
-        PROG = [n in M.PROGNOSTICS for n in IN]
+        PROG = [n in M.PROGNOSTICS + M.SPECIES for n in IN]
         p, q = pert(x0, ALL, 10 + i), pert(x0, IN, 20 + i)
         def tl(dx):
             d = run_tl(x0, ALL, dx, geoms)[1]
@@ -271,8 +291,8 @@ def test_specified_base_only_step_is_the_joint_base(backend, tmp_path):
     dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
     out = _run(backend, f'''
 for dtn in {dtypes!r}:
-    for i, (warm, nstep, msf, shift, times) in enumerate({CASES!r}):
-        cfg, state = build(warm, msf, shift, times=times)
+    for i, (warm, nstep, msf, shift, times, moist) in enumerate({CASES!r}):
+        cfg, state = build(warm, msf, shift, times=times, moist=moist)
         geoms = M.step_geometries(state, cfg, nstep)
         ALL = M.step_inputs(geoms[0]) + M.step_parameters(geoms[0])
         x0 = M.run_state(state, cfg, np.dtype(dtn))
@@ -300,8 +320,8 @@ def test_specified_step_tl_matches_finite_differences(backend, tmp_path):
     """||NL(x + a dx) - NL(x)|| / ||a TL dx|| -> 1 in binary64, dx over
     the inputs and the boundary tables."""
     out = _run(backend, f'''
-for i, (warm, nstep, msf, shift, times) in enumerate({CASES!r}):
-    cfg, state = build(warm, msf, shift, times=times)
+for i, (warm, nstep, msf, shift, times, moist) in enumerate({CASES!r}):
+    cfg, state = build(warm, msf, shift, times=times, moist=moist)
     geoms = M.step_geometries(state, cfg, nstep)
     IN = M.step_inputs(geoms[0])
     ALL = IN + M.step_parameters(geoms[0])
@@ -328,7 +348,7 @@ for i, (warm, nstep, msf, shift, times) in enumerate({CASES!r}):
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_specified_window(backend, tmp_path):
     """Window on a specified domain: its binary32 forward is dycore.step's
-    words (checkpoints every 1 and 3 steps), and sum_k <TL dx_k, f_k> ==
+    words (checkpoints every 1 and 3 steps, and a moist state), and sum_k <TL dx_k, f_k> ==
     <dx_0, AD f> with dx_0 over the inputs and the tables and the tables'
     adjoint returned with state 0's (1e-12 binary64, 1e-5 binary32);
     WRFDA's start with ``specified`` seeds the mu halo from g_mu, which
@@ -337,14 +357,14 @@ def test_specified_window(backend, tmp_path):
     dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
     out = _run(backend, f'''
 N = 4
-for every in (1, 3):
-    cfg, state = build(1)
+for every, moist in ((1, 0), (3, 0), (3, 1)):
+    cfg, state = build(1, moist=moist)
     w = W.Window(state, cfg, N, dtype=np.float32, checkpoint_every=every)
     xn = w.forward()
     for _ in range(N):
         D.step(state, cfg)
     y = M.run_state(state, cfg, np.float32)
-    out[f"fwd/{{every}}"] = sum(int((cp.asnumpy(xn[n]).view(np.uint32)
+    out[f"fwd/{{every}}/{{moist}}"] = sum(int((cp.asnumpy(xn[n]).view(np.uint32)
                                      != cp.asnumpy(y[n]).view(np.uint32)).sum()) for n in w.inputs)
 for dtn in {dtypes!r}:
     cfg, state = build(1, 0, 3.0)
@@ -409,7 +429,7 @@ for dtn in {dtypes!r}:
     out[f"halo_read/{{dtn}}"] = sum(int((cp.asnumpy(tl0[N][n]) != cp.asnumpy(tlw[N][n])).sum())
                                     for n in w.inputs)
 ''', tmp_path)
-    assert out["fwd/1"] == 0 and out["fwd/3"] == 0, out
+    assert out["fwd/1/0"] == 0 and out["fwd/3/0"] == 0 and out["fwd/3/1"] == 0, out
     for dtn in dtypes:
         limit = 1e-12 if dtn == "float64" else 1e-5
         for key in ("dot", "ends", "pair", "wrfda"):

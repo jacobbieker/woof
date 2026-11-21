@@ -910,6 +910,38 @@ Each step is one small PR, taken to merged before the next widens.
        qv's capture through the primal's own single-row
        `_launch_state_relaxation` with the time-t source and mass.
      There is no WRFPLUS fixture.
+8l. Moisture, part 5 (DA item 4): the moist step. `step_geometry` now
+   accepts a moist state without microphysics (qv, qc and qr,
+   `mp_physics = 0`, `moist_adv_opt = 0`) and binds 8h-8k in
+   `dycore._step_body`'s strict order:
+   - `_save_time_t` also copies qv, qc and qr to `*0`; the species are
+     step inputs (`step_inputs`), so the window carries them.
+   - Each stage: `calc_cq` (`n_mass` 1) after rk_step_prep; the pressure
+     gradient with `moist_cq`, the buoyancy with `moist` (base mass from
+     mub2d), the diagnosis (each stage's and the epilogue's) with qv, and
+     calc_coef_w, advance_uv and advance_w with `moist_cq`; sumflux zeroed
+     before the substeps, accumulated after each and finished after
+     small_step_finish; then `advance_scalars_stage`: on rk_step 1 with
+     qv's tables qv's held tendency (zeroed, then the relaxation and
+     specified rows from qv0 at mup0), the qv, qc and qr updates (qv's
+     with the held tendency), and on a specified domain flow_dep_bdy for
+     qc and qr.
+   - Epilogue: qv's spec_bdy_final after phi's; qv's tables are step
+     parameters (`QV_INPUTS`).
+   - Refused by name: `moist_adv_opt` != 0, any species beyond qv, qc and
+     qr (ice, numbers, PBL or tracer scalars, registered mass slots),
+     `moist_cq` off, boundary tables for scalars other than qv, a qv
+     table spec_bdy_final does not force back, and a qv table wider or
+     narrower than theta's (one set of Davies weights).
+   - Tests: `tests/test_grad_wrfplus_model.py` (moist, alone and with map
+     factors, rotation, hybrid, w_damp and six substeps, and a cold moist
+     chain of three) and `tests/test_grad_wrfplus_spec_step.py` (a warm
+     moist step and a cold mapped moist chain with the halo off the ring,
+     and the window's moist forward): the binary32 base is
+     `dycore.step`'s words on every input, the species and the sumflux
+     accumulators; dot product (the species in the identity), base-only
+     tape and FD; dropping qv's capture, its final or flow_dep_bdy moves
+     words.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
