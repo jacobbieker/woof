@@ -390,9 +390,14 @@ matched exchange unless asked.
    into one Fortran driver (`run_coupler_interval.F90`), word for word after
    every step on CUDA and Metal. The flux's mask is taken once from the
    starting fractions, as `seq_flux_init_mct` takes it (kept). The wave
-   couplings are refused by name. Next (e3): the interval on the spine, with
-   the ocean's forward step and the sea ice's step in place of the scripted
-   exports.
+   couplings are refused by name. The interval runs on the spine
+   (`woof/hex/coupled/run_e3sm.py`, `tests/test_e3sm_coupled_spine.py`).
+   It is driven over a `CoupledClock` with the alarms cut from the ocean's
+   and sea ice's coupling periods. The components (`Components`) are called
+   where RASM_OPTION1 runs them, and every hand-over is a matched exchange.
+   It is word-exact against the chained oracle with the components
+   scripted. Next: the ocean's forward step and the sea ice's step as the
+   components, through their ported import/export.
 4. The ocean's and the sea ice's import and export
    (`components/mpas-ocean/driver/ocn_comp_mct.F`,
    `components/mpas-seaice/driver/ice_comp_mct.F`). The ocean's is ported
