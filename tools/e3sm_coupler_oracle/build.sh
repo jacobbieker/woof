@@ -6,7 +6,8 @@
 # the coupler's surface fractions, seq_frac_set (run_seq_frac), and its
 # atmosphere-ocean flux, seq_flux_atmocn_mct (run_flux_atmocn), its ocean
 # albedos, seq_flux_ocnalb_mct (run_flux_ocnalb), and the ocean-input
-# accumulation, prep_ocn_accum and prep_ocn_accum_avg (run_ocn_accum).
+# accumulation, prep_ocn_accum and prep_ocn_accum_avg (run_ocn_accum), and
+# one coupler interval chaining them all (run_coupler_interval).
 #
 #   bash tools/e3sm_coupler_oracle/build.sh E3SM_SOURCE_ROOT MCT_SOURCE_ROOT BUILD_DIR [ICEPACK_SOURCE_ROOT]
 #
@@ -502,6 +503,127 @@ if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\
     exit 6
 fi
 echo "built ${build_dir}/run_ocn_accum"
+
+# ---------------------------------------------------------------- one coupler interval, chained
+# The coupler's own sequence over one or more coupler steps (cime_comp_mod's
+# RASM_OPTION1 order, aoflux_grid 'ocn'; the components are scripted from
+# the stream): prep_ocn_calc_i2x_ox, seq_flux_atmocn_mct, prep_ocn_mrg,
+# prep_ocn_accum and seq_flux_ocnalb_mct; on the ocean's run alarm
+# prep_ocn_accum_avg; on the sea ice's prep_ice_calc_o2x_ix,
+# prep_ice_calc_a2x_ix and prep_ice_mrg; then seq_frac_set.  Every routine is
+# the single-routine oracles' cut, byte for byte, linked together:
+# prep_ocn_mod and prep_ice_mod hold the host's use lines (prep_ocn_mod.F90
+# 3-21, prep_ice_mod.F90 3-20) and module data (82-113; 63-78), made public
+# for the driver (prep_ocn_init and prep_ice_init set them up, as the driver
+# does), and their routines and getters; seq_flux_mct, seq_frac_mct,
+# seq_map_mod and seq_map_type_mod as in the flux and fractions sections;
+# mct_mod from the pinned wrapper's renames with its
+# mct_rearr_rearrange_fldlist, mct_avect_accum and mct_aVect_avg cut
+# verbatim.  Compiled verbatim: shr_kind_mod, shr_const_mod,
+# water_isotopes and shr_flux_mod.  chain_standins_base.F90 and
+# chain_standins.F90 hold the rest (no arithmetic).
+obj="${build_dir}/interval"
+rm -rf "${obj}" && mkdir -p "${obj}" && cd "${obj}"
+{
+    printf 'module mct_mod\n'
+    grep -E '^ *use (shr_mpi_mod|shr_sys_mod|shr_const_mod) ' "${e3sm}/share/util/mct_mod.F90"
+    grep -E '^ *use m_[A-Za-z0-9_]+ +,only:' "${e3sm}/share/util/mct_mod.F90"
+    printf '  use shr_kind_mod, only: R8 => SHR_KIND_R8, IN => SHR_KIND_IN\n  implicit none\n'
+    grep -E '^ *logical,public :: mct_use(alltoall|vector) = \.false\.$' "${e3sm}/share/util/mct_mod.F90"
+    printf 'contains\n'
+    for r in mct_rearr_rearrange_fldlist mct_avect_accum mct_aVect_avg; do
+        cut "${e3sm}/share/util/mct_mod.F90" "${r}" subroutine
+    done
+    printf 'end module mct_mod\n'
+} > mct_mod.F90
+cp "${build_dir}/frac/seq_map_type_cut.F90" "${build_dir}/frac/seq_map_cut.F90" "${build_dir}/frac/seq_frac_cut.F90" .
+cp "${build_dir}/flux/seq_flux_cut.F90" .
+ocn_use=$(sed -n '3,21p' "${drv}/prep_ocn_mod.F90")
+ocn_data=$(sed -n '82,113p' "${drv}/prep_ocn_mod.F90")
+ice_use=$(sed -n '3,20p' "${drv}/prep_ice_mod.F90")
+ice_data=$(sed -n '63,78p' "${drv}/prep_ice_mod.F90")
+if [[ "$(printf '%s\n' "${ocn_use}" | head -1)" != *'r8 => SHR_KIND_R8'* \
+      || "$(printf '%s\n' "${ocn_use}" | tail -1)" != *'only: ocn, atm, ice, rof, wav, glc'* \
+      || "$(printf '%s\n' "${ocn_data}" | head -1 | tr -d ' ')" != '!mappers' \
+      || "$(printf '%s\n' "${ocn_data}" | tail -1)" != *':: x2o_average'* \
+      || "$(printf '%s\n' "${ice_use}" | head -1)" != *'r8 => SHR_KIND_R8'* \
+      || "$(printf '%s\n' "${ice_use}" | tail -1)" != *'only: ice, atm, ocn, glc, rof, wav'* \
+      || "$(printf '%s\n' "${ice_data}" | head -1 | tr -d ' ')" != '!mappers' \
+      || "$(printf '%s\n' "${ice_data}" | tail -1)" != *':: mpicom_CPLID'* ]]; then
+    echo "prep_ocn_mod.F90's or prep_ice_mod.F90's head is not where the cut expects it" >&2
+    exit 3
+fi
+ocn_routines=(prep_ocn_mrg prep_ocn_merge prep_ocn_accum prep_ocn_accum_avg prep_ocn_calc_i2x_ox)
+ocn_getters=(prep_ocn_get_mapper_Fa2o prep_ocn_get_mapper_SFi2o)
+ice_routines=(prep_ice_mrg prep_ice_merge prep_ice_calc_a2x_ix prep_ice_calc_o2x_ix)
+ice_getters=(prep_ice_get_mapper_SFo2i)
+{
+    printf 'module prep_ocn_mod\n'
+    printf '%s\n' "${ocn_use}"
+    printf '  implicit none\n  save\n  private\n'
+    printf '  public :: %s\n' "${ocn_routines[@]}" "${ocn_getters[@]}"
+    printf '  ! the harness: prep_ocn_init sets these up\n'
+    printf '  public :: mapper_SFi2o, mapper_Fa2o, a2x_ox, r2x_ox, i2x_ox, g2x_ox, w2x_ox\n'
+    printf '  public :: x2oacc_ox, x2oacc_ox_cnt, mpicom_CPLID, x2o_average\n'
+    printf '%s\n' "${ocn_data}"
+    printf 'contains\n'
+    for r in "${ocn_routines[@]}"; do cut "${drv}/prep_ocn_mod.F90" "${r}" subroutine; done
+    for r in "${ocn_getters[@]}"; do cut "${drv}/prep_ocn_mod.F90" "${r}" function; done
+    printf 'end module prep_ocn_mod\n'
+} > prep_ocn_cut.F90
+{
+    printf 'module prep_ice_mod\n'
+    printf '%s\n' "${ice_use}"
+    printf '  implicit none\n  save\n  private\n'
+    printf '  public :: %s\n' "${ice_routines[@]}" "${ice_getters[@]}"
+    printf '  ! the harness: prep_ice_init sets these up\n'
+    printf '  public :: mapper_SFo2i, a2x_ix, o2x_ix, g2x_ix, r2x_ix, w2x_ix, mpicom_CPLID\n'
+    printf '%s\n' "${ice_data}"
+    printf 'contains\n'
+    for r in "${ice_routines[@]}"; do cut "${drv}/prep_ice_mod.F90" "${r}" subroutine; done
+    for r in "${ice_getters[@]}"; do cut "${drv}/prep_ice_mod.F90" "${r}" function; done
+    printf 'end module prep_ice_mod\n'
+} > prep_ice_cut.F90
+for want in "${ocn_routines[@]/%/:subroutine:prep_ocn_cut.F90}" "${ocn_getters[@]/%/:function:prep_ocn_cut.F90}" \
+            "${ice_routines[@]/%/:subroutine:prep_ice_cut.F90}" "${ice_getters[@]/%/:function:prep_ice_cut.F90}" \
+            mct_rearr_rearrange_fldlist:subroutine:mct_mod.F90 mct_avect_accum:subroutine:mct_mod.F90 \
+            mct_aVect_avg:subroutine:mct_mod.F90; do
+    IFS=: read -r r kind file <<< "${want}"
+    if [[ $(grep -cE "^ *(end )?${kind} ${r}( |\\(|$)" "${file}") -ne 2 ]]; then
+        echo "a routine was not cut out whole (${r})" >&2
+        exit 3
+    fi
+done
+iflags=(-c -cpp -O0 -ffp-contract=off -ffree-line-length-none "${mctinc[@]}")
+"${fc[@]}" "${iflags[@]}" "${e3sm}/share/util/shr_kind_mod.F90"
+"${fc[@]}" "${iflags[@]}" "${e3sm}/share/util/shr_const_mod.F90"
+"${fc[@]}" "${iflags[@]}" "${script_dir}/chain_standins_base.F90"
+"${fc[@]}" "${iflags[@]}" "${e3sm}/share/util/water_isotopes.F90"
+"${fc[@]}" "${iflags[@]}" "${e3sm}/share/util/shr_flux_mod.F90"
+"${fc[@]}" "${iflags[@]}" mct_mod.F90
+"${fc[@]}" "${iflags[@]}" seq_map_type_cut.F90
+"${fc[@]}" "${iflags[@]}" "${script_dir}/chain_standins.F90"
+"${fc[@]}" "${iflags[@]}" seq_map_cut.F90
+"${fc[@]}" "${iflags[@]}" prep_ocn_cut.F90
+"${fc[@]}" "${iflags[@]}" prep_ice_cut.F90
+"${fc[@]}" "${iflags[@]}" seq_frac_cut.F90
+"${fc[@]}" "${iflags[@]}" seq_flux_cut.F90
+"${fc[@]}" "${iflags[@]}" "${script_dir}/run_coupler_interval.F90"
+"${fc[@]}" -o "${build_dir}/run_coupler_interval" ./*.o "${mctlib[@]}"
+if command -v objdump >/dev/null; then
+    objdump -d prep_ocn_cut.o prep_ice_cut.o seq_frac_cut.o seq_map_cut.o seq_flux_cut.o shr_flux_mod.o mct_mod.o \
+        > disassembly.txt
+    if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
+        echo "an object contains an FMA instruction (${obj}/fma.txt)" >&2
+        exit 5
+    fi
+fi
+nm -u prep_ocn_cut.o prep_ice_cut.o seq_frac_cut.o seq_map_cut.o mct_mod.o > undefined.txt
+if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\b' undefined.txt; then
+    echo "the merges, the accumulation, the mapping or the fractions call libm" >&2
+    exit 6
+fi
+echo "built ${build_dir}/run_coupler_interval"
 
 # ---------------------------------------------------------------- the sea ice's import and export
 # ice_import_mct, ice_export_mct, basal_pressure and frazil_mass are cut byte
