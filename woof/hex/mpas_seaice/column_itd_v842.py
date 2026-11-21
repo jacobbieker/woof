@@ -79,6 +79,7 @@ STOP_LABELS = {
     5: "aggregate ice area out of bounds",
     6: "Zap ice: negative ice area",
     7: "Zap ice: excess ice area",
+    8: "ice: remap_layers_bgc error",
 }
 #: the tracer indices the kernel reads, in its tidx order (TI_* in column_itd_v842.cu)
 _TRACER_INDICES = ("surfaceTemperature", "iceEnthalpy", "snowEnthalpy", "iceSalinity", "iceAge",
@@ -106,9 +107,32 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
                 f"config_nCategories <= {ITD_MAXCAT}")
 
 
+def tracer_indices(to: "cv.TracerObject") -> np.ndarray:
+    """The kernel's tidx (TI_* in column_itd_v842.cu): 0-based, -1 for a tracer that is off."""
+    return np.array([to.index[k] - 1 for k in _TRACER_INDICES] + [to.nt_fbri - 1, to.nt_bgc_s - 1], np.int32)
+
+
+def _zsal_args(pools: dict, configs: dict, dims: dict[str, int], written: list, grids: bool = True) -> tuple:
+    """The kernels' trailing vertical-salinity arguments: nBioLayers, (the
+    ITD's biologyGrid and verticalGrid,) zSalinityFlux. Only under
+    ``zsal_solve`` is anything read or written (``zSalinityFlux`` then joins
+    ``written``, which an abort restores past the aborting cell)."""
+    import cupy as cp
+    if not cv.solves_zsal(configs):
+        dummy = cp.zeros(1, np.float64)
+        return (np.int32(0), *((dummy, dummy) if grids else ()), dummy)
+    bgc, nbl, nil = pools["biogeochemistry"], dims["nBioLayers"], dims["nIceLayers"]
+    flux = cv._need(bgc, "zSalinityFlux", (dims["nCells"] + 1,))
+    written.append(flux)
+    extra = (cv._need(bgc, "biologyGrid", (nbl + 2,)), cv._need(bgc, "verticalGrid", (nil + 1,))) if grids else ()
+    return (np.int32(nbl), *extra, flux)
+
+
 def module_source(n_ice_layers: int) -> str:
+    from .column_bgc_v842 import zbgc_shared_source
     body = files("woof.hex.mpas_seaice").joinpath("column_itd_v842.cu").read_text(encoding="utf-8")
-    return f"#define COL_NILYR {int(n_ice_layers)}\n" + cv.module_source() + "\n" + body
+    return (f"#define COL_NILYR {int(n_ice_layers)}\n" + cv.module_source() + "\n" + zbgc_shared_source() + "\n"
+            + body)
 
 
 @lru_cache(maxsize=None)
@@ -134,7 +158,8 @@ def _flags(configs: dict, state: "cv.ColumnState") -> int:
     bits = (configs["config_use_ice_age"], configs["config_use_first_year_ice"], configs["config_use_level_ice"],
             configs["config_use_cesm_meltponds"], configs["config_use_level_meltponds"],
             configs["config_use_topo_meltponds"], configs["config_update_ocean_fluxes"],
-            state.ktherm != 0)            # colpkg_init_thermo's heat_capacity
+            state.ktherm != 0,            # colpkg_init_thermo's heat_capacity
+            cv.solves_zsal(configs))      # zsal_solve: the column package's solve_zsal
     return sum(int(bool(b)) << i for i, b in enumerate(bits))
 
 
@@ -173,6 +198,7 @@ def itd_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
     newly = cv._need_int(pools["biogeochemistry"], "newlyFormedIce", cc)
     tracer_fields = [cv._tracer_field(pools, name)[0] for name, _, _ in to.layout]
     written = [area, volume, snow, newly, *cell_fields, *tracer_fields]
+    zsal_args = _zsal_args(pools, configs, d, written)
     before = [a[:n_solve].copy() for a in written]
 
     trcrn = cp.zeros((max(n_solve, 1), ncat, nt), np.float64)
@@ -182,7 +208,7 @@ def itd_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
                    np.int32(layers), np.int32(sub), np.int32(src.shape[2]), np.int32(nt), np.int32(ncat),
                    np.int32(n_solve))
     atrcrn = cp.zeros_like(trcrn)
-    tidx = cp.asarray(np.array([to.index[k] - 1 for k in _TRACER_INDICES] + [to.nt_fbri - 1], np.int32))
+    tidx = cp.asarray(tracer_indices(to))
     status = cp.zeros(max(n_solve, 1), np.int32)
     nwarn = cp.zeros(max(n_solve, 1), np.int32)
     args = (
@@ -196,7 +222,7 @@ def itd_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
         need(pools["initial"], "initialSalinityProfile", (n_cells + 1, nil + 1)),
         need(mg, "lateralIceMeltFraction", c1), lateral_melt, need(oc, "freezingMeltingPotential", c1),
         frazil, need(pools["atmos_coupling"], "rainfallRate", c1), pond_flux, fresh, salt, heat, frazil_diag,
-        freeze_onset, newly,
+        freeze_onset, newly, *zsal_args,
     )
     if n_solve:
         _function("seaice_column_itd_thermodynamics_v842", nil)(_grid(n_solve), (_BLOCK,), args)

@@ -156,6 +156,7 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
     newly = cv._need_int(pools["biogeochemistry"], "newlyFormedIce", cc)
     tracer_fields = [cv._tracer_field(pools, name)[0] for name, _, _ in to.layout]
     written = [area, volume, snow, newly, *cell_fields, *category_fields, *tracer_fields]
+    zsal_args = citd._zsal_args(pools, configs, d, written, grids=False)
     before = [a[:n_solve].copy() for a in written]
 
     trcrn = cp.zeros((max(n_solve, 1), ncat, nt), np.float64)
@@ -165,7 +166,7 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
                    np.int32(layers), np.int32(sub), np.int32(src.shape[2]), np.int32(nt), np.int32(ncat),
                    np.int32(n_solve))
     atrcrn = cp.zeros_like(trcrn)
-    tidx = cp.asarray(np.array([to.index[k] - 1 for k in citd._TRACER_INDICES] + [to.nt_fbri - 1], np.int32))
+    tidx = cp.asarray(citd.tracer_indices(to))
     status, nwarn, nrepeat = (cp.zeros(max(n_solve, 1), np.int32) for _ in range(3))
     ints = cv._CICE_INT
     partic = ints["config_ridging_participation_function"][configs["config_ridging_participation_function"]]
@@ -177,7 +178,7 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
         cp.asarray(to.parent_index), cp.asarray(np.ascontiguousarray(to.first_ancestor_mask)),
         cp.asarray(to.ancestor_number), cp.asarray(np.ascontiguousarray(to.ancestor_indices)), limits, trcrn,
         atrcrn, area, volume, snow, cell_fields[0], cell_fields[1], need(rg, "ridgeConvergence", c1),
-        need(rg, "ridgeShear", c1), *cell_fields[2:], *category_fields, newly,
+        need(rg, "ridgeShear", c1), *cell_fields[2:], *category_fields, newly, *zsal_args,
     )
     if n_solve:
         _function("seaice_column_ridging_v842", nil)(_grid(n_solve), (_BLOCK,), args)

@@ -435,8 +435,8 @@ def corrections(configs: dict) -> frozenset[str]:
 
 #: the biogeochemistry flags the port carries (the brine height); the others are refused by name
 BGC_PORTED = ("config_use_brine",)
-#: the vertical salinity: every biogeochemistry stage carries v8.4.2's inert one; only the stages
-#: refuse_unported's zsalinity names carry the solved one (ZSAL_SOLVE)
+#: the vertical salinity: every biogeochemistry stage carries v8.4.2's inert one and the solved
+#: one (ZSAL_SOLVE)
 ZSAL_FLAG = "config_use_vertical_zsalinity"
 #: the opt-in correction that solves the vertical salinity (CORRECTIONS)
 ZSAL_SOLVE = "zsal_solve"
@@ -451,8 +451,7 @@ def solves_zsal(configs: dict) -> bool:
                 and configs[ZSAL_FLAG] and "zsal_solve" in corrections(configs))
 
 
-def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool = False,
-                    zsalinity: bool = False) -> None:
+def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool = False) -> None:
     """Refuse, by name, what this stage of the column port does not carry.
 
     ``biogeochemistry`` is the caller's: the init (:func:`initialize`),
@@ -460,12 +459,10 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
     vertical and ITD thermodynamics, the ridging, the shortwave and the
     column step carry the column biogeochemistry's framework and its brine
     height (``config_use_brine``); every other routine refuses
-    ``config_use_column_biogeochemistry``. Those stages all carry v8.4.2's
-    inert vertical salinity (``config_use_vertical_zsalinity``: its tracers
-    are counted, never solved or copied). ``zsalinity`` is the caller's too:
-    the init, the column biogeochemistry and the vertical thermodynamics
-    carry the solved vertical salinity (the ``zsal_solve`` correction); the
-    other stages refuse that correction."""
+    ``config_use_column_biogeochemistry``. Those stages all carry the
+    vertical salinity (``config_use_vertical_zsalinity``): v8.4.2's inert
+    one (its tracers counted, never solved or copied) and, under the
+    ``zsal_solve`` correction, the solved one."""
     c = configs
     if not c.get("config_use_column_package", False):
         _refuse("config_use_column_package", False, "the column port runs only with the column package on",
@@ -480,12 +477,6 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
             if flag not in BGC_PORTED and flag != ZSAL_FLAG and c[flag]:
                 _refuse(flag, True, "of the column biogeochemistry only the brine height and the vertical "
                         "salinity are ported", f"{flag} = .false.")
-        if solves_zsal(c) and not zsalinity:
-            _refuse("woof_v842_corrections", ZSAL_SOLVE,
-                    "the solved vertical salinity is ported for the init, the column biogeochemistry and the "
-                    "vertical thermodynamics only (not the ITD thermodynamics, the ridging, the shortwave or "
-                    "the steps); v8.4.2's inert vertical salinity is carried by every column stage",
-                    f"woof_v842_corrections without {ZSAL_SOLVE}")
         _refuse_bio_layers(c, dims)
     if dims["nSnowLayers"] != 1:
         _refuse("config_nSnowLayers", dims["nSnowLayers"],
@@ -754,20 +745,18 @@ class ColumnState:
     warnings: int | list = 0
 
 
-def init_parameters(pools: dict, configs: dict, biogeochemistry: bool = False,
-                    zsalinity: bool = False) -> ColumnState:
+def init_parameters(pools: dict, configs: dict, biogeochemistry: bool = False) -> ColumnState:
     """``seaice_init_column_physics_package_parameters``: host side. The
     stand-in pointers of the packages that are off change no state the port
-    reads (the absent fields stay ``None``). ``biogeochemistry`` and
-    ``zsalinity``: the caller carries the column biogeochemistry and the
-    vertical salinity (:func:`refuse_unported`)."""
+    reads (the absent fields stay ``None``). ``biogeochemistry``: the caller
+    carries the column biogeochemistry (:func:`refuse_unported`)."""
     mesh = pools["mesh"]
     dims = {k: int(mesh[k]) for k in ("nCells", "nCellsSolve", "nVertices", "nEdges", "maxEdges",
                                        "vertexDegree") if k in mesh}
     for k, v in mesh.items():
         if isinstance(v, (int, np.integer)):
             dims.setdefault(k, int(v))
-    refuse_unported(configs, dims, biogeochemistry, zsalinity)
+    refuse_unported(configs, dims, biogeochemistry)
     check_column_package_configs(configs, dims["nCategories"])
     return ColumnState(
         dims=dims, packages=packages(configs), tracers=tracer_object(configs, dims),
@@ -1133,7 +1122,7 @@ def initialize(pools: dict, configs: dict) -> ColumnState:
     coupler fields, the column variables, the ice state, the coupler-flux
     reset. The mesh, forcing, velocity-solver and advection inits are the
     other modules' (:mod:`~woof.hex.mpas_seaice.timestep_v842`)."""
-    state = init_parameters(pools, configs, biogeochemistry=True, zsalinity=True)
+    state = init_parameters(pools, configs, biogeochemistry=True)
     initialize_coupler_fields(pools, configs, state)
     init_variables(pools, configs, state)
     init_ice_state(pools, configs, state)
