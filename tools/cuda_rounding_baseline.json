@@ -4909,7 +4909,7 @@
    },
    {
     "file": "woof/hex/coupled/flux_atmocn_e3sm.cu",
-    "sha256": "476f6cdc018f60efd360bd609ee78af5d5bdd4640f2f6edb7fa516897d5abd29"
+    "sha256": "ad4d601dd37722f202273d8434528be4b4e7dc28cc05f16d170d7a2a6fa402bb"
    },
    {
     "file": "woof/hex/coupled/ice_coupling_e3sm.cu",
@@ -5783,7 +5783,7 @@
    },
    {
     "file": "woof/hex/coupled/flux_atmocn_e3sm.py",
-    "sha256": "dfe35a4d4ca981bc5a7f31fa0819dabdfc4eb57479d25fc04f4d1b640a1ba856"
+    "sha256": "0082076b8cc592479260796c0b96cbb9ca8c068191f982fb03e83b7ce5138954"
    },
    {
     "file": "woof/hex/coupled/ice_coupling_e3sm.py",

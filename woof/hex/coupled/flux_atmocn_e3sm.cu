@@ -20,13 +20,28 @@
 // Attribute vectors are MCT's rAttr(nflds, lsize): field k of point n at
 // av[n * nflds + k]. One thread per point.
 
-#ifdef WOOF_GLIBC239_TRIG64
-
 typedef double r8;
 #define A(a,b) __dadd_rn((a),(b))
 #define S(a,b) __dsub_rn((a),(b))
 #define M(a,b) __dmul_rn((a),(b))
 #define D(a,b) __ddiv_rn((a),(b))
+
+// seq_flux_init_mct: mask = 0 where the domain's mask rounds to 0 (< 0.5) or
+// ofrac + ifrac <= 0, else 1
+extern "C" __global__ void flux_init_mask(
+    int* __restrict__ mask, const r8* __restrict__ dom, int ndom, int kmask, const r8* __restrict__ fr, int nfr,
+    int ko, int ki, int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    int m = 1;
+    if (dom[(size_t)i * ndom + kmask] < 0.5) m = 0;
+    if (A(fr[(size_t)i * nfr + ko], fr[(size_t)i * nfr + ki]) <= 0.0) m = 0;
+    mask[i] = m;
+}
+
+// everything below calls (or serves what calls) glibc's double atan: opt-in only
+#ifdef WOOF_GLIBC239_TRIG64
 
 __device__ __forceinline__ r8 max_first(r8 a, r8 b) {
     return __longlong_as_double(b > a ? __double_as_longlong(b) : __double_as_longlong(a));
@@ -100,20 +115,6 @@ __device__ __forceinline__ void update_stress(r8 wind0, r8 wsresp, r8 tau_est, r
 __device__ __forceinline__ r8 gusted(r8 v, r8 ugust, int flags, r8 minwind) {
     if (flags & F_GUST) v = sqrt(A(M(v, v), M(ugust, ugust)));
     return max_first(minwind, v);
-}
-
-// seq_flux_init_mct: mask = 0 where the domain's mask rounds to 0 (< 0.5) or
-// ofrac + ifrac <= 0, else 1
-extern "C" __global__ void flux_init_mask(
-    int* __restrict__ mask, const r8* __restrict__ dom, int ndom, int kmask, const r8* __restrict__ fr, int nfr,
-    int ko, int ki, int n)
-{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
-    int m = 1;
-    if (dom[(size_t)i * ndom + kmask] < 0.5) m = 0;
-    if (A(fr[(size_t)i * nfr + ko], fr[(size_t)i * nfr + ki]) <= 0.0) m = 0;
-    mask[i] = m;
 }
 
 // seq_flux_atmocn_mct up to the write: gather (or the dead models'

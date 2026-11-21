@@ -32,9 +32,10 @@ schemes, the diurnal cycle (``flux_diurnal``), two-way wave coupling
 (``wav_atm_coup = 'twoway'``), and an xao with the water isotopes' fluxes.
 
 ``psimhu`` calls glibc's binary64 ``atan`` on every iteration; it is LGPL
-and not correctly rounded, so the unit compiles only with the opt-in
+and not correctly rounded, so the flux compiles only with the opt-in
 transcription (``WOOF_GLIBC239_LIBM64=1``, :mod:`woof.core.glibc239_gpu`)
-and is refused by name without it. ``exp``, ``log`` and ``pow`` (``x**0.5``)
+and is refused by name without it (:func:`flux_mask`, which calls no
+atan, sits outside the opt-in and runs either way). ``exp``, ``log`` and ``pow`` (``x**0.5``)
 are the shared MIT transcriptions of glibc's (``glibc_flt64.cuh``); ``x**4``
 is libgcc's ``__powidf2`` as gfortran -O0 calls it; ``log(zref/ztref)``,
 which gfortran folds, is folded here on the host.
@@ -130,6 +131,7 @@ class FluxOptions:
     ocn_surface_flux_scheme: int = 0
     flux_diurnal: bool = False
     coldair_outbreak_mod: bool = False
+    #: E3SM's default: seq_infodata_mod.F90 and drv's namelist_definition_drv.xml both set 0.0
     flux_convergence: float = 0.0
     flux_max_iteration: int = -1
     atm_flux_method: str = "explicit"
@@ -142,6 +144,9 @@ class FluxOptions:
             raise ValueError(f"atm_flux_method {self.atm_flux_method!r}: one of {FLUX_METHODS}")
         if self.wav_atm_coup not in WAV_ATM_COUPLINGS:
             raise ValueError(f"wav_atm_coup {self.wav_atm_coup!r}: one of {WAV_ATM_COUPLINGS}")
+        for name in ("dead_comps", "flux_diurnal", "coldair_outbreak_mod", "atm_gustiness"):
+            if not isinstance(getattr(self, name), (bool, np.bool_)):
+                raise TypeError(f"{name} must be a bool")
         for name in ("ocn_surface_flux_scheme", "flux_max_iteration"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
@@ -260,7 +265,7 @@ def flux_mask(*, dom, dom_fields, fractions, fractions_fields):
         raise CouplingAbort('m_AttrVect::indexRA_:: FATAL--attribute not found: "mask" (dom)')
     ko, ki = _need(fpos, "ofrac", "fractions"), _need(fpos, "ifrac", "fractions")
     mask = cp.zeros(n, dtype=np.int32)
-    _check_trig()
+    # the mask's kernel sits outside the opt-in's #ifdef: no atan, so no refusal
     _launch("flux_init_mask", n, (mask, dom, np.int32(len(dpos)), np.int32(dpos["mask"]), fractions,
                                   np.int32(len(fpos)), np.int32(ko), np.int32(ki), np.int32(n)))
     return mask
