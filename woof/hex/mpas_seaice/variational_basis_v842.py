@@ -82,7 +82,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal, MpasPortError
 
-from .remap_init_v842 import literal
+from .remap_init_v842 import _like, literal
 from .wachspress_quadrature_v842 import DUNAVANT, FEKETE
 
 SOURCE_FILES = (
@@ -243,7 +243,19 @@ def metric_terms(mesh: dict, *, rotate: bool, include: bool, real, metric_libm: 
                 lat[i] = _cr("asin", v, real)
                 tan[i] = _cr("tan", lat[i], real)
     with np.errstate(divide="ignore", invalid="ignore"):
-        return (tan / radius).astype(real)
+        result = (tan / radius).astype(real)
+    # the oracle's NaN words (x86-64, glibc): 0/0 gives the default NaN, sign
+    # bit set, which asin, tan and the division carry on; asin of |x| > 1 (or
+    # of an infinity) gives a positive quiet NaN. (arm64's default NaN is
+    # positive, so both are set here.)
+    return np.where(np.isnan(arg), _nan(real, True), np.where(np.isnan(result), _nan(real, False), result))
+
+
+def _nan(real, sign: bool):
+    """A quiet NaN word with the sign bit ``sign``."""
+    if real is np.float32:
+        return np.array(0xFFC00000 if sign else 0x7FC00000, np.uint32).view(np.float32)[()]
+    return np.array(0xFFF8000000000000 if sign else 0x7FF8000000000000, np.uint64).view(np.float64)[()]
 
 
 # --- local coordinates --------------------------------------------------------
@@ -751,11 +763,7 @@ def initialize_pools(pools: dict, configs: dict, *, metric_libm: str | None = No
         if isinstance(target, np.ndarray):
             target[...] = out[name]
         elif target is None:
-            if isinstance(pools["mesh"]["xCell"], np.ndarray):
-                vv[name] = out[name]
-            else:
-                import cupy as cp
-                vv[name] = cp.asarray(out[name])
+            vv[name] = _like(pools["mesh"]["xCell"], out[name])
         else:
             target.set(np.ascontiguousarray(out[name]))
     return warnings
