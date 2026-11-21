@@ -478,9 +478,11 @@ def _refuse_bio_layers(configs: dict, dims: dict[str, int]) -> None:
     """compute_microS_mushy remaps the ice salinity and enthalpy onto the
     nBioLayers biology layers into ``trtmp(ntrcr+2)`` at the tracer's own
     index (``ice_brine.F90:279-297``): past ``ntrcr + 2`` v8.4.2 writes out of
-    bounds. ``ntrcr`` is taken as the physics tracers' count, its smallest."""
+    bounds. ``ntrcr`` is the column package's tracer count for this
+    configuration (``ice_brine.F90:234``), the brine fraction included: the
+    bound is v8.4.2's own, not a conservative one."""
     n_bio = dims.get("nBioLayers", 7)
-    to = tracer_object({**configs, "config_use_column_biogeochemistry": False}, dims)
+    to = tracer_object(configs, dims)
     last = to.index["iceSalinity"] + n_bio - 1
     if not 1 <= n_bio <= MAX_BIO_LAYERS or last > to.n_tracers + 2:
         _refuse("nBioLayers", n_bio,
@@ -939,8 +941,11 @@ def init_biogeochemistry_profiles(pools: dict, configs: dict, state: ColumnState
     if not configs["config_do_restart_hbrine"]:
         n_solve = d["nCellsSolve"]
         bgc["newlyFormedIce"][:n_solve] = 1
-        if pools["tracers"].get("brineFraction") is not None:
-            pools["tracers"]["brineFraction"][:n_solve] = 1.0
+        # v8.4.2 sets it unconditionally (mpas_seaice_column.F:11904); without
+        # config_use_brine the array is the inactive package's placeholder,
+        # which nothing reads. With it, a missing array is an error, not a skip.
+        if configs["config_use_brine"]:
+            _need(pools["tracers"], "brineFraction", (d["nCells"] + 1, d["nCategories"], 1))[:n_solve] = 1.0
 
 
 def init_ice_state(pools: dict, configs: dict, state: ColumnState) -> None:

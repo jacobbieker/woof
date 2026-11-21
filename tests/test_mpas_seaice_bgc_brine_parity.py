@@ -180,6 +180,36 @@ def test_biology_layers_past_compute_microS_mushy_s_buffer_are_refused(dims):
         cbgc.refuse_unported(case["config"], _dims(case, nSnowLayers=1, **dims))
 
 
+def test_the_bio_layer_bound_is_v842_s_own_tracer_count():
+    """trtmp is ntrcr + 2 long with ntrcr the configured count, the brine
+    fraction included (ice_brine.F90:234): the last layer count that fits is
+    accepted, one more is refused."""
+    case = _case("bgc_brine")
+    dims = _dims(case, nSnowLayers=1, nIceLayers=1)
+    to = cv.tracer_object(case["config"], dims)
+    fits = to.n_tracers + 2 - to.index["iceSalinity"] + 1
+    assert 1 <= fits <= cv.MAX_BIO_LAYERS
+    cbgc.refuse_unported(case["config"], {**dims, "nBioLayers": fits})
+    with pytest.raises(ConfigurationRefusal, match="nBioLayers"):
+        cbgc.refuse_unported(case["config"], {**dims, "nBioLayers": fits + 1})
+
+
+@requires_gpu
+def test_a_missing_brine_fraction_array_is_an_init_error():
+    import types
+
+    import cupy as cp
+    case = _case("bgc_brine")
+    dims = _dims(case, nSnowLayers=1)
+    grids = cv.hbrine_grids(dims["nBioLayers"], dims["nIceLayers"])
+    pools = {"biogeochemistry": {**{k: cp.zeros(v.shape) for k, v in grids.items()},
+                                 "newlyFormedIce": cp.zeros((dims["nCells"] + 1, dims["nCategories"]), cp.int32)},
+             "tracers": {}}
+    state = types.SimpleNamespace(dims=dims)
+    with pytest.raises(ValueError, match="brineFraction"):
+        cv.init_biogeochemistry_profiles(pools, case["config"], state)
+
+
 def test_the_stage_without_the_brine_height_and_too_many_categories_are_refused():
     case = _case("bgc_brine")
     with pytest.raises(ConfigurationRefusal, match="config_use_brine"):
