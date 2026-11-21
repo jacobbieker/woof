@@ -22,7 +22,9 @@ start, and ``da_transfer_xatowrftl_adj`` gives ``xa_0``'s gradient.
 ``enable_identity``: every slot's perturbation is the initial one, the
 adjoint sums the forcings.  That this is what ``enable_identity`` does,
 and that the TL round trip matches WRFDA's, are not yet checked against
-WRFDA: the 4D.0 identity lane (L-id) is the gate for both.  P3a's ``Window`` (PR 4D.3) is the next model.
+WRFDA: the 4D.0 identity lane (L-id) is the gate for both.
+:class:`woof.da.var.window4d.WindowModel` is P3a's dry ``Window`` as the
+model (PR 4D.3).
 
 The observations and innovations are FGAT's (:mod:`woof.da.var.fgat`):
 one file and one first guess per slot, ``plocal`` slot boundaries,
