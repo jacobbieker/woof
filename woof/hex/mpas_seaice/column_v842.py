@@ -784,7 +784,7 @@ def tracer_object(configs: dict, dims: dict[str, int]) -> TracerObject:
         nk = dims["nBioLayers"] + 1
         first = len(parent) + 1
         bio_index.append(first)
-        bio_index_o.append(2 * 3 + 3 + 1 + 7)
+        bio_index_o.append(2 * _MAX_ALGAE + _MAX_DOC + _MAX_DIC + 7)
         n_bio = len(bio_index)
         nt_zbgc_frac = first + nk + 2
         ice, snow = np.full(nk, 2 + nt_fbri, np.int32), np.full(2, 2, np.int32)
@@ -1175,6 +1175,11 @@ def ocean_conc_array(pools: dict, configs: dict, dims: dict[str, int]) -> None:
     c, bgc = configs, pools["biogeochemistry"]
     n = dims["nCellsSolve"]
     out = _need(bgc, "oceanBioConcentrations", (dims["nCells"] + 1, dims["nZBGCTracers"]))
+    for name in ("oceanAlgaeConc", "oceanDOCConc", "oceanDICConc", "oceanDONConc", "oceanDissolvedIronConc",
+                 "oceanParticulateIronConc", "oceanZAerosolConc", "oceanNitrateConc", "oceanAmmoniumConc",
+                 "oceanSilicateConc", "oceanDMSPConc", "oceanDMSConc", "oceanHumicsConc"):
+        if not isinstance(bgc.get(name), cp.ndarray) or len(bgc[name]) < n:
+            raise ValueError(f"{name} must be a device array over the owned cells")
     algae, doc, dic, don = (bgc[k][:n] for k in ("oceanAlgaeConc", "oceanDOCConc", "oceanDICConc", "oceanDONConc"))
     fed, fep, zaero = (bgc[k][:n] for k in ("oceanDissolvedIronConc", "oceanParticulateIronConc",
                                             "oceanZAerosolConc"))
@@ -1235,7 +1240,7 @@ def init_bgc(pools: dict, configs: dict, state: ColumnState) -> None:
     bgc, t = pools["biogeochemistry"], pools["tracers"]
     conc = bgc["oceanBioConcentrations"]
     pon = _need(t, "verticalNonreactiveConc", (d["nCells"] + 1, d["nCategories"], nbl + 3))
-    frac = t["mobileFraction"]
+    frac = _need(t, "mobileFraction", (d["nCells"] + 1, d["nCategories"], d["nZBGCTracers"]))
     for m, o in enumerate(to.bio_index_o):
         ice = conc[:n_solve, o - 1] * np.float64(par["init_frac"][m])
         pon[:n_solve, :, :nbl + 1] = ice[:, None, None]
