@@ -14,7 +14,7 @@ sea ice runs right after it takes the coupler's fields in:
 The rotation's sin, cos, asin and atan2 are the host libm's in MPAS; here
 their words come in as ``trig`` ``(n, 8)``: per cell sin and cos of
 ``latCell``, ``lonCell`` and the rotated grid's latitude and longitude,
-exactly what :func:`woof.hex.coupled.ice_coupling_e3sm.rotation_trig` makes
+exactly what the E3SM cap's rotation_trig (woof.hex.coupled) makes
 (the forward and backward rotations take the same eight words).
 
 ``real(8)`` only. The kernels (``post_coupling_v842.cu``) are held word for
