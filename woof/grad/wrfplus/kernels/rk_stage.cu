@@ -236,7 +236,7 @@ void calc_p_rho_phi_ad(PRP_STATE(_a), PRP_ACTIVE(), PRP_ADJ, PRP_PASSIVE,
 // ======================================================== rk_step_prep
 
 #define RSP_GEOM int nz, int ny, int nx, int has_msf, int boundary_x,        \
-    int boundary_y, wreal rdx, wreal rdy
+    int boundary_y, wreal rdx, wreal rdy, int use_halo
 
 #define RSP_STATE(s)                                                        \
     wreal* __restrict__ ru##s, wreal* __restrict__ rv##s,                  \
@@ -244,7 +244,14 @@ void calc_p_rho_phi_ad(PRP_STATE(_a), PRP_ACTIVE(), PRP_ADJ, PRP_PASSIVE,
 
 #define RSP_ACTIVE(s)                                                       \
     const wreal* __restrict__ u##s, const wreal* __restrict__ v##s,        \
-    const wreal* __restrict__ mup##s
+    const wreal* __restrict__ mup##s, const wreal* __restrict__ mu_halo##s
+
+// use_halo (rk_step 1 of a carried strict step on a bounded axis,
+// dycore._calc_ww_cp_fluxes): calc_ww_cp's boundary faces read the ghost
+// cell's mu' from the carried halo (the ring mass before the previous
+// step's spec_bdy_final) instead of the clamped edge cell.  Face 0's
+// ghost is its left operand b, face n's its right operand a; calc_mu_uv
+// (ru, rv) keeps the clamp.
 
 #define RSP_PASSIVE                                                         \
     const wreal* __restrict__ mub, const wreal* __restrict__ c1h,          \
@@ -317,7 +324,8 @@ void rk_step_prep_flux_tl(RSP_STATE(), RSP_STATE(_d), RSP_ACTIVE(), RSP_ACTIVE(_
 
 // calc_ww_cp's coupled u flux at face column (j, i) and level k.
 static __device__ __forceinline__ void rk_fu(const wreal* u, const wreal* u_d,
-    const wreal* mup, const wreal* mup_d, const wreal* mub, const wreal* c1h,
+    const wreal* mup, const wreal* mup_d, const wreal* hal, const wreal* hal_d,
+    int use_halo, const wreal* mub, const wreal* c1h,
     const wreal* c2h, const wreal* msfu, int k, int j, int i, int ny, int nx,
     int has_msf, int bx, wreal* f, wreal* f_d)
 {
@@ -325,10 +333,13 @@ static __device__ __forceinline__ void rk_fu(const wreal* u, const wreal* u_d,
     size_t a = (size_t)j * nx + rk_cell_a(i, nx, bx);
     size_t b = (size_t)j * nx + rk_cell_b(i, nx, bx);
     size_t ix = R3(k, j, i, ny, nxf);
-    wreal mu = rk_mu_ww(mup, mub, a, b);
+    bool hb = use_halo && bx && i == 0, ha = use_halo && bx && i == nx;
+    wreal pa = ha ? hal[a] : mup[a], pb = hb ? hal[b] : mup[b];
+    wreal pa_d = ha ? hal_d[a] : mup_d[a], pb_d = hb ? hal_d[b] : mup_d[b];
+    wreal mu = (wreal)0.5 * (((pa + mub[a]) + pb) + mub[b]);
     wreal C = c1h[k] * mu + c2h[k];
     *f = C * u[ix];
-    *f_d = c1h[k] * ((wreal)0.5 * (mup_d[a] + mup_d[b])) * u[ix] + C * u_d[ix];
+    *f_d = c1h[k] * ((wreal)0.5 * (pa_d + pb_d)) * u[ix] + C * u_d[ix];
     if (has_msf) {
         wreal m = msfu[(size_t)j * nxf + i];
         *f = *f / m;
@@ -336,7 +347,8 @@ static __device__ __forceinline__ void rk_fu(const wreal* u, const wreal* u_d,
     }
 }
 static __device__ __forceinline__ void rk_fv(const wreal* v, const wreal* v_d,
-    const wreal* mup, const wreal* mup_d, const wreal* mub, const wreal* c1h,
+    const wreal* mup, const wreal* mup_d, const wreal* hal, const wreal* hal_d,
+    int use_halo, const wreal* mub, const wreal* c1h,
     const wreal* c2h, const wreal* msfv, int k, int j, int i, int ny, int nx,
     int has_msf, int by, wreal* f, wreal* f_d)
 {
@@ -344,10 +356,13 @@ static __device__ __forceinline__ void rk_fv(const wreal* v, const wreal* v_d,
     size_t a = (size_t)rk_cell_a(j, ny, by) * nx + i;
     size_t b = (size_t)rk_cell_b(j, ny, by) * nx + i;
     size_t ix = R3(k, j, i, nyf, nx);
-    wreal mu = rk_mu_ww(mup, mub, a, b);
+    bool hb = use_halo && by && j == 0, ha = use_halo && by && j == ny;
+    wreal pa = ha ? hal[a] : mup[a], pb = hb ? hal[b] : mup[b];
+    wreal pa_d = ha ? hal_d[a] : mup_d[a], pb_d = hb ? hal_d[b] : mup_d[b];
+    wreal mu = (wreal)0.5 * (((pa + mub[a]) + pb) + mub[b]);
     wreal C = c1h[k] * mu + c2h[k];
     *f = C * v[ix];
-    *f_d = c1h[k] * ((wreal)0.5 * (mup_d[a] + mup_d[b])) * v[ix] + C * v_d[ix];
+    *f_d = c1h[k] * ((wreal)0.5 * (pa_d + pb_d)) * v[ix] + C * v_d[ix];
     if (has_msf) {
         wreal m = msfv[(size_t)j * nx + i];
         *f = *f * m;
@@ -367,14 +382,14 @@ void rk_step_prep_ww_tl(RSP_STATE(), RSP_STATE(_d), RSP_ACTIVE(), RSP_ACTIVE(_d)
     wreal dmdt = 0, dmdt_d = 0;
     for (int k = 0; k < nz; ++k) {
         wreal f0, f0d, f1, f1d, g0, g0d, g1, g1d;
-        rk_fu(u, u_d, mup, mup_d, mub, c1h, c2h, msfu, k, j, i, ny, nx, has_msf,
-              boundary_x, &f0, &f0d);
-        rk_fu(u, u_d, mup, mup_d, mub, c1h, c2h, msfu, k, j, i + 1, ny, nx, has_msf,
-              boundary_x, &f1, &f1d);
-        rk_fv(v, v_d, mup, mup_d, mub, c1h, c2h, msfv, k, j, i, ny, nx, has_msf,
-              boundary_y, &g0, &g0d);
-        rk_fv(v, v_d, mup, mup_d, mub, c1h, c2h, msfv, k, j + 1, i, ny, nx, has_msf,
-              boundary_y, &g1, &g1d);
+        rk_fu(u, u_d, mup, mup_d, mu_halo, mu_halo_d, use_halo, mub, c1h, c2h, msfu,
+              k, j, i, ny, nx, has_msf, boundary_x, &f0, &f0d);
+        rk_fu(u, u_d, mup, mup_d, mu_halo, mu_halo_d, use_halo, mub, c1h, c2h, msfu,
+              k, j, i + 1, ny, nx, has_msf, boundary_x, &f1, &f1d);
+        rk_fv(v, v_d, mup, mup_d, mu_halo, mu_halo_d, use_halo, mub, c1h, c2h, msfv,
+              k, j, i, ny, nx, has_msf, boundary_y, &g0, &g0d);
+        rk_fv(v, v_d, mup, mup_d, mu_halo, mu_halo_d, use_halo, mub, c1h, c2h, msfv,
+              k, j + 1, i, ny, nx, has_msf, boundary_y, &g1, &g1d);
         wreal W = has_msf ? msft[c] * dnw[k] : dnw[k];
         wreal divv = W * (rdx * (f1 - f0) + rdy * (g1 - g0));
         wreal divv_d = W * (rdx * (f1d - f0d) + rdy * (g1d - g0d));
@@ -432,12 +447,18 @@ void rk_step_prep_ww_ad(RSP_STATE(_a), wreal* __restrict__ bk, RSP_PASSIVE,
 
 // Face pass of the adjoint, one thread per (level chunk, face column):
 // consumes ru/rv's adjoints, adds into u and v, and leaves each face's
-// chunk sum of the face-mass adjoint (xm, ym) for the cell gather.
+// chunk sum of the face-mass adjoint (xm, ym) for the cell gather.  With
+// use_halo the boundary faces also leave the ghost operand's share: the
+// calc_mu_uv part alone (xg, yg; the ghost cell is still the edge cell
+// there) and the calc_ww_cp part (hx, hy), which is the halo's.  Side 0
+// is face 0, side 1 face n.
 extern "C" __global__
 void rk_step_prep_flux_ad(RSP_STATE(_a), const wreal* __restrict__ bk,
                           RSP_ACTIVE(), wreal* __restrict__ u_a,
                           wreal* __restrict__ v_a, wreal* __restrict__ xm,
-                          wreal* __restrict__ ym, RSP_PASSIVE, RSP_GEOM)
+                          wreal* __restrict__ ym, wreal* __restrict__ xg,
+                          wreal* __restrict__ yg, wreal* __restrict__ hx,
+                          wreal* __restrict__ hy, RSP_PASSIVE, RSP_GEOM)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int nyf = ny + 1, nxf = nx + 1;
@@ -452,9 +473,12 @@ void rk_step_prep_flux_ad(RSP_STATE(_a), const wreal* __restrict__ bk,
     if (j < ny) {
         size_t a = (size_t)j * nx + rk_cell_a(i, nx, boundary_x);
         size_t b = (size_t)j * nx + rk_cell_b(i, nx, boundary_x);
-        wreal Cr = rk_mu_uv(mup, mub, a, b), Cw = rk_mu_ww(mup, mub, a, b);
+        bool hb = use_halo && boundary_x && i == 0, ha = use_halo && boundary_x && i == nx;
+        wreal pa = ha ? mu_halo[a] : mup[a], pb = hb ? mu_halo[b] : mup[b];
+        wreal Cr = rk_mu_uv(mup, mub, a, b);
+        wreal Cw = (wreal)0.5 * (((pa + mub[a]) + pb) + mub[b]);
         wreal rm = has_msf ? (wreal)1.0 / msfu[(size_t)j * nxf + i] : (wreal)1.0;
-        wreal am = 0;
+        wreal amr = 0, amw = 0;
         for (int k = k0; k < k1; ++k) {
             size_t ix = R3(k, j, i, ny, nxf);
             wreal af = 0;     // du(cell i-1) = f(i) - f(i-1); du(cell i) = f(i+1) - f(i)
@@ -464,16 +488,25 @@ void rk_step_prep_flux_ad(RSP_STATE(_a), const wreal* __restrict__ bk,
             wreal ar = ru_a[ix] * rm;
             ru_a[ix] = 0;
             u_a[ix] += ar * (c1h[k] * Cr + c2h[k]) + af * (c1h[k] * Cw + c2h[k]);
-            am += (ar + af) * u[ix] * c1h[k];
+            amr += ar * u[ix] * c1h[k];
+            amw += af * u[ix] * c1h[k];
         }
-        xm[(size_t)ck * ny * nxf + (size_t)j * nxf + i] = am;
+        xm[(size_t)ck * ny * nxf + (size_t)j * nxf + i] = amr + amw;
+        if (ha || hb) {
+            size_t g = (size_t)ck * ny * 2 + (size_t)j * 2 + (ha ? 1 : 0);
+            xg[g] = amr;
+            hx[g] = amw;
+        }
     }
     if (i < nx) {
         size_t a = (size_t)rk_cell_a(j, ny, boundary_y) * nx + i;
         size_t b = (size_t)rk_cell_b(j, ny, boundary_y) * nx + i;
-        wreal Cr = rk_mu_uv(mup, mub, a, b), Cw = rk_mu_ww(mup, mub, a, b);
+        bool hb = use_halo && boundary_y && j == 0, ha = use_halo && boundary_y && j == ny;
+        wreal pa = ha ? mu_halo[a] : mup[a], pb = hb ? mu_halo[b] : mup[b];
+        wreal Cr = rk_mu_uv(mup, mub, a, b);
+        wreal Cw = (wreal)0.5 * (((pa + mub[a]) + pb) + mub[b]);
         wreal m = has_msf ? msfv[(size_t)j * nx + i] : (wreal)1.0;
-        wreal am = 0;
+        wreal amr = 0, amw = 0;
         for (int k = k0; k < k1; ++k) {
             size_t ix = R3(k, j, i, nyf, nx);
             wreal af = 0;
@@ -483,32 +516,61 @@ void rk_step_prep_flux_ad(RSP_STATE(_a), const wreal* __restrict__ bk,
             wreal ar = rv_a[ix] * m;
             rv_a[ix] = 0;
             v_a[ix] += ar * (c1h[k] * Cr + c2h[k]) + af * (c1h[k] * Cw + c2h[k]);
-            am += (ar + af) * v[ix] * c1h[k];
+            amr += ar * v[ix] * c1h[k];
+            amw += af * v[ix] * c1h[k];
         }
-        ym[(size_t)ck * nyf * nx + (size_t)j * nx + i] = am;
+        ym[(size_t)ck * nyf * nx + (size_t)j * nx + i] = amr + amw;
+        if (ha || hb) {
+            size_t g = (size_t)ck * 2 * nx + (size_t)(ha ? 1 : 0) * nx + i;
+            yg[g] = amr;
+            hy[g] = amw;
+        }
     }
 }
 
 // Cell gather: mup_a += 0.5 * (chunk sums of every face naming the cell).
+// With use_halo a boundary face's ghost role (q 2 and 3, the clamped
+// duplicate) takes the calc_mu_uv part alone, and halo_a gathers the
+// calc_ww_cp part.
 extern "C" __global__
 void rk_step_prep_mass_gather(wreal* __restrict__ mup_a, const wreal* __restrict__ xm,
-                              const wreal* __restrict__ ym, RSP_GEOM)
+                              const wreal* __restrict__ ym,
+                              wreal* __restrict__ halo_a, const wreal* __restrict__ xg,
+                              const wreal* __restrict__ yg, const wreal* __restrict__ hx,
+                              const wreal* __restrict__ hy, RSP_GEOM)
 {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= ny * nx) return;
     int j = c / nx, i = c - j * nx;
     int nyf = ny + 1, nxf = nx + 1;
     int nck = (nz + RK_KCHUNK - 1) / RK_KCHUNK;
-    wreal s = 0;
+    wreal s = 0, h = 0;
     for (int ck = 0; ck < nck; ++ck) {
         for (int q = 0; q < 4; ++q) {
             int f = rk_face(q, i, nx, boundary_x);
-            if (f >= 0) s += xm[(size_t)ck * ny * nxf + (size_t)j * nxf + f];
+            if (f >= 0) {
+                if (use_halo && boundary_x && q >= 2) {
+                    size_t g = (size_t)ck * ny * 2 + (size_t)j * 2 + (q == 3 ? 1 : 0);
+                    s += xg[g];
+                    h += hx[g];
+                } else {
+                    s += xm[(size_t)ck * ny * nxf + (size_t)j * nxf + f];
+                }
+            }
             int g = rk_face(q, j, ny, boundary_y);
-            if (g >= 0) s += ym[(size_t)ck * nyf * nx + (size_t)g * nx + i];
+            if (g >= 0) {
+                if (use_halo && boundary_y && q >= 2) {
+                    size_t e = (size_t)ck * 2 * nx + (size_t)(q == 3 ? 1 : 0) * nx + i;
+                    s += yg[e];
+                    h += hy[e];
+                } else {
+                    s += ym[(size_t)ck * nyf * nx + (size_t)g * nx + i];
+                }
+            }
         }
     }
     mup_a[c] += (wreal)0.5 * s;
+    if (use_halo) halo_a[c] += (wreal)0.5 * h;
 }
 
 // ====================================================== rk_addtend_dry
