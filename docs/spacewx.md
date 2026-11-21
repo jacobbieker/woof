@@ -15,7 +15,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
-| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
+| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, the energy flux in history (`spacewx_aurora_opt = 2`), and the Joule power in history (`spacewx_aurora_opt = 3`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make; auroral-electron ion-pair rates (Fang et al. 2010) from OVATION's energy flux and mean energy | ion-pair rates available as `woof spacewx particles` (electrons with `--electron-energy-flux`, a diagnostic above every model top); the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
 | L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route and hex's generic column seam, and on Fast-TUV photolysis (`phot_opt = 3`, RADM2; WRF route and hex) |
@@ -570,6 +570,23 @@ The forecast is identical with the option on or off.
   option existed has no dPhi/dt: the solar wind for the start is then read
   again, and the resume is refused by name if the feed no longer covers it
   (SWPC keeps only 24 h).
+- `spacewx_aurora_opt = 3` adds `JOULE_POWER` (GW) to option 2's rows: the
+  northern hemisphere's Joule power of Knipp et al. 2004 (Sol. Phys. 224, 495,
+  Table I), a seasonal quadratic in |PC(N)| and |Dst| fitted to AMIE. PC(N) and
+  Dst are OMNI2 words 52 and 41, so it needs `spacewx_kp_source = "omni"` (SWPC's
+  feed carries neither). Both come from the latest hour that has ended by the
+  start and has both values, within 24 h; Knipp's season is the start's. The
+  value is held for the run, and the fit has no horizontal structure, so the row
+  holds that one number in every column of every frame. It is the
+  hemisphere-integrated power, not a local heating rate. The `[spacewx aurora]`
+  line adds PC(N), Dst, their hour, the season, the northern power and Knipp's
+  global value (twice the northern). The drivers are kept with the held Kp
+  whenever OMNI2 has them, and an older hold without them reads OMNI2 again.
+  Scale check: with the climatological |PC(N)| of about 1.2 and Dst of about
+  -17 nT, the annual fit gives a global 84 GW, against the 95 GW mean that
+  Knipp et al. 2004 report for 1975-2003; a severe storm (PC(N) 6, Dst -250 nT)
+  gives about 470 GW in the north, the scale of AMIE storm peaks (McHarg et al.
+  2005, JGR 110, A12S16, up to about 300 GW).
 - Rows are rebuilt from the configuration on restart (no checkpoint state),
   and the two keys are output-only for the restart and prepared-cache
   identities, so a resume may switch the rows on or off. A fetched Kp (gfz,

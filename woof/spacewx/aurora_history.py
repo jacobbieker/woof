@@ -35,6 +35,18 @@ needs ``spacewx_kp_source = "omni"`` or ``"swpc"``.  Its dPhi/dt is OVATION's
 progress has weight 0, so only hours that have ended count; it is held for the
 run like the Kp, and so is the season.  Each frame looks the held grid up at
 the oval's geomagnetic latitude and MLT.
+
+``spacewx_aurora_opt = 3`` adds the Joule power of Knipp et al. 2004
+(woof.spacewx.ovation.joule_power: Sol. Phys. 224, 495, Table I), a seasonal
+quadratic in |PC(N)| and |Dst| fitted to AMIE, on top of option 2's rows.
+PC(N) and Dst come from OMNI2 (words 52 and 41), so it needs
+``spacewx_kp_source = "omni"``; SWPC's real-time feed carries neither.  Both
+are taken from the latest OMNI2 hour that has ended by the start and has
+both values, held for the run like the Kp, and so is Knipp's season (that of
+the start).  The fit is for the northern hemisphere and has no horizontal
+structure, so ``JOULE_POWER`` holds that one number (GW) in every column of
+every frame; Knipp et al. double it for the globe, and the receipt carries
+both.  It is the hemisphere-integrated Joule power, not a local heating rate.
 """
 from __future__ import annotations
 
@@ -56,6 +68,12 @@ ENERGY_HISTORY_FIELDS = {
     "AURORA_EMEAN": ("mean_energy", "ELECTRON PRECIPITATION MEAN ENERGY (OVATION PRIME 2010)", "keV"),
     "AURORA_IFLUX": ("eflux_ion", "ION PRECIPITATION ENERGY FLUX (OVATION PRIME 2010)", "mW m-2"),
 }
+#: The Joule row of ``spacewx_aurora_opt = 3``: wrfout name -> (description, units).
+JOULE_HISTORY_FIELDS = {
+    "JOULE_POWER": ("NORTHERN-HEMISPHERE JOULE POWER (KNIPP ET AL. 2004), HELD FROM THE START", "GW"),
+}
+#: The options' row groups, by spacewx_aurora_opt.
+MAX_OPT = 3
 #: How far back from the start an observed or estimated Kp is looked for.
 LOOKBACK_HOURS = 24
 
@@ -69,14 +87,19 @@ def enabled(cfg) -> bool:
 
 
 def energy_enabled(cfg) -> bool:
-    return int(getattr(cfg, "spacewx_aurora_opt", 0) or 0) == 2
+    return int(getattr(cfg, "spacewx_aurora_opt", 0) or 0) >= 2
+
+
+def joule_enabled(cfg) -> bool:
+    return int(getattr(cfg, "spacewx_aurora_opt", 0) or 0) == 3
 
 
 def row_names(cfg) -> tuple[str, ...]:
     """The wrfout names the option writes (none when off)."""
     if not enabled(cfg):
         return ()
-    return tuple(HISTORY_FIELDS) + (tuple(ENERGY_HISTORY_FIELDS) if energy_enabled(cfg) else ())
+    return (tuple(HISTORY_FIELDS) + (tuple(ENERGY_HISTORY_FIELDS) if energy_enabled(cfg) else ())
+            + (tuple(JOULE_HISTORY_FIELDS) if joule_enabled(cfg) else ()))
 
 
 def history_shapes(cfg) -> dict[str, tuple[int, int]]:
@@ -155,10 +178,33 @@ def _coupling_at_start(wind, start: datetime) -> float:
         raise AuroraHistoryError(f"spacewx_aurora_opt = 2: no OVATION coupling at the start: {exc}") from None
 
 
+def _joule_at_start(wind, start: datetime) -> dict:
+    """Knipp et al. 2004's drivers held for the run: PC(N) and Dst of the latest
+    hour that has ended by the start (hour h + 1 <= start) and carries both,
+    looked for back to :data:`LOOKBACK_HOURS`; nothing after the start is read."""
+    from woof.spacewx import ovation
+    hour = start.replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+    first = hour
+    while start - hour <= timedelta(hours=LOOKBACK_HOURS):
+        try:
+            pcn, dst = wind.pcn_at(hour), wind.dst_at(hour)
+        except ValueError:
+            pcn = dst = float("nan")
+        if np.isfinite(pcn) and np.isfinite(dst):
+            season = ovation.knipp_season(start)
+            return {"pcn": float(pcn), "dst": float(dst), "hour": f"{hour:%Y-%m-%dT%H:%M}Z",
+                    "season": season, "north_gw": ovation.joule_power(pcn, dst, start, season=season)}
+        hour -= timedelta(hours=1)
+    raise AuroraHistoryError(
+        f"spacewx_aurora_opt = 3: no OMNI2 hour with both PC(N) and Dst in the {LOOKBACK_HOURS} h "
+        f"before {start:%Y-%m-%dT%H:%MZ} (latest hour tried {first:%Y-%m-%dT%H}Z; {wind.source})")
+
+
 def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loader=None,
-             memo=None, energy: bool = False) -> dict:
+             memo=None, energy: bool = False, joule: bool = False) -> dict:
     """The run's held Kp, its |AL| and the receipt of where it came from; with
-    ``energy``, also OVATION's dPhi/dt (a solar-wind source only).
+    ``energy``, also OVATION's dPhi/dt (a solar-wind source only); with
+    ``joule``, also Knipp et al. 2004's PC(N), Dst and Joule power (OMNI2 only).
 
     With ``memo`` (a directory), a fetched source's result is kept per
     (source, start): a resumed run, and every domain of a nested one, holds
@@ -170,6 +216,10 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
         raise AuroraHistoryError(
             f"spacewx_aurora_opt = 2 drives OVATION Prime with the solar wind, so "
             f"spacewx_kp_source must be 'omni' or 'swpc', not {source!r}")
+    if joule and kind != "omni":
+        raise AuroraHistoryError(
+            f"spacewx_aurora_opt = 3 reads PC(N) and Dst, which only OMNI2 carries, so "
+            f"spacewx_kp_source must be 'omni', not {source!r}")
     if kind == "value":
         return {"kp": float(value), "al": float(kp_to_al(value)),
                 "record": {"spacewx_kp_source": "value"}}
@@ -187,9 +237,11 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
                        "record": dict(held["record"], spacewx_kp_held_from=str(memo_path))}
                 if held.get("dphidt") is not None:
                     out["dphidt"] = float(held["dphidt"])
-                if not energy or "dphidt" in out:
+                if isinstance(held.get("joule"), dict):
+                    out["joule"] = {k: held["joule"][k] for k in ("pcn", "dst", "hour", "season", "north_gw")}
+                if (not energy or "dphidt" in out) and (not joule or "joule" in out):
                     return out
-                # Held by a run without the energy rows: keep its Kp, add the coupling.
+                # Held by a run without the energy or Joule rows: keep its Kp, add what is missing.
             except (ValueError, KeyError, TypeError):
                 held = None                            # damaged: read the source again
     if kind in ("omni", "swpc"):
@@ -197,12 +249,17 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
         load = solarwind_loader or solarwind.load
         wind = load(kind, start - timedelta(hours=LOOKBACK_HOURS + 4), start)
         if held is not None:
-            # The hold predates its dPhi/dt: read the solar wind for the start
-            # again (refused, by name, if the feed no longer covers it).
-            out["dphidt"] = _coupling_at_start(wind, start)
-            out["record"]["spacewx_dphidt_sha256"] = wind.sha256
-            _write_memo(memo_path, {**held, "dphidt": out["dphidt"],
-                                    "record": dict(held["record"], spacewx_dphidt_sha256=wind.sha256)})
+            # The hold predates its dPhi/dt or its Joule drivers: read the solar
+            # wind for the start again (refused, by name, if the feed no longer
+            # covers it).
+            added, record = {}, dict(held["record"])
+            if energy and "dphidt" not in out:
+                out["dphidt"] = added["dphidt"] = _coupling_at_start(wind, start)
+                out["record"]["spacewx_dphidt_sha256"] = record["spacewx_dphidt_sha256"] = wind.sha256
+            if joule and "joule" not in out:
+                out["joule"] = added["joule"] = _joule_at_start(wind, start)
+                out["record"]["spacewx_joule_sha256"] = record["spacewx_joule_sha256"] = wind.sha256
+            _write_memo(memo_path, {**held, **added, "record": record})
             return out
         # Hours T-1, T and T+1 must have ended by the start.
         kp, at = _latest(wind.kp_estimate, start, f"{kind} solar wind", complete_hours=2)
@@ -215,6 +272,14 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
             if energy:
                 raise
             dphidt = None
+        # Knipp's drivers, kept whenever OMNI2 has them (as the coupling is).
+        joule_drive = None
+        if kind == "omni":
+            try:
+                joule_drive = _joule_at_start(wind, start)
+            except AuroraHistoryError:
+                if joule:
+                    raise
     else:
         from woof.spacewx import indices
         load = indices_loader or indices.load
@@ -232,6 +297,8 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
     out = {"kp": float(kp), "al": float(kp_to_al(kp)), "record": record}
     if kind in ("omni", "swpc") and dphidt is not None:
         out["dphidt"] = float(dphidt)
+    if kind == "omni" and joule_drive is not None:
+        out["joule"] = joule_drive
     if memo_path is not None:
         _write_memo(memo_path, out)
     return out
@@ -292,9 +359,9 @@ class AuroraHistory:
         if indices_loader is None and solarwind_loader is None:
             from woof.spacewx.solar_irradiance import cache_root
             memo = cache_root() / "aurora-activity"
-        energy = energy_enabled(cfg)
+        energy, joule = energy_enabled(cfg), joule_enabled(cfg)
         drive = activity(getattr(cfg, "spacewx_kp_source", ""), start, indices_loader=indices_loader,
-                         solarwind_loader=solarwind_loader, memo=memo, energy=energy)
+                         solarwind_loader=solarwind_loader, memo=memo, energy=energy, joule=joule)
         from woof.spacewx.aurora import Aurora
         lat, lon = _host(lat), _host(lon)
         oval = Aurora(lat, lon, when=start, igrf_model=igrf_model)
@@ -310,6 +377,8 @@ class AuroraHistory:
             tables = energy_tables(coef, drive["dphidt"], start)
             drive = dict(drive, record=dict(drive["record"], spacewx_ovation_sha256=coef.sha256,
                                             spacewx_ovation_source=coef.source))
+        if not joule:
+            drive = {k: v for k, v in drive.items() if k != "joule"}
         return cls(oval, start, drive, lat.shape, tables=tables)
 
     def __init__(self, oval, start_time: datetime, drive: dict, shape, tables=None):
@@ -320,7 +389,9 @@ class AuroraHistory:
         self.record = drive["record"]
         self.dphidt = drive.get("dphidt")
         self.tables = tables
-        self.names = tuple(HISTORY_FIELDS) + (tuple(ENERGY_HISTORY_FIELDS) if tables is not None else ())
+        self.joule = drive.get("joule")
+        self.names = (tuple(HISTORY_FIELDS) + (tuple(ENERGY_HISTORY_FIELDS) if tables is not None else ())
+                      + (tuple(JOULE_HISTORY_FIELDS) if self.joule is not None else ()))
         self.shape = tuple(int(n) for n in shape)
         self._rows = None
         self._elapsed = None
@@ -334,6 +405,12 @@ class AuroraHistory:
         if self.tables is not None:
             extra = {"spacewx_ovation_dphidt": self.dphidt, "spacewx_energy_model": "OVATION Prime 2010",
                      **{f"spacewx_{k}": v for k, v in self.tables["power"].items()}}
+        if self.joule is not None:
+            extra.update({"spacewx_joule_model": "Knipp et al. 2004 Table I, northern hemisphere, |PC(N)| and |Dst|",
+                          "spacewx_joule_pcn": self.joule["pcn"], "spacewx_joule_dst_nt": self.joule["dst"],
+                          "spacewx_joule_hour": self.joule["hour"], "spacewx_joule_season": self.joule["season"],
+                          "spacewx_joule_north_gw": self.joule["north_gw"],
+                          "spacewx_joule_global_gw": 2.0 * self.joule["north_gw"]})
         return receipt(self.aurora, {**self.record, "spacewx_kp": self.kp, "spacewx_al_nt": self.al, **extra})
 
     def history_fields(self, elapsed_seconds: float) -> dict:
@@ -360,9 +437,13 @@ class AuroraHistory:
                 for name in ENERGY_HISTORY_FIELDS:
                     col = np.where(mlat >= 0.0, north[name], south[name])
                     self._rows[name][...] = cp.asarray(col.astype(np.float32).reshape(self.shape))
+            if self.joule is not None:
+                # Held for the run: the same number in every column and frame.
+                self._rows["JOULE_POWER"][...] = np.float32(self.joule["north_gw"])
             self._elapsed = float(elapsed_seconds)
         return dict(self._rows)
 
 
-__all__ = ["HISTORY_FIELDS", "ENERGY_HISTORY_FIELDS", "AuroraHistory", "AuroraHistoryError", "activity",
-           "enabled", "energy_enabled", "row_names", "history_shapes", "device_shapes", "parse_kp_source"]
+__all__ = ["HISTORY_FIELDS", "ENERGY_HISTORY_FIELDS", "JOULE_HISTORY_FIELDS", "MAX_OPT", "AuroraHistory",
+           "AuroraHistoryError", "activity", "enabled", "energy_enabled", "joule_enabled", "row_names",
+           "history_shapes", "device_shapes", "parse_kp_source"]
