@@ -76,7 +76,7 @@ module mpas_pool_routines
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
             mpas_pool_initialize_time_levels, mpas_pool_shift_time_levels, &
             mpas_pool_iterator_type, mpas_pool_begin_iteration, mpas_pool_get_next_member, &
-            stub_pool_has, stub_pool_get_logical, mpas_pool_create_pool
+            stub_pool_has, stub_pool_get_logical, mpas_pool_create_pool, mpas_pool_get_package
 
   integer, parameter :: maxEntries = 192
   integer, parameter :: MPAS_POOL_CONFIG = 1004
@@ -322,6 +322,19 @@ contains
     allocate(pool % e(k) % i0)
     pool % e(k) % i0 = value
   end subroutine add_config_i
+
+  subroutine mpas_pool_get_package(pool, name, package)
+    ! a package the driver put (run_forward.F90: the analysis members'); any
+    ! other is not part of these oracles.  A module procedure: its pointer
+    ! argument needs the explicit interface
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    logical, pointer :: package
+    call stub_pool_get_logical(pool, name, package)
+    if (associated(package)) return
+    print *, 'oracle stub: mpas_pool_get_package (', trim(name), ') is not part of this oracle'
+    stop 6
+  end subroutine mpas_pool_get_package
 
   subroutine mpas_pool_create_pool(pool)
     ! li_analysis_setup_packages's member list (an empty pool)
@@ -1086,16 +1099,3 @@ subroutine mpas_dmpar_min_real_array(dminfo, nElements, inArray, outArray)
   ! one rank: the reduction is the identity
   outArray = inArray
 end subroutine mpas_dmpar_min_real_array
-
-subroutine mpas_pool_get_package(pool, name, package)
-  ! a package the driver put (run_forward.F90: the analysis members'); any
-  ! other is not part of these oracles
-  use mpas_pool_routines
-  type(MPAS_pool_type), intent(in) :: pool
-  character(len=*), intent(in) :: name
-  logical, pointer :: package
-  call stub_pool_get_logical(pool, name, package)
-  if (associated(package)) return
-  print *, 'oracle stub: mpas_pool_get_package (', trim(name), ') is not part of this oracle'
-  stop 6
-end subroutine mpas_pool_get_package

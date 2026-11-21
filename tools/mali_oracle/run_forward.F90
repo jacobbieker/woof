@@ -43,18 +43,12 @@
 ! the words it left: every field of its pool (NAME'AM') in the input's
 ! order, taken when its 'compute_' timer stops.
 
-program run_forward
+module run_forward_record
+  ! the field table and the analysis members' record (a module, so the
+  ! timer hook is a module procedure, not an internal one)
   use mpas_kind_types
-  use mpas_derived_types
-  use mpas_pool_routines
-  use mpas_timekeeping
-  use mpas_log, only: stub_log_errors, stub_log_capture, stub_log_lines, stub_log_count
-  use mpas_dmpar, only: stub_trace_r, stub_trace_i, stub_trace_nr, stub_trace_ni, stub_trace_paused
-  use mpas_timer, only: stub_timer_hook
-  use li_core, only: li_simulation_clock_init, li_core_init, li_core_run
-  use li_analysis_driver, only: li_analysis_setup_packages
+  use mpas_dmpar, only: stub_trace_paused
   implicit none
-
   integer, parameter :: maxFields = 512
   type field_ref
     character(len=16) :: pool
@@ -69,6 +63,67 @@ program run_forward
     integer, dimension(:,:), pointer :: i2 => null()
     character(len=StrKIND), pointer :: c0 => null()
   end type field_ref
+  type(field_ref), allocatable :: fields(:)
+  integer :: nFields
+  character(len=16), parameter :: memberNames(2) = [character(len=16) :: 'globalStats', 'regionalStats']
+  ! the analysis members' record (see above)
+  integer :: nComputes = 0, nWords = 0, errPackages
+  integer, allocatable :: computeMembers(:)
+  character(len=StrKIND), allocatable :: computeTimes(:)
+  real(kind=RKIND), allocatable :: computeWords(:)
+  character(len=StrKIND), pointer :: xtime => null()
+
+contains
+
+  subroutine record_member(timer_name, starting)
+    ! an analysis member's 'compute_' timer: its reductions are not traced,
+    ! and when it stops, the words it left are recorded
+    character(len=*), intent(in) :: timer_name
+    logical, intent(in) :: starting
+    integer :: m, k
+    character(len=16) :: poolName
+    m = 0
+    do k = 1, size(memberNames)
+       if (timer_name == 'compute_' // trim(memberNames(k))) m = k
+    end do
+    if (m == 0) return
+    stub_trace_paused = starting
+    if (starting) return
+    if (.not. associated(xtime)) stop 15
+    nComputes = nComputes + 1
+    computeMembers = [computeMembers, m]
+    computeTimes = [character(len=StrKIND) :: computeTimes, xtime]
+    poolName = trim(memberNames(m)) // 'AM'
+    do k = 1, nFields
+       if (fields(k) % pool /= poolName) cycle
+       select case (fields(k) % kind * 10 + fields(k) % rank)
+       case (10)
+          computeWords = [computeWords, fields(k) % r0]
+          nWords = nWords + 1
+       case (11)
+          computeWords = [computeWords, fields(k) % r1]
+          nWords = nWords + size(fields(k) % r1)
+       case default
+          stop 16
+       end select
+    end do
+  end subroutine record_member
+
+end module run_forward_record
+
+program run_forward
+  use mpas_kind_types
+  use mpas_derived_types
+  use mpas_pool_routines
+  use mpas_timekeeping
+  use mpas_log, only: stub_log_errors, stub_log_capture, stub_log_lines, stub_log_count
+  use mpas_dmpar, only: stub_trace_r, stub_trace_i, stub_trace_nr, stub_trace_ni
+  use run_forward_record
+  use mpas_timer, only: stub_timer_hook
+  use li_core, only: li_simulation_clock_init, li_core_init, li_core_run
+  use li_analysis_driver, only: li_analysis_setup_packages
+  implicit none
+
   type pool_ref
     type(MPAS_pool_type), pointer :: p => null()
   end type pool_ref
@@ -79,15 +134,7 @@ program run_forward
   type(pool_ref) :: pools(9)
   character(len=16), parameter :: poolNames(9) = [character(len=16) :: 'mesh', 'geometry', 'thermal', &
        'velocity', 'scratch', 'hydro', 'globalStatsAM', 'regionalStatsAM', 'regions']
-  character(len=16), parameter :: memberNames(2) = [character(len=16) :: 'globalStats', 'regionalStats']
-  ! the analysis members' record (see above)
-  integer :: nComputes = 0, nWords = 0, member = 0, errPackages
-  integer, allocatable :: computeMembers(:)
-  character(len=StrKIND), allocatable :: computeTimes(:)
-  real(kind=RKIND), allocatable :: computeWords(:)
-  character(len=StrKIND), pointer :: xtime => null()
-  type(field_ref), allocatable :: fields(:)
-  integer :: nConfigs, nFields, i, u, ctype, dims(3), errClock, errInit, errRun, p
+  integer :: nConfigs, i, u, ctype, dims(3), errClock, errInit, errRun, p
   character(len=StrKIND) :: startTimeStamp, calendar, endTimeStamp
   type(MPAS_Time_type) :: endTime
   character(len=64) :: cname
@@ -297,40 +344,5 @@ program run_forward
   if (nWords > 0) write(u) computeWords
   close(u)
 
-contains
-
-  subroutine record_member(timer_name, starting)
-    ! an analysis member's 'compute_' timer: its reductions are not traced,
-    ! and when it stops, the words it left are recorded
-    character(len=*), intent(in) :: timer_name
-    logical, intent(in) :: starting
-    integer :: m, k
-    character(len=16) :: poolName
-    m = 0
-    do k = 1, size(memberNames)
-       if (timer_name == 'compute_' // trim(memberNames(k))) m = k
-    end do
-    if (m == 0) return
-    stub_trace_paused = starting
-    if (starting) return
-    if (.not. associated(xtime)) stop 15
-    nComputes = nComputes + 1
-    computeMembers = [computeMembers, m]
-    computeTimes = [character(len=StrKIND) :: computeTimes, xtime]
-    poolName = trim(memberNames(m)) // 'AM'
-    do k = 1, nFields
-       if (fields(k) % pool /= poolName) cycle
-       select case (fields(k) % kind * 10 + fields(k) % rank)
-       case (10)
-          computeWords = [computeWords, fields(k) % r0]
-          nWords = nWords + 1
-       case (11)
-          computeWords = [computeWords, fields(k) % r1]
-          nWords = nWords + size(fields(k) % r1)
-       case default
-          stop 16
-       end select
-    end do
-  end subroutine record_member
 
 end program run_forward
