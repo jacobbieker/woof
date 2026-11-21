@@ -90,6 +90,7 @@ def _run(tmp_path, case: dict, *extra: str, skip=()) -> int:
 @pytest.mark.parametrize("name, precision", [
     ("dome_uniform", "r4"), ("hydro_radial_uniform", "r4"), ("eismint2_a_temperature_varres", "r8"),
     ("dome_adaptive_varres", "r8"), ("simple_radial_shelf_varres", "r4"), ("simple_rim_uniform", "r8"),
+    ("stats_dome_varres", "r4"), ("stats_simple_shelf_uniform", "r8"),
 ])
 def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
     case = _case(name, precision)
@@ -108,6 +109,11 @@ def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
             assert fo.word_mismatches(got[field].reshape(pinned[key].shape), pinned[key]) == 0, field
         compared += 1
     assert compared > 100
+    # the statistics' reports, as the model logs them
+    log = tmp_path / "out" / "statistics.log"
+    assert log.exists() == fo.stats_on(case["config"])
+    if log.exists():
+        assert fo.stats_log(log.read_text().splitlines()) == str(pinned["stats/log"])
 
 
 @requires_gpu
@@ -155,3 +161,20 @@ def test_the_registry_defaults_cover_every_option_the_forward_mode_reads():
     assert not missing
     assert defaults["config_velocity_solver"] == "sia" and defaults["config_SGH"] is False
     assert defaults["config_dt"] == "0001-00-00_00:00:00"
+
+
+@requires_gpu
+def test_the_statistics_log_is_this_runs_alone(tmp_path):
+    # statistics on but none in the run: an empty log; statistics off: an
+    # earlier run's log in the same out directory is removed
+    case = _case("stats_dome_uniform", "r4")
+    quiet = dict(case, config=dict(case["config"], config_stats_interval=100, config_write_stats_on_startup=False))
+    (tmp_path / "out").mkdir()
+    log = tmp_path / "out" / "statistics.log"
+    log.write_text("a stale report\n")
+    assert _run(tmp_path, quiet) == 0
+    assert log.read_text() == ""
+    log.write_text("a stale report\n")
+    off = dict(case, config=dict(case["config"], config_stats_interval=0, config_write_stats_on_startup=False))
+    assert _run(tmp_path, off) == 0
+    assert not log.exists()

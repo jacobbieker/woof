@@ -332,8 +332,7 @@ NCAR aerosols as a small PR whenever it fits.
    enthalpy solvers, the radial hydrology test and a marine variant, the
    enthalpy benchmark), each on a uniform and a variable resolution periodic
    hexagonal mesh (`tests/test_mali_forward_parity.py`). Refused by name:
-   MPAS's restart stream (`config_do_restart`), RK4, the statistics, the
-   analysis members, intervals with months, years on the Gregorian calendar,
+   MPAS's restart stream (`config_do_restart`), RK4, the analysis members, intervals with months, years on the Gregorian calendar,
    fractions of a second. `li_SGH_init` gives grounded ice below sea level
    the ocean's water pressure (it reads a mask holding only the initial
    extent bit); `woof_sgh_init_mask = 'corrected'` computes the mask first,
@@ -365,7 +364,17 @@ NCAR aerosols as a small PR whenever it fits.
    calving) copied into `normalVelocity` each step and zeroed off the
    dynamic ice; three forward cases on both meshes hold it to the oracle's
    words. The higher-order package's `dirichletVelocityMask` is carried
-   unchanged: only the Albany solvers read it. The statistics are next.
+   unchanged: only the Albany solvers read it. The statistics
+   (`li_compute_statistics`, `config_stats_interval` and
+   `config_write_stats_on_startup`; `woof/hex/mpas_ice/statistics_v842.py`)
+   are reproduced on the host at RKIND in the Fortran's summation order:
+   every word the reductions return and every character of the log report
+   match the oracle (v8.4.2's `mpas_li_statistics.F` compiled verbatim, its
+   reductions and log recorded by the stubs) over four cases on both
+   meshes. The reports go to a callback, the `woof.hex.mpas_ice` logger, or
+   the run door's `statistics.log`. v8.4.2 takes the extrema over ice-free
+   cells and edges too; `woof_statistics_extrema = 'ice'` restricts them,
+   off by default. The analysis members are next.
 6. **The Albany first-order (Blatter-Pattyn) Stokes solver**
    (`config_velocity_solver` = 'FO', also 'L1L2' and 'Stokes'). This is a C++
    finite-element code built on Trilinos (Kokkos assembly, NOX/Belos/MueLu

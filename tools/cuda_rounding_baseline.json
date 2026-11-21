@@ -5407,7 +5407,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "f50adb70fa5e73bd95ee355527094433666f08c16a869b097e65286ca1cc5331"
+    "sha256": "5414e1a59af29a05bddf120319148c2b59abc0a1415acfdd70b472be0d29aa32"
    },
    {
     "file": "woof/core/etanew.py",
@@ -6123,7 +6123,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/forward_v842.py",
-    "sha256": "c9e4623b9f11cfb16e53a774e12d21d3da4fce1d7505cee1b4b9b098ca27c367"
+    "sha256": "639daa8e6d85cd562997749aade11740d2ed1f1d3d74e861fae83148eb429f0e"
    },
    {
     "file": "woof/hex/mpas_ice/geometry_v842.py",
