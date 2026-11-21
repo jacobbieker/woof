@@ -2347,7 +2347,10 @@ class RunConfig:
     # "gfz" (the GFZ index file, fetched; "" means the same), a local file
     # in its format or a number in sfu, held at the run start's value;
     # spacewx_f107_mode is "81day" or "daily".  spacewx_ionosphere_maps
-    # picks the foF2 maps ("ccir" or "ursi").  0 runs no new code.
+    # picks the foF2 maps ("ccir" or "ursi").  spacewx_ionosphere_opt = 2
+    # adds the storm-time foF2 correction (woof.spacewx.storm) from GFZ's ap,
+    # the latest observed ap persisted past the start, and its IONO_STORM row
+    # (needs a GFZ source, not a number).  0 runs no new code.
     spacewx_ionosphere_opt: int = _config_field(default=0, kw_only=True)
     spacewx_f107_source: str = _config_field(default="", kw_only=True)
     spacewx_f107_mode: str = _config_field(default="81day", kw_only=True)
@@ -2470,10 +2473,11 @@ def _validate_spacewx_ionosphere(cfg) -> None:
     opt = cfg.spacewx_ionosphere_opt
     source, mode, maps = (cfg.spacewx_f107_source, cfg.spacewx_f107_mode,
                           cfg.spacewx_ionosphere_maps)
-    if type(opt) is not int or opt not in (0, 1):
+    if type(opt) is not int or opt not in (0, 1, 2):
         raise ConfigurationRefused(
-            f"spacewx_ionosphere_opt={opt!r} must be 0 (no ionosphere) or 1 "
-            "(the climatological ionosphere in every history frame)")
+            f"spacewx_ionosphere_opt={opt!r} must be 0 (no ionosphere), 1 "
+            "(the climatological ionosphere in every history frame) or 2 "
+            "(with the storm-time correction)")
     if type(source) is not str or type(mode) is not str or type(maps) is not str:
         raise ConfigurationRefused(
             "spacewx_f107_source, spacewx_f107_mode and spacewx_ionosphere_maps "
@@ -2494,12 +2498,16 @@ def _validate_spacewx_ionosphere(cfg) -> None:
         return
     from woof.spacewx.history import IonosphereHistoryError, parse_f107_source
     try:
-        parse_f107_source(source)
+        kind, _value = parse_f107_source(source)
     except IonosphereHistoryError as exc:
         raise ConfigurationRefused(str(exc)) from None
+    if opt == 2 and kind == "value":
+        raise ConfigurationRefused(
+            "spacewx_ionosphere_opt = 2 reads ap from the GFZ index file, so "
+            "spacewx_f107_source must be 'gfz' or a GFZ-format file, not a number")
     if not radiation_enabled(cfg):
         raise ConfigurationRefused(
-            "spacewx_ionosphere_opt = 1 places the ionosphere on the radiation "
+            f"spacewx_ionosphere_opt = {opt} places the ionosphere on the radiation "
             "geometry's columns, and no radiation scheme is on "
             "(ra_lw_physics = ra_sw_physics = 0)")
 
