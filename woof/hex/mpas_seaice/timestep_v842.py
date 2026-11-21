@@ -393,13 +393,24 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
         consts = evp_v842.init_evp(m["dvEdge"][:ne], int(m["nEdgesSolve"]), solver["dynamicsTimeStep"].item(),
                                    solver["elasticTimeStep"].item())
     tangents = None
-    if configs.get("config_use_velocity_solver", True) and _scheme(configs) == "weak":
+    weak = configs.get("config_use_velocity_solver", True) and _scheme(configs) == "weak"
+    if weak_corrections and not weak:
+        raise ValueError(f"weak_corrections {tuple(weak_corrections)} need config_stress_divergence_scheme = "
+                         "'weak' with the velocity solver on")
+    if weak:
         # the weak form's metric terms: tan of the init's rotated latitudes, once
         from . import weak_v842
+        weak_v842._check_corrections(weak_corrections)
+        sphere = bool(configs.get("mesh:on_a_sphere", configs.get("on_a_sphere", False)))
+        radius = float(configs.get("mesh:sphere_radius", configs.get("sphere_radius", 0.0)))
+        if sphere and not radius > 0.0:
+            _refuse("mesh:sphere_radius", radius,
+                    "the weak form's metric terms divide by the sphere's radius, and on a sphere it must be "
+                    "given (0 would stand in 1 and scale every metric term by the radius)",
+                    "mesh:sphere_radius = the sphere's radius in m")
         vw = pools["velocity_weak"]
         tangents = tuple(cp.asarray(t) for t in weak_v842.metric_tangents(
             vw["latCellRotated"], vw["latVertexRotated"], metric_libm=metric_libm))
-        weak_v842._check_corrections(weak_corrections)
     tree = advection_tree(pools, configs) if configs.get("config_use_advection", False) else None
     itimestep = first_step
     for i in range(n_steps):

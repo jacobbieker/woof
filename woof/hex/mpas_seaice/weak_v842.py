@@ -198,11 +198,25 @@ def libm(name: str, real, metric_libm: str, x, y=None):
 
 # --- the init ----------------------------------------------------------------
 
+def _fma64(a: float, b: float, c: float) -> float:
+    """binary64 ``a*b + c`` with one rounding: ``math.fma`` (Python 3.13+),
+    else exact rational arithmetic and CPython's correctly rounded division."""
+    if hasattr(math, "fma"):
+        return math.fma(a, b, c)
+    if not (math.isfinite(a) and math.isfinite(b) and math.isfinite(c)):
+        return a * b + c
+    exact = Fraction(a) * Fraction(b) + Fraction(c)
+    try:
+        return float(exact)
+    except OverflowError:
+        return math.copysign(math.inf, exact)
+
+
 def _fma(a, b, c, real):
     """``round(a*b + c)`` at ``real``, exactly."""
     if real is np.float64:
-        return np.float64(math.fma(float(a), float(b), float(c)))
-    s = math.fma(float(a), float(b), float(c))
+        return np.float64(_fma64(float(a), float(b), float(c)))
+    s = _fma64(float(a), float(b), float(c))
     r = np.float32(s)
     if float(r) != s and math.isfinite(s):
         # a binary64 sum on a binary32 midpoint may have been rounded onto it
@@ -608,6 +622,14 @@ def final_divergence_shear_weak(*, mesh: dict, solver: dict, weak: dict, ridging
         np.int32(bool(use_column_package)), np.int32("weak_ridge_delta" in corrections), np.int32(ncs)))
 
 
+@lru_cache(maxsize=8)
+def _ones(device: int, n: int):
+    """A device nEdgesOnCell of ones (the variational per-point kernel's mask), once per size."""
+    import cupy as cp
+    with cp.cuda.Device(device):
+        return cp.ones(n, cp.int32)
+
+
 def principal_stresses(*, mesh: dict, weak: dict) -> None:
     """``principal_stresses_driver`` (weak), in place over the first
     ``nCellsSolve`` cells: velocity_v842's per-point kernel, one point per cell."""
@@ -622,7 +644,7 @@ def principal_stresses(*, mesh: dict, weak: dict) -> None:
     for name in ("stress11", "stress22", "stress12", "replacementPressure", "principalStress1",
                  "principalStress2"):
         _check(name, weak[name], dtype, (n_cells,))
-    ones = cp.ones(n_cells, cp.int32)
+    ones = _ones(cp.cuda.Device().id, n_cells)
     w = weak
     vel._function(precision, "seaice_principal_stresses_variational_v842")(vel._grid(ncs), (vel._BLOCK,), (
         w["principalStress1"], w["principalStress2"], w["stress11"], w["stress22"], w["stress12"],
