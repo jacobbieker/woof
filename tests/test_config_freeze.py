@@ -348,6 +348,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     assert names.pop() == "mynn_sfclay_psih_zolzt"
     assert RunConfig.__dataclass_fields__["mynn_sfclay_psih_zolzt"].default is False
     assert RunConfig.__dataclass_fields__["mynn_sfclay_psih_zolzt"].kw_only
+    # The opt-in YSU surface heat flux on theta (quirk pass), appended off.
+    assert names.pop() == "ysu_surface_heat_exner"
+    assert RunConfig.__dataclass_fields__["ysu_surface_heat_exner"].default is False
+    assert RunConfig.__dataclass_fields__["ysu_surface_heat_exner"].kw_only
     # The gridded urban morphology (woof.core.urban_param), appended unset.
     assert names.pop() == "urban_param_file"
     assert RunConfig.__dataclass_fields__["urban_param_file"].default == ""
@@ -984,6 +988,8 @@ def _check_frozen_defaults(actual):
                          ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
                          # the gridded urban morphology, unset
                          ("urban_param_file", ""),
+                         # the opt-in YSU surface heat flux on theta, off
+                         ("ysu_surface_heat_exner", False),
                          # the opt-in MYNN surface-layer 2 m / 10 m correction, off
                          ("mynn_sfclay_psih_zolzt", False),
                          # the opt-in resolved obstacles, off

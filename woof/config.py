@@ -2392,6 +2392,15 @@ class RunConfig:
     # BEP+BEM.  Empty runs the URBPARM table morphology, as before.
     urban_param_file: str = _config_field(default="", kw_only=True)
     # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
+    # appended off.  YSU (bl_pbl_physics = 1) adds the surface heat flux to
+    # potential temperature as a temperature flux (bl_ysu.F90:613, :687,
+    # :891, :1045) and converts the result back with pi (:1103), so the
+    # column receives HFX*pi rather than HFX: 4.5% of the surface heating is
+    # lost at 850 hPa, 14% at 600 hPa.  True divides HFX by the lowest
+    # level's pi before the unchanged kernel reads it; False is WRF's
+    # arithmetic word for word.  Read only where bl_pbl_physics = 1.
+    ysu_surface_heat_exner: bool = _config_field(default=False, kw_only=True)
+    # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
     # appended off.  The MYNN surface layer (sf_sfclay_physics = 5)
     # integrates the 2 m and 10 m heat profile from z0/L
     # (module_sf_mynn.F:826-827, 839-840, 910-911, 921-922) while its own
@@ -9473,6 +9482,20 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     if type(cfg.gf_deep_rain_evaporation_booking) is not bool:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking must be true or false")
+    if type(cfg.ysu_surface_heat_exner) is not bool:
+        raise ConfigurationRefused("ysu_surface_heat_exner must be true or false")
+    if cfg.ysu_surface_heat_exner and int(cfg.bl_pbl_physics) != 1:
+        raise ConfigurationRefused(
+            "ysu_surface_heat_exner corrects YSU's surface heat flux "
+            f"(bl_pbl_physics = 1); this run selects bl_pbl_physics = "
+            f"{cfg.bl_pbl_physics}, which never reads it")
+    if cfg.ysu_surface_heat_exner and int(cfg.sf_urban_physics) in (2, 3):
+        raise ConfigurationRefused(
+            "ysu_surface_heat_exner corrects the surface heat flux YSU's heat "
+            "solve adds; with BEP/BEM (sf_urban_physics = "
+            f"{cfg.sf_urban_physics}) WRF's YSU takes that heat from the "
+            "urban sources instead (bepswitch = 1), so the correction would "
+            "reach only the PBL diagnosis; drop it or the urban model")
     if type(cfg.mynn_sfclay_psih_zolzt) is not bool:
         raise ConfigurationRefused("mynn_sfclay_psih_zolzt must be true or false")
     if cfg.mynn_sfclay_psih_zolzt and int(cfg.sf_sfclay_physics) != 5:

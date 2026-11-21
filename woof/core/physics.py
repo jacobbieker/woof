@@ -5722,6 +5722,9 @@ class PhysicsDriver:
                 self.radiation_theta_forcing()),
             ysu_topdown_pblmix=cfg.ysu_topdown_pblmix,
             ysu_version=cfg.ysu_version,
+            # The opt-in surface heat flux on theta (default off: the
+            # historical unit).
+            surface_heat_exner=getattr(cfg, "ysu_surface_heat_exner", False) is True,
             # BEP/BEM's drag, heat and TKE sources (bl_ysu.F90 flag_bep
             # arm).  Passed ONLY when an urban model produced them, so the
             # non-BEP call is the historical one.

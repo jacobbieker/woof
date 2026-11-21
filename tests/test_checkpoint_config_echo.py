@@ -105,6 +105,9 @@ MOVED = {
     "gf_deep_rain_evaporation_booking": (
         dict(gf_deep_rain_evaporation_booking=True),
         {"gf_deep_rain_evaporation_booking"}),
+    "ysu_surface_heat_exner": (
+        dict(bl_pbl_physics=1, sf_sfclay_physics=1, ysu_surface_heat_exner=True),
+        {"ysu_surface_heat_exner", "ysu_version"}),
     "mynn_sfclay_psih_zolzt": (
         dict(sf_sfclay_physics=5, bl_pbl_physics=5, mynn_sfclay_psih_zolzt=True),
         {"mynn_sfclay_psih_zolzt"}),
@@ -236,6 +239,8 @@ DEFAULT_OFF = frozenset({
     "spacewx_epp_opt", "spacewx_epp_source",
     # The gridded urban morphology (woof.core.urban_param), absent unset.
     "urban_param_file",
+    # The opt-in YSU surface heat flux on theta, absent while off.
+    "ysu_surface_heat_exner",
     # The opt-in MYNN surface-layer 2 m / 10 m correction, absent while off.
     "mynn_sfclay_psih_zolzt",
     # TEMPO's optional coupling arms, absent while off.
