@@ -31,6 +31,14 @@ fork already had, upstream's keys and flags are now the only ones:
 
 New:
 
+- The WRF dry-step adjoint's window (`woof.grad.wrfplus.window.Window`)
+  can linearise about a supplied trajectory, as WRFPLUS does about the
+  nonlinear run's states: `forward(trajectory=states)` takes the state
+  each step starts from (a woof forecast with physics through
+  `trajectory_state`, or WRF's own), and `tl`/`ad` linearise step k about
+  `states[k]` instead of the window's own dry rerun. The forecast path is
+  unchanged.
+
 - The WRF dry-step tangent-linear and adjoint (`woof.grad.wrfplus.model`
   and `window.Window`) now cover specified lateral boundaries, which
   regional 4D-Var needs. The step binds the stage-1 relaxation fold, the
