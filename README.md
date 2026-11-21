@@ -1182,19 +1182,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   over N steps with checkpoints, and takes adjoint forcing at
   intermediate states for 4D-Var. Its TL can start from part of the
   state, with the rest zero, as WRFDA's TL start does
-  (`Window.tl(dx0, partial=True)`). The first moist pieces exist as
-  kernels but are not yet in the step: `calc_cq` (qv, or qv, qc and qr),
-  the pressure gradient's cqu/cqv and the moist buoyancy. The forecast
-  path does not import any of it.
-  (`Window.tl(dx0, partial=True)`). The diagnosis also takes qv on a
-  moist state (WRF's `qvf`), not yet in the step. The forecast path does
-  not import any of it.
-  (`Window.tl(dx0, partial=True)`). Moist scalar transport (sumflux and
-  the non-PD scalar update, `woof.grad.wrfplus.scalar`) is ported too,
-  not yet in the step. The forecast path does not import any of it.
-  (`Window.tl(dx0, partial=True)`). The moist boundary rows (qv's
-  relaxation and spec_bdy_final, flow_dep_bdy for hydrometeors) are ported
-  too, not yet in the step. The forecast path does not import any of it.
+  (`Window.tl(dx0, partial=True)`). It can also linearise about a
+  supplied trajectory instead of its own dry rerun, as WRFPLUS does
+  about the nonlinear run's states (`Window.forward(trajectory=...)`).
+  The step also covers a moist state without microphysics (qv, qc and
+  qr: calc_cq, the moist pressure gradient, buoyancy and diagnosis,
+  sumflux and the non-PD scalar update, and qv's boundary rows with
+  flow_dep_bdy for qc and qr). The forecast path does not import any of
+  it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
