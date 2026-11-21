@@ -73,14 +73,25 @@ def sumflux_shapes(geom) -> dict:
     return dict(zip(SUMFLUX + SUMFLUX_SRC + SUMFLUX_REF, (u, v, w) * 3))
 
 
-def _sf_check(geom, named) -> None:
+def _sf_check(geom, named) -> np.dtype:
+    """Shapes, contiguity, distinct buffers and one real type."""
     geom.validate()
     _check(geom, named, sumflux_shapes(geom), min_nz=1)
+    return _dtype([a for _, _, a in named])
+
+
+def _sf_named(geom, state=None, pert_state=None, traj=None, pert=None, srcs=()):
+    out = []
+    for label, d, names in (("state", state, SUMFLUX), ("pert", pert_state, SUMFLUX),
+                            ("traj", traj, srcs), ("pert", pert, srcs)):
+        if d is not None:
+            out += [(label, n, d[n]) for n in names]
+    return out
 
 
 def sumflux_zero_tl(state, pert_state, geom: SumfluxGeometry, *, nl=True) -> None:
     """``zero_sumflux``."""
-    _sf_check(geom, [("state", n, state[n]) for n in SUMFLUX])
+    _sf_check(geom, _sf_named(geom, state, pert_state if _tangent() else None))
     for n in SUMFLUX:
         if nl:
             state[n][...] = 0
@@ -89,6 +100,7 @@ def sumflux_zero_tl(state, pert_state, geom: SumfluxGeometry, *, nl=True) -> Non
 
 
 def sumflux_zero_ad(adj_state, geom: SumfluxGeometry) -> None:
+    _sf_check(geom, _sf_named(geom, adj_state))
     for n in SUMFLUX:
         adj_state[n][...] = 0
 
@@ -96,8 +108,8 @@ def sumflux_zero_ad(adj_state, geom: SumfluxGeometry) -> None:
 def sumflux_accumulate_tl(state, pert_state, traj, pert, geom: SumfluxGeometry,
                           *, nl=True) -> None:
     """``accumulate_sumflux``: ``ru_m += u_pp`` (and v, ww)."""
-    _sf_check(geom, [("state", n, state[n]) for n in SUMFLUX]
-              + [("traj", n, traj[n]) for n in SUMFLUX_SRC])
+    _sf_check(geom, _sf_named(geom, state, *((pert_state,) if _tangent() else (None,)),
+                              traj, pert if _tangent() else None, srcs=SUMFLUX_SRC))
     for m, s in zip(SUMFLUX, SUMFLUX_SRC):
         if nl:
             state[m] += traj[s]
@@ -106,6 +118,7 @@ def sumflux_accumulate_tl(state, pert_state, traj, pert, geom: SumfluxGeometry,
 
 
 def sumflux_accumulate_ad(adj_state, traj, adj, geom: SumfluxGeometry) -> None:
+    _sf_check(geom, _sf_named(geom, adj_state, traj=adj, srcs=SUMFLUX_SRC))
     for m, s in zip(SUMFLUX, SUMFLUX_SRC):
         adj[s] += adj_state[m]
 
@@ -114,9 +127,8 @@ def sumflux_finish_tl(state, pert_state, traj, pert, geom: SumfluxGeometry,
                       *, nl=True) -> None:
     """``finish_sumflux``: ``ru_m = ru_m / nsub + ru`` (and v, ww), the
     division and the add each rounded."""
-    _sf_check(geom, [("state", n, state[n]) for n in SUMFLUX]
-              + [("traj", n, traj[n]) for n in SUMFLUX_REF])
-    dt = _dtype([state[n] for n in SUMFLUX] + [traj[n] for n in SUMFLUX_REF])
+    dt = _sf_check(geom, _sf_named(geom, state, *((pert_state,) if _tangent() else (None,)),
+                                   traj, pert if _tangent() else None, srcs=SUMFLUX_REF))
     nsub = dt.type(geom.nsub)
     for m, r in zip(SUMFLUX, SUMFLUX_REF):
         if nl:
@@ -126,7 +138,7 @@ def sumflux_finish_tl(state, pert_state, traj, pert, geom: SumfluxGeometry,
 
 
 def sumflux_finish_ad(adj_state, traj, adj, geom: SumfluxGeometry) -> None:
-    nsub = np.dtype(adj_state[SUMFLUX[0]].dtype).type(geom.nsub)
+    nsub = _sf_check(geom, _sf_named(geom, adj_state, traj=adj, srcs=SUMFLUX_REF)).type(geom.nsub)
     for m, r in zip(SUMFLUX, SUMFLUX_REF):
         adj[r] += adj_state[m]
         adj_state[m][...] = adj_state[m] / nsub
@@ -161,7 +173,7 @@ class ScalarGeometry:
 
     def validate(self) -> None:
         self.adv().validate()
-        for name in ("spec", "has_msf", "held"):
+        for name in ("open_x", "open_y", "spec", "has_msf", "held"):
             if getattr(self, name) not in (0, 1):
                 raise ValueError(f"{name} must be 0 or 1, got {getattr(self, name)!r}")
         if self.held and not self.spec:
@@ -171,6 +183,12 @@ class ScalarGeometry:
                              f"{self.ny}x{self.nx}")
         if not self.spec and self.spec_zone:
             raise ValueError("spec_zone needs spec")
+        if self.spec and not (self.open_x and self.open_y):
+            # the ring is cleared on all four sides, as the primal does on
+            # a specified domain (both axes bounded)
+            raise ValueError("spec needs both axes bounded")
+        if not (np.isfinite(self.dt) and self.dt > 0):
+            raise ValueError(f"dt must be finite and > 0, got {self.dt!r}")
 
 
 def su_shapes(geom: ScalarGeometry) -> dict:
@@ -186,9 +204,13 @@ def su_active(geom: ScalarGeometry) -> tuple:
     return SU_ACTIVE if geom.held else tuple(n for n in SU_ACTIVE if n != "held")
 
 
-def _su_check(geom, named) -> None:
+def _su_check(geom, named) -> np.dtype:
+    """Shapes, contiguity, distinct buffers and one real type over every
+    array the call names (the species is named once: in the step it is
+    one array in the state and the trajectory, and in the perturbations)."""
     geom.validate()
     _check(geom, named, su_shapes(geom), min_nz=1)
+    return _dtype([a for _, _, a in named])
 
 
 _ADV_NAMES = {"tend": "tend", "q": "q", "ru": "ru_m", "rv": "rv_m", "rw": "ww_m",
@@ -251,12 +273,14 @@ def su_tl(state, pert_state, traj, pert, geom: ScalarGeometry, *, nl=True) -> No
     """TL of the species' stage update: ``state['q']`` (and the scratch
     ``tend``) from the trajectory, ``pert_state['q']`` from the
     perturbations of :func:`su_active`."""
+    tl = _tangent()
     names = [("state", n, state[n]) for n in SU_STATE]
     names += [("traj", n, traj[n]) for n in su_active(geom) + SU_PASSIVE
               if n not in SU_STATE]
-    _su_check(geom, names)
-    tl = _tangent()
-    dtype = _dtype([state["q"], traj["q0"], traj["mup"]])
+    if tl:
+        names += [("pert", n, pert_state[n]) for n in SU_STATE]
+        names += [("pert", n, pert[n]) for n in su_active(geom) if n not in SU_STATE]
+    dtype = _su_check(geom, names)
     dt = dtype.type(geom.dt)
     if nl:
         state["tend"][...] = 0
@@ -292,8 +316,8 @@ def su_ad(adj_state, traj, adj, geom: ScalarGeometry) -> None:
     the update."""
     names = [("adj", n, adj_state[n]) for n in SU_STATE]
     names += [("traj", n, traj[n]) for n in su_active(geom) + SU_PASSIVE]
-    _su_check(geom, names)
-    dtype = _dtype([adj_state["q"], traj["q0"], traj["mup"]])
+    names += [("adj", n, adj[n]) for n in su_active(geom) if n not in SU_STATE]
+    dtype = _su_check(geom, names)
     dt = dtype.type(geom.dt)
     c1h, chm0, chm = _masses(traj, dtype)
     q = chm0 * traj["q0"]

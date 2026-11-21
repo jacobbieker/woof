@@ -177,6 +177,37 @@ for op, cfgs in {CONFIGS!r}.items():
     assert not bad, bad
 
 
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_adjoint_in_one_dict(backend, tmp_path):
+    """The step passes one dict as the adjoint state and the input
+    adjoints (the species is both): the AD gives the separate-dict
+    result there, the species' own seed consumed before the advection
+    adds into it."""
+    dtn = "float32" if backend == "mlx" else "float64"
+    out = _run(backend, f'''
+dt = np.dtype({dtn!r})
+for op, cfgs in {CONFIGS!r}.items():
+    St, Out, A, G, T, P, _, adf = OPS[op]
+    for i, over in enumerate(cfgs):
+        g = G(**over)
+        X = A(g)
+        tr = dev(T(g, 71 + i, dt, hybrid=bool(i % 2)))
+        q = seeds(op, tr, 700 + i, dt)
+        sa, adj = run_ad(op, g, tr, q)
+        one = {{n: cp.zeros_like(tr[n]) for n in set(St) | set(X)}}
+        for n in Out:
+            one[n][...] = q[n]
+        adf(one, tr, one, g)
+        for n in set(St) | set(X):
+            want = adj[n] if n in X else sa[n]
+            scale = max(float(cp.abs(want).max()), 1e-300)
+            out[f"{{op}}/{{i}}/{{n}}"] = float(cp.abs(one[n] - want).max()) / scale
+''', tmp_path)
+    limit = 1e-6 if backend == "mlx" else 1e-14
+    bad = {k: v for k, v in out.items() if not v < limit}
+    assert not bad, bad
+
+
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
 def test_tl_matches_finite_differences(backend, tmp_path):
     """||NL(x + a dx) - NL(x) - a TL dx|| / ||a TL dx|| -> 0 as O(a)."""
@@ -261,11 +292,13 @@ for i, over in enumerate({CONFIGS["sf"]!r}):
 
 def test_geometry_rejects_unported_options():
     """A held tendency without a specified domain, a ring that does not
-    fit, flags outside 0/1, an unported advection order and empty axes are
-    refused, not run."""
+    fit, a specified domain with a periodic axis, flags outside 0/1, a
+    non-positive or non-finite dt, an unported advection order and empty
+    axes are refused, not run."""
     from woof.grad.wrfplus import cases as C
     for over in (dict(held=1), dict(spec=1, spec_zone=0), dict(spec=1, spec_zone=5),
-                 dict(spec_zone=1), dict(has_msf=2), dict(horder=2), dict(nx=0)):
+                 dict(spec_zone=1), dict(has_msf=2), dict(horder=2), dict(nx=0),
+                 dict(open_x=2), dict(spec=1, open_y=0), dict(dt=0.0), dict(dt=float("nan"))):
         with pytest.raises(ValueError):
             C.su_geometry(**over).validate()
     for over in (dict(nsub=0), dict(nz=0)):

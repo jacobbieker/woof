@@ -795,6 +795,8 @@ Each step is one small PR, taken to merged before the next widens.
      - dot product;
      - the adjoint accumulates, and the species, its tendency and the
        accumulators are consumed;
+     - the adjoint in one dict (as the step passes it) gives the
+       separate-dict result;
      - FD convergence;
      - the binary32 base gives `_advance_species_wrf`'s and the sumflux
        launches' words, and each update moves the species.
