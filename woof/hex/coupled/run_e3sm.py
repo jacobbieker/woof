@@ -73,27 +73,82 @@ class Components(Protocol):
 
 @dataclass(frozen=True)
 class Alarms:
-    """The ocean's and sea ice's coupling periods in coupler steps."""
+    """The driver's ocean and sea-ice alarms, as E3SM v3.2.0 sets them up.
+
+    ``ocean`` and ``seaice`` are the coupling periods (``ocn_cpl_dt``,
+    ``ice_cpl_dt``) in coupler steps; ``ocean_offset`` and ``seaice_offset``
+    the namelist's ``ocn_cpl_offset`` and ``ice_cpl_offset`` in coupler
+    steps; ``startup`` is a run that does not read a restart.
+
+    ``driver-mct/shr/seq_timemgr_mod.F90``: each offset is the namelist's
+    (1056-1057) plus one driver step (1074), at most the period (1067-1070)
+    and a multiple of the driver step (1076-1079). The sea ice's run alarm rings every
+    ``ice_cpl_dt`` from ``CurrTime + offset(ice)`` (1126-1133), the ocean's
+    every ``ocn_cpl_dt`` from ``CurrTime + offset(ocn)`` (1194-1201), and
+    the ocean's next alarm is that one a driver step earlier (1203-1213).
+    ``seq_timemgr_alarmInit`` moves the first ring to the first time after
+    ``CurrTime`` on that cadence (1737-1741). ``cime_comp_mod.F90`` advances
+    the clock before it reads the alarms (2848, 2855-2860), so coupler step
+    ``s`` (from 0) sees the time ``start + (s + 1) * dt``: the ocean runs at
+    ``(s - ocean_offset) % ocean == 0``, ends at
+    ``(s + 1 - ocean_offset) % ocean == 0`` and the sea ice runs at
+    ``(s - seaice_offset) % seaice == 0``.
+
+    The ocean's lag on a startup: ``skip_ocean_run`` is set unless the run
+    reads a restart (cime_comp_mod 1869-1873) and holds both ocean alarms
+    off until the run alarm has rung a second time (2948-2957). The
+    ocean's first window then runs on, unaveraged, to that second ring.
+    """
 
     ocean: int
     seaice: int
+    ocean_offset: int = 0
+    seaice_offset: int = 0
+    startup: bool = False
+
+    def __post_init__(self) -> None:
+        for name in ("ocean", "seaice"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 1:
+                raise ValueError(f"the {name} coupling period must be a positive whole number of coupler steps")
+        for name, period in (("ocean_offset", self.ocean), ("seaice_offset", self.seaice)):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+                raise ValueError(f"{name} must be a whole number of coupler steps")
+            if abs(value) > period:
+                raise ValueError(f"{name} ({value}) is larger than its coupling period ({period}): "
+                                 "seq_timemgr_clockInit stops ('offset too large')")
+        if not isinstance(self.startup, (bool, np.bool_)):
+            raise TypeError("startup must be a bool")
 
     @classmethod
-    def from_clock(cls, clock: CoupledClock, *, ocean_period: float, seaice_period: float) -> Alarms:
-        """From coupling periods in seconds, each a whole number of the clock's cadence."""
-        periods = {}
-        for name, seconds in (("ocean", ocean_period), ("seaice", seaice_period)):
+    def from_clock(cls, clock: CoupledClock, *, ocean_period: float, seaice_period: float,
+                   ocean_offset: float = 0.0, seaice_offset: float = 0.0, startup: bool = False) -> Alarms:
+        """From coupling periods and offsets in seconds, each a whole number of the clock's cadence."""
+        steps = {}
+        for name, seconds, positive in (("ocean", ocean_period, True), ("seaice", seaice_period, True),
+                                        ("ocean_offset", ocean_offset, False),
+                                        ("seaice_offset", seaice_offset, False)):
             ratio = seconds / clock.cadence
-            if seconds <= 0.0 or abs(ratio - round(ratio)) > 1e-9:
-                raise ValueError(f"the {name} coupling period {seconds}s is not a whole number of coupler steps "
-                                 f"of {clock.cadence}s")
-            periods[name] = int(round(ratio))
-        return cls(**periods)
+            if (positive and seconds <= 0.0) or abs(ratio - round(ratio)) > 1e-9:
+                label = f"the {name} coupling period" if positive else name
+                raise ValueError(f"{label} {seconds}s is not a whole number of coupler steps of {clock.cadence}s")
+            steps[name] = int(round(ratio))
+        return cls(**steps, startup=startup)
 
     def at(self, step: int) -> tuple[bool, bool, bool]:
         """The ocean's run alarm, the sea ice's, and the ocean's next alarm at coupler step ``step``."""
         k, m = self.ocean, self.seaice
-        return step % k == 0, step % m == 0, step % k == k - 1
+        ocn_run = (step - self.ocean_offset) % k == 0
+        ocn_next = (step + 1 - self.ocean_offset) % k == 0
+        ice_run = (step - self.seaice_offset) % m == 0
+        if self.startup:
+            # ocnrun_count after this step's increment: the run alarm's rings at steps 0..step
+            first = self.ocean_offset % k
+            rings = 0 if step < first else (step - first) // k + 1
+            if rings <= 1:
+                ocn_run = ocn_next = False
+        return ocn_run, ice_run, ocn_next
 
 
 def _host(array) -> np.ndarray:

@@ -67,6 +67,7 @@ fields; seed per case.
 | `no_component_maps` | 4 | ocean every 2nd | `ice_c2_ocn`, `ocn_c2_ice`, `atm_c2_ice` off: the mapped vectors stay zero |
 | `ice_not_prognostic` | 3 | ocean every 3rd | no sea-ice merge; its export still read |
 | `frac_abort_mid_run` | 3 | ocean every 3rd | the second step's sea-ice export below `seq_frac_check`'s bound: the chain stops in `seq_frac_set` (`aborts.json`) |
+| `ocean_startup_lag` | 7 | ocean every 3rd, startup | `skip_ocean_run`: both ocean alarms held off until the run alarm's second ring; a first window of 4 |
 
 Per step the stream also carries infodata's `nextsw_cday` and
 `flux_epbalfact` and, when flagged, new runoff, land-ice and wave exports to
