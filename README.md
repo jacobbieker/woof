@@ -1309,6 +1309,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   as WRFDA's `gen_be_ep2` does (to 2.8e-13 K in `t`; the rest word for
   word). Its analysis matches WRFDA's `wrfvar_output` to O7's tolerances:
   max |difference| at most 4.7e-5 of the RMS.
+  `woof.da.var.pairing` (Python API) pairs it with an LETKF cycle: the hybrid's
+  ensemble is the LETKF's forecast ensemble, and the LETKF's analysis members
+  are recentred on the variational analysis. Tested on synthetic grids only;
+  no cycling skill claim, and writing the members back is the controller's.
   FGAT (experimental; `woof var --fgat-obs obNN.ascii --fgat-first-guess fgNN`
   per time slot) compares each observation with the first guess at its
   slot's time, as WRFDA's `num_fgat_time` does. On a 7-slot 12-18Z case

@@ -1199,8 +1199,10 @@ one digest in fast and strict. The full-ensemble branch (`je_factor <= 1`,
 `jb_factor = -999`, static control variables dropped) builds its cost, but
 WRFDA's `precondition_cg` divides by zero there, so woof skips the empty blocks
 (as for `max_vert_var5 = 0`). O6's namelist leaves `precondition_cg` off; its
-diagonal is checked against a transcription of `da_minimise_cg`'s loop. Still open: the LETKF-cycling
-pairing and the OSSE half of GV3.
+diagonal is checked against a transcription of `da_minimise_cg`'s loop. The `woof var` door takes members and
+`woof.da.var.pairing` pairs the hybrid with an LETKF cycle (the LETKF's forecast
+ensemble as `x'_n`; its analysis members recentred on the variational mean,
+`gamma`-weighted; synthetic-grid tests, `ps` not analysed by the LETKF). Still open: the OSSE half of GV3.
 
 ### V4. Hydrometeor CVs, radar, GOES, radiances (9.5-16 w)
 
