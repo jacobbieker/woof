@@ -324,6 +324,10 @@ _DOMAIN_RUN_OVERRIDES = (
     # The opt-in GF deep evaporation booking, on the same terms: a [shared]
     # value reaches the cu_physics = 3 domains only.
     "gf_deep_rain_evaporation_booking",
+    # The opt-in MYNN surface-layer 2 m / 10 m heat profile from zt/L, on
+    # the same terms: a [shared] value reaches the sf_sfclay_physics = 5
+    # domains only.
+    "mynn_sfclay_psih_zolzt",
     # The opt-in resolved obstacles: buildings belong to one domain's grid
     # (an LES nest), so every obstacle key is per-domain.
     # WPS's gridded urban morphology is on one domain's grid.
@@ -4356,6 +4360,14 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     shared.get("bl_pbl_physics", RunConfig.bl_pbl_physics)))
         == SASE_PBL_SCHEME
         for dom in domain_tables)
+    # The opt-in MYNN surface-layer 2 m / 10 m correction is read only by
+    # the MYNN surface layer (sf_sfclay_physics = 5).
+    tree_runs_mynn_sl = any(
+        physics_mode.settings.get(
+            "sf_sfclay_physics",
+            dom.get("sf_sfclay_physics",
+                    shared.get("sf_sfclay_physics", RunConfig.sf_sfclay_physics))) == 5
+        for dom in domain_tables)
     # The same rule for the Grell-family keys.  clos_choice and ishallow
     # are read only where cu_physics = 3, and the wizard writes them in
     # [shared]; on a tree whose cumulus-off child sits under a
@@ -4966,6 +4978,9 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if (tree_runs_gf and kw.get("cu_physics", RunConfig.cu_physics) != 3
                 and "gf_deep_rain_evaporation_booking" not in dom):
             kw["gf_deep_rain_evaporation_booking"] = False
+        if (tree_runs_mynn_sl and kw.get("sf_sfclay_physics", RunConfig.sf_sfclay_physics) != 5
+                and "mynn_sfclay_psih_zolzt" not in dom):
+            kw["mynn_sfclay_psih_zolzt"] = False
         # G3-only shared controls reach only G3 domains. Explicit domain
         # controls remain validated, so an off-scheme value is not discarded.
         from woof.config import G3_RUN_DEFAULTS
@@ -6370,6 +6385,7 @@ def _public_config_value(value):
                                   ("solar_ssi_opt", 0), ("solar_ssi_source", ""),
                                   ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
                                   ("urban_param_file", ""),
+                                  ("mynn_sfclay_psih_zolzt", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

@@ -343,6 +343,11 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The opt-in MYNN surface-layer 2 m / 10 m heat profile from zt/L
+    # (quirk pass), appended off.
+    assert names.pop() == "mynn_sfclay_psih_zolzt"
+    assert RunConfig.__dataclass_fields__["mynn_sfclay_psih_zolzt"].default is False
+    assert RunConfig.__dataclass_fields__["mynn_sfclay_psih_zolzt"].kw_only
     # The gridded urban morphology (woof.core.urban_param), appended unset.
     assert names.pop() == "urban_param_file"
     assert RunConfig.__dataclass_fields__["urban_param_file"].default == ""
@@ -979,6 +984,8 @@ def _check_frozen_defaults(actual):
                          ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
                          # the gridded urban morphology, unset
                          ("urban_param_file", ""),
+                         # the opt-in MYNN surface-layer 2 m / 10 m correction, off
+                         ("mynn_sfclay_psih_zolzt", False),
                          # the opt-in resolved obstacles, off
                          *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field

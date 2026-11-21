@@ -538,6 +538,10 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The opt-in GF deep evaporation booking (cu_physics = 3 only, default
     # off): a tree prepared before it existed ran it off.
     "run.gf_deep_rain_evaporation_booking",
+    # The opt-in MYNN surface-layer 2 m / 10 m heat profile from zt/L
+    # (sf_sfclay_physics = 5 only, default off): a tree prepared before it
+    # existed ran it off.
+    "run.mynn_sfclay_psih_zolzt",
     # The opt-in TSI forcing (woof.spacewx), appended off.
     "run.solar_tsi_opt", "run.solar_tsi_source", "run.solar_tsi_mode",
     # The opt-in solar band shares (woof.spacewx), appended off.

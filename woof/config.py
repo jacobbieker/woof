@@ -2391,6 +2391,15 @@ class RunConfig:
     # for the single-layer UCM's NUDAPT arm, HI (118-132) for BEP and
     # BEP+BEM.  Empty runs the URBPARM table morphology, as before.
     urban_param_file: str = _config_field(default="", kw_only=True)
+    # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
+    # appended off.  The MYNN surface layer (sf_sfclay_physics = 5)
+    # integrates the 2 m and 10 m heat profile from z0/L
+    # (module_sf_mynn.F:826-827, 839-840, 910-911, 921-922) while its own
+    # log terms gz2ozt/gz10ozt and the first-level psih start at zt.  True
+    # takes zt/L (kernels/mynn_surface.cu MYNN_SL_PSIH_ZOLZT), which moves
+    # only T2/TH2/Q2 and the 2 m exchange coefficients; False is WRF's
+    # arithmetic word for word.  wrf_461 variant only.
+    mynn_sfclay_psih_zolzt: bool = _config_field(default=False, kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -9464,6 +9473,18 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     if type(cfg.gf_deep_rain_evaporation_booking) is not bool:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking must be true or false")
+    if type(cfg.mynn_sfclay_psih_zolzt) is not bool:
+        raise ConfigurationRefused("mynn_sfclay_psih_zolzt must be true or false")
+    if cfg.mynn_sfclay_psih_zolzt and int(cfg.sf_sfclay_physics) != 5:
+        raise ConfigurationRefused(
+            "mynn_sfclay_psih_zolzt corrects the MYNN surface layer's 2 m / "
+            "10 m heat profile (sf_sfclay_physics = 5); this run selects "
+            f"sf_sfclay_physics = {cfg.sf_sfclay_physics}, which never reads it")
+    if cfg.mynn_sfclay_psih_zolzt and cfg.mynn_sfclay_variant != "wrf_461":
+        raise ConfigurationRefused(
+            "mynn_sfclay_psih_zolzt corrects the wrf_461 MYNN surface layer; "
+            f"mynn_sfclay_variant = {cfg.mynn_sfclay_variant!r} integrates "
+            "every heat profile from z0/L by design")
     _validate_solar_tsi(cfg)
     _validate_solar_ssi(cfg)
     _validate_spacewx_ionosphere(cfg)

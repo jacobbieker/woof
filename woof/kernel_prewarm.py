@@ -353,6 +353,9 @@ def _variant_jobs(experiment, modules):
                 defines = (("MYNN_GSD41", 1),)
             elif name == "mynn_surface":
                 defines = MYNN_SFCLAY_DEFINES[getattr(run, "mynn_sfclay_variant", "wrf_461")]
+                if getattr(run, "mynn_sfclay_psih_zolzt", False) is True:
+                    from woof.core.mynn_sfclay import MYNN_SL_PSIH_ZOLZT_DEFINES
+                    defines = defines + MYNN_SL_PSIH_ZOLZT_DEFINES
             tiers = [defines] if defines else []
             if name == "advection":
                 if getattr(run, "momentum_adv_opt", 1) == 3:

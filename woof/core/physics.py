@@ -4407,6 +4407,7 @@ class PhysicsDriver:
                                  if cfg.spp_pbl else None),
                 variant=cfg.mynn_sfclay_variant,
                 ocean_z0=(self.ocean.feedback_z0 if getattr(self, "ocean", None) is not None else None),
+                psih_zolzt=getattr(cfg, "mynn_sfclay_psih_zolzt", False) is True,
             )
             if fractional_ruc:
                 # module_surface_driver.F:5441-5506.  Force the second call
@@ -4446,6 +4447,7 @@ class PhysicsDriver:
                                      if cfg.spp_pbl else None),
                     variant=cfg.mynn_sfclay_variant,
                     ocean_z0=(self.ocean.feedback_z0 if getattr(self, "ocean", None) is not None else None),
+                    psih_zolzt=getattr(cfg, "mynn_sfclay_psih_zolzt", False) is True,
                 )
 
                 # :5508-5554.  These diagnostics become grid-cell values

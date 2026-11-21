@@ -105,6 +105,9 @@ MOVED = {
     "gf_deep_rain_evaporation_booking": (
         dict(gf_deep_rain_evaporation_booking=True),
         {"gf_deep_rain_evaporation_booking"}),
+    "mynn_sfclay_psih_zolzt": (
+        dict(sf_sfclay_physics=5, bl_pbl_physics=5, mynn_sfclay_psih_zolzt=True),
+        {"mynn_sfclay_psih_zolzt"}),
     # The gridded urban morphology rides the single-layer UCM.
     "urban_param_file": (dict(sf_surface_physics=2, sf_urban_physics=1,
                               urban_param_file="geo_em.d01.nc"),
@@ -233,6 +236,8 @@ DEFAULT_OFF = frozenset({
     "spacewx_epp_opt", "spacewx_epp_source",
     # The gridded urban morphology (woof.core.urban_param), absent unset.
     "urban_param_file",
+    # The opt-in MYNN surface-layer 2 m / 10 m correction, absent while off.
+    "mynn_sfclay_psih_zolzt",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The RUC sea-ice threshold switch, absent at 0 as in a 2.8.5 header.
