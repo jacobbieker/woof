@@ -229,13 +229,16 @@ class HybridSeaIce:
     ``nextsw_cday`` the coupler's at start. ``trig`` ``(nCells, 8)`` is the
     rotation's words (:func:`~woof.hex.coupled.ice_coupling_e3sm.rotation_trig`
     over every cell with ``sphere_radius`` when not given). Construction is
-    ``ice_init_mct`` for an initial run."""
+    ``ice_init_mct`` for an initial run. ``basis`` and ``metric_libm`` go to
+    :func:`~woof.hex.mpas_seaice.timestep_v842.initialize` (the default
+    computes the variational basis from the mesh, as v8.4.2 does; at real(8)
+    its metric terms need ``metric_libm``)."""
 
     name = HYBRID_NAME
 
     def __init__(self, *, pools: dict, configs: dict, x2i_fields, i2x_fields, ice_cpl_dt: int,
                  nextsw_cday: float = -1.0, trig=None, sphere_radius: float | None = None,
-                 wav_ice_coup: str = "none") -> None:
+                 wav_ice_coup: str = "none", basis: str | None = None, metric_libm: str | None = None) -> None:
         import cupy as cp
         from woof.hex.mpas_seaice import coupling_prep_v842 as cprep
         from woof.hex.mpas_seaice import timestep_v842 as ts
@@ -275,7 +278,7 @@ class HybridSeaIce:
         self._export_pools["tracers_aggregate"] = ta
         # ice_init_mct: nextsw_cday, then the core's init
         self._nextsw(nextsw_cday)
-        self.clock = ts.initialize(pools=pools, configs=configs)
+        self.clock = ts.initialize(pools=pools, configs=configs, basis=basis, metric_libm=metric_libm)
         # the coupling preparation (E3SM's seaice_icepack_coupling_prep; v8.4.2's column one)
         cprep.coupling_prep(pools=pools, n_cells_solve=self.n_cells_solve, dt=float(configs["config_dt"]),
                             configs=configs)
