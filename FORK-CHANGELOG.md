@@ -51,6 +51,11 @@ New:
   boundary clock, relax_w, DFI forcing, streamed seams and a window
   crossing a boundary interval are refused by name. The forecast path is
   unchanged.
+- The WRF dry-step adjoint's diagnosis (`woof.grad.wrfplus`
+  `calc_p_rho_phi`) takes qv as an active input on a moist state, through
+  WRF's `qvf = 1 + rvovrd qv`. It is checked against woof's strict
+  primal word for word in binary32. It is not yet bound into the step.
+  The forecast path is unchanged.
 
 - Noah-MP is recorded as following WRF 4.7.1's Noah-MP submodule (e5c0859),
   at the user's request. No forecast answer changes, because the default

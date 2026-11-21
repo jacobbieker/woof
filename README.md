@@ -1186,6 +1186,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   kernels but are not yet in the step: `calc_cq` (qv, or qv, qc and qr),
   the pressure gradient's cqu/cqv and the moist buoyancy. The forecast
   path does not import any of it.
+  (`Window.tl(dx0, partial=True)`). The diagnosis also takes qv on a
+  moist state (WRF's `qvf`), not yet in the step. The forecast path does
+  not import any of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
