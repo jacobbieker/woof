@@ -1,4 +1,4 @@
-"""MPAS-Seaice v8.4.2's column biogeochemistry on the GPU: the brine height.
+"""MPAS-Seaice v8.4.2's column biogeochemistry on the GPU: the brine height and the vertical salinity.
 
 ``column_biogeochemistry`` (``mpas_seaice_column.F:2781-3272``) and the
 column package under it (``colpkg_biogeochemistry``) with
@@ -16,11 +16,29 @@ transcription; the framework (the tracer object's brine fraction, the init's
 grids and profiles, the ocean concentrations and flux resets) is
 :mod:`~woof.hex.mpas_seaice.column_v842`'s.
 
+The vertical salinity (``config_use_vertical_zsalinity``, BL99 only) is
+inert in v8.4.2: ``colpkg_init_parameters`` never sets the column package's
+``solve_zsal`` and the pool's ``verticalSalinity`` reaches the tracer arrays
+only with the vertical tracers, so the step is the brine height's above and
+the init only clears ``rayleighCriteriaReal``; that is the default, word for
+word. The opt-in correction ``zsal_solve``
+(:data:`~woof.hex.mpas_seaice.column_v842.CORRECTIONS`) solves it as the
+column package is written to, held word for word to the oracle built with
+``tools/mpas_seaice_oracle/zsal_solve.patch``: ``compute_microS`` (first ice,
+a brine height above ``maxhbr`` times the ice, old ice; its stop is checked),
+``update_hbrine`` with ``dh_direct``, and ``zsalinity`` (``solve_S_dt``'s
+Lapidus-smoothed advection-diffusion in ``max(1, int(dt/dts_b))`` steps, or
+its add/melt branch; ``bSin(k) > max_salin`` stops; the remap back to the ice
+salinity, ``column_sum_zsal``, ``merge_zsal_fluxes``). There the Rayleigh
+criterion: ``rayleighCriteriaReal`` is only ever zeroed, which changes nothing,
+since ``solve_S_dt`` forces it where its convective branch runs (the brine
+height above ``thinS`` = ``Ra_c``); ``totalVerticalSalinity`` is summed into and
+never reset.
+
 What it refuses, by name: the biogeochemistry without ``config_use_brine``
 (``colpkg_biogeochemistry`` writes the brine changes, which only the brine
 height's package allocates), every biogeochemistry flag but ``config_use_brine``
-(the vertical salinity, the vertical and skeletal biochemistry and their
-species, the shortwave bioabsorption, the z-aerosols:
+(the vertical and skeletal biochemistry and their species, the shortwave bioabsorption, the z-aerosols:
 :func:`~woof.hex.mpas_seaice.column_v842.refuse_unported`), more biology
 layers than ``compute_microS_mushy``'s ``trtmp(ntrcr+2)`` holds, and more
 than 64 categories. ``exp`` is the shared glibc transcription
@@ -67,14 +85,17 @@ from .velocity_v842 import COMPILE_OPTIONS
 SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_column.F:2781-3272",
     "src/core_seaice/column/ice_colpkg.F90:4884-5262",
-    "src/core_seaice/column/ice_brine.F90:17-579,841-943",
+    "src/core_seaice/column/ice_brine.F90:17-943",
+    "src/core_seaice/column/ice_zsalinity.F90:38-425,435-1023,1111-1177",
     "src/core_seaice/column/ice_zbgc_shared.F90:110-133,167-333",
+    "src/core_seaice/column/ice_therm_shared.F90:47-73",
     "src/core_seaice/column/ice_mushy_physics.F90:29-110,361-409",
 )
 _BLOCK = 64
 SEAICE_ERROR_COL_BGC = 13
 MAX_CATEGORIES = 64
-STOP_LABELS = {1: "ice_brine preflushing: fbri <= c0", 2: "ice: remap_layers_bgc error"}
+STOP_LABELS = {1: "ice_brine preflushing: fbri <= c0", 2: "ice: remap_layers_bgc error",
+               3: "bSin(k) > max_salin"}
 
 
 class CriticalAbort(MpasPortError):
@@ -105,7 +126,13 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
 def module_source(n_ice_layers: int, n_bio_layers: int) -> str:
     body = files("woof.hex.mpas_seaice").joinpath("column_bgc_v842.cu").read_text(encoding="utf-8")
     return (f"#define COL_NILYR {int(n_ice_layers)}\n#define COL_NBLYR {int(n_bio_layers)}\n"
-            + cv.module_source() + "\n" + body)
+            + cv.module_source() + "\n" + zbgc_shared_source() + "\n" + body)
+
+
+def zbgc_shared_source() -> str:
+    """column_zbgc_shared_v842.cu: remap_zbgc and calculate_Tin_from_qin, which
+    the ITD thermodynamics share under ``zsal_solve``."""
+    return files("woof.hex.mpas_seaice").joinpath("column_zbgc_shared_v842.cu").read_text(encoding="utf-8")
 
 
 @lru_cache(maxsize=None)
@@ -145,10 +172,16 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
     t, ist, mg, oc, bgc = (pools["tracers"], pools["icestate"], pools["melt_growth_rates"],
                            pools["ocean_coupling"], pools["biogeochemistry"])
     tr_brine = bool(configs["config_use_brine"])
+    solve_zsal = cv.solves_zsal(configs)
+    flags = int(tr_brine) | int(solve_zsal) << 1
     status = cp.zeros(max(n_solve, 1), np.int32)
+    if solve_zsal:
+        zsal = need(t, "verticalSalinity", (n_cells + 1, ncat, nbl))
+    else:
+        zsal = cp.zeros(1, np.float64)       # never read without the vertical salinity
     args = (
         status, np.float64(configs["config_dt"]),
-        np.float64(configs["config_bio_gravity_drainage_length_scale"]), np.int32(ncat), np.int32(tr_brine),
+        np.float64(configs["config_bio_gravity_drainage_length_scale"]), np.int32(ncat), np.int32(flags),
         np.int32(n_solve),
         need(bgc, "biologyGrid", (nbl + 2,)), need(bgc, "interfaceBiologyGrid", (nbl + 1,)),
         need(bgc, "verticalGrid", (nil + 1,)),
@@ -170,6 +203,10 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
         need(bgc, "darcyVelocityBio", cc), need(bgc, "zSalinityIceDensity", cc), need(bgc, "netBrineHeight", c1),
         need(bgc, "atmosBlackCarbonFlux", (n_cells + 1, 2)), need(bgc, "atmosDustFlux", (n_cells + 1, 4)),
         need(bgc, "totalSkeletalAlgae", c1), need(bgc, "bioShortwaveFluxCell", (n_cells + 1, nbl + 1)),
+        np.float64(cv.zsalinity_dts(nbl)), np.float64(configs["config_zsalinity_gravity_drainage_scale"]),
+        np.float64(configs["config_zsalinity_molecular_sublayer"]), need(t, "surfaceTemperature", cat1), zsal,
+        need(bgc, "bioPermeability", (n_cells + 1, ncat, nbl + 1)), need(bgc, "totalVerticalSalinity", c1),
+        need(bgc, "zSalinityFlux", c1), need(bgc, "zSalinityGDFlux", c1),
     )
     if n_solve:
         # atmosBioFluxes(:,:) = 0 on the first cell's turn: the whole array

@@ -208,14 +208,16 @@ expected.
 |---|---|---|---|
 | P1 | `config_use_column_biogeochemistry` with `config_use_brine` only | the tracer object's brine fraction; `colpkg_init_hbrine`, `colpkg_init_zbgc`'s brine part, `init_column_biogeochemistry_profiles`, the coupler's ocean concentrations and flux resets; `column_biogeochemistry`'s brine path (`preflushing_changes`, `compute_microS_mushy`, `update_hbrine`, `calculate_drho`) (`woof/hex/mpas_seaice/column_bgc_v842.py`, `tests/test_mpas_seaice_bgc_brine_parity.py`) | the init (BL99, mushy, a brine-height restart, three layers with CESM ponds); the stage with mushy and BL99, a short drainage length, four layers and three categories, and an abort |
 | P1b | the same, through the rest of the column | the brine fraction carried through the ITD (`add_new_ice_bgc`, `zap_small_areas`), ridging, the column step (`column_biogeochemistry` after the vertical thermodynamics; `seaice_column_reinitialize_diagnostics_bgc`, refused without the correction `bgc_inactive_diagnostics` because v8.4.2 zeroes the unallocated `totalChlorophyll`) and the coupled step (`coupling_prep`'s and `scale_fluxes`' ocean biogeochemistry fluxes); the remap already carried it and its oracle cases test it (`tests/test_mpas_seaice_bgc_brine_carry_parity.py`) | five ITD and three ridging cases; the column step over 3 steps (three cases); the coupled step with ridging (two cases, without advection) |
-| P2 | `config_use_vertical_zsalinity` (needs brine and BL99) | `ice_zsalinity.F90`: `zsalinity`, `solve_zsalinity`, `solve_S_dt`, the salt fluxes, the Rayleigh criterion and the salinity's feedback into the thermodynamics | the stage with the Rayleigh criterion met and not; the column step; a melt season |
+| P2 | `config_use_vertical_zsalinity` (needs brine and BL99) | v8.4.2 never sets the column package's `solve_zsal` (`colpkg_init_parameters`) and copies `verticalSalinity` only with the vertical tracers, so by default the vertical salinity is inert: the tracer count, the init's Rayleigh criterion, the brine height's step, BL99's `dTemp` 0.02 (`tests/data/oracles/mpas_seaice_bgc_zsal`). The opt-in correction `zsal_solve` solves it: `compute_microS`, `update_hbrine`'s `dh_direct`, `ice_zsalinity.F90` (`zsalinity`, `solve_zsalinity`, `solve_S_dt`, the salt fluxes, `column_sum_zsal`, `merge_zsal_fluxes`) and `dTemp` 0.1, held to an oracle built with `tools/mpas_seaice_oracle/zsal_solve.patch` (`tests/test_mpas_seaice_bgc_zsal_parity.py`) | inert: the init, the stage, a remap abort, BL99's thermodynamics; `zsal_solve`: the init and its restart, the stage (the Rayleigh criterion met and not, a brine height above `maxhbr`, one substep, a molecular sublayer), the remap and `max_salin` aborts, BL99's thermodynamics in winter and in a melt season |
+| P2b | the same, through the rest of the column (inert) | v8.4.2's inert zsal tracers carried by the ITD, ridging, the column step and the coupled step: counted, never copied, `cleanup_itd`'s zero `dfzsal`, the step's zeroed salinity fluxes; `coupling_prep` takes it (no ocean flux of its own) (`tests/test_mpas_seaice_bgc_zsal_carry_parity.py`, `tests/data/oracles/mpas_seaice_bgc_zsal_carry`) | the ITD (update-ocean, delta function), ridging (Thorndike/Hibler, subcycles), two column steps, the coupled step |
+| P2c | the same under `zsal_solve` | done: the ITD's zsal branches (`add_new_ice`'s `fzsal` and unmixed `sice`, `add_new_ice_bgc`'s `adjust_tracer_profile` with `regrid_stationary` and its remap stop as an ITD abort, the first category's `Tsfc`, `lateral_melt_bgc`, `zap_small_areas`' `dfzsal`), the ridging's cleanup, and `zsalinity` inside the column and coupled steps, against the patched oracle (`tests/test_mpas_seaice_bgc_zsal_solve_carry_parity.py`, `tests/data/oracles/mpas_seaice_bgc_zsal_solve_carry`). The oracle driver's steps now init `dts_b` as the model does | the ITD (update-ocean, delta function, one category, the regrid abort), ridging (Thorndike/Hibler, subcycles), two column steps, the coupled step |
 | P3 | `config_use_vertical_tracers` with `config_use_nonreactive` only | the z-tracer core: the bio grid, mobile fractions, transport without reactions (the FCT matrix and correction, `tridiag_solverz`, `thin_ice_flux`, the conservation check), new ice and lateral melt, ridging, the remap, the snow and ice tracer split, the ocean fluxes | the stage with thin and thick ice; the column step with the ITD; the coupled step with advection |
 | P4 | `config_use_zaerosols`, `config_use_shortwave_bioabsorption` (needs P3) | the aerosol z-tracers; chlorophyll and aerosols in the delta-Eddington shortwave (`dEdd_algae`) | z-aerosol transport; the radiation stage; the column step |
 | P5a | `config_use_vertical_biochemistry` | `algal_dyn`, `zbio`: algae, nitrate, ammonium, silicate | the stage; the column step; a nutrient-limited case |
 | P5b | the same | carbon (DOC, DIC), DON, DMS, iron, humics | the same per species group |
 | P6 | `config_use_skeletal_biochemistry` | the bottom layer's biogeochemistry (`sklbio`, `skl_biogeochemistry`); exclusive with the z-tracers, so it can follow P1 directly | the stage; the column step |
 
-The order is P1, P1b, P2, P3, P4, P5a, P5b; P6 any time after P1, and the
+The order is P1, P1b, P2, P2b, P2c, P3, P4, P5a, P5b; P6 any time after P1, and the
 NCAR aerosols as a small PR whenever it fits.
 
 ## MPAS-Ocean (`core_ocean`, about 80,000 lines)
@@ -342,8 +344,7 @@ NCAR aerosols as a small PR whenever it fits.
    enthalpy solvers, the radial hydrology test and a marine variant, the
    enthalpy benchmark), each on a uniform and a variable resolution periodic
    hexagonal mesh (`tests/test_mali_forward_parity.py`). Refused by name:
-   MPAS's restart stream (`config_do_restart`), RK4, the statistics, the
-   analysis members, intervals with months, years on the Gregorian calendar,
+   MPAS's restart stream (`config_do_restart`), RK4, analysis members other than globalStats and regionalStats, intervals with months, years on the Gregorian calendar,
    fractions of a second. `li_SGH_init` gives grounded ice below sea level
    the ocean's water pressure (it reads a mask holding only the initial
    extent bit); `woof_sgh_init_mask = 'corrected'` computes the mask first,
@@ -375,7 +376,25 @@ NCAR aerosols as a small PR whenever it fits.
    calving) copied into `normalVelocity` each step and zeroed off the
    dynamic ice; three forward cases on both meshes hold it to the oracle's
    words. The higher-order package's `dirichletVelocityMask` is carried
-   unchanged: only the Albany solvers read it. The statistics are next.
+   unchanged: only the Albany solvers read it. The statistics
+   (`li_compute_statistics`, `config_stats_interval` and
+   `config_write_stats_on_startup`; `woof/hex/mpas_ice/statistics_v842.py`)
+   are reproduced on the host at RKIND in the Fortran's summation order:
+   every word the reductions return and every character of the log report
+   match the oracle (v8.4.2's `mpas_li_statistics.F` compiled verbatim, its
+   reductions and log recorded by the stubs) over four cases on both
+   meshes. The reports go to a callback, the `woof.hex.mpas_ice` logger, or
+   the run door's `statistics.log`. v8.4.2 takes the extrema over ice-free
+   cells and edges too; `woof_statistics_extrema = 'ice'` restricts them,
+   off by default. The analysis members `globalStats` and `regionalStats`
+   (`woof/hex/mpas_ice/analysis_v842.py`) match v8.4.2's driver and members
+   compiled verbatim word for word, and compute when the model does: on
+   startup, at 'dt', at an interval on the stream's reference time (the
+   alarm rebuilt wherever a run resumes, as MPAS's restart does), and at
+   'output_interval' when the caller says the stream rings. Each compute's
+   words go to the members' pools and a callback; the run door writes them
+   to `<stream_name>.nc`. A mean over no ice is v8.4.2's NaN (x86-64's,
+   bit for bit, on any host); `woof_analysis_empty = 'corrected'` reports 0.
 6. **The Albany first-order (Blatter-Pattyn) Stokes solver**
    (`config_velocity_solver` = 'FO', also 'L1L2' and 'Stokes'). This is a C++
    finite-element code built on Trilinos (Kokkos assembly, NOX/Belos/MueLu
@@ -500,6 +519,58 @@ matched exchange unless asked.
 5. The coupled ocean + sea-ice step on `woof/hex/coupled`, with the exchange
    checked against the E3SM merge. The sea ice's time step with the
    column package is ported (above); the coupled step is not built yet.
+6. The ocean component under the coupler, option (a): "E3SM v3.2.0
+   coupler with MPAS v8.4.2 components, not an E3SM configuration"
+   (`woof/hex/coupled/hybrid_ocean.py`, registry
+   `e3sm-v3.2.0-coupler+mpas-v8.4.2`,
+   `tests/test_e3sm_hybrid_ocean_parity.py`). The MPAS v8.4.2 ocean runs as
+   `ocn_init_mct` and `ocn_run_mct` run E3SM's: at start, the forcing is
+   built again, the clock moves to its first coupling alarm without a step,
+   the means are reset and taken once, then the export and the import of
+   the zeroed x2o; each window, the import, the means reset
+   (v8.4.2's `ocn_time_average_coupled_init`), `ocn_cpl_dt / config_dt`
+   steps (forcing built frazil first, as E3SM builds it), then the export.
+   The constants are E3SM's build's (`MPAS_ESM_SHR_CONST`: `T0_Kelvin`
+   273.15, `rho_sw` 1026) by default, or v8.4.2's own (`constants='mpas'`).
+   The sea-ice pressure cap takes v8.4.2's `gravity = 9.80616_RKIND`.
+   The oracle (`tools/e3sm_coupler_oracle/run_hybrid_ocean.F90`) is that
+   sequence around v8.4.2's forward mode, with E3SM's import and export
+   cut verbatim and compiled against v8.4.2's modules, real(r8), on CUDA
+   and Metal. `hybrid_ocean.DIVERGENCES` lists each place E3SM's loop or
+   cap does something v8.4.2's lacks: ported, refused by name, or left out
+   with the reason. The sea ice under the same coupler is
+   `woof/hex/coupled/hybrid_seaice.py` (`tests/test_e3sm_hybrid_seaice_parity.py`).
+   The MPAS v8.4.2 sea ice (column package, velocity solver) runs as
+   `ice_init_mct` and `ice_run_mct` run E3SM's.
+   - At start: `nextsw_cday` into `dayOfNextShortwaveCalculation`, the
+     core's init, v8.4.2's `seaice_column_coupling_prep` where E3SM calls
+     `seaice_icepack_coupling_prep`, the export, and the import of the
+     zeroed x2i.
+   - Each window: `seaice_column_reinitialize_fluxes` once, the import,
+     `nextsw_cday`, and v8.4.2's `post_atmospheric_coupling` and
+     `post_oceanic_coupling` (a new kernel, `post_coupling_v842`). Then
+     `ice_cpl_dt / config_dt` steps with the counter restarted and no
+     `seaice_timestep_finalize`. On the run's first step only,
+     `seaice_init_post_clock_advance` runs. Then the export.
+   - The cap's constants and Icepack's three functions are v8.4.2's
+     stand-alone column package's (cice constants: `cp_ice` 2106, `cp_ocn`
+     4218, `Lfresh` 334000). The oracle supplies them through renames only.
+   - `run_hybrid_seaice.F90` is that sequence around `run_column`'s
+     `seaice_step` build. Word-exact on CUDA on 4 cases: BL99 and mushy,
+     dEdd and ccsm3, 1 and 2 steps a window, rotated and unrotated.
+   - `hybrid_seaice.DIVERGENCES` lists each difference. v8.4.2's ESM build
+     (`-Dcoupled -DCCSMCOUPLED` and `constants/cesm`) is left out with its
+     reason; it is later work alongside (b). Under that build the zenith
+     angle comes from `nextsw_cday`, BL99's tolerances and `hi_min` differ,
+     and the constants are `shr_const`'s.
+7. Later work, option (b): port E3SM v3.2.0's own MPAS-Ocean
+   (`components/mpas-ocean`) and MPAS-Seaice (`components/mpas-seaice`),
+   which have moved away from MPAS-Model v8.4.2. Their land-ice fluxes,
+   frazil, equation of state, constants, GM/submesoscale/Redi, waves,
+   removed runoff, icebergs, the 10 m wind and the 3-D thermal forcing
+   differ or are absent in v8.4.2. Option (b) would be a real E3SM
+   configuration and would retire most of the refusals in (a). It is not
+   started.
 
 The matched exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
 are the ones agreed with the MALI port's ocean seam. Land ice sends

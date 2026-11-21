@@ -6,12 +6,13 @@
 #
 # As build.sh's oracles, plus the forward mode's own code, all compiled
 # verbatim and checked against SOURCES.sha256: mpas_li_core.F,
-# mpas_li_time_integration.F, the framework's mpas_timekeeping.F with
-# mpas_string_utils.F, and the ESMF time library it wraps
-# (src/external/esmf_time_f90, -DHIDE_MPI).  stubs.F90 is compiled with
+# mpas_li_time_integration.F, mpas_li_statistics.F, the analysis-member
+# driver with its globalStats and regionalStats members, the framework's
+# mpas_timekeeping.F with mpas_string_utils.F, and the ESMF time library it
+# wraps (src/external/esmf_time_f90, -DHIDE_MPI).  stubs.F90 is compiled with
 # -DMALI_REAL_TIMEKEEPING (its stand-in mpas_timekeeping gives way to the real
-# one), and stubs_forward.F90 adds the stream manager, RBF, decomposition,
-# analysis-member and statistics stand-ins mpas_li_core.F USEs.  The
+# one), and stubs_forward.F90 adds the stream manager, RBF and decomposition
+# stand-ins mpas_li_core.F USEs.  The
 # reconstruction cut gains a no-op mpas_init_reconstruct: the coefficients
 # are the input mesh's.  The objects must contain no FMA instruction.
 set -euo pipefail
@@ -43,7 +44,9 @@ units=(framework/mpas_constants operators/mpas_vector_operations operators/mpas_
        core_landice/mode_forward/mpas_li_advection core_landice/mode_forward/mpas_li_calving
        core_landice/mode_forward/mpas_li_velocity_simple core_landice/mode_forward/mpas_li_velocity
        core_landice/mode_forward/mpas_li_subglacial_hydro core_landice/mode_forward/mpas_li_time_integration_fe
-       core_landice/mode_forward/mpas_li_time_integration core_landice/mode_forward/mpas_li_core)
+       core_landice/mode_forward/mpas_li_time_integration core_landice/mode_forward/mpas_li_statistics
+       core_landice/analysis_members/mpas_li_global_stats core_landice/analysis_members/mpas_li_regional_stats
+       core_landice/analysis_members/mpas_li_analysis_driver core_landice/mode_forward/mpas_li_core)
 reconstruct_cut="${build_dir}/mpas_vector_reconstruction_cut.F"
 {
     printf 'module mpas_vector_reconstruction\n  use mpas_derived_types\n  use mpas_pool_routines\n  use mpas_threading\n'
