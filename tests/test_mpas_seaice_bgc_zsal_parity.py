@@ -288,10 +288,12 @@ def _oracle_toolchain() -> tuple[str, Path] | None:
                     or platform.libc_ver() != ("glibc", "2.44"),
                     reason="the column oracle's words are the x86-64 glibc 2.44 host's libm (the fixtures', "
                            "PROVENANCE.md); it needs gfortran (pixi -e mpas-oracle) and WOOF_MPAS_V842_SOURCE")
-@pytest.mark.parametrize("which, patch", [("zsal", ""), ("zsal_solve", "zsal_solve")])
+@pytest.mark.parametrize("which, patch", [("zsal", ""), ("zsal_solve", "zsal_solve"), ("zsal_carry", ""),
+                                          ("zsal_solve_carry", "zsal_solve")])
 def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path, which, patch):
     gfortran, source = _oracle_toolchain()
-    fixture = INERT if which == "zsal" else SOLVE
+    fixture = {"zsal": INERT, "zsal_solve": SOLVE, "zsal_carry": co.BGC_ZSAL_CARRY_FIXTURE_DIR,
+               "zsal_solve_carry": co.BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR}[which]
     subprocess.run(["bash", str(ROOT / "tools" / "mpas_seaice_oracle" / "build.sh"), str(source),
                     str(tmp_path / "build")], check=True,
                    env={**os.environ, "GFORTRAN": gfortran, "WOOF_ORACLE_PATCH": patch})
