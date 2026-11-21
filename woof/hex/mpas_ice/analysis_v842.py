@@ -28,7 +28,9 @@ edge sums from 0 in sequence (``np.add.accumulate``, never pairwise; the
 grounding-line flux edge by edge, level by level), the extrema by strict
 comparison from the Fortran's sentinels (100000 m for the global minimum
 thickness, 10000 m for a region's, 0 for the maxima). A division of 0 by 0
-gives the NaN x86-64 gives (the sign bit set), whatever the host.
+gives the NaN x86-64 gives (the sign bit set), whatever the host; gfortran
+compiles ``-1.0 * a / b / c`` as ``-(a / b / c)``, so the melt rates' NaN
+has it clear.
 
 On one rank every reduction is the identity. Held to v8.4.2's driver and
 members compiled verbatim (``tools/mali_oracle/run_forward.F90``,
@@ -234,6 +236,16 @@ def _div(a, b, real):
     return q
 
 
+def _negated(x):
+    """``-1.0_RKIND * a / b / c`` as gfortran -O0 compiles it: ``-(a / b /
+    c)``, the sign flipped last (exact for every number; a NaN quotient
+    comes out with its sign bit flipped, as the oracle's does)."""
+    real = type(x)
+    u = np.uint32 if real is np.float32 else np.uint64
+    flip = u(0x80000000) if real is np.float32 else u(0x8000000000000000)
+    return (np.array(x, real).view(u) ^ flip).view(real)[()]
+
+
 def _running(values: np.ndarray, assigned: np.ndarray, init, larger: bool, positive: bool = False):
     """``if (values(i) > best [.and. values(i) > 0]) best = assigned(i)``
     over i in order (``<`` when not ``larger``)."""
@@ -313,8 +325,8 @@ def global_stats(pools: dict, config: dict) -> dict:
         "volumeAboveFloatation": vaf, "groundingLineFlux": gl,
         "iceThicknessMean": _div(vol, area, real),
         "avgNetAccumulation": _div(_div(smb, area, real), rhoi, real),
-        "avgGroundedBasalMelt": _div(_div(real(real(-1.0) * gbmb), garea, real), rhoi, real),
-        "avgSubshelfMelt": _div(_div(real(real(-1.0) * fbmb), farea, real), rhoi, real),
+        "avgGroundedBasalMelt": _negated(_div(_div(gbmb, garea, real), rhoi, real)),
+        "avgSubshelfMelt": _negated(_div(_div(fbmb, farea, real), rhoi, real)),
         "iceThicknessMin": t_min, "iceThicknessMax": t_max,
         "surfaceSpeedMax": real(s_max * scyr), "basalSpeedMax": real(b_max * scyr)}
     if config.get("woof_analysis_empty", "v842") == "corrected":
@@ -373,8 +385,8 @@ def regional_stats(pools: dict, config: dict) -> dict:
             "regionalVolumeAboveFloatation": vaf, "regionalSumGroundingLineFlux": gl,
             "regionalIceThicknessMean": _div(vol, area, real),
             "regionalAvgNetAccumulation": _div(_div(smb, area, real), rhoi, real),
-            "regionalAvgGroundedBasalMelt": _div(_div(real(real(-1.0) * gbmb), garea, real), rhoi, real),
-            "regionalAvgSubshelfMelt": _div(_div(real(real(-1.0) * fbmb), farea, real), rhoi, real),
+            "regionalAvgGroundedBasalMelt": _negated(_div(_div(gbmb, garea, real), rhoi, real)),
+            "regionalAvgSubshelfMelt": _negated(_div(_div(fbmb, farea, real), rhoi, real)),
             "regionalIceThicknessMin": t_min, "regionalIceThicknessMax": t_max,
             "regionalSurfaceSpeedMax": real(s_max * scyr), "regionalBasalSpeedMax": real(b_max * scyr)}
         if empty:

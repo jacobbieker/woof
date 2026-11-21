@@ -28,7 +28,8 @@ def _value(v) -> str:
 
 def write_namelist(path, config: dict) -> None:
     lines = ["&landice"]
-    lines += [f"    {k} = {_value(v)}" for k, v in config.items() if k not in ("on_a_sphere", "sphere_radius")]
+    lines += [f"    {k} = {_value(v)}" for k, v in config.items()
+              if k not in ("on_a_sphere", "sphere_radius") and not k.startswith("stream:")]
     path.write_text("\n".join(lines + ["/", ""]), encoding="utf-8")
 
 
@@ -40,14 +41,15 @@ def write_input(path, case: dict, skip: tuple[str, ...] = ()) -> None:
         ds.createDimension("Time", None)
         ds.createDimension("StrLen", 64)
         for name in ("nCells", "nEdges", "nVertices", "nVertLevels", "nVertInterfaces", "maxEdges", "maxEdges2",
-                     "vertexDegree"):
-            ds.createDimension(name, dims[name])
+                     "vertexDegree", "nRegions"):
+            if name in dims:
+                ds.createDimension(name, dims[name])
         ds.createDimension("TWO", 2)
         ds.createDimension("R3", 3)
         ds.setncattr("on_a_sphere", "YES" if case["config"].get("on_a_sphere") else "NO")
         ds.setncattr("sphere_radius", float(case["config"].get("sphere_radius", 0.0)))
         for pool, name, kind, shape in fo.fields(case):
-            if kind == "d" or pool == "scratch" or "@" in name or name in skip:
+            if kind == "d" or pool in ("scratch", "globalStatsAM", "regionalStatsAM") or "@" in name or name in skip:
                 continue
             value = case["pools"][pool][name]
             if kind == "c":
@@ -90,7 +92,8 @@ def _run(tmp_path, case: dict, *extra: str, skip=()) -> int:
 @pytest.mark.parametrize("name, precision", [
     ("dome_uniform", "r4"), ("hydro_radial_uniform", "r4"), ("eismint2_a_temperature_varres", "r8"),
     ("dome_adaptive_varres", "r8"), ("simple_radial_shelf_varres", "r4"), ("simple_rim_uniform", "r8"),
-    ("stats_dome_varres", "r4"), ("stats_simple_shelf_uniform", "r8"),
+    ("stats_dome_varres", "r4"), ("stats_simple_shelf_uniform", "r8"), ("am_marine_varres", "r4"),
+    ("am_marine_uniform", "r8"),
 ])
 def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
     case = _case(name, precision)
@@ -101,8 +104,8 @@ def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
     compared = 0
     for pool, field in fo.outputs(case):
         key = f"{pool}/{field}"
-        if key not in pinned or "@" in field:   # a second time level lives in restart.npz only
-            continue
+        if key not in pinned or "@" in field or pool in fo.AM_POOLS:
+            continue   # a second time level lives in restart.npz only; the members' words in their files
         if pinned[key].dtype.kind in "SU":
             assert got[field] == str(pinned[key]).rstrip(), field
         else:
@@ -114,6 +117,26 @@ def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
     assert log.exists() == fo.stats_on(case["config"])
     if log.exists():
         assert fo.stats_log(log.read_text().splitlines()) == str(pinned["stats/log"])
+    # the analysis members: each compute a record of its stream's file
+    if fo.am_on(case["config"]):
+        import netCDF4
+        from woof.hex.mpas_ice import analysis_v842 as am
+        words, stamps = [], []
+        files = {m: netCDF4.Dataset(tmp_path / "out" / f"{m}Output.nc") for m in am.enabled(case["config"])}
+        try:
+            counts = dict.fromkeys(files, 0)
+            for code, stamp in zip(pinned["am/member"], pinned["am/xtime"]):
+                member = am.MEMBERS[int(code) - 1]
+                ds, t = files[member], counts[member]
+                counts[member] += 1
+                stamps.append(b"".join(np.asarray(ds["xtime"][t]).tolist()).decode("ascii").rstrip())
+                words.append(np.concatenate([np.asarray(ds[n][t]).ravel() for n in am.FIELDS[member]]))
+            assert all(len(ds["xtime"]) == counts[m] for m, ds in files.items())
+        finally:
+            for ds in files.values():
+                ds.close()
+        assert stamps == [str(x) for x in pinned["am/xtime"]]
+        assert fo.word_mismatches(np.concatenate(words), pinned["am/words"]) == 0
 
 
 @requires_gpu

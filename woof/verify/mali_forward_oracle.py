@@ -79,7 +79,8 @@ AM_POOLS = ("globalStatsAM", "regionalStatsAM", "regions")
 
 
 def am_on(config: dict) -> bool:
-    return any(k.startswith("config_AM_") for k in config)
+    """Whether an analysis member is enabled (and so its pools are carried)."""
+    return bool(analysis_v842.enabled(config))
 
 
 def streams_of(config: dict) -> dict[str, str] | None:
@@ -204,7 +205,7 @@ CASES = (
     # in (computes at days 30 and 90, and on startup), regionalStats every step from startup off,
     # over an inner disc, a half plane and no cell; on the marine bed with its grounding line,
     # globalStats at 'output_interval' (on startup only) and regionalStats every 20 days, a region
-    # weighted 2
+    # weighted 2 (its streams at the run's start, the door's default)
     ("am_dome", 5, dict(_DOME, _region3="empty", **_am("globalStats", "0000-00-70_00:00:00", True),
                         **_am("regionalStats", "dt", False),
                         **{"stream:globalStatsOutput": "0001-01-16_00:00:00",
@@ -215,7 +216,7 @@ CASES = (
                           **_am("globalStats", "output_interval", True),
                           **_am("regionalStats", "0000-00-20_00:00:00", True),
                           **{"stream:globalStatsOutput": "0001-01-01_00:00:00",
-                             "stream:regionalStatsOutput": "0000-12-27_00:00:00"})),
+                             "stream:regionalStatsOutput": "0001-01-01_00:00:00"})),
     ("enthalpy_benchmark", 10, {"_physics": "benchmark", "config_thermal_solver": "enthalpy",
                                 "config_velocity_solver": "none", "config_thickness_advection": "none",
                                 "config_surface_air_temperature_value": 243.15,
