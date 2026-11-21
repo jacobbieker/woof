@@ -2611,6 +2611,26 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      a static error does not absorb. The follow-ups are AMV error
      inflation or tighter thinning, and a 4-D (FGAT) operator before
      using the full window.
+   - **AMV error inflation (2026-11-21).** AMVs alone, 11-12Z, the
+     same 31 members, WRFDA's AMV error times a scale. Sonde RMS,
+     background to analysis (u / v 400-200 hPa, v all levels, T 850-500
+     hPa):
+
+     | AMV error scale | AMVs assimilated | u 400-200 | v 400-200 | v all | T 850-500 |
+     |---|---|---|---|---|---|
+     | 1 | 26,575 | 1.958 to 2.136 | 2.465 to 2.766 | 2.459 to 2.585 | 0.854 to 0.870 |
+     | 2 | 27,268 | 1.958 to 1.985 | 2.465 to 2.552 | 2.459 to 2.493 | 0.854 to 0.857 |
+     | 3 | 27,317 | 1.958 to 1.958 | 2.465 to 2.497 | 2.459 to 2.471 | 0.854 to 0.855 |
+
+     Inflation removes the damage but never gives a gain: at 3 times
+     the error the AMVs are neutral on the sondes, and at no scale do
+     they help. The AMV departures stay large (O-B RMS 5-7 m/s), so the
+     remaining suspects are the height assignment and a representativeness
+     error that a diagonal R does not carry. A 4-D (FGAT) LETKF operator
+     is still open: a 3-hour run with first guesses at several lead times
+     was tried once in scratch and left the sondes' v at 400-200 hPa
+     2.465 to 2.917, so it is not a fix on its own. Tighter thinning was
+     not run (it needs the reader's source data again).
    - The RO O-B was +1.8 % of N at 20-30 km until #698, which converts
      geometric tangent heights to geopotential.
 
