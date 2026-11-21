@@ -2,7 +2,8 @@
 // rows (P3a item 7): one row of state_relaxation_multi
 // (woof/core/kernels/lbc_state.cu, GPUWM_WRF_EXACT, whole domain), which
 // is WRF relax_bdy_dry (relax_bdytend_core on the coupled field) and
-// spec_bdy_dry (spec_bdytend) for u, v, theta, phi, w and mu.
+// spec_bdy_dry (spec_bdytend) for u, v, theta, phi, w and mu, and qv's
+// rk_step-1 capture (relax_bdy_scalar + spec_bdy_scalar), coupled as theta.
 //
 // Per cell of the row's field, with the row's flags:
 //   held pass (held_compute): h = 0 on the specified rows, the relaxation
@@ -72,7 +73,8 @@ static __device__ __forceinline__ Dl ld(const wreal* a, const wreal* ad, size_t 
     return dl(a[at], ad[at]);
 }
 
-enum { LB_U = 0, LB_V = 1, LB_THETA = 2, LB_PHI = 3, LB_MU = 4, LB_W = 6 };
+// LB_QV takes the mass-grid branches theta takes (c1h coupling, msft).
+enum { LB_U = 0, LB_V = 1, LB_THETA = 2, LB_PHI = 3, LB_MU = 4, LB_QV = 5, LB_W = 6 };
 enum { SIDE_S = 0, SIDE_N = 1, SIDE_W = 2, SIDE_E = 3 };
 
 // ------------------------------------------------- frame enumeration

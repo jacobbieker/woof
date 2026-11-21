@@ -226,10 +226,11 @@ def test_the_known_modes_are_taken():
 
 
 def test_the_default_path_does_not_call_the_coupling():
-    """Opt-in: nothing under woof/ imports it but its own oracle module."""
+    """Opt-in: nothing under woof/ imports it but its own oracle module and
+    the opt-in hybrid (MPAS v8.4.2 under E3SM v3.2.0's coupler)."""
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "ocn_coupling_e3sm" in p.read_text(encoding="utf-8")
-             and p.name not in ("ocn_coupling_e3sm.py", "e3sm_ocean_coupling_oracle.py")]
+             and p.name not in ("ocn_coupling_e3sm.py", "e3sm_ocean_coupling_oracle.py", "hybrid_ocean.py")]
     assert users == []
     # and importing the package and its siblings does not load it
     siblings = sorted(p.stem for p in (ROOT / "woof" / "hex" / "coupled").glob("*.py")

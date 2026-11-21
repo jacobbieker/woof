@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 5949,
+  "site_count": 5950,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 5882
+    "prose": 5883
   },
   "sites": [
     {
@@ -415,7 +415,7 @@
     },
     {
       "file": "README.md",
-      "line": 913,
+      "line": 953,
       "kind": "prose",
       "anchor": "pairs was checked under both subnormal modes",
       "anchor_sha256": "2d72bca9880fb9136b484ba3ebdab81af419d5df3061964499ecb9120e7d562e",
@@ -28850,7 +28850,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 923,
+      "line": 915,
       "kind": "prose",
       "anchor": "\"factory\": \"_load_module_preserving_subnormals\",",
       "anchor_sha256": "9d136622beb9503e39268623e256ca1742422b90f0f8813969de5cb1b7508ef2",
@@ -28861,7 +28861,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1011,
+      "line": 1003,
       "kind": "prose",
       "anchor": "\"factory\": \"compile_noftz_module\",",
       "anchor_sha256": "901303867d2adb97021d9c0f4e6fea5c89e03c04be4223a66cea1805f6bcfc0d",
@@ -28872,7 +28872,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1179,
+      "line": 1171,
       "kind": "prose",
       "anchor": "\"factory\": \"load_module_no_ftz\",",
       "anchor_sha256": "b0421ca3cd3bd385c26b85a05030a47384adf627d8ff1b368af865eae647bfa8",
@@ -28883,7 +28883,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1181,
+      "line": 1173,
       "kind": "prose",
       "anchor": "\"file\": \"woof/core/kernels/no_ftz.py\",",
       "anchor_sha256": "49e696c34493b8f7aceb70e54266067dfd6ce7130465924b65be77ede7460451",
@@ -64670,6 +64670,17 @@
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes\": {",
       "anchor_sha256": "4fe895e0dee5e9c54f0cda4bef8e3082081d27bfd49fd19279737784b2051a7e",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/verify/e3sm_hybrid_ocean_oracle.py",
+      "line": 47,
+      "kind": "prose",
+      "anchor": "_MISSING_2D = (\"stokesDriftZonalWavenumber\", \"stokesDriftMeridionalWavenumber\")",
+      "anchor_sha256": "c298e2f55ef320ece083030f0e50245257a1d2be3b3520d781926f837f85c7fa",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
