@@ -2467,9 +2467,21 @@ def _validate_solar_ssi(cfg) -> None:
 
 def _validate_spacewx_ionosphere(cfg) -> None:
     """spacewx_ionosphere_opt and its keys (woof.spacewx.history)."""
-    opt = cfg.spacewx_ionosphere_opt
-    source, mode, maps = (cfg.spacewx_f107_source, cfg.spacewx_f107_mode,
-                          cfg.spacewx_ionosphere_maps)
+    if not validate_spacewx_ionosphere_keys(
+            cfg.spacewx_ionosphere_opt, cfg.spacewx_f107_source,
+            cfg.spacewx_f107_mode, cfg.spacewx_ionosphere_maps):
+        return
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            "spacewx_ionosphere_opt = 1 places the ionosphere on the radiation "
+            "geometry's columns, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def validate_spacewx_ionosphere_keys(opt, source, mode, maps) -> bool:
+    """spacewx_ionosphere_opt and its keys; True when the rows are on.
+    Shared by the WRF route and hex's MPAS suite route, whose rows sit on
+    the cell centres whatever the radiation."""
     if type(opt) is not int or opt not in (0, 1):
         raise ConfigurationRefused(
             f"spacewx_ionosphere_opt={opt!r} must be 0 (no ionosphere) or 1 "
@@ -2491,17 +2503,13 @@ def _validate_spacewx_ionosphere(cfg) -> None:
                 "spacewx_f107_source/spacewx_f107_mode/spacewx_ionosphere_maps "
                 "are set but spacewx_ionosphere_opt = 0, so they would do "
                 "nothing; set spacewx_ionosphere_opt = 1 or drop them")
-        return
+        return False
     from woof.spacewx.history import IonosphereHistoryError, parse_f107_source
     try:
         parse_f107_source(source)
     except IonosphereHistoryError as exc:
         raise ConfigurationRefused(str(exc)) from None
-    if not radiation_enabled(cfg):
-        raise ConfigurationRefused(
-            "spacewx_ionosphere_opt = 1 places the ionosphere on the radiation "
-            "geometry's columns, and no radiation scheme is on "
-            "(ra_lw_physics = ra_sw_physics = 0)")
+    return True
 
 
 def _validate_spacewx_aurora(cfg) -> None:
