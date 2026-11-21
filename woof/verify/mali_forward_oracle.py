@@ -387,6 +387,14 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
         off += dtype.itemsize * n
     if off != len(raw):
         raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
+    # The driver writes back the arrays it put, but the stub's
+    # mpas_pool_shift_time_levels trades them between NAME and NAME@2 (once in
+    # the initial solve, once a step): after an odd number of shifts the array
+    # put as level 1 holds level 2. Label the words by time level, as MPAS's
+    # pool (and the port) does.
+    if "mesh/timestepNumber" in out and (1 + int(out["mesh/timestepNumber"][()])) % 2 == 1:
+        for key in [k for k in out if k.endswith("@2")]:
+            out[key], out[key[:-2]] = out[key[:-2]], out[key]
     return out
 
 
