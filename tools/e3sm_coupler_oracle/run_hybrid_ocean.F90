@@ -84,6 +84,7 @@ program run_hybrid_ocean
   use ocn_diagnostics_variables, only: landIceBoundaryLayerTracers, landIceTracerTransferVelocities, &
                                        indexBLT, indexBLS, indexHeatTrans, indexSaltTrans
   use ocn_comp_mct_cut, only: ocn_import_mct, ocn_export_mct, domain, infodata, ocn_cpl_dt
+  use ocn_config, only: config_frazil_heat_of_fusion
   implicit none
   type(oracle_pools) :: pools
   type(oracle_field), allocatable :: fields(:)
@@ -100,6 +101,7 @@ program run_hybrid_ocean
   real(kind=RKIND), dimension(:,:,:), pointer :: activeTracers
   real(kind=RKIND), allocatable :: x2o(:,:,:), o2x(:,:), x2oZero(:,:)
   character(len=StrKIND), pointer :: config_start_time, config_dt, config_calendar_type, config_land_ice_flux_mode
+  real(kind=RKIND), pointer :: frazilHeatOfFusion
   character(len=StrKIND) :: timeStamp
   character(len=:), allocatable :: rlist
   character(len=1024) :: inPath, cplPath, outPath
@@ -243,6 +245,11 @@ program run_hybrid_ocean
      indexHeatTrans = iHT
      indexSaltTrans = iST
   end if
+
+  ! E3SM's ocn_config_init sets the module's namelist options from the configs: the export's
+  ! frazil heat of fusion (Fioo_q) is the component's
+  call mpas_pool_get_config(pools % configs, 'config_frazil_heat_of_fusion', frazilHeatOfFusion)
+  config_frazil_heat_of_fusion = frazilHeatOfFusion
 
   open(newunit=uo, file=trim(outPath), access='stream', form='unformatted', status='replace')
 

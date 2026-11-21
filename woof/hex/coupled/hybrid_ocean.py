@@ -278,13 +278,14 @@ class HybridOcean:
                                wav_ocn_coup=wav_ocn_coup, ocn_lnd_one_way=ocn_lnd_one_way, glc_nzoc=glc_nzoc)
         c = configs
         from woof.hex.mpas_ocean import frazil_v842
+        from woof.hex.mpas_ocean.eos_v842 import _configs as eos_configs
         # the export's freezing point is v8.4.2's: E3SM's formula with no mushy term (1/inf = 0, see check)
         self.opts = cpl.Options(
             ocn_cpl_dt=int(ocn_cpl_dt), config_density0=float(c["config_density0"]),
             frazil_ice_active=frazil_v842.is_on(c),
             config_land_ice_flux_mode=str(c.get("config_land_ice_flux_mode", "off")),
             config_frazil_heat_of_fusion=float(frazil_v842._config(c, "config_frazil_heat_of_fusion")),
-            open_ocean_freezing=tuple(float(c.get(f"config_open_ocean_freezing_temperature_{k}", 0.0))
+            open_ocean_freezing=tuple(float(eos_configs(c)[f"config_open_ocean_freezing_temperature_{k}"])
                                       for k in ("coeff_0", "coeff_S", "coeff_p", "coeff_pS")) + (math.inf,))
         self.opts.check()
         if constants == "e3sm":

@@ -45,3 +45,4 @@ the sea-ice pressure past its cap in places).
 | `hybrid_frazil` | `frazil_split_three_steps` | 3 x 2 | e3sm | frazil sent (`Fioo_q`, `Fioo_frazil`) and reset |
 | `hybrid_frazil_land_ice_mpas_constants` | `frazil_land_ice_nested_halos` | 1 x 3 | mpas | halos, land ice 'pressure_only', `config_density0` 1027.5, a positive freezing reference pressure |
 | `hybrid_land_ice_coupled` | `coupled_jenkins_two_steps` | 2 x 2 | e3sm | land ice 'coupled': the boundary layer and effective density sent |
+| `hybrid_frazil_heat_of_fusion` | `frazil_split_three_steps` | 1 x 2 | e3sm | `config_frazil_heat_of_fusion` 3.0e5: the export's `Fioo_q` reads the component's (the driver sets `ocn_config`'s from the configs, as `ocn_config_init` does) |
