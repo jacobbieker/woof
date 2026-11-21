@@ -295,7 +295,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     ISOMIP and Jenkins melt, the top drag, the boundary layer, the thickness,
     velocity and tracer forcing, the effective density in land ice and the
     coupler's land-ice means; standalone, in the diagnostics and over forward
-    steps; 'HollandJenkins' is refused by name). Three v8.4.2 quirks keep
+    steps; 'HollandJenkins' is refused by name), and the Gent-McWilliams
+    bolus velocity (`ocn_gm_compute_Bolus_velocity`: isoneutral slopes,
+    their smoothing and tapering, `k33`, the stream function's solve;
+    standalone, not yet wired into the step). Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
