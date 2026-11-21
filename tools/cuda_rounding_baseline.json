@@ -12012,15 +12012,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "503d4505129272b017ae716f1a79eb767fe172f3078e32f31031625c57679277",
+    "sha256": "c199c9dd392a01d3603806ad8d77dc6ae0a1e993cad7046c18ba64ac1e009cd2",
     "sites": {
-     "100": 905
+     "100": 890
     }
    },
    "native_differences": {
-    "sha256": "b4d9d63827c623c7bd754d4b25bdc4389a10ac8d8ec6b824a48b3b75fbe34f86",
+    "sha256": "ba202071061c14bf060b2817dac50959649153785b5eb7f9d43af4a38dcb5531",
     "sites": {
-     "100": 2333
+     "100": 1985
     }
    },
    "native_errors": {},
@@ -22962,15 +22962,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "0e1114a593288c9587a44f9c52cf858e1f47997d48653f4dbc3566b9662842ae",
+    "sha256": "e76bbfc0012dbabea1d26bd76fe9f57d69b998d9dce382db1803692ec02aca34",
     "sites": {
-     "100": 14
+     "100": 15
     }
    },
    "native_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sha256": "d8954ecd96e4122d1ec24e32303425c580989033991cb9c18116f7b1e03c1d51",
     "sites": {
-     "100": 0
+     "100": 4
     }
    },
    "native_errors": {},
@@ -23009,7 +23009,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "97456a0500349ac03ff4bcaba3b79e55eb6a0a65b6c2c5a7cc994265dd0f0283",
+    "sha256": "604213c81d019ded3d87a61a3e5c3ae39331c908204cc908ce6920c69eb3cc8e",
     "sites": {
      "100": 72
     }
@@ -26030,7 +26030,7 @@
    },
    "source_sha256": "09a8565214c8550d78b4d3eb0ff3009aeafc1cc8fb9fceaa5b007883370928cb"
   },
-  "literal:woof/core/health_ledger.py:423": {
+  "literal:woof/core/health_ledger.py:434": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
@@ -26077,7 +26077,7 @@
    },
    "source_sha256": "2d569e567dc0c58b8909ae66b52cfa361a23ba363bb03ac75f293c47c5a93750"
   },
-  "literal:woof/core/health_ledger.py:650": {
+  "literal:woof/core/health_ledger.py:678": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
