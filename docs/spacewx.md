@@ -385,7 +385,7 @@ the forecast is identical with the option on or off.
 - Preflight prices the held arrays (14 column vectors and the five rows) and
   the kernel's 96 B local frame.
 - A streamed domain refuses the option, because the rows are not a tile
-  carrier, and hex refuses it until a hex history stream carries them.
+  carrier. Hex's MPAS v8.4.2 suite route writes the rows per cell (below).
 
 ## L3b: the auroral oval and the solar wind (`woof spacewx aurora`)
 
@@ -597,7 +597,35 @@ The forecast is identical with the option on or off.
   Kp the first read found, even after SWPC's 24-hour feed has moved on. The
   `[spacewx aurora]` start-up line records the value, the interval and the
   source. Preflight prices the held arrays and the kernel's
-  32 B frame. Streamed domains and hex refuse it.
+  32 B frame. Streamed domains refuse it; hex's MPAS v8.4.2 suite route writes
+  the rows per cell (below).
+
+### On hex's MPAS v8.4.2 suite route
+
+The suite route takes the WRF keys from `--physics`, as the WRF route takes them
+from its namelist: `spacewx_ionosphere_opt`, `spacewx_f107_source`,
+`spacewx_f107_mode`, `spacewx_ionosphere_maps`, `spacewx_aurora_opt` and
+`spacewx_kp_source`. Only these keys are taken out of the overrides; every other
+WRF key is still refused by name, since the MPAS Registry has none of them.
+The keys are judged by the WRF route's own checks, except that no radiation
+scheme is needed, because the rows sit on the cell centres. They are printed as
+the run starts (the `[spacewx suite]` line, then each history object's receipt)
+and recorded in the driver receipt (`spacewx_diagnostics`).
+
+Each row is a `diag` field on `nCells` in the `diagnostics` stream. It has the
+lower-case wrfout name (`iono_tec`, `aurora_zone`, `joule_power`, ...), with
+`wrf_name` holding the wrfout name, and the WRF route's units and long name.
+Each family has its own package: `spacewx_ionosphere`, `spacewx_aurora`,
+`spacewx_aurora_energy` (options 2 and 3) and `spacewx_joule` (option 3).
+
+The rows are the WRF route's IonosphereHistory and AuroraHistory. They are built
+on the solve cells' centres (latCell/lonCell, in degrees) and the case start, at
+the first frame a stream writes, and evaluated at each due frame's valid time. On a
+variable-resolution mesh each cell is one column, whatever its size. A
+checkpoint continuation builds them on the straight run's start (the segment
+start less the step offset), so it writes the words the straight run would. A
+multi-rank mesh evaluates each rank's own cells. Without the keys, the Registry,
+the default streams and the receipt are unchanged.
 
 ## L2: solar proton events (`woof spacewx particles`)
 
