@@ -416,6 +416,15 @@ matched exchange unless asked.
    checked against the E3SM merge. The sea ice's time step with the
    column package is ported (above); the coupled step is not built yet.
 
+The matched exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
+are the ones agreed with the MALI port's ocean seam. Land ice sends
+`landIcePressure` (Pa), `landIceFraction`, `landIceMask` (int32), and
+`li2ocn_liquid_runoff` and `li2ocn_solid_runoff` (kg m^-2 s^-1, positive into
+the ocean). The ocean returns `ocn2li_floating_basal_mass_bal` in MALI's sign
+(negative is melt). `landIceDraft` is a diagnostic channel only. The calving
+momentum channels (`li2ocn_momentum_x`/`_y`; v8.4.2's land ice exports none)
+and the old `li2ocn_mass` are refused by name.
+
 ## Status
 
 | Core | Ported pieces | Status |

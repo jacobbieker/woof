@@ -459,6 +459,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     over the ocean's coupling window, averaged by E3SM's rounded `1/count`
     and copied back. real(r8), word-exact on CUDA and Metal against the
     routines compiled verbatim on MCT.
+  - The coupled exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
+    are the MALI port's ocean seam: `landIcePressure`, `landIceFraction` and
+    `landIceMask` (int32), liquid and solid runoff in place of one mass
+    channel, and `ocn2li_floating_basal_mass_bal` back in MALI's sign
+    (`landIceDraft` is a diagnostic only). Calving momentum is refused by
+    name.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
