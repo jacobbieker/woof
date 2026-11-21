@@ -81,7 +81,7 @@ def test_fixture_covers_the_branches():
     assert one["op1/x2o"].tobytes() == c1["samples"][0].tobytes()
     sp = outputs["signed_zeros_subnormals_overflow"]["op3/x2o"]
     assert np.signbit(sp[0:4]).all() and np.isinf(sp[10:12]).all()
-    assert (sp[13] == 0).all() and (sp[6:10] != 0).any()
+    assert (sp[13] == np.nextafter(0.0, 1.0)).all() and (sp[6:10] != 0).any()
 
 
 def test_the_default_path_does_not_call_the_accumulation():
@@ -152,7 +152,6 @@ def test_a_mutated_kernel_is_caught(monkeypatch, original, mutated, case):
 
 @requires_gpu
 def test_mutated_bookkeeping_is_caught(monkeypatch):
-    import cupy as cp
     real_accum, real_avg = oae.OceanAccumulator.accum, oae.OceanAccumulator.accum_avg
 
     def add_first(self, x2o):          # the first sample added to the last average
@@ -173,12 +172,11 @@ def test_mutated_bookkeeping_is_caught(monkeypatch):
     assert _caught("window_of_two")
     monkeypatch.setattr(oae, "mct_avg_factor", lambda n: 1.0 / n)
 
-    def scale_one(self, x2o):          # a window of one scaled by 1/1 is the same; skipping the copy is not
+    def no_copy(self, x2o):            # x2o left as it was
         self._check(x2o)
         self.count = 0
-    monkeypatch.setattr(oae.OceanAccumulator, "accum_avg", scale_one)
-    assert _caught("window_of_one")
-    del cp
+    monkeypatch.setattr(oae.OceanAccumulator, "accum_avg", no_copy)
+    assert _caught("average_without_samples")
 
 
 def _oracle_toolchain():

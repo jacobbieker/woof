@@ -4,7 +4,9 @@
 # ocn_import_mct and ocn_export_mct (run_ocean_coupling), and, given Icepack,
 # MPAS-Seaice's, ice_import_mct and ice_export_mct (run_seaice_coupling),
 # the coupler's surface fractions, seq_frac_set (run_seq_frac), and its
-# atmosphere-ocean flux, seq_flux_atmocn_mct (run_flux_atmocn).
+# atmosphere-ocean flux, seq_flux_atmocn_mct (run_flux_atmocn), its ocean
+# albedos, seq_flux_ocnalb_mct (run_flux_ocnalb), and the ocean-input
+# accumulation, prep_ocn_accum and prep_ocn_accum_avg (run_ocn_accum).
 #
 #   bash tools/e3sm_coupler_oracle/build.sh E3SM_SOURCE_ROOT MCT_SOURCE_ROOT BUILD_DIR [ICEPACK_SOURCE_ROOT]
 #

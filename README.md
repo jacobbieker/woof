@@ -438,6 +438,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     albedos, with E3SM's and MCT's stops. real(r8), word-exact on CUDA and
     Metal against the routine compiled verbatim on MCT. The orbital albedo
     is refused by name.
+  - The coupler's ocean-input accumulation, E3SM v3.2.0's `prep_ocn_accum`
+    and `prep_ocn_accum_avg` over MCT's `mct_avect_accum`/`mct_aVect_avg`
+    (`woof/hex/coupled/ocn_accum_e3sm.py`, opt-in): the merged x2o summed
+    over the ocean's coupling window, averaged by E3SM's rounded `1/count`
+    and copied back. real(r8), word-exact on CUDA and Metal against the
+    routines compiled verbatim on MCT.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
