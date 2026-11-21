@@ -291,8 +291,8 @@ Each step is one small PR, taken to merged before the next widens.
      transpose of its TL. The oracle leaves those levels out there. The
      dot-product test holds woof's AD to woof's TL, which matches WRFPLUS's
      TL.
-   - Not covered: the moist cqu/cqv/cqw factors, the hydrostatic option
-     and a 1-D base state.
+   - Not covered: the hydrostatic option and a 1-D base state. The moist
+     cqu/cqv/cqw factors came with DA item 4 (8h).
    - `rhs_ph` is done in the same module (`geo_tl`, `geo_ad`). It covers
      woof's strict `slow_geopotential_open` (3-D base, vertical term on,
      no supplied face masses) for `h_sca_adv_order` 2-6 and 0, on periodic,
@@ -705,8 +705,8 @@ Each step is one small PR, taken to merged before the next widens.
      step gives `dycore.step`'s words on a mapped state. With msfv passed
      where the strict path passes MSFV_INV, about 2000 words per
      prognostic differ, so the test pins the choice.
-   - Still refused then: lateral boundaries other than periodic (bound
-     in 8f).
+   - Still refused: lateral boundaries other than periodic (specified
+     boundaries next), so WRFDA's regional tutorial case cannot run yet.
 8f. Specified boundaries in the step (DA item 3): `step_geometry` binds
    woof's strict specified step on a domain whose tables are attached
    (`attach_lateral_boundaries`).
@@ -799,6 +799,91 @@ Each step is one small PR, taken to merged before the next widens.
      it from state 2 on; the adjoint with forcing is the TL's (1e-12
      binary64, 1e-5 binary32); a wrong length, or x0 with a trajectory,
      is refused.
+8h. Moisture, part 1 (DA item 4): the big-step pieces that take the moist
+   species. Not bound in the step yet; `step_geometry` still refuses
+   moisture.
+   - `cq_tl`/`cq_ad` (`CQGeometry`, `n_mass` 1 or 3): WRF `calc_cq` on
+     woof's strict primal. cqu, cqv and cqw are `1/(1 + 0.5 qtot)` over
+     each face's pair, qtot summed species by species in the primal's
+     order. cqw is 1 at levels 0 and nz. With `n_mass` 1 qv alone is read,
+     and with 3 qv, qc and qr. The primal overwrites cq, so the AD
+     consumes the cq adjoints and zeroes them. The AD is a gather: each
+     mass cell collects the u and v faces that pair it (the periodic end
+     face included, once) and the interior w levels above and below.
+   - The pressure gradient with `PGFGeometry.moist_cq`: cqu and cqv are
+     active and multiply the face term, as woof's `slow_pgf` does with
+     `use_cq` (WRF `horizontal_pressure_gradient`'s `cqu`/`cqv`).
+   - The buoyancy with `BuoyGeometry.moist` (the primal's moist_mode 1):
+     qv, qc and qr are active through WRF's cqw, formed from the strict
+     `wrf_cqw_pair` sum. The `cqw * cq1` mass-loading term reads the base
+     mass `c1f mub + c2f`. The derivative with respect to cqw is
+     `-cq1^2 (P + base_mass)`, where P is the bracket before its cq1
+     factor. The moist buoyancy needs nz >= 2, because the top's pair
+     reads level nz-2. The ice species (moist_mode 2-3, `n_mass` 6-7) are
+     refused.
+   - Tests (`tests/test_grad_wrfplus_bigstep.py`, ops `pgfm`, `buoym` and
+     `cq`):
+     - dot-product (1e-12 binary64, 1e-5 binary32);
+     - the AD adds into its inputs, and the cq adjoints are zeroed;
+     - FD convergence;
+     - the binary32 base gives the primal's words for `slow_pgf` with
+       cq, `slow_buoyancy` moist_mode 1 and `calc_cq` (n_mass 1 and 3).
+       The pgf check also confirms that cq changes the tendency.
+     There is no WRFPLUS fixture for the moist cases yet. The dry cases
+     still match the old fixtures.
+   - Still to come for item 4: the moist diagnosis (`calc_p_rho` and
+     `al`/`alt` with qv), moist scalar advection and update, the moist
+     LBC rows, and the step binding.
+8i. Moisture, part 2 (DA item 4): the moist diagnosis. `PRPGeometry.moist`
+   makes qv an active input of `calc_p_rho_phi_tl/_ad`. The temperature
+   ratio's numerator `Rd (300 + theta')` is multiplied by WRF's `qvf = 1 +
+   rvovrd qv`, as woof's strict `wrf_p_rho_phi_column` does. That kernel
+   is used for a moist state without `use_theta_m`; with `use_theta_m` the
+   primal passes moist 0. `rvovrd` is the binary32 quotient the primal's
+   `#define` carries (`woof.core.constants.RVOVRD`).
+   - Tests (`tests/test_grad_wrfplus_rk_stage.py`, op `prpm`, both
+     hypsometric options, carried and formed muts, 1-D base, one column):
+     - dot product;
+     - the adjoint accumulates, and p/al/alt/p' are consumed;
+     - FD convergence;
+     - the binary32 base gives `calc_p_alpha[_carried_muts]`'s words
+       with moist 1. Each case also checks that qv moves p off the dry
+       words.
+     There is no WRFPLUS fixture for the moist case.
+   - The step still refuses moisture. The diagnosis joins it with the
+     moist scalar advection and the step binding.
+   - Still refused then: lateral boundaries other than periodic (bound
+     in 8f).
+8j. Moisture, part 3 (DA item 4): moist scalar transport
+   (`woof.grad.wrfplus.scalar`). Two operators, not yet in the step:
+   - sumflux (`sumflux_zero/accumulate/finish_tl/_ad`): `ru_m, rv_m, ww_m`
+     start at zero, add `u_pp, v_pp, ww_pp` after each acoustic substep,
+     and finish as `sum/nsub` plus the stage's coupled `ru, rv, ww`
+     (the dycore's `zero_sumflux`, `accumulate_sumflux` and
+     `finish_sumflux` launches).
+   - One species' stage update (`su_tl/_ad`, `ScalarGeometry`), woof's
+     strict non-PD `_advance_species_wrf` (WRF rk_scalar_tend +
+     rk_update_scalar): `flux_div_scalar` of the stage's species with the
+     sumflux fluxes (all four active), the specified ring cleared, times
+     msft, plus the species' held boundary tendency when it has one, then
+     `q = ((c1h mu0 + c2h) q0 + dt tend) / (c1h mu + c2h)` with the time-t
+     mass `mub + mup0` and the post-acoustic `mub + mup`. The arithmetic
+     is the primal's, one rounded operation at a time. The adjoint
+     rebuilds the base tendency through the base-only advection build.
+   - Not covered: the positive-definite final stage (`moist_adv_opt =
+     1`), physics and mixing sources, IEVA and the RQVFTEN export.
+   - Tests (`tests/test_grad_wrfplus_scalar.py`: periodic, map factors,
+     specified with and without the held tendency, rings of 1 and 2,
+     every h order, one level; sumflux with 1-4 substeps):
+     - dot product;
+     - the adjoint accumulates, and the species, its tendency and the
+       accumulators are consumed;
+     - the adjoint in one dict (as the step passes it) gives the
+       separate-dict result;
+     - FD convergence;
+     - the binary32 base gives `_advance_species_wrf`'s and the sumflux
+       launches' words, and each update moves the species.
+     There is no WRFPLUS fixture.
 8k. Moisture, part 4 (DA item 4): the moist boundary rows
    (`woof.grad.wrfplus.lbc`), not yet in the step.
    - qv's rows: `LBCGeometry`/`FinalGeometry` take kind `qv` (the
@@ -825,7 +910,6 @@ Each step is one small PR, taken to merged before the next widens.
        `apply_flow_dependent_boundaries` (every ring cell moves) and of
        qv's capture through the primal's own single-row
        `_launch_state_relaxation` with the time-t source and mass.
-     There is no WRFPLUS fixture.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
