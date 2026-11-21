@@ -98,8 +98,9 @@ def test_word_exact_in_fast_and_strict_children(numerics, exact):
     # term 2's flux with the thickness inside
     ("rk flux = M(M(C(0.5), dvEdge[iEdge]), A(s_tmpU, s_tmpD));\n            flux = M(flux, layerThicknessEdge[iEdge * nl + k]);",
      "rk flux = M(M(C(0.5), dvEdge[iEdge]), M(A(s_tmpU, s_tmpD), layerThicknessEdge[iEdge * nl + k]));", "term1_off"),
-    # the top-of-edge gradient taken from level 1 ("fixing" v8.4.2's level 2)
-    ("gt[0] = ge[1];", "gt[0] = ge[0];", "redi"),
+    # the interface gradient's thickness weighting divided term by term
+    ("D(A(M(h2, ge[k - 1]), M(h1, ge[k])), A(h1, h2))",
+     "A(D(M(h2, ge[k - 1]), A(h1, h2)), D(M(h1, ge[k]), A(h1, h2)))", "redi"),
     # the vertical derivative over the thickness-weighted distance's other sign
     ("S(zMid[iCell * nl + k - 1], zMid[iCell * nl + k])", "S(zMid[iCell * nl + k], zMid[iCell * nl + k - 1])", "redi"),
     # term 3 without areaCellSum's 1e-34 start

@@ -164,7 +164,8 @@ extern "C" __global__ void ocn_tracer_hmix_redi_edge_v842(
         const rk h1 = h[k - 1], h2 = h[k];
         gt[k] = D(A(M(h2, ge[k - 1]), M(h1, ge[k])), A(h1, h2));
     }
-    // v8.4.2 takes the top interface from level 2
+    // v8.4.2 takes the top interface from level 2 (never seen in tend: term 3
+    // zeroes the top interface of gradHTracerSlopedTopOfCell)
     gt[0] = ge[1];
     gt[mlet] = ge[(mlet > 1 ? mlet : 1) - 1];
 }
@@ -221,9 +222,9 @@ extern "C" __global__ void ocn_tracer_hmix_redi_tend_v842(
             if (k >= maxLevelEdgeTop[iEdge]) continue;
             const int cell1 = cellsOnEdge[2 * iEdge] - 1, cell2 = cellsOnEdge[2 * iEdge + 1] - 1;
             const rk r_tmp = D(M(kappa, dvEdge[iEdge]), dcEdge[iEdge]);
-            const rk turb = S(tracers[(cell2 * nl + k) * nTracers + iTracer],
-                              tracers[(cell1 * nl + k) * nTracers + iTracer]);
-            const rk flux = M(M(layerThicknessEdge[iEdge * nl + k], turb), r_tmp);
+            const rk tracer_turb_flux = S(tracers[(cell2 * nl + k) * nTracers + iTracer],
+                                          tracers[(cell1 * nl + k) * nTracers + iTracer]);
+            const rk flux = M(M(layerThicknessEdge[iEdge * nl + k], tracer_turb_flux), r_tmp);
             value = S(value, M(M((rk)edgeSignOnCell[iCell * maxEdges + i], flux), invAreaCell));
         }
     }
