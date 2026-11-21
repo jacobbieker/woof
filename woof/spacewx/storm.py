@@ -116,12 +116,6 @@ def last_ended_interval(when: datetime) -> datetime:
 def ap_series(geo, when: datetime, nlag: int) -> np.ndarray:
     """ap of the ``nlag`` 3-hour intervals that have ended by ``when``, latest
     first (NaN where GFZ has none)."""
-    return _ap_series(geo, when, nlag)
-
-
-def _ap_series(geo, when: datetime, nlag: int) -> np.ndarray:
-    """ap of the ``nlag`` 3-hour intervals that have ended by ``when``, latest
-    first (NaN where GFZ has none)."""
     last = last_ended_interval(when)
     out = np.full(nlag, np.nan)
     for i in range(nlag):
@@ -140,7 +134,7 @@ def filtered_ap(geo, when: datetime, tau: float, nlag: int, min_weight: float = 
     onset is there); an older missing interval is left out and the weights
     renormalised, and fewer than ``min_weight`` of the weight present is an
     error."""
-    return _filter(_ap_series(geo, when, nlag), when, tau, min_weight)
+    return _filter(ap_series(geo, when, nlag), when, tau, min_weight)
 
 
 def persisted_ap_tau(ap_start, start: datetime, when: datetime, tau: float, min_weight: float = 0.8) -> float:
@@ -229,12 +223,23 @@ def basis(nodes, mlat_deg, lt_h, season) -> np.ndarray:
     return np.einsum("ni,nj,nk->nijk", wm, wl, ws).reshape(wm.shape[0], -1)
 
 
+#: Points per block of the dense basis in :func:`log_ratio`, so a large domain
+#: holds at most this many rows of it (108 float64 each for the shipped fit).
+BASIS_BLOCK = 65536
+
+
 def log_ratio(fit: StormFit, mlat_deg, lt_h, season, ap_tau) -> np.ndarray:
     """log(R) at points; ``ap_tau`` a scalar or one per point."""
     x = np.minimum(np.asarray(ap_tau, dtype=np.float64) / 100.0, fit.x_max)
-    b = basis((fit.mlat_nodes, fit.lt_nodes, fit.season_nodes), mlat_deg, lt_h, season)
+    mlat, lt, sea = (np.asarray(v, dtype=np.float64).ravel() for v in (mlat_deg, lt_h, season))
+    nodes = (fit.mlat_nodes, fit.lt_nodes, fit.season_nodes)
     c = fit.coef.reshape(-1, 2)
-    return (b @ c[:, 0]) * x + (b @ c[:, 1]) * x * x
+    a, b = np.empty(mlat.size), np.empty(mlat.size)
+    for lo in range(0, mlat.size, BASIS_BLOCK):
+        s = slice(lo, lo + BASIS_BLOCK)
+        w = basis(nodes, mlat[s], lt[s], sea[s])
+        a[s], b[s] = w @ c[:, 0], w @ c[:, 1]
+    return a * x + b * x * x
 
 
 def nmf2_factor(fit: StormFit, mlat_deg, lt_h, season, ap_tau) -> np.ndarray:
@@ -260,5 +265,5 @@ def receipt(fit: StormFit, source: str) -> dict:
 
 
 __all__ = ["FIT_PATH", "StormError", "StormFit", "load_fit", "last_ended_interval", "ap_series", "filtered_ap",
-           "persisted_ap_tau", "magnetic_latitude", "local_time",
+           "persisted_ap_tau", "BASIS_BLOCK", "magnetic_latitude", "local_time",
            "season_coordinate", "basis", "log_ratio", "nmf2_factor", "fof2_scale", "receipt"]

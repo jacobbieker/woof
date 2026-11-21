@@ -32,7 +32,8 @@ interval that ends after the start takes the latest observed ap
 filter runs on with each frame.  The dipole magnetic latitude is taken at the
 start; local time and season move with each frame.  The ap series is held
 per (source, start) in the space-weather cache, so a resume, and every domain
-of a nested run, uses the ap the first read found.
+that starts at the same time, uses the ap the first read found (a nest that
+starts later reads the ap ended by its own start).
 """
 from __future__ import annotations
 
@@ -113,9 +114,14 @@ def parse_f107_source(source: str):
 
 
 def _held_ap(load, name: str, start: datetime, nlag: int, memo) -> tuple:
-    """(the index record, ap of the ``nlag`` intervals ended by the start,
-    latest first; the receipt fields).  With ``memo`` (a directory) the series
-    is kept per (source, start), so a resume and every nest reads the same ap."""
+    """(ap of the ``nlag`` intervals ended by the start, latest first; the
+    receipt fields).  With ``memo`` (a directory) the series is kept per
+    (source, start), so a resume, and every domain with the same start, reads
+    the same ap.  Only a series read from a fresh fetch whose latest
+    :data:`woof.spacewx.storm.LATEST_REQUIRED` intervals are all present is
+    kept: an incomplete one, or one from the cached file kept because GFZ
+    could not be reached, is used for this run only, so a later run fetches
+    again."""
     import hashlib
     import json
     from pathlib import Path
@@ -134,19 +140,19 @@ def _held_ap(load, name: str, start: datetime, nlag: int, memo) -> tuple:
                 pass                                   # damaged: read the source again
     # GFZ adds ap during the day: a cache without the latest ended interval
     # is fetched again, and kept if GFZ cannot be reached.
+    fallback = False
     try:
         geo = load(name, storm.last_ended_interval(start), kp=True)
     except OSError:
-        geo = load(name, None)
+        geo, fallback = load(name, None), True
     ap = storm.ap_series(geo, start, nlag)
     record = {"spacewx_storm_ap_source": geo.source, "spacewx_storm_ap_sha256": geo.sha256}
-    if memo_path is not None:
-        import os
-        memo_path.parent.mkdir(parents=True, exist_ok=True)
-        part = memo_path.with_name(f"{memo_path.name}.{os.getpid()}.part")
-        doc = {"ap": [None if not np.isfinite(v) else float(v) for v in ap], "record": record}
-        part.write_text(json.dumps(doc, sort_keys=True) + "\n", encoding="utf-8")
-        part.replace(memo_path)
+    if fallback:
+        record["spacewx_storm_ap_offline_cache"] = True
+    if memo_path is not None and not fallback and np.isfinite(ap[:storm.LATEST_REQUIRED]).all():
+        from woof.spacewx.aurora_history import _write_memo
+        _write_memo(memo_path, {"ap": [None if not np.isfinite(v) else float(v) for v in ap],
+                                "record": record})
     return ap, record
 
 
@@ -193,10 +199,11 @@ class IonosphereHistory:
                 try:
                     f107 = geo.f107_driver(start, mode)
                 except indices.IndicesError as exc:
+                    hint = ("use spacewx_f107_mode = '81day'" if storm_enabled(cfg) else
+                            "set spacewx_f107_source to a number (sfu) or use spacewx_f107_mode = '81day'")
                     raise IonosphereHistoryError(
-                        f"spacewx_ionosphere_opt = 1: {exc}; GFZ has not released the flux "
-                        "this start needs, so set spacewx_f107_source to a number (sfu) "
-                        "or use spacewx_f107_mode = '81day'") from None
+                        f"spacewx_ionosphere_opt = {int(cfg.spacewx_ionosphere_opt)}: {exc}; GFZ has not "
+                        f"released the flux this start needs, so {hint}") from None
             record = {"spacewx_f107_source": geo.source, "spacewx_f107_sha256": geo.sha256}
         from woof.spacewx.ionosphere import Ionosphere, month_weights
         lat, lon = _host(lat), _host(lon)

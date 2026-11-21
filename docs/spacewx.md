@@ -398,8 +398,12 @@ the forecast is identical with the option on or off.
   - The dipole magnetic latitude is taken at the start; local time and season
     move with each frame.
   - The ap series is held per source and start in
-    `~/.woof/spacewx/storm-activity`, so a resume and every nest read the same
-    ap. The `[spacewx ionosphere]` line adds the fit's SHA-256, tau, the
+    `~/.woof/spacewx/storm-activity`, so a resume, and every domain that
+    starts at the same time, reads the same ap. A nest that starts later reads
+    the ap ended by its own start. A series is kept only from a fresh fetch
+    that has the latest two intervals: an incomplete one, or one from the
+    cached file used when GFZ cannot be reached (flagged in the receipt), is
+    not kept, so a later run fetches again. The `[spacewx ionosphere]` line adds the fit's SHA-256, tau, the
     latest ap, its interval and ap_tau at the start.
   - Scale check (`tests/test_spacewx_ionosphere_history.py`): at a strong
     storm the shipped fit's mean R at |MLAT| 35-62.5 deg is about 0.30 in local

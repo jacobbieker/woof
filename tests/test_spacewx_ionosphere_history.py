@@ -440,6 +440,39 @@ def test_the_held_ap_is_reused_for_the_start(tmp_path):
     assert len(calls) == 3
 
 
+def test_an_incomplete_or_offline_ap_series_is_not_held(tmp_path):
+    from woof.spacewx import indices
+    good = _storm_gfz(tmp_path)
+    late = tmp_path / "late.txt"
+    late.write_text("\n".join(line for line in good.read_text().splitlines()
+                              if not line.startswith(("2024 05 10", "2024 05 11", "2024 05 12"))) + "\n")
+    memo = tmp_path / "memo"
+    ap, record = hist._held_ap(lambda s, n, kp=False: indices.read(late), "gfz", START, 40, memo)
+    assert np.isnan(ap[0]) and not memo.exists()                       # GFZ had not posted it yet
+    ap, _ = hist._held_ap(lambda s, n, kp=False: indices.read(good), "gfz", START, 40, memo)
+    assert ap[0] == 300.0 and len(list(memo.iterdir())) == 1          # read again once posted
+
+    def offline(source, needed, kp=False):
+        if needed is not None:
+            raise OSError("network down")
+        return indices.read(good)
+
+    other = START + timedelta(hours=3)
+    _ap, record = hist._held_ap(offline, "gfz", other, 40, memo)
+    assert record["spacewx_storm_ap_offline_cache"] is True
+    assert len(list(memo.iterdir())) == 1                               # the offline read is not held
+
+
+def test_the_blocked_basis_gives_the_unblocked_ratio(monkeypatch):
+    from woof.spacewx import storm
+    fit = storm.load_fit()
+    rng = np.random.default_rng(3)
+    mlat, lt, season = rng.uniform(-80, 80, 1000), rng.uniform(0, 24, 1000), rng.uniform(-1, 1, 1000)
+    whole = storm.log_ratio(fit, mlat, lt, season, 55.0)
+    monkeypatch.setattr(storm, "BASIS_BLOCK", 97)
+    np.testing.assert_array_equal(storm.log_ratio(fit, mlat, lt, season, 55.0), whole)
+
+
 def test_the_shipped_storm_fit_has_the_published_seasonal_pattern():
     """Physical sanity of the shipped fit (woof/data/spacewx/storm_fit_v1.json)
     at a strong storm: the F2 negative phase is strongest in local summer at
