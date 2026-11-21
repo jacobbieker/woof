@@ -6,8 +6,11 @@
 # the coupler's surface fractions, seq_frac_set (run_seq_frac), and its
 # atmosphere-ocean flux, seq_flux_atmocn_mct (run_flux_atmocn), its ocean
 # albedos, seq_flux_ocnalb_mct (run_flux_ocnalb), and the ocean-input
-# accumulation, prep_ocn_accum and prep_ocn_accum_avg (run_ocn_accum), and
-# one coupler interval chaining them all (run_coupler_interval).
+# accumulation, prep_ocn_accum and prep_ocn_accum_avg (run_ocn_accum),
+# one coupler interval chaining them all (run_coupler_interval), and, given
+# MPAS v8.4.2 (MPAS_V842_SOURCE_ROOT, MPAS_OCEAN_ORACLE_BUILD), the hybrid
+# ocean: the MPAS v8.4.2 ocean under E3SM's ocean coupling
+# (run_hybrid_ocean_{e3sm,mpas}).
 #
 #   bash tools/e3sm_coupler_oracle/build.sh E3SM_SOURCE_ROOT MCT_SOURCE_ROOT BUILD_DIR [ICEPACK_SOURCE_ROOT]
 #
@@ -244,6 +247,78 @@ if grep -E '\b(exp|log|pow|sin|cos|tan|atan|asin|acos|cbrt|erf)[fl]?\b' undefine
     exit 6
 fi
 echo "built ${build_dir}/run_ocean_coupling"
+
+# ---------------------------------------------------------------- the hybrid ocean (E3SM coupler, MPAS v8.4.2 ocean)
+# "E3SM v3.2.0 coupler with MPAS v8.4.2 components, not an E3SM
+# configuration" (woof.hex.coupled.hybrid_ocean).  Built when
+# MPAS_V842_SOURCE_ROOT names an MPAS-Model v8.4.2 tree and
+# MPAS_OCEAN_ORACLE_BUILD the BUILD_DIR of tools/mpas_ocean_oracle/build.sh
+# over it (its r8 objects and modules: the forward mode, every module
+# verbatim).  The cut above (ocn_comp_mct_cut.F90: ocn_import_mct and
+# ocn_export_mct, verbatim) is compiled again against the component's
+# modules: v8.4.2's ocn_constants, ocn_equation_of_state (its
+# ocn_freezing_temperature), mpas_constants and the same framework stubs;
+# ocean_standins.F90 and e3sm_standins.F90 hold the rest.  v8.4.2's
+# mpas_ocn_constants.F is compiled twice, as E3SM builds MPAS
+# (-DMPAS_ESM_SHR_CONST, shr_const_mod's constants: run_hybrid_ocean_e3sm)
+# and as v8.4.2 builds itself (run_hybrid_ocean_mpas).
+if [[ -z "${MPAS_V842_SOURCE_ROOT:-}" || -z "${MPAS_OCEAN_ORACLE_BUILD:-}" ]]; then
+    echo "no MPAS_V842_SOURCE_ROOT / MPAS_OCEAN_ORACLE_BUILD: the hybrid ocean oracle is not built"
+else
+    mpas_src=$(cd "${MPAS_V842_SOURCE_ROOT}" && pwd)
+    mpas_obj=$(cd "${MPAS_OCEAN_ORACLE_BUILD}/r8" && pwd)
+    ( cd "${mpas_src}" && grep '  src/core_ocean/shared/mpas_ocn_constants.F$' "${script_dir}/../mpas_ocean_oracle/SOURCES.sha256" \
+        | { command -v sha256sum >/dev/null && sha256sum -c --quiet - || shasum -a 256 -c --quiet -; } ) || {
+        echo "MPAS's mpas_ocn_constants.F differs from SOURCES.sha256; refusing to build" >&2
+        exit 3
+    }
+    obj="${build_dir}/hybrid_ocean"
+    rm -rf "${obj}" && mkdir -p "${obj}/shr" && cd "${obj}"
+    hflags=(-c -cpp -O0 -ffp-contract=off -ffree-line-length-none -DNDEBUG -I"${mpas_obj}/eos" -I"${mpas_obj}"
+            -I"${e3sm}/share/include" "${mctinc[@]}")
+    cp "${build_dir}/merge/mct_mod.F90" mct_mod.F90
+    cp "${build_dir}/ocean/ocn_comp_mct_cut.F90" ocn_comp_mct_cut.F90
+    "${fc[@]}" "${hflags[@]}" "${e3sm}/share/util/shr_kind_mod.F90"
+    "${fc[@]}" "${hflags[@]}" "${e3sm}/share/util/shr_const_mod.F90"
+    "${fc[@]}" "${hflags[@]}" "${script_dir}/e3sm_standins.F90"
+    "${fc[@]}" "${hflags[@]}" "${script_dir}/ocean_standins.F90"
+    "${fc[@]}" "${hflags[@]}" mct_mod.F90
+    "${fc[@]}" "${hflags[@]}" "${e3sm}/driver-mct/shr/glc_zocnclass_mod.F90"
+    "${fc[@]}" "${hflags[@]}" -ffree-form "${src}/driver/mpaso_cpl_indices.F"
+    "${fc[@]}" "${hflags[@]}" ocn_comp_mct_cut.F90
+    "${fc[@]}" "${hflags[@]}" "${script_dir}/run_hybrid_ocean.F90"
+    ( cd shr && "${fc[@]}" "${hflags[@]}" -I.. -ffree-form -DMPAS_ESM_SHR_CONST \
+        "${mpas_src}/src/core_ocean/shared/mpas_ocn_constants.F" )
+    libm_objects=()
+    while read -r object; do libm_objects+=("${object}"); done \
+        < <(bash "${script_dir}/../oracle_libm/build_host_libm.sh" 2> libm.txt)
+    component=("${mpas_obj}"/eos/ocn_timestep_cut.o "${mpas_obj}"/eos/oracle_stream.o "${mpas_obj}"/eos/ocn_split_step_cut.o
+               "${mpas_obj}"/eos/mpas_vector_reconstruction_cut.o "${mpas_obj}"/eos/stubs_split.o
+               "${mpas_obj}"/eos/mpas_ocn_time_average_coupled.o "${mpas_obj}"/eos/mpas_ocn_effective_density_in_land_ice.o
+               "${mpas_obj}"/eos/mpas_ocn_tendency.o "${mpas_obj}"/eos/mpas_ocn_surface_bulk_forcing.o
+               "${mpas_obj}"/eos/mpas_ocn_frazil_forcing.o "${mpas_obj}"/eos/mpas_ocn_surface_land_ice_fluxes.o
+               "${mpas_obj}"/eos/mpas_ocn_tracer_*.o "${mpas_obj}"/eos/mpas_tracer_advection_helpers_cut.o
+               "${mpas_obj}"/eos/ocn_diagnostics_cut.o "${mpas_obj}"/eos/mpas_ocn_diagnostics_routines.o
+               "${mpas_obj}"/eos/mpas_ocn_thick_ale.o "${mpas_obj}"/eos/mpas_ocn_vmix*.o "${mpas_obj}"/eos/stubs_vmix.o
+               "${mpas_obj}"/eos/mpas_ocn_equation_of_state*.o "${mpas_obj}"/mpas_ocn_vel_*.o
+               "${mpas_obj}"/mpas_ocn_thick_hadv.o "${mpas_obj}"/mpas_ocn_thick_vadv.o
+               "${mpas_obj}"/mpas_ocn_thick_surface_flux.o "${mpas_obj}"/mpas_ocn_forcing.o "${mpas_obj}"/mpas_constants.o
+               "${mpas_obj}"/stubs_unported.o "${mpas_obj}"/stubs.o "${mpas_obj}"/mpas_kind_types.o)
+    coupler=(run_hybrid_ocean.o ocn_comp_mct_cut.o mpaso_cpl_indices.o glc_zocnclass_mod.o mct_mod.o ocean_standins.o
+             e3sm_standins.o shr_const_mod.o shr_kind_mod.o)
+    "${fc[@]}" -o "${build_dir}/run_hybrid_ocean_e3sm" "${coupler[@]}" shr/mpas_ocn_constants.o "${component[@]}" \
+        "${mctlib[@]}" ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_hybrid_ocean_mpas" "${coupler[@]}" "${mpas_obj}"/mpas_ocn_constants.o \
+        "${component[@]}" "${mctlib[@]}" ${libm_objects[@]+"${libm_objects[@]}"}
+    if command -v objdump >/dev/null; then
+        objdump -d ocn_comp_mct_cut.o run_hybrid_ocean.o shr/mpas_ocn_constants.o > disassembly.txt
+        if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
+            echo "an object contains an FMA instruction (${obj}/fma.txt)" >&2
+            exit 5
+        fi
+    fi
+    echo "built ${build_dir}/run_hybrid_ocean_{e3sm,mpas}"
+fi
 
 # ---------------------------------------------------------------- the surface fractions
 # seq_frac_set and seq_frac_check are cut byte for byte out of

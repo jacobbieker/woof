@@ -835,8 +835,6 @@ Each step is one small PR, taken to merged before the next widens.
    - Still to come for item 4: the moist diagnosis (`calc_p_rho` and
      `al`/`alt` with qv), moist scalar advection and update, the moist
      LBC rows, and the step binding.
-   - Still refused: lateral boundaries other than periodic (specified
-     boundaries next), so WRFDA's regional tutorial case cannot run yet.
 8i. Moisture, part 2 (DA item 4): the moist diagnosis. `PRPGeometry.moist`
    makes qv an active input of `calc_p_rho_phi_tl/_ad`. The temperature
    ratio's numerator `Rd (300 + theta')` is multiplied by WRF's `qvf = 1 +
@@ -855,6 +853,8 @@ Each step is one small PR, taken to merged before the next widens.
      There is no WRFPLUS fixture for the moist case.
    - The step still refuses moisture. The diagnosis joins it with the
      moist scalar advection and the step binding.
+   - Still refused then: lateral boundaries other than periodic (bound
+     in 8f).
 8j. Moisture, part 3 (DA item 4): moist scalar transport
    (`woof.grad.wrfplus.scalar`). Two operators, not yet in the step:
    - sumflux (`sumflux_zero/accumulate/finish_tl/_ad`): `ru_m, rv_m, ww_m`
@@ -884,6 +884,7 @@ Each step is one small PR, taken to merged before the next widens.
      - FD convergence;
      - the binary32 base gives `_advance_species_wrf`'s and the sumflux
        launches' words, and each update moves the species.
+     There is no WRFPLUS fixture.
 8k. Moisture, part 4 (DA item 4): the moist boundary rows
    (`woof.grad.wrfplus.lbc`), not yet in the step.
    - qv's rows: `LBCGeometry`/`FinalGeometry` take kind `qv` (the

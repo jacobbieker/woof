@@ -397,8 +397,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     word for word on CUDA and Metal. v8.4.2's step writes the algae's
     `totalChlorophyll` through a null pointer when the brine height runs
     alone (it dies on every step), so the step refuses that configuration
-    unless the correction `bgc_inactive_diagnostics` is named; the other
-    biogeochemistry flags are refused by name until their phases land;
+    unless the correction `bgc_inactive_diagnostics` is named. The vertical
+    salinity (`config_use_vertical_zsalinity`, BL99) is inert in v8.4.2,
+    which never sets the column package's `solve_zsal` and copies
+    `verticalSalinity` only with the vertical tracers; every column stage
+    (the init, the brine height's step, the vertical and ITD
+    thermodynamics, the ridging, the column step and the coupled step)
+    keeps that word for word, and the correction `zsal_solve` solves it
+    (`compute_microS`, `solve_S_dt`, the salt fluxes, BL99's `dTemp`) in
+    the init, the brine height's step and the vertical thermodynamics,
+    word for word on CUDA and Metal with an oracle built from
+    `zsal_solve.patch`. The other biogeochemistry flags, and `zsal_solve`
+    in the other stages, are refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -416,7 +426,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     imports the ocean's floating basal mass balance
     (`woof/hex/mpas_ice/ocean_seam_v842.py`, graded by conservation); the
     land-ice core's registry status is now `ported_subset` (velocity
-    solvers 'sia', 'simple' and 'none'). Two v8.4.2 quirks have opt-in corrections, off by
+    solvers 'sia', 'simple' and 'none'), and its global statistics
+    (`config_stats_interval`, `woof/hex/mpas_ice/statistics_v842.py`) match
+    v8.4.2's log report character for character, with
+    `woof_statistics_extrema = 'ice'` as an opt-in correction, and so do
+    its analysis members `globalStats` and `regionalStats`
+    (`woof/hex/mpas_ice/analysis_v842.py`: every word and every compute's
+    time against v8.4.2's driver and members compiled verbatim, their
+    alarms on the streams' reference times; the door writes each stream's
+    records), with `woof_analysis_empty = 'corrected'` (0 for a mean over no
+    ice, which v8.4.2 leaves NaN) as an opt-in correction. Two v8.4.2 quirks have opt-in corrections, off by
     default: `woof_sgh_init_mask = 'corrected'` and
     `woof_enthalpy_advection_units = 'corrected'` (the advection converts
     enthalpy in Celsius, as the thermal solver does, so the EISMINT2
@@ -502,7 +521,22 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     runs them. Each hand-over is a matched exchange, refused by its
     channel's name. Word-exact against the chained oracle with scripted
     components.
-  - The coupled exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
+  - E3SM v3.2.0 coupler with MPAS v8.4.2 components, not an E3SM
+    configuration (`woof/hex/coupled/hybrid_ocean.py`, opt-in): the MPAS
+    v8.4.2 ocean (this fork's port) run as E3SM v3.2.0's `ocn_init_mct` and
+    `ocn_run_mct` run their ocean (the clock moved to its first coupling
+    alarm at start, the means reset each window, the forcing built in
+    E3SM's order), with E3SM's import and export around it. E3SM's build's
+    constants by default (`T0_Kelvin` 273.15, `rho_sw` 1026), or v8.4.2's
+    own. real(r8), word-exact on CUDA and Metal against E3SM's import and
+    export cut verbatim and compiled against v8.4.2's modules, around
+    v8.4.2's forward mode. Each place E3SM's loop does something v8.4.2's
+    does not is listed (`DIVERGENCES`): ported, refused by name (the
+    removed Antarctic runoff, the waves, the 10 m wind, the land ice's
+    'standalone' and 'data', the 3-D thermal forcing, nonzero iceberg
+    fluxes, precipitation scaling, the BGC tracers) or left out with the
+    reason (`Faoo_h2otemp` is sent as 0). E3SM's own MPAS-Ocean is not
+    ported.
     are the MALI port's ocean seam: `landIcePressure`, `landIceFraction` and
     `landIceMask` (int32), liquid and solid runoff in place of one mass
     channel, and `ocn2li_floating_basal_mass_bal` back in MALI's sign

@@ -31,22 +31,41 @@ fork already had, upstream's keys and flags are now the only ones:
 
 New:
 
+- The WRF dry-step adjoint's step (`woof.grad.wrfplus.model`) now covers
+  a moist state without microphysics (qv, qc and qr): calc_cq, the moist
+  pressure gradient, buoyancy and diagnosis, sumflux and the non-PD
+  scalar update, qv's boundary capture and spec_bdy_final, and
+  flow_dep_bdy for qc and qr, in the strict primal's order. The binary32
+  base reproduces `dycore.step` word for word. The forecast path is
+  unchanged.
+
+- The WRF dry-step adjoint's lateral-boundary rows (`woof.grad.wrfplus.lbc`)
+  gain the moist ones: qv's rk_step-1 relaxation capture and its
+  spec_bdy_final, and WRF's flow-dependent boundary for hydrometeors
+  without a table. The binary32 base reproduces woof's strict primal word
+  for word. They are not yet bound into the step. The forecast path is
+  unchanged.
+
+- The WRF dry-step adjoint (`woof.grad.wrfplus.scalar`) gains moist
+  scalar transport: WRF's sumflux and one species' non-positive-definite
+  rk_scalar_tend + rk_update_scalar, with the specified ring and the held
+  boundary tendency. The binary32 base reproduces woof's strict primal
+  word for word. It is not yet bound into the step. The forecast path is
+  unchanged.
+
 - The WRF dry-step adjoint (`woof.grad.wrfplus`) gains its first moist
   pieces, for WRFDA's moisture control: the TL/AD of `calc_cq` (qv, or
   qv, qc and qr), of the pressure gradient's cqu/cqv factor, and of the
   moist buoyancy (`moist_mode` 1). Each is checked against woof's strict
   primal word for word in binary32. They are not yet bound into the
   step. The forecast path is unchanged.
-- The WRF dry-step adjoint (`woof.grad.wrfplus.scalar`) gains moist
-  scalar transport: WRF's sumflux and one species' non-positive-definite
-  rk_scalar_tend + rk_update_scalar, with the specified ring and the held
-  boundary tendency. The binary32 base reproduces woof's strict primal
-  word for word. It is not yet bound into the step. The forecast path is
-- The WRF dry-step adjoint's lateral-boundary rows (`woof.grad.wrfplus.lbc`)
-  gain the moist ones: qv's rk_step-1 relaxation capture and its
-  spec_bdy_final, and WRF's flow-dependent boundary for hydrometeors
-  without a table. The binary32 base reproduces woof's strict primal word
-  for word. They are not yet bound into the step. The forecast path is
+
+- The WRF dry-step adjoint's diagnosis (`woof.grad.wrfplus`
+  `calc_p_rho_phi`) takes qv as an active input on a moist state, through
+  WRF's `qvf = 1 + rvovrd qv`. It is checked against woof's strict
+  primal word for word in binary32. It is not yet bound into the step.
+  The forecast path is unchanged.
+
 - The WRF dry-step adjoint's window (`woof.grad.wrfplus.window.Window`)
   can linearise about a supplied trajectory, as WRFPLUS does about the
   nonlinear run's states: `forward(trajectory=states)` takes the state
@@ -68,11 +87,6 @@ New:
   boundary clock, relax_w, DFI forcing, streamed seams and a window
   crossing a boundary interval are refused by name. The forecast path is
   unchanged.
-- The WRF dry-step adjoint's diagnosis (`woof.grad.wrfplus`
-  `calc_p_rho_phi`) takes qv as an active input on a moist state, through
-  WRF's `qvf = 1 + rvovrd qv`. It is checked against woof's strict
-  primal word for word in binary32. It is not yet bound into the step.
-  The forecast path is unchanged.
 
 - Noah-MP is recorded as following WRF 4.7.1's Noah-MP submodule (e5c0859),
   at the user's request. No forecast answer changes, because the default
