@@ -36,6 +36,7 @@ _VECTORS = tuple(("diagnostics", f"{stem}{axis}", REAL, (level, "C1"))
                  for axis in ("X", "Y", "Z", "Zonal", "Meridional"))
 GM_FIELDS = (
     ("diagnostics", "boundaryLayerDepth", REAL, ("C1",)),
+    ("diagnostics", "hEddyFlux", REAL, ("L", "E1")),
     ("diagnostics", "relativeSlopeTopOfCell", REAL, ("LP1", "C1")),
     ("diagnostics", "gmStreamFuncTopOfEdge", REAL, ("LP1", "E1")),
     ("diagnostics", "gmStreamFuncTopOfCell", REAL, ("L", "C1")),

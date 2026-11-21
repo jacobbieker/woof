@@ -23,6 +23,7 @@ from woof.verify import mpas_ocean_forward_oracle as _fw
 from woof.verify import mpas_ocean_split_step_gm_oracle as _ssgm
 from woof.verify import mpas_ocean_stream as _stream
 from woof.verify import mpas_ocean_tend_oracle as _tend
+from woof.verify.mpas_ocean_tend_oracle import PRECISIONS  # noqa: F401  (make_fixture reads it)
 
 FIXTURE_DIR = (Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mpas_ocean_forward_gm")
 CASES_PER_PRECISION = True
