@@ -978,6 +978,10 @@ class ForecastRequest:
     #: WRF's inflow perturbation controls when --inflow-perturbation asked for it
     #: (woof.hex.inflow_perturbation), else None.
     inflow_perturbation: dict | None = field(default=None, kw_only=True)
+    #: WRF's flow-dependent specified zone for the undriven species when
+    #: --undriven-species-boundary wrf-flow-dependent asked for it
+    #: (woof.hex.undriven_species_boundary), else None (``free``, the default).
+    undriven_species_boundary: str | None = field(default=None, kw_only=True)
     #: Input problems collected rather than raised, preflight only.  Always
     #: empty on a real run, because there the same conditions refuse.
     input_problems: tuple[str, ...] = ()
@@ -2626,6 +2630,7 @@ def resolve_request(
         w_damping=_resolve_w_damping(arguments),
         obstacles=_resolve_obstacles(arguments, collected),
         inflow_perturbation=_resolve_inflow_perturbation(arguments),
+        undriven_species_boundary=_resolve_undriven_species_boundary(arguments),
         input_problems=tuple(collected or ()),
         preset=preset.name,
         pbl_cadence_source=pbl_cadence_source,
@@ -3252,6 +3257,9 @@ def _partitioned_samehost_refusal(request) -> str | None:
     if request.inflow_perturbation is not None:
         return ("--inflow-perturbation acts in the one-card regional runtime; the partitioned same-host "
                 f"executor's rank runtimes do not carry it ({one_card})")
+    if request.undriven_species_boundary is not None:
+        return ("--undriven-species-boundary wrf-flow-dependent acts in the one-card regional runtime; the "
+                f"partitioned same-host executor's rank runtimes do not carry it ({one_card})")
     return None
 
 
@@ -3317,6 +3325,22 @@ def _resolve_obstacles(arguments, collected: list[str] | None = None) -> dict | 
     except ValueError as error:
         raise _refuse(str(error)) from error
     return settings.as_dict()
+
+
+def _resolve_undriven_species_boundary(arguments) -> str | None:
+    """``wrf-flow-dependent`` when asked for, else None (``free``, the default: nothing changes)."""
+
+    mode = getattr(arguments, "undriven_species_boundary", None)
+    if mode in (None, "free"):
+        return None
+    if mode != "wrf-flow-dependent":
+        raise _refuse(f"--undriven-species-boundary {mode!r} must be free or wrf-flow-dependent")
+    for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
+        if getattr(arguments, flag, False):
+            raise _refuse(
+                f"--undriven-species-boundary acts in the resident regional runtime; --{flag.replace('_', '-')} "
+                "runs its own drivers that do not carry it, so the rule would be accepted and never applied")
+    return str(mode)
 
 
 def _resolve_inflow_perturbation(arguments) -> dict | None:
@@ -3564,6 +3588,8 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
         argv += ["--obstacles", json.dumps(request.obstacles, sort_keys=True)]
     if request.inflow_perturbation is not None:
         argv += ["--inflow-perturbation", json.dumps(request.inflow_perturbation, sort_keys=True)]
+    if request.undriven_species_boundary is not None:
+        argv += ["--undriven-species-boundary", request.undriven_species_boundary]
     if request.source_table is not None:
         argv += ["--source-table", str(request.source_table)]
     if request.start_time:
@@ -3936,6 +3962,8 @@ def build_receipt(
             **({} if request.obstacles is None else {"obstacles": dict(request.obstacles)}),
             **({} if request.inflow_perturbation is None else
                {"inflow_perturbation": dict(request.inflow_perturbation)}),
+            **({} if request.undriven_species_boundary is None else
+               {"undriven_species_boundary": request.undriven_species_boundary}),
             "source_table": (
                 None if request.source_table is None
                 else str(request.source_table)
@@ -5285,6 +5313,9 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             if getattr(arguments, "inflow_perturbation", False):
                 raise ValueError("--inflow-perturbation is carried by the WOOF-physics route's regional runtime; "
                                  "the MPAS suite route (matrix item 5.7 follow-up) would accept it and never apply it")
+            if getattr(arguments, "undriven_species_boundary", None) not in (None, "free"):
+                raise ValueError("--undriven-species-boundary wrf-flow-dependent is carried by the WOOF-physics "
+                                 "route's regional runtime; the MPAS suite route would accept it and never apply it")
             from .mpasphys.resident_v842 import ported_route_refusal
             from .mpasphys.forecast_v842 import named_library_route
             suite_refusal = ported_route_refusal(native_config)
@@ -5884,6 +5915,11 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                         help="WRF's inflow_perturbation_amplitude_scale (default 1.0)")
     parser.add_argument("--inflow-perturbation-faces", default=None, choices=("inflow", "outflow"),
                         help="WRF's inflow_perturbation_faces (default inflow)")
+    parser.add_argument("--undriven-species-boundary", default="free", choices=("free", "wrf-flow-dependent"),
+                        help="the specified zone of the microphysics species the boundary stream does not drive: "
+                             "free (default, transported like the interior) or wrf-flow-dependent (WRF's "
+                             "flow_dep_bdy: outflow copies the first inner cell, inflow sets 0, or ccn_conc for "
+                             "nn/qnn); regional mesh, WOOF-physics route only")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",
                         help="opt-in Fitch turbine drag and TKE from the shared turbine tables")
     # --wrf-hydro / --wrf-hydro-output: WRF-Hydro's routing on its own LSM grid, coupled to the hex land surface

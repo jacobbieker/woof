@@ -3965,6 +3965,11 @@ def execute_forecast(
         from woof.hex.inflow_perturbation import attach as attach_inflow
         print(json.dumps({"inflow_perturbation": attach_inflow(
             stack["driver"], stack["backend"], host["inflow_perturbation"])}), flush=True)
+    if host.get("undriven_species_boundary") is not None:
+        # WRF's flow-dependent specified zone for the undriven species (woof.hex.undriven_species_boundary).
+        from woof.hex.undriven_species_boundary import attach as attach_undriven
+        print(json.dumps({"undriven_species_boundary": attach_undriven(
+            stack["driver"], host, host["undriven_species_boundary"])}), flush=True)
     if host.get("w_damping") is not None:
         from woof.hex.cuda_w_damping import WDamping
         stack["driver"].w_damping = WDamping(w_crit_cfl=float(host["w_damping"]["w_crit_cfl"]))
@@ -4887,6 +4892,10 @@ def execute_forecast(
         (output_root / "nest-trigger-receipt.json").write_text(
             json.dumps(nest_trigger.receipt(), indent=2, sort_keys=True, default=str) + "\n",
             encoding="utf-8", newline="\n")
+    undriven = getattr(getattr(stack["driver"], "regional_v841", None), "undriven_species_boundary", None)
+    if undriven is not None:
+        (output_root / "undriven-species-boundary-receipt.json").write_text(
+            json.dumps(undriven.receipt(), indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     inflow = getattr(getattr(stack["driver"], "regional_v841", None), "inflow_perturbation", None)
     if inflow is not None:
         # What the inflow seeding put on the boundary (woof.hex.inflow_perturbation).
@@ -5566,6 +5575,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--wind-farms", default=None)
     parser.add_argument("--w-damping", action="store_true")
     parser.add_argument("--inflow-perturbation", default=None)
+    parser.add_argument("--undriven-species-boundary", default=None, choices=("free", "wrf-flow-dependent"))
     parser.add_argument("--obstacles", default=None)
     parser.add_argument("--w-crit-cfl", type=float, default=1.0)
     parser.add_argument(
@@ -6466,6 +6476,8 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
         host["w_damping"] = {"w_crit_cfl": float(args.w_crit_cfl)}
     if getattr(args, "inflow_perturbation", None):
         host["inflow_perturbation"] = json.loads(args.inflow_perturbation)
+    if getattr(args, "undriven_species_boundary", None) not in (None, "free"):
+        host["undriven_species_boundary"] = args.undriven_species_boundary
     if getattr(args, "obstacles", None):
         if getattr(args, "fullstep_local_timestep", False) or getattr(args, "local_timestep", False):
             raise ConfigurationRefusal("obstacle_opt", 1, "the local-time-step executors do not carry the "

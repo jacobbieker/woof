@@ -5195,6 +5195,9 @@ class CudaDryDycoreDriver:
         )
 
         del split_flux_u_sum, split_flux_w_sum
+        if getattr(self.regional_v841, "undriven_species_boundary", None) is not None:
+            # --undriven-species-boundary wrf-flow-dependent: the sign of WRF's ru_m (ruAvg here).
+            self.regional_v841.undriven_mass_flux = split_flux_u
         scalar_stage_timesteps = None
         if (
             self.config.config_scalar_advection
