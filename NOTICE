@@ -1820,6 +1820,22 @@ licenses/LICENSE-E3SM-BSD-3-Clause.txt. This is a modified derivative, not
 the version available from the E3SM project, and neither the E3SM project,
 UChicago Argonne, LLC, UCAR nor the Department of Energy endorses it.
 
+woof/hex/coupled/flux_atmocn_e3sm.cu (and its Python wrapper) transcribe
+E3SM v3.2.0's coupler atmosphere-ocean flux, seq_flux_init_mct's mask and
+seq_flux_atmocn_mct from driver-mct/main/seq_flux_mct.F90 (cpl7: University
+Corporation for Atmospheric Research and UChicago Argonne, LLC; E3SM:
+Copyright 2024, UChicago Argonne, LLC; BSD 3-Clause) and shr_flux_atmOcn's
+E3SMv1 scheme and shr_flux_update_stress from share/util/shr_flux_mod.F90
+(CESM share code: UCAR; E3SM: Copyright 2024, UChicago Argonne, LLC; BSD
+3-Clause). Its oracle, tools/e3sm_coupler_oracle/, compiles those routines
+verbatim on MCT as it is. The terms are reproduced at
+licenses/LICENSE-E3SM-BSD-3-Clause.txt. This is a modified derivative, not
+the version available from the E3SM project, and neither the E3SM project,
+UChicago Argonne, LLC, UCAR nor the Department of Energy endorses it. Its
+atan is the opt-in glibc 2.39 transcription (LGPL, see the glibc 2.39
+section): without WOOF_GLIBC239_LIBM64=1 the flux compiles no kernel and is
+refused by name (only seq_flux_init_mct's mask, which calls no atan, runs).
+
 woof/hex/coupled/ice_coupling_e3sm.cu (and its Python wrapper) transcribe
 E3SM v3.2.0's MPAS-Seaice coupler import and export, ice_import_mct,
 ice_export_mct, basal_pressure and frazil_mass from

@@ -3,7 +3,8 @@
 # (run_ocean_merge), MPAS-Ocean's coupler import and export,
 # ocn_import_mct and ocn_export_mct (run_ocean_coupling), and, given Icepack,
 # MPAS-Seaice's, ice_import_mct and ice_export_mct (run_seaice_coupling),
-# and the coupler's surface fractions, seq_frac_set (run_seq_frac).
+# the coupler's surface fractions, seq_frac_set (run_seq_frac), and its
+# atmosphere-ocean flux, seq_flux_atmocn_mct (run_flux_atmocn).
 #
 #   bash tools/e3sm_coupler_oracle/build.sh E3SM_SOURCE_ROOT MCT_SOURCE_ROOT BUILD_DIR [ICEPACK_SOURCE_ROOT]
 #
@@ -304,6 +305,83 @@ if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\
     exit 6
 fi
 echo "built ${build_dir}/run_seq_frac"
+
+# ---------------------------------------------------------------- the atmosphere-ocean flux
+# seq_flux_init_mct and seq_flux_atmocn_mct are cut byte for byte out of
+# driver-mct/main/seq_flux_mct.F90 into a module of the same name whose head
+# is the host module's own (lines 1-23 and 32-214: its use lines, its
+# private data and the index variables; of its public lines only those of
+# the two routines cut, 24 and 30) plus a harness setter for the private
+# seq_flux_atmocn_minwind (seq_flux_readnl_mct reads it from the namelist).
+# Compiled verbatim: shr_kind_mod, shr_const_mod, water_isotopes and
+# shr_flux_mod.  mct_mod is written as for the fractions, with its
+# `use shr_const_mod` (seq_flux_mct takes SHR_CONST_PI through it).
+# flux_standins_base.F90 and flux_standins.F90 hold the rest (no
+# arithmetic).
+obj="${build_dir}/flux"
+rm -rf "${obj}" && mkdir -p "${obj}" && cd "${obj}"
+{
+    printf 'module mct_mod\n'
+    grep -E '^ *use (shr_mpi_mod|shr_sys_mod|shr_const_mod) ' "${e3sm}/share/util/mct_mod.F90"
+    grep -E '^ *use m_[A-Za-z0-9_]+ +,only:' "${e3sm}/share/util/mct_mod.F90"
+    printf '  use shr_kind_mod, only: IN => SHR_KIND_IN\n  implicit none\n'
+    grep -E '^ *logical,public :: mct_use(alltoall|vector) = \.false\.$' "${e3sm}/share/util/mct_mod.F90"
+    printf 'end module mct_mod\n'
+} > mct_mod.F90
+{
+    sed -n '1,23p;24p;30p' "${drv}/seq_flux_mct.F90"
+    printf '  public seq_flux_oracle_set_minwind\n'
+    sed -n '32,214p' "${drv}/seq_flux_mct.F90"
+    for r in seq_flux_init_mct seq_flux_atmocn_mct; do cut "${drv}/seq_flux_mct.F90" "${r}" subroutine; done
+    printf '  ! the harness: seq_flux_readnl_mct sets this from the namelist\n'
+    printf '  subroutine seq_flux_oracle_set_minwind(minwind)\n    real(r8), intent(in) :: minwind\n'
+    printf '    seq_flux_atmocn_minwind = minwind\n  end subroutine seq_flux_oracle_set_minwind\n'
+    printf 'end module seq_flux_mct\n'
+} > seq_flux_cut.F90
+for want in 'seq_flux_init_mct' 'seq_flux_atmocn_mct'; do
+    if [[ $(grep -cE "^ *(end )?subroutine ${want}( |\\(|$)" seq_flux_cut.F90) -ne 2 ]]; then
+        echo "a routine was not cut out whole (${want})" >&2
+        exit 3
+    fi
+done
+if [[ "$(sed -n '1p;24,26p;28p;30,31p;214p' "${drv}/seq_flux_mct.F90" | tr -d ' ')" != \
+      $'moduleseq_flux_mct\npublicseq_flux_init_mct\npublicseq_flux_readnl_mct\npublicseq_flux_initexch_mct\npublicseq_flux_ocnalb_mct\npublicseq_flux_atmocn_mct\npublicseq_flux_atmocnexch_mct\ncontains' ]]; then
+    echo "seq_flux_mct.F90's module head moved" >&2
+    exit 3
+fi
+fflags=(-c -cpp -O0 -ffp-contract=off -ffree-line-length-none "${mctinc[@]}")
+"${fc[@]}" "${fflags[@]}" "${e3sm}/share/util/shr_kind_mod.F90"
+"${fc[@]}" "${fflags[@]}" "${e3sm}/share/util/shr_const_mod.F90"
+"${fc[@]}" "${fflags[@]}" "${script_dir}/flux_standins_base.F90"
+"${fc[@]}" "${fflags[@]}" "${e3sm}/share/util/water_isotopes.F90"
+"${fc[@]}" "${fflags[@]}" "${e3sm}/share/util/shr_flux_mod.F90"
+"${fc[@]}" "${fflags[@]}" mct_mod.F90
+"${fc[@]}" "${fflags[@]}" "${script_dir}/flux_standins.F90"
+"${fc[@]}" "${fflags[@]}" seq_flux_cut.F90
+"${fc[@]}" "${fflags[@]}" "${script_dir}/run_flux_atmocn.F90"
+"${fc[@]}" -o "${build_dir}/run_flux_atmocn" ./*.o "${mctlib[@]}"
+if command -v objdump >/dev/null; then
+    objdump -d seq_flux_cut.o shr_flux_mod.o > disassembly.txt
+    if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
+        echo "an object contains an FMA instruction (${obj}/fma.txt)" >&2
+        exit 5
+    fi
+    # the functions shr_flux_atmOcn calls (its relocations): of libm exactly
+    # exp, log, atan and pow (x**0.5), and libgcc's __powidf2 (x**4)
+    objdump -dr --no-show-raw-insn --disassemble=__shr_flux_mod_MOD_shr_flux_atmocn shr_flux_mod.o \
+        | grep -oE 'R_X86_64_PLT32\s+\S+' | awk '{print $2}' | sed 's/-0x4$//' | sort -u > atmocn_calls.txt
+    if [[ "$(grep -xE '(exp|log|pow|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf|tanh|log10|__powidf2)[fl]?' \
+             atmocn_calls.txt | tr '\n' ' ')" != '__powidf2 atan exp log pow ' ]]; then
+        echo "shr_flux_atmOcn's maths calls changed (${obj}/atmocn_calls.txt)" >&2
+        exit 6
+    fi
+fi
+nm -u seq_flux_cut.o > undefined.txt
+if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\b' undefined.txt; then
+    echo "seq_flux_atmocn_mct calls libm" >&2
+    exit 6
+fi
+echo "built ${build_dir}/run_flux_atmocn"
 
 # ---------------------------------------------------------------- the sea ice's import and export
 # ice_import_mct, ice_export_mct, basal_pressure and frazil_mass are cut byte

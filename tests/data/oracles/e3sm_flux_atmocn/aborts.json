@@ -1,0 +1,10 @@
+{
+ "abort_a2x_without_pslv": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Sa_pslv\" Traceback:",
+ "abort_diurnal_ua": "(seq_flux_atmocn_mct) ERROR cannot use flux_diurnal with UA flux scheme",
+ "abort_gust_without_ugust": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Sa_ugust\" Traceback:",
+ "abort_no_iteration": "No iterations performed ERROR in shr_flux_mod.F90 at line 476",
+ "abort_scheme_3": "(shr_flux_atmOcn)  subroutine shr_flux_atmOcn requires ocn_surface_flux_scheme = 0 or 1",
+ "abort_sizes": "(seq_flux_atmocn_mct) ERROR nloc sizes do not match",
+ "abort_tolerance_one": "No iterations performed ERROR in shr_flux_mod.F90 at line 476",
+ "abort_xao_without_ninc": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"So_ninc_diurn\" Traceback:"
+}
