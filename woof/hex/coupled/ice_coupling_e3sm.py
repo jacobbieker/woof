@@ -108,6 +108,35 @@ TOCNFRZ = -1.8  # seaiceFreezingTemperatureConstant
 FRAZIL_SALINITY_REDUCTION = 3.0
 FRAZIL_ICE_POROSITY = 0.75
 
+@dataclass(frozen=True)
+class Constants:
+    """The ``seaice_constants`` and Icepack parameters the two routines read.
+    :func:`e3sm_constants` (the default) is E3SM's build's; a sea ice built
+    on other constants (the hybrid's v8.4.2 column package) passes its own."""
+
+    tffresh: float
+    rhoi: float
+    rhow: float
+    rhos: float
+    gravity: float
+    cp_ice: float
+    cp_ocn: float
+    latice: float  # seaiceLatentHeatMelting (frazil_mass's qi0new)
+    lfresh: float  # the column physics' Lfresh (the mush enthalpy)
+    ref_salinity: float
+    puny: float
+    depress_t: float
+    tocnfrz: float
+    frazil_salinity_reduction: float
+    frazil_ice_porosity: float
+
+
+def e3sm_constants() -> Constants:
+    """E3SM v3.2.0's (``CCSMCOUPLED``), read from this module at call time."""
+    return Constants(TFFRESH, RHOI, RHOW, RHOS, GRAVITY, CP_ICE, CP_OCN, LATICE, LFRESH, REF_SALINITY, PUNY,
+                     DEPRESS_T, TOCNFRZ, FRAZIL_SALINITY_REDUCTION, FRAZIL_ICE_POROSITY)
+
+
 #: the glibc release the oracle's trigonometric words were recorded with
 TRIG_GLIBC = "2.44"
 #: mpas_seaice_initialize's ocean surfaces ("free"; the rest is the slab ocean) and seq_flds_mod's wave couplings
@@ -357,13 +386,16 @@ def _pool_array(pools: dict, pool: str, name: str):
         raise ValueError(f"{pool}/{name} is needed and missing") from None
 
 
-def import_x2i(idx: Indices, opts: Options, x2i, *, n_cells_solve: int, pools: dict, n_frequencies: int = 0) -> None:
+def import_x2i(idx: Indices, opts: Options, x2i, *, n_cells_solve: int, pools: dict, n_frequencies: int = 0,
+               constants: Constants | None = None) -> None:
     """``ice_import_mct``: ``x2i`` ``(lsize, nx2i)`` into the pools' arrays in
     place. ``pools`` maps a pool name to ``{array name: device array}``: 1-D
     ``(nCells,)``, 2-D ``(nCells, k)`` (MPAS's ``(k, nCells)`` in memory
-    order). ``n_frequencies`` is the ``nFrequencies`` dimension."""
+    order). ``n_frequencies`` is the ``nFrequencies`` dimension.
+    ``constants`` defaults to :func:`e3sm_constants`."""
     import cupy as cp
     opts.check()
+    k = e3sm_constants() if constants is None else constants
     if n_cells_solve < 0 or n_frequencies < 0:
         raise ValueError(f"nCellsSolve ({n_cells_solve}) and nFrequencies ({n_frequencies}) must not be negative")
     _f64("x2i", x2i)
@@ -395,10 +427,11 @@ def import_x2i(idx: Indices, opts: Options, x2i, *, n_cells_solve: int, pools: d
     _launch("ice_import_e3sm", n_cells_solve, (
         buf, np.int32(n_cells), np.int32(len(rows)), _ints(r[3] for r in rows), _ints(len(r[4]) for r in rows),
         cp.asarray(cols), x2i, np.int32(idx.nx2i), np.int32(n_cells_solve),
-        np.float64(TFFRESH), np.int32(opts.tfrz), np.int32(opts.ktherm), np.int32(opts.mushy),
-        np.float64(RHOI), np.float64(LATICE), np.float64(FRAZIL_SALINITY_REDUCTION), np.float64(FRAZIL_ICE_POROSITY),
-        np.float64(RHOI), np.float64(RHOW), np.float64(CP_ICE), np.float64(CP_OCN), np.float64(LFRESH),
-        np.float64(DEPRESS_T), np.float64(TOCNFRZ), np.float64(PUNY)))
+        np.float64(k.tffresh), np.int32(opts.tfrz), np.int32(opts.ktherm), np.int32(opts.mushy),
+        np.float64(k.rhoi), np.float64(k.latice), np.float64(k.frazil_salinity_reduction),
+        np.float64(k.frazil_ice_porosity),
+        np.float64(k.rhoi), np.float64(k.rhow), np.float64(k.cp_ice), np.float64(k.cp_ocn), np.float64(k.lfresh),
+        np.float64(k.depress_t), np.float64(k.tocnfrz), np.float64(k.puny)))
     # the solve cells only: the halo is E3SM's to leave alone
     for j, (pool, name, comp, *_) in enumerate(rows):
         if comp is None:
@@ -427,13 +460,16 @@ _A_ORDER = tuple((p, n) for p, names in (
     ("floe_size_distribution", "floeSizeDiameter")) for n in names.split())
 
 
-def export_i2x(idx: Indices, opts: Options, i2x, *, n_cells_solve: int, pools: dict, trig) -> None:
+def export_i2x(idx: Indices, opts: Options, i2x, *, n_cells_solve: int, pools: dict, trig,
+               constants: Constants | None = None) -> None:
     """``ice_export_mct``: fills ``i2x`` ``(lsize, ni2x)`` from the pools'
     arrays. ``trig`` is ``(nCellsSolve, 8)``: per cell sin and cos of
     ``latCell``, ``lonCell`` and the rotated grid's latitude and longitude
-    (:func:`rotation_trig`, or the words E3SM's libm makes)."""
+    (:func:`rotation_trig`, or the words E3SM's libm makes). ``constants``
+    defaults to :func:`e3sm_constants`."""
     import cupy as cp
     opts.check()
+    k = e3sm_constants() if constants is None else constants
     if n_cells_solve < 0:
         raise ValueError(f"nCellsSolve ({n_cells_solve}) must not be negative")
     _f64("i2x", i2x)
@@ -458,8 +494,8 @@ def export_i2x(idx: Indices, opts: Options, i2x, *, n_cells_solve: int, pools: d
         i2x, np.int32(idx.ni2x), _ints(idx.i(n) for n in _I_ORDER), np.int32(n_cells_solve), arr, trig,
         np.int32(opts.config_rotate_cartesian_grid), np.int32(opts.config_use_topo_meltponds),
         np.int32(opts.config_use_column_shortwave), np.int32(opts.config_use_data_icebergs), np.int32(floe),
-        np.float64(TFFRESH), np.float64(RHOI), np.float64(RHOS), np.float64(RHOW),
-        np.float64(GRAVITY), np.float64(REF_SALINITY)))
+        np.float64(k.tffresh), np.float64(k.rhoi), np.float64(k.rhos), np.float64(k.rhow),
+        np.float64(k.gravity), np.float64(k.ref_salinity)))
 
 
 def _asin(v: float) -> float:
