@@ -1,4 +1,4 @@
-"""One dry model step's chained tangent-linear and adjoint (P3a item 8,
+"""One model step's chained tangent-linear and adjoint (P3a item 8,
 woof.grad.wrfplus.model.step_tl/_ad): the three RK stages with their slow
 tendencies, acoustic substeps and the step epilogue, in woof's strict order.
 
@@ -64,10 +64,15 @@ VARIANTS = [dict(), dict(hybrid_opt=2), dict(w_damping=1),
             dict(h_mom_adv_order=3, h_sca_adv_order=4, v_mom_adv_order=5),
             dict(time_step_sound=6, smdiv=0.2), dict(_rot=1), dict(_msf=1),
             dict(_msf=1, _rot=1, hybrid_opt=2, w_damping=1)]
+# Moist states (qv, qc and qr, mp_physics 0, moist_adv_opt 0): alone and
+# with every option branch above.
+MOIST = [dict(_moist=1),
+         dict(_moist=1, _msf=1, _rot=1, hybrid_opt=2, w_damping=1, time_step_sound=6)]
 # Chains of three steps: from a warm state (the previous step's diagnosis
 # reused on rk_step 1) and from a cold one (diagnosed on the first step
 # only), each followed by warm steps.
-CHAINS = [(dict(), 3, 2), (dict(), 3, 0)]
+CHAINS = [(dict(), 3, 2), (dict(), 3, 0), (dict(_moist=1), 3, 0)]
+CASES = [(v, 1, 2) for v in VARIANTS + MOIST] + CHAINS
 
 
 def _run(backend, body, tmp_path):
@@ -85,10 +90,18 @@ def _run(backend, body, tmp_path):
         "from woof.grad.wrfplus import model as M, _checks as K\n"
         "out = {}\n"
         "IN = M.STEP_INPUTS\n"
+        "def inputs(geoms):\n"
+        "    # the step's inputs (the species on a moist state) and which of\n"
+        "    # them the identity is taken out of\n"
+        "    global IN, PROG\n"
+        "    IN = M.step_inputs(geoms[0])\n"
+        "    PROG = [n in M.PROGNOSTICS + M.SPECIES for n in IN]\n"
         "def build(over, warm=2, nx=16, ny=12, nz=10, seed=1, hill=400.0):\n"
         "    o = dict(h_sca_adv_order=5, terrain_opt=1); o.update(over)\n"
         "    rot = o.pop('_rot', 0)\n"
         "    msf = o.pop('_msf', 0)\n"
+        "    if o.pop('_moist', 0):\n"
+        "        o.update(moist=True, moist_adv_opt=0)\n"
         "    cfg = H.make_config(nx, ny, nz, **o)\n"
         "    jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')\n"
         "    ridge = hill * np.exp(-(((ii - nx / 2) / (nx / 5)) ** 2\n"
@@ -106,6 +119,10 @@ def _run(backend, body, tmp_path):
         "        jv, iv = np.meshgrid(np.arange(ny + 1) - 0.5, np.arange(nx), indexing='ij')\n"
         "        geo = dataclasses.replace(geo, msft=m(jj, ii), msfu=m(jf, iu), msfv=m(jv, iv))\n"
         "    state = H.make_state(cfg, seed, geography=geo)\n"
+        "    if cfg.moist:  # the harness seeds qv and qc; give qr a field too\n"
+        "        rng = np.random.default_rng(seed + 7)\n"
+        "        state.qr[...] = cp.asarray(np.maximum(2e-4 * rng.standard_normal(\n"
+        "            state.qr.shape), 0.0), dtype=state.qr.dtype)\n"
         "    for _ in range(warm):\n"
         "        D.step(state, cfg)\n"
         "    return cfg, state\n"
@@ -153,23 +170,25 @@ def test_step_reproduces_strict_primal_words(backend, tmp_path):
     """The binary32 base of step_tl is dycore.step's strict step word for
     word, on every prognostic, the carried diagnosis and the scratch the
     next step reads: one step per variant and the chains of three."""
-    cases = [(v, 1, 2) for v in VARIANTS] + CHAINS
+    cases = CASES
     out = _run(backend, f'''
 for i, (over, nstep, warm) in enumerate({cases!r}):
     cfg, state = build(over, warm)
     geoms = M.step_geometries(state, cfg, nstep)
+    inputs(geoms)
     x = M.run_state(state, cfg, np.float32)
     dx = zeros(x)
     for g in geoms:
         M.step_tl(x, dx, g)
         D.step(state, cfg)
     y = M.run_state(state, cfg, np.float32)
-    for n in IN + ("w0", "u_pp", "mu_pp", "ww_ref"):
+    for n in IN + ("w0", "u_pp", "mu_pp", "ww_ref") + (("ru_m", "ww_m") if cfg.moist else ()):
         a, b = cp.asnumpy(x[n]), cp.asnumpy(y[n])
         out[f"{{i}}/{{n}}"] = int((a.view(np.uint32) != b.view(np.uint32)).sum())
 ''', tmp_path)
+    moist = sum(1 for over, _, _ in cases if over.get("_moist"))
     assert len(out) == len(cases) * (len(("u", "v", "w", "thp", "php", "mup", "p", "al",
-                                              "alt", "p_pert", "muts")) + 4)
+                                              "alt", "p_pert", "muts")) + 4) + moist * 5
     bad = {k: v for k, v in out.items() if v}
     assert not bad, bad
 
@@ -180,12 +199,13 @@ def test_step_dot_product(backend, tmp_path):
     in binary64, 1e-5 in binary32; one step per variant and the chains of
     three (I on the prognostics only)."""
     dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
-    cases = [(v, 1, 2) for v in VARIANTS] + CHAINS
+    cases = CASES
     out = _run(backend, f'''
 for dtn in {dtypes!r}:
     for i, (over, nstep, warm) in enumerate({cases!r}):
         cfg, state = build(over, warm)
         geoms = M.step_geometries(state, cfg, nstep)
+        inputs(geoms)
         x0 = M.run_state(state, cfg, np.dtype(dtn))
         p, q = pert(x0, 10 + i), pert(x0, 20 + i)
         def tl(dx):
@@ -207,12 +227,13 @@ def test_base_only_step_is_the_joint_base(backend, tmp_path):
     over its tape is the adjoint over the TL's: binary64 and binary32,
     one step per variant and the chains of three."""
     dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
-    cases = [(v, 1, 2) for v in VARIANTS] + CHAINS
+    cases = CASES
     out = _run(backend, f'''
 for dtn in {dtypes!r}:
     for i, (over, nstep, warm) in enumerate({cases!r}):
         cfg, state = build(over, warm)
         geoms = M.step_geometries(state, cfg, nstep)
+        inputs(geoms)
         x0 = M.run_state(state, cfg, np.dtype(dtn))
         ta, tb = [[] for _ in geoms], [[] for _ in geoms]
         xa, _ = run_tl(x0, pert(x0, 40 + i), geoms, ta)
@@ -237,11 +258,12 @@ for dtn in {dtypes!r}:
 def test_step_tl_matches_finite_differences(backend, tmp_path):
     """||NL(x + a dx) - NL(x)|| / ||a TL dx|| -> 1 in binary64, for one step
     per variant and the chains of three."""
-    cases = [(v, 1, 2) for v in VARIANTS] + CHAINS
+    cases = CASES
     out = _run(backend, f'''
 for i, (over, nstep, warm) in enumerate({cases!r}):
     cfg, state = build(over, warm)
     geoms = M.step_geometries(state, cfg, nstep)
+    inputs(geoms)
     x0 = M.run_state(state, cfg, np.float64)
     p = pert(x0, 30 + i)
     def model(xs):
@@ -262,13 +284,16 @@ for i, (over, nstep, warm) in enumerate({cases!r}):
 
 @pytest.mark.parametrize("backend", NO_MLX[:1])
 def test_step_refuses_what_it_does_not_cover(backend, tmp_path):
-    """A flat base (1-D columns), open boundaries, physics or an odd
-    time_step_sound raise rather than return a step that is not the
-    strict primal's; rotation and map factors are accepted."""
+    """A flat base (1-D columns), open boundaries, physics, an odd
+    time_step_sound or the positive-definite moist stage raise rather
+    than return a step that is not the strict primal's; rotation, map
+    factors and a moist state are accepted."""
     out = _run(backend, '''
 cases = {"flat": dict(terrain_opt=0), "open": dict(open_x=True, terrain_opt=1),
          "earth": dict(terrain_opt=1), "pbl": dict(terrain_opt=1, bl_pbl_physics=1),
-         "odd": dict(terrain_opt=1, time_step_sound=5), "rot": dict(terrain_opt=1)}
+         "odd": dict(terrain_opt=1, time_step_sound=5), "rot": dict(terrain_opt=1),
+         "pd": dict(terrain_opt=1, moist=True, moist_adv_opt=1),
+         "moist": dict(terrain_opt=1, moist=True, moist_adv_opt=0)}
 for key, over in cases.items():
     cfg = H.make_config(8, 6, 6, h_sca_adv_order=5, **over)
     geo = None
@@ -290,6 +315,8 @@ for key, over in cases.items():
     assert "physics" in out["pbl"], out
     assert "odd time_step_sound" in out["odd"], out
     assert out["rot"] == "accepted rotational=True cc=True msf=0", out
+    assert "moist_adv_opt" in out["pd"], out
+    assert out["moist"].startswith("accepted"), out
 
 
 def test_forecast_path_does_not_import_the_step_adjoint():
