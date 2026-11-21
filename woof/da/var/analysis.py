@@ -62,6 +62,7 @@ __all__ = [
     "increment_stats",
     "obs_window",
     "read_first_guess",
+    "restamp_start",
     "roughness_from_lanu",
     "wrftoxb",
     "write_analysis_file",
@@ -788,7 +789,9 @@ def write_analysis_file(first_guess, wrf: dict, out) -> Path:
 
     Written through :func:`woof.io.analysis_bundle.write_analysis`: the
     increments (analysis minus first guess, binary64) added to the first
-    guess and rounded to each variable's stored type.
+    guess and rounded to each variable's stored type.  A first guess from
+    the middle of a forecast is restamped to start at its valid time
+    (:func:`restamp_start`), as WRFDA's output is.
     """
     from woof.io.analysis_bundle import write_analysis
 
@@ -802,7 +805,40 @@ def write_analysis_file(first_guess, wrf: dict, out) -> Path:
             base = np.asarray(nc.variables[name][0], dtype=np.float64)
             increments[name] = _to_file_order(wrf[name]) - base
     write_analysis(fg.path, increments, out)
+    restamp_start(out, fg.times)
     return Path(out)
+
+
+def restamp_start(path, valid_time: str) -> bool:
+    """Stamp a written analysis as starting at its valid time, as WRFDA's
+    ``da_med_initialdata_output`` does (``start_date = current_date``, then
+    ``GMT``/``JULYR``/``JULDAY`` from it; the run's simulation start is the
+    analysis time too).
+
+    A first guess from the middle of a forecast (a ``wrfout`` or a
+    ``write_input`` file at 15Z of a run started at 12Z) carries the
+    forecast's ``START_DATE``; without this the analysis would claim to start
+    at 12Z while holding the 15Z state, and the bundle refuses it.  Files
+    whose ``START_DATE`` is already the valid time are not touched, byte for
+    byte.  Returns whether the file was changed.
+    """
+    import netCDF4
+
+    stamp = str(valid_time)[:19]
+    t = _dt.datetime.strptime(stamp, "%Y-%m-%d_%H:%M:%S")
+    with netCDF4.Dataset(path) as nc:
+        attrs = {k: nc.getncattr(k) for k in nc.ncattrs()}
+    if str(attrs.get("START_DATE", stamp)) == stamp:
+        return False
+    want = {"START_DATE": stamp, "SIMULATION_START_DATE": stamp,
+            "GMT": np.float32(t.hour + t.minute / 60.0 + t.second / 3600.0),
+            "JULYR": np.int32(t.year), "JULDAY": np.int32(t.timetuple().tm_yday)}
+    with netCDF4.Dataset(path, "a") as nc:
+        for k, v in want.items():
+            if k in attrs:
+                old = attrs[k]
+                nc.setncattr(k, v if isinstance(old, str) else np.asarray(old).dtype.type(v))
+    return True
 
 
 def write_bundle(out, first_guess, wrf: dict, *, recipe: dict, grid_id: str, physics_suite: str = "unspecified",

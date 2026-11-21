@@ -15,6 +15,14 @@ Every word is held to those routines compiled verbatim with gfortran
 ``-O0 -ffp-contract=off`` at RKIND 4 (MALI's default) and RKIND 8
 (``tools/mali_oracle/run_advection.F90``, ``tests/test_mali_advection_parity.py``).
 
+One v8.4.2 quirk has a named opt-in correction. With the enthalpy solver,
+``tracer_setup`` and ``tracer_finish`` call ``li_temperature_to_enthalpy`` and
+``li_enthalpy_to_temperature`` with Kelvin temperatures, where li_thermal's
+solver converts in Celsius against a Celsius pressure-melting point, so the
+advected ice turns temperate and melts. ``woof_enthalpy_advection_units =
+'corrected'`` converts in Celsius (and the new ice's enthalpies with it);
+the default 'v842' keeps the model's words.
+
 The model's scratch arrays (the old layer thicknesses and tracers and the new
 ice's tracers) are private here: nothing the routine returns depends on
 them. Arrays are device float32 (RKIND 4) or float64 (RKIND 8) with int32
@@ -42,6 +50,10 @@ COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false",
 MODULE_OPTIONS = COMPILE_OPTIONS
 THICKNESS_ADVECTION = ("fo", "none")
 THERMAL_SOLVERS = {"none": 0, "temperature": 1, "enthalpy": 2}
+#: ``woof_enthalpy_advection_units``: 'v842' converts the advected enthalpy
+#: with Kelvin temperatures, as tracer_setup/tracer_finish do; 'corrected'
+#: converts in Celsius, as li_thermal's solver does.
+ENTHALPY_ADVECTION_UNITS = ("v842", "corrected")
 MAX_LEVELS = 128
 _BLOCK = 128
 
@@ -84,7 +96,8 @@ def _grid(n: int) -> tuple[int]:
 def advect_thickness_tracers(*, mesh: dict, geometry: dict, velocity: dict, thermal: dict, dt: float,
                              advect_tracers: bool, config_thickness_advection: str, config_thermal_solver: str,
                              config_ice_density: float, config_ocean_density: float, config_sea_level: float,
-                             config_dynamic_thickness: float, config_velocity_solver: str = "sia") -> None:
+                             config_dynamic_thickness: float, config_velocity_solver: str = "sia",
+                             woof_enthalpy_advection_units: str = "v842") -> None:
     """``li_advection_thickness_tracers``, in place.
 
     ``mesh``: ``nEdgesOnCell``, ``cellsOnCell``, ``cellsOnVertex``,
@@ -105,6 +118,8 @@ def advect_thickness_tracers(*, mesh: dict, geometry: dict, velocity: dict, ther
                          f"(one of {THICKNESS_ADVECTION})")
     if config_thermal_solver not in THERMAL_SOLVERS:
         raise ValueError(f"config_thermal_solver must be one of {sorted(THERMAL_SOLVERS)}")
+    if woof_enthalpy_advection_units not in ENTHALPY_ADVECTION_UNITS:
+        raise ValueError(f"woof_enthalpy_advection_units must be one of {ENTHALPY_ADVECTION_UNITS}")
     g, m, t = geometry, mesh, thermal
     n_cells, n_levels = g["layerThickness"].shape
     if n_levels > MAX_LEVELS:
@@ -142,17 +157,23 @@ def advect_thickness_tracers(*, mesh: dict, geometry: dict, velocity: dict, ther
 
     rhoi, dtr = real(config_ice_density), real(dt)
     mode = THERMAL_SOLVERS[config_thermal_solver] if advect_tracers else 0
+    celsius = mode == 2 and woof_enthalpy_advection_units == "corrected"
     if mode == 2:
         # li_temperature_to_enthalpy over the owned cells, into the thermal pool
+        # (in Celsius, as li_thermal converts, with the opt-in correction)
+        temperature = t["temperature"][:ncs]
+        if celsius:
+            temperature = cp.empty_like(temperature)
+            _shift_k2c(precision, temperature, t["temperature"][:ncs], -1)
         thermal_init_v842.temperature_to_enthalpy(
-            temperature=t["temperature"][:ncs], waterfrac=t["waterfrac"][:ncs], enthalpy=t["enthalpy"][:ncs],
+            temperature=temperature, waterfrac=t["waterfrac"][:ncs], enthalpy=t["enthalpy"][:ncs],
             thickness=g["thickness"][:ncs], layer_center_sigma=m["layerCenterSigma"], rhoi=config_ice_density)
     tracers = cp.empty((n_cells, n_levels), f32)
     surface_tracers = cp.zeros(n_cells, f32)
     basal_tracers = cp.zeros(n_cells, f32)
     _function(precision, "li_tracer_setup_v842")(cells, block, (
         tracers, surface_tracers, basal_tracers, t["temperature"], t["enthalpy"], t["surfaceAirTemperature"],
-        t["basalTemperature"], rhoi, np.int32(mode), nc, nl))
+        t["basalTemperature"], rhoi, np.int32(3 if celsius else mode), nc, nl))
     thickness_old = cp.empty_like(g["layerThickness"])
     tracers_old = cp.empty_like(tracers)
     words = np.int32(n_cells * n_levels)
@@ -195,3 +216,13 @@ def advect_thickness_tracers(*, mesh: dict, geometry: dict, velocity: dict, ther
             surface_enthalpy=scratch[0], surface_temperature=scratch[1], basal_enthalpy=scratch[2],
             basal_temperature=scratch[3], thickness=g["thickness"][:ncs], layer_center_sigma=m["layerCenterSigma"],
             rhoi=config_ice_density)
+        if celsius:
+            temperature = t["temperature"][:ncs]
+            _shift_k2c(precision, temperature, temperature, 1)
+
+
+def _shift_k2c(precision: str, dst, src, sign: int) -> None:
+    """``dst = src - 273.15`` (sign -1) or ``src + 273.15`` (sign 1), for
+    ``woof_enthalpy_advection_units = 'corrected'``."""
+    n = np.int32(src.size)
+    _function(precision, "li_shift_k2c_v842")(_grid(int(n)), (_BLOCK,), (dst, src, np.int32(sign), n))

@@ -49,7 +49,16 @@ those counts and more layers are refused by name. ``log`` and the powers in the 
 drag coefficient and upward longwave are constants gfortran folds at compile
 time (correctly rounded, :func:`_folded_constants`).
 
-Refused by name: the column biogeochemistry; more than one snow layer
+The column biogeochemistry's framework and brine height
+(``config_use_column_biogeochemistry`` with ``config_use_brine``): the tracer
+object's ``index_brineFraction`` (``colpkg_init_zbgc``), the ocean
+concentrations and deposition ``initialize_coupler_fields`` sets,
+``init_column_biogeochemistry_profiles`` (:func:`hbrine_grids`, the brine
+fraction) and the ocean fluxes the reset zeroes. The brine height's step is
+:mod:`woof.hex.mpas_seaice.column_bgc_v842`; the other routines refuse the
+biogeochemistry, and every other biogeochemistry flag is refused by name.
+
+Refused by name: the other biogeochemistry flags; more than one snow layer
 (``init_column_tracer_object_parent_indices`` sets only the first snow
 layer's parent in v8.4.2, so the others' are undefined); a restart
 (``config_do_restart``: the shortwave re-initialisation is a later stage);
@@ -84,11 +93,12 @@ from .velocity_v842 import COMPILE_OPTIONS, _grid
 
 SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_column.F:200-300,359-420,758-800,3413-3600,4561-5435,5595-6079,"
-    "7805-8222,10138-10232,10232-10420,10868-10990",
+    "7805-8222,10138-10232,10232-10420,10868-10990,11714-11990",
     "src/core_seaice/shared/mpas_seaice_initialize.F:231-850,1309-1377,1707-1944",
     "src/core_seaice/shared/mpas_seaice_forcing.F:1600-1840",
     "src/core_seaice/model_forward/mpas_seaice_core_interface.F:222-531",
-    "src/core_seaice/column/ice_colpkg.F90:82-210,326-375,416-490,1599-1718,3170-3290",
+    "src/core_seaice/column/ice_colpkg.F90:82-210,326-375,416-490,999-1011,1099-1121,1599-1718,3170-3290,"
+    "5268-5442",
     "src/core_seaice/column/ice_colpkg_tracers.F90:180-245",
     "src/core_seaice/column/ice_mushy_physics.F90:1-120,199-330",
     "src/core_seaice/column/constants/cice/ice_constants_colpkg.F90",
@@ -100,6 +110,8 @@ MATH_HEADERS = ("glibc_flt64.cuh", "cr_tanh_flt64.cuh")
 MAX_ICE_LAYERS = 64
 #: the ice-layer counts whose profile meets one of glibc's not correctly rounded cos words
 COS_REFUSED_LAYERS = frozenset({11, 31, 33, 55})
+#: the biology layers the brine kernel's local arrays hold (the Registry fixes nBioLayers at 7)
+MAX_BIO_LAYERS = 32
 _BLOCK = 128
 _DATA = files("woof.hex.mpas_seaice").joinpath("data")
 
@@ -375,6 +387,20 @@ CORRECTIONS = {
         "with algae the visible light reaching it is absorbed in ice that is not there, and with kalg = 0 "
         "(0*Inf) the category's shortwave is NaN; the correction gives layers without thickness no "
         "chlorophyll absorption, so they are transparent"),
+    "zbgc_c2n_proteins": (
+        "colpkg_init_zbgc sets R_C2N(1) = ratio_C2N_proteins after R_C2N(1) = ratio_C2N_diatoms "
+        "(ice_colpkg.F90:1108,1121) where it means R_C2N_DON(1), so the diatoms' carbon to nitrogen ratio is "
+        "the proteins' and R_C2N_DON keeps its static zero; initialize_coupler_fields hands both to "
+        "carbonToNitrogenRatioAlgae and carbonToNitrogenRatioDON (colpkg_init_ocean_conc); the correction "
+        "gives the diatoms config_ratio_C_to_N_diatoms and the proteins config_ratio_C_to_N_proteins"),
+    "bgc_inactive_diagnostics": (
+        "seaice_column_reinitialize_diagnostics_bgc zeroes every biogeochemical diagnostic "
+        "(mpas_seaice_column.F:12450-12471) without asking whether its package is on, and the Registry "
+        "allocates no array for a field whose packages are off: with the brine height alone, "
+        "totalChlorophyll (pkgTracerVerticalAlgae;pkgTracerSkeletalAlgae) is a null pointer whose "
+        "descriptor gfortran gives one element, so the zeroing writes to address 0 and every time step "
+        "with the column biogeochemistry dies there; the correction zeroes only the fields that have an "
+        "array, which nothing else reads"),
 }
 
 
@@ -397,15 +423,34 @@ def corrections(configs: dict) -> frozenset[str]:
     return frozenset(names)
 
 
-def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
-    """Refuse, by name, what this stage of the column port does not carry."""
+#: the biogeochemistry flags the port carries (the brine height); the others are refused by name
+BGC_PORTED = ("config_use_brine",)
+
+
+def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool = False) -> None:
+    """Refuse, by name, what this stage of the column port does not carry.
+
+    ``biogeochemistry`` is the caller's: the init (:func:`initialize`),
+    :func:`woof.hex.mpas_seaice.column_bgc_v842.biogeochemistry`, the
+    vertical and ITD thermodynamics, the ridging, the shortwave and the
+    column step carry the column biogeochemistry's framework and its brine
+    height (``config_use_brine``); every other routine refuses
+    ``config_use_column_biogeochemistry``."""
     c = configs
     if not c.get("config_use_column_package", False):
         _refuse("config_use_column_package", False, "the column port runs only with the column package on",
                 "config_use_column_package = .true.")
     if c["config_use_column_biogeochemistry"]:
-        _refuse("config_use_column_biogeochemistry", True, "the column biogeochemistry is not ported",
-                "config_use_column_biogeochemistry = .false.")
+        if not biogeochemistry:
+            _refuse("config_use_column_biogeochemistry", True,
+                    "the column biogeochemistry is ported for the init, the column stages and the column "
+                    "step only",
+                    "config_use_column_biogeochemistry = .false.")
+        for flag in _BGC_FLAGS:
+            if flag not in BGC_PORTED and c[flag]:
+                _refuse(flag, True, "of the column biogeochemistry only the brine height is ported",
+                        f"{flag} = .false.")
+        _refuse_bio_layers(c, dims)
     if dims["nSnowLayers"] != 1:
         _refuse("config_nSnowLayers", dims["nSnowLayers"],
                 "v8.4.2's init_column_tracer_object_parent_indices sets only the first snow layer's parent "
@@ -439,6 +484,23 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
                 "config_initial_velocity_type in " + ", ".join(INITIAL_VELOCITIES))
 
 
+def _refuse_bio_layers(configs: dict, dims: dict[str, int]) -> None:
+    """compute_microS_mushy remaps the ice salinity and enthalpy onto the
+    nBioLayers biology layers into ``trtmp(ntrcr+2)`` at the tracer's own
+    index (``ice_brine.F90:279-297``): past ``ntrcr + 2`` v8.4.2 writes out of
+    bounds. ``ntrcr`` is the column package's tracer count for this
+    configuration (``ice_brine.F90:234``), the brine fraction included: the
+    bound is v8.4.2's own, not a conservative one."""
+    n_bio = dims.get("nBioLayers", 7)
+    to = tracer_object(configs, dims)
+    last = to.index["iceSalinity"] + n_bio - 1
+    if not 1 <= n_bio <= MAX_BIO_LAYERS or last > to.n_tracers + 2:
+        _refuse("nBioLayers", n_bio,
+                "compute_microS_mushy's remap writes the biology layers past its trtmp(ntrcr+2) "
+                f"(the ice salinity's index {to.index['iceSalinity']} plus nBioLayers - 1 > {to.n_tracers} + 2), "
+                f"or more than {MAX_BIO_LAYERS} layers", "more ice layers or physics tracers")
+
+
 # ---------------------------------------------------------------------------
 # the tracer object (init_column_tracer_object, mpas_seaice_column.F:4561-5287)
 # ---------------------------------------------------------------------------
@@ -459,6 +521,8 @@ class TracerObject:
     nt_tsfc: int
     nt_fbri: int
     layout: list[tuple[str, int, int]] = field(default_factory=list)
+    #: nTracersNotBio: the physics tracers' count (the biogeochemistry's tracers follow)
+    n_tracers_not_bio: int = 0
 
     def log_rows(self) -> dict[str, list[int]]:
         """The oracle log's ``TOBJ`` rows."""
@@ -475,8 +539,10 @@ class TracerObject:
 
 
 def tracer_object(configs: dict, dims: dict[str, int]) -> TracerObject:
-    """``init_column_tracer_object`` without the biogeochemistry: the tracer
-    number, child (index), parent, first-ancestor and ancestor routines."""
+    """``init_column_tracer_object``: the tracer number, child (index),
+    parent, first-ancestor and ancestor routines, with the biogeochemistry's
+    brine fraction (``nt_fbri``) when the column biogeochemistry and
+    ``config_use_brine`` are on (the only biogeochemistry tracer ported)."""
     c = configs
     n_ice, n_snow, n_aero = dims["nIceLayers"], dims["nSnowLayers"], dims["nAerosols"]
     cesm, level, topo = c["config_use_cesm_meltponds"], c["config_use_level_meltponds"], c["config_use_topo_meltponds"]
@@ -570,9 +636,26 @@ def tracer_object(configs: dict, dims: dict[str, int]) -> TracerObject:
     # colpkg_init_tracer_indices: nt_Tsfc is the surface temperature's index;
     # nt_fbri is index_brineFraction, which only the biogeochemistry sets: the
     # module variable's zero (ciceTracerObject is static), which no tracer matches
-    return TracerObject(n_tracers=n_tracers, index=idx, parent_index=parent, first_ancestor_mask=mask,
-                        ancestor_number=number, ancestor_indices=ancestors, nt_tsfc=idx["surfaceTemperature"],
-                        nt_fbri=0, layout=layout)
+    nt_fbri = 0
+    if c["config_use_column_biogeochemistry"] and c["config_use_brine"]:
+        # init_column_tracer_object_tracer_number counts the brine height after the
+        # physics tracers (nTracersNotBio); colpkg_init_zbgc (ice_colpkg.F90:999-1011)
+        # makes it index_brineFraction = ntrcr + 1, volume-weighted with no strata:
+        # trcr_depend 1, trcr_base (0, 1, 0), n_trcr_strata 0, nt_strata 0. The
+        # first-ancestor mask MPAS filled for it before from a parentIndex not yet
+        # set is overwritten whole by trcr_base.
+        nt_fbri = n_tracers + 1
+        parent = np.append(parent, np.int32(1))
+        column = np.zeros((3, 1), np.float64)
+        column[1, 0] = 1.0
+        mask = np.concatenate([mask, column], axis=1)
+        number = np.append(number, np.int32(0))
+        ancestors = np.concatenate([ancestors, np.zeros((2, 1), np.int32)], axis=1)
+        layout.append(("brineFraction", nt_fbri, 1))
+    return TracerObject(n_tracers=n_tracers + (nt_fbri != 0), index=idx, parent_index=parent,
+                        first_ancestor_mask=mask, ancestor_number=number, ancestor_indices=ancestors,
+                        nt_tsfc=idx["surfaceTemperature"], nt_fbri=nt_fbri, layout=layout,
+                        n_tracers_not_bio=n_tracers)
 
 
 # ---------------------------------------------------------------------------
@@ -602,17 +685,18 @@ class ColumnState:
     warnings: int | list = 0
 
 
-def init_parameters(pools: dict, configs: dict) -> ColumnState:
+def init_parameters(pools: dict, configs: dict, biogeochemistry: bool = False) -> ColumnState:
     """``seaice_init_column_physics_package_parameters``: host side. The
     stand-in pointers of the packages that are off change no state the port
-    reads (the absent fields stay ``None``)."""
+    reads (the absent fields stay ``None``). ``biogeochemistry``: the caller
+    carries the column biogeochemistry (:func:`refuse_unported`)."""
     mesh = pools["mesh"]
     dims = {k: int(mesh[k]) for k in ("nCells", "nCellsSolve", "nVertices", "nEdges", "maxEdges",
                                        "vertexDegree") if k in mesh}
     for k, v in mesh.items():
         if isinstance(v, (int, np.integer)):
             dims.setdefault(k, int(v))
-    refuse_unported(configs, dims)
+    refuse_unported(configs, dims, biogeochemistry)
     check_column_package_configs(configs, dims["nCategories"])
     return ColumnState(
         dims=dims, packages=packages(configs), tracers=tracer_object(configs, dims),
@@ -705,9 +789,10 @@ def _folded_constants() -> dict[str, float]:
 # ---------------------------------------------------------------------------
 
 def initialize_coupler_fields(pools: dict, configs: dict, state: ColumnState) -> None:
-    """``initialize_coupler_fields`` (``mpas_seaice_initialize.F:1707-1944``)
-    without the biogeochemistry (refused): the whole-array assignments cover
-    MPAS's missing-cell element, the freezing temperature loop nCells."""
+    """``initialize_coupler_fields`` (``mpas_seaice_initialize.F:1707-1944``),
+    the biogeochemistry's part too (:func:`_init_coupler_bgc`): the
+    whole-array assignments cover MPAS's missing-cell element, the freezing
+    temperature loop nCells."""
     n = state.dims["nCells"]
     atmos, ocean = pools["atmos_coupling"], pools["ocean_coupling"]
     c1 = (n + 1,)
@@ -725,6 +810,40 @@ def initialize_coupler_fields(pools: dict, configs: dict, state: ColumnState) ->
         flux = pools["aerosols"]["atmosAerosolFlux"]
         if flux is not None and flux.size:
             _fill(flux, 1.0e-12)
+    if configs["config_use_column_biogeochemistry"]:
+        _init_coupler_bgc(pools, configs, n)
+
+
+def _init_coupler_bgc(pools: dict, configs: dict, n: int) -> None:
+    """``initialize_coupler_fields``' biogeochemistry (``mpas_seaice_initialize.F:1846-1940``):
+    ``atmosBioFluxes`` zeroed whole, the black carbon and dust deposition of
+    the uncoupled build (``1e-12``, ``1e-13``) and ``colpkg_init_ocean_conc``'s
+    ocean concentrations on cells 1 to nCells, and its carbon to nitrogen
+    ratios (``R_C2N``, ``R_C2N_DON``: see :data:`CORRECTIONS` ``zbgc_c2n_proteins``)."""
+    bgc = pools["biogeochemistry"]
+    _fill(bgc["atmosBioFluxes"], 0.0)
+    for name, value in (("atmosBlackCarbonFlux", 1.0e-12), ("atmosDustFlux", 1.0e-13),
+                        ("oceanAmmoniumConc", 1.0), ("oceanDMSPConc", 0.1), ("oceanDMSConc", 0.1),
+                        ("oceanDICConc", 1.0), ("oceanDONConc", 12.9), ("oceanDissolvedIronConc", 0.4),
+                        ("oceanParticulateIronConc", 2.0), ("oceanHumicsConc", 1.0), ("oceanNitrateConc", 12.0),
+                        ("oceanSilicateConc", 25.0), ("oceanZAerosolConc", 0.0)):
+        bgc[name][:n] = value
+    for name, values in (("oceanAlgaeConc", (1.0, 0.0057, 0.0027)), ("oceanDOCConc", (16.2, 9.0, 1.0))):
+        for k, value in enumerate(values):
+            bgc[name][:n, k] = value
+    c = configs
+    if "zbgc_c2n_proteins" in corrections(c):
+        algae = (c["config_ratio_C_to_N_diatoms"], c["config_ratio_C_to_N_small_plankton"],
+                 c["config_ratio_C_to_N_phaeocystis"])
+        don = c["config_ratio_C_to_N_proteins"]
+    else:
+        algae = (c["config_ratio_C_to_N_proteins"], c["config_ratio_C_to_N_small_plankton"],
+                 c["config_ratio_C_to_N_phaeocystis"])
+        don = 0.0
+    if n:
+        for k, value in enumerate(algae):
+            bgc["carbonToNitrogenRatioAlgae"][k] = float(value)
+        bgc["carbonToNitrogenRatioDON"][0] = float(don)
 
 
 def _init_thermo(n_ice_layers: int, ktherm: int):
@@ -758,8 +877,9 @@ def init_column_itd(pools: dict, state: ColumnState) -> None:
 
 
 def init_variables(pools: dict, configs: dict, state: ColumnState) -> None:
-    """``seaice_init_column_physics_package_variables`` without the
-    biogeochemistry and the restart shortwave (refused)."""
+    """``seaice_init_column_physics_package_variables`` without the restart
+    shortwave (refused); with the biogeochemistry, its brine height's profiles
+    (:func:`init_biogeochemistry_profiles`)."""
     d = state.dims
     n_cells, n_solve, ncat, nil = d["nCells"], d["nCellsSolve"], d["nCategories"], d["nIceLayers"]
     tracers = pools["tracers"]
@@ -776,8 +896,66 @@ def init_variables(pools: dict, configs: dict, state: ColumnState) -> None:
             _need(pools["initial"], "initialSalinityProfile", shape),
             _need(pools["initial"], "initialMeltingTemperatureProfile", shape), profile, np.int32(n_solve),
             np.int32(nil), np.int32(state.ktherm))
+    if configs["config_use_column_biogeochemistry"]:
+        init_biogeochemistry_profiles(pools, configs, state)
     # init_column_history_variables
     _fill(_need(pools["ridging"], "ratioRidgeThicknessToIce", (n_cells + 1, ncat)), 1.0)
+
+
+def hbrine_grids(n_bio_layers: int, n_ice_layers: int) -> dict[str, np.ndarray]:
+    """``colpkg_init_hbrine``'s grids (``ice_colpkg.F90:5268-5355``), each
+    operation a binary64 one as gfortran's: ``biologyGrid`` (bgrid),
+    ``interfaceBiologyGrid`` (igrid), ``verticalGrid`` (cgrid),
+    ``interfaceGrid`` (icgrid) and ``verticalShortwaveGrid`` (swgrid)."""
+    nb, ni = int(n_bio_layers), int(n_ice_layers)
+    bgrid = [0.0] * (nb + 2)
+    bgrid[nb + 1] = 1.0
+    igrid = [0.0] * (nb + 1)
+    igrid[nb] = 1.0
+    zspace = 1.0 / max(1.0, float(nb))
+    for k in range(2, nb + 2):
+        bgrid[k - 1] = zspace * (float(k) - 1.5)
+    for k in range(2, nb + 1):
+        igrid[k - 1] = 0.5 * (bgrid[k] + bgrid[k - 1])
+    zspace = 1.0 / float(ni)
+    cgrid = [0.0] * (ni + 1)
+    icgrid = [0.0] * (ni + 1)
+    for k in range(2, ni + 2):
+        cgrid[k - 1] = zspace * (float(k) - 1.5)
+        icgrid[k - 1] = zspace * (float(k) - 1.0)
+    swgrid = [0.0] * (ni + 1)
+    half = zspace / 2.0
+    swgrid[0] = 1.0 / 60.0 if 1.0 / 60.0 < half else half
+    swgrid[1] = half
+    for k in range(3, ni + 2):
+        swgrid[k - 1] = zspace * (float(k) - 1.5)
+    return {name: np.array(values, np.float64) for name, values in (
+        ("biologyGrid", bgrid), ("interfaceBiologyGrid", igrid), ("verticalGrid", cgrid),
+        ("interfaceGrid", icgrid), ("verticalShortwaveGrid", swgrid))}
+
+
+def init_biogeochemistry_profiles(pools: dict, configs: dict, state: ColumnState) -> None:
+    """``init_column_biogeochemistry_profiles`` (``mpas_seaice_column.F:11714-11990``)
+    with the brine height: ``colpkg_init_hbrine``'s grids, and on every owned
+    cell, without ``config_do_restart_hbrine``, ``newlyFormedIce`` 1 and
+    ``brineFraction`` 1 (the tracer array's round trip changes no word).
+    ``colpkg_init_hbrine`` also rewrites ``config_snow_porosity_at_ice_surface``
+    to ``1 - rhos/rhoi`` when it is not positive, after the column package took
+    its copy (``colpkg_init_parameters``); nothing reads the config again."""
+    import cupy as cp
+    d = state.dims
+    bgc = pools["biogeochemistry"]
+    for name, values in hbrine_grids(d["nBioLayers"], d["nIceLayers"]).items():
+        target = bgc[name]
+        target[...] = cp.asarray(values)
+    if not configs["config_do_restart_hbrine"]:
+        n_solve = d["nCellsSolve"]
+        bgc["newlyFormedIce"][:n_solve] = 1
+        # v8.4.2 sets it unconditionally (mpas_seaice_column.F:11904); without
+        # config_use_brine the array is the inactive package's placeholder,
+        # which nothing reads. With it, a missing array is an error, not a skip.
+        if configs["config_use_brine"]:
+            _need(pools["tracers"], "brineFraction", (d["nCells"] + 1, d["nCategories"], 1))[:n_solve] = 1.0
 
 
 def init_ice_state(pools: dict, configs: dict, state: ColumnState) -> None:
@@ -836,7 +1014,7 @@ def init_ice_state(pools: dict, configs: dict, state: ColumnState) -> None:
 
 
 def reset_coupler_fluxes(pools: dict, configs: dict, state: ColumnState) -> None:
-    """``seaice_reset_coupler_fluxes`` without the biogeochemistry (refused)."""
+    """``seaice_reset_coupler_fluxes``, the biogeochemistry's ocean fluxes too."""
     for pool, name in (("atmos_fluxes", "sensibleHeatFlux"), ("atmos_fluxes", "latentHeatFlux"),
                        ("atmos_fluxes", "longwaveUp"), ("atmos_fluxes", "evaporativeWaterFlux"),
                        ("velocity_solver", "airStressCellU"), ("velocity_solver", "airStressCellV"),
@@ -846,6 +1024,18 @@ def reset_coupler_fluxes(pools: dict, configs: dict, state: ColumnState) -> None
                        ("ocean_fluxes", "oceanSaltFlux"), ("ocean_fluxes", "oceanHeatFlux"),
                        ("ocean_fluxes", "oceanShortwaveFlux")):
         _fill(pools[pool][name], 0.0)
+    if configs["config_use_column_biogeochemistry"]:
+        # reset_atmospheric_coupler_fluxes' and reset_ocean_coupler_fluxes' biogeochemistry
+        # (mpas_seaice_forcing.F): the deposition initialize_coupler_fields set is zeroed;
+        # oceanAlgaeFlux is fetched, not reset
+        for name in _BGC_ATMOS_FLUXES + _BGC_OCEAN_FLUXES:
+            _fill(pools["biogeochemistry"][name], 0.0)
+
+
+_BGC_ATMOS_FLUXES = ("atmosBioFluxes", "atmosBlackCarbonFlux", "atmosDustFlux")
+_BGC_OCEAN_FLUXES = ("oceanBioFluxes", "oceanDOCFlux", "oceanDICFlux", "oceanDONFlux", "oceanNitrateFlux",
+                     "oceanSilicateFlux", "oceanAmmoniumFlux", "oceanDMSFlux", "oceanDMSPpFlux", "oceanDMSPdFlux",
+                     "oceanHumicsFlux", "oceanParticulateIronFlux", "oceanDissolvedIronFlux", "oceanDustIronFlux")
 
 
 def initialize(pools: dict, configs: dict) -> ColumnState:
@@ -853,7 +1043,7 @@ def initialize(pools: dict, configs: dict) -> ColumnState:
     coupler fields, the column variables, the ice state, the coupler-flux
     reset. The mesh, forcing, velocity-solver and advection inits are the
     other modules' (:mod:`~woof.hex.mpas_seaice.timestep_v842`)."""
-    state = init_parameters(pools, configs)
+    state = init_parameters(pools, configs, biogeochemistry=True)
     initialize_coupler_fields(pools, configs, state)
     init_variables(pools, configs, state)
     init_ice_state(pools, configs, state)

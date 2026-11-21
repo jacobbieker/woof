@@ -36,7 +36,11 @@ pinned by the Registry's sha256.
 - a core that is not yet ported is refused by name.
 
 A core is `ported` only when its dynamical core and every scheme run on the
-GPU and its landing gate passes. Until then its status is `stub`.
+GPU and its landing gate passes. Until then its status is `stub`, or
+`partial` once its standalone forward mode runs word for word on the GPU;
+a coupled step refuses a `partial` core as it refuses a stub. A core may be
+`ported_subset`: a coupled step runs it with the schemes it declares and
+refuses any other by name (MALI: the 'sia' and 'none' velocity solvers).
 
 ## The reference
 
@@ -180,8 +184,39 @@ Ordered by how self-contained each piece is:
    `tests/test_mpas_seaice_coupled_step_parity.py`). Still to port: mushy
    vertical thermodynamics, the melt ponds' own physics, and the other `ice_atmo`
    options.
-7. Biogeochemistry (`ice_zbgc*`, `ice_algae`, `ice_aerosol`). Refused by name
-   until ported.
+7. Biogeochemistry (`ice_zbgc*`, `ice_brine`, `ice_zsalinity`, `ice_algae`).
+   Ported in phases (below); every flag a phase does not carry is refused by
+   name. The NCAR aerosols (`config_use_aerosols`, `ice_aerosol`) are not
+   biogeochemistry and stay refused until their own PR.
+
+### Sea-ice biogeochemistry: the phases
+
+In v8.4.2 every biogeochemistry flag needs
+`config_use_column_biogeochemistry`, so `config_use_vertical_tracers` cannot
+be turned on alone: it sits on the biogeochemistry framework and the brine
+height. Every flag is off in the Registry, so each phase is opt-in. Each
+phase lifts one refusal, adds an oracle stage or cases in
+`tools/mpas_seaice_oracle/run_column.F90` with its own fixture under
+`tests/data/oracles/mpas_seaice_bgc_<phase>`, and is word-exact on CUDA and
+Metal with mutation tests and an oracle rebuild test. v8.4.2's quirks are
+kept by default, with opt-in corrections (`column_v842.CORRECTIONS`) where
+they matter. The biogeochemistry calls only `exp` (the MIT glibc
+transcription) and `**` (`pow`, `__powidf2`), so no new LGPL opt-in is
+expected.
+
+| Phase | Configs | Work | Oracle cases |
+|---|---|---|---|
+| P1 | `config_use_column_biogeochemistry` with `config_use_brine` only | the tracer object's brine fraction; `colpkg_init_hbrine`, `colpkg_init_zbgc`'s brine part, `init_column_biogeochemistry_profiles`, the coupler's ocean concentrations and flux resets; `column_biogeochemistry`'s brine path (`preflushing_changes`, `compute_microS_mushy`, `update_hbrine`, `calculate_drho`) (`woof/hex/mpas_seaice/column_bgc_v842.py`, `tests/test_mpas_seaice_bgc_brine_parity.py`) | the init (BL99, mushy, a brine-height restart, three layers with CESM ponds); the stage with mushy and BL99, a short drainage length, four layers and three categories, and an abort |
+| P1b | the same, through the rest of the column | the brine fraction carried through the ITD (`add_new_ice_bgc`, `zap_small_areas`), ridging, the column step (`column_biogeochemistry` after the vertical thermodynamics; `seaice_column_reinitialize_diagnostics_bgc`, refused without the correction `bgc_inactive_diagnostics` because v8.4.2 zeroes the unallocated `totalChlorophyll`) and the coupled step (`coupling_prep`'s and `scale_fluxes`' ocean biogeochemistry fluxes); the remap already carried it and its oracle cases test it (`tests/test_mpas_seaice_bgc_brine_carry_parity.py`) | five ITD and three ridging cases; the column step over 3 steps (three cases); the coupled step with ridging (two cases, without advection) |
+| P2 | `config_use_vertical_zsalinity` (needs brine and BL99) | `ice_zsalinity.F90`: `zsalinity`, `solve_zsalinity`, `solve_S_dt`, the salt fluxes, the Rayleigh criterion and the salinity's feedback into the thermodynamics | the stage with the Rayleigh criterion met and not; the column step; a melt season |
+| P3 | `config_use_vertical_tracers` with `config_use_nonreactive` only | the z-tracer core: the bio grid, mobile fractions, transport without reactions (the FCT matrix and correction, `tridiag_solverz`, `thin_ice_flux`, the conservation check), new ice and lateral melt, ridging, the remap, the snow and ice tracer split, the ocean fluxes | the stage with thin and thick ice; the column step with the ITD; the coupled step with advection |
+| P4 | `config_use_zaerosols`, `config_use_shortwave_bioabsorption` (needs P3) | the aerosol z-tracers; chlorophyll and aerosols in the delta-Eddington shortwave (`dEdd_algae`) | z-aerosol transport; the radiation stage; the column step |
+| P5a | `config_use_vertical_biochemistry` | `algal_dyn`, `zbio`: algae, nitrate, ammonium, silicate | the stage; the column step; a nutrient-limited case |
+| P5b | the same | carbon (DOC, DIC), DON, DMS, iron, humics | the same per species group |
+| P6 | `config_use_skeletal_biochemistry` | the bottom layer's biogeochemistry (`sklbio`, `skl_biogeochemistry`); exclusive with the z-tracers, so it can follow P1 directly | the stage; the column step |
+
+The order is P1, P1b, P2, P3, P4, P5a, P5b; P6 any time after P1, and the
+NCAR aerosols as a small PR whenever it fits.
 
 ## MPAS-Ocean (`core_ocean`, about 80,000 lines)
 
@@ -280,7 +315,51 @@ Ordered by how self-contained each piece is:
    calculation, and the SHMIP C and D forcings (at RKIND 8 the SHMIP
    forcings are refused by name without the opt-in: glibc's binary64 `sin`/`cos`)
    (`woof/hex/mpas_ice/subglacial_hydro_v842.py`).
-5. **The Albany first-order (Blatter-Pattyn) Stokes solver**
+5. The forward mode around the step (`mpas_li_core.F`,
+   `mpas_li_time_integration.F`; `woof/hex/mpas_ice/forward_v842.py`):
+   `li_simulation_clock_init` (start, `config_dt`, run duration or stop time
+   on 'gregorian_noleap' or 'gregorian', the adaptive step's force alarm),
+   `li_core_init` (`li_setup_config_options`, the time stamps, `deltat` and
+   `daysSinceStart`, the vertical grid, the edge signs, the barycentric
+   weights, the initial mask, `li_thermal_init` and `li_SGH_init`),
+   `li_core_initial_solve` and the `li_core_run` loop (`li_timestep`, the
+   time-level shift, the force alarm's reset), with its own bitwise restart
+   (`write_restart`/`read_restart`). Held word for word at RKIND 4 and 8 on
+   CUDA and Metal against the land-ice core, `mpas_timekeeping` and the ESMF
+   time library compiled verbatim, over the MALI test cases' physics (dome
+   fixed and adaptive, dome with calving, EISMINT2 A with the temperature and
+   enthalpy solvers, the radial hydrology test and a marine variant, the
+   enthalpy benchmark), each on a uniform and a variable resolution periodic
+   hexagonal mesh (`tests/test_mali_forward_parity.py`). Refused by name:
+   MPAS's restart stream (`config_do_restart`), RK4, the statistics, the
+   analysis members, intervals with months, years on the Gregorian calendar,
+   fractions of a second. `li_SGH_init` gives grounded ice below sea level
+   the ocean's water pressure (it reads a mask holding only the initial
+   extent bit); `woof_sgh_init_mask = 'corrected'` computes the mask first,
+   off by default. With the enthalpy solver, `tracer_setup`/`tracer_finish`
+   convert the advected enthalpy with Kelvin temperatures against the
+   thermal solver's Celsius melting point, so the ice turns temperate and
+   melts; `woof_enthalpy_advection_units = 'corrected'` converts in Celsius,
+   off by default. `woof hex ice run` (`woof/hex/mpas_ice/run_v842.py`)
+   runs the forward mode from a MALI namelist (every option at its v8.4.2
+   Registry default, `Registry_subglacial_hydro.xml` included) and an MPAS
+   land-ice input file, and writes `output.nc` and a bitwise `restart.npz`;
+   a case written out as such a file runs to the oracle's words
+   (`tests/test_mali_run_door.py`). The input must carry
+   `edgeNormalVectors` and `coeffs_reconstruct` (MPAS's reconstruction
+   initialisation is not ported). MALI's side of the land-ice/ocean seam
+   (`woof/hex/mpas_ice/ocean_seam_v842.py`, names agreed with the ocean
+   coupling): exports `landIcePressure`, `landIceFraction`, `landIceMask`,
+   `li2ocn_liquid_runoff` (the hydrology's discharge across the grounding
+   line into ocean cells) and `li2ocn_solid_runoff` (the step's calving),
+   with `landIceDraft` as a diagnostic; imports
+   `ocn2li_floating_basal_mass_bal` through v8.4.2's
+   `config_basal_mass_bal_float = 'file'`. Calving momentum is refused by
+   name (v8.4.2 computes none). No oracle exists for the seam; it is graded
+   by conservation (`tests/test_mali_ocean_seam.py`). The core is
+   `ported_subset` for the 'sia' and 'none' velocity solvers. The 'simple'
+   velocity solver and the statistics are next.
+6. **The Albany first-order (Blatter-Pattyn) Stokes solver**
    (`config_velocity_solver` = 'FO', also 'L1L2' and 'Stokes'). This is a C++
    finite-element code built on Trilinos (Kokkos assembly, NOX/Belos/MueLu
    nonlinear and linear solves), reached through
@@ -308,12 +387,68 @@ matched exchange unless asked.
    aborts, the zero and shared-name copies, the shortwave, precipitation and
    runoff, the nutrients, the per-category fields and the generic
    fraction-weighted merge, real(r8), on CUDA and Metal. The water isotopes
-   are refused by name.
+   are refused by name. The sea ice's import merge, `prep_ice_merge`
+   (`driver-mct/main/prep_ice_mod.F90`), is ported too
+   (`woof/hex/coupled/prep_ice_merge_e3sm.py`,
+   `tests/test_e3sm_ice_merge_parity.py`): the shared-name copies from o2x,
+   a2x, g2x and (two-way waves) w2x into an x2i it does not zero, and rain,
+   snow and the ice runoff summed, then scaled by `flux_epbalfact`.
 2. The fractions on the ocean grid (`seq_frac_set`, `ifrac`/`ofrac` from the
    ice's `Si_ifrac`) and the radiative fractions (`ifrad`/`ofrad`, from
-   `seq_flux_ocnalb_mct`). Still to port.
+   `seq_flux_ocnalb_mct`). `seq_frac_set` is ported
+   (`woof/hex/coupled/seq_frac_e3sm.py`, `tests/test_e3sm_seq_frac_parity.py`):
+   the ice grid's fractions from `Si_ifrac` and the domain's `frac`, their
+   maps to the ocean and atmosphere grids through `seq_map_map` (copy,
+   rearrangement, or the sparse matrix multiply in MCT's element order) and
+   `seq_frac_check`'s stops (or, with dead models, its reports), real(r8),
+   on CUDA and Metal, against the routines compiled verbatim on the pinned
+   MCT. Its eps is E3SM's single-precision `1.0e-02`. The radiative
+   fractions are still to port.
 3. The atmosphere/ocean fluxes, `xao` (`seq_flux_atmocn_mct`, `shr_flux_atmocn`).
-   Still to port.
+   Ported (`woof/hex/coupled/flux_atmocn_e3sm.py`,
+   `tests/test_e3sm_flux_atmocn_parity.py`): `seq_flux_init_mct`'s mask,
+   `emask` (E3SM's single-precision `1.0e-12` density limit), the E3SMv1
+   scheme (`ocn_surface_flux_scheme = 0`) with the explicit and implicit
+   stress (`shr_flux_update_stress`), gustiness, the cold-air outbreak
+   scaling, `flux_convergence`/`flux_max_iteration`, the minimum wind and
+   dead models, and E3SM's and MCT's stops, real(r8), on CUDA and Metal,
+   against the routines compiled verbatim on the pinned MCT. `psimhu` calls
+   glibc's atan, so the port needs the opt-in glibc 2.39 transcription
+   (`WOOF_GLIBC239_LIBM64=1`) and is refused by name without it; exp, log
+   and pow are the MIT transcriptions. COARE (1), UA (2), the diurnal cycle,
+   the two-way wave drag and the water isotopes are refused by name.
+   The ocean albedos, `seq_flux_ocnalb_mct`, are ported too
+   (`woof/hex/coupled/ocnalb_e3sm.py`, `tests/test_e3sm_ocnalb_parity.py`):
+   `flux_albav`'s namelist albedos with the radiative fractions, and the net
+   shortwave `Faox_swdn`/`Faox_swup` from xao's albedos (0 on the dark side),
+   with E3SM's and MCT's stops, real(r8), on CUDA and Metal. The orbital
+   albedo (`shr_orb_decl`/`shr_orb_cosz`, glibc's sin, cos and asin) is
+   refused by name. The ocean-input accumulation, `prep_ocn_accum` and
+   `prep_ocn_accum_avg` over MCT's `mct_avect_accum`/`mct_aVect_avg`, is
+   ported (`woof/hex/coupled/ocn_accum_e3sm.py`,
+   `tests/test_e3sm_ocn_accum_parity.py`): the window's sum, the average by
+   `1/count` rounded once (E3SM's reciprocal, kept) and the copy back into
+   x2o, real(r8), on CUDA and Metal. One coupler interval chains them
+   (`woof/hex/coupled/interval_e3sm.py`,
+   `tests/test_e3sm_coupler_interval_parity.py`): `cime_comp_mod`'s
+   RASM_OPTION1 phases (`cime_run_atmocn_setup`, `_ocn_setup_send`,
+   `_ice_setup_send`, `_update_fractions`) over several coupler steps, an
+   ocean and sea ice on one grid (the copy_only mappers) and an atmosphere
+   mapper of any kind, against E3SM's own routines cut verbatim and linked
+   into one Fortran driver (`run_coupler_interval.F90`), word for word after
+   every step on CUDA and Metal. The flux's mask is taken once from the
+   starting fractions, as `seq_flux_init_mct` takes it (kept). The wave
+   couplings are refused by name. The interval runs on the spine
+   (`woof/hex/coupled/run_e3sm.py`, `tests/test_e3sm_coupled_spine.py`).
+   It is driven over a `CoupledClock` with the alarms cut from the ocean's
+   and sea ice's coupling periods. The components (`Components`) are called
+   where RASM_OPTION1 runs them, and every hand-over is a matched exchange.
+   It is word-exact against the chained oracle with the components
+   scripted. The alarms are E3SM's: `run_e3sm.Alarms` follows
+   `seq_timemgr_mod`'s alarm set-up with the coupling offsets and
+   `cime_comp_mod`'s startup ocean lag (`skip_ocean_run`), checked against a
+   transcription of both, and the oracle holds a startup case. Next: the ocean's forward step and the sea ice's step as the
+   components, through their ported import/export.
 4. The ocean's and the sea ice's import and export
    (`components/mpas-ocean/driver/ocn_comp_mct.F`,
    `components/mpas-seaice/driver/ice_comp_mct.F`). The ocean's is ported
@@ -349,12 +484,21 @@ matched exchange unless asked.
    checked against the E3SM merge. The sea ice's time step with the
    column package is ported (above); the coupled step is not built yet.
 
+The matched exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
+are the ones agreed with the MALI port's ocean seam. Land ice sends
+`landIcePressure` (Pa), `landIceFraction`, `landIceMask` (int32), and
+`li2ocn_liquid_runoff` and `li2ocn_solid_runoff` (kg m^-2 s^-1, positive into
+the ocean). The ocean returns `ocn2li_floating_basal_mass_bal` in MALI's sign
+(negative is melt). `landIceDraft` is a diagnostic channel only. The calving
+momentum channels (`li2ocn_momentum_x`/`_y`; v8.4.2's land ice exports none)
+and the old `li2ocn_mass` are refused by name.
+
 ## Status
 
 | Core | Ported pieces | Status |
 |---|---|---|
 | seaice | EVP internal stress, variational: `seaice_init_evp`, strain tensor, EVP and revised-EVP constitutive relation, stress divergence, final divergence/shear and ridging parameters (`woof/hex/mpas_seaice/evp_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_evp_parity.py`, `woof hex seaice verify`). The EVP velocity solve: Coriolis coefficient, ocean stress, subcycle initialisation, ocean stress coefficient, `solve_velocity`/`_revised`, principal stresses, whole elastic subcycles and `ocean_stress_final` (`woof/hex/mpas_seaice/velocity_v842.py`). Word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_velocity_parity.py`). The rest of `velocity_solver_pre_subcycle`: aggregates, stress and velocity masks, new-ice velocities, Hibler ice strength, air stress, surface tilt (`woof/hex/mpas_seaice/presubcycle_v842.py`). Word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_presubcycle_parity.py`); the column package's ice strength (`colpkg_ice_strength`) is `column_ridge_v842.ice_strength`. The forward time step, dynamics only (`seaice_timestep`, its column wrappers and finalize, the time diagnostics, the step counter, `config_dynamics_subcycle_number` velocity solves; `woof/hex/mpas_seaice/timestep_v842.py`), word-exact over N steps at RKIND 4 and 8 on CUDA and Metal against the forward model compiled verbatim (`tests/test_mpas_seaice_timestep_parity.py`), with a restart that continues a run bitwise; with `config_use_column_package` (RKIND 8) the column package's stages run in v8.4.2's order around the velocity solver, word-exact over N steps against the whole `seaice_timestep` compiled verbatim (`tests/test_mpas_seaice_coupled_step_parity.py`); forcing is refused by name. | stub |
 | ocean | Tendency terms: `ocn_vel_coriolis_tend`, `ocn_vel_vadv_tend`, `ocn_thick_hadv_tend`, `ocn_thick_vadv_tend` and their `_init` switches (`woof/hex/mpas_ocean/tend_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tend_parity.py`, `woof hex ocean verify`). The pressure gradient (`ocn_vel_pressure_grad_tend`, every type) and horizontal momentum mixing (`ocn_vel_hmix_tend`: del2, Leith, del4) (`woof/hex/mpas_ocean/pgrad_hmix_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_pgrad_hmix_parity.py`). The full momentum and thickness tendencies (`ocn_tend_vel`, `ocn_tend_thick`) with the bulk forcing, velocity forcing and thickness surface flux (`woof/hex/mpas_ocean/forcing_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tendency_parity.py`). The equation of state (`ocn_equation_of_state_density`, 'linear' and 'jm', every displacement type, with the in-situ expansion coefficients) and the freezing temperature with its salinity derivative (`woof/hex/mpas_ocean/eos_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_eos_parity.py`). The diagnostic solve (`ocn_diagnostic_solve`: layer-thickness edges, vorticity and circulation, divergence, kinetic energy with the vertex option, the vertical velocities, the normalized vorticities with APVM, density/potential/displaced density, Montgomery potential or pressure and layer heights, Brunt-Vaisala and Richardson numbers, KPP surface-layer averages, land-ice pressure, `pressureAdjustedSSH`, `gradSSH`) (`woof/hex/mpas_ocean/diagnostics_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_diagnostics_parity.py`); with the land-ice fluxes on, `ocn_compute_land_ice_flux_input_fields` (top drag, friction velocity, boundary layer with its neighbour weighting, Jenkins transfer velocities, attenuation), word-exact (`tests/test_mpas_ocean_land_ice_parity.py`). Tracer advection (`ocn_tracer_advection_tend`: the monotone flux-corrected scheme, 2nd/3rd/4th-order horizontal blending and vertical stencils, the active-tracer budgets) (`woof/hex/mpas_ocean/tracer_advection_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tracer_advection_parity.py`); `config_monotonic = .false.` is refused by name (v8.4.2's standard scheme asks for scratch fields its Registry does not define). Horizontal tracer mixing (`ocn_tracer_hmix_tend`: del2 and del4) (`woof/hex/mpas_ocean/tracer_hmix_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tracer_hmix_parity.py`); Redi (`config_use_standardGM`) is refused by name. The active tracers' whole tendency, `ocn_tend_tracer` (thickness flux, bulk forcing with the bulk thickness flux, advection, mixing, the surface flux with runoff, Jerlov short-wave absorption, the budgets) (`woof/hex/mpas_ocean/tend_tracer_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tend_tracer_parity.py`); KPP's non-local flux, restoring, decay, ideal age, TTD, ohlmann00, the HollandJenkins land-ice formulation and the other tracer groups are refused by name. Implicit vertical mixing, `ocn_vmix_implicit` (constant and Richardson-number coefficients, the velocity and tracer tridiagonal solves, the implicit bottom drag, the budget) (`woof/hex/mpas_ocean/vmix_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_vmix_parity.py`); tanh, CVMix and Redi coefficients are refused by name. The vertical (ALE) transport velocity, `ocn_vert_transport_velocity_top` with `ocn_ALE_thickness` (z-star, the min/max thickness limits, impermeable interfaces) (`woof/hex/mpas_ocean/vert_transport_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_vert_transport_parity.py`); the thickness filter is refused by name. The split-explicit step's barotropic stage (stage 2 of `ocn_time_integrator_split`: the subcycled barotropic velocity and SSH predictors and correctors, `config_btr_solve_SSH2`, the filtered forcing, the normalised sums and the velocity-corrected transport velocity; the unsplit integrator's stage) (`woof/hex/mpas_ocean/btr_subcycle_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_btr_subcycle_parity.py`); halo counters that v8.4.2 drives outside its arrays are refused by name. One whole split-explicit step, `ocn_time_integrator_split` (the preparation, stage 1's momentum tendency and baroclinic iterations with `ocn_fuperp`, the barotropic stage, stage 3's vertical transport, thickness and tracer tendencies and updates, the diagnostics, implicit vertical mixing, prescribed fields, `mpas_reconstruct` and the coupler's running means; split and unsplit) (`woof/hex/mpas_ocean/split_step_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal against the step compiled with every module it reaches (`tests/test_mpas_ocean_split_step_parity.py`); the sphere's reconstruction at RKIND 8 runs under the glibc 2.39 opt-in; GM and the thickness filter are refused by name; nested halo extents run (the momentum and thickness tendencies loop over v8.4.2's `nCellsArray`/`nEdgesArray`/`nVerticesArray` extents, `tend_v842.halo_extents`), word-exact over three steps on a decomposed block. The forward mode around it (`woof/hex/mpas_ocean/forward_v842.py`): the clock on MPAS's calendar, the barotropic subcycle count from `config_dt`/`config_btr_dt`, the cold start (`ocn_time_integration_split_init` and the state part of `ocn_init_routines_block`), the absorbed fractions, `ocn_timestep` and the time-level shift, word-exact over N steps at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_forward_parity.py`), with a restart that continues a run bitwise; RK4 and MPAS's own restart stream are refused by name. Frazil ice formation, `ocn_frazil_forcing_build_arrays` with its thickness and active-tracer tendencies (open ocean and under land ice, the cavity's freezing coefficients, the land-ice frazil mass, the surface pressure) (`woof/hex/mpas_ocean/frazil_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal, in fast and strict numerics, standalone (`tests/test_mpas_ocean_frazil_parity.py`) and over forward steps (`tests/test_mpas_ocean_forward_frazil_parity.py`); off by default, as v8.4.2's Registry has it. The land-ice fluxes, `config_land_ice_flux_mode` 'standalone' and 'coupled' (`ocn_surface_land_ice_fluxes_build_arrays` with ISOMIP and Jenkins melt, its thickness, velocity and tracer forcing, `ocn_effective_density_in_land_ice_update`, the coupler's land-ice means) (`woof/hex/mpas_ocean/land_ice_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal, in fast and strict numerics, standalone and in the diagnostics (`tests/test_mpas_ocean_land_ice_parity.py`) and over forward steps (`tests/test_mpas_ocean_forward_land_ice_parity.py`); off by default; 'HollandJenkins' and `useHollandJenkinsAdvDiff` are refused by name (log and pow are not ported). | stub |
-| landice | The SIA velocity solver: one `li_sia_solve` call, including `li_calculate_flowParamA` (constant, PB1982, CP2010), all three tangent-slope methods and the velocity profile (`woof/hex/mpas_ice/sia_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mali_sia_parity.py`, `woof hex ice verify`); every piece below is graded at both precisions. The geometry diagnostics before advection: `li_calculate_mask` (sia/none), `li_update_geometry`, `li_calculate_layerThickness`, `li_layer_normal_velocity` (`woof/hex/mpas_ice/geometry_v842.py`, `tests/test_mali_geometry_parity.py`), word-exact on CUDA and Metal. The thermal initialisation and conversions: `li_thermal_init` (sfc_air_temperature, linear, file), `li_compute_pressure_melting_point_fields`, `li_temperature_to_enthalpy`, `li_enthalpy_to_temperature` (`woof/hex/mpas_ice/thermal_init_v842.py`, `tests/test_mali_thermal_init_parity.py`), word-exact on CUDA and Metal. Thickness and tracer advection: `li_advection_thickness_tracers` ('fo'/'none', temperature/enthalpy/no tracers), with the mass balance and vertical remap (`woof/hex/mpas_ice/advection_v842.py`, `tests/test_mali_advection_parity.py`), word-exact on CUDA and Metal. The thermal solver: `li_thermal_solver` (temperature/enthalpy, SIA dissipation, basal friction, grounded basal melt) and `li_basal_melt_floating_ice` (none/file/constant/mismip/seroussi) (`woof/hex/mpas_ice/thermal_solver_v842.py`, `tests/test_mali_thermal_solver_parity.py`), word-exact on CUDA and Metal. One whole forward-Euler time step, `li_time_integrator_forwardeuler` (`woof/hex/mpas_ice/time_integration_fe_v842.py`, `tests/test_mali_time_integration_fe_parity.py`), with calving and the calving-front restoration (`woof/hex/mpas_ice/calving_v842.py`, `tests/test_mali_calving_parity.py`) and subglacial hydrology (`woof/hex/mpas_ice/subglacial_hydro_v842.py`, `tests/test_mali_subglacial_hydro_parity.py`), word-exact on CUDA and Metal. Albany FO/L1L2/Stokes refused by name. | stub |
+| landice | The SIA velocity solver: one `li_sia_solve` call, including `li_calculate_flowParamA` (constant, PB1982, CP2010), all three tangent-slope methods and the velocity profile (`woof/hex/mpas_ice/sia_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mali_sia_parity.py`, `woof hex ice verify`); every piece below is graded at both precisions. The geometry diagnostics before advection: `li_calculate_mask` (sia/none), `li_update_geometry`, `li_calculate_layerThickness`, `li_layer_normal_velocity` (`woof/hex/mpas_ice/geometry_v842.py`, `tests/test_mali_geometry_parity.py`), word-exact on CUDA and Metal. The thermal initialisation and conversions: `li_thermal_init` (sfc_air_temperature, linear, file), `li_compute_pressure_melting_point_fields`, `li_temperature_to_enthalpy`, `li_enthalpy_to_temperature` (`woof/hex/mpas_ice/thermal_init_v842.py`, `tests/test_mali_thermal_init_parity.py`), word-exact on CUDA and Metal. Thickness and tracer advection: `li_advection_thickness_tracers` ('fo'/'none', temperature/enthalpy/no tracers), with the mass balance and vertical remap (`woof/hex/mpas_ice/advection_v842.py`, `tests/test_mali_advection_parity.py`), word-exact on CUDA and Metal. The thermal solver: `li_thermal_solver` (temperature/enthalpy, SIA dissipation, basal friction, grounded basal melt) and `li_basal_melt_floating_ice` (none/file/constant/mismip/seroussi) (`woof/hex/mpas_ice/thermal_solver_v842.py`, `tests/test_mali_thermal_solver_parity.py`), word-exact on CUDA and Metal. One whole forward-Euler time step, `li_time_integrator_forwardeuler` (`woof/hex/mpas_ice/time_integration_fe_v842.py`, `tests/test_mali_time_integration_fe_parity.py`), with calving and the calving-front restoration (`woof/hex/mpas_ice/calving_v842.py`, `tests/test_mali_calving_parity.py`) and subglacial hydrology (`woof/hex/mpas_ice/subglacial_hydro_v842.py`, `tests/test_mali_subglacial_hydro_parity.py`), word-exact on CUDA and Metal. The forward mode: the clock, `li_core_init`, the initial solve and the `li_core_run` loop with a bitwise restart (`woof/hex/mpas_ice/forward_v842.py`, `tests/test_mali_forward_parity.py`), word-exact at RKIND 4 and 8 on CUDA and Metal over the dome, EISMINT2 A, hydrology and enthalpy-benchmark cases on uniform and variable resolution meshes. The run door (`woof hex ice run`) and MALI's side of the land-ice/ocean seam (`woof/hex/mpas_ice/ocean_seam_v842.py`, graded by conservation). Albany FO/L1L2/Stokes refused by name. | ported_subset (sia, none) |
 
 This table is updated as each piece lands with its parity tests.

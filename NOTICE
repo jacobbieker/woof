@@ -1794,6 +1794,18 @@ a modified derivative, not the version available from the E3SM project, and
 neither the E3SM project, UChicago Argonne, LLC, UCAR nor the Department of
 Energy endorses it.
 
+woof/hex/coupled/prep_ice_merge_e3sm.cu (and its Python wrapper) transcribe
+E3SM v3.2.0's sea-ice import merge, prep_ice_merge, from
+driver-mct/main/prep_ice_mod.F90 (cpl7: University Corporation for
+Atmospheric Research and UChicago Argonne, LLC) and the attribute-vector
+shared-index copy of MCT (Copyright 2018, UChicago Argonne, LLC), both BSD
+3-Clause; E3SM is Copyright 2024, UChicago Argonne, LLC. Its oracle,
+tools/e3sm_coupler_oracle/, compiles that routine verbatim on MCT as it is.
+The terms are reproduced at licenses/LICENSE-E3SM-BSD-3-Clause.txt. This is
+a modified derivative, not the version available from the E3SM project, and
+neither the E3SM project, UChicago Argonne, LLC, UCAR nor the Department of
+Energy endorses it.
+
 woof/hex/coupled/ocn_coupling_e3sm.cu (and its Python wrapper) transcribe
 E3SM v3.2.0's MPAS-Ocean coupler import and export, ocn_import_mct and
 ocn_export_mct from components/mpas-ocean/driver/ocn_comp_mct.F, the field
@@ -1806,6 +1818,76 @@ reproduced at licenses/LICENSE-E3SM-BSD-3-Clause.txt and
 licenses/LICENSE-MPAS-BSD-3-Clause.txt. This is a modified derivative, not
 the version available from the E3SM or MPAS projects, and none of their
 copyright holders nor the Department of Energy endorses it.
+
+woof/hex/coupled/seq_frac_e3sm.cu (and its Python wrapper) transcribe
+E3SM v3.2.0's coupler surface fractions update, seq_frac_set and
+seq_frac_check from driver-mct/main/seq_frac_mct.F90, the maps they make
+through seq_map_map and seq_map_avNormArr from driver-mct/main/seq_map_mod.F90
+(cpl7: University Corporation for Atmospheric Research and UChicago Argonne,
+LLC; E3SM: Copyright 2024, UChicago Argonne, LLC; BSD 3-Clause) and MCT's
+sparse matrix-vector multiply (Copyright 2018, UChicago Argonne, LLC, BSD
+3-Clause). Its oracle, tools/e3sm_coupler_oracle/, compiles those routines
+verbatim on MCT as it is. The terms are reproduced at
+licenses/LICENSE-E3SM-BSD-3-Clause.txt. This is a modified derivative, not
+the version available from the E3SM project, and neither the E3SM project,
+UChicago Argonne, LLC, UCAR nor the Department of Energy endorses it.
+
+woof/hex/coupled/flux_atmocn_e3sm.cu (and its Python wrapper) transcribe
+E3SM v3.2.0's coupler atmosphere-ocean flux, seq_flux_init_mct's mask and
+seq_flux_atmocn_mct from driver-mct/main/seq_flux_mct.F90 (cpl7: University
+Corporation for Atmospheric Research and UChicago Argonne, LLC; E3SM:
+Copyright 2024, UChicago Argonne, LLC; BSD 3-Clause) and shr_flux_atmOcn's
+E3SMv1 scheme and shr_flux_update_stress from share/util/shr_flux_mod.F90
+(CESM share code: UCAR; E3SM: Copyright 2024, UChicago Argonne, LLC; BSD
+3-Clause). Its oracle, tools/e3sm_coupler_oracle/, compiles those routines
+verbatim on MCT as it is. The terms are reproduced at
+licenses/LICENSE-E3SM-BSD-3-Clause.txt. This is a modified derivative, not
+the version available from the E3SM project, and neither the E3SM project,
+UChicago Argonne, LLC, UCAR nor the Department of Energy endorses it. Its
+atan is the opt-in glibc 2.39 transcription (LGPL, see the glibc 2.39
+section): without WOOF_GLIBC239_LIBM64=1 the flux compiles no kernel and is
+refused by name (only seq_flux_init_mct's mask, which calls no atan, runs).
+
+woof/hex/coupled/ocnalb_e3sm.cu (and its Python wrapper) transcribe E3SM
+v3.2.0's coupler ocean albedos, seq_flux_ocnalb_mct from
+driver-mct/main/seq_flux_mct.F90 (cpl7: University Corporation for
+Atmospheric Research and UChicago Argonne, LLC; E3SM: Copyright 2024,
+UChicago Argonne, LLC; BSD 3-Clause), without its orbital branch. Its
+oracle, tools/e3sm_coupler_oracle/, compiles the routine verbatim on MCT as
+it is. The terms are reproduced at licenses/LICENSE-E3SM-BSD-3-Clause.txt.
+This is a modified derivative, not the version available from the E3SM
+project, and neither the E3SM project, UChicago Argonne, LLC, UCAR nor the
+Department of Energy endorses it.
+
+woof/hex/coupled/ocn_accum_e3sm.cu (and its Python wrapper) transcribe E3SM
+v3.2.0's coupler ocean-input accumulation, prep_ocn_accum and
+prep_ocn_accum_avg from driver-mct/main/prep_ocn_mod.F90 (cpl7: University
+Corporation for Atmospheric Research and UChicago Argonne, LLC; E3SM:
+Copyright 2024, UChicago Argonne, LLC; BSD 3-Clause) and mct_avect_accum and
+mct_aVect_avg from share/util/mct_mod.F90 (CESM share code: UCAR; E3SM:
+Copyright 2024, UChicago Argonne, LLC; BSD 3-Clause). Its oracle,
+tools/e3sm_coupler_oracle/, compiles those routines verbatim on MCT as it
+is. The terms are reproduced at licenses/LICENSE-E3SM-BSD-3-Clause.txt. This
+is a modified derivative, not the version available from the E3SM project,
+and neither the E3SM project, UChicago Argonne, LLC, UCAR nor the Department
+of Energy endorses it.
+
+woof/hex/coupled/interval_e3sm.py (and woof/hex/coupled/run_e3sm.py, which
+calls the components at the points that driver's RASM_OPTION1 loop runs them)
+follows the order E3SM v3.2.0's driver
+runs its coupler routines in one coupler step, cime_run_atmocn_setup,
+cime_run_ocn_setup_send, cime_run_ice_setup_send, cime_run_update_fractions,
+cime_run_atmocn_fluxes and cime_run_ocn_albedos from
+driver-mct/main/cime_comp_mod.F90 (cpl7: University Corporation for
+Atmospheric Research and UChicago Argonne, LLC; E3SM: Copyright 2024,
+UChicago Argonne, LLC; BSD 3-Clause). Its oracle, tools/e3sm_coupler_oracle/
+(run_coupler_interval.F90, chain_standins*.F90), links the routines cut
+verbatim from prep_ocn_mod.F90, prep_ice_mod.F90, seq_flux_mct.F90,
+seq_frac_mct.F90, seq_map_mod.F90 and share/util/mct_mod.F90 on MCT as it
+is. The terms are reproduced at licenses/LICENSE-E3SM-BSD-3-Clause.txt. This
+is a modified derivative, not the version available from the E3SM project,
+and neither the E3SM project, UChicago Argonne, LLC, UCAR nor the Department
+of Energy endorses it.
 
 woof/hex/coupled/ice_coupling_e3sm.cu (and its Python wrapper) transcribe
 E3SM v3.2.0's MPAS-Seaice coupler import and export, ice_import_mct,

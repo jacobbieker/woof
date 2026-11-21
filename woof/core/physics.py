@@ -8205,7 +8205,8 @@ def _resolve_initial_glw(glw, *, ra_lw_physics: int, radiation_active: bool,
     else:
         reads = ("radiation is active, so the GLW row is written to every "
                  "wrfout frame")
-    raise ValueError(
+    from woof.config import ConfigurationRefused
+    raise ConfigurationRefused(
         "downward longwave (GLW) has no source: ra_lw_physics=0, so no "
         f"longwave scheme computes it, and {reads}. "
         "initialize_physics will not invent one. "

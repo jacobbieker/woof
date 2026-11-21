@@ -36,9 +36,10 @@
 //
 // Appended to column_v842.cu (its rounding macros, constants, layout and the
 // mushy liquidus and enthalpy). The column package's l_conservation_check is
-// .false. (no conservation checks), print_diags .false.; the biogeochemistry,
-// aerosols and the zero-layer thermodynamics are refused by the host
-// (column_itd_v842.py). x**2 is x*x.
+// .false. (no conservation checks), print_diags .false.; of the
+// biogeochemistry only the brine height is carried (tr_brine: nt_fbri,
+// tidx[TI_FBRI] >= 0); the rest, the aerosols and the zero-layer
+// thermodynamics are refused by the host (column_itd_v842.py). x**2 is x*x.
 //
 // One thread is one owned cell. The category tracer array of each owned cell
 // (set_cice_tracer_array_category: seaice_gather_tracer_v842) is
@@ -464,8 +465,35 @@ __device__ void itd_update_vertical_tracers(double *trc, double h1, double h2, d
     for (int k = 0; k < COL_NILYR; ++k) trc[k] = trc2[k];
 }
 
+// ice_zbgc.F90:29-251 add_new_ice_bgc with the brine height only (nbtrcr =
+// nltrcr = 0, l_conservation_check .false.): the brine fraction of the new
+// ice. aicen_init and vicen_init are add_new_ice's copies at its entry, vicen
+// the updated volumes; vi0new is add_new_ice's final frazil volume.
+__device__ void itd_add_new_ice_brine(const ItdTracers &T, int ncat, const double *aicen_init,
+                                      const double *vicen_init, const double *vicen, double vi0new, double hsurp,
+                                      double *trcrn)
+{
+    const int nt = T.nt;
+    const int fb = T.idx[TI_FBRI];
+    double vbrin[ITD_MAXCAT];
+    for (int n = 0; n < ncat; ++n) vbrin[n] = M(trcrn[n * nt + fb], vicen_init[n]);
+    for (int n = 0; n < ncat; ++n) {
+        if (hsurp > 0.0) {
+            double vsurp = M(hsurp, aicen_init[n]);
+            vbrin[n] = A(vbrin[n], vsurp);
+            if (vicen[n] > 0.0) trcrn[n * nt + fb] = D(vbrin[n], vicen[n]);
+            else trcrn[n * nt + fb] = 1.0;
+        }
+    }
+    if (vi0new > 0.0) {
+        vbrin[0] = A(vbrin[0], vi0new);
+        if (vicen[0] > 0.0) trcrn[fb] = D(vbrin[0], vicen[0]);
+        else trcrn[fb] = 1.0;
+    }
+}
+
 // ice_therm_itd.F90:1007-1503 add_new_ice (no conservation check, no
-// biogeochemistry, no aerosols)
+// aerosols; of the biogeochemistry the brine height, itd_add_new_ice_brine)
 __device__ void itd_add_new_ice(const ItdTracers &T, int ncat, double dt, const double *hin_max, int ktherm,
                                 double *aicen, double *trcrn, double *vicen, double *aice0, double aice,
                                 double frzmlt, double *frazil, double *frz_onset, double yday, int flags,
@@ -476,6 +504,11 @@ __device__ void itd_add_new_ice(const ItdTracers &T, int ncat, double dt, const 
     const int *ix = T.idx;
     const double rnilyr = (double)COL_NILYR;
     (void)rnilyr;
+    double aicen_init[ITD_MAXCAT], vicen_init[ITD_MAXCAT];
+    for (int n = 0; n < ncat; ++n) {
+        aicen_init[n] = aicen[n];
+        vicen_init[n] = vicen[n];
+    }
     double hi0max = ncat > 1 ? M(hin_max[1], 0.9) : BIGNUM;
     double Sprofile[COL_NILYR];
     double Si0new = 0.0, qi0new;
@@ -591,6 +624,8 @@ __device__ void itd_add_new_ice(const ItdTracers &T, int ncat, double dt, const 
             }
         }
     }
+    // tr_brine .or. nbtrcr > 0 (ice_therm_itd.F90:1491)
+    if (ix[TI_FBRI] >= 0) itd_add_new_ice_brine(T, ncat, aicen_init, vicen_init, vicen, vi0new, hsurp, trcrn);
 }
 
 // ice_therm_itd.F90:829-985 lateral_melt (no aerosols, no biogeochemistry)
@@ -662,7 +697,7 @@ __device__ void itd_zap_snow(const ItdTracers &T, double dt, double *tr, double 
 }
 
 // ice_itd.F90:1019-1323 zap_small_areas (no aerosols, zsalinity or
-// biogeochemistry). Returns the abort code.
+// biogeochemical tracers; tr_brine resets the brine fraction to 1). Returns the abort code.
 __device__ int itd_zap_small_areas(const ItdTracers &T, double dt, int ncat, double *aice, double *aice0,
                                    double *aicen, double *trcrn, double *vicen, double *vsnon, double *dfpond,
                                    double *dfresh, double *dfsalt, double *dfhocn, int flags, int *first_ice)
@@ -693,7 +728,7 @@ __device__ int itd_zap_small_areas(const ItdTracers &T, double dt, int ncat, dou
             vicen[n] = 0.0;
             tr[ix[TI_TSFC]] = TOCNFRZ;
             itd_zap_snow(T, dt, tr, &vsnon[n], dfresh, dfhocn);
-            for (int it = 1; it < nt; ++it) tr[it] = 0.0;   // tr_brine is .false. (refused)
+            for (int it = 1; it < nt; ++it) tr[it] = it == ix[TI_FBRI] ? 1.0 : 0.0;   // tr_brine: fbri = 1
             first_ice[n] = 1;
         }
     }

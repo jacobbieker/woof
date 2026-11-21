@@ -26,7 +26,8 @@ What it refuses, by name:
   ``asin``, which are not correctly rounded and are LGPL, so they compile
   only with ``WOOF_GLIBC239_LIBM64=1`` (:mod:`woof.core.glibc239_gpu`);
 - the aerosols and the shortwave bioabsorption (and, as every column stage,
-  the biogeochemistry);
+  the biogeochemistry but its brine height, whose fraction only the
+  bioabsorption reads);
 - ``shortwave_ccsm3`` with more categories than ice layers: v8.4.2 passes
   ``ncat`` as ``absorbed_solar``'s ``nilyr`` (``ice_shortwave.F90:236``) and
   then writes past the category's layers (unless corrected, below);
@@ -97,7 +98,7 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     from woof.hex.mpas_ice import rkind
 
     c = configs
-    cv.refuse_unported(c, dims)
+    cv.refuse_unported(c, dims, biogeochemistry=True)
     calc_tsfc = bool(c["config_calc_surface_temperature"])
     dedd = calc_tsfc and c["config_shortwave_type"] == "dEdd"
     if dedd and not rkind.trig64():
@@ -341,7 +342,7 @@ def prep_radiation(pools: dict, configs: dict, state: "cv.ColumnState") -> None:
     """``column_prep_radiation``: the shortwave fluxes scaled by the ratio of
     the new to the old net shortwave."""
     d = state.dims
-    cv.refuse_unported(configs, d)
+    cv.refuse_unported(configs, d, biogeochemistry=True)
     n1, n_solve, ncat, nil, nsl = d["nCells"] + 1, d["nCellsSolve"], d["nCategories"], d["nIceLayers"], d["nSnowLayers"]
     sw = pools["shortwave"]
     c1 = (n1,)
