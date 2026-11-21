@@ -854,6 +854,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "4b92c97efe1aab3473a5925f3a5ecf9cce5417f01549211d57150572e6d1ad93",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "a8e308a9b72c0da4686e6925e251e6fa9d950f7f91ec1cb6a7f1f5cc972a0ec9",
+    "file": "woof/hex/mpas_ocean/gm_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "4be502462b670b9c90af24b5cb506eab01db608e2da220ed00929d79011b2ac4",
     "constructor": "compile_using_nvrtc",
     "factory": "_probe_module",
@@ -5104,6 +5112,10 @@
     "sha256": "f1a1fea6d56a6c9712129acee2a35d75d8ad22128fb5af84d72498175ab796d8"
    },
    {
+    "file": "woof/hex/mpas_ocean/gm_v842.cu",
+    "sha256": "6e1c7777a0a68cde03794b3fd10a2933f91632c7cd8f6fad2af1aac1099d5bdd"
+   },
+   {
     "file": "woof/hex/mpas_ocean/land_ice_v842.cu",
     "sha256": "35c26ab51c26bb4042395efcc15f4a7765d2d73b24efd7b6faac78b1e4a894b3"
    },
@@ -5579,7 +5591,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "b95accf11f61db8eeac050936789c6b06ef26ba721f9defd2c7bfcf26c5d9a11"
+    "sha256": "73e76370cd75961e4ef72bd800cd0dfd0339963bac36e2e759003f61d3142c7f"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5787,7 +5799,7 @@
    },
    {
     "file": "woof/ensemble/batch_physics.py",
-    "sha256": "166afdd35c7ef8570fc58ca0f6612401fd13cf96c6950e8dc32d797e23f707c6"
+    "sha256": "a18255388bcb442c6e372bfd3e325752621319ff0d71d31a54e57ef5cb605d0b"
    },
    {
     "file": "woof/ensemble/batch_physics_init.py",
@@ -6188,6 +6200,10 @@
    {
     "file": "woof/hex/mpas_ocean/frazil_v842.py",
     "sha256": "4977948f9734c70a0c65b6517a381d8ad8b686c14aa8bb8131bd7303db53eb95"
+   },
+   {
+    "file": "woof/hex/mpas_ocean/gm_v842.py",
+    "sha256": "a09d64f6400e403398f7500440debadf6b210b68e87d426e1b22ec8d79fdacf5"
    },
    {
     "file": "woof/hex/mpas_ocean/land_ice_v842.py",
@@ -26431,7 +26447,7 @@
    },
    "source_sha256": "aa3255ad884eddc46748ca4e4232188cc3a22c415444c5b956f7dc7dd3c70246"
   },
-  "literal:woof/ensemble/batch_physics.py:528": {
+  "literal:woof/ensemble/batch_physics.py:544": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
