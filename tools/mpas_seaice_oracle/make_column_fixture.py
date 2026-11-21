@@ -1,7 +1,7 @@
 """Run the built MPAS-Seaice column-package oracle on every case and write the fixture.
 
     pixi run -e default python tools/mpas_seaice_oracle/make_column_fixture.py BUILD_DIR [--out DIR]
-        [--cases init|therm|itd|ridge|radiation|dedd|step|coupled|oml]
+        [--cases init|therm|itd|ridge|radiation|dedd|step|coupled|oml|bgc]
 
 BUILD_DIR holds ``run_column_r8`` and ``run_init_thermo_r8`` from build.sh.
 Writes into ``tests/data/oracles/mpas_seaice_column`` by default:
@@ -21,7 +21,9 @@ the shortwave's (``RADIATION_CASES``) into ``tests/data/oracles/mpas_seaice_colu
 the time step's with the column package and the velocity solver (``COUPLED_CASES``)
 into ``tests/data/oracles/mpas_seaice_coupled_step``; ``--cases oml``
 the ocean mixed layer's, alone and in the column step (``OML_CASES``,
-``OML_STEP_CASES``), into ``tests/data/oracles/mpas_seaice_ocean_mixed_layer``.
+``OML_STEP_CASES``), into ``tests/data/oracles/mpas_seaice_ocean_mixed_layer``;
+``--cases bgc`` the column biogeochemistry's (the init and the brine
+height's step, ``BGC_CASES``) into ``tests/data/oracles/mpas_seaice_bgc_brine``.
 """
 from __future__ import annotations
 
@@ -44,7 +46,7 @@ def main() -> int:
     parser.add_argument("build_dir", type=Path)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--cases", choices=("init", "therm", "itd", "ridge", "radiation", "dedd", "step", "coupled",
-                                              "oml"),
+                                              "oml", "bgc"),
                         default="init")
     args = parser.parse_args()
     rows, fixture_dir = {"init": (co.CASES, co.FIXTURE_DIR), "therm": (co.VT_CASES, co.VT_FIXTURE_DIR),
@@ -54,7 +56,8 @@ def main() -> int:
                          "dedd": (co.DEDD_CASES, co.DEDD_FIXTURE_DIR),
                          "step": (co.STEP_CASES, co.STEP_FIXTURE_DIR),
                          "coupled": (co.COUPLED_CASES, co.COUPLED_FIXTURE_DIR),
-                         "oml": (co.OML_CASES + co.OML_STEP_CASES, co.OML_FIXTURE_DIR)}[args.cases]
+                         "oml": (co.OML_CASES + co.OML_STEP_CASES, co.OML_FIXTURE_DIR),
+                         "bgc": (co.BGC_CASES, co.BGC_FIXTURE_DIR)}[args.cases]
     args.out = args.out or fixture_dir
     args.out.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, np.ndarray] = {}

@@ -32,7 +32,8 @@ module mpas_log
   integer :: stub_log_warn_unit = 0
   ! a unit a driver opened to record MPAS_LOG_ERR messages (as the warnings);
   ! with it set they are recorded and the run goes on, as in MPAS, where only
-  ! MPAS_LOG_CRIT aborts; 0 (the default) stops on them
+  ! MPAS_LOG_CRIT aborts (recorded as CRIT before the stop); 0 (the default)
+  ! stops on them
   integer :: stub_log_err_unit = 0
 
 contains
@@ -48,20 +49,38 @@ contains
     if (present(err)) err = 0
     if (present(messageType)) then
       if (messageType == MPAS_LOG_WARN .and. stub_log_warn_unit /= 0) then
-        write(stub_log_warn_unit, '(a)') 'WARN ' // trim(message)
+        write(stub_log_warn_unit, '(a)') 'WARN ' // trim(clip_nul(message))
         if (present(intArgs)) write(stub_log_warn_unit, '(a,*(1x,i0))') 'INTS', intArgs
         if (present(realArgs)) write(stub_log_warn_unit, '(a,*(1x,es25.17e3))') 'REALS', realArgs
       end if
       if (messageType == MPAS_LOG_ERR .and. stub_log_err_unit /= 0) then
-        write(stub_log_err_unit, '(a)') 'ERR ' // trim(message)
+        write(stub_log_err_unit, '(a)') 'ERR ' // trim(clip_nul(message))
         if (present(intArgs)) write(stub_log_err_unit, '(a,*(1x,i0))') 'INTS', intArgs
         if (present(realArgs)) write(stub_log_err_unit, '(a,*(1x,es25.17e3))') 'REALS', realArgs
       else if (messageType == MPAS_LOG_ERR .or. messageType == MPAS_LOG_CRIT) then
+        ! MPAS_LOG_CRIT aborts MPAS (mpas_log.F): with the error unit set the message
+        ! and its integers are recorded first, so a driver can tell where it died
+        if (messageType == MPAS_LOG_CRIT .and. stub_log_err_unit /= 0) then
+          write(stub_log_err_unit, '(a)') 'CRIT ' // trim(clip_nul(message))
+          if (present(intArgs)) write(stub_log_err_unit, '(a,*(1x,i0))') 'INTS', intArgs
+        end if
         print *, 'oracle stub: mpas_log_write: ', trim(message)
         stop 7
       end if
     end if
   end subroutine mpas_log_write
+
+  ! A message cut at its first NUL: a caller's message buffer can be longer than
+  ! the text put in it and uninitialised past it (column_biogeochemistry's
+  ! abortMessage takes an 80-character stop label), which MPAS writes as is.
+  pure function clip_nul(message) result(clipped)
+    character(len=*), intent(in) :: message
+    character(len=len(message)) :: clipped
+    integer :: i
+    clipped = message
+    i = index(message, achar(0))
+    if (i > 0) clipped(i:) = ' '
+  end function clip_nul
 
 end module mpas_log
 

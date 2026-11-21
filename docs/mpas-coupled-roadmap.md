@@ -180,8 +180,39 @@ Ordered by how self-contained each piece is:
    `tests/test_mpas_seaice_coupled_step_parity.py`). Still to port: mushy
    vertical thermodynamics, the melt ponds' own physics, and the other `ice_atmo`
    options.
-7. Biogeochemistry (`ice_zbgc*`, `ice_algae`, `ice_aerosol`). Refused by name
-   until ported.
+7. Biogeochemistry (`ice_zbgc*`, `ice_brine`, `ice_zsalinity`, `ice_algae`).
+   Ported in phases (below); every flag a phase does not carry is refused by
+   name. The NCAR aerosols (`config_use_aerosols`, `ice_aerosol`) are not
+   biogeochemistry and stay refused until their own PR.
+
+### Sea-ice biogeochemistry: the phases
+
+In v8.4.2 every biogeochemistry flag needs
+`config_use_column_biogeochemistry`, so `config_use_vertical_tracers` cannot
+be turned on alone: it sits on the biogeochemistry framework and the brine
+height. Every flag is off in the Registry, so each phase is opt-in. Each
+phase lifts one refusal, adds an oracle stage or cases in
+`tools/mpas_seaice_oracle/run_column.F90` with its own fixture under
+`tests/data/oracles/mpas_seaice_bgc_<phase>`, and is word-exact on CUDA and
+Metal with mutation tests and an oracle rebuild test. v8.4.2's quirks are
+kept by default, with opt-in corrections (`column_v842.CORRECTIONS`) where
+they matter. The biogeochemistry calls only `exp` (the MIT glibc
+transcription) and `**` (`pow`, `__powidf2`), so no new LGPL opt-in is
+expected.
+
+| Phase | Configs | Work | Oracle cases |
+|---|---|---|---|
+| P1 | `config_use_column_biogeochemistry` with `config_use_brine` only | the tracer object's brine fraction; `colpkg_init_hbrine`, `colpkg_init_zbgc`'s brine part, `init_column_biogeochemistry_profiles`, the coupler's ocean concentrations and flux resets; `column_biogeochemistry`'s brine path (`preflushing_changes`, `compute_microS_mushy`, `update_hbrine`, `calculate_drho`) (`woof/hex/mpas_seaice/column_bgc_v842.py`, `tests/test_mpas_seaice_bgc_brine_parity.py`) | the init (BL99, mushy, a brine-height restart, three layers with CESM ponds); the stage with mushy and BL99, a short drainage length, four layers and three categories, and an abort |
+| P1b | the same, through the rest of the column | the brine fraction carried through the ITD, ridging, the remap, the column step and the coupled step (`seaice_column_reinitialize_diagnostics_bgc`) | the column step over 3 steps; the coupled step with the remap and ridging |
+| P2 | `config_use_vertical_zsalinity` (needs brine and BL99) | `ice_zsalinity.F90`: `zsalinity`, `solve_zsalinity`, `solve_S_dt`, the salt fluxes, the Rayleigh criterion and the salinity's feedback into the thermodynamics | the stage with the Rayleigh criterion met and not; the column step; a melt season |
+| P3 | `config_use_vertical_tracers` with `config_use_nonreactive` only | the z-tracer core: the bio grid, mobile fractions, transport without reactions (the FCT matrix and correction, `tridiag_solverz`, `thin_ice_flux`, the conservation check), new ice and lateral melt, ridging, the remap, the snow and ice tracer split, the ocean fluxes | the stage with thin and thick ice; the column step with the ITD; the coupled step with advection |
+| P4 | `config_use_zaerosols`, `config_use_shortwave_bioabsorption` (needs P3) | the aerosol z-tracers; chlorophyll and aerosols in the delta-Eddington shortwave (`dEdd_algae`) | z-aerosol transport; the radiation stage; the column step |
+| P5a | `config_use_vertical_biochemistry` | `algal_dyn`, `zbio`: algae, nitrate, ammonium, silicate | the stage; the column step; a nutrient-limited case |
+| P5b | the same | carbon (DOC, DIC), DON, DMS, iron, humics | the same per species group |
+| P6 | `config_use_skeletal_biochemistry` | the bottom layer's biogeochemistry (`sklbio`, `skl_biogeochemistry`); exclusive with the z-tracers, so it can follow P1 directly | the stage; the column step |
+
+The order is P1, P1b, P2, P3, P4, P5a, P5b; P6 any time after P1, and the
+NCAR aerosols as a small PR whenever it fits.
 
 ## MPAS-Ocean (`core_ocean`, about 80,000 lines)
 
