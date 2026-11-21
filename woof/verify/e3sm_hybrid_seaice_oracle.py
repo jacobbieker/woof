@@ -112,6 +112,7 @@ def make_case(name: str, column_case: str, steps_per_window: int, windows: int, 
     lsize = int(case["dims"]["nCellsSolve"])
     dt = int(float(c["config_dt"]))
     nextsw = np.concatenate([[-1.0], 150.0 + rs.random_sample(windows)])
+    case["aborts"] = False
     case["hybrid"] = {"steps_per_window": steps_per_window, "windows": windows, "ice_cpl_dt": steps_per_window * dt,
                       "x2i": _x2i(rs, pools, lsize, windows), "nextsw": nextsw, "lsize": lsize}
     return case
@@ -171,7 +172,12 @@ def run_binary(build_dir: Path, case: dict) -> tuple[int, dict | None, dict | st
         if done.returncode != 0 or not out.exists() or not pools.exists():
             return done.returncode or -1, None, done.stderr + done.stdout
         parsed = parse_log(log.read_text(encoding="utf-8"))
-        return 0, read_outputs(out.read_bytes(), pools.read_bytes(), case), parsed
+        if parsed["tracer_object"].get("IERR", [0])[0] != 0:
+            return -2, None, f"the column aborted: {parsed}"
+        outputs = read_outputs(out.read_bytes(), pools.read_bytes(), case)
+        keep = set(expected_keys(case))
+        return 0, {k: v for k, v in outputs.items() if "/" in k and (k.split("/")[0] in ("i2x", "oracle")
+                                                                      or k in keep)}, parsed
 
 
 def load_fixture() -> dict[str, dict[str, np.ndarray]]:
