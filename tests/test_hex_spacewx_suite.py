@@ -52,6 +52,8 @@ def test_the_suite_route_takes_the_keys_from_physics(capsys):
     assert '[spacewx suite] {"spacewx_aurora_opt": 1' in capsys.readouterr().out
     assert sw.packages(_route(["spacewx_aurora_opt=2", "spacewx_kp_source=omni"])) == {
         "spacewx_aurora", "spacewx_aurora_energy"}
+    assert sw.packages(_route(["spacewx_aurora_opt=3", "spacewx_kp_source=omni"])) == {
+        "spacewx_aurora", "spacewx_aurora_energy", "spacewx_joule"}
     # The off state: no key, no rows, the receipt unchanged.
     plain = _route([])
     assert plain.spacewx_diagnostics is None and "spacewx_diagnostics" not in plain.receipt()
@@ -67,6 +69,8 @@ def test_the_suite_route_takes_the_keys_from_physics(capsys):
     (["spacewx_ionosphere_opt=1", "spacewx_f107_mode=weekly"], "81day"),
     (["spacewx_ionosphere_opt=1", "spacewx_ionosphere_maps=iri"], "ccir"),
     (["spacewx_aurora_opt=2", "spacewx_kp_source=gfz"], "'omni' or 'swpc'"),
+    (["spacewx_aurora_opt=3", "spacewx_kp_source=swpc"], "must be 'omni'"),
+    (["spacewx_aurora_opt=4"], "must be 0"),
     (["spacewx_kp_source=5"], "would do nothing"),
 ])
 def test_other_wrf_keys_and_bad_values_are_refused_by_name(physics, message):
@@ -88,7 +92,7 @@ def _layout(physics=()):
 def test_pools_and_streams_only_with_the_keys(tmp_path):
     from woof.hex.mpasphys.forecast_v842 import read_streams, write_default_streams
     from woof.hex.streams_v842 import _all_packages, field_definition
-    off, on = _layout(), _layout([*ION, "spacewx_aurora_opt=2", "spacewx_kp_source=omni"])
+    off, on = _layout(), _layout([*ION, "spacewx_aurora_opt=3", "spacewx_kp_source=omni"])
     rows = lambda layout: {r["name"]: r for r in layout.fields if r["pool"] == "diag"}
     assert not set(sw.NAMES) & set(rows(off))
     assert set(sw.NAMES) <= set(rows(on))
@@ -105,6 +109,7 @@ def test_pools_and_streams_only_with_the_keys(tmp_path):
     assert tec["gates"] == ["spacewx_ionosphere"] and tec["attrs"]["units"] == "TECU"
     assert tec["attrs"]["wrf_name"] == "IONO_TEC"
     assert field_definition("aurora_eflux")["gates"] == ["spacewx_aurora_energy"]
+    assert field_definition("joule_power")["attrs"]["units"] == "GW"
     assert set(sw.PACKAGES) <= _all_packages()
     # Only the ionosphere: no aurora rows.
     assert not {n for n in sw.NAMES if not n.startswith("iono")} & set(rows(_layout(ION)))
@@ -239,7 +244,7 @@ def test_every_word_is_the_wrf_routes_aurora_row(cp, opt, source):
 @pytest.mark.gpu
 def test_a_continuation_writes_the_straight_runs_words(cp):
     physics = [*ION, *AURORA]
-    written = set(sw.NAMES) - {"aurora_eflux", "aurora_emean", "aurora_iflux"}
+    written = set(sw.NAMES) - {"aurora_eflux", "aurora_emean", "aurora_iflux", "joule_power"}
     when = START + timedelta(hours=5)
     straight_owner, straight = _module(cp, physics, written)
     want = _publish(straight_owner, straight, int(5 * 3600 / DT), when)

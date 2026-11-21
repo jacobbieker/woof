@@ -9,7 +9,7 @@ other WRF key by name (the MPAS Registry has none of them)::
     spacewx_f107_source      'gfz', a path, or a flux in sfu
     spacewx_f107_mode        '81day' / 'daily'
     spacewx_ionosphere_maps  'ccir' / 'ursi'
-    spacewx_aurora_opt       0 / 1 / 2      the auroral oval (2: with OVATION Prime's energy flux)
+    spacewx_aurora_opt       0 / 1 / 2 / 3  the auroral oval (2: with OVATION Prime's energy flux; 3: and the Joule power)
     spacewx_kp_source        'gfz', 'swpc', 'omni', a path, or a Kp value
 
 The keys are judged by the WRF route's own checks (woof.config.validate_spacewx_ionosphere_keys /
@@ -18,7 +18,7 @@ centres here.
 
 The fields are ``diag`` fields [nCells] in the ``diagnostics`` stream, the WRF route's rows under lower-case names
 (``wrf_name`` the wrfout name) with its units and text, packaged ``spacewx_ionosphere``, ``spacewx_aurora`` and
-``spacewx_aurora_energy`` (option 2).  With the keys absent nothing here is allocated or constructed, and the
+``spacewx_aurora_energy`` (options 2 and 3) and ``spacewx_joule`` (option 3).  With the keys absent nothing here is allocated or constructed, and the
 Registry, the default streams and the driver receipt are the ones a run without this module has.
 
 Nothing is re-derived: the rows are woof.spacewx.history.IonosphereHistory and woof.spacewx.aurora_history.
@@ -38,8 +38,9 @@ import numpy as np
 
 from .utils import Direction
 
-ION_PACKAGE, AURORA_PACKAGE, ENERGY_PACKAGE = "spacewx_ionosphere", "spacewx_aurora", "spacewx_aurora_energy"
-PACKAGES = (ION_PACKAGE, AURORA_PACKAGE, ENERGY_PACKAGE)
+ION_PACKAGE, AURORA_PACKAGE = "spacewx_ionosphere", "spacewx_aurora"
+ENERGY_PACKAGE, JOULE_PACKAGE = "spacewx_aurora_energy", "spacewx_joule"
+PACKAGES = (ION_PACKAGE, AURORA_PACKAGE, ENERGY_PACKAGE, JOULE_PACKAGE)
 #: The --physics keys this route takes, with the WRF RunConfig defaults.
 DEFAULTS = {"spacewx_ionosphere_opt": 0, "spacewx_f107_source": "", "spacewx_f107_mode": "81day",
             "spacewx_ionosphere_maps": "ccir", "spacewx_aurora_opt": 0, "spacewx_kp_source": ""}
@@ -51,7 +52,7 @@ def _rows():
     from woof.spacewx import aurora_history as ah
     from woof.spacewx import history as hist
     return {ION_PACKAGE: hist.HISTORY_FIELDS, AURORA_PACKAGE: ah.HISTORY_FIELDS,
-            ENERGY_PACKAGE: ah.ENERGY_HISTORY_FIELDS}
+            ENERGY_PACKAGE: ah.ENERGY_HISTORY_FIELDS, JOULE_PACKAGE: ah.JOULE_HISTORY_FIELDS}
 
 
 def _field(package: str, wrf_name: str, description: str, units: str) -> dict[str, Any]:
@@ -59,8 +60,8 @@ def _field(package: str, wrf_name: str, description: str, units: str) -> dict[st
             "attrs": {"units": units, "long_name": description, "wrf_name": wrf_name}, "gates": [package]}
 
 
-FIELDS = {wrf.lower(): _field(package, wrf, text, units)
-          for package, rows in _rows().items() for wrf, (_key, text, units) in rows.items()}
+FIELDS = {wrf.lower(): _field(package, wrf, *row[-2:])            # (..., description, units)
+          for package, rows in _rows().items() for wrf, row in rows.items()}
 NAMES = tuple(FIELDS)
 
 
@@ -85,7 +86,7 @@ class SpacewxConfig:
     @property
     def packages(self) -> set[str]:
         return ({ION_PACKAGE} if self.ionosphere else set()) | ({AURORA_PACKAGE} if self.aurora else set()) | (
-            {ENERGY_PACKAGE} if self.aurora == 2 else set())
+            {ENERGY_PACKAGE} if self.aurora >= 2 else set()) | ({JOULE_PACKAGE} if self.aurora == 3 else set())
 
     def receipt(self) -> dict:
         return dict(self.settings)
