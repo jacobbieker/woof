@@ -1089,3 +1089,72 @@ def sp_perturbation(geom, seed: int, dtype=np.float64) -> dict:
                  thp=0.2, alt=0.01, c2a=1.4e3)
     return {k: np.ascontiguousarray(scale[k] * rng.standard_normal(sh[k]), dtype=dtype)
             for k in SP_ACTIVE}
+
+
+# ------------------------------------------------- moist scalar transport
+
+_SU_SCALES = {"q": (0.01, 0.002), "q0": (0.01, 0.002), "tend": (0.0, 1.0),
+              "ru_m": (2e5, 4e5), "rv_m": (-1e5, 4e5), "ww_m": (0.0, 10.0),
+              "mup0": (0.0, 200.0), "mup": (0.0, 200.0), "mub2d": (9.0e4, 2e3),
+              "held": (0.0, 0.05), "msft": (1.0, 0.02)}
+
+
+def su_geometry(nz=7, ny=8, nx=9, **overrides):
+    """A species' stage update; ``spec`` alone turns on both bounded axes
+    with a one-point ring, as a specified domain runs it."""
+    from .scalar import ScalarGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0, dt=12.0)
+    if overrides.get("spec"):
+        base.update(open_x=1, open_y=1, spec_zone=1)
+    base.update(overrides)
+    return ScalarGeometry(**base)
+
+
+def su_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host base state of the update: the species and its time-t copy,
+    the sumflux fluxes, both masses, the levels, msft and the held
+    boundary tendency."""
+    from .scalar import SU_PASSIVE, SU_STATE, su_active, su_shapes
+    rng = np.random.default_rng(seed)
+    sh = su_shapes(geom)
+    lev = _vertical(geom.nz, rng, hybrid)
+    adv = adv_trajectory(geom.adv(), seed + 1, hybrid=hybrid)
+    out = {"c1h": lev["c1h"], "c2h": lev["c2h"], "rdnw": adv["rdz"],
+           "fnm": adv["fnm"], "fnp": adv["fnp"]}
+    for n in SU_STATE + su_active(geom) + SU_PASSIVE:
+        if n not in out:
+            c, s = _SU_SCALES[n]
+            out[n] = c + s * rng.standard_normal(sh[n])
+    if not geom.has_msf:   # the advection then takes msft of ones
+        out["msft"] = np.ones(sh["msft"])
+    return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in out.items()}
+
+
+def su_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .scalar import su_active, su_shapes
+    rng = np.random.default_rng(seed)
+    sh = su_shapes(geom)
+    return {n: np.ascontiguousarray(_SU_SCALES[n][1] * rng.standard_normal(sh[n]),
+                                    dtype=dtype) for n in su_active(geom)}
+
+
+def sf_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .scalar import SumfluxGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, nsub=4)
+    base.update(overrides)
+    return SumfluxGeometry(**base)
+
+
+_SF_SCALES = {"ru_m": 4e5, "rv_m": 4e5, "ww_m": 10.0, "u_pp": 4e4, "v_pp": 4e4,
+              "ww_pp": 2.0, "ru": 4e5, "rv": 4e5, "ww": 10.0}
+
+
+def sf_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    from .scalar import sumflux_shapes
+    rng = np.random.default_rng(seed)
+    return {n: np.ascontiguousarray(s * rng.standard_normal(sumflux_shapes(geom)[n]),
+                                    dtype=dtype) for n, s in _SF_SCALES.items()}
+
+
+def sf_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    return sf_trajectory(geom, seed, dtype)
