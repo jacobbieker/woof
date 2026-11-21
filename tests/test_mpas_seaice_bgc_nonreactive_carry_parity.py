@@ -121,9 +121,9 @@ def _mismatches(names):
     # cleanup_itd's zapped tracer not added to the flux
     (_ITD_NAMES + _RIDGE_NAMES, "if (T.nbio) *T.flux_bio = A(*T.flux_bio, dflux_bio);", ""),
     # the tracer's regrid_stationary stop not checked
-    ((ABORT,), "            int stop = itd_regrid_points(cs, nbl + 1, T.igrid, hbri_old, hbri, top_conc);\n"
+    ((ABORT,), "            int stop = itd_regrid_points(cs, nbl + 1, ig, hbri_old, hbri, top_conc);\n"
                "            if (stop) return stop;\n",
-     "            (void)itd_regrid_points(cs, nbl + 1, T.igrid, hbri_old, hbri, top_conc);\n"),
+     "            (void)itd_regrid_points(cs, nbl + 1, ig, hbri_old, hbri, top_conc);\n"),
 ])
 def test_a_mutated_vertical_tracer_branch_is_caught(monkeypatch, names, original, mutated):
     source = citd.module_source

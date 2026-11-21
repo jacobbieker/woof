@@ -129,7 +129,7 @@ struct ItdTracers {
     const double *cgrid;    // verticalGrid: cgrid(k) is cgrid[k - 1]
     // the vertical tracers (z_tracers) with the nonreactive tracer alone: nbtrcr
     // (0 or 1), its first tracer bio_index(1) (0-based: nblyr + 1 ice layers, then the
-    // snow's two), interfaceBiologyGrid (igrid(k) is igrid[k]: 1-based), the
+    // snow's two), interfaceBiologyGrid (igrid(k) is igrid[k - 1]), the
     // column package's zbgc_init_frac(1), and the cell's ocean concentration
     // (oceanBioConcentrationsUsed(1)) and flux (oceanBioFluxes(1, iCell))
     int nbio;
@@ -563,7 +563,9 @@ __device__ int itd_adjust_tracer_profile(const ItdTracers &T, double aicen, doub
         if (T.nbio) {
             const double top_conc = M(T.ocean_bio, T.init_frac);
             for (int k = 1; k <= nbl + 1; ++k) cs[k] = M(zbio[k - 1], hbri_old);
-            int stop = itd_regrid_points(cs, nbl + 1, T.igrid, hbri_old, hbri, top_conc);
+            double ig[ZB_NBMAX + 3];   // igrid(k) at ig[k]
+            for (int k = 1; k <= nbl + 1; ++k) ig[k] = T.igrid[k - 1];
+            int stop = itd_regrid_points(cs, nbl + 1, ig, hbri_old, hbri, top_conc);
             if (stop) return stop;
             for (int k = 1; k <= nbl + 1; ++k) zbio[k - 1] = D(cs[k], hbri);
         }
@@ -1083,15 +1085,13 @@ extern "C" __global__ void seaice_column_itd_thermodynamics_v842(
     T.bgrid = biologyGrid;
     T.cgrid = verticalGrid;
     // the vertical tracer (nbio = 0: dummies, never read)
-    double igrid[ZB_NBMAX + 2];
     T.nbio = nbio;
     T.bio = bio0;
     T.init_frac = zbgc_init_frac;
     T.ocean_bio = 0.0;
     T.flux_bio = oceanBioFluxes;
-    T.igrid = igrid;
+    T.igrid = interfaceBiologyGrid;
     if (nbio) {
-        for (int k = 1; k <= nblyr + 1; ++k) igrid[k] = interfaceBiologyGrid[k - 1];
         T.ocean_bio = oceanBioConcentrations[(size_t)c * nzbgc + bio_o];
         T.flux_bio = oceanBioFluxes + (size_t)c * nzbgc;
     }
