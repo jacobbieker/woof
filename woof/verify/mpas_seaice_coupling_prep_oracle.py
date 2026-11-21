@@ -14,9 +14,16 @@ The cases cover the following branches:
   ``seaicePuny``, exactly zero, exactly ``seaicePuny`` and between them included);
 - the pond freshwater feedback on and off;
 - one category and five;
-- halo cells beyond ``nCellsSolve``, which must be left alone.
+- halo cells beyond ``nCellsSolve``, which must be left alone;
+- the column biogeochemistry with the brine height alone (no biogeochemical
+  tracer): coupling_prep zeroes the owned cells' ocean biogeochemistry
+  fluxes and scale_fluxes scales them over the aggregate pool's
+  ``nCellsSolve``, which these cases set past and short of the tracers
+  pool's, so the scaled-but-not-zeroed and the zeroed-but-not-scaled cells
+  both show.
 
-The biogeochemistry package is off, so its fields are absent.
+Without the biogeochemistry its fields are absent; the cases with it use
+:data:`BGC_FIELDS` (the Registry's extents).
 """
 from __future__ import annotations
 
@@ -68,18 +75,40 @@ FIELDS = (
     *(("atmos_fluxes", name, REAL, ("C1",)) for name in (
         "sensibleHeatFlux", "latentHeatFlux", "evaporativeWaterFlux", "longwaveUp")),
 )
+#: the Registry's extents of the biogeochemistry's fields (nZBGCTracers is
+#: oceanBioFluxesAll's, which coupling_prep reads 29 words of)
+_BGC_EXTENTS = {"nZBGCTracers": 29, "maxAlgaeType": 3, "maxDOCType": 3, "maxDICType": 1, "maxDONType": 1,
+                "maxAerosolType": 6, "maxIronType": 2, "maxBCType": 2, "maxDustType": 4}
+_BGC_2D_EXTENT = {"oceanBioFluxes": "nZBGCTracers", "oceanAlgaeFlux": "maxAlgaeType", "oceanDOCFlux": "maxDOCType",
+                  "oceanDICFlux": "maxDICType", "oceanDONFlux": "maxDONType",
+                  "oceanParticulateIronFlux": "maxIronType", "oceanDissolvedIronFlux": "maxIronType"}
+#: the stream with the column biogeochemistry on: FIELDS with each two-dimensional
+#: biogeochemistry field at its Registry extent
+BGC_FIELDS = tuple((pool, name, kind, (_BGC_EXTENTS[_BGC_2D_EXTENT[name]], "C1"))
+                   if pool == "biogeochemistry" and name in _BGC_2D else (pool, name, kind, fshape)
+                   for pool, name, kind, fshape in FIELDS)
 ARRAYS = tuple((pool, name) for pool, name, kind, _ in FIELDS if kind == REAL)
 BASE_CONFIG = {"config_use_ocean_mixed_layer": False, "config_include_pond_freshwater_feedback": False,
                "config_use_column_biogeochemistry": False}
-#: (name, seed, nCells, nCellsSolve, nCategories, config_dt, config overrides)
+_BGC = {"config_use_column_biogeochemistry": True, "config_use_brine": True}
+#: (name, seed, nCells, nCellsSolve, nCategories, config_dt, config overrides[, the
+#: aggregate pool's nCellsSolve, by default the tracers pool's])
 CASES = (
     ("five_categories", 20262401, 40, 40, 5, 3600.0, {}),
     ("pond_feedback_halo", 20262402, 48, 33, 5, 1800.0, {"config_include_pond_freshwater_feedback": True}),
     ("one_category_low_sun", 20262403, 30, 30, 1, 600.0, {"config_include_pond_freshwater_feedback": True}),
+    ("bgc_brine_aggregate_past_solve", 20262404, 48, 33, 5, 1800.0, _BGC, 40),
+    ("bgc_brine_aggregate_short_of_solve", 20262405, 30, 30, 3, 600.0,
+     {**_BGC, "config_include_pond_freshwater_feedback": True}, 24),
 )
 
 
-def make_case(name, seed, n_cells, solved, n_categories, dt, overrides, precision="r4") -> dict:
+def fields_of(case: dict) -> tuple:
+    """The case's stream layout: :data:`BGC_FIELDS` with the biogeochemistry, else :data:`FIELDS`."""
+    return BGC_FIELDS if case["config"]["config_use_column_biogeochemistry"] else FIELDS
+
+
+def make_case(name, seed, n_cells, solved, n_categories, dt, overrides, aggregate=None, precision="r4") -> dict:
     rs = np.random.RandomState(seed)
     real = PRECISIONS[precision]
     nc = n_cells
@@ -100,7 +129,8 @@ def make_case(name, seed, n_cells, solved, n_categories, dt, overrides, precisio
     edge = rs.random_sample(nc + 1)
     coszen[edge < 0.05] = 1.0e-11
     coszen[(edge >= 0.05) & (edge < 0.1)] = 0.5e-11
-    values = dict(_BGC_DIMS)
+    bgc = bool(config["config_use_column_biogeochemistry"])
+    values = dict(_BGC_EXTENTS if bgc else _BGC_DIMS)
     values.update({
         "nCellsSolve": solved, "nCategories": n_categories, "iceAreaCategory": area,
         "iceAreaCell": area.sum(axis=(1, 2)), "solarZenithAngleCosine": coszen,
@@ -123,10 +153,12 @@ def make_case(name, seed, n_cells, solved, n_categories, dt, overrides, precisio
     for name_ in _CATEGORY:
         values[name_] = uniform(0.0, 1.0, (nc + 1, n_categories))
     pools: dict[str, dict] = {}
-    for pool, field, kind, fshape in FIELDS:
+    for pool, field, kind, fshape in fields_of(case):
         if kind == DIM:
             value = values[field]
-        elif pool == "biogeochemistry":
+            if (pool, field) == ("tracers_aggregate", "nCellsSolve") and aggregate is not None:
+                value = aggregate
+        elif pool == "biogeochemistry" and not bgc:
             value = None
         elif field in values:
             value = np.asarray(values[field]).astype(real)
@@ -143,7 +175,7 @@ def cases(precision: str = "r4") -> list[dict]:
 
 
 def input_bytes(case: dict) -> bytes:
-    return _stream.input_bytes(FIELDS, case)
+    return _stream.input_bytes(fields_of(case), case)
 
 
 def input_digest(case: dict) -> str:
@@ -151,7 +183,7 @@ def input_digest(case: dict) -> str:
 
 
 def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
-    return _stream.read_outputs(FIELDS, raw, case)
+    return _stream.read_outputs(fields_of(case), raw, case)
 
 
 word_mismatches = _stream.word_mismatches
@@ -171,7 +203,7 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     import cupy as cp
     from woof.hex.mpas_seaice import coupling_prep_v842 as cpl
 
-    dev = _stream.on_device(FIELDS, case)
+    dev = _stream.on_device(fields_of(case), case)
     cpl.coupling_prep(pools=dev, n_cells_solve=int(dev["tracers"]["nCellsSolve"]),
                       n_cells_solve_aggregate=int(dev["tracers_aggregate"]["nCellsSolve"]),
                       dt=case["config"]["config_dt"], configs=case["config"])
