@@ -113,8 +113,12 @@ def test_fixture_covers_the_branches():
     assert n["step2/x2i"].tobytes() == c["values"]["x2i"].tobytes()
     # the fractions follow the sea ice between steps
     o = outputs["albav_ice_every_other_epbal"]
-    assert o["step0/fractions_o"].tobytes() != o["step2/fractions_o"].tobytes()
-    assert o["step0/fractions_o"].tobytes() == o["step1/fractions_o"].tobytes()
+    ifrac = list(ci.LISTS["fractions_o"]).index("ifrac")
+    assert o["step0/fractions_o"][:, ifrac].tobytes() != o["step2/fractions_o"][:, ifrac].tobytes()
+    assert o["step0/fractions_o"][:, ifrac].tobytes() == o["step1/fractions_o"][:, ifrac].tobytes()
+    # ... and with flux_albav the albedos' radiative fractions follow them a step later
+    ifrad = list(ci.LISTS["fractions_o"]).index("ifrad")
+    assert o["step1/fractions_o"][:, ifrad].tobytes() == o["step0/fractions_o"][:, ifrac].tobytes()
 
 
 def test_the_default_path_does_not_call_the_interval():
