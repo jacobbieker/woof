@@ -1115,7 +1115,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and NOx/HOx production during solar proton events (Bethe stopping in air,
   35 eV per ion pair). Against the CMIP7 rates, the ratio is 0.4-1.0 at 0.1-100
   hPa. `spacewx_epp_opt = 1` adds that NO, OH and HO2 to RADM2 chemistry in
-  the polar caps, from the GOES flux at the start. With `--electron-energy-flux`
+  the polar caps, from the GOES flux at the start; on hex, the same keys in
+  the chemistry config's `wrf_chem` block do it on both routes, word for word
+  the WRF path's. With `--electron-energy-flux`
   and `--electron-mean-energy` (OVATION's eflux and mean energy) the command
   adds the auroral electrons' ion-pair rates and NOx (Fang et al. 2010). They
   deposit above about 85 km, so they are a diagnostic, not a forecast source

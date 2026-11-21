@@ -1576,7 +1576,10 @@ keys are output-only, so a restart may switch the rows on or off.
 `spacewx_epp_source` is refused while `spacewx_epp_opt = 0`. `spacewx_epp_opt =
 1` is refused without RADM2 chemistry (the `emission.radm2` rows `no`, `ho`
 and `ho2`), with no radiation scheme (the polar caps are placed on the
-radiation geometry's xlat/xlong), on a streamed domain and on hex. Each domain
+radiation geometry's xlat/xlong) and on a streamed domain. Hex takes both keys
+in the `--chemistry-config` `wrf_chem` block (either hex route; the caps come
+from the cell centres, so no radiation check applies) and refuses them as
+`--physics` overrides. Each domain
 holds the hour before its own start, kept per source and start in the
 space-weather cache (`epp-flux`), so a resume holds the same hour and a nest
 started with its parent holds its parent's. The hour, the source's SHA-256 and whether it is an event are
