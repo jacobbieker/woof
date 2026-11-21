@@ -53,6 +53,18 @@ __all__ = ["WindowModel", "to_window", "from_window"]
 #: goes through ``wrfda_tl_start``).
 _NAMES = {"u_2": "u", "v_2": "v", "w_2": "w", "t_2": "thp", "mu_2": "mup", "ph_2": "php"}
 
+#: ``halo_start``: ``wrfplus`` (WRFPLUS's start_domain: the primal mu halo
+#: reset to the edge row, its tangent seeded from g_mu) or ``carried`` (the
+#: window's carried halo, the TL halo starting at zero; woof's own window).
+_HALO_STARTS = ("wrfplus", "carried")
+
+
+def _halo_name():
+    from woof.grad.wrfplus import model as M
+
+    return getattr(M, "HALO", None)
+
+
 #: WRF's state names (``wrftoxb``'s ``grid``) -> the window's, for the base check.
 _BASE = {**_NAMES, "p": "p_pert"}
 
@@ -100,13 +112,21 @@ class WindowModel:
 
     The adjoint forces every state input the window has
     (``Window.inputs`` where it has one: a specified domain adds the
-    carried mu halo, forced with zero, as nothing observes it).  The
+    carried mu halo, forced with zero, as nothing observes it).
+
+    ``halo_start`` (specified windows only): ``"wrfplus"`` (default) starts
+    as WRFPLUS's ``start_domain`` does, the primal mu halo reset to the edge
+    row and the TL halo seeded from ``g_mu``
+    (``wrfda_tl_start(..., specified=True)``); ``"carried"`` keeps the
+    window's carried halo and starts the TL halo at zero (woof's own
+    window, not WRFPLUS's: a warm window then differs from WRFPLUS's base).  The
     boundary tables are not perturbed (WRFDA's ``var4d_lbc = .false.``)
     and their adjoint is dropped.
     """
 
     def __init__(self, window, steps_per_slot: int, *, moisture: str = "persist", to_device=None, to_host=None,
-                 base: Sequence | None = None, base_rtol: float = 1e-5, base_end: dict | None = None):
+                 base: Sequence | None = None, base_rtol: float = 1e-5, base_end: dict | None = None,
+                 halo_start: str = "wrfplus"):
         if moisture != "persist":
             raise NotImplementedError(f"moisture={moisture!r}: the window is dry; only 'persist' is ported")
         if steps_per_slot < 1:
@@ -119,6 +139,12 @@ class WindowModel:
                             "(a binary32 window's adjoint is its transpose to only ~1e-6)")
         self._dev = to_device or (lambda a: _default_to_device(a, self.dtype))
         self._host = to_host or _default_to_host
+        if halo_start not in _HALO_STARTS:
+            raise ValueError(f"halo_start must be one of {_HALO_STARTS}, not {halo_start!r}")
+        self.halo = _halo_name() if _halo_name() in self._inputs() else None
+        self.halo_start = halo_start
+        if self.halo is not None and halo_start == "wrfplus":
+            self._halo_to_edge()
         if getattr(window, "_checkpoints", None) is None:
             window.forward()
         self.base_diff = None
@@ -169,6 +195,39 @@ class WindowModel:
                              + "; ".join(bad) + f" > rtol {rtol:g}")
         return out
 
+    def _halo_to_edge(self) -> None:
+        """WRFPLUS's ``start_domain`` on a specified window: the primal mu
+        halo starts as the edge row, which in woof's form (model.HALO, a copy
+        of ``mup`` whose ring rk_step 1 reads) is ``mup`` itself.  Resets the
+        window's start and reruns its base if it already ran one; a window
+        on an external trajectory is checked, not changed (its state 0 is
+        the caller's)."""
+        w, h = self.window, self.halo
+        if getattr(w, "_external", False):
+            st = w._checkpoints[0]
+            if not bool(np.array_equal(self._host(st[h]), self._host(st["mup"]))):
+                raise ValueError("halo_start='wrfplus': the external trajectory's state 0 carries a mu halo "
+                                 "that is not mup (WRFPLUS's start resets it to the edge row); reset it, or "
+                                 "pass halo_start='carried'")
+            return
+        w._start[h][...] = w._start["mup"]
+        if getattr(w, "_checkpoints", None) is not None:
+            w.forward()
+
+    def _tl_start(self, d: dict) -> dict:
+        from woof.grad.wrfplus.window import wrfda_tl_start
+
+        if self.halo is not None and self.halo_start == "wrfplus":
+            return wrfda_tl_start(d, specified=True)
+        return wrfda_tl_start(d)
+
+    def _tl_start_ad(self, a: dict) -> dict:
+        from woof.grad.wrfplus.window import wrfda_tl_start_ad
+
+        if self.halo is not None and self.halo_start == "wrfplus":
+            return wrfda_tl_start_ad(a, specified=True)
+        return wrfda_tl_start_ad(a)
+
     def _inputs(self) -> tuple:
         """The window's state inputs: ``Window.inputs`` (STEP_INPUTS plus the
         mu halo on a specified domain) where the window has it."""
@@ -184,15 +243,13 @@ class WindowModel:
         return [n * self.sps for n in range(nslots)]
 
     def tl(self, g0: dict, nslots: int) -> list:
-        from woof.grad.wrfplus.window import wrfda_tl_start
-
         missing = [k for k in t4.TL_KEYS if k not in g0]
         if missing:
             raise ValueError(f"the TL state lacks {missing}")
         states = self._slots(nslots)
         dev = {"u": g0["u_2"], "v": g0["v_2"], "w": g0["w_2"], "thp": g0["t_2"], "mup": g0["mu_2"],
                "p": g0["p"]}
-        dx0 = wrfda_tl_start({k: self._dev(to_window(v)) for k, v in dev.items()})
+        dx0 = self._tl_start({k: self._dev(to_window(v)) for k, v in dev.items()})
         dx0["php"] = self._dev(to_window(g0["ph_2"]))
         out = self.window.tl(dx0, save_at=states, partial=True)
         res = []
@@ -205,8 +262,6 @@ class WindowModel:
         return res
 
     def ad(self, forcings: Sequence) -> dict:
-        from woof.grad.wrfplus.window import wrfda_tl_start_ad
-
         forcings = list(forcings)
         states = self._slots(len(forcings))
         start = self.window._start
@@ -225,7 +280,7 @@ class WindowModel:
             if "qv" in f:
                 qv = np.array(f["qv"], dtype=np.float64) if qv is None else qv + f["qv"]
         a = self.window.ad(None, forcing)
-        a0 = wrfda_tl_start_ad(a)
+        a0 = self._tl_start_ad(a)
         # php is not one of wrfda_tl_start's fields (WRFDA starts g_ph at
         # zero; ph="hydrostatic" sets it here, outside that map), so a0 has
         # no php: its adjoint is the window's own, a["php"]

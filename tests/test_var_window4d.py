@@ -35,7 +35,35 @@ from woof.da.var import transfer4d as t4
 from woof.da.var import window4d as w4
 from woof.grad.wrfplus.model import STEP_INPUTS
 
-HALO = "mu_halo"   # model.HALO on a specified domain (#743); the fake only needs a name
+from woof.grad.wrfplus import model as _M  # noqa: E402
+
+HALO = getattr(_M, "HALO", "mu_halo")   # model.HALO on a specified domain (#743)
+
+
+@pytest.fixture(autouse=True)
+def _specified_api(monkeypatch):
+    """The fake's halo is model.HALO, and ``wrfda_tl_start(..., specified=)``
+    is #743's (a stand-in with its semantics where main's lacks it)."""
+    import inspect
+
+    from woof.grad.wrfplus import window as W
+
+    monkeypatch.setattr(w4, "_halo_name", lambda: HALO)
+    if "specified" not in inspect.signature(W.wrfda_tl_start).parameters:
+        base, base_ad = W.wrfda_tl_start, W.wrfda_tl_start_ad
+
+        def start(g, *, specified=False):
+            out = base(g)
+            return {**out, HALO: g["mup"]} if specified else out
+
+        def start_ad(adj, *, specified=False):
+            out = base_ad(adj)
+            if specified:
+                out["mup"] = out["mup"] + adj[HALO]
+            return out
+
+        monkeypatch.setattr(W, "wrfda_tl_start", start)
+        monkeypatch.setattr(W, "wrfda_tl_start_ad", start_ad)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -95,6 +123,7 @@ class FakeWindow:
 
     def tl(self, dx0, save_at=(), *, partial=False):
         assert partial and set(dx0) <= set(self._start)
+        self.last_dx0 = dx0
         dx = {n: np.array(dx0[n]) if n in dx0 else np.zeros_like(v) for n, v in self._start.items()}
         out = {0: dx} if 0 in save_at else {}
         for k in range(self.nsteps):
@@ -117,9 +146,9 @@ class FakeWindow:
         return ax
 
 
-def _fake(nx=5, ny=4, nz=3, sps=2, nslots=3, halo=False):
+def _fake(nx=5, ny=4, nz=3, sps=2, nslots=3, halo=False, **kw):
     win = FakeWindow(nx, ny, nz, sps * (nslots - 1), halo=halo)
-    return w4.WindowModel(win, sps, to_device=np.asarray, to_host=np.asarray), (nx, ny, nz)
+    return w4.WindowModel(win, sps, to_device=np.asarray, to_host=np.asarray, **kw), (nx, ny, nz)
 
 
 def _tl_state(rng, nx, ny, nz):
@@ -133,11 +162,12 @@ def _dot(a, b):
     return sum(float(np.sum(a[k] * b[k])) for k in t4.TL_KEYS)
 
 
-@pytest.mark.parametrize("halo", [False, True])
-def test_fake_window_dot_product(halo):
+@pytest.mark.parametrize("halo,halo_start", [(False, "wrfplus"), (True, "wrfplus"), (True, "carried")])
+def test_fake_window_dot_product(halo, halo_start):
     """With ``halo`` the window is a specified domain's: its inputs add the
-    carried mu halo (fed from ``mup``), which the adjoint must force too."""
-    model, dims = _fake(halo=halo)
+    carried mu halo (fed from ``mup``), which the adjoint must force too,
+    and under ``wrfplus`` the TL start seeds it from ``g_mu``."""
+    model, dims = _fake(halo=halo, halo_start=halo_start)
     rng = np.random.default_rng(0)
     g0 = _tl_state(rng, *dims)
     fs = [_tl_state(rng, *dims) for _ in range(3)]
@@ -209,6 +239,45 @@ def test_base_check():
     assert mk(base=slots, base_rtol=0.02).base_diff[(1, "t_2")] == pytest.approx(0.01 / 1.01)
     with pytest.raises(ValueError, match="checkpoint_every=3"):
         mk(base=_grids(nx, ny, nz, 3, 2), every=3)
+
+
+def test_halo_start():
+    """``wrfplus`` (default): the primal halo starts as ``mup`` (WRFPLUS's
+    start_domain resets it to the edge row), the base reruns, and the TL
+    halo starts as ``g_mu``; ``carried`` keeps the window's halo and starts
+    the TL halo at zero.  A periodic window has no halo to start."""
+    nx, ny, nz = 5, 4, 3
+    g0 = _tl_state(np.random.default_rng(4), nx, ny, nz)
+    for mode in ("wrfplus", "carried"):
+        win = FakeWindow(nx, ny, nz, 4, halo=True)
+        win._start[HALO][...] = 7.0          # a carried halo, not mup
+        win.forward()
+        model = w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray, halo_start=mode)
+        model.tl(g0, 3)
+        if mode == "wrfplus":
+            np.testing.assert_array_equal(win._start[HALO], win._start["mup"])
+            assert win.forwards == 2 and win._checkpoints[0][HALO][0, 0] == 1.0
+            np.testing.assert_array_equal(win.last_dx0[HALO], w4.to_window(g0["mu_2"]))
+        else:
+            assert (win._start[HALO] == 7.0).all() and win.forwards == 1
+            assert HALO not in win.last_dx0
+    model, _ = _fake()
+    assert model.halo is None
+    with pytest.raises(ValueError, match="halo_start"):
+        _fake(halo_start="edge")
+
+
+def test_halo_start_on_an_external_trajectory():
+    nx, ny, nz = 5, 4, 3
+    win = FakeWindow(nx, ny, nz, 4, halo=True)
+    states = [{n: v + 1.0 * k for n, v in win._start.items()} for k in range(5)]
+    states[0][HALO] = states[0][HALO] + 3.0
+    win.use_trajectory(states)
+    with pytest.raises(ValueError, match="carries a mu halo that is not mup"):
+        w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray)
+    w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray, halo_start="carried")
+    states[0][HALO] = states[0]["mup"].copy()
+    w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray)
 
 
 def test_base_check_reads_an_external_trajectory():
