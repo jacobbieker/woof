@@ -2627,10 +2627,8 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      they help. The AMV departures stay large (O-B RMS 5-7 m/s), so the
      remaining suspects are the height assignment and a representativeness
      error that a diagonal R does not carry. A 4-D (FGAT) LETKF operator
-     is still open: a 3-hour run with first guesses at several lead times
-     was tried once in scratch and left the sondes' v at 400-200 hPa
-     2.465 to 2.917, so it is not a fix on its own. Tighter thinning was
-     not run (it needs the reader's source data again).
+     is still open and was not tried here. Tighter thinning was not run
+     (it needs the reader's source data again).
    - The RO O-B was +1.8 % of N at 20-30 km until #698, which converts
      geometric tangent heights to geopotential.
 
