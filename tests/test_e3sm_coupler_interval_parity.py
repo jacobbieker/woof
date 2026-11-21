@@ -140,7 +140,9 @@ def test_fixture_covers_the_branches():
 def test_the_default_path_does_not_call_the_interval():
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "interval_e3sm" in p.read_text(encoding="utf-8")
-             and p.name not in ("interval_e3sm.py", "e3sm_coupler_interval_oracle.py")]
+             and p.relative_to(ROOT).as_posix() not in ("woof/hex/coupled/interval_e3sm.py",
+                                                    "woof/verify/e3sm_coupler_interval_oracle.py",
+                                                    "woof/hex/coupled/run_e3sm.py")]
     assert users == []
     # importing it loads none of the routines it chains
     code = ("import sys, woof.hex.coupled.interval_e3sm\n"
