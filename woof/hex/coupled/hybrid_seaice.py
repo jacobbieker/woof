@@ -231,16 +231,18 @@ class HybridSeaIce:
     over every cell with ``sphere_radius`` when not given). Construction is
     ``ice_init_mct`` for an initial run. ``basis``, ``metric_libm`` and
     ``basis_corrections`` go to
-    :func:`~woof.hex.mpas_seaice.timestep_v842.initialize`. The default
-    computes the variational basis from the mesh, as v8.4.2 does; it is
-    refused by name when the mesh pool carries no coordinates, and at real(8)
-    its metric terms need ``metric_libm``."""
+    :func:`~woof.hex.mpas_seaice.timestep_v842.initialize`. The default,
+    ``"input"``, keeps the basis the pools carry (the coupled harness's pools
+    come from an initialised model, and the HybridSeaIce API takes the
+    sphere as ``sphere_radius``, not as the ``mesh:`` configs the set-up
+    reads). ``basis="compute"`` computes it from the mesh as v8.4.2's init
+    does; at real(8) its metric terms need ``metric_libm``."""
 
     name = HYBRID_NAME
 
     def __init__(self, *, pools: dict, configs: dict, x2i_fields, i2x_fields, ice_cpl_dt: int,
                  nextsw_cday: float = -1.0, trig=None, sphere_radius: float | None = None,
-                 wav_ice_coup: str = "none", basis: str | None = None, metric_libm: str | None = None,
+                 wav_ice_coup: str = "none", basis: str = "input", metric_libm: str | None = None,
                  basis_corrections=()) -> None:
         import cupy as cp
         from woof.hex.mpas_seaice import coupling_prep_v842 as cprep
