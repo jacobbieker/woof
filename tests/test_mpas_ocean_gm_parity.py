@@ -10,7 +10,9 @@ fixture itself is rebuilt and compared.
 
 THE BREAKAGES THESE PREVENT
 ---------------------------
-1. A port that agrees with MPAS only to a tolerance, in either precision.
+1. A port that agrees with MPAS only to a tolerance, in either precision, or
+   only under one numerics mode: the gate also runs in fast and strict child
+   processes.
 2. A case generator whose bytes drift. The input digests are pinned.
 3. A fixture that misses a branch: the slope clip, the max-slope taper, the
    surface and bottom tapering, ``config_disable_redi_k33``, edges too shallow
@@ -29,6 +31,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from _numerics_child import MODES, run as run_child
 from conftest import requires_gpu
 from woof.verify import mpas_ocean_gm_oracle as oo
 
@@ -72,6 +75,12 @@ def test_gpu_matches_the_v842_oracle_word_for_word(precision):
     report = oo.measure(precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad
+
+
+@requires_gpu
+@pytest.mark.parametrize(*MODES)
+def test_word_exact_in_fast_and_strict_children(numerics, exact):
+    run_child(__file__, ["test_gpu_matches_the_v842_oracle_word_for_word"], numerics, exact)
 
 
 @requires_gpu
