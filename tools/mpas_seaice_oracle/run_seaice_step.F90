@@ -58,6 +58,7 @@ program run_seaice_step
   character(len=StrKIND), pointer :: config_variational_basis, config_wachspress_integration_type
   character(len=StrKIND), pointer :: config_stress_divergence_scheme
   integer, pointer :: config_wachspress_integration_order
+  type(mpas_pool_type), pointer :: weakMesh, weakBoundary, weakPool
   character(len=24), parameter :: structNames(24) = [character(len=24) :: 'mesh', 'boundary', 'velocity_solver', &
        'velocity_variational', 'velocity_weak', 'icestate', 'tracers', 'tracers_aggregate', 'atmos_coupling', &
        'ocean_coupling', 'ridging', 'diagnostics', 'scratch', 'tracer_tendencies', 'tracer_edge_fluxes', &
@@ -112,8 +113,10 @@ program run_seaice_step
      call mpas_pool_get_config(pools % configs, 'config_stress_divergence_scheme', &
           config_stress_divergence_scheme)
      if (trim(config_stress_divergence_scheme) == "weak") then
-        call seaice_init_velocity_solver_weak(pool_named(pools, 'mesh'), pool_named(pools, 'boundary'), &
-             pool_named(pools, 'velocity_weak'), config_rotate_cartesian_grid)
+        weakMesh => pool_named(pools, 'mesh')
+        weakBoundary => pool_named(pools, 'boundary')
+        weakPool => pool_named(pools, 'velocity_weak')
+        call seaice_init_velocity_solver_weak(weakMesh, weakBoundary, weakPool, config_rotate_cartesian_grid)
      else if (trim(config_stress_divergence_scheme) == "variational") then
         call seaice_init_velocity_solver_variational(pool_named(pools, 'mesh'), &
              pool_named(pools, 'velocity_variational'), pool_named(pools, 'boundary'), &

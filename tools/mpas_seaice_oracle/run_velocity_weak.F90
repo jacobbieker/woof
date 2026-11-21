@@ -28,6 +28,7 @@ program run_velocity_weak
   real(kind=RKIND) :: inputDt
   logical, pointer :: config_rotate_cartesian_grid
   integer, pointer :: nIterations
+  type(mpas_pool_type), pointer :: weakMesh, weakBoundary, weakPool
   integer :: i, p
   character(len=24), parameter :: structNames(5) = [character(len=24) :: 'mesh', 'boundary', &
        'velocity_solver', 'velocity_weak', 'ridging']
@@ -51,8 +52,10 @@ program run_velocity_weak
 
   call seaice_init_evp(domain)
   call mpas_pool_get_config(pools % configs, 'config_rotate_cartesian_grid', config_rotate_cartesian_grid)
-  call seaice_init_velocity_solver_weak(pool_named(pools, 'mesh'), pool_named(pools, 'boundary'), &
-       pool_named(pools, 'velocity_weak'), config_rotate_cartesian_grid)
+  weakMesh => pool_named(pools, 'mesh')
+  weakBoundary => pool_named(pools, 'boundary')
+  weakPool => pool_named(pools, 'velocity_weak')
+  call seaice_init_velocity_solver_weak(weakMesh, weakBoundary, weakPool, config_rotate_cartesian_grid)
   call mpas_pool_get_config(pools % configs, 'oracle_n_iterations', nIterations)
   do i = 1, nIterations
      call seaice_internal_stress_weak(domain)

@@ -630,6 +630,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "370053044db02e1ab21e07dcf02caeec2619c45ba5aefa23b48a044f6d2871c5",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "6cdd0af565e47e310803837242dab4eb60892c097b012dd1f4fbbec98f32020b",
+    "file": "woof/hex/mpas_seaice/weak_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "3906e794ed37c2b114e021e89124cd4712eade511394f273ba751a0f4df17ebc",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
@@ -5196,6 +5204,10 @@
     "sha256": "01073e25f0768a46ebd77c21fe27035b3559c55f474b559c45c7440087384791"
    },
    {
+    "file": "woof/hex/mpas_seaice/weak_v842.cu",
+    "sha256": "b03a97043565146f5cbfa9c5a4579361f9b4ffa37cf4b9be4c3bbda714dbd141"
+   },
+   {
     "file": "woof/hex/mpasphys/rrfs/nssl_sunpro.cuh",
     "sha256": "d38b8170869f84a478b834752eff171c40a79cc2b1a5522df4d9900eb04d59f1"
    },
@@ -6255,7 +6267,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
-    "sha256": "69e77864acce53f216d4ea224a1e869fc16162a7f80d09b5061cc4e43836239d"
+    "sha256": "6abd6fb940959a46e3893aed3e8850cbe551479eda97b2fe13399b4b2f5a21d1"
    },
    {
     "file": "woof/hex/mpas_seaice/post_coupling_v842.py",
@@ -6263,7 +6275,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
-    "sha256": "33ea15cccbd03ad8ea011ea0721956a4f098d285060a340b850d3565f1e5ecaa"
+    "sha256": "4e94becc30ac51b81a3562e8cf461ddcc90cceec2a72fee187a82c9b9fd2ba8b"
    },
    {
     "file": "woof/hex/mpas_seaice/remap_v842.py",
@@ -6272,6 +6284,10 @@
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.py",
     "sha256": "7b70420a4f8ada2cc8158cd62b516a7cf5b595d0a7596b92f132aded5ce1b243"
+   },
+   {
+    "file": "woof/hex/mpas_seaice/weak_v842.py",
+    "sha256": "ad75fa786eff33e76e80b101cf8abafa2eb378fd7252647429a568e67e9b565d"
    },
    {
     "file": "woof/hex/mpasdiag/_kernels.py",
