@@ -1548,6 +1548,10 @@ def cases(precision: str = "r8", rows=CASES) -> list[dict]:
 
 
 def input_bytes(case: dict) -> bytes:
+    names = case["config"].get("woof_v842_corrections")
+    if names is not None and not isinstance(names, str):
+        # several corrections (which the oracle does not read) go into the stream as one string
+        case = {**case, "config": {**case["config"], "woof_v842_corrections": " ".join(names)}}
     return _stream.input_bytes(case["fields"], case)
 
 
