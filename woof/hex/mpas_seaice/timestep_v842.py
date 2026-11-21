@@ -148,6 +148,8 @@ def check_config(configs: dict) -> None:
     if scheme != "variational":
         _refuse("config_stress_divergence_scheme", scheme, "only the variational stress divergence is ported",
                 "config_stress_divergence_scheme = 'variational'")
+    from . import variational_basis_v842
+    variational_basis_v842.check_config(configs)
 
 
 def advection_tree(pools: dict, configs: dict):
@@ -176,7 +178,8 @@ def _tilt(configs: dict) -> str:
     return "geostrophic" if configs.get("config_geostrophic_surface_tilt", False) else "ssh_gradient"
 
 
-def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None) -> Clock:
+def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None, basis: str | None = None,
+               metric_libm: str | None = None, basis_corrections=()) -> Clock:
     """The init's time steps and time diagnostics; the clock at its start.
 
     Under ``config_use_advection`` with ``remap_geometry="compute"`` (the
@@ -187,8 +190,24 @@ def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None)
     ``"input"`` keeps the pools' own (a harness replaying a fixture whose
     geometry came from elsewhere). The halo-layer warnings v8.4.2 logs go to
     this module's logger. With the column package, ``init_column_itd``
-    writes the thickness limits (``categoryThicknessLimits``)."""
+    writes the thickness limits (``categoryThicknessLimits``).
+
+    With the velocity solver on, ``basis="compute"`` (the default then; v8.4.2
+    always computes it) runs ``seaice_init_velocity_solver_variational``
+    (:mod:`~woof.hex.mpas_seaice.variational_basis_v842`) after
+    ``seaice_init_evp``'s place: the basis gradients and integrals,
+    ``tanLatVertexRotatedOverRadius`` and ``cellVerticesAtVertex`` from the
+    mesh, into the velocity_variational pool. ``metric_libm`` and
+    ``basis_corrections`` go to it (at RKIND 8 the metric terms need
+    ``metric_libm`` unless they are off or trivially zero or NaN). ``"input"``
+    keeps the pool's own (a harness replaying a fixture whose basis came
+    from elsewhere)."""
     check_config(configs)
+    solver_on = configs.get("config_use_velocity_solver", True)
+    if basis is None:
+        basis = "compute" if solver_on else "input"
+    if basis not in ("compute", "input"):
+        raise ValueError(f"basis is 'compute' or 'input', not {basis!r}")
     if configs.get("config_use_column_package", False):
         from . import column_v842 as cv
         _column_precision(pools)
@@ -202,6 +221,11 @@ def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None)
         from . import remap_init_v842
         for w in remap_init_v842.initialize_pools(pools, configs):
             _log.info("%s %s", w["message"], w["ints"])
+    if solver_on and basis == "compute":
+        from . import variational_basis_v842
+        for w in variational_basis_v842.initialize_pools(pools, configs, metric_libm=metric_libm,
+                                                         corrections=basis_corrections):
+            _log.warning("%s", w["message"])
     solver = pools["velocity_solver"]
     real = PRECISIONS[_precision_of(solver["uVelocity"])]
     dynamics = real(real(configs["config_dt"]) / real(configs["config_dynamics_subcycle_number"]))

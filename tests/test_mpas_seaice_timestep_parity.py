@@ -111,7 +111,7 @@ def test_a_restart_continues_the_run_bitwise(tmp_path, precision):
     dev = stream.on_device(oo.FIELDS, case)
     dev["diagnostics"]["xtime"] = config["diagnostics:xtime"]
     dev["diagnostics"]["simulationStartTime"] = config["diagnostics:simulationStartTime"]
-    clock = ts.initialize(pools=dev, configs=config)
+    clock = ts.initialize(pools=dev, configs=config, basis="input")
     next_step = ts.advance(pools=dev, configs=config, clock=clock, n_steps=1)
     dev["diagnostics"]["oracle_next_step"] = next_step
     ts.write_restart(tmp_path / "restart.npz", pools=dev, clock=clock)
@@ -152,7 +152,8 @@ def test_a_mutated_driver_is_caught(monkeypatch, mutation):
         original_init = ts.initialize
 
         def init_with_two(**kw):
-            clock = original_init(pools=kw["pools"], configs=dict(kw["configs"], config_dynamics_subcycle_number=2))
+            clock = original_init(pools=kw["pools"], configs=dict(kw["configs"], config_dynamics_subcycle_number=2),
+                                  basis=kw.get("basis"))
             return clock
         monkeypatch.setattr(ts, "initialize", init_with_two)
         field = "velocity_solver/uVelocity"

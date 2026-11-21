@@ -1,52 +1,12 @@
 ! Stand-ins for the MPAS-Seaice modules the time-step oracle (run_seaice_step)
-! compiles against but does not drive: the variational basis setup
-! (Wachspress, PWL: the driver gives the basis arrays), the weak-form solver
-! and the unit tests.  Each stops by name if reached.  (Incremental-remap
+! compiles against but does not drive: the weak-form solver and the unit
+! tests.  Each stops by name if reached.  (The variational basis set-up,
+! Wachspress and PWL, is compiled verbatim (build.sh).  Incremental-remap
 ! advection is compiled verbatim; its stand-ins are remap_standins.F90 and
 ! rbf_standins.F90.  The column package's ice strength is
 ! colpkg_standin.F90's, which the column oracle replaces with the column
 ! package itself.)  The framework is tools/mpas_ocean_oracle/stubs.F90,
 ! shared with the ocean.
-module seaice_velocity_solver_wachspress
-  use mpas_derived_types
-  implicit none
-  private
-  public :: seaice_init_velocity_solver_wachspress
-
-contains
-
-  subroutine seaice_init_velocity_solver_wachspress(mesh, velocity_variational, boundary, &
-       rotateCartesianGrid, includeMetricTerms, integrationType, integrationOrder)
-    type(MPAS_pool_type), pointer, intent(in) :: mesh
-    type(MPAS_pool_type), pointer :: velocity_variational, boundary
-    logical, intent(in) :: rotateCartesianGrid, includeMetricTerms
-    character(len=*), intent(in) :: integrationType
-    integer, intent(in) :: integrationOrder
-    print *, 'oracle stub: the Wachspress basis setup is not part of this oracle'
-    stop 6
-  end subroutine seaice_init_velocity_solver_wachspress
-
-end module seaice_velocity_solver_wachspress
-
-module seaice_velocity_solver_pwl
-  use mpas_derived_types
-  implicit none
-  private
-  public :: seaice_init_velocity_solver_pwl
-
-contains
-
-  subroutine seaice_init_velocity_solver_pwl(mesh, velocity_variational, boundary, &
-       rotateCartesianGrid, includeMetricTerms)
-    type(MPAS_pool_type), pointer, intent(in) :: mesh
-    type(MPAS_pool_type), pointer :: velocity_variational, boundary
-    logical, intent(in) :: rotateCartesianGrid, includeMetricTerms
-    print *, 'oracle stub: the PWL basis setup is not part of this oracle'
-    stop 6
-  end subroutine seaice_init_velocity_solver_pwl
-
-end module seaice_velocity_solver_pwl
-
 module seaice_velocity_solver_weak
   use mpas_derived_types
   implicit none
