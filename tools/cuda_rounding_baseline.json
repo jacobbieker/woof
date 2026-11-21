@@ -2756,6 +2756,14 @@
     "factory_sha256": "656fbab1b5a9c1df75c9647d10ba91fb5df7ef553e502b4a1b602bb569c03aee",
     "file": "woof/core/sfire_ideal_atmos.py",
     "status": "unresolved"
+   },
+   {
+    "call_sha256": "fe643dd88dfa6a455a8b4b4c6cd8c5352c6883d8f0586e36f9b638b269697b16",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "604c69d5226e4465af8629a50f17b7ec7258040b585a4e4f32dd90f30cd261c2",
+    "file": "woof/hex/coupled/ocn_accum_e3sm.py",
+    "status": "unresolved"
    }
   ],
   "cuda_files": [
@@ -4940,6 +4948,10 @@
     "sha256": "ecff73adad07a1f455bca91e95148c54f05360b907a3fd0ae8c9caae7913ffdb"
    },
    {
+    "file": "woof/hex/coupled/ocn_accum_e3sm.cu",
+    "sha256": "e6d1617c2d7c77d5473044cc170c8000cb67eecb5d1b7e69ac2f6c281ad450ad"
+   },
+   {
     "file": "woof/hex/coupled/ocn_coupling_e3sm.cu",
     "sha256": "7eb1bcd641ea5ac79d59ff2012535e1c302dc196c34e8d1cbe1161541d206ce3"
    },
@@ -5824,6 +5836,10 @@
    {
     "file": "woof/hex/coupled/ice_coupling_e3sm.py",
     "sha256": "0d2ad29b7bfbcab54eeb8eeb9be45a6521c4fae7269554afcfd64595819f82f7"
+   },
+   {
+    "file": "woof/hex/coupled/ocn_accum_e3sm.py",
+    "sha256": "130b128665d23caac4dcb0158d2189d53e53524fb5ccdd423efc65e53f87f055"
    },
    {
     "file": "woof/hex/coupled/ocn_coupling_e3sm.py",

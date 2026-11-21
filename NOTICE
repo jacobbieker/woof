@@ -1859,6 +1859,19 @@ This is a modified derivative, not the version available from the E3SM
 project, and neither the E3SM project, UChicago Argonne, LLC, UCAR nor the
 Department of Energy endorses it.
 
+woof/hex/coupled/ocn_accum_e3sm.cu (and its Python wrapper) transcribe E3SM
+v3.2.0's coupler ocean-input accumulation, prep_ocn_accum and
+prep_ocn_accum_avg from driver-mct/main/prep_ocn_mod.F90 (cpl7: University
+Corporation for Atmospheric Research and UChicago Argonne, LLC; E3SM:
+Copyright 2024, UChicago Argonne, LLC; BSD 3-Clause) and mct_avect_accum and
+mct_aVect_avg from share/util/mct_mod.F90 (CESM share code: UCAR; E3SM:
+Copyright 2024, UChicago Argonne, LLC; BSD 3-Clause). Its oracle,
+tools/e3sm_coupler_oracle/, compiles those routines verbatim on MCT as it
+is. The terms are reproduced at licenses/LICENSE-E3SM-BSD-3-Clause.txt. This
+is a modified derivative, not the version available from the E3SM project,
+and neither the E3SM project, UChicago Argonne, LLC, UCAR nor the Department
+of Energy endorses it.
+
 woof/hex/coupled/ice_coupling_e3sm.cu (and its Python wrapper) transcribe
 E3SM v3.2.0's MPAS-Seaice coupler import and export, ice_import_mct,
 ice_export_mct, basal_pressure and frazil_mass from

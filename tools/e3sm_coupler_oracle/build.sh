@@ -4,7 +4,9 @@
 # ocn_import_mct and ocn_export_mct (run_ocean_coupling), and, given Icepack,
 # MPAS-Seaice's, ice_import_mct and ice_export_mct (run_seaice_coupling),
 # the coupler's surface fractions, seq_frac_set (run_seq_frac), and its
-# atmosphere-ocean flux, seq_flux_atmocn_mct (run_flux_atmocn).
+# atmosphere-ocean flux, seq_flux_atmocn_mct (run_flux_atmocn), its ocean
+# albedos, seq_flux_ocnalb_mct (run_flux_ocnalb), and the ocean-input
+# accumulation, prep_ocn_accum and prep_ocn_accum_avg (run_ocn_accum).
 #
 #   bash tools/e3sm_coupler_oracle/build.sh E3SM_SOURCE_ROOT MCT_SOURCE_ROOT BUILD_DIR [ICEPACK_SOURCE_ROOT]
 #
@@ -429,6 +431,77 @@ if grep -E '\b(exp|log|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\b|\b
 fi
 echo "built ${build_dir}/run_flux_atmocn"
 echo "built ${build_dir}/run_flux_ocnalb"
+
+# ---------------------------------------------------------------- the ocean-input accumulation
+# prep_ocn_accum and prep_ocn_accum_avg are cut byte for byte out of
+# driver-mct/main/prep_ocn_mod.F90 into a module of that name whose head is
+# the host's own lines for what they use (3, 8, 17, 18, 20 and 21: r8, the
+# instance count, the timers, mct_mod, the component getters and
+# components) and declare (106-107: the accumulator and its count; 110:
+# mpicom_CPLID), with the accumulator made public for the driver (it is
+# private in E3SM; prep_ocn_init sets it up, as the driver does).
+# mct_mod is written from the pinned share/util/mct_mod.F90's own `use m_*,
+# only:` renames and flags with its mct_avect_accum and mct_aVect_avg cut
+# verbatim.  Compiled verbatim: shr_kind_mod.  accum_standins.F90 holds the
+# rest (no arithmetic).
+obj="${build_dir}/accum"
+rm -rf "${obj}" && mkdir -p "${obj}" && cd "${obj}"
+{
+    printf 'module mct_mod\n'
+    grep -E '^ *use m_[A-Za-z0-9_]+ +,only:' "${e3sm}/share/util/mct_mod.F90"
+    printf '  use shr_kind_mod, only: R8 => SHR_KIND_R8, IN => SHR_KIND_IN\n  implicit none\n'
+    grep -E '^ *logical,public :: mct_use(alltoall|vector) = \.false\.$' "${e3sm}/share/util/mct_mod.F90"
+    printf '  private :: R8, IN\ncontains\n'
+    cut "${e3sm}/share/util/mct_mod.F90" mct_avect_accum subroutine
+    cut "${e3sm}/share/util/mct_mod.F90" mct_aVect_avg subroutine
+    printf 'end module mct_mod\n'
+} > mct_mod.F90
+host=$(sed -n '3p;8p;17p;18p;20p;21p' "${drv}/prep_ocn_mod.F90")
+decl=$(sed -n '106,107p;110p' "${drv}/prep_ocn_mod.F90")
+if [[ "${host}" != *'r8 => SHR_KIND_R8'* || "${host}" != *'num_inst_ocn'* || "${host}" != *'use t_drv_timers_mod'* \
+      || "${host}" != *'use mct_mod'* || "${host}" != *'component_get_x2c_cx'* || "${host}" != *'only: ocn,'* \
+      || "${decl}" != *':: x2oacc_ox(:)'* || "${decl}" != *':: x2oacc_ox_cnt'* || "${decl}" != *':: mpicom_CPLID'* ]]; then
+    echo "prep_ocn_mod.F90's head is not where the cut expects it" >&2
+    exit 3
+fi
+{
+    printf 'module prep_ocn_mod\n'
+    printf '%s\n' "${host}"
+    printf '  implicit none\n  save\n  private\n'
+    printf '  public :: prep_ocn_accum, prep_ocn_accum_avg\n'
+    printf '  ! the harness: prep_ocn_init sets these up\n  public :: x2oacc_ox, x2oacc_ox_cnt\n'
+    printf '%s\n' "${decl}"
+    printf 'contains\n'
+    for r in prep_ocn_accum prep_ocn_accum_avg; do cut "${drv}/prep_ocn_mod.F90" "${r}" subroutine; done
+    printf 'end module prep_ocn_mod\n'
+} > prep_ocn_accum_cut.F90
+for want in 'prep_ocn_accum:prep_ocn_accum_cut.F90' 'prep_ocn_accum_avg:prep_ocn_accum_cut.F90' \
+            'mct_avect_accum:mct_mod.F90' 'mct_aVect_avg:mct_mod.F90'; do
+    if [[ $(grep -cE "^ *(end )?subroutine ${want%%:*}( |\\(|$)" "${want#*:}") -ne 2 ]]; then
+        echo "a routine was not cut out whole (${want})" >&2
+        exit 3
+    fi
+done
+aflags=(-c -cpp -O0 -ffp-contract=off -ffree-line-length-none "${mctinc[@]}")
+"${fc[@]}" "${aflags[@]}" "${e3sm}/share/util/shr_kind_mod.F90"
+"${fc[@]}" "${aflags[@]}" mct_mod.F90
+"${fc[@]}" "${aflags[@]}" "${script_dir}/accum_standins.F90"
+"${fc[@]}" "${aflags[@]}" prep_ocn_accum_cut.F90
+"${fc[@]}" "${aflags[@]}" "${script_dir}/run_ocn_accum.F90"
+"${fc[@]}" -o "${build_dir}/run_ocn_accum" ./*.o "${mctlib[@]}"
+if command -v objdump >/dev/null; then
+    objdump -d mct_mod.o prep_ocn_accum_cut.o > disassembly.txt
+    if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
+        echo "an object contains an FMA instruction (${obj}/fma.txt)" >&2
+        exit 5
+    fi
+fi
+nm -u mct_mod.o prep_ocn_accum_cut.o > undefined.txt
+if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\b' undefined.txt; then
+    echo "the accumulation calls libm" >&2
+    exit 6
+fi
+echo "built ${build_dir}/run_ocn_accum"
 
 # ---------------------------------------------------------------- the sea ice's import and export
 # ice_import_mct, ice_export_mct, basal_pressure and frazil_mass are cut byte
