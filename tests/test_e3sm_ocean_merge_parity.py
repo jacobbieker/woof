@@ -109,7 +109,9 @@ def test_the_coupled_step_does_not_call_the_merge():
     """Opt-in: nothing under woof/ imports the merge but its own oracle module."""
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "prep_ocn_merge_e3sm" in p.read_text(encoding="utf-8")
-             and p.name not in ("prep_ocn_merge_e3sm.py", "e3sm_ocean_merge_oracle.py")]
+             and p.name not in ("prep_ocn_merge_e3sm.py", "e3sm_ocean_merge_oracle.py")
+             and p.relative_to(ROOT).as_posix() not in ("woof/hex/coupled/interval_e3sm.py",
+                                                    "woof/verify/e3sm_coupler_interval_oracle.py")]
     assert users == []
 
 

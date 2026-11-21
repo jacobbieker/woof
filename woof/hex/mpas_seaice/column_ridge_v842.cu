@@ -23,8 +23,9 @@
 // Appended to column_v842.cu and column_itd_v842.cu (the rounding macros,
 // constants, the tracer layout, colpkg_compute_tracers and cleanup_itd).
 // l_conservation_check is .false. (no conservation checks); the aerosols,
-// the biogeochemistry and the zero-layer thermodynamics are refused by the
-// host (column_ridge_v842.py), so tr_aero and tr_brine are .false. exp is
+// the biogeochemistry but the brine height and the zero-layer thermodynamics
+// are refused by the host (column_ridge_v842.py), so tr_aero is .false.; the
+// brine fraction is a volume tracer ridge_shift scales new ridges by. exp is
 // glibc_exp (glibc_flt64.cuh, the MIT transcription of glibc's binary64 exp);
 // gfortran folds c1/(c1 - exp(-astari)), whose exp(-20) every correctly
 // rounded exp gives. Fortran's MIN and MAX are gfortran's comparisons
@@ -142,7 +143,7 @@ __device__ void rdg_ridge_itd(int ncat, double aice0, const double *aicen, const
     }
 }
 
-// ice_mechred.F90:1027-1535 ridge_shift (no aerosols, no brine). Returns the
+// ice_mechred.F90:1027-1535 ridge_shift (no aerosols). Returns the
 // abort code. aredistn and vredistn are written only for the thinnest
 // category's ridges under the exponential redistribution, as v8.4.2 does.
 __device__ int rdg_ridge_shift(const ItdTracers &T, double dt, int ncat, const double *hin_max, double *aicen,

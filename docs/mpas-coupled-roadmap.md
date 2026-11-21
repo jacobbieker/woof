@@ -207,7 +207,7 @@ expected.
 | Phase | Configs | Work | Oracle cases |
 |---|---|---|---|
 | P1 | `config_use_column_biogeochemistry` with `config_use_brine` only | the tracer object's brine fraction; `colpkg_init_hbrine`, `colpkg_init_zbgc`'s brine part, `init_column_biogeochemistry_profiles`, the coupler's ocean concentrations and flux resets; `column_biogeochemistry`'s brine path (`preflushing_changes`, `compute_microS_mushy`, `update_hbrine`, `calculate_drho`) (`woof/hex/mpas_seaice/column_bgc_v842.py`, `tests/test_mpas_seaice_bgc_brine_parity.py`) | the init (BL99, mushy, a brine-height restart, three layers with CESM ponds); the stage with mushy and BL99, a short drainage length, four layers and three categories, and an abort |
-| P1b | the same, through the rest of the column | the brine fraction carried through the ITD, ridging, the remap, the column step and the coupled step (`seaice_column_reinitialize_diagnostics_bgc`) | the column step over 3 steps; the coupled step with the remap and ridging |
+| P1b | the same, through the rest of the column | the brine fraction carried through the ITD (`add_new_ice_bgc`, `zap_small_areas`), ridging, the column step (`column_biogeochemistry` after the vertical thermodynamics; `seaice_column_reinitialize_diagnostics_bgc`, refused without the correction `bgc_inactive_diagnostics` because v8.4.2 zeroes the unallocated `totalChlorophyll`) and the coupled step (`coupling_prep`'s and `scale_fluxes`' ocean biogeochemistry fluxes); the remap already carried it and its oracle cases test it (`tests/test_mpas_seaice_bgc_brine_carry_parity.py`) | five ITD and three ridging cases; the column step over 3 steps (three cases); the coupled step with ridging (two cases, without advection) |
 | P2 | `config_use_vertical_zsalinity` (needs brine and BL99) | `ice_zsalinity.F90`: `zsalinity`, `solve_zsalinity`, `solve_S_dt`, the salt fluxes, the Rayleigh criterion and the salinity's feedback into the thermodynamics | the stage with the Rayleigh criterion met and not; the column step; a melt season |
 | P3 | `config_use_vertical_tracers` with `config_use_nonreactive` only | the z-tracer core: the bio grid, mobile fractions, transport without reactions (the FCT matrix and correction, `tridiag_solverz`, `thin_ice_flux`, the conservation check), new ice and lateral melt, ridging, the remap, the snow and ice tracer split, the ocean fluxes | the stage with thin and thick ice; the column step with the ITD; the coupled step with advection |
 | P4 | `config_use_zaerosols`, `config_use_shortwave_bioabsorption` (needs P3) | the aerosol z-tracers; chlorophyll and aerosols in the delta-Eddington shortwave (`dEdd_algae`) | z-aerosol transport; the radiation stage; the column step |
@@ -336,6 +336,10 @@ NCAR aerosols as a small PR whenever it fits.
    fractions of a second. `li_SGH_init` gives grounded ice below sea level
    the ocean's water pressure (it reads a mask holding only the initial
    extent bit); `woof_sgh_init_mask = 'corrected'` computes the mask first,
+   off by default. With the enthalpy solver, `tracer_setup`/`tracer_finish`
+   convert the advected enthalpy with Kelvin temperatures against the
+   thermal solver's Celsius melting point, so the ice turns temperate and
+   melts; `woof_enthalpy_advection_units = 'corrected'` converts in Celsius,
    off by default. `woof hex ice run` (`woof/hex/mpas_ice/run_v842.py`)
    runs the forward mode from a MALI namelist (every option at its v8.4.2
    Registry default, `Registry_subglacial_hydro.xml` included) and an MPAS
@@ -424,7 +428,19 @@ matched exchange unless asked.
    ported (`woof/hex/coupled/ocn_accum_e3sm.py`,
    `tests/test_e3sm_ocn_accum_parity.py`): the window's sum, the average by
    `1/count` rounded once (E3SM's reciprocal, kept) and the copy back into
-   x2o, real(r8), on CUDA and Metal.
+   x2o, real(r8), on CUDA and Metal. One coupler interval chains them
+   (`woof/hex/coupled/interval_e3sm.py`,
+   `tests/test_e3sm_coupler_interval_parity.py`): `cime_comp_mod`'s
+   RASM_OPTION1 phases (`cime_run_atmocn_setup`, `_ocn_setup_send`,
+   `_ice_setup_send`, `_update_fractions`) over several coupler steps, an
+   ocean and sea ice on one grid (the copy_only mappers) and an atmosphere
+   mapper of any kind, against E3SM's own routines cut verbatim and linked
+   into one Fortran driver (`run_coupler_interval.F90`), word for word after
+   every step on CUDA and Metal. The flux's mask is taken once from the
+   starting fractions, as `seq_flux_init_mct` takes it (kept). The wave
+   couplings are refused by name. Next (e3): the interval on the spine, with
+   the ocean's forward step and the sea ice's step in place of the scripted
+   exports.
 4. The ocean's and the sea ice's import and export
    (`components/mpas-ocean/driver/ocn_comp_mct.F`,
    `components/mpas-seaice/driver/ice_comp_mct.F`). The ocean's is ported

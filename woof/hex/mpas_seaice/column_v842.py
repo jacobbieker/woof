@@ -393,6 +393,14 @@ CORRECTIONS = {
         "the proteins' and R_C2N_DON keeps its static zero; initialize_coupler_fields hands both to "
         "carbonToNitrogenRatioAlgae and carbonToNitrogenRatioDON (colpkg_init_ocean_conc); the correction "
         "gives the diatoms config_ratio_C_to_N_diatoms and the proteins config_ratio_C_to_N_proteins"),
+    "bgc_inactive_diagnostics": (
+        "seaice_column_reinitialize_diagnostics_bgc zeroes every biogeochemical diagnostic "
+        "(mpas_seaice_column.F:12450-12471) without asking whether its package is on, and the Registry "
+        "allocates no array for a field whose packages are off: with the brine height alone, "
+        "totalChlorophyll (pkgTracerVerticalAlgae;pkgTracerSkeletalAlgae) is a null pointer whose "
+        "descriptor gfortran gives one element, so the zeroing writes to address 0 and every time step "
+        "with the column biogeochemistry dies there; the correction zeroes only the fields that have an "
+        "array, which nothing else reads"),
 }
 
 
@@ -422,10 +430,11 @@ BGC_PORTED = ("config_use_brine",)
 def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool = False) -> None:
     """Refuse, by name, what this stage of the column port does not carry.
 
-    ``biogeochemistry`` is the caller's: the init (:func:`initialize`) and
-    :func:`woof.hex.mpas_seaice.column_bgc_v842.biogeochemistry` carry the
-    column biogeochemistry's framework and its brine height
-    (``config_use_brine``); every other routine refuses
+    ``biogeochemistry`` is the caller's: the init (:func:`initialize`),
+    :func:`woof.hex.mpas_seaice.column_bgc_v842.biogeochemistry`, the
+    vertical and ITD thermodynamics, the ridging, the shortwave and the
+    column step carry the column biogeochemistry's framework and its brine
+    height (``config_use_brine``); every other routine refuses
     ``config_use_column_biogeochemistry``."""
     c = configs
     if not c.get("config_use_column_package", False):
@@ -434,7 +443,8 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
     if c["config_use_column_biogeochemistry"]:
         if not biogeochemistry:
             _refuse("config_use_column_biogeochemistry", True,
-                    "the column biogeochemistry is ported for the init and column_biogeochemistry only",
+                    "the column biogeochemistry is ported for the init, the column stages and the column "
+                    "step only",
                     "config_use_column_biogeochemistry = .false.")
         for flag in _BGC_FLAGS:
             if flag not in BGC_PORTED and c[flag]:

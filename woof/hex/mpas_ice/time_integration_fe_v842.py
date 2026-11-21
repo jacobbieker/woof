@@ -125,6 +125,10 @@ def _check_config(config: dict, precision: str, velocity: dict) -> None:
     for knob in ("config_thickness_advection", "config_tracer_advection"):
         if config[knob] not in ADVECTION:
             raise ValueError(f"{knob} must be one of {ADVECTION}")
+    units = config.get("woof_enthalpy_advection_units", "v842")
+    if units not in advection_v842.ENTHALPY_ADVECTION_UNITS:
+        _refuse("woof_enthalpy_advection_units", units, "not an option of this port",
+                "woof_enthalpy_advection_units = 'v842' | 'corrected'")
     if config.get("config_SGH", False):
         subglacial_hydro_v842.check_config(config, precision)
     if not config.get("config_restore_calving_front", False):
@@ -275,7 +279,8 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
         advection_v842.advect_thickness_tracers(
             mesh=m, geometry=g, velocity=v, thermal=t, dt=deltat,
             advect_tracers=c["config_tracer_advection"] == "fo", config_thickness_advection="fo",
-            config_thermal_solver=c["config_thermal_solver"], **masks)
+            config_thermal_solver=c["config_thermal_solver"],
+            woof_enthalpy_advection_units=c.get("woof_enthalpy_advection_units", "v842"), **masks)
     _function(precision, "li_clamp_thickness_v842")(_grid(n_cells), block, (g["thickness"], np.int32(n_cells)))
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)
     _update_geometry(m, g, c)
