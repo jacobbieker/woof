@@ -255,3 +255,19 @@ def test_a_continuation_writes_the_straight_runs_words(cp):
     assert set(got) == {("%s" % n) for n in written} == set(want)
     for name in written:
         np.testing.assert_array_equal(got[name], want[name], name)
+
+
+def test_the_active_packages_fields_are_produced_before_the_writer_is_built():
+    """streams_output_v842.PhysicsStreams checks the enabled streams' fields against ``produced`` before it binds
+    the diagnostics (test_output_diagnostics_produced)."""
+    from woof.hex.mpasphys import resident_output_diagnostics_v842 as rod
+
+    def produced(packages):
+        session = SimpleNamespace(layout=SimpleNamespace(packages=set(packages), fields=[]),
+                                  device_pools=SimpleNamespace(cp=None))
+        return rod.ResidentOutputDiagnostics(session, dycore=None).produced
+
+    assert produced(()) == rod.PRODUCED
+    ion = produced({"spacewx_ionosphere"})
+    assert {n for n in sw.NAMES if n.startswith("iono_")} <= ion and not {"aurora_zone", "joule_power"} & ion
+    assert set(sw.NAMES) <= produced(set(sw.PACKAGES))
