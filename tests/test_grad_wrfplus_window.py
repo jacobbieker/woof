@@ -183,7 +183,10 @@ def test_window_external_trajectory(backend, tmp_path):
       state after the first supplied state other than the window's own,
       and not before it;
     - the adjoint with forcing is the TL's (1e-12 binary64, 1e-5
-      binary32), and forward returns state N, given or stepped;
+      binary32), and forward returns state N, given or stepped (the own
+      states, N of them, end where the own forward does);
+    - a plain forward afterwards returns to the own TL and adjoint bit
+      for bit, and a refused one leaves the external base in place;
     - a trajectory of the wrong length, or with x0, is refused."""
     dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
     out = _run(backend, f"""
@@ -206,9 +209,10 @@ for dtn in {dtypes!r}:
                 for k in (1, 2, {N}) for n in IN)
             + sum(int((cp.asnumpy(ad_own[n]) != cp.asnumpy(ad_ext[n])).sum()) for n in IN)
             + sum(int((cp.asnumpy(own_end[n]) != cp.asnumpy(end[n])).sum()) for n in IN))
-        # another run: the primal from a perturbed start; state 0 the
-        # window's own, so the TL first moves at state 2
-        other = state
+        # another run: the primal from a perturbed start (its own
+        # DomainState); state 0 the window's own, so the TL first moves
+        # at state 2
+        _, other = build(over, warm)
         other.thp += cp.float32(0.5)
         traj = [own[0]]
         for _ in range({N}):
@@ -220,19 +224,32 @@ for dtn in {dtypes!r}:
         tl = w.tl(dx0, save_at=(1, 2))
         out[f"state1/{{dtn}}/{{i}}"] = sum(
             int((cp.asnumpy(tl[1][n]) != cp.asnumpy(tl_own[1][n])).sum()) for n in IN)
-        out[f"moved/{{dtn}}/{{i}}"] = int(sum(
-            int((cp.asnumpy(tl[2][n]) != cp.asnumpy(tl_own[2][n])).sum()) for n in IN) > 0)
+        # moved by more than roundoff: ||dx_2 - own dx_2|| / ||own dx_2||
+        out[f"moved/{{dtn}}/{{i}}"] = K.norm([tl[2][n] - tl_own[2][n] for n in IN]) / K.norm(
+            [tl_own[2][n] for n in IN])
         a0 = w.ad(None, f)
         ys = sum((flat(tl[k]) for k in sorted(f)), [])
         fs = sum((flat(f[k]) for k in sorted(f)), [])
         out[f"{{dtn}}/{{i}}"] = K.dot_product(lambda _x: ys, lambda _y: flat(a0), flat(dx0), fs,
                                               terms=dtn == "float32")
-        # N states: forward steps the last one with the window's step
-        endn = w.forward(trajectory=traj[:{N}])
-        xw = w._load(traj[{N} - 1])
-        M.step_base(xw, w.geoms[-1], None)
-        out[f"stepped_end/{{dtn}}/{{i}}"] = sum(
-            int((cp.asnumpy(endn[n]) != cp.asnumpy(xw[n])).sum()) for n in IN)
+        # back to the window's own base: the own TL and adjoint, bit for bit
+        back_end = w.forward()
+        tl_b, ad_b = w.tl(dx0, save_at=(1, 2)), w.ad(None, f)
+        out[f"back/{{dtn}}/{{i}}"] = (
+            sum(int((cp.asnumpy(tl_own[k][n]) != cp.asnumpy(tl_b[k][n])).sum())
+                for k in (1, 2, {N}) for n in IN)
+            + sum(int((cp.asnumpy(ad_own[n]) != cp.asnumpy(ad_b[n])).sum()) for n in IN)
+            + sum(int((cp.asnumpy(own_end[n]) != cp.asnumpy(back_end[n])).sum()) for n in IN))
+        # a refused own forward leaves the external base in place
+        w.forward(trajectory=traj)
+        try:
+            w.forward({{n: v for n, v in x0.items() if n in IN and n != "u"}})
+        except ValueError:
+            pass
+        tl_r = w.tl(dx0, save_at=(1, 2))
+        out[f"kept/{{dtn}}/{{i}}"] = sum(
+            int((cp.asnumpy(tl_r[k][n]) != cp.asnumpy(tl[k][n])).sum())
+            for k in (1, 2, {N}) for n in IN)
 cfg, state = build({{}}, 1)
 w = W.Window(state, cfg, {N})
 x = w.trajectory_state(state, cfg)
@@ -247,11 +264,11 @@ for key, kw in (("short", dict(trajectory=[x] * ({N} - 1))),
     assert f"holds {N - 1} states" in out.pop("refuse/short"), out
     assert "not both" in out.pop("refuse/both"), out
     nd = 1 if backend == "mlx" else 2
-    assert len(out) == nd * len(CASES) * 6
+    assert len(out) == nd * len(CASES) * 7
     for key, val in out.items():
         if key.startswith("moved/"):
-            assert val == 1, (key, val)
-        elif key.startswith(("same/", "given_end/", "state1/", "stepped_end/")):
+            assert val > 1e-4, (key, val)
+        elif key.startswith(("same/", "given_end/", "state1/", "back/", "kept/")):
             assert val == 0, (key, val)
         else:
             assert val < (1e-12 if key.startswith("float64") else 1e-5), (key, val)

@@ -180,9 +180,9 @@ class Window:
             if x0 is not None:
                 raise ValueError("forward takes x0 or trajectory, not both")
             return self._use_trajectory(trajectory)
-        self._external = False
         if x0 is not None:
             self._check(x0, "x0")
+        self._external = False
         x = self._load(self._inputs(self._start) if x0 is None else x0)
         self._checkpoints = {}
         for k, g in enumerate(self.geoms):
@@ -203,7 +203,7 @@ class Window:
         self._checkpoints = {k: _copy(self._inputs(st)) for k, st in enumerate(states)}
         self._external = True
         if len(states) > self.nsteps:
-            return _copy(self._checkpoints.pop(self.nsteps))
+            return self._checkpoints.pop(self.nsteps)   # already a copy
         x = self._load(self._checkpoints[self.nsteps - 1])
         self._scratch = M.step_base(x, self.geoms[-1], None, self._scratch)
         return _copy(self._inputs(x))
