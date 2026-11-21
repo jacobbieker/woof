@@ -576,8 +576,8 @@
       },
       "spacewx_epp_opt": {
         "inactive_values": ["0"],
-        "reason": "the solar-proton NOx/HOx source (woof.spacewx.epp_chem) is built and tested on the WRF route's RADM2 chemistry; the hex chemistry route has not been validated with it yet",
-        "follow_up": "spacewx_epp_opt=0 on hex; a WRF domain with chem_sets radm2 for the source, or woof spacewx particles --time ... for the ion-pair rates"
+        "reason": "the solar-proton NOx/HOx source (woof.spacewx.epp_chem) feeds the RADM2 rows, which hex's chemistry config declares; the column physics is judged before those rows join it, so the key is the chemistry config's, not the physics selection's",
+        "follow_up": "drop spacewx_epp_opt from --physics and set \"spacewx_epp_opt\": 1 with \"spacewx_epp_source\" in the --chemistry-config wrf_chem block (chem_sets radm2 or radm2sorg; both hex routes)"
       }
     }
   },

@@ -90,10 +90,29 @@ def test_omni2_paths_join_with_colons_and_expand_the_home(tmp_path, monkeypatch)
         E.parse_source("~/omni2_2012.dat:~/omni2_2013.dat")
 
 
-def test_hex_refuses_it():
+def test_hex_takes_it_in_the_chemistry_config_not_the_physics_selection():
     from woof.hex.physics_suites import PhysicsSelectionRefusal, resolve_physics
-    with pytest.raises(PhysicsSelectionRefusal, match="spacewx_epp_opt"):
+    with pytest.raises(PhysicsSelectionRefusal, match="wrf_chem block"):
         resolve_physics("arwen_mpas_column", {"spacewx_epp_opt": 1}, mesh="x1.40962")
+    from woof.hex import chem_wrf
+    raw = {"schema": "gpuwm-hex.chemistry/v1",
+           "wrf_chem": {"chem_sets": "radm2", "spacewx_epp_opt": 1, "spacewx_epp_source": "swpc"}}
+    name, _table, values = chem_wrf.load_table(raw)
+    assert name == "radm2" and (values["spacewx_epp_opt"], values["spacewx_epp_source"]) == (1, "swpc")
+    assert "spacewx_epp_opt" not in chem_wrf.load_table({"wrf_chem": {"chem_sets": "radm2"}})[2]
+
+
+@pytest.mark.parametrize("block, match", [
+    ({"chem_sets": "radm2", "spacewx_epp_opt": True, "spacewx_epp_source": "swpc"}, "must be 0"),
+    ({"chem_sets": "radm2", "spacewx_epp_source": "omni"}, "would do nothing"),
+    ({"chem_sets": "radm2", "spacewx_epp_opt": 1}, "needs spacewx_epp_source"),
+    ({"chem_sets": "radm2", "spacewx_epp_opt": 1, "spacewx_epp_source": 3}, "must be a string"),
+    ({"chem_opt": 401, "spacewx_epp_opt": 1, "spacewx_epp_source": "swpc"}, "RADM2"),
+])
+def test_hex_wrf_chem_refusals_name_the_breakage(block, match):
+    from woof.hex import chem_wrf
+    with pytest.raises(ValueError, match=match):
+        chem_wrf.load_table({"wrf_chem": block})
 
 
 # --- the held flux ---------------------------------------------------------------------
