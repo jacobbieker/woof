@@ -404,11 +404,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     (the init, the brine height's step, the vertical and ITD
     thermodynamics, the ridging, the column step and the coupled step)
     keeps that word for word, and the correction `zsal_solve` solves it
-    (`compute_microS`, `solve_S_dt`, the salt fluxes, BL99's `dTemp`) in
-    the init, the brine height's step and the vertical thermodynamics,
-    word for word on CUDA and Metal with an oracle built from
-    `zsal_solve.patch`. The other biogeochemistry flags, and `zsal_solve`
-    in the other stages, are refused by name until their phases land;
+    (`compute_microS`, `solve_S_dt`, the salt fluxes, BL99's `dTemp`, and
+    in the ITD and the ridging the new ice's salt loss, `adjust_tracer_profile`,
+    `lateral_melt_bgc` and `zap_small_areas`' salt) in every one of those
+    stages, word for word on CUDA and Metal with an oracle built from
+    `zsal_solve.patch`. The other biogeochemistry flags are refused by
+    name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -1412,7 +1413,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   MHS and ATMS departures fall on columns that were not assimilated as
   well. Against held-out radiosondes the analysis is neutral to slightly
   better without AMVs. With AMVs, upper-level winds are 3-4 % worse
-  (plan 12.8 item 6).
+  (plan 12.8 item 6). The 31-member solve runs on host-staged arrays
+  (`solve_namespace=np`) with 12 forked workers, 237k active points: the
+  transform took 65 s, against 20 minutes in one process at 4 members.
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA

@@ -112,7 +112,7 @@ class CriticalAbort(MpasPortError):
 
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the brine height's port does not carry."""
-    cv.refuse_unported(configs, dims, biogeochemistry=True, zsalinity=True)
+    cv.refuse_unported(configs, dims, biogeochemistry=True)
     if configs["config_use_column_biogeochemistry"] and not configs["config_use_brine"]:
         cv._refuse("config_use_brine", False,
                    "colpkg_biogeochemistry writes brineTopChange and brineBottomChange, which only the brine "
@@ -126,7 +126,13 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
 def module_source(n_ice_layers: int, n_bio_layers: int) -> str:
     body = files("woof.hex.mpas_seaice").joinpath("column_bgc_v842.cu").read_text(encoding="utf-8")
     return (f"#define COL_NILYR {int(n_ice_layers)}\n#define COL_NBLYR {int(n_bio_layers)}\n"
-            + cv.module_source() + "\n" + body)
+            + cv.module_source() + "\n" + zbgc_shared_source() + "\n" + body)
+
+
+def zbgc_shared_source() -> str:
+    """column_zbgc_shared_v842.cu: remap_zbgc and calculate_Tin_from_qin, which
+    the ITD thermodynamics share under ``zsal_solve``."""
+    return files("woof.hex.mpas_seaice").joinpath("column_zbgc_shared_v842.cu").read_text(encoding="utf-8")
 
 
 @lru_cache(maxsize=None)
