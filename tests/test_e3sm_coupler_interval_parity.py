@@ -298,7 +298,7 @@ def test_bad_set_ups_are_refused(glibc239):
 def _oracle_toolchain():
     e3sm, mct = os.environ.get("WOOF_E3SM_V320_SOURCE"), os.environ.get("WOOF_MCT_SOURCE")
     gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
-    if not e3sm or not mct or not gfortran or not Path(e3sm, "driver-mct", "main", "cime_comp_mod.F90").is_file():
+    if not e3sm or not mct or not gfortran or not Path(e3sm, "driver-mct", "main", "prep_ocn_mod.F90").is_file():
         return None
     return gfortran, Path(e3sm), Path(mct)
 
