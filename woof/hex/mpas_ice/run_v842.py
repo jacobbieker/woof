@@ -184,7 +184,7 @@ def read_input(path, *, config: dict, precision: str) -> tuple[dict, dict]:
         mesh_config = {"on_a_sphere": _truth(_attribute(ds, "on_a_sphere", "NO")),
                        "sphere_radius": float(_attribute(ds, "sphere_radius", 0.0))}
         pools: dict[str, dict] = {p: {} for p in POOLS}
-        for pool, name, kind, shape in fo.FIELDS:
+        for pool, name, kind, shape in fo.fields_for(config):
             if kind == "d":
                 continue
             size = tuple(dims[s] if isinstance(s, str) else s for s in shape)
@@ -205,6 +205,7 @@ def read_input(path, *, config: dict, precision: str) -> tuple[dict, dict]:
                 value = np.ascontiguousarray(value, dtype)
             pools[pool][name] = value
         missing = [n for n in RECONSTRUCTION if n not in ds.variables]
+        simple_missing = [n for n in ("xEdge", "yEdge") if n not in ds.variables]
     if precision == "r8" and not rkind.trig64():
         # the strain-rate angle calls glibc's binary64 atan (LGPL): left out at
         # RKIND 8 unless WOOF_GLIBC239_LIBM64=1
@@ -216,6 +217,11 @@ def read_input(path, *, config: dict, precision: str) -> tuple[dict, dict]:
                     "takes edgeNormalVectors and coeffs_reconstruct from its input"),
             declaration="an input file carrying edgeNormalVectors and coeffs_reconstruct (MPAS writes both "
                         "to its output and restart streams)")
+    if config.get("config_velocity_solver") == "simple" and simple_missing:
+        raise ConfigurationRefusal(
+            knob="input." + simple_missing[0], value="absent",
+            reason="config_velocity_solver = 'simple' forms its prescribed velocity from the edge points",
+            declaration="an MPAS mesh with xEdge and yEdge")
     return pools, mesh_config
 
 
@@ -228,7 +234,7 @@ def device_pools(pools: dict) -> dict:
             for pool, fields in pools.items()}
 
 
-def write_output(path, *, pools: dict, clock: forward_v842.Clock) -> None:
+def write_output(path, *, pools: dict, clock: forward_v842.Clock, config: dict | None = None) -> None:
     """The state of every non-scratch field, one ``Time`` record, by Registry name."""
     import cupy as cp
     import netCDF4
@@ -250,7 +256,7 @@ def write_output(path, *, pools: dict, clock: forward_v842.Clock) -> None:
             ds.createDimension(f"R{extent}", extent)
         ds.setncattr("model", "woof hex ice (MALI v8.4.2 forward mode)")
         ds.setncattr("clock_now", clock.time_stamp)
-        for pool, name, kind, shape in fo.FIELDS:
+        for pool, name, kind, shape in fo.fields_for(config or {}):
             if kind == "d" or pool == "scratch" or "@" in name or name not in pools.get(pool, {}):
                 continue
             value = pools[pool][name]
@@ -285,7 +291,7 @@ def run(*, namelist, input=None, out, precision: str | None = None, restart=None
         clock = forward_v842.cold_start(pools=pools, config=config)
         forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps)
     out.mkdir(parents=True, exist_ok=True)
-    write_output(out / "output.nc", pools=pools, clock=clock)
+    write_output(out / "output.nc", pools=pools, clock=clock, config=config)
     forward_v842.write_restart(out / "restart.npz", pools=pools, clock=clock)
     _save_mesh_config(out / "restart.npz", config)
     return clock

@@ -14,8 +14,10 @@
    :mod:`~woof.hex.mpas_ice.subglacial_hydro_v842`, with ``config_SGH``), then
    ``li_calve_ice`` or ``li_restore_calving_front``
    (:mod:`~woof.hex.mpas_ice.calving_v842`);
-5. ``li_velocity_solve`` for 'sia' and 'none': the masks and geometry, the
-   normal surface slope, ``li_sia_solve``, the uphill-margin cleanup,
+5. ``li_velocity_solve`` for 'sia', 'simple' and 'none': the masks and
+   geometry, the normal surface slope, ``li_sia_solve`` (or 'simple''s
+   prescribed ``normalVelocityInitial``,
+   :mod:`~woof.hex.mpas_ice.velocity_simple_v842`), the uphill-margin cleanup,
    ``mpas_reconstruct``, the speeds, ``calculate_strain_rates`` and
    ``remove_fast_ice``;
 6. ``li_calculate_diagnostic_vars``: the pressure melting point, ``dHdt``
@@ -61,12 +63,13 @@ from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
 from . import (advection_v842, calving_v842, geometry_v842, rkind, sia_v842, subglacial_hydro_v842,
-               thermal_init_v842, thermal_solver_v842)
+               thermal_init_v842, thermal_solver_v842, velocity_simple_v842)
 
 SOURCE_FILES = (
     "src/core_landice/mode_forward/mpas_li_time_integration_fe.F:75-952",
     "src/core_landice/mode_forward/mpas_li_diagnostic_vars.F:78-338",
     "src/core_landice/mode_forward/mpas_li_velocity.F:224-666,879-984",
+    "src/core_landice/mode_forward/mpas_li_velocity_simple.F:66-628",
     "src/core_landice/shared/mpas_li_setup.F:626-739",
     "src/operators/mpas_vector_reconstruction.F:205-339,489-588",
 )
@@ -74,7 +77,7 @@ COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false",
                    "--prec-div=true", "--prec-sqrt=true")
 MODULE_OPTIONS = COMPILE_OPTIONS
 MATH_HEADERS_R4 = ("glibc_trig_flt32.cuh",)
-VELOCITY_SOLVERS = ("sia", "none")
+VELOCITY_SOLVERS = ("sia", "simple", "none")
 ADVECTION = ("fo", "none")
 _BLOCK = 128
 
@@ -119,9 +122,10 @@ def _refuse(knob: str, value, reason: str, declaration: str):
 def _check_config(config: dict, precision: str, velocity: dict) -> None:
     if config["config_velocity_solver"] not in VELOCITY_SOLVERS:
         sia_v842.require_velocity_solver(config["config_velocity_solver"])
-        _refuse("config_velocity_solver", config["config_velocity_solver"],
-                "'simple' needs the Dirichlet velocity mask the ported masks do not carry",
-                "config_velocity_solver = 'sia' | 'none'")
+        _refuse("config_velocity_solver", config["config_velocity_solver"], "not a velocity solver of this port",
+                "config_velocity_solver = 'sia' | 'simple' | 'none'")
+    if config["config_velocity_solver"] == "simple":
+        velocity_simple_v842.require_fields(velocity=velocity)
     for knob in ("config_thickness_advection", "config_tracer_advection"):
         if config[knob] not in ADVECTION:
             raise ValueError(f"{knob} must be one of {ADVECTION}")
@@ -302,8 +306,9 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
 
 
 def velocity_solve(*, mesh: dict, geometry: dict, thermal: dict, velocity: dict, config: dict) -> None:
-    """``li_velocity_solve`` (solveVelo) for 'sia' and 'none', in place: the
-    masks and geometry, the normal surface slope, ``li_sia_solve``, the
+    """``li_velocity_solve`` (solveVelo) for 'sia', 'simple' and 'none', in
+    place: the masks and geometry, the normal surface slope, ``li_sia_solve``
+    (or 'simple''s ``normalVelocityInitial`` on the dynamic edges), the
     uphill-margin cleanup, ``mpas_reconstruct``, the speeds,
     ``calculate_strain_rates`` and ``remove_fast_ice``."""
     m, g, t, v, c = mesh, geometry, thermal, velocity, config
@@ -331,10 +336,12 @@ def velocity_solve(*, mesh: dict, geometry: dict, thermal: dict, velocity: dict,
             config_default_flowParamA=c["config_default_flowParamA"],
             config_flowParamA_calculation=c["config_flowParamA_calculation"],
             config_sia_tangent_slope_calculation=c["config_sia_tangent_slope_calculation"])
+    elif solver == "simple":
+        velocity_simple_v842.solve(velocity=v, edge_mask=g["edgeMask"], n_edges_solve=nes)
     _function(precision, "li_uphill_margin_v842")(_grid(nes), block, (
         v["normalVelocity"], g["edgeMask"], g["cellMask"], g["upperSurface"], m["cellsOnEdge"], np.int32(nes),
         np.int32(nvi)))
-    if solver == "sia":
+    if solver in ("sia", "simple"):
         _function(precision, "li_reconstruct_2d_v842")(_grid(ncs), block, (
             v["uReconstructX"], v["uReconstructY"], v["uReconstructZ"], v["uReconstructZonal"],
             v["uReconstructMeridional"], v["normalVelocity"], m["coeffs_reconstruct"], m["nEdgesOnCell"],

@@ -11,7 +11,9 @@
   tracers), ``xtime``, ``simulationStartTime``, ``daysSinceStart`` and
   ``deltat``; ``landice_init_block``: the second time level of ``vertexMask``
   cleared, ``li_setup_vertical_grid``, ``li_setup_sign_and_index_fields``,
-  ``li_sia_block_init``'s barycentric weights (``from_vertex_barycentric``),
+  ``li_velocity_block_init`` (``li_sia_block_init``'s barycentric weights
+  with ``from_vertex_barycentric``, or 'simple''s prescribed velocity,
+  :mod:`~woof.hex.mpas_ice.velocity_simple_v842`),
   ``li_calculate_mask_init`` and ``thicknessOld``; ``li_thermal_init``
   (:mod:`~woof.hex.mpas_ice.thermal_init_v842`) and ``li_SGH_init``;
 - ``li_core_initial_solve``: the masks and geometry, ``li_velocity_solve``
@@ -43,7 +45,9 @@ or no ice below sea level, but at that point the mask carries only
 level is given the ocean's pressure as well. 'v842' (the default) keeps the
 model's words; 'corrected' computes ``li_calculate_mask`` first. The
 advection's enthalpy units have one too (``woof_enthalpy_advection_units``,
-:mod:`woof.hex.mpas_ice.advection_v842`).
+:mod:`woof.hex.mpas_ice.advection_v842`), and so does the 'simple' velocity
+solver's circular-shelf bed (``woof_simple_velocity_bed``,
+:mod:`woof.hex.mpas_ice.velocity_simple_v842`).
 
 Refused by name, beyond what the step refuses: a restart start
 (``config_do_restart``; :func:`read_restart` is this port's restart),
@@ -66,7 +70,7 @@ from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ocean.forward_v842 import calendar_of, format_time, parse_time
 
-from . import geometry_v842, rkind, subglacial_hydro_v842, thermal_init_v842
+from . import geometry_v842, rkind, subglacial_hydro_v842, thermal_init_v842, velocity_simple_v842
 from . import time_integration_fe_v842 as fe
 
 SOURCE_FILES = (
@@ -75,6 +79,7 @@ SOURCE_FILES = (
     "src/core_landice/shared/mpas_li_setup.F:84-330",
     "src/core_landice/shared/mpas_li_mask.F:172-223",
     "src/core_landice/mode_forward/mpas_li_sia.F:126-211",
+    "src/core_landice/mode_forward/mpas_li_velocity.F:157-208",
     "src/core_landice/mode_forward/mpas_li_subglacial_hydro.F:75-191,1281-1361",
     "src/operators/mpas_geometry_utils.F:203-236,311-372,423-637,710-749",
     "src/operators/mpas_vector_operations.F:79-121",
@@ -507,6 +512,9 @@ def cold_start(*, pools: dict, config: dict) -> Clock:
             _refuse(name, "missing" if name not in m else "all zero",
                     "mpas_rbf_interp_initialize and mpas_init_reconstruct are not ported: the mesh must carry them",
                     f"a mesh pool with {name} (MPAS writes it to its output and restart streams)")
+    if config["config_velocity_solver"] == "simple":
+        velocity_simple_v842.require_fields(mesh=m, velocity=v)
+        velocity_simple_v842.check_config(config)
     config = setup_config_options(config)
     clock = clock_init(config)
     n_cells, n_levels = g["layerThickness"].shape
@@ -536,6 +544,8 @@ def cold_start(*, pools: dict, config: dict) -> Clock:
         cells, weights = barycentric_weights(bary_mesh, real)
         m["baryCellsOnVertex"][...] = cp.asarray(cells)
         m["baryWeightsOnVertex"][...] = cp.asarray(weights)
+    elif config["config_velocity_solver"] == "simple":
+        velocity_simple_v842.block_init(mesh=m, geometry=g, velocity=v, config=config)
     _function(precision, "li_mask_init_v842")(_grid(n_cells), (_BLOCK,), (g["cellMask"], g["thickness"],
                                                                           np.int32(n_cells)))
     g["thicknessOld"][...] = g["thickness"]

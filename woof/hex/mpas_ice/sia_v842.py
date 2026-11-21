@@ -20,7 +20,8 @@ Refused by name:
 
 - ``config_velocity_solver`` other than 'sia'. 'FO', 'L1L2' and 'Stokes' are
   the external Albany/Trilinos dycores (``Interface_velocity_solver.cpp``),
-  which have no pinned reference; 'simple' and 'none' are not ported.
+  which have no pinned reference; 'simple' and 'none' are not this unit's
+  (the forward-Euler step runs them, :mod:`~woof.hex.mpas_ice.time_integration_fe_v842`).
 
 Arrays are device float32 (RKIND 4) or float64 (RKIND 8), int32 for
 connectivity and masks, in the Fortran

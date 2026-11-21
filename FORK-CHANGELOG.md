@@ -37,6 +37,13 @@ New:
   moist buoyancy (`moist_mode` 1). Each is checked against woof's strict
   primal word for word in binary32. They are not yet bound into the
   step. The forecast path is unchanged.
+- The WRF dry-step adjoint's window (`woof.grad.wrfplus.window.Window`)
+  can linearise about a supplied trajectory, as WRFPLUS does about the
+  nonlinear run's states: `forward(trajectory=states)` takes the state
+  each step starts from (a woof forecast with physics through
+  `trajectory_state`, or WRF's own), and `tl`/`ad` linearise step k about
+  `states[k]` instead of the window's own dry rerun. The forecast path is
+  unchanged.
 
 - The WRF dry-step tangent-linear and adjoint (`woof.grad.wrfplus.model`
   and `window.Window`) now cover specified lateral boundaries, which
