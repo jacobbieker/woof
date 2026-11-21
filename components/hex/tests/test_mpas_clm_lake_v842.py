@@ -425,3 +425,36 @@ def test_the_service_receipt_is_published():
     import inspect
     from woof.hex.mpasphys import runtime_v842
     assert "receipt['clm_lake_service'] = lake_receipt" in inspect.getsource(runtime_v842._run_native_dynamics)
+
+
+def test_the_resident_lake_is_the_regathering_lake_word_for_word():
+    """The service keeps the lake's work copy resident between calls; re-gathering it from the horizontal
+    array every call (WRF's door, the earlier R2 service) gives the same words, and an external write to
+    the array followed by invalidate_columns() is picked up by the resident copy."""
+    import cupy as cp
+    from woof.hex.mpasphys.clm_lake_v842 import lake_init_step
+    call = SimpleNamespace(dt=60.0, options={"config_microp_scheme": "mp_thompson",
+                                             "config_convection_scheme": "cu_ntiedtke"})
+    runs = []
+    for resident in (True, False):
+        provider = _Provider(cp, np.random.default_rng(5))
+        columns = lake_init_step(provider, call)
+        assert columns.model.resident is True
+        columns.model.resident = resident
+        runs.append((provider, columns))
+    for index in range(5):
+        for provider, columns in runs:
+            provider.refresh()
+            columns.step(provider, call)
+        if index == 2:
+            for provider, columns in runs:
+                pool = columns.fields["lake_columns"]
+                pool[3, :NC] = pool[3, :NC] + cp.float32(0.25)
+                columns.model.invalidate_columns()
+        (a, ca), (b, cb) = runs
+        np.testing.assert_array_equal(_words(_host(cp, ca.fields["lake_columns"])),
+                                      _words(_host(cp, cb.fields["lake_columns"])), err_msg=f"call {index}")
+        for pool, name in OUTPUT_FIELDS:
+            np.testing.assert_array_equal(_words(_host(cp, getattr(a, {"diag_physics": "diag", "sfc_input": "sfc"}[pool])[name])),
+                                          _words(_host(cp, getattr(b, {"diag_physics": "diag", "sfc_input": "sfc"}[pool])[name])),
+                                          err_msg=f"call {index}: {name}")

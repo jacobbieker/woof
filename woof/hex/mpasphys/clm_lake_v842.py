@@ -259,6 +259,14 @@ def _owned(cp, array, nc):
     return cp.array(cp.asarray(array)[:nc], copy=True)
 
 
+def _owned_view(cp, array, nc):
+    """The owned cells of a pool vector, in place: writes through to the pool."""
+    view = cp.asarray(array)[:nc]
+    if view.shape != (nc,) or not view.flags.c_contiguous:
+        raise ValueError("a pool vector must be a contiguous owned-cell prefix the lake can write in place")
+    return view
+
+
 def _surface(cp, array, nc):
     return cp.ascontiguousarray(cp.asarray(array, dtype=cp.float32)[:nc])
 
@@ -311,6 +319,9 @@ class LakeColumns:
             fields, latitude=latitude, lake_depth=cp.asarray(self.statics["lake_depth"]),
             lake_depth_flag=int(self.statics["lake_depth_flag"]), use_lakedepth=USE_LAKEDEPTH,
             lakedepth_default=LAKEDEPTH_DEFAULT, iswater=iswater, xice_threshold=threshold)
+        # R2 steps the lake from this service alone (restart, moving regions and rank tiles are refused), so
+        # the lake's work copy of its columns stays resident between calls instead of being re-gathered.
+        self.model.resident = True
         for name in CONVERTED:
             target = sfc[name]
             target[:nc] = fields[name]
@@ -327,15 +338,17 @@ class LakeColumns:
         cp = self.cp
         diag = provider["diag_physics"]
         at = self.lake_indices
-        take = lambda a: cp.asnumpy(cp.asarray(a, dtype=cp.float32)[:self.nc][at])
+        # On the device, float32 throughout: the same IEEE divide and adds the host numpy words were (the
+        # test pins every word), with no host round trip of the lake cells.
+        take = lambda a: cp.asarray(a, dtype=cp.float32)[:self.nc][at]
         swdown = take(diag["gsw"]) / (F(1.0) - take(diag["sfc_albedo"]))
-        rain = np.zeros(self.column_count, F)
+        rain = cp.zeros(self.column_count, cp.float32)
         if call.options["config_microp_scheme"] != "off":
             rain = rain + take(diag["rainncv"])
         if call.options["config_convection_scheme"] != "off":
             rain = rain + take(diag["raincv"])
-        self._swdown[self.lake_indices] = cp.asarray(swdown.astype(F))
-        self._rain[self.lake_indices] = cp.asarray(rain.astype(F))
+        self._swdown[at] = swdown
+        self._rain[at] = rain
         return self._swdown, self._rain
 
     def step(self, provider, call):
@@ -350,19 +363,20 @@ class LakeColumns:
         pools = {"diag_physics": diag, "sfc_input": provider["sfc_input"]}
 
         def levels(name, count):
-            return cp.ascontiguousarray(cp.asarray(prepared[name], dtype=cp.float32)[:count, :nc])
+            # A view: the lake gathers its own cells from row 0 (and 1), so no copy of the row block.
+            return cp.asarray(prepared[name], dtype=cp.float32)[:count, :nc]
         atmosphere = {"temperature": levels("t_p", 1), "p_interface": levels("pres2_hyd_p", 2),
                       "dz": levels("dz_p", 1), "qv": levels("qv_p", 1),
                       "u": levels("u_p", 1), "v": levels("v_p", 1)}
         swdown, rain = self.forcing(provider, call)
         fields = dict(self.fields, glw=_surface(cp, diag["glw"], nc),
                       emiss=_surface(cp, diag["sfc_emiss"], nc), swdown=swdown)
+        # The lake reads and writes only its own cells (LakeModel.step gathers and scatters through its
+        # indices, after check_errors), so the owned-cell pool vectors go in as views: no per-field copy in,
+        # no write-back of the unchanged land cells out.  albedo is read (gathered) before it is written.
         for name, pool, source in OUTPUTS:
-            fields[name] = _owned(cp, pools[pool][source], nc)
+            fields[name] = _owned_view(cp, pools[pool][source], nc)
         self.model.step(fields, atmosphere, dt=float(call.dt), precipitation=rain)
-        for name, pool, source in OUTPUTS:
-            target = pools[pool][source]
-            target[:nc] = fields[name]
         self.steps += 1
         return fields
 
