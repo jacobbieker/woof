@@ -2,7 +2,8 @@
 //
 //   calc_p_rho_phi   woof calc_p_alpha / calc_p_alpha_carried_muts
 //                    (woof/core/kernels/diagnostics.cu, strict
-//                    wrf_p_rho_phi_column), dry, hypsometric_opt 1 or 2;
+//                    wrf_p_rho_phi_column), hypsometric_opt 1 or 2, dry
+//                    or moist (qv through WRF's qvf = 1 + rvovrd qv);
 //   rk_step_prep     woof stage_fluxes: couple_momentum on calc_mu_uv's
 //                    face masses (ru, rv) and calc_ww_cp on its own face
 //                    masses (ww), woof/core/dycore.py + ieva.py;
@@ -81,7 +82,7 @@ static __device__ __forceinline__ int rk_face(int q, int p, int n, int bnd)
 // ====================================================== calc_p_rho_phi
 
 #define PRP_GEOM int nz, int ny, int nx, int hypso, int base3d, int carried, \
-    wreal p_top
+    wreal p_top, int moist, wreal rvovrd
 
 #define PRP_STATE(s)                                                        \
     wreal* __restrict__ p##s, wreal* __restrict__ al##s,                   \
@@ -107,6 +108,7 @@ static __device__ __forceinline__ int rk_face(int q, int p, int n, int bnd)
 // d != 0 also the tangent.  Writes p, al, alt, p_pp (and their tangents).
 extern "C" __global__
 void calc_p_rho_phi_tl(PRP_STATE(), PRP_STATE(_d), PRP_ACTIVE(), PRP_ACTIVE(_d),
+                       const wreal* __restrict__ qv, const wreal* __restrict__ qv_d,
                        PRP_PASSIVE, int nl, PRP_GEOM)
 {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
@@ -144,11 +146,19 @@ void calc_p_rho_phi_tl(PRP_STATE(), PRP_STATE(_d), PRP_ACTIVE(), PRP_ACTIVE(_d),
             ap_d = inv_d * s + inv * s_d;
         }
         wreal a = ap + alb[b];
-        wreal num = RK_RD * ((wreal)300.0 + thp[h]);
+        wreal theta = (wreal)300.0 + thp[h];
+        wreal num = RK_RD * theta;
+        // moist: numerator * qvf (calc_p_rho_phi's qvf = 1 + rvovrd qv)
+        wreal qvf = moist ? (wreal)1.0 + rvovrd * qv[h] : (wreal)1.0;
+        wreal num_d = RK_RD * thp_d[h];
+        if (moist) {
+            num_d = num_d * qvf + num * (rvovrd * qv_d[h]);
+            num = num * qvf;
+        }
         wreal r = num / (RK_P0 * a);
         wreal pw = wpow(r, RK_GAMMA);
         wreal pp = pw * RK_P0 - pb[b];
-        wreal r_d = (RK_RD * thp_d[h] - r * RK_P0 * ap_d) / (RK_P0 * a);
+        wreal r_d = (num_d - r * RK_P0 * ap_d) / (RK_P0 * a);
         wreal pp_d = RK_P0 * RK_GAMMA * pw / r * r_d;
         if (WRFPLUS_TL) alt_d[h] = ap_d;
         if (WRFPLUS_TL) al_d[h] = ap_d;
@@ -167,8 +177,9 @@ void calc_p_rho_phi_tl(PRP_STATE(), PRP_STATE(_d), PRP_ACTIVE(), PRP_ACTIVE(_d),
 // adjoints; adds into thp, php (own column), mup and muts (or mup when
 // not carried).
 extern "C" __global__
-void calc_p_rho_phi_ad(PRP_STATE(_a), PRP_ACTIVE(), PRP_ADJ, PRP_PASSIVE,
-                       PRP_GEOM)
+void calc_p_rho_phi_ad(PRP_STATE(_a), PRP_ACTIVE(), PRP_ADJ,
+                       const wreal* __restrict__ qv, wreal* __restrict__ qv_a,
+                       PRP_PASSIVE, PRP_GEOM)
 {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= ny * nx) return;
@@ -198,13 +209,16 @@ void calc_p_rho_phi_ad(PRP_STATE(_a), PRP_ACTIVE(), PRP_ADJ, PRP_PASSIVE,
         }
         wreal a = ap + alb[b];
         wreal ra = (wreal)1.0 / (RK_P0 * a);
-        wreal r = RK_RD * ((wreal)300.0 + thp[h]) * ra;
+        wreal theta = (wreal)300.0 + thp[h];
+        wreal qvf = moist ? (wreal)1.0 + rvovrd * qv[h] : (wreal)1.0;
+        wreal r = RK_RD * theta * qvf * ra;
         wreal pw = wpow(r, RK_GAMMA);
 
         wreal a_pp = p_a[h] + p_pp_a[h];
         p_a[h] = 0; p_pp_a[h] = 0;
         wreal a_r = a_pp * RK_P0 * RK_GAMMA * pw / r;
-        thp_a[h] += a_r * RK_RD * ra;
+        thp_a[h] += a_r * RK_RD * qvf * ra;
+        if (moist) qv_a[h] += a_r * RK_RD * theta * rvovrd * ra;
         wreal a_ap = al_a[h] + alt_a[h] - a_r * r * RK_P0 * ra;
         al_a[h] = 0; alt_a[h] = 0;
         wreal a_dphp;

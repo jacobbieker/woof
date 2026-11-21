@@ -17,7 +17,7 @@ from .stage import (AT_ACTIVE, AT_ALIAS, AT_PASSIVE, AT_STATE, PRP_ACTIVE,
                     PRP_ALIAS, PRP_PASSIVE, PRP_STATE, RSP_ACTIVE, RSP_ALIAS,
                     RSP_PASSIVE, RSP_STATE, ATGeometry, PRPGeometry,
                     RSPGeometry, StageGeometry, SWGeometry, at_shapes,
-                    prp_shapes, rsp_shapes, sw_shapes)
+                    prp_active, prp_shapes, rsp_shapes, sw_shapes)
 
 # (centre, spread) per field, roughly a mid-latitude 1-3 km grid.
 _UV_SCALES = {
@@ -378,7 +378,7 @@ _RK_SCALES = {
     "w": (0.0, 1.0), "h_diabatic": (0.0, 1e-3),
     "p": (8.0e4, 1e4), "al": (0.0, 1e-3), "alt": (1.0, 0.2),
     "p_pp": (0.0, 50.0), "ru": (0.0, 4e5), "rv": (0.0, 4e5),
-    "ww": (0.0, 10.0),
+    "ww": (0.0, 10.0), "qv": (8e-3, 1e-3),
     "ru_t": (0.0, 50.0), "rv_t": (0.0, 50.0), "rw_t": (0.0, 5.0),
     "rph_t": (0.0, 50.0), "rth_t": (0.0, 50.0), "rmu_t": (0.0, 0.5),
     "ru_tf": (0.0, 50.0), "rv_tf": (0.0, 50.0), "rw_tf": (0.0, 5.0),
@@ -440,6 +440,9 @@ def prp_trajectory(geom: PRPGeometry, seed: int, dtype=np.float64, *,
         c, s = _RK_SCALES[n]
         out[n] = c + s * rng.standard_normal(sh[n])
     keep = PRP_STATE + PRP_ACTIVE + PRP_PASSIVE
+    if geom.moist:
+        out["qv"] = np.abs(8e-3 + 3e-3 * rng.standard_normal(sh["qv"]))
+        keep += ("qv",)
     return {k: np.ascontiguousarray(out[k], dtype=dtype) for k in keep}
 
 
@@ -457,8 +460,13 @@ def _rk_perturbation(names, shapes, seed, dtype):
 
 
 def prp_perturbation(geom: PRPGeometry, seed: int, dtype=np.float64) -> dict:
-    return _rk_perturbation(PRP_STATE + PRP_ACTIVE, prp_shapes(geom), seed,
+    return _rk_perturbation(PRP_STATE + prp_active(geom), prp_shapes(geom), seed,
                             dtype)
+
+
+def prpm_geometry(nz=7, ny=8, nx=9, **overrides) -> PRPGeometry:
+    """The moist diagnosis (qv active)."""
+    return prp_geometry(nz, ny, nx, **dict(overrides, moist=1))
 
 
 def rsp_geometry(nz=7, ny=8, nx=9, **overrides) -> RSPGeometry:
