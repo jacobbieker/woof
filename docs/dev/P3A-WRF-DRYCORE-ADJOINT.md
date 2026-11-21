@@ -291,8 +291,8 @@ Each step is one small PR, taken to merged before the next widens.
      transpose of its TL. The oracle leaves those levels out there. The
      dot-product test holds woof's AD to woof's TL, which matches WRFPLUS's
      TL.
-   - Not covered: the moist cqu/cqv/cqw factors, the hydrostatic option
-     and a 1-D base state.
+   - Not covered: the hydrostatic option and a 1-D base state. The moist
+     cqu/cqv/cqw factors came with DA item 4 (8h).
    - `rhs_ph` is done in the same module (`geo_tl`, `geo_ad`). It covers
      woof's strict `slow_geopotential_open` (3-D base, vertical term on,
      no supplied face masses) for `h_sca_adv_order` 2-6 and 0, on periodic,
@@ -699,6 +699,41 @@ Each step is one small PR, taken to merged before the next widens.
      prognostic differ, so the test pins the choice.
    - Still refused: lateral boundaries other than periodic (specified
      boundaries next), so WRFDA's regional tutorial case cannot run yet.
+8h. Moisture, part 1 (DA item 4): the big-step pieces that take the moist
+   species. Not bound in the step yet; `step_geometry` still refuses
+   moisture.
+   - `cq_tl`/`cq_ad` (`CQGeometry`, `n_mass` 1 or 3): WRF `calc_cq` on
+     woof's strict primal. cqu, cqv and cqw are `1/(1 + 0.5 qtot)` over
+     each face's pair, qtot summed species by species in the primal's
+     order. cqw is 1 at levels 0 and nz. With `n_mass` 1 qv alone is read,
+     and with 3 qv, qc and qr. The primal overwrites cq, so the AD
+     consumes the cq adjoints and zeroes them. The AD is a gather: each
+     mass cell collects the u and v faces that pair it (the periodic end
+     face included, once) and the interior w levels above and below.
+   - The pressure gradient with `PGFGeometry.moist_cq`: cqu and cqv are
+     active and multiply the face term, as woof's `slow_pgf` does with
+     `use_cq` (WRF `horizontal_pressure_gradient`'s `cqu`/`cqv`).
+   - The buoyancy with `BuoyGeometry.moist` (the primal's moist_mode 1):
+     qv, qc and qr are active through WRF's cqw, formed from the strict
+     `wrf_cqw_pair` sum. The `cqw * cq1` mass-loading term reads the base
+     mass `c1f mub + c2f`. The derivative with respect to cqw is
+     `-cq1^2 (P + base_mass)`, where P is the bracket before its cq1
+     factor. The moist buoyancy needs nz >= 2, because the top's pair
+     reads level nz-2. The ice species (moist_mode 2-3, `n_mass` 6-7) are
+     refused.
+   - Tests (`tests/test_grad_wrfplus_bigstep.py`, ops `pgfm`, `buoym` and
+     `cq`):
+     - dot-product (1e-12 binary64, 1e-5 binary32);
+     - the AD adds into its inputs, and the cq adjoints are zeroed;
+     - FD convergence;
+     - the binary32 base gives the primal's words for `slow_pgf` with
+       cq, `slow_buoyancy` moist_mode 1 and `calc_cq` (n_mass 1 and 3).
+       The pgf check also confirms that cq changes the tendency.
+     There is no WRFPLUS fixture for the moist cases yet. The dry cases
+     still match the old fixtures.
+   - Still to come for item 4: the moist diagnosis (`calc_p_rho` and
+     `al`/`alt` with qv), moist scalar advection and update, the moist
+     LBC rows, and the step binding.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 

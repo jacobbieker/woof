@@ -31,6 +31,13 @@ fork already had, upstream's keys and flags are now the only ones:
 
 New:
 
+- The WRF dry-step adjoint (`woof.grad.wrfplus`) gains its first moist
+  pieces, for WRFDA's moisture control: the TL/AD of `calc_cq` (qv, or
+  qv, qc and qr), of the pressure gradient's cqu/cqv factor, and of the
+  moist buoyancy (`moist_mode` 1). Each is checked against woof's strict
+  primal word for word in binary32. They are not yet bound into the
+  step. The forecast path is unchanged.
+
 - Noah-MP is recorded as following WRF 4.7.1's Noah-MP submodule (e5c0859),
   at the user's request. No forecast answer changes, because the default
   already computes what e5c0859 computes. Of e5c0859's edits to the code
