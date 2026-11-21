@@ -2361,7 +2361,9 @@ class RunConfig:
     # number in [0, 9], held for the run.  spacewx_aurora_opt = 2 adds
     # OVATION Prime 2010's electron energy flux, mean energy and ion energy
     # flux (woof.spacewx.ovation), driven by the solar wind ("omni" or
-    # "swpc").  0 runs no new code.
+    # "swpc").  spacewx_aurora_opt = 3 also adds Knipp et al. 2004's
+    # northern-hemisphere Joule power from OMNI2's PC(N) and Dst ("omni"
+    # only), held from the start.  0 runs no new code.
     spacewx_aurora_opt: int = _config_field(default=0, kw_only=True)
     spacewx_kp_source: str = _config_field(default="", kw_only=True)
     # solar_ssi_opt = 1 moves the solar source between RRTMG SW's 14 bands
@@ -2516,11 +2518,11 @@ def _validate_spacewx_ionosphere(cfg) -> None:
 def _validate_spacewx_aurora(cfg) -> None:
     """spacewx_aurora_opt and its key (woof.spacewx.aurora_history)."""
     opt, source = cfg.spacewx_aurora_opt, cfg.spacewx_kp_source
-    if type(opt) is not int or opt not in (0, 1, 2):
+    if type(opt) is not int or opt not in (0, 1, 2, 3):
         raise ConfigurationRefused(
             f"spacewx_aurora_opt={opt!r} must be 0 (no aurora), 1 (the auroral "
-            "oval in every history frame) or 2 (the oval and its particle "
-            "energy flux)")
+            "oval in every history frame), 2 (the oval and its particle "
+            "energy flux) or 3 (those and the Joule power)")
     if type(source) is not str:
         raise ConfigurationRefused("spacewx_kp_source must be a string")
     if opt == 0:
@@ -2534,6 +2536,10 @@ def _validate_spacewx_aurora(cfg) -> None:
         kind, _value = parse_kp_source(source)
     except AuroraHistoryError as exc:
         raise ConfigurationRefused(str(exc)) from None
+    if opt == 3 and kind != "omni":
+        raise ConfigurationRefused(
+            f"spacewx_aurora_opt = 3 reads PC(N) and Dst, which only OMNI2 carries, so "
+            f"spacewx_kp_source must be 'omni', not {source!r}")
     if opt == 2 and kind not in ("omni", "swpc"):
         raise ConfigurationRefused(
             f"spacewx_aurora_opt = 2 drives OVATION Prime with the solar wind, so "
