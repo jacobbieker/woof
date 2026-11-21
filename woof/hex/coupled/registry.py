@@ -31,11 +31,15 @@ _COMPONENTS: dict[str, tuple[str, str, str]] = {
     "atmosphere": ("core_atmosphere", "ported", "hex"),
     "ocean": ("core_ocean", "stub", "ocean"),
     "seaice": ("core_seaice", "stub", "seaice"),
-    "landice": ("core_landice", "partial", "ice"),
+    "landice": ("core_landice", "ported_subset", "ice"),
 }
 
 #: component -> the schemes a ``ported_subset`` component can run in a coupled step
-_SUBSETS: dict[str, tuple[str, ...]] = {}
+_SUBSETS: dict[str, tuple[str, ...]] = {
+    # MALI v8.4.2: the forward mode with these velocity solvers ('simple' is
+    # next; Albany's FO/L1L2/Stokes are refused by name)
+    "landice": ("sia", "none"),
+}
 
 
 @dataclass(frozen=True)
