@@ -110,6 +110,8 @@ BGC_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_brine_carry"
 BGC_ZSAL_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal"
 #: the vertical salinity under zsal_solve (BGC_ZSAL_SOLVE_CASES), from the patched oracle
 BGC_ZSAL_SOLVE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_solve"
+#: the inert vertical salinity through the ITD, the ridging and the steps (BGC_ZSAL_CARRY_CASES)
+BGC_ZSAL_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_carry"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -512,8 +514,33 @@ BGC_ZSAL_SOLVE_CASES = (
     ("vt_zsal_solve_bl99_melting", 20262552, "vertical_thermodynamics", {
         **_VT, **_ZSAL_SOLVE, "config_start_time": "2000-07-10_00:00:00"}),
 )
-#: the stages that carry the vertical salinity (column_v842.refuse_unported's zsalinity)
+#: the stages that carry the solved vertical salinity (column_v842.refuse_unported's zsalinity)
 ZSAL_STAGES = ("init", _BGC_STAGE, "vertical_thermodynamics")
+_ZSAL_STEP = {**_BGC_ZSAL, "woof_v842_corrections": _BGC_INACTIVE}
+#: v8.4.2's inert vertical salinity carried through the ITD thermodynamics, the ridging
+#: and the steps (its tracers counted, never solved or copied; the remap advects the
+#: pool's): name, seed, stage, overrides
+BGC_ZSAL_CARRY_CASES = (
+    ("itd_bgc_zsal_bl99_update_ocean", 20262601, _ITD, {**_BGC_ZSAL, "config_update_ocean_fluxes": True}),
+    ("itd_bgc_zsal_bl99_delta_function_four_layers", 20262602, _ITD, {
+        **_BGC_ZSAL, **_DELTA_NEW, "config_nIceLayers": 4, "config_nCategories": 4,
+        "config_use_level_meltponds": False, "config_use_level_ice": False}),
+    ("ridge_bgc_zsal_bl99", 20262611, _RDG, _BGC_ZSAL),
+    ("ridge_bgc_zsal_bl99_thorndike_hibler_subcycles", 20262612, _RDG, {
+        **_BGC_ZSAL, **_THORNDIKE, **_HIBLER, "config_dynamics_subcycle_number": 2}),
+    ("step_bgc_zsal_bl99_dedd", 20262621, _STEP, {**_STEP_BASE, **_ZSAL_STEP, "oracle_n_steps": 3,
+                                                 "config_start_time": "2001-06-01_10:00:00"}),
+    ("step_bgc_zsal_bl99_dedd_three_categories_gregorian", 20262622, _STEP, {
+        **_STEP_BASE, **_ZSAL_STEP, "oracle_n_steps": 3, "config_nIceLayers": 4, "config_nCategories": 3,
+        "config_calendar_type": "gregorian", "config_start_time": "2000-07-10_06:00:00"}),
+)
+#: the inert vertical salinity through the time step with the velocity solver (no
+#: advection, as every column-package time-step case here)
+BGC_ZSAL_CARRY_COUPLED_CASES = (
+    ("seaice_bgc_zsal_bl99_dedd_rothrock", 20262631, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_ZSAL_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
+     (12, 6, 3)),
+)
 
 
 def configs_of(overrides: dict, stage: str) -> dict:

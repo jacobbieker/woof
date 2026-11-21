@@ -400,13 +400,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     unless the correction `bgc_inactive_diagnostics` is named. The vertical
     salinity (`config_use_vertical_zsalinity`, BL99) is inert in v8.4.2,
     which never sets the column package's `solve_zsal` and copies
-    `verticalSalinity` only with the vertical tracers; the init, the brine
-    height's step and the vertical thermodynamics keep that word for word,
-    and the correction `zsal_solve` solves it (`compute_microS`,
-    `solve_S_dt`, the salt fluxes, BL99's `dTemp`), word for word on CUDA
-    and Metal with an oracle built from `zsal_solve.patch`. The other
-    biogeochemistry flags, and the vertical salinity in the other stages,
-    are refused by name until their phases land;
+    `verticalSalinity` only with the vertical tracers; every column stage
+    (the init, the brine height's step, the vertical and ITD
+    thermodynamics, the ridging, the column step and the coupled step)
+    keeps that word for word, and the correction `zsal_solve` solves it
+    (`compute_microS`, `solve_S_dt`, the salt fluxes, BL99's `dTemp`) in
+    the init, the brine height's step and the vertical thermodynamics,
+    word for word on CUDA and Metal with an oracle built from
+    `zsal_solve.patch`. The other biogeochemistry flags, and `zsal_solve`
+    in the other stages, are refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -424,7 +426,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     imports the ocean's floating basal mass balance
     (`woof/hex/mpas_ice/ocean_seam_v842.py`, graded by conservation); the
     land-ice core's registry status is now `ported_subset` (velocity
-    solvers 'sia', 'simple' and 'none'). Two v8.4.2 quirks have opt-in corrections, off by
+    solvers 'sia', 'simple' and 'none'), and its global statistics
+    (`config_stats_interval`, `woof/hex/mpas_ice/statistics_v842.py`) match
+    v8.4.2's log report character for character, with
+    `woof_statistics_extrema = 'ice'` as an opt-in correction. Two v8.4.2 quirks have opt-in corrections, off by
     default: `woof_sgh_init_mask = 'corrected'` and
     `woof_enthalpy_advection_units = 'corrected'` (the advection converts
     enthalpy in Celsius, as the thermal solver does, so the EISMINT2

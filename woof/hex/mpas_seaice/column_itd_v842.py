@@ -18,12 +18,17 @@ the ice age, first-year ice and level-ice tracers,
 brine height (``config_use_brine``): the brine fraction travels with the ice
 volume through the remap and rebinning, ``add_new_ice_bgc``
 (``ice_zbgc.F90:29-251``) gives the new ice its brine fraction, and
-``zap_small_areas`` resets it to 1.
+``zap_small_areas`` resets it to 1. v8.4.2's vertical salinity
+(``config_use_vertical_zsalinity``) is inert here: its ``solve_zsal`` is never
+set, so ``cleanup_itd``'s ``dfzsal`` is zero and ``zSalinityFlux`` keeps its
+words; its tracers are counted and not copied (the solved vertical salinity,
+``zsal_solve``, is refused).
 
 What it refuses, by name: the zero-layer thermodynamics (``cleanup_itd``'s
 ``zerolayer_check`` is not ported), the aerosols, and more than
 ``ITD_MAXCAT`` categories; of the biogeochemistry everything but the brine
-height (:func:`woof.hex.mpas_seaice.column_v842.refuse_unported`).
+height and the inert vertical salinity
+(:func:`woof.hex.mpas_seaice.column_v842.refuse_unported`).
 
 v8.4.2's quirks are kept: ``rebin`` drops ``shift_ice``'s abort (cleanup_itd
 never reads it before ``zap_small_areas`` resets it) while ``shift_ice`` still

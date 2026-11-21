@@ -18,8 +18,9 @@ lost with the ridging ice, and everything ``cleanup_itd`` carries
 
 What it refuses, by name: what the ITD thermodynamics port refuses (the
 zero-layer thermodynamics, the aerosols, more than ``ITD_MAXCAT``
-categories, and the biogeochemistry but the brine height). The brine
-fraction is a volume tracer: new ridges take the ridging ice's.
+categories, the biogeochemistry but the brine height and v8.4.2's inert
+vertical salinity, and the solved vertical salinity ``zsal_solve``). The
+brine fraction is a volume tracer: new ridges take the ridging ice's.
 
 v8.4.2's quirks are kept: ``ridge_prep``'s ``hin_max(ncat) = 1e8`` lands in
 ``categoryThicknessLimits``; ``fractionNewRidgeArea`` and

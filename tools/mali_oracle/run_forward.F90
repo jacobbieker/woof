@@ -25,14 +25,19 @@
 !
 ! OUTPUT.bin holds the error flags (clock init, core init, core run), the
 ! count of error-level log lines, the clock's final time as text (StrKIND
-! characters), then every field's words in the input's order.
+! characters), then every field's words in the input's order, then the
+! record li_compute_statistics leaves (stubs.F90): the counts of its real
+! and integer reduction words and of the log lines, the real words, the
+! integer words, and every log message (StrKIND characters each) but the
+! warnings and errors.
 
 program run_forward
   use mpas_kind_types
   use mpas_derived_types
   use mpas_pool_routines
   use mpas_timekeeping
-  use mpas_log, only: stub_log_errors
+  use mpas_log, only: stub_log_errors, stub_log_capture, stub_log_lines, stub_log_count
+  use mpas_dmpar, only: stub_trace_r, stub_trace_i, stub_trace_nr, stub_trace_ni
   use li_core, only: li_simulation_clock_init, li_core_init, li_core_run
   implicit none
 
@@ -188,6 +193,7 @@ program run_forward
   domain % blocklist => block
   domain % configs => configs
 
+  stub_log_capture = .true.
   call mpas_timekeeping_init(calendar)
   call li_simulation_clock_init(domain % clock, configs, errClock)
   errInit = li_core_init(domain, startTimeStamp)
@@ -219,6 +225,12 @@ program run_forward
           write(u) f % c0
        end select
      end associate
+  end do
+  write(u) stub_trace_nr, stub_trace_ni, stub_log_count
+  if (stub_trace_nr > 0) write(u) stub_trace_r(1:stub_trace_nr)
+  if (stub_trace_ni > 0) write(u) stub_trace_i(1:stub_trace_ni)
+  do i = 1, stub_log_count
+     write(u) stub_log_lines(i)
   end do
   close(u)
 
