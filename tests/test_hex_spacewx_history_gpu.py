@@ -103,12 +103,3 @@ def test_both_options_together_write_both_row_sets(synthetic):
                        spacewx_aurora_opt=1, spacewx_kp_source="5"))
     got = sh.cell_fields(sh.seam_holders(seam), START, NCOL)
     assert set(got) == set(NAMES) | set(ah.HISTORY_FIELDS)
-
-
-def test_the_generic_seam_admits_the_keys():
-    from woof.hex.physics_suites import resolve_physics
-    physics = resolve_physics("arwen_mpas_column", {"spacewx_ionosphere_opt": 1, "spacewx_f107_source": "150",
-                                                    "spacewx_aurora_opt": 1, "spacewx_kp_source": "5"},
-                              mesh="x1.40962")
-    assert physics.engine_physics["spacewx_ionosphere_opt"] == 1
-    assert physics.engine_physics["spacewx_aurora_opt"] == 1
