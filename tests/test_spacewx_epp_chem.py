@@ -92,8 +92,9 @@ def test_omni2_paths_join_with_colons_and_expand_the_home(tmp_path, monkeypatch)
 
 def test_hex_takes_it_in_the_chemistry_config_not_the_physics_selection():
     from woof.hex.physics_suites import PhysicsSelectionRefusal, resolve_physics
-    with pytest.raises(PhysicsSelectionRefusal, match="wrf_chem block"):
-        resolve_physics("arwen_mpas_column", {"spacewx_epp_opt": 1}, mesh="x1.40962")
+    for key, value in (("spacewx_epp_opt", 1), ("spacewx_epp_source", "swpc")):
+        with pytest.raises(PhysicsSelectionRefusal, match="wrf_chem block"):
+            resolve_physics("arwen_mpas_column", {key: value}, mesh="x1.40962")
     from woof.hex import chem_wrf
     raw = {"schema": "gpuwm-hex.chemistry/v1",
            "wrf_chem": {"chem_sets": "radm2", "spacewx_epp_opt": 1, "spacewx_epp_source": "swpc"}}
@@ -103,7 +104,8 @@ def test_hex_takes_it_in_the_chemistry_config_not_the_physics_selection():
 
 
 @pytest.mark.parametrize("block, match", [
-    ({"chem_sets": "radm2", "spacewx_epp_opt": True, "spacewx_epp_source": "swpc"}, "must be 0"),
+    ({"chem_sets": "radm2", "spacewx_epp_opt": True, "spacewx_epp_source": "swpc"}, "must be an integer"),
+    ({"chem_sets": "radm2", "spacewx_epp_opt": 2, "spacewx_epp_source": "swpc"}, "must be 0"),
     ({"chem_sets": "radm2", "spacewx_epp_source": "omni"}, "would do nothing"),
     ({"chem_sets": "radm2", "spacewx_epp_opt": 1}, "needs spacewx_epp_source"),
     ({"chem_sets": "radm2", "spacewx_epp_opt": 1, "spacewx_epp_source": 3}, "must be a string"),

@@ -578,6 +578,11 @@
         "inactive_values": ["0"],
         "reason": "the solar-proton NOx/HOx source (woof.spacewx.epp_chem) feeds the RADM2 rows, which hex's chemistry config declares; the column physics is judged before those rows join it, so the key is the chemistry config's, not the physics selection's",
         "follow_up": "drop spacewx_epp_opt from --physics and set \"spacewx_epp_opt\": 1 with \"spacewx_epp_source\" in the --chemistry-config wrf_chem block (chem_sets radm2 or radm2sorg; both hex routes)"
+      },
+      "spacewx_epp_source": {
+        "inactive_values": [""],
+        "reason": "the solar-proton NOx/HOx source (woof.spacewx.epp_chem) feeds the RADM2 rows, which hex's chemistry config declares; the column physics is judged before those rows join it, so the key is the chemistry config's, not the physics selection's",
+        "follow_up": "drop spacewx_epp_source from --physics and set \"spacewx_epp_opt\": 1 with \"spacewx_epp_source\" in the --chemistry-config wrf_chem block (chem_sets radm2 or radm2sorg; both hex routes)"
       }
     }
   },

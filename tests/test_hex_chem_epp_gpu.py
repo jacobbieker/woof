@@ -35,6 +35,9 @@ from test_spacewx_epp_chem import JAN2012, _held  # noqa: E402
 from test_spacewx_ionosphere import _dipole  # noqa: E402
 from woof.hex import chem_wrf  # noqa: E402
 
+#: the real statics sampler, captured before any test wraps it
+ATTACH_STATICS = chem_wrf.attach_statics
+
 NZ, NCOL, DT = base.NZ, base.NCOL, base.DT
 STEPS = 3
 pytestmark = pytest.mark.gpu
@@ -156,6 +159,9 @@ def test_the_woof_route_is_the_wrf_paths_source_word_for_word(held, capsys, mesh
         np.testing.assert_array_equal(inc_hex, cp.asnumpy(base._to_hex(cp.asarray(
             inc_wrf.reshape(-1, base.NY, base.NX)))).reshape(inc_hex.shape))
     _source_acts_in_the_caps_only(held[0::2], cap)
+    # and the source reaches the rows: the cap cells' NO is not the run without it
+    k = [r.name for r in runtime.rows].index("no")
+    assert (on[-1][0][k][0][:, cap] != off[-1][0][k][0][:, cap]).any()
 
 
 def _suite(tmp_path, raw, area, start, dataset):
@@ -200,7 +206,7 @@ def _suite_route(tmp_path, monkeypatch, epp, area):
     """The suite route and the WOOF route's runtime on its config, on the same columns (tests/
     test_hex_chem_suite_v842_gpu.py's wrf_case, RADM2)."""
     tmp_path.mkdir()
-    original = chem_wrf.attach_statics
+    original = ATTACH_STATICS
     monkeypatch.setattr(chem_wrf, "attach_statics",
                         lambda runtime, **kw: original(runtime, lat_deg=None, lon_deg=None, fields=base._statics()))
     seam = base._seam()
@@ -261,3 +267,5 @@ def test_the_suite_route_takes_it_from_the_chemistry_config(held, tmp_path, monk
     _chem, off = _suite_route(tmp_path / "off", monkeypatch, False, AREAS[mesh])
     a, b = on[-1][0], off[-1][0]
     assert a[:, :, ~cap].tobytes() == b[:, :, ~cap].tobytes()
+    k = [r.name for r in chem.runtime.rows].index("no")
+    assert (a[k][:, cap] != b[k][:, cap]).any()

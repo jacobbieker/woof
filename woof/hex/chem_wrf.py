@@ -76,14 +76,15 @@ UNPORTED_PROCESSES = {
 #: ``&chem`` keys carried with their WRF meaning, and their Python types.
 INT_KEYS = ("dust_opt", "seas_opt", "dmsemis_opt", "wetscav_onoff", "vertmix_onoff", "aer_op_opt",
             "kemit", "chem_conv_tr", "aer_drydep_opt", "aer_ra_feedback", "biomass_burn_opt",
-            "plumerisefire_frq")
+            "plumerisefire_frq", "spacewx_epp_opt")
 FLOAT_KEYS = ("chemdt", "dust_alpha", "dust_gamma", "dust_smtune", "dust_ustune")
 #: WOOF's fire keys (woof.config.RunConfig), strings.
-STR_KEYS = ("fire_emission_mode", "plume_fire_properties")
+STR_KEYS = ("fire_emission_mode", "plume_fire_properties", "spacewx_epp_source")
 #: WOOF's solar-proton NOx/HOx source (woof.spacewx.epp_chem) in the RADM2 rows: set here, beside the rows it
 #: feeds, since the column physics' config is judged before the chemistry joins it.  The polar caps come from
 #: the cells' own latitude and longitude (set_geography), whatever the radiation.
-SPACEWX_KEYS = {"spacewx_epp_opt": int, "spacewx_epp_source": str}
+#: (Typed with INT_KEYS/STR_KEYS; their cross-checks against the set's rows are load_table's.)
+SPACEWX_KEYS = ("spacewx_epp_opt", "spacewx_epp_source")
 #: Keys the hex route refuses at any value other than WRF's "off", with the reason.
 OFF_ONLY_KEYS = {
     "mynn_chem_vertmx": "MYNN's chem mixing is not wired on the hex column route",
@@ -103,7 +104,7 @@ EMISSION_SWITCHES = {"emiss_opt": {"emission.radm2": 3}}
 #: replaces the switches' choice, under the same chem law (woof.config.validate_chem_config).
 KNOWN_KEYS = (frozenset(INT_KEYS) | frozenset(FLOAT_KEYS) | frozenset(STR_KEYS) | frozenset(OFF_ONLY_KEYS)
               | frozenset(HEX_KEYS) | frozenset(SOURCE_SWITCHES) | frozenset(EMISSION_SWITCHES)
-              | frozenset(SPACEWX_KEYS) | frozenset(("chem_sources",)))
+              | frozenset(("chem_sources",)))
 #: Product suffixes of every transported row.
 ROW_SUFFIXES = ("_column_mass", "_surface_concentration")
 #: units of every product configure() declared, by name (history_units)
@@ -159,9 +160,6 @@ def knobs(block):
             if not isinstance(block[key], str):
                 raise ValueError(f"wrf_chem {key} must be a string, got {block[key]!r}")
             out[key] = block[key]
-    for key in SPACEWX_KEYS:
-        if key in block:
-            out[key] = block[key]          # typed by woof.config.validate_spacewx_epp_keys (load_table)
     for key, reason in OFF_ONLY_KEYS.items():
         if key in block and block[key] not in (0, False):
             raise ValueError(f"wrf_chem {key}={block[key]!r}: {reason}; only WRF's off value is accepted")
@@ -787,8 +785,18 @@ class HexWrfChemistry:
                 "initial_composition": self.initial_receipts,
                 "lateral_boundaries": (None if self.boundary_reader is None
                                        else self.boundary_reader.receipt()),
-                **({} if getattr(self.state.chem, "epp_source", None) is None
-                   else {"spacewx_epp": self.state.chem.epp_source.receipt()})}
+                **self._epp_receipt()}
+
+    def _epp_receipt(self):
+        """spacewx_epp_opt: the held hour once the first chemistry step has read it (it is rebuilt then on a
+        resume, woof.core.chem_radm2_emiss._solar_protons); before that, the keys it will be read from."""
+        if not int(getattr(self.cfg, "spacewx_epp_opt", 0) or 0):
+            return {}
+        source = getattr(self.state.chem, "epp_source", None)
+        if source is None:
+            return {"spacewx_epp": {"spacewx_epp_source": self.cfg.spacewx_epp_source,
+                                    "spacewx_epp_held": "at the first chemistry step"}}
+        return {"spacewx_epp": source.receipt()}
 
     def restart_payload(self):
         import cupy as cp
