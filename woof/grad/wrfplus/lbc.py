@@ -21,7 +21,9 @@ consumed) and adds into the inputs' adjoints.
 
 qv's row (8k) is the moist array's rk_step-1 capture: a direct row
 (``apply_relax``) into qv's held tendency, from the time-t qv and mu'.
-Its spec_bdy_final is :func:`lbf_tl` with kind qv.  Hydrometeors without
+Its spec_bdy_final is :func:`lbf_tl` with kind qv, on the strict path
+only (the carried muts): the non-strict re-coupling finalizer, which
+also clamps a scalar at zero, is not modelled.  Hydrometeors without
 a table take WRF's flow_dep_bdy (:func:`flow_tl`).
 
 Whole domains only (no streamed tile seams).  Not covered: scalar-array

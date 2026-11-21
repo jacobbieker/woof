@@ -113,7 +113,9 @@ for dtn in {dtypes!r}:
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
 def test_flow_tl_matches_finite_differences(backend, tmp_path):
     """||NL(q + a dq) - NL(q) - a TL dq|| / ||a TL dq|| -> 0 (the map is
-    linear in q at fixed fluxes, so it is 0 to roundoff)."""
+    linear in q at fixed fluxes, so it is 0 to roundoff).  NL is the same
+    function's base update, so this only ties the base and tangent
+    branches together; the primal words test ties the base to woof."""
     out = _run(backend, f'''
 for i, over in enumerate({FLOW!r}):
     g = C.flow_geometry(**over)
