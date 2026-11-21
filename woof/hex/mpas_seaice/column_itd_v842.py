@@ -100,7 +100,7 @@ def _refuse(knob: str, value, reason: str, declaration: str):
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the ITD thermodynamics port does not carry."""
     c = configs
-    cv.refuse_unported(c, dims, biogeochemistry=True)
+    cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=True)
     if c["config_thermodynamics_type"] == "zero layer":
         _refuse("config_thermodynamics_type", "zero layer",
                 "cleanup_itd's zerolayer_check (the zero-layer thermodynamics) is not ported",
@@ -133,6 +133,31 @@ def _zsal_args(pools: dict, configs: dict, dims: dict[str, int], written: list, 
     written.append(flux)
     extra = (cv._need(bgc, "biologyGrid", (nbl + 2,)), cv._need(bgc, "verticalGrid", (nil + 1,))) if grids else ()
     return (np.int32(nbl), *extra, flux)
+
+
+def _ztr_args(pools: dict, configs: dict, state: "cv.ColumnState", written: list, itd: bool = True) -> tuple:
+    """The kernels' trailing vertical-tracer arguments: nbtrcr, bio_index(1)
+    (0-based), (the ITD's interfaceBiologyGrid, zbgc_init_frac,
+    oceanBioConcentrations,) nZBGCTracers, (the ITD's bio_index_o(1),
+    0-based,) oceanBioFluxes. Only with the vertical tracers is anything read
+    or written (``oceanBioFluxes`` then joins ``written``, which an abort
+    restores past the aborting cell)."""
+    import cupy as cp
+    d, to = state.dims, state.tracers
+    if not cv.vertical_tracers(configs):
+        dummy = cp.zeros(1, np.float64)
+        if itd:
+            return (np.int32(0), np.int32(0), dummy, np.float64(0.0), dummy, np.int32(1), np.int32(0), dummy)
+        return (np.int32(0), np.int32(0), np.int32(1), dummy)
+    bgc, nz, n1 = pools["biogeochemistry"], d["nZBGCTracers"], d["nCells"] + 1
+    flux = cv._need(bgc, "oceanBioFluxes", (n1, nz))
+    written.append(flux)
+    nbio, bio0 = np.int32(to.n_bio_tracers), np.int32(to.bio_index[0] - 1)
+    if not itd:
+        return (nbio, bio0, np.int32(nz), flux)
+    init_frac = cv.zbgc_parameters(configs, to)["init_frac"][0]
+    return (nbio, bio0, cv._need(bgc, "interfaceBiologyGrid", (d["nBioLayers"] + 1,)), np.float64(init_frac),
+            cv._need(bgc, "oceanBioConcentrations", (n1, nz)), np.int32(nz), np.int32(to.bio_index_o[0] - 1), flux)
 
 
 def module_source(n_ice_layers: int) -> str:
@@ -206,6 +231,7 @@ def itd_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
     tracer_fields = [cv._tracer_field(pools, name)[0] for name, _, _ in to.layout]
     written = [area, volume, snow, newly, *cell_fields, *tracer_fields]
     zsal_args = _zsal_args(pools, configs, d, written)
+    ztr_args = _ztr_args(pools, configs, state, written)
     before = [a[:n_solve].copy() for a in written]
 
     trcrn = cp.zeros((max(n_solve, 1), ncat, nt), np.float64)
@@ -229,7 +255,7 @@ def itd_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
         need(pools["initial"], "initialSalinityProfile", (n_cells + 1, nil + 1)),
         need(mg, "lateralIceMeltFraction", c1), lateral_melt, need(oc, "freezingMeltingPotential", c1),
         frazil, need(pools["atmos_coupling"], "rainfallRate", c1), pond_flux, fresh, salt, heat, frazil_diag,
-        freeze_onset, newly, *zsal_args,
+        freeze_onset, newly, *zsal_args, *ztr_args,
     )
     if n_solve:
         _function("seaice_column_itd_thermodynamics_v842", nil)(_grid(n_solve), (_BLOCK,), args)
