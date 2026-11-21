@@ -204,10 +204,15 @@ program run_coupler_interval
 contains
 
   ! a vector the driver holds for an absent component: its list and values
+  ! (MCT cannot initialise a vector off one with no fields: the list again)
   subroutine take(dst, src)
     type(mct_aVect), intent(inout) :: dst
     type(mct_aVect), intent(in) :: src
-    call mct_aVect_init(dst, src, mct_aVect_lsize(src))
+    if (mct_aVect_nRattr(src) == 0) then
+       call mct_aVect_init(dst, rList='', lsize=sizes(1))
+       return
+    end if
+    call mct_aVect_init(dst, src, sizes(1))
     call mct_aVect_copy(src, dst)
   end subroutine take
 
