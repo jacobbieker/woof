@@ -229,7 +229,15 @@ def classify_log(text: str, returncode: int) -> dict:
     stopped = [line for line in lines
                if "the forecast driver stopped with" in line]
     if stopped:
-        reason = stopped[-1][:1500]
+        # A multi-line reason (the vertical preflight lists its violations
+        # on "  - " continuation lines) is the verdict, not its first line.
+        at = len(lines) - 1 - lines[::-1].index(stopped[-1])
+        more = []
+        for line in lines[at + 1:]:
+            if not line.startswith("  - "):
+                break
+            more.append(line.strip())
+        reason = " ".join([stopped[-1].rstrip(), *more])[:1500]
         kind = reason.split("stopped with", 1)[1].split(":", 1)[0].strip()
         if kind in _REFUSING:
             return {"outcome": "refused", "reason": reason}
