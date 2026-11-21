@@ -76,6 +76,9 @@ extern "C" __global__ void li_calculate_layer_thickness_v842(
 // those temperatures times config_ice_density*cp_ice. mode 0 (no tracer
 // advection, or no thermal solver): the tracer is 0 and the new ice's
 // tracers are not set (the model leaves its scratch array as it was).
+// mode 3 is not the model's: woof_enthalpy_advection_units = 'corrected'
+// takes mode 2's enthalpy tracer but converts the new ice's temperatures in
+// Celsius, (T - 273.15)*config_ice_density*cp_ice, as li_thermal does.
 extern "C" __global__ void li_tracer_setup_v842(
     rk *tracers, rk *surfaceTracers, rk *basalTracers, const rk *temperature, const rk *enthalpy,
     const rk *surfaceAirTemperature, const rk *basalTemperature, rk rhoi, int mode, int nCells, int nLevels)
@@ -84,7 +87,7 @@ extern "C" __global__ void li_tracer_setup_v842(
     if (iCell >= nCells) return;
     for (int k = 0; k < nLevels; ++k) {
         const int p = iCell * nLevels + k;
-        tracers[p] = mode == 1 ? temperature[p] : (mode == 2 ? enthalpy[p] : (rk)0.0);
+        tracers[p] = mode == 1 ? temperature[p] : (mode >= 2 ? enthalpy[p] : (rk)0.0);
     }
     const rk surface = li_min(surfaceAirTemperature[iCell], LI_K2C);
     if (mode == 1) {
@@ -93,6 +96,9 @@ extern "C" __global__ void li_tracer_setup_v842(
     } else if (mode == 2) {
         surfaceTracers[iCell] = M(M(surface, rhoi), LI_CP_ICE);
         basalTracers[iCell] = M(M(basalTemperature[iCell], rhoi), LI_CP_ICE);
+    } else if (mode == 3) {
+        surfaceTracers[iCell] = M(M(S(surface, LI_K2C), rhoi), LI_CP_ICE);
+        basalTracers[iCell] = M(M(S(basalTemperature[iCell], LI_K2C), rhoi), LI_CP_ICE);
     }
 }
 
@@ -249,4 +255,13 @@ extern "C" __global__ void li_copy_v842(rk *dst, const rk *src, int n)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) dst[i] = src[i];
+}
+
+// Not the model's: woof_enthalpy_advection_units = 'corrected' moves the
+// temperatures to Celsius around the enthalpy conversions, dst = src - 273.15
+// (sign -1) or dst = src + 273.15 (sign 1), as li_thermal's solver does.
+extern "C" __global__ void li_shift_k2c_v842(rk *dst, const rk *src, int sign, int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) dst[i] = sign > 0 ? A(src[i], LI_K2C) : S(src[i], LI_K2C);
 }

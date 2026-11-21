@@ -228,6 +228,34 @@ def test_the_sgh_init_mask_correction_is_opt_in(tmp_path):
 
 
 @requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+@pytest.mark.parametrize("mesh", ["uniform", "varres"])
+def test_the_enthalpy_advection_units_correction_is_opt_in(precision, mesh):
+    # v8.4.2's tracer_setup/tracer_finish convert the advected enthalpy with
+    # Kelvin temperatures against li_thermal's Celsius melting point, so the
+    # ice turns temperate and melts; 'corrected' converts in Celsius
+    from woof.hex.errors import ConfigurationRefusal
+    from woof.hex.mpas_ice import forward_v842 as fw
+    case = _case(f"eismint2_a_enthalpy_{mesh}", precision)
+    pinned = fo.load_fixture(precision)[case["name"]]
+    default = fo.run_gpu(case)
+    assert all(fo.word_mismatches(default[k], pinned[k]) == 0 for k in default if k in pinned)
+    corrected = fo.run_gpu(case, {"woof_enthalpy_advection_units": "corrected"})
+    h0 = np.asarray(case["pools"]["geometry"]["thickness"], np.float64)
+    ice = h0 > 0
+    for out, physical in ((default, False), (corrected, True)):
+        h = np.asarray(out["geometry/thickness"], np.float64)
+        t = np.asarray(out["thermal/temperature"], np.float64)[ice]
+        w = np.asarray(out["thermal/waterfrac"], np.float64)[ice]
+        kept = h[ice].sum() / h0[ice].sum()
+        stays = bool(kept > 0.99 and w.max() < 1e-3 and np.isfinite(t).all() and 200.0 < t.min()
+                     and t.max() <= 273.15)
+        assert stays == physical, (physical, kept, w.max(), t.min(), t.max())
+    with pytest.raises(ConfigurationRefusal, match="woof_enthalpy_advection_units"):
+        fw.run(pools=fo.device_pools(case), config=dict(case["config"], woof_enthalpy_advection_units="other"))
+
+
+@requires_gpu
 @pytest.mark.parametrize("knob, value", [
     ("config_do_restart", True), ("config_time_integration", "rk4"), ("config_stats_interval", 1),
     ("config_write_stats_on_startup", True), ("config_write_albany_ascii_mesh", True),

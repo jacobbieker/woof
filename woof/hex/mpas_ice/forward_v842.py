@@ -41,7 +41,9 @@ One v8.4.2 quirk has a named opt-in correction (``woof_sgh_init_mask``):
 or no ice below sea level, but at that point the mask carries only
 ``li_calculate_mask_init``'s initial-extent bit, so grounded ice below sea
 level is given the ocean's pressure as well. 'v842' (the default) keeps the
-model's words; 'corrected' computes ``li_calculate_mask`` first.
+model's words; 'corrected' computes ``li_calculate_mask`` first. The
+advection's enthalpy units have one too (``woof_enthalpy_advection_units``,
+:mod:`woof.hex.mpas_ice.advection_v842`).
 
 Refused by name, beyond what the step refuses: a restart start
 (``config_do_restart``; :func:`read_restart` is this port's restart),
