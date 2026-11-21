@@ -470,7 +470,9 @@ def test_the_blocked_basis_gives_the_unblocked_ratio(monkeypatch):
     mlat, lt, season = rng.uniform(-80, 80, 1000), rng.uniform(0, 24, 1000), rng.uniform(-1, 1, 1000)
     whole = storm.log_ratio(fit, mlat, lt, season, 55.0)
     monkeypatch.setattr(storm, "BASIS_BLOCK", 97)
-    np.testing.assert_array_equal(storm.log_ratio(fit, mlat, lt, season, 55.0), whole)
+    # BLAS may sum a block's dot products in another order (OpenBLAS does), so
+    # the blocks agree to rounding; a grid of one block is the old computation.
+    np.testing.assert_allclose(storm.log_ratio(fit, mlat, lt, season, 55.0), whole, rtol=1e-12, atol=1e-15)
 
 
 def test_the_shipped_storm_fit_has_the_published_seasonal_pattern():
