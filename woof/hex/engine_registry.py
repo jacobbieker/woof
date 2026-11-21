@@ -246,6 +246,16 @@ def parameter_value(name: str, value: Any, checkout: str | Path | None = None) -
     return typed
 
 
+def _string_field(name: str) -> bool:
+    """Whether ``name`` is a RunConfig field declared ``str``."""
+    import dataclasses
+    from woof.config import RunConfig
+    for item in dataclasses.fields(RunConfig):
+        if item.name == name:
+            return item.type in (str, "str")
+    return False
+
+
 def setting_value(name: str, value: Any, checkout: str | Path | None = None) -> Any:
     """One engine setting outside hex's nine selector keys, typed.
 
@@ -266,6 +276,10 @@ def setting_value(name: str, value: Any, checkout: str | Path | None = None) -> 
         return parameter_value(name, value, checkout)
     if isinstance(value, str):
         text = value.strip().strip("'\"")
+        if _string_field(name):
+            # A RunConfig string (spacewx_f107_source=150 is a flux in sfu, spacewx_kp_source=5 a Kp): its
+            # validator types it, so a number-like spelling stays the text the user wrote.
+            return text
         lowered = text.lower().strip(".")
         if lowered in ("true", "false"):
             return lowered == "true"
