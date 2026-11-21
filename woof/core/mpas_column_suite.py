@@ -1680,7 +1680,8 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
             # eta 0 has zero thickness and the longwave rate goes
             # non-finite.  It happens when p_top_pa is above the standard
             # atmosphere's pressure at the nominal top.
-            raise ValueError(
+            from woof.config import ConfigurationRefused
+            raise ConfigurationRefused(
                 "GFDL-Eta radiation needs a strictly decreasing nominal eta: "
                 f"p_top_pa={p_top} is above the standard-atmosphere "
                 "pressure of the nominal top, so the upper layers clip to "

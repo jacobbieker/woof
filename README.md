@@ -580,7 +580,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     transition-band diagnostics. The step is set by the smallest cell, so
     a graded mesh costs about what its finest cells cost;
   - an option matrix that runs generic-seam column options through a real
-    hex forecast on CUDA and Metal.
+    hex forecast on CUDA and Metal. Every row now runs or is refused by
+    name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
+    the 149-level case (nominal eta), MAD-WRF (species row) and any
+    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5,
+    KF-CuP, BouLac and QNSE rows state their layer limits.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
