@@ -4937,7 +4937,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/rk_stage.cu",
-    "sha256": "c0ae2fa1cc8321dbc9ddaa105113b2786854e60f4230c9b08c9284b3a706add8"
+    "sha256": "4452fe757f4024e4b7afc27f0169009bd222db98b832ea12718d64d112055378"
    },
    {
     "file": "woof/grad/wrfplus/kernels/small_step.cu",
@@ -5839,7 +5839,7 @@
    },
    {
     "file": "woof/grad/wrfplus/stage.py",
-    "sha256": "2eea386d069903bda1264979b6a0c575cbfbae24c596b8e7de1ffbfd18d8ab80"
+    "sha256": "f03dcbf1ed670adeef4d2220ad49529b474ab2b4f594914e1af787531f4083fb"
    },
    {
     "file": "woof/hex/coupled/flux_atmocn_e3sm.py",
