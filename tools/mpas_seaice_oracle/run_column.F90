@@ -43,6 +43,11 @@
 !   ridging       colpkg_init_thermo and init_column_itd as above, then
 !                 column_ridging(domain, ierr), its ierr logged as above
 !                 (SEAICE_ERROR_COL_RIDGING after an abort);
+!   biogeochemistry
+!                 column_biogeochemistry(domain, ierr) (the column
+!                 biogeochemistry's step: with the brine height, its update),
+!                 its ierr logged as above (SEAICE_ERROR_COL_BGC after an
+!                 abort);
 !   prep_radiation
 !                 column_prep_radiation;
 !   radiation     colpkg_init_thermo (heat_capacity), colpkg_init_orbit for
@@ -197,6 +202,10 @@ program run_column
      call init_column_itd(domain)
      ierr = 0
      call column_ridging(domain, ierr)
+     call write_ints('IERR', [ierr])
+  case ('biogeochemistry')
+     ierr = 0
+     call column_biogeochemistry(domain, ierr)
      call write_ints('IERR', [ierr])
   case ('prep_radiation')
      call column_prep_radiation(domain)

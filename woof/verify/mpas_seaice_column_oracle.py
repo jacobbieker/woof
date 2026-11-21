@@ -32,6 +32,10 @@ stage a case names (``oracle_stage``):
   ``seaice_timestep_finalize``'s ``seaice_column_reinitialize_fluxes``), its
   ierr logged the same way. Its cases carry a BL99 column state and forcing
   (:func:`_step_state`);
+- ``biogeochemistry``: ``column_biogeochemistry``, its ierr logged the same
+  way; its abort logs the cell at ``MPAS_LOG_CRIT``, which terminates MPAS
+  (the stub records it, :func:`run_oracle`'s ``crash``). Its cases (:data:`BGC_CASES`, with the init's under the column
+  biogeochemistry) carry a brine-height state (:func:`_bgc_state`);
 - ``seaice_step``: the column step's setup and ``run_seaice_step.F90``'s
   (the velocity solver's time steps, ``seaice_init_evp``,
   ``seaice_init_advection``, ``seaice_initialize_time_diagnostics``), then
@@ -68,6 +72,7 @@ from pathlib import Path
 
 import numpy as np
 
+from woof.hex.mpas_seaice import column_bgc_v842 as cbgc
 from woof.hex.mpas_seaice import column_itd_v842 as citd
 from woof.hex.mpas_seaice import column_radiation_v842 as crad
 from woof.hex.mpas_seaice import column_ridge_v842 as crdg
@@ -94,6 +99,8 @@ STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_step"
 COUPLED_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_coupled_step"
 #: the ocean mixed layer's fixture (OML_CASES and OML_STEP_CASES)
 OML_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_ocean_mixed_layer"
+#: the column biogeochemistry's (BGC_CASES)
+BGC_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_brine"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -387,6 +394,31 @@ OML_STEP_CASES = (
     ("oml_step_registry_defaults_no_vertical_thermodynamics", 20262212, _STEP, {
         "config_use_column_vertical_thermodynamics": False, "oracle_n_steps": 2,
         "config_start_time": "2001-07-20_12:00:00"}),
+)
+
+_BGC_STAGE = "biogeochemistry"
+#: the column biogeochemistry with the brine height
+_BGC = {"config_use_column_biogeochemistry": True, "config_use_brine": True}
+#: distinct carbon to nitrogen ratios, so colpkg_init_zbgc's R_C2N(1) shows which it took
+_C2N = {"config_ratio_C_to_N_diatoms": 6.5, "config_ratio_C_to_N_small_plankton": 7.25,
+        "config_ratio_C_to_N_phaeocystis": 7.75, "config_ratio_C_to_N_proteins": 5.5}
+#: the column biogeochemistry (the init and column_biogeochemistry's brine height): name, seed, stage, overrides
+BGC_CASES = (
+    ("init_bgc_brine", 20262201, "init", _BGC),
+    ("init_bgc_brine_bl99_c2n", 20262202, "init", {**_BGC, **_BL99, **_C2N}),
+    ("init_bgc_brine_restart_hbrine", 20262203, "init", {**_BGC, "config_do_restart_hbrine": True}),
+    ("init_bgc_no_brine", 20262204, "init", {"config_use_column_biogeochemistry": True}),
+    ("init_bgc_brine_three_layers_cesm_ponds", 20262205, "init", {
+        **_BGC, "config_nIceLayers": 3, "config_use_level_meltponds": False, "config_use_cesm_meltponds": True,
+        "config_pond_refreezing_type": "cesm"}),
+    ("bgc_brine", 20262211, _BGC_STAGE, _BGC),
+    ("bgc_brine_bl99_half_hour", 20262212, _BGC_STAGE, {**_BGC, **_BL99, "config_dt": 1800.0}),
+    ("bgc_brine_short_drainage_length", 20262213, _BGC_STAGE, {
+        **_BGC, "config_bio_gravity_drainage_length_scale": 0.5}),
+    ("bgc_brine_four_layers_three_categories", 20262214, _BGC_STAGE, {
+        **_BGC, "config_nIceLayers": 4, "config_nCategories": 3}),
+    ("bgc_brine_abort_remap", 20262215, _BGC_STAGE, _BGC),
+    ("bgc_brine_remap_stop_cleared", 20262216, _BGC_STAGE, _BGC),
 )
 
 
@@ -1023,6 +1055,86 @@ def _step_state(rs, case: dict) -> None:
             t[key] = u(a, b, t[key].shape)
 
 
+def _bgc_state(rs, case: dict) -> None:
+    """The brine height's inputs: categories of 0.3-3 m ice (and below the
+    0.05 m ``thinS`` in one cell), the thickness and area before the
+    thermodynamics, the melt and growth, mushy enthalpies and salinities (a
+    layer saltier than the liquidus break, a nearly melted category), the
+    brine fraction above sea level with little snow (runoff) and below it
+    under heavy snow (flooding), non-positive brine fractions, new ice (an
+    initial area at or below puny), an ice-free cell, and ``colpkg_init_hbrine``'s
+    grids. ``remap_stop`` in the name: a negative thickness in a middle
+    category (a stop the next category clears); ``abort``: that, and the same
+    in two cells' last category.
+    Separate numpy ufuncs only, so the words are the same on every host."""
+    pools, dims, name = case["pools"], case["dims"], case["name"]
+    nc, ncat, nil, nbl = dims["nCells"], dims["nCategories"], dims["nIceLayers"], dims["nBioLayers"]
+    n1 = nc + 1
+    u = _uniform(rs)
+    t, ist, mg, oc, bgc = (pools["tracers"], pools["icestate"], pools["melt_growth_rates"],
+                           pools["ocean_coupling"], pools["biogeochemistry"])
+    area = u(0.02, 0.9 / ncat, (n1, ncat))
+    hin = u(0.3, 3.0, (n1, ncat))
+    hsn = u(0.0, 0.3, (n1, ncat))
+    fbri = u(0.85, 1.2, (n1, ncat))
+    hsn[0] = 0.01                                  # brine above sea level: runoff
+    fbri[0] = u(1.05, 1.2, (ncat,))
+    hsn[1] = 0.6                                   # brine below sea level: flooding
+    fbri[1] = u(0.7, 0.9, (ncat,))
+    area[2] = 0.0                                  # no ice
+    hin[3] = u(0.005, 0.045, (ncat,))              # below thinS
+    fbri[5, ::2] = 0.0                             # reset to 1
+    fbri[5, 1 % ncat] = -0.5
+    area_init = area * u(0.9, 1.1, (n1, ncat))
+    area_init[4, 0] = 0.0                          # new ice in the first category: no Rayleigh criterion
+    area_init[6, 1 % ncat] = 5.0e-12               # at most puny
+    hin_init = hin * u(0.9, 1.1, (n1, ncat))
+    hin_init[6, 0] = 1.0e-13                       # an old thickness below puny
+    if "abort" in name or "remap_stop" in name:
+        # remap_zbgc stops on a negative thickness, which colpkg_biogeochemistry does not
+        # check: the next ice category's preflushing_changes clears it (cell 4)
+        hin[4, 2 % ncat] = -0.4
+        hin_init[4, 2 % ncat] = -0.4
+    if "abort" in name:
+        # only a stop in a cell's last category aborts (cell 7)
+        hin[7, ncat - 1] = -0.2
+        hin_init[7, ncat - 1] = -0.2
+        hin[8, ncat - 1] = -0.3                    # a later cell, which MPAS never reaches
+        hin_init[8, ncat - 1] = -0.3
+    t["iceAreaCategory"] = area[:, :, None]
+    t["iceVolumeCategory"] = (area * hin)[:, :, None]
+    t["snowVolumeCategory"] = (area * hsn)[:, :, None]
+    t["brineFraction"] = fbri[:, :, None]
+    sal = u(2.0, 12.0, (n1, ncat, nil))
+    sal[7, 0, nil // 2] = 130.0                    # above the liquidus break salinity
+    q = u(-3.4e8, -1.0e8, (n1, ncat, nil))
+    q[7, 1 % ncat] = u(-5.0e5, -1.0e4, (nil,))     # nearly melted
+    t["iceSalinity"], t["iceEnthalpy"] = sal, q
+    ist["iceAreaCategoryInitial"] = area_init
+    ist["iceVolumeCategoryInitial"] = area_init * hin_init
+    ist["iceThicknessCategoryInitial"] = u(0.0, 3.0, (n1, ncat))
+    total = np.zeros(n1)
+    for n in range(ncat):
+        total = total + area[:, n]
+    ist["openWaterArea"] = 1.0 - total
+    for key, hi in (("basalIceMeltCategory", 0.01), ("surfaceIceMeltCategory", 0.01),
+                    ("congelationCategory", 0.01), ("snowiceFormationCategory", 0.005),
+                    ("snowMeltCategory", 0.005)):
+        value = u(0.0, hi, (n1, ncat))
+        value[::2, 0] = 0.0
+        mg[key] = value
+    oc["seaSurfaceSalinity"] = u(30.0, 35.0, (n1,))
+    sst = u(-1.9, -1.0, (n1,))
+    sst[8] = 0.5
+    oc["seaSurfaceTemperature"] = sst
+    bgc["newlyFormedIce"] = rs.randint(0, 2, (n1, ncat)).astype(np.int32)
+    bgc["rayleighCriteriaReal"] = u(0.0, 1.0, (n1,))
+    bgc["netBrineHeight"] = u(0.0, 0.5, (n1,))
+    for key, value in cv.hbrine_grids(nbl, nil).items():
+        bgc[key] = value
+    pools["mesh"]["indexToCellID"] = np.arange(1, n1 + 1, dtype=np.int32)
+
+
 def _coupled_dynamics(name: str, seed: int, torus: tuple, config: dict) -> tuple[dict, dict]:
     """The time-step oracle's dynamics state (:mod:`woof.verify.mpas_seaice_step_oracle`)
     on a culled hexagonal torus of ``torus = (nq, nr, owned columns)``: the
@@ -1153,6 +1265,8 @@ def make_case(name, seed, stage, overrides, torus=None) -> dict:
         _radiation_state(rs, case)
     if stage == _OML:
         _oml_state(rs, case)
+    if stage == _BGC_STAGE:
+        _bgc_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
     case["fields"] = [r[:4] for r in rows]
@@ -1201,19 +1315,35 @@ def _runtime_error(stderr: str) -> dict | None:
     return {"file": Path(at.group(2)).name, "line": int(at.group(1)), "error": error.group(1).strip()}
 
 
+def _critical(parsed: dict) -> dict | None:
+    """An ``MPAS_LOG_CRIT`` abort's record (the stub's ``CRIT`` line, its
+    integers and the ``ERR`` line before it), or None."""
+    lines = parsed["log"]
+    at = next((i for i, line in enumerate(lines) if line.startswith("CRIT ")), None)
+    if at is None:
+        return None
+    error = next((line[len("ERR "):] for line in reversed(lines[:at]) if line.startswith("ERR ")), None)
+    ints = (lines[at + 1].split()[1:] if at + 1 < len(lines) and lines[at + 1].startswith("INTS") else [])
+    return {"error": error, "critical": lines[at][len("CRIT "):], "ints": [int(x) for x in ints]}
+
+
 def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray] | None, dict]:
-    """The oracle's outputs and log. A case on which v8.4.2 itself dies with
-    a Fortran runtime error has no outputs; its log carries ``crash`` (the
-    error's file, line and message)."""
+    """The oracle's outputs and log. A case on which v8.4.2 itself dies, with
+    a Fortran runtime error or an ``MPAS_LOG_CRIT`` message (which aborts
+    MPAS), has no outputs; its log carries ``crash`` (the error's file, line
+    and message, or the critical message, its integers and the error logged
+    before it)."""
     with tempfile.TemporaryDirectory() as tmp:
         src, dst, log = Path(tmp) / "in.bin", Path(tmp) / "out.bin", Path(tmp) / "log.txt"
         src.write_bytes(input_bytes(case))
         run = subprocess.run([str(Path(build_dir) / "run_column_r8"), str(src), str(dst), str(log)],
                              capture_output=True, text=True)
         crash = _runtime_error(run.stderr) if run.returncode else None
+        parsed = parse_log(log.read_text(encoding="utf-8"))
+        if run.returncode == 7 and crash is None:
+            crash = _critical(parsed)
         if run.returncode and crash is None:
             raise subprocess.CalledProcessError(run.returncode, run.args, run.stdout, run.stderr)
-        parsed = parse_log(log.read_text(encoding="utf-8"))
         if crash is not None:
             return None, {**parsed, "crash": crash}
         return read_outputs(dst.read_bytes(), case), parsed
@@ -1264,8 +1394,8 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
 
     dev = on_device(case)
     config = case["config"]
-    state = cv.init_parameters(dev, config)
     stage = case["stage"]
+    state = cv.init_parameters(dev, config, biogeochemistry=stage in ("init", _BGC_STAGE))
     if stage == "init":
         cv.initialize_coupler_fields(dev, config, state)
         cv.init_variables(dev, config, state)
@@ -1284,6 +1414,8 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     elif stage == "ridging":
         cv.init_column_itd(dev, state)
         state.abort = crdg.ridging(dev, config, state)
+    elif stage == _BGC_STAGE:
+        state.abort = cbgc.biogeochemistry(dev, config, state)
     elif stage == "prep_radiation":
         crad.prep_radiation(dev, config, state)
     elif stage == "radiation":
@@ -1375,6 +1507,39 @@ def oracle_abort(log: dict, routine: str = "column_vertical_thermodynamics") -> 
     message = next(line for line in lines if line.startswith(prefix))[len("ERR "):]
     cell = int(lines[lines.index("ERR iCell: $i") + 1].split()[1])
     return ierr, cell, message
+
+
+def measure_bgc(reference: dict | None = None, logs: dict | None = None, *, rows=BGC_CASES,
+                fixture_dir: Path = BGC_FIXTURE_DIR) -> dict[str, dict[str, int]]:
+    """Per column-biogeochemistry case: the words the GPU gets wrong per
+    field, the tracer object's integers that differ and, for the brine
+    height's step, whether it reports an abort the oracle does not; for a
+    case v8.4.2 dies on (``MPAS_LOG_CRIT``), whether the port fails to stop
+    at the same cell with the same message."""
+    reference = load_fixture(fixture_dir) if reference is None else reference
+    logs = load_logs(fixture_dir) if logs is None else logs
+    report: dict[str, dict[str, int]] = {}
+    for case in cases("r8", rows):
+        log = logs[case["name"]]
+        if "crash" in log:
+            # v8.4.2 dies: the port must stop at the same cell with the same message
+            try:
+                run_gpu(case)
+            except cbgc.CriticalAbort as error:
+                report[case["name"]] = {"crash": int(error.crash != log["crash"])}
+            else:
+                report[case["name"]] = {"crash": 1}
+            continue
+        got, state = run_gpu(case)
+        row = {}
+        if case["stage"] == _BGC_STAGE:
+            row["abort"] = int(tuple(state.abort) != oracle_abort(log, "column_biogeochemistry"))
+        want = expected_outputs(case, reference.get(case["name"], {}))
+        row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        mine = state.tracers.log_rows()
+        row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
+        report[case["name"]] = row
+    return report
 
 
 def measure_vt(reference: dict | None = None, logs: dict | None = None, *, rows=VT_CASES,

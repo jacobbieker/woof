@@ -24,6 +24,36 @@ def engine_has_suite_init(engine) -> bool:
     return SUITE_INIT_FLAG in (probe.stdout or "") + (probe.stderr or "")
 
 
+#: The usage line of an rw_mpas_init whose ``--augment-init`` gives every declared ``--scalar-names`` species its own
+#: slot (rw-mpas init/emit.rs ``write_init_declaring``).
+DECLARED_SLOTS_MARKER = "--declared-scalar-slots"
+
+#: The species an older ``--augment-init`` creates when the init lacks them (rw-mpas init/emit.rs ADMITTED_SPECIES).
+#: THE BREAKAGE THIS PREVENTS (hex option matrix, 2026-11-13): 20 microphysics rows (Morrison ``ns``, P3 ``qir``/``qib``,
+#: NSSL ``qh``, WDM ``nn``, the SBM bins, ...) were refused at init with "the init file has no variable for", because the
+#: engine created only this set.  An engine without the marker is refused by name before it is run.
+LEGACY_ADMITTED_SPECIES = frozenset(("qv", "qc", "qr", "qi", "qs", "qg", "ni", "nr", "nc", "nwfa", "nifa", "ng", "volg"))
+
+
+def engine_has_declared_slots(engine) -> bool:
+    """Whether this rw_mpas_init's ``--augment-init`` creates every declared species: its usage names the marker."""
+
+    probe = subprocess.run([str(engine), "--help"], capture_output=True, text=True)
+    return DECLARED_SLOTS_MARKER in (probe.stdout or "") + (probe.stderr or "")
+
+
+def declared_slots_refusal(engine, names) -> str | None:
+    """The sentence for a species row an older engine cannot initialize, or ``None``."""
+
+    beyond = [name for name in names if name not in LEGACY_ADMITTED_SPECIES]
+    if not beyond or engine_has_declared_slots(engine):
+        return None
+    return (f"the selected microphysics carries the prognostic species {', '.join(beyond)}, and the installed "
+            f"rw_mpas_init ({engine}) predates initializing them (its usage lists no {DECLARED_SLOTS_MARKER}). "
+            "Build rw_mpas_init from this checkout (cargo build --release -p rw-mpas --bin rw_mpas_init in "
+            "tools/rustwx) or install an engine that carries it")
+
+
 def aerosol_status(engine, init):
     """The engine's ``--aerosol-status`` record for ``init``, or ``None`` when
     the binary predates the suite-aware entries.  Only a failed call probes
@@ -161,6 +191,9 @@ def _synthetic_source(path):
 
 def initialize_species(engine, output, selection, arguments):
     names = selection["scalar_names"]
+    refusal = declared_slots_refusal(engine, names)
+    if refusal is not None:
+        raise ValueError(refusal)
     argv = [str(engine), "--augment-init", str(output), "--scalar-names", ",".join(names)]
     argv.extend(("--land-surface", selection["land_surface"]))
     fields_path = None

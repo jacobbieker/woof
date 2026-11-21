@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 712,
+  "site_count": 715,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 47,
     "cupy.RawKernel": 120,
     "cupy.RawModule": 310,
     "cupy.ReductionKernel": 22,
-    "cupy.cuda.compiler.compile_using_nvrtc": 213
+    "cupy.cuda.compiler.compile_using_nvrtc": 216
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 111,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 138
+      "cupy.cuda.compiler.compile_using_nvrtc": 141
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -9713,6 +9713,22 @@
       "text": "return cp.RawModule(code=source, options=("
     },
     {
+      "file": "woof/hex/coupled/flux_atmocn_e3sm.py",
+      "line": 196,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"flux_atmocn_e3sm.cu\")"
+    },
+    {
       "file": "woof/hex/coupled/ice_coupling_e3sm.py",
       "line": 320,
       "column": 15,
@@ -9743,6 +9759,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"ocn_coupling_e3sm.cu\")"
+    },
+    {
+      "file": "woof/hex/coupled/ocnalb_e3sm.py",
+      "line": 69,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"ocnalb_e3sm.cu\")"
     },
     {
       "file": "woof/hex/coupled/prep_ocn_merge_e3sm.py",
@@ -10777,6 +10809,22 @@
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_vmix_v842_{precision}.cu\")"
     },
     {
+      "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
+      "line": 116,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(n_ice_layers, n_bio_layers), options, None,"
+    },
+    {
       "file": "woof/hex/mpas_seaice/column_itd_v842.py",
       "line": 110,
       "column": 15,
@@ -10842,7 +10890,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_v842.py",
-      "line": 642,
+      "line": 716,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",

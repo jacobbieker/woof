@@ -1,6 +1,6 @@
 """Run a built E3SM coupler oracle on every case and write its fixture.
 
-    python tools/e3sm_coupler_oracle/make_fixture.py BUILD_DIR [--oracle merge|coupling|seaice|frac] [--out DIR]
+    python tools/e3sm_coupler_oracle/make_fixture.py BUILD_DIR [--oracle merge|coupling|seaice|frac|flux|ocnalb] [--out DIR]
 
 BUILD_DIR holds build.sh's binaries. ``--oracle merge`` (the default) runs
 ``run_ocean_merge`` and writes ``oracle-r8.npz`` (``<case>/call<i>``: x2o's
@@ -14,7 +14,11 @@ and ``<case>/trig`` (the stress rotation's sine and cosine words) into
 ``tests/data/oracles/e3sm_seaice_coupling``; ``--oracle frac`` runs
 ``run_seq_frac`` and writes ``<case>/fractions_i``, ``_o``, ``_a`` and
 ``<case>/reported`` (the stages ``seq_frac_check`` reported without
-stopping) into ``tests/data/oracles/e3sm_seq_frac``. Each writes
+stopping) into ``tests/data/oracles/e3sm_seq_frac``; ``--oracle flux`` runs
+``run_flux_atmocn`` and writes ``<case>/xao`` into
+``tests/data/oracles/e3sm_flux_atmocn``; ``--oracle ocnalb`` runs
+``run_flux_ocnalb`` and writes ``<case>/call<i>/xao`` and ``/fractions`` into
+``tests/data/oracles/e3sm_ocnalb``. Each writes
 ``aborts.json`` (each case that must stop: the line E3SM or MCT writes as it
 stops) and ``inputs.sha256`` (every case's input stream). ``--out`` names
 another directory.
@@ -34,13 +38,16 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from woof.verify import e3sm_flux_atmocn_oracle as fx  # noqa: E402
 from woof.verify import e3sm_ocean_coupling_oracle as oc  # noqa: E402
 from woof.verify import e3sm_ocean_merge_oracle as oo  # noqa: E402
+from woof.verify import e3sm_ocnalb_oracle as oa  # noqa: E402
 from woof.verify import e3sm_seaice_coupling_oracle as si  # noqa: E402
 from woof.verify import e3sm_seq_frac_oracle as sf  # noqa: E402
 
 ORACLES = {"merge": (oo, "run_ocean_merge"), "coupling": (oc, "run_ocean_coupling"),
-           "seaice": (si, "run_seaice_coupling"), "frac": (sf, "run_seq_frac")}
+           "seaice": (si, "run_seaice_coupling"), "frac": (sf, "run_seq_frac"),
+           "flux": (fx, "run_flux_atmocn"), "ocnalb": (oa, "run_flux_ocnalb")}
 
 
 def run_case(binary: Path, case: dict, oo=oo) -> tuple[int, object, str]:
