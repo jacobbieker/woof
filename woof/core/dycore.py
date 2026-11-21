@@ -3179,7 +3179,23 @@ def _accumulate_diff6_wrf_order(state: DomainState, cfg: RunConfig, f0, tmp,
             _zero_open_strips(budget_6, cfg, 3)
 
 
-def add_fixed_dry_tendencies(state: DomainState, cfg: RunConfig) -> None:
+def _held_slots_filled(cfg: RunConfig, held_physics: bool) -> bool:
+    """Whether any package left a term in the held ``smag_r*`` slots.
+
+    The mixing package, diff6 and observation nudging fill them on any
+    path.  Strict mode also folds into them the stage-1 lateral relaxation
+    (:func:`fold_lateral_relaxation`) and the physics tendencies
+    (:func:`_fold_physics_wrf`), which WRF's rk_addtend_dry and
+    rk_update_scalar add whatever the mixing options; strict mode zeroes the
+    slots every step (:func:`prepare_fixed_tendencies`).
+    """
+    return (wrf_mixing_package_active(cfg) or cfg.diff_6th_opt > 0
+            or bool(cfg.obs_nudge_opt)
+            or (WRF_EXACT and bool(held_physics)))
+
+
+def add_fixed_dry_tendencies(state: DomainState, cfg: RunConfig,
+                             held_physics: bool = False) -> None:
     """Add the held time-t forward tendencies to one RK slow pass.
 
     WRF ``rk_addtend_dry`` divides each held ``*_tendf`` by the target's
@@ -3190,7 +3206,8 @@ def add_fixed_dry_tendencies(state: DomainState, cfg: RunConfig) -> None:
     mixing package and diff6 left in the shared carrying buffer, both of
     which carry WRF's map factor into it.
     """
-    if not wrf_mixing_package_active(cfg) and cfg.diff_6th_opt <= 0 and not cfg.obs_nudge_opt:
+    if not (_held_slots_filled(cfg, held_physics)
+            or _wrf_relaxation_fold(cfg)):
         return
     # K values are not consumed here; the specs provide shapes/targets.
     pairs = tuple((state.scratch(f0.shape, slot), tend)
@@ -3204,11 +3221,12 @@ def add_fixed_dry_tendencies(state: DomainState, cfg: RunConfig) -> None:
         launch()
 
 
-def fixed_scalar_tendencies(state: DomainState, cfg: RunConfig):
+def fixed_scalar_tendencies(state: DomainState, cfg: RunConfig,
+                            held_physics: bool = False):
     """Return held scalar forward tendencies by Registry field name."""
-    if (state.qv is None and getattr(state, "qke_adv", None) is None
-            and cfg.bl_pbl_physics != 17 and not active_tracers(cfg)) or (not wrf_mixing_package_active(cfg)
-                            and cfg.diff_6th_opt <= 0 and not cfg.obs_nudge_opt):
+    no_scalars = (state.qv is None and getattr(state, "qke_adv", None) is None
+                  and cfg.bl_pbl_physics != 17 and not active_tracers(cfg))
+    if no_scalars or not _held_slots_filled(cfg, held_physics):
         return None
     names = [name for name in SPECIES if getattr(state, name, None) is not None]
     names += list(extra_moist_species(state))
@@ -5345,7 +5363,10 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
             state, physics_tendencies.rtheta, vapour,
             thermal=physics_thermal_previous)
     prepare_fixed_tendencies(state, cfg, physics_tendencies)
-    fixed_scalars = fixed_scalar_tendencies(state, cfg)
+    # Strict mode folds the physics into the held slots, so they are added
+    # even when no mixing package fills them (_held_slots_filled).
+    held_physics = physics_tendencies is not None
+    fixed_scalars = fixed_scalar_tendencies(state, cfg, held_physics)
     if WRF_EXACT:
         # Folded into the held tendencies (_fold_physics_wrf); nothing adds
         # them again, per stage or per scalar.
@@ -5422,7 +5443,7 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                 apply_w_damping(state, cfg, ww)
             if istage == 0 and _wrf_relaxation_fold(cfg):
                 fold_lateral_relaxation(state, cfg)
-            add_fixed_dry_tendencies(state, cfg)
+            add_fixed_dry_tendencies(state, cfg, held_physics)
             if physics_tendencies is not None:
                 physics_tendencies.add_to_slow(state)
             if cfg.mp_physics != 0:
