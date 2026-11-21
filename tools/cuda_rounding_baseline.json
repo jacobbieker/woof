@@ -414,6 +414,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "1903375b469da368c16f811d01b4216ecf66a6306ce39f264c268063da21d3f8",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "0c8bf660aaffb1c67103dacfbd3ce5f82be66c4e8a3eb0db54c58adc5765aa2c",
+    "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "1cc6102acbb4ee04439b456bf568cf110e95e1cb6440a4004b3a741120bf0f25",
     "constructor": "compile_using_nvrtc",
     "factory": "load_module_no_ftz",
@@ -931,6 +939,14 @@
     "factory": "_compile_cfe",
     "factory_sha256": "ccbeb3c4c18f6ef0e180da8d03ee108967b07dd2784ad415349d33b0191e0d90",
     "file": "woof/hydro/cfe.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "518fff55f60405a15c6728e33f1c094521e6e5a876ec749dcd3a5ab801418d84",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "fc4e626f90eb7271581586db7a482fea1ee4a111e7a081e3103d588543b06142",
+    "file": "woof/hex/coupled/prep_ice_merge_e3sm.py",
     "status": "unresolved"
    },
    {
@@ -4944,6 +4960,10 @@
     "sha256": "84ee5201826f52ee4fa2c1889280f7e5b40b34d1a4ffa14ccab0654c27012854"
    },
    {
+    "file": "woof/hex/coupled/prep_ice_merge_e3sm.cu",
+    "sha256": "712b39555dedd630124820ad4b53206eb0b3715099394e95176a8a4cca983164"
+   },
+   {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.cu",
     "sha256": "34b752cd152fd8a3fb699ce182480d6a8eccc8b4eb44fcaa8f4f6f2559994418"
    },
@@ -5098,6 +5118,10 @@
    {
     "file": "woof/hex/mpas_ocean/vmix_v842.cu",
     "sha256": "c1a253e775826ab249a894dd987c2b698099b6334b58b42eefaa307b5abf428d"
+   },
+   {
+    "file": "woof/hex/mpas_seaice/column_bgc_v842.cu",
+    "sha256": "89ce0dee17371b50821161e1826e9b67009fafa89a20ff64c6c1724f82944630"
    },
    {
     "file": "woof/hex/mpas_seaice/column_dedd_v842.cu",
@@ -5826,6 +5850,10 @@
     "sha256": "682a61f3ca21164da0c4975bf3f47c4b59d9f3055a2f28ab7179c062996f3e00"
    },
    {
+    "file": "woof/hex/coupled/prep_ice_merge_e3sm.py",
+    "sha256": "6cae9337b3b9b030059946a6b6f85707f1210b1260dbe2c80279bad18cecd51f"
+   },
+   {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.py",
     "sha256": "fba045a94745828c98be18fdd3a9685f34432a890d48079b3ce6abc2b75da42e"
    },
@@ -6166,6 +6194,10 @@
     "sha256": "0e3db18d2741f6340f341639f8108f9d932afd5fed88428bc66a5632c2737d10"
    },
    {
+    "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
+    "sha256": "d4c12c3bc666f47731ca1bc7cdf7eb8ef5d3784e991c92afbe2da21af1858739"
+   },
+   {
     "file": "woof/hex/mpas_seaice/column_itd_v842.py",
     "sha256": "094b1ad5e930ade0b1bd7e8a8c9d3d27c0a2c72108e9b2e7b4b9bf287fe16865"
    },
@@ -6183,7 +6215,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.py",
-    "sha256": "e71b4e454f17c54ec6677839c9b978ce44ce0f9a2210476d1f59f22a009476d5"
+    "sha256": "7beb4e0be2d2732d3ed0c8e8747cfb3357211f359811d1bb41291cfcf2665d74"
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",

@@ -383,7 +383,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     an M3 Max, with the same words. Each subcycle computes the ocean
     stress coefficient and solves the velocity in one launch (a vertex's
     solve reads only its own coefficient), so the step launches 120 fewer
-    kernels: about 30 instead of 33 ms on an M3 Max, the same words;
+    kernels: about 30 instead of 33 ms on an M3 Max, the same words.
+    The column biogeochemistry's framework and brine height
+    (`config_use_column_biogeochemistry` with `config_use_brine`, opt-in;
+    `column_bgc_v842`): the brine fraction tracer, the init's grids,
+    profiles and ocean concentrations, and `column_biogeochemistry`'s
+    flushing, flooding and Darcy velocity, RKIND 8 with no opt-in, word for
+    word with v8.4.2 on CUDA and Metal. v8.4.2's diatom carbon to nitrogen
+    ratio (the proteins') has a named correction (`zbgc_c2n_proteins`);
+    the other biogeochemistry flags, and the brine fraction in the ITD,
+    ridging and remap, are refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -396,6 +405,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     real(r8), word-exact on CUDA and Metal against the routine compiled
     verbatim on the pinned MCT (`tools/e3sm_coupler_oracle`); the water
     isotopes are refused by name;
+  - the coupler's sea-ice import merge, E3SM v3.2.0's `prep_ice_merge`
+    (`woof/hex/coupled/prep_ice_merge_e3sm.py`, opt-in): x2i from the
+    ocean, atmosphere, land ice and waves by shared name, with rain, snow and
+    the ice runoff summed and scaled by `flux_epbalfact`. real(r8),
+    word-exact on CUDA and Metal against the routine compiled verbatim on
+    MCT; the water isotopes are refused by name;
   - MPAS-Ocean's coupler import and export, E3SM v3.2.0's `ocn_import_mct`
     and `ocn_export_mct` with `mpaso_cpl_indices_set`
     (`woof/hex/coupled/ocn_coupling_e3sm.py`, opt-in): x2o into the forcing

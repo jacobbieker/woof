@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the E3SM v3.2.0 coupler oracles: the ocean merge, prep_ocn_merge
-# (run_ocean_merge), MPAS-Ocean's coupler import and export,
+# (run_ocean_merge), the sea ice's, prep_ice_merge (run_ice_merge), MPAS-Ocean's coupler import and export,
 # ocn_import_mct and ocn_export_mct (run_ocean_coupling), and, given Icepack,
 # MPAS-Seaice's, ice_import_mct and ice_export_mct (run_seaice_coupling),
 # the coupler's surface fractions, seq_frac_set (run_seq_frac), and its
@@ -127,6 +127,41 @@ if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|asin|acos|cbrt|erf)[fl]?\b' und
     exit 6
 fi
 echo "built ${build_dir}/run_ocean_merge"
+
+# prep_ice_merge, byte for byte, inside a module of its own, in the same
+# objects' directory (mct_mod, shr_kind_mod and e3sm_standins as above)
+{
+    printf 'module prep_ice_merge_cut\n'
+    printf '  use shr_kind_mod, only: r8 => SHR_KIND_R8, cs => SHR_KIND_CS, cl => SHR_KIND_CL\n'
+    printf '  use shr_sys_mod, only: shr_sys_abort, shr_sys_flush\n'
+    printf '  use seq_comm_mct, only: CPLID, logunit, seq_comm_getData => seq_comm_setptrs\n'
+    printf '  use mct_mod\n  implicit none\n  private\n  public :: prep_ice_merge\ncontains\n'
+    awk '/^  subroutine prep_ice_merge\(/{on=1} on{print} /^  end subroutine prep_ice_merge$/{on=0}' \
+        "${e3sm}/driver-mct/main/prep_ice_mod.F90"
+    printf 'end module prep_ice_merge_cut\n'
+} > prep_ice_merge_cut.F90
+if [[ $(grep -c '^  subroutine prep_ice_merge(' prep_ice_merge_cut.F90) -ne 1 \
+      || $(grep -c '^  end subroutine prep_ice_merge$' prep_ice_merge_cut.F90) -ne 1 ]]; then
+    echo "prep_ice_merge was not cut out of prep_ice_mod.F90 whole" >&2
+    exit 3
+fi
+"${fc[@]}" "${flags[@]}" prep_ice_merge_cut.F90
+"${fc[@]}" "${flags[@]}" "${script_dir}/run_ice_merge.F90"
+"${fc[@]}" -o "${build_dir}/run_ice_merge" run_ice_merge.o prep_ice_merge_cut.o mct_mod.o e3sm_standins.o \
+    shr_kind_mod.o "${mctlib[@]}"
+if command -v objdump >/dev/null; then
+    objdump -d prep_ice_merge_cut.o run_ice_merge.o > disassembly_ice.txt
+    if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly_ice.txt > fma_ice.txt; then
+        echo "an object contains an FMA instruction (${obj}/fma_ice.txt)" >&2
+        exit 5
+    fi
+fi
+nm -u prep_ice_merge_cut.o > undefined_ice.txt
+if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|asin|acos|cbrt|erf)[fl]?\b' undefined_ice.txt; then
+    echo "prep_ice_merge calls libm" >&2
+    exit 6
+fi
+echo "built ${build_dir}/run_ice_merge"
 
 # ---------------------------------------------------------------- the ocean's import and export
 # ocn_import_mct and ocn_export_mct are cut byte for byte out of
