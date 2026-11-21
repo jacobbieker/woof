@@ -492,6 +492,22 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     real(r8), word-exact on CUDA and Metal against E3SM's own routines cut
     verbatim, linked and driven in that order on MCT. Like the flux it needs
     `WOOF_GLIBC239_LIBM64=1`; the wave couplings are refused by name.
+    Per-step inputs (`nextsw_cday`, `flux_epbalfact`, the runoff, land-ice
+    and wave exports) go through `set_inputs`. A `seq_frac_set` stop
+    comes through the chain.
+  - The coupled step on the spine (`woof/hex/coupled/run_e3sm.py`,
+    opt-in): the interval driven over a `CoupledClock`, one coupler step
+    per clock interval. The ocean's and sea ice's alarms come from their
+    coupling periods, and the components are called where RASM_OPTION1
+    runs them. Each hand-over is a matched exchange, refused by its
+    channel's name. Word-exact against the chained oracle with scripted
+    components.
+  - The coupled exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
+    are the MALI port's ocean seam: `landIcePressure`, `landIceFraction` and
+    `landIceMask` (int32), liquid and solid runoff in place of one mass
+    channel, and `ocn2li_floating_basal_mass_bal` back in MALI's sign
+    (`landIceDraft` is a diagnostic only). Calving momentum is refused by
+    name.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF

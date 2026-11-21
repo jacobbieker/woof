@@ -109,6 +109,8 @@ def test_fixture_covers_the_branches():
     assert outputs["ocean_every_third"]["counts"].tolist() == [0, 1, 2, 0, 1, 2, 0]
     assert outputs["albav_ice_every_other_epbal"]["counts"].tolist() == [0, 1, 0, 1]
     assert outputs["implicit_gust"]["counts"].tolist() == [0, 1, 2, 3, 0, 1]
+    # a startup: the ocean's first run skipped (cime_comp_mod's skip_ocean_run), a first window of 4
+    assert outputs["ocean_startup_lag"]["counts"].tolist() == [1, 2, 3, 0, 1, 2, 0]
     # the per-step inputs change within a case: nextsw_cday with and without the averaged albedos,
     # flux_epbalfact, and the side exports
     for name in ("ocean_every_third", "albav_ice_every_other_epbal"):
@@ -140,7 +142,9 @@ def test_fixture_covers_the_branches():
 def test_the_default_path_does_not_call_the_interval():
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "interval_e3sm" in p.read_text(encoding="utf-8")
-             and p.name not in ("interval_e3sm.py", "e3sm_coupler_interval_oracle.py")]
+             and p.relative_to(ROOT).as_posix() not in ("woof/hex/coupled/interval_e3sm.py",
+                                                    "woof/verify/e3sm_coupler_interval_oracle.py",
+                                                    "woof/hex/coupled/run_e3sm.py")]
     assert users == []
     # importing it loads none of the routines it chains
     code = ("import sys, woof.hex.coupled.interval_e3sm\n"

@@ -443,9 +443,17 @@ matched exchange unless asked.
    into one Fortran driver (`run_coupler_interval.F90`), word for word after
    every step on CUDA and Metal. The flux's mask is taken once from the
    starting fractions, as `seq_flux_init_mct` takes it (kept). The wave
-   couplings are refused by name. Next (e3): the interval on the spine, with
-   the ocean's forward step and the sea ice's step in place of the scripted
-   exports.
+   couplings are refused by name. The interval runs on the spine
+   (`woof/hex/coupled/run_e3sm.py`, `tests/test_e3sm_coupled_spine.py`).
+   It is driven over a `CoupledClock` with the alarms cut from the ocean's
+   and sea ice's coupling periods. The components (`Components`) are called
+   where RASM_OPTION1 runs them, and every hand-over is a matched exchange.
+   It is word-exact against the chained oracle with the components
+   scripted. The alarms are E3SM's: `run_e3sm.Alarms` follows
+   `seq_timemgr_mod`'s alarm set-up with the coupling offsets and
+   `cime_comp_mod`'s startup ocean lag (`skip_ocean_run`), checked against a
+   transcription of both, and the oracle holds a startup case. Next: the ocean's forward step and the sea ice's step as the
+   components, through their ported import/export.
 4. The ocean's and the sea ice's import and export
    (`components/mpas-ocean/driver/ocn_comp_mct.F`,
    `components/mpas-seaice/driver/ice_comp_mct.F`). The ocean's is ported
@@ -480,6 +488,15 @@ matched exchange unless asked.
 5. The coupled ocean + sea-ice step on `woof/hex/coupled`, with the exchange
    checked against the E3SM merge. The sea ice's time step with the
    column package is ported (above); the coupled step is not built yet.
+
+The matched exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
+are the ones agreed with the MALI port's ocean seam. Land ice sends
+`landIcePressure` (Pa), `landIceFraction`, `landIceMask` (int32), and
+`li2ocn_liquid_runoff` and `li2ocn_solid_runoff` (kg m^-2 s^-1, positive into
+the ocean). The ocean returns `ocn2li_floating_basal_mass_bal` in MALI's sign
+(negative is melt). `landIceDraft` is a diagnostic channel only. The calving
+momentum channels (`li2ocn_momentum_x`/`_y`; v8.4.2's land ice exports none)
+and the old `li2ocn_mass` are refused by name.
 
 ## Status
 

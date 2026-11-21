@@ -1872,7 +1872,9 @@ is a modified derivative, not the version available from the E3SM project,
 and neither the E3SM project, UChicago Argonne, LLC, UCAR nor the Department
 of Energy endorses it.
 
-woof/hex/coupled/interval_e3sm.py follows the order E3SM v3.2.0's driver
+woof/hex/coupled/interval_e3sm.py (and woof/hex/coupled/run_e3sm.py, which
+calls the components at the points that driver's RASM_OPTION1 loop runs them)
+follows the order E3SM v3.2.0's driver
 runs its coupler routines in one coupler step, cime_run_atmocn_setup,
 cime_run_ocn_setup_send, cime_run_ice_setup_send, cime_run_update_fractions,
 cime_run_atmocn_fluxes and cime_run_ocn_albedos from
