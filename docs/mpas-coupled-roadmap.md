@@ -444,7 +444,10 @@ matched exchange unless asked.
    and sea ice's coupling periods. The components (`Components`) are called
    where RASM_OPTION1 runs them, and every hand-over is a matched exchange.
    It is word-exact against the chained oracle with the components
-   scripted. Next: the ocean's forward step and the sea ice's step as the
+   scripted. The alarms are E3SM's: `run_e3sm.Alarms` follows
+   `seq_timemgr_mod`'s alarm set-up with the coupling offsets and
+   `cime_comp_mod`'s startup ocean lag (`skip_ocean_run`), checked against a
+   transcription of both, and the oracle holds a startup case. Next: the ocean's forward step and the sea ice's step as the
    components, through their ported import/export.
 4. The ocean's and the sea ice's import and export
    (`components/mpas-ocean/driver/ocn_comp_mct.F`,

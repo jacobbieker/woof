@@ -66,16 +66,18 @@ OUTPUTS = ("xao", "acc", "x2o", "x2i", "fractions_o", "fractions_i", "fractions_
 
 def _spec(name, *, seed, steps, ocn_every=3, ice_every=1, n=16, n_a=11, i2a="matrix", implicit=False, gust=False,
           dead=False, albav=False, epbal=1.0, ocn_prognostic=True, ice_prognostic=True, ice_c2_ocn=True,
-          ocn_c2_ice=True, atm_c2_ice=True, cday_step=0.0, epbal_step=0.0, side_every=0, abort_step=None):
+          ocn_c2_ice=True, atm_c2_ice=True, cday_step=0.0, epbal_step=0.0, side_every=0, abort_step=None,
+          startup=False):
     """``cday_step`` and ``epbal_step``: nextsw_cday's and flux_epbalfact's
     change per step; ``side_every``: new r2x/g2x/w2x every that many steps
     (0: never); ``abort_step``: the step whose sea-ice export takes Si_ifrac
-    below seq_frac_check's bound (seq_frac_set stops)."""
+    below seq_frac_check's bound (seq_frac_set stops); ``startup``: the
+    ocean's alarms held off until its run alarm's second ring."""
     return dict(name=name, seed=seed, steps=steps, ocn_every=ocn_every, ice_every=ice_every, n=n,
                 n_a=n if i2a != "matrix" else n_a, i2a=i2a, implicit=implicit, gust=gust, dead=dead, albav=albav,
                 epbal=epbal, ocn_prognostic=ocn_prognostic, ice_prognostic=ice_prognostic, ice_c2_ocn=ice_c2_ocn,
                 ocn_c2_ice=ocn_c2_ice, atm_c2_ice=atm_c2_ice, cday_step=cday_step, epbal_step=epbal_step,
-                side_every=side_every, abort_step=abort_step)
+                side_every=side_every, abort_step=abort_step, startup=startup)
 
 
 SPECS = (
@@ -93,14 +95,24 @@ SPECS = (
     _spec("ice_not_prognostic", seed=7, steps=3, ice_prognostic=False),
     # the chain stops where seq_frac_set does: the second step's sea-ice export out of bounds
     _spec("frac_abort_mid_run", seed=8, steps=3, abort_step=1),
+    # a startup: the ocean's first run skipped, its first window running on to 4 samples
+    _spec("ocean_startup_lag", seed=9, steps=7, startup=True),
 )
 
 
 def alarms(spec) -> list[tuple[bool, bool, bool]]:
     """Per step: the ocean's run alarm (its interval starts), the sea ice's,
-    and the ocean's next alarm (its interval's last coupler step)."""
+    and the ocean's next alarm (its interval's last coupler step); on a
+    startup both ocean alarms are held off until the run alarm's second ring."""
     k, m = spec["ocn_every"], spec["ice_every"]
-    return [(s % k == 0, s % m == 0, s % k == k - 1) for s in range(spec["steps"])]
+    out, rings = [], 0
+    for s in range(spec["steps"]):
+        run, ice, nxt = s % k == 0, s % m == 0, s % k == k - 1
+        rings += run
+        if spec.get("startup") and rings <= 1:
+            run = nxt = False
+        out.append((run, ice, nxt))
+    return out
 
 
 def _a2x(rng, n) -> np.ndarray:

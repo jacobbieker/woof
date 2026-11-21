@@ -14,6 +14,8 @@ THE BREAKAGES THESE PREVENT
 1. A spine whose alarms or call order differ from the driver's: every
    non-stopping case is graded word for word after every step, in fast and
    strict children, and alarms one step off are caught.
+   The alarms' phase is checked against a transcription of seq_timemgr's
+   alarm set-up and cime_comp_mod's startup lag, with offsets.
 2. A hand-over that drops or changes words: a component that holds a
    different import than the coupler sent is refused by the channel's name.
 3. A stop swallowed by the spine: seq_frac_set's stop comes through.
@@ -96,7 +98,8 @@ def _clock(case):
 
 def _alarms(case, clock):
     s = case["spec"]
-    return re3.Alarms.from_clock(clock, ocean_period=s["ocn_every"] * DT, seaice_period=s["ice_every"] * DT)
+    return re3.Alarms.from_clock(clock, ocean_period=s["ocn_every"] * DT, seaice_period=s["ice_every"] * DT,
+                                 startup=s["startup"])
 
 
 def _run(case, *, alarms=None, components=None):
@@ -126,6 +129,72 @@ def test_the_spine_alarms_are_the_oracle_alarms():
         clock = _clock(case)
         alarms = _alarms(case, clock)
         assert [alarms.at(w.index) for w in clock.intervals()] == ci.alarms(case["spec"]), case["name"]
+
+
+def _seq_timemgr_rings(*, t0, dt, nsteps, period, offset):
+    """The driver's alarm, transcribed: offset(n) = the namelist's + one driver
+    step (seq_timemgr_mod 1056-1057, 1074); RefTime = CurrTime + offset
+    (1126-1127, 1194-1195); the first ring the first time after CurrTime on the
+    period's cadence (1737-1741); the alarm read after the clock advance
+    (cime_comp_mod 2848, 2855-2860). Times in seconds."""
+    ref = t0 + offset + dt
+    nxt = ref - period
+    while nxt <= t0:
+        nxt += period
+    rings = []
+    for s in range(nsteps):
+        t = t0 + (s + 1) * dt
+        on = t == nxt
+        if on:
+            nxt += period
+        rings.append(on)
+    return rings
+
+
+def _cime_ocean(run, nxt, *, startup):
+    """cime_comp_mod 1869-1873 and 2948-2957: skip_ocean_run on a startup until
+    ocnrun_count > 1."""
+    count, skip, out = 0, startup, []
+    for r, n in zip(run, nxt):
+        if r:
+            count += 1
+        if count > 1:
+            skip = False
+        out.append((False, False) if skip else (r, n))
+    return out
+
+
+@pytest.mark.parametrize("startup", [False, True])
+def test_the_alarm_phase_is_the_drivers(startup):
+    dt, t0, nsteps = 1800, 86400 * 3, 40
+    for k in (1, 2, 3, 4, 6):
+        for m in (1, 2, 3):
+            for jo in range(-k, k + 1):
+                for ji in range(-m, m + 1):
+                    run = _seq_timemgr_rings(t0=t0, dt=dt, nsteps=nsteps, period=k * dt, offset=jo * dt)
+                    # ocnnext: the ocnrun alarm offset by -dtime of the driver (seq_timemgr_mod 1203-1213)
+                    nxt = _seq_timemgr_rings(t0=t0, dt=dt, nsteps=nsteps, period=k * dt, offset=jo * dt - dt)
+                    ice = _seq_timemgr_rings(t0=t0, dt=dt, nsteps=nsteps, period=m * dt, offset=ji * dt)
+                    ocean = _cime_ocean(run, nxt, startup=startup)
+                    alarms = re3.Alarms(ocean=k, seaice=m, ocean_offset=jo, seaice_offset=ji, startup=startup)
+                    want = [(o[0], i, o[1]) for o, i in zip(ocean, ice)]
+                    assert [alarms.at(s) for s in range(nsteps)] == want, (k, m, jo, ji)
+    # ... and the oracle's own alarm model, which the fixture was driven with, is the same phase
+    for case in ci.cases():
+        sp = case["spec"]
+        run = _seq_timemgr_rings(t0=0, dt=dt, nsteps=sp["steps"], period=sp["ocn_every"] * dt, offset=0)
+        nxt = _seq_timemgr_rings(t0=0, dt=dt, nsteps=sp["steps"], period=sp["ocn_every"] * dt, offset=-dt)
+        ice = _seq_timemgr_rings(t0=0, dt=dt, nsteps=sp["steps"], period=sp["ice_every"] * dt, offset=0)
+        ocean = _cime_ocean(run, nxt, startup=sp["startup"])
+        assert ci.alarms(sp) == [(o[0], i, o[1]) for o, i in zip(ocean, ice)], case["name"]
+
+
+def test_offsets_past_the_period_are_refused():
+    with pytest.raises(ValueError, match="offset too large"):
+        re3.Alarms(ocean=2, seaice=1, ocean_offset=3)
+    clock = CoupledClock(start=0.0, end=4 * DT, cadence=DT, dts={"ocean": DT})
+    with pytest.raises(ValueError, match="ocean_offset"):
+        re3.Alarms.from_clock(clock, ocean_period=DT, seaice_period=DT, ocean_offset=0.5 * DT)
 
 
 def test_a_coupling_period_off_the_coupler_step_is_refused():
