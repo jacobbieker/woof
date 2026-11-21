@@ -74,7 +74,9 @@ module mpas_pool_routines
             mpas_pool_add_config, mpas_pool_print_summary, MPAS_POOL_CONFIG, &
             field1DInteger, field1DReal, field2DReal, field3DReal, mpas_pool_get_field, &
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
-            mpas_pool_initialize_time_levels, mpas_pool_shift_time_levels
+            mpas_pool_initialize_time_levels, mpas_pool_shift_time_levels, &
+            mpas_pool_iterator_type, mpas_pool_begin_iteration, mpas_pool_get_next_member, &
+            stub_pool_has, stub_pool_get_logical, mpas_pool_create_pool
 
   integer, parameter :: maxEntries = 192
   integer, parameter :: MPAS_POOL_CONFIG = 1004
@@ -121,7 +123,14 @@ module mpas_pool_routines
   type MPAS_pool_type
     type(pool_entry), dimension(maxEntries) :: e
     integer :: n = 0
+    integer :: cursor = 0   ! mpas_pool_get_next_member's place: entries in the order put
   end type MPAS_pool_type
+
+  ! the iterator the analysis-member driver reads (memberName only)
+  type mpas_pool_iterator_type
+    character(len=StrKIND) :: memberName = ''
+    integer :: memberType = 0
+  end type mpas_pool_iterator_type
 
   interface mpas_pool_get_field
     module procedure get_field_i1, get_field_r1, get_field_r2, get_field_r3
@@ -136,7 +145,7 @@ module mpas_pool_routines
   end interface mpas_deallocate_scratch_field
 
   interface mpas_pool_add_config
-    module procedure add_config_l, add_config_r
+    module procedure add_config_l, add_config_r, add_config_i
   end interface mpas_pool_add_config
 
   interface mpas_pool_get_config
@@ -302,6 +311,58 @@ contains
     print *, 'oracle stub: mpas_pool_add_config is not part of this oracle: ', trim(name)
     stop 6
   end subroutine add_config_r
+
+  subroutine add_config_i(pool, name, value)
+    ! li_analysis_setup_packages builds its member list with it
+    type(MPAS_pool_type), intent(inout) :: pool
+    character(len=*), intent(in) :: name
+    integer, intent(in) :: value
+    integer :: k
+    k = slot(pool, name)
+    allocate(pool % e(k) % i0)
+    pool % e(k) % i0 = value
+  end subroutine add_config_i
+
+  subroutine mpas_pool_create_pool(pool)
+    ! li_analysis_setup_packages's member list (an empty pool)
+    type(MPAS_pool_type), pointer :: pool
+    allocate(pool)
+  end subroutine mpas_pool_create_pool
+
+  subroutine mpas_pool_begin_iteration(pool)
+    type(MPAS_pool_type), intent(inout) :: pool
+    pool % cursor = 0
+  end subroutine mpas_pool_begin_iteration
+
+  logical function mpas_pool_get_next_member(pool, iterator)
+    type(MPAS_pool_type), intent(inout) :: pool
+    type(mpas_pool_iterator_type), intent(inout) :: iterator
+    pool % cursor = pool % cursor + 1
+    mpas_pool_get_next_member = pool % cursor <= pool % n
+    if (mpas_pool_get_next_member) iterator % memberName = pool % e(pool % cursor) % name
+  end function mpas_pool_get_next_member
+
+  logical function stub_pool_has(pool, name)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    integer :: i
+    stub_pool_has = .false.
+    do i = 1, pool % n
+      if (trim(pool % e(i) % name) == trim(name)) stub_pool_has = .true.
+    end do
+  end function stub_pool_has
+
+  subroutine stub_pool_get_logical(pool, name, value)
+    ! a logical entry, or null when the pool has none by that name
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    logical, pointer :: value
+    integer :: i
+    nullify(value)
+    do i = 1, pool % n
+      if (trim(pool % e(i) % name) == trim(name)) value => pool % e(i) % l0
+    end do
+  end subroutine stub_pool_get_logical
 
   subroutine mpas_pool_print_summary(pool, poolMemberType, recurseSubpools)
     type(MPAS_pool_type), intent(in) :: pool
@@ -682,8 +743,11 @@ module mpas_derived_types
 #ifdef MALI_REAL_TIMEKEEPING
 #include "mpas_timekeeping_types.inc"
 
+  ! the streams the run declares (run_forward.F90: the analysis members'),
+  ! by name with their reference time; stubs_forward.F90's manager reads them
   type MPAS_streamManager_type
-    integer :: unused = 0
+    integer :: n = 0, cursor = 0
+    character(len=StrKIND), dimension(8) :: names = '', refTimes = ''
   end type MPAS_streamManager_type
 
   ! the members of v8.4.2's stream list (mpas_stream_list_types.inc) that
@@ -706,6 +770,7 @@ module mpas_derived_types
   type block_type
     integer :: localBlockID = 0
     type(MPAS_pool_type), pointer :: structs => null()
+    type(MPAS_pool_type), pointer :: dimensions => null()
     type(MPAS_pool_type), pointer :: configs => null()
     type(block_type), pointer :: next => null()
   end type block_type
@@ -736,18 +801,22 @@ module mpas_dmpar
   public :: mpas_dmpar_min_real, mpas_dmpar_max_real, mpas_dmpar_max_int, mpas_dmpar_field_halo_exch, &
             mpas_dmpar_sum_real, mpas_dmpar_sum_int, mpas_dmpar_minloc_real, mpas_dmpar_maxloc_real, &
             mpas_dmpar_bcast_real, mpas_dmpar_bcast_int, mpas_dmpar_sum_real_array, IO_NODE, &
-            stub_trace_r, stub_trace_i, stub_trace_nr, stub_trace_ni
+            stub_trace_r, stub_trace_i, stub_trace_nr, stub_trace_ni, stub_trace_paused
 
   integer, parameter :: IO_NODE = 0
   real(kind=RKIND), dimension(:), allocatable, save :: stub_trace_r
   integer, dimension(:), allocatable, save :: stub_trace_i
   integer, save :: stub_trace_nr = 0, stub_trace_ni = 0
+  ! set while an analysis member computes (run_forward.F90's timer hook): its
+  ! reductions are recorded as the pool words it leaves, not here
+  logical, save :: stub_trace_paused = .false.
 
 contains
 
   subroutine trace_r(value)
     real(kind=RKIND), intent(in) :: value
     real(kind=RKIND), dimension(:), allocatable :: grown
+    if (stub_trace_paused) return
     if (.not. allocated(stub_trace_r)) allocate(stub_trace_r(256))
     if (stub_trace_nr == size(stub_trace_r)) then
       allocate(grown(2 * size(stub_trace_r)))
@@ -761,6 +830,7 @@ contains
   subroutine trace_i(value)
     integer, intent(in) :: value
     integer, dimension(:), allocatable :: grown
+    if (stub_trace_paused) return
     if (.not. allocated(stub_trace_i)) allocate(stub_trace_i(256))
     if (stub_trace_ni == size(stub_trace_i)) then
       allocate(grown(2 * size(stub_trace_i)))
@@ -897,33 +967,38 @@ contains
 end module mpas_threading
 
 module mpas_timer
+  ! no timing; a driver may hook the starts and stops (run_forward.F90 records
+  ! what each analysis member leaves when its 'compute_' timer stops)
   implicit none
   private
-  public :: mpas_timer_start, mpas_timer_stop
+  public :: mpas_timer_start, mpas_timer_stop, stub_timer_hook
+
+  abstract interface
+    subroutine timer_hook(timer_name, starting)
+      character(len=*), intent(in) :: timer_name
+      logical, intent(in) :: starting
+    end subroutine timer_hook
+  end interface
+  procedure(timer_hook), pointer, save :: stub_timer_hook => null()
 
 contains
 
   subroutine mpas_timer_start(timer_name, clear_timer_in)
     character(len=*), intent(in) :: timer_name
     logical, optional, intent(in) :: clear_timer_in
+    if (associated(stub_timer_hook)) call stub_timer_hook(timer_name, .true.)
   end subroutine mpas_timer_start
 
   subroutine mpas_timer_stop(timer_name)
     character(len=*), intent(in) :: timer_name
+    if (associated(stub_timer_hook)) call stub_timer_hook(timer_name, .false.)
   end subroutine mpas_timer_stop
 
 end module mpas_timer
 
 
-! mpas_geometry_utils' Wachspress unit tests call these as external
-! procedures; the oracle never runs those tests
-subroutine mpas_pool_create_pool(pool)
-  use mpas_pool_routines
-  type(MPAS_pool_type), pointer :: pool
-  print *, 'oracle stub: mpas_pool_create_pool is not part of this oracle'
-  stop 6
-end subroutine mpas_pool_create_pool
-
+! mpas_geometry_utils' Wachspress unit tests call this as an external
+! procedure; the oracle never runs those tests
 subroutine mpas_pool_destroy_pool(pool)
   use mpas_pool_routines
   type(MPAS_pool_type), pointer :: pool
@@ -990,7 +1065,18 @@ contains
 
 end module li_velocity_external
 
-! li_subglacial_hydro and li_velocity call these without an interface
+! li_subglacial_hydro, li_velocity and the analysis members call these
+! without an interface
+subroutine mpas_dmpar_max_real_array(dminfo, nElements, inArray, outArray)
+  use mpas_derived_types
+  type(dm_info), intent(in) :: dminfo
+  integer, intent(in) :: nElements
+  real(kind=RKIND), dimension(nElements), intent(in) :: inArray
+  real(kind=RKIND), dimension(nElements), intent(out) :: outArray
+  ! one rank: the reduction is the identity
+  outArray = inArray
+end subroutine mpas_dmpar_max_real_array
+
 subroutine mpas_dmpar_min_real_array(dminfo, nElements, inArray, outArray)
   use mpas_derived_types
   type(dm_info), intent(in) :: dminfo
@@ -1002,10 +1088,14 @@ subroutine mpas_dmpar_min_real_array(dminfo, nElements, inArray, outArray)
 end subroutine mpas_dmpar_min_real_array
 
 subroutine mpas_pool_get_package(pool, name, package)
+  ! a package the driver put (run_forward.F90: the analysis members'); any
+  ! other is not part of these oracles
   use mpas_pool_routines
   type(MPAS_pool_type), intent(in) :: pool
   character(len=*), intent(in) :: name
   logical, pointer :: package
+  call stub_pool_get_logical(pool, name, package)
+  if (associated(package)) return
   print *, 'oracle stub: mpas_pool_get_package (', trim(name), ') is not part of this oracle'
   stop 6
 end subroutine mpas_pool_get_package
