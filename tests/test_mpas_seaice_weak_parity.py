@@ -162,9 +162,10 @@ def test_a_mesh_without_coordinates_is_refused_by_name():
 def test_the_weak_form_with_the_column_step_is_refused_by_name():
     from woof.hex.mpas_seaice import column_step_v842 as cs
     from woof.hex.mpas_seaice import timestep_v842 as ts
-    configs = {"config_use_column_package": True, "config_stress_divergence_scheme": "weak"}
-    with pytest.raises(ConfigurationRefusal, match="config_stress_divergence_scheme"):
-        cs.check_config(configs)
+    for scheme in ("weak", "weak   "):          # a Fortran-padded namelist string too
+        configs = {"config_use_column_package": True, "config_stress_divergence_scheme": scheme}
+        with pytest.raises(ConfigurationRefusal, match="config_stress_divergence_scheme"):
+            cs.check_config(configs)
     with pytest.raises(ConfigurationRefusal, match="config_stress_divergence_scheme"):
         ts.check_config({"config_stress_divergence_scheme": "none"})
 
@@ -185,6 +186,35 @@ def test_the_opt_in_ridge_delta_correction():
     e11, e22, e12 = (fixed[f"velocity_weak/strain{n}"][:nc] for n in ("11", "22", "12"))
     delta = np.sqrt((e11 + e22) ** 2 + ((e11 - e22) ** 2 + (2.0 * e12) ** 2) / 4.0)   # e = 2
     np.testing.assert_allclose(own, 0.5 * (delta - np.abs(e11 + e22)), rtol=1e-9, atol=1e-15)
+
+
+def test_the_fma_without_math_fma_is_the_same_rounding(monkeypatch):
+    rs = np.random.RandomState(7)
+    triples = [tuple(rs.standard_normal(3) * 10.0 ** rs.randint(-8, 8, 3)) for _ in range(2000)]
+    triples += [(1.0 + 2.0 ** -30, 1.0 - 2.0 ** -30, -1.0), (1e300, 1e300, -1e300), (np.inf, 1.0, 1.0)]
+    want = [wv._fma(a, b, c, real) for a, b, c in triples for real in (np.float32, np.float64)]
+    if hasattr(wv.math, "fma"):
+        monkeypatch.delattr(wv.math, "fma")
+    got = [wv._fma(a, b, c, real) for a, b, c in triples for real in (np.float32, np.float64)]
+    assert np.array_equal(np.array(got, dtype=object).astype(np.float64), np.array(want, dtype=object).astype(np.float64))
+
+
+@requires_gpu
+def test_the_time_step_refuses_a_sphere_without_its_radius_and_stray_corrections():
+    from woof.hex.mpas_seaice import timestep_v842 as ts
+    case = wo.step_cases("r4")[2]                         # the sphere about the North Pole
+    fixture = wo.load_step_fixture("r4")[case["name"]]
+    dev = sr.device_pools(case, fixture)
+    clock = ts.initialize(pools=dev, configs=case["config"], remap_geometry="input", metric_libm=_libm())
+    no_radius = {k: v for k, v in case["config"].items() if k not in ("mesh:sphere_radius", "sphere_radius")}
+    with pytest.raises(ConfigurationRefusal, match="sphere_radius"):
+        ts.advance(pools=dev, configs=no_radius, clock=clock, n_steps=1, metric_libm=_libm())
+    with pytest.raises(ValueError, match="corrections"):
+        ts.advance(pools=dev, configs=case["config"], clock=clock, n_steps=1, metric_libm=_libm(),
+                   weak_corrections=("weak_ridge_dleta",))
+    variational = dict(case["config"], config_stress_divergence_scheme="variational")
+    with pytest.raises(ValueError, match="weak_corrections"):
+        ts.advance(pools=dev, configs=variational, clock=clock, n_steps=1, weak_corrections=("weak_ridge_delta",))
 
 
 def _python_mutant(old: str, new: str):
