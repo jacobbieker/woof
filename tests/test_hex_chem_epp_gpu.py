@@ -158,7 +158,7 @@ def test_the_woof_route_is_the_wrf_paths_source_word_for_word(held, capsys, mesh
     _source_acts_in_the_caps_only(held[0::2], cap)
 
 
-def _suite(tmp_path, raw, area, start):
+def _suite(tmp_path, raw, area, start, dataset):
     """tests/test_hex_chem_suite_v842_gpu.py's _suite with the start's columns in place at bind (the RADM2
     cold start reads them) and no inventory frames."""
     import json
@@ -178,6 +178,9 @@ def _suite(tmp_path, raw, area, start):
     chem.extend_state(host)
     dycore = SimpleNamespace(atmosphere=SimpleNamespace(state=SimpleNamespace(scalars=cp.asarray(host.scalars))))
     session = sv842._Session()
+    # Wesely reads MPAS's sfc_input.mminlu: the seam's own land-use dataset (as the suite test's cams_aq case)
+    session.native = SimpleNamespace(
+        get_text_field=lambda pool, name: dataset if (pool, name) == ("sfc_input", "mminlu") else None)
     session.pools["sfc_input", "xland"] = cp.asarray(np.ones(NCOL), dtype=cp.float32)
     holder = SimpleNamespace(columns=start)
     chem._columns = lambda atmosphere: sv842._prepared(holder.columns)
@@ -205,10 +208,12 @@ def _suite_route(tmp_path, monkeypatch, epp, area):
     state2 = {n: inputs[n].copy() for n in
               ("theta", "qv", "qc", "qr", "qi", "qs", "qg", "pressure", "rho_dry", "z_interface")}
     raw = _raw(epp)
-    chem, dycore, session, holder = _suite(tmp_path, raw, area, base._columns(inputs, inputs))
+    chem, dycore, session, holder = _suite(tmp_path, raw, area, base._columns(inputs, inputs),
+                                         seam._driver.noahmp_params.dataset_identifier)
     ref = chem_wrf.HexWrfChemistry("chemistry.json", raw, chem.digest, cfg=seam._cfg, area=area, nlev=NZ,
                                    ncells=NCOL, offset=0, start_time=base.START, fnm=seam._state.fnm,
                                    fnp=seam._state.fnp, terrain=seam._state.ht)
+    ref.bind_seam(seam)
     original(ref, lat_deg=None, lon_deg=None, fields=base._statics())
     ref.set_geography(LAT, LON)
     ref.state.chem.emission_frames = _NoFrames()
