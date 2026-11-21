@@ -55,7 +55,6 @@ import numpy as np
 import pytest
 
 from conftest import requires_gpu
-from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_seaice import column_bgc_v842 as cbgc
 from woof.hex.mpas_seaice import column_therm_v842 as ct
 from woof.hex.mpas_seaice import column_v842 as cv
@@ -204,14 +203,11 @@ def test_only_zsal_solve_maps_the_vertical_salinity():
     assert not cv.solves_zsal(_case("bgc_zsal")["config"]) and cv.solves_zsal(_case("bgc_zsal_solve")["config"])
 
 
-def test_stages_without_the_solved_vertical_salinity_refuse_it():
+def test_every_biogeochemistry_stage_takes_the_vertical_salinity():
     dims = {**_case("bgc_zsal")["dims"], "nSnowLayers": 1}
-    # v8.4.2's inert vertical salinity: every biogeochemistry stage carries it
+    # v8.4.2's inert vertical salinity and the solved one: every biogeochemistry stage carries both
     cv.refuse_unported(_case("bgc_zsal")["config"], dims, biogeochemistry=True)
-    solved = _case("bgc_zsal_solve")["config"]
-    with pytest.raises(ConfigurationRefusal, match=cv.ZSAL_SOLVE):
-        cv.refuse_unported(solved, dims, biogeochemistry=True)
-    cv.refuse_unported(solved, dims, biogeochemistry=True, zsalinity=True)
+    cv.refuse_unported(_case("bgc_zsal_solve")["config"], dims, biogeochemistry=True)
 
 
 @pytest.mark.parametrize("change", [{"config_thermodynamics_type": "mushy",

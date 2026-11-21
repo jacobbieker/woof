@@ -21,8 +21,15 @@ volume through the remap and rebinning, ``add_new_ice_bgc``
 ``zap_small_areas`` resets it to 1. v8.4.2's vertical salinity
 (``config_use_vertical_zsalinity``) is inert here: its ``solve_zsal`` is never
 set, so ``cleanup_itd``'s ``dfzsal`` is zero and ``zSalinityFlux`` keeps its
-words; its tracers are counted and not copied (the solved vertical salinity,
-``zsal_solve``, is refused).
+words; its tracers are counted and not copied. Under the opt-in correction
+``zsal_solve`` (the solved vertical salinity, held to the patched oracle)
+the column package's ``solve_zsal`` branches run: ``add_new_ice``'s
+``fzsal`` loss with the frazil and no mixing of the new ice's ``sice``,
+``adjust_tracer_profile``'s ``regrid_stationary`` of the vertical salinity
+(its remap's stop an ITD abort) and the ``remap_zbgc`` back into ``sice``
+(``ice_zbgc.F90:29-251``, ``ice_brine.F90``), the first category's surface
+temperature from that ``sice``, and ``lateral_melt_bgc``'s and
+``zap_small_areas``' salt into ``zSalinityFlux``.
 
 What it refuses, by name: the zero-layer thermodynamics (``cleanup_itd``'s
 ``zerolayer_check`` is not ported), the aerosols, and more than

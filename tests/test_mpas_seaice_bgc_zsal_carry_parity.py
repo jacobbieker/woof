@@ -11,8 +11,9 @@ the tracers are counted, the ITD's and the ridging's ``cleanup_itd`` add a
 zero ``dfzsal`` to ``zSalinityFlux``, the step's
 ``seaice_column_reinitialize_diagnostics_bgc`` zeroes the salinity fluxes,
 and the time step with the velocity solver (no advection, as every
-column-package time-step case) leaves ``verticalSalinity`` alone. The solved vertical salinity (the ``zsal_solve`` correction) is
-refused by these stages. ``tools/mpas_seaice_oracle/run_column.F90`` runs
+column-package time-step case) leaves ``verticalSalinity`` alone. The solved vertical salinity (the
+``zsal_solve`` correction) is tested against the patched oracle in
+tests/test_mpas_seaice_bgc_zsal_solve_carry_parity.py. ``tools/mpas_seaice_oracle/run_column.F90`` runs
 the stages; the outputs are committed
 (tests/data/oracles/mpas_seaice_bgc_zsal_carry, PROVENANCE.md), so the GPU
 comparison runs without gfortran. The step cases use the delta-Eddington
@@ -26,8 +27,7 @@ THE BREAKAGES THESE PREVENT
    verticalSalinity must keep its words through the ITD, the ridging and the
    steps.
 3. A step that does not zero the salinity fluxes.
-4. The solved vertical salinity running in a stage that does not carry it:
-   refused by name.
+4. A stage that refuses the vertical salinity, inert or solved.
 5. A case generator whose bytes drift: the input digests are pinned.
 """
 from __future__ import annotations
@@ -36,7 +36,6 @@ import numpy as np
 import pytest
 
 from conftest import requires_gpu
-from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_seaice import column_itd_v842 as citd
 from woof.hex.mpas_seaice import column_ridge_v842 as crdg
 from woof.hex.mpas_seaice import column_step_v842 as cstep
@@ -109,13 +108,12 @@ def test_fixture_shows_v842_s_inert_vertical_salinity():
     ("step_bgc_zsal_bl99_dedd",
      lambda c: cv.refuse_unported(c["config"], {**c["dims"], "nSnowLayers": 1}, biogeochemistry=True)),
 ])
-def test_the_inert_vertical_salinity_is_carried_and_the_solved_one_refused(name, refuse):
+def test_the_inert_and_the_solved_vertical_salinity_are_carried(name, refuse):
     case = _case(name)
     refuse(case)
     solved = {**case, "config": {**case["config"], "woof_v842_corrections": (
         *cv.corrections(case["config"]), cv.ZSAL_SOLVE)}}
-    with pytest.raises(ConfigurationRefusal, match=cv.ZSAL_SOLVE):
-        refuse(solved)
+    refuse(solved)
 
 
 def test_the_step_and_coupling_prep_take_the_vertical_salinity():
