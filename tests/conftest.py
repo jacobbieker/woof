@@ -1159,6 +1159,13 @@ def _the_default_geography_root_counts_as_staged(monkeypatch):
         return real(geog_root, **kwargs)
 
     monkeypatch.setattr(go_cli, "geography_refusal", refusal)
+    # The lake_depth download the launch makes ahead of that check is the same hole: on the
+    # default root it would reach for the network on a host that has no tree.
+    real_stage = go_cli.stage_lake_depth
+    monkeypatch.setattr(
+        go_cli, "stage_lake_depth",
+        lambda geog_root, config: (False if pathlib.Path(geog_root) == default_geog_root()
+                                   else real_stage(geog_root, config)))
 
 
 @pytest.fixture

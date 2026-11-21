@@ -1199,8 +1199,10 @@ one digest in fast and strict. The full-ensemble branch (`je_factor <= 1`,
 `jb_factor = -999`, static control variables dropped) builds its cost, but
 WRFDA's `precondition_cg` divides by zero there, so woof skips the empty blocks
 (as for `max_vert_var5 = 0`). O6's namelist leaves `precondition_cg` off; its
-diagonal is checked against a transcription of `da_minimise_cg`'s loop. Still open: the LETKF-cycling
-pairing and the OSSE half of GV3.
+diagonal is checked against a transcription of `da_minimise_cg`'s loop. The `woof var` door takes members and
+`woof.da.var.pairing` pairs the hybrid with an LETKF cycle (the LETKF's forecast
+ensemble as `x'_n`; its analysis members recentred on the variational mean,
+`gamma`-weighted; synthetic-grid tests, `ps` not analysed by the LETKF). Still open: the OSSE half of GV3.
 
 ### V4. Hydrometeor CVs, radar, GOES, radiances (9.5-16 w)
 
@@ -2574,6 +2576,11 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      the forked chunk loop: 12 workers, under 2 minutes for 31 members and
      38,000 observations). Without it the host path is one process and
      took 20 minutes at 4 members.
+     The 31-member run's diagnostics: `host_workers = 12` with
+     `host_workers_reason = 'host_workers=12'` (asked for; the automatic
+     mode also forks on Linux), 237,448 of 310,341 points active, 62
+     batches, `chunk_points` 8000, setup 2.7 s, transform 64.6 s. On macOS
+     the loop stays in one process unless `host_workers` is passed.
    - **The window matters most.** The LETKF is 3-D (no FGAT), so an
      observation 3 hours old is compared with the 12Z state. With
      09-12Z observations the analysis made the sondes' v at 400-200 hPa
@@ -2611,6 +2618,24 @@ Each step is one small PR, opt-in, and leaves default runs unchanged.
      a static error does not absorb. The follow-ups are AMV error
      inflation or tighter thinning, and a 4-D (FGAT) operator before
      using the full window.
+   - **AMV error inflation (2026-11-21).** AMVs alone, 11-12Z, the
+     same 31 members, WRFDA's AMV error times a scale. Sonde RMS,
+     background to analysis (u / v 400-200 hPa, v all levels, T 850-500
+     hPa):
+
+     | AMV error scale | AMVs assimilated | u 400-200 | v 400-200 | v all | T 850-500 |
+     |---|---|---|---|---|---|
+     | 1 | 26,575 | 1.958 to 2.136 | 2.465 to 2.766 | 2.459 to 2.585 | 0.854 to 0.870 |
+     | 2 | 27,268 | 1.958 to 1.985 | 2.465 to 2.552 | 2.459 to 2.493 | 0.854 to 0.857 |
+     | 3 | 27,317 | 1.958 to 1.958 | 2.465 to 2.497 | 2.459 to 2.471 | 0.854 to 0.855 |
+
+     Inflation removes the damage but never gives a gain: at 3 times
+     the error the AMVs are neutral on the sondes, and at no scale do
+     they help. The AMV departures stay large (O-B RMS 5-7 m/s), so the
+     remaining suspects are the height assignment and a representativeness
+     error that a diagonal R does not carry. A 4-D (FGAT) LETKF operator
+     is still open and was not tried here. Tighter thinning was not run
+     (it needs the reader's source data again).
    - The RO O-B was +1.8 % of N at 20-30 km until #698, which converts
      geometric tangent heights to geopotential.
 
