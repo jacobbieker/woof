@@ -131,7 +131,8 @@ def test_fixture_covers_the_branches(precision):
         assert out["stats/int"].size == 12 * expected, name
         found = config["config_stats_cell_ID"] != 0
         assert ("Local cell ID, block, proc =       0" in log) != found, name
-    assert "Max velocity (m/yr), edge, level     -0.0000000000000000" in str(
+    # 'none' leaves every normal velocity 0: the magnitude is MAX of two zeros
+    assert "Max velocity (m/yr), edge, level      0.0000000000000000" in str(
         fixture["stats_benchmark_uniform"]["stats/log"])
     # the gregorian calendar's leap day lies inside EISMINT2's run
     assert str(fixture["eismint2_a_temperature_uniform"]["clock/now"]) == "2000-03-11_00:00:00"
@@ -547,10 +548,11 @@ def test_the_e_edit_descriptor_is_gfortrans(value, text):
 
 
 def test_max_keeps_x86_gfortrans_tie_rule():
-    # MAX(0.0, -0.0) is -0.0 and MAX(-0.0, 0.0) is 0.0 (maxss returns the second on a tie)
+    # MAX(localMax, -localMin) compiles to maxss with -localMin as the destination:
+    # a tie of signed zeros keeps localMax (gfortran 16 -O0, x86-64)
     from woof.hex.mpas_ice import statistics_v842 as st
     z = np.float32(0.0)
-    assert np.signbit(st._fmax(z, -z)) and not np.signbit(st._fmax(-z, z))
+    assert not np.signbit(st._fmax(z, -z)) and np.signbit(st._fmax(-z, z))
 
 
 @requires_gpu
@@ -563,7 +565,7 @@ def test_a_mutated_statistic_is_caught(monkeypatch, precision, mutation, field):
     if mutation == "pairwise":
         monkeypatch.setattr(st, "_sequential_sum", lambda terms, real: real(np.sum(np.asarray(terms, real))))
     elif mutation == "max_ties":
-        monkeypatch.setattr(st, "_fmax", lambda a, b: b if b > a else a)
+        monkeypatch.setattr(st, "_fmax", lambda a, b: a if a > b else b)
     else:
         original = st._first_extreme
 

@@ -90,6 +90,7 @@ def _run(tmp_path, case: dict, *extra: str, skip=()) -> int:
 @pytest.mark.parametrize("name, precision", [
     ("dome_uniform", "r4"), ("hydro_radial_uniform", "r4"), ("eismint2_a_temperature_varres", "r8"),
     ("dome_adaptive_varres", "r8"), ("simple_radial_shelf_varres", "r4"), ("simple_rim_uniform", "r8"),
+    ("stats_dome_varres", "r4"), ("stats_simple_shelf_uniform", "r8"),
 ])
 def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
     case = _case(name, precision)
@@ -108,6 +109,11 @@ def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
             assert fo.word_mismatches(got[field].reshape(pinned[key].shape), pinned[key]) == 0, field
         compared += 1
     assert compared > 100
+    # the statistics' reports, as the model logs them
+    log = tmp_path / "out" / "statistics.log"
+    assert log.exists() == fo.stats_on(case["config"])
+    if log.exists():
+        assert fo.stats_log(log.read_text().splitlines()) == str(pinned["stats/log"])
 
 
 @requires_gpu

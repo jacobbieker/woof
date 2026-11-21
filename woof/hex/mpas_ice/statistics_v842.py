@@ -23,8 +23,8 @@ rounded operation at a time in the Fortran's order: a column's ``sum`` from
 level 1 down, the cell sums from cell 1 up (``np.add.accumulate``, which
 adds in sequence; never a pairwise sum), the extrema with their first
 locations by strict comparison from the Fortran's sentinels (``1.0e34``,
-``huge``), and x86-64 gfortran's ``MAX`` (``maxss``: the first argument only when it
-is the larger). The report's lines are formatted as gfortran writes them (``A``,
+``huge``), and x86-64 gfortran's ``MAX(localMax, -localMin)`` (``maxss``, which
+keeps ``localMax`` on a tie of signed zeros). The report's lines are formatted as gfortran writes them (``A``,
 ``I``, ``F`` and ``E`` edit descriptors). On one rank every reduction is
 the identity; :attr:`Statistics.real_words` and :attr:`Statistics.int_words`
 are the words each reduction and broadcast returns, in call order, as the
@@ -212,9 +212,12 @@ def _first_extreme(values: np.ndarray, init, larger: bool, eligible: np.ndarray 
 
 
 def _fmax(a, b):
-    """x86-64 gfortran's ``MAX(a, b)`` (``maxss``/``maxsd``): ``a`` only when
-    it is the larger, so a tie of signed zeros (or a NaN) gives ``b``."""
-    return a if a > b else b
+    """``MAX(localMax, -localMin)`` as x86-64 gfortran -O0 compiles it:
+    ``maxss``/``maxsd`` with ``-localMin`` as the destination, so ``b``
+    only when it is the larger; a tie of signed zeros (or a NaN) gives
+    ``a``. (A bare ``MAX(a, b)`` of two variables compiles the other way
+    round: the instruction's operand order, not the intrinsic, decides.)"""
+    return b if b > a else a
 
 
 def compute_statistics(*, mesh: dict, geometry: dict, thermal: dict, velocity: dict, config: dict,
