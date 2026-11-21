@@ -513,7 +513,7 @@ echo "built ${build_dir}/run_ocn_accum"
 # prep_ice_calc_a2x_ix and prep_ice_mrg; then seq_frac_set.  Every routine is
 # the single-routine oracles' cut, byte for byte, linked together:
 # prep_ocn_mod and prep_ice_mod hold the host's use lines (prep_ocn_mod.F90
-# 3-21, prep_ice_mod.F90 3-20) and module data (82-113; 63-78), made public
+# 3-21, prep_ice_mod.F90 3-20) and module data (81-113; 62-78), made public
 # for the driver (prep_ocn_init and prep_ice_init set them up, as the driver
 # does), and their routines and getters; seq_flux_mct, seq_frac_mct,
 # seq_map_mod and seq_map_type_mod as in the flux and fractions sections;
@@ -539,9 +539,9 @@ rm -rf "${obj}" && mkdir -p "${obj}" && cd "${obj}"
 cp "${build_dir}/frac/seq_map_type_cut.F90" "${build_dir}/frac/seq_map_cut.F90" "${build_dir}/frac/seq_frac_cut.F90" .
 cp "${build_dir}/flux/seq_flux_cut.F90" .
 ocn_use=$(sed -n '3,21p' "${drv}/prep_ocn_mod.F90")
-ocn_data=$(sed -n '82,113p' "${drv}/prep_ocn_mod.F90")
+ocn_data=$(sed -n '81,113p' "${drv}/prep_ocn_mod.F90")
 ice_use=$(sed -n '3,20p' "${drv}/prep_ice_mod.F90")
-ice_data=$(sed -n '63,78p' "${drv}/prep_ice_mod.F90")
+ice_data=$(sed -n '62,78p' "${drv}/prep_ice_mod.F90")
 if [[ "$(printf '%s\n' "${ocn_use}" | head -1)" != *'r8 => SHR_KIND_R8'* \
       || "$(printf '%s\n' "${ocn_use}" | tail -1)" != *'only: ocn, atm, ice, rof, wav, glc'* \
       || "$(printf '%s\n' "${ocn_data}" | head -1 | tr -d ' ')" != '!mappers' \
