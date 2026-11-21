@@ -488,6 +488,34 @@ matched exchange unless asked.
 5. The coupled ocean + sea-ice step on `woof/hex/coupled`, with the exchange
    checked against the E3SM merge. The sea ice's time step with the
    column package is ported (above); the coupled step is not built yet.
+6. The ocean component under the coupler, option (a): "E3SM v3.2.0
+   coupler with MPAS v8.4.2 components, not an E3SM configuration"
+   (`woof/hex/coupled/hybrid_ocean.py`, registry
+   `e3sm-v3.2.0-coupler+mpas-v8.4.2`,
+   `tests/test_e3sm_hybrid_ocean_parity.py`). The MPAS v8.4.2 ocean runs as
+   `ocn_init_mct` and `ocn_run_mct` run E3SM's: at start, the forcing is
+   built again, the clock moves to its first coupling alarm without a step,
+   the means are reset and taken once, then the export and the import of
+   the zeroed x2o; each window, the import, the means reset
+   (v8.4.2's `ocn_time_average_coupled_init`), `ocn_cpl_dt / config_dt`
+   steps (forcing built frazil first, as E3SM builds it), then the export.
+   The constants are E3SM's build's (`MPAS_ESM_SHR_CONST`: `T0_Kelvin`
+   273.15, `rho_sw` 1026) by default, or v8.4.2's own (`constants='mpas'`).
+   The sea-ice pressure cap takes v8.4.2's `gravity = 9.80616_RKIND`.
+   The oracle (`tools/e3sm_coupler_oracle/run_hybrid_ocean.F90`) is that
+   sequence around v8.4.2's forward mode, with E3SM's import and export
+   cut verbatim and compiled against v8.4.2's modules, real(r8), on CUDA
+   and Metal. `hybrid_ocean.DIVERGENCES` lists each place E3SM's loop or
+   cap does something v8.4.2's lacks: ported, refused by name, or left out
+   with the reason. The sea ice under the same coupler is the next piece.
+7. Later work, option (b): port E3SM v3.2.0's own MPAS-Ocean
+   (`components/mpas-ocean`) and MPAS-Seaice (`components/mpas-seaice`),
+   which have moved away from MPAS-Model v8.4.2. Their land-ice fluxes,
+   frazil, equation of state, constants, GM/submesoscale/Redi, waves,
+   removed runoff, icebergs, the 10 m wind and the 3-D thermal forcing
+   differ or are absent in v8.4.2. Option (b) would be a real E3SM
+   configuration and would retire most of the refusals in (a). It is not
+   started.
 
 The matched exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
 are the ones agreed with the MALI port's ocean seam. Land ice sends
