@@ -120,14 +120,17 @@ def tracer_indices(to: "cv.TracerObject") -> np.ndarray:
 
 
 def _zsal_args(pools: dict, configs: dict, dims: dict[str, int], written: list, grids: bool = True) -> tuple:
-    """The kernels' trailing vertical-salinity arguments: nBioLayers, (the
+    """The kernels' trailing vertical-salinity arguments: nBioLayers (also
+    the vertical tracers'), (the
     ITD's biologyGrid and verticalGrid,) zSalinityFlux. Only under
     ``zsal_solve`` is anything read or written (``zSalinityFlux`` then joins
     ``written``, which an abort restores past the aborting cell)."""
     import cupy as cp
     if not cv.solves_zsal(configs):
         dummy = cp.zeros(1, np.float64)
-        return (np.int32(0), *((dummy, dummy) if grids else ()), dummy)
+        # nBioLayers is the vertical tracers' too
+        nbl = dims["nBioLayers"] if cv.vertical_tracers(configs) else 0
+        return (np.int32(nbl), *((dummy, dummy) if grids else ()), dummy)
     bgc, nbl, nil = pools["biogeochemistry"], dims["nBioLayers"], dims["nIceLayers"]
     flux = cv._need(bgc, "zSalinityFlux", (dims["nCells"] + 1,))
     written.append(flux)
