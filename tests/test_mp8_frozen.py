@@ -1179,9 +1179,9 @@ FROZEN_MODULE_DIGESTS = {
         # preprocessed unit is the previous one.  Previously b8b5b9b5/2c93b3ba.
         # RE-PINNED by the quirk pass (mynn_sfclay_psih_zolzt): psih2/psih10
         # from zt/L compiled in only under MYNN_SL_PSIH_ZOLZT; without it the
-        # preprocessed unit is the previous one.  Previously a02979c2.
+        # preprocessed unit is the previous one.  Previously a02979c2/a9abd502.
         '2e8b7cb344da2eb74e68893f8921d7140c534d3ed311f471abca8c6580b7a7c0',
-        'a9abd5020db8a204e3f538e9af69ebb903c2b329c56c258d5286bfdf18cc5ddf'),
+        '179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1'),
     'nest': (
         # Re-pinned for a combined four-side boundary launch. The original
         # single-side entry point and SINT expression tree remain unchanged.
