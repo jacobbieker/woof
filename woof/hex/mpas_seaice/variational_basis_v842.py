@@ -102,6 +102,9 @@ CORRECTIONS = ("planar_metric_terms", "periodic_local_coords")
 #: the outputs, in the velocity_variational pool
 OUTPUTS = ("basisGradientU", "basisGradientV", "basisIntegralsU", "basisIntegralsV", "basisIntegralsMetric",
            "tanLatVertexRotatedOverRadius", "cellVerticesAtVertex")
+#: the mesh pool's fields the set-up reads
+MESH_FIELDS = ("nCells", "nVertices", "maxEdges", "vertexDegree", "nEdgesOnCell", "edgesOnCell", "verticesOnCell",
+               "cellsOnVertex", "xCell", "yCell", "zCell", "xVertex", "yVertex", "zVertex", "dvEdge", "areaCell")
 
 
 class BasisError(MpasPortError):
@@ -320,16 +323,13 @@ def cell_vertices_at_vertex(mesh: dict) -> np.ndarray:
     """``seaice_cell_vertices_at_vertex``: (nVertices, vertexDegree), the last
     matching position (1-based) of the vertex in each surrounding cell, else 0."""
     nv, vd = int(mesh["nVertices"]), int(mesh["vertexDegree"])
-    out = np.zeros((nv, vd), np.int32)
-    cov = mesh["cellsOnVertex"]
-    noc, voc = mesh["nEdgesOnCell"], mesh["verticesOnCell"]
-    for v in range(nv):
-        for d in range(vd):
-            c = int(cov[v, d]) - 1
-            for k in range(int(noc[c])):
-                if int(voc[c, k]) == v + 1:
-                    out[v, d] = k + 1
-    return out
+    cells = np.asarray(mesh["cellsOnVertex"])[:nv, :vd].astype(np.int64) - 1
+    voc = np.asarray(mesh["verticesOnCell"])[cells]                      # (nv, vd, maxEdges)
+    k = np.arange(voc.shape[-1])
+    match = (voc == np.arange(1, nv + 1)[:, None, None]) & \
+        (k < np.asarray(mesh["nEdgesOnCell"])[cells][..., None])
+    last = voc.shape[-1] - np.argmax(match[..., ::-1], axis=-1)        # the last match, 1-based
+    return np.where(match.any(axis=-1), last, 0).astype(np.int32)
 
 
 # --- Wachspress ---------------------------------------------------------------
@@ -690,6 +690,14 @@ def initialize(*, mesh: dict, configs: dict, real, out: dict | None = None, metr
     unknown = set(corrections) - set(CORRECTIONS)
     if unknown:
         raise ValueError(f"unknown corrections {sorted(unknown)}; known: {CORRECTIONS}")
+    if metric_libm not in (None, *METRIC_LIBMS):
+        raise ValueError(f"metric_libm is one of {METRIC_LIBMS}, not {metric_libm!r}")
+    missing = [name for name in MESH_FIELDS if mesh.get(name) is None]
+    if missing:
+        _refuse("basis", "compute",
+                f"the variational basis is computed from the mesh, and the mesh pool carries no {missing}",
+                "the mesh fields " + ", ".join(MESH_FIELDS) + ", or basis = 'input' with the basis in the "
+                "velocity_variational pool")
     nc, nv, me = int(mesh["nCells"]), int(mesh["nVertices"]), int(mesh["maxEdges"])
     vd = int(mesh["vertexDegree"])
     sphere = bool(configs.get("mesh:on_a_sphere", configs.get("on_a_sphere", False)))
@@ -706,8 +714,10 @@ def initialize(*, mesh: dict, configs: dict, real, out: dict | None = None, metr
     m = dict(mesh)
     m["sphere_radius"] = configs.get("mesh:sphere_radius", configs.get("sphere_radius", 0.0))
     periodic = None
-    if "periodic_local_coords" in corrections and not sphere and configs.get("mesh:is_periodic", False):
-        periodic = {"x": configs.get("mesh:x_period"), "y": configs.get("mesh:y_period")}
+    if "periodic_local_coords" in corrections and not sphere and \
+            configs.get("mesh:is_periodic", configs.get("is_periodic", False)):
+        periodic = {"x": configs.get("mesh:x_period", configs.get("x_period")),
+                    "y": configs.get("mesh:y_period", configs.get("y_period"))}
     xl, yl = local_coords(m, sphere=sphere, rotate=rotate, real=real, periodic=periodic)
     out["tanLatVertexRotatedOverRadius"][:nv] = metric_terms(
         m, rotate=rotate, include=include, real=real, metric_libm=metric_libm,
@@ -751,10 +761,11 @@ def initialize_pools(pools: dict, configs: dict, *, metric_libm: str | None = No
         if a is None or np.isscalar(a) or isinstance(a, (int, float, np.ndarray)):
             return a
         return a.get()
-    mesh = {k: host(v) for k, v in pools["mesh"].items()}
+    mesh = {k: host(pools["mesh"].get(k)) for k in MESH_FIELDS}
     vv = pools["velocity_variational"]
-    out = {name: host(vv.get(name)) for name in OUTPUTS}
-    out = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in out.items()}
+    out = {name: vv.get(name) for name in OUTPUTS}
+    # .get() already gave a host copy; a numpy pool's arrays are copied
+    out = {k: (v.copy() if isinstance(v, np.ndarray) else host(v)) for k, v in out.items()}
     real = pools["velocity_solver"]["uVelocity"].dtype.type
     out, warnings = initialize(mesh=mesh, configs=configs, real=real, out=out, metric_libm=metric_libm,
                                corrections=corrections)
