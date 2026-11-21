@@ -5,6 +5,8 @@ file and exact licence acceptance. Credentials are never discovered.
 """
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
+import contextlib
+import contextvars
 import ctypes
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -436,10 +438,31 @@ def load_state(source, valid_time, lat, lon, *, path='', accept_licence='', cach
     return values, receipt
 
 
+_RESTORING = contextvars.ContextVar('woof_lake_state_restoring', default=False)
+
+
+@contextlib.contextmanager
+def restoring_from_checkpoint():
+    """Seams built inside this block are about to be overwritten by a restart payload.
+
+    The lake water, ice and sediment state is in that payload (``lake_columns``, the
+    ``sst``/``tsk``/``xice`` planes), so fetching the observed source again would read
+    the network (or a changed cache) for state the restore then discards, and a source
+    that is down would stop a restart that needs nothing from it.
+    """
+    token = _RESTORING.set(True)
+    try:
+        yield
+    finally:
+        _RESTORING.reset(token)
+
+
 def initialize_surface(fields, cfg, *, valid_time, latitude, longitude, cold_start=True):
     """Bind observations before either the LSM or lake cold start."""
     import cupy as cp
     source = getattr(cfg, 'lake_state_source', 'auto')
+    if _RESTORING.get():
+        return None, dict(schema='gpuwm.lake-init.v1', status='restored_from_checkpoint', source=source)
     if not cold_start or source == 'forcing':
         return None, dict(schema='gpuwm.lake-init.v1', status='retained_forcing', source=source)
     if valid_time is None or latitude is None or longitude is None:
