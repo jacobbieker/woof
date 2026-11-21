@@ -332,7 +332,7 @@ NCAR aerosols as a small PR whenever it fits.
    enthalpy solvers, the radial hydrology test and a marine variant, the
    enthalpy benchmark), each on a uniform and a variable resolution periodic
    hexagonal mesh (`tests/test_mali_forward_parity.py`). Refused by name:
-   MPAS's restart stream (`config_do_restart`), RK4, the analysis members, intervals with months, years on the Gregorian calendar,
+   MPAS's restart stream (`config_do_restart`), RK4, analysis members other than globalStats and regionalStats, intervals with months, years on the Gregorian calendar,
    fractions of a second. `li_SGH_init` gives grounded ice below sea level
    the ocean's water pressure (it reads a mask holding only the initial
    extent bit); `woof_sgh_init_mask = 'corrected'` computes the mask first,
@@ -374,7 +374,15 @@ NCAR aerosols as a small PR whenever it fits.
    meshes. The reports go to a callback, the `woof.hex.mpas_ice` logger, or
    the run door's `statistics.log`. v8.4.2 takes the extrema over ice-free
    cells and edges too; `woof_statistics_extrema = 'ice'` restricts them,
-   off by default. The analysis members are next.
+   off by default. The analysis members `globalStats` and `regionalStats`
+   (`woof/hex/mpas_ice/analysis_v842.py`) match v8.4.2's driver and members
+   compiled verbatim word for word, and compute when the model does: on
+   startup, at 'dt', at an interval on the stream's reference time (the
+   alarm rebuilt wherever a run resumes, as MPAS's restart does), and at
+   'output_interval' when the caller says the stream rings. Each compute's
+   words go to the members' pools and a callback; the run door writes them
+   to `<stream_name>.nc`. A mean over no ice is v8.4.2's NaN (x86-64's,
+   bit for bit, on any host); `woof_analysis_empty = 'corrected'` reports 0.
 6. **The Albany first-order (Blatter-Pattyn) Stokes solver**
    (`config_velocity_solver` = 'FO', also 'L1L2' and 'Stokes'). This is a C++
    finite-element code built on Trilinos (Kokkos assembly, NOX/Belos/MueLu
