@@ -28,6 +28,8 @@ THE BREAKAGES THESE PREVENT
 """
 from __future__ import annotations
 
+import contextlib
+import os
 from pathlib import Path
 
 import pytest
@@ -46,21 +48,34 @@ def _case(name):
     return next(c for c in oracle.cases() if c["name"] == name)
 
 
-@pytest.fixture
-def glibc239(monkeypatch):
+@contextlib.contextmanager
+def _glibc239_opt_in():
     """The dEdd orbit's opt-in glibc 2.39 binary64 transcriptions (LGPL, source checkout only)."""
     from woof.core import glibc239_gpu
     from woof.hex.mpas_seaice import column_radiation_v842 as crad
     from woof.hex.mpas_seaice import column_therm_v842 as ct
     if not glibc239_gpu.header_path().is_file():
         pytest.skip("the opt-in glibc 2.39 transcription is only in a source checkout")
-    monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "1")
+    before = os.environ.get("WOOF_GLIBC239_LIBM64")
+    os.environ["WOOF_GLIBC239_LIBM64"] = "1"
     caches = [ct._module_on, crad._module_on]
     for cache in caches:
         cache.cache_clear()
-    yield
-    for cache in caches:
-        cache.cache_clear()
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop("WOOF_GLIBC239_LIBM64", None)
+        else:
+            os.environ["WOOF_GLIBC239_LIBM64"] = before
+        for cache in caches:
+            cache.cache_clear()
+
+
+@pytest.fixture
+def glibc239():
+    with _glibc239_opt_in():
+        yield
 
 
 def test_case_inputs_are_the_recorded_bytes():
@@ -93,8 +108,9 @@ def test_fixture_covers_the_branches():
 
 
 @requires_gpu
-def test_gpu_matches_the_hybrid_oracle_word_for_word(glibc239):
-    report = oracle.measure()
+def test_gpu_matches_the_hybrid_oracle_word_for_word():
+    with _glibc239_opt_in():  # not a fixture: the numerics children call the test bare
+        report = oracle.measure()
     bad = {case: {k: v for k, v in r.items() if v} for case, r in report.items()}
     assert not any(bad.values()), bad
     assert all(len(r) > 300 for r in report.values())
