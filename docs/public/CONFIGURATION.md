@@ -589,11 +589,11 @@ Grell-Freitas notes in [PHYSICS.md](PHYSICS.md#cumulus-cu_physics).
 YSU's surface heat flux (`bl_pbl_physics = 1`, either `ysu_version`),
 per domain on the same terms. WRF's `bl_ysu.F90` adds `HFX` to potential
 temperature as a temperature flux and converts the tendency back with
-pi, so the column receives `HFX*pi` (1 - pi of the surface heating, 5% at
-850 hPa, is lost). With `true`, every use of `HFX` takes the theta flux
-`HFX/pi` at the lowest level, so the column receives `HFX`. Off, the
-arithmetic is WRF's word for word. It is not a WRF namelist key; set it in
-the TOML.
+pi, so the surface heat enters as `HFX*pi` (4.5% short at 850 hPa). With
+`true`, every use of `HFX` takes the theta flux `HFX/pi` at the lowest
+level, so the surface heat enters as `HFX`. Refused with BEP/BEM
+(`sf_urban_physics` 2 or 3). Off, the arithmetic is WRF's word for word.
+It is not a WRF namelist key; set it in the TOML.
 
 `obstacle_opt` (default `0`) resolves buildings and other obstacles on an
 LES or other high-resolution domain. It is woof's own option, not a WRF

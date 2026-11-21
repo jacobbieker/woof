@@ -7,8 +7,8 @@ a theta flux: ``sflux = hfx/rho/cp`` (:613), ``hgamt = gamfac*hfx/cp``
 ``f1(1) = thx(1) - 300 + hfx/cont/del(1)*dt2`` (:1045, ``cont = cp/g``).  The
 theta tendency is then turned into the temperature the driver hands back by
 multiplying with pi (:1103), so the column receives ``HFX*pi(1)`` rather than
-``HFX``: the surface heating is short by ``1 - pi``, about 0 at 1000 hPa, 5%
-at 850 hPa and 15% at 600 hPa (the Tibetan and Andean plateaus, the Rockies).
+``HFX``: the surface heating is short by ``1 - pi``, about 0 at 1000 hPa, 4.5%
+at 850 hPa and 14% at 600 hPa (the Tibetan and Andean plateaus, the Rockies).
 The surface layer's own budget (and Noah's) books the full HFX, so the
 energy is lost between the two schemes.
 
@@ -19,8 +19,9 @@ column's temperature receives HFX.  No kernel source changes; off (the
 default) the launch is the caller's hfx, WRF's word for word.
 
 WHAT THIS FILE PINS.
-* Configuration: off by default, YSU only.
-* The default launch: no key is the historical launch, byte for byte.
+* Configuration: off by default, YSU only, not with BEP/BEM.
+* The default launch: no key is the historical launch, byte for byte, and
+  the opt-in only replaces the hfx the kernel reads.
 * The corrected path on the GPU, by the column heat budget: YSU's implicit
   diffusion, countergradient and entrainment terms are all in flux form with
   a closed top, so ``sum_k cp*dtheta_k*delp_k/g`` is exactly the surface
@@ -56,6 +57,10 @@ def test_the_key_is_off_by_default_and_ysu_only():
     validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
                               ysu_version="wrf_461",
                               ysu_surface_heat_exner=True))
+    with pytest.raises(ConfigurationRefused, match="BEP/BEM"):
+        validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
+                                  sf_surface_physics=2, sf_urban_physics=2,
+                                  ysu_surface_heat_exner=True))
     with pytest.raises(ConfigurationRefused, match="true or false"):
         validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
                                   ysu_surface_heat_exner=1))
@@ -105,12 +110,21 @@ def _run(arrays, **kw):
 
 @pytest.mark.gpu
 @requires_gpu
-def test_the_default_launch_is_the_historical_unit():
+def test_the_opt_in_changes_only_the_surface_heat_flux_input():
+    """Off, the launch is the caller's hfx (the WRF-oracle YSU tests pin
+    that launch word for word); on, it is exactly the default launch fed
+    the theta flux hfx/pi(1), so nothing else in the program moves."""
     arrays, _ = _plateau_columns()
     default = _run(arrays)
     named_off = _run(arrays, surface_heat_exner=False)
+    corrected = _run(arrays, surface_heat_exner=True)
+    theta_flux = dict(arrays, hfx=np.ascontiguousarray(
+        (arrays["hfx"] / arrays["exner"][0]).astype(np.float32)))
+    fed = _run(theta_flux)
     for name, value in default.items():
         assert value.tobytes() == named_off[name].tobytes(), name
+        assert corrected[name].tobytes() == fed[name].tobytes(), name
+    assert default["dtheta"].tobytes() != corrected["dtheta"].tobytes()
 
 
 @pytest.mark.gpu

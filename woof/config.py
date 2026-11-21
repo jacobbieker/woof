@@ -2395,8 +2395,8 @@ class RunConfig:
     # appended off.  YSU (bl_pbl_physics = 1) adds the surface heat flux to
     # potential temperature as a temperature flux (bl_ysu.F90:613, :687,
     # :891, :1045) and converts the result back with pi (:1103), so the
-    # column receives HFX*pi rather than HFX: 5% of the surface heating is
-    # lost at 850 hPa, 15% at 600 hPa.  True divides HFX by the lowest
+    # column receives HFX*pi rather than HFX: 4.5% of the surface heating is
+    # lost at 850 hPa, 14% at 600 hPa.  True divides HFX by the lowest
     # level's pi before the unchanged kernel reads it; False is WRF's
     # arithmetic word for word.  Read only where bl_pbl_physics = 1.
     ysu_surface_heat_exner: bool = _config_field(default=False, kw_only=True)
@@ -9480,6 +9480,13 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "ysu_surface_heat_exner corrects YSU's surface heat flux "
             f"(bl_pbl_physics = 1); this run selects bl_pbl_physics = "
             f"{cfg.bl_pbl_physics}, which never reads it")
+    if cfg.ysu_surface_heat_exner and int(cfg.sf_urban_physics) in (2, 3):
+        raise ConfigurationRefused(
+            "ysu_surface_heat_exner corrects the surface heat flux YSU's heat "
+            "solve adds; with BEP/BEM (sf_urban_physics = "
+            f"{cfg.sf_urban_physics}) WRF's YSU takes that heat from the "
+            "urban sources instead (bepswitch = 1), so the correction would "
+            "reach only the PBL diagnosis; drop it or the urban model")
     _validate_solar_tsi(cfg)
     _validate_solar_ssi(cfg)
     _validate_spacewx_ionosphere(cfg)

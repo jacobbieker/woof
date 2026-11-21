@@ -5787,7 +5787,7 @@
    },
    {
     "file": "woof/ensemble/batch_physics.py",
-    "sha256": "cfea8af457f9f87ac6811e6a9063cf7d5db5952ecca066f27d3423c4b0f14b30"
+    "sha256": "a18255388bcb442c6e372bfd3e325752621319ff0d71d31a54e57ef5cb605d0b"
    },
    {
     "file": "woof/ensemble/batch_physics_init.py",
@@ -26431,7 +26431,7 @@
    },
    "source_sha256": "aa3255ad884eddc46748ca4e4232188cc3a22c415444c5b956f7dc7dd3c70246"
   },
-  "literal:woof/ensemble/batch_physics.py:537": {
+  "literal:woof/ensemble/batch_physics.py:544": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {

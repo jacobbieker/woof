@@ -148,9 +148,10 @@ def launch_ysu(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
     ``surface_heat_exner`` (``RunConfig.ysu_surface_heat_exner``, default
     off) is an opt-in correction of a WRF quirk: bl_ysu.F90 adds the surface
     heat flux to potential temperature as if it were a temperature flux, so
-    the column receives HFX*pi instead of HFX.  True hands the unchanged
-    kernel the theta flux HFX/pi(1) (w'theta' = w'T'/pi at the lowest
-    level), so every use of HFX in the scheme sees a theta flux.  False
+    the surface heat enters the column as HFX*pi(1) instead of HFX.  True
+    hands the unchanged kernel the theta flux HFX/pi(1) (w'theta' = w'T'/pi
+    at the lowest level), so every use of HFX in the scheme sees a theta
+    flux; the interior mixing stays WRF's theta form.  Refused with ``bep``.  False
     launches exactly what this function launched before the key existed.
     """
     generation = ysu_generation(ysu_version)
@@ -253,6 +254,10 @@ def launch_ysu(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
     ncol = ny * nx
     from woof.wrf_exact import ENABLED
     module, defines = ysu_kernel_selection(ysu_version, strict=ENABLED)
+    if surface_heat_exner and bep_args:
+        raise ValueError(
+            "surface_heat_exner does not combine with bep: the BEP arm takes "
+            "the surface heat from the urban sources (bepswitch = 1)")
     if surface_heat_exner:
         # The opt-in correction (default off): YSU takes HFX as a theta
         # flux, so hand it the theta flux HFX/pi(1).  The kernel is not

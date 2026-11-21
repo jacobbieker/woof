@@ -241,8 +241,12 @@ YSU_VOLUME_OUTPUTS = ("du", "dv", "dtheta", "dqv", "dqc", "dqi", "exch_h", "exch
 YSU_SURFACE_OUTPUTS = ("hpbl", "kpbl", "wstar", "delta", "topdown_radsum", "wstar3_2", "cloudflg")
 
 
-def ysu_output_plan(*, nz, ny, nx, members, reserved_bytes=0):
-    """All-member one-launch YSU outputs plus its full launch workspace."""
+def ysu_output_plan(*, nz, ny, nx, members, reserved_bytes=0, surface_heat_exner=False):
+    """All-member one-launch YSU outputs plus its full launch workspace.
+
+    ``surface_heat_exner`` (RunConfig.ysu_surface_heat_exner, default off)
+    adds the member theta-flux buffer the corrected launch reads.
+    """
     from woof.core.physics_inventory import ysu_workspace_floats
     nz, ny, nx, members = [_positive(v, n) for v, n in ((nz, "nz"), (ny, "ny"), (nx, "nx"), (members, "members"))]
     from woof.physics_vertical_contract import (
@@ -258,6 +262,8 @@ def ysu_output_plan(*, nz, ny, nx, members, reserved_bytes=0):
     # workspace. Admission can choose this launch or a qualified tiled
     # family later, but cannot hide the memory behind an average multiplier.
     specs.append(BatchArraySpec("ysu:workspace", (ysu_workspace_floats(nz, members * ny * nx),), "shared"))
+    if surface_heat_exner:
+        specs.append(BatchArraySpec("ysu:hfx_theta", (ny, nx), "member"))
     return BatchMemoryPlan(tuple(specs), reserved_bytes=reserved_bytes)
 
 
@@ -297,7 +303,8 @@ def prepare_ysu_column_batch(inputs, *, members, ny, nx, dt, available_bytes,
                 or array.dtype != np.dtype("float32") or not array.flags.c_contiguous
                 or int(array.device.id) != device):
             raise ValueError(f"YSU {name} needs resident contiguous float32 packed shape {shape}")
-    plan = ysu_output_plan(nz=nz, ny=ny, nx=nx, members=members, reserved_bytes=reserved_bytes)
+    plan = ysu_output_plan(nz=nz, ny=ny, nx=nx, members=members, reserved_bytes=reserved_bytes,
+                           surface_heat_exner=surface_heat_exner)
     storage = BatchStorage(plan, members, array_module=array_module, available_bytes=available_bytes)
     outputs = {}
     for name in YSU_VOLUME_OUTPUTS + YSU_SURFACE_OUTPUTS:
@@ -309,9 +316,9 @@ def prepare_ysu_column_batch(inputs, *, members, ny, nx, dt, available_bytes,
     bound = dict(inputs)
     if surface_heat_exner:
         # RunConfig.ysu_surface_heat_exner (default off), as launch_ysu: the
-        # unchanged kernel reads the theta flux HFX/pi(1) from a private
+        # unchanged kernel reads the theta flux HFX/pi(1) from a planned
         # buffer refreshed before every launch.
-        bound["hfx"] = array_module.empty_like(inputs["hfx"])
+        bound["hfx"] = storage.arrays["ysu:hfx_theta"].reshape(inputs["hfx"].shape)
     args = tuple(bound[name] for name in YSU_COLUMNS + YSU_SURFACES)
     args += tuple(outputs[name] for name in ("du", "dv", "dtheta", "dqv", "dqc", "dqi", "hpbl", "kpbl", "exch_h", "exch_m", "wstar", "delta"))
     args += (np.float32(dt), outputs["topdown_radsum"], outputs["wstar3_2"], outputs["cloudflg"],
@@ -1411,7 +1418,8 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
         raise ValueError("default shared surfaces must be the audited immutable Noah/MM5 inputs")
     active = atmosphere()
     extras_plan = default_column_extra_plan(nz=nz, ny=ny, nx=nx)
-    ysu_plan = ysu_output_plan(nz=nz, ny=ny, nx=nx, members=members)
+    ysu_plan = ysu_output_plan(nz=nz, ny=ny, nx=nx, members=members,
+                               surface_heat_exner=getattr(cfg, "ysu_surface_heat_exner", False) is True)
     required = extras_plan.required_bytes(members) + ysu_plan.required_bytes(members)
     if required > available_bytes:
         raise MemoryError(f"default native physics binding needs {required} bytes for YSU and held carriers")
@@ -1482,6 +1490,8 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
     def native_ysu(*args, **kwargs):
         actual = list(args[:10]) + [kwargs["rthraten"]] + [kwargs[name] for name in YSU_SURFACES]
         verify_pointers(actual, [inputs[name] for name in YSU_COLUMNS + YSU_SURFACES])
+        if bool(kwargs.get("surface_heat_exner", False)) != (getattr(cfg, "ysu_surface_heat_exner", False) is True):
+            raise ValueError("YSU's surface heat flux correction changed after admission")
         if kwargs.get("ysu_version", "wrf_480") != cfg.ysu_version:
             raise ValueError("YSU generation changed after admission; entrainment tendencies would use a different cap")
         if kwargs.get("bep") is not None or kwargs.get("topo") is not None or np.float32(kwargs["dt"]) != np.float32(driver.bldt_seconds):
