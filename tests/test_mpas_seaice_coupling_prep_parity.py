@@ -112,8 +112,12 @@ def test_unported_options_are_refused_by_name(monkeypatch):
         cpl.check_config({})
     with pytest.raises(ConfigurationRefusal, match="config_atmos_boundary_method"):
         cpl.check_config({"config_atmos_boundary_method": "constant"})
-    with pytest.raises(ConfigurationRefusal, match="config_use_column_biogeochemistry"):
-        cpl.check_config({"config_use_ocean_mixed_layer": False, "config_use_column_biogeochemistry": True})
+    with pytest.raises(ConfigurationRefusal, match="config_use_nitrate"):
+        cpl.check_config({"config_use_ocean_mixed_layer": False, "config_use_column_biogeochemistry": True,
+                          "config_use_nitrate": True})
+    # the brine height alone is carried: its ocean fluxes are zeroed, then scaled
+    cpl.check_config({"config_use_ocean_mixed_layer": False, "config_use_column_biogeochemistry": True,
+                      "config_use_brine": True})
     cpl.check_config(dict(oo.BASE_CONFIG))
 
 

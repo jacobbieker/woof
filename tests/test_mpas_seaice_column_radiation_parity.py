@@ -142,7 +142,8 @@ def test_fixture_covers_the_branches():
 @pytest.mark.parametrize("overrides, match", [
     ({"config_use_aerosols": True}, "aerosols"),
     ({"config_use_shortwave_bioabsorption": True}, "bioabsorption"),
-    ({"config_use_column_biogeochemistry": True}, "biogeochemistry"),
+    ({"config_use_column_biogeochemistry": True, "config_use_skeletal_biochemistry": True},
+     "config_use_skeletal_biochemistry"),
 ])
 def test_unported_configurations_are_refused_by_name(overrides, match):
     case = _case("rad_ccsm3_constant_albedos")

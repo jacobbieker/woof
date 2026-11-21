@@ -9,6 +9,7 @@ MPAS runs it:
 - :func:`predynamics`, ``seaice_column_predynamics_time_integration``:
   ``column_prep_radiation`` (under the column shortwave with a computed
   surface temperature), ``column_vertical_thermodynamics``,
+  ``column_biogeochemistry`` (under ``config_use_column_biogeochemistry``),
   ``column_itd_thermodynamics`` and ``seaice_column_update_state``
   ("thermodynamics", ``config_dt``, ``config_dt``);
 - per dynamics subcycle, :func:`reinitialize_diagnostics_dynamics` and
@@ -23,6 +24,7 @@ MPAS runs it:
   fluxes), after the step's output.
 
 Each stage is the port in :mod:`~woof.hex.mpas_seaice.column_therm_v842`,
+:mod:`~woof.hex.mpas_seaice.column_bgc_v842`,
 :mod:`~woof.hex.mpas_seaice.column_itd_v842`,
 :mod:`~woof.hex.mpas_seaice.column_ridge_v842`,
 :mod:`~woof.hex.mpas_seaice.column_radiation_v842`,
@@ -41,8 +43,19 @@ v8.4.2 (``tests/test_mpas_seaice_column_step_parity.py``). An abort returns
 ``(ierr, cell, message)`` from the stage that aborts, and the step stops
 there, as ``seaice_timestep`` returns on ``ierr > 0``.
 
-Refused by name, besides each stage's own refusals: the column
-biogeochemistry, the vertical snow and ice tracers
+The column biogeochemistry is carried with its brine height alone
+(``config_use_brine``; each stage refuses the biogeochemical tracers): the
+brine fraction travels through every stage, and a ``column_biogeochemistry``
+that v8.4.2 dies on raises
+:class:`~woof.hex.mpas_seaice.column_bgc_v842.CriticalAbort`. v8.4.2 itself
+cannot take a step with the brine height alone: its
+``seaice_column_reinitialize_diagnostics_bgc`` zeroes ``totalChlorophyll``,
+which the algae's packages allocate, through a null pointer and dies. The
+step refuses that by name; the opt-in ``bgc_inactive_diagnostics`` correction
+(:data:`~woof.hex.mpas_seaice.column_v842.CORRECTIONS`) zeroes only the
+fields that exist, and the rest of the step is v8.4.2's word for word.
+
+Refused by name, besides each stage's own refusals: the vertical snow and ice tracers
 (``column_separate_snow_ice_tracers`` and ``_combine_``), the ocean mixed
 layer (``coupling_prep_v842``) and, under the velocity solver, the weak-form
 stress divergence (its principal stresses are re-initialised in the
@@ -55,6 +68,7 @@ import numpy as np
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ocean.forward_v842 import format_time
 
+from . import column_bgc_v842 as cbgc
 from . import column_itd_v842 as citd
 from . import column_radiation_v842 as crad
 from . import column_ridge_v842 as crdg
@@ -93,9 +107,14 @@ def check_config(configs: dict) -> None:
     if not c.get("config_use_column_package", False):
         _refuse("config_use_column_package", False, "the column step runs with the column package on",
                 "config_use_column_package = .true.")
-    if c.get("config_use_column_biogeochemistry", False):
-        _refuse("config_use_column_biogeochemistry", True, "the column biogeochemistry is not ported",
-                "config_use_column_biogeochemistry = .false.")
+    if c.get("config_use_column_biogeochemistry", False) and "bgc_inactive_diagnostics" not in cv.corrections(c):
+        missing = inactive_bgc_diagnostics(c)
+        if missing:
+            _refuse("config_use_column_biogeochemistry", True,
+                    "v8.4.2's seaice_column_reinitialize_diagnostics_bgc zeroes " + ", ".join(missing)
+                    + ", whose packages are off and which therefore has no array: it writes to address 0 and "
+                    "the time step dies", "woof_v842_corrections = ('bgc_inactive_diagnostics',) (zero only "
+                    "the fields that exist), or config_use_column_biogeochemistry = .false.")
     if c.get("config_use_vertical_tracers", False):
         _refuse("config_use_vertical_tracers", True,
                 "column_separate_snow_ice_tracers and column_combine_snow_ice_tracers are not ported",
@@ -112,6 +131,18 @@ def check_config(configs: dict) -> None:
 def _zero(pool: dict, *names: str) -> None:
     for name in names:
         pool[name][...] = 0
+
+
+def inactive_bgc_diagnostics(configs: dict) -> tuple[str, ...]:
+    """The fields ``seaice_column_reinitialize_diagnostics_bgc`` zeroes whose
+    own Registry packages are all off, so v8.4.2 has no array for them (the
+    Registry allocates a var by its own packages, not its struct's)."""
+    active = cv.packages(configs)
+    own = {name: [p for p in package_text.split(";") if p]
+           for struct in cv.registry_fields()["var_structs"] if struct["name"] == "biogeochemistry"
+           for name, _, _, package_text in struct["vars"]}
+    return tuple(name for name in _BGC_FIELDS
+                 if own[name] and not any(active[f"{p}Active"] for p in own[name]))
 
 
 def reinitialize_atmospheric_fluxes(pools: dict, configs: dict) -> None:
@@ -179,12 +210,17 @@ def reinitialize_diagnostics_dynamics(pools: dict, configs: dict) -> None:
 
 
 def reinitialize_diagnostics_bgc(pools: dict, configs: dict) -> None:
-    """``seaice_column_reinitialize_diagnostics_bgc`` (the biogeochemistry is
-    refused; the shortwave's ``bioTracerShortwave`` is zeroed)."""
+    """``seaice_column_reinitialize_diagnostics_bgc``
+    (``mpas_seaice_column.F:12403-12491``): the biogeochemistry's diagnostics
+    and fluxes, and the shortwave's ``bioTracerShortwave``, zeroed; under the
+    ``bgc_inactive_diagnostics`` correction, only those whose packages are on
+    (:func:`inactive_bgc_diagnostics`)."""
     if not configs["config_use_column_package"]:
         return
     if configs["config_use_column_biogeochemistry"]:
-        _zero(pools["biogeochemistry"], *_BGC_FIELDS)
+        # check_config refuses the fields v8.4.2 has no array for unless corrected
+        skip = inactive_bgc_diagnostics(configs) if "bgc_inactive_diagnostics" in cv.corrections(configs) else ()
+        _zero(pools["biogeochemistry"], *(name for name in _BGC_FIELDS if name not in skip))
     if configs["config_use_column_biogeochemistry"] or configs["config_use_column_shortwave"]:
         _zero(pools["biogeochemistry"], "bioTracerShortwave")
 
@@ -206,6 +242,10 @@ def predynamics(pools: dict, configs: dict, state: "cv.ColumnState", now: str) -
         crad.prep_radiation(pools, c, state)
     if c["config_use_column_vertical_thermodynamics"]:
         abort = ct.vertical_thermodynamics(pools, c, state, day=day)
+        if abort[0] > 0:
+            return abort
+    if c["config_use_column_biogeochemistry"]:
+        abort = cbgc.biogeochemistry(pools, c, state)
         if abort[0] > 0:
             return abort
     if c["config_use_column_itd_thermodynamics"]:

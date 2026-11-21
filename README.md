@@ -390,9 +390,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     profiles and ocean concentrations, and `column_biogeochemistry`'s
     flushing, flooding and Darcy velocity, RKIND 8 with no opt-in, word for
     word with v8.4.2 on CUDA and Metal. v8.4.2's diatom carbon to nitrogen
-    ratio (the proteins') has a named correction (`zbgc_c2n_proteins`);
-    the other biogeochemistry flags, and the brine fraction in the ITD,
-    ridging and remap, are refused by name until their phases land;
+    ratio (the proteins') has a named correction (`zbgc_c2n_proteins`).
+    The brine fraction is carried through the ITD (new ice, the thickness
+    surplus, zapped categories), ridging, the remap, the column step and
+    the coupled step (the ocean biogeochemistry fluxes zeroed and scaled),
+    word for word on CUDA and Metal. v8.4.2's step writes the algae's
+    `totalChlorophyll` through a null pointer when the brine height runs
+    alone (it dies on every step), so the step refuses that configuration
+    unless the correction `bgc_inactive_diagnostics` is named; the other
+    biogeochemistry flags are refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),

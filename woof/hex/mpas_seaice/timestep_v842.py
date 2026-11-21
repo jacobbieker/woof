@@ -66,8 +66,8 @@ package and the velocity solver compiled verbatim
 Refused by name: upwind advection (v8.4.2 cannot run it), a periodic
 planar mesh under advection, forcing, the weak-form stress divergence, the
 unit tests, a restart start, halo exchanges, and what the column step
-refuses (the column biogeochemistry, the vertical snow and ice tracers, the
-ocean mixed layer's constant boundary layer). ``seaice_check_state`` changes
+refuses (the column biogeochemistry but its brine height, the vertical snow
+and ice tracers, the ocean mixed layer's constant boundary layer). ``seaice_check_state`` changes
 no state and is not run.
 """
 from __future__ import annotations
@@ -192,7 +192,7 @@ def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None)
     if configs.get("config_use_column_package", False):
         from . import column_v842 as cv
         _column_precision(pools)
-        cv.init_column_itd(pools, cv.init_parameters(pools, configs))
+        cv.init_column_itd(pools, cv.init_parameters(pools, configs, biogeochemistry=True))
     advection = configs.get("config_use_advection", False)
     if remap_geometry is None:
         remap_geometry = "compute" if advection else "input"
@@ -226,7 +226,7 @@ def _column_state(pools: dict, configs: dict):
     ``colpkg_init_itd`` run on a copy of the thickness limits (the pools'
     keep what the run has made of them, as a running model's do)."""
     from . import column_v842 as cv
-    state = cv.init_parameters(pools, configs)
+    state = cv.init_parameters(pools, configs, biogeochemistry=True)
     limits = pools["initial"]["categoryThicknessLimits"]
     cv.init_column_itd({"initial": {"categoryThicknessLimits": limits.copy()}}, state)
     return state
