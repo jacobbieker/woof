@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 455,
+**Which keys a `[[domain]]` table may override.** Exactly these 456,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -406,7 +406,7 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     iccg_prescribed_den  cellcount_method  cldtop_adjustment  do_radar_ref
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
-    gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
+    gf_deep_rain_evaporation_booking  ysu_surface_heat_exner  mynn_sfclay_psih_zolzt
     obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
     obstacle_drag_coefficient  obstacle_wall_z0  urban_param_file
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
@@ -594,6 +594,13 @@ pi, so the surface heat enters as `HFX*pi` (4.5% short at 850 hPa). With
 level, so the surface heat enters as `HFX`. Refused with BEP/BEM
 (`sf_urban_physics` 2 or 3). Off, the arithmetic is WRF's word for word.
 It is not a WRF namelist key; set it in the TOML.
+
+`mynn_sfclay_psih_zolzt` (default `false`) is an opt-in correction to the
+MYNN surface layer's 2 m and 10 m diagnostics (`sf_sfclay_physics = 5`,
+`mynn_sfclay_variant = "wrf_461"`), per domain on the same terms. WRF's
+`module_sf_mynn.F` integrates that heat profile from `z0/L` while its log
+term starts at `zt`; with `true` it starts at `zt/L`. Off, the arithmetic
+is WRF's word for word.
 
 `obstacle_opt` (default `0`) resolves buildings and other obstacles on an
 LES or other high-resolution domain. It is woof's own option, not a WRF
