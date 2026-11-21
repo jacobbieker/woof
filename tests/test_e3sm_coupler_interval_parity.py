@@ -260,7 +260,8 @@ def test_a_reordered_or_rewired_chain_is_caught(glibc239, monkeypatch):
                             nextsw_cday=self.nextsw_cday)
         real["atmocn_setup"](self, a2x)                      # the flux, the merge and the albedos again
     monkeypatch.setattr(ie.CouplerInterval, "atmocn_setup", albedo_first)
-    assert _caught("ocean_every_third")
+    # (with flux_albav off and nextsw_cday below -0.5 the albedos change nothing the merge reads,
+    # so only the averaged albedos show the order)
     assert _caught("albav_ice_every_other_epbal")
     restore()
 
