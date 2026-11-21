@@ -2364,8 +2364,16 @@ class CudaRegionalRuntimeV841:
     # -- graft: the scalar boundary stages ---------------------------------
 
     def bdy_adjust_scalars(self, scalars: Any, rk_step: int) -> None:
-        """``atm_srk3:2688-2717``."""
+        """``atm_srk3:2688-2717``; then, opted in, WRF's flow-dependent specified zone for the undriven species."""
 
+        self._bdy_adjust_driven_scalars(scalars, rk_step)
+        undriven = getattr(self, "undriven_species_boundary", None)
+        if undriven is not None:
+            # --undriven-species-boundary wrf-flow-dependent (woof.hex.undriven_species_boundary):
+            # the step's split mass flux the scalar transport read, staged by the driver.
+            undriven.apply(scalars, getattr(self, "undriven_mass_flux", None))
+
+    def _bdy_adjust_driven_scalars(self, scalars: Any, rk_step: int) -> None:
         dt_rk = transport_rk_timestep_f32(
             outer_dt=self.outer_dt, rk_step=int(rk_step),
             order=self.time_integration_order,

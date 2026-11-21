@@ -419,6 +419,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     real(r8), word-exact on CUDA and Metal against the routine compiled
     verbatim on the pinned MCT (`tools/e3sm_coupler_oracle`); the water
     isotopes are refused by name;
+  - the coupler's sea-ice import merge, E3SM v3.2.0's `prep_ice_merge`
+    (`woof/hex/coupled/prep_ice_merge_e3sm.py`, opt-in): x2i from the
+    ocean, atmosphere, land ice and waves by shared name, with rain, snow and
+    the ice runoff summed and scaled by `flux_epbalfact`. real(r8),
+    word-exact on CUDA and Metal against the routine compiled verbatim on
+    MCT; the water isotopes are refused by name;
   - MPAS-Ocean's coupler import and export, E3SM v3.2.0's `ocn_import_mct`
     and `ocn_export_mct` with `mpaso_cpl_indices_set`
     (`woof/hex/coupled/ocn_coupling_e3sm.py`, opt-in): x2o into the forcing
@@ -461,6 +467,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     albedos, with E3SM's and MCT's stops. real(r8), word-exact on CUDA and
     Metal against the routine compiled verbatim on MCT. The orbital albedo
     is refused by name.
+  - The coupler's ocean-input accumulation, E3SM v3.2.0's `prep_ocn_accum`
+    and `prep_ocn_accum_avg` over MCT's `mct_avect_accum`/`mct_aVect_avg`
+    (`woof/hex/coupled/ocn_accum_e3sm.py`, opt-in): the merged x2o summed
+    over the ocean's coupling window, averaged by E3SM's rounded `1/count`
+    and copied back. real(r8), word-exact on CUDA and Metal against the
+    routines compiled verbatim on MCT.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
@@ -569,6 +581,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     WRF's inflow perturbation on the regional relax rings
     (`woof hex forecast --inflow-perturbation`, which takes its depth from
     the run's own boundary-layer height since hex has no parent model);
+  - WRF's flow-dependent specified zone for the microphysics species a
+    regional boundary stream does not drive (`woof hex forecast
+    --undriven-species-boundary wrf-flow-dependent`: outflow copies the
+    first cell inside the zone, inflow sets 0, or `ccn_conc` for the CCN
+    number). The default, `free`, keeps MPAS's behaviour: those species
+    get no boundary step;
   - `woof resume` and `woof branch` for hex runs
     ([docs/branch-from-checkpoint.md](docs/branch-from-checkpoint.md));
   - GRIB2 and Earth2 export ([docs/grib2-export.md](docs/grib2-export.md));
@@ -582,7 +600,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     transition-band diagnostics. The step is set by the smallest cell, so
     a graded mesh costs about what its finest cells cost;
   - an option matrix that runs generic-seam column options through a real
-    hex forecast on CUDA and Metal.
+    hex forecast on CUDA and Metal. Every row now runs or is refused by
+    name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
+    the 149-level case (nominal eta), MAD-WRF (species row) and any
+    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5,
+    KF-CuP, BouLac and QNSE rows state their layer limits.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
