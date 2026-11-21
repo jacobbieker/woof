@@ -405,6 +405,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     real(r8), word-exact on CUDA and Metal against the routine compiled
     verbatim on the pinned MCT (`tools/e3sm_coupler_oracle`); the water
     isotopes are refused by name;
+  - the coupler's sea-ice import merge, E3SM v3.2.0's `prep_ice_merge`
+    (`woof/hex/coupled/prep_ice_merge_e3sm.py`, opt-in): x2i from the
+    ocean, atmosphere, land ice and waves by shared name, with rain, snow and
+    the ice runoff summed and scaled by `flux_epbalfact`. real(r8),
+    word-exact on CUDA and Metal against the routine compiled verbatim on
+    MCT; the water isotopes are refused by name;
   - MPAS-Ocean's coupler import and export, E3SM v3.2.0's `ocn_import_mct`
     and `ocn_export_mct` with `mpaso_cpl_indices_set`
     (`woof/hex/coupled/ocn_coupling_e3sm.py`, opt-in): x2o into the forcing

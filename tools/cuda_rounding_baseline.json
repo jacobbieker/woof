@@ -942,6 +942,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "518fff55f60405a15c6728e33f1c094521e6e5a876ec749dcd3a5ab801418d84",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "fc4e626f90eb7271581586db7a482fea1ee4a111e7a081e3103d588543b06142",
+    "file": "woof/hex/coupled/prep_ice_merge_e3sm.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "529a111e9cb4230800289db2d8008a6c688c7e4a48d5b0aeaa73316db7ee3c7f",
     "constructor": "RawKernel",
     "factory": "_kernel",
@@ -4940,6 +4948,10 @@
     "sha256": "84ee5201826f52ee4fa2c1889280f7e5b40b34d1a4ffa14ccab0654c27012854"
    },
    {
+    "file": "woof/hex/coupled/prep_ice_merge_e3sm.cu",
+    "sha256": "712b39555dedd630124820ad4b53206eb0b3715099394e95176a8a4cca983164"
+   },
+   {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.cu",
     "sha256": "34b752cd152fd8a3fb699ce182480d6a8eccc8b4eb44fcaa8f4f6f2559994418"
    },
@@ -5820,6 +5832,10 @@
    {
     "file": "woof/hex/coupled/ocnalb_e3sm.py",
     "sha256": "682a61f3ca21164da0c4975bf3f47c4b59d9f3055a2f28ab7179c062996f3e00"
+   },
+   {
+    "file": "woof/hex/coupled/prep_ice_merge_e3sm.py",
+    "sha256": "6cae9337b3b9b030059946a6b6f85707f1210b1260dbe2c80279bad18cecd51f"
    },
    {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.py",
