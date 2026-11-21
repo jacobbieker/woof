@@ -12,7 +12,11 @@ config's wrf_chem block, so both hex routes take it from the same place:
   on tests/test_hex_chem_suite_v842_gpu.py's stand-in session: its rows are the WOOF route's byte for byte.
 
 On both, the cells inside a polar cap gain NO against the same run without the source and every other cell
-is untouched to the bit.  The proton flux is a fixed hold (a hard event, about 4e4 pfu above 10 MeV, the
+is untouched to the bit; the NO the source adds each step is positive at every cap cell's top and the same
+from the same pressures on hex and on the WRF grid.  (Below a 137 hPa model top that hard event's increment
+is near float32's resolution of the RADM2 background, so it is checked as the source adds it, not as a row
+difference; the published-scale check, about 1 ppbv NO a day at 1 hPa, is tests/test_spacewx_epp_chem.py's,
+on the same woof.spacewx.epp_chem code.)  The proton flux is a fixed hold (a hard event, about 4e4 pfu above 10 MeV, the
 size of October 1989's peak), the geomagnetic field the synthetic dipole of tests/test_spacewx_ionosphere.py.
 """
 from __future__ import annotations
@@ -46,9 +50,28 @@ AREAS = {"uniform": np.full(NCOL, 2.25e8), "variable": np.geomspace(9.0e6, 4.0e8
 
 @pytest.fixture
 def held(monkeypatch):
-    from woof.spacewx import epp_chem, igrf
+    """The fixed hold, and a record of every step's NO increment the source adds (ppmv, per apply call)."""
+    from woof.spacewx import epp_chem, igrf, particles
     monkeypatch.setattr(igrf, "load", lambda *a, **k: _dipole())
     monkeypatch.setattr(epp_chem, "held_flux", lambda source, start, **k: _held(HARD))
+    calls, apply = [], epp_chem.EppSource.apply
+
+    def spy(self, rows, p8w, dt):
+        q = epp_chem.ion_pairs(p8w, self.log_rate, cp) * self.cap
+        per_pair = particles.vmr_tendency(1.0, 1.0) * 1.0e6 * float(dt) * dict(epp_chem.YIELDS)["no"]
+        calls.append((cp.asnumpy(q).reshape(q.shape[0], -1) * per_pair, cp.asnumpy(p8w).reshape(p8w.shape[0], -1)))
+        return apply(self, rows, p8w, dt)
+
+    monkeypatch.setattr(epp_chem.EppSource, "apply", spy)
+    return calls
+
+
+def _source_acts_in_the_caps_only(calls, cap):
+    """Each step's NO increment: positive at the top of every cap cell, zero outside the caps."""
+    for inc, _p8w in calls:
+        assert inc.shape[-1] == NCOL
+        assert np.all(inc[:, ~cap] == 0.0)
+        assert np.all(inc[-1, cap] > 0.0), inc[-1]
 
 
 def _cap():
@@ -103,10 +126,6 @@ def _woof_route(epp, area):
     return runtime, wrf, out
 
 
-def _no(runtime, rows):
-    return next(h for (h, _w), row in zip(rows, runtime.rows) if row.name == "no")
-
-
 @pytest.mark.parametrize("mesh", sorted(AREAS))
 def test_the_woof_route_is_the_wrf_paths_source_word_for_word(held, capsys, mesh):
     runtime, wrf, on = _woof_route(True, AREAS[mesh])
@@ -130,8 +149,48 @@ def test_the_woof_route_is_the_wrf_paths_source_word_for_word(held, capsys, mesh
     for (rows_on, _p), (rows_off, _q) in zip(on, off):
         for (a, _w), (b, _v), row in zip(rows_on, rows_off, runtime.rows):
             assert a[:, ~cap].tobytes() == b[:, ~cap].tobytes(), row.name
-    gain = _no(runtime, on[-1][0]) - _no(off_runtime, off[-1][0])
-    assert np.all(gain[:, cap].sum(axis=0) > 0.0), gain[:, cap].sum(axis=0)
+    # hex's source and the WRF path's, from the same p8w, every step
+    assert len(held) == 2 * STEPS
+    for (inc_hex, p_hex), (inc_wrf, p_wrf) in zip(held[0::2], held[1::2]):
+        assert p_hex.tobytes() == cp.asnumpy(base._to_hex(cp.asarray(p_wrf.reshape(-1, base.NY, base.NX)))).tobytes()
+        np.testing.assert_array_equal(inc_hex, cp.asnumpy(base._to_hex(cp.asarray(
+            inc_wrf.reshape(-1, base.NY, base.NX)))).reshape(inc_hex.shape))
+    _source_acts_in_the_caps_only(held[0::2], cap)
+
+
+def _suite(tmp_path, raw, area, start):
+    """tests/test_hex_chem_suite_v842_gpu.py's _suite with the start's columns in place at bind (the RADM2
+    cold start reads them) and no inventory frames."""
+    import json
+    from types import SimpleNamespace
+    from woof.hex.mpasphys import chemistry_v842 as suite
+    path = tmp_path / "chemistry.json"
+    path.write_text(json.dumps(raw))
+    mesh = SimpleNamespace(n_cells=NCOL, attrs={}, arrays={"areaCell": np.asarray(area, np.float64),
+                                                           "latCell": np.radians(LAT), "lonCell": np.radians(LON)})
+    zw = np.linspace(0.0, 16000.0, NZ + 1)
+    vertical = SimpleNamespace(zw=zw, zgrid=np.repeat(zw[None, :], NCOL, axis=0))
+    chem = suite.SuiteChemistry(path, registry_names=sv842.REGISTRY, mesh=mesh, nlev=NZ, grid_path=path,
+                                start_text=sv842.CONFIGS["config_start_time"], vertical=vertical,
+                                configs=dict(sv842.CONFIGS), dt=DT)
+    rng = np.random.default_rng(7)
+    host = SimpleNamespace(scalars=rng.uniform(1e-6, 1e-3, (len(sv842.REGISTRY), NZ, NCOL)).astype(np.float32))
+    chem.extend_state(host)
+    dycore = SimpleNamespace(atmosphere=SimpleNamespace(state=SimpleNamespace(scalars=cp.asarray(host.scalars))))
+    session = sv842._Session()
+    session.pools["sfc_input", "xland"] = cp.asarray(np.ones(NCOL), dtype=cp.float32)
+    holder = SimpleNamespace(columns=start)
+    chem._columns = lambda atmosphere: sv842._prepared(holder.columns)
+    real = chem_wrf.HexWrfChemistry.__init__
+
+    def no_frames(self, *a, **k):
+        real(self, *a, **k)
+        self.state.chem.emission_frames = _NoFrames()
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(chem_wrf.HexWrfChemistry, "__init__", no_frames)
+        chem.bind(dycore=dycore, cache=None, coupling=SimpleNamespace(session=session, names=sv842.REGISTRY))
+    return chem, dycore, session, holder
 
 
 def _suite_route(tmp_path, monkeypatch, epp, area):
@@ -141,15 +200,12 @@ def _suite_route(tmp_path, monkeypatch, epp, area):
     original = chem_wrf.attach_statics
     monkeypatch.setattr(chem_wrf, "attach_statics",
                         lambda runtime, **kw: original(runtime, lat_deg=None, lon_deg=None, fields=base._statics()))
-    monkeypatch.setattr(sv842, "LAT", np.radians(LAT))
-    monkeypatch.setattr(sv842, "LON", np.radians(LON))
     seam = base._seam()
     inputs = base._profile()
     state2 = {n: inputs[n].copy() for n in
               ("theta", "qv", "qc", "qr", "qi", "qs", "qg", "pressure", "rho_dry", "z_interface")}
     raw = _raw(epp)
-    chem, dycore, session, holder = sv842._suite(tmp_path, raw, area)
-    chem.runtime.state.chem.emission_frames = _NoFrames()
+    chem, dycore, session, holder = _suite(tmp_path, raw, area, base._columns(inputs, inputs))
     ref = chem_wrf.HexWrfChemistry("chemistry.json", raw, chem.digest, cfg=seam._cfg, area=area, nlev=NZ,
                                    ncells=NCOL, offset=0, start_time=base.START, fnm=seam._state.fnm,
                                    fnp=seam._state.fnp, terrain=seam._state.ht)
@@ -190,8 +246,11 @@ def test_the_suite_route_takes_it_from_the_chemistry_config(held, tmp_path, monk
     assert cp.asnumpy(chem.runtime.state.chem.epp_source.cap).reshape(-1).astype(bool).tolist() == cap.tolist()
     for step, (suite_rows, woof_rows) in enumerate(on, start=1):
         assert suite_rows.tobytes() == woof_rows.tobytes(), step
+    # the suite runtime's source and its WOOF-route reference's, every step
+    assert len(held) == 2 * STEPS
+    for (inc_ref, _p), (inc_suite, _q) in zip(held[0::2], held[1::2]):
+        assert inc_ref.tobytes() == inc_suite.tobytes()
+    _source_acts_in_the_caps_only(held, cap)
     _chem, off = _suite_route(tmp_path / "off", monkeypatch, False, AREAS[mesh])
     a, b = on[-1][0], off[-1][0]
     assert a[:, :, ~cap].tobytes() == b[:, :, ~cap].tobytes()
-    k = [r.name for r in chem.runtime.rows].index("no")
-    assert np.all((a[k] - b[k])[:, cap].sum(axis=0) > 0.0)
