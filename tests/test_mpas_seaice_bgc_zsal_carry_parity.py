@@ -10,9 +10,8 @@ tracers (mpas_seaice_column.F:6292,6664), so its vertical salinity is inert:
 the tracers are counted, the ITD's and the ridging's ``cleanup_itd`` add a
 zero ``dfzsal`` to ``zSalinityFlux``, the step's
 ``seaice_column_reinitialize_diagnostics_bgc`` zeroes the salinity fluxes,
-and with the velocity solver the incremental remap advects the pool's
-``verticalSalinity`` (pkgTracerZSalinityActive, its parent the brine
-fraction). The solved vertical salinity (the ``zsal_solve`` correction) is
+and the time step with the velocity solver (no advection, as every
+column-package time-step case) leaves ``verticalSalinity`` alone. The solved vertical salinity (the ``zsal_solve`` correction) is
 refused by these stages. ``tools/mpas_seaice_oracle/run_column.F90`` runs
 the stages; the outputs are committed
 (tests/data/oracles/mpas_seaice_bgc_zsal_carry, PROVENANCE.md), so the GPU
@@ -25,9 +24,8 @@ THE BREAKAGES THESE PREVENT
    field the stages may write must be bit-identical.
 2. A port that "solves" or copies the inert vertical salinity: the pool's
    verticalSalinity must keep its words through the ITD, the ridging and the
-   column step.
-3. A time step whose remap drops the vertical salinity, or a step that does
-   not zero the salinity fluxes.
+   steps.
+3. A step that does not zero the salinity fluxes.
 4. The solved vertical salinity running in a stage that does not carry it:
    refused by name.
 5. A case generator whose bytes drift: the input digests are pinned.
@@ -44,14 +42,12 @@ from woof.hex.mpas_seaice import column_ridge_v842 as crdg
 from woof.hex.mpas_seaice import column_step_v842 as cstep
 from woof.hex.mpas_seaice import column_v842 as cv
 from woof.hex.mpas_seaice import coupling_prep_v842 as cpl
-from woof.hex.mpas_seaice import remap_v842
 from woof.verify import mpas_seaice_column_oracle as co
 
 FIXTURE = co.BGC_ZSAL_CARRY_FIXTURE_DIR
 ROWS = co.BGC_ZSAL_CARRY_CASES + co.BGC_ZSAL_CARRY_COUPLED_CASES
 ZSAL = "tracers/verticalSalinity"
 FBRI = "tracers/brineFraction"
-COLUMN = tuple(row[0] for row in co.BGC_ZSAL_CARRY_CASES)
 
 
 def _row(name):
@@ -93,7 +89,7 @@ def test_fixture_shows_v842_s_inert_vertical_salinity():
     for name in cases:
         # the brine fraction still moves with the vertical salinity counted
         assert (got(name, FBRI) != given(name, FBRI)).any(), name
-    for name in COLUMN:
+    for name in cases:
         # never copied from the tracer arrays: the pool keeps its words
         assert ZSAL not in fixture[name], name
     for name, _, stage, _ in co.BGC_ZSAL_CARRY_CASES:
@@ -104,9 +100,6 @@ def test_fixture_shows_v842_s_inert_vertical_salinity():
     for name in steps:
         for key in ("biogeochemistry/zSalinityFlux", "biogeochemistry/zSalinityGDFlux"):
             assert (given(name, key) != 0).all() and (got(name, key) == 0).all(), (name, key)
-    # the remap advects the pool's vertical salinity
-    coupled = co.BGC_ZSAL_CARRY_COUPLED_CASES[0][0]
-    assert (got(coupled, ZSAL) != given(coupled, ZSAL)).any()
 
 
 @pytest.mark.parametrize("name, refuse", [
@@ -155,17 +148,11 @@ def test_a_port_that_copies_the_inert_vertical_salinity_is_caught(monkeypatch, g
         return to
 
     monkeypatch.setattr(cv, "tracer_object", copying)
-    assert _mismatches(("itd_bgc_zsal_bl99_update_ocean", "ridge_bgc_zsal_bl99"), ZSAL) > 0
+    assert _mismatches(("itd_bgc_zsal_bl99_update_ocean", "ridge_bgc_zsal_bl99", "step_bgc_zsal_bl99_dedd"),
+                       ZSAL) > 0
 
 
 @requires_gpu
 def test_a_step_that_keeps_the_salinity_flux_is_caught(monkeypatch, glibc239):
     monkeypatch.setattr(cstep, "_BGC_FIELDS", tuple(f for f in cstep._BGC_FIELDS if f != "zSalinityFlux"))
     assert _mismatches(("step_bgc_zsal_bl99_dedd",), "biogeochemistry/zSalinityFlux") > 0
-
-
-@requires_gpu
-def test_a_remap_without_the_vertical_salinity_is_caught(monkeypatch, glibc239):
-    monkeypatch.setattr(remap_v842, "TRACER_TABLE",
-                        tuple(row for row in remap_v842.TRACER_TABLE if row[0] != "verticalSalinity"))
-    assert _mismatches((co.BGC_ZSAL_CARRY_COUPLED_CASES[0][0],), ZSAL) > 0

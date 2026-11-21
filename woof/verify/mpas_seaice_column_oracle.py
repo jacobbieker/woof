@@ -534,8 +534,8 @@ BGC_ZSAL_CARRY_CASES = (
         **_STEP_BASE, **_ZSAL_STEP, "oracle_n_steps": 3, "config_nIceLayers": 4, "config_nCategories": 3,
         "config_calendar_type": "gregorian", "config_start_time": "2000-07-10_06:00:00"}),
 )
-#: the inert vertical salinity through the time step with the velocity solver (the remap
-#: advects verticalSalinity under pkgTracerZSalinityActive)
+#: the inert vertical salinity through the time step with the velocity solver (no
+#: advection, as every column-package time-step case here)
 BGC_ZSAL_CARRY_COUPLED_CASES = (
     ("seaice_bgc_zsal_bl99_dedd_rothrock", 20262631, _SEAICE_STEP, {
         **_COUPLED_BASE, **_ZSAL_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
