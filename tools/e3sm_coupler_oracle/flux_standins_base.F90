@@ -80,6 +80,8 @@ module seq_infodata_mod
   type seq_infodata_type
     logical :: read_restart = .false.
     logical :: flux_albav = .false.
+    real(r8) :: nextsw_cday = -1.0_r8
+    real(r8) :: orb_eccen = 0.0_r8, orb_mvelpp = 0.0_r8, orb_lambm0 = 0.0_r8, orb_obliqr = 0.0_r8
     logical :: dead_comps = .false.
     logical :: ocn_prognostic = .true.
     logical :: flux_diurnal = .false.
@@ -91,14 +93,20 @@ module seq_infodata_mod
 contains
   subroutine seq_infodata_GetData(infodata, read_restart, flux_albav, dead_comps, ocn_prognostic, flux_diurnal, &
                                   ocn_surface_flux_scheme, coldair_outbreak_mod, flux_convergence, &
-                                  flux_max_iteration)
+                                  flux_max_iteration, nextsw_cday, orb_eccen, orb_mvelpp, orb_lambm0, orb_obliqr)
     type(seq_infodata_type), intent(in) :: infodata
     logical, optional, intent(out) :: read_restart, flux_albav, dead_comps, ocn_prognostic, flux_diurnal
     logical, optional, intent(out) :: coldair_outbreak_mod
     integer, optional, intent(out) :: ocn_surface_flux_scheme, flux_max_iteration
     real(r8), optional, intent(out) :: flux_convergence
+    real(r8), optional, intent(out) :: nextsw_cday, orb_eccen, orb_mvelpp, orb_lambm0, orb_obliqr
     if (present(read_restart)) read_restart = infodata % read_restart
     if (present(flux_albav)) flux_albav = infodata % flux_albav
+    if (present(nextsw_cday)) nextsw_cday = infodata % nextsw_cday
+    if (present(orb_eccen)) orb_eccen = infodata % orb_eccen
+    if (present(orb_mvelpp)) orb_mvelpp = infodata % orb_mvelpp
+    if (present(orb_lambm0)) orb_lambm0 = infodata % orb_lambm0
+    if (present(orb_obliqr)) orb_obliqr = infodata % orb_obliqr
     if (present(dead_comps)) dead_comps = infodata % dead_comps
     if (present(ocn_prognostic)) ocn_prognostic = infodata % ocn_prognostic
     if (present(flux_diurnal)) flux_diurnal = infodata % flux_diurnal
@@ -109,7 +117,9 @@ contains
   end subroutine seq_infodata_GetData
 end module seq_infodata_mod
 
-! named by seq_flux_mct's use statement; only the ocean albedo (not cut) calls them
+! named by seq_flux_mct's use statement; only the ocean albedo's orbital
+! branch (nextsw_cday >= -0.5 without flux_albav) calls them, which the
+! oracle never runs: each stops
 module shr_orb_mod
   use shr_kind_mod, only: r8 => SHR_KIND_R8
   implicit none
@@ -120,12 +130,19 @@ contains
     error stop 9
   end subroutine shr_orb_params
 
-  real(r8) function shr_orb_cosz()
+  real(r8) pure function shr_orb_cosz(jday, lat, lon, declin, dt_avg, uniform_angle)
+    real(r8), intent(in) :: jday, lat, lon, declin
+    real(r8), optional, intent(in) :: dt_avg
+    logical, optional, intent(in) :: uniform_angle
     shr_orb_cosz = 0.0_r8
     error stop 9
   end function shr_orb_cosz
 
-  subroutine shr_orb_decl()
+  subroutine shr_orb_decl(calday, eccen, mvelpp, lambm0, obliqr, delta, eccf)
+    real(r8), intent(in) :: calday, eccen, mvelpp, lambm0, obliqr
+    real(r8), intent(out) :: delta, eccf
+    delta = 0.0_r8
+    eccf = 0.0_r8
     error stop 9
   end subroutine shr_orb_decl
 end module shr_orb_mod

@@ -441,6 +441,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     glibc's atan, so it runs only with `WOOF_GLIBC239_LIBM64=1` and is
     refused by name without it. COARE, UA, the diurnal cycle, the two-way
     wave drag and the water isotopes are refused by name.
+  - The coupler's ocean albedos, E3SM v3.2.0's `seq_flux_ocnalb_mct`
+    (`woof/hex/coupled/ocnalb_e3sm.py`, opt-in): `flux_albav`'s namelist
+    albedos and radiative fractions, or the net shortwave from xao's
+    albedos, with E3SM's and MCT's stops. real(r8), word-exact on CUDA and
+    Metal against the routine compiled verbatim on MCT. The orbital albedo
+    is refused by name.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF

@@ -364,6 +364,13 @@ matched exchange unless asked.
    (`WOOF_GLIBC239_LIBM64=1`) and is refused by name without it; exp, log
    and pow are the MIT transcriptions. COARE (1), UA (2), the diurnal cycle,
    the two-way wave drag and the water isotopes are refused by name.
+   The ocean albedos, `seq_flux_ocnalb_mct`, are ported too
+   (`woof/hex/coupled/ocnalb_e3sm.py`, `tests/test_e3sm_ocnalb_parity.py`):
+   `flux_albav`'s namelist albedos with the radiative fractions, and the net
+   shortwave `Faox_swdn`/`Faox_swup` from xao's albedos (0 on the dark side),
+   with E3SM's and MCT's stops, real(r8), on CUDA and Metal. The orbital
+   albedo (`shr_orb_decl`/`shr_orb_cosz`, glibc's sin, cos and asin) is
+   refused by name.
 4. The ocean's and the sea ice's import and export
    (`components/mpas-ocean/driver/ocn_comp_mct.F`,
    `components/mpas-seaice/driver/ice_comp_mct.F`). The ocean's is ported

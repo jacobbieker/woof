@@ -307,12 +307,13 @@ fi
 echo "built ${build_dir}/run_seq_frac"
 
 # ---------------------------------------------------------------- the atmosphere-ocean flux
-# seq_flux_init_mct and seq_flux_atmocn_mct are cut byte for byte out of
-# driver-mct/main/seq_flux_mct.F90 into a module of the same name whose head
-# is the host module's own (lines 1-23 and 32-214: its use lines, its
-# private data and the index variables; of its public lines only those of
-# the two routines cut, 24 and 30) plus a harness setter for the private
-# seq_flux_atmocn_minwind (seq_flux_readnl_mct reads it from the namelist).
+# seq_flux_init_mct, seq_flux_ocnalb_mct and seq_flux_atmocn_mct are cut
+# byte for byte out of driver-mct/main/seq_flux_mct.F90 into a module of the
+# same name whose head is the host module's own (lines 1-23 and 32-214: its
+# use lines, its private data and the index variables; of its public lines
+# only those of the three routines cut, 24, 28 and 30) plus harness setters
+# for the private seq_flux_atmocn_minwind and seq_flux_mct_albdif/albdir
+# (seq_flux_readnl_mct reads them from the namelist).
 # Compiled verbatim: shr_kind_mod, shr_const_mod, water_isotopes and
 # shr_flux_mod.  mct_mod is written as for the fractions, with its
 # `use shr_const_mod` (seq_flux_mct takes SHR_CONST_PI through it).
@@ -329,16 +330,22 @@ rm -rf "${obj}" && mkdir -p "${obj}" && cd "${obj}"
     printf 'end module mct_mod\n'
 } > mct_mod.F90
 {
-    sed -n '1,23p;24p;30p' "${drv}/seq_flux_mct.F90"
-    printf '  public seq_flux_oracle_set_minwind\n'
+    sed -n '1,23p;24p;28p;30p' "${drv}/seq_flux_mct.F90"
+    printf '  public seq_flux_oracle_set_minwind, seq_flux_oracle_set_albedos\n'
     sed -n '32,214p' "${drv}/seq_flux_mct.F90"
-    for r in seq_flux_init_mct seq_flux_atmocn_mct; do cut "${drv}/seq_flux_mct.F90" "${r}" subroutine; done
+    for r in seq_flux_init_mct seq_flux_ocnalb_mct seq_flux_atmocn_mct; do
+        cut "${drv}/seq_flux_mct.F90" "${r}" subroutine
+    done
     printf '  ! the harness: seq_flux_readnl_mct sets this from the namelist\n'
     printf '  subroutine seq_flux_oracle_set_minwind(minwind)\n    real(r8), intent(in) :: minwind\n'
     printf '    seq_flux_atmocn_minwind = minwind\n  end subroutine seq_flux_oracle_set_minwind\n'
+    printf '  ! the harness: seq_flux_readnl_mct sets these from the namelist\n'
+    printf '  subroutine seq_flux_oracle_set_albedos(albdif, albdir)\n    real(r8), intent(in) :: albdif, albdir\n'
+    printf '    seq_flux_mct_albdif = albdif\n    seq_flux_mct_albdir = albdir\n'
+    printf '  end subroutine seq_flux_oracle_set_albedos\n'
     printf 'end module seq_flux_mct\n'
 } > seq_flux_cut.F90
-for want in 'seq_flux_init_mct' 'seq_flux_atmocn_mct'; do
+for want in 'seq_flux_init_mct' 'seq_flux_ocnalb_mct' 'seq_flux_atmocn_mct'; do
     if [[ $(grep -cE "^ *(end )?subroutine ${want}( |\\(|$)" seq_flux_cut.F90) -ne 2 ]]; then
         echo "a routine was not cut out whole (${want})" >&2
         exit 3
@@ -359,7 +366,9 @@ fflags=(-c -cpp -O0 -ffp-contract=off -ffree-line-length-none "${mctinc[@]}")
 "${fc[@]}" "${fflags[@]}" "${script_dir}/flux_standins.F90"
 "${fc[@]}" "${fflags[@]}" seq_flux_cut.F90
 "${fc[@]}" "${fflags[@]}" "${script_dir}/run_flux_atmocn.F90"
-"${fc[@]}" -o "${build_dir}/run_flux_atmocn" ./*.o "${mctlib[@]}"
+"${fc[@]}" "${fflags[@]}" "${script_dir}/run_flux_ocnalb.F90"
+"${fc[@]}" -o "${build_dir}/run_flux_atmocn" $(ls ./*.o | grep -v run_flux_ocnalb.o) "${mctlib[@]}"
+"${fc[@]}" -o "${build_dir}/run_flux_ocnalb" $(ls ./*.o | grep -v run_flux_atmocn.o) "${mctlib[@]}"
 if command -v objdump >/dev/null; then
     objdump -d seq_flux_cut.o shr_flux_mod.o > disassembly.txt
     if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
@@ -376,12 +385,15 @@ if command -v objdump >/dev/null; then
         exit 6
     fi
 fi
+# the cut's only libm call is seq_flux_ocnalb_mct's cosz**1.7 (pow), on the
+# orbital branch the oracle does not run
 nm -u seq_flux_cut.o > undefined.txt
-if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\b' undefined.txt; then
-    echo "seq_flux_atmocn_mct calls libm" >&2
+if grep -E '\b(exp|log|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\b|\bpow[fl]\b' undefined.txt; then
+    echo "the cut calls libm beyond seq_flux_ocnalb_mct's pow" >&2
     exit 6
 fi
 echo "built ${build_dir}/run_flux_atmocn"
+echo "built ${build_dir}/run_flux_ocnalb"
 
 # ---------------------------------------------------------------- the sea ice's import and export
 # ice_import_mct, ice_export_mct, basal_pressure and frazil_mass are cut byte

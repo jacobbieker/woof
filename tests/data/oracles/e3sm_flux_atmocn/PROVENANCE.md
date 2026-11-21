@@ -9,9 +9,11 @@ x86_64, glibc 2.44), 2026-11-20.
   `driver-mct/main/seq_flux_mct.F90` (`seq_flux_init_mct` and
   `seq_flux_atmocn_mct`, cut verbatim from their `subroutine` lines to their
   `end subroutine` lines into a module whose head is the host module's own
-  lines 1-24, 30 and 32-214: its use lines, module arrays and parameters;
-  the other routines' public lines are left out, and a harness setter for
-  the namelist's `seq_flux_atmocn_minwind` is added). Compiled verbatim:
+  lines 1-24, 28, 30 and 32-214: its use lines, module arrays and
+  parameters; the other routines' public lines are left out, harness
+  setters for the namelist's `seq_flux_atmocn_minwind`, `seq_flux_mct_albdif`
+  and `seq_flux_mct_albdir` are added, and `seq_flux_ocnalb_mct` is cut
+  alongside for its own oracle, `tests/data/oracles/e3sm_ocnalb`). Compiled verbatim:
   `share/util/shr_flux_mod.F90` (`shr_flux_atmOcn`,
   `shr_flux_update_stress`), `share/util/water_isotopes.F90`,
   `share/util/shr_kind_mod.F90` and `share/util/shr_const_mod.F90`.

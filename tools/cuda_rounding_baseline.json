@@ -894,6 +894,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "4e94e1eccb8ba4b35c7f0023a24c1e30bdd51e317ccfad110fdb0bf750f49005",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "fa4175e559e8b7052c28dabe204e6ef4983d2bc4f96a0cdbed10bd47bd9771ac",
+    "file": "woof/hex/coupled/ocnalb_e3sm.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "5004d0454501a98395939411abbfe58e1e9b231abfff8fa83985186eeffc46d8",
     "constructor": "compile_using_nvrtc",
     "factory": "_load_module_preserving_subnormals",
@@ -4928,6 +4936,10 @@
     "sha256": "7eb1bcd641ea5ac79d59ff2012535e1c302dc196c34e8d1cbe1161541d206ce3"
    },
    {
+    "file": "woof/hex/coupled/ocnalb_e3sm.cu",
+    "sha256": "84ee5201826f52ee4fa2c1889280f7e5b40b34d1a4ffa14ccab0654c27012854"
+   },
+   {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.cu",
     "sha256": "34b752cd152fd8a3fb699ce182480d6a8eccc8b4eb44fcaa8f4f6f2559994418"
    },
@@ -5804,6 +5816,10 @@
    {
     "file": "woof/hex/coupled/ocn_coupling_e3sm.py",
     "sha256": "429b6463254970ef436c1eba343f363ad9277ad129ea1cf19430c041c6399d37"
+   },
+   {
+    "file": "woof/hex/coupled/ocnalb_e3sm.py",
+    "sha256": "682a61f3ca21164da0c4975bf3f47c4b59d9f3055a2f28ab7179c062996f3e00"
    },
    {
     "file": "woof/hex/coupled/prep_ocn_merge_e3sm.py",
