@@ -35,6 +35,8 @@ from woof.da.var import transfer4d as t4
 from woof.da.var import window4d as w4
 from woof.grad.wrfplus.model import STEP_INPUTS
 
+HALO = "mu_halo"   # model.HALO on a specified domain (#743); the fake only needs a name
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -43,20 +45,33 @@ class FakeWindow:
     (numpy, its names and shapes): each step rolls every field along ``i``
     and feeds ``p_pert`` into ``p`` and ``thp`` and ``muts`` into ``mup``."""
 
-    def __init__(self, nx, ny, nz, nsteps, dtype=np.float64, every=1):
+    def __init__(self, nx, ny, nz, nsteps, dtype=np.float64, every=1, halo=False):
         mass, two = (nz, ny, nx), (ny, nx)
         shapes = {"u": (nz, ny, nx + 1), "v": (nz, ny + 1, nx), "w": (nz + 1, ny, nx), "php": (nz + 1, ny, nx),
-                  "thp": mass, "p": mass, "al": mass, "alt": mass, "p_pert": mass, "mup": two, "muts": two}
-        self._start = {n: np.ones(shapes[n], dtype=dtype) for n in STEP_INPUTS}
+                  "thp": mass, "p": mass, "al": mass, "alt": mass, "p_pert": mass, "mup": two, "muts": two,
+                  HALO: two}
+        if halo:   # a specified domain's Window.inputs (#743)
+            self.inputs = STEP_INPUTS + (HALO,)
+        names = STEP_INPUTS + ((HALO,) if halo else ())
+        self._start = {n: np.ones(shapes[n], dtype=dtype) for n in names}
         self.nsteps = nsteps
         self.every = every
         self._checkpoints = None
+        self.forwards = 0
 
     def forward(self):
         """The base: the start plus ``k`` in every field at state ``k``."""
+        self.forwards += 1
         self._checkpoints = {k: {n: v + k for n, v in self._start.items()}
                              for k in range(0, self.nsteps, self.every)}
         return {n: v + self.nsteps for n, v in self._start.items()}
+
+    def use_trajectory(self, states):
+        """``forward(trajectory=states)`` as #746 keeps it: every state but
+        the last, ``_external`` set; returns the last."""
+        self._checkpoints = {k: st for k, st in enumerate(states[:self.nsteps])}
+        self._external = True
+        return states[self.nsteps]
 
     @staticmethod
     def _step(d):
@@ -64,18 +79,22 @@ class FakeWindow:
         d["p"] = d["p"] + 0.3 * d["p_pert"]
         d["mup"] = d["mup"] + 0.2 * d["muts"]
         d["thp"] = d["thp"] + 0.05 * d["p_pert"]
+        if HALO in d:
+            d[HALO] = d[HALO] + 0.5 * d["mup"]
         return d
 
     @staticmethod
     def _step_ad(a):
         a = dict(a)
+        if HALO in a:
+            a["mup"] = a["mup"] + 0.5 * a[HALO]
         a["p_pert"] = a["p_pert"] + 0.05 * a["thp"]
         a["muts"] = a["muts"] + 0.2 * a["mup"]
         a["p_pert"] = a["p_pert"] + 0.3 * a["p"]
         return {n: v + 0.1 * np.roll(v, -1, axis=-1) for n, v in a.items()}
 
     def tl(self, dx0, save_at=(), *, partial=False):
-        assert partial and set(dx0) <= set(STEP_INPUTS)
+        assert partial and set(dx0) <= set(self._start)
         dx = {n: np.array(dx0[n]) if n in dx0 else np.zeros_like(v) for n, v in self._start.items()}
         out = {0: dx} if 0 in save_at else {}
         for k in range(self.nsteps):
@@ -87,8 +106,8 @@ class FakeWindow:
     def ad(self, ax_final, forcing):
         assert ax_final is None and self._checkpoints is not None
         for f in forcing.values():
-            assert set(f) == set(STEP_INPUTS)
-            assert all(f[n].shape == self._start[n].shape for n in STEP_INPUTS)
+            assert set(f) == set(self._start)
+            assert all(f[n].shape == self._start[n].shape for n in self._start)
         ax = {n: np.array(v) for n, v in forcing.get(self.nsteps, {}).items()} or \
             {n: np.zeros_like(v) for n, v in self._start.items()}
         for k in reversed(range(self.nsteps)):
@@ -98,8 +117,8 @@ class FakeWindow:
         return ax
 
 
-def _fake(nx=5, ny=4, nz=3, sps=2, nslots=3):
-    win = FakeWindow(nx, ny, nz, sps * (nslots - 1))
+def _fake(nx=5, ny=4, nz=3, sps=2, nslots=3, halo=False):
+    win = FakeWindow(nx, ny, nz, sps * (nslots - 1), halo=halo)
     return w4.WindowModel(win, sps, to_device=np.asarray, to_host=np.asarray), (nx, ny, nz)
 
 
@@ -114,8 +133,11 @@ def _dot(a, b):
     return sum(float(np.sum(a[k] * b[k])) for k in t4.TL_KEYS)
 
 
-def test_fake_window_dot_product():
-    model, dims = _fake()
+@pytest.mark.parametrize("halo", [False, True])
+def test_fake_window_dot_product(halo):
+    """With ``halo`` the window is a specified domain's: its inputs add the
+    carried mu halo (fed from ``mup``), which the adjoint must force too."""
+    model, dims = _fake(halo=halo)
     rng = np.random.default_rng(0)
     g0 = _tl_state(rng, *dims)
     fs = [_tl_state(rng, *dims) for _ in range(3)]
@@ -187,6 +209,28 @@ def test_base_check():
     assert mk(base=slots, base_rtol=0.02).base_diff[(1, "t_2")] == pytest.approx(0.01 / 1.01)
     with pytest.raises(ValueError, match="checkpoint_every=3"):
         mk(base=_grids(nx, ny, nz, 3, 2), every=3)
+
+
+def test_base_check_reads_an_external_trajectory():
+    """On ``forward(trajectory=...)`` (#746) the check reads the given
+    states and never reruns ``forward`` (which would replace them); the
+    last slot needs ``end``."""
+    nx, ny, nz = 5, 4, 3
+    win = FakeWindow(nx, ny, nz, 4)
+    model = w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray)
+    states = [{n: v + 10.0 * k for n, v in win._start.items()} for k in range(5)]
+    end = win.use_trajectory(states)
+    slots = [(None, {g: np.full(sh, 1.0 + 20.0 * n) for g, sh in
+                     ((g, a.shape) for g, a in _grids(nx, ny, nz, 1, 0)[0][1].items())}) for n in range(3)]
+    n0 = win.forwards
+    with pytest.raises(ValueError, match="pass end="):
+        model.check_base(slots)
+    assert max(model.check_base(slots, end=end).values()) == 0.0
+    assert win.forwards == n0 and win._checkpoints[1]["u"][0, 0, 0] == 11.0
+    with pytest.raises(ValueError, match="slot 2"):
+        model.check_base(slots, end=states[3])
+    assert w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray, base=slots,
+                          base_end=end).base_diff[(2, "u_2")] == 0.0
 
 
 @pytest.mark.parametrize("press,ph", [("wrfda", "zero"), ("dnw", "hydrostatic")])

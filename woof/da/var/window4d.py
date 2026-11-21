@@ -95,10 +95,18 @@ class WindowModel:
     :class:`~woof.da.var.fourd.FourDObsTerm` takes them; the window's base
     at each slot is compared with that slot's ``grid`` (see the module
     docstring) and a relative difference over ``base_rtol`` is refused.
+    ``base_end``: the end state for a window on an external trajectory
+    (:meth:`check_base`).
+
+    The adjoint forces every state input the window has
+    (``Window.inputs`` where it has one: a specified domain adds the
+    carried mu halo, forced with zero, as nothing observes it).  The
+    boundary tables are not perturbed (WRFDA's ``var4d_lbc = .false.``)
+    and their adjoint is dropped.
     """
 
     def __init__(self, window, steps_per_slot: int, *, moisture: str = "persist", to_device=None, to_host=None,
-                 base: Sequence | None = None, base_rtol: float = 1e-5):
+                 base: Sequence | None = None, base_rtol: float = 1e-5, base_end: dict | None = None):
         if moisture != "persist":
             raise NotImplementedError(f"moisture={moisture!r}: the window is dry; only 'persist' is ported")
         if steps_per_slot < 1:
@@ -115,22 +123,36 @@ class WindowModel:
             window.forward()
         self.base_diff = None
         if base is not None:
-            self.base_diff = self.check_base(base, rtol=base_rtol)
+            self.base_diff = self.check_base(base, rtol=base_rtol, end=base_end)
 
-    def check_base(self, slots: Sequence, *, rtol: float = 1e-5) -> dict:
+    def check_base(self, slots: Sequence, *, rtol: float = 1e-5, end: dict | None = None) -> dict:
         """The window's base at each slot against that slot's ``grid``:
         ``{(n, name): max|base - grid| / max|grid|}``; refuses any over
-        ``rtol``.  Reruns :meth:`Window.forward` (the base the TL and AD
-        then use is unchanged) and needs a checkpoint at every slot state."""
+        ``rtol``.
+
+        A window running its own base: reruns :meth:`Window.forward` (the
+        base the TL and AD then use is unchanged) and needs a checkpoint at
+        every slot state.  A window on an external trajectory
+        (``Window.forward(trajectory=...)``, which holds every state but the
+        last): reads the trajectory, never reruns ``forward`` (that would
+        replace it), and compares the last slot with ``end``, the state
+        ``forward(trajectory=...)`` returned."""
         states = self._slots(len(slots))
-        every = int(getattr(self.window, "every", 1))
-        if self.sps % every:
-            raise ValueError(f"the base check needs a checkpoint at every slot: checkpoint_every={every} "
-                             f"does not divide steps_per_slot={self.sps}")
-        final = self.window.forward()
+        nsteps = self.window.nsteps
+        if getattr(self.window, "_external", False):
+            if end is None:
+                raise ValueError("the window runs on an external trajectory: pass end= (the state "
+                                 "forward(trajectory=...) returned) for the last slot")
+            final = end
+        else:
+            every = int(getattr(self.window, "every", 1))
+            if self.sps % every:
+                raise ValueError(f"the base check needs a checkpoint at every slot: checkpoint_every={every} "
+                                 f"does not divide steps_per_slot={self.sps}")
+            final = self.window.forward()
         out, bad = {}, []
         for n, (k, (_, grid)) in enumerate(zip(states, slots)):
-            st = final if k == self.window.nsteps else self.window._checkpoints[k]
+            st = final if k == nsteps else self.window._checkpoints[k]
             for g, w in _BASE.items():
                 ref = np.asarray(grid[g], dtype=np.float64)
                 got = from_window(self._host(st[w]))
@@ -146,6 +168,11 @@ class WindowModel:
             raise ValueError("the window's base is not the slots' first guesses (two trajectories): "
                              + "; ".join(bad) + f" > rtol {rtol:g}")
         return out
+
+    def _inputs(self) -> tuple:
+        """The window's state inputs: ``Window.inputs`` (STEP_INPUTS plus the
+        mu halo on a specified domain) where the window has it."""
+        return tuple(getattr(self.window, "inputs", None) or _step_inputs())
 
     def _slots(self, nslots: int) -> list:
         if nslots < 2:
@@ -187,7 +214,7 @@ class WindowModel:
         qv = None
         for k, f in zip(states, forcings):
             dk = {}
-            for n in _step_inputs():
+            for n in self._inputs():
                 dk[n] = self._dev(np.zeros(tuple(start[n].shape)))
             for tl, w in _NAMES.items():
                 if tl in f:
