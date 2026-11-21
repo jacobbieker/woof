@@ -52,13 +52,21 @@ PRP_STATE = ("p", "al", "alt", "p_pp")
 PRP_ACTIVE = ("thp", "php", "mup", "muts")
 PRP_PASSIVE = ("mub", "phb", "alb", "pb", "rdnw", "c1h", "c2h", "c3h", "c4h",
                "c3f", "c4f")
+#: the moist diagnosis's actives: the dry ones and qv
+PRPM_ACTIVE = PRP_ACTIVE + ("qv",)
+
+
+def prp_active(geom) -> tuple:
+    return PRPM_ACTIVE if geom.moist else PRP_ACTIVE
 
 
 @dataclass(frozen=True)
 class PRPGeometry:
     """calc_p_alpha's scalars.  ``carried`` reads WRF's grid%muts from
     ``muts`` (calc_p_alpha_carried_muts); otherwise muts = mub + mup and
-    ``muts`` is not read."""
+    ``muts`` is not read.  ``moist`` reads qv (an active input) through
+    WRF's ``qvf = 1 + rvovrd qv``, as the primal does for a moist state
+    without use_theta_m."""
     nz: int
     ny: int
     nx: int
@@ -66,11 +74,19 @@ class PRPGeometry:
     base3d: int = 1
     carried: int = 1
     p_top: float = 0.0
+    moist: int = 0
 
     def args(self, dtype) -> tuple:
+        from woof.core.constants import RVOVRD
         i, r = np.int32, np.dtype(dtype).type
+        # RVOVRD is the binary32 quotient the primal's #define carries
         return (i(self.nz), i(self.ny), i(self.nx), i(self.hypso),
-                i(self.base3d), i(self.carried), r(self.p_top))
+                i(self.base3d), i(self.carried), r(self.p_top), i(self.moist),
+                r(np.float32(RVOVRD)))
+
+    def validate(self) -> None:
+        if self.moist not in (0, 1):
+            raise ValueError(f"moist is 0 or 1, got {self.moist}")
 
 
 def prp_shapes(geom: PRPGeometry) -> dict:
@@ -82,22 +98,26 @@ def prp_shapes(geom: PRPGeometry) -> dict:
             "phb": wlev if b3 else (nz + 1,), "alb": mass if b3 else (nz,),
             "pb": mass if b3 else (nz,), "rdnw": (nz,), "c1h": (nz,),
             "c2h": (nz,), "c3h": (nz,), "c4h": (nz,), "c3f": (nz + 1,),
-            "c4f": (nz + 1,)}
+            "c4f": (nz + 1,), "qv": mass}
 
 
 def calc_p_rho_phi_tl(state, pert_state, traj, pert, geom, *, nl=True):
-    """WRFPLUS G_CALC_P_RHO_PHI (dry, non-hydrostatic) on woof's strict
+    """WRFPLUS G_CALC_P_RHO_PHI (non-hydrostatic) on woof's strict
     calc_p_alpha[_carried_muts]: p, al, alt and p_pp from thp, php, mup
-    (and muts when carried)."""
+    (and muts when carried), and qv with ``geom.moist``."""
+    geom.validate()
     sh = prp_shapes(geom)
+    act = prp_active(geom)
     _check(geom, _named("state", PRP_STATE, state)
            + _named("pert", PRP_STATE, pert_state)
-           + _named("traj", PRP_ACTIVE + PRP_PASSIVE, traj)
-           + _named("pert", PRP_ACTIVE, pert), sh, min_nz=1)
+           + _named("traj", act + PRP_PASSIVE, traj)
+           + _named("pert", act, pert), sh, min_nz=1)
+    # dry: qv is never read (thp stands in)
+    qv = (traj["qv"], pert["qv"]) if geom.moist else (traj["thp"], pert["thp"])
     arrs = (tuple(state[n] for n in PRP_STATE)
             + tuple(pert_state[n] for n in PRP_STATE)
             + tuple(traj[n] for n in PRP_ACTIVE)
-            + tuple(pert[n] for n in PRP_ACTIVE)
+            + tuple(pert[n] for n in PRP_ACTIVE) + qv
             + tuple(traj[n] for n in PRP_PASSIVE))
     dtype = _dtype(arrs)
     _kernel("calc_p_rho_phi_tl", dtype)(
@@ -106,13 +126,17 @@ def calc_p_rho_phi_tl(state, pert_state, traj, pert, geom, *, nl=True):
 
 
 def calc_p_rho_phi_ad(adj_state, traj, adj, geom):
+    geom.validate()
     sh = prp_shapes(geom)
+    act = prp_active(geom)
     _check(geom, _named("adj", PRP_STATE, adj_state)
-           + _named("traj", PRP_ACTIVE + PRP_PASSIVE, traj)
-           + _named("adj", PRP_ACTIVE, adj), sh, min_nz=1)
+           + _named("traj", act + PRP_PASSIVE, traj)
+           + _named("adj", act, adj), sh, min_nz=1)
+    # dry: qv is never read nor its adjoint written
+    qv = (traj["qv"], adj["qv"]) if geom.moist else (traj["thp"], adj["thp"])
     arrs = (tuple(adj_state[n] for n in PRP_STATE)
             + tuple(traj[n] for n in PRP_ACTIVE)
-            + tuple(adj[n] for n in PRP_ACTIVE)
+            + tuple(adj[n] for n in PRP_ACTIVE) + qv
             + tuple(traj[n] for n in PRP_PASSIVE))
     dtype = _dtype(arrs)
     _kernel("calc_p_rho_phi_ad", dtype)(

@@ -4925,7 +4925,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/bigstep.cu",
-    "sha256": "fb10da810b5879af826b5962f74e9c388637ca0c83b13eba8ab08533957cf285"
+    "sha256": "c07095b0c47d8ca7772995204b25eed0f98e13ee5ac20439e849eb56712db1e7"
    },
    {
     "file": "woof/grad/wrfplus/kernels/calc_coef_w.cu",
@@ -4937,7 +4937,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/rk_stage.cu",
-    "sha256": "b8493ea687b6229f371fdce179850bdfd91a953abd748f638e1d1d634bc49650"
+    "sha256": "788f6c578355ed90eb93b46da9e13e127ab48543769ea1927ed05c23a23e886c"
    },
    {
     "file": "woof/grad/wrfplus/kernels/small_step.cu",
@@ -5831,7 +5831,7 @@
    },
    {
     "file": "woof/grad/wrfplus/bigstep.py",
-    "sha256": "944eb82c17e4ad41003dc667fbeb654eda44d867b27c37c60b91cc3ff65db215"
+    "sha256": "67c6e72c2a532f42e552e406c151acc5dda75eb99b274c64d5bc6c0affe06777"
    },
    {
     "file": "woof/grad/wrfplus/lbc.py",
@@ -5839,7 +5839,7 @@
    },
    {
     "file": "woof/grad/wrfplus/stage.py",
-    "sha256": "1b715ee0af742b8508a84ce6814fea3513611fe441d611477d0c02002087670a"
+    "sha256": "c14c6dae3f02d0ff4923851a77048f25d3f30993b249262fe9294a0c67b83bf1"
    },
    {
     "file": "woof/hex/coupled/flux_atmocn_e3sm.py",
