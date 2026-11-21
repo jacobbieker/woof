@@ -165,3 +165,8 @@ def test_a_failed_lake_depth_fetch_refuses_with_both_remedies(tmp_path, monkeypa
     with pytest.raises(go_cli.GoRefusal, match="no route to host") as refused:
         go_cli.stage_lake_depth(tmp_path / "WPS_GEOG", _lakes_config(tmp_path))
     assert "fetch-geog --datasets lake_depth" in str(refused.value) and "use_lakedepth = 0" in str(refused.value)
+    # An unwritable tree or a lock another fetch holds refuses the same way, not as a traceback.
+    for error in (PermissionError("read-only tree"), RuntimeError("another fetch holds the lock")):
+        monkeypatch.setattr(geog_assets, "fetch_geog", lambda error=error, **kw: (_ for _ in ()).throw(error))
+        with pytest.raises(go_cli.GoRefusal, match=str(error)):
+            go_cli.stage_lake_depth(tmp_path / "WPS_GEOG", _lakes_config(tmp_path))

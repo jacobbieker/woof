@@ -4669,10 +4669,11 @@ def stage_lake_depth(geog_root: Path, config) -> bool:
                    source=resolve_source("ncar", False),
                    progress=lambda line: print(
                        line if line.startswith("note:") else f"go: {line}", flush=True))
-    except GeogFetchError as error:
+    except (GeogFetchError, OSError, RuntimeError) as error:
+        # OSError: an unwritable tree; RuntimeError: another fetch holds the tree's lock.
         raise GoRefusal(
             f"fetching lake_depth for the lake model failed: {error}\n"
-            f"  remedy: woof fetch-geog --datasets lake_depth --source ncar --root {geog_root}, "
+            f"  remedy: woof fetch-geog --datasets lake_depth --source ncar --root {_quote(str(geog_root))}, "
             "or set use_lakedepth = 0 to run on the uniform lakedepth_default") from None
     return True
 
