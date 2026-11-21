@@ -173,14 +173,29 @@ def test_a_mutated_host_step_is_caught(monkeypatch, precision, mutation, field, 
             centre[k] = centre[k - 1] + (real(0.5) * f[k - 1] + real(0.5) * f[k])
         return f, centre, interface
 
+    reset = fw.Clock.reset_force_alarm
+
+    def reset_at_init_only(self):
+        # clock_init's reset at the start time stays; the loop's resets are gone
+        if self.now == self.start:
+            reset(self)
+
     target, name, value = {"vertical_grid": (fw, "vertical_grid", regrouped),
                            "_signed_area": (fw, "_signed_area", lambda a, b, c, real: area(b, c, a, real)),
-                           "reset_force_alarm": (fw.Clock, "reset_force_alarm", lambda self: None)}[mutation]
+                           "reset_force_alarm": (fw.Clock, "reset_force_alarm", reset_at_init_only)}[mutation]
     monkeypatch.setattr(target, name, value)
     if mutation == "reset_force_alarm":
-        # the seconds to the next ring go negative: the model's own check stops the run
+        # past the first ring the seconds to the next ring go to 0 and below:
+        # the model's own check stops the run there, and not before
+        case = _case(names[0], precision)
+        pools = fo.device_pools(case)
+        clock = fw.cold_start(pools=pools, config=case["config"])
+        ring = clock.force_prev + clock.force_interval
+        steps = 0
         with pytest.raises(ValueError, match="config_min_adaptive_timestep"):
-            _caught(precision, names, field)
+            while True:
+                steps += fw.advance(pools=pools, config=case["config"], clock=clock, n_steps=1)
+        assert clock.now >= ring and steps >= 2, (clock.now, ring, steps)
         return
     assert _caught(precision, names, field) > 0
 
@@ -209,6 +224,59 @@ def test_a_restarted_run_ends_on_the_straight_runs_words(tmp_path, name):
     other = {"gregorian": "gregorian_noleap", "gregorian_noleap": "gregorian"}[case["config"]["config_calendar_type"]]
     with pytest.raises(Exception, match="config_calendar_type"):
         fw.read_restart(tmp_path / "restart.npz", config=dict(case["config"], config_calendar_type=other))
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+def test_an_adaptive_restart_across_the_force_alarms_ring(tmp_path, precision):
+    # restarts before the first ring, on it and after it: the clock (its
+    # calendar and alarm) comes back as it was and the run ends on the
+    # straight run's words
+    from woof.hex.errors import ConfigurationRefusal
+    from woof.hex.mpas_ice import forward_v842 as fw
+    case = _case("dome_adaptive_uniform", precision)
+    straight = fo.run_gpu(case)
+    pools = fo.device_pools(case)
+    clock = fw.cold_start(pools=pools, config=case["config"])
+    first_ring = clock.force_prev + clock.force_interval
+    sides = set()
+    while not clock.stopped:
+        fw.advance(pools=pools, config=case["config"], clock=clock, n_steps=1)
+        path = tmp_path / f"restart-{clock.now}.npz"
+        fw.write_restart(path, pools=pools, clock=clock)
+        restored_pools, restored = fw.read_restart(path, config=case["config"], precision=precision)
+        assert restored == clock and restored.calendar == "gregorian_noleap"
+        assert restored.time_stamp == pools["mesh"]["xtime"]
+        sides.add((clock.now > first_ring) - (clock.now < first_ring))
+        fw.advance(pools=restored_pools, config=case["config"], clock=restored)
+        resumed = fo.outputs_of(case, restored_pools, restored)
+        bad = {k: fo.word_mismatches(resumed[k], straight[k]) for k in straight}
+        assert not any(bad.values()), (clock.time_stamp, {k: v for k, v in bad.items() if v})
+    assert sides == {-1, 0, 1}
+    with pytest.raises(ConfigurationRefusal, match="config_calendar_type"):
+        fw.read_restart(path, config=dict(case["config"], config_calendar_type="gregorian"))
+    other = "r8" if precision == "r4" else "r4"
+    with pytest.raises(ConfigurationRefusal, match="precision"):
+        fw.read_restart(path, config=case["config"], precision=other)
+    with pytest.raises(ConfigurationRefusal, match="config_adaptive_timestep_force_interval"):
+        fw.read_restart(path, config=dict(case["config"], config_adaptive_timestep_force_interval="10_00:00:00"))
+    with pytest.raises(ConfigurationRefusal, match="config_adaptive_timestep"):
+        fw.read_restart(path, config=dict(case["config"], config_adaptive_timestep=False))
+    with pytest.raises(ConfigurationRefusal, match="config_velocity_solver"):
+        fw.read_restart(path, config=dict(case["config"], config_velocity_solver="FO"))
+
+
+@requires_gpu
+def test_a_fixed_step_restart_refuses_another_time_step(tmp_path):
+    from woof.hex.errors import ConfigurationRefusal
+    from woof.hex.mpas_ice import forward_v842 as fw
+    case = _case("dome_uniform")
+    pools = fo.device_pools(case)
+    clock = fw.cold_start(pools=pools, config=case["config"])
+    fw.advance(pools=pools, config=case["config"], clock=clock, n_steps=1)
+    fw.write_restart(tmp_path / "restart.npz", pools=pools, clock=clock)
+    with pytest.raises(ConfigurationRefusal, match="config_dt"):
+        fw.read_restart(tmp_path / "restart.npz", config=dict(case["config"], config_dt="0000-00-10_00:00:00"))
 
 
 @requires_gpu
@@ -255,7 +323,13 @@ def test_the_enthalpy_advection_units_correction_is_opt_in(precision, mesh):
         fw.run(pools=fo.device_pools(case), config=dict(case["config"], woof_enthalpy_advection_units="other"))
 
 
-@requires_gpu
+def _refused_on_host(case: dict, config: dict) -> None:
+    """What cold_start checks before it touches a device array."""
+    from woof.hex.mpas_ice import forward_v842 as fw
+    fw.check_config(config, case["precision"], case["pools"]["velocity"])
+    fw.clock_init(fw.setup_config_options(config))
+
+
 @pytest.mark.parametrize("knob, value", [
     ("config_do_restart", True), ("config_time_integration", "rk4"), ("config_stats_interval", 1),
     ("config_write_stats_on_startup", True), ("config_write_albany_ascii_mesh", True),
@@ -264,19 +338,46 @@ def test_the_enthalpy_advection_units_correction_is_opt_in(precision, mesh):
 ])
 def test_the_pieces_not_ported_are_refused_by_name(knob, value):
     from woof.hex.errors import ConfigurationRefusal
-    from woof.hex.mpas_ice import forward_v842 as fw
     case = _case("dome_uniform")
     with pytest.raises(ConfigurationRefusal, match=knob):
-        fw.run(pools=fo.device_pools(case), config=dict(case["config"], **{knob: value}))
+        _refused_on_host(case, dict(case["config"], **{knob: value}))
+
+
+@pytest.mark.parametrize("knob, value", [
+    ("config_dt", "00:00:00"), ("config_dt", "0000-00-00_00:00:00"),
+    ("config_stop_time", "0001-06-01_00:00:00"),
+])
+def test_a_clock_that_never_stops_or_runs_backwards_is_refused(knob, value):
+    from woof.hex.errors import ConfigurationRefusal
+    case = _case("dome_uniform")
+    config = dict(case["config"], **{knob: value})
+    if knob == "config_stop_time":
+        config.update(config_run_duration="none", config_start_time="0002-01-01_00:00:00")
+    with pytest.raises(ConfigurationRefusal, match=knob):
+        _refused_on_host(case, config)
+
+
+def test_years_are_refused_on_the_gregorian_calendar():
+    from woof.hex.errors import ConfigurationRefusal
+    case = _case("eismint2_a_temperature_uniform")
+    with pytest.raises(ConfigurationRefusal, match="config_run_duration"):
+        _refused_on_host(case, dict(case["config"], config_run_duration="0001-00-00_00:00:00"))
 
 
 @requires_gpu
-def test_years_are_refused_on_the_gregorian_calendar():
+@pytest.mark.parametrize("name", ["coeffs_reconstruct", "edgeNormalVectors"])
+def test_a_mesh_without_its_reconstruction_coefficients_is_refused(name):
+    # mpas_init_reconstruct is not ported: cold_start takes them as given
     from woof.hex.errors import ConfigurationRefusal
     from woof.hex.mpas_ice import forward_v842 as fw
-    case = _case("eismint2_a_temperature_uniform")
-    with pytest.raises(ConfigurationRefusal, match="config_run_duration"):
-        fw.run(pools=fo.device_pools(case), config=dict(case["config"], config_run_duration="0001-00-00_00:00:00"))
+    case = _case("dome_uniform")
+    pools = fo.device_pools(case)
+    pools["mesh"][name][...] = 0
+    with pytest.raises(ConfigurationRefusal, match=name):
+        fw.cold_start(pools=pools, config=case["config"])
+    del pools["mesh"][name]
+    with pytest.raises(ConfigurationRefusal, match=name):
+        fw.cold_start(pools=pools, config=case["config"])
 
 
 def test_the_clock_reads_mpas_intervals():

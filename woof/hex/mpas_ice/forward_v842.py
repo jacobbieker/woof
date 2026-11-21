@@ -55,7 +55,6 @@ Gregorian calendar, fractional seconds, and ``config_year_digits`` other than
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
@@ -213,12 +212,19 @@ def clock_init(config: dict) -> Clock:
                 "this port's restart", "config_start_time = a date")
     start = parse_time(config["config_start_time"], calendar)
     step = interval_seconds(config["config_dt"], calendar, "config_dt")
+    if not config["config_adaptive_timestep"] and step <= 0:
+        _refuse("config_dt", config["config_dt"], "a time step of no time never reaches the stop time",
+                "config_dt = a positive interval")
     if config["config_run_duration"] != "none":
         stop = start + interval_seconds(config["config_run_duration"], calendar, "config_run_duration")
+        if stop < start:
+            _refuse("config_run_duration", config["config_run_duration"], "the clock would run backwards",
+                    "config_run_duration = a positive interval")
     elif config["config_stop_time"] != "none":
         stop = parse_time(config["config_stop_time"], calendar, "config_stop_time")
         if stop < start:
-            raise ValueError("config_stop_time is earlier than config_start_time!")
+            _refuse("config_stop_time", config["config_stop_time"], "config_stop_time is earlier than "
+                    "config_start_time! (the clock would run backwards)", "config_stop_time >= config_start_time")
     else:
         raise ValueError("Neither config_run_duration nor config_stop_time were specified.")
     clock = Clock(start, start, step, stop, calendar)
@@ -483,12 +489,24 @@ def cold_start(*, pools: dict, config: dict) -> Clock:
     name: ``mesh``, ``geometry``, ``thermal``, ``velocity``, ``hydro``;
     device arrays, one-word device arrays for the scalars, host strings for
     ``xtime`` and ``simulationStartTime``; ``vertexMask@2`` is the second
-    time level). Returns the clock."""
+    time level). Returns the clock.
+
+    The mesh pool's ``edgeNormalVectors`` and ``coeffs_reconstruct`` are
+    taken as given: ``mpas_rbf_interp_initialize`` and
+    ``mpas_init_reconstruct`` (which li_core_init calls) are not ported, and
+    the oracle takes both from its input too. A mesh without them, or with
+    all-zero reconstruction coefficients (as MPAS static files declare
+    them), is refused by name."""
     import cupy as cp
     m, g, t, v = pools["mesh"], pools["geometry"], pools["thermal"], pools["velocity"]
     precision = rkind.precision_of(g["thickness"])
     real = rkind.PRECISIONS[precision]
     check_config(config, precision, v)
+    for name in ("edgeNormalVectors", "coeffs_reconstruct"):
+        if name not in m or not bool(cp.any(m[name] != 0)):
+            _refuse(name, "missing" if name not in m else "all zero",
+                    "mpas_rbf_interp_initialize and mpas_init_reconstruct are not ported: the mesh must carry them",
+                    f"a mesh pool with {name} (MPAS writes it to its output and restart streams)")
     config = setup_config_options(config)
     clock = clock_init(config)
     n_cells, n_levels = g["layerThickness"].shape
@@ -562,18 +580,24 @@ def advance(*, pools: dict, config: dict, clock: Clock, n_steps: int | None = No
     mesh = _mesh_view(pools)
     taken = 0
     while not clock.stopped and (n_steps is None or taken < n_steps):
+        counters = (m["timestepNumber"].copy(), m["deltat"].copy())
         m["timestepNumber"][...] += 1
         # li_timestep
         m["deltat"][...] = real(0.0) if adaptive else interval_dt(clock.step, real)
-        fe.forward_euler_step(
-            mesh=mesh, geometry=g, thermal=pools["thermal"], velocity=pools["velocity"], config=config,
-            hydro=pools.get("hydro"),
-            seconds_to_next_force_time=interval_dt(clock.seconds_to_next_force_time(), real) if adaptive else None)
+        try:
+            # an adaptive step's time step is refused (a whole positive number of
+            # seconds, as the clock counts) as soon as set_timestep forms it,
+            # before the step changes any prognostic field
+            fe.forward_euler_step(
+                mesh=mesh, geometry=g, thermal=pools["thermal"], velocity=pools["velocity"], config=config,
+                hydro=pools.get("hydro"),
+                seconds_to_next_force_time=(interval_dt(clock.seconds_to_next_force_time(), real) if adaptive
+                                            else None))
+        except BaseException:
+            m["timestepNumber"][...], m["deltat"][...] = counters
+            raise
         if adaptive:
-            deltat = float(m["deltat"].get()[0])
-            if deltat != math.floor(deltat) or deltat <= 0.0:
-                raise ValueError(f"the adaptive time step {deltat} s is not a positive whole number of seconds")
-            clock.step = int(deltat)
+            clock.step = int(float(m["deltat"].get()[0]))
         clock.now += clock.step
         m["xtime"] = clock.time_stamp
         _set_days_since_start(pools, clock, real)
@@ -614,9 +638,13 @@ def write_restart(path, *, pools: dict, clock: Clock) -> None:
     np.savez(Path(path), **arrays)
 
 
-def read_restart(path, *, config: dict) -> tuple[dict, Clock]:
+def read_restart(path, *, config: dict, precision: str | None = None) -> tuple[dict, Clock]:
     """The pools and clock :func:`write_restart` wrote. The clock resumes on
-    its own calendar only: another ``config_calendar_type`` is refused."""
+    its own calendar only: another ``config_calendar_type`` is refused. The
+    configuration is checked against the stored run at load: its refusals
+    (:func:`check_config`, at the stored arrays' precision), and the time
+    step and the adaptive time step's force interval, which the stored clock
+    carries; ``precision``, when given, must be the stored one."""
     import cupy as cp
     pools: dict[str, dict] = {}
     with np.load(Path(path)) as data:
@@ -634,4 +662,22 @@ def read_restart(path, *, config: dict) -> tuple[dict, Clock]:
         _refuse("config_calendar_type", config.get("config_calendar_type"),
                 f"the restart's clock runs on the {calendar} calendar", f"config_calendar_type = '{calendar}'")
     clock = Clock(start, now, step, stop, calendar, None if interval < 0 else interval, None if interval < 0 else prev)
+    stored = rkind.precision_of(pools["geometry"]["thickness"])
+    if precision is not None and precision != stored:
+        _refuse("precision", precision, f"the restart's arrays are RKIND {stored}", f"precision = '{stored}'")
+    check_config(config, stored, pools["velocity"])
+    if bool(config["config_adaptive_timestep"]) != (clock.force_interval is not None):
+        _refuse("config_adaptive_timestep", config["config_adaptive_timestep"],
+                "the restart's clock was " + ("adaptive" if clock.force_interval is not None else "fixed"),
+                f"config_adaptive_timestep = {'.true.' if clock.force_interval is not None else '.false.'}")
+    if clock.force_interval is not None:
+        interval = interval_seconds(config["config_adaptive_timestep_force_interval"], calendar,
+                                    "config_adaptive_timestep_force_interval")
+        if interval != clock.force_interval:
+            _refuse("config_adaptive_timestep_force_interval", config["config_adaptive_timestep_force_interval"],
+                    f"the restart's force alarm rings every {clock.force_interval} s",
+                    "the force interval the run started with")
+    elif interval_seconds(config["config_dt"], calendar, "config_dt") != clock.step:
+        _refuse("config_dt", config["config_dt"], f"the restart's clock steps {clock.step} s",
+                "the config_dt the run started with")
     return pools, clock

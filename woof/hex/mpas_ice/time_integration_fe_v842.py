@@ -181,6 +181,11 @@ def _set_timestep(precision: str, advec_dt, diff_dt, config: dict, seconds_to_ne
     dt = min(proposed, real(seconds_to_next_force_time))
     if dt < real(config["config_min_adaptive_timestep"]):
         raise ValueError("New deltat is less than config_min_adaptive_timestep.")
+    if not (dt > 0 and dt == math.floor(dt)):
+        # the clock counts whole seconds (ESMF fractions are not carried), and a
+        # step of no time never reaches the stop time
+        raise ValueError(f"the adaptive time step {float(dt)} s is not a positive whole number of seconds "
+                         "(config_min_adaptive_timestep = 0 lets a tiny CFL limit floor it to 0)")
     return dt
 
 
