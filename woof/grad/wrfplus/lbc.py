@@ -3,7 +3,7 @@ spec_bdy_dry on woof's strict state_relaxation_multi rows
 (docs/dev/P3A-WRF-DRYCORE-ADJOINT.md section 5, item 7).
 
 One call is one row of the primal's launch: a field kind (u, v, theta,
-phi, mu or w) and the row's flags (:class:`LBCGeometry`).  The strict
+phi, mu, w or qv) and the row's flags (:class:`LBCGeometry`).  The strict
 dycore runs these rows per RK stage: on stage 1 the held u, v, theta (and
 w) relaxation (``held_compute`` + ``held_store``, no target), then the
 specified-zone tendency of u, v, theta (w) (``target``), phi's held row
@@ -19,8 +19,13 @@ tendency ``west_t``, ...), so the LBC perturbation is an AD output.
 cells' tendency adjoint is consumed; a stored held row's adjoint is
 consumed) and adds into the inputs' adjoints.
 
-Whole domains only (no streamed tile seams).  Not covered: moist and
-scalar rows, the nested (time-t copy) sources, the non-strict path.
+qv's row (8k) is the moist array's rk_step-1 capture: a direct row
+(``apply_relax``) into qv's held tendency, from the time-t qv and mu'.
+Its spec_bdy_final is :func:`lbf_tl` with kind qv.  Hydrometeors without
+a table take WRF's flow_dep_bdy (:func:`flow_tl`).
+
+Whole domains only (no streamed tile seams).  Not covered: scalar-array
+rows, the nested sources, the non-strict path.
 """
 
 from __future__ import annotations
@@ -40,7 +45,11 @@ LB_STATE = ("tend", "held")
 LB_TABLES = ("west", "west_t", "east", "east_t", "south", "south_t", "north", "north_t")
 LB_ACTIVE = ("src", "mup") + LB_TABLES
 LB_PASSIVE = ("mub", "c1h", "c2h", "c1f", "c2f", "msft", "msfu", "msfv", "fcx", "gcx")
-LB_KINDS = {"u": 0, "v": 1, "theta": 2, "phi": 3, "mu": 4, "w": 6}
+#: The primal's kind codes (kernels/lbc_state.cu).  qv (5) is a mass-grid
+#: row coupled as theta is under the strict build, ``(c1h mu + c2h) q``,
+#: with the time-t qv and mu' as its source and mass (moist.py's
+#: rk_step-1 capture) and qv's own tables.
+LB_KINDS = {"u": 0, "v": 1, "theta": 2, "phi": 3, "mu": 4, "qv": 5, "w": 6}
 
 
 @lru_cache(maxsize=None)
@@ -97,7 +106,8 @@ class LBCGeometry:
     def field(self) -> tuple[int, int, int]:
         nz, ny, nx = self.nz, self.ny, self.nx
         return {"u": (nz, ny, nx + 1), "v": (nz, ny + 1, nx), "theta": (nz, ny, nx),
-                "phi": (nz + 1, ny, nx), "w": (nz + 1, ny, nx), "mu": (1, ny, nx)}[self.kind]
+                "qv": (nz, ny, nx), "phi": (nz + 1, ny, nx), "w": (nz + 1, ny, nx),
+                "mu": (1, ny, nx)}[self.kind]
 
     @property
     def aw(self) -> int:
@@ -112,7 +122,7 @@ class LBCGeometry:
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be >= 1, got {getattr(self, name)}")
         if self.kind not in LB_KINDS:
-            raise ValueError(f"kind {self.kind!r} is not a dry row")
+            raise ValueError(f"kind {self.kind!r} is not a ported row")
         if not 1 <= self.spec_zone <= self.relax_zone:
             # the relaxation stencil reads the row outside the zone
             raise ValueError("need 1 <= spec_zone <= relax_zone")
@@ -221,7 +231,7 @@ def _named(label, names, d):
 LF_STATE = ("target",)
 LF_ACTIVE = ("muts",) + LB_TABLES
 LF_PASSIVE = ("c1h", "c2h", "c1f", "c2f", "msft", "msfu", "msfv")
-LF_KINDS = ("u", "v", "theta", "phi", "w", "mu")
+LF_KINDS = ("u", "v", "theta", "phi", "w", "mu", "qv")
 
 
 @dataclass(frozen=True)
@@ -248,7 +258,7 @@ class FinalGeometry:
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be >= 1, got {getattr(self, name)}")
         if self.kind not in LF_KINDS:
-            raise ValueError(f"kind {self.kind!r} is not a dry field")
+            raise ValueError(f"kind {self.kind!r} is not a ported field")
         if not 1 <= self.spec_zone <= self.width:
             raise ValueError("need 1 <= spec_zone <= width")
         _, fy, fx = self.field
@@ -396,3 +406,121 @@ def sph_ad(adj_state, state, traj, adj, geom: SpecPhiGeometry):
         + (state["ph_pp"],) + tuple(traj[n] for n in ("rph_t", "php", "rmu_t", "muts",
                                                      "th_pp", "mu_pp", "thp", "alt", "c2a"))
         + tuple(traj[n] for n in SP_PASSIVE) + g)
+
+
+# ---------------------------------------------------------------- item 8k
+#: WRF flow_dep_bdy (share/module_bc.F) on the specified ring of a
+#: hydrometeor without a boundary table: woof's strict
+#: ``flow_dependent_batch`` (kernels/lbc_flow.cu), which moist.py runs on
+#: qc and qr after every stage's scalar update.  Outflow copies the first
+#: interior row or column (zero gradient), inflow takes zero; the y sides
+#: own the corners.  The mass fluxes only pick the branch, so they are
+#: passive.
+FLOW_STATE = ("q",)
+FLOW_PASSIVE = ("ru", "rv")
+
+
+@dataclass(frozen=True)
+class FlowGeometry:
+    nz: int
+    ny: int
+    nx: int
+    spec_zone: int = 1
+
+    def validate(self) -> None:
+        for name in ("nz", "ny", "nx"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be >= 1, got {getattr(self, name)}")
+        if self.spec_zone < 1 or min(self.ny, self.nx) <= 2 * self.spec_zone:
+            raise ValueError("spec_zone leaves no flow-dependent boundary interior")
+
+
+def flow_shapes(geom: FlowGeometry) -> dict:
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    return {"q": (nz, ny, nx), "ru": (nz, ny, nx + 1), "rv": (nz, ny + 1, nx)}
+
+
+@lru_cache(maxsize=64)
+def _flow_frame(ny: int, nx: int, sz: int) -> tuple:
+    """Per frame point (flow_frame_point's order): its cell, the interior
+    cell it copies on outflow, the face whose flux picks the branch (flat
+    index into ru or rv), which of the two, and the flux sign that is
+    outflow."""
+    dest, src, face, use_v, sign = [], [], [], [], []
+    for d in range(sz):
+        ni, nj = nx - 2 * d, max(ny - 2 * d - 2, 0)
+        pts = ([(d, d + p) for p in range(ni)] + [(ny - 1 - d, d + p) for p in range(ni)]
+               + [(d + 1 + p, d) for p in range(nj)] + [(d + 1 + p, nx - 1 - d) for p in range(nj)])
+        for j, i in pts:
+            if j == d:
+                ci = min(max(i, sz), nx - 1 - sz)
+                s, f, v, g = sz * nx + ci, j * nx + i, True, -1.0
+            elif j == ny - 1 - d:
+                ci = min(max(i, sz), nx - 1 - sz)
+                s, f, v, g = (ny - 1 - sz) * nx + ci, (j + 1) * nx + i, True, 1.0
+            elif i == d:
+                cj = min(max(j, sz), ny - 1 - sz)
+                s, f, v, g = cj * nx + sz, j * (nx + 1) + i, False, -1.0
+            else:
+                cj = min(max(j, sz), ny - 1 - sz)
+                s, f, v, g = cj * nx + nx - 1 - sz, j * (nx + 1) + i + 1, False, 1.0
+            dest.append(j * nx + i)
+            src.append(s)
+            face.append(f)
+            use_v.append(v)
+            sign.append(g)
+    return tuple(np.asarray(a) for a in (dest, src, face, use_v, sign))
+
+
+def _flow_map(traj, geom: FlowGeometry):
+    """Device (dest, src, outflow) over every level."""
+    import cupy as cp
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    dest, src, face, use_v, sign = _flow_frame(ny, nx, geom.spec_zone)
+    k = np.arange(nz)[:, None]
+    dest3 = (k * ny * nx + dest[None]).ravel()
+    src3 = (k * ny * nx + src[None]).ravel()
+    fu = (k * ny * (nx + 1) + face[None]).ravel()
+    fv = (k * (ny + 1) * nx + face[None]).ravel()
+    pick_v = np.broadcast_to(use_v[None], (nz, use_v.size)).ravel()
+    sgn = np.broadcast_to(sign[None], (nz, sign.size)).ravel()
+    ru, rv = traj["ru"].reshape(-1), traj["rv"].reshape(-1)
+    flux = cp.where(cp.asarray(pick_v), rv[cp.asarray(np.where(pick_v, fv, 0))],
+                    ru[cp.asarray(np.where(pick_v, 0, fu))])
+    # flux < 0 on the low sides, > 0 on the high ones (strict, as the kernel)
+    outflow = cp.where(cp.asarray(sgn) > 0, flux > 0, flux < 0)
+    return cp.asarray(dest3), cp.asarray(src3), outflow
+
+
+def _flow_check(geom, named) -> np.dtype:
+    geom.validate()
+    _check(geom, named, flow_shapes(geom), min_nz=1)
+    return _dtype([a for _, _, a in named])
+
+
+def flow_tl(state, pert_state, traj, pert, geom: FlowGeometry, *, nl=True):
+    """WRFPLUS's flow_dep_bdy on one field: the ring of ``state['q']``
+    (when ``nl``) and ``pert_state['q']`` take the interior copy on
+    outflow and zero on inflow.  ``pert`` is unused (the fluxes are
+    passive)."""
+    import cupy as cp
+    from ._mode import base_only_active
+    tl = not base_only_active()
+    _flow_check(geom, [("state", "q", state["q"])] + _named("traj", FLOW_PASSIVE, traj)
+                + ([("pert", "q", pert_state["q"])] if tl else []))
+    dest, src, out = _flow_map(traj, geom)
+    for d in (((state,) if nl else ()) + ((pert_state,) if tl else ())):
+        q = d["q"].reshape(-1)
+        q[dest] = cp.where(out, q[src], q.dtype.type(0))
+
+
+def flow_ad(adj_state, traj, adj, geom: FlowGeometry):
+    """Adjoint of :func:`flow_tl`: the ring's adjoint moves to the interior
+    cells it copied (outflow) or is dropped (inflow), in place."""
+    import cupy as cp
+    dtype = _flow_check(geom, [("adj", "q", adj_state["q"])] + _named("traj", FLOW_PASSIVE, traj))
+    dest, src, out = _flow_map(traj, geom)
+    a = adj_state["q"].reshape(-1)
+    moved = cp.where(out, a[dest], dtype.type(0))
+    a[dest] = 0
+    a += cp.bincount(src, weights=moved, minlength=a.size).astype(dtype)
