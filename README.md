@@ -567,6 +567,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     WRF's inflow perturbation on the regional relax rings
     (`woof hex forecast --inflow-perturbation`, which takes its depth from
     the run's own boundary-layer height since hex has no parent model);
+  - WRF's flow-dependent specified zone for the microphysics species a
+    regional boundary stream does not drive (`woof hex forecast
+    --undriven-species-boundary wrf-flow-dependent`: outflow copies the
+    first cell inside the zone, inflow sets 0, or `ccn_conc` for the CCN
+    number). The default, `free`, keeps MPAS's behaviour: those species
+    get no boundary step;
   - `woof resume` and `woof branch` for hex runs
     ([docs/branch-from-checkpoint.md](docs/branch-from-checkpoint.md));
   - GRIB2 and Earth2 export ([docs/grib2-export.md](docs/grib2-export.md));
