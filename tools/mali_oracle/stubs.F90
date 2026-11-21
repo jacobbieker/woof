@@ -9,16 +9,22 @@
 ! The name-lookup pool of tools/mpas_ocean_oracle/stubs.F90 (character, real
 ! and logical configs, 1-D dimension arrays), plus the logging, abort and
 ! timekeeping modules the land-ice modules USE.  mpas_log_write prints
-! errors and records that one was written; it never alters a value.
+! errors and records that one was written; it never alters a value.  With
+! stub_log_capture set (run_forward.F90) it also keeps every other message's
+! text, for li_compute_statistics's report.
 
 module mpas_log
   use mpas_kind_types
   implicit none
   private
-  public :: mpas_log_write, MPAS_LOG_OUT, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT, stub_log_errors
+  public :: mpas_log_write, MPAS_LOG_OUT, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT, stub_log_errors, &
+            stub_log_capture, stub_log_lines, stub_log_count
 
   integer, parameter :: MPAS_LOG_OUT = 1, MPAS_LOG_WARN = 2, MPAS_LOG_ERR = 3, MPAS_LOG_CRIT = 4
   integer, save :: stub_log_errors = 0
+  logical, save :: stub_log_capture = .false.
+  integer, save :: stub_log_count = 0
+  character(len=StrKIND), dimension(:), allocatable, save :: stub_log_lines
 
 contains
 
@@ -32,12 +38,26 @@ contains
     real(kind=RKIND), dimension(:), intent(in), optional :: realArgs
     logical, dimension(:), intent(in), optional :: logicArgs
     integer, intent(out), optional :: err
+    character(len=StrKIND), dimension(:), allocatable :: grown
     if (present(err)) err = 0
     if (present(messageType)) then
       if (messageType >= MPAS_LOG_ERR) then
         stub_log_errors = stub_log_errors + 1
         print *, 'oracle log: ', trim(message)
       end if
+    end if
+    if (stub_log_capture) then
+      if (present(messageType)) then
+        if (messageType /= MPAS_LOG_OUT) return
+      end if
+      if (.not. allocated(stub_log_lines)) allocate(stub_log_lines(256))
+      if (stub_log_count == size(stub_log_lines)) then
+        allocate(grown(2 * size(stub_log_lines)))
+        grown(1:stub_log_count) = stub_log_lines
+        call move_alloc(grown, stub_log_lines)
+      end if
+      stub_log_count = stub_log_count + 1
+      stub_log_lines(stub_log_count) = message
     end if
   end subroutine mpas_log_write
 
@@ -684,6 +704,7 @@ module mpas_derived_types
   end type dm_info
 
   type block_type
+    integer :: localBlockID = 0
     type(MPAS_pool_type), pointer :: structs => null()
     type(MPAS_pool_type), pointer :: configs => null()
     type(block_type), pointer :: next => null()
@@ -704,14 +725,113 @@ module mpas_derived_types
 end module mpas_derived_types
 
 module mpas_dmpar
-  ! one rank, one block: every reduction is the identity and there is no halo
+  ! one rank, one block: every reduction is the identity and there is no halo.
+  ! The reductions li_compute_statistics makes (sums, min/maxloc, broadcasts)
+  ! also record each word they return, in call order: stub_trace_r (reals)
+  ! and stub_trace_i (integers), which run_forward.F90 writes out
   use mpas_kind_types
   use mpas_derived_types
   implicit none
   private
-  public :: mpas_dmpar_min_real, mpas_dmpar_max_real, mpas_dmpar_max_int, mpas_dmpar_field_halo_exch
+  public :: mpas_dmpar_min_real, mpas_dmpar_max_real, mpas_dmpar_max_int, mpas_dmpar_field_halo_exch, &
+            mpas_dmpar_sum_real, mpas_dmpar_sum_int, mpas_dmpar_minloc_real, mpas_dmpar_maxloc_real, &
+            mpas_dmpar_bcast_real, mpas_dmpar_bcast_int, mpas_dmpar_sum_real_array, IO_NODE, &
+            stub_trace_r, stub_trace_i, stub_trace_nr, stub_trace_ni
+
+  integer, parameter :: IO_NODE = 0
+  real(kind=RKIND), dimension(:), allocatable, save :: stub_trace_r
+  integer, dimension(:), allocatable, save :: stub_trace_i
+  integer, save :: stub_trace_nr = 0, stub_trace_ni = 0
 
 contains
+
+  subroutine trace_r(value)
+    real(kind=RKIND), intent(in) :: value
+    real(kind=RKIND), dimension(:), allocatable :: grown
+    if (.not. allocated(stub_trace_r)) allocate(stub_trace_r(256))
+    if (stub_trace_nr == size(stub_trace_r)) then
+      allocate(grown(2 * size(stub_trace_r)))
+      grown(1:stub_trace_nr) = stub_trace_r
+      call move_alloc(grown, stub_trace_r)
+    end if
+    stub_trace_nr = stub_trace_nr + 1
+    stub_trace_r(stub_trace_nr) = value
+  end subroutine trace_r
+
+  subroutine trace_i(value)
+    integer, intent(in) :: value
+    integer, dimension(:), allocatable :: grown
+    if (.not. allocated(stub_trace_i)) allocate(stub_trace_i(256))
+    if (stub_trace_ni == size(stub_trace_i)) then
+      allocate(grown(2 * size(stub_trace_i)))
+      grown(1:stub_trace_ni) = stub_trace_i
+      call move_alloc(grown, stub_trace_i)
+    end if
+    stub_trace_ni = stub_trace_ni + 1
+    stub_trace_i(stub_trace_ni) = value
+  end subroutine trace_i
+
+  subroutine mpas_dmpar_sum_real(dminfo, r, rout)
+    type(dm_info), intent(in) :: dminfo
+    real(kind=RKIND), intent(in) :: r
+    real(kind=RKIND), intent(out) :: rout
+    rout = r
+    call trace_r(rout)
+  end subroutine mpas_dmpar_sum_real
+
+  subroutine mpas_dmpar_sum_int(dminfo, i, iout)
+    type(dm_info), intent(in) :: dminfo
+    integer, intent(in) :: i
+    integer, intent(out) :: iout
+    iout = i
+    call trace_i(iout)
+  end subroutine mpas_dmpar_sum_int
+
+  subroutine mpas_dmpar_minloc_real(dminfo, r, rmin, procout)
+    type(dm_info), intent(in) :: dminfo
+    real(kind=RKIND), intent(in) :: r
+    real(kind=RKIND), intent(out) :: rmin
+    integer, intent(out) :: procout
+    rmin = r
+    procout = IO_NODE
+    call trace_r(rmin)
+  end subroutine mpas_dmpar_minloc_real
+
+  subroutine mpas_dmpar_maxloc_real(dminfo, r, rmax, procout)
+    type(dm_info), intent(in) :: dminfo
+    real(kind=RKIND), intent(in) :: r
+    real(kind=RKIND), intent(out) :: rmax
+    integer, intent(out) :: procout
+    rmax = r
+    procout = IO_NODE
+    call trace_r(rmax)
+  end subroutine mpas_dmpar_maxloc_real
+
+  subroutine mpas_dmpar_bcast_real(dminfo, r, proc)
+    type(dm_info), intent(in) :: dminfo
+    real(kind=RKIND), intent(inout) :: r
+    integer, intent(in), optional :: proc
+    call trace_r(r)
+  end subroutine mpas_dmpar_bcast_real
+
+  subroutine mpas_dmpar_bcast_int(dminfo, i, proc)
+    type(dm_info), intent(in) :: dminfo
+    integer, intent(inout) :: i
+    integer, intent(in), optional :: proc
+    call trace_i(i)
+  end subroutine mpas_dmpar_bcast_int
+
+  subroutine mpas_dmpar_sum_real_array(dminfo, nElements, inArray, outArray)
+    type(dm_info), intent(in) :: dminfo
+    integer, intent(in) :: nElements
+    real(kind=RKIND), dimension(nElements), intent(in) :: inArray
+    real(kind=RKIND), dimension(nElements), intent(out) :: outArray
+    integer :: i
+    outArray = inArray
+    do i = 1, nElements
+      call trace_r(outArray(i))
+    end do
+  end subroutine mpas_dmpar_sum_real_array
 
   subroutine mpas_dmpar_min_real(dminfo, inValue, outValue)
     type(dm_info), intent(in) :: dminfo

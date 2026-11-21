@@ -64,9 +64,18 @@ SIMPLE_FIELDS = (
 )
 
 
+#: what li_compute_statistics adds (its cases only): its edge scratch mask
+STATS_FIELDS = (("scratch", "iceEdgeMask", "i", (_E,)),)
+
+
+def stats_on(config: dict) -> bool:
+    return int(config.get("config_stats_interval", 0)) > 0 or bool(config.get("config_write_stats_on_startup", False))
+
+
 def fields_for(config: dict) -> tuple:
     """The field table of a run with ``config``."""
-    return FIELDS + (SIMPLE_FIELDS if config.get("config_velocity_solver") == "simple" else ())
+    return (FIELDS + (SIMPLE_FIELDS if config.get("config_velocity_solver") == "simple" else ())
+            + (STATS_FIELDS if stats_on(config) else ()))
 
 
 def fields(case: dict) -> tuple:
@@ -144,6 +153,25 @@ CASES = (
                            config_simple_velocity_type="uniform", config_stats_cell_ID=1,
                            config_calving="topographic_threshold", config_dt="10_00:00:00",
                            config_run_duration="40_00:00:00")),
+    # li_compute_statistics: on startup and every step or every other, the diagnostic column at
+    # the dome's summit ('_stats_cell'), on no cell (ID 0), with the thermal solver, the
+    # 'simple' solver's signed velocities and the zero velocity of 'none'
+    ("stats_dome", 5, dict(_DOME, _stats_cell="centre", config_stats_interval=2,
+                           config_write_stats_on_startup=True)),
+    ("stats_eismint2", 10, {"_physics": "eismint2", "config_thermal_solver": "temperature",
+                            "config_flowParamA_calculation": "PB1982",
+                            "config_surface_air_temperature_source": "file", "config_dt": "0000-00-10_00:00:00",
+                            "config_run_duration": "30_00:00:00", "config_stats_interval": 1,
+                            "config_stats_cell_ID": 0}),
+    ("stats_simple_shelf", 5, dict(_DOME, _bed="marine", _stats_cell="centre", config_velocity_solver="simple",
+                                   config_simple_velocity_type="radial", config_calving="floating",
+                                   config_dt="10_00:00:00", config_run_duration="30_00:00:00",
+                                   config_stats_interval=1, config_write_stats_on_startup=True)),
+    ("stats_benchmark", 10, {"_physics": "benchmark", "_stats_cell": "centre", "config_thermal_solver": "enthalpy",
+                             "config_velocity_solver": "none", "config_thickness_advection": "none",
+                             "config_surface_air_temperature_value": 243.15,
+                             "config_dt": "0001-00-00_00:00:00", "config_run_duration": "0002-00-00_00:00:00",
+                             "config_stats_interval": 2, "config_write_stats_on_startup": True}),
     ("enthalpy_benchmark", 10, {"_physics": "benchmark", "config_thermal_solver": "enthalpy",
                                 "config_velocity_solver": "none", "config_thickness_advection": "none",
                                 "config_surface_air_temperature_value": 243.15,
@@ -297,12 +325,16 @@ def make_case(name: str, n_levels: int, overrides: dict, stretch: float, suffix:
             scratch[field] = ((rs.random_sample(s) * 11).astype(np.int32) - 5 if kind == "i"
                               else r(-1.0e3 + 2.0e3 * rs.random_sample(s)))
     pools["scratch"] = scratch
+    if overrides.get("_stats_cell") == "centre":
+        config["config_stats_cell_ID"] = int(np.argmin(d)) + 1
     if config["config_velocity_solver"] == "simple":
         # drawn last, so the other cases' words are as they were
         x_edge, y_edge = edge_points_of(stretch)
         pools["mesh"].update(xEdge=r(x_edge), yEdge=r(y_edge))
         pools["velocity"]["normalVelocityInitial"] = prior((ne, nl + 1))
         pools["velocity"]["dirichletVelocityMask"] = (rs.random_sample((nc, nl + 1)) < 0.5).astype(np.int32)
+    if stats_on(config):
+        scratch["iceEdgeMask"] = (rs.random_sample(ne) * 11).astype(np.int32) - 5
     return case
 
 
@@ -367,7 +399,9 @@ def input_digest(case: dict) -> str:
 def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     """run_forward.F90's output stream -> ``pool/name`` arrays (:data:`OUTPUTS`
     without the RKIND 8 refusals; text fields as 0-d unicode arrays), the
-    error words and the clock's final time (``clock/now``)."""
+    error words and the clock's final time (``clock/now``); with the
+    statistics on, li_compute_statistics's reduction words (``stats/real``,
+    ``stats/int``) and its reports (``stats/log``, :func:`stats_log`)."""
     head = np.frombuffer(raw, "<i4", 4, 0)
     out = {"errClock": head[0:1].copy(), "errInit": head[1:2].copy(), "errRun": head[2:3].copy(),
            "logErrors": head[3:4].copy(),
@@ -385,8 +419,21 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
         if (pool, name) in keep:
             out[f"{pool}/{name}"] = np.frombuffer(raw, dtype, n, off).reshape(s).astype(dtype.newbyteorder("="))
         off += dtype.itemsize * n
+    n_real, n_int, n_lines = np.frombuffer(raw, "<i4", 3, off)
+    off += 12
+    real_words = np.frombuffer(raw, _real(case), n_real, off).astype(_real(case).newbyteorder("="))
+    off += _real(case).itemsize * int(n_real)
+    int_words = np.frombuffer(raw, "<i4", n_int, off).astype(np.int32)
+    off += 4 * int(n_int)
+    lines = [raw[off + i * STRKIND:off + (i + 1) * STRKIND].decode("ascii") for i in range(int(n_lines))]
+    off += STRKIND * int(n_lines)
     if off != len(raw):
         raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
+    if stats_on(case["config"]):
+        out["stats/real"], out["stats/int"] = real_words, int_words
+        out["stats/log"] = np.array(stats_log(lines))
+    elif n_real or n_int:
+        raise ValueError("oracle output: statistics words from a run without statistics")
     # The driver writes back the arrays it put, but the stub's
     # mpas_pool_shift_time_levels trades them between NAME and NAME@2 (once in
     # the initial solve, once a step): after an odd number of shifts the array
@@ -396,6 +443,13 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
         for key in [k for k in out if k.endswith("@2")]:
             out[key], out[key[:-2]] = out[key[:-2]], out[key]
     return out
+
+
+def stats_log(lines) -> str:
+    """Every li_compute_statistics report in a log, in order, one blank
+    line between."""
+    from woof.hex.mpas_ice import statistics_v842
+    return "\n\n".join(statistics_v842.reports(lines))
 
 
 def load_fixture(precision: str = "r4") -> dict[str, dict[str, np.ndarray]]:
@@ -455,8 +509,14 @@ def run_gpu(case: dict, config: dict | None = None) -> dict[str, np.ndarray]:
     from woof.hex.mpas_ice import forward_v842
 
     pools = device_pools(case)
-    clock = forward_v842.run(pools=pools, config=dict(case["config"], **(config or {})))
-    return outputs_of(case, pools, clock)
+    stats: list = []
+    clock = forward_v842.run(pools=pools, config=dict(case["config"], **(config or {})), on_statistics=stats.append)
+    out = outputs_of(case, pools, clock)
+    if stats_on(case["config"]):
+        out["stats/real"] = np.concatenate([s.real_words for s in stats])
+        out["stats/int"] = np.concatenate([s.int_words for s in stats])
+        out["stats/log"] = np.array(stats_log([line for s in stats for line in s.lines]))
+    return out
 
 
 def measure(reference: dict | None = None, precision: str = "r4") -> dict[str, dict[str, int]]:

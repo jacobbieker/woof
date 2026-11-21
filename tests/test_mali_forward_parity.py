@@ -30,6 +30,11 @@ THE BREAKAGES THESE PREVENT
    must end on the straight run's words.
 6. Outputs that depend on the model's uninitialised scratch or on prior
    diagnostics: the oracle fills them with random words.
+7. Statistics that agree only to the printed digits. Every word
+   li_compute_statistics's reductions return (``stats/real``, ``stats/int``,
+   recorded by the oracle's mpas_dmpar) and every character of its reports
+   (``stats/log``) must match; a pairwise sum in place of the Fortran's
+   sequential one, or MAX with the other tie rule, must be caught.
 """
 from __future__ import annotations
 
@@ -112,6 +117,22 @@ def test_fixture_covers_the_branches(precision):
             changed = fo.word_mismatches(out["geometry/bedTopography"], case["pools"]["geometry"]["bedTopography"])
             assert (changed > 0) == (name != "simple_uniform"), name
         assert (fixture[f"simple_radial_shelf_{mesh}"]["geometry/bedTopography"] == -880.0).any()
+    # the statistics: a report on startup (when asked) and every interval-th step, and
+    # none from the cases without them
+    for name, out in fixture.items():
+        config = cases[name]["config"]
+        if not fo.stats_on(config):
+            assert not any(k.startswith("stats/") for k in out), name
+            continue
+        steps = int(out["mesh/timestepNumber"][()])
+        expected = int(config["config_write_stats_on_startup"]) + steps // config["config_stats_interval"]
+        log = str(out["stats/log"])
+        assert log.count("Global statistics: time =") == expected, name
+        assert out["stats/int"].size == 12 * expected, name
+        found = config["config_stats_cell_ID"] != 0
+        assert ("Local cell ID, block, proc =       0" in log) != found, name
+    assert "Max velocity (m/yr), edge, level     -0.0000000000000000" in str(
+        fixture["stats_benchmark_uniform"]["stats/log"])
     # the gregorian calendar's leap day lies inside EISMINT2's run
     assert str(fixture["eismint2_a_temperature_uniform"]["clock/now"]) == "2000-03-11_00:00:00"
 
@@ -348,8 +369,8 @@ def _refused_on_host(case: dict, config: dict) -> None:
 
 
 @pytest.mark.parametrize("knob, value", [
-    ("config_do_restart", True), ("config_time_integration", "rk4"), ("config_stats_interval", 1),
-    ("config_write_stats_on_startup", True), ("config_write_albany_ascii_mesh", True),
+    ("config_do_restart", True), ("config_time_integration", "rk4"), ("config_write_albany_ascii_mesh", True),
+    ("woof_statistics_extrema", "other"),
     ("config_AM_globalStats_enable", True), ("config_year_digits", 5), ("config_velocity_solver", "FO"),
     ("config_dt", "0000-01-00_00:00:00"), ("config_dt", "00:00:10.5"), ("config_start_time", "file"),
 ])
@@ -499,3 +520,80 @@ def test_the_simple_seam_edges_take_cell_twos_vector(monkeypatch, precision):
 
     monkeypatch.setattr(vs, "normal_velocity_initial", never_far)
     assert _caught(precision, names, "velocity/normalVelocityInitial") > 0
+
+
+@pytest.mark.parametrize("value, w, d, text", [
+    # gfortran 16's own output (x86-64): ties to even on the exact binary value,
+    # the sign of -0 kept, a three-digit exponent without its E, overflow as asterisks
+    (2.0 ** -17, 24, 16, "      0.0000076293945312"), (-0.0, 24, 16, "     -0.0000000000000000"),
+    (-1.0e-20, 24, 16, "     -0.0000000000000000"), (12345678.9, 24, 16, "*" * 24),
+    (np.float32(0.1), 24, 16, "      0.1000000014901161"), (np.float32(0.1), 6, 4, "0.1000"),
+    (0.00005, 6, 4, "0.0001"), (0.00015, 6, 4, "0.0001"),
+])
+def test_the_f_edit_descriptor_is_gfortrans(value, w, d, text):
+    from woof.hex.mpas_ice import statistics_v842 as st
+    assert st.fmt_f(value, w, d) == text
+
+
+@pytest.mark.parametrize("value, text", [
+    (2.0 ** -17, "  0.7629394531250000E-05"), (-0.0, " -0.0000000000000000E+00"),
+    (1.0e120, "  0.1000000000000000+121"), (1.0e-300, "  0.1000000000000000-299"),
+    (np.float32(123456.789), "  0.1234567890625000E+06"), (0.99999999999999999, "  0.1000000000000000E+01"),
+    (9.99999999999999999e22, "  0.9999999999999999E+23"),
+])
+def test_the_e_edit_descriptor_is_gfortrans(value, text):
+    from woof.hex.mpas_ice import statistics_v842 as st
+    assert st.fmt_e(value, 24, 16) == text
+
+
+def test_max_keeps_x86_gfortrans_tie_rule():
+    # MAX(0.0, -0.0) is -0.0 and MAX(-0.0, 0.0) is 0.0 (maxss returns the second on a tie)
+    from woof.hex.mpas_ice import statistics_v842 as st
+    z = np.float32(0.0)
+    assert np.signbit(st._fmax(z, -z)) and not np.signbit(st._fmax(-z, z))
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+@pytest.mark.parametrize("mutation, field", [
+    ("pairwise", "stats/real"), ("max_ties", "stats/log"), ("last_location", "stats/int"),
+])
+def test_a_mutated_statistic_is_caught(monkeypatch, precision, mutation, field):
+    from woof.hex.mpas_ice import statistics_v842 as st
+    if mutation == "pairwise":
+        monkeypatch.setattr(st, "_sequential_sum", lambda terms, real: real(np.sum(np.asarray(terms, real))))
+    elif mutation == "max_ties":
+        monkeypatch.setattr(st, "_fmax", lambda a, b: b if b > a else a)
+    else:
+        original = st._first_extreme
+
+        def last(values, init, larger, eligible=None):
+            flat = np.asarray(values).ravel()
+            value, at = original(values, init, larger, eligible)
+            if at:
+                at = int(np.flatnonzero(flat == value)[-1]) + 1
+            return value, at
+        monkeypatch.setattr(st, "_first_extreme", last)
+    names = {f"{n}_{m}" for n in ("stats_dome", "stats_eismint2", "stats_simple_shelf", "stats_benchmark")
+             for m, _ in fo.MESHES}
+    assert _caught(precision, names, field) > 0
+
+
+@requires_gpu
+def test_the_statistics_extrema_correction_is_opt_in():
+    # v8.4.2 takes the extrema over every owned cell and edge, ice or not: the
+    # dome's ice-free margin reports a minimum thickness of 0. 'ice' takes the
+    # ice cells alone; the state's words do not depend on it
+    case = _case("stats_dome_uniform")
+    pinned = fo.load_fixture("r4")[case["name"]]
+    corrected = fo.run_gpu(case, {"woof_statistics_extrema": "ice"})
+    for key in pinned:
+        if key.startswith("stats/") or key in ("errClock", "errInit", "errRun", "logErrors"):
+            continue
+        assert fo.word_mismatches(corrected[key], pinned[key]) == 0, key
+    default_min = [line for line in str(pinned["stats/log"]).splitlines() if line.startswith("Min thickness")]
+    fixed_min = [line for line in str(corrected["stats/log"]).splitlines() if line.startswith("Min thickness")]
+    assert all(" 0.0000000000000000" in line for line in default_min)
+    assert not any(" 0.0000000000000000" in line for line in fixed_min)
+    assert str(corrected["stats/log"]).count("Global statistics") == str(pinned["stats/log"]).count(
+        "Global statistics")

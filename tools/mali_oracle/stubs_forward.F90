@@ -13,8 +13,11 @@
 !   mesh's, as the hex atmosphere's are (build_forward.sh's reconstruction
 !   cut carries the no-op mpas_init_reconstruct);
 ! - the analysis members (every one is off by default, and the port refuses
-!   enabling one by name) and li_compute_statistics (config_stats_interval
-!   = 0 and config_write_stats_on_startup = .false.; reaching it stops).
+!   enabling one by name).
+!
+! li_compute_statistics is v8.4.2's own (mpas_li_statistics.F, compiled
+! verbatim): its reductions and its report are recorded by stubs.F90's
+! mpas_dmpar and mpas_log.
 
 module mpas_framework
   ! li_core USEs it; everything it calls comes from the modules below
@@ -175,20 +178,3 @@ contains
   end subroutine li_analysis_finalize
 
 end module li_analysis_driver
-
-module li_statistics
-  use mpas_derived_types
-  implicit none
-  private
-  public :: li_compute_statistics
-
-contains
-
-  subroutine li_compute_statistics(domain, itimestep)
-    type(domain_type), intent(inout) :: domain
-    integer, intent(in) :: itimestep
-    print *, 'oracle stub: li_compute_statistics is not part of this oracle'
-    stop 6
-  end subroutine li_compute_statistics
-
-end module li_statistics

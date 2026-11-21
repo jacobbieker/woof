@@ -275,22 +275,27 @@ def run(*, namelist, input=None, out, precision: str | None = None, restart=None
     """A run from ``input`` (a cold start, at ``precision``, 'r4' by
     default) or from ``restart`` (at its stored precision, which
     ``precision`` must name if given); writes ``out/output.nc`` and
-    ``out/restart.npz``. Returns the clock."""
+    ``out/restart.npz``, and ``out/statistics.log`` (every
+    ``li_compute_statistics`` report, as the model logs it) when the
+    namelist asks for statistics. Returns the clock."""
     out = Path(out)
     config = read_namelist(namelist)
+    stats: list = []
     if restart is not None:
         config.update(_restart_mesh_config(restart))
         pools, clock = forward_v842.read_restart(restart, config=config, precision=precision)
-        forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps)
+        forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps, on_statistics=stats.append)
     else:
         if input is None:
             raise ValueError("a cold start needs --input")
         host, mesh_config = read_input(input, config=config, precision=precision or "r4")
         config.update(mesh_config)
         pools = device_pools(host)
-        clock = forward_v842.cold_start(pools=pools, config=config)
-        forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps)
+        clock = forward_v842.cold_start(pools=pools, config=config, on_statistics=stats.append)
+        forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps, on_statistics=stats.append)
     out.mkdir(parents=True, exist_ok=True)
+    if stats:
+        (out / "statistics.log").write_text("".join(f"{s.report}\n\n" for s in stats))
     write_output(out / "output.nc", pools=pools, clock=clock, config=config)
     forward_v842.write_restart(out / "restart.npz", pools=pools, clock=clock)
     _save_mesh_config(out / "restart.npz", config)
