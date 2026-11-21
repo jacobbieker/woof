@@ -297,6 +297,8 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict, t
         i32(d["index_SSHGradientMeridional"])))
     time_average_accumulate(diagnostics=d, forcing=f, effective_density=st.get("effectiveDensityInLandIce@2"),
                             configs=configs, t0_kelvin=t0_kelvin)
+    if gm:
+        reconstruct_gm_vectors(mesh=m, diagnostics=d, configs=configs)
 
 
 def time_average_accumulate(*, diagnostics: dict, forcing: dict, effective_density, configs: dict,
@@ -320,8 +322,6 @@ def time_average_accumulate(*, diagnostics: dict, forcing: dict, effective_densi
                                 n_cells=n_cells_forcing, n_accumulated=int(f["nAccumulatedCoupled"]), configs=configs)
     # ocn_time_average_coupled_accumulate counts the step in
     f["nAccumulatedCoupled"] = int(f["nAccumulatedCoupled"]) + 1
-    if gm:
-        reconstruct_gm_vectors(mesh=m, diagnostics=d, configs=configs)
 
 
 #: ocn_reconstruct_gm_vectors' edge fields and the cell vectors it makes of them
