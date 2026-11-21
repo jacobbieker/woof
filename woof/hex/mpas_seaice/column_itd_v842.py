@@ -13,13 +13,17 @@ What it carries: the BL99 and mushy thermodynamics (the mushy frazil's
 salinity, liquidus and enthalpy, and its vertical regridding), the linear
 remap and the delta function (``config_itd_conversion_type``), any category
 bounds, one category (``reduce_area``), the level, CESM and topo melt ponds,
-the ice age, first-year ice and level-ice tracers, and
-``config_update_ocean_fluxes`` either way.
+the ice age, first-year ice and level-ice tracers,
+``config_update_ocean_fluxes`` either way, and the column biogeochemistry's
+brine height (``config_use_brine``): the brine fraction travels with the ice
+volume through the remap and rebinning, ``add_new_ice_bgc``
+(``ice_zbgc.F90:29-251``) gives the new ice its brine fraction, and
+``zap_small_areas`` resets it to 1.
 
 What it refuses, by name: the zero-layer thermodynamics (``cleanup_itd``'s
 ``zerolayer_check`` is not ported), the aerosols, and more than
-``ITD_MAXCAT`` categories; the biogeochemistry is refused by the column port
-(:func:`woof.hex.mpas_seaice.column_v842.refuse_unported`).
+``ITD_MAXCAT`` categories; of the biogeochemistry everything but the brine
+height (:func:`woof.hex.mpas_seaice.column_v842.refuse_unported`).
 
 v8.4.2's quirks are kept: ``rebin`` drops ``shift_ice``'s abort (cleanup_itd
 never reads it before ``zap_small_areas`` resets it) while ``shift_ice`` still
@@ -83,7 +87,7 @@ def _refuse(knob: str, value, reason: str, declaration: str):
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the ITD thermodynamics port does not carry."""
     c = configs
-    cv.refuse_unported(c, dims)
+    cv.refuse_unported(c, dims, biogeochemistry=True)
     if c["config_thermodynamics_type"] == "zero layer":
         _refuse("config_thermodynamics_type", "zero layer",
                 "cleanup_itd's zerolayer_check (the zero-layer thermodynamics) is not ported",

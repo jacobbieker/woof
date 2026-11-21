@@ -75,3 +75,32 @@ def test_an_mpas_v842_suite_is_initialized_by_the_plain_init_and_named():
     assert init_selection("convection_permitting", None)["scalar_names"] == init_selection(None, None)["scalar_names"]
     with pytest.raises(MpasPortError, match="four soil levels"):
         init_selection("convection_permitting", "ruc")
+
+
+def _usage_engine(tmp_path, usage):
+    import stat, sys
+    engine = tmp_path / "usage_engine"
+    engine.write_text("#!" + sys.executable + "\nimport sys\nsys.stderr.write(" + repr(usage) + ")\nsys.exit(1)\n")
+    engine.chmod(engine.stat().st_mode | stat.S_IXUSR)
+    return engine
+
+
+def test_an_engine_without_declared_slots_refuses_a_species_row_beyond_its_set(tmp_path):
+    """Morrison's ``ns`` met "the init file has no variable for" in the 2026-11-13 option matrix; an engine that
+    predates the declared slots is now refused by name before it runs, and one that has them is admitted."""
+    from woof.hex import init_physics
+    from woof.hex.species_row import species_row_for_scheme
+    names = ["qv", "qc", "qr", "qi", "qs", "qg", "ns"]
+    stale = _usage_engine(tmp_path, "usage: rw_mpas_init --augment-init INIT.nc --scalar-names a,b")
+    message = init_physics.declared_slots_refusal(stale, names)
+    assert message is not None and "ns" in message and init_physics.DECLARED_SLOTS_MARKER in message
+    fresh = _usage_engine(tmp_path, "usage: ... " + init_physics.DECLARED_SLOTS_MARKER + " ...")
+    assert init_physics.declared_slots_refusal(fresh, names) is None
+    # The default rows never probe the engine: their species are the set every engine creates.
+    missing = tmp_path / "no_such_engine"
+    for scheme in ("mp_wsm6", "mp_thompson", "mp_thompson_aerosols", "mp_kessler"):
+        try:
+            row = species_row_for_scheme(scheme).names()
+        except Exception:
+            continue
+        assert init_physics.declared_slots_refusal(missing, row) is None, scheme

@@ -579,13 +579,8 @@ Each step is one small PR, taken to merged before the next widens.
    needed before its tutorial case can serve as the oracle.
    - Map factors: bound in the step since item 8e (below); no longer
      refused.
-   - Specified boundaries: the step must also take the relaxation folded
-     into the held tendencies (`fold_lateral_relaxation` into
-     rk_addtend_dry), the per-stage `state_relaxation_multi` rows on the
-     state's boundary tables, the exact frame and
-     `advance_specified_phi_w` in every substep, and `spec_bdy_final` in
-     the epilogue. The kernels are ported (items 5 and 7); the binding is
-     not.
+   - Specified boundaries: bound in the step since item 8f (below); no
+     longer refused.
    - Order agreed on 2026-11-20: the window driver next, then map
      factors, then specified boundaries.
 
@@ -620,14 +615,27 @@ Each step is one small PR, taken to merged before the next widens.
      - `wrfda_tl_start(g)` builds the start from g over
        `WRFDA_TL_FIELDS`. `wrfda_tl_start_ad(adj)` is its adjoint. A dot
        test pins the pair.
+     - On a specified window pass `specified=True` to both. g_mu then
+       also seeds the mu halo (`model.HALO`). WRFPLUS's `wrf_run_tl`
+       calls `start_domain`, and `g_start_domain_em`
+       (`wrftladj/start_em_tl.F:706`) runs `g_set_physical_bc2d` on
+       `mu_2`, which on a specified domain copies g_mu's edge row into
+       the halo (`wrftladj/module_bc_tl.F`). The first step reads the
+       halo only when the state carries one, so a cold start gives the
+       same TL either way. `test_specified_window` covers the pair's dot
+       test, and with a carried halo it shows that the seed changes the
+       TL.
      - `partial=True` with an empty `dx0` is refused.
      - The adjoint of the zero fill is a restriction, so a caller takes
        the same names from `ad`'s result. A dot test pins this.
      - An incomplete dict without `partial`, or a name outside
        STEP_INPUTS, is refused by name.
    - The window refuses whatever `step_geometry` refuses, and names it.
-     Map factors are in (#723). Specified boundaries are refused until
-     they are in, so a regional WRFDA case is still refused.
+     Map factors (8e, #723) and specified boundaries (8f) are bound. On
+     a specified domain the state also carries the mu halo, and the
+     interval's boundary tables are window parameters (`Window.params`):
+     `tl` takes their perturbation in `dx0` (with or without
+     `partial`), and `ad` returns their adjoint with state 0's.
    - Checkpoints hold a state's STEP_INPUTS only. A step reads nothing
      else its predecessor wrote: it writes its scratch before reading
      it. A test pins this. With every other written array poisoned with
@@ -697,8 +705,72 @@ Each step is one small PR, taken to merged before the next widens.
      step gives `dycore.step`'s words on a mapped state. With msfv passed
      where the strict path passes MSFV_INV, about 2000 words per
      prognostic differ, so the test pins the choice.
-   - Still refused: lateral boundaries other than periodic (specified
-     boundaries next), so WRFDA's regional tutorial case cannot run yet.
+   - Still refused then: lateral boundaries other than periodic (bound
+     in 8f).
+8f. Specified boundaries in the step (DA item 3): `step_geometry` binds
+   woof's strict specified step on a domain whose tables are attached
+   (`attach_lateral_boundaries`).
+   - Per stage, after the slow tendencies:
+     - stage 1 only: `fold_lateral_relaxation` on u, v and theta (the
+       held relax rows times msfu/msfv, then the mixing map-factor
+       coupling: /msfu, *msfv_inv, /msft);
+     - every stage: `_apply_state_lateral_boundaries_wrf`'s rows on the
+       state tables (u, v, theta target; phi held compute and store on
+       stage 1, held read later; mu with its relaxation on stage 1).
+   - After each substep: `advance_specified_phi_w`.
+   - Epilogue: the halo takes mup, then `spec_bdy_final` (mu first, then
+     u, v, theta and phi coupled with the captured muts). The periodic
+     alias close is skipped.
+   - rk_step 1 of a carried step reads WRF's mu halo on the boundary
+     faces' ghost operand (`_calc_ww_cp_fluxes`). `rk_step_prep` gains a
+     `halo` flag, and its adjoint routes each boundary face's ghost share
+     to the halo's adjoint. `model.HALO` ("mu_halo") is a step input
+     (`step_inputs(geom)`).
+   - The interval's tables (`lbc_<field>_<side>[_t]`,
+     `step_parameters(geom)`) are inputs no step writes: their TL is
+     carried, and their adjoint accumulates over the window.
+   - Each step has its own geometry, because its boundary time (dtbc,
+     the unbound clock: stage rows at the step start, `spec_bdy_final`
+     at its end) differs per step.
+   - `Window.lbc_seconds` is the interval's length. `lbc_from_ends(start,
+     end, seconds)` builds WRFDA's `var4d_lbc` table perturbation (value
+     = start, tendency = (end - start) / seconds, as WRF's bt ties to the
+     next record), and `lbc_from_ends_ad` folds the tables' adjoint into
+     the start's and the end's. Without `var4d_lbc`, pass the value tables
+     alone in `dx0`: the `_t` tables start at zero.
+   - Refused by name: nested boundaries, open boundaries that are not
+     specified, specified without tables, a periodic axis, a bound
+     `DomainClock`, time laws other than linear, relax_w, DFI boundary
+     forcing, streamed tile seams, spec_zone 0, and a window reaching
+     another boundary interval. A step ending on its interval's end is
+     accepted when the primal serves that time from the same (last)
+     interval, and refused when it serves it from the next.
+   - Tests (`tests/test_grad_wrfplus_spec_step.py`, host and CUDA): four
+     cases on a 20x18x8 ridge with relax_zone 4 (a warm step, a cold
+     three-step chain, a warm two-step chain with map factors and the
+     carried halo moved 3 Pa off the ring, and a cold chain ending on its
+     interval's end). The boundary snapshots move every field (mu and phi
+     too) between the two times and vary along the ring, so every table,
+     tendency and the relaxation's Laplacian term carries signal.
+     - The binary32 base reproduces `dycore.step`'s words on every input
+       and the next step's scratch. Dropping each part of the binding in
+       turn (the fold, `advance_specified_phi_w`, `spec_bdy_final`, the
+       stage rows, the halo operand on the shifted case) moves words; the
+       test asserts each.
+     - The dot test perturbs the state, the halo and every table at 1e-3
+       of its scale (1e-12 in binary64, 1e-5 terms-scaled in binary32).
+       In binary64 each of the 40 tables also passes its own dot test
+       with a nonzero share.
+     - Binary64 finite differences converge, and the base-only build is
+       the joint base.
+     - The window's binary32 forward is N primal steps; its dot test
+       with forcing covers the tables' adjoint; omitted tables equal zero
+       ones bit for bit; and `lbc_from_ends` passes its dot test alone
+       and through the window.
+     - With the written arrays (held rows, fold slots) and the mu row's
+       unread source poisoned with NaN, a step's outputs and adjoint are
+       the clean run's; the tables are never written.
+     - The refusals are named.
 8g. An external trajectory (DA item 1; WRFDA-4DVAR-PLAN section 3.1).
    WRFPLUS linearises about the nonlinear run's states, read every time
    step (`auxinput6`), from a run with full physics.

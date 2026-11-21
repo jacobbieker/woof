@@ -139,6 +139,45 @@ pub fn write_init(
     provenance: &str,
     lineage: &crate::init::Lineage,
 ) -> MpasResult<EmitLedger> {
+    write_init_declaring(out_path, capsule_path, computed, file_id, parent_chain, provenance, lineage, &[])
+}
+
+/// The transported species [`write_init`] creates when the capsule has no
+/// slot for them: the WSM6/Thompson/aerosol-aware set every producer knows.
+pub const ADMITTED_SPECIES: [&str; 10] = ["qi","qs","qg","ni","nr","nc","nwfa","nifa","ng","volg"];
+
+/// [`write_init`], also creating a `(Time, nCells, nVertLevels)` float slot
+/// for each name in `declared_scalars` that the capsule lacks.
+///
+/// `declared_scalars` is a microphysics scheme's own prognostic species row
+/// (`--augment-init --scalar-names`, from woof.hex.species_row): Morrison's
+/// `ns`, P3's `qir`/`qib`, NSSL's `qh`/`qnh`, the SBM bins and so on.  The
+/// caller names each one, so a computed value under a declared name has a
+/// landing site; any other computed name without a capsule variable still
+/// meets the "no variable for" refusal.  Names must be plain identifiers.
+#[allow(clippy::too_many_arguments)]
+pub fn write_init_declaring(
+    out_path: &Path,
+    capsule_path: &Path,
+    computed: BTreeMap<String, Computed>,
+    file_id: &str,
+    parent_chain: &[String],
+    provenance: &str,
+    lineage: &crate::init::Lineage,
+    declared_scalars: &[String],
+) -> MpasResult<EmitLedger> {
+    for name in declared_scalars {
+        let plain = !name.is_empty() && name.len() <= 64
+            && name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !plain {
+            return Err(MpasError::Refusal(format!("declared scalar {name:?} is not a plain identifier")));
+        }
+        match computed.get(name) {
+            None | Some(Computed::Floats(_)) => {}
+            Some(_) => return Err(MpasError::Refusal(format!("declared scalar {name} must be computed as binary32"))),
+        }
+    }
     let capsule = netcrust::File::open(capsule_path)?;
     // The capsule's own classic layout and a plain handle on it: a carried variable is copied as
     // the bytes the capsule stores (NcSlab::Copy), not decoded and re-encoded.  A capsule that is
@@ -295,9 +334,10 @@ pub fn write_init(
     // Only the transported species a physics suite may add are created here;
     // any other computed name without a capsule variable stays a stray and
     // meets the "no variable for" refusal below, which the door keys on.
-    let admitted = ["qi","qs","qg","ni","nr","nc","nwfa","nifa","ng","volg"];
+    // A scheme's declared species row (write_init_declaring) adds its own.
+    let admitted = |name: &str| ADMITTED_SPECIES.contains(&name) || declared_scalars.iter().any(|s| s == name);
     let extra: Vec<String> = computed.keys()
-        .filter(|name| !present.contains(*name) && !added_aerosols.contains(&name.as_str()) && admitted.contains(&name.as_str())).cloned().collect();
+        .filter(|name| !present.contains(*name) && !added_aerosols.contains(&name.as_str()) && admitted(name.as_str())).cloned().collect();
     for name in &extra {
         let mut ids = vec![];
         if let Some(&id) = dimid_of.get("Time") { ids.push(id); }

@@ -90,6 +90,9 @@ def test_kf_phase_mode_mapping_keeps_kessler_and_no_mp_distinct():
     assert kf_phase_mode_for_microphysics(1) == KFPhaseMode.WARM_RAIN
     assert kf_phase_mode_for_microphysics(10) == \
         KFPhaseMode.SEPARATE_ICE_SNOW
+    # TEMPO (900) is Thompson's moist package: qv,qc,qr,qi,qs,qg.
+    assert kf_phase_mode_for_microphysics(900) == \
+        KFPhaseMode.SEPARATE_ICE_SNOW
     with pytest.raises(ValueError, match="no verified phase-output contract"):
         kf_phase_mode_for_microphysics(99)
 
