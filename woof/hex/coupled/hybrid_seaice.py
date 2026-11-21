@@ -263,6 +263,16 @@ class HybridSeaIce:
         self.trig = cp.ascontiguousarray(trig[:self.n_cells])
         self.n_steps = int(ice_cpl_dt) // int(float(configs["config_dt"]))
         self._i2x_vector = cp.zeros((self.n_cells_solve, self.idx.ni2x), dtype=np.float64)
+        # the export reads the pond arrays only under the topographic ponds (basal_pressure);
+        # without the ponds' package v8.4.2 has none, so it sees zeros there
+        self._export_pools = dict(pools)
+        ta = dict(pools["tracers_aggregate"])
+        for name in ("pondDepthCell", "pondLidThicknessCell", "pondAreaCell"):
+            if ta.get(name) is None:
+                if configs.get("config_use_topo_meltponds", False):
+                    raise ValueError(f"tracers_aggregate/{name} is absent under the topographic ponds")
+                ta[name] = cp.zeros(self.n_cells + 1, dtype=np.float64)
+        self._export_pools["tracers_aggregate"] = ta
         # ice_init_mct: nextsw_cday, then the core's init
         self._nextsw(nextsw_cday)
         self.clock = ts.initialize(pools=pools, configs=configs)
@@ -286,7 +296,7 @@ class HybridSeaIce:
     def _export(self):
         import cupy as cp
         i2x = self._i2x_vector  # MCT's i2x_i: zeroed once, then the export zeroes and fills it
-        icc.export_i2x(self.idx, self.opts, i2x, n_cells_solve=self.n_cells_solve, pools=self.pools,
+        icc.export_i2x(self.idx, self.opts, i2x, n_cells_solve=self.n_cells_solve, pools=self._export_pools,
                        trig=self.trig[:self.n_cells_solve], constants=self.constants)
         return cp.array(i2x, copy=True)
 
