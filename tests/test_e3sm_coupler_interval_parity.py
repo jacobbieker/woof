@@ -380,7 +380,7 @@ def test_the_per_step_inputs_are_checked(glibc239):
     r2x = cp.asarray(case["values"]["r2x_o"]) * 2.0
     interval.set_inputs(nextsw_cday=-3.0, flux_epbalfact=0.5, r2x_o=r2x)
     assert (interval.nextsw_cday, interval.flux_epbalfact) == (-3.0, 0.5)
-    assert interval.vector("r2x_o").tobytes() == r2x.tobytes()
+    assert cp.asnumpy(interval.vector("r2x_o")).tobytes() == cp.asnumpy(r2x).tobytes()
     # the orbital albedos stay refused when a step's nextsw_cday asks for them
     a2x = cp.asarray(case["steps"][0]["a2x"])
     with pytest.raises(oce.AlbedoRefusal):
