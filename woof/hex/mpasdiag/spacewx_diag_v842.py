@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, Mapping
 
@@ -198,11 +198,15 @@ class SpacewxModule:
         self.carried = {n for n in self.names if utils.stream_inclusion_count(n, Direction.OUTPUT) > 0}
 
     def begin(self, step, when):
-        self._step, self._when = int(step), when
+        """The frame's step and valid time (a datetime, or MPAS's ``YYYY-MM-DD_hh:mm:ss``)."""
+        from woof.spacewx.history import _naive_utc
+        if not isinstance(when, datetime):
+            when = datetime.strptime(str(when), "%Y-%m-%d_%H:%M:%S")
+        self._step, self._when = int(step), _naive_utc(when)
 
     def _build(self):
         from woof.spacewx.history import _naive_utc
-        when = _naive_utc(self._when)
+        when = self._when
         steps = self._step + int(getattr(self.owner, "step_offset", 0))
         start = when - timedelta(seconds=steps * self.dt)
         alarms = getattr(getattr(self.owner, "writer", None), "alarms", None)
@@ -219,10 +223,9 @@ class SpacewxModule:
         """lower-case name -> the (nCellsSolve,) float32 device row at the frame begin() named."""
         if self.holders is None:
             self._build()
-        from woof.spacewx.history import _naive_utc
         out = {}
         for holder in self.holders:
-            elapsed = (_naive_utc(self._when) - holder.start_time).total_seconds()
+            elapsed = (self._when - holder.start_time).total_seconds()
             for wrf, row in holder.history_fields(elapsed).items():
                 out[wrf.lower()] = row.reshape(-1)[:self.nc]
         return out
