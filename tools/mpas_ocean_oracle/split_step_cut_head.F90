@@ -3,8 +3,9 @@
 ! and ocn_time_integration_split_init (the barotropic subcycle count from
 ! config_dt and config_btr_dt, and the cold start's barotropic velocity),
 ! verbatim, after its module's USE list and variables.  run_split_step sets
-! nBtrSubcycles itself; run_forward calls the init.  GM's two routines come from stubs_split.F90 (GM is not
-! driven).
+! nBtrSubcycles itself; run_forward calls the init.  GM's two routines are
+! mpas_ocn_gm.F verbatim and ocn_reconstruct_gm_vectors cut verbatim
+! (gm_vectors_cut_head.F90).
 module ocn_split_step_cut
    use mpas_derived_types
    use mpas_pool_routines
