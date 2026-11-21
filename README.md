@@ -402,7 +402,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
-    subglacial hydrology and one forward-Euler time step;
+    subglacial hydrology, one forward-Euler time step, and the forward mode
+    around it (the clock with its adaptive-step force alarm, the cold-start
+    initialisation, the initial solve and the time-step loop, with a
+    bitwise restart; `woof/hex/mpas_ice/forward_v842.py`), word-exact over
+    the dome, EISMINT2 A, hydrology and enthalpy-benchmark cases on uniform
+    and variable resolution meshes; the land-ice core's registry status is
+    now `partial`;
   - the coupler's ocean import merge, E3SM v3.2.0's `prep_ocn_merge`
     (`woof/hex/coupled/prep_ocn_merge_e3sm.py`, opt-in, not called by the
     coupled step): x2o built from the atmosphere, sea ice, runoff, waves,

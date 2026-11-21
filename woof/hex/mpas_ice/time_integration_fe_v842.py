@@ -177,6 +177,11 @@ def _set_timestep(precision: str, advec_dt, diff_dt, config: dict, seconds_to_ne
     dt = min(proposed, real(seconds_to_next_force_time))
     if dt < real(config["config_min_adaptive_timestep"]):
         raise ValueError("New deltat is less than config_min_adaptive_timestep.")
+    if not (dt > 0 and dt == math.floor(dt)):
+        # the clock counts whole seconds (ESMF fractions are not carried), and a
+        # step of no time never reaches the stop time
+        raise ValueError(f"the adaptive time step {float(dt)} s is not a positive whole number of seconds "
+                         "(config_min_adaptive_timestep = 0 lets a tiny CFL limit floor it to 0)")
     return dt
 
 
@@ -201,7 +206,6 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
     n_cells, n_levels = g["layerThickness"].shape
     n_edges = m["dcEdge"].shape[0]
     max_edges = m["edgesOnCell"].shape[1]
-    nvi = n_levels + 1
     ncs, nes = int(m["nCellsSolve"]), int(m["nEdgesSolve"])
     if not (0 <= ncs <= n_cells and 0 <= nes <= n_edges):
         raise ValueError("nCellsSolve and nEdgesSolve must lie within nCells and nEdges")
@@ -288,7 +292,25 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
     else:
         calving_v842.calve_ice(mesh=m, geometry=g, velocity=v, config=c)
 
-    # === li_velocity_solve
+    velocity_solve(mesh=m, geometry=g, thermal=t, velocity=v, config=c)
+    diagnostic_vars(mesh=m, geometry=g, thermal=t, config=c, deltat=deltat)
+
+
+def velocity_solve(*, mesh: dict, geometry: dict, thermal: dict, velocity: dict, config: dict) -> None:
+    """``li_velocity_solve`` (solveVelo) for 'sia' and 'none', in place: the
+    masks and geometry, the normal surface slope, ``li_sia_solve``, the
+    uphill-margin cleanup, ``mpas_reconstruct``, the speeds,
+    ``calculate_strain_rates`` and ``remove_fast_ice``."""
+    m, g, t, v, c = mesh, geometry, thermal, velocity, config
+    precision = rkind.precision_of(g["thickness"])
+    n_cells, n_levels = g["layerThickness"].shape
+    n_edges = m["dcEdge"].shape[0]
+    max_edges = m["edgesOnCell"].shape[1]
+    nvi = n_levels + 1
+    ncs, nes = int(m["nCellsSolve"]), int(m["nEdgesSolve"])
+    sphere = np.int32(bool(c.get("on_a_sphere", False)))
+    block = (_BLOCK,)
+    masks = _mask_configs(c)
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)
     _update_geometry(m, g, c)
     solver = c["config_velocity_solver"]
@@ -332,7 +354,17 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
     _function(precision, "li_remove_fast_ice_v842")(_grid(n_cells), block, (
         g["thickness"], g["calvingThickness"], v["surfaceSpeed"], g["cellMask"], np.int32(n_cells)))
 
-    # === li_calculate_diagnostic_vars
+
+
+def diagnostic_vars(*, mesh: dict, geometry: dict, thermal: dict, config: dict, deltat) -> None:
+    """``li_calculate_diagnostic_vars``, in place: the pressure melting point,
+    ``dHdt`` over ``deltat`` (the step's, at its precision) and the next
+    step's ``thicknessOld``."""
+    m, g, t, c = mesh, geometry, thermal, config
+    precision = rkind.precision_of(g["thickness"])
+    real = rkind.PRECISIONS[precision]
+    n_cells = g["thickness"].shape[0]
+    block = (_BLOCK,)
     thermal_init_v842.pressure_melting_point_fields(
         thickness=g["thickness"], layer_center_sigma=m["layerCenterSigma"], pmp_temperature=t["pmpTemperature"],
         basal_pmp_temperature=t["basalPmpTemperature"], rhoi=c["config_ice_density"])
