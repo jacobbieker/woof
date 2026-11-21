@@ -66,6 +66,8 @@ fn usage() -> String {
          Physics completion of an existing init (each mode stands alone):\n\
         \x20 --augment-init INIT.nc --scalar-names a,b [--aerosol-fields DIR]\n\
         \x20                    [--land-surface noah|noahmp|ruc]\n\
+        \x20                    --declared-scalar-slots: every --scalar-names species the init\n\
+        \x20                    lacks gets its own (Time, nCells, nVertLevels) slot\n\
         \x20 --aerosol-status INIT.nc\n\
         \x20 --aerosol-target INIT.nc --target-dir DIR\n\
         \x20 DIR holds little-endian float32 files, cell-major.",

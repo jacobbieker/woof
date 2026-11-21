@@ -383,7 +383,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     an M3 Max, with the same words. Each subcycle computes the ocean
     stress coefficient and solves the velocity in one launch (a vertex's
     solve reads only its own coefficient), so the step launches 120 fewer
-    kernels: about 30 instead of 33 ms on an M3 Max, the same words;
+    kernels: about 30 instead of 33 ms on an M3 Max, the same words.
+    The column biogeochemistry's framework and brine height
+    (`config_use_column_biogeochemistry` with `config_use_brine`, opt-in;
+    `column_bgc_v842`): the brine fraction tracer, the init's grids,
+    profiles and ocean concentrations, and `column_biogeochemistry`'s
+    flushing, flooding and Darcy velocity, RKIND 8 with no opt-in, word for
+    word with v8.4.2 on CUDA and Metal. v8.4.2's diatom carbon to nitrogen
+    ratio (the proteins') has a named correction (`zbgc_c2n_proteins`);
+    the other biogeochemistry flags, and the brine fraction in the ITD,
+    ridging and remap, are refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -428,6 +437,22 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     multiply in its own element order), with `seq_frac_check`'s stops.
     real(r8), word-exact on CUDA and Metal against the routines compiled
     verbatim on MCT.
+  - The coupler's atmosphere-ocean flux, E3SM v3.2.0's
+    `seq_flux_atmocn_mct` over `shr_flux_atmOcn`
+    (`woof/hex/coupled/flux_atmocn_e3sm.py`, opt-in): `seq_flux_init_mct`'s
+    mask and the E3SMv1 scheme into `xao`, with the implicit stress,
+    gustiness, the cold-air outbreak scaling, the convergence switches and
+    dead models, and E3SM's and MCT's stops. real(r8), word-exact on CUDA
+    and Metal against the routines compiled verbatim on MCT. It calls
+    glibc's atan, so it runs only with `WOOF_GLIBC239_LIBM64=1` and is
+    refused by name without it. COARE, UA, the diurnal cycle, the two-way
+    wave drag and the water isotopes are refused by name.
+  - The coupler's ocean albedos, E3SM v3.2.0's `seq_flux_ocnalb_mct`
+    (`woof/hex/coupled/ocnalb_e3sm.py`, opt-in): `flux_albav`'s namelist
+    albedos and radiative fractions, or the net shortwave from xao's
+    albedos, with E3SM's and MCT's stops. real(r8), word-exact on CUDA and
+    Metal against the routine compiled verbatim on MCT. The orbital albedo
+    is refused by name.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
@@ -1304,7 +1329,8 @@ carry none of the following. Each is off until selected:
 
 - **LGPL glibc 2.39 libm** (`WOOF_GLIBC239_LIBM64`, `WOOF_GLIBC239_TRIG64`):
   glibc's binary64 words on the GPU and host. It lifts some MALI,
-  MPAS-Ocean and MPAS-Seaice RKIND 8 refusals.
+  MPAS-Ocean and MPAS-Seaice RKIND 8 refusals, and E3SM's
+  atmosphere-ocean flux.
 - **NVIDIA-derived `powf`**: CUDA's transcription for Metal strict numerics.
   The default is WOOF's own correctly rounded `powf`.
 - **WRF-Hydro** (`WOOF_ENABLE_WRF_HYDRO=1`), **NEMO**

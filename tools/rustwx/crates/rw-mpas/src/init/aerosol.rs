@@ -2,7 +2,7 @@
 //! the WRF synthetic fallback and writes the complete model species row.
 use std::{collections::BTreeMap, path::Path};
 use crate::error::{MpasError, MpasResult};
-use super::{emit::{Computed, write_init}, Lineage};
+use super::{emit::{Computed, write_init_declaring}, Lineage};
 
 pub fn analyzed_pair(path: &Path) -> MpasResult<bool> {
     let file=netcrust::File::open(path)?;
@@ -152,7 +152,7 @@ pub fn enrich(path: &Path, scalar_names: &[String], fields: Option<&Path>, recon
     let file_id=super::capsule_file_id(path).unwrap_or_else(||super::emit::mint_file_id(&path.display().to_string()));
     let parent_text=file.attribute("parent_id").and_then(|a|a.as_string().map(str::to_string)).unwrap_or_default();
     let parents:Vec<String>=parent_text.lines().filter(|s|!s.is_empty()).map(str::to_string).collect();
-    let ledger=write_init(&temp,path,computed,&file_id,&parents,"aerosol initialization",&Lineage::default())?;
+    let ledger=write_init_declaring(&temp,path,computed,&file_id,&parents,"aerosol initialization",&Lineage::default(),scalar_names)?;
     drop(file);
     std::fs::rename(&temp,path)?;
     Ok(serde_json::json!({"source":source,"cells":n,"levels":nz,"written":ledger.computed,"soil_categories_reconciled":soil_categories_reconciled}))

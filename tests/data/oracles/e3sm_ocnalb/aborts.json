@@ -1,0 +1,8 @@
+{
+ "abort_a2x_without_swvdf": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Faxa_swvdf\" Traceback:",
+ "abort_albav_without_ofrad": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"ofrad\" Traceback:",
+ "abort_albdif_negative": "(seq_flux_ocnalb_mct) ERROR seq_flux_mct_inparm namelist not initialized",
+ "abort_albdir_negative": "(seq_flux_ocnalb_mct) ERROR seq_flux_mct_inparm namelist not initialized",
+ "abort_xao_without_anidr": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"So_anidr\" Traceback:",
+ "abort_xao_without_swup": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Faox_swup\" Traceback:"
+}
