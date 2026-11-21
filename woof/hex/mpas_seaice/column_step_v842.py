@@ -119,7 +119,8 @@ def check_config(configs: dict) -> None:
     if c.get("config_use_velocity_solver", True) and \
             c.get("config_stress_divergence_scheme", "variational") == "weak":
         _refuse("config_stress_divergence_scheme", "weak",
-                "the weak-form stress divergence's pool (velocity_weak) is not ported",
+                "the weak-form stress divergence with the column package is not held against an oracle "
+                "(the column oracle carries no velocity_weak pool); it runs without the column package",
                 "config_stress_divergence_scheme = 'variational'")
     crdg.check_config(c)
     cprep.check_config(c)
