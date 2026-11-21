@@ -15,8 +15,12 @@ word for word:
   each then multiplied by ``flux_epbalfact`` (two roundings).
 
 This is not called by any default path. ``real(r8)`` only, the coupler's
-kind. The water isotopes (``Faxa_rain_16O`` and the like in ``x2i``) are
-refused by name: their branch is not ported.
+kind. The water isotopes are refused by name: E3SM's branch for an isotope
+runs when ``x2i`` holds its ``Faxa_rain_<iso>`` (``16O``, ``18O``, ``HDO``)
+and writes only ``x2i``'s ``Faxa_rain_<iso>`` and ``Faxa_snow_<iso>`` from
+``a2x``'s ``Faxa_rainc/rainl/snowc/snowl_<iso>``; it is not ported. An
+``x2i`` with ``Faxa_snow_<iso>`` and no ``Faxa_rain_<iso>`` takes only the
+copies, as in E3SM.
 
 The kernel (``prep_ice_merge_e3sm.cu``) is held word for word to E3SM's
 routine cut verbatim out of ``driver-mct/main/prep_ice_mod.F90`` and run on
@@ -86,7 +90,8 @@ def plan(lists: dict, *, wav_ice_coup: str = "none") -> Plan:
             found[vector, name] = lists[vector].index(name)
         except ValueError:
             raise MergeAbort(f'm_AttrVect::indexRA_:: FATAL--attribute not found: "{name}"') from None
-    isotopes = [n for n in lists["x2i"] for iso in ISOTOPES if n in (f"Faxa_rain_{iso}", f"Faxa_snow_{iso}")]
+    # E3SM's gate for each isotope's branch: x2i's Faxa_rain_<iso> (prep_ice_mod.F90's index_x2i_Faxa_rain_<iso> /= 0)
+    isotopes = [f"Faxa_rain_{iso}" for iso in ISOTOPES if f"Faxa_rain_{iso}" in lists["x2i"]]
     if isotopes:
         raise NotImplementedError(f"E3SM's water isotopes in x2i ({', '.join(isotopes)}) are not ported")
     position = {name: k for k, name in enumerate(lists["x2i"])}

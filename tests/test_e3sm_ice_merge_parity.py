@@ -105,9 +105,24 @@ def test_the_plan_refuses_what_mct_stops_on():
         assert str(stopped.value).split(":: FATAL")[-1] in aborts[case["name"]]
 
 
+def test_several_missing_fields_stop_at_the_fortrans_first():
+    def drop(lists, **gone):
+        return {k: [f for f in v if f not in gone.get(k, ())] for k, v in lists.items()}
+    for gone, first in ((dict(a2x=("Faxa_snowl",), x2i=("Fixx_rofi",)), "Faxa_snowl"),
+                        (dict(a2x=("Faxa_rainl",), g2x=("Figg_rofi",)), "Faxa_rainl"),
+                        (dict(r2x=("Firr_rofi",), g2x=("Figg_rofi",)), "Figg_rofi"),
+                        (dict(x2i=("Faxa_snow", "Faxa_rain")), "Faxa_rain")):
+        with pytest.raises(pim.MergeAbort, match=f'"{first}"'):
+            pim.plan(drop(im.GCASE, **gone))
+
+
 def test_the_isotopes_and_bad_lists_are_refused():
-    with pytest.raises(NotImplementedError, match="isotopes"):
-        pim.plan(dict(im.GCASE, x2i=list(im.GCASE["x2i"]) + ["Faxa_snow_HDO"]))
+    with pytest.raises(NotImplementedError, match="isotopes.*Faxa_rain_HDO"):
+        pim.plan(dict(im.GCASE, x2i=list(im.GCASE["x2i"]) + ["Faxa_snow_HDO", "Faxa_rain_HDO"]))
+    # without Faxa_rain_<iso>, E3SM's isotope branch is off: Faxa_snow_<iso> is only copied
+    snow = pim.plan(dict(im.GCASE, a2x=list(im.GCASE["a2x"]) + ["Faxa_snow_18O"],
+                         x2i=list(im.GCASE["x2i"]) + ["Faxa_snow_18O"]))
+    assert (1, len(im.GCASE["a2x"]), len(im.GCASE["x2i"])) in snow.copies
     with pytest.raises(ValueError, match="repeats"):
         pim.plan(dict(im.GCASE, o2x=list(im.GCASE["o2x"]) + ["So_t"]))
     with pytest.raises(ValueError, match="wav_ice_coup"):
