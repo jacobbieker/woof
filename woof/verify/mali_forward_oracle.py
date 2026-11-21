@@ -510,11 +510,13 @@ def run_gpu(case: dict, config: dict | None = None) -> dict[str, np.ndarray]:
 
     pools = device_pools(case)
     stats: list = []
-    clock = forward_v842.run(pools=pools, config=dict(case["config"], **(config or {})), on_statistics=stats.append)
+    effective = dict(case["config"], **(config or {}))
+    clock = forward_v842.run(pools=pools, config=effective, on_statistics=stats.append)
     out = outputs_of(case, pools, clock)
-    if stats_on(case["config"]):
-        out["stats/real"] = np.concatenate([s.real_words for s in stats])
-        out["stats/int"] = np.concatenate([s.int_words for s in stats])
+    if stats_on(effective):
+        real = _real(case).newbyteorder("=")
+        out["stats/real"] = np.concatenate([np.empty(0, real)] + [s.real_words for s in stats]).astype(real)
+        out["stats/int"] = np.concatenate([np.empty(0, np.int32)] + [s.int_words for s in stats]).astype(np.int32)
         out["stats/log"] = np.array(stats_log([line for s in stats for line in s.lines]))
     return out
 

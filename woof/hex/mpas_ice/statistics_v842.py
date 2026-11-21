@@ -418,13 +418,15 @@ def _host(array) -> np.ndarray:
 
 def reports(lines) -> list[str]:
     """The statistics reports in a log: each from its rule line to its basal
-    temperature line (``1.0000``), joined by newlines."""
+    temperature line (``1.0000`` and the ``------`` speed field: a last
+    interior sigma can also print as ``1.0000``), joined by newlines."""
     lines = [line.rstrip() for line in lines]
+    basal = fmt_f(1.0, 6, 4) + fmt_a("------", 25)
     out, i = [], 0
     while i < len(lines):
         if lines[i] == RULE and i + 2 < len(lines) and lines[i + 2].startswith("Global statistics: time ="):
             j = i
-            while j < len(lines) and not lines[j].startswith(fmt_f(1.0, 6, 4)):
+            while j < len(lines) and not lines[j].startswith(basal):
                 j += 1
             out.append("\n".join(lines[i:j + 1]))
             i = j + 1

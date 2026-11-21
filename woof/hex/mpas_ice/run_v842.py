@@ -42,7 +42,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import forward_v842, rkind
+from . import forward_v842, rkind, statistics_v842
 
 OPTION_FILES = ("registry-options.json", "registry-options-subglacial-hydro.json")
 #: the fields the forward mode carries with a non-zero Registry default_value
@@ -276,8 +276,8 @@ def run(*, namelist, input=None, out, precision: str | None = None, restart=None
     default) or from ``restart`` (at its stored precision, which
     ``precision`` must name if given); writes ``out/output.nc`` and
     ``out/restart.npz``, and ``out/statistics.log`` (every
-    ``li_compute_statistics`` report, as the model logs it) when the
-    namelist asks for statistics. Returns the clock."""
+    ``li_compute_statistics`` report of this run, as the model logs it;
+    empty if none falls in the run) when the namelist asks for statistics. Returns the clock."""
     out = Path(out)
     config = read_namelist(namelist)
     stats: list = []
@@ -294,8 +294,13 @@ def run(*, namelist, input=None, out, precision: str | None = None, restart=None
         clock = forward_v842.cold_start(pools=pools, config=config, on_statistics=stats.append)
         forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps, on_statistics=stats.append)
     out.mkdir(parents=True, exist_ok=True)
-    if stats:
-        (out / "statistics.log").write_text("".join(f"{s.report}\n\n" for s in stats))
+    # this run's log alone: empty when the run ends before its first report,
+    # and none (an earlier run's removed) when the namelist asks for none
+    log = out / "statistics.log"
+    if statistics_v842.enabled(config):
+        log.write_text("".join(f"{s.report}\n\n" for s in stats))
+    else:
+        log.unlink(missing_ok=True)
     write_output(out / "output.nc", pools=pools, clock=clock, config=config)
     forward_v842.write_restart(out / "restart.npz", pools=pools, clock=clock)
     _save_mesh_config(out / "restart.npz", config)
