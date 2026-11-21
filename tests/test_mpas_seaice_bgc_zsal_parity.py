@@ -37,9 +37,9 @@ THE BREAKAGES THESE PREVENT
    ancestors must be the oracle's.
 6. A gate that cannot fail: mutated orders, the dropped dTemp band and a
    dropped stop must produce mismatches.
-7. A configuration the port does not carry running silently: the vertical
-   salinity in a stage that does not carry it, or without BL99, is refused
-   by name.
+7. A configuration the port does not carry running silently: the solved
+   vertical salinity in a stage that does not carry it, or the vertical
+   salinity without BL99, is refused by name.
 8. A case generator whose bytes drift: the input digests are pinned.
 """
 from __future__ import annotations
@@ -204,11 +204,14 @@ def test_only_zsal_solve_maps_the_vertical_salinity():
     assert not cv.solves_zsal(_case("bgc_zsal")["config"]) and cv.solves_zsal(_case("bgc_zsal_solve")["config"])
 
 
-def test_stages_without_the_vertical_salinity_refuse_it():
-    case = _case("bgc_zsal")
-    with pytest.raises(ConfigurationRefusal, match=cv.ZSAL_FLAG):
-        cv.refuse_unported(case["config"], {**case["dims"], "nSnowLayers": 1}, biogeochemistry=True)
-    cv.refuse_unported(case["config"], {**case["dims"], "nSnowLayers": 1}, biogeochemistry=True, zsalinity=True)
+def test_stages_without_the_solved_vertical_salinity_refuse_it():
+    dims = {**_case("bgc_zsal")["dims"], "nSnowLayers": 1}
+    # v8.4.2's inert vertical salinity: every biogeochemistry stage carries it
+    cv.refuse_unported(_case("bgc_zsal")["config"], dims, biogeochemistry=True)
+    solved = _case("bgc_zsal_solve")["config"]
+    with pytest.raises(ConfigurationRefusal, match=cv.ZSAL_SOLVE):
+        cv.refuse_unported(solved, dims, biogeochemistry=True)
+    cv.refuse_unported(solved, dims, biogeochemistry=True, zsalinity=True)
 
 
 @pytest.mark.parametrize("change", [{"config_thermodynamics_type": "mushy",

@@ -400,13 +400,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     unless the correction `bgc_inactive_diagnostics` is named. The vertical
     salinity (`config_use_vertical_zsalinity`, BL99) is inert in v8.4.2,
     which never sets the column package's `solve_zsal` and copies
-    `verticalSalinity` only with the vertical tracers; the init, the brine
-    height's step and the vertical thermodynamics keep that word for word,
-    and the correction `zsal_solve` solves it (`compute_microS`,
-    `solve_S_dt`, the salt fluxes, BL99's `dTemp`), word for word on CUDA
-    and Metal with an oracle built from `zsal_solve.patch`. The other
-    biogeochemistry flags, and the vertical salinity in the other stages,
-    are refused by name until their phases land;
+    `verticalSalinity` only with the vertical tracers; every column stage
+    (the init, the brine height's step, the vertical and ITD
+    thermodynamics, the ridging, the column step and the coupled step)
+    keeps that word for word, and the correction `zsal_solve` solves it
+    (`compute_microS`, `solve_S_dt`, the salt fluxes, BL99's `dTemp`) in
+    the init, the brine height's step and the vertical thermodynamics,
+    word for word on CUDA and Metal with an oracle built from
+    `zsal_solve.patch`. The other biogeochemistry flags, and `zsal_solve`
+    in the other stages, are refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),

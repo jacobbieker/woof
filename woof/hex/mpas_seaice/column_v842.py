@@ -435,8 +435,11 @@ def corrections(configs: dict) -> frozenset[str]:
 
 #: the biogeochemistry flags the port carries (the brine height); the others are refused by name
 BGC_PORTED = ("config_use_brine",)
-#: the vertical salinity, which only the stages that carry it accept (refuse_unported's zsalinity)
+#: the vertical salinity: every biogeochemistry stage carries v8.4.2's inert one; only the stages
+#: refuse_unported's zsalinity names carry the solved one (ZSAL_SOLVE)
 ZSAL_FLAG = "config_use_vertical_zsalinity"
+#: the opt-in correction that solves the vertical salinity (CORRECTIONS)
+ZSAL_SOLVE = "zsal_solve"
 
 
 def solves_zsal(configs: dict) -> bool:
@@ -457,10 +460,12 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
     vertical and ITD thermodynamics, the ridging, the shortwave and the
     column step carry the column biogeochemistry's framework and its brine
     height (``config_use_brine``); every other routine refuses
-    ``config_use_column_biogeochemistry``. ``zsalinity`` is the caller's too:
+    ``config_use_column_biogeochemistry``. Those stages all carry v8.4.2's
+    inert vertical salinity (``config_use_vertical_zsalinity``: its tracers
+    are counted, never solved or copied). ``zsalinity`` is the caller's too:
     the init, the column biogeochemistry and the vertical thermodynamics
-    carry the vertical salinity (``config_use_vertical_zsalinity``); the
-    other stages refuse it."""
+    carry the solved vertical salinity (the ``zsal_solve`` correction); the
+    other stages refuse that correction."""
     c = configs
     if not c.get("config_use_column_package", False):
         _refuse("config_use_column_package", False, "the column port runs only with the column package on",
@@ -472,13 +477,15 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
                     "step only",
                     "config_use_column_biogeochemistry = .false.")
         for flag in _BGC_FLAGS:
-            if flag == ZSAL_FLAG and c[flag] and not zsalinity:
-                _refuse(flag, True, "the vertical salinity is ported for the init, the column biogeochemistry "
-                        "and the vertical thermodynamics only (not the ITD thermodynamics, the ridging, the "
-                        "shortwave, the aggregate or the steps)", f"{flag} = .false.")
             if flag not in BGC_PORTED and flag != ZSAL_FLAG and c[flag]:
                 _refuse(flag, True, "of the column biogeochemistry only the brine height and the vertical "
                         "salinity are ported", f"{flag} = .false.")
+        if solves_zsal(c) and not zsalinity:
+            _refuse("woof_v842_corrections", ZSAL_SOLVE,
+                    "the solved vertical salinity is ported for the init, the column biogeochemistry and the "
+                    "vertical thermodynamics only (not the ITD thermodynamics, the ridging, the shortwave or "
+                    "the steps); v8.4.2's inert vertical salinity is carried by every column stage",
+                    f"woof_v842_corrections without {ZSAL_SOLVE}")
         _refuse_bio_layers(c, dims)
     if dims["nSnowLayers"] != 1:
         _refuse("config_nSnowLayers", dims["nSnowLayers"],
