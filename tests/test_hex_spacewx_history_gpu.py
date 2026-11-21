@@ -1,11 +1,13 @@
-"""spacewx_ionosphere_opt on hex: the climatological ionosphere's rows, one value per cell (woof.hex.spacewx_history).
+"""spacewx_ionosphere_opt and spacewx_aurora_opt on hex's generic column seam: one value per cell
+(woof.hex.spacewx_history).
 
-* The generic column seam (tests/test_hex_rrtmgk_gpu.py's cells on a polar cap, 3 km to 20 km cell areas):
-  ``--physics spacewx_ionosphere_opt=1`` reaches the seam's own PhysicsDriver, whose rows at each frame's valid
-  time are word for word the WRF route's Ionosphere on the same cell centres.
-* The MPAS v8.4.2 suite route: the door's spacewx keys build the same rows on the mesh's cell centres.
+On tests/test_hex_rrtmgk_gpu.py's cells (a spherical cap, cell areas 3 km to 20 km across: a variable-resolution
+set), ``--physics spacewx_ionosphere_opt=1`` / ``spacewx_aurora_opt=1`` reach the seam's own PhysicsDriver,
+and the rows hex writes at each frame's valid time are word for word the WRF route's on the same cell centres
+(the radiation geometry's float32 latitudes and longitudes, as on a WRF domain).
 
-The CCIR maps are tests/test_spacewx_ionosphere.py's synthetic ones and the field its dipole, so no fetch runs.
+The CCIR maps are tests/test_spacewx_ionosphere.py's synthetic ones and the field its dipole, so no fetch runs;
+the aurora is driven by a fixed Kp.
 """
 from __future__ import annotations
 
@@ -16,9 +18,10 @@ import pytest
 
 cp = pytest.importorskip("cupy")
 
-from test_hex_rrtmgk_gpu import NCOL, START, _build, _cap, _physics  # noqa: E402
+from test_hex_rrtmgk_gpu import NCOL, START, _build, _physics  # noqa: E402
 from test_spacewx_ionosphere import _dipole, _loader  # noqa: E402
 from woof.hex import spacewx_history as sh  # noqa: E402
+from woof.spacewx import aurora_history as ah  # noqa: E402
 from woof.spacewx import history as hist  # noqa: E402
 from woof.spacewx import igrf  # noqa: E402
 from woof.spacewx import ionosphere as ion  # noqa: E402
@@ -42,11 +45,17 @@ def _want(lat, lon, when, f107=150.0):
             for name, (key, _d, _u) in hist.HISTORY_FIELDS.items()}
 
 
+def _geometry(seam):
+    radiation = seam._driver.radiation_callable
+    return (cp.asnumpy(radiation.latitude_deg).astype(np.float64).reshape(-1),
+            cp.asnumpy(radiation.longitude_deg).astype(np.float64).reshape(-1))
+
+
 def test_the_generic_seam_writes_the_wrf_routes_rows_per_cell(synthetic):
     seam = _build(dict(_physics(), spacewx_ionosphere_opt=1, spacewx_f107_source="150"))
     holders = sh.seam_holders(seam)
     assert len(holders) == 1 and holders[0].start_time == START
-    lat, lon = _cap(NCOL)
+    lat, lon = _geometry(seam)
     frames = {}
     for hours in (0, 3):
         when = START + timedelta(hours=hours)
@@ -66,29 +75,40 @@ def test_the_generic_seam_writes_the_wrf_routes_rows_per_cell(synthetic):
     assert sh.seam_holders(_build(_physics())) == ()
 
 
-def test_the_suite_route_builds_the_same_rows_from_the_door_keys(synthetic):
-    settings = sh.suite_settings({"spacewx_ionosphere_opt": 1, "spacewx_f107_source": "150",
-                                  "config_microp_scheme": "mp_wsm6"})
-    assert settings == {"spacewx_ionosphere_opt": 1, "spacewx_f107_source": "150",
-                        "spacewx_f107_mode": "81day", "spacewx_ionosphere_maps": "ccir"}
-    lat, lon = _cap(NCOL)
-    holders = sh.suite_holders(settings, latitude_deg=lat, longitude_deg=lon, start_time=START,
-                               run_seconds=6 * 3600.0)
-    when = START + timedelta(hours=5)
+def test_the_aurora_rows_are_the_wrf_routes_per_cell(synthetic):
+    from types import SimpleNamespace
+    physics = dict(_physics(), spacewx_aurora_opt=1, spacewx_kp_source="5")
+    seam = _build(physics)
+    holders = sh.seam_holders(seam)
+    assert [type(h).__name__ for h in holders] == ["AuroraHistory"]
+    lat, lon = _geometry(seam)
+    # The WRF route's own rows, from the same configuration on a (1, ncells) radiation geometry.
+    geometry = SimpleNamespace(start_time=START, latitude_deg=lat.reshape(1, -1), longitude_deg=lon.reshape(1, -1))
+    route = ah.AuroraHistory.for_run(seam._cfg, geometry, igrf_model=_dipole())
+    when = START + timedelta(hours=2)
     got = sh.cell_fields(holders, when, NCOL)
-    want = _want(lat, lon, when)
-    for name in NAMES:
-        np.testing.assert_array_equal(got[name][0], want[name], name)
-    assert sh.suite_holders(sh.suite_settings({}), latitude_deg=lat, longitude_deg=lon, start_time=START,
-                            run_seconds=0.0) == ()
+    want = route.history_fields((when - START).total_seconds())
+    assert set(got) == set(ah.HISTORY_FIELDS) == set(want)
+    for name, (values, dims, units) in got.items():
+        assert dims == ("nCells",) and units == ah.HISTORY_FIELDS[name][2]
+        np.testing.assert_array_equal(values, cp.asnumpy(want[name]).reshape(-1), name)
+    # The cap sits around 56N: Kp 5 puts its cells in more than one zone.
+    zone = got["AURORA_ZONE"][0]
+    assert zone.min() >= 0 and zone.max() <= 3
+    assert np.all(np.abs(got["MAG_LAT"][0]) <= 90.0)
 
 
-@pytest.mark.parametrize("given, match", [
-    ({"spacewx_ionosphere_opt": 2}, "must be 0"),
-    ({"spacewx_f107_source": "150"}, "would do nothing"),
-    ({"spacewx_ionosphere_opt": 1, "spacewx_f107_mode": "weekly"}, "81day"),
-    ({"spacewx_ionosphere_opt": 1, "spacewx_ionosphere_maps": "iri"}, "ccir"),
-])
-def test_the_suite_keys_are_judged_as_the_wrf_route_judges_them(given, match):
-    with pytest.raises(ValueError, match=match):
-        sh.suite_settings(given)
+def test_both_options_together_write_both_row_sets(synthetic):
+    seam = _build(dict(_physics(), spacewx_ionosphere_opt=1, spacewx_f107_source="150",
+                       spacewx_aurora_opt=1, spacewx_kp_source="5"))
+    got = sh.cell_fields(sh.seam_holders(seam), START, NCOL)
+    assert set(got) == set(NAMES) | set(ah.HISTORY_FIELDS)
+
+
+def test_the_generic_seam_admits_the_keys():
+    from woof.hex.physics_suites import resolve_physics
+    physics = resolve_physics("arwen_mpas_column", {"spacewx_ionosphere_opt": 1, "spacewx_f107_source": "150",
+                                                    "spacewx_aurora_opt": 1, "spacewx_kp_source": "5"},
+                              mesh="x1.40962")
+    assert physics.engine_physics["spacewx_ionosphere_opt"] == 1
+    assert physics.engine_physics["spacewx_aurora_opt"] == 1

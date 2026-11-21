@@ -1,13 +1,12 @@
-"""Space-weather history rows on hex cells (``spacewx_ionosphere_opt``, woof.spacewx.history).
+"""Space-weather history rows on hex cells (``spacewx_ionosphere_opt``, ``spacewx_aurora_opt``).
 
-The rows are the WRF route's own: the climatological ionosphere (woof.spacewx.history.IonosphereHistory)
-evaluated on the cell centres at each history frame's valid time.  Hex writes each as one float32 value per
-cell, ``(Time, nCells)``, under its wrfout name and units (woof.io.wrf_output_schema.REGISTRY_VAR_META).
+The rows are the WRF route's own: the climatological ionosphere (woof.spacewx.history.IonosphereHistory) and
+the auroral oval with its OVATION energy flux (woof.spacewx.aurora_history.AuroraHistory), evaluated on the
+cell centres at each history frame's valid time.  Hex writes each as one float32 value per cell,
+``(Time, nCells)``, under its wrfout name and units (woof.io.wrf_output_schema.REGISTRY_VAR_META).
 
-* The generic column seam runs WRF's PhysicsDriver on the cells, which builds the history object from its
-  RunConfig and radiation geometry (woof.core.physics) as a WRF domain's does; :func:`seam_holders` reads it.
-* The MPAS v8.4.2 suite route has no WRF driver: :func:`suite_holders` builds the same object from the
-  ``--physics`` spacewx keys the door passes it, on the mesh's cell centres and the case start.
+The generic column seam runs WRF's PhysicsDriver on the cells, which builds the history objects from its
+RunConfig and radiation geometry (woof.core.physics) as a WRF domain's does; :func:`seam_holders` reads them.
 
 Diagnostic only: nothing the step reads.  A frame's valid time is the schedule's, so a resumed run writes the
 rows its uninterrupted run would.
@@ -15,52 +14,15 @@ rows its uninterrupted run would.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 import numpy as np
-
-#: The --physics keys the suite route hands to these rows instead of to MPAS (its Registry has none of them).
-SUITE_KEYS = ("spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode", "spacewx_ionosphere_maps")
-#: The RunConfig defaults of SUITE_KEYS.
-_DEFAULTS = {"spacewx_ionosphere_opt": 0, "spacewx_f107_source": "", "spacewx_f107_mode": "81day",
-             "spacewx_ionosphere_maps": "ccir"}
 
 
 def seam_holders(seam) -> tuple:
     """The generic seam's history objects (empty when the options are off or there is no seam)."""
     driver = getattr(seam, "_driver", None)
-    return tuple(h for h in (getattr(driver, "spacewx_ionosphere", None),) if h is not None)
-
-
-def suite_settings(settings) -> dict:
-    """SUITE_KEYS of ``settings`` (the --physics overrides), typed and judged as the WRF route judges them,
-    with the defaults filled; ``{}`` when none is given."""
-    given = {key: settings[key] for key in SUITE_KEYS if key in settings}
-    if not given:
-        return {}
-    from woof.config import ConfigurationRefused, validate_spacewx_ionosphere_keys
-    values = {**_DEFAULTS, **given}
-    try:
-        validate_spacewx_ionosphere_keys(values["spacewx_ionosphere_opt"], values["spacewx_f107_source"],
-                                         values["spacewx_f107_mode"], values["spacewx_ionosphere_maps"])
-    except ConfigurationRefused as exc:
-        raise ValueError(str(exc)) from None
-    return values
-
-
-def suite_holders(settings, *, latitude_deg, longitude_deg, start_time, run_seconds, **loaders) -> tuple:
-    """The suite route's history objects on the cell centres (degrees), from :func:`suite_settings`."""
-    if not int(settings.get("spacewx_ionosphere_opt", 0) or 0):
-        return ()
-    import json
-    from woof.spacewx.history import IonosphereHistory
-    lat = np.asarray(latitude_deg, dtype=np.float64).reshape(1, -1)
-    lon = np.asarray(longitude_deg, dtype=np.float64).reshape(1, -1)
-    cfg = SimpleNamespace(**settings, run_seconds=float(run_seconds))
-    geometry = SimpleNamespace(start_time=start_time, latitude_deg=lat, longitude_deg=lon)
-    holder = IonosphereHistory.for_run(cfg, geometry, **loaders)
-    print("[spacewx ionosphere] " + json.dumps(holder.receipt(), default=str), flush=True)
-    return (holder,)
+    return tuple(h for h in (getattr(driver, "spacewx_ionosphere", None), getattr(driver, "spacewx_aurora", None))
+                 if h is not None)
 
 
 def _when(valid_time) -> datetime:
@@ -98,4 +60,4 @@ def long_name(name: str) -> str:
     return REGISTRY_VAR_META[name][0]
 
 
-__all__ = ["SUITE_KEYS", "cell_fields", "long_name", "seam_holders", "suite_holders", "suite_settings"]
+__all__ = ["cell_fields", "long_name", "seam_holders"]
