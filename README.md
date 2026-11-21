@@ -397,8 +397,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     word for word on CUDA and Metal. v8.4.2's step writes the algae's
     `totalChlorophyll` through a null pointer when the brine height runs
     alone (it dies on every step), so the step refuses that configuration
-    unless the correction `bgc_inactive_diagnostics` is named; the other
-    biogeochemistry flags are refused by name until their phases land;
+    unless the correction `bgc_inactive_diagnostics` is named. The vertical
+    salinity (`config_use_vertical_zsalinity`, BL99) is inert in v8.4.2,
+    which never sets the column package's `solve_zsal` and copies
+    `verticalSalinity` only with the vertical tracers; the init, the brine
+    height's step and the vertical thermodynamics keep that word for word,
+    and the correction `zsal_solve` solves it (`compute_microS`,
+    `solve_S_dt`, the salt fluxes, BL99's `dTemp`), word for word on CUDA
+    and Metal with an oracle built from `zsal_solve.patch`. The other
+    biogeochemistry flags, and the vertical salinity in the other stages,
+    are refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -416,7 +424,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     imports the ocean's floating basal mass balance
     (`woof/hex/mpas_ice/ocean_seam_v842.py`, graded by conservation); the
     land-ice core's registry status is now `ported_subset` (velocity
-    solvers 'sia' and 'none'). Two v8.4.2 quirks have opt-in corrections, off by
+    solvers 'sia', 'simple' and 'none'). Two v8.4.2 quirks have opt-in corrections, off by
     default: `woof_sgh_init_mask = 'corrected'` and
     `woof_enthalpy_advection_units = 'corrected'` (the advection converts
     enthalpy in Celsius, as the thermal solver does, so the EISMINT2
@@ -1200,8 +1208,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
   0.85-3.2x the glue, 3.3-4.5x advection, 1.3-4.4x the big-step
   tendencies and 2.5-3.7x the lateral boundaries. The kernels chain into
-  one strict dry step (`woof.grad.wrfplus.model`, periodic, with
-  Coriolis, curvature and map factors) whose binary32 base state reproduces
+  one strict dry step (`woof.grad.wrfplus.model`, periodic or with
+  specified lateral boundaries, with Coriolis, curvature and map factors;
+  the boundary tables are inputs whose adjoint it returns) whose binary32 base state reproduces
   `dycore.step` word for word, and whose binary64 dot-product and
   finite-difference tests pass. Measured at 200x200x49 on an A6000, the
   step's adjoint sweep costs 3.3x the forward step, and 4.8x with its
@@ -1211,8 +1220,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   over N steps with checkpoints, and takes adjoint forcing at
   intermediate states for 4D-Var. Its TL can start from part of the
   state, with the rest zero, as WRFDA's TL start does
-  (`Window.tl(dx0, partial=True)`). The forecast path does not import any
-  of it.
+  (`Window.tl(dx0, partial=True)`). It can also linearise about a
+  supplied trajectory instead of its own dry rerun, as WRFPLUS does
+  about the nonlinear run's states (`Window.forward(trajectory=...)`).
+  The first moist pieces exist as kernels but are not yet in the step:
+  `calc_cq` (qv, or qv, qc and qr), the pressure gradient's cqu/cqv, the
+  moist buoyancy, the diagnosis's qv (WRF's `qvf`), moist scalar
+  transport (sumflux and the non-PD scalar update,
+  `woof.grad.wrfplus.scalar`), and the moist boundary rows (qv's
+  relaxation and spec_bdy_final, flow_dep_bdy for hydrometeors). The
+  forecast path does not import any of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8

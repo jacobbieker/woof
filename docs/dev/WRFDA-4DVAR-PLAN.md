@@ -100,6 +100,18 @@ model's first steps adjust it. The default reproduces this. The opt-in
 `transfer="balanced"` would integrate the TL hypsometric relation for
 `g_ph`.
 
+**The mu halo at a specified window's start (`WindowModel(halo_start=)`):**
+WRFPLUS's `start_domain` resets the primal `mu_2` halo to the edge row at
+each window's start. Its TL `g_start_domain_em` calls `g_set_physical_bc2d`
+(`wrftladj/start_em_tl.F:706`, `module_bc_tl.F`), which copies `g_mu`'s
+edge row into the halo. woof's window carries the halo of the forecast it
+starts from. On a warm specified window the two bases therefore differ.
+The default, `halo_start="wrfplus"`, matches WRFPLUS: the primal halo
+(`model.HALO`) is reset to `mup`, and the TL halo is seeded from `g_mu`
+(`wrfda_tl_start(..., specified=True)`). `halo_start="carried"` keeps woof's
+carried halo and starts the TL halo at zero. A cold start, or a periodic
+domain, is the same under both.
+
 ## 2. How it maps onto woof
 
 | WRFDA | woof |
