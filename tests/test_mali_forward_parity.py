@@ -372,7 +372,7 @@ def _refused_on_host(case: dict, config: dict) -> None:
 @pytest.mark.parametrize("knob, value", [
     ("config_do_restart", True), ("config_time_integration", "rk4"), ("config_write_albany_ascii_mesh", True),
     ("woof_statistics_extrema", "other"),
-    ("config_AM_globalStats_enable", True), ("config_year_digits", 5), ("config_velocity_solver", "FO"),
+    ("config_AM_oceanStats_enable", True), ("woof_analysis_empty", "other"), ("config_year_digits", 5), ("config_velocity_solver", "FO"),
     ("config_dt", "0000-01-00_00:00:00"), ("config_dt", "00:00:10.5"), ("config_start_time", "file"),
 ])
 def test_the_pieces_not_ported_are_refused_by_name(knob, value):

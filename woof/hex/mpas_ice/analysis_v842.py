@@ -157,7 +157,8 @@ def init(config: dict, clock, streams: dict[str, str] | None = None) -> Analysis
         interval = str(option(config, member, "compute_interval"))
         stream = str(option(config, member, "stream_name"))
         if interval == "dt":
-            seconds = clock.step
+            # the clock's time step at li_core_init: config_dt (an adaptive step changes it later)
+            seconds = fwd.interval_seconds(config["config_dt"], clock.calendar, "config_dt")
         elif interval != "output_interval":
             seconds = fwd.interval_seconds(interval, clock.calendar, f"config_AM_{member}_compute_interval")
             if seconds <= 0:
