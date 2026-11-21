@@ -71,6 +71,7 @@ owned cell and the message, and the arrays are not v8.4.2's after it.
 """
 from __future__ import annotations
 
+from fractions import Fraction
 from functools import lru_cache
 from importlib.resources import files
 
@@ -95,7 +96,18 @@ _BLOCK = 64
 SEAICE_ERROR_COL_BGC = 13
 MAX_CATEGORIES = 64
 STOP_LABELS = {1: "ice_brine preflushing: fbri <= c0", 2: "ice: remap_layers_bgc error",
-               3: "bSin(k) > max_salin"}
+               3: "bSin(k) > max_salin", 4: "zbgc initialization error", 5: "negative bgc",
+               6: "(check_conservation_FCT's stop: v8.4.2 logs an undefined stop_label)"}
+#: z_biogeochemistry's constants as gfortran folds them, each operation rounded once
+#: (ice_algae.F90:972-977, pi from ice_constants_colpkg): S_col = 4*pi*r_c**2,
+#: P_b = pi*r_bac**2, V_c = 4*pi*r_c**3/3*(1e-6)**3, V_alg = pi/6*r_bac*r_alg**2 with
+#: r_c = 3e3, r_bac = 15, r_alg = 10; f_v is the default-real literal 0.7854
+_PI = 3.14159265358979323846
+_S_COL = (4.0 * _PI) * 9.0e6
+_P_B = _PI * 225.0
+_V_C = (((4.0 * _PI) * 2.7e10) / 3.0) * float(Fraction(1.0e-6) ** 3)
+_V_ALG = ((_PI / 6.0) * 15.0) * 100.0
+_F_V = float(np.float32(0.7854))
 
 
 class CriticalAbort(MpasPortError):
@@ -112,7 +124,7 @@ class CriticalAbort(MpasPortError):
 
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the brine height's port does not carry."""
-    cv.refuse_unported(configs, dims, biogeochemistry=True)
+    cv.refuse_unported(configs, dims, biogeochemistry=True, z_tracers=True)
     if configs["config_use_column_biogeochemistry"] and not configs["config_use_brine"]:
         cv._refuse("config_use_brine", False,
                    "colpkg_biogeochemistry writes brineTopChange and brineBottomChange, which only the brine "
@@ -173,7 +185,8 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
                            pools["ocean_coupling"], pools["biogeochemistry"])
     tr_brine = bool(configs["config_use_brine"])
     solve_zsal = cv.solves_zsal(configs)
-    flags = int(tr_brine) | int(solve_zsal) << 1
+    z_tracers = cv.vertical_tracers(configs)
+    flags = int(tr_brine) | int(solve_zsal) << 1 | int(z_tracers) << 2
     status = cp.zeros(max(n_solve, 1), np.int32)
     if solve_zsal:
         zsal = need(t, "verticalSalinity", (n_cells + 1, ncat, nbl))
@@ -207,6 +220,7 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
         np.float64(configs["config_zsalinity_molecular_sublayer"]), need(t, "surfaceTemperature", cat1), zsal,
         need(bgc, "bioPermeability", (n_cells + 1, ncat, nbl + 1)), need(bgc, "totalVerticalSalinity", c1),
         need(bgc, "zSalinityFlux", c1), need(bgc, "zSalinityGDFlux", c1),
+        *_z_tracer_args(pools, configs, state),
     )
     if n_solve:
         # atmosBioFluxes(:,:) = 0 on the first cell's turn: the whole array
@@ -219,3 +233,40 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
     first = int(bad[0])
     cell = int(cp.asnumpy(pools["mesh"]["indexToCellID"][first:first + 1])[0])
     raise CriticalAbort(cell, "column_biogeochemistry: " + STOP_LABELS[int(codes[first])])
+
+
+def zbgc_constants(configs: dict, tracers: "cv.TracerObject") -> np.ndarray:
+    """The kernel's ``zpar``: the nonreactive tracer's ``colpkg_init_zbgc``
+    parameters (:func:`~woof.hex.mpas_seaice.column_v842.zbgc_parameters`),
+    ``grid_o`` and z_biogeochemistry's folded constants."""
+    par = cv.zbgc_parameters(configs, tracers)
+    return np.array([par["type"][0], par["tau_ret"][0], par["tau_rel"][0], par["frac_init"][0],
+                     par["init_frac"][0], float(configs["config_biogrid_bottom_molecular_sublayer"]), _F_V, _V_C,
+                     _S_COL, _P_B, _V_ALG], np.float64)
+
+
+def _z_tracer_args(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple:
+    """The kernel's vertical tracer arguments (dummies without them)."""
+    import cupy as cp
+
+    d, to = state.dims, state.tracers
+    nzbgc = d["nZBGCTracers"]
+    if not cv.vertical_tracers(configs):
+        dummy = cp.zeros(1, np.float64)
+        return (dummy, dummy, np.int32(nzbgc), dummy, np.int32(0), dummy, dummy, dummy, dummy, dummy, dummy,
+                dummy, dummy, dummy, dummy, dummy, dummy)
+    need = cv._need
+    n1, ncat, nil, nbl = d["nCells"] + 1, d["nCategories"], d["nIceLayers"], d["nBioLayers"]
+    t, ist, bgc = pools["tracers"], pools["icestate"], pools["biogeochemistry"]
+    fz = (n1, nzbgc)
+    return (
+        need(t, "verticalNonreactiveConc", (n1, ncat, nbl + 3)), need(t, "mobileFraction", (n1, ncat, nzbgc)),
+        np.int32(nzbgc), cp.asarray(zbgc_constants(configs, to)), np.int32(to.bio_index_o[0] - 1),
+        need(bgc, "oceanBioConcentrations", fz), need(pools["atmos_coupling"], "snowfallRate", (n1,)),
+        need(ist, "snowVolumeCategoryInitial", (n1, ncat)),
+        need(pools["shortwave"], "shortwaveLayerPenetration", (n1, ncat, nil + 1)),
+        need(bgc, "interfaceGrid", (nil + 1,)), need(bgc, "bioShortwaveFlux", (n1, ncat, nbl + 1)),
+        need(bgc, "oceanBioFluxes", fz), need(bgc, "snowIceBioFluxes", fz), need(bgc, "atmosIceBioFluxes", fz),
+        need(bgc, "totalVerticalBiologyIce", fz), need(bgc, "totalVerticalBiologySnow", fz),
+        need(bgc, "atmosBioFluxes", fz),
+    )
