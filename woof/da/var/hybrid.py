@@ -62,6 +62,7 @@ __all__ = [
     "flow_xa_adj",
     "hybrid_cost",
     "jb_factor_for",
+    "member_fields",
     "perturbations_sha256",
     "read_ep",
     "read_vertloc",
@@ -461,6 +462,25 @@ def read_ep(directory, ne: int, ep_format: int = 1, shape=None) -> dict:
     return {k: np.stack(v) for k, v in out.items()}
 
 
+def member_fields(path, time_index=0) -> dict:
+    """One member's u, v, t, q, ps as ``gen_be_ep2`` builds them (the full state, not a perturbation).
+
+    ``u`` and ``v`` averaged to mass points, ``t`` from ``theta = 300 + T`` and
+    ``p = PB + P`` (``da_get_trh``), ``q = QVAPOR / (1 + QVAPOR)``, ``PSFC``;
+    (nx, ny, nz) and (nx, ny), the layout of :class:`Ensemble`.
+    """
+    from woof.da.var import gen_be as gb
+
+    f = gb.read_wrf_history(Path(path), int(time_index))
+    big_u, big_v = f["U"], f["V"]
+    dim1, dim2 = big_u.shape[0] - 1, big_v.shape[1] - 1
+    theta = gb.T0 + f["T"]
+    pres = f["PB"] + f["P"]
+    x = f["QVAPOR"]
+    return {"u": 0.5 * (big_u[0:dim1] + big_u[1:dim1 + 1]), "v": 0.5 * (big_v[:, 0:dim2] + big_v[:, 1:dim2 + 1]),
+            "t": theta * np.power(pres / gb.BASE_PRES, gb.KAPPA), "q": x / (1.0 + x), "ps": f["PSFC"].copy()}
+
+
 def ep_from_wrf(paths, *, time_index=0) -> dict:
     """``gen_be_ep2``: unscaled perturbations of WRF history files about their mean.
 
@@ -477,8 +497,6 @@ def ep_from_wrf(paths, *, time_index=0) -> dict:
     Hydrometeor perturbations (``mp_physics > 0``) are not read
     (``alpha_hydrometeors`` is not implemented).
     """
-    from woof.da.var import gen_be as gb
-
     paths = [Path(x) for x in paths]
     if len(paths) < 2:
         raise ValueError(f"the ensemble needs at least 2 members (got {len(paths)})")
@@ -488,14 +506,7 @@ def ep_from_wrf(paths, *, time_index=0) -> dict:
     members = []
     shape = None
     for path, index in zip(paths, indices):
-        f = gb.read_wrf_history(path, index)
-        big_u, big_v = f["U"], f["V"]
-        dim1, dim2 = big_u.shape[0] - 1, big_v.shape[1] - 1
-        theta = gb.T0 + f["T"]
-        pres = f["PB"] + f["P"]
-        x = f["QVAPOR"]
-        m = {"u": 0.5 * (big_u[0:dim1] + big_u[1:dim1 + 1]), "v": 0.5 * (big_v[:, 0:dim2] + big_v[:, 1:dim2 + 1]),
-             "t": theta * np.power(pres / gb.BASE_PRES, gb.KAPPA), "q": x / (1.0 + x), "ps": f["PSFC"].copy()}
+        m = member_fields(path, index)
         if shape is None:
             shape = m["t"].shape
         elif m["t"].shape != shape:
