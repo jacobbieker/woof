@@ -327,8 +327,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     column's loads coalesce: the 33,000-cell step takes 42 instead of 58 ms
     on an A6000, the same words. Metal keeps a thread per column,
     which is faster there (switch: `WOOF_OCEAN_COLUMN_LANES=1` or `32`);
-  - MPAS-Seaice: variational EVP internal stress, the velocity solve and
-    elastic subcycles, the pre-subcycle routines, ocean stress,
+  - MPAS-Seaice: variational EVP internal stress with its basis set-up
+    (Wachspress and PWL under every integration rule, computed on the host
+    in the init; the RKIND 8 metric terms need `metric_libm` because
+    glibc's binary64 asin and tan are not correctly rounded), the
+    weak-form stress divergence (`config_stress_divergence_scheme =
+    'weak'`, its normal vectors computed on the host in the init; on a
+    sphere it needs `metric_libm` too), the velocity
+    solve and elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
     grid, hexagons and quadrilaterals, variable resolution) with its
     optional conservation and monotonicity checks (one rank), a forward

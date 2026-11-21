@@ -229,13 +229,21 @@ class HybridSeaIce:
     ``nextsw_cday`` the coupler's at start. ``trig`` ``(nCells, 8)`` is the
     rotation's words (:func:`~woof.hex.coupled.ice_coupling_e3sm.rotation_trig`
     over every cell with ``sphere_radius`` when not given). Construction is
-    ``ice_init_mct`` for an initial run."""
+    ``ice_init_mct`` for an initial run. ``basis``, ``metric_libm`` and
+    ``basis_corrections`` go to
+    :func:`~woof.hex.mpas_seaice.timestep_v842.initialize`. The default,
+    ``"input"``, keeps the basis the pools carry (the coupled harness's pools
+    come from an initialised model, and the HybridSeaIce API takes the
+    sphere as ``sphere_radius``, not as the ``mesh:`` configs the set-up
+    reads). ``basis="compute"`` computes it from the mesh as v8.4.2's init
+    does; at real(8) its metric terms need ``metric_libm``."""
 
     name = HYBRID_NAME
 
     def __init__(self, *, pools: dict, configs: dict, x2i_fields, i2x_fields, ice_cpl_dt: int,
                  nextsw_cday: float = -1.0, trig=None, sphere_radius: float | None = None,
-                 wav_ice_coup: str = "none") -> None:
+                 wav_ice_coup: str = "none", basis: str = "input", metric_libm: str | None = None,
+                 basis_corrections=()) -> None:
         import cupy as cp
         from woof.hex.mpas_seaice import coupling_prep_v842 as cprep
         from woof.hex.mpas_seaice import timestep_v842 as ts
@@ -275,7 +283,8 @@ class HybridSeaIce:
         self._export_pools["tracers_aggregate"] = ta
         # ice_init_mct: nextsw_cday, then the core's init
         self._nextsw(nextsw_cday)
-        self.clock = ts.initialize(pools=pools, configs=configs)
+        self.clock = ts.initialize(pools=pools, configs=configs, basis=basis, metric_libm=metric_libm,
+                                   basis_corrections=basis_corrections)
         # the coupling preparation (E3SM's seaice_icepack_coupling_prep; v8.4.2's column one)
         cprep.coupling_prep(pools=pools, n_cells_solve=self.n_cells_solve, dt=float(configs["config_dt"]),
                             configs=configs)
