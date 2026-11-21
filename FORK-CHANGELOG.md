@@ -31,6 +31,13 @@ fork already had, upstream's keys and flags are now the only ones:
 
 New:
 
+- The WRF dry-step adjoint's lateral-boundary rows (`woof.grad.wrfplus.lbc`)
+  gain the moist ones: qv's rk_step-1 relaxation capture and its
+  spec_bdy_final, and WRF's flow-dependent boundary for hydrometeors
+  without a table. The binary32 base reproduces woof's strict primal word
+  for word. They are not yet bound into the step. The forecast path is
+  unchanged.
+
 - The WRF dry-step adjoint (`woof.grad.wrfplus.scalar`) gains moist
   scalar transport: WRF's sumflux and one species' non-positive-definite
   rk_scalar_tend + rk_update_scalar, with the specified ring and the held

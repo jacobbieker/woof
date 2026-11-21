@@ -1187,10 +1187,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   about the nonlinear run's states (`Window.forward(trajectory=...)`).
   The first moist pieces exist as kernels but are not yet in the step:
   `calc_cq` (qv, or qv, qc and qr), the pressure gradient's cqu/cqv, the
-  moist buoyancy, the diagnosis's qv (WRF's `qvf`), and moist scalar
+  moist buoyancy, the diagnosis's qv (WRF's `qvf`), moist scalar
   transport (sumflux and the non-PD scalar update,
-  `woof.grad.wrfplus.scalar`). The forecast path does not import any of
-  it.
+  `woof.grad.wrfplus.scalar`), and the moist boundary rows (qv's
+  relaxation and spec_bdy_final, flow_dep_bdy for hydrometeors). The
+  forecast path does not import any of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
