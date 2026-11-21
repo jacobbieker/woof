@@ -136,6 +136,7 @@ def make_case(name, base, base_name, steps_per_window, windows, constants, overr
     case["hybrid"] = {"steps_per_window": steps_per_window, "windows": windows, "constants": constants,
                       "ocn_cpl_dt": steps_per_window * int(case["dt"]), "x2o": _x2o(rs, lsize, windows),
                       "lsize": lsize}
+    case["aborts"] = False
     return case
 
 
@@ -174,11 +175,28 @@ def read_outputs(o2x_raw: bytes, pools_raw: bytes, case: dict) -> dict[str, np.n
 word_mismatches = _stream.word_mismatches
 
 
+def run_binary(build_dir: Path, case: dict) -> tuple[int, dict | None, str]:
+    """``run_hybrid_ocean_<constants>`` on ``case``: (status, outputs, stderr)."""
+    import subprocess
+    import tempfile
+    binary = Path(build_dir) / f"run_hybrid_ocean_{case['hybrid']['constants']}"
+    with tempfile.TemporaryDirectory() as tmp:
+        fwd, cpl, out = (Path(tmp) / n for n in ("forward.bin", "coupling.bin", "out.bin"))
+        fwd.write_bytes(forward_bytes(case))
+        cpl.write_bytes(coupling_bytes(case))
+        done = subprocess.run([str(binary), str(fwd), str(cpl), str(out)], capture_output=True, text=True)
+        pools = Path(str(out) + ".pools")
+        if done.returncode != 0 or not out.exists() or not pools.exists():
+            return done.returncode or -1, None, done.stderr + done.stdout
+        return 0, read_outputs(out.read_bytes(), pools.read_bytes(), case), done.stderr
+
+
 def load_fixture() -> dict[str, dict[str, np.ndarray]]:
-    out = {}
-    for path in sorted(FIXTURE_DIR.glob("*.npz")):
-        with np.load(path) as z:
-            out[path.stem] = {k.replace("|", "/"): z[k] for k in z.files}
+    out: dict[str, dict[str, np.ndarray]] = {}
+    with np.load(FIXTURE_DIR / "oracle-r8.npz") as z:
+        for key in z.files:
+            case, _, name = key.partition("/")
+            out.setdefault(case, {})[name] = z[key]
     return out
 
 

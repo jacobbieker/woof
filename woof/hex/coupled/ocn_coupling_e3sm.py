@@ -307,11 +307,14 @@ def _launch(kernel: str, n: int, args) -> None:
             ((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,), tuple(args))
 
 
-def import_x2o(idx: Indices, opts: Options, x2o, *, n_cells_solve: int, lat_cell, forcing: dict) -> None:
+def import_x2o(idx: Indices, opts: Options, x2o, *, n_cells_solve: int, lat_cell, forcing: dict,
+               gravity: float = GRAVITY) -> None:
     """``ocn_import_mct``: ``x2o`` ``(lsize, nx2o)`` into ``forcing``'s
     arrays in place. ``forcing`` maps MPAS names to the device arrays a
     package has on: 1-D ``(nCells,)``, the Stokes drift ``(nCells, 6)``
-    (MPAS's ``(6, nCells)`` in memory order); ``lat_cell`` is ``(nCells,)``."""
+    (MPAS's ``(6, nCells)`` in memory order); ``lat_cell`` is ``(nCells,)``.
+    ``gravity`` is mpas_constants' (E3SM v3.2.0's float32-rounded literal by
+    default; MPAS v8.4.2's framework gives ``9.80616_RKIND``)."""
     import cupy as cp
     opts.check()
     if int(x2o.shape[0]) != n_cells_solve:
@@ -330,7 +333,7 @@ def import_x2o(idx: Indices, opts: Options, x2o, *, n_cells_solve: int, lat_cell
     _launch("ocn_import_e3sm", n_cells, (
         buf, np.int32(n_cells), np.int32(len(rows)), *(_ints(r[k] for r in rows) for k in (2, 3, 4, 5, 6)),
         x2o, np.int32(idx.nx2o), np.int32(n_cells_solve), lat_cell, np.float64(prec),
-        np.float64(opts.config_density0), np.float64(GRAVITY)))
+        np.float64(opts.config_density0), np.float64(gravity)))
     for j, (name, comp, *_) in enumerate(rows):
         if comp is None:
             forcing[name][...] = buf[j]

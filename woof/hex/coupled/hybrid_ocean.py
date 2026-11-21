@@ -62,6 +62,8 @@ SOURCE_FILES = ("components/mpas-ocean/driver/ocn_comp_mct.F:ocn_init_mct:781-79
 SHR_RHO_SW, SHR_CP_SW, SHR_T0_KELVIN = 1.026e3, 3.996e3, 273.15
 #: v8.4.2's standalone build: rho_sw is config_density0
 MPAS_CP_SW, MPAS_T0_KELVIN = 3.996e3, 273.16
+#: v8.4.2's framework mpas_constants: ``gravity = 9.80616_RKIND`` (E3SM v3.2.0's is a default-real literal)
+MPAS_GRAVITY = 9.80616
 CONSTANTS = ("e3sm", "mpas")
 
 
@@ -152,6 +154,9 @@ DIVERGENCES = (
     Divergence("ocn_constants: MPAS_ESM_SHR_CONST", "mpas_ocn_constants.F:153-167 (both)", "ported",
                "E3SM builds MPAS with shr_const_mod's constants (T0_Kelvin 273.15, rho_sw 1026); the "
                "default here. v8.4.2's standalone build (273.16, config_density0) is constants='mpas'"),
+    Divergence("the import's sea-ice pressure cap: mpas_constants' gravity", "ocn_comp_mct.F:2555", "ported",
+               "E3SM v3.2.0's framework writes gravity as a default-real literal (float32-rounded); the "
+               "hybrid compiles the import against v8.4.2's framework, whose gravity is 9.80616_RKIND"),
 )
 
 
@@ -365,7 +370,7 @@ class HybridOcean:
         f = self.pools["forcing"]
         forcing = {k: v for k, v in f.items() if isinstance(v, cp.ndarray) and v.dtype == np.float64}
         cpl.import_x2o(self.idx, self.opts, x2o, n_cells_solve=self.n_cells_solve,
-                       lat_cell=self.pools["mesh"]["latCell"], forcing=forcing)
+                       lat_cell=self.pools["mesh"]["latCell"], forcing=forcing, gravity=MPAS_GRAVITY)
 
     # ------------------------------------------------------------ the run
 

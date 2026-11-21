@@ -502,7 +502,22 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     runs them. Each hand-over is a matched exchange, refused by its
     channel's name. Word-exact against the chained oracle with scripted
     components.
-  - The coupled exchange's land-ice/ocean channels (`woof/hex/coupled/exchange.py`)
+  - E3SM v3.2.0 coupler with MPAS v8.4.2 components, not an E3SM
+    configuration (`woof/hex/coupled/hybrid_ocean.py`, opt-in): the MPAS
+    v8.4.2 ocean (this fork's port) run as E3SM v3.2.0's `ocn_init_mct` and
+    `ocn_run_mct` run their ocean (the clock moved to its first coupling
+    alarm at start, the means reset each window, the forcing built in
+    E3SM's order), with E3SM's import and export around it. E3SM's build's
+    constants by default (`T0_Kelvin` 273.15, `rho_sw` 1026), or v8.4.2's
+    own. real(r8), word-exact on CUDA and Metal against E3SM's import and
+    export cut verbatim and compiled against v8.4.2's modules, around
+    v8.4.2's forward mode. Each place E3SM's loop does something v8.4.2's
+    does not is listed (`DIVERGENCES`): ported, refused by name (the
+    removed Antarctic runoff, the waves, the 10 m wind, the land ice's
+    'standalone' and 'data', the 3-D thermal forcing, nonzero iceberg
+    fluxes, precipitation scaling, the BGC tracers) or left out with the
+    reason (`Faoo_h2otemp` is sent as 0). E3SM's own MPAS-Ocean is not
+    ported.
     are the MALI port's ocean seam: `landIcePressure`, `landIceFraction` and
     `landIceMask` (int32), liquid and solid runoff in place of one mass
     channel, and `ocn2li_floating_basal_mass_bal` back in MALI's sign
