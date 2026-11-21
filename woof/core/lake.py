@@ -87,6 +87,12 @@ class LakeModel:
     #: (0.5, or 0.02 under fractional_seaice = 1); lakeini and lake read
     #: the same value the land-surface seam runs.
     xice_threshold: float = 0.5
+    #: True when this model's work copy is the only writer of ``lake_columns`` between steps
+    #: (the R2 service: no tile or rank gathers, no restart): the step then skips re-gathering
+    #: the work copy from the horizontal array, which holds exactly what the previous step
+    #: scattered into it.  ``invalidate_columns`` still forces a full regather.  The WRF door
+    #: leaves it False and gathers every step, as before.
+    resident: bool = False
 
     @property
     def column_count(self) -> int:
@@ -142,8 +148,9 @@ class LakeModel:
             return
         if dt <= 0:
             raise ValueError("Lake time step must be positive to convert accumulated precipitation to a rate")
-        cp.take(fields["lake_columns"].reshape(LAKE_STATE_WORDS, -1),
-                self.indices, axis=1, out=self.columns)
+        if not self.resident:
+            cp.take(fields["lake_columns"].reshape(LAKE_STATE_WORDS, -1),
+                    self.indices, axis=1, out=self.columns)
         p_interface = atmosphere["p_interface"]
         values = (
             atmosphere["temperature"][0], p_interface[0], p_interface[1],
@@ -162,7 +169,13 @@ class LakeModel:
             (n, self.forcing, self.columns, self.static, self.output,
              cp.float32(dt), cp.float32(self.xice_threshold), self.errors),
             self._arena)
-        self.check_errors()
+        try:
+            self.check_errors()
+        except RuntimeError:
+            # The kernel advanced the work copy in place and nothing was committed: the next step
+            # re-gathers from the horizontal array (the last committed state), resident or not.
+            self._needs_refresh = True
+            raise
         fields["lake_columns"].reshape(LAKE_STATE_WORDS, -1)[:, self.indices] = self.columns
         for row, (name, _) in enumerate(LAKE_OUTPUT_LAYOUT):
             fields[name].reshape(-1)[self.indices] = self.output[row]

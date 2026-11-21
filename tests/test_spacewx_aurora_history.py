@@ -28,6 +28,7 @@ from test_spacewx_ionosphere_history import START, _cfg, _gfz, _radiation  # noq
 
 NAMES = ("AURORA_ZONE", "AURORA_DIST", "MAG_LAT", "MAG_LT")
 ENERGY = ("AURORA_EFLUX", "AURORA_EMEAN", "AURORA_IFLUX")
+JOULE = ("JOULE_POWER",)
 
 
 # --- admission ----------------------------------------------------------------------
@@ -40,7 +41,12 @@ def test_defaults_are_off_and_admitted():
 
 
 @pytest.mark.parametrize("overrides, match", [
-    (dict(spacewx_aurora_opt=3), "spacewx_aurora_opt"),
+    (dict(spacewx_aurora_opt=4), "spacewx_aurora_opt"),
+    (dict(spacewx_aurora_opt=3), "must be 'omni', not"),
+    (dict(spacewx_aurora_opt=3, spacewx_kp_source="swpc"), "only OMNI2 carries"),
+    (dict(spacewx_aurora_opt=3, spacewx_kp_source="4"), "only OMNI2 carries"),
+    (dict(spacewx_aurora_opt=3, spacewx_kp_source="omni", ra_physics=0, ra_sw_physics=0, ra_lw_physics=0),
+     "spacewx_aurora_opt = 3 places"),
     (dict(spacewx_aurora_opt=2), "must be 'omni' or 'swpc'"),
     (dict(spacewx_aurora_opt=2, spacewx_kp_source="gfz"), "must be 'omni' or 'swpc'"),
     (dict(spacewx_aurora_opt=2, spacewx_kp_source="5"), "must be 'omni' or 'swpc'"),
@@ -67,6 +73,10 @@ def test_an_on_config_is_admitted(source):
 @pytest.mark.parametrize("source", ["omni", "swpc"])
 def test_the_energy_rows_are_admitted_with_a_solar_wind(source):
     validate_run_config(_cfg(spacewx_aurora_opt=2, spacewx_kp_source=source))
+
+
+def test_the_joule_row_is_admitted_with_omni_only():
+    validate_run_config(_cfg(spacewx_aurora_opt=3, spacewx_kp_source="omni"))
 
 
 def test_kp_source_forms():
@@ -214,6 +224,87 @@ def test_the_held_coupling_is_reused_and_added_to_an_older_hold(tmp_path):
     assert held["kp"] == 2.0 and held["dphidt"] == plain["dphidt"]
 
 
+def _omni_wind(hours, start, pcn=1.5, dst=-40.0):
+    wind = _wind(hours, start)
+    full = np.full(hours, 1.0)
+    return dataclasses.replace(wind, pcn=full * pcn, dst=full * dst, source="omni2")
+
+
+def test_the_joule_drivers_are_the_latest_hour_ended_by_the_start():
+    from woof.spacewx import ovation
+    wind = _omni_wind(30, START - timedelta(hours=19))        # runs past the start
+    wind.pcn[19:] = 9.0                                       # the start's hour and later: never read
+    wind.dst[18] = np.nan                                     # 17 UT lacks Dst: 16 UT is taken
+    drive = ah.activity("omni", START + timedelta(minutes=40), solarwind_loader=lambda *a: wind, joule=True)
+    j = drive["joule"]
+    assert (j["pcn"], j["dst"], j["hour"], j["season"]) == (1.5, -40.0, "2024-05-10T16:00Z", "summer")
+    assert j["north_gw"] == pytest.approx(ovation.joule_power(1.5, -40.0, START))
+    assert j["north_gw"] == pytest.approx(29.27 * 1.5 + 8.18 * 2.25 - 0.04 * 40.0 + 0.0126 * 1600.0)
+    assert drive["record"]["spacewx_joule_sha256"] == wind.sha256
+    # SWPC carries no PC(N) or Dst; a fixed Kp none either.
+    for source in ("swpc", "gfz", "5"):
+        with pytest.raises(ah.AuroraHistoryError, match="must be 'omni'"):
+            ah.activity(source, START, solarwind_loader=lambda *a: wind, joule=True)
+    # No hour with both in the lookback: refused by name; the Kp alone still runs.
+    empty = _wind(30, START - timedelta(hours=19))
+    with pytest.raises(ah.AuroraHistoryError, match="no OMNI2 hour with both PC"):
+        ah.activity("omni", START, solarwind_loader=lambda *a: empty, joule=True)
+    assert "joule" not in ah.activity("omni", START, solarwind_loader=lambda *a: empty)
+
+
+def test_the_held_joule_drivers_are_reused_and_added_to_an_older_hold(tmp_path):
+    import json
+    wind = _omni_wind(20, START - timedelta(hours=19))
+    calls = []
+
+    def loader(source, first, last):
+        calls.append(source)
+        return wind
+
+    plain = ah.activity("omni", START, solarwind_loader=loader, memo=tmp_path, energy=True)
+    assert calls == ["omni"] and plain["joule"]["pcn"] == 1.5           # kept even without the row
+    held = ah.activity("omni", START, solarwind_loader=lambda *a: 1 / 0, memo=tmp_path, joule=True)
+    assert held["joule"] == plain["joule"] and held["dphidt"] == plain["dphidt"]
+    (memo,) = tmp_path.glob("omni-*.json")
+    doc = json.loads(memo.read_text())
+    doc.pop("joule")
+    doc["kp"] = 2.0
+    memo.write_text(json.dumps(doc))
+    added = ah.activity("omni", START, solarwind_loader=loader, memo=tmp_path, energy=True, joule=True)
+    assert calls == ["omni", "omni"] and added["kp"] == 2.0 and added["joule"] == plain["joule"]
+    assert added["dphidt"] == plain["dphidt"] and added["record"]["spacewx_joule_sha256"] == wind.sha256
+    again = json.loads(memo.read_text())
+    assert again["joule"] == plain["joule"] and again["kp"] == 2.0 and again["dphidt"] == plain["dphidt"]
+
+
+def test_a_negative_fit_is_held_at_zero_power():
+    # Summer, PC(N) 0, Dst -3 nT: the fit gives -0.04 * 3 + 0.0126 * 9 < 0.
+    drive = {"kp": 1.0, "al": -50.0, "record": {},
+             "joule": {"pcn": 0.0, "dst": -3.0, "hour": "x", "season": "summer", "north_gw": -0.0066}}
+    h = ah.AuroraHistory(None, START, drive, (2, 2))
+    assert h.joule_gw == 0.0 and h.names[-1] == "JOULE_POWER"
+    assert ah.AuroraHistory(None, START, dict(drive, joule=None), (2, 2)).joule_gw is None
+
+
+def test_knipp_joule_power_matches_the_published_scale():
+    """Physical sanity (Knipp et al. 2004, Sol. Phys. 224, 495): their fit
+    gives a 1975-2003 mean global Joule input of 95 GW (twice the northern
+    value).  With climatological drivers, |PC(N)| about 1.2 and Dst about
+    -17 nT, the annual fit gives a global power of that size; a severe storm
+    (PC(N) 6, Dst -250 nT) gives hundreds of GW per hemisphere, the scale of
+    AMIE storm peaks (McHarg et al. 2005, JGR 110, A12S16: up to about 300 GW)."""
+    from woof.spacewx import ovation
+    june = datetime(2024, 6, 1)
+    mean_global = 2.0 * ovation.joule_power(1.2, -17.0, june, season="annual")
+    assert 0.7 * 95.0 <= mean_global <= 1.3 * 95.0
+    storm = ovation.joule_power(6.0, -250.0, june, season="annual")
+    assert 200.0 <= storm <= 600.0
+    for season in ("winter", "summer", "equinox"):
+        quiet = ovation.joule_power(1.2, -17.0, june, season=season)
+        assert 20.0 <= quiet <= 70.0
+        assert ovation.joule_power(6.0, -250.0, june, season=season) > 4.0 * quiet
+
+
 def test_an_unreachable_gfz_falls_back_to_the_cached_file(tmp_path):
     path = _gfz(tmp_path)
     asked = []
@@ -263,6 +354,11 @@ def test_produced_history_shapes_carry_the_rows_only_when_on():
     from woof.spacewx.ovation import COLUMN_FIELDS
     for name, (key, desc, units) in ah.ENERGY_HISTORY_FIELDS.items():
         assert REGISTRY_VAR_META[name] == (desc, units) and key in COLUMN_FIELDS
+    joule = produced_history_shapes(_cfg(spacewx_aurora_opt=3, spacewx_kp_source="omni"))
+    assert set(joule) - set(off) == set(NAMES + ENERGY + JOULE)
+    assert tuple(ah.JOULE_HISTORY_FIELDS) == JOULE
+    for name, (desc, units) in ah.JOULE_HISTORY_FIELDS.items():
+        assert REGISTRY_VAR_META[name] == (desc, units)
 
 
 def test_preflight_prices_the_held_arrays_and_the_kernel():
@@ -273,6 +369,8 @@ def test_preflight_prices_the_held_arrays_and_the_kernel():
     assert sum(1 for name in shapes if shapes[name] == (24,)) == 2 + len(au.OUTPUTS)
     assert ah.device_shapes(_cfg(spacewx_aurora_opt=2, spacewx_kp_source="omni"))[
         "spacewx_aurora/history"] == (7, 4, 6)
+    assert ah.device_shapes(_cfg(spacewx_aurora_opt=3, spacewx_kp_source="omni"))[
+        "spacewx_aurora/history"] == (8, 4, 6)
     assert preflight.KERNEL_MAX_LOCAL_SIZE_BYTES["spacewx_aurora"] == 32
     src = inspect.getsource(preflight)
     assert 'modules.add("spacewx_aurora")' in src
@@ -401,3 +499,37 @@ def test_missing_ovation_coefficients_are_refused_by_name(monkeypatch):
     with pytest.raises(ah.AuroraHistoryError, match="spacewx_aurora_opt = 2 needs the OVATION Prime"):
         ah.AuroraHistory.for_run(_cfg(spacewx_aurora_opt=2, spacewx_kp_source="omni"), rad,
                                  solarwind_loader=lambda *a: wind, igrf_model=_dipole())
+
+
+@pytest.mark.gpu
+@requires_gpu
+def test_the_joule_row_is_the_held_knipp_power_in_every_column(tmp_path):
+    import cupy as cp
+    from types import SimpleNamespace
+    from woof.spacewx import ovation
+    from test_spacewx_ovation import _premodel
+    coef = ovation.read_coefficients(_premodel(tmp_path))
+    wind = _omni_wind(20, START - timedelta(hours=19), pcn=3.0, dst=-120.0)
+    lat, lon = np.meshgrid(np.linspace(-80.0, 88.0, 4), np.linspace(-170.0, 170.0, 6), indexing="ij")
+    rad = SimpleNamespace(start_time=START, latitude_deg=lat.astype(np.float32),
+                          longitude_deg=lon.astype(np.float32))
+    cfg = _cfg(spacewx_aurora_opt=3, spacewx_kp_source="omni")
+    h = ah.AuroraHistory.for_run(cfg, rad, solarwind_loader=lambda *a: wind, igrf_model=_dipole(),
+                                 ovation_coefficients=coef)
+    want = np.float32(ovation.joule_power(3.0, -120.0, START))
+    for elapsed in (0.0, 3600.0, 7200.0):
+        rows = h.history_fields(elapsed)
+        assert tuple(rows) == NAMES + ENERGY + JOULE
+        joule = cp.asnumpy(rows["JOULE_POWER"])
+        assert joule.dtype == np.float32 and joule.shape == (4, 6) and np.all(joule == want)
+    receipt = h.receipt()
+    assert receipt["spacewx_joule_north_gw"] == pytest.approx(float(want))
+    assert receipt["spacewx_joule_global_gw"] == pytest.approx(2.0 * float(want))
+    assert (receipt["spacewx_joule_pcn"], receipt["spacewx_joule_dst_nt"]) == (3.0, -120.0)
+    assert receipt["spacewx_joule_hour"] == "2024-05-10T17:00Z"
+    # Option 2 on the same drive writes no Joule row and no Joule receipt.
+    two = ah.AuroraHistory.for_run(_cfg(spacewx_aurora_opt=2, spacewx_kp_source="omni"), rad,
+                                   solarwind_loader=lambda *a: wind, igrf_model=_dipole(),
+                                   ovation_coefficients=coef)
+    assert tuple(two.history_fields(0.0)) == NAMES + ENERGY
+    assert not any(k.startswith("spacewx_joule") for k in two.receipt())

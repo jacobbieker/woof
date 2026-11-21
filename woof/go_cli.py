@@ -40,6 +40,7 @@ stages, and each retains its own input and physics validation.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import errno
 import json
 import os
@@ -4604,6 +4605,79 @@ def _planner_machine(probe, profile=None):
         name="woof go probe", device_profile=profile)
 
 
+_GO_STAGES_LAKE_DEPTH = contextvars.ContextVar("woof_go_stages_lake_depth", default=False)
+
+
+def go_stages_lake_depth_refusal(geog_root: Path, *, config) -> str | None:
+    """:func:`geography_refusal` for a caller whose real run stages ``lake_depth`` itself.
+
+    A dry run and ``woof check`` preview the launch, which downloads that one archive
+    (:func:`stage_lake_depth`) instead of refusing, so they must not refuse it either.
+    """
+
+    token = _GO_STAGES_LAKE_DEPTH.set(True)
+    try:
+        return geography_refusal(geog_root, config=config)
+    finally:
+        _GO_STAGES_LAKE_DEPTH.reset(token)
+
+
+def _lake_depth_missing(geog_root: Path, config) -> bool:
+    """True when this configuration's lake model reads ``lake_depth`` and the tree lacks it.
+
+    The plan is the one ``woof fetch-geog --config`` stages from
+    (:func:`woof.geog_assets.geography_for_run`): ``lake_depth`` only for
+    ``sf_lake_physics = 1`` with ``use_lakedepth = 1`` on a static file that does not
+    already serve LAKE_DEPTH.
+    """
+
+    from woof.geog_assets import archive_for, geography_for_run
+
+    try:
+        planned = geography_for_run(Path(config))["datasets"]
+    except (OSError, ValueError):
+        # A configuration whose inputs cannot be read has no geography plan yet; the
+        # launch's own input and geography checks name what is missing.
+        return False
+    if "lake_depth" not in planned:
+        return False
+    archive = archive_for("lake_depth")
+    return any(not (Path(geog_root) / (f"lake_depth/{child}/index" if child else "lake_depth/index")).is_file()
+               for child in (archive.index_subdirs or ("",)))
+
+
+def stage_lake_depth(geog_root: Path, config) -> bool:
+    """Download ``lake_depth`` when the lake model needs it and the tree lacks it.
+
+    BREAKAGE THIS ENDS: ``woof go --lakes clm`` refused ("missing geography indexes ...
+    lake_depth/index") and sent the reader to a separate ``woof fetch-geog`` for a 2.4 MB
+    archive, the one dataset the opt-in itself adds.  Go stages that one dataset (NCAR is its
+    only source) before the geography check, on the same side of the forcing download.  Every
+    other missing dataset still refuses with its remedy.  Returns True when it staged.
+    """
+
+    if config is None or not _lake_depth_missing(geog_root, config):
+        return False
+    from woof.geog_assets import GeogFetchError, archive_for, fetch_geog, resolve_source
+
+    size = archive_for("lake_depth").archive_bytes
+    print(f"go: the lake model reads WPS lake_depth bathymetry and {geog_root} lacks it; "
+          f"fetching it from NCAR ({size / 1e6:.1f} MB download, about 1.9 GB unpacked). "
+          "use_lakedepth = 0 runs on the uniform lakedepth_default and needs none.", flush=True)
+    try:
+        fetch_geog(root=Path(geog_root), datasets=("lake_depth",),
+                   source=resolve_source("ncar", False),
+                   progress=lambda line: print(
+                       line if line.startswith("note:") else f"go: {line}", flush=True))
+    except (GeogFetchError, OSError, RuntimeError) as error:
+        # OSError: an unwritable tree; RuntimeError: another fetch holds the tree's lock.
+        raise GoRefusal(
+            f"fetching lake_depth for the lake model failed: {error}\n"
+            f"  remedy: woof fetch-geog --datasets lake_depth --source ncar --root {_quote(str(geog_root))}, "
+            "or set use_lakedepth = 0 to run on the uniform lakedepth_default") from None
+    return True
+
+
 def geography_refusal(geog_root: Path, *, config=None) -> str | None:
     """Why the prepare stage cannot build static fields, or ``None``.
 
@@ -4645,7 +4719,8 @@ def geography_refusal(geog_root: Path, *, config=None) -> str | None:
                    for name in required
                    for child in (archive_for(name).index_subdirs or ("",))]
         missing = [index for index in indexes
-                   if not (Path(geog_root) / index).is_file()]
+                   if not (Path(geog_root) / index).is_file()
+                   and not (_GO_STAGES_LAKE_DEPTH.get() and index.startswith("lake_depth/"))]
         if not missing:
             return None
         return layered(
@@ -5206,9 +5281,12 @@ def _registered_launch(args, *, config: Path, payload: dict,
             # fetch; a dry run that validates the route refuses it too.
             # It exited 0 on a --geog-root naming no directory, and the
             # real launch of the same command then refused.
-            geography = geography_refusal(geog_root, config=config)
+            geography = go_stages_lake_depth_refusal(geog_root, config=config)
             if geography is not None:
                 raise GoRefusal(geography)
+            if _lake_depth_missing(geog_root, config):
+                print(f"go: the run would fetch WPS lake_depth into {geog_root} first "
+                      "(the lake model's bathymetry)")
             note = static_source_note(payload, geog_root,
                                       base_dir=config.parent)
             if note is not None:
@@ -5261,6 +5339,7 @@ def _registered_launch(args, *, config: Path, payload: dict,
                  else Path(args.geog_root) if args.geog_root is not None
                  else config_geog_root(config))
     if bundle is None:
+        stage_lake_depth(geog_root, config)
         geography = geography_refusal(geog_root, config=config)
         if geography is not None:
             raise GoRefusal(geography)
@@ -6910,6 +6989,7 @@ def _prepare_only_launch(args, *, config, payload, observer=None):
     from woof.geog_assets import config_geog_root
     geog_root = (Path(args.geog_root) if args.geog_root is not None
                  else config_geog_root(config))
+    stage_lake_depth(geog_root, config)
     geography = geography_refusal(geog_root, config=config)
     if geography is not None:
         raise GoRefusal(geography)
@@ -7388,6 +7468,7 @@ def _go_prepared_main(args, *, observer=None) -> int:
         if not _prepare_only_needs_no_card(args):
             _require_forecast_device()
         # Same rule as the memory gate, same side of the download.
+        stage_lake_depth(geog_root, args.config)
         geography = geography_refusal(geog_root, config=args.config)
         if geography is not None:
             raise GoRefusal(geography)

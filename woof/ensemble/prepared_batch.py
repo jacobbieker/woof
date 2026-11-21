@@ -628,7 +628,9 @@ def native_memory_model_from_node(inputs, node, *, runtime_reservation, allocato
                         evidence="separate retained radiation coupling owner"),
         MemoryComponent("native_driver_extra", "physics", plan=default_column_extra_plan(**sizes),
                         evidence="default native column binding construction"),
-        MemoryComponent("native_ysu", "physics", plan_for_members=lambda members: ysu_output_plan(**sizes, members=members),
+        MemoryComponent("native_ysu", "physics", plan_for_members=lambda members: ysu_output_plan(
+                            **sizes, members=members,
+                            surface_heat_exner=getattr(cfg, "ysu_surface_heat_exner", False) is True),
                         evidence="YSU retained output and native full launch workspace"),
         MemoryComponent("native_radiation_coszen", "radiation", plan=BatchMemoryPlan((
             BatchArraySpec("radiation:coszen", (cfg.ny, cfg.nx), "member"),), reserved_bytes=0),

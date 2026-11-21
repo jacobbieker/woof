@@ -425,3 +425,97 @@ def test_the_service_receipt_is_published():
     import inspect
     from woof.hex.mpasphys import runtime_v842
     assert "receipt['clm_lake_service'] = lake_receipt" in inspect.getsource(runtime_v842._run_native_dynamics)
+
+
+def test_the_resident_lake_is_the_regathering_lake_word_for_word():
+    """The service keeps the lake's work copy resident between calls; re-gathering it from the horizontal
+    array every call (WRF's door, the earlier R2 service) gives the same words, and an external write to
+    the array followed by invalidate_columns() is picked up by the resident copy."""
+    import cupy as cp
+    from woof.hex.mpasphys.clm_lake_v842 import lake_init_step
+    call = SimpleNamespace(dt=60.0, options={"config_microp_scheme": "mp_thompson",
+                                             "config_convection_scheme": "cu_ntiedtke"})
+    runs = []
+    for resident in (True, False):
+        provider = _Provider(cp, np.random.default_rng(5))
+        columns = lake_init_step(provider, call)
+        assert columns.model.resident is True
+        columns.model.resident = resident
+        runs.append((provider, columns))
+    for index in range(5):
+        for provider, columns in runs:
+            provider.refresh()
+            columns.step(provider, call)
+        if index == 2:
+            for provider, columns in runs:
+                pool = columns.fields["lake_columns"]
+                pool[3, :NC] = pool[3, :NC] + cp.float32(0.25)
+                columns.model.invalidate_columns()
+        (a, ca), (b, cb) = runs
+        np.testing.assert_array_equal(_words(_host(cp, ca.fields["lake_columns"])),
+                                      _words(_host(cp, cb.fields["lake_columns"])), err_msg=f"call {index}")
+        for pool, name in OUTPUT_FIELDS:
+            np.testing.assert_array_equal(_words(_host(cp, getattr(a, {"diag_physics": "diag", "sfc_input": "sfc"}[pool])[name])),
+                                          _words(_host(cp, getattr(b, {"diag_physics": "diag", "sfc_input": "sfc"}[pool])[name])),
+                                          err_msg=f"call {index}: {name}")
+
+
+def _two_lakes(resident_flags):
+    import cupy as cp
+    from woof.hex.mpasphys.clm_lake_v842 import lake_init_step
+    call = SimpleNamespace(dt=60.0, options={"config_microp_scheme": "mp_thompson",
+                                             "config_convection_scheme": "cu_ntiedtke"})
+    runs = []
+    for resident in resident_flags:
+        provider = _Provider(cp, np.random.default_rng(5))
+        columns = lake_init_step(provider, call)
+        columns.model.resident = resident
+        runs.append((provider, columns))
+    return call, runs
+
+
+def test_the_resident_lake_does_not_regather_but_is_told_when_it_must():
+    import cupy as cp
+    call, runs = _two_lakes((True, False))
+    for provider, columns in runs:
+        provider.refresh()
+        columns.step(provider, call)
+    # An external write the lake was NOT told about: the regathering lake sees it, the resident one does not.
+    for provider, columns in runs:
+        pool = columns.fields["lake_columns"]
+        host = _host(cp, pool)
+        row = int(np.flatnonzero(((host[:, :NC] > 270.0) & (host[:, :NC] < 300.0)).any(axis=1))[0])  # a temperature word
+        pool[row, :NC] = pool[row, :NC] + cp.float32(1.0)
+        provider.refresh()
+        columns.step(provider, call)
+    (_, resident), (_, regathering) = runs
+    assert (_words(_host(cp, resident.fields["lake_columns"]))
+            != _words(_host(cp, regathering.fields["lake_columns"]))).any()
+
+
+def test_a_refused_lake_step_commits_nothing_and_the_next_step_restarts_from_the_committed_state():
+    import cupy as cp
+    call, runs = _two_lakes((True, True))
+    (pa, a), (pb, b) = runs
+    for provider, columns in runs:
+        provider.refresh()
+        columns.step(provider, call)
+    committed = _words(_host(cp, a.fields["lake_columns"])).copy()
+    real = a.model.check_errors
+
+    def refuse():
+        raise RuntimeError("WRF CLM lake rejected a column")
+    a.model.check_errors = refuse
+    pa.refresh()
+    with pytest.raises(RuntimeError, match="rejected a column"):
+        a.step(pa, call)
+    np.testing.assert_array_equal(_words(_host(cp, a.fields["lake_columns"])), committed)
+    # The twin never saw the refused step; both now take the same next step, so the refused one left nothing behind.
+    a.model.check_errors = real
+    pb.refresh()
+    pb.refresh()   # the refused call drew one refresh on the first provider as well
+    pa.refresh()
+    a.step(pa, call)
+    b.step(pb, call)
+    np.testing.assert_array_equal(_words(_host(cp, a.fields["lake_columns"])),
+                                  _words(_host(cp, b.fields["lake_columns"])))

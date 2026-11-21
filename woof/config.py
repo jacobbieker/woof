@@ -2361,7 +2361,9 @@ class RunConfig:
     # number in [0, 9], held for the run.  spacewx_aurora_opt = 2 adds
     # OVATION Prime 2010's electron energy flux, mean energy and ion energy
     # flux (woof.spacewx.ovation), driven by the solar wind ("omni" or
-    # "swpc").  0 runs no new code.
+    # "swpc").  spacewx_aurora_opt = 3 also adds Knipp et al. 2004's
+    # northern-hemisphere Joule power from OMNI2's PC(N) and Dst ("omni"
+    # only), held from the start.  0 runs no new code.
     spacewx_aurora_opt: int = _config_field(default=0, kw_only=True)
     spacewx_kp_source: str = _config_field(default="", kw_only=True)
     # solar_ssi_opt = 1 moves the solar source between RRTMG SW's 14 bands
@@ -2391,6 +2393,15 @@ class RunConfig:
     # for the single-layer UCM's NUDAPT arm, HI (118-132) for BEP and
     # BEP+BEM.  Empty runs the URBPARM table morphology, as before.
     urban_param_file: str = _config_field(default="", kw_only=True)
+    # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
+    # appended off.  YSU (bl_pbl_physics = 1) adds the surface heat flux to
+    # potential temperature as a temperature flux (bl_ysu.F90:613, :687,
+    # :891, :1045) and converts the result back with pi (:1103), so the
+    # column receives HFX*pi rather than HFX: 4.5% of the surface heating is
+    # lost at 850 hPa, 14% at 600 hPa.  True divides HFX by the lowest
+    # level's pi before the unchanged kernel reads it; False is WRF's
+    # arithmetic word for word.  Read only where bl_pbl_physics = 1.
+    ysu_surface_heat_exner: bool = _config_field(default=False, kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -2507,11 +2518,11 @@ def _validate_spacewx_ionosphere(cfg) -> None:
 def _validate_spacewx_aurora(cfg) -> None:
     """spacewx_aurora_opt and its key (woof.spacewx.aurora_history)."""
     opt, source = cfg.spacewx_aurora_opt, cfg.spacewx_kp_source
-    if type(opt) is not int or opt not in (0, 1, 2):
+    if type(opt) is not int or opt not in (0, 1, 2, 3):
         raise ConfigurationRefused(
             f"spacewx_aurora_opt={opt!r} must be 0 (no aurora), 1 (the auroral "
-            "oval in every history frame) or 2 (the oval and its particle "
-            "energy flux)")
+            "oval in every history frame), 2 (the oval and its particle "
+            "energy flux) or 3 (those and the Joule power)")
     if type(source) is not str:
         raise ConfigurationRefused("spacewx_kp_source must be a string")
     if opt == 0:
@@ -2525,6 +2536,10 @@ def _validate_spacewx_aurora(cfg) -> None:
         kind, _value = parse_kp_source(source)
     except AuroraHistoryError as exc:
         raise ConfigurationRefused(str(exc)) from None
+    if opt == 3 and kind != "omni":
+        raise ConfigurationRefused(
+            f"spacewx_aurora_opt = 3 reads PC(N) and Dst, which only OMNI2 carries, so "
+            f"spacewx_kp_source must be 'omni', not {source!r}")
     if opt == 2 and kind not in ("omni", "swpc"):
         raise ConfigurationRefused(
             f"spacewx_aurora_opt = 2 drives OVATION Prime with the solar wind, so "
@@ -2538,7 +2553,23 @@ def _validate_spacewx_aurora(cfg) -> None:
 
 def _validate_spacewx_epp(cfg) -> None:
     """spacewx_epp_opt and its key (woof.spacewx.epp_chem)."""
-    opt, source = cfg.spacewx_epp_opt, cfg.spacewx_epp_source
+    from woof.chem_table import load as load_chem_table
+    table = (lambda: load_chem_table(cfg)) if getattr(cfg, "chem_sets", "") else None
+    if not validate_spacewx_epp_keys(cfg.spacewx_epp_opt, cfg.spacewx_epp_source, table):
+        return
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            "spacewx_epp_opt = 1 places the source in the polar caps from the "
+            "radiation geometry's xlat/xlong, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def validate_spacewx_epp_keys(opt, source, table) -> bool:
+    """spacewx_epp_opt and spacewx_epp_source against a run's chem table (a
+    callable that loads it, ``None`` for no chemistry); True when the source
+    is on.  Shared by the
+    WRF route and hex's wrf_chem block, whose cells carry their own
+    xlat/xlong whatever the radiation."""
     if type(opt) is not int or opt not in (0, 1):
         raise ConfigurationRefused(
             f"spacewx_epp_opt={opt!r} must be 0 (no particle source) or 1 (the "
@@ -2550,26 +2581,20 @@ def _validate_spacewx_epp(cfg) -> None:
             raise ConfigurationRefused(
                 "spacewx_epp_source is set but spacewx_epp_opt = 0, so it would "
                 "do nothing; set spacewx_epp_opt = 1 or drop it")
-        return
+        return False
     from woof.spacewx.epp_chem import EppChemError, YIELDS, parse_source
     try:
         parse_source(source)
     except EppChemError as exc:
         raise ConfigurationRefused(str(exc)) from None
-    from woof.chem_table import load as load_chem_table
-    table = load_chem_table(cfg) if getattr(cfg, "chem_sets", "") else None
-    names = {row.name for row in table.rows_for("emission.radm2")} if table is not None else set()
+    names = {row.name for row in table().rows_for("emission.radm2")} if table is not None else set()
     missing = [name for name, _y in YIELDS if name not in names]
     if missing:
         raise ConfigurationRefused(
             "spacewx_epp_opt = 1 adds NO, OH and HO2 to the RADM2 chemistry "
             "(chem_sets radm2 or radm2sorg), and this run's emission.radm2 "
             f"rows lack {', '.join(missing)}")
-    if not radiation_enabled(cfg):
-        raise ConfigurationRefused(
-            "spacewx_epp_opt = 1 places the source in the polar caps from the "
-            "radiation geometry's xlat/xlong, and no radiation scheme is on "
-            "(ra_lw_physics = ra_sw_physics = 0)")
+    return True
 
 
 @dataclass(frozen=True)
@@ -9464,6 +9489,20 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     if type(cfg.gf_deep_rain_evaporation_booking) is not bool:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking must be true or false")
+    if type(cfg.ysu_surface_heat_exner) is not bool:
+        raise ConfigurationRefused("ysu_surface_heat_exner must be true or false")
+    if cfg.ysu_surface_heat_exner and int(cfg.bl_pbl_physics) != 1:
+        raise ConfigurationRefused(
+            "ysu_surface_heat_exner corrects YSU's surface heat flux "
+            f"(bl_pbl_physics = 1); this run selects bl_pbl_physics = "
+            f"{cfg.bl_pbl_physics}, which never reads it")
+    if cfg.ysu_surface_heat_exner and int(cfg.sf_urban_physics) in (2, 3):
+        raise ConfigurationRefused(
+            "ysu_surface_heat_exner corrects the surface heat flux YSU's heat "
+            "solve adds; with BEP/BEM (sf_urban_physics = "
+            f"{cfg.sf_urban_physics}) WRF's YSU takes that heat from the "
+            "urban sources instead (bepswitch = 1), so the correction would "
+            "reach only the PBL diagnosis; drop it or the urban model")
     _validate_solar_tsi(cfg)
     _validate_solar_ssi(cfg)
     _validate_spacewx_ionosphere(cfg)

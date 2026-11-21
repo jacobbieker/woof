@@ -8,7 +8,8 @@
 # ocn_vert_transport_velocity_top; run_btr_subcycle: the split-explicit
 # barotropic stage; run_split_step: the whole split-explicit step;
 # run_forward: the forward mode over N steps; run_frazil: frazil formation;
-# run_land_ice: the land-ice fluxes and effective density) at the strict
+# run_land_ice: the land-ice fluxes and effective density; run_gm: the GM
+# bolus velocity) at the strict
 # recipe, in both precisions.
 #
 #   bash tools/mpas_ocean_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
@@ -164,8 +165,18 @@ for precision in r4 r8; do
         echo "end module ocn_timestep_cut"; } > ocn_timestep_cut.F
       "${fc[@]}" "${flags[@]}" -I.. ocn_timestep_cut.F
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_forward.F90" )
+    # GM, verbatim, in a directory of its own (stubs_split.F90's stand-in is
+    # eos/'s ocn_gm); it assigns huge(0D0) to RKIND arrays, which gfortran
+    # converts at RKIND 4 (to +Inf) only with -fno-range-check
+    mkdir -p gm
+    ( cd gm
+      gm_flags=("${flags[@]}")
+      [[ ${precision} == r4 ]] && gm_flags+=(-fno-range-check)
+      "${fc[@]}" "${gm_flags[@]}" -I.. "${ocean}/mpas_ocn_gm.F"
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/oracle_stream.F90"
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_gm.F90" )
     if command -v objdump >/dev/null; then
-        if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o eos/ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
+        if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o eos/ocn_*.o gm/mpas_ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
             exit 4
         fi
@@ -235,11 +246,13 @@ for precision in r4 r8; do
         mpas_ocn_vel_*.o mpas_ocn_thick_hadv.o mpas_ocn_thick_vadv.o mpas_ocn_thick_surface_flux.o mpas_ocn_forcing.o \
         mpas_ocn_constants.o mpas_constants.o stubs_unported.o stubs.o mpas_kind_types.o \
         ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_gm_${precision}" gm/run_gm.o gm/oracle_stream.o gm/mpas_ocn_gm.o \
+        mpas_ocn_constants.o mpas_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
-    echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none; r4 adds -DSINGLE_PRECISION"
+    echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none; r4 adds -DSINGLE_PRECISION (and -fno-range-check for mpas_ocn_gm.F)"
     echo "host: $(uname -srm)"
     cat "${build_dir}/r4/libm.txt"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle,split_step,forward,frazil,land_ice}_{r4,r8}"
+echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle,split_step,forward,frazil,land_ice,gm}_{r4,r8}"
