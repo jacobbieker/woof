@@ -300,8 +300,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     their smoothing and tapering, `k33`, the stream function's solve) and
     Redi isoneutral mixing (`ocn_tracer_hmix_redi_tend`'s three horizontal
     terms, and `k33` in the vertical diffusivity, which v8.4.2 adds without
-    `config_Redi_kappa`; `woof_redi_k33 = 'kappa'` scales it), standalone
-    and not yet wired into the step. Three v8.4.2 quirks keep
+    `config_Redi_kappa`; `woof_redi_k33 = 'kappa'` scales it), standalone,
+    in the split-explicit step (GM before the implicit mixing and after the
+    last diagnostics, the bolus velocity in the transport, Redi in the
+    tracer tendency, `ocn_reconstruct_gm_vectors`) and over forward steps
+    (the cold start's bolus transport); off by default. Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
