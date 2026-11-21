@@ -218,6 +218,8 @@ def _suite_route(tmp_path, monkeypatch, epp, area):
     ref.set_geography(LAT, LON)
     ref.state.chem.emission_frames = _NoFrames()
     ref_scalars = cp.zeros((len(ref.rows), NZ, NCOL), dtype=cp.float32)
+    # the RADM2 cold start the suite's attach ran (chem_wrf.attach), on the same start columns
+    ref.cold_start(ref_scalars, chem_wrf.columns_from_prep(sv842._prepared(holder.columns)))
     albedo = cp.asarray(np.linspace(0.08, 0.3, NCOL), dtype=cp.float32)
     rng = np.random.default_rng(13)
     out = []
