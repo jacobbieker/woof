@@ -137,6 +137,7 @@ def test_hybrid_step_end_to_end_with_the_letkf(monkeypatch):
     ref = hy.Ensemble.from_members(var)
     for a, c in zip(seen["ensemble"].arrays(), ref.arrays()):
         np.testing.assert_array_equal(a, c)
+    assert set(step.members) == set(like)
     out = pr.to_var_layout(step.members, LK)
     target = pr.variational_state(step.var)
     inc = {k: np.asarray(like[LK[k]] + step.increments.get(LK[k], 0.0)) for k in hy.FIELDS}
@@ -155,9 +156,21 @@ def test_hybrid_step_end_to_end_with_the_letkf(monkeypatch):
 def test_the_letkf_must_analyse_every_pairing_field(monkeypatch):
     var, like = _prior()
     _, _, _, cfg, _ = _setup(2.0, 2, scale=3.0)
-    monkeypatch.setattr("woof.da.var.analysis.analyse", lambda *a, **k: SimpleNamespace(xb={}, xa={}))
+    def boom(*a, **k):
+        raise AssertionError("the variational solve must not start before the LETKF config is checked")
+
+    monkeypatch.setattr("woof.da.var.analysis.analyse", boom)
     lcfg = lk.LetkfConfig(localization=lk.Localization(horizontal_m=9000.0, vertical_m=4000.0),
                           analysis_fields=("T", "U", "V"), rtps_alpha=0.0)
     with pytest.raises(ValueError, match="analysis_fields lack"):
         pr.hybrid_step("be", "obs", "fg", like, ([], None, lcfg), hybrid=cfg, names=LK)
 
+
+
+def test_recentre_keeps_the_members_dtype():
+    var, like = _prior()
+    like32 = {k: v.astype(np.float32) for k, v in like.items()}
+    target = {k: pr._mean(var[k]) + 0.1 for k in hy.FIELDS}
+    out = pr.recentre(like32, target, names=LK)
+    assert all(a.dtype == np.float32 for a in out.values())
+    assert set(out) == set(LK.values())

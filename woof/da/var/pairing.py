@@ -21,7 +21,8 @@ reads WRF history files) and writes the recentred fields back; hydrostatic and
 dry-column-mass consistency of a recentred member is that controller's
 (:func:`~woof.da.var.analysis.xatowrf` does it for the variational mean).
 Members with no ensemble-mean first guess are fine, but then the first guess's
-own departure from the ensemble mean is part of the recentring shift.
+own departure from the ensemble mean is part of the recentring shift.  If the
+LETKF is given ``ps`` too, its mean update is replaced by the variational one.
 
 Nothing here changes a default: 3-D Var, the hybrid and the LETKF are untouched.
 """
@@ -42,6 +43,11 @@ FIELDS = hy.FIELDS
 _XA = {"u": "u", "v": "v", "t": "t", "q": "q", "ps": "psfc"}
 
 
+def _host(a):
+    """A NumPy view of a NumPy or CuPy array."""
+    return a.get() if hasattr(a, "get") else np.asarray(a)
+
+
 def _names(names) -> dict:
     out = {k: k for k in FIELDS}
     if names is not None:
@@ -57,7 +63,7 @@ def to_var_layout(prior, names=None) -> dict:
     nm = _names(names)
     out = {}
     for k in FIELDS:
-        a = np.asarray(prior[nm[k]], dtype=np.float64)
+        a = np.asarray(_host(prior[nm[k]]), dtype=np.float64)
         if k == "ps":
             if a.ndim == 4:
                 if a.shape[1] != 1:
@@ -77,7 +83,7 @@ def to_var_layout(prior, names=None) -> dict:
 
 
 def from_var_layout(members: dict, names=None, *, like=None) -> dict:
-    """The inverse of :func:`to_var_layout`; ``like`` (the LETKF's prior) decides ``ps``'s rank."""
+    """The inverse of :func:`to_var_layout`; ``like`` (the LETKF's prior) decides ``ps``'s rank and every field's dtype."""
     nm = _names(names)
     out = {}
     for k in FIELDS:
@@ -88,6 +94,8 @@ def from_var_layout(members: dict, names=None, *, like=None) -> dict:
                 a = a[:, None]
         else:
             a = np.transpose(a, (0, 3, 2, 1))
+        if like is not None:
+            a = a.astype(np.asarray(_host(like[nm[k]])[:0]).dtype, copy=False)
         out[nm[k]] = np.ascontiguousarray(a)
     return out
 
@@ -117,7 +125,8 @@ def recentre(members: dict, target: dict, *, names=None, gamma: float = 1.0) -> 
     ``members`` are the LETKF's analysis stacks (``(R, nz, ny, nx)``) and
     ``target`` the variational analysis in the var layout
     (:func:`variational_state`).  Returns the five fields in the LETKF layout;
-    the perturbations about the mean are the LETKF's, unchanged.
+    the perturbations about the mean are the LETKF's, unchanged, in the members'
+    dtype.  Fields of ``members`` that are not among the five are not returned.
     """
     if not (0.0 <= float(gamma) <= 1.0):
         raise ValueError(f"gamma is the share of the shift to the variational mean, in [0, 1], got {gamma}")
@@ -162,9 +171,15 @@ def hybrid_step(be, obs, first_guess, prior, letkf, *, hybrid, names=None, gamma
     :func:`woof.da.letkf.analyze` (its ``analysis_fields`` must include ``u``,
     ``v``, ``t`` and ``q``; the LETKF takes only ``(R, nz, ny, nx)`` fields, so
     ``ps`` is not analysed by it and its members keep the prior's perturbations,
-    recentred on the variational ``ps``), ``hybrid`` a :class:`~woof.da.var.hybrid.HybridConfig`.
-    ``be``, ``obs`` and ``first_guess`` and the remaining keywords are
-    :func:`woof.da.var.analysis.analyse`'s.  With ``analysis_members`` the LETKF
+    recentred on the variational ``ps``), ``hybrid`` a
+    :class:`~woof.da.var.hybrid.HybridConfig`.
+    Recentring can leave negative ``q`` (counted in ``stats["negative_q"]``,
+    not clipped: clipping would move the mean off the analysis).  The first
+    guess goes through ``wrftoxb`` (hypsometric ``p``, clipped ``q``), the
+    members through :func:`~woof.da.var.hybrid.member_fields`; their small
+    definitional difference is part of the recentring shift.  Other analysed
+    fields come back unchanged.  ``be``, ``obs`` and ``first_guess`` and the
+    remaining keywords are :func:`woof.da.var.analysis.analyse`'s.  With ``analysis_members`` the LETKF
     is not run (its result, prior plus increments, is given).
     """
     from woof.da import letkf as lk
@@ -173,23 +188,24 @@ def hybrid_step(be, obs, first_guess, prior, letkf, *, hybrid, names=None, gamma
     if analyse_kw.get("ensemble") is not None:
         raise ValueError("hybrid_step builds the ensemble from the LETKF prior; do not pass ensemble=")
     nm = _names(names)
-    ens = ensemble_from_letkf(prior, names)
-    res = analyse(be, obs, first_guess, ensemble=ens, hybrid=hybrid, **analyse_kw)
     if analysis_members is None:
         gobs, grid, cfg = letkf
         missing = [nm[k] for k in FIELDS if k != "ps" and nm[k] not in cfg.analysis_fields]
-        if missing:
+        if missing:   # before the variational solve
             raise ValueError(f"the LETKF's analysis_fields lack {missing}; the pairing needs u, v, t and q")
+    prior_v = to_var_layout(prior, names)
+    res = analyse(be, obs, first_guess, ensemble=hy.Ensemble.from_members(prior_v), hybrid=hybrid, **analyse_kw)
+    if analysis_members is None:
         inc = lk.analyze(prior, gobs, grid, cfg)
-        analysis_members = {nm[k]: np.asarray(prior[nm[k]]) for k in FIELDS}
-        analysis_members.update({f: np.asarray(prior[f]) + np.asarray(inc[f]) for f in cfg.analysis_fields})
+        analysis_members = {nm[k]: _host(prior[nm[k]]) for k in FIELDS}
+        analysis_members.update({f: _host(prior[f]) + _host(inc[f]) for f in cfg.analysis_fields})
     else:
-        inc = {f: np.asarray(analysis_members[f]) - np.asarray(prior[f]) for f in analysis_members if f in prior}
-    target = variational_state(res)
-    mem = recentre(analysis_members, target, names=names, gamma=gamma)
-    before, after, prior_v = to_var_layout(analysis_members, names), to_var_layout(mem, names), to_var_layout(prior, names)
+        inc = {f: _host(analysis_members[f]) - _host(prior[f]) for f in analysis_members if f in prior}
+    mem = recentre(analysis_members, variational_state(res), names=names, gamma=gamma)
+    before, after = to_var_layout(analysis_members, names), to_var_layout(mem, names)
     stats = {"spread_prior": {k: _spread(prior_v[k]) for k in FIELDS},
              "spread_post": {k: _spread(after[k]) for k in FIELDS},
              "shift": {k: float(np.sqrt(np.mean((_mean(after[k]) - _mean(before[k])) ** 2))) for k in FIELDS},
              "negative_q": int((after["q"] < 0.0).sum())}
+    mem = {**{f: a for f, a in analysis_members.items() if f not in mem}, **mem}
     return HybridStep(var=res, increments=inc, members=mem, stats=stats)
