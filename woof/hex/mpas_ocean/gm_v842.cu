@@ -13,8 +13,11 @@
 // One source for both precisions (RKIND 4 unless MPAS_RKIND8 is defined).
 // Every operation is an explicit round-to-nearest intrinsic in the Fortran's
 // evaluation order (gfortran -O0 -ffp-contract=off); MIN and MAX keep their
-// first argument unless the second is strictly smaller (larger), as gfortran's
-// do. A thread owns one edge or cell column, and each kernel is one of the
+// first argument unless the second is strictly smaller (larger), which is
+// gfortran's result for ordered, nonzero-distinct operands (as the sibling
+// ports' helpers). A NaN operand (gfortran returns the other one) and the
+// sign of a zero tie are not reproduced; no finite input reaches either
+// (the one zero tie, max(bv, 0), only feeds a subtraction). A thread owns one edge or cell column, and each kernel is one of the
 // routine's loops (or loops over the same extent that read nothing another
 // column of the same loop writes), launched in the routine's order.
 //
