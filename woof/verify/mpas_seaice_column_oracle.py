@@ -112,6 +112,8 @@ BGC_ZSAL_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal"
 BGC_ZSAL_SOLVE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_solve"
 #: the inert vertical salinity through the ITD, the ridging and the steps (BGC_ZSAL_CARRY_CASES)
 BGC_ZSAL_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_carry"
+#: the same under zsal_solve (BGC_ZSAL_SOLVE_CARRY_CASES), from the patched oracle
+BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_solve_carry"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -514,8 +516,6 @@ BGC_ZSAL_SOLVE_CASES = (
     ("vt_zsal_solve_bl99_melting", 20262552, "vertical_thermodynamics", {
         **_VT, **_ZSAL_SOLVE, "config_start_time": "2000-07-10_00:00:00"}),
 )
-#: the stages that carry the solved vertical salinity (column_v842.refuse_unported's zsalinity)
-ZSAL_STAGES = ("init", _BGC_STAGE, "vertical_thermodynamics")
 _ZSAL_STEP = {**_BGC_ZSAL, "woof_v842_corrections": _BGC_INACTIVE}
 #: v8.4.2's inert vertical salinity carried through the ITD thermodynamics, the ridging
 #: and the steps (its tracers counted, never solved or copied; the remap advects the
@@ -539,6 +539,32 @@ BGC_ZSAL_CARRY_CASES = (
 BGC_ZSAL_CARRY_COUPLED_CASES = (
     ("seaice_bgc_zsal_bl99_dedd_rothrock", 20262631, _SEAICE_STEP, {
         **_COUPLED_BASE, **_ZSAL_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
+     (12, 6, 3)),
+)
+_ZSAL_SOLVE_STEP = {**_BGC_ZSAL, "woof_v842_corrections": (_BGC_INACTIVE, ZSAL_SOLVE)}
+#: the solved vertical salinity (zsal_solve) through the ITD thermodynamics, the ridging
+#: and the steps, against the patched oracle: name, seed, stage, overrides
+BGC_ZSAL_SOLVE_CARRY_CASES = (
+    ("itd_zsal_solve_bl99_update_ocean", 20262701, _ITD, {**_ZSAL_SOLVE, "config_update_ocean_fluxes": True}),
+    ("itd_zsal_solve_bl99_delta_function_four_layers", 20262702, _ITD, {
+        **_ZSAL_SOLVE, **_DELTA_NEW, "config_nIceLayers": 4, "config_nCategories": 4,
+        "config_use_level_meltponds": False, "config_use_level_ice": False}),
+    ("itd_zsal_solve_bl99_single_category", 20262703, _ITD, {
+        **_ZSAL_SOLVE, "config_nCategories": 1, "config_category_bounds_type": "single category",
+        "config_itd_conversion_type": "delta function"}),
+    ("itd_zsal_solve_abort_regrid", 20262704, _ITD, _ZSAL_SOLVE),
+    ("ridge_zsal_solve_bl99", 20262711, _RDG, _ZSAL_SOLVE),
+    ("ridge_zsal_solve_bl99_thorndike_hibler_subcycles", 20262712, _RDG, {
+        **_ZSAL_SOLVE, **_THORNDIKE, **_HIBLER, "config_dynamics_subcycle_number": 2}),
+    ("step_zsal_solve_bl99_dedd", 20262721, _STEP, {**_STEP_BASE, **_ZSAL_SOLVE_STEP, "oracle_n_steps": 3,
+                                                   "config_start_time": "2001-06-01_10:00:00"}),
+    ("step_zsal_solve_bl99_dedd_three_categories_gregorian", 20262722, _STEP, {
+        **_STEP_BASE, **_ZSAL_SOLVE_STEP, "oracle_n_steps": 3, "config_nIceLayers": 4, "config_nCategories": 3,
+        "config_calendar_type": "gregorian", "config_start_time": "2000-07-10_06:00:00"}),
+)
+BGC_ZSAL_SOLVE_CARRY_COUPLED_CASES = (
+    ("seaice_zsal_solve_bl99_dedd_rothrock", 20262731, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_ZSAL_SOLVE_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
      (12, 6, 3)),
 )
 
@@ -1347,6 +1373,26 @@ def _zsal_state(rs, case: dict) -> None:
         t["surfaceTemperature"][0, 0, 0] = -25.0
 
 
+def _zsal_solve_carry_state(rs, case: dict) -> None:
+    """Under ``zsal_solve``, what the ITD thermodynamics, the ridging and the
+    steps read of the vertical salinity: its profile (positive), the salt
+    flux and, for the ITD and the ridging, ``colpkg_init_hbrine``'s grids.
+    ``abort_regrid`` in the name: a slightly negative brine fraction in cell
+    2's first category, under :func:`_itd_state`'s spread frazil, so
+    ``regrid_stationary``'s remap stops on a negative old brine height."""
+    pools, dims, name = case["pools"], case["dims"], case["name"]
+    n1, ncat, nil, nbl = dims["nCells"] + 1, dims["nCategories"], dims["nIceLayers"], dims["nBioLayers"]
+    u = _uniform(rs)
+    t, bgc = pools["tracers"], pools["biogeochemistry"]
+    t["verticalSalinity"] = u(2.0, 12.0, (n1, ncat, nbl))
+    bgc["zSalinityFlux"] = u(-1.0e-5, 1.0e-5, (n1,))
+    if case["stage"] in (_ITD, _RDG):
+        for key, value in cv.hbrine_grids(nbl, nil).items():
+            bgc[key] = value
+    if "abort_regrid" in name:
+        t["brineFraction"][2, 0, 0] = -1.0e-3
+
+
 def _coupled_dynamics(name: str, seed: int, torus: tuple, config: dict) -> tuple[dict, dict]:
     """The time-step oracle's dynamics state (:mod:`woof.verify.mpas_seaice_step_oracle`)
     on a culled hexagonal torus of ``torus = (nq, nr, owned columns)``: the
@@ -1487,6 +1533,8 @@ def make_case(name, seed, stage, overrides, torus=None) -> dict:
         _bgc_state(rs, case)
         if config["config_use_vertical_zsalinity"]:
             _zsal_state(rs, case)
+    if stage in (_ITD, _RDG, _STEP, _SEAICE_STEP) and cv.solves_zsal(config):
+        _zsal_solve_carry_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
     case["fields"] = [r[:4] for r in rows]
@@ -1500,6 +1548,10 @@ def cases(precision: str = "r8", rows=CASES) -> list[dict]:
 
 
 def input_bytes(case: dict) -> bytes:
+    names = case["config"].get("woof_v842_corrections")
+    if names is not None and not isinstance(names, str):
+        # several corrections (which the oracle does not read) go into the stream as one string
+        case = {**case, "config": {**case["config"], "woof_v842_corrections": " ".join(names)}}
     return _stream.input_bytes(case["fields"], case)
 
 
@@ -1635,8 +1687,7 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     config = case["config"]
     stage = case["stage"]
     # the stages that carry the brine height (each refuses the rest itself)
-    state = cv.init_parameters(dev, config, biogeochemistry=stage not in ("aggregate", "update_state", _OML),
-                               zsalinity=stage in ZSAL_STAGES)
+    state = cv.init_parameters(dev, config, biogeochemistry=stage not in ("aggregate", "update_state", _OML))
     if stage == "init":
         cv.initialize_coupler_fields(dev, config, state)
         cv.init_variables(dev, config, state)

@@ -197,7 +197,7 @@ _ITD_NAMES = tuple(row[0] for row in co.BGC_CARRY_CASES if row[2] == "itd_thermo
 @requires_gpu
 @pytest.mark.parametrize("original, mutated", [
     # add_new_ice_bgc not called
-    ("if (ix[TI_FBRI] >= 0) itd_add_new_ice_brine(", "if (false) itd_add_new_ice_brine("),
+    ("    if (ix[TI_FBRI] >= 0)\n        return itd_add_new_ice_bgc(", "    if (false)\n        return itd_add_new_ice_bgc("),
     # an empty category under a thickness surplus keeps its brine fraction
     ("            else trcrn[n * nt + fb] = 1.0;\n", "\n"),
     # the new ice's brine volume left out

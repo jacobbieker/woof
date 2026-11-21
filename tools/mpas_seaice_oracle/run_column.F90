@@ -62,7 +62,9 @@
 !                 colpkg_init_thermo, then seaice_init_column_shortwave(domain,
 !                 clock) (the orbit for the delta-Eddington shortwave,
 !                 column_radiation at initialisation and the albedos);
-!   column_step   colpkg_init_thermo, init_column_itd and, for the
+!   column_step   colpkg_init_thermo, init_column_itd, with the vertical
+!                 salinity colpkg_init_zsalinity's dts_b (as for
+!                 biogeochemistry) and, for the
 !                 delta-Eddington shortwave, colpkg_init_orbit (as seaice_init
 !                 runs them), then oracle_n_steps times the column package's
 !                 part of seaice_core_run (mpas_seaice_core.F,
@@ -252,6 +254,7 @@ program run_column
      allocate(sprofile(nIceLayers + 1))
      call colpkg_init_thermo(nIceLayers, sprofile)
      call init_column_itd(domain)
+     call init_zsalinity_step()
      call mpas_pool_get_config(pools % configs, 'config_shortwave_type', shortwaveType)
      call mpas_pool_get_config(pools % configs, 'config_use_column_shortwave', useShortwave)
      if (useShortwave .and. trim(shortwaveType) == 'dEdd') then
@@ -284,6 +287,7 @@ program run_column
      allocate(sprofile(nIceLayers + 1))
      call colpkg_init_thermo(nIceLayers, sprofile)
      call init_column_itd(domain)
+     call init_zsalinity_step()
      call mpas_pool_get_config(pools % configs, 'config_shortwave_type', shortwaveType)
      call mpas_pool_get_config(pools % configs, 'config_use_column_shortwave', useShortwave)
      if (useShortwave .and. trim(shortwaveType) == 'dEdd') then
@@ -325,6 +329,18 @@ program run_column
   close(logUnit)
 
 contains
+
+  ! with the vertical salinity, colpkg_init_zsalinity's dts_b as
+  ! seaice_init_column_physics_package_variables leaves it before any step
+  ! (restart_zsal, so no tracer or Rayleigh criterion is touched)
+  subroutine init_zsalinity_step()
+    call mpas_pool_get_config(pools % configs, 'config_use_vertical_zsalinity', useZSalinity)
+    if (.not. useZSalinity) return
+    call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nBioLayers', nBioLayers)
+    call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nCategories', nCategoriesZ)
+    call colpkg_init_zsalinity(nBioLayers, 0, .true., rayleighStandIn, rayleighRealStandIn, zsalStandIn, &
+         1, nCategoriesZ, 0.0_RKIND)
+  end subroutine init_zsalinity_step
 
   subroutine write_ints(name, values)
     character(len=*), intent(in) :: name

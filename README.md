@@ -404,11 +404,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     (the init, the brine height's step, the vertical and ITD
     thermodynamics, the ridging, the column step and the coupled step)
     keeps that word for word, and the correction `zsal_solve` solves it
-    (`compute_microS`, `solve_S_dt`, the salt fluxes, BL99's `dTemp`) in
-    the init, the brine height's step and the vertical thermodynamics,
-    word for word on CUDA and Metal with an oracle built from
-    `zsal_solve.patch`. The other biogeochemistry flags, and `zsal_solve`
-    in the other stages, are refused by name until their phases land;
+    (`compute_microS`, `solve_S_dt`, the salt fluxes, BL99's `dTemp`, and
+    in the ITD and the ridging the new ice's salt loss, `adjust_tracer_profile`,
+    `lateral_melt_bgc` and `zap_small_areas`' salt) in every one of those
+    stages, word for word on CUDA and Metal with an oracle built from
+    `zsal_solve.patch`. The other biogeochemistry flags are refused by
+    name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),

@@ -17,7 +17,7 @@
 //     841-943    calculate_drho
 //   src/core_seaice/column/ice_zbgc_shared.F90:
 //     110-133    exp_h, k_o, thinS, viscos_dynamic, Dm, Ra_c
-//     167-333    remap_zbgc (the CICE grid to the biology grid, nr0 = 0)
+// (remap_zbgc and calculate_Tin_from_qin are in column_zbgc_shared_v842.cu)
 //   src/core_seaice/column/ice_mushy_physics.F90:
 //     29-110     the Assur (1958) liquidus constants
 //     361-409    temperature_mush
@@ -29,7 +29,7 @@
 // not the version available from LANS and UCAR.
 //
 // Appended to column_v842.cu (its rounding macros, constants, layout and
-// liquid_fraction). x**2 and x**3 (bTin**2, bTin**3, iphin**exp_h,
+// liquid_fraction) and column_zbgc_shared_v842.cu. x**2 and x**3 (bTin**2, bTin**3, iphin**exp_h,
 // bphin**exp_h, hbr_old**2) are libgcc's __powidf2, the call gfortran -O0
 // makes: x*x and x*(x*x). exp is the shared glibc transcription (glibc_exp,
 // glibc_flt64.cuh); sqrt the correctly rounded instruction. MAX and MIN of
@@ -142,113 +142,6 @@ __device__ int preflushing_changes(double aicen, double vicen, double vsnon, dou
     }
     *hbr_old = M(*fbri, *hice_old);
     return stop;
-}
-
-// remap_zbgc (ice_zbgc_shared.F90:167-333). nr0 = 0: the donor's nlyrn layers
-// on ice_grid (hice) onto the receiver's nbyrn layers on bio_grid (hinS);
-// nr0 = 1: the donor's nbyrn layers on bio_grid (hinS) onto nlyrn layers on
-// ice_grid (hice), the ice above the brine at S_min. src[0..] are the donor
-// layers (trcrn(it+kd-1)); ice_grid[k] and bio_grid[k] are ice_grid(k) and
-// bio_grid(k) (cgrid(k+1), bgrid(k+1): the 0-based grids); out[kr] is
-// trtmp(it+kr-1), kr = 1..receivers, an untouched one keeping its word.
-// Returns BG_REMAP on a negative thickness (out untouched).
-__device__ int remap_zbgc(const double *src, int nr0, int nlyrn, int nbyrn, double hice, double hinS,
-                          const double *ice_grid, const double *bio_grid, double S_min, double *out)
-{
-    if (hinS < 0.0 || hice < 0.0) return BG_REMAP;
-    double dgrid[COL_NBLYR + COL_NILYR + 4], rgrid[COL_NBLYR + COL_NILYR + 4], tracer[COL_NBLYR + COL_NILYR + 4];
-    double trgrid[COL_NBLYR + COL_NILYR + 4], trdr[COL_NBLYR + COL_NILYR + 4];
-    for (int k = 0; k < COL_NBLYR + COL_NILYR + 4; ++k) { trgrid[k] = 0.0; trdr[k] = 0.0; }
-    int n_nd, n_nr, n_plus;
-    if (nr0 == 0) {                                   // cice to bio
-        n_nd = nlyrn;
-        n_nr = nbyrn;
-        n_plus = 2;
-        dgrid[1] = col_min(col_min(A(-hice, hinS), A(-hinS, hice)), 0.0);
-        dgrid[nlyrn + 2] = col_min(hinS, hice);
-        tracer[1] = src[0];
-        tracer[nlyrn + 2] = src[nlyrn - 1];
-        rgrid[nbyrn + 2] = col_min(hinS, hice);
-        if (hice > hinS) {
-            rgrid[1] = 0.0;
-            for (int kr = 1; kr <= n_nr; ++kr) rgrid[kr + 1] = M(bio_grid[kr], hinS);
-            for (int kd = 1; kd <= n_nd; ++kd) {
-                dgrid[kd + 1] = A(M(S(ice_grid[kd], 1.0), hice), hinS);
-                tracer[kd + 1] = src[kd - 1];
-            }
-        } else {
-            rgrid[1] = A(-hinS, hice);
-            for (int kr = 1; kr <= n_nr; ++kr) rgrid[kr + 1] = A(M(S(bio_grid[kr], 1.0), hinS), hice);
-            for (int kd = 1; kd <= n_nd; ++kd) {
-                dgrid[kd + 1] = M(ice_grid[kd], hice);
-                tracer[kd + 1] = src[kd - 1];
-            }
-        }
-    } else {                                          // bio to cice
-        n_nd = nbyrn;
-        n_nr = nlyrn;
-        if (hice > hinS) {                            // add S_min to the top layer
-            n_plus = 3;
-            tracer[1] = S_min;
-            tracer[2] = S_min;
-            rgrid[1] = A(-hice, hinS);
-            rgrid[nlyrn + n_plus - 1] = hinS;
-            for (int kr = 1; kr <= n_nr; ++kr) rgrid[kr + 1] = A(M(S(ice_grid[kr], 1.0), hice), hinS);
-            dgrid[1] = A(-hice, hinS);
-            dgrid[2] = M(S(hinS, hice), 0.5);
-            dgrid[nbyrn + n_plus] = hinS;
-            tracer[nbyrn + n_plus] = src[nbyrn - 1];
-            for (int kd = 1; kd <= n_nd; ++kd) {
-                dgrid[kd + 2] = M(bio_grid[kd], hinS);
-                tracer[kd + 2] = src[kd - 1];
-            }
-            const double half = M(0.5, S(dgrid[n_plus + 1], dgrid[n_plus]));
-            tracer[n_plus] = D(A(M(S_min, S(hice, hinS)), M(M(tracer[n_plus], 0.5), S(dgrid[n_plus + 1], dgrid[n_plus]))),
-                               A(S(hice, hinS), half));
-            tracer[1] = tracer[n_plus];
-            tracer[2] = tracer[n_plus];
-        } else {
-            n_plus = 2;
-            tracer[1] = src[0];
-            tracer[nbyrn + 2] = src[nbyrn - 1];
-            dgrid[1] = S(hice, hinS);
-            dgrid[nbyrn + 2] = hice;
-            rgrid[nlyrn + 2] = hice;
-            rgrid[1] = 0.0;
-            for (int kd = 1; kd <= n_nd; ++kd) {
-                dgrid[kd + 1] = A(M(S(bio_grid[kd], 1.0), hinS), hice);
-                tracer[kd + 1] = src[kd - 1];
-            }
-            for (int kr = 1; kr <= n_nr; ++kr) rgrid[kr + 1] = M(ice_grid[kr], hice);
-        }
-    }
-    int kdr = 0, kdi = 1;
-    for (int kr = 1; kr <= n_nr; ++kr) {
-        const int last = n_nd + n_plus;
-        for (int kd = kdi; kd <= last; ++kd) {
-            if (dgrid[kd] < rgrid[kr + 1]) {
-                kdr = kdr + 1;
-                trgrid[kdr] = dgrid[kd];
-                trdr[kdr] = tracer[kd];
-            } else if (dgrid[kd] > rgrid[kr + 1]) {
-                kdr = kdr + 1;
-                kdi = kd;
-                trgrid[kdr] = rgrid[kr + 1];
-                out[kr] = A(trdr[kdr - 1], D(M(S(rgrid[kr + 1], trgrid[kdr - 1]), S(tracer[kd], trdr[kdr - 1])),
-                                            S(dgrid[kd], trgrid[kdr - 1])));
-                trdr[kdr] = out[kr];
-                break;
-            } else {
-                kdr = kdr + 1;
-                kdi = kd + 1;
-                trgrid[kdr] = rgrid[kr + 1];
-                out[kr] = tracer[kd];
-                trdr[kdr] = tracer[kd];
-                break;
-            }
-        }
-    }
-    return BG_OK;
 }
 
 // remap_zbgc from the CICE grid to the biology grid at hinS = hice, as
@@ -464,17 +357,6 @@ __device__ void update_hbrine(double meltt, double melts, double dt, double hin,
 #define BG_LAPIDUS_G 0.3
 #define BG_MAXSALIN_STOP 3     // bSin(k) > max_salin
 
-// ice_therm_shared: calculate_Tin_from_qin with l_brine (the vertical salinity
-// runs under BL99, where colpkg_init_thermo sets l_brine)
-__device__ double bg_Tin_from_qin(double qin, double Tmltk)
-{
-    double aa1 = CP_ICE;
-    double bb1 = S(S(M(S(CP_OCN, CP_ICE), Tmltk), D(qin, RHOI)), lfresh());
-    double cc1 = M(lfresh(), Tmltk);
-    return col_min(D(S(-bb1, SQRT(S(M(bb1, bb1), M(M(4.0, aa1), cc1)))), M(2.0, aa1)), Tmltk);
-}
-
-// compute_microS (ice_brine.F90:591-834): sice (trcrn(nt_sice:)) and zsal
 // (trcrn(nt_bgc_S:)) are the category's tracers, written in place; 1-based
 // bgrid, igrid and profiles, 0-based cgrid0/bgrid0. Its sloss and the local
 // Rayleigh it derives are never read. Returns BG_REMAP on remap_zbgc's stop.
