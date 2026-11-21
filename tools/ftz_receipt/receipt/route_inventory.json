@@ -10842,7 +10842,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
-      "line": 143,
+      "line": 184,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10922,7 +10922,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_v842.py",
-      "line": 788,
+      "line": 882,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
