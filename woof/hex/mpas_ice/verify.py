@@ -53,7 +53,7 @@ def verify() -> dict:
         "backend": backend.active(),
         "oracle": {"repo": oracle.ORACLE_REPO, "tag": oracle.ORACLE_TAG, "pin": oracle.ORACLE_PIN},
         "pieces": pieces,
-        "refused": {"config_velocity_solver": list(sia_v842.EXTERNAL_DYCORES) + ["simple"],
+        "refused": {"config_velocity_solver": list(sia_v842.EXTERNAL_DYCORES),
                     "config_basal_mass_bal_float at RKIND 8":
                         [] if rkind.trig64() else sorted(thermal_solver_v842.R8_REFUSED_FLOAT_MELT)},
         "remaining": "docs/mpas-coupled-roadmap.md",

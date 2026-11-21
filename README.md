@@ -416,7 +416,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     imports the ocean's floating basal mass balance
     (`woof/hex/mpas_ice/ocean_seam_v842.py`, graded by conservation); the
     land-ice core's registry status is now `ported_subset` (velocity
-    solvers 'sia' and 'none'). Two v8.4.2 quirks have opt-in corrections, off by
+    solvers 'sia', 'simple' and 'none'). Two v8.4.2 quirks have opt-in corrections, off by
     default: `woof_sgh_init_mask = 'corrected'` and
     `woof_enthalpy_advection_units = 'corrected'` (the advection converts
     enthalpy in Celsius, as the thermal solver does, so the EISMINT2

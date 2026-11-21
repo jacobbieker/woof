@@ -54,6 +54,23 @@ on both meshes, at both precisions.
 | `hydro_radial` | 5 | none (radial prescribed velocity) | none | 6 h for 1 day; `config_SGH` | 4 |
 | `hydro_marine` | 5 | none | none | 6 h for 12 h; grounded ice below sea level | 2 |
 | `enthalpy_benchmark` | 10 | none | enthalpy, 1000 m slab | 1 year for 4 | 4 |
+| `simple_uniform` | 5 | simple, 'uniform' (1000 m/yr along x) | temperature | 30 days for 120 | 4 |
+| `simple_radial_shelf` | 5 | simple, 'radial' | none | 10 days for 40; marine bed, 'floating' calving (the -880 m spike) | 4 |
+| `simple_rim` | 5 | simple, 'uniform' | none | 10 days for 40; marine bed, 'topographic_threshold' calving (the deepened rim) | 4 |
+
+The 'simple' cases (added 2026-11-21 with the same build; every earlier
+case's words came back byte for byte) also carry `xEdge`/`yEdge` (the edge
+midpoints stored inside the rhombus, so seam edges take the model's
+`cellsOnEdge(2)` branch), `normalVelocityInitial` and the higher-order
+package's `dirichletVelocityMask`, which 'simple' never reads and must come
+back unchanged.
+
+The driver writes back the arrays it put, and the stub's
+`mpas_pool_shift_time_levels` trades them between `vertexMask` and
+`vertexMask@2`; `woof.verify.mali_forward_oracle.read_outputs` labels the
+words by time level (after the initial solve's shift and one per step).
+Every case but the fast-moving 'simple' ones holds the same words on both
+levels at the end, so this changed no earlier word.
 
 The only logged errors are `mpas_calculate_barycentric_weights`' weight sums
 across the periodic seam (229 and 195 at RKIND 4, 76 at RKIND 8, in the
@@ -69,6 +86,10 @@ Two v8.4.2 quirks run in these cases with the model's words:
   `mpas_li_advection.F` convert with Kelvin temperatures where the thermal
   solver's conversions take Celsius, so the advected ice turns temperate and
   melts away within the run (`eismint2_a_enthalpy`).
+- `li_velocity_simple_block_init` writes its circular-shelf test's bed over
+  the input's whenever calving is 'floating' or 'topographic_threshold'
+  (`simple_radial_shelf`, `simple_rim`). The port's opt-in
+  `woof_simple_velocity_bed = 'corrected'` keeps the input bed.
 
 Compared at both precisions: every mesh, geometry, thermal, velocity and
 hydro field (the mesh's own inputs included, which must come back

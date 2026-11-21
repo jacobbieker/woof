@@ -53,12 +53,37 @@ _FORWARD_FIELDS = (
     ("scratch", "vertexIndices", "i", (_V,)),
 )
 FIELDS = fe_oracle.FIELDS + _FORWARD_FIELDS
+#: what the 'simple' velocity solver adds (its cases only, so the other cases'
+#: streams are unchanged): the edge points, the prescribed velocity, and the
+#: higher-order package's Dirichlet mask, which 'simple' allocates but never
+#: reads (carried, and compared, word for word)
+SIMPLE_FIELDS = (
+    ("mesh", "xEdge", "r", (_E,)), ("mesh", "yEdge", "r", (_E,)),
+    ("velocity", "normalVelocityInitial", "r", (_E, _I)),
+    ("velocity", "dirichletVelocityMask", "i", (_C, _I)),
+)
+
+
+def fields_for(config: dict) -> tuple:
+    """The field table of a run with ``config``."""
+    return FIELDS + (SIMPLE_FIELDS if config.get("config_velocity_solver") == "simple" else ())
+
+
+def fields(case: dict) -> tuple:
+    return fields_for(case["config"])
+
+
+def outputs(case: dict) -> tuple:
+    """Every word compared for ``case``: :data:`OUTPUTS`, plus 'simple''s."""
+    return tuple((pool, name) for pool, name, kind, _ in fields(case) if pool != "scratch" and kind != "d")
+
 #: the mesh's own words: the run must leave them as they are (compared too)
 MESH_INPUTS = ("nEdgesOnCell", "cellsOnCell", "cellsOnVertex", "cellsOnEdge", "edgesOnCell", "verticesOnEdge",
                "nEdgesOnEdge", "edgesOnEdge", "indexToCellID", "indexToEdgeID", "dvEdge", "dcEdge", "areaCell",
                "xCell", "yCell", "zCell", "xVertex", "yVertex", "zVertex", "latCell", "lonCell",
-               "kiteAreasOnVertex", "weightsOnEdge", "edgeNormalVectors", "coeffs_reconstruct", "verticesOnCell")
-#: every word compared: every field but the dimensions and the scratch
+               "kiteAreasOnVertex", "weightsOnEdge", "edgeNormalVectors", "coeffs_reconstruct", "verticesOnCell",
+               "xEdge", "yEdge")
+#: every word compared (the cases without 'simple'): every field but the dimensions and the scratch
 OUTPUTS = tuple((pool, name) for pool, name, kind, _ in FIELDS if pool != "scratch" and kind != "d")
 #: refused at RKIND 8 (glibc's binary64 atan): not in the r8 fixture
 R8_REFUSED = (("velocity", "eTheta"),)
@@ -107,6 +132,18 @@ CASES = (
                          "config_velocity_solver": "none", "config_thickness_advection": "none",
                          "config_dt": "06:00:00", "config_run_duration": "0000-00-00_12:00:00",
                          "config_SGH_englacial_porosity": 1.0, "config_SGH_conduc_coeff": 1.0e-4}),
+    # the 'simple' velocity solver: a prescribed field, with the thermal solver; radial on the
+    # marine bed with the circular-shelf test's spike ('floating') and rim ('topographic_threshold')
+    ("simple_uniform", 5, dict(_DOME, config_velocity_solver="simple", config_simple_velocity_type="uniform",
+                               config_stats_cell_ID=1, config_thermal_solver="temperature")),
+    ("simple_radial_shelf", 5, dict(_DOME, _bed="marine", config_velocity_solver="simple",
+                                    config_simple_velocity_type="radial", config_stats_cell_ID=1,
+                                    config_calving="floating", config_dt="10_00:00:00",
+                                    config_run_duration="40_00:00:00")),
+    ("simple_rim", 5, dict(_DOME, _bed="marine", config_velocity_solver="simple",
+                           config_simple_velocity_type="uniform", config_stats_cell_ID=1,
+                           config_calving="topographic_threshold", config_dt="10_00:00:00",
+                           config_run_duration="40_00:00:00")),
     ("enthalpy_benchmark", 10, {"_physics": "benchmark", "config_thermal_solver": "enthalpy",
                                 "config_velocity_solver": "none", "config_thickness_advection": "none",
                                 "config_surface_air_temperature_value": 243.15,
@@ -120,6 +157,11 @@ MESH_N, MESH_DC = 20, 4000.0
 @lru_cache(maxsize=None)
 def mesh_of(stretch: float) -> dict:
     return mali_hexmesh.torus(MESH_N, MESH_DC, stretch)
+
+
+@lru_cache(maxsize=None)
+def edge_points_of(stretch: float) -> tuple[np.ndarray, np.ndarray]:
+    return mali_hexmesh.edge_points(MESH_N, MESH_DC, stretch)
 
 
 def field_shape(case: dict, shape: tuple) -> tuple[int, ...]:
@@ -255,6 +297,12 @@ def make_case(name: str, n_levels: int, overrides: dict, stretch: float, suffix:
             scratch[field] = ((rs.random_sample(s) * 11).astype(np.int32) - 5 if kind == "i"
                               else r(-1.0e3 + 2.0e3 * rs.random_sample(s)))
     pools["scratch"] = scratch
+    if config["config_velocity_solver"] == "simple":
+        # drawn last, so the other cases' words are as they were
+        x_edge, y_edge = edge_points_of(stretch)
+        pools["mesh"].update(xEdge=r(x_edge), yEdge=r(y_edge))
+        pools["velocity"]["normalVelocityInitial"] = prior((ne, nl + 1))
+        pools["velocity"]["dirichletVelocityMask"] = (rs.random_sample((nc, nl + 1)) < 0.5).astype(np.int32)
     return case
 
 
@@ -283,7 +331,8 @@ def input_bytes(case: dict) -> bytes:
     """run_forward.F90's input stream for ``case``."""
     real = _real(case)
     config = case["config"]
-    parts = [np.array([len(config), len(FIELDS)], "<i4").tobytes()]
+    table = fields(case)
+    parts = [np.array([len(config), len(table)], "<i4").tobytes()]
     for name in sorted(config):
         value = config[name]
         if isinstance(value, bool):
@@ -294,7 +343,7 @@ def input_bytes(case: dict) -> bytes:
             parts += [_text(name, 64), np.array([1], "<i4").tobytes(), np.array(value, real).tobytes()]
         else:
             parts += [_text(name, 64), np.array([4], "<i4").tobytes(), _text(value, STRKIND)]
-    for pool, name, kind, shape in FIELDS:
+    for pool, name, kind, shape in table:
         s = field_shape(case, shape)
         code = {"r": 1, "i": 2, "d": 3, "c": 4}[kind]
         dims = list(reversed(s)) + [1] * (3 - len(s))
@@ -323,8 +372,8 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     out = {"errClock": head[0:1].copy(), "errInit": head[1:2].copy(), "errRun": head[2:3].copy(),
            "logErrors": head[3:4].copy(),
            "clock/now": np.array(raw[16:16 + STRKIND].decode("ascii").rstrip())}
-    off, keep = 16 + STRKIND, set(OUTPUTS) - set(refused(case))
-    for pool, name, kind, shape in FIELDS:
+    off, keep = 16 + STRKIND, set(outputs(case)) - set(refused(case))
+    for pool, name, kind, shape in fields(case):
         if kind == "c":
             if (pool, name) in keep:
                 out[f"{pool}/{name}"] = np.array(raw[off:off + STRKIND].decode("ascii").rstrip())
@@ -338,6 +387,14 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
         off += dtype.itemsize * n
     if off != len(raw):
         raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
+    # The driver writes back the arrays it put, but the stub's
+    # mpas_pool_shift_time_levels trades them between NAME and NAME@2 (once in
+    # the initial solve, once a step): after an odd number of shifts the array
+    # put as level 1 holds level 2. Label the words by time level, as MPAS's
+    # pool (and the port) does.
+    if "mesh/timestepNumber" in out and (1 + int(out["mesh/timestepNumber"][()])) % 2 == 1:
+        for key in [k for k in out if k.endswith("@2")]:
+            out[key], out[key[:-2]] = out[key[:-2]], out[key]
     return out
 
 
@@ -379,7 +436,7 @@ def outputs_of(case: dict, pools: dict, clock) -> dict[str, np.ndarray]:
     """The port's pools as the oracle's ``pool/name`` outputs."""
     import cupy as cp
     out = {"clock/now": np.array(clock.time_stamp)}
-    for pool, name in OUTPUTS:
+    for pool, name in outputs(case):
         if (pool, name) in refused(case):
             continue
         value = pools[pool][name]
