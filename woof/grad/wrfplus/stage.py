@@ -139,12 +139,27 @@ class RSPGeometry:
     has_msf: int = 0
     boundary_x: int = 0
     boundary_y: int = 0
+    halo: int = 0
 
     def args(self, dtype) -> tuple:
         i, r = np.int32, np.dtype(dtype).type
         return (i(self.nz), i(self.ny), i(self.nx), i(self.has_msf),
                 i(self.boundary_x), i(self.boundary_y), r(self.rdx),
-                r(self.rdy))
+                r(self.rdy), i(self.halo))
+
+
+#: The carried mu halo rk_step 1 reads on a bounded axis
+#: (RSPGeometry.halo): an extra active input, absent otherwise.
+RSP_HALO = "mu_halo"
+
+
+def _halo(d: dict, geom) -> object:
+    """``d``'s mu halo, or its mup (never read) without ``geom.halo``."""
+    if geom.halo:
+        if RSP_HALO not in d:
+            raise ValueError(f"RSPGeometry.halo needs {RSP_HALO!r}")
+        return d[RSP_HALO]
+    return d["mup"]
 
 
 def rsp_shapes(geom: RSPGeometry) -> dict:
@@ -160,18 +175,23 @@ def rk_step_prep_tl(state, pert_state, traj, pert, geom, *, nl=True):
     """WRFPLUS g_calc_mu_uv + g_couple_momentum + g_calc_ww_cp (the dry
     part of g_rk_step_prep) on woof's strict stage_fluxes: ru, rv, ww.
 
-    Boundary face masses are clamped or wrapped; the rk_step 1
-    ``carried_wrf_mu_halo`` override of a non-periodic axis
-    (``stage_fluxes(first_stage=True)``) is not covered (item 7)."""
+    Boundary face masses are clamped or wrapped.  With ``geom.halo``
+    (rk_step 1 of a carried step on a bounded axis,
+    ``stage_fluxes(first_stage=True)``) calc_ww_cp's boundary faces read
+    the ghost cell's mu' from :data:`RSP_HALO` in ``traj`` and ``pert``."""
     sh = rsp_shapes(geom)
+    halo = (_halo(traj, geom), _halo(pert, geom))
     _check(geom, _named("state", RSP_STATE, state)
            + _named("pert", RSP_STATE, pert_state)
            + _named("traj", RSP_ACTIVE + RSP_PASSIVE, traj)
-           + _named("pert", RSP_ACTIVE, pert), sh, min_nz=1)
+           + _named("pert", RSP_ACTIVE, pert)
+           + ([("traj", RSP_HALO, halo[0]), ("pert", RSP_HALO, halo[1])]
+              if geom.halo else []),
+           {**sh, RSP_HALO: sh["mup"]}, min_nz=1)
     arrs = (tuple(state[n] for n in RSP_STATE)
             + tuple(pert_state[n] for n in RSP_STATE)
-            + tuple(traj[n] for n in RSP_ACTIVE)
-            + tuple(pert[n] for n in RSP_ACTIVE)
+            + tuple(traj[n] for n in RSP_ACTIVE) + halo[:1]
+            + tuple(pert[n] for n in RSP_ACTIVE) + halo[1:]
             + tuple(traj[n] for n in RSP_PASSIVE))
     dtype = _dtype(arrs)
     g = geom
@@ -183,28 +203,38 @@ def rk_step_prep_tl(state, pert_state, traj, pert, geom, *, nl=True):
 
 
 def rk_step_prep_ad(adj_state, traj, adj, geom):
+    """Adjoint of :func:`rk_step_prep_tl`; with ``geom.halo`` the halo's
+    adjoint is added into ``adj[RSP_HALO]``."""
     import cupy as cp
     sh = rsp_shapes(geom)
+    halo = (_halo(traj, geom), _halo(adj, geom))
     _check(geom, _named("adj", RSP_STATE, adj_state)
            + _named("traj", RSP_ACTIVE + RSP_PASSIVE, traj)
-           + _named("adj", RSP_ACTIVE, adj), sh, min_nz=1)
+           + _named("adj", RSP_ACTIVE, adj)
+           + ([("traj", RSP_HALO, halo[0]), ("adj", RSP_HALO, halo[1])]
+              if geom.halo else []),
+           {**sh, RSP_HALO: sh["mup"]}, min_nz=1)
     sa = tuple(adj_state[n] for n in RSP_STATE)
-    tr = tuple(traj[n] for n in RSP_ACTIVE)
+    tr = tuple(traj[n] for n in RSP_ACTIVE) + halo[:1]
     ps = tuple(traj[n] for n in RSP_PASSIVE)
-    dtype = _dtype(sa + tr + ps + tuple(adj[n] for n in RSP_ACTIVE))
+    dtype = _dtype(sa + tr + ps + tuple(adj[n] for n in RSP_ACTIVE) + halo[1:])
     g = geom
     nck = (g.nz + AD_KCHUNK - 1) // AD_KCHUNK
     bk = cp.empty((g.nz, g.ny, g.nx), dtype=dtype)
     xm = cp.empty((nck, g.ny, g.nx + 1), dtype=dtype)
     ym = cp.empty((nck, g.ny + 1, g.nx), dtype=dtype)
+    # the boundary faces' ghost shares (read only with geom.halo)
+    xg, hx = (cp.empty((nck, g.ny, 2), dtype=dtype) for _ in range(2))
+    yg, hy = (cp.empty((nck, 2, g.nx), dtype=dtype) for _ in range(2))
     geo = g.args(dtype)
     _kernel("rk_step_prep_ww_ad", dtype)(
         _blocks(g.ny * g.nx), (THREADS,), sa + (bk,) + ps + geo)
     _kernel("rk_step_prep_flux_ad", dtype)(
         _blocks(nck * (g.ny + 1) * (g.nx + 1)), (THREADS,),
-        sa + (bk,) + tr + (adj["u"], adj["v"], xm, ym) + ps + geo)
+        sa + (bk,) + tr + (adj["u"], adj["v"], xm, ym, xg, yg, hx, hy) + ps + geo)
     _kernel("rk_step_prep_mass_gather", dtype)(
-        _blocks(g.ny * g.nx), (THREADS,), (adj["mup"], xm, ym) + geo)
+        _blocks(g.ny * g.nx), (THREADS,),
+        (adj["mup"], xm, ym, halo[1], xg, yg, hx, hy) + geo)
 
 
 # ------------------------------------------------------------ rk_addtend_dry

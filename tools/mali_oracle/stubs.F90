@@ -53,7 +53,8 @@ module mpas_pool_routines
             stub_pool_put_dimension, stub_pool_put_config, &
             mpas_pool_add_config, mpas_pool_print_summary, MPAS_POOL_CONFIG, &
             field1DInteger, field1DReal, field2DReal, field3DReal, mpas_pool_get_field, &
-            mpas_allocate_scratch_field, mpas_deallocate_scratch_field
+            mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
+            mpas_pool_initialize_time_levels, mpas_pool_shift_time_levels
 
   integer, parameter :: maxEntries = 192
   integer, parameter :: MPAS_POOL_CONFIG = 1004
@@ -135,11 +136,11 @@ module mpas_pool_routines
   end interface stub_pool_put_dimension
 
   interface mpas_pool_get_array
-    module procedure get_r0, get_r1, get_r2, get_r3, get_i0, get_i1, get_i2
+    module procedure get_r0, get_r1, get_r2, get_r3, get_i0, get_i1, get_i2, get_c0
   end interface mpas_pool_get_array
 
   interface stub_pool_put_array
-    module procedure put_r0, put_r1, put_r2, put_r3, put_i0, put_i1, put_i2
+    module procedure put_r0, put_r1, put_r2, put_r3, put_i0, put_i1, put_i2, put_c0
   end interface stub_pool_put_array
 
 contains
@@ -157,6 +158,24 @@ contains
     print *, 'oracle stub: no pool entry named ', trim(name)
     stop 4
   end function find
+
+  integer function level(pool, name, timeLevel)
+    ! a field's entry at timeLevel: time level 2 is the entry the driver put
+    ! as NAME@2 (run_forward.F90); a pool without one has a single level
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    integer, intent(in), optional :: timeLevel
+    integer :: i
+    level = 0
+    if (present(timeLevel)) then
+      if (timeLevel == 2) then
+        do i = 1, pool % n
+          if (trim(pool % e(i) % name) == trim(name) // '@2') level = i
+        end do
+      end if
+    end if
+    if (level == 0) level = find(pool, name)
+  end function level
 
   integer function slot(pool, name)
     type(MPAS_pool_type), intent(inout) :: pool
@@ -317,7 +336,7 @@ contains
     character(len=*), intent(in) :: name
     integer, intent(in), optional :: timeLevel
     real(kind=RKIND), pointer :: a
-    a => pool % e(find(pool, name)) % r0
+    a => pool % e(level(pool, name, timeLevel)) % r0
   end subroutine get_r0
 
   subroutine get_r1(pool, name, a, timeLevel)
@@ -325,7 +344,7 @@ contains
     character(len=*), intent(in) :: name
     integer, intent(in), optional :: timeLevel
     real(kind=RKIND), dimension(:), pointer :: a
-    a => pool % e(find(pool, name)) % r1
+    a => pool % e(level(pool, name, timeLevel)) % r1
   end subroutine get_r1
 
   subroutine get_r2(pool, name, a, timeLevel)
@@ -333,7 +352,7 @@ contains
     character(len=*), intent(in) :: name
     integer, intent(in), optional :: timeLevel
     real(kind=RKIND), dimension(:,:), pointer :: a
-    a => pool % e(find(pool, name)) % r2
+    a => pool % e(level(pool, name, timeLevel)) % r2
   end subroutine get_r2
 
   subroutine get_r3(pool, name, a, timeLevel)
@@ -341,7 +360,7 @@ contains
     character(len=*), intent(in) :: name
     integer, intent(in), optional :: timeLevel
     real(kind=RKIND), dimension(:,:,:), pointer :: a
-    a => pool % e(find(pool, name)) % r3
+    a => pool % e(level(pool, name, timeLevel)) % r3
   end subroutine get_r3
 
   subroutine get_i0(pool, name, a, timeLevel)
@@ -349,7 +368,7 @@ contains
     character(len=*), intent(in) :: name
     integer, intent(in), optional :: timeLevel
     integer, pointer :: a
-    a => pool % e(find(pool, name)) % i0
+    a => pool % e(level(pool, name, timeLevel)) % i0
   end subroutine get_i0
 
   subroutine get_i1(pool, name, a, timeLevel)
@@ -357,7 +376,7 @@ contains
     character(len=*), intent(in) :: name
     integer, intent(in), optional :: timeLevel
     integer, dimension(:), pointer :: a
-    a => pool % e(find(pool, name)) % i1
+    a => pool % e(level(pool, name, timeLevel)) % i1
   end subroutine get_i1
 
   subroutine get_i2(pool, name, a, timeLevel)
@@ -365,109 +384,189 @@ contains
     character(len=*), intent(in) :: name
     integer, intent(in), optional :: timeLevel
     integer, dimension(:,:), pointer :: a
-    a => pool % e(find(pool, name)) % i2
+    a => pool % e(level(pool, name, timeLevel)) % i2
   end subroutine get_i2
+
+  subroutine get_c0(pool, name, a, timeLevel)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    integer, intent(in), optional :: timeLevel
+    character(len=StrKIND), pointer :: a
+    a => pool % e(level(pool, name, timeLevel)) % c0
+  end subroutine get_c0
+
+  subroutine mpas_pool_initialize_time_levels(pool)
+    ! every level from level 1, as the model's: NAME@2 takes NAME's words
+    type(MPAS_pool_type), intent(inout) :: pool
+    integer :: i, j
+    do i = 1, pool % n
+      j = len_trim(pool % e(i) % name)
+      if (j < 3) cycle
+      if (pool % e(i) % name(j-1:j) /= '@2') cycle
+      associate (two => pool % e(i), one => pool % e(find(pool, pool % e(i) % name(1:j-2))))
+        if (associated(two % i1)) two % i1 = one % i1
+        if (associated(two % r1)) two % r1 = one % r1
+        if (associated(two % r2)) two % r2 = one % r2
+      end associate
+    end do
+  end subroutine mpas_pool_initialize_time_levels
+
+  subroutine mpas_pool_shift_time_levels(pool)
+    ! two levels: NAME and NAME@2 trade arrays
+    type(MPAS_pool_type), intent(inout) :: pool
+    integer :: i, j, k
+    integer, dimension(:), pointer :: i1
+    real(kind=RKIND), dimension(:), pointer :: r1
+    real(kind=RKIND), dimension(:,:), pointer :: r2
+    do i = 1, pool % n
+      j = len_trim(pool % e(i) % name)
+      if (j < 3) cycle
+      if (pool % e(i) % name(j-1:j) /= '@2') cycle
+      k = find(pool, pool % e(i) % name(1:j-2))
+      i1 => pool % e(i) % i1; pool % e(i) % i1 => pool % e(k) % i1; pool % e(k) % i1 => i1
+      r1 => pool % e(i) % r1; pool % e(i) % r1 => pool % e(k) % r1; pool % e(k) % r1 => r1
+      r2 => pool % e(i) % r2; pool % e(i) % r2 => pool % e(k) % r2; pool % e(k) % r2 => r2
+    end do
+  end subroutine mpas_pool_shift_time_levels
 
   subroutine stub_pool_put_subpool(pool, name, sub)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     type(MPAS_pool_type), pointer :: sub
-    pool % e(slot(pool, name)) % sub => sub
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % sub => sub
   end subroutine stub_pool_put_subpool
 
   subroutine put_dimension_0d(pool, name, dim)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     integer, pointer :: dim
-    pool % e(slot(pool, name)) % i0 => dim
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % i0 => dim
   end subroutine put_dimension_0d
 
   subroutine put_dimension_1d(pool, name, dim)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     integer, dimension(:), pointer :: dim
-    pool % e(slot(pool, name)) % d1 => dim
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % d1 => dim
   end subroutine put_dimension_1d
 
   subroutine put_config_l(pool, name, value)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     logical, pointer :: value
-    pool % e(slot(pool, name)) % l0 => value
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % l0 => value
   end subroutine put_config_l
 
   subroutine put_config_c(pool, name, value)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     character(len=StrKIND), pointer :: value
-    pool % e(slot(pool, name)) % c0 => value
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % c0 => value
   end subroutine put_config_c
 
   subroutine put_config_i(pool, name, value)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     integer, pointer :: value
-    pool % e(slot(pool, name)) % i0 => value
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % i0 => value
   end subroutine put_config_i
 
   subroutine put_config_r(pool, name, value)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), pointer :: value
-    pool % e(slot(pool, name)) % r0 => value
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % r0 => value
   end subroutine put_config_r
+
+  subroutine put_c0(pool, name, a)
+    type(MPAS_pool_type), intent(inout) :: pool
+    character(len=*), intent(in) :: name
+    character(len=StrKIND), pointer :: a
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % c0 => a
+  end subroutine put_c0
 
   subroutine put_r0(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), pointer :: a
-    pool % e(slot(pool, name)) % r0 => a
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % r0 => a
   end subroutine put_r0
 
   subroutine put_r1(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:), pointer :: a
-    pool % e(slot(pool, name)) % r1 => a
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % r1 => a
   end subroutine put_r1
 
   subroutine put_r2(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:,:), pointer :: a
-    pool % e(slot(pool, name)) % r2 => a
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % r2 => a
   end subroutine put_r2
 
   subroutine put_r3(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:,:,:), pointer :: a
-    pool % e(slot(pool, name)) % r3 => a
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % r3 => a
   end subroutine put_r3
 
   subroutine put_i0(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     integer, pointer :: a
-    pool % e(slot(pool, name)) % i0 => a
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % i0 => a
   end subroutine put_i0
 
   subroutine put_i1(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     integer, dimension(:), pointer :: a
-    pool % e(slot(pool, name)) % i1 => a
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % i1 => a
   end subroutine put_i1
 
   subroutine put_i2(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     integer, dimension(:,:), pointer :: a
-    pool % e(slot(pool, name)) % i2 => a
+    integer :: k
+    k = slot(pool, name)  ! before the pointer assignment: slot changes pool
+    pool % e(k) % i2 => a
   end subroutine put_i2
 
 end module mpas_pool_routines
 
+#ifndef MALI_REAL_TIMEKEEPING
 module mpas_timekeeping
   ! Times and intervals in whole seconds: all the land-ice time step reads of
   ! them is set_timestep's interval to the next forced time, which the driver
@@ -543,14 +642,41 @@ contains
   end subroutine mpas_get_timeInterval
 
 end module mpas_timekeeping
+#endif
 
 module mpas_derived_types
   use mpas_kind_types
   use mpas_log
   use mpas_pool_routines
+#ifdef MALI_REAL_TIMEKEEPING
+  ! run_forward.F90's build: v8.4.2's own mpas_timekeeping and the ESMF time
+  ! library it wraps (build_forward.sh), with the types the framework's
+  ! mpas_derived_types carries for them
+  use ESMF
+#else
   use mpas_timekeeping, only: MPAS_Clock_type
+#endif
   implicit none
   public
+
+#ifdef MALI_REAL_TIMEKEEPING
+#include "mpas_timekeeping_types.inc"
+
+  type MPAS_streamManager_type
+    integer :: unused = 0
+  end type MPAS_streamManager_type
+
+  ! the members of v8.4.2's stream list (mpas_stream_list_types.inc) that
+  ! mpas_timekeeping's mpas_minimum_alarm_interval reads; nothing calls it
+  type MPAS_stream_list_type
+    character(len=StrKIND) :: name
+    type(MPAS_stream_list_type), pointer :: next => null()
+  end type MPAS_stream_list_type
+
+  type decomp_list
+    integer :: unused = 0
+  end type decomp_list
+#endif
 
   type dm_info
     integer :: nprocs = 1
@@ -569,6 +695,10 @@ module mpas_derived_types
     type(MPAS_pool_type), pointer :: packages => null()
     type(dm_info), pointer :: dminfo => null()
     type(MPAS_Clock_type), pointer :: clock => null()
+#ifdef MALI_REAL_TIMEKEEPING
+    type(MPAS_streamManager_type), pointer :: streamManager => null()
+    type(decomp_list), pointer :: decompositions => null()
+#endif
   end type domain_type
 
 end module mpas_derived_types
@@ -632,13 +762,17 @@ end module mpas_abort
 module mpas_threading
   implicit none
   private
-  public :: mpas_threading_barrier
+  public :: mpas_threading_barrier, mpas_threading_get_thread_num
 
 contains
 
   subroutine mpas_threading_barrier()
     ! one thread
   end subroutine mpas_threading_barrier
+
+  integer function mpas_threading_get_thread_num()
+    mpas_threading_get_thread_num = 0
+  end function mpas_threading_get_thread_num
 
 end module mpas_threading
 
@@ -724,7 +858,13 @@ contains
   end subroutine li_velocity_external_finalize
 
   subroutine li_velocity_external_write_albany_mesh(domain)
+    ! li_core_init calls it on every start; v8.4.2's returns at once unless
+    ! config_write_albany_ascii_mesh (refused by name), as this one does
+    use mpas_pool_routines, only: mpas_pool_get_config
     type(domain_type), intent(inout) :: domain
+    logical, pointer :: config_write_albany_ascii_mesh
+    call mpas_pool_get_config(domain % configs, 'config_write_albany_ascii_mesh', config_write_albany_ascii_mesh)
+    if (.not. config_write_albany_ascii_mesh) return
     call reached('li_velocity_external_write_albany_mesh')
   end subroutine li_velocity_external_write_albany_mesh
 
