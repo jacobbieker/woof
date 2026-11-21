@@ -24,6 +24,7 @@ THE BREAKAGES THESE PREVENT
 """
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import numpy as np
@@ -63,6 +64,8 @@ def test_fixture_covers_the_branches():
         cap = (case["config"]["config_density0"] * ho.MPAS_GRAVITY) * 5.0
         assert (ref[name]["forcing/seaIcePressure"] == cap).any()
     assert (ref["hybrid_frazil"]["o2x/1"][:, col["Fioo_q"]] != 0).any()
+    assert (ref["hybrid_frazil_heat_of_fusion"]["o2x/1"][:, col["Fioo_q"]] != 0).any()
+    assert cases["hybrid_frazil_heat_of_fusion"]["config"]["config_frazil_heat_of_fusion"] != 3.34e5
     assert (ref["hybrid_land_ice_coupled"]["o2x/1"][:, col["So_blt"]] != 0).any()
     assert cases["hybrid_frazil_land_ice_mpas_constants"]["hybrid"]["constants"] == "mpas"
 
@@ -99,6 +102,25 @@ def _mismatches(name, *, mutate=None):
 def test_a_mutated_run_loop_is_caught(monkeypatch, attr, value, case):
     monkeypatch.setattr(ho, attr, value)
     assert _mismatches(case) > 0
+
+
+@requires_gpu
+def test_the_freezing_coefficients_default_to_the_components():
+    # configs without the open-ocean freezing coefficients take v8.4.2's defaults (coeff_0 = -1.8)
+    case = _case("hybrid_frazil")
+    for k in ("coeff_0", "coeff_S", "coeff_p", "coeff_pS"):
+        del case["config"][f"config_open_ocean_freezing_temperature_{k}"]
+    got, want = oracle.run_gpu(case), oracle.load_fixture()["hybrid_frazil"]
+    bad = {k: n for k in want if (n := oracle.word_mismatches(got[k], want[k]))}
+    assert not bad, bad
+
+
+@requires_gpu
+def test_a_default_heat_of_fusion_is_caught_on_the_non_default_case():
+    # the export's Fioo_q with the default 3.34e5 where the component's is 3.0e5
+    def default_fusion(ocean):
+        ocean.opts = dataclasses.replace(ocean.opts, config_frazil_heat_of_fusion=3.34e5)
+    assert _mismatches("hybrid_frazil_heat_of_fusion", mutate=default_fusion) > 0
 
 
 @requires_gpu

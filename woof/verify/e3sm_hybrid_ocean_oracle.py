@@ -61,6 +61,9 @@ CASES = (
     ("hybrid_frazil_land_ice_mpas_constants", _fz, "frazil_land_ice_nested_halos", 1, 3, "mpas", {
         "config_density0": 1027.5, "config_open_ocean_freezing_temperature_reference_pressure": 2.0e4}),
     ("hybrid_land_ice_coupled", _li, "coupled_jenkins_two_steps", 2, 2, "e3sm", {}),
+    # a frazil heat of fusion other than the default (the export's Fioo_q reads the component's)
+    ("hybrid_frazil_heat_of_fusion", _fz, "frazil_split_three_steps", 1, 2, "e3sm",
+     {"config_frazil_heat_of_fusion": 3.0e5}),
 )
 
 #: x2o's ranges per field (others: small positive)
