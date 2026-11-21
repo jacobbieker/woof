@@ -196,6 +196,10 @@ def render_routes(receipt: dict, *, indent: str = "  ") -> str:
     return "\n".join(lines)
 
 
+#: Group key for sites whose options argument is not a literal sequence.
+_NON_LITERAL = ("<non-literal options expression>",)
+
+
 def package_tuples(inventory: dict) -> list[tuple[tuple, list[dict]]]:
     """Distinct literal option tuples over the shipped package surface."""
     groups: dict[tuple, list[dict]] = {}
@@ -203,7 +207,14 @@ def package_tuples(inventory: dict) -> list[tuple[tuple, list[dict]]]:
         if not record["file"].startswith("woof/"):
             continue
         options = record.get("options")
-        key = tuple(options) if options else ()
+        if options:
+            key = tuple(options)
+        elif record.get("options_argument_present") and options is None:
+            # Supplied, but not as a sequence display the scan can read
+            # (a module constant, a call): not "no caller options".
+            key = _NON_LITERAL
+        else:
+            key = ()
         groups.setdefault(key, []).append(record)
     return sorted(groups.items(),
                   key=lambda item: (-len(item[1]), str(item[0])))
@@ -212,7 +223,10 @@ def package_tuples(inventory: dict) -> list[tuple[tuple, list[dict]]]:
 def render_tuples(inventory: dict, *, indent: str = "  ") -> str:
     lines = []
     for options, records in package_tuples(inventory):
-        if options:
+        if options == _NON_LITERAL:
+            shown = ("caller options passed as a name or call the scan "
+                     "does not evaluate")
+        elif options:
             shown = " ".join(
                 f"`{item}`" if item is not None
                 else "a target flag built from the device architecture "
