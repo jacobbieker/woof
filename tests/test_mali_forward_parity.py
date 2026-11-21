@@ -740,3 +740,40 @@ def test_the_x86_division_and_negation_words():
         assert int(np.array(am._div(nan, real(917.0), real), real).view(bits)) == default
         assert int(np.array(am._negated(nan), real).view(bits)) == default ^ (1 << (8 * np.dtype(real).itemsize - 1))
         assert am._div(real(1.0), real(0.0), real) == np.inf and am._negated(real(2.5)) == real(-2.5)
+
+
+def test_a_thin_basal_layer_does_not_end_a_report_early():
+    # the last interior sigma of fractions [0.99998, 0.00002] prints as 1.0000:
+    # the basal row is the one with the '------' speed field as well
+    from woof.hex.mpas_ice import statistics_v842 as st
+    assert st.fmt_f(0.99999, 6, 4) == st.fmt_f(1.0, 6, 4)
+    lines = [st.RULE, "", "Global statistics: time = 0001-01-01_00:00:00", "",
+             "Sigma        Ice speed (m/yr)       Ice temperature (C)",
+             st.fmt_f(0.0, 6, 4) + st.fmt_a("------", 25) + st.fmt_f(-10.0, 24, 16),
+             st.fmt_f(0.49999, 6, 4) + st.fmt_f(1.0, 25, 16) + st.fmt_f(-5.0, 24, 16),
+             st.fmt_f(0.99999, 6, 4) + st.fmt_f(2.0, 25, 16) + st.fmt_f(-1.0, 24, 16),
+             st.fmt_f(1.0, 6, 4) + st.fmt_a("------", 25) + st.fmt_f(-0.5, 24, 16),
+             " ", "after the report"]
+    assert st.reports(lines) == ["\n".join(line.rstrip() for line in lines[:9])]
+
+
+@requires_gpu
+def test_statistics_with_no_report_in_the_run_are_typed_and_empty():
+    # stats_interval past the run's steps and no startup report: statistics are
+    # on but none falls in the run; the effective config decides, not the case's
+    case = _case("stats_dome_uniform")
+    got = fo.run_gpu(case, {"config_stats_interval": 100, "config_write_stats_on_startup": False})
+    assert got["stats/real"].shape == (0,) and got["stats/real"].dtype == fo._real(case).newbyteorder("=")
+    assert got["stats/int"].shape == (0,) and got["stats/int"].dtype == np.int32
+    assert str(got["stats/log"]) == ""
+    off = fo.run_gpu(case, {"config_stats_interval": 0, "config_write_stats_on_startup": False})
+    assert not any(key.startswith("stats/") for key in off)
+
+
+@requires_gpu
+def test_analysis_members_with_no_compute_in_the_run_are_typed_and_empty():
+    case = _case("am_marine_uniform")
+    got = fo.run_gpu(case, {"config_AM_globalStats_compute_on_startup": False,
+                            "config_AM_regionalStats_enable": False})
+    assert got["am/member"].shape == (0,) and got["am/xtime"].shape == (0,)
+    assert got["am/words"].shape == (0,) and got["am/words"].dtype == fo._real(case).newbyteorder("=")

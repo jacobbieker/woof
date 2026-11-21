@@ -184,3 +184,34 @@ def test_the_registry_defaults_cover_every_option_the_forward_mode_reads():
     assert not missing
     assert defaults["config_velocity_solver"] == "sia" and defaults["config_SGH"] is False
     assert defaults["config_dt"] == "0001-00-00_00:00:00"
+
+
+@requires_gpu
+def test_the_statistics_log_is_this_runs_alone(tmp_path):
+    # statistics on but none in the run: an empty log; statistics off: an
+    # earlier run's log in the same out directory is removed
+    case = _case("stats_dome_uniform", "r4")
+    quiet = dict(case, config=dict(case["config"], config_stats_interval=100, config_write_stats_on_startup=False))
+    (tmp_path / "out").mkdir()
+    log = tmp_path / "out" / "statistics.log"
+    log.write_text("a stale report\n")
+    assert _run(tmp_path, quiet) == 0
+    assert log.read_text() == ""
+    log.write_text("a stale report\n")
+    off = dict(case, config=dict(case["config"], config_stats_interval=0, config_write_stats_on_startup=False))
+    assert _run(tmp_path, off) == 0
+    assert not log.exists()
+
+
+@requires_gpu
+def test_an_analysis_member_that_did_not_compute_leaves_no_file(tmp_path):
+    # globalStats at 'output_interval' with no startup compute never computes:
+    # an earlier run's globalStatsOutput.nc in the same out directory is removed
+    case = _case("am_marine_uniform", "r4")
+    never = dict(case, config=dict(case["config"], config_AM_globalStats_compute_on_startup=False))
+    (tmp_path / "out").mkdir()
+    stale = tmp_path / "out" / "globalStatsOutput.nc"
+    stale.write_text("a stale file\n")
+    assert _run(tmp_path, never) == 0
+    assert not stale.exists()
+    assert (tmp_path / "out" / "regionalStatsOutput.nc").exists()

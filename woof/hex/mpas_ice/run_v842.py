@@ -49,7 +49,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import analysis_v842, forward_v842, rkind
+from . import analysis_v842, forward_v842, rkind, statistics_v842
 
 OPTION_FILES = ("registry-options.json", "registry-options-subglacial-hydro.json",
                 "registry-options-global-stats.json", "registry-options-regional-stats.json")
@@ -288,12 +288,16 @@ def write_output(path, *, pools: dict, clock: forward_v842.Clock, config: dict |
 
 def write_analysis(out: Path, computes: list, *, config: dict) -> None:
     """Each enabled member's computes, one ``Time`` record each, to its
-    stream's file (``none``: not written)."""
+    stream's file (``none``: not written); a member that did not compute in
+    this run leaves no file (an earlier run's is removed)."""
     import netCDF4
     for member in analysis_v842.enabled(config):
         stream = str(analysis_v842.option(config, member, "stream_name"))
         mine = [c for c in computes if c.member == member]
-        if stream == "none" or not mine:
+        if stream == "none":
+            continue
+        if not mine:
+            (out / f"{stream}.nc").unlink(missing_ok=True)
             continue
         names = analysis_v842.FIELDS[member]
         per = mine[0].words.size // len(names)
@@ -317,9 +321,10 @@ def run(*, namelist, input=None, out, precision: str | None = None, restart=None
     default) or from ``restart`` (at its stored precision, which
     ``precision`` must name if given); writes ``out/output.nc`` and
     ``out/restart.npz``, and ``out/statistics.log`` (every
-    ``li_compute_statistics`` report, as the model logs it) when the
-    namelist asks for statistics, and ``out/<stream_name>.nc`` for each
-    enabled analysis member that computed. Returns the clock."""
+    ``li_compute_statistics`` report of this run, as the model logs it;
+    empty if none falls in the run) when the namelist asks for statistics,
+    and ``out/<stream_name>.nc`` for each enabled analysis member that
+    computed. Returns the clock."""
     out = Path(out)
     config = read_namelist(namelist)
     stats: list = []
@@ -340,8 +345,13 @@ def run(*, namelist, input=None, out, precision: str | None = None, restart=None
         forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps, on_statistics=stats.append,
                                      on_analysis=computes.append)
     out.mkdir(parents=True, exist_ok=True)
-    if stats:
-        (out / "statistics.log").write_text("".join(f"{s.report}\n\n" for s in stats))
+    # this run's log alone: empty when the run ends before its first report,
+    # and none (an earlier run's removed) when the namelist asks for none
+    log = out / "statistics.log"
+    if statistics_v842.enabled(config):
+        log.write_text("".join(f"{s.report}\n\n" for s in stats))
+    else:
+        log.unlink(missing_ok=True)
     write_output(out / "output.nc", pools=pools, clock=clock, config=config)
     write_analysis(out, computes, config=config)
     forward_v842.write_restart(out / "restart.npz", pools=pools, clock=clock)

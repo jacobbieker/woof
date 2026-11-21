@@ -578,18 +578,19 @@ def run_gpu(case: dict, config: dict | None = None) -> dict[str, np.ndarray]:
     pools = device_pools(case)
     stats: list = []
     computes: list = []
-    run_config = {k: v for k, v in dict(case["config"], **(config or {})).items() if not k.startswith("stream:")}
+    effective = dict(case["config"], **(config or {}))
+    run_config = {k: v for k, v in effective.items() if not k.startswith("stream:")}
     clock = forward_v842.run(pools=pools, config=run_config, on_statistics=stats.append, on_analysis=computes.append,
-                             streams=streams_of(case["config"]))
+                             streams=streams_of(effective))
     out = outputs_of(case, pools, clock)
-    if am_on(case["config"]):
+    real = _real(case).newbyteorder("=")
+    if am_on(effective):
         out["am/member"] = np.array([1 + analysis_v842.MEMBERS.index(c.member) for c in computes], np.int32)
-        out["am/xtime"] = np.array([c.xtime for c in computes])
-        out["am/words"] = (np.concatenate([c.words for c in computes]) if computes
-                           else np.zeros(0, PRECISIONS[case["precision"]]))
-    if stats_on(case["config"]):
-        out["stats/real"] = np.concatenate([s.real_words for s in stats])
-        out["stats/int"] = np.concatenate([s.int_words for s in stats])
+        out["am/xtime"] = np.array([c.xtime for c in computes], str)
+        out["am/words"] = np.concatenate([np.empty(0, real)] + [c.words for c in computes]).astype(real)
+    if stats_on(effective):
+        out["stats/real"] = np.concatenate([np.empty(0, real)] + [s.real_words for s in stats]).astype(real)
+        out["stats/int"] = np.concatenate([np.empty(0, np.int32)] + [s.int_words for s in stats]).astype(np.int32)
         out["stats/log"] = np.array(stats_log([line for s in stats for line in s.lines]))
     return out
 
