@@ -261,7 +261,11 @@ def _owned(cp, array, nc):
 
 def _owned_view(cp, array, nc):
     """The owned cells of a pool vector, in place: writes through to the pool."""
-    view = cp.asarray(array)[:nc]
+    device = cp.asarray(array)
+    if device is not array:
+        raise ValueError("a pool vector must already be a device array: the lake writes it in place, and a "
+                         "copy would drop its outputs")
+    view = device[:nc]
     if view.shape != (nc,) or not view.flags.c_contiguous:
         raise ValueError("a pool vector must be a contiguous owned-cell prefix the lake can write in place")
     return view

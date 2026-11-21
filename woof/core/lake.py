@@ -169,7 +169,13 @@ class LakeModel:
             (n, self.forcing, self.columns, self.static, self.output,
              cp.float32(dt), cp.float32(self.xice_threshold), self.errors),
             self._arena)
-        self.check_errors()
+        try:
+            self.check_errors()
+        except RuntimeError:
+            # The kernel advanced the work copy in place and nothing was committed: the next step
+            # re-gathers from the horizontal array (the last committed state), resident or not.
+            self._needs_refresh = True
+            raise
         fields["lake_columns"].reshape(LAKE_STATE_WORDS, -1)[:, self.indices] = self.columns
         for row, (name, _) in enumerate(LAKE_OUTPUT_LAYOUT):
             fields[name].reshape(-1)[self.indices] = self.output[row]
