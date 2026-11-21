@@ -32,10 +32,9 @@ def test_chem_sets_by_name(tmp_path):
     ({"chem_opt": 300}, "chem.sulfur"),
     ({"chem_sets": "smoke", "fire_emission_mode": 3}, "must be a string"),
     ({"chem_sets": "sfire_smoke"}, "fire grid"),
-    ({"chem_opt": 1}, "RADM2"),
     ({"chem_opt": 7}, "PNNL"),
     ({"chem_opt": 401, "biomass_burn_opt": True}, "integer"),
-    ({"chem_opt": 401, "emiss_opt": 1}, "not carried on the hex route"),
+    ({"chem_opt": 401, "emiss_opt": 1}, "set 'dust' answers none"),
     ({"chem_opt": 401, "dust_opt": 1.5}, "integer"),
     ({"chem_opt": 401, "chem_sets": "dust"}, "exactly one"),
     ({}, "exactly one"),
@@ -45,6 +44,11 @@ def test_unported_and_malformed_refused_by_name(tmp_path, block, match):
     # (fire smoke with plume rise is carried: tests/test_hex_chem_wrf_gpu.py, the smoke case)
     with pytest.raises(ValueError, match=match):
         load_config(config(tmp_path, block))
+
+
+def test_radm2_is_carried_not_refused(tmp_path):
+    # RADM2 (chem_opt 1) moved from the refused to the ported processes (PORTED_PROCESSES)
+    configure(config(tmp_path, {"chem_opt": 1}))
 
 
 def test_species_and_wrf_chem_are_exclusive(tmp_path):
@@ -140,9 +144,9 @@ def test_dust_statics_follow_each_rows_interpolation_sequence(tmp_path):
     assert chem_wrf.statics_receipt(tmp_path)["SANDFRAC"]["files_sha256"] != before
 
 
-def test_suite_route_refuses_wrf_chem(tmp_path):
+def test_suite_route_refuses_wrf_chem_without_its_grid_configs_and_dt(tmp_path):
     from woof.hex.mpasphys.chemistry_v842 import SuiteChemistry
-    with pytest.raises(ValueError, match="hex WOOF column route"):
+    with pytest.raises(ValueError, match="needs the vertical grid, configs and dt"):
         SuiteChemistry(config(tmp_path, {"chem_opt": 401}), registry_names=("qv",), mesh=None, nlev=3,
                        grid_path=None, start_text="2021-06-01_18:00:00")
 
