@@ -13,9 +13,11 @@
 #            woof_dump.inc in (apply_dump_patch.sh) and build it
 # The pinned trees are never patched; only the -dump copy is.
 # usage: build_4dvar.sh src|wrfplus|wrfda|dump
+#   J (default 6): make jobs; RESUME=1 (wrfplus): keep the configured tree
+#   and its objects, to finish a compile a killed compiler stopped
 set -eux
 STEP=${1:?usage: build_4dvar.sh src|wrfplus|wrfda|dump}
-export HOME=/tmp NETCDF=/usr J=${J:-6}
+export HOME=/tmp NETCDF=/usr; JOBS=${J:-6}; unset J   # compile reads J as "-j N"
 W=${W:-/d/scratch/wrfda}; W=$(cd "$W" && pwd); S=$W/src
 TAR=$S/v4.7.1.tar.gz
 TAR_SHA=11186188b033d26332e31769c1f7aff9349406920a7f72eeb256d5881f7223f4
@@ -32,11 +34,18 @@ src)
   ;;
 wrfplus)
   cd "$PLUS"
-  ./clean -a >/dev/null 2>&1 || true
-  printf "%s\n" "$OPT" | ./configure wrfplus
+  if [ "${RESUME:-0}" = 1 ] && [ -s configure.wrf ]; then
+    echo "RESUME=1: keeping the configured tree and its objects (a retry after a killed compile)"
+  else
+    ./clean -a >/dev/null 2>&1 || true
+    printf "%s\n" "$OPT" | ./configure wrfplus
+  fi
   grep -q -- "-fdefault-real-8" configure.wrf || { echo "WRFPLUS is not built with 8-byte reals" >&2; exit 1; }
   rm -f main/wrf.exe main/libwrflib.a
-  /usr/bin/time -v ./compile wrfplus > "$W/build-wrfplus.log" 2>&1 || true
+  /usr/bin/time -v ./compile -j "$JOBS" wrfplus > "$W/build-wrfplus.log" 2>&1 || true
+  if grep -q "Killed signal terminated program" "$W/build-wrfplus.log"; then
+    echo "a compiler was killed (out of memory?): retry with RESUME=1 and a smaller J" >&2
+  fi
   [ -x main/wrf.exe ] && [ -s main/libwrflib.a ] || { echo "WRFPLUS did not build: see $W/build-wrfplus.log" >&2; exit 1; }
   ls -la main/wrf.exe main/libwrflib.a
   ;;
