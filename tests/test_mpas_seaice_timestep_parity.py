@@ -152,7 +152,8 @@ def test_a_mutated_driver_is_caught(monkeypatch, mutation):
         original_init = ts.initialize
 
         def init_with_two(**kw):
-            clock = original_init(pools=kw["pools"], configs=dict(kw["configs"], config_dynamics_subcycle_number=2))
+            clock = original_init(pools=kw["pools"], configs=dict(kw["configs"], config_dynamics_subcycle_number=2),
+                                  basis=kw.get("basis"))
             return clock
         monkeypatch.setattr(ts, "initialize", init_with_two)
         field = "velocity_solver/uVelocity"
