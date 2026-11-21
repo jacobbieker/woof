@@ -201,10 +201,14 @@ def libm(name: str, real, metric_libm: str, x, y=None):
 def _fma64(a: float, b: float, c: float) -> float:
     """binary64 ``a*b + c`` with one rounding: ``math.fma`` (Python 3.13+),
     else exact rational arithmetic and CPython's correctly rounded division."""
-    if hasattr(math, "fma"):
-        return math.fma(a, b, c)
     if not (math.isfinite(a) and math.isfinite(b) and math.isfinite(c)):
-        return a * b + c
+        with np.errstate(all="ignore"):
+            return float(np.float64(a) * np.float64(b) + np.float64(c))     # IEEE's inf/NaN (math.fma raises)
+    if hasattr(math, "fma"):
+        try:
+            return math.fma(a, b, c)
+        except OverflowError:
+            pass
     exact = Fraction(a) * Fraction(b) + Fraction(c)
     try:
         return float(exact)
