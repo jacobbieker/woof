@@ -705,8 +705,8 @@ Each step is one small PR, taken to merged before the next widens.
      step gives `dycore.step`'s words on a mapped state. With msfv passed
      where the strict path passes MSFV_INV, about 2000 words per
      prognostic differ, so the test pins the choice.
-   - Still refused then: lateral boundaries other than periodic (bound
-     in 8f).
+   - Still refused: lateral boundaries other than periodic (specified
+     boundaries next), so WRFDA's regional tutorial case cannot run yet.
 8f. Specified boundaries in the step (DA item 3): `step_geometry` binds
    woof's strict specified step on a domain whose tables are attached
    (`attach_lateral_boundaries`).
@@ -834,6 +834,26 @@ Each step is one small PR, taken to merged before the next widens.
    - Still to come for item 4: the moist diagnosis (`calc_p_rho` and
      `al`/`alt` with qv), moist scalar advection and update, the moist
      LBC rows, and the step binding.
+8i. Moisture, part 2 (DA item 4): the moist diagnosis. `PRPGeometry.moist`
+   makes qv an active input of `calc_p_rho_phi_tl/_ad`. The temperature
+   ratio's numerator `Rd (300 + theta')` is multiplied by WRF's `qvf = 1 +
+   rvovrd qv`, as woof's strict `wrf_p_rho_phi_column` does. That kernel
+   is used for a moist state without `use_theta_m`; with `use_theta_m` the
+   primal passes moist 0. `rvovrd` is the binary32 quotient the primal's
+   `#define` carries (`woof.core.constants.RVOVRD`).
+   - Tests (`tests/test_grad_wrfplus_rk_stage.py`, op `prpm`, both
+     hypsometric options, carried and formed muts, 1-D base, one column):
+     - dot product;
+     - the adjoint accumulates, and p/al/alt/p' are consumed;
+     - FD convergence;
+     - the binary32 base gives `calc_p_alpha[_carried_muts]`'s words
+       with moist 1. Each case also checks that qv moves p off the dry
+       words.
+     There is no WRFPLUS fixture for the moist case.
+   - The step still refuses moisture. The diagnosis joins it with the
+     moist scalar advection and the step binding.
+   - Still refused then: lateral boundaries other than periodic (bound
+     in 8f).
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 
