@@ -204,7 +204,7 @@ def read_input(path, *, config: dict, precision: str) -> tuple[dict, dict]:
                                                declaration=f"{source} with dimensions {shape}")
                 value = np.ascontiguousarray(value, dtype)
             pools[pool][name] = value
-            missing = [n for n in RECONSTRUCTION if n not in ds.variables]
+        missing = [n for n in RECONSTRUCTION if n not in ds.variables]
     if precision == "r8" and not rkind.trig64():
         # the strain-rate angle calls glibc's binary64 atan (LGPL): left out at
         # RKIND 8 unless WOOF_GLIBC239_LIBM64=1
@@ -265,20 +265,21 @@ def write_output(path, *, pools: dict, clock: forward_v842.Clock) -> None:
             var[0] = host if axes else host[0]
 
 
-def run(*, namelist, input=None, out, precision: str = "r4", restart=None, n_steps: int | None = None):
-    """A run from ``input`` (a cold start) or from ``restart``; writes
-    ``out/output.nc`` and ``out/restart.npz``. Returns the clock."""
+def run(*, namelist, input=None, out, precision: str | None = None, restart=None, n_steps: int | None = None):
+    """A run from ``input`` (a cold start, at ``precision``, 'r4' by
+    default) or from ``restart`` (at its stored precision, which
+    ``precision`` must name if given); writes ``out/output.nc`` and
+    ``out/restart.npz``. Returns the clock."""
     out = Path(out)
     config = read_namelist(namelist)
     if restart is not None:
-        pools, clock = forward_v842.read_restart(restart, config=config)
-        config.update({k: bool(v) if k == "on_a_sphere" else v
-                       for k, v in _restart_mesh_config(restart).items()})
+        config.update(_restart_mesh_config(restart))
+        pools, clock = forward_v842.read_restart(restart, config=config, precision=precision)
         forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps)
     else:
         if input is None:
             raise ValueError("a cold start needs --input")
-        host, mesh_config = read_input(input, config=config, precision=precision)
+        host, mesh_config = read_input(input, config=config, precision=precision or "r4")
         config.update(mesh_config)
         pools = device_pools(host)
         clock = forward_v842.cold_start(pools=pools, config=config)

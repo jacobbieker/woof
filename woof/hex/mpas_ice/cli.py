@@ -28,8 +28,9 @@ def add_ice_parser(commands) -> None:
     run.add_argument("--input", default=None, help="the MPAS land-ice input file (a cold start)")
     run.add_argument("--restart", default=None, help="a restart.npz a run wrote (continue it)")
     run.add_argument("--out", required=True, help="the folder for output.nc and restart.npz")
-    run.add_argument("--precision", choices=("r4", "r8"), default="r4",
-                     help="MALI's RKIND: r4 (single, MALI's default build) or r8")
+    run.add_argument("--precision", choices=("r4", "r8"), default=None,
+                     help="MALI's RKIND: r4 (single, MALI's default build; a cold start's default) or r8; a "
+                          "restart runs at its stored precision")
     run.add_argument("--steps", type=int, default=None, help="stop after this many steps (default: the stop time)")
     run.set_defaults(handler=_run)
 

@@ -3,8 +3,9 @@
 Each piece runs on the active backend (CUDA, or Metal through the facade) over
 the committed oracle fixtures, at RKIND 4 and RKIND 8, and every output word
 must be bit-identical.
-The core's registry status is ``partial`` (the standalone forward mode runs)
-until every piece is ported; docs/mpas-coupled-roadmap.md lists what remains.
+The core's registry status is ``ported_subset``: the forward mode with the
+'sia' and 'none' velocity solvers (docs/mpas-coupled-roadmap.md lists what
+remains).
 """
 from __future__ import annotations
 

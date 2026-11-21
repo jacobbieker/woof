@@ -401,8 +401,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     initialisation, the initial solve and the time-step loop, with a
     bitwise restart; `woof/hex/mpas_ice/forward_v842.py`), word-exact over
     the dome, EISMINT2 A, hydrology and enthalpy-benchmark cases on uniform
-    and variable resolution meshes; the land-ice core's registry status is
-    now `partial`;
+    and variable resolution meshes; `woof hex ice run --namelist
+    namelist.landice --input landice_grid.nc --out DIR` runs it from an
+    MPAS land-ice input file to the oracle's words (`output.nc`, and a
+    `restart.npz` to continue from); MALI's side of the land-ice/ocean seam
+    exports `landIcePressure`, `landIceFraction`, `landIceMask` and the
+    liquid (grounding-line discharge) and solid (calving) runoff, and
+    imports the ocean's floating basal mass balance
+    (`woof/hex/mpas_ice/ocean_seam_v842.py`, graded by conservation); the
+    land-ice core's registry status is now `ported_subset` (velocity
+    solvers 'sia' and 'none');
   - the coupler's ocean import merge, E3SM v3.2.0's `prep_ocn_merge`
     (`woof/hex/coupled/prep_ocn_merge_e3sm.py`, opt-in, not called by the
     coupled step): x2o built from the atmosphere, sea ice, runoff, waves,

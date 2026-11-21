@@ -26,8 +26,9 @@ def test_registry_names_all_four_cores() -> None:
     assert component("atmosphere").status == "ported"
     assert component("seaice").status == "stub"
     assert component("landice").core_dir == "core_landice"
-    # the standalone forward mode is ported; the coupled step still refuses it
-    assert component("landice").status == "partial"
+    # the forward mode is ported for the declared velocity solvers
+    assert component("landice").status == "ported_subset"
+    assert component("landice").schemes == ("sia", "none")
 
 
 def test_registry_refuses_an_unknown_component_by_name() -> None:
@@ -40,8 +41,11 @@ def test_require_ported_passes_the_atmosphere_and_refuses_a_stub() -> None:
     with pytest.raises(ConfigurationRefusal) as exc:
         require_ported("seaice")
     assert "docs/mpas-coupled-roadmap.md" in str(exc.value)
-    with pytest.raises(ConfigurationRefusal, match="partial"):
+    assert require_ported("landice", ("sia",)).name == "landice"
+    with pytest.raises(ConfigurationRefusal, match="declared subset"):
         require_ported("landice")
+    with pytest.raises(ConfigurationRefusal, match="FO"):
+        require_ported("landice", ("FO",))
 
 
 def _declare_subset(monkeypatch, name: str, schemes: tuple[str, ...]) -> None:
