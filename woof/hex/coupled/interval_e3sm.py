@@ -22,8 +22,19 @@ for word to E3SM on their own:
   :meth:`~CouplerInterval.ocn_recv_post`: the components' new exports;
 - :meth:`~CouplerInterval.update_fractions` (``cime_run_update_fractions``):
   ``seq_frac_set`` (:mod:`.seq_frac_e3sm`);
+- :meth:`~CouplerInterval.set_inputs`: what changes between coupler steps
+  besides the atmosphere's, ocean's and sea ice's exports: infodata's
+  ``nextsw_cday`` (the atmosphere's) and ``flux_epbalfact``, and the
+  runoff, land-ice and wave exports to the ocean and sea ice (r2x, g2x,
+  w2x), each holding until set again;
 - :meth:`~CouplerInterval.step`: one coupler step in the driver's order,
-  given the run alarms.
+  given the run alarms (and, optionally, this step's :meth:`set_inputs`).
+
+``atm_c2_ocn`` is not a switch here: ``cime_comp_mod`` sets it whenever the
+atmosphere and ocean are present (lines 1810-1811), as they are in an
+interval, so ``prep_ocn_calc_a2x_ox`` always runs and a2x (on the ocean's
+grid) is this step's export. ``Switches(atm_c2_ocn=False)`` is refused by
+name.
 
 The ice-to-ocean and ocean-to-ice mappers (``seq_map_init_rearrolap``) are
 ``copy_only`` on one grid: ``seq_map_map`` copies the shared fields
@@ -55,6 +66,9 @@ E3SM_COMMIT = "648b167b7f95267a159a9fdee25faf604c2bfc4f"
 SOURCE_FILES = ("driver-mct/main/cime_comp_mod.F90:cime_run_atmocn_setup,cime_run_ocn_setup_send,"
                 "cime_run_ice_setup_send,cime_run_update_fractions,cime_run_atmocn_fluxes,cime_run_ocn_albedos",)
 
+#: the vectors other components export to the ocean and sea ice that an interval takes as inputs
+SIDE_INPUTS = ("r2x_o", "w2x_o", "g2x_o", "r2x_i", "g2x_i", "w2x_i")
+
 #: the vectors an interval holds and the grid each is on ("o": the ocean's and sea ice's; "a": the atmosphere's)
 VECTORS = {"dom": "o", "a2x": "o", "o2x": "o", "i2x": "o", "xao": "o", "fractions_o": "o", "fractions_i": "o",
            "fractions_a": "a", "r2x_o": "o", "w2x_o": "o", "g2x_o": "o", "r2x_i": "o", "g2x_i": "o", "w2x_i": "o",
@@ -77,15 +91,17 @@ class IntervalRefusal(ValueError):
 @dataclass(frozen=True)
 class Switches:
     """The driver's switches an interval reads: ``ocn_prognostic``,
-    ``ice_prognostic``, ``ice_c2_ocn``, ``ocn_c2_ice`` and ``atm_c2_ice``
-    (cime_comp_mod's), infodata's ``flux_albav``, ``nextsw_cday`` and
-    ``flux_epbalfact``, the namelist's ``seq_flux_mct_albdif`` and
+    ``ice_prognostic``, ``atm_c2_ocn`` (only True), ``ice_c2_ocn``,
+    ``ocn_c2_ice`` and ``atm_c2_ice`` (cime_comp_mod's), infodata's
+    ``flux_albav``, ``nextsw_cday`` and ``flux_epbalfact`` (their starting
+    values: :meth:`CouplerInterval.set_inputs` changes them), the namelist's ``seq_flux_mct_albdif`` and
     ``_albdir``, seq_frac_mct's ``seq_frac_dead``, and ``rof2ocn_nutrients``,
     ``seq_flds_i2o_per_cat``, ``wav_ocn_coup`` and ``wav_ice_coup``
     (seq_flds_mod's)."""
 
     ocn_prognostic: bool = True
     ice_prognostic: bool = True
+    atm_c2_ocn: bool = True
     ice_c2_ocn: bool = True
     ocn_c2_ice: bool = True
     atm_c2_ice: bool = True
@@ -101,7 +117,7 @@ class Switches:
     wav_ice_coup: str = "none"
 
     def check(self) -> None:
-        for name in ("ocn_prognostic", "ice_prognostic", "ice_c2_ocn", "ocn_c2_ice", "atm_c2_ice", "flux_albav",
+        for name in ("ocn_prognostic", "ice_prognostic", "atm_c2_ocn", "ice_c2_ocn", "ocn_c2_ice", "atm_c2_ice", "flux_albav",
                      "frac_dead", "rof2ocn_nutrients", "i2o_per_cat"):
             if not isinstance(getattr(self, name), (bool, np.bool_)):
                 raise TypeError(f"{name} must be a bool")
@@ -109,6 +125,10 @@ class Switches:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (int, float, np.floating)):
                 raise TypeError(f"{name} must be a real")
+        if not self.atm_c2_ocn:
+            raise IntervalRefusal("atm_c2_ocn = False is not reachable in an interval: cime_comp_mod sets it "
+                                  "whenever the atmosphere and ocean are present, so prep_ocn_calc_a2x_ox always "
+                                  "runs (a2x_ox left zero is not ported)")
         for name in ("wav_ocn_coup", "wav_ice_coup"):
             if getattr(self, name) != "none":
                 raise IntervalRefusal(f"{name} = {getattr(self, name)!r} is not ported in an interval: "
@@ -149,6 +169,8 @@ class CouplerInterval:
         if missing:
             raise ValueError(f"lists has no {', '.join(sorted(missing))}")
         self.switches, self.flux, self.mapper_i2a = switches, flux, mapper_i2a
+        #: infodata's values this step (set_inputs changes them)
+        self.nextsw_cday, self.flux_epbalfact = float(switches.nextsw_cday), float(switches.flux_epbalfact)
         self.n, self.n_a = int(n), int(n_a)
         self.lists = {k: tuple(lists[k]) for k in VECTORS}
         for k, names in self.lists.items():
@@ -189,6 +211,26 @@ class CouplerInterval:
             raise ValueError(f"{name} must be float64 of shape {dst.shape}")
         dst[...] = cp.asarray(array)
 
+    def set_inputs(self, *, nextsw_cday=None, flux_epbalfact=None, **vectors) -> None:
+        """What changes between coupler steps besides the exports
+        :meth:`step` takes: infodata's ``nextsw_cday`` and
+        ``flux_epbalfact`` (reals), and any of :data:`SIDE_INPUTS` (each a
+        ``(lsize, nflds)`` float64 array). Each holds until set again; the
+        routines read them where E3SM reads them, in the next phases run."""
+        unknown = set(vectors) - set(SIDE_INPUTS)
+        if unknown:
+            raise ValueError(f"set_inputs takes nextsw_cday, flux_epbalfact and {', '.join(SIDE_INPUTS)}; "
+                             f"not {', '.join(sorted(unknown))}")
+        for name, value in (("nextsw_cday", nextsw_cday), ("flux_epbalfact", flux_epbalfact)):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float, np.floating))):
+                raise TypeError(f"{name} must be a real")
+        for name, array in vectors.items():
+            self._set(name, array)
+        if nextsw_cday is not None:
+            self.nextsw_cday = float(nextsw_cday)
+        if flux_epbalfact is not None:
+            self.flux_epbalfact = float(flux_epbalfact)
+
     # -- cime_run_atmocn_setup ------------------------------------------------
     def atmocn_setup(self, a2x) -> None:
         """``cime_run_atmocn_setup`` with this step's atmosphere export on the ocean grid."""
@@ -210,12 +252,12 @@ class CouplerInterval:
             _omerge.merge(self._ocn_plan, {"a2x": v["a2x"], "i2x": v["i2x_ox"], "r2x": v["r2x_o"],
                                            "w2x": v["w2x_o"], "g2x": v["g2x_o"], "xao": v["xao"],
                                            "fractions": v["fractions_o"]},
-                          v["x2o"], flux_epbalfact=float(s.flux_epbalfact))
+                          v["x2o"], flux_epbalfact=self.flux_epbalfact)
             self.accumulator.accum(v["x2o"])
         _alb.seq_flux_ocnalb(a2x=v["a2x"], a2x_fields=self.lists["a2x"], fractions=v["fractions_o"],
                              fractions_fields=self.lists["fractions_o"], xao=v["xao"], xao_fields=self.lists["xao"],
                              flux_albav=bool(s.flux_albav), albdif=float(s.albdif), albdir=float(s.albdir),
-                             nextsw_cday=float(s.nextsw_cday))
+                             nextsw_cday=self.nextsw_cday)
 
     # -- cime_run_ocn_setup_send ----------------------------------------------
     def ocn_setup_send(self) -> None:
@@ -240,7 +282,7 @@ class CouplerInterval:
                                           wav_ice_coup=s.wav_ice_coup)
         _imerge.merge(self._ice_plan, {"a2x": v["a2x_ix"], "o2x": v["o2x_ix"], "r2x": v["r2x_i"],
                                        "g2x": v["g2x_i"], "w2x": v["w2x_i"]},
-                      v["x2i"], flux_epbalfact=float(s.flux_epbalfact))
+                      v["x2i"], flux_epbalfact=self.flux_epbalfact)
 
     def ice_recv_post(self, i2x) -> None:
         """The sea ice's new export (``cime_run_ice_recv_post``)."""
@@ -260,15 +302,19 @@ class CouplerInterval:
             fo_fields=self.lists["fractions_o"], fractions_a=v["fractions_a"], fa_fields=self.lists["fractions_a"],
             mapper_i2o=_frac.Mapper("copy"), mapper_i2a=self.mapper_i2a, dead=bool(self.switches.frac_dead))
 
-    def step(self, a2x, *, ocn_run: bool, ice_run: bool, ocn_next: bool, i2x=None, o2x=None) -> None:
+    def step(self, a2x, *, ocn_run: bool, ice_run: bool, ocn_next: bool, i2x=None, o2x=None,
+             inputs: dict | None = None) -> None:
         """One coupler step in RASM_OPTION1's order. ``i2x`` is the sea ice's
         export after it runs (required with ``ice_run``), ``o2x`` the
-        ocean's when its run ends (required with ``ocn_next``)."""
+        ocean's when its run ends (required with ``ocn_next``); ``inputs``,
+        if given, is this step's :meth:`set_inputs`, applied first."""
         for name, value in (("ocn_run", ocn_run), ("ice_run", ice_run), ("ocn_next", ocn_next)):
             if not isinstance(value, (bool, np.bool_)):
                 raise TypeError(f"{name} must be a bool")
         if ice_run and i2x is None or ocn_next and o2x is None:
             raise ValueError("a component that runs this step needs its new export")
+        if inputs:
+            self.set_inputs(**inputs)
         self.atmocn_setup(a2x)
         if ocn_run:
             self.ocn_setup_send()

@@ -138,8 +138,9 @@ def test_the_eps_is_single_precision():
 def test_the_default_path_does_not_call_seq_frac():
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "seq_frac_e3sm" in p.read_text(encoding="utf-8")
-             and p.name not in ("seq_frac_e3sm.py", "e3sm_seq_frac_oracle.py", "interval_e3sm.py",
-                                "e3sm_coupler_interval_oracle.py")]
+             and p.name not in ("seq_frac_e3sm.py", "e3sm_seq_frac_oracle.py")
+             and p.relative_to(ROOT).as_posix() not in ("woof/hex/coupled/interval_e3sm.py",
+                                                    "woof/verify/e3sm_coupler_interval_oracle.py")]
     assert users == []
     siblings = sorted(p.stem for p in (ROOT / "woof" / "hex" / "coupled").glob("*.py")
                       if p.stem not in ("__init__", "seq_frac_e3sm"))

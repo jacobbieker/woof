@@ -34,7 +34,9 @@
 ! g2x_ox, r2x_ix, g2x_ix, w2x_ix, x2o and x2i; then, for a mapper of kind 2,
 ! its element count and the elements' global rows, columns (1-based) and
 ! weights (r8). Per step: the ocean run, sea-ice run and ocean next alarms
-! (0/1), a2x_ox's rAttr, then the sea ice's new export (with its run alarm)
+! (0/1); nextsw_cday and flux_epbalfact (r8) and a flag (0/1) for new
+! r2x_ox, w2x_ox, g2x_ox, r2x_ix, g2x_ix and w2x_ix rAttr, which follow
+! when set (each that has fields); a2x_ox's rAttr, then the sea ice's new export (with its run alarm)
 ! and the ocean's (with its next alarm).
 ! i2x_ox, a2x_ix and o2x_ix take their sources' field lists and the
 ! accumulator x2o's, zeroed with a count of 0, as prep_ocn_init and
@@ -71,7 +73,8 @@ program run_coupler_interval
   character(len=4096) :: path_in, path_out
   character(len=:), allocatable :: rlist
   integer :: flags(8), switches(8), sizes(3), alarms(3), rlen, i, istep, uin, uout, ierr
-  real(r8) :: reals(6)
+  real(r8) :: reals(6), step_reals(2)
+  integer :: iside
   logical :: ocn_prognostic, ice_prognostic, ice_c2_ocn, ocn_c2_ice, atm_c2_ice
 
   call MPI_Init(ierr)
@@ -164,6 +167,19 @@ program run_coupler_interval
   open(newunit=uout, file=trim(path_out), access='stream', form='unformatted', status='replace')
   do istep = 1, sizes(3)
      read(uin) alarms
+     ! this step's infodata (the atmosphere's nextsw_cday, flux_epbalfact) and,
+     ! when flagged, the runoff, land-ice and wave exports to the ocean and sea ice
+     read(uin) step_reals, iside
+     infodata % nextsw_cday = step_reals(1)
+     infodata % flux_epbalfact = step_reals(2)
+     if (iside /= 0) then
+        call read_side(r2x_ox(1))
+        call read_side(w2x_ox(1))
+        call read_side(g2x_ox(1))
+        call read_side(r2x_ix(1))
+        call read_side(g2x_ix(1))
+        call read_side(w2x_ix(1))
+     end if
      read(uin) a2x_ox(1) % rAttr
      ! cime_run_atmocn_setup
      if (ocn_prognostic .and. ice_c2_ocn) call prep_ocn_calc_i2x_ox(timer='CPL:atmocnp_ice2ocn')
@@ -202,6 +218,12 @@ program run_coupler_interval
   call MPI_Finalize(ierr)
 
 contains
+
+  ! a side export's new values, if it has fields
+  subroutine read_side(v)
+    type(mct_aVect), intent(inout) :: v
+    if (mct_aVect_nRattr(v) > 0) read(uin) v % rAttr
+  end subroutine read_side
 
   ! a vector the driver holds for an absent component: its list and values
   ! (MCT cannot initialise a vector off one with no fields: the list again)

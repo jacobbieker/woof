@@ -25,12 +25,15 @@ THE BREAKAGES THESE PREVENT
    three fractions after every step.
 2. A case generator whose bytes drift. The input digests are pinned.
 3. A fixture that misses a branch: accumulation windows of 1, 2, 3 and 4
-   samples cut by the ocean's alarms, the sea ice every step and every
-   other, the albedos averaged and computed, the implicit stress and
+   samples cut by the ocean's alarms (and one never averaged), the sea ice
+   every step and every other, nextsw_cday, flux_epbalfact and the runoff,
+   land-ice and wave exports changing between steps, seq_frac_set stopping
+   mid-run, the albedos averaged and computed, the implicit stress and
    gustiness, dead models, an ocean or sea ice that is not prognostic, the
    component maps switched off, an atmosphere mapper as a matrix, a copy
    and a rearrangement.
-4. A gate that cannot fail: phases out of order, the flux's mask taken from
+4. A gate that cannot fail: phases out of order, the albedos before the
+   ocean's merge, the per-step inputs ignored, the flux's mask taken from
    the fractions of the moment, a map taken when its switch is off, the
    accumulation before the merge, a copy where E3SM keeps the earlier
    value.
@@ -63,6 +66,8 @@ from conftest import requires_gpu
 from woof.hex.coupled import flux_atmocn_e3sm as fxe
 from woof.hex.coupled import interval_e3sm as ie
 from woof.hex.coupled import ocn_accum_e3sm as oae
+from woof.hex.coupled import ocnalb_e3sm as oce
+from woof.hex.coupled import seq_frac_e3sm as sfe
 from woof.verify import e3sm_coupler_interval_oracle as ci
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,7 +95,9 @@ def test_case_inputs_are_the_recorded_bytes():
 def test_fixture_covers_the_branches():
     outputs, aborts = ci.load_fixture()
     cases = {c["name"]: c for c in ci.cases()}
-    assert aborts == {} and set(outputs) == set(cases)
+    assert set(aborts) == {n for n, c in cases.items() if c["aborts"]} == {"frac_abort_mid_run"}
+    assert aborts["frac_abort_mid_run"].startswith("(seq_frac_check) [ice set]")
+    assert set(outputs) == {n for n, c in cases.items() if not c["aborts"]}
     specs = [c["spec"] for c in cases.values()]
     for key in ("implicit", "gust", "dead", "albav"):
         assert {s[key] for s in specs} == {True, False}, key
@@ -98,9 +105,17 @@ def test_fixture_covers_the_branches():
         assert {s[key] for s in specs} == {True, False}, key
     assert {s["i2a"] for s in specs} == {"matrix", "copy", "rearrange"}
     assert {s["ice_every"] for s in specs} == {1, 2}
-    # the accumulation windows the ocean's alarms cut: 1, 3, 3 samples
+    # the accumulation windows the ocean's alarms cut: 1, 3, 3; 1, 2; 1, 4 and one never averaged
     assert outputs["ocean_every_third"]["counts"].tolist() == [0, 1, 2, 0, 1, 2, 0]
-    assert outputs["implicit_gust"]["counts"].tolist() == [0, 1, 2, 3]
+    assert outputs["albav_ice_every_other_epbal"]["counts"].tolist() == [0, 1, 0, 1]
+    assert outputs["implicit_gust"]["counts"].tolist() == [0, 1, 2, 3, 0, 1]
+    # the per-step inputs change within a case: nextsw_cday with and without the averaged albedos,
+    # flux_epbalfact, and the side exports
+    for name in ("ocean_every_third", "albav_ice_every_other_epbal"):
+        steps = cases[name]["steps"]
+        assert len({st["nextsw_cday"] for st in steps}) == len(steps), name
+        assert any(st["side"] is not None for st in steps), name
+    assert len({st["flux_epbalfact"] for st in cases["albav_ice_every_other_epbal"]["steps"]}) == 4
     # after an average x2o is the accumulator scaled, before the next merge overwrites it
     o = outputs["ocean_every_third"]
     assert o["step3/x2o"].tobytes() == o["step3/acc"].tobytes()
@@ -170,13 +185,15 @@ def _caught(case_name):
 def test_a_reordered_or_rewired_chain_is_caught(glibc239, monkeypatch):
     real = {name: getattr(ie.CouplerInterval, name) for name in
             ("atmocn_setup", "ice_setup_send", "update_fractions", "step", "__init__")}
+    real_set_inputs = ie.CouplerInterval.set_inputs
 
     def restore():
         for name, fn in real.items():
             monkeypatch.setattr(ie.CouplerInterval, name, fn)
 
     # the fractions updated before the sea ice's export arrives
-    def fractions_first(self, a2x, *, ocn_run, ice_run, ocn_next, i2x=None, o2x=None):
+    def fractions_first(self, a2x, *, ocn_run, ice_run, ocn_next, i2x=None, o2x=None, inputs=None):
+        self.set_inputs(**inputs)
         self.atmocn_setup(a2x)
         if ocn_run:
             self.ocn_setup_send()
@@ -191,7 +208,8 @@ def test_a_reordered_or_rewired_chain_is_caught(glibc239, monkeypatch):
     restore()
 
     # the ocean's new export taken before the sea ice's merge reads o2x
-    def ocean_first(self, a2x, *, ocn_run, ice_run, ocn_next, i2x=None, o2x=None):
+    def ocean_first(self, a2x, *, ocn_run, ice_run, ocn_next, i2x=None, o2x=None, inputs=None):
+        self.set_inputs(**inputs)
         self.atmocn_setup(a2x)
         if ocn_run:
             self.ocn_setup_send()
@@ -229,6 +247,28 @@ def test_a_reordered_or_rewired_chain_is_caught(glibc239, monkeypatch):
     monkeypatch.setattr(ie.CouplerInterval, "ice_setup_send", always_map_ice)
     assert _caught("no_component_maps")
     restore()
+
+    # the albedos computed before the ocean's merge reads xao and the fractions
+    def albedo_first(self, a2x):
+        v, s = self._v, self.switches
+        self._set("a2x", a2x)
+        if s.ocn_prognostic and s.ice_c2_ocn:
+            v["i2x_ox"][...] = v["i2x"]
+        oce.seq_flux_ocnalb(a2x=v["a2x"], a2x_fields=self.lists["a2x"], fractions=v["fractions_o"],
+                            fractions_fields=self.lists["fractions_o"], xao=v["xao"], xao_fields=self.lists["xao"],
+                            flux_albav=bool(s.flux_albav), albdif=float(s.albdif), albdir=float(s.albdir),
+                            nextsw_cday=self.nextsw_cday)
+        real["atmocn_setup"](self, a2x)                      # the flux, the merge and the albedos again
+    monkeypatch.setattr(ie.CouplerInterval, "atmocn_setup", albedo_first)
+    assert _caught("ocean_every_third")
+    assert _caught("albav_ice_every_other_epbal")
+    restore()
+
+    # the per-step inputs ignored: nextsw_cday, flux_epbalfact and the side exports held at their start
+    monkeypatch.setattr(ie.CouplerInterval, "set_inputs", lambda self, **kw: None)
+    assert _caught("albav_ice_every_other_epbal")
+    assert _caught("ocean_every_third")
+    monkeypatch.setattr(ie.CouplerInterval, "set_inputs", real_set_inputs)
 
     # the sea ice's merge reading the ocean's export itself, not the copy the coupler took
     def no_copy(self):
@@ -299,6 +339,58 @@ def test_bad_set_ups_are_refused(glibc239):
         interval.step(a2x, ocn_run=True, ice_run=1, ocn_next=False)
     with pytest.raises(ValueError, match="a2x must be float64"):
         interval.atmocn_setup(a2x[:-1])
+
+
+@requires_gpu
+def test_the_chain_stops_where_seq_frac_set_does(glibc239):
+    import cupy as cp
+    _, aborts = ci.load_fixture()
+    case = _case("frac_abort_mid_run")
+    interval = ci.interval_for(case)
+    for k, ((ocn_run, ice_run, ocn_next), step) in enumerate(zip(ci.alarms(case["spec"]), case["steps"])):
+        call = dict(ocn_run=ocn_run, ice_run=ice_run, ocn_next=ocn_next,
+                    i2x=None if step["i2x"] is None else cp.asarray(step["i2x"]),
+                    o2x=None if step["o2x"] is None else cp.asarray(step["o2x"]),
+                    inputs=dict(nextsw_cday=step["nextsw_cday"], flux_epbalfact=step["flux_epbalfact"]))
+        if k < case["spec"]["abort_step"]:
+            interval.step(cp.asarray(step["a2x"]), **call)
+            continue
+        with pytest.raises(sfe.FracAbort) as stopped:
+            interval.step(cp.asarray(step["a2x"]), **call)
+        assert str(stopped.value) == aborts[case["name"]]
+        break
+    else:
+        raise AssertionError("the chain did not stop")
+
+
+@requires_gpu
+def test_the_per_step_inputs_are_checked(glibc239):
+    import cupy as cp
+    case = _case("ocean_every_third")
+    interval = ci.interval_for(case)
+    with pytest.raises(ValueError, match="x2o"):
+        interval.set_inputs(x2o=cp.zeros_like(interval.vector("x2o")))
+    with pytest.raises(TypeError, match="nextsw_cday"):
+        interval.set_inputs(nextsw_cday="120")
+    with pytest.raises(TypeError, match="flux_epbalfact"):
+        interval.set_inputs(flux_epbalfact=True)
+    with pytest.raises(ValueError, match="r2x_o must be float64"):
+        interval.set_inputs(r2x_o=interval.vector("r2x_o")[:-1])
+    r2x = cp.asarray(case["values"]["r2x_o"]) * 2.0
+    interval.set_inputs(nextsw_cday=-3.0, flux_epbalfact=0.5, r2x_o=r2x)
+    assert (interval.nextsw_cday, interval.flux_epbalfact) == (-3.0, 0.5)
+    assert interval.vector("r2x_o").tobytes() == r2x.tobytes()
+    # the orbital albedos stay refused when a step's nextsw_cday asks for them
+    a2x = cp.asarray(case["steps"][0]["a2x"])
+    with pytest.raises(oce.AlbedoRefusal):
+        interval.step(a2x, ocn_run=True, ice_run=False, ocn_next=False, inputs=dict(nextsw_cday=120.0))
+
+
+def test_atm_c2_ocn_off_is_refused_by_name():
+    with pytest.raises(ie.IntervalRefusal, match="atm_c2_ocn"):
+        ie.Switches(atm_c2_ocn=False).check()
+    with pytest.raises(TypeError, match="atm_c2_ocn"):
+        ie.Switches(atm_c2_ocn=0).check()
 
 
 def _oracle_toolchain():

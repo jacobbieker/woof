@@ -37,7 +37,8 @@ from woof.verify.e3sm_ice_merge_oracle import GCASE as _ICE_GCASE
 from woof.verify.e3sm_ocean_merge_oracle import GCASE as _OCN_GCASE
 from woof.verify.e3sm_ocean_merge_oracle import _fractions, _uniform, _vector
 from woof.verify.e3sm_ocean_merge_oracle import word_mismatches  # noqa: F401
-from woof.verify.e3sm_seq_frac_oracle import FA_FIELDS, FI_FIELDS, FO_FIELDS, KIND_CODES, _mapped, _matrix
+from woof.verify.e3sm_seq_frac_oracle import _BELOW, FA_FIELDS, FI_FIELDS, FO_FIELDS, KIND_CODES, _mapped, _matrix
+from woof.verify.e3sm_seq_frac_oracle import abort_line  # noqa: F401  (make_fixture reads seq_frac_check's line)
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "e3sm_coupler_interval"
 
@@ -58,28 +59,40 @@ LISTS = {
 #: the stream's order after the domain
 STREAM = ("a2x", "o2x", "i2x", "xao", "fractions_o", "fractions_i", "fractions_a", "r2x_o", "w2x_o", "g2x_o",
           "r2x_i", "g2x_i", "w2x_i", "x2o", "x2i")
+#: the side exports a step may change (set_inputs's vectors), in the stream's order
+SIDE = ("r2x_o", "w2x_o", "g2x_o", "r2x_i", "g2x_i", "w2x_i")
 OUTPUTS = ("xao", "acc", "x2o", "x2i", "fractions_o", "fractions_i", "fractions_a")
 
 
 def _spec(name, *, seed, steps, ocn_every=3, ice_every=1, n=16, n_a=11, i2a="matrix", implicit=False, gust=False,
           dead=False, albav=False, epbal=1.0, ocn_prognostic=True, ice_prognostic=True, ice_c2_ocn=True,
-          ocn_c2_ice=True, atm_c2_ice=True):
+          ocn_c2_ice=True, atm_c2_ice=True, cday_step=0.0, epbal_step=0.0, side_every=0, abort_step=None):
+    """``cday_step`` and ``epbal_step``: nextsw_cday's and flux_epbalfact's
+    change per step; ``side_every``: new r2x/g2x/w2x every that many steps
+    (0: never); ``abort_step``: the step whose sea-ice export takes Si_ifrac
+    below seq_frac_check's bound (seq_frac_set stops)."""
     return dict(name=name, seed=seed, steps=steps, ocn_every=ocn_every, ice_every=ice_every, n=n,
                 n_a=n if i2a != "matrix" else n_a, i2a=i2a, implicit=implicit, gust=gust, dead=dead, albav=albav,
                 epbal=epbal, ocn_prognostic=ocn_prognostic, ice_prognostic=ice_prognostic, ice_c2_ocn=ice_c2_ocn,
-                ocn_c2_ice=ocn_c2_ice, atm_c2_ice=atm_c2_ice)
+                ocn_c2_ice=ocn_c2_ice, atm_c2_ice=atm_c2_ice, cday_step=cday_step, epbal_step=epbal_step,
+                side_every=side_every, abort_step=abort_step)
 
 
 SPECS = (
-    # the ocean every third coupler step, the sea ice every step: windows of 1, 3 and 3 samples
-    _spec("ocean_every_third", seed=1, steps=7),
+    # the ocean every third coupler step, the sea ice every step: windows of 1, 3 and 3 samples;
+    # nextsw_cday moving below -0.5 (no orbital albedos), new runoff/land-ice/wave exports every other step
+    _spec("ocean_every_third", seed=1, steps=7, cday_step=-0.25, side_every=2),
+    # windows of 1 and 2; nextsw_cday and flux_epbalfact changing every step, new side exports every 3rd
     _spec("albav_ice_every_other_epbal", seed=2, steps=4, ocn_every=2, ice_every=2, i2a="copy", albav=True,
-          epbal=0.9873046875000123),
-    _spec("implicit_gust", seed=3, steps=4, ocn_every=4, implicit=True, gust=True),
+          epbal=0.9873046875000123, cday_step=0.03125, epbal_step=0.0009765625, side_every=3),
+    # windows of 1 and 4, then one never averaged
+    _spec("implicit_gust", seed=3, steps=6, ocn_every=4, implicit=True, gust=True),
     _spec("dead_models", seed=4, steps=3, ocn_every=1, dead=True),
     _spec("ocean_not_prognostic", seed=5, steps=4, ocn_prognostic=False, i2a="rearrange"),
     _spec("no_component_maps", seed=6, steps=4, ocn_every=2, ice_c2_ocn=False, ocn_c2_ice=False, atm_c2_ice=False),
     _spec("ice_not_prognostic", seed=7, steps=3, ice_prognostic=False),
+    # the chain stops where seq_frac_set does: the second step's sea-ice export out of bounds
+    _spec("frac_abort_mid_run", seed=8, steps=3, abort_step=1),
 )
 
 
@@ -164,11 +177,19 @@ def _build(spec) -> dict:
     for k in ("r2x_o", "w2x_o", "g2x_o", "r2x_i", "g2x_i", "w2x_i", "x2o", "x2i"):
         values[k] = _vector(rng, list(LISTS[k]))(n)
     steps = []
-    for ocn_run, ice_run, ocn_next in alarms(spec):
-        steps.append(dict(a2x=_a2x(rng, n), i2x=_i2x(rng, n) if ice_run else None,
-                          o2x=_o2x(rng, n) if ocn_next else None))
-    return dict(name=spec["name"], spec=spec, aborts=False, lists=LISTS, values=values, steps=steps,
-                matrix=matrix)
+    base_cday = 120.25 if spec["albav"] else -1.0
+    for k, (ocn_run, ice_run, ocn_next) in enumerate(alarms(spec)):
+        every = spec["side_every"]
+        side = ({name: _vector(rng, list(LISTS[name]))(n) for name in SIDE}
+                if every and k and k % every == 0 else None)
+        i2x = _i2x(rng, n) if ice_run else None
+        if k == spec["abort_step"]:
+            i2x[6, I2X.index("Si_ifrac")] = _BELOW
+        steps.append(dict(nextsw_cday=base_cday + k * spec["cday_step"],
+                          flux_epbalfact=spec["epbal"] + k * spec["epbal_step"], side=side,
+                          a2x=_a2x(rng, n), i2x=i2x, o2x=_o2x(rng, n) if ocn_next else None))
+    return dict(name=spec["name"], spec=spec, aborts=spec["abort_step"] is not None, lists=LISTS, values=values,
+                steps=steps, matrix=matrix)
 
 
 def cases() -> list[dict]:
@@ -199,6 +220,11 @@ def input_bytes(case: dict) -> bytes:
                    + w.astype("<f8").tobytes())
     for (ocn_run, ice_run, ocn_next), step in zip(alarms(s), case["steps"]):
         out.append(struct.pack("<3i", int(ocn_run), int(ice_run), int(ocn_next)))
+        out.append(struct.pack("<2di", step["nextsw_cday"], step["flux_epbalfact"], int(step["side"] is not None)))
+        if step["side"] is not None:
+            for name in SIDE:
+                if len(case["lists"][name]):
+                    out.append(np.ascontiguousarray(step["side"][name], dtype="<f8").tobytes())
         out.append(np.ascontiguousarray(step["a2x"], dtype="<f8").tobytes())
         if ice_run:
             out.append(np.ascontiguousarray(step["i2x"], dtype="<f8").tobytes())
@@ -275,9 +301,12 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     interval = interval_for(case)
     out, counts = {}, []
     for k, ((ocn_run, ice_run, ocn_next), step) in enumerate(zip(alarms(case["spec"]), case["steps"])):
+        inputs = dict(nextsw_cday=step["nextsw_cday"], flux_epbalfact=step["flux_epbalfact"])
+        if step["side"] is not None:
+            inputs.update({name: cp.asarray(v) for name, v in step["side"].items()})
         interval.step(cp.asarray(step["a2x"]), ocn_run=ocn_run, ice_run=ice_run, ocn_next=ocn_next,
                       i2x=None if step["i2x"] is None else cp.asarray(step["i2x"]),
-                      o2x=None if step["o2x"] is None else cp.asarray(step["o2x"]))
+                      o2x=None if step["o2x"] is None else cp.asarray(step["o2x"]), inputs=inputs)
         counts.append(interval.accumulator.count)
         for key in OUTPUTS:
             out[f"step{k}/{key}"] = cp.asnumpy(interval.vector(key))
@@ -290,6 +319,8 @@ def measure() -> dict[str, dict[str, int]]:
     outputs, _ = load_fixture()
     report = {}
     for case in cases():
+        if case["aborts"]:
+            continue
         got, want = run_gpu(case), outputs[case["name"]]
         report[case["name"]] = {k: word_mismatches(got[k], want[k]) if k != "counts"
                                 else int((got[k] != want[k]).sum()) for k in want}

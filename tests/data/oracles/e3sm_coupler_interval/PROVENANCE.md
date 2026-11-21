@@ -59,20 +59,23 @@ fields; seed per case.
 
 | case | steps | alarms | what it covers |
 |---|---|---|---|
-| `ocean_every_third` | 7 | ocean every 3rd, ice every step | windows of 1, 3, 3; matrix i2a |
-| `albav_ice_every_other_epbal` | 4 | ocean and ice every 2nd | `flux_albav`, `flux_epbalfact`, a copy i2a, fractions held between the ice's runs |
-| `implicit_gust` | 4 | ocean every 4th | the implicit stress and gustiness, a window never averaged |
+| `ocean_every_third` | 7 | ocean every 3rd, ice every step | windows of 1, 3, 3; matrix i2a; nextsw_cday changing below -0.5; new r2x/g2x/w2x every other step |
+| `albav_ice_every_other_epbal` | 4 | ocean and ice every 2nd | windows of 1, 2; `flux_albav`; `nextsw_cday` and `flux_epbalfact` changing every step; new r2x/g2x/w2x at step 3; a copy i2a; fractions held between the ice's runs |
+| `implicit_gust` | 6 | ocean every 4th | the implicit stress and gustiness; windows of 1, 4, then one never averaged |
 | `dead_models` | 3 | ocean every step | dead models (the mask set to 1) |
 | `ocean_not_prognostic` | 4 | ocean every 3rd | no merge, no accumulation; a rearrange i2a |
 | `no_component_maps` | 4 | ocean every 2nd | `ice_c2_ocn`, `ocn_c2_ice`, `atm_c2_ice` off: the mapped vectors stay zero |
 | `ice_not_prognostic` | 3 | ocean every 3rd | no sea-ice merge; its export still read |
+| `frac_abort_mid_run` | 3 | ocean every 3rd | the second step's sea-ice export below `seq_frac_check`'s bound: the chain stops in `seq_frac_set` (`aborts.json`) |
 
-No case stops (`aborts.json` is empty); the single-routine oracles hold the
-stops.
+Per step the stream also carries infodata's `nextsw_cday` and
+`flux_epbalfact` and, when flagged, new runoff, land-ice and wave exports to
+the ocean and sea ice; the driver sets them before the step's phases.
 
 ## Grading
 
 `tests/test_e3sm_coupler_interval_parity.py` runs
 `woof.hex.coupled.interval_e3sm.CouplerInterval` with
 `WOOF_GLIBC239_LIBM64=1`: the count and every word of xao, the accumulator,
-x2o, x2i and the three fractions after every step must be identical.
+x2o, x2i and the three fractions after every step must be identical, and
+the stopping case must stop in the same step with `seq_frac_check`'s line.
