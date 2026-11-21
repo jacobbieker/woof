@@ -60,6 +60,13 @@ MESH_ARRAYS = ("nEdgesOnCell", "verticesOnCell", "edgesOnCell", "cellsOnVertex",
                "xCell", "yCell", "zCell", "areaCell", "dvEdge")
 
 
+def _uniform(rs: np.random.RandomState, low: float, high: float, size=None):
+    """``rs.uniform``'s draws, ``low + (high - low) * u`` rounded op by op (numpy's
+    own may fuse them on arm64)."""
+    u = rs.random_sample(size)
+    return np.add(low, np.multiply(high - low, u))
+
+
 def _norm(v) -> float:
     return math.sqrt(float(v[0]) * float(v[0]) + float(v[1]) * float(v[1]) + float(v[2]) * float(v[2]))
 
@@ -89,21 +96,21 @@ def polygon_mesh(rs: np.random.RandomState, *, n_cells: int = 24, sphere: bool =
     v = 0
     for c, n in enumerate(sides):
         # n points on the unit circle, counter-clockwise from t in (-1, 1] then the far side
-        t = np.sort(rs.uniform(-2.4, 2.4, n))
+        t = np.sort(_uniform(rs, -2.4, 2.4, n))
         while np.min(np.diff(t)) < 0.15:
-            t = np.sort(rs.uniform(-2.4, 2.4, n))
+            t = np.sort(_uniform(rs, -2.4, 2.4, n))
         px = (1.0 - t * t) / (1.0 + t * t)
         py = (2.0 * t) / (1.0 + t * t)
-        sx, sy, shear = size * rs.uniform(0.7, 1.3), size * rs.uniform(0.7, 1.3), rs.uniform(-0.3, 0.3)
+        sx, sy, shear = size * _uniform(rs, 0.7, 1.3), size * _uniform(rs, 0.7, 1.3), _uniform(rs, -0.3, 0.3)
         local = [(sx * px[k] + shear * sx * py[k], sy * py[k]) for k in range(n)]
         if sphere:
             # the cell's centre on the sphere and two tangent directions there
             if c == 0:
                 centre = np.array([0.0, 0.6, 0.8])      # rotated z = x = 0
             else:
-                centre = rs.uniform(-1.0, 1.0, 3)
+                centre = _uniform(rs, -1.0, 1.0, 3)
                 while _norm(centre) < 0.3:
-                    centre = rs.uniform(-1.0, 1.0, 3)
+                    centre = _uniform(rs, -1.0, 1.0, 3)
             cn = centre / _norm(centre)
             helper = np.array([0.0, 0.0, 1.0]) if abs(cn[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
             e1 = _cross(helper, cn)
@@ -115,9 +122,9 @@ def polygon_mesh(rs: np.random.RandomState, *, n_cells: int = 24, sphere: bool =
                 pts.append(p * (radius / _norm(p)))
             xc[c], yc[c], zc[c] = cn * radius
         else:
-            ox, oy = rs.uniform(-1.0e6, 1.0e6, 2)
+            ox, oy = _uniform(rs, -1.0e6, 1.0e6, 2)
             pts = [np.array([ox + lx, oy + ly, 0.0]) for lx, ly in local]
-            xc[c], yc[c] = ox + rs.uniform(-0.05, 0.05) * size, oy + rs.uniform(-0.05, 0.05) * size
+            xc[c], yc[c] = ox + _uniform(rs, -0.05, 0.05) * size, oy + _uniform(rs, -0.05, 0.05) * size
         n_edges_on_cell[c] = n
         doubled = 0.0
         for k in range(n):
@@ -202,7 +209,7 @@ def make_case(name, mesh_name, seed, basis, kind, order, rotate, metric, radius=
         elif k == INT:
             value = noise.randint(-9, 99, _stream.shape(case, fshape)).astype(np.int32)
         else:
-            value = noise.uniform(-1.0, 1.0, _stream.shape(case, fshape)).astype(real)
+            value = _uniform(noise, -1.0, 1.0, _stream.shape(case, fshape)).astype(real)
         pools[pool][field] = value
     case["pools"] = pools
     return case
