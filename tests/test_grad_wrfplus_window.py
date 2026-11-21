@@ -186,7 +186,8 @@ def test_window_external_trajectory(backend, tmp_path):
       binary32), and forward returns state N, given or stepped (the own
       states, N of them, end where the own forward does);
     - a plain forward afterwards returns to the own TL and adjoint bit
-      for bit, and a refused one leaves the external base in place;
+      for bit, and a refused one, or an external one whose last step
+      fails, leaves the external base in place;
     - a trajectory of the wrong length, or with x0, is refused."""
     dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
     out = _run(backend, f"""
@@ -250,6 +251,22 @@ for dtn in {dtypes!r}:
         out[f"kept/{{dtn}}/{{i}}"] = sum(
             int((cp.asnumpy(tl_r[k][n]) != cp.asnumpy(tl[k][n])).sum())
             for k in (1, 2, {N}) for n in IN)
+        # so does a trajectory whose last step fails (the N-state form
+        # steps the last state; here that step raises)
+        real = M.step_base
+        def boom(*a, **k):
+            raise RuntimeError("step failed")
+        M.step_base = boom
+        try:
+            w.forward(trajectory=own)
+        except RuntimeError:
+            pass
+        finally:
+            M.step_base = real
+        tl_f = w.tl(dx0, save_at=(1, 2))
+        out[f"failed/{{dtn}}/{{i}}"] = sum(
+            int((cp.asnumpy(tl_f[k][n]) != cp.asnumpy(tl[k][n])).sum())
+            for k in (1, 2, {N}) for n in IN)
 cfg, state = build({{}}, 1)
 w = W.Window(state, cfg, {N})
 x = w.trajectory_state(state, cfg)
@@ -264,11 +281,11 @@ for key, kw in (("short", dict(trajectory=[x] * ({N} - 1))),
     assert f"holds {N - 1} states" in out.pop("refuse/short"), out
     assert "not both" in out.pop("refuse/both"), out
     nd = 1 if backend == "mlx" else 2
-    assert len(out) == nd * len(CASES) * 7
+    assert len(out) == nd * len(CASES) * 8
     for key, val in out.items():
         if key.startswith("moved/"):
             assert val > 1e-4, (key, val)
-        elif key.startswith(("same/", "given_end/", "state1/", "back/", "kept/")):
+        elif key.startswith(("same/", "given_end/", "state1/", "back/", "kept/", "failed/")):
             assert val == 0, (key, val)
         else:
             assert val < (1e-12 if key.startswith("float64") else 1e-5), (key, val)

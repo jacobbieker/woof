@@ -200,13 +200,18 @@ class Window:
         for k, st in enumerate(states):
             self._check(st, f"trajectory[{k}]")
         # copies: a step reads its state through the work dict only
-        self._checkpoints = {k: _copy(self._inputs(st)) for k, st in enumerate(states)}
-        self._external = True
+        checkpoints = {k: _copy(self._inputs(st)) for k, st in enumerate(states)}
         if len(states) > self.nsteps:
-            return self._checkpoints.pop(self.nsteps)   # already a copy
-        x = self._load(self._checkpoints[self.nsteps - 1])
-        self._scratch = M.step_base(x, self.geoms[-1], None, self._scratch)
-        return _copy(self._inputs(x))
+            end = checkpoints.pop(self.nsteps)   # already a copy
+        else:
+            x = self._load(checkpoints[self.nsteps - 1])
+            self._scratch = M.step_base(x, self.geoms[-1], None, self._scratch)
+            end = _copy(self._inputs(x))
+        # switch the base only once the end state exists: a failed step
+        # leaves the window on its previous base
+        self._checkpoints = checkpoints
+        self._external = True
+        return end
 
     def trajectory_state(self, state, cfg) -> dict:
         """A trajectory entry from a DomainState (a woof forecast's state
