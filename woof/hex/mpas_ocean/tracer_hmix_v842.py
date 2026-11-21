@@ -110,6 +110,12 @@ def tracer_hmix_tend(*, tracers, layer_thickness_edge, mesh: dict, tend, configs
     me = mesh["edgesOnCell"].shape[1]
     m, i32 = mesh, np.int32
     del2, del4 = switches(configs)
+    redi = redi_on(configs)
+    if redi:  # checked before any tendency is written
+        if diagnostics is None:
+            raise ValueError("Redi (config_use_standardGM) needs the diagnostics' zMid and GM's slopes")
+        if nl < 2:
+            raise ValueError("v8.4.2's Redi reads the along-layer gradient of level 2: one-level meshes are not run")
     edges = (m["dvEdge"], m["dcEdge"], m["areaCell"], m["nEdgesOnCell"], m["edgesOnCell"], m["edgeSignOnCell"],
              m["cellsOnEdge"], m["maxLevelEdgeTop"])
     if del2 is not None:
@@ -123,11 +129,7 @@ def tracer_hmix_tend(*, tracers, layer_thickness_edge, mesh: dict, tend, configs
         _launch(precision, "ocn_tracer_hmix_del4_v842", cells[0] * nl * nt, (
             tend, delsq, m["meshScalingDel4"], *edges, m["edgeMask"], i32(cells[0]), i32(nl), i32(nt), i32(me),
             real(del4)))
-    if redi_on(configs):
-        if diagnostics is None:
-            raise ValueError("Redi (config_use_standardGM) needs the diagnostics' zMid and GM's slopes")
-        if nl < 2:
-            raise ValueError("v8.4.2's Redi reads the along-layer gradient of level 2: one-level meshes are not run")
+    if redi:
         _redi_tend(tracers=tracers, layer_thickness_edge=layer_thickness_edge, mesh=mesh, tend=tend,
                    configs=configs, diagnostics=diagnostics)
 
