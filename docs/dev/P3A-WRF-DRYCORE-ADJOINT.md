@@ -826,6 +826,36 @@ Each step is one small PR, taken to merged before the next widens.
      There is no WRFPLUS fixture for the moist case.
    - The step still refuses moisture. The diagnosis joins it with the
      moist scalar advection and the step binding.
+8j. Moisture, part 3 (DA item 4): moist scalar transport
+   (`woof.grad.wrfplus.scalar`). Two operators, not yet in the step:
+   - sumflux (`sumflux_zero/accumulate/finish_tl/_ad`): `ru_m, rv_m, ww_m`
+     start at zero, add `u_pp, v_pp, ww_pp` after each acoustic substep,
+     and finish as `sum/nsub` plus the stage's coupled `ru, rv, ww`
+     (the dycore's `zero_sumflux`, `accumulate_sumflux` and
+     `finish_sumflux` launches).
+   - One species' stage update (`su_tl/_ad`, `ScalarGeometry`), woof's
+     strict non-PD `_advance_species_wrf` (WRF rk_scalar_tend +
+     rk_update_scalar): `flux_div_scalar` of the stage's species with the
+     sumflux fluxes (all four active), the specified ring cleared, times
+     msft, plus the species' held boundary tendency when it has one, then
+     `q = ((c1h mu0 + c2h) q0 + dt tend) / (c1h mu + c2h)` with the time-t
+     mass `mub + mup0` and the post-acoustic `mub + mup`. The arithmetic
+     is the primal's, one rounded operation at a time. The adjoint
+     rebuilds the base tendency through the base-only advection build.
+   - Not covered: the positive-definite final stage (`moist_adv_opt =
+     1`), physics and mixing sources, IEVA and the RQVFTEN export.
+   - Tests (`tests/test_grad_wrfplus_scalar.py`: periodic, map factors,
+     specified with and without the held tendency, rings of 1 and 2,
+     every h order, one level; sumflux with 1-4 substeps):
+     - dot product;
+     - the adjoint accumulates, and the species, its tendency and the
+       accumulators are consumed;
+     - the adjoint in one dict (as the step passes it) gives the
+       separate-dict result;
+     - FD convergence;
+     - the binary32 base gives `_advance_species_wrf`'s and the sumflux
+       launches' words, and each update moves the species.
+     There is no WRFPLUS fixture.
 9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
    (`diff_opt = 1`).
 

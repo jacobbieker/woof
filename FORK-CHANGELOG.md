@@ -37,6 +37,12 @@ New:
   moist buoyancy (`moist_mode` 1). Each is checked against woof's strict
   primal word for word in binary32. They are not yet bound into the
   step. The forecast path is unchanged.
+- The WRF dry-step adjoint (`woof.grad.wrfplus.scalar`) gains moist
+  scalar transport: WRF's sumflux and one species' non-positive-definite
+  rk_scalar_tend + rk_update_scalar, with the specified ring and the held
+  boundary tendency. The binary32 base reproduces woof's strict primal
+  word for word. It is not yet bound into the step. The forecast path is
+  unchanged.
 
 - The WRF dry-step tangent-linear and adjoint (`woof.grad.wrfplus.model`
   and `window.Window`) now cover specified lateral boundaries, which
