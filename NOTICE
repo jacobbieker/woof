@@ -1833,8 +1833,8 @@ licenses/LICENSE-E3SM-BSD-3-Clause.txt. This is a modified derivative, not
 the version available from the E3SM project, and neither the E3SM project,
 UChicago Argonne, LLC, UCAR nor the Department of Energy endorses it. Its
 atan is the opt-in glibc 2.39 transcription (LGPL, see the glibc 2.39
-section): without WOOF_GLIBC239_LIBM64=1 the unit compiles no kernel and is
-refused by name.
+section): without WOOF_GLIBC239_LIBM64=1 the flux compiles no kernel and is
+refused by name (only seq_flux_init_mct's mask, which calls no atan, runs).
 
 woof/hex/coupled/ice_coupling_e3sm.cu (and its Python wrapper) transcribe
 E3SM v3.2.0's MPAS-Seaice coupler import and export, ice_import_mct,
