@@ -240,6 +240,7 @@ def test_the_joule_drivers_are_the_latest_hour_ended_by_the_start():
     assert (j["pcn"], j["dst"], j["hour"], j["season"]) == (1.5, -40.0, "2024-05-10T16:00Z", "summer")
     assert j["north_gw"] == pytest.approx(ovation.joule_power(1.5, -40.0, START))
     assert j["north_gw"] == pytest.approx(29.27 * 1.5 + 8.18 * 2.25 - 0.04 * 40.0 + 0.0126 * 1600.0)
+    assert drive["record"]["spacewx_joule_sha256"] == wind.sha256
     # SWPC carries no PC(N) or Dst; a fixed Kp none either.
     for source in ("swpc", "gfz", "5"):
         with pytest.raises(ah.AuroraHistoryError, match="must be 'omni'"):
@@ -274,6 +275,15 @@ def test_the_held_joule_drivers_are_reused_and_added_to_an_older_hold(tmp_path):
     assert added["dphidt"] == plain["dphidt"] and added["record"]["spacewx_joule_sha256"] == wind.sha256
     again = json.loads(memo.read_text())
     assert again["joule"] == plain["joule"] and again["kp"] == 2.0 and again["dphidt"] == plain["dphidt"]
+
+
+def test_a_negative_fit_is_held_at_zero_power():
+    # Summer, PC(N) 0, Dst -3 nT: the fit gives -0.04 * 3 + 0.0126 * 9 < 0.
+    drive = {"kp": 1.0, "al": -50.0, "record": {},
+             "joule": {"pcn": 0.0, "dst": -3.0, "hour": "x", "season": "summer", "north_gw": -0.0066}}
+    h = ah.AuroraHistory(None, START, drive, (2, 2))
+    assert h.joule_gw == 0.0 and h.names[-1] == "JOULE_POWER"
+    assert ah.AuroraHistory(None, START, dict(drive, joule=None), (2, 2)).joule_gw is None
 
 
 def test_knipp_joule_power_matches_the_published_scale():

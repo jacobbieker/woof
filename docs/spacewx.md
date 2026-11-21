@@ -578,7 +578,9 @@ The forecast is identical with the option on or off.
   start and has both values, within 24 h; Knipp's season is the start's. The
   value is held for the run, and the fit has no horizontal structure, so the row
   holds that one number in every column of every frame. It is the
-  hemisphere-integrated power, not a local heating rate. The `[spacewx aurora]`
+  hemisphere-integrated power, not a local heating rate. The summer fit can go
+  a fraction of a GW below 0 for near-zero PC(N) and Dst; the row holds
+  max(fit, 0), and the receipt keeps the fit's value too. The `[spacewx aurora]`
   line adds PC(N), Dst, their hour, the season, the northern power and Knipp's
   global value (twice the northern). The drivers are kept with the held Kp
   whenever OMNI2 has them, and an older hold without them reads OMNI2 again.

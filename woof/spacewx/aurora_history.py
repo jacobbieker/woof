@@ -72,8 +72,6 @@ ENERGY_HISTORY_FIELDS = {
 JOULE_HISTORY_FIELDS = {
     "JOULE_POWER": ("NORTHERN-HEMISPHERE JOULE POWER (KNIPP ET AL. 2004), HELD FROM THE START", "GW"),
 }
-#: The options' row groups, by spacewx_aurora_opt.
-MAX_OPT = 3
 #: How far back from the start an observed or estimated Kp is looked for.
 LOOKBACK_HOURS = 24
 
@@ -191,9 +189,8 @@ def _joule_at_start(wind, start: datetime) -> dict:
         except ValueError:
             pcn = dst = float("nan")
         if np.isfinite(pcn) and np.isfinite(dst):
-            season = ovation.knipp_season(start)
             return {"pcn": float(pcn), "dst": float(dst), "hour": f"{hour:%Y-%m-%dT%H:%M}Z",
-                    "season": season, "north_gw": ovation.joule_power(pcn, dst, start, season=season)}
+                    "season": ovation.knipp_season(start), "north_gw": ovation.joule_power(pcn, dst, start)}
         hour -= timedelta(hours=1)
     raise AuroraHistoryError(
         f"spacewx_aurora_opt = 3: no OMNI2 hour with both PC(N) and Dst in the {LOOKBACK_HOURS} h "
@@ -277,6 +274,7 @@ def activity(source: str, start: datetime, *, indices_loader=None, solarwind_loa
         if kind == "omni":
             try:
                 joule_drive = _joule_at_start(wind, start)
+                record["spacewx_joule_sha256"] = wind.sha256
             except AuroraHistoryError:
                 if joule:
                     raise
@@ -379,6 +377,7 @@ class AuroraHistory:
                                             spacewx_ovation_source=coef.source))
         if not joule:
             drive = {k: v for k, v in drive.items() if k != "joule"}
+            drive["record"] = {k: v for k, v in drive["record"].items() if k != "spacewx_joule_sha256"}
         return cls(oval, start, drive, lat.shape, tables=tables)
 
     def __init__(self, oval, start_time: datetime, drive: dict, shape, tables=None):
@@ -390,6 +389,11 @@ class AuroraHistory:
         self.dphidt = drive.get("dphidt")
         self.tables = tables
         self.joule = drive.get("joule")
+        # The summer fit's negative |Dst| term can take a near-zero PC(N) and
+        # Dst a fraction of a GW below 0; a power is not negative, so the row
+        # and the receipt's north/global values hold max(fit, 0), and the
+        # receipt keeps the fit's own value beside them.
+        self.joule_gw = max(float(self.joule["north_gw"]), 0.0) if self.joule is not None else None
         self.names = (tuple(HISTORY_FIELDS) + (tuple(ENERGY_HISTORY_FIELDS) if tables is not None else ())
                       + (tuple(JOULE_HISTORY_FIELDS) if self.joule is not None else ()))
         self.shape = tuple(int(n) for n in shape)
@@ -409,8 +413,9 @@ class AuroraHistory:
             extra.update({"spacewx_joule_model": "Knipp et al. 2004 Table I, northern hemisphere, |PC(N)| and |Dst|",
                           "spacewx_joule_pcn": self.joule["pcn"], "spacewx_joule_dst_nt": self.joule["dst"],
                           "spacewx_joule_hour": self.joule["hour"], "spacewx_joule_season": self.joule["season"],
-                          "spacewx_joule_north_gw": self.joule["north_gw"],
-                          "spacewx_joule_global_gw": 2.0 * self.joule["north_gw"]})
+                          "spacewx_joule_fit_gw": self.joule["north_gw"],
+                          "spacewx_joule_north_gw": self.joule_gw,
+                          "spacewx_joule_global_gw": 2.0 * self.joule_gw})
         return receipt(self.aurora, {**self.record, "spacewx_kp": self.kp, "spacewx_al_nt": self.al, **extra})
 
     def history_fields(self, elapsed_seconds: float) -> dict:
@@ -420,6 +425,9 @@ class AuroraHistory:
         if self._rows is None:
             rows = cp.zeros((len(self.names), *self.shape), dtype=cp.float32)
             self._rows = dict(zip(self.names, (rows[i] for i in range(len(self.names)))))
+            if self.joule is not None:
+                # Held for the run: the same number in every column and frame.
+                self._rows["JOULE_POWER"][...] = np.float32(self.joule_gw)
         if self._elapsed != float(elapsed_seconds):
             out = self.aurora.evaluate(self.valid_time(elapsed_seconds), self.al)
             for name, (key, _desc, _units) in HISTORY_FIELDS.items():
@@ -437,13 +445,10 @@ class AuroraHistory:
                 for name in ENERGY_HISTORY_FIELDS:
                     col = np.where(mlat >= 0.0, north[name], south[name])
                     self._rows[name][...] = cp.asarray(col.astype(np.float32).reshape(self.shape))
-            if self.joule is not None:
-                # Held for the run: the same number in every column and frame.
-                self._rows["JOULE_POWER"][...] = np.float32(self.joule["north_gw"])
             self._elapsed = float(elapsed_seconds)
         return dict(self._rows)
 
 
-__all__ = ["HISTORY_FIELDS", "ENERGY_HISTORY_FIELDS", "JOULE_HISTORY_FIELDS", "MAX_OPT", "AuroraHistory",
+__all__ = ["HISTORY_FIELDS", "ENERGY_HISTORY_FIELDS", "JOULE_HISTORY_FIELDS", "AuroraHistory",
            "AuroraHistoryError", "activity", "enabled", "energy_enabled", "joule_enabled", "row_names",
            "history_shapes", "device_shapes", "parse_kp_source"]

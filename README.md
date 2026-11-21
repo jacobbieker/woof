@@ -1112,7 +1112,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`AURORA_EFLUX`, `AURORA_EMEAN`, `AURORA_IFLUX`) to those history frames,
   from the solar wind at the start, and `spacewx_aurora_opt = 3` also the
   Knipp et al. 2004 northern Joule power (`JOULE_POWER`, GW; one number held
-  from OMNI2's PC(N) and Dst at the start, not a local heating rate). `woof spacewx particles` turns the GOES
+  from OMNI2's PC(N) and Dst at the start, not a local heating rate).
+  `woof spacewx particles` turns the GOES
   integral proton flux (OMNI2 or SWPC real time) into polar-cap ion-pair rates
   and NOx/HOx production during solar proton events (Bethe stopping in air,
   35 eV per ion pair). Against the CMIP7 rates, the ratio is 0.4-1.0 at 0.1-100
