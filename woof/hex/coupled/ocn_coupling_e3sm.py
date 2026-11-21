@@ -308,7 +308,7 @@ def _launch(kernel: str, n: int, args) -> None:
 
 
 def import_x2o(idx: Indices, opts: Options, x2o, *, n_cells_solve: int, lat_cell, forcing: dict,
-               gravity: float = GRAVITY) -> None:
+               gravity: float | None = None) -> None:
     """``ocn_import_mct``: ``x2o`` ``(lsize, nx2o)`` into ``forcing``'s
     arrays in place. ``forcing`` maps MPAS names to the device arrays a
     package has on: 1-D ``(nCells,)``, the Stokes drift ``(nCells, 6)``
@@ -333,7 +333,7 @@ def import_x2o(idx: Indices, opts: Options, x2o, *, n_cells_solve: int, lat_cell
     _launch("ocn_import_e3sm", n_cells, (
         buf, np.int32(n_cells), np.int32(len(rows)), *(_ints(r[k] for r in rows) for k in (2, 3, 4, 5, 6)),
         x2o, np.int32(idx.nx2o), np.int32(n_cells_solve), lat_cell, np.float64(prec),
-        np.float64(opts.config_density0), np.float64(gravity)))
+        np.float64(opts.config_density0), np.float64(GRAVITY if gravity is None else gravity)))
     for j, (name, comp, *_) in enumerate(rows):
         if comp is None:
             forcing[name][...] = buf[j]
@@ -381,7 +381,7 @@ def export_columns(idx: Indices, opts: Options) -> list[str]:
 
 
 def export_o2x(idx: Indices, opts: Options, o2x, *, n_cells_solve: int, forcing: dict, state: dict, dims: dict,
-               diagnostics: dict, constants: tuple[float, float, float] = (RHO_SW, CP_SW, T0_KELVIN)) -> None:
+               diagnostics: dict, constants: tuple[float, float, float] | None = None) -> None:
     """``ocn_export_mct`` into ``o2x`` ``(lsize, no2x)`` in place; resets the
     frazil arrays (``seaIceEnergy``, ``frazilSurfacePressure``,
     ``accumulatedFrazilIceMass``) as E3SM does.
@@ -459,7 +459,8 @@ def export_o2x(idx: Indices, opts: Options, o2x, *, n_cells_solve: int, forcing:
         tsv, np.int32(n_tsv), np.int32(i_t), np.int32(i_s),
         vel, np.int32(n_vel), np.int32(i_u), np.int32(i_v),
         arr(state, "ssh")[0], grad, np.int32(n_grad), np.int32(i_dx), np.int32(i_dy),
-        arr(forcing, "avgTotalFreshWaterTemperatureFlux")[0], *(np.float64(c) for c in constants),
+        arr(forcing, "avgTotalFreshWaterTemperatureFlux")[0],
+        *(np.float64(c) for c in (constants or (RHO_SW, CP_SW, T0_KELVIN))),
         np.int32(li), arr(forcing, "avgLandIceFreshwaterFlux", sa)[0], arr(forcing, "avgLandIceHeatFlux", sa)[0],
         np.int32(opts.config_remove_ais_river_runoff),
         arr(forcing, "avgRemovedRiverRunoffFlux", opts.config_remove_ais_river_runoff)[0],

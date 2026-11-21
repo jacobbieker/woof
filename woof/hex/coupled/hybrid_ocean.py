@@ -404,7 +404,7 @@ class HybridOcean:
         self.windows += 1
         return self._o2x
 
-    # ------------------------------------------------------------ on the spine (run_e3sm.Components)
+    # ------------------------------------------------------------ on the spine (its Components protocol)
 
     def ocean_start(self, step: int, x2o):
         """The ocean's run alarm: E3SM's ``ocn_run_mct`` runs the whole window
