@@ -21,13 +21,20 @@ THE BREAKAGES THESE PREVENT
      between the two;
    - the pond freshwater feedback on and off;
    - one category and five;
-   - halo cells left alone.
+   - halo cells left alone;
+   - with the brine height's biogeochemistry, every one of the 14 ocean
+     biogeochemistry fluxes starting nonzero, zeroed on the owned cells and
+     scaled on the aggregate pool's, with that pool's nCellsSolve past and
+     short of the tracers pool's.
 4. A gate that cannot fail. Each of these mutations must produce mismatches:
    - a mutated sun test (three ways), shortwave scaling factor or pond feedback;
    - scaling by division instead of the inverse;
-   - x**4 evaluated left to right.
+   - x**4 evaluated left to right;
+   - any one ocean biogeochemistry flux left out, or the fluxes zeroed but
+     not scaled.
 5. An unported option run silently. The ocean mixed layer (the Registry
-   default for stand-alone runs) and the column biogeochemistry are refused
+   default for stand-alone runs), every biogeochemistry flag but the brine
+   height, and the biogeochemistry without the column package are refused
    by name.
 """
 from __future__ import annotations
@@ -62,20 +69,39 @@ def test_fixture_covers_the_branches(precision):
     cases = {case["name"]: case for case in oo.cases(precision)}
     assert set(fixture) == set(cases)
     seen = dict.fromkeys(("open", "ice", "sun", "dark", "horizon", "at_puny", "below_puny", "feedback", "halo",
-                          "one"), 0)
+                          "one", "bgc_scaled", "aggregate_short"), 0)
     for name, out in fixture.items():
         case = cases[name]
         pools, cfg = case["pools"], case["config"]
         solved, nc = int(pools["tracers"]["nCellsSolve"]), case["dims"]["nCells"]
+        aggregate = int(pools["tracers_aggregate"]["nCellsSolve"])
+        touched = max(solved, aggregate)
         real = np.dtype(oo.PRECISIONS[precision]).type
         area = pools["tracers_aggregate"]["iceAreaCell"][:solved]
         coszen = pools["shortwave"]["solarZenithAngleCosine"][:solved]
         for key, words in out.items():
             assert np.isfinite(words).all(), (name, key)
             pool, field = key.split("/")
-            # halo cells beyond nCellsSolve are left as they came
-            assert oo.word_mismatches(words[solved:], pools[pool][field][solved:]) == 0, (name, key)
-        seen["halo"] += int(solved < nc)
+            # halo cells beyond both pools' nCellsSolve are left as they came
+            assert oo.word_mismatches(words[touched:], pools[pool][field][touched:]) == 0, (name, key)
+        seen["halo"] += int(touched < nc)
+        seen["aggregate_short"] += int(aggregate < solved)
+        if cfg["config_use_column_biogeochemistry"]:
+            area_all = pools["tracers_aggregate"]["iceAreaCell"]
+            for field in cpl.BGC_OCEAN_FLUXES:
+                given = pools["biogeochemistry"][field]
+                got = out[f"biogeochemistry/{field}"]
+                assert (given[:touched] != 0).all(), (name, field)
+                # zeroed on the owned cells (then scaled: still zero)
+                assert (got[:solved] == 0).all(), (name, field)
+                # scaled past them on the aggregate pool's: by the inverse area where there is ice, else zero
+                rows = slice(solved, aggregate)
+                ice = area_all[rows] > 0
+                inverse = real(1.0) / np.where(ice, area_all[rows], real(1.0))
+                scaled = given[rows] * (inverse if given.ndim == 1 else inverse[:, None])
+                assert oo.word_mismatches(got[rows][ice], scaled[ice]) == 0, (name, field)
+                assert (got[rows][~ice] == 0).all(), (name, field)
+                seen["bgc_scaled"] += int((got[rows][ice] != given[rows][ice]).any())
         seen["one"] += int(case["dims"]["nCategories"] == 1)
         open_water = area == 0
         seen["open"] += int(open_water.sum())
@@ -84,7 +110,10 @@ def test_fixture_covers_the_branches(precision):
         t = pools["ocean_coupling"]["seaFreezingTemperature"][:solved] + real(cpl.FRESH_WATER_FREEZING_POINT)
         t2 = t * t
         want = -(real(cpl.STEFAN_BOLTZMANN) * (t2 * t2))
-        assert oo.word_mismatches(out["atmos_fluxes/longwaveUp"][:solved][open_water], want[open_water]) == 0
+        # (scale_fluxes runs over the aggregate pool's cells)
+        scaled = np.arange(solved) < aggregate
+        assert oo.word_mismatches(out["atmos_fluxes/longwaveUp"][:solved][open_water & scaled],
+                                  want[open_water & scaled]) == 0
         seen["sun"] += int((coszen > real(cpl.PUNY)).sum())
         seen["dark"] += int((coszen <= real(cpl.PUNY)).sum())
         ice = area > 0
@@ -118,6 +147,10 @@ def test_unported_options_are_refused_by_name(monkeypatch):
     # the brine height alone is carried: its ocean fluxes are zeroed, then scaled
     cpl.check_config({"config_use_ocean_mixed_layer": False, "config_use_column_biogeochemistry": True,
                       "config_use_brine": True})
+    # v8.4.2 runs coupling_prep (and checks the biogeochemistry) only with the column package
+    with pytest.raises(ConfigurationRefusal, match="config_use_column_package"):
+        cpl.check_config({"config_use_ocean_mixed_layer": False, "config_use_column_biogeochemistry": True,
+                          "config_use_brine": True, "config_use_column_package": False})
     cpl.check_config(dict(oo.BASE_CONFIG))
 
 
@@ -180,6 +213,38 @@ def test_a_mutated_kernel_is_caught(monkeypatch, precision, original, mutated, f
         assert mismatches > 0
     finally:
         cpl._module_on.cache_clear()
+
+
+def _bgc_mismatches(precision, field):
+    want = oo.load_fixture(precision)
+    return sum(oo.word_mismatches(oo.run_gpu(case)[field], want[case["name"]][field])
+               for case in oo.cases(precision) if case["config"]["config_use_column_biogeochemistry"])
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", BOTH)
+@pytest.mark.parametrize("flux", ["oceanNitrateFlux", "oceanSilicateFlux", "oceanAmmoniumFlux", "oceanDMSPpFlux",
+                                  "oceanDMSPdFlux", "oceanDMSFlux", "oceanHumicsFlux", "oceanDustIronFlux",
+                                  "oceanAlgaeFlux", "oceanDOCFlux", "oceanDICFlux", "oceanDONFlux",
+                                  "oceanParticulateIronFlux", "oceanDissolvedIronFlux"])
+def test_an_ocean_biogeochemistry_flux_left_out_is_caught(monkeypatch, precision, flux):
+    from woof.hex.mpas_seaice import coupling_prep_v842 as cpl
+    assert flux in cpl.BGC_OCEAN_FLUXES
+    monkeypatch.setattr(cpl, "BGC_OCEAN_FLUXES", tuple(f for f in cpl.BGC_OCEAN_FLUXES if f != flux))
+    assert _bgc_mismatches(precision, f"biogeochemistry/{flux}") > 0
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", BOTH)
+def test_ocean_biogeochemistry_fluxes_zeroed_but_not_scaled_are_caught(monkeypatch, precision):
+    from woof.hex.mpas_seaice import coupling_prep_v842 as cpl
+    real = cpl._bgc_ocean_fluxes
+
+    def unscaled(bgc, area, n_cells_solve, n_aggregate):
+        real(bgc, area, n_cells_solve, n_cells_solve)
+
+    monkeypatch.setattr(cpl, "_bgc_ocean_fluxes", unscaled)
+    assert _bgc_mismatches(precision, "biogeochemistry/oceanNitrateFlux") > 0
 
 
 def _oracle_toolchain() -> tuple[str, Path] | None:

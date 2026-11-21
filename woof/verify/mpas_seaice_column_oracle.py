@@ -1468,7 +1468,7 @@ def load_logs(fixture_dir: Path = FIXTURE_DIR) -> dict:
 def stand_ins(config: dict) -> set[tuple[str, str]]:
     """The fields the oracle gives an array v8.4.2 does not have (see
     :func:`field_rows`): not v8.4.2's words, so not compared."""
-    if config.get("woof_v842_corrections") == _BGC_INACTIVE and config.get("oracle_stage") in (_STEP, _SEAICE_STEP):
+    if _BGC_INACTIVE in cv.corrections(config) and config.get("oracle_stage") in (_STEP, _SEAICE_STEP):
         return {("biogeochemistry", name) for name in cstep.inactive_bgc_diagnostics(config)}
     return set()
 

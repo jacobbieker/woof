@@ -106,12 +106,20 @@ def test_fixture_covers_the_branches():
         if stage == "itd_thermodynamics" and cases[name]["dims"]["nCategories"] > 1:
             assert (got(name, FBRI)[3, :, 0] == 1).all(), name
     assert got("itd_bgc_brine_bl99_delta_function", FBRI)[2, 1, 0] == 1
-    # the steps write the brine height's diagnostics and the ocean fluxes
+    # the steps write the brine height's diagnostics, and every ocean biogeochemistry flux
+    # starts nonzero and ends zeroed on the owned cells (the aggregate pool's are the same
+    # cells in a step; tests/test_mpas_seaice_coupling_prep_parity.py has them apart)
     for name in [r[0] for r in ROWS if r[2] in ("column_step", "seaice_step")]:
+        solve = int(cases[name]["pools"]["tracers"]["nCellsSolve"])
+        assert solve == int(cases[name]["pools"]["tracers_aggregate"]["nCellsSolve"])
         moved = {key for key in ("biogeochemistry/netBrineHeight", "biogeochemistry/brineTopChange",
-                                 "biogeochemistry/brineBottomChange", "biogeochemistry/oceanNitrateFlux")
+                                 "biogeochemistry/brineBottomChange")
                  if key in fixture[name] and (got(name, key) != given(name, key)).any()}
         assert moved, name
+        for flux in cpl.BGC_OCEAN_FLUXES:
+            start = np.asarray(cases[name]["pools"]["biogeochemistry"][flux])[:solve]
+            end = co.expected_outputs(cases[name], fixture[name])[f"biogeochemistry/{flux}"][:solve]
+            assert (start != 0).all() and (end == 0).all(), (name, flux)
     assert co.stand_ins(cases["step_bgc_brine_bl99_dedd"]["config"]) == {("biogeochemistry", "totalChlorophyll")}
     assert "biogeochemistry/totalChlorophyll" not in co.expected_outputs(cases["step_bgc_brine_bl99_dedd"],
                                                                          fixture["step_bgc_brine_bl99_dedd"])
@@ -135,9 +143,13 @@ def test_the_correction_zeroes_only_the_fields_that_exist():
     bgc["netBrineHeight"][...] = 7.0
     cstep.reinitialize_diagnostics_bgc(case["pools"], case["config"])
     assert (bgc["netBrineHeight"] == 0).all()
+    # word for word, v8.4.2 writes to the array it does not have: refused by name, not a crash
     word_exact = {k: v for k, v in case["config"].items() if k != "woof_v842_corrections"}
-    with pytest.raises(TypeError):
+    with pytest.raises(ConfigurationRefusal, match="config_use_column_biogeochemistry.*totalChlorophyll"):
         cstep.reinitialize_diagnostics_bgc(case["pools"], word_exact)
+    # a tuple naming the correction is the same declaration as the bare name
+    assert co.stand_ins({**case["config"], "woof_v842_corrections": ("bgc_inactive_diagnostics",)}) == \
+        co.stand_ins(case["config"]) == {("biogeochemistry", "totalChlorophyll")}
 
 
 @pytest.mark.parametrize("name, refuse", [
@@ -210,6 +222,7 @@ def test_a_step_without_the_column_biogeochemistry_is_caught(monkeypatch, glibc2
 
 
 @requires_gpu
-def test_unscaled_ocean_biogeochemistry_fluxes_are_caught(monkeypatch, glibc239):
-    monkeypatch.setattr(cpl, "_bgc_ocean_fluxes", lambda *args: None)
-    assert _mismatches(("step_bgc_brine_bl99_dedd",), "biogeochemistry/oceanNitrateFlux") > 0
+@pytest.mark.parametrize("flux", cpl.BGC_OCEAN_FLUXES)
+def test_an_ocean_biogeochemistry_flux_the_step_leaves_alone_is_caught(monkeypatch, glibc239, flux):
+    monkeypatch.setattr(cpl, "BGC_OCEAN_FLUXES", tuple(f for f in cpl.BGC_OCEAN_FLUXES if f != flux))
+    assert _mismatches(("step_bgc_brine_bl99_dedd",), f"biogeochemistry/{flux}") > 0

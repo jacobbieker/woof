@@ -131,8 +131,17 @@ def check_config(configs: dict) -> None:
         oml.check_config(configs)
     if _config(configs, "config_use_column_biogeochemistry"):
         from . import column_v842 as cv
+        # an option the caller leaves out is its Registry default, as in MPAS; each is then read strictly
+        c = {**cv.default_configs(), **configs}
+        if not c["config_use_column_package"]:
+            # v8.4.2 checks the biogeochemistry's options and calls seaice_column_coupling_prep only from
+            # the column package (seaice_column_postdynamics_time_integration)
+            raise ConfigurationRefusal(
+                knob="config_use_column_package", value=False,
+                reason="the column biogeochemistry runs only with the column package on",
+                declaration="config_use_column_package = .true., or config_use_column_biogeochemistry = .false.")
         for flag in cv._BGC_FLAGS:
-            if flag not in cv.BGC_PORTED and configs.get(flag, False):
+            if flag not in cv.BGC_PORTED and c[flag]:
                 raise ConfigurationRefusal(
                     knob=flag, value=True,
                     reason="the column biogeochemistry's ocean fluxes are ported for the brine height only "

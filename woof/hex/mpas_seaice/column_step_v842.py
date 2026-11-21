@@ -107,14 +107,8 @@ def check_config(configs: dict) -> None:
     if not c.get("config_use_column_package", False):
         _refuse("config_use_column_package", False, "the column step runs with the column package on",
                 "config_use_column_package = .true.")
-    if c.get("config_use_column_biogeochemistry", False) and "bgc_inactive_diagnostics" not in cv.corrections(c):
-        missing = inactive_bgc_diagnostics(c)
-        if missing:
-            _refuse("config_use_column_biogeochemistry", True,
-                    "v8.4.2's seaice_column_reinitialize_diagnostics_bgc zeroes " + ", ".join(missing)
-                    + ", whose packages are off and which therefore has no array: it writes to address 0 and "
-                    "the time step dies", "woof_v842_corrections = ('bgc_inactive_diagnostics',) (zero only "
-                    "the fields that exist), or config_use_column_biogeochemistry = .false.")
+    if c.get("config_use_column_biogeochemistry", False):
+        _refuse_inactive_bgc_diagnostics(c)
     if c.get("config_use_vertical_tracers", False):
         _refuse("config_use_vertical_tracers", True,
                 "column_separate_snow_ice_tracers and column_combine_snow_ice_tracers are not ported",
@@ -131,6 +125,21 @@ def check_config(configs: dict) -> None:
 def _zero(pool: dict, *names: str) -> None:
     for name in names:
         pool[name][...] = 0
+
+
+def _refuse_inactive_bgc_diagnostics(configs: dict) -> None:
+    """Refuse v8.4.2's write to the diagnostics it has no array for
+    (:func:`inactive_bgc_diagnostics`) unless the opt-in correction
+    ``bgc_inactive_diagnostics`` is named."""
+    if "bgc_inactive_diagnostics" in cv.corrections(configs):
+        return
+    missing = inactive_bgc_diagnostics(configs)
+    if missing:
+        _refuse("config_use_column_biogeochemistry", True,
+                "v8.4.2's seaice_column_reinitialize_diagnostics_bgc zeroes " + ", ".join(missing)
+                + ", whose packages are off and which therefore has no array: it writes to address 0 and "
+                "the time step dies", "woof_v842_corrections = ('bgc_inactive_diagnostics',) (zero only "
+                "the fields that exist), or config_use_column_biogeochemistry = .false.")
 
 
 def inactive_bgc_diagnostics(configs: dict) -> tuple[str, ...]:
@@ -218,8 +227,9 @@ def reinitialize_diagnostics_bgc(pools: dict, configs: dict) -> None:
     if not configs["config_use_column_package"]:
         return
     if configs["config_use_column_biogeochemistry"]:
-        # check_config refuses the fields v8.4.2 has no array for unless corrected
-        skip = inactive_bgc_diagnostics(configs) if "bgc_inactive_diagnostics" in cv.corrections(configs) else ()
+        # the fields v8.4.2 has no array for: refused unless corrected, and then skipped
+        _refuse_inactive_bgc_diagnostics(configs)
+        skip = inactive_bgc_diagnostics(configs)
         _zero(pools["biogeochemistry"], *(name for name in _BGC_FIELDS if name not in skip))
     if configs["config_use_column_biogeochemistry"] or configs["config_use_column_shortwave"]:
         _zero(pools["biogeochemistry"], "bioTracerShortwave")
