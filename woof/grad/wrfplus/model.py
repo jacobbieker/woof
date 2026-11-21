@@ -1,4 +1,4 @@
-"""One dry model step's tangent-linear and adjoint (P3a item 8), chained
+"""One model step's tangent-linear and adjoint (P3a item 8), chained
 from the ported operators in woof's strict order (GPUWM_WRF_EXACT=1,
 woof/core/dycore.py ``_step_body`` and ``_wrf_step_epilogue``).
 
@@ -231,6 +231,9 @@ def _refuse(cfg, state) -> None:
         "IAU forcing": getattr(state, "_iau_forcing", None) is not None,
         "spectral nudging": getattr(state, "_spectral_nudging_graph", None) is not None,
         "odd time_step_sound": int(cfg.time_step_sound) % 2 != 0,
+        # _step_body advances these after the species; the chain does not
+        "TKE scalar": getattr(state, "tke", None) is not None,
+        "chem scalars": getattr(state, "chem", None) is not None,
     })
     if state.qv is not None:   # the primal's test (dycore._step_body)
         checks.update(_refuse_moist(cfg, state))
@@ -669,10 +672,6 @@ def _inv(d: dict) -> dict:
     return {**d, "msfv": d["msfv_inv"]}
 
 
-def state_inputs(x: dict) -> dict:
-    return {n: x[n] for n in STEP_INPUTS}
-
-
 # ------------------------------------------------------------------ the step
 
 def _op_table(spec: StageSpec):
@@ -717,7 +716,7 @@ def _written(alias, names):
 
 def step_tl(x: dict, dx: dict, geom: StepGeometry, tape: list | None = None,
             observe=None) -> None:
-    """One strict dry step: ``x`` advances (NL in its dtype) and ``dx``
+    """One strict step (dry, or moist with qv, qc and qr): ``x`` advances (NL in its dtype) and ``dx``
     maps to the step's output perturbation, in place.  ``dx`` holds every
     name of ``x`` (zeros where unperturbed).  With a ``tape`` each
     operator's written arrays are appended before it runs.  ``observe``

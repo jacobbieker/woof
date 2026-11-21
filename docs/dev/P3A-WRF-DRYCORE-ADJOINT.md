@@ -9,8 +9,8 @@ kernel or a few.
 
 ## 1. What is being linearised
 
-- **Route:** the WRF route, dry, with `moist_adv_opt = 0`, specified or
-  periodic lateral boundaries, one domain, no nests and a fixed `dt`.
+- **Route:** the WRF route, dry (moist with qv, qc and qr from 8l), with
+  `moist_adv_opt = 0`, specified or periodic lateral boundaries, one domain, no nests and a fixed `dt`.
   These are WRFPLUS's own limits.
 - **Routine boundaries:** woof's strict sequence (`GPUWM_WRF_EXACT=1`).
   It keeps WRF's routine boundaries (`small_step_prep`, `advance_uv`,
@@ -783,11 +783,12 @@ Each step is one small PR, taken to merged before the next widens.
      supplied state.
    - `Window.trajectory_state(state, cfg)` reads a DomainState (a woof
      forecast's state after some steps) as an entry, in the window's
-     dtype. A WRF trajectory is mapped onto STEP_INPUTS by the caller.
+     dtype. A WRF trajectory is mapped onto `step_inputs(geom)` by the
+     caller (STEP_INPUTS, plus SPECIES on a moist window).
      Each entry must hold what its step reads: on a warm step the
      previous step's diagnosis and carried muts.
    - The geometry is still the window's (the `cfg` it was built with), so
-     a physics run's states are linearised by the dry step: the
+     a physics run's states are linearised by the physics-free step: the
      adiabatic TL of WRFDA's lanes L1/L0 before item 6.
    - `forward` returns state `nsteps`: the supplied one, or one window
      step from the last. A plain `forward()` returns to the window's own
