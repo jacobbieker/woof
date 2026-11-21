@@ -4,8 +4,12 @@
 //   horizontal_pressure_gradient  woof slow_pgf (woof/core/kernels/
 //                    dycore.cu, the GPUWM_WRF_EXACT, _C_BIGSTEP and
 //                    _D_DIAGNOSTICS paths: p is the perturbation pressure),
-//                    dry (no cqu/cqv), non-hydrostatic, 3-D base state;
-//   pg_buoy_w        woof slow_buoyancy, dry (moist_mode 0).
+//                    dry or with the moist cqu/cqv factors (use_cq),
+//                    non-hydrostatic, 3-D base state;
+//   pg_buoy_w        woof slow_buoyancy, dry (moist_mode 0) or with qv, qc
+//                    and qr (moist_mode 1, WRF's cqw pair);
+//   calc_cq          woof calc_cq (acoustic.cu): cqu, cqv and cqw from
+//                    qv (n_mass 1) or qv, qc and qr (n_mass 3).
 //   rhs_ph           woof slow_geopotential_open (supplied = 0,
 //                    add_vertical = 1), which for h_sca_adv_order 5 on
 //                    periodic or specified axes gives the words of the
@@ -74,10 +78,17 @@ static __device__ __forceinline__ Dl operator*(Dl a, Dl b)
 static __device__ __forceinline__ Dl operator*(wreal a, Dl b) { return dl(a * b.v, a * b.d); }
 static __device__ __forceinline__ Dl operator+(Dl a, wreal b) { return dl(a.v + b, a.d); }
 static __device__ __forceinline__ Dl operator-(Dl a, wreal b) { return dl(a.v - b, a.d); }
+static __device__ __forceinline__ Dl operator+(wreal a, Dl b) { return dl(a + b.v, b.d); }
 static __device__ __forceinline__ Dl operator*(Dl a, wreal b) { return dl(a.v * b, a.d * b); }
 static __device__ __forceinline__ Dl operator/(Dl a, wreal b)
 {
     return dl(wdiv(a.v, b), wdiv(a.d, b));
+}
+// a / b with b active: the value is the primal's division.
+static __device__ __forceinline__ Dl operator/(wreal a, Dl b)
+{
+    wreal v = wdiv(a, b.v);
+    return dl(v, wdiv(-(v * b.d), b.v));
 }
 static __device__ __forceinline__ Dl ld(const wreal* a, const wreal* ad, size_t at)
 {
@@ -163,6 +174,8 @@ void pgf_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_d,
             const wreal* __restrict__ alt, const wreal* __restrict__ altd,
             const wreal* __restrict__ php, const wreal* __restrict__ phpd,
             const wreal* __restrict__ mup, const wreal* __restrict__ mupd,
+            const wreal* __restrict__ cqu, const wreal* __restrict__ cqud,
+            const wreal* __restrict__ cqv, const wreal* __restrict__ cqvd, int use_cq,
             PGF_PASSIVE, int nl, PGF_GEOM)
 {
     size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -181,6 +194,7 @@ void pgf_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_d,
                            pb, phb, mub, c1h, c2h, rdnw, fnm, fnp,
                            cf1, cf2, cf3, top_lid, cfn, cfn1);
         size_t out = R3(k, j, i, ny, nxf);
+        if (use_cq) t = ld(cqu, cqud, out) * t;   // the primal's rn_mul(cqu, term)
         if (nl) ru_t[out] = ru_t[out] - t.v;
         if (WRFPLUS_TL) ru_d[out] = ru_d[out] - t.d;
     }
@@ -191,6 +205,7 @@ void pgf_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_d,
                            pb, phb, mub, c1h, c2h, rdnw, fnm, fnp,
                            cf1, cf2, cf3, top_lid, cfn, cfn1);
         size_t out = R3(k, j, i, nyf, nx);
+        if (use_cq) t = ld(cqv, cqvd, out) * t;
         if (nl) rv_t[out] = rv_t[out] - t.v;
         if (WRFPLUS_TL) rv_d[out] = rv_d[out] - t.d;
     }
@@ -201,7 +216,9 @@ void pgf_tl(wreal* __restrict__ ru_t, wreal* __restrict__ ru_d,
 // term = (H L) B + (R D) V with H = rd/2, L the layer mass, B the bracket,
 // R = rd, D the half-level geopotential difference and V the vertical
 // term; the face's tendency loses it, so with a its adjoint
-// aB = -a H L, aL = -a H B, aD = -a R V, aV = -a R D.
+// aB = -a H L, aL = -a H B, aD = -a R V, aV = -a R D.  With use_cq the
+// tendency loses cq term: a is scaled by cq first, and cq's adjoint is
+// -a term (pgf_ad_face adds it into acqu / acqv).
 //
 // pgf_ad_face writes the four per face (slot s of fu / fv: aB, aL, aD,
 // aV; zero where the face does not exist); pgf_ad_cell (p, al, alt),
@@ -302,6 +319,8 @@ static __device__ PgfParts pgf_face_parts(PgfFace F, int k, size_t st, int nz, c
 
 extern "C" __global__
 void pgf_ad_face(const wreal* __restrict__ ru_a, const wreal* __restrict__ rv_a, PGF_AD_IN,
+                 const wreal* __restrict__ cqu, const wreal* __restrict__ cqv,
+                 wreal* __restrict__ acqu, wreal* __restrict__ acqv, int use_cq,
                  wreal* __restrict__ fu, wreal* __restrict__ fv, PGF_PASSIVE, PGF_GEOM)
 {
     size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -327,6 +346,12 @@ void pgf_ad_face(const wreal* __restrict__ ru_a, const wreal* __restrict__ rv_a,
             wreal rd = dir ? rdy : rdx;
             PgfParts R = pgf_face_parts(F, k, st, nz, p, al, alt, php, mup, pb, phb, mub, c1h,
                                         c2h, rdnw, fnm, fnp, cf1, cf2, cf3, top_lid, cfn, cfn1);
+            if (use_cq) {
+                wreal term = ((wreal)0.5 * rd * R.L) * R.B + (rd * R.D) * R.V;
+                if (dir) acqv[at] -= a * term;
+                else acqu[at] -= a * term;
+                a = a * (dir ? cqv[at] : cqu[at]);
+            }
             wreal hr = -a * ((wreal)0.5 * rd);
             aB = hr * R.L;
             aL = hr * R.B;
@@ -469,11 +494,29 @@ static __device__ __forceinline__ wreal buoy_scale(const wreal* msft, size_t c, 
     return wdiv((wreal)1, msft[c]) * BS_G;
 }
 
+// WRF's cqw pair (the primal's wrf_cqw_pair): 0.5 times the moist mass at
+// levels a and b, accumulated species by species, a then b.
+static __device__ Dl buoy_cqw_tl(const wreal* qv, const wreal* qvd, const wreal* qc,
+                                 const wreal* qcd, const wreal* qr, const wreal* qrd,
+                                 size_t a, size_t b)
+{
+    Dl q = (dl((wreal)0, (wreal)0) + ld(qv, qvd, a)) + ld(qv, qvd, b);
+    q = (q + ld(qc, qcd, a)) + ld(qc, qcd, b);
+    q = (q + ld(qr, qrd, a)) + ld(qr, qrd, b);
+    return (wreal)0.5 * q;
+}
+
+#define BUOY_MOIST                                                          \
+    const wreal* __restrict__ qv, const wreal* __restrict__ qvd,            \
+    const wreal* __restrict__ qc, const wreal* __restrict__ qcd,            \
+    const wreal* __restrict__ qr, const wreal* __restrict__ qrd,            \
+    const wreal* __restrict__ mub, const wreal* __restrict__ c2f, int moist
+
 extern "C" __global__
 void buoy_tl(wreal* __restrict__ rw_t, wreal* __restrict__ rw_d,
              const wreal* __restrict__ p, const wreal* __restrict__ pd,
              const wreal* __restrict__ mup, const wreal* __restrict__ mupd,
-             BUOY_PASSIVE, int nl, int has_msf, int nz, int ny, int nx)
+             BUOY_MOIST, BUOY_PASSIVE, int nl, int has_msf, int nz, int ny, int nx)
 {
     size_t st = (size_t)ny * nx;
     size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -483,24 +526,48 @@ void buoy_tl(wreal* __restrict__ rw_t, wreal* __restrict__ rw_d,
     size_t ix = (size_t)k * st + c;
     Dl term;
     if (k == nz) {
-        wreal cq1 = wdiv((wreal)1, (wreal)1 + (wreal)0);
+        size_t top = (size_t)(nz - 1) * st + c;
+        Dl cqw = moist ? buoy_cqw_tl(qv, qvd, qc, qcd, qr, qrd, top, top - st)
+                       : dl((wreal)0, (wreal)0);
+        Dl cq1 = (wreal)1 / ((wreal)1 + cqw);
         Dl pressure = ((cq1 * (wreal)2) * rdnw[nz - 1]) * (dl((wreal)0, (wreal)0)
-                                                          - ld(p, pd, (size_t)(nz - 1) * st + c));
+                                                          - ld(p, pd, top));
         term = pressure - c1f[nz] * ld(mup, mupd, c);
+        if (moist) {
+            wreal base_mass = c1f[nz] * mub[c] + c2f[nz];
+            term = term - (cqw * cq1) * base_mass;
+        }
     } else {
         Dl dp = ld(p, pd, ix) - ld(p, pd, ix - st);
-        term = rdn[k] * dp;
-        term = term - c1f[k] * ld(mup, mupd, c);
+        if (moist) {
+            Dl cqw = buoy_cqw_tl(qv, qvd, qc, qcd, qr, qrd, ix, ix - st);
+            Dl cq1 = (wreal)1 / ((wreal)1 + cqw);
+            term = (cq1 * rdn[k]) * dp;
+            term = term - c1f[k] * ld(mup, mupd, c);
+            wreal base_mass = c1f[k] * mub[c] + c2f[k];
+            term = term - (cqw * cq1) * base_mass;
+        } else {
+            term = rdn[k] * dp;
+            term = term - c1f[k] * ld(mup, mupd, c);
+        }
     }
     Dl buoy = buoy_scale(msft, c, has_msf) * term;
     if (nl) rw_t[ix] = rw_t[ix] + buoy.v;
     if (WRFPLUS_TL) rw_d[ix] = rw_d[ix] + buoy.d;
 }
 
-// p and mup of one column.
+// p, mup (and, moist, qv, qc and qr) of one column.  With cq1 = 1/(1+cqw),
+// d(cq1)/d(cqw) = -cq1^2 and d(cqw cq1)/d(cqw) = cq1^2, so the term's
+// cqw derivative is -cq1^2 (P + base_mass) with P the pressure bracket
+// before its cq1 factor (rdn dp, or 2 rdnw (0 - p') at the top).
 extern "C" __global__
-void buoy_ad(const wreal* __restrict__ rw_a, wreal* __restrict__ ap,
-             wreal* __restrict__ amup, BUOY_PASSIVE, int has_msf, int nz, int ny, int nx)
+void buoy_ad(const wreal* __restrict__ rw_a, const wreal* __restrict__ p,
+             wreal* __restrict__ ap, wreal* __restrict__ amup,
+             const wreal* __restrict__ qv, const wreal* __restrict__ qc,
+             const wreal* __restrict__ qr, wreal* __restrict__ aqv,
+             wreal* __restrict__ aqc, wreal* __restrict__ aqr,
+             const wreal* __restrict__ mub, const wreal* __restrict__ c2f, int moist,
+             BUOY_PASSIVE, int has_msf, int nz, int ny, int nx)
 {
     size_t st = (size_t)ny * nx;
     size_t c = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -510,11 +577,27 @@ void buoy_ad(const wreal* __restrict__ rw_a, wreal* __restrict__ ap,
     for (int k = nz; k >= 1; --k) {
         wreal a = rw_a[(size_t)k * st + c] * s;
         gm -= a * c1f[k];
+        size_t hi = k == nz ? (size_t)(nz - 1) * st + c : (size_t)k * st + c;
+        size_t lo = hi - st;   // the cqw pair's lower level (unused dry)
+        wreal cq1 = 1, P;
+        if (moist) {
+            wreal cqw = (wreal)0.5 * (qv[hi] + qv[lo] + qc[hi] + qc[lo] + qr[hi] + qr[lo]);
+            cq1 = (wreal)1 / ((wreal)1 + cqw);
+        }
         if (k == nz) {
-            ap[(size_t)(nz - 1) * st + c] -= a * ((wreal)2 * rdnw[nz - 1]);
+            P = (wreal)2 * rdnw[nz - 1] * (-p[hi]);
+            ap[hi] -= a * cq1 * ((wreal)2 * rdnw[nz - 1]);
         } else {
-            ap[(size_t)k * st + c] += a * rdn[k];
-            ap[(size_t)(k - 1) * st + c] -= a * rdn[k];
+            P = rdn[k] * (p[hi] - p[lo]);
+            ap[hi] += a * cq1 * rdn[k];
+            ap[lo] -= a * cq1 * rdn[k];
+        }
+        if (moist) {
+            wreal acqw = -a * cq1 * cq1 * (P + (c1f[k] * mub[c] + c2f[k]));
+            wreal h = (wreal)0.5 * acqw;
+            aqv[hi] += h; aqv[lo] += h;
+            aqc[hi] += h; aqc[lo] += h;
+            aqr[hi] += h; aqr[lo] += h;
         }
     }
     amup[c] += gm;
@@ -1661,4 +1744,141 @@ void wd_ad(const wreal* __restrict__ rw_a, const wreal* __restrict__ ww,
         am += c1f[k] * (a * sa * (vc - w_crit_cfl) - wdiv(aq * q, m));
     }
     amup[c] += am;
+}
+
+// ============================================================== calc_cq
+//
+// woof's calc_cq (acoustic.cu): every face's cq = 1 / (1 + 0.5 qtot),
+// qtot the face's two cells' moist mass summed species by species (qv;
+// with n_mass 3 also qc and qr), a then b.  u and v faces wrap
+// periodically (every face, the boundary faces included; advance_uv
+// skips the boundary-normal ones); cqw is 1 at w levels 0 and nz.
+
+static __device__ Dl cq_pair_tl(const wreal* qv, const wreal* qvd, const wreal* qc,
+                                const wreal* qcd, const wreal* qr, const wreal* qrd,
+                                size_t a, size_t b, int n_mass)
+{
+    Dl q = dl((wreal)0, (wreal)0);
+    q = q + ld(qv, qvd, a);
+    q = q + ld(qv, qvd, b);
+    if (n_mass >= 3) {
+        q = q + ld(qc, qcd, a);
+        q = q + ld(qc, qcd, b);
+        q = q + ld(qr, qrd, a);
+        q = q + ld(qr, qrd, b);
+    }
+    return (wreal)1 / ((wreal)1 + (wreal)0.5 * q);
+}
+
+#define CQ_MOIST                                                            \
+    const wreal* __restrict__ qv, const wreal* __restrict__ qvd,            \
+    const wreal* __restrict__ qc, const wreal* __restrict__ qcd,            \
+    const wreal* __restrict__ qr, const wreal* __restrict__ qrd
+
+extern "C" __global__
+void cq_tl(wreal* __restrict__ cqu, wreal* __restrict__ cqud,
+           wreal* __restrict__ cqv, wreal* __restrict__ cqvd,
+           wreal* __restrict__ cqw, wreal* __restrict__ cqwd,
+           CQ_MOIST, int nl, int n_mass, int nz, int ny, int nx)
+{
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    int nxf = nx + 1, nyf = ny + 1;
+    size_t nu = (size_t)nz * ny * nxf, nv = (size_t)nz * nyf * nx;
+    size_t nw = (size_t)(nz + 1) * ny * nx;
+    if (tid < nu) {
+        int k = (int)(tid / ((size_t)ny * nxf));
+        size_t rem = tid - (size_t)k * ny * nxf;
+        int j = (int)(rem / nxf), i = (int)(rem - (size_t)j * nxf);
+        int ia = i % nx, ib = (i - 1 + nx) % nx;
+        Dl q = cq_pair_tl(qv, qvd, qc, qcd, qr, qrd, R3(k, j, ia, ny, nx),
+                          R3(k, j, ib, ny, nx), n_mass);
+        if (nl) cqu[tid] = q.v;
+        if (WRFPLUS_TL) cqud[tid] = q.d;
+    }
+    if (tid < nv) {
+        int k = (int)(tid / ((size_t)nyf * nx));
+        size_t rem = tid - (size_t)k * nyf * nx;
+        int j = (int)(rem / nx), i = (int)(rem - (size_t)j * nx);
+        int ja = j % ny, jb = (j - 1 + ny) % ny;
+        Dl q = cq_pair_tl(qv, qvd, qc, qcd, qr, qrd, R3(k, ja, i, ny, nx),
+                          R3(k, jb, i, ny, nx), n_mass);
+        if (nl) cqv[tid] = q.v;
+        if (WRFPLUS_TL) cqvd[tid] = q.d;
+    }
+    if (tid < nw) {
+        int k = (int)(tid / ((size_t)ny * nx));
+        size_t rem = tid - (size_t)k * ny * nx;
+        Dl q = dl((wreal)1, (wreal)0);
+        if (k != 0 && k != nz)
+            q = cq_pair_tl(qv, qvd, qc, qcd, qr, qrd, (size_t)k * ny * nx + rem,
+                           (size_t)(k - 1) * ny * nx + rem, n_mass);
+        if (nl) cqw[tid] = q.v;
+        if (WRFPLUS_TL) cqwd[tid] = q.d;
+    }
+}
+
+// The adjoint of qtot at one face from cq's: d cq / d qtot = -0.5 cq^2.
+static __device__ __forceinline__ wreal cq_face_ad(const wreal* qv, const wreal* qc,
+                                                   const wreal* qr, size_t a, size_t b,
+                                                   int n_mass, wreal acq)
+{
+    wreal q = qv[a] + qv[b];
+    if (n_mass >= 3) q = q + qc[a] + qc[b] + qr[a] + qr[b];
+    wreal cq = (wreal)1 / ((wreal)1 + (wreal)0.5 * q);
+    return -(wreal)0.5 * cq * cq * acq;
+}
+
+// Gather: each mass cell collects the faces (u, v, w) whose pair reads it.
+extern "C" __global__
+void cq_ad(const wreal* __restrict__ acqu, const wreal* __restrict__ acqv,
+           const wreal* __restrict__ acqw, const wreal* __restrict__ qv,
+           const wreal* __restrict__ qc, const wreal* __restrict__ qr,
+           wreal* __restrict__ aqv, wreal* __restrict__ aqc, wreal* __restrict__ aqr,
+           int n_mass, int nz, int ny, int nx)
+{
+    size_t st = (size_t)ny * nx;
+    size_t tid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= (size_t)nz * st) return;
+    int k = (int)(tid / st);
+    size_t c = tid - (size_t)k * st;
+    int j = (int)(c / nx), i = (int)(c - (size_t)j * nx);
+    int nxf = nx + 1, nyf = ny + 1;
+    wreal g = 0;
+    // u faces f with ia = f % nx == i or ib = (f - 1 + nx) % nx == i: f = i,
+    // i + 1, and the periodic ends nx (i = 0) and 0 (i = nx - 1), each once
+    int fu[4] = {i, i + 1, i == 0 ? nx : -1, i == nx - 1 ? 0 : -1};
+    for (int r = 0; r < 4; ++r) {
+        int f = fu[r];
+        if (f < 0 || (r >= 1 && f == fu[0]) || (r >= 2 && f == fu[1])
+            || (r == 3 && f == fu[2])) continue;
+        int ia = f % nx, ib = (f - 1 + nx) % nx;
+        if (ia != i && ib != i) continue;
+        size_t at = R3(k, j, f, ny, nxf);
+        wreal h = cq_face_ad(qv, qc, qr, R3(k, j, ia, ny, nx), R3(k, j, ib, ny, nx), n_mass,
+                             acqu[at]);
+        g += (ia == i ? h : (wreal)0) + (ib == i ? h : (wreal)0);
+    }
+    int fv[4] = {j, j + 1, j == 0 ? ny : -1, j == ny - 1 ? 0 : -1};
+    for (int r = 0; r < 4; ++r) {
+        int f = fv[r];
+        if (f < 0 || (r >= 1 && f == fv[0]) || (r >= 2 && f == fv[1])
+            || (r == 3 && f == fv[2])) continue;
+        int ja = f % ny, jb = (f - 1 + ny) % ny;
+        if (ja != j && jb != j) continue;
+        size_t at = R3(k, f, i, nyf, nx);
+        wreal h = cq_face_ad(qv, qc, qr, R3(k, ja, i, ny, nx), R3(k, jb, i, ny, nx), n_mass,
+                             acqv[at]);
+        g += (ja == j ? h : (wreal)0) + (jb == j ? h : (wreal)0);
+    }
+    // w levels k (pair k, k-1) and k+1 (pair k+1, k), interior only
+    for (int m = k; m <= k + 1; ++m) {
+        if (m == 0 || m == nz) continue;
+        size_t at = (size_t)m * st + c;
+        g += cq_face_ad(qv, qc, qr, at, at - st, n_mass, acqw[at]);
+    }
+    aqv[tid] += g;
+    if (n_mass >= 3) {
+        aqc[tid] += g;
+        aqr[tid] += g;
+    }
 }

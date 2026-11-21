@@ -31,11 +31,19 @@ fork already had, upstream's keys and flags are now the only ones:
 
 New:
 
+- The WRF dry-step adjoint (`woof.grad.wrfplus`) gains its first moist
+  pieces, for WRFDA's moisture control: the TL/AD of `calc_cq` (qv, or
+  qv, qc and qr), of the pressure gradient's cqu/cqv factor, and of the
+  moist buoyancy (`moist_mode` 1). Each is checked against woof's strict
+  primal word for word in binary32. They are not yet bound into the
+  step. The forecast path is unchanged.
+
 - The WRF dry-step adjoint's diagnosis (`woof.grad.wrfplus`
   `calc_p_rho_phi`) takes qv as an active input on a moist state, through
   WRF's `qvf = 1 + rvovrd qv`. It is checked against woof's strict
   primal word for word in binary32. It is not yet bound into the step.
   The forecast path is unchanged.
+
 - The WRF dry-step adjoint's window (`woof.grad.wrfplus.window.Window`)
   can linearise about a supplied trajectory, as WRFPLUS does about the
   nonlinear run's states: `forward(trajectory=states)` takes the state

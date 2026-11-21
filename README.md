@@ -1185,8 +1185,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`Window.tl(dx0, partial=True)`). It can also linearise about a
   supplied trajectory instead of its own dry rerun, as WRFPLUS does
   about the nonlinear run's states (`Window.forward(trajectory=...)`).
-  The diagnosis also takes qv on a moist state (WRF's `qvf`), not yet in
-  the step. The forecast path does not import any of it.
+  The first moist pieces exist as kernels but are not yet in the step:
+  `calc_cq` (qv, or qv, qc and qr), the pressure gradient's cqu/cqv, the
+  moist buoyancy and the diagnosis's qv (WRF's `qvf`). The forecast path
+  does not import any of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
