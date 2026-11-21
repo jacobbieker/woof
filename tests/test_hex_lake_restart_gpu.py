@@ -60,7 +60,8 @@ def _words(seam, theta):
             **{name: base._host(seam._driver.fields[name]) for name in names}}
 
 
-def test_a_restart_binds_no_lake_state_and_continues_bitwise(monkeypatch):
+def test_a_restart_binds_no_lake_state_and_continues_bitwise(monkeypatch, tmp_path):
+    monkeypatch.setenv("WOOF_LAKE_RECEIPT_DIR", str(tmp_path))
     calls = []
     reference_seam = _seam(monkeypatch, calls)
     assert calls == ["era5-land"], "the unbroken run binds the source once"
@@ -91,8 +92,11 @@ def test_a_restart_binds_no_lake_state_and_continues_bitwise(monkeypatch):
                 err_msg=f"step {step} {name}")
 
 
-def test_an_ordinary_build_still_binds_the_source(monkeypatch):
+def test_an_ordinary_build_still_binds_the_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("WOOF_LAKE_RECEIPT_DIR", str(tmp_path))
     calls = []
-    _seam(monkeypatch, calls)
-    _seam(monkeypatch, calls, restoring=True)
+    ordinary = _seam(monkeypatch, calls)
+    restored = _seam(monkeypatch, calls, restoring=True)
     assert calls == ["era5-land"]
+    assert ordinary._driver.lake_initialization_receipt["status"] == "bound"
+    assert restored._driver.lake_initialization_receipt["status"] == "restored_from_checkpoint"

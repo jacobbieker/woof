@@ -461,10 +461,10 @@ def initialize_surface(fields, cfg, *, valid_time, latitude, longitude, cold_sta
     """Bind observations before either the LSM or lake cold start."""
     import cupy as cp
     source = getattr(cfg, 'lake_state_source', 'auto')
-    if _RESTORING.get():
-        return None, dict(schema='gpuwm.lake-init.v1', status='restored_from_checkpoint', source=source)
     if not cold_start or source == 'forcing':
         return None, dict(schema='gpuwm.lake-init.v1', status='retained_forcing', source=source)
+    if _RESTORING.get():
+        return None, dict(schema='gpuwm.lake-init.v1', status='restored_from_checkpoint', source=source)
     if valid_time is None or latitude is None or longitude is None:
         # A chain is explicit here: its model step cannot run without them.
         if source != 'auto':
