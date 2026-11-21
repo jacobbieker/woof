@@ -36,9 +36,9 @@ _COMPONENTS: dict[str, tuple[str, str, str]] = {
 
 #: component -> the schemes a ``ported_subset`` component can run in a coupled step
 _SUBSETS: dict[str, tuple[str, ...]] = {
-    # MALI v8.4.2: the forward mode with these velocity solvers ('simple' is
-    # next; Albany's FO/L1L2/Stokes are refused by name)
-    "landice": ("sia", "none"),
+    # MALI v8.4.2: the forward mode with these velocity solvers (Albany's
+    # FO/L1L2/Stokes are refused by name)
+    "landice": ("sia", "simple", "none"),
 }
 
 

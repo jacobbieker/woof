@@ -416,7 +416,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     imports the ocean's floating basal mass balance
     (`woof/hex/mpas_ice/ocean_seam_v842.py`, graded by conservation); the
     land-ice core's registry status is now `ported_subset` (velocity
-    solvers 'sia' and 'none'). Two v8.4.2 quirks have opt-in corrections, off by
+    solvers 'sia', 'simple' and 'none'). Two v8.4.2 quirks have opt-in corrections, off by
     default: `woof_sgh_init_mask = 'corrected'` and
     `woof_enthalpy_advection_units = 'corrected'` (the advection converts
     enthalpy in Celsius, as the thermal solver does, so the EISMINT2
@@ -1170,8 +1170,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
   0.85-3.2x the glue, 3.3-4.5x advection, 1.3-4.4x the big-step
   tendencies and 2.5-3.7x the lateral boundaries. The kernels chain into
-  one strict dry step (`woof.grad.wrfplus.model`, periodic, with
-  Coriolis, curvature and map factors) whose binary32 base state reproduces
+  one strict dry step (`woof.grad.wrfplus.model`, periodic or with
+  specified lateral boundaries, with Coriolis, curvature and map factors;
+  the boundary tables are inputs whose adjoint it returns) whose binary32 base state reproduces
   `dycore.step` word for word, and whose binary64 dot-product and
   finite-difference tests pass. Measured at 200x200x49 on an A6000, the
   step's adjoint sweep costs 3.3x the forward step, and 4.8x with its
@@ -1181,9 +1182,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   over N steps with checkpoints, and takes adjoint forcing at
   intermediate states for 4D-Var. Its TL can start from part of the
   state, with the rest zero, as WRFDA's TL start does
-  (`Window.tl(dx0, partial=True)`). The diagnosis also takes qv on a
-  moist state (WRF's `qvf`), not yet in the step. The forecast path does
-  not import any of it.
+  (`Window.tl(dx0, partial=True)`). It can also linearise about a
+  supplied trajectory instead of its own dry rerun, as WRFPLUS does
+  about the nonlinear run's states (`Window.forward(trajectory=...)`).
+  The diagnosis also takes qv on a moist state (WRF's `qvf`), not yet in
+  the step. The forecast path does not import any of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
