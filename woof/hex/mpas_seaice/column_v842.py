@@ -1143,7 +1143,8 @@ def zbgc_parameters(configs: dict, tracers: TracerObject) -> dict:
     type band (1 s each below 0, where none applies), ``zbgc_frac_init`` (1)
     and ``zbgc_init_frac`` (``frazil_scav``, or ``initbio_frac`` below 0)."""
     c = configs
-    tau_min, tau_max = float(c["config_rapid_mobile_to_stationary_time"]), float(c["config_long_mobile_to_stationary_time"])
+    tau_min = float(c["config_rapid_mobile_to_stationary_time"])
+    tau_max = float(c["config_long_mobile_to_stationary_time"])
     out = {"type": [], "tau_ret": [], "tau_rel": [], "frac_init": [], "init_frac": []}
     for _ in range(tracers.n_bio_tracers):
         kind = float(c["config_mobility_type_nitrate"])
@@ -1175,7 +1176,8 @@ def ocean_conc_array(pools: dict, configs: dict, dims: dict[str, int]) -> None:
     n = dims["nCellsSolve"]
     out = _need(bgc, "oceanBioConcentrations", (dims["nCells"] + 1, dims["nZBGCTracers"]))
     algae, doc, dic, don = (bgc[k][:n] for k in ("oceanAlgaeConc", "oceanDOCConc", "oceanDICConc", "oceanDONConc"))
-    fed, fep, zaero = (bgc[k][:n] for k in ("oceanDissolvedIronConc", "oceanParticulateIronConc", "oceanZAerosolConc"))
+    fed, fep, zaero = (bgc[k][:n] for k in ("oceanDissolvedIronConc", "oceanParticulateIronConc",
+                                            "oceanZAerosolConc"))
     chl = [np.float64(c[f"config_ratio_chla_to_N_{a}"]) for a in ("diatoms", "small_plankton", "phaeocystis")]
     s2n = [np.float64(c[f"config_ratio_S_to_N_{a}"]) for a in ("diatoms", "small_plankton", "phaeocystis")]
     o = cp.zeros_like(out[:n])

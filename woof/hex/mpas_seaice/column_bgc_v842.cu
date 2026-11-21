@@ -1,6 +1,7 @@
-// MPAS-Seaice v8.4.2: the column biogeochemistry's brine height
-// (column_biogeochemistry -> colpkg_biogeochemistry with tr_brine and without
-// the vertical salinity, the vertical or the skeletal biochemistry).
+// MPAS-Seaice v8.4.2: the column biogeochemistry's brine height, vertical
+// salinity and vertical tracers' nonreactive tracer (column_biogeochemistry ->
+// colpkg_biogeochemistry with tr_brine, without the vertical or the skeletal
+// biochemistry).
 //
 // A modified derivative of MPAS-Model v8.4.2 (MPAS-Dev/MPAS-Model,
 // f34984b2c89353cf31c235b08d3b4acd96b37bb3), transcribed from
@@ -17,6 +18,19 @@
 //     841-943    calculate_drho
 //   src/core_seaice/column/ice_zbgc_shared.F90:
 //     110-133    exp_h, k_o, thinS, viscos_dynamic, Dm, Ra_c
+//     370-524    regrid_stationary
+//   src/core_seaice/column/ice_algae.F90:
+//     29-340     zbio
+//     747-1417   z_biogeochemistry
+//     2159-2223  thin_ice_flux
+//     2232-2429  compute_FCT_matrix
+//     2438-2559  compute_FCT_corr
+//     2568-2611  tridiag_solverz
+//     2617-2710  check_conservation_FCT
+//   src/core_seaice/column/ice_aerosol.F90:
+//     447-826    update_snow_bgc
+//   src/core_seaice/column/ice_zbgc.F90:
+//     528-653    merge_bgc_fluxes
 // (remap_zbgc and calculate_Tin_from_qin are in column_zbgc_shared_v842.cu)
 //   src/core_seaice/column/ice_mushy_physics.F90:
 //     29-110     the Assur (1958) liquidus constants
@@ -1071,7 +1085,7 @@ __device__ void thin_ice_flux(double hin, double hin_old, double *Cin, double *f
 __device__ double zb_maxval(const double *x, int lo, int hi)
 {
     int k = lo;
-    while (k <= hi && !(x[k] >= -INFINITY)) ++k;
+    while (k <= hi && x[k] != x[k]) ++k;
     if (k > hi) return __longlong_as_double(0x7ff8000000000000LL);
     double r = x[k];
     for (++k; k <= hi; ++k)

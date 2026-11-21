@@ -1,4 +1,4 @@
-"""MPAS-Seaice v8.4.2's column biogeochemistry on the GPU: the brine height and the vertical salinity.
+"""MPAS-Seaice v8.4.2's column biogeochemistry on the GPU: brine height, vertical salinity, nonreactive tracer.
 
 ``column_biogeochemistry`` (``mpas_seaice_column.F:2781-3272``) and the
 column package under it (``colpkg_biogeochemistry``) with
@@ -35,10 +35,36 @@ since ``solve_S_dt`` forces it where its convective branch runs (the brine
 height above ``thinS`` = ``Ra_c``); ``totalVerticalSalinity`` is summed into and
 never reset.
 
+The vertical tracers (``config_use_vertical_tracers``) are carried with the
+nonreactive tracer alone (``config_use_nonreactive``: the column package's
+PON, nbtrcr = 1, no vertical biochemistry). On ice, after the brine height,
+``zbio``: ``update_snow_bgc`` (the snow's two layers: evaporation, melt
+scavenging, snow ice, snowfall, the surface layer's new thickness),
+``z_biogeochemistry`` (first ice from the ocean concentration, the shortwave
+remapped onto the biology grid into ``bioShortwaveFlux``, then above
+``thinS`` the mobile and stationary exchange by the transport type's
+retention and release times with the saturation cap, the flux-corrected
+transport's low order solve, ``check_conservation_FCT``'s flux,
+``compute_FCT_corr``, ``regrid_stationary`` with the bottom melt and
+growth, the new mobile fraction; below it ``thin_ice_flux``; then the bulk
+concentration) and ``merge_bgc_fluxes`` into ``oceanBioFluxes``,
+``snowIceBioFluxes``, ``atmosIceBioFluxes`` and the column totals.
+New ice resets the mobile fraction, and the wrapper's tail sums
+``bioShortwaveFluxCell``. Its stops: ``zbgc initialization error`` (a
+negative tracer), ``negative bgc``, ``remap_zbgc``'s, and
+``check_conservation_FCT``'s negative low order solution, after which v8.4.2
+logs a stop label nothing set (whatever ``abortMessage`` held). The FCT's
+conservation failure and the snow's warnings are warnings only, not kept.
+``update_snow_bgc`` divides by the area before the step unguarded, so ice
+new to a category (an initial area of 0) would take NaN; the step never
+makes that (the area before the step is the step's own), and the cases do
+not.
+
 What it refuses, by name: the biogeochemistry without ``config_use_brine``
 (``colpkg_biogeochemistry`` writes the brine changes, which only the brine
 height's package allocates), every biogeochemistry flag but ``config_use_brine``
-(the vertical and skeletal biochemistry and their species, the shortwave bioabsorption, the z-aerosols:
+but the vertical tracers' nonreactive tracer (the vertical and skeletal
+biochemistry and their species, the shortwave bioabsorption, the z-aerosols:
 :func:`~woof.hex.mpas_seaice.column_v842.refuse_unported`), more biology
 layers than ``compute_microS_mushy``'s ``trtmp(ntrcr+2)`` holds, and more
 than 64 categories. ``exp`` is the shared glibc transcription
@@ -88,7 +114,10 @@ SOURCE_FILES = (
     "src/core_seaice/column/ice_colpkg.F90:4884-5262",
     "src/core_seaice/column/ice_brine.F90:17-943",
     "src/core_seaice/column/ice_zsalinity.F90:38-425,435-1023,1111-1177",
-    "src/core_seaice/column/ice_zbgc_shared.F90:110-133,167-333",
+    "src/core_seaice/column/ice_zbgc_shared.F90:110-133,167-333,370-524",
+    "src/core_seaice/column/ice_algae.F90:29-340,747-1417,2159-2611,2617-2710",
+    "src/core_seaice/column/ice_aerosol.F90:447-826",
+    "src/core_seaice/column/ice_zbgc.F90:528-653",
     "src/core_seaice/column/ice_therm_shared.F90:47-73",
     "src/core_seaice/column/ice_mushy_physics.F90:29-110,361-409",
 )

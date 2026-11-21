@@ -1,7 +1,8 @@
 """Run the built MPAS-Seaice column-package oracle on every case and write the fixture.
 
     pixi run -e default python tools/mpas_seaice_oracle/make_column_fixture.py BUILD_DIR [--out DIR]
-        [--cases init|therm|itd|ridge|radiation|dedd|step|coupled|oml|bgc|carry|zsal|zsal_solve|zsal_carry|zsal_solve_carry|nonreactive]
+        [--cases init|therm|itd|ridge|radiation|dedd|step|coupled|oml|bgc|carry|zsal|zsal_solve|zsal_carry|zsal_solve_carry
+                 |nonreactive]
 
 BUILD_DIR holds ``run_column_r8`` and ``run_init_thermo_r8`` from build.sh.
 Writes into ``tests/data/oracles/mpas_seaice_column`` by default:
