@@ -1,0 +1,5 @@
+{
+ "abort_missing_a2x_snowc": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Faxa_snowc\" Traceback:",
+ "abort_missing_r2x_rofi": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Firr_rofi\" Traceback:",
+ "abort_missing_x2i_rofi": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Fixx_rofi\" Traceback:"
+}

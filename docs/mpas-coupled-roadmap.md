@@ -308,7 +308,12 @@ matched exchange unless asked.
    aborts, the zero and shared-name copies, the shortwave, precipitation and
    runoff, the nutrients, the per-category fields and the generic
    fraction-weighted merge, real(r8), on CUDA and Metal. The water isotopes
-   are refused by name.
+   are refused by name. The sea ice's import merge, `prep_ice_merge`
+   (`driver-mct/main/prep_ice_mod.F90`), is ported too
+   (`woof/hex/coupled/prep_ice_merge_e3sm.py`,
+   `tests/test_e3sm_ice_merge_parity.py`): the shared-name copies from o2x,
+   a2x, g2x and (two-way waves) w2x into an x2i it does not zero, and rain,
+   snow and the ice runoff summed, then scaled by `flux_epbalfact`.
 2. The fractions on the ocean grid (`seq_frac_set`, `ifrac`/`ofrac` from the
    ice's `Si_ifrac`) and the radiative fractions (`ifrad`/`ofrad`, from
    `seq_flux_ocnalb_mct`). `seq_frac_set` is ported
