@@ -1549,8 +1549,9 @@ generic column seam takes it).
 The `spacewx_f107_*` and `spacewx_ionosphere_maps` keys are refused while
 `spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 1` is refused without a
 radiation scheme, since the ionosphere uses the radiation geometry's columns.
-It is also refused on a streamed (tiled) domain and on hex, where no history
-stream carries the rows yet. Its CCIR/URSI maps and IGRF-14 coefficients are
+It is also refused on a streamed (tiled) domain and on hex's MPAS-native suites.
+Hex's generic column seam takes it (`--physics spacewx_ionosphere_opt=1`) and
+writes each row as one value per cell, `(Time, nCells)`. Its CCIR/URSI maps and IGRF-14 coefficients are
 fetched on first use into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`) and
 checked against pinned SHA-256 sums. The GFZ index file is a living record, so
 it has no pinned sum: it is fetched again when it ends before the day before the
@@ -1561,7 +1562,8 @@ ionosphere's receipt as the run starts (the `[spacewx ionosphere]` line).
 `spacewx_kp_source` is refused while `spacewx_aurora_opt = 0`;
 `spacewx_aurora_opt = 2` is refused unless `spacewx_kp_source` is `"omni"` or `"swpc"`, and
 `spacewx_aurora_opt = 1` or `2` is refused without a radiation scheme, on a streamed
-domain and on hex, for the same reasons as the ionosphere rows. For the aurora
+domain and on hex's MPAS-native suites, for the same reasons as the ionosphere rows
+(hex's generic column seam writes them per cell). For the aurora
 the GFZ file is fetched again when it lacks the latest 3-hour interval that has
 ended by the start, since the latest Kp is the one that matters (the cached file
 is kept if GFZ cannot be reached). A fetched Kp is held per source and start in

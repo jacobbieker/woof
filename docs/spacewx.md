@@ -14,8 +14,8 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | layer | what it does | status |
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
-| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
-| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
+| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route and hex generic-seam forecast history (`spacewx_ionosphere_opt`) |
+| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route and hex generic-seam forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make; auroral-electron ion-pair rates (Fang et al. 2010) from OVATION's energy flux and mean energy | ion-pair rates available as `woof spacewx particles` (electrons with `--electron-energy-flux`, a diagnostic above every model top); the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
 | L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route and hex's generic column seam, and on Fast-TUV photolysis (`phot_opt = 3`, RADM2; WRF route and hex) |
@@ -385,7 +385,15 @@ the forecast is identical with the option on or off.
 - Preflight prices the held arrays (14 column vectors and the five rows) and
   the kernel's 96 B local frame.
 - A streamed domain refuses the option, because the rows are not a tile
-  carrier, and hex refuses it until a hex history stream carries them.
+  carrier.
+- On hex's generic column seam (`--physics spacewx_ionosphere_opt=1`, with the
+  same keys), the seam's own physics driver holds the rows. Each history frame
+  writes one value per cell, `(Time, nCells)`, under the same names and units,
+  at the frame's valid time. Per cell they are word for word the WRF route's rows
+  on the same cell centres, on variable-resolution cells too
+  (`tests/test_hex_spacewx_history_gpu.py`). The seam holds no forecast
+  length, so the monthly maps after the start month load when a frame first
+  needs them. The MPAS-native hex suites still refuse the keys by name.
 
 ## L3b: the auroral oval and the solar wind (`woof spacewx aurora`)
 
@@ -578,7 +586,9 @@ The forecast is identical with the option on or off.
   Kp the first read found, even after SWPC's 24-hour feed has moved on. The
   `[spacewx aurora]` start-up line records the value, the interval and the
   source. Preflight prices the held arrays and the kernel's
-  32 B frame. Streamed domains and hex refuse it.
+  32 B frame. Streamed domains refuse it. Hex's generic column seam writes the
+  rows (and option 2's energy flux) per cell, as for the ionosphere; the
+  MPAS-native hex suites still refuse the keys by name.
 
 ## L2: solar proton events (`woof spacewx particles`)
 
