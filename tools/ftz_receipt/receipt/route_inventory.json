@@ -10842,7 +10842,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
-      "line": 116,
+      "line": 137,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10906,7 +10906,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_therm_v842.py",
-      "line": 198,
+      "line": 200,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10922,7 +10922,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_v842.py",
-      "line": 726,
+      "line": 790,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",

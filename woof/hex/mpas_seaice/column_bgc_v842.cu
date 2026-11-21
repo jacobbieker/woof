@@ -144,35 +144,82 @@ __device__ int preflushing_changes(double aicen, double vicen, double vsnon, dou
     return stop;
 }
 
-// remap_zbgc from the CICE grid to the biology grid (nr0 = 0): trtmp(it+kr-1)
-// is out[kr], kr = 1..nblyr, an untouched one 0 as trtmp's initial value
-__device__ int remap_cice_to_bio(const double *src, double hice, double hinS, const double *cgrid,
-                                 const double *bgrid, double *out)
+// remap_zbgc (ice_zbgc_shared.F90:167-333). nr0 = 0: the donor's nlyrn layers
+// on ice_grid (hice) onto the receiver's nbyrn layers on bio_grid (hinS);
+// nr0 = 1: the donor's nbyrn layers on bio_grid (hinS) onto nlyrn layers on
+// ice_grid (hice), the ice above the brine at S_min. src[0..] are the donor
+// layers (trcrn(it+kd-1)); ice_grid[k] and bio_grid[k] are ice_grid(k) and
+// bio_grid(k) (cgrid(k+1), bgrid(k+1): the 0-based grids); out[kr] is
+// trtmp(it+kr-1), kr = 1..receivers, an untouched one keeping its word.
+// Returns BG_REMAP on a negative thickness (out untouched).
+__device__ int remap_zbgc(const double *src, int nr0, int nlyrn, int nbyrn, double hice, double hinS,
+                          const double *ice_grid, const double *bio_grid, double S_min, double *out)
 {
     if (hinS < 0.0 || hice < 0.0) return BG_REMAP;
-    const int n_nd = COL_NILYR, n_nr = COL_NBLYR, n_plus = 2;
-    double dgrid[COL_NILYR + 3], rgrid[COL_NBLYR + 3], tracer[COL_NILYR + 3];
+    double dgrid[COL_NBLYR + COL_NILYR + 4], rgrid[COL_NBLYR + COL_NILYR + 4], tracer[COL_NBLYR + COL_NILYR + 4];
     double trgrid[COL_NBLYR + COL_NILYR + 4], trdr[COL_NBLYR + COL_NILYR + 4];
     for (int k = 0; k < COL_NBLYR + COL_NILYR + 4; ++k) { trgrid[k] = 0.0; trdr[k] = 0.0; }
-    dgrid[1] = col_min(col_min(A(-hice, hinS), A(-hinS, hice)), 0.0);
-    dgrid[COL_NILYR + 2] = col_min(hinS, hice);
-    tracer[1] = src[0];
-    tracer[COL_NILYR + 2] = src[COL_NILYR - 1];
-    rgrid[COL_NBLYR + 2] = col_min(hinS, hice);
-    // ice_grid(kd) = cgrid(kd+1) = cgrid[kd]; bio_grid(kr) = bgrid(kr+1) = bgrid[kr] (0-based)
-    if (hice > hinS) {
-        rgrid[1] = 0.0;
-        for (int kr = 1; kr <= n_nr; ++kr) rgrid[kr + 1] = M(bgrid[kr], hinS);
-        for (int kd = 1; kd <= n_nd; ++kd) {
-            dgrid[kd + 1] = A(M(S(cgrid[kd], 1.0), hice), hinS);
-            tracer[kd + 1] = src[kd - 1];
+    int n_nd, n_nr, n_plus;
+    if (nr0 == 0) {                                   // cice to bio
+        n_nd = nlyrn;
+        n_nr = nbyrn;
+        n_plus = 2;
+        dgrid[1] = col_min(col_min(A(-hice, hinS), A(-hinS, hice)), 0.0);
+        dgrid[nlyrn + 2] = col_min(hinS, hice);
+        tracer[1] = src[0];
+        tracer[nlyrn + 2] = src[nlyrn - 1];
+        rgrid[nbyrn + 2] = col_min(hinS, hice);
+        if (hice > hinS) {
+            rgrid[1] = 0.0;
+            for (int kr = 1; kr <= n_nr; ++kr) rgrid[kr + 1] = M(bio_grid[kr], hinS);
+            for (int kd = 1; kd <= n_nd; ++kd) {
+                dgrid[kd + 1] = A(M(S(ice_grid[kd], 1.0), hice), hinS);
+                tracer[kd + 1] = src[kd - 1];
+            }
+        } else {
+            rgrid[1] = A(-hinS, hice);
+            for (int kr = 1; kr <= n_nr; ++kr) rgrid[kr + 1] = A(M(S(bio_grid[kr], 1.0), hinS), hice);
+            for (int kd = 1; kd <= n_nd; ++kd) {
+                dgrid[kd + 1] = M(ice_grid[kd], hice);
+                tracer[kd + 1] = src[kd - 1];
+            }
         }
-    } else {
-        rgrid[1] = A(-hinS, hice);
-        for (int kr = 1; kr <= n_nr; ++kr) rgrid[kr + 1] = A(M(S(bgrid[kr], 1.0), hinS), hice);
-        for (int kd = 1; kd <= n_nd; ++kd) {
-            dgrid[kd + 1] = M(cgrid[kd], hice);
-            tracer[kd + 1] = src[kd - 1];
+    } else {                                          // bio to cice
+        n_nd = nbyrn;
+        n_nr = nlyrn;
+        if (hice > hinS) {                            // add S_min to the top layer
+            n_plus = 3;
+            tracer[1] = S_min;
+            tracer[2] = S_min;
+            rgrid[1] = A(-hice, hinS);
+            rgrid[nlyrn + n_plus - 1] = hinS;
+            for (int kr = 1; kr <= n_nr; ++kr) rgrid[kr + 1] = A(M(S(ice_grid[kr], 1.0), hice), hinS);
+            dgrid[1] = A(-hice, hinS);
+            dgrid[2] = M(S(hinS, hice), 0.5);
+            dgrid[nbyrn + n_plus] = hinS;
+            tracer[nbyrn + n_plus] = src[nbyrn - 1];
+            for (int kd = 1; kd <= n_nd; ++kd) {
+                dgrid[kd + 2] = M(bio_grid[kd], hinS);
+                tracer[kd + 2] = src[kd - 1];
+            }
+            const double half = M(0.5, S(dgrid[n_plus + 1], dgrid[n_plus]));
+            tracer[n_plus] = D(A(M(S_min, S(hice, hinS)), M(M(tracer[n_plus], 0.5), S(dgrid[n_plus + 1], dgrid[n_plus]))),
+                               A(S(hice, hinS), half));
+            tracer[1] = tracer[n_plus];
+            tracer[2] = tracer[n_plus];
+        } else {
+            n_plus = 2;
+            tracer[1] = src[0];
+            tracer[nbyrn + 2] = src[nbyrn - 1];
+            dgrid[1] = S(hice, hinS);
+            dgrid[nbyrn + 2] = hice;
+            rgrid[nlyrn + 2] = hice;
+            rgrid[1] = 0.0;
+            for (int kd = 1; kd <= n_nd; ++kd) {
+                dgrid[kd + 1] = A(M(S(bio_grid[kd], 1.0), hinS), hice);
+                tracer[kd + 1] = src[kd - 1];
+            }
+            for (int kr = 1; kr <= n_nr; ++kr) rgrid[kr + 1] = M(ice_grid[kr], hice);
         }
     }
     int kdr = 0, kdi = 1;
@@ -202,6 +249,14 @@ __device__ int remap_cice_to_bio(const double *src, double hice, double hinS, co
         }
     }
     return BG_OK;
+}
+
+// remap_zbgc from the CICE grid to the biology grid at hinS = hice, as
+// compute_microS_mushy makes it
+__device__ __forceinline__ int remap_cice_to_bio(const double *src, double hice, double hinS, const double *cgrid,
+                                                 const double *bgrid, double *out)
+{
+    return remap_zbgc(src, 0, COL_NILYR, COL_NBLYR, hice, hinS, cgrid, bgrid, MIN_SALIN, out);
 }
 
 // prepare_hbrine (1-based arrays)
@@ -357,10 +412,12 @@ __device__ int compute_microS_mushy(const double *bgrid, const double *cgrid0, c
 // update_hbrine
 __device__ void update_hbrine(double meltt, double melts, double dt, double hin, double hsn, double hin_old,
                               double *hbr, double hbr_old, double *fbri, double *dhS_top, double dhS_bottom,
-                              double kperm, double *bphi_min, double *darcy_V, double bphin, double aice0)
+                              double kperm, double *bphi_min, double *darcy_V, double bphin, double aice0,
+                              double *dh_direct)
 {
     double hbrocn = 0.0, hbrocn_new = 0.0, hbrmin, dhbr, darcy_coeff, dhrunoff, dhflood, dhbr_hin;
     *darcy_V = 0.0;
+    *dh_direct = 0.0;
     double h_ocn = A(M(D(BG_RHOSI, RHOW), hin), M(D(RHOS, RHOW), hsn));
     if (hbr_old > BG_THINS && hin_old > BG_THINS && hin > BG_THINS) {
         hbrmin = BG_THINS;
@@ -379,12 +436,14 @@ __device__ void update_hbrine(double meltt, double melts, double dt, double hin,
             hbrocn_new = S(*hbr, h_ocn);
             *darcy_V = -bg_sign(M(D(S(hbrocn, hbrocn_new), dt), *bphi_min), hbrocn);
             *dhS_top = A(S(*dhS_top, D(M(*darcy_V, dt), *bphi_min)), dhrunoff);
+            *dh_direct = dhrunoff;
         } else if (hbrocn < 0.0 && *hbr > BG_THINS) {
             hbrocn_new = M(hbrocn, glibc_exp(-M(D(darcy_coeff, *bphi_min), dt)));
             dhflood = M(col_max(0.0, S(hbrocn_new, hbrocn)), aice0);
             *hbr = col_max(hbrmin, A(h_ocn, hbrocn_new));
             *darcy_V = -bg_sign(M(D(A(S(hbrocn, hbrocn_new), dhflood), dt), *bphi_min), hbrocn);
             *dhS_top = S(S(*dhS_top, D(M(*darcy_V, dt), *bphi_min)), dhflood);
+            *dh_direct = -dhflood;
         }
     } else {
         hbrmin = col_min(BG_THINS, hin);
@@ -396,8 +455,362 @@ __device__ void update_hbrine(double meltt, double melts, double dt, double hin,
     *fbri = D(*hbr, hin);
 }
 
-// column_biogeochemistry: one thread per owned cell. flags: bit 0 tr_brine.
-// fbri is brineFraction (or a dummy without the brine height).
+// ---------------------------------------------------------------------------
+// the vertical salinity (solve_zsal): compute_microS and ice_zsalinity
+// ---------------------------------------------------------------------------
+
+#define BG_SALT_LOSS 0.4
+#define BG_MAX_SALIN 200.0
+#define BG_LAPIDUS_G 0.3
+#define BG_MAXSALIN_STOP 3     // bSin(k) > max_salin
+
+// ice_therm_shared: calculate_Tin_from_qin with l_brine (the vertical salinity
+// runs under BL99, where colpkg_init_thermo sets l_brine)
+__device__ double bg_Tin_from_qin(double qin, double Tmltk)
+{
+    double aa1 = CP_ICE;
+    double bb1 = S(S(M(S(CP_OCN, CP_ICE), Tmltk), D(qin, RHOI)), lfresh());
+    double cc1 = M(lfresh(), Tmltk);
+    return col_min(D(S(-bb1, SQRT(S(M(bb1, bb1), M(M(4.0, aa1), cc1)))), M(2.0, aa1)), Tmltk);
+}
+
+// compute_microS (ice_brine.F90:591-834): sice (trcrn(nt_sice:)) and zsal
+// (trcrn(nt_bgc_S:)) are the category's tracers, written in place; 1-based
+// bgrid, igrid and profiles, 0-based cgrid0/bgrid0. Its sloss and the local
+// Rayleigh it derives are never read. Returns BG_REMAP on remap_zbgc's stop.
+__device__ int compute_microS(const double *bgrid0, const double *cgrid0, const double *igrid, double *sice,
+                              const double *qice, double tsfc, double *zsal, double hice_old, double *hbr_old,
+                              double sss, double sst, double *bTin, double *iTin, double *bphin, double *kperm,
+                              double *bphi_min, int firstice, double *bSin, double *brine_sal, double *brine_rho,
+                              double *iphin, double *ibrine_rho, double *ibrine_sal, double *sice_rho)
+{
+    double trtmp[COL_NBLYR + 1], trtmp0[COL_NILYR];
+    for (int k = 1; k <= NB2; ++k) { bTin[k] = 0.0; bSin[k] = 0.0; }
+    for (int k = 0; k <= COL_NBLYR; ++k) trtmp[k] = 0.0;
+    const double surface_S = MIN_SALIN;
+    const double hinc_old = hice_old;
+    if (firstice) {
+        for (int k = 0; k < COL_NILYR; ++k) sice[k] = M(sss, BG_SALT_LOSS);
+        if (remap_zbgc(sice, 0, COL_NILYR, COL_NBLYR, hinc_old, hinc_old, cgrid0, bgrid0, surface_S, trtmp))
+            return BG_REMAP;
+        for (int k = 1; k <= COL_NBLYR; ++k) {
+            zsal[k - 1] = col_max(MIN_SALIN, trtmp[k]);
+            bSin[k + 1] = col_max(MIN_SALIN, zsal[k - 1]);
+        }
+        bSin[1] = bSin[2];
+        bSin[NB2] = sss;
+    } else if (*hbr_old > M(BG_MAXHBR, hice_old)) {
+        if (remap_zbgc(zsal, 0, COL_NBLYR, COL_NBLYR, *hbr_old, M(BG_MAXHBR, hinc_old), bgrid0, bgrid0, surface_S,
+                       trtmp))
+            return BG_REMAP;
+        for (int k = 1; k <= COL_NBLYR; ++k) {
+            bSin[k + 1] = col_max(MIN_SALIN, trtmp[k]);
+            zsal[k - 1] = bSin[k + 1];
+        }
+        bSin[1] = bSin[2];
+        bSin[NB2] = sss;
+        *hbr_old = M(BG_MAXHBR, hinc_old);
+    } else {
+        for (int k = 1; k <= COL_NBLYR; ++k) {
+            zsal[k - 1] = col_max(MIN_SALIN, zsal[k - 1]);
+            bSin[k + 1] = zsal[k - 1];
+        }
+        bSin[1] = bSin[2];
+        bSin[NB2] = sss;
+    }
+    for (int k = 0; k < COL_NILYR; ++k) trtmp0[k] = bg_Tin_from_qin(qice[k], -M(sice[k], DEPRESST));
+    for (int k = 0; k <= COL_NBLYR; ++k) trtmp[k] = 0.0;
+    if (remap_zbgc(trtmp0, 0, COL_NILYR, COL_NBLYR, hinc_old, *hbr_old, cgrid0, bgrid0, surface_S, trtmp))
+        return BG_REMAP;
+    for (int k = 1; k <= COL_NBLYR; ++k) bTin[k + 1] = col_min(-M(bSin[k + 1], DEPRESST), trtmp[k]);
+    bTin[1] = col_min(-M(MIN_SALIN, DEPRESST), M(A(bTin[2], tsfc), 0.5));
+    bTin[NB2] = sst;
+    prepare_hbrine(bSin, bTin, iTin, brine_sal, brine_rho, ibrine_sal, ibrine_rho, sice_rho, bphin, iphin,
+                   kperm, bphi_min, igrid, sss);
+    return BG_OK;
+}
+
+struct zsal_params {
+    double dts_b, l_skS, grid_oS, l_sk;
+};
+
+// solve_S_dt (ice_zsalinity.F90:435-885), 1-based arrays; the salt
+// conservation check is off (test_conservation), and what only it reads
+// (Ci_s, Vi_s, the boundary and molecular fluxes, the corrections) is not
+// carried. calc_salt_fluxes (891-1023) is folded in: only fzsaln and
+// fzsaln_g leave it.
+__device__ int solve_S_dt(int *cflag_out, int nint, double dts, double *bSin, const double *bTin, double *bphin,
+                          double *iphin, const double *igrid, const double *bgrid, double *ikin, double hbri_old,
+                          double hbrin, double hice_old, double *iDin, double darcy_V, const double *brine_sal,
+                          int *Rayleigh, int first_ice, double sss, double dt, double dht, double dhb,
+                          const double *brine_rho, const double *ibrine_sal, const double *ibrine_rho,
+                          double *fzsaln, double *fzsaln_g, const double *S_bot, const zsal_params &zp)
+{
+    const int nblyr = COL_NBLYR;
+    int l_stop = BG_OK, cflag = 0;
+    double iDin_p[NB1 + 1], dSbdx[NB1 + 1], drho[NB1 + 1], Ui_s[NB1 + 1], ivel[NB1 + 1];
+    double Din_p[NB2 + 1], Sintemp[NB2 + 1], pre_sin[NB2 + 1], pre_sinb[NB2 + 1], bgrid_temp[NB2 + 1];
+    double Q_s[NB2 + 1], C_s[NB2 + 1], V_s[NB2 + 1], U_s[NB2 + 1], F_s[NB2 + 1];
+    double vel[COL_NBLYR + 1], lapA[COL_NBLYR + 1], lapB[COL_NBLYR + 1], lapidus_diff[COL_NBLYR + 1];
+    for (int k = 1; k <= NB1; ++k) { iDin_p[k] = 0.0; Ui_s[k] = 0.0; ivel[k] = 0.0; dSbdx[k] = 0.0; }
+    for (int k = 1; k <= NB2; ++k) { Din_p[k] = 0.0; V_s[k] = 0.0; U_s[k] = 0.0; Q_s[k] = 0.0; C_s[k] = 0.0; F_s[k] = 0.0; }
+    for (int k = 1; k <= nblyr; ++k) { lapA[k] = 1.0; lapB[k] = 1.0; vel[k] = 0.0; }
+    lapA[nblyr] = 0.0;
+    lapB[1] = 0.0;
+    double dh = 0.0, dbgrid = 2.0, lapidus = 0.0;
+    *fzsaln = 0.0;
+    *fzsaln_g = 0.0;
+    calculate_drho(igrid, bgrid, brine_rho, ibrine_rho, drho);
+    const double h2 = M(hbri_old, hbri_old);
+    for (int k = 2; k <= NB1; ++k) {
+        iDin_p[k] = D(M(D(M(M(BG_K_O, BG_GRAVIT), zp.l_skS), BG_VISCOS_DYNAMIC), drho[k]), h2);
+        Din_p[k] = D(A(M(iDin_p[k], S(igrid[k], bgrid[k])), M(iDin_p[k - 1], S(bgrid[k], igrid[k - 1]))),
+                     S(igrid[k], igrid[k - 1]));
+    }
+    for (int k = 1; k <= NB2; ++k) bgrid_temp[k] = bgrid[k];
+    Din_p[NB2] = iDin_p[NB1];
+    if (!*Rayleigh && hbrin < BG_RA_C) {
+        for (int k = 1; k <= NB2; ++k) Din_p[k] = 0.0;
+        for (int k = 1; k <= NB1; ++k) iDin_p[k] = 0.0;
+    } else {
+        *Rayleigh = 1;
+    }
+    if (hbri_old > BG_THINS && hbrin > BG_THINS && hice_old > BG_THINS && !first_ice) {
+        cflag = 1;
+        bgrid_temp[1] = 0.0;
+        bgrid_temp[NB2] = 1.0;
+        dbgrid = D(igrid[2], S(bgrid_temp[2], bgrid_temp[1]));
+        lapidus = D(BG_LAPIDUS_G, M((double)nblyr, (double)nblyr));
+        ivel[1] = D(dht, hbri_old);
+        U_s[1] = M(D(ivel[1], dt), dts);
+        Ui_s[1] = U_s[1];
+        F_s[1] = D(D(M(M(D(M(brine_rho[2], brine_sal[2]), BG_RHOSI), darcy_V), dts), hbri_old), bSin[1]);
+        ivel[NB1] = D(dhb, hbri_old);
+        Ui_s[NB1] = M(D(ivel[NB1], dt), dts);
+        dSbdx[nblyr] = D(S(M(ibrine_sal[NB1], ibrine_rho[NB1]), M(ibrine_sal[nblyr], ibrine_rho[nblyr])),
+                         S(igrid[NB1], igrid[nblyr]));
+        C_s[NB1] = D(M(D(M(D(D(BG_DM, brine_sal[NB1]), brine_rho[NB1]), dts), h2),
+                       S(M(ibrine_sal[NB1], ibrine_rho[NB1]), M(ibrine_sal[nblyr], ibrine_rho[nblyr]))),
+                     S(igrid[NB1], igrid[nblyr]));
+        F_s[NB1] = D(D(M(darcy_V, dts), hbri_old), bphin[NB1]);
+        F_s[NB2] = D(D(M(darcy_V, dts), hbri_old), bphin[NB2]);
+        vel[nblyr] = D(S(M(bgrid[NB1], dhb), M(S(bgrid[NB1], 1.0), dht)), hbri_old);
+        U_s[NB1] = M(D(vel[nblyr], dt), dts);
+        V_s[NB1] = M(M(M(D(Din_p[NB1], BG_RHOSI), bg_powi3(D(D(BG_RHOSI, brine_sal[NB1]), brine_rho[NB1]))), dts),
+                     dSbdx[nblyr]);
+        const double bot = A(S(bgrid[NB2], bgrid[NB1]), D(zp.grid_oS, hbri_old));
+        dSbdx[NB1] = D(S(M(brine_sal[NB2], brine_rho[NB2]), M(brine_sal[NB1], brine_rho[NB1])), bot);
+        C_s[NB2] = D(M(D(M(D(D(BG_DM, brine_sal[NB2]), brine_rho[NB2]), dts), h2),
+                       S(M(brine_sal[NB2], brine_rho[NB2]), M(brine_sal[NB1], brine_rho[NB1]))), bot);
+        U_s[NB2] = M(D(ivel[NB1], dt), dts);
+        V_s[NB2] = M(M(M(D(Din_p[NB2], BG_RHOSI), bg_powi3(D(bphin[NB1], bSin[NB2]))), dts), dSbdx[NB1]);
+        dh = M(D(S(dhb, dht), dt), dts);
+        for (int k = 2; k <= nblyr; ++k) {
+            ivel[k] = D(S(M(igrid[k], dhb), M(S(igrid[k], 1.0), dht)), hbri_old);
+            Ui_s[k] = M(D(ivel[k], dt), dts);
+            dSbdx[k - 1] = D(S(M(ibrine_sal[k], ibrine_rho[k]), M(ibrine_sal[k - 1], ibrine_rho[k - 1])),
+                             S(igrid[k], igrid[k - 1]));
+            F_s[k] = D(D(M(darcy_V, dts), hbri_old), bphin[k]);
+            C_s[k] = D(M(D(M(D(D(BG_DM, brine_sal[k]), brine_rho[k]), dts), h2),
+                         S(M(ibrine_sal[k], ibrine_rho[k]), M(ibrine_sal[k - 1], ibrine_rho[k - 1]))),
+                       S(igrid[k], igrid[k - 1]));
+            vel[k - 1] = D(S(M(bgrid[k], dhb), M(S(bgrid[k], 1.0), dht)), hbri_old);
+            U_s[k] = M(D(vel[k - 1], dt), dts);
+            V_s[k] = M(M(M(D(Din_p[k], BG_RHOSI), bg_powi3(D(D(BG_RHOSI, brine_sal[k]), brine_rho[k]))), dts),
+                       dSbdx[k - 1]);
+            C_s[2] = 0.0;
+            V_s[2] = 0.0;
+        }
+        for (int m = 1; m <= nint; ++m) {
+            for (int k = 1; k <= NB2; ++k) { Sintemp[k] = bSin[k]; pre_sin[k] = bSin[k]; pre_sinb[k] = bSin[k]; }
+            double Ssum_old = M(bSin[NB1], S(igrid[NB1], igrid[nblyr]));
+            for (int k = 2; k <= nblyr; ++k) {
+                Ssum_old = A(Ssum_old, M(bSin[k], S(igrid[k], igrid[k - 1])));
+                pre_sin[k] = A(bSin[k],
+                               D(S(A(S(A(M(Ui_s[k], S(bSin[k + 1], bSin[k])), M(V_s[k + 1], bg_powi3(bSin[k + 1]))),
+                                       M(V_s[k], bg_powi3(bSin[k]))),
+                                     M(A(C_s[k + 1], F_s[k + 1]), bSin[k + 1])),
+                                   M(A(C_s[k], F_s[k]), bSin[k])),
+                                 S(bgrid_temp[k + 1], bgrid_temp[k])));
+            }
+            pre_sin[NB1] = A(bSin[NB1],
+                             D(S(A(S(A(M(Ui_s[NB1], S(bSin[NB2], bSin[NB1])), M(V_s[NB2], bg_powi3(bSin[NB2]))),
+                                     M(V_s[NB1], bg_powi3(bSin[NB1]))),
+                                   M(A(C_s[NB2], F_s[NB2]), bSin[NB2])),
+                                 M(A(C_s[NB1], F_s[NB1]), bSin[NB1])),
+                               S(bgrid_temp[NB2], bgrid_temp[NB1])));
+            pre_sinb[2] = M(0.5, A(A(bSin[2], pre_sin[2]),
+                                   D(S(A(S(A(M(Ui_s[1], S(pre_sin[2], pre_sin[1])), M(V_s[2], bg_powi3(pre_sin[2]))),
+                                           M(V_s[1], bg_powi3(pre_sin[1]))),
+                                         M(A(C_s[2], F_s[2]), pre_sin[2])),
+                                       M(A(C_s[1], F_s[1]), pre_sin[1])),
+                                     S(bgrid_temp[2], bgrid_temp[1]))));
+            for (int k = NB1; k >= 3; --k) {
+                pre_sinb[k] = M(0.5, A(A(bSin[k], pre_sin[k]),
+                                       D(S(A(S(A(M(Ui_s[k - 1], S(pre_sin[k], pre_sin[k - 1])),
+                                                 M(V_s[k], bg_powi3(pre_sin[k]))),
+                                               M(V_s[k - 1], bg_powi3(pre_sin[k - 1]))),
+                                             M(A(C_s[k], F_s[k]), pre_sin[k])),
+                                           M(A(C_s[k - 1], F_s[k - 1]), pre_sin[k - 1])),
+                                         S(bgrid_temp[k], bgrid_temp[k - 1]))));
+                Q_s[k] = A(A(A(M(V_s[k], M(pre_sin[k], pre_sin[k])), U_s[k]), C_s[k]), F_s[k]);
+            }
+            Q_s[2] = A(A(A(M(V_s[2], M(pre_sin[2], pre_sin[2])), U_s[2]), C_s[2]), F_s[2]);
+            Q_s[1] = A(A(A(M(V_s[1], M(pre_sin[2], pre_sin[2])), Ui_s[1]), C_s[1]), F_s[1]);
+            Q_s[NB2] = A(A(A(M(V_s[NB2], M(pre_sin[NB1], pre_sin[NB1])), Ui_s[NB1]), C_s[NB2]), F_s[NB2]);
+            double Ssum_new = 0.0;
+            for (int k = 2; k <= NB1; ++k) {
+                const double gp = S(bgrid_temp[k + 1], bgrid_temp[k]), gm = S(bgrid_temp[k], bgrid_temp[k - 1]);
+                lapidus_diff[k - 1] = M(D(lapidus, S(igrid[k], igrid[k - 1])),
+                                        S(D(M(M(lapA[k - 1], fabs(S(Q_s[k + 1], Q_s[k]))),
+                                              S(fabs(pre_sinb[k + 1]), fabs(pre_sinb[k]))), M(gp, gp)),
+                                          D(M(M(lapB[k - 1], fabs(S(Q_s[k], Q_s[k - 1]))),
+                                              S(fabs(pre_sinb[k]), fabs(pre_sinb[k - 1]))), M(gm, gm))));
+                bSin[k] = A(pre_sinb[k], lapidus_diff[k - 1]);
+                if (bSin[k] < MIN_SALIN) {
+                    bSin[k] = MIN_SALIN;
+                } else if (bSin[k] > -D(bTin[k], DEPRESST)) {
+                    bSin[k] = -D(bTin[k], DEPRESST);
+                } else if (bSin[k] > BG_MAX_SALIN) {
+                    l_stop = BG_MAXSALIN_STOP;
+                }
+                if (k == NB1) bSin[NB2] = A(M(S_bot[1], bSin[NB1]), M(S_bot[2], bSin[NB2]));
+                Ssum_new = A(Ssum_new, M(bSin[k], S(igrid[k], igrid[k - 1])));
+            }
+            // calc_salt_fluxes
+            const double dhtmp = S(1.0, D(dh, hbri_old));
+            const double hin_next = A(hbri_old, M((double)m, dh));
+            const double hin_old = A(hbri_old, M(S((double)m, 1.0), dh));
+            const double s3 = bg_powi3(Sintemp[NB1]);
+            const double fluxg_b = M(0.5, A(M(M(M(dhtmp, dbgrid), V_s[NB2]), s3),
+                                            M(V_s[NB1], S(bg_powi3(pre_sin[NB1]), M(M(dhtmp, S(dbgrid, 1.0)), s3)))));
+            *fzsaln_g = S(*fzsaln_g, D(M(M(M(hin_next, fluxg_b), BG_RHOSI), 0.001), dts));
+            *fzsaln = A(*fzsaln, D(M(M(S(M(Ssum_old, hin_old), M(Ssum_new, hin_next)), BG_RHOSI), 0.001), dts));
+        }
+    } else {                                          // add/melt ice only
+        double sum_old = 0.0, sum_new = 0.0;
+        const double dh_dt = S(hbrin, hbri_old);
+        double dS_dt = 0.0;
+        if (dh_dt > 0.0) {
+            dS_dt = M(M(sss, dh_dt), BG_SALT_LOSS);
+            for (int k = 2; k <= NB1; ++k) bSin[k] = col_max(MIN_SALIN, D(A(M(bSin[k], hbri_old), dS_dt), hbrin));
+        } else {
+            for (int k = 2; k <= NB1; ++k) {
+                sum_old = A(sum_old, M(M(bSin[k], hbri_old), S(igrid[k], igrid[k - 1])));
+                bSin[k] = col_max(MIN_SALIN, M(bSin[k], S(1.0, D(fabs(dh_dt), hbri_old))));
+                sum_new = A(sum_new, M(M(bSin[k], hbrin), S(igrid[k], igrid[k - 1])));
+            }
+        }
+        *fzsaln = D(M(M(BG_RHOSI, A(S(sum_old, sum_new), dS_dt)), 0.001), dt);
+        *fzsaln_g = 0.0;
+    }
+    for (int k = 1; k <= NB1; ++k) { iDin[k] = 0.0; iphin[k] = 1.0; ikin[k] = 0.0; }
+    for (int k = 1; k <= NB1; ++k) {
+        if (k < NB1)
+            bphin[k + 1] = col_min(1.0, col_max(PUNY, D(M(bSin[k + 1], BG_RHOSI), M(brine_sal[k + 1], brine_rho[k + 1]))));
+        if (k == 1) {
+            bphin[1] = col_min(1.0, col_max(PUNY, D(M(bSin[1], BG_RHOSI), M(brine_sal[1], brine_rho[1]))));
+            iphin[1] = bphin[2];
+        } else if (k == NB1) {
+            iphin[NB1] = bphin[NB1];
+        } else {
+            iphin[k] = col_min(1.0, col_max(0.0, A(M(D(S(bphin[k + 1], bphin[k]), S(bgrid[k + 1], bgrid[k])),
+                                                     S(igrid[k], bgrid[k])), bphin[k])));
+        }
+        ikin[k] = M(BG_K_O, bg_powi3(iphin[k]));
+    }
+    for (int k = 2; k <= NB1; ++k) {
+        iDin[k] = D(M(iphin[k], BG_DM), h2);
+        if (cflag && *Rayleigh && hbrin >= BG_RA_C)
+            iDin[k] = A(iDin[k], D(M(D(M(M(zp.l_sk, ikin[k]), BG_GRAVIT), BG_VISCOS_DYNAMIC), drho[k]), h2));
+    }
+    *cflag_out = cflag;
+    return l_stop;
+}
+
+// zsalinity -> solve_zsalinity (ice_zsalinity.F90:38-425), with
+// column_sum_zsal and merge_zsal_fluxes. n is the 0-based category; zsal,
+// qice and sice the category's tracers; bSin, bTin, bphin, brine_sal and
+// brine_rho (1..NB2) and iphin, ibrine_sal and ibrine_rho (1..NB1) what
+// compute_microS and update_hbrine left. aicen_init is merge_zsal_fluxes'
+// weight, as colpkg_biogeochemistry passes it.
+__device__ int zsalinity(int n, double dt, const double *cgrid0, const double *bgrid0, const double *bgrid,
+                         const double *igrid, double *zsal, const double *qice, double *sice, double fbri,
+                         double *bSin, double *bTin, double *bphin, double *iphin, double *ikin, double hbr_old,
+                         double hbrin, double hin, double hin_old, double *iDin, double darcy_V, double *brine_sal,
+                         double *brine_rho, const double *ibrine_sal, const double *ibrine_rho, double dh_direct,
+                         int *Rayleigh_criteria, int first_ice, double sss, double sst, double dh_top, double dh_bot,
+                         double *fzsal, double *fzsal_g, double bphi_min, double vicen, double aicen_init,
+                         double *zsal_tot, const zsal_params &zp)
+{
+    double fzsaln, fzsaln_g, S_bot[3];
+    int stop;
+    {   // solve_zsalinity
+        double dts = zp.dts_b;
+        int nint = (int)D(dt, dts);
+        if (nint < 1) nint = 1;
+        dts = D(dt, (double)nint);
+        const double surface_S = MIN_SALIN;
+        int Rayleigh = 1;
+        if (n == 0 && hbr_old < BG_RA_C) Rayleigh = *Rayleigh_criteria;
+        if (A(dh_bot, M(darcy_V, dt)) > 0.0) {
+            bSin[NB2] = sss;
+            bTin[NB2] = sst;
+            brine_sal[NB2] = sss;
+            brine_rho[NB2] = RHOW;
+            bphin[NB2] = 1.0;
+            S_bot[1] = 0.0;
+            S_bot[2] = 1.0;
+        } else {
+            bSin[NB2] = bSin[NB1];
+            bTin[NB2] = bTin[NB1];
+            bphin[NB2] = iphin[NB1];
+            S_bot[1] = 1.0;
+            S_bot[2] = 0.0;
+        }
+        if (fabs(dh_top) > PUNY && fabs(darcy_V) > PUNY) {
+            const double inner = A(S(M(M(D(M(brine_rho[2], brine_sal[2]), BG_RHOSI), darcy_V), dt),
+                                     M(S(A(dh_top, D(M(darcy_V, dt), bphi_min)), dh_direct), MIN_SALIN)),
+                                   M(col_max(0.0, -dh_direct), sss));
+            bSin[1] = col_max(MIN_SALIN, -D(inner, dh_top));
+            brine_sal[1] = brine_sal[2];
+            brine_rho[1] = brine_rho[2];
+            bphin[1] = bphi_min;
+        } else {
+            bSin[1] = MIN_SALIN;
+        }
+        int cflag;
+        stop = solve_S_dt(&cflag, nint, dts, bSin, bTin, bphin, iphin, igrid, bgrid, ikin, hbr_old, hbrin, hin_old,
+                          iDin, darcy_V, brine_sal, &Rayleigh, first_ice, sss, dt, dh_top, dh_bot, brine_rho,
+                          ibrine_sal, ibrine_rho, &fzsaln, &fzsaln_g, S_bot, zp);
+        if (!stop) {
+            if (n == 0) *Rayleigh_criteria = Rayleigh;
+            double trtmp[COL_NILYR + 1];
+            for (int k = 0; k <= COL_NILYR; ++k) trtmp[k] = 0.0;
+            for (int k = 1; k <= COL_NBLYR; ++k) zsal[k - 1] = bSin[k + 1];
+            // remap_zbgc's stop here is not checked: the salinities are updated from
+            // the untouched zeros and colpkg_biogeochemistry returns on it
+            stop = remap_zbgc(zsal, 1, COL_NILYR, COL_NBLYR, hin, hbrin, cgrid0, bgrid0, surface_S, trtmp);
+            const double Tmax = -M(A(MIN_SALIN, PUNY), DEPRESST);
+            for (int k = 0; k < COL_NILYR; ++k) {
+                const double Ttemp = col_min(Tmax, bg_Tin_from_qin(qice[k], -M(sice[k], DEPRESST)));
+                sice[k] = col_min(-D(Ttemp, DEPRESST), col_max(MIN_SALIN, trtmp[k + 1]));
+            }
+        }
+    }
+    // column_sum_zsal and merge_zsal_fluxes (ice_zsalinity.F90:1111-1177)
+    double zsal_totn = 0.0;
+    for (int k = 0; k < COL_NBLYR; ++k)
+        zsal_totn = A(zsal_totn, D(M(M(M(BG_RHOSI, zsal[k]), fbri), vicen), (double)COL_NBLYR));
+    *zsal_tot = A(*zsal_tot, zsal_totn);
+    *fzsal = A(*fzsal, M(fzsaln, aicen_init));
+    *fzsal_g = A(*fzsal_g, M(fzsaln_g, aicen_init));
+    return stop;
+}
+
+// column_biogeochemistry: one thread per owned cell. flags: bit 0 tr_brine,
+// bit 1 solve_zsal. fbri is brineFraction and zsal_out verticalSalinity (or
+// dummies without them).
 extern "C" __global__ void seaice_column_biogeochemistry_v842(
     int *__restrict__ status, double dt, double l_sk, int ncat, int flags, int nCellsSolve,
     const double *__restrict__ bgrid0, const double *__restrict__ igrid0, const double *__restrict__ cgrid0,
@@ -406,17 +819,21 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
     const double *__restrict__ meltb, const double *__restrict__ meltt, const double *__restrict__ congel,
     const double *__restrict__ snoice, const double *__restrict__ melts,
     const double *__restrict__ sst, const double *__restrict__ sss, const double *__restrict__ aice0,
-    const double *__restrict__ qice, const double *__restrict__ sice,
+    const double *__restrict__ qice, double *__restrict__ sice,
     double *__restrict__ fbri_out, double *__restrict__ hin_old, int *__restrict__ newly,
     double *__restrict__ rayleigh, double *__restrict__ dhbr_top, double *__restrict__ dhbr_bot,
     double *__restrict__ bTiz, double *__restrict__ bphi, double *__restrict__ iDi,
     double *__restrict__ darcy_V, double *__restrict__ sice_rho, double *__restrict__ hbri,
     double *__restrict__ atm_bc, double *__restrict__ atm_dust, double *__restrict__ total_skeletal,
-    double *__restrict__ bio_sw_cell)
+    double *__restrict__ bio_sw_cell,
+    double dts_b, double l_skS, double grid_oS, const double *__restrict__ tsfc, double *__restrict__ zsal_out,
+    double *__restrict__ iki, double *__restrict__ zsal_tot, double *__restrict__ fzsal,
+    double *__restrict__ fzsal_g)
 {
     const int iCell = blockIdx.x * blockDim.x + threadIdx.x;
     if (iCell >= nCellsSolve) return;
-    const int tr_brine = flags & 1;
+    const int tr_brine = flags & 1, solve_zsal = (flags >> 1) & 1;
+    const zsal_params zp = {dts_b, l_skS, grid_oS, l_sk};
     // the uncoupled build's deposition (#else of #ifdef coupled)
     atm_bc[iCell * 2 + 0] = 1.e-12;
     atm_bc[iCell * 2 + 1] = 1.e-12;
@@ -436,6 +853,8 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
     int l_stop = BG_OK;
     for (int n = 0; n < ncat; ++n) {
         const int c = iCell * ncat + n;
+        double *zs = zsal_out + (size_t)c * COL_NBLYR;
+        double *si = sice + (size_t)c * COL_NILYR;
         hin_old[c] = 0.0;
         if (aicen_init[c] > PUNY) {
             hin_old[c] = D(vicen_init[c], aicen_init[c]);
@@ -443,34 +862,59 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
             first_ice[n] = 1;
             if (tr_brine) fbri[n] = 1.0;
             if (n == 0) Rayleigh = 0;
+            if (solve_zsal) for (int k = 0; k < COL_NBLYR; ++k) zs[k] = 0.0;
         }
         if (aicen[c] > PUNY) {
             dhbr_top[c] = 0.0;
             dhbr_bot[c] = 0.0;
             if (tr_brine) {
                 if (fbri[n] <= 0.0) fbri[n] = 1.0;
-                double dhice = 0.0, hbr_old, hin, hsn, hbrin = 0.0, kavg = 0.0, bphi_o = 0.0;
+                double dhice = 0.0, hbr_old, hin, hsn, hbrin = 0.0, kavg = 0.0, bphi_o = 0.0, dh_direct;
                 l_stop = preflushing_changes(aicen[c], vicen[c], vsnon[c], meltb[c], meltt[c], congel[c],
                                              snoice[c], &hin_old[c], &dhice, &fbri[n], &dhbr_top[c],
                                              &dhbr_bot[c], &hbr_old, &hin, &hsn, first_ice[n]);
                 if (l_stop) { hbri[iCell] = hbri_c; status[iCell] = l_stop; return; }
                 double *idi = iDi + (size_t)c * NB1 - 1;          // 1-based
-                for (int k = 1; k <= NB1; ++k) idi[k] = 0.0;
                 double bT[NB2 + 1], bp[NB2 + 1], rho = sice_rho[c];
                 for (int k = 1; k <= NB2; ++k) { bT[k] = bTiz[(size_t)c * NB2 + k - 1]; bp[k] = bphi[(size_t)c * NB2 + k - 1]; }
-                // colpkg_biogeochemistry does not check compute_microS_mushy's l_stop: on a
-                // remap stop the profiles keep their words, update_hbrine runs with
-                // kavg = bphi_o = 0, and the next ice category's preflushing_changes clears it
-                l_stop = compute_microS_mushy(bgrid, cgrid0, bgrid0, igrid, qice + (size_t)c * COL_NILYR,
-                                              sice + (size_t)c * COL_NILYR, hin_old[c], &hbr_old, sss[iCell],
-                                              sst[iCell], bT, bp, &kavg, &bphi_o, &rho, idi, l_sk);
-                if (!l_stop) {
+                double bSin[NB2 + 1], brine_sal[NB2 + 1], brine_rho[NB2 + 1];
+                double iTin[NB1 + 1], iphin[NB1 + 1], ibrine_rho[NB1 + 1], ibrine_sal[NB1 + 1];
+                if (solve_zsal) {
+                    l_stop = compute_microS(bgrid0, cgrid0, igrid, si, qice + (size_t)c * COL_NILYR,
+                                            tsfc[c], zs, hin_old[c], &hbr_old, sss[iCell], sst[iCell], bT, iTin,
+                                            bp, &kavg, &bphi_o, first_ice[n], bSin, brine_sal, brine_rho, iphin,
+                                            ibrine_rho, ibrine_sal, &rho);
+                    if (l_stop) { hbri[iCell] = hbri_c; status[iCell] = l_stop; return; }
                     for (int k = 1; k <= NB2; ++k) { bTiz[(size_t)c * NB2 + k - 1] = bT[k]; bphi[(size_t)c * NB2 + k - 1] = bp[k]; }
                     sice_rho[c] = rho;
+                } else {
+                    for (int k = 1; k <= NB1; ++k) idi[k] = 0.0;
+                    // colpkg_biogeochemistry does not check compute_microS_mushy's l_stop: on a
+                    // remap stop the profiles keep their words, update_hbrine runs with
+                    // kavg = bphi_o = 0, and the next ice category's preflushing_changes clears it
+                    l_stop = compute_microS_mushy(bgrid, cgrid0, bgrid0, igrid, qice + (size_t)c * COL_NILYR,
+                                                  si, hin_old[c], &hbr_old, sss[iCell], sst[iCell], bT, bp, &kavg,
+                                                  &bphi_o, &rho, idi, l_sk);
+                    if (!l_stop) {
+                        for (int k = 1; k <= NB2; ++k) { bTiz[(size_t)c * NB2 + k - 1] = bT[k]; bphi[(size_t)c * NB2 + k - 1] = bp[k]; }
+                        sice_rho[c] = rho;
+                    }
                 }
                 update_hbrine(meltt[c], melts[c], dt, hin, hsn, hin_old[c], &hbrin, hbr_old, &fbri[n],
-                              &dhbr_top[c], dhbr_bot[c], kavg, &bphi_o, &darcy_V[c], bp[2], aice0[iCell]);
+                              &dhbr_top[c], dhbr_bot[c], kavg, &bphi_o, &darcy_V[c], bp[2], aice0[iCell],
+                              &dh_direct);
                 hbri_c = A(hbri_c, M(hbrin, aicen[c]));
+                if (solve_zsal) {
+                    double *ik = iki + (size_t)c * NB1 - 1;       // 1-based
+                    l_stop = zsalinity(n, dt, cgrid0, bgrid0, bgrid, igrid, zs, qice + (size_t)c * COL_NILYR, si,
+                                       fbri[n], bSin, bT, bp, iphin, ik, hbr_old, hbrin, hin, hin_old[c], idi,
+                                       darcy_V[c], brine_sal, brine_rho, ibrine_sal, ibrine_rho, dh_direct,
+                                       &Rayleigh, first_ice[n], sss[iCell], sst[iCell], dhbr_top[c], dhbr_bot[c],
+                                       &fzsal[iCell], &fzsal_g[iCell], bphi_o, vicen[c], aicen_init[c],
+                                       &zsal_tot[iCell], zp);
+                    for (int k = 1; k <= NB2; ++k) { bTiz[(size_t)c * NB2 + k - 1] = bT[k]; bphi[(size_t)c * NB2 + k - 1] = bp[k]; }
+                    if (l_stop) { hbri[iCell] = hbri_c; status[iCell] = l_stop; return; }
+                }
             }
             first_ice[n] = 0;
         }
@@ -485,5 +929,7 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
     }
     total_skeletal[iCell] = 0.0;
     for (int k = 0; k < NB1; ++k) bio_sw_cell[(size_t)iCell * NB1 + k] = 0.0;
+    // only ever zeroed: a criterion solve_S_dt switches on is not stored (it changes no
+    // other word: drainage needs hbrin > thinS = Ra_c, where solve_S_dt switches it on)
     if (!Rayleigh) rayleigh[iCell] = 0.0;
 }

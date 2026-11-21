@@ -1,0 +1,70 @@
+--- a/src/core_seaice/column/ice_colpkg.F90
++++ b/src/core_seaice/column/ice_colpkg.F90
+@@ -4337,6 +4337,7 @@
+         frazil_scav = frazil_scav_in
+         grid_oS = grid_oS_in
+         l_skS = l_skS_in
++        solve_zsal = solve_zsal_in  ! woof zsal_solve: v8.4.2 never assigns it
+         phi_snow = phi_snow_in
+      !  restore_bgc = restore_bgc_in
+         ratio_Si2N_diatoms= ratio_Si2N_diatoms_in 
+--- a/src/core_seaice/shared/mpas_seaice_column.F
++++ b/src/core_seaice/shared/mpas_seaice_column.F
+@@ -6429,6 +6429,14 @@
+                   verticalSalinity(iLayers,:,iCell)
+           enddo
+        endif
++    endif
++
++    ! woof zsal_solve: v8.4.2 copies the vertical salinity only with the vertical tracers
++    if (config_use_vertical_zsalinity .and. .not. config_use_vertical_tracers) then
++          do iLayers = 1, nBioLayers
++             tracerObject % tracerArrayCategory(tracerObject % index_verticalSalinity+iLayers-1,:) = &
++                  verticalSalinity(iLayers,:,iCell)
++          enddo
+     endif
+ 
+   end subroutine set_cice_biogeochemistry_tracer_array_category
+@@ -6806,6 +6814,14 @@
+                   tracerObject % tracerArrayCategory(tracerObject % index_verticalSalinity+iLayers-1,:)
+           enddo
+        endif
++    endif
++
++    ! woof zsal_solve: v8.4.2 copies the vertical salinity only with the vertical tracers
++    if (config_use_vertical_zsalinity .and. .not. config_use_vertical_tracers) then
++          do iLayers = 1, nBioLayers
++             verticalSalinity(iLayers,:,iCell) = &
++                  tracerObject % tracerArrayCategory(tracerObject % index_verticalSalinity+iLayers-1,:)
++          enddo
+     endif
+ 
+   end subroutine get_cice_biogeochemistry_tracer_array_category
+@@ -7295,6 +7311,13 @@
+              tracerObject % tracerArrayCell(tracerObject % index_verticalSalinity+iLayers-1)  = verticalSalinityCell(iLayers,iCell)
+           enddo
+        endif
++    endif
++
++    ! woof zsal_solve: v8.4.2 copies the vertical salinity only with the vertical tracers
++    if (config_use_vertical_zsalinity .and. .not. config_use_vertical_tracers) then
++          do iLayers = 1, nBioLayers
++             tracerObject % tracerArrayCell(tracerObject % index_verticalSalinity+iLayers-1)  = verticalSalinityCell(iLayers,iCell)
++          enddo
+     endif
+ 
+   end subroutine set_cice_biogeochemistry_tracer_array_cell
+@@ -7784,6 +7807,13 @@
+        endif
+     endif
+ 
++    ! woof zsal_solve: v8.4.2 copies the vertical salinity only with the vertical tracers
++    if (config_use_vertical_zsalinity .and. .not. config_use_vertical_tracers) then
++          do iLayers = 1, nBioLayers
++             verticalSalinityCell(iLayers,iCell) = tracerObject % tracerArrayCell(tracerObject % index_verticalSalinity+iLayers-1)
++          enddo
++    endif
++
+   end subroutine get_cice_biogeochemistry_tracer_array_cell
+ 
+ !-----------------------------------------------------------------------
