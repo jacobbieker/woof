@@ -348,6 +348,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     assert names.pop() == "mynn_sfclay_psih_zolzt"
     assert RunConfig.__dataclass_fields__["mynn_sfclay_psih_zolzt"].default is False
     assert RunConfig.__dataclass_fields__["mynn_sfclay_psih_zolzt"].kw_only
+    # The umbrella over the opt-in quirk corrections, appended at 'none'.
+    assert names.pop() == "woof_quirk_corrections"
+    assert RunConfig.__dataclass_fields__["woof_quirk_corrections"].default == "none"
+    assert RunConfig.__dataclass_fields__["woof_quirk_corrections"].kw_only
     # The opt-in YSU surface heat flux on theta (quirk pass), appended off.
     assert names.pop() == "ysu_surface_heat_exner"
     assert RunConfig.__dataclass_fields__["ysu_surface_heat_exner"].default is False
@@ -990,6 +994,8 @@ def _check_frozen_defaults(actual):
                          ("urban_param_file", ""),
                          # the opt-in YSU surface heat flux on theta, off
                          ("ysu_surface_heat_exner", False),
+                         # the umbrella over the opt-in quirk corrections, none
+                         ("woof_quirk_corrections", "none"),
                          # the opt-in MYNN surface-layer 2 m / 10 m correction, off
                          ("mynn_sfclay_psih_zolzt", False),
                          # the opt-in resolved obstacles, off

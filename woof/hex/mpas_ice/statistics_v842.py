@@ -46,6 +46,7 @@ from fractions import Fraction
 import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
+from woof import quirk_corrections
 
 from . import rkind
 
@@ -76,7 +77,7 @@ class Statistics:
 
 
 def check_config(config: dict) -> None:
-    value = config.get("woof_statistics_extrema", "v842")
+    value = quirk_corrections.option(config, "woof_statistics_extrema")
     if value not in STATISTICS_EXTREMA:
         raise ConfigurationRefusal(knob="woof_statistics_extrema", value=value,
                                    reason="not an option of this port",
@@ -244,7 +245,7 @@ def compute_statistics(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
     n_cells, n_levels = layer_thickness.shape
     ice_cell = ((cell_mask & MASK_ICE) != 0).astype(np.int32)
     ice_edge = ((edge_mask & MASK_ICE) != 0).astype(np.int32)
-    masked = config.get("woof_statistics_extrema", "v842") == "ice"
+    masked = quirk_corrections.option(config, "woof_statistics_extrema") == "ice"
     rhoi = real(config["config_ice_density"])
     cp_ice, kelvin, scyr = real(2009.0), literal("273.15", real), real(31536000.0)
     big, huge = literal("1.0e34", real), real(np.finfo(real).max)

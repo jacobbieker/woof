@@ -3483,6 +3483,9 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # The opt-in YSU surface heat flux on theta: the same contract.
     if values.get("ysu_surface_heat_exner", False) is False:
         values.pop("ysu_surface_heat_exner", None)
+    # The umbrella over the opt-in quirk corrections: absent at 'none'.
+    if values.get("woof_quirk_corrections", "none") == "none":
+        values.pop("woof_quirk_corrections", None)
     # The opt-in MYNN surface-layer 2 m / 10 m correction: the same contract.
     if values.get("mynn_sfclay_psih_zolzt", False) is False:
         values.pop("mynn_sfclay_psih_zolzt", None)
@@ -5764,6 +5767,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'bl_mynn_gsd41_unsquared_qtke': False,
     'gf_deep_rain_evaporation_booking': False,
     'ysu_surface_heat_exner': False,
+    'woof_quirk_corrections': 'none',
     'mynn_sfclay_psih_zolzt': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
@@ -6352,6 +6356,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "urban_water_balance": "wrf_471",
                           "gf_deep_rain_evaporation_booking": False,
                           "ysu_surface_heat_exner": False,
+                          "woof_quirk_corrections": "none",
                           "mynn_sfclay_psih_zolzt": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,

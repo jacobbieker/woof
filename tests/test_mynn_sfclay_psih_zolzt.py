@@ -171,3 +171,19 @@ def test_the_gsl_variant_refuses_the_correction():
     assert mynn_surface_defines("wrf_461", True) == (("MYNN_SL_PSIH_ZOLZT", 1),)
     with pytest.raises(ValueError, match="gsl_wrf39"):
         mynn_surface_defines("gsl_wrf39", True)
+
+
+def test_the_umbrella_turns_it_on_for_the_wrf461_surface_layer():
+    from woof.config import ConfigurationRefused, validate_run_config
+    from woof.quirk_corrections import apply_run_corrections
+    kw = apply_run_corrections(dict(woof_quirk_corrections="all", bl_pbl_physics=5, sf_sfclay_physics=5))
+    assert kw["mynn_sfclay_psih_zolzt"] is True
+    assert validate_run_config(_base(**kw)).mynn_sfclay_psih_zolzt is True
+    # the gsl_wrf39 fork has nothing to correct, so the umbrella leaves it off
+    kw = apply_run_corrections(dict(woof_quirk_corrections="all", bl_pbl_physics=5, sf_sfclay_physics=5,
+                                    mynn_sfclay_variant="gsl_wrf39"))
+    assert "mynn_sfclay_psih_zolzt" not in kw
+    validate_run_config(_base(**kw))
+    with pytest.raises(ConfigurationRefused, match="mynn_sfclay_psih_zolzt"):
+        apply_run_corrections(dict(woof_quirk_corrections="all", sf_sfclay_physics=5,
+                                   mynn_sfclay_psih_zolzt=False))
