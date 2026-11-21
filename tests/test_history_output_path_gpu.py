@@ -59,8 +59,14 @@ def _spin_kernel():
     return spin
 
 
-def test_snapshot_direct_and_synchronous_frames_are_byte_identical(tmp_path):
+# The default frame is a deflated NetCDF-4 file, which has no streamed digest and is re-read; only the
+# classic ("none") frame is hashed as it is written (woof.io.classic_tape stream_identity_refusal).
+@pytest.mark.parametrize("compression,identity", [("none", "streamed"), ("deflate", "reread")])
+def test_snapshot_direct_and_synchronous_frames_are_byte_identical(tmp_path, monkeypatch, compression,
+                                                                   identity):
     from tilestream import harness
+    from woof.io.wrfout import HISTORY_COMPRESSION_ENV
+    monkeypatch.setenv(HISTORY_COMPRESSION_ENV, compression)
     from woof.config import soil_layer_count
     from woof.io.wrfout import WrfoutWriter, state_frame
 
@@ -89,7 +95,7 @@ def test_snapshot_direct_and_synchronous_frames_are_byte_identical(tmp_path):
     receipt = snap.receipt()
     assert receipt["d2h"]["mode"] == "snapshot", receipt
     assert receipt["stalls"]["frames_by_mode"] == {"snapshot": 2}
-    assert receipt["identity"].get("streamed") == 2
+    assert receipt["identity"].get(identity) == 2
     assert (tmp_path / "snapshot").read_bytes() == (tmp_path / "direct").read_bytes()
     # The synchronous frame omits nothing the async one writes.
     import netCDF4
