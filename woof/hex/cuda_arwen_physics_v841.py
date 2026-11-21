@@ -2073,6 +2073,10 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
             refl = simulated_reflectivity(view, seam._cfg)
         except NotImplementedError as refusal:
             return None, f"engine refuses a between-steps reflectivity for this scheme: {refusal}"
+        except ValueError as refusal:
+            if "reflectivity lacks" not in str(refusal):
+                raise
+            return None, f"the engine state lacks a field this scheme's reflectivity reads: {refusal}"
         except Exception as refusal:
             if type(refusal).__name__ != "NativeReflectivityScheme":
                 raise

@@ -368,7 +368,12 @@ matched exchange unless asked.
    aborts, the zero and shared-name copies, the shortwave, precipitation and
    runoff, the nutrients, the per-category fields and the generic
    fraction-weighted merge, real(r8), on CUDA and Metal. The water isotopes
-   are refused by name.
+   are refused by name. The sea ice's import merge, `prep_ice_merge`
+   (`driver-mct/main/prep_ice_mod.F90`), is ported too
+   (`woof/hex/coupled/prep_ice_merge_e3sm.py`,
+   `tests/test_e3sm_ice_merge_parity.py`): the shared-name copies from o2x,
+   a2x, g2x and (two-way waves) w2x into an x2i it does not zero, and rain,
+   snow and the ice runoff summed, then scaled by `flux_epbalfact`.
 2. The fractions on the ocean grid (`seq_frac_set`, `ifrac`/`ofrac` from the
    ice's `Si_ifrac`) and the radiative fractions (`ifrad`/`ofrad`, from
    `seq_flux_ocnalb_mct`). `seq_frac_set` is ported
@@ -399,7 +404,12 @@ matched exchange unless asked.
    shortwave `Faox_swdn`/`Faox_swup` from xao's albedos (0 on the dark side),
    with E3SM's and MCT's stops, real(r8), on CUDA and Metal. The orbital
    albedo (`shr_orb_decl`/`shr_orb_cosz`, glibc's sin, cos and asin) is
-   refused by name.
+   refused by name. The ocean-input accumulation, `prep_ocn_accum` and
+   `prep_ocn_accum_avg` over MCT's `mct_avect_accum`/`mct_aVect_avg`, is
+   ported (`woof/hex/coupled/ocn_accum_e3sm.py`,
+   `tests/test_e3sm_ocn_accum_parity.py`): the window's sum, the average by
+   `1/count` rounded once (E3SM's reciprocal, kept) and the copy back into
+   x2o, real(r8), on CUDA and Metal.
 4. The ocean's and the sea ice's import and export
    (`components/mpas-ocean/driver/ocn_comp_mct.F`,
    `components/mpas-seaice/driver/ice_comp_mct.F`). The ocean's is ported
