@@ -17,7 +17,7 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
 | L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, the energy flux in history (`spacewx_aurora_opt = 2`), and the Joule power in history (`spacewx_aurora_opt = 3`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
-| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make; auroral-electron ion-pair rates (Fang et al. 2010) from OVATION's energy flux and mean energy | ion-pair rates available as `woof spacewx particles` (electrons with `--electron-energy-flux`, a diagnostic above every model top); the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
+| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make; auroral-electron ion-pair rates (Fang et al. 2010) from OVATION's energy flux and mean energy | ion-pair rates available as `woof spacewx particles` (electrons with `--electron-energy-flux`, a diagnostic above every model top); the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route; on hex in the chemistry config's `wrf_chem` block) |
 | L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route and hex's generic column seam, and on Fast-TUV photolysis (`phot_opt = 3`, RADM2; WRF route and hex) |
 
 Couplings that stay speculative are not implemented, and none is planned. One example is
@@ -719,9 +719,20 @@ domain that runs RADM2 (`chem_sets` `radm2` or `radm2sorg`).
   at its mid depth sqrt(X_top X_bottom), with X = p8w / g. This is within 3 %
   of the layer means wherever the rate matters
   (`tests/test_spacewx_epp_chem.py`).
-- **Refusals.** Streamed domains and hex refuse the option, for now, and so
-  does a run with no radiation scheme (the caps are placed on the radiation
+- **Refusals.** Streamed domains refuse the option, for now, and so does a
+  WRF-route run with no radiation scheme (the caps are placed on the radiation
   geometry's xlat/xlong). A domain with no cell in a polar cap adds nothing.
+- **On hex.** Set `"spacewx_epp_opt": 1` and `"spacewx_epp_source"` in the
+  `--chemistry-config` document's `wrf_chem` block, beside `chem_sets`
+  (`radm2` or `radm2sorg`). Both hex routes take it there: the generic
+  column seam and the MPAS v8.4.2 suite route. The caps are placed on the
+  cells' own centres, whatever the radiation. `--physics spacewx_epp_opt=...`
+  is refused by name, because the column physics is judged before the
+  chemistry rows join it. The rows, the photolysis rates and each step's
+  increment match the WRF path word for word on the same columns, on equal
+  cells and on variable-resolution cell areas
+  (`tests/test_hex_chem_epp_gpu.py`). The chemistry receipt records the held
+  hour under `spacewx_epp`.
 
 **Validation.** The source is the ion-pair rate above multiplied by fixed
 yields, so its validation is the CMIP7 comparison. A comparison with MLS (OH,

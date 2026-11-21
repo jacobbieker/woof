@@ -2553,7 +2553,23 @@ def _validate_spacewx_aurora(cfg) -> None:
 
 def _validate_spacewx_epp(cfg) -> None:
     """spacewx_epp_opt and its key (woof.spacewx.epp_chem)."""
-    opt, source = cfg.spacewx_epp_opt, cfg.spacewx_epp_source
+    from woof.chem_table import load as load_chem_table
+    table = (lambda: load_chem_table(cfg)) if getattr(cfg, "chem_sets", "") else None
+    if not validate_spacewx_epp_keys(cfg.spacewx_epp_opt, cfg.spacewx_epp_source, table):
+        return
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            "spacewx_epp_opt = 1 places the source in the polar caps from the "
+            "radiation geometry's xlat/xlong, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def validate_spacewx_epp_keys(opt, source, table) -> bool:
+    """spacewx_epp_opt and spacewx_epp_source against a run's chem table (a
+    callable that loads it, ``None`` for no chemistry); True when the source
+    is on.  Shared by the
+    WRF route and hex's wrf_chem block, whose cells carry their own
+    xlat/xlong whatever the radiation."""
     if type(opt) is not int or opt not in (0, 1):
         raise ConfigurationRefused(
             f"spacewx_epp_opt={opt!r} must be 0 (no particle source) or 1 (the "
@@ -2565,26 +2581,20 @@ def _validate_spacewx_epp(cfg) -> None:
             raise ConfigurationRefused(
                 "spacewx_epp_source is set but spacewx_epp_opt = 0, so it would "
                 "do nothing; set spacewx_epp_opt = 1 or drop it")
-        return
+        return False
     from woof.spacewx.epp_chem import EppChemError, YIELDS, parse_source
     try:
         parse_source(source)
     except EppChemError as exc:
         raise ConfigurationRefused(str(exc)) from None
-    from woof.chem_table import load as load_chem_table
-    table = load_chem_table(cfg) if getattr(cfg, "chem_sets", "") else None
-    names = {row.name for row in table.rows_for("emission.radm2")} if table is not None else set()
+    names = {row.name for row in table().rows_for("emission.radm2")} if table is not None else set()
     missing = [name for name, _y in YIELDS if name not in names]
     if missing:
         raise ConfigurationRefused(
             "spacewx_epp_opt = 1 adds NO, OH and HO2 to the RADM2 chemistry "
             "(chem_sets radm2 or radm2sorg), and this run's emission.radm2 "
             f"rows lack {', '.join(missing)}")
-    if not radiation_enabled(cfg):
-        raise ConfigurationRefused(
-            "spacewx_epp_opt = 1 places the source in the polar caps from the "
-            "radiation geometry's xlat/xlong, and no radiation scheme is on "
-            "(ra_lw_physics = ra_sw_physics = 0)")
+    return True
 
 
 @dataclass(frozen=True)
