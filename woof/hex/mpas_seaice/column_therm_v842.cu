@@ -107,6 +107,7 @@ struct vt_params {
     int ncat, l_brine, calc_tsfc, calc_strair, highfreq, natmiter, conduct_mu71, tr_iage, tr_fy;
     // opt-in corrections of v8.4.2 bugs (column_v842.CORRECTIONS); 0 is v8.4.2 word for word
     int fix_sfcflux_order, fix_ice_velocity;
+    int solve_zsal;
 };
 
 // ice_therm_shared: calculate_Tin_from_qin
@@ -489,6 +490,7 @@ __device__ int temperature_changes(const vt_params &p, double rhoa, double flw, 
     }
     conductivity(p, l_snow, hilyr, hslyr, zTin, zSin, kh);
     double frac = 0.9, dTemp = 0.02;
+    if (p.solve_zsal) dTemp = P1;                  // lower tolerance with dynamic salinity
     double ci, dswabs;
     for (int k = 0; k < nilyr; ++k) {
         double Iswabs_tmp = 0.0;
@@ -1071,6 +1073,7 @@ extern "C" __global__ void seaice_column_vertical_thermodynamics_v842(
     p.highfreq = (flags >> 3) & 1; p.conduct_mu71 = (flags >> 4) & 1;
     p.tr_iage = (flags >> 5) & 1; p.tr_fy = (flags >> 6) & 1;
     p.fix_sfcflux_order = (flags >> 7) & 1; p.fix_ice_velocity = (flags >> 8) & 1;
+    p.solve_zsal = (flags >> 9) & 1;
     const int ncat = p.ncat, nilyr = COL_NILYR, nslyr = COL_NSLYR;
     const int c = iCell;
     const double dt = p.dt;
