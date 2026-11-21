@@ -330,7 +330,10 @@ def test_specified_window(backend, tmp_path):
     """Window on a specified domain: its binary32 forward is dycore.step's
     words (checkpoints every 1 and 3 steps), and sum_k <TL dx_k, f_k> ==
     <dx_0, AD f> with dx_0 over the inputs and the tables and the tables'
-    adjoint returned with state 0's (1e-12 binary64, 1e-5 binary32)."""
+    adjoint returned with state 0's (1e-12 binary64, 1e-5 binary32);
+    WRFDA's start with ``specified`` seeds the mu halo from g_mu, which
+    the first step reads when a halo is carried, and its adjoint pair
+    passes the dot test."""
     dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
     out = _run(backend, f'''
 N = 4
@@ -391,12 +394,27 @@ for dtn in {dtypes!r}:
     out[f"pair/{{dtn}}"] = rel([tab[n] for n in w.params], [a[n] for n in w.params],
                                [s0[n] for n in vals] + [s1[n] for n in vals],
                                [sa[n] for n in vals] + [ea[n] for n in vals])
+    # WRFDA's start on a specified window seeds the mu halo from g_mu
+    # (WRFPLUS start_domain's g_set_physical_bc2d): the pair's dot test,
+    # and the halo is read here (the carried halo is off the ring), so a
+    # zero halo gives another TL
+    g = {{n: dx0[n] for n in W.WRFDA_TL_FIELDS}}
+    part = W.wrfda_tl_start(g, specified=True)
+    out[f"halo_shared/{{dtn}}"] = int(part[M.HALO] is part["mup"])
+    tlw = w.tl(part, partial=True)
+    ga = W.wrfda_tl_start_ad(aN, specified=True)
+    out[f"wrfda/{{dtn}}"] = rel([tlw[N][n] for n in w.inputs], [f[N][n] for n in w.inputs],
+                                [g[n] for n in g], [ga[n] for n in g])
+    tl0 = w.tl(W.wrfda_tl_start(g), partial=True)
+    out[f"halo_read/{{dtn}}"] = sum(int((cp.asnumpy(tl0[N][n]) != cp.asnumpy(tlw[N][n])).sum())
+                                    for n in w.inputs)
 ''', tmp_path)
     assert out["fwd/1"] == 0 and out["fwd/3"] == 0, out
     for dtn in dtypes:
         limit = 1e-12 if dtn == "float64" else 1e-5
-        for key in ("dot", "ends", "pair"):
+        for key in ("dot", "ends", "pair", "wrfda"):
             assert out[f"{key}/{dtn}"] < limit, (key, out)
+        assert out[f"halo_shared/{dtn}"] == 1 and out[f"halo_read/{dtn}"] > 0, out
         assert out[f"tables/{dtn}"] > 0, out   # every table's adjoint is nonzero
         assert out[f"omitted/{dtn}"] == 0, out
 

@@ -67,22 +67,35 @@ WRFDA_TL_FIELDS = ("u", "v", "w", "thp", "mup", "p")
 _WRFDA_COPIES = {"p_pert": "p", "muts": "mup"}
 
 
-def wrfda_tl_start(g: dict) -> dict:
+def _wrfda_copies(specified: bool) -> dict:
+    # On a specified domain WRFPLUS's TL start also fills the mu halo
+    # from g_mu: wrf_run_tl calls start_domain, whose g_start_domain_em
+    # (wrftladj/start_em_tl.F:706) runs g_set_physical_bc2d on mu_2 with
+    # 't', and for a specified domain that copies g_mu_2's edge row into
+    # the halo rows (wrftladj/module_bc_tl.F, open_xs and the other
+    # sides).  woof's halo (model.HALO) is a copy of mup whose ring is
+    # what rk_step 1 reads, so its tangent is g_mu.
+    return {**_WRFDA_COPIES, M.HALO: "mup"} if specified else _WRFDA_COPIES
+
+
+def wrfda_tl_start(g: dict, *, specified: bool = False) -> dict:
     """WRFDA's TL start for ``Window.tl(..., partial=True)`` from
     ``g`` over :data:`WRFDA_TL_FIELDS` (no other name): g_p into both
-    pressure carriers and g_mu into ``muts`` too (the arrays are shared,
-    not copied; ``Window.tl`` only reads them)."""
+    pressure carriers and g_mu into ``muts`` too, and with ``specified``
+    (a window on specified boundaries) into the mu halo as well (the
+    arrays are shared, not copied; ``Window.tl`` only reads them)."""
     if set(g) != set(WRFDA_TL_FIELDS):
         raise ValueError(f"wrfda_tl_start takes {list(WRFDA_TL_FIELDS)}, got {sorted(g)}")
-    return {**g, **{t: g[src] for t, src in _WRFDA_COPIES.items()}}
+    return {**g, **{t: g[src] for t, src in _wrfda_copies(specified).items()}}
 
 
-def wrfda_tl_start_ad(adj: dict) -> dict:
-    """The adjoint of :func:`wrfda_tl_start`: :data:`WRFDA_TL_FIELDS` of
-    ``adj`` (a ``Window.ad`` result), with each copy's adjoint summed back
-    into its source (``p + p_pert``, ``mup + muts``); new arrays."""
+def wrfda_tl_start_ad(adj: dict, *, specified: bool = False) -> dict:
+    """The adjoint of :func:`wrfda_tl_start` (the same ``specified``):
+    :data:`WRFDA_TL_FIELDS` of ``adj`` (a ``Window.ad`` result), with each
+    copy's adjoint summed back into its source (``p + p_pert``, ``mup +
+    muts`` and, with ``specified``, ``+ adj[HALO]``); new arrays."""
     out = {n: adj[n].copy() for n in WRFDA_TL_FIELDS}
-    for t, src in _WRFDA_COPIES.items():
+    for t, src in _wrfda_copies(specified).items():
         out[src] += adj[t]
     return out
 

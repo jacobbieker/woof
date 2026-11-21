@@ -615,6 +615,16 @@ Each step is one small PR, taken to merged before the next widens.
      - `wrfda_tl_start(g)` builds the start from g over
        `WRFDA_TL_FIELDS`. `wrfda_tl_start_ad(adj)` is its adjoint. A dot
        test pins the pair.
+     - On a specified window pass `specified=True` to both. g_mu then
+       also seeds the mu halo (`model.HALO`). WRFPLUS's `wrf_run_tl`
+       calls `start_domain`, and `g_start_domain_em`
+       (`wrftladj/start_em_tl.F:706`) runs `g_set_physical_bc2d` on
+       `mu_2`, which on a specified domain copies g_mu's edge row into
+       the halo (`wrftladj/module_bc_tl.F`). The first step reads the
+       halo only when the state carries one, so a cold start gives the
+       same TL either way. `test_specified_window` covers the pair's dot
+       test, and with a carried halo it shows that the seed changes the
+       TL.
      - `partial=True` with an empty `dx0` is refused.
      - The adjoint of the zero fill is a restriction, so a caller takes
        the same names from `ad`'s result. A dot test pins this.
