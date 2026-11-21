@@ -5037,7 +5037,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/advection_v842.cu",
-    "sha256": "5f98f8cfe1a6906d51767c52ecf14af278aac305dd9f4576dd735e4025a6a06c"
+    "sha256": "ae33e4fb95db1810733b97457378ecea929ecbdc8a6dabc5b92d995cbb46b8b4"
    },
    {
     "file": "woof/hex/mpas_ice/calving_v842.cu",
@@ -6115,7 +6115,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/advection_v842.py",
-    "sha256": "1c93ae0d95fec7c9e261b2b675dc67a94db42b1524e66240796543a293f4f342"
+    "sha256": "26575a379dbe9d51f7d4fd474d4faf6b73009e71cecd6dfefac3c7b0e514fb53"
    },
    {
     "file": "woof/hex/mpas_ice/calving_v842.py",
@@ -6123,7 +6123,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/forward_v842.py",
-    "sha256": "90e979669caf03a21ce386d1b10149d28d1ba3df54c117b173b3b23cef6557e0"
+    "sha256": "e4474e9ef816d5b94ea50612949f4e4c90504c15a8209f8bfdbd926a942a1782"
    },
    {
     "file": "woof/hex/mpas_ice/geometry_v842.py",
@@ -6147,7 +6147,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
-    "sha256": "f09b09db76aa249e6e46a0a85c2423d0627957e797e611548b07a11d3e1fd79d"
+    "sha256": "0c1fbdea6fa23b73d245689c2eb63342fc56ea728c5ccc614f3f17760a297012"
    },
    {
     "file": "woof/hex/mpas_ocean/btr_subcycle_v842.py",

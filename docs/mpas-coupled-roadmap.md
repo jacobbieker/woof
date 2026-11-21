@@ -335,6 +335,10 @@ NCAR aerosols as a small PR whenever it fits.
    fractions of a second. `li_SGH_init` gives grounded ice below sea level
    the ocean's water pressure (it reads a mask holding only the initial
    extent bit); `woof_sgh_init_mask = 'corrected'` computes the mask first,
+   off by default. With the enthalpy solver, `tracer_setup`/`tracer_finish`
+   convert the advected enthalpy with Kelvin temperatures against the
+   thermal solver's Celsius melting point, so the ice turns temperate and
+   melts; `woof_enthalpy_advection_units = 'corrected'` converts in Celsius,
    off by default. Statistics, and the coupling fields, are next.
 6. **The Albany first-order (Blatter-Pattyn) Stokes solver**
    (`config_velocity_solver` = 'FO', also 'L1L2' and 'Stokes'). This is a C++

@@ -408,7 +408,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     bitwise restart; `woof/hex/mpas_ice/forward_v842.py`), word-exact over
     the dome, EISMINT2 A, hydrology and enthalpy-benchmark cases on uniform
     and variable resolution meshes; the land-ice core's registry status is
-    now `partial`;
+    now `partial`. Two v8.4.2 quirks have opt-in corrections, off by
+    default: `woof_sgh_init_mask = 'corrected'` and
+    `woof_enthalpy_advection_units = 'corrected'` (the advection converts
+    enthalpy in Celsius, as the thermal solver does, so the EISMINT2
+    enthalpy ice no longer melts away);
   - the coupler's ocean import merge, E3SM v3.2.0's `prep_ocn_merge`
     (`woof/hex/coupled/prep_ocn_merge_e3sm.py`, opt-in, not called by the
     coupled step): x2o built from the atmosphere, sea ice, runoff, waves,
