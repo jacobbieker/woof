@@ -409,7 +409,19 @@ matched exchange unless asked.
    ported (`woof/hex/coupled/ocn_accum_e3sm.py`,
    `tests/test_e3sm_ocn_accum_parity.py`): the window's sum, the average by
    `1/count` rounded once (E3SM's reciprocal, kept) and the copy back into
-   x2o, real(r8), on CUDA and Metal.
+   x2o, real(r8), on CUDA and Metal. One coupler interval chains them
+   (`woof/hex/coupled/interval_e3sm.py`,
+   `tests/test_e3sm_coupler_interval_parity.py`): `cime_comp_mod`'s
+   RASM_OPTION1 phases (`cime_run_atmocn_setup`, `_ocn_setup_send`,
+   `_ice_setup_send`, `_update_fractions`) over several coupler steps, an
+   ocean and sea ice on one grid (the copy_only mappers) and an atmosphere
+   mapper of any kind, against E3SM's own routines cut verbatim and linked
+   into one Fortran driver (`run_coupler_interval.F90`), word for word after
+   every step on CUDA and Metal. The flux's mask is taken once from the
+   starting fractions, as `seq_flux_init_mct` takes it (kept). The wave
+   couplings are refused by name. Next (e3): the interval on the spine, with
+   the ocean's forward step and the sea ice's step in place of the scripted
+   exports.
 4. The ocean's and the sea ice's import and export
    (`components/mpas-ocean/driver/ocn_comp_mct.F`,
    `components/mpas-seaice/driver/ice_comp_mct.F`). The ocean's is ported

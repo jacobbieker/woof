@@ -475,6 +475,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     over the ocean's coupling window, averaged by E3SM's rounded `1/count`
     and copied back. real(r8), word-exact on CUDA and Metal against the
     routines compiled verbatim on MCT.
+  - One coupler interval chained (`woof/hex/coupled/interval_e3sm.py`,
+    opt-in): the ported routines above, run in E3SM v3.2.0's RASM_OPTION1
+    order over several coupler steps (the i2x map, the flux, the ocean
+    merge and accumulation, the albedos; the window's average on the
+    ocean's alarm; the o2x and a2x maps and the sea-ice merge on the sea
+    ice's; then the fractions), with the components' exports scripted.
+    real(r8), word-exact on CUDA and Metal against E3SM's own routines cut
+    verbatim, linked and driven in that order on MCT. Like the flux it needs
+    `WOOF_GLIBC239_LIBM64=1`; the wave couplings are refused by name.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
