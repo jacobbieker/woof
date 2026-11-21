@@ -7,7 +7,10 @@ units and signs were agreed with the MPAS-Ocean coupling (the ocean reads
 pieces in :mod:`woof.hex.mpas_ocean.land_ice_v842`). Remapping between meshes
 and the channel wiring of :mod:`woof.hex.coupled.exchange` belong to the
 ocean/coupler side: every field here is on MALI's mesh, over its owned cells
-(``nCellsSolve``), at MALI's RKIND.
+(``nCellsSolve``), at MALI's RKIND. The seam is single-rank: on a
+partitioned mesh, liquid runoff whose receiving ocean cell is a halo cell
+(at or beyond ``nCellsSolve``) belongs to another rank, so
+:func:`export_fields` refuses it by name instead of dropping it.
 
 Exports (:func:`export_fields`):
 
@@ -27,7 +30,12 @@ Exports (:func:`export_fields`):
   ``rho_water``, over the ocean cell's ``areaCell``; edges are taken in
   index order. Water the hydrology moves onto ice-free land is not the
   ocean's. Without ``config_SGH`` it is 0: v8.4.2 routes no meltwater
-  without the hydrology.
+  without the hydrology. ``waterFlux`` and ``channelDischarge`` are positive
+  from ``cellsOnEdge(1)`` to ``cellsOnEdge(2)``, as in v8.4.2's hydrology
+  (mpas_li_subglacial_hydro.F: the slope ``hydropotentialBaseSlopeNormal =
+  (phi(cell2) - phi(cell1)) / dcEdge`` at line 786, ``channelDischarge = -Kc
+  ... * hydropotentialBaseSlopeNormal`` at line 1468, and the divergence's
+  ``- waterFlux * dvEdge * edgeSignOnCell`` at line 489).
 - ``landIceDraft`` (m, diagnostic, not a channel): ``lowerSurface`` under
   floating ice, 0 elsewhere.
 
@@ -123,6 +131,7 @@ def grounding_line_discharge(pools: dict, config: dict) -> tuple[np.ndarray, np.
     channel = _host(h["channelDischarge"]).astype(real)
     is_grounded = grounded(mask)
     is_ocean = ocean(mask, _host(g["bedTopography"]).astype(real), real(config["config_sea_level"]))
+    # perf: a host loop over nEdgesSolve; vectorise only if the edge-order summation in export_fields is kept.
     for e in range(nes):
         c1, c2 = cells_on_edge[e]
         if not (0 <= c1 < n_cells and 0 <= c2 < n_cells):
@@ -158,12 +167,17 @@ def export_fields(*, pools: dict, config: dict, diagnostics: bool = False) -> di
         "li2ocn_solid_runoff": ((_host(g["calvingThickness"]).astype(real)[:ncs] * rhoi) / deltat).astype(real),
     }
     rate, receiver = grounding_line_discharge(pools, config)
+    halo = receiver >= ncs
+    if halo.any():
+        raise ConfigurationRefusal(
+            knob="mesh.partition", value=f"nCellsSolve={ncs}",
+            reason=f"{int(halo.sum())} grounding-line edge(s) discharge into halo cells owned by another rank",
+            declaration="the land-ice/ocean seam is single-rank: export on an unpartitioned mesh")
     liquid = np.zeros(ncs, real)
     rho_w = real(RHO_WATER)
     for e in np.nonzero(receiver >= 0)[0]:
         c = receiver[e]
-        if c < ncs:
-            liquid[c] = liquid[c] + (rate[e] * rho_w) / area[c]
+        liquid[c] = liquid[c] + (rate[e] * rho_w) / area[c]
     out["li2ocn_liquid_runoff"] = liquid
     if diagnostics:
         out["landIceDraft"] = np.where(shelf, _host(g["lowerSurface"]).astype(real)[:ncs], zero).astype(real)

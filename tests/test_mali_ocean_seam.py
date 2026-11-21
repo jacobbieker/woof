@@ -163,3 +163,22 @@ def test_the_seam_refuses_by_name():
     pools["mesh"]["deltat"][...] = 0
     with pytest.raises(ValueError, match="deltat"):
         seam.export_fields(pools=pools, config=case["config"])
+
+
+@requires_gpu
+def test_runoff_into_a_halo_cell_is_refused_not_dropped():
+    """On a partitioned mesh a receiving ocean cell past nCellsSolve is
+    another rank's: the single-rank seam refuses it by name."""
+    import cupy as cp
+    from woof.hex.errors import ConfigurationRefusal
+    from woof.hex.mpas_ice import ocean_seam_v842 as seam
+    case = _case("hydro_marine_uniform", "r8")
+    for pools, config in _steps(case):
+        rate, receiver = seam.grounding_line_discharge(pools, config)
+        if (receiver >= 0).any():
+            break
+    seam.export_fields(pools=pools, config=config)   # unpartitioned: every receiver is owned
+    ncs = int(receiver[receiver >= 0].max())
+    pools["mesh"]["nCellsSolve"] = cp.asarray([ncs], cp.int32)
+    with pytest.raises(ConfigurationRefusal, match="halo cells"):
+        seam.export_fields(pools=pools, config=config)
