@@ -226,13 +226,15 @@ def test_the_constants_are_ccsmcoupled():
 
 
 def test_the_default_path_does_not_call_the_coupling():
-    """Opt-in: nothing under woof/ imports it but its own oracle module."""
+    """Opt-in: nothing under woof/ imports it but its own oracle module and the
+    opt-in hybrid sea ice (and its oracle module)."""
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "ice_coupling_e3sm" in p.read_text(encoding="utf-8")
-             and p.name not in ("ice_coupling_e3sm.py", "e3sm_seaice_coupling_oracle.py")]
+             and p.name not in ("ice_coupling_e3sm.py", "e3sm_seaice_coupling_oracle.py", "hybrid_seaice.py",
+                                "e3sm_hybrid_seaice_oracle.py")]
     assert users == []
     siblings = sorted(p.stem for p in (ROOT / "woof" / "hex" / "coupled").glob("*.py")
-                      if p.stem not in ("__init__", "ice_coupling_e3sm"))
+                      if p.stem not in ("__init__", "ice_coupling_e3sm", "hybrid_seaice"))
     code = ("import sys, importlib, woof, woof.hex, woof.hex.coupled\n"
             f"for m in {siblings!r}: importlib.import_module('woof.hex.coupled.' + m)\n"
             "assert 'woof.hex.coupled.ice_coupling_e3sm' not in sys.modules, 'loaded'\n")

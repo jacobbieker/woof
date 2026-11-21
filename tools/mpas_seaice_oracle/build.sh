@@ -46,6 +46,15 @@ read -r -a fc <<< "${GFORTRAN:-gfortran}"
     echo "an MPAS source differs from SOURCES.sha256; refusing to build" >&2
     exit 3
 }
+# WOOF_ORACLE_PATCH names a patch in this directory: an opt-in correction's
+# oracle (zsal_solve.patch; the fixture's PROVENANCE.md), built from the checked
+# tree copied into BUILD_DIR/source and patched there
+if [[ -n "${WOOF_ORACLE_PATCH:-}" ]]; then
+    rm -rf "${build_dir}/source" && mkdir -p "${build_dir}/source"
+    cp -R "${source_root}/src" "${build_dir}/source/"
+    patch -s -d "${build_dir}/source" -p1 < "${script_dir}/${WOOF_ORACLE_PATCH}.patch"
+    source_root="${build_dir}/source"
+fi
 
 seaice="${source_root}/src/core_seaice"
 # seaice_mesh's interpolation routines and the routines the variational basis

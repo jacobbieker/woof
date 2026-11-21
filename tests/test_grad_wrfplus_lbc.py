@@ -71,6 +71,10 @@ CONFIGS = [dict(kind=k, **f) for k in ("u", "v", "theta", "phi", "w", "mu")
 CONFIGS += [dict(kind="u", apply_relax=1, has_msf=1), dict(kind="v", apply_relax=1, has_msf=1),
             dict(kind="theta", apply_relax=1, spec_zone=2, relax_zone=5, width=7, ny=14, nx=15),
             dict(kind="u", apply_relax=1, spec_zone=1, relax_zone=1, width=2)]
+# qv's rk_step-1 capture (a direct row into its held tendency), with map
+# factors, and its specified-only row
+CONFIGS += [dict(kind="qv", apply_relax=1), dict(kind="qv", apply_relax=1, has_msf=1),
+            dict(kind="qv")]
 
 # Strict mode with each of its four controls pinned on, so an inherited
 # =0 cannot leave the reference primal off WRF's order.
@@ -282,7 +286,7 @@ def test_geometry_rejects_unported_options():
     flags, the map-factor divide on u or v, a row that writes nothing and
     an unknown kind are refused, not run."""
     from woof.grad.wrfplus import cases as C
-    for over in (dict(spec_zone=0), dict(width=4), dict(ny=10), dict(kind="qv"),
+    for over in (dict(spec_zone=0), dict(width=4), dict(ny=10), dict(kind="qc"),
                  dict(held_compute=1, held_read=1), dict(held_store=1),
                  dict(apply_relax=1, held_read=1), dict(divide_msf=1),
                  dict(kind="u", held_compute=1, divide_msf=1), dict(target=0),

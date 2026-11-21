@@ -321,12 +321,14 @@ def timestep_finalize(pools: dict, configs: dict) -> None:
 
 
 def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_step: int = 1,
-            finalize_last: bool = True) -> int:
+            finalize_last: bool = True, after_clock=None) -> int:
     """``seaice_core_run``'s loop, ``n_steps`` times from step ``first_step``, in
     place on the pools and clock; returns the next step's number. With
     ``finalize_last`` false the last step is not finalized (a coupler reads
-    its fluxes, then calls :func:`timestep_finalize`). A column abort raises
-    :class:`ColumnAbort`."""
+    its fluxes, then calls :func:`timestep_finalize`). ``after_clock(step)``,
+    if given, runs after each clock advance and before the step (a driver's
+    work there, e.g. ``seaice_init_post_clock_advance``). A column abort
+    raises :class:`ColumnAbort`."""
     import cupy as cp
     check_config(configs)
     clock.check_calendar(configs)
@@ -352,6 +354,8 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
     itimestep = first_step
     for i in range(n_steps):
         clock.now += clock.step
+        if after_clock is not None:
+            after_clock(itimestep)
         # seaice_set_time_diagnostics
         d["xtime"] = clock.time_stamp
         days = real(real(clock.now - clock.seconds(d["simulationStartTime"], "diagnostics:simulationStartTime"))

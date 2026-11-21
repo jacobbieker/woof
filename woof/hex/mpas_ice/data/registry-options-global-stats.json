@@ -1,0 +1,47 @@
+{
+  "schema": "gpuwm-hex.mpas-core-options/v1",
+  "core": "core_landice",
+  "pin": "f34984b2c89353cf31c235b08d3b4acd96b37bb3",
+  "registry": {
+    "path": "src/core_landice/analysis_members/Registry_global_stats.xml",
+    "sha256": "b72a92e58feede74ada02e84128d95b7df8956e971e15163565b984053279210"
+  },
+  "option_count": 5,
+  "options": [
+    {
+      "name": "config_AM_globalStats_enable",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "If true, landice analysis member globalStats is called."
+    },
+    {
+      "name": "config_AM_globalStats_compute_interval",
+      "type": "character",
+      "default": "output_interval",
+      "units": "unitless",
+      "description": "Timestamp determining how often analysis member computations should be performed."
+    },
+    {
+      "name": "config_AM_globalStats_stream_name",
+      "type": "character",
+      "default": "globalStatsOutput",
+      "units": "unitless",
+      "description": "Name of the stream that the globalStats analysis member should be tied to."
+    },
+    {
+      "name": "config_AM_globalStats_compute_on_startup",
+      "type": "logical",
+      "default": ".true.",
+      "units": "unitless",
+      "description": "Logical flag determining if analysis member computations occur on start-up."
+    },
+    {
+      "name": "config_AM_globalStats_write_on_startup",
+      "type": "logical",
+      "default": ".true.",
+      "units": "unitless",
+      "description": "Logical flag determining if an analysis member write occurs on start-up."
+    }
+  ]
+}

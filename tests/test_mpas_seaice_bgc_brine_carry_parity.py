@@ -161,7 +161,8 @@ def test_the_correction_zeroes_only_the_fields_that_exist():
 def test_the_brine_height_is_carried_and_every_other_flag_refused_by_name(name, refuse):
     case = _case(name)
     refuse(case)
-    for flag in (f for f in cv._BGC_FLAGS if f not in cv.BGC_PORTED):
+    # (the vertical salinity is carried too: tests/test_mpas_seaice_bgc_zsal_carry_parity.py)
+    for flag in (f for f in cv._BGC_FLAGS if f not in cv.BGC_PORTED and f != cv.ZSAL_FLAG):
         other = {**case, "config": {**case["config"], flag: True}}
         with pytest.raises(ConfigurationRefusal, match=flag):
             refuse(other)
@@ -196,7 +197,7 @@ _ITD_NAMES = tuple(row[0] for row in co.BGC_CARRY_CASES if row[2] == "itd_thermo
 @requires_gpu
 @pytest.mark.parametrize("original, mutated", [
     # add_new_ice_bgc not called
-    ("if (ix[TI_FBRI] >= 0) itd_add_new_ice_brine(", "if (false) itd_add_new_ice_brine("),
+    ("    if (ix[TI_FBRI] >= 0)\n        return itd_add_new_ice_bgc(", "    if (false)\n        return itd_add_new_ice_bgc("),
     # an empty category under a thickness surplus keeps its brine fraction
     ("            else trcrn[n * nt + fb] = 1.0;\n", "\n"),
     # the new ice's brine volume left out

@@ -15,13 +15,16 @@ layer iterations, a computed or a coupled surface temperature
 ``alternative_atmos_forcing``'s), the ice age and first-year ice tracers,
 and the column biogeochemistry's brine height (``config_use_brine``:
 ``column_vertical_thermodynamics`` neither reads nor writes the brine
-fraction; the other biogeochemistry is refused).
+fraction) and vertical salinity (``config_use_vertical_zsalinity``: its
+tracers pass through untouched, and ``temperature_changes`` takes
+``dTemp = 0.1`` for 0.02, ``ice_therm_bl99.F90:287``); the other
+biogeochemistry is refused.
 
 What it refuses, by name:
 
 - the mushy and zero-layer thermodynamics, melt ponds (level, CESM, topo;
-  level ponds are the Registry default), aerosols, form drag and the
-  vertical zsalinity are not ported;
+  level ponds are the Registry default), aerosols and form drag are not
+  ported;
 - ``config_atmos_boundary_method = 'constant'`` and
   ``config_calc_surface_stresses = .false.``: ``colpkg_step_therm1``'s
   ``Cdn_atm_ratio_n`` is an uninitialised local that only
@@ -121,8 +124,7 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     for knob in ("config_use_level_meltponds", "config_use_cesm_meltponds", "config_use_topo_meltponds"):
         if c[knob]:
             _refuse(knob, True, "the melt ponds are not ported", f"{knob} = .false.")
-    for knob, what in (("config_use_aerosols", "the aerosols"), ("config_use_form_drag", "form drag"),
-                       ("config_use_vertical_zsalinity", "the vertical zsalinity")):
+    for knob, what in (("config_use_aerosols", "the aerosols"), ("config_use_form_drag", "form drag")):
         if c[knob]:
             _refuse(knob, True, f"{what} in the vertical thermodynamics are not ported", f"{knob} = .false.")
     if c["config_atmos_boundary_method"] != "ccsm3":
@@ -219,6 +221,9 @@ def _flags(configs: dict, state: "cv.ColumnState") -> int:
             configs["config_use_first_year_ice"])
     fixes = cv.corrections(configs)
     bits += ("set_sfcflux_order" in fixes, "ice_velocity_at_cell" in fixes)
+    # solve_zsal: thickness_changes' dTemp is 0.1 with the vertical salinity (ice_therm_bl99.F90:287),
+    # which v8.4.2 never sets: only under zsal_solve
+    bits += (cv.solves_zsal(configs),)
     return sum(int(bool(b)) << i for i, b in enumerate(bits))
 
 
