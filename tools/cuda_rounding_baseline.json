@@ -6255,7 +6255,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/post_coupling_v842.py",
-    "sha256": "eb0277bd65457081a5dccee1cef219e068cb8756df5e7ec883e4da91ffef16fb"
+    "sha256": "3a13c33a3155ea62e61706f2aa2a18e0b88da8c844683a3918734977c7858833"
    },
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
