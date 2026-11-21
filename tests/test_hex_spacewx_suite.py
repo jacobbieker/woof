@@ -41,7 +41,7 @@ def _route(physics):
     return native_route(request)[0]
 
 
-def test_the_suite_route_takes_the_keys_from_physics(capsys):
+def test_the_suite_route_takes_the_keys_from_physics():
     config = _route([*ION, *AURORA])
     assert config.spacewx_diagnostics.receipt() == {
         "spacewx_ionosphere_opt": 1, "spacewx_f107_source": "150", "spacewx_f107_mode": "81day",
@@ -49,7 +49,6 @@ def test_the_suite_route_takes_the_keys_from_physics(capsys):
     assert config.receipt()["spacewx_diagnostics"]["spacewx_aurora_opt"] == 1
     assert sw.packages(config) == {"spacewx_ionosphere", "spacewx_aurora"}
     assert not any(key.startswith("spacewx") for key in config.options)
-    assert '[spacewx suite] {"spacewx_aurora_opt": 1' in capsys.readouterr().out
     assert sw.packages(_route(["spacewx_aurora_opt=2", "spacewx_kp_source=omni"])) == {
         "spacewx_aurora", "spacewx_aurora_energy"}
     assert sw.packages(_route(["spacewx_aurora_opt=3", "spacewx_kp_source=omni"])) == {
@@ -169,7 +168,7 @@ class _Utils:
         return name in self.written
 
 
-def _owner(cp, step_offset=0, hours=12):
+def _owner(cp, step_offset=0, hours=12, segment_start=START):
     lat, lon = _cells()
     pad = lambda a: cp.asarray(np.concatenate([a, a[:1]]))            # one halo word past nCellsSolve
     fields = {("mesh", "latCell"): pad(lat), ("mesh", "lonCell"): pad(lon)}
@@ -178,15 +177,15 @@ def _owner(cp, step_offset=0, hours=12):
     def buffer(pool, name):
         return buffers.setdefault((pool, name), cp.full(NC + 1, -9.0, dtype=cp.float32))
 
-    alarms = SimpleNamespace(final_time=START + timedelta(hours=hours))
     return SimpleNamespace(cp=cp, session=SimpleNamespace(layout=SimpleNamespace(dimensions={"nCellsSolve": NC})),
                            authority=lambda pool, name: fields[pool, name], buffer=buffer, buffers=buffers,
                            dycore=SimpleNamespace(config=SimpleNamespace(config_dt=DT)), step_offset=step_offset,
-                           writer=SimpleNamespace(alarms=alarms), halo=None)
+                           writer=SimpleNamespace(start=segment_start, final=START + timedelta(hours=hours)),
+                           halo=None)
 
 
-def _module(cp, physics, written, step_offset=0):
-    owner = _owner(cp, step_offset)
+def _module(cp, physics, written, step_offset=0, segment_start=START):
+    owner = _owner(cp, step_offset, segment_start=segment_start)
     module = sw.SpacewxModule(owner, sw.resolve(dict(item.split("=", 1) for item in physics)))
     module.setup(_Utils(written))
     return owner, module
@@ -199,7 +198,7 @@ def _publish(owner, module, step, when):
 
 
 @pytest.mark.gpu
-def test_every_word_is_the_wrf_routes_ionosphere_row(cp):
+def test_every_word_is_the_wrf_routes_ionosphere_row(cp, capsys):
     from test_spacewx_ionosphere import _dipole, _loader
     from woof.spacewx import history as hist
     from woof.spacewx.ionosphere import Ionosphere
@@ -220,6 +219,8 @@ def test_every_word_is_the_wrf_routes_ionosphere_row(cp):
             assert got[name][NC] == -9.0                       # the halo word is not a solve cell
         frames[step] = got["iono_tec"][:NC].copy()
     assert module.start == START and frames[0].min() > 0.0
+    log = capsys.readouterr().out
+    assert log.count("[spacewx suite]") == 1 and '"spacewx_f107_sfu": 150.0' in log and "2026-03-20T00:00:00" in log
     assert not np.array_equal(frames[0], frames[240])
 
 
@@ -242,17 +243,24 @@ def test_every_word_is_the_wrf_routes_aurora_row(cp, opt, source):
 
 
 @pytest.mark.gpu
-def test_a_continuation_writes_the_straight_runs_words(cp):
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+def test_a_continuation_writes_the_straight_runs_words(cp, mode):
+    """Correct mode hands the continuation the straight run's step offset; exact mode does not, and the rows' start
+    rides the checkpoint (state()/resume())."""
     physics = [*ION, *AURORA]
     written = set(sw.NAMES) - {"aurora_eflux", "aurora_emean", "aurora_iflux", "joule_power"}
     when = START + timedelta(hours=5)
     straight_owner, straight = _module(cp, physics, written)
     want = _publish(straight_owner, straight, int(5 * 3600 / DT), when)
     offset = int(2 * 3600 / DT)                              # the continuation started at +2 h
-    owner, module = _module(cp, physics, written, step_offset=offset)
+    segment = START + timedelta(hours=2)
+    owner, module = _module(cp, physics, written, step_offset=offset if mode == "correct" else 0,
+                            segment_start=segment)
+    assert module.start == (START if mode == "correct" else segment)
+    module.resume(straight.state())
     got = _publish(owner, module, int(5 * 3600 / DT) - offset, when)
     assert module.start == straight.start == START
-    assert set(got) == {("%s" % n) for n in written} == set(want)
+    assert set(got) == set(written) == set(want)
     for name in written:
         np.testing.assert_array_equal(got[name], want[name], name)
 

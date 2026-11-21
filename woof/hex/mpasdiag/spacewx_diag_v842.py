@@ -1,9 +1,9 @@
 """The space-weather history rows (spacewx_ionosphere_opt, spacewx_aurora_opt) on the MPAS-A v8.4.2 suite route.
 
-A WOOF-only output; MPAS-A v8.4.2 has none.  The run names WRF's keys with ``--physics`` as on the WRF route and
-hex's generic column seam (woof.hex.spacewx_history there); this route takes only these keys out of the overrides
-(woof.hex.mpasphys.forecast_v842), records them in the run log and the driver receipt, and keeps refusing every
-other WRF key by name (the MPAS Registry has none of them)::
+A WOOF-only output; MPAS-A v8.4.2 has none.  The run names WRF's keys with ``--physics``, as the WRF route names
+them in its namelist; this route takes only these keys out of the overrides (woof.hex.mpasphys.forecast_v842),
+records them in the driver receipt and, with the drivers each history object resolved, in the run log (the
+``[spacewx suite]`` line), and keeps refusing every other WRF key by name (the MPAS Registry has none of them)::
 
     spacewx_ionosphere_opt   0 / 1          the climatological ionosphere (woof.spacewx.history)
     spacewx_f107_source      'gfz', a path, or a flux in sfu
@@ -22,9 +22,12 @@ The fields are ``diag`` fields [nCells] in the ``diagnostics`` stream, the WRF r
 Registry, the default streams and the driver receipt are the ones a run without this module has.
 
 Nothing is re-derived: the rows are woof.spacewx.history.IonosphereHistory and woof.spacewx.aurora_history.
-AuroraHistory, built on the solve cells' centres (latCell/lonCell in degrees) and the case start, and evaluated at
-each due frame's valid time.  Diagnostic only: nothing the step reads.  A checkpoint continuation builds them on the
-straight run's start (the segment start less ``step_offset`` steps), so it writes the rows the straight run would.
+AuroraHistory, built at setup on the solve cells' centres (latCell/lonCell in degrees) and the case start, and
+evaluated at each due frame's valid time.  Diagnostic only: nothing the step reads, so the keys stay out of the
+checkpoint's physics identity (a resume may switch the rows on or off, as on the WRF route).  A checkpoint carries
+the rows' start, and a continuation rebuilds them on it, so it writes the rows the straight run would.  Each rank
+of a multi-rank mesh builds its own cells' rows; a fetched Kp is held per source and start in the space-weather
+cache, so the ranks read one value.
 """
 from __future__ import annotations
 
@@ -129,7 +132,6 @@ def configure(config, given: Mapping[str, str]):
     if spacewx is None:
         return config
     from dataclasses import replace
-    print("[spacewx suite] " + json.dumps(spacewx.receipt(), sort_keys=True), flush=True)
     return replace(config, spacewx_diagnostics=spacewx)
 
 
@@ -156,7 +158,7 @@ def extend_registry(root, active: set[str]) -> None:
             ET.SubElement(stream, "var", {"name": name, "packages": package})
 
 
-def holders(spacewx: SpacewxConfig, *, latitude_deg, longitude_deg, start_time, run_seconds, **loaders) -> tuple:
+def holders(spacewx: SpacewxConfig, *, latitude_deg, longitude_deg, start_time, run_seconds) -> tuple:
     """The WRF route's history objects on the cell centres (degrees), ionosphere then aurora."""
     from woof.spacewx.aurora_history import AuroraHistory
     from woof.spacewx.history import IonosphereHistory
@@ -166,27 +168,23 @@ def holders(spacewx: SpacewxConfig, *, latitude_deg, longitude_deg, start_time, 
     geometry = SimpleNamespace(start_time=start_time, latitude_deg=lat, longitude_deg=lon)
     built = []
     if spacewx.ionosphere:
-        built.append(IonosphereHistory.for_run(cfg, geometry, **{k: v for k, v in loaders.items()
-                                                                if k in ("indices_loader", "igrf_model",
-                                                                         "map_loader")}))
+        built.append(IonosphereHistory.for_run(cfg, geometry))
     if spacewx.aurora:
-        built.append(AuroraHistory.for_run(cfg, geometry, **{k: v for k, v in loaders.items()
-                                                            if k in ("indices_loader", "solarwind_loader",
-                                                                     "igrf_model", "ovation_coefficients")}))
-    for holder in built:
-        print(f"[spacewx suite] {type(holder).__name__} " + json.dumps(holder.receipt(), sort_keys=True,
-                                                                       default=str), flush=True)
+        built.append(AuroraHistory.for_run(cfg, geometry))
     return tuple(built)
 
 
+START_KEY = "spacewx:start"
+
+
 class SpacewxModule:
-    """Build the rows at the first due frame; publish them for every due frame.  ``owner`` is the route's
-    ResidentOutputDiagnostics."""
+    """Build the rows at setup (so a feed that cannot be read refuses before step 1); publish them for every due
+    frame.  ``owner`` is the route's ResidentOutputDiagnostics."""
 
     def __init__(self, owner, config: SpacewxConfig):
         self.owner, self.config = owner, config
         self.holders = None
-        self._step = None
+        self._when = None
 
     def setup(self, utils):
         dims = self.owner.session.layout.dimensions
@@ -196,35 +194,43 @@ class SpacewxModule:
         active = self.config.packages
         self.names = tuple(n for n in NAMES if FIELDS[n]["gates"][0] in active)
         self.carried = {n for n in self.names if utils.stream_inclusion_count(n, Direction.OUTPUT) > 0}
-
-    def begin(self, step, when):
-        """The frame's step and valid time (a datetime, or MPAS's ``YYYY-MM-DD_hh:mm:ss``)."""
+        # The straight run's start, as reduction_diag_v842's origin: a continuation's writer starts at the
+        # checkpoint and the steps before it are the owner's step_offset.  A checkpoint that carries the rows' own
+        # start (state()) replaces it on resume(), so an exact-mode continuation (step_offset 0) keeps it too.
         from woof.spacewx.history import _naive_utc
-        if not isinstance(when, datetime):
-            when = datetime.strptime(str(when), "%Y-%m-%d_%H:%M:%S")
-        self._step, self._when = int(step), _naive_utc(when)
+        writer = self.owner.writer
+        start = _naive_utc(writer.start) - timedelta(seconds=int(getattr(self.owner, "step_offset", 0)) * self.dt)
+        self._build(start, _naive_utc(writer.final))
 
-    def _build(self):
-        from woof.spacewx.history import _naive_utc
-        when = self._when
-        steps = self._step + int(getattr(self.owner, "step_offset", 0))
-        start = when - timedelta(seconds=steps * self.dt)
-        alarms = getattr(getattr(self.owner, "writer", None), "alarms", None)
-        final = getattr(alarms, "final_time", None)
-        run_seconds = max(0.0, (_naive_utc(final) - start).total_seconds()) if final is not None else 0.0
+    def _build(self, start, final=None):
+        if final is not None:
+            self._final = final
         cp = self.owner.cp
         lat = np.degrees(cp.asnumpy(self.owner.authority("mesh", "latCell")[:self.nc]).astype(np.float64))
         lon = np.degrees(cp.asnumpy(self.owner.authority("mesh", "lonCell")[:self.nc]).astype(np.float64))
         self.start = start
         self.holders = holders(self.config, latitude_deg=lat, longitude_deg=lon, start_time=start,
-                               run_seconds=run_seconds)
+                               run_seconds=max(0.0, (self._final - start).total_seconds()))
+        print("[spacewx suite] " + json.dumps({"settings": self.config.receipt(), "start": start.isoformat(),
+                                               "rows": {type(h).__name__: h.receipt() for h in self.holders}},
+                                              sort_keys=True, default=str), flush=True)
 
-    def rows(self) -> dict:
-        """lower-case name -> the (nCellsSolve,) float32 device row at the frame begin() named."""
-        if self.holders is None:
-            self._build()
+    def begin(self, step, when):
+        """The frame's valid time (a datetime, or MPAS's ``YYYY-MM-DD_hh:mm:ss``)."""
+        from woof.spacewx.history import _naive_utc
+        if not isinstance(when, datetime):
+            when = datetime.strptime(str(when), "%Y-%m-%d_%H:%M:%S")
+        self._when = _naive_utc(when)
+
+    def rows(self, names) -> dict:
+        """lower-case name -> the (nCellsSolve,) float32 device row at the frame begin() named, for the history
+        objects that carry one of ``names``."""
         out = {}
         for holder in self.holders:
+            from woof.spacewx.history import HISTORY_FIELDS
+            carries = getattr(holder, "names", None) or tuple(HISTORY_FIELDS)     # IonosphereHistory: the five
+            if not {wrf.lower() for wrf in carries} & set(names):
+                continue
             elapsed = (self._when - holder.start_time).total_seconds()
             for wrf, row in holder.history_fields(elapsed).items():
                 out[wrf.lower()] = row.reshape(-1)[:self.nc]
@@ -235,6 +241,17 @@ class SpacewxModule:
         due = [n for n in self.carried if self.utils.field_will_be_written(n)]
         if not due:
             return
-        rows = self.rows()
+        rows = self.rows(due)
         for name in due:
             self.owner.buffer("diag", name)[:self.nc] = rows[name]
+
+    # -- checkpoint continuation: the rows' start, so the continuation reads the straight run's drivers ---------
+    def state(self):
+        return {START_KEY: np.array([(self.start - datetime(1970, 1, 1)).total_seconds()], dtype=np.float64)}
+
+    def resume(self, state):
+        if START_KEY not in state:
+            return
+        start = datetime(1970, 1, 1) + timedelta(seconds=float(np.asarray(state[START_KEY]).reshape(-1)[0]))
+        if start != self.start:
+            self._build(start)
