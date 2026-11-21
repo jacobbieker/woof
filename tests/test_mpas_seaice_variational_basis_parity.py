@@ -153,6 +153,18 @@ def test_what_v842_stops_on_or_mishandles_is_refused_by_name(knob, value, match)
         vb.check_config(fekete)
 
 
+def test_a_mesh_without_coordinates_or_a_bad_libm_is_refused_up_front():
+    case = next(c for c in so.cases("r4") if c["name"] == "planar_hex_wachspress")
+    mesh = {k: v for k, v in case["pools"]["mesh"].items() if k not in ("xVertex", "edgesOnCell")}
+    with pytest.raises(ConfigurationRefusal, match="xVertex"):
+        vb.initialize(mesh=mesh, configs=case["config"], real=np.float32)
+    # checked on every path, not only where RKIND 8's metric terms read it
+    with pytest.raises(ValueError, match="metric_libm"):
+        so.run_port(case, metric_libm="Host")
+    with pytest.raises(ValueError, match="metric_libm"):
+        so.run_port(dict(case, config=dict(case["config"], config_include_metric_terms=False)), metric_libm="glibc")
+
+
 def test_a_singular_basis_system_stops_as_v842_does():
     matrix = np.array([[[1.0, 2.0, 1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]])
     with pytest.raises(vb.BasisError, match="singular"):
@@ -198,10 +210,13 @@ def test_the_opt_in_corrections():
                                                 "mesh:y_period": 0.0})
     quirk, _ = so.run_port(shifted)
     fixed, _ = so.run_port(shifted, corrections=("periodic_local_coords",))
+    bare = dict(shifted, config=dict(case["config"], is_periodic=True, x_period=period, y_period=0.0))
+    fixed_bare, _ = so.run_port(bare, corrections=("periodic_local_coords",))
     key = "velocity_variational/basisIntegralsMetric"
     n = int(mesh["nEdgesOnCell"][0])
     assert not np.allclose(quirk[key][0, :n, :n], base[key][0, :n, :n])
     np.testing.assert_allclose(fixed[key][0, :n, :n], base[key][0, :n, :n], rtol=1e-9)
+    assert so.word_mismatches(fixed_bare[key], fixed[key]) == 0      # the bare config keys too
 
 
 def _mutant(old: str, new: str):
