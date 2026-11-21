@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from conftest import requires_netcdf_bridge
 from woof.config import RunConfig, validate_run_config
 from woof.core.radiation_composition import ComposedRadiation, make_radiation
 
@@ -108,7 +109,7 @@ def _wrf_driver_sw(lw, sw):
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("variant", ["rte-rrtmgp", "rrtmg_legacy"])
+@pytest.mark.parametrize("variant", [pytest.param("rte-rrtmgp", marks=requires_netcdf_bridge), "rrtmg_legacy"])
 @pytest.mark.parametrize("swint", [0, 1])
 def test_selected_spectrum_equals_paired_engine_and_never_calls_inactive_solver(env, monkeypatch, variant, swint):
     import cupy as cp
@@ -219,7 +220,7 @@ def test_modern_mixed_microphysics_admits_every_coupled_two_moment_scheme(lw,sw)
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("variant", ["rte-rrtmgp", "rrtmg_legacy"])
+@pytest.mark.parametrize("variant", [pytest.param("rte-rrtmgp", marks=requires_netcdf_bridge), "rrtmg_legacy"])
 def test_mixed_engines_match_independent_spectra_and_tile_identity(env, variant):
     import cupy as cp
     from test_rrtmg_legacy_wiring import START
