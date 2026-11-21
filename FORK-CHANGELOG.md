@@ -31,6 +31,13 @@ fork already had, upstream's keys and flags are now the only ones:
 
 New:
 
+- The WRF dry-step adjoint (`woof.grad.wrfplus`) gains its first moist
+  pieces, for WRFDA's moisture control: the TL/AD of `calc_cq` (qv, or
+  qv, qc and qr), of the pressure gradient's cqu/cqv factor, and of the
+  moist buoyancy (`moist_mode` 1). Each is checked against woof's strict
+  primal word for word in binary32. They are not yet bound into the
+  step. The forecast path is unchanged.
+
 - The WRF dry-step tangent-linear and adjoint (`woof.grad.wrfplus.model`
   and `window.Window`) now cover specified lateral boundaries, which
   regional 4D-Var needs. The step binds the stage-1 relaxation fold, the
