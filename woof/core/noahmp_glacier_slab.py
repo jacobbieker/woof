@@ -12,7 +12,9 @@ WRITE_FIELDS = ('tsk', 'hfx', 'grdflx', 'snow', 'snowh', 'emiss', 'qsfc', 'tgxy'
 
 def run_glacier_slab(fields, atmosphere, active, *, coszen, zsoil, dt,
                      opt_alb=2, opt_gla=1, opt_stc=1, opt_tbot=2, snicar_options=None, noahmp_snow_age="wrf_470",
-                     wrf_hydro=None):
+                     opt_tksno=1, wrf_hydro=None):
+    from woof.core.noahmp_tksno import validate as tksno_validate
+    tksno_validate(opt_tksno)
     import cupy as cp
     from woof.core import health_ledger
     from woof.core.noahmp_glacier_gpu import glacier_module
@@ -73,6 +75,7 @@ def run_glacier_slab(fields, atmosphere, active, *, coszen, zsoil, dt,
          snow if snow is not None else np.uint64(0),
          heating if snow is not None else np.uint64(0),
          carried if snow is not None else np.uint64(0), errors,
+         np.int32(opt_tksno),
          *((wrf_hydro[name] for name in ("sfcheadrt", "infxsrt", "soldrain", "qtiledrain"))
            if wrf_hydro is not None else (np.uint64(0),) * 4)))
     if opt_alb == 3:

@@ -549,8 +549,8 @@ def _tree_index() -> dict[str, tuple[str, ...]]:
     for candidate in MODEL.rglob("*"):
         relative_parts = candidate.relative_to(MODEL).parts
         # Other checkouts live INSIDE the main checkout: nested
-        # worktrees and parked clones under the .worktrees and .claude
-        # directories.  A citation into THIS worktree must never resolve
+        # worktrees and parked clones under dot-named directories
+        # (.worktrees and the like).  A citation into THIS worktree must never resolve
         # into some other ref's tree (a rotted citation could come back
         # RESOLVED against a file this tree no longer carries), and those
         # clones contain Linux symlinks Windows cannot stat (WinError

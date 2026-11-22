@@ -139,34 +139,41 @@ pub fn write_init(
     provenance: &str,
     lineage: &crate::init::Lineage,
 ) -> MpasResult<EmitLedger> {
-    write_init_declaring(out_path, capsule_path, computed, file_id, parent_chain, provenance, lineage, &[])
+    write_init_declaring(out_path, capsule_path, computed, &[], file_id, parent_chain, provenance, lineage)
 }
 
 /// The transported species [`write_init`] creates when the capsule has no
 /// slot for them: the WSM6/Thompson/aerosol-aware set every producer knows.
 pub const ADMITTED_SPECIES: [&str; 10] = ["qi","qs","qg","ni","nr","nc","nwfa","nifa","ng","volg"];
 
-/// [`write_init`], also creating a `(Time, nCells, nVertLevels)` float slot
-/// for each name in `declared_scalars` that the capsule lacks.
+/// [`write_init`] for a caller that DECLARES transported species: each name in
+/// `declared_species` that has a computed value and no capsule variable gets a
+/// `(Time, nCells, nVertLevels)` float32 variable, as the fixed suite species do.
 ///
-/// `declared_scalars` is a microphysics scheme's own prognostic species row
+/// `declared_species` is a microphysics scheme's own prognostic species row
 /// (`--augment-init --scalar-names`, from woof.hex.species_row): Morrison's
-/// `ns`, P3's `qir`/`qib`, NSSL's `qh`/`qnh`, the SBM bins and so on.  The
-/// caller names each one, so a computed value under a declared name has a
-/// landing site; any other computed name without a capsule variable still
-/// meets the "no variable for" refusal.  Names must be plain identifiers.
+/// `ns`, P3's `qir`/`qib`, NSSL's `qh`/`qnh`, the SBM bins and so on.  Names
+/// must be plain identifiers and computed as binary32.
+///
+/// THE BREAKAGE THIS PREVENTS (2026-11-09, an ERA5 1957-12-18T12 zoom globe on the ArWen suite
+/// with NSSL two-moment picked; the fork's hex option matrix found the same on 2026-11-13): the
+/// fixed list above knew the species of the suites of 2026-10-12 only, so the door's own
+/// `--scalar-names` for a microphysics chosen later (NSSL's qh qndrop qng qnh qni qnn qnr qns
+/// qvolg qvolh, P3's qib qir) met the "no variable for" refusal and no forecast with that scheme
+/// could start.  The refusal itself stays for every name nobody declared: a computed value with
+/// no variable is still never dropped.
 #[allow(clippy::too_many_arguments)]
 pub fn write_init_declaring(
     out_path: &Path,
     capsule_path: &Path,
     computed: BTreeMap<String, Computed>,
+    declared_species: &[String],
     file_id: &str,
     parent_chain: &[String],
     provenance: &str,
     lineage: &crate::init::Lineage,
-    declared_scalars: &[String],
 ) -> MpasResult<EmitLedger> {
-    for name in declared_scalars {
+    for name in declared_species {
         let plain = !name.is_empty() && name.len() <= 64
             && name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
             && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
@@ -335,10 +342,22 @@ pub fn write_init_declaring(
     // any other computed name without a capsule variable stays a stray and
     // meets the "no variable for" refusal below, which the door keys on.
     // A scheme's declared species row (write_init_declaring) adds its own.
-    let admitted = |name: &str| ADMITTED_SPECIES.contains(&name) || declared_scalars.iter().any(|s| s == name);
+    let admitted = |name: &str| ADMITTED_SPECIES.contains(&name) || declared_species.iter().any(|s| s == name);
     let extra: Vec<String> = computed.keys()
         .filter(|name| !present.contains(*name) && !added_aerosols.contains(&name.as_str()) && admitted(name.as_str())).cloned().collect();
     for name in &extra {
+        // A declared species lands as a level field or not at all: the wrong size would be
+        // written as a file that opens cleanly and reads another field's numbers.
+        if declared_species.contains(name) {
+            let expected: usize = ["nCells", "nVertLevels"].iter()
+                .map(|d| dimid_of.get(*d).map(|&i| dims[i].len as usize).unwrap_or(0)).product();
+            match computed.get(name) {
+                Some(Computed::Floats(values)) if values.len() == expected => {}
+                Some(Computed::Floats(values)) => return Err(MpasError::Refusal(format!(
+                    "declared species {name} has {} words, expected {expected} (nCells x nVertLevels)", values.len()))),
+                _ => return Err(MpasError::Refusal(format!("declared species {name} must be binary32"))),
+            }
+        }
         let mut ids = vec![];
         if let Some(&id) = dimid_of.get("Time") { ids.push(id); }
         for dim in ["nCells", "nVertLevels"] {
