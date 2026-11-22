@@ -3425,11 +3425,11 @@
    },
    {
     "file": "woof/core/kernels/gsfcsw.cu",
-    "sha256": "112658723f9630d3acad88f1ea3d5ad71ee363c61d5b4a9ef95204eb7dc1c9b2"
+    "sha256": "520b17104407232684ac9ddf6e9956e219b3cdfb1468f30f3e481a82ed1c2da5"
    },
    {
     "file": "woof/core/kernels/gsfcsw_fast.cuh",
-    "sha256": "e6f663eaeaa24a205d74a287983ef7d9ecdc118c0b7b94d6d7a901db6d788dc2"
+    "sha256": "e7899fc52c5d29127acbe23472fd4392b2e2f7f9341f29f8b153a0f753d5d183"
    },
    {
     "file": "woof/core/kernels/hail.cu",
@@ -5611,7 +5611,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "52bbfd62d8e95edc79939ab7d2f810b90cf99cf48aab0afbd7ebe030f11f38bf"
+    "sha256": "4051e2350f563b5d09a646420596f46f30bdeea252ec66b2041e6de12957688e"
    },
    {
     "file": "woof/core/refl.py",
@@ -15964,13 +15964,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "c86a5e32ddac639f3f2e821d7607889fc00a6caba2836d11659e9abba8a63866",
+    "sha256": "6751e3de472c7b2140caec26ddc5b7386157988c042722a39188d22e66579e4d",
     "sites": {
      "100": 172
     }
    },
    "native_differences": {
-    "sha256": "cfbcf8bd3a77bf1dcb7566a030fb887d0f419ce49ced7db5391fd16d9da8e906",
+    "sha256": "486e406570b9ccfc93ab75e92770eb1b6ae93c59a331428a2d47dc336786eea8",
     "sites": {
      "100": 9
     }
@@ -15994,7 +15994,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "6caa4aed4388831ee0a06de6fcaff48208e30c6d2870fe0abab35008745d3921"
+   "source_sha256": "cf3967f0ec5512e14fffd1b388ccbe672e031792da753c69536808b5a49e792c"
   },
   "kernels:hail": {
    "assessment": "static_diagnostic_only",
