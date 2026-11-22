@@ -429,8 +429,19 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `z_biogeochemistry`'s mobile and stationary phases and
     `merge_bgc_fluxes`), the ITD thermodynamics and the ridging
     (`add_new_ice_bgc`, `lateral_melt_bgc` and `zap_small_areas`' tracer
-    into `oceanBioFluxes`), word for word with v8.4.2 on CUDA and Metal. The
-    other stages still refuse them. The other biogeochemistry flags are
+    into `oceanBioFluxes`) and the column step (the snow and ice layers
+    separated after the pre-dynamics and combined before each ridging, the
+    vertical thermodynamics, the shortwave and `coupling_prep`) and the
+    coupled step with the velocity solver, word for
+    word with v8.4.2 on CUDA and Metal. Two v8.4.2 quirks there have opt-in
+    corrections: `subcycle_snow_ice_tracers` (v8.4.2 combines every dynamics
+    subcycle but separates once a step, so an earlier subcycle's ridging of
+    the tracers is lost) and `bgc_snow_new_category` (without the vertical
+    thermodynamics `update_snow_bgc` divides 0/0 for a category the last
+    step opened, and `oceanBioFluxes` is NaN; on Metal that NaN's sign bit
+    is the opposite of x86's, the one word not compared bitwise there). The
+    other biogeochemistry
+    flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
@@ -618,8 +629,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     once, each where its scheme runs (default `"none"`; the hex door takes
     `--quirk-corrections all`). A key set against it is refused by name,
     and so is a correction its own key refuses in that combination. It
-    turns on `gf_deep_rain_evaporation_booking`,
-    `ysu_surface_heat_exner` and `mynn_sfclay_psih_zolzt` (WRF route); `--undriven-species-boundary
+    turns on `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
+    `mynn_sfclay_psih_zolzt` and `noah_smc_floor_booking` (WRF route); `--undriven-species-boundary
     wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -628,7 +639,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `woof_analysis_empty` (MALI); the MPAS-Seaice column's
     `set_sfcflux_order`, `ice_velocity_at_cell`,
     `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
-    `zbgc_c2n_proteins`, `bgc_inactive_diagnostics` and `zsal_solve`;
+    `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
+    `bgc_snow_new_category` and `subcycle_snow_ice_tracers`;
     and the MPAS-Seaice velocity solver's `planar_metric_terms`,
     `periodic_local_coords` and `weak_ridge_delta`.
     The list and its values are in
@@ -647,6 +659,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     roughness `zt/L`. The option uses `zt/L` throughout. It moves only the
     T2/Q2 diagnostics; checked against the corrected CPU reference, not yet
     scored against observations.
+  - `noah_smc_floor_booking` (Noah, `sf_surface_physics = 2`, WRF route).
+    WRF's Noah raises a soil layer that dries below 0.02 to 0.02 and books
+    the water it adds nowhere, so dry sandy columns gain water (up to 30 mm
+    in a step on a column that starts below the floor). The option takes it
+    from the layer below, and past the bottom layer from the drainage, so
+    the column water budget closes. Not yet scored against observations;
+    the hex MPAS-suite Noah does not carry it yet.
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as

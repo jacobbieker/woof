@@ -327,6 +327,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The opt-in YSU surface heat flux on theta, on the same terms: a
     # [shared] value reaches the bl_pbl_physics = 1 domains only.
     "ysu_surface_heat_exner",
+    # The opt-in Noah soil-moisture floor booking, on the same terms: a
+    # [shared] value reaches the sf_surface_physics = 2 domains only.
+    "noah_smc_floor_booking",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -4382,6 +4385,14 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             dom.get("sf_sfclay_physics",
                     shared.get("sf_sfclay_physics", RunConfig.sf_sfclay_physics))) == 5
         for dom in domain_tables)
+    # The opt-in Noah soil-moisture floor booking is read only by Noah
+    # (sf_surface_physics = 2), on the same terms.
+    tree_runs_noah = any(
+        physics_mode.settings.get(
+            "sf_surface_physics",
+            dom.get("sf_surface_physics",
+                    shared.get("sf_surface_physics", RunConfig.sf_surface_physics))) == 2
+        for dom in domain_tables)
     # The same rule for the Grell-family keys.  clos_choice and ishallow
     # are read only where cu_physics = 3, and the wizard writes them in
     # [shared]; on a tree whose cumulus-off child sits under a
@@ -5002,6 +5013,9 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                      or kw.get("mynn_sfclay_variant", RunConfig.mynn_sfclay_variant) != "wrf_461")
                 and "mynn_sfclay_psih_zolzt" not in dom):
             kw["mynn_sfclay_psih_zolzt"] = False
+        if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
+                and "noah_smc_floor_booking" not in dom):
+            kw["noah_smc_floor_booking"] = False
         # woof_quirk_corrections = 'all': every opt-in correction whose
         # scheme this domain runs, a conflicting explicit key refused by name.
         from woof.quirk_corrections import apply_run_corrections
@@ -6413,6 +6427,7 @@ def _public_config_value(value):
                                   ("ysu_surface_heat_exner", False),
                                   ("woof_quirk_corrections", "none"),
                                   ("mynn_sfclay_psih_zolzt", False),
+                                  ("noah_smc_floor_booking", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

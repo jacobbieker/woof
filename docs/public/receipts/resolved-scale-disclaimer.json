@@ -306,7 +306,7 @@
       "command": "git grep -inE cuda graph|kernel fusion|operator fusion -- README.md docs/public/*.md",
       "exit_code": 0,
       "stderr": "",
-      "stdout": "docs/public/PHYSICS.md:1709:ledger, preserving CUDA graph capture. The global column workspace is\ndocs/public/PHYSICS.md:3886:CUDA graph advances a complete step without host readbacks. Rust reads and\n"
+      "stdout": "docs/public/PHYSICS.md:1709:ledger, preserving CUDA graph capture. The global column workspace is\ndocs/public/PHYSICS.md:3902:CUDA graph advances a complete step without host readbacks. Rust reads and\n"
     }
   },
   "readme_item": {
@@ -380,7 +380,7 @@
     "command": "git grep -inE cuda graph|kernel fusion|operator fusion|lift[a-z]* the ceiling|single-GPU ceiling -- README.md docs/public/*.md",
     "exit_code": 0,
     "stderr": "",
-    "stdout": "docs/public/PHYSICS.md:1709:ledger, preserving CUDA graph capture. The global column workspace is\ndocs/public/PHYSICS.md:3886:CUDA graph advances a complete step without host readbacks. Rust reads and\n"
+    "stdout": "docs/public/PHYSICS.md:1709:ledger, preserving CUDA graph capture. The global column workspace is\ndocs/public/PHYSICS.md:3902:CUDA graph advances a complete step without host readbacks. Rust reads and\n"
   },
   "verification_item": {
     "first_line": 448,
