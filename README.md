@@ -1267,7 +1267,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   transport (sumflux and the non-PD scalar update,
   `woof.grad.wrfplus.scalar`), and the moist boundary rows (qv's
   relaxation and spec_bdy_final, flow_dep_bdy for hydrometeors). The
-  forecast path does not import any of it.
+  forecast path does not import any of it. The first diffusion pieces
+  (`woof.grad.wrfplus.diffusion`, diff_opt 1 / km_opt 4) are kernels too,
+  not yet in the step: the deformation (WRF `compute_diff_metrics` +
+  `cal_deform_and_div`) and `smag2d_km`'s xkmh/xkhh with the 10 * mlen
+  cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
+  `wrf_diff_opt1_km4` word for word, and they match WRFPLUS to about
+  1e-16, except at the top level of a periodic seam, where WRF keeps a
+  cold-zero slope and woof the true one.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8

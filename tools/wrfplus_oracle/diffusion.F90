@@ -13,7 +13,8 @@
 ! then its adjoint, A_SMAG2D_KM.  xkmh and xkhh start at their cold zero.
 !
 ! Input (stream, native binary64/int32): nx, ny, nz, flags (bit 0
-! periodic_x, 1 periodic_y, 2 specified), mode; rdx, rdy, cf1, cf2, cf3,
+! periodic_x, 1 periodic_y, 2 specified, 3 TL only: the AD outputs are
+! 0), mode; rdx, rdy, cf1, cf2, cf3,
 ! dx, dy, c_s; then on (-3:nx+4, 1:nz+1, -3:ny+4):
 !   mode 1: u, ud, v, vd, ph, phd, phb, w, and the defor11, defor22,
 !           defor12 adjoint seeds; on (-3:nx+4, -3:ny+4) msfu, msfv, msft;
@@ -99,6 +100,9 @@ program wrfplus_diffusion
 
     au = 0; av = 0; aw = 0; aph = 0; az = 0; ardz = 0; ardzw = 0; azx = 0; azy = 0
     a11 = s11; a22 = s22; a12 = s12; a33 = 0; a13 = 0; a23 = 0; adv = 0; nbad = 0
+    if (btest(flags, 3)) then
+      a11 = 0; a22 = 0; a12 = 0
+    else
     call a_cal_deform_and_div(cf, u, au, v, av, w, aw, dv, adv, d11, a11, d22, a22, &
          d33, a33, d12, a12, d13, a13, d23, a23, nba, nbad, 1, ubase, vbase, &
          msfu, msfu, msfv, msfv, msft, msft, rdx, rdy, dn, dnw, rdz, ardz, rdzw, ardzw, &
@@ -108,6 +112,7 @@ program wrfplus_diffusion
     call a_compute_diff_metrics(cf, ph, aph, phb, z, az, rdz, ardz, rdzw, ardzw, &
          zx, azx, zy, azy, rdx, rdy, ids, ide, jds, jde, kds, kde, &
          ims, ime, jms, jme, kms, kme, ids, ide, jds, jde, kds, kde)
+    end if
 
     open(newunit=iu, file=trim(fout), access='stream', form='unformatted', status='replace')
     write(iu) d11, d11d, d22, d22d, d12, d12d, a11, a22, a12, au, av, aph
@@ -129,11 +134,15 @@ program wrfplus_diffusion
 
     akm = skm; akh = skh; akv = 0; akhv = 0; ardzw = 0; azx = 0; azy = 0
     a11 = 0; a22 = 0; a12 = 0
+    if (btest(flags, 3)) then
+      akm = 0; akh = 0
+    else
     call abct(akh); call abct(akm)
     call a_smag2d_km(cf, km, akm, kv, akv, kh, akh, khv, akhv, d11, a11, d22, a22, &
          d12, a12, rdzw, ardzw, dx, dy, msft, msft, zx, azx, zy, azy, &
          ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
          ids, ide, jds, jde, kds, kde)
+    end if
 
     open(newunit=iu, file=trim(fout), access='stream', form='unformatted', status='replace')
     write(iu) km, kmd, kh, khd, akm, akh, a11, a22, a12

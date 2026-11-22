@@ -204,7 +204,12 @@ def test_wrfplus_oracle_agreement(backend, tmp_path):
     specified axes with map factors and a 3-D base geopotential.  A
     periodic axis's end face repeats face 0: the u and v adjoints of faces
     0 and nx (ny) are compared as a sum (woof reads face 0 for both, WRF
-    reads its halo)."""
+    reads its halo).  WRF's compute_diff_metrics leaves a periodic seam's
+    top-level slope at its cold zero, where woof takes the true slope: the
+    deformation words that read it are left out (the fixture's mask/*) and
+    their adjoint seeds are 0.  a_cal_deform_and_div overruns its y tapes
+    on a periodic y axis, so the fully periodic case is TL only
+    (tools/wrfplus_oracle/fixture.py DIFF_CASES)."""
     if not FIXTURE.exists():
         pytest.skip("tests/data/wrfplus/diffusion.npz not built")
     dtn = "float32" if backend == "mlx" else "float64"
@@ -232,6 +237,9 @@ for case in sorted({{k.split("/")[0] for k in z.files if "/" in k}}):
             continue
         name = k.split("/", 2)[2]
         e, w = z[k].copy(), cp.asnumpy(got[name]).astype(np.float64)
+        mk = pre + "mask/" + name.split("_")[-1]
+        if name.startswith("tl_") and mk in z.files:
+            e, w = e[z[mk]], w[z[mk]]
         for x in (e, w):
             if name == "ad_u" and not g.boundary_x:
                 x[..., 0] += x[..., -1]; x[..., -1] = 0
@@ -243,7 +251,9 @@ for case in sorted({{k.split("/")[0] for k in z.files if "/" in k}}):
     limit = 1e-5 if backend == "mlx" else 1e-12
     bad = {k: v for k, v in out.items() if not v < limit}
     assert not bad, sorted(bad.items())
-    assert len(out) >= 8
+    # 6 TL words per deformation case plus 6 AD words for the 3 with an
+    # adjoint; 4 TL and 5 AD words per coefficient case
+    assert len(out) == 4 * 6 + 3 * 6 + 3 * 9
 
 
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])

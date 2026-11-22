@@ -2086,16 +2086,41 @@ def lbc_final(exe: str, runner: list[str], seed: int = 20261201) -> dict:
 #: diffusion: the diff_opt 1 / km_opt 4 coefficients (diffusion.F90).
 #: WRFPLUS's ``specified`` is one flag for every side; a periodic x with
 #: specified y sides is WRF's channel (periodic_x plus specified).
+#: a_cal_deform_and_div sizes its y tapes (Tmpv400-403) from
+#: max(jds+1, jts), so on a periodic y axis (j_start = jts) it writes past
+#: them and the driver crashes: the periodic-y cases are TL only.
+#: (A bounded x with a periodic y is not a WRF configuration: specified
+#: bounds y in cal_deform_and_div unless periodic_x.)
 DIFF_CASES = {
-    "df_periodic": dict(op="df"),
+    "df_periodic": dict(op="df", tl_only=1),
     "df_spec": dict(op="df", boundary_x=1, boundary_y=1),
     "df_spec_y": dict(op="df", boundary_y=1),
-    "df_small": dict(op="df", nz=4, ny=6, nx=5),
+    "df_small": dict(op="df", nz=4, ny=6, nx=5, boundary_x=1, boundary_y=1),
     "km_periodic": dict(op="km"),
     "km_spec": dict(op="km", boundary_x=1, boundary_y=1),
     "km_spec_y": dict(op="km", boundary_y=1),
 }
 DIFF_DIMS = dict(nz=7, ny=8, nx=9)
+
+
+def _df_masks(geom):
+    """The deformation words WRF and woof both define.  WRF's
+    compute_diff_metrics fills a periodic axis's seam slope (zx at ids and
+    ide, zy at jds and jde) for levels 1..ktf only: at the top w level the
+    seam keeps its cold zero, where woof takes the true slope.  So the top
+    level's defor11 (columns 0 and nx-1) and defor12 (column 0) of a
+    periodic x, and defor22 (rows 0 and ny-1) and defor12 (row 0) of a
+    periodic y, are left out, and their adjoint seeds are 0 (so the seam
+    slope's adjoint is 0 on both sides)."""
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    m = {n: np.ones((nz, ny, nx), dtype=bool) for n in ("defor11", "defor22", "defor12")}
+    if not geom.boundary_x:
+        m["defor11"][nz - 1][:, [0, nx - 1]] = False
+        m["defor12"][nz - 1][:, 0] = False
+    if not geom.boundary_y:
+        m["defor22"][nz - 1][[0, ny - 1], :] = False
+        m["defor12"][nz - 1][0, :] = False
+    return m
 
 
 def _df_layout(geom):
@@ -2104,20 +2129,21 @@ def _df_layout(geom):
                         open_y=geom.boundary_y))
 
 
-def _df_head(geom, mode, sc):
+def _df_head(geom, mode, sc, tl_only=0):
     bx, by = geom.boundary_x, geom.boundary_y
-    flags = int(not bx) | (int(not by) << 1) | (int(bool(bx or by)) << 2)
+    flags = (int(not bx) | (int(not by) << 1) | (int(bool(bx or by)) << 2)
+             | (int(bool(tl_only)) << 3))
     head = np.array([geom.nx, geom.ny, geom.nz, flags, mode], dtype=np.int32)
     return head.tobytes() + np.asarray(sc, dtype="<f8").tobytes()
 
 
-def _df_record(geom, tr, pe, seeds):
+def _df_record(geom, tr, pe, seeds, tl_only=0):
     """diffusion.F90 mode 1.  Halos wrap a periodic axis (a staggered end
     face takes face 0, which woof reads there) and copy the edge of a
     specified one (woof clamps)."""
     L = _df_layout(geom)
     blob = _df_head(geom, 1, [geom.rdx, geom.rdy, geom.cf1, geom.cf2, geom.cf3, 0.0, 0.0,
-                              0.0])
+                              0.0], tl_only)
     rng = np.random.default_rng(7)
     w = rng.standard_normal((geom.nz + 1, geom.ny, geom.nx))
     a3 = [L.pad3(tr["u"], end=False), L.pad3(pe["u"], end=False),
@@ -2151,9 +2177,9 @@ def _df_expected(geom, out, L):
     return exp
 
 
-def _km_record(geom, tr, pe, seeds):
+def _km_record(geom, tr, pe, seeds, tl_only=0):
     L = _df_layout(geom)
-    blob = _df_head(geom, 2, [0.0, 0.0, 0.0, 0.0, 0.0, geom.dx, geom.dy, geom.c_s])
+    blob = _df_head(geom, 2, [0.0, 0.0, 0.0, 0.0, 0.0, geom.dx, geom.dy, geom.c_s], tl_only)
     a3 = []
     for n in ("defor11", "defor22", "defor12"):
         a3 += [L.pad3(tr[n]), L.pad3(pe[n])]
@@ -2183,6 +2209,7 @@ def diffusion(exe: str, runner: list[str], seed: int = 20261130) -> dict:
     for n, (name, over) in enumerate(DIFF_CASES.items()):
         over = dict(over)
         op = over.pop("op")
+        tl_only = over.pop("tl_only", 0)
         dims = dict(DIFF_DIMS)
         dims.update(over)
         rng = np.random.default_rng(seed + 10 * n + 2)
@@ -2193,7 +2220,11 @@ def diffusion(exe: str, runner: list[str], seed: int = 20261130) -> dict:
             pe = cases.df_perturbation(geom, seed + 10 * n + 1)
             sh = D.df_shapes(geom)
             seeds = {s: rng.standard_normal(sh[s]) for s in D.DF_STATE}
-            blob, L = _df_record(geom, tr, pe, seeds)
+            masks = _df_masks(geom)
+            for s, m in masks.items():
+                seeds[s] = np.where(m, seeds[s], 0.0)
+                out[f"{name}/mask/{s}"] = m
+            blob, L = _df_record(geom, tr, pe, seeds, tl_only)
             expected = lambda r, g=geom, L=L: _df_expected(g, r, L)  # noqa: E731
         else:
             geom = cases.km_geometry(**dims)
@@ -2210,7 +2241,7 @@ def diffusion(exe: str, runner: list[str], seed: int = 20261130) -> dict:
                     seeds[s][..., 0] = seeds[s][..., -1] = 0.0
                 if geom.boundary_y:
                     seeds[s][..., 0, :] = seeds[s][..., -1, :] = 0.0
-            blob, L = _km_record(geom, tr, pe, seeds)
+            blob, L = _km_record(geom, tr, pe, seeds, tl_only)
             expected = lambda r, g=geom, L=L: _km_expected(g, r, L)  # noqa: E731
         with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
             fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
@@ -2224,7 +2255,8 @@ def diffusion(exe: str, runner: list[str], seed: int = 20261130) -> dict:
             for k, v in d.items():
                 out[prefix + kind + "/" + k] = v
         for k, v in expected(result).items():
-            out[prefix + "wrfplus/" + k] = v
+            if not (tl_only and not k.startswith("tl_")):
+                out[prefix + "wrfplus/" + k] = v
     return out
 
 
