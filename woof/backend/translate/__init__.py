@@ -2667,7 +2667,13 @@ class _Rewriter:
     #: THOMPSON_COLUMN_KMAX 128 and 256, and at the default 64 as well, so
     #: the tier gate covers every tier.  Out of line (size or none: the same
     #: words) the three tiers agree word for word on the same columns.
-    INLINE_POLICY_BY_KERNEL_TIER = {("thompson_column_step", "THOMPSON_COLUMN_KMAX", 64): "size"}
+    #: WSM7, WDM5 and WDM7's per-thread level arrays at their 256 tier
+    #: (28.7-39 KB frames) crash the service the same way fully inlined;
+    #: the 64/80/128 tiers build fully inlined as before.
+    INLINE_POLICY_BY_KERNEL_TIER = {("thompson_column_step", "THOMPSON_COLUMN_KMAX", 64): "size",
+                                    ("wsm7_column", "WSM7_KMAX", 256): "size",
+                                    ("wdm5_column", "WDM5_KMAX", 256): "size",
+                                    ("wdm7_column", "WDM6_KMAX", 256): "size"}
 
     def _unit_inline_policy(self) -> str:
         policy = self.INLINE_POLICY_BY_UNIT.get(self.unit.split("[", 1)[0], "")

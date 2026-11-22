@@ -1407,6 +1407,57 @@ pytest tests/test_kernel_local_bounds.py -k rrtmgp
 GPUWM_NO_LOCAL_GPU=1 pytest tests/test_preflight.py -k rrtmgp_rte_is_priced
 ```
 
+---
+
+## 12. WSM3, WSM5, WSM7, WDM5 and WDM7: the 80-level ladder extended to 256
+
+These five units still keep their level arrays per thread (one thread per
+column), sized by a compile-time tier: `WSM3_KMAX`, `WSM5_KMAX`, `WSM7_KMAX`,
+`WDM5_KMAX`, and `WDM6_KMAX` for the separate `wdm7.cu` unit. Unlike WSM6 and
+WDM6 (section 11) they were not moved onto a workspace. Their ladders ended at
+80; they are now 64 / 80 / 128 / 256, so every one admits `2 <= nz <= 256`
+(`WSM3_VERTICAL_LEVEL_BOUNDS`, `WSM5_VERTICAL_LEVEL_BOUNDS`,
+`WSM7_VERTICAL_LEVEL_BOUNDS`, `WDM5_VERTICAL_LEVEL_BOUNDS`,
+`WDM7_VERTICAL_LEVEL_BOUNDS`). The 64 and 80 tiers compile the source unchanged;
+128 and 256 are the same source at a deeper `#define`, so any column of 80
+levels or fewer produces the same words as before
+(`tests/test_wsm_wdm_256_levels_gpu.py` compares nz = 49 and 80 against the
+128 and 256 tiers bit for bit; the WRF oracle gates at the old tiers pass
+unchanged).
+
+Frames read through the production loader on an RTX A6000 (sm_86, 84 SMs,
+NVRTC 12.9.86, 2026-11-22), widest export of each unit; exactly linear in the
+tier:
+
+| unit | 64 | 80 | 128 | 256 | B/level | registers | reserved at 256 (measured) |
+|---|---|---|---|---|---|---|---|
+| `wsm3` | 5,664 | 7,072 | 11,296 | 22,560 | 88 | 123 | 2,654 MiB |
+| `wsm5` | 5,664 | 7,072 | 11,296 | 22,560 | 88 | 200 | 2,654 MiB |
+| `wsm7` | 7,200 | 8,992 | 14,368 | 28,704 | 112 | 204 | 3,410 MiB |
+| `wdm5` | 9,248 | 11,552 | 18,464 | 36,896 | 144 | 114 | 4,418 MiB |
+| `wdm7` | 9,776 | 12,208 | 19,504 | 38,960 | 152 | 128 | 4,672 MiB |
+
+The reservation is the law at the head of this document,
+`(frame - 1024) x 1536 x SMs` (2,650 / 3,408 / 4,415 / 4,666 MiB predicted for
+84 SMs), measured as in section 1 at 256 levels; at nz = 80 the same units
+reserve 748 / 984 / 1,298 / 1,380 MiB. On a 170-SM card the 256 reservation is
+about 5.3 GiB (WSM3, WSM5) to 9.2 GiB (WDM7). Register counts are the same at
+all four tiers, so the tier does not change occupancy: with 32-thread blocks
+the register-limited residency is 33 % of the SM's threads for WSM3, WDM5 and
+WDM7 and 19-21 % for WSM5 and WSM7. Preflight prices the frame per domain at
+the tier it launches (`CONDITIONAL_COLUMN_TIERED_FRAMES`, `WDM5_TIER_FRAME`,
+`WDM7_TIER_FRAME`, and `local_frame_bytes` in `woof/data/wsm_family/schemes.json`
+for WSM7, whose recorded sm_120 rows are 16 B above these readings and so remain
+the ceiling). A run that only needs 49 levels still compiles the 64 tier and is
+priced exactly as before.
+
+```
+pytest tests/test_wsm_wdm_256_levels_gpu.py
+pytest tests/test_wsm3_wrf461_column_exact.py tests/test_wsm5.py \
+       tests/test_wsm7_wrf461_column_exact.py tests/test_wdm5_wrf461_oracle.py \
+       tests/test_wdm7_wrf461_oracle.py
+```
+
 ## QNSE and BouLac to 256 levels (compile-time tier)
 
 `QNSE_KMAX` (`kernels/qnsepbl.cu`, both `qnsepbl_column` and
