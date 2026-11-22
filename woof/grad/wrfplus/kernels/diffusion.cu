@@ -339,9 +339,21 @@ extern "C" __global__ void df_tl(wreal* __restrict__ d11, wreal* __restrict__ d2
 }
 
 // AD: one thread per input word (u faces, then v faces, then ph' levels).
-// The outputs that can read a word lie within 2 columns and rows of it
-// and at the levels L-1..L+1, 0 or nz-1 (the bottom and lid extrapolations
-// read levels 0-2 and nz-2..nz-1); df_cand drops repeats.
+// The outputs that can read a word lie within one column and row of it
+// (a bounded axis's copied outer d12 face included): defor11 at (j, i)
+// reads u faces i and i+1 and ph' columns i-1..i+1 of row j only, defor22
+// the same for v and rows, defor12 u rows j-1..j at face i, v columns
+// i-1..i at face j and ph' rows and columns j-1..j, i-1..i.  A wind word
+// at level L is read at the levels L-1..L+1, by level 0 when L <= 2 (the
+// bottom extrapolation reads levels 0-2) and by level nz-1 when
+// L >= nz-2 (the lid's reads nz-2..nz-1); a ph' word at w level L by
+// levels L-1 and L.  df_cand drops repeats.  Within that window each
+// term is gathered only from the outputs that read the word (tested on
+// the output's coordinate, so a short periodic axis whose images repeat
+// still finds it): defor11 from columns i-1..i for a u face, defor22
+// from rows j-1..j for a v face; defor12 from face i (u) or j (v) and
+// the next row (u), column (v) or both (ph'), plus a bounded axis's
+// copied outer face 0 for index 1.
 extern "C" __global__ void df_ad(const wreal* __restrict__ a11, const wreal* __restrict__ a22,
                                  const wreal* __restrict__ a12, const wreal* __restrict__ u,
                                  const wreal* __restrict__ v, const wreal* __restrict__ php,
@@ -372,27 +384,41 @@ extern "C" __global__ void df_ad(const wreal* __restrict__ a11, const wreal* __r
     // a face index nx (ny) of a periodic axis is never read: its image is
     // 0, so its adjoint gains nothing.
     if ((s.which == DF_U && !bx && i == nx) || (s.which == DF_V && !by && j == ny)) return;
-    int levels[5] = {k - 1, k, k + 1, 0, nz - 1};
+    int ph = s.which == DF_PH;
+    // the lid's reads (nz-2..nz-1) already lie in k..k+1; the bottom
+    // extrapolation adds level 0 only for k == 2
+    int levels[4] = {k - 1, k, ph ? -1 : k + 1, (!ph && k == 2) ? 0 : -1};
+    // the previous and next images of i and j on their axes
+    int ip = bx ? i - 1 : df_per(i - 1, nx), inx = bx ? i + 1 : df_per(i + 1, nx);
+    int jp = by ? j - 1 : df_per(j - 1, ny), jnx = by ? j + 1 : df_per(j + 1, ny);
     wreal acc = (wreal)0;
-    for (int a = 0; a < 5; ++a) {
+    for (int a = 0; a < 4; ++a) {
         int ko = levels[a];
         if (ko < 0 || ko >= nz) continue;
         bool seen = false;
         for (int b = 0; b < a; ++b) seen = seen || levels[b] == ko;
         if (seen) continue;
-        for (int oj = -2; oj <= 2; ++oj) {
-            int jo = df_cand(j, oj, -2, ny, by);
+        for (int oj = -1; oj <= 1; ++oj) {
+            int jo = df_cand(j, oj, -1, ny, by);
             if (jo < 0) continue;
-            for (int oi = -2; oi <= 2; ++oi) {
-                int io = df_cand(i, oi, -2, nx, bx);
+            for (int oi = -1; oi <= 1; ++oi) {
+                int io = df_cand(i, oi, -1, nx, bx);
                 if (io < 0) continue;
                 size_t o = R3(ko, jo, io, ny, nx);
-                // defor11 does not read v, nor defor22 u
-                if (a11[o] != (wreal)0 && s.which != DF_V)
+                // defor11 reads no v and only row j, defor22 no u and
+                // only column i
+                if (a11[o] != (wreal)0 && s.which != DF_V && jo == j
+                    && (s.which == DF_PH || io == i || io == ip))
                     acc = acc + a11[o] * df_d11(s, ko, jo, io).d;
-                if (a22[o] != (wreal)0 && s.which != DF_U)
+                if (a22[o] != (wreal)0 && s.which != DF_U && io == i
+                    && (s.which == DF_PH || jo == j || jo == jp))
                     acc = acc + a22[o] * df_d22(s, ko, jo, io).d;
-                if (a12[o] != (wreal)0) acc = acc + a12[o] * df_d12(s, ko, jo, io).d;
+                bool x12 = io == i || (bx && i == 1 && io == 0)
+                           || (s.which != DF_U && io == inx);
+                bool y12 = jo == j || (by && j == 1 && jo == 0)
+                           || (s.which != DF_V && jo == jnx);
+                if (a12[o] != (wreal)0 && x12 && y12)
+                    acc = acc + a12[o] * df_d12(s, ko, jo, io).d;
             }
         }
     }
