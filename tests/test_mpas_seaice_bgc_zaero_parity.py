@@ -198,8 +198,8 @@ def _mismatches(names):
      "src < 1 ? atm_bc[iCell * 2 + src] : atm_dust[iCell * 4]"),
     # each tracer's own scavenging coefficient
     (_BGC_NAMES, "flux_bio_atm[m], zpar[m * ZP_N + ZP_KSCAVZ]", "flux_bio_atm[m], zpar[ZP_KSCAVZ] * (m + 1)"),
-    # the mobile phase from another tracer's fraction
-    (_BGC_NAMES, "C_top[m] = M(in_init[m][1], frac[m]);", "C_top[m] = M(in_init[m][1], frac[0]);"),
+    # another tracer's atmospheric deposition
+    (_BGC_NAMES, "A(A(zbgc_snow[m], zbgc_atm[m]), 0.0)", "A(A(zbgc_snow[m], zbgc_atm[0]), 0.0)"),
     # each tracer's ocean concentration
     (_BGC_NAMES, "ocean_conc[(size_t)iCell * nzbgc + bio_o[m]]", "ocean_conc[(size_t)iCell * nzbgc + bio_o[0]]"),
     # the new ice's mobile fractions: only the first reset

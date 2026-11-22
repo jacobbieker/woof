@@ -426,7 +426,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     subcycle but separates once a step, so an earlier subcycle's ridging of
     the tracers is lost) and `bgc_snow_new_category` (without the vertical
     thermodynamics `update_snow_bgc` divides 0/0 for a category the last
-    step opened, and `oceanBioFluxes` is NaN). The other biogeochemistry
+    step opened, and `oceanBioFluxes` is NaN). The z-aerosols
+    (`config_use_zaerosols`: two black carbons and a dust, alone or with the
+    nonreactive tracer) run in the init and `column_biogeochemistry`, word
+    for word with v8.4.2; the opt-in correction `zaero_snow_scavenging`
+    gives each its own snow scavenging, where v8.4.2 indexes the table by
+    list position and gives all three 0.03. The other stages still refuse
+    them by name. The other biogeochemistry
     flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,

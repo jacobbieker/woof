@@ -422,14 +422,6 @@
     "status": "unresolved"
    },
    {
-    "call_sha256": "1903375b469da368c16f811d01b4216ecf66a6306ce39f264c268063da21d3f8",
-    "constructor": "compile_using_nvrtc",
-    "factory": "_module_on",
-    "factory_sha256": "0c8bf660aaffb1c67103dacfbd3ce5f82be66c4e8a3eb0db54c58adc5765aa2c",
-    "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
-    "status": "unresolved"
-   },
-   {
     "call_sha256": "1cc6102acbb4ee04439b456bf568cf110e95e1cb6440a4004b3a741120bf0f25",
     "constructor": "compile_using_nvrtc",
     "factory": "load_module_no_ftz",
@@ -1100,6 +1092,14 @@
     "factory_sha256": "fb29bfa544e65890360e4bd8f89de2d56a2098a0b7c419709d595dc5886bcdec",
     "file": "woof/ensemble/batch_product_output.py",
     "status": "resolved_literal"
+   },
+   {
+    "call_sha256": "6041825ec7eaad106f7b1d547e719f64339291fd914148aeedd0a1fc7f88bd4b",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "d5a94aea8a711a715c3767b587646027a48dc76b184ce333f6146d576ca2fd35",
+    "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
+    "status": "unresolved"
    },
    {
     "call_sha256": "618725fb7921bd9e3a34a38d4539a2b9b517e37b9841dd5b8829726e56f1aa96",
@@ -5153,7 +5153,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.cu",
-    "sha256": "035ee3896b5d6ef65db3f20efa2cb467b88c41a31dab57f4fde7d269743009c5"
+    "sha256": "0940139b2284f8e915ebda9cb65280d32df743ca438d00485d1dc5a856957cb1"
    },
    {
     "file": "woof/hex/mpas_seaice/column_dedd_v842.cu",
@@ -6243,7 +6243,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
-    "sha256": "29527aa3ddc516ba9891cfc4a382ce684bd3f21a68d098a0b401cafd876dec08"
+    "sha256": "fbc489599fc40a4210aa9b8178ff90743400fa127a2e24ecb0e7326662897c48"
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.py",
@@ -6263,7 +6263,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.py",
-    "sha256": "c4494d89e7186c210735fcc067cacffcdf0c889ad18fc511c4e9d4789411cdd5"
+    "sha256": "d21934ee72f2ae900549cdb7b951a0ad5b2b3b1694b055f8e548ca05397760c9"
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",

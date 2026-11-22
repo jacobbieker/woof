@@ -1,4 +1,4 @@
-"""MPAS-Seaice v8.4.2's column biogeochemistry on the GPU: brine height, vertical salinity, nonreactive tracer.
+"""MPAS-Seaice v8.4.2's column biogeochemistry on the GPU: brine height, vertical salinity, nonreactive tracer, z-aerosols.
 
 ``column_biogeochemistry`` (``mpas_seaice_column.F:2781-3272``) and the
 column package under it (``colpkg_biogeochemistry``) with
@@ -36,8 +36,18 @@ height above ``thinS`` = ``Ra_c``); ``totalVerticalSalinity`` is summed into and
 never reset.
 
 The vertical tracers (``config_use_vertical_tracers``) are carried with the
-nonreactive tracer alone (``config_use_nonreactive``: the column package's
-PON, nbtrcr = 1, no vertical biochemistry). On ice, after the brine height,
+nonreactive tracer (``config_use_nonreactive``: the column package's PON)
+and the z-aerosols (``config_use_zaerosols``: ``nzAerosols`` = 3, black
+carbon 1 and 2 and the first dust, after it in the column package's order),
+either or both, with no vertical biochemistry. ``COL_NBTRCR`` is their
+number; each of ``z_biogeochemistry``'s phases runs over every tracer before
+the next, as v8.4.2's loops do, so its stops come in v8.4.2's order. The
+aerosols' deposition is the uncoupled build's black carbon and dust, and
+``atmosBioFluxes`` keeps only the last owned cell's: the wrapper zeroes the
+whole array on each cell's turn (``mpas_seaice_column.F:3131``). v8.4.2 gives
+every tracer ``kscavz(k)`` by its place in the list, not by its type
+(``ice_aerosol.F90:602-607``), so each takes 0.03; the opt-in correction
+``zaero_snow_scavenging`` takes the type's. On ice, after the brine height,
 ``zbio``: ``update_snow_bgc`` (the snow's two layers: evaporation, melt
 scavenging, snow ice, snowfall, the surface layer's new thickness),
 ``z_biogeochemistry`` (first ice from the ocean concentration, the shortwave
@@ -63,8 +73,8 @@ not.
 What it refuses, by name: the biogeochemistry without ``config_use_brine``
 (``colpkg_biogeochemistry`` writes the brine changes, which only the brine
 height's package allocates), every biogeochemistry flag but ``config_use_brine``
-but the vertical tracers' nonreactive tracer (the vertical and skeletal
-biochemistry and their species, the shortwave bioabsorption, the z-aerosols:
+but the vertical tracers' nonreactive tracer and z-aerosols (the vertical
+and skeletal biochemistry and their species, the shortwave bioabsorption:
 :func:`~woof.hex.mpas_seaice.column_v842.refuse_unported`), more biology
 layers than ``compute_microS_mushy``'s ``trtmp(ntrcr+2)`` holds, and more
 than 64 categories. ``exp`` is the shared glibc transcription

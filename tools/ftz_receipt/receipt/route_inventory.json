@@ -10858,7 +10858,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
-      "line": 191,
+      "line": 209,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10870,7 +10870,7 @@
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "image, _ = compile_using_nvrtc(module_source(n_ice_layers, n_bio_layers), options, None,"
+      "text": "image, _ = compile_using_nvrtc(module_source(n_ice_layers, n_bio_layers, n_bio_tracers), options, None,"
     },
     {
       "file": "woof/hex/mpas_seaice/column_itd_v842.py",
@@ -10938,7 +10938,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_v842.py",
-      "line": 898,
+      "line": 930,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
