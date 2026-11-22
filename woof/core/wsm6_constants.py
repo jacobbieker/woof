@@ -684,8 +684,8 @@ def wsm6_workspace_bytes_per_column(nz: int) -> int:
 # WSM5 (mp_physics = 4), phys/module_mp_wsm5.F.  The WSM family shares one
 # constants module: WSM5's process constants are WSM6's rain and snow
 # constants (same intercepts, fall laws and densities; no graupel), and
-# kernels/wsm5.cu compiles at the 64/80 level ladder WSM6 had before its
-# column workspace.
+# kernels/wsm5.cu compiles at the 64/80/128/256 level ladder (WSM6 had 64/80 before its
+# column workspace).
 # ---------------------------------------------------------------------------
 
 #: The float32 words ``wsm5init`` leaves in module_mp_wsm5 (WRF v4.6.1, called
@@ -721,11 +721,13 @@ WSM5_RADAR_F64: tuple[tuple[str, int], ...] = tuple(
 
 #: ``kernels/wsm5.cu``'s ``WSM5_KMAX`` ladder: the 64/80 ladder WSM6 had
 #: before its column workspace, for the same reason (one thread per column,
-#: per-thread work arrays sized by the tier).  WSM5 keeps its own literals
-#: now that WSM6's ceiling is the 256-level workspace bound.
+#: per-thread work arrays sized by the tier), extended with 128 and 256 (the
+#: dynamical core's bound).  The 64 and 80 tiers compile the unchanged
+#: source, so nz <= 80 is word-identical to the pre-extension build; the
+#: deeper tiers are priced by preflight as a deeper local frame.
 WSM5_SHALLOW_KMAX = 64
-WSM5_DEEP_KMAX = 80
-WSM5_KERNEL_LEVEL_TIERS = (WSM5_SHALLOW_KMAX, WSM5_DEEP_KMAX)
+WSM5_DEEP_KMAX = 256
+WSM5_KERNEL_LEVEL_TIERS = (WSM5_SHALLOW_KMAX, 80, 128, WSM5_DEEP_KMAX)
 #: ``(minimum, maximum)`` levels WSM5 admits: 2 (nislfv_rain_plm needs an
 #: interface above and below) up to the deepest compiled tier.
 WSM5_VERTICAL_LEVEL_BOUNDS = (2, WSM5_DEEP_KMAX)

@@ -1312,10 +1312,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   sumflux and the non-PD scalar update, and qv's boundary rows with
   flow_dep_bdy for qc and qr). The forecast path does not import any of
   it.
-  The first diffusion pieces
-  (`woof.grad.wrfplus.diffusion`, diff_opt 1 / km_opt 4) are kernels,
-  not yet in the step: the deformation (WRF `compute_diff_metrics` +
-  `cal_deform_and_div`) and `smag2d_km`'s xkmh/xkhh with the 10 * mlen
+  On a dry state the step also covers WRF's diff_opt 1 / km_opt 4
+  horizontal mixing (`woof.grad.wrfplus.diffusion`, bound into the step
+  on periodic and specified domains, word for word against
+  `dycore.step`; the moist rows are next): the deformation (WRF
+  `compute_diff_metrics` + `cal_deform_and_div`) and `smag2d_km`'s
+  xkmh/xkhh with the 10 * mlen
   cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
   `wrf_diff_opt1_km4` word for word, and they match WRFPLUS to about
   4e-16, except at the top level of a periodic seam, where WRF keeps a
@@ -1532,6 +1534,21 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   tests by name, and main's full run is periodic. Every merge to `main`
   tags, writes release notes and publishes `metal-woof` to PyPI
   ([docs/dev/ci.md](docs/dev/ci.md)).
+- **256-level columns for WSM3, WSM5, WSM7, WDM5 and WDM7.** These five
+  microphysics units (`mp_physics` 3, 4, 24, 14 and 26) keep their level
+  arrays per thread, sized by a compile-time `*_KMAX` tier, and the ladder
+  ended at 80 levels. It now has 128 and 256 tiers: a column of 80 levels or
+  fewer compiles the unchanged source (every output word is the same), a
+  deeper column compiles the same source at the next tier, and preflight
+  prices the deeper per-thread frame (WSM3 and WSM5 22,560 B, WSM7 28,720 B,
+  WDM5 36,896 B and WDM7 38,960 B at 256, against 7,000-12,000 B at 80).
+  Past 256 is refused by name. Hex runs these through the generic column
+  seam and follows the same bound. WSM6 and WDM6 already ran 256 levels on
+  a column workspace; the five here keep the per-thread arrays, so a
+  256-level run reserves several GiB of local memory on a large card
+  ([the frame table](docs/kernel_local_memory_bounds.md)). The committed hex
+  option-matrix rows for WSM3 and WSM5 still record the old 80-level
+  refusal at 149 levels until the matrix is re-run on its staged case.
 
 ### Licensing and opt-ins
 
