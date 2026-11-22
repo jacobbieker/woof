@@ -30,11 +30,13 @@ def kmax_tier(nz: int) -> int:
         f"this domain has {nz}")
 
 
-def tiered_kernel(module: str, func: str, define: str, nz: int):
+def tiered_kernel(module: str, func: str, define: str, nz: int, get_kernel):
     """``module``'s ``func`` at the tier of an ``nz``-level column: the plain
-    loader (unchanged source) up to :data:`SHIPPED_KMAX`, the ``define`` =
-    :data:`DEEP_KMAX` build above it.  CuPy is imported only here."""
-    from woof.core.kernels import get_kernel, get_kernel_int_defines
+    loader ``get_kernel`` (unchanged source) up to :data:`SHIPPED_KMAX`, the
+    ``define`` = :data:`DEEP_KMAX` build above it.  Callers pass their own
+    module-level ``get_kernel`` so a test that replaces it there still owns
+    the shipped tier.  CuPy is imported only here."""
+    from woof.core.kernels import get_kernel_int_defines
 
     tier = kmax_tier(nz)
     if tier == SHIPPED_KMAX:

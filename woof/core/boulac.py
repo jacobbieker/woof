@@ -148,7 +148,8 @@ def launch_boulac(columns: Mapping, surface: Mapping, tke, *, dt: float,
     blocks = (n + _TPB - 1) // _TPB
     # <= 128 levels compile the unchanged source; deeper columns its 256
     # tier (woof.core.pbl_level_tiers).
-    kernel = tiered_kernel("boulac", "boulac_column", "BOULAC_KMAX", nz)
+    kernel = tiered_kernel("boulac", "boulac_column", "BOULAC_KMAX", nz,
+                           get_kernel)
     kernel((blocks,), (_TPB,),
            tuple(column_arrays) + (tke,) + tuple(surface_arrays)
            + (frc, out["pblh"])

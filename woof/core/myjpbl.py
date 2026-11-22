@@ -274,7 +274,7 @@ def _qnse_kernel(func: str, nz: int):
     """``qnsepbl.cu``'s ``func`` at the ``QNSE_KMAX`` tier of an ``nz``
     column: the unchanged source up to 128 levels, its 256 tier above
     (woof.core.pbl_level_tiers)."""
-    return tiered_kernel("qnsepbl", func, "QNSE_KMAX", nz)
+    return tiered_kernel("qnsepbl", func, "QNSE_KMAX", nz, get_kernel)
 
 
 def launch_qnse_pbl(columns, surface, state, tke, outputs, *,
