@@ -721,11 +721,13 @@ WSM5_RADAR_F64: tuple[tuple[str, int], ...] = tuple(
 
 #: ``kernels/wsm5.cu``'s ``WSM5_KMAX`` ladder: the 64/80 ladder WSM6 had
 #: before its column workspace, for the same reason (one thread per column,
-#: per-thread work arrays sized by the tier).  WSM5 keeps its own literals
-#: now that WSM6's ceiling is the 256-level workspace bound.
+#: per-thread work arrays sized by the tier), extended with 128 and 256 (the
+#: dynamical core's bound).  The 64 and 80 tiers compile the unchanged
+#: source, so nz <= 80 is word-identical to the pre-extension build; the
+#: deeper tiers are priced by preflight as a deeper local frame.
 WSM5_SHALLOW_KMAX = 64
-WSM5_DEEP_KMAX = 80
-WSM5_KERNEL_LEVEL_TIERS = (WSM5_SHALLOW_KMAX, WSM5_DEEP_KMAX)
+WSM5_DEEP_KMAX = 256
+WSM5_KERNEL_LEVEL_TIERS = (WSM5_SHALLOW_KMAX, 80, 128, WSM5_DEEP_KMAX)
 #: ``(minimum, maximum)`` levels WSM5 admits: 2 (nislfv_rain_plm needs an
 #: interface above and below) up to the deepest compiled tier.
 WSM5_VERTICAL_LEVEL_BOUNDS = (2, WSM5_DEEP_KMAX)
