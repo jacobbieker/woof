@@ -17,8 +17,8 @@ import sys
 
 #: word -> (entry module, entry function, label, one-line help)
 COMPONENTS = {
-    "hex": ("woof.hex.cli", "main", "hex model (preview)",
-            "the hex (MPAS-style mesh) model, preview: woof hex --help"),
+    "hex": ("woof.hex.cli", "main", "WOOF-HEX-A engine (preview)",
+            "WOOF-HEX-A, the MPAS engine (hexagonal mesh), preview: woof hex --help"),
     # Opt-in tooling that reads finished forecasts; dispatched here so no other
     # command imports woof.grad (docs/grad.md).
     "grad": ("woof.grad.cli", "main", "observation-gradient tooling (experimental)",

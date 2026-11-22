@@ -6,6 +6,8 @@ import check_mpas_citations as c
 
 PINS = {
     # RP7 now cites the native lowest-layer pressure-thickness statement.
+    # RP8 (correct mode, mixlength 1) cites the BouLac downward length statement.
+    'bl_mynn_subroutines.F90:1327': c.CitationPin('src/core_atmosphere/physics/physics_mmm/bl_mynn_subroutines.F90', 1327, 1327, 'd6a597876c88ff414a8fa88dddf5e8a59d7be0b99c886862930ff403ac71d427', 1),
     'bl_mynn_subroutines.F90:3102': c.CitationPin('src/core_atmosphere/physics/physics_mmm/bl_mynn_subroutines.F90', 3102, 3102, '07f68e89a4b9357c6b231a5ecc0760bf19cba4f1fc983a942f58a14d42a6eca4', 1),
     'mpas_atmphys_driver_gwdo.F:735-829': c.CitationPin('src/core_atmosphere/physics/mpas_atmphys_driver_gwdo.F', 735, 829, 'f1356b16357871b94f836a8f8d9636d6ee967454df3326e8d768cf319eb0bbbb', 1),
     'mpas_atmphys_driver_gwdo.F:692-834': c.CitationPin('src/core_atmosphere/physics/mpas_atmphys_driver_gwdo.F', 692, 834, 'ef1d4f9ae5a415c44d1dfeaa749c1d281df63e65f52041e9a265681b29d9f68f', 1),
@@ -47,7 +49,7 @@ PINS = {
     'mpas_atmphys_lsm_shared.F:42-52': c.CitationPin('src/core_atmosphere/physics/mpas_atmphys_lsm_shared.F', 42, 52, 'aa111132b5ff00e18b5bcf8498c4ca779d57dce39b6e0bfa72ae0dbfa8de1cde', 1),
     # Correct mode WB5 (merge/correct-mode-2): the WSM6 rain-out statement.
     'mp_wsm6.F90:1984': c.CitationPin('src/core_atmosphere/physics/physics_mmm/mp_wsm6.F90', 1984, 1984, '77e810fe4814dce0d4aee2cdd58ad2901a040e871c830af4308749cd75ac4d0b', 1),
-    # Correct mode RP8: the unguarded qsat_blend divisions.
+    # Correct mode RP9 (fork PR 506): the unguarded qsat_blend divisions.
     'mynn_shared.F90:90-98': c.CitationPin('src/core_atmosphere/physics/physics_mmm/mynn_shared.F90', 90, 98, '9038fa9cd253afd409f26c3974ceba24c022a8aa19c7d19ad54cf23fa4c9ce3b', 1),
 }
 

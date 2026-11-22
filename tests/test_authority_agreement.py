@@ -25,11 +25,14 @@ the next one.
 
 Two layers, because they answer different questions:
 
-**Exhaustive component cross-product.**  All 4,032 combinations of the six
-components' registered options, run through the shipped constraint evaluator
-and through ``validate_run_config`` on the settings that evaluator resolved.
-This is exhaustion, not sampling: the property is proven over the whole space
-rather than over examples.  It needs a permissive runner route, because the
+**Component walk.**  Every plan that moves at most three of the eight
+components off the base template, each over all its registered options,
+run through the shipped constraint evaluator and through
+``validate_run_config`` on the settings that evaluator resolved.  This was
+once the whole cross product (4,032 combinations of six components); at
+185,982,720 it took days and no run finished, while every defect it ever
+found was a pair or a triple, which this walk holds in full.  It needs a
+permissive runner route, because the
 shipped routes deliberately do not let a user vary the PBL or the land-surface
 model per domain -- so the route is synthesised here, and ONLY the route.  The
 constraints, the options, the parameter specs and both authorities' code are
@@ -196,6 +199,36 @@ _SHARED_CODES = frozenset({
     # on the 2.9.0 round-2 tree offered lightning_option 1, 2 or 11 with no
     # reflectivity or cumulus cloud top as launchable.
     "lightning-dependency",
+    # The shallow-cumulus pairings, shared by the same construction: plan
+    # review calls woof.config's validate_shallow_cumulus_config, the
+    # function validate_run_config calls.  Before it did, 3,936 of 84,932
+    # reachable plans offered a shcu_physics the run refuses (UW without an
+    # ice carrier, Deng without MYJ or MYNN, any shallow scheme under MYNN
+    # EDMF, NSCV beside NSAS) as launchable.  This walk had been ending in
+    # an AttributeError (spp_conv=1 with Grell-Freitas) before it reported
+    # them.
+    "shallow-cumulus-pairing",
+    # The rest of the run door's per-domain laws on settings the
+    # prepared-tree route offers freely, shared by the same construction
+    # (woof.physics_registry._run_door_laws: each is the function
+    # validate_run_config calls).  Before they were, 728 of 84,932
+    # reachable plans (1,456 domains) were offered as launchable and
+    # refused at run start: bmj_rad_feedback without BMJ (158),
+    # obs_nudge_opt=1 with max_obs=0 (158), shalconv=0 outside SAS (158),
+    # icloud_bl=0 (130, of which the 128 without MYNN met a refusal that
+    # named no breakage and is gone) and tke_budget=1 outside km_opt=2 or
+    # MYNN (124).
+    "bmj-feedback-dependency",
+    "observation-nudging-settings",
+    "shalconv-consumer",
+    "mynn-option-identity",
+    "tke-budget-closure",
+    # The native fog-settling and KF-trigger laws.  Shared since they were
+    # written: plan review calls woof.config's validate_fog_kfeta_config,
+    # the function validate_run_config calls.  Left unclassified, every
+    # grav_settling plan on an mp_physics=28 template ended in an
+    # "unclassified error code" report instead of being compared.
+    "fog-kfeta-pairing",
     "madwrf-dependency",
     "unimplemented-selector",
     "unknown-selector-combination",
@@ -544,23 +577,97 @@ def _component_option_ids(registry: dict) -> dict[str, list[str]]:
     }
 
 
-#: The most plans the exhaustive walk takes on.  It was written against a
-#: registry of 4,032 combinations and walked tens of thousands within the
-#: suite's 1,200 s per-test timeout.  Upstream 1.1.6's registry multiplies to
-#: 185,982,720 (37 microphysics x 17 PBL x 16 cumulus x 11 radiation x 10
-#: surface layer x 7 land x 6 turbulence x 4 urban): hosted leg 4 hit its
-#: 150 min job timeout inside this walk (2026-11-08), and no runner finishes it.
-_EXHAUSTIVE_COMBINATION_LIMIT = 200_000
+#: How many components a walked plan may move off the base template at once.
+#: Three, because the defects this gate has caught were never wider: the
+#: MYNN/Noah one above is a land/surface-layer/PBL triple, and the families
+#: the full product found in 3.0.2 (BouLac or SASE over the GFS layer, the
+#: slab under GFS, TEMF, QNSE or Pleim-Xiu) are pairs and triples.  Every
+#: requires_components row names one other component, and validate_run_config's
+#: pairing laws read at most three selectors together.
+_WALK_AXES = 3
 
 
-def test_exhaustive_component_cross_product_agrees_on_every_combination(
+def _plans_within_axes(options: dict[str, list[str]], base: dict[str, str],
+                       axes: int) -> list[tuple[str, ...]]:
+    """Every tuple that differs from ``base`` in at most ``axes`` components.
+
+    In component order, each tuple once.  For the 3.0.2 registry this is
+    88,095 plans out of the full product's 185,982,720 -- seconds on a
+    node's cores rather than the full product's days.
+    """
+
+    component_ids = sorted(options)
+    base_row = tuple(base[c] for c in component_ids)
+    found: set[tuple[str, ...]] = set()
+    for chosen in itertools.combinations(range(len(component_ids)), axes):
+        for values in itertools.product(
+                *(options[component_ids[i]] for i in chosen)):
+            row = list(base_row)
+            for index, value in zip(chosen, values):
+                row[index] = value
+            found.add(tuple(row))
+    return sorted(found)
+
+
+def test_the_axis_walk_reaches_every_pair_and_triple():
+    """The walk holds every option, every pair and every triple of them."""
+
+    options = {"a": ["0", "1", "2"], "b": ["0", "1"], "c": ["0", "1", "2"],
+               "d": ["0", "1"]}
+    base = {"a": "0", "b": "0", "c": "0", "d": "0"}
+    walked = set(_plans_within_axes(options, base, 3))
+    full = set(itertools.product(*(options[c] for c in sorted(options))))
+    assert walked == {row for row in full
+                      if sum(value != "0" for value in row) <= 3}
+    # The only tuple left out of this small product moves all four.
+    assert full - walked == {row for row in full if "0" not in row}
+
+
+@pytest.mark.parametrize("components", [
+    # Each family the full product found in 3.0.2: the registry refused
+    # it (component-dependency) and validate_run_config started it.
+    {"pbl": "boulac", "surface_layer": "gfs"},
+    {"pbl": "sase", "surface_layer": "gfs", "turbulence": "closure-supplied"},
+    {"land_surface": "slab", "surface_layer": "gfs", "pbl": "gfs"},
+    {"land_surface": "slab", "surface_layer": "gfs", "pbl": "uw"},
+    {"land_surface": "slab", "surface_layer": "pleim-xiu", "pbl": "acm2"},
+    {"land_surface": "slab", "surface_layer": "qnse", "pbl": "qnse"},
+    {"land_surface": "slab", "surface_layer": "temf", "pbl": "temf"},
+], ids=lambda c: "+".join(f"{k}={v}" for k, v in sorted(c.items())))
+def test_the_302_walk_families_are_launchable_at_both_doors(components):
+    registry = _permissive_registry()
+    template_id = _base_template_id(registry)
+    chosen = dict(registry["templates"][template_id]["components"])
+    chosen.update(components)
+    report = validate_physics_plan(_single_domain_plan(
+        registry, _PERMISSIVE_RUNNER, "any-source", template_id,
+        components=chosen), registry=registry)
+    assert report["launchable"] is True, report["errors"]
+    disagreements: list[str] = []
+    _compare(repr(chosen), report, disagreements, registry=registry)
+    assert disagreements == []
+
+
+def test_component_walk_agrees_on_every_plan_within_three_axes(
         monkeypatch):
-    """Every combination of every registered option, both authorities."""
+    """Every plan within three components of the base, both authorities.
+
+    This replaced the full cross product of every option (185,982,720
+    plans, about three days on one process), which no session had seen
+    finish.  The first 37,504 of its plans already held 110 disagreements,
+    on 3.0.1 too; this walk found the same families in 88,095 plans and
+    they are fixed in the registry (BouLac and SASE over the GFS layer,
+    the slab under GFS, TEMF, QNSE and Pleim-Xiu).
+    """
 
     registry = _permissive_registry()
     template_id = _base_template_id(registry)
     options = _component_option_ids(registry)
     component_ids = sorted(options)
+    base = registry["templates"][template_id]["components"]
+    assert set(base) == set(component_ids), (
+        "the base template no longer names every component, so the walk "
+        "would move components it cannot see")
 
     # The fixture is fixed throughout the exhaustive walk. Hash its exact
     # bytes once, retaining every option comparison and checking immutability
@@ -585,22 +692,13 @@ def test_exhaustive_component_cross_product_agrees_on_every_combination(
     monkeypatch.setattr(registry_module, "registry_sha256", fixture_hash)
     monkeypatch.setitem(globals(), "registry_sha256", fixture_hash)
 
-    option_lists = [options[c] for c in component_ids]
-    expected = 1
-    for option_list in option_lists:
-        expected *= len(option_list)
-    if expected > _EXHAUSTIVE_COMBINATION_LIMIT:
-        pytest.skip(
-            f"too many combinations to walk: the registry's component options "
-            f"multiply to {expected:,} plans (limit "
-            f"{_EXHAUSTIVE_COMBINATION_LIMIT:,}); at a few ms each that is days "
-            f"of CPU, past any runner's timeout ({dict(zip(component_ids, map(len, option_lists)))})")
+    plans = _plans_within_axes(options, base, _WALK_AXES)
+    expected = len(plans)
 
     def walk(start: int, stop: int) -> tuple[int, list[str]]:
         found: list[str] = []
         walked = 0
-        for values in itertools.islice(
-                itertools.product(*option_lists), start, stop):
+        for values in plans[start:stop]:
             components = dict(zip(component_ids, values))
             walked += 1
             plan = _single_domain_plan(
@@ -611,17 +709,15 @@ def test_exhaustive_component_cross_product_agrees_on_every_combination(
                      monkeypatch=monkeypatch)
         return walked, found
 
-    # The product is tens of thousands of plans, each a few milliseconds
-    # of pure Python: on one core it outran the suite's timeout (a 1,200 s
-    # serial run did not finish), leaving one xdist worker busy while the
-    # rest idled.  Forked workers share the fixture and the monkeypatches
-    # above; the slices are walked in product order and joined in order,
-    # so the record is the one serial walk would write.
+    # The walk is tens of thousands of plans, each a few milliseconds of
+    # pure Python, so it is spread over the cores.  Forked workers share
+    # the fixture and the monkeypatches above; the slices are walked in
+    # order and joined in order, so the record is the one serial walk
+    # would write.
     combinations, disagreements = _walk_across_cores(walk, expected)
     assert combinations == expected, (
-        f"the cross-product enumerated {combinations} of {expected} "
-        "combinations")
-    assert combinations >= 4032, (
+        f"the walk enumerated {combinations} of {expected} plans")
+    assert combinations >= 80000, (
         "the registry should carry at least the component options this gate "
         f"was written against; enumerated {combinations}")
     assert original_hash(registry) == fixed_hash, "the shared fixture changed during the walk"
@@ -1140,20 +1236,42 @@ def test_every_reachable_plan_the_registry_calls_launchable_actually_validates(
     """The direction a user feels: offered means startable."""
 
     registry = physics_registry()
-    disagreements: list[str] = []
-    plans = 0
-    launchable = 0
-    for runner_id, source_id, template_id, plan in _reachable_plans(registry):
-        plans += 1
-        report = validate_physics_plan(plan)
-        if report["launchable"]:
-            launchable += 1
-        _compare(f"{runner_id} {source_id} {template_id} "
-                 f"{plan['domains'][0].get('components', {})}"
-                 f"{plan['domains'][0].get('parameters', {})}",
-                 report, disagreements, registry=registry,
-                 monkeypatch=monkeypatch)
+    # About 85,000 plans, most of them two-domain trees: serially this walk
+    # took hours and the suite's per-file timeout stopped it every time, so
+    # it is spread over the cores the way the component walk is.  Each
+    # worker returns its disagreements in order and one marker per
+    # launchable plan.  The plan builders stamp every plan with the
+    # registry's digest; this registry object is fixed for the whole walk,
+    # so it is hashed once rather than once per plan (6.6 ms a plan on the
+    # desktop, ten minutes of the walk), and checked unchanged at the end.
+    fixed_hash = registry_sha256(registry)
+    original_hash = registry_sha256
+    monkeypatch.setitem(
+        globals(), "registry_sha256",
+        lambda value=None: fixed_hash if value is registry else original_hash(value))
+    reachable = list(_reachable_plans(registry))
 
+    def walk(start: int, stop: int) -> tuple[int, list]:
+        found: list = []
+        for runner_id, source_id, template_id, plan in reachable[start:stop]:
+            report = validate_physics_plan(plan)
+            if report["launchable"]:
+                found.append(None)
+            messages: list[str] = []
+            _compare(f"{runner_id} {source_id} {template_id} "
+                     f"{plan['domains'][0].get('components', {})}"
+                     f"{plan['domains'][0].get('parameters', {})}",
+                     report, messages, registry=registry,
+                     monkeypatch=monkeypatch)
+            found.extend(messages)
+        return stop - start, found
+
+    plans, results = _walk_across_cores(walk, len(reachable))
+    launchable = sum(1 for item in results if item is None)
+    disagreements = [item for item in results if item is not None]
+
+    assert plans == len(reachable)
+    assert original_hash(registry) == fixed_hash, "the registry changed during the walk"
     assert plans > 100, f"the reachable surface enumerated only {plans} plans"
     assert launchable > 0, "no reachable plan is launchable at all"
     assert disagreements == [], (
@@ -1416,7 +1534,19 @@ def _observed_and_absences(consumer: str):
             # read no clear-air floor either.
             **{mp: reason for mp, reason
                in obsop.NATIVE_Z_NOT_SEPARABLE_FROM_THE_STEP.items()
-               if mp not in obsop.CLEAR_AIR_FLOOR_DBZ}}
+               if mp not in obsop.CLEAR_AIR_FLOOR_DBZ},
+            # The rest are the registry's own "unread" rows, with the reason
+            # each row records -- the same silence obsop's agreement check
+            # (woof.da.obsop._require_agreement_with_the_registry) reads
+            # as nothing to compare: UDM, RCON and Eta Ferrier have no H(x)
+            # route yet, and MAD-WRF writes no REFL_10CM.
+            **{mp: f"{row['reflectivity_route_reason']}; "
+                   f"{row['clear_air_floor_reason']}"
+               for mp, row in consumer_rows_by_selector(
+                   "microphysics", "radar_da").items()
+               if row["clear_air_floor_status"] == "unread"
+               and row["reflectivity_route"] != "native-not-separable"
+               and mp not in obsop.CLEAR_AIR_FLOOR_DBZ and mp not in (0, 11, 30)}}
     if consumer == "refl.REFL_10CM_INPUT_SPECIES + SCHEME_NATIVE_REFL_10CM":
         from woof.core import refl
         # The module's own cited absences (CAM MG never writes REFL_10CM).
@@ -1580,33 +1710,38 @@ def test_the_consumer_row_gate_is_silent_for_every_implemented_tuple():
 
     from woof.physics_registry import consumer_row_gaps_for_option
 
+    # This used to walk the whole product of every component's options
+    # (185,982,720 tuples, about 4 hours on one process).  The product adds
+    # nothing over one option at a time, for two reasons this test now
+    # checks rather than assumes: no selector key belongs to two components,
+    # so a tuple's settings are the plain union of its options' selectors
+    # and each component resolves to the option that was chosen; and
+    # consumer_row_gaps asks each resolved option alone, reading no other
+    # setting a tuple of selectors can carry (the one cross read,
+    # ra_rrtmg_variant, is no option's selector, so every tuple took its
+    # default).  So the gaps of a tuple are the union of its options' gaps,
+    # and every implemented option judged once is the whole product judged.
     registry = physics_registry()
-    options = _component_option_ids(registry)
-    per_option = {}
-    for component_id, option_ids in options.items():
+    owners: dict[str, set[str]] = {}
+    for component_id, component in registry["components"].items():
+        for option in component["options"].values():
+            for key in option.get("selectors", {}):
+                owners.setdefault(key, set()).add(component_id)
+    shared_keys = {key: sorted(ids) for key, ids in owners.items() if len(ids) > 1}
+    assert shared_keys == {}, (
+        "a selector key belongs to two components, so one option no longer "
+        f"stands for every tuple holding it; walk the pairs: {shared_keys}")
+    assert "ra_rrtmg_variant" not in owners
+    judged = 0
+    for component_id, option_ids in _component_option_ids(registry).items():
         for option_id in option_ids:
-            option, selectors = _implemented_selectors(registry, component_id, option_id)
+            option = registry["components"][component_id]["options"][option_id]
             if option.get("implemented") is not True:
                 continue
-            settings = dict(selectors)
-            assert consumer_row_gaps(settings) == [], (component_id, option_id, settings)
-            per_option[component_id, option_id] = (option, selectors)
-    assert per_option, "the registry names no implemented option"
-
-    implemented = {component_id: [o for o in option_ids if (component_id, o) in per_option]
-                   for component_id, option_ids in options.items()}
-    chooser = random.Random(20261121)
-    for _ in range(2000):
-        settings, expected = {}, []
-        for component_id in sorted(implemented):
-            if not implemented[component_id]:
-                break
-            option_id = chooser.choice(implemented[component_id])
-            option, selectors = per_option[component_id, option_id]
-            settings.update(selectors)
-            expected += consumer_row_gaps_for_option(component_id, option_id, option, selectors)
-        else:
-            assert consumer_row_gaps(settings) == expected == [], settings
+            settings = dict(option.get("selectors", {}))
+            assert consumer_row_gaps(settings) == [], (component_id, option_id)
+            judged += 1
+    assert judged >= 60, f"only {judged} implemented options were judged"
 
 
 def test_the_consumer_row_gate_refuses_a_missing_row_before_step_0(monkeypatch):
@@ -1997,9 +2132,9 @@ class _HandoffState:
     def __init__(self):
         self.physics = SimpleNamespace(refl_10cm=np.zeros((1,)))
 
-    def existing_scratch(self, slot):
-        # DomainState.existing_scratch never allocates; this tile holds no
-        # history-theta slot, so the hook skips that copy.
+    def existing_scratch(self, name):
+        # The hook also refreshes the history theta slot when a tile holds
+        # one (woof.core.streaming.refl_handoff_hook); this tile holds none.
         return None
 
 

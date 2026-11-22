@@ -129,6 +129,34 @@ impl Timestamp {
         )))
     }
 
+    /// The valid time of a history file: the stamp in its name, or, for a
+    /// file named without one (an MPAS `init.nc`, a start drawn as frame 0),
+    /// the first `xtime` record the file itself carries. Refuses by name only
+    /// when neither holds a stamp.
+    pub fn of_history_file(history_path: &Path) -> MpasResult<Timestamp> {
+        let name = history_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        let by_name = match Timestamp::parse(name) {
+            Ok(stamp) => return Ok(stamp),
+            Err(e) => e,
+        };
+        let xtime = netcrust::File::open(history_path)
+            .ok()
+            .and_then(|f| f.read_strings("xtime").ok())
+            .and_then(|v| v.into_iter().next())
+            .map(|s| s.trim().trim_end_matches('\0').to_string());
+        match xtime.as_deref().map(Timestamp::parse) {
+            Some(Ok(stamp)) => Ok(stamp),
+            _ => Err(MpasError::Refusal(format!(
+                "{by_name}, and the file carries no parseable xtime ({}), so the frame has no \
+                 valid time",
+                xtime.as_deref().unwrap_or("absent")
+            ))),
+        }
+    }
+
     fn parse_exact(s: &str) -> Option<Timestamp> {
         let b: Vec<char> = s.chars().collect();
         if b.len() != 19 {
@@ -962,12 +990,7 @@ fn read_history_body(
 
     let resolved_time = match valid_time {
         Some(t) => t,
-        None => Timestamp::parse(
-            history_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default(),
-        )?,
+        None => Timestamp::of_history_file(history_path)?,
     };
 
     let deg = 180.0 / std::f64::consts::PI;
@@ -1331,12 +1354,7 @@ pub fn read_history_cells_on_mesh(
     }
     let resolved_time = match valid_time {
         Some(t) => t,
-        None => Timestamp::parse(
-            history_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default(),
-        )?,
+        None => Timestamp::of_history_file(history_path)?,
     };
     Ok(MpasFrame {
         history_path: history_path.to_path_buf(),
@@ -1499,6 +1517,14 @@ mod tests {
     fn a_name_without_a_stamp_is_refused() {
         let err = Timestamp::parse("history.nc").unwrap_err().to_string();
         assert!(err.contains("no YYYY-MM-DD"), "{err}");
+        // A file named without a stamp falls back to its own xtime; a file
+        // with neither is still refused by name, saying both were looked at.
+        let none = Timestamp::of_history_file(Path::new("/nonexistent/init.nc"))
+            .unwrap_err()
+            .to_string();
+        assert!(none.contains("no YYYY-MM-DD") && none.contains("no parseable xtime"), "{none}");
+        let named = Timestamp::of_history_file(Path::new("/x/history.2026-08-10_13.00.00.nc")).unwrap();
+        assert_eq!(named, Timestamp::parse("2026-08-10_13:00:00").unwrap());
     }
 
     #[test]

@@ -258,11 +258,16 @@ _BOUND_TIME_ALIGNMENTS = frozenset({
 #: the primary extent (every primary coordinate within half a donor spacing
 #: of a donor coordinate) and both grids must be regular, or the binding
 #: refuses by name.
+#: ``exact_coordinate_subset_or_bilinear_mask_aware_nearest`` is the exact
+#: subset when the donor publishes every primary point and the native regrid
+#: (with a one-donor-step edge allowance) when it does not: two ERA5 files
+#: from two CDS services can sit on lattices shifted by part of a cell.
 _GRID_EXACT_SUBSET = "exact_coordinate_subset"
 _GRID_NEAREST_INDEX = "nearest_coordinate_index"
+_EXACT_OR_REGRID = "exact_coordinate_subset_or_bilinear_mask_aware_nearest"
 _BOUND_GRID_ALIGNMENTS = frozenset({
     _GRID_EXACT_SUBSET, "exact_coordinate_strided_subset", "nearest_coordinate",
-    "bilinear_mask_aware_nearest", _GRID_NEAREST_INDEX,
+    "bilinear_mask_aware_nearest", _GRID_NEAREST_INDEX, _EXACT_OR_REGRID,
 })
 
 #: Relative tolerance on a regular axis's spacing and on the half-spacing
@@ -1370,6 +1375,15 @@ def _binding_subset_indices(
             allow_strided=allow_strided,
         )
     except ValueError as error:
+        if grid_alignment == _EXACT_OR_REGRID:
+            # The regrid half of this alignment is the native engine's
+            # (regrid.rs); the reference composes only the exact half.
+            raise ValueError(
+                f"contributing source binding {binding_name!r} is cross-grid "
+                f"({error}); its composition declares {_EXACT_OR_REGRID!r}, "
+                "whose horizontal regrid runs in the native mapped engine "
+                "only -- run the preparation with the native engine"
+            ) from error
         raise ValueError(
             f"contributing source binding {binding_name!r} is cross-grid "
             f"({error}); borrowing a field across grids requires a "
