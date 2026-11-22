@@ -184,7 +184,8 @@ def test_the_chem_block_is_appended_after_every_older_field():
             "spacewx_ionosphere_maps", "spacewx_aurora_opt",
             "spacewx_kp_source", "solar_ssi_opt", "solar_ssi_source",
             "spacewx_epp_opt", "spacewx_epp_source", "urban_param_file",
-            "ysu_surface_heat_exner"]
+            "ysu_surface_heat_exner", "woof_quirk_corrections",
+            "mynn_sfclay_psih_zolzt"]
     assert names[-len(tail):] == tail
     names = names[:-len(tail)]
     # Appended last after the campaign, keyword-only: sea ice's real.exe

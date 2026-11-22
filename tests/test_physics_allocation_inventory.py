@@ -1838,7 +1838,10 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_radm2_emiss.py'] = {}
 # input pack, the per-batch workspaces (BATCH = 2048 columns, about 0.6 MB a
 # column at 45 levels), the (photolysis, nz, ny, nx) output and the per-batch
 # fatal words, per call.
-_PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_ftuv.py'] = {'_state': 6, 'launch_ftuv': 5}
+# step's one site (abe0a13ec, clean-room SORGAM optics) is the twelve contiguous
+# (nz, ny, nx) per-bin planes of tauaer/waer/gaer, fed to launch_ftuv when
+# aer_ra_feedback = 1 under RADM2SORG; nothing is allocated otherwise.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_ftuv.py'] = {'_state': 6, 'launch_ftuv': 5, 'step': 1}
 # SORGAM: the one-word fatal flag of the column and the cold-start launches,
 # and the callers-may-supply outputs (38 (ny, nx) deposition planes; the four
 # (nz, ny, nx) PM planes) that are built only when the caller hands none.
@@ -1855,6 +1858,10 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_activation.py'] = {
 # class-volume stack (18, ncell); bounded by memory_shapes' 28 + 91 planes.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_modal_optics.py'] = {
     'launch_modal_optics': 4, 'sorgam_volumes': 1}
+
+# PBL level-tier dispatch (994631b1f, 8ec080e83): picks and prices a kernel tier
+# and allocates nothing.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/pbl_level_tiers.py'] = {}
 
 def test_no_physics_gpu_module_allocates_outside_its_workspace():
     """The property, not the instance: scan every physics GPU module.
@@ -2115,8 +2122,11 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/lightning.py']['launch_lightning'] = 3
 # adds one uint32 and n booleans, pre adds one n-vector, thermal adds
 # n*len(BATS_PARAMETER_NAMES) and n*3, water adds fixed input/output strides.
 # The separate structural batch-bound test continues to check every site.
-_PHYSICS_ALLOCATION_INVENTORY['woof/core/noahmp_sflx_post_slab.py']['_raise_for_status'] = 2
-_PHYSICS_ALLOCATION_INVENTORY['woof/core/noahmp_sflx_pre_slab.py']['evaluate_sflx_pre_slab'] = 10
+# 33927e20a carved the status flag and the phenology/precipitation output
+# planes out of one allocation (and one launch per deferred status word):
+# _raise_for_status 2 -> 1, evaluate_sflx_pre_slab 10 -> 7.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/noahmp_sflx_post_slab.py']['_raise_for_status'] = 1
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/noahmp_sflx_pre_slab.py']['evaluate_sflx_pre_slab'] = 7
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/noahmp_thermal_slab.py']['evaluate_radiation_slab'] = 3
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/noahmp_water_slab.py']['evaluate_water_slab'] = 8
 # Shape-enabled NSSL packs seven full-level sedimentation lanes, allocated

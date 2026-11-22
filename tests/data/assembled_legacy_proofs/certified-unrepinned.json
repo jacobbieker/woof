@@ -1,0 +1,11 @@
+{
+ "schema": "assembled-certified-unrepinned-v1",
+ "modules": {
+  "smag2d": {
+   "pin": "7dec200c373ce4a01684df3dca4d3797b511bba4c50c0c71465f979a2fb380a2",
+   "current": "31b03d4dae7e29b0aa327c2b7d016f18d8eb5a47e0449f2896bfcb2d5efb5d0e",
+   "staled_by": "aff34e2de4c5b4fd469bacff38a499bc35ddcd39",
+   "reason": "smag multi-row scalar launches (aff34e2de), then the stored deformation hats (1e80206be) and the GPUWM_SMAG_STORED_HAT module (bf9c3c5da) moved the composed smag2d source; no Blackwell card is available to replay the sealed words at it"
+  }
+ }
+}

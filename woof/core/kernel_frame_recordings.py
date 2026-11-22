@@ -795,7 +795,9 @@ SM86_NVRTC_13_4_92 = KernelFrameRecording(
         # are 4096 B, this build's mp_physics = 10 morrison reading; the
         # preflight prices them through the "morrison" row, which the
         # mp_physics = 40 module list carries.
-        'morrison_aero': 0,
+        # Re-read 2026-11-22 through load_module (the module now declares its own
+        # morrison_aero_process kernel): 3,104 B, matching the other recordings.
+        'morrison_aero': 3104,
     }),
 )
 
@@ -1202,7 +1204,12 @@ PHYSICS_PARAMS_MEASURED_SOURCE_SHA256 = (
 # (pd_fluxes, pd_renorm_apply, pd_vertical_sl, upper_wind_limiter).
 # Previously 929291a5 and d5ae17c0.
 DYCORE_FRAME_MEASURED_SOURCE_SHA256 = MappingProxyType({
-    "pd_vertical_sl": "dad6c8c0d6c5bf32a602d324c88685dd788faedfe2a44368df32623782cd9733",
+    # pd_vertical_sl's composed source moved after the sm_120 reading
+    # (dad6c8c0...); re-read 2026-11-22 on the RTX A6000 (sm_86, NVRTC
+    # 13.4.92, CuPy 14.2.0), both GPUWM_WRF_EXACT modes: 0 B on pd_fluxes,
+    # pd_renorm_apply and pd_vertical_sl.  The sm_120 card was not available
+    # to re-read it; the recorded frame stays 0 B.
+    "pd_vertical_sl": "c66b49f1baa3411bcb736473b11cdb5e447dcff43f8a2b639e7f80a1ec515e07",
     "upper_wind_limiter": "8b3208d53826688a69566b1bbe71a5ffa6a492b918d0bf77d9e59c9077f40286",
 })
 
@@ -4301,6 +4308,28 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
     measured="2026-11-08", complete=False,
     frames=MappingProxyType({"chem_sorgam": 672}),
+),)
+
+# chem_activation, chem_ftuv, chem_modal_optics and chem_radm2_emiss, production
+# loader (woof.core.kernels.module_source/module_options) on the RTX A6000
+# workstation, sm_86 NVRTC 13.4.92 (CuPy 14.2.0), 2026-11-22, both
+# GPUWM_WRF_EXACT modes (identical text and options): driver local-size
+# attribute, maximum over each module's __global__ entries (chem_ftuv 288 B
+# for chem_ftuv, 0 B for chem_ftuv_init).  Attributes only.
+# vortex_init (tc.vortex.frame_module, the production loader) reads 80 B here,
+# 40 B on the sm_120 reading above; snow_papers reads 1,136 B, as recorded.
+_CHEM_A6000_FRAMES = {"chem_activation": 384, "chem_ftuv": 288,
+                      "chem_modal_optics": 96, "chem_radm2_emiss": 0,
+                      "vortex_init": 80}
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if row.complete and not set(_CHEM_A6000_FRAMES) <= set(row.frames) else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="rtx-a6000-workstation", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
+    measured="2026-11-22", complete=False,
+    frames=MappingProxyType(_CHEM_A6000_FRAMES),
 ),)
 
 # The climatological ionosphere (kernels/spacewx_ionosphere.cu, the

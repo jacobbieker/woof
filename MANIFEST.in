@@ -155,6 +155,7 @@ include docs/lake-state-initialization.md docs/lakes.md docs/ruc-mosaic-and-clm-
 include docs/coupling/WRF-HYDRO-NEMO.md
 include docs/grad.md docs/dev/DIFFERENTIABLE-HYBRID-PLAN.md
 include docs/dev/WRFDA-3DVAR-PLAN.md docs/nn-physics.md docs/spacewx.md
+include docs/dev/P3A-WRF-DRYCORE-ADJOINT.md docs/satellite-imagers.md docs/var.md
 recursive-include docs/manual *.md
 recursive-include docs/integration-kit *.md *.json *.py
 

@@ -152,6 +152,46 @@
    {
     "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
     "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "00f32e5a356f1065661f3be621c474782cb05fffeec3f7404ad9c6ef8450bde7",
+    "file": "woof/grad/wrfplus/advect.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "97f343d886ef6c6ff50ffde8cecdbc4b75124991f1801d71485c80c2d21b87b2",
+    "file": "woof/grad/wrfplus/lbc.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "cdf9b77cdea0bc43bbfeeb8fad69162404665f23a669f827c7c11db5069507b8",
+    "file": "woof/grad/wrfplus/acoustic.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "f389f321dcc36680926bb13567f1aa3426f823a598ced0ee3e319650c1ce97f7",
+    "file": "woof/grad/wrfplus/stage.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "f4ddf35b946644c9d62f3ab15c133f95ce313c0ecc20b1edf01e085403473ebe",
+    "file": "woof/grad/wrfplus/bigstep.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
     "factory": "_diagnostic_module",
     "factory_sha256": "310053f4c9cf92713a4e49628be948659fbbbe0e05636433e739115ab8ecacbd",
     "file": "woof/verify/smallstep_vertical_oracle.py",
@@ -342,22 +382,6 @@
     "status": "unresolved"
    },
    {
-    "call_sha256": "1242c075373bd96f466da0715ad327e28df978e59a7efe988f2dbda632251b48",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "factory_sha256": "015c503fa88441b16a67efe137fc68422b75ac95e0b99c13d5cb4190c915a897",
-    "file": "woof/grad/wrfplus/bigstep.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "1242c075373bd96f466da0715ad327e28df978e59a7efe988f2dbda632251b48",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "factory_sha256": "dc15c65c64924ca610c168308193f161263fc025f51758964edbb993954c718c",
-    "file": "woof/grad/wrfplus/lbc.py",
-    "status": "unresolved"
-   },
-   {
     "call_sha256": "128448711859c3c6e1ccb0c6d6b8781bd54ca6f90e9f6bdc098674f62386b13f",
     "constructor": "RawKernel",
     "factory": "_validation_batch_kernel",
@@ -483,14 +507,6 @@
     "factory": "_kernels_on",
     "factory_sha256": "216e2946fdccdaaddec76e41730004660d0487b52d903186e30e2324787bc58c",
     "file": "woof/hex/mpasphys/oml_v842.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "265dadb152e6a11c49eeafa30d93d879a0d7db76abc0803464b47fc74a3c1308",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "factory_sha256": "7a94ad488364e7a73bfc1ac734309d4e9a03b8c0465a40b757c561b0068f789e",
-    "file": "woof/grad/wrfplus/advect.py",
     "status": "unresolved"
    },
    {
@@ -899,14 +915,6 @@
     "factory": "_nonzero",
     "factory_sha256": "19b1b3b8735e0f5404a0ccde5905471dc797dffdfd943bbea298621eb951e965",
     "file": "woof/core/mynn_pbl_gpu.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "4dff38cbd996fee405f52a00256ed3385ccfcdbcb94ef678f6fc574fdfce34b4",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "factory_sha256": "e42471d378d16a5b6d78df905fa4c3eb290b9836dc3265998bb117faf0811573",
-    "file": "woof/grad/wrfplus/acoustic.py",
     "status": "unresolved"
    },
    {
@@ -2011,14 +2019,6 @@
     "factory": "_subnormal_arith",
     "factory_sha256": "be6e3b0f3687e7742865d9e4f8f3b50bba78e094460302e4f8f78f668bf60581",
     "file": "woof/backend/facade/_ops.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "b52139ec7aa9bd860f5cd1623fed541cbedd8f69729ded5426d74d7a645a1b26",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "factory_sha256": "169bc11ed92377e6185f7733c89521519f6b97551eebf58c8e43edc8c6c684f3",
-    "file": "woof/grad/wrfplus/stage.py",
     "status": "unresolved"
    },
    {
@@ -5487,7 +5487,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "269202188291cfecf90bd35276d6247edc1ae9983c6c8c5e0ddabd1a099d619e"
+    "sha256": "b1bc508743d038f38aff2a6581e4c51f895f52f40ea58384008f93e7a703a4df"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5611,7 +5611,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "e1768b37878c2ce4e0c2cb48e4c3e4d62b7ed6b3d4b8727644375436adb7dfa9"
+    "sha256": "eeba86679dfd223f73afe5483e08e24bf84fa806658e0695be0721c52b945e1a"
    },
    {
     "file": "woof/core/refl.py",
@@ -5867,23 +5867,23 @@
    },
    {
     "file": "woof/grad/wrfplus/acoustic.py",
-    "sha256": "071685089a99ce27c2f090f00121945a6bdd1742a3c575a733b60643d9a1be80"
+    "sha256": "c7d89311932d18241876fd3bc071f4b48f7384e69614e22eca19690a77ad65db"
    },
    {
     "file": "woof/grad/wrfplus/advect.py",
-    "sha256": "9b52d13c2053b6b4a680f0603113c92358e762bb78d7d1b9b9d8fa135e47afe9"
+    "sha256": "b5df5938c4f0e7db139343ddd11961c2883cfe91381b32e48e3d9cc7889dde37"
    },
    {
     "file": "woof/grad/wrfplus/bigstep.py",
-    "sha256": "67c6e72c2a532f42e552e406c151acc5dda75eb99b274c64d5bc6c0affe06777"
+    "sha256": "de9a8e36a65755085e533151869dfebfe2079896de0c815515a9ded71d531bf7"
    },
    {
     "file": "woof/grad/wrfplus/lbc.py",
-    "sha256": "227b5dbbdda6dc32a2b121b30bb99cfd77a82d63b244da3542604e18beec8045"
+    "sha256": "239c5029b70cc14982970d9004e41f0b1facffdd4ffce97ca0c2d649681c0b08"
    },
    {
     "file": "woof/grad/wrfplus/stage.py",
-    "sha256": "c14c6dae3f02d0ff4923851a77048f25d3f30993b249262fe9294a0c67b83bf1"
+    "sha256": "51233507c9490df50135bc3781f80e59e547ce9316dad73e7d03d2b84db66587"
    },
    {
     "file": "woof/hex/coupled/flux_atmocn_e3sm.py",
@@ -6807,7 +6807,7 @@
    },
    {
     "file": "woof/tc/vortex.py",
-    "sha256": "7207f8709e55766dd9ba8bade5dfb9a0a6053199aaaa0c8340885f97557fd65f"
+    "sha256": "8ad76c1ba43cfbef429fc42c2d3864989ee8e9f39a8049a78bdfa503bb0b1297"
    },
    {
     "file": "woof/tc_accumulator.py",
@@ -31383,53 +31383,6 @@
    },
    "source_sha256": "3d338be1f544eab513d0a75e2f6759c32e7666c0d1790713b6e83f3cfffd1773"
   },
-  "spp:mynn_surface[capacity=40]": {
-   "assessment": "static_diagnostic_only",
-   "coverage": "compiled",
-   "dataflow_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "errors": {},
-   "native_dataflow_differences": {
-    "sha256": "df129a738b441097dba4ff4d83bb4cdb29ec98f942a58cf80f914d22daaab612",
-    "sites": {
-     "100": 549
-    }
-   },
-   "native_differences": {
-    "sha256": "c15c901fd1717c955a097e98a40bd12a46a86dade723cf575834d5f99be6870a",
-    "sites": {
-     "100": 632
-    }
-   },
-   "native_errors": {},
-   "options": {
-    "100": [
-     "-std=c++17",
-     "-ftz=true",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_100"
-    ],
-    "120": [
-     "-std=c++17",
-     "-ftz=true",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ]
-   },
-   "source_sha256": "b2745d3f2bcf8eee60ac158316f2c9fd01386d6e90f07382302662dc74e9f6ab"
-  },
   "spp:mynn_surface[capacity=40,MYNN_SL_PSIH_ZOLZT=1]": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
@@ -31476,6 +31429,53 @@
     ]
    },
    "source_sha256": "8f3ebf378093a4773083454163370bcdada40a8fbfd6971c58cfdddac537a6ac"
+  },
+  "spp:mynn_surface[capacity=40]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "df129a738b441097dba4ff4d83bb4cdb29ec98f942a58cf80f914d22daaab612",
+    "sites": {
+     "100": 549
+    }
+   },
+   "native_differences": {
+    "sha256": "c15c901fd1717c955a097e98a40bd12a46a86dade723cf575834d5f99be6870a",
+    "sites": {
+     "100": 632
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "b2745d3f2bcf8eee60ac158316f2c9fd01386d6e90f07382302662dc74e9f6ab"
   }
  }
 }

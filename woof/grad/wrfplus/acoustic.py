@@ -87,10 +87,14 @@ def _module(unit: str, real: str, defines: tuple = ()):
 def _device_module(unit: str, real: str, device: int, defines: tuple = (),
                    build: tuple = ()):
     import cupy as cp
+    from woof.certify.kernel_manifest import record_module
     source = (KERNELS / f"{unit}.cu").read_text(encoding="utf-8")
-    return cp.RawModule(code=source,
-                        options=("--fmad=false", f"-DWRFPLUS_REAL={real}")
-                        + tuple(f"-D{k}={v}" for k, v in defines) + build)
+    options = (("--fmad=false", f"-DWRFPLUS_REAL={real}")
+               + tuple(f"-D{k}={v}" for k, v in defines) + build)
+    module = cp.RawModule(code=source, options=options)
+    record_module("woof.grad.wrfplus.acoustic:" + unit, source=source,
+                  options=options, module=module)
+    return module
 
 
 def _kernel(unit: str, name: str, dtype, defines: tuple = ()):

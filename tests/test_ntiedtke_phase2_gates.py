@@ -520,7 +520,21 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
              "radtran_mol_abs_param": "reptran coarse",
              "radtran_solver": "disort", "radtran_streams": 0,
              "radtran_pseudospherical": False, "radtran_aerosol": "none",
-             **MULTI_PERTURB_RUN_DEFAULTS}
+             **MULTI_PERTURB_RUN_DEFAULTS,
+             # Fork keys appended since, each default-off and absent from the
+             # identity at its default (the same document rule).
+             "gf_deep_rain_evaporation_booking": False, "solar_tsi_opt": 0,
+             "solar_tsi_source": "", "solar_tsi_mode": "absolute",
+             "obstacle_opt": 0, "obstacle_file": "",
+             "obstacle_solid_fraction": 0.5, "obstacle_relax_factor": 10.0,
+             "obstacle_drag_coefficient": 0.4, "obstacle_wall_z0": 0.01,
+             "spacewx_ionosphere_opt": 0, "spacewx_f107_source": "",
+             "spacewx_f107_mode": "81day", "spacewx_ionosphere_maps": "ccir",
+             "spacewx_aurora_opt": 0, "spacewx_kp_source": "",
+             "solar_ssi_opt": 0, "solar_ssi_source": "",
+             "spacewx_epp_opt": 0, "spacewx_epp_source": "",
+             "urban_param_file": "", "ysu_surface_heat_exner": False,
+             "woof_quirk_corrections": "none", "mynn_sfclay_psih_zolzt": False}
     for name, default in later.items():
         assert expected_run.pop(name) == default, name
     # 2.9.7 tc/nest: the fixed-frame archive is read only on a nested domain;

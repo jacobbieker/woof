@@ -65,6 +65,13 @@ def _module(device):
         return _compile_loaded_module(source, ("-std=c++17", "--ftz=false"), "snow_papers")
 
 
+def frame_module():
+    """``(module, source)`` for the frame reading (preflight's production-unit list)."""
+    import cupy as cp
+    source = (Path(__file__).with_name("kernels")/"snow_papers.cu").read_text()
+    return _module(cp.cuda.Device().id), source
+
+
 def evaluate(inputs, ist, *, carbon=None, layers=None, state=None, options=None,
              glacier=None, ice_layers=None, air_temperature=None,
              return_state=False, return_fluxes=False):
