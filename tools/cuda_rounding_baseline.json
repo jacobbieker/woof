@@ -18057,7 +18057,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "156132995e849e2fcdd8ee89e0a8c43d81198cf44ea54fef6058046ab47e50fd"
+   "source_sha256": "31a67aeb18faaa6bd37d4df7b09b65016373a70668f09230a13e7ddba82d4e0f"
   },
   "kernels:mskf_aerosol_replay": {
    "assessment": "static_diagnostic_only",
