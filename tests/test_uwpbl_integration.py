@@ -157,5 +157,5 @@ def test_default_off_allocates_nothing_and_reaches_no_seam():
     # presence.
     assert source.count('"uw_cldfra" in self.fields') == 1
     farms = (ROOT / "woof/core/farms.py").read_text(encoding="utf-8")
-    assert farms.count("'uw_cldfra' in driver.fields") == 1
+    assert farms.count("'uw_cldfra' in driver.fields") == 3
     assert source.count("UWPBL_HELD_3D") == 2  # import + guarded allocation
