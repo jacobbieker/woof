@@ -216,3 +216,14 @@ def test_the_config_admits_256_layers_and_refuses_257():
         assert "GSFC" not in str(error), error
     with pytest.raises(ConfigurationRefused, match="GSFC shortwave requires 2 to 256"):
         validate_run_config(cfg(DEEP + 1))
+
+
+@pytest.mark.parametrize("nz,words", [(49, 32677), (128, 32677), (129, 62885), (256, 62885)])
+def test_preflight_prices_the_arena_at_the_tier_it_launches(nz, words):
+    from woof.config import RunConfig
+    from woof.core.preflight import physics_array_shapes
+
+    cfg = RunConfig(nx=8, ny=8, nz=nz, dx=1000.0, dy=1000.0, ztop=30000.0,
+                    dt=1.0, run_seconds=10.0, ra_physics=0, ra_lw_physics=0,
+                    ra_sw_physics=2)
+    assert physics_array_shapes(cfg)["radiation/gsfc_workspace"] == (32, words)
