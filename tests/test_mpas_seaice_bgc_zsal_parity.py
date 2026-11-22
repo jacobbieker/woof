@@ -231,7 +231,7 @@ def test_gpu_matches_the_oracle_word_for_word(glibc239, which):
 def _mutated(monkeypatch, module, original, mutated):
     source = module.module_source
     assert source(7, 7).count(original) == 1
-    monkeypatch.setattr(module, "module_source", lambda nil, nbl: source(nil, nbl).replace(original, mutated))
+    monkeypatch.setattr(module, "module_source", lambda *a: source(*a).replace(original, mutated))
     module._module_on.cache_clear()
 
 

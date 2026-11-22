@@ -156,7 +156,7 @@ class CriticalAbort(MpasPortError):
 
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the brine height's port does not carry."""
-    cv.refuse_unported(configs, dims, biogeochemistry=True, z_tracers=True)
+    cv.refuse_unported(configs, dims, biogeochemistry=True, z_tracers=cv.VT_INIT_PORTED)
     if configs["config_use_column_biogeochemistry"] and not configs["config_use_brine"]:
         cv._refuse("config_use_brine", False,
                    "colpkg_biogeochemistry writes brineTopChange and brineBottomChange, which only the brine "
@@ -169,11 +169,19 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         cv._refuse("woof_v842_corrections", SNOW_NEW_CATEGORY,
                    "update_snow_bgc (the correction's routine) runs only with the vertical tracers",
                    "config_use_vertical_tracers = .true., or no bgc_snow_new_category")
+    if cv.ZAERO_KSCAVZ in cv.corrections(configs) and not (cv.vertical_tracers(configs)
+                                                            and configs[cv.ZAERO_FLAG]):
+        cv._refuse("woof_v842_corrections", cv.ZAERO_KSCAVZ,
+                   "the correction changes only the z-aerosols' scavenging coefficients",
+                   "config_use_zaerosols = .true. with the vertical tracers, or no zaero_snow_scavenging")
 
 
-def module_source(n_ice_layers: int, n_bio_layers: int) -> str:
+def module_source(n_ice_layers: int, n_bio_layers: int, n_bio_tracers: int = 1) -> str:
+    """The kernel's source for these layers and ``n_bio_tracers`` vertical
+    tracers (nbtrcr; 1 without them)."""
     body = files("woof.hex.mpas_seaice").joinpath("column_bgc_v842.cu").read_text(encoding="utf-8")
     return (f"#define COL_NILYR {int(n_ice_layers)}\n#define COL_NBLYR {int(n_bio_layers)}\n"
+            f"#define COL_NBTRCR {max(int(n_bio_tracers), 1)}\n"
             + cv.module_source() + "\n" + zbgc_shared_source() + "\n" + body)
 
 
@@ -184,22 +192,23 @@ def zbgc_shared_source() -> str:
 
 
 @lru_cache(maxsize=None)
-def _module_on(device: int, options: tuple[str, ...], n_ice_layers: int, n_bio_layers: int):
+def _module_on(device: int, options: tuple[str, ...], n_ice_layers: int, n_bio_layers: int, n_bio_tracers: int):
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
-    image, _ = compile_using_nvrtc(module_source(n_ice_layers, n_bio_layers), options, None,
-                                   f"seaice_column_bgc_v842_l{n_ice_layers}_b{n_bio_layers}.cu")
+    image, _ = compile_using_nvrtc(module_source(n_ice_layers, n_bio_layers, n_bio_tracers), options, None,
+                                   f"seaice_column_bgc_v842_l{n_ice_layers}_b{n_bio_layers}_t{n_bio_tracers}.cu")
     with cp.cuda.Device(device):
         module = cp.cuda.function.Module()
         module.load(image.encode() if isinstance(image, str) else image)
     return module
 
 
-def _function(name: str, n_ice_layers: int, n_bio_layers: int):
+def _function(name: str, n_ice_layers: int, n_bio_layers: int, n_bio_tracers: int = 1):
     import cupy as cp
     options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
-    return _module_on(cp.cuda.Device().id, options, n_ice_layers, n_bio_layers).get_function(name)
+    return _module_on(cp.cuda.Device().id, options, n_ice_layers, n_bio_layers,
+                      max(int(n_bio_tracers), 1)).get_function(name)
 
 
 def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, None, None]:
@@ -225,6 +234,7 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
     snow_new_category = SNOW_NEW_CATEGORY in cv.corrections(configs)
     flags = int(tr_brine) | int(solve_zsal) << 1 | int(z_tracers) << 2 | int(snow_new_category) << 3
     status = cp.zeros(max(n_solve, 1), np.int32)
+    ztr_args, conc = _z_tracer_args(pools, configs, state)
     if solve_zsal:
         zsal = need(t, "verticalSalinity", (n_cells + 1, ncat, nbl))
     else:
@@ -257,12 +267,23 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
         np.float64(configs["config_zsalinity_molecular_sublayer"]), need(t, "surfaceTemperature", cat1), zsal,
         need(bgc, "bioPermeability", (n_cells + 1, ncat, nbl + 1)), need(bgc, "totalVerticalSalinity", c1),
         need(bgc, "zSalinityFlux", c1), need(bgc, "zSalinityGDFlux", c1),
-        *_z_tracer_args(pools, configs, state),
+        *ztr_args,
     )
     if n_solve:
-        # atmosBioFluxes(:,:) = 0 on the first cell's turn: the whole array
-        cv._fill(need(bgc, "atmosBioFluxes", (n_cells + 1, d["nZBGCTracers"])), 0.0)
-        _function("seaice_column_biogeochemistry_v842", nil, nbl)(((n_solve + _BLOCK - 1) // _BLOCK,), (_BLOCK,), args)
+        # atmosBioFluxes(:,:) = 0 on each cell's turn: the whole array, then that cell's
+        # z-aerosol deposition, so the last owned cell's stays
+        fluxes = need(bgc, "atmosBioFluxes", (n_cells + 1, d["nZBGCTracers"]))
+        cv._fill(fluxes, 0.0)
+        _function("seaice_column_biogeochemistry_v842", nil, nbl, state.tracers.n_bio_tracers)(
+            ((n_solve + _BLOCK - 1) // _BLOCK,), (_BLOCK,), args)
+        if z_tracers:
+            _scatter_z_tracers(pools, state, conc)
+            last = n_solve - 1
+            for m, src in enumerate(_atm_sources(state.tracers)):
+                if src >= 0:
+                    deposition = (bgc["atmosBlackCarbonFlux"][last, src] if src < 2
+                                  else bgc["atmosDustFlux"][last, src - 2])
+                    fluxes[last, m] = deposition
     codes = cp.asnumpy(status)[:n_solve]
     bad = np.flatnonzero(codes)
     if not bad.size:
@@ -273,37 +294,61 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
 
 
 def zbgc_constants(configs: dict, tracers: "cv.TracerObject") -> np.ndarray:
-    """The kernel's ``zpar``: the nonreactive tracer's ``colpkg_init_zbgc``
+    """The kernel's ``zpar``: per bio tracer a row of its ``colpkg_init_zbgc``
     parameters (:func:`~woof.hex.mpas_seaice.column_v842.zbgc_parameters`),
-    ``grid_o`` and z_biogeochemistry's folded constants."""
+    ``grid_o``, z_biogeochemistry's folded constants and its ``kscavz``."""
     par = cv.zbgc_parameters(configs, tracers)
-    return np.array([par["type"][0], par["tau_ret"][0], par["tau_rel"][0], par["frac_init"][0],
-                     par["init_frac"][0], float(configs["config_biogrid_bottom_molecular_sublayer"]), _F_V, _V_C,
-                     _S_COL, _P_B, _V_ALG], np.float64)
+    return np.array([[par["type"][m], par["tau_ret"][m], par["tau_rel"][m], par["frac_init"][m],
+                      par["init_frac"][m], float(configs["config_biogrid_bottom_molecular_sublayer"]), _F_V, _V_C,
+                      _S_COL, _P_B, _V_ALG, par["kscavz"][m]] for m in range(tracers.n_bio_tracers)],
+                    np.float64).reshape(-1)
 
 
-def _z_tracer_args(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple:
-    """The kernel's vertical tracer arguments (dummies without them)."""
+def _atm_sources(tracers: "cv.TracerObject") -> list[int]:
+    """Per bio tracer its deposition in ``atmosBioFluxes`` (``mpas_seaice_column.F:3131-3140``):
+    the z-aerosols' black carbon (``atmosBlackCarbonFlux``, 0-1) then dust
+    (``atmosDustFlux``, 2-5); -1, none, for the nonreactive tracer."""
+    return [j if name == "verticalAerosolsConc" else -1 for name, _, j in tracers.bio_fields]
+
+
+def _z_tracer_args(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[tuple, object]:
+    """The kernel's vertical tracer arguments (dummies without them) and the
+    tracers' packed layers (``None`` without them), which
+    :func:`biogeochemistry` scatters back to their fields."""
     import cupy as cp
 
     d, to = state.dims, state.tracers
     nzbgc = d["nZBGCTracers"]
     if not cv.vertical_tracers(configs):
         dummy = cp.zeros(1, np.float64)
-        return (dummy, dummy, np.int32(nzbgc), dummy, np.int32(0), dummy, dummy, dummy, dummy, dummy, dummy,
-                dummy, dummy, dummy, dummy, dummy, dummy)
+        none = cp.zeros(1, np.int32)
+        return (dummy, dummy, np.int32(nzbgc), dummy, none, dummy, dummy, dummy, dummy, dummy, dummy,
+                dummy, dummy, dummy, dummy, dummy, none), None
     need = cv._need
     n1, ncat, nil, nbl = d["nCells"] + 1, d["nCategories"], d["nIceLayers"], d["nBioLayers"]
     t, ist, bgc = pools["tracers"], pools["icestate"], pools["biogeochemistry"]
     fz = (n1, nzbgc)
+    conc = cp.empty((n1, ncat, to.n_bio_tracers, nbl + 3), np.float64)
+    for m, (name, sub, _) in enumerate(to.bio_fields):
+        field = need(t, name, (n1, ncat, cv.bio_field_layers(name, d)))
+        conc[:, :, m] = field[:, :, sub:sub + nbl + 3]
     return (
-        need(t, "verticalNonreactiveConc", (n1, ncat, nbl + 3)), need(t, "mobileFraction", (n1, ncat, nzbgc)),
-        np.int32(nzbgc), cp.asarray(zbgc_constants(configs, to)), np.int32(to.bio_index_o[0] - 1),
+        conc, need(t, "mobileFraction", (n1, ncat, nzbgc)),
+        np.int32(nzbgc), cp.asarray(zbgc_constants(configs, to)),
+        cp.asarray(np.array([o - 1 for o in to.bio_index_o], np.int32)),
         need(bgc, "oceanBioConcentrations", fz), need(pools["atmos_coupling"], "snowfallRate", (n1,)),
         need(ist, "snowVolumeCategoryInitial", (n1, ncat)),
         need(pools["shortwave"], "shortwaveLayerPenetration", (n1, ncat, nil + 1)),
         need(bgc, "interfaceGrid", (nil + 1,)), need(bgc, "bioShortwaveFlux", (n1, ncat, nbl + 1)),
         need(bgc, "oceanBioFluxes", fz), need(bgc, "snowIceBioFluxes", fz), need(bgc, "atmosIceBioFluxes", fz),
         need(bgc, "totalVerticalBiologyIce", fz), need(bgc, "totalVerticalBiologySnow", fz),
-        need(bgc, "atmosBioFluxes", fz),
-    )
+        cp.asarray(np.array(_atm_sources(to), np.int32)),
+    ), conc
+
+
+def _scatter_z_tracers(pools: dict, state: "cv.ColumnState", conc) -> None:
+    """The packed vertical tracers back to their fields (every cell: the
+    kernel writes the owned ones only)."""
+    nbl = state.dims["nBioLayers"]
+    for m, (name, sub, _) in enumerate(state.tracers.bio_fields):
+        pools["tracers"][name][:, :, sub:sub + nbl + 3] = conc[:, :, m]

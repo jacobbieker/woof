@@ -408,6 +408,12 @@ CORRECTIONS = {
         "config_use_column_vertical_thermodynamics off, a category the previous step's ITD opened has no initial "
         "area, so 0/0 makes its snow layers' flux NaN and oceanBioFluxes is NaN in that cell; the correction "
         "takes a category without an initial area to have had no snow (hs_old = 0)"),
+    "zaero_snow_scavenging": (
+        "update_snow_bgc scavenges each vertical tracer from the melting snow with kscavz(k), k its place among "
+        "the bio tracers (ice_aerosol.F90:602-607), but ice_zbgc_shared lays the kscavz table out as bio_index_o "
+        "is (ice_zbgc_shared.F90:45-55: the z-aerosols' Flanner et al. coefficients at 23-28): with the "
+        "z-aerosols every tracer takes the table's leading 0.03, so the second black carbon (0.20) and the dust "
+        "(0.02) are scavenged at the wrong rate; the correction takes kscavz(bio_index_o(k))"),
     "subcycle_snow_ice_tracers": (
         "seaice_column_predynamics_time_integration separates the vertical tracers into their *Snow and *Ice "
         "fields once a step (mpas_seaice_column.F:922-925), but seaice_column_dynamics_time_integration combines "
@@ -461,10 +467,15 @@ ZSAL_SOLVE = "zsal_solve"
 
 
 #: the vertical biogeochemical tracers (z_tracers): the init and column_biogeochemistry
-#: carry them with the nonreactive tracer (VT_PORTED) alone; every other stage refuses them
+#: carry the nonreactive tracer and the z-aerosols (VT_INIT_PORTED), the other vertical
+#: tracer stages the nonreactive tracer (VT_PORTED) alone; every other stage refuses them
 VT_FLAG = "config_use_vertical_tracers"
-#: the vertical tracers' flags the port carries
+#: the vertical tracers' flags every vertical tracer stage carries
 VT_PORTED = ("config_use_nonreactive",)
+#: the z-aerosols (tr_zaero: nzAerosols = 3, black carbon 1 and 2 and the first dust)
+ZAERO_FLAG = "config_use_zaerosols"
+#: the vertical tracers' flags the init and column_biogeochemistry carry
+VT_INIT_PORTED = VT_PORTED + (ZAERO_FLAG,)
 
 
 def vertical_tracers(configs: dict) -> bool:
@@ -483,7 +494,7 @@ def solves_zsal(configs: dict) -> bool:
 
 
 def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool = False,
-                    z_tracers: bool = False) -> None:
+                    z_tracers: bool | tuple[str, ...] = False) -> None:
     """Refuse, by name, what this stage of the column port does not carry.
 
     ``biogeochemistry`` is the caller's: the init (:func:`initialize`),
@@ -496,11 +507,13 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
     one (its tracers counted, never solved or copied) and, under the
     ``zsal_solve`` correction, the solved one.
 
-    ``z_tracers`` is the caller's too: the init, ``column_biogeochemistry``,
-    the ITD thermodynamics and the ridging carry the vertical tracers
-    (``config_use_vertical_tracers``) with the nonreactive tracer alone
-    (:data:`VT_PORTED`); every other stage refuses them."""
+    ``z_tracers`` is the caller's too: the stages that carry the vertical
+    tracers (``config_use_vertical_tracers``) pass the tracer flags they
+    carry, or ``True`` for the nonreactive tracer alone (:data:`VT_PORTED`);
+    the init and ``column_biogeochemistry`` carry the z-aerosols as well
+    (:data:`VT_INIT_PORTED`). Every other stage refuses them."""
     c = configs
+    vt = VT_PORTED if z_tracers is True else tuple(z_tracers or ())
     if not c.get("config_use_column_package", False):
         _refuse("config_use_column_package", False, "the column port runs only with the column package on",
                 "config_use_column_package = .true.")
@@ -513,13 +526,14 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
         if c[VT_FLAG] and not z_tracers:
             _refuse(VT_FLAG, True, "the vertical tracers are ported for the init, column_biogeochemistry, "
                     "the ITD thermodynamics and the ridging only", f"{VT_FLAG} = .false.")
-        carried = BGC_PORTED + (ZSAL_FLAG,) + ((VT_FLAG,) + VT_PORTED if c[VT_FLAG] else ())
+        carried = BGC_PORTED + (ZSAL_FLAG,) + ((VT_FLAG,) + vt if c[VT_FLAG] else ())
         for flag in _BGC_FLAGS:
             if flag not in carried and c[flag]:
                 _refuse(flag, True, "of the column biogeochemistry only the brine height, the vertical "
-                        "salinity and the vertical tracers' nonreactive tracer are ported", f"{flag} = .false.")
+                        "salinity and the vertical tracers' nonreactive tracer (and in the init and "
+                        "column_biogeochemistry the z-aerosols) are ported", f"{flag} = .false.")
         if c[VT_FLAG]:
-            _refuse_z_tracers(c)
+            _refuse_z_tracers(c, vt)
         _refuse_bio_layers(c, dims)
     if dims["nSnowLayers"] != 1:
         _refuse("config_nSnowLayers", dims["nSnowLayers"],
@@ -554,16 +568,17 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
                 "config_initial_velocity_type in " + ", ".join(INITIAL_VELOCITIES))
 
 
-def _refuse_z_tracers(configs: dict) -> None:
-    """What the vertical tracers' port does not carry, by name."""
+def _refuse_z_tracers(configs: dict, carried: tuple[str, ...] = VT_PORTED) -> None:
+    """What the vertical tracers' port does not carry, by name: ``carried``
+    the stage's tracer flags, one of which must be on."""
     c = configs
     if not c["config_use_brine"]:
         _refuse("config_use_brine", False, "the vertical tracers are ported with the brine height only "
                 "(colpkg_init_zbgc makes them depend on the brine fraction)",
                 f"config_use_brine = .true. with {VT_FLAG}")
-    if not all(c[flag] for flag in VT_PORTED):
-        _refuse("config_use_nonreactive", False, "the vertical tracers are ported with the nonreactive tracer",
-                f"config_use_nonreactive = .true. with {VT_FLAG}")
+    if not any(c[flag] for flag in carried):
+        _refuse("config_use_nonreactive", False, "the vertical tracers are ported with "
+                + " or ".join(carried) + " on", f"{' or '.join(carried)} = .true. with {VT_FLAG}")
     if c[ZSAL_FLAG]:
         # set/get_cice_biogeochemistry_tracer_array_category copy verticalSalinity at
         # index_verticalSalinity with the vertical tracers (mpas_seaice_column.F:6292,6664),
@@ -625,6 +640,8 @@ class TracerObject:
     nt_zbgc_frac: int = 0
     bio_index: tuple = ()
     bio_index_o: tuple = ()
+    #: per bio tracer its tracers-pool field, the field's first layer and the tracer's place in it
+    bio_fields: tuple = ()
 
     def log_rows(self) -> dict[str, list[int]]:
         """The oracle log's ``TOBJ`` rows."""
@@ -787,45 +804,58 @@ def tracer_object(configs: dict, dims: dict[str, int]) -> TracerObject:
             # vertical tracers (mpas_seaice_column.F:6292,6664,7075,7562): its tracers are
             # counted and never read or written back, so only zsal_solve maps the pool field
             layout.append(("verticalSalinity", nt_bgc_s, n_bio))
-    bio_index, bio_index_o, nt_zbgc_frac = [], [], 0
-    if vertical_tracers(c) and c["config_use_brine"] and c["config_use_nonreactive"]:
-        # colpkg_init_zbgc's z_tracers (ice_colpkg.F90:1362-1371 and 1426-1490), the
-        # nonreactive tracer (tr_bgc_PON) alone: colpkg_init_bgc_trcr gives its nblyr + 1
-        # ice layers trcr_depend nt_depend = 2 + nt_fbri (ntd = 0 with the brine
-        # fraction), trcr_base (0, 1, 0) and the brine fraction as their one stratum,
-        # then its two snow layers trcr_depend 2, trcr_base (0, 0, 1) and no strata;
-        # bio_index_o(nlt_bgc_PON) = 2*max_algae + max_doc + max_dic + 7. The mobile
-        # fractions follow at nt_zbgc_frac: trcr_depend 2 + nt_fbri, (0, 1, 0), the
-        # brine fraction their stratum. Every word MPAS filled before is overwritten.
+    bio_index, bio_index_o, bio_fields, nt_zbgc_frac = [], [], [], 0
+    if vertical_tracers(c) and c["config_use_brine"] and any(c[flag] for flag in VT_INIT_PORTED):
+        # colpkg_init_zbgc's z_tracers (ice_colpkg.F90:1362-1371 and 1426-1490): the
+        # nonreactive tracer (tr_bgc_PON), then the nzAerosols z-aerosols (tr_zaero; the
+        # Registry fixes nzAerosols at 3: black carbon 1 and 2, the first dust).
+        # colpkg_init_bgc_trcr gives each its nblyr + 1 ice layers trcr_depend nt_depend =
+        # 2 + nt_fbri (ntd = 0 with the brine fraction), trcr_base (0, 1, 0) and the brine
+        # fraction as their one stratum, then its two snow layers trcr_depend 2, trcr_base
+        # (0, 0, 1) and no strata; bio_index_o(nlt_bgc_PON) = 2*max_algae + max_doc +
+        # max_dic + 7, bio_index_o(nlt_zaero(mm)) = 2*max_algae + max_doc + max_dic +
+        # max_don + 2*max_fe + 7 + mm. The mobile fractions follow at nt_zbgc_frac:
+        # trcr_depend 2 + nt_fbri, (0, 1, 0), the brine fraction their stratum. Every word
+        # MPAS filled before is overwritten. MPAS's verticalAerosolsConc holds the
+        # aerosols one after another, nBioLayersP3 layers each.
         nk = dims["nBioLayers"] + 1
+        if c["config_use_nonreactive"]:
+            bio_index_o.append(2 * _MAX_ALGAE + _MAX_DOC + _MAX_DIC + 7)
+            bio_fields.append(("verticalNonreactiveConc", 0, 0))
+        if c[ZAERO_FLAG]:
+            for mm in range(dims["nzAerosols"]):
+                bio_index_o.append(2 * _MAX_ALGAE + _MAX_DOC + _MAX_DIC + _MAX_DON + 2 * _MAX_FE + 7 + mm + 1)
+                bio_fields.append(("verticalAerosolsConc", mm * (nk + 2), mm))
+        n_bio = len(bio_fields)
         first = len(parent) + 1
-        bio_index.append(first)
-        bio_index_o.append(2 * _MAX_ALGAE + _MAX_DOC + _MAX_DIC + 7)
-        n_bio = len(bio_index)
-        nt_zbgc_frac = first + nk + 2
-        ice, snow = np.full(nk, 2 + nt_fbri, np.int32), np.full(2, 2, np.int32)
+        bio_index = [first + m * (nk + 2) for m in range(n_bio)]
+        nt_zbgc_frac = first + n_bio * (nk + 2)
+        one = np.concatenate([np.full(nk, 2 + nt_fbri, np.int32), np.full(2, 2, np.int32)])
         frac = np.full(n_bio, 2 + nt_fbri, np.int32)
-        parent = np.concatenate([parent, ice, snow, frac])
-        column = np.zeros((3, nk + 2 + n_bio), np.float64)
+        parent = np.concatenate([parent, *([one] * n_bio), frac])
+        column = np.zeros((3, nk + 2), np.float64)
         column[1, :nk] = 1.0
         column[2, nk:nk + 2] = 1.0
-        column[1, nk + 2:] = 1.0
-        mask = np.concatenate([mask, column], axis=1)
-        more_number = np.zeros(nk + 2 + n_bio, np.int32)
-        more_number[:nk] = 1
-        more_number[nk + 2:] = 1
-        number = np.append(number, more_number)
-        more = np.zeros((2, nk + 2 + n_bio), np.int32)
-        more[0, :nk] = nt_fbri
-        more[0, nk + 2:] = nt_fbri
-        ancestors = np.concatenate([ancestors, more], axis=1)
-        layout.append(("verticalNonreactiveConc", first, nk + 2))
+        frac_column = np.zeros((3, n_bio), np.float64)
+        frac_column[1] = 1.0
+        mask = np.concatenate([mask, *([column] * n_bio), frac_column], axis=1)
+        one_number = np.zeros(nk + 2, np.int32)
+        one_number[:nk] = 1
+        number = np.concatenate([number, *([one_number] * n_bio), np.ones(n_bio, np.int32)])
+        one_more = np.zeros((2, nk + 2), np.int32)
+        one_more[0, :nk] = nt_fbri
+        frac_more = np.zeros((2, n_bio), np.int32)
+        frac_more[0] = nt_fbri
+        ancestors = np.concatenate([ancestors, *([one_more] * n_bio), frac_more], axis=1)
+        for (name, sub, _), at in zip(bio_fields, bio_index):
+            layout.append((f"{name}:{sub}" if sub else name, at, nk + 2))
         layout.append(("mobileFraction", nt_zbgc_frac, n_bio))
     return TracerObject(n_tracers=len(parent), index=idx, parent_index=parent,
                         first_ancestor_mask=mask, ancestor_number=number, ancestor_indices=ancestors,
                         nt_tsfc=idx["surfaceTemperature"], nt_fbri=nt_fbri, layout=layout,
                         n_tracers_not_bio=n_tracers, nt_bgc_s=nt_bgc_s, n_bio_tracers=len(bio_index),
-                        nt_zbgc_frac=nt_zbgc_frac, bio_index=tuple(bio_index), bio_index_o=tuple(bio_index_o))
+                        nt_zbgc_frac=nt_zbgc_frac, bio_index=tuple(bio_index), bio_index_o=tuple(bio_index_o),
+                        bio_fields=tuple(bio_fields))
 
 
 # ---------------------------------------------------------------------------
@@ -861,14 +891,16 @@ def init_parameters(pools: dict, configs: dict, biogeochemistry: bool = False,
     stand-in pointers of the packages that are off change no state the port
     reads (the absent fields stay ``None``). ``biogeochemistry`` and
     ``z_tracers``: the caller carries the column biogeochemistry and its
-    vertical tracers (:func:`refuse_unported`)."""
+    vertical tracers (:func:`refuse_unported`); the init carries every
+    vertical tracer the port has (:data:`VT_INIT_PORTED`), and each stage
+    refuses those it does not carry."""
     mesh = pools["mesh"]
     dims = {k: int(mesh[k]) for k in ("nCells", "nCellsSolve", "nVertices", "nEdges", "maxEdges",
                                        "vertexDegree") if k in mesh}
     for k, v in mesh.items():
         if isinstance(v, (int, np.integer)):
             dims.setdefault(k, int(v))
-    refuse_unported(configs, dims, biogeochemistry, z_tracers)
+    refuse_unported(configs, dims, biogeochemistry, VT_INIT_PORTED if z_tracers is True else z_tracers)
     check_column_package_configs(configs, dims["nCategories"])
     return ColumnState(
         dims=dims, packages=packages(configs), tracers=tracer_object(configs, dims),
@@ -1152,18 +1184,46 @@ def init_biogeochemistry_profiles(pools: dict, configs: dict, state: ColumnState
 _MAX_ALGAE, _MAX_DOC, _MAX_DIC, _MAX_DON, _MAX_FE, _MAX_AERO = 3, 3, 1, 1, 2, 6
 
 
+#: ice_zbgc_shared's kscavz, the snow's scavenging coefficients (max_nbtrcr = 29): laid out as
+#: bio_index_o is, the z-aerosols' (Flanner et al., 2007) at 23-28 and the humics' at 29
+KSCAVZ = (0.03,) * 22 + (0.03, 0.20, 0.02, 0.02, 0.01, 0.01, 0.03)
+#: the opt-in correction (CORRECTIONS) that takes each tracer's kscavz at its bio_index_o
+ZAERO_KSCAVZ = "zaero_snow_scavenging"
+#: per vertical tracer field, the transport types (mobility) colpkg_init_zbgc gives it:
+#: the nonreactive tracer nitratetype (ice_colpkg.F90:1366), the z-aerosols zaerotype(mm)
+#: (ice_colpkg.F90:1200-1205)
+_MOBILITY = {"verticalNonreactiveConc": ("config_mobility_type_nitrate",),
+             "verticalAerosolsConc": ("config_mobility_type_black_carbon1", "config_mobility_type_black_carbon2",
+                                      "config_mobility_type_dust1", "config_mobility_type_dust2",
+                                      "config_mobility_type_dust3", "config_mobility_type_dust4")}
+
+
+def bio_field_layers(name: str, dims: dict[str, int]) -> int:
+    """A vertical tracer field's layers: nBioLayersP3 per tracer it holds."""
+    return (dims["nBioLayers"] + 3) * (dims["nzAerosols"] if name == "verticalAerosolsConc" else 1)
+
+
 def zbgc_parameters(configs: dict, tracers: TracerObject) -> dict:
-    """``colpkg_init_zbgc``'s per-bio-tracer parameters (``ice_colpkg.F90:1446-1490``),
-    the nonreactive tracer's alone: its transport type (``nitratetype``,
-    ``config_mobility_type_nitrate``), the retention and release times by
-    type band (1 s each below 0, where none applies), ``zbgc_frac_init`` (1)
-    and ``zbgc_init_frac`` (``frazil_scav``, or ``initbio_frac`` below 0)."""
+    """``colpkg_init_zbgc``'s per-bio-tracer parameters (``ice_colpkg.F90:1446-1490``):
+    its transport type (the nonreactive tracer's ``nitratetype``,
+    ``config_mobility_type_nitrate``; the z-aerosols' ``zaerotype``,
+    ``config_mobility_type_black_carbon1`` and on), the retention and release
+    times by type band (1 s each below 0, where none applies),
+    ``zbgc_frac_init`` (1), ``zbgc_init_frac`` (``frazil_scav``, or
+    ``initbio_frac`` below 0), and ``update_snow_bgc``'s scavenging
+    coefficient. v8.4.2 indexes ``kscavz`` by the tracer's place among the
+    bio tracers (``kscavz(k)``, ``ice_aerosol.F90:602-607``), where the table
+    is laid out by ``bio_index_o``: every tracer of these takes 0.03, the
+    aerosols' own coefficients (0.20 for the second black carbon, 0.02 for
+    the dust) are never used. The opt-in correction ``zaero_snow_scavenging``
+    takes ``kscavz(bio_index_o(k))``."""
     c = configs
     tau_min = float(c["config_rapid_mobile_to_stationary_time"])
     tau_max = float(c["config_long_mobile_to_stationary_time"])
-    out = {"type": [], "tau_ret": [], "tau_rel": [], "frac_init": [], "init_frac": []}
-    for _ in range(tracers.n_bio_tracers):
-        kind = float(c["config_mobility_type_nitrate"])
+    by_o = ZAERO_KSCAVZ in corrections(c)
+    out = {"type": [], "tau_ret": [], "tau_rel": [], "frac_init": [], "init_frac": [], "kscavz": []}
+    for k, ((name, _, j), o) in enumerate(zip(tracers.bio_fields, tracers.bio_index_o)):
+        kind = float(c[_MOBILITY[name][j]])
         ret = rel = 1.0
         if 0.0 <= kind < 0.5:
             ret, rel = tau_min, tau_max
@@ -1179,6 +1239,7 @@ def zbgc_parameters(configs: dict, tracers: TracerObject) -> dict:
         out["frac_init"].append(1.0)
         out["init_frac"].append(float(c["config_new_ice_fraction_biotracer"]) if kind < 0.0
                                 else float(c["config_fraction_biotracer_in_frazil"]))
+        out["kscavz"].append(KSCAVZ[o - 1] if by_o else KSCAVZ[k])
     return out
 
 
@@ -1255,12 +1316,12 @@ def init_bgc(pools: dict, configs: dict, state: ColumnState) -> None:
     par = zbgc_parameters(configs, to)
     bgc, t = pools["biogeochemistry"], pools["tracers"]
     conc = bgc["oceanBioConcentrations"]
-    pon = _need(t, "verticalNonreactiveConc", (d["nCells"] + 1, d["nCategories"], nbl + 3))
     frac = _need(t, "mobileFraction", (d["nCells"] + 1, d["nCategories"], d["nZBGCTracers"]))
-    for m, o in enumerate(to.bio_index_o):
+    for m, ((name, sub, j), o) in enumerate(zip(to.bio_fields, to.bio_index_o)):
+        field = _need(t, name, (d["nCells"] + 1, d["nCategories"], bio_field_layers(name, d)))
         ice = conc[:n_solve, o - 1] * np.float64(par["init_frac"][m])
-        pon[:n_solve, :, :nbl + 1] = ice[:, None, None]
-        pon[:n_solve, :, nbl + 1:] = 0.0
+        field[:n_solve, :, sub:sub + nbl + 1] = ice[:, None, None]
+        field[:n_solve, :, sub + nbl + 1:sub + nbl + 3] = 0.0
         frac[:n_solve, :, m] = par["frac_init"][m]
 
 
@@ -1416,9 +1477,15 @@ _NO_CELL_FIELD = ("mobileFraction",)
 
 def _cell_only_layout(to: TracerObject, dims: dict[str, int]) -> list[tuple[str, int, int]]:
     """The cell fields get_cice_biogeochemistry_tracer_array_cell also writes:
-    the nonreactive tracer's ice layers again, as ``verticalNonreactiveIceCell``
-    (``mpas_seaice_column.F:7701-7709``)."""
-    return [("verticalNonreactiveIce", to.bio_index[0], dims["nBioLayers"] + 1)] if to.n_bio_tracers else []
+    each vertical tracer's ice layers again, as ``verticalNonreactiveIceCell``
+    (``mpas_seaice_column.F:7701-7709``) and ``verticalAerosolsIceCell``, the
+    aerosols one after another (``mpas_seaice_column.F:7760-7777``)."""
+    nk = dims["nBioLayers"] + 1
+    out = []
+    for (name, _, j), first in zip(to.bio_fields, to.bio_index):
+        ice = name.replace("Conc", "Ice")
+        out.append((f"{ice}:{j * nk}" if j else ice, first, nk))
+    return out
 
 
 def update_state(pools: dict, configs: dict, state: ColumnState, update_type: str, dt: float,

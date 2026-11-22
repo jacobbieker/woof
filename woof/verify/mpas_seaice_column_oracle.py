@@ -118,6 +118,8 @@ BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_so
 BGC_NONREACTIVE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive"
 BGC_NONREACTIVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive_carry"
 BGC_NONREACTIVE_STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive_step"
+#: the z-aerosols' (BGC_ZAERO_CASES)
+BGC_ZAERO_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -637,6 +639,34 @@ BGC_NONREACTIVE_STEP_CASES = (
     ("seaice_nonreactive_bl99_dedd_rothrock", 20262911, _SEAICE_STEP, {
         **_COUPLED_BASE, **_NR_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
      (12, 6, 3)),
+)
+
+#: the z-aerosols (config_use_zaerosols: black carbon 1 and 2 and the first dust), alone and
+#: after the nonreactive tracer
+_BGC_ZA = {**_BGC, "config_use_vertical_tracers": True, "config_use_zaerosols": True}
+_BGC_ZA_NR = {**_BGC_ZA, "config_use_nonreactive": True}
+#: a transport type per band: the black carbons retained and rapid, the dust stationary
+_ZA_TYPES = {"config_mobility_type_black_carbon1": 0.2, "config_mobility_type_black_carbon2": 0.7,
+             "config_mobility_type_dust1": 2.5}
+#: the z-aerosols in the init and column_biogeochemistry: name, seed, stage, overrides
+BGC_ZAERO_CASES = (
+    ("init_bgc_zaero", 20263001, "init", _BGC_ZA),
+    ("init_bgc_zaero_nonreactive_types_frazil", 20263002, "init", {
+        **_BGC_ZA_NR, **_ZA_TYPES, "config_mobility_type_dust1": -1.0, "config_fraction_biotracer_in_frazil": 0.6,
+        "config_new_ice_fraction_biotracer": 0.7}),
+    ("init_bgc_zaero_three_layers_four_categories", 20263003, "init", {
+        **_BGC_ZA, "config_nIceLayers": 3, "config_nCategories": 4}),
+    ("bgc_zaero", 20263011, _BGC_STAGE, _BGC_ZA),
+    ("bgc_zaero_nonreactive", 20263012, _BGC_STAGE, _BGC_ZA_NR),
+    ("bgc_zaero_nonreactive_bl99_types", 20263013, _BGC_STAGE, {**_BGC_ZA_NR, **_BL99, **_ZA_TYPES}),
+    ("bgc_zaero_released_half_hour", 20263014, _BGC_STAGE, {
+        **_BGC_ZA, "config_mobility_type_black_carbon1": 1.5, "config_mobility_type_dust1": -1.0,
+        "config_dt": 1800.0, "config_long_mobile_to_stationary_time": 86400.0}),
+    ("bgc_zaero_nonreactive_four_layers_three_categories", 20263015, _BGC_STAGE, {
+        **_BGC_ZA_NR, **_ZA_TYPES, "config_nIceLayers": 4, "config_nCategories": 3,
+        "config_biogrid_bottom_molecular_sublayer": 0.01}),
+    ("bgc_zaero_nonreactive_abort_negative", 20263016, _BGC_STAGE, _BGC_ZA_NR),
+    ("bgc_zaero_nonreactive_abort_order", 20263017, _BGC_STAGE, _BGC_ZA_NR),
 )
 
 
@@ -1423,7 +1453,8 @@ def _nonreactive_state(rs, case: dict) -> None:
     conc = u(0.5, 20.0, (n1, ncat, nbl + 3))
     conc[:, :, nbl + 1:] = u(0.0, 5.0, (n1, ncat, 2))
     conc[7, 0, 1] = 1.0e-12
-    t["verticalNonreactiveConc"] = conc
+    if case["config"]["config_use_nonreactive"]:
+        t["verticalNonreactiveConc"] = conc
     t["mobileFraction"] = u(0.0, 1.0, (n1, ncat, nz))
     bgc["oceanBioConcentrations"] = u(0.5, 15.0, (n1, nz))
     snowfall = u(0.0, 3.0e-5, (n1,))
@@ -1439,9 +1470,31 @@ def _nonreactive_state(rs, case: dict) -> None:
         for cell in (6, 8):
             bgc["newlyFormedIce"][cell, 0] = 0
             conc[cell, 0, 2] = -1.0
-    if "abort_negative" in name:
+    if "abort_negative" in name or "abort_order" in name:
         bgc["newlyFormedIce"][3] = 0
         bgc["oceanBioConcentrations"][3] = -50.0
+    if case["config"][cv.ZAERO_FLAG]:
+        _zaero_state(rs, case)
+
+
+def _zaero_state(rs, case: dict) -> None:
+    """The z-aerosols' layers (positive, nBioLayersP3 per aerosol, one below
+    puny), drawn after the nonreactive tracer's. ``abort_order`` in the name:
+    the second aerosol negative in cell 3's first category, where the
+    nonreactive tracer's ocean concentration is negative under thin ice:
+    z_biogeochemistry's initialization error for every tracer comes before the
+    thin-ice flux of any, so v8.4.2 stops on the initialization error.
+    Separate numpy ufuncs only."""
+    pools, dims, name = case["pools"], case["dims"], case["name"]
+    n1, ncat, nbl, nza = dims["nCells"] + 1, dims["nCategories"], dims["nBioLayers"], dims["nzAerosols"]
+    u = _uniform(rs)
+    aero = u(0.5, 20.0, (n1, ncat, nza * (nbl + 3)))
+    for j in range(nza):
+        aero[:, :, j * (nbl + 3) + nbl + 1:(j + 1) * (nbl + 3)] = u(0.0, 5.0, (n1, ncat, 2))
+    aero[5, 0, nbl + 3 + 4] = 1.0e-12
+    if "abort_order" in name:
+        aero[3, 0, nbl + 3 + 2] = -1.0
+    pools["tracers"]["verticalAerosolsConc"] = aero
 
 
 def _nonreactive_carry_state(rs, case: dict) -> None:

@@ -256,7 +256,7 @@ def test_the_c2n_correction_gives_each_ratio_its_own_value():
 def test_a_mutated_evaluation_order_is_caught(monkeypatch, original, mutated, field, case):
     source = cbgc.module_source
     assert source(7, 7).count(original) == 1
-    monkeypatch.setattr(cbgc, "module_source", lambda nil, nbl: source(nil, nbl).replace(original, mutated))
+    monkeypatch.setattr(cbgc, "module_source", lambda *a: source(*a).replace(original, mutated))
     cbgc._module_on.cache_clear()
     try:
         c = _case(case)
@@ -283,7 +283,7 @@ def test_checking_compute_microS_mushy_s_stop_is_caught(monkeypatch):
     mutated = "                if (l_stop) { status[iCell] = l_stop; return; }\n                {\n"
     source = cbgc.module_source
     assert source(7, 7).count(original) == 1
-    monkeypatch.setattr(cbgc, "module_source", lambda nil, nbl: source(nil, nbl).replace(original, mutated))
+    monkeypatch.setattr(cbgc, "module_source", lambda *a: source(*a).replace(original, mutated))
     cbgc._module_on.cache_clear()
     try:
         with pytest.raises(cbgc.CriticalAbort) as error:

@@ -707,19 +707,24 @@ __device__ int zsalinity(int n, double dt, const double *cgrid0, const double *b
 }
 
 // ---------------------------------------------------------------------------
-// the vertical tracers (z_tracers): zbio with the nonreactive tracer alone
-// (nbtrcr = 1, PON; no vertical biochemistry, z-aerosols or dust iron)
+// the vertical tracers (z_tracers): zbio with the nonreactive tracer and the
+// z-aerosols (nbtrcr = COL_NBTRCR; no vertical biochemistry or dust iron)
 // ---------------------------------------------------------------------------
 
+#ifndef COL_NBTRCR
+#define COL_NBTRCR 1
+#endif
+#define NBT COL_NBTRCR
+#define ZT_STRIDE (NB1 + 2)        // a tracer's nblyr + 3 layers
 #define ZB_HS_MIN 1.e-4            // ice_constants_colpkg hs_min
-#define ZB_KSCAVZ 0.03             // ice_zbgc_shared kscavz(1)
 #define ZB_N_VOL 0.04e-12          // z_biogeochemistry N_vol
 #define ZB_NG_TO_MMOL 0.0140067    // z_biogeochemistry Ng_to_mmol
 #define BG_ZBGC_INIT 4             // zbgc initialization error
 #define BG_NEGATIVE_BGC 5          // negative bgc
 #define BG_FCT_POSITIVITY 6        // check_conservation_FCT's l_stop (no stop label of its own)
-// zpar: colpkg_init_zbgc's per-tracer parameters, grid_o and z_biogeochemistry's
-// folded constants (f_v is the default-real literal 0.7854 widened)
+// zpar: per tracer a row of ZP_N, colpkg_init_zbgc's parameters, grid_o,
+// z_biogeochemistry's folded constants (f_v is the default-real literal 0.7854
+// widened) and update_snow_bgc's kscavz
 #define ZP_TYPE 0
 #define ZP_TAU_RET 1
 #define ZP_TAU_REL 2
@@ -731,14 +736,20 @@ __device__ int zsalinity(int n, double dt, const double *cgrid0, const double *b
 #define ZP_S_COL 8
 #define ZP_P_B 9
 #define ZP_V_ALG 10
+#define ZP_KSCAVZ 11
+#define ZP_N 12
 
 // ice_aerosol.F90 update_snow_bgc for one tracer, nslyr = 1. trc is the
 // tracer's nblyr + 3 layers (trcrn(bio_index:)): the snow's at trc[NB1] and
-// trc[NB1 + 1]. The conservation and negative-aerosol warnings are not kept.
-__device__ void update_snow_bgc(double dt, double melts, double snoice, double fsnow, double *trc,
-                                double aice_old, double vsno_old, double vsnon, double aicen,
-                                double flux_bio_atm, double *zbgc_snow, double *zbgc_atm, double *flux_bio,
-                                int new_category)
+// trc[NB1 + 1]; kscavz its scavenging coefficient. The snow's thicknesses do
+// not depend on the tracer, so each tracer's pass is the k loops' own. Returns
+// whether the tracer's snow went below -puny: update_snow_bgc then clamps every
+// tracer's snow layers (its minval spans them all), which the caller does. The
+// conservation and negative-aerosol warnings are not kept.
+__device__ int update_snow_bgc(double dt, double melts, double snoice, double fsnow, double *trc,
+                               double aice_old, double vsno_old, double vsnon, double aicen,
+                               double flux_bio_atm, double kscavz, double *zbgc_snow, double *zbgc_atm,
+                               double *flux_bio, int new_category)
 {
     double a1 = 0.0, a2 = 0.0;
     *zbgc_snow = 0.0;
@@ -769,7 +780,7 @@ __device__ void update_snow_bgc(double dt, double melts, double snoice, double f
         *s1 = 0.0;
         *s2 = 0.0;
         *zbgc_atm = A(*zbgc_atm, M(flux_bio_atm, dt));
-        return;
+        return 0;
     }
     a1 = M(*s1, dzssl);
     a2 = M(*s2, dzint);
@@ -777,9 +788,9 @@ __device__ void update_snow_bgc(double dt, double melts, double snoice, double f
     dzssl = col_max(A(dzssl, dhs_evap), 0.0);
     if (-dhs_melts > PUNY) {
         double sloss1 = 0.0, sloss2 = 0.0;
-        if (dzssl > PUNY) sloss1 = D(M(M(ZB_KSCAVZ, a1), col_min(-dhs_melts, dzssl)), dzssl);
+        if (dzssl > PUNY) sloss1 = D(M(M(kscavz, a1), col_min(-dhs_melts, dzssl)), dzssl);
         a1 = S(a1, sloss1);
-        if (dzint > PUNY) sloss2 = D(M(M(ZB_KSCAVZ, a2), col_max(S(-dhs_melts, dzssl), 0.0)), dzint);
+        if (dzint > PUNY) sloss2 = D(M(M(kscavz, a2), col_max(S(-dhs_melts, dzssl), 0.0)), dzint);
         a2 = S(a2, sloss2);
         *zbgc_snow = A(*zbgc_snow, A(sloss1, sloss2));
         dzint = A(dzint, col_min(A(dzssl, dhs_melts), 0.0));
@@ -842,10 +853,7 @@ __device__ void update_snow_bgc(double dt, double melts, double snoice, double f
         *s1 = 0.0;
         *s2 = 0.0;
     }
-    if (a1 < -PUNY || a2 < -PUNY) {
-        *s1 = col_max(*s1, 0.0);
-        *s2 = col_max(*s2, 0.0);
-    }
+    return a1 < -PUNY || a2 < -PUNY;
 }
 
 // ice_algae.F90 compute_FCT_matrix (1-based arrays; its top and bottom sources
@@ -1096,132 +1104,149 @@ __device__ double zb_maxval(const double *x, int lo, int hi)
     return r;
 }
 
-// ice_algae.F90 z_biogeochemistry for one tracer without solve_zbgc: trc its
-// nblyr + 3 layers, frac its mobile fraction, flux_bio zbio's flux_bion.
-// bphin (nblyr + 2), iphin, iDin, bgrid, igrid and icgrid are 1-based; fswthrul
-// and zfswin 0-based. Returns the stop (BG_*), 0 without.
+// ice_algae.F90 z_biogeochemistry for the NBT tracers without solve_zbgc, in
+// its order: each phase loops over the tracers before the next, so a stop is
+// the first phase's to meet one (and in it the first tracer's). trc is the
+// tracers' NBT x (nblyr + 3) layers, frac their mobile fractions, ocean_bio,
+// flux_bio (zbio's flux_bion), zbgc_snow and zbgc_atm per tracer, zpar their
+// ZP_N rows. bphin (nblyr + 2), iphin, iDin, bgrid, igrid and icgrid are
+// 1-based; fswthrul and zfswin 0-based. Returns the stop (BG_*), 0 without.
 __device__ int z_biogeochemistry(double dt, int first_ice, double aicen, double vicen, double hice_old,
-                                 double ocean_bio, double *flux_bio, const double *bphin, const double *iphin,
-                                 double *trc, double *frac, const double *iDin, const double *fswthrul,
-                                 double *zfswin, double dh_top, double dh_bot, double hbri, double hbri_old,
-                                 double darcy_V, const double *bgrid, const double *igrid, const double *icgrid,
-                                 double bphi_min, double zbgc_snow, double zbgc_atm, double dh_direct, double meltb,
-                                 double congel, const double *zp)
+                                 const double *ocean_bio, double *flux_bio, const double *bphin,
+                                 const double *iphin, double *trc, double *frac, const double *iDin,
+                                 const double *fswthrul, double *zfswin, double dh_top, double dh_bot, double hbri,
+                                 double hbri_old, double darcy_V, const double *bgrid, const double *igrid,
+                                 const double *icgrid, double bphi_min, const double *zbgc_snow,
+                                 const double *zbgc_atm, double dh_direct, double meltb, double congel,
+                                 const double *zpar)
 {
     const double zspace = D(1.0, (double)COL_NBLYR);
-    double bphin_N[NB2 + 1], iphin_N[NB1 + 1], in_init[NB1 + 1], cons[NB1 + 1];
-    for (int k = 1; k <= NB1; ++k) {
-        bphin_N[NB2] = 1.0;
-        bphin_N[k] = bphin[k];
-        iphin_N[k] = iphin[k];
-        bphin_N[1] = bphi_min;
-        double *t = trc + k - 1;
-        if (first_ice) {
-            *t = M(ocean_bio, zp[ZP_INIT_FRAC]);
-            in_init[k] = M(*t, hbri_old);
-        } else if (fabs(*t) < PUNY) {
-            *t = 0.0;
-            in_init[k] = 0.0;
-        } else {
-            in_init[k] = M(*t, hbri_old);
+    double bphin_N[NB2 + 1], iphin_N[NB1 + 1], in_init[NBT][NB1 + 1], cons[NBT][NB1 + 1];
+    for (int m = 0; m < NBT; ++m) {
+        const double *zp = zpar + m * ZP_N;
+        for (int k = 1; k <= NB1; ++k) {
+            bphin_N[NB2] = 1.0;
+            bphin_N[k] = bphin[k];
+            iphin_N[k] = iphin[k];
+            bphin_N[1] = bphi_min;
+            double *t = trc + m * ZT_STRIDE + k - 1;
+            if (first_ice) {
+                *t = M(ocean_bio[m], zp[ZP_INIT_FRAC]);
+                in_init[m][k] = M(*t, hbri_old);
+            } else if (fabs(*t) < PUNY) {
+                *t = 0.0;
+                in_init[m][k] = 0.0;
+            } else {
+                in_init[m][k] = M(*t, hbri_old);
+            }
+            if (*t < 0.0) return BG_ZBGC_INIT;
         }
-        if (*t < 0.0) return BG_ZBGC_INIT;
     }
     const double hin = D(vicen, aicen);
     const double hin_old = hice_old;
     const double phi_max = zb_maxval(bphin_N, 2, NB1);
     // Sat_conc = f_s*f_a*f_v*(c1-phi_max)/V_c*S_col/P_b*N_vol*V_alg/Ng_to_mmol (f_s = f_a = 1)
-    const double sat_conc = D(M(M(D(M(D(M(zp[ZP_F_V], S(1.0, phi_max)), zp[ZP_V_C]), zp[ZP_S_COL]), zp[ZP_P_B]),
-                                  ZB_N_VOL), zp[ZP_V_ALG]), ZB_NG_TO_MMOL);
+    const double sat_conc = D(M(M(D(M(D(M(zpar[ZP_F_V], S(1.0, phi_max)), zpar[ZP_V_C]), zpar[ZP_S_COL]),
+                                    zpar[ZP_P_B]), ZB_N_VOL), zpar[ZP_V_ALG]), ZB_NG_TO_MMOL);
     // nlt_bgc_N(1) = 0 without algae: every tracer takes the first branch
-    double rtau_rel, rtau_ret;
-    if (hin_old > hin) {
-        rtau_rel = D(1.0, zp[ZP_TAU_REL]);
-        rtau_ret = 0.0;
-    } else {
-        rtau_ret = D(1.0, zp[ZP_TAU_RET]);
-        rtau_rel = 0.0;
-    }
+    double rtau_rel[NBT], rtau_ret[NBT], C_top[NBT], C_bot[NBT], source[NBT], atm_add[NBT];
     const double dhtop = dh_top, dhbot = dh_bot, darcyV = darcy_V;
-    double C_top = M(in_init[1], *frac);
-    const double added = A(A(zbgc_snow, zbgc_atm), 0.0);       // + dust_Fe(m) = 0
-    const double source = fabs(added);
     const double dhflood = col_max(0.0, -dh_direct);
-    double atm_add = 0.0;
     const double top = A(dhtop, M(D(darcyV, bphin_N[1]), dt));
-    if (top < -PUNY)
-        C_top = M(D(added, fabs(A(top, PUNY))), hbri_old);
-    else if (top >= -PUNY && fabs(A(added, M(M(ocean_bio, bphin_N[1]), dhflood))) > PUNY)
-        atm_add = A(fabs(added), M(M(ocean_bio, bphin_N[1]), dhflood));
-    else
-        atm_add = fabs(added);
-    const double C_bot = M(M(ocean_bio, hbri_old), iphin_N[NB1]);
+    for (int m = 0; m < NBT; ++m) {
+        const double *zp = zpar + m * ZP_N;
+        if (hin_old > hin) {
+            rtau_rel[m] = D(1.0, zp[ZP_TAU_REL]);
+            rtau_ret[m] = 0.0;
+        } else {
+            rtau_ret[m] = D(1.0, zp[ZP_TAU_RET]);
+            rtau_rel[m] = 0.0;
+        }
+        C_top[m] = M(in_init[m][1], frac[m]);
+        const double added = A(A(zbgc_snow[m], zbgc_atm[m]), 0.0);       // + dust_Fe(m) = 0
+        source[m] = fabs(added);
+        atm_add[m] = 0.0;
+        if (top < -PUNY)
+            C_top[m] = M(D(added, fabs(A(top, PUNY))), hbri_old);
+        else if (top >= -PUNY && fabs(A(added, M(M(ocean_bio[m], bphin_N[1]), dhflood))) > PUNY)
+            atm_add[m] = A(fabs(added), M(M(ocean_bio[m], bphin_N[1]), dhflood));
+        else
+            atm_add[m] = fabs(added);
+        C_bot[m] = M(M(ocean_bio[m], hbri_old), iphin_N[NB1]);
+    }
     // the shortwave onto the bio grid
     double trtmp[NB1 + 1];
     for (int k = 0; k <= NB1; ++k) trtmp[k] = 0.0;
     for (int k = 0; k < NB1; ++k) zfswin[k] = 0.0;
     if (remap_zbgc(fswthrul, 0, COL_NILYR + 1, NB1, hin, hbri, icgrid, igrid, 0.0, trtmp)) return BG_REMAP;
     for (int k = 1; k <= NB1; ++k) zfswin[k - 1] = trtmp[k];
-    const double mobile = zp[ZP_TYPE] >= 0.0 ? 1.0 : 0.0;
-    for (int k = 1; k <= NB1; ++k) cons[k] = in_init[k];
-    if (hbri_old > BG_THINS && hbri > BG_THINS) {
-        double icm[NB1 + 1], ics[NB1 + 1], initcons[NB1 + 1], biocons[NB1 + 1], low[NB1 + 1];
-        double sbdiag[NB1 + 1], diag[NB1 + 1], spdiag[NB1 + 1], rhs[NB1 + 1];
-        double D_sbdiag[NB1 + 1], D_spdiag[NB1 + 1], ML[NB1 + 1];
-        for (int k = 1; k <= NB1; ++k) {
-            icm[k] = M(in_init[k], *frac);
-            ics[k] = M(mobile, S(in_init[k], icm[k]));
-            const double dmobile = M(mobile, A(M(icm[k], S(glibc_exp(-M(dt, rtau_ret)), 1.0)),
-                                               M(ics[k], S(1.0, glibc_exp(-M(dt, rtau_rel))))));
-            icm[k] = col_max(0.0, A(icm[k], dmobile));
-            ics[k] = col_max(0.0, S(ics[k], dmobile));
-            if (D(ics[k], hbri_old) > sat_conc) {
-                icm[k] = S(A(icm[k], ics[k]), M(sat_conc, hbri_old));
-                ics[k] = M(sat_conc, hbri_old);
+    for (int m = 0; m < NBT; ++m)
+        for (int k = 1; k <= NB1; ++k) cons[m][k] = in_init[m][k];
+    for (int m = 0; m < NBT; ++m) {
+        const double *zp = zpar + m * ZP_N;
+        const double mobile = zp[ZP_TYPE] >= 0.0 ? 1.0 : 0.0;
+        if (hbri_old > BG_THINS && hbri > BG_THINS) {
+            double icm[NB1 + 1], ics[NB1 + 1], initcons[NB1 + 1], biocons[NB1 + 1], low[NB1 + 1];
+            double sbdiag[NB1 + 1], diag[NB1 + 1], spdiag[NB1 + 1], rhs[NB1 + 1];
+            double D_sbdiag[NB1 + 1], D_spdiag[NB1 + 1], ML[NB1 + 1];
+            for (int k = 1; k <= NB1; ++k) {
+                icm[k] = M(in_init[m][k], frac[m]);
+                ics[k] = M(mobile, S(in_init[m][k], icm[k]));
+                const double dmobile = M(mobile, A(M(icm[k], S(glibc_exp(-M(dt, rtau_ret[m])), 1.0)),
+                                                   M(ics[k], S(1.0, glibc_exp(-M(dt, rtau_rel[m]))))));
+                icm[k] = col_max(0.0, A(icm[k], dmobile));
+                ics[k] = col_max(0.0, S(ics[k], dmobile));
+                if (D(ics[k], hbri_old) > sat_conc) {
+                    icm[k] = S(A(icm[k], ics[k]), M(sat_conc, hbri_old));
+                    ics[k] = M(sat_conc, hbri_old);
+                }
+                initcons[k] = icm[k];
+                biocons[k] = icm[k];
             }
-            initcons[k] = icm[k];
-            biocons[k] = icm[k];
+            compute_FCT_matrix(initcons, dt, bgrid, darcyV, dhtop, dhbot, iphin_N, iDin, hbri_old, atm_add[m],
+                               bphin_N, C_top[m], C_bot[m], zp[ZP_GRID_O], sbdiag, diag, spdiag, rhs, D_sbdiag,
+                               D_spdiag, ML);
+            tridiag_solverz(sbdiag, diag, spdiag, rhs, biocons);
+            // check_conservation_FCT: the flux, the low order solution, and its stop
+            // on a negative one (its conservation failure only warns)
+            double c_init = M(M(A(initcons[1], initcons[NB1]), zspace), 0.5);
+            double c_new = M(M(A(biocons[1], biocons[NB1]), zspace), 0.5);
+            low[1] = biocons[1];
+            low[NB1] = biocons[NB1];
+            for (int k = 2; k <= COL_NBLYR; ++k) {
+                c_init = A(c_init, M(initcons[k], zspace));
+                c_new = A(c_new, M(biocons[k], zspace));
+                low[k] = biocons[k];
+            }
+            flux_bio[m] = D(A(S(c_init, c_new), source[m]), dt);
+            for (int k = 1; k <= NB1; ++k)
+                if (low[k] < 0.0) return BG_FCT_POSITIVITY;
+            compute_FCT_corr(initcons, biocons, dt, D_sbdiag, D_spdiag, ML);
+            int stop = zb_regrid_stationary(ics, hbri_old, hbri, dt, 0.0, igrid, &flux_bio[m], meltb, congel);
+            if (stop) return stop;
+            for (int k = 1; k <= NB1; ++k) cons[m][k] = A(biocons[k], ics[k]);
+            double sum_new = D(M(A(biocons[1], biocons[NB1]), zspace), 2.0);
+            double sum_tot = D(M(A(cons[m][1], cons[m][NB1]), zspace), 2.0);
+            for (int k = 2; k <= COL_NBLYR; ++k) {
+                sum_new = A(sum_new, M(biocons[k], zspace));
+                sum_tot = A(sum_tot, M(cons[m][k], zspace));
+            }
+            frac[m] = zp[ZP_FRAC_INIT];
+            if (sum_tot > 0.0 && mobile > 0.0) frac[m] = D(sum_new, sum_tot);
+            // the FCT failure (sum_old against sum_new, negative profiles) only warns
+        } else {
+            thin_ice_flux(hbri, hbri_old, cons[m], &flux_bio[m], source[m], dt, ocean_bio[m]);
         }
-        compute_FCT_matrix(initcons, dt, bgrid, darcyV, dhtop, dhbot, iphin_N, iDin, hbri_old, atm_add, bphin_N,
-                           C_top, C_bot, zp[ZP_GRID_O], sbdiag, diag, spdiag, rhs, D_sbdiag, D_spdiag, ML);
-        tridiag_solverz(sbdiag, diag, spdiag, rhs, biocons);
-        // check_conservation_FCT: the flux, the low order solution, and its stop
-        // on a negative one (its conservation failure only warns)
-        double c_init = M(M(A(initcons[1], initcons[NB1]), zspace), 0.5);
-        double c_new = M(M(A(biocons[1], biocons[NB1]), zspace), 0.5);
-        low[1] = biocons[1];
-        low[NB1] = biocons[NB1];
-        for (int k = 2; k <= COL_NBLYR; ++k) {
-            c_init = A(c_init, M(initcons[k], zspace));
-            c_new = A(c_new, M(biocons[k], zspace));
-            low[k] = biocons[k];
-        }
-        *flux_bio = D(A(S(c_init, c_new), source), dt);
-        for (int k = 1; k <= NB1; ++k)
-            if (low[k] < 0.0) return BG_FCT_POSITIVITY;
-        compute_FCT_corr(initcons, biocons, dt, D_sbdiag, D_spdiag, ML);
-        int stop = zb_regrid_stationary(ics, hbri_old, hbri, dt, 0.0, igrid, flux_bio, meltb, congel);
-        if (stop) return stop;
-        for (int k = 1; k <= NB1; ++k) cons[k] = A(biocons[k], ics[k]);
-        double sum_new = D(M(A(biocons[1], biocons[NB1]), zspace), 2.0);
-        double sum_tot = D(M(A(cons[1], cons[NB1]), zspace), 2.0);
-        for (int k = 2; k <= COL_NBLYR; ++k) {
-            sum_new = A(sum_new, M(biocons[k], zspace));
-            sum_tot = A(sum_tot, M(cons[k], zspace));
-        }
-        *frac = zp[ZP_FRAC_INIT];
-        if (sum_tot > 0.0 && mobile > 0.0) *frac = D(sum_new, sum_tot);
-        // the FCT failure (sum_old against sum_new, negative profiles) only warns
-    } else {
-        thin_ice_flux(hbri, hbri_old, cons, flux_bio, source, dt, ocean_bio);
     }
-    for (int k = 1; k <= NB1; ++k) {
-        double bio_tmp = M(A(D(D(cons[k], hbri), iphin_N[k]), 0.0), iphin_N[k]);    // + react = 0
-        if (fabs(bio_tmp) < PUNY) bio_tmp = 0.0;
-        else if (bio_tmp > 1.0e6) {}                                                 // a warning only
-        else if (bio_tmp < 0.0) return BG_NEGATIVE_BGC;
-        trc[k - 1] = col_max(0.0, bio_tmp);
-        if (ocean_bio <= 0.0 && *flux_bio < 0.0) *flux_bio = col_max(0.0, *flux_bio);
+    for (int m = 0; m < NBT; ++m) {
+        for (int k = 1; k <= NB1; ++k) {
+            double bio_tmp = M(A(D(D(cons[m][k], hbri), iphin_N[k]), 0.0), iphin_N[k]);    // + react = 0
+            if (fabs(bio_tmp) < PUNY) bio_tmp = 0.0;
+            else if (bio_tmp > 1.0e6) {}                                                       // a warning only
+            else if (bio_tmp < 0.0) return BG_NEGATIVE_BGC;
+            trc[m * ZT_STRIDE + k - 1] = col_max(0.0, bio_tmp);
+            if (ocean_bio[m] <= 0.0 && flux_bio[m] < 0.0) flux_bio[m] = col_max(0.0, flux_bio[m]);
+        }
     }
     return BG_OK;
 }
@@ -1246,9 +1271,12 @@ __device__ void merge_bgc_fluxes(double dt, double aicen, double vicen, double v
 
 // column_biogeochemistry: one thread per owned cell. flags: bit 0 tr_brine,
 // bit 1 solve_zsal, bit 2 z_tracers (with the brine height; the nonreactive
-// tracer alone), bit 3 the correction bgc_snow_new_category. fbri is brineFraction and zsal_out verticalSalinity, ztr_conc
-// verticalNonreactiveConc (nblyr + 3 per category) and ztr_frac mobileFraction
-// (nzbgc per category) (or dummies without them).
+// tracer and the z-aerosols), bit 3 the correction bgc_snow_new_category. fbri
+// is brineFraction and zsal_out verticalSalinity, ztr_conc the NBT vertical
+// tracers' layers (NBT x (nblyr + 3) per category, the tracer array's order),
+// ztr_frac mobileFraction (nzbgc per category), bio_o each tracer's 0-based
+// place in the ocean concentrations and atm_src its deposition (-1 none, 0-1
+// atm_bc's, 2-5 atm_dust's) (or dummies without them).
 extern "C" __global__ void seaice_column_biogeochemistry_v842(
     int *__restrict__ status, double dt, double l_sk, int ncat, int flags, int nCellsSolve,
     const double *__restrict__ bgrid0, const double *__restrict__ igrid0, const double *__restrict__ cgrid0,
@@ -1268,11 +1296,11 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
     double *__restrict__ iki, double *__restrict__ zsal_tot, double *__restrict__ fzsal,
     double *__restrict__ fzsal_g,
     double *__restrict__ ztr_conc, double *__restrict__ ztr_frac, int nzbgc, const double *__restrict__ zpar,
-    int bio_o, const double *__restrict__ ocean_conc, const double *__restrict__ fsnow,
+    const int *__restrict__ bio_o, const double *__restrict__ ocean_conc, const double *__restrict__ fsnow,
     const double *__restrict__ vsno_init, const double *__restrict__ fswthrul, const double *__restrict__ icgrid0,
     double *__restrict__ zfswin, double *__restrict__ flux_bio, double *__restrict__ fbio_snoice,
     double *__restrict__ fbio_atmice, double *__restrict__ ice_bio_net, double *__restrict__ snow_bio_net,
-    const double *__restrict__ flux_bio_atm)
+    const int *__restrict__ atm_src)
 {
     const int iCell = blockIdx.x * blockDim.x + threadIdx.x;
     if (iCell >= nCellsSolve) return;
@@ -1292,7 +1320,13 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
     // colpkg_biogeochemistry's iphin: compute_microS_mushy's, kept across categories
     double iphin_c[NB1 + 1];
     for (int k = 0; k <= NB1; ++k) iphin_c[k] = 0.0;
-    const double ocean_bio = z_tracers ? ocean_conc[(size_t)iCell * nzbgc + bio_o] : 0.0;
+    // atmosBioFluxes(:, iCell): 0, then the z-aerosols' deposition
+    double ocean_bio[NBT], flux_bio_atm[NBT];
+    for (int m = 0; m < NBT; ++m) {
+        ocean_bio[m] = z_tracers ? ocean_conc[(size_t)iCell * nzbgc + bio_o[m]] : 0.0;
+        const int src = z_tracers ? atm_src[m] : -1;
+        flux_bio_atm[m] = src < 0 ? 0.0 : src < 2 ? atm_bc[iCell * 2 + src] : atm_dust[iCell * 4 + src - 2];
+    }
     int first_ice[64];
     double fbri[64];
     for (int n = 0; n < ncat; ++n) {
@@ -1313,7 +1347,8 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
             first_ice[n] = 1;
             if (tr_brine) fbri[n] = 1.0;
             if (n == 0) Rayleigh = 0;
-            if (z_tracers) ztr_frac[(size_t)c * nzbgc] = zpar[ZP_FRAC_INIT];
+            if (z_tracers)
+                for (int m = 0; m < NBT; ++m) ztr_frac[(size_t)c * nzbgc + m] = zpar[m * ZP_N + ZP_FRAC_INIT];
             if (solve_zsal) for (int k = 0; k < COL_NBLYR; ++k) zs[k] = 0.0;
         }
         if (aicen[c] > PUNY) {
@@ -1370,22 +1405,35 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
                 if (z_tracers) {
                     // zbio (z_tracers is carried with the brine height only): its l_stop is
                     // z_biogeochemistry's, which clears compute_microS_mushy's
-                    double *trc = ztr_conc + (size_t)c * (NB1 + 2);
-                    double zsn, zan, flux_sno = 0.0, flux_bion = 0.0;
-                    update_snow_bgc(dt, melts[c], snoice[c], fsnow[iCell], trc, aicen_init[c], vsno_init[c],
-                                    vsnon[c], aicen[c], flux_bio_atm[(size_t)iCell * nzbgc], &zsn, &zan,
-                                    &flux_sno, snow_new_category);
+                    double *trc = ztr_conc + (size_t)c * NBT * ZT_STRIDE;
+                    double zsn[NBT], zan[NBT], flux_sno[NBT], flux_bion[NBT];
+                    int negative = 0;
+                    for (int m = 0; m < NBT; ++m) {
+                        flux_sno[m] = 0.0;
+                        flux_bion[m] = 0.0;
+                        negative |= update_snow_bgc(dt, melts[c], snoice[c], fsnow[iCell], trc + m * ZT_STRIDE,
+                                                    aicen_init[c], vsno_init[c], vsnon[c], aicen[c],
+                                                    flux_bio_atm[m], zpar[m * ZP_N + ZP_KSCAVZ], &zsn[m],
+                                                    &zan[m], &flux_sno[m], snow_new_category);
+                    }
+                    // update_snow_bgc's minval over every tracer's snow: all are clamped
+                    if (negative)
+                        for (int m = 0; m < NBT; ++m) {
+                            trc[m * ZT_STRIDE + NB1] = col_max(trc[m * ZT_STRIDE + NB1], 0.0);
+                            trc[m * ZT_STRIDE + NB1 + 1] = col_max(trc[m * ZT_STRIDE + NB1 + 1], 0.0);
+                        }
                     l_stop = z_biogeochemistry(dt, first_ice[n], aicen[c], vicen[c], hin_old[c], ocean_bio,
-                                               &flux_bion, bp, iphin_c, trc, ztr_frac + (size_t)c * nzbgc, idi,
+                                               flux_bion, bp, iphin_c, trc, ztr_frac + (size_t)c * nzbgc, idi,
                                                fswthrul + (size_t)c * (COL_NILYR + 1), zfswin + (size_t)c * NB1,
                                                dhbr_top[c], dhbr_bot[c], hbrin, hbr_old, darcy_V[c], bgrid, igrid,
                                                icgrid, bphi_o, zsn, zan, dh_direct, meltb[c], congel[c], zpar);
-                    flux_bion = A(flux_bion, flux_sno);
+                    for (int m = 0; m < NBT; ++m) flux_bion[m] = A(flux_bion[m], flux_sno[m]);
                     if (l_stop) { hbri[iCell] = hbri_c; status[iCell] = l_stop; return; }
                     const size_t o = (size_t)iCell * nzbgc;
-                    merge_bgc_fluxes(dt, aicen[c], vicen[c], vsnon[c], trc, fbri[n], flux_bion, zsn, zan,
-                                     &flux_bio[o], &fbio_snoice[o], &fbio_atmice[o], &ice_bio_net[o],
-                                     &snow_bio_net[o]);
+                    for (int m = 0; m < NBT; ++m)
+                        merge_bgc_fluxes(dt, aicen[c], vicen[c], vsnon[c], trc + m * ZT_STRIDE, fbri[n],
+                                         flux_bion[m], zsn[m], zan[m], &flux_bio[o + m], &fbio_snoice[o + m],
+                                         &fbio_atmice[o + m], &ice_bio_net[o + m], &snow_bio_net[o + m]);
                 }
             }
             first_ice[n] = 0;

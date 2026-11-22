@@ -181,7 +181,7 @@ def _mismatches(names):
 def test_a_mutated_vertical_tracer_is_caught(monkeypatch, names, original, mutated):
     source = cbgc.module_source
     assert source(7, 7).count(original) == 1
-    monkeypatch.setattr(cbgc, "module_source", lambda nil, nbl: source(nil, nbl).replace(original, mutated))
+    monkeypatch.setattr(cbgc, "module_source", lambda *a: source(*a).replace(original, mutated))
     cbgc._module_on.cache_clear()
     try:
         assert _mismatches(names) > 0
