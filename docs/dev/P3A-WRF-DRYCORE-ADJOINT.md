@@ -953,9 +953,27 @@ Each step is one small PR, taken to merged before the next widens.
        max(jds+1, jts) but fills them from j_start = jts on a periodic y
        axis, so it overruns them there: the fully periodic case is TL
        only.
-   - 9b. The four rows: `G_/A_HORIZONTAL_DIFFUSION` ('u', 'v', 'w') and
-     `g_/a_horizontal_diffusion_3dmp` (theta) on
+   - 9b. The rows (`woof.grad.wrfplus.diffusion.hd_tl/_ad`), not yet in
+     the step: `G_/A_HORIZONTAL_DIFFUSION` ('u', 'v', 'w' and a scalar
+     row, which 9d binds for moisture) and
+     `g_/a_horizontal_diffusion_3dmp` (theta minus its initial field) on
      `wrf_diff_opt1_horizontal`.
+     - Active: the field, the coefficient (xkmh for u, v, w; xkhh for the
+       scalars) and mut; the hybrid mass c1 mut + c2, the initial theta
+       and the map factors pass through. The tendency accumulates, so its
+       adjoint passes through too.
+     - The same single forward as 9a: the AD thread of an input word
+       gathers over the row points within one column and row of it (a
+       field word at its own level, a coefficient word at its own and,
+       for w, the next level, a mut word at every level).
+     - Tests (`tests/test_grad_wrfplus_hdiff.py`): dot product,
+       accumulation, FD and the strict primal's words (through dycore's
+       `launch_coordinate_horizontal`; the hybrid mass and the initial
+       theta must move words) for every row on periodic, bounded and
+       one- to three-cell axes, and the WRFPLUS fixture (`tests/data/
+       wrfplus/hdiff.npz`, `tools/wrfplus_oracle/hdiff.F90`, 17 cases).
+       WRFPLUS's rows take mu as the mass, so the fixture uses c1 = 1,
+       c2 = 0; in binary64 woof matches it to about 1e-16.
    - 9c. The step binding (stage 1 into the held slots, the map-factor
      coupling and the specified fold); lifts the refusal for diff_opt 1
      with km_opt 4 only.
