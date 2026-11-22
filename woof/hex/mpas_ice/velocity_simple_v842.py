@@ -47,6 +47,7 @@ from __future__ import annotations
 import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
+from woof import quirk_corrections
 
 from . import rkind
 
@@ -69,7 +70,7 @@ MASK_DYNAMIC_ICE = 2
 
 def check_config(config: dict) -> None:
     """Refuse an unknown ``woof_simple_velocity_bed`` by name."""
-    value = config.get("woof_simple_velocity_bed", "v842")
+    value = quirk_corrections.option(config, "woof_simple_velocity_bed")
     if value not in SIMPLE_VELOCITY_BED:
         raise ConfigurationRefusal(knob="woof_simple_velocity_bed", value=value, reason="not an option of this port",
                                    declaration="woof_simple_velocity_bed = 'v842' | 'corrected'")
@@ -177,7 +178,7 @@ def block_init(*, mesh: dict, geometry: dict, velocity: dict, config: dict, n_ed
         n_levels=n_levels, real=real)
     target[...] = cp.asarray(words)
     check_config(config)
-    if config.get("woof_simple_velocity_bed", "v842") == "corrected":
+    if quirk_corrections.option(config, "woof_simple_velocity_bed") == "corrected":
         return
     bed = topography(cp.asnumpy(geometry["bedTopography"]), host["xCell"], host["yCell"],
                      config.get("config_calving", "none"), real)

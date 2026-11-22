@@ -131,7 +131,8 @@ def _source_receipt(module, wrapper, *, entry):
 def prepare_mynn_surface_column_batch(inputs, *, mol, ustm, outputs=None,
                                       members, ny, nx, dx, available_bytes,
                                       isfflx=1, isftcflx=0, variant="wrf_461",
-                                      array_module=None, reserved_bytes=0):
+                                      array_module=None, reserved_bytes=0,
+                                      psih_zolzt=False):
     """Bind one ordinary MYNN surface kernel over all resident members.
 
     The first-step seeding is owned by the preceding surface-driver seam.
@@ -140,9 +141,9 @@ def prepare_mynn_surface_column_batch(inputs, *, mol, ustm, outputs=None,
     """
     if array_module is None:
         import cupy as array_module
-    from woof.core.mynn_sfclay import (MYNN_SURFACE_INPUTS, MYNN_SFCLAY_DEFINES, MynnSurfaceResult,
+    from woof.core.mynn_sfclay import (MYNN_SURFACE_INPUTS, MynnSurfaceResult,
         _TPB, _validate_options, launch_mynn_surface_layer, mynn_surface_kernel,
-        mynn_sfclay_variant_form)
+        mynn_sfclay_variant_form, mynn_surface_defines)
     members, ny, nx = (_positive(value, name) for value, name in
                        ((members, "members"), (ny, "ny"), (nx, "nx")))
     _validate_options(dx, 1, isfflx, isftcflx)
@@ -165,7 +166,9 @@ def prepare_mynn_surface_column_batch(inputs, *, mol, ustm, outputs=None,
                         **{f"output:{key}": value for key, value in outputs.items()}}.items():
         _resident(array, xp=array_module, device=device, shape=shape, name=name)
     _validate_surface_aliases(inputs, outputs, mol=mol, ustm=ustm)
-    kernel = mynn_surface_kernel(variant)
+    # RunConfig.mynn_sfclay_psih_zolzt (default off), as the scalar launch.
+    defines = mynn_surface_defines(variant, psih_zolzt)
+    kernel = mynn_surface_kernel(variant, psih_zolzt=psih_zolzt)
     arrays = tuple(inputs[name] for name in MYNN_SURFACE_INPUTS) + (mol, ustm)
     arrays += tuple(outputs[name] for name in MYNN_SURFACE_OUTPUTS)
     count = members * ny * nx
@@ -182,7 +185,7 @@ def prepare_mynn_surface_column_batch(inputs, *, mol, ustm, outputs=None,
 
     launch.inputs, launch.outputs, launch.storage = dict(inputs), dict(outputs), storage
     launch.receipt = {"members": members, "shape": shape, "launches_per_call": 1,
-        "variant": variant, "defines": list(MYNN_SFCLAY_DEFINES[variant]),
+        "variant": variant, "defines": list(defines),
         "first_step_seed": "preceding ordinary surface-driver seam",
         "output_payload_bytes": 0 if storage is None else storage.payload_bytes,
         "external_output_bytes": sum(array.nbytes for array in outputs.values()) if storage is None else 0,

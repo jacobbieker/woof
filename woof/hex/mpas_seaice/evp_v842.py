@@ -18,13 +18,15 @@ held word for word to those routines, compiled verbatim with gfortran
 - ``r8``: RKIND = 8. The column package is double, so production MPAS-Seaice
   is built double. On Metal it runs through soft-f64.
 
-Not covered here, and refused by name where a caller could reach them:
+Not covered here:
 
-- the weak-form stress divergence (``config_stress_divergence_scheme = 'weak'``);
+- the weak-form stress divergence (``config_stress_divergence_scheme = 'weak'``),
+  which is :mod:`woof.hex.mpas_seaice.weak_v842` (it shares this module's
+  constitutive relation);
 - the Wachspress and PWL basis setup (``seaice_init_velocity_solver_variational``),
   whose outputs (``basisGradientU/V``, ``basisIntegralsU/V/Metric``,
   ``tanLatVertexRotatedOverRadius``, ``cellVerticesAtVertex``) these kernels
-  take as inputs;
+  take as inputs: :mod:`woof.hex.mpas_seaice.variational_basis_v842`;
 - the rest of ``mpas_seaice_velocity_solver.F``: the velocity update and the
   ocean stress are :mod:`woof.hex.mpas_seaice.velocity_v842`, which composes
   them with these kernels into the elastic subcycle.

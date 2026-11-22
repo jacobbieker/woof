@@ -68,6 +68,9 @@ def field_definition(name: str, *, physics: bool = True) -> dict:
     from .mpasdiag import lightning_diag_v842 as lightning
     if physics and name in lightning.FIELDS:
         return lightning.field_definition(name)
+    from .mpasdiag import spacewx_diag_v842 as spacewx
+    if physics and name in spacewx.FIELDS:
+        return spacewx.field_definition(name)
     from .mpasdiag import reduction_diag_v842 as reduce
     if physics and name in reduce.FIELDS:
         return reduce.field_definition(name)
@@ -437,7 +440,8 @@ def _all_packages() -> frozenset[str]:
     from .mpasdiag.reduction_diag_v842 import PACKAGES as REDUCTION_PACKAGES
     from .mpasdiag.lightning_diag_v842 import PACKAGES as LIGHTNING_PACKAGES
     from .mpasdiag.hailcast_diag_v842 import PACKAGE as HAILCAST_PACKAGE
-    return frozenset(PACKAGES.values()) | {RADTRAN_PACKAGE, SOLAR_PACKAGE, NWP_PACKAGE, P_PACKAGE, Z_PACKAGE, PREC_PACKAGE, TEND_PACKAGE, *AFWA_PACKAGES, *REDUCTION_PACKAGES, *LIGHTNING_PACKAGES.values(), HAILCAST_PACKAGE} | frozenset(p for f in _REGISTRY['fields'].values() for gate in f['gates']
+    from .mpasdiag.spacewx_diag_v842 import PACKAGES as SPACEWX_PACKAGES
+    return frozenset(PACKAGES.values()) | {RADTRAN_PACKAGE, SOLAR_PACKAGE, NWP_PACKAGE, P_PACKAGE, Z_PACKAGE, PREC_PACKAGE, TEND_PACKAGE, *AFWA_PACKAGES, *REDUCTION_PACKAGES, *LIGHTNING_PACKAGES.values(), HAILCAST_PACKAGE, *SPACEWX_PACKAGES} | frozenset(p for f in _REGISTRY['fields'].values() for gate in f['gates']
                      for p in gate.split(';')) | frozenset(
                      p for s in _REGISTRY['streams'].values()
                      for p in s['options'].get('packages','').split(';')) | {'no_invariant_stream'}

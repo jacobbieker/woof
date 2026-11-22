@@ -141,6 +141,10 @@ def test_a_correction_without_the_vertical_tracers_is_refused(correction, refuse
     case["config"] = {**case["config"], cv.VT_FLAG: False, "config_use_nonreactive": False}
     with pytest.raises(ConfigurationRefusal, match=correction):
         refuse(case)
+    # under woof_quirk_corrections = 'all' alone it is on but changes nothing, so not refused
+    case["config"] = {**case["config"], "woof_v842_corrections": (), "woof_quirk_corrections": "all"}
+    assert correction in cv.corrections(case["config"])
+    refuse(case)
 
 
 @requires_gpu

@@ -160,10 +160,12 @@ def test_streamed_domains_refuse_by_name():
     assert "spacewx_ionosphere_opt = {int(cfg.spacewx_ionosphere_opt)}, whose history rows are computed on the" in src
 
 
-def test_hex_refuses_the_option_and_admits_off():
-    from woof.hex.physics_suites import PhysicsSelectionRefusal, resolve_physics
-    with pytest.raises(PhysicsSelectionRefusal, match="spacewx_ionosphere_opt"):
-        resolve_physics("arwen_mpas_column", {"spacewx_ionosphere_opt": 1}, mesh="x1.40962")
+def test_hex_generic_seam_takes_the_keys():
+    # The rows themselves: tests/test_hex_spacewx_history_gpu.py.
+    from woof.hex.physics_suites import resolve_physics
+    got = resolve_physics("arwen_mpas_column", {"spacewx_ionosphere_opt": 1, "spacewx_f107_source": "150"},
+                          mesh="x1.40962").engine_physics
+    assert (got["spacewx_ionosphere_opt"], got["spacewx_f107_source"]) == (1, "150")
     resolve_physics("arwen_mpas_column", {"spacewx_ionosphere_opt": 0}, mesh="x1.40962")
 
 

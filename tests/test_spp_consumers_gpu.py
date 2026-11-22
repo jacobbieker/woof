@@ -146,7 +146,9 @@ def test_spp_compiled_sources_have_no_constant_division_rewrites():
     from tools.literal_division_census import production_units, census_unit, rewrite_sites
     selected = [unit for unit in production_units(reference.DATA.parents[2])
                 if unit.key.startswith("spp:") or unit.key == "kernels:ruc_spp"]
-    assert len(selected) == 5
+    # the four SPP units, RUC's, and the opt-in GF booking and MYNN
+    # surface-layer units
+    assert len(selected) == 7
     for unit in selected:
         assert census_unit(unit)["constant_divisor_sites"] == [], unit.key
         assert rewrite_sites(unit)["rewritten_sites"] == [], unit.key

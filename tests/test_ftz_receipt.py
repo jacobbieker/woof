@@ -283,9 +283,24 @@ def _calibrate_default_compile_routes(request):
 # ---- control 2: the probe is sensitive to what it measures ---------------
 
 def _backend_table_dir() -> Path:
-    """The committed table of the backend this process runs: the CUDA receipt, or the Metal pin."""
+    """The committed table of the device this process runs, or a skip naming the missing pin.
+
+    Metal: the Metal pin.  CUDA: ``receipt_devices/<key>/`` if the device has one, else ``receipt/`` only
+    when ``receipt.json`` records this very device.  Never another card's table.
+    """
     from woof import backend
-    return probe.METAL_PIN_DIR if backend.active() == "mlx" else RECEIPT_DIR
+    if backend.active() == "mlx":
+        return probe.METAL_PIN_DIR
+    key = probe.active_device_key()
+    pinned = probe.DEVICE_PIN_ROOT / key
+    if (pinned / "bitpatterns.csv").is_file():
+        return pinned
+    recorded = json.loads((RECEIPT_DIR / "receipt.json").read_text(encoding="utf-8"))
+    if probe.recorded_device_key(recorded) == key:
+        return RECEIPT_DIR
+    pytest.skip(f"no committed bit table for CUDA device {key}; record it with "
+                f"`python -m tools.ftz_receipt.probe --device-pin` and commit "
+                f"tools/ftz_receipt/receipt_devices/{key}/")
 
 
 @requires_gpu
@@ -299,7 +314,8 @@ def test_probe_sensitivity_control_moves_the_bit_column(receipt, request):
     if _calibrate_default_compile_routes(request):
         return
     words = probe.sensitivity_words(receipt)
-    if _backend_table_dir() == RECEIPT_DIR:
+    from woof import backend
+    if backend.active() != "mlx":
         for name, pair in words.items():
             assert pair["mutated"] != pair["shipped"], (
                 f"{name} produced identical words after its instruction was "
@@ -315,7 +331,8 @@ def test_probe_sensitivity_control_moves_the_bit_column(receipt, request):
 def test_the_committed_table_reproduces_on_this_device(receipt, request):
     if _calibrate_default_compile_routes(request):
         return
+    table_dir = _backend_table_dir()
     inventory = ri.load_inventory(ROOT)
     rows, _meta = probe.run_probe(inventory)
     assert probe.bitpatterns_csv(rows) == (
-        _backend_table_dir() / "bitpatterns.csv").read_text(encoding="utf-8")
+        table_dir / "bitpatterns.csv").read_text(encoding="utf-8")

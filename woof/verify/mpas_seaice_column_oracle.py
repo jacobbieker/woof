@@ -1899,7 +1899,7 @@ def _run_seaice_step(dev: dict, config: dict) -> tuple[tuple, int]:
     from woof.hex.mpas_seaice import timestep_v842 as ts
     dev["diagnostics"]["xtime"] = config["diagnostics:xtime"]
     dev["diagnostics"]["simulationStartTime"] = config["diagnostics:simulationStartTime"]
-    clock = ts.initialize(pools=dev, configs=config)
+    clock = ts.initialize(pools=dev, configs=config, basis="input")
     n_steps = int(config["oracle_n_steps"])
     try:
         ts.advance(pools=dev, configs=config, clock=clock, n_steps=n_steps,
