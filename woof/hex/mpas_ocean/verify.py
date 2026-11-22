@@ -18,7 +18,8 @@ def verify() -> dict:
                              mpas_ocean_vert_transport_oracle, mpas_ocean_frazil_oracle,
                              mpas_ocean_forward_frazil_oracle, mpas_ocean_land_ice_oracle,
                              mpas_ocean_land_ice_diagnostics_oracle, mpas_ocean_forward_land_ice_oracle,
-                             mpas_ocean_gm_oracle)
+                             mpas_ocean_gm_oracle, mpas_ocean_redi_oracle, mpas_ocean_split_step_gm_oracle,
+                             mpas_ocean_forward_gm_oracle)
 
     from . import (btr_subcycle_v842, diagnostics_v842, forward_v842, split_step_v842, eos_v842, forcing_v842, pgrad_hmix_v842, tend_tracer_v842, tend_v842,
                    tracer_advection_v842, tracer_hmix_v842, vert_transport_v842, vmix_v842, frazil_v842,
@@ -46,7 +47,11 @@ def verify() -> dict:
                                        ("land_ice_diagnostics", mpas_ocean_land_ice_diagnostics_oracle,
                                         land_ice_v842),
                                        ("forward_mode_land_ice", mpas_ocean_forward_land_ice_oracle, land_ice_v842),
-                                       ("gm_bolus_velocity", mpas_ocean_gm_oracle, gm_v842)):
+                                       ("gm_bolus_velocity", mpas_ocean_gm_oracle, gm_v842),
+                                       ("redi_isoneutral_mixing", mpas_ocean_redi_oracle, tracer_hmix_v842),
+                                       ("split_explicit_step_gm", mpas_ocean_split_step_gm_oracle,
+                                        split_step_v842),
+                                       ("forward_mode_gm", mpas_ocean_forward_gm_oracle, forward_v842)):
         fixture_dir = oracle_module.FIXTURE_DIR
         for precision in oracle_module.PRECISIONS:
             if not (fixture_dir / f"oracle-{precision}.npz").is_file():

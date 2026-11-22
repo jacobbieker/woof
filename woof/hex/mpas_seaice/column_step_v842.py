@@ -128,27 +128,29 @@ def check_config(configs: dict) -> None:
                     "(check_column_package_configs)", "config_use_column_biogeochemistry = .true. with "
                     f"{cv.VT_FLAG}, or {cv.VT_FLAG} = .false.")
         cv._refuse_z_tracers({**cv.default_configs(), **c})
-    if SUBCYCLE_SNOW_ICE in cv.corrections(c) and not c.get("config_use_vertical_tracers", False):
+    # refused only when named; under woof_quirk_corrections = 'all' alone it changes nothing
+    if SUBCYCLE_SNOW_ICE in cv.named_corrections(c) and not c.get("config_use_vertical_tracers", False):
         _refuse("woof_v842_corrections", SUBCYCLE_SNOW_ICE,
                 "the snow and ice tracers are separated and combined only with the vertical tracers",
                 "config_use_vertical_tracers = .true., or no subcycle_snow_ice_tracers")
     if c.get("config_use_velocity_solver", True) and \
-            c.get("config_stress_divergence_scheme", "variational") == "weak":
+            str(c.get("config_stress_divergence_scheme", "variational")).rstrip(" ") == "weak":
         _refuse("config_stress_divergence_scheme", "weak",
-                "the weak-form stress divergence's pool (velocity_weak) is not ported",
+                "the weak-form stress divergence with the column package is not held against an oracle "
+                "(the column oracle carries no velocity_weak pool); it runs without the column package",
                 "config_stress_divergence_scheme = 'variational'")
     crdg.check_config(c)
     cprep.check_config(c)
 
 
+#: the opt-in correction (column_v842.CORRECTIONS) that separates the snow and ice
+#: tracers again after each dynamics subcycle
+SUBCYCLE_SNOW_ICE = "subcycle_snow_ice_tracers"
 #: the vertical tracers column_separate_snow_ice_tracers and column_combine_snow_ice_tracers
 #: move (mpas_seaice_column.F:12500-13266), each under its flag: the z-aerosols (nzAerosols
 #: tracers, each nBioLayersP3 layers in the Conc field, 2 in the Snow and nBioLayersP1 in the
 #: Ice) and the nonreactive tracer, the ones the port carries (column_v842.VT_PORTED); every
 #: other vertical tracer is refused by its stages
-#: the opt-in correction (column_v842.CORRECTIONS) that separates the snow and ice
-#: tracers again after each dynamics subcycle
-SUBCYCLE_SNOW_ICE = "subcycle_snow_ice_tracers"
 _SNOW_ICE_TRACERS = (
     (cv.ZAERO_FLAG, "nzAerosols", "verticalAerosolsConc", "verticalAerosolsSnow", "verticalAerosolsIce"),
     ("config_use_nonreactive", None, "verticalNonreactiveConc", "verticalNonreactiveSnow", "verticalNonreactiveIce"),

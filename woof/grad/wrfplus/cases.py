@@ -400,6 +400,8 @@ def _vertical(nz, rng, hybrid):
     # hypsometric_opt 2's pressure coefficients (non-hybrid: c3 = eta,
     # c4 = 0; hybrid: c3 = c1, c4 = c2 times the column scale, as WRF).
     c1f = np.sqrt(np.clip(eta, 0.0, None)) if hybrid else np.ones(nz + 1)
+    out["c1f"] = c1f
+    out["c2f"] = (1.0 - c1f) * 5000.0 if hybrid else np.zeros(nz + 1)
     out["c3h"] = out["c1h"] * znu if hybrid else znu.copy()
     out["c4h"] = out["c2h"] * znu if hybrid else np.zeros(nz)
     out["c3f"] = c1f * eta if hybrid else eta.copy()
@@ -1181,3 +1183,167 @@ def flow_trajectory(geom, seed: int, dtype=np.float64) -> dict:
            "ru": 4e5 * rng.standard_normal(sh["ru"]),
            "rv": 4e5 * rng.standard_normal(sh["rv"])}
     return {n: np.ascontiguousarray(v, dtype=dtype) for n, v in out.items()}
+
+
+def df_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .diffusion import DFGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0, cf1=1.6, cf2=-0.8,
+                cf3=0.2)
+    base.update(overrides)
+    return DFGeometry(**base)
+
+
+def df_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of wrf_smag_deform: winds of 10 m/s with 5 m/s noise, a
+    base geopotential rising 4e3 per level with 50 noise (so the
+    coordinate slopes zx, zy are nonzero), ph' of 20 and map factors near
+    1; ``hybrid`` only stretches the levels (the deformation has no
+    column mass)."""
+    from .diffusion import DF_ACTIVE, DF_PASSIVE, DF_STATE, df_shapes
+    rng = np.random.default_rng(seed)
+    sh = df_shapes(geom)
+    v = _vertical(geom.nz, rng, hybrid)
+    znu, dnw = v["znu"], v["dnw"]
+    dn = np.zeros(geom.nz)
+    dn[1:] = np.diff(znu)
+    fnm, fnp = np.zeros(geom.nz), np.zeros(geom.nz)
+    fnm[1:] = 0.5 * dnw[:-1] / dn[1:]
+    fnp[1:] = 0.5 * dnw[1:] / dn[1:]
+    out = dict(dn=dn, dnw=dnw, fnm=fnm, fnp=fnp)
+    for n in DF_STATE:
+        out[n] = np.zeros(sh[n])
+    out["u"] = 10.0 + 5.0 * rng.standard_normal(sh["u"])
+    out["v"] = -4.0 + 5.0 * rng.standard_normal(sh["v"])
+    out["php"] = 20.0 * rng.standard_normal(sh["php"])
+    k = np.arange(geom.nz + 1)[:, None, None]
+    out["phb"] = 4.0e3 * k + 50.0 * rng.standard_normal(sh["phb"])
+    for n in ("msft", "msfu", "msfv"):
+        out[n] = 1.0 + 0.02 * rng.standard_normal(sh[n])
+    keep = DF_STATE + DF_ACTIVE + DF_PASSIVE
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def df_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .diffusion import DF_ACTIVE, df_shapes
+    rng = np.random.default_rng(seed)
+    sh = df_shapes(geom)
+    scale = {"u": 1.0, "v": 1.0, "php": 5.0}
+    return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in DF_ACTIVE}
+
+
+def km_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .diffusion import KMGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, dx=3000.0, dy=2500.0)
+    base.update(overrides)
+    return KMGeometry(**base)
+
+
+def _km_ratio(geom, d11, d22, d12, msft):
+    """smag2d_km's uncapped coefficient over its 10 * mlen cap (binary64,
+    periodic or clamped neighbours as the primal)."""
+    ny, nx = geom.ny, geom.nx
+    jp = np.minimum(np.arange(ny) + 1, ny - 1) if geom.boundary_y else (np.arange(ny) + 1) % ny
+    ip = np.minimum(np.arange(nx) + 1, nx - 1) if geom.boundary_x else (np.arange(nx) + 1) % nx
+    cross = 0.25 * (d12 + d12[:, jp, :] + d12[:, :, ip] + d12[:, jp][:, :, ip])
+    strain = np.sqrt(0.25 * (d11 - d22) ** 2 + cross ** 2)
+    length = np.sqrt(geom.dx / msft * geom.dy / msft)
+    return geom.c_s ** 2 * length ** 2 * strain / (10.0 * length)
+
+
+def km_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of wrf_diff_opt1_km4: deformations whose magnitudes
+    spread over 3e-4 to 0.3 /s, so about a quarter of the points take the
+    10 * mlen cap; no point lies within 3% of the cap (so the switch does
+    not move under the FD perturbation or a binary32 rounding).  The
+    levels play no part (``hybrid`` is accepted for the common harness)."""
+    from .diffusion import KM_ACTIVE, KM_PASSIVE, KM_STATE, km_shapes
+    rng = np.random.default_rng(seed)
+    sh = km_shapes(geom)
+    out = {n: np.zeros(sh[n]) for n in KM_STATE}
+    for n in KM_ACTIVE:
+        mag = 10.0 ** rng.uniform(-3.5, -0.5, sh[n])
+        out[n] = mag * rng.standard_normal(sh[n])
+    out["msft"] = 1.0 + 0.02 * rng.standard_normal(sh["msft"])
+    # the outer row of a bounded axis is 0 whatever the deformation
+    inner = np.ones(sh["xkmh"], dtype=bool)
+    if geom.boundary_x:
+        inner[..., 0] = inner[..., -1] = False
+    if geom.boundary_y:
+        inner[..., 0, :] = inner[..., -1, :] = False
+    r = _km_ratio(geom, out["defor11"], out["defor22"], out["defor12"], out["msft"])
+    if inner.any() and not (r[inner] < 1.0).any():
+        # a capped coefficient has no tangent: keep one point below the cap
+        # (the coefficient is homogeneous of degree 1 in the deformation)
+        for n in KM_ACTIVE:
+            out[n] *= 0.5 / r[inner].min()
+    for _ in range(200):
+        r = _km_ratio(geom, out["defor11"], out["defor22"], out["defor12"], out["msft"])
+        near = np.abs(r - 1.0) < 0.03
+        if not near.any():
+            break
+        for n in ("defor11", "defor22"):
+            out[n] = np.where(near, out[n] * 1.3, out[n])
+    else:
+        raise RuntimeError("km_trajectory: could not clear the cap's neighbourhood")
+    if inner.any() and not (r[inner] < 1.0).any():
+        raise RuntimeError("km_trajectory: every coefficient takes the cap")
+    keep = KM_STATE + KM_ACTIVE + KM_PASSIVE
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def km_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .diffusion import KM_ACTIVE, km_shapes
+    rng = np.random.default_rng(seed)
+    sh = km_shapes(geom)
+    return {n: np.ascontiguousarray(1e-2 * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in KM_ACTIVE}
+
+
+def hd_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .diffusion import HDGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0)
+    base.update(overrides)
+    return HDGeometry(**base)
+
+
+#: Row field scales (mean, noise) of wrf_diff_opt1_horizontal's cases.
+_HD_FIELD = {"u": (10.0, 5.0), "v": (-4.0, 5.0), "w": (0.0, 0.5), "t": (5.0, 2.0),
+             "s": (1.0e-2, 3.0e-3)}
+
+
+def hd_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of wrf_diff_opt1_horizontal: the row's field (winds of
+    10 m/s with 5 m/s noise, w of 0.5 m/s, theta - 300 of 5 K with 2 K
+    noise and an initial field 1 K (rms) from it, a moisture-like scalar),
+    coefficients spread over 30-3000 m2/s, a column mass of 9e4 Pa with
+    500 Pa noise, map factors near 1, a nonzero starting tendency and the
+    half- (w: full-) level c1, c2 (``hybrid``: c1 < 1, c2 > 0)."""
+    from .diffusion import HD_ACTIVE, HD_STATE, hd_passive, hd_shapes
+    rng = np.random.default_rng(seed)
+    sh = hd_shapes(geom)
+    v = _vertical(geom.nz, rng, hybrid)
+    mean, noise = _HD_FIELD[geom.row]
+    out = {"field": mean + noise * rng.standard_normal(sh["field"]),
+           "xk": 10.0 ** rng.uniform(1.5, 3.5, sh["xk"]),
+           "mut": 9.0e4 + 500.0 * rng.standard_normal(sh["mut"]),
+           "tend": rng.standard_normal(sh["tend"])}
+    if geom.perturb:
+        out["base"] = out["field"] + rng.standard_normal(sh["base"])
+    if geom.stag == 3:
+        out["c1"], out["c2"] = v["c1f"], v["c2f"]
+    else:
+        out["c1"], out["c2"] = v["c1h"], v["c2h"]
+    for n in ("msft", "msfu", "msfv"):
+        out[n] = 1.0 + 0.02 * rng.standard_normal(sh[n])
+    keep = HD_STATE + HD_ACTIVE + hd_passive(geom)
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def hd_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .diffusion import HD_ACTIVE, hd_shapes
+    rng = np.random.default_rng(seed)
+    sh = hd_shapes(geom)
+    scale = {"field": _HD_FIELD[geom.row][1] * 0.2, "xk": 10.0, "mut": 100.0}
+    return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in HD_ACTIVE}

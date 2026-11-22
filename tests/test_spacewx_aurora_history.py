@@ -383,10 +383,12 @@ def test_streamed_domains_refuse_by_name():
         inspect.getsource(streaming))
 
 
-def test_hex_refuses_the_option_and_admits_off():
-    from woof.hex.physics_suites import PhysicsSelectionRefusal, resolve_physics
-    with pytest.raises(PhysicsSelectionRefusal, match="spacewx_aurora_opt"):
-        resolve_physics("arwen_mpas_column", {"spacewx_aurora_opt": 1}, mesh="x1.40962")
+def test_hex_generic_seam_takes_the_keys():
+    # The rows themselves: tests/test_hex_spacewx_history_gpu.py.
+    from woof.hex.physics_suites import resolve_physics
+    got = resolve_physics("arwen_mpas_column", {"spacewx_aurora_opt": 1, "spacewx_kp_source": "5"},
+                          mesh="x1.40962").engine_physics
+    assert (got["spacewx_aurora_opt"], got["spacewx_kp_source"]) == (1, "5")
     resolve_physics("arwen_mpas_column", {"spacewx_aurora_opt": 0}, mesh="x1.40962")
 
 

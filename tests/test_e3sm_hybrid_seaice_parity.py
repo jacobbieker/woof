@@ -237,3 +237,26 @@ def test_the_default_path_does_not_build_the_hybrid():
     sig = inspect.signature(ts.advance)
     assert sig.parameters["finalize_last"].default is True and sig.parameters["after_clock"].default is None
 
+
+
+def test_the_basis_configs_come_from_the_api_or_are_refused_by_name():
+    from woof.hex.errors import ConfigurationRefusal
+    sphere = hs.basis_configs({}, 6.371229e6)
+    assert sphere["mesh:on_a_sphere"] is True and sphere["mesh:sphere_radius"] == 6.371229e6
+    plane = hs.basis_configs({}, 0.0)
+    assert plane["mesh:on_a_sphere"] is False and plane["mesh:sphere_radius"] == 0.0
+    # a configured value wins over the argument
+    assert hs.basis_configs({"mesh:sphere_radius": 2.0}, 5.0)["mesh:sphere_radius"] == 2.0
+    with pytest.raises(ConfigurationRefusal, match="sphere_radius"):
+        hs.basis_configs({}, None)
+    with pytest.raises(ConfigurationRefusal, match="sphere_radius"):
+        hs.basis_configs({"mesh:on_a_sphere": True}, 0.0)
+    with pytest.raises(ConfigurationRefusal, match="is_periodic"):
+        hs.basis_configs({}, 0.0, ("periodic_local_coords",))
+    with pytest.raises(ConfigurationRefusal, match="y_period"):
+        hs.basis_configs({"is_periodic": True, "x_period": 4.0}, 0.0, ("periodic_local_coords",))
+    periodic = hs.basis_configs({"is_periodic": True, "x_period": 4.0, "y_period": 0.0}, 0.0,
+                                ("periodic_local_coords",))
+    assert (periodic["mesh:is_periodic"], periodic["mesh:x_period"], periodic["mesh:y_period"]) == (True, 4.0, 0.0)
+    import inspect
+    assert inspect.signature(hs.HybridSeaIce).parameters["basis"].default == "compute"

@@ -407,7 +407,8 @@ CORRECTIONS = {
         "iceAreaCategoryInitial and snowVolumeCategoryInitial (mpas_seaice_column.F:1458-1460): with "
         "config_use_column_vertical_thermodynamics off, a category the previous step's ITD opened has no initial "
         "area, so 0/0 makes its snow layers' flux NaN and oceanBioFluxes is NaN in that cell; the correction "
-        "takes a category without an initial area to have had no snow (hs_old = 0)"),
+        "takes a category whose initial area is at most puny (none: the ITD opened it) to have had no snow "
+        "(hs_old = 0)"),
     "zaero_snow_scavenging": (
         "update_snow_bgc scavenges each vertical tracer from the melting snow with kscavz(k), k its place among "
         "the bio tracers (ice_aerosol.F90:602-607), but ice_zbgc_shared lays the kscavz table out as bio_index_o "
@@ -445,6 +446,16 @@ CORRECTIONS = {
 
 
 def corrections(configs: dict) -> frozenset[str]:
+    """The opt-in corrections ``configs`` applies: the ones it names
+    (:func:`named_corrections`), and under ``woof_quirk_corrections = 'all'``
+    (woof.quirk_corrections) every one of :data:`CORRECTIONS`. A correction
+    whose scheme the configuration does not run then changes nothing; one
+    it refuses in this configuration is refused by name, as when named."""
+    from woof import quirk_corrections
+    return named_corrections(configs) | frozenset(quirk_corrections.seaice_names(configs))
+
+
+def named_corrections(configs: dict) -> frozenset[str]:
     """The opt-in corrections ``configs`` names (``woof_v842_corrections``),
     refusing names that are not in :data:`CORRECTIONS`."""
     names = configs.get("woof_v842_corrections", ())
@@ -472,8 +483,10 @@ ZSAL_FLAG = "config_use_vertical_zsalinity"
 ZSAL_SOLVE = "zsal_solve"
 
 
-#: the vertical biogeochemical tracers (z_tracers): every vertical tracer stage carries the
-#: nonreactive tracer and the z-aerosols (VT_PORTED); every other stage refuses them
+#: the vertical biogeochemical tracers (z_tracers): the init, the column stages
+#: (column_biogeochemistry, the vertical thermodynamics, the ITD, the ridging, the shortwave),
+#: coupling_prep and the column and coupled steps carry the nonreactive tracer and the
+#: z-aerosols (VT_PORTED); a stage that carries none (z_tracers False) refuses them
 VT_FLAG = "config_use_vertical_tracers"
 #: the z-aerosols (tr_zaero: nzAerosols = 3, black carbon 1 and 2 and the first dust)
 ZAERO_FLAG = "config_use_zaerosols"
@@ -530,8 +543,10 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
                     "step only",
                     "config_use_column_biogeochemistry = .false.")
         if c[VT_FLAG] and not z_tracers:
-            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init and the column step's "
-                    "stages only", f"{VT_FLAG} = .false.")
+            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init, the column stages "
+                    "(column_biogeochemistry, the vertical thermodynamics, the ITD, the ridging, the "
+                    "shortwave), coupling_prep and the column and coupled steps, not for this stage",
+                    f"{VT_FLAG} = .false.")
         carried = BGC_PORTED + (ZSAL_FLAG,) + SW_BIO_PORTED + ((VT_FLAG,) + vt if c[VT_FLAG] else ())
         for flag in _BGC_FLAGS:
             if flag not in carried and c[flag]:
