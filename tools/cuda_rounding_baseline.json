@@ -20536,13 +20536,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "508d2945a4540eeb5f03b2125009676a893e844d7f22d6e8c9407ab2f0dda895",
+    "sha256": "589fc013acd97b94c7a631d9eba76b09f0e660ee67d980a8ad583028a04fcbae",
     "sites": {
      "100": 5792
     }
    },
    "native_differences": {
-    "sha256": "45ff21677f9f4cd4d8c568fed85cb0ca4dde8c3aec6863c9ba4cc6d229d7caa9",
+    "sha256": "71781082f8557616bdd9fcb0926222b97f89ac558f56d54acfd17e2a3a3cde23",
     "sites": {
      "100": 254
     }
@@ -20564,7 +20564,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "328a32d7585eba8e21db90f492c1e8ceb5fcd8b61846838a99941f615c561958"
+   "source_sha256": "518193302cf40bf2965719d79a39554ee70473de4dfb445926b61c26f7768cca"
   },
   "kernels:pxsfclay": {
    "assessment": "static_diagnostic_only",
@@ -26692,7 +26692,7 @@
    },
    "source_sha256": "aa3255ad884eddc46748ca4e4232188cc3a22c415444c5b956f7dc7dd3c70246"
   },
-  "literal:woof/ensemble/batch_physics.py:544": {
+  "literal:woof/ensemble/batch_physics.py:550": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {

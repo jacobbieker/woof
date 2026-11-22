@@ -1339,9 +1339,9 @@ FROZEN_MODULE_DIGESTS = {
         # floor adds from the layer below (WPLUS < 0) or RUNOFF3; without the
         # define the preprocessed program is the previous one byte for byte
         # (tests/test_noah_smc_floor_booking.py strips the block and checks the
-        # previous digest).  Previously 96e0b62e.
+        # previous digest).  Previously 96e0b62e/908ffc16.
         'a141557506413747fb31f34e3a5d14a92ddb099b3e2fa734b0657257cda992d4',
-        '908ffc160b5a9a4a807ceb282ab2fc017431bb5b8b7defb0d6e3bdf889395492'),
+        'd0553bf896a7d8f300c2fafd74ecbd098034e7aa3552dfc10414264a158d9417'),
     'noahmp_bareflux': (
         '54fb5065e95b24d4cf676e2deda29bae44b3e9305d3d98cbc1abf5ed55f444ce',
         'fbb19fc8b5668ea2edbcc1270f8ffe367475124ffa0ce99d3bc34639f3f31e9f'),
