@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -2083,12 +2083,157 @@ def lbc_final(exe: str, runner: list[str], seed: int = 20261201) -> dict:
     return out
 
 
+#: diffusion: the diff_opt 1 / km_opt 4 coefficients (diffusion.F90).
+#: WRFPLUS's ``specified`` is one flag for every side; a periodic x with
+#: specified y sides is WRF's channel (periodic_x plus specified).
+DIFF_CASES = {
+    "df_periodic": dict(op="df"),
+    "df_spec": dict(op="df", boundary_x=1, boundary_y=1),
+    "df_spec_y": dict(op="df", boundary_y=1),
+    "df_small": dict(op="df", nz=4, ny=6, nx=5),
+    "km_periodic": dict(op="km"),
+    "km_spec": dict(op="km", boundary_x=1, boundary_y=1),
+    "km_spec_y": dict(op="km", boundary_y=1),
+}
+DIFF_DIMS = dict(nz=7, ny=8, nx=9)
+
+
+def _df_layout(geom):
+    from types import SimpleNamespace as NS
+    return AdvLayout(NS(nz=geom.nz, ny=geom.ny, nx=geom.nx, open_x=geom.boundary_x,
+                        open_y=geom.boundary_y))
+
+
+def _df_head(geom, mode, sc):
+    bx, by = geom.boundary_x, geom.boundary_y
+    flags = int(not bx) | (int(not by) << 1) | (int(bool(bx or by)) << 2)
+    head = np.array([geom.nx, geom.ny, geom.nz, flags, mode], dtype=np.int32)
+    return head.tobytes() + np.asarray(sc, dtype="<f8").tobytes()
+
+
+def _df_record(geom, tr, pe, seeds):
+    """diffusion.F90 mode 1.  Halos wrap a periodic axis (a staggered end
+    face takes face 0, which woof reads there) and copy the edge of a
+    specified one (woof clamps)."""
+    L = _df_layout(geom)
+    blob = _df_head(geom, 1, [geom.rdx, geom.rdy, geom.cf1, geom.cf2, geom.cf3, 0.0, 0.0,
+                              0.0])
+    rng = np.random.default_rng(7)
+    w = rng.standard_normal((geom.nz + 1, geom.ny, geom.nx))
+    a3 = [L.pad3(tr["u"], end=False), L.pad3(pe["u"], end=False),
+          L.pad3(tr["v"], end=False), L.pad3(pe["v"], end=False),
+          L.pad3(tr["php"]), L.pad3(pe["php"]), L.pad3(tr["phb"]), L.pad3(w)]
+    a3 += [L.place3(seeds[n]) for n in ("defor11", "defor22", "defor12")]
+    a2 = [_rp_pad2(L, tr["msfu"], False), _rp_pad2(L, tr["msfv"], False), L.pad2(tr["msft"])]
+    for a in a3 + a2:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    for n in ("fnm", "fnp", "dn", "dnw"):
+        blob += np.concatenate([tr[n], [0.0]]).astype("<f8").tobytes()
+    return blob, L
+
+
+def _df_expected(geom, out, L):
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    n3 = int(np.prod(L.s3))
+    vals = np.frombuffer(out, dtype="<f8")
+    assert vals.size == 12 * n3, (vals.size, n3)
+    x = [vals[i * n3:(i + 1) * n3].reshape(L.s3, order="F") for i in range(12)]
+    m = (nz, ny, nx)
+    exp = {}
+    for i, n in enumerate(("defor11", "defor22", "defor12")):
+        exp["tl_" + n] = L.take3(x[2 * i], m)
+        exp["tl_d_" + n] = L.take3(x[2 * i + 1], m)
+        exp["adst_" + n] = L.take3(x[6 + i], m)
+    # a periodic end face folds onto face 0 (the test sums woof's two)
+    exp["ad_u"] = L.fold3(x[9], (nz, ny, nx + 1), end=False)
+    exp["ad_v"] = L.fold3(x[10], (nz, ny + 1, nx), end=False)
+    exp["ad_php"] = L.fold3(x[11], (nz + 1, ny, nx))
+    return exp
+
+
+def _km_record(geom, tr, pe, seeds):
+    L = _df_layout(geom)
+    blob = _df_head(geom, 2, [0.0, 0.0, 0.0, 0.0, 0.0, geom.dx, geom.dy, geom.c_s])
+    a3 = []
+    for n in ("defor11", "defor22", "defor12"):
+        a3 += [L.pad3(tr[n]), L.pad3(pe[n])]
+    a3 += [L.place3(seeds[n]) for n in ("xkmh", "xkhh")]
+    for a in a3 + [L.pad2(tr["msft"])]:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    return blob, L
+
+
+def _km_expected(geom, out, L):
+    n3 = int(np.prod(L.s3))
+    vals = np.frombuffer(out, dtype="<f8")
+    assert vals.size == 9 * n3, (vals.size, n3)
+    x = [vals[i * n3:(i + 1) * n3].reshape(L.s3, order="F") for i in range(9)]
+    m = (geom.nz, geom.ny, geom.nx)
+    exp = {"tl_xkmh": L.take3(x[0], m), "tl_d_xkmh": L.take3(x[1], m),
+           "tl_xkhh": L.take3(x[2], m), "tl_d_xkhh": L.take3(x[3], m),
+           "adst_xkmh": L.take3(x[4], m), "adst_xkhh": L.take3(x[5], m)}
+    for i, n in enumerate(("defor11", "defor22", "defor12")):
+        exp["ad_" + n] = L.fold3(x[6 + i], m)
+    return exp
+
+
+def diffusion(exe: str, runner: list[str], seed: int = 20261130) -> dict:
+    from woof.grad.wrfplus import diffusion as D
+    out = {}
+    for n, (name, over) in enumerate(DIFF_CASES.items()):
+        over = dict(over)
+        op = over.pop("op")
+        dims = dict(DIFF_DIMS)
+        dims.update(over)
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        if op == "df":
+            geom = cases.df_geometry(**dims)
+            geom.validate()
+            tr = cases.df_trajectory(geom, seed + 10 * n)
+            pe = cases.df_perturbation(geom, seed + 10 * n + 1)
+            sh = D.df_shapes(geom)
+            seeds = {s: rng.standard_normal(sh[s]) for s in D.DF_STATE}
+            blob, L = _df_record(geom, tr, pe, seeds)
+            expected = lambda r, g=geom, L=L: _df_expected(g, r, L)  # noqa: E731
+        else:
+            geom = cases.km_geometry(**dims)
+            geom.validate()
+            tr = cases.km_trajectory(geom, seed + 10 * n)
+            pe = cases.km_perturbation(geom, seed + 10 * n + 1)
+            sh = D.km_shapes(geom)
+            seeds = {s: rng.standard_normal(sh[s]) for s in D.KM_STATE}
+            # WRF never writes a specified axis's outer coefficient row (it
+            # keeps its cold zero), so its adjoint is not consumed there;
+            # woof overwrites the row with 0.  The seed is 0 there.
+            for s in D.KM_STATE:
+                if geom.boundary_x:
+                    seeds[s][..., 0] = seeds[s][..., -1] = 0.0
+                if geom.boundary_y:
+                    seeds[s][..., 0, :] = seeds[s][..., -1, :] = 0.0
+            blob, L = _km_record(geom, tr, pe, seeds)
+            expected = lambda r, g=geom, L=L: _km_expected(g, r, L)  # noqa: E731
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        prefix = f"{name}/"
+        out[prefix + "op"] = np.array(op)
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for kind, d in (("seed", seeds), ("traj", tr), ("pert", pe)):
+            for k, v in d.items():
+                out[prefix + kind + "/" + k] = v
+        for k, v in expected(result).items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
             "small_step": small_step, "rk_stage": rk_stage,
             "advect": advect, "bigstep": bigstep, "rhsph": rhsph,
             "coriolis": coriolis, "w_damp": w_damp,
-            "lbc": lbc, "lbc_final": lbc_final}
+            "lbc": lbc, "lbc_final": lbc_final, "diffusion": diffusion}
 
 
 def main(argv=None) -> int:
