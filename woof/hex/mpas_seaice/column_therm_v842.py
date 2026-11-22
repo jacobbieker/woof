@@ -116,7 +116,7 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     from woof.hex.mpas_ice import rkind
 
     c = configs
-    cv.refuse_unported(c, dims, biogeochemistry=True)
+    cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=True)
     if c["config_thermodynamics_type"] != "BL99":
         _refuse("config_thermodynamics_type", c["config_thermodynamics_type"],
                 "the mushy and zero-layer vertical thermodynamics are not ported",

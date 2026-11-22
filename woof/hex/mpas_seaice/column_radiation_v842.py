@@ -98,7 +98,7 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     from woof.hex.mpas_ice import rkind
 
     c = configs
-    cv.refuse_unported(c, dims, biogeochemistry=True)
+    cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=True)
     calc_tsfc = bool(c["config_calc_surface_temperature"])
     dedd = calc_tsfc and c["config_shortwave_type"] == "dEdd"
     if dedd and not rkind.trig64():
@@ -342,7 +342,7 @@ def prep_radiation(pools: dict, configs: dict, state: "cv.ColumnState") -> None:
     """``column_prep_radiation``: the shortwave fluxes scaled by the ratio of
     the new to the old net shortwave."""
     d = state.dims
-    cv.refuse_unported(configs, d, biogeochemistry=True)
+    cv.refuse_unported(configs, d, biogeochemistry=True, z_tracers=True)
     n1, n_solve, ncat, nil, nsl = d["nCells"] + 1, d["nCellsSolve"], d["nCategories"], d["nIceLayers"], d["nSnowLayers"]
     sw = pools["shortwave"]
     c1 = (n1,)

@@ -117,6 +117,7 @@ BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_so
 #: the vertical tracers' nonreactive tracer in the init and column_biogeochemistry
 BGC_NONREACTIVE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive"
 BGC_NONREACTIVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive_carry"
+BGC_NONREACTIVE_STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive_step"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -618,6 +619,21 @@ BGC_NONREACTIVE_CARRY_CASES = (
     ("ridge_nonreactive_mushy_level_ponds", 20262811, _RDG, _BGC_NR),
     ("ridge_nonreactive_bl99_thorndike_hibler_subcycles", 20262812, _RDG, {
         **_BGC_NR, **_BL99, **_THORNDIKE, **_HIBLER, "config_dynamics_subcycle_number": 2}),
+)
+_NR_STEP = {**_BGC_NR, "woof_v842_corrections": _BGC_INACTIVE}
+#: the nonreactive tracer through the column package's part of the time step (the snow
+#: and ice tracers separated after the pre-dynamics and combined before each ridging):
+#: name, seed, stage, overrides
+BGC_NONREACTIVE_STEP_CASES = (
+    ("step_nonreactive_bl99_dedd", 20262901, _STEP, {**_STEP_BASE, **_NR_STEP, "oracle_n_steps": 3,
+                                                     "config_start_time": "2001-06-01_10:00:00"}),
+    ("step_nonreactive_bl99_dedd_subcycles_gregorian", 20262902, _STEP, {
+        **_STEP_BASE, **_NR_STEP, "oracle_n_steps": 3, "config_dynamics_subcycle_number": 2,
+        "config_nIceLayers": 4, "config_nCategories": 3, "config_calendar_type": "gregorian",
+        "config_start_time": "2000-07-10_06:00:00"}),
+    ("step_nonreactive_mushy_level_ponds_no_vertical_thermodynamics", 20262903, _STEP, {
+        **_NR_STEP, "config_use_ocean_mixed_layer": False, "config_use_column_vertical_thermodynamics": False,
+        "config_mobility_type_nitrate": 0.7, "oracle_n_steps": 3, "config_start_time": "2001-07-20_12:00:00"}),
 )
 
 
@@ -1662,7 +1678,7 @@ def make_case(name, seed, stage, overrides, torus=None) -> dict:
             _nonreactive_state(rs, case)
     if stage in (_ITD, _RDG, _STEP, _SEAICE_STEP) and cv.solves_zsal(config):
         _zsal_solve_carry_state(rs, case)
-    if stage in (_ITD, _RDG) and cv.vertical_tracers(config):
+    if stage in (_ITD, _RDG, _STEP, _SEAICE_STEP) and cv.vertical_tracers(config):
         _nonreactive_carry_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
@@ -1817,7 +1833,7 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     stage = case["stage"]
     # the stages that carry the brine height (each refuses the rest itself)
     state = cv.init_parameters(dev, config, biogeochemistry=stage not in ("aggregate", "update_state", _OML),
-                               z_tracers=stage in ("init", _BGC_STAGE, _ITD, _RDG))
+                               z_tracers=stage in ("init", _BGC_STAGE, _ITD, _RDG, _STEP, _SEAICE_STEP))
     if stage == "init":
         cv.initialize_coupler_fields(dev, config, state)
         cv.init_variables(dev, config, state)
