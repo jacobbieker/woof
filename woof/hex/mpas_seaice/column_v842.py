@@ -401,6 +401,12 @@ CORRECTIONS = {
         "descriptor gfortran gives one element, so the zeroing writes to address 0 and every time step "
         "with the column biogeochemistry dies there; the correction zeroes only the fields that have an "
         "array, which nothing else reads"),
+    "zap_snow_area": (
+        "zap_small_areas zeroes the category's area and then calls zap_snow with it (ice_itd.F90:1188-1202), "
+        "so zap_snow's surface-layer snow volume dvssl = min(0.5*vsnon, hs_ssl*aicen) is 0: a zapped "
+        "category's whole snow goes to flux_bio at the interior layer's concentration, and the surface "
+        "layer's vertical tracer is lost (zap_snow_temperature passes the area it has); the correction "
+        "passes zap_snow the category's area before the zeroing"),
     "zsal_solve": (
         "colpkg_init_parameters takes solve_zsal_in but never assigns the column package's solve_zsal "
         "(ice_colpkg.F90:4325-4345; mpas_seaice_column.F:9608 has it commented out), so it stays false, and "
