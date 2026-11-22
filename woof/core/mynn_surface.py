@@ -628,6 +628,10 @@ def mynn_surface_layer_default(
     from woof.core.spp_kernel_sources import spp_flag
     stochastic = spp_flag(spp_pbl, "spp_pbl")
     fork = mynn_sfclay_variant_form(variant) == "gsl_wrf39"
+    if psih_zolzt:
+        # the device path's rule (mynn_surface_defines): refused on the fork
+        from woof.core.mynn_sfclay import mynn_surface_defines
+        mynn_surface_defines(variant, True)
     if not isinstance(itimestep, int) or itimestep < 1:
         raise ValueError("itimestep must be a positive integer")
     if isfflx not in (0, 1):

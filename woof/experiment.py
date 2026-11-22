@@ -4995,7 +4995,11 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if (tree_runs_ysu and kw.get("bl_pbl_physics", RunConfig.bl_pbl_physics) != 1
                 and "ysu_surface_heat_exner" not in dom):
             kw["ysu_surface_heat_exner"] = False
-        if (tree_runs_mynn_sl and kw.get("sf_sfclay_physics", RunConfig.sf_sfclay_physics) != 5
+        # (the gsl_wrf39 fork integrates from z0/L throughout: nothing to
+        # correct, as the umbrella's ledger has it)
+        if (tree_runs_mynn_sl
+                and (kw.get("sf_sfclay_physics", RunConfig.sf_sfclay_physics) != 5
+                     or kw.get("mynn_sfclay_variant", RunConfig.mynn_sfclay_variant) != "wrf_461")
                 and "mynn_sfclay_psih_zolzt" not in dom):
             kw["mynn_sfclay_psih_zolzt"] = False
         # woof_quirk_corrections = 'all': every opt-in correction whose

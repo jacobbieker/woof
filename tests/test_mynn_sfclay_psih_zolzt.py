@@ -171,6 +171,11 @@ def test_the_gsl_variant_refuses_the_correction():
     assert mynn_surface_defines("wrf_461", True) == (("MYNN_SL_PSIH_ZOLZT", 1),)
     with pytest.raises(ValueError, match="gsl_wrf39"):
         mynn_surface_defines("gsl_wrf39", True)
+    # the reference refuses what the device path refuses
+    from woof.core.mynn_surface import mynn_surface_layer_default
+    _, inputs = _cases()
+    with pytest.raises(ValueError, match="gsl_wrf39"):
+        mynn_surface_layer_default(inputs, variant="gsl_wrf39", psih_zolzt=True)
 
 
 def test_the_umbrella_turns_it_on_for_the_wrf461_surface_layer():
