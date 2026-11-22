@@ -3331,8 +3331,20 @@ WDM7_TIER_FRAME = TieredKernelFrame("wdm7", "WDM6_KMAX", 64, 152)
 # Additional column families declare their measured compile tiers here.
 # WSM3 reads 5664 B at 64 and 7072 B at 80 in both arithmetic arms.
 from woof.core.wsm3_constants import wsm3_level_tier as _wsm3_level_tier
+#
+# QNSE and BouLac compile ``QNSE_KMAX`` / ``BOULAC_KMAX`` at 128 for columns
+# of at most 128 levels (the source's own default, the recorded rows above)
+# and at 256 above (woof.core.pbl_level_tiers).  Both hold the whole column
+# in per-thread arrays, so the frame is linear in the tier: QNSE 132 B per
+# level (its 16,896 B row is exactly 132 x 128: 33 float columns), BouLac
+# 64 B per level plus 16 B (8,208 B at 128).
+from woof.core.pbl_level_tiers import kmax_tier as _pbl_kmax_tier
 CONDITIONAL_COLUMN_TIERED_FRAMES = {
     "wsm3": (TieredKernelFrame("wsm3", "WSM3_KMAX", 64, 88), _wsm3_level_tier),
+    "qnsepbl": (TieredKernelFrame("qnsepbl", "QNSE_KMAX", 128, 132),
+                _pbl_kmax_tier),
+    "boulac": (TieredKernelFrame("boulac", "BOULAC_KMAX", 128, 64),
+               _pbl_kmax_tier),
 }
 
 

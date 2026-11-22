@@ -1406,3 +1406,25 @@ pytest tests/test_rrtmgp.py -k "retired_ceiling or deep_column or 256_level or i
 pytest tests/test_kernel_local_bounds.py -k rrtmgp
 GPUWM_NO_LOCAL_GPU=1 pytest tests/test_preflight.py -k rrtmgp_rte_is_priced
 ```
+
+## QNSE and BouLac to 256 levels (compile-time tier)
+
+`QNSE_KMAX` (`kernels/qnsepbl.cu`, both `qnsepbl_column` and
+`mfshconv_column`) and `BOULAC_KMAX` (`kernels/boulac.cu`) size the
+per-thread column arrays, so unlike YSU they cannot be raised for free.
+Each now compiles at one of two tiers (`woof/core/pbl_level_tiers.py`): the
+source's own `#ifndef` default, 128, for every column of at most 128 levels
+-- the unchanged translation unit, so those runs are word-for-word the
+pre-tier kernel by construction -- and 256 above it, through
+`get_kernel_int_defines`. The contract ceilings
+(`QNSE_VERTICAL_LEVEL_BOUNDS`, `BOULAC_VERTICAL_LEVEL_BOUNDS`), the registry
+rows and hex's refusal all follow: 256.
+
+Frames are linear in the tier and priced per domain by
+`CONDITIONAL_COLUMN_TIERED_FRAMES` (`qnsepbl`: 132 B per level from the
+16,896 B row; `boulac`: 64 B per level from the 8,208 B row).
+`tests/test_kernel_local_bounds.py::test_the_qnse_and_boulac_tier_frames_are_what_the_driver_reports`
+reads both tiers back off the driver; `tests/test_pbl_qnse_boulac_256_levels.py`
+runs a 256-level column to a 1 hPa top (finite, non-trivial), proves the
+256 tier reproduces the unchanged kernel word for word at `nz` 49 and 128,
+and compares CUDA with Metal.
