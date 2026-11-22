@@ -1060,13 +1060,13 @@ KNOWN_CONTRACT_PINS = MappingProxyType(
             "b334506b289c6f002a2660e6c7796361e39372f6652b8e60268c1400900ab9ec"
         ),
         "coupling_contract_sha256": (
-            "3266241aea0d2481093bf7f1ed7617ca83301937dc89fa2229a6dcf30de11b69"
+            "63bee3eb7619876e423005401a4389f23563776dd94067c23667ece61e6567d5"
         ),
         "coupling_kernel_sha256": (
             "fb0aa7da49c1a5e7f5d6bacce6503214d1e550b9a60c4faaaeff237e2d719e4b"
         ),
         "adapter_contract_sha256": (
-            "dca5e7e7c299cf0c0e2e3cd216d3665f1277c3ff3b459033d168431400089702"
+            "977298d4130706e32999afe112d034b325c832b2839569422e6a1e41692af6a1"
         ),
         "arwen_contract_surface_sha256": ARWEN_CONTRACT_SURFACE_SHA256,
         "arwen_glacier_composed_tu_sha256": ARWEN_GLACIER_COMPOSED_TU_SHA256,
