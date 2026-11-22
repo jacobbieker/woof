@@ -164,3 +164,4 @@ def test_publish_metal_runs_daily_on_the_newest_tag_wheel_only():
     assert "--wheel" in build and "--sdist" not in build
     assert jobs["publish"]["if"] == "needs.resolve.outputs.publish == 'true'"
     assert jobs["publish"]["concurrency"]["cancel-in-progress"] is False
+    assert jobs["publish"]["concurrency"]["queue"] == "max"

@@ -25,8 +25,9 @@ name: publish-metal
 # explicit version, so it gets its own group per version and is never
 # cancelled by an unrelated schedule or tag run (a requested publish is not
 # lost); re-dispatching the same version replaces only its own pending run.
-# The publish job has its own non-cancelling group, so a run superseded
-# mid-upload finishes uploading.  A scheduled run executes this workflow file
+# The publish job has its own non-cancelling, queue: max group, so a run superseded
+# mid-upload finishes uploading and no pending upload is dropped.  A scheduled
+# run executes this workflow file
 # from main but builds the newest tag's source and tools; a change to how the
 # workflow calls those tools should land with its tag before the next cron.
 
@@ -269,9 +270,12 @@ jobs:
     needs: [resolve, build, smoke]
     if: needs.resolve.outputs.publish == 'true'
     # Never cancelled: a newer run may cancel the build, not an upload under way.
+    # queue: max keeps every pending upload (the default keeps only the newest
+    # pending job, which could drop an explicit manual publish).
     concurrency:
       group: publish-metal-upload
       cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-24.04
     environment:
       name: pypi-metal
