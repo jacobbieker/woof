@@ -5133,7 +5133,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.cu",
-    "sha256": "91b37015488c1a8a92a287b9f12e52eb4dba77ef11f0ae22de0e3cf38d95aedf"
+    "sha256": "ff7724604a24e2c11a86bd0efa037772f367c616753e38fb49496fcd6527cb30"
    },
    {
     "file": "woof/hex/mpas_seaice/column_dedd_v842.cu",
@@ -5141,7 +5141,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.cu",
-    "sha256": "64fb75653c143d352ec7a8607fb8ec81775f799d6c2d9bfa7a4b2396f00b4273"
+    "sha256": "850573a58c1e3719c5fba8310299d5fdcf9eb054142276e6db6fe007ed5cbbaa"
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.cu",
@@ -5161,7 +5161,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_zbgc_shared_v842.cu",
-    "sha256": "b85ccd315725f3d6d5b58895b956c1b7ae57355e27f10bbb527bc6136d734b9f"
+    "sha256": "c0bd27032a057c3213a67f21d1370f0d76d04c3d126c8938fd7571a1d3d098ee"
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.cu",
@@ -6219,7 +6219,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.py",
-    "sha256": "14b95ec396c83f52cdf7911262e430916ad4d8412ee4faa82ecf2809bcaf7acb"
+    "sha256": "eafa69503d39243d6ebde59d69dbb01c2a555532d64c3ec112a88b6ce8494c25"
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
