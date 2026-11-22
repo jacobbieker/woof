@@ -249,9 +249,7 @@ class HDGeometry:
                 i(self.boundary_y), i(self.nz), i(self.ny), i(self.nx))
 
     def validate(self) -> None:
-        _axes(self)
-        if self.row not in HD_ROWS:
-            raise ValueError(f"row is one of {sorted(HD_ROWS)}, got {self.row!r}")
+        _axes(self)   # the row is checked in __post_init__
         if not (np.isfinite(self.rdx) and np.isfinite(self.rdy)
                 and self.rdx > 0 and self.rdy > 0):
             raise ValueError("rdx and rdy must be positive and finite")
