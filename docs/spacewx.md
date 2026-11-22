@@ -421,7 +421,7 @@ the forecast is identical with the option on or off.
   on the same cell centres, on variable-resolution cells too
   (`tests/test_hex_spacewx_history_gpu.py`). The seam holds no forecast
   length, so the monthly maps after the start month load when a frame first
-  needs them. The MPAS-native hex suites still refuse the keys by name.
+  needs them. Hex's MPAS v8.4.2 suite route writes the rows per cell too (below).
 
 ## L3b: the auroral oval and the solar wind (`woof spacewx aurora`)
 
@@ -634,8 +634,37 @@ The forecast is identical with the option on or off.
   `[spacewx aurora]` start-up line records the value, the interval and the
   source. Preflight prices the held arrays and the kernel's
   32 B frame. Streamed domains refuse it. Hex's generic column seam writes the
-  rows (and option 2's energy flux) per cell, as for the ionosphere; the
-  MPAS-native hex suites still refuse the keys by name.
+  rows (and option 2's energy flux) per cell, as for the ionosphere, and hex's
+  MPAS v8.4.2 suite route writes them per cell too (below).
+
+### On hex's MPAS v8.4.2 suite route
+
+The suite route takes the WRF keys from `--physics`, as the WRF route takes them
+from its namelist: `spacewx_ionosphere_opt`, `spacewx_f107_source`,
+`spacewx_f107_mode`, `spacewx_ionosphere_maps`, `spacewx_aurora_opt` and
+`spacewx_kp_source`. Only these keys are taken out of the overrides; every other
+WRF key is still refused by name, since the MPAS Registry has none of them.
+The keys are judged by the WRF route's own checks, except that no radiation
+scheme is needed, because the rows sit on the cell centres. They are printed as
+the run starts (the `[spacewx suite]` line, then each history object's receipt)
+and recorded in the driver receipt (`spacewx_diagnostics`).
+
+Each row is a `diag` field on `nCells` in the `diagnostics` stream. It has the
+lower-case wrfout name (`iono_tec`, `aurora_zone`, `joule_power`, ...), with
+`wrf_name` holding the wrfout name, and the WRF route's units and long name.
+Each family has its own package: `spacewx_ionosphere`, `spacewx_storm`
+(`iono_storm`, ionosphere option 2), `spacewx_aurora`, `spacewx_aurora_energy`
+(aurora options 2 and 3) and `spacewx_joule` (aurora option 3).
+
+The rows are the WRF route's IonosphereHistory and AuroraHistory. They are built
+when the diagnostics bind, on the solve cells' centres (latCell/lonCell, in
+degrees), the case start and the run's final time, and evaluated at each due
+frame's valid time. On a variable-resolution mesh each cell is one column,
+whatever its size. A checkpoint continuation builds them on the straight run's
+start (the segment start less the step offset), and the checkpoint carries that
+start (`spacewx:start`), so a continuation writes the words the straight run
+would. A multi-rank mesh evaluates each rank's own cells. Without the keys, the
+Registry, the default streams and the receipt are unchanged.
 
 ## L2: solar proton events (`woof spacewx particles`)
 

@@ -1131,8 +1131,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   forecast, and `spacewx_ionosphere_opt = 2` applies the storm-time
   correction there too (plus its ratio `IONO_STORM`), from GFZ's ap with the
   latest observed ap persisted past the start; hex's generic column seam
-  writes the same rows per cell, and streamed domains refuse both for now.
-  `woof spacewx aurora`
+  writes the same rows per cell, hex's MPAS v8.4.2 suite route writes them per
+  cell from `--physics` (the aurora rows too), and streamed domains refuse both
+  for now. `woof spacewx aurora`
   places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
