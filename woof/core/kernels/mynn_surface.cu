@@ -577,6 +577,13 @@ void mynn_surface_column(
         psim10 = mynn_psim_stable(zol10) - mynn_psim_stable(zolz0);
         psih10 = mynn_psih_stable(zol10) - mynn_psih_stable(zolz0);
         psih2 = mynn_psih_stable(zol2) - mynn_psih_stable(zolz0);
+#ifdef MYNN_SL_PSIH_ZOLZT
+        // Opt-in (RunConfig.mynn_sfclay_psih_zolzt, default off): WRF
+        // module_sf_mynn.F:826-827/839-840 integrate the 2 m / 10 m heat profile
+        // from z0/L, while gz2ozt/gz10ozt and psih start at zt; take zt/L.
+        psih10 = mynn_psih_stable(zol10) - mynn_psih_stable(zolzt);
+        psih2 = mynn_psih_stable(zol2) - mynn_psih_stable(zolzt);
+#endif
     } else if (br == 0.0f) {
         regime = 3.0f; zol = 0.0f;
 #ifdef MYNN_SFCLAY_GSL_WRF39
@@ -610,6 +617,13 @@ void mynn_surface_column(
         psim10 = mynn_psim_unstable(zol10) - mynn_psim_unstable(zolz0);
         psih10 = mynn_psih_unstable(zol10) - mynn_psih_unstable(zolz0);
         psih2 = mynn_psih_unstable(zol2) - mynn_psih_unstable(zolz0);
+#ifdef MYNN_SL_PSIH_ZOLZT
+        // Opt-in (RunConfig.mynn_sfclay_psih_zolzt, default off): WRF
+        // module_sf_mynn.F:910-911/921-922 integrate the 2 m / 10 m heat profile
+        // from z0/L, while gz2ozt/gz10ozt and psih start at zt; take zt/L.
+        psih10 = mynn_psih_unstable(zol10) - mynn_psih_unstable(zolzt);
+        psih2 = mynn_psih_unstable(zol2) - mynn_psih_unstable(zolzt);
+#endif
         psih = fminf(psih, 0.9f * gz1ozt);
         psim = fminf(psim, 0.9f * gz1oz0);
         psih2 = fminf(psih2, 0.9f * gz2ozt);

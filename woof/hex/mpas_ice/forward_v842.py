@@ -85,6 +85,7 @@ import numpy as np
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ocean.forward_v842 import calendar_of, format_time, parse_time
+from woof import quirk_corrections
 
 from . import (advection_v842, analysis_v842, geometry_v842, rkind, statistics_v842, subglacial_hydro_v842, thermal_init_v842,
                velocity_simple_v842)
@@ -285,8 +286,8 @@ def check_config(config: dict, precision: str, velocity: dict) -> None:
     if int(config.get("config_year_digits", 4)) != 4:
         _refuse("config_year_digits", config["config_year_digits"], "the time stamps carry 4-digit years",
                 "config_year_digits = 4")
-    if config.get("woof_sgh_init_mask", "v842") not in SGH_INIT_MASK:
-        _refuse("woof_sgh_init_mask", config["woof_sgh_init_mask"], "not an option of this port",
+    if quirk_corrections.option(config, "woof_sgh_init_mask") not in SGH_INIT_MASK:
+        _refuse("woof_sgh_init_mask", config.get("woof_sgh_init_mask"), "not an option of this port",
                 "woof_sgh_init_mask = 'v842' | 'corrected'")
     if config.get("config_SGH", False) and int(config.get("config_num_halos", 2)) < 1:
         raise ValueError("Subglacial hydrology requires config_num_halos >= 1")
@@ -489,7 +490,7 @@ def _sgh_init(precision: str, mesh: dict, geometry: dict, hydro: dict, config: d
     n_cells = g["thickness"].shape[0]
     masks = fe._mask_configs(config)
     hydro["deltatSGH"][...] = real(1.0e-4)
-    if config.get("woof_sgh_init_mask", "v842") == "corrected":
+    if quirk_corrections.option(config, "woof_sgh_init_mask") == "corrected":
         geometry_v842.calculate_mask(mesh=mesh, geometry=g, **masks)
     _function(precision, "li_sgh_init_v842")(_grid(n_cells), (_BLOCK,), (
         h["waterThickness"], h["tillWaterThickness"], h["waterPressure"], g["thickness"], g["bedTopography"],

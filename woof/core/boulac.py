@@ -36,6 +36,7 @@ import cupy as cp
 import numpy as np
 
 from woof.core.kernels import get_kernel
+from woof.core.pbl_level_tiers import tiered_kernel
 from woof.core.state import DTYPE
 from woof.physics_vertical_contract import (
     BOULAC_VERTICAL_LEVEL_BOUNDS, outside_vertical_bounds,
@@ -89,7 +90,8 @@ def launch_boulac(columns: Mapping, surface: Mapping, tke, *, dt: float,
             breakage=(
                 "the kernel holds at most "
                 f"{BOULAC_VERTICAL_LEVEL_BOUNDS[1]} levels per column "
-                "(BOULAC_KMAX in kernels/boulac.cu) -- raise the define and "
+                "(BOULAC_KMAX in kernels/boulac.cu, compiled at the tiers of "
+                "woof.core.pbl_level_tiers) -- extend the ladder and "
                 "re-measure rather than truncating -- and below three levels "
                 "the shear and buoyancy terms, which live on the interior "
                 "levels kts+1..kte-1, do not exist."))
@@ -144,7 +146,10 @@ def launch_boulac(columns: Mapping, surface: Mapping, tke, *, dt: float,
     if n == 0:
         return _aliased(out)
     blocks = (n + _TPB - 1) // _TPB
-    kernel = get_kernel("boulac", "boulac_column")
+    # <= 128 levels compile the unchanged source; deeper columns its 256
+    # tier (woof.core.pbl_level_tiers).
+    kernel = tiered_kernel("boulac", "boulac_column", "BOULAC_KMAX", nz,
+                           get_kernel)
     kernel((blocks,), (_TPB,),
            tuple(column_arrays) + (tke,) + tuple(surface_arrays)
            + (frc, out["pblh"])

@@ -16,6 +16,6 @@ def test_preparation_stage_carries_family_bounds_without_the_executor(tmp_path,m
     assert (stage/'woof/smoke_receipts.py').is_file()
     root=Path(__file__).resolve().parents[1]
     assert hashlib.sha256((stage/table).read_bytes()).digest()==hashlib.sha256((root/table).read_bytes()).digest()
-    code='import sys; sys.path.insert(0,sys.argv[1]); from woof.physics_vertical_contract import WSM7_VERTICAL_LEVEL_BOUNDS; assert WSM7_VERTICAL_LEVEL_BOUNDS==(2,80); assert "woof.core.wsm_family" not in sys.modules; assert "cupy" not in sys.modules'
+    code='import sys; sys.path.insert(0,sys.argv[1]); from woof.physics_vertical_contract import WSM7_VERTICAL_LEVEL_BOUNDS; assert WSM7_VERTICAL_LEVEL_BOUNDS==(2,256); assert "woof.core.wsm_family" not in sys.modules; assert "cupy" not in sys.modules'
     r=subprocess.run([sys.executable,'-I','-c',code,str(stage)],capture_output=True,text=True)
     assert r.returncode==0,r.stderr

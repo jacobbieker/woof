@@ -612,8 +612,12 @@ def mynn_surface_layer_default(
     spp_pbl: int = 0,
     pattern_spp_pbl=None,
     variant: str = MYNN_SFCLAY_DEFAULT,
+    psih_zolzt: bool = False,
 ) -> dict[str, np.ndarray]:
     """Evaluate the WRF MYNN surface layer for independent columns.
+
+    ``psih_zolzt`` mirrors the kernel's opt-in MYNN_SL_PSIH_ZOLZT
+    (RunConfig.mynn_sfclay_psih_zolzt): psih2/psih10 from zt/L.
 
     ``isftcflx`` selects the over-water roughness identity and is ignored on
     land, exactly as ``module_sf_mynn.F:625`` is.  Only the four identities
@@ -624,6 +628,10 @@ def mynn_surface_layer_default(
     from woof.core.spp_kernel_sources import spp_flag
     stochastic = spp_flag(spp_pbl, "spp_pbl")
     fork = mynn_sfclay_variant_form(variant) == "gsl_wrf39"
+    if psih_zolzt:
+        # the device path's rule (mynn_surface_defines): refused on the fork
+        from woof.core.mynn_sfclay import mynn_surface_defines
+        mynn_surface_defines(variant, True)
     if not isinstance(itimestep, int) or itimestep < 1:
         raise ValueError("itimestep must be a positive integer")
     if isfflx not in (0, 1):
@@ -800,6 +808,9 @@ def mynn_surface_layer_default(
             psim10 = F(_psim_stable(zol10) - _psim_stable(zolz0))
             psih10 = F(_psih_stable(zol10) - _psih_stable(zolz0))
             psih2 = F(_psih_stable(zol2) - _psih_stable(zolz0))
+            if psih_zolzt:
+                psih10 = F(_psih_stable(zol10) - _psih_stable(zolzt))
+                psih2 = F(_psih_stable(zol2) - _psih_stable(zolzt))
         elif br == F(0.0):
             regime, zol = F(3.0), F(0.0)
             if fork:
@@ -832,6 +843,9 @@ def mynn_surface_layer_default(
             psim10 = F(_psim_unstable(zol10) - _psim_unstable(zolz0))
             psih10 = F(_psih_unstable(zol10) - _psih_unstable(zolz0))
             psih2 = F(_psih_unstable(zol2) - _psih_unstable(zolz0))
+            if psih_zolzt:
+                psih10 = F(_psih_unstable(zol10) - _psih_unstable(zolzt))
+                psih2 = F(_psih_unstable(zol2) - _psih_unstable(zolzt))
             psih = min(psih, F(0.9) * gz1ozt)
             psim = min(psim, F(0.9) * gz1oz0)
             psih2 = min(psih2, F(0.9) * gz2ozt)

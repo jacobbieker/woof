@@ -2689,6 +2689,16 @@ surface heat enters as `HFX` (`tests/test_ysu_surface_heat_exner.py`, by
 the column heat budget). It is per domain, refused off `bl_pbl_physics =
 1` and with BEP/BEM, and not yet scored against observations.
 
+**Opt-in: `mynn_sfclay_psih_zolzt` (default off).** WRF 4.7.1's MYNN
+surface layer (`module_sf_mynn.F:826-827, 839-840, 910-911, 921-922`)
+integrates the 2 m and 10 m heat stability function from `z0/L`, while the
+log term it is paired with (`gz2ozt = ln((2+z0)/zt)`) and the first-level
+`psih` start at `zt/L`. With the option on, `psih2`/`psih10` also start at
+`zt/L`, so the 2 m temperature and humidity come from one profile. Only
+T2, TH2, Q2 and the 2 m exchange coefficients move
+(`tests/test_mynn_sfclay_psih_zolzt.py`). Refused off `sf_sfclay_physics =
+5` and with the `gsl_wrf39` variant; not yet scored against observations.
+
 ## Passive tracers (`tracer_opt`)
 
 The non-Chem EM package `tracer_opt=2` carries WRF's eight dimensionless
