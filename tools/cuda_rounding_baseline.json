@@ -334,11 +334,11 @@
     "status": "unresolved"
    },
    {
-    "call_sha256": "1173c94313c4ec8f9dd541bbc8bb2282d46f3b547e3d14fca605a399244000fa",
+    "file": "woof/core/dycore.py",
     "constructor": "ElementwiseKernel",
     "factory": "_couple_momentum_kernel",
+    "call_sha256": "1173c94313c4ec8f9dd541bbc8bb2282d46f3b547e3d14fca605a399244000fa",
     "factory_sha256": "06850258f29f47fb7cb39b4c8531dcd7e386ac7e8b58a98e7bcb26e261848cdd",
-    "file": "woof/core/dycore.py",
     "status": "unresolved"
    },
    {
@@ -2686,11 +2686,11 @@
     "status": "unresolved"
    },
    {
-    "call_sha256": "f6bacb8f7278993793545febf2ba731d35fc29d2fc4baf5156c2968d9134d2a4",
+    "file": "woof/core/dycore.py",
     "constructor": "ElementwiseKernel",
     "factory": "_omega_column_kernel",
+    "call_sha256": "f6bacb8f7278993793545febf2ba731d35fc29d2fc4baf5156c2968d9134d2a4",
     "factory_sha256": "881f494f567f719369ad6f88070ecc70e53b2ab8ce96a51f5b81b0e8a55c3277",
-    "file": "woof/core/dycore.py",
     "status": "unresolved"
    },
    {
@@ -4085,7 +4085,7 @@
    },
    {
     "file": "woof/core/kernels/qnsepbl.cu",
-    "sha256": "39619abb05d5c529028733659e5433ae63ad309dc9ec028d05321d614c632a62"
+    "sha256": "2caac116c0c877141ef5afe72de1cd826def6719f656c86423a47e351408c769"
    },
    {
     "file": "woof/core/kernels/qnsesfc.cu",
@@ -4957,7 +4957,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/diffusion.cu",
-    "sha256": "d1b2cfefeebaa444976892c2b626a52a58c61f29acc7964367aa108b65dbaab4"
+    "sha256": "9e1bb2643bf94b015db6beeba44dda08d151dc6380e0da9483abba05a1921018"
    },
    {
     "file": "woof/grad/wrfplus/kernels/lbc.cu",
@@ -5391,7 +5391,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "c85aa4c74af18d2f1e322657496c17deff551ad5184c43896ddabc7ade9621ef"
+    "sha256": "5042dbb2daca01685e7744231e78e7dfadb25f5d883c42f525fc3add689467b2"
    },
    {
     "file": "woof/chem_micm.py",
@@ -5451,7 +5451,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "5414e1a59af29a05bddf120319148c2b59abc0a1415acfdd70b472be0d29aa32"
+    "sha256": "89973ae8d08cd8500276ac12e0460714cf4cf3c183c9bde23574bfbc17ca8914"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5611,7 +5611,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "e1768b37878c2ce4e0c2cb48e4c3e4d62b7ed6b3d4b8727644375436adb7dfa9"
+    "sha256": "52bbfd62d8e95edc79939ab7d2f810b90cf99cf48aab0afbd7ebe030f11f38bf"
    },
    {
     "file": "woof/core/refl.py",
@@ -20454,13 +20454,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "b6157e0dce893417e72591eb32af0a647a098609c70809ad430b433ff6094059",
+    "sha256": "57431f4b74acc214f39c6bdca17789b7eba9ebeae10b0b406473dc14145b7c5a",
     "sites": {
      "100": 270
     }
    },
    "native_differences": {
-    "sha256": "4b27a97c1593cd81b8789473f71f2569e30fa66c0402f1dee710c9e1cbe42151",
+    "sha256": "957daf17f02c25c2572ce3b33242edd155dd4f7ca023be535643869b0db6e1a4",
     "sites": {
      "100": 2
     }
@@ -20482,7 +20482,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "aae9899e31715b66707d627af8408477ebcf9a5720e45bac3d2afd64d4095c72"
+   "source_sha256": "8426c5b3b4dba44ee63d9ec9d0160fccdabfbca60975a069b2928cb47e191b5b"
   },
   "kernels:qnsesfc": {
    "assessment": "static_diagnostic_only",
