@@ -622,8 +622,8 @@ BGC_NONREACTIVE_CARRY_CASES = (
 )
 _NR_STEP = {**_BGC_NR, "woof_v842_corrections": _BGC_INACTIVE}
 #: the nonreactive tracer through the column package's part of the time step (the snow
-#: and ice tracers separated after the pre-dynamics and combined before each ridging):
-#: name, seed, stage, overrides
+#: and ice tracers separated after the pre-dynamics and combined before each ridging) and
+#: through the coupled step: name, seed, stage, overrides (and the coupled torus)
 BGC_NONREACTIVE_STEP_CASES = (
     ("step_nonreactive_bl99_dedd", 20262901, _STEP, {**_STEP_BASE, **_NR_STEP, "oracle_n_steps": 3,
                                                      "config_start_time": "2001-06-01_10:00:00"}),
@@ -634,6 +634,9 @@ BGC_NONREACTIVE_STEP_CASES = (
     ("step_nonreactive_mushy_level_ponds_no_vertical_thermodynamics", 20262903, _STEP, {
         **_NR_STEP, "config_use_ocean_mixed_layer": False, "config_use_column_vertical_thermodynamics": False,
         "config_mobility_type_nitrate": 0.7, "oracle_n_steps": 3, "config_start_time": "2001-07-20_12:00:00"}),
+    ("seaice_nonreactive_bl99_dedd_rothrock", 20262911, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_NR_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
+     (12, 6, 3)),
 )
 
 
