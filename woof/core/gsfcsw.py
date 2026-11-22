@@ -139,6 +139,8 @@ class GSFCSWShortwaveRadiation:
         t=atmosphere['temperature']; nz,ny,nx=t.shape
         words=workspace_words(nz)
         if self.gsfc_workspace.shape[1]!=words:
+            # Drop the old tier's arena first so both are never live at once.
+            self.gsfc_workspace=None
             self.gsfc_workspace=cp.empty((workspace_columns(self.latitude_deg.size),words),dtype=cp.float32)
         def cols(a): return cp.ascontiguousarray(a.transpose(1,2,0).reshape(ny*nx,a.shape[0]))
         def grid(a): return cp.ascontiguousarray(a.reshape(ny,nx,nz).transpose(2,0,1))

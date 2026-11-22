@@ -210,10 +210,7 @@ def test_the_config_admits_256_layers_and_refuses_257():
                          ztop=30000.0, dt=1.0, run_seconds=10.0,
                          ra_physics=0, ra_lw_physics=0, ra_sw_physics=2)
 
-    try:
-        validate_run_config(cfg(DEEP))
-    except ConfigurationRefused as error:
-        assert "GSFC" not in str(error), error
+    validate_run_config(cfg(DEEP))
     with pytest.raises(ConfigurationRefused, match="GSFC shortwave requires 2 to 256"):
         validate_run_config(cfg(DEEP + 1))
 
