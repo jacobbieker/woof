@@ -248,6 +248,7 @@ def _refuse(cfg, state) -> None:
         "1-D base state (no terrain)": np.ndim(state.phb) != 3,
     }
     from woof.config import radiation_scheme_ids, wrf_mixing_package_active
+    from woof.core.passive_tracer_contract import active_tracers
     from woof.core.physics_inventory import physics_enabled
     checks.update({
         "mixing package other than diff_opt 1 with km_opt 4": bool(
@@ -269,6 +270,8 @@ def _refuse(cfg, state) -> None:
         # _step_body advances these after the species; the chain does not
         "TKE scalar": getattr(state, "tke", None) is not None,
         "chem scalars": getattr(state, "chem", None) is not None,
+        # their transport (and, with the mixing, their smag rows)
+        "passive tracers": bool(active_tracers(cfg)),
     })
     if state.qv is not None:   # the primal's test (dycore._step_body)
         checks.update(_refuse_moist(cfg, state))
@@ -309,15 +312,12 @@ def _mixes(cfg) -> bool:
 
 def _refuse_mixing(cfg, state) -> dict:
     """What the diff_opt 1 / km_opt 4 binding does not cover."""
-    from woof.core.passive_tracer_contract import active_tracers
+    from woof.core.dycore import coordinate_reference_missing
     return {
         # dycore.initialize_coordinate_reference would raise: a resumed
         # state cannot rebuild WRF's t_init from evolved theta
         "a resumed diff_opt 1 state without diff1_theta_initial": bool(
-            "diff1_theta_initial" not in state._scratch
-            and getattr(state, "elapsed_seconds", 0.0) > 0.0),
-        # their smag rows (prepare_fixed_tendencies) are not bound
-        "passive tracers": bool(active_tracers(cfg)),
+            coordinate_reference_missing(state, cfg)),
         # the moist rows run after stage 1's acoustic loop with its muts
         # (add_scalar_coordinate_wrf): P3a item 5 step (e)
         "moist mixing rows (diff_opt 1 on a moist state)": state.qv is not None,
@@ -1063,14 +1063,14 @@ def _held_start_tl(x, dx, geom, snap, tl):
             _couple(dx, geom, x)
 
 
-def _held_start_ad(ax, back, geom):
+def _held_start_ad(ax, back, peek, geom):
     """Adjoint of :func:`_held_start_tl`."""
     m = geom.mix
     if m is not None:
         if not geom.specified and geom.couple:
             base = back()
             _couple(ax, geom, base)
-        base = back(pop=False)   # the rows read no slot they write
+        base = peek()   # the rows read no slot they write: no snapshot
         for row, g in reversed(m.rows):
             kind = row[0]
             hd_ad({"tend": ax[_HELD[kind]]}, _hd_traj(base, row, g), _hd_act(ax, row), g)
@@ -1192,10 +1192,9 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
     Returns the base at the step start."""
     cur = dict(x)
 
-    def back(pop=True):
+    def back():
         nonlocal cur
-        if pop:
-            cur = {**cur, **tape.pop()}
+        cur = {**cur, **tape.pop()}
         return cur
 
     if not geom.specified:
@@ -1257,7 +1256,7 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
         back()                                                    # zero_tendencies
         for n in TENDENCIES:
             ax[n][...] = 0
-    _held_start_ad(ax, back, geom)
+    _held_start_ad(ax, back, lambda: cur, geom)
     back()                                                        # _save_time_t
     for n in PROGNOSTICS + (SPECIES if geom.moist else ()):
         ax[n] += ax[n + "0"]

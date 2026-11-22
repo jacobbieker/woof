@@ -224,20 +224,23 @@ def test_mixing_step_refuses_what_it_does_not_cover(backend, tmp_path):
 cases = {"ok": dict(MIX), "diff2": dict(MIX, diff_opt=2), "km3": dict(MIX, km_opt=3),
          "moist": dict(MIX, moist=True, moist_adv_opt=0),
          "tc": dict(MIX, tc_horizontal_length_m=500.0), "mopt": dict(MIX, m_opt=1),
-         "tracer": dict(MIX, tracer_opt=2), "resumed": dict(MIX)}
+         "tracer": dict(MIX, tracer_opt=2), "resumed": dict(MIX), "carried": dict(MIX)}
 for key, over in cases.items():
     try:
         cfg = H.make_config(8, 6, 6, h_sca_adv_order=5, terrain_opt=1, **over)
         st = H.make_state(cfg, 1, geography=H.neutral_geography(cfg))
-        if key == "resumed":   # a restart that lost WRF's t_init
-            st._scratch.pop("diff1_theta_initial", None)
+        if key in ("resumed", "carried"):   # a restart, with or without WRF's t_init
+            D.initialize_coordinate_reference(st, cfg)
+            assert "diff1_theta_initial" in st._scratch
+            if key == "resumed":
+                del st._scratch["diff1_theta_initial"]
             st.elapsed_seconds = 60.0
         g = M.step_geometry(st, cfg)
         out[key] = f"accepted mix={g.mix is not None}"
     except (NotImplementedError, ValueError) as e:
         out[key] = f"{type(e).__name__}: {e}"
 '''.replace("MIX", repr(MIX)), tmp_path)
-    assert out["ok"] == "accepted mix=True", out
+    assert out["ok"] == out["carried"] == "accepted mix=True", out
     for key in ("diff2", "km3"):
         assert "mixing package other than diff_opt 1 with km_opt 4" in out[key], out
     assert "moist mixing rows" in out["moist"], out

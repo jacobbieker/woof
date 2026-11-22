@@ -859,7 +859,8 @@ Each step is one small PR, taken to merged before the next widens.
    - Still refused then: lateral boundaries other than periodic (bound
      in 8f).
 8j. Moisture, part 3 (DA item 4): moist scalar transport
-   (`woof.grad.wrfplus.scalar`). Two operators, not yet in the step:
+   (`woof.grad.wrfplus.scalar`). Two operators, bound into the step with
+   the moist binding:
    - sumflux (`sumflux_zero/accumulate/finish_tl/_ad`): `ru_m, rv_m, ww_m`
      start at zero, add `u_pp, v_pp, ww_pp` after each acoustic substep,
      and finish as `sum/nsub` plus the stage's coupled `ru, rv, ww`
@@ -889,7 +890,8 @@ Each step is one small PR, taken to merged before the next widens.
        launches' words, and each update moves the species.
      There is no WRFPLUS fixture.
 8k. Moisture, part 4 (DA item 4): the moist boundary rows
-   (`woof.grad.wrfplus.lbc`), not yet in the step.
+   (`woof.grad.wrfplus.lbc`), bound into the step with the moist
+   binding.
    - qv's rows: `LBCGeometry`/`FinalGeometry` take kind `qv` (the
      primal's code 5), a mass-grid row coupled as theta is under the
      strict build, `(c1h mu + c2h) q`. moist.py's rk_step-1 capture is a
@@ -1033,7 +1035,10 @@ Each step is one small PR, taken to merged before the next widens.
        does).
      - Refused by name: any other mixing package (diff_opt 2, km_opt 1,
        2, 3 or 5), a moist state with the mixing (9d),
-       `tc_horizontal_length_m` and `m_opt`.
+       `tc_horizontal_length_m`, `m_opt` and a resumed state without
+       `diff1_theta_initial` (`dycore.coordinate_reference_missing`, the
+       primal's own refusal). Passive tracers are refused on every step:
+       the chain carries neither their transport nor their rows.
      - Tests (`tests/test_grad_wrfplus_mix_step.py`): a warm periodic
        step, one with map factors, rotation, the hybrid coordinate and
        w_damp, a cold periodic chain of three, a warm specified step and
@@ -1050,11 +1055,12 @@ Each step is one small PR, taken to merged before the next widens.
        each neighbour's whole stencil over a window wider than the
        stencils need (5 x 5 columns and five levels for the
        deformation). A zero output adjoint skips the recompute, so a
-       step seeded with zeros hides the cost. PR #820 narrows the
-       deformation's gather to the outputs that read each word (3 x 3
-       columns at most, the levels it reads, and per term only the
-       reading rows and columns): `df_ad` 209 -> 11.6 ms, the base + AD
-       step with the mixing 252 -> 52 ms (26 ms without it). Each `hd_ad` row's mut thread
+       step seeded with zeros hides the cost. PR #820, a separate
+       change to `df_ad`, narrows the gather to the outputs that read
+       each word (3 x 3 columns at most, the levels it reads, and per
+       term only the reading rows and columns). Measured with it:
+       `df_ad` 209 -> 11.6 ms and the base + AD step with the mixing
+       252 -> 52 ms (26 ms without it). Each `hd_ad` row's mut thread
        still gathers its column's levels serially; that is left for a
        later perf pass.
    - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`).
