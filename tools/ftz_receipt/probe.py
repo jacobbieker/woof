@@ -743,6 +743,33 @@ SENSITIVITY_KERNELS = (("ftz_probe_ptx_mul", False), ("ftz_probe_ptx_cvt", True)
 #: The Metal backend's own committed table.  The CUDA receipt in ``receipt/`` cannot describe it: Metal
 #: gives different words for some probes.  ``receipt/`` is never written from a Metal run.
 METAL_PIN_DIR = Path(__file__).resolve().parent / "receipt_metal"
+#: One pinned table per CUDA device model, ``receipt_devices/<device_key>/``.  The words depend on the
+#: architecture and the driver's compile of the shipped routes, so a table measured on one card is not
+#: evidence for another.  ``receipt/`` stays the canonical receipt and is the pin for the device it records.
+DEVICE_PIN_ROOT = Path(__file__).resolve().parent / "receipt_devices"
+
+
+def device_key(name, compute_capability) -> str:
+    """Stable identity of a CUDA device model: ``sm_86-NVIDIA_RTX_A6000``.
+
+    Compute capability plus name, never the UUID, so every card of one model shares one pin.
+    """
+    major, _, minor = str(compute_capability).partition(".")
+    arch = f"sm_{major}{minor or '0'}"
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", str(name)).strip("_")
+    return f"{arch}-{slug}"
+
+
+def recorded_device_key(receipt: dict) -> str:
+    """The device key of the card ``receipt.json`` was measured on."""
+    device = receipt["device"]
+    return device_key(device["name"], device["compute_capability"])
+
+
+def active_device_key() -> str:
+    """The device key of the CUDA device this process runs on."""
+    identity = device_identity()
+    return device_key(identity["name"], identity["compute_capability"])
 
 
 def sensitivity_words(receipt: dict) -> dict:
@@ -785,6 +812,13 @@ def write_metal_pin(out_dir: Path, inventory: dict) -> None:
     (out_dir / "bitpatterns.csv").write_text(bitpatterns_csv(rows), encoding="utf-8", newline="")
     (out_dir / "sensitivity.json").write_text(
         json.dumps(sensitivity_words(receipt), indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def write_device_pin(out_dir: Path, inventory: dict) -> None:
+    """Record, from this CUDA device, its probe table in ``out_dir``."""
+    rows, _meta = run_probe(inventory)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "bitpatterns.csv").write_text(bitpatterns_csv(rows), encoding="utf-8", newline="")
 
 
 #: A CUDA device UUID is 16 bytes.  ``cudaUUID_t`` is ``char bytes[16]``
@@ -962,6 +996,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--metal-pin", action="store_true",
                         help="write only the Metal backend's table and sensitivity words "
                              "(receipt_metal beside receipt/); run under WOOF_BACKEND=mlx")
+    parser.add_argument("--device-pin", action="store_true",
+                        help="write only this CUDA device's table to "
+                             "receipt_devices/<sm_XX-device_name>/ beside receipt/")
     args = parser.parse_args(argv)
     ri.require_same_tree(__file__)
     root = Path(args.root).resolve() if args.root else ri.repo_root()
@@ -971,6 +1008,15 @@ def main(argv: list[str] | None = None) -> int:
         if backend.install() != "mlx":
             raise SystemExit("--metal-pin records the Metal backend: run under WOOF_BACKEND=mlx")
         write_metal_pin(Path(args.out) if args.out else METAL_PIN_DIR, inventory)
+        return 0
+    if args.device_pin:
+        from woof import backend
+        if backend.install() == "mlx":
+            raise SystemExit("--device-pin records a CUDA device: use --metal-pin under WOOF_BACKEND=mlx")
+        key = active_device_key()
+        out = Path(args.out) if args.out else DEVICE_PIN_ROOT / key
+        write_device_pin(out, inventory)
+        print(f"device pin {key}: {out}")
         return 0
     out_dir = (Path(args.out) if args.out
                else root / "tools" / "ftz_receipt" / "receipt")
