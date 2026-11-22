@@ -256,7 +256,7 @@ def test_a_continuation_writes_the_straight_runs_words(cp, mode):
     """Correct mode hands the continuation the straight run's step offset; exact mode does not, and the rows' start
     rides the checkpoint (state()/resume())."""
     physics = [*ION, *AURORA]
-    written = set(sw.NAMES) - {"aurora_eflux", "aurora_emean", "aurora_iflux", "joule_power"}
+    written = set(sw.NAMES) - {"iono_storm", "aurora_eflux", "aurora_emean", "aurora_iflux", "joule_power"}
     when = START + timedelta(hours=5)
     straight_owner, straight = _module(cp, physics, written)
     want = _publish(straight_owner, straight, int(5 * 3600 / DT), when)
