@@ -205,7 +205,7 @@ class MixSpec:
     prp: object
     df: DFGeometry
     km: KMGeometry
-    rows: tuple               # (held kind, HDGeometry) in _MIX_ROWS' order
+    rows: tuple               # (_MIX_ROWS entry, HDGeometry)
 
 
 @dataclass(frozen=True)
@@ -247,8 +247,7 @@ def _refuse(cfg, state) -> None:
         # the float step would not reproduce its words.
         "1-D base state (no terrain)": np.ndim(state.phb) != 3,
     }
-    from woof.config import radiation_scheme_ids
-    from woof.core.dycore import wrf_mixing_package_active
+    from woof.config import radiation_scheme_ids, wrf_mixing_package_active
     from woof.core.physics_inventory import physics_enabled
     checks.update({
         "mixing package other than diff_opt 1 with km_opt 4": bool(
@@ -304,14 +303,21 @@ def _mixes(cfg) -> bool:
     """Whether the step runs WRF's diff_opt 1 / km_opt 4 mixing (the
     package dycore.prepare_fixed_tendencies builds, on the coordinate
     branch with smag2d_km's coefficients)."""
-    from woof.config import constant_k_mixing_active, wrf_mixing_package_active
-    return (bool(wrf_mixing_package_active(cfg)) and int(cfg.diff_opt) == 1
-            and int(cfg.km_opt) == 4 and not constant_k_mixing_active(cfg))
+    # km_opt 4 runs the package on its own (wrf_mixing_package_active)
+    return int(cfg.diff_opt) == 1 and int(cfg.km_opt) == 4
 
 
 def _refuse_mixing(cfg, state) -> dict:
     """What the diff_opt 1 / km_opt 4 binding does not cover."""
+    from woof.core.passive_tracer_contract import active_tracers
     return {
+        # dycore.initialize_coordinate_reference would raise: a resumed
+        # state cannot rebuild WRF's t_init from evolved theta
+        "a resumed diff_opt 1 state without diff1_theta_initial": bool(
+            "diff1_theta_initial" not in state._scratch
+            and getattr(state, "elapsed_seconds", 0.0) > 0.0),
+        # their smag rows (prepare_fixed_tendencies) are not bound
+        "passive tracers": bool(active_tracers(cfg)),
         # the moist rows run after stage 1's acoustic loop with its muts
         # (add_scalar_coordinate_wrf): P3a item 5 step (e)
         "moist mixing rows (diff_opt 1 on a moist state)": state.qv is not None,
@@ -539,9 +545,9 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
             km=KMGeometry(nz, ny, nx, dx=float(f32(dx)), dy=float(f32(dy)),
                           c_s=float(f32(cfg.c_s)), prandtl=float(f32(D._PRANDTL)),
                           boundary_x=bx, boundary_y=by),
-            rows=tuple((kind, HDGeometry(nz, ny, nx, rdx, rdy, row=row, boundary_x=bx,
-                                         boundary_y=by))
-                       for kind, row, *_ in _MIX_ROWS))
+            rows=tuple((r, HDGeometry(nz, ny, nx, rdx, rdy, row=r[1], boundary_x=bx,
+                                      boundary_y=by))
+                       for r in _MIX_ROWS))
         held = tuple(_HELD)
     else:
         held = tuple(lb["fold"]) if spec else ()
@@ -685,7 +691,8 @@ def _mix_state(state, cfg, dtype) -> dict:
     """The mixing's arrays: the deformation, the coefficients and the row
     mass (written each step), the vertical metrics the deformation reads
     and WRF's initial theta (dycore.initialize_coordinate_reference, which
-    the primal's first step would take the same way), passive."""
+    the primal's first step would take the same way, storing it on the
+    state), passive as in WRFPLUS."""
     import cupy as cp
     from woof.core import dycore as D
     nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
@@ -1044,8 +1051,9 @@ def _held_start_tl(x, dx, geom, snap, tl):
     cp.add(x["mub2d"], x["mup0"], out=x["smag_mut"])
     if tl:
         dx["smag_mut"][...] = dx["mup0"]
-    for (kind, g), row in zip(m.rows, _MIX_ROWS):
-        snap((_HELD[kind],))
+    # each row adds into its own slot, zeroed above: no snapshot needed
+    for row, g in m.rows:
+        kind = row[0]
         hd_tl({"tend": x[_HELD[kind]]}, {"tend": dx[_HELD[kind]]}, _hd_traj(x, row, g),
               _hd_act(dx, row), g, nl=True)
     if not geom.specified and geom.couple:
@@ -1062,8 +1070,9 @@ def _held_start_ad(ax, back, geom):
         if not geom.specified and geom.couple:
             base = back()
             _couple(ax, geom, base)
-        for (kind, g), row in reversed(tuple(zip(m.rows, _MIX_ROWS))):
-            base = back()
+        base = back(pop=False)   # the rows read no slot they write
+        for row, g in reversed(m.rows):
+            kind = row[0]
             hd_ad({"tend": ax[_HELD[kind]]}, _hd_traj(base, row, g), _hd_act(ax, row), g)
         back()
         ax["mup0"] += ax["smag_mut"]
@@ -1183,9 +1192,10 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
     Returns the base at the step start."""
     cur = dict(x)
 
-    def back():
+    def back(pop=True):
         nonlocal cur
-        cur = {**cur, **tape.pop()}
+        if pop:
+            cur = {**cur, **tape.pop()}
         return cur
 
     if not geom.specified:

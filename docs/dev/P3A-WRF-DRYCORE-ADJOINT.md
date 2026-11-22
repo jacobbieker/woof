@@ -955,7 +955,7 @@ Each step is one small PR, taken to merged before the next widens.
    and `horizontal_diffusion_3dmp` ('m', theta minus t_init, with xkhh).
    (`horizontal_diffusion_2` is diff_opt 2 only.) The split:
    - 9a. The coefficients (`woof.grad.wrfplus.diffusion`,
-     `kernels/diffusion.cu`), not yet in the step.
+     `kernels/diffusion.cu`), bound into the step by 9c.
      - `df_tl/_ad`: defor11, defor22, defor12 of u, v and ph' (3-D
        phb, map factors, periodic or bounded axes) on woof's strict
        `wrf_smag_deform` (the `GPUWM_WRF_EXACT_C_DIFFUSION` statements;
@@ -988,8 +988,8 @@ Each step is one small PR, taken to merged before the next widens.
        max(jds+1, jts) but fills them from j_start = jts on a periodic y
        axis, so it overruns them there: the fully periodic case is TL
        only.
-   - 9b. The rows (`woof.grad.wrfplus.diffusion.hd_tl/_ad`), not yet in
-     the step: `G_/A_HORIZONTAL_DIFFUSION` ('u', 'v', 'w' and a scalar
+   - 9b. The rows (`woof.grad.wrfplus.diffusion.hd_tl/_ad`), bound into
+     the step by 9c: `G_/A_HORIZONTAL_DIFFUSION` ('u', 'v', 'w' and a scalar
      row, which 9d binds for moisture) and
      `g_/a_horizontal_diffusion_3dmp` (theta minus its initial field) on
      `wrf_diff_opt1_horizontal`.
@@ -1050,8 +1050,12 @@ Each step is one small PR, taken to merged before the next widens.
        each neighbour's whole stencil over a window wider than the
        stencils need (5 x 5 columns and five levels for the
        deformation). A zero output adjoint skips the recompute, so a
-       step seeded with zeros hides the cost. The windows are narrowed
-       in their own PR.
+       step seeded with zeros hides the cost. PR #820 narrows the
+       deformation's window to the stencil's reach (3 x 3 columns, and
+       the levels it reads): `df_ad` 209 -> 31 ms, the base + AD step
+       with the mixing 252 -> 75 ms. Each `hd_ad` row's mut thread
+       still gathers its column's levels serially; that is left for a
+       later perf pass.
    - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`).
    `sixth_order_diffusion` and diff_opt 2 are not started.
 

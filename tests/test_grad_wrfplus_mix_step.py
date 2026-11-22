@@ -217,16 +217,21 @@ def test_mixing_step_tl_matches_finite_differences(backend, tmp_path):
 
 @pytest.mark.parametrize("backend", NO_MLX[:1])
 def test_mixing_step_refuses_what_it_does_not_cover(backend, tmp_path):
-    """diff_opt 2, another km_opt, a moist state, the TC horizontal length
-    and m_opt are refused by name; diff_opt 1 / km_opt 4 is accepted."""
+    """diff_opt 2, another km_opt, a moist state, the TC horizontal length,
+    m_opt, passive tracers and a resumed state without WRF's t_init are
+    refused by name; diff_opt 1 / km_opt 4 is accepted."""
     out = _run_periodic(backend, '''
 cases = {"ok": dict(MIX), "diff2": dict(MIX, diff_opt=2), "km3": dict(MIX, km_opt=3),
          "moist": dict(MIX, moist=True, moist_adv_opt=0),
-         "tc": dict(MIX, tc_horizontal_length_m=500.0), "mopt": dict(MIX, m_opt=1)}
+         "tc": dict(MIX, tc_horizontal_length_m=500.0), "mopt": dict(MIX, m_opt=1),
+         "tracer": dict(MIX, tracer_opt=2), "resumed": dict(MIX)}
 for key, over in cases.items():
     try:
         cfg = H.make_config(8, 6, 6, h_sca_adv_order=5, terrain_opt=1, **over)
         st = H.make_state(cfg, 1, geography=H.neutral_geography(cfg))
+        if key == "resumed":   # a restart that lost WRF's t_init
+            st._scratch.pop("diff1_theta_initial", None)
+            st.elapsed_seconds = 60.0
         g = M.step_geometry(st, cfg)
         out[key] = f"accepted mix={g.mix is not None}"
     except (NotImplementedError, ValueError) as e:
@@ -238,3 +243,5 @@ for key, over in cases.items():
     assert "moist mixing rows" in out["moist"], out
     assert "tc_horizontal_length_m" in out["tc"], out
     assert "m_opt" in out["mopt"], out
+    assert "passive tracers" in out["tracer"], out
+    assert "without diff1_theta_initial" in out["resumed"], out
