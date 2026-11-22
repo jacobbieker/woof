@@ -4085,7 +4085,7 @@
    },
    {
     "file": "woof/core/kernels/qnsepbl.cu",
-    "sha256": "7610b66ff3d41ff1a8cef51f47385abc935ad79bb13c6860c7f9463cefcb3fbf"
+    "sha256": "0135d84ede5ea65942289f28e80ca25d3c438f521948b56ae1ec2c6c62bafde7"
    },
    {
     "file": "woof/core/kernels/qnsesfc.cu",
@@ -20429,7 +20429,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "91bfdcbe49ac5ecf1eae1363e145026f010939364136e44810a66d11eb44f371"
+   "source_sha256": "82e5c365045a84b7932df5284a6dc648fa1ee5eafdc2b9c74f99931ac3ac899d"
   },
   "kernels:qnsesfc": {
    "assessment": "static_diagnostic_only",
