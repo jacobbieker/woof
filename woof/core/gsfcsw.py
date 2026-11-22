@@ -13,16 +13,26 @@ from woof.core.thompson_contract import TableAsset, read_validated_table_asset
 
 TABLE_ROOT = Path(__file__).resolve().parents[1] / 'data/wrf_radiation/gsfcsw'
 TABLE_ASSET = TableAsset('coefficients.f32',9896,'a23e21798425039a82cf799f81c638a9f6bb7b0562c586829f05bdff10abc533')
-MAX_LAYERS = 128
-WORKSPACE_WORDS = 32677
+from woof.core.gsfcsw_levels import DEEP_KMAX as MAX_LAYERS, kmax_tier, workspace_words
+#: Arena words per column of the shipped (<= 128 layer) tier; deeper columns
+#: use ``workspace_words(nlay)``.
+WORKSPACE_WORDS = workspace_words(128)
 COLUMN_CHUNK = 4096
 
 def workspace_columns(columns):
     return min((int(columns)+31)//32*32,COLUMN_CHUNK)
 
-def workspace_bytes(columns):
+def workspace_bytes(columns,nlay=128):
     """Bounded call workspace, also charged by forecast preflight."""
-    return workspace_columns(columns)*WORKSPACE_WORDS*4
+    return workspace_columns(columns)*workspace_words(nlay)*4
+
+def gsfcsw_kernel(nlay):
+    """The column kernel at the tier of an nlay-layer column: the plain
+    loader (unchanged source) to 128 layers, GSFC_KMAX=256 above."""
+    from woof.core.kernels import get_kernel_int_defines, load_module
+    tier=kmax_tier(nlay)
+    if tier==128: return load_module('gsfcsw').get_function('gsfcsw_columns_kernel')
+    return get_kernel_int_defines('gsfcsw','gsfcsw_columns_kernel',(('GSFC_KMAX',tier),))
 
 def load_tables(root=None):
     """Refuse changed coefficient words before a physics call."""
@@ -44,9 +54,8 @@ def packed_columns(inputs,nlay,*,warm_rain=False,f_qi=True,f_qndrop=False,
     field for a native module replay; spectrum adapters start from zero.
     """
     import cupy as cp
-    from woof.core.kernels import load_module
     if isinstance(nlay,bool) or not isinstance(nlay,(int,np.integer)) or not 2<=nlay<=MAX_LAYERS:
-        raise ValueError('GSFC shortwave requires 2 to 128 layers; larger columns exceed its allocated CUDA workspace')
+        raise ValueError('GSFC shortwave requires 2 to 256 layers')
     if not 1<=int(julday)<=366: raise ValueError('julday must be 1 to 366')
     if not np.isfinite(solcon) or solcon<=0 or not np.isfinite(center_lat) or abs(center_lat)>90:
         raise ValueError('solcon must be positive and center_lat must be a valid latitude')
@@ -62,11 +71,12 @@ def packed_columns(inputs,nlay,*,warm_rain=False,f_qi=True,f_qndrop=False,
         if incoming.shape!=(a.shape[0],nlay):
             raise ValueError('incoming GSFC heating must have shape (ncol,nlay)')
         out[:,:nlay]=incoming
-    kernel=load_module('gsfcsw').get_function('gsfcsw_columns_kernel')
+    kernel=gsfcsw_kernel(nlay)
     width=min(a.shape[0],COLUMN_CHUNK)
+    words=workspace_words(nlay)
     if workspace is None:
-        workspace=cp.empty((workspace_columns(width),WORKSPACE_WORDS),dtype=cp.float32)
-    if workspace.dtype!=cp.float32 or not workspace.flags.c_contiguous or workspace.size<workspace_columns(width)*WORKSPACE_WORDS:
+        workspace=cp.empty((workspace_columns(width),words),dtype=cp.float32)
+    if workspace.dtype!=cp.float32 or not workspace.flags.c_contiguous or workspace.size<workspace_columns(width)*words:
         raise ValueError('GSFC workspace is too small or not contiguous float32')
     for first in range(0,a.shape[0],width):
         count=min(width,a.shape[0]-first)
@@ -117,6 +127,7 @@ class GSFCSWShortwaveRadiation:
         if not np.isfinite(self.center_lat) or abs(self.center_lat)>90:
             raise ValueError("GSFC center latitude must be finite and within 90 degrees")
         self.gsfc_coefficients=cp.asarray(load_tables())
+        # The shipped tier; a call deeper than 128 layers replaces it with the deep tier's.
         self.gsfc_workspace=cp.empty((workspace_columns(self.latitude_deg.size),WORKSPACE_WORDS),dtype=cp.float32)
 
     def __call__(self,*,atmosphere,fields,state,cfg):
@@ -126,6 +137,9 @@ class GSFCSWShortwaveRadiation:
         from woof.core.rrtmgp import cal_cldfra1, cal_cldfra2
         from woof.core.rrtmg_legacy import legacy_cloud_fraction_flags
         t=atmosphere['temperature']; nz,ny,nx=t.shape
+        words=workspace_words(nz)
+        if self.gsfc_workspace.shape[1]!=words:
+            self.gsfc_workspace=cp.empty((workspace_columns(self.latitude_deg.size),words),dtype=cp.float32)
         def cols(a): return cp.ascontiguousarray(a.transpose(1,2,0).reshape(ny*nx,a.shape[0]))
         def grid(a): return cp.ascontiguousarray(a.reshape(ny,nx,nz).transpose(2,0,1))
         zero=cp.zeros_like(t)
@@ -173,4 +187,4 @@ class GSFCSWShortwaveRadiation:
     def restart_identity(self):
         from woof.io.restart import _array_setup_identity
         coefficients_state=_array_setup_identity(self.gsfc_coefficients)
-        return {'algorithm':'wrf-v4.7.1-gsfc-shortwave','coefficients_sha256':TABLE_ASSET.sha256,'coefficients_state':coefficients_state,'center_lat':self.center_lat,'icloud':self.icloud,'supported_path':'no-chem','max_layers':MAX_LAYERS}
+        return {'algorithm':'wrf-v4.7.1-gsfc-shortwave','coefficients_sha256':TABLE_ASSET.sha256,'coefficients_state':coefficients_state,'center_lat':self.center_lat,'icloud':self.icloud,'supported_path':'no-chem','max_layers':128}
