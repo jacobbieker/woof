@@ -32,6 +32,15 @@ fork already had, upstream's keys and flags are now the only ones:
 New:
 
 - The WRF dry-step adjoint's step (`woof.grad.wrfplus.model`) now covers
+  diff_opt 1 / km_opt 4 horizontal mixing on a dry state, periodic or
+  specified: the deformation, smag2d_km and the u, v, w and theta rows
+  of the time-t fields into the held tendencies, their map-factor
+  coupling (after the folded relaxation on a specified domain) and their
+  add on every stage. The binary32 base reproduces `dycore.step` word
+  for word. Other mixing packages and moist states with mixing are still
+  refused. The forecast path is unchanged.
+
+- The WRF dry-step adjoint's step (`woof.grad.wrfplus.model`) now covers
   a moist state without microphysics (qv, qc and qr): calc_cq, the moist
   pressure gradient, buoyancy and diagnosis, sumflux and the non-PD
   scalar update, qv's boundary capture and spec_bdy_final, and

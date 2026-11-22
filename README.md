@@ -1279,10 +1279,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   sumflux and the non-PD scalar update, and qv's boundary rows with
   flow_dep_bdy for qc and qr). The forecast path does not import any of
   it.
-  The first diffusion pieces
-  (`woof.grad.wrfplus.diffusion`, diff_opt 1 / km_opt 4) are kernels,
-  not yet in the step: the deformation (WRF `compute_diff_metrics` +
-  `cal_deform_and_div`) and `smag2d_km`'s xkmh/xkhh with the 10 * mlen
+  On a dry state the step also covers WRF's diff_opt 1 / km_opt 4
+  horizontal mixing (`woof.grad.wrfplus.diffusion`, bound into the step
+  on periodic and specified domains, word for word against
+  `dycore.step`; the moist rows are next): the deformation (WRF
+  `compute_diff_metrics` + `cal_deform_and_div`) and `smag2d_km`'s xkmh/xkhh with the 10 * mlen
   cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
   `wrf_diff_opt1_km4` word for word, and they match WRFPLUS to about
   4e-16, except at the top level of a periodic seam, where WRF keeps a

@@ -19,7 +19,10 @@ dry or moist without microphysics (qv, qc and qr: calc_cq, the moist
 pressure gradient, buoyancy, diagnosis and acoustic cq, sumflux and the
 non-positive-definite scalar update, and on a specified domain qv's
 held boundary tendency and spec_bdy_final with flow_dep_bdy for qc and
-qr), no physics or mixing, ``rk_ord = 3``, ``h_*_adv_order`` 3-6, a 3-D
+qr), on a dry state WRF's diff_opt 1 / km_opt 4 horizontal mixing (the
+deformation, smag2d_km and the u, v, w and theta rows of the time-t
+fields into the held tendencies, coupled to the map factors and added on
+every stage), no physics, ``rk_ord = 3``, ``h_*_adv_order`` 3-6, a 3-D
 base state (terrain) and the w_damp limiter.
 Everything else is refused by :func:`step_geometry`.
 """
@@ -51,6 +54,8 @@ from .bigstep import (BUOY_ACTIVE, BUOY_PASSIVE, BUOY_STATE, CC_ACTIVE,
                       GeoGeometry, PGFGeometry, WDampGeometry, buoy_ad, buoy_tl,
                       cc_ad, cc_tl, cq_ad, cq_tl, geo_ad, geo_tl, pgf_ad, pgf_tl,
                       wd_ad, wd_tl)
+from .diffusion import (DF_PASSIVE, DF_STATE, DFGeometry, HDGeometry, KMGeometry,
+                        df_ad, df_tl, hd_ad, hd_tl, km_ad, km_tl)
 from .scalar import (SUMFLUX, ScalarGeometry, SumfluxGeometry, su_ad, su_tl,
                      sumflux_accumulate_ad, sumflux_accumulate_tl,
                      sumflux_finish_ad, sumflux_finish_tl, sumflux_zero_ad,
@@ -105,11 +110,26 @@ _LBC_FINAL = {"u": "u", "v": "v", "theta": "thp", "phi": "php", "mu": "mup", "qv
 #: The relaxation rows' passive names (state_relaxation_multi's header:
 #: msfv is MSFV_INV in the strict build).
 _LB_PASS = {"mub": "mub2d", "msfv": "msfv_inv", "fcx": "lbc_fcx", "gcx": "lbc_gcx"}
-#: fold_lateral_relaxation's held slot per folded row, the map factor the
-#: relaxation is scaled by and the one it is then divided by ("inv": times
-#: msfv_inv, as _couple_dry_mixing_map_factor does under BIGSTEP).
-_FOLD = {"u": ("fold_u", "msfu", "msfu"), "v": ("fold_v", "msfv", "inv"),
-         "theta": ("fold_theta", None, "msft")}
+#: The held dry tendencies (prepare_fixed_tendencies' smag_r* slots, WRF's
+#: *_tendf): zeroed at the step start, filled by the mixing rows and on a
+#: specified domain the folded stage-1 relaxation, coupled to the map
+#: factor once and added to the stage tendency on every stage
+#: (add_fixed_dry_tendencies).
+_HELD = {"u": "smag_ru", "v": "smag_rv", "w": "smag_rw", "theta": "smag_rth"}
+_HELD_TEND = {"u": "ru_t", "v": "rv_t", "w": "rw_t", "theta": "rth_t"}
+#: _couple_dry_mixing_map_factor's divisor per held row (v: times msfv_inv
+#: under BIGSTEP, else divided by msfv).
+_COUPLE = {"u": "msfu", "v": "msfv", "w": "msft", "theta": "msft"}
+#: The map factor fold_lateral_relaxation scales each folded row by.
+_FOLD_SCALE = {"u": "msfu", "v": "msfv", "theta": None}
+#: _compute_coordinate_tendencies' rows at the step start (_smag2d_specs'
+#: order): held kind, wrf_diff_opt1_horizontal row, the time-t field, the
+#: coefficient and the hybrid mass weights.  Theta mixes thp0 (the strict
+#: basis) as its departure from diff1_theta_initial.
+_MIX_ROWS = (("u", "u", "u0", "smag_km", "c1h", "c2h"),
+             ("v", "v", "v0", "smag_km", "c1h", "c2h"),
+             ("w", "w", "w0", "smag_km", "c1f", "c2f"),
+             ("theta", "t", "thp0", "smag_kh", "c1h", "c2h"))
 
 
 def step_inputs(geom) -> tuple:
@@ -178,6 +198,17 @@ class StageSpec:
 
 
 @dataclass(frozen=True)
+class MixSpec:
+    """diff_opt 1 / km_opt 4 at the step start (prepare_fixed_tendencies):
+    the cold step's diagnosis before it (None when rk_step 1 reuses the
+    carried one), the deformation, the coefficients and the rows."""
+    prp: object
+    df: DFGeometry
+    km: KMGeometry
+    rows: tuple               # (held kind, HDGeometry) in _MIX_ROWS' order
+
+
+@dataclass(frozen=True)
 class StepGeometry:
     nz: int
     ny: int
@@ -189,6 +220,10 @@ class StepGeometry:
     capture: tuple = ()       # stage 1's held relaxation: (kind, LBCGeometry)
     fold: tuple = ()          # the folded kinds (u, v, theta)
     fold_msf: bool = False    # the fold's map-factor scaling (state.has_msf)
+    mix: object = None        # MixSpec: diff_opt 1 / km_opt 4
+    held: tuple = ()          # the held rows added on every stage (_HELD)
+    couple: tuple = ()        # the held rows divided by their map factor
+    v_inv: bool = True        # v's coupling times msfv_inv (BIGSTEP)
     final: tuple = ()         # spec_bdy_final: (kind, FinalGeometry), mu first
     moist: bool = False       # qv, qc and qr (SPECIES)
     qv_table: bool = False    # specified, with qv's tables (held capture, final)
@@ -216,7 +251,8 @@ def _refuse(cfg, state) -> None:
     from woof.core.dycore import wrf_mixing_package_active
     from woof.core.physics_inventory import physics_enabled
     checks.update({
-        "mixing package": bool(wrf_mixing_package_active(cfg)),
+        "mixing package other than diff_opt 1 with km_opt 4": bool(
+            wrf_mixing_package_active(cfg) and not _mixes(cfg)),
         # what else _step_body runs that the chain does not
         "physics": bool(physics_enabled(cfg)),
         "radiation selector 31 (idealized Rayleigh friction)":
@@ -237,6 +273,8 @@ def _refuse(cfg, state) -> None:
     })
     if state.qv is not None:   # the primal's test (dycore._step_body)
         checks.update(_refuse_moist(cfg, state))
+    if _mixes(cfg):
+        checks.update(_refuse_mixing(cfg, state))
     if cfg.specified:
         checks.update(_refuse_specified(cfg, state))
     bad = [k for k, v in checks.items() if v]
@@ -259,6 +297,26 @@ def _refuse_moist(cfg, state) -> dict:
             or getattr(state, "etanew_restart_state", None) is not None
             or any(getattr(state, n, None) is None for n in SPECIES)),
         "moist_cq off": not bool(getattr(cfg, "moist_cq", True)),
+    }
+
+
+def _mixes(cfg) -> bool:
+    """Whether the step runs WRF's diff_opt 1 / km_opt 4 mixing (the
+    package dycore.prepare_fixed_tendencies builds, on the coordinate
+    branch with smag2d_km's coefficients)."""
+    from woof.config import constant_k_mixing_active, wrf_mixing_package_active
+    return (bool(wrf_mixing_package_active(cfg)) and int(cfg.diff_opt) == 1
+            and int(cfg.km_opt) == 4 and not constant_k_mixing_active(cfg))
+
+
+def _refuse_mixing(cfg, state) -> dict:
+    """What the diff_opt 1 / km_opt 4 binding does not cover."""
+    return {
+        # the moist rows run after stage 1's acoustic loop with its muts
+        # (add_scalar_coordinate_wrf): P3a item 5 step (e)
+        "moist mixing rows (diff_opt 1 on a moist state)": state.qv is not None,
+        "tc_horizontal_length_m": bool(getattr(cfg, "tc_horizontal_length_m", 0)),
+        "m_opt (the SFS output capture)": bool(getattr(cfg, "m_opt", 0)),
     }
 
 
@@ -470,6 +528,23 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
             lbc=lb["rows"][istage] if spec else (),
             sph=SpecPhiGeometry(nz, ny, nx, dtau, spec_zone=szone) if spec else None,
             **moist_parts))
+    mix = None
+    if _mixes(cfg):
+        # launch_wrf_smag2d_km's and launch_coordinate_horizontal's scalars
+        mix = MixSpec(
+            prp=stages[0].diagnose,   # _step_body's cold diagnosis before the mixing
+            df=DFGeometry(nz, ny, nx, rdx, rdy, cf1=float(f32(state.cf1)),
+                          cf2=float(f32(state.cf2)), cf3=float(f32(state.cf3)),
+                          boundary_x=bx, boundary_y=by),
+            km=KMGeometry(nz, ny, nx, dx=float(f32(dx)), dy=float(f32(dy)),
+                          c_s=float(f32(cfg.c_s)), prandtl=float(f32(D._PRANDTL)),
+                          boundary_x=bx, boundary_y=by),
+            rows=tuple((kind, HDGeometry(nz, ny, nx, rdx, rdy, row=row, boundary_x=bx,
+                                         boundary_y=by))
+                       for kind, row, *_ in _MIX_ROWS))
+        held = tuple(_HELD)
+    else:
+        held = tuple(lb["fold"]) if spec else ()
     return StepGeometry(
         nz, ny, nx, tuple(stages),
         end_prp=PRPGeometry(nz, ny, nx, hypso=hypso, carried=1, p_top=p_top,
@@ -477,7 +552,9 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
         sw=SWGeometry(nz, ny, nx, half_rdx=float(f32(0.5 / dx)),
                       half_rdy=float(f32(0.5 / dy)), mapped=msf, boundary_x=bx,
                       boundary_y=by, **cf),
-        specified=spec, moist=moist, qv_table=qvt, **({} if not spec else dict(
+        specified=spec, moist=moist, qv_table=qvt, mix=mix, held=held,
+        couple=held if msf else (), v_inv=bool(D.BIGSTEP_ENABLED),
+        **({} if not spec else dict(
             capture=lb["capture"], fold=lb["fold"], fold_msf=bool(msf),
             final=lb["final"])))
 
@@ -594,8 +671,31 @@ def run_state(state, cfg, dtype=np.float64) -> dict:
             out[n] = cp.ascontiguousarray(
                 cp.asarray(state.scratch(shape, slot)).astype(dtype, copy=True))
         out["moist_tend"] = cp.zeros((nz, ny, nx), dtype=dtype)
+    if cfg.specified or _mixes(cfg):   # the held tendencies (_HELD)
+        for n, shape in zip(_HELD.values(), (sh["ru"], sh["rv"], sh["ww_ref"], sh["p_pert"])):
+            out[n] = cp.zeros(shape, dtype=dtype)
+    if _mixes(cfg):
+        out.update(_mix_state(state, cfg, dtype))
     if cfg.specified:
         out.update(_lbc_state(state, cfg, dtype))
+    return out
+
+
+def _mix_state(state, cfg, dtype) -> dict:
+    """The mixing's arrays: the deformation, the coefficients and the row
+    mass (written each step), the vertical metrics the deformation reads
+    and WRF's initial theta (dycore.initialize_coordinate_reference, which
+    the primal's first step would take the same way), passive."""
+    import cupy as cp
+    from woof.core import dycore as D
+    nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
+    D.initialize_coordinate_reference(state, cfg)
+    out = {n: cp.zeros((nz, ny, nx), dtype=dtype)
+           for n in DF_STATE + ("smag_km", "smag_kh")}
+    out["smag_mut"] = cp.zeros((ny, nx), dtype=dtype)
+    for n, a in (("dn", state.dn), ("dnw", state.dnw),
+                 ("diff1_theta_initial", state._scratch["diff1_theta_initial"])):
+        out[n] = cp.ascontiguousarray(cp.asarray(a).astype(dtype, copy=True))
     return out
 
 
@@ -603,7 +703,7 @@ def _lbc_state(state, cfg, dtype) -> dict:
     """The specified binding's arrays: the interval's tables and Davies
     weights (lateral_bc._relaxation_context), the carried mu halo (mup
     where none is carried: the first step does not read it), the held
-    relaxation rows, the folded slots and the mu row's unread source;
+    relaxation rows and the mu row's unread source;
     with qv's tables, those and qv's held tendency (and its row's unread
     held slot)."""
     import cupy as cp
@@ -627,7 +727,6 @@ def _lbc_state(state, cfg, dtype) -> dict:
     u, v, m, w = (nz, ny, nx + 1), (nz, ny + 1, nx), (nz, ny, nx), (nz + 1, ny, nx)
     for n, sh in (("lbc_held_u", u), ("lbc_held_v", v), ("lbc_held_theta", m),
                   ("lbc_held_phi", w), ("lbc_held_mu", (1, ny, nx)),
-                  ("fold_u", u), ("fold_v", v), ("fold_theta", m),
                   ("lbc_mu_src", (1, ny, nx))) + (
                       (("lbc_qv_held", m), ("lbc_held_qv", m)) if qvt else ()):
         out[n] = cp.zeros(sh, dtype=dtype)
@@ -759,6 +858,8 @@ def _step(x, dx, geom, tape, observe, *, tl):
 
     saved = PROGNOSTICS + (SPECIES if geom.moist else ())
     copy_names(tuple(n + "0" for n in saved), saved)               # _save_time_t
+    _held_start_tl(x, dx, geom, snap, tl)
+    seen("mixing", x)
     for spec in geom.stages:
         snap(TENDENCIES)                                          # zero_tendencies
         for n in TENDENCIES:
@@ -770,7 +871,7 @@ def _step(x, dx, geom, tape, observe, *, tl):
             s, p = _view(x, alias), _view(dx, alias)
             op_tl(s, p, s, p, g, nl=True)
             seen(name, x)
-        if geom.specified:
+        if geom.specified or geom.held:
             _lbc_stage_tl(x, dx, geom, spec, snap, tl)
             seen("lbc", x)
         snap(SI_STATE)
@@ -898,73 +999,169 @@ def _scalars_ad(ax, back, spec):
     sumflux_finish_ad(_view(ax, _SF_ALIAS), None, _view(ax, _SF_ALIAS), spec.sf)
 
 
-def _fold_tl(d, kind, held_name, mapped):
-    """fold_lateral_relaxation on one row, in the primal's operations:
-    the zeroed slot plus the relaxation times its map factor, then the
-    map-factor division of _couple_dry_mixing_map_factor (times msfv_inv
-    for v)."""
-    slot, scale, div = _FOLD[kind]
-    out = d[slot]
-    out[...] = 0
-    h = d[held_name]
-    out += h * d[scale][None] if (mapped and scale) else h
-    if mapped:
-        if div == "inv":
-            out *= d["msfv_inv"][None]
+def _couple(d, geom, names=None):
+    """_couple_dry_mixing_map_factor on the held rows of ``d`` (the msf
+    factors read from ``names``, ``d`` itself by default): divided by the
+    row's map factor, v times msfv_inv under BIGSTEP.  Its own adjoint."""
+    names = d if names is None else names
+    for kind in geom.couple:
+        slot = d[_HELD[kind]]
+        if kind == "v" and geom.v_inv:
+            slot *= names["msfv_inv"][None]
         else:
-            out /= d[div][None]
+            slot /= names[_COUPLE[kind]][None]
+
+
+def _held_start_tl(x, dx, geom, snap, tl):
+    """prepare_fixed_tendencies' dry work at the step start: the held
+    rows zeroed; with the mixing (a cold step's diagnosis first) the
+    deformation and smag2d_km of the time-t winds and geopotential, the
+    rows' mass mub2d + mup0, the u, v, w and theta rows into the held rows
+    and, unless a specified domain's fold takes it, the map-factor
+    coupling."""
+    import cupy as cp
+    m = geom.mix
+    if m is not None and m.prp is not None:     # _step_body's cold diagnosis
+        snap(_written(PRP_ALIAS, PRP_STATE))
+        s, p = _view(x, PRP_ALIAS), _view(dx, PRP_ALIAS)
+        calc_p_rho_phi_tl(s, p, s, p, m.prp, nl=True)
+    if geom.held:
+        names = tuple(_HELD[k] for k in geom.held)
+        snap(names)
+        for n in names:
+            x[n][...] = 0
+            if tl:
+                dx[n][...] = 0
+    if m is None:
+        return
+    snap(DF_STATE)
+    df_tl({n: x[n] for n in DF_STATE}, {n: dx[n] for n in DF_STATE}, _df_traj(x),
+          _df_act(dx), m.df, nl=True)
+    snap(("smag_km", "smag_kh"))
+    km_tl(_km_out(x), _km_out(dx), {**{n: x[n] for n in DF_STATE}, "msft": x["msft"]},
+          {n: dx[n] for n in DF_STATE}, m.km, nl=True)
+    snap(("smag_mut",))
+    cp.add(x["mub2d"], x["mup0"], out=x["smag_mut"])
+    if tl:
+        dx["smag_mut"][...] = dx["mup0"]
+    for (kind, g), row in zip(m.rows, _MIX_ROWS):
+        snap((_HELD[kind],))
+        hd_tl({"tend": x[_HELD[kind]]}, {"tend": dx[_HELD[kind]]}, _hd_traj(x, row, g),
+              _hd_act(dx, row), g, nl=True)
+    if not geom.specified and geom.couple:
+        snap(tuple(_HELD[k] for k in geom.couple))
+        _couple(x, geom)
+        if tl:
+            _couple(dx, geom, x)
+
+
+def _held_start_ad(ax, back, geom):
+    """Adjoint of :func:`_held_start_tl`."""
+    m = geom.mix
+    if m is not None:
+        if not geom.specified and geom.couple:
+            base = back()
+            _couple(ax, geom, base)
+        for (kind, g), row in reversed(tuple(zip(m.rows, _MIX_ROWS))):
+            base = back()
+            hd_ad({"tend": ax[_HELD[kind]]}, _hd_traj(base, row, g), _hd_act(ax, row), g)
+        back()
+        ax["mup0"] += ax["smag_mut"]
+        ax["smag_mut"][...] = 0
+        base = back()
+        km_ad(_km_out(ax), {**{n: base[n] for n in DF_STATE}, "msft": base["msft"]},
+              {n: ax[n] for n in DF_STATE}, m.km)
+        base = back()
+        df_ad({n: ax[n] for n in DF_STATE}, _df_traj(base), _df_act(ax), m.df)
+    if geom.held:
+        back()
+        for k in geom.held:
+            ax[_HELD[k]][...] = 0
+    if m is not None and m.prp is not None:
+        base = back()
+        a = _view(ax, PRP_ALIAS)
+        calc_p_rho_phi_ad(a, _view(base, PRP_ALIAS), a, m.prp)
+
+
+def _df_act(d):
+    """The deformation's active inputs: the time-t winds and geopotential
+    (_wrf_smag_grid_args with time_t)."""
+    return {"u": d["u0"], "v": d["v0"], "php": d["php0"]}
+
+
+def _df_traj(x):
+    return {**_df_act(x), **{n: x[n] for n in DF_PASSIVE}}
+
+
+def _km_out(d):
+    return {"xkmh": d["smag_km"], "xkhh": d["smag_kh"]}
+
+
+def _hd_act(d, row):
+    _kind, _row, field, xk, _c1, _c2 = row
+    return {"field": d[field], "xk": d[xk], "mut": d["smag_mut"]}
+
+
+def _hd_traj(x, row, g):
+    _kind, _row, _field, _xk, c1, c2 = row
+    out = {**_hd_act(x, row), "c1": x[c1], "c2": x[c2], "msft": x["msft"],
+           "msfu": x["msfu"], "msfv": x["msfv"]}
+    if g.perturb:
+        out["base"] = x["diff1_theta_initial"]
+    return out
 
 
 def _lbc_stage_tl(x, dx, geom, spec, snap, tl):
-    """A stage's specified work after the slow tendencies, in
-    dycore._step_body's strict order: on stage 1 the held relaxation of
-    u, v and theta and its fold (fold_lateral_relaxation), every stage the
-    folded slots' add (add_fixed_dry_tendencies), then the boundary rows
-    (_apply_state_lateral_boundaries_wrf)."""
-    if spec.rk_step == 1:
+    """A stage's held and specified work after the slow tendencies, in
+    dycore._step_body's strict order: on a specified domain's stage 1 the
+    held relaxation of u, v and theta, folded into the held rows (times
+    the map factor) and the rows' coupling (fold_lateral_relaxation);
+    every stage the held rows' add (add_fixed_dry_tendencies), then the
+    boundary rows (_apply_state_lateral_boundaries_wrf)."""
+    if geom.specified and spec.rk_step == 1:
         for kind, g in geom.capture:
             snap(("lbc_held_" + kind,))
             st, traj, act = _lb_views(x, dx, kind)
             lbc_tl(st(x), st(dx), traj, act(dx), g, nl=True)
-        for kind in geom.fold:
-            snap((_FOLD[kind][0],))
-            _fold_tl(x, kind, "lbc_held_" + kind, geom.fold_msf)
-            if tl:   # the msf factors are passive: the same operations
-                _fold_tl({**x, _FOLD[kind][0]: dx[_FOLD[kind][0]],
-                          "lbc_held_" + kind: dx["lbc_held_" + kind]},
-                         kind, "lbc_held_" + kind, geom.fold_msf)
-    snap(tuple(_LBC_TEND[k] for k in geom.fold))
-    for kind in geom.fold:
-        x[_LBC_TEND[kind]] += x[_FOLD[kind][0]]
-        if tl:
-            dx[_LBC_TEND[kind]] += dx[_FOLD[kind][0]]
-    for kind, g in spec.lbc:
-        snap((_LBC_TEND[kind], "lbc_held_" + kind))
-        st, traj, act = _lb_views(x, dx, kind)
-        lbc_tl(st(x), st(dx), traj, act(dx), g, nl=True)
+        snap(tuple(dict.fromkeys(_HELD[k] for k in geom.fold + geom.couple)))
+        for d in ((x, dx) if tl else (x,)):   # the msf factors are passive
+            for kind in geom.fold:
+                scale = _FOLD_SCALE[kind]
+                h = d["lbc_held_" + kind]
+                d[_HELD[kind]] += h * x[scale][None] if (geom.fold_msf and scale) else h
+            _couple(d, geom, x)
+    if geom.held:
+        snap(tuple(_HELD_TEND[k] for k in geom.held))
+        for d in ((x, dx) if tl else (x,)):
+            for kind in geom.held:
+                d[_HELD_TEND[kind]] += d[_HELD[kind]]
+    if geom.specified:
+        for kind, g in spec.lbc:
+            snap((_LBC_TEND[kind], "lbc_held_" + kind))
+            st, traj, act = _lb_views(x, dx, kind)
+            lbc_tl(st(x), st(dx), traj, act(dx), g, nl=True)
 
 
 def _lbc_stage_ad(ax, back, geom, spec):
     """Adjoint of :func:`_lbc_stage_tl` (``back`` pops one snapshot and
     returns the base before that operation)."""
-    for kind, g in reversed(spec.lbc):
-        base = back()
-        st, traj, act = _lb_views(base, None, kind)
-        lbc_ad(st(ax), traj, _lb_adj(ax, kind), g)
-    back()
-    for kind in geom.fold:
-        ax[_FOLD[kind][0]] += ax[_LBC_TEND[kind]]
-    if spec.rk_step == 1:
-        for kind in reversed(geom.fold):
+    if geom.specified:
+        for kind, g in reversed(spec.lbc):
             base = back()
-            slot, scale, div = _FOLD[kind]
-            a = ax[slot]
-            if geom.fold_msf:
-                a = a * base["msfv_inv"][None] if div == "inv" else a / base[div][None]
-                if scale:
-                    a = a * base[scale][None]
-            ax["lbc_held_" + kind] += a
-            ax[slot][...] = 0
+            st, traj, act = _lb_views(base, None, kind)
+            lbc_ad(st(ax), traj, _lb_adj(ax, kind), g)
+    if geom.held:
+        back()
+        for kind in geom.held:
+            ax[_HELD[kind]] += ax[_HELD_TEND[kind]]
+    if geom.specified and spec.rk_step == 1:
+        base = back()
+        _couple(ax, geom, base)
+        for kind in reversed(geom.fold):
+            scale = _FOLD_SCALE[kind]
+            a = ax[_HELD[kind]]
+            ax["lbc_held_" + kind] += (a * base[scale][None] if (geom.fold_msf and scale)
+                                       else a)
         for kind, g in reversed(geom.capture):
             base = back()
             st, traj, act = _lb_views(base, None, kind)
@@ -1041,7 +1238,7 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
         ax["muts"][...] = 0
         base = back()                                             # si
         small_step_init_ad(_inv(ax), _inv(base), _inv(ax), spec.ss)
-        if geom.specified:
+        if geom.specified or geom.held:
             _lbc_stage_ad(ax, back, geom, spec)
         for _, _, ad, alias, g, _ in reversed(_op_table(spec)):
             base = back()
@@ -1050,6 +1247,7 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
         back()                                                    # zero_tendencies
         for n in TENDENCIES:
             ax[n][...] = 0
+    _held_start_ad(ax, back, geom)
     back()                                                        # _save_time_t
     for n in PROGNOSTICS + (SPECIES if geom.moist else ()):
         ax[n] += ax[n + "0"]

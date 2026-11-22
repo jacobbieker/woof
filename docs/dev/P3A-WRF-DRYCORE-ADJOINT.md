@@ -501,9 +501,10 @@ Each step is one small PR, taken to merged before the next widens.
    periodic alias closure. With a tape it snapshots each operator's
    written arrays before it runs, and `step_ad` pops them in reverse.
    - Scope: periodic axes, no map factors, no rotation (8b adds it), dry, no physics
-     or mixing package, none of the other work `_step_body` can add
-     (use_theta_m, a moving frame, obstacles, polar filtering, lightning,
-     avgflx, IAU or spectral nudging), `rk_ord = 3`, an even
+     or mixing package (9c binds diff_opt 1 / km_opt 4), none of the
+     other work `_step_body` can add (use_theta_m, a moving frame,
+     obstacles, polar filtering, lightning, avgflx, IAU or spectral
+     nudging), `rk_ord = 3`, an even
      time_step_sound, orders 3-6, and a 3-D base state.
      `step_geometry` refuses everything else. `step_geometries` gives a
      chain's geometries: the first step follows the state (a cold one
@@ -1008,9 +1009,40 @@ Each step is one small PR, taken to merged before the next widens.
        wrfplus/hdiff.npz`, `tools/wrfplus_oracle/hdiff.F90`, 17 cases).
        WRFPLUS's rows take mu as the mass, so the fixture uses c1 = 1,
        c2 = 0; in binary64 woof matches it to about 1e-16.
-   - 9c. The step binding (stage 1 into the held slots, the map-factor
-     coupling and the specified fold); lifts the refusal for diff_opt 1
-     with km_opt 4 only.
+   - 9c. The step binding (`woof.grad.wrfplus.model`), done for a dry
+     state on periodic and specified domains, in `dycore._step_body`'s
+     strict order:
+     - At the step start, after `_save_time_t` (and on a cold step after
+       the diagnosis `_step_body` runs before the mixing): the held rows
+       `smag_ru`, `smag_rv`, `smag_rw` and `smag_rth` zeroed, the
+       deformation of u0, v0 and php0, `smag2d_km`'s xkmh and xkhh, the
+       mass mub2d + mup0, and the u, v, w (xkmh, c1f/c2f) and theta
+       (xkhh, thp0 minus `diff1_theta_initial`) rows into the held rows.
+       On a periodic domain the rows are then divided by their map
+       factor (`_couple_dry_mixing_map_factor`: v times msfv_inv under
+       BIGSTEP).
+     - On a specified domain the fold (`fold_lateral_relaxation`) adds
+       the stage-1 relaxation into the same held rows, so the division
+       covers the mixing and the relaxation together, as
+       `rk_addtend_dry` does. The fold's own slots are gone; without the
+       mixing the words are unchanged.
+     - Every stage adds the held rows after the slow tendencies
+       (`add_fixed_dry_tendencies`).
+     - `diff1_theta_initial` is passive (`run_state` takes it from
+       `initialize_coordinate_reference`, as the primal's first step
+       does).
+     - Refused by name: any other mixing package (diff_opt 2, km_opt 1,
+       2, 3 or 5), a moist state with the mixing (9d),
+       `tc_horizontal_length_m` and `m_opt`.
+     - Tests (`tests/test_grad_wrfplus_mix_step.py`): a warm periodic
+       step, one with map factors, rotation, the hybrid coordinate and
+       w_damp, a cold periodic chain of three, a warm specified step and
+       a cold mapped specified chain with the halo off the ring. The
+       binary32 base is `dycore.step`'s words on every input and the
+       carried scratch, and the same step without the mixing moves u, v,
+       w and theta. Also the dot product (with the boundary tables on
+       the specified cases), the base-only tape and FD.
+     - Cost: COST_PLACEHOLDER
    - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`).
    `sixth_order_diffusion` and diff_opt 2 are not started.
 
