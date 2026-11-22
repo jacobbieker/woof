@@ -16,6 +16,7 @@ from ..mpasdiag import acc_diag_v842 as _acc
 from ..mpasdiag import afwa_diag_v842 as _afwa
 from ..mpasdiag import lightning_diag_v842 as _lightning
 from ..mpasdiag import hailcast_diag_v842 as _hailcast
+from ..mpasdiag import spacewx_diag_v842 as _spacewx
 from ..mpasdiag import reduction_diag_v842 as _reduce
 
 
@@ -99,6 +100,8 @@ class ResidentOutputDiagnostics:
     lightning = None
     #: WRF-HAILCAST (mpasdiag.hailcast_diag_v842); built by bind() only with config_hailcast_opt.
     hailcast = None
+    #: The space-weather history rows (mpasdiag.spacewx_diag_v842); built by bind() only with the --physics keys.
+    spacewx = None
     #: WRF's CLWRF / RASM / surface-energy reductions (mpasdiag.reduction_diag_v842); built by bind() only with their options.
     reduction = None
     #: The running maxima/accumulators of the convective module (``accumulates``).
@@ -156,6 +159,8 @@ class ResidentOutputDiagnostics:
             fields |= set(_lightning.NAMES)
         if _hailcast.PACKAGE in packages:
             fields |= set(_hailcast.NAMES)
+        if set(_spacewx.PACKAGES) & packages:
+            fields |= {n for n in _spacewx.NAMES if _spacewx.FIELDS[n]['gates'][0] in packages}
         if {_plevel.P_PACKAGE, _plevel.Z_PACKAGE} & packages:
             fields |= set(_plevel.NAMES)
         return frozenset(fields)
@@ -174,6 +179,8 @@ class ResidentOutputDiagnostics:
             state.update(self.lightning.state())
         if self.hailcast is not None:
             state.update(self.hailcast.state())
+        if self.spacewx is not None:
+            state.update(self.spacewx.state())
         if self.reduction is not None:
             state.update(self.reduction.state())
         return state
@@ -209,6 +216,8 @@ class ResidentOutputDiagnostics:
         if self.hailcast is not None:
             self._resume.update((name, value) for name, value in state.items()
                                 if name.startswith(_hailcast.STATE_PREFIX))
+        if self.spacewx is not None and _spacewx.START_KEY in state:
+            self._resume[_spacewx.START_KEY] = state[_spacewx.START_KEY]
         if self.reduction is not None:
             self._resume.update((name, value) for name, value in state.items()
                                 if name.startswith(_reduce.STATE_PREFIX))
@@ -314,6 +323,9 @@ class ResidentOutputDiagnostics:
             self.produced = self.produced | frozenset(_hailcast.NAMES)
             self.hailcast.setup(self.utils)
             self.accumulates = True
+        if set(_spacewx.PACKAGES) & set(self.session.layout.packages):
+            self.spacewx = _spacewx.SpacewxModule(self, self.session.config.spacewx_diagnostics)
+            self.spacewx.setup(self.utils)
         if {_plevel.P_PACKAGE, _plevel.Z_PACKAGE} & set(self.session.layout.packages):
             self.plevel = _plevel.LevelDiagnosticsModule(self, self.session.config.plevel_diagnostics)
             self.produced = self.produced | frozenset(_plevel.NAMES)
@@ -463,6 +475,8 @@ class ResidentOutputDiagnostics:
             self.lightning.begin(step, when)
         if self.hailcast is not None:
             self.hailcast.begin(step, when)
+        if self.spacewx is not None:
+            self.spacewx.begin(step, when)
         if self.reduction is not None:
             self.reduction.begin(step, when)
         self._begin_event()
@@ -470,7 +484,8 @@ class ResidentOutputDiagnostics:
         if resume is not None:
             for name, value in resume.items():
                 if not name.startswith((_nwp.STATE_PREFIX, _acc.STATE_PREFIX, _afwa.STATE_PREFIX, _lightning.STATE_PREFIX,
-                                         _hailcast.STATE_PREFIX, _reduce.STATE_PREFIX)):
+                                         _hailcast.STATE_PREFIX, _reduce.STATE_PREFIX,
+                                         _spacewx.START_KEY)):
                     target = self.buffers['diag', name]
                     target[...] = self.cp.asarray(value).reshape(target.shape)
             if self.nwp is not None:
@@ -483,6 +498,8 @@ class ResidentOutputDiagnostics:
                 self.lightning.resume(resume)
             if self.hailcast is not None:
                 self.hailcast.resume(resume)
+            if self.spacewx is not None:
+                self.spacewx.resume(resume)
             if self.reduction is not None:
                 self.reduction.resume(resume)
         elif step == 0:
@@ -505,6 +522,8 @@ class ResidentOutputDiagnostics:
             self.lightning.compute()
         if self.hailcast is not None:
             self.hailcast.compute()
+        if self.spacewx is not None:
+            self.spacewx.compute()
         if self.reduction is not None:
             self.reduction.compute()
         if self.plevel is not None:

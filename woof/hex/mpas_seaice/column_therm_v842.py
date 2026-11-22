@@ -212,7 +212,7 @@ def _function(name: str, n_ice_layers: int):
     return _module_on(cp.cuda.Device().id, options, n_ice_layers, rkind.trig64()).get_function(name)
 
 
-def _flags(configs: dict, state: "cv.ColumnState") -> int:
+def _flags(configs: dict, state: "cv.ColumnState", ice_velocity_at_cell: bool | None = None) -> int:
     heat_capacity = state.ktherm != 0
     l_brine = 3.2 > 0.1 and heat_capacity          # colpkg_init_thermo: saltmax > min_salin
     bits = (l_brine, state.calc_tsfc, configs["config_calc_surface_stresses"],
@@ -220,7 +220,9 @@ def _flags(configs: dict, state: "cv.ColumnState") -> int:
             configs["config_use_ice_age"],
             configs["config_use_first_year_ice"])
     fixes = cv.corrections(configs)
-    bits += ("set_sfcflux_order" in fixes, "ice_velocity_at_cell" in fixes)
+    if ice_velocity_at_cell is None:
+        ice_velocity_at_cell = "ice_velocity_at_cell" in fixes
+    bits += ("set_sfcflux_order" in fixes, ice_velocity_at_cell)
     # solve_zsal: thickness_changes' dTemp is 0.1 with the vertical salinity (ice_therm_bl99.F90:287),
     # which v8.4.2 never sets: only under zsal_solve
     bits += (cv.solves_zsal(configs),)
@@ -240,6 +242,11 @@ def _ice_velocity(pools: dict, configs: dict, n_vertices: int, n_cells: int, dum
     from . import velocity_v842 as vel
     missing = [name for name, there in (("boundary/interiorVertex", (pools.get("boundary") or {}).get(
         "interiorVertex") is not None), ("velocity_solver/vVelocity", vs.get("vVelocity") is not None)) if not there]
+    if missing and "ice_velocity_at_cell" not in cv.named_corrections(configs):
+        # woof_quirk_corrections = 'all' without naming it: a run without the
+        # velocity solver's v and interior vertices does not carry the
+        # correction, so it stays off (v8.4.2's read), as the umbrella's rule
+        return u, dummy
     if missing:
         cv._refuse("woof_v842_corrections", "ice_velocity_at_cell",
                    "the cell's ice velocity is interpolated from the vertices' u and v over the interior vertices; "
@@ -312,10 +319,13 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
     tr_iage, tr_fy = configs["config_use_ice_age"], configs["config_use_first_year_ice"]
     dummy = cp.zeros(1, np.float64)
     status = cp.zeros(max(n_solve, 1), np.int32)
+    # the correction's flag follows the velocity actually handed over: under the umbrella without the velocity
+    # solver's v and interior vertices it stays off, and the kernel must not read the placeholder per cell
+    ice_velocity = _ice_velocity(pools, configs, n_vertices, n_cells, dummy)
     args = (
         status, np.float64(configs["config_dt"]), np.float64(day),
         np.float64(configs["config_min_friction_velocity"]), np.float64(folded["rdn_ice"]),
-        np.float64(folded["al2"]), np.int32(ncat), np.int32(_flags(configs, state)),
+        np.float64(folded["al2"]), np.int32(ncat), np.int32(_flags(configs, state, ice_velocity[1] is not dummy)),
         np.int32(configs["config_boundary_layer_iteration_number"]), np.int32(n_solve),
         need(pools["mesh"], "latCell", c1), need(ist, "iceAreaCellInitial", c1),
         need(ist, "iceAreaCategoryInitial", cc), need(ist, "iceVolumeCategoryInitial", cc),
@@ -324,7 +334,7 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
         need(t, "surfaceTemperature", cat1), need(t, "snowEnthalpy", cs), need(t, "iceEnthalpy", ci),
         need(t, "iceSalinity", ci), need(t, "iceAge", cat1) if tr_iage else dummy,
         need(t, "firstYearIceArea", cat1) if tr_fy else dummy,
-        *_ice_velocity(pools, configs, n_vertices, n_cells, dummy), need(vs, "airStressCellU", c1), need(vs, "airStressCellV", c1),
+        *ice_velocity, need(vs, "airStressCellU", c1), need(vs, "airStressCellV", c1),
         need(vs, "oceanStressCellU", c1), need(vs, "oceanStressCellV", c1),
         need(ac, "uAirVelocity", c1), need(ac, "vAirVelocity", c1), need(ac, "airLevelHeight", c1),
         need(ac, "airSpecificHumidity", c1), need(ac, "airDensity", c1), need(ac, "airPotentialTemperature", c1),

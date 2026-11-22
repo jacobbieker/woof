@@ -7,7 +7,9 @@ block, in the Fortran's order and halo extents:
    constant coefficients (``config_use_const_visc``/``_diff``) and the
    Richardson-number ones (``config_use_rich_visc``/``_diff``: density and
    displaced density through :mod:`~woof.hex.mpas_ocean.eos_v842`, then
-   ``ocn_vmix_get_rich_numbers``);
+   ``ocn_vmix_get_rich_numbers``), then Redi's vertical diffusion
+   (``ocn_vmix_coefs_redi_build``, with ``config_use_standardGM``: GM's
+   ``k33`` added over ``nCellsSolve``);
 2. ``ocn_vel_vmix_tend_implicit``: the edge thicknesses and a tridiagonal
    solve of each edge's column, with the implicit bottom drag
    (``config_use_implicit_bottom_drag``);
@@ -25,10 +27,16 @@ on (level 2 for a one-level edge); below a cell's column the tracers become
 the single-precision ``-1e34`` widened, and the budget is taken over every
 level.
 
+v8.4.2 adds Redi's ``k33`` (GM's tapered slope squared, dimensionless) to
+the diffusivity as it is, without ``config_Redi_kappa``, which
+``ocn_vmix_coefs_redi_init`` reads and never uses (the Registry gives ``k33``
+in m^2/s; E3SM later multiplies by the Redi kappa). That is the default here,
+word for word; ``woof_redi_k33 = 'kappa'`` adds ``config_Redi_kappa * k33``
+instead (:func:`redi_k33_kappa_scaled`).
+
 Refused by name, as not ported: the tanh coefficients
-(``config_use_tanh_visc``/``_diff``), CVMix (``config_use_cvmix``), and Redi's
-vertical diffusion (``config_use_standardGM``). One-level meshes raise (the
-bottom drag reads level 2).
+(``config_use_tanh_visc``/``_diff``) and CVMix (``config_use_cvmix``).
+One-level meshes raise (the bottom drag reads level 2).
 """
 from __future__ import annotations
 
@@ -46,6 +54,7 @@ SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_vmix.F:88-631,646-813",
     "src/core_ocean/shared/mpas_ocn_vmix_coefs_const.F",
     "src/core_ocean/shared/mpas_ocn_vmix_coefs_rich.F",
+    "src/core_ocean/shared/mpas_ocn_vmix_coefs_redi.F",
 )
 MODULE_OPTIONS = COMPILE_OPTIONS
 GRAVITY = 9.80616
@@ -83,11 +92,33 @@ def check_config(configs: dict) -> None:
     """Refuse, by name, the coefficient schemes this port does not carry."""
     for knob, reason in (("config_use_tanh_visc", "the tanh coefficients are not ported"),
                          ("config_use_tanh_diff", "the tanh coefficients are not ported"),
-                         ("config_use_cvmix", "CVMix (an external library in MPAS-Ocean) is not ported"),
-                         ("config_use_standardGM", "Redi's vertical diffusion (with GM) is not ported")):
+                         ("config_use_cvmix", "CVMix (an external library in MPAS-Ocean) is not ported")):
         if configs.get(knob, False):
             raise ConfigurationRefusal(knob=knob, value=True, reason=reason, declaration=f"{knob} = .false.")
     eos_v842.eos_type(configs)
+    redi_k33_kappa_scaled(configs)
+
+
+def redi_k33_kappa_scaled(configs: dict) -> bool:
+    """Redi's vertical diffusion scaled by ``config_Redi_kappa``, opt-in (``woof_redi_k33``).
+
+    v8.4.2's ``ocn_tracer_vmix_coefs_redi`` adds ``k33`` to
+    ``vertDiffTopOfCell`` as it is: ``k33`` is GM's tapered isoneutral slope
+    squared, a dimensionless number, added to a diffusivity in m^2/s, and the
+    ``config_Redi_kappa`` its init reads is never used. The default keeps
+    that, word for word (``'v842'``). With ``woof_redi_k33 = 'kappa'`` the
+    diffusivity takes ``config_Redi_kappa * k33``, the small-slope Redi
+    tensor's vertical element (as E3SM's later MPAS-Ocean has it).
+    """
+    from woof import quirk_corrections
+    # its own key, else 'kappa' under woof_quirk_corrections = 'all' (an explicit 'v842' then is refused by name)
+    value = quirk_corrections.option(configs, "woof_redi_k33")
+    if value not in ("v842", "kappa"):
+        raise ConfigurationRefusal(
+            knob="woof_redi_k33", value=value,
+            reason="Redi's vertical diffusion adds k33 as v8.4.2 does or config_Redi_kappa * k33",
+            declaration="woof_redi_k33 = 'v842' | 'kappa'")
+    return value == "kappa"
 
 
 def vmix_implicit(*, dt: float, mesh: dict, state: dict, tracers: dict, diagnostics: dict, configs: dict) -> None:
@@ -160,6 +191,10 @@ def vmix_implicit(*, dt: float, mesh: dict, state: dict, tracers: dict, diagnost
                 diff, d["RiTopOfCell"], m["maxLevelCell"], i32(n_cells_solve), i32(nl),
                 real(configs["config_rich_mix"]), real(configs["config_bkrd_vert_diff"]),
                 real(configs["config_bkrd_vert_visc"]), real(configs["config_convective_diff"])))
+    if configs.get("config_use_standardGM", False):
+        _launch(precision, "ocn_vmix_add_redi_k33_v842", n_cells_solve * (nl + 1), (
+            diff, d["k33"], i32(n_cells_solve), i32(nl + 1), real(configs.get("config_Redi_kappa", 0.0)),
+            i32(redi_k33_kappa_scaled(configs))))
 
     # the implicit velocity and tracer steps
     if not configs.get("config_disable_vel_vmix", False):
