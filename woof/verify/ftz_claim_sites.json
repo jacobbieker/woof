@@ -62213,7 +62213,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3788,
+      "line": 3790,
       "kind": "prose",
       "anchor": "\"\"\"``-x`` on a binary32 value in a -ftz=true unit: CUDA's neg.ftz",
       "anchor_sha256": "6a004e80fe164bd982a267040947baea0cea8d8d482c7071cd4c9b721bb9d331",
@@ -62224,7 +62224,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3789,
+      "line": 3791,
       "kind": "prose",
       "anchor": "flushes a subnormal x to -0, Metal's negation flips the bit and keeps",
       "anchor_sha256": "6e6b096bcb33a4faa1f0627210c7289959330dd61379f474a383b199a25423d9",
@@ -62235,7 +62235,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3885,
+      "line": 3887,
       "kind": "prose",
       "anchor": "\"\"\"In a subnormal-retaining unit ``float`` is ``f32s``, but a float",
       "anchor_sha256": "b20dd5541efeb12fafa00081793a92b06bf52512e3e8dbff7a73d4e220cb293b",
@@ -62246,7 +62246,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4214,
+      "line": 4216,
       "kind": "prose",
       "anchor": "\"\"\"``retain_subnormals``: float vector components stay ``float`` (a",
       "anchor_sha256": "425d6634b3426123a07cb7f50d6a03668330502bf2e5cd1b8d755c4db57e52d1",
@@ -62257,7 +62257,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4219,
+      "line": 4221,
       "kind": "prose",
       "anchor": "keeps subnormals, as CUDA's --ftz=false does;",
       "anchor_sha256": "7b3cc7a06f756827321c22a31bb98b2962ad9d4c3eed6bace57828bcba4847a0",
@@ -62268,7 +62268,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4370,
+      "line": 4372,
       "kind": "prose",
       "anchor": "def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bool = False,",
       "anchor_sha256": "e39fe1ef71800a02605ec1326b414358052821d8cbe99709214b8c369cba68a7",
@@ -62279,7 +62279,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4372,
+      "line": 4374,
       "kind": "prose",
       "anchor": "\"\"\"``retain_subnormals``: the unit is --ftz=false (float is f32s);",
       "anchor_sha256": "5db4f8ba7ba2cfd0444abcd53d8613c6444d3a2d7e866579bc3dd34ef6a25ae1",
@@ -62290,7 +62290,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4373,
+      "line": 4375,
       "kind": "prose",
       "anchor": "``ieee_helpers``: it uses the subnormal-keeping ops of non-.ftz PTX,",
       "anchor_sha256": "57d2b149ff107b2be641232518c75d1844af0937289d0f3731f77e9169ddbb41",
@@ -62301,7 +62301,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4379,
+      "line": 4381,
       "kind": "prose",
       "anchor": "return _df64_prelude(soft, contract=contract, retain_subnormals=retain_subnormals,",
       "anchor_sha256": "e6584e21d16826daf39622dede5db885753fb59fd6a3436b242b11a1889874c9",
@@ -62312,7 +62312,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4389,
+      "line": 4391,
       "kind": "prose",
       "anchor": "if retain_subnormals:",
       "anchor_sha256": "8747498c0775c864e7c0df98116ca012f99107565ff4d5a71c1c75fc64505c17",
@@ -62323,7 +62323,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4390,
+      "line": 4392,
       "kind": "prose",
       "anchor": "text = \"#define WOOF_RETAIN_SUBNORMALS 1\\n\" + text",
       "anchor_sha256": "4b3c45afa52c0b892352effc29d7f8635ff93fbb80865a365900bd5125d28078",
@@ -62334,7 +62334,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4391,
+      "line": 4393,
       "kind": "prose",
       "anchor": "if retain_subnormals or ieee_helpers:",
       "anchor_sha256": "4437f4782795f6038d9c103293cd2b9cef1a91888afa6339960c2a105df25069",
@@ -62345,7 +62345,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4400,
+      "line": 4402,
       "kind": "prose",
       "anchor": "def _df64_prelude(soft: str, *, contract: bool, retain_subnormals: bool, ieee_helpers: bool) -> str:",
       "anchor_sha256": "473c4352f33e0711603d25e896f51524322d04b823a2c0482a871f8c3675d8fc",
@@ -62356,7 +62356,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4407,
+      "line": 4409,
       "kind": "prose",
       "anchor": "if retain_subnormals:",
       "anchor_sha256": "8747498c0775c864e7c0df98116ca012f99107565ff4d5a71c1c75fc64505c17",
@@ -62367,7 +62367,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4408,
+      "line": 4410,
       "kind": "prose",
       "anchor": "text = \"#define WOOF_RETAIN_SUBNORMALS 1\\n\" + text",
       "anchor_sha256": "4b3c45afa52c0b892352effc29d7f8635ff93fbb80865a365900bd5125d28078",
@@ -62378,7 +62378,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4409,
+      "line": 4411,
       "kind": "prose",
       "anchor": "if retain_subnormals or ieee_helpers:",
       "anchor_sha256": "4437f4782795f6038d9c103293cd2b9cef1a91888afa6339960c2a105df25069",
@@ -62389,7 +62389,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4518,
+      "line": 4520,
       "kind": "prose",
       "anchor": "\"\"\"``retain_subnormals`` with inheritance: ``f32s`` converts to the",
       "anchor_sha256": "12b6d2626363800c88805ed13cbec521d5d3b83fca81a41a14a441a1b9c5a075",
@@ -62400,7 +62400,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4823,
+      "line": 4825,
       "kind": "prose",
       "anchor": "def _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64):",
       "anchor_sha256": "3705e51eb966b55559d27241469d1f2a717e2d2db3c59912b89989af00e2d14b",
@@ -62411,7 +62411,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4833,
+      "line": 4835,
       "kind": "prose",
       "anchor": "translator_digest(), unit, str(bool(contract)), str(bool(retain_subnormals)), f64,",
       "anchor_sha256": "d8c48ca337ca927ae3b4f780ba61d526c5fabcfbef563c3c84dd5c6fb2d679e8",
@@ -62422,7 +62422,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4993,
+      "line": 4995,
       "kind": "prose",
       "anchor": "retain_subnormals: bool = False, defines=(), include_dirs=(),",
       "anchor_sha256": "dde70b43f1af78f5922e985f385ee8bd5dadabddf41cc4dc8502495923480ad1",
@@ -62433,7 +62433,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4997,
+      "line": 4999,
       "kind": "prose",
       "anchor": "``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual",
       "anchor_sha256": "462887cb8437e000a5a26f34dc6f0238ecf1081bee9e8728a5ed4a8f7bd4c853",
@@ -62444,7 +62444,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 4999,
+      "line": 5001,
       "kind": "prose",
       "anchor": "f32s.h) -- CUDA's --ftz=false.",
       "anchor_sha256": "9b45fddd4b1773c521d687ae9d3267b6cff3522013530e18c9d88932ca68cbff",
@@ -62455,7 +62455,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 5012,
+      "line": 5014,
       "kind": "prose",
       "anchor": "cached, store = _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64)",
       "anchor_sha256": "51d63ee4e36ee9af07de2c0f746e839aa19753433b95b3e5b49e1080065be26c",
@@ -62466,7 +62466,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 5016,
+      "line": 5018,
       "kind": "prose",
       "anchor": "retain_subnormals=retain_subnormals, defines=defines, f64=f64)",
       "anchor_sha256": "e52ba22b04fedb370f48e90da614bcf57391572cac4e0a42d691b4d5924186b2",
@@ -62477,7 +62477,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 5022,
+      "line": 5024,
       "kind": "prose",
       "anchor": "retain_subnormals: bool, defines, f64: str) -> TranslatedUnit:",
       "anchor_sha256": "bc56b48179d7abc81eb5a334168b0621ce63400d2e401d682dcb8dd0d86ba0d2",
@@ -62488,7 +62488,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 5024,
+      "line": 5026,
       "kind": "prose",
       "anchor": "if retain_subnormals:",
       "anchor_sha256": "8747498c0775c864e7c0df98116ca012f99107565ff4d5a71c1c75fc64505c17",
@@ -62499,7 +62499,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 5029,
+      "line": 5031,
       "kind": "prose",
       "anchor": "result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,",
       "anchor_sha256": "22ac765d2130695c1bc0cd1ff567ecfa927cca0ef9a3e1254530b4453c41e017",
@@ -62510,7 +62510,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 5031,
+      "line": 5033,
       "kind": "prose",
       "anchor": "head = prelude(contract=contract, retain_subnormals=retain_subnormals,",
       "anchor_sha256": "566041581e5e4c4195e6135af94ee2cc6ef9e015dfb9b1e095ecc0a1b50e1ac9",

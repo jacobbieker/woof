@@ -2668,8 +2668,10 @@ class _Rewriter:
     #: the tier gate covers every tier.  Out of line (size or none: the same
     #: words) the three tiers agree word for word on the same columns.
     #: QNSE's EDMF mfshconv_column at its QNSE_KMAX 256 tier (a 30.7 KB
-    #: per-thread frame) crashes the service the same way fully inlined; its
-    #: 128 tier and qnsepbl_column at 256 build fully inlined.
+    #: per-thread frame) crashes the service the same way fully inlined.  The
+    #: policy is per unit, so qnsepbl_column at 256 is built out of line too;
+    #: both kernels' words at 256 match CUDA's under GPUWM_WRF_EXACT (#823).
+    #: The 128 tier builds fully inlined as before.
     INLINE_POLICY_BY_KERNEL_TIER = {("thompson_column_step", "THOMPSON_COLUMN_KMAX", 64): "size",
                                     ("mfshconv_column", "QNSE_KMAX", 256): "size"}
 

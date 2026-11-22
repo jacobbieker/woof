@@ -7,7 +7,7 @@ Metal has no ``__activemask``, and until the ``__WOOF_METAL__`` branch the
 translation of ``kernels/qnsepbl.cu`` failed, so QNSE never ran on Metal.
 The value is an integer maximum, which no order of lanes changes, so the
 Metal branch takes each SIMD group's maximum with ``__reduce_max_sync``
-(``simd_max``) and posts it with one ``atomicMax``.  The WRF word grade in
+(``simd_max``) and its lowest live thread posts it with one ``atomicMax``.  The WRF word grade in
 tests/test_qnse_wrf461_parity.py runs one-column tiles (``native_tile=False``,
 tile_mode 0), so this file also runs the production two-pass tile path and
 checks that the reduced ``tile_top`` over all 72 fixture columns (two full
@@ -41,7 +41,8 @@ def test_the_cuda_arm_keeps_the_warp_reduction():
     metal, cuda = branch.split("#else\n", 1)
     assert "#ifdef __WOOF_METAL__" in metal
     assert "__reduce_max_sync(0xffffffffu, processed)" in metal
-    assert "atomicMax(tile_top, group_top);" in metal
+    assert "__reduce_min_sync(0xffffffffu, (int)threadIdx.x)" in metal
+    assert "if ((int)threadIdx.x == first) atomicMax(tile_top, group_top);" in metal
     code = re.sub(r"//[^\n]*", "", metal)
     assert "__activemask" not in code and "__shfl" not in code
     assert re.search(r"const unsigned mask = __activemask\(\);", cuda)

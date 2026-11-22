@@ -809,12 +809,14 @@ extern "C" __global__ void mfshconv_column(
         // Metal has no __activemask.  The tile reduction is an integer
         // maximum folded into *tile_top by atomicMax, which no order of
         // lanes changes: each SIMD group takes its maximum with simd_max
-        // (the prelude's __reduce_max_sync) and lane 0 posts it, so
-        // tile_top ends on the same word the CUDA warp reduction leaves.
-        // Lane 0 of a group is live whenever any lane is: the only
-        // divergent exit above is the trailing col >= n.
+        // (the prelude's __reduce_max_sync) and its lowest live thread posts
+        // it, so tile_top ends on the same word the CUDA warp reduction
+        // leaves.  The poster is chosen by the group's own minimum thread
+        // index, so neither the SIMD width nor which lanes have exited
+        // matters.
         const int group_top = __reduce_max_sync(0xffffffffu, processed);
-        if ((threadIdx.x & 31) == 0) atomicMax(tile_top, group_top);
+        const int first = __reduce_min_sync(0xffffffffu, (int)threadIdx.x);
+        if ((int)threadIdx.x == first) atomicMax(tile_top, group_top);
         return;
 #else
         const unsigned mask = __activemask();

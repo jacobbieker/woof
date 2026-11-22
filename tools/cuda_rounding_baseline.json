@@ -4085,7 +4085,7 @@
    },
    {
     "file": "woof/core/kernels/qnsepbl.cu",
-    "sha256": "0135d84ede5ea65942289f28e80ca25d3c438f521948b56ae1ec2c6c62bafde7"
+    "sha256": "2caac116c0c877141ef5afe72de1cd826def6719f656c86423a47e351408c769"
    },
    {
     "file": "woof/core/kernels/qnsesfc.cu",
@@ -5391,7 +5391,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "542b15ed73c0c4eb0947666fc7d1c56ba9621a87f4dbce4227596a44b4e9d1f2"
+    "sha256": "452affb3aa567f2a8ec40093b34682f2b9da8498e6363ccdda2a010df19806a2"
    },
    {
     "file": "woof/chem_micm.py",
@@ -20482,7 +20482,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "82e5c365045a84b7932df5284a6dc648fa1ee5eafdc2b9c74f99931ac3ac899d"
+   "source_sha256": "8426c5b3b4dba44ee63d9ec9d0160fccdabfbca60975a069b2928cb47e191b5b"
   },
   "kernels:qnsesfc": {
    "assessment": "static_diagnostic_only",
