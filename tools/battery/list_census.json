@@ -1707,7 +1707,7 @@
    "environment": {
     "GPUWM_NO_LOCAL_GPU": "1"
    },
-   "collected_total": 29550,
+   "collected_total": 29734,
    "files": {
     "tests/test_acoustic_adaptation.py": 32,
     "tests/test_acoustic_carrier_lifetime.py": 1,
@@ -2659,7 +2659,12 @@
     "tests/test_build_drops_release_excluded.py": 2,
     "tests/test_seal_check.py": 13,
     "tests/test_hex_mpas_route_imports.py": 69,
-    "tests/test_wheel_packed_data.py": 6
+    "tests/test_wheel_packed_data.py": 6,
+    "tests/test_da_external_baseline_score.py": 9,
+    "tests/test_da_member_pool_dispatch.py": 11,
+    "tests/test_da_nowcast_daemon_argv.py": 9,
+    "tests/test_da_structure_metrics.py": 26,
+    "tests/test_shipped_licence_scan.py": 4
    }
   },
   "always": {
