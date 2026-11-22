@@ -1,9 +1,10 @@
-"""A window of strict dry steps: the forward model, its tangent-linear and
+"""A window of strict steps (dry, or moist with qv, qc and qr): the forward model, its tangent-linear and
 its adjoint over N steps with checkpoints (P3a item 8, for 4D-Var).
 
-States in and out are dicts over :data:`model.STEP_INPUTS` (the
-prognostics and the previous step's diagnosis; :func:`model.step_inputs`
-adds the carried mu halo on a specified domain).  State ``k`` is the state
+States in and out are dicts over :func:`model.step_inputs` of the
+window's geometry (:data:`model.STEP_INPUTS`, the prognostics and the
+previous step's diagnosis, plus the carried mu halo on a specified domain
+and qv, qc and qr on a moist one).  State ``k`` is the state
 after ``k`` steps, ``0 <= k <= nsteps``.  A specified domain's boundary
 tables (:data:`model.LBC_INPUTS`, ``Window.params``) are inputs no step
 writes: :meth:`Window.tl` takes their perturbation in ``dx0`` (zero where

@@ -327,6 +327,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The opt-in YSU surface heat flux on theta, on the same terms: a
     # [shared] value reaches the bl_pbl_physics = 1 domains only.
     "ysu_surface_heat_exner",
+    # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
+    # per domain like the corrections it turns on, each where its scheme runs.
+    "woof_quirk_corrections",
     # The opt-in resolved obstacles: buildings belong to one domain's grid
     # (an LES nest), so every obstacle key is per-domain.
     # WPS's gridded urban morphology is on one domain's grid.
@@ -4980,6 +4983,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if (tree_runs_ysu and kw.get("bl_pbl_physics", RunConfig.bl_pbl_physics) != 1
                 and "ysu_surface_heat_exner" not in dom):
             kw["ysu_surface_heat_exner"] = False
+        # woof_quirk_corrections = 'all': every opt-in correction whose
+        # scheme this domain runs, a conflicting explicit key refused by name.
+        from woof.quirk_corrections import apply_run_corrections
+        kw = apply_run_corrections(kw)
         # G3-only shared controls reach only G3 domains. Explicit domain
         # controls remain validated, so an off-scheme value is not discarded.
         from woof.config import G3_RUN_DEFAULTS
@@ -6385,6 +6392,7 @@ def _public_config_value(value):
                                   ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
                                   ("urban_param_file", ""),
                                   ("ysu_surface_heat_exner", False),
+                                  ("woof_quirk_corrections", "none"),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

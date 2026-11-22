@@ -1064,6 +1064,10 @@ SFIRE_PREPARATION_INERT_RUN_FIELDS = frozenset({
 RETIRED_INACTIVE_IDENTITY_FIELDS = {"run.fire_moisture_namelist": ""}
 
 PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
+    # The umbrella over the opt-in quirk corrections: a meta key that the
+    # RunConfig resolves into the individual correction keys, which carry
+    # the identity themselves.
+    "run.woof_quirk_corrections",
     # The slab snow switch is read by forecast physics only; preparation
     # writes the same initial snow fields under either value. It remains
     # part of the slab checkpoint identity.

@@ -61,6 +61,7 @@ import numpy as np
 
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
+from woof import quirk_corrections
 
 from . import (advection_v842, calving_v842, geometry_v842, rkind, sia_v842, subglacial_hydro_v842,
                thermal_init_v842, thermal_solver_v842, velocity_simple_v842)
@@ -129,7 +130,7 @@ def _check_config(config: dict, precision: str, velocity: dict) -> None:
     for knob in ("config_thickness_advection", "config_tracer_advection"):
         if config[knob] not in ADVECTION:
             raise ValueError(f"{knob} must be one of {ADVECTION}")
-    units = config.get("woof_enthalpy_advection_units", "v842")
+    units = quirk_corrections.option(config, "woof_enthalpy_advection_units")
     if units not in advection_v842.ENTHALPY_ADVECTION_UNITS:
         _refuse("woof_enthalpy_advection_units", units, "not an option of this port",
                 "woof_enthalpy_advection_units = 'v842' | 'corrected'")
@@ -284,7 +285,7 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
             mesh=m, geometry=g, velocity=v, thermal=t, dt=deltat,
             advect_tracers=c["config_tracer_advection"] == "fo", config_thickness_advection="fo",
             config_thermal_solver=c["config_thermal_solver"],
-            woof_enthalpy_advection_units=c.get("woof_enthalpy_advection_units", "v842"), **masks)
+            woof_enthalpy_advection_units=quirk_corrections.option(c, "woof_enthalpy_advection_units"), **masks)
     _function(precision, "li_clamp_thickness_v842")(_grid(n_cells), block, (g["thickness"], np.int32(n_cells)))
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)
     _update_geometry(m, g, c)

@@ -51,6 +51,17 @@ extern "C" __global__ void ocn_vmix_add_const_v842(rk *field, int n, int levels,
     field[t] = A(field[t], value);
 }
 
+// ocn_tracer_vmix_coefs_redi: vertDiffTopOfCell += k33 over cells
+// 1..nCellsSolve, every level (v8.4.2 adds the bare slope squared, without
+// config_Redi_kappa); with kappaScaled (woof_redi_k33 = 'kappa') kappa * k33
+extern "C" __global__ void ocn_vmix_add_redi_k33_v842(rk *vertDiffTopOfCell, const rk *k33, int n, int levels,
+                                                      rk kappa, int kappaScaled)
+{
+    const int t = vm_thread();
+    if (t >= n * levels) return;
+    vertDiffTopOfCell[t] = A(vertDiffTopOfCell[t], kappaScaled ? M(kappa, k33[t]) : k33[t]);
+}
+
 // ocn_vmix_get_rich_numbers' first loop: ddensityTopOfCell, cells 1..nCellsArray(2)
 extern "C" __global__ void ocn_vmix_ddensity_cell_v842(
     rk *ddensityTopOfCell, const rk *displacedDensity, const rk *density, const int *maxLevelCell, int nCells, int nl)
