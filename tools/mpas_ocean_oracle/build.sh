@@ -137,7 +137,9 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_btr_subcycle.F90"
       # the whole split-explicit step: the vector reconstruction's two routines
       # and ocn_time_integrator_split cut verbatim (awk ranges), the time
-      # averaging and land-ice effective density verbatim, GM's stand-ins
+      # averaging and land-ice effective density verbatim, GM verbatim (at
+      # RKIND 4 with -fno-range-check: it assigns huge(0D0) to RKIND arrays)
+      # and ocn_reconstruct_gm_vectors cut out of mpas_ocn_diagnostics.F
       { cat "${script_dir}/vector_reconstruction_cut_head.F90"
         for routine in mpas_reconstruct_2d mpas_reconstruct_1d; do
             awk -v r="${routine}" '$0 ~ "^ *subroutine " r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine " r "[^a-zA-Z_0-9]" {on=0}' \
@@ -145,6 +147,14 @@ for precision in r4 r8; do
         done
         echo "end module mpas_vector_reconstruction"; } > mpas_vector_reconstruction_cut.F
       "${fc[@]}" "${flags[@]}" -I.. mpas_vector_reconstruction_cut.F
+      gm_flags=("${flags[@]}")
+      [[ ${precision} == r4 ]] && gm_flags+=(-fno-range-check)
+      "${fc[@]}" "${gm_flags[@]}" -I.. "${ocean}/mpas_ocn_gm.F"
+      { cat "${script_dir}/gm_vectors_cut_head.F90"
+        awk '/^ *subroutine ocn_reconstruct_gm_vectors\(/ {on=1} on {print} on && /^ *end subroutine ocn_reconstruct_gm_vectors[^a-zA-Z_0-9]/ {on=0}' \
+            "${ocean}/mpas_ocn_diagnostics.F"
+        echo "end module split_gm_vectors"; } > ocn_gm_vectors_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. ocn_gm_vectors_cut.F
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/stubs_split.F90"
       for unit in mpas_ocn_time_average_coupled mpas_ocn_effective_density_in_land_ice; do
           "${fc[@]}" "${flags[@]}" -I.. "${ocean}/${unit}.F"
@@ -165,8 +175,8 @@ for precision in r4 r8; do
         echo "end module ocn_timestep_cut"; } > ocn_timestep_cut.F
       "${fc[@]}" "${flags[@]}" -I.. ocn_timestep_cut.F
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_forward.F90" )
-    # GM, verbatim, in a directory of its own (stubs_split.F90's stand-in is
-    # eos/'s ocn_gm); it assigns huge(0D0) to RKIND arrays, which gfortran
+    # GM, verbatim, in a directory of its own for run_gm (its own driver and
+    # stream); it assigns huge(0D0) to RKIND arrays, which gfortran
     # converts at RKIND 4 (to +Inf) only with -fno-range-check
     mkdir -p gm
     ( cd gm
@@ -228,6 +238,7 @@ for precision in r4 r8; do
     # the step: every real module of the tendencies, diagnostics, tracers and vertical mixing
     "${fc[@]}" -o "${build_dir}/run_split_step_${precision}" eos/run_split_step.o eos/oracle_stream.o \
         eos/ocn_split_step_cut.o eos/mpas_vector_reconstruction_cut.o eos/stubs_split.o \
+        eos/mpas_ocn_gm.o eos/ocn_gm_vectors_cut.o \
         eos/mpas_ocn_time_average_coupled.o eos/mpas_ocn_effective_density_in_land_ice.o \
         eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_frazil_forcing.o \
         eos/mpas_ocn_surface_land_ice_fluxes.o eos/mpas_ocn_tracer_*.o \
@@ -238,6 +249,7 @@ for precision in r4 r8; do
         ${libm_objects[@]+"${libm_objects[@]}"}
     "${fc[@]}" -o "${build_dir}/run_forward_${precision}" eos/run_forward.o eos/ocn_timestep_cut.o eos/oracle_stream.o \
         eos/ocn_split_step_cut.o eos/mpas_vector_reconstruction_cut.o eos/stubs_split.o \
+        eos/mpas_ocn_gm.o eos/ocn_gm_vectors_cut.o \
         eos/mpas_ocn_time_average_coupled.o eos/mpas_ocn_effective_density_in_land_ice.o \
         eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_frazil_forcing.o \
         eos/mpas_ocn_surface_land_ice_fluxes.o eos/mpas_ocn_tracer_*.o \

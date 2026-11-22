@@ -300,8 +300,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     their smoothing and tapering, `k33`, the stream function's solve) and
     Redi isoneutral mixing (`ocn_tracer_hmix_redi_tend`'s three horizontal
     terms, and `k33` in the vertical diffusivity, which v8.4.2 adds without
-    `config_Redi_kappa`; `woof_redi_k33 = 'kappa'` scales it), standalone
-    and not yet wired into the step. Three v8.4.2 quirks keep
+    `config_Redi_kappa`; `woof_redi_k33 = 'kappa'` scales it), standalone,
+    in the split-explicit step (GM before the implicit mixing and after the
+    last diagnostics, the bolus velocity in the transport, Redi in the
+    tracer tendency, `ocn_reconstruct_gm_vectors`) and over forward steps
+    (the cold start's bolus transport); off by default. Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
@@ -1148,8 +1151,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   forecast, and `spacewx_ionosphere_opt = 2` applies the storm-time
   correction there too (plus its ratio `IONO_STORM`), from GFZ's ap with the
   latest observed ap persisted past the start; hex's generic column seam
-  writes the same rows per cell, and streamed domains refuse both for now.
-  `woof spacewx aurora`
+  writes the same rows per cell, hex's MPAS v8.4.2 suite route writes them per
+  cell from `--physics` (the aurora rows too), and streamed domains refuse both
+  for now. `woof spacewx aurora`
   places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
@@ -1299,6 +1303,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   sumflux and the non-PD scalar update, and qv's boundary rows with
   flow_dep_bdy for qc and qr). The forecast path does not import any of
   it.
+  The first diffusion pieces
+  (`woof.grad.wrfplus.diffusion`, diff_opt 1 / km_opt 4) are kernels,
+  not yet in the step: the deformation (WRF `compute_diff_metrics` +
+  `cal_deform_and_div`) and `smag2d_km`'s xkmh/xkhh with the 10 * mlen
+  cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
+  `wrf_diff_opt1_km4` word for word, and they match WRFPLUS to about
+  4e-16, except at the top level of a periodic seam, where WRF keeps a
+  cold-zero slope and woof the true one.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
