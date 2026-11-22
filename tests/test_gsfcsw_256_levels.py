@@ -226,4 +226,4 @@ def test_preflight_prices_the_arena_at_the_tier_it_launches(nz, words):
     cfg = RunConfig(nx=8, ny=8, nz=nz, dx=1000.0, dy=1000.0, ztop=30000.0,
                     dt=1.0, run_seconds=10.0, ra_physics=0, ra_lw_physics=0,
                     ra_sw_physics=2)
-    assert physics_array_shapes(cfg)["radiation/gsfc_workspace"] == (32, words)
+    assert physics_array_shapes(cfg)["radiation/gsfc_workspace"] == (64, words)
