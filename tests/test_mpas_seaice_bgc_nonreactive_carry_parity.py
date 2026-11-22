@@ -102,24 +102,27 @@ def _mismatches(names):
 @requires_gpu
 @pytest.mark.parametrize("names, original, mutated", [
     # the frazil's tracer from its final volume, not add_new_ice's first
-    (_ITD_NAMES, "M(M(D(vi0_init, dt), T.ocean_bio), T.init_frac)", "M(M(D(vi0new, dt), T.ocean_bio), T.init_frac)"),
+    (_ITD_NAMES, "M(M(D(vi0_init, dt), itd_ocean_bio(T, m)), T.init_frac[m])",
+     "M(M(D(vi0new, dt), itd_ocean_bio(T, m)), T.init_frac[m])"),
     # regrid_stationary's top concentration without zbgc_init_frac
-    (_ITD_NAMES, "const double top_conc = M(T.ocean_bio, T.init_frac);", "const double top_conc = T.ocean_bio;"),
+    (_ITD_NAMES, "const double top_conc = M(itd_ocean_bio(T, m), T.init_frac[m]);",
+     "const double top_conc = itd_ocean_bio(T, m);"),
     # the frazil mixed through the profile without its tracer
-    (_ITD_NAMES, "zbio[k - 1] = D(A(M(zbio[k - 1], vtmp), M(M(T.ocean_bio, T.init_frac), vsurp)), vbrin);",
+    (_ITD_NAMES, "zbio[k - 1] = D(A(M(zbio[k - 1], vtmp), M(M(itd_ocean_bio(T, m), T.init_frac[m]), vsurp)), vbrin);",
      "zbio[k - 1] = D(M(zbio[k - 1], vtmp), vbrin);"),
     # lateral_melt without the snow tracers
-    (_ITD_NAMES, "*T.flux_bio = A(*T.flux_bio, D(M(A(M(tr[sn], dvssl), M(tr[sn + 1], dvint)), rside), dt));", ""),
+    (_ITD_NAMES, "T.flux_bio[m] = A(T.flux_bio[m], D(M(A(M(tr[sn], dvssl), M(tr[sn + 1], dvint)), rside), dt));", ""),
     # lateral_melt_bgc on the volume after the melt
-    (_ITD_NAMES, "*T.flux_bio = A(*T.flux_bio, D(M(M(M(M(tr[ix[TI_FBRI]], vicen_init[n]), zspace)",
-     "*T.flux_bio = A(*T.flux_bio, D(M(M(M(M(tr[ix[TI_FBRI]], vicen[n]), zspace)"),
+    (_ITD_NAMES, "T.flux_bio[m] = A(T.flux_bio[m], D(M(M(M(M(tr[ix[TI_FBRI]], vicen_init[n]), zspace)",
+     "T.flux_bio[m] = A(T.flux_bio[m], D(M(M(M(M(tr[ix[TI_FBRI]], vicen[n]), zspace)"),
     # zap_small_bgc dropped
-    (_ITD_NAMES + _RIDGE_NAMES, "*dflux_bio = A(*dflux_bio, D(M(tr[T.bio + k - 1], bvol), dt));", ""),
+    (_ITD_NAMES + _RIDGE_NAMES, "dflux_bio[m] = A(dflux_bio[m], D(M(tr[T.bio[m] + k - 1], bvol), dt));", ""),
     # zap_snow without the snow tracers
-    (_ITD_NAMES + _RIDGE_NAMES, "*dflux_bio = A(*dflux_bio, D(A(M(tr[sn], dvssl), M(tr[sn + 1], dvint)), dt));",
+    (_ITD_NAMES + _RIDGE_NAMES, "dflux_bio[m] = A(dflux_bio[m], D(A(M(tr[sn], dvssl), M(tr[sn + 1], dvint)), dt));",
      ""),
     # cleanup_itd's zapped tracer not added to the flux
-    (_ITD_NAMES + _RIDGE_NAMES, "if (T.nbio) *T.flux_bio = A(*T.flux_bio, dflux_bio);", ""),
+    (_ITD_NAMES + _RIDGE_NAMES, "for (int m = 0; m < T.nbio; ++m) T.flux_bio[m] = A(T.flux_bio[m], dflux_bio[m]);",
+     ""),
     # the tracer's regrid_stationary stop not checked
     ((ABORT,), "            int stop = itd_regrid_points(cs, nbl + 1, ig, hbri_old, hbri, top_conc);\n"
                "            if (stop) return stop;\n",
