@@ -177,9 +177,10 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
     if overrides.get("_ice"):
         ice = np.where(rs.random_sample(nc + 1) < 0.5, uniform(0.0, 1.0, nc + 1), 0.0)
     lat = uniform(-1.4, 1.4, nc + 1)
+    # the Coriolis parameter from sin(lat)'s cubic, not the host libm, so the inputs are the same bytes everywhere
     values = {
         "nVertLevelsP1": nl + 1, "cellsOnCell": cells_on_cell, "cellMask": cell_mask, "latCell": lat,
-        "lonCell": uniform(0.0, 6.28, nc + 1), "fCell": 2.0 * 7.292e-5 * np.sin(lat),
+        "lonCell": uniform(0.0, 6.28, nc + 1), "fCell": 2.0 * 7.292e-5 * (lat - lat * lat * lat / 6.0),
         "bottomDepth": h.sum(axis=1), "ssh": uniform(-1.0, 1.0, nc + 1), "index_vertNonLocalFluxTemp": 1,
         "vertNonLocalFlux": uniform(-1.0, 1.0, (nc + 1, nl + 1, 1)), "zTop": -(depth - 0.5 * h), "zMid": -depth,
         "potentialDensity": pd, "BruntVaisalaFreqTop": bvf,

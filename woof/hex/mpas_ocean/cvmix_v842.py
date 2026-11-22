@@ -16,8 +16,8 @@ Fortran's order and halo extents:
    ``config_use_cvmix_fixed_boundary_layer``) and its limits;
 3. the boundary-layer depth smoothed over ``nCellsArray(2)``
    (``config_cvmix_use_BLD_smoothing``);
-4. the second stage over ``nCellsArray(3)``, or over ``nCellsArray(2)`` once
-   the smoothing has reassigned the shared loop bound (a quirk): the Richardson number smoothed
+4. the second stage over ``nCellsArray(3)``, or ``nCellsArray(2)`` after the
+   smoothing (a quirk, below): the Richardson number smoothed
    (``config_cvmix_num_ri_smooth_loops``), shear mixing (``PP`` less the
    background, or ``KPP``), KPP's boundary-layer diffusivities
    (``SimpleShapes`` or ``MatchBoth``, the enhanced diffusivity at the layer's
@@ -40,7 +40,10 @@ min(maxLevelCell+1, nVertLevels)``); convection without KPP is applied from
 the top (CVMix's ``kOBL_depth`` is never set, so its index is 1); a negative
 ``config_cvmix_convective_triggerBVF`` gives no convection at all (MPAS clips
 the frequency at zero before CVMix reads it); the latitude CVMix is handed
-uses ``180/3.14`` (unused on this path).
+uses ``180/3.14`` (unused on this path); the smoothing sets the cell loop's
+shared bound ``nCells = nCellsArray(2)``, so with
+``config_cvmix_use_BLD_smoothing`` the second stage (KPP, convection, the
+no-flux zeroing) stops one halo layer short of ``nCellsArray(3)``.
 
 Refused by name: CVMix at RKIND 4 (``mpas_ocn_vmix_cvmix.F`` does not compile
 there: CVMix is real(8)); ``config_cvmix_kpp_EkmanOBL = .true.`` and

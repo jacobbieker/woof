@@ -45,7 +45,8 @@ verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
 
 Refused by name, beyond what the pieces refuse: the high-frequency thickness
 filter, a time integrator other than 'split_explicit' or
-'unsplit_explicit', and the sphere's reconstruction at RKIND 8
+'unsplit_explicit', CVMix (``config_use_cvmix``: ported for
+``ocn_vmix_implicit`` alone, ``cvmix_v842``), and the sphere's reconstruction at RKIND 8
 without the glibc 2.39 opt-in (``WOOF_GLIBC239_LIBM64=1``).
 """
 from __future__ import annotations
@@ -121,6 +122,10 @@ def check_config(configs: dict, precision: str, mesh: dict) -> None:
     if configs.get("config_use_freq_filtered_thickness", False):
         _refuse("config_use_freq_filtered_thickness", True, "the high-frequency thickness filter is not ported",
                 "config_use_freq_filtered_thickness = .false.")
+    if configs.get("config_use_cvmix", False):
+        _refuse("config_use_cvmix", True,
+                "CVMix is ported for ocn_vmix_implicit alone (vmix_v842); in the split-explicit step it is not "
+                "yet held to the step compiled with CVMix", "config_use_cvmix = .false.")
     if configs.get("mesh:on_a_sphere", False) and precision == "r8" and not rkind.trig64():
         _refuse("on_a_sphere", True, rkind.trig_refusal("mpas_reconstruct calls glibc's double cos and sin"),
                 "on_a_sphere = .false. at RKIND 8, or WOOF_GLIBC239_LIBM64=1")

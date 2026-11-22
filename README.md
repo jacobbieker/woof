@@ -304,7 +304,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     in the split-explicit step (GM before the implicit mixing and after the
     last diagnostics, the bolus velocity in the transport, Redi in the
     tracer tendency, `ocn_reconstruct_gm_vectors`) and over forward steps
-    (the cold start's bolus transport); off by default. Three v8.4.2 quirks keep
+    (the cold start's bolus transport); off by default; and CVMix's
+    vertical mixing coefficients (`ocn_vmix_coefs_cvmix_build` with CVMix
+    v0.84-beta: KPP's boundary layer, SimpleShapes and MatchBoth
+    diffusivities and non-local flux, Pacanowski-Philander or KPP shear,
+    convection, the background) in the implicit vertical mixing, at RKIND 8
+    only (v8.4.2 does not compile CVMix at RKIND 4), standalone; transcribed
+    under CVMix's Apache-2.0 grant, with the two v0.84-only options
+    (`config_cvmix_kpp_EkmanOBL`, `config_cvmix_kpp_use_enhanced_diff =
+    .false.`) refused by name. Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
@@ -585,7 +593,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
   meshes by name. The sea-ice column physics' time step (mushy vertical thermodynamics,
-  shortwave), ocean KPP and GM/Redi,
+  shortwave), CVMix in the ocean's split-explicit step and KPP's non-local
+  flux in its tracer tendency,
   and the coupler pieces other than the ocean merge and the ocean's import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).

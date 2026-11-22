@@ -20,8 +20,8 @@
 //     cvmix_math_evaluate_cubic)
 //   cvmix_shear.F90 (cvmix_coeffs_shear_low), cvmix_convection.F90
 //     (cvmix_coeffs_conv_low)
-// Copyright (c) 2013-2025, the CVMix developers (University Corporation for
-// Atmospheric Research and others); Apache-2.0 WITH LLVM-exception, the
+// The CVMix developers (NCAR/UCAR staff and contributors; the sources carry
+// no copyright line); Apache-2.0 WITH LLVM-exception, the
 // terms in licenses/LICENSE-CVMix-Apache-2.0-LLVM.txt, as CVMix-src
 // fce422195a0c58f15a55946b5ed517ba4365e232 is licensed. The words are held
 // to v0.84-beta (d83f5827, the tag MPAS-Model v8.4.2 builds), whose routines
