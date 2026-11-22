@@ -348,6 +348,9 @@ class DriverConfig:
     #: WOOF's &diagnostics config_hailcast_opt (mpasdiag.hailcast_diag_v842): WRF-HAILCAST (a
     #: hailcast_diag_v842.HailcastConfig), or None.  Not Registry options.
     hailcast_diagnostics: Any = None
+    #: WRF's --physics spacewx_ionosphere_opt / spacewx_aurora_opt keys (mpasdiag.spacewx_diag_v842): the space-weather
+    #: history rows (a spacewx_diag_v842.SpacewxConfig), or None.  Not Registry options.
+    spacewx_diagnostics: Any = None
     #: WOOF's &diagnostics config_output_diagnostics / config_auxhist3_interval / config_mean_diag / config_mean_freq /
     #: config_mean_interval / config_diurnal_diag / config_surface_energy_diag (mpasdiag.reduction_diag_v842): WRF's
     #: CLWRF, RASM and surface-energy reductions (a reduction_diag_v842.ReductionConfig), or None.  Not Registry options.
@@ -491,6 +494,8 @@ class DriverConfig:
             result["lightning_diagnostics"] = self.lightning_diagnostics.receipt()
         if self.hailcast_diagnostics is not None:
             result["hailcast_diagnostics"] = self.hailcast_diagnostics.receipt()
+        if self.spacewx_diagnostics is not None:
+            result["spacewx_diagnostics"] = self.spacewx_diagnostics.receipt()
         if self.acc_diagnostics is not None:
             o = self.acc_diagnostics
             result["acc_diagnostics"] = dict(prec_acc_dt=o.prec_acc_dt, acc_phy_tend=o.acc_phy_tend,

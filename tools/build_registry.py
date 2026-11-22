@@ -5355,8 +5355,8 @@ _VERTICAL_BOUND_SOURCES: dict[str, dict[str, tuple[str, str]]] = {
         "wsm3-mp3": ("WSM3 microphysics", "WSM3_VERTICAL_LEVEL_BOUNDS"),
         "wsm6r-mp106": ("WSM6R microphysics", "WSM6R_VERTICAL_LEVEL_BOUNDS"),
         "wsm7-mp24": ("WSM7 microphysics", "WSM7_VERTICAL_LEVEL_BOUNDS"),
-        # WDM7's independent unit compiles at the WDM6_KMAX level tiers (64/80).
-        "wdm7-mp26": ("WDM7 microphysics", "WDM7_VERTICAL_LEVEL_BOUNDS"),
+        # WDM7's independent unit uses the WDM6_KMAX level tiers.
+        "wdm7-mp26": ("WDM7 microphysics", "WDM6_VERTICAL_LEVEL_BOUNDS"),
         "p3-mp50": ("P3 microphysics", "P3_VERTICAL_LEVEL_BOUNDS"),
         "gsfcgce-mp97": ("Goddard GCE microphysics", "GSFCGCE_VERTICAL_LEVEL_BOUNDS"),
         "p3-mp51": ("P3 microphysics", "P3_VERTICAL_LEVEL_BOUNDS"),

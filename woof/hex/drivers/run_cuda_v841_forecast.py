@@ -4297,6 +4297,14 @@ def execute_forecast(
     capture_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hex-capture") if async_capture else None
     capture_pending = []
     wind_frames = {}
+    # spacewx_ionosphere_opt on the generic seam (woof.hex.spacewx_history): the seam's PhysicsDriver holds the
+    # rows; each frame takes them at its own valid time.
+    from woof.hex import spacewx_history
+    spacewx_rows = bool(spacewx_history.seam_holders(getattr(stack["backend"], "_seam", None)))
+    if spacewx_rows:
+        spacewx_history.preload(spacewx_history.seam_holders(stack["backend"]._seam),
+                                schedule["valid_times"].values())
+    spacewx_frames = {}
     # Running-max updraft helicity (woof.hex.uh_layers): the 2-5 km maximum by default, as every MPAS-physics run
     # writes it; --uh-layers on adds 0-1/0-2/0-3 km, off writes none (uh_layers.arwen_names).
     uh_frames = {}
@@ -4392,6 +4400,8 @@ def execute_forecast(
         finish_started = time.perf_counter()
         if step in wind_frames:
             snapshot['wind_fields'], snapshot['wind_metadata'] = wind_frames.pop(step)
+        if step in spacewx_frames:
+            snapshot['spacewx_fields'] = spacewx_frames.pop(step)
         if step in uh_frames:
             snapshot['arrays'].update(uh_frames.pop(step))
         time_ledger.emit("forecast.output.capture.finish", "begin", attrs={"step": step})
@@ -4491,6 +4501,7 @@ def execute_forecast(
                  "receipt": {"step": step},
                  **({"wind_fields": snapshot["wind_fields"], "wind_metadata": snapshot["wind_metadata"]}
                     if "wind_fields" in snapshot else {}),
+                 **({"spacewx_fields": snapshot["spacewx_fields"]} if "spacewx_fields" in snapshot else {}),
                  "valid_time": snapshot["valid_time"],
                  **frame_options},
                 static,
@@ -4552,6 +4563,11 @@ def execute_forecast(
         wind = getattr(stack['backend'], 'wind_farms', None)
         if wind is not None:
             wind_frames[step] = (wind.history_fields(), wind.metadata())
+        if spacewx_rows:
+            # The current seam's holders: the backend rebuilds its seam after a refused step.
+            spacewx_frames[step] = spacewx_history.cell_fields(
+                spacewx_history.seam_holders(stack["backend"]._seam), schedule["valid_times"][step],
+                int(host["prepared"].mesh.n_cells))
         if uh_layers is not None:
             uh_frames[step] = uh_layers_module.arwen_history_arrays(uh_layers)
         if async_capture:

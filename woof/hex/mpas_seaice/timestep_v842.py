@@ -63,9 +63,17 @@ package and the velocity solver compiled verbatim
 (``tools/mpas_seaice_oracle/run_column.F90``'s ``seaice_step`` stage,
 ``tests/test_mpas_seaice_coupled_step_parity.py``).
 
+The weak-form stress divergence (``config_stress_divergence_scheme =
+'weak'``) runs :mod:`~woof.hex.mpas_seaice.weak_v842` in the variational
+solver's place: its init (``seaice_init_velocity_solver_weak``, under
+``basis="compute"``) and each subcycle's internal stress, with the metric
+terms' tangents worked out once per :func:`advance` (``metric_libm``, which
+a sphere needs; ``weak_corrections``). Held word for word over N steps
+(``tests/test_mpas_seaice_weak_parity.py``).
+
 Refused by name: upwind advection (v8.4.2 cannot run it), a periodic
-planar mesh under advection, forcing, the weak-form stress divergence, the
-unit tests, a restart start, halo exchanges, and what the column step
+planar mesh under advection, forcing, the weak form with the column
+package, the unit tests, a restart start, halo exchanges, and what the column step
 refuses (the column biogeochemistry but its brine height, the vertical snow
 and ice tracers, the ocean mixed layer's constant boundary layer). ``seaice_check_state`` changes
 no state and is not run.
@@ -144,10 +152,18 @@ def check_config(configs: dict) -> None:
         remap_v842.check_config(configs)
     if not configs.get("config_use_velocity_solver", True):
         return
-    scheme = configs.get("config_stress_divergence_scheme", "variational")
-    if scheme != "variational":
-        _refuse("config_stress_divergence_scheme", scheme, "only the variational stress divergence is ported",
-                "config_stress_divergence_scheme = 'variational'")
+    scheme = _scheme(configs)
+    if scheme not in ("variational", "weak"):
+        _refuse("config_stress_divergence_scheme", scheme,
+                "only the variational and weak stress divergences are ported",
+                "config_stress_divergence_scheme = 'variational' | 'weak'")
+    if scheme == "variational":
+        from . import variational_basis_v842
+        variational_basis_v842.check_config(configs)
+
+
+def _scheme(configs: dict) -> str:
+    return str(configs.get("config_stress_divergence_scheme", "variational")).rstrip(" ")
 
 
 def advection_tree(pools: dict, configs: dict):
@@ -176,7 +192,8 @@ def _tilt(configs: dict) -> str:
     return "geostrophic" if configs.get("config_geostrophic_surface_tilt", False) else "ssh_gradient"
 
 
-def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None) -> Clock:
+def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None, basis: str | None = None,
+               metric_libm: str | None = None, basis_corrections=()) -> Clock:
     """The init's time steps and time diagnostics; the clock at its start.
 
     Under ``config_use_advection`` with ``remap_geometry="compute"`` (the
@@ -187,12 +204,32 @@ def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None)
     ``"input"`` keeps the pools' own (a harness replaying a fixture whose
     geometry came from elsewhere). The halo-layer warnings v8.4.2 logs go to
     this module's logger. With the column package, ``init_column_itd``
-    writes the thickness limits (``categoryThicknessLimits``)."""
+    writes the thickness limits (``categoryThicknessLimits``).
+
+    With the velocity solver on, ``basis="compute"`` (the default then; v8.4.2
+    always computes it) runs ``seaice_init_velocity_solver_variational``
+    (:mod:`~woof.hex.mpas_seaice.variational_basis_v842`) after
+    ``seaice_init_evp``'s place: the basis gradients and integrals,
+    ``tanLatVertexRotatedOverRadius`` and ``cellVerticesAtVertex`` from the
+    mesh, into the velocity_variational pool. ``metric_libm`` and
+    ``basis_corrections`` go to it (at RKIND 8 the metric terms need
+    ``metric_libm`` unless they are off or trivially zero or NaN). ``"input"``
+    keeps the pool's own (a harness replaying a fixture whose basis came
+    from elsewhere). Under the weak form ``"compute"`` runs
+    ``seaice_init_velocity_solver_weak`` instead
+    (:func:`~woof.hex.mpas_seaice.weak_v842.initialize_pools`: the normal
+    vectors and rotated latitudes into the velocity_weak pool; on a sphere
+    it needs ``metric_libm``)."""
     check_config(configs)
+    solver_on = configs.get("config_use_velocity_solver", True)
+    if basis is None:
+        basis = "compute" if solver_on else "input"
+    if basis not in ("compute", "input"):
+        raise ValueError(f"basis is 'compute' or 'input', not {basis!r}")
     if configs.get("config_use_column_package", False):
         from . import column_v842 as cv
         _column_precision(pools)
-        cv.init_column_itd(pools, cv.init_parameters(pools, configs, biogeochemistry=True))
+        cv.init_column_itd(pools, cv.init_parameters(pools, configs, biogeochemistry=True, z_tracers=True))
     advection = configs.get("config_use_advection", False)
     if remap_geometry is None:
         remap_geometry = "compute" if advection else "input"
@@ -202,6 +239,16 @@ def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None)
         from . import remap_init_v842
         for w in remap_init_v842.initialize_pools(pools, configs):
             _log.info("%s %s", w["message"], w["ints"])
+    if solver_on and basis == "compute" and _scheme(configs) == "weak":
+        from . import weak_v842
+        weak_v842.initialize_pools(pools, configs, metric_libm=metric_libm)
+    elif solver_on and basis == "compute":
+        from . import variational_basis_v842
+        for w in variational_basis_v842.initialize_pools(pools, configs, metric_libm=metric_libm,
+                                                         corrections=velocity_corrections(
+                                                             configs, basis_corrections,
+                                                             variational_basis_v842.CORRECTIONS)):
+            _log.warning("%s", w["message"])
     solver = pools["velocity_solver"]
     real = PRECISIONS[_precision_of(solver["uVelocity"])]
     dynamics = real(real(configs["config_dt"]) / real(configs["config_dynamics_subcycle_number"]))
@@ -226,17 +273,37 @@ def _column_state(pools: dict, configs: dict):
     ``colpkg_init_itd`` run on a copy of the thickness limits (the pools'
     keep what the run has made of them, as a running model's do)."""
     from . import column_v842 as cv
-    state = cv.init_parameters(pools, configs, biogeochemistry=True)
+    state = cv.init_parameters(pools, configs, biogeochemistry=True, z_tracers=True)
     limits = pools["initial"]["categoryThicknessLimits"]
     cv.init_column_itd({"initial": {"categoryThicknessLimits": limits.copy()}}, state)
     return state
 
 
-def _velocity_solver(pools: dict, configs: dict, consts, column_state=None) -> None:
-    """``seaice_run_velocity_solver``: pre-subcycle, elastic subcycles, post-subcycle."""
+def velocity_corrections(configs: dict, named, table) -> tuple:
+    """The velocity set-up corrections a call takes: those ``named``, plus
+    every one of ``table`` under ``woof_quirk_corrections = 'all'`` in
+    ``configs`` (woof.quirk_corrections; route ``mpas_seaice_velocity``).
+    Each acts only where its mesh has the quirk, so the umbrella carries
+    them everywhere."""
+    from woof import quirk_corrections
+    named = tuple(named)
+    if not quirk_corrections.all_on(configs):
+        return named
+    return named + tuple(name for name in table if name not in named)
+
+
+def _velocity_solver(pools: dict, configs: dict, consts, column_state=None, weak_tangents=None,
+                     weak_corrections=()) -> None:
+    """``seaice_run_velocity_solver``: pre-subcycle, elastic subcycles,
+    post-subcycle. ``weak_tangents`` (the weak form's): the device
+    ``tan(latCellRotated)`` and ``tan(latVertexRotated)``."""
     p = pools
     mesh = {**p["mesh"]}
-    solver, variational, icestate = p["velocity_solver"], p["velocity_variational"], p["icestate"]
+    solver, variational, icestate = p["velocity_solver"], p.get("velocity_variational"), p["icestate"]
+    weak = weak_tangents is not None
+    if weak:
+        from . import weak_v842
+        vw = p["velocity_weak"]
     column = column_state is not None
     flags = {"use_column_package": column,
              "use_column_vertical_thermodynamics": column and bool(
@@ -260,20 +327,35 @@ def _velocity_solver(pools: dict, configs: dict, consts, column_state=None) -> N
         mesh=mesh, boundary=p["boundary"], tracers=tracers, aggregate=p["tracers_aggregate"],
         icestate=icestate, ocean=p["ocean_coupling"], atmos=p["atmos_coupling"], solver=solver,
         variational=variational, use_air_stress=bool(configs.get("config_use_air_stress", False)),
-        use_ocean_stress=use_ocean_stress, tilt=_tilt(configs), column_ice_strength=strength, **flags)
+        use_ocean_stress=use_ocean_stress, tilt=_tilt(configs), column_ice_strength=strength,
+        init_subcycle=(lambda: weak_v842.init_subcycle_variables(mesh=mesh, solver=solver, weak=vw)) if weak
+        else None, **flags)
     inertia = consts[1:2]
+    radius = configs.get("mesh:sphere_radius", configs.get("sphere_radius", 0.0))
     # the subcycles run on the same arrays, so the first one checks them for all
     for subcycle in range(int(configs["config_elastic_subcycle_number"])):
-        evp_v842.internal_stress_variational(mesh=mesh, solver=solver, variational=variational, consts=consts,
-                                             elastic_time_step=elastic_dt, revised_evp=revised,
-                                             check=subcycle == 0)
+        if weak:
+            weak_v842.internal_stress_weak(mesh=mesh, solver=solver, weak=vw, consts=consts,
+                                           tangents=weak_tangents, elastic_time_step=elastic_dt,
+                                           revised_evp=revised, sphere_radius=radius, check=subcycle == 0)
+        else:
+            evp_v842.internal_stress_variational(mesh=mesh, solver=solver, variational=variational,
+                                                 consts=consts, elastic_time_step=elastic_dt,
+                                                 revised_evp=revised, check=subcycle == 0)
         velocity_v842.velocity_update(mesh=mesh, icestate=icestate, solver=solver, inertia=inertia,
                                       use_ocean_stress=use_ocean_stress, revised_evp=revised,
                                       elastic_time_step=elastic_dt, dynamics_time_step=dynamics_dt,
                                       check=subcycle == 0)
-    evp_v842.final_divergence_shear_variational(mesh=mesh, solver=solver, variational=variational,
-                                                ridging=p["ridging"], use_column_package=column)
-    velocity_v842.principal_stresses(mesh=mesh, variational=variational)
+    if weak:
+        weak_v842.final_divergence_shear_weak(mesh=mesh, solver=solver, weak=vw, ridging=p["ridging"],
+                                              use_column_package=column,
+                                              corrections=velocity_corrections(configs, weak_corrections,
+                                                                               weak_v842.CORRECTIONS))
+        weak_v842.principal_stresses(mesh=mesh, weak=vw)
+    else:
+        evp_v842.final_divergence_shear_variational(mesh=mesh, solver=solver, variational=variational,
+                                                    ridging=p["ridging"], use_column_package=column)
+        velocity_v842.principal_stresses(mesh=mesh, variational=variational)
     velocity_v842.ocean_stress_final(mesh=mesh, boundary=p["boundary"], icestate=icestate, solver=solver,
                                      use_ocean_stress=use_ocean_stress)
 
@@ -297,7 +379,8 @@ def timestep_finalize(pools: dict, configs: dict) -> None:
 
 
 def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_step: int = 1,
-            finalize_last: bool = True, after_clock=None) -> int:
+            finalize_last: bool = True, after_clock=None, metric_libm: str | None = None,
+            weak_corrections=()) -> int:
     """``seaice_core_run``'s loop, ``n_steps`` times from step ``first_step``, in
     place on the pools and clock; returns the next step's number. With
     ``finalize_last`` false the last step is not finalized (a coupler reads
@@ -326,6 +409,25 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
         # seaice_init_evp, at the init's time steps
         consts = evp_v842.init_evp(m["dvEdge"][:ne], int(m["nEdgesSolve"]), solver["dynamicsTimeStep"].item(),
                                    solver["elasticTimeStep"].item())
+    tangents = None
+    weak = configs.get("config_use_velocity_solver", True) and _scheme(configs) == "weak"
+    if weak_corrections and not weak:
+        raise ValueError(f"weak_corrections {tuple(weak_corrections)} need config_stress_divergence_scheme = "
+                         "'weak' with the velocity solver on")
+    if weak:
+        # the weak form's metric terms: tan of the init's rotated latitudes, once
+        from . import weak_v842
+        weak_v842._check_corrections(weak_corrections)
+        sphere = bool(configs.get("mesh:on_a_sphere", configs.get("on_a_sphere", False)))
+        radius = float(configs.get("mesh:sphere_radius", configs.get("sphere_radius", 0.0)))
+        if sphere and not radius > 0.0:
+            _refuse("mesh:sphere_radius", radius,
+                    "the weak form's metric terms divide by the sphere's radius, and on a sphere it must be "
+                    "given (0 would stand in 1 and scale every metric term by the radius)",
+                    "mesh:sphere_radius = the sphere's radius in m")
+        vw = pools["velocity_weak"]
+        tangents = tuple(cp.asarray(t) for t in weak_v842.metric_tangents(
+            vw["latCellRotated"], vw["latVertexRotated"], metric_libm=metric_libm))
     tree = advection_tree(pools, configs) if configs.get("config_use_advection", False) else None
     itimestep = first_step
     for i in range(n_steps):
@@ -350,7 +452,7 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
                 cstep.reinitialize_diagnostics_dynamics(pools, configs)
             if configs.get("config_use_velocity_solver", True):
                 with evp_v842.block_counts(cells=nc, vertices=nv):
-                    _velocity_solver(pools, configs, consts, column)
+                    _velocity_solver(pools, configs, consts, column, tangents, weak_corrections)
             if tree is not None:
                 # seaice_run_advection: incremental remap at dynamicsTimeStep
                 remap_v842.run(tree, pools=pools, mesh=m, configs=configs)

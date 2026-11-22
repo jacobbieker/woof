@@ -2140,6 +2140,22 @@ one line:
   models off is untouched: the plain YSU kernel compiles from unchanged
   statements.
 
+**Opt-in: `noah_smc_floor_booking` (default off).** WRF 4.7.1's Noah SSTEP
+(`module_sf_noahlsm.F`) clips each layer's total soil moisture to
+`MAX(MIN(STOT, SMCMAX), 0.02)` (:4030). The upper clip books its excess:
+`WPLUS` passes it to the layer below and, past the bottom layer, to
+`RUNOFF3` (:4026, :4075). The lower floor books nothing, so a sandy or
+desert layer that dries below 0.02 gains the difference from nowhere; a
+column that starts below the floor gains up to 30 mm in one step. With the
+option on, the water the floor adds is taken from the layer below as a
+negative `WPLUS`, and past the bottom layer from `RUNOFF3`, which can then
+be negative. The column water budget then closes on those columns
+(`tests/test_noah_smc_floor_booking.py`, float64 mirror and kernel). It is
+per domain, refused off `sf_surface_physics = 2`, carried by the plain,
+mosaic, UA and urban-canopy Noah units, and not yet scored against
+observations. The hex MPAS-suite Noah (`woof/hex/mpasphys/noah_v842.py`)
+does not carry it yet. Off, the arithmetic is WRF's word for word.
+
 ## Radiation (`ra_lw_physics` / `ra_sw_physics`)
 
 | option | selection | maturity | evidence, in one line |
@@ -2688,6 +2704,16 @@ option on, YSU's unchanged kernel reads the theta flux `HFX/pi(1)`, so the
 surface heat enters as `HFX` (`tests/test_ysu_surface_heat_exner.py`, by
 the column heat budget). It is per domain, refused off `bl_pbl_physics =
 1` and with BEP/BEM, and not yet scored against observations.
+
+**Opt-in: `mynn_sfclay_psih_zolzt` (default off).** WRF 4.7.1's MYNN
+surface layer (`module_sf_mynn.F:826-827, 839-840, 910-911, 921-922`)
+integrates the 2 m and 10 m heat stability function from `z0/L`, while the
+log term it is paired with (`gz2ozt = ln((2+z0)/zt)`) and the first-level
+`psih` start at `zt/L`. With the option on, `psih2`/`psih10` also start at
+`zt/L`, so the 2 m temperature and humidity come from one profile. Only
+T2, TH2, Q2 and the 2 m exchange coefficients move
+(`tests/test_mynn_sfclay_psih_zolzt.py`). Refused off `sf_sfclay_physics =
+5` and with the `gsl_wrf39` variant; not yet scored against observations.
 
 ## Passive tracers (`tracer_opt`)
 

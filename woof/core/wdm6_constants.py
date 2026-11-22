@@ -93,17 +93,14 @@ def wdm6_workspace_floats(nz: int, columns: int) -> int:
     return blocks * WDM6WS_SLOTS * wdm6_workspace_extent(nz) * WDM6_BLOCK
 
 
-#: The 64/80 ``WDM6_KMAX`` ladder upstream's separate WDM7 unit
-#: (kernels/wdm7.cu over wdm_shared.cuh) still compiles at, one thread per
+#: The ``WDM6_KMAX`` ladder upstream's separate WDM7 unit
+#: (kernels/wdm7.cu over wdm_shared.cuh) compiles at, one thread per
 #: column with per-thread level arrays; WDM6 itself runs the column
-#: workspace above and admits up to :data:`WDM6_MAX_LEVELS`.
+#: workspace above and admits up to :data:`WDM6_MAX_LEVELS`.  64 and 80
+#: compile the unchanged source; 128 and 256 are deeper defines of it.
 WDM6_SHALLOW_KMAX = 64
-WDM6_KERNEL_LEVEL_TIERS = (WDM6_SHALLOW_KMAX, 80)
-
-
-#: WDM7 (mp_physics=26): the deepest tier its unit compiles at.  The
-#: registry's vertical row once read WDM6's 256-level ceiling here, so a
-#: 149-level hex run passed the preflight and stopped at step 0.
+WDM6_KERNEL_LEVEL_TIERS = (WDM6_SHALLOW_KMAX, 80, 128, 256)
+#: ``(minimum, maximum)`` levels the WDM7 unit admits.
 WDM7_VERTICAL_LEVEL_BOUNDS = (2, WDM6_KERNEL_LEVEL_TIERS[-1])
 
 
@@ -121,8 +118,8 @@ def wdm6_level_tier(nz: int) -> int:
 #: local-memory backing store sized by the deepest frame).  64 is the
 #: source's ``#ifndef`` default.
 WDM5_SHALLOW_KMAX = 64
-WDM5_DEEP_KMAX = 80
-WDM5_KERNEL_LEVEL_TIERS = (WDM5_SHALLOW_KMAX, WDM5_DEEP_KMAX)
+WDM5_DEEP_KMAX = 256
+WDM5_KERNEL_LEVEL_TIERS = (WDM5_SHALLOW_KMAX, 80, 128, WDM5_DEEP_KMAX)
 #: ``(minimum, maximum)`` levels WDM5 admits: 2 (a layer above and below to
 #: sediment between) up to the deepest compiled tier.
 WDM5_VERTICAL_LEVEL_BOUNDS = (2, WDM5_DEEP_KMAX)
@@ -370,10 +367,10 @@ def wrf_word(bits: int) -> float:
     return struct.unpack("<f", struct.pack("<I", bits))[0]
 
 
-__all__ = ["WDM5_DEEP_KMAX", "WDM5_KERNEL_LEVEL_TIERS", "WDM5_SHALLOW_KMAX", "WDM5_VERTICAL_LEVEL_BOUNDS",
+__all__ = ["WDM7_VERTICAL_LEVEL_BOUNDS", "WDM5_DEEP_KMAX", "WDM5_KERNEL_LEVEL_TIERS", "WDM5_SHALLOW_KMAX", "WDM5_VERTICAL_LEVEL_BOUNDS",
            "WDM6Coefficients", "WDM6WS_SLOTS", "WDM6_BLOCK", "WDM6_DEEP_KMAX",
            "WDM6_KERNEL_LEVEL_TIERS", "WDM6_MAX_LEVELS", "WDM6_NUMBER_SPECIES", "WDM6_SHALLOW_KMAX",
-           "WDM6_TILE_BLOCKS_PER_SM", "WDM6_VERTICAL_LEVEL_BOUNDS", "WDM6_WRF_RIMED_WORDS", "WDM7_VERTICAL_LEVEL_BOUNDS", "WDM6_WRF_WORDS",
+           "WDM6_TILE_BLOCKS_PER_SM", "WDM6_VERTICAL_LEVEL_BOUNDS", "WDM6_WRF_RIMED_WORDS", "WDM6_WRF_WORDS",
            "WDM7_HAIL_SPECIES", "WDM7_WRF_HAIL_WORDS", "WDM_HAIL_SCHEMES", "WDM_SCHEMES",
            "WDM_SCHEME_NAMES", "WdmScheme", "coefficients", "rimed_ice_constants",
            "wdm5_level_tier", "wdm6_level_tier", "wdm6_workspace_extent", "wdm6_workspace_floats",

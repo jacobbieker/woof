@@ -98,14 +98,16 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     from woof.hex.mpas_ice import rkind
 
     c = configs
-    cv.refuse_unported(c, dims, biogeochemistry=True)
+    cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=True)
     calc_tsfc = bool(c["config_calc_surface_temperature"])
     dedd = calc_tsfc and c["config_shortwave_type"] == "dEdd"
     if dedd and not rkind.trig64():
         _refuse("config_shortwave_type", "dEdd",
                 rkind.trig_refusal("the orbit and the solar zenith angle call glibc's double sin, cos, atan and asin"),
                 "WOOF_GLIBC239_LIBM64=1, config_shortwave_type = 'ccsm3' or config_calc_surface_temperature = .false.")
-    fixes = cv.corrections(c)
+    # a named correction whose shortwave this configuration does not run is
+    # refused; under woof_quirk_corrections = 'all' alone it changes nothing
+    fixes = cv.named_corrections(c)
     if "ccsm3_absorbed_solar_layers" in fixes and not (calc_tsfc and not dedd):
         _refuse("woof_v842_corrections", "ccsm3_absorbed_solar_layers",
                 "it corrects shortwave_ccsm3, which this configuration does not run",
@@ -342,7 +344,7 @@ def prep_radiation(pools: dict, configs: dict, state: "cv.ColumnState") -> None:
     """``column_prep_radiation``: the shortwave fluxes scaled by the ratio of
     the new to the old net shortwave."""
     d = state.dims
-    cv.refuse_unported(configs, d, biogeochemistry=True)
+    cv.refuse_unported(configs, d, biogeochemistry=True, z_tracers=True)
     n1, n_solve, ncat, nil, nsl = d["nCells"] + 1, d["nCellsSolve"], d["nCategories"], d["nIceLayers"], d["nSnowLayers"]
     sw = pools["shortwave"]
     c1 = (n1,)

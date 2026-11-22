@@ -401,6 +401,23 @@ CORRECTIONS = {
         "descriptor gfortran gives one element, so the zeroing writes to address 0 and every time step "
         "with the column biogeochemistry dies there; the correction zeroes only the fields that have an "
         "array, which nothing else reads"),
+    "bgc_snow_new_category": (
+        "update_snow_bgc divides the category's initial snow volume by its initial area with no guard "
+        "(ice_aerosol.F90:543, hs_old = vsno_old/aice_old), and only column_vertical_thermodynamics refreshes "
+        "iceAreaCategoryInitial and snowVolumeCategoryInitial (mpas_seaice_column.F:1458-1460): with "
+        "config_use_column_vertical_thermodynamics off, a category the previous step's ITD opened has no initial "
+        "area, so 0/0 makes its snow layers' flux NaN and oceanBioFluxes is NaN in that cell; the correction "
+        "takes a category whose initial area is at most puny (none: the ITD opened it) to have had no snow "
+        "(hs_old = 0)"),
+    "subcycle_snow_ice_tracers": (
+        "seaice_column_predynamics_time_integration separates the vertical tracers into their *Snow and *Ice "
+        "fields once a step (mpas_seaice_column.F:922-925), but seaice_column_dynamics_time_integration combines "
+        "them back into the tracer before every dynamics subcycle's ridging (mpas_seaice_column.F:976-979; the "
+        "subcycle loop is mpas_seaice_time_integration.F:139-164), so with config_dynamics_subcycle_number > 1 "
+        "each subcycle's combine overwrites what the previous subcycle's ridging did to the vertical tracers "
+        "with the pre-ridging *Snow and *Ice (and the advection moves those): the ridged categories keep their "
+        "old concentrations at their new areas and the tracer is not conserved; the correction separates again "
+        "after each subcycle's column dynamics, so the next combine hands back the ridged tracer"),
     "zsal_solve": (
         "colpkg_init_parameters takes solve_zsal_in but never assigns the column package's solve_zsal "
         "(ice_colpkg.F90:4325-4345; mpas_seaice_column.F:9608 has it commented out), so it stays false, and "
@@ -417,6 +434,16 @@ CORRECTIONS = {
 
 
 def corrections(configs: dict) -> frozenset[str]:
+    """The opt-in corrections ``configs`` applies: the ones it names
+    (:func:`named_corrections`), and under ``woof_quirk_corrections = 'all'``
+    (woof.quirk_corrections) every one of :data:`CORRECTIONS`. A correction
+    whose scheme the configuration does not run then changes nothing; one
+    it refuses in this configuration is refused by name, as when named."""
+    from woof import quirk_corrections
+    return named_corrections(configs) | frozenset(quirk_corrections.seaice_names(configs))
+
+
+def named_corrections(configs: dict) -> frozenset[str]:
     """The opt-in corrections ``configs`` names (``woof_v842_corrections``),
     refusing names that are not in :data:`CORRECTIONS`."""
     names = configs.get("woof_v842_corrections", ())
@@ -444,8 +471,10 @@ ZSAL_FLAG = "config_use_vertical_zsalinity"
 ZSAL_SOLVE = "zsal_solve"
 
 
-#: the vertical biogeochemical tracers (z_tracers): the init and column_biogeochemistry
-#: carry them with the nonreactive tracer (VT_PORTED) alone; every other stage refuses them
+#: the vertical biogeochemical tracers (z_tracers): the init, the column stages
+#: (column_biogeochemistry, the vertical thermodynamics, the ITD, the ridging, the shortwave),
+#: coupling_prep and the column and coupled steps carry them with the nonreactive tracer
+#: (VT_PORTED) alone; a stage that does not (z_tracers False) refuses them
 VT_FLAG = "config_use_vertical_tracers"
 #: the vertical tracers' flags the port carries
 VT_PORTED = ("config_use_nonreactive",)
@@ -480,10 +509,10 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
     one (its tracers counted, never solved or copied) and, under the
     ``zsal_solve`` correction, the solved one.
 
-    ``z_tracers`` is the caller's too: the init and ``column_biogeochemistry``
-    carry the vertical tracers (``config_use_vertical_tracers``) with the
-    nonreactive tracer alone (:data:`VT_PORTED`); every other stage refuses
-    them."""
+    ``z_tracers`` is the caller's too: the init, the column stages, the
+    column and coupled steps carry the vertical tracers
+    (``config_use_vertical_tracers``) with the nonreactive tracer alone
+    (:data:`VT_PORTED`); a caller passing False refuses them."""
     c = configs
     if not c.get("config_use_column_package", False):
         _refuse("config_use_column_package", False, "the column port runs only with the column package on",
@@ -495,8 +524,9 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
                     "step only",
                     "config_use_column_biogeochemistry = .false.")
         if c[VT_FLAG] and not z_tracers:
-            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init and column_biogeochemistry "
-                    "only", f"{VT_FLAG} = .false.")
+            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init, the column stages "
+                    "(column_biogeochemistry, the vertical thermodynamics, the ITD, the ridging, the "
+                    "shortwave), coupling_prep and the column and coupled steps, not for this stage", f"{VT_FLAG} = .false.")
         carried = BGC_PORTED + (ZSAL_FLAG,) + ((VT_FLAG,) + VT_PORTED if c[VT_FLAG] else ())
         for flag in _BGC_FLAGS:
             if flag not in carried and c[flag]:

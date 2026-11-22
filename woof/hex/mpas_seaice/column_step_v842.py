@@ -10,12 +10,18 @@ MPAS runs it:
   ``column_prep_radiation`` (under the column shortwave with a computed
   surface temperature), ``column_vertical_thermodynamics``,
   ``column_biogeochemistry`` (under ``config_use_column_biogeochemistry``),
-  ``column_itd_thermodynamics`` and ``seaice_column_update_state``
-  ("thermodynamics", ``config_dt``, ``config_dt``);
+  ``column_itd_thermodynamics``, ``seaice_column_update_state``
+  ("thermodynamics", ``config_dt``, ``config_dt``) and, under
+  ``config_use_vertical_tracers``, ``column_separate_snow_ice_tracers``;
 - per dynamics subcycle, :func:`reinitialize_diagnostics_dynamics` and
   then, after the velocity solver and the advection, :func:`dynamics`,
-  ``seaice_column_dynamics_time_integration``: ``column_ridging`` and
-  ``seaice_column_update_state`` ("transport", ``dynamicsTimeStep``, 0);
+  ``seaice_column_dynamics_time_integration``: under
+  ``config_use_vertical_tracers`` ``column_combine_snow_ice_tracers``, then
+  ``column_ridging`` and
+  ``seaice_column_update_state`` ("transport", ``dynamicsTimeStep``, 0)
+  (and, with the opt-in correction ``subcycle_snow_ice_tracers``,
+  :func:`separate_snow_ice_tracers` again, so a later subcycle's combine
+  keeps this subcycle's ridging);
 - :func:`postdynamics`, ``seaice_column_postdynamics_time_integration``:
   ``column_radiation`` (not at initialisation) under the column shortwave,
   then ``seaice_column_coupling_prep`` and ``seaice_column_scale_fluxes``;
@@ -56,10 +62,11 @@ step refuses that by name; the opt-in ``bgc_inactive_diagnostics`` correction
 fields that exist, and the rest of the step is v8.4.2's word for word.
 v8.4.2's inert vertical salinity (``config_use_vertical_zsalinity``: never
 solved, never copied to the tracer arrays) is carried too, and so is the
-solved one (the ``zsal_solve`` correction).
+solved one (the ``zsal_solve`` correction). The vertical tracers with the
+nonreactive tracer alone are carried through every stage, its snow and ice
+layers separated for the advection and combined again before the ridging.
 
-Refused by name, besides each stage's own refusals: the vertical snow and ice tracers
-(``column_separate_snow_ice_tracers`` and ``_combine_``), the ocean mixed
+Refused by name, besides each stage's own refusals: the ocean mixed
 layer (``coupling_prep_v842``) and, under the velocity solver, the weak-form
 stress divergence (its principal stresses are re-initialised in the
 ``velocity_weak`` pool, which this port does not carry).
@@ -112,17 +119,66 @@ def check_config(configs: dict) -> None:
                 "config_use_column_package = .true.")
     if c.get("config_use_column_biogeochemistry", False):
         _refuse_inactive_bgc_diagnostics(c)
-    if c.get("config_use_vertical_tracers", False):
-        _refuse("config_use_vertical_tracers", True,
-                "column_separate_snow_ice_tracers and column_combine_snow_ice_tracers are not ported",
-                "config_use_vertical_tracers = .false.")
+    if c.get(cv.VT_FLAG, False):
+        if not c.get("config_use_column_biogeochemistry", False):
+            # check_column_package_configs stops on any biogeochemistry flag without the column
+            # biogeochemistry (mpas_seaice_column.F:8159-8167)
+            _refuse(cv.VT_FLAG, True, "MPAS stops on the vertical tracers without the column biogeochemistry "
+                    "(check_column_package_configs)", "config_use_column_biogeochemistry = .true. with "
+                    f"{cv.VT_FLAG}, or {cv.VT_FLAG} = .false.")
+        cv._refuse_z_tracers({**cv.default_configs(), **c})
+    # refused only when named; under woof_quirk_corrections = 'all' alone it changes nothing
+    if SUBCYCLE_SNOW_ICE in cv.named_corrections(c) and not c.get("config_use_vertical_tracers", False):
+        _refuse("woof_v842_corrections", SUBCYCLE_SNOW_ICE,
+                "the snow and ice tracers are separated and combined only with the vertical tracers",
+                "config_use_vertical_tracers = .true., or no subcycle_snow_ice_tracers")
     if c.get("config_use_velocity_solver", True) and \
-            c.get("config_stress_divergence_scheme", "variational") == "weak":
+            str(c.get("config_stress_divergence_scheme", "variational")).rstrip(" ") == "weak":
         _refuse("config_stress_divergence_scheme", "weak",
-                "the weak-form stress divergence's pool (velocity_weak) is not ported",
+                "the weak-form stress divergence with the column package is not held against an oracle "
+                "(the column oracle carries no velocity_weak pool); it runs without the column package",
                 "config_stress_divergence_scheme = 'variational'")
     crdg.check_config(c)
     cprep.check_config(c)
+
+
+#: the opt-in correction (column_v842.CORRECTIONS) that separates the snow and ice
+#: tracers again after each dynamics subcycle
+SUBCYCLE_SNOW_ICE = "subcycle_snow_ice_tracers"
+#: the vertical tracers column_separate_snow_ice_tracers and column_combine_snow_ice_tracers
+#: move (mpas_seaice_column.F:12500-13266): the nonreactive tracer's, the one the port carries
+#: (column_v842.VT_PORTED); every other vertical tracer is refused by its stages
+_SNOW_ICE_TRACERS = (("verticalNonreactiveConc", "verticalNonreactiveSnow", "verticalNonreactiveIce"),)
+
+
+def _snow_ice_fields(pools: dict, state: "cv.ColumnState"):
+    d, t = state.dims, pools["tracers"]
+    n1, ncat, p1 = d["nCells"] + 1, d["nCategories"], d["nBioLayers"] + 1
+    for conc, snow, ice in _SNOW_ICE_TRACERS:
+        yield (cv._need(t, conc, (n1, ncat, p1 + 2)), cv._need(t, snow, (n1, ncat, 2)),
+               cv._need(t, ice, (n1, ncat, p1)))
+
+
+def separate_snow_ice_tracers(pools: dict, configs: dict, state: "cv.ColumnState") -> None:
+    """``column_separate_snow_ice_tracers``: on the owned cells, each vertical
+    tracer's two snow layers (``nBioLayersP1+1:nBioLayersP3``) into its
+    ``*Snow`` field and its ice layers (``1:nBioLayersP1``) into its ``*Ice``
+    field, for the advection. Copies, word for word."""
+    n = state.dims["nCellsSolve"]
+    p1 = state.dims["nBioLayers"] + 1
+    for conc, snow, ice in _snow_ice_fields(pools, state):
+        snow[:n] = conc[:n, :, p1:p1 + 2]
+        ice[:n] = conc[:n, :, :p1]
+
+
+def combine_snow_ice_tracers(pools: dict, configs: dict, state: "cv.ColumnState") -> None:
+    """``column_combine_snow_ice_tracers``: the reverse of
+    :func:`separate_snow_ice_tracers`, before the ridging."""
+    n = state.dims["nCellsSolve"]
+    p1 = state.dims["nBioLayers"] + 1
+    for conc, snow, ice in _snow_ice_fields(pools, state):
+        conc[:n, :, p1:p1 + 2] = snow[:n]
+        conc[:n, :, :p1] = ice[:n]
 
 
 def _zero(pool: dict, *names: str) -> None:
@@ -269,6 +325,8 @@ def predynamics(pools: dict, configs: dict, state: "cv.ColumnState", now: str) -
             return abort
     dt = float(c["config_dt"])
     cv.update_state(pools, c, state, "thermodynamics", dt, dt)
+    if c["config_use_vertical_tracers"]:
+        separate_snow_ice_tracers(pools, c, state)
     return 0, None, None
 
 
@@ -279,12 +337,16 @@ def dynamics(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple:
 
     check_config(configs)
     state.warnings = []
+    if configs["config_use_vertical_tracers"]:
+        combine_snow_ice_tracers(pools, configs, state)
     if configs["config_use_column_ridging"]:
         abort = crdg.ridging(pools, configs, state)
         if abort[0] > 0:
             return abort
     step = float(cp.asnumpy(pools["velocity_solver"]["dynamicsTimeStep"]).reshape(-1)[0])
     cv.update_state(pools, configs, state, "transport", step, 0.0)
+    if configs["config_use_vertical_tracers"] and SUBCYCLE_SNOW_ICE in cv.corrections(configs):
+        separate_snow_ice_tracers(pools, configs, state)
     return 0, None, None
 
 

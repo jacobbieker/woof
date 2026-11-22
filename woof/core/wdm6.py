@@ -240,8 +240,8 @@ from woof.core import constants as c
 from woof.core.wdm6_constants import (wdm_scheme, wdm5_level_tier, WDM5_SHALLOW_KMAX,
                                        WDM6_SHALLOW_KMAX, wdm6_level_tier)
 
-# Upstream's separate WDM7 unit (kernels/wdm7.cu) keeps WDM6's 64/80
-# WDM6_KMAX ladder; WDM6 itself runs the fork's column workspace above.
+# Upstream's separate WDM7 unit (kernels/wdm7.cu) keeps WDM6's
+# 64/80/128/256 WDM6_KMAX ladder; WDM6 itself runs the fork's column workspace above.
 _SHALLOW_KMAX = WDM6_SHALLOW_KMAX
 _kernel_capacity = wdm6_level_tier
 

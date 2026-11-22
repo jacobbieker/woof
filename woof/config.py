@@ -77,6 +77,15 @@ def validate_surface_radiation_policy(policy: str) -> str:
 @dataclass(frozen=True)
 class RunConfig:
     def __post_init__(self):
+        # woof_quirk_corrections = 'all' (woof.quirk_corrections): each
+        # RunConfig correction is on exactly where its scheme runs, however
+        # the RunConfig was built (a dataclasses.replace that changes the
+        # scheme re-derives it).  The TOML readers refuse an explicit
+        # conflicting key before this point (apply_run_corrections).
+        if self.woof_quirk_corrections == "all":
+            from woof.quirk_corrections import run_corrections_under_all
+            for key, value in run_corrections_under_all(self).items():
+                object.__setattr__(self, key, value)
         if self._legacy_h_sca is None:
             object.__setattr__(self, "_legacy_h_sca", self.h_sca_adv_order is None)
         if self.h_sca_adv_order is None:
@@ -2405,6 +2414,29 @@ class RunConfig:
     # level's pi before the unchanged kernel reads it; False is WRF's
     # arithmetic word for word.  Read only where bl_pbl_physics = 1.
     ysu_surface_heat_exner: bool = _config_field(default=False, kw_only=True)
+    # The umbrella over the opt-in quirk corrections (woof.quirk_corrections),
+    # appended at 'none': each correction stays on its own key.  'all' turns
+    # on every RunConfig correction whose scheme the domain runs
+    # (__post_init__); the TOML readers (load_config, build_experiment)
+    # refuse one set to anything else next to 'all', by name.
+    woof_quirk_corrections: str = _config_field(default="none", kw_only=True)
+    # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
+    # appended off.  The MYNN surface layer (sf_sfclay_physics = 5)
+    # integrates the 2 m and 10 m heat profile from z0/L
+    # (module_sf_mynn.F:826-827, 839-840, 910-911, 921-922) while its own
+    # log terms gz2ozt/gz10ozt and the first-level psih start at zt.  True
+    # takes zt/L (kernels/mynn_surface.cu MYNN_SL_PSIH_ZOLZT), which moves
+    # only T2/TH2/Q2 and the 2 m exchange coefficients; False is WRF's
+    # arithmetic word for word.  wrf_461 variant only.
+    mynn_sfclay_psih_zolzt: bool = _config_field(default=False, kw_only=True)
+    # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-22),
+    # appended off.  Noah's SSTEP (sf_surface_physics = 2) raises a layer's
+    # total soil moisture below 0.02 to 0.02 (module_sf_noahlsm.F:4030) and
+    # books the water it adds nowhere, so dry sandy columns gain water.
+    # True takes it from the layer below as a negative WPLUS, and below the
+    # bottom layer from RUNOFF3 (:4075), which may then go negative; False
+    # is WRF's arithmetic word for word.  Read only where Noah runs.
+    noah_smc_floor_booking: bool = _config_field(default=False, kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -2481,9 +2513,21 @@ def _validate_solar_ssi(cfg) -> None:
 
 def _validate_spacewx_ionosphere(cfg) -> None:
     """spacewx_ionosphere_opt and its keys (woof.spacewx.history)."""
-    opt = cfg.spacewx_ionosphere_opt
-    source, mode, maps = (cfg.spacewx_f107_source, cfg.spacewx_f107_mode,
-                          cfg.spacewx_ionosphere_maps)
+    if not validate_spacewx_ionosphere_keys(
+            cfg.spacewx_ionosphere_opt, cfg.spacewx_f107_source,
+            cfg.spacewx_f107_mode, cfg.spacewx_ionosphere_maps):
+        return
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            f"spacewx_ionosphere_opt = {cfg.spacewx_ionosphere_opt} places the ionosphere on the radiation "
+            "geometry's columns, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def validate_spacewx_ionosphere_keys(opt, source, mode, maps) -> bool:
+    """spacewx_ionosphere_opt and its keys; True when the rows are on.
+    Shared by the WRF route and hex's MPAS suite route, whose rows sit on
+    the cell centres whatever the radiation."""
     if type(opt) is not int or opt not in (0, 1, 2):
         raise ConfigurationRefused(
             f"spacewx_ionosphere_opt={opt!r} must be 0 (no ionosphere), 1 "
@@ -2506,7 +2550,7 @@ def _validate_spacewx_ionosphere(cfg) -> None:
                 "spacewx_f107_source/spacewx_f107_mode/spacewx_ionosphere_maps "
                 "are set but spacewx_ionosphere_opt = 0, so they would do "
                 "nothing; set spacewx_ionosphere_opt = 1 or drop them")
-        return
+        return False
     from woof.spacewx.history import IonosphereHistoryError, parse_f107_source
     try:
         kind, _value = parse_f107_source(source)
@@ -2516,16 +2560,25 @@ def _validate_spacewx_ionosphere(cfg) -> None:
         raise ConfigurationRefused(
             "spacewx_ionosphere_opt = 2 reads ap from the GFZ index file, so "
             "spacewx_f107_source must be 'gfz' or a GFZ-format file, not a number")
-    if not radiation_enabled(cfg):
-        raise ConfigurationRefused(
-            f"spacewx_ionosphere_opt = {opt} places the ionosphere on the radiation "
-            "geometry's columns, and no radiation scheme is on "
-            "(ra_lw_physics = ra_sw_physics = 0)")
+    return True
 
 
 def _validate_spacewx_aurora(cfg) -> None:
     """spacewx_aurora_opt and its key (woof.spacewx.aurora_history)."""
-    opt, source = cfg.spacewx_aurora_opt, cfg.spacewx_kp_source
+    opt = cfg.spacewx_aurora_opt
+    if not validate_spacewx_aurora_keys(opt, cfg.spacewx_kp_source):
+        return
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            f"spacewx_aurora_opt = {opt} places the auroral oval on the radiation "
+            "geometry's columns, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def validate_spacewx_aurora_keys(opt, source) -> bool:
+    """spacewx_aurora_opt and spacewx_kp_source; True when the rows are on.
+    Shared by the WRF route and hex's MPAS suite route, whose rows sit on
+    the cell centres whatever the radiation."""
     if type(opt) is not int or opt not in (0, 1, 2, 3):
         raise ConfigurationRefused(
             f"spacewx_aurora_opt={opt!r} must be 0 (no aurora), 1 (the auroral "
@@ -2538,7 +2591,7 @@ def _validate_spacewx_aurora(cfg) -> None:
             raise ConfigurationRefused(
                 "spacewx_kp_source is set but spacewx_aurora_opt = 0, so it "
                 "would do nothing; set spacewx_aurora_opt = 1 or drop it")
-        return
+        return False
     from woof.spacewx.aurora_history import AuroraHistoryError, parse_kp_source
     try:
         kind, _value = parse_kp_source(source)
@@ -2552,11 +2605,7 @@ def _validate_spacewx_aurora(cfg) -> None:
         raise ConfigurationRefused(
             f"spacewx_aurora_opt = 2 drives OVATION Prime with the solar wind, so "
             f"spacewx_kp_source must be 'omni' or 'swpc', not {source!r}")
-    if not radiation_enabled(cfg):
-        raise ConfigurationRefused(
-            f"spacewx_aurora_opt = {opt} places the auroral oval on the radiation "
-            "geometry's columns, and no radiation scheme is on "
-            "(ra_lw_physics = ra_sw_physics = 0)")
+    return True
 
 
 def _validate_spacewx_epp(cfg) -> None:
@@ -5783,6 +5832,8 @@ def load_config(path: str | Path, *, accept_epssm_auto: bool = False,
     apply_chem_set_defaults(merged)
     from woof.surface_ocean import apply_ocean_defaults
     apply_ocean_defaults(merged)
+    from woof.quirk_corrections import apply_run_corrections
+    merged = apply_run_corrections(merged)
     return validate_run_config(RunConfig(**merged),
                                native_fire_ideal=native_fire_ideal)
 
@@ -9499,6 +9550,15 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "gf_deep_rain_evaporation_booking must be true or false")
     if type(cfg.ysu_surface_heat_exner) is not bool:
         raise ConfigurationRefused("ysu_surface_heat_exner must be true or false")
+    if type(cfg.noah_smc_floor_booking) is not bool:
+        raise ConfigurationRefused("noah_smc_floor_booking must be true or false")
+    if cfg.noah_smc_floor_booking and int(cfg.sf_surface_physics) != 2:
+        raise ConfigurationRefused(
+            "noah_smc_floor_booking corrects Noah's soil-moisture floor "
+            f"(sf_surface_physics = 2); this run selects sf_surface_physics = "
+            f"{cfg.sf_surface_physics}, which never reads it")
+    from woof.quirk_corrections import check_run_config
+    check_run_config(cfg)
     if cfg.ysu_surface_heat_exner and int(cfg.bl_pbl_physics) != 1:
         raise ConfigurationRefused(
             "ysu_surface_heat_exner corrects YSU's surface heat flux "
@@ -9511,6 +9571,18 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             f"{cfg.sf_urban_physics}) WRF's YSU takes that heat from the "
             "urban sources instead (bepswitch = 1), so the correction would "
             "reach only the PBL diagnosis; drop it or the urban model")
+    if type(cfg.mynn_sfclay_psih_zolzt) is not bool:
+        raise ConfigurationRefused("mynn_sfclay_psih_zolzt must be true or false")
+    if cfg.mynn_sfclay_psih_zolzt and int(cfg.sf_sfclay_physics) != 5:
+        raise ConfigurationRefused(
+            "mynn_sfclay_psih_zolzt corrects the MYNN surface layer's 2 m / "
+            "10 m heat profile (sf_sfclay_physics = 5); this run selects "
+            f"sf_sfclay_physics = {cfg.sf_sfclay_physics}, which never reads it")
+    if cfg.mynn_sfclay_psih_zolzt and cfg.mynn_sfclay_variant != "wrf_461":
+        raise ConfigurationRefused(
+            "mynn_sfclay_psih_zolzt corrects the wrf_461 MYNN surface layer; "
+            f"mynn_sfclay_variant = {cfg.mynn_sfclay_variant!r} integrates "
+            "every heat profile from z0/L by design")
     _validate_solar_tsi(cfg)
     _validate_solar_ssi(cfg)
     _validate_spacewx_ionosphere(cfg)

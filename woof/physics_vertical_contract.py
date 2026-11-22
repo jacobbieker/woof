@@ -21,10 +21,12 @@ KFCUP_VERTICAL_LEVEL_BOUNDS = (8, 128)
 # workspace, so nothing is compiled per level count).  Those modules are
 # CuPy-free and staged wherever this one is, so the values are imported
 # rather than transcribed.  Re-exported under their own names below.
-from woof.core.wdm6_constants import WDM5_VERTICAL_LEVEL_BOUNDS, WDM6_VERTICAL_LEVEL_BOUNDS, WDM7_VERTICAL_LEVEL_BOUNDS
+from woof.core.wdm6_constants import WDM5_VERTICAL_LEVEL_BOUNDS, WDM6_VERTICAL_LEVEL_BOUNDS
 # WSM3's ceiling is owned the same way: the deepest WSM3_KMAX tier of the
 # CuPy-free constants leaf.
 from woof.core.wsm3_constants import WSM3_VERTICAL_LEVEL_BOUNDS
+# QNSE's and BouLac's ceilings are the deep tier of their CuPy-free ladder.
+from woof.core.pbl_level_tiers import DEEP_KMAX as _PBL_DEEP_KMAX
 # WSM6's 256-level workspace ceiling and WSM6R's window are owned by the
 # WSM6 family's CuPy-free constants module, which their launchers enforce;
 # imported for the same reason.
@@ -114,10 +116,13 @@ SHINHONG_VERTICAL_LEVEL_BOUNDS = (4, 256)
 #: profile smoothing can read ``REL(K-1)``/``REL(K+1)``.
 MYJ_VERTICAL_LEVEL_BOUNDS = (4, 256)
 #: QNSE (bl_pbl_physics=4) and its mass flux.  ``QNSE_KMAX`` in
-#: ``kernels/qnsepbl.cu`` for the ceiling; the floor is MYJ's for MYJ's
+#: ``kernels/qnsepbl.cu`` sizes the per-thread column; it compiles at 128
+#: for columns of at most 128 levels (the unchanged source) and at 256
+#: above (woof.core.pbl_level_tiers), so 256 is the dycore's own ceiling.
+#: The floor is MYJ's for MYJ's
 #: reasons (VDIFQ's interior rows, MIXLEN's REL(K-1)/REL(K+1)), which the
 #: mass flux's IKE-1 updraft loop also needs.
-QNSE_VERTICAL_LEVEL_BOUNDS = (4, 128)
+QNSE_VERTICAL_LEVEL_BOUNDS = (4, _PBL_DEEP_KMAX)
 #: SASE.  The deepest ``SASE_KMAX`` tier ``woof/core/sase.py`` compiles
 #: ``kernels/sase.cu`` at (``woof.core.sase_limits.KMAX_TIERS``; the run's
 #: own tier is the smallest power of two from 32 that holds ``nz``), which is
@@ -156,11 +161,12 @@ EEPS_VERTICAL_LEVEL_BOUNDS = (3, None)
 #: below four levels the search is empty and the height reads ZL(0).
 GFS_PBL_VERTICAL_LEVEL_BOUNDS = (4, None)
 
-#: BouLac (bl_pbl_physics=8).  ``BOULAC_KMAX`` in ``kernels/boulac.cu`` for
-#: the ceiling: one thread holds the column in per-thread local memory, the
-#: MYJ shape.  The floor is where SHEAR and BUOY, which live on the interior
+#: BouLac (bl_pbl_physics=8).  ``BOULAC_KMAX`` in ``kernels/boulac.cu``
+#: sizes the per-thread column (one thread holds it in local memory); it
+#: compiles at 128 for columns of at most 128 levels (the unchanged source)
+#: and at 256 above (woof.core.pbl_level_tiers), the dycore's own ceiling.  The floor is where SHEAR and BUOY, which live on the interior
 #: levels kts+1..kte-1 (module_bl_boulac.F:787, :820), have a level at all.
-BOULAC_VERTICAL_LEVEL_BOUNDS = (3, 128)
+BOULAC_VERTICAL_LEVEL_BOUNDS = (3, _PBL_DEEP_KMAX)
 
 #: ACM2 (bl_pbl_physics=7).  No ceiling: the column arrays live in a
 #: global workspace sized from nz at launch (woof/core/acm2pbl.py), so no

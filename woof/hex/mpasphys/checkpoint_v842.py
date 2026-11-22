@@ -217,7 +217,9 @@ class CheckpointRoute(MovingRoute):
                 value = json.loads(json.dumps(value))
                 config = value.get('config') if isinstance(value, dict) else None
                 if isinstance(config, dict):
-                    for key in ('corrections', 'correct_skip', 'correct_mode'):
+                    # spacewx_diagnostics: output-only rows (mpasdiag.spacewx_diag_v842), which a resume may switch
+                    # on or off as on the WRF route (woof.checkpoint_identity CONFIG_DIAGNOSTIC_FIELDS).
+                    for key in ('corrections', 'correct_skip', 'correct_mode', 'spacewx_diagnostics'):
                         config.pop(key, None)
                 return value
             carried = self.restart_metadata.get('physics')
