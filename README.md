@@ -436,8 +436,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `config_use_modal_aerosols` optics) the delta-Eddington shortwave
     carries the z-aerosols' optics and `bioTracerShortwave`, word for word;
     the opt-in correction `shortwave_bio_grid` remaps onto the biology grid,
-    where v8.4.2 passes the ice's vertical grid. The other biogeochemistry
-    flags are
+    where v8.4.2 passes the ice's vertical grid. The vertical biochemistry
+    (`config_use_vertical_biochemistry`: three algae, with nitrate and
+    optionally ammonium and silicate) runs in the init and
+    `column_biogeochemistry` (`algal_dyn`'s growth, uptake, grazing,
+    mortality and nitrification, and the uptake, production and
+    chlorophyll sums), word for word with v8.4.2; the opt-in correction
+    `total_chlorophyll` counts each category's chlorophyll once, where
+    v8.4.2 adds the cell's running total once per category. The other
+    stages refuse it until its later phases land. The other biogeochemistry flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness

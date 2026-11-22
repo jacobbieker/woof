@@ -125,6 +125,9 @@ BGC_ZAERO_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero_carry"
 #: the z-aerosols' through the time steps (BGC_ZAERO_STEP_CASES)
 BGC_ZAERO_STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero_step"
 BGC_ZAERO_SW_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero_shortwave"
+#: the vertical biochemistry's algae and nutrients in the init and column_biogeochemistry
+#: (BGC_ALGAE_CASES)
+BGC_ALGAE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_algae"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -733,6 +736,43 @@ BGC_ZAERO_SW_CASES = (
     ("seaice_zaero_nonreactive_bioabsorption_bl99_dedd_rothrock", 20263321, _SEAICE_STEP, {
         **_COUPLED_BASE, **_ZA_NR_STEP, **_SW_BIO, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
      (12, 6, 3)),
+)
+#: the vertical biochemistry (algal_dyn) with nitrate, the algae's one required nutrient
+_BGC_ALG = {**_BGC, "config_use_vertical_tracers": True, "config_use_vertical_biochemistry": True,
+            "config_use_nitrate": True}
+#: and ammonium and silicate
+_BGC_ALG_NUT = {**_BGC_ALG, "config_use_ammonium": True, "config_use_silicate": True}
+#: a transport type per band for the algae and the nutrients
+_ALG_TYPES = {"config_mobility_type_diatoms": 0.2, "config_mobility_type_small_plankton": 0.7,
+              "config_mobility_type_phaeocystis": 1.5, "config_mobility_type_ammonium": 2.5,
+              "config_mobility_type_silicate": 0.0}
+#: the vertical biochemistry's algae, nitrate, ammonium and silicate in the init and
+#: column_biogeochemistry: name, seed, stage, overrides
+BGC_ALGAE_CASES = (
+    ("init_bgc_algae", 20263401, "init", _BGC_ALG),
+    ("init_bgc_algae_nutrients_types_frazil", 20263402, "init", {
+        **_BGC_ALG_NUT, **_ALG_TYPES, "config_fraction_biotracer_in_frazil": 0.6,
+        "config_new_ice_fraction_biotracer": 0.7}),
+    ("init_bgc_algae_nutrients_zaero_nonreactive_three_layers", 20263403, "init", {
+        **_BGC_ALG_NUT, "config_use_zaerosols": True, "config_use_nonreactive": True, "config_nIceLayers": 3}),
+    ("bgc_algae", 20263411, _BGC_STAGE, _BGC_ALG),
+    ("bgc_algae_nutrients_c2n", 20263412, _BGC_STAGE, {**_BGC_ALG_NUT, **_C2N}),
+    ("bgc_algae_nutrients_bl99_types_nitrification", 20263413, _BGC_STAGE, {
+        **_BGC_ALG_NUT, **_BL99, **_ALG_TYPES, "config_nitrification_rate": 0.5,
+        "config_maximum_brine_temperature": -1.5}),
+    ("bgc_algae_nutrients_nutrient_limited", 20263414, _BGC_STAGE, {
+        **_BGC_ALG_NUT, "config_maximum_loss_fraction": 0.5}),
+    ("bgc_algae_nutrients_bioabsorption", 20263415, _BGC_STAGE, {
+        **_BGC_ALG_NUT, "config_use_shortwave_bioabsorption": True}),
+    ("bgc_algae_fast_algae_half_hour", 20263416, _BGC_STAGE, {
+        **_BGC_ALG, "config_algal_maximum_velocity": 1.0e-4, "config_dt": 1800.0,
+        "config_minimum_optical_depth": 5.0, "config_salinity_dependence_of_growth": 0.8}),
+    ("bgc_algae_nutrients_zaero_nonreactive_four_layers_three_categories", 20263417, _BGC_STAGE, {
+        **_BGC_ALG_NUT, **_ZA_TYPES, "config_use_zaerosols": True, "config_use_nonreactive": True,
+        "config_nIceLayers": 4, "config_nCategories": 3, "config_biogrid_bottom_molecular_sublayer": 0.01}),
+    ("bgc_nutrients_nonreactive_without_algae", 20263418, _BGC_STAGE, {
+        **_BGC_NR, **_ALG_TYPES, "config_use_nitrate": True, "config_use_ammonium": True,
+        "config_use_silicate": True}),
 )
 
 
@@ -1541,6 +1581,8 @@ def _nonreactive_state(rs, case: dict) -> None:
         bgc["oceanBioConcentrations"][3] = -50.0
     if case["config"][cv.ZAERO_FLAG]:
         _zaero_state(rs, case)
+    if any(case["config"][flag] for flag in cv.ALGAE_PORTED):
+        _algae_state(rs, case)
 
 
 def _zaero_state(rs, case: dict) -> None:
@@ -1561,6 +1603,48 @@ def _zaero_state(rs, case: dict) -> None:
     if "abort_order" in name:
         aero[3, 0, nbl + 3 + 2] = -1.0
     pools["tracers"]["verticalAerosolsConc"] = aero
+
+
+def _algae_state(rs, case: dict) -> None:
+    """The vertical biochemistry's layers, drawn after the z-aerosols': the
+    algae (0.05-5 in the ice, nBioLayersP3 per alga), nitrate, ammonium and
+    silicate (their snow layers lower), and cell 0's last category of area
+    below 0.001 (the first alga's stationary part regridded whatever the
+    melt). ``nutrient_limited`` in the name: nitrate nearly gone in cells 0
+    and 1, silicate in cell 5 and ammonium in cell 7, so the uptake meets
+    ``max_loss`` (and the diatoms the silicate). The algae are dense in cell 6.
+    Separate numpy ufuncs only."""
+    pools, dims, name, c = case["pools"], case["dims"], case["name"], case["config"]
+    n1, ncat, nbl = dims["nCells"] + 1, dims["nCategories"], dims["nBioLayers"]
+    u = _uniform(rs)
+    t, ist = pools["tracers"], pools["icestate"]
+    if c["config_use_vertical_biochemistry"]:
+        nalg = dims["nAlgae"]
+        alg = u(0.05, 5.0, (n1, ncat, nalg * (nbl + 3)))
+        for j in range(nalg):
+            alg[:, :, j * (nbl + 3) + nbl + 1:(j + 1) * (nbl + 3)] = u(0.0, 0.5, (n1, ncat, 2))
+        alg[6] = np.multiply(alg[6], 8.0)
+        t["verticalAlgaeConc"] = alg
+    limited = "nutrient_limited" in name
+    for flag, field, lo, hi, cells in (("config_use_nitrate", "verticalNitrateConc", 0.5, 20.0, (0, 1)),
+                                       ("config_use_ammonium", "verticalAmmoniumConc", 0.05, 2.0, (7,)),
+                                       ("config_use_silicate", "verticalSilicateConc", 1.0, 30.0, (5,))):
+        if not c[flag]:
+            continue
+        conc = u(lo, hi, (n1, ncat, nbl + 3))
+        conc[:, :, nbl + 1:] = u(0.0, lo, (n1, ncat, 2))
+        if limited:
+            for cell in cells:
+                conc[cell] = u(1.0e-6, 1.0e-3, (ncat, nbl + 3))
+        t[field] = conc
+    # a last category below 0.001 in cell 0: its area, volumes and the same before the
+    # step scaled alike, so the thicknesses stay
+    last = ncat - 1
+    scale = np.divide(5.0e-4, t["iceAreaCategory"][0, last, 0])
+    for pool, key in ((t, "iceAreaCategory"), (t, "iceVolumeCategory"), (t, "snowVolumeCategory")):
+        pool[key][0, last, 0] = np.multiply(pool[key][0, last, 0], scale)
+    for key in ("iceAreaCategoryInitial", "iceVolumeCategoryInitial", "snowVolumeCategoryInitial"):
+        ist[key][0, last] = np.multiply(ist[key][0, last], scale)
 
 
 def _nonreactive_carry_state(rs, case: dict) -> None:
@@ -2012,7 +2096,8 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     stage = case["stage"]
     # the stages that carry the brine height (each refuses the rest itself)
     state = cv.init_parameters(dev, config, biogeochemistry=stage not in ("aggregate", "update_state", _OML),
-                               z_tracers=stage in ("init", _BGC_STAGE, _ITD, _RDG, "radiation", _STEP, _SEAICE_STEP))
+                               z_tracers=(cv.VT_INIT_PORTED if stage in ("init", _BGC_STAGE)
+                                          else stage in (_ITD, _RDG, "radiation", _STEP, _SEAICE_STEP)))
     if stage == "init":
         cv.initialize_coupler_fields(dev, config, state)
         cv.init_variables(dev, config, state)
