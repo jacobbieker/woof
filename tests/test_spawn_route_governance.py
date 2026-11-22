@@ -38,7 +38,6 @@ GUARDED_FRONT_DOORS = {
     # them, docs/storm-nests.md); a mapped single-domain bundle still refuses.
     "woof/mapped_direct.py": "mapped-adapter single-domain prepared-cache",
     "woof/prepared_single_domain_forecast.py": "prepared single-domain",
-    "woof/da/nested_forecast.py": "DA nested free-forecast",
 }
 
 

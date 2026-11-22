@@ -1152,6 +1152,8 @@ def _launch_checked(new: str, new_count: int, old: str, old_count: int,
         _launch(old, old_count, (*inputs, *reference), kernel_cache)
         for value, expected in zip(outputs, reference):
             if settle is not None:
+                # ``settle(array)`` writes, in both forms, the words the caller overwrites before anything reads
+                # them (the regional garbage column the pool fill rewrites; fork jacobbieker/woof PR 224).
                 settle(value)
                 settle(expected)
             cuda_edge_hoist.compare(new, value, expected, cp)
@@ -1207,12 +1209,18 @@ def _regional_target_density_check(cp: Any, target: Any, nlev: int, ncells: int,
     if garbage_cell is not None and 0 <= int(garbage_cell) < ncells:
         keep = keep.copy()
         keep[int(garbage_cell)] = False
-    # A broadcast mask, not boolean indexing: ``values[:, keep]`` sized its
-    # result on the host and so waited for the whole queued step (~80 ms of
-    # every regional step at 5,069 cells).  The flag is the same OR over the
-    # same kept words.
+    # Element-wise over the whole (level, cell) block with the kept-cell mask broadcast, not a boolean gather
+    # (target[:, keep]): every launch here writes bool or integer words only, so the check carries no float word and
+    # the differentiable engine's linear model passes through it with no derivative to supply. The verdict is the same
+    # term for term: any kept cell whose target density is not finite and strictly positive.
+    # THE BREAKAGE THIS PREVENTS (rec-fix, 2026-11-18, hex 0.6.2): the gather wrote a float32 copy of the target density
+    # (cupy_getitem_mask) every step, a kind with no derivative row and no rule, which the window keeps as identity over
+    # the words it writes; every plan recorded from a 0.6.0 or 0.6.1 forecast carried it, and a 15-minute 12 km one
+    # failed the release's own check (dot 0.228) where the shipped example plan, recorded before this check, passed.
+    # It also no longer waits on the host: boolean indexing sized its result there and so waited for the whole
+    # queued step on every regional transport (fork jacobbieker/woof PR 216: ~80 ms of every step at 5,069 cells).
     values = target.reshape(nlev, ncells)
-    bad = cp.any(~(cp.isfinite(values) & (values > 0)) & keep[None, :]).astype(cp.int32)
+    bad = cp.any(~(cp.isfinite(values) & (values > 0)) & keep).astype(cp.int32)
     flag = _v823._i32(validation_flag)
     cp.maximum(flag, bad, out=flag)
 
@@ -1577,11 +1585,9 @@ def advance_scalars_monotonic_cuda_v841(
         vertical_velocity, rdnw, rho0, rho1,
     )
     if element_fct:
-        # On a regional mesh the garbage column of ``target`` is bound to the
-        # density pool (bind_density_pool above) and the checker's fresh
-        # reference is not, so the launch discipline restores 1 in one and 0
-        # in the other; the pool fill below writes 1 there before anything
-        # reads it.  The check compares after writing that same 1 into both.
+        # On a regional mesh the garbage column of ``target`` is bound to the density pool and the checker's fresh
+        # reference is not, so the launch discipline restores 1 in one and 0 in the other; the pool fill below
+        # writes 1 there before anything reads it.  The check compares after writing that same 1 into both.
         _launch_checked("transport_target_density_elem_v841", nlev * ncells,
                         "transport_target_density_v841", ncells,
                         target_inputs, (target,), kernel_cache,

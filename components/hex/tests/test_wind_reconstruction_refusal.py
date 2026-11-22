@@ -1,4 +1,7 @@
-"""The MPAS-suite wind reconstruction names the check that raised its one invalid word."""
+"""The MPAS-suite wind reconstruction names the check that raised its one invalid word.
+
+Brought from fork jacobbieker/woof PR 495 (Apache-2.0).
+"""
 
 import types
 

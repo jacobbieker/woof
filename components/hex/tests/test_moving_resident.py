@@ -417,6 +417,7 @@ def test_gpu_driver_budget_excludes_global_mesh_parent_and_shared_host_aliases()
     assert _driver_input_bytes((mesh,grid,None,SimpleNamespace(rho=local),None,None,('qv',))) == local.nbytes
 
 
+# Brought from fork jacobbieker/woof PR 497 (Apache-2.0), environment names ours.
 def test_a_move_to_another_member_than_the_record_named_renames_the_record(tmp_path):
     """The record named member A, the policy moved to B: A's record goes and B's is named before the verdict.
 

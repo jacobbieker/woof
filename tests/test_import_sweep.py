@@ -281,7 +281,8 @@ def test_no_shipped_module_imports_a_declared_script() -> None:
             if relative[:-len(".py")].replace("/", ".") in SCRIPT_MODULES:
                 continue
             for line in path.read_text(encoding="utf-8").splitlines():
-                if "import" not in line:
+                # (WOOF 1.1.7) an import statement, not a comment or docstring that says "import"
+                if not re.match(r"\s*(?:from\s+[\w.]+\s+)?import\s", line):
                     continue
                 for leaf, module in leaves.items():
                     if re.search(rf"\b{leaf}\b", line):
