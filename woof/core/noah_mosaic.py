@@ -525,7 +525,7 @@ MOSAIC_NVRTC_OPTIONS = ("-std=c++17", "--fmad=false")
 
 #: RunConfig.noah_smc_floor_booking (default off), as woof.core.noah's: the
 #: mosaic SSTEP books the water its 0.02 floor adds.
-SMC_FLOOR_BOOKING_PREFIX = "#define NOAH_SMC_FLOOR_BOOKING 1\n"
+from .noah import SMC_FLOOR_BOOKING_PREFIX  # noqa: E402
 
 
 @lru_cache(maxsize=None)
@@ -542,9 +542,10 @@ def _mosaic_module(ua_phys=False, smc_floor_booking=False):
     from woof.core.kernels import MODULE_KEY_ROOT, _compile_observed, module_source
 
     if ua_phys:
-        from woof.core.kernels import load_module, load_module_int_defines
+        from woof.core.kernels import load_module
         if smc_floor_booking:
-            return load_module_int_defines("noah_mosaic_ua", (("NOAH_SMC_FLOOR_BOOKING", 1),))
+            from .noah import smc_floor_booking_module
+            return smc_floor_booking_module("noah_mosaic_ua")
         return load_module("noah_mosaic_ua")
     name = "noah_mosaic"
     source = module_source(name)

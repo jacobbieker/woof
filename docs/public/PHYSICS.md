@@ -2140,6 +2140,22 @@ one line:
   models off is untouched: the plain YSU kernel compiles from unchanged
   statements.
 
+**Opt-in: `noah_smc_floor_booking` (default off).** WRF 4.7.1's Noah SSTEP
+(`module_sf_noahlsm.F`) clips each layer's total soil moisture to
+`MAX(MIN(STOT, SMCMAX), 0.02)` (:4030). The upper clip books its excess:
+`WPLUS` passes it to the layer below and, past the bottom layer, to
+`RUNOFF3` (:4026, :4075). The lower floor books nothing, so a sandy or
+desert layer that dries below 0.02 gains the difference from nowhere; a
+column that starts below the floor gains up to 30 mm in one step. With the
+option on, the water the floor adds is taken from the layer below as a
+negative `WPLUS`, and past the bottom layer from `RUNOFF3`, which can then
+be negative. The column water budget then closes on those columns
+(`tests/test_noah_smc_floor_booking.py`, float64 mirror and kernel). It is
+per domain, refused off `sf_surface_physics = 2`, carried by the plain,
+mosaic, UA and urban-canopy Noah units, and not yet scored against
+observations. The hex MPAS-suite Noah (`woof/hex/mpasphys/noah_v842.py`)
+does not carry it yet. Off, the arithmetic is WRF's word for word.
+
 ## Radiation (`ra_lw_physics` / `ra_sw_physics`)
 
 | option | selection | maturity | evidence, in one line |

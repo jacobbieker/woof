@@ -381,6 +381,16 @@ def production_units(root) -> list[Unit]:
                       specialized_source("gf", capacity=40, kernel_dir=kdir,
                                          defines=(("GF_DEEP_EVAP_BOOKING", 1),)),
                       ("-std=c++17",), []))
+    # The opt-in Noah soil-moisture floor booking (woof.core.noah.launch_noah):
+    # the plain unit's integer tier, and the UA units with the define first.
+    from woof.core.noah import NOAH_SMC_FLOOR_BOOKING_DEFINES, SMC_FLOOR_BOOKING_PREFIX
+    units.append(Unit("kernels:noah[NOAH_SMC_FLOOR_BOOKING=1]",
+                      K.module_source_int_defines("noah", NOAH_SMC_FLOOR_BOOKING_DEFINES, kernel_dir=kdir),
+                      K.module_options("noah"), []))
+    for name in ("noah_ua", "noah_mosaic_ua"):
+        units.append(Unit(f"kernels:{name}[NOAH_SMC_FLOOR_BOOKING=1]",
+                          SMC_FLOOR_BOOKING_PREFIX + K.module_source(name, kernel_dir=kdir),
+                          K.module_options(name), []))
     for name, parts in N.NOAHMP_TRANSLATION_UNITS.items():
         ru = N.runtime_unit(name, kernel_dir=kdir)
         pieces = ([] if ru.preamble_sha256 != N._sha(K._preamble(kdir))

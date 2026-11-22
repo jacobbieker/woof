@@ -42,6 +42,8 @@ from pathlib import Path
 
 import numpy as np
 
+from woof.core.device_cache import cuda_cache
+
 TBL_DIR = Path(__file__).resolve().parent.parent / "data" / "noah_tables"
 
 #: Noah's soil geometry, stated once, beside the scheme that owns it.
@@ -665,6 +667,29 @@ def noah_chklowq_myj(dev: dict) -> None:
 #: nowhere.  The define takes that water from the layer below (a negative
 #: WPLUS), and below the bottom layer from RUNOFF3.
 NOAH_SMC_FLOOR_BOOKING_DEFINES = (("NOAH_SMC_FLOOR_BOOKING", 1),)
+#: The define as the first line of a unit: the UA units carry noah.cu and
+#: noah_mosaic.cu as headers, ahead of where an integer tier is inserted.
+SMC_FLOOR_BOOKING_PREFIX = "#define NOAH_SMC_FLOOR_BOOKING 1\n"
+
+
+def smc_floor_booking_source(name: str) -> str:
+    """The booked unit's source: the define, then ``name``'s default source."""
+    from woof.core.kernels import module_source
+    return SMC_FLOOR_BOOKING_PREFIX + module_source(name)
+
+
+@cuda_cache(maxsize=None)
+def smc_floor_booking_module(name: str):
+    """``name`` (noah_ua or noah_mosaic_ua) with the booking define first,
+    on the default unit's route and options (woof.core.kernels.load_module)."""
+    from woof import backend
+    from woof.core import kernels as K
+    key = f"{name}[NOAH_SMC_FLOOR_BOOKING=1]"
+    source = smc_floor_booking_source(name)
+    if backend.active() != "cuda":
+        return K._translated_module(name, source, key=key)
+    return K._load_module_preserving_subnormals(name, source, K.module_options(name),
+                                                key=f"{K.MODULE_KEY_ROOT}:{key}")
 
 
 def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
@@ -794,8 +819,12 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
         name = "noah_column_irrigation"
     # RunConfig.noah_smc_floor_booking (default off): SSTEP books the water
     # its 0.02 soil-moisture floor adds; off, the unit compiled before it.
-    kern = (get_kernel_int_defines(module, name, NOAH_SMC_FLOOR_BOOKING_DEFINES)
-            if smc_floor_booking else get_kernel(module, name))
+    if not smc_floor_booking:
+        kern = get_kernel(module, name)
+    elif ua_phys:
+        kern = smc_floor_booking_module(module).get_function(name)
+    else:
+        kern = get_kernel_int_defines(module, name, NOAH_SMC_FLOOR_BOOKING_DEFINES)
     blocks = (ny * nx + _TPB - 1) // _TPB
     kern((blocks,), (_TPB,), tuple(args))
 

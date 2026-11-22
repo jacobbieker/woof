@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 456,
+**Which keys a `[[domain]]` table may override.** Exactly these 457,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -407,6 +407,7 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
     gf_deep_rain_evaporation_booking  ysu_surface_heat_exner  woof_quirk_corrections
+    noah_smc_floor_booking
     obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
     obstacle_drag_coefficient  obstacle_wall_z0  urban_param_file
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
@@ -595,6 +596,14 @@ level, so the surface heat enters as `HFX`. Refused with BEP/BEM
 (`sf_urban_physics` 2 or 3). Off, the arithmetic is WRF's word for word.
 It is not a WRF namelist key; set it in the TOML.
 
+`noah_smc_floor_booking` (default `false`) is an opt-in correction to
+Noah's soil-moisture floor (`sf_surface_physics = 2`), per domain on the
+same terms. WRF's SSTEP raises a layer below 0.02 to 0.02 and books the
+water it adds nowhere. With `true`, that water comes from the layer below,
+and past the bottom layer from the drainage `RUNOFF3` (`udrunoff`), which
+can then be negative. Off, the arithmetic is WRF's word for word. It is
+not a WRF namelist key; set it in the TOML.
+
 `woof_quirk_corrections` (default `"none"`) is the umbrella over the
 opt-in corrections of WRF 4.7.1 / MPAS v8.4.2 quirks
 (`woof/quirk_corrections.py`). With `"none"` each correction stays on
@@ -607,8 +616,9 @@ corrections. The same key works in the MPAS config dicts, and the hex
 door takes it as `--quirk-corrections all`. `"all"` turns on:
 
 - WRF route (RunConfig): `gf_deep_rain_evaporation_booking = true`
-  (`cu_physics = 3`) and `ysu_surface_heat_exner = true`
-  (`bl_pbl_physics = 1`).
+  (`cu_physics = 3`), `ysu_surface_heat_exner = true`
+  (`bl_pbl_physics = 1`) and `noah_smc_floor_booking = true`
+  (`sf_surface_physics = 2`).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
   stays off on the MPAS suite route, local time stepping, partial nest and

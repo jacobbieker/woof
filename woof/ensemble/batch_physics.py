@@ -1515,6 +1515,8 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
         verify_pointers([fields[name] for name in noah_fields], list(noah_fields.values()))
         if params is not driver.noah_params or kwargs.get("urban") is not None or np.float32(dt) != np.float32(driver.bldt_seconds):
             raise ValueError("Noah's table owner, timestep or urban producer changed after admission")
+        if bool(kwargs.get("smc_floor_booking", False)) != (getattr(cfg, "noah_smc_floor_booking", False) is True):
+            raise ValueError("Noah's soil-moisture floor booking changed after admission")
         noah(kwargs["itimestep"])
 
     def sum_radiation(owned):

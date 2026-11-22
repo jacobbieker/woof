@@ -1334,7 +1334,13 @@ FROZEN_MODULE_DIGESTS = {
         # identical to 1.1.6's but for __local_depot/callseq/label
         # numbering; tests/test_noah_wrf461_parity.py and
         # tests/test_noah_wrf_hydro_parity.py pass.  Previously b902d662/a8b1e6b2.
-        '96e0b62e529d90ecdc25f06b91bf5aaa918afd508513d66073bec7553b8cef03',
+        # RE-PINNED 2026-11-22 by the opt-in noah_smc_floor_booking (default off): a
+        # NOAH_SMC_FLOOR_BOOKING #ifdef block in SSTEP takes the water the 0.02
+        # floor adds from the layer below (WPLUS < 0) or RUNOFF3; without the
+        # define the preprocessed program is the previous one byte for byte
+        # (tests/test_noah_smc_floor_booking.py strips the block and checks the
+        # previous digest).  Previously 96e0b62e.
+        'a141557506413747fb31f34e3a5d14a92ddb099b3e2fa734b0657257cda992d4',
         '908ffc160b5a9a4a807ceb282ab2fc017431bb5b8b7defb0d6e3bdf889395492'),
     'noahmp_bareflux': (
         '54fb5065e95b24d4cf676e2deda29bae44b3e9305d3d98cbc1abf5ed55f444ce',

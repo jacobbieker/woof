@@ -429,6 +429,13 @@ def composed_units(root: Path) -> list[Unit]:
              tuple(mosaic.MOSAIC_NVRTC_OPTIONS)),
         Unit("composed:noah_mosaic_ucm", mosaic.mosaic_ucm_source(),
              tuple(mosaic.MOSAIC_NVRTC_OPTIONS)),
+        # the opt-in noah_smc_floor_booking units (woof.core.noah_mosaic)
+        Unit("composed:noah_mosaic[NOAH_SMC_FLOOR_BOOKING=1]",
+             mosaic.SMC_FLOOR_BOOKING_PREFIX + module_source("noah_mosaic", kernel_dir=kdir),
+             tuple(mosaic.MOSAIC_NVRTC_OPTIONS)),
+        Unit("composed:noah_mosaic_ucm[NOAH_SMC_FLOOR_BOOKING=1]",
+             mosaic.SMC_FLOOR_BOOKING_PREFIX + mosaic.mosaic_ucm_source(),
+             tuple(mosaic.MOSAIC_NVRTC_OPTIONS)),
         Unit("composed:ntiedtke_fused", nt.source_plan()[0], ("-std=c++17",)),
         Unit("composed:nest", module_source("nest", kernel_dir=kdir),
              ("-std=c++17", "-fmad=false")),
