@@ -151,6 +151,13 @@ def test_gpu_matches_the_oracle_word_for_word(glibc239):
     assert not any(bad.values()), bad
 
 
+def test_a_nan_matches_any_nan_but_nothing_else():
+    # the NaN's sign and payload are the processor's (Metal's soft float flips the sign of this one)
+    nan, neg = np.float64(np.nan), -np.float64(np.nan)
+    assert co.nan_word_mismatches(np.array([nan, 1.0]), np.array([neg, 1.0])) == 0
+    assert co.nan_word_mismatches(np.array([nan, 0.0]), np.array([1.0, -0.0])) == 2
+
+
 def _mismatches(names, *fields):
     report = co.measure_carry(rows=tuple(_row(name) for name in names), fixture_dir=FIXTURE)
     return sum(row.get(f, 0) for row in report.values() for f in fields + ("abort",))

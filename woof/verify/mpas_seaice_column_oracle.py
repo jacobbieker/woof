@@ -1782,6 +1782,19 @@ def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray] | Non
 word_mismatches = _stream.word_mismatches
 
 
+def nan_word_mismatches(got, want) -> int:
+    """:func:`word_mismatches` with a NaN matching any NaN (the step's and the
+    coupled step's fields): v8.4.2 lets a NaN through (``bgc_snow_new_category``
+    on a new category, ``oceanBioFluxes``), and the word a NaN takes through
+    an operation (its sign and payload) is the processor's, x86's, the GPU's
+    or Metal's soft float's, outside the word-for-word claim."""
+    got, want = np.asarray(got), np.asarray(want)
+    if got.shape != want.shape or got.dtype.kind != "f" or want.dtype.kind != "f":
+        return word_mismatches(got, want)
+    both = np.isnan(got) & np.isnan(want)
+    return word_mismatches(np.where(both, 0.0, got).astype(got.dtype), np.where(both, 0.0, want).astype(want.dtype))
+
+
 def changed_fields(case: dict, outputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     changed = {}
     for key, value in outputs.items():
@@ -1911,7 +1924,7 @@ def measure_coupled(reference: dict | None = None, logs: dict | None = None, *, 
         row = {"abort": int(tuple(state.abort) != oracle_step_abort(log)),
                "step": int(got[SEAICE_STEP_KEY][0] != log["tracer_object"]["STEP"][0])}
         want = expected_outputs(case, reference.get(case["name"], {}))
-        row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        row.update({key: nan_word_mismatches(got[key], want[key]) for key in want})
         mine = state.tracers.log_rows()
         row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
         report[case["name"]] = row
@@ -2178,7 +2191,7 @@ def measure_step(reference: dict | None = None, logs: dict | None = None, *, row
         row = {"abort": int(tuple(state.abort) != oracle_step_abort(log)),
                "warnings": int(state.warnings != oracle_ridge_warnings(log))}
         want = expected_outputs(case, reference.get(case["name"], {}))
-        row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        row.update({key: nan_word_mismatches(got[key], want[key]) for key in want})
         mine = state.tracers.log_rows()
         row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
         report[case["name"]] = row
