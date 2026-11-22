@@ -172,7 +172,7 @@ def test_the_time_step_init_computes_the_step_fixtures_geometry(precision):
             dev = ro.on_device(case)       # no fixture: the remap pool's geometry is the input's zeros
             dev["diagnostics"]["xtime"] = case["config"]["diagnostics:xtime"]
             dev["diagnostics"]["simulationStartTime"] = case["config"]["diagnostics:simulationStartTime"]
-            ts.initialize(pools=dev, configs=case["config"])
+            ts.initialize(pools=dev, configs=case["config"], basis="input")
             for name in ro.GEOMETRY:
                 key = f"incremental_remap/{name}"
                 if key in fixture[case["name"]]:

@@ -218,6 +218,52 @@ def options(configs: dict) -> icc.Options:
         config_use_column_biogeochemistry=bool(c.get("config_use_column_biogeochemistry", False)))
 
 
+def _config(configs: dict, name: str):
+    """``mesh:NAME`` or the bare ``NAME``, else None."""
+    return configs.get(f"mesh:{name}", configs.get(name))
+
+
+def basis_configs(configs: dict, sphere_radius: float | None, basis_corrections=()) -> dict:
+    """``configs`` with the mesh configs v8.4.2's basis set-up reads
+    (``mesh:on_a_sphere``, ``mesh:sphere_radius``; under the
+    ``periodic_local_coords`` correction ``mesh:is_periodic``,
+    ``mesh:x_period``, ``mesh:y_period``), derived from the HybridSeaIce
+    API: a configured value wins, else ``sphere_radius`` (> 0 a sphere of that
+    radius, 0 a plane). What cannot be derived is refused by name."""
+    out = dict(configs)
+    radius = _config(configs, "sphere_radius")
+    if radius is None:
+        radius = sphere_radius
+    sphere = _config(configs, "on_a_sphere")
+    if radius is None:
+        _refuse("sphere_radius", None,
+                "computing the variational basis needs the mesh's sphere radius (0 on a plane), and neither "
+                "sphere_radius nor the config mesh:sphere_radius gives it",
+                "sphere_radius = the radius in m (0 for a plane), or basis = 'input'")
+    radius = float(radius)
+    if sphere is None:
+        sphere = radius > 0.0
+    if bool(sphere) and not radius > 0.0:
+        _refuse("sphere_radius", radius, "a spherical mesh's basis needs its radius",
+                "sphere_radius = the radius in m, or basis = 'input'")
+    out["mesh:on_a_sphere"], out["mesh:sphere_radius"] = bool(sphere), radius
+    if "periodic_local_coords" in tuple(basis_corrections) and not sphere:
+        periodic = _config(configs, "is_periodic")
+        if periodic is None:
+            _refuse("is_periodic", None,
+                    "the periodic_local_coords correction needs to know whether the planar mesh is periodic",
+                    "the config mesh:is_periodic (with mesh:x_period and mesh:y_period)")
+        out["mesh:is_periodic"] = bool(periodic)
+        if periodic:
+            for axis in ("x_period", "y_period"):
+                value = _config(configs, axis)
+                if value is None:
+                    _refuse(axis, None, f"a periodic planar mesh's basis correction needs its {axis}",
+                            f"the config mesh:{axis}")
+                out[f"mesh:{axis}"] = float(value)
+    return out
+
+
 class HybridSeaIce:
     """The MPAS v8.4.2 sea ice under E3SM v3.2.0's coupler (:data:`HYBRID_NAME`).
 
@@ -229,13 +275,21 @@ class HybridSeaIce:
     ``nextsw_cday`` the coupler's at start. ``trig`` ``(nCells, 8)`` is the
     rotation's words (:func:`~woof.hex.coupled.ice_coupling_e3sm.rotation_trig`
     over every cell with ``sphere_radius`` when not given). Construction is
-    ``ice_init_mct`` for an initial run."""
+    ``ice_init_mct`` for an initial run. ``basis``, ``metric_libm`` and
+    ``basis_corrections`` go to
+    :func:`~woof.hex.mpas_seaice.timestep_v842.initialize`. The default,
+    ``"compute"``, computes the variational basis from the mesh as v8.4.2's
+    init does (:func:`basis_configs` derives the mesh configs it reads from
+    ``sphere_radius`` and the planar periodic settings; at real(8) its metric
+    terms need ``metric_libm``). ``basis="input"`` keeps the basis the pools
+    carry."""
 
     name = HYBRID_NAME
 
     def __init__(self, *, pools: dict, configs: dict, x2i_fields, i2x_fields, ice_cpl_dt: int,
                  nextsw_cday: float = -1.0, trig=None, sphere_radius: float | None = None,
-                 wav_ice_coup: str = "none") -> None:
+                 wav_ice_coup: str = "none", basis: str = "compute", metric_libm: str | None = None,
+                 basis_corrections=()) -> None:
         import cupy as cp
         from woof.hex.mpas_seaice import coupling_prep_v842 as cprep
         from woof.hex.mpas_seaice import timestep_v842 as ts
@@ -275,7 +329,9 @@ class HybridSeaIce:
         self._export_pools["tracers_aggregate"] = ta
         # ice_init_mct: nextsw_cday, then the core's init
         self._nextsw(nextsw_cday)
-        self.clock = ts.initialize(pools=pools, configs=configs)
+        init_configs = basis_configs(configs, sphere_radius, basis_corrections) if basis == "compute" else configs
+        self.clock = ts.initialize(pools=pools, configs=init_configs, basis=basis, metric_libm=metric_libm,
+                                   basis_corrections=basis_corrections)
         # the coupling preparation (E3SM's seaice_icepack_coupling_prep; v8.4.2's column one)
         cprep.coupling_prep(pools=pools, n_cells_solve=self.n_cells_solve, dt=float(configs["config_dt"]),
                             configs=configs)
