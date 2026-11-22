@@ -55,7 +55,6 @@ import numpy as np
 import pytest
 
 from conftest import requires_gpu
-from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_seaice import column_bgc_v842 as cbgc
 from woof.hex.mpas_seaice import column_therm_v842 as ct
 from woof.hex.mpas_seaice import column_v842 as cv
@@ -204,14 +203,11 @@ def test_only_zsal_solve_maps_the_vertical_salinity():
     assert not cv.solves_zsal(_case("bgc_zsal")["config"]) and cv.solves_zsal(_case("bgc_zsal_solve")["config"])
 
 
-def test_stages_without_the_solved_vertical_salinity_refuse_it():
+def test_every_biogeochemistry_stage_takes_the_vertical_salinity():
     dims = {**_case("bgc_zsal")["dims"], "nSnowLayers": 1}
-    # v8.4.2's inert vertical salinity: every biogeochemistry stage carries it
+    # v8.4.2's inert vertical salinity and the solved one: every biogeochemistry stage carries both
     cv.refuse_unported(_case("bgc_zsal")["config"], dims, biogeochemistry=True)
-    solved = _case("bgc_zsal_solve")["config"]
-    with pytest.raises(ConfigurationRefusal, match=cv.ZSAL_SOLVE):
-        cv.refuse_unported(solved, dims, biogeochemistry=True)
-    cv.refuse_unported(solved, dims, biogeochemistry=True, zsalinity=True)
+    cv.refuse_unported(_case("bgc_zsal_solve")["config"], dims, biogeochemistry=True)
 
 
 @pytest.mark.parametrize("change", [{"config_thermodynamics_type": "mushy",
@@ -292,10 +288,13 @@ def _oracle_toolchain() -> tuple[str, Path] | None:
                     or platform.libc_ver() != ("glibc", "2.44"),
                     reason="the column oracle's words are the x86-64 glibc 2.44 host's libm (the fixtures', "
                            "PROVENANCE.md); it needs gfortran (pixi -e mpas-oracle) and WOOF_MPAS_V842_SOURCE")
-@pytest.mark.parametrize("which, patch", [("zsal", ""), ("zsal_solve", "zsal_solve")])
+@pytest.mark.parametrize("which, patch", [("zsal", ""), ("zsal_solve", "zsal_solve"), ("zsal_carry", ""),
+                                          ("zsal_solve_carry", "zsal_solve"), ("nonreactive", "")])
 def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path, which, patch):
     gfortran, source = _oracle_toolchain()
-    fixture = INERT if which == "zsal" else SOLVE
+    fixture = {"zsal": INERT, "zsal_solve": SOLVE, "zsal_carry": co.BGC_ZSAL_CARRY_FIXTURE_DIR,
+               "zsal_solve_carry": co.BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR,
+               "nonreactive": co.BGC_NONREACTIVE_FIXTURE_DIR}[which]
     subprocess.run(["bash", str(ROOT / "tools" / "mpas_seaice_oracle" / "build.sh"), str(source),
                     str(tmp_path / "build")], check=True,
                    env={**os.environ, "GFORTRAN": gfortran, "WOOF_ORACLE_PATCH": patch})

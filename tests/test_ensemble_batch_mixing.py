@@ -30,7 +30,7 @@ def test_every_installed_macro_signature_expands_and_preserves_original_cuda_bod
     source = module_source("smag2d")
     expanded = normalized_smag_source()
     names = re.findall(r"\bvoid\s+(\w+)\s*\(\s*WRF_SMAG_GRID_ARGS\b", source)
-    assert len(names) == len(_GRID_MACRO_ENTRIES) == 23 and set(names) == _GRID_MACRO_ENTRIES
+    assert len(names) == len(_GRID_MACRO_ENTRIES) == 25 and set(names) == _GRID_MACRO_ENTRIES
     for entry in names:
         assert body(source, entry).encode() == body(expanded, entry).encode(), entry
         signature = re.search(r"\bvoid\s+" + re.escape(entry) + r"\s*\(", expanded)

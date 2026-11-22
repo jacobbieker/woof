@@ -705,6 +705,8 @@ def test_rrtmgp_table_containers_are_explicitly_classified():
          # classification comments in woof/io/restart.py)
          "_C", "_sw_tables", "_cuda_sw", "_ozone_climo",
          "_night_outputs", "_ozone",
+         # hex's aer_opt = 2 records (UserAerosolFrames), set once by the constructor
+         "user_aerosol_frames",
          # the RRTM+Dudhia (1/1) composition's rebuild-on-load
          # sub-adapters and the RRTM coefficient bundle (1.9.1 D3; see
          # woof/io/restart.py and tests/test_radiation_callable_manifest)

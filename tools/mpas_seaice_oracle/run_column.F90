@@ -62,7 +62,9 @@
 !                 colpkg_init_thermo, then seaice_init_column_shortwave(domain,
 !                 clock) (the orbit for the delta-Eddington shortwave,
 !                 column_radiation at initialisation and the albedos);
-!   column_step   colpkg_init_thermo, init_column_itd and, for the
+!   column_step   colpkg_init_thermo, init_column_itd, with the vertical
+!                 salinity colpkg_init_zsalinity's dts_b (as for
+!                 biogeochemistry) and, for the
 !                 delta-Eddington shortwave, colpkg_init_orbit (as seaice_init
 !                 runs them), then oracle_n_steps times the column package's
 !                 part of seaice_core_run (mpas_seaice_core.F,
@@ -104,8 +106,9 @@
 ! LOG.txt gets the tracer object ('TOBJ name values...': nTracers, the
 ! physics tracer indices, parentIndex, firstAncestorMask (as integers),
 ! ancestorNumber, ancestorIndices, and the column package's nt_Tsfc and
-! nt_fbri, and with the vertical salinity its nt_bgc_S as 'colpkg_zsal') and
-! every warning and error the routines log.
+! nt_fbri, with the vertical salinity its nt_bgc_S as 'colpkg_zsal', and with
+! the vertical tracers nBioTracers, nt_zbgc_frac, bio_index and bio_index_o as
+! 'colpkg_zbgc') and every warning and error the routines log.
 program run_column
   use mpas_kind_types
   use mpas_derived_types
@@ -115,7 +118,7 @@ program run_column
   use seaice_column
   use seaice_initialize, only: init_ice_state, initialize_coupler_fields
   use seaice_forcing, only: seaice_reset_coupler_fluxes
-  use ice_colpkg_tracers, only: nt_Tsfc, nt_fbri, nt_bgc_S
+  use ice_colpkg_tracers, only: nt_Tsfc, nt_fbri, nt_bgc_S, nt_zbgc_frac, bio_index, bio_index_o
   use ice_colpkg, only: colpkg_init_thermo, colpkg_init_orbit, colpkg_init_zsalinity
   use seaice_velocity_solver_constitutive_relation, only: seaice_init_evp
   use seaice_diagnostics, only: seaice_initialize_time_diagnostics
@@ -139,7 +142,7 @@ program run_column
   logical, pointer :: useShortwave
   integer, pointer :: nIceLayers
   real(kind=RKIND), allocatable :: sprofile(:)
-  logical, pointer :: useZSalinity
+  logical, pointer :: useZSalinity, useVerticalTracers
   integer, pointer :: nBioLayers, nCategoriesZ
   logical :: rayleighStandIn
   real(kind=RKIND) :: rayleighRealStandIn
@@ -252,6 +255,7 @@ program run_column
      allocate(sprofile(nIceLayers + 1))
      call colpkg_init_thermo(nIceLayers, sprofile)
      call init_column_itd(domain)
+     call init_zsalinity_step()
      call mpas_pool_get_config(pools % configs, 'config_shortwave_type', shortwaveType)
      call mpas_pool_get_config(pools % configs, 'config_use_column_shortwave', useShortwave)
      if (useShortwave .and. trim(shortwaveType) == 'dEdd') then
@@ -284,6 +288,7 @@ program run_column
      allocate(sprofile(nIceLayers + 1))
      call colpkg_init_thermo(nIceLayers, sprofile)
      call init_column_itd(domain)
+     call init_zsalinity_step()
      call mpas_pool_get_config(pools % configs, 'config_shortwave_type', shortwaveType)
      call mpas_pool_get_config(pools % configs, 'config_use_column_shortwave', useShortwave)
      if (useShortwave .and. trim(shortwaveType) == 'dEdd') then
@@ -326,6 +331,18 @@ program run_column
 
 contains
 
+  ! with the vertical salinity, colpkg_init_zsalinity's dts_b as
+  ! seaice_init_column_physics_package_variables leaves it before any step
+  ! (restart_zsal, so no tracer or Rayleigh criterion is touched)
+  subroutine init_zsalinity_step()
+    call mpas_pool_get_config(pools % configs, 'config_use_vertical_zsalinity', useZSalinity)
+    if (.not. useZSalinity) return
+    call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nBioLayers', nBioLayers)
+    call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nCategories', nCategoriesZ)
+    call colpkg_init_zsalinity(nBioLayers, 0, .true., rayleighStandIn, rayleighRealStandIn, zsalStandIn, &
+         1, nCategoriesZ, 0.0_RKIND)
+  end subroutine init_zsalinity_step
+
   subroutine write_ints(name, values)
     character(len=*), intent(in) :: name
     integer, dimension(:), intent(in) :: values
@@ -356,6 +373,10 @@ contains
       call write_ints('colpkg', [nt_Tsfc, nt_fbri])
       call mpas_pool_get_config(pools % configs, 'config_use_vertical_zsalinity', useZSalinity)
       if (useZSalinity) call write_ints('colpkg_zsal', [nt_bgc_S])
+      call mpas_pool_get_config(pools % configs, 'config_use_vertical_tracers', useVerticalTracers)
+      if (useVerticalTracers .and. t % nBioTracers > 0) &
+           call write_ints('colpkg_zbgc', [t % nBioTracers, nt_zbgc_frac, bio_index(1:t % nBioTracers), &
+           bio_index_o(1:t % nBioTracers)])
     end associate
   end subroutine write_tracer_object
 

@@ -282,9 +282,10 @@ def _calibrate_default_compile_routes(request):
 
 # ---- control 2: the probe is sensitive to what it measures ---------------
 
-_PTX_MUL = ('asm volatile("mul.rn.f32 %0, %1, %2;" : "=f"(r) '
-            ': "f"(a), "f"(b));')
-_PTX_CVT = 'asm volatile("cvt.rn.f32.f64 %0, %1;" : "=f"(r) : "d"(a));'
+def _backend_table_dir() -> Path:
+    """The committed table of the backend this process runs: the CUDA receipt, or the Metal pin."""
+    from woof import backend
+    return probe.METAL_PIN_DIR if backend.active() == "mlx" else RECEIPT_DIR
 
 
 @requires_gpu
@@ -297,43 +298,17 @@ def test_probe_sensitivity_control_moves_the_bit_column(receipt, request):
     """
     if _calibrate_default_compile_routes(request):
         return
-    import numpy as np
-    import cupy as cp
-    from woof.core import kernels as gpuwm_kernels
-
-    source = probe._probe_source()
-    mutated = source.replace(_PTX_MUL, "r = a * b;")
-    assert mutated != source, "the inline-PTX multiply arm has moved"
-    mutated2 = mutated.replace(_PTX_CVT, "r = __double2float_rn(a);")
-    assert mutated2 != mutated, "the inline-PTX convert arm has moved"
-
-    options = tuple(receipt["routes"]["R1"]["arm_options"])
-    module = cp.RawModule(code=mutated2, options=options)
-    module.compile()
-
-    shipped = gpuwm_kernels.load_module("ftz_probe")
-    count = len(probe.INPUT_ROWS)
-    au = cp.asarray(np.array([probe._f32_bits(row["a"])
-                              for row in probe.INPUT_ROWS], dtype=np.uint32))
-    bu = cp.asarray(np.array([probe._f32_bits(row["b"])
-                              for row in probe.INPUT_ROWS], dtype=np.uint32))
-    ad = cp.asarray(np.array([row["d"] for row in probe.INPUT_ROWS],
-                             dtype=np.float64))
-
-    def run(mod, name, convert):
-        out = cp.zeros(count, dtype=cp.uint32)
-        function = mod.get_function(name)
-        args = (ad, out, np.int32(count)) if convert else (
-            au, bu, out, np.int32(count))
-        function((1,), (32,), args)
-        cp.cuda.runtime.deviceSynchronize()
-        return [int(value) for value in out.get()]
-
-    for name, convert in (("ftz_probe_ptx_mul", False),
-                          ("ftz_probe_ptx_cvt", True)):
-        assert run(module, name, convert) != run(shipped, name, convert), (
-            f"{name} produced identical words after its instruction was "
-            f"replaced; the probe cannot see what it claims to measure")
+    words = probe.sensitivity_words(receipt)
+    if _backend_table_dir() == RECEIPT_DIR:
+        for name, pair in words.items():
+            assert pair["mutated"] != pair["shipped"], (
+                f"{name} produced identical words after its instruction was "
+                f"replaced; the probe cannot see what it claims to measure")
+        return
+    # The Metal backend: the words it gives are committed beside its table, so a change in what the
+    # backend does with the rewritten instructions fails here by name instead of passing as "moves".
+    recorded = json.loads((probe.METAL_PIN_DIR / "sensitivity.json").read_text(encoding="utf-8"))
+    assert words == recorded
 
 
 @requires_gpu
@@ -343,4 +318,4 @@ def test_the_committed_table_reproduces_on_this_device(receipt, request):
     inventory = ri.load_inventory(ROOT)
     rows, _meta = probe.run_probe(inventory)
     assert probe.bitpatterns_csv(rows) == (
-        RECEIPT_DIR / "bitpatterns.csv").read_text(encoding="utf-8")
+        _backend_table_dir() / "bitpatterns.csv").read_text(encoding="utf-8")

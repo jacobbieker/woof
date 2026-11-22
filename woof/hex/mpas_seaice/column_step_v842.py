@@ -55,8 +55,8 @@ step refuses that by name; the opt-in ``bgc_inactive_diagnostics`` correction
 (:data:`~woof.hex.mpas_seaice.column_v842.CORRECTIONS`) zeroes only the
 fields that exist, and the rest of the step is v8.4.2's word for word.
 v8.4.2's inert vertical salinity (``config_use_vertical_zsalinity``: never
-solved, never copied to the tracer arrays) is carried too; the solved one
-(the ``zsal_solve`` correction) is refused by the stages.
+solved, never copied to the tracer arrays) is carried too, and so is the
+solved one (the ``zsal_solve`` correction).
 
 Refused by name, besides each stage's own refusals: the vertical snow and ice tracers
 (``column_separate_snow_ice_tracers`` and ``_combine_``), the ocean mixed

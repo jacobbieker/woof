@@ -20,6 +20,7 @@ import pytest
 cp = pytest.importorskip("cupy")
 
 from woof.core import mpas_column_batch as mcb  # noqa: E402
+from conftest import requires_p3_bridge  # noqa: E402
 
 NZ, NCOL = 20, 8
 DT = 120.0
@@ -450,6 +451,7 @@ def test_p3_phase1_leaves_every_input_byte_identical():
     assert not cp.asnumpy(result.dqg).any()
 
 
+@requires_p3_bridge
 def test_p3_phase2_updates_the_eight_species_and_theta_in_place():
     seam = _p3_seam()
     inputs = _p3_profile(seed=11)
@@ -474,6 +476,7 @@ def test_p3_phase2_updates_the_eight_species_and_theta_in_place():
         "P3 has no graupel accumulator (physics_inventory mp=50 row)")
 
 
+@requires_p3_bridge
 def test_p3_species_direction_refusals():
     seam = _p3_seam()
     inputs = _p3_profile()
@@ -492,6 +495,7 @@ def test_p3_species_direction_refusals():
     seam.run_phase2(**state2)   # leave the seam at a clean boundary
 
 
+@requires_p3_bridge
 def test_p3_restart_round_trip_continues_bit_identically():
     """THE CARD GATE: a restored P3 seam continues bit-identically.
 
@@ -534,6 +538,7 @@ def test_p3_restart_round_trip_continues_bit_identically():
     assert resumed.call_counts == reference.call_counts
 
 
+@requires_p3_bridge
 def test_p3_and_wsm6_payloads_refuse_each_other():
     p3_seam = _p3_seam()
     p3_inputs = _p3_profile()
@@ -825,6 +830,7 @@ def test_mp28_restore_refuses_a_payload_without_the_first_contact_record():
         _mp28_seam().restore_state(payload)
 
 
+@requires_p3_bridge
 def test_mp28_payloads_refuse_the_other_schemes():
     mp28 = _mp28_seam()
     mp28_inputs = _mp28_profile()
@@ -850,6 +856,7 @@ def test_mp28_payloads_refuse_the_other_schemes():
         _p3_seam().restore_state(mp28_payload)
 
 
+@requires_p3_bridge
 def test_wsm6_and_p3_payload_layouts_are_unchanged_by_the_mp28_arm():
     """The pre-mp28 layouts, key for key.
 
