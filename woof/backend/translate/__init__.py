@@ -2667,7 +2667,11 @@ class _Rewriter:
     #: THOMPSON_COLUMN_KMAX 128 and 256, and at the default 64 as well, so
     #: the tier gate covers every tier.  Out of line (size or none: the same
     #: words) the three tiers agree word for word on the same columns.
-    INLINE_POLICY_BY_KERNEL_TIER = {("thompson_column_step", "THOMPSON_COLUMN_KMAX", 64): "size"}
+    #: QNSE's EDMF mfshconv_column at its QNSE_KMAX 256 tier (a 30.7 KB
+    #: per-thread frame) crashes the service the same way fully inlined; its
+    #: 128 tier and qnsepbl_column at 256 build fully inlined.
+    INLINE_POLICY_BY_KERNEL_TIER = {("thompson_column_step", "THOMPSON_COLUMN_KMAX", 64): "size",
+                                    ("mfshconv_column", "QNSE_KMAX", 256): "size"}
 
     def _unit_inline_policy(self) -> str:
         policy = self.INLINE_POLICY_BY_UNIT.get(self.unit.split("[", 1)[0], "")
