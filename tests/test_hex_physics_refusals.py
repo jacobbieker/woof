@@ -97,8 +97,8 @@ def _resolve_output(args):
 #: sha256[:16] of ``woof hex physics resolve ARGS`` stdout recorded on origin/main
 #: (2bd55d9a2), before refused_settings existed.
 ADMITTED = [
-    # 40b35ac79 (RP8, MYNN qsat_blend pole guards) added "RP8" to the default suite's
-    # corrections_applied; re-recorded from 214ec49ca59cf16d.  Nothing else in the output moved.
+    # 40b35ac79 (MYNN qsat_blend pole guards, then RP8, RP9 since the 1.1.7 sync) added it to the
+    # default suite's corrections_applied; re-recorded from 214ec49ca59cf16d.  Nothing else moved.
     ([], "a9ad2bdd717af479"),
     (["--physics-suite", "rrfs_v2_dev"], "b2fa7a27c16f90d8"),
     (["--physics", "ifire=0"], "761f1b8678879127"),

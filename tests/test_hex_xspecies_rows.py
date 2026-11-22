@@ -2,7 +2,7 @@
 of a regional run's initial state, and CAM-MG's signed precipitation buckets.
 
 NSSL's operator forms rho from WRF's ``alt`` (woof.core.state_reflectivity), so
-the view carries ``alt = 1/rho_dry`` when the seam gives it the density; NTU's
+the view carries ``alt = 1/rho_dry`` (main's fix); NTU's
 field table names ``w``, so the view carries the mass-level w too.  A
 two-moment init whose number moments are zero under analysis masses (Morrison's
 ns/ng after --augment-init) gives a non-finite operator result; the hour-0
@@ -27,7 +27,7 @@ def _view(**kwargs):
 
 def test_the_view_carries_alt_from_the_density_and_w():
     rho = np.linspace(0.6, 1.2, NZ * NCOL, dtype=np.float32).reshape(NZ, NCOL)
-    view = _view(density=rho)
+    view = _view(rho_dry=rho)
     assert view.alt.shape == (NZ, 1, NCOL)
     assert np.array_equal(view.alt.reshape(NZ, NCOL), np.float32(1.0) / rho)
     assert not hasattr(_view(), "alt")
