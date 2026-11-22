@@ -76,6 +76,19 @@ FIELDS = (
     *(("scratch", name, SCRATCH, ("L", "C1")) for name in _ADV_SCRATCH),
     ("scratch", "highOrderFlux", SCRATCH, ("LP1", "E1")),
     ("scratch", "delsq_tracer", SCRATCH, ("T", "L", "C1")),
+    # ocn_compute_KPP_input_fields' (under config_use_cvmix_kpp)
+    ("diagnostics", "tracersSurfaceValue", REAL, ("T", "C1")),
+    ("diagnostics", "surfaceBuoyancyForcing", REAL, ("C1",)),
+    ("diagnostics", "surfaceFrictionVelocity", REAL, ("C1",)),
+    ("forcing", "surfaceThicknessFlux", REAL, ("C1",)), ("forcing", "surfaceStress", REAL, ("E1",)),
+    ("forcing", "surfaceStressMagnitude", REAL, ("C1",)),
+    # read (pointers taken) but not used
+    ("state", "normalVelocity", REAL, ("L", "E1")), ("diagnostics", "zTop", REAL, ("L", "C1")),
+    ("diagnostics", "density", REAL, ("L", "C1")), ("diagnostics", "indexSurfaceLayerDepth", REAL, ("C1",)),
+    ("diagnostics", "normalVelocitySurfaceLayer", REAL, ("E1",)),
+    ("forcing", "surfaceThicknessFluxRunoff", REAL, ("C1",)),
+    *(("scratch", name, SCRATCH, ("L", "C1"))
+      for name in ("densitySurfaceDisplaced", "thermalExpansionCoeff", "salineContractionCoeff")),
 )
 
 BASE_CONFIG = {
@@ -102,6 +115,11 @@ BASE_CONFIG = {
     "config_open_ocean_freezing_temperature_coeff_0": -1.8, "config_open_ocean_freezing_temperature_coeff_S": 0.0,
     "config_open_ocean_freezing_temperature_coeff_p": 0.0, "config_open_ocean_freezing_temperature_coeff_pS": 0.0,
     "config_open_ocean_freezing_temperature_reference_pressure": 0.0,
+    # the equation of state (KPP's input fields) and KPP's non-local flux
+    "config_eos_type": "linear", "config_eos_linear_densityref": 1000.0, "config_eos_linear_alpha": 0.2,
+    "config_eos_linear_beta": 0.8, "config_eos_linear_Tref": 5.0, "config_eos_linear_Sref": 35.0,
+    "config_disable_tr_nonlocalflux": False, "config_flux_attenuation_coefficient": 0.001,
+    "config_flux_attenuation_coefficient_runoff": 0.001,
 }
 #: (name, seed, nCells, nVertLevels, config overrides)
 CASES = (
@@ -119,6 +137,23 @@ CASES = (
     ("sflux_disabled_runoff", 20261264, 32, 8, {"config_disable_tr_sflux": True, "config_vert_tracer_adv_order": 2}),
     ("active_tracers_off", 20261265, 24, 6, {"config_use_activeTracers": False}),
     ("all_tend_disabled", 20261266, 24, 6, {"config_disable_tr_all_tend": True}),
+    # KPP's input fields and non-local flux; _halos gives nCellsArray four
+    # different extents (the input fields run over the third, the flux over the first)
+    ("kpp_nonlocal_bulk_budgets", 20261267, 40, 16,
+     {"config_use_cvmix_kpp": True, "config_use_activeTracers_surface_bulk_forcing": True,
+      "config_sw_absorption_type": "jerlov", "config_jerlov_water_type": 3, "config_compute_active_tracer_budgets": True,
+      "_halos": True}),
+    ("kpp_nonlocal_jm_attenuated", 20261268, 36, 12,
+     {"config_use_cvmix_kpp": True, "config_use_activeTracers_surface_bulk_forcing": True,
+      "config_sw_absorption_type": "jerlov", "config_jerlov_water_type": 1, "config_eos_type": "jm",
+      "config_flux_attenuation_coefficient": 10.0, "config_flux_attenuation_coefficient_runoff": 4.0,
+      "_halos": True}),
+    ("kpp_nonlocal_with_implicit_mix", 20261269, 28, 10,
+     {"config_use_cvmix_kpp": True, "config_cvmix_kpp_nonlocal_with_implicit_mix": True,
+      "config_compute_active_tracer_budgets": True, "config_flux_attenuation_coefficient": 25.0}),
+    ("kpp_nonlocal_disabled_budgets", 20261270, 28, 10,
+     {"config_use_cvmix_kpp": True, "config_disable_tr_nonlocalflux": True,
+      "config_compute_active_tracer_budgets": True, "config_eos_type": "jm"}),
 )
 
 
@@ -217,6 +252,14 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
         if kind == REAL and value is not None:
             value = np.asarray(value).astype(real)
         pools.setdefault(pool, {})[field] = value
+    # KPP's inputs, drawn after every other field so the earlier cases' words stay
+    surface = pools["tracers"]["activeTracers"][:, 0, :]
+    pools["diagnostics"]["tracersSurfaceValue"] = (surface + uniform(-0.1, 0.1, surface.shape)).astype(real)
+    pools["forcing"]["surfaceThicknessFlux"] = uniform(-2.0e-5, 2.0e-5, nc + 1).astype(real)
+    pools["forcing"]["surfaceStress"] = uniform(-0.4, 0.4, ne + 1).astype(real)
+    if overrides.get("_halos"):
+        pools["mesh"]["nCellsArray"] = np.array([nc - 9, nc - 6, nc - 3, nc], np.int32)
+        pools["mesh"]["nCellsSolve"] = nc - 9
     case["pools"] = pools
     return case
 

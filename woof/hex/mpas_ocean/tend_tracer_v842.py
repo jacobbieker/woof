@@ -18,7 +18,14 @@ active tracers on one block, in the Fortran's order:
 5. Jerlov short-wave absorption (``config_sw_absorption_type`` 'jerlov') or
    none;
 6. the active-tracer budgets (``config_compute_active_tracer_budgets``);
-7. frazil (``ocn_frazil_forcing_tracers``,
+7. under ``config_use_cvmix_kpp``, ``ocn_compute_KPP_input_fields`` (the
+   non-local surface fluxes, the surface buoyancy forcing, the surface
+   stress magnitude and the friction velocity, after the equation of state
+   at the surface-displaced type) and, unless
+   ``config_cvmix_kpp_nonlocal_with_implicit_mix``, KPP's non-local tracer
+   flux (``ocn_tracer_nonlocalflux_tend``, off under
+   ``config_disable_tr_nonlocalflux``) with its budget;
+8. frazil (``ocn_frazil_forcing_tracers``,
    :func:`~woof.hex.mpas_ocean.frazil_v842.active_tracers_tend`) under
    ``config_use_frazil_ice_formation``.
 
@@ -33,8 +40,7 @@ The pools are dicts of device arrays named as in MPAS (``mesh``, ``state``,
 ``forcing``), with MPAS's missing-neighbour element; dimensions are host
 integers, a field whose package is off is ``None``.
 
-Refused by name, as not ported: KPP's non-local flux (``config_use_cvmix_kpp``),
-surface and interior restoring, exponential decay, ideal age and TTD for the
+Refused by name, as not ported: surface and interior restoring, exponential decay, ideal age and TTD for the
 active tracers, the ohlmann00 short-wave absorption, and every other tracer group
 (this port carries ``activeTracers``). Short-wave absorption without the bulk
 forcing raises, as v8.4.2's init aborts.
@@ -58,12 +64,16 @@ SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_tracer_surface_flux_to_tend.F",
     "src/core_ocean/shared/mpas_ocn_tracer_short_wave_absorption.F",
     "src/core_ocean/shared/mpas_ocn_tracer_short_wave_absorption_jerlov.F",
+    "src/core_ocean/shared/mpas_ocn_diagnostics.F:1328-1526",
+    "src/core_ocean/shared/mpas_ocn_tracer_nonlocalflux.F",
 )
 MODULE_OPTIONS = COMPILE_OPTIONS
 MATH_HEADERS = {"r4": ("glibc_flt32.cuh",), "r8": ("glibc_flt64.cuh",)}
 #: ocn_tracer_short_wave_absorption_jerlov's water types: (rfac, depth1, depth2)
 JERLOV = ((0.58, 0.35, 23.0), (0.62, 0.60, 20.0), (0.67, 1.00, 17.0), (0.77, 1.50, 14.0), (0.78, 1.40, 7.90))
 CP_SW = 3.996e3
+#: mpas_constants' gravity
+GRAVITY = 9.80616
 _UNPORTED_GROUP_SWITCHES = ("surface_restoring", "interior_restoring", "exponential_decay", "idealAge_forcing",
                             "ttd_forcing")
 _BLOCK = 128
@@ -109,9 +119,6 @@ def check_config(configs: dict, groups=("activeTracers",)) -> None:
         if group != "activeTracers":
             _refuse("tracer group", group, "only the active tracers' tendency is ported",
                     "the tracers pool holds activeTracers alone")
-    if configs.get("config_use_cvmix_kpp", False):
-        _refuse("config_use_cvmix_kpp", True, "KPP's non-local tracer flux (and its input fields) are not ported",
-                "config_use_cvmix_kpp = .false.")
     for switch in _UNPORTED_GROUP_SWITCHES:
         knob = f"config_use_activeTracers_{switch}"
         if configs.get(knob, False):
@@ -132,9 +139,15 @@ def check_config(configs: dict, groups=("activeTracers",)) -> None:
 
 
 def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_tend: dict,
-                tracers_surface_flux: dict, diagnostics: dict, forcing: dict, configs: dict) -> None:
+                tracers_surface_flux: dict, diagnostics: dict, forcing: dict, configs: dict,
+                tracers_level1: dict | None = None) -> None:
     """``ocn_tend_tracer`` for the active tracers, in place on ``tracers_tend``,
-    ``tracers_surface_flux``, the forcing's penetrative flux and the budgets."""
+    ``tracers_surface_flux``, the forcing's penetrative flux and the budgets.
+
+    With ``config_use_cvmix_kpp``, ``ocn_compute_KPP_input_fields`` reads
+    ``tracers_level1`` (time level 1's tracers; ``tracers`` when not given)
+    for its surface fluxes, as the Fortran does, and ``tracers`` for its
+    equation of state."""
     import cupy as cp
     check_config(configs)
     if configs.get("config_disable_tr_all_tend", False):
@@ -208,5 +221,56 @@ def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_te
     if budgets:
         sw = d["temperatureShortWaveTendency"]
         sw[:n_cells] = tend[:n_cells, :, it - 1] - sw[:n_cells]
+    if configs.get("config_use_cvmix_kpp", False):
+        _kpp_input_fields(precision=precision, mesh=mesh, layer_thickness=h, tracers=tracers,
+                          tracers_level1=tracers if tracers_level1 is None else tracers_level1,
+                          tracers_surface_flux=tracers_surface_flux, diagnostics=d, forcing=f, configs=configs)
+        if not configs.get("config_cvmix_kpp_nonlocal_with_implicit_mix", False):
+            if budgets:
+                d["activeTracerNonLocalTendency"][:n_cells] = tend[:n_cells]
+            if not configs.get("config_disable_tr_nonlocalflux", False):
+                vnl = d["vertNonLocalFlux"]
+                _launch(precision, "ocn_tt_nonlocal_flux_v842", cells[0], (
+                    tend, vnl, tracers_surface_flux["nonLocalSurfaceTracerFlux"], mesh["maxLevelCell"],
+                    i32(cells[0]), i32(nl), i32(nt), i32(vnl.shape[-1])))
+            if budgets:
+                nonlocal_tend = d["activeTracerNonLocalTendency"]
+                nonlocal_tend[:n_cells] = tend[:n_cells] - nonlocal_tend[:n_cells]
     frazil_v842.active_tracers_tend(mesh=mesh, forcing=f, tend=tend, index_temperature=it, index_salinity=isal,
                                     configs=configs)
+
+
+def _kpp_input_fields(*, precision: str, mesh: dict, layer_thickness, tracers: dict, tracers_level1: dict,
+                      tracers_surface_flux: dict, diagnostics: dict, forcing: dict, configs: dict) -> None:
+    """``ocn_compute_KPP_input_fields`` over ``nCellsArray(3)``: the equation
+    of state at the surface-displaced type into scratch (with the in-situ
+    coefficients), then the non-local surface fluxes, the surface buoyancy
+    forcing, the surface stress magnitude and the friction velocity."""
+    import cupy as cp
+    real = PRECISIONS[precision]
+    i32 = np.int32
+    d, f = diagnostics, forcing
+    nl = int(mesh["nVertLevels"])
+    cells = [int(x) for x in mesh["nCellsArray"]]
+    group = tracers["activeTracers"]
+    nt = group.shape[2]
+    it, isal = int(tracers["index_temperature"]), int(tracers["index_salinity"])
+    shape = (group.shape[0], nl)
+    density, alpha, beta = (cp.zeros(shape, dtype=real) for _ in range(3))
+    eos_v842.equation_of_state_density(
+        mesh={"maxLevelCell": mesh["maxLevelCell"], "refBottomDepth": mesh["refBottomDepth"]}, active_tracers=group,
+        tracers_surface_value=d["tracersSurfaceValue"], index_temperature=it, index_salinity=isal, density=density,
+        k_displaced=0, displacement_type="surfaceDisplaced", configs=configs, thermal_expansion_coeff=alpha,
+        saline_contraction_coeff=beta, n_cells=cells[2])
+    _launch(precision, "ocn_tt_kpp_input_fields_v842", cells[2], (
+        tracers_surface_flux["nonLocalSurfaceTracerFlux"], d["surfaceBuoyancyForcing"], f["surfaceStressMagnitude"],
+        d["surfaceFrictionVelocity"], tracers_surface_flux["activeTracersSurfaceFlux"],
+        tracers_surface_flux["activeTracersSurfaceFluxRunoff"], f["penetrativeTemperatureFlux"],
+        d["penetrativeTemperatureFluxOBL"], f["surfaceThicknessFlux"], tracers_level1["activeTracers"],
+        layer_thickness, alpha, beta, f["surfaceStress"], mesh["areaCell"],
+        mesh["dcEdge"], mesh["dvEdge"], mesh["nEdgesOnCell"], mesh["edgesOnCell"], i32(cells[2]), i32(nl), i32(nt),
+        i32(mesh["edgesOnCell"].shape[1]), i32(tracers_surface_flux["index_temperatureSurfaceFlux"]),
+        i32(tracers_surface_flux["index_salinitySurfaceFlux"]),
+        real(configs.get("config_flux_attenuation_coefficient", 0.001)),
+        real(configs.get("config_flux_attenuation_coefficient_runoff", 0.001)), real(GRAVITY),
+        real(configs["config_density0"])))
