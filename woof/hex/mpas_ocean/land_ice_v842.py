@@ -46,6 +46,7 @@ from importlib.resources import files
 
 import numpy as np
 
+from woof import quirk_corrections
 from woof.hex.errors import ConfigurationRefusal
 
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
@@ -168,7 +169,7 @@ def isomip_salinity_corrected(configs: dict) -> bool:
     the ISOMIP formulation (Holland and Jenkins 1999's one-equation form)
     means; nothing else changes.
     """
-    value = configs.get("woof_land_ice_isomip_freezing_salinity", "boundary_layer_temperature")
+    value = quirk_corrections.option(configs, "woof_land_ice_isomip_freezing_salinity")
     if value not in ("boundary_layer_temperature", "boundary_layer_salinity"):
         raise ConfigurationRefusal(
             knob="woof_land_ice_isomip_freezing_salinity", value=value,

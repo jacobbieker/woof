@@ -614,6 +614,26 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
 - **Corrections of WRF/MPAS quirks, each opt-in and off by default.**
   The default stays word for word with the WRF 4.7.1 / MPAS v8.4.2
   oracle; each key changes only the arithmetic it names.
+  - `woof_quirk_corrections = "all"` turns every correction below on at
+    once, each where its scheme runs (default `"none"`; the hex door takes
+    `--quirk-corrections all`). A key set against it is refused by name,
+    and so is a correction its own key refuses in that combination. It
+    turns on `gf_deep_rain_evaporation_booking` and
+    `ysu_surface_heat_exner` (WRF route); `--undriven-species-boundary
+    wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
+    flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
+    `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
+    `woof_redi_k33` (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
+    `woof_simple_velocity_bed`, `woof_statistics_extrema` and
+    `woof_analysis_empty` (MALI); the MPAS-Seaice column's
+    `set_sfcflux_order`, `ice_velocity_at_cell`,
+    `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
+    `zbgc_c2n_proteins`, `bgc_inactive_diagnostics` and `zsal_solve`;
+    and the MPAS-Seaice velocity solver's `planar_metric_terms`,
+    `periodic_local_coords` and `weak_ridge_delta`.
+    The list and its values are in
+    [CONFIGURATION.md](docs/public/CONFIGURATION.md) and
+    `woof/quirk_corrections.py`.
   - `ysu_surface_heat_exner` (YSU, `bl_pbl_physics = 1`, WRF route). WRF's YSU adds the surface sensible heat flux to
     potential temperature as if it were a temperature flux and converts
     back with pi, so the column gets `HFX*pi` instead of `HFX`. That loses

@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 455,
+**Which keys a `[[domain]]` table may override.** Exactly these 456,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -406,7 +406,7 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     iccg_prescribed_den  cellcount_method  cldtop_adjustment  do_radar_ref
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
-    gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
+    gf_deep_rain_evaporation_booking  ysu_surface_heat_exner  woof_quirk_corrections
     obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
     obstacle_drag_coefficient  obstacle_wall_z0  urban_param_file
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
@@ -594,6 +594,42 @@ pi, so the surface heat enters as `HFX*pi` (4.5% short at 850 hPa). With
 level, so the surface heat enters as `HFX`. Refused with BEP/BEM
 (`sf_urban_physics` 2 or 3). Off, the arithmetic is WRF's word for word.
 It is not a WRF namelist key; set it in the TOML.
+
+`woof_quirk_corrections` (default `"none"`) is the umbrella over the
+opt-in corrections of WRF 4.7.1 / MPAS v8.4.2 quirks
+(`woof/quirk_corrections.py`). With `"none"` each correction stays on
+its own key, off unless set. `"all"` turns on every correction whose
+scheme the run carries; one whose scheme does not run stays off. A key
+set to anything but its corrected value next to `"all"` is refused by
+name, and a correction its own key refuses in some combination (YSU's
+with BEP/BEM) is refused there under `"all"` too. Per domain, like the
+corrections. The same key works in the MPAS config dicts, and the hex
+door takes it as `--quirk-corrections all`. `"all"` turns on:
+
+- WRF route (RunConfig): `gf_deep_rain_evaporation_booking = true`
+  (`cu_physics = 3`) and `ysu_surface_heat_exner = true`
+  (`bl_pbl_physics = 1`).
+- Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
+  (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
+  stays off on the MPAS suite route, local time stepping, partial nest and
+  the partitioned same-host executor, which do not carry it). The door's
+  `--quirk-corrections all` sets only this flag: the RunConfig keys above
+  are not hex flags.
+- MPAS-Ocean: `woof_land_ice_isomip_freezing_salinity =
+  'boundary_layer_salinity'`, `woof_bottom_drag_dry_edges = 'skip'`,
+  `woof_rayleigh_bottom_friction = 'corrected'` and `woof_redi_k33 =
+  'kappa'`.
+- MALI: `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
+  `woof_simple_velocity_bed` and `woof_analysis_empty` at `'corrected'`,
+  and `woof_statistics_extrema = 'ice'`.
+- MPAS-Seaice column (`woof_v842_corrections` names):
+  `set_sfcflux_order`, `ice_velocity_at_cell`,
+  `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
+  `zbgc_c2n_proteins`, `bgc_inactive_diagnostics` and `zsal_solve`.
+- MPAS-Seaice velocity solver set-up (the time step's
+  `basis_corrections` / `weak_corrections` names): `planar_metric_terms`
+  and `periodic_local_coords` (variational basis; each acts only on a
+  planar or periodic mesh) and `weak_ridge_delta` (weak stress divergence).
 
 `obstacle_opt` (default `0`) resolves buildings and other obstacles on an
 LES or other high-resolution domain. It is woof's own option, not a WRF

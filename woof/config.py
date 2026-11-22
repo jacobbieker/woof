@@ -77,6 +77,15 @@ def validate_surface_radiation_policy(policy: str) -> str:
 @dataclass(frozen=True)
 class RunConfig:
     def __post_init__(self):
+        # woof_quirk_corrections = 'all' (woof.quirk_corrections): each
+        # RunConfig correction is on exactly where its scheme runs, however
+        # the RunConfig was built (a dataclasses.replace that changes the
+        # scheme re-derives it).  The TOML readers refuse an explicit
+        # conflicting key before this point (apply_run_corrections).
+        if self.woof_quirk_corrections == "all":
+            from woof.quirk_corrections import run_corrections_under_all
+            for key, value in run_corrections_under_all(self).items():
+                object.__setattr__(self, key, value)
         if self._legacy_h_sca is None:
             object.__setattr__(self, "_legacy_h_sca", self.h_sca_adv_order is None)
         if self.h_sca_adv_order is None:
@@ -2405,6 +2414,12 @@ class RunConfig:
     # level's pi before the unchanged kernel reads it; False is WRF's
     # arithmetic word for word.  Read only where bl_pbl_physics = 1.
     ysu_surface_heat_exner: bool = _config_field(default=False, kw_only=True)
+    # The umbrella over the opt-in quirk corrections (woof.quirk_corrections),
+    # appended at 'none': each correction stays on its own key.  'all' turns
+    # on every RunConfig correction whose scheme the domain runs
+    # (__post_init__); the TOML readers (load_config, build_experiment)
+    # refuse one set to anything else next to 'all', by name.
+    woof_quirk_corrections: str = _config_field(default="none", kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -5800,6 +5815,8 @@ def load_config(path: str | Path, *, accept_epssm_auto: bool = False,
     apply_chem_set_defaults(merged)
     from woof.surface_ocean import apply_ocean_defaults
     apply_ocean_defaults(merged)
+    from woof.quirk_corrections import apply_run_corrections
+    merged = apply_run_corrections(merged)
     return validate_run_config(RunConfig(**merged),
                                native_fire_ideal=native_fire_ideal)
 
@@ -9516,6 +9533,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "gf_deep_rain_evaporation_booking must be true or false")
     if type(cfg.ysu_surface_heat_exner) is not bool:
         raise ConfigurationRefused("ysu_surface_heat_exner must be true or false")
+    from woof.quirk_corrections import check_run_config
+    check_run_config(cfg)
     if cfg.ysu_surface_heat_exner and int(cfg.bl_pbl_physics) != 1:
         raise ConfigurationRefused(
             "ysu_surface_heat_exner corrects YSU's surface heat flux "

@@ -245,7 +245,9 @@ def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None,
     elif solver_on and basis == "compute":
         from . import variational_basis_v842
         for w in variational_basis_v842.initialize_pools(pools, configs, metric_libm=metric_libm,
-                                                         corrections=basis_corrections):
+                                                         corrections=velocity_corrections(
+                                                             configs, basis_corrections,
+                                                             variational_basis_v842.CORRECTIONS)):
             _log.warning("%s", w["message"])
     solver = pools["velocity_solver"]
     real = PRECISIONS[_precision_of(solver["uVelocity"])]
@@ -275,6 +277,19 @@ def _column_state(pools: dict, configs: dict):
     limits = pools["initial"]["categoryThicknessLimits"]
     cv.init_column_itd({"initial": {"categoryThicknessLimits": limits.copy()}}, state)
     return state
+
+
+def velocity_corrections(configs: dict, named, table) -> tuple:
+    """The velocity set-up corrections a call takes: those ``named``, plus
+    every one of ``table`` under ``woof_quirk_corrections = 'all'`` in
+    ``configs`` (woof.quirk_corrections; route ``mpas_seaice_velocity``).
+    Each acts only where its mesh has the quirk, so the umbrella carries
+    them everywhere."""
+    from woof import quirk_corrections
+    named = tuple(named)
+    if not quirk_corrections.all_on(configs):
+        return named
+    return named + tuple(name for name in table if name not in named)
 
 
 def _velocity_solver(pools: dict, configs: dict, consts, column_state=None, weak_tangents=None,
@@ -333,7 +348,9 @@ def _velocity_solver(pools: dict, configs: dict, consts, column_state=None, weak
                                       check=subcycle == 0)
     if weak:
         weak_v842.final_divergence_shear_weak(mesh=mesh, solver=solver, weak=vw, ridging=p["ridging"],
-                                              use_column_package=column, corrections=weak_corrections)
+                                              use_column_package=column,
+                                              corrections=velocity_corrections(configs, weak_corrections,
+                                                                               weak_v842.CORRECTIONS))
         weak_v842.principal_stresses(mesh=mesh, weak=vw)
     else:
         evp_v842.final_divergence_shear_variational(mesh=mesh, solver=solver, variational=variational,
