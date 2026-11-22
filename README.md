@@ -432,7 +432,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     dust's ocean flux in `oceanDustIronFlux`, word for word with v8.4.2;
     the opt-in correction `zaero_snow_scavenging` gives each its own snow
     scavenging, where v8.4.2 indexes the table by list position and gives
-    all three 0.03. The other biogeochemistry
+    all three 0.03. With `config_use_shortwave_bioabsorption` (bulk or
+    `config_use_modal_aerosols` optics) the delta-Eddington shortwave
+    carries the z-aerosols' optics and `bioTracerShortwave`, word for word;
+    the opt-in correction `shortwave_bio_grid` remaps onto the biology grid,
+    where v8.4.2 passes the ice's vertical grid. The other biogeochemistry
     flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,

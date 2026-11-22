@@ -149,7 +149,8 @@ def check_config(configs: dict) -> None:
         # tracer is (bio_index_o 17), and coupling_prep's mapping skips that entry (PON has no
         # ocean*Flux field, mpas_seaice_column.F:3998-3999), as it skips the black carbons'
         # (23-24, :4016); the first dust's (25) goes into oceanDustIronFlux (:4018-4021)
-        carried = cv.BGC_PORTED + (cv.ZSAL_FLAG,)
+        # the shortwave bioabsorption and the modal optics touch no ocean flux
+        carried = cv.BGC_PORTED + (cv.ZSAL_FLAG,) + cv.SW_BIO_PORTED
         if cv.vertical_tracers(c):
             cv._refuse_z_tracers(c)
             carried += (cv.VT_FLAG,) + cv.VT_PORTED

@@ -17,7 +17,17 @@ level, topo or no melt ponds), the CCSM3 shortwave
 or ``constant`` albedos and ``absorbed_solar``), and any shortwave type with a
 coupled surface temperature (``config_calc_surface_temperature = .false.``:
 no shortwave, the topo ponds' effective area), on BL99, mushy or zero-layer
-ice.
+ice. With the column biogeochemistry's z-aerosols
+(``config_use_zaerosols``) the delta-Eddington shortwave carries their
+bioabsorption (``config_use_shortwave_bioabsorption``, dEdd_algae):
+``compute_shortwave_trcr`` remaps each aerosol's ice layers onto the
+shortwave grid into ``bioTracerShortwave`` (``remap_zbgc``, below its two
+snow levels), and ``compute_dEdd`` folds their extinction, single scattering
+and asymmetry into the snow and the bare and snow-covered ice's layers, from
+the aerosols pool's tables: the bulk ones, or with
+``config_use_modal_aerosols`` the modal black carbon's (interstitial, and
+within the ice with its absorption enhanced by the snow grain size). Without
+the z-aerosols the bioabsorption changes nothing (the algae are refused).
 
 What it refuses, by name:
 
@@ -25,9 +35,16 @@ What it refuses, by name:
   solar zenith angle call glibc's binary64 ``sin``, ``cos``, ``atan`` and
   ``asin``, which are not correctly rounded and are LGPL, so they compile
   only with ``WOOF_GLIBC239_LIBM64=1`` (:mod:`woof.core.glibc239_gpu`);
-- the aerosols and the shortwave bioabsorption (and, as every column stage,
-  the biogeochemistry but its brine height, whose fraction only the
-  bioabsorption reads);
+- the NCAR aerosols (``config_use_aerosols``) and, as every column stage, the
+  biogeochemistry but its brine height, the vertical salinity, the
+  nonreactive tracer and the z-aerosols;
+- the bioabsorption without the column biogeochemistry (v8.4.2's
+  ``check_column_package_configs`` stops);
+- the bioabsorption of the z-aerosols with fewer ice layers than biology
+  layers (unless corrected, below): ``column_radiation`` passes
+  ``verticalGrid`` (the ice layers' midpoints, ``mpas_seaice_column.F:2415``)
+  as ``compute_shortwave_trcr``'s biology interface grid, which then reads
+  ``nBioLayers + 1`` points of it, past the array;
 - ``shortwave_ccsm3`` with more categories than ice layers: v8.4.2 passes
   ``ncat`` as ``absorbed_solar``'s ``nilyr`` (``ice_shortwave.F90:236``) and
   then writes past the category's layers (unless corrected, below);
@@ -62,7 +79,16 @@ Opt-in corrections (``configs["woof_v842_corrections"]``, named in
 ``ccsm3_absorbed_solar_layers`` passes the category's ``nilyr`` to
 ``absorbed_solar`` (and lifts the ``ncat > nilyr`` refusal), and
 ``dedd_zero_volume_ice`` gives the delta-Eddington layers without thickness
-no chlorophyll absorption, so ice without volume is transparent.
+no chlorophyll absorption, so ice without volume is transparent, and
+``shortwave_bio_grid`` passes ``interfaceBiologyGrid`` as
+``compute_shortwave_trcr``'s biology grid (and lifts the ice-layer
+refusal). v8.4.2's ``verticalGrid`` there is kept by default: with at least
+as many ice layers as biology layers it remaps the aerosols from the ice
+layers' midpoints' depths. A negative brine height stops ``remap_zbgc``,
+and ``compute_shortwave_trcr`` returns with the later aerosols' levels at 0;
+``colpkg_step_radiation`` never resets its uninitialised ``l_stop`` (false on
+the oracle's entry to each cell), so the cell's later categories return at
+their first remap and keep all their levels at 0, as the port does.
 
 ``exp`` is ``glibc_exp`` (the MIT transcription of glibc's binary64 exp).
 """
@@ -84,7 +110,8 @@ SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_column.F:435-647,1990-2484",
     "src/core_seaice/column/ice_colpkg.F90:387-412,2547-2972",
     "src/core_seaice/column/ice_orbital.F90:35-680",
-    "src/core_seaice/column/ice_shortwave.F90:72-660,673-3563",
+    "src/core_seaice/column/ice_shortwave.F90:72-660,673-3563,3571-3729",
+    "src/core_seaice/column/ice_zbgc_shared.F90:167-333",
 )
 _BLOCK = 128
 
@@ -117,10 +144,24 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     if c["config_use_aerosols"]:
         _refuse("config_use_aerosols", True, "the aerosols in the shortwave are not ported",
                 "config_use_aerosols = .false.")
-    if c["config_use_shortwave_bioabsorption"]:
+    if c["config_use_shortwave_bioabsorption"] and not c["config_use_column_biogeochemistry"]:
         _refuse("config_use_shortwave_bioabsorption", True,
-                "the shortwave bioabsorption (compute_shortwave_trcr) is not ported",
-                "config_use_shortwave_bioabsorption = .false.")
+                "check_column_package_configs stops v8.4.2: the shortwave bioabsorption needs the column "
+                "biogeochemistry (mpas_seaice_column.F:8159-8167)",
+                "config_use_shortwave_bioabsorption = .false. or config_use_column_biogeochemistry = .true.")
+    fix_grid = "shortwave_bio_grid" in fixes
+    if fix_grid and not (dedd and shortwave_zaerosols(c)):
+        _refuse("woof_v842_corrections", "shortwave_bio_grid",
+                "it corrects compute_shortwave_trcr's grid, which runs only with the delta-Eddington shortwave's "
+                "bioabsorption of the z-aerosols",
+                "config_use_shortwave_bioabsorption and config_use_zaerosols with config_shortwave_type = 'dEdd'")
+    if dedd and shortwave_zaerosols(c) and not fix_grid and dims["nIceLayers"] < dims.get("nBioLayers", 7):
+        _refuse("config_nIceLayers", dims["nIceLayers"],
+                "column_radiation passes verticalGrid (nIceLayers + 1 points) as compute_shortwave_trcr's "
+                "biology interface grid, which reads nBioLayers + 1 of them: past the array with fewer ice "
+                "layers than biology layers",
+                "config_nIceLayers >= nBioLayers, or the opt-in correction "
+                "woof_v842_corrections = ('shortwave_bio_grid',)")
     if calc_tsfc and not dedd and dims["nCategories"] > dims["nIceLayers"] and \
             "ccsm3_absorbed_solar_layers" not in cv.corrections(c):
         _refuse("config_nCategories", dims["nCategories"],
@@ -145,10 +186,13 @@ def refuse_state_mismatch(configs: dict, state: "cv.ColumnState") -> None:
 
 def module_source() -> str:
     from woof.hex.mpas_ice import rkind
+    from .column_bgc_v842 import zbgc_shared_source
     here = files("woof.hex.mpas_seaice")
     body = "\n".join(here.joinpath(name).read_text(encoding="utf-8")
                      for name in ("column_radiation_v842.cu", "column_dedd_v842.cu"))
-    return rkind.r8_trig_prelude() + cv.module_source() + "\n" + body
+    # remap_zbgc (compute_shortwave_trcr's) sized for the most ice layers
+    return (rkind.r8_trig_prelude() + f"#define COL_NILYR {cv.MAX_ICE_LAYERS}\n" + cv.module_source() + "\n"
+            + zbgc_shared_source() + "\n" + body)
 
 
 @lru_cache(maxsize=None)
@@ -269,8 +313,10 @@ def _radiation_dedd(pools: dict, configs: dict, state: "cv.ColumnState", initial
     coszen = cv._need(sw, "solarZenithAngleCosine", (n1,))
     snowfrac = cv._need(sw, "snowFractionCategory", cat)
     bio, nbio = _bio(pools, n1, ncat, dummy)
+    za = _zaero_optics(pools, c, d, dummy)
     flags = (int(cesm) | int(level) << 1 | int(topo) << 2 | int(bool(initialization)) << 3
-             | int(state.ktherm != 0) << 4 | int("dedd_zero_volume_ice" in cv.corrections(c)) << 5)
+             | int(state.ktherm != 0) << 4 | int("dedd_zero_volume_ice" in cv.corrections(c)) << 5
+             | int(bool(c.get("config_use_modal_aerosols", False))) << 6)
     par = cp.asarray(_dedd_parameters(c, day))
     orb = _orbit()
     args = (np.int32(ncat), np.int32(nil), np.int32(nsl), np.int32(nbio), np.int32(flags), np.int32(sec),
@@ -280,9 +326,40 @@ def _radiation_dedd(pools: dict, configs: dict, state: "cv.ColumnState", initial
             f["albedoIRDiffuseCategory"], f["surfaceShortwaveFlux"], f["interiorShortwaveFlux"],
             f["penetratingShortwaveFlux"], f["shortwaveLayerPenetration"], f["absorbedShortwaveIceLayer"],
             f["absorbedShortwaveSnowLayer"], f["bareIceAlbedoCategory"], f["snowAlbedoCategory"],
-            f["pondAlbedoCategory"], f["effectivePondAreaCategory"], snowfrac, dhs, bio)
+            f["pondAlbedoCategory"], f["effectivePondAreaCategory"], snowfrac, dhs, bio, *za)
     if n_solve:
         _function("seaice_column_radiation_dedd_v842")(_grid(n_solve), (_BLOCK,), args)
+
+
+def shortwave_zaerosols(configs: dict) -> bool:
+    """``dEdd_algae`` with ``tr_zaero``: the z-aerosols in the delta-Eddington
+    shortwave (``compute_shortwave_trcr`` and ``compute_dEdd``'s aerosol
+    optics)."""
+    c = configs
+    return bool(c["config_use_column_biogeochemistry"] and c.get(cv.VT_FLAG, False)
+                and c.get(cv.ZAERO_FLAG, False) and c.get("config_use_shortwave_bioabsorption", False))
+
+
+def _zaero_optics(pools: dict, configs: dict, d: dict, dummy) -> tuple:
+    """The kernel's z-aerosol arguments: nz (0 without them), nBioLayers, the
+    aerosols' tracer, the brine fraction, the shortwave and biology grids and
+    the aerosols pool's optics tables."""
+    if not shortwave_zaerosols(configs):
+        return (np.int32(0), np.int32(0)) + (dummy,) * 11
+    n1, ncat, nil, nbl, nz = d["nCells"] + 1, d["nCategories"], d["nIceLayers"], d["nBioLayers"], d["nzAerosols"]
+    need = cv._need
+    t, bgc, aer = pools["tracers"], pools["biogeochemistry"], pools["aerosols"]
+    # v8.4.2 passes verticalGrid as compute_shortwave_trcr's biology interface grid
+    # (mpas_seaice_column.F:2415); the correction shortwave_bio_grid passes interfaceBiologyGrid
+    grid = (need(bgc, "interfaceBiologyGrid", (nbl + 1,)) if "shortwave_bio_grid" in cv.corrections(configs)
+            else need(bgc, "verticalGrid", (nil + 1,)))
+    tables = [need(aer, k, (6, 3)) for k in ("aerosolMassExtinctionCrossSection", "aerosolSingleScatterAlbedo",
+                                             "aerosolAsymmetryParameter")]
+    tables += [need(aer, k, (10, 3)) for k in ("modalMassExtinctionCrossSection", "modalSingleScatterAlbedo",
+                                               "modalAsymmetryParameter")]
+    tables.append(need(aer, "modalBCabsorptionParameter", (8, 10, 3)))
+    return (np.int32(nz), np.int32(nbl), need(t, "verticalAerosolsConc", (n1, ncat, nz * (nbl + 3))),
+            need(t, "brineFraction", (n1, ncat, 1)), need(bgc, "verticalShortwaveGrid", (nil + 1,)), grid, *tables)
 
 
 def _bio(pools: dict, n1: int, ncat: int, dummy) -> tuple:
