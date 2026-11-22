@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 456,
+**Which keys a `[[domain]]` table may override.** Exactly these 457,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -407,6 +407,7 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
     gf_deep_rain_evaporation_booking  ysu_surface_heat_exner  woof_quirk_corrections
+    mynn_sfclay_psih_zolzt
     obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
     obstacle_drag_coefficient  obstacle_wall_z0  urban_param_file
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
@@ -607,8 +608,9 @@ corrections. The same key works in the MPAS config dicts, and the hex
 door takes it as `--quirk-corrections all`. `"all"` turns on:
 
 - WRF route (RunConfig): `gf_deep_rain_evaporation_booking = true`
-  (`cu_physics = 3`) and `ysu_surface_heat_exner = true`
-  (`bl_pbl_physics = 1`).
+  (`cu_physics = 3`), `ysu_surface_heat_exner = true`
+  (`bl_pbl_physics = 1`) and `mynn_sfclay_psih_zolzt = true`
+  (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
   stays off on the MPAS suite route, local time stepping, partial nest and
@@ -630,6 +632,13 @@ door takes it as `--quirk-corrections all`. `"all"` turns on:
   `basis_corrections` / `weak_corrections` names): `planar_metric_terms`
   and `periodic_local_coords` (variational basis; each acts only on a
   planar or periodic mesh) and `weak_ridge_delta` (weak stress divergence).
+
+`mynn_sfclay_psih_zolzt` (default `false`) is an opt-in correction to the
+MYNN surface layer's 2 m and 10 m diagnostics (`sf_sfclay_physics = 5`,
+`mynn_sfclay_variant = "wrf_461"`), per domain on the same terms. WRF's
+`module_sf_mynn.F` integrates that heat profile from `z0/L` while its log
+term starts at `zt`; with `true` it starts at `zt/L`. Off, the arithmetic
+is WRF's word for word.
 
 `obstacle_opt` (default `0`) resolves buildings and other obstacles on an
 LES or other high-resolution domain. It is woof's own option, not a WRF
