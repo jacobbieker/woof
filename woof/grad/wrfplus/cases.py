@@ -1296,3 +1296,54 @@ def km_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     sh = km_shapes(geom)
     return {n: np.ascontiguousarray(1e-2 * rng.standard_normal(sh[n]), dtype=dtype)
             for n in KM_ACTIVE}
+
+
+def hd_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .diffusion import HDGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0)
+    base.update(overrides)
+    return HDGeometry(**base)
+
+
+#: Row field scales (mean, noise) of wrf_diff_opt1_horizontal's cases.
+_HD_FIELD = {"u": (10.0, 5.0), "v": (-4.0, 5.0), "w": (0.0, 0.5), "t": (5.0, 2.0),
+             "s": (1.0e-2, 3.0e-3)}
+
+
+def hd_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of wrf_diff_opt1_horizontal: the row's field (winds of
+    10 m/s with 5 m/s noise, w of 0.5 m/s, theta - 300 of 5 K with 2 K
+    noise and an initial field within 1 K of it, a moisture-like scalar),
+    coefficients spread over 30-3000 m2/s, a column mass of 9e4 Pa with
+    500 Pa noise, map factors near 1, a nonzero starting tendency and the
+    half- (w: full-) level c1, c2 (``hybrid``: c1 < 1, c2 > 0)."""
+    from .diffusion import HD_ACTIVE, HD_STATE, hd_passive, hd_shapes
+    rng = np.random.default_rng(seed)
+    sh = hd_shapes(geom)
+    v = _vertical(geom.nz, rng, hybrid)
+    mean, noise = _HD_FIELD[geom.row]
+    out = {"field": mean + noise * rng.standard_normal(sh["field"]),
+           "xk": 10.0 ** rng.uniform(1.5, 3.5, sh["xk"]),
+           "mut": 9.0e4 + 500.0 * rng.standard_normal(sh["mut"]),
+           "tend": rng.standard_normal(sh["tend"])}
+    if geom.perturb:
+        out["base"] = out["field"] + rng.standard_normal(sh["base"])
+    if geom.stag == 3:
+        eta = v["znw"]
+        c1 = np.sqrt(np.clip(eta, 0.0, None)) if hybrid else np.ones(geom.nz + 1)
+        out["c1"], out["c2"] = c1, ((1.0 - c1) * 5000.0 if hybrid else np.zeros(geom.nz + 1))
+    else:
+        out["c1"], out["c2"] = v["c1h"], v["c2h"]
+    for n in ("msft", "msfu", "msfv"):
+        out[n] = 1.0 + 0.02 * rng.standard_normal(sh[n])
+    keep = HD_STATE + HD_ACTIVE + hd_passive(geom)
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def hd_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .diffusion import HD_ACTIVE, hd_shapes
+    rng = np.random.default_rng(seed)
+    sh = hd_shapes(geom)
+    scale = {"field": _HD_FIELD[geom.row][1] * 0.2, "xk": 10.0, "mut": 100.0}
+    return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in HD_ACTIVE}
