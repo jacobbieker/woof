@@ -28,3 +28,15 @@ def kmax_tier(nz: int) -> int:
     raise ValueError(
         f"QNSE/BouLac hold at most {DEEP_KMAX} levels per column; "
         f"this domain has {nz}")
+
+
+def tiered_kernel(module: str, func: str, define: str, nz: int):
+    """``module``'s ``func`` at the tier of an ``nz``-level column: the plain
+    loader (unchanged source) up to :data:`SHIPPED_KMAX`, the ``define`` =
+    :data:`DEEP_KMAX` build above it.  CuPy is imported only here."""
+    from woof.core.kernels import get_kernel, get_kernel_int_defines
+
+    tier = kmax_tier(nz)
+    if tier == SHIPPED_KMAX:
+        return get_kernel(module, func)
+    return get_kernel_int_defines(module, func, ((define, tier),))

@@ -1425,9 +1425,13 @@ Frames are linear in the tier and priced per domain by
 NVRTC 12.9) through the production loader at tiers 128 / 192 / 256:
 `qnsepbl_column` 9,232 / 13,840 / 18,448 B, `mfshconv_column` 15,360 /
 23,040 / 30,720 B (the widest), `boulac_column` 7,696 / 11,536 / 15,376 B,
-so the QNSE module grows by its widest kernel's 120 B per level and BouLac by
-60 B per level, and a 256-level run is priced at 32,256 B (QNSE, from the
-16,896 B row) and 15,888 B (BouLac, from the 8,208 B row).
+so on that card the QNSE module grows by its widest kernel's 120 B per level
+and BouLac by 60 B per level.  Those are the arrays one build keeps live; the
+shipped rows are maxima over cards and modes and two of them keep every
+array live (QNSE's 16,896 B = 132 x 128 is the strict sm_89 mass-flux frame,
+BouLac's 8,208 B = 64 x 128 + 16 is sm_120's), so preflight prices the full
+per-level array bytes, 132 B and 64 B: a 256-level run is priced at
+33,792 B (QNSE) and 16,400 B (BouLac).
 `tests/test_kernel_local_bounds.py::test_the_qnse_and_boulac_tier_frames_are_what_the_driver_reports`
 reads both tiers back off the driver; `tests/test_pbl_qnse_boulac_256_levels.py`
 runs a 256-level column to a 1 hPa top (finite, non-trivial), proves the

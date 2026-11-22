@@ -36,8 +36,8 @@ from __future__ import annotations
 import cupy as cp
 import numpy as np
 
-from woof.core.kernels import get_kernel, get_kernel_int_defines
-from woof.core.pbl_level_tiers import SHIPPED_KMAX, kmax_tier
+from woof.core.kernels import get_kernel
+from woof.core.pbl_level_tiers import tiered_kernel
 from woof.core.physics_inventory import (MYJ_BLOCK, MYJ_TILE_BLOCKS_PER_SM,
                                           MYJWS_SLOTS, myj_workspace_floats)
 from woof.core.state import DTYPE
@@ -274,10 +274,7 @@ def _qnse_kernel(func: str, nz: int):
     """``qnsepbl.cu``'s ``func`` at the ``QNSE_KMAX`` tier of an ``nz``
     column: the unchanged source up to 128 levels, its 256 tier above
     (woof.core.pbl_level_tiers)."""
-    tier = kmax_tier(nz)
-    if tier == SHIPPED_KMAX:
-        return get_kernel("qnsepbl", func)
-    return get_kernel_int_defines("qnsepbl", func, (("QNSE_KMAX", tier),))
+    return tiered_kernel("qnsepbl", func, "QNSE_KMAX", nz)
 
 
 def launch_qnse_pbl(columns, surface, state, tke, outputs, *,

@@ -35,8 +35,8 @@ from collections.abc import Mapping
 import cupy as cp
 import numpy as np
 
-from woof.core.kernels import get_kernel, get_kernel_int_defines
-from woof.core.pbl_level_tiers import SHIPPED_KMAX, kmax_tier
+from woof.core.kernels import get_kernel
+from woof.core.pbl_level_tiers import tiered_kernel
 from woof.core.state import DTYPE
 from woof.physics_vertical_contract import (
     BOULAC_VERTICAL_LEVEL_BOUNDS, outside_vertical_bounds,
@@ -148,10 +148,7 @@ def launch_boulac(columns: Mapping, surface: Mapping, tke, *, dt: float,
     blocks = (n + _TPB - 1) // _TPB
     # <= 128 levels compile the unchanged source; deeper columns its 256
     # tier (woof.core.pbl_level_tiers).
-    tier = kmax_tier(nz)
-    kernel = (get_kernel("boulac", "boulac_column") if tier == SHIPPED_KMAX
-              else get_kernel_int_defines("boulac", "boulac_column",
-                                          (("BOULAC_KMAX", tier),)))
+    kernel = tiered_kernel("boulac", "boulac_column", "BOULAC_KMAX", nz)
     kernel((blocks,), (_TPB,),
            tuple(column_arrays) + (tke,) + tuple(surface_arrays)
            + (frc, out["pblh"])

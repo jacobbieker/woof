@@ -3340,15 +3340,20 @@ from woof.core.wsm3_constants import wsm3_level_tier as _wsm3_level_tier
 # at QNSE_KMAX / BOULAC_KMAX 128, 192, 256: qnsepbl_column 9,232 / 13,840 /
 # 18,448 B (72 B per level), mfshconv_column 15,360 / 23,040 / 30,720 B (the
 # widest, 120 B per level), boulac_column 7,696 / 11,536 / 15,376 B (60 B per
-# level).  Each module is its shipped-tier row plus its widest kernel's slope
-# above 128, so 256 prices qnsepbl at 16,896 + 15,360 = 32,256 B and boulac
-# at 8,208 + 7,680 = 15,888 B.
+# level).  Those sm_86 default-build slopes are the LIVE arrays only; the
+# shipped rows are maxima over cards and modes, and two of them keep every
+# column array live: QNSE's 16,896 B row is the strict (GPUWM_WRF_EXACT)
+# sm_89 mass-flux frame, 16,896 = 132 x 128 (all 33 float arrays), and
+# BouLac's 8,208 B row is sm_120's, 8,208 = 64 x 128 + 16 (all 16).  So the
+# slope priced is the full per-level array bytes, 132 B (QNSE) and 64 B
+# (BouLac), never less than any build keeps live: 256 prices qnsepbl at
+# 16,896 + 16,896 = 33,792 B and boulac at 8,208 + 8,192 = 16,400 B.
 from woof.core.pbl_level_tiers import kmax_tier as _pbl_kmax_tier
 CONDITIONAL_COLUMN_TIERED_FRAMES = {
     "wsm3": (TieredKernelFrame("wsm3", "WSM3_KMAX", 64, 88), _wsm3_level_tier),
-    "qnsepbl": (TieredKernelFrame("qnsepbl", "QNSE_KMAX", 128, 120),
+    "qnsepbl": (TieredKernelFrame("qnsepbl", "QNSE_KMAX", 128, 132),
                 _pbl_kmax_tier),
-    "boulac": (TieredKernelFrame("boulac", "BOULAC_KMAX", 128, 60),
+    "boulac": (TieredKernelFrame("boulac", "BOULAC_KMAX", 128, 64),
                _pbl_kmax_tier),
 }
 

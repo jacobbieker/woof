@@ -91,6 +91,7 @@ def _run_qnse(cp, nz, mfshconv):
 
     columns, surface, state, tke, qfx = _qnse_inputs(cp, nz)
     surface["qfx"] = qfx
+    tke_in = np.asarray(cp.asnumpy(tke)).copy()
     mf_state = {"rc_mf": cp.zeros((nz, 1, NCOL), dtype=cp.float32)}
     mf_outputs = {n: cp.zeros((nz, 1, NCOL), dtype=cp.float32)
                   for n in MFSHCONV_OUTPUTS_3D}
@@ -103,6 +104,7 @@ def _run_qnse(cp, nz, mfshconv):
                         diagnostics=diag)
     result = _bits(out)
     result["tke"] = np.asarray(cp.asnumpy(tke)).copy()
+    result["tke_in"] = tke_in
     for name, array in state.items():
         result["state_" + name] = np.asarray(cp.asnumpy(array)).copy()
     if mfshconv:
@@ -134,10 +136,12 @@ def _run_boulac(cp, nz):
     from woof.core.boulac import launch_boulac
 
     columns, surface, tke = _boulac_inputs(cp, nz)
+    tke_in = np.asarray(cp.asnumpy(tke)).copy()
     out = launch_boulac(columns, surface, tke, dt=30.0, cp_air=1004.5,
                         g=9.81)
     result = _bits(out)
     result["tke"] = np.asarray(cp.asnumpy(tke)).copy()
+    result["tke_in"] = tke_in
     return result
 
 
@@ -149,12 +153,16 @@ def _check_xbackend(label, result):
     from woof import backend
 
     os.makedirs(directory, exist_ok=True)
-    mine = backend.active()
+    mine = backend.active()       # "cuda", "mlx" (Metal), "amd", ...
     np.savez(os.path.join(directory, f"{label}.{mine}.npz"), **result)
-    other = "cuda" if mine != "cuda" else "metal"
-    path = os.path.join(directory, f"{label}.{other}.npz")
-    if not os.path.exists(path):
-        return
+    others = sorted(name for name in os.listdir(directory)
+                    if name.startswith(f"{label}.") and name.endswith(".npz")
+                    and name != f"{label}.{mine}.npz")
+    for other in others:
+        _compare_xbackend(label, result, os.path.join(directory, other))
+
+
+def _compare_xbackend(label, result, path):
     with np.load(path) as theirs:
         for name in sorted(result):
             a, b = result[name], theirs[name]
@@ -162,7 +170,7 @@ def _check_xbackend(label, result):
                 continue
             scale = max(float(np.abs(a).max()), float(np.abs(b).max()), 1e-30)
             err = float(np.abs(a.astype(np.float64) - b).max()) / scale
-            assert err < 5e-3, f"{label}/{name}: CUDA vs Metal {err:.3e}"
+            assert err < 5e-3, f"{label}/{name}: vs {os.path.basename(path)} {err:.3e}"
 
 
 @pytest.mark.parametrize("mfshconv", [False, True])
@@ -171,7 +179,9 @@ def test_qnse_runs_a_256_level_column_to_a_1_hpa_top(mfshconv):
 
     out = _run_qnse(cp, DEEP, mfshconv)
     assert out["rublten"].shape == (DEEP, 1, NCOL)
-    _assert_ran(out, ("rublten", "rthblten", "exch_h", "el_myj", "tke"))
+    _assert_ran(out, ("rublten", "rthblten", "exch_h", "el_myj"))
+    # TKE is seeded >= 1e-4, so "not all zero" proves nothing: it must move.
+    assert np.any(out["tke"] != out["tke_in"])
     assert (out["pblh"] > 0).all()
     assert ((out["kpbl"] >= 1) & (out["kpbl"] < DEEP)).all()
     if mfshconv:
@@ -185,16 +195,16 @@ def test_qnse_256_tier_reproduces_the_unchanged_kernel(nz, mfshconv,
                                                       monkeypatch):
     import cupy as cp
 
-    from woof.core import myjpbl
+    from woof.core import pbl_level_tiers
 
     calls = []
-    real = myjpbl.kmax_tier
-    monkeypatch.setattr(myjpbl, "kmax_tier",
+    real = pbl_level_tiers.kmax_tier
+    monkeypatch.setattr(pbl_level_tiers, "kmax_tier",
                         lambda n: calls.append(real(n)) or real(n))
     shipped = _run_qnse(cp, nz, mfshconv)
     assert set(calls) == {SHIPPED}, "nz <= 128 must take the unchanged tier"
     _assert_ran(shipped, ("rublten", "rthblten", "exch_h"))
-    monkeypatch.setattr(myjpbl, "kmax_tier", lambda n: DEEP)
+    monkeypatch.setattr(pbl_level_tiers, "kmax_tier", lambda n: DEEP)
     deep = _run_qnse(cp, nz, mfshconv)
     _assert_bitwise(deep, shipped, f"QNSE_KMAX 128 -> 256 at nz={nz}")
 
@@ -204,7 +214,8 @@ def test_boulac_runs_a_256_level_column_to_a_1_hpa_top():
 
     out = _run_boulac(cp, DEEP)
     assert out["rublten"].shape == (DEEP, 1, NCOL)
-    _assert_ran(out, ("rublten", "rthblten", "tke"))
+    _assert_ran(out, ("rublten", "rthblten"))
+    assert np.any(out["tke"] != out["tke_in"])
     assert (out["pblh"] > 0).all()
     _check_xbackend("boulac", out)
 
@@ -213,15 +224,15 @@ def test_boulac_runs_a_256_level_column_to_a_1_hpa_top():
 def test_boulac_256_tier_reproduces_the_unchanged_kernel(nz, monkeypatch):
     import cupy as cp
 
-    from woof.core import boulac
+    from woof.core import pbl_level_tiers
 
     calls = []
-    real = boulac.kmax_tier
-    monkeypatch.setattr(boulac, "kmax_tier",
+    real = pbl_level_tiers.kmax_tier
+    monkeypatch.setattr(pbl_level_tiers, "kmax_tier",
                         lambda n: calls.append(real(n)) or real(n))
     shipped = _run_boulac(cp, nz)
     assert set(calls) == {SHIPPED}, "nz <= 128 must take the unchanged tier"
     _assert_ran(shipped, ("rublten", "rthblten"))
-    monkeypatch.setattr(boulac, "kmax_tier", lambda n: DEEP)
+    monkeypatch.setattr(pbl_level_tiers, "kmax_tier", lambda n: DEEP)
     deep = _run_boulac(cp, nz)
     _assert_bitwise(deep, shipped, f"BOULAC_KMAX 128 -> 256 at nz={nz}")

@@ -709,9 +709,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
     the 149-level case (nominal eta), MAD-WRF (species row) and any
     radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5
-    and KF-CuP rows state their layer limits. BouLac and QNSE PBL run to
-    256 levels (compile-time 128/256 tier; at 128 levels or fewer the
-    unchanged kernel, word for word).
+    and KF-CuP rows state their layer limits. BouLac and QNSE PBL now
+    admit 256 levels (compile-time 128/256 tier; at 128 levels or fewer
+    the unchanged kernel, word for word); their matrix rows still record
+    the old 128-level refusal until the 149-level hex case is re-run.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
