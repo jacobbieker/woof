@@ -3785,7 +3785,7 @@
    },
    {
     "file": "woof/core/kernels/mskf.cu",
-    "sha256": "e5596e0f0a59f848e3eb63fe1952a77d3ac10d5cefd4b1ab26e33daee10deac2"
+    "sha256": "28d338515dacf93c1b2664547feca66ae70f4f7083fb97c14b9fb0ef117a4708"
    },
    {
     "file": "woof/core/kernels/mskf_aerosol.cuh",
@@ -5727,7 +5727,7 @@
    },
    {
     "file": "woof/core/kf.py",
-    "sha256": "702211abd9dc8f644637c98cefffe4a10230c730de252e9a40514d22ceb37aaa"
+    "sha256": "613245836d85082d39db9f2d1d0652bfc5f703b0a0c3492fb7ec3e9c1a18dc12"
    },
    {
     "file": "woof/core/microphysics.py",
@@ -18517,7 +18517,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "2d17b688693ae69658f4eb305ea2f2f35121718b3247a0f8bd01bdeb5eb64414",
+    "sha256": "f8bc304c8617ec9979d3bf3bf06c464c6288f753944e9e58a0cbebdd1bece769",
     "sites": {
      "100": 724
     }
@@ -18549,7 +18549,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "156132995e849e2fcdd8ee89e0a8c43d81198cf44ea54fef6058046ab47e50fd"
+   "source_sha256": "31a67aeb18faaa6bd37d4df7b09b65016373a70668f09230a13e7ddba82d4e0f"
   },
   "kernels:mskf_aerosol_replay": {
    "assessment": "static_diagnostic_only",
