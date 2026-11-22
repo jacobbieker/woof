@@ -17,7 +17,7 @@ THE BREAKAGES THESE PREVENT
    switch or coefficient off, mixing disabled, del4's masked edge levels.
 4. A gate that cannot fail: a regrouped coefficient or flux must produce
    mismatches.
-5. Redi isoneutral mixing silently skipped: it is refused by name.
+5. Redi isoneutral mixing is graded in tests/test_mpas_ocean_redi_parity.py.
 """
 from __future__ import annotations
 
@@ -66,11 +66,10 @@ def test_fixture_covers_the_branches(precision):
     assert any(not on for _, _, on in seen)
 
 
-def test_redi_is_refused_by_name():
+def test_redi_is_no_longer_refused():
     from woof.hex.mpas_ocean import tracer_hmix_v842 as th
     th.check_config(dict(oo.BASE_CONFIG))
-    with pytest.raises(ConfigurationRefusal, match="config_use_standardGM"):
-        th.check_config(dict(oo.BASE_CONFIG, config_use_standardGM=True))
+    th.check_config(dict(oo.BASE_CONFIG, config_use_standardGM=True))
 
 
 @requires_gpu
