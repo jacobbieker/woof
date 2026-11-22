@@ -33,10 +33,13 @@ PERIODIC = [(dict(MIX), 1, 2),
             (dict(MIX, _moist=1, _msf=1, hybrid_opt=2), 1, 2),
             (dict(MIX, _moist=1), 2, 0)]
 # specified (warm-up, steps, map factors, halo shift, moist): a warm step
-# and a cold mapped chain with the halo off the ring; moist (qv's tables
-# attached): a warm step and a cold mapped one
-SPECIFIED = [(2, 1, 0, 0.0, 0), (0, 2, 1, 3.0, 0), (2, 1, 0, 0.0, 1), (0, 1, 1, 3.0, 1)]
-NMOIST = sum(1 for o, _, _ in PERIODIC if o.get("_moist")) + sum(c[4] for c in SPECIFIED)
+# and a cold mapped chain with the halo off the ring; moist with qv's
+# tables (1): a warm step and a cold mapped chain of two; moist without
+# them (2, qv's held source is its mixing row): a warm step
+SPECIFIED = [(2, 1, 0, 0.0, 0), (0, 2, 1, 3.0, 0), (2, 1, 0, 0.0, 1), (0, 2, 1, 3.0, 1),
+             (2, 1, 0, 0.0, 2)]
+NMOIST = (sum(1 for o, _, _ in PERIODIC if o.get("_moist"))
+          + sum(1 for c in SPECIFIED if c[4]))
 
 _PERIODIC_LOOP = f'''
 def cases():
@@ -49,7 +52,8 @@ def cases():
 _SPECIFIED_LOOP = f'''
 def cases():
     for i, (warm, nstep, msf, shift, moist) in enumerate({SPECIFIED!r}):
-        cfg, state = build(warm, msf, shift, moist=moist, diff_opt=1, km_opt=4)
+        cfg, state = build(warm, msf, shift, moist=int(moist > 0),
+                           drop=("qv",) if moist == 2 else (), diff_opt=1, km_opt=4)
         geoms = M.step_geometries(state, cfg, nstep)
         IN, PAR = M.step_inputs(geoms[0]), M.step_parameters(geoms[0])
         yield (f"specified{{i}}", cfg, state, geoms, IN, PAR,
@@ -92,7 +96,8 @@ for key, cfg, state, geoms, IN, PAR, PROG in cases():
 def test_mixing_step_reproduces_strict_primal_words(backend, tmp_path):
     """The binary32 base is dycore.step's strict step with diff_opt 1 /
     km_opt 4 word for word, on every input and the scratch the next step
-    reads; the same step without the mixing moves u, v, w and theta."""
+    reads; the same step without the mixing moves u, v, w and theta, and
+    on a moist state each species."""
     out = _both(backend, _WORDS, tmp_path)
     nomix = {k: out.pop(k) for k in list(out) if k.startswith("nomix/")}
     ncase = len(PERIODIC) + len(SPECIFIED)

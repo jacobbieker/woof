@@ -52,15 +52,14 @@ BACKENDS = [pytest.param("host", marks=pytest.mark.skipif(not HAVE_CXX, reason="
             pytest.param("cuda", marks=pytest.mark.skipif(not _has_cuda(), reason="no CUDA card")),
             pytest.param("mlx", marks=pytest.mark.skipif(not _has_metal(), reason="no Metal"))]
 
-# periodic; map factors; a periodic held source (a mixing row); specified
-# with and without the held tendency
+# periodic; map factors; specified with and without the held tendency
 # (one-point and two-point rings); every h order; one level and the
-# 7-point minimum of a bounded axis.
+# 7-point minimum of a bounded axis; a periodic held source (a mixing row).
 CONFIGS = {
-    "su": [dict(), dict(has_msf=1), dict(held=1, has_msf=1), dict(spec=1),
-           dict(spec=1, held=1, has_msf=1),
+    "su": [dict(), dict(has_msf=1), dict(spec=1), dict(spec=1, held=1, has_msf=1),
            dict(spec=1, held=1, spec_zone=2, horder=3, vorder=2), dict(horder=4, vorder=4),
-           dict(horder=6, vorder=6, has_msf=1), dict(nz=1, ny=7, nx=7, spec=1, held=1)],
+           dict(horder=6, vorder=6, has_msf=1), dict(nz=1, ny=7, nx=7, spec=1, held=1),
+           dict(held=1, has_msf=1)],
     "sf": [dict(), dict(nsub=1), dict(nz=1, ny=1, nx=1, nsub=3)],
 }
 

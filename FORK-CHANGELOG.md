@@ -62,8 +62,8 @@ New:
   (`woof.grad.wrfplus.diffusion.hd_tl/hd_ad`): u, v, w, theta (its
   departure from the initial field) and scalar tendencies of the field,
   the coefficient and the column mass, tangent-linear and adjoint,
-  checked against WRFPLUS 4.7.1. The step binding above binds the u, v,
-  w and theta rows; the scalar row waits for the moist mixing rows.
+  checked against WRFPLUS 4.7.1. The step bindings above bind them: the
+  u, v, w and theta rows, and the scalar row for qv, qc and qr.
 
 - The WRF dry-step adjoint gains the diff_opt 1 / km_opt 4 coefficients
   (`woof.grad.wrfplus.diffusion`): the deformation and `smag2d_km`'s

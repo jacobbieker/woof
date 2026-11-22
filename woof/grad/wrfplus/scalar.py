@@ -148,10 +148,11 @@ def sumflux_finish_ad(adj_state, traj, adj, geom: SumfluxGeometry) -> None:
 class ScalarGeometry:
     """One species' stage update: the grid, ``rdx``/``rdy``, the update's
     ``dt`` (the primal's ``DTYPE(nsub*dtau)``), the advection's orders
-    and lateral options, the map factor switch and, on a specified
-    domain, the ring width, and whether the species has a held source
-    (``held``: qv's boundary tendency with a table, or the species'
-    diff_opt 1 mixing row, which moist._wrf_scalar_source holds)."""
+    and lateral options, the map factor switch, the ring width on a
+    specified domain, and whether the species has a held source
+    (``held``, on any domain: qv's boundary tendency with a table, or the
+    species' diff_opt 1 mixing row, which moist._wrf_scalar_source
+    holds)."""
     nz: int
     ny: int
     nx: int
