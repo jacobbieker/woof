@@ -805,6 +805,14 @@ extern "C" __global__ void mfshconv_column(
         emf[jk + 1] = FMUL(FMUL(frac[jk + 1], sqrtf(w2[jk + 1])), s2[jk + 1]);
     }
     if (tile_mode == 1) {
+#ifdef __WOOF_METAL__
+        // Metal has no __activemask.  The tile reduction is an integer
+        // maximum folded into *tile_top by atomicMax, which no order of
+        // lanes changes, so each lane posts its own level directly and
+        // tile_top ends on the same word the CUDA warp reduction leaves.
+        atomicMax(tile_top, processed);
+        return;
+#else
         const unsigned mask = __activemask();
         const int lane = threadIdx.x & 31;
         for (int offset = 16; offset; offset >>= 1) {
@@ -814,6 +822,7 @@ extern "C" __global__ void mfshconv_column(
         }
         if (lane == 0) atomicMax(tile_top, processed);
         return;
+#endif
     }
     emf[0] = 0.0f;                                       // :1599-1601
     emf[iku - 1] = 0.0f;
