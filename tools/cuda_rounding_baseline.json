@@ -3673,7 +3673,7 @@
    },
    {
     "file": "woof/core/kernels/mynn_surface.cu",
-    "sha256": "a02979c2ef27ce361f092675cef0d55705be6ff3f298a04b7e969b1c9694bdd9"
+    "sha256": "2e8b7cb344da2eb74e68893f8921d7140c534d3ed311f471abca8c6580b7a7c0"
    },
    {
     "file": "woof/core/kernels/mynn_surface_libm.cuh",
@@ -5607,7 +5607,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "73e76370cd75961e4ef72bd800cd0dfd0339963bac36e2e759003f61d3142c7f"
+    "sha256": "6e9d25c14764e1a3b7e5d478222adc9250861f0f0c39478eead0daa5f784cb3e"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5707,7 +5707,7 @@
    },
    {
     "file": "woof/core/spp_kernel_sources.py",
-    "sha256": "34d047edeb467faf3e855a243ff46d5c64a8a9b2e349d8c033227825a4dacb33"
+    "sha256": "949c752131a7fbb6e69ccf48ee72c31e5cb213c85b6182f7258fec00846de646"
    },
    {
     "file": "woof/core/storm_tracking.py",
@@ -18270,13 +18270,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "4136cc9112e5151e6091a29c60284d701bfaba4a37e7683720925ed9601bdd21",
+    "sha256": "e0a540d87472166d49092c03bfa258f39cd91374a6a43fb57efc6aac20069410",
     "sites": {
      "100": 494
     }
    },
    "native_differences": {
-    "sha256": "94a927c31c3908ecbd212b290ff195df553db6a2857ea6d88a638e375a14be37",
+    "sha256": "bc9ab6fcbf1487740faa6e52d5213b217d2c170122aa810c132542b62bc14771",
     "sites": {
      "100": 378
     }
@@ -18300,7 +18300,56 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "a9abd5020db8a204e3f538e9af69ebb903c2b329c56c258d5286bfdf18cc5ddf"
+   "source_sha256": "179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1"
+  },
+  "kernels:mynn_surface[MYNN_SL_PSIH_ZOLZT=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "924fdb4903a3ef8325193799cbd513742b4674b42cd093b4f420ab03f44502fc",
+    "sites": {
+     "100": 494
+    }
+   },
+   "native_differences": {
+    "sha256": "f13f9e3bdb7a68f65c207a8c95c50c53574c86e44ca07f840ecac8b8b3069510",
+    "sites": {
+     "100": 378
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "c3618cbba3fb6a0befb3ac9bb8358bb1e4995ea0ad5d1bf4e7b0e89989abd378"
   },
   "kernels:native_surface_diagnostics": {
    "assessment": "static_diagnostic_only",
@@ -31351,13 +31400,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "4db697f92521e2c8c4161d0eb79c59e78451c09990c343b7ec47ed00195c6d00",
+    "sha256": "df129a738b441097dba4ff4d83bb4cdb29ec98f942a58cf80f914d22daaab612",
     "sites": {
      "100": 549
     }
    },
    "native_differences": {
-    "sha256": "1f27f53124068857edc3a5417fa7330b31c87e3beec52329b74ae4e43575bb56",
+    "sha256": "c15c901fd1717c955a097e98a40bd12a46a86dade723cf575834d5f99be6870a",
     "sites": {
      "100": 632
     }
@@ -31379,7 +31428,54 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "122dd59495c7f40fd44ec7ca97969051d98c82e08ca1d08fabd4c602e7e46b42"
+   "source_sha256": "b2745d3f2bcf8eee60ac158316f2c9fd01386d6e90f07382302662dc74e9f6ab"
+  },
+  "spp:mynn_surface[capacity=40,MYNN_SL_PSIH_ZOLZT=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "bd08031c6b9e417f432eb79d60b626260013af1fda9751c8775f373ef13cbd3e",
+    "sites": {
+     "100": 549
+    }
+   },
+   "native_differences": {
+    "sha256": "601630da161fafbad2fb37f700ed0acea1b64448c38890b5b6a8a234d121e54a",
+    "sites": {
+     "100": 632
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "8f3ebf378093a4773083454163370bcdada40a8fbfd6971c58cfdddac537a6ac"
   }
  }
 }

@@ -445,13 +445,14 @@ class PackedProductionPhysics:
         outputs = self._gather_maps(namespace + ":outputs", [vars(args[3]) for args, _, _ in requests], names=MYNN_SURFACE_OUTPUTS)
         mol = self._gather(namespace, "mol", [args[1] for args, _, _ in requests])
         ustm = self._gather(namespace, "ustm", [args[2] for args, _, _ in requests])
-        knobs = self._common_kwargs(requests, ("dx", "itimestep", "isfflx", "variant"))
+        knobs = self._common_kwargs(requests, ("dx", "itimestep", "isfflx", "variant", "psih_zolzt"))
         if ordinal not in self._components:
             cfg = self.configs[0]
             self._components[ordinal] = prepare_mynn_surface_column_batch(inputs, mol=mol, ustm=ustm,
                 outputs=outputs, members=self.members, ny=cfg.ny, nx=cfg.nx,
                 available_bytes=self.available_bytes - self._priced, dx=knobs["dx"],
-                isfflx=knobs["isfflx"], variant=knobs["variant"], array_module=self.xp)
+                isfflx=knobs["isfflx"], variant=knobs["variant"],
+                psih_zolzt=bool(knobs["psih_zolzt"]), array_module=self.xp)
         self._components[ordinal](itimestep=knobs["itimestep"])
         self._scatter(outputs, [vars(args[3]) for args, _, _ in requests])
         return (None,) * self.members

@@ -269,7 +269,9 @@ def test_spp_specializations_leave_default_compiler_sources_frozen():
             # test_mp8_frozen.FROZEN_MODULE_DIGESTS.
             # RE-PINNED for 3.0.0: 51bb93111ee reworded one comment.
             # Previously 5b294157.
-            "mynn_surface": "a9abd5020db8a204e3f538e9af69ebb903c2b329c56c258d5286bfdf18cc5ddf"}
+            # RE-PINNED by the quirk pass: the MYNN_SL_PSIH_ZOLZT block, off
+            # in the default string.  Previously a9abd502.
+            "mynn_surface": "179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1"}
     for name, pin in pins.items():
         baseline = module_source(name)
         assert hashlib.sha256(baseline.encode()).hexdigest() == pin
