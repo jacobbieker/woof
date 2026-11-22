@@ -614,6 +614,26 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
 - **Corrections of WRF/MPAS quirks, each opt-in and off by default.**
   The default stays word for word with the WRF 4.7.1 / MPAS v8.4.2
   oracle; each key changes only the arithmetic it names.
+  - `woof_quirk_corrections = "all"` turns every correction below on at
+    once, each where its scheme runs (default `"none"`; the hex door takes
+    `--quirk-corrections all`). A key set against it is refused by name,
+    and so is a correction its own key refuses in that combination. It
+    turns on `gf_deep_rain_evaporation_booking`,
+    `ysu_surface_heat_exner` and `mynn_sfclay_psih_zolzt` (WRF route); `--undriven-species-boundary
+    wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
+    flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
+    `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
+    `woof_redi_k33` (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
+    `woof_simple_velocity_bed`, `woof_statistics_extrema` and
+    `woof_analysis_empty` (MALI); the MPAS-Seaice column's
+    `set_sfcflux_order`, `ice_velocity_at_cell`,
+    `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
+    `zbgc_c2n_proteins`, `bgc_inactive_diagnostics` and `zsal_solve`;
+    and the MPAS-Seaice velocity solver's `planar_metric_terms`,
+    `periodic_local_coords` and `weak_ridge_delta`.
+    The list and its values are in
+    [CONFIGURATION.md](docs/public/CONFIGURATION.md) and
+    `woof/quirk_corrections.py`.
   - `ysu_surface_heat_exner` (YSU, `bl_pbl_physics = 1`, WRF route). WRF's YSU adds the surface sensible heat flux to
     potential temperature as if it were a temperature flux and converts
     back with pi, so the column gets `HFX*pi` instead of `HFX`. That loses
@@ -621,6 +641,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     uses `HFX/pi(1)` (refused with BEP/BEM, where YSU takes the urban
     heat sources instead). Checked by the column heat budget, not yet scored
     against observations; the hex MPAS-suite YSU does not carry it yet.
+  - `mynn_sfclay_psih_zolzt` (MYNN surface layer, `sf_sfclay_physics = 5`,
+    WRF route). WRF integrates the 2 m and 10 m heat profile from `z0/L`
+    while its log term and the first-level `psih` start at the thermal
+    roughness `zt/L`. The option uses `zt/L` throughout. It moves only the
+    T2/Q2 diagnostics; checked against the corrected CPU reference, not yet
+    scored against observations.
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
@@ -1290,7 +1316,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
   `wrf_diff_opt1_km4` word for word, and they match WRFPLUS to about
   4e-16, except at the top level of a periodic seam, where WRF keeps a
-  cold-zero slope and woof the true one.
+  cold-zero slope and woof the true one. The rows that use them
+  (`hd_tl/hd_ad`: WRF `horizontal_diffusion` for u, v, w and scalars,
+  `horizontal_diffusion_3dmp` for theta) reproduce woof's strict
+  `wrf_diff_opt1_horizontal` and match WRFPLUS to about 1e-16.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8

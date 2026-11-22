@@ -347,7 +347,13 @@ extern "C" __global__ void df_tl(wreal* __restrict__ d11, wreal* __restrict__ d2
 // at level L is read at the levels L-1..L+1, by level 0 when L <= 2 (the
 // bottom extrapolation reads levels 0-2) and by level nz-1 when
 // L >= nz-2 (the lid's reads nz-2..nz-1); a ph' word at w level L by
-// levels L-1 and L.  df_cand drops repeats.
+// levels L-1 and L.  df_cand drops repeats.  Within that window each
+// term is gathered only from the outputs that read the word (tested on
+// the output's coordinate, so a short periodic axis whose images repeat
+// still finds it): defor11 from columns i-1..i for a u face, defor22
+// from rows j-1..j for a v face; defor12 from face i (u) or j (v) and
+// the next row (u), column (v) or both (ph'), plus a bounded axis's
+// copied outer face 0 for index 1.
 extern "C" __global__ void df_ad(const wreal* __restrict__ a11, const wreal* __restrict__ a22,
                                  const wreal* __restrict__ a12, const wreal* __restrict__ u,
                                  const wreal* __restrict__ v, const wreal* __restrict__ php,
@@ -379,10 +385,14 @@ extern "C" __global__ void df_ad(const wreal* __restrict__ a11, const wreal* __r
     // 0, so its adjoint gains nothing.
     if ((s.which == DF_U && !bx && i == nx) || (s.which == DF_V && !by && j == ny)) return;
     int ph = s.which == DF_PH;
-    int levels[5] = {k - 1, k, ph ? -1 : k + 1, (!ph && k <= 2) ? 0 : -1,
-                     (!ph && k >= nz - 2) ? nz - 1 : -1};
+    // the lid's reads (nz-2..nz-1) already lie in k..k+1; the bottom
+    // extrapolation adds level 0 only for k == 2
+    int levels[4] = {k - 1, k, ph ? -1 : k + 1, (!ph && k == 2) ? 0 : -1};
+    // the previous and next images of i and j on their axes
+    int ip = bx ? i - 1 : df_per(i - 1, nx), inx = bx ? i + 1 : df_per(i + 1, nx);
+    int jp = by ? j - 1 : df_per(j - 1, ny), jnx = by ? j + 1 : df_per(j + 1, ny);
     wreal acc = (wreal)0;
-    for (int a = 0; a < 5; ++a) {
+    for (int a = 0; a < 4; ++a) {
         int ko = levels[a];
         if (ko < 0 || ko >= nz) continue;
         bool seen = false;
@@ -397,11 +407,18 @@ extern "C" __global__ void df_ad(const wreal* __restrict__ a11, const wreal* __r
                 size_t o = R3(ko, jo, io, ny, nx);
                 // defor11 reads no v and only row j, defor22 no u and
                 // only column i
-                if (a11[o] != (wreal)0 && s.which != DF_V && jo == j)
+                if (a11[o] != (wreal)0 && s.which != DF_V && jo == j
+                    && (s.which == DF_PH || io == i || io == ip))
                     acc = acc + a11[o] * df_d11(s, ko, jo, io).d;
-                if (a22[o] != (wreal)0 && s.which != DF_U && io == i)
+                if (a22[o] != (wreal)0 && s.which != DF_U && io == i
+                    && (s.which == DF_PH || jo == j || jo == jp))
                     acc = acc + a22[o] * df_d22(s, ko, jo, io).d;
-                if (a12[o] != (wreal)0) acc = acc + a12[o] * df_d12(s, ko, jo, io).d;
+                bool x12 = io == i || (bx && i == 1 && io == 0)
+                           || (s.which != DF_U && io == inx);
+                bool y12 = jo == j || (by && j == 1 && jo == 0)
+                           || (s.which != DF_V && jo == jnx);
+                if (a12[o] != (wreal)0 && x12 && y12)
+                    acc = acc + a12[o] * df_d12(s, ko, jo, io).d;
             }
         }
     }
@@ -552,4 +569,291 @@ extern "C" __global__ void km_zero2(wreal* __restrict__ a, wreal* __restrict__ b
     if (t >= (size_t)n) return;
     a[t] = (wreal)0;
     b[t] = (wreal)0;
+}
+
+// ============================================ horizontal_diffusion (rows)
+//
+// woof wrf_diff_opt1_horizontal (diff_opt1.cu): WRF horizontal_diffusion
+// for the u (stag 1), v (2), w (3) and scalar (0) rows and
+// horizontal_diffusion_3dmp (0 with perturb: theta minus its initial
+// field), coordinate-surface fluxes with the hybrid mass c1 mut + c2.
+// The tendency accumulates (tendency += ...), so its adjoint passes
+// through and is not consumed.  Active: the field, the coefficient
+// (xkmh or xkhh) and mut; passive: c1, c2, the base field and the map
+// factors.  WRFPLUS 4.7.1's G_/A_HORIZONTAL_DIFFUSION(_3DMP) take mut as
+// the mass (no c1/c2), so the oracle cases use c1 = 1, c2 = 0.
+
+#define HD_F 1
+#define HD_K 2
+#define HD_MU 3
+
+static __device__ __forceinline__ Dl operator+(Dl a, wreal b) { return dl(a.v + b, a.d); }
+
+struct HdSrc {
+    const wreal* f;
+    const wreal* fd;
+    const wreal* km;
+    const wreal* kmd;
+    const wreal* mu;
+    const wreal* mud;
+    const wreal* c1;
+    const wreal* c2;
+    const wreal* base;
+    const wreal* msft;
+    const wreal* msfu;
+    const wreal* msfv;
+    wreal rdx, rdy;
+    int nz, ny, nx, stag, bx, by, perturb;
+    int tl, which;
+    size_t at;
+};
+
+static __device__ __forceinline__ Dl hd_in(const HdSrc& s, int id, const wreal* a,
+                                           const wreal* ad, size_t at)
+{
+    wreal d = s.tl ? ad[at] : ((s.which == id && s.at == at) ? (wreal)1 : (wreal)0);
+    return dl(a[at], d);
+}
+
+// d1index: clamped on a bounded axis, periodic otherwise
+static __device__ __forceinline__ int hd_ix(int n, int size, int bounded)
+{
+    return bounded ? max(0, min(n, size - 1)) : df_per(n, size);
+}
+
+static __device__ __forceinline__ Dl hd_mass(const HdSrc& s, int k, int j, int i)
+{
+    size_t at = (size_t)hd_ix(j, s.ny, s.by) * s.nx + hd_ix(i, s.nx, s.bx);
+    return s.c1[k] * hd_in(s, HD_MU, s.mu, s.mud, at) + s.c2[k];
+}
+
+static __device__ __forceinline__ Dl hd_k(const HdSrc& s, int k, int j, int i)
+{
+    size_t at = R3(max(0, min(k, s.nz - 1)), hd_ix(j, s.ny, s.by), hd_ix(i, s.nx, s.bx),
+                   s.ny, s.nx);
+    return hd_in(s, HD_K, s.km, s.kmd, at);
+}
+
+static __device__ __forceinline__ Dl hd_f(const HdSrc& s, int k, int j, int i)
+{
+    int ii = s.stag == 1 ? (s.bx ? max(0, min(i, s.nx)) : df_per(i, s.nx)) : hd_ix(i, s.nx, s.bx);
+    int jj = s.stag == 2 ? (s.by ? max(0, min(j, s.ny)) : df_per(j, s.ny)) : hd_ix(j, s.ny, s.by);
+    return hd_in(s, HD_F, s.f, s.fd, R3(k, jj, ii, s.ny + (s.stag == 2), s.nx + (s.stag == 1)));
+}
+
+static __device__ __forceinline__ wreal hd_b(const HdSrc& s, int k, int j, int i)
+{
+    return s.base[R3(k, hd_ix(j, s.ny, s.by), hd_ix(i, s.nx, s.bx), s.ny, s.nx)];
+}
+
+static __device__ __forceinline__ wreal hd_map(const HdSrc& s, int stagger, int j, int i)
+{
+    int width = s.nx + (stagger == 1);
+    int ii = stagger == 1 && s.bx ? max(0, min(i, s.nx)) : hd_ix(i, s.nx, s.bx);
+    int jj = stagger == 2 && s.by ? max(0, min(j, s.ny)) : hd_ix(j, s.ny, s.by);
+    return (stagger == 1 ? s.msfu : stagger == 2 ? s.msfv : s.msft)[(size_t)jj * width + ii];
+}
+
+static __device__ __forceinline__ Dl hd_four(Dl a, Dl b, Dl c, Dl d)
+{
+    return (wreal)0.25 * (((a + b) + c) + d);
+}
+
+static __device__ __forceinline__ Dl hd_delta(const HdSrc& s, int k, int j1, int i1, int j0,
+                                              int i0)
+{
+    Dl v = hd_f(s, k, j1, i1) - hd_f(s, k, j0, i0);
+    if (s.perturb) v = dl((v.v - hd_b(s, k, j1, i1)) + hd_b(s, k, j0, i0), v.d);
+    return v;
+}
+
+// The primal's increment at output (k, j, i), 0 off its loop.
+static __device__ Dl hd_point(const HdSrc& s, int k, int j, int i)
+{
+    const int st = s.stag;
+    if (st == 3 && (k == 0 || k == s.nz)) return dl((wreal)0, (wreal)0);
+    if (s.bx && (i == 0 || i >= s.nx - (st != 1))) return dl((wreal)0, (wreal)0);
+    if (s.by && (j == 0 || j >= s.ny - (st != 2))) return dl((wreal)0, (wreal)0);
+    Dl xm, xp, ym, yp;
+    if (st == 1) {
+        xm = (hd_mass(s, k, j, i - 1) * hd_k(s, k, j, i - 1)) * s.rdx;
+        xp = (hd_mass(s, k, j, i) * hd_k(s, k, j, i)) * s.rdx;
+        ym = (hd_four(hd_mass(s, k, j, i), hd_mass(s, k, j - 1, i), hd_mass(s, k, j - 1, i - 1),
+                      hd_mass(s, k, j, i - 1))
+              * hd_four(hd_k(s, k, j, i), hd_k(s, k, j - 1, i), hd_k(s, k, j - 1, i - 1),
+                        hd_k(s, k, j, i - 1))) * s.rdy;
+        yp = (hd_four(hd_mass(s, k, j, i), hd_mass(s, k, j + 1, i), hd_mass(s, k, j + 1, i - 1),
+                      hd_mass(s, k, j, i - 1))
+              * hd_four(hd_k(s, k, j, i), hd_k(s, k, j + 1, i), hd_k(s, k, j + 1, i - 1),
+                        hd_k(s, k, j, i - 1))) * s.rdy;
+    } else if (st == 2) {
+        xm = (hd_four(hd_mass(s, k, j, i), hd_mass(s, k, j - 1, i), hd_mass(s, k, j - 1, i - 1),
+                      hd_mass(s, k, j, i - 1))
+              * hd_four(hd_k(s, k, j, i), hd_k(s, k, j - 1, i), hd_k(s, k, j - 1, i - 1),
+                        hd_k(s, k, j, i - 1))) * s.rdx;
+        xp = (hd_four(hd_mass(s, k, j, i), hd_mass(s, k, j - 1, i), hd_mass(s, k, j - 1, i + 1),
+                      hd_mass(s, k, j, i + 1))
+              * hd_four(hd_k(s, k, j, i), hd_k(s, k, j - 1, i), hd_k(s, k, j - 1, i + 1),
+                        hd_k(s, k, j, i + 1))) * s.rdx;
+        // WRF v4.7.1's coordinate-v meridional row has no dry mass
+        ym = hd_k(s, k, j - 1, i) * s.rdy;
+        yp = hd_k(s, k, j, i) * s.rdy;
+    } else if (st == 3) {
+        xm = (hd_four(hd_mass(s, k, j, i), hd_mass(s, k, j, i - 1), hd_mass(s, k, j, i),
+                      hd_mass(s, k, j, i - 1))
+              * hd_four(hd_k(s, k, j, i), hd_k(s, k, j, i - 1), hd_k(s, k - 1, j, i),
+                        hd_k(s, k - 1, j, i - 1))) * s.rdx;
+        xp = (hd_four(hd_mass(s, k, j, i + 1), hd_mass(s, k, j, i), hd_mass(s, k, j, i + 1),
+                      hd_mass(s, k, j, i))
+              * hd_four(hd_k(s, k, j, i + 1), hd_k(s, k, j, i), hd_k(s, k - 1, j, i + 1),
+                        hd_k(s, k - 1, j, i))) * s.rdx;
+        wreal m0 = hd_map(s, 2, j, i), m1 = hd_map(s, 2, j + 1, i);
+        ym = ((m0 * wdiv((wreal)1, m0))
+              * hd_four(hd_mass(s, k, j, i), hd_mass(s, k, j - 1, i), hd_mass(s, k, j, i),
+                        hd_mass(s, k, j - 1, i)))
+             * hd_four(hd_k(s, k, j, i), hd_k(s, k, j - 1, i), hd_k(s, k - 1, j, i),
+                       hd_k(s, k - 1, j - 1, i));
+        ym = ym * s.rdy;
+        yp = ((m1 * wdiv((wreal)1, m1))
+              * hd_four(hd_mass(s, k, j + 1, i), hd_mass(s, k, j, i), hd_mass(s, k, j + 1, i),
+                        hd_mass(s, k, j, i)))
+             * hd_four(hd_k(s, k, j + 1, i), hd_k(s, k, j, i), hd_k(s, k - 1, j + 1, i),
+                       hd_k(s, k - 1, j, i));
+        yp = yp * s.rdy;
+    } else {
+        xm = ((((wreal)0.5 * (hd_k(s, k, j, i) + hd_k(s, k, j, i - 1))) * (wreal)0.5)
+              * (hd_mass(s, k, j, i) + hd_mass(s, k, j, i - 1))) * s.rdx;
+        xp = ((((wreal)0.5 * (hd_k(s, k, j, i + 1) + hd_k(s, k, j, i))) * (wreal)0.5)
+              * (hd_mass(s, k, j, i + 1) + hd_mass(s, k, j, i))) * s.rdx;
+        wreal m0 = hd_map(s, 2, j, i), m1 = hd_map(s, 2, j + 1, i);
+        ym = (((((m0 * wdiv((wreal)1, m0)) * (wreal)0.5)
+                * (hd_k(s, k, j, i) + hd_k(s, k, j - 1, i))) * (wreal)0.5)
+              * (hd_mass(s, k, j, i) + hd_mass(s, k, j - 1, i)));
+        ym = ym * s.rdy;
+        yp = (((((m1 * wdiv((wreal)1, m1)) * (wreal)0.5)
+                * (hd_k(s, k, j + 1, i) + hd_k(s, k, j, i))) * (wreal)0.5)
+              * (hd_mass(s, k, j + 1, i) + hd_mass(s, k, j, i)));
+        yp = yp * s.rdy;
+    }
+    wreal map = hd_map(s, st == 3 ? 0 : st, j, i), map2 = map * map;
+    Dl tx = (map2 * s.rdx) * (xp * hd_delta(s, k, j, i + 1, j, i)
+                              - xm * hd_delta(s, k, j, i, j, i - 1));
+    Dl ty = (map2 * s.rdy) * (yp * hd_delta(s, k, j + 1, i, j, i)
+                              - ym * hd_delta(s, k, j, i, j - 1, i));
+    return tx + ty;
+}
+
+#define HD_PASSIVE const wreal* __restrict__ c1, const wreal* __restrict__ c2, \
+    const wreal* __restrict__ base, const wreal* __restrict__ msft,             \
+    const wreal* __restrict__ msfu, const wreal* __restrict__ msfv
+
+#define HD_GEOM wreal rdx, wreal rdy, int stag, int perturb, int bx, int by, int nz, int ny, \
+    int nx
+
+static __device__ HdSrc hd_src(const wreal* f, const wreal* fd, const wreal* km,
+                               const wreal* kmd, const wreal* mu, const wreal* mud,
+                               const wreal* c1, const wreal* c2, const wreal* base,
+                               const wreal* msft, const wreal* msfu, const wreal* msfv,
+                               wreal rdx, wreal rdy, int stag, int perturb, int bx, int by,
+                               int nz, int ny, int nx, int tl)
+{
+    HdSrc s;
+    s.f = f; s.fd = fd; s.km = km; s.kmd = kmd; s.mu = mu; s.mud = mud;
+    s.c1 = c1; s.c2 = c2; s.base = base; s.msft = msft; s.msfu = msfu; s.msfv = msfv;
+    s.rdx = rdx; s.rdy = rdy;
+    s.nz = nz; s.ny = ny; s.nx = nx; s.stag = stag; s.bx = bx; s.by = by;
+    s.perturb = perturb; s.tl = tl; s.which = 0; s.at = 0;
+    return s;
+}
+
+// TL: one thread per point of the row; the tendency accumulates.
+extern "C" __global__ void hd_tl(wreal* __restrict__ tend, wreal* __restrict__ tendd,
+                                 const wreal* __restrict__ f, const wreal* __restrict__ fd,
+                                 const wreal* __restrict__ km, const wreal* __restrict__ kmd,
+                                 const wreal* __restrict__ mu, const wreal* __restrict__ mud,
+                                 HD_PASSIVE, int nl, HD_GEOM)
+{
+    int nxs = nx + (stag == 1), nys = ny + (stag == 2), nzs = nz + (stag == 3);
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (size_t)nzs * nys * nxs) return;
+    int i = (int)(t % nxs), j = (int)((t / nxs) % nys), k = (int)(t / ((size_t)nxs * nys));
+    HdSrc s = hd_src(f, fd, km, kmd, mu, mud, c1, c2, base, msft, msfu, msfv, rdx, rdy, stag,
+                     perturb, bx, by, nz, ny, nx, 1);
+    if (stag == 3 && (k == 0 || k == nz)) return;
+    if (bx && (i == 0 || i >= nx - (stag != 1))) return;
+    if (by && (j == 0 || j >= ny - (stag != 2))) return;
+    Dl r = hd_point(s, k, j, i);
+    if (nl) tend[t] = tend[t] + r.v;
+    if (WRFPLUS_TL) tendd[t] = tendd[t] + r.d;
+}
+
+// The distinct row points within one point of coordinate c on an axis
+// of n mass points (n + stag row points): on a periodic axis the images
+// mod n, and the staggered end point n with image 0.
+static __device__ int hd_axis(int c, int n, int bounded, int stag, int* out)
+{
+    int m = 0;
+    for (int off = -1; off <= 1; ++off) {
+        int x = c + off;
+        if (bounded) {
+            if (x >= 0 && x < n + stag) out[m++] = x;
+            continue;
+        }
+        x = df_per(x, n);
+        bool seen = false;
+        for (int q = 0; q < m; ++q) seen = seen || out[q] == x;
+        if (seen) continue;
+        out[m++] = x;
+        if (stag && x == 0) out[m++] = n;
+    }
+    return m;
+}
+
+// AD: one thread per input word (field, then coefficient, then mut).  A
+// field word is read at its own level, a coefficient word at its own and
+// (w row) the next, a mut word at every level; horizontally within one
+// point.  The tendency adjoint is read, not consumed.
+extern "C" __global__ void hd_ad(const wreal* __restrict__ atend, const wreal* __restrict__ f,
+                                 const wreal* __restrict__ km, const wreal* __restrict__ mu,
+                                 wreal* __restrict__ af, wreal* __restrict__ akm,
+                                 wreal* __restrict__ amu, HD_PASSIVE, HD_GEOM)
+{
+    int nxs = nx + (stag == 1), nys = ny + (stag == 2), nzs = nz + (stag == 3);
+    size_t nf = (size_t)nzs * nys * nxs, nk = (size_t)nz * ny * nx, nm = (size_t)ny * nx;
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= nf + nk + nm) return;
+    HdSrc s = hd_src(f, f, km, km, mu, mu, c1, c2, base, msft, msfu, msfv, rdx, rdy, stag,
+                     perturb, bx, by, nz, ny, nx, 0);
+    int k, j, i, klo, khi;
+    wreal* out;
+    if (t < nf) {
+        i = (int)(t % nxs); j = (int)((t / nxs) % nys); k = (int)(t / ((size_t)nxs * nys));
+        // a periodic staggered end point is never read (its image is 0)
+        if ((stag == 1 && !bx && i == nx) || (stag == 2 && !by && j == ny)) return;
+        s.which = HD_F; s.at = t; out = af;
+        klo = khi = k;
+    } else if (t < nf + nk) {
+        t -= nf;
+        i = (int)(t % nx); j = (int)((t / nx) % ny); k = (int)(t / ((size_t)nx * ny));
+        s.which = HD_K; s.at = t; out = akm;
+        klo = k; khi = stag == 3 ? k + 1 : k;
+    } else {
+        t -= nf + nk;
+        i = (int)(t % nx); j = (int)(t / nx); k = 0;
+        s.which = HD_MU; s.at = t; out = amu;
+        klo = 0; khi = nzs - 1;
+    }
+    // a field word's own axis may be staggered; the coefficient's and
+    // mut's are mass points read by the row's points
+    int js[4], is[4];
+    int mj = hd_axis(j, ny, by, stag == 2, js);
+    int mi = hd_axis(i, nx, bx, stag == 1, is);
+    wreal acc = (wreal)0;
+    for (int ko = klo; ko <= khi && ko < nzs; ++ko)
+        for (int b = 0; b < mj; ++b)
+            for (int a = 0; a < mi; ++a) {
+                size_t o = R3(ko, js[b], is[a], nys, nxs);
+                if (atend[o] != (wreal)0) acc = acc + atend[o] * hd_point(s, ko, js[b], is[a]).d;
+            }
+    out[t] = out[t] + acc;
 }
