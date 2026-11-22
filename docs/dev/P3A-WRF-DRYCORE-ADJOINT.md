@@ -1051,9 +1051,10 @@ Each step is one small PR, taken to merged before the next widens.
        stencils need (5 x 5 columns and five levels for the
        deformation). A zero output adjoint skips the recompute, so a
        step seeded with zeros hides the cost. PR #820 narrows the
-       deformation's window to the stencil's reach (3 x 3 columns, and
-       the levels it reads): `df_ad` 209 -> 31 ms, the base + AD step
-       with the mixing 252 -> 75 ms. Each `hd_ad` row's mut thread
+       deformation's gather to the outputs that read each word (3 x 3
+       columns at most, the levels it reads, and per term only the
+       reading rows and columns): `df_ad` 209 -> 11.6 ms, the base + AD
+       step with the mixing 252 -> 52 ms (26 ms without it). Each `hd_ad` row's mut thread
        still gathers its column's levels serially; that is left for a
        later perf pass.
    - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`).
