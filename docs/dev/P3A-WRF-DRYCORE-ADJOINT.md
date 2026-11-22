@@ -943,7 +943,7 @@ Each step is one small PR, taken to merged before the next widens.
        kernels and the coefficients; the slopes and the cap must move
        words) and the WRFPLUS fixture (`tests/data/wrfplus/
        diffusion.npz`, `tools/wrfplus_oracle/diffusion.F90`): in
-       binary64 woof matches WRFPLUS to about 3e-16.
+       binary64 woof matches WRFPLUS to about 4e-16.
      - WRFPLUS findings. `compute_diff_metrics` (WRF's too) fills a
        periodic axis's seam slope (zx at ids/ide, zy at jds/jde) for
        levels 1..ktf only, so the top w level's seam slope keeps its cold

@@ -1263,12 +1263,18 @@ def km_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) ->
         mag = 10.0 ** rng.uniform(-3.5, -0.5, sh[n])
         out[n] = mag * rng.standard_normal(sh[n])
     out["msft"] = 1.0 + 0.02 * rng.standard_normal(sh["msft"])
+    # the outer row of a bounded axis is 0 whatever the deformation
+    inner = np.ones(sh["xkmh"], dtype=bool)
+    if geom.boundary_x:
+        inner[..., 0] = inner[..., -1] = False
+    if geom.boundary_y:
+        inner[..., 0, :] = inner[..., -1, :] = False
     r = _km_ratio(geom, out["defor11"], out["defor22"], out["defor12"], out["msft"])
-    if (r > 1.0).all():
+    if inner.any() and not (r[inner] < 1.0).any():
         # a capped coefficient has no tangent: keep one point below the cap
         # (the coefficient is homogeneous of degree 1 in the deformation)
         for n in KM_ACTIVE:
-            out[n] *= 0.5 / r.min()
+            out[n] *= 0.5 / r[inner].min()
     for _ in range(200):
         r = _km_ratio(geom, out["defor11"], out["defor22"], out["defor12"], out["msft"])
         near = np.abs(r - 1.0) < 0.03
@@ -1278,6 +1284,8 @@ def km_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) ->
             out[n] = np.where(near, out[n] * 1.3, out[n])
     else:
         raise RuntimeError("km_trajectory: could not clear the cap's neighbourhood")
+    if inner.any() and not (r[inner] < 1.0).any():
+        raise RuntimeError("km_trajectory: every coefficient takes the cap")
     keep = KM_STATE + KM_ACTIVE + KM_PASSIVE
     return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
 

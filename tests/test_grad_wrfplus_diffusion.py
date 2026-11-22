@@ -268,6 +268,8 @@ def test_float_base_state_is_the_strict_primal(backend, tmp_path):
     out = _run(backend, f'''
 from woof.core.kernels import get_kernel, get_kernel_int_defines
 f32, i32 = np.float32, np.int32
+from woof.core import dycore
+out["prandtl"] = int(float(dycore._PRANDTL) != D.PRANDTL)
 def diff(a, b):
     return int((cp.asnumpy(a).view(np.uint32) != cp.asnumpy(b).view(np.uint32)).sum())
 dx, dy = 3000.0, 2500.0
@@ -324,7 +326,7 @@ for i, over in enumerate({CONFIGS["km"]!r}):
         out[f"km/{{i}}/cap"] = int(not capped.any())
 ''', tmp_path, extra_env=STRICT_ENV)
     caps = sum(1 for c in CONFIGS["km"] if c.get("nz", 7) * c.get("ny", 8) * c.get("nx", 9) > 4)
-    assert len(out) == 3 * len(CONFIGS["df"]) + len(CONFIGS["km"]) + caps
+    assert len(out) == 3 * len(CONFIGS["df"]) + len(CONFIGS["km"]) + caps + 1
     bad = {k: v for k, v in out.items() if v}
     assert not bad, bad
 
@@ -332,10 +334,11 @@ for i, over in enumerate({CONFIGS["km"]!r}):
 def test_geometry_rejects_unported_options():
     """The deformation under 3 levels (the bottom extrapolation reads
     levels 0-2), empty axes, a boundary flag other than 0/1 and
-    non-positive spacings are refused, not run."""
+    non-positive or non-finite spacings are refused, not run."""
     from woof.grad.wrfplus import cases as C
     for make, over in ((C.df_geometry, dict(nz=2)), (C.df_geometry, dict(nx=0)),
-                       (C.df_geometry, dict(boundary_x=2)), (C.km_geometry, dict(ny=0)),
+                       (C.df_geometry, dict(boundary_x=2)), (C.df_geometry, dict(rdx=0.0)),
+                       (C.df_geometry, dict(rdy=float("nan"))), (C.km_geometry, dict(ny=0)),
                        (C.km_geometry, dict(dx=0.0)), (C.km_geometry, dict(prandtl=-1.0))):
         with pytest.raises(ValueError):
             make(**over).validate()

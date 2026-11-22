@@ -350,14 +350,6 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/grad/wrfplus/diffusion.py",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "call_sha256": "1242c075373bd96f466da0715ad327e28df978e59a7efe988f2dbda632251b48",
-    "factory_sha256": "bbe172434b1678e01debb9b6d806a9850f9e00b62dceb6637db0c1b65c712696",
-    "status": "unresolved"
-   },
-   {
     "call_sha256": "1242c075373bd96f466da0715ad327e28df978e59a7efe988f2dbda632251b48",
     "constructor": "RawModule",
     "factory": "_device_module",
@@ -4957,7 +4949,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/diffusion.cu",
-    "sha256": "8f0f28e51c5004002b836a48cd5705e2f00a8e05336309c126c70f42869200e9"
+    "sha256": "b39f4f881d55cc63af97c23c13b81cf5a0a2184fdaa4b7593368f799931c6c31"
    },
    {
     "file": "woof/grad/wrfplus/kernels/lbc.cu",
@@ -5872,10 +5864,6 @@
    {
     "file": "woof/grad/wrfplus/bigstep.py",
     "sha256": "67c6e72c2a532f42e552e406c151acc5dda75eb99b274c64d5bc6c0affe06777"
-   },
-   {
-    "file": "woof/grad/wrfplus/diffusion.py",
-    "sha256": "f7225f5762ae95c6bed2d16362fda6193e193097c93984e58a29245d92075e3b"
    },
    {
     "file": "woof/grad/wrfplus/lbc.py",

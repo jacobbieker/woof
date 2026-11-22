@@ -369,7 +369,9 @@ extern "C" __global__ void df_ad(const wreal* __restrict__ a11, const wreal* __r
         s.which = DF_PH; s.at = t; out = aph;
     }
     i = (int)(t % w); j = (int)((t / w) % h); k = (int)(t / ((size_t)w * h));
-    // a face index nx (ny) of a periodic axis is never read: its image is 0.
+    // a face index nx (ny) of a periodic axis is never read: its image is
+    // 0, so its adjoint gains nothing.
+    if ((s.which == DF_U && !bx && i == nx) || (s.which == DF_V && !by && j == ny)) return;
     int levels[5] = {k - 1, k, k + 1, 0, nz - 1};
     wreal acc = (wreal)0;
     for (int a = 0; a < 5; ++a) {
@@ -385,8 +387,11 @@ extern "C" __global__ void df_ad(const wreal* __restrict__ a11, const wreal* __r
                 int io = df_cand(i, oi, -2, nx, bx);
                 if (io < 0) continue;
                 size_t o = R3(ko, jo, io, ny, nx);
-                if (a11[o] != (wreal)0) acc = acc + a11[o] * df_d11(s, ko, jo, io).d;
-                if (a22[o] != (wreal)0) acc = acc + a22[o] * df_d22(s, ko, jo, io).d;
+                // defor11 does not read v, nor defor22 u
+                if (a11[o] != (wreal)0 && s.which != DF_V)
+                    acc = acc + a11[o] * df_d11(s, ko, jo, io).d;
+                if (a22[o] != (wreal)0 && s.which != DF_U)
+                    acc = acc + a22[o] * df_d22(s, ko, jo, io).d;
                 if (a12[o] != (wreal)0) acc = acc + a12[o] * df_d12(s, ko, jo, io).d;
             }
         }
@@ -398,8 +403,8 @@ extern "C" __global__ void df_ad(const wreal* __restrict__ a11, const wreal* __r
 extern "C" __global__ void df_zero3(wreal* __restrict__ a, wreal* __restrict__ b,
                                     wreal* __restrict__ c, int n)
 {
-    int t = blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= n) return;
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (size_t)n) return;
     a[t] = (wreal)0;
     b[t] = (wreal)0;
     c[t] = (wreal)0;
@@ -534,8 +539,8 @@ extern "C" __global__ void km_ad(const wreal* __restrict__ akm, const wreal* __r
 
 extern "C" __global__ void km_zero2(wreal* __restrict__ a, wreal* __restrict__ b, int n)
 {
-    int t = blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= n) return;
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (size_t)n) return;
     a[t] = (wreal)0;
     b[t] = (wreal)0;
 }

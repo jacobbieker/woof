@@ -21,31 +21,19 @@ base geopotential and m_opt.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
 
 import numpy as np
 
-from ._mode import tl_options
-from .acoustic import THREADS, _blocks, _check, _dtype, _real
+from .acoustic import THREADS, _blocks, _check, _dtype
+from .acoustic import _kernel as _unit_kernel
 
-KERNELS = Path(__file__).resolve().parent / "kernels"
-
-#: woof's dycore._PRANDTL, as the primal passes it.
+#: woof's dycore._PRANDTL, as the primal passes it (the strict-primal test
+#: checks the two agree).
 PRANDTL = 1.0 / 3.0
 
 
-@lru_cache(maxsize=None)
-def _device_module(real: str, device: int, build: tuple = ()):
-    import cupy as cp
-    source = (KERNELS / "diffusion.cu").read_text(encoding="utf-8")
-    return cp.RawModule(code=source,
-                        options=("--fmad=false", f"-DWRFPLUS_REAL={real}") + build)
-
-
 def _kernel(name: str, dtype):
-    import cupy as cp
-    return _device_module(_real(dtype), cp.cuda.Device().id, tl_options()).get_function(name)
+    return _unit_kernel("diffusion", name, dtype)
 
 
 def _named(label, names, d):
@@ -59,6 +47,9 @@ def _axes(geom) -> None:
     for name in ("boundary_x", "boundary_y"):
         if getattr(geom, name) not in (0, 1):
             raise ValueError(f"{name} is 0 or 1, got {getattr(geom, name)}")
+    # the zeroing launches take an int32 count (as the primal's grids)
+    if (geom.nz + 1) * (geom.ny + 1) * (geom.nx + 1) >= 2 ** 31:
+        raise ValueError("the grid is too large for the int32 launches")
 
 
 # ------------------------------------------------------------- deformation
@@ -94,6 +85,9 @@ class DFGeometry:
         if self.nz < 3:
             raise ValueError(f"the deformation needs nz >= 3 (the bottom "
                              f"extrapolation reads levels 0-2), got {self.nz}")
+        if not (np.isfinite(self.rdx) and np.isfinite(self.rdy)
+                and self.rdx > 0 and self.rdy > 0):
+            raise ValueError("rdx and rdy must be positive and finite")
 
 
 def df_shapes(geom) -> dict:
@@ -167,8 +161,8 @@ class KMGeometry:
 
     def validate(self) -> None:
         _axes(self)
-        if not (self.dx > 0 and self.dy > 0 and self.prandtl > 0):
-            raise ValueError("dx, dy and prandtl must be positive")
+        if not all(np.isfinite(x) and x > 0 for x in (self.dx, self.dy, self.prandtl)):
+            raise ValueError("dx, dy and prandtl must be positive and finite")
 
 
 def km_shapes(geom) -> dict:

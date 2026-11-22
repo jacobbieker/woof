@@ -9,11 +9,11 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 720,
+  "site_count": 719,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 47,
     "cupy.RawKernel": 120,
-    "cupy.RawModule": 311,
+    "cupy.RawModule": 310,
     "cupy.ReductionKernel": 22,
     "cupy.cuda.compiler.compile_using_nvrtc": 220
   },
@@ -27,7 +27,7 @@
     "package": {
       "cupy.ElementwiseKernel": 35,
       "cupy.RawKernel": 39,
-      "cupy.RawModule": 112,
+      "cupy.RawModule": 111,
       "cupy.ReductionKernel": 9,
       "cupy.cuda.compiler.compile_using_nvrtc": 145
     },
@@ -9667,22 +9667,6 @@
     {
       "file": "woof/grad/wrfplus/bigstep.py",
       "line": 47,
-      "column": 11,
-      "surface": "package",
-      "constructor": "cp.RawModule",
-      "constructor_kind": "cupy.RawModule",
-      "enclosing": "_device_module",
-      "takes_caller_options": true,
-      "options_argument_present": true,
-      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\") + build",
-      "options": null,
-      "options_element_expressions": null,
-      "options_are_literal": false,
-      "text": "return cp.RawModule(code=source,"
-    },
-    {
-      "file": "woof/grad/wrfplus/diffusion.py",
-      "line": 42,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawModule",

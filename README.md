@@ -1273,7 +1273,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `cal_deform_and_div`) and `smag2d_km`'s xkmh/xkhh with the 10 * mlen
   cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
   `wrf_diff_opt1_km4` word for word, and they match WRFPLUS to about
-  1e-16, except at the top level of a periodic seam, where WRF keeps a
+  4e-16, except at the top level of a periodic seam, where WRF keeps a
   cold-zero slope and woof the true one.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
