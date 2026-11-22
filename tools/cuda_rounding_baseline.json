@@ -5783,7 +5783,7 @@
    },
    {
     "file": "woof/ensemble/batch_layout_trials.py",
-    "sha256": "4d0079d9d87eb7733a51455371caf9ff387d6a3b678daf42d0ac2d861a42a2ad"
+    "sha256": "95265924ae01b8deac08daeaed61613426508305100964301e24595e8e96e296"
    },
    {
     "file": "woof/ensemble/batch_moist.py",
