@@ -13,7 +13,7 @@ from woof.core.thompson_contract import TableAsset, read_validated_table_asset
 
 TABLE_ROOT = Path(__file__).resolve().parents[1] / 'data/wrf_radiation/gsfcsw'
 TABLE_ASSET = TableAsset('coefficients.f32',9896,'a23e21798425039a82cf799f81c638a9f6bb7b0562c586829f05bdff10abc533')
-from woof.core.gsfcsw_levels import DEEP_KMAX as MAX_LAYERS, kmax_tier, workspace_words
+from woof.core.gsfcsw_levels import DEEP_KMAX as MAX_LAYERS, kmax_tier, tier_workspace_words, workspace_words
 #: Arena words per column of the shipped (<= 128 layer) tier; deeper columns
 #: use ``workspace_words(nlay)``.
 WORKSPACE_WORDS = workspace_words(128)
@@ -26,11 +26,10 @@ def workspace_bytes(columns,nlay=128):
     """Bounded call workspace, also charged by forecast preflight."""
     return workspace_columns(columns)*workspace_words(nlay)*4
 
-def gsfcsw_kernel(nlay):
-    """The column kernel at the tier of an nlay-layer column: the plain
-    loader (unchanged source) to 128 layers, GSFC_KMAX=256 above."""
+def gsfcsw_kernel(tier):
+    """The column kernel at one GSFC_KMAX tier: the plain loader (the
+    unchanged source, GSFC_KMAX 128) or the deep tier's -D build."""
     from woof.core.kernels import get_kernel_int_defines, load_module
-    tier=kmax_tier(nlay)
     if tier==128: return load_module('gsfcsw').get_function('gsfcsw_columns_kernel')
     return get_kernel_int_defines('gsfcsw','gsfcsw_columns_kernel',(('GSFC_KMAX',tier),))
 
@@ -71,9 +70,10 @@ def packed_columns(inputs,nlay,*,warm_rain=False,f_qi=True,f_qndrop=False,
         if incoming.shape!=(a.shape[0],nlay):
             raise ValueError('incoming GSFC heating must have shape (ncol,nlay)')
         out[:,:nlay]=incoming
-    kernel=gsfcsw_kernel(nlay)
+    tier=kmax_tier(nlay)
+    kernel=gsfcsw_kernel(tier)
     width=min(a.shape[0],COLUMN_CHUNK)
-    words=workspace_words(nlay)
+    words=tier_workspace_words(tier)
     if workspace is None:
         workspace=cp.empty((workspace_columns(width),words),dtype=cp.float32)
     if workspace.dtype!=cp.float32 or not workspace.flags.c_contiguous or workspace.size<workspace_columns(width)*words:

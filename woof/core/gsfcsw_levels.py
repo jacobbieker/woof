@@ -35,7 +35,12 @@ def kmax_tier(nz: int) -> int:
         f"this domain has {nz}")
 
 
+def tier_workspace_words(kmax: int) -> int:
+    """Float words of arena per column of a ``GSFC_KMAX = kmax`` build."""
+    return (WORKSPACE_WORDS_PER_INTERFACE * (int(kmax) + 1)
+            + WORKSPACE_WORDS_FIXED)
+
+
 def workspace_words(nz: int) -> int:
     """Float words of arena per column at the tier of an ``nz``-level column."""
-    return (WORKSPACE_WORDS_PER_INTERFACE * (kmax_tier(nz) + 1)
-            + WORKSPACE_WORDS_FIXED)
+    return tier_workspace_words(kmax_tier(nz))
