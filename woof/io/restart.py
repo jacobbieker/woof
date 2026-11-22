@@ -3486,6 +3486,9 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # The umbrella over the opt-in quirk corrections is never echoed: the
     # RunConfig resolves it into the individual keys, which bind on their own.
     values.pop("woof_quirk_corrections", None)
+    # The opt-in MYNN surface-layer 2 m / 10 m correction: the same contract.
+    if values.get("mynn_sfclay_psih_zolzt", False) is False:
+        values.pop("mynn_sfclay_psih_zolzt", None)
     # The opt-in Noah soil-moisture floor booking: absent while off.
     if values.get("noah_smc_floor_booking", False) is False:
         values.pop("noah_smc_floor_booking", None)
@@ -5768,6 +5771,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'gf_deep_rain_evaporation_booking': False,
     'ysu_surface_heat_exner': False,
     'woof_quirk_corrections': 'none',
+    'mynn_sfclay_psih_zolzt': False,
     'noah_smc_floor_booking': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
@@ -6361,6 +6365,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "gf_deep_rain_evaporation_booking": False,
                           "ysu_surface_heat_exner": False,
                           "woof_quirk_corrections": "none",
+                          "mynn_sfclay_psih_zolzt": False,
                           "noah_smc_floor_booking": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,

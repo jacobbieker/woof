@@ -541,6 +541,10 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The opt-in YSU surface heat flux on theta (bl_pbl_physics = 1 only,
     # default off): a tree prepared before it existed ran it off.
     "run.ysu_surface_heat_exner",
+    # The opt-in MYNN surface-layer 2 m / 10 m heat profile from zt/L
+    # (sf_sfclay_physics = 5 only, default off): a tree prepared before it
+    # existed ran it off.
+    "run.mynn_sfclay_psih_zolzt",
     # The opt-in Noah soil-moisture floor booking (sf_surface_physics = 2
     # only, default off): a tree prepared before it existed ran it off.
     "run.noah_smc_floor_booking",

@@ -337,7 +337,7 @@ def _variant_jobs(experiment, modules):
     from woof.core.kernel_shape import FUNCTIONS, shape_defines
     from woof.core.thompson_aerosol_launch import AEROSOL_KERNEL_MODULES, WRF39_DEFINES
     from woof.ingest.lateral_bc import relaxation_shapes
-    from woof.core.mynn_sfclay import MYNN_SFCLAY_DEFINES
+    from woof.core.mynn_sfclay import mynn_surface_defines
 
     jobs, seen = [], set()
     runs = [dc.run for dc in getattr(experiment, "domains", ()) if hasattr(dc, "run")]
@@ -352,7 +352,8 @@ def _variant_jobs(experiment, modules):
             elif name == "mynn_pbl" and getattr(run, "bl_mynn_version", "") == "gsd_41":
                 defines = (("MYNN_GSD41", 1),)
             elif name == "mynn_surface":
-                defines = MYNN_SFCLAY_DEFINES[getattr(run, "mynn_sfclay_variant", "wrf_461")]
+                defines = mynn_surface_defines(getattr(run, "mynn_sfclay_variant", "wrf_461"),
+                                               getattr(run, "mynn_sfclay_psih_zolzt", False) is True)
             tiers = [defines] if defines else []
             if name == "advection":
                 if getattr(run, "momentum_adv_opt", 1) == 3:

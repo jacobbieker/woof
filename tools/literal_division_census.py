@@ -372,6 +372,15 @@ def production_units(root) -> list[Unit]:
     assert booked.source == K.module_source_int_defines(
         "gf", (("GF_KMAX", 40), ("GF_DEEP_EVAP_BOOKING", 1)), kernel_dir=kdir)
     units.append(booked)
+    # The opt-in MYNN surface-layer 2 m / 10 m profile from zt/L
+    # (woof.core.mynn_sfclay.mynn_surface_defines).
+    zolzt = _segmented("kernels:mynn_surface[MYNN_SL_PSIH_ZOLZT=1]",
+                       pre + headers("mynn_surface")
+                       + [("<MYNN_SL_PSIH_ZOLZT>", "#define MYNN_SL_PSIH_ZOLZT 1\n"),
+                          kfile("mynn_surface.cu")], K.module_options("mynn_surface"))
+    assert zolzt.source == K.module_source_int_defines(
+        "mynn_surface", (("MYNN_SL_PSIH_ZOLZT", 1),), kernel_dir=kdir)
+    units.append(zolzt)
     from woof.core.spp_kernel_sources import specialized_source
     for name, capacity in (("gf", 40), ("gf", 60), ("mynn_pbl", 40), ("mynn_surface", 40)):
         units.append(Unit(f"spp:{name}[capacity={capacity}]",
@@ -380,6 +389,10 @@ def production_units(root) -> list[Unit]:
     units.append(Unit("spp:gf[capacity=40,GF_DEEP_EVAP_BOOKING=1]",
                       specialized_source("gf", capacity=40, kernel_dir=kdir,
                                          defines=(("GF_DEEP_EVAP_BOOKING", 1),)),
+                      ("-std=c++17",), []))
+    units.append(Unit("spp:mynn_surface[capacity=40,MYNN_SL_PSIH_ZOLZT=1]",
+                      specialized_source("mynn_surface", capacity=40, kernel_dir=kdir,
+                                         defines=(("MYNN_SL_PSIH_ZOLZT", 1),)),
                       ("-std=c++17",), []))
     # The opt-in Noah soil-moisture floor booking (woof.core.noah.launch_noah):
     # the plain unit's integer tier, and the UA units with the define first.

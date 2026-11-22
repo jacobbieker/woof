@@ -112,6 +112,9 @@ MOVED = {
     "woof_quirk_corrections": (
         dict(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all"),
         {"ysu_surface_heat_exner", "ysu_version"}),
+    "mynn_sfclay_psih_zolzt": (
+        dict(sf_sfclay_physics=5, bl_pbl_physics=5, mynn_sfclay_psih_zolzt=True),
+        {"mynn_sfclay_psih_zolzt"}),
     # Noah runs here, so its default-on prognostic sea ice is bound too.
     "noah_smc_floor_booking": (
         dict(sf_surface_physics=2, noah_smc_floor_booking=True),
@@ -248,6 +251,8 @@ DEFAULT_OFF = frozenset({
     "ysu_surface_heat_exner",
     # The umbrella over the opt-in quirk corrections, never echoed.
     "woof_quirk_corrections",
+    # The opt-in MYNN surface-layer 2 m / 10 m correction, absent while off.
+    "mynn_sfclay_psih_zolzt",
     # The opt-in Noah soil-moisture floor booking, absent while off.
     "noah_smc_floor_booking",
     # TEMPO's optional coupling arms, absent while off.

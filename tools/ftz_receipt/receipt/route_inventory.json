@@ -2884,7 +2884,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3288,
+      "line": 3291,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -8766,7 +8766,7 @@
     },
     {
       "file": "woof/core/spp_kernel_sources.py",
-      "line": 183,
+      "line": 184,
       "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
