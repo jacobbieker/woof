@@ -132,7 +132,9 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         _refuse("config_shortwave_type", "dEdd",
                 rkind.trig_refusal("the orbit and the solar zenith angle call glibc's double sin, cos, atan and asin"),
                 "WOOF_GLIBC239_LIBM64=1, config_shortwave_type = 'ccsm3' or config_calc_surface_temperature = .false.")
-    fixes = cv.corrections(c)
+    # a named correction whose shortwave this configuration does not run is
+    # refused; under woof_quirk_corrections = 'all' alone it changes nothing
+    fixes = cv.named_corrections(c)
     if "ccsm3_absorbed_solar_layers" in fixes and not (calc_tsfc and not dedd):
         _refuse("woof_v842_corrections", "ccsm3_absorbed_solar_layers",
                 "it corrects shortwave_ccsm3, which this configuration does not run",
@@ -155,7 +157,9 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
                 "it corrects compute_shortwave_trcr's grid, which runs only with the delta-Eddington shortwave's "
                 "bioabsorption of the z-aerosols",
                 "config_use_shortwave_bioabsorption and config_use_zaerosols with config_shortwave_type = 'dEdd'")
-    if dedd and shortwave_zaerosols(c) and not fix_grid and dims["nIceLayers"] < dims.get("nBioLayers", 7):
+    # the umbrella turns the correction on too, so the read past the array is not reached
+    if dedd and shortwave_zaerosols(c) and "shortwave_bio_grid" not in cv.corrections(c) and \
+            dims["nIceLayers"] < dims.get("nBioLayers", 7):
         _refuse("config_nIceLayers", dims["nIceLayers"],
                 "column_radiation passes verticalGrid (nIceLayers + 1 points) as compute_shortwave_trcr's "
                 "biology interface grid, which reads nBioLayers + 1 of them: past the array with fewer ice "

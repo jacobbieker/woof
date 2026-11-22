@@ -11,11 +11,15 @@
   ``config_dt`` and ``config_btr_dt`` (:func:`btr_subcycle_count`) and, on a
   cold start, the initial velocity split into barotropic and baroclinic
   (``config_filter_btr_mode`` with its top-layer reset);
-- the state part of ``ocn_init_routines_block``: ``ocn_diagnostic_solve``, the
-  missing cell's and the land levels' sentinels, the transport velocity, the
-  time levels initialised (the mesh part, the signs, ``derivTwo``, the
-  advection and reconstruction coefficients and the mesh scaling, is the
-  input's);
+- the state part of ``ocn_init_routines_block``: the boundary layer depth
+  (half the top layer, where the diagnostics carry it), ``ocn_diagnostic_solve``,
+  the missing cell's and the land levels' sentinels, the transport velocity
+  (with ``config_use_standardGM`` GM's bolus velocity,
+  :mod:`~woof.hex.mpas_ocean.gm_v842`, added, and its vectors on cells,
+  ``ocn_reconstruct_gm_vectors``), the time levels initialised (the mesh
+  part, the signs, ``derivTwo``, the advection and reconstruction
+  coefficients and the mesh scaling, is the input's; ``mpas_reconstruct`` of
+  the velocity is not run, as the step's own overwrites it);
 - each step: the clock advanced, the absorbed fractions
   (:func:`~woof.hex.mpas_ocean.forcing_v842.fraction_absorbed`), the
   land-ice fluxes (:func:`~woof.hex.mpas_ocean.land_ice_v842.build_arrays`,
@@ -52,7 +56,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import diagnostics_v842, forcing_v842, frazil_v842, land_ice_v842, split_step_v842
+from . import diagnostics_v842, forcing_v842, frazil_v842, gm_v842, land_ice_v842, split_step_v842
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
 
 SOURCE_FILES = (
@@ -60,6 +64,7 @@ SOURCE_FILES = (
     "src/core_ocean/mode_forward/mpas_ocn_time_integration.F:80-164",
     "src/core_ocean/mode_forward/mpas_ocn_time_integration_split.F:1940-2096",
     "src/core_ocean/shared/mpas_ocn_init_routines.F:529-700",
+    "src/core_ocean/shared/mpas_ocn_diagnostics.F:1844-1920",
 ) + land_ice_v842.SOURCE_FILES[1:2]
 MODULE_OPTIONS = COMPILE_OPTIONS
 _BLOCK = 128
@@ -298,6 +303,10 @@ def cold_start(*, pools: dict, configs: dict) -> Clock:
             st["normalBarotropicVelocity"][...] = 0
 
     # ocn_init_routines_block's state part
+    gm = bool(configs.get("config_use_standardGM", False))
+    if d.get("boundaryLayerDepth") is not None:
+        # read by GM's surface-layer tapering (and by KPP, which is refused) alone
+        d["boundaryLayerDepth"][:nc] = st["layerThickness"][:nc, 0] * real(0.5)
     diagnostics_v842.diagnostic_solve(dt=dt, mesh=m, state=_state(pools, 1), tracers=_tracers(pools, 1),
                                       diagnostics=d, forcing=pools["forcing"], configs=configs)
     m["areaCell"][nc] = real(-1.0e34)
@@ -307,6 +316,11 @@ def cold_start(*, pools: dict, configs: dict) -> Clock:
         i32(nl)))
     _launch(precision, "ocn_fw_init_cells_v842", nc, (tr["activeTracers"], m["maxLevelCell"], i32(nc), i32(nl),
                                                        i32(nt)))
+    if gm:
+        # mpas_ocn_init_routines.F:656-664 and 685-687
+        gm_v842.compute_bolus_velocity(mesh=m, diagnostics=d, configs=configs)
+        d["normalTransportVelocity"][:ne] += d["normalGMBolusVelocity"][:ne]
+        split_step_v842.reconstruct_gm_vectors(mesh=m, diagnostics=d, configs=configs)
     for pool, names in _two_level(pools).items():
         for name in names:
             pools[pool][f"{name}@2"][...] = pools[pool][name]

@@ -54,6 +54,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
+from woof import quirk_corrections
 
 from . import rkind
 
@@ -103,8 +104,8 @@ def enabled(config: dict) -> tuple[str, ...]:
 
 def check_config(config: dict) -> None:
     """Refuse by name what the members do not carry."""
-    if config.get("woof_analysis_empty", "v842") not in ANALYSIS_EMPTY:
-        _refuse("woof_analysis_empty", config["woof_analysis_empty"], "not an option of this port",
+    if quirk_corrections.option(config, "woof_analysis_empty") not in ANALYSIS_EMPTY:
+        _refuse("woof_analysis_empty", config.get("woof_analysis_empty"), "not an option of this port",
                 "woof_analysis_empty = 'v842' | 'corrected'")
     for knob in config:
         if knob.startswith("config_AM_") and not any(
@@ -329,7 +330,7 @@ def global_stats(pools: dict, config: dict) -> dict:
         "avgSubshelfMelt": _negated(_div(_div(fbmb, farea, real), rhoi, real)),
         "iceThicknessMin": t_min, "iceThicknessMax": t_max,
         "surfaceSpeedMax": real(s_max * scyr), "basalSpeedMax": real(b_max * scyr)}
-    if config.get("woof_analysis_empty", "v842") == "corrected":
+    if quirk_corrections.option(config, "woof_analysis_empty") == "corrected":
         for name, over in (("iceThicknessMean", area), ("avgNetAccumulation", area),
                            ("avgGroundedBasalMelt", garea), ("avgSubshelfMelt", farea)):
             if over == 0:
@@ -355,7 +356,7 @@ def regional_stats(pools: dict, config: dict) -> dict:
     cells_on_edge = x["cellsOnEdge"][gl_edges]
     n_regions = masks.shape[1]
     out = {k: np.zeros(n_regions, real) for k in REGIONAL_FIELDS}
-    empty = config.get("woof_analysis_empty", "v842") == "corrected"
+    empty = quirk_corrections.option(config, "woof_analysis_empty") == "corrected"
     for r in range(n_regions):
         mr = masks[:, r].astype(real)
         area = _sum((mr * a) * ice, real)

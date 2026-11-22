@@ -157,6 +157,10 @@ def test_total_chlorophyll_without_the_vertical_biochemistry_is_refused():
     case = _case(WITHOUT, cbgc.TOTAL_CHLOROPHYLL)
     with pytest.raises(ConfigurationRefusal, match=cbgc.TOTAL_CHLOROPHYLL):
         cbgc.refuse_unported(case["config"], _dims(case))
+    # under woof_quirk_corrections = 'all' alone it is on but changes nothing there: not refused
+    umbrella = {**case["config"], "woof_v842_corrections": (), "woof_quirk_corrections": "all"}
+    assert cbgc.TOTAL_CHLOROPHYLL in cv.corrections(umbrella)
+    cbgc.refuse_unported(umbrella, _dims(case))
 
 
 def test_the_algae_parameters_follow_colpkg_init_zbgc():
@@ -206,7 +210,7 @@ def _mismatches(names):
     # the diatoms' carbon to nitrogen ratio in the primary production
     (("bgc_algae_nutrients_c2n",), "ap[AP_R_C2N + mm]), ZB_R_GC2MOLC", "ap[AP_R_C2N + 1]), ZB_R_GC2MOLC"),
     # each alga's chlorophyll ratio
-    (_BGC_NAMES, "M(ice_bio_net[m], ap[AP_R_CHL2N + mm])", "M(ice_bio_net[m], ap[AP_R_CHL2N])"),
+    (_BGC_NAMES, "M(net, ap[AP_R_CHL2N + mm])", "M(net, ap[AP_R_CHL2N])"),
 ])
 def test_a_mutated_algal_branch_is_caught(monkeypatch, names, original, mutated):
     source = cbgc.module_source
@@ -214,7 +218,13 @@ def test_a_mutated_algal_branch_is_caught(monkeypatch, names, original, mutated)
     monkeypatch.setattr(cbgc, "module_source", lambda *a: source(*a).replace(original, mutated))
     cbgc._module_on.cache_clear()
     try:
-        assert _mismatches(names) > 0
+        # a mutation may trip the kernel's negative bgc stop (v8.4.2's MPAS_LOG_CRIT) before any
+        # word is compared: the uncapped nitrate uptake takes the nutrient-limited cells negative
+        try:
+            caught = _mismatches(names) > 0
+        except cbgc.CriticalAbort as stop:
+            caught = "negative bgc" in str(stop)
+        assert caught
     finally:
         cbgc._module_on.cache_clear()
 

@@ -297,8 +297,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     coupler's land-ice means; standalone, in the diagnostics and over forward
     steps; 'HollandJenkins' is refused by name), and the Gent-McWilliams
     bolus velocity (`ocn_gm_compute_Bolus_velocity`: isoneutral slopes,
-    their smoothing and tapering, `k33`, the stream function's solve;
-    standalone, not yet wired into the step). Three v8.4.2 quirks keep
+    their smoothing and tapering, `k33`, the stream function's solve) and
+    Redi isoneutral mixing (`ocn_tracer_hmix_redi_tend`'s three horizontal
+    terms, and `k33` in the vertical diffusivity, which v8.4.2 adds without
+    `config_Redi_kappa`; `woof_redi_k33 = 'kappa'` scales it), standalone,
+    in the split-explicit step (GM before the implicit mixing and after the
+    last diagnostics, the bolus velocity in the transport, Redi in the
+    tracer tendency, `ocn_reconstruct_gm_vectors`) and over forward steps
+    (the cold start's bolus transport); off by default. Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
@@ -330,8 +336,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     column's loads coalesce: the 33,000-cell step takes 42 instead of 58 ms
     on an A6000, the same words. Metal keeps a thread per column,
     which is faster there (switch: `WOOF_OCEAN_COLUMN_LANES=1` or `32`);
-  - MPAS-Seaice: variational EVP internal stress, the velocity solve and
-    elastic subcycles, the pre-subcycle routines, ocean stress,
+  - MPAS-Seaice: variational EVP internal stress with its basis set-up
+    (Wachspress and PWL under every integration rule, computed on the host
+    in the init; the RKIND 8 metric terms need `metric_libm` because
+    glibc's binary64 asin and tan are not correctly rounded), the
+    weak-form stress divergence (`config_stress_divergence_scheme =
+    'weak'`, its normal vectors computed on the host in the init; on a
+    sphere it needs `metric_libm` too), the velocity
+    solve and elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
     grid, hexagons and quadrilaterals, variable resolution) with its
     optional conservation and monotonicity checks (one rank), a forward
@@ -426,7 +438,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     subcycle but separates once a step, so an earlier subcycle's ridging of
     the tracers is lost) and `bgc_snow_new_category` (without the vertical
     thermodynamics `update_snow_bgc` divides 0/0 for a category the last
-    step opened, and `oceanBioFluxes` is NaN). The z-aerosols
+    step opened, and `oceanBioFluxes` is NaN; on Metal that NaN's sign bit
+    is the opposite of x86's, the one word not compared bitwise there). The
+    z-aerosols
     (`config_use_zaerosols`: two black carbons and a dust, alone or with the
     nonreactive tracer) run through the same stages and steps, with the
     dust's ocean flux in `oceanDustIronFlux`, word for word with v8.4.2;
@@ -628,6 +642,28 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
 - **Corrections of WRF/MPAS quirks, each opt-in and off by default.**
   The default stays word for word with the WRF 4.7.1 / MPAS v8.4.2
   oracle; each key changes only the arithmetic it names.
+  - `woof_quirk_corrections = "all"` turns every correction below on at
+    once, each where its scheme runs (default `"none"`; the hex door takes
+    `--quirk-corrections all`). A key set against it is refused by name,
+    and so is a correction its own key refuses in that combination. It
+    turns on `gf_deep_rain_evaporation_booking`,
+    `ysu_surface_heat_exner` and `mynn_sfclay_psih_zolzt` (WRF route); `--undriven-species-boundary
+    wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
+    flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
+    `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
+    `woof_redi_k33` (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
+    `woof_simple_velocity_bed`, `woof_statistics_extrema` and
+    `woof_analysis_empty` (MALI); the MPAS-Seaice column's
+    `set_sfcflux_order`, `ice_velocity_at_cell`,
+    `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
+    `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
+    `bgc_snow_new_category`, `subcycle_snow_ice_tracers`,
+    `zaero_snow_scavenging`, `shortwave_bio_grid` and `total_chlorophyll`;
+    and the MPAS-Seaice velocity solver's `planar_metric_terms`,
+    `periodic_local_coords` and `weak_ridge_delta`.
+    The list and its values are in
+    [CONFIGURATION.md](docs/public/CONFIGURATION.md) and
+    `woof/quirk_corrections.py`.
   - `ysu_surface_heat_exner` (YSU, `bl_pbl_physics = 1`, WRF route). WRF's YSU adds the surface sensible heat flux to
     potential temperature as if it were a temperature flux and converts
     back with pi, so the column gets `HFX*pi` instead of `HFX`. That loses
@@ -635,6 +671,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     uses `HFX/pi(1)` (refused with BEP/BEM, where YSU takes the urban
     heat sources instead). Checked by the column heat budget, not yet scored
     against observations; the hex MPAS-suite YSU does not carry it yet.
+  - `mynn_sfclay_psih_zolzt` (MYNN surface layer, `sf_sfclay_physics = 5`,
+    WRF route). WRF integrates the 2 m and 10 m heat profile from `z0/L`
+    while its log term and the first-level `psih` start at the thermal
+    roughness `zt/L`. The option uses `zt/L` throughout. It moves only the
+    T2/Q2 diagnostics; checked against the corrected CPU reference, not yet
+    scored against observations.
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
@@ -734,8 +776,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     hex forecast on CUDA and Metal. Every row now runs or is refused by
     name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
     the 149-level case (nominal eta), MAD-WRF (species row) and any
-    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5,
-    KF-CuP, BouLac and QNSE rows state their layer limits.
+    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5
+    and KF-CuP rows state their layer limits. BouLac and QNSE PBL now
+    admit 256 levels (compile-time 128/256 tier; at 128 levels or fewer
+    the unchanged kernel, word for word); their matrix rows still record
+    the old 128-level refusal until the 149-level hex case is re-run.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
@@ -1144,13 +1189,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
   forecast, and `spacewx_ionosphere_opt = 2` applies the storm-time
   correction there too (plus its ratio `IONO_STORM`), from GFZ's ap with the
-  latest observed ap persisted past the start; hex and streamed domains
-  refuse both for now. `woof spacewx aurora`
+  latest observed ap persisted past the start; hex's generic column seam
+  writes the same rows per cell, hex's MPAS v8.4.2 suite route writes them per
+  cell from `--physics` (the aurora rows too), and streamed domains refuse both
+  for now. `woof spacewx aurora`
   places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
   oval (`AURORA_ZONE`, `AURORA_DIST`, `MAG_LAT`, `MAG_LT`) into every WRF-route
-  history frame from the start's Kp. `woof spacewx aurora --energy` adds the
+  history frame from the start's Kp (on hex's generic column seam too, per
+  cell). `woof spacewx aurora --energy` adds the
   precipitating electron and ion energy and number fluxes and the hemispheric
   power of OVATION Prime 2010 (a port of NOAA's public-domain IDL code, which
   reproduces its test outputs; the coefficients are fetched and pinned), and
@@ -1289,13 +1337,22 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`Window.tl(dx0, partial=True)`). It can also linearise about a
   supplied trajectory instead of its own dry rerun, as WRFPLUS does
   about the nonlinear run's states (`Window.forward(trajectory=...)`).
-  The first moist pieces exist as kernels but are not yet in the step:
-  `calc_cq` (qv, or qv, qc and qr), the pressure gradient's cqu/cqv, the
-  moist buoyancy, the diagnosis's qv (WRF's `qvf`), moist scalar
-  transport (sumflux and the non-PD scalar update,
-  `woof.grad.wrfplus.scalar`), and the moist boundary rows (qv's
-  relaxation and spec_bdy_final, flow_dep_bdy for hydrometeors). The
-  forecast path does not import any of it.
+  The step also covers a moist state without microphysics (qv, qc and
+  qr: calc_cq, the moist pressure gradient, buoyancy and diagnosis,
+  sumflux and the non-PD scalar update, and qv's boundary rows with
+  flow_dep_bdy for qc and qr). The forecast path does not import any of
+  it.
+  The first diffusion pieces
+  (`woof.grad.wrfplus.diffusion`, diff_opt 1 / km_opt 4) are kernels,
+  not yet in the step: the deformation (WRF `compute_diff_metrics` +
+  `cal_deform_and_div`) and `smag2d_km`'s xkmh/xkhh with the 10 * mlen
+  cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
+  `wrf_diff_opt1_km4` word for word, and they match WRFPLUS to about
+  4e-16, except at the top level of a periodic seam, where WRF keeps a
+  cold-zero slope and woof the true one. The rows that use them
+  (`hd_tl/hd_ad`: WRF `horizontal_diffusion` for u, v, w and scalars,
+  `horizontal_diffusion_3dmp` for theta) reproduce woof's strict
+  `wrf_diff_opt1_horizontal` and match WRFPLUS to about 1e-16.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8

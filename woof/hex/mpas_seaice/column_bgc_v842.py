@@ -66,9 +66,11 @@ negative tracer), ``negative bgc``, ``remap_zbgc``'s, and
 logs a stop label nothing set (whatever ``abortMessage`` held). The FCT's
 conservation failure and the snow's warnings are warnings only, not kept.
 ``update_snow_bgc`` divides by the area before the step unguarded, so ice
-new to a category (an initial area of 0) would take NaN; the step never
-makes that (the area before the step is the step's own), and the cases do
-not.
+new to a category (an initial area of 0) takes NaN. With the vertical
+thermodynamics the step never makes that; without them
+``iceAreaCategoryInitial`` is never refreshed, so a category the last step's
+ITD opened gives a NaN ``oceanBioFluxes`` (kept word for word; the opt-in
+correction ``bgc_snow_new_category`` takes it to have had no snow).
 
 What it refuses, by name: the biogeochemistry without ``config_use_brine``
 (``colpkg_biogeochemistry`` writes the brine changes, which only the brine
@@ -178,17 +180,24 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         cv._refuse("config_nCategories", dims["nCategories"],
                    f"the brine kernel holds at most {MAX_CATEGORIES} categories",
                    f"config_nCategories <= {MAX_CATEGORIES}")
-    if SNOW_NEW_CATEGORY in cv.corrections(configs) and not cv.vertical_tracers(configs):
+    # refused only when named; under woof_quirk_corrections = 'all' alone it changes nothing
+    if SNOW_NEW_CATEGORY in cv.named_corrections(configs) and not cv.vertical_tracers(configs):
         cv._refuse("woof_v842_corrections", SNOW_NEW_CATEGORY,
                    "update_snow_bgc (the correction's routine) runs only with the vertical tracers",
                    "config_use_vertical_tracers = .true., or no bgc_snow_new_category")
-    if TOTAL_CHLOROPHYLL in cv.corrections(configs) and not (cv.vertical_tracers(configs)
-                                                             and configs["config_use_vertical_biochemistry"]):
+    if TOTAL_CHLOROPHYLL in cv.named_corrections(configs) and not (cv.vertical_tracers(configs)
+                                                                   and configs["config_use_vertical_biochemistry"]):
         cv._refuse("woof_v842_corrections", TOTAL_CHLOROPHYLL,
                    "the correction changes only the vertical biochemistry's totalChlorophyll",
                    "config_use_vertical_biochemistry = .true. with the vertical tracers, or no total_chlorophyll")
-    if cv.ZAERO_KSCAVZ in cv.corrections(configs) and not (cv.vertical_tracers(configs)
-                                                            and configs[cv.ZAERO_FLAG]):
+    if SNOW_NEW_CATEGORY in cv.named_corrections(configs) and \
+            configs.get("config_use_column_vertical_thermodynamics", True):
+        cv._refuse("woof_v842_corrections", SNOW_NEW_CATEGORY,
+                   "with the vertical thermodynamics every category update_snow_bgc reaches has an initial "
+                   "area, so the correction changes nothing",
+                   "config_use_column_vertical_thermodynamics = .false., or no bgc_snow_new_category")
+    if cv.ZAERO_KSCAVZ in cv.named_corrections(configs) and not (cv.vertical_tracers(configs)
+                                                                  and configs[cv.ZAERO_FLAG]):
         cv._refuse("woof_v842_corrections", cv.ZAERO_KSCAVZ,
                    "the correction changes only the z-aerosols' scavenging coefficients",
                    "config_use_zaerosols = .true. with the vertical tracers, or no zaero_snow_scavenging")

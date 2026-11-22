@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 455,
+**Which keys a `[[domain]]` table may override.** Exactly these 457,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -406,7 +406,8 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     iccg_prescribed_den  cellcount_method  cldtop_adjustment  do_radar_ref
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
-    gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
+    gf_deep_rain_evaporation_booking  ysu_surface_heat_exner  woof_quirk_corrections
+    mynn_sfclay_psih_zolzt
     obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
     obstacle_drag_coefficient  obstacle_wall_z0  urban_param_file
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
@@ -594,6 +595,52 @@ pi, so the surface heat enters as `HFX*pi` (4.5% short at 850 hPa). With
 level, so the surface heat enters as `HFX`. Refused with BEP/BEM
 (`sf_urban_physics` 2 or 3). Off, the arithmetic is WRF's word for word.
 It is not a WRF namelist key; set it in the TOML.
+
+`woof_quirk_corrections` (default `"none"`) is the umbrella over the
+opt-in corrections of WRF 4.7.1 / MPAS v8.4.2 quirks
+(`woof/quirk_corrections.py`). With `"none"` each correction stays on
+its own key, off unless set. `"all"` turns on every correction whose
+scheme the run carries; one whose scheme does not run stays off. A key
+set to anything but its corrected value next to `"all"` is refused by
+name, and a correction its own key refuses in some combination (YSU's
+with BEP/BEM) is refused there under `"all"` too. Per domain, like the
+corrections. The same key works in the MPAS config dicts, and the hex
+door takes it as `--quirk-corrections all`. `"all"` turns on:
+
+- WRF route (RunConfig): `gf_deep_rain_evaporation_booking = true`
+  (`cu_physics = 3`), `ysu_surface_heat_exner = true`
+  (`bl_pbl_physics = 1`) and `mynn_sfclay_psih_zolzt = true`
+  (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`).
+- Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
+  (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
+  stays off on the MPAS suite route, local time stepping, partial nest and
+  the partitioned same-host executor, which do not carry it). The door's
+  `--quirk-corrections all` sets only this flag: the RunConfig keys above
+  are not hex flags.
+- MPAS-Ocean: `woof_land_ice_isomip_freezing_salinity =
+  'boundary_layer_salinity'`, `woof_bottom_drag_dry_edges = 'skip'`,
+  `woof_rayleigh_bottom_friction = 'corrected'` and `woof_redi_k33 =
+  'kappa'`.
+- MALI: `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
+  `woof_simple_velocity_bed` and `woof_analysis_empty` at `'corrected'`,
+  and `woof_statistics_extrema = 'ice'`.
+- MPAS-Seaice column (`woof_v842_corrections` names):
+  `set_sfcflux_order`, `ice_velocity_at_cell`,
+  `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
+  `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
+  `bgc_snow_new_category`, `subcycle_snow_ice_tracers`,
+  `zaero_snow_scavenging`, `shortwave_bio_grid` and `total_chlorophyll`.
+- MPAS-Seaice velocity solver set-up (the time step's
+  `basis_corrections` / `weak_corrections` names): `planar_metric_terms`
+  and `periodic_local_coords` (variational basis; each acts only on a
+  planar or periodic mesh) and `weak_ridge_delta` (weak stress divergence).
+
+`mynn_sfclay_psih_zolzt` (default `false`) is an opt-in correction to the
+MYNN surface layer's 2 m and 10 m diagnostics (`sf_sfclay_physics = 5`,
+`mynn_sfclay_variant = "wrf_461"`), per domain on the same terms. WRF's
+`module_sf_mynn.F` integrates that heat profile from `z0/L` while its log
+term starts at `zt`; with `true` it starts at `zt/L`. Off, the arithmetic
+is WRF's word for word.
 
 `obstacle_opt` (default `0`) resolves buildings and other obstacles on an
 LES or other high-resolution domain. It is woof's own option, not a WRF
@@ -1560,8 +1607,11 @@ The `spacewx_f107_*` and `spacewx_ionosphere_maps` keys are refused while
 `spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 2` is refused with a numeric
 `spacewx_f107_source` (it reads ap from the GFZ file). `spacewx_ionosphere_opt = 1` or `2` is refused without a
 radiation scheme, since the ionosphere uses the radiation geometry's columns.
-It is also refused on a streamed (tiled) domain and on hex, where no history
-stream carries the rows yet. Its CCIR/URSI maps and IGRF-14 coefficients are
+It is also refused on a streamed (tiled) domain.
+Hex's generic column seam takes it (`--physics spacewx_ionosphere_opt=1`) and
+writes each row as one value per cell, `(Time, nCells)`. Hex's MPAS v8.4.2 suite
+route also takes the keys from `--physics` and writes the rows per cell, with no
+radiation condition (docs/spacewx.md). Its CCIR/URSI maps and IGRF-14 coefficients are
 fetched on first use into `~/.woof/spacewx` (or `$WOOF_SPACEWX_CACHE`) and
 checked against pinned SHA-256 sums. The GFZ index file is a living record, so
 it has no pinned sum: it is fetched again when it ends before the day before the
@@ -1573,7 +1623,8 @@ ionosphere's receipt as the run starts (the `[spacewx ionosphere]` line).
 `spacewx_aurora_opt = 2` is refused unless `spacewx_kp_source` is `"omni"` or `"swpc"`,
 `spacewx_aurora_opt = 3` unless it is `"omni"`, and
 `spacewx_aurora_opt = 1`, `2` or `3` is refused without a radiation scheme, on a streamed
-domain and on hex, for the same reasons as the ionosphere rows. For the aurora
+domain, for the same reasons as the ionosphere rows (hex's generic column seam
+and hex's MPAS v8.4.2 suite route write them per cell from `--physics`). For the aurora
 the GFZ file is fetched again when it lacks the latest 3-hour interval that has
 ended by the start, since the latest Kp is the one that matters (the cached file
 is kept if GFZ cannot be reached). A fetched Kp is held per source and start in

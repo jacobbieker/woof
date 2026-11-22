@@ -127,6 +127,10 @@ def test_fewer_ice_layers_than_biology_layers_are_refused_unless_corrected(glibc
     with pytest.raises(ConfigurationRefusal, match="verticalGrid"):
         crad.refuse_unported(case["config"], dims)
     crad.refuse_unported({**case["config"], "woof_v842_corrections": ("shortwave_bio_grid",)}, dims)
+    # the umbrella turns it on as well; there the correction without the bioabsorption is not refused
+    crad.refuse_unported({**case["config"], "woof_quirk_corrections": "all"}, dims)
+    crad.refuse_unported({**case["config"], "config_use_shortwave_bioabsorption": False,
+                          "woof_quirk_corrections": "all"}, case["dims"])
     # the correction means nothing without the bioabsorption of the z-aerosols
     plain = {**case["config"], "config_use_shortwave_bioabsorption": False,
              "woof_v842_corrections": ("shortwave_bio_grid",)}

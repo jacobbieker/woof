@@ -28,6 +28,7 @@ from ..mpasdiag import acc_diag_v842 as _acc
 from ..mpasdiag import afwa_diag_v842 as _afwa
 from ..mpasdiag import lightning_diag_v842 as _lightning
 from ..mpasdiag import hailcast_diag_v842 as _hailcast
+from ..mpasdiag import spacewx_diag_v842 as _spacewx
 from ..mpasdiag import reduction_diag_v842 as _reduce
 
 _ENTITY = {"nCells", "nEdges", "nVertices"}
@@ -152,6 +153,8 @@ def active_packages(config: DriverConfig, configs: Mapping[str, Any]) -> set[str
     packages.update(_lightning.packages(config))
     # WOOF's &diagnostics config_hailcast_opt (mpasdiag.hailcast_diag_v842).
     packages.update(_hailcast.packages(config))
+    # WRF's --physics spacewx_* history keys (mpasdiag.spacewx_diag_v842).
+    packages.update(_spacewx.packages(config))
     # WOOF's &diagnostics CLWRF / RASM / surface_energy_diag options (mpasdiag.reduction_diag_v842).
     packages.update(_reduce.packages(config))
     return packages
@@ -181,6 +184,7 @@ class RegistryLayout:
         _afwa.extend_registry(self.root, _afwa.packages(config))
         _lightning.extend_registry(self.root, _lightning.packages(config))
         _hailcast.extend_registry(self.root, _hailcast.packages(config))
+        _spacewx.extend_registry(self.root, _spacewx.packages(config))
         _reduce.extend_registry(self.root, _reduce.packages(config))
         self.configs = {}
         self.config_kinds = {}
