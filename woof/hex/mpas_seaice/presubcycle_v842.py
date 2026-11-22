@@ -300,7 +300,7 @@ def surface_tilt(*, mesh: dict, icestate: dict, ocean: dict, solver: dict, tilt:
 def pre_subcycle(*, mesh: dict, boundary: dict, tracers: dict, aggregate: dict, icestate: dict, ocean: dict,
                  atmos: dict, solver: dict, variational: dict, use_column_package: bool,
                  use_column_vertical_thermodynamics: bool, use_air_stress: bool, use_ocean_stress: bool,
-                 tilt: str, column_ice_strength=None) -> None:
+                 tilt: str, column_ice_strength=None, init_subcycle=None) -> None:
     """``velocity_solver_pre_subcycle``, in place, in the model's order:
     the aggregates and masks, the new-ice velocities, the ice strength, the
     air stress, then :func:`velocity_v842.pre_subcycle`'s Coriolis
@@ -311,7 +311,10 @@ def pre_subcycle(*, mesh: dict, boundary: dict, tracers: dict, aggregate: dict, 
     ``colpkg_ice_strength``'s: ``column_ice_strength`` is a callable that
     computes it in place (the time step passes
     :func:`~woof.hex.mpas_seaice.column_ridge_v842.ice_strength`). Without
-    one, that configuration is refused by name before anything is touched."""
+    one, that configuration is refused by name before anything is touched.
+    ``init_subcycle``, if given, runs in place of the variational
+    ``init_subcycle_variables`` (the weak form's,
+    :func:`~woof.hex.mpas_seaice.weak_v842.init_subcycle_variables`)."""
     flags = {"use_column_package": use_column_package,
              "use_column_vertical_thermodynamics": use_column_vertical_thermodynamics}
     column = use_column_package and use_column_vertical_thermodynamics
@@ -330,4 +333,7 @@ def pre_subcycle(*, mesh: dict, boundary: dict, tracers: dict, aggregate: dict, 
     velocity_v842.coriolis_and_ocean_stress(mesh=mesh, icestate=icestate, solver=solver,
                                             use_ocean_stress=use_ocean_stress)
     surface_tilt(mesh=mesh, icestate=icestate, ocean=ocean, solver=solver, tilt=tilt)
-    velocity_v842.init_subcycle_variables(mesh=mesh, solver=solver, variational=variational)
+    if init_subcycle is not None:
+        init_subcycle()
+    else:
+        velocity_v842.init_subcycle_variables(mesh=mesh, solver=solver, variational=variational)

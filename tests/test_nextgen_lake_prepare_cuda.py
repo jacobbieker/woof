@@ -16,6 +16,55 @@ from woof.hydro import output
 from woof.hydro.reservoirs import prepare
 
 
+ROOT = Path(__file__).resolve().parents[1]
+_SCRATCH = None
+
+
+def _cargo(*args, env):
+    import shutil
+    import subprocess
+    if shutil.which("cargo") is None:
+        raise unittest.SkipTest("cargo is not on PATH: the Rust lake fragment and the Rust output "
+                                "library cannot be built (set NEXTGEN_LAKE_FRAGMENT and "
+                                "WOOF_NEXTGEN_OUTPUT_LIBRARY to prebuilt ones)")
+    done = subprocess.run(["cargo", *args], env=env, cwd=ROOT, capture_output=True, text=True)
+    if done.returncode:
+        raise unittest.SkipTest("the Rust build failed (set NEXTGEN_LAKE_FRAGMENT and "
+                                "WOOF_NEXTGEN_OUTPUT_LIBRARY to prebuilt ones): " + done.stderr[-400:])
+
+
+def setUpModule():
+    """The test consumes the real Rust lake fragment and the Rust output library.  When the environment
+    does not name them, build them from this checkout: the packer's own synthetic-ABI test writes the
+    fragment (its path lands in HYDRO_TEST_ROOT/cuda-input-path.txt) and the output crate is a cdylib."""
+    global _SCRATCH
+    _SCRATCH = tempfile.TemporaryDirectory(prefix="nextgen-lake-")
+    env = dict(os.environ)
+    env.setdefault("CARGO_TARGET_DIR", str(Path(_SCRATCH.name) / "target"))
+    if not os.environ.get("NEXTGEN_LAKE_FRAGMENT"):
+        hydro = Path(_SCRATCH.name) / "hydro"
+        hydro.mkdir()
+        _cargo("test", "--release", "--locked", "--manifest-path",
+               "tools/nextgen_reservoir_prepare/Cargo.toml", env={**env, "HYDRO_TEST_ROOT": str(hydro)})
+        os.environ["NEXTGEN_LAKE_FRAGMENT"] = (hydro / "cuda-input-path.txt").read_text().strip()
+    if not os.environ.get("WOOF_NEXTGEN_OUTPUT_LIBRARY"):
+        try:
+            output._library_path()
+        except FileNotFoundError:
+            _cargo("build", "--release", "--locked", "--manifest-path",
+                   "tools/nextgen_output/Cargo.toml", env=env)
+            import sys
+            name = ("rw_nextgen_output.dll" if os.name == "nt" else
+                    "librw_nextgen_output.dylib" if sys.platform == "darwin" else
+                    "librw_nextgen_output.so")
+            os.environ["WOOF_NEXTGEN_OUTPUT_LIBRARY"] = str(Path(env["CARGO_TARGET_DIR"]) / "release" / name)
+
+
+def tearDownModule():
+    if _SCRATCH is not None:
+        _SCRATCH.cleanup()
+
+
 class PreparedLakeTests(unittest.TestCase):
     def component(self, *, changed_datum=False):
         root = Path(os.environ["NEXTGEN_LAKE_FRAGMENT"])

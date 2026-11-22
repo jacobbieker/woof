@@ -23,7 +23,12 @@
 #else
 #define ZB_NBMAX 32
 #endif
+#define ZB_HS_SSL 0.040     // ice_colpkg_shared hs_ssl: the snow surface layer (m)
 #define ZB_REMAP_STOP 2     // ice: remap_layers_bgc error
+// the Fortran's arrays are nbyrn + nlyrn + 3 long; the largest remaps are the
+// shortwave's (nilyr + 1 onto nblyr + 1) and regrid_stationary's (nblyr + 1 onto
+// nblyr + 1), with index 0 unused
+#define ZB_REMAP_N (2 * ZB_NBMAX + COL_NILYR + 6)
 
 // remap_zbgc (ice_zbgc_shared.F90:167-333). nr0 = 0: the donor's nlyrn layers
 // on ice_grid (hice) onto the receiver's nbyrn layers on bio_grid (hinS);
@@ -37,9 +42,8 @@ __device__ int remap_zbgc(const double *src, int nr0, int nlyrn, int nbyrn, doub
                           const double *ice_grid, const double *bio_grid, double S_min, double *out)
 {
     if (hinS < 0.0 || hice < 0.0) return ZB_REMAP_STOP;
-    double dgrid[ZB_NBMAX + COL_NILYR + 4], rgrid[ZB_NBMAX + COL_NILYR + 4], tracer[ZB_NBMAX + COL_NILYR + 4];
-    double trgrid[ZB_NBMAX + COL_NILYR + 4], trdr[ZB_NBMAX + COL_NILYR + 4];
-    for (int k = 0; k < ZB_NBMAX + COL_NILYR + 4; ++k) { trgrid[k] = 0.0; trdr[k] = 0.0; }
+    double dgrid[ZB_REMAP_N], rgrid[ZB_REMAP_N], tracer[ZB_REMAP_N], trgrid[ZB_REMAP_N], trdr[ZB_REMAP_N];
+    for (int k = 0; k < ZB_REMAP_N; ++k) { trgrid[k] = 0.0; trdr[k] = 0.0; }
     int n_nd, n_nr, n_plus;
     if (nr0 == 0) {                                   // cice to bio
         n_nd = nlyrn;

@@ -57,12 +57,18 @@ def test_the_suite_route_takes_the_keys_from_physics():
     plain = _route([])
     assert plain.spacewx_diagnostics is None and "spacewx_diagnostics" not in plain.receipt()
     assert _route(["spacewx_ionosphere_opt=0"]).spacewx_diagnostics is None
+    # Option 2, the storm-time correction, adds its ratio row (IONO_STORM).
+    storm = _route(["spacewx_ionosphere_opt=2", "spacewx_f107_source=gfz"])
+    assert sw.packages(storm) == {"spacewx_ionosphere", "spacewx_storm"}
+    assert sw.field_definition("iono_storm")["gates"] == ["spacewx_storm"]
+    assert sw.field_definition("iono_storm")["attrs"]["wrf_name"] == "IONO_STORM"
 
 
 @pytest.mark.parametrize("physics, message", [
     (["mp_physics=8"], "Registry has no physics option"),
     (["spacewx_epp_opt=1"], "Registry has no physics option"),
-    (["spacewx_ionosphere_opt=2"], "must be 0"),
+    (["spacewx_ionosphere_opt=3"], "must be 0"),
+    (["spacewx_ionosphere_opt=2", "spacewx_f107_source=150"], "not a number"),
     (["spacewx_ionosphere_opt=one"], "an integer"),
     (["spacewx_f107_source=150"], "would do nothing"),
     (["spacewx_ionosphere_opt=1", "spacewx_f107_mode=weekly"], "81day"),
@@ -91,7 +97,8 @@ def _layout(physics=()):
 def test_pools_and_streams_only_with_the_keys(tmp_path):
     from woof.hex.mpasphys.forecast_v842 import read_streams, write_default_streams
     from woof.hex.streams_v842 import _all_packages, field_definition
-    off, on = _layout(), _layout([*ION, "spacewx_aurora_opt=3", "spacewx_kp_source=omni"])
+    off, on = _layout(), _layout(["spacewx_ionosphere_opt=2", "spacewx_f107_source=gfz",
+                                  "spacewx_aurora_opt=3", "spacewx_kp_source=omni"])
     rows = lambda layout: {r["name"]: r for r in layout.fields if r["pool"] == "diag"}
     assert not set(sw.NAMES) & set(rows(off))
     assert set(sw.NAMES) <= set(rows(on))
@@ -110,8 +117,9 @@ def test_pools_and_streams_only_with_the_keys(tmp_path):
     assert field_definition("aurora_eflux")["gates"] == ["spacewx_aurora_energy"]
     assert field_definition("joule_power")["attrs"]["units"] == "GW"
     assert set(sw.PACKAGES) <= _all_packages()
-    # Only the ionosphere: no aurora rows.
+    # Only the ionosphere: no aurora rows, and option 1 has no storm row.
     assert not {n for n in sw.NAMES if not n.startswith("iono")} & set(rows(_layout(ION)))
+    assert "iono_storm" not in rows(_layout(ION))
 
 
 def test_the_off_state_registry_streams_and_receipt_are_unchanged():
@@ -277,5 +285,7 @@ def test_the_active_packages_fields_are_produced_before_the_writer_is_built():
 
     assert produced(()) == rod.PRODUCED
     ion = produced({"spacewx_ionosphere"})
-    assert {n for n in sw.NAMES if n.startswith("iono_")} <= ion and not {"aurora_zone", "joule_power"} & ion
+    assert {n for n in sw.NAMES if n.startswith("iono_")} - {"iono_storm"} <= ion
+    assert not {"iono_storm", "aurora_zone", "joule_power"} & ion
+    assert "iono_storm" in produced({"spacewx_ionosphere", "spacewx_storm"})
     assert set(sw.NAMES) <= produced(set(sw.PACKAGES))

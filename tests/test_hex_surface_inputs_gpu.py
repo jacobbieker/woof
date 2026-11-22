@@ -17,6 +17,7 @@ import pytest
 cp = pytest.importorskip("cupy")
 
 import mpas_column_physics_cases as cases  # noqa: E402
+from conftest import requires_water_blend_bridge  # noqa: E402
 from woof.core import mpas_column_suite as suite  # noqa: E402
 
 NZ, NCOL, DT = cases.NZ, cases.NCOL, cases.DT
@@ -93,6 +94,7 @@ def _host(value):
     return cp.asnumpy(cp.asarray(value)).copy()
 
 
+@requires_water_blend_bridge
 def test_hex_lake_columns_are_wrf_lake_kernel_columns():
     from woof.core.lake import initialize_lake
     from woof.core.lake_schema import LAKE_OUTPUT_LAYOUT
@@ -167,6 +169,7 @@ def _lake_seam():
         **_seal(_mapping(_physics(), _inputs())).arwen_kwargs())
 
 
+@requires_water_blend_bridge
 def test_the_lake_seam_restarts_bit_identically():
     from woof.core.lake_schema import LAKE_OUTPUT_LAYOUT
 

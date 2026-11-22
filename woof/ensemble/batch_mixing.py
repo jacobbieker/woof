@@ -44,6 +44,8 @@ _GRID_MACRO_ENTRIES = frozenset({
     "wrf_smag_flux_s", "wrf_smag_hd_s", "wrf_calc_n2", "wrf_smag3d_km", "wrf_smag_vd_s",
     "wrf_smag_surface_u_cd0", "wrf_smag_surface_v_cd0", "wrf_smag_surface_heat_const",
     "wrf_tke_km", "wrf_tke_rhs",
+    # the multi-row scalar launches (smag2d.cu); the batch path launches the per-row kernels above
+    "wrf_smag_flux_s_multi", "wrf_smag_hd_s_multi",
 })
 _SMAG_PTX_ENTRIES = _GRID_MACRO_ENTRIES | {"wrf_smag_deform", "wrf_smag2d_km", "wrf_smag_km_bc"}
 _ROWS = (("u0", "smag_ru", "diff6_x", "x", "c1h", "c2h"),
