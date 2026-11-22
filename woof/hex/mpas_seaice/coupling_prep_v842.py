@@ -147,6 +147,7 @@ def check_config(configs: dict) -> None:
         # ocean*Flux field, mpas_seaice_column.F:3998-3999): every ocean*Flux stays zero
         carried = cv.BGC_PORTED + (cv.ZSAL_FLAG,)
         if cv.vertical_tracers(c):
+            cv._refuse_z_tracers(c)
             carried += (cv.VT_FLAG,) + cv.VT_PORTED
         for flag in cv._BGC_FLAGS:
             if flag not in carried and c[flag]:

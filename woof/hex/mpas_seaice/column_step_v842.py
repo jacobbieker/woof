@@ -119,6 +119,14 @@ def check_config(configs: dict) -> None:
                 "config_use_column_package = .true.")
     if c.get("config_use_column_biogeochemistry", False):
         _refuse_inactive_bgc_diagnostics(c)
+    if c.get(cv.VT_FLAG, False):
+        if not c.get("config_use_column_biogeochemistry", False):
+            # check_column_package_configs stops on any biogeochemistry flag without the column
+            # biogeochemistry (mpas_seaice_column.F:8159-8167)
+            _refuse(cv.VT_FLAG, True, "MPAS stops on the vertical tracers without the column biogeochemistry "
+                    "(check_column_package_configs)", "config_use_column_biogeochemistry = .true. with "
+                    f"{cv.VT_FLAG}, or {cv.VT_FLAG} = .false.")
+        cv._refuse_z_tracers({**cv.default_configs(), **c})
     if SUBCYCLE_SNOW_ICE in cv.corrections(c) and not c.get("config_use_vertical_tracers", False):
         _refuse("woof_v842_corrections", SUBCYCLE_SNOW_ICE,
                 "the snow and ice tracers are separated and combined only with the vertical tracers",
