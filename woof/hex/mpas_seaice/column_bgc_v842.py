@@ -56,9 +56,11 @@ negative tracer), ``negative bgc``, ``remap_zbgc``'s, and
 logs a stop label nothing set (whatever ``abortMessage`` held). The FCT's
 conservation failure and the snow's warnings are warnings only, not kept.
 ``update_snow_bgc`` divides by the area before the step unguarded, so ice
-new to a category (an initial area of 0) would take NaN; the step never
-makes that (the area before the step is the step's own), and the cases do
-not.
+new to a category (an initial area of 0) takes NaN. With the vertical
+thermodynamics the step never makes that; without them
+``iceAreaCategoryInitial`` is never refreshed, so a category the last step's
+ITD opened gives a NaN ``oceanBioFluxes`` (kept word for word; the opt-in
+correction ``bgc_snow_new_category`` takes it to have had no snow).
 
 What it refuses, by name: the biogeochemistry without ``config_use_brine``
 (``colpkg_biogeochemistry`` writes the brine changes, which only the brine
@@ -124,6 +126,9 @@ SOURCE_FILES = (
 _BLOCK = 64
 SEAICE_ERROR_COL_BGC = 13
 MAX_CATEGORIES = 64
+#: the opt-in correction (column_v842.CORRECTIONS) for update_snow_bgc's 0/0 on a
+#: category without an initial area
+SNOW_NEW_CATEGORY = "bgc_snow_new_category"
 STOP_LABELS = {1: "ice_brine preflushing: fbri <= c0", 2: "ice: remap_layers_bgc error",
                3: "bSin(k) > max_salin", 4: "zbgc initialization error", 5: "negative bgc",
                6: "(check_conservation_FCT's stop: v8.4.2 logs an undefined stop_label)"}
@@ -162,6 +167,17 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         cv._refuse("config_nCategories", dims["nCategories"],
                    f"the brine kernel holds at most {MAX_CATEGORIES} categories",
                    f"config_nCategories <= {MAX_CATEGORIES}")
+    # refused only when named; under woof_quirk_corrections = 'all' alone it changes nothing
+    if SNOW_NEW_CATEGORY in cv.named_corrections(configs) and not cv.vertical_tracers(configs):
+        cv._refuse("woof_v842_corrections", SNOW_NEW_CATEGORY,
+                   "update_snow_bgc (the correction's routine) runs only with the vertical tracers",
+                   "config_use_vertical_tracers = .true., or no bgc_snow_new_category")
+    if SNOW_NEW_CATEGORY in cv.named_corrections(configs) and \
+            configs.get("config_use_column_vertical_thermodynamics", True):
+        cv._refuse("woof_v842_corrections", SNOW_NEW_CATEGORY,
+                   "with the vertical thermodynamics every category update_snow_bgc reaches has an initial "
+                   "area, so the correction changes nothing",
+                   "config_use_column_vertical_thermodynamics = .false., or no bgc_snow_new_category")
 
 
 def module_source(n_ice_layers: int, n_bio_layers: int) -> str:
@@ -215,7 +231,8 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
     tr_brine = bool(configs["config_use_brine"])
     solve_zsal = cv.solves_zsal(configs)
     z_tracers = cv.vertical_tracers(configs)
-    flags = int(tr_brine) | int(solve_zsal) << 1 | int(z_tracers) << 2
+    snow_new_category = SNOW_NEW_CATEGORY in cv.corrections(configs)
+    flags = int(tr_brine) | int(solve_zsal) << 1 | int(z_tracers) << 2 | int(snow_new_category) << 3
     status = cp.zeros(max(n_solve, 1), np.int32)
     if solve_zsal:
         zsal = need(t, "verticalSalinity", (n_cells + 1, ncat, nbl))

@@ -91,6 +91,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "the MYNN surface layer's 2 m / 10 m heat profile is integrated from zt/L, as its log term is",
         # the gsl_wrf39 fork integrates from z0/L throughout: nothing to correct
         active=lambda get: int(get("sf_sfclay_physics")) == 5 and get("mynn_sfclay_variant") == "wrf_461"),
+    QuirkCorrection(
+        "noah_smc_floor_booking", "wrf", False, True, "sf_surface_physics = 2",
+        "Noah's 0.02 soil-moisture floor takes the water it adds from the layer below, or RUNOFF3",
+        active=lambda get: int(get("sf_surface_physics")) == 2),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",
@@ -148,6 +152,12 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
     QuirkCorrection(
         "zsal_solve", "mpas_seaice", False, True, "config_use_vertical_zsalinity",
         "the vertical salinity is solved, as config_use_vertical_zsalinity asks"),
+    QuirkCorrection(
+        "bgc_snow_new_category", "mpas_seaice", False, True, "vertical tracers without the vertical thermodynamics",
+        "a category without an initial area had no snow (no 0/0 NaN in oceanBioFluxes)"),
+    QuirkCorrection(
+        "subcycle_snow_ice_tracers", "mpas_seaice", False, True, "vertical tracers with dynamics subcycles",
+        "the vertical tracers are separated after each subcycle, so the next combine keeps the ridging"),
     # MPAS-Seaice v8.4.2 velocity solver set-up (woof.hex.mpas_seaice.timestep_v842)
     QuirkCorrection(
         "planar_metric_terms", "mpas_seaice_velocity", False, True, "variational basis on a planar mesh",

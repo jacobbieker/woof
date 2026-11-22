@@ -2429,6 +2429,14 @@ class RunConfig:
     # only T2/TH2/Q2 and the 2 m exchange coefficients; False is WRF's
     # arithmetic word for word.  wrf_461 variant only.
     mynn_sfclay_psih_zolzt: bool = _config_field(default=False, kw_only=True)
+    # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-22),
+    # appended off.  Noah's SSTEP (sf_surface_physics = 2) raises a layer's
+    # total soil moisture below 0.02 to 0.02 (module_sf_noahlsm.F:4030) and
+    # books the water it adds nowhere, so dry sandy columns gain water.
+    # True takes it from the layer below as a negative WPLUS, and below the
+    # bottom layer from RUNOFF3 (:4075), which may then go negative; False
+    # is WRF's arithmetic word for word.  Read only where Noah runs.
+    noah_smc_floor_booking: bool = _config_field(default=False, kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -9542,6 +9550,13 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "gf_deep_rain_evaporation_booking must be true or false")
     if type(cfg.ysu_surface_heat_exner) is not bool:
         raise ConfigurationRefused("ysu_surface_heat_exner must be true or false")
+    if type(cfg.noah_smc_floor_booking) is not bool:
+        raise ConfigurationRefused("noah_smc_floor_booking must be true or false")
+    if cfg.noah_smc_floor_booking and int(cfg.sf_surface_physics) != 2:
+        raise ConfigurationRefused(
+            "noah_smc_floor_booking corrects Noah's soil-moisture floor "
+            f"(sf_surface_physics = 2); this run selects sf_surface_physics = "
+            f"{cfg.sf_surface_physics}, which never reads it")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
     if cfg.ysu_surface_heat_exner and int(cfg.bl_pbl_physics) != 1:
