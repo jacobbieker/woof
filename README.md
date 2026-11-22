@@ -297,8 +297,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     coupler's land-ice means; standalone, in the diagnostics and over forward
     steps; 'HollandJenkins' is refused by name), and the Gent-McWilliams
     bolus velocity (`ocn_gm_compute_Bolus_velocity`: isoneutral slopes,
-    their smoothing and tapering, `k33`, the stream function's solve;
-    standalone, not yet wired into the step). Three v8.4.2 quirks keep
+    their smoothing and tapering, `k33`, the stream function's solve) and
+    Redi isoneutral mixing (`ocn_tracer_hmix_redi_tend`'s three horizontal
+    terms, and `k33` in the vertical diffusivity, which v8.4.2 adds without
+    `config_Redi_kappa`; `woof_redi_k33 = 'kappa'` scales it), standalone
+    and not yet wired into the step. Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
