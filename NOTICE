@@ -1792,6 +1792,13 @@ as MPAS-Seaice tabulates them), under the same terms and marking.
 tools/mpas_seaice_oracle/run_variational_basis.F90 drives those modules,
 compiled verbatim.
 
+woof/hex/mpas_seaice/weak_v842.py and weak_v842.cu transcribe MPAS-Seaice
+v8.4.2's weak-form stress divergence (mpas_seaice_velocity_solver_weak.F,
+the weak branch of mpas_seaice_velocity_solver.F's init_subcycle_variables,
+and seaice_normal_vectors with its routines from mpas_seaice_mesh.F), under
+the same terms and marking. tools/mpas_seaice_oracle/run_velocity_weak.F90
+drives those modules, compiled verbatim.
+
 woof/hex/coupled/prep_ocn_merge_e3sm.cu (and its Python wrapper) transcribe
 E3SM v3.2.0's ocean import merge, prep_ocn_merge, from
 driver-mct/main/prep_ocn_mod.F90 (cpl7: University Corporation for

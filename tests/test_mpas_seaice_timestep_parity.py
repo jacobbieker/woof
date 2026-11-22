@@ -80,7 +80,7 @@ def test_fixture_covers_the_branches(precision):
 @pytest.mark.parametrize("knob, value", [
     ("config_advection_type", "upwind"), ("config_use_forcing", True),
     ("config_perform_unit_test", True), ("config_do_restart", True), ("config_use_halo_exch", True),
-    ("config_stress_divergence_scheme", "weak"),
+    ("config_stress_divergence_scheme", "none"),   # "weak" runs (test_mpas_seaice_weak_parity.py)
 ])
 def test_what_the_driver_does_not_carry_is_refused_by_name(knob, value):
     from woof.hex.mpas_seaice import timestep_v842 as ts

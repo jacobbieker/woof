@@ -22,6 +22,9 @@
 # (seaice_column_coupling_prep and seaice_column_scale_fluxes, cut verbatim);
 # run_variational_basis.F90 the variational basis set-up (the wachspress, pwl,
 # variational_shared and numerics modules verbatim; asin and tan the host libm's).
+# run_velocity_weak.F90 the weak-form solver (mpas_seaice_velocity_solver_weak.F
+# verbatim, with seaice_normal_vectors cut verbatim; atan2, asin, sin, cos and
+# tan the host libm's, matmul libgfortran's).
 # The objects must contain no FMA instruction (checked with objdump
 # when it is present).  expf (RKIND 4) and exp (RKIND 8), which ice_strength
 # calls, are the host glibc's, or tools/oracle_libm's transcriptions of them on
@@ -60,17 +63,22 @@ seaice="${source_root}/src/core_seaice"
 # seaice_mesh's interpolation routines and the routines the variational basis
 # set-up calls (seaice_cell_vertices_at_vertex, seaice_project_3D_vector_onto_local_2D
 # with seaice_dot_product_3space and the private local_eastern_and_northern_unit_vectors,
-# seaice_grid_rotation_forward), byte for byte, inside a module of that name
+# seaice_grid_rotation_forward) and the weak form's (seaice_normal_vectors and
+# the private routines it calls), byte for byte, inside a module of that name
 mesh_cut="${build_dir}/seaice_mesh_interpolation.F90"
 {
     printf 'module seaice_mesh\n  use mpas_derived_types\n  use mpas_pool_routines\n  implicit none\n'
     printf '  private\n  public :: seaice_interpolate_cell_to_vertex, seaice_interpolate_vertex_to_cell, &\n'
     printf '            seaice_cell_vertices_at_vertex, seaice_dot_product_3space, seaice_grid_rotation_forward, &\n'
-    printf '            seaice_project_3D_vector_onto_local_2D\ncontains\n'
+    printf '            seaice_project_3D_vector_onto_local_2D, seaice_normal_vectors\ncontains\n'
     awk '/^  subroutine seaice_interpolate_cell_to_vertex\(/{on=1} on{print} /^  end subroutine seaice_interpolate_vertex_to_cell/{on=0}' \
         "${seaice}/shared/mpas_seaice_mesh.F"
     for routine in seaice_cell_vertices_at_vertex seaice_dot_product_3space seaice_project_3D_vector_onto_local_2D \
-                   local_eastern_and_northern_unit_vectors seaice_grid_rotation_forward; do
+                   local_eastern_and_northern_unit_vectors seaice_grid_rotation_forward \
+                   seaice_normal_vectors seaice_normal_vectors_polygon seaice_normal_vectors_triangle \
+                   normal_vectors_planar_polygon normal_vectors_planar_triangle \
+                   normal_vectors_spherical_polygon_metric normal_vectors_spherical_triangle_metric \
+                   cross_product_3space; do
         awk -v r="${routine}" '$0 ~ "^ *subroutine +" r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine +" r "([^a-zA-Z_0-9]|$)" {on=0}' \
             "${seaice}/shared/mpas_seaice_mesh.F"
     done
@@ -142,6 +150,8 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_wachspress.F"
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_pwl.F"
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_variational.F"
+      # the weak-form solver, verbatim
+      "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_weak.F"
       { cat "${script_dir}/diagnostics_cut_head.F90"
         cut "${seaice}/shared/mpas_seaice_diagnostics.F" seaice_initialize_time_diagnostics \
             seaice_set_time_diagnostics seaice_check_state seaice_load_balance_timers
@@ -180,6 +190,7 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" seaice_column_coupling_cut.F
       "${fc[@]}" "${flags[@]}" "${script_dir}/run_coupling_prep.F90"
       "${fc[@]}" "${flags[@]}" "${script_dir}/run_variational_basis.F90"
+      "${fc[@]}" "${flags[@]}" "${script_dir}/run_velocity_weak.F90"
       if command -v objdump >/dev/null; then
           if objdump -d mpas_seaice_*.o seaice_*.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
               echo "a time-step oracle object contains an FMA instruction; refusing" >&2
@@ -193,7 +204,7 @@ for precision in r4 r8; do
           mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o \
           mpas_seaice_velocity_solver_wachspress.o mpas_seaice_velocity_solver_pwl.o \
           mpas_seaice_velocity_solver_variational_shared.o mpas_seaice_numerics.o \
-          step_standins.o colpkg_standin.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
+          mpas_seaice_velocity_solver_weak.o step_standins.o colpkg_standin.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
           seaice_mesh_interpolation.o oracle_stream.o stubs.o mpas_kind_types.o \
           ${step_libm[@]+"${step_libm[@]}"}
       "${fc[@]}" -o "${build_dir}/run_coupling_prep_${precision}" run_coupling_prep.o seaice_column_coupling_cut.o \
@@ -204,6 +215,10 @@ for precision in r4 r8; do
           mpas_seaice_velocity_solver_constitutive_relation.o \
           seaice_mesh_interpolation.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
           oracle_stream.o stubs.o mpas_kind_types.o
+      "${fc[@]}" -o "${build_dir}/run_velocity_weak_${precision}" run_velocity_weak.o \
+          mpas_seaice_velocity_solver_weak.o mpas_seaice_velocity_solver_constitutive_relation.o \
+          seaice_mesh_interpolation.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
+          oracle_stream.o stubs.o mpas_kind_types.o ${step_libm[@]+"${step_libm[@]}"}
       "${fc[@]}" -o "${build_dir}/run_incremental_remap_${precision}" run_incremental_remap.o \
           mpas_seaice_advection_incremental_remap.o mpas_seaice_advection_incremental_remap_tracers.o \
           remap_standins.o rbf_standins.o seaice_diagnostics_cut.o oracle_stream.o stubs.o mpas_kind_types.o
@@ -310,6 +325,7 @@ done
 "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_wachspress.F"
 "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_pwl.F"
 "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_variational.F"
+"${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_weak.F"
 { cat "${script_dir}/diagnostics_cut_head.F90"
   cut "${seaice}/shared/mpas_seaice_diagnostics.F" seaice_initialize_time_diagnostics \
       seaice_set_time_diagnostics seaice_check_state seaice_load_balance_timers
@@ -343,7 +359,7 @@ fi
     mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o \
     mpas_seaice_velocity_solver_wachspress.o mpas_seaice_velocity_solver_pwl.o \
     mpas_seaice_velocity_solver_variational_shared.o mpas_seaice_numerics.o \
-    step_standins.o seaice_mesh_interpolation.o \
+    mpas_seaice_velocity_solver_weak.o step_standins.o seaice_mesh_interpolation.o \
     mpas_seaice_column.o remap_standins.o mpas_seaice_constants.o ice_*.o oracle_stream.o stubs.o \
     mpas_kind_types.o ${column_libm[@]+"${column_libm[@]}"}
 "${fc[@]}" -o "${build_dir}/run_init_thermo_r8" run_init_thermo.o ice_*.o \
@@ -361,5 +377,6 @@ cd "${build_dir}"
 echo "built ${build_dir}/run_oracle_r{4,8} ${build_dir}/run_subcycle_r{4,8} ${build_dir}/run_presubcycle_r{4,8}" \
      "${build_dir}/run_seaice_step_r{4,8} ${build_dir}/run_incremental_remap_r{4,8}" \
      "${build_dir}/run_incremental_remap_init_r{4,8}" "${build_dir}/run_coupling_prep_r{4,8}" \
-     "${build_dir}/run_variational_basis_r{4,8}" "${build_dir}/run_column_r8" \
+     "${build_dir}/run_variational_basis_r{4,8}" "${build_dir}/run_velocity_weak_r{4,8}" \
+     "${build_dir}/run_column_r8" \
      "${build_dir}/run_init_thermo_r8"
