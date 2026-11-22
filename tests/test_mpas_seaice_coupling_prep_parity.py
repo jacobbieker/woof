@@ -240,8 +240,8 @@ def test_ocean_biogeochemistry_fluxes_zeroed_but_not_scaled_are_caught(monkeypat
     from woof.hex.mpas_seaice import coupling_prep_v842 as cpl
     real = cpl._bgc_ocean_fluxes
 
-    def unscaled(bgc, area, n_cells_solve, n_aggregate):
-        real(bgc, area, n_cells_solve, n_cells_solve)
+    def unscaled(bgc, area, n_cells_solve, n_aggregate, dust=None):
+        real(bgc, area, n_cells_solve, n_cells_solve, dust)
 
     monkeypatch.setattr(cpl, "_bgc_ocean_fluxes", unscaled)
     assert _bgc_mismatches(precision, "biogeochemistry/oceanNitrateFlux") > 0
