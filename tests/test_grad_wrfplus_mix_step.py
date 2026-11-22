@@ -1,16 +1,19 @@
 """The step's TL/AD with WRF's diff_opt 1 / km_opt 4 horizontal mixing
-(P3a item 5, step (d); woof.grad.wrfplus.model with diffusion.py): the
-deformation, smag2d_km and the u, v, w and theta rows of the time-t
-fields into the held tendencies at the step start, their map-factor
-coupling (on a specified domain after the folded relaxation) and their
-add on every stage, on periodic and specified dry domains.
+(P3a item 5, steps (d) and (e); woof.grad.wrfplus.model with
+diffusion.py): the deformation, smag2d_km and the u, v, w and theta rows
+of the time-t fields into the held tendencies at the step start, their
+map-factor coupling (on a specified domain after the folded relaxation)
+and their add on every stage; on a moist state the qv, qc and qr rows
+after rk_step 1's acoustic loop (with its muts) into the species' held
+sources, which qv's boundary capture starts from.  Periodic and
+specified, dry and moist.
 
 Breakage this prevents:
 - a mixing step that drifts from dycore.step's strict words (a row's
   field, mass or coefficient, the coupling, the fold's order, the cold
   diagnosis before the mixing);
 - an adjoint that drops the mixing's share of the winds, theta, the
-  geopotential or the mass;
+  species, the geopotential or the mass (the time-t or the acoustic one);
 - a TL that is not the derivative of the mixing step;
 - a mixing option the binding does not cover that is not refused.
 """
@@ -22,13 +25,18 @@ from test_grad_wrfplus_spec_step import _run as _run_specified
 
 MIX = dict(diff_opt=1, km_opt=4)
 # periodic (over, steps, warm-up): a warm step, one with map factors,
-# rotation, the hybrid coordinate and w_damp, and a cold chain of three
+# rotation, the hybrid coordinate and w_damp, and a cold chain of three;
+# moist: a warm mapped step and a cold chain of two
 PERIODIC = [(dict(MIX), 1, 2),
             (dict(MIX, _msf=1, _rot=1, hybrid_opt=2, w_damping=1), 1, 2),
-            (dict(MIX), 3, 0)]
-# specified (warm-up, steps, map factors, halo shift): a warm step and a
-# cold mapped chain with the halo off the ring
-SPECIFIED = [(2, 1, 0, 0.0), (0, 2, 1, 3.0)]
+            (dict(MIX), 3, 0),
+            (dict(MIX, _moist=1, _msf=1, hybrid_opt=2), 1, 2),
+            (dict(MIX, _moist=1), 2, 0)]
+# specified (warm-up, steps, map factors, halo shift, moist): a warm step
+# and a cold mapped chain with the halo off the ring; moist (qv's tables
+# attached): a warm step and a cold mapped one
+SPECIFIED = [(2, 1, 0, 0.0, 0), (0, 2, 1, 3.0, 0), (2, 1, 0, 0.0, 1), (0, 1, 1, 3.0, 1)]
+NMOIST = sum(1 for o, _, _ in PERIODIC if o.get("_moist")) + sum(c[4] for c in SPECIFIED)
 
 _PERIODIC_LOOP = f'''
 def cases():
@@ -40,8 +48,8 @@ def cases():
 '''
 _SPECIFIED_LOOP = f'''
 def cases():
-    for i, (warm, nstep, msf, shift) in enumerate({SPECIFIED!r}):
-        cfg, state = build(warm, msf, shift, diff_opt=1, km_opt=4)
+    for i, (warm, nstep, msf, shift, moist) in enumerate({SPECIFIED!r}):
+        cfg, state = build(warm, msf, shift, moist=moist, diff_opt=1, km_opt=4)
         geoms = M.step_geometries(state, cfg, nstep)
         IN, PAR = M.step_inputs(geoms[0]), M.step_parameters(geoms[0])
         yield (f"specified{{i}}", cfg, state, geoms, IN, PAR,
@@ -67,15 +75,16 @@ for key, cfg, state, geoms, IN, PAR, PROG in cases():
         M.step_tl(x, dx, g)
         M.step_tl(nomix, zeros(nomix), dataclasses.replace(
             g, mix=None, held=g.fold if g.specified else (),
-            couple=(g.fold if g.specified else ()) if g.couple else ()))
+            couple=(g.fold if g.specified else ()) if g.couple else (),
+            stages=tuple(dataclasses.replace(s, mix_q=()) for s in g.stages)))
         D.step(state, cfg)
     y = M.run_state(state, cfg, np.float32)
     words = lambda a: cp.asnumpy(a).view(np.uint32)
-    for n in IN + ("w0", "u_pp", "mu_pp", "ww_ref"):
+    for n in IN + ("w0", "u_pp", "mu_pp", "ww_ref") + (("ru_m", "ww_m") if cfg.moist else ()):
         out[f"{key}/{n}"] = int((words(x[n]) != words(y[n])).sum())
-    # the mixing must move words
-    out[f"nomix/{key}"] = sum(int((words(nomix[n]) != words(y[n])).sum())
-                              for n in ("u", "v", "w", "thp"))
+    # the mixing must move words, the moist rows each species'
+    for n in ("u", "v", "w", "thp") + (M.SPECIES if cfg.moist else ()):
+        out[f"nomix/{key}/{n}"] = int((words(nomix[n]) != words(y[n])).sum())
 '''
 
 
@@ -86,8 +95,9 @@ def test_mixing_step_reproduces_strict_primal_words(backend, tmp_path):
     reads; the same step without the mixing moves u, v, w and theta."""
     out = _both(backend, _WORDS, tmp_path)
     nomix = {k: out.pop(k) for k in list(out) if k.startswith("nomix/")}
-    assert len(nomix) == len(PERIODIC) + len(SPECIFIED) and all(nomix.values()), nomix
-    assert len(out) == len(PERIODIC) * (11 + 4) + len(SPECIFIED) * (12 + 4)
+    ncase = len(PERIODIC) + len(SPECIFIED)
+    assert len(nomix) == 4 * ncase + 3 * NMOIST and all(nomix.values()), nomix
+    assert len(out) == len(PERIODIC) * (11 + 4) + len(SPECIFIED) * (12 + 4) + 5 * NMOIST
     bad = {k: v for k, v in out.items() if v}
     assert not bad, bad
 
@@ -217,9 +227,9 @@ def test_mixing_step_tl_matches_finite_differences(backend, tmp_path):
 
 @pytest.mark.parametrize("backend", NO_MLX[:1])
 def test_mixing_step_refuses_what_it_does_not_cover(backend, tmp_path):
-    """diff_opt 2, another km_opt, a moist state, the TC horizontal length,
-    m_opt, passive tracers and a resumed state without WRF's t_init are
-    refused by name; diff_opt 1 / km_opt 4 is accepted."""
+    """diff_opt 2, another km_opt, the TC horizontal length, m_opt,
+    passive tracers and a resumed state without WRF's t_init are refused
+    by name; diff_opt 1 / km_opt 4 is accepted, dry or moist."""
     out = _run_periodic(backend, '''
 cases = {"ok": dict(MIX), "diff2": dict(MIX, diff_opt=2), "km3": dict(MIX, km_opt=3),
          "moist": dict(MIX, moist=True, moist_adv_opt=0),
@@ -243,7 +253,7 @@ for key, over in cases.items():
     assert out["ok"] == out["carried"] == "accepted mix=True", out
     for key in ("diff2", "km3"):
         assert "mixing package other than diff_opt 1 with km_opt 4" in out[key], out
-    assert "moist mixing rows" in out["moist"], out
+    assert out["moist"] == "accepted mix=True", out
     assert "tc_horizontal_length_m" in out["tc"], out
     assert "m_opt" in out["mopt"], out
     assert "passive tracers" in out["tracer"], out
