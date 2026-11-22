@@ -73,7 +73,7 @@ and steep-terrain numerics.
 - Sea-surface temperature is fixed for the whole run. `sst_update`,
   `sst_skin` and `tmn_update` are pinned to 0: "SST update cycling is not
   implemented (single-analysis case runs)" (`woof/namelist_import.py:980-985`,
-  `docs/public/CONFIGURATION.md:880`).
+  `docs/public/CONFIGURATION.md:884`).
 - The initial water temperature is chosen carefully. One provider is used
   per connected body of water, and an optional user-supplied
   high-resolution analysis can replace ERA5 SST
@@ -390,7 +390,7 @@ top. Other relevant settings:
   arm interpolates one median RFMIP ozone profile in log pressure, the same
   profile at every latitude and date (`woof/core/rrtmgp.py:3142-3145`,
   `:3305-3306`). The legacy RRTMG arm uses the CAM climatology by
-  default (`o3input = 2`, `docs/public/CONFIGURATION.md:873`), or the RRTMG
+  default (`o3input = 2`, `docs/public/CONFIGURATION.md:877`), or the RRTMG
   wrapper's built-in profile with `o3input = 0` (`woof/config.py:4583-4586`). Neither reads ozone
   from the forcing source, although sources such as ERA5 carry an ozone
   mixing ratio
@@ -406,7 +406,7 @@ top. Other relevant settings:
   (measured, `components/hex/README.md:909-915`).
 
 Note: the "Fixed by WOOF" table row `gwd_opt | 0 | no gravity-wave drag`
-(`docs/public/CONFIGURATION.md:876`) disagrees with
+(`docs/public/CONFIGURATION.md:880`) disagrees with
 `docs/public/TERRAIN-DRAG.md`, which documents options 1 and 3. That row
 appears to be stale.
 

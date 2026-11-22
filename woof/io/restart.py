@@ -3483,9 +3483,9 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # The opt-in YSU surface heat flux on theta: the same contract.
     if values.get("ysu_surface_heat_exner", False) is False:
         values.pop("ysu_surface_heat_exner", None)
-    # The umbrella over the opt-in quirk corrections: absent at 'none'.
-    if values.get("woof_quirk_corrections", "none") == "none":
-        values.pop("woof_quirk_corrections", None)
+    # The umbrella over the opt-in quirk corrections is never echoed: the
+    # RunConfig resolves it into the individual keys, which bind on their own.
+    values.pop("woof_quirk_corrections", None)
     # The opt-in resolved obstacles (woof.core.obstacles): every key at its
     # default is what every earlier header ran, so each is echoed only when
     # it differs; obstacle_opt = 1 always echoes with its file.
