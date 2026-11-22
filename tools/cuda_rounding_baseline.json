@@ -334,11 +334,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/core/dycore.py",
+    "call_sha256": "1173c94313c4ec8f9dd541bbc8bb2282d46f3b547e3d14fca605a399244000fa",
     "constructor": "ElementwiseKernel",
     "factory": "_couple_momentum_kernel",
-    "call_sha256": "1173c94313c4ec8f9dd541bbc8bb2282d46f3b547e3d14fca605a399244000fa",
     "factory_sha256": "06850258f29f47fb7cb39b4c8531dcd7e386ac7e8b58a98e7bcb26e261848cdd",
+    "file": "woof/core/dycore.py",
     "status": "unresolved"
    },
    {
@@ -2686,11 +2686,11 @@
     "status": "unresolved"
    },
    {
-    "file": "woof/core/dycore.py",
+    "call_sha256": "f6bacb8f7278993793545febf2ba731d35fc29d2fc4baf5156c2968d9134d2a4",
     "constructor": "ElementwiseKernel",
     "factory": "_omega_column_kernel",
-    "call_sha256": "f6bacb8f7278993793545febf2ba731d35fc29d2fc4baf5156c2968d9134d2a4",
     "factory_sha256": "881f494f567f719369ad6f88070ecc70e53b2ab8ce96a51f5b81b0e8a55c3277",
+    "file": "woof/core/dycore.py",
     "status": "unresolved"
    },
    {
