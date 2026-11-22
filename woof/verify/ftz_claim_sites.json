@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 6685,
+  "site_count": 6691,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 6618
+    "prose": 6624
   },
   "sites": [
     {
@@ -415,7 +415,7 @@
     },
     {
       "file": "README.md",
-      "line": 1021,
+      "line": 1026,
       "kind": "prose",
       "anchor": "pairs was checked under both subnormal modes",
       "anchor_sha256": "2d72bca9880fb9136b484ba3ebdab81af419d5df3061964499ecb9120e7d562e",
@@ -13993,6 +13993,72 @@
       "kind": "prose",
       "anchor": "A helper that returned -0.0 or a subnormal here would perturb every bin",
       "anchor_sha256": "0a632c63db88914218860e5f9a2722909d8b4f6111d68050d408b9e83c341f1a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_cu_kfcup_mskf_256_levels_gpu.py",
+      "line": 195,
+      "kind": "prose",
+      "anchor": "from woof.core.kernels import no_ftz",
+      "anchor_sha256": "9e79469d4d18e38ecd220075844aeffa2d2095c1e51a1b59d4df6e1003653953",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_cu_kfcup_mskf_256_levels_gpu.py",
+      "line": 199,
+      "kind": "prose",
+      "anchor": "source, options = no_ftz.module_recipe_no_ftz(\"mskf\", ((\"GPUWM_MSKF_NO_AEROSOL\", 1),))",
+      "anchor_sha256": "55040cf63dcb1ac4aea0d5468147b09977c1e98003bf41258a5b442082e2b999",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_cu_kfcup_mskf_256_levels_gpu.py",
+      "line": 210,
+      "kind": "prose",
+      "anchor": "monkeypatch.setattr(no_ftz, \"get_kernel_no_ftz\", get_kernel)",
+      "anchor_sha256": "7b5c81fa3884a1265eeb08bb188bd1cd2bb3fcf4bdf65e3048c793de15761e7a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_cu_kfcup_mskf_256_levels_gpu.py",
+      "line": 220,
+      "kind": "prose",
+      "anchor": "from woof.core.kernels import no_ftz",
+      "anchor_sha256": "9e79469d4d18e38ecd220075844aeffa2d2095c1e51a1b59d4df6e1003653953",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_cu_kfcup_mskf_256_levels_gpu.py",
+      "line": 223,
+      "kind": "prose",
+      "anchor": "source, options = no_ftz.module_recipe_no_ftz(\"mskf\", ((\"GPUWM_MSKF_NO_AEROSOL\", 1),))",
+      "anchor_sha256": "55040cf63dcb1ac4aea0d5468147b09977c1e98003bf41258a5b442082e2b999",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_cu_kfcup_mskf_256_levels_gpu.py",
+      "line": 227,
+      "kind": "prose",
+      "anchor": "monkeypatch.setattr(no_ftz, \"get_kernel_no_ftz\",",
+      "anchor_sha256": "8801d9d39468ab7506062392bf89e04f1674ba50e39ce20c0f1a34af24b1084b",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -69605,7 +69671,7 @@
     },
     {
       "file": "woof/core/mskf.py",
-      "line": 161,
+      "line": 162,
       "kind": "prose",
       "anchor": "from woof.core.kernels.no_ftz import get_kernel_no_ftz",
       "anchor_sha256": "c31b3c22fbcd801c566d7c3176471b532a55bda658d1c577bce49a7778337a86",
@@ -69616,7 +69682,7 @@
     },
     {
       "file": "woof/core/mskf.py",
-      "line": 163,
+      "line": 164,
       "kind": "prose",
       "anchor": "get_kernel_no_ftz(\"mskf\", \"mskf_aerosol_init\")((1,), (1,), (table,))",
       "anchor_sha256": "e4e45742803651543f4cdfc83aa23004734674c9fd8b6452adebc3430b37b1a9",
@@ -69627,7 +69693,7 @@
     },
     {
       "file": "woof/core/mskf.py",
-      "line": 183,
+      "line": 184,
       "kind": "prose",
       "anchor": "from woof.core.kernels.no_ftz import get_kernel_no_ftz as get_kernel",
       "anchor_sha256": "fad51fdea18c01d2d23a3256b0584bccb8a8826f2cd4765fe107e267825b48ce",
@@ -69638,7 +69704,7 @@
     },
     {
       "file": "woof/core/mskf.py",
-      "line": 247,
+      "line": 248,
       "kind": "prose",
       "anchor": "from woof.core.kernels.no_ftz import get_kernel_no_ftz as get_kernel",
       "anchor_sha256": "fad51fdea18c01d2d23a3256b0584bccb8a8826f2cd4765fe107e267825b48ce",

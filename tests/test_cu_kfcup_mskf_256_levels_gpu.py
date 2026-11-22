@@ -157,8 +157,23 @@ def test_mskf_contract_and_message_agree():
     assert f"#define MSKF_KMAX {DEEP}\n" in src
 
 
+def _mskf_triggering_rank():
+    """The first fixture case whose column triggers (cu_act) at the
+    fixture's own nz.  The two strongest-heating cases carry their
+    tendencies from an earlier trigger (NCA still running) and do not
+    trigger on this call at any level count, so they cannot show that a
+    256-level column convects."""
+    from woof.verify.mskf_oracle import load_fixture
+    nz = load_fixture().nz
+    for rank in range(8):
+        _, out = _mskf_run(nz, rank=rank)
+        if out["cu_act"].sum() > 0:
+            return rank
+    pytest.fail("no MSKF fixture case triggers at the fixture's nz")
+
+
 def test_mskf_runs_a_256_level_column():
-    status, out = _mskf_run(DEEP)
+    status, out = _mskf_run(DEEP, rank=_mskf_triggering_rank())
     assert status == 0
     _finite(out)
     assert out["cu_act"].sum() > 0
@@ -170,7 +185,7 @@ def test_mskf_runs_a_256_level_column():
     gross = sum((rhodz * np.abs(out[n])).sum(axis=0) for n in
                 ("rqvcuten", "rqccuten", "rqrcuten", "rqicuten", "rqscuten"))
     resid = np.abs(net + out["pratec"]).max()
-    assert resid <= 0.05 * max(float(gross.max()), 1e-30), (resid, gross.max())
+    assert resid <= 1e-4 * max(float(gross.max()), 1e-30), (resid, gross.max())
     _check_xbackend("mskf", out)
 
 
@@ -265,43 +280,51 @@ def test_kfcup_contract_agrees():
     assert KFCUP_VERTICAL_LEVEL_BOUNDS == (8, DEEP)
 
 
+def _cup_budget(cfg, b, got):
+    """Per-column water budget in the packed words: dz-weighted vapour and
+    condensate tendency plus the surface rain rate (kg m-2 s-1), with the
+    column's gross tendency for scale.  WRF's KF-CuP sets RAINCV = DT*PRATEC
+    with DT the model step (module_cu_kfcup.F; woof.core.kf's driver hands
+    back pratec = raincv / dt), so the rate is raincv / dt."""
+    names = __import__("woof.core.kf", fromlist=["x"]).KFCUP_LEVEL_INPUTS
+    rho = b["lev_in"][names.index("rho")].astype(np.float64)
+    dz = b["lev_in"][names.index("dz8w")].astype(np.float64)
+    q = [n for n in ("rqvcuten", "rqccuten", "rqrcuten", "rqicuten", "rqscuten")
+         if n in got]
+    net = sum((rho * dz * got[n]).sum(axis=0) for n in q)
+    gross = sum((rho * dz * np.abs(got[n])).sum(axis=0) for n in q)
+    return net + got["raincv"] / np.float64(cfg.dt), gross
+
+
 def test_kfcup_runs_a_256_level_column():
+    """Every configuration runs finite at 256 levels; every one that
+    convects closes its water budget as well as it does at the fixture's
+    own nz (some configurations carry a small budget term of their own,
+    the same at both level counts, so the 256-level residual is held to
+    the fixture's plus 1e-3 of the column's gross tendency)."""
     from woof.verify.kfcup_oracle import configs
     ran = 0
     for cfg in configs():
         cap, b, got = _cup_run(DEEP, cfg.index)
         _finite(got)
-        if np.any(got["rthcuten"] != 0):
-            ran += 1
-            # per-column water budget in the packed words: dz-weighted
-            # vapor + condensate tendency against the surface rain rate.
-            names = __import__("woof.core.kf", fromlist=["x"]).KFCUP_LEVEL_INPUTS
-            rho = b["lev_in"][names.index("rho")]
-            dz = b["lev_in"][names.index("dz8w")]
-            net = sum((rho * dz * got[n]).sum(axis=0) for n in
-                      ("rqvcuten", "rqccuten", "rqrcuten", "rqicuten", "rqscuten")
-                      if n in got)
-            gross = sum((rho * dz * np.abs(got[n])).sum(axis=0) for n in
-                        ("rqvcuten", "rqccuten", "rqrcuten", "rqicuten", "rqscuten")
-                        if n in got)
-            # WRF's KF-CuP sets RAINCV = DT*PRATEC with DT the model step
-            # (module_cu_kfcup.F; woof.core.kf's driver hands back
-            # pratec = raincv / dt), so the surface rain rate in kg m-2 s-1
-            # is raincv / dt, the same units as rho dz times a tendency.
-            rain = got["raincv"] / np.float32(cfg.dt)
-            resid = np.abs(net + rain).max()
-            assert resid <= 0.1 * max(float(gross.max()), 1e-30), (cfg.name, resid)
-            _check_xbackend(f"kfcup{cfg.index}", got)
-            break
+        if not np.any(got["rthcuten"] != 0):
+            continue
+        ran += 1
+        resid, gross = _cup_budget(cfg, b, got)
+        _, b0, got0 = _cup_run(cap.nz, cfg.index)
+        resid0, gross0 = _cup_budget(cfg, b0, got0)
+        live = gross > 0
+        bound = np.abs(resid0) * 1.05 + 1e-3 * np.maximum(gross, gross0)
+        assert (np.abs(resid) <= bound)[live].all(), (cfg.name, resid, resid0, gross)
+        _check_xbackend(f"kfcup{cfg.index}", got)
     assert ran, "no KF-CuP configuration convected on the stretched column"
 
 
 def test_kfcup_fixture_nz_still_equals_wrf():
-    from woof import backend
-    if backend.active() != "cuda":
-        # tests/test_kfcup_runtime.py's oracle grades fail the same way on
-        # Metal on main: the WRF words are a CUDA claim for this scheme.
-        pytest.skip("KF-CuP's WRF word grade is graded on CUDA")
+    if os.environ.get("GPUWM_WRF_EXACT", "0") != "1":
+        # The WRF word grade is the strict-replay claim, as in
+        # tests/test_kfcup_runtime.py: production numerics differ by rounding.
+        pytest.skip("word-grade proof selects GPUWM_WRF_EXACT=1")
     from woof.verify.kfcup_oracle import differing_words, expected_outputs
     # the fixture's own nz, every column, against WRF's words
     import cupy as cp
