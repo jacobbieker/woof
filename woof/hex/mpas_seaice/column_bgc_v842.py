@@ -172,6 +172,12 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         cv._refuse("woof_v842_corrections", SNOW_NEW_CATEGORY,
                    "update_snow_bgc (the correction's routine) runs only with the vertical tracers",
                    "config_use_vertical_tracers = .true., or no bgc_snow_new_category")
+    if SNOW_NEW_CATEGORY in cv.named_corrections(configs) and \
+            configs.get("config_use_column_vertical_thermodynamics", True):
+        cv._refuse("woof_v842_corrections", SNOW_NEW_CATEGORY,
+                   "with the vertical thermodynamics every category update_snow_bgc reaches has an initial "
+                   "area, so the correction changes nothing",
+                   "config_use_column_vertical_thermodynamics = .false., or no bgc_snow_new_category")
 
 
 def module_source(n_ice_layers: int, n_bio_layers: int) -> str:

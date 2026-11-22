@@ -6259,7 +6259,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
-    "sha256": "0ccee0c6ad9efd729aef39448f4221f4818602b50fdcf116f6cad3290f2e4f5b"
+    "sha256": "5ed62d1233608195b14bd9de4d29a64bd488586d72f31c0df0c29aeadc9f2283"
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.py",
@@ -6279,7 +6279,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.py",
-    "sha256": "6c2a8fcdae8b28064d3013c838afbaf2f3bb2ef595169b7af9e3267be3f00029"
+    "sha256": "bc32f7349ee11beb53b621deb81819c1f4f082d9ebdecfcc370331ec40b32b5b"
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",

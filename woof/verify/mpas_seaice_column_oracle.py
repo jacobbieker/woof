@@ -1785,17 +1785,20 @@ word_mismatches = _stream.word_mismatches
 #: the only fields whose NaN may differ from the oracle's in its sign bit: v8.4.2's
 #: update_snow_bgc divides 0/0 there without the vertical thermodynamics (a category the
 #: last step's ITD opened keeps iceAreaCategoryInitial 0; quirk bgc_snow_new_category),
-#: and Metal's soft float gives that NaN the opposite sign to x86's
+#: and Metal's soft float gives that NaN the opposite sign to x86's (CUDA keeps x86's)
 NAN_SIGN_FIELDS = frozenset({"biogeochemistry/oceanBioFluxes"})
 
 
-def nan_word_mismatches(got, want, key: str) -> int:
-    """:func:`word_mismatches`, except that in :data:`NAN_SIGN_FIELDS` a NaN
-    in both may differ in its sign bit (its payload must still match).
-    Every other field, and every word that is not a NaN in both, stays
-    bitwise."""
+def nan_word_mismatches(got, want, key: str, metal: bool | None = None) -> int:
+    """:func:`word_mismatches`, except that on Metal (``metal``, by default
+    the active backend's being mlx) a NaN in both in :data:`NAN_SIGN_FIELDS`
+    may differ in its sign bit (its payload must still match). CUDA, every
+    other field, and every word that is not a NaN in both stay bitwise."""
+    if metal is None:
+        from woof import backend
+        metal = backend.active() == "mlx"
     got, want = np.asarray(got), np.asarray(want)
-    if (key not in NAN_SIGN_FIELDS or got.shape != want.shape or got.dtype != want.dtype
+    if (not metal or key not in NAN_SIGN_FIELDS or got.shape != want.shape or got.dtype != want.dtype
             or got.dtype.kind != "f"):
         return word_mismatches(got, want)
     both = np.isnan(got) & np.isnan(want)

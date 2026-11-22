@@ -438,7 +438,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     subcycle but separates once a step, so an earlier subcycle's ridging of
     the tracers is lost) and `bgc_snow_new_category` (without the vertical
     thermodynamics `update_snow_bgc` divides 0/0 for a category the last
-    step opened, and `oceanBioFluxes` is NaN). The other biogeochemistry
+    step opened, and `oceanBioFluxes` is NaN; on Metal that NaN's sign bit
+    is the opposite of x86's, the one word not compared bitwise there). The
+    other biogeochemistry
     flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,

@@ -142,12 +142,12 @@ def check_config(configs: dict) -> None:
     cprep.check_config(c)
 
 
-#: the vertical tracers column_separate_snow_ice_tracers and column_combine_snow_ice_tracers
-#: move (mpas_seaice_column.F:12500-13266): the nonreactive tracer's, the one the port carries
-#: (column_v842.VT_PORTED); every other vertical tracer is refused by its stages
 #: the opt-in correction (column_v842.CORRECTIONS) that separates the snow and ice
 #: tracers again after each dynamics subcycle
 SUBCYCLE_SNOW_ICE = "subcycle_snow_ice_tracers"
+#: the vertical tracers column_separate_snow_ice_tracers and column_combine_snow_ice_tracers
+#: move (mpas_seaice_column.F:12500-13266): the nonreactive tracer's, the one the port carries
+#: (column_v842.VT_PORTED); every other vertical tracer is refused by its stages
 _SNOW_ICE_TRACERS = (("verticalNonreactiveConc", "verticalNonreactiveSnow", "verticalNonreactiveIce"),)
 
 

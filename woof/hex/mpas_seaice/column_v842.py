@@ -407,7 +407,8 @@ CORRECTIONS = {
         "iceAreaCategoryInitial and snowVolumeCategoryInitial (mpas_seaice_column.F:1458-1460): with "
         "config_use_column_vertical_thermodynamics off, a category the previous step's ITD opened has no initial "
         "area, so 0/0 makes its snow layers' flux NaN and oceanBioFluxes is NaN in that cell; the correction "
-        "takes a category without an initial area to have had no snow (hs_old = 0)"),
+        "takes a category whose initial area is at most puny (none: the ITD opened it) to have had no snow "
+        "(hs_old = 0)"),
     "subcycle_snow_ice_tracers": (
         "seaice_column_predynamics_time_integration separates the vertical tracers into their *Snow and *Ice "
         "fields once a step (mpas_seaice_column.F:922-925), but seaice_column_dynamics_time_integration combines "
@@ -470,8 +471,10 @@ ZSAL_FLAG = "config_use_vertical_zsalinity"
 ZSAL_SOLVE = "zsal_solve"
 
 
-#: the vertical biogeochemical tracers (z_tracers): the init and column_biogeochemistry
-#: carry them with the nonreactive tracer (VT_PORTED) alone; every other stage refuses them
+#: the vertical biogeochemical tracers (z_tracers): the init, the column stages
+#: (column_biogeochemistry, the vertical thermodynamics, the ITD, the ridging, the shortwave),
+#: coupling_prep and the column and coupled steps carry them with the nonreactive tracer
+#: (VT_PORTED) alone; a stage that does not (z_tracers False) refuses them
 VT_FLAG = "config_use_vertical_tracers"
 #: the vertical tracers' flags the port carries
 VT_PORTED = ("config_use_nonreactive",)
@@ -506,10 +509,10 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
     one (its tracers counted, never solved or copied) and, under the
     ``zsal_solve`` correction, the solved one.
 
-    ``z_tracers`` is the caller's too: the init, ``column_biogeochemistry``,
-    the ITD thermodynamics and the ridging carry the vertical tracers
+    ``z_tracers`` is the caller's too: the init, the column stages, the
+    column and coupled steps carry the vertical tracers
     (``config_use_vertical_tracers``) with the nonreactive tracer alone
-    (:data:`VT_PORTED`); every other stage refuses them."""
+    (:data:`VT_PORTED`); a caller passing False refuses them."""
     c = configs
     if not c.get("config_use_column_package", False):
         _refuse("config_use_column_package", False, "the column port runs only with the column package on",
@@ -521,8 +524,9 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
                     "step only",
                     "config_use_column_biogeochemistry = .false.")
         if c[VT_FLAG] and not z_tracers:
-            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init, column_biogeochemistry, "
-                    "the ITD thermodynamics and the ridging only", f"{VT_FLAG} = .false.")
+            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init, the column stages "
+                    "(column_biogeochemistry, the vertical thermodynamics, the ITD, the ridging, the "
+                    "shortwave), coupling_prep and the column and coupled steps, not for this stage", f"{VT_FLAG} = .false.")
         carried = BGC_PORTED + (ZSAL_FLAG,) + ((VT_FLAG,) + VT_PORTED if c[VT_FLAG] else ())
         for flag in _BGC_FLAGS:
             if flag not in carried and c[flag]:
