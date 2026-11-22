@@ -1782,6 +1782,16 @@ Each kernel names the files and lines it transcribes. Their oracles
 (tools/mpas_seaice_oracle/ ...) compile MPAS source verbatim. These are
 MPAS-derived portions under the same terms and the same marking.
 
+woof/hex/mpas_seaice/variational_basis_v842.py and
+wachspress_quadrature_v842.py transcribe MPAS-Seaice v8.4.2's variational
+basis set-up (mpas_seaice_velocity_solver_variational.F, ..._shared.F,
+..._wachspress.F with its trapezoidal, Dunavant and Fekete quadrature tables,
+..._pwl.F, mpas_seaice_numerics.F and routines of mpas_seaice_mesh.F; the
+Dunavant rules are from D. A. Dunavant, Int. J. Num. Meth. Engng 21 (1985),
+as MPAS-Seaice tabulates them), under the same terms and marking.
+tools/mpas_seaice_oracle/run_variational_basis.F90 drives those modules,
+compiled verbatim.
+
 woof/hex/coupled/prep_ocn_merge_e3sm.cu (and its Python wrapper) transcribe
 E3SM v3.2.0's ocean import merge, prep_ocn_merge, from
 driver-mct/main/prep_ocn_mod.F90 (cpl7: University Corporation for
