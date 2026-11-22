@@ -1587,7 +1587,11 @@ def load_module_int_defines(
     if backend.active() != "cuda":
         tier = ",".join(f"{key}={value}" for key, value in normalized)
         return _translated_module(name, src, key=f"{name}[{tier}]")
-    if name in _NO_FTZ_MODULES | _PORT_IEEE_DIVISION_MODULES:
+    from woof.wrf_exact import ENABLED as _strict_replay
+    # boulac's plain loader routes only the strict-replay build through the
+    # direct no-FTZ compile; its integer tier must take the same route.
+    if (name in _NO_FTZ_MODULES | _PORT_IEEE_DIVISION_MODULES
+            or (name == "boulac" and _strict_replay)):
         tier = ",".join(f"{key}={value}" for key, value in normalized)
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}[{tier}]")
     if name in _DIFFUSION_MODULES:
