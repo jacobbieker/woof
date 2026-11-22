@@ -612,7 +612,11 @@ door takes it as `--quirk-corrections all`. `"all"` turns on:
   (`bl_pbl_physics = 1`) and `mynn_sfclay_psih_zolzt = true`
   (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
-  (a regional run, `--lbc-dir`).
+  (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
+  stays off on the MPAS suite route, local time stepping, partial nest and
+  the partitioned same-host executor, which do not carry it). The door's
+  `--quirk-corrections all` sets only this flag: the RunConfig keys above
+  are not hex flags.
 - MPAS-Ocean: `woof_land_ice_isomip_freezing_salinity =
   'boundary_layer_salinity'`, `woof_bottom_drag_dry_edges = 'skip'` and
   `woof_rayleigh_bottom_friction = 'corrected'`.

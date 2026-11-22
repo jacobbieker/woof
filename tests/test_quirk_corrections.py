@@ -69,6 +69,7 @@ def test_every_runconfig_quirk_correction_is_in_the_ledger():
         qc.run_scheme_active("not_a_correction", RunConfig(nx=4, ny=4, nz=4, dx=1.0, dy=1.0, ztop=1.0, dt=1.0,
                                                            run_seconds=1.0))
     for key in qc.keys("wrf"):
+        assert qc.BY_KEY[key].active is not None, key
         qc.run_scheme_active(key, {}, RunConfig)
 
 
@@ -173,17 +174,37 @@ def test_all_turns_on_the_run_corrections_where_their_scheme_runs():
 def test_all_refuses_a_conflicting_key_by_name():
     with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
         qc.apply_run_corrections({qc.UMBRELLA: "all", "bl_pbl_physics": 1, "ysu_surface_heat_exner": False})
-    # a RunConfig built without apply_run_corrections is refused, not half-applied
-    with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
-        validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all"))
+    # the refusal names the TOML spelling on the WRF route and the flags on the hex door
+    with pytest.raises(ConfigurationRefused, match="woof_quirk_corrections = 'all'"):
+        qc.apply_run_corrections({qc.UMBRELLA: "all", "cu_physics": 3, "gf_deep_rain_evaporation_booking": False})
     for key in qc.keys("mpas_ocean") + qc.keys("mali"):
         assert qc.option({qc.UMBRELLA: "all"}, key) == qc.BY_KEY[key].corrected
         assert qc.option({qc.UMBRELLA: "all", key: qc.BY_KEY[key].corrected}, key) == qc.BY_KEY[key].corrected
         with pytest.raises(ConfigurationRefusal, match=key):
             qc.option({qc.UMBRELLA: "all", key: qc.BY_KEY[key].default}, key)
-    with pytest.raises(ValueError, match="undriven_species_boundary"):
+    with pytest.raises(ValueError, match="--quirk-corrections all .*--undriven-species-boundary free"):
         qc.hex_undriven_species_boundary(
             argparse.Namespace(lbc_dir="x", quirk_corrections="all", undriven_species_boundary="free"))
+
+
+def test_a_runconfig_built_in_python_resolves_the_umbrella():
+    # every construction path (load_config, build_experiment, the domain and
+    # downscale readers, Python) gets the same corrections: __post_init__
+    run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all"))
+    assert run.ysu_surface_heat_exner is True and run.gf_deep_rain_evaporation_booking is False
+    assert qc.run_corrections_due(run) == ("ysu_surface_heat_exner",)
+    run = _base(bl_pbl_physics=5, sf_sfclay_physics=5, cu_physics=3, woof_quirk_corrections="all")
+    assert run.ysu_surface_heat_exner is False and run.gf_deep_rain_evaporation_booking is True
+    assert _base(bl_pbl_physics=1, sf_sfclay_physics=1).ysu_surface_heat_exner is False
+
+
+def test_the_umbrella_is_never_echoed_or_bound_on_its_own():
+    from woof.ingest.prepared_cache import PREPARATION_INERT_RUN_FIELDS
+    from woof.io.restart import _drop_default_off_run_keys
+    assert f"run.{qc.UMBRELLA}" in PREPARATION_INERT_RUN_FIELDS
+    values = {qc.UMBRELLA: "all", "ysu_surface_heat_exner": True}
+    _drop_default_off_run_keys(values)
+    assert values == {"ysu_surface_heat_exner": True}
 
 
 def test_all_keeps_a_refused_combination_refused_by_name():
@@ -201,6 +222,14 @@ def test_all_on_the_hex_door_is_regional_only():
     assert qc.hex_undriven_species_boundary(ns) == "wrf-flow-dependent"
     from woof.hex import forecast_door
     assert forecast_door._resolve_undriven_species_boundary(ns) == "wrf-flow-dependent"
+    # drivers that do not carry the rule: under the umbrella it stays off there
+    assert qc.hex_undriven_species_boundary(ns, carried=False) is None
+    for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
+        lts = argparse.Namespace(quirk_corrections="all", lbc_dir="x", **{flag: True})
+        assert forecast_door._resolve_undriven_species_boundary(lts) is None
+        explicit = argparse.Namespace(lbc_dir="x", undriven_species_boundary="wrf-flow-dependent", **{flag: True})
+        with pytest.raises(Exception, match="--undriven-species-boundary"):
+            forecast_door._resolve_undriven_species_boundary(explicit)
 
 
 def test_all_turns_on_every_seaice_column_correction():

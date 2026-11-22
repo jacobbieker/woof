@@ -541,9 +541,6 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The opt-in YSU surface heat flux on theta (bl_pbl_physics = 1 only,
     # default off): a tree prepared before it existed ran it off.
     "run.ysu_surface_heat_exner",
-    # The umbrella over the opt-in quirk corrections (default 'none'): a
-    # tree prepared before it existed ran each correction on its own key.
-    "run.woof_quirk_corrections",
     # The opt-in MYNN surface-layer 2 m / 10 m heat profile from zt/L
     # (sf_sfclay_physics = 5 only, default off): a tree prepared before it
     # existed ran it off.
@@ -1071,6 +1068,10 @@ SFIRE_PREPARATION_INERT_RUN_FIELDS = frozenset({
 RETIRED_INACTIVE_IDENTITY_FIELDS = {"run.fire_moisture_namelist": ""}
 
 PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
+    # The umbrella over the opt-in quirk corrections: a meta key that the
+    # RunConfig resolves into the individual correction keys, which carry
+    # the identity themselves.
+    "run.woof_quirk_corrections",
     # The slab snow switch is read by forecast physics only; preparation
     # writes the same initial snow fields under either value. It remains
     # part of the slab checkpoint identity.

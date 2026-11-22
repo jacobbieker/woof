@@ -77,6 +77,14 @@ def validate_surface_radiation_policy(policy: str) -> str:
 @dataclass(frozen=True)
 class RunConfig:
     def __post_init__(self):
+        # woof_quirk_corrections = 'all' (woof.quirk_corrections): every
+        # correction whose scheme this run carries is on, however the
+        # RunConfig was built.  The TOML readers refuse an explicit
+        # conflicting key before this point (apply_run_corrections).
+        if self.woof_quirk_corrections == "all":
+            from woof.quirk_corrections import run_corrections_due
+            for key in run_corrections_due(self):
+                object.__setattr__(self, key, True)
         if self._legacy_h_sca is None:
             object.__setattr__(self, "_legacy_h_sca", self.h_sca_adv_order is None)
         if self.h_sca_adv_order is None:
@@ -2405,8 +2413,8 @@ class RunConfig:
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections),
     # appended at 'none': each correction stays on its own key.  'all' turns
     # on every RunConfig correction whose scheme the domain runs
-    # (woof.quirk_corrections.apply_run_corrections, which the TOML reader
-    # calls); one set to anything else next to 'all' is refused by name.
+    # (__post_init__); the TOML readers (load_config, build_experiment)
+    # refuse one set to anything else next to 'all', by name.
     woof_quirk_corrections: str = _config_field(default="none", kw_only=True)
     # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
     # appended off.  The MYNN surface layer (sf_sfclay_physics = 5)
@@ -5790,6 +5798,8 @@ def load_config(path: str | Path, *, accept_epssm_auto: bool = False,
     apply_chem_set_defaults(merged)
     from woof.surface_ocean import apply_ocean_defaults
     apply_ocean_defaults(merged)
+    from woof.quirk_corrections import apply_run_corrections
+    merged = apply_run_corrections(merged)
     return validate_run_config(RunConfig(**merged),
                                native_fire_ideal=native_fire_ideal)
 

@@ -108,11 +108,10 @@ MOVED = {
     "ysu_surface_heat_exner": (
         dict(bl_pbl_physics=1, sf_sfclay_physics=1, ysu_surface_heat_exner=True),
         {"ysu_surface_heat_exner", "ysu_version"}),
-    # The umbrella echoes with the corrections it turned on.
+    # The umbrella itself is never echoed: the corrections it turned on are.
     "woof_quirk_corrections": (
-        dict(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all",
-             ysu_surface_heat_exner=True),
-        {"woof_quirk_corrections", "ysu_surface_heat_exner", "ysu_version"}),
+        dict(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all"),
+        {"ysu_surface_heat_exner", "ysu_version"}),
     "mynn_sfclay_psih_zolzt": (
         dict(sf_sfclay_physics=5, bl_pbl_physics=5, mynn_sfclay_psih_zolzt=True),
         {"mynn_sfclay_psih_zolzt"}),
@@ -246,7 +245,7 @@ DEFAULT_OFF = frozenset({
     "urban_param_file",
     # The opt-in YSU surface heat flux on theta, absent while off.
     "ysu_surface_heat_exner",
-    # The umbrella over the opt-in quirk corrections, absent at 'none'.
+    # The umbrella over the opt-in quirk corrections, never echoed.
     "woof_quirk_corrections",
     # The opt-in MYNN surface-layer 2 m / 10 m correction, absent while off.
     "mynn_sfclay_psih_zolzt",

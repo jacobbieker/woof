@@ -601,7 +601,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     and so is a correction its own key refuses in that combination. It
     turns on `gf_deep_rain_evaporation_booking`,
     `ysu_surface_heat_exner` and `mynn_sfclay_psih_zolzt` (WRF route); `--undriven-species-boundary
-    wrf-flow-dependent` (hex, regional); `woof_land_ice_isomip_freezing_salinity`,
+    wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
+    flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges` and `woof_rayleigh_bottom_friction`
     (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
     `woof_simple_velocity_bed`, `woof_statistics_extrema` and

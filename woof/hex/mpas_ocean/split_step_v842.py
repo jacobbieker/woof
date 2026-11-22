@@ -49,6 +49,7 @@ from pathlib import Path
 
 import numpy as np
 
+from woof import quirk_corrections
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ice import rkind
 
@@ -169,7 +170,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict, t
     sizes = {nc + 1: nc, ne + 1: ne, nv + 1: nv}
     mesh_cut = _cut(m, sizes)
     tend_configs = {k: configs[k] for k in (*forcing_v842.DEFAULT_CONFIGS, *forcing_v842.WOOF_OPT_INS,
-                                            "woof_quirk_corrections") if k in configs}
+                                            quirk_corrections.UMBRELLA) if k in configs}
 
     # the preparation
     _launch(precision, "ocn_ss_prep_edges_v842", ne * nl, (
