@@ -1,7 +1,8 @@
 """Run the built MPAS-Seaice column-package oracle on every case and write the fixture.
 
     pixi run -e default python tools/mpas_seaice_oracle/make_column_fixture.py BUILD_DIR [--out DIR]
-        [--cases init|therm|itd|ridge|radiation|dedd|step|coupled]
+        [--cases init|therm|itd|ridge|radiation|dedd|step|coupled|oml|bgc|carry|zsal|zsal_solve|zsal_carry|zsal_solve_carry
+                 |nonreactive]
 
 BUILD_DIR holds ``run_column_r8`` and ``run_init_thermo_r8`` from build.sh.
 Writes into ``tests/data/oracles/mpas_seaice_column`` by default:
@@ -19,7 +20,28 @@ the shortwave's (``RADIATION_CASES``) into ``tests/data/oracles/mpas_seaice_colu
 ``tests/data/oracles/mpas_seaice_column_dedd``; ``--cases step`` the column step's
 (``STEP_CASES``) into ``tests/data/oracles/mpas_seaice_column_step``; ``--cases coupled``
 the time step's with the column package and the velocity solver (``COUPLED_CASES``)
-into ``tests/data/oracles/mpas_seaice_coupled_step``.
+into ``tests/data/oracles/mpas_seaice_coupled_step``; ``--cases oml``
+the ocean mixed layer's, alone and in the column step (``OML_CASES``,
+``OML_STEP_CASES``), into ``tests/data/oracles/mpas_seaice_ocean_mixed_layer``;
+``--cases bgc`` the column biogeochemistry's (the init and the brine
+height's step, ``BGC_CASES``) into ``tests/data/oracles/mpas_seaice_bgc_brine``;
+``--cases carry`` the brine fraction carried through the ITD thermodynamics,
+the ridging and the steps (``BGC_CARRY_CASES``, ``BGC_CARRY_COUPLED_CASES``) into
+``tests/data/oracles/mpas_seaice_bgc_brine_carry``; ``--cases zsal`` the vertical
+salinity in the init, column_biogeochemistry and the vertical thermodynamics
+(``BGC_ZSAL_CASES``) into ``tests/data/oracles/mpas_seaice_bgc_zsal``; ``--cases
+zsal_solve`` the same under the opt-in correction ``zsal_solve``
+(``BGC_ZSAL_SOLVE_CASES``) into ``tests/data/oracles/mpas_seaice_bgc_zsal_solve``,
+from a build made with ``WOOF_ORACLE_PATCH=zsal_solve``; ``--cases zsal_carry``
+v8.4.2's inert vertical salinity through the ITD thermodynamics, the ridging and
+the steps (``BGC_ZSAL_CARRY_CASES``, ``BGC_ZSAL_CARRY_COUPLED_CASES``) into
+``tests/data/oracles/mpas_seaice_bgc_zsal_carry``; ``--cases zsal_solve_carry``
+the same under ``zsal_solve`` (``BGC_ZSAL_SOLVE_CARRY_CASES``,
+``BGC_ZSAL_SOLVE_CARRY_COUPLED_CASES``) into
+``tests/data/oracles/mpas_seaice_bgc_zsal_solve_carry``, from the patched build;
+``--cases nonreactive`` the vertical tracers' nonreactive tracer in the init and
+column_biogeochemistry (``BGC_NONREACTIVE_CASES``) into
+``tests/data/oracles/mpas_seaice_bgc_nonreactive``.
 """
 from __future__ import annotations
 
@@ -41,7 +63,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("build_dir", type=Path)
     parser.add_argument("--out", type=Path, default=None)
-    parser.add_argument("--cases", choices=("init", "therm", "itd", "ridge", "radiation", "dedd", "step", "coupled"),
+    parser.add_argument("--cases", choices=("init", "therm", "itd", "ridge", "radiation", "dedd", "step", "coupled",
+                                              "oml", "bgc", "carry", "zsal", "zsal_solve", "zsal_carry",
+                                              "zsal_solve_carry", "nonreactive"),
                         default="init")
     args = parser.parse_args()
     rows, fixture_dir = {"init": (co.CASES, co.FIXTURE_DIR), "therm": (co.VT_CASES, co.VT_FIXTURE_DIR),
@@ -50,7 +74,18 @@ def main() -> int:
                          "radiation": (co.RADIATION_CASES, co.RADIATION_FIXTURE_DIR),
                          "dedd": (co.DEDD_CASES, co.DEDD_FIXTURE_DIR),
                          "step": (co.STEP_CASES, co.STEP_FIXTURE_DIR),
-                         "coupled": (co.COUPLED_CASES, co.COUPLED_FIXTURE_DIR)}[args.cases]
+                         "coupled": (co.COUPLED_CASES, co.COUPLED_FIXTURE_DIR),
+                         "oml": (co.OML_CASES + co.OML_STEP_CASES, co.OML_FIXTURE_DIR),
+                         "bgc": (co.BGC_CASES, co.BGC_FIXTURE_DIR),
+                         "carry": (co.BGC_CARRY_CASES + co.BGC_CARRY_COUPLED_CASES,
+                                   co.BGC_CARRY_FIXTURE_DIR),
+                         "zsal": (co.BGC_ZSAL_CASES, co.BGC_ZSAL_FIXTURE_DIR),
+                         "zsal_solve": (co.BGC_ZSAL_SOLVE_CASES, co.BGC_ZSAL_SOLVE_FIXTURE_DIR),
+                         "zsal_carry": (co.BGC_ZSAL_CARRY_CASES + co.BGC_ZSAL_CARRY_COUPLED_CASES,
+                                        co.BGC_ZSAL_CARRY_FIXTURE_DIR),
+                         "zsal_solve_carry": (co.BGC_ZSAL_SOLVE_CARRY_CASES + co.BGC_ZSAL_SOLVE_CARRY_COUPLED_CASES,
+                                              co.BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR),
+                         "nonreactive": (co.BGC_NONREACTIVE_CASES, co.BGC_NONREACTIVE_FIXTURE_DIR)}[args.cases]
     args.out = args.out or fixture_dir
     args.out.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, np.ndarray] = {}

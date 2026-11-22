@@ -5,6 +5,10 @@
 ``seaice_column_postdynamics_time_integration`` does each step when the column
 package is on. It works per cell over ``nCellsSolve``:
 
+- under ``config_use_ocean_mixed_layer`` (the Registry default) it first
+  runs the stand-alone ocean mixed layer
+  (:func:`woof.hex.mpas_seaice.ocean_mixed_layer_v842.ocean_mixed_layer`,
+  RKIND 8 and the LGPL libm opt-in only);
 - it saves the freezing/melting potential;
 - it sums the category albedos (and the bare-ice, snow and pond albedos where
   the sun is up) and the effective pond area into the cell values, weighting
@@ -13,13 +17,17 @@ package is on. It works per cell over ``nCellsSolve``:
   (``config_include_pond_freshwater_feedback``);
 - it copies the albedos and ocean fluxes, which are per unit grid-cell area,
   into their ``*Area`` fields;
-- it forms the shortwave scaling factor.
+- it forms the shortwave scaling factor;
+- under ``config_use_column_biogeochemistry`` it maps the column package's
+  ocean biogeochemical fluxes onto the ``ocean*Flux`` fields: with the brine
+  height alone there are none (``nBioTracers`` is 0), so each is zero.
 
 It then runs ``seaice_column_scale_fluxes``. Where there is ice, that divides
 the air stress, the atmospheric and ocean fluxes, the reference
-temperature/humidity and the cell albedos by the ice area. Where there is
-none, it zeroes them, sets the open-water upward longwave at the sea's
-freezing point, and takes the reference values from the air.
+temperature/humidity, the cell albedos and (under the biogeochemistry) the
+ocean biogeochemical fluxes by the ice area. Where there is none, it zeroes
+them, sets the open-water upward longwave at the sea's freezing point, and
+takes the reference values from the air.
 
 The kernels (``coupling_prep_v842.cu``) are held word for word to v8.4.2.
 Both routines are cut verbatim out of ``mpas_seaice_column.F`` and compiled
@@ -29,12 +37,10 @@ with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
 
 Refused by name:
 
-- ``config_use_ocean_mixed_layer`` (``seaice_column_ocean_mixed_layer``:
-  ``colpkg_atm_boundary``'s stability iteration and
-  ``colpkg_ocn_mixed_layer``, not ported). Its Registry default is
-  ``.true.`` for stand-alone runs. A run coupled to an ocean model turns it
-  off, because the ocean supplies the sea surface.
-- ``config_use_column_biogeochemistry`` (the BGC ocean fluxes, not ported).
+- what :mod:`~woof.hex.mpas_seaice.ocean_mixed_layer_v842` refuses, under
+  ``config_use_ocean_mixed_layer``;
+- ``config_use_column_biogeochemistry`` with biogeochemical tracers (only
+  the brine height, which has no ocean flux, is carried).
 """
 from __future__ import annotations
 
@@ -121,16 +127,54 @@ def _config(configs: dict, name: str):
 def check_config(configs: dict) -> None:
     """Refuse, by name, what this port does not carry."""
     if _config(configs, "config_use_ocean_mixed_layer"):
-        raise ConfigurationRefusal(
-            knob="config_use_ocean_mixed_layer", value=True,
-            reason="seaice_column_ocean_mixed_layer (colpkg_atm_boundary's stability iteration and "
-                   "colpkg_ocn_mixed_layer) is not ported; a run coupled to an ocean turns it off",
-            declaration="config_use_ocean_mixed_layer = .false.")
+        from . import ocean_mixed_layer_v842 as oml
+        oml.check_config(configs)
     if _config(configs, "config_use_column_biogeochemistry"):
-        raise ConfigurationRefusal(
-            knob="config_use_column_biogeochemistry", value=True,
-            reason="the column biogeochemistry's ocean fluxes are not ported",
-            declaration="config_use_column_biogeochemistry = .false.")
+        from . import column_v842 as cv
+        # an option the caller leaves out is its Registry default, as in MPAS; each is then read strictly
+        c = {**cv.default_configs(), **configs}
+        if not c["config_use_column_package"]:
+            # v8.4.2 checks the biogeochemistry's options and calls seaice_column_coupling_prep only from
+            # the column package (seaice_column_postdynamics_time_integration)
+            raise ConfigurationRefusal(
+                knob="config_use_column_package", value=False,
+                reason="the column biogeochemistry runs only with the column package on",
+                declaration="config_use_column_package = .true., or config_use_column_biogeochemistry = .false.")
+        # the vertical salinity is no biogeochemical tracer: colpkg_init_zbgc leaves it out of
+        # nbtrcr (nBioTracers), so its fluxes are not among oceanBioFluxes
+        for flag in cv._BGC_FLAGS:
+            if flag not in cv.BGC_PORTED and flag != cv.ZSAL_FLAG and c[flag]:
+                raise ConfigurationRefusal(
+                    knob=flag, value=True,
+                    reason="the column biogeochemistry's ocean fluxes are ported for the brine height and the "
+                           "vertical salinity only (no biogeochemical tracer)",
+                    declaration=f"{flag} = .false.")
+
+
+#: the ocean biogeochemical fluxes seaice_column_coupling_prep maps from the column
+#: package's (mpas_seaice_column.F:3928-4028) and seaice_column_scale_fluxes scales
+BGC_OCEAN_FLUXES = ("oceanNitrateFlux", "oceanSilicateFlux", "oceanAmmoniumFlux", "oceanDMSPpFlux",
+                    "oceanDMSPdFlux", "oceanDMSFlux", "oceanHumicsFlux", "oceanDustIronFlux", "oceanAlgaeFlux",
+                    "oceanDOCFlux", "oceanDICFlux", "oceanDONFlux", "oceanParticulateIronFlux",
+                    "oceanDissolvedIronFlux")
+
+
+def _bgc_ocean_fluxes(bgc: dict, ice_area_cell, n_cells_solve: int, n_aggregate: int) -> None:
+    """The biogeochemistry's part of both routines without biogeochemical
+    tracers: coupling_prep sets each flux of the owned cells to zero (the
+    dust's to a sum of zeros), and scale_fluxes multiplies them by the
+    inverse ice area where there is ice and zeroes them where there is none,
+    so a cell of ice with an area whose inverse overflows gets 0 * inf."""
+    import cupy as cp
+    area = ice_area_cell[:n_aggregate]
+    for name in BGC_OCEAN_FLUXES:
+        flux = bgc[name]
+        flux[:n_cells_solve] = 0
+        rows = flux[:n_aggregate]
+        ice = area > 0 if rows.ndim == 1 else (area > 0)[:, None]
+        inverse = 1.0 / cp.where(area > 0, area, 1.0)
+        scaled = rows * (inverse if rows.ndim == 1 else inverse[:, None])
+        rows[...] = cp.where(ice, scaled, cp.zeros_like(rows))
 
 
 def coupling_prep(*, pools: dict, n_cells_solve: int, n_cells_solve_aggregate: int | None = None,
@@ -143,6 +187,9 @@ def coupling_prep(*, pools: dict, n_cells_solve: int, n_cells_solve_aggregate: i
     tracers_aggregate's (the same by default). ``dt`` is ``config_dt``.
     """
     check_config(configs)
+    if _config(configs, "config_use_ocean_mixed_layer"):
+        from . import ocean_mixed_layer_v842 as oml
+        oml.ocean_mixed_layer(pools, {**configs, "config_dt": dt}, n_cells_solve)
     sw, oc, of, ac = pools["shortwave"], pools["ocean_coupling"], pools["ocean_fluxes"], pools["atmos_coupling"]
     area_category = pools["tracers"]["iceAreaCategory"]
     precision = _precision_of(area_category)
@@ -174,3 +221,6 @@ def coupling_prep(*, pools: dict, n_cells_solve: int, n_cells_solve_aggregate: i
         sw["albedoVisibleDirectCell"], sw["albedoIRDirectCell"], sw["albedoVisibleDiffuseCell"],
         sw["albedoIRDiffuseCell"], ac["airTemperature"], ac["airSpecificHumidity"], oc["seaFreezingTemperature"],
         i32(n_aggregate), real(STEFAN_BOLTZMANN), real(FRESH_WATER_FREEZING_POINT)))
+    if _config(configs, "config_use_column_biogeochemistry"):
+        _bgc_ocean_fluxes(pools["biogeochemistry"], pools["tracers_aggregate"]["iceAreaCell"], n_cells_solve,
+                          n_aggregate)

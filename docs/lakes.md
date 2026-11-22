@@ -18,8 +18,7 @@ fields = "lakes"     # lake extent from 100 m land cover
 ```
 
 ```text
-woof fetch-geog --datasets lake_depth --source ncar   # once; --root DIR for a non-default geography tree
-woof go forecast.toml --lakes clm
+woof go forecast.toml --lakes clm     # downloads lake_depth itself if the tree lacks it
 ```
 
 They stay opt-in because they change the forecast. `--lakes clm` is refused
@@ -58,10 +57,12 @@ Caveats:
   .81/.89/.94 to .70/.82/.88 at 9/27/51 km, and the Erie lee band sits
   8.6 km south of MRMS (7.5 km with the defaults). The 10 mm FSS improves
   (.76/.83/.88 to .79/.86/.90).
-- **`lake_depth` is a separate download.** `woof go` does not fetch the WPS
-  `lake_depth` geography; stage it with the `woof fetch-geog` line above
-  (or see below), or set `use_lakedepth = 0` to run on the uniform
-  `lakedepth_default`.
+- **`lake_depth` is a download.** `woof go` fetches the WPS `lake_depth`
+  geography itself when the lake model needs it and the tree lacks it (about
+  2.4 MB to download, about 1.9 GB unpacked). Stage it ahead with
+  `woof fetch-geog --datasets lake_depth --source ncar` (`--root DIR` for a
+  non-default tree), or set `use_lakedepth = 0` to run on the uniform
+  `lakedepth_default` and need none.
 - **Hex R2 starts too cold.** On the hex MPAS-suite route
   (`config_clm_lake_backend`), lakes start from the forcing's skin
   temperature (lakeini), about 1.4 K colder than GLSEA on the Great Lakes
@@ -77,14 +78,14 @@ Caveats:
 
 - `clm` turns on WRF's CLM lake model. It uses WPS bathymetry (the
   `lake_depth` geography) and starts the lakes from GLSEA where GLSEA covers
-  and from ERA5's FLake state elsewhere. `woof go` does not download
-  `lake_depth` itself (about 2.4 MB to download, about 1.9 GB unpacked; NCAR
-  is its only source). Where it is missing, go's geography check refuses
-  before the forcing download and names the remedy:
-  `woof fetch-geog --config <stem>.lakes-clm-<hash>.toml` (the copy the
-  switch wrote; add `--root DIR` for a non-default geography tree), then run
-  `woof go --lakes clm` again. `use_lakedepth = 0` (uniform
-  `lakedepth_default`) needs no bathymetry, and go does not ask for it. `clm` also needs an active
+  and from ERA5's FLake state elsewhere. `woof go` downloads `lake_depth`
+  itself when the tree lacks it, before the forcing download (about 2.4 MB to
+  download, about 1.9 GB unpacked; NCAR is its only source). A failed download
+  refuses and names `woof fetch-geog --datasets lake_depth --source ncar`
+  (add `--root DIR` for a non-default geography tree). Every other missing
+  geography dataset still refuses with `woof fetch-geog --config <stem>.lakes-clm-<hash>.toml`.
+  `use_lakedepth = 0` (uniform `lakedepth_default`) needs no bathymetry, and go
+  does not fetch it. `clm` also needs an active
   land-surface scheme (`sf_surface_physics` 1, 2, 3, 4 or 8) and is refused
   up front otherwise.
 - `ic` keeps WRF's water-point lakes but replaces the forcing's lake skin

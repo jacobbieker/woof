@@ -8,7 +8,10 @@ and its coupling channels exist, and asking to couple it is refused by name
 rather than running something that looks right.
 
 A component is ``ported`` only when its dynamical core and every scheme are on
-the GPU and its landing gate is green; until then it is ``stub``.
+the GPU and its landing gate is green; until then it is ``stub``, or
+``partial`` once its standalone forward mode runs on the GPU (word for word
+against its oracle) while schemes are still missing. A ``partial`` core is
+refused by a coupled step as a stub is.
 
 A component may instead be ``ported_subset``: it declares, in ``_SUBSETS``, the
 exact schemes a coupled step can run. A step names the schemes it asks for;
@@ -28,11 +31,43 @@ _COMPONENTS: dict[str, tuple[str, str, str]] = {
     "atmosphere": ("core_atmosphere", "ported", "hex"),
     "ocean": ("core_ocean", "stub", "ocean"),
     "seaice": ("core_seaice", "stub", "seaice"),
-    "landice": ("core_landice", "stub", "ice"),
+    "landice": ("core_landice", "ported_subset", "ice"),
 }
 
 #: component -> the schemes a ``ported_subset`` component can run in a coupled step
-_SUBSETS: dict[str, tuple[str, ...]] = {}
+_SUBSETS: dict[str, tuple[str, ...]] = {
+    # MALI v8.4.2: the forward mode with these velocity solvers (Albany's
+    # FO/L1L2/Stokes are refused by name)
+    "landice": ("sia", "simple", "none"),
+}
+
+
+#: opt-in coupled configurations that are not a model's own, each named plainly:
+#: name -> (what it is, the module that runs it, the components it carries)
+_HYBRIDS: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    "e3sm-v3.2.0-coupler+mpas-v8.4.2": (
+        "E3SM v3.2.0 coupler with MPAS v8.4.2 components, not an E3SM configuration",
+        "woof.hex.coupled.hybrid_ocean",
+        ("ocean", "seaice"),
+    ),
+}
+#: name -> component -> the module that runs that component under the hybrid
+_HYBRID_MODULES: dict[str, dict[str, str]] = {
+    "e3sm-v3.2.0-coupler+mpas-v8.4.2": {"ocean": "woof.hex.coupled.hybrid_ocean",
+                                        "seaice": "woof.hex.coupled.hybrid_seaice"},
+}
+
+
+def hybrids() -> dict[str, tuple[str, str, tuple[str, ...]]]:
+    """The opt-in hybrid configurations (none is on the default path). E3SM
+    v3.2.0's own MPAS-Ocean and MPAS-Seaice are not ported
+    (docs/mpas-coupled-roadmap.md)."""
+    return dict(_HYBRIDS)
+
+
+def hybrid_modules(name: str) -> dict[str, str]:
+    """Per component, the module that runs it under hybrid ``name``."""
+    return dict(_HYBRID_MODULES[name])
 
 
 @dataclass(frozen=True)

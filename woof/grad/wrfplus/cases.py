@@ -17,7 +17,7 @@ from .stage import (AT_ACTIVE, AT_ALIAS, AT_PASSIVE, AT_STATE, PRP_ACTIVE,
                     PRP_ALIAS, PRP_PASSIVE, PRP_STATE, RSP_ACTIVE, RSP_ALIAS,
                     RSP_PASSIVE, RSP_STATE, ATGeometry, PRPGeometry,
                     RSPGeometry, StageGeometry, SWGeometry, at_shapes,
-                    prp_shapes, rsp_shapes, sw_shapes)
+                    prp_active, prp_shapes, rsp_shapes, sw_shapes)
 
 # (centre, spread) per field, roughly a mid-latitude 1-3 km grid.
 _UV_SCALES = {
@@ -378,7 +378,7 @@ _RK_SCALES = {
     "w": (0.0, 1.0), "h_diabatic": (0.0, 1e-3),
     "p": (8.0e4, 1e4), "al": (0.0, 1e-3), "alt": (1.0, 0.2),
     "p_pp": (0.0, 50.0), "ru": (0.0, 4e5), "rv": (0.0, 4e5),
-    "ww": (0.0, 10.0),
+    "ww": (0.0, 10.0), "qv": (8e-3, 1e-3),
     "ru_t": (0.0, 50.0), "rv_t": (0.0, 50.0), "rw_t": (0.0, 5.0),
     "rph_t": (0.0, 50.0), "rth_t": (0.0, 50.0), "rmu_t": (0.0, 0.5),
     "ru_tf": (0.0, 50.0), "rv_tf": (0.0, 50.0), "rw_tf": (0.0, 5.0),
@@ -440,6 +440,9 @@ def prp_trajectory(geom: PRPGeometry, seed: int, dtype=np.float64, *,
         c, s = _RK_SCALES[n]
         out[n] = c + s * rng.standard_normal(sh[n])
     keep = PRP_STATE + PRP_ACTIVE + PRP_PASSIVE
+    if geom.moist:
+        out["qv"] = np.abs(8e-3 + 3e-3 * rng.standard_normal(sh["qv"]))
+        keep += ("qv",)
     return {k: np.ascontiguousarray(out[k], dtype=dtype) for k in keep}
 
 
@@ -457,8 +460,13 @@ def _rk_perturbation(names, shapes, seed, dtype):
 
 
 def prp_perturbation(geom: PRPGeometry, seed: int, dtype=np.float64) -> dict:
-    return _rk_perturbation(PRP_STATE + PRP_ACTIVE, prp_shapes(geom), seed,
+    return _rk_perturbation(PRP_STATE + prp_active(geom), prp_shapes(geom), seed,
                             dtype)
+
+
+def prpm_geometry(nz=7, ny=8, nx=9, **overrides) -> PRPGeometry:
+    """The moist diagnosis (qv active)."""
+    return prp_geometry(nz, ny, nx, **dict(overrides, moist=1))
 
 
 def rsp_geometry(nz=7, ny=8, nx=9, **overrides) -> RSPGeometry:
@@ -697,16 +705,27 @@ def pgf_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -
     out["pb"] = 9.0e4 - 6.0e3 * k[:-1] + 300.0 * rng.standard_normal(sh["pb"])
     out["phb"] = 4.0e3 * k + 50.0 * rng.standard_normal(sh["phb"])
     keep = PGF_STATE + PGF_ACTIVE + PGF_PASSIVE
+    if getattr(geom, "moist_cq", 0):
+        # calc_cq's range: 1/(1 + 0.5 qtot) for qtot of a few g/kg
+        for n in ("cqu", "cqv"):
+            out[n] = 0.99 + 0.004 * rng.standard_normal(sh[n])
+        keep += ("cqu", "cqv")
     return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
 
 
 def pgf_perturbation(geom, seed: int, dtype=np.float64) -> dict:
-    from .bigstep import PGF_ACTIVE, pgf_shapes
+    from .bigstep import pgf_active, pgf_shapes
     rng = np.random.default_rng(seed)
     sh = pgf_shapes(geom)
-    scale = {"p": 50.0, "al": 1e-4, "alt": 0.05, "php": 20.0, "mup": 200.0}
+    scale = {"p": 50.0, "al": 1e-4, "alt": 0.05, "php": 20.0, "mup": 200.0,
+             "cqu": 0.004, "cqv": 0.004}
     return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
-            for n in PGF_ACTIVE}
+            for n in pgf_active(geom)}
+
+
+def pgfm_geometry(nz=7, ny=8, nx=9, **overrides):
+    """The moist pressure gradient (cqu, cqv active)."""
+    return pgf_geometry(nz, ny, nx, **dict(overrides, moist_cq=1))
 
 
 def buoy_geometry(nz=7, ny=8, nx=9, **overrides):
@@ -726,16 +745,67 @@ def buoy_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) 
         out[n] = c + s * rng.standard_normal(sh[n])
     out["msft"] = 1.0 + 0.02 * rng.standard_normal(sh["msft"])
     keep = BUOY_STATE + BUOY_ACTIVE + BUOY_PASSIVE
+    if getattr(geom, "moist", 0):
+        out.update(_moist_species(sh["qv"], rng))
+        out["mub"] = 9.0e4 + 2e3 * rng.standard_normal(sh["mub"])
+        # hybrid levels: c2f carries the base mass c1f leaves
+        out["c2f"] = (1.0 - out["c1f"]) * 5.0e4
+        keep += ("qv", "qc", "qr", "mub", "c2f")
     return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
 
 
+_Q_SCALES = {"qv": (8e-3, 3e-3), "qc": (4e-4, 3e-4), "qr": (3e-4, 2e-4)}
+
+
+def _moist_species(shape, rng) -> dict:
+    """qv, qc and qr of a cloudy column, all positive."""
+    return {n: np.abs(c + s * rng.standard_normal(shape)) for n, (c, s) in _Q_SCALES.items()}
+
+
 def buoy_perturbation(geom, seed: int, dtype=np.float64) -> dict:
-    from .bigstep import BUOY_ACTIVE, buoy_shapes
+    from .bigstep import buoy_active, buoy_shapes
     rng = np.random.default_rng(seed)
     sh = buoy_shapes(geom)
-    scale = {"p": 50.0, "mup": 200.0}
+    scale = {"p": 50.0, "mup": 200.0, "qv": 1e-3, "qc": 1e-4, "qr": 1e-4}
     return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
-            for n in BUOY_ACTIVE}
+            for n in buoy_active(geom)}
+
+
+def buoym_geometry(nz=7, ny=8, nx=9, **overrides):
+    """The moist buoyancy (moist_mode 1: qv, qc and qr active)."""
+    return buoy_geometry(nz, ny, nx, **dict(overrides, moist=1))
+
+
+# calc_cq (P3a DA item 4).
+
+def cq_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .bigstep import CQGeometry
+    base = dict(nz=nz, ny=ny, nx=nx)
+    base.update(overrides)
+    return CQGeometry(**base)
+
+
+def cq_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """qv, qc and qr, and cqu, cqv and cqw holding stale values (calc_cq
+    overwrites them).  ``hybrid`` is accepted for the common signature."""
+    from .bigstep import CQ_STATE, cq_shapes
+    rng = np.random.default_rng(seed)
+    sh = cq_shapes(geom)
+    out = _moist_species(sh["qv"], rng)
+    for n in CQ_STATE:
+        out[n] = 5.0 + rng.standard_normal(sh[n])
+    return {n: np.ascontiguousarray(v, dtype=dtype) for n, v in out.items()}
+
+
+def cq_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    """Perturbations of all three species (n_mass 1 reads only qv's), at
+    5 g/kg: cq moves by about 0.5 dq, so a smaller dq leaves the binary64
+    finite differences at a = 1e-7 in roundoff."""
+    from .bigstep import CQ_SPECIES, cq_shapes
+    rng = np.random.default_rng(seed)
+    sh = cq_shapes(geom)
+    return {n: np.ascontiguousarray(5e-3 * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in CQ_SPECIES}
 
 
 # rhs_ph (P3a item 5).
@@ -871,7 +941,7 @@ def wd_perturbation(geom, seed: int, dtype=np.float64) -> dict:
 
 # The source field's (centre, spread) per row kind (u, v, theta', ph', w, mu').
 _LB_SRC = {"u": (5.0, 8.0), "v": (-2.0, 8.0), "theta": (0.0, 2.0), "phi": (0.0, 100.0),
-           "w": (0.0, 0.5), "mu": (0.0, 200.0)}
+           "w": (0.0, 0.5), "mu": (0.0, 200.0), "qv": (0.01, 0.003)}
 
 
 def lbc_geometry(nz=4, ny=12, nx=13, kind="u", **overrides):
@@ -929,6 +999,10 @@ def lbc_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     sh = lb_shapes(geom)
     c, s = _LB_SRC[geom.kind]
     scale = 1.0 if geom.kind == "mu" else 9.0e4
+    if geom.kind == "qv":
+        # qv's coupled row is ~1e3 against tables of the same size: a
+        # larger step keeps binary64 roundoff out of the 1e-7 FD point
+        s *= 10.0
     out = {"src": 0.1 * s * rng.standard_normal(sh["src"]),
            "mup": 20.0 * rng.standard_normal(sh["mup"])}
     for n in LB_ACTIVE[2:]:
@@ -1019,3 +1093,91 @@ def sp_perturbation(geom, seed: int, dtype=np.float64) -> dict:
                  thp=0.2, alt=0.01, c2a=1.4e3)
     return {k: np.ascontiguousarray(scale[k] * rng.standard_normal(sh[k]), dtype=dtype)
             for k in SP_ACTIVE}
+
+
+# ------------------------------------------------- moist scalar transport
+
+_SU_SCALES = {"q": (0.01, 0.002), "q0": (0.01, 0.002), "tend": (0.0, 1.0),
+              "ru_m": (2e5, 4e5), "rv_m": (-1e5, 4e5), "ww_m": (0.0, 10.0),
+              "mup0": (0.0, 200.0), "mup": (0.0, 200.0), "mub2d": (9.0e4, 2e3),
+              "held": (0.0, 0.05), "msft": (1.0, 0.02)}
+
+
+def su_geometry(nz=7, ny=8, nx=9, **overrides):
+    """A species' stage update; ``spec`` alone turns on both bounded axes
+    with a one-point ring, as a specified domain runs it."""
+    from .scalar import ScalarGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0, dt=12.0)
+    if overrides.get("spec"):
+        base.update(open_x=1, open_y=1, spec_zone=1)
+    base.update(overrides)
+    return ScalarGeometry(**base)
+
+
+def su_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host base state of the update: the species and its time-t copy,
+    the sumflux fluxes, both masses, the levels, msft and the held
+    boundary tendency."""
+    from .scalar import SU_PASSIVE, SU_STATE, su_active, su_shapes
+    rng = np.random.default_rng(seed)
+    sh = su_shapes(geom)
+    lev = _vertical(geom.nz, rng, hybrid)
+    adv = adv_trajectory(geom.adv(), seed + 1, hybrid=hybrid)
+    out = {"c1h": lev["c1h"], "c2h": lev["c2h"], "rdnw": adv["rdz"],
+           "fnm": adv["fnm"], "fnp": adv["fnp"]}
+    for n in SU_STATE + su_active(geom) + SU_PASSIVE:
+        if n not in out:
+            c, s = _SU_SCALES[n]
+            out[n] = c + s * rng.standard_normal(sh[n])
+    if not geom.has_msf:   # the advection then takes msft of ones
+        out["msft"] = np.ones(sh["msft"])
+    return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in out.items()}
+
+
+def su_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .scalar import su_active, su_shapes
+    rng = np.random.default_rng(seed)
+    sh = su_shapes(geom)
+    return {n: np.ascontiguousarray(_SU_SCALES[n][1] * rng.standard_normal(sh[n]),
+                                    dtype=dtype) for n in su_active(geom)}
+
+
+def sf_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .scalar import SumfluxGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, nsub=4)
+    base.update(overrides)
+    return SumfluxGeometry(**base)
+
+
+_SF_SCALES = {"ru_m": 4e5, "rv_m": 4e5, "ww_m": 10.0, "u_pp": 4e4, "v_pp": 4e4,
+              "ww_pp": 2.0, "ru": 4e5, "rv": 4e5, "ww": 10.0}
+
+
+def sf_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    from .scalar import sumflux_shapes
+    rng = np.random.default_rng(seed)
+    return {n: np.ascontiguousarray(s * rng.standard_normal(sumflux_shapes(geom)[n]),
+                                    dtype=dtype) for n, s in _SF_SCALES.items()}
+
+
+def sf_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    return sf_trajectory(geom, seed, dtype)
+
+
+def flow_geometry(nz=3, ny=7, nx=8, **overrides):
+    from .lbc import FlowGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, spec_zone=1)
+    base.update(overrides)
+    return FlowGeometry(**base)
+
+
+def flow_trajectory(geom, seed: int, dtype=np.float64) -> dict:
+    """A hydrometeor and mass fluxes of either sign, so every side has
+    outflow and inflow cells."""
+    from .lbc import flow_shapes
+    rng = np.random.default_rng(seed)
+    sh = flow_shapes(geom)
+    out = {"q": 1e-3 + 5e-4 * rng.standard_normal(sh["q"]),
+           "ru": 4e5 * rng.standard_normal(sh["ru"]),
+           "rv": 4e5 * rng.standard_normal(sh["rv"])}
+    return {n: np.ascontiguousarray(v, dtype=dtype) for n, v in out.items()}

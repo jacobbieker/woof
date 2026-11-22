@@ -52,6 +52,12 @@ The port lives in `woof.da.var`. Only this command and its tests import it
    - `--ph balance` lets the bundle writer rebuild `PH` instead of keeping
      WRFDA's.
    - `--iau-window-s` records an IAU window.
+   - A first guess from the middle of a forecast keeps the forecast's
+     `START_DATE`. As WRFDA's `wrfvar_output` does, the analysis is
+     restamped to start at its valid time: `START_DATE`,
+     `SIMULATION_START_DATE`, `GMT`, `JULYR` and `JULDAY`. A first guess
+     that already starts at its valid time is written byte for byte as
+     before.
 
 ## Hybrid 3DEnVar (opt-in)
 
@@ -106,6 +112,78 @@ WRFDA's gen_be sample forecasts, `je_factor = 2` and `alpha_corr_scale =
 - The analysis increments against WRFDA's `wrfvar_output` have max
   |difference| at most 4.7e-5 of the RMS (PSFC; the other fields at most
   7.2e-6) and correlation of at least 0.9999999996.
+
+### Paired with an LETKF cycle (opt-in, Python API)
+
+`woof.da.var.pairing` is the usual hybrid EnKF-Var pairing. The LETKF's
+forecast ensemble gives the hybrid its `x'_n` (`ensemble_from_letkf`: the
+LETKF's `(R, nz, ny, nx)` stacks, perturbations about their mean), 3DEnVar
+analyses the first guess, the LETKF updates the members, and `recentre` moves
+the analysis members' mean to the variational analysis (`gamma` of the way,
+default all of it) while keeping the LETKF's perturbations. `hybrid_step`
+runs one such step. The pairing works in `u`, `v`, `t`, `q` and `ps`, the
+hybrid's own fields. The LETKF takes only 3-D fields, so `ps` is not analysed
+by it: its members keep the prior's perturbations about the recentred mean.
+Writing the recentred fields back to member files, and the hydrostatic and
+column-mass consistency of a recentred member, belong to the cycle
+controller that owns those files; `analyse` does that for the mean only.
+It is not on the `woof var` door, which takes members' history files
+(`--ensemble-member`) and so already analyses with any cycle's forecasts.
+Tested on synthetic grids with the real LETKF (`tests/test_var_pairing.py`);
+no cycling skill claim (the OSSE half of GV3) is made.
+
+## FGAT (opt-in)
+
+WRFDA's FGAT (`num_fgat_time > 1`, first guess at appropriate time) compares
+each observation with the first guess at its time slot, not at the analysis
+time. The increment, `H'` and the analysis stay at the analysis time. Only
+the innovations change. `woof var` runs it with one observation file and one
+first guess per slot (`woof.da.var.fgat`; the Python door is
+`analyse(..., fgat=[fg01, ...])` with `obs=[ob01.ascii, ...]`):
+
+```
+woof var --be be.dat --first-guess fg --out bundle --window-minutes 180 \
+    --fgat-obs ob01.ascii --fgat-first-guess fg01 \
+    --fgat-obs ob02.ascii --fgat-first-guess fg02 ...
+```
+
+- **Slots.** As in WRFDA, `fg01` is at the window's start and the last
+  first guess at its end, evenly spaced between. Each `obNN.ascii` is
+  filtered by the whole window, not by its slot (`da_read_obs_ascii`). woof
+  refuses a first guess that is not at its slot's time; WRFDA reads `fgNN`
+  without checking.
+- **Per slot.** Each slot gets its own vertical positions, background check,
+  surface correction and GNSS-RO QC, against its own first guess
+  (`da_get_innov_vector`). `--first-guess` is the analysis-time background
+  that `H'` is linearised about and the analysis is added to.
+- **Refused.**
+  - `--max-ext-its` above 1: WRFDA 4.7.1 re-reads `fgNN` and `fg` from
+    disk in every outer loop, which drops the earlier loops' increments.
+  - Radiances: WRFDA bins them by time slot, and that is not ported.
+  - The hybrid (ensemble) B: WRFDA bins the ensemble by time slot only in
+    4DEnVar (`use_4denvar`), which is not ported.
+  - An analysis-time first guess (`--first-guess`) that is not at one of
+    the slot times (WRFDA's `itime_ana`).
+  - Mixing `--obs` with `--fgat-obs`.
+- **The bundle.** Each slot's file names and SHA-256 go into `recipe_sha256`
+  and are listed under `notes.var.fgat`.
+
+Checked against WRFDA 4.7.1 FGAT (`tests/test_var_fgat.py`;
+`tools/wrfda_oracle/run_fgat.sh`; `WOOF_WRFDA471_FGAT_DIR`). The case uses the
+testdata's 4D-Var observations: seven hourly files from 12 to 18Z, 69,144
+observations. The first guesses come from a WRF 4.7.1 forecast from the 12Z
+`wrfinput`, and the analysis is at 15Z.
+
+- **Innovations.** The qc flags equal WRFDA's everywhere. Every innovation
+  agrees to 1e-10 relative. The exception is metar `p`, whose O-B is small:
+  it is measured at 2.3e-10 and tested to 3e-10. These differences are the
+  crmath-against-glibc ulps of O5.
+- **Initial cost.** `Jo` at the background is WRFDA's `J_0` to 1e-13.
+- **Minimisation.** It takes WRFDA's 31 iterations to its final `J`,
+  tested to 1e-12 relative (measured 5e-16).
+- **Analysis.** The increments against `wrfvar_output` have max
+  |difference| at most 8.4e-5 of the RMS (PSFC; the other fields at most
+  1.1e-5) and correlation of at least 0.999999998.
 
 ## Tiers
 
@@ -236,5 +314,6 @@ print `Jb factor used`.
 - Radar and GOES (plan sections 6-11); hydrometeor perturbations in the hybrid
   (`alpha_hydrometeors`).
 - `cv_options` other than 5.
+- FGAT with outer loops, radiances or PREPBUFR observations.
 - WRFDA's `A2C`, `var4d` and cloud control variables; pseudo-observations other than `u`, `v`, `t`, `q`.
 - Nested domains.

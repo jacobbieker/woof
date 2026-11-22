@@ -1698,7 +1698,10 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
             # copies before allocating the replacement seam, so recovery
             # retains only the old seam and the host restore payload.
             snapshot["arrays"].clear()
-            fresh = self._new_seam()
+            from woof.ingest.lake_state import restoring_from_checkpoint
+
+            with restoring_from_checkpoint():
+                fresh = self._new_seam()
             fresh.restore_state(payload)
             self._seam = fresh
             if getattr(self, "_surface_updates", None) is not None:
@@ -2073,6 +2076,10 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
             refl = simulated_reflectivity(view, seam._cfg)
         except NotImplementedError as refusal:
             return None, f"engine refuses a between-steps reflectivity for this scheme: {refusal}"
+        except ValueError as refusal:
+            if "reflectivity lacks" not in str(refusal):
+                raise
+            return None, f"the engine state lacks a field this scheme's reflectivity reads: {refusal}"
         except Exception as refusal:
             if type(refusal).__name__ != "NativeReflectivityScheme":
                 raise
@@ -2777,7 +2784,10 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
             raise ValueError("restart gwdo_calls conflicts with GWDO identity")
         if adapter["last_gwdo_result_persisted"] is not False:
             raise ValueError("frozen WOOF v2 adapter restart does not persist trajectory-inert GWDO arrays")
-        fresh = self._new_seam()
+        from woof.ingest.lake_state import restoring_from_checkpoint
+
+        with restoring_from_checkpoint():
+            fresh = self._new_seam()
         from .moving_seaice import prepare_restart_ice
         # A seam payload without arrays (one with no prognostic sea ice) has
         # nothing to allocate; restore_state below still checks the payload.

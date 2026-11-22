@@ -1774,6 +1774,12 @@ class MpasColumnBatchPhysics:
         # producer".  KeyError on a payload without it is the right
         # refusal (a v1 payload already refuses at the identity gate).
         driver.carriers.restore(scalars["carriers"])
+        lake = getattr(driver, "lake", None)
+        if lake is not None:
+            # The sparse lake work (static columns, latitude) was gathered at
+            # construction; the restored planes are the authority (as in
+            # woof.io.restart).
+            lake.invalidate_columns()
         self._pending_phase = _PHASE1
 
 

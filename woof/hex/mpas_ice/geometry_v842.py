@@ -36,7 +36,7 @@ SOURCE_FILES = (
 COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false",
                    "--prec-div=true", "--prec-sqrt=true")
 MODULE_OPTIONS = COMPILE_OPTIONS
-MASK_VELOCITY_SOLVERS = ("sia", "none")
+MASK_VELOCITY_SOLVERS = ("sia", "simple", "none")
 _BLOCK = 128
 
 
@@ -87,7 +87,7 @@ def calculate_mask(*, mesh: dict, geometry: dict, config_ice_density: float, con
         raise ConfigurationRefusal(
             knob="config_velocity_solver", value=config_velocity_solver,
             reason="the higher-order solvers' Albany mask bits need their Dirichlet masks, which are not ported",
-            declaration="config_velocity_solver = 'sia' | 'none'")
+            declaration="config_velocity_solver = 'sia' | 'simple' | 'none'")
     n_cells, max_edges = mesh["cellsOnCell"].shape
     n_vertices, vertex_degree = mesh["cellsOnVertex"].shape
     n_edges = mesh["cellsOnEdge"].shape[0]

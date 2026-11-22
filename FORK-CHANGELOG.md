@@ -31,6 +31,55 @@ fork already had, upstream's keys and flags are now the only ones:
 
 New:
 
+- The WRF dry-step adjoint's lateral-boundary rows (`woof.grad.wrfplus.lbc`)
+  gain the moist ones: qv's rk_step-1 relaxation capture and its
+  spec_bdy_final, and WRF's flow-dependent boundary for hydrometeors
+  without a table. The binary32 base reproduces woof's strict primal word
+  for word. They are not yet bound into the step. The forecast path is
+  unchanged.
+
+- The WRF dry-step adjoint (`woof.grad.wrfplus.scalar`) gains moist
+  scalar transport: WRF's sumflux and one species' non-positive-definite
+  rk_scalar_tend + rk_update_scalar, with the specified ring and the held
+  boundary tendency. The binary32 base reproduces woof's strict primal
+  word for word. It is not yet bound into the step. The forecast path is
+  unchanged.
+
+- The WRF dry-step adjoint (`woof.grad.wrfplus`) gains its first moist
+  pieces, for WRFDA's moisture control: the TL/AD of `calc_cq` (qv, or
+  qv, qc and qr), of the pressure gradient's cqu/cqv factor, and of the
+  moist buoyancy (`moist_mode` 1). Each is checked against woof's strict
+  primal word for word in binary32. They are not yet bound into the
+  step. The forecast path is unchanged.
+
+- The WRF dry-step adjoint's diagnosis (`woof.grad.wrfplus`
+  `calc_p_rho_phi`) takes qv as an active input on a moist state, through
+  WRF's `qvf = 1 + rvovrd qv`. It is checked against woof's strict
+  primal word for word in binary32. It is not yet bound into the step.
+  The forecast path is unchanged.
+
+- The WRF dry-step adjoint's window (`woof.grad.wrfplus.window.Window`)
+  can linearise about a supplied trajectory, as WRFPLUS does about the
+  nonlinear run's states: `forward(trajectory=states)` takes the state
+  each step starts from (a woof forecast with physics through
+  `trajectory_state`, or WRF's own), and `tl`/`ad` linearise step k about
+  `states[k]` instead of the window's own dry rerun. The forecast path is
+  unchanged.
+
+- The WRF dry-step tangent-linear and adjoint (`woof.grad.wrfplus.model`
+  and `window.Window`) now cover specified lateral boundaries, which
+  regional 4D-Var needs. The step binds the stage-1 relaxation fold, the
+  per-stage specified and relaxation rows, `advance_specified_phi_w` in
+  every substep, `spec_bdy_final`, and WRF's mu halo on rk_step 1's
+  boundary faces. Its binary32 base reproduces strict `dycore.step` word
+  for word. The interval's boundary tables are inputs: the TL takes their
+  perturbation and the adjoint returns theirs, and `lbc_from_ends` (with
+  its adjoint) builds WRFDA's `var4d_lbc` perturbation from the interval's
+  ends. Nested domains, a bound
+  boundary clock, relax_w, DFI forcing, streamed seams and a window
+  crossing a boundary interval are refused by name. The forecast path is
+  unchanged.
+
 - Noah-MP is recorded as following WRF 4.7.1's Noah-MP submodule (e5c0859),
   at the user's request. No forecast answer changes, because the default
   already computes what e5c0859 computes. Of e5c0859's edits to the code
@@ -878,6 +927,17 @@ Changed:
 
 Fixed:
 
+- **Strict mode with no mixing package now adds its held dry tendencies.**
+  With `GPUWM_WRF_EXACT=1`, the stage-1 lateral relaxation of a specified
+  or nested domain and the physics tendencies are folded into the held
+  `*_tendf` slots, as WRF's `rk_addtend_dry` does. When no mixing package,
+  diff6 or observation nudging ran, `add_fixed_dry_tendencies` returned
+  early, so both were dropped:
+  - The relaxation zone had no u, v, theta (or w) relaxation.
+  - The physics never reached u, v, theta or the moist scalars.
+  The held slots are now added whenever strict mode has folded something
+  into them. They are zeroed every step. The default (fast) path was not
+  affected, because it applies the relaxation and physics on their own.
 - **Adaptive-step runs with a cumulus scheme change answers.** On an
   adaptive clock, convective rain and the Kain-Fritsch hold stopped
   following WRF. WRF's `advance_ppt` (`RAINC += PRATEC*DT`, the KF `NCA`

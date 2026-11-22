@@ -13,12 +13,28 @@ What it carries: the BL99 and mushy thermodynamics (the mushy frazil's
 salinity, liquidus and enthalpy, and its vertical regridding), the linear
 remap and the delta function (``config_itd_conversion_type``), any category
 bounds, one category (``reduce_area``), the level, CESM and topo melt ponds,
-the ice age, first-year ice and level-ice tracers, and
-``config_update_ocean_fluxes`` either way.
+the ice age, first-year ice and level-ice tracers,
+``config_update_ocean_fluxes`` either way, and the column biogeochemistry's
+brine height (``config_use_brine``): the brine fraction travels with the ice
+volume through the remap and rebinning, ``add_new_ice_bgc``
+(``ice_zbgc.F90:29-251``) gives the new ice its brine fraction, and
+``zap_small_areas`` resets it to 1. v8.4.2's vertical salinity
+(``config_use_vertical_zsalinity``) is inert here: its ``solve_zsal`` is never
+set, so ``cleanup_itd``'s ``dfzsal`` is zero and ``zSalinityFlux`` keeps its
+words; its tracers are counted and not copied. Under the opt-in correction
+``zsal_solve`` (the solved vertical salinity, held to the patched oracle)
+the column package's ``solve_zsal`` branches run: ``add_new_ice``'s
+``fzsal`` loss with the frazil and no mixing of the new ice's ``sice``,
+``adjust_tracer_profile``'s ``regrid_stationary`` of the vertical salinity
+(its remap's stop an ITD abort) and the ``remap_zbgc`` back into ``sice``
+(``ice_zbgc.F90:29-251``, ``ice_brine.F90``), the first category's surface
+temperature from that ``sice``, and ``lateral_melt_bgc``'s and
+``zap_small_areas``' salt into ``zSalinityFlux``.
 
 What it refuses, by name: the zero-layer thermodynamics (``cleanup_itd``'s
 ``zerolayer_check`` is not ported), the aerosols, and more than
-``ITD_MAXCAT`` categories; the biogeochemistry is refused by the column port
+``ITD_MAXCAT`` categories; of the biogeochemistry everything but the brine
+height and the inert vertical salinity
 (:func:`woof.hex.mpas_seaice.column_v842.refuse_unported`).
 
 v8.4.2's quirks are kept: ``rebin`` drops ``shift_ice``'s abort (cleanup_itd
@@ -70,6 +86,7 @@ STOP_LABELS = {
     5: "aggregate ice area out of bounds",
     6: "Zap ice: negative ice area",
     7: "Zap ice: excess ice area",
+    8: "ice: remap_layers_bgc error",
 }
 #: the tracer indices the kernel reads, in its tidx order (TI_* in column_itd_v842.cu)
 _TRACER_INDICES = ("surfaceTemperature", "iceEnthalpy", "snowEnthalpy", "iceSalinity", "iceAge",
@@ -83,7 +100,7 @@ def _refuse(knob: str, value, reason: str, declaration: str):
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the ITD thermodynamics port does not carry."""
     c = configs
-    cv.refuse_unported(c, dims)
+    cv.refuse_unported(c, dims, biogeochemistry=True)
     if c["config_thermodynamics_type"] == "zero layer":
         _refuse("config_thermodynamics_type", "zero layer",
                 "cleanup_itd's zerolayer_check (the zero-layer thermodynamics) is not ported",
@@ -97,9 +114,32 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
                 f"config_nCategories <= {ITD_MAXCAT}")
 
 
+def tracer_indices(to: "cv.TracerObject") -> np.ndarray:
+    """The kernel's tidx (TI_* in column_itd_v842.cu): 0-based, -1 for a tracer that is off."""
+    return np.array([to.index[k] - 1 for k in _TRACER_INDICES] + [to.nt_fbri - 1, to.nt_bgc_s - 1], np.int32)
+
+
+def _zsal_args(pools: dict, configs: dict, dims: dict[str, int], written: list, grids: bool = True) -> tuple:
+    """The kernels' trailing vertical-salinity arguments: nBioLayers, (the
+    ITD's biologyGrid and verticalGrid,) zSalinityFlux. Only under
+    ``zsal_solve`` is anything read or written (``zSalinityFlux`` then joins
+    ``written``, which an abort restores past the aborting cell)."""
+    import cupy as cp
+    if not cv.solves_zsal(configs):
+        dummy = cp.zeros(1, np.float64)
+        return (np.int32(0), *((dummy, dummy) if grids else ()), dummy)
+    bgc, nbl, nil = pools["biogeochemistry"], dims["nBioLayers"], dims["nIceLayers"]
+    flux = cv._need(bgc, "zSalinityFlux", (dims["nCells"] + 1,))
+    written.append(flux)
+    extra = (cv._need(bgc, "biologyGrid", (nbl + 2,)), cv._need(bgc, "verticalGrid", (nil + 1,))) if grids else ()
+    return (np.int32(nbl), *extra, flux)
+
+
 def module_source(n_ice_layers: int) -> str:
+    from .column_bgc_v842 import zbgc_shared_source
     body = files("woof.hex.mpas_seaice").joinpath("column_itd_v842.cu").read_text(encoding="utf-8")
-    return f"#define COL_NILYR {int(n_ice_layers)}\n" + cv.module_source() + "\n" + body
+    return (f"#define COL_NILYR {int(n_ice_layers)}\n" + cv.module_source() + "\n" + zbgc_shared_source() + "\n"
+            + body)
 
 
 @lru_cache(maxsize=None)
@@ -125,7 +165,8 @@ def _flags(configs: dict, state: "cv.ColumnState") -> int:
     bits = (configs["config_use_ice_age"], configs["config_use_first_year_ice"], configs["config_use_level_ice"],
             configs["config_use_cesm_meltponds"], configs["config_use_level_meltponds"],
             configs["config_use_topo_meltponds"], configs["config_update_ocean_fluxes"],
-            state.ktherm != 0)            # colpkg_init_thermo's heat_capacity
+            state.ktherm != 0,            # colpkg_init_thermo's heat_capacity
+            cv.solves_zsal(configs))      # zsal_solve: the column package's solve_zsal
     return sum(int(bool(b)) << i for i, b in enumerate(bits))
 
 
@@ -164,6 +205,7 @@ def itd_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
     newly = cv._need_int(pools["biogeochemistry"], "newlyFormedIce", cc)
     tracer_fields = [cv._tracer_field(pools, name)[0] for name, _, _ in to.layout]
     written = [area, volume, snow, newly, *cell_fields, *tracer_fields]
+    zsal_args = _zsal_args(pools, configs, d, written)
     before = [a[:n_solve].copy() for a in written]
 
     trcrn = cp.zeros((max(n_solve, 1), ncat, nt), np.float64)
@@ -173,7 +215,7 @@ def itd_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
                    np.int32(layers), np.int32(sub), np.int32(src.shape[2]), np.int32(nt), np.int32(ncat),
                    np.int32(n_solve))
     atrcrn = cp.zeros_like(trcrn)
-    tidx = cp.asarray(np.array([to.index[k] - 1 for k in _TRACER_INDICES] + [to.nt_fbri - 1], np.int32))
+    tidx = cp.asarray(tracer_indices(to))
     status = cp.zeros(max(n_solve, 1), np.int32)
     nwarn = cp.zeros(max(n_solve, 1), np.int32)
     args = (
@@ -187,7 +229,7 @@ def itd_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
         need(pools["initial"], "initialSalinityProfile", (n_cells + 1, nil + 1)),
         need(mg, "lateralIceMeltFraction", c1), lateral_melt, need(oc, "freezingMeltingPotential", c1),
         frazil, need(pools["atmos_coupling"], "rainfallRate", c1), pond_flux, fresh, salt, heat, frazil_diag,
-        freeze_onset, newly,
+        freeze_onset, newly, *zsal_args,
     )
     if n_solve:
         _function("seaice_column_itd_thermodynamics_v842", nil)(_grid(n_solve), (_BLOCK,), args)

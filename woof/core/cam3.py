@@ -24,6 +24,13 @@ class Cam3Radiation:
     publishes_cldfra=True
     def __init__(self,start_time,latitude_deg,longitude_deg,*,table_root=None,column_chunk=DEFAULT_WORKERS,icloud=1,longwave=True,shortwave=True):
         import cupy as cp
+        from woof import backend
+        if backend.active()=='mlx':
+            # The absorption schedule hands CAM's column kernels raw device
+            # pointers (cam3_launch descriptors, arena.data+offset), which
+            # the Metal facade's arrays do not expose.
+            from woof.config import ConfigurationRefused
+            raise ConfigurationRefused('CAM radiation (ra_lw/ra_sw_physics=3) is not ported to the Metal backend: its absorption schedule passes raw device pointers to the column kernels, which MLX arrays do not expose; run it on CUDA')
         self.start_time=start_time;self.latitude_deg=cp.ascontiguousarray(cp.asarray(latitude_deg),dtype=cp.float32);self.longitude_deg=cp.ascontiguousarray(cp.asarray(longitude_deg),dtype=cp.float32)
         if self.latitude_deg.shape!=self.longitude_deg.shape:raise ValueError('CAM radiation geography must share one grid')
         self.longwave=bool(longwave);self.shortwave=bool(shortwave);self.publishes_olr=self.longwave

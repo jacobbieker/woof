@@ -26,6 +26,9 @@ def test_registry_names_all_four_cores() -> None:
     assert component("atmosphere").status == "ported"
     assert component("seaice").status == "stub"
     assert component("landice").core_dir == "core_landice"
+    # the forward mode is ported for the declared velocity solvers
+    assert component("landice").status == "ported_subset"
+    assert component("landice").schemes == ("sia", "simple", "none")
 
 
 def test_registry_refuses_an_unknown_component_by_name() -> None:
@@ -38,6 +41,12 @@ def test_require_ported_passes_the_atmosphere_and_refuses_a_stub() -> None:
     with pytest.raises(ConfigurationRefusal) as exc:
         require_ported("seaice")
     assert "docs/mpas-coupled-roadmap.md" in str(exc.value)
+    assert require_ported("landice", ("sia",)).name == "landice"
+    assert require_ported("landice", ("simple", "none")).name == "landice"
+    with pytest.raises(ConfigurationRefusal, match="declared subset"):
+        require_ported("landice")
+    with pytest.raises(ConfigurationRefusal, match="FO"):
+        require_ported("landice", ("FO",))
 
 
 def _declare_subset(monkeypatch, name: str, schemes: tuple[str, ...]) -> None:
@@ -171,3 +180,44 @@ def test_the_coupled_door_refuses_an_unported_core_named_by_dt() -> None:
     with pytest.raises(ConfigurationRefusal) as exc:
         door._coupled(args)
     assert "seaice" in str(exc.value)
+
+
+def test_the_land_ice_ocean_seam_is_the_agreed_one() -> None:
+    # the names, directions and words agreed with the MALI port's ocean seam
+    exports = ("landIceFraction", "landIceMask", "landIcePressure", "li2ocn_liquid_runoff", "li2ocn_solid_runoff")
+    li_ocn = {c.name: c for c in channels_for({"landice", "ocean"}, diagnostics=True)}
+    assert set(li_ocn) == set(exports) | {"landIceDraft", "ocn2li_floating_basal_mass_bal"}
+    assert all(li_ocn[n].source == "landice" for n in exports + ("landIceDraft",))
+    assert li_ocn["ocn2li_floating_basal_mass_bal"].source == "ocean"
+    assert li_ocn["landIceDraft"].diagnostic
+    assert {c.name for c in channels_for({"landice", "ocean"})} == set(exports) | {"ocn2li_floating_basal_mass_bal"}
+    assert li_ocn["landIceMask"].dtype == "int32"
+    try:
+        from woof.hex.mpas_ice import ocean_seam_v842 as seam
+    except ImportError:
+        return
+    assert (set(seam.EXPORTS), set(seam.DIAGNOSTICS), set(seam.IMPORTS)) == (
+        set(exports), {"landIceDraft"}, {"ocn2li_floating_basal_mass_bal"})
+
+
+def test_the_land_ice_momentum_and_the_old_mass_channel_are_refused_by_name() -> None:
+    from woof.hex.coupled.exchange import REFUSED, channel
+
+    for name in ("li2ocn_momentum_x", "li2ocn_momentum_y", "li2ocn_mass"):
+        assert name in REFUSED
+        with pytest.raises(ConfigurationRefusal, match=name):
+            channel(name)
+    with pytest.raises(ConfigurationRefusal, match="li2ocn_liquid_runoff"):
+        channel("li2ocn_mass")
+    with pytest.raises(ConfigurationRefusal, match="no such channel"):
+        channel("li2ocn_heat")
+    assert channel("landIceMask").dtype == "int32"
+
+
+def test_a_mask_channel_carries_its_declared_word() -> None:
+    from woof.hex.coupled.exchange import channel
+
+    mask = channel("landIceMask")
+    check_matched(mask, np.array([0, 1, 1], np.int32), np.array([0, 1, 1], np.int32))
+    with pytest.raises(ConfigurationRefusal, match="int32"):
+        check_matched(mask, np.array([0.0, 1.0, 1.0]), np.array([0.0, 1.0, 1.0]))

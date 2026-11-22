@@ -32,6 +32,13 @@ stage a case names (``oracle_stage``):
   ``seaice_timestep_finalize``'s ``seaice_column_reinitialize_fluxes``), its
   ierr logged the same way. Its cases carry a BL99 column state and forcing
   (:func:`_step_state`);
+- ``biogeochemistry``: ``column_biogeochemistry``, its ierr logged the same
+  way; its abort logs the cell at ``MPAS_LOG_CRIT``, which terminates MPAS
+  (the stub records it, :func:`run_oracle`'s ``crash``). Its cases (:data:`BGC_CASES`, with the init's under the column
+  biogeochemistry) carry a brine-height state (:func:`_bgc_state`); the
+  vertical salinity's (:data:`BGC_ZSAL_CASES`, inert as in v8.4.2, and
+  :data:`BGC_ZSAL_SOLVE_CASES` under ``zsal_solve``, against the oracle built
+  with ``WOOF_ORACLE_PATCH=zsal_solve``) add :func:`_zsal_state`;
 - ``seaice_step``: the column step's setup and ``run_seaice_step.F90``'s
   (the velocity solver's time steps, ``seaice_init_evp``,
   ``seaice_init_advection``, ``seaice_initialize_time_diagnostics``), then
@@ -41,7 +48,9 @@ stage a case names (``oracle_stage``):
   ``oracle_finalize_last``), stopping on an abort; the ierr and the step are
   logged (``TOBJ IERR``, ``TOBJ STEP``). Its cases (:data:`COUPLED_CASES`)
   carry the column step's state on a culled hexagonal torus with the
-  time-step oracle's dynamics state (:func:`_coupled_dynamics`).
+  time-step oracle's dynamics state (:func:`_coupled_dynamics`);
+- ``ocean_mixed_layer``: ``seaice_column_ocean_mixed_layer``. Its cases
+  carry the open ocean and the air above it (:func:`_oml_state`).
 
 ``mpas_seaice_column.F``, ``mpas_seaice_initialize.F``'s and
 ``mpas_seaice_forcing.F``'s routines and the column package are compiled
@@ -66,12 +75,14 @@ from pathlib import Path
 
 import numpy as np
 
+from woof.hex.mpas_seaice import column_bgc_v842 as cbgc
 from woof.hex.mpas_seaice import column_itd_v842 as citd
 from woof.hex.mpas_seaice import column_radiation_v842 as crad
 from woof.hex.mpas_seaice import column_ridge_v842 as crdg
 from woof.hex.mpas_seaice import column_step_v842 as cstep
 from woof.hex.mpas_seaice import column_therm_v842 as ct
 from woof.hex.mpas_seaice import column_v842 as cv
+from woof.hex.mpas_seaice import ocean_mixed_layer_v842 as oml
 from woof.verify import mpas_ocean_stream as _stream
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mpas_seaice_column"
@@ -89,6 +100,22 @@ DEDD_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_dedd"
 STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_step"
 #: the time step with the column package (COUPLED_CASES)
 COUPLED_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_coupled_step"
+#: the ocean mixed layer's fixture (OML_CASES and OML_STEP_CASES)
+OML_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_ocean_mixed_layer"
+#: the column biogeochemistry's (BGC_CASES)
+BGC_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_brine"
+#: the brine fraction carried through the ITD thermodynamics, the ridging and the steps
+BGC_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_brine_carry"
+#: the vertical salinity's (BGC_ZSAL_CASES)
+BGC_ZSAL_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal"
+#: the vertical salinity under zsal_solve (BGC_ZSAL_SOLVE_CASES), from the patched oracle
+BGC_ZSAL_SOLVE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_solve"
+#: the inert vertical salinity through the ITD, the ridging and the steps (BGC_ZSAL_CARRY_CASES)
+BGC_ZSAL_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_carry"
+#: the same under zsal_solve (BGC_ZSAL_SOLVE_CARRY_CASES), from the patched oracle
+BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_solve_carry"
+#: the vertical tracers' nonreactive tracer in the init and column_biogeochemistry
+BGC_NONREACTIVE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -364,6 +391,214 @@ COUPLED_CASES = (
     ("seaice_bl99_abort_salinity", 20262106, _SEAICE_STEP, {**_COUPLED_BASE, "oracle_n_steps": 2},
      (10, 5, 3)),
 )
+_OML = "ocean_mixed_layer"
+_OML_BASE = {**_VT, "config_use_ocean_mixed_layer": True}
+#: seaice_column_ocean_mixed_layer alone: name, seed, stage, overrides
+OML_CASES = (
+    ("oml_registry_defaults", 20262201, _OML, _OML_BASE),
+    ("oml_no_surface_stresses", 20262202, _OML, {**_OML_BASE, "config_calc_surface_stresses": False}),
+    ("oml_high_frequency_one_iteration", 20262203, _OML, {
+        **_OML_BASE, "config_use_high_frequency_coupling": True, "config_boundary_layer_iteration_number": 1}),
+    ("oml_test_ice_shelf_ten_iterations", 20262204, _OML, {
+        **_OML_BASE, "config_use_test_ice_shelf": True, "config_boundary_layer_iteration_number": 10}),
+)
+#: the column step with the mixed layer on (seaice_column_coupling_prep runs it first)
+OML_STEP_CASES = (
+    ("oml_step_bl99_dedd", 20262211, _STEP, {**_OML_BASE, "oracle_n_steps": 3,
+                                             "config_start_time": "2001-06-01_10:00:00"}),
+    ("oml_step_registry_defaults_no_vertical_thermodynamics", 20262212, _STEP, {
+        "config_use_column_vertical_thermodynamics": False, "oracle_n_steps": 2,
+        "config_start_time": "2001-07-20_12:00:00"}),
+)
+
+_BGC_STAGE = "biogeochemistry"
+#: the column biogeochemistry with the brine height
+_BGC = {"config_use_column_biogeochemistry": True, "config_use_brine": True}
+#: v8.4.2 cannot step it without (column_step_v842.check_config)
+_BGC_INACTIVE = "bgc_inactive_diagnostics"
+_BGC_STEP = {**_BGC, "woof_v842_corrections": _BGC_INACTIVE}
+#: distinct carbon to nitrogen ratios, so colpkg_init_zbgc's R_C2N(1) shows which it took
+_C2N = {"config_ratio_C_to_N_diatoms": 6.5, "config_ratio_C_to_N_small_plankton": 7.25,
+        "config_ratio_C_to_N_phaeocystis": 7.75, "config_ratio_C_to_N_proteins": 5.5}
+#: the column biogeochemistry (the init and column_biogeochemistry's brine height): name, seed, stage, overrides
+BGC_CASES = (
+    ("init_bgc_brine", 20262201, "init", _BGC),
+    ("init_bgc_brine_bl99_c2n", 20262202, "init", {**_BGC, **_BL99, **_C2N}),
+    ("init_bgc_brine_restart_hbrine", 20262203, "init", {**_BGC, "config_do_restart_hbrine": True}),
+    ("init_bgc_no_brine", 20262204, "init", {"config_use_column_biogeochemistry": True}),
+    ("init_bgc_brine_three_layers_cesm_ponds", 20262205, "init", {
+        **_BGC, "config_nIceLayers": 3, "config_use_level_meltponds": False, "config_use_cesm_meltponds": True,
+        "config_pond_refreezing_type": "cesm"}),
+    ("bgc_brine", 20262211, _BGC_STAGE, _BGC),
+    ("bgc_brine_bl99_half_hour", 20262212, _BGC_STAGE, {**_BGC, **_BL99, "config_dt": 1800.0}),
+    ("bgc_brine_short_drainage_length", 20262213, _BGC_STAGE, {
+        **_BGC, "config_bio_gravity_drainage_length_scale": 0.5}),
+    ("bgc_brine_four_layers_three_categories", 20262214, _BGC_STAGE, {
+        **_BGC, "config_nIceLayers": 4, "config_nCategories": 3}),
+    ("bgc_brine_abort_remap", 20262215, _BGC_STAGE, _BGC),
+    ("bgc_brine_remap_stop_cleared", 20262216, _BGC_STAGE, _BGC),
+)
+
+
+#: the brine fraction carried through the ITD thermodynamics and the ridging: name, seed,
+#: stage, overrides (each an ITD or ridging case's, with the brine height on)
+BGC_CARRY_CASES = (
+    ("itd_bgc_brine_mushy_level_ponds", 20262301, _ITD, _BGC),
+    ("itd_bgc_brine_bl99_update_ocean", 20262302, _ITD, {**_BGC, **_BL99, "config_update_ocean_fluxes": True}),
+    ("itd_bgc_brine_bl99_delta_function", 20262303, _ITD, {
+        **_BGC, **_BL99, **_DELTA_NEW, "config_nCategories": 4, "config_use_level_meltponds": False,
+        "config_use_level_ice": False}),
+    ("itd_bgc_brine_bl99_single_category", 20262304, _ITD, {
+        **_BGC, **_BL99, "config_nCategories": 1, "config_category_bounds_type": "single category",
+        "config_itd_conversion_type": "delta function"}),
+    ("itd_bgc_brine_three_layers_topo_ponds", 20262305, _ITD, {
+        **_BGC, "config_nIceLayers": 3, "config_use_level_meltponds": False, "config_use_topo_meltponds": True}),
+    ("ridge_bgc_brine_mushy_level_ponds", 20262311, _RDG, _BGC),
+    ("ridge_bgc_brine_bl99_thorndike_hibler", 20262312, _RDG, {**_BGC, **_BL99, **_THORNDIKE, **_HIBLER}),
+    ("ridge_bgc_brine_subcycles_topo_ponds", 20262313, _RDG, {
+        **_BGC, **_TOPO, "config_dynamics_subcycle_number": 3, "config_ridiging_efolding_scale": 4.5}),
+    ("step_bgc_brine_bl99_dedd", 20262321, _STEP, {**_STEP_BASE, **_BGC_STEP, "oracle_n_steps": 3,
+                                                   "config_start_time": "2001-06-01_10:00:00"}),
+    ("step_bgc_brine_bl99_dedd_subcycles_gregorian", 20262322, _STEP, {
+        **_STEP_BASE, **_BGC_STEP, "oracle_n_steps": 3, "config_dynamics_subcycle_number": 2,
+        "config_nIceLayers": 4,
+        "config_nCategories": 3, "config_calendar_type": "gregorian", "config_start_time": "2000-07-10_06:00:00"}),
+    ("step_bgc_brine_mushy_level_ponds_no_vertical_thermodynamics", 20262323, _STEP, {
+        **_BGC_STEP, "config_use_ocean_mixed_layer": False, "config_use_column_vertical_thermodynamics": False,
+        "oracle_n_steps": 3, "config_start_time": "2001-07-20_12:00:00"}),
+)
+#: the brine fraction through the time step with the column package and the velocity solver
+BGC_CARRY_COUPLED_CASES = (
+    ("seaice_bgc_brine_bl99_dedd_rothrock", 20262331, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_BGC_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
+     (12, 6, 3)),
+    ("seaice_bgc_brine_mushy_level_ponds_no_vertical_thermodynamics", 20262332, _SEAICE_STEP, {
+        **{k: v for k, v in _COUPLED_BASE.items() if k not in _VT}, **_BGC_STEP,
+        "config_use_column_vertical_thermodynamics": False, "oracle_n_steps": 2,
+        "config_start_time": "2001-07-20_12:00:00"}, (10, 5, 3)),
+)
+
+
+#: the column biogeochemistry with the brine height and the vertical salinity (BL99 only)
+_BGC_ZSAL = {**_BGC, **_BL99, "config_use_vertical_zsalinity": True}
+#: the vertical salinity in the init, column_biogeochemistry and the vertical
+#: thermodynamics, as v8.4.2 runs it (inert: colpkg's solve_zsal is never set and
+#: the pool's vertical salinity is copied only with the vertical tracers):
+#: name, seed, stage, overrides
+BGC_ZSAL_CASES = (
+    ("init_bgc_zsal", 20262501, "init", _BGC_ZSAL),
+    ("init_bgc_zsal_three_layers_four_categories", 20262503, "init", {
+        **_BGC_ZSAL, "config_nIceLayers": 3, "config_nCategories": 4}),
+    ("bgc_zsal", 20262511, _BGC_STAGE, _BGC_ZSAL),
+    ("bgc_zsal_four_layers_three_categories", 20262514, _BGC_STAGE, {
+        **_BGC_ZSAL, "config_nIceLayers": 4, "config_nCategories": 3}),
+    ("bgc_zsal_abort_remap", 20262515, _BGC_STAGE, _BGC_ZSAL),
+    ("vt_bgc_zsal_bl99", 20262521, "vertical_thermodynamics", {**_VT, **_BGC_ZSAL}),
+)
+#: the opt-in correction that solves the vertical salinity (column_v842.CORRECTIONS)
+ZSAL_SOLVE = "zsal_solve"
+_ZSAL_SOLVE = {**_BGC_ZSAL, "woof_v842_corrections": ZSAL_SOLVE}
+#: the same under ``zsal_solve``, against the oracle built with
+#: tools/mpas_seaice_oracle/zsal_solve.patch (WOOF_ORACLE_PATCH=zsal_solve)
+BGC_ZSAL_SOLVE_CASES = (
+    ("init_zsal_solve", 20262531, "init", _ZSAL_SOLVE),
+    ("init_zsal_solve_restart_zsalinity", 20262532, "init", {**_ZSAL_SOLVE, "config_do_restart_zsalinity": True}),
+    ("init_zsal_solve_three_layers_four_categories", 20262533, "init", {
+        **_ZSAL_SOLVE, "config_nIceLayers": 3, "config_nCategories": 4}),
+    ("bgc_zsal_solve", 20262541, _BGC_STAGE, _ZSAL_SOLVE),
+    ("bgc_zsal_solve_half_hour_sublayer_drainage_scale", 20262542, _BGC_STAGE, {
+        **_ZSAL_SOLVE, "config_dt": 1800.0, "config_zsalinity_molecular_sublayer": 0.01,
+        "config_zsalinity_gravity_drainage_scale": 0.05, "config_bio_gravity_drainage_length_scale": 0.5}),
+    ("bgc_zsal_solve_short_step", 20262543, _BGC_STAGE, {**_ZSAL_SOLVE, "config_dt": 200.0}),
+    ("bgc_zsal_solve_four_layers_three_categories", 20262544, _BGC_STAGE, {
+        **_ZSAL_SOLVE, "config_nIceLayers": 4, "config_nCategories": 3}),
+    ("bgc_zsal_solve_abort_remap", 20262545, _BGC_STAGE, _ZSAL_SOLVE),
+    ("bgc_zsal_solve_abort_max_salinity", 20262546, _BGC_STAGE, _ZSAL_SOLVE),
+    ("vt_zsal_solve_bl99", 20262551, "vertical_thermodynamics", {**_VT, **_ZSAL_SOLVE}),
+    ("vt_zsal_solve_bl99_melting", 20262552, "vertical_thermodynamics", {
+        **_VT, **_ZSAL_SOLVE, "config_start_time": "2000-07-10_00:00:00"}),
+)
+_ZSAL_STEP = {**_BGC_ZSAL, "woof_v842_corrections": _BGC_INACTIVE}
+#: v8.4.2's inert vertical salinity carried through the ITD thermodynamics, the ridging
+#: and the steps (its tracers counted, never solved or copied; the remap advects the
+#: pool's): name, seed, stage, overrides
+BGC_ZSAL_CARRY_CASES = (
+    ("itd_bgc_zsal_bl99_update_ocean", 20262601, _ITD, {**_BGC_ZSAL, "config_update_ocean_fluxes": True}),
+    ("itd_bgc_zsal_bl99_delta_function_four_layers", 20262602, _ITD, {
+        **_BGC_ZSAL, **_DELTA_NEW, "config_nIceLayers": 4, "config_nCategories": 4,
+        "config_use_level_meltponds": False, "config_use_level_ice": False}),
+    ("ridge_bgc_zsal_bl99", 20262611, _RDG, _BGC_ZSAL),
+    ("ridge_bgc_zsal_bl99_thorndike_hibler_subcycles", 20262612, _RDG, {
+        **_BGC_ZSAL, **_THORNDIKE, **_HIBLER, "config_dynamics_subcycle_number": 2}),
+    ("step_bgc_zsal_bl99_dedd", 20262621, _STEP, {**_STEP_BASE, **_ZSAL_STEP, "oracle_n_steps": 3,
+                                                 "config_start_time": "2001-06-01_10:00:00"}),
+    ("step_bgc_zsal_bl99_dedd_three_categories_gregorian", 20262622, _STEP, {
+        **_STEP_BASE, **_ZSAL_STEP, "oracle_n_steps": 3, "config_nIceLayers": 4, "config_nCategories": 3,
+        "config_calendar_type": "gregorian", "config_start_time": "2000-07-10_06:00:00"}),
+)
+#: the inert vertical salinity through the time step with the velocity solver (no
+#: advection, as every column-package time-step case here)
+BGC_ZSAL_CARRY_COUPLED_CASES = (
+    ("seaice_bgc_zsal_bl99_dedd_rothrock", 20262631, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_ZSAL_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
+     (12, 6, 3)),
+)
+_ZSAL_SOLVE_STEP = {**_BGC_ZSAL, "woof_v842_corrections": (_BGC_INACTIVE, ZSAL_SOLVE)}
+#: the solved vertical salinity (zsal_solve) through the ITD thermodynamics, the ridging
+#: and the steps, against the patched oracle: name, seed, stage, overrides
+BGC_ZSAL_SOLVE_CARRY_CASES = (
+    ("itd_zsal_solve_bl99_update_ocean", 20262701, _ITD, {**_ZSAL_SOLVE, "config_update_ocean_fluxes": True}),
+    ("itd_zsal_solve_bl99_delta_function_four_layers", 20262702, _ITD, {
+        **_ZSAL_SOLVE, **_DELTA_NEW, "config_nIceLayers": 4, "config_nCategories": 4,
+        "config_use_level_meltponds": False, "config_use_level_ice": False}),
+    ("itd_zsal_solve_bl99_single_category", 20262703, _ITD, {
+        **_ZSAL_SOLVE, "config_nCategories": 1, "config_category_bounds_type": "single category",
+        "config_itd_conversion_type": "delta function"}),
+    ("itd_zsal_solve_abort_regrid", 20262704, _ITD, _ZSAL_SOLVE),
+    ("ridge_zsal_solve_bl99", 20262711, _RDG, _ZSAL_SOLVE),
+    ("ridge_zsal_solve_bl99_thorndike_hibler_subcycles", 20262712, _RDG, {
+        **_ZSAL_SOLVE, **_THORNDIKE, **_HIBLER, "config_dynamics_subcycle_number": 2}),
+    ("step_zsal_solve_bl99_dedd", 20262721, _STEP, {**_STEP_BASE, **_ZSAL_SOLVE_STEP, "oracle_n_steps": 3,
+                                                   "config_start_time": "2001-06-01_10:00:00"}),
+    ("step_zsal_solve_bl99_dedd_three_categories_gregorian", 20262722, _STEP, {
+        **_STEP_BASE, **_ZSAL_SOLVE_STEP, "oracle_n_steps": 3, "config_nIceLayers": 4, "config_nCategories": 3,
+        "config_calendar_type": "gregorian", "config_start_time": "2000-07-10_06:00:00"}),
+)
+BGC_ZSAL_SOLVE_CARRY_COUPLED_CASES = (
+    ("seaice_zsal_solve_bl99_dedd_rothrock", 20262731, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_ZSAL_SOLVE_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
+     (12, 6, 3)),
+)
+
+
+#: the column biogeochemistry with the brine height and the vertical tracers' nonreactive tracer
+_BGC_NR = {**_BGC, "config_use_vertical_tracers": True, "config_use_nonreactive": True}
+#: the nonreactive tracer in the init and column_biogeochemistry, by its transport type
+#: (config_mobility_type_nitrate: below 0 not mobile, then the retention and release
+#: time bands): name, seed, stage, overrides
+BGC_NONREACTIVE_CASES = (
+    ("init_bgc_nonreactive", 20262601, "init", _BGC_NR),
+    ("init_bgc_nonreactive_bl99_mobile_frazil", 20262602, "init", {
+        **_BGC_NR, **_BL99, "config_mobility_type_nitrate": 0.2, "config_fraction_biotracer_in_frazil": 0.6}),
+    ("init_bgc_nonreactive_restart_bgc", 20262603, "init", {**_BGC_NR, "config_do_restart_bgc": True}),
+    ("init_bgc_nonreactive_three_layers_four_categories", 20262604, "init", {
+        **_BGC_NR, "config_nIceLayers": 3, "config_nCategories": 4, "config_new_ice_fraction_biotracer": 0.7}),
+    ("bgc_nonreactive", 20262611, _BGC_STAGE, _BGC_NR),
+    ("bgc_nonreactive_bl99_retained", 20262612, _BGC_STAGE, {
+        **_BGC_NR, **_BL99, "config_mobility_type_nitrate": 0.2}),
+    ("bgc_nonreactive_rapid", 20262613, _BGC_STAGE, {
+        **_BGC_NR, "config_mobility_type_nitrate": 0.7, "config_rapid_mobile_to_stationary_time": 1800.0}),
+    ("bgc_nonreactive_released_half_hour", 20262614, _BGC_STAGE, {
+        **_BGC_NR, "config_mobility_type_nitrate": 1.5, "config_dt": 1800.0,
+        "config_long_mobile_to_stationary_time": 86400.0}),
+    ("bgc_nonreactive_stationary_four_layers_three_categories", 20262615, _BGC_STAGE, {
+        **_BGC_NR, "config_mobility_type_nitrate": 2.5, "config_nIceLayers": 4, "config_nCategories": 3,
+        "config_biogrid_bottom_molecular_sublayer": 0.01}),
+    ("bgc_nonreactive_bl99_retained_two_hours", 20262616, _BGC_STAGE, {
+        **_BGC_NR, **_BL99, "config_mobility_type_nitrate": 0.2, "config_dt": 7200.0}),
+    ("bgc_nonreactive_abort_init", 20262617, _BGC_STAGE, _BGC_NR),
+    ("bgc_nonreactive_abort_negative", 20262618, _BGC_STAGE, _BGC_NR),
+)
 
 
 def configs_of(overrides: dict, stage: str) -> dict:
@@ -383,12 +618,20 @@ def field_rows(config: dict, mesh: dict = MESH) -> tuple[list, dict[str, int], d
         # seaice_column_coupling_prep reads its dimensions from the tracers pool
         rows += [("tracers", "nCellsSolve", DIM, ()), ("tracers", "nCategories", DIM, ())]
     stage = config.get("oracle_stage")
-    pools = (VT_POOLS if stage == "vertical_thermodynamics" else STEP_POOLS if stage in (_STEP, _SEAICE_STEP)
+    if stage in (_STEP, _OML) and config.get("config_use_ocean_mixed_layer"):
+        # seaice_column_ocean_mixed_layer reads its nCellsSolve from the ocean_coupling pool
+        rows += [("ocean_coupling", "nCellsSolve", DIM, ())]
+    pools = (VT_POOLS if stage in ("vertical_thermodynamics", _OML) else STEP_POOLS if stage in (_STEP, _SEAICE_STEP)
              else POOLS)
     # The Registry allocates a var by its own packages: gen_inc.c's parse_var never reads
     # the var_struct's (biogeochemistry's newlyFormedIce is the column package's).  The
     # earlier stages' cases keep the struct gate, which only drops fields their routines
     # never read, so their bytes (and fixtures) stay; the ITD stage reads newlyFormedIce.
+    # Under the bgc_inactive_diagnostics correction the fields v8.4.2's
+    # seaice_column_reinitialize_diagnostics_bgc zeroes without an array get one,
+    # as a build whose zeroing asked would leave them: nothing else reads them, so
+    # every other word is v8.4.2's (without, v8.4.2 writes to address 0).
+    allocated = stand_ins(config)
     var_packages_only = config.get("oracle_stage") in ("itd_thermodynamics", "ridging", *_RADIATION_STAGES, _STEP,
                                                        _SEAICE_STEP)
     for struct in cv.registry_fields()["var_structs"]:
@@ -402,6 +645,8 @@ def field_rows(config: dict, mesh: dict = MESH) -> tuple[list, dict[str, int], d
             fshape = tuple(_EXTENTS.get(d, dims.get(d)) for d in names)
             own = [p for p in package_text.split(";") if p]
             on = struct_on and (not own or any(active[f"{p}Active"] for p in own))
+            if (struct["name"], name) in allocated:
+                on = True
             name = NAME_IN_CODE.get((struct["name"], name), name)
             rows.append((struct["name"], name, REAL if kind == "real" else INT, fshape, on))
     return rows, dims, active
@@ -652,6 +897,10 @@ def _itd_state(rs, case: dict) -> None:
     dh = u(-0.12, 0.12, (n1, ncat))
     area_init[1] = 0.0
     area_init[2] = share[2] / total[2] * 0.995
+    if config["config_use_brine"] and ncat >= 2:
+        # an empty category under the spread frazil: add_new_ice_bgc's brine fraction 1
+        area_init[2, 0] = area_init[2, 0] + area_init[2, 1]
+        area_init[2, 1] = 0.0
     area_init[3] = 2.0e-12 / ncat
     dh[5] = 0.9
     dh[7] = np.abs(dh[7])
@@ -721,6 +970,38 @@ def _itd_state(rs, case: dict) -> None:
     onset = u(0.0, 365.0, (n1,))
     onset[::2] = 0.0
     pools["diagnostics"]["freezeOnset"] = onset
+
+
+def _brine_fraction(rs, case: dict) -> None:
+    """The brine fraction the ITD and ridging cases with the brine height
+    carry: 0.6-1.1 (brine above and below the ice top)."""
+    pools, dims = case["pools"], case["dims"]
+    n1, ncat = dims["nCells"] + 1, dims["nCategories"]
+    pools["tracers"]["brineFraction"] = _uniform(rs)(0.6, 1.1, (n1, ncat, 1))
+
+
+def _brine_step_state(rs, case: dict) -> None:
+    """On top of :func:`_step_state`, what the brine height's step reads that
+    no earlier stage of the step writes: the brine fraction (:func:`_brine_fraction`),
+    the thickness of the last brine height step (``iceThicknessCategoryInitial``,
+    near the ice's), the Rayleigh criterion, the melt and growth (which the
+    vertical thermodynamics, when on, overwrites) and ``colpkg_init_hbrine``'s
+    grids."""
+    _brine_fraction(rs, case)
+    pools, dims = case["pools"], case["dims"]
+    n1, ncat, nil, nbl = dims["nCells"] + 1, dims["nCategories"], dims["nIceLayers"], dims["nBioLayers"]
+    u = _uniform(rs)
+    t, ist, mg, bgc = pools["tracers"], pools["icestate"], pools["melt_growth_rates"], pools["biogeochemistry"]
+    area, volume = t["iceAreaCategory"][:, :, 0], t["iceVolumeCategory"][:, :, 0]
+    hin = volume / np.where(area > 0.0, area, 1.0)
+    ist["iceThicknessCategoryInitial"] = hin * u(0.9, 1.1, (n1, ncat))
+    bgc["rayleighCriteriaReal"] = u(0.0, 1.0, (n1,))
+    for key, hi in (("basalIceMeltCategory", 0.01), ("surfaceIceMeltCategory", 0.01),
+                    ("congelationCategory", 0.01), ("snowiceFormationCategory", 0.005),
+                    ("snowMeltCategory", 0.005)):
+        mg[key] = u(0.0, hi, (n1, ncat))
+    for key, value in cv.hbrine_grids(nbl, nil).items():
+        bgc[key] = value
 
 
 def _ridge_state(rs, case: dict) -> None:
@@ -996,6 +1277,202 @@ def _step_state(rs, case: dict) -> None:
             t[key] = u(a, b, t[key].shape)
 
 
+def _bgc_state(rs, case: dict) -> None:
+    """The brine height's inputs: categories of 0.3-3 m ice (and below the
+    0.05 m ``thinS`` in one cell), the thickness and area before the
+    thermodynamics, the melt and growth, mushy enthalpies and salinities (a
+    layer saltier than the liquidus break, a nearly melted category), the
+    brine fraction above sea level with little snow (runoff) and below it
+    under heavy snow (flooding), non-positive brine fractions, new ice (an
+    initial area at or below puny), an ice-free cell, and ``colpkg_init_hbrine``'s
+    grids. ``remap_stop`` in the name: a negative thickness in a middle
+    category (a stop the next category clears); ``abort``: that, and the same
+    in two cells' last category.
+    Separate numpy ufuncs only, so the words are the same on every host."""
+    pools, dims, name = case["pools"], case["dims"], case["name"]
+    nc, ncat, nil, nbl = dims["nCells"], dims["nCategories"], dims["nIceLayers"], dims["nBioLayers"]
+    n1 = nc + 1
+    u = _uniform(rs)
+    t, ist, mg, oc, bgc = (pools["tracers"], pools["icestate"], pools["melt_growth_rates"],
+                           pools["ocean_coupling"], pools["biogeochemistry"])
+    area = u(0.02, 0.9 / ncat, (n1, ncat))
+    hin = u(0.3, 3.0, (n1, ncat))
+    hsn = u(0.0, 0.3, (n1, ncat))
+    fbri = u(0.85, 1.2, (n1, ncat))
+    hsn[0] = 0.01                                  # brine above sea level: runoff
+    fbri[0] = u(1.05, 1.2, (ncat,))
+    hsn[1] = 0.6                                   # brine below sea level: flooding
+    fbri[1] = u(0.7, 0.9, (ncat,))
+    area[2] = 0.0                                  # no ice
+    hin[3] = u(0.005, 0.045, (ncat,))              # below thinS
+    fbri[5, ::2] = 0.0                             # reset to 1
+    fbri[5, 1 % ncat] = -0.5
+    area_init = area * u(0.9, 1.1, (n1, ncat))
+    area_init[4, 0] = 0.0                          # new ice in the first category: no Rayleigh criterion
+    area_init[6, 1 % ncat] = 5.0e-12               # at most puny
+    hin_init = hin * u(0.9, 1.1, (n1, ncat))
+    hin_init[6, 0] = 1.0e-13                       # an old thickness below puny
+    if "abort_remap" in name or "remap_stop" in name:
+        # remap_zbgc stops on a negative thickness, which colpkg_biogeochemistry does not
+        # check: the next ice category's preflushing_changes clears it (cell 4)
+        hin[4, 2 % ncat] = -0.4
+        hin_init[4, 2 % ncat] = -0.4
+    if "abort_remap" in name:
+        # only a stop in a cell's last category aborts (cell 7)
+        hin[7, ncat - 1] = -0.2
+        hin_init[7, ncat - 1] = -0.2
+        hin[8, ncat - 1] = -0.3                    # a later cell, which MPAS never reaches
+        hin_init[8, ncat - 1] = -0.3
+    t["iceAreaCategory"] = area[:, :, None]
+    t["iceVolumeCategory"] = (area * hin)[:, :, None]
+    t["snowVolumeCategory"] = (area * hsn)[:, :, None]
+    t["brineFraction"] = fbri[:, :, None]
+    sal = u(2.0, 12.0, (n1, ncat, nil))
+    sal[7, 0, nil // 2] = 130.0                    # above the liquidus break salinity
+    q = u(-3.4e8, -1.0e8, (n1, ncat, nil))
+    q[7, 1 % ncat] = u(-5.0e5, -1.0e4, (nil,))     # nearly melted
+    t["iceSalinity"], t["iceEnthalpy"] = sal, q
+    ist["iceAreaCategoryInitial"] = area_init
+    ist["iceVolumeCategoryInitial"] = area_init * hin_init
+    ist["iceThicknessCategoryInitial"] = u(0.0, 3.0, (n1, ncat))
+    total = np.zeros(n1)
+    for n in range(ncat):
+        total = total + area[:, n]
+    ist["openWaterArea"] = 1.0 - total
+    for key, hi in (("basalIceMeltCategory", 0.01), ("surfaceIceMeltCategory", 0.01),
+                    ("congelationCategory", 0.01), ("snowiceFormationCategory", 0.005),
+                    ("snowMeltCategory", 0.005)):
+        value = u(0.0, hi, (n1, ncat))
+        value[::2, 0] = 0.0
+        mg[key] = value
+    oc["seaSurfaceSalinity"] = u(30.0, 35.0, (n1,))
+    sst = u(-1.9, -1.0, (n1,))
+    sst[8] = 0.5
+    oc["seaSurfaceTemperature"] = sst
+    bgc["newlyFormedIce"] = rs.randint(0, 2, (n1, ncat)).astype(np.int32)
+    bgc["rayleighCriteriaReal"] = u(0.0, 1.0, (n1,))
+    bgc["netBrineHeight"] = u(0.0, 0.5, (n1,))
+    for key, value in cv.hbrine_grids(nbl, nil).items():
+        bgc[key] = value
+    pools["mesh"]["indexToCellID"] = np.arange(1, n1 + 1, dtype=np.int32)
+
+
+def _nonreactive_state(rs, case: dict) -> None:
+    """On top of :func:`_bgc_state`, the vertical tracers' inputs: the
+    nonreactive tracer's ice and snow layers (positive, one below puny) and
+    mobile fractions, the ocean concentrations, snowfall (none in every third
+    cell), the snow before the step (none in cell 0, deep in cell 1), the
+    shortwave through the ice layers, and the fluxes and integrals the stage
+    accumulates into. update_snow_bgc divides by the area before the step
+    unguarded, which the step never leaves at 0 under ice: cell 4's new ice
+    gets its area back. ``abort_init`` in the name: a negative tracer in cell
+    6's first category, old ice (z_biogeochemistry's initialization error),
+    and in cell 8's, which MPAS never reaches; ``abort_negative``: a negative
+    ocean concentration under cell 3's thin old ice, which the thin-ice flux
+    adds as the brine grows. Separate numpy ufuncs only."""
+    pools, dims, name = case["pools"], case["dims"], case["name"]
+    n1, ncat, nil, nbl, nz = (dims["nCells"] + 1, dims["nCategories"], dims["nIceLayers"], dims["nBioLayers"],
+                              dims["nZBGCTracers"])
+    u = _uniform(rs)
+    t, ist, bgc = pools["tracers"], pools["icestate"], pools["biogeochemistry"]
+    area = t["iceAreaCategory"][:, :, 0]
+    ist["iceAreaCategoryInitial"][4, 0] = area[4, 0]
+    hsn = u(0.0, 0.3, (n1, ncat))
+    hsn[0] = 0.0
+    hsn[1] = u(0.3, 0.6, (ncat,))
+    ist["snowVolumeCategoryInitial"] = np.multiply(ist["iceAreaCategoryInitial"], hsn)
+    conc = u(0.5, 20.0, (n1, ncat, nbl + 3))
+    conc[:, :, nbl + 1:] = u(0.0, 5.0, (n1, ncat, 2))
+    conc[7, 0, 1] = 1.0e-12
+    t["verticalNonreactiveConc"] = conc
+    t["mobileFraction"] = u(0.0, 1.0, (n1, ncat, nz))
+    bgc["oceanBioConcentrations"] = u(0.5, 15.0, (n1, nz))
+    snowfall = u(0.0, 3.0e-5, (n1,))
+    snowfall[::3] = 0.0
+    pools["atmos_coupling"]["snowfallRate"] = snowfall
+    pools["shortwave"]["shortwaveLayerPenetration"] = u(0.0, 40.0, (n1, ncat, nil + 1))
+    bgc["bioShortwaveFlux"] = u(0.0, 40.0, (n1, ncat, nbl + 1))
+    for key, lo, hi in (("oceanBioFluxes", -1.0e-4, 1.0e-4), ("snowIceBioFluxes", 0.0, 1.0e-4),
+                        ("atmosIceBioFluxes", 0.0, 1.0e-4), ("totalVerticalBiologyIce", 0.0, 50.0),
+                        ("totalVerticalBiologySnow", 0.0, 10.0)):
+        bgc[key] = u(lo, hi, (n1, nz))
+    if "abort_init" in name:
+        for cell in (6, 8):
+            bgc["newlyFormedIce"][cell, 0] = 0
+            conc[cell, 0, 2] = -1.0
+    if "abort_negative" in name:
+        bgc["newlyFormedIce"][3] = 0
+        bgc["oceanBioConcentrations"][3] = -50.0
+
+
+def _zsal_dtemp_band(case: dict) -> None:
+    """Cell 5's ice 0.05 degC below each layer's melting point, in daylight:
+    inside BL99's absorbed-shortwave band, which ``temperature_changes``'
+    dTemp (0.02, or 0.1 with ``solve_zsal``, ice_therm_bl99.F90:282-287)
+    moves. Separate numpy ufuncs only."""
+    t = case["pools"]["tracers"]
+    tmlt = np.multiply(np.negative(t["iceSalinity"][5]), _DEPRESST)
+    tin = np.subtract(tmlt, 0.05)
+    t["iceEnthalpy"][5] = -_RHOI * (_CP_ICE * (tmlt - tin) + _LFRESH * (1.0 - tmlt / tin) - _CP_OCN * tmlt)
+
+
+def _zsal_state(rs, case: dict) -> None:
+    """On top of :func:`_bgc_state`, the vertical salinity's inputs: the
+    salinity on the biology grid, the surface temperature, a brine height
+    above ``maxhbr`` times the ice (cell 8's first category, old ice), thin
+    first-category ice with the Rayleigh criterion met (cell 1) and not
+    (cell 3), and the diagnostics it accumulates into.
+    ``max_salinity`` in the name: cold, old, thick ice above ``max_salin``
+    and below its melting salinity in cell 0's first category, where
+    ``solve_S_dt`` stops."""
+    pools, dims, name = case["pools"], case["dims"], case["name"]
+    nc, ncat, nil, nbl = dims["nCells"], dims["nCategories"], dims["nIceLayers"], dims["nBioLayers"]
+    n1 = nc + 1
+    u = _uniform(rs)
+    t, ist, bgc = pools["tracers"], pools["icestate"], pools["biogeochemistry"]
+    t["verticalSalinity"] = u(2.0, 12.0, (n1, ncat, nbl))
+    t["surfaceTemperature"] = u(-20.0, -1.0, (n1, ncat, 1))
+    t["brineFraction"][8, 0, 0] = 1.4               # hbr_old > maxhbr*hice_old
+    bgc["newlyFormedIce"][8, 0] = 0
+    area = t["iceAreaCategory"][:, :, 0]
+    for cell, real in ((1, 0.8), (3, 0.2)):
+        bgc["rayleighCriteriaReal"][cell] = real
+        bgc["newlyFormedIce"][cell, 0] = 0
+        thin = np.multiply(area[cell, 0], 0.04)
+        t["iceVolumeCategory"][cell, 0, 0] = thin
+        ist["iceVolumeCategoryInitial"][cell, 0] = np.multiply(ist["iceAreaCategoryInitial"][cell, 0], 0.045)
+    for key, lo, hi in (("totalVerticalSalinity", 0.0, 50.0), ("zSalinityFlux", -1.0e-5, 1.0e-5),
+                        ("zSalinityGDFlux", -1.0e-5, 1.0e-5)):
+        bgc[key] = u(lo, hi, (n1,))
+    if "max_salinity" in name:
+        bgc["newlyFormedIce"][0, 0] = 0
+        t["brineFraction"][0, 0, 0] = 1.0
+        t["iceEnthalpy"][0, 0] = -3.4e8
+        t["iceSalinity"][0, 0] = 4.0
+        t["verticalSalinity"][0, 0] = 250.0
+        t["surfaceTemperature"][0, 0, 0] = -25.0
+
+
+def _zsal_solve_carry_state(rs, case: dict) -> None:
+    """Under ``zsal_solve``, what the ITD thermodynamics, the ridging and the
+    steps read of the vertical salinity: its profile (positive), the salt
+    flux and, for the ITD and the ridging, ``colpkg_init_hbrine``'s grids.
+    ``abort_regrid`` in the name: a slightly negative brine fraction in cell
+    2's first category, under :func:`_itd_state`'s spread frazil, so
+    ``regrid_stationary``'s remap stops on a negative old brine height."""
+    pools, dims, name = case["pools"], case["dims"], case["name"]
+    n1, ncat, nil, nbl = dims["nCells"] + 1, dims["nCategories"], dims["nIceLayers"], dims["nBioLayers"]
+    u = _uniform(rs)
+    t, bgc = pools["tracers"], pools["biogeochemistry"]
+    t["verticalSalinity"] = u(2.0, 12.0, (n1, ncat, nbl))
+    bgc["zSalinityFlux"] = u(-1.0e-5, 1.0e-5, (n1,))
+    if case["stage"] in (_ITD, _RDG):
+        for key, value in cv.hbrine_grids(nbl, nil).items():
+            bgc[key] = value
+    if "abort_regrid" in name:
+        t["brineFraction"][2, 0, 0] = -1.0e-3
+
+
 def _coupled_dynamics(name: str, seed: int, torus: tuple, config: dict) -> tuple[dict, dict]:
     """The time-step oracle's dynamics state (:mod:`woof.verify.mpas_seaice_step_oracle`)
     on a culled hexagonal torus of ``torus = (nq, nr, owned columns)``: the
@@ -1039,6 +1516,50 @@ def _overlay_dynamics(case: dict, dynamics: dict) -> None:
     pools["mesh"]["indexToCellID"] = np.arange(1, nc + 2, dtype=np.int32)
 
 
+def _oml_state(rs, case: dict) -> None:
+    """The open ocean under :func:`_thermo_state`'s air (its draws first): the
+    down shortwave (a cell without sun), the mixed layer's depth (a shallow
+    cell whose freezing/melting potential the +-1000 W m-2 clamp bounds), a
+    sea surface at, below and well above freezing, a warm-air cell (a stable
+    boundary layer over the sea), the deep heat flux convergence (positive
+    where the mixed layer is at freezing, so it is zeroed), the fluxes
+    through the ice and the drag ratio the call passes."""
+    _thermo_state(rs, case)
+    n1 = case["dims"]["nCells"] + 1
+    u = _uniform(rs)
+    ac = case["pools"]["atmos_coupling"]
+    for key, hi in (("shortwaveVisibleDirectDown", 250.0), ("shortwaveVisibleDiffuseDown", 120.0),
+                    ("shortwaveIRDirectDown", 200.0), ("shortwaveIRDiffuseDown", 100.0)):
+        value = u(0.0, hi, (n1,))
+        value[7] = 0.0
+        ac[key] = value
+    _oml_ocean(rs, case)
+
+
+def _oml_ocean(rs, case: dict) -> None:
+    """:func:`_oml_state`'s ocean (and the column step's, with the mixed layer on)."""
+    pools, dims = case["pools"], case["dims"]
+    n1 = dims["nCells"] + 1
+    u = _uniform(rs)
+    pools["atmos_coupling"]["airPotentialTemperature"][5] = 285.0
+    oc = pools["ocean_coupling"]
+    tf = oc["seaFreezingTemperature"]
+    sst = tf + u(0.0, 1.5, (n1,))
+    sst[1], sst[2] = tf[1] - 0.3, tf[2]
+    sst[4], sst[8] = 3.0, 6.0
+    oc["seaSurfaceTemperature"] = sst
+    hmix = u(5.0, 40.0, (n1,))
+    hmix[3] = 0.05
+    oc["oceanMixedLayerDepth"] = hmix
+    qdp = u(-30.0, 30.0, (n1,))
+    qdp[1], qdp[2] = 15.0, 25.0
+    oc["oceanHeatFluxConvergence"] = qdp
+    of = pools["ocean_fluxes"]
+    of["oceanHeatFlux"] = u(-60.0, 10.0, (n1,))
+    of["oceanShortwaveFlux"] = u(0.0, 20.0, (n1,))
+    pools["drag"]["airOceanDragCoefficientRatio"] = u(0.5, 1.5, (n1,))
+
+
 def make_case(name, seed, stage, overrides, torus=None) -> dict:
     rs = np.random.RandomState(seed)
     config = configs_of(overrides, stage)
@@ -1068,16 +1589,34 @@ def make_case(name, seed, stage, overrides, torus=None) -> dict:
     _tracers(rs, case["pools"], case["dims"])
     if stage == "vertical_thermodynamics":
         _thermo_state(rs, case)
+        if config["config_use_vertical_zsalinity"]:
+            _zsal_dtemp_band(case)
     if stage in (_STEP, _SEAICE_STEP):
         _step_state(rs, case)
+        if config["config_use_brine"]:
+            _brine_step_state(rs, case)
+        if config["config_use_ocean_mixed_layer"]:
+            _oml_ocean(rs, case)
     if dynamics is not None:
         _overlay_dynamics(case, dynamics)
     if stage == "itd_thermodynamics":
         _itd_state(rs, case)
     if stage == "ridging":
         _ridge_state(rs, case)
+    if stage in ("itd_thermodynamics", "ridging") and config["config_use_brine"]:
+        _brine_fraction(rs, case)
     if stage in _RADIATION_STAGES:
         _radiation_state(rs, case)
+    if stage == _OML:
+        _oml_state(rs, case)
+    if stage == _BGC_STAGE:
+        _bgc_state(rs, case)
+        if config["config_use_vertical_zsalinity"]:
+            _zsal_state(rs, case)
+        if cv.vertical_tracers(config):
+            _nonreactive_state(rs, case)
+    if stage in (_ITD, _RDG, _STEP, _SEAICE_STEP) and cv.solves_zsal(config):
+        _zsal_solve_carry_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
     case["fields"] = [r[:4] for r in rows]
@@ -1091,6 +1630,10 @@ def cases(precision: str = "r8", rows=CASES) -> list[dict]:
 
 
 def input_bytes(case: dict) -> bytes:
+    names = case["config"].get("woof_v842_corrections")
+    if names is not None and not isinstance(names, str):
+        # several corrections (which the oracle does not read) go into the stream as one string
+        case = {**case, "config": {**case["config"], "woof_v842_corrections": " ".join(names)}}
     return _stream.input_bytes(case["fields"], case)
 
 
@@ -1102,15 +1645,25 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     return _stream.read_outputs(case["fields"], raw, case)
 
 
+#: column_biogeochemistry's MPAS_LOG_ERR line, and the column package's char_len
+_BGC_ABORT_LINE = "ERR column_biogeochemistry: "
+_CHAR_LEN = 80
+
+
 def parse_log(text: str) -> dict:
     """The tracer object (``TOBJ`` rows, a repeated name's rows concatenated)
-    and every other line the routines logged."""
+    and every other line the routines logged. column_biogeochemistry's
+    abortMessage (strKIND long) is never initialised and the column
+    package's stop labels are ``char_len`` dummies, so past ``char_len`` its
+    abort line is whatever the stack held: only the label is kept."""
     tobj: dict[str, list[int]] = {}
     other = []
-    for line in text.splitlines():
+    for line in text.split("\n"):
         if line.startswith("TOBJ "):
             parts = line.split()
             tobj.setdefault(parts[1], []).extend(int(x) for x in parts[2:])
+        elif line.startswith(_BGC_ABORT_LINE):
+            other.append(_BGC_ABORT_LINE + line[len(_BGC_ABORT_LINE):][:_CHAR_LEN].rstrip())
         elif line.strip():
             other.append(line.rstrip())
     return {"tracer_object": tobj, "log": other}
@@ -1126,19 +1679,35 @@ def _runtime_error(stderr: str) -> dict | None:
     return {"file": Path(at.group(2)).name, "line": int(at.group(1)), "error": error.group(1).strip()}
 
 
+def _critical(parsed: dict) -> dict | None:
+    """An ``MPAS_LOG_CRIT`` abort's record (the stub's ``CRIT`` line, its
+    integers and the ``ERR`` line before it), or None."""
+    lines = parsed["log"]
+    at = next((i for i, line in enumerate(lines) if line.startswith("CRIT ")), None)
+    if at is None:
+        return None
+    error = next((line[len("ERR "):] for line in reversed(lines[:at]) if line.startswith("ERR ")), None)
+    ints = (lines[at + 1].split()[1:] if at + 1 < len(lines) and lines[at + 1].startswith("INTS") else [])
+    return {"error": error, "critical": lines[at][len("CRIT "):], "ints": [int(x) for x in ints]}
+
+
 def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray] | None, dict]:
-    """The oracle's outputs and log. A case on which v8.4.2 itself dies with
-    a Fortran runtime error has no outputs; its log carries ``crash`` (the
-    error's file, line and message)."""
+    """The oracle's outputs and log. A case on which v8.4.2 itself dies, with
+    a Fortran runtime error or an ``MPAS_LOG_CRIT`` message (which aborts
+    MPAS), has no outputs; its log carries ``crash`` (the error's file, line
+    and message, or the critical message, its integers and the error logged
+    before it)."""
     with tempfile.TemporaryDirectory() as tmp:
         src, dst, log = Path(tmp) / "in.bin", Path(tmp) / "out.bin", Path(tmp) / "log.txt"
         src.write_bytes(input_bytes(case))
         run = subprocess.run([str(Path(build_dir) / "run_column_r8"), str(src), str(dst), str(log)],
                              capture_output=True, text=True)
         crash = _runtime_error(run.stderr) if run.returncode else None
+        parsed = parse_log(log.read_text(encoding="utf-8"))
+        if run.returncode == 7 and crash is None:
+            crash = _critical(parsed)
         if run.returncode and crash is None:
             raise subprocess.CalledProcessError(run.returncode, run.args, run.stdout, run.stderr)
-        parsed = parse_log(log.read_text(encoding="utf-8"))
         if crash is not None:
             return None, {**parsed, "crash": crash}
         return read_outputs(dst.read_bytes(), case), parsed
@@ -1169,10 +1738,19 @@ def load_logs(fixture_dir: Path = FIXTURE_DIR) -> dict:
     return json.loads((fixture_dir / "column-logs.json").read_text(encoding="utf-8"))
 
 
+def stand_ins(config: dict) -> set[tuple[str, str]]:
+    """The fields the oracle gives an array v8.4.2 does not have (see
+    :func:`field_rows`): not v8.4.2's words, so not compared."""
+    if _BGC_INACTIVE in cv.corrections(config) and config.get("oracle_stage") in (_STEP, _SEAICE_STEP):
+        return {("biogeochemistry", name) for name in cstep.inactive_bgc_diagnostics(config)}
+    return set()
+
+
 def expected_outputs(case: dict, fixture: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     out = {}
+    skip = stand_ins(case["config"])
     for pool, name, kind, _ in case["fields"]:
-        if kind not in (REAL, INT) or case["pools"][pool][name] is None:
+        if kind not in (REAL, INT) or case["pools"][pool][name] is None or (pool, name) in skip:
             continue
         key = f"{pool}/{name}"
         out[key] = fixture[key] if key in fixture else np.asarray(case["pools"][pool][name])
@@ -1189,8 +1767,10 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
 
     dev = on_device(case)
     config = case["config"]
-    state = cv.init_parameters(dev, config)
     stage = case["stage"]
+    # the stages that carry the brine height (each refuses the rest itself)
+    state = cv.init_parameters(dev, config, biogeochemistry=stage not in ("aggregate", "update_state", _OML),
+                               z_tracers=stage in ("init", _BGC_STAGE))
     if stage == "init":
         cv.initialize_coupler_fields(dev, config, state)
         cv.init_variables(dev, config, state)
@@ -1209,6 +1789,8 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     elif stage == "ridging":
         cv.init_column_itd(dev, state)
         state.abort = crdg.ridging(dev, config, state)
+    elif stage == _BGC_STAGE:
+        state.abort = cbgc.biogeochemistry(dev, config, state)
     elif stage == "prep_radiation":
         crad.prep_radiation(dev, config, state)
     elif stage == "radiation":
@@ -1220,6 +1802,8 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
         state.abort = cstep.run(dev, config, state, int(config["oracle_n_steps"]))
     elif stage == _SEAICE_STEP:
         state.abort, step = _run_seaice_step(dev, config)
+    elif stage == _OML:
+        oml.ocean_mixed_layer(dev, config, int(case["dims"]["nCellsSolve"]))
     else:
         raise ValueError(f"unknown stage {stage}")
     outputs = {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]
@@ -1298,6 +1882,74 @@ def oracle_abort(log: dict, routine: str = "column_vertical_thermodynamics") -> 
     message = next(line for line in lines if line.startswith(prefix))[len("ERR "):]
     cell = int(lines[lines.index("ERR iCell: $i") + 1].split()[1])
     return ierr, cell, message
+
+
+def measure_bgc(reference: dict | None = None, logs: dict | None = None, *, rows=BGC_CASES,
+                fixture_dir: Path = BGC_FIXTURE_DIR) -> dict[str, dict[str, int]]:
+    """Per column-biogeochemistry case: the words the GPU gets wrong per
+    field, the tracer object's integers that differ and, for the brine
+    height's step, whether it reports an abort the oracle does not; for a
+    case v8.4.2 dies on (``MPAS_LOG_CRIT``), whether the port fails to stop
+    at the same cell with the same message."""
+    reference = load_fixture(fixture_dir) if reference is None else reference
+    logs = load_logs(fixture_dir) if logs is None else logs
+    report: dict[str, dict[str, int]] = {}
+    for case in cases("r8", rows):
+        log = logs[case["name"]]
+        if "crash" in log:
+            # v8.4.2 dies: the port must stop at the same cell with the same message
+            try:
+                run_gpu(case)
+            except cbgc.CriticalAbort as error:
+                report[case["name"]] = {"crash": int(error.crash != log["crash"])}
+            else:
+                report[case["name"]] = {"crash": 1}
+            continue
+        got, state = run_gpu(case)
+        row = {}
+        if case["stage"] == _BGC_STAGE:
+            row["abort"] = int(tuple(state.abort) != oracle_abort(log, "column_biogeochemistry"))
+        want = expected_outputs(case, reference.get(case["name"], {}))
+        row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        mine = state.tracers.log_rows()
+        row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
+        report[case["name"]] = row
+    return report
+
+
+def measure_zsal(reference: dict | None = None, logs: dict | None = None, *, rows=BGC_ZSAL_CASES,
+                 fixture_dir: Path = BGC_ZSAL_FIXTURE_DIR) -> dict[str, dict[str, int]]:
+    """The vertical salinity's cases (``BGC_ZSAL_CASES`` by default): the
+    init's and column_biogeochemistry's as :func:`measure_bgc`, the vertical
+    thermodynamics' as :func:`measure_vt`."""
+    reference = load_fixture(fixture_dir) if reference is None else reference
+    logs = load_logs(fixture_dir) if logs is None else logs
+    vt = tuple(row for row in rows if row[2] == "vertical_thermodynamics")
+    rest = tuple(row for row in rows if row[2] != "vertical_thermodynamics")
+    report: dict[str, dict[str, int]] = {}
+    if rest:
+        report.update(measure_bgc(reference, logs, rows=rest, fixture_dir=fixture_dir))
+    if vt:
+        report.update(measure_vt(reference, logs, rows=vt, fixture_dir=fixture_dir))
+    return report
+
+
+def measure_carry(reference: dict | None = None, logs: dict | None = None, *,
+                  rows=BGC_CARRY_CASES + BGC_CARRY_COUPLED_CASES,
+                  fixture_dir: Path = BGC_CARRY_FIXTURE_DIR) -> dict[str, dict[str, int]]:
+    """The brine fraction's carry-through cases (``BGC_CARRY_CASES`` and
+    ``BGC_CARRY_COUPLED_CASES`` by default), each measured as its stage's
+    own (:func:`measure_itd`, :func:`measure_ridge`, :func:`measure_step`,
+    :func:`measure_coupled`)."""
+    reference = load_fixture(fixture_dir) if reference is None else reference
+    logs = load_logs(fixture_dir) if logs is None else logs
+    by_stage = {_ITD: measure_itd, _RDG: measure_ridge, _STEP: measure_step, _SEAICE_STEP: measure_coupled}
+    report: dict[str, dict[str, int]] = {}
+    for stage, measure_stage in by_stage.items():
+        mine = tuple(row for row in rows if row[2] == stage)
+        if mine:
+            report.update(measure_stage(reference, logs, rows=mine, fixture_dir=fixture_dir))
+    return report
 
 
 def measure_vt(reference: dict | None = None, logs: dict | None = None, *, rows=VT_CASES,
