@@ -1547,6 +1547,18 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   ([the frame table](docs/kernel_local_memory_bounds.md)). The committed hex
   option-matrix rows for WSM3 and WSM5 still record the old 80-level
   refusal at 149 levels until the matrix is re-run on its staged case.
+- **256-level columns for the GSFC shortwave scheme.** `ra_sw_physics=2`
+  was refused above 128 layers: its per-column arena (every array's extent
+  and offset) and the entry point's `zero[]` were literals for a 128-layer
+  column. They are now expressions of `GSFC_KMAX`, whose source default is
+  128, so a column of 128 layers or fewer compiles the unchanged-meaning
+  source (the oracle fixture words and a raw-bit comparison at nz = 49 and
+  128 are identical) and a deeper column adds `-D GSFC_KMAX=256`. The
+  local frame stays 0 B at both tiers; the arena grows from 32,677 to 62,885
+  words per column (535 MB to 1.03 GB for the 4,096-column chunk) and
+  preflight prices it by tier. Past 256 is refused by name. Hex does not
+  offer `ra_sw_physics=2`, so only the WRF route is affected
+  ([the record](docs/kernel_local_memory_bounds.md)).
 
 ### Licensing and opt-ins
 
