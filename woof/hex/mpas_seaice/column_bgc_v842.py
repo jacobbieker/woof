@@ -124,6 +124,9 @@ SOURCE_FILES = (
 _BLOCK = 64
 SEAICE_ERROR_COL_BGC = 13
 MAX_CATEGORIES = 64
+#: the opt-in correction (column_v842.CORRECTIONS) for update_snow_bgc's 0/0 on a
+#: category without an initial area
+SNOW_NEW_CATEGORY = "bgc_snow_new_category"
 STOP_LABELS = {1: "ice_brine preflushing: fbri <= c0", 2: "ice: remap_layers_bgc error",
                3: "bSin(k) > max_salin", 4: "zbgc initialization error", 5: "negative bgc",
                6: "(check_conservation_FCT's stop: v8.4.2 logs an undefined stop_label)"}
@@ -162,6 +165,10 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         cv._refuse("config_nCategories", dims["nCategories"],
                    f"the brine kernel holds at most {MAX_CATEGORIES} categories",
                    f"config_nCategories <= {MAX_CATEGORIES}")
+    if SNOW_NEW_CATEGORY in cv.corrections(configs) and not cv.vertical_tracers(configs):
+        cv._refuse("woof_v842_corrections", SNOW_NEW_CATEGORY,
+                   "update_snow_bgc (the correction's routine) runs only with the vertical tracers",
+                   "config_use_vertical_tracers = .true., or no bgc_snow_new_category")
 
 
 def module_source(n_ice_layers: int, n_bio_layers: int) -> str:
@@ -215,7 +222,8 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
     tr_brine = bool(configs["config_use_brine"])
     solve_zsal = cv.solves_zsal(configs)
     z_tracers = cv.vertical_tracers(configs)
-    flags = int(tr_brine) | int(solve_zsal) << 1 | int(z_tracers) << 2
+    snow_new_category = SNOW_NEW_CATEGORY in cv.corrections(configs)
+    flags = int(tr_brine) | int(solve_zsal) << 1 | int(z_tracers) << 2 | int(snow_new_category) << 3
     status = cp.zeros(max(n_solve, 1), np.int32)
     if solve_zsal:
         zsal = need(t, "verticalSalinity", (n_cells + 1, ncat, nbl))

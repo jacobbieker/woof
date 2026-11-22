@@ -18,7 +18,10 @@ MPAS runs it:
   ``seaice_column_dynamics_time_integration``: under
   ``config_use_vertical_tracers`` ``column_combine_snow_ice_tracers``, then
   ``column_ridging`` and
-  ``seaice_column_update_state`` ("transport", ``dynamicsTimeStep``, 0);
+  ``seaice_column_update_state`` ("transport", ``dynamicsTimeStep``, 0)
+  (and, with the opt-in correction ``subcycle_snow_ice_tracers``,
+  :func:`separate_snow_ice_tracers` again, so a later subcycle's combine
+  keeps this subcycle's ridging);
 - :func:`postdynamics`, ``seaice_column_postdynamics_time_integration``:
   ``column_radiation`` (not at initialisation) under the column shortwave,
   then ``seaice_column_coupling_prep`` and ``seaice_column_scale_fluxes``;
@@ -116,6 +119,10 @@ def check_config(configs: dict) -> None:
                 "config_use_column_package = .true.")
     if c.get("config_use_column_biogeochemistry", False):
         _refuse_inactive_bgc_diagnostics(c)
+    if SUBCYCLE_SNOW_ICE in cv.corrections(c) and not c.get("config_use_vertical_tracers", False):
+        _refuse("woof_v842_corrections", SUBCYCLE_SNOW_ICE,
+                "the snow and ice tracers are separated and combined only with the vertical tracers",
+                "config_use_vertical_tracers = .true., or no subcycle_snow_ice_tracers")
     if c.get("config_use_velocity_solver", True) and \
             c.get("config_stress_divergence_scheme", "variational") == "weak":
         _refuse("config_stress_divergence_scheme", "weak",
@@ -128,6 +135,9 @@ def check_config(configs: dict) -> None:
 #: the vertical tracers column_separate_snow_ice_tracers and column_combine_snow_ice_tracers
 #: move (mpas_seaice_column.F:12500-13266): the nonreactive tracer's, the one the port carries
 #: (column_v842.VT_PORTED); every other vertical tracer is refused by its stages
+#: the opt-in correction (column_v842.CORRECTIONS) that separates the snow and ice
+#: tracers again after each dynamics subcycle
+SUBCYCLE_SNOW_ICE = "subcycle_snow_ice_tracers"
 _SNOW_ICE_TRACERS = (("verticalNonreactiveConc", "verticalNonreactiveSnow", "verticalNonreactiveIce"),)
 
 
@@ -325,6 +335,8 @@ def dynamics(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple:
             return abort
     step = float(cp.asnumpy(pools["velocity_solver"]["dynamicsTimeStep"]).reshape(-1)[0])
     cv.update_state(pools, configs, state, "transport", step, 0.0)
+    if configs["config_use_vertical_tracers"] and SUBCYCLE_SNOW_ICE in cv.corrections(configs):
+        separate_snow_ice_tracers(pools, configs, state)
     return 0, None, None
 
 

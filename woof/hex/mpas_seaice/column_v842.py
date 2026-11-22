@@ -401,6 +401,22 @@ CORRECTIONS = {
         "descriptor gfortran gives one element, so the zeroing writes to address 0 and every time step "
         "with the column biogeochemistry dies there; the correction zeroes only the fields that have an "
         "array, which nothing else reads"),
+    "bgc_snow_new_category": (
+        "update_snow_bgc divides the category's initial snow volume by its initial area with no guard "
+        "(ice_aerosol.F90:543, hs_old = vsno_old/aice_old), and only column_vertical_thermodynamics refreshes "
+        "iceAreaCategoryInitial and snowVolumeCategoryInitial (mpas_seaice_column.F:1458-1460): with "
+        "config_use_column_vertical_thermodynamics off, a category the previous step's ITD opened has no initial "
+        "area, so 0/0 makes its snow layers' flux NaN and oceanBioFluxes is NaN in that cell; the correction "
+        "takes a category without an initial area to have had no snow (hs_old = 0)"),
+    "subcycle_snow_ice_tracers": (
+        "seaice_column_predynamics_time_integration separates the vertical tracers into their *Snow and *Ice "
+        "fields once a step (mpas_seaice_column.F:922-925), but seaice_column_dynamics_time_integration combines "
+        "them back into the tracer before every dynamics subcycle's ridging (mpas_seaice_column.F:976-979; the "
+        "subcycle loop is mpas_seaice_time_integration.F:139-164), so with config_dynamics_subcycle_number > 1 "
+        "each subcycle's combine overwrites what the previous subcycle's ridging did to the vertical tracers "
+        "with the pre-ridging *Snow and *Ice (and the advection moves those): the ridged categories keep their "
+        "old concentrations at their new areas and the tracer is not conserved; the correction separates again "
+        "after each subcycle's column dynamics, so the next combine hands back the ridged tracer"),
     "zsal_solve": (
         "colpkg_init_parameters takes solve_zsal_in but never assigns the column package's solve_zsal "
         "(ice_colpkg.F90:4325-4345; mpas_seaice_column.F:9608 has it commented out), so it stays false, and "

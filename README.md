@@ -414,8 +414,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `z_biogeochemistry`'s mobile and stationary phases and
     `merge_bgc_fluxes`), the ITD thermodynamics and the ridging
     (`add_new_ice_bgc`, `lateral_melt_bgc` and `zap_small_areas`' tracer
-    into `oceanBioFluxes`), word for word with v8.4.2 on CUDA and Metal. The
-    other stages still refuse them. The other biogeochemistry flags are
+    into `oceanBioFluxes`) and the column step (the snow and ice layers
+    separated after the pre-dynamics and combined before each ridging, the
+    vertical thermodynamics, the shortwave and `coupling_prep`), word for
+    word with v8.4.2 on CUDA and Metal. Two v8.4.2 quirks there have opt-in
+    corrections: `subcycle_snow_ice_tracers` (v8.4.2 combines every dynamics
+    subcycle but separates once a step, so an earlier subcycle's ridging of
+    the tracers is lost) and `bgc_snow_new_category` (without the vertical
+    thermodynamics `update_snow_bgc` divides 0/0 for a category the last
+    step opened, and `oceanBioFluxes` is NaN). The coupled step still
+    refuses them. The other biogeochemistry flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
