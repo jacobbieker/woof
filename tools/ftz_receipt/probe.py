@@ -743,33 +743,6 @@ SENSITIVITY_KERNELS = (("ftz_probe_ptx_mul", False), ("ftz_probe_ptx_cvt", True)
 #: The Metal backend's own committed table.  The CUDA receipt in ``receipt/`` cannot describe it: Metal
 #: gives different words for some probes.  ``receipt/`` is never written from a Metal run.
 METAL_PIN_DIR = Path(__file__).resolve().parent / "receipt_metal"
-#: One pinned table per CUDA device model, ``receipt_devices/<device_key>/``.  The words depend on the
-#: architecture and the driver's compile of the shipped routes, so a table measured on one card is not
-#: evidence for another.  ``receipt/`` stays the canonical receipt and is the pin for the device it records.
-DEVICE_PIN_ROOT = Path(__file__).resolve().parent / "receipt_devices"
-
-
-def device_key(name, compute_capability) -> str:
-    """Stable identity of a CUDA device model: ``sm_86-NVIDIA_RTX_A6000``.
-
-    Compute capability plus name, never the UUID, so every card of one model shares one pin.
-    """
-    major, _, minor = str(compute_capability).partition(".")
-    arch = f"sm_{major}{minor or '0'}"
-    slug = re.sub(r"[^A-Za-z0-9]+", "_", str(name)).strip("_")
-    return f"{arch}-{slug}"
-
-
-def recorded_device_key(receipt: dict) -> str:
-    """The device key of the card ``receipt.json`` was measured on."""
-    device = receipt["device"]
-    return device_key(device["name"], device["compute_capability"])
-
-
-def active_device_key() -> str:
-    """The device key of the CUDA device this process runs on."""
-    identity = device_identity()
-    return device_key(identity["name"], identity["compute_capability"])
 
 
 def sensitivity_words(receipt: dict) -> dict:
@@ -812,6 +785,35 @@ def write_metal_pin(out_dir: Path, inventory: dict) -> None:
     (out_dir / "bitpatterns.csv").write_text(bitpatterns_csv(rows), encoding="utf-8", newline="")
     (out_dir / "sensitivity.json").write_text(
         json.dumps(sensitivity_words(receipt), indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+
+#: One pinned table per CUDA device model, ``receipt_devices/<device_key>/``.  The words depend on the
+#: architecture and the driver's compile of the shipped routes, so a table measured on one card is not
+#: evidence for another.  ``receipt/`` stays the canonical receipt and is the pin for the device it records.
+DEVICE_PIN_ROOT = Path(__file__).resolve().parent / "receipt_devices"
+
+
+def device_key(name, compute_capability) -> str:
+    """Stable identity of a CUDA device model: ``sm_86-NVIDIA_RTX_A6000``.
+
+    Compute capability plus name, never the UUID, so every card of one model shares one pin.
+    """
+    major, _, minor = str(compute_capability).partition(".")
+    arch = f"sm_{major}{minor or '0'}"
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", str(name)).strip("_")
+    return f"{arch}-{slug}"
+
+
+def recorded_device_key(receipt: dict) -> str:
+    """The device key of the card ``receipt.json`` was measured on."""
+    device = receipt["device"]
+    return device_key(device["name"], device["compute_capability"])
+
+
+def active_device_key() -> str:
+    """The device key of the CUDA device this process runs on."""
+    identity = device_identity()
+    return device_key(identity["name"], identity["compute_capability"])
 
 
 def write_device_pin(out_dir: Path, inventory: dict) -> None:
