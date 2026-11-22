@@ -80,6 +80,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "ysu_surface_heat_exner", "wrf", False, True, "bl_pbl_physics = 1",
         "YSU takes the surface heat flux as HFX/pi(1), so the column gets HFX rather than HFX*pi",
         active=lambda get: int(get("bl_pbl_physics")) == 1),
+    QuirkCorrection(
+        "noah_smc_floor_booking", "wrf", False, True, "sf_surface_physics = 2",
+        "Noah's 0.02 soil-moisture floor takes the water it adds from the layer below, or RUNOFF3",
+        active=lambda get: int(get("sf_surface_physics")) == 2),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",

@@ -343,6 +343,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The opt-in Noah soil-moisture floor booking (quirk pass), appended off.
+    assert names.pop() == "noah_smc_floor_booking"
+    assert RunConfig.__dataclass_fields__["noah_smc_floor_booking"].default is False
+    assert RunConfig.__dataclass_fields__["noah_smc_floor_booking"].kw_only
     # The umbrella over the opt-in quirk corrections, appended at 'none'.
     assert names.pop() == "woof_quirk_corrections"
     assert RunConfig.__dataclass_fields__["woof_quirk_corrections"].default == "none"
@@ -991,6 +995,8 @@ def _check_frozen_defaults(actual):
                          ("ysu_surface_heat_exner", False),
                          # the umbrella over the opt-in quirk corrections, none
                          ("woof_quirk_corrections", "none"),
+                         # the opt-in Noah soil-moisture floor booking, off
+                         ("noah_smc_floor_booking", False),
                          # the opt-in resolved obstacles, off
                          *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field

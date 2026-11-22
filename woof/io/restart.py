@@ -3486,6 +3486,9 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # The umbrella over the opt-in quirk corrections is never echoed: the
     # RunConfig resolves it into the individual keys, which bind on their own.
     values.pop("woof_quirk_corrections", None)
+    # The opt-in Noah soil-moisture floor booking: absent while off.
+    if values.get("noah_smc_floor_booking", False) is False:
+        values.pop("noah_smc_floor_booking", None)
     # The opt-in resolved obstacles (woof.core.obstacles): every key at its
     # default is what every earlier header ran, so each is echoed only when
     # it differs; obstacle_opt = 1 always echoes with its file.
@@ -5765,6 +5768,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'gf_deep_rain_evaporation_booking': False,
     'ysu_surface_heat_exner': False,
     'woof_quirk_corrections': 'none',
+    'noah_smc_floor_booking': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
     'obstacle_solid_fraction': 0.5,
@@ -6353,6 +6357,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "gf_deep_rain_evaporation_booking": False,
                           "ysu_surface_heat_exner": False,
                           "woof_quirk_corrections": "none",
+                          "noah_smc_floor_booking": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,
                           "obstacle_relax_factor": 10.0,

@@ -5232,7 +5232,8 @@ class PhysicsDriver:
                            atmosphere=atmosphere,
                            solar=(self.urban_coupler.state.solar if self.urban_coupler is not None else None),
                            use_wudapt_lcz=int(getattr(cfg, "use_wudapt_lcz", 0)),
-                           urban_water_balance=getattr(cfg, "urban_water_balance", None))
+                           urban_water_balance=getattr(cfg, "urban_water_balance", None),
+                           smc_floor_booking=getattr(cfg, "noah_smc_floor_booking", False) is True)
         self._run_noah_seaice(cfg, use_scheme_sr,
                               xice_threshold=setup.xice_threshold)
         if active(cfg): after_lsm(f)
@@ -5366,6 +5367,7 @@ class PhysicsDriver:
                                         if cfg.sf_surf_irr_scheme == 1 else None),
                     urban=(None if coupler is None
                            else coupler.noah_kernel_args()),
+                    smc_floor_booking=getattr(cfg, "noah_smc_floor_booking", False) is True,
                     **_wrf_hydro_lsm_kwargs(self))
         if self.noah_myj:
             noah_chklowq_myj(f)

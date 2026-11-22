@@ -660,13 +660,21 @@ def noah_chklowq_myj(dev: dict) -> None:
     cp.copyto(dev["chklowq"], np.float32(0.0), where=low)
 
 
+#: RunConfig.noah_smc_floor_booking (default off): module_sf_noahlsm.F:4026
+#: (SSTEP) raises a soil layer below 0.02 to 0.02 and books the water it adds
+#: nowhere.  The define takes that water from the layer below (a negative
+#: WPLUS), and below the bottom layer from RUNOFF3.
+NOAH_SMC_FLOOR_BOOKING_DEFINES = (("NOAH_SMC_FLOOR_BOOKING", 1),)
+
+
 def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
                 isurban: int | None = None, isice: int | None = None,
                 xice_threshold: float = 0.5, frpcpn: bool = False,
                 usemonalb: bool = False, rdlai2d: bool = False,
                 opt_thcnd: int = 1, itimestep: int = 2,
                 urban: dict | None = None,
-                wrf_hydro: dict | None = None, fasdas: dict | None = None, ua_phys: bool = False, irrigation_channel=None) -> None:
+                wrf_hydro: dict | None = None, fasdas: dict | None = None, ua_phys: bool = False, irrigation_channel=None,
+                smc_floor_booking: bool = False) -> None:
     """Run the ``noah_column`` kernel on device arrays (in place).
 
     ``dev`` maps field names to CuPy arrays: every name in ``_F2D`` as
@@ -702,7 +710,7 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
             "noah_column_hydro has no urban hand-over")
     import cupy as cp
 
-    from woof.core.kernels import get_kernel
+    from woof.core.kernels import get_kernel, get_kernel_int_defines
     from woof.core.state import DTYPE
 
     ny, nx = dev["tsk"].shape
@@ -784,7 +792,10 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
             raise ValueError("IRRIGATION_CHANNEL must be a float32 surface field")
         args.append(irrigation_channel)
         name = "noah_column_irrigation"
-    kern = get_kernel(module, name)
+    # RunConfig.noah_smc_floor_booking (default off): SSTEP books the water
+    # its 0.02 soil-moisture floor adds; off, the unit compiled before it.
+    kern = (get_kernel_int_defines(module, name, NOAH_SMC_FLOOR_BOOKING_DEFINES)
+            if smc_floor_booking else get_kernel(module, name))
     blocks = (ny * nx + _TPB - 1) // _TPB
     kern((blocks,), (_TPB,), tuple(args))
 
