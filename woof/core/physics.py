@@ -1999,6 +1999,17 @@ def _wrf_hydro_lsm_kwargs(driver) -> dict:
     return {} if seam is None else seam.lsm_kwargs()
 
 
+def _noah_smc_floor_booking(cfg, hydro: dict) -> bool:
+    """RunConfig.noah_smc_floor_booking for this Noah call.  A WRF-Hydro
+    coupling does not carry the booking (its drainage may go negative), so
+    under ``woof_quirk_corrections = 'all'`` it stays off there; asked for
+    by itself, launch_noah refuses it by name."""
+    booked = getattr(cfg, "noah_smc_floor_booking", False) is True
+    if booked and hydro and getattr(cfg, "woof_quirk_corrections", "none") == "all":
+        return False
+    return booked
+
+
 def _external_ocean_configured(cfg) -> bool:
     """An ``ocean_config`` naming an ``[external_ocean]`` (woof.ocean.external),
     whose cpl_snd2 sends GSW as SURF_NET_SOLAR."""
@@ -5356,6 +5367,7 @@ class PhysicsDriver:
         surface_owner=getattr(self.state,"_surface_fdda_owner",None)
         fasdas=(surface_owner.noah_inputs(atmosphere) if surface_owner is not None
                 and surface_owner.fasdas else None)
+        hydro = _wrf_hydro_lsm_kwargs(self)
         launch_noah(f, self.noah_params, self.bldt_seconds,
                     NOAH_LAYER_THICKNESS_M, frpcpn=use_scheme_sr,
                     xice_threshold=(0.02 if cfg.fractional_seaice else 0.5),
@@ -5367,8 +5379,8 @@ class PhysicsDriver:
                                         if cfg.sf_surf_irr_scheme == 1 else None),
                     urban=(None if coupler is None
                            else coupler.noah_kernel_args()),
-                    smc_floor_booking=getattr(cfg, "noah_smc_floor_booking", False) is True,
-                    **_wrf_hydro_lsm_kwargs(self))
+                    smc_floor_booking=_noah_smc_floor_booking(cfg, hydro),
+                    **hydro)
         if self.noah_myj:
             noah_chklowq_myj(f)
         # Sea ice after lsm, as the surface driver orders them, and before

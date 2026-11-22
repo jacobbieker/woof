@@ -5409,8 +5409,9 @@ def _noah_sstep(sh2oin, cmc, rhstt, rhsct, dt, nsoil, smcmax, cmcmax,
             wplus = (stot - smcmax) * ddz
         else:
             wplus = 0.0
-        if stot < 0.02 or (min(stot, smcmax) - sice[k]) < 0.0:
-            flags["clamped"] = True      # the 0.02/0.0 floors create water
+        booked_floor = bool(flags.get("smc_floor_booking"))
+        if (stot < 0.02 and not booked_floor) or (max(min(stot, smcmax), 0.02) - sice[k]) < 0.0:
+            flags["clamped"] = True      # the 0.02/0.0 floors create water (booked: only the 0.0 one)
         if flags.get("smc_floor_booking") and stot < 0.02:
             # opt-in noah_smc_floor_booking: the layer below (or RUNOFF3)
             # pays for the water the 0.02 floor adds

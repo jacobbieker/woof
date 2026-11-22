@@ -69,6 +69,20 @@ def test_the_umbrella_turns_it_on_where_noah_runs():
         qc.apply_run_corrections({qc.UMBRELLA: "all", "sf_surface_physics": 2, "noah_smc_floor_booking": False})
 
 
+def test_a_wrf_hydro_coupling_refuses_the_booking_and_the_umbrella_leaves_it_off():
+    from types import SimpleNamespace
+    from woof.core.noah import launch_noah
+    from woof.core.physics import _noah_smc_floor_booking
+    with pytest.raises(ValueError, match="noah_smc_floor_booking"):
+        launch_noah({}, None, 10.0, None, wrf_hydro={}, smc_floor_booking=True)
+    hydro = {"wrf_hydro": {}}
+    explicit = SimpleNamespace(noah_smc_floor_booking=True, woof_quirk_corrections="none")
+    umbrella = SimpleNamespace(noah_smc_floor_booking=True, woof_quirk_corrections="all")
+    assert _noah_smc_floor_booking(explicit, hydro) is True      # refused by launch_noah
+    assert _noah_smc_floor_booking(umbrella, hydro) is False
+    assert _noah_smc_floor_booking(umbrella, {}) is True
+
+
 # --- the default ----------------------------------------------------------
 
 @pytest.mark.parametrize("name", sorted(BEFORE))
@@ -116,7 +130,7 @@ def _imbalance(col, out, dt):
 def test_the_mirror_books_the_floor_water(params, monkeypatch):
     from test_noah import DT, DZS
     from woof.verify.npref import np_noah_column
-    created = closed = untouched = 0
+    created = closed = untouched = unflagged = 0
     for col in _columns(params, monkeypatch):
         stock = np_noah_column(dict(col), params, DT, DZS)
         default = np_noah_column(dict(col), params, DT, DZS, smc_floor_booking=False)
@@ -125,7 +139,8 @@ def test_the_mirror_books_the_floor_water(params, monkeypatch):
         booked = np_noah_column(dict(col), params, DT, DZS, smc_floor_booking=True)
         if stock["skip"]:
             continue
-        floored = any(stock["smois"] <= 0.02 + 1e-12)
+        # a layer the floor lifted may refill from above within the step: the stock flag tells
+        floored = stock["clamped"] or any(stock["smois"] <= 0.02 + 1e-12)
         if not floored:
             for key, value in stock.items():
                 np.testing.assert_array_equal(np.asarray(booked[key]), np.asarray(value), err_msg=key)
@@ -134,8 +149,12 @@ def test_the_mirror_books_the_floor_water(params, monkeypatch):
         if _imbalance(col, stock, DT) > 1e-6:
             created += 1
         assert abs(_imbalance(col, booked, DT)) < 1e-12, (col["isltyp"], _imbalance(col, booked, DT))
+        assert stock["clamped"]
+        unflagged += not booked["clamped"]
         closed += 1
     assert created >= 5 and closed >= created and untouched >= 5, (created, closed, untouched)
+    # booked, the 0.02 floor no longer marks a column as creating water
+    assert unflagged >= 5, unflagged
 
 
 # --- the device -------------------------------------------------------------
@@ -171,7 +190,8 @@ def test_the_kernel_books_the_floor_water(params, monkeypatch):
         ref = np_noah_column(dict(c32), params, DT, DZS, smc_floor_booking=True)
         if ref["skip"]:
             continue
-        if all(np.asarray(ref["smois"]) > 0.02 + 1e-6):
+        stock_ref = np_noah_column(dict(c32), params, DT, DZS)
+        if not stock_ref["clamped"] and all(np.asarray(ref["smois"]) > 0.02 + 1e-6):
             # the floor never acts: the booked unit is the stock unit's arithmetic
             for key in ("smois", "sh2o", "tslb"):
                 np.testing.assert_array_equal(booked[key][:, j, i].view(np.uint32),

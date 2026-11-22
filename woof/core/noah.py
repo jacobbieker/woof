@@ -733,6 +733,13 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
         raise NotImplementedError(
             "Noah with WRF_HYDRO and sf_urban_physics > 0 is not ported: "
             "noah_column_hydro has no urban hand-over")
+    if wrf_hydro is not None and smc_floor_booking:
+        # booked, RUNOFF3 (and so RUNOFF2) may go negative; WRF-Hydro takes
+        # RUNOFF2*DT*1000 as the column's drainage into its routing buckets
+        raise ValueError(
+            "noah_smc_floor_booking with a WRF-Hydro coupling is refused: the "
+            "booked bottom drainage may be negative, and WRF-Hydro's SOLDRAIN "
+            "is a drainage; drop noah_smc_floor_booking or the [wrf_hydro] table")
     import cupy as cp
 
     from woof.core.kernels import get_kernel, get_kernel_int_defines

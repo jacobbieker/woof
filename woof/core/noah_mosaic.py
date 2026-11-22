@@ -544,8 +544,7 @@ def _mosaic_module(ua_phys=False, smc_floor_booking=False):
     if ua_phys:
         from woof.core.kernels import load_module
         if smc_floor_booking:
-            from .noah import smc_floor_booking_module
-            return smc_floor_booking_module("noah_mosaic_ua")
+            raise ValueError("the booked UA mosaic unit is per device: _mosaic_kernel loads it")
         return load_module("noah_mosaic_ua")
     name = "noah_mosaic"
     source = module_source(name)
@@ -561,6 +560,10 @@ def _mosaic_module(ua_phys=False, smc_floor_booking=False):
 
 
 def _mosaic_kernel(ua_phys=False, smc_floor_booking=False):
+    if ua_phys and smc_floor_booking:
+        # the per-device cache, not _mosaic_module's process-wide one
+        from .noah import smc_floor_booking_module
+        return smc_floor_booking_module("noah_mosaic_ua").get_function("noah_mosaic_column")
     return _mosaic_module(ua_phys, smc_floor_booking).get_function("noah_mosaic_column")
 
 
