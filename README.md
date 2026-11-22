@@ -746,8 +746,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     hex forecast on CUDA and Metal. Every row now runs or is refused by
     name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
     the 149-level case (nominal eta), MAD-WRF (species row) and any
-    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5,
-    KF-CuP, BouLac and QNSE rows state their layer limits.
+    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5
+    and KF-CuP rows state their layer limits. BouLac and QNSE PBL now
+    admit 256 levels (compile-time 128/256 tier; at 128 levels or fewer
+    the unchanged kernel, word for word); their matrix rows still record
+    the old 128-level refusal until the 149-level hex case is re-run.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
@@ -1529,6 +1532,21 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   tests by name, and main's full run is periodic. Every merge to `main`
   tags, writes release notes and publishes `metal-woof` to PyPI
   ([docs/dev/ci.md](docs/dev/ci.md)).
+- **256-level columns for WSM3, WSM5, WSM7, WDM5 and WDM7.** These five
+  microphysics units (`mp_physics` 3, 4, 24, 14 and 26) keep their level
+  arrays per thread, sized by a compile-time `*_KMAX` tier, and the ladder
+  ended at 80 levels. It now has 128 and 256 tiers: a column of 80 levels or
+  fewer compiles the unchanged source (every output word is the same), a
+  deeper column compiles the same source at the next tier, and preflight
+  prices the deeper per-thread frame (WSM3 and WSM5 22,560 B, WSM7 28,720 B,
+  WDM5 36,896 B and WDM7 38,960 B at 256, against 7,000-12,000 B at 80).
+  Past 256 is refused by name. Hex runs these through the generic column
+  seam and follows the same bound. WSM6 and WDM6 already ran 256 levels on
+  a column workspace; the five here keep the per-thread arrays, so a
+  256-level run reserves several GiB of local memory on a large card
+  ([the frame table](docs/kernel_local_memory_bounds.md)). The committed hex
+  option-matrix rows for WSM3 and WSM5 still record the old 80-level
+  refusal at 149 levels until the matrix is re-run on its staged case.
 
 ### Licensing and opt-ins
 
