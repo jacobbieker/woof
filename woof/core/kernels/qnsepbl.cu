@@ -808,9 +808,13 @@ extern "C" __global__ void mfshconv_column(
 #ifdef __WOOF_METAL__
         // Metal has no __activemask.  The tile reduction is an integer
         // maximum folded into *tile_top by atomicMax, which no order of
-        // lanes changes, so each lane posts its own level directly and
+        // lanes changes: each SIMD group takes its maximum with simd_max
+        // (the prelude's __reduce_max_sync) and lane 0 posts it, so
         // tile_top ends on the same word the CUDA warp reduction leaves.
-        atomicMax(tile_top, processed);
+        // Lane 0 of a group is live whenever any lane is: the only
+        // divergent exit above is the trailing col >= n.
+        const int group_top = __reduce_max_sync(0xffffffffu, processed);
+        if ((threadIdx.x & 31) == 0) atomicMax(tile_top, group_top);
         return;
 #else
         const unsigned mask = __activemask();
