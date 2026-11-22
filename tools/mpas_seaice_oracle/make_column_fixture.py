@@ -2,7 +2,7 @@
 
     pixi run -e default python tools/mpas_seaice_oracle/make_column_fixture.py BUILD_DIR [--out DIR]
         [--cases init|therm|itd|ridge|radiation|dedd|step|coupled|oml|bgc|carry|zsal|zsal_solve|zsal_carry|zsal_solve_carry
-                 |nonreactive]
+                 |nonreactive|nonreactive_carry]
 
 BUILD_DIR holds ``run_column_r8`` and ``run_init_thermo_r8`` from build.sh.
 Writes into ``tests/data/oracles/mpas_seaice_column`` by default:
@@ -41,7 +41,10 @@ the same under ``zsal_solve`` (``BGC_ZSAL_SOLVE_CARRY_CASES``,
 ``tests/data/oracles/mpas_seaice_bgc_zsal_solve_carry``, from the patched build;
 ``--cases nonreactive`` the vertical tracers' nonreactive tracer in the init and
 column_biogeochemistry (``BGC_NONREACTIVE_CASES``) into
-``tests/data/oracles/mpas_seaice_bgc_nonreactive``.
+``tests/data/oracles/mpas_seaice_bgc_nonreactive``; ``--cases nonreactive_carry``
+the nonreactive tracer through the ITD thermodynamics and the ridging
+(``BGC_NONREACTIVE_CARRY_CASES``) into
+``tests/data/oracles/mpas_seaice_bgc_nonreactive_carry``.
 """
 from __future__ import annotations
 
@@ -65,7 +68,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--cases", choices=("init", "therm", "itd", "ridge", "radiation", "dedd", "step", "coupled",
                                               "oml", "bgc", "carry", "zsal", "zsal_solve", "zsal_carry",
-                                              "zsal_solve_carry", "nonreactive"),
+                                              "zsal_solve_carry", "nonreactive", "nonreactive_carry"),
                         default="init")
     args = parser.parse_args()
     rows, fixture_dir = {"init": (co.CASES, co.FIXTURE_DIR), "therm": (co.VT_CASES, co.VT_FIXTURE_DIR),
@@ -85,7 +88,9 @@ def main() -> int:
                                         co.BGC_ZSAL_CARRY_FIXTURE_DIR),
                          "zsal_solve_carry": (co.BGC_ZSAL_SOLVE_CARRY_CASES + co.BGC_ZSAL_SOLVE_CARRY_COUPLED_CASES,
                                               co.BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR),
-                         "nonreactive": (co.BGC_NONREACTIVE_CASES, co.BGC_NONREACTIVE_FIXTURE_DIR)}[args.cases]
+                         "nonreactive": (co.BGC_NONREACTIVE_CASES, co.BGC_NONREACTIVE_FIXTURE_DIR),
+                         "nonreactive_carry": (co.BGC_NONREACTIVE_CARRY_CASES,
+                                               co.BGC_NONREACTIVE_CARRY_FIXTURE_DIR)}[args.cases]
     args.out = args.out or fixture_dir
     args.out.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, np.ndarray] = {}

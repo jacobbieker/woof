@@ -711,7 +711,6 @@ __device__ int zsalinity(int n, double dt, const double *cgrid0, const double *b
 // (nbtrcr = 1, PON; no vertical biochemistry, z-aerosols or dust iron)
 // ---------------------------------------------------------------------------
 
-#define ZB_HS_SSL 0.040            // ice_colpkg_shared hs_ssl
 #define ZB_HS_MIN 1.e-4            // ice_constants_colpkg hs_min
 #define ZB_KSCAVZ 0.03             // ice_zbgc_shared kscavz(1)
 #define ZB_N_VOL 0.04e-12          // z_biogeochemistry N_vol

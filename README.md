@@ -297,8 +297,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     coupler's land-ice means; standalone, in the diagnostics and over forward
     steps; 'HollandJenkins' is refused by name), and the Gent-McWilliams
     bolus velocity (`ocn_gm_compute_Bolus_velocity`: isoneutral slopes,
-    their smoothing and tapering, `k33`, the stream function's solve;
-    standalone, not yet wired into the step). Three v8.4.2 quirks keep
+    their smoothing and tapering, `k33`, the stream function's solve) and
+    Redi isoneutral mixing (`ocn_tracer_hmix_redi_tend`'s three horizontal
+    terms, and `k33` in the vertical diffusivity, which v8.4.2 adds without
+    `config_Redi_kappa`; `woof_redi_k33 = 'kappa'` scales it), standalone
+    and not yet wired into the step. Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
@@ -330,8 +333,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     column's loads coalesce: the 33,000-cell step takes 42 instead of 58 ms
     on an A6000, the same words. Metal keeps a thread per column,
     which is faster there (switch: `WOOF_OCEAN_COLUMN_LANES=1` or `32`);
-  - MPAS-Seaice: variational EVP internal stress, the velocity solve and
-    elastic subcycles, the pre-subcycle routines, ocean stress,
+  - MPAS-Seaice: variational EVP internal stress with its basis set-up
+    (Wachspress and PWL under every integration rule, computed on the host
+    in the init; the RKIND 8 metric terms need `metric_libm` because
+    glibc's binary64 asin and tan are not correctly rounded), the
+    weak-form stress divergence (`config_stress_divergence_scheme =
+    'weak'`, its normal vectors computed on the host in the init; on a
+    sphere it needs `metric_libm` too), the velocity
+    solve and elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
     grid, hexagons and quadrilaterals, variable resolution) with its
     optional conservation and monotonicity checks (one rank), a forward
@@ -412,10 +421,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `lateral_melt_bgc` and `zap_small_areas`' salt) in every one of those
     stages, word for word on CUDA and Metal with an oracle built from
     `zsal_solve.patch`. The vertical tracers (`config_use_vertical_tracers`)
-    with the nonreactive tracer (`config_use_nonreactive`) run in the init
-    and `column_biogeochemistry`: `update_snow_bgc`'s scavenging,
+    with the nonreactive tracer (`config_use_nonreactive`) run in the init,
+    `column_biogeochemistry` (`update_snow_bgc`'s scavenging,
     `z_biogeochemistry`'s mobile and stationary phases and
-    `merge_bgc_fluxes`, word for word with v8.4.2 on CUDA and Metal. The
+    `merge_bgc_fluxes`), the ITD thermodynamics and the ridging
+    (`add_new_ice_bgc`, `lateral_melt_bgc` and `zap_small_areas`' tracer
+    into `oceanBioFluxes`), word for word with v8.4.2 on CUDA and Metal. The
     other stages still refuse them. The other biogeochemistry flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
@@ -1116,13 +1127,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
   forecast, and `spacewx_ionosphere_opt = 2` applies the storm-time
   correction there too (plus its ratio `IONO_STORM`), from GFZ's ap with the
-  latest observed ap persisted past the start; hex and streamed domains
-  refuse both for now. `woof spacewx aurora`
+  latest observed ap persisted past the start; hex's generic column seam
+  writes the same rows per cell, and streamed domains refuse both for now.
+  `woof spacewx aurora`
   places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
   oval (`AURORA_ZONE`, `AURORA_DIST`, `MAG_LAT`, `MAG_LT`) into every WRF-route
-  history frame from the start's Kp. `woof spacewx aurora --energy` adds the
+  history frame from the start's Kp (on hex's generic column seam too, per
+  cell). `woof spacewx aurora --energy` adds the
   precipitating electron and ion energy and number fluxes and the hemispheric
   power of OVATION Prime 2010 (a port of NOAA's public-domain IDL code, which
   reproduces its test outputs; the coefficients are fetched and pinned), and
@@ -1261,14 +1274,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`Window.tl(dx0, partial=True)`). It can also linearise about a
   supplied trajectory instead of its own dry rerun, as WRFPLUS does
   about the nonlinear run's states (`Window.forward(trajectory=...)`).
-  The first moist pieces exist as kernels but are not yet in the step:
-  `calc_cq` (qv, or qv, qc and qr), the pressure gradient's cqu/cqv, the
-  moist buoyancy, the diagnosis's qv (WRF's `qvf`), moist scalar
-  transport (sumflux and the non-PD scalar update,
-  `woof.grad.wrfplus.scalar`), and the moist boundary rows (qv's
-  relaxation and spec_bdy_final, flow_dep_bdy for hydrometeors). The
-  forecast path does not import any of it. The first diffusion pieces
-  (`woof.grad.wrfplus.diffusion`, diff_opt 1 / km_opt 4) are kernels too,
+  The step also covers a moist state without microphysics (qv, qc and
+  qr: calc_cq, the moist pressure gradient, buoyancy and diagnosis,
+  sumflux and the non-PD scalar update, and qv's boundary rows with
+  flow_dep_bdy for qc and qr). The forecast path does not import any of
+  it.
+  The first diffusion pieces
+  (`woof.grad.wrfplus.diffusion`, diff_opt 1 / km_opt 4) are kernels,
   not yet in the step: the deformation (WRF `compute_diff_metrics` +
   `cal_deform_and_div`) and `smag2d_km`'s xkmh/xkhh with the 10 * mlen
   cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
