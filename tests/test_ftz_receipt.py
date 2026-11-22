@@ -331,7 +331,8 @@ def test_probe_sensitivity_control_moves_the_bit_column(receipt, request):
 def test_the_committed_table_reproduces_on_this_device(receipt, request):
     if _calibrate_default_compile_routes(request):
         return
+    table_dir = _backend_table_dir()
     inventory = ri.load_inventory(ROOT)
     rows, _meta = probe.run_probe(inventory)
     assert probe.bitpatterns_csv(rows) == (
-        _backend_table_dir() / "bitpatterns.csv").read_text(encoding="utf-8")
+        table_dir / "bitpatterns.csv").read_text(encoding="utf-8")

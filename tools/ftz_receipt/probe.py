@@ -806,7 +806,9 @@ def device_key(name, compute_capability) -> str:
 
 def recorded_device_key(receipt: dict) -> str:
     """The device key of the card ``receipt.json`` was measured on."""
-    device = receipt["device"]
+    device = receipt.get("device") or {}
+    if not device.get("name") or not device.get("compute_capability"):
+        return ""
     return device_key(device["name"], device["compute_capability"])
 
 
@@ -818,9 +820,11 @@ def active_device_key() -> str:
 
 def write_device_pin(out_dir: Path, inventory: dict) -> None:
     """Record, from this CUDA device, its probe table in ``out_dir``."""
-    rows, _meta = run_probe(inventory)
+    table = bitpatterns_csv(run_probe(inventory)[0])
+    if bitpatterns_csv(run_probe(inventory)[0]) != table:
+        raise SystemExit("two probe runs on this device gave different tables; not recording a pin")
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "bitpatterns.csv").write_text(bitpatterns_csv(rows), encoding="utf-8", newline="")
+    (out_dir / "bitpatterns.csv").write_text(table, encoding="utf-8", newline="")
 
 
 #: A CUDA device UUID is 16 bytes.  ``cudaUUID_t`` is ``char bytes[16]``
@@ -1016,7 +1020,7 @@ def main(argv: list[str] | None = None) -> int:
         if backend.install() == "mlx":
             raise SystemExit("--device-pin records a CUDA device: use --metal-pin under WOOF_BACKEND=mlx")
         key = active_device_key()
-        out = Path(args.out) if args.out else DEVICE_PIN_ROOT / key
+        out = Path(args.out) if args.out else root / "tools" / "ftz_receipt" / "receipt_devices" / key
         write_device_pin(out, inventory)
         print(f"device pin {key}: {out}")
         return 0

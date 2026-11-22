@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 6673,
+  "site_count": 6674,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 6606
+    "prose": 6607
   },
   "sites": [
     {
@@ -41038,7 +41038,7 @@
     },
     {
       "file": "tools/ftz_receipt/probe.py",
-      "line": 895,
+      "line": 899,
       "kind": "prose",
       "anchor": "\"generator\": \"tools/ftz_receipt/probe.py\",",
       "anchor_sha256": "2d92883bd7176f417e4966e8ba5abef91d1259ba75a2fabf06f46f7361feb061",
@@ -41049,7 +41049,7 @@
     },
     {
       "file": "tools/ftz_receipt/probe.py",
-      "line": 897,
+      "line": 901,
       "kind": "prose",
       "anchor": "\"cupy_ftz_append_site\": ftz_append_site(),",
       "anchor_sha256": "ec2ecbf6c0a1c20ca3565cac26eeef61c1eaebbf36caddd80f3be9b93a0fbe92",
@@ -41060,7 +41060,7 @@
     },
     {
       "file": "tools/ftz_receipt/probe.py",
-      "line": 984,
+      "line": 988,
       "kind": "prose",
       "anchor": "\"ftz_modifiers\": ptx_ftz_modifiers(text)}",
       "anchor_sha256": "19d303d471e15425e6577a5f218b1a4c0ba78e81a89a5dceb097ec0c2de38abd",
@@ -41071,7 +41071,18 @@
     },
     {
       "file": "tools/ftz_receipt/probe.py",
-      "line": 1024,
+      "line": 1023,
+      "kind": "prose",
+      "anchor": "out = Path(args.out) if args.out else root / \"tools\" / \"ftz_receipt\" / \"receipt_devices\" / key",
+      "anchor_sha256": "ae4278d2e4b0f02d5dc06139b7b93fd7be7603dc54f6e0bcf6159d37a262f4e3",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/ftz_receipt/probe.py",
+      "line": 1028,
       "kind": "prose",
       "anchor": "else root / \"tools\" / \"ftz_receipt\" / \"receipt\")",
       "anchor_sha256": "7f197d1f3ba932cc6eac5bad7ba8b84dc91a5c9def2b14ff1d467d389f91843d",
