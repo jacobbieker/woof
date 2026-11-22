@@ -94,13 +94,14 @@ def _launch(precision: str, name: str, n: int, args: tuple) -> None:
             ((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,), args)
 
 
-def check_config(configs: dict) -> None:
-    """Refuse, by name, the coefficient schemes this port does not carry."""
+def check_config(configs: dict, precision: str | None = None) -> None:
+    """Refuse, by name, the coefficient schemes this port does not carry (CVMix
+    at ``precision``'s RKIND among them)."""
     for knob, reason in (("config_use_tanh_visc", "the tanh coefficients are not ported"),
                          ("config_use_tanh_diff", "the tanh coefficients are not ported")):
         if configs.get(knob, False):
             raise ConfigurationRefusal(knob=knob, value=True, reason=reason, declaration=f"{knob} = .false.")
-    cvmix_v842.check_config(configs)
+    cvmix_v842.check_config(configs, precision)
     eos_v842.eos_type(configs)
     redi_k33_kappa_scaled(configs)
 
@@ -134,11 +135,19 @@ def vmix_implicit(*, dt: float, mesh: dict, state: dict, tracers: dict, diagnost
     ``tracers_surface_flux`` (``nonLocalSurfaceTracerFlux``) with
     ``config_cvmix_kpp_nonlocal_with_implicit_mix``."""
     import cupy as cp
-    check_config(configs)
     h = state["layerThickness"]
     u = state["normalVelocity"]
     precision = _precision_of(h)
-    cvmix_v842.check_config(configs, precision)
+    check_config(configs, precision)
+    for knob, on, missing in (
+            ("config_use_cvmix_kpp", configs.get("config_use_cvmix", False)
+             and configs.get("config_use_cvmix_kpp", False), forcing is None),
+            ("config_cvmix_kpp_nonlocal_with_implicit_mix",
+             configs.get("config_cvmix_kpp_nonlocal_with_implicit_mix", False), tracers_surface_flux is None)):
+        if on and missing:
+            raise ConfigurationRefusal(
+                knob=knob, value=True, reason="this caller does not pass the forcing (sea-ice fraction) or the "
+                "tracers' surface flux (nonLocalSurfaceTracerFlux) it reads", declaration=f"{knob} = .false.")
     real = PRECISIONS[precision]
     i32 = np.int32
     m, d = mesh, diagnostics

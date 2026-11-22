@@ -42,7 +42,8 @@
 // normalVelocity(nVertLevels, nEdges+1) is u[iEdge*nl + k-1];
 // cellsOnCell/edgesOnCell(maxEdges, nCells+1) is c[iCell*maxEdges + i-1],
 // 1-based; cellMask(nVertLevels, nCells+1) is m[iCell*nl + k-1];
-// vertNonLocalFlux(1, nVertLevelsP1, nCells+1) is f[iCell*(nl+1) + k-1].
+// vertNonLocalFlux(nGroup, nVertLevelsP1, nCells+1) is
+// f[(iCell*(nl+1) + k-1)*nGroup + iGroup], iGroup = index_vertNonLocalFluxTemp - 1.
 
 typedef double rk;
 #define A(a,b) __dadd_rn((a),(b))
@@ -430,7 +431,7 @@ extern "C" __global__ void ocn_cvmix_stage2_v842(
     rk *vertViscTopOfCell, rk *vertDiffTopOfCell, rk *vertNonLocalFlux, rk *boundaryLayerDepth,
     rk *indexBoundaryLayerDepth, rk *work, const rk *layerThickness, const rk *riTopOfCell,
     const rk *bruntVaisalaFreqTop, const rk *surfaceFrictionVelocity, const rk *surfaceBuoyancyForcing,
-    const int *maxLevelCell, int nCells, int nl, const rk *rp, const int *ip)
+    const int *maxLevelCell, int nCells, int nl, int nGroup, int iGroup, const rk *rp, const int *ip)
 {
     const int iCell = cv_thread();
     if (iCell >= nCells) return;
@@ -585,8 +586,8 @@ extern "C" __global__ void ocn_cvmix_stage2_v842(
         } else {
             for (int k = 1; k <= mlc + 1; ++k) { visc[k - 1] = Md[k]; diff[k - 1] = Td[k]; }
         }
-        rk *f = vertNonLocalFlux + (size_t)iCell * (nl + 1);
-        for (int k = 1; k <= nl + 1; ++k) f[k - 1] = tnl[k];
+        rk *f = vertNonLocalFlux + (size_t)iCell * (nl + 1) * nGroup + iGroup;
+        for (int k = 1; k <= nl + 1; ++k) f[(size_t)(k - 1) * nGroup] = tnl[k];
     }
 
     // convection (cvmix_coeffs_conv_low, Brunt-Vaisala; lnoOBL)

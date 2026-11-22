@@ -57,6 +57,7 @@ extent outside (0, 1].
 """
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
@@ -82,8 +83,6 @@ MATH_HEADERS = ("glibc_flt64.cuh",)
 INTERPOLATIONS = {"line": 1, "linear": 1, "quad": 2, "quadratic": 2, "cube": 3, "cubic": 3, "cubic_spline": 3,
                   "cubic spline": 3}
 SHEAR_SCHEMES = {"PP": 1, "KPP": 2}
-#: cvmix_v842.cu's per-column work arrays (W_N) and real/switch parameters
-_WORK_ARRAYS = 19
 _BLOCK = 128
 
 
@@ -95,6 +94,15 @@ def module_source(precision: str = "r8") -> str:
     math = "\n".join((root / name).read_text(encoding="utf-8") for name in MATH_HEADERS)
     body = files("woof.hex.mpas_ocean").joinpath("cvmix_v842.cu").read_text(encoding="utf-8")
     return "#define MPAS_RKIND8 1\n" + math + "\n" + body
+
+
+@lru_cache(maxsize=None)
+def _work_arrays() -> int:
+    """cvmix_v842.cu's per-column work arrays, ``W_N``, read from its enum."""
+    body = files("woof.hex.mpas_ocean").joinpath("cvmix_v842.cu").read_text(encoding="utf-8")
+    names = re.search(r"enum \{\s*(W_ZW\b[^}]*)\}", body).group(1).split(",")
+    assert names[-1].strip() == "W_N"
+    return len(names) - 1
 
 
 @lru_cache(maxsize=None)
@@ -180,7 +188,7 @@ def _parameters(configs: dict):
     rp = np.array([
         c("config_cvmix_kpp_surface_layer_extent", 0.1), c("config_cvmix_kpp_criticalBulkRichardsonNumber", 0.25),
         c("config_cvmix_kpp_boundary_layer_depth", 30.0), c("configure_cvmix_kpp_minimum_OBL_under_sea_ice", 10.0),
-        c("config_density0"), c("config_cvmix_background_viscosity", 1.0e-4),
+        c("config_density0", 1026.0), c("config_cvmix_background_viscosity", 1.0e-4),
         c("config_cvmix_background_diffusion", 1.0e-5), c("config_cvmix_shear_PP_nu_zero", 0.005),
         c("config_cvmix_shear_PP_alpha", 5.0), c("config_cvmix_shear_PP_exp", 2.0),
         c("config_cvmix_shear_KPP_nu_zero", 0.005), c("config_cvmix_shear_KPP_Ri_zero", 0.7),
@@ -199,30 +207,31 @@ def _parameters(configs: dict):
 def coefs_build(*, mesh: dict, state: dict, diagnostics: dict, forcing: dict, configs: dict) -> None:
     """``ocn_vmix_coefs_cvmix_build`` for one block, in place on the diagnostics'
     ``vertViscTopOfCell``, ``vertDiffTopOfCell``, ``vertNonLocalFlux``, the
-    boundary-layer depth (smoothed), its index and the bulk Richardson numbers."""
+    boundary-layer depth (smoothed), its index and the bulk Richardson numbers.
+    The caller has checked ``configs`` (:func:`check_config`, as
+    ``vmix_v842.vmix_implicit`` does)."""
     import cupy as cp
     from . import vmix_v842
 
     h = state["layerThickness"]
     precision = _precision_of(h)
-    check_config(configs, precision)
     i32 = np.int32
     m, d = mesh, diagnostics
     nl = int(m["nVertLevels"])
     cells = [int(x) for x in m["nCellsArray"]]
     me = int(m["edgesOnCell"].shape[1])
     visc, diff, nonlocal_flux = d["vertViscTopOfCell"], d["vertDiffTopOfCell"], d["vertNonLocalFlux"]
-    visc[: cells[3]] = 0
-    diff[: cells[3]] = 0
-    nonlocal_flux[: cells[3]] = 0
+    visc[: cells[-1]] = 0
+    diff[: cells[-1]] = 0
+    nonlocal_flux[: cells[-1]] = 0
     if configs.get("config_use_cvmix_background", False):
         n = cells[2] * (nl + 1)
         vmix_v842._launch(precision, "ocn_vmix_add_const_v842", n, (
-            visc, i32(cells[2]), i32(nl + 1), np.float64(configs["config_cvmix_background_viscosity"])))
+            visc, i32(cells[2]), i32(nl + 1), np.float64(configs.get("config_cvmix_background_viscosity", 1.0e-4))))
         vmix_v842._launch(precision, "ocn_vmix_add_const_v842", n, (
-            diff, i32(cells[2]), i32(nl + 1), np.float64(configs["config_cvmix_background_diffusion"])))
+            diff, i32(cells[2]), i32(nl + 1), np.float64(configs.get("config_cvmix_background_diffusion", 1.0e-5))))
     rp, ip = _parameters(configs)
-    work = cp.zeros(max(cells[2], 1) * _WORK_ARRAYS * (nl + 2), dtype=np.float64)
+    work = cp.zeros(max(cells[2], 1) * _work_arrays() * (nl + 2), dtype=np.float64)
     bld = d["boundaryLayerDepth"]
     if configs.get("config_use_cvmix_kpp", False):
         iwork = cp.zeros(max(cells[2], 1) * (nl + 2), dtype=np.int32)
@@ -246,7 +255,8 @@ def coefs_build(*, mesh: dict, state: dict, diagnostics: dict, forcing: dict, co
     _launch("ocn_cvmix_stage2_v842", stage2, (
         visc, diff, nonlocal_flux, bld, d["indexBoundaryLayerDepth"], work, h, d["RiTopOfCell"],
         d["BruntVaisalaFreqTop"], d["surfaceFrictionVelocity"], d["surfaceBuoyancyForcing"], m["maxLevelCell"],
-        i32(stage2), i32(nl), rp, ip))
+        i32(stage2), i32(nl), i32(nonlocal_flux.shape[-1]), i32(int(d.get("index_vertNonLocalFluxTemp", 1)) - 1),
+        rp, ip))
 
 
 def visc_to_edges(*, mesh: dict, diagnostics: dict) -> None:

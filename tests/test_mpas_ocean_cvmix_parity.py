@@ -129,6 +129,32 @@ def test_options_not_ported_are_refused_by_name():
     vm.check_config(dict(oo.BASE_CONFIG, config_cvmix_kpp_EkmanOBL=True, config_cvmix_kpp_use_enhanced_diff=False))
 
 
+def test_a_caller_without_the_kpp_inputs_is_refused_by_name():
+    from woof.hex.mpas_ocean import vmix_v842 as vm
+    state = {"layerThickness": np.zeros((2, 2)), "normalVelocity": np.zeros((2, 2))}
+    for knob, config in (("config_use_cvmix_kpp", dict(oo.BASE_CONFIG, **oo.KPP)),
+                         ("config_cvmix_kpp_nonlocal_with_implicit_mix",
+                          dict(oo.BASE_CONFIG, config_cvmix_kpp_nonlocal_with_implicit_mix=True))):
+        with pytest.raises(ConfigurationRefusal, match=knob):
+            vm.vmix_implicit(dt=1.0, mesh={}, state=state, tracers={}, diagnostics={}, configs=config)
+
+
+@requires_gpu
+def test_the_non_local_flux_keeps_its_group_in_a_wider_pool():
+    """vertNonLocalFlux(nGroup, nVertLevelsP1, nCells) with more than one group:
+    the coefficients write group index_vertNonLocalFluxTemp and the implicit
+    solve reads group 1, as in v8.4.2's one-member var_array."""
+    import copy
+    case = copy.deepcopy(next(c for c in oo.cases("r8") if c["name"] == "kpp_nonlocal_implicit_budgets"))
+    diag = case["pools"]["diagnostics"]
+    one = diag["vertNonLocalFlux"]
+    diag["vertNonLocalFlux"] = np.concatenate([one, one[..., :1] + 7.0], axis=-1)
+    got = oo.run_gpu(case)
+    ref = oo.load_fixture("r8")["kpp_nonlocal_implicit_budgets"]
+    assert oo.word_mismatches(got[NONLOCAL][..., :1], ref[NONLOCAL]) == 0
+    assert oo.word_mismatches(got[TRACERS], ref[TRACERS]) == 0
+
+
 @requires_gpu
 def test_gpu_matches_the_v842_oracle_word_for_word():
     report = oo.measure("r8")

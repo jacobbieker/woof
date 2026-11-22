@@ -122,6 +122,10 @@ def check_config(configs: dict, precision: str, mesh: dict) -> None:
     if configs.get("config_use_freq_filtered_thickness", False):
         _refuse("config_use_freq_filtered_thickness", True, "the high-frequency thickness filter is not ported",
                 "config_use_freq_filtered_thickness = .false.")
+    if configs.get("config_cvmix_kpp_nonlocal_with_implicit_mix", False):
+        _refuse("config_cvmix_kpp_nonlocal_with_implicit_mix", True,
+                "KPP's non-local flux in the implicit solve is ported for ocn_vmix_implicit alone (vmix_v842)",
+                "config_cvmix_kpp_nonlocal_with_implicit_mix = .false.")
     if configs.get("config_use_cvmix", False):
         _refuse("config_use_cvmix", True,
                 "CVMix is ported for ocn_vmix_implicit alone (vmix_v842); in the split-explicit step it is not "
