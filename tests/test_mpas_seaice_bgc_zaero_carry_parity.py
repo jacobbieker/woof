@@ -81,7 +81,7 @@ def test_the_itd_and_the_ridging_take_the_z_aerosols():
 
 def test_the_frazil_fractions_differ_by_transport_type():
     case = co.make_case(*_row("itd_zaero_nonreactive_types_frazil_three_layers"))
-    state = cv.init_parameters(case["pools"], case["config"], biogeochemistry=True, z_tracers=cv.VT_INIT_PORTED)
+    state = cv.init_parameters(case["pools"], case["config"], biogeochemistry=True, z_tracers=True)
     # the nonreactive tracer and the dust not mobile (0.7), the black carbons mobile (0.6)
     assert cv.zbgc_parameters(case["config"], state.tracers)["init_frac"] == [0.7, 0.6, 0.6, 0.7]
 

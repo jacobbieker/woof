@@ -107,7 +107,7 @@ def _refuse(knob: str, value, reason: str, declaration: str):
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the ITD thermodynamics port does not carry."""
     c = configs
-    cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=cv.VT_INIT_PORTED)
+    cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=True)
     if c["config_thermodynamics_type"] == "zero layer":
         _refuse("config_thermodynamics_type", "zero layer",
                 "cleanup_itd's zerolayer_check (the zero-layer thermodynamics) is not ported",

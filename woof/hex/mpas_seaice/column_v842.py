@@ -466,16 +466,13 @@ ZSAL_FLAG = "config_use_vertical_zsalinity"
 ZSAL_SOLVE = "zsal_solve"
 
 
-#: the vertical biogeochemical tracers (z_tracers): the init and column_biogeochemistry
-#: carry the nonreactive tracer and the z-aerosols (VT_INIT_PORTED), the other vertical
-#: tracer stages the nonreactive tracer (VT_PORTED) alone; every other stage refuses them
+#: the vertical biogeochemical tracers (z_tracers): every vertical tracer stage carries the
+#: nonreactive tracer and the z-aerosols (VT_PORTED); every other stage refuses them
 VT_FLAG = "config_use_vertical_tracers"
-#: the vertical tracers' flags every vertical tracer stage carries
-VT_PORTED = ("config_use_nonreactive",)
 #: the z-aerosols (tr_zaero: nzAerosols = 3, black carbon 1 and 2 and the first dust)
 ZAERO_FLAG = "config_use_zaerosols"
-#: the vertical tracers' flags the init and column_biogeochemistry carry
-VT_INIT_PORTED = VT_PORTED + (ZAERO_FLAG,)
+#: the vertical tracers' flags every vertical tracer stage carries
+VT_PORTED = ("config_use_nonreactive", ZAERO_FLAG)
 
 
 def vertical_tracers(configs: dict) -> bool:
@@ -509,9 +506,8 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
 
     ``z_tracers`` is the caller's too: the stages that carry the vertical
     tracers (``config_use_vertical_tracers``) pass the tracer flags they
-    carry, or ``True`` for the nonreactive tracer alone (:data:`VT_PORTED`);
-    the init and ``column_biogeochemistry`` carry the z-aerosols as well
-    (:data:`VT_INIT_PORTED`). Every other stage refuses them."""
+    carry, or ``True`` for the nonreactive tracer and the z-aerosols
+    (:data:`VT_PORTED`). Every other stage refuses them."""
     c = configs
     vt = VT_PORTED if z_tracers is True else tuple(z_tracers or ())
     if not c.get("config_use_column_package", False):
@@ -524,14 +520,14 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
                     "step only",
                     "config_use_column_biogeochemistry = .false.")
         if c[VT_FLAG] and not z_tracers:
-            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init, column_biogeochemistry, "
-                    "the ITD thermodynamics and the ridging only", f"{VT_FLAG} = .false.")
+            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init and the column step's "
+                    "stages only", f"{VT_FLAG} = .false.")
         carried = BGC_PORTED + (ZSAL_FLAG,) + ((VT_FLAG,) + vt if c[VT_FLAG] else ())
         for flag in _BGC_FLAGS:
             if flag not in carried and c[flag]:
                 _refuse(flag, True, "of the column biogeochemistry only the brine height, the vertical "
-                        "salinity and the vertical tracers' nonreactive tracer (and in the init and "
-                        "column_biogeochemistry the z-aerosols) are ported", f"{flag} = .false.")
+                        "salinity and the vertical tracers' nonreactive tracer and z-aerosols are ported",
+                        f"{flag} = .false.")
         if c[VT_FLAG]:
             _refuse_z_tracers(c, vt)
         _refuse_bio_layers(c, dims)
@@ -805,7 +801,7 @@ def tracer_object(configs: dict, dims: dict[str, int]) -> TracerObject:
             # counted and never read or written back, so only zsal_solve maps the pool field
             layout.append(("verticalSalinity", nt_bgc_s, n_bio))
     bio_index, bio_index_o, bio_fields, nt_zbgc_frac = [], [], [], 0
-    if vertical_tracers(c) and c["config_use_brine"] and any(c[flag] for flag in VT_INIT_PORTED):
+    if vertical_tracers(c) and c["config_use_brine"] and any(c[flag] for flag in VT_PORTED):
         # colpkg_init_zbgc's z_tracers (ice_colpkg.F90:1362-1371 and 1426-1490): the
         # nonreactive tracer (tr_bgc_PON), then the nzAerosols z-aerosols (tr_zaero; the
         # Registry fixes nzAerosols at 3: black carbon 1 and 2, the first dust).
@@ -892,15 +888,14 @@ def init_parameters(pools: dict, configs: dict, biogeochemistry: bool = False,
     reads (the absent fields stay ``None``). ``biogeochemistry`` and
     ``z_tracers``: the caller carries the column biogeochemistry and its
     vertical tracers (:func:`refuse_unported`); the init carries every
-    vertical tracer the port has (:data:`VT_INIT_PORTED`), and each stage
-    refuses those it does not carry."""
+    vertical tracer the port has (:data:`VT_PORTED`)."""
     mesh = pools["mesh"]
     dims = {k: int(mesh[k]) for k in ("nCells", "nCellsSolve", "nVertices", "nEdges", "maxEdges",
                                        "vertexDegree") if k in mesh}
     for k, v in mesh.items():
         if isinstance(v, (int, np.integer)):
             dims.setdefault(k, int(v))
-    refuse_unported(configs, dims, biogeochemistry, VT_INIT_PORTED if z_tracers is True else z_tracers)
+    refuse_unported(configs, dims, biogeochemistry, z_tracers)
     check_column_package_configs(configs, dims["nCategories"])
     return ColumnState(
         dims=dims, packages=packages(configs), tracers=tracer_object(configs, dims),

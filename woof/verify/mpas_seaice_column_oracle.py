@@ -122,6 +122,8 @@ BGC_NONREACTIVE_STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreac
 BGC_ZAERO_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero"
 #: the z-aerosols' through the ITD thermodynamics and the ridging (BGC_ZAERO_CARRY_CASES)
 BGC_ZAERO_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero_carry"
+#: the z-aerosols' through the time steps (BGC_ZAERO_STEP_CASES)
+BGC_ZAERO_STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero_step"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -686,6 +688,29 @@ BGC_ZAERO_CARRY_CASES = (
     ("ridge_zaero_mushy_level_ponds", 20263111, _RDG, _BGC_ZA),
     ("ridge_zaero_nonreactive_bl99_thorndike_hibler_subcycles", 20263112, _RDG, {
         **_BGC_ZA_NR, **_BL99, **_THORNDIKE, **_HIBLER, "config_dynamics_subcycle_number": 2}),
+)
+_ZA_STEP = {**_BGC_ZA, "woof_v842_corrections": _BGC_INACTIVE}
+_ZA_NR_STEP = {**_BGC_ZA_NR, "woof_v842_corrections": _BGC_INACTIVE}
+#: the z-aerosols through the column package's part of the time step and through the coupled
+#: step (the first dust's flux into oceanDustIronFlux): name, seed, stage, overrides (and the
+#: coupled torus)
+BGC_ZAERO_STEP_CASES = (
+    ("step_zaero_bl99_dedd", 20263201, _STEP, {**_STEP_BASE, **_ZA_STEP, "oracle_n_steps": 3,
+                                               "config_start_time": "2001-06-01_10:00:00"}),
+    ("step_zaero_nonreactive_types_bl99_dedd_subcycles_gregorian", 20263202, _STEP, {
+        **_STEP_BASE, **_ZA_NR_STEP, **_ZA_TYPES, "oracle_n_steps": 3, "config_dynamics_subcycle_number": 2,
+        "config_nIceLayers": 4, "config_nCategories": 3, "config_calendar_type": "gregorian",
+        "config_start_time": "2000-07-10_06:00:00"}),
+    ("step_zaero_nonreactive_mushy_level_ponds_no_vertical_thermodynamics", 20263203, _STEP, {
+        **_ZA_NR_STEP, "config_use_ocean_mixed_layer": False, "config_use_column_vertical_thermodynamics": False,
+        "config_mobility_type_black_carbon1": 0.7, "oracle_n_steps": 3,
+        "config_start_time": "2001-07-20_12:00:00"}),
+    ("seaice_zaero_nonreactive_bl99_dedd_rothrock", 20263211, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_ZA_NR_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
+     (12, 6, 3)),
+    ("seaice_zaero_bl99_dedd_rothrock", 20263212, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_ZA_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
+     (12, 6, 3)),
 )
 
 

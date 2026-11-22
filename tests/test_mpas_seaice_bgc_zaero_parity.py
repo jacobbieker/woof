@@ -51,7 +51,6 @@ from conftest import requires_gpu
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_seaice import column_bgc_v842 as cbgc
 from woof.hex.mpas_seaice import column_itd_v842 as citd
-from woof.hex.mpas_seaice import column_therm_v842 as ct
 from woof.hex.mpas_seaice import column_v842 as cv
 from woof.verify import mpas_seaice_column_oracle as co
 
@@ -135,24 +134,22 @@ def test_fixture_shows_the_z_aerosols():
 def test_the_init_the_biogeochemistry_and_the_itd_carry_the_z_aerosols():
     for name in ("init_bgc_zaero", "bgc_zaero_nonreactive"):
         case = _case(name)
-        cv.refuse_unported(case["config"], _dims(case), biogeochemistry=True, z_tracers=cv.VT_INIT_PORTED)
+        cv.refuse_unported(case["config"], _dims(case), biogeochemistry=True, z_tracers=True)
         cbgc.refuse_unported(case["config"], _dims(case))
         citd.refuse_unported(case["config"], _dims(case))
 
 
-def test_the_stages_that_do_not_carry_them_refuse_them():
+def test_the_stages_without_the_vertical_tracers_refuse_them():
     case = _case("bgc_zaero_nonreactive")
-    with pytest.raises(ConfigurationRefusal, match=cv.ZAERO_FLAG):
-        cv.refuse_unported(case["config"], _dims(case), biogeochemistry=True, z_tracers=True)
-    with pytest.raises(ConfigurationRefusal, match=cv.ZAERO_FLAG):
-        ct.refuse_unported(case["config"], _dims(case))
+    with pytest.raises(ConfigurationRefusal, match=cv.VT_FLAG):
+        cv.refuse_unported(case["config"], _dims(case), biogeochemistry=True)
 
 
 def test_the_vertical_tracers_without_a_tracer_are_refused():
     case = _case("bgc_zaero")
     config = {**case["config"], cv.ZAERO_FLAG: False}
     with pytest.raises(ConfigurationRefusal, match="config_use_nonreactive"):
-        cv.refuse_unported(config, _dims(case), biogeochemistry=True, z_tracers=cv.VT_INIT_PORTED)
+        cv.refuse_unported(config, _dims(case), biogeochemistry=True, z_tracers=True)
 
 
 def test_zaero_snow_scavenging_without_the_z_aerosols_is_refused():

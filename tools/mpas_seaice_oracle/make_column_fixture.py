@@ -50,7 +50,9 @@ the nonreactive tracer through the time steps (``BGC_NONREACTIVE_STEP_CASES``) i
 z-aerosols in the init and column_biogeochemistry (``BGC_ZAERO_CASES``) into
 ``tests/data/oracles/mpas_seaice_bgc_zaero``; ``--cases zaero_carry`` the
 z-aerosols through the ITD thermodynamics and the ridging
-(``BGC_ZAERO_CARRY_CASES``) into ``tests/data/oracles/mpas_seaice_bgc_zaero_carry``.
+(``BGC_ZAERO_CARRY_CASES``) into ``tests/data/oracles/mpas_seaice_bgc_zaero_carry``;
+``--cases zaero_step`` the z-aerosols through the time steps (``BGC_ZAERO_STEP_CASES``)
+into ``tests/data/oracles/mpas_seaice_bgc_zaero_step``.
 """
 from __future__ import annotations
 
@@ -75,7 +77,8 @@ def main() -> int:
     parser.add_argument("--cases", choices=("init", "therm", "itd", "ridge", "radiation", "dedd", "step", "coupled",
                                               "oml", "bgc", "carry", "zsal", "zsal_solve", "zsal_carry",
                                               "zsal_solve_carry", "nonreactive", "nonreactive_carry",
-                                              "nonreactive_step", "zaero", "zaero_carry"),
+                                              "nonreactive_step", "zaero", "zaero_carry",
+                                              "zaero_step"),
                         default="init")
     args = parser.parse_args()
     rows, fixture_dir = {"init": (co.CASES, co.FIXTURE_DIR), "therm": (co.VT_CASES, co.VT_FIXTURE_DIR),
@@ -101,7 +104,8 @@ def main() -> int:
                          "nonreactive_step": (co.BGC_NONREACTIVE_STEP_CASES,
                                               co.BGC_NONREACTIVE_STEP_FIXTURE_DIR),
                          "zaero": (co.BGC_ZAERO_CASES, co.BGC_ZAERO_FIXTURE_DIR),
-                         "zaero_carry": (co.BGC_ZAERO_CARRY_CASES, co.BGC_ZAERO_CARRY_FIXTURE_DIR)}[args.cases]
+                         "zaero_carry": (co.BGC_ZAERO_CARRY_CASES, co.BGC_ZAERO_CARRY_FIXTURE_DIR),
+                         "zaero_step": (co.BGC_ZAERO_STEP_CASES, co.BGC_ZAERO_STEP_FIXTURE_DIR)}[args.cases]
     args.out = args.out or fixture_dir
     args.out.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, np.ndarray] = {}
