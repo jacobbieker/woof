@@ -279,6 +279,13 @@ def live_state_history_fields(state) -> dict[str, object]:
         value = getattr(state, name, None)
         if value is not None:
             fields[name] = value
+    # WRF v4.8.0 dynamic lightning (registry.dyn_light history names).
+    if getattr(state, "light_pe", None) is not None:
+        for name, output in (("light_ne", "LIGHTNING_NE"), ("light_pe", "LIGHTNING_PE"),
+                             ("light_neu", "LIGHTNING_NEU"), ("lpos", "LPOS"),
+                             ("lneg", "LNEG"), ("lneu", "LNEU"),
+                             ("lpi2d", "LPI2D"), ("lpi3d", "LPI3D")):
+            fields[output] = getattr(state, name)
 
     p_top = getattr(state, "p_top", None)
     if p_top is not None:
@@ -463,6 +470,12 @@ def live_state_history_fields(state) -> dict[str, object]:
             for field_name in (*BUDGET, *PLUMES):
                 if field_name in live_surface:
                     fields[SCHEME_OUTPUT_FIELDS[field_name].netcdf_name] = live_surface[field_name]
+            # WRF 4.8.0's seven new EDMF fields exist only on the wrf_480
+            # route (initialize_physics allocates them nowhere else).
+            for field_name in ("excess_h", "excess_q", "maxmf_dd", "maxwidth_dd",
+                               "maxtkeprod", "cldtop_cooling", "ent_eff"):
+                if field_name in live_surface:
+                    fields[SCHEME_OUTPUT_FIELDS[field_name].netcdf_name] = live_surface[field_name]
             # Registry's MYNN package allocates TKE_PBL on interfaces,
             # although the wrapper evolves QKE instead (module_pbl_driver.F:
             # 1660-1720). Preserve this separate initialized carrier.
@@ -567,7 +580,14 @@ def live_state_history_fields(state) -> dict[str, object]:
             for field_name in (*GECROS_STATE,"grainxy","gddxy","croptype","season_gdd","cropcat","planting","harvest",*MAPS,*COUNTERS,*STATE,*(n for n in output_shapes(3 if "acsagv" in live_surface else 1,(1,1)) if n!="swnorm"),*ACCUMULATORS.values(), "td_fraction", "qtdrain", *NOAHMP_STATE_2D, *NOAHMP_GROUNDWATER_2D,*GW_CARRIERS,"smoiseq", *CARBON_STATE_2D, *CARBON_DIAGNOSTICS_2D, *(n.lower()+"_3d" for n in ("SMCWLT","SMCREF","SMCMAX","BEXP","PSISAT","DKSAT","DWSAT","SMCDRY","QUARTZ")), "soilcomp", "soilcl1", "soilcl2", "soilcl3", "soilcl4", *NOAHMP_STATE_INT_2D,
                                *NOAHMP_STATE_SNOW_3D,
                                *NOAHMP_STATE_SNOWSOIL_3D,
-                               *NOAHMP_DIAGNOSTICS_2D):
+                               *NOAHMP_DIAGNOSTICS_2D,
+                               # WRF writes SFROFF/UDROFF (Registry
+                               # EM_COMMON:855-856, mm) for Noah-MP as for
+                               # Noah; the write-back accumulates both
+                               # carriers (noahmp_runtime._write_back_slab)
+                               # and they were never published, so a Noah-MP
+                               # wrfout had no runoff at noahmp_acc_dt = 0.
+                               "sfcrunoff", "udrunoff"):
                 if field_name in live_surface:
                     fields[SCHEME_OUTPUT_FIELDS[field_name].netcdf_name] = \
                         live_surface[field_name]
@@ -797,6 +817,15 @@ def physics_history_fields(physics) -> dict[str, object]:
     wind_farm = getattr(physics, "wind_farm", None)
     if wind_farm is not None:
         output.update(wind_farm.history_fields())
+    # spacewx_ionosphere_opt (woof.spacewx.history): the climatological
+    # ionosphere's TEC and layer parameters at the frame's valid time.
+    ionosphere = getattr(physics, "spacewx_ionosphere", None)
+    if ionosphere is not None:
+        output.update(ionosphere.history_fields(physics.state.elapsed_seconds))
+    # spacewx_aurora_opt (woof.spacewx.aurora_history): the auroral oval.
+    aurora = getattr(physics, "spacewx_aurora", None)
+    if aurora is not None:
+        output.update(aurora.history_fields(physics.state.elapsed_seconds))
     cumulus = getattr(physics, "cumulus_callable", None)
     diagnostics = getattr(cumulus, "cu_diag", {})
     for key, schema in GD_OUTPUT_FIELDS.items():
@@ -1135,6 +1164,7 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
     state._scratch.update({slot: carrier(shape) for slot, shape in
                           (output_shapes(cfg) | hail_shapes(cfg) | avgflx_shapes(cfg)).items()})
     state.p_top = 0.0
+    state.elapsed_seconds = 0.0
     state.physics = None
     uh = carrier(surface) if int(cfg.nwp_diagnostics) == 1 or cfg.gsd_diagnostics else None
     state.existing_scratch = lambda name: uh if name == "up_heli_max" else state._scratch.get(name)
@@ -1164,6 +1194,19 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
             wind_farm=(SimpleNamespace(
                 history_fields=lambda: {"POWER": carrier(surface)})
                 if getattr(cfg, "wind_farm_scheme", "off") == "fitch_wrf"
+                else None),
+            # spacewx_ionosphere_opt writes its rows through the same seam.
+            spacewx_ionosphere=(SimpleNamespace(
+                history_fields=lambda _elapsed: {
+                    name: carrier(shape) for name, shape in
+                    __import__("woof.spacewx.history", fromlist=["x"]).history_shapes(cfg).items()})
+                if int(getattr(cfg, "spacewx_ionosphere_opt", 0) or 0)
+                else None),
+            spacewx_aurora=(SimpleNamespace(
+                history_fields=lambda _elapsed: {
+                    name: carrier(surface) for name in
+                    __import__("woof.spacewx.aurora_history", fromlist=["x"]).row_names(cfg)})
+                if int(getattr(cfg, "spacewx_aurora_opt", 0) or 0)
                 else None),
             olr=carrier(surface) if "olr" in allocated else None,
             surface_dni=(carrier(surface) if "surface_dni" in allocated

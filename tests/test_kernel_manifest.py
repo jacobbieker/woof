@@ -156,10 +156,25 @@ RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
         "compiled from a literal string to prove the HIP toolchain and the "
         "32-lane grouping work; not a forecast translation unit"),
     "woof/core/mynn471_gpu.py": (
-        "the MYNN 4.7.1 input gather (mynn471_pack): one kernel that copies "
-        "each input field, at its own strides, into the packed slab as the "
-        "same float or int value; it computes no forecast arithmetic, and the "
-        "MYNN column itself compiles through the recorded nvcc image route"),
+        "the generated MYNN routes' input gather (mynn471_pack) and batched "
+        "write-back (mynn471_copy): one kernel copies each input field, at "
+        "its own strides, into the packed slab as the same float or int "
+        "value, the other copies the column's output words into the state "
+        "fields; they compute no forecast arithmetic, and the MYNN column "
+        "itself compiles through the recorded nvcc image route"),
+    "woof/core/gfl_873b414.py": (
+        "the WRF 4.8.0 GFL lane relayout (gfl_relayout): one kernel that moves "
+        "each column's level values between the state fields and the "
+        "lane-interleaved scratch as the same float; it computes no forecast "
+        "arithmetic, and the GFL column itself compiles through the recorded "
+        "nvcc image route"),
+    "woof/core/noahmp_snow_tinit.py": (
+        "the Noah-MP snow-layer cold start (noahmp_snow_tinit = 2): one "
+        "kernel run once at initialisation that places each snow layer on a "
+        "straight line between skin and top-soil temperature, capped at "
+        "freezing; it runs before the first step and no step reads its "
+        "compile options, graded against its host reference byte for byte "
+        "by tests/test_noahmp_snow_tinit.py"),
     "woof/core/mynn_pbl_gpu.py": (
         "a one-kernel finiteness and range check over the MYNN inputs, built "
         "from a predicate string at call time; it reads the arrays and sets "
@@ -186,6 +201,13 @@ RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
         "float dtype compiled on first use; they run in the data-assimilation "
         "analysis, not a forecast step, record nothing and are not a "
         "translation unit the manifest freezes"),
+    "woof/da/var/transforms.py": (
+        "the experimental 3D-Var's control-variable transform, inner "
+        "products and observation operators (woof.da.var, kernels/var_u.cu "
+        "and kernels/var_obs.cu), one RawModule per precision and unit "
+        "compiled on first use; they run only under the woof var "
+        "door, never in a forecast step, record nothing and are graded word "
+        "for word against WRFDA 4.7.1 instead (tests/test_var_transforms_gpu.py)"),
     "woof/da/radar_tten.py": (
         "the research data-assimilation line's radar latent heating, one "
         "RawKernel per entry point compiled on first use: the builder runs "

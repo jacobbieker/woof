@@ -2103,6 +2103,14 @@ KERNEL_LOCAL_FRAME_RECORDINGS: tuple[KernelFrameRecording, ...] = (
 #: cross-platform drift check (``preflight.under_priced_kernel_frames``,
 #: driven from the ``.cu`` enumeration) is structurally unable to see it.
 CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
+    "terrain_drag_gwdo480_composed":
+        "woof/core/terrain_drag.py _gwdo480_module compiles terrain_drag.cu "
+        "followed by terrain_drag_gwdo480.cu (WRF v4.8.0 gwd_opt = 1) with "
+        "-fmad=false --ftz=false; the follower fails standalone.  Read on an "
+        "RTX 4090, sm_89 / NVRTC 13.4, 2026-11-09: gwdo480_column 640 B "
+        "(88 registers), the frozen unit's kernels unchanged beside it "
+        "(gwdo_column 640 B, gwdo_gsl_column 1,184 B), so the unit is priced "
+        "at 1,184 B like terrain_drag_composed.",
     "kf_trigger2":
         "woof/core/kf.py _kf_module(device, 2) compiles kf.cu with "
         "KF_TRIGGER 2 prepended, so no *.cu enumeration reaches that image. "
@@ -2209,6 +2217,22 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "kernels on sm_120 (RTX 5070 Ti) at NVRTC 13.4.92 on 2026-10-02, "
         "after rsw_sfluxzen_body's store on every path; bounded on a "
         "device by tests/test_rrtmg_sw_cuda.py (LOCAL_FRAME_BOUNDS).",
+    # RRTMG-K (ra_lw_physics = ra_sw_physics = 14).
+    "rrtmgk_prep_unit":
+        "glibc_flt32.cuh + rrtmg_mcica_wrf.cu + rrtmgk_prep.cu as one unit "
+        "(woof/core/rrtmgk.py prep_source); rrtmgk_prep.cu fails NVRTC "
+        "standalone.  Every kernel read 0 B on an RTX A6000, sm_86 / NVRTC "
+        "12.9.86, 2026-11-16.",
+    "rrtmgk_lw_unit":
+        "rrtmg_lw.cu + rrtmg_lw_taugb06_09.cu + rrtmgk_lw.cu as one unit "
+        "(woof/core/rrtmgk.py lw_post_source); rrtmgk_lw.cu fails NVRTC "
+        "standalone.  Every kernel read 0 B on an RTX A6000, sm_86 / NVRTC "
+        "12.9.86, 2026-11-16.",
+    "rrtmgk_sw_unit":
+        "K's packed-table defines + rrtmg_sw.cu + its spectral helpers + "
+        "rrtmgk_sw.cu as one unit (woof/core/rrtmgk.py sw_source); "
+        "rrtmgk_sw.cu fails NVRTC standalone.  Every kernel read 0 B on an "
+        "RTX A6000, sm_86 / NVRTC 12.9.86, 2026-11-16.",
     # BEP+BEM (sf_urban_physics = 3).
     "urban_bem_composed":
         "glibc_flt32.cuh + glibc_trig_flt32.cuh + urban_bem.cuh + "
@@ -3173,6 +3197,24 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     frames=MappingProxyType({"ssib_records": 0}),
 ),)
 
+# The WRF 4.8.0 Shin-Hong unit (shinhong_version = "wrf_480"), read through
+# the production loader (get_kernel) on test host A, fast and strict options:
+# shinhong480_column, shinhong480_column_topo and
+# shinhong480_validate_outputs all 0 local bytes (180-182 registers).
+# Partial: no other module was re-read (the Shin-Hong port).
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="test host A", device="NVIDIA GeForce RTX 4090",
+    compute_capability="89", nvrtc_build="13.4.59", platform_family="linux",
+    measured="2026-11-09", complete=False,
+    frames=MappingProxyType({"shinhong_480": 0}),
+    strict_recording=KernelFrameRecording(
+        box="test host A", device="NVIDIA GeForce RTX 4090",
+        compute_capability="89", nvrtc_build="13.4.59",
+        platform_family="linux", measured="2026-11-09", complete=False,
+        frames=MappingProxyType({"shinhong_480": 0}),
+    ),
+),)
+
 
 def frame_ceiling() -> dict[str, int]:
     """The element-wise maximum over every recording.
@@ -3625,6 +3667,21 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
     measured="2026-11-15", complete=False,
     frames=MappingProxyType({"smag2d_tke_faces": 0}),
+),)
+
+# The opt-in porous immersed obstacles (kernels/obstacle_drag.cu), production
+# loader (no contraction), default and strict
+# (GPUWM_WRF_EXACT=1) numerics, read 2026-11-17 on the RTX A6000 CUDA host
+# with kernel_local_size_bytes: obstacle_drag 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if "obstacle_drag" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"obstacle_drag": 0}),
 ),)
 
 # The Fitch wind-farm unit (labs/windfarm, 2.9.11), through the production
@@ -4271,3 +4328,132 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     measured="2026-11-08", complete=False,
     frames=MappingProxyType({"chem_sorgam": 672}),
 ),)
+
+# The climatological ionosphere (kernels/spacewx_ionosphere.cu, the
+# spacewx_ionosphere_opt history rows), production loader
+# (woof.core.kernels.get_kernel), RTX A6000 sm_86, NVRTC 12.9.86,
+# 2026-11-17, both GPUWM_WRF_EXACT modes: 96 B, 40 registers; re-measured
+# 2026-11-18 with the storm-time fo_scale argument: unchanged.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "spacewx_ionosphere" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"spacewx_ionosphere": 96}),
+),)
+
+# The auroral oval (kernels/spacewx_aurora.cu, woof spacewx aurora),
+# production loader (woof.core.kernels.get_kernel), RTX A6000 sm_86,
+# NVRTC 12.9.86, 2026-11-17, both GPUWM_WRF_EXACT modes: 32 B, 28-29
+# registers.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "spacewx_aurora" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-11-17", complete=False,
+    frames=MappingProxyType({"spacewx_aurora": 32}),
+),)
+
+# WRF v4.8.0 kim_tofd unit (port/wrf-480 L07): sfclay_column in sfclay_tofd,
+# kernel_local_size_bytes 0 in fast and strict numerics; test host B RTX 5090,
+# NVRTC 13.3.33, 2026-11-09 (the sfclayrev port's
+# measure-fast.json / measure-strict.json).
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="test host B", device="NVIDIA GeForce RTX 5090",
+    compute_capability="120", nvrtc_build="13.3.33", platform_family="linux",
+    measured="2026-11-09", complete=False,
+    frames=MappingProxyType({"sfclay_tofd": 0}),
+    strict_recording=KernelFrameRecording(
+        box="test host B", device="NVIDIA GeForce RTX 5090",
+        compute_capability="120", nvrtc_build="13.3.33", platform_family="linux",
+        measured="2026-11-09", complete=False,
+        frames=MappingProxyType({"sfclay_tofd": 0})),
+),)
+
+
+# 3.0.0 fold: the WRF v4.8.0 units with no row yet and the SNICAR LAP unit,
+# each read through its production loader (kernels.load_module for
+# dyn_lightning and wind_fitch_480, mynnsfc_b66187f.module(), and
+# snow_papers._lap_module, which appends snow_lap.cu to snow_papers.cu), widest
+# kernel per unit; test host B RTX 5090, NVRTC 13.4.92, 2026-11-09.
+# dyn_lightning: search/rank/columns 0 B; wind_fitch_480: fitch_induction_480
+# 32 B fast, 0 B strict; mynnsfc_b66187f: mynnsfc_wrf_columns 184 B;
+# snow_lap: snow_lap_albedo 1,360 B.  The last two compile only composed, so
+# they are declared in preflight.UNMEASURED_KERNEL_MODULES with these reads.
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="test host B", device="NVIDIA GeForce RTX 5090",
+    compute_capability="120", nvrtc_build="13.4.92", platform_family="linux",
+    measured="2026-11-09", complete=False,
+    frames=MappingProxyType({"dyn_lightning": 0, "wind_fitch_480": 32}),
+    strict_recording=KernelFrameRecording(
+        box="test host B", device="NVIDIA GeForce RTX 5090",
+        compute_capability="120", nvrtc_build="13.4.92", platform_family="linux",
+        measured="2026-11-09", complete=False,
+        frames=MappingProxyType({"dyn_lightning": 0, "wind_fitch_480": 0})),
+),)
+# 2026-11-09, test host B (RTX 5090, sm_120, NVRTC 12.9.86), read with
+# `tools/measure_noahmp_frames.py measure` (fresh process, no launch).  The
+# Noah-MP snowmelt-reset correction (correct-mode SN1,
+# GPUWM_NOAHMP_MELT_RESET_ESAT) moved the noahmp_bareflux and
+# noahmp_vegeflux_runtime identities; every frame read the same as the
+# 2026-11-01 row, which is kept as history.
+HISTORICAL_NOAHMP_COMPOSED_FRAME_RECORDINGS += NOAHMP_COMPOSED_FRAME_RECORDINGS
+NOAHMP_COMPOSED_FRAME_RECORDINGS = (
+    replace(NOAHMP_COMPOSED_FRAME_RECORDINGS[0], measured='2026-11-09',
+            frames=MappingProxyType({
+        'noahmp_bareflux': 0,
+        'noahmp_driver_composed': 288,
+        'noahmp_energy_composed': 272,
+        'noahmp_fluxprep': 0,
+        'noahmp_glacier_composed': 456,
+        'noahmp_leaves': 272,
+        'noahmp_libm_slab_composed': 272,
+        'noahmp_output': 0,
+        'noahmp_radiation': 0,
+        'noahmp_sflx': 0,
+        'noahmp_snow': 200,
+        'noahmp_soilwater': 0,
+        'noahmp_thermal_composed': 368,
+        'noahmp_vegeflux_runtime': 0,
+        'noahmp_vegprecip': 0,
+        'noahmp_water': 224,
+            }),
+            unit_identity=MappingProxyType({
+        'noahmp_bareflux':
+            'c3b025bacc4c69a40aa61490134b569a5323c01303479c9862b473e697e654f3',
+        'noahmp_driver_composed':
+            'dbfa9c8b4ec51833c24ac9c9105f6638f76851aa12185531456685d1b947a673',
+        'noahmp_energy_composed':
+            '56229ed3168b83845f6d9820d2585d4485ee7cf7f479217d9838573c3654b55f',
+        'noahmp_fluxprep':
+            'c1f15fefd60c05cb774135b7ad976a584432a0c5d19ef545720eb66d0c1a0f7a',
+        'noahmp_glacier_composed':
+            '0bcf3db1d33e20ce46234bbfcdce083f0652952bbe886bee63d61c67c61077a4',
+        'noahmp_leaves':
+            '98d7020604c6fbd067d5b22b92c5c910b1119f84b9dc1b11ab51b3ab484c7e97',
+        'noahmp_libm_slab_composed':
+            '5240c4820d045777237e86a1cae372e79a65aad0ca415a955774b7a6f7c5ec81',
+        'noahmp_output':
+            '9becce8c9d883118d760b0e6cea2ae624d886458ff9f1b3f8d5624646b625626',
+        'noahmp_radiation':
+            'fd3a2198282ef306f58aa256471287c7cacbd25cd0a7daa6ccf7fdb320b6ef46',
+        'noahmp_sflx':
+            'a40b1871465f6d795438483f8ade620a34dffdfe0f333833107404053cf072e4',
+        'noahmp_snow':
+            '8fbb7ebd7e02544af651d2809e60e3a4acd2012ac20649ffb46e3209a7c1eeb0',
+        'noahmp_soilwater':
+            '761c107eb267b1dded45f5a353040b629870444b49c1000f8a2fd8e551abad01',
+        'noahmp_thermal_composed':
+            '90edf4cb7b87d54a0062c8373decab6b510f77388beaaa5ac3c35b71a91a6342',
+        'noahmp_vegeflux_runtime':
+            'b2e02ddae2416232cddc43b89a8596ce2626796a9c55a7e8b4fa040c18100d94',
+        'noahmp_vegprecip':
+            '754bbe9b73b37bd9db74b40f5dc12bb58c27a66329a125b342b8d3c067d7dd7f',
+        'noahmp_water':
+            '89573c1b1303f56980dc184704e260e06153ad71076aaf3177ccdd80321988b3',
+            })),
+)

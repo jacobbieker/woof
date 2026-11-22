@@ -29,9 +29,66 @@ nothing runs unless you ask for it.
 2 flow along +x+y, 3 east-west flow, 4 flow along +x-y) and 118-132
 `HI_URB2D`. Every other index is zero. A raster carries no
 building identity, so `MH_URB2D` is the plan-area-weighted mean, the same as
-`HGT_URB2D`; NUDAPT's index 92 is a per-building mean. The fork's urban
-schemes do not read `URB_PARAM` yet (they use the URBPARM table's
-morphology); that ingest is a later change.
+`HGT_URB2D`; NUDAPT's index 92 is a per-building mean.
+
+## Using it in the urban schemes (`urban_param_file`)
+
+Set `urban_param_file` on a domain (with `sf_urban_physics` 1, 2 or 3) to
+a `woof-buildings.v1` product, a `geo_em` or a `met_em` on that domain's
+own mass grid. woof then does what WRF 4.7.1 does with `URB_PARAM`
+(`woof.core.urban_param`):
+
+- **The split** (`module_initialize_real.F:3189-3215`): LP, LB and HGT for
+  every option; MH, STDH and the four LF sectors for the single-layer UCM
+  (option 1); the 15 HI bins for BEP and BEP+BEM (options 2 and 3).
+- **urban_var_init's keep/zero rule** (`module_sf_urban.F:2788-2833`): an
+  urban column keeps the morphology when `HGT_URB2D > 0`; otherwise it is
+  zeroed and the column runs on the URBPARM table, as in WRF. Columns that
+  are not urban are zeroed.
+- **The SLUCM's NUDAPT arm** (`module_sf_urban.F:649-788`, where
+  `MH_URB2D > 0`): building and street widths from the gridded fractions,
+  the frontal-area sector chosen by the wind, Macdonald roughness and
+  displacement, and the sky-view factor. It is transcribed into the CUDA
+  and Metal kernel and matches a gfortran build of WRF's own routine bit for
+  bit (`tests/test_urban_ucm_nudapt_parity.py`).
+- **BEP and BEP+BEM** already carried WRF's gridded-morphology branches
+  (`param`, `icBEPHI_XY`). They now receive the file's LP/LB/HGT/HI.
+
+`FRC_URB2D`: a `geo_em`/`met_em` carries one, and it replaces the route's
+urban fraction after real.exe's fill (0 on an urban category becomes 0.9).
+The woof product has none, so the route's fraction is kept.
+
+Refused before any physics runs, with the reason named:
+
+- a grid that is not the domain's (shape, latitude/longitude and DX/DY
+  where the file carries them), or more than one time;
+- missing or non-finite values on an urban column with `HGT_URB2D > 0`
+  (a column whose HGT is masked is zeroed and runs on the table, as in WRF);
+- a file on which real.exe would reclassify a column to urban
+  (`FRC_URB2D >= 0.5` on a non-urban category). woof has already built the
+  land surface from the route's land use by then, so it cannot match this.
+  Run from a `wrfinput` that real.exe made, or give a file without
+  `FRC_URB2D`;
+- for option 1, morphology on which WRF's own NUDAPT arm goes non-finite:
+  `LP` outside (0, 1), an `LF` sector <= 0, or a negative `LB` or `STDH`;
+- `urban_ucm_generation = "wrf_480"` (that column has no NUDAPT arm),
+  `sf_surface_mosaic = 1` with option 1 (the mosaic urban tile calls the
+  column without the morphology), and `sf_urban_physics = 0`.
+
+**One deliberate difference from WRF.** WRF picks the LF sector from
+`ATAN2(U10, V10)` *before* `urban` writes U10/V10 (they are `INTENT(OUT)`),
+so it reads whatever the caller's variables held: in the Noah driver, the
+previous column's 10 m wind. That read is undefined, so woof uses the
+column's own lowest-level wind, `ATAN2(U1, V1)`. The oracle sets `U10 = U1`,
+`V10 = V1` before each call, so the comparison grades exactly that choice.
+The arm's `ELSEIF (SW.lt.0.0.or.BW.lt.0.0)` width branch
+(`module_sf_urban.F:693`) also reads two values before they are written.
+It assigns exactly what the `ELSE` assigns (the table's first widths), so
+WRF's result does not depend on that read, and woof folds the two arms
+into one.
+
+Without `urban_param_file` the run is byte-identical to before, in fast and
+strict numerics, on CUDA and Metal (`tests/test_urban_param_runs.py`).
 
 The file's attributes carry the sources used, their licences and their
 attribution strings, and a receipt of the filters and counts.
@@ -72,9 +129,10 @@ another footprint covers. When an nDSM median supplies a height, the nDSM's
 source (GEM-15) is recorded with its licence and attribution. A GeoParquet
 file with no `crs` key is in OGC:CRS84, as the GeoParquet spec says; an
 explicit `"crs": null` (unknown) is refused, and a PROJJSON definition
-without an authority id is kept whole. woof does not download footprints:
-export the area you need with the provider's own tools (for example the
-`overturemaps` CLI or an OSM extract) and pass the file.
+without an authority id is kept whole. woof downloads
+footprints from one provider only, Overture Maps (`--overture`, below);
+for any other source export the area you need with the provider's own tools
+(for example an OSM extract) and pass the file.
 
 **Combining.** `aggregate` takes any number of height rasters. Rasters on
 one pixel lattice (same CRS, pixel size and alignment, such as adjacent
@@ -82,12 +140,567 @@ GEM-15 windows or a footprint burn on a GEM-15 window's grid) are mosaicked
 first: where two know the same pixel the taller wins, and walls across the
 tile seams are counted once. Rasters on different lattices must lie at
 least one model cell apart: `aggregate` refuses an overlap (that ground
-would count twice) and a shared seam (the walls along it would be lost). It then supersamples each raster until each model cell holds at
+would count twice) and a shared seam (the walls along it would be lost),
+comparing the model cells each raster's outline reaches, so a rotated
+or curved raster is judged by its true shape. A raster off the domain is
+ignored. Only rasters that sample some cell, and only footprints that
+show in the burn, are credited as sources. An nDSM must sit on the footprint
+raster's own lattice, and georeferenced footprints cannot burn onto the
+model plane (`crs=None`). It then supersamples each raster until each model cell holds at
 least nine samples, and assigns each pixel to a model cell by its centre. Walls (height steps between
 neighbouring pixels) go to a cell by their midpoint. A WRF domain is read
 through its own projection (`ProjectionGrid`); idealised cases use the model
 plane (`CartesianGrid`, `block_raster`). Holes (NaN) count as neither
 building nor open ground.
+
+## Building the product for a domain (`woof buildings`)
+
+```bash
+woof buildings --namelist namelist.wps --domain 4 \
+    --footprints buildings.geojson:osm --output buildings_d04.nc
+```
+
+The command reads one domain of a WPS namelist (the innermost by default)
+and writes its product. `--footprints PATH[:SOURCE]` names a footprint file
+and its source (`osm`, `overture`, `microsoft`, `google-open-buildings`, or
+`user`); repeat it for more files. The footprints are read over the domain
+plus a two-cell halo and burned on one UTM lattice at a quarter of the grid
+spacing, but no coarser than 5 m (`--resolution`). A lattice of more than
+150 million pixels is refused; pass a coarser `--resolution` for a large
+domain, knowing that footprints much smaller than a pixel are lost or grown
+to it. GEM-15 is range-read under the same box into the high-resolution
+terrain cache (`--cache`, `--offline`):
+
+- with footprints, GEM-15 only supplies the nDSM median for footprints that
+  have no `height` attribute; only footprints become buildings, so trees
+  and bridges in the nDSM do not;
+- without footprints, the filtered nDSM is the product (objects under
+  `--min-area`, 200 m2 by default, are dropped); GEM-15 cells on either side
+  of a UTM zone edge are resampled onto one 15 m lattice;
+- `--no-gem15` uses the footprints' own heights and storeys only.
+
+**Overture Maps door (`--overture [RELEASE|latest]`).** The command fetches
+the Overture `buildings` theme, type `building`, for the domain plus a halo
+of four cells and about 100 m, and adds it as an `overture` footprint file
+(it combines with `--footprints`). It reads the public release
+(`s3://overturemaps-us-west-2/release/<release>/theme=buildings/type=building/`)
+anonymously through pyarrow's S3 filesystem, filters on each row's `bbox`
+struct so only matching row groups are read, and keeps `id`, the WKB
+geometry, `height` and `num_floors` (`sources` is read for the sidecar's
+counts and not stored in the GeoParquet). A bare `--overture` or
+`latest` takes the newest release under the bucket's `release/` prefix; an
+id such as `2026-11-18.0` pins one. The result is a GeoParquet file
+(`overture-buildings-<release>-<box hash>.parquet`, OGC:CRS84) with a JSON
+sidecar of the same name under `<cache>/overture/` (`--cache`, by default
+the high-resolution terrain cache). A second run with the same release and
+box reads the cache; an explicit release uses no network, and `latest` lists
+the bucket first, falling back to the newest cached release (with a note on
+stderr) if the listing fails. `--offline` never touches the
+network: it uses the cached file (the newest cached release for `latest`)
+and refuses with a message if there is none. The sidecar records the release,
+box, S3 path, fetch time, footprint count, the footprints per
+`sources[].dataset` and per source licence; the receipt in the product
+carries it as `overture`.
+
+Licences: the theme is ODbL 1.0 and woof attributes it "© OpenStreetMap
+contributors, Overture Maps Foundation". Individual records can come from
+other datasets under their own licences (for example Esri Community Maps
+contributors and Google Open Buildings under CC BY 4.0, Microsoft Global ML
+Building Footprints under ODbL); read the per-dataset and per-licence counts
+in the sidecar and see <https://docs.overturemaps.org/attribution/> before
+you publish a product or database derived from it. woof ships no Overture
+data. The first fetch of a small box took about five minutes
+(it reads the footers of the release's 512 files); later runs use the cache.
+This is a known cost, not yet optimised. Without a pyarrow that has S3
+support the command refuses and says so. Releases are large; the box keeps the download to the row groups
+under it.
+
+The receipt is printed and stored in the product. It gives the box, the
+GEM-15 windows, and for each footprint file where every height came from
+(attribute, GEM-15 median, storeys, default, or dropped). GEM-15 is named
+as a source only when a building whose height it gave shows in the domain.
+
+## Resolved obstacles in the model (`obstacle_opt = 1`)
+
+On an LES or other high-resolution domain (grid spacing up to 500 m;
+in practice a few metres) the product can be resolved by the dynamics.
+Set it per domain:
+
+```toml
+[[domain]]
+obstacle_opt = 1
+obstacle_file = "buildings_d03.nc"   # made on this domain's mass grid
+```
+
+The method is a porous immersed obstacle. It is a hybrid of the volume
+penalisation (Brinkman) method of Angot, Bruneau and Fabrie (1999), the
+masked topography of PALM, and the drag-porosity buildings of Meso-NH
+(Aumond, Masson and Lac 2013):
+
+- The solid fraction of each model layer comes from the building height
+  histogram and the base-state level heights above ground. A layer at
+  least `obstacle_solid_fraction` full is solid. Every u, v or w face next
+  to a solid cell is blocked, the C-grid rule.
+- A blocked face's coupled momentum is relaxed toward zero at the rate
+  `obstacle_relax_factor / dt`.
+- Partly built cells get canopy form drag `Cd a_f |U|`. `a_f` is the
+  cell's frontal area index spread over its building volume profile, and
+  Cd is `obstacle_drag_coefficient` (Coceal and Belcher 2004).
+- Open faces beside or above a wall get log-law wall stress
+  `(kappa / ln(d / z0))^2 |U| / spacing` for each wall, with d half the
+  spacing and z0 `obstacle_wall_z0`. This is the wall model WRF-IBM uses (Lundquist et al.
+  2010, 2012; Bao, Chow and Lundquist 2018).
+
+All three act as one rate `k = a/dt + b|U|` per face. Each RK stage
+subtracts `k / (1 + k dt)` times the coupled momentum from the face's
+tendency, after the stage's other slow tendencies. That bounded implicit
+form is stable for any k. The acoustic steps carry it as part of the held
+slow forcing, so no acoustic kernel changes. The geometry is static (from
+`phb`), so a restart rebuilds the same coefficients. The checkpoint binds
+the buildings product's bytes, so resuming against a changed product is
+refused. One fused kernel
+(`kernels/obstacle_drag.cu`, CUDA and Metal) works on a sparse list of the
+faces that touch an obstacle. Off, or with no buildings, nothing is built
+and nothing launches, and the run steps to the same bits as before (checked
+in fast and strict numerics).
+
+WRF-IBM's cut-cell reconstruction would follow sloped roofs more
+closely. It needs terrain-following interpolation stencils on every
+boundary point, which a staircase of blocked faces avoids. At a few metres
+the staircase is what PALM and most urban LES use.
+
+**Benchmarks** (`woof.verify.cases.obstacle_canyon` and `obstacle_cube`,
+RTX A6000):
+
+| case | measure | woof | reference |
+|---|---|---|---|
+| 2-D canyon, H/W = 1, 10 cells per H | vortex centre x/W, z/H | 0.55, 0.45 | about 0.5 and 0.5 to 0.6 (Brown et al. 2000; Li, Liu and Leung 2008) |
+| | recirculation cells up the canyon | 1 | 1 |
+| | floor wind / U(2H), roof wind / U(2H) | -0.09, +0.20 | reverse floor flow, forward roof shear |
+| | wind inside the buildings / U(2H) | 1.7e-4 | 0 |
+| 2-D canyon, H/W = 2 | recirculation cells up the canyon | 2 | 2 (Li, Liu and Leung 2008; Sini, Anquetin and Mestayer 1996) |
+| | primary vortex centre z/H | 0.67 | upper canyon |
+| | floor wind / U(2H) | +0.02 | forward, under the lower counter-rotating vortex |
+| cube, 8 cells per H, periodic 12H x 6H | reattachment behind the cube / H | 1.70 | about 1.6 (Martinuzzi and Tropea 1993), 1.7 (Shah and Ferziger 1997) |
+| | horseshoe separation ahead / H | 0.5 | about 1.0 |
+| | wind inside the cube / U(2H) | 0.009 | 0 |
+
+The benchmarks run without a surface layer, so the ground takes the LES
+closure's prescribed drag (`isfflx = 0`, `tke_drag_coefficient`). They set
+it to the walls' own log law (z0 = 1 cm at the first level). With a
+free-slip floor instead, no boundary layer approaches the cube: the
+horseshoe shrinks to 0.25 H and the wake reattaches at 2.4 H. A real case
+runs a surface layer on the ground. Eight cells per H under-resolve the
+horseshoe; Martinuzzi and Tropea's 1.0 H is a channel flow at
+Re_H = 4e4.
+
+### On the hex (MPAS) dycore
+
+`woof hex forecast` takes the same option on the WOOF-physics route:
+
+```bash
+woof hex forecast ... --obstacle-opt 1 --obstacle-file buildings_hex.nc
+```
+
+`--obstacle-solid-fraction`, `--obstacle-relax-factor`,
+`--obstacle-drag-coefficient` and `--obstacle-wall-z0` take the same names
+and defaults as above. The product is a `woof-buildings.v1` file made on the
+mesh's own cells: `aggregate(rasters, VoronoiGrid.from_mesh(mesh))` in
+`woof.static.buildings` gives shape `(1, nCells)`. `woof buildings` makes
+products for WRF grids only, so for now a hex product is made from Python.
+
+The method is the one above, moved onto the C-grid. The Voronoi edges carry
+the normal momentum `rho_u` and the cells' w faces carry `rho_w`. An edge
+is blocked when either of its two cells is solid in that layer, and a w face
+when the layer above or below it is solid. Canopy drag uses the frontal
+area index for flow along the edge normal. Wall stress counts each cell's
+solid neighbours, weighted by wall length over cell area and by the angle
+between wall and flow. Each RK stage of each dynamics substep subtracts
+`k / (1 + k dt)` times the stage's momentum after its other slow
+tendencies, with dt the substep, and the acoustic steps carry it as held
+forcing. Two kernels (`woof/hex/obstacles.py`, CUDA and Metal) work on
+sparse lists of the edges and w faces that touch an obstacle. Off, the
+module is never imported and nothing launches; with `--obstacle-opt 1` and an
+empty product, no obstacle kernel launches and the state stays unchanged. Either
+way the run steps to the same bits as before (checked in child processes in fast,
+strict and wrf_exact numerics, on CUDA and Metal).
+
+Refused, by name: any obstacle flag without `--obstacle-opt 1`; opt 1
+without a file or with a missing file; a product that is not `(1, nCells)`;
+obstacle cells with spacing over 500 m; the MPAS suite route; the
+partitioned executor; local time stepping and partial nests (the obstacles
+would never be applied); the RRFS fork dycore and the pre-v8.4.1 step loop.
+A regional mesh keeps buildings out of its boundary rings.
+
+**Benchmarks** (`woof.verify.cases.hex_obstacles`). There is no planar
+periodic hex mesh, so the cases run on a small icosahedral sphere whose
+equator is 12 H long (H = 20 m). The flow is a solid-body rotation held at
+5 m/s above 2 H by a body force, with the planet's rotation set so that it
+needs no pressure gradient. The dry v8.4.1 dycore runs with 2-D Smagorinsky
+plus an explicit vertical Smagorinsky term, and the ground gets the walls'
+log law.
+
+| case | measure | CUDA (A6000) | Metal (Mac) | reference |
+|---|---|---|---|---|
+| cube, 1.3 m cells (15 per H) | reattachment / H | 1.80 | | about 1.6 to 1.7; WRF route 1.70 |
+| | horseshoe separation / H | 0.36 | | WRF route 0.5 |
+| | wind inside the cube / U(2H) | 0.002 | | 0 |
+| cube, 2.7 m cells (7.5 per H) | reattachment / H | 2.12 | 2.18 | |
+| | horseshoe separation / H | 0.05 | 0.05 | |
+| | wind inside the cube / U(2H) | 0.003 | 0.003 | 0 |
+| cube, variable mesh (2.1 m at the cube, coarser away) | reattachment / H, separation / H | 1.79, 0.33 | | |
+| canyon H/W = 1, 2.7 m cells | recirculation cells up the canyon | 1 | 1 | 1 |
+| | vortex centre x/W, z/H | 0.45, 0.81 | 0.25, 0.94 | about 0.5 and 0.5 to 0.6 |
+| | floor wind / U(2H), roof wind / U(2H) | -0.03, +0.02 | -0.05, +0.01 | WRF route -0.09, +0.20 |
+| canyon H/W = 1, 1.3 m cells | recirculation cells, vortex centre x/W, z/H | 1; 0.35, 0.81 | | |
+| | floor wind / U(2H), roof wind / U(2H) | -0.04, +0.06 | | |
+
+The canyon vortex is weak. It strengthens with resolution, but at 1.3 m
+the street still sees under half of the WRF route's floor wind and under a
+third of its roof wind. The canyon bars run almost pole to pole
+(|lat| < 88°). Bars that stop at 60° leave the street open at both ends,
+and the street fills with a uniform back-flow of -0.2 U(2H) and no vortex,
+at both 2.7 m and 1.3 m. Metal ran the 2.7 m cases only. CUDA and Metal agree on the cube to within
+the spread of a turbulent wake (reattachment 2.12 and 2.18 H), not to the
+bit; both canyons form one vortex, but its centre is placed differently.
+With obstacles off, each reproduces its earlier runs bit for bit.
+
+The test sphere (`graded_sphere_mesh` in the hex tests) ships zero
+`weightsOnEdge` and unoriented `verticesOnEdge`, which removes the
+vorticity flux, Coriolis and tangential wind. The case fills in Thuburn
+weights and orients each edge as MPAS does. With both in place a balanced
+solid body holds to 0.01 m/s.
+
+## Terrain under buildings
+
+Resolved buildings (and an urban canopy under LES) sit on top of the
+terrain, so the terrain must be bare earth. Copernicus GLO-30, SRTM and the
+GEM-15 `dsm` are surface models: over a city their heights include the
+roofs, and the buildings would count twice.
+
+A domain that sets `obstacle_opt > 0`, or runs `sf_urban_physics > 0`
+(a `[shared]` key) with `km_opt` 2, 3 or 5, needs bare earth. For that
+domain only:
+
+- under the sub-km default (no `[static.highres]` block, GLO-30) or
+  `terrain_source = "auto"`, it takes the bare-earth USGS 3DEP 1/3" DEM
+  where the 3DEP envelope contains its footprint;
+- outside 3DEP it is refused (`surface-model-under-buildings`); declare
+  `terrain_source = "gem15-dtm"` (bare earth, experimental). Where GEM-15
+  would fall back to GLO-30, that is refused too;
+- a surface model you name yourself is kept, with one warning per domain.
+
+The other domains of the tree, and configurations without buildings,
+resolve exactly as before. The building domains are part of the static
+identity (`bare_earth_domains`), so a preparation made without them is not
+reused.
+
+## A city check: Manhattan at 50 m and 25 m
+
+This check asks whether individual buildings show up in a real-data LES, and
+whether their heights in the model match the source data.
+
+**Setup.**
+- `woof domain` built a nested HRRR-route tree from 3 km down to 50 m:
+  - 3 km, 1 km and 250 m parents, then a 50 m domain (370 x 320 cells,
+    18.5 x 16 km) over Manhattan, Brooklyn and Queens;
+  - a one-way 25 m nest (120 x 300 cells, 3 x 7.5 km) from the Battery to
+    59th St;
+  - 112 levels, about 5 m apart at the ground and 10 m apart at 100 m.
+- Physics: the 250 m, 50 m and 25 m domains run LES (`km_opt = 3`, PBL off).
+- Terrain: the bare-earth 3DEP 1/3" DEM (`[static.highres] terrain_source =
+  "usgs-3dep-13as"`). On a city, use a bare-earth source. Copernicus
+  GLO-30, the sub-km default, is a surface model with the buildings
+  already in it. Since phase 2 a configuration with `obstacle_opt` (or an
+  urban canopy under LES) does this itself; see "Terrain under buildings".
+- Buildings: `woof buildings` made both products from an OpenStreetMap
+  extract (256,305 footprints in the 50 m domain), with GEM-15 supplying
+  missing heights. The 50 m product used a 12.5 m lattice, the default
+  (dx/4) before #585's review fix capped it at 5 m. The 25 m product used
+  a 5 m lattice.
+- Run: HRRR initial and boundary data from 2026-11-02 19 UTC, wind about
+  4 m/s from the SSW, on an RTX A6000 that other jobs were also using.
+- Comparison: one run with buildings (`obstacle_opt = 1` on the 50 m and
+  25 m domains) against one without. Fields are 10-minute output averaged
+  over 19:20-20:00, so the first 20 minutes of spin-up are left out.
+
+**Source heights.** GEM-15's median surface height over each footprint
+(nDSM, surface minus terrain), compared with the OSM `height` tag (220,782
+footprints):
+
+| OSM height | footprints | GEM-15 minus OSM (bias) | RMSE | r |
+|---|---|---|---|---|
+| all | 220,782 | -3.1 m (-20%) | 8.5 m | 0.65 |
+| 0-10 m | 133,563 | -1.5 m (-16%) | 2.9 m | 0.43 |
+| 10-20 m | 72,963 | -3.2 m (-24%) | 4.9 m | 0.49 |
+| 20-50 m | 11,718 | -10 m (-34%) | 12.7 m | 0.53 |
+| 50-100 m | 2,138 | -35 m (-53%) | 39 m | 0.03 |
+| 100-200 m | 348 | -107 m (-82%) | 112 m | -0.09 |
+| 200-600 m | 52 | -253 m (-92%) | 263 m | 0.03 |
+
+GEM-15 is good for low-rise buildings but loses towers. Its 15 m pixels
+blend roofs with streets, and 21-26% of the pixels under towers over 100 m
+are holes. Use it to fill missing heights under footprints, which is what
+`woof buildings` does. GEM-15 on its own is a poor building map:
+
+- it marks 85,714 cells built where OSM marks 48,656, because trees,
+  bridges and highways pass its filters;
+- its cell mean height has an 18.8 m RMSE against OSM.
+
+OSM footprints with GEM-15 filling the gaps match the footprint-only
+product to within +0.06 in plan area fraction and +0.7 m in mean height.
+
+**Heights in the model.** The model's building height is the top of its
+solid cells at each footprint centre, on the run's own levels. This
+compares it with the OSM tag for footprints whose bounding box is at least
+2,500 m2:
+
+| domain | footprints | with a solid column | bias | median | RMSE | r |
+|---|---|---|---|---|---|---|
+| 50 m | 4,315 | 2,478 | -8.0 m | -2.3 m | 25 m | 0.86 |
+| 25 m | 841 | 793 | -1.8 m | -1.0 m | 7.0 m | 0.99 |
+
+At 25 m the model's buildings stand at their source heights, to within
+about one level spacing. At 50 m, 43% of these footprints have no solid
+column at their centre, and their volume is carried as canopy drag instead.
+
+**Which buildings are resolved.** A building counts as resolved when at
+least half its footprint lies in cells that are solid at 0-10 m. The table
+covers the 25 m nest's interior, where the street grid is 18 m cross
+streets, 30 m avenues and 60 m deep blocks:
+
+| | 50 m | 25 m |
+|---|---|---|
+| buildings resolved | 59% (10,481 of 17,903) | 77% (13,805) |
+| footprint area in solid cells | 64% | 76% |
+| street area in fully open cells | 33% | 46% |
+| street area in solid cells | 21% | 14% |
+| resolved, under 250 m2 (11,171 buildings) | 54% | 72% |
+| resolved, 250-1,000 m2 (5,205) | 65% | 84% |
+| resolved, 1,000-2,500 m2 (1,180) | 70% | 93% |
+| resolved, 2,500-10,000 m2 (326) | 86% | 97% |
+| resolved, over 10,000 m2 (21) | 100% | 100% |
+
+Over the whole 50 m domain, with its six-cell boundary ring left out:
+
+- 10,524 ground columns are solid and 44,412 ground cells are porous;
+- the tallest towers stay solid up to 390-400 m (8 columns);
+- about a fifth of the buildings are resolved (28,682 of 150,780), which
+  is a third of the footprint area. The domain includes the low-rise
+  outer boroughs.
+
+So 50 m resolves Manhattan's blocks and large buildings but not its
+streets: a cross street narrower than a cell is closed or porous. 25 m
+opens most avenues and many cross streets. That is the spacing to use when
+the street canyons themselves matter.
+
+**Wind.** Mean speeds over the built cells of the 25 m nest's area, taken
+from the 50 m domain:
+
+| height AGL | no buildings: mean (p10-p90) | buildings: mean (p10-p90) | w std, no buildings / buildings | max updraft, no buildings / buildings |
+|---|---|---|---|---|
+| 10 m | 4.2 (3.4-5.2) m/s | 0.5 (0.05-1.2) m/s | 0.05 / 0.06 m/s | 0.4 / 0.4 m/s |
+| 30 m | 5.6 (4.8-6.4) m/s | 1.3 (0.2-2.7) m/s | 0.09 / 0.13 m/s | 0.4 / 0.9 m/s |
+| 60 m | 7.0 (6.1-7.7) m/s | 2.9 (0.7-5.2) m/s | 0.17 / 0.23 m/s | 0.6 / 1.8 m/s |
+
+With buildings, the wind follows the street grid:
+
+- it channels along the open avenues and the waterfronts;
+- it leaves slack wakes behind single towers that reach up to their heights;
+- reversed flow appears in 2.5% of the open cells of the whole 50 m domain
+  at 10 m (1.4% at 30 m, 0.4% at 60 m), and in none without buildings;
+- up- and down-drafts sit on the tower edges: at 60 m they reach 1.8 m/s up
+  and 1.9 m/s down, against 0.6 and 0.7 m/s without buildings.
+
+On the cross-section along 42nd St, the solid towers stand at their
+footprint heights, two of them about 185 and 215 m tall mid-section. Above
+them the 25 m nest shows rotors and downwash that the 50 m domain smears
+out.
+
+In the 19:10 output, the lowest-level flow inside solid cells is 0.045 m/s
+at 50 m and 0.023 m/s at 25 m. In open cells it is 2.5 and 1.7 m/s.
+
+**Stations.** Model winds are given first and the station report second.
+The Battery heliport (KJRB) at 19:56 UTC reported 4.1 m/s from 200°:
+
+| run | 10 m wind |
+|---|---|
+| no buildings, 50 m | 4.4 m/s from 205° |
+| buildings, 50 m | 3.5 m/s from 235° |
+| buildings, 25 m | 3.4 m/s from 254° |
+
+The model wind is taken from the nearest five cells with no building at
+0-10 m, averaged over ±10 min. The station sits on the waterfront. The
+buildings just inland veer the modelled wind from SSW to WSW, away from
+the report.
+
+2 m temperature is 3.0 K below the station's in both runs. The obstacles
+exchange no heat (see Limitations). HRRR's 19 UTC start is already 4.8 K
+below the station's 18:56 report.
+
+The buildings run stopped at one model hour, so LaGuardia and Central Park
+(20:51-20:53) are compared only without buildings:
+
+- LaGuardia: 3.9 m/s from 200° against 4.6 m/s from 160°.
+- Central Park: 4.6 m/s from 206° against 8.2 m/s from 240°. Its 2 m
+  temperature runs on average 4.1 K below KJRB's in the archive at any time
+  shift, so it is used for wind only.
+
+**Cost.** Wall seconds per simulated hour for the whole 4- or 5-domain tree,
+on a shared A6000:
+
+| tree | wall s per simulated hour |
+|---|---|
+| 3 km to 50 m, no buildings | about 6,000 |
+| with buildings and the 25 m nest, first 20 minutes | 11,500 (the GPU less busy) |
+| with buildings and the 25 m nest, whole hour | 16,200 |
+
+The 50 m domain takes most of the step. GPU memory was 17 GB without the
+nest and 21 GB with it.
+
+### Phase 2: two hours, Overture footprints
+
+The same case was rerun with two changes:
+- the run covers both model hours (19-21 UTC);
+- the products come from `woof buildings --overture 2026-11-18.0`:
+  - 50 m domain: 493,000 footprints;
+  - 25 m nest: 26,165 footprints;
+  - GEM-15 fills the missing heights.
+
+The products use the 5 m lattice cap. The no-buildings run was repeated
+over the same two hours. Outputs are 10-minute frames.
+
+**Resolved buildings with Overture.** Same measure and area as above
+(18,053 buildings in the 25 m nest's interior):
+
+| | 50 m | 25 m |
+|---|---|---|
+| buildings resolved | 58% | 78% |
+| footprint area in solid cells | 66% | 77% |
+| street area in fully open cells | 27% | 44% |
+| street area in solid cells | 21% | 15% |
+| resolved, under 250 m2 | 52% | 72% |
+| resolved, 1,000-2,500 m2 | 69% | 95% |
+
+Overture's footprints are finer-grained than the OSM extract, so less
+street is fully open (27% against 33% at 50 m, 44% against 46% at 25 m). The conclusion is unchanged: 25 m is
+the spacing that opens the canyons.
+
+**25 m against 50 m.** Mean wind over the 25 m nest's area. The 25 m
+numbers come from the nest itself; the 50 m numbers come from the parent
+over the same area. All cells are counted, open and built:
+
+| window | height | 50 m: mean / p95 / w std | 25 m: mean / p95 / w std |
+|---|---|---|---|
+| 19:20-20:00 | 10 m | 0.98 / 3.6 / 0.06 m/s | 1.00 / 3.8 / 0.09 m/s |
+| 19:20-20:00 | 30 m | 1.59 / 4.6 / 0.14 m/s | 1.62 / 4.9 / 0.21 m/s |
+| 19:20-20:00 | 60 m | 2.93 / 6.1 / 0.23 m/s | 2.98 / 6.4 / 0.32 m/s |
+| 20:00-21:00 | 10 m | 0.81 / 3.0 / 0.05 m/s | 0.84 / 3.1 / 0.08 m/s |
+| 20:00-21:00 | 30 m | 1.29 / 3.8 / 0.11 m/s | 1.34 / 4.2 / 0.18 m/s |
+| 20:00-21:00 | 60 m | 2.42 / 5.0 / 0.19 m/s | 2.52 / 5.4 / 0.27 m/s |
+
+The mean wind is nearly the same at 25 m as at 50 m. The extra resolution
+goes into the turbulence: vertical-velocity spread is 40-70% larger and
+the gusts (p95) are 2-10% stronger.
+
+Without buildings, the same built cells of the 50 m domain over
+19:20-20:00 average 4.2, 5.6 and 7.0 m/s at 10, 30 and 60 m. That matches
+phase 1. With buildings they average 0.5, 1.2 and 2.6 m/s.
+Over 20:00-21:00 the wind weakens in both runs: 3.6, 4.8 and 6.2 m/s
+without buildings, and 0.4, 1.0 and 2.1 m/s with them.
+
+**Street canyons.** These are streamwise sections through the open cells
+between two solid blocks, using the mean wind over each window. A canyon
+holds a vortex when the flow in its lower half runs against the flow
+above the roofs:
+
+| window | domain | canyons | with a vortex | w up at the upwind wall |
+|---|---|---|---|---|
+| 19:20-20:00 | 50 m, no buildings | 222 | 0% | 50% |
+| 19:20-20:00 | 50 m | 222 | 30% | 53% |
+| 19:20-20:00 | 25 m | 1,700 | 43% | 64% |
+| 20:00-21:00 | 50 m, no buildings | 234 | 0% | 51% |
+| 20:00-21:00 | 50 m | 234 | 39% | 58% |
+| 20:00-21:00 | 25 m | 1,771 | 45% | 64% |
+
+At 25 m, the median canyon is 1.2 times as wide as its walls are tall,
+against 2.5 at 50 m. Under WRF's skimming-flow regime, a canyon that narrow
+should hold one vortex. 25 m finds a vortex in more canyons, and its
+upwind-wall updraft is the textbook sense of rotation. 50 m catches only
+the wider canyons.
+
+**Tower wakes.** Speed deficit 200 m and 400 m downwind of five towers at
+60 m, relative to the upwind wind at 60 m. Window 19:20-20:00:
+
+| tower | no buildings, 50 m | buildings, 50 m | buildings, 25 m |
+|---|---|---|---|
+| One World Trade Center | 0.01 / 0.01 | 0.89 / 0.73 | 0.77 / 0.82 |
+| Empire State | -0.04 / -0.04 | 0.89 / 0.62 | 0.84 / 0.45 |
+| One Vanderbilt | 0.10 / 0.12 | 0.69 / 0.46 | 0.76 / 0.48 |
+| Bank of America Tower | -0.01 / 0.01 | 0.90 / 0.84 | 0.82 / 0.85 |
+| 30 Hudson Yards | 0.02 / 0.00 | 0.85 / 0.90 | 0.26 / 0.51 |
+
+Most towers leave deficits of 0.45-0.9 out to 400 m; 30 Hudson Yards at
+25 m is the exception (0.26 at 200 m). The neighbouring
+blocks are in the same wake, though, so the deficit is the canopy's and
+the tower's together, not the tower's alone. The Chrysler Building is
+left out: in the product it is only 132 m tall at 50 m and 10 m at 25 m.
+Both its footprint and GEM-15 miss the spire, and GEM-15 has a hole under
+it.
+
+**Stations.** Model winds against the reports. The model value is the
+mean of the nearest five open cells over ±10 min:
+
+| station, report | report | no buildings, 50 m | buildings, 50 m | buildings, 25 m |
+|---|---|---|---|---|
+| KJRB, 19:56 | 4.1 m/s from 200° | 4.4 from 205° | 3.0 from 243° | 3.1 from 262° |
+| KJRB, 20:56 | 3.6 m/s from 220° | 3.7 from 211° | 2.5 from 247° | 2.6 from 268° |
+| LaGuardia, 20:51 | 4.6 m/s from 160° | 3.9 from 200° | 2.5 from 218° | outside the nest |
+| Central Park, 20:53 | 8.2 m/s from 240° | 4.6 from 206° | 1.7 from 212° | outside the nest |
+
+The buildings make every station's wind weaker and veer it more westerly.
+Without buildings, the 50 m domain is closer to the reports at all four.
+The model's open cells near the stations are street and waterfront cells
+below the roofs. The stations measure at the shore (KJRB), at an airfield
+(LaGuardia) and above the park's canopy (Central Park). Both the
+nearest-open-cell sample and the building heights are rough at this
+spacing, so treat this as a sanity check, not a verdict.
+
+2 m temperature agrees with and without buildings to within 0.3 K,
+because the obstacles exchange no heat: about 3 K cold at KJRB, and 0.8 K (LaGuardia)
+to 3.9 K (Central Park) warm.
+
+**Metal against CUDA.** The first 10 minutes of the buildings run
+(5-domain tree, to 19:10) were run on an Apple M3 Max (128 GB) as well as
+on the A6000:
+
+| | CUDA (shared A6000) | Metal (M3 Max) |
+|---|---|---|
+| integration time, 19:00-19:10 | 2,199 s | 5,252 s |
+| 50 m, mean time per logged step | 0.30 s | 1.24 s |
+| 25 m, mean time per logged step | 0.29 s | 0.41 s |
+| peak memory | 21 GB (GPU) | 16.7 GB (resident) |
+
+The runs are not bit-identical, and should not be expected to be:
+
+- The initial states already differ in 21 of 179 float fields, by up to
+  2e-4 in U and T. Preprocessing ran on different machines (the CUDA host
+  and the Mac).
+- At 19:10 the turbulence has decorrelated. The rms difference in U is
+  0.27 m/s on the 50 m domain and 0.52 m/s on the 25 m domain, against
+  field rms values of about 4.8 m/s.
+
+`woof go` refuses a forecast on Metal, because its readiness gate probes
+NVRTC. To run one, prepare with `woof go --prepare-only`, then run
+`woof sim --experiment-config <prepared>/experiment.toml --wps-namelist
+<prepared>/namelist.wps <prepared>`.
+
+**Cost, phase 2.** The two-hour buildings run with the 25 m nest took
+34,800 s of integration on an A6000 that other jobs were also using. That
+is about 17,400 s per simulated hour, in line with phase 1. The mean step
+was 0.40 s on the 50 m domain and 0.38 s on the 25 m domain. Wall time
+was 593 minutes for the two hours. The no-buildings rerun (4 domains, no
+nest) took 241 minutes on the same GPU.
 
 ## Licences
 
@@ -104,6 +717,15 @@ footprints is a Produced Work and must carry the attribution. A derived
 database you share publicly must itself be under ODbL.
 
 ## Limitations
+- Resolved obstacles (`obstacle_opt = 1`) act on momentum only. Scalars are
+  not masked: advection through a blocked face stops with its wind, but
+  sub-grid diffusion across a wall does not. Buildings exchange no heat or
+  moisture.
+- Buildings in the specified or nested boundary ring of a domain, or
+  within two cells of an open edge, are dropped, so the boundary update
+  and the obstacles never fight. A periodic axis keeps every cell.
+- A moving frame (`umove`, `vmove`) is refused: the buildings are fixed
+  to the ground.
 
 - Building heats, shading and moisture are not represented. The product
   describes geometry only.

@@ -40,6 +40,7 @@ stages, and each retains its own input and physics validation.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import errno
 import json
 import os
@@ -568,7 +569,8 @@ def plan_from_config(config: Path, *, outdir: Path | None = None,
                      transport: str | None = None,
                      devices: int | None = None,
                      as_posted: bool | None = None,
-                     late_after_minutes: float | None = None) -> dict:
+                     late_after_minutes: float | None = None,
+                     wait_for_cycle: bool = False) -> dict:
     """Everything the five stages need, or a refusal saying why not.
 
     ``transport`` is ``woof go --transport``: it wins over the config's
@@ -960,6 +962,10 @@ def plan_from_config(config: Path, *, outdir: Path | None = None,
                      else fetch_table.get("as_posted")) is False
             else late_after_minutes if late_after_minutes is not None
             else fetch_table.get("late_after_minutes")),
+        # Wait for a cycle whose start is more than a day ahead
+        # (source_readiness.MAX_START_WAIT): the flag or the table.
+        "wait_for_cycle": bool(wait_for_cycle
+                               or fetch_table.get("wait_for_cycle")),
         # The runtime surface fields this config requires from the cycle
         # itself; None leaves every table-declared field on its fallback
         # rule (recorded) when a cycle publishes no record for it.
@@ -1008,6 +1014,11 @@ def plan_from_config(config: Path, *, outdir: Path | None = None,
         # printed rw-wps line and run-plan's refusal all read the same
         # sentence out of one place.
         "statics_corridor": config_declares_follow_source(experiment),
+        # What the lakes will start from, said before anything is spent
+        # (defect 5 of the 2026-11-12 runner list: an auto lake request
+        # that failed was one stderr line and the plan never named it).
+        "lake_state_sentence": _lake_state_sentence(
+            experiment, area=str(fetch_table["area"])),
     }
     if any(domain.run.chem_sets for domain in experiment.domains):
         plan["chem_data_store_sources"] = chem_data_store_sources(experiment)
@@ -1022,6 +1033,12 @@ def plan_from_config(config: Path, *, outdir: Path | None = None,
     # claim=True made the folder above, so the namelist lands in it now.
     return _render_plan_wps(plan) if claim else plan
 
+
+
+def _lake_state_sentence(experiment, *, area: str | None) -> str:
+    """The plan's lake-state line for the root domain (lake keys are [shared])."""
+    from woof.ingest.lake_state import experiment_plan_sentence
+    return "go: " + experiment_plan_sentence(experiment, area=area)
 
 
 def chem_window(experiment, *, forcing_hours: float = 0) -> tuple[str, str]:
@@ -1266,6 +1283,8 @@ def fetch_command(plan: dict) -> list[str]:
     if plan.get("late_after_minutes") is not None:
         command.extend(("--late-after-minutes",
                         f"{float(plan['late_after_minutes']):g}"))
+    if plan.get("wait_for_cycle"):
+        command.append("--wait-for-cycle")
     if plan.get("runtime_surface"):
         command.extend(("--runtime-surface", str(plan["runtime_surface"])))
     if plan.get("wif_domains"):
@@ -2986,6 +3005,45 @@ def _progress_note(progress: Path | None) -> str:
     return (", " + ", ".join(parts)) if parts else ""
 
 
+def _utc_now():
+    """go's clock (naive UTC); a test puts its own here."""
+
+    from woof.source_readiness import _utc_now as now
+
+    return now()
+
+
+def future_cycle_refusal(plan: dict, *, now=None) -> str | None:
+    """Why this run should not wait for its cycle to start, or None.
+
+    The fetch stage refuses the same cycle (``woof fetch`` without
+    ``--wait-for-cycle``, :func:`woof.source_readiness.future_start_refusal`
+    names the breakage); asked here first so ``woof go`` says it before a
+    stage starts, and a dry run can print it.  Only a source the run waits
+    on as it posts is asked: an archive or a whole-cycle fetch waits for
+    nothing.
+    """
+
+    from datetime import datetime as _datetime
+
+    from woof import fetch, source_posting, source_readiness
+
+    if plan.get("wait_for_cycle") or plan.get("as_posted") is False:
+        return None
+    source = str(plan.get("source") or "")
+    try:
+        cycle = _datetime.strptime(str(plan.get("cycle") or "")[:13], "%Y-%m-%dT%H")
+        if not (fetch.cycle_is_probeable(source)
+                and source_posting.posting(source).waited):
+            return None
+        due = source_posting.expected_at(
+            source, cycle, int(plan.get("forecast_start_hour") or 0))
+    except (ValueError, KeyError, TypeError):
+        return None
+    return source_readiness.future_start_refusal(
+        source, cycle, due, now=_utc_now() if now is None else now)
+
+
 def _posting_note(schedule: dict) -> str:
     """The fetch's beat line as posted: leads in, and the lead it waits for.
 
@@ -3006,6 +3064,18 @@ def _posting_note(schedule: dict) -> str:
         expected = str(waiting.get("expected_at") or "")
         when = (f" (scheduled from about {expected[11:16]}Z)"
                 if len(expected) >= 16 else "")
+        from woof import source_readiness
+        try:
+            due = source_readiness.parse_instant(expected or None)
+        except ValueError:
+            due = None
+        now = _utc_now()
+        if due is not None and due > now:
+            # A lead still ahead says its date when it is not today, and
+            # how long that is: the 3.0.3 check's run typed a date five days
+            # ahead and read "scheduled from about 03:30Z" for ten minutes.
+            when = (" (scheduled from about "
+                    f"{source_readiness.when_words(due, now=now)})")
         note += (f", waiting for {schedule.get('source')} "
                  f"f{int(waiting.get('lead', 0)):03d}, not posted yet{when}")
     return note
@@ -3972,6 +4042,23 @@ def _partial_tree_note(root) -> str:
             f"reads it, so it is safe to remove once you are done with "
             f"it.  Every stage is create-only, so a re-run needs a new "
             f"--outdir either way.")
+
+
+def _plan_run_configs(plan: dict) -> list:
+    """The per-domain RunConfigs of the plan's config, root first ([] if none)."""
+    from woof.surface_ocean import config_run_configs
+    return config_run_configs(plan.get("config"))
+
+
+def _ocean_plan_lines(plan: dict) -> list[str]:
+    """The banner's ocean lines (door item 6): what the run's ocean is, and
+    the long-run offer, in the dry run and the real run alike.  A config the
+    banner cannot read prints nothing here, as for the experimental labels:
+    the loader that diagnoses it runs a moment later."""
+    from woof.surface_ocean import config_ocean_lines
+    return config_ocean_lines(plan.get("config"), prefix="go: ocean: ")
+
+
 def _experimental_labels(plan: dict) -> tuple[str, ...]:
     """(label, reason) for the experimental options this plan selects.
 
@@ -3982,17 +4069,9 @@ def _experimental_labels(plan: dict) -> tuple[str, ...]:
     loader that IS that place runs a moment later.
     """
     try:
-        from woof.experiment import is_experiment_toml, load_experiment
         from woof.physics_compat import _experimental_components
 
-        path = plan.get("config")
-        if path is None:
-            return ()
-        if is_experiment_toml(path):
-            configs = [dc.run for dc in load_experiment(path).domains]
-        else:
-            from woof.config import load_config
-            configs = [load_config(path)]
+        configs = _plan_run_configs(plan)
         clauses: dict[str, str] = {}
         for cfg in configs:
             for label, reason in _experimental_components(cfg):
@@ -4088,6 +4167,35 @@ def _physics_words(plan: dict) -> str:
         return f"profile {plan['profile']}"
     return ("physics from the config as written (supported, not yet "
             "WRF-verified)")
+
+
+def _boundary_hydrometeor_note(plan: dict) -> str | None:
+    """The dry run's line on the boundary hydrometeors: what the source
+    publishes and the envelope the ring will serve them with
+    (lateral_bc.hydrometeor_ring_plan).  None when the source publishes
+    none.  A config that cannot be read here is diagnosed by the loader
+    that runs a moment later, so it gives no line rather than a wrong one,
+    and the dry run says that it could not tell."""
+    try:
+        from woof.boundary_fields import source_boundary_species
+        from woof.experiment import is_experiment_toml, load_experiment
+        from woof.ingest.lateral_bc import hydrometeor_ring_plan
+
+        species = source_boundary_species(plan.get("source"))
+        if not species:
+            return None
+        path = plan.get("config")
+        if is_experiment_toml(path):
+            cfg = load_experiment(path).domains[0].run
+        else:
+            from woof.config import load_config
+            cfg = load_config(path)
+        ring = hydrometeor_ring_plan(cfg, species)
+        return None if ring is None else ring["sentence"]
+    except Exception as error:   # noqa: BLE001 -- the loader diagnoses it
+        return ("boundary hydrometeors: the envelope could not be read from "
+                f"the config here ({type(error).__name__}); the run record "
+                "states it")
 
 
 def memory_refusal_text(gate: dict) -> str:
@@ -4395,7 +4503,8 @@ def memory_gate(plan: dict, *, vram_gib: float | None = None,
     if (phases.peak_envelope_bytes > free and not phases.streamed_forecast
             and len(exp.domains) == 1
             and not getattr(getattr(exp, "devices", None), "enabled", False)):
-        from woof.core.preflight import (mynn_width_adjustable,
+        from woof.core.preflight import (MYNN_NARROWED_NOTE,
+                                          mynn_width_adjustable,
                                           required_mynn_pricing)
         if mynn_width_adjustable(exp):
             with required_mynn_pricing(exp):
@@ -4412,10 +4521,8 @@ def memory_gate(plan: dict, *, vram_gib: float | None = None,
             if (not narrow.streamed_forecast
                     and narrow.peak_envelope_bytes <= free):
                 phases = narrow
-                mynn_note = ("priced at the narrowest MYNN column width: the "
-                             "width the run would pick does not fit, so the "
-                             "forecast walks the widest width that does "
-                             "(speed, never bytes)")
+                # One sentence, shared with woof check (door item 3).
+                mynn_note = MYNN_NARROWED_NOTE
     # The budget the ENVELOPE is compared against, from the wizard's own
     # seam so the two doors cannot disagree about one card.  It is free
     # VRAM minus what this process's envelope does not model -- other
@@ -4604,6 +4711,79 @@ def _planner_machine(probe, profile=None):
         name="woof go probe", device_profile=profile)
 
 
+_GO_STAGES_LAKE_DEPTH = contextvars.ContextVar("woof_go_stages_lake_depth", default=False)
+
+
+def go_stages_lake_depth_refusal(geog_root: Path, *, config) -> str | None:
+    """:func:`geography_refusal` for a caller whose real run stages ``lake_depth`` itself.
+
+    A dry run and ``woof check`` preview the launch, which downloads that one archive
+    (:func:`stage_lake_depth`) instead of refusing, so they must not refuse it either.
+    """
+
+    token = _GO_STAGES_LAKE_DEPTH.set(True)
+    try:
+        return geography_refusal(geog_root, config=config)
+    finally:
+        _GO_STAGES_LAKE_DEPTH.reset(token)
+
+
+def _lake_depth_missing(geog_root: Path, config) -> bool:
+    """True when this configuration's lake model reads ``lake_depth`` and the tree lacks it.
+
+    The plan is the one ``woof fetch-geog --config`` stages from
+    (:func:`woof.geog_assets.geography_for_run`): ``lake_depth`` only for
+    ``sf_lake_physics = 1`` with ``use_lakedepth = 1`` on a static file that does not
+    already serve LAKE_DEPTH.
+    """
+
+    from woof.geog_assets import archive_for, geography_for_run
+
+    try:
+        planned = geography_for_run(Path(config))["datasets"]
+    except (OSError, ValueError):
+        # A configuration whose inputs cannot be read has no geography plan yet; the
+        # launch's own input and geography checks name what is missing.
+        return False
+    if "lake_depth" not in planned:
+        return False
+    archive = archive_for("lake_depth")
+    return any(not (Path(geog_root) / (f"lake_depth/{child}/index" if child else "lake_depth/index")).is_file()
+               for child in (archive.index_subdirs or ("",)))
+
+
+def stage_lake_depth(geog_root: Path, config) -> bool:
+    """Download ``lake_depth`` when the lake model needs it and the tree lacks it.
+
+    BREAKAGE THIS ENDS: ``woof go --lakes clm`` refused ("missing geography indexes ...
+    lake_depth/index") and sent the reader to a separate ``woof fetch-geog`` for a 2.4 MB
+    archive, the one dataset the opt-in itself adds.  Go stages that one dataset (NCAR is its
+    only source) before the geography check, on the same side of the forcing download.  Every
+    other missing dataset still refuses with its remedy.  Returns True when it staged.
+    """
+
+    if config is None or not _lake_depth_missing(geog_root, config):
+        return False
+    from woof.geog_assets import GeogFetchError, archive_for, fetch_geog, resolve_source
+
+    size = archive_for("lake_depth").archive_bytes
+    print(f"go: the lake model reads WPS lake_depth bathymetry and {geog_root} lacks it; "
+          f"fetching it from NCAR ({size / 1e6:.1f} MB download, about 1.9 GB unpacked). "
+          "use_lakedepth = 0 runs on the uniform lakedepth_default and needs none.", flush=True)
+    try:
+        fetch_geog(root=Path(geog_root), datasets=("lake_depth",),
+                   source=resolve_source("ncar", False),
+                   progress=lambda line: print(
+                       line if line.startswith("note:") else f"go: {line}", flush=True))
+    except (GeogFetchError, OSError, RuntimeError) as error:
+        # OSError: an unwritable tree; RuntimeError: another fetch holds the tree's lock.
+        raise GoRefusal(
+            f"fetching lake_depth for the lake model failed: {error}\n"
+            f"  remedy: woof fetch-geog --datasets lake_depth --source ncar --root {_quote(str(geog_root))}, "
+            "or set use_lakedepth = 0 to run on the uniform lakedepth_default") from None
+    return True
+
+
 def geography_refusal(geog_root: Path, *, config=None) -> str | None:
     """Why the prepare stage cannot build static fields, or ``None``.
 
@@ -4645,7 +4825,8 @@ def geography_refusal(geog_root: Path, *, config=None) -> str | None:
                    for name in required
                    for child in (archive_for(name).index_subdirs or ("",))]
         missing = [index for index in indexes
-                   if not (Path(geog_root) / index).is_file()]
+                   if not (Path(geog_root) / index).is_file()
+                   and not (_GO_STAGES_LAKE_DEPTH.get() and index.startswith("lake_depth/"))]
         if not missing:
             return None
         return layered(
@@ -5180,6 +5361,17 @@ def _registered_launch(args, *, config: Path, payload: dict,
         upper_line = upper_source_note(fetch, exp)
         if upper_line is not None:
             print("go: " + upper_line)
+    from woof.surface_ocean import domains_ocean_lines
+    for line in domains_ocean_lines((dc.run for dc in exp.domains),
+                                    prefix="go: ocean: "):
+        print(line)
+    # What the root's ring will be fed of the source's hydrometeors, and
+    # the envelope key that decides it (lateral_bc.hydrometeor_ring_plan).
+    from woof.boundary_fields import source_boundary_species
+    from woof.ingest.lateral_bc import hydrometeor_ring_plan
+    ring = hydrometeor_ring_plan(exp.domains[0].run, source_boundary_species(source))
+    if ring is not None:
+        print(f"go: {ring['sentence']}")
     pinned_line = (transport_note(pinned, pinned_from, fetch.get("transport"))
                    if bundle is None else None)
     if pinned_line is not None:
@@ -5187,6 +5379,7 @@ def _registered_launch(args, *, config: Path, payload: dict,
     if getattr(getattr(exp, "devices", None), "enabled", False):
         from woof.core.devices import describe_split
         print("go: " + describe_split(exp))
+    print(_lake_state_sentence(exp, area=fetch.get("area")))
     if args.dry_run:
         if getattr(getattr(exp, "devices", None), "enabled", False):
             gate = memory_gate({"config": config, "source": source,
@@ -5206,9 +5399,12 @@ def _registered_launch(args, *, config: Path, payload: dict,
             # fetch; a dry run that validates the route refuses it too.
             # It exited 0 on a --geog-root naming no directory, and the
             # real launch of the same command then refused.
-            geography = geography_refusal(geog_root, config=config)
+            geography = go_stages_lake_depth_refusal(geog_root, config=config)
             if geography is not None:
                 raise GoRefusal(geography)
+            if _lake_depth_missing(geog_root, config):
+                print(f"go: the run would fetch WPS lake_depth into {geog_root} first "
+                      "(the lake model's bathymetry)")
             note = static_source_note(payload, geog_root,
                                       base_dir=config.parent)
             if note is not None:
@@ -5261,6 +5457,7 @@ def _registered_launch(args, *, config: Path, payload: dict,
                  else Path(args.geog_root) if args.geog_root is not None
                  else config_geog_root(config))
     if bundle is None:
+        stage_lake_depth(geog_root, config)
         geography = geography_refusal(geog_root, config=config)
         if geography is not None:
             raise GoRefusal(geography)
@@ -5557,31 +5754,183 @@ def _at_flag_tiles(args, config: Path, payload: dict) -> tuple[Path, dict]:
     declared = payload.get("tiles")
     if isinstance(declared, dict) and declared.get("mode") == mode:
         return config, payload
+
+    def edit(raw):
+        # Pinned tilings and store choices ride along under 'on'; 'auto' and
+        # 'off' take the bare mode, which is what the planner decides from.
+        table = dict(raw.get("tiles") or {}) if mode == "on" else {}
+        table["mode"] = mode
+        raw["tiles"] = table
+
+    out, loaded = _restated_fetching_config(
+        args, config, fetch_table, flag=f"--tiles {mode}",
+        subdir=Path("tiles") / mode, edit=edit)
+    print(f"go: --tiles {mode}: {config} re-stated with [tiles] mode = "
+          f"'{mode}', as {out}")
+    return out, loaded
+
+
+def _restated_fetching_config(args, config: Path, fetch_table: dict, *,
+                              flag: str, subdir: Path, edit) -> tuple[Path, dict]:
+    """A fetching config re-stated under ``<outdir>/<subdir>/`` with ``edit``.
+
+    The --cycle mechanism at the config's own cycle (its route files come
+    along), then ``edit(raw)`` changes the parsed tables in place and the
+    file is written back.  ``args.config`` moves to the copy.
+    """
+
+    import tomllib
+
     from woof.companion_setups import retime_to_cycle
     from woof.fetch import parse_cycle
     from woof.toml_document import emit_experiment_toml
 
     if getattr(args, "outdir", None) is None:
         args.outdir = config.parent / f"{config.stem}-go"
-    out = Path(args.outdir) / "tiles" / mode / config.name
+    out = Path(args.outdir) / subdir / config.name
     source = str(fetch_table["source"])
     try:
         retime_to_cycle(config, parse_cycle(str(fetch_table["cycle"]), source), out)
     except ValueError as error:
-        raise GoRefusal(f"--tiles {mode}: {error}") from error
+        raise GoRefusal(f"{flag}: {error}") from error
     raw = tomllib.loads(out.read_text(encoding="utf-8"))
-    # Pinned tilings and store choices ride along under 'on'; 'auto' and
-    # 'off' take the bare mode, which is what the planner decides from.
-    table = dict(raw.get("tiles") or {}) if mode == "on" else {}
-    table["mode"] = mode
-    raw["tiles"] = table
+    edit(raw)
     text = emit_experiment_toml(raw)
     if out.read_text(encoding="utf-8") != text:
         out.write_text(text, encoding="utf-8")
-    print(f"go: --tiles {mode}: {config} re-stated with [tiles] mode = "
-          f"'{mode}', as {out}")
     args.config = out
     return out, tomllib.loads(text)
+
+
+def _at_flag_lake_ice(args, config: Path, payload: dict) -> tuple[Path, dict]:
+    """The config with ``woof go --lake-ice`` written into its [ingest].
+
+    The GFS route reads its lake-ice choice from ``[ingest] gfs_lake_ice``
+    (woof.case_data.gfs_preparation_policy).  Before this flag and that
+    key the choice lived only in ``[case_data]``, which a GFS config from
+    `woof domain` does not carry and cannot carry without the ERA5
+    route's inputs, so the prepared GFS route always downloaded the IMS
+    analysis and nothing could stop it (door item 7).  The config is
+    re-stated as --tiles does it.
+    """
+
+    choice = getattr(args, "lake_ice", None)
+    if choice is None:
+        return config, payload
+    if _prepared_launch(args):
+        # Breakage it prevents: a prepared bundle's lake ice was decided by
+        # its preparation and its config is hash-bound, so the flag would be
+        # read by nothing.
+        raise GoRefusal(
+            f"--lake-ice {choice} is a preparation choice, and this launch "
+            "runs a prepared bundle, which keeps the lake ice it was prepared "
+            f"with. Next: woof go CONFIG --lake-ice {choice} with the "
+            "source configuration.")
+    if "case_data" in payload:
+        # Breakage it prevents: a [case_data] config cannot be re-stated in
+        # another folder (its forcing paths are its own).
+        raise GoRefusal(
+            f"--lake-ice {choice} re-states the config's [ingest] in a copy, "
+            "and this config names its input files in [case_data], which a "
+            f"copy cannot carry. Next: set [ingest] gfs_lake_ice = '{choice}' "
+            f"in {config} and launch it again.")
+    fetch_table = payload.get("fetch")
+    if not isinstance(fetch_table, dict) or not {"source", "cycle"} <= fetch_table.keys():
+        raise GoRefusal(
+            f"--lake-ice {choice} re-states a fetching config's [ingest], and "
+            f"{config} has no [fetch] source and cycle. Next: set [ingest] "
+            f"gfs_lake_ice = '{choice}' in it.")
+    from woof.runplan import prepares_on_gfs_route
+    if not prepares_on_gfs_route(
+            fetch_table["source"],
+            source_root=getattr(args, "data_dir", None) or fetch_table.get("source_root")):
+        # Breakage it prevents: only the GFS route freezes lakes from the
+        # observed analysis, so on any other source the flag would be read
+        # by nothing and the run would say it had obeyed.
+        raise GoRefusal(
+            f"--lake-ice chooses the GFS route's lake ice, and source "
+            f"{fetch_table['source']!r} does not prepare on that route. "
+            "Next: drop --lake-ice.")
+    declared = payload.get("ingest")
+    if isinstance(declared, dict) and declared.get("gfs_lake_ice") == choice:
+        return config, payload
+
+    def edit(raw):
+        raw["ingest"] = {**dict(raw.get("ingest") or {}), "gfs_lake_ice": choice}
+
+    out, loaded = _restated_fetching_config(
+        args, config, fetch_table, flag=f"--lake-ice {choice}",
+        subdir=Path("lake-ice") / choice, edit=edit)
+    print(f"go: --lake-ice {choice}: {config} re-stated with [ingest] "
+          f"gfs_lake_ice = '{choice}', as {out}")
+    return out, loaded
+
+
+def unread_gfs_ingest_note(payload: dict, *, source_root=None) -> str | None:
+    """One WARNING for GFS-route ``[ingest]`` keys the launch's route never reads.
+
+    ``gfs_lake_ice``, ``gfs_lake_skin`` and ``gfs_snow_convention`` are read
+    by the GFS preparation alone (woof.case_data.gfs_preparation_policy,
+    called only by woof.gfs_direct).  The loader accepts them on any
+    config, so on an HRRR, RAP or ERA5 config ``[ingest] gfs_lake_ice =
+    "wps"`` was read by nothing and the run said nothing (door item 7
+    follow-up): a user who set it to keep the forcing's lake ice could not
+    tell it had no effect.  ``woof go --lake-ice`` already refuses on those
+    sources; a key in the file is said once instead of refused, because it
+    harms nothing and a config may be shared between sources.
+
+    Said, not made to apply: the other routes start lakes from their own
+    forcing's ice, skin and snow, and the IMS freeze exists to correct the
+    lakes GFS does not resolve; applying it to HRRR, which carries its own
+    lake ice, would change a plain HRRR run and is not what the key names.
+    """
+
+    declared = payload.get("ingest")
+    if not isinstance(declared, dict):
+        return None
+    from woof.case_data import GFS_PREPARATION_DEFAULTS
+    keys = [key for key, _default in GFS_PREPARATION_DEFAULTS if key in declared]
+    if not keys:
+        return None
+    fetch = payload.get("fetch") if isinstance(payload.get("fetch"), dict) else {}
+    source = fetch.get("source")
+    from woof.runplan import prepares_on_gfs_route
+    if source and prepares_on_gfs_route(
+            source, source_root=source_root or fetch.get("source_root")):
+        return None
+    named = ", ".join(f"{key} = {declared[key]!r}" for key in keys)
+    where = (f"source {source!r} does not prepare on it" if source else
+             "this config names no [fetch] source that prepares on it")
+    return (f"go: WARNING [ingest] {named}: only the GFS route's preparation "
+            f"reads {'this key' if len(keys) == 1 else 'these keys'}, and {where}, "
+            "so it changes nothing in this run; this route takes lake ice, lake "
+            "skin and snow from its own forcing. Remove it from [ingest] to "
+            "silence this.")
+
+
+def lake_ice_sentence(config) -> str | None:
+    """What the GFS preparation will do about lake ice, in one line.
+
+    ``None`` when the config cannot be read for it (its own loader then
+    reports why).  Printed by the GFS dry run, so the plan states the
+    choice before anything is downloaded (door item 7).
+    """
+
+    from woof.case_data import (
+        gfs_preparation_policy_from_config, optional_case_data_from_config)
+    try:
+        policy = gfs_preparation_policy_from_config(
+            config, optional_case_data_from_config(config))
+    except (OSError, ValueError):
+        return None
+    if policy["gfs_lake_ice"] == "wps":
+        return ("go: lake ice: wps -- lakes keep the forcing's own ice (as WPS "
+                "and real.exe give it); no lake-ice analysis is fetched.")
+    return ("go: lake ice: observed -- the IMS daily snow and ice analysis "
+            "(NSIDC, 1 km) is fetched at preparation only if a domain has "
+            "land-use lake cells, and freezes the lakes it sees frozen; "
+            "--lake-ice wps or [ingest] gfs_lake_ice = \"wps\" keeps the "
+            "forcing's ice and fetches nothing.")
 
 
 def _streams_instead(args, gate: dict, config: Path,
@@ -6194,6 +6543,9 @@ def _go_wrfinput(args) -> int:
 @_ledger_main
 def go_main(args, *, observer=None) -> int:
     """Choose native WRF handoff or the existing CONFIG preparation chain."""
+    if getattr(args, "mcica_seed_mode", None):
+        # Stage subprocesses inherit the environment (woof.core.mcica_seed).
+        os.environ["WOOF_MCICA_SEED_MODE"] = args.mcica_seed_mode
     # [model] engine = "hex" runs the hex model (woof.go_hex); a CONFIG
     # without [model], or naming "wrf", takes the WRF path below unchanged.
     from woof.go_hex import HexGoRefusal, configured_engine
@@ -6215,6 +6567,21 @@ def go_main(args, *, observer=None) -> int:
     return _go_config_main(args, observer=observer)
 
 
+def _refuse_lakes_off_configuration(args) -> None:
+    """``--lakes`` rewrites a TOML configuration; every directory route
+    (WRF input, met_em, namelist.input, global directory) carries its own
+    namelist and static fields and would launch with the switch ignored."""
+    if getattr(args, "lakes", None) is None:
+        return
+    config = getattr(args, "config", None)
+    if getattr(args, "wrfinput", None) is not None or (
+            config is not None and (Path(config).is_dir()
+                                    or Path(config).name == "namelist.input")):
+        raise GoRefusal("--lakes applies to a TOML configuration launch; a WRF input, "
+                        "met_em or namelist directory carries its own namelist and "
+                        "static fields. Next: drop --lakes, or launch from the configuration.")
+
+
 @_cyclone_go_scope
 @_hydro_go_scope(beside=True)
 def _go_config_main(args, *, observer=None) -> int:
@@ -6233,6 +6600,7 @@ def _go_config_main(args, *, observer=None) -> int:
     except ValueError as error:
         print(f"go: {error}", file=sys.stderr)
         return 2
+    _refuse_lakes_off_configuration(args)
     from woof.go_wrfinput import launch_if_global_directory
     native_status = launch_if_global_directory(args, observer=observer)
     if native_status is not None:
@@ -6260,7 +6628,9 @@ def _go_config_main(args, *, observer=None) -> int:
         command = ["run", "--met-em", str(native), "--outdir", str(
             getattr(args, "outdir", None) or native/"gpuwm-go")]
         for key, flag in (("restart", "--restart"), ("render_products", "--products"),
-                          ("members", "--members"), ("run_seconds", "--run-seconds")):
+                          ("members", "--members"), ("run_seconds", "--run-seconds"),
+                          ("lake_state", "--lake-state"),
+                          ("lake_state_path", "--lake-state-path")):
             value = getattr(args, key, None)
             if value is not None:
                 command.extend((flag, str(value)))
@@ -6273,13 +6643,10 @@ def _go_config_main(args, *, observer=None) -> int:
                 command.append(flag)
         if getattr(args, "explain", False):
             command.append("--explain")
-        # run has no visual-verification parser flag. Preserve go's
-        # explicit setting in the existing finish-hook environment.
-        from contextlib import nullcontext
-        from woof.verification_visuals import verification_scope
-        visuals = getattr(args, "verify_visuals", None)
-        with (nullcontext() if visuals is None else verification_scope(visuals)):
-            return cli_main(command)
+        # go's --no-verify-visuals is run's own flag, same meaning.
+        if getattr(args, "verify_visuals", None) is False:
+            command.append("--no-verify-visuals")
+        return cli_main(command)
     from woof.earth2_licensing import check_namespace
     check_namespace(args)
     if getattr(args, "config", None) is not None and Path(args.config).is_dir():
@@ -6290,18 +6657,26 @@ def _go_config_main(args, *, observer=None) -> int:
                         "configuration launches retain their stage workers")
     if getattr(args, "allow_shared_gpu", False):
         raise GoRefusal("--allow-shared-gpu currently requires WRF inputs")
+    if getattr(args, "native_shared_gpu", False):
+        raise GoRefusal("--native-shared-gpu requires WRF inputs")
     if getattr(args, "benchmark", False):
         raise GoRefusal("--benchmark requires WRF inputs")
     if getattr(args, "run_seconds", None) is not None:
         raise GoRefusal("--run-seconds requires WRF inputs")
     _at_flag_storm_nests(args)
     if getattr(args, "branch_from", None) is not None:
+        if getattr(args, "lakes", None) is not None:
+            raise GoRefusal("--lakes does not apply to --branch-from, which launches branches "
+                            "of an existing run. Next: drop --lakes.")
         from woof.ensemble.mass_launcher import run as run_branches
         return run_branches(args)
     # A future stage-only owner can answer before GPU admission. None is
     # the frozen no-op result; all existing callers take the same route.
     stage_result = SpeedHooks.stage_only(args, None)
     if stage_result is not None:
+        if getattr(args, "lakes", None) is not None:
+            raise GoRefusal("--lakes does not apply to a stage-only launch, which never "
+                            "reaches the lake configuration. Next: drop --lakes.")
         return stage_result
     # An acquisition owner can materialize its source-only domain using the
     # same wizard as CONFIG launches. The registry chooses it, not source ids.
@@ -6684,6 +7059,18 @@ def _archive_dry_readiness(args, payload: dict, cycle) -> int | None:
     if (not fetch_endpoints.archive_rows(str(table.get("source", "")))
             or not requested or requested == "latest"):
         return None
+    # A dated dry run answers with the readiness document (exit 75 while
+    # the window is not yet up), whose retry_after_seconds alone did not
+    # say that the run itself refuses a start days ahead.
+    ahead = future_cycle_refusal({
+        "source": table.get("source"), "cycle": requested,
+        "forecast_start_hour": table.get("forecast_start_hour"),
+        "as_posted": (False if getattr(args, "whole_cycle", False)
+                      else table.get("as_posted")),
+        "wait_for_cycle": bool(getattr(args, "wait_for_cycle", False)
+                               or table.get("wait_for_cycle"))})
+    if ahead is not None:
+        print(f"go: WARNING -- the run would refuse: {ahead}", file=sys.stderr)
     probe_payload = {**payload, "fetch": {**table, "cycle": requested}}
     pinned, _ = pinned_transport(table, getattr(args, "transport", None))
     document, code = _readiness_answer(
@@ -6770,6 +7157,10 @@ def _go_launch(args, *, observer=None) -> int:
         config, payload = _at_flag_cycle(args, config, payload, cycle)
     _hydro_cycle_applied(args)
     config, payload = _at_flag_tiles(args, config, payload)
+    config, payload = _at_flag_lake_ice(args, config, payload)
+    unread = unread_gfs_ingest_note(payload, source_root=getattr(args, "data_dir", None))
+    if unread is not None:
+        print(unread, file=sys.stderr)
     from woof.spectral_nudging.cli import at_flag as at_flag_nudging
     config, payload = at_flag_nudging(args, config, payload)
     from woof.smoke_execution import (
@@ -6883,6 +7274,7 @@ def _prepare_only_launch(args, *, config, payload, observer=None):
     from woof.geog_assets import config_geog_root
     geog_root = (Path(args.geog_root) if args.geog_root is not None
                  else config_geog_root(config))
+    stage_lake_depth(geog_root, config)
     geography = geography_refusal(geog_root, config=config)
     if geography is not None:
         raise GoRefusal(geography)
@@ -7145,7 +7537,9 @@ def _go_prepared_main(args, *, observer=None) -> int:
                             as_posted=(False if getattr(args, "whole_cycle", False)
                                        else None),
                             late_after_minutes=getattr(
-                                args, "late_after_minutes", None))
+                                args, "late_after_minutes", None),
+                            wait_for_cycle=bool(getattr(
+                                args, "wait_for_cycle", False)))
     plan["publish_root"] = Path(getattr(args, "publish_root", None) or Path(plan["root"]) / "www")
     plan["publish_cmd"] = getattr(args, "publish_cmd", None)
     plan["hydro"] = getattr(args, "hydro", None) or "auto"
@@ -7175,13 +7569,21 @@ def _go_prepared_main(args, *, observer=None) -> int:
     # path again after the claim below.
     manifest = front_door_manifest(plan)
     cycle_stamp = _cycle_stamp(plan["cycle"])
+    ahead = future_cycle_refusal(plan)
 
     if getattr(args, "dry_run", False):
         print(f"go: {plan['config']} -- source {plan['source']}, cycle "
               f"{plan['cycle']}, {plan['hours']} h of forcing, "
               f"{_physics_words(plan)}{_lead_note(plan)}")
         _prepare_only_line(args, plan)
+        if ahead is not None:
+            print(f"go: WARNING -- the run would refuse: {ahead}", file=sys.stderr)
+        for line in _ocean_plan_lines(plan):
+            print(line)
         print(_run_folder_note(plan))
+        ring = _boundary_hydrometeor_note(plan)
+        if ring is not None:
+            print(f"go: {ring}")
         pinned = transport_note(plan.get("transport"), plan.get("transport_from"),
                                 plan.get("transport_table"))
         if pinned is not None:
@@ -7190,6 +7592,15 @@ def _go_prepared_main(args, *, observer=None) -> int:
             print(f"go: {plan['devices_sentence']}")
         if plan.get("tiles"):
             print(f"go: {plan['tiles']['sentence']}")
+        # The GFS route's lake-ice line, on that route only: on another
+        # source it named an IMS fetch that never happens.
+        from woof.runplan import prepares_on_gfs_route
+        lake_ice = (lake_ice_sentence(plan["config"]) if prepares_on_gfs_route(
+            plan.get("source"), source_root=getattr(args, "data_dir", None)) else None)
+        if lake_ice is not None:
+            print(lake_ice)
+        if plan.get("lake_state_sentence"):
+            print(plan["lake_state_sentence"])
         if plan.get("devices"):
             gate = memory_gate(plan)
             print(gate["verdict"])
@@ -7292,6 +7703,9 @@ def _go_prepared_main(args, *, observer=None) -> int:
                "directory>\n")
             + f"  # or remove {plan['root']} if that run is finished with")
 
+    if ahead is not None:
+        raise GoRefusal(ahead)
+
     # plan['hours'] is the [fetch] window (forcing coverage), not the run
     # length: a 1 h run on 3-hourly GFS boundaries fetches 3 h and the line
     # read "3 h" as if the forecast were (2.9.2 box door test).
@@ -7299,6 +7713,8 @@ def _go_prepared_main(args, *, observer=None) -> int:
           f"{plan['cycle']}, {plan['hours']} h of forcing, {_physics_words(plan)}"
           f"{_lead_note(plan)}")
     _prepare_only_line(args, plan)
+    for line in _ocean_plan_lines(plan):
+        print(line)
     pinned = transport_note(plan.get("transport"), plan.get("transport_from"),
                             plan.get("transport_table"))
     if pinned is not None:
@@ -7323,6 +7739,8 @@ def _go_prepared_main(args, *, observer=None) -> int:
         print(f"go: {plan['devices_sentence']}")
     if plan.get("tiles"):
         print(f"go: {plan['tiles']['sentence']}")
+    if plan.get("lake_state_sentence"):
+        print(plan["lake_state_sentence"])
 
     #: The Icechunk exporter started beside the forecast, when one was
     #: asked for; every way out of the chain below settles or abandons it.
@@ -7361,6 +7779,7 @@ def _go_prepared_main(args, *, observer=None) -> int:
         if not _prepare_only_needs_no_card(args):
             _require_forecast_device()
         # Same rule as the memory gate, same side of the download.
+        stage_lake_depth(geog_root, args.config)
         geography = geography_refusal(geog_root, config=args.config)
         if geography is not None:
             raise GoRefusal(geography)
@@ -7880,6 +8299,12 @@ def _add_go_arguments(parser) -> None:
                         help="keep selected scheduled WRF-input checkpoints (WRF valid times or end)")
     parser.add_argument("--nudging", choices=("off", "spectral", "grid"),
                         help="relax toward prepared source analyses; spectral keeps only the configured large-scale modes")
+    parser.add_argument("--lake-ice", choices=("observed", "wps"), default=None,
+                        dest="lake_ice",
+                        help="GFS route lake ice: observed (default) freezes lakes the "
+                             "IMS daily analysis sees frozen, fetched only when a domain "
+                             "has lakes; wps keeps the forcing's ice and fetches nothing. "
+                             "Written as [ingest] gfs_lake_ice")
     parser.add_argument("--wrfinput", type=Path, default=None, metavar="DIR",
                         help="run a stock real.exe directory containing namelist.input, "
                              "wrfinput_d0N and wrfbdy_d01 through the shared WRF forecast route")
@@ -7909,6 +8334,8 @@ def _add_go_arguments(parser) -> None:
                         "forecast has no hydro")
     from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
     add_wrf_hydro_arguments(parser)
+    from woof.nn.launch import add_arguments as add_nn_arguments
+    add_nn_arguments(parser)
     from woof.source_adapters import ensemble_source_ids
     from woof.ensemble.wofs_recipe import source_spec_argument
     parser.add_argument("--source", type=source_spec_argument, default=None, metavar="SOURCE[:N],...",
@@ -8077,6 +8504,14 @@ def _add_go_arguments(parser) -> None:
                              "time a lead may be before the run stops with exit "
                              "75; wins over the config's [fetch] "
                              "late_after_minutes and the source row's budget")
+    parser.add_argument("--wait-for-cycle", action="store_true",
+                        dest="wait_for_cycle",
+                        help="download routes only: wait for a cycle whose "
+                             "first hours are due more than 24 h from now; "
+                             "without it (or the config's [fetch] "
+                             "wait_for_cycle = true) such a cycle is refused "
+                             "with its date and the wait, since it is most "
+                             "often a typo")
     parser.add_argument("--readiness", action="store_true",
                         help="print gpuwm.readiness.v1 for the config's fetch "
                              "window on stdout and run nothing: exit 0 ready, "
@@ -8103,8 +8538,8 @@ def _add_go_arguments(parser) -> None:
                              "catalog), or 'none' to stop after the "
                              "forecast.  The same spelling `woof render "
                              "--products` takes")
-    parser.add_argument("--no-verify-visuals", action="store_false", dest="verify_visuals", default=None,
-                        help="skip postforecast observation verification; the physical run is unchanged")
+    from woof.verification_visuals import add_argument as add_verification_argument
+    add_verification_argument(parser)
     parser.add_argument("--grib2", action="store_true",
                         help="write native surface and pressure-level GRIB2 as each frame lands, "
                              "then <run>/grib2-grib2.zip")
@@ -8130,6 +8565,12 @@ def _add_go_arguments(parser) -> None:
                              "its folder (default 1, enough to resume); 0 keeps "
                              "every hourly set, which a later branch or downscale "
                              "from an earlier checkpoint needs")
+    parser.add_argument("--mcica-seed-mode", choices=("pressure", "cell"), default=None,
+                        dest="mcica_seed_mode",
+                        help="RRTMG McICA seeding: pressure (default, upstream) or cell, "
+                             "a fixed hash of column id and radiation call time for "
+                             "`woof grad` finite-difference and ensemble legs "
+                             "(docs/grad.md); not upstream physics")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run",
                         help="validate the route and show how to launch it; fetch "
                              "and run nothing")

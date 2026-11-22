@@ -296,6 +296,18 @@ def forecast_column_config(run):
     # warms the background physics; its unrelated grid cannot locate that farm.
     if getattr(run, "wind_farm_scheme", "off") != "off":
         common.update(wind_farm_scheme="off", wind_farm_table="", wind_farms="")
+    # Nest-child-only mechanisms need the NestCoupler's rolling boundary
+    # tables the column does not have (``nested=False`` above), and the
+    # validator refuses them off a nest: inflow_perturbation (theta seeding of
+    # the parent-forced tables) and a mixed-scheme nest_microphysics_transition.
+    # Before this, every inflow-perturbation LES nest skipped its pre-warm
+    # ("requires nested=true"; Manhattan 25 m nest, 2026-11-17) and compiled
+    # in step 1.  Their own kernels still compile lazily on the real domain.
+    if getattr(run, "inflow_perturbation", False):
+        common["inflow_perturbation"] = False
+    if getattr(run, "nest_microphysics_transition",
+               "same-scheme-only") != "same-scheme-only":
+        common["nest_microphysics_transition"] = "same-scheme-only"
     if bool(getattr(run, "specified", False) or getattr(run, "nested", False)):
         extent = max(_NX, 2 * int(run.spec_bdy_width) + 4)
         return validate_run_config(replace(
@@ -444,10 +456,10 @@ def _synthetic_orographic_static(cfg, grid) -> dict:
     gwd_opt = int(getattr(cfg, "gwd_opt", 0) or 0)
     if not (topo_wind or gwd_opt):
         return {}
-    from woof.static.orographic import required_static_fields
+    from woof.static.orographic import drag_static_fields, gwdo_version_of
 
     static = {"HGT_M": np.zeros(grid, dtype=np.float32)}
-    for name in required_static_fields(topo_wind, gwd_opt):
+    for name in drag_static_fields(topo_wind, gwd_opt, gwdo_version_of(cfg)):
         static[name] = np.full(grid, _SYNTHETIC_OROGRAPHY_VALUE.get(name, 0.1), dtype=np.float32)
     return {"terrain_drag_static": static}
 

@@ -109,13 +109,16 @@ def test_fixture_covers_the_branches():
     assert changed("vt_bl99_bubbly", "melt_growth_rates/snowiceFormation").any()
     assert (got("vt_bl99_bubbly", "ocean_fluxes/oceanHeatFluxIceBottom") < 0).any()
     # the first-year ice area resets on day 259 in the north and day 75 in the south only
-    for name, north in (("vt_bl99_first_year_north", True), ("vt_bl99_first_year_south", False)):
+    for name, north in (("vt_bl99_first_year_north_leap_year", True), ("vt_bl99_first_year_north_gregorian", True),
+                        ("vt_bl99_first_year_south", False)):
         lat = cases[name]["pools"]["mesh"]["latCell"][:n_solve]
         fy = got(name, "tracers/firstYearIceArea")[:, :, 0]
         area = cases[name]["pools"]["tracers"]["iceAreaCategory"][:n_solve, :, 0]
         hemisphere = np.broadcast_to((lat > 0 if north else lat <= 0)[:, None], fy.shape)
         assert (fy[hemisphere & (area > 1e-11)] == 0).all() and (fy[~hemisphere] != 0).any()
     assert "tracers/firstYearIceArea" not in fixture["vt_bl99_bubbly"]
+    # 2000-09-15 is day 258 of the 365-day year: no reset (the Gregorian count, 259, would reset)
+    assert "tracers/firstYearIceArea" not in fixture["vt_bl99_first_year_north"]
     # the coupled fluxes reach the category fluxes swapped (v8.4.2's set_sfcflux call)
     alt = cases["vt_bl99_coupled_surface_temperature"]["pools"]["alternative_atmos_forcing"]
     surface = got("vt_bl99_coupled_surface_temperature", "atmos_fluxes/surfaceHeatFluxCategory")
@@ -123,10 +126,22 @@ def test_fixture_covers_the_branches():
     assert (surface[iced > 1e-11] == alt["surfaceConductiveFluxCouple"][:n_solve][iced > 1e-11]).all()
 
 
-def test_the_day_of_year_is_the_clock_s():
-    assert ct.day_of_year("2000-01-01_00:00:00") == 1.0
-    assert ct.day_of_year("2000-09-15_00:00:00") == 259.0
-    assert ct.day_of_year("2001-03-16_00:00:00") == 75.0
+def test_the_day_of_year_is_the_clock_s_on_its_calendar():
+    for calendar in ("gregorian", "gregorian_noleap"):
+        assert ct.day_of_year("2000-01-01_00:00:00", calendar) == 1.0
+        assert ct.day_of_year("2001-03-16_00:00:00", calendar) == 75.0
+        assert ct.day_of_year("2001-09-16_00:00:00", calendar) == 259.0
+    # a leap year after February: the 365-day year (the Registry default) is a day behind
+    assert ct.day_of_year("2000-09-15_00:00:00", "gregorian") == 259.0
+    assert ct.day_of_year("2000-09-15_00:00:00", "gregorian_noleap") == 258.0
+    assert ct.day_of_year("2000-03-01_00:00:00", "gregorian_noleap") == 60.0
+    assert ct.day_of_year("2000-12-31_23:59:59", "gregorian") == 366.0
+    assert ct.day_of_year("2000-12-31_23:59:59", "gregorian_noleap") == 365.0
+    assert ct.day_of_year("2000-02-29_07:00:00", "gregorian") == 60.0
+    with pytest.raises(ConfigurationRefusal, match="29 February"):
+        ct.day_of_year("2000-02-29_07:00:00", "gregorian_noleap")
+    with pytest.raises(ConfigurationRefusal, match="config_calendar_type"):
+        ct.day_of_year("2001-06-21_12:00:00", "360day")
 
 
 @pytest.mark.parametrize("overrides, match", [
@@ -169,7 +184,7 @@ def test_gpu_matches_the_v842_oracle_word_for_word(glibc239):
      "surfaceHeatFluxCategory[cn] = M(surfaceHeatFluxCouple[cn], 1.0);",
      "atmos_fluxes/surfaceHeatFlux", "vt_bl99_coupled_surface_temperature"),
     # colpkg_atm_boundary's vvel = 0 "fixed" (high-frequency coupling)
-    ("&Cdn_atm_ratio_n, uVelocity[c], 0.0,", "&Cdn_atm_ratio_n, uVelocity[c], uVelocity[c],",
+    ("p.fix_ice_velocity ? vVelocityCell[c] : 0.0,", "p.fix_ice_velocity ? vVelocityCell[c] : uVelocity[c],",
      "velocity_solver/airStressCellV", "vt_bl99_mu71_highfreq"),
     # TsfK**4 as three multiplications instead of __powidf2's two squarings
     ("__device__ __forceinline__ double powi4(double x) { double t = M(x, x); return M(t, t); }",
@@ -195,6 +210,18 @@ def test_a_mutated_evaluation_order_is_caught(monkeypatch, glibc239, original, m
         assert co.word_mismatches(got[field], want) > 0
     finally:
         ct._module_on.cache_clear()
+
+
+@requires_gpu
+def test_dropping_the_abort_restore_is_caught(monkeypatch, glibc239):
+    """Without the restore, the owned cells after the aborting one keep the
+    kernel's words, which v8.4.2 never writes."""
+    case = _case("vt_bl99_abort_salinity")
+    monkeypatch.setattr(ct, "_keep_after_abort", lambda *args: None)
+    got, state = co.run_gpu(case)
+    assert state.abort[0] == ct.SEAICE_ERROR_COL_VERT_THERM
+    want = co.expected_outputs(case, co.load_fixture(FIXTURE).get(case["name"], {}))
+    assert sum(co.word_mismatches(got[key], want[key]) for key in want) > 0
 
 
 def _oracle_toolchain() -> tuple[str, Path] | None:

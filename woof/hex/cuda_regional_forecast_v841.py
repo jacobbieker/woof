@@ -55,6 +55,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from woof.backend.scratch import scratch_empty
 from .cuda_backend.containers import DeviceAtmosphere, TransferStats
 from .cuda_regional_v841 import (
     CudaRegionalKernels,
@@ -117,7 +118,7 @@ REGIONAL_GARBAGE_POOL: Mapping[str, float] = {
 def _padded(array: Any, axis: int, value: float) -> np.ndarray:
     """``np.concatenate([array, np.full(.., value)], axis)`` as a C-ordered array, copied on host threads.
 
-    THE COST THIS REMOVES (mv3km 3 km limited area, V6000, 2026-10-28): padding every regional array with
+    THE COST THIS REMOVES (mv3km 3 km limited area, RTX PRO 6000, 2026-10-28): padding every regional array with
     the garbage element was a strided copy plus a concatenate on the main thread, about 1.8 s of the
     start-up (the dycore build and the first boundary admissions) while the card waited.  The copy is written in blocks of
     the leading non-padded axis on host threads (woof.hex.host_parallel); the words are the same.
@@ -617,7 +618,7 @@ def pad_regional_physics_host(
     n_cells_solve: int,
     donor_cell: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Put the WOOF constructor and the GWDO statics on the padded extent.
+    """Put the WOOF-ArWen constructor and the GWDO statics on the padded extent.
 
     The global stack and the limited-area stack call the SAME three physics
     geometry constructors and the SAME sealed constructor; the only thing
@@ -973,7 +974,7 @@ class RegionalGarbageDiscipline:
 
         ``module_key`` names the translation unit that launched, and it is
         load-bearing.  One KernelCache serves the whole run -- the dycore AND
-        the WOOF physics seam -- so before 2026-08-26 this discipline
+        the ArWen physics seam -- so before 2026-08-26 this discipline
         rewrote the garbage column of every float32 argument of every physics
         launch too, and that is the wrong answer for exactly one reason: the
         physics seam MANAGES ITS OWN garbage column.
@@ -1069,6 +1070,30 @@ class _PaddedMaskExtents:
         self.n_edges = int(n_edges)
 
 
+#: The default WOOF_HEX_LBC_TEND_CACHE_MB.
+_TEND_CACHE_DEFAULT_MB = 256
+
+
+def _tend_cache_bytes() -> int:
+    """WOOF_HEX_LBC_TEND_CACHE_MB: bytes of full-extent driving tendencies kept per LBC interval.
+
+    256 MiB by default: a regional Alps/edi rank's three fields fit many times over, and a conus3km
+    rank (about 590 MB for all three) holds what fits and expands the rest per call, so the cache
+    never adds more than this per rank.  0 turns it off (every call expands)."""
+
+    import math
+    import os
+
+    value = os.environ.get("WOOF_HEX_LBC_TEND_CACHE_MB", "").strip() or str(_TEND_CACHE_DEFAULT_MB)
+    try:
+        mib = float(value)
+    except ValueError:
+        mib = math.nan
+    if not math.isfinite(mib) or mib < 0:
+        raise ValueError(f"WOOF_HEX_LBC_TEND_CACHE_MB must be a finite, non-negative number of MiB, got {value!r}")
+    return int(mib * 2**20)
+
+
 def _ring_lbc_on() -> bool:
     """WOOF_HEX_REGIONAL_RING_LBC=0 restores the full-extent LBC admission derivation (A/B only)."""
 
@@ -1098,6 +1123,10 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
         super().__init__(*args, **kwargs)
         # _derive makes the zeros it needs; holding a full-extent edge array of zeros for the run bought nothing.
         self._rho_edge_zero = None
+        # tendency()'s full-extent expansions for the current interval, dropped by start() and advance().
+        self._tend_expanded: dict[str, Any] = {}
+        self._tend_expanded_bytes = 0
+        self._tend_cache_bytes = _tend_cache_bytes()
 
     # -- the boundary-support pool ------------------------------------------
     #
@@ -1194,8 +1223,43 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
         del state, scalars
         return compact, compact_scalars
 
+    def _drop_tend_expanded(self) -> None:
+        self._tend_expanded = {}
+        self._tend_expanded_bytes = 0
+
+    def start(self, when: datetime) -> None:
+        self._drop_tend_expanded()
+        super().start(when)
+
+    def advance(self, when: datetime | None = None) -> None:
+        # Dropped before the next interval is derived, so the held expansions
+        # do not add to the admission peak.
+        self._drop_tend_expanded()
+        super().advance(when)
+
     def tendency(self, name: str) -> Any:
-        return self._expand(name, super().tendency(name))
+        """The interval tendency at full extent.  Read-only: with the cache on,
+        every stage of the interval gets the same array.
+
+        The expansion (a zero fill and a scatter of the boundary support) is the
+        same for every stage and step of one LBC interval.  With
+        WOOF_HEX_LBC_TEND_CACHE_MB > 0 (256 by default) it is kept, within that many
+        MiB, until ``start`` or ``advance`` (a conus3km rank's three fields need
+        about 590 MB, so the default holds some of them).  0: every call
+        expands.  Every consumer reads it (speczone kernels, graph staging
+        copies).
+        """
+        compact = super().tendency(name)
+        if self._support is None or self._tend_cache_bytes <= 0:
+            return self._expand(name, compact)
+        held = self._tend_expanded.get(name)
+        if held is not None:
+            return held
+        out = self._expand(name, compact)
+        if self._tend_expanded_bytes + int(out.nbytes) <= self._tend_cache_bytes:
+            self._tend_expanded[name] = out
+            self._tend_expanded_bytes += int(out.nbytes)
+        return out
 
     def state_at(self, name: str, step_start: Any, delta_t: Any, out: Any = None) -> Any:
         return self._expand(name, super().state_at(name, step_start, delta_t), out=out)
@@ -1302,7 +1366,7 @@ class PaddedRegionalDrivingState(DeviceRegionalDrivingState):
 
         def upload(name: str) -> Any:
             # The file slab (element, level) goes to the card as stored; the (level, element) transpose and
-            # the garbage column at 0.0 are written there.  THE COST THIS REMOVES (mv3km, V6000,
+            # the garbage column at 0.0 are written there.  THE COST THIS REMOVES (mv3km, RTX PRO 6000,
             # 2026-10-28): the strided host transpose plus padding of 17 slabs took about 1.3 s of one core
             # per boundary admission (2.6 s of the first step) while the card waited.  Same words.
             slab = cp.asarray(np.ascontiguousarray(admitted.fields[name], dtype=np.float32))
@@ -1420,8 +1484,8 @@ def advance_acoustic_step_regional_cuda_v841(
     # acoustic_rs_ts_regional_v841 writes every (level, cell) of rs and ts,
     # the specified zone included (zero there), so the scratch needs no
     # memset of its own.
-    rs = cp.empty((nlev, ncells), dtype=cp.float32)
-    ts = cp.empty_like(rs)
+    rs = scratch_empty(cp, (nlev, ncells), cp.float32)
+    ts = scratch_empty(cp, (nlev, ncells), cp.float32)
     split = regional_acoustic_split_enabled()
 
     def rs_ts(slot_major: bool, rs_out: Any, ts_out: Any) -> None:
@@ -2300,8 +2364,16 @@ class CudaRegionalRuntimeV841:
     # -- graft: the scalar boundary stages ---------------------------------
 
     def bdy_adjust_scalars(self, scalars: Any, rk_step: int) -> None:
-        """``atm_srk3:2688-2717``."""
+        """``atm_srk3:2688-2717``; then, opted in, WRF's flow-dependent specified zone for the undriven species."""
 
+        self._bdy_adjust_driven_scalars(scalars, rk_step)
+        undriven = getattr(self, "undriven_species_boundary", None)
+        if undriven is not None:
+            # --undriven-species-boundary wrf-flow-dependent (woof.hex.undriven_species_boundary):
+            # the step's split mass flux the scalar transport read, staged by the driver.
+            undriven.apply(scalars, getattr(self, "undriven_mass_flux", None))
+
+    def _bdy_adjust_driven_scalars(self, scalars: Any, rk_step: int) -> None:
         dt_rk = transport_rk_timestep_f32(
             outer_dt=self.outer_dt, rk_step=int(rk_step),
             order=self.time_integration_order,
@@ -2786,7 +2858,7 @@ def open_regional_forecast_v841(
 ) -> Any:
     """Open one regional configuration on the card, recording its anchor.
 
-    RETIRED 2026-10-10 as a gate (owner ruling).  This used to refuse every regional configuration whose class
+    RETIRED 2026-10-10 as a gate.  This used to refuse every regional configuration whose class
     held no forecast mint, and the only way past it was a measurement
     instrument that swapped this function for the assembler.  It now asks
     the same question, records the answer on the driver

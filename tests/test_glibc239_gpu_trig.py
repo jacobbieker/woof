@@ -1,4 +1,4 @@
-"""The opt-in glibc 2.39 binary64 sin, cos and atan for GPU kernels.
+"""The opt-in glibc 2.39 binary64 sin, cos, atan and asin for GPU kernels.
 
 ``tools/glibc239_libm_gpu/glibc239_trig_flt64.cuh`` is LGPL code: a source
 checkout uses it only with ``WOOF_GLIBC239_LIBM64=1``, and no wheel carries
@@ -49,12 +49,27 @@ def test_the_tables_are_the_rust_crates_words():
     assert len(_words(sincos)) == 440 and len(_words(cij)) == 241 * 7
 
 
+def test_the_asin_tables_are_the_rust_crates_words():
+    import struct
+    header = HEADER.read_text(encoding="utf-8")
+    rust = (RUST / "asincos_tbl.rs").read_text(encoding="utf-8")
+
+    asncs = _words(header.split("ASNCS[2568] = {")[1].split("};")[0])
+    assert asncs == _words(rust.split("static ASNCS:")[1].split("];")[0]) and len(asncs) == 2568
+    for name, count in (("INROOT", 128), ("POWTWO", 28)):
+        words = _words(header.split(f"{name}[{count}] = {{")[1].split("};")[0])
+        values = re.findall(r"[-+]?\d+\.\d*(?:[eE][-+]?\d+)?", rust.split(f"static {name}:")[1].split("= [", 1)[1]
+                            .split("];")[0])
+        assert words == [f"0x{struct.unpack('<Q', struct.pack('<d', float(v)))[0]:016x}" for v in values]
+        assert len(words) == count
+
+
 def test_the_header_keeps_its_lgpl_notice_and_the_notice_names_the_opt_in():
     head = "".join(HEADER.read_text(encoding="utf-8").splitlines(True)[:30])
     assert "THIRD-PARTY NOTICE: LGPL-2.1-or-later" in head and "IBM Accurate Mathematical Library" in head
     assert "Modified: transcribed to CUDA C++" in HEADER.read_text(encoding="utf-8")
     notice = (ROOT / "NOTICE").read_text(encoding="utf-8")
-    section = notice.split("glibc 2.39 binary64 sin, cos and atan for the GPU")[1].split("-" * 74)[0]
+    section = notice.split("glibc 2.39 binary64 sin, cos, atan and asin for the GPU")[1].split("-" * 74)[0]
     for token in ("THE TRANSCRIPTION IS OPT-IN.", "WOOF_GLIBC239_LIBM64=1", "licenses/LICENSE-glibc-LGPL-2.1.txt",
                   "tools/glibc239_libm_gpu/glibc239_trig_flt64.cuh", "metal-woof"):
         assert token in section, token
@@ -108,7 +123,7 @@ def test_the_host_transcription_gives_glibc_2_39s_words(host):
 def test_the_host_transcription_equals_this_hosts_glibc_below_the_branred_range(host):
     if grade_trig.glibc_version() is None or not host.trig_bind_host_libm():
         pytest.skip("needs a glibc host")
-    for f in range(3):
+    for f in range(len(grade_trig.FUNCTIONS)):
         counts, first = np.zeros(3, dtype=np.uint64), ctypes.c_uint64()
         host.trig_sweep(f, 0, 1 << 20, counts.ctypes.data, ctypes.byref(first))
         assert counts[0] == 0, (grade_trig.FUNCTIONS[f], int(first.value))

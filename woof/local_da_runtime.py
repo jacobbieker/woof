@@ -714,7 +714,8 @@ class PreparedBackend:
             extra, report = point_batches(obs['rows'], states=states, setup=self.setup, grid=self.grid,
                 analysis_time=when, analysis_times=self.analysis_times, surface=surface,
                 max_age_seconds=self.plan['selected']['cadence_seconds'], localization=loc,
-                error_inflation=settings['error_inflation'])
+                error_inflation=settings['error_inflation'],
+                aircraft_level=bool(self.plan['request'].get('assimilate_aircraft', False)))
             receipts.append(report)
         for part, record in enumerate(obs['surface']):
             available_t = 't2' in surface

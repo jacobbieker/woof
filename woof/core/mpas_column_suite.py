@@ -188,6 +188,14 @@ GENERATION_SELECTORS = MappingProxyType({
     "tempo_surface_emission_before": {
         "values": (False, True),
         "requires": ("microphysics_scheme", ("tempo",))},
+    # The TEMPO generation: v3.2.5 (the RunConfig default) or the RRFS v2
+    # pin v3.0.3, which a proof against native NOAA MPAS names here.
+    "tempo_version": {
+        "values": ("v3.2.5", "v3.0.3"),
+        "requires": ("microphysics_scheme", ("tempo",))},
+    "tempo_hailhyperaware": {
+        "values": (True, False),
+        "requires": ("microphysics_scheme", ("tempo",))},
     "thompson_version": {
         "values": ("wrf_461", "wrf_39_noaa"),
         "requires": ("microphysics_scheme", ("thompson_aero",))},
@@ -989,9 +997,15 @@ _FIXED_MASS_RATES = (("dqv", "rqv"), ("dqc", "rqc"), ("dqr", "rqr"),
 #: state and geometry, so they run at the first phase 2 rather than on the
 #: seam's zero placeholder buffers.  Keyed by ``mp_physics``; a scheme
 #: without a row has no such step.
-# Both aerosol-aware Thompson members derive surface emissions from the
-# first real layer depth; placeholder geometry would divide by zero.
+# Every member of the aerosol-aware Thompson family derives its surface
+# emission from the first real layer depth; placeholder geometry would
+# divide by zero.  RCON (29) is a member (woof.config
+# THOMPSON_AEROSOL_FAMILY) and had no row while its speed guard refused it
+# before any seam was built: without one its construction-time nwfa2d, an
+# infinity from the zero-depth placeholder layer, stayed on the state and
+# the lowest-level water-friendly aerosol was non-finite from step 0.
 _FIRST_CONTACT = {28: "_thompson_first_contact",
+                  29: "_thompson_first_contact",
                   38: "_thompson_first_contact",
                   900: "_tempo_first_contact"}
 
@@ -1581,6 +1595,19 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                 f"surface names {unknown}, which initialize_physics does "
                 f"not take from a column caller; it takes "
                 f"{sorted(accepted - seam_bound)}")
+        # An explicit lake_state_source binds lake cells, and on the column
+        # route only a staged lake mask (sf_lake_physics = 1's surface
+        # inputs) marks any: without one the source would be accepted and
+        # never read.  'auto' and 'forcing' stay tolerant.
+        lake_source = getattr(cfg, "lake_state_source", "auto")
+        if (lake_source not in ("auto", "forcing")
+                and given.get("lakemask") is None
+                and given.get("landuse") is None):
+            raise ValueError(
+                f"lake_state_source={lake_source!r} names lake cells to bind, "
+                "but this column run stages no lake mask (set "
+                "sf_lake_physics=1 with its surface statics), so the source "
+                "would be accepted and never read")
         n_soil = plan.n_soil_levels
         for name in ("soil_temperature", "soil_moisture"):
             if not n_soil:
@@ -1667,7 +1694,8 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
             # eta 0 has zero thickness and the longwave rate goes
             # non-finite.  It happens when p_top_pa is above the standard
             # atmosphere's pressure at the nominal top.
-            raise ValueError(
+            from woof.config import ConfigurationRefused
+            raise ConfigurationRefused(
                 "GFDL-Eta radiation needs a strictly decreasing nominal eta: "
                 f"p_top_pa={p_top} is above the standard-atmosphere "
                 "pressure of the nominal top, so the upper layers clip to "

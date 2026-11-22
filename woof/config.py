@@ -77,6 +77,15 @@ def validate_surface_radiation_policy(policy: str) -> str:
 @dataclass(frozen=True)
 class RunConfig:
     def __post_init__(self):
+        # woof_quirk_corrections = 'all' (woof.quirk_corrections): each
+        # RunConfig correction is on exactly where its scheme runs, however
+        # the RunConfig was built (a dataclasses.replace that changes the
+        # scheme re-derives it).  The TOML readers refuse an explicit
+        # conflicting key before this point (apply_run_corrections).
+        if self.woof_quirk_corrections == "all":
+            from woof.quirk_corrections import run_corrections_under_all
+            for key, value in run_corrections_under_all(self).items():
+                object.__setattr__(self, key, value)
         if self._legacy_h_sca is None:
             object.__setattr__(self, "_legacy_h_sca", self.h_sca_adv_order is None)
         if self.h_sca_adv_order is None:
@@ -90,6 +99,20 @@ class RunConfig:
         if isinstance(self.waves_options, dict):
             import json
             object.__setattr__(self, "waves_options", json.dumps(self.waves_options, sort_keys=True))
+        # Noah-MP separate surface/subsurface runoff (WRF 4.8.0 opt_runsrf /
+        # opt_runsub; re-implemented from published descriptions, not bitwise
+        # to upstream). Normalize once, before any consumer reads opt_run:
+        # opt_run becomes the surface option and opt_runsub the subsurface
+        # one only when the pair is really split. A stock pair, including
+        # opt_runsrf = opt_runsub = opt_run, leaves both at 0, so its
+        # configuration, identities and cache keys are those of opt_run alone.
+        if self.opt_runsrf or self.opt_runsub:
+            from woof.core import noahmp_runoff_split as _runoff_split
+            run, runsub = _runoff_split.canonical(*_runoff_split.resolve(
+                self.opt_run, self.opt_runsrf, self.opt_runsub))
+            object.__setattr__(self, "opt_run", run)
+            object.__setattr__(self, "opt_runsrf", 0)
+            object.__setattr__(self, "opt_runsub", runsub)
         if self.wind_farms:
             if self.wind_farms == "off":
                 object.__setattr__(self, "wind_farm_scheme", "off")
@@ -117,11 +140,15 @@ class RunConfig:
             object.__setattr__(self, "mp_physics", resolve_mp_physics(self.mp_physics))
         # Resolve the generation after named microphysics so partial
         # number mixing has the same meaning through either run door.
-        if self.bl_pbl_physics == 5 and self.bl_mynn_version == "wrf_461":
-            changed = any(getattr(self, k) != v for k, v in MYNN_PBL_OPTION_IDENTITY.items())
-            partial = self.bl_mynn_mixscalars == 1 and self.mp_physics in MYNN_QN_FLAG_SPECIES and self.mp_physics not in MYNN_QN_FAMILY_SCHEMES and bool(MYNN_QN_FLAG_SPECIES[self.mp_physics])
-            if changed or self.bl_mynn_mixlength == 0 or self.tke_budget or partial:
-                object.__setattr__(self, "bl_mynn_version", "wrf_471")
+        resolved_version = resolve_mynn_version(self, self.bl_mynn_version)
+        if resolved_version != self.bl_mynn_version:
+            object.__setattr__(self, "bl_mynn_version", resolved_version)
+        # WRF v4.8.0's GFL (cu_gf_version default) never writes KTOP_DEEP, so
+        # PR92 lightning from the cumulus cloud top stays on the previous pin's
+        # GFDRV, which writes it (woof/core/gfl.py, upstream defect 1).
+        if (self.cu_physics == GRELL_FREITAS_CU_PHYSICS and self.cu_gf_version == "gfl_873b414"
+                and self.lightning_option == 11):
+            object.__setattr__(self, "cu_gf_version", "wrf_461")
         # WRF resets its default shallow mass-flux switch outside QNSE.
         if self.bl_pbl_physics != 4 and self.mfshconv == 1:
             object.__setattr__(self, "mfshconv", 0)
@@ -328,6 +355,12 @@ class RunConfig:
     # CCN spectrum and cut-off tables from -- 1 marine, 2 clean
     # continental, 3 average continental, 4 urban (Whitby 1978).
     ntu_ccnty: int = _config_field(default=2, kw_only=True)
+    # WRF source generations of NTU (56) and UDM (27), woof.mp_generations.
+    # ``wrf_480`` (default) runs WRF 4.8.0's statement fixes; ``wrf_471``
+    # reproduces the 4.7.1 transcription.  Keyword-only, so no positional
+    # index moves; a header without the key ran wrf_471.
+    ntu_version: str = _config_field(default="wrf_480", kw_only=True)
+    udm_version: str = _config_field(default="wrf_480", kw_only=True)
     # WRF-native split radiation selection.  ``-1/-1`` preserves the
     # historical woof ``ra_physics`` aggregate exactly; new configurations
     # set BOTH values explicitly and leave ra_physics=0, or restate the
@@ -448,6 +481,12 @@ class RunConfig:
     opt_run: int = 3
     opt_sfc: int = 1
     opt_frz: int = 1
+    # Ground snow cover fraction: 1 = Niu and Yang 2007 with the land-type
+    # SCFFAC/MFSNO table values (WRF-lineage default); 2 = scale-aware
+    # parameters from the grid spacing (Abolafia-Rosenzweig et al. 2025,
+    # JAMES, Eq. 4-5), re-implemented from published descriptions, not
+    # bitwise to upstream.  Read by woof/core/noahmp_energy_slab.py.
+    opt_scf: int = _config_field(default=1, kw_only=True)
     opt_inf: int = 1
     opt_rad: int = 3
     opt_alb: int = 2
@@ -458,10 +497,48 @@ class RunConfig:
     snicar_dust_ppm: float = _config_field(default=0.0, kw_only=True)
     snicar_ice_density: float = _config_field(default=900.0, kw_only=True)
     snicar_bubble_radius_um: float = _config_field(default=1000.0, kw_only=True)
+    # opt_alb=3 fresh-snow grain radius ramp: 1 = 54.526-204.526 um,
+    # 2 = Lin et al. 2025 MODSCAG retune 33-91 um (re-implemented from
+    # published descriptions, not bitwise to upstream).
+    snicar_fresh_grain_opt: int = _config_field(default=1, kw_only=True)
+    # clean-snicar-lap: light-absorbing particles in snow (opt_alb=3 only).
+    snicar_lap_opt: int = _config_field(default=0, kw_only=True)
+    snicar_lap_table: str = _config_field(default="", kw_only=True)
+    snicar_lap_series: str = _config_field(default="", kw_only=True)
+    # Re-implemented from published descriptions, not bitwise to upstream.
+    snicar_ice_ri_opt: int = _config_field(default=2, kw_only=True)
+    snicar_dust_optics_opt: int = _config_field(default=0, kw_only=True)
+    #: Noah-MP wetland scheme of Zhang et al. (2022, WRR 58, e2021WR030573),
+    #: re-implemented from published descriptions, not bitwise to upstream.
+    #: 0 off (the v4 port unchanged), 1 on: wetland saturated fraction from
+    #: first-layer wetness plus a fill-evaporate-spill wetland store, with
+    #: GLWD v2 / Copernicus GLO-90 static maps built at prep.  Needs
+    #: opt_run 1, 2 or 5 (woof.core.noahmp_wetland).
+    noahmp_wetland: int = _config_field(default=0, kw_only=True)
+    # Incident spectrum (0 packaged G173; 1-6 RRTMGP/AFGL spectra) and band
+    # count (1 five bands, 2 480 bands); re-implemented from published
+    # descriptions, not bitwise to upstream. Read only by opt_alb=3.
+    snicar_solarspec_opt: int = _config_field(default=0, kw_only=True)
+    snicar_bandnumber_opt: int = _config_field(default=2, kw_only=True)
+    # clean-snicar-layers: re-implemented from published descriptions, not
+    # bitwise to upstream. 1 adding-doubling (default), 2 Toon 1989.
+    snicar_solver_opt: int = _config_field(default=1, kw_only=True)
     opt_snf: int = 1
     opt_tbot: int = 2
     opt_stc: int = 1
     opt_gla: int = 1
+    opt_tksno: int = _config_field(default=1, kw_only=True)
+    #: Noah-MP cold-start snow-layer temperatures (woof.core.noahmp_snow_tinit):
+    #: 2 (default) conduction profile between skin and top soil; 1 is WRF's
+    #: SNOW_INIT (every layer at the skin temperature), the bitwise-to-WRF pin.
+    #: Default 2 because WRF's isothermal pack is a cold reservoir: deep-snow
+    #: night T2 vs ASOS +0.66 K (2022-02-03) and +0.70 K (2024-01-15), snow-free
+    #: stations within 0.06 K (the tksno-winter check's two winter cases).
+    #: A strict WRF process (GPUWM_WRF_EXACT=1) defaults to 1, as the
+    #: correct-mode keys do: breakage prevented is a strict 0 ULP WRF proof
+    #: with Noah-MP over snow at a cold start silently running the new profile.
+    noahmp_snow_tinit: int = _config_field(
+        default=2 if _correct_mode.CORRECT_KEYS_DEFAULT else 1, kw_only=True)
     opt_rsf: int = 1
     opt_soil: int = 1
     opt_pedo: int = 1
@@ -665,7 +742,7 @@ class RunConfig:
     # CPM-style cell-blocked theta perturbation of the child's rolling
     # nest-boundary VALUE tables on the inflow-side relax-zone rows,
     # refreshed on the FORCE cadence (woof/core/inflow_perturbation.py;
-    # every constant pinned in docs/superpowers/receipts/les/
+    # every constant pinned in docs/internal/receipts/les/
     # INFLOW-GENERATOR-ACCEPTANCE-V2.md, registered before data).  An
     # ArWen-over-WRF extension (PROVENANCE.md D10): stock v4.6.1 ships
     # perturb_bdy (stoch-package boundary-tendency patterns), not a
@@ -1361,6 +1438,15 @@ class RunConfig:
     # keys, ahead of the chem block.
     tempo_ml_for_bl_nc: bool = False
     tempo_surface_emission_before: bool = False
+    #: TEMPO generation (named microphysics TEMPO only).  ``v3.2.5`` is the
+    #: latest NCAR/TEMPO release (c62699f) and the default; ``v3.0.3`` is
+    #: the RRFS v2 pin (9adf9ef) the bitwise claims are proven against.  A
+    #: checkpoint header without the key ran v3.0.3 (ECHO_ABSENT_RUN_VALUES).
+    #: Keyword-only, so the positional constructor is unchanged.
+    tempo_version: str = _config_field(default="v3.2.5", kw_only=True)
+    #: v3.2.x hail-hyperaware (graupel/hail split), on as upstream and the
+    #: RRFS fork have it; read by tempo_version = "v3.2.5" only.
+    tempo_hailhyperaware: bool = _config_field(default=True, kw_only=True)
     #: Optional directory of generation-specific Thompson table records.
     #: The WRF-folder door supplies its own directory for a known generation.
     #: Appended at None after the TEMPO arms, ahead of the chem block, so
@@ -1485,6 +1571,30 @@ class RunConfig:
     # WRF's tendency-only scalar ring.
     # Keyword-only, so the positional constructor is unchanged.
     hydrometeor_handover_numbers: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # SN1 (2.9.14): Noah-MP's land snowmelt reset re-evaluates the ground
+    # saturation vapour pressure (and bare QSFC) at the reset temperature,
+    # as WRF's glacier reset does (kernels/noahmp_vegeflux.cu,
+    # noahmp_bareflux.cu, GPUWM_NOAHMP_MELT_RESET_ESAT).  Off is WRF's
+    # stale-ESTG arithmetic.
+    noahmp_melt_reset_esat: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # ML1 (3.0.3): MYNN's BouLac downward length takes the sign of NCAR/
+    # MYNN-EDMF 399f50f (PR 94) in its constant-theta (linear) branch,
+    # theta(iz) - theta(izz); WRF v4.6.1 divides by theta(izz) - theta(iz),
+    # so a parcel that stops in a layer of exactly constant theta gets a
+    # negative last step and a downward length short by twice it
+    # (kernels/mynn_pbl.cu, MYNN_BOULAC_DOWN_SIGN).  Read on bl_pbl_physics
+    # = 5 with bl_mynn_version "wrf_461" or "gsd_41", bl_mynn_mixlength = 1.
+    # Off is WRF's arithmetic.
+    mynn_boulac_down_sign: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # ML1's second key (3.0.3): WRF's own BouLac PBL (bl_pbl_physics = 8,
+    # module_bl_boulac.F) and the k-epsilon PBL (17, module_bl_keps.F) carry
+    # the same downward length loop with the same sign (wrf-model/WRF PR 2431);
+    # on, both compile the bbb -> 0 limit's sign (kernels/boulac.cu,
+    # kernels/keps.cu, BOULAC_DOWN_SIGN).  Off is WRF's arithmetic.
+    pbl_boulac_down_sign: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
     # WRF's Pollard and three-dimensional PWP oceans. New PWP controls
     # are keyword-only so the existing positional constructor is stable.
@@ -1905,7 +2015,8 @@ class RunConfig:
     # WRF &physics ghg_input: 0 = fixed gases (CO2 a function of year),
     # 1 = time-varying CO2/N2O/CH4/CFC-11/CFC-12 from the CAMtr SSP245
     # table (woof.core.camtr_gases), re-interpolated at every radiation
-    # call as WRF's RRTMG and RRTM longwave wrappers do; one tree-wide
+    # call as WRF's RRTMG and RRTM longwave wrappers do (and, beyond WRF,
+    # woof's RRTMG-K, ra_lw/ra_sw_physics = 14); one tree-wide
     # value, inert on a domain whose radiation reads no gases (as in WRF).  The WRF v4 Registry
     # default is 1; the namelist importer writes 1 for a namelist named as
     # V4 that omits the key.  The engine's own default stays 0 so
@@ -1934,7 +2045,10 @@ class RunConfig:
     windfarm_ij: int = _config_field(default=0, kw_only=True)
     windfarm_wake_model: int = _config_field(default=2, kw_only=True)
     windfarm_overlap_method: int = _config_field(default=4, kw_only=True)
-    windfarm_induction: int = _config_field(default=0, kw_only=True)
+    # WRF &physics windfarm_induction (Fitch axial induction correction).
+    # -1 = the selected Fitch pin's own Registry default: WRF v4.8.0 defines
+    # the key with default 1; v4.7.1 has no key (0). See windfarm_fitch_version.
+    windfarm_induction: int = _config_field(default=-1, kw_only=True)
     windfarm_deg: float = _config_field(default=0.0, kw_only=True)
     wind_farm_max_dx_m: float = _config_field(default=3000.0, kw_only=True)
     # Native WRF station diagnostics. Empty path preserves prior outputs.
@@ -2215,6 +2329,117 @@ class RunConfig:
     # UP_HELI_MAX by the nwp_diagnostics = 1 step.  Appended last,
     # keyword-only and off by default, so every earlier run is unchanged.
     uh_layers: int = _config_field(default=0, kw_only=True)
+    # MYNN-SFC (WRF v4.8.0 phys/MYNN-SFC b66187f5), read only under
+    # mynn_sfclay_variant = "mynnsfc_b66187f": the land and water roughness
+    # and zt/zq forms and the shallow-water z0 blend (Registry.EM_COMMON
+    # :2512-2513, :2649 defaults 0, 1 and 0).  Appended last, keyword-only;
+    # omitted from fingerprints at these defaults.
+    sf_mynn_sfcflux_land: int = _config_field(default=0, kw_only=True)
+    sf_mynn_sfcflux_water: int = _config_field(default=1, kw_only=True)
+    shalwater_z0: int = _config_field(default=0, kw_only=True)
+    # WRF v4.8.0 KIM turbulent orographic form drag in the revised MM5
+    # surface layer (Registry.EM_COMMON kim_tofd .false., tofd_factor .003;
+    # physics_mmm 550b5b4 sf_sfclayrev.F90:707-720, 779-783).  Option 1 only;
+    # reads geo_em VAR.  Appended last, keyword-only and off by default, so
+    # every earlier run is unchanged.
+    kim_tofd: bool = _config_field(default=False, kw_only=True)
+    tofd_factor: float = _config_field(default=0.003, kw_only=True)
+    # gwd_opt = 1 generation (woof.core.terrain_drag): "wrf_480" is WRF
+    # v4.8.0's revised KIM drag (it reads ELVMAX, gwd_dx_factor and
+    # gwd_if_nonhyd), "wrf_471" the WRF v4.6.1/v4.7.1 scheme.  Read only
+    # under gwd_opt = 1.  Appended last, keyword-only.  The default stays
+    # "wrf_471" until the rw-wps ELVMAX producer lands (the upstream
+    # port/omax): without ELVMAX the 4.8.0 scheme turns the drag off on every
+    # column, so a default gwd_opt = 1 run would be refused.
+    gwdo_version: str = _config_field(default="wrf_471", kw_only=True)
+    #: WRF v4.8.0 ``&dynamics gwd_dx_factor`` (Registry.EM_COMMON:2902,
+    #: default 2.): the KIM base stress uses dx_eff = gwd_dx_factor*dx.
+    gwd_dx_factor: float = _config_field(default=2.0, kw_only=True)
+    #: WRF v4.8.0 ``&dynamics gwd_if_nonhyd`` (Registry.EM_COMMON:2903,
+    #: default .true.): the Xu et al. (2024) nonhydrostatic factor.
+    gwd_if_nonhyd: bool = _config_field(default=True, kw_only=True)
+    # Fitch wind-farm pin (windfarm_opt=1 with native WRF turbine files):
+    # "wrf_480" = WRF v4.8.0 module_wind_fitch.F (induction correction on by
+    # default, THRUST written on every Fitch run, the original branch run
+    # natively when induction is off); "wrf_471" = the previous pin, today's
+    # engine byte for byte. Appended last, keyword-only; absent from identity
+    # with farms off or at "wrf_471" (woof.wind_table.drop_inert_config).
+    windfarm_fitch_version: str = _config_field(default="wrf_480", kw_only=True)
+    #: Which scheme ``cu_physics = 3`` runs.  ``gfl_873b414`` (default) is
+    #: WRF v4.8.0's Grell-Freitas-Li, NOAA GSL's GFL at 873b414
+    #: (woof/core/gfl.py, module replay 0 different against native WRF
+    #: v4.8.0 strict; lane-interleaved scratch, cumulus stage 1.10x GFDRV).
+    #: ``wrf_461`` is the previous pin's GFDRV (WRF v4.6.1 = v4.7.1,
+    #: woof/core/gf.py), byte for byte, and is what 4.6.1/4.7.1-named
+    #: namelists resolve to.  GF SPP (``spp_conv``) needs
+    #: ``wrf_461`` (WRF v4.8.0's GFL call carries no SPP pattern; refused by
+    #: name otherwise), and PR92 lightning from the cumulus cloud top
+    #: (``lightning_option = 11``) stays on ``wrf_461`` because GFL never
+    #: writes KTOP_DEEP.  A checkpoint header
+    #: without the key ran ``wrf_461`` (io/restart.py ECHO_ABSENT_RUN_VALUES).
+    #: Appended last and keyword-only.
+    cu_gf_version: str = _config_field(default="gfl_873b414", kw_only=True)
+    #: Shin-Hong (bl_pbl_physics = 11) generation: ``wrf_480`` is WRF
+    #: 4.8.0's physics_mmm rewrite (kernels/shinhong_480.cu); ``wrf_461``
+    #: reproduces the 4.6.1/4.7.1 module (one file in both releases).
+    #: Appended last and keyword-only (WRF-480 assembly).
+    shinhong_version: str = _config_field(default="wrf_480", kw_only=True)
+    #: WRF 4.8.0's three Shin-Hong namelist logicals (Registry defaults);
+    #: read only under ``shinhong_version = "wrf_480"``.
+    shinhong_nonlocal_flux: bool = _config_field(default=True, kw_only=True)
+    shinhong_scu_mixing: bool = _config_field(default=False, kw_only=True)
+    shinhong_ke_dissipation: bool = _config_field(default=False, kw_only=True)
+    #: WRF v4.8.0 dynamic lightning (Registry/registry.dyn_light; Lynn et al.
+    #: 2012): charging energy, flash counts and LPI from the microphysics
+    #: driver. Off by default; keyword-only so positional construction keeps
+    #: every earlier field. woof/core/dyn_lightning.py.
+    #: Appended last (WRF-480 assembly).
+    dyn_lightning_option: int = _config_field(default=0, kw_only=True)
+    coul_pos: float = _config_field(default=0.25e-4, kw_only=True)
+    coul_neg: float = _config_field(default=0.25e-4, kw_only=True)
+    coul_neu: float = _config_field(default=0.25e-4, kw_only=True)
+    j_pos: float = _config_field(default=5.e9, kw_only=True)
+    j_neg: float = _config_field(default=1.e9, kw_only=True)
+    j_neu: float = _config_field(default=1.e9, kw_only=True)
+    #: Upstream MYNN v6.1 bug fixes on the WRF 4.6.1 MYNN route
+    #: (NCAR/MYNN-EDMF v6.1.1 and NCAR/MYNN-SFC v6.1.0, Apache-2.0;
+    #: woof/core/mynn_pbl_v61.py lists each fix and what is not carried):
+    #: dew/frost no longer deleted, the surface-density virtual-temperature
+    #: factor, ground-Exner surface theta, the PBL-height search start, and
+    #: no surface-layer cold-start reset on a cycled start.  Labelled
+    #: "upstream MYNN v6.1 fixes, not bitwise to WRF".  Correct-mode finding
+    #: MY1 (woof/correct_mode.py), so on by default (fixed means default)
+    #: and off in physics.mode = 'exact' and in a strict WRF process; read
+    #: only by bl_pbl_physics = 5 at bl_mynn_version = "wrf_461".  False is
+    #: WRF 4.6.1's MYNN as written, still selectable.  Keyword-only.
+    mynn_fixes_v61: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    #: Noah-MP snow compaction overburden parameter C_bd.  1 is WRF v4's
+    #: fixed 0.021 m3/kg (default, byte-identical); 2 is C_bd(T_air, p_sfc)
+    #: after Abolafia-Rosenzweig et al. 2024 (JAMES, Eq. 11-12),
+    #: re-implemented from published descriptions, not bitwise to upstream.
+    #: Appended last and keyword-only, so every earlier run is unchanged.
+    opt_snow_compact: int = _config_field(default=1, kw_only=True)
+    # Appended last, keyword-only. WRF 4.8.0 / Noah-MP v5 separate surface and subsurface runoff options;
+    # 0 inherits opt_run. Normalized in __post_init__ (see there).
+    opt_runsrf: int = _config_field(default=0, kw_only=True)
+    opt_runsub: int = _config_field(default=0, kw_only=True)
+    #: The stretch of edge, in km, over which a lateral-boundary hydrometeor
+    #: mass (qc qr qi qs qg, with its paired number) must be present in BOTH
+    #: forcing frames bracketing an interval for the root's specified ring to
+    #: serve it (woof.ingest.lateral_bc.hold_hydrometeor_ring_envelope): the
+    #: ring serves the smaller of the two frames, then the minimum over half
+    #: this stretch either way along the edge, with zero tendency.  25 km, a
+    #: deep convective cell's diameter, is the scale the hourly HRRR boundary
+    #: band defect was fixed with (29 Oct 12Z, 2.25 km: 40-46 dBZ bands from
+    #: a cell one frame caught; 1.54 g/kg fed with the time hold alone, 0.12
+    #: with both).  0 serves the prepared linear table as it is, which brings
+    #: a cell caught in one frame in from a fixed point for the whole
+    #: interval.  The run record states the value and the fraction of the
+    #: source's condensate the ring served.  Read only by a specified domain
+    #: whose boundary carries hydrometeors; appended last, keyword-only, and
+    #: absent from the restart identity at its default.
+    lbc_hydrometeor_envelope_km: float = _config_field(default=25.0, kw_only=True)
     # Fork-only RunConfig fields (the RRTMG band output, the woof.radtran
     # diagnostic and WRF-Solar EPS), keyword-only after every upstream field.
     # RRTMG per-band (and per-g-point) flux diagnostic (output-only, per
@@ -2322,6 +2547,112 @@ class RunConfig:
     solar_tsi_opt: int = _config_field(default=0, kw_only=True)
     solar_tsi_source: str = _config_field(default="", kw_only=True)
     solar_tsi_mode: str = _config_field(default="absolute", kw_only=True)
+    # Appended last.  Resolved buildings and obstacles at LES / high
+    # resolution (woof.core.obstacles; docs/public/BUILDINGS.md), woof's own
+    # option beyond WRF parity, default OFF: 0 runs no obstacle code at all.
+    # 1 = porous immersed obstacles: Brinkman penalisation of momentum on
+    # faces of solid cells, canopy drag in partly built cells and log-law
+    # wall stress beside walls, from the woof-buildings.v1 product named by
+    # obstacle_file (woof.static.buildings).
+    obstacle_opt: int = _config_field(default=0, kw_only=True)
+    obstacle_file: str = _config_field(default="", kw_only=True)
+    # A layer at least this full of building is solid (blocked faces).
+    obstacle_solid_fraction: float = _config_field(default=0.5, kw_only=True)
+    # Penalisation rate on blocked faces, in units of 1/dt.
+    obstacle_relax_factor: float = _config_field(default=10.0, kw_only=True)
+    # Form-drag coefficient of partly built cells (BEP's CDRAG).
+    obstacle_drag_coefficient: float = _config_field(default=0.4, kw_only=True)
+    # Roughness length (m) of building walls and roofs for the wall law.
+    obstacle_wall_z0: float = _config_field(default=0.01, kw_only=True)
+    # spacewx_ionosphere_opt = 1 adds the climatological ionosphere
+    # (woof.spacewx.history: vertical TEC and the F2/E-layer parameters) to
+    # every history frame on the radiation geometry's columns.  Diagnostic
+    # only: the atmosphere integrates identically.  The F10.7 driver is
+    # "gfz" (the GFZ index file, fetched; "" means the same), a local file
+    # in its format or a number in sfu, held at the run start's value;
+    # spacewx_f107_mode is "81day" or "daily".  spacewx_ionosphere_maps
+    # picks the foF2 maps ("ccir" or "ursi").  spacewx_ionosphere_opt = 2
+    # adds the storm-time foF2 correction (woof.spacewx.storm) from GFZ's ap,
+    # the latest observed ap persisted past the start, and its IONO_STORM row
+    # (needs a GFZ source, not a number).  0 runs no new code.
+    spacewx_ionosphere_opt: int = _config_field(default=0, kw_only=True)
+    spacewx_f107_source: str = _config_field(default="", kw_only=True)
+    spacewx_f107_mode: str = _config_field(default="81day", kw_only=True)
+    spacewx_ionosphere_maps: str = _config_field(default="ccir", kw_only=True)
+    # spacewx_aurora_opt = 1 adds the auroral oval (woof.spacewx.aurora_history:
+    # zone, distance from the visibility line, geomagnetic latitude and MLT)
+    # to every history frame on the radiation geometry's columns.  Diagnostic
+    # only: the atmosphere integrates identically.  spacewx_kp_source is
+    # "gfz" (the latest observed Kp at the start; "" means the same), "omni"
+    # or "swpc" (Kp estimated from the solar wind), a GFZ-format file or a
+    # number in [0, 9], held for the run.  spacewx_aurora_opt = 2 adds
+    # OVATION Prime 2010's electron energy flux, mean energy and ion energy
+    # flux (woof.spacewx.ovation), driven by the solar wind ("omni" or
+    # "swpc").  spacewx_aurora_opt = 3 also adds Knipp et al. 2004's
+    # northern-hemisphere Joule power from OMNI2's PC(N) and Dst ("omni"
+    # only), held from the start.  0 runs no new code.
+    spacewx_aurora_opt: int = _config_field(default=0, kw_only=True)
+    spacewx_kp_source: str = _config_field(default="", kw_only=True)
+    # solar_ssi_opt = 1 moves the solar source between RRTMG SW's 14 bands
+    # with the day's solar spectrum (woof.spacewx.solar_spectrum): each band
+    # takes [S_b(t)/TSI(t)] / [S_b/TSI over solar cycle 24], renormalised
+    # so the total is unchanged (solar_tsi_opt sets the total).  The source
+    # is "nrlssi2" (the NOAA CDR daily SSI, fetched) or NOAA CDR SSI netCDF
+    # path(s).  RRTMG (ra_sw_physics = 4, rrtmg_legacy) and RRTMG-K (14)
+    # only.  With RADM2's Fast-TUV photolysis the same spectrum scales its
+    # extraterrestrial flux per wavelength bin (not renormalised; the total
+    # stays Fast-TUV's fixed flux).  0 runs no new code.
+    solar_ssi_opt: int = _config_field(default=0, kw_only=True)
+    solar_ssi_source: str = _config_field(default="", kw_only=True)
+    # spacewx_epp_opt = 1 adds the NO, OH and HO2 that solar protons make in
+    # the polar caps (woof.spacewx.epp_chem: 1.25 NO and 2 HOx per ion pair,
+    # |magnetic latitude| >= 60) to the RADM2 rows, inside emission.radm2.
+    # spacewx_epp_source is "omni", "swpc" or OMNI2 file(s); the GOES flux of
+    # the last hour that has ended by the start is held for the run.  This
+    # changes the chemistry.  0 runs no new code.
+    spacewx_epp_opt: int = _config_field(default=0, kw_only=True)
+    spacewx_epp_source: str = _config_field(default="", kw_only=True)
+    # urban_param_file names a NetCDF on this domain's mass grid holding
+    # WPS's gridded urban morphology URB_PARAM(132) (a geo_em, a met_em or
+    # a woof-buildings.v1 product).  The urban scheme then reads it as WRF
+    # 4.7.1's real.exe and urban_var_init do (woof.core.urban_param): LP,
+    # LB, HGT (91, 95, 94) for every option, MH, STDH, LF (92, 93, 96-99)
+    # for the single-layer UCM's NUDAPT arm, HI (118-132) for BEP and
+    # BEP+BEM.  Empty runs the URBPARM table morphology, as before.
+    urban_param_file: str = _config_field(default="", kw_only=True)
+    # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
+    # appended off.  YSU (bl_pbl_physics = 1) adds the surface heat flux to
+    # potential temperature as a temperature flux (bl_ysu.F90:613, :687,
+    # :891, :1045) and converts the result back with pi (:1103), so the
+    # column receives HFX*pi rather than HFX: 4.5% of the surface heating is
+    # lost at 850 hPa, 14% at 600 hPa.  True divides HFX by the lowest
+    # level's pi before the unchanged kernel reads it; False is WRF's
+    # arithmetic word for word.  Read only where bl_pbl_physics = 1.
+    ysu_surface_heat_exner: bool = _config_field(default=False, kw_only=True)
+    # The umbrella over the opt-in quirk corrections (woof.quirk_corrections),
+    # appended at 'none': each correction stays on its own key.  'all' turns
+    # on every RunConfig correction whose scheme the domain runs
+    # (__post_init__); the TOML readers (load_config, build_experiment)
+    # refuse one set to anything else next to 'all', by name.
+    woof_quirk_corrections: str = _config_field(default="none", kw_only=True)
+    # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
+    # appended off.  The MYNN surface layer (sf_sfclay_physics = 5)
+    # integrates the 2 m and 10 m heat profile from z0/L
+    # (module_sf_mynn.F:826-827, 839-840, 910-911, 921-922) while its own
+    # log terms gz2ozt/gz10ozt and the first-level psih start at zt.  True
+    # takes zt/L (kernels/mynn_surface.cu MYNN_SL_PSIH_ZOLZT), which moves
+    # only T2/TH2/Q2 and the 2 m exchange coefficients; False is WRF's
+    # arithmetic word for word.  wrf_461 variant only.
+    mynn_sfclay_psih_zolzt: bool = _config_field(default=False, kw_only=True)
+    # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-22),
+    # appended off.  Noah's SSTEP (sf_surface_physics = 2) raises a layer's
+    # total soil moisture below 0.02 to 0.02 (module_sf_noahlsm.F:4030) and
+    # books the water it adds nowhere, so dry sandy columns gain water.
+    # True takes it from the layer below as a negative WPLUS, and below the
+    # bottom layer from RUNOFF3 (:4075), which may then go negative; False
+    # is WRF's arithmetic word for word.  Read only where Noah runs.
+    noah_smc_floor_booking: bool = _config_field(default=False, kw_only=True)
+
 
 def _validate_solar_tsi(cfg) -> None:
     """solar_tsi_opt and its keys (woof.spacewx.solar_irradiance)."""
@@ -2355,6 +2686,187 @@ def _validate_solar_tsi(cfg) -> None:
             "solar_tsi_opt = 1 with swint_opt = 2: FARMS recomputes the "
             "surface shortwave every step from its own solar constant, "
             "outside the radiation call the TSI factor scales")
+
+
+def _validate_solar_ssi(cfg) -> None:
+    """solar_ssi_opt and its source (woof.spacewx.solar_spectrum)."""
+    opt, source = cfg.solar_ssi_opt, cfg.solar_ssi_source
+    if type(opt) is not int or opt not in (0, 1):
+        raise ConfigurationRefused(
+            f"solar_ssi_opt={opt!r} must be 0 (RRTMG's fixed band shares) or 1 "
+            "(the band shares of the day's solar spectrum)")
+    if type(source) is not str:
+        raise ConfigurationRefused("solar_ssi_source must be a string")
+    if opt == 0:
+        if source:
+            raise ConfigurationRefused(
+                "solar_ssi_source is set but solar_ssi_opt = 0, so it would do "
+                "nothing; set solar_ssi_opt = 1 or drop it")
+        return
+    if not source.strip():
+        raise ConfigurationRefused(
+            "solar_ssi_opt = 1 needs solar_ssi_source: 'nrlssi2' or NOAA CDR "
+            "SSI netCDF path(s)")
+    sw = radiation_scheme_ids(cfg)[1]
+    from woof.physics_compat import RRTMG_VARIANT_LEGACY, rrtmg_variant
+    if not (sw == 14 or (sw == 4 and rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY)):
+        raise ConfigurationRefused(
+            f"solar_ssi_opt = 1 scales RRTMG SW's 14 bands; ra_sw_physics = {sw}"
+            + (" runs RTE+RRTMGP, whose g-point solar source has its own bands; set "
+               "ra_rrtmg_variant = 'rrtmg_legacy'" if sw == 4 else "")
+            + " (it needs ra_sw_physics = 4 with ra_rrtmg_variant = 'rrtmg_legacy', or 14)")
+    if int(cfg.dfi_opt) != 0:
+        raise ConfigurationRefused(
+            "solar_ssi_opt = 1 with dfi_opt: the filter captures the step in a "
+            "CUDA graph, which would freeze the band factor of its first call")
+    if int(cfg.swint_opt) == 2:
+        raise ConfigurationRefused(
+            "solar_ssi_opt = 1 with swint_opt = 2: FARMS recomputes the surface "
+            "shortwave every step from its own broadband source, so the surface "
+            "would not see the band shares the heating rates use")
+
+
+def _validate_spacewx_ionosphere(cfg) -> None:
+    """spacewx_ionosphere_opt and its keys (woof.spacewx.history)."""
+    if not validate_spacewx_ionosphere_keys(
+            cfg.spacewx_ionosphere_opt, cfg.spacewx_f107_source,
+            cfg.spacewx_f107_mode, cfg.spacewx_ionosphere_maps):
+        return
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            f"spacewx_ionosphere_opt = {cfg.spacewx_ionosphere_opt} places the ionosphere on the radiation "
+            "geometry's columns, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def validate_spacewx_ionosphere_keys(opt, source, mode, maps) -> bool:
+    """spacewx_ionosphere_opt and its keys; True when the rows are on.
+    Shared by the WRF route and hex's MPAS suite route, whose rows sit on
+    the cell centres whatever the radiation."""
+    if type(opt) is not int or opt not in (0, 1, 2):
+        raise ConfigurationRefused(
+            f"spacewx_ionosphere_opt={opt!r} must be 0 (no ionosphere), 1 "
+            "(the climatological ionosphere in every history frame) or 2 "
+            "(with the storm-time correction)")
+    if type(source) is not str or type(mode) is not str or type(maps) is not str:
+        raise ConfigurationRefused(
+            "spacewx_f107_source, spacewx_f107_mode and spacewx_ionosphere_maps "
+            "must be strings")
+    if mode not in ("81day", "daily"):
+        raise ConfigurationRefused(
+            f"spacewx_f107_mode={mode!r} must be '81day' (the trailing 81-day "
+            "mean F10.7) or 'daily' (the previous UT day's)")
+    if maps not in ("ccir", "ursi"):
+        raise ConfigurationRefused(
+            f"spacewx_ionosphere_maps={maps!r} must be 'ccir' or 'ursi'")
+    if opt == 0:
+        if source or mode != "81day" or maps != "ccir":
+            raise ConfigurationRefused(
+                "spacewx_f107_source/spacewx_f107_mode/spacewx_ionosphere_maps "
+                "are set but spacewx_ionosphere_opt = 0, so they would do "
+                "nothing; set spacewx_ionosphere_opt = 1 or drop them")
+        return False
+    from woof.spacewx.history import IonosphereHistoryError, parse_f107_source
+    try:
+        kind, _value = parse_f107_source(source)
+    except IonosphereHistoryError as exc:
+        raise ConfigurationRefused(str(exc)) from None
+    if opt == 2 and kind == "value":
+        raise ConfigurationRefused(
+            "spacewx_ionosphere_opt = 2 reads ap from the GFZ index file, so "
+            "spacewx_f107_source must be 'gfz' or a GFZ-format file, not a number")
+    return True
+
+
+def _validate_spacewx_aurora(cfg) -> None:
+    """spacewx_aurora_opt and its key (woof.spacewx.aurora_history)."""
+    opt = cfg.spacewx_aurora_opt
+    if not validate_spacewx_aurora_keys(opt, cfg.spacewx_kp_source):
+        return
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            f"spacewx_aurora_opt = {opt} places the auroral oval on the radiation "
+            "geometry's columns, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def validate_spacewx_aurora_keys(opt, source) -> bool:
+    """spacewx_aurora_opt and spacewx_kp_source; True when the rows are on.
+    Shared by the WRF route and hex's MPAS suite route, whose rows sit on
+    the cell centres whatever the radiation."""
+    if type(opt) is not int or opt not in (0, 1, 2, 3):
+        raise ConfigurationRefused(
+            f"spacewx_aurora_opt={opt!r} must be 0 (no aurora), 1 (the auroral "
+            "oval in every history frame), 2 (the oval and its particle "
+            "energy flux) or 3 (those and the Joule power)")
+    if type(source) is not str:
+        raise ConfigurationRefused("spacewx_kp_source must be a string")
+    if opt == 0:
+        if source:
+            raise ConfigurationRefused(
+                "spacewx_kp_source is set but spacewx_aurora_opt = 0, so it "
+                "would do nothing; set spacewx_aurora_opt = 1 or drop it")
+        return False
+    from woof.spacewx.aurora_history import AuroraHistoryError, parse_kp_source
+    try:
+        kind, _value = parse_kp_source(source)
+    except AuroraHistoryError as exc:
+        raise ConfigurationRefused(str(exc)) from None
+    if opt == 3 and kind != "omni":
+        raise ConfigurationRefused(
+            f"spacewx_aurora_opt = 3 reads PC(N) and Dst, which only OMNI2 carries, so "
+            f"spacewx_kp_source must be 'omni', not {source!r}")
+    if opt == 2 and kind not in ("omni", "swpc"):
+        raise ConfigurationRefused(
+            f"spacewx_aurora_opt = 2 drives OVATION Prime with the solar wind, so "
+            f"spacewx_kp_source must be 'omni' or 'swpc', not {source!r}")
+    return True
+
+
+def _validate_spacewx_epp(cfg) -> None:
+    """spacewx_epp_opt and its key (woof.spacewx.epp_chem)."""
+    from woof.chem_table import load as load_chem_table
+    table = (lambda: load_chem_table(cfg)) if getattr(cfg, "chem_sets", "") else None
+    if not validate_spacewx_epp_keys(cfg.spacewx_epp_opt, cfg.spacewx_epp_source, table):
+        return
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            "spacewx_epp_opt = 1 places the source in the polar caps from the "
+            "radiation geometry's xlat/xlong, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def validate_spacewx_epp_keys(opt, source, table) -> bool:
+    """spacewx_epp_opt and spacewx_epp_source against a run's chem table (a
+    callable that loads it, ``None`` for no chemistry); True when the source
+    is on.  Shared by the
+    WRF route and hex's wrf_chem block, whose cells carry their own
+    xlat/xlong whatever the radiation."""
+    if type(opt) is not int or opt not in (0, 1):
+        raise ConfigurationRefused(
+            f"spacewx_epp_opt={opt!r} must be 0 (no particle source) or 1 (the "
+            "solar-proton NO, OH and HO2 in the RADM2 chemistry)")
+    if type(source) is not str:
+        raise ConfigurationRefused("spacewx_epp_source must be a string")
+    if opt == 0:
+        if source:
+            raise ConfigurationRefused(
+                "spacewx_epp_source is set but spacewx_epp_opt = 0, so it would "
+                "do nothing; set spacewx_epp_opt = 1 or drop it")
+        return False
+    from woof.spacewx.epp_chem import EppChemError, YIELDS, parse_source
+    try:
+        parse_source(source)
+    except EppChemError as exc:
+        raise ConfigurationRefused(str(exc)) from None
+    names = {row.name for row in table().rows_for("emission.radm2")} if table is not None else set()
+    missing = [name for name, _y in YIELDS if name not in names]
+    if missing:
+        raise ConfigurationRefused(
+            "spacewx_epp_opt = 1 adds NO, OH and HO2 to the RADM2 chemistry "
+            "(chem_sets radm2 or radm2sorg), and this run's emission.radm2 "
+            f"rows lack {', '.join(missing)}")
+    return True
 
 
 @dataclass(frozen=True)
@@ -2399,7 +2911,9 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "scheme reads to false explicitly (wsm6_conservative_surface, "
     "wdm6_conservative_surface, wsm3_conservative_surface, "
     "wsm5_conservative_surface, wsm7_conservative_surface, "
-    "ntiedtke_dry_mass_coupling, hydrometeor_handover_numbers); otherwise "
+    "ntiedtke_dry_mass_coupling, hydrometeor_handover_numbers, "
+    "noahmp_melt_reset_esat, mynn_fixes_v61, "
+    "mynn_boulac_down_sign, pbl_boulac_down_sign); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -2498,6 +3012,9 @@ NOAHMP_OPTION_IDENTITY_EVIDENCE: dict[str, tuple[object, str]] = {
     "opt_sfc": (1, "fixture; SFCDIF1 default. Native SFCDIF2 reaches both flux "
                    "tiles and has a real whole-module replay"),
     "opt_frz": (1, "fixture; NY06 supercooled liquid"),
+    "opt_scf": (1, "fixture; Niu-Yang 2007 ground SCF with table SCFFAC/MFSNO. "
+                   "Scale-aware SCF (2, Abolafia-Rosenzweig et al. 2025 Eq. 4-5) is "
+                   "re-implemented from published descriptions, not bitwise to upstream"),
     "opt_inf": (1, "fixture; NY06 frozen-soil permeability"),
     "opt_rad": (3, "fixture; gap = 1 - FVEG"),
     "opt_alb": (2, "fixture; CLASS default. BATS (1) has a real WRF "
@@ -2506,13 +3023,30 @@ NOAHMP_OPTION_IDENTITY_EVIDENCE: dict[str, tuple[object, str]] = {
     "snicar_snowshape_opt": (3, "paper reconstruction; four He grain habits"),
     "snicar_snowbc_intmix": (True, "paper reconstruction; He internal BC fit"),
     "snicar_snowdust_intmix": (False, "paper reconstruction; He internal dust fit"),
+    "snicar_fresh_grain_opt": (1, "paper reconstruction; 2 = Lin 2025 MODSCAG fresh grains "
+                                  "33-91 um, re-implemented from published descriptions, not bitwise to upstream"),
+    "snicar_lap_opt": (0, "off by default; re-implemented from published descriptions, not bitwise to upstream: BC/OC and five dust bins tracked layer by layer in the snow from deposition, 1 table fluxes, 2 deposition series (GEOS-FP or MERRA-2, Rust producer)"),
+    "snicar_ice_ri_opt": (2, "re-implemented from published descriptions, not bitwise to upstream; "
+                             "1 Warren 1984, 2 Warren and Brandt 2008, 3 Picard 2016 merge"),
+    "snicar_dust_optics_opt": (0, "re-implemented from published descriptions, not bitwise to upstream; "
+                                  "0 Zhang 2024, 1 Saharan, 2 Colorado, 3 Greenland"),
+    "snicar_solarspec_opt": (0, "packaged ASTM G173; 1-6 are AFGL atmospheres through RRTMGP, re-implemented from published descriptions, not bitwise to upstream"),
+    "snicar_bandnumber_opt": (2, "480 bands; 1 is five flux-weighted bands, re-implemented from published descriptions, not bitwise to upstream"),
+    "snicar_solver_opt": (1, "adding-doubling default; 2 = Toon 1989 two-stream, "
+                             "re-implemented from published descriptions, not bitwise to upstream"),
     "opt_snf": (1, "fixture; Jordan91 default. Values 2-5 have real "
                    "whole-module replay and forecast proof, plus complete "
                    "native ATM threshold/species checks"),
+    "opt_snow_compact": (1, "fixture; WRF v4 fixed overburden C_bd 0.021. Value 2 is "
+                            "C_bd(T_air, p_sfc) after Abolafia-Rosenzweig et al. 2024: "
+                            "re-implemented from published descriptions, not bitwise to upstream"),
     "opt_tbot": (2, "fixture; Noah lower boundary at ZBOT"),
     "opt_stc": (1, "fixture; semi-implicit snow/soil temperature"),
     "opt_gla": (1, "default glacier path; GLA2 has a strict real native glacier "
                    "module replay, complete Greenland forecast and resident lifecycle proof"),
+    "opt_tksno": (1, "Yen 1965 snow conductivity, the v4 formula, by default. "
+                     "2 Anderson 1976, 3 constant 0.35, 4 Verseghy 1991, 5 Yen 1981/Douville 1995: "
+                     "re-implemented from published descriptions, not bitwise to upstream"),
     "opt_rsf": (1, "fixture; Sakaguchi/Zeng by default. Values 2/3/4 have "
                    "real WRF whole-module replay and forecast proof"),
     "opt_soil": (1, "fixture; uniform category by default. Depth categories and "
@@ -2530,6 +3064,11 @@ NOAHMP_OPTION_IDENTITY_EVIDENCE: dict[str, tuple[object, str]] = {
     "opt_infdv": (0, "inactive outside RUN8; methods 1/2/3 implement the complete "
                      "native Philip, Green-Ampt and Smith-Parlange infiltration"),
     "opt_tdrn": (0, "complete native simple and Hooghoudt tile drainage at 1/2; inactive when run is not 3 or mapped fraction is below the native threshold"),
+    "opt_runsrf": (0, "WRF 4.8.0 surface runoff option; normalized into opt_run when the "
+                      "configuration is built, so the engine reads 0 here"),
+    "opt_runsub": (0, "stock pair at 0 (opt_run alone); 1-8 select a separate subsurface "
+                      "runoff scheme, re-implemented from published descriptions, not "
+                      "bitwise to upstream (woof/core/noahmp_runoff_split.py)"),
     "soiltstep": (0.0, "native decimated soil clock and nine persisted ACC arrays; "
                        "zero retains the original per-step default"),
     "noahmp_output": (1, "native output level 3 carries the complete water and energy accumulator block"),
@@ -2564,18 +3103,30 @@ NOAHMP_OPTION_VALUES: dict[str, tuple[int, ...]] = {
     "snicar_snowshape_opt": (1, 2, 3, 4),
     "snicar_snowbc_intmix": (True, False),
     "snicar_snowdust_intmix": (True, False),
+    "snicar_fresh_grain_opt": (1, 2),
+    "snicar_lap_opt": (0, 1, 2),
+    "snicar_ice_ri_opt": (1, 2, 3),
+    "snicar_dust_optics_opt": (0, 1, 2, 3),
+    "snicar_solarspec_opt": (0, 1, 2, 3, 4, 5, 6),
+    "snicar_bandnumber_opt": (1, 2),
+    "snicar_solver_opt": (1, 2),
     "opt_inf": (1, 2),
     "opt_run": (1, 2, 3, 4, 5, 6, 7, 8),
     "opt_infdv": (0, 1, 2, 3),
+    "opt_runsrf": (0, 1, 2, 3, 4, 5, 6, 7, 8),
+    "opt_runsub": (0, 1, 2, 3, 4, 5, 6, 7, 8),
     "opt_rad": (1, 2, 3),
     "opt_frz": (1, 2),
+    "opt_scf": (1, 2),
     "opt_stc": (1, 2, 3),
+    "opt_tksno": (1, 2, 3, 4, 5),
     "opt_tbot": (1, 2),
     "dveg": (1, 2, 3, 4, 5, 6, 7, 8, 9),
     "opt_btr": (1, 2, 3),
     "opt_rsf": (1, 2, 3, 4),
     "opt_alb": (1, 2, 3),
     "opt_snf": (1, 2, 3, 4, 5),
+    "opt_snow_compact": (1, 2),
 }
 
 
@@ -2583,6 +3134,13 @@ NOAHMP_OPTION_VALUES: dict[str, tuple[int, ...]] = {
 #: value.  ``validate_run_config`` refuses anything else *before* a run
 #: starts, so the driver's own refusal is a second line rather than the
 #: first. Options with multiple implemented values are validated below.
+#: The MYNN generation each WRF reference pin resolves to (PLAN section 4,
+#: the ``wrf_reference`` selector owns). "4.7.1" is today's engine
+#: byte for byte: None keeps the existing resolution (wrf_461, or wrf_471
+#: when a 4.7.1-only control is named). "4.8.0" is the MYNN-EDMF 8f8e8b59
+#: column, replay-qualified against native WRF 4.8.0 strict.
+MYNN_VERSION_BY_WRF_REFERENCE: dict[str, str | None] = {"4.7.1": None, "4.8.0": "wrf_480"}
+
 MYNN471_OPTION_VALUES = {
     "bl_mynn_closure": (2.5, 2.6, 3.0), "bl_mynn_cloudpdf": (0, 1, 2),
     "bl_mynn_edmf": (0, 1), "bl_mynn_edmf_mom": (0, 1),
@@ -2894,10 +3452,170 @@ def validate_mynn_generation_spp(cfg) -> None:
             "every perturbed step while the run claimed them.")
 
 
+#: The fields :func:`validate_shallow_cumulus_config` reads, so a door that
+#: holds settings rather than a ``RunConfig`` can hand it exactly those.
+SHALLOW_CUMULUS_FIELDS = ("shcu_physics", "bl_pbl_physics", "bl_mynn_edmf",
+                          "cu_physics", "icloud", "icloud_bl", "moist",
+                          "moist_cq", "mp_physics")
+
+
+def validate_shallow_cumulus_config(cfg) -> None:
+    """The shallow-cumulus pairings, asked by both doors.
+
+    ``validate_run_config`` calls this where it held the same lines, and
+    plan review (``woof.physics_registry.validate_physics_plan``) calls it
+    on the settings a plan resolves.  Plan review carried none of these
+    pairings, and ``shcu_physics`` is a per-domain setting every prepared
+    route offers, so 3,936 of 84,932 reachable plans were called launchable
+    and refused at run start (tests/test_authority_agreement.py; that walk
+    had been ending in an error before it could report them).
+    """
+    if type(cfg.shcu_physics) is not int or cfg.shcu_physics not in (0, 1, 2, 3, 4, 5):
+        raise ConfigurationRefused("shcu_physics must be 0 (off), 1 (G3 native no-op), 2 (UW), 3 (GRIMS), 4 (NSCV), or 5 (Deng)")
+    from woof.shallow_cumulus import shallow_refusal
+    why = shallow_refusal(cfg.shcu_physics, cfg.bl_pbl_physics,
+                          cfg.bl_mynn_edmf, cfg.cu_physics,
+                          icloud=cfg.icloud, icloud_bl=cfg.icloud_bl)
+    if why:
+        raise ConfigurationRefused(why)
+    if cfg.shcu_physics in (3, 4, 5) and not cfg.moist:
+        raise ConfigurationRefused("shallow convection requires a water-vapour carrier")
+    if cfg.shcu_physics == 5 and not cfg.moist_cq:
+        raise ConfigurationRefused("Deng requires QC and QR condensate carriers")
+    if cfg.shcu_physics == 2 and not (cfg.moist and cfg.moist_cq):
+        raise ConfigurationRefused("UW shallow convection requires moist condensate carriers")
+    if cfg.shcu_physics == 2 and cfg.mp_physics not in UW_SHALLOW_QI_MP_PHYSICS:
+        raise ConfigurationRefused("WRF UW shallow convection requires the QI carrier (module_shallowcu_driver.F:519-522)")
+
+
+# The laws below were lines of validate_run_config.  Each is now one
+# function that the run door calls where its lines were and plan review
+# (woof.physics_registry.validate_physics_plan) calls on the settings a
+# plan resolves.  The prepared-tree route offers each setting as a free
+# per-domain parameter, and plan review carried none of these laws, so
+# 728 of 84,932 reachable plans (1,456 domains) were called launchable and
+# refused at run start (tests/test_authority_agreement.py, 2026-11-12).  One wording,
+# one law, the same way validate_shallow_cumulus_config is shared.
+
+def validate_shalconv_config(cfg) -> None:
+    """``shalconv`` is CU_SAS's switch and nothing else reads it.
+
+    The refusal outside SAS prevents a record that names a shallow-branch
+    choice no scheme in the run makes: under any other cumulus the value
+    reaches no code, so ``shalconv = 0`` would read as "no shallow
+    convection" while the selected scheme's own shallow branch still runs.
+    """
+    if cfg.cu_physics == SAS_CU_PHYSICS:
+        if type(cfg.shalconv) is not int or cfg.shalconv not in (0, 1):
+            raise ValueError("shalconv must be 0 or 1: CU_SAS executes the shallow branch only at 1")
+    elif cfg.shalconv != 1:
+        raise ValueError("shalconv is consumed only by cu_physics=94; leave it at 1 otherwise")
+
+
+def validate_bmj_rad_feedback_config(cfg) -> None:
+    """BMJ's convective cloud reaches radiation only from BMJ, and only
+    through a radiation adapter that merges it.
+
+    Prevents a run whose record says the radiation sees convective cloud
+    when no cloud field is published (another cumulus scheme) or no
+    adapter reads it (the analytic clear-sky adapter).
+    """
+    if type(cfg.bmj_rad_feedback) is not bool:
+        raise ValueError("bmj_rad_feedback must be bool")
+    if cfg.bmj_rad_feedback:
+        if cfg.cu_physics not in COLUMN_KERNEL_CU_SCHEMES:
+            raise ValueError("bmj_rad_feedback requires cu_physics=2: other schemes do not publish BMJ cloud fields")
+        if not bmj_feedback_radiation_supported(radiation_scheme_ids(cfg)):
+            raise ValueError("bmj_rad_feedback requires physical cloud radiation or disabled streams: the selected radiation adapter does not merge the carried convective cloud")
+
+
+def resolve_mynn_version(cfg, version: str) -> str:
+    """The MYNN generation a ``RunConfig`` resolves ``version`` to.
+
+    ``RunConfig`` promotes the default ``wrf_461`` to ``wrf_471`` on a MYNN
+    domain that names a 4.7.1-only control (an identity key off its pin,
+    ``bl_mynn_mixlength = 0``, the TKE budget, or partial number mixing).
+    It calls this, and so does plan review, which judges the identity law
+    on the generation the run will hold.  ``cfg.mp_physics`` must already
+    be a number; ``cfg.bl_mynn_version`` is not read.
+    """
+    if cfg.bl_pbl_physics == 5 and version == "wrf_461":
+        changed = any(getattr(cfg, k) != v for k, v in MYNN_PBL_OPTION_IDENTITY.items())
+        partial = cfg.bl_mynn_mixscalars == 1 and cfg.mp_physics in MYNN_QN_FLAG_SPECIES and cfg.mp_physics not in MYNN_QN_FAMILY_SCHEMES and bool(MYNN_QN_FLAG_SPECIES[cfg.mp_physics])
+        if changed or cfg.bl_mynn_mixlength == 0 or cfg.tke_budget or partial:
+            return "wrf_471"
+    return version
+
+
+def validate_mynn_option_identity(cfg) -> None:
+    """MYNN's suboptions must name a branch the selected column implements.
+
+    Prevents a nearby branch running under the name of an unported one.
+    ``icloud_bl`` is held to the identity only on a MYNN domain
+    (``bl_pbl_physics = 5``): it is WRF's switch for merging MYNN's subgrid
+    cloud into radiation and the GSD diagnostics: the radiation readers gate
+    it on an active MYNN (woof.core.mynn_radiation.mynn_bl_cloud_active),
+    the GSD kernel merges only where MYNN's CLDFRA_BL is set (zero without
+    MYNN), and Deng requires 0 under MYJ as well.  Outside MYNN, 0 and 1
+    give the same run and 0 says what the run does, so no branch can be
+    substituted there; the namelist door already scoped it this way.
+    Refusing it outside MYNN named no breakage and refused 128 reachable
+    plans at run start.
+    """
+    for name, admitted in MYNN_PBL_OPTION_IDENTITY.items():
+        value = getattr(cfg, name)
+        if name == 'icloud_bl' and cfg.shcu_physics == 5 and value == 0 and type(value) is int:
+            continue
+        if name == 'icloud_bl' and cfg.bl_pbl_physics != 5:
+            if type(value) is not int or value not in (0, 1):
+                raise ConfigurationRefused(
+                    f"icloud_bl={value!r} must be the integer 0 or 1")
+            continue
+        if type(value) is not type(admitted) or (value not in MYNN471_OPTION_VALUES[name] if cfg.bl_mynn_version == "wrf_471" else value != admitted):
+            if cfg.bl_mynn_version == "wrf_480" and type(value) is type(admitted) and value in MYNN471_OPTION_VALUES[name]:
+                # Implemented by the 4.8.0 column, but only the default
+                # identity has a native 4.8.0 replay witness so far.
+                raise ConfigurationRefused(
+                    f"{name}={value!r} with bl_mynn_version='wrf_480': the WRF 4.8.0 "
+                    "MYNN column is replay-qualified against native 4.8.0 for the "
+                    "default option identity only; this setting would run "
+                    "unqualified code under the 4.8.0 name. Use wrf_471 for it.")
+            implemented = (
+                f"{name} in {MYNN471_OPTION_VALUES[name]!r}"
+                if cfg.bl_mynn_version == "wrf_471" else f"{name}={admitted!r}")
+            raise ConfigurationRefused(
+                f"{name}={value!r} is outside the admitted MYNN option "
+                f"identity; woof implements {implemented} only, and "
+                "no nearby branch is substituted for an unported one."
+            )
+
+
+def validate_tke_budget_config(cfg) -> None:
+    """The TKE budget is implemented for the km_opt=2 closure and for MYNN.
+
+    Prevents a budget that omits terms: under any other closure (km_opt=4,
+    SMS-3DTKE's implicit transport and dissipation) the accumulated terms
+    would not sum to the TKE the run carries.
+    """
+    if cfg.tke_budget not in (0, 1):
+        raise ConfigurationRefused(
+            f"tke_budget must be 0 (off) or 1 (per-step term-by-term TKE "
+            f"budget accumulation), got {cfg.tke_budget}."
+        )
+    if cfg.tke_budget == 1 and cfg.km_opt != 2 and cfg.bl_pbl_physics != 5:
+        raise ConfigurationRefused(
+            "tke_budget=1 requires km_opt=2 or bl_pbl_physics=5: the implemented budget "
+            "accumulates that closure's explicit source terms. It does "
+            f"not account for km_opt={cfg.km_opt}, including SMS-3DTKE's "
+            "implicit transport and dissipation."
+        )
+
+
 def validate_spp_config(cfg) -> None:
     """Require an actual physics consumer for each requested SPP pattern."""
     consumers = {
-        "spp_conv": (("cu_physics", 3),),
+        # WRF v4.8.0's GFL call carries no SPP pattern; GFDRV (wrf_461) does.
+        "spp_conv": (("cu_physics", 3), ("cu_gf_version", "wrf_461")),
         "spp_pbl": (("bl_pbl_physics", 5), ("sf_sfclay_physics", 5)),
         "spp_lsm": (("sf_surface_physics", 3),),
     }
@@ -3008,11 +3726,36 @@ def validate_urban_config(cfg) -> None:
         raise ConfigurationRefused(
             "sf_urban_physics must be 0 (none), 1 (single-layer UCM), 2 (BEP) "
             f"or 3 (BEP+BEM), WRF numbering, got {option}.")
+    morphology = getattr(cfg, "urban_param_file", "")
+    if type(morphology) is not str:
+        raise ConfigurationRefused(
+            f"urban_param_file must be a path string, got {morphology!r}")
     if option == 0:
+        if morphology:
+            raise ConfigurationRefused(
+                "urban_param_file is set but sf_urban_physics = 0: no urban "
+                "scheme would read the gridded morphology; set "
+                "sf_urban_physics = 1, 2 or 3 or drop it")
         return
     generation = getattr(cfg, "urban_ucm_generation", "wrf_471")
     if generation not in ("wrf_471", "wrf_480"):
         raise ValueError("urban_ucm_generation must be wrf_471 or wrf_480")
+    if morphology and option == 1 and generation == "wrf_480":
+        raise ConfigurationRefused(
+            "urban_param_file with urban_ucm_generation = wrf_480: the "
+            "WRF 4.8 canopy column in this build does not carry the NUDAPT "
+            "gridded-morphology arm (MH_URB2D > 0), so the column would run "
+            "on table morphology while the file claims gridded; use "
+            "urban_ucm_generation = wrf_471 (whose arm is transcribed from "
+            "WRF 4.7.1) or drop urban_param_file")
+    if (morphology and option == 1
+            and int(getattr(cfg, "sf_surface_mosaic", 0) or 0)):
+        raise ConfigurationRefused(
+            "urban_param_file with sf_surface_mosaic = 1 and "
+            "sf_urban_physics = 1: the Noah mosaic's urban tile calls the "
+            "canopy column without the gridded morphology, so its tiles "
+            "would run on table morphology while the file claims gridded; "
+            "set sf_surface_mosaic = 0 or drop urban_param_file")
     if generation != "wrf_471" and option != 1:
         raise ValueError("urban_ucm_generation=wrf_480 requires sf_urban_physics=1; the new BEP/BEM generations are not implemented")
     if generation == "wrf_480" and getattr(cfg, "sf_surface_mosaic", 0):
@@ -3035,9 +3778,11 @@ def validate_urban_config(cfg) -> None:
         raise ConfigurationRefused(
             f"num_urban_hi={bins}: the BEP/BEM kernels in this build index "
             f"HI_URB2D with WRF's default {URBAN_HEIGHT_BINS}-bin stride, and "
-            "the gridded morphology (URB_PARAM) that alone could fill another "
-            "bin count is not ingested, so any other count would read past "
-            "the array the kernels were built for.")
+            "the gridded morphology (urban_param_file) fills exactly "
+            f"{URBAN_HEIGHT_BINS} bins, URB_PARAM(118-132), as WRF 4.7.1's "
+            "real.exe does (module_initialize_real.F:3194-3196), so any "
+            "other count would read past the array the kernels were built "
+            "for.")
     lsm = int(cfg.sf_surface_physics)
     if lsm not in URBAN_LAND_SURFACE_SCHEMES:
         raise ConfigurationRefused(
@@ -3537,6 +4282,15 @@ CU_STOCK_CALLABLES = {
     93: "woof.core.gf.GrellDevenyi",
 }
 
+#: ``cu_gf_version`` values: which scheme ``cu_physics = 3`` runs.
+CU_GF_VERSIONS = frozenset({"gfl_873b414", "wrf_461"})
+
+#: Versioned cumulus callables: (cu_physics, cu_gf_version) rows that replace
+#: the CU_STOCK_CALLABLES row of their scheme.
+CU_VERSIONED_CALLABLES = {
+    (GRELL_FREITAS_CU_PHYSICS, "gfl_873b414"): "woof.core.gfl.GrellFreitasLi",
+}
+
 #: The Grell-family keys, each with the WRF Registry default it is judged
 #: against: :func:`validate_run_config` refuses a non-default value on a
 #: domain whose ``cu_physics`` is not :data:`GRELL_FREITAS_CU_PHYSICS`.
@@ -3644,8 +4398,8 @@ def gf_clos_choice_advice(value: int) -> str | None:
 #: refusal string cannot be iterated.  The refusal sentences below still
 #: recite the names; these tuples are the membership they test.
 RA_PHYSICS_ACCEPTED = (0, 4, 90)
-RA_LW_PHYSICS_ACCEPTED = (0, 1, 3, 4, 5, 7, 31, 90, 99)
-RA_SW_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 7, 90, 99)
+RA_LW_PHYSICS_ACCEPTED = (0, 1, 3, 4, 5, 7, 14, 31, 90, 99)
+RA_SW_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 7, 14, 90, 99)
 
 #: Every other WRF v4.6.1/v4.7.1 radiation selector value, with the reason it
 #: is refused.  A value is never run as another scheme: the forecast and its
@@ -3658,17 +4412,11 @@ RA_SW_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 7, 90, 99)
 #: batch branches) stays out of it.
 RA_UNPORTED_REASONS: dict[str, dict[int, str]] = {
     "ra_lw_physics": {
-        14: ("WRF RRTMG-K longwave is not ported; RRTMG (4, with "
-             "ra_rrtmg_variant = rrtmg_legacy for WRF's transcription) is the "
-             "nearest scheme and is a different k-distribution"),
         24: ("WRF fast RRTMG longwave (module_ra_rrtmg_lwf) is a separately "
              "coded solver that is not ported; ra_lw_physics = 4 with "
              "ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription"),
     },
     "ra_sw_physics": {
-        14: ("WRF RRTMG-K shortwave is not ported; RRTMG (4, with "
-             "ra_rrtmg_variant = rrtmg_legacy for WRF's transcription) is the "
-             "nearest scheme and is a different k-distribution"),
         24: ("WRF fast RRTMG shortwave (module_ra_rrtmg_swf) is a separately "
              "coded solver that is not ported; ra_sw_physics = 4 with "
              "ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription"),
@@ -3746,6 +4494,90 @@ def drop_inactive_radiation_port_keys(values: dict) -> None:
     if values.get("aer_opt", 0) != 2:
         for key in AER_OPT2_RUN_KEYS:
             values.pop(key, None)
+
+
+def validate_rrtmgk_config(cfg, ra_lw_physics, ra_sw_physics) -> None:
+    """Refuse what WRF 4.7.1's RRTMG-K (ra_lw_physics = ra_sw_physics = 14,
+    module_ra_rrtmg_swk.F rad_rrtmg_driver) is not ported for.
+
+    WRF runs both spectra in one call from the longwave CASE
+    (module_radiation_driver.F:2103-2129); its RRTMK_SWSCHEME CASE only adds
+    the shortwave heating the longwave call already made, so a split pair
+    either never radiates the shortwave (14/x) or adds a second one (x/14).
+    """
+    if (ra_lw_physics, ra_sw_physics) != (14, 14):
+        raise ConfigurationRefused(
+            f"ra_lw_physics={ra_lw_physics}, ra_sw_physics={ra_sw_physics}: "
+            "WRF RRTMG-K computes both spectra in one rad_rrtmg_driver call "
+            "from the longwave case, so it runs only as the pair "
+            "ra_lw_physics=14, ra_sw_physics=14.")
+    if str(getattr(cfg, "rrtmg_spectral_output", "none") or "none") != "none":
+        raise ConfigurationRefused(
+            f"rrtmg_spectral_output={cfg.rrtmg_spectral_output!r} is a legacy "
+            "RRTMG (4/4) diagnostic: WRF RRTMG-K's rad_rrtmg_driver has no "
+            "band or g-point flux output, so there is nothing to write. Set "
+            "rrtmg_spectral_output='none' with ra_lw_physics=ra_sw_physics=14.")
+    # ghg_input is admitted (both values): WRF's rad_rrtmg_driver never
+    # reads it, and woof's RRTMG-K takes legacy RRTMG's CAMtr gases under 1
+    # (woof.core.rrtmgk.RRTMGKRadiation), a declared extension beyond WRF.
+    aer_opt = int(getattr(cfg, "aer_opt", 0) or 0)
+    if aer_opt:
+        raise ConfigurationRefused(
+            f"aer_opt={aer_opt} with ra_lw_physics=ra_sw_physics=14: the "
+            "aer_opt>0 aerosol optics on the RRTMG-K shortwave are not "
+            "ported. Set aer_opt=0.")
+    if cfg.icloud != 1:
+        raise ConfigurationRefused(
+            f"icloud={cfg.icloud} with ra_lw_physics=ra_sw_physics=14: the "
+            "RRTMG-K port is anchored on the icloud=1 cal_cldfra1 cloud "
+            "fraction only. Set icloud=1.")
+    if int(getattr(cfg, "o3input", 2)) not in (0, 2):
+        raise ConfigurationRefused(
+            f"o3input={cfg.o3input}: RRTMG-K implements 0 (wrapper O3DATA) "
+            "and 2 (CAM climatology).")
+    from woof.core.mynn_radiation import mynn_bl_cloud_active
+    merges = [name for name, on in (
+        ("icloud_bl=1 (MYNN subgrid clouds)", mynn_bl_cloud_active(
+            cfg.bl_pbl_physics, getattr(cfg, "icloud_bl", 0))),
+        ("cu_rad_feedback=.true.", bool(getattr(cfg, "cu_rad_feedback", False))),
+        ("bmj_rad_feedback=.true.", bool(getattr(cfg, "bmj_rad_feedback", False))),
+        ("shcu_physics=5 (Deng shallow-cumulus clouds)",
+         int(getattr(cfg, "shcu_physics", 0) or 0) == 5),
+        ("cu_physics=10 (KF-CuP cloud feedback)",
+         int(getattr(cfg, "cu_physics", 0) or 0) == 10)) if on]
+    if merges:
+        raise ConfigurationRefused(
+            f"{', '.join(merges)} with ra_lw_physics=ra_sw_physics=14: the "
+            "RRTMG-K port radiates the resolved cloud only; the driver's "
+            "subgrid and convective cloud merges are not ported for it. "
+            "Turn the named merge off (icloud_bl=0, cu_rad_feedback=.false., "
+            "bmj_rad_feedback=.false., shcu_physics=0, a cu_physics other "
+            "than 10) to radiate the resolved cloud.")
+    if int(getattr(cfg, "mp_physics", 0) or 0) in (11, 95):
+        raise ConfigurationRefused(
+            f"mp_physics={cfg.mp_physics} with ra_lw_physics=ra_sw_physics=14: "
+            "this scheme supplies radiation clouds through a path "
+            "rad_rrtmg_driver is not ported for.")
+    if cfg.moist and cfg.mp_physics:
+        from woof.wrf_physics_inventory import stock_wrf_physics_inventory
+        try:
+            inv = stock_wrf_physics_inventory(int(cfg.mp_physics))
+        except ValueError:
+            inv = None
+        names = () if inv is None else {
+            f.registry_name for f in inv.wrfinput_fields}
+        if inv is None or "qs" not in names:
+            raise ConfigurationRefused(
+                f"mp_physics={cfg.mp_physics} with ra_lw_physics="
+                "ra_sw_physics=14: the RRTMG-K port runs rad_rrtmg_driver's "
+                "snow-carrying cloud optics (iceflag 5), which needs a "
+                "microphysics scheme whose Registry package carries QS (and "
+                "a packaged package contract to read F_QNC from).")
+    else:
+        raise ConfigurationRefused(
+            "ra_lw_physics=ra_sw_physics=14 needs moist microphysics with "
+            "snow: rad_rrtmg_driver's ported cloud optics are the iceflag 5 "
+            "arm.")
 
 
 def wrf_unported_reason(key: str, value: int) -> str:
@@ -4275,6 +5107,27 @@ def thompson_aerosol_aware(mp_physics) -> bool:
         return False
 
 
+def carries_aerosol_numbers(mp_physics) -> bool:
+    """Whether ``mp_physics`` carries prognostic nwfa AND nifa.
+
+    ONE SPELLING of the question aer_opt = 3 asks, for the config battery
+    and the namelist importer alike: the aerosol-aware Thompson family, or
+    a named scheme whose capability row lists both tracers (TEMPO).  Named
+    breakage: the importer asked only the Thompson family, so a TEMPO
+    namelist with aer_opt = 3 (the HRRR route's own emission of a TEMPO
+    TOML) was refused although the config battery admits it.
+    """
+    try:
+        value = int(mp_physics)
+    except (TypeError, ValueError):
+        return False
+    if value in THOMPSON_AEROSOL_FAMILY:
+        return True
+    from woof.microphysics_schemes import SCHEMES_BY_ID
+    named = SCHEMES_BY_ID.get(value)
+    return named is not None and {"nwfa", "nifa"} <= set(named.aerosol_species)
+
+
 def thompson_hail_aware(mp_physics) -> bool:
     """Whether ``mp_physics`` carries the hail-aware graupel (mp=38)."""
     member = THOMPSON_AEROSOL_FAMILY.get(int(mp_physics or 0))
@@ -4682,11 +5535,7 @@ def validate_radiation_driver_options(cfg: RunConfig) -> None:
             "is not wired ahead of the fit here, so the direct-beam fit "
             "would run on a zero SWDDIR")
     if aer == 3:
-        from woof.microphysics_schemes import SCHEMES_BY_ID
-        named = SCHEMES_BY_ID.get(int(cfg.mp_physics))
-        carries_numbers = (int(cfg.mp_physics) in THOMPSON_AEROSOL_FAMILY or
-                           (named is not None and {"nwfa", "nifa"} <= set(named.aerosol_species)))
-        if not carries_numbers:
+        if not carries_aerosol_numbers(cfg.mp_physics):
             raise ValueError(
                 f"aer_opt=3 needs water-friendly and ice-friendly aerosol numbers "
                 f"(Thompson aerosol-aware mp_physics=28, or a named aerosol-aware "
@@ -4705,11 +5554,11 @@ def validate_radiation_driver_options(cfg: RunConfig) -> None:
 
 
 def validate_aerosol_source_options(cfg: RunConfig) -> None:
-    """Fail closed on any mp=28 aerosol-source selector WOOF cannot honour.
+    """Fail closed on any mp=28 aerosol-source selector WOOF-ArWen cannot honour.
 
     THE DEFAULT MOVED (development branch).  ``(aer_init_opt, wif_input_opt)``
     at WRF's Registry defaults ``(0, 0)`` no longer MEANS "synthetic
-    profile"; it means "WOOF chooses", and what WOOF chooses is the
+    profile"; it means "WOOF-ArWen chooses", and what WOOF-ArWen chooses is the
     climatology whenever the dataset resolves.  The two namelist fields keep
     WRF's Registry defaults on purpose -- ``physics_compat``'s
     ``_SINGLE_DOMAIN_RUNTIME_SWITCHES`` rows are compared for EXACT equality
@@ -4734,8 +5583,8 @@ def validate_aerosol_source_options(cfg: RunConfig) -> None:
     something under mp=28 ride silently into an mp=28 restart or nest.
     """
     source = str(getattr(cfg, "mp28_aerosol_source", "auto") or "auto")
-    if bool(cfg.use_rap_aero_icbc) and int(cfg.mp_physics) not in THOMPSON_AEROSOL_FAMILY:
-        raise ConfigurationRefused("use_rap_aero_icbc requires mp_physics=28 or mp_physics=38; other schemes carry no QNWFA/QNIFA to initialize or force")
+    if bool(cfg.use_rap_aero_icbc) and not carries_aerosol_numbers(cfg.mp_physics):
+        raise ConfigurationRefused("use_rap_aero_icbc requires a scheme that carries QNWFA/QNIFA (mp_physics=28 or 38, or TEMPO); other schemes have no aerosol number to initialize or force")
     if source not in MP28_AEROSOL_SOURCES:
         raise ConfigurationRefused(
             f"mp28_aerosol_source={source!r} is not one of "
@@ -4776,7 +5625,7 @@ def validate_aerosol_source_options(cfg: RunConfig) -> None:
             if value in (only, 1):
                 continue
             raise UnsupportedConfiguration(
-                f"{name}={value!r} is not implemented; WOOF honours "
+                f"{name}={value!r} is not implemented; WOOF-ArWen honours "
                 f"{name}={only!r} (WRF Registry default, {citation}) and "
                 f"{name}=1 as the ported climatology pair. {why}.")
         raise UnsupportedConfiguration(
@@ -4785,7 +5634,7 @@ def validate_aerosol_source_options(cfg: RunConfig) -> None:
             "real.exe's climatology route derives both together "
             "(use_aero_icbc=.true. -> aer_init_opt=1, and the use_wif_input "
             "package -> wif_input_opt=1); one without the other names half "
-            "an input path, and WOOF refuses rather than guessing which "
+            "an input path, and WOOF-ArWen refuses rather than guessing which "
             "half was meant. Use aer_init_opt=1 with wif_input_opt=1, or "
             "leave both at 0 and let mp28_aerosol_source decide.")
     if path and source == "synthetic":
@@ -4894,10 +5743,30 @@ def microphysics_lookup_table_precondition(cfg) -> str | None:
 
     Hail-aware Thompson may generate missing caches under its native
     write controls. That work belongs to preparation asset acquisition.
-    ISHMAEL has no generated fallback.
+    ISHMAEL has no generated fallback.  Neither has RCON: its one
+    initialized table stream is not shipped and no shipped tool builds it.
     """
     mp = int(getattr(cfg, "mp_physics", 0))
-    if mp == 55:
+    if mp == 29:
+        # Asked here so `woof go` and `woof run-plan` refuse before they
+        # fetch or prepare anything, and `woof check` says it, instead of
+        # the forecast stage refusing after preparation.  RCON had no row
+        # while RCON-SPEED-01 refused it at validate_run_config.  Presence
+        # and size only (the loader verifies SHA-256); the sentence is the
+        # table check's own, so there is one wording of this refusal.
+        from woof.core.rcon import TABLE_BYTES, TABLE_FILENAME, table_root
+        stream = table_root() / TABLE_FILENAME
+        try:
+            installed = stream.is_file() and stream.stat().st_size == TABLE_BYTES
+        except OSError:
+            installed = False
+        if not installed:
+            from woof.tables import ensure
+            try:
+                ensure(["rcon"], fetch=False)
+            except (FileNotFoundError, ValueError) as error:
+                return str(error)
+    elif mp == 55:
         from woof.core.ishmael import require_tables
         try:
             require_tables()
@@ -5385,6 +6254,13 @@ def load_config(path: str | Path, *, accept_epssm_auto: bool = False,
     known_keys = {f.name for f in fields(RunConfig)}
     merged: dict = {}
     key_table: dict[str, str] = {}
+    # wrf_reference in [run] pins the scheme generations that WRF release
+    # runs, resolved into the per-scheme keys of the same table (an
+    # explicit key wins); absent, nothing changes (woof.wrf_reference).
+    if isinstance(raw.get("run"), dict) and "wrf_reference" in raw["run"]:
+        from woof.wrf_reference import resolve_wrf_reference
+        raw["run"] = dict(raw["run"])
+        resolve_wrf_reference(raw["run"], where=f"[run] of config file {path}")
     for table in _RUN_CONFIG_TABLES:
         entries = raw.get(table, {})
         unknown_keys = [key for key in entries if key not in known_keys]
@@ -5428,8 +6304,8 @@ def load_config(path: str | Path, *, accept_epssm_auto: bool = False,
         merged["eta_levels"] = tuple(merged["eta_levels"])
     join_chem_name_lists(merged)
     apply_chem_set_defaults(merged)
-    from woof.surface_ocean import apply_ocean_defaults
-    apply_ocean_defaults(merged)
+    from woof.quirk_corrections import apply_run_corrections
+    merged = apply_run_corrections(merged)
     return validate_run_config(RunConfig(**merged),
                                native_fire_ideal=native_fire_ideal)
 
@@ -6027,7 +6903,7 @@ def validate_keps_config(cfg: RunConfig) -> None:
 
     WRF v4.7.1 has no law for the scheme to transcribe: bl_init's SELECT
     CASE has no KEPSSCHEME arm, so every surface layer and every urban
-    option reaches it.  The refusals below are WOOF's and each names the
+    option reaches it.  The refusals below are WOOF-ArWen's and each names the
     breakage it prevents:
 
     * no surface layer, or the Eta layer: the scheme forms z/L from
@@ -6238,6 +7114,10 @@ _DYNAMICS_RANGES: dict[str, tuple] = {
     "relax_timescale_s": (lambda v: v >= 0.0,
                           "a non-negative relaxation time scale in s "
                           "(0 keeps WRF's 10 x dt)"),
+    # The boundary hydrometeor envelope; a negative stretch has no meaning.
+    "lbc_hydrometeor_envelope_km": (lambda v: v >= 0.0,
+                                    "a non-negative stretch of edge in km "
+                                    "(default 25; 0 serves the linear table)"),
     "diff_6th_factor": (lambda v: v >= 0.0,
                         "a non-negative 6th-order diffusion factor "
                         "(WRF Registry default 0.12)"),
@@ -6712,7 +7592,7 @@ def validate_km_opt(cfg: RunConfig) -> None:
         # that carries no TKE at all there is nothing to interpolate and
         # nothing to feed back, and that case has now been run and scored
         # (7 h, 250 m child under a km_opt=4 parent, status PASS; see
-        # docs/superpowers/receipts/les/nested-les-km2-2026-08-02.md).
+        # docs/internal/receipts/les/nested-les-km2-2026-08-02.md).
         # A km_opt=2 child under a km_opt=2 parent does the same thing
         # (the parent's TKE stays on the parent); woof.experiment, the
         # only place that knows the parent, admits that tree with a
@@ -7207,7 +8087,7 @@ def _adaptive_interval(whole: int, den: int, name: str):
     ``:186-214`` does the same for the two limits.  Otherwise the pair is
     a genuine rational ``Sn/Sd`` -- ESMF holds time intervals as exact
     rationals, so a step like 100/3 s stays exact over thousands of steps
-    where a float would drift.  That is the same reason WOOF's clock is
+    where a float would drift.  That is the same reason WOOF-ArWen's clock is
     an integer tick lattice, which is why the pair maps onto it cleanly.
     """
     from fractions import Fraction
@@ -7978,6 +8858,96 @@ def multi_perturb_refusal(cfg) -> str | None:
     return None
 
 
+#: Above this grid spacing buildings are sub-grid: use the urban canopy
+#: schemes (sf_urban_physics) instead of resolved obstacles.
+OBSTACLE_MAX_DX_M = 500.0
+
+#: The resolved-obstacle keys at their defaults (all appended last, off):
+#: every older header, cache and tree ran exactly these.
+OBSTACLE_RUN_DEFAULTS = {
+    "obstacle_opt": 0, "obstacle_file": "", "obstacle_solid_fraction": 0.5,
+    "obstacle_relax_factor": 10.0, "obstacle_drag_coefficient": 0.4,
+    "obstacle_wall_z0": 0.01}
+
+
+def _validate_obstacles(cfg: RunConfig) -> None:
+    """The opt-in resolved obstacles' refusals (woof.core.obstacles)."""
+    option = cfg.obstacle_opt
+    if type(option) is not int or option not in (0, 1):
+        raise ConfigurationRefused(
+            f"obstacle_opt must be 0 (off) or 1 (porous immersed obstacles), "
+            f"got {option!r}")
+    numbers = {"obstacle_solid_fraction": (0.0, 1.0),
+               "obstacle_relax_factor": (0.0, None),
+               "obstacle_drag_coefficient": (0.0, None),
+               "obstacle_wall_z0": (0.0, None)}
+    for name, (low, high) in numbers.items():
+        value = getattr(cfg, name)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value <= low
+                or (high is not None and value > high)):
+            bound = f"in ({low}, {high}]" if high is not None else f"> {low}"
+            raise ConfigurationRefused(f"{name} must be a number {bound}, "
+                                       f"got {value!r}")
+    if not option:
+        if cfg.obstacle_file:
+            raise ConfigurationRefused(
+                "obstacle_file is set but obstacle_opt = 0: the buildings "
+                "would be silently ignored; set obstacle_opt = 1 or drop it")
+        return
+    if not cfg.obstacle_file:
+        raise ConfigurationRefused(
+            "obstacle_opt = 1 needs obstacle_file, a woof-buildings.v1 "
+            "product on this domain's grid (woof.static.buildings)")
+    if max(cfg.dx, cfg.dy) > OBSTACLE_MAX_DX_M:
+        raise ConfigurationRefused(
+            f"obstacle_opt = 1 resolves buildings, which needs dx <= "
+            f"{OBSTACLE_MAX_DX_M:g} m (this domain has {cfg.dx:g} m); at "
+            "coarser spacing buildings are sub-grid, so use the urban "
+            "canopy schemes (sf_urban_physics) instead")
+    if cfg.polar:
+        raise ConfigurationRefused(
+            "obstacle_opt = 1 runs on the regional (WRF-route) grid only")
+    if 0.5 * min(cfg.dx, cfg.dy) < 10.0 * cfg.obstacle_wall_z0:
+        raise ConfigurationRefused(
+            f"obstacle_wall_z0 = {cfg.obstacle_wall_z0:g} m is too rough for "
+            f"dx = {min(cfg.dx, cfg.dy):g} m: the wall law needs half the "
+            "grid spacing to be at least 10 z0")
+    if cfg.dfi_opt:
+        raise ConfigurationRefused(
+            "obstacle_opt = 1 does not run under digital filter "
+            f"initialisation (dfi_opt = {cfg.dfi_opt}): its backward "
+            "integration would turn the obstacle drag into a source")
+    if cfg.umove or cfg.vmove:
+        raise ConfigurationRefused(
+            "obstacle_opt = 1 holds buildings fixed to the ground, but "
+            f"umove = {cfg.umove:g}, vmove = {cfg.vmove:g} m/s moves the "
+            "frame, where the drag would see frame-relative wind; run "
+            "obstacles with umove = vmove = 0")
+
+
+def validate_shinhong_generation(cfg) -> None:
+    """The Shin-Hong generation and its WRF 4.8.0 options (validate_run_config)."""
+    from woof.core.shinhong_generations import SHINHONG_GENERATIONS
+    if cfg.shinhong_version not in SHINHONG_GENERATIONS:
+        raise ConfigurationRefused(
+            f"shinhong_version must be one of {SHINHONG_GENERATIONS}, got "
+            f"{cfg.shinhong_version!r}.")
+    for key in ("shinhong_nonlocal_flux", "shinhong_scu_mixing",
+                "shinhong_ke_dissipation"):
+        if type(getattr(cfg, key)) is not bool:
+            raise TypeError(f"{key} must be a bool")
+    if cfg.shinhong_version == "wrf_461" and (
+            not cfg.shinhong_nonlocal_flux or cfg.shinhong_scu_mixing
+            or cfg.shinhong_ke_dissipation):
+        raise ConfigurationRefused(
+            "shinhong_nonlocal_flux/shinhong_scu_mixing/"
+            "shinhong_ke_dissipation are WRF 4.8.0 Shin-Hong options; the "
+            "wrf_461 generation has none of them, so a non-default value "
+            "would be silently ignored.  Select shinhong_version = "
+            "\"wrf_480\" or leave them at their defaults.")
+
+
 def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> RunConfig:
     """The RunConfig invariant battery, shared by BOTH loaders.
 
@@ -8008,6 +8978,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     validate_trajectory(cfg)
     from woof.lightning_contract import validate_lightning
     validate_lightning(cfg)
+    from woof.core.dyn_lightning import validate_dyn_lightning
+    validate_dyn_lightning(cfg)
     if type(cfg.hailcast_opt) is not int or cfg.hailcast_opt not in (-1, 0, 1):
         raise ConfigurationRefused("hailcast_opt must be -1 (automatic), 0 or 1")
     if not math.isfinite(cfg.haildt) or not 0 <= cfg.haildt <= 60:
@@ -8068,6 +9040,13 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         sf_urban_physics=cfg.sf_urban_physics)
     if why is not None:
         raise ConfigurationRefused(why)
+    from woof.core.terrain_drag import gwdo_options
+    try:
+        gwdo_options(gwdo_version=cfg.gwdo_version,
+                     dx_factor=cfg.gwd_dx_factor,
+                     if_nonhyd=cfg.gwd_if_nonhyd)
+    except ValueError as error:
+        raise ConfigurationRefused(str(error)) from None
     validate_fog_kfeta_config(cfg)
     why = wrf_fitch_refusal(
         wind_farm_scheme=cfg.wind_farm_scheme,
@@ -8661,16 +9640,12 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "nsas_dx_factor is read only by cu_physics=96 (New SAS); with "
             f"cu_physics={cfg.cu_physics} it would reach nothing and the run "
             "would not be the configuration it names. Leave it at 0.")
-    if cfg.cu_physics == SAS_CU_PHYSICS:
-        if cfg.use_adaptive_time_step:
-            raise ValueError(
-                "cu_physics=94 (SAS) cannot use an adaptive time step: "
-                "CU_SAS closes over DT*STEPCU and holds rates for that fixed "
-                "window; WRF refuses this pair (module_cumulus_driver.F:1131-1135).")
-        if type(cfg.shalconv) is not int or cfg.shalconv not in (0, 1):
-            raise ValueError("shalconv must be 0 or 1: CU_SAS executes the shallow branch only at 1")
-    elif cfg.shalconv != 1:
-        raise ValueError("shalconv is consumed only by cu_physics=94; leave it at 1 otherwise")
+    if cfg.cu_physics == SAS_CU_PHYSICS and cfg.use_adaptive_time_step:
+        raise ValueError(
+            "cu_physics=94 (SAS) cannot use an adaptive time step: "
+            "CU_SAS closes over DT*STEPCU and holds rates for that fixed "
+            "window; WRF refuses this pair (module_cumulus_driver.F:1131-1135).")
+    validate_shalconv_config(cfg)
     if cfg.cu_physics in SAS_PGCON_SCHEMES or cfg.shcu_physics == 4:
         if not math.isfinite(float(cfg.sas_pgcon)):
             raise ValueError(
@@ -8701,13 +9676,13 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "formed over dt*stepcu at the call and held while the adaptive "
             "clock moves, so a nonzero cudt would apply them over an "
             "interval the run did not take.")
-    if type(cfg.bmj_rad_feedback) is not bool:
-        raise ValueError("bmj_rad_feedback must be bool")
-    if cfg.bmj_rad_feedback:
-        if cfg.cu_physics not in COLUMN_KERNEL_CU_SCHEMES:
-            raise ValueError("bmj_rad_feedback requires cu_physics=2: other schemes do not publish BMJ cloud fields")
-        if not bmj_feedback_radiation_supported(radiation_scheme_ids(cfg)):
-            raise ValueError("bmj_rad_feedback requires physical cloud radiation or disabled streams: the selected radiation adapter does not merge the carried convective cloud")
+    validate_bmj_rad_feedback_config(cfg)
+    if getattr(cfg, "kim_tofd", False) and not float(cfg.tofd_factor) > 0.0:
+        raise ConfigurationRefused(
+            "tofd_factor must be positive with kim_tofd on: the form-drag "
+            "roughness height zf = VAR*tofd_factor sits inside log((za+zf)/zf), "
+            "so zero divides by zero and a negative factor puts NaN into CD "
+            f"and UST; got tofd_factor={cfg.tofd_factor}.")
     if cfg.sf_sfclay_physics not in (1, 91) and (
             cfg.isftcflx or cfg.iz0tlnd):
         raise ConfigurationRefused(
@@ -8717,6 +9692,18 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         )
     from woof.ysu_generations import ysu_generation
     ysu_generation(cfg.ysu_version)
+    validate_shinhong_generation(cfg)
+    from woof.mp_generations import MP_GENERATION_SELECTORS, generation
+    for selector in MP_GENERATION_SELECTORS:
+        try:
+            generation(selector, getattr(cfg, selector))
+        except ValueError as exc:
+            raise ConfigurationRefused(str(exc)) from None
+    if cfg.cu_gf_version not in CU_GF_VERSIONS:
+        raise ConfigurationRefused(
+            f"cu_gf_version={cfg.cu_gf_version!r} must be one of {sorted(CU_GF_VERSIONS)}: "
+            "'gfl_873b414' is WRF v4.8.0's cu_physics=3 (Grell-Freitas-Li), 'wrf_461' the "
+            "previous pin's Grell-Freitas (WRF v4.6.1/v4.7.1 GFDRV)")
     if cfg.ysu_topdown_pblmix not in (0, 1):
         raise ConfigurationRefused(
             "ysu_topdown_pblmix must be 0 or 1, got "
@@ -8730,19 +9717,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ValueError("scalar_adv_opt must be 0 (ordinary) or 1 (positive definite)")
     if cfg.bl_mynn_tkeadvect and cfg.bl_pbl_physics != 5:
         raise ValueError("bl_mynn_tkeadvect requires the MYNN bl_pbl_physics=5 owner")
-    for name, admitted in MYNN_PBL_OPTION_IDENTITY.items():
-        value = getattr(cfg, name)
-        if name == 'icloud_bl' and cfg.shcu_physics == 5 and value == 0 and type(value) is int:
-            continue
-        if type(value) is not type(admitted) or (value not in MYNN471_OPTION_VALUES[name] if cfg.bl_mynn_version == "wrf_471" else value != admitted):
-            implemented = (
-                f"{name} in {MYNN471_OPTION_VALUES[name]!r}"
-                if cfg.bl_mynn_version == "wrf_471" else f"{name}={admitted!r}")
-            raise ConfigurationRefused(
-                f"{name}={value!r} is outside the admitted MYNN option "
-                f"identity; woof implements {implemented} only, and "
-                "no nearby branch is substituted for an unported one."
-            )
+    validate_mynn_option_identity(cfg)
     if type(cfg.bl_mynn_mixlength) is not int or cfg.bl_mynn_mixlength not in ((0, 1, 2) if cfg.bl_mynn_version == "wrf_471" else (1, 2)):
         raise ConfigurationRefused(
             "bl_mynn_mixlength must be 1 or 2 (or 0, WRF 4.7.1's, which "
@@ -8855,8 +9830,28 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             )
     from woof.core.noahmp_groundwater_slab import validate as groundwater_validate
     groundwater_validate(cfg.wtddt)
+    from woof.core.noahmp_wetland import validate as wetland_validate
+    try:
+        wetland_validate(wetland=cfg.noahmp_wetland,
+                         sf_surface_physics=cfg.sf_surface_physics,
+                         opt_run=cfg.opt_run, soiltstep=cfg.soiltstep)
+    except ValueError as refusal:
+        raise ConfigurationRefused(str(refusal)) from None
+    if cfg.noahmp_wetland:
+        from woof.core.noahmp_wetland import LABEL
+        from woof.explain import warn
+        warn("noahmp_wetland=1: Zhang et al. (2022) wetland scheme, " + LABEL)
     if cfg.sf_surface_physics==4 and cfg.opt_run==8 and cfg.opt_infdv==0:
         raise ConfigurationRefused("Noah-MP opt_run=8 requires opt_infdv=1,2,3: native FSUR is unassigned at zero")
+    if cfg.sf_surface_physics==4 and cfg.opt_runsub:
+        from woof.core import noahmp_runoff_split as _runoff_split
+        try:
+            _runoff_split.validate(cfg.opt_run, cfg.opt_runsub, opt_tdrn=cfg.opt_tdrn, opt_infdv=cfg.opt_infdv)
+        except _runoff_split.RunoffSplitRefused as exc:
+            raise ConfigurationRefused(str(exc)) from None
+        from woof.explain import warn
+        warn(f"opt_runsrf={cfg.opt_run} opt_runsub={cfg.opt_runsub}: separate surface and subsurface "
+             f"runoff, {_runoff_split.LABEL}")
     if cfg.sf_surface_physics==4 and cfg.opt_soil==4:
         from woof.core.noahmp_soil_options import SOIL4_LABEL
         from woof.explain import warn
@@ -8880,6 +9875,9 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             if name == "opt_crop" and value == 2:
                 from woof.explain import warn
                 warn("opt_crop=2: native WRF 4.7.1 fails here; this fixes it, not bitwise to WRF. Measured active-crop step cost is 1.4283x CROP1 on a shared GPU. Cold start is sowing; emergence uses native thermal time.")
+            if name == "opt_snow_compact" and value == 2:
+                from woof.explain import warn
+                warn("opt_snow_compact=2: snow compaction C_bd(T_air, p_sfc) after Abolafia-Rosenzweig et al. 2024 (JAMES); re-implemented from published descriptions, not bitwise to upstream.")
             continue
         if name in NOAHMP_OPTIONS_WITHOUT_CONSUMER:
             # No breakage to name: the knob reaches no woof code at
@@ -9014,15 +10012,44 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             f"{cfg.mp_physics} would run its WRF v4.6.1 kernels under the "
             "fork's name.  Use mp_physics = 28, or leave thompson_version "
             "at 'wrf_461'.")
-    if cfg.bl_mynn_version not in ("wrf_461", "wrf_471", "gsd_41"):
+    if cfg.bl_mynn_version == "wrf_480" and int(cfg.bl_pbl_physics) == 5:
+        if cfg.bl_mynn_mixlength != 1 or cfg.tke_budget or cfg.bl_mynn_tkeadvect or cfg.spp_pbl:
+            raise ConfigurationRefused(
+                "bl_mynn_version='wrf_480' is replay-qualified against native WRF 4.8.0 "
+                "for the default identity (bl_mynn_mixlength=1, tke_budget=0, "
+                "bl_mynn_tkeadvect=false, spp_pbl=0) only; another setting would run "
+                "unqualified code under the 4.8.0 name. Use wrf_471 for it.")
+        if mynn_mixscalars_active(cfg) or int(cfg.bl_mynn_mixscalars) != 0:
+            raise ConfigurationRefused(
+                "bl_mynn_mixscalars=1 with bl_mynn_version='wrf_480': WRF 4.8.0's "
+                "key mixes only the generic scalar array (number species moved to "
+                "bl_mynn_mixnumcon/bl_mynn_mixaerosols); the engine's qn staging "
+                "for that key is the 4.6.1/4.7.1 meaning.")
+        if {"qnwfa", "qnifa"} & set(MYNN_QN_FLAG_SPECIES.get(int(cfg.mp_physics), ())):
+            raise ConfigurationRefused(
+                f"bl_mynn_version='wrf_480' with mp_physics={cfg.mp_physics}: WRF 4.8.0 "
+                "mixes the aerosol numbers by default (bl_mynn_mixaerosols=1) and the "
+                "engine does not stage qnwfa/qnifa into the 4.8.0 MYNN column yet, so "
+                "the run would claim 4.8.0 MYNN without its aerosol mixing.")
+    if cfg.bl_mynn_version not in ("wrf_461", "wrf_471", "wrf_480", "gsd_41"):
         raise ConfigurationRefused(
             f"bl_mynn_version={cfg.bl_mynn_version!r} must be 'wrf_461' "
-            "(WRF v4.6.1 MYNN) or 'gsd_41' (the GSD MYNN v4.1 of the "
+            "(WRF v4.6.1 MYNN), 'wrf_471', 'wrf_480' or 'gsd_41' (the GSD MYNN v4.1 of the "
             "NOAA-EMC WRF 3.9 branch): the two delete or keep a dew flux "
             "and mix with different lengths, so an unknown name cannot "
             "select either.")
     if type(cfg.cycling) is not bool:
         raise TypeError("cycling must be a bool")
+    if type(cfg.mynn_fixes_v61) is not bool:
+        raise ConfigurationRefused(
+            "mynn_fixes_v61 must be true or false: it selects the upstream "
+            "MYNN v6.1 fixes or the WRF 4.6.1 MYNN as written.")
+    # mynn_fixes_v61 is correct-mode key MY1: on by default for every run,
+    # and read only where it applies (woof.core.mynn_pbl_v61.pbl_fixes_active,
+    # correct_mode.KEY_SCOPE / KEY_GENERATIONS).  Elsewhere it reaches
+    # nothing, the checkpoint echo and digest drop it, and the run receipt
+    # does not list it in effect; a wrf_471 / wrf_480 MYNN run lists MY1 as
+    # uncorrected.  So it is no longer refused off the wrf_461 route.
     if cfg.bl_mynn_cloud_tendency_form not in ("wrf_461", "gsd_41"):
         raise ConfigurationRefused("bl_mynn_cloud_tendency_form must be 'wrf_461' or 'gsd_41'")
     if cfg.bl_mynn_cloud_tendency_form == "gsd_41" and cfg.bl_mynn_version != "gsd_41":
@@ -9046,12 +10073,28 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "carries the v4.6.1 shallow-cumulus cloud only, so a gsd_41 run "
             "would hand radiation grid-mean plume water as in-cloud water.")
     validate_mynn_generation_spp(cfg)
-    if cfg.mynn_sfclay_variant not in ("wrf_461", "gsl_wrf39"):
+    if cfg.mynn_sfclay_variant not in ("wrf_461", "gsl_wrf39", "mynnsfc_b66187f"):
         raise ConfigurationRefused(
             f"mynn_sfclay_variant={cfg.mynn_sfclay_variant!r} must be "
-            "'wrf_461' (WRF v4.6.1's MYNN surface layer) or 'gsl_wrf39' "
-            "(the GSL WRF 3.9 fork's): the two solve different equations "
-            "for z/L, so an unknown name cannot select either.")
+            "'wrf_461' (WRF v4.6.1's MYNN surface layer), 'gsl_wrf39' "
+            "(the GSL WRF 3.9 fork's) or 'mynnsfc_b66187f' (WRF v4.8.0's "
+            "MYNN-SFC): they solve different equations for z/L, so an "
+            "unknown name cannot select any of them.")
+    if cfg.shalwater_z0 != 0:
+        raise ConfigurationRefused(
+            f"shalwater_z0={cfg.shalwater_z0!r}: WRF's shallow-water "
+            "roughness blend reads the water_depth bathymetry static, which "
+            "our init does not produce; no surface layer here reads it.")
+    if cfg.mynn_sfclay_variant == "mynnsfc_b66187f":
+        from woof.core.mynnsfc_b66187f import validate_mynnsfc_b66187f
+        validate_mynnsfc_b66187f(cfg)
+    elif (cfg.sf_mynn_sfcflux_land, cfg.sf_mynn_sfcflux_water,
+          cfg.shalwater_z0) != (0, 1, 0) and int(cfg.sf_sfclay_physics) == 5:
+        raise ConfigurationRefused(
+            "sf_mynn_sfcflux_land/sf_mynn_sfcflux_water/shalwater_z0 are read "
+            "only by WRF v4.8.0's MYNN-SFC (mynn_sfclay_variant = "
+            f"'mynnsfc_b66187f'); {cfg.mynn_sfclay_variant!r} runs "
+            "isftcflx/iz0tlnd instead, so the values would be ignored.")
     if cfg.ruc_soilprop not in ("wrf_45", "wrf_461"):
         raise ConfigurationRefused(
             f"ruc_soilprop={cfg.ruc_soilprop!r} must be 'wrf_45' (the WRF "
@@ -9072,10 +10115,50 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "(public WRF's 2 m flux form) or 'log_profile' (the operational "
             "RAP/HRRR branch's logarithmic profile): the two write different "
             "2 m values, so an unknown name cannot select either.")
+    _validate_obstacles(cfg)
     if type(cfg.gf_deep_rain_evaporation_booking) is not bool:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking must be true or false")
+    if type(cfg.ysu_surface_heat_exner) is not bool:
+        raise ConfigurationRefused("ysu_surface_heat_exner must be true or false")
+    if type(cfg.noah_smc_floor_booking) is not bool:
+        raise ConfigurationRefused("noah_smc_floor_booking must be true or false")
+    if cfg.noah_smc_floor_booking and int(cfg.sf_surface_physics) != 2:
+        raise ConfigurationRefused(
+            "noah_smc_floor_booking corrects Noah's soil-moisture floor "
+            f"(sf_surface_physics = 2); this run selects sf_surface_physics = "
+            f"{cfg.sf_surface_physics}, which never reads it")
+    from woof.quirk_corrections import check_run_config
+    check_run_config(cfg)
+    if cfg.ysu_surface_heat_exner and int(cfg.bl_pbl_physics) != 1:
+        raise ConfigurationRefused(
+            "ysu_surface_heat_exner corrects YSU's surface heat flux "
+            f"(bl_pbl_physics = 1); this run selects bl_pbl_physics = "
+            f"{cfg.bl_pbl_physics}, which never reads it")
+    if cfg.ysu_surface_heat_exner and int(cfg.sf_urban_physics) in (2, 3):
+        raise ConfigurationRefused(
+            "ysu_surface_heat_exner corrects the surface heat flux YSU's heat "
+            "solve adds; with BEP/BEM (sf_urban_physics = "
+            f"{cfg.sf_urban_physics}) WRF's YSU takes that heat from the "
+            "urban sources instead (bepswitch = 1), so the correction would "
+            "reach only the PBL diagnosis; drop it or the urban model")
+    if type(cfg.mynn_sfclay_psih_zolzt) is not bool:
+        raise ConfigurationRefused("mynn_sfclay_psih_zolzt must be true or false")
+    if cfg.mynn_sfclay_psih_zolzt and int(cfg.sf_sfclay_physics) != 5:
+        raise ConfigurationRefused(
+            "mynn_sfclay_psih_zolzt corrects the MYNN surface layer's 2 m / "
+            "10 m heat profile (sf_sfclay_physics = 5); this run selects "
+            f"sf_sfclay_physics = {cfg.sf_sfclay_physics}, which never reads it")
+    if cfg.mynn_sfclay_psih_zolzt and cfg.mynn_sfclay_variant != "wrf_461":
+        raise ConfigurationRefused(
+            "mynn_sfclay_psih_zolzt corrects the wrf_461 MYNN surface layer; "
+            f"mynn_sfclay_variant = {cfg.mynn_sfclay_variant!r} integrates "
+            "every heat profile from z0/L by design")
     _validate_solar_tsi(cfg)
+    _validate_solar_ssi(cfg)
+    _validate_spacewx_ionosphere(cfg)
+    _validate_spacewx_aurora(cfg)
+    _validate_spacewx_epp(cfg)
     if cfg.gf_deep_rain_evaporation_booking and int(cfg.cu_physics) != 3:
         raise ConfigurationRefused(
             "gf_deep_rain_evaporation_booking corrects Grell-Freitas's deep "
@@ -9130,13 +10213,13 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         why = radiation_unported_reason("ra_lw_physics", ra_lw_physics)
         raise ConfigurationRefused(
             "ra_lw_physics must be 0 (off), 1 (WRF RRTM), 3 (WRF CAM), 4 "
-            "(RTE+RRTMGP), 5 (WRF New Goddard), 7 (WRF Fu-Liou-Gu), 31 (idealized relaxation), 90 (analytic proxy) or 99 (GFDL Eta), "
+            "(RTE+RRTMGP), 5 (WRF New Goddard), 7 (WRF Fu-Liou-Gu), 14 (WRF RRTMG-K), 31 (idealized relaxation), 90 (analytic proxy) or 99 (GFDL Eta), "
             f"got {ra_lw_physics}." + (f" {why}." if why else ""))
     if ra_sw_physics not in RA_SW_PHYSICS_ACCEPTED:
         why = radiation_unported_reason("ra_sw_physics", ra_sw_physics)
         raise ConfigurationRefused(
             "ra_sw_physics must be 0 (off), 1 (WRF Dudhia), 2 (WRF GSFC), 3 (WRF CAM), 4 "
-            "(RTE+RRTMGP), 5 (WRF New Goddard), 7 (WRF Fu-Liou-Gu), 90 (analytic proxy) or 99 (GFDL Eta), "
+            "(RTE+RRTMGP), 5 (WRF New Goddard), 7 (WRF Fu-Liou-Gu), 14 (WRF RRTMG-K), 90 (analytic proxy) or 99 (GFDL Eta), "
             f"got {ra_sw_physics}." + (f" {why}." if why else ""))
     if 7 in (ra_lw_physics, ra_sw_physics):
         if ra_lw_physics == 7 and ra_sw_physics == 0:
@@ -9150,6 +10233,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             raise ConfigurationRefused(
                 "WRF FLG needs 4 to 100 model layers: its three cloud groups "
                 "need a layer each and its native scratch bound is nvx=100.")
+    if 14 in (ra_lw_physics, ra_sw_physics):
+        validate_rrtmgk_config(cfg, ra_lw_physics, ra_sw_physics)
     if 99 in (ra_lw_physics, ra_sw_physics) and (type(cfg.co2tf) is not int or cfg.co2tf not in (0, 1)):
         raise ConfigurationRefused("co2tf must be 0 (CONRAD) or 1 (CO2O3)")
     if 3 in (ra_lw_physics, ra_sw_physics):
@@ -9322,22 +10407,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "(ra_lw_physics=1 WRF RRTM with ra_sw_physics=1 Dudhia), which "
             "honours icloud=0 end to end, or use icloud=1, 2 or 3 on the 4/4 "
             "pair.")
-    if type(cfg.shcu_physics) is not int or cfg.shcu_physics not in (0, 1, 2, 3, 4, 5):
-        raise ConfigurationRefused("shcu_physics must be 0 (off), 1 (G3 native no-op), 2 (UW), 3 (GRIMS), 4 (NSCV), or 5 (Deng)")
-    from woof.shallow_cumulus import shallow_refusal
-    why = shallow_refusal(cfg.shcu_physics, cfg.bl_pbl_physics,
-                          cfg.bl_mynn_edmf, cfg.cu_physics,
-                          icloud=cfg.icloud, icloud_bl=cfg.icloud_bl)
-    if why:
-        raise ConfigurationRefused(why)
-    if cfg.shcu_physics in (3, 4, 5) and not cfg.moist:
-        raise ConfigurationRefused("shallow convection requires a water-vapour carrier")
-    if cfg.shcu_physics == 5 and not cfg.moist_cq:
-        raise ConfigurationRefused("Deng requires QC and QR condensate carriers")
-    if cfg.shcu_physics == 2 and not (cfg.moist and cfg.moist_cq):
-        raise ConfigurationRefused("UW shallow convection requires moist condensate carriers")
-    if cfg.shcu_physics == 2 and cfg.mp_physics not in UW_SHALLOW_QI_MP_PHYSICS:
-        raise ConfigurationRefused("WRF UW shallow convection requires the QI carrier (module_shallowcu_driver.F:519-522)")
+    validate_shallow_cumulus_config(cfg)
     if cfg.cu_physics == 7:
         from woof.core.camzm_contract import pbl_arm_refusal
         why = pbl_arm_refusal(cfg.bl_pbl_physics, cfg.sf_sfclay_physics)
@@ -9386,16 +10456,13 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     if cfg.aercu_opt > 0:
         from woof.core.morrison_aero import refuse_aercu_opt
         refuse_aercu_opt(cfg.aercu_opt, cu_physics=cfg.cu_physics, mp_physics=cfg.mp_physics)
-    # RCON-SPEED-01: retire when a qualified handoff clears this measured gap.
-    if cfg.mp_physics == 29:
-        raise ConfigurationRefused(
-            "mp_physics=29 (RCON) is ported but its release speed proof is open: "
-            "the whole-forecast microphysics stage costs 1.885431x MP28; "
-            "the retained native 1.053748x profile does not explain the GPU excess. "
-            "A qualified speed handoff is required before forecast admission; "
-            "until then select another microphysics scheme, such as mp_physics=28 "
-            "(the Thompson aerosol-aware scheme it is timed against)."
-        )
+    # mp_physics=29 (RCON) is admitted.  RCON-SPEED-01 refused it here in
+    # 3.0.0 and 3.0.1 because its microphysics stage measured 1.885x MP28.
+    # That is a speed defect, not a breakage (strict WRF 4.7.1 replay 0
+    # differing words, a three-hour forecast passes), and plan review never
+    # carried the refusal, so every plan with RCON was called launchable and
+    # then refused here.  The measured cost stays stated in the registry
+    # row; the speed gap stays open with the RCON speed work.
     if cfg.mp_physics not in MP_PHYSICS_ACCEPTED:
         # Known unported options carry a source-backed reason before the
         # general selector menu. The WDM family is admitted above.
@@ -9466,6 +10533,21 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             raise ValueError(f"{option} must be logical; interpreting a string would select the wrong TEMPO coupling")
         if getattr(cfg, option) and cfg.mp_physics != 900:
             raise ValueError(f"{option} selects TEMPO behavior but mp_physics={cfg.mp_physics} does not execute it")
+    # woof.core.tempo_runtime.TEMPO_VERSIONS (that module imports CuPy).
+    _TEMPO_VERSIONS = ("v3.2.5", "v3.0.3")
+    if cfg.tempo_version not in _TEMPO_VERSIONS:
+        raise ValueError(
+            f"tempo_version must be one of {list(_TEMPO_VERSIONS)}, got "
+            f"{cfg.tempo_version!r}: another name would run a TEMPO "
+            "generation nobody selected")
+    if type(cfg.tempo_hailhyperaware) is not bool:
+        raise ValueError("tempo_hailhyperaware must be logical; a string would "
+                         "switch the hail category on while the file says off")
+    if not cfg.tempo_hailhyperaware and cfg.tempo_version == "v3.0.3":
+        raise ValueError(
+            "tempo_hailhyperaware = false selects a v3.2.x switch but "
+            "tempo_version = \"v3.0.3\" has no hail category to switch off; "
+            "it would be recorded and never read")
     for _correct_key in _correct_mode.CORRECTION_KEYS:
         # A string "false" from a hand-built mapping is truthy in Python and
         # would switch the correction ON while the file says off.
@@ -9696,8 +10778,14 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ValueError("gsd_diagnostics must be 0 or 1; research package 2 is not carried")
     if type(cfg.reset_interval1) is not int or cfg.reset_interval1 <= 0:
         raise ValueError("reset_interval1 must be positive whole minutes")
-    if cfg.gsd_diagnostics and cfg.mp_physics not in (0, 8, 28):
-        raise ValueError("gsd_diagnostics hail PSD supports mp_physics 8/28; other fork PSD tables are not carried")
+    # TEMPO (woof id 900) carries its own hail PSD -- the fork Thompson
+    # 99th-percentile bin search on its two-moment, variable-density graupel
+    # (TEMPO diags.F90 max_hail_diameter) -- and feeds HAIL_MAXK1/HAIL_MAX2D
+    # from it (woof/core/tempo.py), so the HRRR recipe's gsd_diagnostics = 1
+    # runs under TEMPO.  Named breakage for the rest: the fork's single-moment
+    # graupel table would be read as their hail.
+    if cfg.gsd_diagnostics and cfg.mp_physics not in (0, 8, 28, 900):
+        raise ValueError("gsd_diagnostics hail PSD supports mp_physics 8/28 and TEMPO; other fork PSD tables are not carried")
     for key in ("prec_acc_dt", "prec_acc_dt1"):
         value = getattr(cfg, key)
         if not math.isfinite(value) or value < 0:
@@ -9787,18 +10875,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             f"m2 s-2 (WRF Registry default 1000.0), got "
             f"{cfg.tke_upper_bound}."
         )
-    if cfg.tke_budget not in (0, 1):
-        raise ConfigurationRefused(
-            f"tke_budget must be 0 (off) or 1 (per-step term-by-term TKE "
-            f"budget accumulation), got {cfg.tke_budget}."
-        )
-    if cfg.tke_budget == 1 and cfg.km_opt != 2 and cfg.bl_pbl_physics != 5:
-        raise ConfigurationRefused(
-            "tke_budget=1 requires km_opt=2 or bl_pbl_physics=5: the implemented budget "
-            "accumulates that closure's explicit source terms. It does "
-            f"not account for km_opt={cfg.km_opt}, including SMS-3DTKE's "
-            "implicit transport and dissipation."
-        )
+    validate_tke_budget_config(cfg)
     if cfg.mix_isotropic not in (0, 1):
         raise ConfigurationRefused(
             f"mix_isotropic must be 0 (anisotropic mixing lengths) or 1 "

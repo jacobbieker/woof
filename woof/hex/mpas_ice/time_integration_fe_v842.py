@@ -14,8 +14,10 @@
    :mod:`~woof.hex.mpas_ice.subglacial_hydro_v842`, with ``config_SGH``), then
    ``li_calve_ice`` or ``li_restore_calving_front``
    (:mod:`~woof.hex.mpas_ice.calving_v842`);
-5. ``li_velocity_solve`` for 'sia' and 'none': the masks and geometry, the
-   normal surface slope, ``li_sia_solve``, the uphill-margin cleanup,
+5. ``li_velocity_solve`` for 'sia', 'simple' and 'none': the masks and
+   geometry, the normal surface slope, ``li_sia_solve`` (or 'simple''s
+   prescribed ``normalVelocityInitial``,
+   :mod:`~woof.hex.mpas_ice.velocity_simple_v842`), the uphill-margin cleanup,
    ``mpas_reconstruct``, the speeds, ``calculate_strain_rates`` and
    ``remove_fast_ice``;
 6. ``li_calculate_diagnostic_vars``: the pressure melting point, ``dHdt``
@@ -59,14 +61,16 @@ import numpy as np
 
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
+from woof import quirk_corrections
 
 from . import (advection_v842, calving_v842, geometry_v842, rkind, sia_v842, subglacial_hydro_v842,
-               thermal_init_v842, thermal_solver_v842)
+               thermal_init_v842, thermal_solver_v842, velocity_simple_v842)
 
 SOURCE_FILES = (
     "src/core_landice/mode_forward/mpas_li_time_integration_fe.F:75-952",
     "src/core_landice/mode_forward/mpas_li_diagnostic_vars.F:78-338",
     "src/core_landice/mode_forward/mpas_li_velocity.F:224-666,879-984",
+    "src/core_landice/mode_forward/mpas_li_velocity_simple.F:66-628",
     "src/core_landice/shared/mpas_li_setup.F:626-739",
     "src/operators/mpas_vector_reconstruction.F:205-339,489-588",
 )
@@ -74,7 +78,7 @@ COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false",
                    "--prec-div=true", "--prec-sqrt=true")
 MODULE_OPTIONS = COMPILE_OPTIONS
 MATH_HEADERS_R4 = ("glibc_trig_flt32.cuh",)
-VELOCITY_SOLVERS = ("sia", "none")
+VELOCITY_SOLVERS = ("sia", "simple", "none")
 ADVECTION = ("fo", "none")
 _BLOCK = 128
 
@@ -119,12 +123,17 @@ def _refuse(knob: str, value, reason: str, declaration: str):
 def _check_config(config: dict, precision: str, velocity: dict) -> None:
     if config["config_velocity_solver"] not in VELOCITY_SOLVERS:
         sia_v842.require_velocity_solver(config["config_velocity_solver"])
-        _refuse("config_velocity_solver", config["config_velocity_solver"],
-                "'simple' needs the Dirichlet velocity mask the ported masks do not carry",
-                "config_velocity_solver = 'sia' | 'none'")
+        _refuse("config_velocity_solver", config["config_velocity_solver"], "not a velocity solver of this port",
+                "config_velocity_solver = 'sia' | 'simple' | 'none'")
+    if config["config_velocity_solver"] == "simple":
+        velocity_simple_v842.require_fields(velocity=velocity)
     for knob in ("config_thickness_advection", "config_tracer_advection"):
         if config[knob] not in ADVECTION:
             raise ValueError(f"{knob} must be one of {ADVECTION}")
+    units = quirk_corrections.option(config, "woof_enthalpy_advection_units")
+    if units not in advection_v842.ENTHALPY_ADVECTION_UNITS:
+        _refuse("woof_enthalpy_advection_units", units, "not an option of this port",
+                "woof_enthalpy_advection_units = 'v842' | 'corrected'")
     if config.get("config_SGH", False):
         subglacial_hydro_v842.check_config(config, precision)
     if not config.get("config_restore_calving_front", False):
@@ -177,6 +186,11 @@ def _set_timestep(precision: str, advec_dt, diff_dt, config: dict, seconds_to_ne
     dt = min(proposed, real(seconds_to_next_force_time))
     if dt < real(config["config_min_adaptive_timestep"]):
         raise ValueError("New deltat is less than config_min_adaptive_timestep.")
+    if not (dt > 0 and dt == math.floor(dt)):
+        # the clock counts whole seconds (ESMF fractions are not carried), and a
+        # step of no time never reaches the stop time
+        raise ValueError(f"the adaptive time step {float(dt)} s is not a positive whole number of seconds "
+                         "(config_min_adaptive_timestep = 0 lets a tiny CFL limit floor it to 0)")
     return dt
 
 
@@ -201,7 +215,6 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
     n_cells, n_levels = g["layerThickness"].shape
     n_edges = m["dcEdge"].shape[0]
     max_edges = m["edgesOnCell"].shape[1]
-    nvi = n_levels + 1
     ncs, nes = int(m["nCellsSolve"]), int(m["nEdgesSolve"])
     if not (0 <= ncs <= n_cells and 0 <= nes <= n_edges):
         raise ValueError("nCellsSolve and nEdgesSolve must lie within nCells and nEdges")
@@ -271,7 +284,8 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
         advection_v842.advect_thickness_tracers(
             mesh=m, geometry=g, velocity=v, thermal=t, dt=deltat,
             advect_tracers=c["config_tracer_advection"] == "fo", config_thickness_advection="fo",
-            config_thermal_solver=c["config_thermal_solver"], **masks)
+            config_thermal_solver=c["config_thermal_solver"],
+            woof_enthalpy_advection_units=quirk_corrections.option(c, "woof_enthalpy_advection_units"), **masks)
     _function(precision, "li_clamp_thickness_v842")(_grid(n_cells), block, (g["thickness"], np.int32(n_cells)))
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)
     _update_geometry(m, g, c)
@@ -288,7 +302,26 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
     else:
         calving_v842.calve_ice(mesh=m, geometry=g, velocity=v, config=c)
 
-    # === li_velocity_solve
+    velocity_solve(mesh=m, geometry=g, thermal=t, velocity=v, config=c)
+    diagnostic_vars(mesh=m, geometry=g, thermal=t, config=c, deltat=deltat)
+
+
+def velocity_solve(*, mesh: dict, geometry: dict, thermal: dict, velocity: dict, config: dict) -> None:
+    """``li_velocity_solve`` (solveVelo) for 'sia', 'simple' and 'none', in
+    place: the masks and geometry, the normal surface slope, ``li_sia_solve``
+    (or 'simple''s ``normalVelocityInitial`` on the dynamic edges), the
+    uphill-margin cleanup, ``mpas_reconstruct``, the speeds,
+    ``calculate_strain_rates`` and ``remove_fast_ice``."""
+    m, g, t, v, c = mesh, geometry, thermal, velocity, config
+    precision = rkind.precision_of(g["thickness"])
+    n_cells, n_levels = g["layerThickness"].shape
+    n_edges = m["dcEdge"].shape[0]
+    max_edges = m["edgesOnCell"].shape[1]
+    nvi = n_levels + 1
+    ncs, nes = int(m["nCellsSolve"]), int(m["nEdgesSolve"])
+    sphere = np.int32(bool(c.get("on_a_sphere", False)))
+    block = (_BLOCK,)
+    masks = _mask_configs(c)
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)
     _update_geometry(m, g, c)
     solver = c["config_velocity_solver"]
@@ -304,10 +337,12 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
             config_default_flowParamA=c["config_default_flowParamA"],
             config_flowParamA_calculation=c["config_flowParamA_calculation"],
             config_sia_tangent_slope_calculation=c["config_sia_tangent_slope_calculation"])
+    elif solver == "simple":
+        velocity_simple_v842.solve(velocity=v, edge_mask=g["edgeMask"], n_edges_solve=nes)
     _function(precision, "li_uphill_margin_v842")(_grid(nes), block, (
         v["normalVelocity"], g["edgeMask"], g["cellMask"], g["upperSurface"], m["cellsOnEdge"], np.int32(nes),
         np.int32(nvi)))
-    if solver == "sia":
+    if solver in ("sia", "simple"):
         _function(precision, "li_reconstruct_2d_v842")(_grid(ncs), block, (
             v["uReconstructX"], v["uReconstructY"], v["uReconstructZ"], v["uReconstructZonal"],
             v["uReconstructMeridional"], v["normalVelocity"], m["coeffs_reconstruct"], m["nEdgesOnCell"],
@@ -332,7 +367,17 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
     _function(precision, "li_remove_fast_ice_v842")(_grid(n_cells), block, (
         g["thickness"], g["calvingThickness"], v["surfaceSpeed"], g["cellMask"], np.int32(n_cells)))
 
-    # === li_calculate_diagnostic_vars
+
+
+def diagnostic_vars(*, mesh: dict, geometry: dict, thermal: dict, config: dict, deltat) -> None:
+    """``li_calculate_diagnostic_vars``, in place: the pressure melting point,
+    ``dHdt`` over ``deltat`` (the step's, at its precision) and the next
+    step's ``thicknessOld``."""
+    m, g, t, c = mesh, geometry, thermal, config
+    precision = rkind.precision_of(g["thickness"])
+    real = rkind.PRECISIONS[precision]
+    n_cells = g["thickness"].shape[0]
+    block = (_BLOCK,)
     thermal_init_v842.pressure_melting_point_fields(
         thickness=g["thickness"], layer_center_sigma=m["layerCenterSigma"], pmp_temperature=t["pmpTemperature"],
         basal_pmp_temperature=t["basalPmpTemperature"], rhoi=c["config_ice_density"])

@@ -1154,8 +1154,15 @@ FROZEN_MODULE_DIGESTS = {
         # Review: fork CASE(1) and its buoyancy flux now follow the fork.
         # The stock preprocessed source is unchanged, checked by the sibling test.
         # Wave3: export arm folded from sibling; default tokens unchanged.
-        '0a3cc76ddc7fbdfc9b59d8db1c1365746cc4fd649a1bd7b7ae30c6e455643ba0',
-        'cf6678981492e29c5d58e8c269f6cf247d5b00118cffa47e97d71014cd471342'),
+        # ML1 (fix/mynn-boulac-down-sign): the BouLac downward length's
+        # constant-theta branch takes NCAR/MYNN-EDMF 399f50f's sign under
+        # MYNN_BOULAC_DOWN_SIGN only (correct mode).  Without the define the
+        # PTX is byte-identical to rel/3.0.2 84f22b9076 at compute_89 and
+        # compute_120 under both loader option sets
+        # (tools/kernel_ptx_identity/receipts/mynn-boulac-down-sign-ml1-default.json).
+        # Previously 0a3cc76d/cf667898.
+        '17c4f8c5abb445b2213382c609bfa96ddae9d1c965b28d237b607d9b8b95c58c',
+        'ec6cc52fd9fd9456c8d0a0b16d00b6318b8381d4d9eb784bd96ca58976965455'),
     'mynn_surface': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
@@ -1177,8 +1184,11 @@ FROZEN_MODULE_DIGESTS = {
         # in only under OCEAN_WAVE_ROUGHNESS (woof/core/mynn_sfclay.py
         # defines it only with a coupled wave model); without it the
         # preprocessed unit is the previous one.  Previously b8b5b9b5/2c93b3ba.
-        'a02979c2ef27ce361f092675cef0d55705be6ff3f298a04b7e969b1c9694bdd9',
-        'a9abd5020db8a204e3f538e9af69ebb903c2b329c56c258d5286bfdf18cc5ddf'),
+        # RE-PINNED by the quirk pass (mynn_sfclay_psih_zolzt): psih2/psih10
+        # from zt/L compiled in only under MYNN_SL_PSIH_ZOLZT; without it the
+        # preprocessed unit is the previous one.  Previously a02979c2/a9abd502.
+        '2e8b7cb344da2eb74e68893f8921d7140c534d3ed311f471abca8c6580b7a7c0',
+        '179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1'),
     'nest': (
         # Re-pinned for a combined four-side boundary launch. The original
         # single-side entry point and SINT expression tree remain unchanged.
@@ -1234,9 +1244,6 @@ FROZEN_MODULE_DIGESTS = {
         # IEEE-correctly.  Previously 6584d2be/ab4befec.
         '784e7c0e0b1f077bbccc9ceef2833c147548e6973a8aad6dc3001e64cfda7653',
         'fa42d757b211f33157ef13e24cdd4b8fd743794024ddb4d2bf012bc07fddaab1'),
-    # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
-    # labels), proven equal with comments stripped; the preprocessor drops
-    # comments, so the compiled binary does not move.
     'noah': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
@@ -1334,11 +1341,28 @@ FROZEN_MODULE_DIGESTS = {
         # identical to 1.1.6's but for __local_depot/callseq/label
         # numbering; tests/test_noah_wrf461_parity.py and
         # tests/test_noah_wrf_hydro_parity.py pass.  Previously b902d662/a8b1e6b2.
-        '96e0b62e529d90ecdc25f06b91bf5aaa918afd508513d66073bec7553b8cef03',
-        '908ffc160b5a9a4a807ceb282ab2fc017431bb5b8b7defb0d6e3bdf889395492'),
+        # RE-PINNED 2026-11-22 by the opt-in noah_smc_floor_booking (default off): a
+        # NOAH_SMC_FLOOR_BOOKING #ifdef block in SSTEP takes the water the 0.02
+        # floor adds from the layer below (WPLUS < 0) or RUNOFF3; without the
+        # define the preprocessed program is the previous one byte for byte
+        # (tests/test_noah_smc_floor_booking.py strips the block and checks the
+        # previous digest).  Previously 96e0b62e/908ffc16.
+        # Upstream 1.1.7 RE-PINNED by fix/305-f31-private-names (2026-11-15), a COMMENT-ONLY
+        # edit: one comment that named a lab host now names the card ("RTX
+        # 4090 test host").  No code token changed, so the compiled kernel is
+        # the same; only the file and compile-string digests move.
+        # Previously ef57884c/42ed557f.
+        # RE-PINNED for the upstream WOOF 1.1.7 merge: both edits above.
+        '3736ba8f07a6ff915255159e6fec8b29a617e76465364d99d276c0795470e17d',
+        'd97d7894899756adbae9cfbc6e388c6fedc9e95292ae9515111f7819c3675aa2'),
+    # fix/noahmp-small-defects (2026-11-09): correct-mode SN1, the Noah-MP
+    # snowmelt reset re-evaluating ESTG at the reset TG, compiled only under
+    # GPUWM_NOAHMP_MELT_RESET_ESAT.  Without it the arithmetic is unchanged
+    # (colo 3 km 9 h and c1 12 km 1 h, SN1 off: 0 of 338,307,610 and
+    # 0 of 24,142,130 history words differ from rel/2.9.13).
     'noahmp_bareflux': (
-        '54fb5065e95b24d4cf676e2deda29bae44b3e9305d3d98cbc1abf5ed55f444ce',
-        'fbb19fc8b5668ea2edbcc1270f8ffe367475124ffa0ce99d3bc34639f3f31e9f'),
+        '883cd6f2cbc8cbf56671469bc0ff08126bc5f7b56573869d336a5c85d7feb916',
+        '18bce629727038d680911ebb57f4e2aa37639dcbaf030d8fada6f4d64f7b9cf4'),
     'noahmp_driver': (
         'bd555be10ccade5a5bdddcaf4c56b7f4353dae1208fc48a5586fb7ce7d32d643',
         'f1913fe0054adb74188effa6499b799e989cfb1e96ecd676edcd43df0083030e'),
@@ -1408,9 +1432,14 @@ FROZEN_MODULE_DIGESTS = {
     # selector.  The default-route arithmetic is unchanged; the
     # composed-unit frame row is re-read for it in
     # kernel_frame_recordings.  Previously 295e9541/c3271c5a.
+    # fix/noahmp-small-defects (2026-11-09): correct-mode SN1, the Noah-MP
+    # snowmelt reset re-evaluating ESTG at the reset TG, compiled only under
+    # GPUWM_NOAHMP_MELT_RESET_ESAT.  Without it the arithmetic is unchanged
+    # (colo 3 km 9 h and c1 12 km 1 h, SN1 off: 0 of 338,307,610 and
+    # 0 of 24,142,130 history words differ from rel/2.9.13).
     'noahmp_vegeflux': (
-        'd55c402a21caf3f52e5aed05a0dd727df76b747906a3e0d082446e6a7bcab014',
-        '0d23b367d88497bb45a2e895e6d85abc826caf2f4467b8b47c7ba7be32d3a9b4'),
+        'b35620d804880453d8cc5b68c03cc0cd15fa6a4c432c53c555d1d4b2fd363d8b',
+        'ecfcaf8d5e8ae09d127a37ca8ecb75ebebfad942f00becdd8d63197e96cb9ce9'),
     'noahmp_vegprecip': (
         '9ce5667599d111be0efc7cb0871e5719d70259bb95b30fbe923e01964b75c26c',
         '599e85f0fe59a28ae5fd5437e47db7f41c31abd21783979f66b987b212f1f41a'),
@@ -1638,8 +1667,16 @@ FROZEN_MODULE_DIGESTS = {
         # the exact-C build on the HRRR-fork fixture's cases
         # (tests/test_advect_wrf_legacy_parity.py).
         # Previously 20a2dd79/b4832282.
-        'db86f46e0ae5d6e0040a49b6af11e638527e9fc0afb458729d32c6df23844af9',
-        '43d703b4b6fcc3440f534621950a45ecf5c525966e0b6724b0f1295bc42dcf01'),
+        # Re-pinned for the 64x4 CUDA block (perf/pd-block): pd_fluxes and
+        # pd_renorm_apply take j from blockIdx.y * blockDim.y + threadIdx.y.
+        # Every thread computes its own point and the warp exchange sees 32
+        # consecutive i of one row with its edges at the same i as the 128x1
+        # row block, so the words are unchanged (tests/test_pd_advection_block.py,
+        # both backends, fast/strict/exact; the RTX A6000 recapture reproduced
+        # every production word of both advection fixtures).
+        # Previously db86f46e/43d703b4.
+        '952e0f085ab73a69d8c3c6c9136fa5b6878b2689c4ac3dfba24ef72bc013ed76',
+        '6db2d481e14fcdde22252a414dca1f7524df057fd9214815767d0f6691ea9246'),
     'refl': (
         # Re-pinned for A146 (a98f2482e): every float division by a compile-time
         # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a
@@ -1750,8 +1787,17 @@ FROZEN_MODULE_DIGESTS = {
         # passes 162 of 162, and a 360 s legacy-RRTMG forecast with a 50 hPa
         # top (133x125x50, 18 UTC) writes byte-identical wrfout files with
         # either kernel.  Previously 44a83f0e/c9e02eea.
-        '43134d6d6d2be4b3e668c7ab92d5850f1f992a09812dd09c9536fce5d9ab791e',
-        '663d12d7556f379bdd0724bb4f018113450ce45666e13f3ec3220615409acd08'),
+        # Re-pinned 2026-11-19 (perf/spcvmc-running-vrtqdr): rsw_spcvmc_body
+        # hands rsw_vrtqdr_running the layer transmittances and that keeps
+        # the cumulative direct-beam products ptdbt, ztdn and prdnd in
+        # registers (the same multiplies on the same operands in the same
+        # order; the flux loop fused into the ztdn/prdnd loop).  rsw_vrtqdr
+        # itself is unchanged (RRTMG-K uses it).  Digests (synthetic inputs, seed
+        # 20261119) of every flux output match the previous kernel in fast, strict and
+        # GPUWM_WRF_EXACT, nlay 45 and 60, on pb CUDA and Mac Metal.
+        # Previously 43134d6d/663d12d7.
+        '502dfc9b15481742ff5d56a7730c372502904dd4abe37dd131a953e4a35f8122',
+        'fbbaebbf9c7a773228db9dbbf771a52a4eb9a3502e12b8bde7780139fda955f8'),
     'rrtmgp_cloud': (
         # Re-pinned for fused profile preparation, broadcasts, temperature casts and flux copies.
         # Exact-array gates and all five seeded digests match the base.
@@ -1980,8 +2026,17 @@ FROZEN_MODULE_DIGESTS = {
         # physics-on step.  Graded against the strict-recipe oracle
         # (tools/sfclayrev_wrf461_oracle/build_strict.sh).  sfclay is not an
         # mp=8 translation unit.  Previously 09ff5be4/010efce3.
-        '2110f93e4f5ca9fcdee9c2b41844f81082b333af6081133c7078d8d02c82cbb6',
-        '1cbeb1fe01a272288a8afc2a0980182016180c8ec640be8d0fd98fa05044537d'),
+        # Re-pinned port/wrf-480 L07 (WRF v4.8.0 kim_tofd): sfclay.cu gains the
+        # KIM turbulent orographic form drag inside #ifdef GPUWM_SFCLAY_TOFD,
+        # compiled only into the new sfclay_tofd unit.  Reading: the sfclay and
+        # sfclay_dx2d images (fast and strict) are byte-identical to the
+        # previous source's; the WRF 4.6.1 fixture stays 0 ULP; the 4.8.0
+        # referee-object oracle (tools/sfclayrev_wrf480_oracle) is 0 of
+        # 267,960 words under strict numerics.  Previously 2110f93e/1cbeb1fe.
+        # 3.0.0 export hygiene: a comment-only rewrite (a report path in
+        # the dx_factor note became a short name); previously f6932fd1.
+        '29be8e5edf5feac9af91b2bc6702ff09fed7be5f0f5414840b4fa5d539fdcca2',
+        'ad66c56a04b440112ebc6fdfcf1d1d972ac7b86eef48941a3a00feb406fed25b'),
     'smag2d': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
@@ -2063,10 +2118,20 @@ FROZEN_MODULE_DIGESTS = {
         # other entry is untouched text.  Each row's words equal the
         # per-row launches' (tests/test_smag_multi.py, CUDA and Metal, both
         # modes).  Previously db91a5f9/7dec200c.
-        '6ee9ec60dd39deba2c8ddcea7ad0e717b94101879ab55fd33eb5fe9c5968c137',
+        # Re-pinned for wrf_smag_uvhat / wrf_smag_deform_hat: u/msfu and
+        # v/msfv stored once per face and read by the deformation in place
+        # of the division (dycore.launch_wrf_smag2d_km, default on Metal
+        # only; WOOF_SMAG_DEFORM_HAT=0 restores wrf_smag_deform).  Every
+        # stored-hat line sits under GPUWM_SMAG_STORED_HAT, compiled only in
+        # that int-define tier, so the default module and the units composing
+        # smag2d.cu preprocess to the previous text (per-entry PTX equal to
+        # 6ee9ec60's on sm_86, fast and WRF-exact).  The tier's tensors equal
+        # wrf_smag_deform's (tests/test_smag_deform_hat.py, CUDA and Metal,
+        # every mode).  Previously 6ee9ec60/64164164.
+        '379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f',
         # smag2d's default composition keeps 2.9.1's glibc_flt32 text
         # (glibc_flt32_default.cuh); the exact chain's header is strict-only.
-        '64164164291fa1e59bf59592e73df3cc13b56a043be40725a3f57d937b9ae329'),
+        '31b03d4dae7e29b0aa327c2b7d016f18d8eb5a47e0449f2896bfcb2d5efb5d0e'),
     'spec_bdy': (
         'bcc7090fbbb8ea307bd6dd6c65ab9b8a3f56948c4752ae3d744127b450d20161',
         'bc03ed595bacc546d8e041fbb1d11b5bb3b3b90760ef06ea1dd1f0f18b4de931'),

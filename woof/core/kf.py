@@ -176,7 +176,9 @@ def kf_phase_mode_for_microphysics(mp_physics: int) -> KFPhaseMode:
                 else KFPhaseMode.SEPARATE_SNOW if "qs" in row.species
                 else KFPhaseMode.NO_SEPARATE_SNOW)
     # WRF 4.7.1 Registry.EM_COMMON:3040: UDM declares both qi and qs.
-    if int(mp_physics) in (2, 6, 7, 8, 9, 10, 13, 14, 16, 18, 24, 26, 27, 28, 29, 30, 38, 40, 106) + SIX_MASS_TABLE_SCHEMES:
+    # mp_physics=900 (TEMPO) declares qv,qc,qr,qi,qs,qg like Thompson, and
+    # _KF_OLD_SPECIES below already carries it on that contract.
+    if int(mp_physics) in (2, 6, 7, 8, 9, 10, 13, 14, 16, 18, 24, 26, 27, 28, 29, 30, 38, 40, 106, 900) + SIX_MASS_TABLE_SCHEMES:
         return KFPhaseMode.SEPARATE_ICE_SNOW
     if int(mp_physics) == 1:
         return KFPhaseMode.WARM_RAIN
@@ -226,6 +228,25 @@ def kf_phase_mode_for_microphysics(mp_physics: int) -> KFPhaseMode:
         # mp=50 + cu_physics=1 domain through initialize_physics and steps
         # microphysics on it.
         return KFPhaseMode.NO_SEPARATE_SNOW
+    from woof.microphysics_schemes import scheme as _named_scheme
+    named = _named_scheme(mp_physics)
+    if named is not None:
+        # A named scheme (TEMPO, id 900) answers from its capability row, by
+        # the same single test as every numbered scheme above: KF_eta_CPS
+        # picks its feedback branch from F_QI/F_QS, which are true exactly
+        # when the scheme's moist package carries qi and qs.  TEMPO's
+        # package is Thompson's (qv,qc,qr,qi,qs,qg; its row's
+        # ice_mass_species), so it takes the separate-DQIDT branch as
+        # mp_physics=8 and 28 do.  THE BREAKAGE THIS PREVENTS (2026-11-09,
+        # TEMPO picked over the ArWen suite with Grell-Freitas on a hex zoom
+        # globe): initialize_physics could not construct a TEMPO domain with
+        # any cumulus scheme that reaches this rule (cu_physics 1, 3 and the
+        # other KF-family numbers) and raised the sentence below.  A derived
+        # admission, as the P3 rows are.
+        ice = named.ice_mass_species
+        return (KFPhaseMode.SEPARATE_ICE_SNOW if "qi" in ice and "qs" in ice
+                else KFPhaseMode.SEPARATE_SNOW if "qs" in ice
+                else KFPhaseMode.NO_SEPARATE_SNOW)
     raise ValueError(
         f"KF has no verified phase-output contract for mp_physics="
         f"{mp_physics}")

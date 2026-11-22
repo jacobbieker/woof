@@ -25,7 +25,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use rw_mpas::init::emit::{write_init, Computed};
+use rw_mpas::init::emit::{write_init, write_init_declaring, Computed};
 use rw_store::netcdf_classic::{
     NcAttr, NcClassicWriter, NcData, NcDim, NcFormat, NcType, NcVarDef,
 };
@@ -501,4 +501,59 @@ fn thompson_package_adds_a_computed_pair_to_a_capsule_without_aerosols() {
     }
     std::fs::remove_file(capsule).unwrap();
     std::fs::remove_file(out).unwrap();
+}
+
+/// A scheme's declared species row lands in the init; an undeclared one
+/// still refuses.
+///
+/// THE BREAKAGE THIS PREVENTS (hex option matrix, 2026-11-13): `--augment-init`
+/// zero-fills every species of the selected scheme's row, but the emitter
+/// created only the WSM6/Thompson/aerosol set, so Morrison (`ns`), P3
+/// (`qir`, `qib`), NSSL (`qh`, ...), WDM (`nn`) and 16 other schemes were
+/// refused at init with "the init file has no variable for".
+#[test]
+fn a_declared_species_row_creates_its_slots_and_an_undeclared_name_still_refuses() {
+    let capsule = scratch("declared.capsule.nc");
+    write_capsule(&capsule, &BASE_CAPSULE);
+    let ns: Vec<f32> = (0..N_CELLS * N_LEV).map(|i| i as f32 * 0.5).collect();
+    let with_species = || {
+        let mut computed = computed_with_theta();
+        computed.insert("ns".to_string(), Computed::Floats(ns.clone()));
+        computed.insert("qh".to_string(), Computed::Floats(vec![0.0; N_CELLS * N_LEV]));
+        computed
+    };
+
+    let refused = scratch("undeclared.init.nc");
+    let err = write_init(&refused, &capsule, with_species(), "mintedfile", &[], "abi pin test",
+                         &rw_mpas::init::Lineage::default())
+        .err()
+        .expect("an undeclared species must still refuse");
+    assert!(err.to_string().contains("\"ns\""), "the refusal names ns: {err}");
+
+    let out = scratch("declared.init.nc");
+    let declared = vec!["qv".to_string(), "ns".to_string(), "qh".to_string()];
+    let ledger = write_init_declaring(&out, &capsule, with_species(), &declared, "mintedfile", &[], "abi pin test",
+                                      &rw_mpas::init::Lineage::default())
+        .unwrap_or_else(|e| panic!("a declared species row must be admitted: {e}"));
+    for name in ["ns", "qh"] {
+        assert!(ledger.computed.contains(&name.to_string()), "{name} landed computed: {:?}", ledger.computed);
+    }
+    let file = netcrust::File::open(&out).expect("init opens");
+    let read: Vec<f64> = file.read_array_f64("ns").expect("ns readable").into_values();
+    assert_eq!(read, ns.iter().map(|&v| f64::from(v)).collect::<Vec<_>>(), "ns lands verbatim");
+    let var = file.variables().unwrap().into_iter().find(|v| v.name() == "ns").unwrap();
+    let dims: Vec<String> = var.dimensions().iter().map(|d| d.name().to_string()).collect();
+    assert_eq!(dims, ["Time", "nCells", "nVertLevels"]);
+}
+
+#[test]
+fn a_declared_scalar_that_is_not_an_identifier_refuses() {
+    let capsule = scratch("badname.capsule.nc");
+    write_capsule(&capsule, &BASE_CAPSULE);
+    let out = scratch("badname.init.nc");
+    let err = write_init_declaring(&out, &capsule, computed_with_theta(), &["n s".to_string()], "mintedfile", &[],
+                                   "abi pin test", &rw_mpas::init::Lineage::default())
+        .err()
+        .expect("a declared name with a space must refuse");
+    assert!(err.to_string().contains("plain identifier"), "{err}");
 }

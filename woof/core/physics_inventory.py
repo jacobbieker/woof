@@ -195,14 +195,15 @@ def physics_driver_required(cfg: RunConfig) -> bool:
 
 def terrain_drag_array_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
     """TerrainDrag's domain-sized coefficients and statistics, held on GPU."""
-    from woof.static.orographic import GWD_FIELDS
+    from woof.static.orographic import gwd_fields, gwdo_version_of
 
     shape = (int(cfg.ny), int(cfg.nx))
     shapes = {}
     if int(getattr(cfg, "topo_wind", 0) or 0):
         shapes.update({f"terrain_drag/{name}": shape
                        for name in ("ctopo", "ctopo2")})
-    for name in GWD_FIELDS.get(int(getattr(cfg, "gwd_opt", 0) or 0), ()):
+    for name in gwd_fields(int(getattr(cfg, "gwd_opt", 0) or 0),
+                           gwdo_version_of(cfg)):
         shapes[f"terrain_drag/gwd/{name}"] = shape
     return shapes
 
@@ -1057,16 +1058,120 @@ YSUWS_SLOTS = 18
 #: whole number of blocks.  Pinned against the kernel's ``YSUWS_LANES``.
 YSU_BLOCK = 32
 
-#: Blocks per SM the tile is sized for.  MEASURED, not assumed -- see
-#: docs/kernel_local_memory_bounds.md for the sweep this came from.  The
-#: device query in :func:`woof.core.ysu.ysu_tile_columns` only ever
-#: lowers it.  development branch (b28c20509) doubled it to queue a second
+#: Blocks per SM the tile is sized for on CUDA and HIP.  MEASURED, not
+#: assumed -- see docs/kernel_local_memory_bounds.md for the sweep this came
+#: from.  There the device query in :func:`woof.core.ysu.ysu_tile_columns`
+#: only ever lowers it; Metal sizes its tile by
+#: :data:`YSU_TILE_BLOCKS_PER_CORE_METAL` instead.  development branch (b28c20509) doubled it to queue a second
 #: wave; 2.8.2 restores 16 because the doubled workspace is priced on every
 #: YSU domain (313,344,000 more bytes on an RTX 5090 at nz = 50) and turned
 #: trees that fit into refusals (tests/test_streamed_admission.py,
 #: tests/test_auto_search_host_floor.py) for a 0.06 to 0.3 percent
 #: forecast-hour gain.
 YSU_TILE_BLOCKS_PER_SM = 16
+
+
+#: Metal (Apple GPU, unified memory): blocks of ``YSU_BLOCK`` columns per GPU
+#: core in one launch.  CUDA's rule (16 per SM, bounded by occupancy) gave
+#: 20,480 columns on a 40-core M3 Max, so a 228 x 276 domain took four
+#: launches, the last a 1,488-column tail, and each launch costs the full
+#: serial column time (the cores are not saturated at that width).  64 per
+#: core puts that domain in one launch on that chip: Metal kernel time 20.9
+#: -> 13.3-15.4 ms per call there, 9.4 -> 5.4-7.6 ms at 150 x 186 (M3 Max,
+#: shared GPU).  ``WOOF_METAL_YSU_TILE_BLOCKS`` overrides it (16 restores
+#: the CUDA rule's width).
+YSU_TILE_BLOCKS_PER_CORE_METAL = 64
+
+#: Most bytes one Metal YSU tile's workspace may take: the tile narrows to
+#: whole blocks under it.  The 40-core rule at 49 levels is 81,920 columns,
+#: 295 MB, under it; a deep or wide case on a bigger chip (80 cores x 64 x
+#: 32 columns at nz = 256 would be 3.0 GB) is held to it.
+YSU_TILE_BYTES_CAP_METAL = 512 * 2**20
+
+
+def _positive_env_int(name: str, default: int) -> int:
+    """``name`` as a positive integer when set (blank counts as unset),
+    else ``default``; anything else is refused."""
+    import os
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer, not {raw!r}")
+    return value
+
+
+def ysu_metal_tile_blocks() -> int:
+    """Blocks per core of the Metal YSU tile: ``WOOF_METAL_YSU_TILE_BLOCKS``
+    when set, else :data:`YSU_TILE_BLOCKS_PER_CORE_METAL`."""
+    return _positive_env_int("WOOF_METAL_YSU_TILE_BLOCKS",
+                             YSU_TILE_BLOCKS_PER_CORE_METAL)
+
+
+def metal_tile_columns(cores: int, ncol: int, block: int, *,
+                       blocks_per_core: int,
+                       block_bytes: int | None = None,
+                       cap_bytes: int = YSU_TILE_BYTES_CAP_METAL) -> int:
+    """Columns per Metal launch of a tiled column kernel: ``blocks_per_core``
+    blocks of ``block`` columns per GPU core, at most ``ncol``, narrowed to
+    whole blocks whose workspace (``block_bytes`` per block, when given)
+    fits ``cap_bytes``, and never below one block (a ``block_bytes`` of
+    zero or less sets no cap).
+
+    The shared Metal rule of YSU, MRF, EEPS and the column cumulus schemes.
+    CUDA sizes those tiles to the card's resident capacity because the
+    workspace is charged per column in flight; on Metal that rule leaves
+    the cores unsaturated and costs a full serial column time per launch,
+    so Metal launches as many columns as the per-core width and the byte
+    cap allow (a 228 x 276 domain in one launch for MRF, two for New SAS
+    at 49 levels, where the cap binds).  The
+    tile only partitions independent columns, so the words do not depend
+    on it (tests/test_ysu_tile_width.py, tests/test_metal_column_tiles.py).
+    """
+    block = int(block)
+    tile = int(cores) * int(blocks_per_core) * block
+    if block_bytes is not None and int(block_bytes) > 0:
+        tile = min(tile, (int(cap_bytes) // int(block_bytes)) * block)
+    return int(max(block, min(int(ncol), tile)))
+
+
+#: Metal blocks per core of the MRF and column-cumulus tiles, in
+#: ``YSU_BLOCK`` (32-column) units, so each launches YSU's columns per
+#: core whatever its own block: 2,048 columns per core, 81,920 on a
+#: 40-core M3 Max (before the byte cap).
+#: ``WOOF_METAL_COLUMN_TILE_BLOCKS`` overrides it (same units).
+METAL_COLUMN_TILE_BLOCKS_PER_CORE = YSU_TILE_BLOCKS_PER_CORE_METAL
+
+
+def metal_column_tile_columns(cores: int, ncol: int, block: int, *,
+                              block_bytes: int | None = None) -> int:
+    """:func:`metal_tile_columns` for MRF, EEPS and the column cumulus schemes: :data:`METAL_COLUMN_TILE_BLOCKS_PER_CORE` (or
+    ``WOOF_METAL_COLUMN_TILE_BLOCKS``) 32-column units per core, rounded
+    down to whole ``block``-column blocks (at least one per core), under
+    :data:`YSU_TILE_BYTES_CAP_METAL`."""
+    units = _positive_env_int("WOOF_METAL_COLUMN_TILE_BLOCKS",
+                              METAL_COLUMN_TILE_BLOCKS_PER_CORE)
+    per_core = max(1, units * YSU_BLOCK // int(block))
+    return metal_tile_columns(cores, ncol, block, blocks_per_core=per_core,
+                              block_bytes=block_bytes)
+
+
+def ysu_metal_tile_columns(cores: int, ncol: int, nz: int | None = None) -> int:
+    """Columns per Metal YSU launch: :func:`ysu_metal_tile_blocks` blocks per
+    core, at most ``ncol``, narrowed to whole blocks whose workspace fits
+    :data:`YSU_TILE_BYTES_CAP_METAL` when ``nz`` is given, and never below
+    one block (:func:`metal_tile_columns`).  The tile only partitions
+    independent columns, so the words do not depend on it
+    (tests/test_ysu_tile_width.py)."""
+    per_block = (None if nz is None
+                 else YSUWS_SLOTS * (int(nz) + 1) * YSU_BLOCK * 4)
+    return metal_tile_columns(cores, ncol, YSU_BLOCK,
+                              blocks_per_core=ysu_metal_tile_blocks(),
+                              block_bytes=per_block)
 
 
 def ysu_workspace_floats(nz: int, columns: int) -> int:

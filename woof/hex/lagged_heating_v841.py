@@ -1,4 +1,4 @@
-"""MPAS-A's lagged microphysics heating for the WOOF column physics path (finding SG2).
+"""MPAS-A's lagged microphysics heating for the WOOF-ArWen column physics path (finding SG2).
 
 What native MPAS-A v8.4.2 does (the authority, read at MPAS-Model f34984b2):
 
@@ -16,7 +16,7 @@ What native MPAS-A v8.4.2 does (the authority, read at MPAS-Model f34984b2):
   and wind response inside the step is what the carry changes.
 
 hex had the consumer half only on ``hex/gap-da-to-nest-les`` (commit e7be214b,
-fed by the native mpasphys runtime) and no producer at all on the WOOF column
+fed by the native mpasphys runtime) and no producer at all on the WOOF-ArWen column
 path that every state analysis forecast runs: the adapter declined the engine's WRF-style
 ``h_diabatic`` (a DRY-theta rate, which is not the MPAS quantity; the audit's
 heating contract measured a 21 % error on a condensing fixture if it were
@@ -37,7 +37,7 @@ The rate is formed from the same two values the native assignment uses:
 stepping, the class step -- which is native's ``dt_dyn`` for that call.
 
 There is no switch.  The carry is MPAS-A's own behaviour, so it moves the hex
-WOOF path TOWARD the matched dynamics; with physics off nothing produces a
+WOOF-ArWen path TOWARD the matched dynamics; with physics off nothing produces a
 rate, the dycore launches nothing and the dry byte identity is untouched.
 """
 
@@ -163,10 +163,18 @@ def lagged_theta_m_rate(
     threads = 128
     kernel(((count + threads - 1) // threads,), (threads,),
            (np.int32(count), np.float32(rvord), np.float32(dt), before, theta, qv, rate, invalid))
-    if int(invalid.get()[0]) != 0:
-        raise FloatingPointError(
-            "lagged microphysics heating rate is not finite; carrying it would put a "
-            "non-finite theta tendency into every RK stage of the next step")
+    from woof.core import health_ledger
+
+    message = ("lagged microphysics heating rate is not finite; carrying it would put a "
+               "non-finite theta tendency into every RK stage of the next step")
+
+    def describe(_flags: int) -> None:
+        raise FloatingPointError(message + health_ledger.deferred_note())
+
+    # Read now, or -- inside the hex composite step's resident ledger -- at
+    # its pre-commit drain, which refuses this same step before publication.
+    if health_ledger.read_status(invalid, site="lagged-heating", describe=describe):
+        raise FloatingPointError(message)
     return rate
 
 

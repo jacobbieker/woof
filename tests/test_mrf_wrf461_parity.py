@@ -179,7 +179,7 @@ def test_a_tiled_launch_equals_a_single_one(oracle):
     whole = launch()
     original = mrf.mrf_tile_columns
     try:
-        mrf.mrf_tile_columns = lambda fn, ncol: mrf.MRF_BLOCK
+        mrf.mrf_tile_columns = lambda fn, ncol, nz=None: mrf.MRF_BLOCK
         tiled = launch()
     finally:
         mrf.mrf_tile_columns = original

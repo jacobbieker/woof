@@ -7,7 +7,7 @@ Runge-Kutta outer integration wrapping split-explicit acoustic steps
 (forward-backward horizontal, implicit vertical, recoupled to the large step), on a
 hybrid terrain-following dry-mass vertical coordinate, FP32 on CUDA
 [docs/gpuwm-project-history.md:65; README.md, current release scope]. The RK stage table is a
-config-visible knob (`rk_ord`, default 3) [docs/public/CONFIGURATION.md:1130].
+config-visible knob (`rk_ord`, default 3) [docs/public/CONFIGURATION.md:1233].
 
 Advection is WRF's stencils: horizontal momentum and scalars are the WRF flux5
 (5th-order) stencil, and the vertical faces take WRF's `vert_order` ladder,
@@ -17,9 +17,9 @@ selected by `v_sca_adv_order` for scalars, theta, TKE and w and by
 operational HRRR runs 5). Transported-scalar horizontal stencils are fixed at
 5th order, so the importer accepts only the Registry default
 `h_sca_adv_order = 5`; the configurable `h_sca_adv_order` (legacy default 2) feeds
-the geopotential equation only [docs/public/CONFIGURATION.md:654]. Moist transport
+the geopotential equation only [docs/public/CONFIGURATION.md:757]. Moist transport
 runs WRF option 1 (positive-definite limiter) with `scalar_adv_opt` required to
-match [docs/public/CONFIGURATION.md:658, 1135]. At vertical order 5 its
+match [docs/public/CONFIGURATION.md:761, 1238]. At vertical order 5 its
 low-order eta flux takes the operational fork's semi-Lagrangian sum of the
 upstream cells above face Courant 1 (`woof/core/kernels/pd_vertical_sl.cu`)
 and the upwind flux elsewhere, so the limiter stays positive definite.
@@ -31,7 +31,7 @@ the upwind low-order flux at every face.
 
 Lateral boundaries use specified/relaxation zones with Davies-style weighting;
 `spec_bdy_width` defaults to 5 and must be at least `spec_zone + relax_zone`
-[docs/public/CONFIGURATION.md:146, 661]. The damping stack is described in section 1.2.
+[docs/public/CONFIGURATION.md:146, 764]. The damping stack is described in section 1.2.
 
 No symbolic statement of the governing equation set exists in the documentation
 tree; the prose description above and the WRF-ARW technical-note lineage are the
@@ -41,8 +41,8 @@ reference. This is recorded as a documentation gap, not a claim.
 
 `hybrid_opt` supports 0/1 (sigma, `B(eta)=eta`) and 2 (WRF cubic-B hybrid); anything
 else is refused by name. The importer and the domain wizard default to 2 with
-`etac = 0.2` [docs/public/CONFIGURATION.md:184-185; woof/namelist_import.py:3011-3012;
-woof/domain_wizard.py:867]. That `etac` is the value asked for, not always the
+`etac = 0.2` [docs/public/CONFIGURATION.md:186-187; woof/namelist_import.py:6956-6957;
+woof/domain_wizard.py:1524]. That `etac` is the value asked for, not always the
 value run: at `hybrid_opt = 2` the cubic orders a column only while its surface
 pressure stays above a floor set by `etac` and `p_top` (46408 Pa, about 6082 m of
 terrain, at the shipped pair), and WRF calls a column below it fatal. Preparation
@@ -122,14 +122,14 @@ as an experimental path: it runs, it is stamped as experimental in the run's own
 provenance, and one-way consumers refuse a feedback-modified parent. It feeds back
 dynamic state only, where WRF also feeds back hundreds of masked land-surface
 fields, so it is not a WRF-equivalent claim [README.md, current release scope;
-docs/public/CONFIGURATION.md:140-141]. `smooth_option` admits 0 only (the parent
+docs/public/CONFIGURATION.md:143-144]. `smooth_option` admits 0 only (the parent
 smoother acts only under two-way feedback). No receipt, gate, or measurement exists
 yet for the two-way path beyond its stamping; treat it accordingly.
 
 Execution walks parent before child on a flat integer-tick schedule so no
 floating-point clock drift can reorder coupling; child timestep derives exactly as
 `dt_child = dt_parent / parent_time_step_ratio`
-[docs/gpuwm-project-history.md:75; docs/public/CONFIGURATION.md:235].
+[docs/gpuwm-project-history.md:75; docs/public/CONFIGURATION.md:238].
 Parent-to-child initialization uses WRF's SINT interpolation family with
 stagger-aware geometry; lateral forcing is stored as value/tendency tables in WRF
 `bdy_interp1` form [docs/gpuwm-project-history.md:77]. All 128 WRF boundary tables
@@ -146,7 +146,7 @@ ratios 3 and 4 [PROVENANCE.md:576; tests/test_nest_interp.py].
 
 ### 2.5.1 The mechanism
 
-A moving nest in WOOF is a sequence of static nests joined by a re-grid at cycle
+A moving nest in WOOF-ArWen is a sequence of static nests joined by a re-grid at cycle
 boundaries. WRF's continuous per-step motion is not adopted and its namelist keys
 stay refused [docs/nest-relocation-identity-decision.md:29-31]. The design is exact
 rather than approximate: a placement is a whole number of parent cells, so a move of
@@ -181,7 +181,7 @@ Two inventories move, both derived rather than hand-listed:
 1. **Serialized model state**: exactly the restart layer's serialized-state
    contract (`woof.state_serialization_contract.STATE_SERIALIZED_ATTRS`), so a
    field added to the model reaches checkpointing and relocation at once
-   [woof/core/nest_relocation.py:486-496].
+   [woof/core/nest_relocation.py:781-813].
 2. **Driver-held physics continuation state** (new in 2.5.0): everything the
    physics driver holds per column that is cross-step memory nothing recomputes:
    Kain-Fritsch NCA hold timers, held cumulus rates, PRATEC/RAINCV, the
@@ -287,7 +287,7 @@ and nested domains, not radiative open ones, and is WRF-only (refused on MPAS).
 
 `km_opt=2` additionally requires `bl_pbl_physics=0`: WRF will evolve TKE with the
 PBL on, but that combination has no vertical TKE mixing (WRF's
-`vertical_diffusion_2` is PBL-off-gated), so WOOF refuses it rather than run a
+`vertical_diffusion_2` is PBL-off-gated), so WOOF-ArWen refuses it rather than run a
 half-wired scheme [docs/public/LES.md:24-32].
 
 The property most often misread: with the PBL off, `km_opt` 2 or 3 give vertical
@@ -330,18 +330,18 @@ one line naming the ratio and the limit, and reported by the preflight checker
 `woof check` (section 8.5) as what the run will do. A config that writes
 `mix_isotropic = 0` keeps it, in the danger zone
 too, and gets the advisory carrying the override state
-[docs/public/LES.md:430-442; docs/public/CONFIGURATION.md:480]. Because
+[docs/public/LES.md:430-442; docs/public/CONFIGURATION.md:738]. Because
 `mix_isotropic` is inside the restart fingerprint, a checkpoint written under the
 old anisotropic default does not bit-continue under the auto-selected isotropic
 form. A guard test fails if any shipped config arrives on the exposed path, and the
 check resolves the level ladder from `nz`/`ztop` when a config leaves interfaces
 implicit [tests/test_shipped_configs_mixing_stability.py; docs/public/LES.md:421-428].
 
-Related divergence D8, which is a different operator from the one above: WOOF
+Related divergence D8, which is a different operator from the one above: WOOF-ArWen
 hands the *vertical* diffusion of vertical velocity (`vertical_diffusion_w_2`)
 `xkmv` where WRF hands it `xkmh`. WRF's horizontal `w` operator
 (`horizontal_diffusion_w_2`), the one the criterion above is about, takes `xkmv` in
-WRF and WOOF follows it unchanged. It can only matter where the two
+WRF and WOOF-ArWen follows it unchanged. It can only matter where the two
 coefficients differ (`km_opt` 2 or 3 with `mix_isotropic = 0`); taking WRF's choice
 is unstable at dx 250 m against dz 17 m, and on the idealized convective
 boundary-layer case the WRF oracle lane measured `XKMH == XKMV` at all 589,824
@@ -374,7 +374,7 @@ surface heat flux 0.24 K m/s [docs/public/LES.md:59-204]:
   fraction, 0.27% on prognostic subgrid TKE. No pass band is cut; differences are
   reported, not judged.
 - Realisation spread measured, not assumed (n=18 at 100 m, n=9 at 50 m): on the
-  flux-fraction arm WOOF's spread is 8.7x WRF's (0.01414 vs 0.00163 stdev at
+  flux-fraction arm WOOF-ArWen's spread is 8.7x WRF's (0.01414 vs 0.00163 stdev at
   100 m), an open question recorded rather than diagnosed; on the TKE-based
   resolved fraction the two are at parity (0.00231 vs 0.00247).
 - TKE budget closure over a 120-step window: relative residual 2.49e-9.

@@ -124,9 +124,9 @@ CLEAR_AIR_NAME = "z0"
 #: its clear air was refused by the filter, the precipitation analysis and
 #: the heating builder alike, so the documented European route ended at the
 #: file.
-CLEAR_AIR_SOURCES = ("finite_below_floor",
-                     "below_threshold_and_finite_below_floor",
-                     "undetect_and_finite_below_floor")
+#: Upstream WOOF 1.1.7 moved the tuple into woof.da.radar_tten when it removed
+#: this adapter; the fork keeps the adapter and reads the one tuple from there.
+from woof.da.radar_tten import _CLEAR_AIR_SOURCES as CLEAR_AIR_SOURCES  # noqa: E402
 
 #: Backwards-compatible alias for the measurement-only regime.
 CLEAR_AIR_SOURCE = CLEAR_AIR_SOURCES[0]

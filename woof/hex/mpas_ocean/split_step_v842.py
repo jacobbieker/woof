@@ -16,12 +16,22 @@
    :mod:`~woof.hex.mpas_ocean.tend_tracer_v842`) and the update: half-way
    with ``ocn_diagnostic_solve`` before the last iteration, the full step (with
    the budgets per unit thickness and the salinity floor) at it;
-3. the diagnostics and implicit vertical mixing
-   (:mod:`~woof.hex.mpas_ocean.diagnostics_v842`,
+3. the diagnostics, GM's bolus velocity (``config_use_standardGM``;
+   :mod:`~woof.hex.mpas_ocean.gm_v842`) and implicit vertical mixing (with
+   GM's ``k33``; :mod:`~woof.hex.mpas_ocean.diagnostics_v842`,
    :mod:`~woof.hex.mpas_ocean.vmix_v842`), the prescribed velocity or
-   thickness, the diagnostics again, the cell-centred velocity and SSH
-   gradient (``mpas_reconstruct``), the coupler's surface fields and their
-   running means (``ocn_time_average_coupled_accumulate``).
+   thickness, the diagnostics again, the land-ice effective density
+   ('coupled'; ``ocn_effective_density_in_land_ice_update``), GM's bolus
+   velocity again (for the next step's transport), the cell-centred velocity
+   and SSH gradient (``mpas_reconstruct``), the coupler's surface fields and
+   their running means (``ocn_time_average_coupled_accumulate``, the
+   land-ice means in 'coupled'), and with GM the transport, bolus, slope and
+   stream-function vectors on cells (``ocn_reconstruct_gm_vectors``,
+   :func:`reconstruct_gm_vectors`).
+
+With GM on, stage 2's transport velocity adds the bolus velocity the previous
+step left, and the tracer tendency carries Redi's isoneutral mixing
+(:mod:`~woof.hex.mpas_ocean.tracer_hmix_v842`) on that step's slopes.
 
 The pools are dicts of device arrays named as in MPAS (``mesh``, ``state``,
 ``tracers``, ``diagnostics``, ``forcing``, ``tend``, ``tracersTend``,
@@ -34,8 +44,7 @@ verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
 ``tests/test_mpas_ocean_split_step_parity.py``).
 
 Refused by name, beyond what the pieces refuse: the high-frequency thickness
-filter, GM (``config_use_standardGM``), the coupled land-ice effective
-density, a time integrator other than 'split_explicit' or
+filter, a time integrator other than 'split_explicit' or
 'unsplit_explicit', and the sphere's reconstruction at RKIND 8
 without the glibc 2.39 opt-in (``WOOF_GLIBC239_LIBM64=1``).
 """
@@ -47,19 +56,20 @@ from pathlib import Path
 
 import numpy as np
 
+from woof import quirk_corrections
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ice import rkind
 
-from . import (btr_subcycle_v842, diagnostics_v842, forcing_v842, tend_tracer_v842, tend_v842,
-               vert_transport_v842, vmix_v842)
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
+from . import (btr_subcycle_v842, diagnostics_v842, forcing_v842, gm_v842, land_ice_v842, tend_tracer_v842,
+               tend_v842, vert_transport_v842, vmix_v842)
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, column_lanes, launch_options
 
 SOURCE_FILES = (
     "src/core_ocean/mode_forward/mpas_ocn_time_integration_split.F:82-1926",
-    "src/core_ocean/shared/mpas_ocn_diagnostics.F:1062-1128",
+    "src/core_ocean/shared/mpas_ocn_diagnostics.F:1062-1128,1844-1920",
     "src/operators/mpas_vector_reconstruction.F:205-339,489-588",
     "src/core_ocean/shared/mpas_ocn_time_average_coupled.F:202-412",
-)
+) + land_ice_v842.SOURCE_FILES[2:3]
 MODULE_OPTIONS = COMPILE_OPTIONS
 GRAVITY = 9.80616
 T0_KELVIN = 273.16
@@ -112,12 +122,6 @@ def check_config(configs: dict, precision: str, mesh: dict) -> None:
     if configs.get("config_use_freq_filtered_thickness", False):
         _refuse("config_use_freq_filtered_thickness", True, "the high-frequency thickness filter is not ported",
                 "config_use_freq_filtered_thickness = .false.")
-    if configs.get("config_use_standardGM", False):
-        _refuse("config_use_standardGM", True, "GM (mpas_ocn_gm.F) is not ported",
-                "config_use_standardGM = .false.")
-    if configs.get("config_land_ice_flux_mode", "off") == "coupled":
-        _refuse("config_land_ice_flux_mode", "coupled", "the coupled land-ice effective density is not ported",
-                "config_land_ice_flux_mode = 'off' | 'pressure_only'")
     if configs.get("mesh:on_a_sphere", False) and precision == "r8" and not rkind.trig64():
         _refuse("on_a_sphere", True, rkind.trig_refusal("mpas_reconstruct calls glibc's double cos and sin"),
                 "on_a_sphere = .false. at RKIND 8, or WOOF_GLIBC239_LIBM64=1")
@@ -134,8 +138,13 @@ def _cut(pool: dict, sizes: dict) -> dict:
     return out
 
 
-def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -> None:
-    """``ocn_time_integrator_split`` for one block, in place on the pools."""
+def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict, t0_kelvin: float = T0_KELVIN) -> None:
+    """``ocn_time_integrator_split`` for one block, in place on the pools.
+
+    ``t0_kelvin`` is ocn_constants' ``T0_Kelvin``, which the coupler's running
+    mean adds to the surface temperature: v8.4.2's own 273.16 by default, or
+    shr_const_mod's 273.15 when the constants are E3SM's build's
+    (``MPAS_ESM_SHR_CONST``; :mod:`woof.hex.coupled.hybrid_ocean`)."""
     import cupy as cp
     m, st, tr = pools["mesh"], pools["state"], pools["tracers"]
     d, f, td = pools["diagnostics"], pools["forcing"], pools["tend"]
@@ -164,7 +173,8 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
 
     sizes = {nc + 1: nc, ne + 1: ne, nv + 1: nv}
     mesh_cut = _cut(m, sizes)
-    tend_configs = {k: configs[k] for k in forcing_v842.DEFAULT_CONFIGS if k in configs}
+    tend_configs = {k: configs[k] for k in (*forcing_v842.DEFAULT_CONFIGS, *forcing_v842.WOOF_OPT_INS,
+                                            quirk_corrections.UMBRELLA) if k in configs}
 
     # the preparation
     _launch(precision, "ocn_ss_prep_edges_v842", ne * nl, (
@@ -201,10 +211,11 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
                 st["normalVelocity@2"], st["normalBaroclinicVelocity@2"], m["weightsOnEdge"], m["fEdge"],
                 m["edgesOnEdge"], m["nEdgesOnEdge"], m["maxLevelEdgeTop"], i32(m["nEdgesSolve"]), i32(nl), i32(me2)))
             n1 = int(m["nEdgesArray"][0])
-            _launch(precision, "ocn_ss_bcl_v842", n1, (
+            lanes = column_lanes()
+            _launch(precision, "ocn_ss_bcl_v842", n1 * lanes, (
                 st["normalBaroclinicVelocity@2"], d["barotropicForcing"], u_temp, st["normalBaroclinicVelocity"],
                 td["normalVelocity"], st["normalVelocity@2"], st["ssh@2"], d["layerThicknessEdge"], m["dcEdge"],
-                m["cellsOnEdge"], m["maxLevelEdgeTop"], i32(n1), i32(nl), i32(split), rdt, gravity))
+                m["cellsOnEdge"], m["maxLevelEdgeTop"], i32(n1), i32(nl), i32(split), rdt, gravity, i32(lanes)))
         # stage 2: the barotropic velocity
         btr_state = {name: [st[name], st[f"{name}@2"]] for name in (
             "normalBarotropicVelocity", "sshSubcycle", "normalBarotropicVelocitySubcycle", "normalVelocity",
@@ -256,6 +267,10 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
 
     diagnostics_v842.diagnostic_solve(dt=dt, mesh=m, state=state_at(2), tracers=tracers_at(2), diagnostics=d,
                                       forcing=f, configs=configs)
+    gm = bool(configs.get("config_use_standardGM", False))
+    if gm:
+        # the bolus velocity stage 2 of the next step adds (and k33, which vmix adds)
+        gm_v842.compute_bolus_velocity(mesh=m, diagnostics=d, configs=configs)
     vmix_v842.vmix_implicit(dt=dt, mesh=m, state=state_at(2), tracers=tracers_at(2), diagnostics=d,
                             configs=configs)
     if configs.get("config_prescribe_velocity", False):
@@ -264,6 +279,9 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
         st["layerThickness@2"][:nc] = st["layerThickness"][:nc]
     diagnostics_v842.diagnostic_solve(dt=dt, mesh=m, state=state_at(2), tracers=tracers_at(2), diagnostics=d,
                                       forcing=f, configs=configs)
+    land_ice_v842.effective_density_update(mesh=m, forcing=f, state=st, configs=configs)
+    if gm:
+        gm_v842.compute_bolus_velocity(mesh=m, diagnostics=d, configs=configs)
 
     sphere = i32(bool(configs.get("mesh:on_a_sphere", False)))
     for u, names, levels in ((st["normalVelocity@2"], ("velocityX", "velocityY", "velocityZ", "velocityZonal",
@@ -272,18 +290,66 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
                                              "gradSSHMeridional"), 1)):
         _launch(precision, "ocn_ss_reconstruct_v842", nc * levels, (
             *(d[n] for n in names), u, m["coeffs_reconstruct"], m["nEdgesOnCell"], m["edgesOnCell"], m["latCell"],
-            m["lonCell"], i32(nc), i32(levels), i32(me), sphere))
+            m["lonCell"], i32(nc), i32(levels), i32(me), sphere, i32(levels), i32(levels)))
     _launch(precision, "ocn_ss_surface_v842", nc, (
         d["surfaceVelocity"], d["SSHGradient"], d["velocityZonal"], d["velocityMeridional"], d["gradSSHZonal"],
         d["gradSSHMeridional"], i32(nc), i32(nl), i32(d["index_surfaceVelocityZonal"]),
         i32(d["index_surfaceVelocityMeridional"]), i32(d["index_SSHGradientZonal"]),
         i32(d["index_SSHGradientMeridional"])))
+    time_average_accumulate(diagnostics=d, forcing=f, effective_density=st.get("effectiveDensityInLandIce@2"),
+                            configs=configs, t0_kelvin=t0_kelvin)
+    if gm:
+        reconstruct_gm_vectors(mesh=m, diagnostics=d, configs=configs)
+
+
+def time_average_accumulate(*, diagnostics: dict, forcing: dict, effective_density, configs: dict,
+                            t0_kelvin: float = T0_KELVIN) -> None:
+    """``ocn_time_average_coupled_accumulate``: the coupler's running means
+    of the surface fields (and the land-ice means in 'coupled') over the
+    forcing pool's cells, then the count moved on. ``effective_density`` is
+    the time level the caller's ``timeLevel`` names."""
+    d, f = diagnostics, forcing
+    precision = _precision_of(f["avgTracersSurfaceValue"])
+    real = PRECISIONS[precision]
+    i32 = np.int32
     n_cells_forcing = int(f["nCells"])
     _launch(precision, "ocn_ss_time_average_v842", n_cells_forcing, (
         f["avgTracersSurfaceValue"], f["avgSSHGradient"], f["avgSurfaceVelocity"], d["tracersSurfaceValue"],
         d["gradSSHZonal"], d["gradSSHMeridional"], d["surfaceVelocity"], i32(n_cells_forcing),
         i32(f["avgTracersSurfaceValue"].shape[1]), i32(f["index_avgTemperatureSurfaceValue"]),
         i32(f["index_avgSSHGradientZonal"]), i32(f["index_avgSSHGradientMeridional"]),
-        i32(f["nAccumulatedCoupled"]), real(T0_KELVIN)))
+        i32(f["nAccumulatedCoupled"]), real(t0_kelvin)))
+    land_ice_v842.coupled_means(diagnostics=d, forcing=f, effective_density=effective_density,
+                                n_cells=n_cells_forcing, n_accumulated=int(f["nAccumulatedCoupled"]), configs=configs)
     # ocn_time_average_coupled_accumulate counts the step in
     f["nAccumulatedCoupled"] = int(f["nAccumulatedCoupled"]) + 1
+
+
+#: ocn_reconstruct_gm_vectors' edge fields and the cell vectors it makes of them
+GM_VECTORS = (
+    ("normalTransportVelocity", ("transportVelocityX", "transportVelocityY", "transportVelocityZ",
+                                 "transportVelocityZonal", "transportVelocityMeridional")),
+    ("normalGMBolusVelocity", ("GMBolusVelocityX", "GMBolusVelocityY", "GMBolusVelocityZ", "GMBolusVelocityZonal",
+                               "GMBolusVelocityMeridional")),
+    ("relativeSlopeTopOfEdge", ("relativeSlopeTopOfCellX", "relativeSlopeTopOfCellY", "relativeSlopeTopOfCellZ",
+                                "relativeSlopeTopOfCellZonal", "relativeSlopeTopOfCellMeridional")),
+    ("gmStreamFuncTopOfEdge", ("GMStreamFuncX", "GMStreamFuncY", "GMStreamFuncZ", "GMStreamFuncZonal",
+                               "GMStreamFuncMeridional")),
+)
+
+
+def reconstruct_gm_vectors(*, mesh: dict, diagnostics: dict, configs: dict) -> None:
+    """``ocn_reconstruct_gm_vectors`` (``mpas_ocn_diagnostics.F``): ``mpas_reconstruct``
+    of the transport and bolus velocities and of the relative slope and the
+    stream function at the layer tops, over ``nCellsSolve`` (no halos) and
+    levels 1..nVertLevels (the ``nVertLevels+1`` fields' last level is left)."""
+    m, d = mesh, diagnostics
+    precision = _precision_of(d["normalTransportVelocity"])
+    i32 = np.int32
+    nl, n_solve, me = int(m["nVertLevels"]), int(m["nCellsSolve"]), int(m["edgesOnCell"].shape[1])
+    sphere = i32(bool(configs.get("mesh:on_a_sphere", False)))
+    for source, names in GM_VECTORS:
+        u = d[source]
+        _launch(precision, "ocn_ss_reconstruct_v842", n_solve * nl, (
+            *(d[n] for n in names), u, m["coeffs_reconstruct"], m["nEdgesOnCell"], m["edgesOnCell"], m["latCell"],
+            m["lonCell"], i32(n_solve), i32(nl), i32(me), sphere, i32(u.shape[1]), i32(d[names[0]].shape[1])))

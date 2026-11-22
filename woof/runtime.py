@@ -476,6 +476,7 @@ def _write_runtime_report(outdir: Path, exp: ExperimentConfig, summary, *,
     ``runplan._chain_summary`` read no status, timing or hydro record from
     an ERA5 forecast.  Same file name and the same top-level keys.
     """
+    from woof.surface_ocean import domains_ocean_receipt
     nan_free = bool(getattr(summary, "nan_free", False))
     health = {"nan_free": nan_free}
     for key in ("w_max_ms", "boundary_w_max_ms", "interior_w_max_ms",
@@ -496,6 +497,8 @@ def _write_runtime_report(outdir: Path, exp: ExperimentConfig, summary, *,
         "timing_seconds": {"total": float(wall_seconds)},
         "health": health,
         **(dict(summary.hydro_receipts) if summary.hydro_receipts else {}),
+        # The ocean each domain ran, in words, every run (door item 6).
+        "ocean": domains_ocean_receipt(domain.run for domain in exp.domains),
     }
     path = Path(outdir) / "report.json"
     tmp = path.with_name(f".report.json.{os.getpid()}.tmp")
@@ -1743,14 +1746,15 @@ def _child_radiation_adapter(exp: ExperimentConfig, data: CaseDataConfig,
     from woof.physics_compat import RRTMG_VARIANT_LEGACY, rrtmg_variant
     cfg = dc.run
     ozone_parent = None
-    if (4 in radiation_scheme_ids(cfg)
-            and rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY
+    ids = radiation_scheme_ids(cfg)
+    # RRTMG-K (14/14) radiates its parent's ozone exactly like legacy RRTMG.
+    if (((4 in ids and rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY) or 14 in ids)
             and cfg.o3input == 2):
         if radiation_parent is None:
             from woof.core.cam_ozone import cam_ozone_domain_ids, DriverOzoneProvider
             if exp is None or dc.grid_id not in cam_ozone_domain_ids(exp):
                 raise ValueError(
-                    "ra_rrtmg_variant='rrtmg_legacy' on child domain "
+                    "legacy RRTMG or RRTMG-K with o3input=2 on child domain "
                     f"grid_id={dc.grid_id} requires radiation_parent= "
                     "or the experiment's shared CAM ozone carrier")
             ozone_parent = DriverOzoneProvider()
@@ -3950,7 +3954,7 @@ def _exchange_consumer_planes(model, steppers, direction: str,
 
     ``names`` is THIS consumer's slots and no one else's, on the same
     reasoning that gave the two consumers separate windows in the first place
-    (WOOF's ruling, 2026-08-07): the relocation runner resets the follow
+    (WOOF-ArWen's ruling, 2026-08-07): the relocation runner resets the follow
     window on its own cadence, from inside ``execute_experiment``, and a
     spawn boundary that published or adopted that window as well could undo a
     reset the tracker had already made or hand it a window measured against a
@@ -5247,6 +5251,13 @@ def integrate_prepared_case(
             state, history_selection, nx=cfg.nx, ny=cfg.ny, dx=cfg.dx,
             dy=cfg.dy, grid_id=domain_id,
             latlon=prepared.grid.latlon_mass, streamed=streamed)
+    # --nn (woof.nn.launch): the opt-in NN column seat the dycore step
+    # calls; without it no seat, tap or model runtime is imported.
+    nn_seat = None
+    if os.environ.get("WOOF_NN_CONFIG"):
+        from woof.nn.wrf_seat import attach as attach_nn_seat
+        nn_seat = attach_nn_seat(state, integration_cfg, streamed=streamed,
+                                 resume=restart_path is not None)
     if restart_write_steps is not None:
         # THE CHECKPOINT'S QUESTION, ASKED BEFORE STEP 0.  A run that will
         # write checkpoints must be able to NAME its physics setup, and
@@ -5660,6 +5671,8 @@ def integrate_prepared_case(
         lat, lon = prepared.grid.latlon_mass()
         rainc_lat = float(lat[j, i])
         rainc_lon = float(lon[j, i])
+    if nn_seat is not None:
+        nn_seat.close()
     if health_validations_unarmed:
         import warnings
 
@@ -6131,6 +6144,10 @@ def _run_experiment(exp: ExperimentConfig, data: CaseDataConfig, outdir, *,
     """
     from woof.experiment import _bind_physics_params
     exp = _bind_physics_params(exp, "woof.runtime.run_experiment")
+    if restart is not None:
+        # A resume continues its checkpoint's TEMPO generation.
+        from woof.core.tempo import adopt_checkpoint_generation
+        exp = adopt_checkpoint_generation(exp, restart)
     from woof.ensemble.runtime_context import current_session
     ensemble = current_session()
     if ensemble is not None:

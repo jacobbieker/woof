@@ -35,6 +35,7 @@ FIELDS = _ss.FIELDS + (("diagnostics", "daysSinceStartOfSim", REAL, ()),)
 CLOCK_CONFIG = {
     "config_start_time": "0001-01-01_00:00:00", "diagnostics:simulationStartTime": "0001-01-01_00:00:00",
     "diagnostics:xtime": "0001-01-01_00:00:00", "config_do_restart": False,
+    "config_calendar_type": "gregorian_noleap",  # the Registry default
 }
 #: (name, seed, (nq, nr), nVertLevels, steps, config_dt, config_btr_dt, config overrides)
 CASES = (
@@ -53,6 +54,14 @@ CASES = (
     ("split_filter_btr_mode", 20261504, (6, 6), 7, 2, "00:02:00", "0000_00:00:40", {
         "config_filter_btr_mode": True, "config_start_time": "2000-02-28_23:58:00",
         "diagnostics:simulationStartTime": "2000-01-01_00:00:00"}),
+    # a run started on 1 February 2000 and continued from 1 March: the days
+    # since its start are 28 on the default 365-day calendar, 29 on the
+    # Gregorian one, which has 29 February
+    ("split_noleap_after_february", 20261506, (6, 5), 6, 2, "00:02:00", "0000_00:00:40", {
+        "config_start_time": "2000-03-01_00:00:00", "diagnostics:simulationStartTime": "2000-02-01_00:00:00"}),
+    ("split_gregorian_after_february", 20261507, (6, 5), 6, 2, "00:02:00", "0000_00:00:40", {
+        "config_calendar_type": "gregorian", "config_start_time": "2000-03-01_00:00:00",
+        "diagnostics:simulationStartTime": "2000-02-01_00:00:00"}),
 )
 
 

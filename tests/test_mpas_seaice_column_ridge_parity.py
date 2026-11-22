@@ -135,7 +135,8 @@ def test_fixture_covers_the_branches():
 @pytest.mark.parametrize("overrides, match", [
     ({"config_thermodynamics_type": "zero layer"}, "zerolayer_check"),
     ({"config_use_aerosols": True}, "aerosols"),
-    ({"config_use_column_biogeochemistry": True}, "biogeochemistry"),
+    ({"config_use_column_biogeochemistry": True, "config_use_skeletal_biochemistry": True},
+     "config_use_skeletal_biochemistry"),
 ])
 def test_unported_configurations_are_refused_by_name(overrides, match):
     case = _case("ridge_mushy_level_ponds")

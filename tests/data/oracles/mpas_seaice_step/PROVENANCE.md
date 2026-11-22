@@ -28,8 +28,15 @@ Written by `tools/mpas_seaice_oracle/build.sh` and `make_step_fixture.py` on pb
     `seaice_initialize_time_diagnostics`.
   - Then `oracle_n_steps` times: the clock advanced, `seaice_timestep` and
     `seaice_timestep_finalize`, as `seaice_core_run` calls them.
-  - The time manager is the shared stubs' (whole seconds, proleptic
-    Gregorian).
+  - The time manager is the shared stubs' (whole seconds), on
+    `config_calendar_type`'s calendar, set with `mpas_timekeeping_init`
+    before the clock (`mpas_framework.F:111-116`): the Registry default
+    `gregorian_noleap` (a 365-day year) or `gregorian` (proleptic). On a
+    cold start `seaice_initialize_time_diagnostics` sets
+    `simulationStartTime` to the start, so no output word here depends on
+    the calendar (`xtime` is a string the stream does not carry);
+    `tests/test_mpas_clock_calendar.py` checks the clock's dates on both
+    calendars.
 
 ## Cases
 
@@ -37,7 +44,7 @@ Written by `tools/mpas_seaice_oracle/build.sh` and `make_step_fixture.py` on pb
 |---|---|---|---|---|
 | `evp_three_steps` | 12 x 6 (3) | 3 | 1800 s | EVP, 30 elastic subcycles, air stress, ocean stress, geostrophic tilt |
 | `revised_two_dynamics_subcycles` | 12 x 6 (3) | 2 | 3600 s | revised EVP, two dynamics subcycles of 12 elastic |
-| `no_air_no_tilt` | 10 x 5 (3) | 2 | 1800 s | no air stress, no tilt, no ocean stress; a start across a leap day (its time diagnostics restart from the start time) |
+| `no_air_no_tilt` | 10 x 5 (3) | 2 | 1800 s | no air stress, no tilt, no ocean stress; a start over midnight after 28 February 2000 (to 1 March on the default 365-day calendar; its time diagnostics restart from the start time) |
 
 The meshes are `woof.verify.mpas_ocean_hexmesh.hex_mesh`'s culled hexagonal
 tori as one block of a decomposition, so `nCellsSolve` < `nCells`; MPAS's

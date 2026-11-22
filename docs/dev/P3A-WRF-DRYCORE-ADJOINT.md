@@ -1,0 +1,1282 @@
+# P3a: the WRF dry-core tangent-linear and adjoint (design note)
+
+Part of [DIFFERENTIABLE-HYBRID-PLAN.md](DIFFERENTIABLE-HYBRID-PLAN.md),
+section 3(a), 3(e), 3(g), P3 and gate G3. 4D-Var in
+[WRFDA-3DVAR-PLAN.md](WRFDA-3DVAR-PLAN.md) (section 1.12, `var4d`) needs
+this same tangent-linear (TL) and adjoint (AD) model, so the interfaces
+in section 6 serve both. This note adds no code. Each later PR ports one
+kernel or a few.
+
+## 1. What is being linearised
+
+- **Route:** the WRF route, dry (moist with qv, qc and qr from 8l), with
+  `moist_adv_opt = 0`, specified or periodic lateral boundaries, one domain, no nests and a fixed `dt`.
+  These are WRFPLUS's own limits.
+- **Routine boundaries:** woof's strict sequence (`GPUWM_WRF_EXACT=1`).
+  It keeps WRF's routine boundaries (`small_step_prep`, `advance_uv`,
+  `advance_mu_t`, `advance_w`, `small_step_finish`, ...), so each TL/AD
+  kernel maps to one WRFPLUS routine and can be checked against it alone.
+  The fast mode fuses some of these steps. Its trajectory still serves
+  as the linearisation point (section 3), because the two modes differ
+  only by roundoff.
+- **Vertical coordinate.** WRFPLUS 4.7.1's dynamics TL/AD has no hybrid
+  coordinate. `g_advance_uv`, `g_advance_mu_t`, `g_rhs_ph` and the rest
+  use `muu`/`mu`, not `c1h*muu+c2h`; `c1h/c2h` only pass through
+  `solve_em_tl` and `first_rk_step_part*`.
+  - woof's TL/AD follows woof's primal, so it carries `c1h/c2h`.
+  - It is checked against WRFPLUS at `hybrid_opt = 0` (`c1h = 1`,
+    `c2h = 0`), where the two coincide.
+  - At `hybrid_opt = 2`, only the dot-product, Taylor and TL-vs-NL tests
+    cover it. WRFPLUS gives no evidence there.
+
+## 2. Kernel inventory
+
+**Measured on pb (CUDA).** This is one step of the `dry` suite in
+`tools/profile_launch_overhead.py` (periodic, flat, 40x40x30,
+`time_step_sound = 4`, so 1 + 2 + 4 acoustic substeps), traced with
+`tools/launch_trace.py`:
+
+- **77 raw-kernel launches in fast mode and 78 in strict mode.**
+- CUPTI's 93 (plan 1.4) also counts CuPy elementwise kernels and copies.
+
+The per-step strict sequence:
+
+```
+rk_copy_words
+per stage (x3):
+  rk_zero_words  calc_p_alpha[_carried_muts]
+  flux_div_scalar flux_div_u flux_div_v flux_div_w
+  slow_pgf slow_buoyancy slow_geopotential
+  small_step_init_uv small_step_init_column  calc_coefs x2
+  per substep (1, 2, 4):  advance_uv advance_mu_th advance_w_phi x2
+  small_step_finish_uv small_step_finish_column
+calc_p_alpha_carried_muts set_surface_w health_partial health_final
+```
+
+A real leaf adds the following:
+
+| woof kernel | file |
+|---|---|
+| `coriolis_curvature` | `coriolis_map.cu` |
+| `w_damp` | `openbc.cu` |
+| `specified_relaxation` | `spec_bdy.cu` |
+| `state_specified_relaxation`, `state_relaxation_multi`, `finalize_state_*` | `lbc_state.cu` |
+| `evaluate_linear_boundary` | `lbc_time.cu` |
+| `zero_gradient_w`, `flow_dependent_batch` | `lbc_flow.cu` |
+| diffusion and diff6, when chosen | |
+
+The map below runs from WRF routine (`dyn_em`), to WRFPLUS TL/AD routine
+(`wrftladj/`), to woof primal kernel(s), to the P3a PR group. The TL/AD
+routines are named `g_*` (TL) and `a_*` (AD).
+
+**A: acoustic substep**
+
+| WRF routine | WRFPLUS TL/AD (file) | woof primal |
+|---|---|---|
+| `advance_uv` | `g_/a_advance_uv` (small_step) | `advance_uv` |
+| `advance_mu_t` | `g_/a_advance_mu_t` | `advance_mu_th` (strict: `wrf_advance_mu_theta`) |
+| `advance_w` | `g_/a_advance_w` | `advance_w_phi`, `advance_w_phi_msf` |
+| `calc_p_rho` | `g_/a_calc_p_rho` | inside `advance_w_phi` / `calc_p_alpha` |
+| `calc_coef_w` | `g_/a_calc_coef_w` | `calc_coefs` |
+| `small_step_prep` | `g_/a_small_step_prep` | `small_step_init_uv`, `small_step_init_column` |
+| `small_step_finish` | `g_/a_small_step_finish` | `small_step_finish_uv`, `small_step_finish_column` |
+| `calc_mu_uv_1` | `g_/a_calc_mu_uv_1` (big_step) | `average_mass_faces` |
+| `spec_bdyupdate(_ph)`, `zero_grad_bdy` | `g_/a_spec_bdyupdate` (bc), `g_/a_spec_bdyupdate_ph` (bc_em), `g_/a_zero_grad_bdy` (bc) | `advance_specified_phi_w`, `zero_gradient_w` |
+
+**B: RK stage**
+
+| WRF routine | WRFPLUS TL/AD (file) | woof primal |
+|---|---|---|
+| `rk_step_prep`: `calc_mu_uv`, `couple_momentum`, `calc_ww_cp`, `calc_cq` | `g_/a_rk_step_prep` (em), big_step utilities | `average_mass_faces`, `glue_total_theta`, `rk_copy_words` |
+| `calc_p_rho_phi` | `g_/a_calc_p_rho_phi` | `calc_p_alpha[_carried_muts]` |
+| `rk_addtend_dry` | `g_/a_rk_addtend_dry` (em) | strict add-fixed/slow path |
+| `set_w_surface` | `g_/a_set_w_surface` (bc_em) | `set_surface_w` |
+| `set_physical_bc2d/3d` | `g_/a_set_physical_bc*` (bc) | periodic aliasing (`close_periodic_alias`) |
+
+**C: big-step tendencies (`rk_tendency`)**
+
+| WRF routine | WRFPLUS TL/AD (file) | woof primal |
+|---|---|---|
+| `advect_u/v/w`, `advect_scalar` (non-PD, `h/v_mom_adv_order` 2-6) | `G_/a_ADVECT_U/V/W/SCALAR` (advect) | `flux_div_u/v/w/scalar` |
+| `horizontal_pressure_gradient` | `G_/a_HORIZONTAL_PRESSURE_GRADIENT` | `slow_pgf` |
+| `pg_buoy_w` | `g_/a_pg_buoy_w` | `slow_buoyancy` |
+| `rhs_ph` | `g_/a_rhs_ph` | `slow_geopotential[_faces/_open/_vertical]` |
+| `coriolis`, `curvature` | `G_/a_CORIOLIS`, `G_/a_CURVATURE` | `coriolis_curvature` |
+| `w_damp` | `g_/a_w_damp` | `w_damp` |
+| `sixth_order_diffusion` | `g_/a_sixth_order_diffusion` | diff6 (optional, last) |
+| `compute_diff_metrics` + `cal_deform_and_div`, `smag2d_km` (`diff_opt = 1`, `km_opt = 4`) | `g_/a_compute_diff_metrics`, `g_/a_cal_deform_and_div`, `G_/A_SMAG2D_KM` (diffusion) | `wrf_smag_deform`, `wrf_diff_opt1_km4` + `wrf_smag_km_bc` |
+| `horizontal_diffusion` ('u', 'v', 'w'), `horizontal_diffusion_3dmp` ('m', theta) (`diff_opt = 1`) | `G_/A_HORIZONTAL_DIFFUSION`, `g_/a_horizontal_diffusion_3dmp` | `wrf_diff_opt1_horizontal` |
+
+**D: lateral boundaries**
+
+| WRF routine | WRFPLUS TL/AD (file) | woof primal |
+|---|---|---|
+| `relax_bdy_dry`, `relax_bdytend` | `g_/a_relax_bdy_dry`, `G_/a_RELAX_BDYTEND_CORE` | `specified_relaxation`, `state_relaxation_multi` |
+| `spec_bdy_dry`, `spec_bdytend` | `g_/a_spec_bdy_dry`, `g_/a_spec_bdytend` | `state_specified_relaxation` |
+| `spec_bdy_final`, `zero_bdytend` | `g_/a_SPEC_BDY_FINAL`, `g_/a_zero_bdytend` | `finalize_state_*`, `evaluate_linear_boundary` |
+
+Tables A-D have 24 rows. Counted one WRF routine at a time (the
+`rk_step_prep` parts, the advection and diffusion variants, each boundary
+routine), they cover about 37 WRF routines, against about 25 distinct woof
+kernels. Advection is the largest by far: WRFPLUS's
+`module_advect_em_ad.F` is 35.5 k lines, `small_step` AD 5 k, `bc` AD
+3.5 k.
+
+**Out of P3a:** scalar transport with PD/monotonic limiters,
+`moist_adv_opt > 0`, moist `cq`, physics and `h_diabatic` (all P3b), and
+`sumflux`, which only the scalars need.
+
+## 3. Checkpointing
+
+Two levels. Neither adds a hook to `dycore.step`.
+
+1. **Across steps.** The forward model is woof as it runs, in float32,
+   fast or strict.
+   - The driver loop calls `dycore.step` and copies the step-start dry
+     prognostics: `u, v, w, ph', t', mu', p', al'`, plus the static base
+     state, captured once.
+   - Size: about 8 fields, 64 MB per checkpoint at 200x200x50.
+   - A 6 h, 12 km window (300 steps) is 19 GB. It fits in pb's pinned
+     host memory, or the Mac's unified memory, with every step kept.
+     Longer windows use the binomial schedule of plan 3(e), which P4.1
+     owns as `woof/grad/checkpoint.py`. P3a needs only "give me the
+     state at the start of step n".
+   - With physics (P3b), the restart manifest's held tendencies join the
+     checkpoint, as plan 1.3 says.
+2. **Within a step: recompute, then tape.** This is WRFPLUS's own
+   pattern: `solve_em_ad` reruns the forward routine and pushes to
+   `adBuffer`.
+   - From the step-start checkpoint, the TL/AD driver reruns the step's
+     dry arithmetic in **binary64 (NL64)**, inside the same `g_*`
+     kernels. Like Tapenade's output, those kernels advance the base
+     state and the perturbation together.
+   - It keeps the per-stage and per-substep arrays that the AD kernels
+     read: about 80 fields per step at 7 substeps, 1.3 GB in binary64 at
+     200x200x50.
+   - The adjoint sweep then runs the `a_*` kernels in reverse.
+   - Per step, the adjoint costs one NL64 recompute plus the transposed
+     kernels.
+   - The linearisation point is woof's float32 trajectory at step starts
+     and NL64 inside a step. The gap between the two is roundoff, the
+     same gap that WRFPLUS's TL model has against WRF's float NL run.
+
+## 4. Precision, backends and the oracle harness
+
+- **Kernels.** The new `.cu` units go under `woof/grad/wrfplus/kernels/`,
+  one per WRF routine group. Each defines its own `typedef` real type,
+  `double` by default.
+  - The primal `common.cuh` is not included where it would pin
+    `real = float`. Shared index macros are copied with a pointer to
+    their source, so primal files are not edited.
+  - Each unit holds `<routine>_nl` (NL64), `<routine>_tl` (joint base
+    plus perturbation) and `<routine>_ad`.
+- **Backends.**
+  - **CUDA:** binary64. This is the G3 lane; the A6000 runs fp64 at
+    1/32 rate, which goes into the cost ratio. A binary32 instantiation
+    is also built for the 1e-5 lane.
+  - **Mac:** the host backend (`WOOF_BACKEND=host`, the same `.cu` built
+    as C++ at `-ffp-contract=off`) gives binary64 on the CPU. Dot-product,
+    Taylor and WRFPLUS tests run there, and in hosted CI.
+  - **Metal:** no fp64. It runs the binary32 instantiation. The gate
+    there is a dot product to about 1e-5 and agreement with CUDA's
+    binary32 within float tolerance (plan 3(g)). The soft-float df64 path
+    is not differentiated (plan, "not feasible").
+- **WRFPLUS oracle.**
+  - **Build.** Built on pb under `/mnt/NVME2/woof-work/scratch/p3a`:
+    - source: the pristine `v4.7.1.tar.gz` (sha256 `11186188...`);
+    - toolchain: inside `wrf-oracle:u2404`, `./configure wrfplus`, option
+      17 (serial GNU);
+    - flags: `RWORDSIZE 8` (`-fdefault-real-8`) and
+      `FCOPTIM = -O0 -ffp-contract=off -fno-fast-math`;
+    - `./compile wrfplus` takes 6.5 min and gives `main/libwrflib.a` and
+      `wrfplus.exe`.
+  - **Drivers.** Per routine, a small Fortran driver (`tools/wrfplus_oracle/`)
+    is linked against `libwrflib.a`. It reads a raw binary64 input record
+    written by Python, which carries the arguments, the `ims:ime`
+    memory-order dimensions and the config flags. It calls `g_<routine>`
+    and `a_<routine>`, then writes the outputs.
+  - **Inputs.** The Python side makes seeded, physically scaled synthetic
+    states on small grids (for example 9x8x7, `spec_zone = 1`). It
+    converts woof's `(k, j, i)` C-grid to WRF's `(i, k, j)`, and runs the
+    driver in the container.
+  - **Fixtures.** The fixture is `tests/data/wrfplus/<routine>.npz`. It
+    holds the inputs and WRFPLUS's TL and AD outputs, is small, and holds
+    no observation data. Each fixture records the WRFPLUS source digest,
+    the driver digest and the flags.
+  - **The test.** The woof TL/AD kernel must reproduce the fixture to
+    1e-13 relative in binary64; summation order may differ from the
+    Fortran. It runs on host, CUDA and Metal (Metal at binary32
+    tolerance), so after the fixture is made no Fortran is needed.
+    Regenerating a fixture needs pb.
+- **Tests per kernel**, shared with P1's shapes:
+  - TL vs NL64 finite difference, ratio to 1 over at least three
+    decades;
+  - dot product `<TL dx, dy> = <dx, AD dy>` to 1e-12 (binary64) and
+    1e-5 (binary32);
+  - WRFPLUS fixture agreement;
+  - a binding test: NL64 against woof's float32 primal kernel on the
+    same input, within float tolerance. This is the plan's drift
+    guard: a primal edit fails this test until the TL/AD is
+    re-derived.
+- **Helpers.** P1's `woof/grad/checks.py` is torch-autograd based (agreed
+  with the P1 worker). P3a keeps array helpers in
+  `woof/grad/wrfplus/_checks.py` with P1's argument shapes: sequences of
+  arrays, inner products in float64. A thin wrapper can unify them later.
+- **Default path.** No primal file changes. `woof.grad.wrfplus` is
+  imported only by its own tests and CLI. Each PR shows:
+  - identity in child processes under fast and strict, with
+    `GPUWM_WRF_EXACT=0/1`;
+  - the Metal gates;
+  - the rounding audit, with the new kernels registered as opt-in rows;
+  - no import of `woof.grad` from the default path;
+  - unchanged launch counts on the dry trace above.
+
+## 5. Order of work
+
+Each step is one small PR, taken to merged before the next widens.
+
+1. `advance_uv` TL/AD, the `_checks` helpers, the oracle driver
+   framework and fixture writer, and the `<routine>.npz` format. This is
+   the pattern PR.
+2. `advance_mu_t`, `advance_w` (with `calc_p_rho`), `calc_coef_w`.
+3. `small_step_prep`, `small_step_finish`, `calc_mu_uv_1`, plus a
+   **per-acoustic-substep** chained dot-product test
+   (`acoustic_substep_tl/_ad`: advance_uv, advance_mu_t, advance_w in
+   woof's strict order, two substeps, with a finite-difference check of
+   the chain).
+4. RK-stage glue: `rk_step_prep` (`couple_momentum`, `calc_ww_cp`),
+   `calc_p_rho_phi`, `rk_addtend_dry`, `set_w_surface`, periodic
+   physical BCs, plus a per-stage test with tendencies frozen.
+   - Done in `woof/grad/wrfplus/stage.py`, with the chained
+     `rk_stage_tl`/`rk_stage_ad`.
+   - woof's arrays carry no halo, so the periodic physical BCs are the
+     kernels' wrapped face and terrain indices. There is no separate
+     operator; the oracle's halo columns carry the wrapped neighbours.
+   - `rk_addtend_dry` follows woof's decomposition: the held tendf are
+     already divided by the map factor, and the heating carries the
+     hybrid c1h/c2h. The oracle maps WRF's tendf to woof's tendf times
+     msf, at rk_step 2. The rk_step 1 save fold belongs to item 7
+     (lateral boundaries).
+   - Not covered yet, all for item 7: on rk_step 1 with a non-periodic
+     axis, the strict `stage_fluxes(first_stage=True)` takes the
+     boundary-face mu from `carried_wrf_mu_halo`, where these kernels
+     clamp; `_capture_wrf_muts` has a boundary-zone branch the chain
+     does not take (it forms muts = mub + mup + mu'' everywhere).
+   - The chained stage runs calc_p_rho_phi, rk_step_prep,
+     rk_addtend_dry, small_step_init, calc_coef_w, the substeps and
+     small_step_finish, and no others. It leaves out `set_w_surface` (checked on its own),
+     the lateral boundary update and `w_damp` (item 5).
+5. Big-step tendencies: `horizontal_pressure_gradient`, `pg_buoy_w`,
+   `rhs_ph`, `coriolis`, `curvature`, `w_damp`.
+   - `horizontal_pressure_gradient` and `pg_buoy_w` are done in
+     `woof/grad/wrfplus/bigstep.py`. They cover woof's strict `slow_pgf`
+     and `slow_buoyancy`, dry, on periodic, open and specified axes, with
+     the lid extrapolation, map factors and hybrid levels. p is the strict
+     diagnosis's p'.
+   - The pgf AD runs in two passes. One thread per face writes the
+     face's four local adjoints (bracket, layer mass, half-level
+     geopotential difference, vertical term) to scratch, and three gathers
+     (cells, w levels, columns) sum them. That is 2x faster than
+     recomputing the faces in the gathers.
+   - Checks: dot-product test about 1e-16 and FD for 11 configurations.
+     The float base state is the strict primal's words (0 differing, host
+     and CUDA). WRFPLUS 4.7.1 (`tools/wrfplus_oracle/bigstep.F90`) agrees
+     to about 6e-16 on 6 cases.
+   - WRFPLUS's versions are not hybrid (no c1/c2), so the oracle cases
+     use c1 = 1, c2 = 0. The driver forms WRF's precomputed face masses
+     (calc_mu_uv) and half-level geopotential (calc_php) in the fixture,
+     with their transposes.
+   - WRFPLUS bug, found here: with `top_lid`, the reverse sweep of
+     `A_HORIZONTAL_PRESSURE_GRADIENT` still applies the pre-2016 lid
+     extrapolation (cf1-cf3 on kde-1..kde-3). Its forward sweep and the TL
+     use cfn/cfn1, so its adjoint of p at the top three levels is not the
+     transpose of its TL. The oracle leaves those levels out there. The
+     dot-product test holds woof's AD to woof's TL, which matches WRFPLUS's
+     TL.
+   - Not covered: the hydrostatic option and a 1-D base state. The moist
+     cqu/cqv/cqw factors came with DA item 4 (8h).
+   - `rhs_ph` is done in the same module (`geo_tl`, `geo_ad`). It covers
+     woof's strict `slow_geopotential_open` (3-D base, vertical term on,
+     no supplied face masses) for `h_sca_adv_order` 2-6 and 0, on periodic,
+     open and specified axes, with map factors and hybrid levels. For
+     order 5 on periodic or specified axes that kernel gives the fused
+     `slow_geopotential`'s words, and the float base state is checked
+     against both. The outer upwind faces take WRFPLUS's derivative of
+     the clip: min(s, 0) passes the tangent only for s < 0, max(s, 0) for
+     s >= 0.
+   - The AD writes each cell's face and stencil adjoints to y and x
+     scratch, then four gathers (w levels with php, u faces, v faces,
+     columns) sum them, one writer per word. The top level is overwritten
+     by the primal, so its incoming adjoint is zeroed.
+   - Checks: dot-product test about 3e-15 (binary64) and 1.3e-8
+     (binary32) and FD for 11 configurations. The float base state is the
+     strict primal's words (0 differing, host and CUDA). WRFPLUS 4.7.1
+     (`tools/wrfplus_oracle/rhsph.F90`) agrees to about 4e-16 on 10 cases,
+     orders 2-6 (order 0 has the dot-product, FD and primal checks only). WRFPLUS's `rhs_ph` is not hybrid, so the cases use
+     c1 = 1, c2 = 0.
+   - WRFPLUS bugs, found here. (a) `a_rhs_ph` declares its order-3/4
+     trajectory arrays from jts+2 and its+2, but stores below those
+     bounds on a periodic y axis or a specified x axis, which corrupts the
+     heap (SIGSEGV in free; -fcheck=bounds names tmpv4012 and tmpv4016).
+     Those three cases are TL only. (b) For orders 2-4 WRFPLUS ends a
+     bounded axis's interior loop at min(ite, ide-1)-2 (or -3), where
+     native WRF uses ite-2 (-3), so it drops the term one point inside
+     the end (for orders 3/4 in x only with open_xe). The fixture masks
+     those TL points and zeroes the seed there.
+   - Binary32: the u and v adjoints take the across-face difference of
+     phb + php (phb to 3e4, differences about 50-100), so they agree with
+     WRFPLUS to 6.5e-6 to 1.6e-5 on host and CUDA. Removing each level's
+     mean phb brings that under 2e-6. The Metal oracle limit is 1e-4 for
+     those keys, as for the pressure gradient's mu' adjoint.
+   - `coriolis` and `curvature` are done in the same module (`cc_tl`,
+     `cc_ad`). They cover woof's strict `coriolis_curvature`
+     (GPUWM_WRF_EXACT_C_BIGSTEP: coriolis, then curvature, each with its
+     own add) on periodic, open and specified axes, with a rotated grid
+     (sina/cosa), map factors and hybrid levels. The active inputs are
+     ru, rv, u, v, w and the total column mass mut, from which the primal
+     forms rw = (c1f mut + c2f) w / msft.
+   - The AD writes each face's adjoints of its local averages to scratch
+     (rv4, rw4, vxgm and the own wind on u faces; the same on v faces; the
+     four half->full averages on w levels). A vxgm gather then sums the
+     mass-point vxgm adjoints. Gathers for u and ru, v and rv, w (which
+     keeps the rw adjoint) and the column mass collect the rest, one
+     writer per word.
+   - Checks: dot-product test about 2e-15 (binary64) and 6e-8
+     (binary32) and FD for 7 configurations. The float base state is the
+     strict primal's words (0 differing, host and CUDA). WRFPLUS 4.7.1
+     G_/A_CORIOLIS then G_/A_CURVATURE (`tools/wrfplus_oracle/coriolis.F90`)
+     agree to about 5e-16 on 6 cases, hybrid ones included: WRFPLUS takes
+     the coupled rw, which the fixture forms from w and mut with its
+     tangent and adjoint. One case sets f = e = 0, so curvature alone is
+     compared and binary32 (Metal) is held on its scale rather than
+     Coriolis's. A periodic axis's end face repeats face 0. The ru and rv
+     adjoints of faces 0 and nx (ny) are compared apart (woof's face nx
+     is WRF's column ide); WRF and woof split their reads of the repeated
+     u and v face differently, so those two faces' u and v adjoints are
+     compared as a sum. Binary32 agrees to 2.3e-6 or better.
+   - Not covered: the polar / map_proj 6 branch of curvature (tan(lat)),
+     which woof's primal does not port either.
+   - `w_damp` (w_damping = 1) is done in the same module (`wd_tl`,
+     `wd_ad`) over woof's strict `w_damp` (openbc.cu). The active inputs
+     are the eta mass flux ww and mu'; w enters only through its sign and
+     the switch is taken on the base state, so the TL is
+     -sign(w) w_alpha (d|cfl| m + (|cfl| - w_crit_cfl) dm) with
+     d|x| = sign(x) dx. woof's onset (`dycore.w_damp_onset`: w_beta = 1, or
+     w_crit_cfl under zadvect_implicit) and excess reference w_crit_cfl
+     are separate arguments; the coupling mass is the hybrid c1f mut + c2f.
+     The AD is one thread per column (each column's ww words and its mu'
+     word), no scratch.
+   - Checks: dot-product test about 2e-15 (binary64) and 2e-7 (binary32)
+     and FD for 5 configurations (onset equal to, below and above
+     w_crit_cfl). The trajectory keeps every Courant number at least 2%
+     from the onset, so neither FD nor binary32 rounding moves the
+     switch. The float base state is the strict primal's words (0
+     differing, host and CUDA). WRFPLUS 4.7.1 g_/a_w_damp
+     (`tools/wrfplus_oracle/w_damp.F90`) agree to about 4e-16 on 3 cases;
+     WRFPLUS couples with mut and uses w_beta = 1 as both onset and
+     excess reference, so those cases take c1f = 1, c2f = 0 and
+     w_damp_on = w_crit_cfl = 1. Binary32 agrees to 3.2e-7 or better.
+     No WRFPLUS bugs found.
+6. Advection `advect_u/v/w/scalar` (non-PD, h orders 3-6, v orders 2-6). This is the
+   largest group; once the pattern is set, the mechanical ports go to
+   Sonnet sub-agents.
+   - Done in `woof/grad/wrfplus/advect.py`: the TL/AD of woof's strict
+     `flux_div_{scalar,u,v,w}` (WRF `advect_scalar/u/v/w`) for periodic,
+     open and specified lateral boundaries, map factors,
+     h_*_adv_order 3-6 and v_*_adv_order 2-6. The TL is one kernel per
+     field kind. The AD is a gather (one writer per word, no atomics) in
+     six kernels: the advected field's x, y and z adjoints, then ru, rv
+     and rw. That is 16% faster than one kernel per output, because the
+     fused u/v field gather needed about 148 registers.
+   - Checks: dot-product test about 1e-15 and FD about 1e-10 for 4 kinds x
+     9 configurations. The float base state is the strict primal's words
+     (0 differing, host and CUDA). WRFPLUS 4.7.1 `g_/a_advect_*`
+     (`tools/wrfplus_oracle/advect.F90`) agrees to about 1e-16 on 16
+     cases.
+   - The oracle compares every point except three groups. (a) Open
+     non-specified u faces i = 0, nx and v faces j = 0, ny: WRF adds its
+     cb terms there, and woof adds them in the separate
+     `apply_open_radiative_bc` launch. (b) The periodic duplicate end point
+     (u i = nx, v j = ny): WRF reads its halo column, woof wraps, so the
+     fixture makes the two ru/rv end faces equal and compares the summed
+     adjoint of columns 0 and nx. (c) The open non-specified w lid's
+     boundary columns: see the primal finding below.
+   - Primal finding, not fixed here: woof's strict `flux_div_w` lid
+     (woof/core/kernels/advection.cu) forms the open non-cb x/y fluxes at
+     k = nz but applies them only under `GPUWM_NO_HADV`. WRF 4.7.1's
+     `advect_w` applies them at k = ktf+1. Fixing it changes production
+     output for open non-specified runs, so it needs its own PR. The TL/AD
+     follow woof's primal.
+   - Not covered: h_*_adv_order 2 (the legacy idealized path), WENO and
+     the monotonic or positive-definite limiters.
+7. Lateral boundaries: `relax_bdy_dry`, `spec_bdy_dry`,
+   `spec_bdyupdate(_ph)`, `zero_grad_bdy`, `spec_bdy_final`, with LBC
+   perturbations as an AD output (4D-Var's `var4d_lbc`).
+   - Done in `woof/grad/wrfplus/lbc.py` (`lbc_tl`, `lbc_ad`):
+     `relax_bdy_dry` and `spec_bdy_dry` over woof's strict
+     `state_relaxation_multi` (lbc_state.cu), one row per call. A row is
+     a field kind (u, v, theta, phi, w, mu) and the flags the strict stage
+     uses: the stage-1 held capture of u, v, theta (and w), the specified
+     target, phi's stage-1 held compute (with the msft divide) and its
+     later held read, and mu's direct relaxation. The state is the row's
+     tendency and held buffer; the active inputs are the field, mu' and
+     the eight side tables (value and tendency per side), so the LBC
+     perturbation is an AD output. The coupled field is woof's strict
+     `coupled_current` (face mass for u and v, c1 mass + c2, msfu and
+     msfv_inv), its TL taken in the same operation order.
+   - The TL is one kernel. Frame cells take the first threads (the
+     primal's remap); rows without a held pass launch only those. The AD
+     is a gather in four kernels: the per-cell stencil weights (scratch),
+     the field adjoint and per-cell mass adjoint over the stencil's
+     relax_zone + 1 rings, the side tables, and mu' (u and v face masses
+     counted per face). Rows that do not relax (specified target, held
+     read) skip the field and mass gathers.
+   - Checks: dot-product test about 4e-15 (binary64) and 1e-8 (binary32)
+     and FD for 34 configurations (every row type and kind, map factors,
+     hybrid levels, spec_zone 2 with relax_zone 5, relax_zone 1). The
+     float base state is the strict primal's words (0 differing, host and
+     CUDA). WRFPLUS 4.7.1 g_relax_bdytend then g_spec_bdytend, and
+     a_spec_bdytend then a_relax_bdytend (`tools/wrfplus_oracle/lbc.F90`),
+     agree to about 3e-16 on 8 direct-form cases (u with and without map
+     factors, v with them, theta, phi, w, mu, a wider zone). WRFPLUS's relax_bdy_dry is
+     not hybrid and takes ru/rv as given, so the driver calls the core
+     routines on woof's coupled field, which the fixture forms with its
+     tangent and adjoint. Binary32 agrees to 2.1e-7 or better. No WRFPLUS
+     bugs found.
+   - The domain must hold the relaxation frames (2 (relax_zone + 1) + 1
+     cells across) and spec_zone must be at least 1: at spec_zone 0 the
+     primal's stencil reads outside the row (as WRF's does). u and v rows
+     do not take the msft divide. Not covered yet: moist and scalar
+     rows, nested time-t sources, streamed tile seams.
+   - Item 7b, also in `lbc.py`:
+     - `lbf_tl`/`lbf_ad` are `spec_bdy_final` on one field, over woof's
+       strict `finalize_state_field` (GPUWM_WRF_EXACT: specified rows
+       only, coupled with the acoustic muts; face means of muts for u
+       and v, c1 mass + c2, msfu/msfv/msft) or `install_mu_boundary` for
+       mu. The active inputs are muts and the eight side tables; the
+       state is the field.
+     - `sph_tl`/`sph_ad` are `spec_bdyupdate_ph`, `zero_grad_bdy` on w
+       and the frame columns' `calc_p_rho`, over woof's strict
+       `advance_specified_phi_w`. The state is ph'', w'', p'' and al'';
+       the active inputs are rph, php, rmu, muts, th'', mu'', theta', alt
+       and c2a.
+     - The TL and the cell AD launch frame threads only. The AD is a
+       gather: muts per mass column (u and v faces counted per face) and
+       w'' per interior source column of the zero-gradient copy, so no
+       atomics.
+     - Checks: dot-product (1e-12 binary64, 1e-5 binary32) and FD tests
+       over 16 configurations, including the state inputs (every kind,
+       map factors, hybrid levels, spec_zone 1-3, one level, 3x3
+       columns). The float base state is the strict primal's words (0
+       differing, host and CUDA).
+     - WRFPLUS 4.7.1 oracle (`tools/wrfplus_oracle/lbc_final.F90`):
+       g_/a_SPEC_BDY_FINAL on 9 cases (u, v, w with map factors, theta,
+       phi, mu; theta, u and v at spec_zone 2) agree to 3e-16. g_spec_bdyupdate_ph,
+       g_zero_grad_bdy(w), g_calc_p_rho and their adjoints in reverse
+       agree to 1.4e-15 on 2 cases (spec_zone 1 and 2).
+     - WRFPLUS's versions are not hybrid and spec_bdy_final takes the
+       coupling mass as given, so the cases are not hybrid and the
+       fixture forms the u/v face masses. calc_p_rho covers the whole
+       domain in WRFPLUS, so p'' and al'' are compared on the frame, with
+       their seeds zero inside.
+     - Binary32 agrees to 2e-7, except php's adjoint at 2.2e-4. That
+       adjoint is the seed times mu_old/muts - 1, which WRF also forms by
+       subtraction. No WRFPLUS bugs found.
+8. Step and window driver (`woof/grad/wrfplus/model.py`):
+   - per-step dot-product and Taylor tests;
+   - TL vs nonlinear perturbation growth over 1-6 h on a 12 km dry
+     case, measured the way WRFPLUS's checks do (the ratio of TL to NL
+     difference norms by field and lead time);
+   - the adjoint/forward cost ratio on CUDA and Metal.
+
+   This is where G3 is decided.
+
+   **8a, the step (done).** `step_tl` chains the ported operators in the
+   strict step's order: the time-t save, then per RK stage the zeroed
+   tendencies, the diagnosis (reused on stage 1 with WRF's carried muts),
+   rk_step_prep, the four advection kinds, slow_pgf, slow_buoyancy,
+   slow_geopotential, w_damp, small_step_init, the stage muts, calc_coefs,
+   the acoustic substeps (the first with smdiv 0), the captured muts and
+   small_step_finish; then the epilogue diagnosis, set_w_surface and the
+   periodic alias closure. With a tape it snapshots each operator's
+   written arrays before it runs, and `step_ad` pops them in reverse.
+   - Scope: periodic axes, no map factors, no rotation (8b adds it), dry, no physics
+     or mixing package (9c binds diff_opt 1 / km_opt 4), none of the
+     other work `_step_body` can add (use_theta_m, a moving frame,
+     obstacles, polar filtering, lightning, avgflx, IAU or spectral
+     nudging), `rk_ord = 3`, an even
+     time_step_sound, orders 3-6, and a 3-D base state.
+     `step_geometry` refuses everything else. `step_geometries` gives a
+     chain's geometries: the first step follows the state (a cold one
+     diagnoses on rk_step 1), every later one reuses the previous step's
+     diagnosis and carried muts. On a 1-D base (no terrain)
+     the primal's slow_pgf takes another arithmetic path, so the step
+     would not reproduce its words. Rotation, map factors and
+     specified boundaries come in 8b.
+   - Each scalar is rounded the way its primal launcher rounds it (for
+     example rdx = f32(1/dx) but rk_step_prep's f32(1)/f32(dx)), so the
+     binary32 base reproduces `dycore.step` word for word on the
+     prognostics, p, al, alt, p', muts and the scratch the next step
+     reads. This holds on CUDA and the host backend, for the
+     hybrid coordinate, w_damping, hypsometric_opt 2 without a lid and
+     other orders, nsub 3 and 6, and over three chained steps from a
+     warm and a cold state (`tests/test_grad_wrfplus_model.py`, a
+     16x12x10 ridge).
+   - Binary64 dot product 3e-15 to 1.2e-14 per step and over the chains; the finite-difference ratio reaches 1 to 1e-9-2e-8.
+   - Measured cost on the pb A6000 at 200x200x49 (a ridge, periodic,
+     strict, 2026-11-20, card idle), over `dycore.step` at 14.5 ms:
+
+     | | binary32 | binary64 |
+     |---|---|---|
+     | TL step | 1.9x | 10.2x |
+     | TL step with tape | 2.3x | 10.8x |
+     | adjoint sweep | 3.3x | 10.0x |
+     | taped recompute + sweep | 5.6x | 20.8x |
+
+     The sweep alone (3.3x) is under the projection's 3.64. The
+     projection counted the recompute at 1x, but the step recomputes
+     through the joint TL kernels (1.9x) and spends 0.35x on snapshots,
+     which puts the full adjoint step over the 5x limit at 5.6x. Two
+     ways back under it:
+     - a base-only taped forward (the primal's own kernels with
+       snapshots, about 1.35x), which would give about 4.7x;
+     - in incremental 4D-Var, storing the outer loop's trajectory once
+       as WRFPLUS does, so that each inner iteration pays only the sweep
+       (3.3x) plus tape reads.
+     Metal cost, rotation, map factors and specified boundaries in the
+     step, the window driver with checkpoints and the 12 km TL growth
+     test are 8b and later.
+
+   **8b, the base-only recompute (done).** Each kernel unit compiles a
+   second build with `-DWRFPLUS_TL=0`, in which every perturbation store
+   of the TL kernels is skipped (`if (WRFPLUS_TL)`), so the compiler
+   drops the tangent arithmetic and loads. `model.step_base` runs the
+   step through that build (`_mode.base_only()` picks it per thread), and
+   skips the step's own perturbation copies. It advances the base to the
+   joint build's words and tapes the same snapshots, bit for bit, in
+   binary64 and binary32, for every variant and both chains (host and
+   CUDA). The default build's compile options are unchanged.
+
+   Measured as above (A6000, 200x200x49, idle card, two runs):
+
+   | | binary32 | binary64 |
+   |---|---|---|
+   | base-only step | 1.16-1.18x | 6.1-6.2x |
+   | base-only step with tape | 1.50-1.53x | 6.7-6.9x |
+   | adjoint sweep | 3.27-3.30x | 9.8-10.0x |
+   | **full adjoint step (base recompute + sweep)** | **4.76-4.82x** | 16.5-16.9x |
+
+   The binary32 adjoint step is under the 5x limit, with about 0.2x of
+   margin. The snapshots (0.35x) are the next thing to cut if a later
+   item adds cost.
+
+   **8b, rotation in the step (done).** On rotational grids with msf 1
+   (Coriolis f and e, a rotated grid's sina/cosa), each stage runs
+   coriolis_curvature after w_damp, with its total dry mass
+   (`DomainState.total_mu`, mub + mu') formed as a pseudo-operator. The
+   binary32 base reproduces `dycore.step`, and the dot-product, finite-
+   difference and base-only tests take it as a seventh variant.
+
+   **What is still refused, and why.** WRFDA's real 4D-Var cases are
+   regional, with map factors and specified boundaries, so both are
+   needed before its tutorial case can serve as the oracle.
+   - Map factors: bound in the step since item 8e (below); no longer
+     refused.
+   - Specified boundaries: bound in the step since item 8f (below); no
+     longer refused.
+   - Order agreed on 2026-11-20: the window driver next, then map
+     factors, then specified boundaries.
+
+   **8c, the window driver (done; `woof/grad/wrfplus/window.py`).** The
+   interface 4D-Var plans against:
+
+   ```python
+   w = Window(state, cfg, nsteps, dtype=np.float64, checkpoint_every=1)
+   xN = w.forward(x0=None)                 # base; keeps the checkpoints
+   dx = w.tl(dx0, save_at=(k1, k2, ...))   # {k: dx_k}, always with nsteps
+   dx = w.tl({n: g[n] for n in WRFDA_TL_START}, partial=True)  # WRFDA's start
+   ax0 = w.ad(ax_final=None, forcing={k: ax_obs_k})
+   ```
+
+   - States in and out are dicts over `model.STEP_INPUTS` (the
+     prognostics and the previous step's diagnosis). State k is the
+     state after k steps. `forcing[k]` is added to the adjoint of state k
+     before the sweep goes on backwards, which is where a 4D-Var
+     observation term at that time enters.
+   - `tl(dx0, partial=True)` lets `dx0` name any subset of STEP_INPUTS;
+     the rest start at zero. This is WRFDA's TL start: in
+     `da_transfer_xatowrftl` the prognostics are perturbed but phi'
+     (`g_ph_2 = 0`), and g_p is perturbed too.
+     - `WRFDA_TL_START` names those inputs. g_p goes into both `p` and
+       `p_pert`.
+     - `muts` takes g_mu. WRFDA's window starts cold, from `start_em`'s
+       `muts = mub + mu'`.
+     - So the `p`/`p_pert` tangents are one array, and so are the
+       `mup`/`muts` tangents. Their adjoints sum: the adjoint of g_p is
+       `adj["p"] + adj["p_pert"]`, and that of g_mu is
+       `adj["mup"] + adj["muts"]`.
+     - `wrfda_tl_start(g)` builds the start from g over
+       `WRFDA_TL_FIELDS`. `wrfda_tl_start_ad(adj)` is its adjoint. A dot
+       test pins the pair.
+     - On a specified window pass `specified=True` to both. g_mu then
+       also seeds the mu halo (`model.HALO`). WRFPLUS's `wrf_run_tl`
+       calls `start_domain`, and `g_start_domain_em`
+       (`wrftladj/start_em_tl.F:706`) runs `g_set_physical_bc2d` on
+       `mu_2`, which on a specified domain copies g_mu's edge row into
+       the halo (`wrftladj/module_bc_tl.F`). The first step reads the
+       halo only when the state carries one, so a cold start gives the
+       same TL either way. `test_specified_window` covers the pair's dot
+       test, and with a carried halo it shows that the seed changes the
+       TL.
+     - `partial=True` with an empty `dx0` is refused.
+     - The adjoint of the zero fill is a restriction, so a caller takes
+       the same names from `ad`'s result. A dot test pins this.
+     - An incomplete dict without `partial`, or a name outside
+       STEP_INPUTS, is refused by name.
+   - The window refuses whatever `step_geometry` refuses, and names it.
+     Map factors (8e, #723) and specified boundaries (8f) are bound. On
+     a specified domain the state also carries the mu halo, and the
+     interval's boundary tables are window parameters (`Window.params`):
+     `tl` takes their perturbation in `dx0` (with or without
+     `partial`), and `ad` returns their adjoint with state 0's.
+   - Checkpoints hold a state's STEP_INPUTS only. A step reads nothing
+     else its predecessor wrote: it writes its scratch before reading
+     it. A test pins this. With every other written array poisoned with
+     NaN, one step's outputs and its adjoint's equal the clean run's, bit
+     for bit. Every step therefore runs in one work dict.
+   - The adjoint reruns each segment of `checkpoint_every` steps from its
+     checkpoint (base-only build) to recover the step-start states. It
+     then tapes each step and sweeps it in reverse. Memory is one
+     checkpoint per segment, one segment's step-start states, the work
+     dict and one step's tape.
+   - Tests (`tests/test_grad_wrfplus_window.py`, host and CUDA):
+     - the binary32 forward is N `dycore.step` calls word for word (warm
+       start, cold start, rotation; checkpoints every 1 or 3);
+     - sum over k of <TL dx_k, f_k> equals <dx_0, AD(f)> with forcing at
+       states 0, 1, 3 and N (1e-16 in binary64);
+     - the adjoint is bit for bit the same for every checkpoint interval.
+   - Cost (A6000, 200x200x49, 6 steps, per step over `dycore.step`):
+
+     | checkpoint_every | forward | adjoint | binary64 adjoint |
+     |---|---|---|---|
+     | 1 | 1.30x | 5.14x | 19.0x |
+     | 3 | 1.31x | 6.00x | 24.7x |
+     | 6 | 1.31x | 6.22x | 26.6x |
+
+     The forward is the base-only step plus the checkpoint copies.
+     Longer intervals trade memory for one more base-only rerun per step.
+     At `checkpoint_every = 1` the window adds almost nothing to the bare
+     step: a checkpoint load (0.02x) and, before the fix in #718's
+     follow-up commit, a redundant step-start copy (0.02x). Over the same
+     6-step loop, the window adjoint and a bare `_load` + `step_base`
+     (tape) + `step_ad` loop measure within 0.04x of each other (5.00x
+     against 5.04x). The gap to the single-step 4.8x comes from the
+     denominator and the host. This table divides by a 6-step
+     back-to-back `dycore.step` average, which is about 3% faster than
+     the single synced step item 8b divides by (14.06 against 14.53 ms):
+     about 0.15x. Against the single-step denominator, the same fused
+     step measures 4.83-4.93x. The rest is run-to-run spread under
+     another job's host load (15-29), which moves the same measurement
+     by 0.1x and more between runs a minute apart.
+8d. Map factors in advance_w: `advance_w_tl/_ad` take `WGeometry.has_msf`
+   and a passive `msft`, as `advance_w_phi_msf` does. WRF advance_w's
+   msfty multiplies the phi'' coupling, the terrain lower condition and
+   the phi'' update, and msft_inv = 1/msfty multiplies the implicit
+   forcing rows. msftx = msfty = msft, since woof carries one mass-point
+   factor. With has_msf 0 each factor is an exact 1 and msft is not
+   read, so the msf-free kernel's words are unchanged.
+   - Tests (`tests/test_grad_wrfplus_advance_w.py`): three mapped
+     configurations join the dot-product, accumulation and FD tests. The
+     float build gives `advance_w_phi_msf`'s words. The WRFPLUS fixture
+     gains two mapped cases (`mapped`, `mapped_lid_moist`, the driver
+     passing msft as msftx and msfty), and its old cases are unchanged
+     bit for bit. On the mapped cases woof's TL/AD agrees with
+     g_/a_advance_w to 4e-16. With the factors dropped the misfit is
+     4e-3, so the cases do test the factors.
+8e. Map factors in the step: `step_geometry` sets has_msf (or `mapped`)
+   on every operator that takes it when `state.has_msf`, and the step
+   passes msfv as each strict launcher does. rk_step_prep's v coupling,
+   small_step_init, advance_uv and advance_mu_th take MSFV_INV
+   (`DomainState.msfv_inv`). small_step_finish, the advection,
+   slow_geopotential, coriolis_curvature and set_w_surface take msfv.
+   slow_pgf has no map factor, which is right for isotropic factors (WRF's
+   msfux/msfuy is 1).
+   - Tests: two mapped variants join the step's words, dot-product,
+     base-only and FD tests: smooth periodic factors, a few percent from
+     1, alone and with rotation, the hybrid coordinate and w_damp. The
+     window's rotation case now has map factors as well. The binary32
+     step gives `dycore.step`'s words on a mapped state. With msfv passed
+     where the strict path passes MSFV_INV, about 2000 words per
+     prognostic differ, so the test pins the choice.
+   - Still refused then: lateral boundaries other than periodic (bound
+     in 8f).
+8f. Specified boundaries in the step (DA item 3): `step_geometry` binds
+   woof's strict specified step on a domain whose tables are attached
+   (`attach_lateral_boundaries`).
+   - Per stage, after the slow tendencies:
+     - stage 1 only: `fold_lateral_relaxation` on u, v and theta (the
+       held relax rows times msfu/msfv, then the mixing map-factor
+       coupling: /msfu, *msfv_inv, /msft);
+     - every stage: `_apply_state_lateral_boundaries_wrf`'s rows on the
+       state tables (u, v, theta target; phi held compute and store on
+       stage 1, held read later; mu with its relaxation on stage 1).
+   - After each substep: `advance_specified_phi_w`.
+   - Epilogue: the halo takes mup, then `spec_bdy_final` (mu first, then
+     u, v, theta and phi coupled with the captured muts). The periodic
+     alias close is skipped.
+   - rk_step 1 of a carried step reads WRF's mu halo on the boundary
+     faces' ghost operand (`_calc_ww_cp_fluxes`). `rk_step_prep` gains a
+     `halo` flag, and its adjoint routes each boundary face's ghost share
+     to the halo's adjoint. `model.HALO` ("mu_halo") is a step input
+     (`step_inputs(geom)`).
+   - The interval's tables (`lbc_<field>_<side>[_t]`,
+     `step_parameters(geom)`) are inputs no step writes: their TL is
+     carried, and their adjoint accumulates over the window.
+   - Each step has its own geometry, because its boundary time (dtbc,
+     the unbound clock: stage rows at the step start, `spec_bdy_final`
+     at its end) differs per step.
+   - `Window.lbc_seconds` is the interval's length. `lbc_from_ends(start,
+     end, seconds)` builds WRFDA's `var4d_lbc` table perturbation (value
+     = start, tendency = (end - start) / seconds, as WRF's bt ties to the
+     next record), and `lbc_from_ends_ad` folds the tables' adjoint into
+     the start's and the end's. Without `var4d_lbc`, pass the value tables
+     alone in `dx0`: the `_t` tables start at zero.
+   - Refused by name: nested boundaries, open boundaries that are not
+     specified, specified without tables, a periodic axis, a bound
+     `DomainClock`, time laws other than linear, relax_w, DFI boundary
+     forcing, streamed tile seams, spec_zone 0, and a window reaching
+     another boundary interval. A step ending on its interval's end is
+     accepted when the primal serves that time from the same (last)
+     interval, and refused when it serves it from the next.
+   - Tests (`tests/test_grad_wrfplus_spec_step.py`, host and CUDA): four
+     cases on a 20x18x8 ridge with relax_zone 4 (a warm step, a cold
+     three-step chain, a warm two-step chain with map factors and the
+     carried halo moved 3 Pa off the ring, and a cold chain ending on its
+     interval's end). The boundary snapshots move every field (mu and phi
+     too) between the two times and vary along the ring, so every table,
+     tendency and the relaxation's Laplacian term carries signal.
+     - The binary32 base reproduces `dycore.step`'s words on every input
+       and the next step's scratch. Dropping each part of the binding in
+       turn (the fold, `advance_specified_phi_w`, `spec_bdy_final`, the
+       stage rows, the halo operand on the shifted case) moves words; the
+       test asserts each.
+     - The dot test perturbs the state, the halo and every table at 1e-3
+       of its scale (1e-12 in binary64, 1e-5 terms-scaled in binary32).
+       In binary64 each of the 40 tables also passes its own dot test
+       with a nonzero share.
+     - Binary64 finite differences converge, and the base-only build is
+       the joint base.
+     - The window's binary32 forward is N primal steps; its dot test
+       with forcing covers the tables' adjoint; omitted tables equal zero
+       ones bit for bit; and `lbc_from_ends` passes its dot test alone
+       and through the window.
+     - With the written arrays (held rows, fold slots) and the mu row's
+       unread source poisoned with NaN, a step's outputs and adjoint are
+       the clean run's; the tables are never written.
+     - The refusals are named.
+8g. An external trajectory (DA item 1; WRFDA-4DVAR-PLAN section 3.1).
+   WRFPLUS linearises about the nonlinear run's states, read every time
+   step (`auxinput6`), from a run with full physics.
+   `Window.forward(trajectory=states)` does the same: `states[k]` (a
+   STEP_INPUTS dict, `k = 0..nsteps-1`, optionally state `nsteps` too)
+   is the base step `k` is linearised about, in place of the window's own
+   dry rerun.
+   - `tl` loads `states[k]` before step k. `ad` takes every state as a
+     checkpoint, so it reruns no segment; it tapes each step from its
+     supplied state.
+   - `Window.trajectory_state(state, cfg)` reads a DomainState (a woof
+     forecast's state after some steps) as an entry, in the window's
+     dtype. A WRF trajectory is mapped onto `step_inputs(geom)` by the
+     caller (STEP_INPUTS, plus SPECIES on a moist window).
+     Each entry must hold what its step reads: on a warm step the
+     previous step's diagnosis and carried muts.
+   - The geometry is still the window's (the `cfg` it was built with), so
+     a physics run's states are linearised by the physics-free step: the
+     adiabatic TL of WRFDA's lanes L1/L0 before item 6.
+   - `forward` returns state `nsteps`: the supplied one, or one window
+     step from the last. A plain `forward()` returns to the window's own
+     base.
+   - Tests (`test_window_external_trajectory`, host and CUDA): the
+     window's own states supplied as the trajectory give the same TL,
+     adjoint and end state bit for bit; another run's states (the primal
+     from a perturbed start) leave the TL at state 1 unchanged and move
+     it from state 2 on; the adjoint with forcing is the TL's (1e-12
+     binary64, 1e-5 binary32); a wrong length, or x0 with a trajectory,
+     is refused.
+8h. Moisture, part 1 (DA item 4): the big-step pieces that take the moist
+   species. Not bound in the step yet; `step_geometry` still refuses
+   moisture.
+   - `cq_tl`/`cq_ad` (`CQGeometry`, `n_mass` 1 or 3): WRF `calc_cq` on
+     woof's strict primal. cqu, cqv and cqw are `1/(1 + 0.5 qtot)` over
+     each face's pair, qtot summed species by species in the primal's
+     order. cqw is 1 at levels 0 and nz. With `n_mass` 1 qv alone is read,
+     and with 3 qv, qc and qr. The primal overwrites cq, so the AD
+     consumes the cq adjoints and zeroes them. The AD is a gather: each
+     mass cell collects the u and v faces that pair it (the periodic end
+     face included, once) and the interior w levels above and below.
+   - The pressure gradient with `PGFGeometry.moist_cq`: cqu and cqv are
+     active and multiply the face term, as woof's `slow_pgf` does with
+     `use_cq` (WRF `horizontal_pressure_gradient`'s `cqu`/`cqv`).
+   - The buoyancy with `BuoyGeometry.moist` (the primal's moist_mode 1):
+     qv, qc and qr are active through WRF's cqw, formed from the strict
+     `wrf_cqw_pair` sum. The `cqw * cq1` mass-loading term reads the base
+     mass `c1f mub + c2f`. The derivative with respect to cqw is
+     `-cq1^2 (P + base_mass)`, where P is the bracket before its cq1
+     factor. The moist buoyancy needs nz >= 2, because the top's pair
+     reads level nz-2. The ice species (moist_mode 2-3, `n_mass` 6-7) are
+     refused.
+   - Tests (`tests/test_grad_wrfplus_bigstep.py`, ops `pgfm`, `buoym` and
+     `cq`):
+     - dot-product (1e-12 binary64, 1e-5 binary32);
+     - the AD adds into its inputs, and the cq adjoints are zeroed;
+     - FD convergence;
+     - the binary32 base gives the primal's words for `slow_pgf` with
+       cq, `slow_buoyancy` moist_mode 1 and `calc_cq` (n_mass 1 and 3).
+       The pgf check also confirms that cq changes the tendency.
+     There is no WRFPLUS fixture for the moist cases yet. The dry cases
+     still match the old fixtures.
+   - Still to come for item 4: the moist diagnosis (`calc_p_rho` and
+     `al`/`alt` with qv), moist scalar advection and update, the moist
+     LBC rows, and the step binding.
+8i. Moisture, part 2 (DA item 4): the moist diagnosis. `PRPGeometry.moist`
+   makes qv an active input of `calc_p_rho_phi_tl/_ad`. The temperature
+   ratio's numerator `Rd (300 + theta')` is multiplied by WRF's `qvf = 1 +
+   rvovrd qv`, as woof's strict `wrf_p_rho_phi_column` does. That kernel
+   is used for a moist state without `use_theta_m`; with `use_theta_m` the
+   primal passes moist 0. `rvovrd` is the binary32 quotient the primal's
+   `#define` carries (`woof.core.constants.RVOVRD`).
+   - Tests (`tests/test_grad_wrfplus_rk_stage.py`, op `prpm`, both
+     hypsometric options, carried and formed muts, 1-D base, one column):
+     - dot product;
+     - the adjoint accumulates, and p/al/alt/p' are consumed;
+     - FD convergence;
+     - the binary32 base gives `calc_p_alpha[_carried_muts]`'s words
+       with moist 1. Each case also checks that qv moves p off the dry
+       words.
+     There is no WRFPLUS fixture for the moist case.
+   - The step still refuses moisture. The diagnosis joins it with the
+     moist scalar advection and the step binding.
+   - Still refused then: lateral boundaries other than periodic (bound
+     in 8f).
+8j. Moisture, part 3 (DA item 4): moist scalar transport
+   (`woof.grad.wrfplus.scalar`). Two operators, bound into the step with
+   the moist binding:
+   - sumflux (`sumflux_zero/accumulate/finish_tl/_ad`): `ru_m, rv_m, ww_m`
+     start at zero, add `u_pp, v_pp, ww_pp` after each acoustic substep,
+     and finish as `sum/nsub` plus the stage's coupled `ru, rv, ww`
+     (the dycore's `zero_sumflux`, `accumulate_sumflux` and
+     `finish_sumflux` launches).
+   - One species' stage update (`su_tl/_ad`, `ScalarGeometry`), woof's
+     strict non-PD `_advance_species_wrf` (WRF rk_scalar_tend +
+     rk_update_scalar): `flux_div_scalar` of the stage's species with the
+     sumflux fluxes (all four active), the specified ring cleared, times
+     msft, plus the species' held boundary tendency when it has one, then
+     `q = ((c1h mu0 + c2h) q0 + dt tend) / (c1h mu + c2h)` with the time-t
+     mass `mub + mup0` and the post-acoustic `mub + mup`. The arithmetic
+     is the primal's, one rounded operation at a time. The adjoint
+     rebuilds the base tendency through the base-only advection build.
+   - Not covered: the positive-definite final stage (`moist_adv_opt =
+     1`), physics and mixing sources, IEVA and the RQVFTEN export.
+   - Tests (`tests/test_grad_wrfplus_scalar.py`: periodic, map factors,
+     specified with and without the held tendency, rings of 1 and 2,
+     every h order, one level; sumflux with 1-4 substeps):
+     - dot product;
+     - the adjoint accumulates, and the species, its tendency and the
+       accumulators are consumed;
+     - the adjoint in one dict (as the step passes it) gives the
+       separate-dict result;
+     - FD convergence;
+     - the binary32 base gives `_advance_species_wrf`'s and the sumflux
+       launches' words, and each update moves the species.
+     There is no WRFPLUS fixture.
+8k. Moisture, part 4 (DA item 4): the moist boundary rows
+   (`woof.grad.wrfplus.lbc`), bound into the step with the moist
+   binding.
+   - qv's rows: `LBCGeometry`/`FinalGeometry` take kind `qv` (the
+     primal's code 5), a mass-grid row coupled as theta is under the
+     strict build, `(c1h mu + c2h) q`. moist.py's rk_step-1 capture is a
+     direct row (`apply_relax`) into qv's held tendency, from the time-t
+     qv and mu' (`source_field`, `source_mup`), and spec_bdy_final forces
+     qv back after phi. The kernels already took the mass-grid branches
+     for any kind other than u, v, w, phi and mu.
+   - flow_dep_bdy (`flow_tl/_ad`, `FlowGeometry`): the specified ring of a
+     hydrometeor without a table (qc and qr after every stage's update)
+     copies the first interior row or column on outflow and takes zero on
+     inflow, the y sides owning the corners (woof's strict
+     `flow_dependent_batch`). The fluxes only pick the branch, so they
+     are passive; the adjoint moves each copied cell's adjoint onto its
+     interior source.
+   - Tests:
+     - `tests/test_grad_wrfplus_lbc.py` and `_lbc_final.py` gain qv rows
+       (capture, with map factors, specified-only; final, with a wider
+       zone): dot product, accumulation, FD and the strict-primal words of
+       `state_relaxation_multi` and `finalize_state_field`.
+     - `tests/test_grad_wrfplus_moist_lbc.py`: flow_dep_bdy's dot product
+       and FD for ring widths 1-3, and the words of
+       `apply_flow_dependent_boundaries` (every ring cell moves) and of
+       qv's capture through the primal's own single-row
+       `_launch_state_relaxation` with the time-t source and mass.
+     There is no WRFPLUS fixture.
+8l. Moisture, part 5 (DA item 4): the moist step. `step_geometry` now
+   accepts a moist state without microphysics (qv, qc and qr,
+   `mp_physics = 0`, `moist_adv_opt = 0`) and binds 8h-8k in
+   `dycore._step_body`'s strict order:
+   - `_save_time_t` also copies qv, qc and qr to `*0`; the species are
+     step inputs (`step_inputs`), so the window carries them.
+   - Each stage: `calc_cq` (`n_mass` 1) after rk_step_prep; the pressure
+     gradient with `moist_cq`, the buoyancy with `moist` (base mass from
+     mub2d), the diagnosis (each stage's and the epilogue's) with qv, and
+     calc_coef_w, advance_uv and advance_w with `moist_cq`; sumflux zeroed
+     before the substeps, accumulated after each and finished after
+     small_step_finish; then `advance_scalars_stage`: on rk_step 1 with
+     qv's tables qv's held tendency (zeroed, then the relaxation and
+     specified rows from qv0 at mup0), the qv, qc and qr updates (qv's
+     with the held tendency), and on a specified domain flow_dep_bdy for
+     qc and qr.
+   - Epilogue: qv's spec_bdy_final after phi's; qv's tables are step
+     parameters (`QV_INPUTS`).
+   - Refused by name: `moist_adv_opt` != 0, any species beyond qv, qc and
+     qr (ice, numbers, PBL or tracer scalars, registered mass slots),
+     `moist_cq` off, boundary tables for scalars other than qv, a qv
+     table spec_bdy_final does not force back, and a qv table wider or
+     narrower than theta's (one set of Davies weights).
+   - Tests: `tests/test_grad_wrfplus_model.py` (moist, alone and with map
+     factors, rotation, hybrid, w_damp and six substeps, and a cold moist
+     chain of three) and `tests/test_grad_wrfplus_spec_step.py` (a warm
+     moist step and a cold mapped moist chain with the halo off the ring,
+     and the window's moist forward): the binary32 base is
+     `dycore.step`'s words on every input, the species and the sumflux
+     accumulators; dot product (the species in the identity), base-only
+     tape and FD; dropping qv's capture, its final or flow_dep_bdy moves
+     words.
+9. Diffusion, `diff_opt = 1` / `km_opt = 4` (asked for as item 5 of the
+   follow-up list). WRF 4.7.1 and WRFPLUS run, at `rk_step = 1` on the
+   time-t state: `compute_diff_metrics`, `cal_deform_and_div`,
+   `smag2d_km` (no slope limiter at diff_opt 1), then the
+   coordinate-surface `horizontal_diffusion` ('u', 'v', 'w', with xkmh)
+   and `horizontal_diffusion_3dmp` ('m', theta minus t_init, with xkhh).
+   (`horizontal_diffusion_2` is diff_opt 2 only.) The split:
+   - 9a. The coefficients (`woof.grad.wrfplus.diffusion`,
+     `kernels/diffusion.cu`), bound into the step by 9c.
+     - `df_tl/_ad`: defor11, defor22, defor12 of u, v and ph' (3-D
+       phb, map factors, periodic or bounded axes) on woof's strict
+       `wrf_smag_deform` (the `GPUWM_WRF_EXACT_C_DIFFUSION` statements;
+       `wrf_smag_deform_hat`, Metal's default, gives the same words).
+     - `km_tl/_ad`: xkmh and xkhh = xkmh / Pr on
+       `wrf_diff_opt1_km4` + `wrf_smag_km_bc`, with WRFPLUS's
+       derivatives: none where the 10 * mlen cap acts, and sqrt' = 0 where
+       def2 = 0.
+     - One forward serves both directions: the TL reads the inputs'
+       tangents; the AD thread of an input word seeds that word and
+       gathers a_out * d out / d word over the outputs whose stencil can
+       read it (a deduplicated window: 5x5 columns and the levels
+       L-1..L+1, 0 and nz-1 for the deformation; 2x2 for the
+       coefficients). One writer per word, no atomics. The overwritten
+       outputs' adjoints are consumed. The gather recomputes each
+       neighbour's stencil, so it costs more than a tuned adjoint would;
+       its cost is measured with the step binding (9c).
+     - Tests (`tests/test_grad_wrfplus_diffusion.py`): dot product,
+       accumulation, FD, the strict primal's words (both deformation
+       kernels and the coefficients; the slopes and the cap must move
+       words) and the WRFPLUS fixture (`tests/data/wrfplus/
+       diffusion.npz`, `tools/wrfplus_oracle/diffusion.F90`): in
+       binary64 woof matches WRFPLUS to about 4e-16.
+     - WRFPLUS findings. `compute_diff_metrics` (WRF's too) fills a
+       periodic axis's seam slope (zx at ids/ide, zy at jds/jde) for
+       levels 1..ktf only, so the top w level's seam slope keeps its cold
+       zero, where woof's primal takes the true slope: the fixture leaves
+       those deformation words out (and zeroes their adjoint seeds).
+       `a_cal_deform_and_div` sizes its y tapes (Tmpv400-403) from
+       max(jds+1, jts) but fills them from j_start = jts on a periodic y
+       axis, so it overruns them there: the fully periodic case is TL
+       only.
+   - 9b. The rows (`woof.grad.wrfplus.diffusion.hd_tl/_ad`), bound into
+     the step by 9c: `G_/A_HORIZONTAL_DIFFUSION` ('u', 'v', 'w' and a scalar
+     row, which 9d binds for moisture) and
+     `g_/a_horizontal_diffusion_3dmp` (theta minus its initial field) on
+     `wrf_diff_opt1_horizontal`.
+     - Active: the field, the coefficient (xkmh for u, v, w; xkhh for the
+       scalars) and mut; the hybrid mass c1 mut + c2, the initial theta
+       and the map factors pass through. The tendency accumulates, so its
+       adjoint passes through too.
+     - The same single forward as 9a: the AD thread of an input word
+       gathers over the row points within one column and row of it (a
+       field word at its own level, a coefficient word at its own and,
+       for w, the next level, a mut word at every level).
+     - Tests (`tests/test_grad_wrfplus_hdiff.py`): dot product,
+       accumulation, FD and the strict primal's words (through dycore's
+       `launch_coordinate_horizontal`; the hybrid mass and the initial
+       theta must move words) for every row on periodic, bounded and
+       one- to three-cell axes, and the WRFPLUS fixture (`tests/data/
+       wrfplus/hdiff.npz`, `tools/wrfplus_oracle/hdiff.F90`, 17 cases).
+       WRFPLUS's rows take mu as the mass, so the fixture uses c1 = 1,
+       c2 = 0; in binary64 woof matches it to about 1e-16.
+   - 9c. The step binding (`woof.grad.wrfplus.model`), done for a dry
+     state on periodic and specified domains, in `dycore._step_body`'s
+     strict order:
+     - At the step start, after `_save_time_t` (and on a cold step after
+       the diagnosis `_step_body` runs before the mixing): the held rows
+       `smag_ru`, `smag_rv`, `smag_rw` and `smag_rth` zeroed, the
+       deformation of u0, v0 and php0, `smag2d_km`'s xkmh and xkhh, the
+       mass mub2d + mup0, and the u, v, w (xkmh, c1f/c2f) and theta
+       (xkhh, thp0 minus `diff1_theta_initial`) rows into the held rows.
+       On a periodic domain the rows are then divided by their map
+       factor (`_couple_dry_mixing_map_factor`: v times msfv_inv under
+       BIGSTEP).
+     - On a specified domain the fold (`fold_lateral_relaxation`) adds
+       the stage-1 relaxation into the same held rows, so the division
+       covers the mixing and the relaxation together, as
+       `rk_addtend_dry` does. The fold's own slots are gone; without the
+       mixing the words are unchanged.
+     - Every stage adds the held rows after the slow tendencies
+       (`add_fixed_dry_tendencies`).
+     - `diff1_theta_initial` is passive (`run_state` takes it from
+       `initialize_coordinate_reference`, as the primal's first step
+       does).
+     - Refused by name: any other mixing package (diff_opt 2, km_opt 1,
+       2, 3 or 5), a moist state with the mixing (9d),
+       `tc_horizontal_length_m`, `m_opt` and a resumed state without
+       `diff1_theta_initial` (`dycore.coordinate_reference_missing`, the
+       primal's own refusal). Passive tracers are refused on every step:
+       the chain carries neither their transport nor their rows.
+     - Tests (`tests/test_grad_wrfplus_mix_step.py`): a warm periodic
+       step, one with map factors, rotation, the hybrid coordinate and
+       w_damp, a cold periodic chain of three, a warm specified step and
+       a cold mapped specified chain with the halo off the ring. The
+       binary32 base is `dycore.step`'s words on every input and the
+       carried scratch, and the same step without the mixing moves u, v,
+       w and theta. Also the dot product (with the boundary tables on
+       the specified cases), the base-only tape and FD.
+     - Cost (A6000, 120 x 100 x 40, binary32, a warm periodic step,
+       2026-11-22): the mixing adds about 0.2-1 ms to the TL step
+       (10.7 ms without it) but 226 ms to the base + AD step (26 ms
+       without it). Of that, `df_ad` takes 209 ms and the four `hd_ad`
+       rows 3-4 ms each; `km_ad` takes 0.2 ms. The gathers recompute
+       each neighbour's whole stencil over a window wider than the
+       stencils need (5 x 5 columns and five levels for the
+       deformation). A zero output adjoint skips the recompute, so a
+       step seeded with zeros hides the cost. PR #820, a separate
+       change to `df_ad`, narrows the gather to the outputs that read
+       each word (3 x 3 columns at most, the levels it reads, and per
+       term only the reading rows and columns). Measured with it:
+       `df_ad` 209 -> 11.6 ms and the base + AD step with the mixing
+       252 -> 52 ms (26 ms without it). Each `hd_ad` row's mut thread
+       still gathers its column's levels serially; that is left for a
+       later perf pass.
+   - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`).
+   `sixth_order_diffusion` and diff_opt 2 are not started.
+
+Cost is measured from item 2 on. Kernel-level AD/forward ratios are
+reported at every merge, so a G3 cost miss shows up before item 8.
+
+## 6. Interfaces for P4 and 4D-Var
+
+To be agreed with the 3D-Var owner. `woof/da` is not edited.
+
+- `woof.grad.wrfplus.DryState`: a named tuple of device arrays in
+  woof's layout. `u, v, w, ph, t, mu` are the control fields; the
+  diagnostics `p, al` are derived.
+- `Trajectory.record(state, cfg, nsteps)` runs `dycore.step` and keeps
+  the step-start states (section 3).
+- `tl(traj, dx0, steps) -> [dx_n]` and `ad(traj, dy_by_step) -> dx0`.
+  The adjoint takes forcing at any step, as FGAT and 4D-Var need, and
+  returns `dx0`. With LBCs on, it also returns `dlbc`.
+- Arrays are CuPy (or facade) device arrays, taken without a host copy,
+  so 4D-Var's device-resident `U`/`U^T` (the planned `woof/da/var`) feeds them
+  directly.
+- `DryState` stays a named tuple in woof's `(k, j, i)` layout. The
+  control-variable transforms (psi/chi and so on) and the mapping from
+  `xa` to the model state stay in `woof/da`.
+- Moist fields are an optional passthrough: `None` (or zeros) while the
+  model is dry, so the signature does not change at P3b.
+- Inner products and norms are binary64. They take a `dot` hook whose
+  default has the signature of the planned `woof.da.var.control.dot(x, y,
+  reduction=...)` (`"wrfda-serial"`, `"fixed-tree"`; WRFDA-3DVAR-PLAN
+  4.7).
+- Agreed with the 3D-Var owner on 2026-11-19.
+
+## 7. Effort, against the plan's 8-12 w
+
+| item | estimate |
+|---|---|
+| 1 pattern PR (kernel, oracle framework, helpers) | 1.5 w |
+| 2-3 rest of the acoustic substep | 1.5-2 w |
+| 4 RK glue | 1 w |
+| 5 big-step tendencies | 1.5-2 w |
+| 6 advection | 2-3 w |
+| 7 lateral boundaries | 1-1.5 w |
+| 8 step/window driver, G3 measurements | 1.5-2 w |
+| total | **10-13 w** |
+
+That is 1-2 w over the plan's range. The overrun comes from three things:
+
+- the hybrid-coordinate gap (section 1), which needs woof-derived
+  linearisations beyond WRFPLUS's;
+- the binding tests against woof's float32 primal;
+- the three-backend lanes.
+
+Diffusion (item 9) is extra: 1-1.5 w.
+
+## 8. Risks for G3, watched from the start
+
+G3's cost limit is about 5x the forward step. It was 4x until the user's
+decision of 2026-11-20.
+
+- **Cost.** The binary64 adjoint on the A6000 runs at 1/32 fp64
+  throughput. The adjoint step may exceed the limit over the float32
+  forward step even if it is about 3x in operation count.
+  - Fallback: a binary32 adjoint for production gradients, checked
+    against the binary64 tests.
+  - The kernel ratios are measured from item 2, and reported early.
+- **TL validity at km scales.** Measured at item 8 on a 12 km dry case
+  first, then 3 km. Dry TL validity is an upper bound on the moist one.
+- **WRFPLUS has no hybrid coordinate.** `hybrid_opt = 2` gets no
+  oracle evidence (section 1).
+
+### Measured cost and the step projection
+
+These kernel ratios are AD and TL time over the binary32 primal. They were
+measured on the pb A6000 at 200x200x49, as interleaved A/B in one process.
+Other jobs share that card; the advect and big-step rows were timed with
+it idle (under 10% utilisation for 20 s before the run).
+
+| kernel (woof primal) | PR | AD32 | TL32 | AD64 |
+|---|---|---|---|---|
+| advance_uv | #652, #655 | 3.4-4.0x | ~3x | 12-15x |
+| advance_w + calc_p_rho (advance_w_phi) | #669 | 3.5-3.7x | 2.3x | 9.3-9.8x |
+| calc_coef_w (calc_coefs) | #675 | 4.8x | 3.2x | 21-23x |
+| advance_mu_t + spec_bdyupdate (advance_mu_th + advance_exact_frame_mu_t) | advance_mu_t PR | 3.35x (3.2-3.5) | 2.0x | 8.2x |
+| small_step_prep + calc_p_rho, small_step_finish (small_step_{init,finish}_{uv,column}) | #685 | 4.8x (4.7-5.0) | 2.1x | 7.7-8.0x |
+| calc_p_rho_phi (calc_p_alpha_carried_muts) | #691 | 3.2x (3.1-3.5) | 1.0x | 4.9x |
+| rk_step_prep: couple_momentum + calc_ww_cp (stage_fluxes, CuPy) | #691 | 0.85x (0.82-0.86) | 0.32x | 1.2x |
+| rk_addtend_dry (dry tendency add + add_held_heating) | #691 | 1.0x | 1.7x | 2.2x |
+| set_w_surface (set_surface_w) | #691 | 2.1x (2.0-2.3) | 1.2x | 4.0x |
+| advect_scalar/u/v/w (flux_div_{scalar,u,v,w}) | #700 | 3.9x (3.3-4.5) | 1.5-1.8x | 19-27x |
+| horizontal_pressure_gradient (slow_pgf) | #701 | 4.0x (3.9-4.1) | 1.9x | 14-15x |
+| pg_buoy_w (slow_buoyancy) | #701 | 1.3x | 1.9x | 2.1x |
+| rhs_ph (slow_geopotential, fused or open) | #702 | 4.2x (4.1-4.4) | 1.2-1.3x | 13-15x |
+| coriolis + curvature (coriolis_curvature) | #706 | 3.4x | 2.0x | 13x |
+| w_damp (w_damp) | #708 | 1.6x | 1.7x | 7.1x |
+| relax_bdy_dry + spec_bdy_dry (state_relaxation_multi, 3 stages) | #709 | 2.5x (2.5-2.6) | 1.6x | 4.1x |
+| spec_bdy_final (finalize_state_field x5 + install_mu_boundary) | item 7b | 3.7x | 0.41x | 11x |
+| spec_bdyupdate_ph + zero_grad_bdy + frame calc_p_rho (advance_specified_phi_w, 7 substeps) | item 7b | 3.5x | 2.0x | 12x |
+
+advance_uv's 3.7x in the projection is the midpoint of its range. The
+advance_mu_t ratio includes the frame kernel (advance_exact_frame_mu_t),
+whose forward share sits in "other woof kernels", so its 11.4% slightly
+understates the weight. For spec_zone >= 2 the TL/AD follow woof's
+primal, which treats the whole spec_zone ring as frame; WRFPLUS
+integrates from ids+1 whatever spec_zone is, and the oracle runs
+spec_zone = 1 only.
+
+The RK-stage glue (item 4) is cheap next to the acoustic kernels. Its
+four operators together run at 1.8x AD32 over their primal (0.95x TL32).
+rk_step_prep's primal is CuPy (stage_fluxes' face masses and
+elementwise couplings), so its fused TL and AD kernels run faster than
+the forward. In a dry step only calc_p_alpha_carried_muts has a share
+that matters: 5.8% of the strict step (0.93 ms for its four calls,
+CUPTI on the same card, 2026-11-20). It was part of "other woof
+kernels" below. set_surface_w is 0.03%. add_held_heating does not run
+without microphysics, and the held-tendency add without a mixing
+package. stage_fluxes sits inside the 6.8% CuPy share, which is left
+unmeasured below; at 0.85x it can only lower the projection.
+
+small_step's ratio is over all four primal kernels (init and finish).
+Most of its adjoint time is the init column adjoint (3.3 ms of about
+5.8 ms at this size, against 1.16 ms for the init column TL). Taking
+reciprocals in its forward recompute saved only about 6%, so the kernel
+looks bound by memory traffic rather than division. The finish pass runs first in
+the adjoint, init second, as WRFPLUS does. calc_mu_uv_1 has no woof
+kernel of its own in the strict path (small_step_finish's face masses
+are means of muts), so the finish TL/AD and its oracle cover it.
+
+The shares below are each kernel's part of the forward step's GPU kernel
+time. They come from a dry step at 200x200x49, using CUPTI kernel
+activity tagged by woof kernel and the minimum over 10 steps
+(`tools/launch_profile`).
+
+| kernel | strict | fast |
+|---|---|---|
+| advance_w_phi | 34.5% | 32.9% |
+| advance_mu_th | 11.4% | 12.2% |
+| advance_uv | 8.6% | 10.5% |
+| flux_div_{u,v,w,scalar} | 14.4% | 15.9% |
+| small_step_{init,finish}_* | 8.2% | 10.5% |
+| slow_pgf, slow_geopotential | 5.2% | 6.0% |
+| calc_coefs | 2.3% | 3.0% |
+| other woof kernels | 8.5% | 6.1% |
+| CuPy kernels and copies | 6.8% | 3.0% |
+
+flux_div is now measured on the in-tree port (item 6):
+TL and AD over woof's production float32 `flux_div_{scalar,u,v,w}`
+under GPUWM_WRF_EXACT=1, summed over the four kinds at 200x200x49 on pb,
+for periodic and for open+specified boundaries. On an idle card
+(2026-11-20) AD32 was 4.5x with open+specified boundaries and 3.3x
+periodic (3.9x is used below), TL32 1.5-1.8x and AD64 19-27x. A card
+another job held at 73-80% gave AD32 4.0-5.2x. AD64 is compute bound on the A6000's 1/32-rate float64; the glue
+and acoustic kernels are memory bound and do not show this. The earlier
+out-of-tree prototype (periodic flux_div_scalar only) gave 2.56x; the
+port is dearer because the u and v field gathers average their
+advecting mass fluxes and visit both wrapped end faces, and the
+boundary paths add branches.
+
+slow_pgf and slow_buoyancy run once per RK stage. Their idle-card
+primals (0.154 ms and 0.038 ms) give 2.9% and 0.7% of the strict step's
+16 ms for three calls. slow_pgf is part of the 5.2% row above (the
+other 2.3% is slow_geopotential); slow_buoyancy sits in "other woof
+kernels". slow_geopotential's idle-card primal is 0.20-0.24 ms (fused
+for specified and periodic axes, the open kernel for open ones); its
+row above is over the kernel the strict path dispatches.
+coriolis_curvature runs once per RK stage on rotational grids. Its
+idle-card primal (0.20 ms) gives 3.8% of the strict step for three
+calls, taken out of "other woof kernels". w_damp (w_damping = 1) also
+runs once per stage; its idle-card primal (0.047 ms) gives 0.9%, also
+taken out of "other woof kernels". The lateral-boundary rows run as one
+state_relaxation_multi launch per RK stage (8 rows on stage 1, 5 on
+stages 2-3, no w rows); at 200x200x49 the three launches take 0.37 ms,
+2.3% of the strict step, also taken out of "other woof kernels". Their
+ratios are over those launches, timed as CUDA graphs so host dispatch
+of the per-row TL/AD calls (18 rows, 4-7 kernels each) is not counted.
+
+The item 7b kernels run only on specified domains, and the profiled dry
+step is periodic. Their idle-card primals (2026-11-20, CUDA graphs) are
+therefore counted as time added to the 16 ms step rather than as a
+share of it:
+- spec_bdy_final: 0.105 ms per step (five finalize_state_field launches
+  over the whole grid, plus install_mu_boundary);
+- advance_specified_phi_w: 0.554 ms for 7 substeps. It launches one
+  thread per column, and only the frame's columns do work.
+
+Their TL launches frame threads only, so spec_bdy_final's TL32 is under
+1x. With them added, a specified-boundary step projects to 4.67-4.70x
+over 16.66 ms.
+
+The projection is the per-step adjoint cost over the forward step:
+1 (forward recompute) + Σ share x AD32 ratio. For the kernels measured so
+far (98.1% of the strict step: the 65.0% above, calc_p_rho_phi's 5.8%,
+set_w_surface's 0.03%, flux_div's 14.4%, slow_pgf's 2.9%,
+slow_geopotential's 2.3%, coriolis_curvature's 3.8%, the lateral
+boundaries' 2.3%, w_damp's 0.9% and slow_buoyancy's 0.7%), Σ share x
+AD32 = 3.64, on top of the forward recompute's 1. The rest is projected
+at a range of ratios:
+
+| ratio for the unmeasured 1.9% | projection |
+|---|---|
+| 2.2x (memory-traffic floor) | 4.68x |
+| 3.0x | 4.69x |
+| 3.71x (the measured share-weighted mean) | 4.71x |
+
+The 5x limit holds while the rest averages at most about 19x. This is a
+projection from kernel GPU time, not a measured step ratio: launch gaps
+are not counted, most ratios come from a shared card, and 1.9% of the
+step is not yet ported. calc_coefs and small_step are each about 4.8x;
+at 2.3% and 8.2% of the step they add about 0.11 and 0.39. Each later kernel PR replaces a
+projected share with a measured one.
+
+**Measured step (item 8a, 2026-11-20).** The chained periodic step's
+adjoint sweep runs at 3.3x `dycore.step` in binary32, under the 3.64 the
+kernels project for it. The recompute is the gap: through the joint TL
+kernels with snapshots it costs 2.3x, not the 1x assumed above, so the
+full adjoint step measures 5.6x. That is over the 5x limit. Item 8b's
+base-only taped forward (1.5x) brings it to **4.76-4.82x**, under the
+limit. A stored trajectory would cost about 3.3x per inner iteration.

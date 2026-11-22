@@ -85,10 +85,11 @@ def test_gpu_matches_the_v842_oracle_word_for_word(precision):
 def test_the_ice_door_verify_grades_the_ported_piece():
     from woof.hex.mpas_ice.verify import verify
     report = verify()
-    assert report["passed"] and report["status"] == "stub"
+    assert report["passed"] and report["status"] == "ported_subset"
     assert [p["name"] for p in report["pieces"]] == ["sia_velocity_solver", "geometry_diagnostics",
                                                      "thermal_init_and_conversions", "thickness_tracer_advection",
-                                                     "thermal_solver_and_basal_melt"]
+                                                     "thermal_solver_and_basal_melt", "forward_euler_step",
+                                                     "forward_mode"]
 
 
 @requires_gpu

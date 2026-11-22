@@ -45,13 +45,20 @@ def fetch_pinned(asset: PinnedAsset, *, cache=None, opener=None) -> Path:
     import urllib.request
     opener = opener or (lambda url: urllib.request.urlopen(url, timeout=120))
     target.parent.mkdir(parents=True, exist_ok=True)
-    part = target.with_name(target.name + ".part")
-    with opener(asset.url) as reply:
-        part.write_bytes(reply.read())
+    part = unique_part(target)
     try:
+        with opener(asset.url) as reply:
+            part.write_bytes(reply.read())
         _check(part, asset)
-    except AssetError:
+    except BaseException:
         part.unlink(missing_ok=True)
         raise
-    part.replace(target)
+    part.replace(target)     # atomic: a concurrent fetch of the same pin installs equal bytes
     return target
+
+
+def unique_part(target: Path) -> Path:
+    """A download path beside ``target`` that no other process shares."""
+    import os
+    import uuid
+    return target.with_name(f"{target.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.part")

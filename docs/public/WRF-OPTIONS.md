@@ -26,7 +26,7 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 
 | selector | imports | refused |
 |---|---|---|
-| `mp_physics` | 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 24, 26, 27, 28, 30, 38, 40, 50, 51, 52, 53, 55, 56, 95, 96, 97, 106 | 29, 32, 98, 99 |
+| `mp_physics` | 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 24, 26, 27, 28, 29, 30, 38, 40, 50, 51, 52, 53, 55, 56, 95, 96, 97, 106 | 32, 98, 99 |
 | `cu_physics` | 0, 1, 2, 3, 5, 6, 10, 11, 14, 16, 93, 94, 95, 96, 99 | 4, 7, 98 |
 | `shcu_physics` | 0, 1, 2, 3, 4, 5 | - |
 | `bl_pbl_physics` | 0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 16, 17, 99 | 98 |
@@ -34,8 +34,8 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `sf_surface_physics` | 0, 1, 2, 3, 4, 7, 8 | 5, 6 |
 | `sf_urban_physics` | 0, 1, 2, 3 | - |
 | `sf_ocean_physics` | 0, 1, 2 | - |
-| `ra_lw_physics` | 0, 1, 3, 4, 5, 7, 31, 99 | 14, 24 |
-| `ra_sw_physics` | 0, 1, 2, 3, 4, 5, 7, 99 | 14, 24 |
+| `ra_lw_physics` | 0, 1, 3, 4, 5, 7, 14, 31, 99 | 24 |
+| `ra_sw_physics` | 0, 1, 2, 3, 4, 5, 7, 14, 99 | 24 |
 | `sst_update` | 1 | - |
 | `sst_skin` | 1 | - |
 | `tmn_update` | 1 | - |
@@ -75,7 +75,7 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `26` | WDM 7-class scheme (separate hail and graupel categories) | imports |
 | `27` | UDM 7-class scheme, double moments in qnc and qnr plus qnn | imports |
 | `28` | aerosol-aware Thompson scheme with water- and ice-friendly aerosol climatology | imports |
-| `29` | rcon_mp_scheme | refused: mp_physics=29 (RCON) is ported but its release speed proof is open: the whole-forecast microphysics stage costs 1.885431x MP28; the retained native 1.053748x profile does not explain the GPU excess. A qualified speed handoff is required before forecast admission; until then select another microphysics scheme, such as mp_physics=28 (the Thompson aerosol-aware scheme it is timed against). |
+| `29` | rcon_mp_scheme | imports |
 | `30` | fast_khain_lynn_shpund | imports with `--rrtmg-variant rrtmg_legacy` (WRF's own RRTMG) |
 | `32` | full_khain_lynn | refused: namelist.input &physics: mp_physics=32 (full Khain-Lynn spectral bin microphysics, package full_khain_lynn) is not ported. It carries mass and number in dozens of size bins per hydrometeor class; the fast spectral bin scheme (mp_physics=30) is a different, reduced scheme and is not run in its place. |
 | `38` | thompsongh | imports |
@@ -204,8 +204,8 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `4` | rrtmg scheme | imports as RRTMG -> RTE+RRTMGP; `--rrtmg-variant rrtmg_legacy` runs WRF's own RRTMG |
 | `5` | Goddard longwave scheme | imports |
 | `7` | FLG (UCLA) scheme | imports |
-| `14` | rrtmg-k scheme from KIAPS | refused: &physics ra_lw_physics = 14: no ratified woof mapping (implemented: [0, 1, 3, 4, 5, 7, 31, 99]). WRF RRTMG-K longwave is not ported; RRTMG (4, with ra_rrtmg_variant = rrtmg_legacy for WRF's transcription) is the nearest scheme and is a different k-distribution. Nothing is substituted for it; choose one of the implemented values. |
-| `24` | fast rrtmg scheme for GPU and MIC (since 3.7) | refused: &physics ra_lw_physics = 24: no ratified woof mapping (implemented: [0, 1, 3, 4, 5, 7, 31, 99]). WRF fast RRTMG longwave (module_ra_rrtmg_lwf) is a separately coded solver that is not ported; ra_lw_physics = 4 with ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription. Nothing is substituted for it; choose one of the implemented values. |
+| `14` | rrtmg-k scheme from KIAPS | imports |
+| `24` | fast rrtmg scheme for GPU and MIC (since 3.7) | refused: &physics ra_lw_physics = 24: no ratified woof mapping (implemented: [0, 1, 3, 4, 5, 7, 14, 31, 99]). WRF fast RRTMG longwave (module_ra_rrtmg_lwf) is a separately coded solver that is not ported; ra_lw_physics = 4 with ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription. Nothing is substituted for it; choose one of the implemented values. |
 | `31` | Earth Held-Suarez forcing | imports |
 | `99` | GFDL (Eta) longwave (semi-supported) | imports |
 
@@ -220,8 +220,8 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `4` | rrtmg scheme | imports as RRTMG -> RTE+RRTMGP; `--rrtmg-variant rrtmg_legacy` runs WRF's own RRTMG |
 | `5` | Goddard shortwave scheme | imports |
 | `7` | FLG (UCLA) scheme | imports |
-| `14` | rrtmg-k scheme from KIAPS | refused: &physics ra_sw_physics = 14: no ratified woof mapping (implemented: [0, 1, 2, 3, 4, 5, 7, 99]). WRF RRTMG-K shortwave is not ported; RRTMG (4, with ra_rrtmg_variant = rrtmg_legacy for WRF's transcription) is the nearest scheme and is a different k-distribution. Nothing is substituted for it; choose one of the implemented values. |
-| `24` | fast rrtmg scheme for GPU and MIC (since 3.7) | refused: &physics ra_sw_physics = 24: no ratified woof mapping (implemented: [0, 1, 2, 3, 4, 5, 7, 99]). WRF fast RRTMG shortwave (module_ra_rrtmg_swf) is a separately coded solver that is not ported; ra_sw_physics = 4 with ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription. Nothing is substituted for it; choose one of the implemented values. |
+| `14` | rrtmg-k scheme from KIAPS | imports |
+| `24` | fast rrtmg scheme for GPU and MIC (since 3.7) | refused: &physics ra_sw_physics = 24: no ratified woof mapping (implemented: [0, 1, 2, 3, 4, 5, 7, 14, 99]). WRF fast RRTMG shortwave (module_ra_rrtmg_swf) is a separately coded solver that is not ported; ra_sw_physics = 4 with ra_rrtmg_variant = rrtmg_legacy runs WRF's RRTMG transcription. Nothing is substituted for it; choose one of the implemented values. |
 | `99` | GFDL (Eta) longwave (semi-supported) | imports |
 
 ## `sst_update`

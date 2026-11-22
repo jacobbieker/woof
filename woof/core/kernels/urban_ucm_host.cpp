@@ -62,18 +62,22 @@ public:
     ~UcmHostRounding() { std::fesetround(saved); }
 };
 
+// The forecast wrappers below keep their table-morphology ABI (nudapt = 0;
+// the morphology table argument is then never read).
 // Pointer-plane layouts are exactly the CUDA entry layouts. Each plane is a
 // contiguous float32 array; UTYPE and JMONTH input planes are int32 instead.
 // Pointer tables carry native addresses represented as unsigned 64-bit words.
 extern "C" void ucm_host_columns(
     const unsigned long long* inputs, const unsigned long long* outputs,
     const unsigned long long* state, const float* table, const float* globals,
-    const int* switches, int* codes, int n)
+    const int* switches, int* codes, const unsigned long long* morph,
+    int nudapt, int n)
 {
     UcmHostRounding rounding;
     for (int i = 0; i < n; ++i) {
         threadIdx.x = static_cast<std::size_t>(i);
-        ucm_column_test(inputs, outputs, state, table, globals, switches, codes, n);
+        ucm_column_test(inputs, outputs, state, table, globals, switches, codes,
+                        morph, nudapt, n);
     }
 }
 
@@ -97,7 +101,7 @@ extern "C" void ucm_host_noah_after_lsm(
         threadIdx.x = i;
         ucm_noah_after_lsm(urban, utype, fraction, u1, v1, hour_angle,
                            rural, fields, state, table, globals, switches,
-                           dt, month, error, ny, nx);
+                           state, 0, dt, month, error, ny, nx);
     }
 }
 
@@ -114,7 +118,8 @@ extern "C" void ucm_host_noahmp_after_lsm(
         threadIdx.x = i;
         ucm_noahmp_after_lsm(urban, utype, fraction, u1, v1, temperature, qv,
                              p_lower, p_upper, dz, hour_angle, fields, state,
-                             table, globals, switches, dt, month, error, ny, nx);
+                             table, globals, switches, state, 0, dt, month,
+                             error, ny, nx);
     }
 }
 

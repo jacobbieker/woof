@@ -16,8 +16,11 @@
 !   seaice_init_evp (verbatim) and seaice_initialize_time_diagnostics (cut
 !   verbatim), seaice_init_advection (verbatim: under config_use_advection the
 !   incremental remap's init, with coeffs_reconstruct the input's,
-!   rbf_standins.F90); the basis functions, masks and the rest of the mesh
-!   setup are the input's;
+!   rbf_standins.F90); under the config oracle_compute_basis (present at
+!   all) the velocity solver's set-up after seaice_init_evp, as
+!   seaice_init_velocity_solver runs it (verbatim): the variational basis,
+!   or under config_stress_divergence_scheme = 'weak' the weak form's normal
+!   vectors; else they are the input's; the masks and the rest of the mesh setup are the input's;
 !   then oracle_n_steps times: the clock advanced, seaice_timestep (cut
 !   verbatim: the time diagnostics, the step counter, the column wrappers, the
 !   dynamics subcycles with seaice_run_velocity_solver and, under
@@ -36,6 +39,8 @@ program run_seaice_step
   use mpas_pool_routines
   use mpas_timekeeping
   use seaice_velocity_solver_constitutive_relation, only: seaice_init_evp
+  use seaice_velocity_solver_variational, only: seaice_init_velocity_solver_variational
+  use seaice_velocity_solver_weak, only: seaice_init_velocity_solver_weak
   use seaice_diagnostics, only: seaice_initialize_time_diagnostics
   use seaice_advection, only: seaice_init_advection
   use seaice_time_integration
@@ -47,8 +52,13 @@ program run_seaice_step
   real(kind=RKIND) :: inputDt
   real(kind=RKIND), pointer :: config_dt, dynamicsTimeStep, elasticTimeStep
   integer, pointer :: nSteps, config_dynamics_subcycle_number, config_elastic_subcycle_number
-  character(len=StrKIND), pointer :: config_start_time, clockStep
+  character(len=StrKIND), pointer :: config_start_time, clockStep, config_calendar_type
   integer :: itimestep, ierr, p
+  logical, pointer :: config_rotate_cartesian_grid, config_include_metric_terms
+  character(len=StrKIND), pointer :: config_variational_basis, config_wachspress_integration_type
+  character(len=StrKIND), pointer :: config_stress_divergence_scheme
+  integer, pointer :: config_wachspress_integration_order
+  type(mpas_pool_type), pointer :: weakMesh, weakBoundary, weakPool
   character(len=24), parameter :: structNames(24) = [character(len=24) :: 'mesh', 'boundary', 'velocity_solver', &
        'velocity_variational', 'velocity_weak', 'icestate', 'tracers', 'tracers_aggregate', 'atmos_coupling', &
        'ocean_coupling', 'ridging', 'diagnostics', 'scratch', 'tracer_tendencies', 'tracer_edge_fluxes', &
@@ -73,6 +83,9 @@ program run_seaice_step
           pool_named(pools, trim(structNames(p))))
   end do
 
+  ! the framework sets the calendar before the clock (mpas_framework.F:111-116)
+  call mpas_pool_get_config(pools % configs, 'config_calendar_type', config_calendar_type)
+  call mpas_timekeeping_init(config_calendar_type)
   call mpas_pool_get_config(pools % configs, 'config_start_time', config_start_time)
   call mpas_pool_get_config(pools % configs, 'oracle_clock_step', clockStep)
   call mpas_set_clock(domain % clock, config_start_time, clockStep)
@@ -86,6 +99,31 @@ program run_seaice_step
   dynamicsTimeStep = config_dt / real(config_dynamics_subcycle_number,RKIND)
   elasticTimeStep = dynamicsTimeStep / real(config_elastic_subcycle_number,RKIND)
   call seaice_init_evp(domain)
+  ! under oracle_compute_basis, seaice_init_velocity_solver's basis set-up
+  ! (mpas_seaice_velocity_solver.F:160-171, compiled verbatim), as v8.4.2 always
+  ! runs it; without it the basis is the input's
+  if (stub_pool_has(pools % configs, 'oracle_compute_basis')) then
+     call mpas_pool_get_config(pools % configs, 'config_rotate_cartesian_grid', config_rotate_cartesian_grid)
+     call mpas_pool_get_config(pools % configs, 'config_include_metric_terms', config_include_metric_terms)
+     call mpas_pool_get_config(pools % configs, 'config_variational_basis', config_variational_basis)
+     call mpas_pool_get_config(pools % configs, 'config_wachspress_integration_type', &
+          config_wachspress_integration_type)
+     call mpas_pool_get_config(pools % configs, 'config_wachspress_integration_order', &
+          config_wachspress_integration_order)
+     call mpas_pool_get_config(pools % configs, 'config_stress_divergence_scheme', &
+          config_stress_divergence_scheme)
+     if (trim(config_stress_divergence_scheme) == "weak") then
+        weakMesh => pool_named(pools, 'mesh')
+        weakBoundary => pool_named(pools, 'boundary')
+        weakPool => pool_named(pools, 'velocity_weak')
+        call seaice_init_velocity_solver_weak(weakMesh, weakBoundary, weakPool, config_rotate_cartesian_grid)
+     else if (trim(config_stress_divergence_scheme) == "variational") then
+        call seaice_init_velocity_solver_variational(pool_named(pools, 'mesh'), &
+             pool_named(pools, 'velocity_variational'), pool_named(pools, 'boundary'), &
+             config_rotate_cartesian_grid, config_include_metric_terms, config_variational_basis, &
+             config_wachspress_integration_type, config_wachspress_integration_order)
+     end if
+  end if
   call seaice_init_advection(domain)
   call seaice_initialize_time_diagnostics(domain)
 

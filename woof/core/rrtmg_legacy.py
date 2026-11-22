@@ -143,6 +143,7 @@ from woof.core.mynn_radiation import (
 from woof.core import rrtmg_legacy_prep as _prep
 from woof.core import rrtmg_legacy_device as _prep_device
 from woof.core import rrtmg_lw as _lw
+from woof.core import mcica_seed as _mcica_seed
 from woof.core import rrtmg_mcica as _mcica
 from woof.core import rrtmg_sw as _sw
 from woof.core import rrtmg_aerosol_optics as _aer3
@@ -926,6 +927,58 @@ def legacy_radiation_vram_bytes(*, ncol, nz, p_top, column_chunk=None,
     return estimate + result_bytes + ozone_bytes + constants
 
 
+#: How many saturation widths one engine chunk may span when the card has
+#: the room, widest first (see :func:`legacy_wide_chunk_width`).
+WIDE_CHUNK_FACTORS = (4, 2)
+#: Free device memory kept back beyond the priced transient.
+WIDE_CHUNK_MARGIN_BYTES = 1 << 30
+
+
+def legacy_saturation_chunk(resident_threads=None):
+    """The one-wave engine width a wide chunk is a multiple of: the LW
+    saturation width of the device (``rrtmg_lw.LW_BATCH_COLUMN_CHUNK`` on
+    the live card).  ``resident_threads`` prices another card's width
+    without a CUDA context."""
+    return _lw.batch_column_chunk(_lw.NGPTLW, _lw.LW_BATCH_COLUMN_CHUNK_CEILING,
+                                  resident_threads=resident_threads)
+
+
+def legacy_wide_chunk_width(*, ncol, nz, p_top, ncol_day, base, free_bytes,
+                            factors=WIDE_CHUNK_FACTORS,
+                            margin_bytes=WIDE_CHUNK_MARGIN_BYTES, **pricing):
+    """The engine chunk width a legacy call takes when it is WIDER than one
+    wave, or ``None`` for the one-wave width.
+
+    ``base`` times the first of ``factors`` whose priced transient
+    (:func:`legacy_radiation_vram_bytes` at that width) plus
+    ``margin_bytes`` fits ``free_bytes``.  ``None`` when one wave already
+    covers the columns, when no free figure is known, or when nothing
+    wider fits.
+
+    ONE RULE FOR THE CALL AND FOR ITS PRICE.  The live call
+    (:meth:`RRTMGLegacyRadiation._wide_chunk`) asks it with the bytes the
+    card has free at the call; the estimator
+    (:func:`woof.core.preflight.estimate_experiment`) asks it with the
+    card's free bytes less what the forecast holds besides the call.
+    Breakage it prevents: the estimator priced the one-wave width while a
+    card with room ran four waves, so ``woof check --met-em`` priced the
+    150 x 150 x 49 OKC case at 6.29 GiB and the process reached 10.40 GiB
+    on an RTX 5090 (the SW call at 8,192 columns: 6.0 GiB live against
+    the 2.0 GiB priced).
+    """
+    base = int(base)
+    if base >= int(ncol) or free_bytes is None:
+        return None
+    for factor in factors:
+        width = base * int(factor)
+        need = legacy_radiation_vram_bytes(
+            ncol=ncol, nz=nz, p_top=p_top, column_chunk=width,
+            ncol_day=ncol_day, **pricing)
+        if need + int(margin_bytes) <= int(free_bytes):
+            return width
+    return None
+
+
 # ---------------------------------------------------------------------------
 # LW module-DATA tables: WRF v4.6.1's module_ra_rrtmg_lw carries
 # lwavplank (totplnk/totplk16), lwatmref (preflog/tref/chi_mls), lwcldpr
@@ -1455,6 +1508,11 @@ class RRTMGLegacyRadiation:
     """
 
     native_eclipse = True  # WRF dims incoming SCON before SW transport.
+    #: solar_ssi_opt (woof.spacewx.solar_spectrum): PhysicsDriver sets
+    #: ``sw_band_factor`` (14 floats, bands 16..29) before each call; None
+    #: is WRF's fixed Kurucz band shares.
+    accepts_sw_band_factor = True
+    sw_band_factor = None
 
     #: RRTMG_LWRAD's ``OLR`` (TOA outgoing longwave, W m-2) is
     #: ``TOTUFLUX`` at the top level -- ``lwrad_outputs_batch`` already maps
@@ -1812,6 +1870,14 @@ class RRTMGLegacyRadiation:
                 + self.start_time.second / 3600.0
                 + self.start_time.microsecond / 3.6e9)
         xtime = F(float(state.elapsed_seconds) / 60.0)
+        generation = getattr(cfg, "solar_generation", "wrf_480")
+        if generation == "wrf_480":
+            # WRF's frame XTIME/GMT for the whole call (upstream 1.1.7,
+            # woof.core.solar.radiation_calendar); the caller's julian is
+            # the same frame's.
+            from woof.core.solar import radiation_calendar
+            _julian, xtime, gmt = radiation_calendar(
+                self.start_time, float(state.elapsed_seconds))
         radt_minutes = F(cfg.radt if cfg.radt > 0.0 else cfg.radt_minutes)
         # WRF: hour angle at the interval midpoint, declination/solcon at
         # call time (module_radiation_driver.F:1206-1208).  Evaluated on the
@@ -1819,7 +1885,6 @@ class RRTMGLegacyRadiation:
         # (radconst, calc_coszen) differ from WRF's Fortran by up to 64 ULP
         # in COSZEN (tools/rrtmg_legacy_column_oracle).
         xt_mid = xtime + radt_minutes * F(0.5)
-        generation = getattr(cfg, "solar_generation", "wrf_480")
         from woof.wrf_exact import ENABLED
         if ENABLED and generation == "wrf_461":
             coszen_d, _hrang_d, declin, solcon = solar_geometry_device(
@@ -1848,6 +1913,10 @@ class RRTMGLegacyRadiation:
                 + valid_time.second / 3600.0
                 + valid_time.microsecond / 3.6e9)
         julian = F((julday - 1) + hour / 24.0)
+        if getattr(cfg, "solar_generation", "wrf_480") == "wrf_480":
+            from woof.core.solar import radiation_calendar
+            julian, _xtime, _gmt = radiation_calendar(
+                self.start_time, float(state.elapsed_seconds))
         lat_flat = self.latitude_deg.reshape(-1)
         lon_flat = self.longitude_deg.reshape(-1)
         coszen_d, _c, _d, _s = self._call_coszen(
@@ -1949,9 +2018,9 @@ class RRTMGLegacyRadiation:
 
     #: How many saturation widths one engine chunk may span when the card
     #: has the room (see :meth:`_wide_chunk`).
-    WIDE_CHUNK_FACTORS = (4, 2)
+    WIDE_CHUNK_FACTORS = WIDE_CHUNK_FACTORS
     #: Free device memory kept back beyond the priced transient.
-    WIDE_CHUNK_MARGIN_BYTES = 1 << 30
+    WIDE_CHUNK_MARGIN_BYTES = WIDE_CHUNK_MARGIN_BYTES
 
     def _wide_chunk(self, ncol, nz, p_top, nday):
         """Engine chunk width for this call: wider than one wave when it fits.
@@ -1970,6 +2039,9 @@ class RRTMGLegacyRadiation:
         now, the call takes it and issues a quarter or half of the chunks.
         An explicit ``column_chunk`` is used as given; a card without the
         room keeps the one-wave width, exactly as before.
+
+        The rule is :func:`legacy_wide_chunk_width`, which the memory
+        estimator asks too, so the width the check prices is this one.
         """
         if self.column_chunk is not None:
             return self.column_chunk
@@ -1977,19 +2049,14 @@ class RRTMGLegacyRadiation:
         base = int(_lw.LW_BATCH_COLUMN_CHUNK)
         if base >= ncol:
             return None
-        free = _sw.sw_batch_free_device_bytes(cp)
-        if free is None:
-            return None
-        for factor in self.WIDE_CHUNK_FACTORS:
-            width = base * factor
-            need = legacy_radiation_vram_bytes(
-                ncol=ncol, nz=nz, p_top=p_top, column_chunk=width,
-                ncol_day=nday, lw_coefficients=self._C,
-                longwave=self.longwave, shortwave=self.shortwave,
-                o3input=self.o3input, aer_opt=self.aer_opt)
-            if need + self.WIDE_CHUNK_MARGIN_BYTES <= free:
-                return width
-        return None
+        return legacy_wide_chunk_width(
+            ncol=ncol, nz=nz, p_top=p_top, ncol_day=nday, base=base,
+            free_bytes=_sw.sw_batch_free_device_bytes(cp),
+            factors=self.WIDE_CHUNK_FACTORS,
+            margin_bytes=self.WIDE_CHUNK_MARGIN_BYTES,
+            lw_coefficients=self._C, longwave=self.longwave,
+            shortwave=self.shortwave, o3input=self.o3input,
+            aer_opt=self.aer_opt)
 
     def _mcica_generator(self, gpu_entry):
         """Device McICA twin, resolved through the module attribute at
@@ -2036,6 +2103,11 @@ class RRTMGLegacyRadiation:
                 self.start_time.second/3600.+self.start_time.microsecond/3.6e9)
             xt_mid = F(float(elapsed)/60.)+F(cfg.radt if cfg.radt>0 else cfg.radt_minutes)*F(.5)
             generation = getattr(cfg,'solar_generation','wrf_480')
+            if generation == 'wrf_480':
+                # WRF's frame JULIAN/XTIME/GMT (woof.core.solar.radiation_calendar).
+                from woof.core.solar import radiation_calendar
+                julian,xtime_w,gmt = radiation_calendar(self.start_time,float(elapsed))
+                xt_mid = F(xtime_w+F(cfg.radt if cfg.radt>0 else cfg.radt_minutes)*F(.5))
             if ENABLED and generation == 'wrf_461':
                 coszen_d,_,declin,solcon = solar_geometry_device(
                     julian,xt_mid,gmt,self._graph_lat,self._graph_lon)
@@ -2267,6 +2339,13 @@ class RRTMGLegacyRadiation:
                 + valid_time.second / 3600.0
                 + valid_time.microsecond / 3.6e9)
         julian = F((julday - 1) + hour / 24.0)
+        _wrf_frame = getattr(cfg, "solar_generation", "wrf_480") == "wrf_480"
+        if _wrf_frame:
+            # WRF's frame JULIAN/XTIME/GMT for the whole call: solar, ozone
+            # and aerosol read one word (woof.core.solar.radiation_calendar).
+            from woof.core.solar import radiation_calendar
+            julian, _frame_xtime, _frame_gmt = radiation_calendar(
+                self.start_time, float(state.elapsed_seconds))
         aer1_grid = None
         aodtot = None
         if self.shortwave and self.aer_opt == 1:
@@ -2668,6 +2747,7 @@ class RRTMGLegacyRadiation:
             # and the windows below pass logical offsets c0 + w0 to the
             # output kernel, which the adapter's kernel source interleaves.
             sel = slice(c0, c1)
+            _mcica_seed.set_context(time_seconds=state.elapsed_seconds, base=c0)
             kw = chunk_inputs(sel)
             cldfra_cols[c0:c1] = kw["cldfra3d"]
             # The wrapper glue on the device: rrtmg_legacy_device holds
@@ -2841,6 +2921,7 @@ class RRTMGLegacyRadiation:
                     cp.ascontiguousarray(aer1_grid[sel]), nz + 1, self._sw_tables)
                 if diagnostic_sink is not None:
                     diagnostic_aerosol = dict(aerod=aer1_grid[sel], aodtot=aodtot[sel])
+            _mcica_seed.set_context(time_seconds=state.elapsed_seconds, ids=sel)
             ps = _prep_device.swrad_prep_batch_device(
                 **kw, albedo=surf["albedo"][sel],
                 xcoszen=coszen_d[sel], solcon=solcon,
@@ -2897,7 +2978,7 @@ class RRTMGLegacyRadiation:
                              (0 if aerosol_w is None else self.aer_opt)),
                     aerosol=aerosol_w,
                     column_chunk=chunk_sw, _stage_probe=self._stage_probe,
-                    mcica_layout="column")
+                    mcica_layout="column", band_factor=self.sw_band_factor)
                 if spectral is not None:
                     for key, output, _, _ in spectral_bindings:
                         # The device engine returns total and direct spectral

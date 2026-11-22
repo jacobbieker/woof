@@ -1,0 +1,180 @@
+{
+  "schema": "gpuwm-hex.mpas-core-options/v1",
+  "core": "core_landice",
+  "pin": "f34984b2c89353cf31c235b08d3b4acd96b37bb3",
+  "registry": {
+    "path": "src/core_landice/Registry_subglacial_hydro.xml",
+    "sha256": "d25f3facef39da23016bf2b16511ca85b49b696538df8818d48115baa7b441b9"
+  },
+  "option_count": 24,
+  "options": [
+    {
+      "name": "config_SGH",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "activate subglacial hydrology model"
+    },
+    {
+      "name": "config_SGH_adaptive_timestep_fraction",
+      "type": "real",
+      "default": "1.0",
+      "units": "unitless",
+      "description": "fraction of adaptive CFL timestep to use"
+    },
+    {
+      "name": "config_SGH_max_adaptive_timestep",
+      "type": "real",
+      "default": "3.15e9",
+      "units": "s",
+      "description": "The maximum allowable time step in seconds. If the allowable time step determined by the adaptive CFL calculation is longer than this, then the model will specify config_SGH_max_adaptive_timestep as the time step instead.  Defaults to 100 years (in seconds)."
+    },
+    {
+      "name": "config_SGH_tangent_slope_calculation",
+      "type": "character",
+      "default": "from_normal_slope",
+      "units": "unitless",
+      "description": "Selection of the method for calculating the tangent component of slope at edges. 'from_vertex_barycentric' interpolates scalar values from cell centers to vertices using the barycentric interpolation routine in operators (mpas_cells_to_points_using_baryweights) and then calculates the slope between vertices.  It works for obtuse triangles, but will not work correctly across the edges of periodic meshes. 'from_vertex_barycentric_kiteareas' interpolates scalar values from cell centers to vertices using barycentric interpolation based on kiterea values and then calculates the slope between vertices.  It will work across the edges of periodic meshes, but will not work correctly for obtuse triangles. 'from_normal_slope' uses the vector operator mpas_tangential_vector_1d to calculate the tangent slopes from the normal slopes on the edges of the adjacent cells.  It will work for any mesh configuration, but is the least accurate method."
+    },
+    {
+      "name": "config_SGH_pressure_calc",
+      "type": "character",
+      "default": "cavity",
+      "units": "unitless",
+      "description": "Selection of the method for calculating water pressure. 'cavity' closes the hydrology equations by assuming cavities are always completely full. 'overburden' assumes water pressure is always equal to ice overburden pressure."
+    },
+    {
+      "name": "config_SGH_alpha",
+      "type": "real",
+      "default": "1.25",
+      "units": "unitless",
+      "description": "power of alpha parameter in subglacial water flux formula"
+    },
+    {
+      "name": "config_SGH_beta",
+      "type": "real",
+      "default": "1.5",
+      "units": "unitless",
+      "description": "power of beta parameter in subglacial water flux formula"
+    },
+    {
+      "name": "config_SGH_conduc_coeff",
+      "type": "real",
+      "default": "0.001",
+      "units": "m^(2*beta-alpha) s^(2*beta-3) kg^(1-beta)",
+      "description": "conductivity coefficient for subglacial water flux"
+    },
+    {
+      "name": "config_SGH_till_drainage",
+      "type": "real",
+      "default": "3.1709792e-11",
+      "units": "m s^{-1}",
+      "description": "background subglacial till drainage rate"
+    },
+    {
+      "name": "config_SGH_advection",
+      "type": "character",
+      "default": "fo",
+      "units": "none",
+      "description": "Advection method for SGH. 'fo'=first-order upwind; 'fct'=flux-corrected transport. FCT currently not enabled."
+    },
+    {
+      "name": "config_SGH_bed_roughness",
+      "type": "real",
+      "default": "0.5",
+      "units": "m^{-1}",
+      "description": "cavitation coefficient"
+    },
+    {
+      "name": "config_SGH_bed_roughness_max",
+      "type": "real",
+      "default": "0.1",
+      "units": "m",
+      "description": "bed roughness scale"
+    },
+    {
+      "name": "config_SGH_creep_coefficient",
+      "type": "real",
+      "default": "0.04",
+      "units": "none",
+      "description": "creep closure coefficient"
+    },
+    {
+      "name": "config_SGH_englacial_porosity",
+      "type": "real",
+      "default": "0.01",
+      "units": "none",
+      "description": "notional englacial porosity"
+    },
+    {
+      "name": "config_SGH_till_max",
+      "type": "real",
+      "default": "2.0",
+      "units": "m",
+      "description": "maximum water thickness in subglacial till"
+    },
+    {
+      "name": "config_SGH_chnl_active",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "activate channels in subglacial hydrology model"
+    },
+    {
+      "name": "config_SGH_chnl_alpha",
+      "type": "real",
+      "default": "1.25",
+      "units": "unitless",
+      "description": "power of alpha parameter in subglacial water flux formula (in channels)"
+    },
+    {
+      "name": "config_SGH_chnl_beta",
+      "type": "real",
+      "default": "1.5",
+      "units": "unitless",
+      "description": "power of beta parameter in subglacial water flux formula (in channels)"
+    },
+    {
+      "name": "config_SGH_chnl_conduc_coeff",
+      "type": "real",
+      "default": "0.1",
+      "units": "m^(2*beta-alpha) s^(2*beta-3) kg^(1-beta)",
+      "description": "conductivity coefficient (in channels)"
+    },
+    {
+      "name": "config_SGH_chnl_creep_coefficient",
+      "type": "real",
+      "default": "0.04",
+      "units": "none",
+      "description": "creep closure coefficient (in channels)"
+    },
+    {
+      "name": "config_SGH_incipient_channel_width",
+      "type": "real",
+      "default": "2.0",
+      "units": "m",
+      "description": "width of sheet beneath/around channel that contributes to melt within the channel"
+    },
+    {
+      "name": "config_SGH_include_pressure_melt",
+      "type": "logical",
+      "default": ".true.",
+      "units": "none",
+      "description": "whether to include the pressure melt term in the rate of channel opening"
+    },
+    {
+      "name": "config_SGH_shmip_forcing",
+      "type": "character",
+      "default": "none",
+      "units": "none",
+      "description": "calculate time-varying forcing specified by SHMIP experiments C or D"
+    },
+    {
+      "name": "config_SGH_basal_melt",
+      "type": "character",
+      "default": "file",
+      "units": "none",
+      "description": "source for the basalMeltInput term.  'file' takes whatever field was input and performs no calculation.  'thermal' uses the groundedBasalMassBal field calculated by the thermal model.  'basal_heat' calculates a melt rate assuming the entirety of the basal heat flux (basalFrictionFlux+basalHeatFlux) goes to melting ice at the bed.  This is calculated in the SGH module and is independent of any calculations in the thermal model."
+    }
+  ]
+}

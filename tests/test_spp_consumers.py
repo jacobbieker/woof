@@ -259,7 +259,13 @@ def test_spp_specializations_leave_default_compiler_sources_frozen():
             # 6d79b6e9c5d adds MYNN_GSD41-only DMP cloud-base outputs and
             # GRIMS diagnostics, off in the default string. Previously
             # 1f5e6f64.
-            "mynn_pbl": 'cf6678981492e29c5d58e8c269f6cf247d5b00118cffa47e97d71014cd471342',
+            # RE-PINNED for 3.0.3, synchronized with test_mp8_frozen:
+            # correct-mode ML1 adds the BouLac downward-length sign under
+            # MYNN_BOULAC_DOWN_SIGN only, off in the default string (the
+            # default PTX is byte-identical to 3.0.2: tools/kernel_ptx_identity/
+            # receipts/mynn-boulac-down-sign-ml1-default.json). Previously
+            # cf667898.
+            "mynn_pbl": 'ec6cc52fd9fd9456c8d0a0b16d00b6318b8381d4d9eb784bd96ca58976965455',
             # Match test_mp8_frozen's accepted staging source: selectable
             # GSL WRF 3.9 stability solver plus explicitly rounded ordinary
             # mynn_table interpolation. The SPP construction remains inert
@@ -269,7 +275,9 @@ def test_spp_specializations_leave_default_compiler_sources_frozen():
             # test_mp8_frozen.FROZEN_MODULE_DIGESTS.
             # RE-PINNED for 3.0.0: 51bb93111ee reworded one comment.
             # Previously 5b294157.
-            "mynn_surface": "a9abd5020db8a204e3f538e9af69ebb903c2b329c56c258d5286bfdf18cc5ddf"}
+            # RE-PINNED by the quirk pass: the MYNN_SL_PSIH_ZOLZT block, off
+            # in the default string.  Previously a9abd502.
+            "mynn_surface": "179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1"}
     for name, pin in pins.items():
         baseline = module_source(name)
         assert hashlib.sha256(baseline.encode()).hexdigest() == pin

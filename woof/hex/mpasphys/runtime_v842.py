@@ -23,6 +23,12 @@ from .driver_v842 import interval_seconds
 from .native_backend import NativePhysics
 from .pool_v842 import NativePoolHydration
 from .session_v842 import NativePhysicsSession, native_working_directory
+from woof.core.adaptive_clock import env_flag
+
+#: Producers that write every element of a resident pool field write it in place instead of into a
+#: private buffer that write_field then copies.  On by default (the same words, Alps hex VR fast and
+#: strict on CUDA and Metal); WOOF_HEX_POOL_DIRECT=0 restores the copy (A/B).
+_POOL_DIRECT = not os.environ.get('WOOF_HEX_POOL_DIRECT', '').strip() or env_flag('WOOF_HEX_POOL_DIRECT')
 
 
 def commit_outer_scalar_groups(session, atmosphere, cp):
@@ -51,11 +57,13 @@ def commit_outer_scalar_groups(session, atmosphere, cp):
 
 
 def forcing_writes_scalar_sources(coupling) -> bool:
-    """Whether a forcing (SPPT/SKEBS, IAU or analysis nudging) adds into the stage's scalar sources in place.
+    """Whether a forcing (SPPT/SKEBS, IAU, analysis nudging or an applying --nn seat) adds into the stage's scalar
+    sources in place.
 
     Compact resident assembly lends Registry publication its scalar allocation, so such a forcing must work on a
     copy or it would rewrite the published pre-forcing words."""
-    return any(getattr(coupling, name, None) is not None for name in ('stochastic', 'iau', 'nudging'))
+    return (any(getattr(coupling, name, None) is not None for name in ('stochastic', 'iau', 'nudging'))
+            or bool(getattr(getattr(coupling, 'nn_seat', None), 'applies', False)))
 
 
 def nudging_partitioned(execution, moving) -> bool:
@@ -66,6 +74,13 @@ def nudging_partitioned(execution, moving) -> bool:
     return execution is not None or (moving is not None and not getattr(moving, 'fixed_mesh', False))
 
 
+def clm_lake_service_receipt(session):
+    """The WOOF-only CLM lake service's receipt (clm_lake_v842: lake columns and steps run), or None when the
+    service is off or has not run clm_lake_init yet."""
+    service = getattr(session, 'clm_lake_service', None)
+    return None if service is None else service.receipt()
+
+
 def wind_reconstruction_refusal(cp, geometry, normal_velocity, value) -> str:
     """The wind reconstruction's refusal, naming which of its checks failed.
 
@@ -74,10 +89,10 @@ def wind_reconstruction_refusal(cp, geometry, normal_velocity, value) -> str:
     normal velocity.  Only the first is a geometry fault; the last is the model state blowing up.  The word is
     read at most one step after it was raised, so this looks at the arrays when the refusal is made: a sealed
     copy that still differs, or a state that is still non-finite.
-    THE BREAKAGE THIS PREVENTS (obs D1, 2026-11-15): three 80-level MPAS-suite runs stopped with "failed
-    geometry validation: the mesh geometry differs from its sealed copy" when the geometry was intact and the
-    winds had gone non-finite (an 80-level, 50 km lid run without the
-    spec's upper damping), so the message pointed at the mesh instead of the integration.
+    THE BREAKAGE THIS PREVENTS (hex 0.6.1; fork jacobbieker/woof PR 495, obs D1, 2026-11-15): every one of those
+    checks was reported as "the mesh geometry differs from its sealed copy", so a run whose winds had gone
+    non-finite (an 80-level, 50 km lid run without the spec's upper damping) pointed whoever debugged it at the
+    mesh instead of the integration.
     """
     names = ('edges_on_cell', 'n_edges_on_cell', 'coeffs_reconstruct', 'lat_cell', 'lon_cell')
     try:
@@ -209,7 +224,7 @@ class ResidentNativeCoupling:
             # THE BREAKAGE THIS PREVENTS: this path refused every cull ("resident wind reconstruction requires a
             # closed global mesh", then "resident wind pool shape/dtype/layout differs") at the first output, so no
             # MPAS-suite region ran once fix/hex-mpasphys-host met fix/hex-mpas-regional (3 km GFS 2026-10-23 18Z
-            # f348 region at 33.5N 101W, box L, 2026-10-24).
+            # f348 region at 33.5N 101W, 2026-10-24).
             if garbage is not None and int(garbage) != shape[1] - 1:
                 raise ValueError(f'the regional garbage column is the last element of the padded extent; '
                                  f'got {garbage} with {shape[1]} columns')
@@ -313,6 +328,11 @@ class ResidentNativeCoupling:
                 self.sources=self.widen_sources(self.sources,state)
             if getattr(self, 'regional', None) is not None:
                 self.sources=self.pad_regional_sources(self.sources, state=state, saved=saved)
+            if getattr(self, 'nn_seat', None) is not None:
+                # --nn (woof.nn.hex_seat): the opt-in NN column seat on the schemes' own sum, before SPPT/SKEB,
+                # IAU and nudging (so SPPT perturbs the scheme's and the model's source alike).  Absent without --nn.
+                self.nn_seat.stage(self.sources, state=state, saved=saved,
+                                   time_seconds=float(self.dycore.atmosphere.state.time_seconds))
             if getattr(self, 'stochastic', None) is not None:
                 self.stochastic.apply(self.sources, state=state,
                     rho_edge=diagnostics.h_edge, normal_velocity=saved.normal_velocity,
@@ -326,9 +346,16 @@ class ResidentNativeCoupling:
                                             solve=self.solve_extent)
             if self.nudging is not None:
                 # WRF grid/spectral analysis nudging (woof.hex.nudging) at the same seat, after IAU.
+                # --nn tap_target = "nudging" (woof.nn.hex_seat) records its increment; a read only.
+                nn_seat = getattr(self, 'nn_seat', None)
+                if nn_seat is not None:
+                    nn_seat.before_nudging(self.sources)
+                    forced = self.nudging.forced_steps
                 self.nudging.add(0, self.sources, float(self.dycore.atmosphere.state.time_seconds),
                                  self.nudging.dt, rho_edge=diagnostics.h_edge,
                                  normal_velocity=saved.normal_velocity, state=state, theta_m=saved.theta_m)
+                if nn_seat is not None:
+                    nn_seat.after_nudging(self.sources, applied=self.nudging.forced_steps != forced)
             if self.exchange_sources is not None:
                 self.sources=self.exchange_sources(self.sources)
             # The driver's held copy of physics_get_tend's result is dead from here (the RRFS driver's
@@ -351,7 +378,7 @@ class ResidentNativeCoupling:
         """Entity-extent physics sources onto the regional dycore's padded stride.
 
         Native's tendency at the garbage element is zero (mpas_atmphys_todynamics.F allocates nCells+1 and writes
-        1..nCellsSolve; cuda_physics_v841 zeroes it beside the WOOF route's projection for the same reason).  The
+        1..nCellsSolve; cuda_physics_v841 zeroes it beside the WOOF-ArWen route's projection for the same reason).  The
         boundary zones then replace the specified-zone tendencies with the lateral-boundary ones.
         """
         from ..cuda_physics_v841 import CudaMpasStageSourcesV842
@@ -456,8 +483,14 @@ class ResidentNativeCoupling:
             raise RuntimeError('native post-transport callback was not bound to the current CUDA step')
         state,saved,outer,rate=self.transport
         rth=self.cp.zeros_like(state.rho) if rate is None else rate
-        rqv=self.cp.empty_like(state.rho)
         convection=self.session.config.selectors['convection']
+        # GF/NTiedtke write every rqvdynten word (mpas_transport_handoff_v842_f32) and publish it below: the
+        # resident pool field can take the words directly (the put of that same array is then a no-op).
+        rqv_put = (convection in ('cu_grell_freitas','cu_ntiedtke')
+                   and ('tend_physics','rqvdynten') in self.session.native._fields)
+        rqv=self._pool_target('tend_physics','rqvdynten',state.rho) if rqv_put else None
+        if rqv is None:
+            rqv=self.cp.empty_like(state.rho)
         if convection in ('cu_grell_freitas','cu_ntiedtke') and rate is None:
             raise RuntimeError('native convection needs the final RK modified-theta rate')
         before=outer.scalars
@@ -467,10 +500,13 @@ class ResidentNativeCoupling:
             # Native F:5208 modifies scalars_1 before F:2783 computes rqvdynten.
             # Subtracting the untouched outer state folds physical vapor sources
             # into the resolved-advection rate and then convection sees them twice.
+            # scalars_1 takes the baseline: written straight into the resident pool when the copy would be whole
+            # (not with chemistry, whose extra rows change the shape); the put is then a no-op.
             before=prepare_mpas_transport_source_baseline_v842(before=before,
                 source=self.sources.scalars,rho_old=outer.rho,
                 dt=self.dycore.config.config_dt,n_cells_solve=self.solve_cells(),
-                kernel_cache=self.physics_cache)
+                kernel_cache=self.physics_cache,
+                out=self._pool_target('state','scalars',before,level=1))
             self.session.put('state','scalars',self._registry_rows(before),level=1)
         prepare_mpas_post_transport_v842(before=self._registry_rows(before),after=self._registry_rows(state.scalars),
             theta_m=saved.theta_m,scalar_names=self.names,rqvdynten=rqv,rthdynten=rth,
@@ -495,10 +531,27 @@ class ResidentNativeCoupling:
             resident_transport(self, candidate)
         # mpas_atm_time_integration.F:2768-2802 updates this field only for
         # GF/NTiedtke. Original Tiedtke allocates it but leaves it untouched.
-        if (convection in ('cu_grell_freitas','cu_ntiedtke')
-                and ('tend_physics','rqvdynten') in self.session.native._fields):
+        if rqv_put:
             self.session.put('tend_physics','rqvdynten',rqv)
         self.session.put('tend_physics','rthdynten',rth)
+
+    def _pool_target(self, pool, name, like, *, level=1):
+        """The resident pool allocation a whole-array put of ``like`` would copy into, or None
+        (WOOF_HEX_POOL_DIRECT=0, no resident pools, or another extent)."""
+        if not _POOL_DIRECT:
+            return None
+        views = getattr(self.session, 'device_pools', None)
+        if views is None or not getattr(views, 'resident', False):
+            return None
+        return views.resident_target(pool, name, like, level=level)
+
+
+def bound_increment_file(arguments):
+    """The increment file the run's iau stream reads when the door bound it (--stream-input iau=FILE, which
+    --iau-increment and --iau-analysis become; forecast_v842.bind_door_iau), else None."""
+    bound = [str(b).partition('=')[2] for b in (getattr(arguments, 'stream_input', None) or ())
+             if str(b).partition('=')[0] == 'iau']
+    return bound[-1] if bound else None
 
 
 class SuiteIau:
@@ -512,7 +565,7 @@ class SuiteIau:
     (NINT step count, IN1 and IN2 as native); correct mode applies IN1-IN3 (overlap weights, a window position).
     """
 
-    def __init__(self, *, layout, payload, config, mesh, dycore, dt, checkpoint=None):
+    def __init__(self, *, layout, payload, config, mesh, dycore, dt, checkpoint=None, increment_file=None):
         import numpy as np
         from ..iau_v842 import IAUConfig, iau_window_position
 
@@ -581,6 +634,70 @@ class SuiteIau:
         self.weight_seconds = 0.0
         from .iau_witness import IauWitness
         self.witness = IauWitness(cp)
+        self.extra_names, self.extra_index, self.extra_amb, self.extra = (), None, None, {}
+        self._bind_extra(increment_file, layout, records, payload, cp, np)
+
+    def _bind_extra(self, increment_file, layout, records, payload, cp, np):
+        """IAU-ALL (woof.hex.iau_v842 says why): every non-moist state scalar ``X`` whose ``X_amb`` the increment
+        file carries is held on the device in this run's cell order and added in correct mode; what the file
+        carries and this route does not apply is named in the receipt, never dropped silently."""
+        if increment_file is None:
+            self.extra = {'file': None, 'note': 'no --stream-input iau= file binding: only the MPAS iau stream fields '
+                          'were read'}
+            return
+        from netCDF4 import Dataset
+        components = next(row['components'] for row in layout.fields
+                          if row['pool'] == 'state' and row['name'] == 'scalars')
+        ms, me = self.moist['moist_start'], self.moist['moist_end']
+        nl, width = (int(n) for n in self.increments['rho'].shape)
+        n_local = int(layout.dimensions['nCells'])
+        record = records.get(('mesh', 'indexToCellID'))
+        if record is None or not record.get('payload'):
+            raise ValueError("IAU extra increments need the mesh indexToCellID words to place file cells on this "
+                             "run's cells")
+        raw = (Path(payload) / record['payload']).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != record['sha256']:
+            raise ValueError('native payload digest differs at mesh.indexToCellID')
+        ids = np.frombuffer(raw, dtype='<i4')[:n_local].astype(np.int64) - 1
+        applied, values, slots, skipped, sizes = [], [], [], {}, {}
+        with Dataset(increment_file) as d:
+            d.set_auto_maskandscale(False)
+            carried = {n[:-len('_amb')] for n in d.variables if n.endswith('_amb')}
+            for name in components:
+                index = layout.indices.get(('state', 'index_' + name))
+                if name not in carried or not index or ms <= int(index) <= me:
+                    continue
+                v = d.variables[name + '_amb']
+                a = np.asarray(v[0] if v.dimensions[0] == 'Time' else v[:], dtype=np.float64)
+                if a.ndim != 2 or a.shape[1] != nl or ids.max() >= a.shape[0] or ids.min() < 0:
+                    raise ValueError(f'{name}_amb is {a.shape}; the increment needs (nCells, {nl}) on this mesh')
+                local = np.zeros((nl, width), np.float32)
+                local[:, :n_local] = a[ids, :].T.astype(np.float32)
+                sizes[name] = float(np.max(np.abs(a))) if a.size else 0.0
+                if not np.any(local):
+                    skipped[name] = 'zero increment'
+                    continue
+                applied.append(name); values.append(local); slots.append(int(index) - 1)
+            handled = set(components) | {'u', 'rho', 'theta'}
+            for name in sorted(carried - handled):
+                if name == 'w':
+                    peak = float(np.max(np.abs(np.asarray(d.variables['w_amb'][:], np.float64))))
+                    skipped['w'] = (f'not applied: the MPAS IAU form has no vertical-momentum forcing (max |dw| '
+                                    f'{peak:.3g} m/s); named gap, owner hex IAU')
+                    if peak > 0:
+                        print(json.dumps({'DEFECT': 'IAU w increment carried but not applied on the MPAS-suite route',
+                                          'max_abs_m_per_s': peak, 'file': str(increment_file)}), flush=True)
+                else:
+                    skipped[name] = 'not a prognostic of this route (the model diagnoses it)'
+        if not self.config.correct:
+            for name in applied:
+                skipped[name] = "exact mode: MPAS-A v8.4.2 IAU is moist-only (config_physics_mode='correct' adds it)"
+            applied, values, slots = [], [], []
+        self.extra_names = tuple(applied)
+        if applied:
+            self.extra_amb = cp.ascontiguousarray(cp.asarray(np.stack(values)))
+            self.extra_index = cp.asarray(np.asarray(slots, dtype=np.int32))
+        self.extra = {'file': str(increment_file), 'applied': list(applied), 'max_abs': sizes, 'not_applied': skipped}
 
     def checkpoint_state(self):
         from ..iau_v842 import checkpoint_window
@@ -618,10 +735,20 @@ class SuiteIau:
         witness = (self.witness.before(sources, state, saved, diagnostics, self.increments, self.zz,
             self.cells_on_edge, self.moist, (ncs, nes), weight, self.dt, self.config.correct)
             if weight > np.float32(1.0e-12) else None)
+        extra = (self.witness.before_extra(sources, state, self.increments, self.zz, self.extra_index,
+                 self.extra_names, self.extra_amb, (ncs, nes), weight)
+                 if self.extra_names and weight > np.float32(1.0e-12) else None)
         atm_add_tend_anal_incr(self.config, structs, int(itimestep), self.dt, sources.rho_u, sources.rho_theta,
                                sources.rho, cache=cache)
+        if self.extra_names:
+            from ..iau_v842 import atm_add_tend_anal_incr_extra
+            atm_add_tend_anal_incr_extra(self.config, weight, nl=nl, nc=nc, ncs=ncs, index=self.extra_index,
+                extra_amb=self.extra_amb, zz=self.zz, rho_zz=state.rho, scalars=state.scalars,
+                rho_amb=self.increments['rho'], tend_scalars=sources.scalars, cache=cache)
         if witness is not None:
             self.witness.after(witness, sources)
+        if extra is not None:
+            self.witness.after_extra(extra, sources, self.dt)
         self.calls += 1
         if weight > np.float32(1.0e-12):
             self.active_calls += 1
@@ -633,7 +760,8 @@ class SuiteIau:
                 'route': 'mpas-suite (atm_add_tend_anal_incr, woof.hex.iau_v842 on CUDA)', 'mode': self.config.config_physics_mode,
                 'corrections': ['IN1', 'IN2', 'IN3'] if self.config.correct else [],
                 'option': self.config.config_IAU_option, 'window_seconds': float(self.config.config_IAU_window_length_s),
-                'window_start': self.rule, 'increments_read': self.sources_read, 'calls': self.calls,
+                'window_start': self.rule, 'increments_read': self.sources_read, 'extra_increments': self.extra,
+                'calls': self.calls,
                 'active_calls': self.active_calls, 'fraction_admitted': self.weight_seconds,
                 **({'window_position_seconds': float(self.position)} if self.config.correct else {})}
 
@@ -810,7 +938,7 @@ class StepRecordWriter:
     THE BREAKAGE THIS PREVENTS: the step loop serialised the whole growing
     receipt (``json.dumps(indent=2)``, three stage rows a step, so quadratic in
     the run) and opened and appended ``physics-calls.jsonl`` on the one host
-    thread that issues the card's work, every step.  The WOOF route hands
+    thread that issues the card's work, every step.  The WOOF-ArWen route hands
     its receipts to a background writer.  Here the call log lines are
     serialised on the step thread (the driver reuses its call list) and
     appended in order by one writer thread; the receipt is serialised at most
@@ -918,8 +1046,24 @@ def moving_publication_due(moving, *, step, steps, dt):
     """
     if moving is None:
         return False
-    if step == 0 or step >= steps:
+    if step == 0:
         return True
+    if step >= steps:
+        from ..speed_words import PUBLISH_LEAN, on
+        if not on(PUBLISH_LEAN):
+            return True
+        # WOOF_HEX_PUBLISH_LEAN: at the last step the host pools are read by a checkpoint sealed at this step or a
+        # tracker frame; an export publishes again itself before it reads them (MovingRoute.finish,
+        # DistributedMoving.finish: publish_after_output), and is kept here as before.  With none of them this
+        # download of every resident pool has no reader (the CONUS globe, 8 ranks: about 10 GB a rank a run).
+        route = getattr(moving, 'route', moving)
+        if getattr(route, 'export_path', None):
+            return True
+        due = getattr(moving, 'checkpoint_due', None)
+        if due is not None and due(step, dt):
+            return True
+        return (getattr(moving, 'control', None) is not None
+                and float(getattr(moving, 'frame_seconds', 0.0) or 0.0) > 0.0)
     checkpoint_due = getattr(moving, 'checkpoint_due', None)
     if checkpoint_due is not None and checkpoint_due(step, dt):
         # A checkpoint seals the host pool views at this step ("native state already published").
@@ -1095,6 +1239,7 @@ def load_native_dynamics_inputs(arguments, layout, payload, *, keep_initialized_
     # MPAS bootstrapping appends ancestor file IDs with newlines. Input
     # lineage is independent of whether this dycore retains deformation.
     mesh_options={'native_parent_chain':True}
+    mesh_options['lineage_static']=getattr(arguments,'static',None)
     mesh_options['exclude_variables']=native_mesh_state_exclusions(layout)
     mesh=Mesh.from_netcdf(getattr(arguments,'grid',None) or overlay,overlay,**mesh_options)
     # Native MPAS (single precision) reads a double-precision coordinate into RKIND on input
@@ -1167,6 +1312,7 @@ def _regional_source_inputs(arguments, layout):
     init, overlay, invariant, cold_start = native_state_sources(arguments, layout)
     mesh = Mesh.from_netcdf(getattr(arguments, 'grid', None) or overlay, overlay,
                             native_parent_chain=True,
+                            lineage_static=getattr(arguments, 'static', None),
                             exclude_variables=native_mesh_state_exclusions(layout))
     for name, value in list(mesh.arrays.items()):
         if getattr(value, 'dtype', None) is not None and value.dtype == np.float64:
@@ -1262,7 +1408,7 @@ def load_native_regional_inputs(arguments, layout, payload, *, keep_initialized_
     from ..rust_geometry import _run
     init, overlay, invariant, cold_start = native_state_sources(arguments, layout)
 
-    # THE COST THIS REMOVES (mv3km 3 km limited area, 206,726 cells, V6000, 2026-10-28): this loader ran
+    # THE COST THIS REMOVES (mv3km 3 km limited area, 206,726 cells, RTX PRO 6000, 2026-10-28): this loader ran
     # 10-13 s on one host thread while the card waited (about 80-100 s at e3km/conus3km).  The Rust pool
     # payload work does not touch the mesh or the netCDF reads, so it runs on a side thread beside them:
     # the payload digests (hashlib releases the GIL) beside the mesh read, then the scalar words copied in
@@ -1294,6 +1440,7 @@ def load_native_regional_inputs(arguments, layout, payload, *, keep_initialized_
         hydration_future = side.submit(NativePoolHydration, None, layout, payload)
         mesh = Mesh.from_netcdf(getattr(arguments, 'grid', None) or overlay, overlay,
                                 native_parent_chain=True,
+                                lineage_static=getattr(arguments, 'static', None),
                                 exclude_variables=native_mesh_state_exclusions(layout))
         for name, value in list(mesh.arrays.items()):
             if getattr(value, 'dtype', None) is not None and value.dtype == np.float64:
@@ -1421,10 +1568,10 @@ def native_table_roots(source,config,extra=None):
 
 
 def balance_series_sampler(arguments, layout, names, vertical, dycore, out):
-    """``--balance-series`` on the MPAS suite route: the WOOF route's sampler on this dycore's own state.
+    """``--balance-series`` on the MPAS suite route: the WOOF-ArWen route's sampler on this dycore's own state.
 
     woof.hex.iau_forcing.BalanceSeries reads rho_zz and the mass species of the owned columns from
-    ``driver.atmosphere.state``, which the suite route's CUDA dycore holds exactly as the WOOF route's does.
+    ``driver.atmosphere.state``, which the suite route's CUDA dycore holds exactly as the WOOF-ArWen route's does.
     THE BREAKAGE THIS RETIRES (hex parity run group 7, #25): the door refused the flag on this route because
     no sampler was wired here. Returns None when the flag is off.
     """
@@ -1503,15 +1650,40 @@ def framework_only(config):
                 str(config.service_backends.get('surface_update', 'native-cpu')) == 'native-cpu')
 
 
+def native_lbc_scalar_order(layout, config, names):
+    """The boundary species that drive each scalar slot, in the order the native model applies them.
+
+    mpas_atm_boundaries.F mpas_atm_get_bdy_state_3d returns the whole lbc_scalars array and
+    mpas_atm_time_integration.F (atm_bdy_set_scalars, the relaxation zone's scalars_driving) copies it into
+    scalars BY POSITION, while each array numbers its own constituents in its own Registry declaration order.
+    The RRFS fork's Registry (1d6e370e and 44c0849) declares scalars ``... ni, nr ...`` but lbc_scalars
+    ``... lbc_nr, lbc_ni ...``, so native RRFS-MPAS drives cloud-ice number from the boundary's rain number and
+    rain number from its cloud-ice number in the specified and relaxation zones (MPAS-A v8.4.2 declares both in
+    one order and is unaffected).  Exact mode reproduces that order, so a limited-area exact run matches the
+    native reference word for word; correct mode (the default) drives each species from its own boundary field.
+    THE BREAKAGE THIS PREVENTS: the strict exact 3 km storm box (2024-05-21 15Z, RRFS 44c0849) differed from
+    native from the first step in every specified-zone nr and ni word (native ni == hex nr exactly), which
+    hid every other difference behind it (15 Nov).
+    """
+    by_name = tuple('lbc_' + name for name in names)
+    if getattr(config, 'mode', 'correct') != 'exact':
+        return by_name, None
+    lbc = next((row['components'] for row in layout.fields if row['name'] == 'lbc_scalars'), None)
+    if lbc is None or len(lbc) != len(by_name) or set(lbc) != set(by_name) or tuple(lbc) == by_name:
+        return by_name, None
+    swapped = {name[4:]: driver[4:] for name, driver in zip(by_name, lbc) if name != driver}
+    return tuple(lbc), swapped
+
+
 def open_limited_area_dycore(arguments, layout, mesh, grid, profiles, state, reference, saved, names, *,
                              dt, start, config, les, kernel_cache, dycore_config=None, driver_type=None,
                              iau_wrapped=False):
     """The regional dycore for a limited-area suite run; mpas_atm_core.F:539-596, mpas_atm_boundaries.F.
 
-    This is the WOOF route's regional assembler (cuda_regional_forecast_v841.open_regional_forecast_v841): the same
+    This is the WOOF-ArWen route's regional assembler (cuda_regional_forecast_v841.open_regional_forecast_v841): the same
     boundary driver, specified and relaxation zones and lateral-boundary series, so a limited-area run differs between
     the two routes only in its physics.  The boundary drives every scalar the suite carries (lbc_<name>); a species
-    the series does not hold keeps native's recycled allocation, as on the WOOF route.
+    the series does not hold keeps native's recycled allocation, as on the WOOF-ArWen route.
 
     A suite row with a fork dycore (``dycore_config`` resolved from its table row, e.g. RRFS's
     mpas-v8.3.1-noaa) takes that variant's own regional constructor (dycore_variants.dycore_regional_constructor:
@@ -1530,7 +1702,9 @@ def open_limited_area_dycore(arguments, layout, mesh, grid, profiles, state, ref
     if not paths:
         raise ValueError(f'--lbc-dir {lbc_dir} holds no lbc.*.nc: the limited-area run has no boundary series')
     start_time = datetime.strptime(start, '%Y-%m-%d_%H:%M:%S')
-    scalar_names = tuple('lbc_' + name for name in names)
+    scalar_names, native_order = native_lbc_scalar_order(layout, config, names)
+    if native_order:
+        print(json.dumps({'exact_mode_native_lbc_order': native_order}), flush=True)
     from ..dycore_variants import dycore_regional_constructor
     from ..cuda_regional_forecast_v841 import open_regional_forecast_v841 as _shared_regional
     # A fork dycore with its own regional driver builds it here. A variant on the shared regional driver (the
@@ -2019,6 +2193,8 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
             from .wrfsolar_eps_v842 import MpasMultiPerturb
             session.wrfsolar_eps=MpasMultiPerturb(config.wrfsolar_eps,mesh,dt=dt,
                                                   n_solve=int(layout.dimensions['nCellsSolve']))
+        from .rrfs.tempo_v303 import output_attributes as tempo_output_attributes
+        session.output_extra_attributes=tempo_output_attributes(config)
         if os.environ.get('WOOF_HEX_MOVING_RESIDENT') == '1':
             receipt['physics_session_preparation'] = session.preparation_timings
         # A rank's scheme initialisation takes global extrema across ranks, as native's mpas_dmpar_min/max_real
@@ -2082,7 +2258,8 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 if getattr(config, 'mode', 'exact') == 'correct' and carried_window is None:
                     raise ValueError('checkpoint carries no IAU window state')
             coupling.iau=SuiteIau(layout=layout,payload=payload,config=config,mesh=mesh,dycore=dycore,dt=dt,
-                                  checkpoint=carried_window)
+                                  checkpoint=carried_window,
+                                  increment_file=bound_increment_file(arguments))
             session.iau_window = coupling.iau
             receipt['iau']=coupling.iau.receipt()
             print(json.dumps({'iau':receipt['iau']}),flush=True)
@@ -2096,6 +2273,19 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 pbl_height=lambda: session.field('diag_physics', 'hpbl'))
             receipt['nudging'] = coupling.nudging.receipt()
             print(json.dumps({'nudging': receipt['nudging']}, default=str), flush=True)
+        # --nn (woof.nn.hex_seat, WOOF_NN_CONFIG): the opt-in NN column seat on the held sources.  Without it nothing
+        # from woof.nn is imported; a resume refuses a carrier an applying seat sealed (it would splice trajectories).
+        nn_carried = moving.carrier.get('nn') if resumed else None
+        if os.environ.get('WOOF_NN_CONFIG'):
+            from woof.nn.hex_seat import attach as attach_nn_seat
+            attach_nn_seat(coupling, config=config, mesh=mesh, n_cells=int(layout.dimensions['nCells']),
+                           vertical=grid.vertical_grid, dt=dt, execution=execution, moving=moving,
+                           physics_map=physics_map, resumed=resumed, carried=nn_carried)
+            receipt['nn_column_seat'] = coupling.nn_seat.receipt()
+        elif nn_carried is not None:
+            raise ValueError(f"this checkpoint was written by a run that applied a neural-network column model "
+                             f"({nn_carried.get('mode')} by {(nn_carried.get('model') or {}).get('name')}); "
+                             "resume it with the same --nn file")
         from .diagnostics_v842 import initialize_thermodynamics
         # A restart forms the cold start's base state too (the restart stream's base words), never the
         # perturbation state it carries.
@@ -2196,6 +2386,9 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 # the first physics call (woof.hex.f000_first_call); exact mode is native's.
                 # Same-host ranks gather every rank's owned first-call words to rank 0's global
                 # frame (samehost_v842 GatheredPhysicsStreams._read_first_call).
+                # Set first: holding the frame starts the f000 reflectivity's compile, which takes the
+                # corrections the forecast applies (tempo_refl_v303 REFL_CORRECTIONS).
+                output.fork_corrections=tuple(sorted(getattr(config,'corrections',()) or ()))
                 output.first_frame_from_first_call=True
             receipt['missing_fields'] = output.missing
             if os.environ.get('WOOF_HEX_UH_LAYERS','').strip().lower() in ('1','on','true','yes'):
@@ -2204,6 +2397,13 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 uh_layers_row=attach_uh_layers(diagnostics,output,halo=halo)
                 if uh_layers_row is not None:
                     receipt['uh_layers']=uh_layers_row
+            from ..hailcast import attach_mpas as attach_hailcast, mode as hailcast_mode
+            if hailcast_mode()!='off':
+                # HAILCAST hail size and the size-distribution hail maxima (woof.hex.hailcast): on by default where
+                # the mesh is finer than 4 km, ArWen's shared GPU stone model (HRRR v4's by default).
+                hailcast_row=attach_hailcast(diagnostics,output,halo=halo)
+                if hailcast_row is not None:
+                    receipt['hailcast']=hailcast_row
             session.output_streams=output
             restore_continuation=getattr(moving,'restore_continuation',None) if resumed else None
             if callable(restore_continuation):
@@ -2393,6 +2593,9 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                         receipt['iau']=coupling.iau.receipt()
                     if getattr(coupling, 'nudging', None) is not None:
                         receipt['nudging']=coupling.nudging.receipt()
+                    lake_receipt = clm_lake_service_receipt(session)
+                    if lake_receipt is not None:
+                        receipt['clm_lake_service'] = lake_receipt
                     if les is not None:
                         receipt['les_execution']=les.receipt(step)
                     records.append(calls_path, json.dumps(dict(step=step,calls=session.driver.calls))+'\n')
@@ -2507,6 +2710,9 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
             raise RuntimeError(f"IAU window not fully applied: {receipt['iau']}")
     if execution is not None:
         receipt['rank_execution']=execution.receipt()
+    if getattr(coupling, 'nn_seat', None) is not None:
+        # The tap's record is flushed here; an applying seat reports its model, ledger and not-identical flag.
+        receipt['nn_column_seat']=coupling.nn_seat.close()
     if limited_area:
         receipt['limited_area']=limited_area_receipt(arguments, dycore, coupling)
     if fullstep_shadow is not None:
@@ -2518,5 +2724,6 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
     from ..device_memory_release import process_release
     receipt['device_memory_release']=process_release().receipt()
     receipt_path.write_text(json.dumps(receipt,indent=2,default=str)+'\n')
-    print(json.dumps(receipt,default=str))
+    from ..correct_mode import terminal_record
+    print(json.dumps(terminal_record(receipt),default=str))
     return 0

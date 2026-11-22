@@ -70,6 +70,8 @@
 #define STEFAN_BOLTZMANN 567.0e-10
 #define EMISSIVITY 0.95
 #define QQQICE 11637800.0
+#define QQQOCN 627572.4
+#define TTTOCN 5107.4
 #define TTTICE 5897.8
 #define CP_AIR 1005.0
 #define CP_WV 1.81e3
@@ -103,6 +105,9 @@ __device__ __forceinline__ double f_sign(double a, double b) { return copysign(f
 struct vt_params {
     double dt, yday, ustar_min, rdn_ice, al2;
     int ncat, l_brine, calc_tsfc, calc_strair, highfreq, natmiter, conduct_mu71, tr_iage, tr_fy;
+    // opt-in corrections of v8.4.2 bugs (column_v842.CORRECTIONS); 0 is v8.4.2 word for word
+    int fix_sfcflux_order, fix_ice_velocity;
+    int solve_zsal;
 };
 
 // ice_therm_shared: calculate_Tin_from_qin
@@ -160,8 +165,9 @@ __device__ __forceinline__ double psixhu(double xd)
 }
 
 // ice_atmo: atmo_boundary_layer for sfctype 'ice' without form drag (refused),
-// as colpkg_atm_boundary calls it (uvel = uVelocity, vvel = 0: its second
-// "if (present(uvel)) worku = uvel" never sets workv).
+// as colpkg_atm_boundary calls it (uvel = uVelocity, vvel = 0: it drops the
+// vvel passed in, its second "if (present(uvel)) worku = uvel" never sets workv). The opt-in correction
+// ice_velocity_at_cell passes the cell's ice velocity instead (both components).
 __device__ void atmo_boundary_layer_ice(const vt_params &p, double Tsf, double potT, double uatm, double vatm,
                                         double wind, double zlvl, double Qa, double rhoa, double *strx,
                                         double *stry, double *Tref, double *Qref, double *delt, double *delq,
@@ -484,6 +490,7 @@ __device__ int temperature_changes(const vt_params &p, double rhoa, double flw, 
     }
     conductivity(p, l_snow, hilyr, hslyr, zTin, zSin, kh);
     double frac = 0.9, dTemp = 0.02;
+    if (p.solve_zsal) dTemp = P1;                  // lower tolerance with dynamic salinity
     double ci, dswabs;
     for (int k = 0; k < nilyr; ++k) {
         double Iswabs_tmp = 0.0;
@@ -1023,7 +1030,7 @@ extern "C" __global__ void seaice_column_vertical_thermodynamics_v842(
     double *iceAreaCategory, double *iceVolumeCategory, double *snowVolumeCategory, double *surfaceTemperature,
     double *snowEnthalpy, double *iceEnthalpy, const double *iceSalinity, double *iceAge, double *firstYearIceArea,
     // velocity_solver
-    const double *uVelocity, double *airStressCellU, double *airStressCellV, const double *oceanStressCellU,
+    const double *uVelocity, const double *vVelocityCell, double *airStressCellU, double *airStressCellV, const double *oceanStressCellU,
     const double *oceanStressCellV,
     // atmos_coupling, atmos_forcing
     const double *uAirVelocity, const double *vAirVelocity, const double *airLevelHeight,
@@ -1065,6 +1072,8 @@ extern "C" __global__ void seaice_column_vertical_thermodynamics_v842(
     p.l_brine = (flags >> 0) & 1; p.calc_tsfc = (flags >> 1) & 1; p.calc_strair = (flags >> 2) & 1;
     p.highfreq = (flags >> 3) & 1; p.conduct_mu71 = (flags >> 4) & 1;
     p.tr_iage = (flags >> 5) & 1; p.tr_fy = (flags >> 6) & 1;
+    p.fix_sfcflux_order = (flags >> 7) & 1; p.fix_ice_velocity = (flags >> 8) & 1;
+    p.solve_zsal = (flags >> 9) & 1;
     const int ncat = p.ncat, nilyr = COL_NILYR, nslyr = COL_NSLYR;
     const int c = iCell;
     const double dt = p.dt;
@@ -1126,7 +1135,8 @@ extern "C" __global__ void seaice_column_vertical_thermodynamics_v842(
             atmo_boundary_layer_ice(p, surfaceTemperature[cn], airPotentialTemperature[c], uAirVelocity[c],
                                     vAirVelocity[c], windSpeed[c], airLevelHeight[c], airSpecificHumidity[c],
                                     airDensity[c], &strairxn, &strairyn, &Trefn, &Qrefn, &worka, &workb, &lhcoef,
-                                    &shcoef, &airDragCoefficient[c], &Cdn_atm_ratio_n, uVelocity[c], 0.0,
+                                    &shcoef, &airDragCoefficient[c], &Cdn_atm_ratio_n, uVelocity[c],
+                                    p.fix_ice_velocity ? vVelocityCell[c] : 0.0,
                                     &Urefn);
             if (p.tr_iage) iceAge[cn] = A(iceAge[cn], dt);
             if (p.tr_fy) {
@@ -1143,8 +1153,14 @@ extern "C" __global__ void seaice_column_vertical_thermodynamics_v842(
                 // set_sfcflux takes fsurfn_f and fsurfn_f where it takes fcondtopn_f
                 // (ice_colpkg.F90:2095-2101 against ice_flux_colpkg.F90:169-177), so fsurfn
                 // is the coupled conductive flux and fcondtopn the coupled surface flux.
-                surfaceHeatFluxCategory[cn] = M(surfaceConductiveFluxCouple[cn], 1.0);
-                surfaceConductiveFluxCategory[cn] = M(surfaceHeatFluxCouple[cn], 1.0);
+                // The opt-in correction set_sfcflux_order passes them in set_sfcflux's order.
+                if (p.fix_sfcflux_order) {
+                    surfaceHeatFluxCategory[cn] = M(surfaceHeatFluxCouple[cn], 1.0);
+                    surfaceConductiveFluxCategory[cn] = M(surfaceConductiveFluxCouple[cn], 1.0);
+                } else {
+                    surfaceHeatFluxCategory[cn] = M(surfaceConductiveFluxCouple[cn], 1.0);
+                    surfaceConductiveFluxCategory[cn] = M(surfaceHeatFluxCouple[cn], 1.0);
+                }
                 latentHeatFluxCategory[cn] = M(latentHeatFluxCouple[cn], 1.0);
                 sensibleHeatFluxCategory[cn] = M(sensibleHeatFluxCouple[cn], 1.0);
             }
@@ -1197,6 +1213,123 @@ extern "C" __global__ void seaice_column_vertical_thermodynamics_v842(
         }
     }
     status[c] = VT_OK;
+}
+
+// ice_atmo: atmo_boundary_layer for sfctype 'ocn' (ice_atmo.F90:217-224 and the
+// shared rest), as seaice_column_ocean_mixed_layer calls colpkg_atm_boundary:
+// no ice velocity (uvel and vvel absent), no form drag (the 'ocn' branch has
+// none), Cdn_atm left as passed (only the 'ice' branch sets it) and Uref
+// dropped. umin is 0.5 under highfreq, but the 'ocn' wind and stress never
+// take the high-frequency branch.
+__device__ void atmo_boundary_layer_ocn(int calc_strair, int highfreq, int natmiter, double al2, double Tsf,
+                                        double potT, double uatm, double vatm, double wind, double zlvl, double Qa,
+                                        double rhoa, double *strx, double *stry, double *Tref, double *Qref,
+                                        double *delt, double *delq, double *lhcoef, double *shcoef,
+                                        double *Cdn_atm_ratio_n)
+{
+    const double cpvir = S(D(CP_WV, CP_AIR), 1.0);
+    const double zTrf = 2.0;
+    double umin = highfreq ? 0.5 : 1.0;
+    *Tref = 0.0; *Qref = 0.0; *delt = 0.0; *delq = 0.0; *shcoef = 0.0; *lhcoef = 0.0;
+    const double qqq = QQQOCN, TTT = TTTOCN, Lheat = LVAP;
+    double vmag = col_max(umin, wind);
+    double rdn = SQRT(A(A(D(0.0027, vmag), 0.000142), M(0.0000764, vmag)));
+    double TsfK = A(Tsf, TFFRESH);
+    double qsat = M(qqq, glibc_exp(-D(TTT, TsfK)));
+    double ssq = D(qsat, rhoa);
+    double thva = M(potT, A(1.0, M(ZVIR, Qa)));
+    *delt = S(potT, TsfK);
+    *delq = S(Qa, ssq);
+    double alz = glibc_log(D(zlvl, 10.0));
+    double cp = M(CP_AIR, A(1.0, M(cpvir, ssq)));
+    double rhn = rdn, ren = rdn;
+    double ustar = M(rdn, vmag);
+    double tstar = M(rhn, *delt);
+    double qstar = M(ren, *delq);
+    double hol = 0.0, stable = 0.0, xqq, psimh, psixh = 0.0, psimhs, rd = 0.0, rh = 0.0, re = 0.0;
+    for (int k = 1; k <= natmiter; ++k) {
+        hol = D(M(M(M(VONKAR, GRAVIT), zlvl), A(D(tstar, thva), D(qstar, A(D(1.0, ZVIR), Qa)))),
+                M(ustar, ustar));
+        hol = f_sign(col_min(fabs(hol), 10.0), hol);
+        stable = A(0.5, f_sign(0.5, hol));
+        xqq = col_max(SQRT(fabs(S(1.0, M(16.0, hol)))), 1.0);
+        xqq = SQRT(xqq);
+        psimhs = -A(A(M(0.7, hol), M(M(0.75, S(hol, 14.3)), glibc_exp(-M(0.35, hol)))), 10.7);
+        psimh = A(M(psimhs, stable), M(S(1.0, stable), psimhu(xqq)));
+        psixh = A(M(psimhs, stable), M(S(1.0, stable), psixhu(xqq)));
+        rd = D(rdn, A(1.0, M(D(rdn, VONKAR), S(alz, psimh))));
+        rh = D(rhn, A(1.0, M(D(rhn, VONKAR), S(alz, psixh))));
+        re = D(ren, A(1.0, M(D(ren, VONKAR), S(alz, psixh))));
+        ustar = M(rd, vmag);
+        tstar = M(rh, *delt);
+        qstar = M(re, *delq);
+    }
+    if (calc_strair) {
+        double tau = M(M(rhoa, ustar), rd);
+        *strx = M(tau, uatm);
+        *stry = M(tau, vatm);
+        *Cdn_atm_ratio_n = D(D(M(rd, rd), rdn), rdn);
+    }
+    *shcoef = A(M(M(M(rhoa, ustar), cp), rh), 1.0);
+    *lhcoef = M(M(M(rhoa, ustar), Lheat), re);
+    hol = D(M(hol, zTrf), zlvl);
+    xqq = col_max(1.0, SQRT(fabs(S(1.0, M(16.0, hol)))));
+    xqq = SQRT(xqq);
+    double psix2 = A(-M(M(5.0, hol), stable), M(S(1.0, stable), psixhu(xqq)));
+    double fac = M(D(rh, VONKAR), A(S(A(alz, al2), psixh), psix2));
+    *Tref = S(potT, M(*delt, fac));
+    *Tref = S(*Tref, M(P01, zTrf));
+    fac = M(D(re, VONKAR), A(S(A(alz, al2), psixh), psix2));
+    *Qref = S(Qa, M(*delq, fac));
+}
+
+// seaice_column_ocean_mixed_layer (mpas_seaice_column.F:4320-4543) with
+// colpkg_ocn_mixed_layer (ice_colpkg.F90:3521-3611): per owned cell the
+// open-ocean boundary layer, the ocean albedos (seaiceOceanAlbedo = albocn),
+// the mixed layer's heat balance (the SST and the freezing/melting potential,
+// clamped to +-frzmlt_max = 1000 W m-2; qdp zeroed in place when the mixed
+// layer is at or below freezing), then, under config_use_test_ice_shelf, no
+// freezing/melting potential under land ice. cprho = cp_ocn*rhow is the
+// folded 4218*1026. airOceanDragCoefficientRatio gets the open ocean's
+// Cdn_atm_ratio_n under calc_strair (v8.4.2 passes the grid field; nothing
+// reads it after).
+extern "C" __global__ void seaice_column_ocean_mixed_layer_v842(
+    double *sst, const double *Tf, double *frzmlt, const double *hmix, double *qdp,
+    const double *potT, const double *uatm, const double *vatm, const double *wind, const double *zlvl,
+    const double *Qa, const double *rhoa, const double *flw, const double *swvdr, const double *swvdf,
+    const double *swidr, const double *swidf, const double *aice, double *Cdn_atm_ratio_n, const double *fhocn,
+    const double *fswthru, double *strx, double *stry, double *Tref, double *Qref, double *alvdr,
+    double *alidr, double *alvdf, double *alidf, double *flwout, double *fsens, double *flat, double *evap,
+    const int *landIceMask, double dt, double al2, int natmiter, int calc_strair, int highfreq,
+    int test_ice_shelf, int nSolve)
+{
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= nSolve) return;
+    double delt, delq, lhcoef, shcoef;
+    atmo_boundary_layer_ocn(calc_strair, highfreq, natmiter, al2, sst[c], potT[c], uatm[c], vatm[c], wind[c],
+                            zlvl[c], Qa[c], rhoa[c], &strx[c], &stry[c], &Tref[c], &Qref[c], &delt, &delq,
+                            &lhcoef, &shcoef, &Cdn_atm_ratio_n[c]);
+    const double albocn = 0.06;
+    alvdr[c] = albocn; alidr[c] = albocn; alvdf[c] = albocn; alidf[c] = albocn;
+    const double cprho = 4327668.0;  // cp_ocn*rhow = 4218*1026, folded
+    double swabs = A(A(A(M(S(1.0, alvdr[c]), swvdr[c]), M(S(1.0, alidr[c]), swidr[c])),
+                       M(S(1.0, alvdf[c]), swvdf[c])), M(S(1.0, alidf[c]), swidf[c]));
+    double TsfK = A(sst[c], TFFRESH);
+    flwout[c] = -M(STEFAN_BOLTZMANN, powi4(TsfK));
+    fsens[c] = M(shcoef, delt);
+    flat[c] = M(lhcoef, delq);
+    evap[c] = D(-flat[c], LVAP);
+    double s = sst[c];
+    double heat = A(A(M(A(A(A(A(fsens[c], flat[c]), flwout[c]), flw[c]), swabs), S(1.0, aice[c])), fhocn[c]),
+                    fswthru[c]);
+    s = A(s, D(M(dt, heat), M(cprho, hmix[c])));
+    if (s <= Tf[c] && qdp[c] > 0.0) qdp[c] = 0.0;
+    s = S(s, D(M(qdp[c], dt), M(cprho, hmix[c])));
+    double f = D(M(M(S(Tf[c], s), cprho), hmix[c]), dt);
+    f = col_min(col_max(f, -1000.0), 1000.0);
+    if (s <= Tf[c]) s = Tf[c];
+    sst[c] = s;
+    frzmlt[c] = (test_ice_shelf && landIceMask[c] == 1) ? 0.0 : f;
 }
 
 #endif  // WOOF_GLIBC239_TRIG64

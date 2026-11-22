@@ -29,6 +29,7 @@ from woof.core.kernels import get_kernel, get_kernel_int_defines
 # beside the constants there.
 from woof.core.physics_inventory import (YSUWS_SLOTS, YSU_BLOCK,
                                           YSU_TILE_BLOCKS_PER_SM,
+                                          ysu_metal_tile_columns,
                                           ysu_workspace_floats)
 from woof.core.state import DTYPE
 from woof.ysu_generations import YSU_DEFAULT_GENERATION, ysu_generation, ysu_kernel_selection
@@ -42,17 +43,25 @@ _VALIDATE_TPB = 256
 _KMAX = 256
 
 
-def ysu_tile_columns(fn, ncol: int) -> int:
-    """Columns to keep in flight: enough to fill the card, and no more.
+def ysu_tile_columns(fn, ncol: int, nz: int | None = None) -> int:
+    """Columns to keep in flight: on CUDA enough to fill the card, and no
+    more.
 
     The whole point of the workspace is that it is charged per thread IN
     FLIGHT where the local-memory backing store was charged per thread the
     card could ever hold.  Over-sizing the tile hands that ratio back.
+    On Metal there is no such store and the cores hold more columns than
+    CUDA's rule launches, so the tile is
+    :func:`woof.core.physics_inventory.ysu_metal_tile_columns` (64 blocks
+    per core, under a byte cap at this ``nz``).
     """
     import cupy as cp
 
     dev = cp.cuda.Device()
     sms = dev.attributes["MultiProcessorCount"]
+    from woof import backend
+    if backend.active() == "mlx":
+        return ysu_metal_tile_columns(sms, ncol, nz)
     per_sm = YSU_TILE_BLOCKS_PER_SM
     try:
         from cupy_backends.cuda.api import driver
@@ -109,7 +118,8 @@ def launch_ysu(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
                frc_urb2d: cp.ndarray | None = None,
                topo: tuple[cp.ndarray, cp.ndarray] | None = None,
                u10_out: cp.ndarray | None = None,
-               v10_out: cp.ndarray | None = None):
+               v10_out: cp.ndarray | None = None,
+               surface_heat_exner: bool = False):
     """Launch YSU for a batch of device columns and return device outputs.
 
     Three-dimensional inputs have shape ``(nz, ny, nx)`` except
@@ -134,6 +144,15 @@ def launch_ysu(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
     into ``u10_out``/``v10_out``, which the caller supplies; ``u10``/``v10``
     are read, never written, so the returned dict keeps its layout.  It
     does not combine with ``bep``.
+
+    ``surface_heat_exner`` (``RunConfig.ysu_surface_heat_exner``, default
+    off) is an opt-in correction of a WRF quirk: bl_ysu.F90 adds the surface
+    heat flux to potential temperature as if it were a temperature flux, so
+    the surface heat enters the column as HFX*pi(1) instead of HFX.  True
+    hands the unchanged kernel the theta flux HFX/pi(1) (w'theta' = w'T'/pi
+    at the lowest level), so every use of HFX in the scheme sees a theta
+    flux; the interior mixing stays WRF's theta form.  Refused with ``bep``.  False
+    launches exactly what this function launched before the key existed.
     """
     generation = ysu_generation(ysu_version)
     columns = {"u": u, "v": v, "theta": theta, "qv": qv, "qc": qc,
@@ -235,6 +254,15 @@ def launch_ysu(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
     ncol = ny * nx
     from woof.wrf_exact import ENABLED
     module, defines = ysu_kernel_selection(ysu_version, strict=ENABLED)
+    if surface_heat_exner and bep_args:
+        raise ValueError(
+            "surface_heat_exner does not combine with bep: the BEP arm takes "
+            "the surface heat from the urban sources (bepswitch = 1)")
+    if surface_heat_exner:
+        # The opt-in correction (default off): YSU takes HFX as a theta
+        # flux, so hand it the theta flux HFX/pi(1).  The kernel is not
+        # touched; off, the launch below gets the caller's hfx unchanged.
+        hfx = hfx / exner[0]
     entry = "ysu_column_bep" if bep_args else "ysu_column_topo" if topo_args else "ysu_column"
     kernel = (get_kernel_int_defines(module, entry, defines) if defines
               else get_kernel(module, entry))
@@ -246,7 +274,7 @@ def launch_ysu(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
     # OFFSET rather than as a slice, because the (nz, ny, nx) fields make a
     # column tile non-contiguous, so the kernel indexes them exactly as
     # before.
-    tile = ysu_tile_columns(kernel, ncol)
+    tile = ysu_tile_columns(kernel, ncol, nz)
     wskp = nz + 1
     ws = cp.empty(ysu_workspace_floats(nz, tile), dtype=DTYPE)
     try:

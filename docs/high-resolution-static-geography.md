@@ -66,7 +66,10 @@ fields = "lakes"
 ```
 
 This mode takes the inland lake extent from the land-cover source
-(CGLC-MODIS-LCZ by default) and changes nothing else:
+(CGLC-MODIS-LCZ by default) and changes nothing else. It is opt-in and, on
+the WRF route, is recommended together with `woof go --lakes clm` wherever
+lakes matter
+(scores and caveats in [lakes.md](lakes.md#recommended-settings)):
 
 - A baseline lake cell (dominant category 21) that the source calls land
   becomes that land. It takes the source's land-use fractions, index and
@@ -74,11 +77,27 @@ This mode takes the inland lake extent from the land-cover source
   and deep-soil temperature of its nearest land cell.
 - A baseline land cell that the source calls a lake becomes a lake, with
   water soil and water-masked climatologies.
+- `LAKE_DEPTH` (built for `sf_lake_physics = 1`, e.g. `woof go --lakes
+  clm`) follows. A cell that became land takes the row's 10 m fill, as
+  WPS gives every land cell. A new lake cell takes the depth of the
+  nearest kept lake cell within WPS's search reach (five 30-arc-second
+  pixels, about 4.6 km), else the 10 m fill.
+- With a source that has one open-water class (`landcover_source =
+  "annual-nlcd"`), water connected to the baseline's sea is not made a
+  lake: it is the coastline offset between the two maps.
 - Terrain, the sea (category 17) and every other cell stay the
-  30-arc-second baseline. Only the land-cover raster is fetched.
+  30-arc-second baseline, bit for bit in every field (TMN included).
+  Only the land-cover raster is fetched; `terrain_source` is not read.
+- A footprint wholly outside the published land-cover raster keeps all
+  its baseline lakes, and the receipt says why.
+- `lcz_pervious = "split"` applies to the land use of cells that become
+  land.
+- A `geog_data_res` token naming the land-cover collection
+  (`cglc_modis_lcz`) is still refused: this mode does not build that
+  land use.
 
 The receipt's `lake_check` gives the counts, the categories and the
-heights of the changed cells.
+heights of the changed cells, and how their `LAKE_DEPTH` was set.
 
 Why: WPS's `modis_landuse_20class_30s_with_lakes` marks glacier, rock and
 shaded alpine pixels as lakes (MODIS IGBP water). Its real lakes also sit

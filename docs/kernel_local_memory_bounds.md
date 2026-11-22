@@ -479,7 +479,9 @@ Measured at 102,400 columns, `nz = 49`, block 32:
 
 The kernel's hardware occupancy at block 32 is **16 blocks/SM**, so 16 is
 both the plateau and the point where the tile exactly fills the card;
-`ysu_tile_columns` queries occupancy and only ever lowers it. Rows past 16
+`ysu_tile_columns` queries occupancy and only ever lowers it on CUDA (Metal
+launches 64 blocks per core under a 512 MiB workspace cap,
+`physics_inventory.ysu_metal_tile_columns`). Rows past 16
 buy nothing (they cannot be resident) and cost workspace linearly.
 
 ### The floor: what a bare default run actually gains, and why
@@ -1404,3 +1406,85 @@ pytest tests/test_rrtmgp.py -k "retired_ceiling or deep_column or 256_level or i
 pytest tests/test_kernel_local_bounds.py -k rrtmgp
 GPUWM_NO_LOCAL_GPU=1 pytest tests/test_preflight.py -k rrtmgp_rte_is_priced
 ```
+
+---
+
+## 12. WSM3, WSM5, WSM7, WDM5 and WDM7: the 80-level ladder extended to 256
+
+These five units still keep their level arrays per thread (one thread per
+column), sized by a compile-time tier: `WSM3_KMAX`, `WSM5_KMAX`, `WSM7_KMAX`,
+`WDM5_KMAX`, and `WDM6_KMAX` for the separate `wdm7.cu` unit. Unlike WSM6 and
+WDM6 (section 11) they were not moved onto a workspace. Their ladders ended at
+80; they are now 64 / 80 / 128 / 256, so every one admits `2 <= nz <= 256`
+(`WSM3_VERTICAL_LEVEL_BOUNDS`, `WSM5_VERTICAL_LEVEL_BOUNDS`,
+`WSM7_VERTICAL_LEVEL_BOUNDS`, `WDM5_VERTICAL_LEVEL_BOUNDS`,
+`WDM7_VERTICAL_LEVEL_BOUNDS`). The 64 and 80 tiers compile the source unchanged;
+128 and 256 are the same source at a deeper `#define`, so any column of 80
+levels or fewer produces the same words as before
+(`tests/test_wsm_wdm_256_levels_gpu.py` compares nz = 49 and 80 against the
+128 and 256 tiers bit for bit; the WRF oracle gates at the old tiers pass
+unchanged).
+
+Frames read through the production loader on an RTX A6000 (sm_86, 84 SMs,
+NVRTC 12.9.86, 2026-11-22), widest export of each unit; exactly linear in the
+tier:
+
+| unit | 64 | 80 | 128 | 256 | B/level | registers | reserved at 256 (measured) |
+|---|---|---|---|---|---|---|---|
+| `wsm3` | 5,664 | 7,072 | 11,296 | 22,560 | 88 | 123 | 2,654 MiB |
+| `wsm5` | 5,664 | 7,072 | 11,296 | 22,560 | 88 | 200 | 2,654 MiB |
+| `wsm7` | 7,200 | 8,992 | 14,368 | 28,704 | 112 | 204 | 3,410 MiB |
+| `wdm5` | 9,248 | 11,552 | 18,464 | 36,896 | 144 | 114 | 4,418 MiB |
+| `wdm7` | 9,776 | 12,208 | 19,504 | 38,960 | 152 | 128 | 4,672 MiB |
+
+The reservation is the law at the head of this document,
+`(frame - 1024) x 1536 x SMs` (2,650 / 3,408 / 4,415 / 4,666 MiB predicted for
+84 SMs), measured as in section 1 at 256 levels; at nz = 80 the same units
+reserve 748 / 984 / 1,298 / 1,380 MiB. On a 170-SM card the 256 reservation is
+about 5.3 GiB (WSM3, WSM5) to 9.2 GiB (WDM7). Register counts are the same at
+all four tiers, so the tier does not change occupancy: with 32-thread blocks
+the register-limited residency is 33 % of the SM's threads for WSM3, WDM5 and
+WDM7 and 19-21 % for WSM5 and WSM7. Preflight prices the frame per domain at
+the tier it launches (`CONDITIONAL_COLUMN_TIERED_FRAMES`, `WDM5_TIER_FRAME`,
+`WDM7_TIER_FRAME`, and `local_frame_bytes` in `woof/data/wsm_family/schemes.json`
+for WSM7, whose recorded sm_120 rows are 16 B above these readings and so remain
+the ceiling). A run that only needs 49 levels still compiles the 64 tier and is
+priced exactly as before.
+
+```
+pytest tests/test_wsm_wdm_256_levels_gpu.py
+pytest tests/test_wsm3_wrf461_column_exact.py tests/test_wsm5.py \
+       tests/test_wsm7_wrf461_column_exact.py tests/test_wdm5_wrf461_oracle.py \
+       tests/test_wdm7_wrf461_oracle.py
+```
+
+## QNSE and BouLac to 256 levels (compile-time tier)
+
+`QNSE_KMAX` (`kernels/qnsepbl.cu`, both `qnsepbl_column` and
+`mfshconv_column`) and `BOULAC_KMAX` (`kernels/boulac.cu`) size the
+per-thread column arrays, so unlike YSU they cannot be raised for free.
+Each now compiles at one of two tiers (`woof/core/pbl_level_tiers.py`): the
+source's own `#ifndef` default, 128, for every column of at most 128 levels
+-- the unchanged translation unit, so those runs are word-for-word the
+pre-tier kernel by construction -- and 256 above it, through
+`get_kernel_int_defines`. The contract ceilings
+(`QNSE_VERTICAL_LEVEL_BOUNDS`, `BOULAC_VERTICAL_LEVEL_BOUNDS`), the registry
+rows and hex's refusal all follow: 256.
+
+Frames are linear in the tier and priced per domain by
+`CONDITIONAL_COLUMN_TIERED_FRAMES`. Measured 2026-11-22 on sm_86 (RTX A6000,
+NVRTC 12.9) through the production loader at tiers 128 / 192 / 256:
+`qnsepbl_column` 9,232 / 13,840 / 18,448 B, `mfshconv_column` 15,360 /
+23,040 / 30,720 B (the widest), `boulac_column` 7,696 / 11,536 / 15,376 B,
+so on that card the QNSE module grows by its widest kernel's 120 B per level
+and BouLac by 60 B per level.  Those are the arrays one build keeps live; the
+shipped rows are maxima over cards and modes and two of them keep every
+array live (QNSE's 16,896 B = 132 x 128 is the strict sm_89 mass-flux frame,
+BouLac's 8,208 B = 64 x 128 + 16 is sm_120's), so preflight prices the full
+per-level array bytes, 132 B and 64 B: a 256-level run is priced at
+33,792 B (QNSE) and 16,400 B (BouLac).
+`tests/test_kernel_local_bounds.py::test_the_qnse_and_boulac_tier_frames_are_what_the_driver_reports`
+reads both tiers back off the driver; `tests/test_pbl_qnse_boulac_256_levels.py`
+runs a 256-level column to a 1 hPa top (finite, non-trivial), proves the
+256 tier reproduces the unchanged kernel word for word at `nz` 49 and 128,
+and compares CUDA with Metal.

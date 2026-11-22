@@ -7,8 +7,10 @@
 # ocn_tend_tracer; run_vmix: implicit vertical mixing; run_vert_transport:
 # ocn_vert_transport_velocity_top; run_btr_subcycle: the split-explicit
 # barotropic stage; run_split_step: the whole split-explicit step;
-# run_forward: the forward mode over N steps) at the
-# strict recipe, in both precisions.
+# run_forward: the forward mode over N steps; run_frazil: frazil formation;
+# run_land_ice: the land-ice fluxes and effective density; run_gm: the GM
+# bolus velocity) at the strict
+# recipe, in both precisions.
 #
 #   bash tools/mpas_ocean_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
 #
@@ -51,6 +53,8 @@ for precision in r4 r8; do
     "${fc[@]}" "${flags[@]}" "${ocean}/mpas_ocn_constants.F"
     "${fc[@]}" "${flags[@]}" "${script_dir}/stubs_tendency.F90"
     "${fc[@]}" "${flags[@]}" "${script_dir}/stubs_unported.F90"
+    "${fc[@]}" "${flags[@]}" "${script_dir}/stubs_frazil.F90"
+    "${fc[@]}" "${flags[@]}" "${script_dir}/stubs_land_ice.F90"
     for unit in mpas_ocn_vel_coriolis mpas_ocn_vel_vadv mpas_ocn_thick_hadv mpas_ocn_thick_vadv \
                 mpas_ocn_vel_pressure_grad mpas_ocn_vel_hmix_del2 mpas_ocn_vel_hmix_leith mpas_ocn_vel_hmix_del4 \
                 mpas_ocn_vel_hmix mpas_ocn_forcing mpas_ocn_surface_bulk_forcing mpas_ocn_thick_surface_flux \
@@ -95,12 +99,14 @@ for precision in r4 r8; do
       for unit in mpas_ocn_tracer_hmix_del2 mpas_ocn_tracer_hmix_del4 mpas_ocn_tracer_hmix_redi mpas_ocn_tracer_hmix; do
           "${fc[@]}" "${flags[@]}" -I.. "${ocean}/${unit}.F"
       done
-      # ocn_tend_tracer: the remaining tracer modules and the bulk forcing
-      # verbatim, against the real equation of state, then mpas_ocn_tendency.F
-      # itself against the real tracer modules (stubs_unported.F90 for the rest)
+      # ocn_tend_tracer: the remaining tracer modules, the bulk forcing,
+      # frazil and the land-ice fluxes verbatim, against the real equation of state, then
+      # mpas_ocn_tendency.F itself against the real tracer modules
+      # (stubs_unported.F90 for the rest)
       for unit in mpas_ocn_tracer_nonlocalflux mpas_ocn_tracer_surface_flux_to_tend \
                   mpas_ocn_tracer_short_wave_absorption_jerlov mpas_ocn_tracer_short_wave_absorption \
-                  mpas_ocn_surface_bulk_forcing mpas_ocn_tendency; do
+                  mpas_ocn_surface_bulk_forcing mpas_ocn_frazil_forcing mpas_ocn_surface_land_ice_fluxes \
+                  mpas_ocn_tendency; do
           "${fc[@]}" "${flags[@]}" -I.. "${ocean}/${unit}.F"
       done
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/oracle_stream.F90"
@@ -109,6 +115,7 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_tracer_advection.F90"
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_tracer_hmix.F90"
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_tend_tracer.F90"
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_frazil.F90"
       # vertical mixing, after mpas_ocn_tendency.F (which links stubs_unported.F90's ocn_vmix)
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/stubs_vmix.F90"
       for unit in mpas_ocn_vmix_coefs_const mpas_ocn_vmix_coefs_tanh mpas_ocn_vmix_coefs_rich \
@@ -130,7 +137,9 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_btr_subcycle.F90"
       # the whole split-explicit step: the vector reconstruction's two routines
       # and ocn_time_integrator_split cut verbatim (awk ranges), the time
-      # averaging and land-ice effective density verbatim, GM's stand-ins
+      # averaging and land-ice effective density verbatim, GM verbatim (at
+      # RKIND 4 with -fno-range-check: it assigns huge(0D0) to RKIND arrays)
+      # and ocn_reconstruct_gm_vectors cut out of mpas_ocn_diagnostics.F
       { cat "${script_dir}/vector_reconstruction_cut_head.F90"
         for routine in mpas_reconstruct_2d mpas_reconstruct_1d; do
             awk -v r="${routine}" '$0 ~ "^ *subroutine " r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine " r "[^a-zA-Z_0-9]" {on=0}' \
@@ -138,10 +147,19 @@ for precision in r4 r8; do
         done
         echo "end module mpas_vector_reconstruction"; } > mpas_vector_reconstruction_cut.F
       "${fc[@]}" "${flags[@]}" -I.. mpas_vector_reconstruction_cut.F
+      gm_flags=("${flags[@]}")
+      [[ ${precision} == r4 ]] && gm_flags+=(-fno-range-check)
+      "${fc[@]}" "${gm_flags[@]}" -I.. "${ocean}/mpas_ocn_gm.F"
+      { cat "${script_dir}/gm_vectors_cut_head.F90"
+        awk '/^ *subroutine ocn_reconstruct_gm_vectors\(/ {on=1} on {print} on && /^ *end subroutine ocn_reconstruct_gm_vectors[^a-zA-Z_0-9]/ {on=0}' \
+            "${ocean}/mpas_ocn_diagnostics.F"
+        echo "end module split_gm_vectors"; } > ocn_gm_vectors_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. ocn_gm_vectors_cut.F
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/stubs_split.F90"
       for unit in mpas_ocn_time_average_coupled mpas_ocn_effective_density_in_land_ice; do
           "${fc[@]}" "${flags[@]}" -I.. "${ocean}/${unit}.F"
       done
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_land_ice.F90"
       { cat "${script_dir}/split_step_cut_head.F90"
         awk '/^ *subroutine ocn_time_integrator_split\(domain, dt\)/ {on=1} on {print} on && /^ *end subroutine ocn_time_integrator_split/ {on=0}' "${split}"
         awk '/^ *subroutine ocn_time_integration_split_init\(domain\)/ {on=1} on {print} on && /^ *end subroutine ocn_time_integration_split_init/ {on=0}' "${split}"
@@ -157,8 +175,18 @@ for precision in r4 r8; do
         echo "end module ocn_timestep_cut"; } > ocn_timestep_cut.F
       "${fc[@]}" "${flags[@]}" -I.. ocn_timestep_cut.F
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_forward.F90" )
+    # GM, verbatim, in a directory of its own for run_gm (its own driver and
+    # stream); it assigns huge(0D0) to RKIND arrays, which gfortran
+    # converts at RKIND 4 (to +Inf) only with -fno-range-check
+    mkdir -p gm
+    ( cd gm
+      gm_flags=("${flags[@]}")
+      [[ ${precision} == r4 ]] && gm_flags+=(-fno-range-check)
+      "${fc[@]}" "${gm_flags[@]}" -I.. "${ocean}/mpas_ocn_gm.F"
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/oracle_stream.F90"
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_gm.F90" )
     if command -v objdump >/dev/null; then
-        if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o eos/ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
+        if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o eos/ocn_*.o gm/mpas_ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
             exit 4
         fi
@@ -170,7 +198,8 @@ for precision in r4 r8; do
         < <(bash "${script_dir}/../oracle_libm/build_host_libm.sh" 2> libm.txt)
     for driver in run_oracle run_pgrad_hmix run_tendency; do
         "${fc[@]}" -o "${build_dir}/${driver}_${precision}" "${driver}.o" mpas_ocn_*.o mpas_constants.o \
-            stubs_tendency.o stubs_unported.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
+            stubs_tendency.o stubs_unported.o stubs_frazil.o stubs_land_ice.o stubs.o mpas_kind_types.o \
+            ${libm_objects[@]+"${libm_objects[@]}"}
     done
     "${fc[@]}" -o "${build_dir}/run_eos_${precision}" eos/run_eos.o eos/mpas_ocn_equation_of_state*.o \
         mpas_ocn_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
@@ -185,10 +214,18 @@ for precision in r4 r8; do
         ${libm_objects[@]+"${libm_objects[@]}"}
     # the tendency module and every real module it reaches, from both directories
     "${fc[@]}" -o "${build_dir}/run_tend_tracer_${precision}" eos/run_tend_tracer.o eos/oracle_stream.o \
-        eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_tracer_*.o \
+        eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_frazil_forcing.o \
+        eos/mpas_ocn_surface_land_ice_fluxes.o eos/mpas_ocn_tracer_*.o \
         eos/mpas_tracer_advection_helpers_cut.o eos/ocn_diagnostics_cut.o eos/mpas_ocn_diagnostics_routines.o eos/mpas_ocn_thick_ale.o \
         eos/mpas_ocn_equation_of_state*.o mpas_ocn_vel_*.o mpas_ocn_thick_*.o mpas_ocn_forcing.o mpas_ocn_constants.o \
         mpas_constants.o stubs_unported.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_frazil_${precision}" eos/run_frazil.o eos/oracle_stream.o \
+        eos/mpas_ocn_frazil_forcing.o eos/mpas_ocn_equation_of_state*.o mpas_ocn_constants.o mpas_constants.o \
+        stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_land_ice_${precision}" eos/run_land_ice.o eos/oracle_stream.o \
+        eos/mpas_ocn_surface_land_ice_fluxes.o eos/mpas_ocn_effective_density_in_land_ice.o \
+        eos/mpas_ocn_equation_of_state*.o mpas_ocn_constants.o mpas_constants.o stubs.o mpas_kind_types.o \
+        ${libm_objects[@]+"${libm_objects[@]}"}
     "${fc[@]}" -o "${build_dir}/run_vmix_${precision}" eos/run_vmix.o eos/oracle_stream.o eos/mpas_ocn_vmix*.o \
         eos/stubs_vmix.o eos/mpas_ocn_equation_of_state*.o mpas_ocn_constants.o mpas_constants.o stubs.o \
         mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
@@ -201,8 +238,10 @@ for precision in r4 r8; do
     # the step: every real module of the tendencies, diagnostics, tracers and vertical mixing
     "${fc[@]}" -o "${build_dir}/run_split_step_${precision}" eos/run_split_step.o eos/oracle_stream.o \
         eos/ocn_split_step_cut.o eos/mpas_vector_reconstruction_cut.o eos/stubs_split.o \
+        eos/mpas_ocn_gm.o eos/ocn_gm_vectors_cut.o \
         eos/mpas_ocn_time_average_coupled.o eos/mpas_ocn_effective_density_in_land_ice.o \
-        eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_tracer_*.o \
+        eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_frazil_forcing.o \
+        eos/mpas_ocn_surface_land_ice_fluxes.o eos/mpas_ocn_tracer_*.o \
         eos/mpas_tracer_advection_helpers_cut.o eos/ocn_diagnostics_cut.o eos/mpas_ocn_diagnostics_routines.o \
         eos/mpas_ocn_thick_ale.o eos/mpas_ocn_vmix*.o eos/stubs_vmix.o eos/mpas_ocn_equation_of_state*.o \
         mpas_ocn_vel_*.o mpas_ocn_thick_hadv.o mpas_ocn_thick_vadv.o mpas_ocn_thick_surface_flux.o mpas_ocn_forcing.o \
@@ -210,18 +249,22 @@ for precision in r4 r8; do
         ${libm_objects[@]+"${libm_objects[@]}"}
     "${fc[@]}" -o "${build_dir}/run_forward_${precision}" eos/run_forward.o eos/ocn_timestep_cut.o eos/oracle_stream.o \
         eos/ocn_split_step_cut.o eos/mpas_vector_reconstruction_cut.o eos/stubs_split.o \
+        eos/mpas_ocn_gm.o eos/ocn_gm_vectors_cut.o \
         eos/mpas_ocn_time_average_coupled.o eos/mpas_ocn_effective_density_in_land_ice.o \
-        eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_tracer_*.o \
+        eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_frazil_forcing.o \
+        eos/mpas_ocn_surface_land_ice_fluxes.o eos/mpas_ocn_tracer_*.o \
         eos/mpas_tracer_advection_helpers_cut.o eos/ocn_diagnostics_cut.o eos/mpas_ocn_diagnostics_routines.o \
         eos/mpas_ocn_thick_ale.o eos/mpas_ocn_vmix*.o eos/stubs_vmix.o eos/mpas_ocn_equation_of_state*.o \
         mpas_ocn_vel_*.o mpas_ocn_thick_hadv.o mpas_ocn_thick_vadv.o mpas_ocn_thick_surface_flux.o mpas_ocn_forcing.o \
         mpas_ocn_constants.o mpas_constants.o stubs_unported.o stubs.o mpas_kind_types.o \
         ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_gm_${precision}" gm/run_gm.o gm/oracle_stream.o gm/mpas_ocn_gm.o \
+        mpas_ocn_constants.o mpas_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
-    echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none; r4 adds -DSINGLE_PRECISION"
+    echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none; r4 adds -DSINGLE_PRECISION (and -fno-range-check for mpas_ocn_gm.F)"
     echo "host: $(uname -srm)"
     cat "${build_dir}/r4/libm.txt"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle,split_step,forward}_{r4,r8}"
+echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle,split_step,forward,frazil,land_ice,gm}_{r4,r8}"

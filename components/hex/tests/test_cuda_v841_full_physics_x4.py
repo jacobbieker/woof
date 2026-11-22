@@ -115,11 +115,11 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         "src/hexcore/snapshot_transfer.py": "7064e74719933894c9d92dbfe06190b404801cd72ecc5e4fe2447b66124c5efb",
         "src/hexcore/history_ready.py": "287840b7ece3cb97185340f3e161c997bbfd9a11233ff5da4198cca42e1f9523",
         "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
-        "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
+        "src/hexcore/cuda_arwen_helper_scope_v2.py": "03f122b7835a92536c52218713744bd1bfc0385cf88ac102a3295fe3f9ae9c4e",
         "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-        "src/hexcore/data/profiles/engine-helper-sets.v1.json": "5207221df126f3f5c7d3d310d6b7fc07884834ff251f6afd9ed57f8f595ec1b8",
+        "src/hexcore/data/profiles/engine-helper-sets.v1.json": "93861b917431684c114b73009a71e149adbacad1e0fdd2eeb8de464830ef068f",
         "src/hexcore/step_anchors.py": (
-            "13f8bf3361b3fc5c25805d05d48e3c59841050e3d372c03c96f1498133399b72"
+            "8c91f50ea56df0eff70589e5423de42f41a371994647d641eff06aa9500807a0"
         ),
         "src/hexcore/data/dycore-step-anchors.v1.json": (
             "f9a102a3f4fd848e95bf9fabe5a5ccd0579ba01de739de9e7da8e4ed7930e62d"
@@ -131,10 +131,10 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
             "a0ae4d9b3e639bfe02a8de57458fac4407c6e48f1bc12e2e698626e9a9069d2c"
         ),
         "src/hexcore/cuda_gwdo_v841.py": (
-            "6f619095a10bf6787ca38c57304765561519d452aa8c1ee7b654b63e8062cb74"
+            "f6ff7d030e18ea341b01cc0b5226949cc211533ccbcd3210b3e1cb91cd2d4423"
         ),
         "src/hexcore/cuda_physics_v841.py": (
-            "8140553c0bec161af26c5c4f66ff8a54f1f18762810d36460cf447996ee64b44"
+            "6670121bef99b05877a01fe089910a25b3b5660b34b9afec086a0ff5a86689ad"
         ),
         # Re-frozen 2026-08-26 for the convection ruling: the physics cadence
         # table reports convection: None when no scheme is selected; and again
@@ -149,16 +149,16 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # Re-frozen 2026-10-05 for the startup lane (host-preparation cache);
         # the rationale lives beside the runner's pin.
         "src/hexcore/cuda_driver.py": (
-            "f453eee1152aa33392b09ecfde1d16ee33ec53cf17d754ecd076736088630fea"
+            "ce61c976958713226f7fdf2dbd30a19fecdb80f49b178f856b975ae2e543d5c1"
         ),
         # New pin (startup lane, 2026-10-05): the frozen driver executes host
         # preparation through this module; the rationale lives beside the
         # runner's pin.
         "src/hexcore/prep_cache.py": (
-            "9e2014bee45c4e42e16b7afe5e8c7f6df5ef1ebf2f62a6269c01692aa6cc095e"
+            "38e6bbbfdeceb117468ad6d577dabfc281cbba137633bcdf59e99e04fe9a9092"
         ),
         "src/hexcore/cuda_backend/recovery.py": (
-            "1a5a85585ebc72867904f852ee54c541ace5fc2ac26f0ef89dabd179096cc041"
+            "d47e5523a9ea997367565a9756573b98912bb149599827101dafe7980608f4d5"
         ),
         # Re-frozen for the regional CPU authority lane, again
         # for timestep admission, and again 2026-08-26 for the
@@ -169,9 +169,9 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # of the two digest gates is an admission-time refusal, not a test.
         # Measured inert by AST; the rationale lives beside the runner's pin.
         "src/hexcore/config_v841.py": (
-            "25863cb84107bca0658019d9a202ac8638c6cefaca076579483cdf8a58de2668"
+            "0678d49b4db602dfc7ff24da5a7801d4bdeb321af82d0dabeb12c13fcca9767b"
         ),
-        # New pin (convection ruling, 2026-08-26): the frozen config admits
+        # New pin (the convection rule by spacing): the frozen config admits
         # config_convection_scheme from this module and the timestep registry
         # keys on the selection it produces; the rationale lives beside the
         # runner's pin.
@@ -181,9 +181,9 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # of the two digest gates is an admission-time refusal, not a test.
         # Measured inert by AST; the rationale lives beside the runner's pin.
         # Re-frozen 2026-10-11: variable-resolution meshes decided per cell;
-        # the rationale lives beside the runner's pin.
+        # the rationale lives beside the runner's pin.  Re-frozen 2026-11-17: the rule's text only.
         "src/hexcore/convection_admission.py": (
-            "33372d55a763e50428d3742af895d19c9ff8c000ef7814ee52ac757554e602f0"
+            "cad0d80621e3101e12e2e07c409a196d477352bfe7b0df1097ba693eaa835690"
         ),
         # New pin (the timestep-anchor campaign): the frozen config ADMITS config_dt from this
         # module, so the pinned config's meaning depends on these bytes.
@@ -209,7 +209,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # the table is unchanged and the new branch runs only on opt-in; the
         # rationale lives beside the runner's pin.
         "src/hexcore/dt_admission.py": (
-            "169aa21b5e8ce6e72b1d815ff94a51fa1a0eb294918d365bae33cee93717f735"
+            "09f2a8b3c8f4ec1f3811dca5ba4c117be058a26c6182051de2791684e9de6023"
         ),
         # New pin (surface/PBL cadence, 2026-08-26): this module decides
         # config_bldt_seconds, a knob the frozen registry keys on; the
@@ -236,12 +236,12 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # (SWDDNI/SWDDIF/COSZR selected from the export's diag/ keys); the
         # rationale lives beside the runner's pin.
         "src/hexcore/cuda_arwen_physics_v841.py": (
-            "8550e4e3bdec9366744738f787feb28fb617c5ba4775a3e512f2887553d302f6"
+            "787e1a6becfed524d4d53a8d674c54fbd7ac5c750db6aefbed3e0ac8c2270be7"
         ),
         # New pin 2026-10-05 (New Tiedtke row); the rationale lives beside the
         # runner's pin.
         "src/hexcore/cuda_ntiedtke_column_v841.py": (
-            "6be7219b39c2e0f9732342631c0ab27c438ea6126ea9faf97b45c6c22080c2ea"
+            "eff1bae9f5399163a8617d8fe819c70ea948841f50ffa10773b6460ded5442d9"
         ),
         "src/hexcore/cuda_seam_snapshot_v841.py": (
             "a05fdda5ef82b0d77b1af63d4354953660f3d5b80470d7915bb647f41d191019"
@@ -249,7 +249,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # Re-frozen for the regional CPU authority lane; the
         # rationale lives beside the runner's pin.
         "src/hexcore/mixing.py": (
-            "1fd749a6c2a8599acf9bac7b2fc9764c0cb8ceb428be50b19a4e93e3a094d554"
+            "025a09079f180ed38529bb329c32b60abe43351d576d99ceaaf3bba355f679be"
         ),
         # Re-frozen for the regional CPU authority lane, and again
         # 2026-10-05 for the startup lane (host-preparation cache); the
@@ -273,17 +273,17 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # stack below the smallest anchored timestep); the rationale lives
         # beside the runner's pin.
         "src/hexcore/cuda_compensated_recovery.py": (
-            "f076673925dc4761c7bd77380722f8badc1ffdbdec228cbb4c3c573edb2f6129"
+            "4a2a31e9e64107d899f3fe76224fdf08ce771f463bdd189a54fe806054e22f69"
         ),
         "src/hexcore/cuda_horizontal.py": (
-            "f94137176db65d24df0d9ff1d491c278d6c835bb08cd76dc43c5cfcbf323a345"
+            "97b3ec1656518db03bccfe14c4fbf562dd7a407994ca31c8e2d4462943881b9c"
         ),
         "src/hexcore/cuda_horizontal_v841.py": (
             "1a5fae3d6055a710de7d7ce216dddb9bee7c2e4ee72cf4e6a959e2401dfe0cb7"
         ),
         # Current d15ea3482cc5 cache-key correction; archived proofs unchanged.
         "src/hexcore/cuda_transport_v841.py": (
-            "344aa93c1ebe74f9ffaef10a7e7eeea4b050ed231059d4e587f63f4d5fa05094"
+            "5eae06571788b8700f7eeb3de66badbb2784b116d7ef5a45135b24854f78f830"
         ),
         "src/hexcore/cuda_transport.py": (
             "013ed46f8ef3bcc1a445b2e81135e262c23c49950e52e5b62b22e4274644b15e"
@@ -1139,6 +1139,139 @@ def test_composite_transaction_rejects_incomplete_driver_rollback() -> None:
     assert log[-2:] == ["driver_abort", "adapter_abort"]
 
 
+class _HealthBackend(_FakeBackend):
+    """Phase one and phase two report a status word through the ledger."""
+
+    def __init__(self, log, cp, *, site, phase, word, seen):
+        super().__init__(log)
+        self._cp, self._site, self._phase = cp, site, phase
+        self._word, self._seen = word, seen
+
+    def _report(self, phase):
+        from woof.core import health_ledger
+
+        if phase != self._phase:
+            return
+        self._seen["active"] = health_ledger.active() is not None
+        status = self._cp.asarray([self._word], dtype=self._cp.uint32)
+
+        def describe(flags):
+            raise FloatingPointError(
+                f"{self._site} flagged {flags:#x}" + health_ledger.deferred_note())
+
+        self._seen["returned"] = health_ledger.read_status(
+            status, site=self._site, describe=describe)
+
+    def begin_step(self, **kwargs):
+        raw = super().begin_step(**kwargs)
+        self._report("phase1")
+        return raw
+
+    def finish_step(self, **kwargs):
+        update = super().finish_step(**kwargs)
+        self._report("phase2")
+        return update
+
+
+def _health_step(runner, backend, log, **extra):
+    couple, clamp, recover = _transaction_callables(log)
+    return runner.execute_composite_step(
+        driver=_FakeDriver(log), backend=backend,
+        scalar_names=runner.SCALAR_NAMES, physics_geometry=object(),
+        kernel_cache=object(), previous_surface_updates=None,
+        couple=couple, clamp=clamp, recover=recover, **extra)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("site,phase", [
+    ("microphysics", "phase2"), ("ysu", "phase1"), ("grell-freitas", "phase1"),
+    ("noahmp_static_surface_identity", "phase1"), ("lagged-heating", "phase2")])
+def test_a_deferred_health_refusal_is_drained_before_the_commit(
+        site, phase, monkeypatch) -> None:
+    """The step's health words are read once, before publication: a
+    deferred refusal aborts the same step exactly as the immediate one."""
+    cp = pytest.importorskip("cupy")
+    from woof.core import health_ledger
+
+    monkeypatch.delenv(health_ledger.RESIDENT_ENV, raising=False)
+    runner = _load_runner()
+    log: list[str] = []
+    seen: dict[str, object] = {}
+    backend = _HealthBackend(log, cp, site=site, phase=phase, word=4, seen=seen)
+    with pytest.raises(runner.CompositeTransactionError,
+                       match="aborted without publication") as caught:
+        _health_step(runner, backend, log)
+    assert seen == {"active": True, "returned": 0}
+    cause = caught.value.__cause__
+    assert isinstance(cause, FloatingPointError)
+    assert f"{site} flagged 0x4" in str(cause)
+    assert "deferred health read at the end of this model step" in str(cause)
+    assert "driver_commit" not in log and "adapter_commit" not in log
+    assert log[-2:] == ["driver_abort", "adapter_abort"]
+    assert health_ledger.active() is None
+
+    # Healthy: deferred, nothing raised, the ledger is gone after the step.
+    log.clear()
+    seen.clear()
+    backend = _HealthBackend(log, cp, site=site, phase=phase, word=0, seen=seen)
+    _health_step(runner, backend, log)
+    assert seen == {"active": True, "returned": 0}
+    assert log[-2:] == ["driver_commit", "adapter_commit"]
+    assert health_ledger.active() is None
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("mode,site", [
+    ("immediate", "microphysics"), ("deferred", "rrtmgp")])
+def test_immediate_mode_and_unadmitted_sites_read_at_the_site(
+        mode, site, monkeypatch) -> None:
+    cp = pytest.importorskip("cupy")
+    from woof.core import health_ledger
+
+    monkeypatch.setenv(health_ledger.RESIDENT_ENV, mode)
+    runner = _load_runner()
+    log: list[str] = []
+    seen: dict[str, object] = {}
+    backend = _HealthBackend(log, cp, site=site, phase="phase2", word=4,
+                             seen=seen)
+    _health_step(runner, backend, log)
+    assert seen["returned"] == 4
+    assert log[-2:] == ["driver_commit", "adapter_commit"]
+    assert health_ledger.active() is None
+
+
+@pytest.mark.gpu
+def test_a_step_that_exchanges_halos_reads_at_the_site(monkeypatch) -> None:
+    """Same-host ranks and LTS classes exchange before phase two: a failing
+    scheme must stop its own rank there, so nothing is deferred."""
+    cp = pytest.importorskip("cupy")
+    from woof.core import health_ledger
+
+    monkeypatch.delenv(health_ledger.RESIDENT_ENV, raising=False)
+    runner = _load_runner()
+    log: list[str] = []
+    seen: dict[str, object] = {}
+    backend = _HealthBackend(log, cp, site="ysu", phase="phase1", word=4, seen=seen)
+    before = health_ledger.resident_receipt()["immediate_steps"].get("exchanged", 0)
+    _health_step(runner, backend, log, before_phase_two=lambda *args, **kwargs: None)
+    assert seen == {"active": False, "returned": 4}
+    assert health_ledger.resident_receipt()["immediate_steps"]["exchanged"] == before + 1
+    assert health_ledger.active() is None
+
+
+def test_the_hex_admitted_sites_are_real_call_sites() -> None:
+    """Each extra site the composite step admits is spelled exactly so by a
+    read_status call; a renamed site would silently fall back to the
+    immediate read and these tests would not notice."""
+    import woof
+
+    runner = _load_runner()
+    root = Path(woof.__file__).resolve().parent
+    text = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
+    for site in runner.HEX_EXTRA_RESIDENT_SITES:
+        assert f'site="{site}"' in text, site
+
+
 def test_native_gate_includes_physical_edge_u_interface_w_and_gwdo() -> None:
     runner = _load_runner()
     assert runner.NATIVE_FIELD_MAP["normal_u"] == ("u", "level_edge")
@@ -1234,9 +1367,9 @@ def test_restart_localization_gates_precede_first_resumed_step() -> None:
     f001 = source.index("identity = require_bitwise_restart_identity(")
     assert worker_spawn < restored_f030 < step16 < f001
     assert '"F030 restored MPAS atmosphere"' in source
-    assert '"F030 restored WOOF backend"' in source
+    assert '"F030 restored WOOF-ArWen backend"' in source
     assert '"F030 restored GF advective forcing"' in source
-    assert '"first resumed step 16 WOOF backend"' in source
+    assert '"first resumed step 16 WOOF-ArWen backend"' in source
     assert '"restart_arm_fresh_process": True' in source
 
     worker_source = inspect.getsource(runner._execute_restart_worker)

@@ -705,6 +705,8 @@ def test_rrtmgp_table_containers_are_explicitly_classified():
          # classification comments in woof/io/restart.py)
          "_C", "_sw_tables", "_cuda_sw", "_ozone_climo",
          "_night_outputs", "_ozone",
+         # hex's aer_opt = 2 records (UserAerosolFrames), set once by the constructor
+         "user_aerosol_frames",
          # the RRTM+Dudhia (1/1) composition's rebuild-on-load
          # sub-adapters and the RRTM coefficient bundle (1.9.1 D3; see
          # woof/io/restart.py and tests/test_radiation_callable_manifest)
@@ -1278,7 +1280,7 @@ def test_the_advective_forcing_pair_roundtrips_and_only_where_it_exists(
     consumer must not gain two archive members, or every checkpoint on
     disk for every other configuration would stop resuming.
     """
-    cfg = _cfg(moist=True, mp_physics=10, cu_physics=3, cudt_minutes=0.0)
+    cfg = _cfg(moist=True, mp_physics=10, cu_physics=3, cu_gf_version="wrf_461", cudt_minutes=0.0)
     state, _ = _grell_freitas_shim_state(cfg, monkeypatch)
     _fill_setup(state)
     _fill_serialized(state, seed=20260820)
@@ -1316,7 +1318,7 @@ def test_a_checkpoint_predating_the_advective_export_is_refused_by_name(
     difference by eye and then guess whether it was recoverable.  Refusals
     name the breakage AND the remedy.
     """
-    cfg = _cfg(moist=True, mp_physics=10, cu_physics=3, cudt_minutes=0.0)
+    cfg = _cfg(moist=True, mp_physics=10, cu_physics=3, cu_gf_version="wrf_461", cudt_minutes=0.0)
     state, _ = _grell_freitas_shim_state(cfg, monkeypatch)
     _fill_setup(state)
     _fill_serialized(state, seed=20260820)
@@ -4176,7 +4178,12 @@ _DIAGNOSTIC_ON = {"rrtmg_spectral_output": "bands",
                   "radtran_wavelengths": (550.0,), "radtran_interval_s": 1800.0,
                   "radtran_umu": (0.5,), "radtran_phi": (90.0,),
                   "radtran_mol_abs_param": "reptran medium", "radtran_solver": "twostr",
-                  "radtran_streams": 8, "radtran_aerosol": "continental_average"}
+                  "radtran_streams": 8, "radtran_aerosol": "continental_average",
+                  # The ionosphere history's keys (each valid only with the option on).
+                  "spacewx_ionosphere_opt": 1, "spacewx_f107_source": "150",
+                  "spacewx_f107_mode": "daily", "spacewx_ionosphere_maps": "ursi",
+                  # The auroral oval history's keys.
+                  "spacewx_aurora_opt": 1, "spacewx_kp_source": "4"}
 
 
 def _diagnostic_on(name):
@@ -4743,7 +4750,7 @@ def _grell_freitas_tree(monkeypatch, *, seed=61):
 
     def build(grid_id, nested, payload):
         cfg = _cfg(grid_id=grid_id, nested=nested, moist=True,
-                   cu_physics=3, cudt_minutes=0.0, run_seconds=60.0)
+                   cu_physics=3, cu_gf_version="wrf_461", cudt_minutes=0.0, run_seconds=60.0)
         state, driver = _shim_driver_state(cfg, monkeypatch)
         _fill_setup(state)
         _fill_serialized(state, payload)
@@ -5284,7 +5291,7 @@ def _grell_freitas_state(cp):
         # radt 6 min on a 60 s step -> stepra 6, so radiation is due at
         # itimestep % 6 == 1 and the step-20 checkpoint is OFF its calendar.
         ra_physics=4, radt_minutes=6.0, bldt=0.0,
-        cu_physics=3, cudt_minutes=0.0, ishallow=1))
+        cu_physics=3, cu_gf_version="wrf_461", cudt_minutes=0.0, ishallow=1))
     coord = make_vertical_coord(cfg.nz)
 
     def theta(z):

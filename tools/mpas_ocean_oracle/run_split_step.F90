@@ -10,8 +10,8 @@
 ! mpas_ocn_time_integration_split.F (split_step_cut_head.F90); everything it
 ! calls is the real v8.4.2 module (the tendencies, diagnostics, equation of
 ! state, ALE thickness, tracer advection and mixing, vertical mixing, time
-! averaging, the land-ice effective density) or a cut of it
-! (mpas_reconstruct), less GM (stubs_split.F90).  The driver runs the _init
+! averaging, the land-ice effective density, GM) or a cut of it
+! (mpas_reconstruct, ocn_reconstruct_gm_vectors).  The driver runs the _init
 ! routine of every module the step reaches, as ocn_forward_mode_init does,
 ! builds the block (its structs every pool, its dimensions the mesh pool's),
 ! computes the starting state's diagnostics (ocn_diagnostic_solve at time
@@ -25,6 +25,8 @@ program run_split_step
   use ocn_tendency
   use ocn_forcing
   use ocn_surface_bulk_forcing
+  use ocn_surface_land_ice_fluxes
+  use ocn_frazil_forcing
   use ocn_thick_hadv
   use ocn_thick_vadv
   use ocn_thick_surface_flux
@@ -41,6 +43,7 @@ program run_split_step
   use ocn_equation_of_state
   use ocn_diagnostics
   use ocn_vmix
+  use ocn_gm
   use ocn_split_step_cut
   use oracle_stream
   implicit none
@@ -75,6 +78,8 @@ program run_split_step
   call ocn_tendency_init(err)
   call ocn_forcing_init(err)
   call ocn_surface_bulk_forcing_init(err)
+  call ocn_surface_land_ice_fluxes_init(err)
+  call ocn_frazil_forcing_init(err)
   call ocn_thick_hadv_init(err)
   call ocn_thick_vadv_init(err)
   call ocn_thick_surface_flux_init(err)
@@ -99,6 +104,8 @@ program run_split_step
   call ocn_diagnostics_init(err)
   if (err /= 0) stop 13
   call ocn_vmix_init(domain, err)
+  if (err /= 0) stop 13
+  call ocn_gm_init(err)
   if (err /= 0) stop 13
 
   ! the diagnostics of the state the step starts from, as MPAS's init

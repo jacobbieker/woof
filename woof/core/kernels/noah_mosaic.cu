@@ -697,6 +697,13 @@ __device__ static void noah_sstep(real* sh2oout, const real* sh2oin,
         } else {
             wplus = 0.0f;
         }
+#ifdef NOAH_SMC_FLOOR_BOOKING
+        // Opt-in (RunConfig.noah_smc_floor_booking, default off): WRF
+        // module_sf_noahlsm.F:4026 raises a layer below 0.02 to 0.02 and
+        // books the water it adds nowhere; take it from the layer below
+        // (WPLUS < 0), and below the bottom layer from RUNOFF3.
+        if (stot < 0.02f) wplus = FMUL(FSUB(stot, 0.02f), ddz);
+#endif
         smc[k] = fmaxf(fminf(stot, smcmax), 0.02f);
         sh2oout[k] = fmaxf(FSUB(smc[k], sice[k]), 0.0f);
     }

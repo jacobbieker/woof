@@ -100,6 +100,7 @@ import numpy as np
 
 from woof import perf_timing
 from woof.io.parallel_npz import write_npz
+from woof.mp_generations import microphysics_algorithm_identity
 from woof.checkpoint_identity import (
     CONFIG_DIAGNOSTIC_FIELDS,
     CUMULUS_ALGORITHM_IDENTITIES,
@@ -503,6 +504,11 @@ STATE_REBUILT_ATTRS = frozenset({
     "tr_qc0", "tr_qi0", "tr_qs0",
     "tr17_10", "tr17_20", "tr17_30", "tr17_40",
     "tr17_50", "tr17_60", "tr17_70", "tr17_80",
+    # WRF v4.8.0 dynamic lightning: the energies' RK time-t copies, and the
+    # post-scheme theta and its step stamp, captured by every microphysics
+    # call before the lightning block reads them.
+    "light_ne0", "light_pe0", "light_neu0",
+    "dyn_lightning_theta", "_dyn_lightning_theta_at",
     # WOOF_WRF_EXACT_DIAGNOSTICS' stored perturbation pressure: written by
     # update_diagnostics with p/al/alt at every step entry, before the
     # pressure force reads it.  Unclassified, every strict run with the
@@ -609,6 +615,12 @@ STATE_INFRA_ATTRS = frozenset({
     # names/bytes, not this preparation selector, own forecast forcing and
     # are already covered by setup_fingerprint/lateral prefix identity.
     "_external_scalar_boundary_fields",
+    # The opt-in obstacles' device face lists and host receipt
+    # (woof.core.obstacles.attach): rebuilt from obstacle_file and the base
+    # state at the first stage, and the product's bytes are bound by the
+    # physics setup identity; the expected digest is that binding, pinned
+    # by the restore for the attach to check.
+    "_obstacles", "_obstacles_receipt", "_obstacles_expected_sha256",
     # Config binds speed; restored U/V already use this frame (see restore).
     "_moving_frame_velocity", "_moving_frame_initialized",
     # The HAILCAST generation a resumed run keeps (woof.core.hail
@@ -761,6 +773,13 @@ STATE_INFRA_ATTRS = frozenset({
     # so any checkpoint written inside a window, and the final trajectory
     # digest of every IAU run on the tree route, raised RestartManifestError.
     "_iau_forcing",
+    # --nn (woof.nn.wrf_seat): the launch attaches the seat from its --nn
+    # file at every start and resume.  INFRA: it carries no state across a
+    # step (a tap only records; an applying seat recomputes its increment
+    # from the time-t state every step), and an applying seat's identity
+    # -- the artefact's hashes and the safety settings -- is bound in the
+    # checkpoint header ("nn_column_seat", _validate_nn_column_checkpoint).
+    "_nn_column_seat",
     # woof.da.iau.IAU_AFTER_STEP_ATTRIBUTE: the analysis door's post-step
     # acts for a STREAMED root (its dry-mass share of the IAU window and its
     # balance probe, served per compute window by woof.da.iau
@@ -1432,6 +1451,11 @@ DRIVER_CHECKPOINT_ONLY_ATTRS = frozenset({"olr", "cldfra", "radiation_flux_diagn
 DRIVER_HELD_FORCING_ATTRS = frozenset({"gf_rthblten", "gf_rqvblten"})
 
 DRIVER_REBUILT_ATTRS = frozenset({
+    # WRF v4.8.0 MYNN-SFC call-site scratch (woof.core.mynnsfc_b66187f):
+    # the constant dx2d, absent-optional scratch, pointer tables and the
+    # surface driver's own call-local CQS, which mynnsfc_driver overwrites
+    # before reading.  Rebuilt at the first surface-layer call.
+    "_mynnsfc_b66187f",
     # Recreated from the bound simulation epoch and static coordinates.
     # Evolving solar/RASM values live in serialized scratch, not here.
     "native_diagnostic_epoch", "native_diagnostic_lat", "native_diagnostic_lon",
@@ -1490,11 +1514,25 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # RunConfig; stateless (the factor is read from the series at each
     # radiation call's model time), so a resumed run scales identically.
     "solar_variability",
+    # The opt-in band shares (woof.spacewx.solar_spectrum), the same: the
+    # factor is set on the SW leaf before each call from that call's time.
+    "solar_spectrum",
+    # The opt-in ionosphere history (woof.spacewx.history): rebuilt from the
+    # resumed RunConfig; its rows are recomputed at each frame's valid time
+    # from the run start's F10.7, so a resumed run writes the same rows.
+    "spacewx_ionosphere",
+    # The opt-in auroral oval history (woof.spacewx.aurora_history), the
+    # same contract: rebuilt from the RunConfig.  A fetched Kp is held per
+    # (source, start) in the space-weather cache, so a resume on the same
+    # host reads the Kp the first start found.
+    "spacewx_aurora",
     # WRF's topo_wind / gwd_opt (woof.core.terrain_drag): initialize_physics
     # rebuilds it from the resumed RunConfig and the prepared statics; it
     # holds only static coefficients and statistics, never a value a step
     # writes, so the rebuilt carrier is the one the checkpoint ran with.
     "terrain_drag",
+    # WRF v4.8.0 kim_tofd's VAR plane: static, rebuilt the same way.
+    "sfclay_varf",
     # Immutable FogDES selector and pinned classes; evolving VDFG/FGDP/DFGDP
     # are serialized in fields, and initialize_physics rebuilds this carrier.
     "fog_settling",
@@ -2410,9 +2448,10 @@ def classify_scratch_slot(slot: str) -> str:
     matched by prefix; see :data:`CARRIED_SCRATCH_PREFIXES`.
     """
     from woof.core.nest_accumulation import is_archive_slot
-    if slot in ("mynn471_f32", "mynn471_i32", "mynn471_work"):
+    if slot in ("mynn471_f32", "mynn471_i32", "mynn471_work",
+                "mynn480_f32", "mynn480_i32", "mynn480_work"):
         # Packed call arguments and private column workspace are fully
-        # overwritten before each MYNN 4.7.1 call, never carried state.
+        # overwritten before each MYNN 4.7.1 / 4.8.0 call, never carried state.
         return "rebuild"
     if is_archive_slot(slot):
         return "serialize"
@@ -2719,6 +2758,16 @@ def _recorded_asset_identity(role: str, relative: Path, size: int,
     return {"path": relative.as_posix(), "bytes": size, "sha256": sha256}
 
 
+def _shinhong_algorithm(cfg) -> str:
+    """The WRF 4.8.0 Shin-Hong restart identity, with its option word."""
+    from woof.core.shinhong_generations import SHINHONG_SOURCES
+    base = SHINHONG_SOURCES["wrf_480"]["restart_algorithm_identity"]
+    opts = "".join(flag for flag, on in (
+        ("n", cfg.shinhong_nonlocal_flux), ("s", cfg.shinhong_scu_mixing),
+        ("d", cfg.shinhong_ke_dissipation)) if on)
+    return f"{base}-{opts or 'none'}"
+
+
 def _scheme_algorithm(mapping: dict[int, str], scheme_id, label: str) -> str:
     try:
         return mapping[int(scheme_id)]
@@ -2949,6 +2998,9 @@ def _radiation_setup_identity(driver, cfg) -> dict:
     if (lw_id, sw_id) == (7, 7):
         from woof.core.radiation_composition import adapter_restart_identity
         identity["flg"] = adapter_restart_identity(scheme)
+    if (lw_id, sw_id) == (14, 14):
+        # RRTMG-K's own operands: o3input, ozone routing and assets.
+        identity["rrtmgk"] = scheme.restart_identity()
     if (lw_id, sw_id) == (4, 4) and not legacy_rrtmg:
         try:
             identity.update({
@@ -3093,6 +3145,12 @@ def _packed_parameters_identity(params, *, label: str,
 #: the switch apart, which is all the restart walk needs.
 _DIGEST_DROPPED_DIAGNOSTIC_FIELDS = frozenset(
     {"hailcast_opt", "haildt", "hailcast_version", "nwp_diagnostics", "tke_budget", "sase_flux_diag", "surface_energy_diag",
+     # The opt-in ionosphere history: output-only, and dropped while off by
+     # _drop_default_off_run_keys, so no earlier digest carried them.
+     "spacewx_ionosphere_opt", "spacewx_f107_source", "spacewx_f107_mode",
+     "spacewx_ionosphere_maps",
+     # The opt-in auroral oval history: the same.
+     "spacewx_aurora_opt", "spacewx_kp_source",
      # Correct mode WB1: output-only and on by default from 2.9.0, so it is
      # dropped rather than held at a default no earlier digest carried.
      "thompson_cloud_surface_booking",
@@ -3241,6 +3299,9 @@ def _drop_default_radiation_port_keys(values: dict) -> None:
     """
     from woof.config import drop_inactive_radiation_port_keys
     drop_inactive_radiation_port_keys(values)
+    # WRF v4.8.0 dynamic lightning controls, read by nothing while it is off.
+    from woof.core.dyn_lightning import drop_default_dyn_lightning
+    drop_default_dyn_lightning(values)
 
     # Default-on eclipse is implicit in old non-eclipse headers. A live
     # shadow additionally binds its algorithm, table and held field inventory.
@@ -3423,6 +3484,15 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # The Thompson generation: wrf_461 is what every earlier header ran.
     if values.get("thompson_version", "wrf_461") == "wrf_461":
         values.pop("thompson_version", None)
+    # The TEMPO generation: v3.0.3 is what every earlier header ran, and the
+    # keys reach nothing unless TEMPO runs.  The hail switch is read by
+    # v3.2.5 alone and echoes only when it is off.
+    if (values.get("mp_physics", 0) != 900
+            or values.get("tempo_version", "v3.0.3") == "v3.0.3"):
+        values.pop("tempo_version", None)
+        values.pop("tempo_hailhyperaware", None)
+    if values.get("tempo_hailhyperaware", True) is True:
+        values.pop("tempo_hailhyperaware", None)
     if values.get("thompson_table_dir") is None:
         values.pop("thompson_table_dir", None)
     for key, default in (("force_read_thompson", False),
@@ -3440,12 +3510,55 @@ def _drop_default_off_run_keys(values: dict) -> None:
     if (values.get("bl_pbl_physics", 0) != 1
             or values.get("ysu_version", "wrf_461") == "wrf_461"):
         values.pop("ysu_version", None)
+    # Shin-Hong (bl_pbl_physics = 11): a header without the selector ran
+    # the 4.6.1/4.7.1 kernel; the three 4.8.0 logicals at their Registry
+    # defaults are dropped, and none of them reach a non-Shin-Hong run.
+    if (values.get("bl_pbl_physics", 0) != 11
+            or values.get("shinhong_version", "wrf_461") == "wrf_461"):
+        values.pop("shinhong_version", None)
+    for _key, _default in (("shinhong_nonlocal_flux", True),
+                           ("shinhong_scu_mixing", False),
+                           ("shinhong_ke_dissipation", False)):
+        if (values.get("bl_pbl_physics", 0) != 11
+                or values.get(_key, _default) == _default):
+            values.pop(_key, None)
+    # cu_physics=3's generation: headers before the selector ran GFDRV.
+    if (values.get("cu_physics", 0) != 3
+            or values.get("cu_gf_version", "wrf_461") == "wrf_461"):
+        values.pop("cu_gf_version", None)
+    # gwd_opt = 1's generation and its two WRF 4.8.0 keys (WRF-480 L08):
+    # read only under gwd_opt = 1 and inert under "wrf_471", the scheme every
+    # header written before they existed ran (the same rule as
+    # woof.core.model.restart_identity_payload).
+    if (int(values.get("gwd_opt", 0) or 0) != 1
+            or values.get("gwdo_version", "wrf_471") == "wrf_471"):
+        for _key in ("gwdo_version", "gwd_dx_factor", "gwd_if_nonhyd"):
+            values.pop(_key, None)
     if values.get("bl_mynn_gsd41_unsquared_qtke", False) is False:
         values.pop("bl_mynn_gsd41_unsquared_qtke", None)
     # The opt-in GF deep evaporation booking: off is what every earlier
     # header ran, so it is omitted there and echoed only when selected.
     if values.get("gf_deep_rain_evaporation_booking", False) is False:
         values.pop("gf_deep_rain_evaporation_booking", None)
+    # The opt-in YSU surface heat flux on theta: the same contract.
+    if values.get("ysu_surface_heat_exner", False) is False:
+        values.pop("ysu_surface_heat_exner", None)
+    # The umbrella over the opt-in quirk corrections is never echoed: the
+    # RunConfig resolves it into the individual keys, which bind on their own.
+    values.pop("woof_quirk_corrections", None)
+    # The opt-in MYNN surface-layer 2 m / 10 m correction: the same contract.
+    if values.get("mynn_sfclay_psih_zolzt", False) is False:
+        values.pop("mynn_sfclay_psih_zolzt", None)
+    # The opt-in Noah soil-moisture floor booking: absent while off.
+    if values.get("noah_smc_floor_booking", False) is False:
+        values.pop("noah_smc_floor_booking", None)
+    # The opt-in resolved obstacles (woof.core.obstacles): every key at its
+    # default is what every earlier header ran, so each is echoed only when
+    # it differs; obstacle_opt = 1 always echoes with its file.
+    from woof.config import OBSTACLE_RUN_DEFAULTS
+    for key, default in OBSTACLE_RUN_DEFAULTS.items():
+        if values.get(key, default) == default:
+            values.pop(key, None)
     # The opt-in TSI forcing (woof.spacewx): off is what every earlier
     # header ran, so its keys are omitted there and echoed only when on.
     if values.get("solar_tsi_opt", 0) == 0:
@@ -3453,14 +3566,44 @@ def _drop_default_off_run_keys(values: dict) -> None:
                               ("solar_tsi_mode", "absolute")):
             if values.get(name, default) == default:
                 values.pop(name, None)
+    # The opt-in ionosphere history (woof.spacewx), the same contract.
+    if values.get("spacewx_ionosphere_opt", 0) == 0:
+        for name, default in (("spacewx_ionosphere_opt", 0), ("spacewx_f107_source", ""),
+                              ("spacewx_f107_mode", "81day"),
+                              ("spacewx_ionosphere_maps", "ccir")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    if values.get("spacewx_aurora_opt", 0) == 0:
+        for name, default in (("spacewx_aurora_opt", 0), ("spacewx_kp_source", "")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    # The opt-in solar spectral variability (woof.spacewx), the same contract.
+    if values.get("solar_ssi_opt", 0) == 0:
+        for name, default in (("solar_ssi_opt", 0), ("solar_ssi_source", "")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
+    # The opt-in solar-proton chemistry source (woof.spacewx.epp_chem): the
+    # same contract as the TSI forcing, absent while off.
+    if values.get("spacewx_epp_opt", 0) == 0:
+        for name, default in (("spacewx_epp_opt", 0), ("spacewx_epp_source", "")):
+            if values.get(name, default) == default:
+                values.pop(name, None)
     if values.get("bl_mynn_cloud_tendency_form", "wrf_461") == "wrf_461":
         values.pop("bl_mynn_cloud_tendency_form", None)
     # WRF's cycling flag: omitted at its .false. default.
     if values.get("cycling", False) is False:
         values.pop("cycling", None)
+    # The upstream MYNN v6.1 fixes: omitted at their default (off).
+    if values.get("mynn_fixes_v61", False) is False:
+        values.pop("mynn_fixes_v61", None)
     # The MYNN surface-layer generation: wrf_461 is omitted at its default.
     if values.get("mynn_sfclay_variant", "wrf_461") == "wrf_461":
         values.pop("mynn_sfclay_variant", None)
+    # MYNN-SFC (WRF v4.8.0) roughness keys: omitted at their defaults.
+    for name, default in (("sf_mynn_sfcflux_land", 0),
+                          ("sf_mynn_sfcflux_water", 1), ("shalwater_z0", 0)):
+        if values.get(name, default) == default:
+            values.pop(name, None)
     if values.get("urban_ucm_generation", "wrf_471") == "wrf_471":
         values.pop("urban_ucm_generation", None)
     for name in ("urban_treeoption", "urban_ttscheme", "urban_fvg"):
@@ -3468,6 +3611,9 @@ def _drop_default_off_run_keys(values: dict) -> None:
             values.pop(name, None)
     if values.get("urban_table_dir", "") == "":
         values.pop("urban_table_dir", None)
+    # The gridded urban morphology (woof.core.urban_param): absent unset.
+    if values.get("urban_param_file", "") == "":
+        values.pop("urban_param_file", None)
     # The sixth-order filter form and the fork's second factor (unset at
     # the WRF v4.6.1 form), and mp_zero_out with its threshold and array
     # switch (off), are omitted at their defaults: every earlier header
@@ -3656,7 +3802,8 @@ def _configuration_digest_values(config: Mapping) -> dict:
 #: :func:`_configuration_digest_values`.
 _URBAN_DIGEST_FIELDS = ("sf_urban_physics", "use_wudapt_lcz", "num_urban_hi",
                         "urban_water_balance",
-                        "urban_ucm_generation", "urban_treeoption", "urban_ttscheme", "urban_fvg", "urban_table_dir")
+                        "urban_ucm_generation", "urban_treeoption", "urban_ttscheme", "urban_fvg", "urban_table_dir",
+                        "urban_param_file")
 
 
 def _configuration_fingerprint(cfg) -> str:
@@ -3990,9 +4137,9 @@ def physics_algorithm_identities(cfg) -> dict:
             "shortwave radiation")
     algorithms = {
         "physics_driver": PHYSICS_DRIVER_ALGORITHM_IDENTITY,
-        "microphysics": _scheme_algorithm(
+        "microphysics": microphysics_algorithm_identity(cfg, _scheme_algorithm(
             MICROPHYSICS_ALGORITHM_IDENTITIES, cfg.mp_physics,
-            "microphysics"),
+            "microphysics")),
         "surface_layer": _scheme_algorithm(
             SURFACE_LAYER_ALGORITHM_IDENTITIES, cfg.sf_sfclay_physics,
             "surface layer"),
@@ -4000,7 +4147,10 @@ def physics_algorithm_identities(cfg) -> dict:
             LAND_SURFACE_ALGORITHM_IDENTITIES, cfg.sf_surface_physics,
             "land surface"),
         "pbl": (ysu_algorithm_identity(cfg.ysu_version, strict=ENABLED)
-                if cfg.bl_pbl_physics == 1 else _scheme_algorithm(
+                if cfg.bl_pbl_physics == 1 else _shinhong_algorithm(cfg)
+                if cfg.bl_pbl_physics == 11
+                and getattr(cfg, "shinhong_version", "wrf_461") == "wrf_480"
+                else _scheme_algorithm(
                     PBL_ALGORITHM_IDENTITIES, cfg.bl_pbl_physics, "PBL")),
         "radiation": (lw_algorithm if lw_algorithm == sw_algorithm else
                       f"lw={lw_algorithm};sw={sw_algorithm}"),
@@ -4286,7 +4436,12 @@ def physics_setup_identity(state, cfg) -> dict:
     urban = getattr(driver, "urban", None)
     if urban is not None and (getattr(cfg, "urban_ucm_generation", "wrf_471") == "wrf_480" or getattr(cfg, "urban_table_dir", "")):
         from woof.core.urban_ucm import pack_params
-        identity["urban_parameters"] = _packed_parameters_identity(pack_params(urban.params), label="urban canopy", attribute="urban.params")
+        # ``widths`` (the NUDAPT arm's fallback table widths) joined
+        # UcmParams with urban_param_file; it is read only when a column
+        # carries MH_URB2D > 0, and those bytes are bound by
+        # identity["urban_param"] below, so the pre-existing identity of
+        # every earlier checkpoint is unchanged.
+        identity["urban_parameters"] = _packed_parameters_identity(pack_params(urban.params), label="urban canopy", attribute="urban.params", exclude_fields=("widths",))
         identity["urban_parameters"]["table_sha256"] = urban.params.sha256
     surface = getattr(driver, "surface_analysis", None)
     if cfg.sst_update:
@@ -4304,6 +4459,54 @@ def physics_setup_identity(state, cfg) -> dict:
     parameters = parameter_receipt()
     if parameters is not None:
         identity["physics_params"] = parameters
+    # The opt-in resolved obstacles (woof.core.obstacles): the coefficients
+    # are rebuilt at resume from the woof-buildings.v1 product, so the bytes
+    # of the product the domain loaded are bound here and a resume against
+    # other bytes refuses.  A domain not yet attached (the coefficients
+    # build at its first stage) binds the file it will load.  Off adds no
+    # key, so every earlier checkpoint's setup bytes are unchanged.
+    if int(getattr(cfg, "obstacle_opt", 0) or 0):
+        receipt = getattr(state, "_obstacles_receipt", None)
+        if receipt is not None:
+            digest = receipt.get("product_sha256")
+            if digest is None:
+                raise RestartManifestError(
+                    "the obstacles were attached from a morphology in "
+                    "memory, not obstacle_file; a checkpoint cannot bind "
+                    "the buildings it ran with")
+        else:
+            from woof.file_digest import sha256_file
+            path = Path(cfg.obstacle_file)
+            try:
+                digest = sha256_file(path, block_bytes=1024 * 1024)
+            except OSError as exc:
+                raise RestartManifestError(
+                    f"obstacle_file {str(path)!r} is unreadable; the "
+                    "checkpoint cannot bind the buildings it runs with") \
+                    from exc
+        identity["obstacles"] = {"policy": "porous-immersed-v1",
+                                 "product_sha256": digest}
+    # The gridded urban morphology (woof.core.urban_param): urban_var_init
+    # re-reads urban_param_file at resume before the checkpoint's urban
+    # arrays are restored, so the bytes are bound and a resume against
+    # another file refuses.  Unset adds no key.
+    # The digest is the one taken when the file was loaded (so a file
+    # rewritten mid-run cannot be bound in place of the bytes the state came
+    # from); a domain not yet attached binds the file it will load.
+    if urban is not None and getattr(cfg, "urban_param_file", ""):
+        digest = getattr(urban, "urban_param_sha256", None)
+        if digest is None:
+            from woof.file_digest import sha256_file
+            path = Path(cfg.urban_param_file)
+            try:
+                digest = sha256_file(path, block_bytes=1024 * 1024)
+            except OSError as exc:
+                raise RestartManifestError(
+                    f"urban_param_file {str(path)!r} is unreadable; the "
+                    "checkpoint cannot bind the urban morphology it runs "
+                    "with") from exc
+        identity["urban_param"] = {"policy": "wrf471-real-split-v1",
+                                   "file_sha256": digest}
     return identity
 
 
@@ -5317,6 +5520,9 @@ def _prepare_restart(path, state, cfg, *, run_trackers=None,
     header[HAILCAST_VERSION_HEADER_KEY] = _hail_generation(state, cfg)
     if stochastic_header is not None:
         header["ensemble_stochastic"] = stochastic_header
+    nn_seat = getattr(state, "_nn_column_seat", None)
+    if nn_seat is not None and nn_seat.identity() is not None:
+        header["nn_column_seat"] = nn_seat.identity()
     if forcing_contract:
         header.update({
             "forcing_extension_mode": (PRESERVED_FORCING_PREFIX_MODE if preserved_forcing_prefix
@@ -5634,9 +5840,29 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'bl_mynn_cloud_tendency_form': 'wrf_461',
     'bl_mynn_gsd41_unsquared_qtke': False,
     'gf_deep_rain_evaporation_booking': False,
+    'ysu_surface_heat_exner': False,
+    'woof_quirk_corrections': 'none',
+    'mynn_sfclay_psih_zolzt': False,
+    'noah_smc_floor_booking': False,
+    'obstacle_opt': 0,
+    'obstacle_file': '',
+    'obstacle_solid_fraction': 0.5,
+    'obstacle_relax_factor': 10.0,
+    'obstacle_drag_coefficient': 0.4,
+    'obstacle_wall_z0': 0.01,
     'solar_tsi_opt': 0,
     'solar_tsi_source': '',
     'solar_tsi_mode': 'absolute',
+    'spacewx_ionosphere_opt': 0,
+    'spacewx_f107_source': '',
+    'spacewx_f107_mode': '81day',
+    'spacewx_ionosphere_maps': 'ccir',
+    'spacewx_aurora_opt': 0,
+    'spacewx_kp_source': '',
+    'solar_ssi_opt': 0,
+    'solar_ssi_source': '',
+    'spacewx_epp_opt': 0,
+    'spacewx_epp_source': '',
     'ruc_soilprop': 'wrf_45',
     'rrtmg_cloud_optics_form': 'wrf_461',
     'rrtmg_aer3_type_source': 'rural',
@@ -5647,8 +5873,14 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'write_thompson_mp38table': False,
     'thompson_fork_snow_fall': 'blend',
     'mynn_sfclay_variant': 'wrf_461',
+    'mynn_fixes_v61': False,
     'urban_ucm_generation': 'wrf_471',
+    # NTU/UDM source generations (woof.mp_generations): a header without
+    # the key ran the WRF 4.7.1 transcription.
+    'ntu_version': 'wrf_471',
+    'udm_version': 'wrf_471',
     'urban_table_dir': '',
+    'urban_param_file': '',
     'use_rap_aero_icbc': False,
     'ruc_snow': 'wrf_461',
     'ruc_2m_diagnostic': 'flux',
@@ -5676,6 +5908,11 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'aer_opt': 0,
     'alb_sol': 0,
     'w_crit_cfl': 1.0,
+    # MYNN-SFC (WRF v4.8.0) roughness keys, read only under
+    # mynn_sfclay_variant = 'mynnsfc_b66187f'; omitted at these defaults.
+    'sf_mynn_sfcflux_land': 0,
+    'sf_mynn_sfcflux_water': 1,
+    'shalwater_z0': 0,
 }
 
 
@@ -5719,6 +5956,10 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
     live_config = _mosaic_checkpoint_config(dataclasses.asdict(cfg))
     _drop_default_surface_port_keys(stored_config)
     _drop_default_surface_port_keys(live_config)
+    # The umbrella over the opt-in quirk corrections is never echoed: the
+    # individual keys it resolves into bind on their own (configuration_echo).
+    for values in (stored_config, live_config):
+        values.pop("woof_quirk_corrections", None)
     # Match the writer's scheme scope while preserving active GCE switches.
     from woof.checkpoint_identity import drop_unread_mp_switches
     drop_unread_mp_switches(stored_config)
@@ -5904,7 +6145,8 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             stored = default if stored is absent else stored
             live = default if live is absent else live
         if key == "wtddt":
-            if not any(int(values.get("sf_surface_physics",0))==4 and int(values.get("opt_run",3))==5 for values in (stored_config,live_config)):
+            from woof.core.noahmp_runoff_split import carrier_run as _runoff_carrier_run
+            if not any(int(values.get("sf_surface_physics",0))==4 and _runoff_carrier_run(int(values.get("opt_run",3)),int(values.get("opt_runsub",0) or 0))==5 for values in (stored_config,live_config)):
                 continue
         if key == "noahmp_snow_age":
             if stored_config.get("sf_surface_physics", 0) != 4 and \
@@ -5962,9 +6204,48 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
                 continue
             stored = "wrf_461" if stored is absent else stored
             live = "wrf_461" if live is absent else live
+        if key == "shinhong_version":
+            # A header without the selector ran the 4.6.1/4.7.1 kernel.
+            if stored_config.get("bl_pbl_physics", 0) != 11 and live_config.get("bl_pbl_physics", 0) != 11:
+                continue
+            stored = "wrf_461" if stored is absent else stored
+            live = "wrf_461" if live is absent else live
+        if key in ("shinhong_nonlocal_flux", "shinhong_scu_mixing",
+                   "shinhong_ke_dissipation"):
+            if stored_config.get("bl_pbl_physics", 0) != 11 and live_config.get("bl_pbl_physics", 0) != 11:
+                continue
+            default = key == "shinhong_nonlocal_flux"
+            stored = default if stored is absent else stored
+            live = default if live is absent else live
+        if key == "cu_gf_version":
+            # cu_physics=3's generation, read only by cu_physics=3. A header
+            # without the selector ran GFDRV, and the echo drops wrf_461.
+            if stored_config.get("cu_physics", 0) != 3 and live_config.get("cu_physics", 0) != 3:
+                continue
+            stored = "wrf_461" if stored is absent else stored
+            live = "wrf_461" if live is absent else live
+        if key in ("gwdo_version", "gwd_dx_factor", "gwd_if_nonhyd"):
+            # gwd_opt = 1's generation and its WRF 4.8.0 keys (WRF-480 L08),
+            # read only under gwd_opt = 1. A header without them ran the
+            # WRF 4.7.1 scheme at the Registry defaults.
+            if (int(stored_config.get("gwd_opt", 0) or 0) != 1
+                    and int(live_config.get("gwd_opt", 0) or 0) != 1):
+                continue
+            default = {"gwdo_version": "wrf_471", "gwd_dx_factor": 2.0,
+                       "gwd_if_nonhyd": True}[key]
+            stored = default if stored is absent else stored
+            live = default if live is absent else live
         if key == "solar_generation":
             stored = "wrf_461" if stored is absent else stored
             live = "wrf_480" if live is absent else live
+        if key in ("tempo_version", "tempo_hailhyperaware"):
+            # Read by TEMPO alone; a header without the generation ran v3.0.3,
+            # whose hail switch does not exist (absent = the default True).
+            if stored_config.get("mp_physics", 0) != 900 and live_config.get("mp_physics", 0) != 900:
+                continue
+            absent_value = "v3.0.3" if key == "tempo_version" else True
+            stored = absent_value if stored is absent else stored
+            live = absent_value if live is absent else live
         if key in ("urban_treeoption", "urban_ttscheme", "urban_fvg"):
             stored = -1 if stored is absent else stored
             live = -1 if live is absent else live
@@ -6200,11 +6481,38 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "terrain_clock": "measured",
                           "solar_generation": "wrf_461",
                           "ysu_version": "wrf_461",
+                          "gwdo_version": "wrf_471",
+                          "shinhong_version": "wrf_461",
+                          "shinhong_nonlocal_flux": True,
+                          "shinhong_scu_mixing": False,
+                          "shinhong_ke_dissipation": False,
+                          "cu_gf_version": "wrf_461",
+                          "tempo_version": "v3.0.3",
+                          "tempo_hailhyperaware": True,
                           "noahmp_snow_age": "wrf_461",
+                          "noahmp_snow_tinit": 1,
                           "urban_water_balance": "wrf_471",
                           "gf_deep_rain_evaporation_booking": False,
+                          "ysu_surface_heat_exner": False,
+                          "woof_quirk_corrections": "none",
+                          "mynn_sfclay_psih_zolzt": False,
+                          "noah_smc_floor_booking": False,
+                          "obstacle_opt": 0, "obstacle_file": "",
+                          "obstacle_solid_fraction": 0.5,
+                          "obstacle_relax_factor": 10.0,
+                          "obstacle_drag_coefficient": 0.4,
+                          "obstacle_wall_z0": 0.01,
                           "solar_tsi_opt": 0, "solar_tsi_source": "",
                           "solar_tsi_mode": "absolute",
+                          "spacewx_ionosphere_opt": 0, "spacewx_f107_source": "",
+                          "spacewx_f107_mode": "81day",
+                          "spacewx_ionosphere_maps": "ccir",
+                          "spacewx_aurora_opt": 0, "spacewx_kp_source": "",
+                          "solar_ssi_opt": 0, "solar_ssi_source": "",
+                          "spacewx_epp_opt": 0, "spacewx_epp_source": "",
+                          "urban_param_file": "",
+                          "ntu_version": "wrf_471",
+                          "udm_version": "wrf_471",
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without
                           # the key ran the exact arithmetic.
@@ -6364,6 +6672,13 @@ def _require_physics_setup_match(header: dict, state, cfg, path) -> None:
             f"restart file {path} physics setup schema "
             f"{stored.get('schema_version')!r} is not supported by this "
             f"build (expected {PHYSICS_SETUP_SCHEMA_VERSION})")
+    # A resumed obstacle domain attaches at its first stage, after this
+    # check: pin the product the checkpoint bound, so the attach refuses a
+    # file replaced in between (woof.core.obstacles.attach).
+    pinned = stored.get("obstacles")
+    if (isinstance(pinned, Mapping)
+            and getattr(state, "_obstacles", False) is False):
+        state._obstacles_expected_sha256 = pinned.get("product_sha256")
     try:
         live = physics_setup_identity(state, cfg)
         # Serialisability is part of the contract, and the comparison
@@ -6400,6 +6715,18 @@ def _require_physics_setup_match(header: dict, state, cfg, path) -> None:
         stored_cmp = dict(stored)
         stored_cmp["configuration_sha256"] = _configuration_fingerprint(
             rebuilt)
+    if stored_cmp != live and stored == live:
+        # The live identity equals what the WRITING build stored, every
+        # component and the configuration hash under that build's own
+        # rules: the same model, whatever the header rebuild says.  Named
+        # breakage: a gpuwm 2.9.13 TEMPO checkpoint resumed under its own
+        # configuration (generation kept by woof.core.tempo
+        # adopt_checkpoint_generation) was refused as "configuration_sha256
+        # differs" because the rebuilt RunConfig fills the sea-ice keys and
+        # the acoustic step count where the writer's digest had none,
+        # although the live configuration hashed to the stored value
+        # exactly (370e2dfb... both sides).
+        return
 
     stored_run = (header.get("config") or {}) if isinstance(header.get("config"), Mapping) else {}
     if (stored_cmp != live and stored_run.get("sf_ocean_physics", 0) in (0, None)
@@ -9272,6 +9599,42 @@ def _validate_ensemble_stochastic_checkpoint(header, stored, state):
         raise RestartMismatchError(f"stochastic checkpoint is incompatible: {error}") from error
 
 
+def _validate_nn_column_checkpoint(header) -> None:
+    """An applying --nn seat's identity against the launch's.
+
+    Read from the launch (WOOF_NN_CONFIG), not from an attached seat: a
+    route may restore before it attaches.  A trajectory that applied a
+    column model resumes only under the same artefact and settings, and
+    one that did not resumes only without one; a tap changes nothing and
+    binds nothing."""
+    stored = header.get("nn_column_seat")
+    from os import environ
+    live = None
+    if environ.get("WOOF_NN_CONFIG"):
+        from woof.nn.launch import read_settings
+        settings = read_settings(environ["WOOF_NN_CONFIG"])
+        if settings.applies:
+            from woof.nn.manifest import load_manifest
+            live = {**settings.identity(), "model": load_manifest(settings.model).identity()}
+    if stored is None and live is None:
+        return
+    if stored is None:
+        raise RestartMismatchError(
+            "this checkpoint was written without a neural-network column model, and the launch "
+            f"applies one ({live['mode']} of {live['scheme']} by {live['model']['name']}); resuming "
+            "would splice two trajectories. Resume without --nn, or with mode = \"tap\"")
+    if live is None:
+        raise RestartMismatchError(
+            f"this checkpoint was written by a run that applied a neural-network column model "
+            f"({stored.get('mode')} of {stored.get('scheme')} by {stored.get('model', {}).get('name')}); "
+            "resume it with the same --nn file")
+    if stored != live:
+        changed = sorted(k for k in set(stored) | set(live) if stored.get(k) != live.get(k))
+        raise RestartMismatchError(
+            f"this checkpoint's neural-network column model differs from the launch's in {changed}; "
+            "resume it with the artefact and settings that wrote it")
+
+
 def validate_strict_mass_cold(header) -> bool:
     """Validate the optional first-acoustic-step marker before any restore."""
     value = header.get("wrf_mass_carriers_cold", False)
@@ -9343,6 +9706,7 @@ def _validate_restart(path, state, cfg, *,
     if "native_wrf_moisture" in header and header["native_wrf_moisture"] is not True:
         raise RestartMismatchError("malformed native WRF signed-moisture provenance")
     _validate_ensemble_stochastic_checkpoint(header, stored, state)
+    _validate_nn_column_checkpoint(header)
     from woof.core.trajectory_contract import validate_checkpoint as _validate_trajectory_checkpoint
     _validate_trajectory_checkpoint(header, stored, cfg)
     try:

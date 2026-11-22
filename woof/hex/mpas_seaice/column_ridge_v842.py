@@ -18,7 +18,10 @@ lost with the ridging ice, and everything ``cleanup_itd`` carries
 
 What it refuses, by name: what the ITD thermodynamics port refuses (the
 zero-layer thermodynamics, the aerosols, more than ``ITD_MAXCAT``
-categories, and the biogeochemistry).
+categories, the biogeochemistry but the brine height and the vertical
+salinity, inert or solved under ``zsal_solve``, whose salt the cleanup's
+``zap_small_areas`` puts into ``zSalinityFlux``). The
+brine fraction is a volume tracer: new ridges take the ridging ice's.
 
 v8.4.2's quirks are kept: ``ridge_prep``'s ``hin_max(ncat) = 1e8`` lands in
 ``categoryThicknessLimits``; ``fractionNewRidgeArea`` and
@@ -43,7 +46,7 @@ from importlib.resources import files
 import numpy as np
 
 from woof.hex import numerics as _hex_numerics
-from woof.hex.errors import MpasPortError
+from woof.hex.errors import ConfigurationRefusal, MpasPortError
 
 from . import column_itd_v842 as citd
 from . import column_v842 as cv
@@ -123,6 +126,7 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
     of the cells' warnings this port grades, in log order: ridge_ice's
     ``Repeat ridging`` lines and zap_snow_temperature's out-of-bounds lines.
     Needs ``init_column_itd`` to have run (the thickness limits)."""
+    check_config(configs)
     import cupy as cp
 
     d = state.dims
@@ -153,6 +157,8 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
     newly = cv._need_int(pools["biogeochemistry"], "newlyFormedIce", cc)
     tracer_fields = [cv._tracer_field(pools, name)[0] for name, _, _ in to.layout]
     written = [area, volume, snow, newly, *cell_fields, *category_fields, *tracer_fields]
+    zsal_args = citd._zsal_args(pools, configs, d, written, grids=False)
+    ztr_args = citd._ztr_args(pools, configs, state, written, itd=False)
     before = [a[:n_solve].copy() for a in written]
 
     trcrn = cp.zeros((max(n_solve, 1), ncat, nt), np.float64)
@@ -162,7 +168,7 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
                    np.int32(layers), np.int32(sub), np.int32(src.shape[2]), np.int32(nt), np.int32(ncat),
                    np.int32(n_solve))
     atrcrn = cp.zeros_like(trcrn)
-    tidx = cp.asarray(np.array([to.index[k] - 1 for k in citd._TRACER_INDICES] + [to.nt_fbri - 1], np.int32))
+    tidx = cp.asarray(citd.tracer_indices(to))
     status, nwarn, nrepeat = (cp.zeros(max(n_solve, 1), np.int32) for _ in range(3))
     ints = cv._CICE_INT
     partic = ints["config_ridging_participation_function"][configs["config_ridging_participation_function"]]
@@ -174,7 +180,7 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
         cp.asarray(to.parent_index), cp.asarray(np.ascontiguousarray(to.first_ancestor_mask)),
         cp.asarray(to.ancestor_number), cp.asarray(np.ascontiguousarray(to.ancestor_indices)), limits, trcrn,
         atrcrn, area, volume, snow, cell_fields[0], cell_fields[1], need(rg, "ridgeConvergence", c1),
-        need(rg, "ridgeShear", c1), *cell_fields[2:], *category_fields, newly,
+        need(rg, "ridgeShear", c1), *cell_fields[2:], *category_fields, newly, *zsal_args, *ztr_args,
     )
     if n_solve:
         _function("seaice_column_ridging_v842", nil)(_grid(n_solve), (_BLOCK,), args)
@@ -203,3 +209,67 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
     if int(codes[last]) in RUNTIME_ERRORS:
         raise FortranRuntimeError(RUNTIME_ERRORS[int(codes[last])], cell)
     return SEAICE_ERROR_COL_RIDGING, cell, "column_ridging: " + STOP_LABELS[int(codes[last])]
+
+
+#: the names v8.4.2's column package maps to colpkg's integers (anything else
+#: aborts ``seaice_column_init`` there); the ridging kernels and
+#: ``colpkg_ice_strength``'s carry exactly these
+NAMED_OPTIONS = ("config_ice_strength_formulation", "config_ridging_participation_function",
+                 "config_ridging_redistribution_function")
+
+
+def check_config(configs: dict) -> None:
+    """Refuse, by name and before any pool is touched, a strength formulation
+    or a ridging participation or redistribution function that is missing or
+    not one v8.4.2 names."""
+    for knob in NAMED_OPTIONS:
+        names = cv._CICE_INT[knob]
+        value = configs.get(knob)
+        if value not in names:
+            raise ConfigurationRefusal(
+                knob=knob, value=value, reason=f"v8.4.2's column package names only {sorted(names)}",
+                declaration=" or ".join(f"{knob} = '{name}'" for name in names))
+
+
+def ice_strength(pools: dict, configs: dict, n_ice_layers: int) -> None:
+    """``ice_strength`` under the column package's vertical thermodynamics,
+    in place (``mpas_seaice_velocity_solver.F:1359-1379``): ``icePressure``
+    of the owned cells zeroed, then, where ``solveStress`` is 1,
+    ``colpkg_ice_strength``'s (``config_ice_strength_formulation``:
+    ``Rothrock75``, the Registry default, from ``ridge_itd``'s participation
+    and ridges with ``config_ridging_participation_function``,
+    ``config_ridging_redistribution_function`` and
+    ``config_ridiging_efolding_scale``; or ``Hibler79``). Its ``Cf`` is the
+    column constants' 17, as v8.4.2 does not read
+    ``config_ratio_ridging_work_to_PE``. RKIND 8 only."""
+    check_config(configs)
+    ints = cv._CICE_INT
+    strength = configs["config_ice_strength_formulation"]
+    solver, aggregate = pools["velocity_solver"], pools["tracers_aggregate"]
+    pressure = solver["icePressure"]
+    n_cells = pressure.shape[0]
+    area, volume = pools["tracers"]["iceAreaCategory"], pools["tracers"]["iceVolumeCategory"]
+    ncat = area.shape[1]
+    n_solve = int(pools["mesh"]["nCellsSolve"])
+    if not 0 <= n_solve <= n_cells:
+        raise ValueError("nCellsSolve must lie within nCells")
+    if ncat > citd.ITD_MAXCAT:
+        raise ValueError(f"colpkg_ice_strength here carries at most {citd.ITD_MAXCAT} categories")
+    for name, a, shape in (("icePressure", pressure, (n_cells,)),
+                           ("iceAreaCell", aggregate["iceAreaCell"], (n_cells,)),
+                           ("iceVolumeCell", aggregate["iceVolumeCell"], (n_cells,)),
+                           ("openWaterArea", pools["icestate"]["openWaterArea"], (n_cells,))):
+        cv._need({name: a}, name, shape)
+    for name, a in (("iceAreaCategory", area), ("iceVolumeCategory", volume)):
+        if a.size != n_cells * ncat:
+            raise ValueError(f"{name} must hold nCategories values per cell")
+        cv._need({name: a.reshape(n_cells, ncat)}, name, (n_cells, ncat))
+    cv._need_int({"solveStress": solver["solveStress"]}, "solveStress", (n_cells,))
+    partic = ints["config_ridging_participation_function"][configs["config_ridging_participation_function"]]
+    redist = ints["config_ridging_redistribution_function"][configs["config_ridging_redistribution_function"]]
+    if n_solve:
+        _function("seaice_column_ice_strength_v842", n_ice_layers)(_grid(n_solve), (_BLOCK,), (
+            pressure, solver["solveStress"], aggregate["iceAreaCell"], aggregate["iceVolumeCell"],
+            pools["icestate"]["openWaterArea"], area, volume, np.int32(ncat),
+            np.int32(ints["config_ice_strength_formulation"][strength]), np.int32(partic), np.int32(redist),
+            np.float64(configs["config_ridiging_efolding_scale"]), np.int32(n_solve)))

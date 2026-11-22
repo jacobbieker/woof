@@ -86,11 +86,11 @@ def test_a_restart_continues_the_remapped_run_bitwise(tmp_path, precision):
     fixture = sr.load_fixture(precision)[case["name"]]
     config = case["config"]
     dev = sr.device_pools(case, fixture)
-    clock = ts.initialize(pools=dev, configs=config, remap_geometry="input")
+    clock = ts.initialize(pools=dev, configs=config, remap_geometry="input", basis="input")
     next_step = ts.advance(pools=dev, configs=config, clock=clock, n_steps=1)
     dev["diagnostics"]["oracle_next_step"] = next_step
     ts.write_restart(tmp_path / "restart.npz", pools=dev, clock=clock)
-    pools, clock = ts.read_restart(tmp_path / "restart.npz", like=dev)
+    pools, clock = ts.read_restart(tmp_path / "restart.npz", like=dev, configs=case["config"])
     del dev
     ts.advance(pools=pools, configs=config, clock=clock, n_steps=int(config["oracle_n_steps"]) - 1,
                first_step=int(pools["diagnostics"]["oracle_next_step"]))

@@ -6,14 +6,21 @@ active tracers on one block, in the Fortran's order:
 1. the thickness flux ``normalTransportVelocity * layerThicknessEdge``;
 2. the tendency and surface flux zeroed, then the bulk forcing
    (``ocn_surface_bulk_forcing_active_tracers``, with the bulk thickness flux
-   and ``ocn_freezing_temperature`` when ``config_use_bulk_thickness_flux``);
+   and ``ocn_freezing_temperature`` when ``config_use_bulk_thickness_flux``)
+   and the land-ice heat flux ('standalone', 'coupled';
+   :func:`~woof.hex.mpas_ocean.land_ice_v842.tracers_tend`);
 3. advection (:mod:`~woof.hex.mpas_ocean.tracer_advection_v842`) and
-   horizontal mixing (:mod:`~woof.hex.mpas_ocean.tracer_hmix_v842`);
+   horizontal mixing (:mod:`~woof.hex.mpas_ocean.tracer_hmix_v842`, with
+   Redi's isoneutral mixing under ``config_use_standardGM`` on the slopes
+   GM left in the diagnostics);
 4. the surface flux into the column (``ocn_tracer_surface_flux_tend``, with
    the runoff flux);
 5. Jerlov short-wave absorption (``config_sw_absorption_type`` 'jerlov') or
    none;
-6. the active-tracer budgets (``config_compute_active_tracer_budgets``).
+6. the active-tracer budgets (``config_compute_active_tracer_budgets``);
+7. frazil (``ocn_frazil_forcing_tracers``,
+   :func:`~woof.hex.mpas_ocean.frazil_v842.active_tracers_tend`) under
+   ``config_use_frazil_ice_formation``.
 
 The kernels (``tend_tracer_v842.cu`` and those of the modules above) are held
 word for word to the v8.4.2 routines, ``mpas_ocn_tendency.F`` compiled
@@ -28,8 +35,7 @@ integers, a field whose package is off is ``None``.
 
 Refused by name, as not ported: KPP's non-local flux (``config_use_cvmix_kpp``),
 surface and interior restoring, exponential decay, ideal age and TTD for the
-active tracers, the ohlmann00 short-wave absorption, land-ice fluxes and
-frazil (their routines return at once when off), and every other tracer group
+active tracers, the ohlmann00 short-wave absorption, and every other tracer group
 (this port carries ``activeTracers``). Short-wave absorption without the bulk
 forcing raises, as v8.4.2's init aborts.
 """
@@ -43,7 +49,7 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import eos_v842, tracer_advection_v842, tracer_hmix_v842
+from . import eos_v842, frazil_v842, land_ice_v842, tracer_advection_v842, tracer_hmix_v842
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
 
 SOURCE_FILES = (
@@ -110,13 +116,7 @@ def check_config(configs: dict, groups=("activeTracers",)) -> None:
         knob = f"config_use_activeTracers_{switch}"
         if configs.get(knob, False):
             _refuse(knob, True, "not ported", f"{knob} = .false.")
-    mode = configs.get("config_land_ice_flux_mode", "off")
-    if mode in ("standalone", "coupled"):
-        _refuse("config_land_ice_flux_mode", mode, "the land-ice tracer fluxes are not ported",
-                "config_land_ice_flux_mode = 'off' | 'pressure_only'")
-    if configs.get("config_use_frazil_ice_formation", False):
-        _refuse("config_use_frazil_ice_formation", True, "frazil is not ported",
-                "config_use_frazil_ice_formation = .false.")
+    land_ice_v842.check_config(configs)
     sw = configs.get("config_sw_absorption_type", "none")
     if sw not in ("none", "jerlov"):
         _refuse("config_sw_absorption_type", sw,
@@ -181,12 +181,13 @@ def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_te
             i32(cells[2]), i32(nl), i32(nt), i32(it), i32(isal),
             i32(bool(configs.get("config_use_bulk_thickness_flux", False))), real(dt), hflux, real(1.0), rho_sw,
             *freeze))
+    land_ice_v842.tracers_tend(forcing=f, tracers_surface_flux=flux, n_cells=n_cells, configs=configs)
     tracer_advection_v842.tracer_advection_tend(
         tracers=group, normal_thickness_flux=thickness_flux, w=d["vertAleTransportTop"], layer_thickness=h, dt=dt,
         mesh=mesh, tend=tend, configs=configs, horizontal_budget=d.get("activeTracerHorizontalAdvectionTendency"),
         vertical_budget=d.get("activeTracerVerticalAdvectionTendency"))
     tracer_hmix_v842.tracer_hmix_tend(tracers=group, layer_thickness_edge=d["layerThicknessEdge"], mesh=mesh,
-                                      tend=tend, configs=configs)
+                                      tend=tend, configs=configs, diagnostics=d)
     if budgets:
         d["activeTracerSurfaceFluxTendency"][:n_cells] = tend[:n_cells]
     if not configs.get("config_disable_tr_sflux", False):
@@ -207,3 +208,5 @@ def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_te
     if budgets:
         sw = d["temperatureShortWaveTendency"]
         sw[:n_cells] = tend[:n_cells, :, it - 1] - sw[:n_cells]
+    frazil_v842.active_tracers_tend(mesh=mesh, forcing=f, tend=tend, index_temperature=it, index_salinity=isal,
+                                    configs=configs)

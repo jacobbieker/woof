@@ -23,8 +23,9 @@
 // Appended to column_v842.cu and column_itd_v842.cu (the rounding macros,
 // constants, the tracer layout, colpkg_compute_tracers and cleanup_itd).
 // l_conservation_check is .false. (no conservation checks); the aerosols,
-// the biogeochemistry and the zero-layer thermodynamics are refused by the
-// host (column_ridge_v842.py), so tr_aero and tr_brine are .false. exp is
+// the biogeochemistry but the brine height and the zero-layer thermodynamics
+// are refused by the host (column_ridge_v842.py), so tr_aero is .false.; the
+// brine fraction is a volume tracer ridge_shift scales new ridges by. exp is
 // glibc_exp (glibc_flt64.cuh, the MIT transcription of glibc's binary64 exp);
 // gfortran folds c1/(c1 - exp(-astari)), whose exp(-20) every correctly
 // rounded exp gives. Fortran's MIN and MAX are gfortran's comparisons
@@ -142,7 +143,7 @@ __device__ void rdg_ridge_itd(int ncat, double aice0, const double *aicen, const
     }
 }
 
-// ice_mechred.F90:1027-1535 ridge_shift (no aerosols, no brine). Returns the
+// ice_mechred.F90:1027-1535 ridge_shift (no aerosols). Returns the
 // abort code. aredistn and vredistn are written only for the thinnest
 // category's ridges under the exponential redistribution, as v8.4.2 does.
 __device__ int rdg_ridge_shift(const ItdTracers &T, double dt, int ncat, const double *hin_max, double *aicen,
@@ -407,7 +408,8 @@ extern "C" __global__ void seaice_column_ridging_v842(
     double *oceanHeatFlux, double *ridgeParticipationFunction, double *ratioRidgeThicknessToIce,
     double *fractionNewRidgeArea, double *fractionNewRidgeVolume, double *areaLossRidgeCategory,
     double *areaGainRidgeCategory, double *iceVolumeRidgedCategory, double *raftingIceArea,
-    double *raftingIceVolume, int *newlyFormedIce)
+    double *raftingIceVolume, int *newlyFormedIce, int nblyr, double *zSalinityFlux, int nbio, int bio0, int nzbgc,
+    double *oceanBioFluxes)
 {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= nCellsSolve) return;
@@ -418,6 +420,18 @@ extern "C" __global__ void seaice_column_ridging_v842(
     T.nstrata = n_trcr_strata;
     T.strata = nt_strata;
     for (int i = 0; i < TI_COUNT; ++i) T.idx[i] = tidx[i];
+    // solve_zsal: cleanup_itd's zap_small_areas adds the zapped vertical salinity to fzsal
+    T.zsal = (flags & ITD_SOLVE_ZSAL) != 0;
+    T.nblyr = nblyr;
+    T.bgrid = categoryThicknessLimits;   // not read: only add_new_ice_bgc remaps (no grids here)
+    T.cgrid = categoryThicknessLimits;
+    // the vertical tracer: cleanup_itd's zapped ice and snow into oceanBioFluxes (MPAS passes it)
+    T.nbio = nbio;
+    T.bio = bio0;
+    T.igrid = categoryThicknessLimits;   // not read
+    T.init_frac = 0.0;
+    T.ocean_bio = 0.0;
+    T.flux_bio = oceanBioFluxes + (nbio ? (size_t)c * nzbgc : 0);
 
     double aicen[ITD_MAXCAT], vicen[ITD_MAXCAT], vsnon[ITD_MAXCAT], hin_max[ITD_MAXCAT + 1];
     int first_ice[ITD_MAXCAT];
@@ -433,6 +447,7 @@ extern "C" __global__ void seaice_column_ridging_v842(
     double aice0 = openWaterArea[c], aice = iceAreaCell[c];
     double fpond = pondFreshWaterFlux[c], fresh = oceanFreshWaterFlux[c], fsalt = oceanSaltFlux[c];
     double fhocn = oceanHeatFlux[c];
+    double fzsal = T.zsal ? zSalinityFlux[c] : 0.0;
     double dardg1dt = areaLossRidge[c], dardg2dt = areaGainRidge[c], dvirdgdt = iceVolumeRidged[c];
     double opening = openingRateRidge[c];
     int warnings = 0, repeats = 0;
@@ -448,7 +463,7 @@ extern "C" __global__ void seaice_column_ridging_v842(
     if (code == RDG_OK) {
         double dtt = M(dt, (double)ndtd);
         if (itd_cleanup_itd(T, dtt, ncat, hin_max, aicen, trcrn, vicen, vsnon, &aice0, &aice, flags, first_ice,
-                            &fpond, &fresh, &fsalt, &fhocn, atrcrn, &warnings))
+                            &fpond, &fresh, &fsalt, &fhocn, atrcrn, &warnings, &fzsal))
             code = RDG_CLEANUP;
     }
 
@@ -464,6 +479,7 @@ extern "C" __global__ void seaice_column_ridging_v842(
     oceanFreshWaterFlux[c] = fresh;
     oceanSaltFlux[c] = fsalt;
     oceanHeatFlux[c] = fhocn;
+    if (T.zsal) zSalinityFlux[c] = fzsal;
     areaLossRidge[c] = dardg1dt;
     areaGainRidge[c] = dardg2dt;
     iceVolumeRidged[c] = dvirdgdt;
@@ -471,4 +487,62 @@ extern "C" __global__ void seaice_column_ridging_v842(
     status[c] = code;
     nwarn[c] = warnings;
     nrepeat[c] = repeats;
+}
+
+// ice_strength's column branch (mpas_seaice_velocity_solver.F:1359-1379)
+// with colpkg_ice_strength (ice_colpkg.F90:3298-3410), one owned cell per
+// thread: icePressure is zeroed, then, where the stress is solved, the
+// strength of Rothrock (1975) (kstrength = 1: ridge_itd's participation and
+// ridges, the potential-energy change per category, Cf*Cp/aksum) or of
+// Hibler (1979) (kstrength = 0). Cf and Cp are the column constants'
+// (ice_constants_colpkg), not config_ratio_ridging_work_to_PE, which v8.4.2
+// does not read. asum_ridging's sum is computed and unused, as in v8.4.2.
+extern "C" __global__ void seaice_column_ice_strength_v842(
+    double *icePressure, const int *solveStress, const double *iceAreaCell, const double *iceVolumeCell,
+    const double *openWaterArea, const double *iceAreaCategory, const double *iceVolumeCategory, int ncat,
+    int kstrength, int krdg_partic, int krdg_redist, double mu_rdg, int nCellsSolve)
+{
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= nCellsSolve) return;
+    icePressure[c] = 0.0;
+    if (solveStress[c] != 1) return;
+    const double *aicen = iceAreaCategory + c * ncat;
+    const double *vicen = iceVolumeCategory + c * ncat;
+    double strength = 0.0;
+    if (kstrength == 1) {
+        double aksum;
+        double apartic[ITD_MAXCAT + 1], hrmin[ITD_MAXCAT], hrmax[ITD_MAXCAT], hrexp[ITD_MAXCAT], krdg[ITD_MAXCAT];
+        double aparticn[ITD_MAXCAT], krdgn[ITD_MAXCAT], mraft[ITD_MAXCAT];
+        (void)rdg_asum(ncat, aicen, openWaterArea[c]);
+        rdg_ridge_itd(ncat, openWaterArea[c], aicen, vicen, krdg_partic, krdg_redist, mu_rdg, &aksum, apartic,
+                      hrmin, hrmax, hrexp, krdg, aparticn, krdgn, mraft);
+        const double p333 = D(1.0, 3.0);
+        for (int n = 1; n <= ncat; ++n) {
+            if (aicen[n - 1] > PUNY && apartic[n] > 0.0) {
+                double hi = D(vicen[n - 1], aicen[n - 1]);
+                double h2rdg;
+                if (krdg_redist == 0) {
+                    // x**3 is __powidf2's x*(x*x)
+                    double xmax = hrmax[n - 1], xmin = hrmin[n - 1];
+                    h2rdg = D(M(p333, S(M(xmax, M(xmax, xmax)), M(xmin, M(xmin, xmin)))), S(xmax, xmin));
+                } else if (krdg_redist == 1) {
+                    h2rdg = A(A(M(hrmin[n - 1], hrmin[n - 1]), M(M(2.0, hrmin[n - 1]), hrexp[n - 1])),
+                              M(M(2.0, hrexp[n - 1]), hrexp[n - 1]));
+                } else {
+                    // unreachable: column_ridge_v842.check_config refuses any other
+                    // config_ridging_redistribution_function before the launch
+                    continue;
+                }
+                double dh2rdg = A(-M(hi, hi), D(h2rdg, krdg[n - 1]));
+                strength = A(strength, M(apartic[n], dh2rdg));
+            }
+        }
+        // Cp = 0.5*gravit*(rhow-rhoi)*rhoi/rhow; Cf*Cp folded
+        const double cp_pe = D(M(M(M(0.5, 9.80616), S(RHOW, RHOI)), RHOI), RHOW);
+        strength = D(M(M(17.0, cp_pe), strength), aksum);
+    } else {
+        // Pstar*vice*exp(-Cstar*(c1-aice))
+        strength = M(M(2.75e4, iceVolumeCell[c]), glibc_exp(-M(20.0, S(1.0, iceAreaCell[c]))));
+    }
+    icePressure[c] = strength;
 }

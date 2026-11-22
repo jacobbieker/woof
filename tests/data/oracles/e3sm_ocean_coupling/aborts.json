@@ -1,0 +1,9 @@
+{
+ "abort_glc_nzoc": "shr_sys_abort: glc_zocnclass_init ERROR: unknown glc_nzoc",
+ "abort_missing_nutrient": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Foxx_rofDSi\" Traceback:",
+ "abort_missing_o2x": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"So_rhoeff\" Traceback:",
+ "abort_missing_tf3d": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"So_tf3d_mask03\" Traceback:",
+ "abort_missing_wave": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Sw_Charn\" Traceback:",
+ "abort_missing_x2o": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Sg_blit\" Traceback:",
+ "abort_missing_x2o_icemask": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Sg_icemask_floating\" Traceback:"
+}

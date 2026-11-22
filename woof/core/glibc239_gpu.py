@@ -1,12 +1,14 @@
-"""The opt-in glibc 2.39 binary64 ``sin``, ``cos`` and ``atan`` for GPU kernels.
+"""The opt-in glibc 2.39 binary64 ``sin``, ``cos``, ``atan`` and ``asin`` for GPU kernels.
 
-glibc's binary64 ``sin``, ``cos`` and ``atan`` (the IBM Accurate
+glibc's binary64 ``sin``, ``cos``, ``atan`` and ``asin`` (the IBM Accurate
 Mathematical Library) are not correctly rounded, so no permissively licensed
 function gives their words, and their code is LGPL-2.1-or-later. Kernels that
-must equal a gfortran oracle's binary64 ``sin``/``cos``/``atan`` word for
-word (MALI at RKIND 8: the strain-rate angle ``eTheta``, the sphere's
-velocity reconstruction, the SHMIP forcings, 'seroussi' floating melt)
-therefore refuse those configurations by name unless this opt-in is on.
+must equal a gfortran oracle's binary64 ``sin``/``cos``/``atan``/``asin``
+word for word (MALI at RKIND 8: the strain-rate angle ``eTheta``, the
+sphere's velocity reconstruction, the SHMIP forcings, 'seroussi' floating
+melt; MPAS-Seaice's column package: the ccsm3 albedos, ``ice_atmo`` and the
+delta-Eddington shortwave's orbit) therefore refuse those configurations by
+name unless this opt-in is on.
 
 The transcription is ``tools/glibc239_libm_gpu/glibc239_trig_flt64.cuh``, in
 the form of glibc's x86-64 FMA variants. It is not package data: the
@@ -15,7 +17,7 @@ recast-woof and metal-woof wheels and every default build contain none of it
 ``WOOF_GLIBC239_LIBM64_SOURCE`` may name another copy of the header.
 
 It gives glibc 2.39's words (and the oracle host's glibc 2.44 words, which
-come from the same sources) for every ``atan`` argument and every ``sin`` and
+come from the same sources) for every ``atan`` and ``asin`` argument and every ``sin`` and
 ``cos`` argument below 105414350 in magnitude; above that glibc 2.44's build
 of ``branred.c`` rounds some reductions differently
 (``tools/glibc239_libm_gpu/verification.log``).

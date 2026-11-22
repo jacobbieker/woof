@@ -95,7 +95,8 @@ def add_model_parser(
     word: str,
     help_text: str,
     row: dict,
-) -> None:
+) -> argparse._SubParsersAction:
+    """Add the lane's door; returns its subcommands so a lane can add its own."""
     parser = commands.add_parser(word, help=help_text)
     sub = parser.add_subparsers(dest="model_command", required=True)
 
@@ -112,3 +113,4 @@ def add_model_parser(
         help="the oracle gate: grade each ported piece word for word (refused by name while none is ported)",
     )
     verify.set_defaults(handler=_verify(row))
+    return sub

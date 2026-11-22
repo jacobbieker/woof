@@ -45,10 +45,11 @@ EXPECTED_SOURCE_SHA256 = {
     # Re-derived 2026-10-19 after f65ab11c specialized immutable kernel
     # dimensions. The read-only velocity alias checks below still apply.
     SRC / "cuda_driver.py": (
-        "f453eee1152aa33392b09ecfde1d16ee33ec53cf17d754ecd076736088630fea"
+        # Re-derived for the merge of the fork onto WOOF 1.1.7.
+        "ce61c976958713226f7fdf2dbd30a19fecdb80f49b178f856b975ae2e543d5c1"
     ),
     SRC / "cuda_horizontal.py": (
-        "f94137176db65d24df0d9ff1d491c278d6c835bb08cd76dc43c5cfcbf323a345"
+        "97b3ec1656518db03bccfe14c4fbf562dd7a407994ca31c8e2d4462943881b9c"
     ),
     SRC / "cuda_horizontal_v841.py": (
         "1a5fae3d6055a710de7d7ce216dddb9bee7c2e4ee72cf4e6a959e2401dfe0cb7"

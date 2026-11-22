@@ -100,10 +100,9 @@ def test_bad_rows_and_units_are_refused(tmp_path):
         si.read_series(tmp_path / "missing.csv")
 
 
-def test_noaa_cdr_netcdf_layout(tmp_path):
+def _cdr_file(path, first=datetime(2024, 5, 10)):
     netCDF4 = pytest.importorskip("netCDF4")
-    path = tmp_path / "tsi_v03r00_daily_s20240101_e20241231_c20250221.nc"
-    start = (datetime(2024, 5, 10) - datetime(1610, 1, 1)).days
+    start = (first - datetime(1610, 1, 1)).days
     with netCDF4.Dataset(path, "w") as data:
         data.createDimension("time", 3)
         data.createDimension("bounds", 2)
@@ -114,6 +113,11 @@ def test_noaa_cdr_netcdf_layout(tmp_path):
         b[:] = np.stack([start + np.arange(3), start + 1 + np.arange(3)], axis=1)
         v = data.createVariable("TSI", "f4", ("time",))
         v[:] = [1360.5, 1361.5, 1362.5]
+    return path
+
+
+def test_noaa_cdr_netcdf_layout(tmp_path):
+    path = _cdr_file(tmp_path / "tsi_v03r00_daily_s20240101_e20241231_c20250221.nc")
     series = si.read_series(path)
     assert series.at(datetime(2024, 5, 11, 12)) == pytest.approx(1361.5)
     assert series.at(datetime(2024, 5, 11, 0)) == pytest.approx(1361.0)
@@ -121,6 +125,8 @@ def test_noaa_cdr_netcdf_layout(tmp_path):
 
 def test_nrlssi2_fetch_takes_the_newest_listed_year_file_once(tmp_path):
     import io
+    payload = _cdr_file(tmp_path / "served.nc").read_bytes()
+    cache = tmp_path / "cache"
     calls = []
     listing = ('<a href="tsi_v03r00_daily_s20240101_e20241231_c20250101.nc">'
                '<a href="tsi_v03r00_daily_s20240101_e20241231_c20250221.nc">')
@@ -134,18 +140,64 @@ def test_nrlssi2_fetch_takes_the_newest_listed_year_file_once(tmp_path):
 
     def opener(url):
         calls.append(url)
-        return Reply(listing.encode() if url.endswith("/") else b"payload")
+        return Reply(listing.encode() if url.endswith("/") else payload)
 
-    paths = si.fetch_nrlssi2([2024], cache=tmp_path, opener=opener)
+    paths = si.fetch_nrlssi2([2024], cache=cache, opener=opener)
     assert [p.name for p in paths] == ["tsi_v03r00_daily_s20240101_e20241231_c20250221.nc"]
-    assert paths[0].read_bytes() == b"payload"
-    again = si.fetch_nrlssi2([2024], cache=tmp_path, opener=opener)
+    assert paths[0].read_bytes() == payload
+    again = si.fetch_nrlssi2([2024], cache=cache, opener=opener)
     assert again == paths and len(calls) == 2           # cached: no second download
     with pytest.raises(si.SolarForcingError, match="no complete NOAA CDR"):
-        si.fetch_nrlssi2([2031], cache=tmp_path, opener=opener)
+        si.fetch_nrlssi2([2031], cache=cache, opener=opener)
+
+
+def test_a_truncated_nrlssi2_download_is_refused_and_not_installed(tmp_path):
+    import io
+    payload = _cdr_file(tmp_path / "served.nc").read_bytes()
+    cache = tmp_path / "cache"
+    listing = b'<a href="tsi_v03r00_daily_s20240101_e20241231_c20250221.nc">'
+
+    def opener(url):
+        return io.BytesIO(listing if url.endswith("/") else payload[: len(payload) // 3])
+
+    with pytest.raises(si.SolarForcingError, match="does not read"):
+        si.fetch_nrlssi2([2024], cache=cache, opener=opener)
+    assert list(cache.iterdir()) == []                  # nothing cached, no part file left
+
+
+def test_coverage_years_follow_the_noon_means():
+    seen = []
+
+    def fake_fetch(years):
+        seen.append(list(years))
+        raise si.SolarForcingError("stop")
+
+    import unittest.mock as mock
+    with mock.patch.object(si, "fetch_nrlssi2", fake_fetch):
+        for start, end in ((datetime(2024, 12, 31, 6), datetime(2024, 12, 31, 9)),
+                           (datetime(2024, 12, 31, 6), datetime(2024, 12, 31, 18)),
+                           (datetime(2025, 1, 1, 6), datetime(2025, 1, 1, 9)),
+                           (datetime(2025, 1, 1, 13), datetime(2025, 1, 1, 14))):
+            with pytest.raises(si.SolarForcingError):
+                si.load_series("nrlssi2", start, end)
+    # 31 Dec 18 UT needs 1 Jan noon (2025); 1 Jan 06 UT needs 31 Dec noon (2024).
+    assert seen == [[2024], [2024, 2025], [2024, 2025], [2025]]
 
 
 # --- the factor and the scaling -----------------------------------------------------
+
+def test_direct_written_shortwave_fields_follow_the_factor(tmp_path):
+    path = _csv(tmp_path, [("2024-05-10", 1361.0), ("2024-05-11", 1361.0)])
+    cfg = _cfg(solar_tsi_opt=1, solar_tsi_source=str(path), run_seconds=6 * 3600.0)
+    sv = si.SolarVariability.for_run(cfg, datetime(2024, 5, 10, 6))
+    sv.factor(0.0)
+    f = np.float32(1361.0 / 1370.0)
+    for scheme, scaled in ((2, {"rswtoa"}), (99, {"rswtoa", "swdownc"}), (4, set())):
+        fields = {n: np.full((2, 3), 100.0, np.float32) for n in ("rswtoa", "swdownc", "rlwtoa")}
+        sv.scale_direct_fields(fields, scheme)
+        for name, value in fields.items():
+            assert np.all(value == (np.float32(100.0) * f if name in scaled else 100.0)), (scheme, name)
+
 
 def test_modes_and_for_run_check_the_whole_window(tmp_path):
     path = _csv(tmp_path, [("2024-05-10", 1361.0), ("2024-05-11", 1361.0)])

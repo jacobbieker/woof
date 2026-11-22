@@ -438,6 +438,16 @@ REMEDIES = (
      "remedy": "select an implemented ra_lw_physics",
      "before": _suite(ra_lw_physics=0, ra_sw_physics=7),
      "after": _suite(ra_lw_physics=1, ra_sw_physics=7)},
+    {"id": "rrtmgk-runs-only-as-the-pair",
+     "remedy": "it runs only as the pair ra_lw_physics=14, ra_sw_physics=14",
+     "before": _suite(ra_lw_physics=14, ra_sw_physics=4),
+     "after": _suite(ra_lw_physics=14, ra_sw_physics=14)},
+    {"id": "rrtmgk-radiates-the-resolved-cloud-only",
+     "remedy": "Turn the named merge off (icloud_bl=0)",
+     "before": _suite(bl_pbl_physics=5, sf_sfclay_physics=5,
+                      ra_lw_physics=14, ra_sw_physics=14),
+     "after": _suite(bl_pbl_physics=5, sf_sfclay_physics=5,
+                     ra_lw_physics=14, ra_sw_physics=14, icloud_bl=0)},
     {"id": "sms-3dtke-supplies-the-pbl-closure",
      "remedy": "select bl_pbl_physics=0 when km_opt=5 supplies turbulence",
      "before": _suite(km_opt=5),
@@ -700,12 +710,6 @@ REMEDIES = (
                       sf_surface_physics=2),
      "after": _suite(sf_sfclay_physics=89, bl_pbl_physics=0,
                      sf_surface_physics=0)},
-    # RCON-SPEED-01 (woof/config.py): RCON is held at the forecast door
-    # until its speed proof clears; the message names the scheme to run.
-    {"id": "rcon-held-for-its-speed-proof",
-     "remedy": "'select another microphysics scheme, such as mp_physics=28'",
-     "before": _suite(mp_physics=29),
-     "after": _suite(mp_physics=28)},
     # The port's MAD-WRF, UDM and Eta Ferrier schemes: judged RTE+RRTMGP
     # cloud-optics exclusions, followed the legacy-RRTMG way they name.
     {"id": "madwrf-has-no-rte-rrtmgp-cloud-optics",

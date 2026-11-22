@@ -105,7 +105,8 @@ def test_the_seaice_door_verify_grades_every_piece():
                                                     "time_step_incremental_remap_sphere_r8",
                                                     "incremental_remap_checks_r4", "incremental_remap_checks_r8",
                                                     "incremental_remap_init_r4", "incremental_remap_init_r8",
-                                                    "column_init_aggregate_r8", "column_init_thermo_profiles_r8"]
+                                                    "column_init_aggregate_r8", "column_init_thermo_profiles_r8",
+                                                    "column_coupling_prep_r4", "column_coupling_prep_r8"]
 
 
 @requires_gpu

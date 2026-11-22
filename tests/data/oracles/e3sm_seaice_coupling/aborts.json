@@ -1,0 +1,7 @@
+{
+ "abort_missing_aerosol": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Faxa_dstwet4\" Traceback:",
+ "abort_missing_i2x": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Si_u10withgusts\" Traceback:",
+ "abort_missing_ifloe": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Si_ifloe\" Traceback:",
+ "abort_missing_wavespec": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"Sw_wavespec11\" Traceback:",
+ "abort_missing_x2i": "MCT::m_AttrVect::indexRA_:: FATAL--attribute not found: \"So_dhdy\" Traceback:"
+}

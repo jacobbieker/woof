@@ -157,10 +157,9 @@ def test_the_walk_covers_what_it_says_it_covers(receipt) -> None:
 
 
 #: Admitted values held at the forecast door by a named, measured guard.
-#: RCON-SPEED-01 (woof/config.py): mp_physics=29 is ported and schema-legal,
-#: but its whole-forecast microphysics stage costs 1.885x MP28, outside the
-#: 1.2x bar; the entry goes when that guard is retired.
-HELD_AT_THE_DOOR = {"mp_physics=29": "RCON-SPEED-01"}
+#: Empty: RCON-SPEED-01 held mp_physics=29 here until 3.0.2, when it was
+#: retired as a speed defect rather than a breakage (woof/config.py).
+HELD_AT_THE_DOOR: dict[str, str] = {}
 
 
 def test_every_admitted_value_of_every_axis_reaches_an_accepted_run(
@@ -193,8 +192,11 @@ def test_every_admitted_value_of_every_axis_reaches_an_accepted_run(
         axis, number = value.split("=")
         held = walk.attempt({**walk.ANCHORS["ysu-mm5-noah-rrtmgp"],
                              **walk.TIER_A_HELD, axis: int(number)})
-        assert held.verdict == "REFUSED", value
-        assert "speed proof is open" in held.message, (guard, held.message)
+        assert held.verdict == "REFUSED", (guard, value)
+    # RCON, the last held value, runs at the anchor since RCON-SPEED-01 left.
+    rcon = walk.attempt({**walk.ANCHORS["ysu-mm5-noah-rrtmgp"],
+                         **walk.TIER_A_HELD, "mp_physics": 29})
+    assert rcon.verdict == "ACCEPTED", rcon.message
     # Non-vacuous: the value that used to be the exception now runs, and
     # the pairing the old refusal named as unreachable is accepted.
     combination = dict(walk.ANCHORS["ysu-mm5-noah-rrtmgp"], **walk.TIER_A_HELD)
@@ -288,6 +290,18 @@ RADIATION_PAIR_REFUSALS = {
     (0, 7): "WRF radiation_driver has no ra_lw_physics=0 CASE for ra_sw_physics=7; select an implemented ra_lw_physics.",
     (7, 0): "WRF radiation_driver rejects ra_lw_physics=7 with ra_sw_physics=0: select an active ra_sw_physics (native CASE 0).",
 }
+# WRF RRTMG-K computes both spectra in its longwave CASE: only 14/14 runs.
+RADIATION_PAIR_REFUSALS.update({
+    (lw, sw): (f"ra_lw_physics={lw}, ra_sw_physics={sw}: WRF RRTMG-K computes "
+               "both spectra in one rad_rrtmg_driver call from the longwave "
+               "case, so it runs only as the pair ra_lw_physics=14, "
+               "ra_sw_physics=14.")
+    for lw in walk.AXIS_VALUES["ra_lw_physics"]
+    for sw in walk.AXIS_VALUES["ra_sw_physics"]
+    if 14 in (lw, sw) and (lw, sw) != (14, 14)})
+#: Pairs MYNN's default subgrid clouds (icloud_bl=1) cannot reach: RRTMG-K
+#: radiates the resolved cloud only (remedy: icloud_bl=0).
+MYNN_PAIR_REFUSALS = {**RADIATION_PAIR_REFUSALS, (14, 14): "icloud_bl"}
 
 
 def test_independent_radiation_spectra_preserve_every_selected_pair() -> None:
@@ -416,7 +430,7 @@ def test_mynn_composes_with_every_radiation_pairing_the_loader_admits(
         f"{lw}/{sw}"
         for lw in walk.AXIS_VALUES["ra_lw_physics"]
         for sw in walk.AXIS_VALUES["ra_sw_physics"]
-        if (lw, sw) not in RADIATION_PAIR_REFUSALS
+        if (lw, sw) not in MYNN_PAIR_REFUSALS
     }
     assert accepted_anywhere == expected
     longwave_on = {pair for pair in accepted_anywhere
@@ -425,7 +439,7 @@ def test_mynn_composes_with_every_radiation_pairing_the_loader_admits(
         f"{lw}/{sw}"
         for lw in walk.AXIS_VALUES["ra_lw_physics"] if lw != 0
         for sw in walk.AXIS_VALUES["ra_sw_physics"]
-        if (lw, sw) not in RADIATION_PAIR_REFUSALS
+        if (lw, sw) not in MYNN_PAIR_REFUSALS
     }
 
 
@@ -489,7 +503,7 @@ def test_the_mynn_matrix_is_the_same_in_every_land_surface_column(
 #: carries the refusal.
 # MP13 is measured on its native legacy RRTMG pairing in tier B. This
 # union records accepted MYNN configurations across radiation variants.
-MYNN_MICROPHYSICS_ACCEPTED = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 18, 24, 26, 28, 38, 40, 50, 51, 52, 53, 55, 56, 97, 106, 900]
+MYNN_MICROPHYSICS_ACCEPTED = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 18, 24, 26, 28, 29, 38, 40, 50, 51, 52, 53, 55, 56, 97, 106, 900]
 
 #: The admitted microphysics values the MYNN slice does not reach.  50 was
 #: here from the 1.9 gate until the P3 cloud-optics row landed, and 9 until
@@ -502,9 +516,10 @@ MYNN_MICROPHYSICS_ACCEPTED = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 
 #: The WRF 4.7.1 port added three more judged RTE+RRTMGP cloud-optics
 #: exclusions of the same kind, each accepting on legacy RRTMG: UDM (27,
 #: module_mp_udm.F's uninitialised den1d radius input), Eta Ferrier (95,
-#: total ice with no qi or radii) and MAD-WRF (96).  RCON (29) is held at the
-#: door by RCON-SPEED-01 (see HELD_AT_THE_DOOR) under every suite.
-MYNN_MICROPHYSICS_EXCLUDED = (27, 29, 30, 95, 96)
+#: total ice with no qi or radii) and MAD-WRF (96).  RCON (29) left this
+#: tuple when RCON-SPEED-01 was retired; it carries a Thompson cloud-optics
+#: row and composes with MYNN.
+MYNN_MICROPHYSICS_EXCLUDED = (27, 30, 95, 96)
 
 
 def test_mynn_composes_with_every_microphysics_and_cumulus_scheme(

@@ -43,8 +43,15 @@ Inputs, the words MPAS's own land-surface driver hands Noah
 * ``glw``      <- diag_physics ``glw``
 * ``emiss``    <- diag_physics ``sfc_emiss``
 * ``swdown``   <- ``gsw/(1 - sfc_albedo)``, MPAS's own SWDOWN for its LSM
-  (lsm_from_MPAS :470-474; MPAS keeps no other downward surface shortwave the
-  LSM reads), in single precision
+  (lsm_from_MPAS :470-474), in single precision, with the albedo in the pool
+  at the call (the lake's own from its last step).  MPAS's Noah (:472),
+  Noah-MP (mpas_atmphys_driver_lsm_noahmp.F:163) and sea ice
+  (mpas_atmphys_driver_seaice.F:246) all form it the same way from the same
+  words, so a snow or ice albedo that rose since the last radiation call
+  raises their SWDOWN as it raises the lake's.  The radiation's downward
+  surface flux ``swdnb`` (WRF's SWDOWN, held from the last radiation call) is
+  in diag_physics, but no MPAS v8.4.2 surface scheme reads it, so the lake
+  reads what MPAS's own land surface reads
 * ``rainbl``   <- ``0 + rainncv + raincv`` in mm, each term only when its
   scheme is on, MPAS's own RAINBL for its LSM (lsm_from_MPAS :441-466): the
   precipitation of the step, the land surface's interval when it runs every step
@@ -76,7 +83,9 @@ and sst-skin updates (they rewrite the lake skin and ice: WRF's own SST update
 hands lake ice back to the lake every interval, module_surface_driver.F:1644-1661,
 which this route does not carry), the OML1D/PWP ocean slot, config_pbl_interval
 (RP6's precipitation window), no land surface, native-file restarts, checkpoints
-and moving regions (the lake columns have no carrier yet), same-host ranks,
+and moving regions, and a correct-mode deck whose streams write a native restart
+(correct mode seals a checkpoint continuation beside each restart file; the lake
+columns have no carrier yet), same-host ranks,
 local time stepping and DA cycling.  The ERA5/GLSEA lake initial state
 (lake_state_source) is not bound on this route: lakeini starts every column from
 the run's skin temperature, WRF's default.
@@ -144,28 +153,72 @@ def refusal(arguments, config, layout, *, moving, execution) -> str | None:
                 "lakeini, discarding their water, ice and sediment heat; the Registry restart stream holds no "
                 "lake state. Run the lake from a cold start")
     if moving is not None:
-        return ("config_clm_lake_backend: checkpoints, restarts from them and moving regions carry no lake "
-                "columns yet (moving_v842's carrier holds none); drop --checkpoint-hours/--restart-from and "
-                "the moving switches, or the lake service")
+        return ("config_clm_lake_backend: " + route_cause(moving).removesuffix(":") + " carries no lake columns yet "
+                "(moving_v842's carrier holds none, so they would start again from lakeini); "
+                + route_remedy(moving) + ", or drop the lake service")
     if execution is not None or getattr(arguments, "samehost_devices", None):
         return ("config_clm_lake_backend: the lake service runs on one card's owned cells; same-host ranks, "
                 "local time stepping and DA cycling carry no lake columns yet")
     return None
 
 
-def statics_path(arguments):
-    """The run's surface statics sidecar: --surface-statics, else beside --grid/--static."""
+def _route_causes(moving):
+    """What made ``checkpoint_v842.resolve_route`` build this route, by the flag or deck entry the user gave."""
+    causes = []
+    if getattr(moving, "native_restart", False):
+        causes.append(("a correct-mode native restart (config_do_restart) resumes the continuation sealed "
+                       "beside its restart file", "run the lake from a cold start"))
+    elif getattr(moving, "cli_restart", False):
+        causes.append(("--restart-from", "drop --restart-from"))
+    if getattr(moving, "checkpoint_seconds", ()):
+        causes.append(("--checkpoint-hours", "drop --checkpoint-hours"))
+    output = getattr(moving, "restart_output", None)
+    if output is not None:
+        causes.append((f"the deck's streams write a native restart output stream ('restart', every "
+                       f"{float(output[0]):g} s), beside each file of which correct mode seals a checkpoint "
+                       "continuation", "set the restart stream's output_interval to 'none' or run in exact mode"))
+    if getattr(moving, "da_analysis", False):
+        causes.append(("--da-analysis", "drop --da-analysis"))
+    if not getattr(moving, "fixed_mesh", False):
+        causes.append(("a moving region (WOOF_HEX_MOVING_* switches)", "drop the moving switches"))
+    return causes
+
+
+def route_cause(moving) -> str:
+    causes = _route_causes(moving)
+    return ("; ".join(cause for cause, _ in causes) if causes
+            else "this run's checkpoint/moving route") + ":"
+
+
+def route_remedy(moving) -> str:
+    causes = _route_causes(moving)
+    return ("; ".join(remedy for _, remedy in causes) if causes
+            else "drop --checkpoint-hours/--restart-from and the moving switches")
+
+
+def statics_candidates(arguments):
+    """Where the run's surface statics sidecar is looked for, in order: --surface-statics, else the forecast
+    door's places (woof.hex.surface_inputs.default_candidates, resolve_surface_statics): ``<mesh>`` beside the
+    grid (--grid, else --init, which carries the grid on this route), the same name beside --static, and the
+    builder's own default beside --static (which needs no --mesh)."""
     from pathlib import Path
-    from ..surface_inputs import default_candidates
+    from ..surface_inputs import builder_default_path, default_candidates
     given = getattr(arguments, "surface_statics", None)
     if given is not None:
-        return Path(given).expanduser().absolute()
+        return (Path(given).expanduser().absolute(),)
     grid = getattr(arguments, "grid", None) or getattr(arguments, "init", None)
+    static = getattr(arguments, "static", None)
     mesh = getattr(arguments, "mesh", None)
-    if grid is None or mesh is None:
-        return None
-    candidates = default_candidates(grid, getattr(arguments, "static", None), mesh)
-    return next((path for path in candidates if path.is_file()), None)
+    if mesh is not None and grid is not None:
+        return default_candidates(grid, static, mesh)
+    return () if static is None else (builder_default_path(static),)
+
+
+def statics_path(arguments):
+    """The run's surface statics sidecar: the first candidate that exists, else the first candidate (which the
+    binding refuses by name, as the door does), else None when there is nowhere to look."""
+    candidates = statics_candidates(arguments)
+    return next((path for path in candidates if path.is_file()), candidates[0] if candidates else None)
 
 
 def bind_statics(native, mesh, layout, arguments) -> dict:
@@ -177,10 +230,13 @@ def bind_statics(native, mesh, layout, arguments) -> dict:
     from ..surface_inputs import bind
     path = statics_path(arguments)
     if path is None or not path.is_file():
+        looked = ", ".join(str(p) for p in statics_candidates(arguments))
         raise ValueError(
             "config_clm_lake_backend = 'hex-cuda' reads the lake mask and bathymetry (LAKEMASK, LAKE_DEPTH) from "
-            f"the mesh's surface statics, and {'none was found' if path is None else str(path) + ' does not exist'}"
-            "; build it with `woof hex surface-statics --static <static> --geog-root <WPS_GEOG> -o "
+            "the mesh's surface statics, and "
+            + ("none was looked for (no --surface-statics, and no --static or --mesh with --grid/--init)"
+               if path is None else f"none exists at {looked}")
+            + "; build it with `woof hex surface-statics --static <static> --geog-root <WPS_GEOG> -o "
             "<mesh>.surface_statics.nc` and pass --surface-statics")
     physics = dict(MPAS_DEFAULT_PHYSICS, sf_lake_physics=1, use_lakedepth=USE_LAKEDEPTH)
     inputs, receipt = bind(physics, path, latitude_rad=mesh.arrays["latCell"],
@@ -201,6 +257,18 @@ def bind_statics(native, mesh, layout, arguments) -> dict:
 def _owned(cp, array, nc):
     """An owned-cell copy of a pool vector (the lake writes its own working copies)."""
     return cp.array(cp.asarray(array)[:nc], copy=True)
+
+
+def _owned_view(cp, array, nc):
+    """The owned cells of a pool vector, in place: writes through to the pool."""
+    device = cp.asarray(array)
+    if device is not array:
+        raise ValueError("a pool vector must already be a device array: the lake writes it in place, and a "
+                         "copy would drop its outputs")
+    view = device[:nc]
+    if view.shape != (nc,) or not view.flags.c_contiguous:
+        raise ValueError("a pool vector must be a contiguous owned-cell prefix the lake can write in place")
+    return view
 
 
 def _surface(cp, array, nc):
@@ -242,16 +310,22 @@ class LakeColumns:
         threshold = float(provider["scalar_state"]["xice_threshold"])
         iswater = int(provider.native.get_field("sfc_input", "iswater").item())
         xland = cp.asnumpy(fields["xland"])[self.indices]
-        xice = cp.asnumpy(fields["xice"])[self.indices]
-        land = (xland < 1.5) & ~(xice >= threshold)
+        xice = cp.asnumpy(fields["xice"]).astype(F)[self.indices]
+        # lakeini hands a cell to lake water only where xice > xice_threshold, in single precision
+        # (woof.core.lake.initialize_lake, ``seed[4] > float32(threshold)``); a land cell at the threshold stays
+        # MPAS sea ice, so the same comparison decides here.
+        land = (xland < 1.5) & ~(xice > F(threshold))
         if land.any():
             raise ValueError(f"the surface statics' LAKEMASK marks {int(land.sum())} cells this run holds as "
-                             "land (xland = 1, no ice); a lake is a water cell (real.exe's ISLAKE -> ISWATER), so "
-                             "the sidecar was built for another land use")
+                             "land (xland = 1, xice not above xice_threshold); a lake is a water cell (real.exe's "
+                             "ISLAKE -> ISWATER), so the sidecar was built for another land use")
         self.model = initialize_lake(
             fields, latitude=latitude, lake_depth=cp.asarray(self.statics["lake_depth"]),
             lake_depth_flag=int(self.statics["lake_depth_flag"]), use_lakedepth=USE_LAKEDEPTH,
             lakedepth_default=LAKEDEPTH_DEFAULT, iswater=iswater, xice_threshold=threshold)
+        # R2 steps the lake from this service alone (restart, moving regions and rank tiles are refused), so
+        # the lake's work copy of its columns stays resident between calls instead of being re-gathered.
+        self.model.resident = True
         for name in CONVERTED:
             target = sfc[name]
             target[:nc] = fields[name]
@@ -268,15 +342,17 @@ class LakeColumns:
         cp = self.cp
         diag = provider["diag_physics"]
         at = self.lake_indices
-        take = lambda a: cp.asnumpy(cp.asarray(a, dtype=cp.float32)[:self.nc][at])
+        # On the device, float32 throughout: the same IEEE divide and adds the host numpy words were (the
+        # test pins every word), with no host round trip of the lake cells.
+        take = lambda a: cp.asarray(a, dtype=cp.float32)[:self.nc][at]
         swdown = take(diag["gsw"]) / (F(1.0) - take(diag["sfc_albedo"]))
-        rain = np.zeros(self.column_count, F)
+        rain = cp.zeros(self.column_count, cp.float32)
         if call.options["config_microp_scheme"] != "off":
             rain = rain + take(diag["rainncv"])
         if call.options["config_convection_scheme"] != "off":
             rain = rain + take(diag["raincv"])
-        self._swdown[self.lake_indices] = cp.asarray(swdown.astype(F))
-        self._rain[self.lake_indices] = cp.asarray(rain.astype(F))
+        self._swdown[at] = swdown
+        self._rain[at] = rain
         return self._swdown, self._rain
 
     def step(self, provider, call):
@@ -291,19 +367,20 @@ class LakeColumns:
         pools = {"diag_physics": diag, "sfc_input": provider["sfc_input"]}
 
         def levels(name, count):
-            return cp.ascontiguousarray(cp.asarray(prepared[name], dtype=cp.float32)[:count, :nc])
+            # A view: the lake gathers its own cells from row 0 (and 1), so no copy of the row block.
+            return cp.asarray(prepared[name], dtype=cp.float32)[:count, :nc]
         atmosphere = {"temperature": levels("t_p", 1), "p_interface": levels("pres2_hyd_p", 2),
                       "dz": levels("dz_p", 1), "qv": levels("qv_p", 1),
                       "u": levels("u_p", 1), "v": levels("v_p", 1)}
         swdown, rain = self.forcing(provider, call)
         fields = dict(self.fields, glw=_surface(cp, diag["glw"], nc),
                       emiss=_surface(cp, diag["sfc_emiss"], nc), swdown=swdown)
+        # The lake reads and writes only its own cells (LakeModel.step gathers and scatters through its
+        # indices, after check_errors), so the owned-cell pool vectors go in as views: no per-field copy in,
+        # no write-back of the unchanged land cells out.  albedo is read (gathered) before it is written.
         for name, pool, source in OUTPUTS:
-            fields[name] = _owned(cp, pools[pool][source], nc)
+            fields[name] = _owned_view(cp, pools[pool][source], nc)
         self.model.step(fields, atmosphere, dt=float(call.dt), precipitation=rain)
-        for name, pool, source in OUTPUTS:
-            target = pools[pool][source]
-            target[:nc] = fields[name]
         self.steps += 1
         return fields
 

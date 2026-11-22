@@ -84,18 +84,20 @@ extern "C" __global__ void ocn_vel_pressure_grad_tend_v842(
     int pgradType, rk density0Inv, rk gdensity0Inv, rk gamma, int indexT, int indexS, int nTracers,
     int nEdges, int nVertLevels)
 {
+    // a thread per (edge, level) for the level-independent types; a thread
+    // per edge for the Jacobian types, whose sum walks down the column
+    const bool jacobian = pgradType != PGRAD_PRESSURE_AND_ZMID && pgradType != PGRAD_MONTGOMERY
+        && pgradType != PGRAD_MONTGOMERY_AND_DENSITY;
     const int t = blockIdx.x * blockDim.x + threadIdx.x;
-    const int iEdge = t / nVertLevels;
+    const int iEdge = jacobian ? t : t / nVertLevels;
     if (iEdge >= nEdges) return;
-    const int k = t - iEdge * nVertLevels;
+    const int k = jacobian ? 0 : t - iEdge * nVertLevels;
     const int nl = nVertLevels;
     const int c1 = (cellsOnEdge[iEdge * 2] - 1) * nl;
     const int c2 = (cellsOnEdge[iEdge * 2 + 1] - 1) * nl;
     const int kmax = maxLevelEdgeTop[iEdge];
     const int base = iEdge * nl;
-    const bool jacobian = pgradType != PGRAD_PRESSURE_AND_ZMID && pgradType != PGRAD_MONTGOMERY
-        && pgradType != PGRAD_MONTGOMERY_AND_DENSITY;
-    if (jacobian ? k != 0 : k >= kmax) return;
+    if (!jacobian && k >= kmax) return;
     const rk invdcEdge = D((rk)1.0, dcEdge[iEdge]);
 
     if (pgradType == PGRAD_PRESSURE_AND_ZMID) {

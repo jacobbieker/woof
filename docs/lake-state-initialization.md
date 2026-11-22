@@ -27,6 +27,54 @@ lake_state_source = "era5-land"
 lake_state_path = "/inputs/lake-fields.nc"
 ```
 
+A WRF run directory or a WPS metgrid directory carries no lake-state key in its
+`namelist.input`, so those doors take the choice on the command line, for
+`woof run` and `woof go` alike:
+
+```
+woof run --met-em DIR --lake-state forcing      # keep the met_em lakes; request nothing
+woof run --wrfinput DIR --lake-state forcing    # keep the wrfinput lakes; request nothing
+woof run --met-em DIR --lake-state era5-land --lake-state-path /inputs/lake-fields.nc
+```
+
+The choices are `auto` (the default when the flag is absent), `forcing` and the
+ids of the table's rows. The door writes the choice into the resolved
+configuration as `lake_state_source` (and `lake_state_path`), prints it at plan
+review, and the prepared `experiment.toml` records it. A CONFIG run sets the two
+keys in its TOML instead, and refuses the flag.
+
+With `auto`, the run asks the first automatic row whose extent holds any of
+the domain's lake cells; GLSEA's extent is the Great Lakes, 38.9N to 50.6N,
+92.4W to 75.9W. The plan and dry run ask the same question of the root
+domain's cells before anything is spent, so a domain outside every row is told
+that its lakes keep the forcing's state and nothing is requested, and the
+run record names each row checked and how many lake cells it holds. On
+`woof go CONFIG` the lake mask does not exist yet at plan time, so for a
+domain a row does reach the plan states the run's condition rather than a
+request: the row is asked if any of the domain's lake cells is inside its
+extent, and otherwise nothing is. A domain whose northern edge enters GLSEA's
+box while its lakes lie south of it gets no request.
+
+A met_em or wrfinput directory already holds the lake mask (the cells whose
+`LU_INDEX` is the land-use table's `ISLAKE`, which is the run's own lake
+mask), so on those two doors the plan line is the decision itself, read from
+each domain's first file: the row that is asked and how many of the domain's
+lake cells its extent holds, or that no row holds any and nothing is
+requested, or that the domain has no lake cells. A nested run gets one line
+per domain (`lake state: d02: ...`), because each domain binds its own lakes.
+`woof run --wrfinput DIR` prints the line too, and `woof go --wrfinput DIR
+--dry-run` carries the lines as `lake_state_plan`.
+
+A wrfinput start reads its lake cells from `LAKEMASK` when the lake model is
+on (`sf_lake_physics = 1`) and from the land use when it is off. real.exe
+writes wrfinput's `LU_INDEX` with the lake category folded into water, so
+with the lake model off such a domain binds no lake analysis although its
+`LAKEMASK` holds lake cells. The plan line, the run's line and the run record
+(`status: retained_forcing`, `input_lake_cells`) say so; they used to say the
+domain had no lake cells. A resume, or a WRF warm
+start from wrfrst files, says that the lakes are restored and nothing is
+fetched. `--lake-state auto` prints the same plan line after the flag's own.
+
 The file contains `valid_time`, `latitude`, `longitude`, and the fields `lmlt`,
 `lblt`, `lmld`, `lshf`, `licd`, `lict` on those axes, in K, K, m, 1, m, K.
 Longitude may be in either conventional encoding. The latest analysis at or
@@ -63,13 +111,34 @@ model, so the forcing's ice stays in charge (`ice_authority = "forcing"`):
 - a cell the forcing has open never takes ERA5 ice.
 
 `auto+era5` binds GLSEA first and asks ERA5 only for the cells that GLSEA
-left without a water temperature. Both values change the initial state
-wherever the domain has lakes, so neither is a default.
+left without a water temperature. ERA5 fills only values GLSEA left missing:
+a GLSEA ice concentration on a cell without a GLSEA water temperature is
+kept. Both values change the initial state wherever the domain has lakes, so
+neither is a default.
+
+In `auto+era5`, the `auto` step keeps the tolerant contract of `auto`. A GLSEA
+value outside its physical range is dropped with a warning, and its cell is
+passed on to ERA5. The `era5` step is explicit. If ERA5 fails for the cells
+GLSEA left (a store timeout, a network error, or no written hour within the
+age limit), the run is refused with a message that names the chain and the
+step. It does not quietly keep the forcing there. An out-of-range ERA5 value
+refuses the run too. A start without an initialization time or surface
+coordinates is refused for `auto+era5` as well, because its ERA5 step cannot
+run. Use `auto` to keep the forcing wherever GLSEA does not cover. Lake
+cells that no step bound are reported as a warning, with the count in the
+receipt's `unbound_cells`.
 
 The ARCO store declares ERA5T further ahead than it has written chunks (on
 2026-11-16 it declared 2026-11-10, but its last written hour was
-2026-11-08 23 UTC). An hour whose fields come back entirely missing is
-therefore skipped for the same hour one day earlier, within the age limit.
+2026-11-08 23 UTC). An hour where any of the six fields comes back entirely
+missing is therefore skipped. The search steps back one day at a time, within
+the age limit, until it finds a written hour. Because the store fills in time
+order, it then bisects the hours between that hour and the last unwritten one.
+The state is the latest written hour, not up to 23 hours older.
+
+The request is always the whole globe from 180 W, whichever lake cells are
+asked for. The longitude axis is closed with a wrapped column, so a lake next
+to the antimeridian is sampled like any other lake.
 
 Surface water temperature at the 2026-11-09 12 UTC start of the Alps case
 (Simstrat is Eawag's operational 1-D lake model, from the Alplakes API. It
@@ -161,7 +230,9 @@ lake_state_source=auto+era5 --surface-statics <mesh>.surface_statics.nc`
 binds the same rows, through the same `initialize_surface`, on the cells
 that the surface statics mark as lakes. The CLM columns that result are WRF
 lakeini's columns from that initial state, bit for bit
-(`tests/test_hex_surface_inputs_gpu.py`, CUDA and Metal). Without
-`sf_lake_physics = 1`, no lake mask is staged on the mesh, so no lake
-state is bound either. The MPAS suite route (R2) folds lakes to water, as
-MPAS-A v8.4.2 does.
+(`tests/test_hex_surface_inputs_gpu.py`, CUDA and Metal). A licensed row's
+`lake_state_path` and `lake_state_accept_licence` are `--physics` keys too.
+Without `sf_lake_physics = 1`, no lake mask is staged on the mesh. An
+explicit source (anything but `auto` or `forcing`) is then refused, because
+it would be accepted and never read. `auto` binds nothing there. The MPAS
+suite route (R2) folds lakes to water, as MPAS-A v8.4.2 does.

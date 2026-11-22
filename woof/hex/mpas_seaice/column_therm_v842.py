@@ -12,13 +12,19 @@ conductivities (``bubbly``, ``MU71``), the constant ocean heat transfer
 (MPAS accepts ``Cdn_ocn`` only with form drag), high-frequency coupling, any number of boundary
 layer iterations, a computed or a coupled surface temperature
 (``config_calc_surface_temperature``; the coupled fluxes are
-``alternative_atmos_forcing``'s), the ice age and first-year ice tracers.
+``alternative_atmos_forcing``'s), the ice age and first-year ice tracers,
+and the column biogeochemistry's brine height (``config_use_brine``:
+``column_vertical_thermodynamics`` neither reads nor writes the brine
+fraction) and vertical salinity (``config_use_vertical_zsalinity``: its
+tracers pass through untouched, and ``temperature_changes`` takes
+``dTemp = 0.1`` for 0.02, ``ice_therm_bl99.F90:287``); the other
+biogeochemistry is refused.
 
 What it refuses, by name:
 
 - the mushy and zero-layer thermodynamics, melt ponds (level, CESM, topo;
-  level ponds are the Registry default), aerosols, form drag and the
-  vertical zsalinity are not ported;
+  level ponds are the Registry default), aerosols and form drag are not
+  ported;
 - ``config_atmos_boundary_method = 'constant'`` and
   ``config_calc_surface_stresses = .false.``: ``colpkg_step_therm1``'s
   ``Cdn_atm_ratio_n`` is an uninitialised local that only
@@ -39,6 +45,23 @@ What it refuses, by name:
 ``deltaT**1.36`` ``glibc_pow``; the constants gfortran folds
 (``vonkar/log(zref/iceruf)``, ``log(zref/zTrf)``) are folded on the host,
 each operation correctly rounded as MPFR does.
+
+Two v8.4.2 bugs are kept by default and corrected on request
+(``configs["woof_v842_corrections"]``, :data:`column_v842.CORRECTIONS`):
+
+- ``set_sfcflux_order``: with a coupled surface temperature,
+  ``colpkg_step_therm1`` passes ``set_sfcflux`` the coupled conductive flux
+  where it takes the surface flux and the reverse
+  (``ice_colpkg.F90:2095-2101`` against ``ice_flux_colpkg.F90:169-177``);
+  corrected, each is read as what it is;
+- ``ice_velocity_at_cell``: ``colpkg_atm_boundary`` gets the vertex field
+  ``uVelocity`` at the cell's index (``mpas_seaice_column.F:1511-1512``) and
+  drops the ``vvel`` passed in (``ice_colpkg.F90:3474-3479`` sets ``worku =
+  uvel`` twice and leaves ``workv`` 0); corrected, it
+  gets both components of the cell's ice velocity, the ``areaTriangle``
+  weighted mean of the interior vertices
+  (``seaice_interpolate_vertex_to_cell``), so high-frequency coupling's
+  stress follows the wind relative to the ice.
 
 On an abort (``l_stop``), MPAS logs the first aborting cell's message and
 returns from the whole routine; :func:`vertical_thermodynamics` returns that
@@ -93,7 +116,7 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     from woof.hex.mpas_ice import rkind
 
     c = configs
-    cv.refuse_unported(c, dims)
+    cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=True)
     if c["config_thermodynamics_type"] != "BL99":
         _refuse("config_thermodynamics_type", c["config_thermodynamics_type"],
                 "the mushy and zero-layer vertical thermodynamics are not ported",
@@ -101,8 +124,7 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     for knob in ("config_use_level_meltponds", "config_use_cesm_meltponds", "config_use_topo_meltponds"):
         if c[knob]:
             _refuse(knob, True, "the melt ponds are not ported", f"{knob} = .false.")
-    for knob, what in (("config_use_aerosols", "the aerosols"), ("config_use_form_drag", "form drag"),
-                       ("config_use_vertical_zsalinity", "the vertical zsalinity")):
+    for knob, what in (("config_use_aerosols", "the aerosols"), ("config_use_form_drag", "form drag")):
         if c[knob]:
             _refuse(knob, True, f"{what} in the vertical thermodynamics are not ported", f"{knob} = .false.")
     if c["config_atmos_boundary_method"] != "ccsm3":
@@ -127,11 +149,28 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
                 "WOOF_GLIBC239_LIBM64=1 (the vertical thermodynamics need glibc's atan)")
 
 
-def day_of_year(start_time: str) -> float:
+_NOLEAP_MONTH_START = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)
+
+
+def day_of_year(start_time: str, calendar: str) -> float:
     """``get_day_of_year`` at the clock's start: the integer day (1 on
-    1 January) as a real."""
-    date = _dt.date(int(start_time[0:4]), int(start_time[5:7]), int(start_time[8:10]))
-    return float(date.timetuple().tm_yday)
+    1 January) as a real, on ``config_calendar_type``'s calendar
+    (``mpas_timekeeping_init``): the Gregorian day, or the day of the 365-day
+    year of ``gregorian_noleap`` (the Registry default). A date the calendar
+    lacks (29 February without leap years) is refused, as ``isValidDate``
+    rejects it and MPAS leaves the time unset; so is the 360-day calendar,
+    which v8.4.2's built-in ESMF lacks, and any other."""
+    year, month, day = int(start_time[0:4]), int(start_time[5:7]), int(start_time[8:10])
+    if calendar == "gregorian":
+        return float(_dt.date(year, month, day).timetuple().tm_yday)
+    if calendar == "gregorian_noleap":
+        if month == 2 and day == 29:
+            _refuse("config_start_time", start_time, "29 February does not exist in the gregorian_noleap calendar",
+                    "a date of the 365-day year")
+        _dt.date(2001, month, day)  # any other day the year lacks raises, as for gregorian
+        return float(_NOLEAP_MONTH_START[month - 1] + day)
+    _refuse("config_calendar_type", calendar, "the time manager is ported for MPAS's gregorian and "
+            "gregorian_noleap calendars", "config_calendar_type = 'gregorian' or 'gregorian_noleap'")
 
 
 @lru_cache(maxsize=None)
@@ -173,28 +212,100 @@ def _function(name: str, n_ice_layers: int):
     return _module_on(cp.cuda.Device().id, options, n_ice_layers, rkind.trig64()).get_function(name)
 
 
-def _flags(configs: dict, state: "cv.ColumnState") -> int:
+def _flags(configs: dict, state: "cv.ColumnState", ice_velocity_at_cell: bool | None = None) -> int:
     heat_capacity = state.ktherm != 0
     l_brine = 3.2 > 0.1 and heat_capacity          # colpkg_init_thermo: saltmax > min_salin
     bits = (l_brine, state.calc_tsfc, configs["config_calc_surface_stresses"],
             configs["config_use_high_frequency_coupling"], configs["config_heat_conductivity_type"] == "MU71",
             configs["config_use_ice_age"],
             configs["config_use_first_year_ice"])
+    fixes = cv.corrections(configs)
+    if ice_velocity_at_cell is None:
+        ice_velocity_at_cell = "ice_velocity_at_cell" in fixes
+    bits += ("set_sfcflux_order" in fixes, ice_velocity_at_cell)
+    # solve_zsal: thickness_changes' dTemp is 0.1 with the vertical salinity (ice_therm_bl99.F90:287),
+    # which v8.4.2 never sets: only under zsal_solve
+    bits += (cv.solves_zsal(configs),)
     return sum(int(bool(b)) << i for i, b in enumerate(bits))
+
+
+def _ice_velocity(pools: dict, configs: dict, n_vertices: int, n_cells: int, dummy) -> tuple:
+    """The ice velocity colpkg_atm_boundary gets: v8.4.2's ``uVelocity`` (a
+    vertex field read at the cell's index, and no v), or with the
+    ``ice_velocity_at_cell`` correction both components interpolated to the
+    cells (``seaice_interpolate_vertex_to_cell``)."""
+    import cupy as cp
+    vs = pools["velocity_solver"]
+    u = cv._need(vs, "uVelocity", (n_vertices + 1,))
+    if "ice_velocity_at_cell" not in cv.corrections(configs):
+        return u, dummy
+    from . import velocity_v842 as vel
+    missing = [name for name, there in (("boundary/interiorVertex", (pools.get("boundary") or {}).get(
+        "interiorVertex") is not None), ("velocity_solver/vVelocity", vs.get("vVelocity") is not None)) if not there]
+    if missing and "ice_velocity_at_cell" not in cv.named_corrections(configs):
+        # woof_quirk_corrections = 'all' without naming it: a run without the
+        # velocity solver's v and interior vertices does not carry the
+        # correction, so it stays off (v8.4.2's read), as the umbrella's rule
+        return u, dummy
+    if missing:
+        cv._refuse("woof_v842_corrections", "ice_velocity_at_cell",
+                   "the cell's ice velocity is interpolated from the vertices' u and v over the interior vertices; "
+                   "the pools lack " + ", ".join(missing),
+                   "pools with boundary/interiorVertex and velocity_solver/vVelocity, or without the correction")
+    v = cv._need(vs, "vVelocity", (n_vertices + 1,))
+    mesh = {k: pools["mesh"][k] for k in ("nEdgesOnCell", "verticesOnCell", "areaTriangle")}
+    mesh = {k: cp.ascontiguousarray(cp.asarray(a)[:n_cells] if k != "areaTriangle" else cp.asarray(a)[:n_vertices])
+            for k, a in mesh.items()}
+    mesh["nCellsSolve"] = pools["mesh"]["nCellsSolve"]
+    boundary = {"interiorVertex": cp.ascontiguousarray(cp.asarray(pools["boundary"]["interiorVertex"])[:n_vertices])}
+    out = []
+    for vertex in (u, v):
+        cell = cp.zeros(n_cells + 1, np.float64)
+        vel.interpolate_vertex_to_cell(mesh=mesh, boundary=boundary, cell=cell[:n_cells],
+                                       vertex=cp.ascontiguousarray(vertex[:n_vertices]))
+        out.append(cell)
+    return tuple(out)
+
+
+@lru_cache(maxsize=None)
+def _written_params() -> tuple[bool, ...]:
+    """Per parameter of ``seaice_column_vertical_thermodynamics_v842``: whether
+    it is an array the kernel may write (a pointer that is not ``const``)."""
+    text = files("woof.hex.mpas_seaice").joinpath("column_therm_v842.cu").read_text(encoding="utf-8")
+    head = text.split("void seaice_column_vertical_thermodynamics_v842(", 1)[1].split("{", 1)[0]
+    head = " ".join(line.split("//", 1)[0] for line in head.splitlines()).rsplit(")", 1)[0]
+    return tuple(_is_written(p) for p in head.split(","))
+
+
+def _is_written(param: str) -> bool:
+    """Whether a kernel parameter is an array the kernel may write: a pointer
+    whose pointee is not ``const`` (``const double *__restrict__ x`` and
+    ``double const *x`` are read only; ``double *__restrict__ const x`` is
+    written)."""
+    if "*" not in param:
+        return False
+    return "const" not in param.split("*", 1)[0].split()
+
+
+def _keep_after_abort(written: list, before: list, first: int, n_solve: int) -> None:
+    """The owned cells after the first aborting one get their words back."""
+    for array, saved in zip(written, before):
+        array[first + 1:n_solve] = saved[first + 1:]
 
 
 def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
                             day: float | None = None) -> tuple[int, int | None, str | None]:
     """``column_vertical_thermodynamics``: returns ``(ierr, cell, message)``,
     ``(0, None, None)`` when no cell aborts, else the first aborting owned
-    cell's ``indexToCellID`` and its logged message."""
+    cell's ``indexToCellID`` and its logged message. As MPAS returns at the
+    first aborting cell, the owned cells after it keep their words."""
     import cupy as cp
 
     d = state.dims
     refuse_unported(configs, d)
     n_cells, n_solve, ncat, nil, nsl = (d["nCells"], d["nCellsSolve"], d["nCategories"], d["nIceLayers"],
                                        d["nSnowLayers"])
-    day = day_of_year(configs["config_start_time"]) if day is None else day
+    day = day_of_year(configs["config_start_time"], configs["config_calendar_type"]) if day is None else day
     folded = folded_constants()
     c1, cc, ci, cs = (n_cells + 1,), (n_cells + 1, ncat), (n_cells + 1, ncat, nil), (n_cells + 1, ncat, nsl)
     cat1 = (n_cells + 1, ncat, 1)
@@ -208,10 +319,13 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
     tr_iage, tr_fy = configs["config_use_ice_age"], configs["config_use_first_year_ice"]
     dummy = cp.zeros(1, np.float64)
     status = cp.zeros(max(n_solve, 1), np.int32)
+    # the correction's flag follows the velocity actually handed over: under the umbrella without the velocity
+    # solver's v and interior vertices it stays off, and the kernel must not read the placeholder per cell
+    ice_velocity = _ice_velocity(pools, configs, n_vertices, n_cells, dummy)
     args = (
         status, np.float64(configs["config_dt"]), np.float64(day),
         np.float64(configs["config_min_friction_velocity"]), np.float64(folded["rdn_ice"]),
-        np.float64(folded["al2"]), np.int32(ncat), np.int32(_flags(configs, state)),
+        np.float64(folded["al2"]), np.int32(ncat), np.int32(_flags(configs, state, ice_velocity[1] is not dummy)),
         np.int32(configs["config_boundary_layer_iteration_number"]), np.int32(n_solve),
         need(pools["mesh"], "latCell", c1), need(ist, "iceAreaCellInitial", c1),
         need(ist, "iceAreaCategoryInitial", cc), need(ist, "iceVolumeCategoryInitial", cc),
@@ -220,7 +334,7 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
         need(t, "surfaceTemperature", cat1), need(t, "snowEnthalpy", cs), need(t, "iceEnthalpy", ci),
         need(t, "iceSalinity", ci), need(t, "iceAge", cat1) if tr_iage else dummy,
         need(t, "firstYearIceArea", cat1) if tr_fy else dummy,
-        need(vs, "uVelocity", (n_vertices + 1,)), need(vs, "airStressCellU", c1), need(vs, "airStressCellV", c1),
+        *ice_velocity, need(vs, "airStressCellU", c1), need(vs, "airStressCellV", c1),
         need(vs, "oceanStressCellU", c1), need(vs, "oceanStressCellV", c1),
         need(ac, "uAirVelocity", c1), need(ac, "vAirVelocity", c1), need(ac, "airLevelHeight", c1),
         need(ac, "airSpecificHumidity", c1), need(ac, "airDensity", c1), need(ac, "airPotentialTemperature", c1),
@@ -250,6 +364,14 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
         need(sw, "absorbedShortwaveSnowLayer", cs), need(sw, "absorbedShortwaveIceLayer", ci),
         need(dg, "meltOnset", c1), need(dg, "freezeOnset", c1),
     )
+    # the per-cell arrays the kernel writes (its non-const pointers), as they were: MPAS
+    # returns at the first aborting cell, so the later cells keep their words. The kernel
+    # writes in place, so the words are kept before it runs, whether or not a cell aborts.
+    if len(args) != len(_written_params()):
+        raise RuntimeError("the vertical thermodynamics' arguments do not match its kernel's parameters")
+    written = [a for a, out in zip(args, _written_params())
+               if out and a.ndim and a.shape[0] == n_cells + 1]
+    before = [a[:n_solve].copy() for a in written]
     if n_solve:
         _function("seaice_column_vertical_thermodynamics_v842", nil)(_grid(n_solve), (_BLOCK,), args)
     codes = cp.asnumpy(status)[:n_solve]
@@ -257,6 +379,7 @@ def vertical_thermodynamics(pools: dict, configs: dict, state: "cv.ColumnState",
     if not bad.size:
         return 0, None, None
     first = int(bad[0])
+    _keep_after_abort(written, before, first, n_solve)
     cell = int(cp.asnumpy(pools["mesh"]["indexToCellID"][first:first + 1])[0])
     message = "column_vertical_thermodynamics: ice: Vertical thermo error: " + STOP_LABELS[int(codes[first])]
     return SEAICE_ERROR_COL_VERT_THERM, cell, message

@@ -32,7 +32,8 @@ module mpas_log
   integer :: stub_log_warn_unit = 0
   ! a unit a driver opened to record MPAS_LOG_ERR messages (as the warnings);
   ! with it set they are recorded and the run goes on, as in MPAS, where only
-  ! MPAS_LOG_CRIT aborts; 0 (the default) stops on them
+  ! MPAS_LOG_CRIT aborts (recorded as CRIT before the stop); 0 (the default)
+  ! stops on them
   integer :: stub_log_err_unit = 0
 
 contains
@@ -48,20 +49,38 @@ contains
     if (present(err)) err = 0
     if (present(messageType)) then
       if (messageType == MPAS_LOG_WARN .and. stub_log_warn_unit /= 0) then
-        write(stub_log_warn_unit, '(a)') 'WARN ' // trim(message)
+        write(stub_log_warn_unit, '(a)') 'WARN ' // trim(clip_nul(message))
         if (present(intArgs)) write(stub_log_warn_unit, '(a,*(1x,i0))') 'INTS', intArgs
         if (present(realArgs)) write(stub_log_warn_unit, '(a,*(1x,es25.17e3))') 'REALS', realArgs
       end if
       if (messageType == MPAS_LOG_ERR .and. stub_log_err_unit /= 0) then
-        write(stub_log_err_unit, '(a)') 'ERR ' // trim(message)
+        write(stub_log_err_unit, '(a)') 'ERR ' // trim(clip_nul(message))
         if (present(intArgs)) write(stub_log_err_unit, '(a,*(1x,i0))') 'INTS', intArgs
         if (present(realArgs)) write(stub_log_err_unit, '(a,*(1x,es25.17e3))') 'REALS', realArgs
       else if (messageType == MPAS_LOG_ERR .or. messageType == MPAS_LOG_CRIT) then
+        ! MPAS_LOG_CRIT aborts MPAS (mpas_log.F): with the error unit set the message
+        ! and its integers are recorded first, so a driver can tell where it died
+        if (messageType == MPAS_LOG_CRIT .and. stub_log_err_unit /= 0) then
+          write(stub_log_err_unit, '(a)') 'CRIT ' // trim(clip_nul(message))
+          if (present(intArgs)) write(stub_log_err_unit, '(a,*(1x,i0))') 'INTS', intArgs
+        end if
         print *, 'oracle stub: mpas_log_write: ', trim(message)
         stop 7
       end if
     end if
   end subroutine mpas_log_write
+
+  ! A message cut at its first NUL: a caller's message buffer can be longer than
+  ! the text put in it and uninitialised past it (column_biogeochemistry's
+  ! abortMessage takes an 80-character stop label), which MPAS writes as is.
+  pure function clip_nul(message) result(clipped)
+    character(len=*), intent(in) :: message
+    character(len=len(message)) :: clipped
+    integer :: i
+    clipped = message
+    i = index(message, achar(0))
+    if (i > 0) clipped(i:) = ' '
+  end function clip_nul
 
 end module mpas_log
 
@@ -73,7 +92,7 @@ module mpas_pool_routines
   public :: mpas_log_write, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT
   public :: MPAS_pool_type, mpas_pool_get_subpool, mpas_pool_get_array, &
             mpas_pool_get_dimension, mpas_pool_get_config, &
-            stub_pool_put_subpool, stub_pool_put_array, stub_pool_mark_absent, &
+            stub_pool_put_subpool, stub_pool_put_array, stub_pool_mark_absent, stub_pool_has, &
             stub_pool_put_dimension, stub_pool_put_config, &
             field1DReal, field2DReal, field3DReal, mpas_pool_get_field, stub_pool_put_field, &
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
@@ -89,11 +108,15 @@ module mpas_pool_routines
   type field1DReal
     real(kind=RKIND), dimension(:), pointer :: array => null()
     integer, dimension(1) :: dimSizes = 0
+    ! .false. for a field whose package is off (the E3SM ocean's coupler
+    ! import reads it)
+    logical :: isActive = .true.
   end type field1DReal
 
   type field2DReal
     real(kind=RKIND), dimension(:,:), pointer :: array => null()
     integer, dimension(2) :: dimSizes = 0
+    logical :: isActive = .true.
   end type field2DReal
 
   type field3DReal
@@ -222,6 +245,18 @@ contains
     print *, 'oracle stub: no pool entry named ', trim(name)
     stop 4
   end function find
+
+  ! Whether the pool holds an entry of that name (a driver's optional switch;
+  ! find stops on a missing one).
+  logical function stub_pool_has(pool, name)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    integer :: i
+    stub_pool_has = .false.
+    do i = 1, pool % n
+      if (trim(pool % e(i) % name) == trim(name)) stub_pool_has = .true.
+    end do
+  end function stub_pool_has
 
   integer function slot(pool, name)
     type(MPAS_pool_type), intent(inout) :: pool
@@ -636,6 +671,7 @@ contains
     else if (.not. associated(p % e(i) % f1) .and. p % e(i) % absent) then
       ! a field whose package is off: MPAS's field with no array
       allocate(p % e(i) % f1)
+      p % e(i) % f1 % isActive = .false.
     end if
     f => p % e(i) % f1
   end subroutine get_field_1d
@@ -665,6 +701,7 @@ contains
     else if (.not. associated(p % e(i) % f2) .and. p % e(i) % absent) then
       ! a field whose package is off: MPAS's field with no array
       allocate(p % e(i) % f2)
+      p % e(i) % f2 % isActive = .false.
     end if
     f => p % e(i) % f2
   end subroutine get_field_2d
@@ -876,6 +913,7 @@ module mpas_derived_types
   type domain_type
     type(block_type), pointer :: blocklist => null()
     type(MPAS_pool_type), pointer :: configs => null()
+    type(MPAS_pool_type), pointer :: packages => null()
     type(MPAS_Clock_type), pointer :: clock => null()
     type(dm_info), pointer :: dminfo => null()
   end type domain_type
@@ -1107,8 +1145,13 @@ end module mpas_tensor_operations
 
 module mpas_timekeeping
   ! The time manager the forward-mode oracle reaches, on whole seconds: a time
-  ! is the seconds since 0001-01-01_00:00:00 on the proleptic Gregorian
-  ! calendar (MPAS's default), an interval a count of seconds.  It parses and
+  ! is the seconds since 0001-01-01_00:00:00 on the calendar
+  ! mpas_timekeeping_init sets (mpas_timekeeping.F:87-127): the proleptic
+  ! Gregorian one until a driver calls it, or the 365-day year of
+  ! 'gregorian_noleap' (MPAS's config_calendar_type default); an interval is
+  ! a count of seconds.  The other calendars stop (v8.4.2's built-in ESMF has
+  ! no 360-day calendar), and so does a date isValidDate rejects
+  ! (mpas_timekeeping.F:2146-2185; MPAS logs it and leaves the time unset).  It parses and
   ! writes MPAS's strings ('YYYY-MM-DD_hh:mm:ss', '[DDDD_]hh:mm:ss').
   ! mpas_get_timeInterval's dt is the seconds as a real, as MPAS gives a whole
   ! interval.  ocn_forcing and ocn_surface_bulk_forcing USE the module and
@@ -1119,13 +1162,18 @@ module mpas_timekeeping
   private
   public :: MPAS_Time_type, MPAS_TimeInterval_type, MPAS_Clock_type, MPAS_NOW, MPAS_START_TIME, &
             mpas_get_clock_time, mpas_set_timeInterval, mpas_interval_division, mpas_set_time, mpas_get_time, &
-            mpas_get_timeInterval, mpas_advance_clock, mpas_set_clock, operator(>), operator(-), &
+            mpas_get_timeInterval, mpas_advance_clock, mpas_set_clock, mpas_get_clock_timestep, &
+            mpas_timekeeping_init, &
+            operator(>), operator(-), &
             isLeapYear, daysInMonth, daysInMonthLeap
 
   integer, parameter :: MPAS_NOW = 1, MPAS_START_TIME = 2
   ! mpas_timekeeping.F:25-26 (the column package's day counts read them)
   integer, dimension(12), parameter :: daysInMonth     = (/31,28,31,30,31,30,31,31,30,31,30,31/)
   integer, dimension(12), parameter :: daysInMonthLeap = (/31,29,31,30,31,30,31,31,30,31,30,31/)
+  ! the days before each month of the 365-day year
+  integer, dimension(12), parameter :: noleapMonthStart = (/0,31,59,90,120,151,181,212,243,273,304,334/)
+  logical, save :: noleap = .false.
 
   interface operator(>)
     module procedure interval_gt
@@ -1135,6 +1183,18 @@ module mpas_timekeeping
   end interface
 
 contains
+
+  subroutine mpas_timekeeping_init(calendar)
+    character(len=*), intent(in) :: calendar
+    if (trim(calendar) == 'gregorian') then
+      noleap = .false.
+    else if (trim(calendar) == 'gregorian_noleap') then
+      noleap = .true.
+    else
+      print *, 'oracle stub: mpas_timekeeping_init: calendar ', trim(calendar), ' is not compiled here'
+      stop 8
+    end if
+  end subroutine mpas_timekeeping_init
 
   logical function interval_gt(a, b)
     type(MPAS_TimeInterval_type), intent(in) :: a, b
@@ -1156,6 +1216,15 @@ contains
     if (whichTime == MPAS_START_TIME) t % s = clock % start
     if (present(ierr)) ierr = 0
   end function mpas_get_clock_time
+
+  ! the clock's step (ocn_frazil_forcing_build_arrays reads dt from it)
+  function mpas_get_clock_timestep(clock, ierr) result(dt)
+    type(MPAS_Clock_type), intent(in) :: clock
+    integer, intent(out), optional :: ierr
+    type(MPAS_TimeInterval_type) :: dt
+    dt % s = clock % step
+    if (present(ierr)) ierr = 0
+  end function mpas_get_clock_timestep
 
   subroutine mpas_set_clock(clock, startString, stepString)
     type(MPAS_Clock_type), intent(inout) :: clock
@@ -1211,10 +1280,15 @@ contains
     if (present(ierr)) ierr = 0
   end subroutine mpas_get_timeInterval
 
-  ! days since 0001-01-01 on the proleptic Gregorian calendar
+  ! days since 0001-01-01 on the proleptic Gregorian calendar, or on the
+  ! 365-day year
   integer(kind=I8KIND) function civil_days(y, mo, d)
     integer, intent(in) :: y, mo, d
     integer(kind=I8KIND) :: yy, era, yoe, doy, doe
+    if (noleap) then
+      civil_days = (int(y, I8KIND) - 1) * 365 + noleapMonthStart(mo) + d - 1
+      return
+    end if
     yy = y
     if (mo <= 2) yy = yy - 1
     era = yy / 400
@@ -1236,6 +1310,10 @@ contains
     read(dateTimeString(12:13), *) h
     read(dateTimeString(15:16), *) m
     read(dateTimeString(18:19), *) sec
+    if (.not. valid_date(y, mo, d)) then
+      print *, 'oracle stub: MPAS_setTime : Invalid date ', trim(dateTimeString)
+      stop 8
+    end if
     curr_time % s = ((civil_days(y, mo, d) * 24 + h) * 60 + m) * 60 + sec
     if (present(ierr)) ierr = 0
   end subroutine mpas_set_time
@@ -1261,6 +1339,18 @@ contains
 
     end function isLeapYear
 
+  ! isValidDate (mpas_timekeeping.F:2146-2185) on the two calendars here
+  logical function valid_date(y, mo, d)
+    integer, intent(in) :: y, mo, d
+    valid_date = .false.
+    if (mo < 1 .or. mo > 12 .or. d < 1) return
+    if (.not. noleap .and. isLeapYear(y)) then
+      valid_date = d <= daysInMonthLeap(mo)
+    else
+      valid_date = d <= daysInMonth(mo)
+    end if
+  end function valid_date
+
   ! the calendar fields ESMF_TimeGet hands back (DoY counts from 1 on 1 January)
   subroutine mpas_get_time(curr_time, YYYY, MM, DD, DoY, H, M, S, dateTimeString, ierr)
     type(MPAS_Time_type), intent(in) :: curr_time
@@ -1270,6 +1360,18 @@ contains
     integer(kind=I8KIND) :: days, rest, z, era, doe, yoe, y, yday, mp, d, mo
     days = curr_time % s / 86400
     rest = curr_time % s - days * 86400
+    if (noleap) then
+      y = days / 365 + 1
+      yday = mod(days, 365_I8KIND)
+      mo = 12
+      do while (noleapMonthStart(mo) > yday)
+        mo = mo - 1
+      end do
+      d = yday - noleapMonthStart(mo) + 1
+      call write_fields()
+      if (present(DoY)) DoY = int(yday) + 1
+      return
+    end if
     z = days + 306
     era = z / 146097
     if (z < 0 .and. mod(z, 146097_I8KIND) /= 0) era = era - 1
@@ -1282,17 +1384,23 @@ contains
     mo = mp + 3
     if (mo > 12) mo = mo - 12
     if (mo <= 2) y = y + 1
-    if (present(dateTimeString)) &
-         write(dateTimeString, '(i4.4,"-",i2.2,"-",i2.2,"_",i2.2,":",i2.2,":",i2.2)') y, mo, d, rest / 3600, &
-         mod(rest, 3600_I8KIND) / 60, mod(rest, 60_I8KIND)
-    if (present(YYYY)) YYYY = int(y)
-    if (present(MM)) MM = int(mo)
-    if (present(DD)) DD = int(d)
+    call write_fields()
     if (present(DoY)) DoY = int(days - civil_days(int(y), 1, 1)) + 1
-    if (present(H)) H = int(rest / 3600)
-    if (present(M)) M = int(mod(rest, 3600_I8KIND) / 60)
-    if (present(S)) S = int(mod(rest, 60_I8KIND))
-    if (present(ierr)) ierr = 0
+
+  contains
+
+    subroutine write_fields()
+      if (present(dateTimeString)) &
+           write(dateTimeString, '(i4.4,"-",i2.2,"-",i2.2,"_",i2.2,":",i2.2,":",i2.2)') y, mo, d, rest / 3600, &
+           mod(rest, 3600_I8KIND) / 60, mod(rest, 60_I8KIND)
+      if (present(YYYY)) YYYY = int(y)
+      if (present(MM)) MM = int(mo)
+      if (present(DD)) DD = int(d)
+      if (present(H)) H = int(rest / 3600)
+      if (present(M)) M = int(mod(rest, 3600_I8KIND) / 60)
+      if (present(S)) S = int(mod(rest, 60_I8KIND))
+      if (present(ierr)) ierr = 0
+    end subroutine write_fields
   end subroutine mpas_get_time
 
 end module mpas_timekeeping

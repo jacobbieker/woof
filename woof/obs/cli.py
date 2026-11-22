@@ -991,6 +991,16 @@ def register_cli(subparsers) -> None:
     register_streams(obs_sub)
     # GOES GLM flash extent density (rw_goes glm), as its own door.
     _register_glm(obs_sub)
+    # SatWeave's geostationary mosaic (opt-in reader; docs/satellite-imagers.md).
+    from woof.obs.satweave import register_cli as register_satweave
+    register_satweave(obs_sub)
+    # GOES ABI L1b from the bkr/geo Icechunk stores (opt-in reader; docs/satellite-imagers.md).
+    from woof.obs.geo_icechunk import register_cli as register_geo
+    register_geo(obs_sub)
+    # WIS2 Global Cache archive (bkr/obs/wis2.icechunk), in-situ families (opt-in reader;
+    # docs/dev/WRFDA-3DVAR-PLAN.md section 12).
+    from woof.obs.wis2 import register_cli as register_wis2
+    register_wis2(obs_sub)
 
 
 __all__ = ["register_cli"]

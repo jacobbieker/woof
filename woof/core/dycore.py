@@ -1323,6 +1323,70 @@ def _wrf_smag_grid_args(state: DomainState, cfg: RunConfig, *,
             np.int32(moist)]
 
 
+#: Stored u/msfu and v/msfv for wrf_smag_deform (wrf_smag_uvhat +
+#: wrf_smag_deform_hat, smag2d.cu's GPUWM_SMAG_STORED_HAT=1 tier): on by
+#: default on Metal only, where it took 9-11 % off the deformation launch
+#: (M3 Max, 49x228x276: 8.04 vs 8.88 ms minimum, 9.98 vs 11.00 ms median).
+#: On CUDA the extra pass did not pay (A6000: 5.11 ms with the stored hats
+#: vs 4.96 ms for wrf_smag_deform alone), so CUDA keeps wrf_smag_deform.  The
+#: words are the same either way (tests/test_smag_deform_hat.py).
+#: ``WOOF_SMAG_DEFORM_HAT`` forces either kernel on any backend (A/B and
+#: byte-identity checks): ``0``/``false``/``no``/``off`` selects
+#: wrf_smag_deform, any other non-empty value the stored hats; unset or
+#: empty keeps the backend default.
+_SMAG_HAT_DEFINES = (("GPUWM_SMAG_STORED_HAT", 1),)
+
+
+def _smag_deform_hat_enabled() -> bool:
+    forced = os.environ.get("WOOF_SMAG_DEFORM_HAT", "").strip().lower()
+    if forced:
+        return forced not in ("0", "false", "no", "off")
+    from woof import backend
+    return backend.active() == "mlx"
+
+
+def _disjoint(a, b) -> bool:
+    """True when two device arrays share no bytes."""
+    a0, b0 = a.data.ptr, b.data.ptr
+    return a0 + a.nbytes <= b0 or b0 + b.nbytes <= a0
+
+
+def launch_wrf_deform(state: DomainState, cfg: RunConfig, common, tensors,
+                      dims, grid, hat_slots=("diff6_x", "diff6_y"), tpb=_TPB):
+    """WRF ``cal_deform_and_div``'s D11/D22/D12 into ``tensors``.
+
+    With the stored hats on (:func:`_smag_deform_hat_enabled`, Metal by
+    default) u/msfu and v/msfv are divided once per face into the
+    ``hat_slots`` face workspaces (dead in each caller: diff6 by default,
+    smag_ru/smag_rv from the isotropic launcher) and
+    read by wrf_smag_deform_hat in place of a division at every stencil
+    point that needs them: the same division of the same operands, stored,
+    so the same words (tests/test_smag_deform_hat.py).  The hats need two
+    backings that share no bytes with each other or with the tensors; if
+    the scratch arena ever hands back overlapping ones, keep the per-point
+    division (wrf_smag_deform).
+    """
+    nz, ny, nx = tensors[0].shape
+    hats = None
+    if _smag_deform_hat_enabled() and wrf_mixing_package_active(cfg):
+        uhat = state.scratch((nz, ny, nx + 1), hat_slots[0])
+        vhat = state.scratch((nz, ny + 1, nx), hat_slots[1])
+        if _disjoint(uhat, vhat) and all(
+                _disjoint(h, t) for h in (uhat, vhat) for t in tensors):
+            hats = (uhat, vhat)
+    if hats is not None:
+        get_kernel_int_defines("smag2d", "wrf_smag_uvhat", _SMAG_HAT_DEFINES)(
+            ((nx + tpb) // tpb, ny + 1, nz), (tpb, 1, 1),
+            (common[0], common[1], common[8], common[9], *hats,
+             np.int32(nz), np.int32(ny), np.int32(nx)))
+        get_kernel_int_defines("smag2d", "wrf_smag_deform_hat", _SMAG_HAT_DEFINES)(
+            grid, (tpb, 1, 1),
+            tuple(list(common) + list(tensors) + list(dims) + list(hats)))
+    else:
+        get_kernel("smag2d", "wrf_smag_deform")(
+            grid, (tpb, 1, 1), tuple(list(common) + list(tensors) + list(dims)))
+
+
 def launch_wrf_smag2d_km(state: DomainState, cfg: RunConfig,
                           xkmh, xkhh, *, time_t: bool):
     """WRF v4.6.1 ``cal_deform_and_div`` + ``smag2d_km`` on device.
@@ -1353,8 +1417,7 @@ def launch_wrf_smag2d_km(state: DomainState, cfg: RunConfig,
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
-    get_kernel("smag2d", "wrf_smag_deform")(
-        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid)
     tail = [DTYPE(cfg.c_s), DTYPE(_PRANDTL), d11, d22, d12, xkmh, xkhh,
             np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
@@ -1431,8 +1494,10 @@ def launch_wrf_isotropic_km(state: DomainState, cfg: RunConfig,
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
-    get_kernel("smag2d", "wrf_smag_deform")(
-        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    # D22/D12 hold the face workspaces here, so the stored hats take the
+    # u/v carrying buffers, which every caller zeroes after this launch.
+    launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid,
+                      hat_slots=("smag_ru", "smag_rv"))
     kmh, kmv, khh, khv = isotropic_km_constants(
         cfg.khdif, cfg.kvdif, cfg.constant_k_prandtl)
     xkmh.fill(kmh)
@@ -1539,8 +1604,8 @@ def launch_wrf_tke_km(state: DomainState, cfg: RunConfig,
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
-    get_kernel("smag2d", "wrf_smag_deform")(
-        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    # The stored hats take diff6_x/diff6_y; BN2 borrows diff6_x after them.
+    launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid)
 
     bn2 = state.scratch((nz, ny, nx + 1), "diff6_x").reshape(-1)[:n_mass]
     bn2 = bn2.reshape((nz, ny, nx))
@@ -1653,8 +1718,8 @@ def launch_wrf_smag3d_km(state: DomainState, cfg: RunConfig,
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
-    get_kernel("smag2d", "wrf_smag_deform")(
-        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    # The stored hats take diff6_x/diff6_y; BN2 borrows diff6_x after them.
+    launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid)
 
     # calculate_N2 inputs: time-t prognostic theta/moisture, current
     # diagnostic p (refreshed against the time-t state by step() before
@@ -2295,6 +2360,14 @@ def launch_coordinate_horizontal(field, xk, mut, c1, c2, msft, msfu,
          np.int32(theta_initial is not None)))
 
 
+def coordinate_reference_missing(state, cfg) -> bool:
+    """Whether a diff_opt 1 state has lost WRF's t_init: a resumed state
+    (elapsed time) without ``diff1_theta_initial``, which
+    :func:`initialize_coordinate_reference` refuses to rebuild."""
+    return (cfg.diff_opt == 1 and "diff1_theta_initial" not in state._scratch
+            and getattr(state, "elapsed_seconds", 0.0) > 0.0)
+
+
 def initialize_coordinate_reference(state, cfg) -> None:
     """Capture WRF's t_init before the first step or streaming inventory.
 
@@ -2303,7 +2376,7 @@ def initialize_coordinate_reference(state, cfg) -> None:
     """
     if cfg.diff_opt != 1 or "diff1_theta_initial" in state._scratch:
         return
-    if getattr(state, "elapsed_seconds", 0.0) > 0.0:
+    if coordinate_reference_missing(state, cfg):
         raise RuntimeError(
             "diff_opt=1 restart is missing its original thermal reference "
             "diff1_theta_initial; reconstructing it from evolved theta "
@@ -3114,7 +3187,23 @@ def _accumulate_diff6_wrf_order(state: DomainState, cfg: RunConfig, f0, tmp,
             _zero_open_strips(budget_6, cfg, 3)
 
 
-def add_fixed_dry_tendencies(state: DomainState, cfg: RunConfig) -> None:
+def _held_slots_filled(cfg: RunConfig, held_physics: bool) -> bool:
+    """Whether any package left a term in the held ``smag_r*`` slots.
+
+    The mixing package, diff6 and observation nudging fill them on any
+    path.  Strict mode also folds into them the stage-1 lateral relaxation
+    (:func:`fold_lateral_relaxation`) and the physics tendencies
+    (:func:`_fold_physics_wrf`), which WRF's rk_addtend_dry and
+    rk_update_scalar add whatever the mixing options; strict mode zeroes the
+    slots every step (:func:`prepare_fixed_tendencies`).
+    """
+    return (wrf_mixing_package_active(cfg) or cfg.diff_6th_opt > 0
+            or bool(cfg.obs_nudge_opt)
+            or (WRF_EXACT and bool(held_physics)))
+
+
+def add_fixed_dry_tendencies(state: DomainState, cfg: RunConfig,
+                             held_physics: bool = False) -> None:
     """Add the held time-t forward tendencies to one RK slow pass.
 
     WRF ``rk_addtend_dry`` divides each held ``*_tendf`` by the target's
@@ -3125,7 +3214,8 @@ def add_fixed_dry_tendencies(state: DomainState, cfg: RunConfig) -> None:
     mixing package and diff6 left in the shared carrying buffer, both of
     which carry WRF's map factor into it.
     """
-    if not wrf_mixing_package_active(cfg) and cfg.diff_6th_opt <= 0 and not cfg.obs_nudge_opt:
+    if not (_held_slots_filled(cfg, held_physics)
+            or _wrf_relaxation_fold(cfg)):
         return
     # K values are not consumed here; the specs provide shapes/targets.
     pairs = tuple((state.scratch(f0.shape, slot), tend)
@@ -3139,11 +3229,12 @@ def add_fixed_dry_tendencies(state: DomainState, cfg: RunConfig) -> None:
         launch()
 
 
-def fixed_scalar_tendencies(state: DomainState, cfg: RunConfig):
+def fixed_scalar_tendencies(state: DomainState, cfg: RunConfig,
+                            held_physics: bool = False):
     """Return held scalar forward tendencies by Registry field name."""
-    if (state.qv is None and getattr(state, "qke_adv", None) is None
-            and cfg.bl_pbl_physics != 17 and not active_tracers(cfg)) or (not wrf_mixing_package_active(cfg)
-                            and cfg.diff_6th_opt <= 0 and not cfg.obs_nudge_opt):
+    no_scalars = (state.qv is None and getattr(state, "qke_adv", None) is None
+                  and cfg.bl_pbl_physics != 17 and not active_tracers(cfg))
+    if no_scalars or not _held_slots_filled(cfg, held_physics):
         return None
     names = [name for name in SPECIES if getattr(state, name, None) is not None]
     names += list(extra_moist_species(state))
@@ -3228,7 +3319,7 @@ def _prepare_small_step_init_launch(state: DomainState, cfg: RunConfig,
     periodic.  The uv kernel builds WRF's ``muu``/``muus`` inline and
     ``calc_mu_uv`` picks the boundary face's off-domain neighbour from
     ``periodic_x``/``periodic_y`` (module_big_step_utilities_em.F:59-115),
-    so the flag has to reach the kernel; WOOF's spelling of "not periodic"
+    so the flag has to reach the kernel; WOOF-ArWen's spelling of "not periodic"
     is ``_boundary_x``/``_boundary_y`` (open, specified, or nested), the same
     predicate ``slow_pgf`` and the advection launchers already pass.
     """
@@ -5191,6 +5282,12 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
     if stochastic_binding is not None:
         physics_tendencies = stochastic_binding.after_nonmicrophysics(
             state, cfg, physics_tendencies)
+    # --nn (woof.nn.wrf_seat): the opt-in NN column seat, on the held
+    # tendencies as the stochastic binding left them.  Absent without --nn.
+    nn_seat = getattr(state, "_nn_column_seat", None)
+    if nn_seat is not None:
+        physics_tendencies = nn_seat.after_nonmicrophysics(
+            state, cfg, physics_tendencies)
     if getattr(state, "chem", None) is not None:
         # Native SFIRE emits into tracers before RK transport. The common
         # chem driver owns its source ledger and refreshes affected time-t
@@ -5274,7 +5371,10 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
             state, physics_tendencies.rtheta, vapour,
             thermal=physics_thermal_previous)
     prepare_fixed_tendencies(state, cfg, physics_tendencies)
-    fixed_scalars = fixed_scalar_tendencies(state, cfg)
+    # Strict mode folds the physics into the held slots, so they are added
+    # even when no mixing package fills them (_held_slots_filled).
+    held_physics = physics_tendencies is not None
+    fixed_scalars = fixed_scalar_tendencies(state, cfg, held_physics)
     if WRF_EXACT:
         # Folded into the held tendencies (_fold_physics_wrf); nothing adds
         # them again, per stage or per scalar.
@@ -5326,6 +5426,11 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                                  weno=(istage == len(stages) - 1 and
                                        getattr(cfg, "momentum_adv_opt", 1) == 3))
         apply_idealized_momentum_damping(state, cfg, ru, rv)
+        if cfg.obstacle_opt:
+            # Opt-in resolved obstacles (woof.core.obstacles): every RK
+            # stage, from this stage's winds; off, nothing is imported.
+            from woof.core.obstacles import apply as apply_obstacles
+            apply_obstacles(state, cfg, ru, rv)
         if (istage == 0 or cfg.cu_physics == 16
                 or (WRF_EXACT and cfg.cu_physics == 3)):
             # WRF RTHFTEN for the cumulus schemes that take it.  THIS LINE
@@ -5346,7 +5451,7 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                 apply_w_damping(state, cfg, ww)
             if istage == 0 and _wrf_relaxation_fold(cfg):
                 fold_lateral_relaxation(state, cfg)
-            add_fixed_dry_tendencies(state, cfg)
+            add_fixed_dry_tendencies(state, cfg, held_physics)
             if physics_tendencies is not None:
                 physics_tendencies.add_to_slow(state)
             if cfg.mp_physics != 0:

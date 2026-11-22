@@ -152,10 +152,10 @@ tests/test_mpasphys_numeric_rrfs.py
 tests/test_mixing_v842_les_cuda.py
 # o4-diag-cloud-pv-soundings: complete strict-native CUDA diagnostic replay
  tests/test_mpasdiag_v842.py
-# p23-rrtmg-sw: MPAS v8.4.2 complete shortwave module.
+# MPAS v8.4.2 complete shortwave module.
 tests/test_mpas_rrtmg_sw_v842.py
 tests/test_mpas_rrtmg_sw_boundaries.py
-# p16-noah: whole CUDA module replay against strict native artifacts.
+# whole CUDA module replay against strict native artifacts.
 
 # r3-rrfs-dycore: complete strict native acoustic, scalar and tendency replays.
 tests/test_acoustic_rrfs_cuda.py
@@ -167,7 +167,7 @@ tests/test_dycore_subnormal_v842.py
 # d1-dycore-options: complete synthetic and real-column device replay entries.
 tests/test_dycore_options_cuda_v842.py
 tests/test_dycore_real_columns_cuda_v842.py
-# p19-oml: complete strict OML replay and native binding require a queued CUDA device
+# complete strict OML replay and native binding require a queued CUDA device
 tests/test_mpas_oml_v842.py
 tests/test_mpas_oml_real_v842.py
 tests/test_mpas_oml_native_binding.py
@@ -178,10 +178,10 @@ tests/test_mpasphys_interface_rrfs.py
 # r4-rrfs-physics-driver complete real microphysics handoffs
 tests/test_mpasphys_micro_interface_rrfs.py
 
-# p22-rrtmg-lw: complete strict native LW CUDA replay.
+# complete strict native LW CUDA replay.
 tests/test_mpas_rrtmg_lw_v842.py
 
-# SG2 lagged microphysics heating (release 0.4.0, lane H1): the producer, consumer, recovery and
+# SG2 lagged microphysics heating (release 0.4.0): the producer, consumer, recovery and
 # specified-zone zero kernels on a card (any CUDA device).
 tests/test_lagged_heating_sg2_kernels.py
 
@@ -200,9 +200,9 @@ tests/mpas_wb3_v842/test_mpasphys_wb3_kernels_gpu_v842.py
 # Correct mode WB5 (mpas-water-budget): whole WSM6 columns equal the native correct-mode build's mp_wsm6.F90
 # (wsm6_plm_surface off and on) word for word.
 tests/mpas_wb5_v842/test_mpasphys_wb5_columns_gpu_v842.py
-# (p9-sfclay-mm5's RP3 real-capture native referee is on home_files.txt with its held harness)
+# (the MM5 surface layer's RP3 real-capture native referee is on home_files.txt with its held harness)
 
-# p10-sf-mynn: RP3 correct-mode component recovery and subnormal device regression.
+# RP3 correct-mode component recovery and subnormal device regression.
 tests/test_mpas_sf_mynn_rp3_gpu.py
 
 # rel-hex040-dasurface: woof.hex.init_gpu's two kernel files compile from the installed package (strict IEEE, with
@@ -316,3 +316,7 @@ tests/test_tc_climate.py
 # Checkpoint runs complete their initial frame like a plain run (fix/hex-ckpt-surface-fields b58ba34d): a whole
 # x1.2562 run straight vs checkpointed vs resumed on one card; inputs from WOOF_HEX_CKPT_INIT / WOOF_HEX_CKPT_GRID.
 tests/test_checkpoint_first_frame_v842.py
+
+# Device-only files (a module-level cupy import) that were on no tier list; no tier-1 member.
+tests/test_pool_direct_v842.py
+tests/test_regional_lbc_tend_cache.py

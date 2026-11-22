@@ -112,6 +112,33 @@ def launch_options() -> tuple[str, ...]:
     return options
 
 
+def column_lanes() -> int:
+    """Threads per column for the level sums of btr_transport and the split
+    step's ss_bcl, and for monotone vertical advection: a warp (32) on CUDA,
+    where the column's loads then coalesce (and advection runs a thread per
+    cell and level), one elsewhere (Metal's serial loops are faster). Both
+    keep the Fortran's order, so both give the same words;
+    ``WOOF_OCEAN_COLUMN_LANES`` (1 or 32) picks one. 32 needs a 32-wide warp
+    or SIMD group with its shuffles, so only CUDA (not CuPy-ROCm, whose
+    wavefronts are 64 wide) and Metal take it."""
+    import os
+    from woof import backend
+    name = backend.active()
+    if name == "cuda":
+        import cupy as cp
+        if cp.cuda.runtime.is_hip:
+            name = "hip"   # CuPy-ROCm under the default backend: a 64-wide wavefront
+    lanes = os.environ.get("WOOF_OCEAN_COLUMN_LANES", "").strip()
+    if not lanes:
+        return 32 if name == "cuda" else 1
+    if lanes == "1" or (lanes == "32" and name in ("cuda", "mlx")):
+        return int(lanes)
+    raise ConfigurationRefusal(
+        knob="WOOF_OCEAN_COLUMN_LANES", value=lanes,
+        reason=f"the column sums run a warp (32, CUDA and Metal only) or a thread (1) per edge; backend {name!r}",
+        declaration="WOOF_OCEAN_COLUMN_LANES=1, or 32 on CUDA or Metal")
+
+
 def _function(precision: str, name: str):
     import cupy as cp
     options = launch_options()

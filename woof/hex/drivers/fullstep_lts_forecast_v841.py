@@ -523,7 +523,7 @@ def execute_fullstep_lts(forecast, *, native_execute, policy, host, schedule, ca
                 "cards were given, so it would run the same-host ranks, which have no balance-series sampler")
         # One class: the unchanged native executor (one card, or the same-host
         # ranks when several cards were given), before any class object exists.
-        # Its one-card step carries the IAU hook since lane W1 (woof.hex.iau_native),
+        # Its one-card step carries the IAU hook (woof.hex.iau_native),
         # which retired the refusal that stood here for want of one.
         if iau is not None or balance_series:
             native_kwargs.update(iau=iau, balance_series=balance_series)
@@ -699,6 +699,8 @@ def execute_fullstep_lts(forecast, *, native_execute, policy, host, schedule, ca
                 from woof.hex.arwen_surface_update import attach_host
                 attach_host(stack["backend"], host, schedule, output_root,
                             dt=base_dt, layout=tables.layout)
+                from woof.hex.spacewx_history import refuse_unwired as refuse_spacewx
+                refuse_spacewx(stack["backend"], "active full-step local time stepping (the class executor)")
                 if moving_resume is not None and moving_weights is not None:
                     from woof.hex.moving_ocean import restore_surface_backend
                     ocean_transfer = restore_surface_backend(stack["backend"], moving_resume,
@@ -1540,6 +1542,8 @@ def _execute_multi(forecast, *, policy, host, schedule, cache_root, output_root,
                     from woof.hex.arwen_surface_update import attach_host
                     attach_host(stack["backend"], host, schedule, output_root,
                                 dt=base_dt, layout=tables.layout)
+                    from woof.hex.spacewx_history import refuse_unwired as refuse_spacewx
+                    refuse_spacewx(stack["backend"], "active full-step local time stepping (the class executor)")
                     if moving_resume is not None and not same_partition:
                         from woof.hex.moving_ocean import restore_surface_backend
                         with physics_lock:
