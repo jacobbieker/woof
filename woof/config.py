@@ -77,14 +77,15 @@ def validate_surface_radiation_policy(policy: str) -> str:
 @dataclass(frozen=True)
 class RunConfig:
     def __post_init__(self):
-        # woof_quirk_corrections = 'all' (woof.quirk_corrections): every
-        # correction whose scheme this run carries is on, however the
-        # RunConfig was built.  The TOML readers refuse an explicit
+        # woof_quirk_corrections = 'all' (woof.quirk_corrections): each
+        # RunConfig correction is on exactly where its scheme runs, however
+        # the RunConfig was built (a dataclasses.replace that changes the
+        # scheme re-derives it).  The TOML readers refuse an explicit
         # conflicting key before this point (apply_run_corrections).
         if self.woof_quirk_corrections == "all":
-            from woof.quirk_corrections import run_corrections_due
-            for key in run_corrections_due(self):
-                object.__setattr__(self, key, True)
+            from woof.quirk_corrections import run_corrections_under_all
+            for key, value in run_corrections_under_all(self).items():
+                object.__setattr__(self, key, value)
         if self._legacy_h_sca is None:
             object.__setattr__(self, "_legacy_h_sca", self.h_sca_adv_order is None)
         if self.h_sca_adv_order is None:
