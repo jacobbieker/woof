@@ -428,8 +428,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     thermodynamics `update_snow_bgc` divides 0/0 for a category the last
     step opened, and `oceanBioFluxes` is NaN). The z-aerosols
     (`config_use_zaerosols`: two black carbons and a dust, alone or with the
-    nonreactive tracer) run in the init and `column_biogeochemistry`, word
-    for word with v8.4.2; the opt-in correction `zaero_snow_scavenging`
+    nonreactive tracer) run in the init, `column_biogeochemistry`, the ITD
+    thermodynamics and the ridging, word for word with v8.4.2; the opt-in correction `zaero_snow_scavenging`
     gives each its own snow scavenging, where v8.4.2 indexes the table by
     list position and gives all three 0.03. The other stages still refuse
     them by name. The other biogeochemistry
