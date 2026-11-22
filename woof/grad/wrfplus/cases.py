@@ -400,6 +400,8 @@ def _vertical(nz, rng, hybrid):
     # hypsometric_opt 2's pressure coefficients (non-hybrid: c3 = eta,
     # c4 = 0; hybrid: c3 = c1, c4 = c2 times the column scale, as WRF).
     c1f = np.sqrt(np.clip(eta, 0.0, None)) if hybrid else np.ones(nz + 1)
+    out["c1f"] = c1f
+    out["c2f"] = (1.0 - c1f) * 5000.0 if hybrid else np.zeros(nz + 1)
     out["c3h"] = out["c1h"] * znu if hybrid else znu.copy()
     out["c4h"] = out["c2h"] * znu if hybrid else np.zeros(nz)
     out["c3f"] = c1f * eta if hybrid else eta.copy()
@@ -1313,7 +1315,7 @@ _HD_FIELD = {"u": (10.0, 5.0), "v": (-4.0, 5.0), "w": (0.0, 0.5), "t": (5.0, 2.0
 def hd_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
     """Host state of wrf_diff_opt1_horizontal: the row's field (winds of
     10 m/s with 5 m/s noise, w of 0.5 m/s, theta - 300 of 5 K with 2 K
-    noise and an initial field within 1 K of it, a moisture-like scalar),
+    noise and an initial field 1 K (rms) from it, a moisture-like scalar),
     coefficients spread over 30-3000 m2/s, a column mass of 9e4 Pa with
     500 Pa noise, map factors near 1, a nonzero starting tendency and the
     half- (w: full-) level c1, c2 (``hybrid``: c1 < 1, c2 > 0)."""
@@ -1329,9 +1331,7 @@ def hd_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) ->
     if geom.perturb:
         out["base"] = out["field"] + rng.standard_normal(sh["base"])
     if geom.stag == 3:
-        eta = v["znw"]
-        c1 = np.sqrt(np.clip(eta, 0.0, None)) if hybrid else np.ones(geom.nz + 1)
-        out["c1"], out["c2"] = c1, ((1.0 - c1) * 5000.0 if hybrid else np.zeros(geom.nz + 1))
+        out["c1"], out["c2"] = v["c1f"], v["c2f"]
     else:
         out["c1"], out["c2"] = v["c1h"], v["c2h"]
     for n in ("msft", "msfu", "msfv"):

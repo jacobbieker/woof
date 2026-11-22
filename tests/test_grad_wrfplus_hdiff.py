@@ -183,9 +183,9 @@ def test_wrfplus_oracle_agreement(backend, tmp_path):
     """woof's TL/AD reproduce WRFPLUS 4.7.1 G_/A_HORIZONTAL_DIFFUSION (u,
     v, w and a scalar row) and g_/a_horizontal_diffusion_3dmp (theta),
     on periodic and specified axes with map factors, c1 = 1 and c2 = 0
-    (WRFPLUS's rows take mut as the mass).  A periodic axis's end face
-    repeats face 0: the field adjoints of faces 0 and nx (ny) are compared
-    as a sum (woof reads face 0 for both, WRF its halo)."""
+    (WRFPLUS's rows take mut as the mass).  On a periodic axis both put
+    the end face's field adjoint on face 0 (the fixture folds WRF's halo
+    there) and leave the end face zero."""
     if not FIXTURE.exists():
         pytest.skip("tests/data/wrfplus/hdiff.npz not built")
     dtn = "float32" if backend == "mlx" else "float64"
@@ -208,12 +208,7 @@ for case in sorted({{k.split("/")[0] for k in z.files if "/" in k}}):
         if not k.startswith(pre + "wrfplus/"):
             continue
         name = k.split("/", 2)[2]
-        e, w = z[k].copy(), cp.asnumpy(got[name]).astype(np.float64)
-        for x in (e, w):
-            if name == "ad_field" and g.row == "u" and not g.boundary_x:
-                x[..., 0] += x[..., -1]; x[..., -1] = 0
-            if name == "ad_field" and g.row == "v" and not g.boundary_y:
-                x[..., 0, :] += x[..., -1, :]; x[..., -1, :] = 0
+        e, w = z[k], cp.asnumpy(got[name]).astype(np.float64)
         scale = max(float(np.abs(e).max()), 1e-300)
         out[pre + name] = float(np.abs(w - e).max()) / scale
 ''', tmp_path)
