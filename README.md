@@ -1310,7 +1310,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
   `wrf_diff_opt1_km4` word for word, and they match WRFPLUS to about
   4e-16, except at the top level of a periodic seam, where WRF keeps a
-  cold-zero slope and woof the true one.
+  cold-zero slope and woof the true one. The rows that use them
+  (`hd_tl/hd_ad`: WRF `horizontal_diffusion` for u, v, w and scalars,
+  `horizontal_diffusion_3dmp` for theta) reproduce woof's strict
+  `wrf_diff_opt1_horizontal` and match WRFPLUS to about 1e-16.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
