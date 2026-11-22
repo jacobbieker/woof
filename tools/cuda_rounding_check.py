@@ -310,8 +310,9 @@ def inventory(root: Path) -> dict:
 #: Kernel files the runtime compiles on their own routes, with their own
 #: headers, defines and options. The generic loader's composition of these
 #: files does not compile; composed_units audits what each route compiles.
-DEDICATED_ROUTES = frozenset({"acm2pbl", "eeps", "etanew", "gbmpbl", "nextgen_cfe",
-                              "nextgen_reservoirs", "snow_papers", "vortex_init"})
+DEDICATED_ROUTES = frozenset({"acm2pbl", "eeps", "etanew", "gbmpbl", "mynnsfc_b66187f",
+                              "nextgen_cfe", "nextgen_reservoirs", "snow_papers",
+                              "vortex_init"})
 #: EEPS's column depth is a compile-time define (woof/core/eeps_pbl.py). The
 #: audit compiles WRF's default 45 staggered levels, i.e. 44 mass levels.
 EEPS_AUDIT_NZ = 44
@@ -487,6 +488,7 @@ def dedicated_route_units(root: Path) -> list[Unit]:
     acm2 = module("core.acm2pbl")
     etanew = module("core.etanew")
     gbm = module("core.gbmpbl")
+    mynnsfc = module("core.mynnsfc_b66187f")
     cfe = module("hydro.cfe")
     reservoirs = module("hydro.reservoirs")
     eeps_options = K.module_options("eeps")
@@ -503,6 +505,9 @@ def dedicated_route_units(root: Path) -> list[Unit]:
         Unit(f"composed:eeps[EEPS_NZ={EEPS_AUDIT_NZ}]",
              K.module_source_int_defines("eeps", (("EEPS_NZ", EEPS_AUDIT_NZ),), kernel_dir=kdir),
              effective_options(eeps_options)),
+        # mynnsfc_b66187f.module(): SL_* defines + mynn_libm.cuh + the unit.
+        Unit("composed:mynnsfc_b66187f", mynnsfc.module_source(),
+             effective_options(mynnsfc.OPTIONS)),
         # cfe._compile_cfe(strict).
         Unit("composed:nextgen_cfe", cfe._cfe_source()[1],
              effective_options(("-std=c++17", "--ftz=false") + ieee)),
