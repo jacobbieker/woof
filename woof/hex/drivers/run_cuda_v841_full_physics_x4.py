@@ -4528,6 +4528,16 @@ def write_snapshot_netcdf(
                 variable = dataset.createVariable(name, 'f4', ('Time', *dimensions), zlib=True, complevel=1)
                 variable.setncattr('units', unit)
                 write_variable(variable, array[None])
+        if snapshot.get('spacewx_fields'):
+            # spacewx_ionosphere_opt (woof.hex.spacewx_history): one value per cell at the frame's valid time.
+            from woof.hex.spacewx_history import long_name
+            for name, (array, dimensions, unit) in snapshot['spacewx_fields'].items():
+                if tuple(dimensions) != ('nCells',) or len(dataset.dimensions['nCells']) != array.shape[0]:
+                    raise ValueError(f'spacewx field {name}: {array.shape} is not one value per history cell')
+                variable = dataset.createVariable(name, 'f4', ('Time', 'nCells'), zlib=True, complevel=1)
+                variable.setncattr('units', unit)
+                variable.setncattr('long_name', long_name(name))
+                write_variable(variable, array[None])
     record = {"path": str(path), "bytes": path.stat().st_size}
     if _hash_file:
         record["sha256"] = sha256_file(path)

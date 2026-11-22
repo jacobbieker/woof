@@ -246,6 +246,18 @@ def parameter_value(name: str, value: Any, checkout: str | Path | None = None) -
     return typed
 
 
+@lru_cache(maxsize=1)
+def _string_fields() -> frozenset[str]:
+    """The RunConfig fields declared ``str``."""
+    import dataclasses
+    from woof.config import RunConfig
+    return frozenset(item.name for item in dataclasses.fields(RunConfig) if item.type in (str, "str"))
+
+
+def _string_field(name: str) -> bool:
+    return name in _string_fields()
+
+
 def setting_value(name: str, value: Any, checkout: str | Path | None = None) -> Any:
     """One engine setting outside hex's nine selector keys, typed.
 
@@ -264,8 +276,15 @@ def setting_value(name: str, value: Any, checkout: str | Path | None = None) -> 
             return found.assignments[name]
     if parameter_row(name, checkout) is not None:
         return parameter_value(name, value, checkout)
+    if _string_field(name) and isinstance(value, (int, float)) and not isinstance(value, bool):
+        # A number given for a RunConfig string (a TOML/JSON spacewx_kp_source = 5) is that string.
+        return str(value)
     if isinstance(value, str):
         text = value.strip().strip("'\"")
+        if _string_field(name):
+            # A RunConfig string (spacewx_f107_source=150 is a flux in sfu, spacewx_kp_source=5 a Kp): its
+            # validator types it, so a number-like spelling stays the text the user wrote.
+            return text
         lowered = text.lower().strip(".")
         if lowered in ("true", "false"):
             return lowered == "true"
