@@ -456,10 +456,10 @@ def _synthetic_orographic_static(cfg, grid) -> dict:
     gwd_opt = int(getattr(cfg, "gwd_opt", 0) or 0)
     if not (topo_wind or gwd_opt):
         return {}
-    from woof.static.orographic import required_static_fields
+    from woof.static.orographic import drag_static_fields, gwdo_version_of
 
     static = {"HGT_M": np.zeros(grid, dtype=np.float32)}
-    for name in required_static_fields(topo_wind, gwd_opt):
+    for name in drag_static_fields(topo_wind, gwd_opt, gwdo_version_of(cfg)):
         static[name] = np.full(grid, _SYNTHETIC_OROGRAPHY_VALUE.get(name, 0.1), dtype=np.float32)
     return {"terrain_drag_static": static}
 

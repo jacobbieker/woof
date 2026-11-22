@@ -221,6 +221,8 @@ def static_modules(experiment) -> tuple[str, ...]:
             modules.update({"noah_fractional", "noah_seaice_options"})
             if getattr(run, "sf_sfclay_physics", 0) == 1:
                 modules.add("sfclay_dx2d")
+        if getattr(run, "kim_tofd", False) and getattr(run, "sf_sfclay_physics", 0) == 1:
+            modules.add("sfclay_tofd")
     return tuple(sorted(modules))
 
 
@@ -337,7 +339,7 @@ def _variant_jobs(experiment, modules):
     from woof.core.kernel_shape import FUNCTIONS, shape_defines
     from woof.core.thompson_aerosol_launch import AEROSOL_KERNEL_MODULES, WRF39_DEFINES
     from woof.ingest.lateral_bc import relaxation_shapes
-    from woof.core.mynn_sfclay import mynn_surface_defines
+    from woof.core.mynn_sfclay import MYNN_SFCLAY_DEFINES, mynn_surface_defines
 
     jobs, seen = [], set()
     runs = [dc.run for dc in getattr(experiment, "domains", ()) if hasattr(dc, "run")]
@@ -352,8 +354,12 @@ def _variant_jobs(experiment, modules):
             elif name == "mynn_pbl" and getattr(run, "bl_mynn_version", "") == "gsd_41":
                 defines = (("MYNN_GSD41", 1),)
             elif name == "mynn_surface":
-                defines = mynn_surface_defines(getattr(run, "mynn_sfclay_variant", "wrf_461"),
-                                               getattr(run, "mynn_sfclay_psih_zolzt", False) is True)
+                # mynnsfc_b66187f (WRF v4.8.0 MYNN-SFC) is its own unit,
+                # compiled at its first call; mynn_surface keeps its default.
+                variant = getattr(run, "mynn_sfclay_variant", "wrf_461")
+                defines = (mynn_surface_defines(variant,
+                                                getattr(run, "mynn_sfclay_psih_zolzt", False) is True)
+                           if variant in MYNN_SFCLAY_DEFINES else ())
             tiers = [defines] if defines else []
             if name == "advection":
                 if getattr(run, "momentum_adv_opt", 1) == 3:
@@ -382,6 +388,16 @@ def _variant_jobs(experiment, modules):
                           [(nz, ny, nx)])
                 tiers.extend(defines + shape_defines(name, FUNCTIONS[name][0], shape)
                              for shape in shapes)
+                if (name == "mynn_pbl"
+                        and int(getattr(run, "bl_pbl_physics", 0) or 0) == 5
+                        and getattr(run, "mynn_boulac_down_sign", False) is True
+                        and getattr(run, "bl_mynn_version", "wrf_461") in ("wrf_461", "gsd_41")):
+                    # Correct-mode ML1 compiles the two mixing-length kernels
+                    # with its define (woof/core/mynn_pbl_gpu.py); the other
+                    # MYNN kernels keep the tiers above.
+                    # Neither of them is a shaped function (kernel_shape.FUNCTIONS).
+                    from woof.core.mynn_pbl_gpu import MYNN_BOULAC_DOWN_SIGN_DEFINE
+                    tiers.append(defines + MYNN_BOULAC_DOWN_SIGN_DEFINE)
             for tier in tiers:
                 if (name, tier) in seen:
                     continue
@@ -442,6 +458,7 @@ _DEVICE_LOADERS = {
     "acm2pbl_composed": ("acm2pbl", "_module"),
     "gbmpbl_composed": ("gbmpbl", "_module"),
     "terrain_drag_composed": ("terrain_drag", "_module"),
+    "terrain_drag_gwdo480_composed": ("terrain_drag", "_gwdo480_module"),
     "fogdes_composed": ("fog_settling", "_module"),
     "thompson_fork_unit": ("thompson_fork", "_module"),
     # wind_farm_scheme = "fitch_wrf" (WRF's windfarm_opt = 1): its own direct
