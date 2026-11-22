@@ -443,11 +443,13 @@ def _native_route(arguments: Any, *, default_mode: str = 'exact'):
         refusal = mpas_route_refusal(named)
         if refusal is not None:
             raise ValueError(refusal)
+    spacewx = {}
     if config is not None and overrides:
         # Reconstruct one native physics group so parse_fortran_namelist never
         # discards a repeated group. WOOF-only selectors have no Registry row.
         groups = {name:dict(options) for name,options in parse_fortran_namelist(text).items()}
         tc_surface = {}
+        from ..mpasdiag import spacewx_diag_v842 as _spacewx
         for override in overrides:
             key, separator, value = override.partition('=')
             if not separator:
@@ -458,6 +460,11 @@ def _native_route(arguments: Any, *, default_mode: str = 'exact'):
             option = key.strip().casefold()
             if option in ('tc_flux_curve', 'tc_spray'):
                 tc_surface[option] = value.strip().strip("\"'")
+                continue
+            if _spacewx.is_key(option):
+                # WRF's space-weather history keys go to the route's own rows (mpasdiag.spacewx_diag_v842), never
+                # into a namelist; every other WRF key still reaches the Registry check and is refused by name.
+                spacewx[option] = value
                 continue
             registry_groups = spec.get('registry_groups',{})
             owners = [name for name,keys in registry_groups.items() if option in keys]
@@ -477,6 +484,9 @@ def _native_route(arguments: Any, *, default_mode: str = 'exact'):
     if config is not None and overrides and tc_surface:
         from .tc_surface import configure
         config = configure(config, tc_surface)
+    if config is not None and spacewx:
+        from ..mpasdiag.spacewx_diag_v842 import configure as configure_spacewx
+        config = configure_spacewx(config, spacewx)
     return config, text
 
 

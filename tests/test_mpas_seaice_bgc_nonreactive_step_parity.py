@@ -131,16 +131,29 @@ def test_the_stages_that_do_not_carry_them_still_refuse_them():
         cv.refuse_unported(case["config"], {**case["dims"], "nSnowLayers": 1}, biogeochemistry=True)
 
 
-@pytest.mark.parametrize("correction, refuse", [
-    (cstep.SUBCYCLE_SNOW_ICE, lambda c: cstep.check_config(c["config"])),
-    (cbgc.SNOW_NEW_CATEGORY, lambda c: cbgc.refuse_unported(c["config"], c["dims"])),
+@pytest.mark.parametrize("name, correction, refuse", [
+    (DEDD, cstep.SUBCYCLE_SNOW_ICE, lambda c: cstep.check_config(c["config"])),
+    (NO_THERM, cbgc.SNOW_NEW_CATEGORY, lambda c: cbgc.refuse_unported(c["config"], c["dims"])),
 ])
-def test_a_correction_without_the_vertical_tracers_is_refused(correction, refuse):
-    case = _case(DEDD, correction)
+def test_a_correction_without_the_vertical_tracers_is_refused(name, correction, refuse):
+    case = _case(name, correction)
     refuse(case)
     case["config"] = {**case["config"], cv.VT_FLAG: False, "config_use_nonreactive": False}
     with pytest.raises(ConfigurationRefusal, match=correction):
         refuse(case)
+    # under woof_quirk_corrections = 'all' alone it is on but changes nothing, so not refused
+    case["config"] = {**case["config"], "woof_v842_corrections": (), "woof_quirk_corrections": "all"}
+    assert correction in cv.corrections(case["config"])
+    refuse(case)
+
+
+def test_bgc_snow_new_category_with_the_vertical_thermodynamics_is_refused():
+    # every category update_snow_bgc reaches then has an initial area: the correction means nothing
+    case = _case(DEDD, cbgc.SNOW_NEW_CATEGORY)
+    assert case["config"]["config_use_column_vertical_thermodynamics"]
+    with pytest.raises(ConfigurationRefusal, match=cbgc.SNOW_NEW_CATEGORY):
+        cbgc.refuse_unported(case["config"], case["dims"])
+    cbgc.refuse_unported(_case(NO_THERM, cbgc.SNOW_NEW_CATEGORY)["config"], case["dims"])
 
 
 @requires_gpu
@@ -151,11 +164,18 @@ def test_gpu_matches_the_oracle_word_for_word(glibc239):
     assert not any(bad.values()), bad
 
 
-def test_a_nan_matches_any_nan_but_nothing_else():
-    # the NaN's sign and payload are the processor's (Metal's soft float flips the sign of this one)
-    nan, neg = np.float64(np.nan), -np.float64(np.nan)
-    assert co.nan_word_mismatches(np.array([nan, 1.0]), np.array([neg, 1.0])) == 0
-    assert co.nan_word_mismatches(np.array([nan, 0.0]), np.array([1.0, -0.0])) == 2
+def test_only_the_named_fields_nan_may_flip_its_sign_and_only_on_metal():
+    # Metal's soft float gives update_snow_bgc's 0/0 the opposite sign to x86's
+    nan = np.float64(np.nan)
+    neg = -nan
+    other = np.array([0x7FF8000000000001], dtype=np.uint64).view(np.float64)[0]
+    assert co.nan_word_mismatches(np.array([nan, 1.0]), np.array([neg, 1.0]), FLUX, metal=True) == 0
+    assert co.nan_word_mismatches(np.array([nan, 1.0]), np.array([neg, 1.0]), FLUX, metal=False) == 1
+    assert co.nan_word_mismatches(np.array([nan, 0.0]), np.array([1.0, -0.0]), FLUX, metal=True) == 2
+    assert co.nan_word_mismatches(np.array([nan]), np.array([other]), FLUX, metal=True) == 1
+    assert co.nan_word_mismatches(np.array([nan]), np.array([neg]), "biogeochemistry/oceanNitrateFlux",
+                                  metal=True) == 1
+    assert co.NAN_SIGN_FIELDS == {FLUX}
 
 
 def _mismatches(names, *fields):

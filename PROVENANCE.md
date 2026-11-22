@@ -193,10 +193,10 @@ bytes are outside the numerical oracle.
   `cupy.cuda.compiler` line 585 (`options += ('-ftz=true',)`), after the
   caller's options, and NVRTC honours the last occurrence.
   The inventory records 15 distinct caller-supplied option tuples across the
-  339 compile sites in the shipped package, each listed here with a site
+  340 compile sites in the shipped package, each listed here with a site
   that supplies it:
   - caller options passed as a name or call the scan does not evaluate --
-    `woof/backend/__init__.py:243` (self.xp.RawModule), and 208 other
+    `woof/backend/__init__.py:243` (self.xp.RawModule), and 209 other
     site(s)
   - no caller options -- `woof/backend/facade/_ops.py:355`
     (ElementwiseKernel), and 63 other site(s)
@@ -214,7 +214,7 @@ bytes are outside the numerical oracle.
     other site(s)
   - `--std=c++17` `--use_fast_math` -- `woof/hex/waves.py:486`
     (cp.RawModule), and 1 other site(s)
-  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:1315`
+  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:1330`
     (cp.RawModule), and 1 other site(s)
   - `-std=c++17` `--fmad=false` `--ftz=false` --
     `woof/core/thompson_fork.py:109` (compiler.compile_using_nvrtc), and 1
@@ -224,7 +224,7 @@ bytes are outside the numerical oracle.
   - `--std=c++17` a target flag built from the device architecture at run
     time -- `woof/ocean/waves/model.py:73` (cp.RawModule)
   - `-std=c++17` `--maxrregcount=112` --
-    `woof/core/kernels/__init__.py:1287` (cp.RawModule)
+    `woof/core/kernels/__init__.py:1302` (cp.RawModule)
   - a target flag built from the device architecture at run time a target
     flag built from the device architecture at run time --
     `woof/hex/mpasphys/surface_update_v842.py:150`

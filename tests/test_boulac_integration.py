@@ -137,7 +137,9 @@ def test_the_launcher_bound_is_the_contract_bound():
     kernel = (ROOT / "woof/core/kernels/boulac.cu").read_text(
         encoding="utf-8")
     from woof.physics_vertical_contract import BOULAC_VERTICAL_LEVEL_BOUNDS
-    assert BOULAC_VERTICAL_LEVEL_BOUNDS == (3, 128)
+    # The source keeps its 128 default (the unchanged tier); the launcher
+    # compiles 256 above it (tests/test_pbl_qnse_boulac_256_levels.py).
+    assert BOULAC_VERTICAL_LEVEL_BOUNDS == (3, 256)
     assert "#define BOULAC_KMAX 128" in kernel
     assert "nz > BOULAC_KMAX || nz < 3" in kernel
 

@@ -1835,17 +1835,34 @@ def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray] | Non
 word_mismatches = _stream.word_mismatches
 
 
-def nan_word_mismatches(got, want) -> int:
-    """:func:`word_mismatches` with a NaN matching any NaN (the step's and the
-    coupled step's fields): v8.4.2 lets a NaN through (``bgc_snow_new_category``
-    on a new category, ``oceanBioFluxes``), and the word a NaN takes through
-    an operation (its sign and payload) is the processor's, x86's, the GPU's
-    or Metal's soft float's, outside the word-for-word claim."""
+#: the only fields whose NaN may differ from the oracle's in its sign bit: v8.4.2's
+#: update_snow_bgc divides 0/0 there without the vertical thermodynamics (a category the
+#: last step's ITD opened keeps iceAreaCategoryInitial 0; quirk bgc_snow_new_category),
+#: and Metal's soft float gives that NaN the opposite sign to x86's (CUDA keeps x86's)
+NAN_SIGN_FIELDS = frozenset({"biogeochemistry/oceanBioFluxes"})
+
+
+def nan_word_mismatches(got, want, key: str, metal: bool | None = None) -> int:
+    """:func:`word_mismatches`, except that on Metal (``metal``, by default
+    the active backend's being mlx) a NaN in both in :data:`NAN_SIGN_FIELDS`
+    may differ in its sign bit (its payload must still match). CUDA, every
+    other field, and every word that is not a NaN in both stay bitwise."""
+    if metal is None:
+        from woof import backend
+        metal = backend.active() == "mlx"
     got, want = np.asarray(got), np.asarray(want)
-    if got.shape != want.shape or got.dtype.kind != "f" or want.dtype.kind != "f":
+    if (not metal or key not in NAN_SIGN_FIELDS or got.shape != want.shape or got.dtype != want.dtype
+            or got.dtype.kind != "f"):
         return word_mismatches(got, want)
     both = np.isnan(got) & np.isnan(want)
-    return word_mismatches(np.where(both, 0.0, got).astype(got.dtype), np.where(both, 0.0, want).astype(want.dtype))
+    if not both.any():
+        return word_mismatches(got, want)
+    view = np.dtype(f"u{got.dtype.itemsize}")
+    sign = view.type(1) << view.type(8 * got.dtype.itemsize - 1)
+    g, w = got.view(view).copy(), want.view(view).copy()
+    g[both] &= ~sign
+    w[both] &= ~sign
+    return int(np.count_nonzero(g != w))
 
 
 def changed_fields(case: dict, outputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
@@ -1952,7 +1969,7 @@ def _run_seaice_step(dev: dict, config: dict) -> tuple[tuple, int]:
     from woof.hex.mpas_seaice import timestep_v842 as ts
     dev["diagnostics"]["xtime"] = config["diagnostics:xtime"]
     dev["diagnostics"]["simulationStartTime"] = config["diagnostics:simulationStartTime"]
-    clock = ts.initialize(pools=dev, configs=config)
+    clock = ts.initialize(pools=dev, configs=config, basis="input")
     n_steps = int(config["oracle_n_steps"])
     try:
         ts.advance(pools=dev, configs=config, clock=clock, n_steps=n_steps,
@@ -1977,7 +1994,7 @@ def measure_coupled(reference: dict | None = None, logs: dict | None = None, *, 
         row = {"abort": int(tuple(state.abort) != oracle_step_abort(log)),
                "step": int(got[SEAICE_STEP_KEY][0] != log["tracer_object"]["STEP"][0])}
         want = expected_outputs(case, reference.get(case["name"], {}))
-        row.update({key: nan_word_mismatches(got[key], want[key]) for key in want})
+        row.update({key: nan_word_mismatches(got[key], want[key], key) for key in want})
         mine = state.tracers.log_rows()
         row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
         report[case["name"]] = row
@@ -2244,7 +2261,7 @@ def measure_step(reference: dict | None = None, logs: dict | None = None, *, row
         row = {"abort": int(tuple(state.abort) != oracle_step_abort(log)),
                "warnings": int(state.warnings != oracle_ridge_warnings(log))}
         want = expected_outputs(case, reference.get(case["name"], {}))
-        row.update({key: nan_word_mismatches(got[key], want[key]) for key in want})
+        row.update({key: nan_word_mismatches(got[key], want[key], key) for key in want})
         mine = state.tracers.log_rows()
         row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
         report[case["name"]] = row
