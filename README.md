@@ -297,8 +297,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     coupler's land-ice means; standalone, in the diagnostics and over forward
     steps; 'HollandJenkins' is refused by name), and the Gent-McWilliams
     bolus velocity (`ocn_gm_compute_Bolus_velocity`: isoneutral slopes,
-    their smoothing and tapering, `k33`, the stream function's solve;
-    standalone, not yet wired into the step). Three v8.4.2 quirks keep
+    their smoothing and tapering, `k33`, the stream function's solve) and
+    Redi isoneutral mixing (`ocn_tracer_hmix_redi_tend`'s three horizontal
+    terms, and `k33` in the vertical diffusivity, which v8.4.2 adds without
+    `config_Redi_kappa`; `woof_redi_k33 = 'kappa'` scales it), standalone,
+    in the split-explicit step (GM before the implicit mixing and after the
+    last diagnostics, the bolus velocity in the transport, Redi in the
+    tracer tendency, `ocn_reconstruct_gm_vectors`) and over forward steps
+    (the cold start's bolus transport); off by default. Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
@@ -1124,13 +1130,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
   forecast, and `spacewx_ionosphere_opt = 2` applies the storm-time
   correction there too (plus its ratio `IONO_STORM`), from GFZ's ap with the
-  latest observed ap persisted past the start; hex and streamed domains
-  refuse both for now. `woof spacewx aurora`
+  latest observed ap persisted past the start; hex's generic column seam
+  writes the same rows per cell, hex's MPAS v8.4.2 suite route writes them per
+  cell from `--physics` (the aurora rows too), and streamed domains refuse both
+  for now. `woof spacewx aurora`
   places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
   oval (`AURORA_ZONE`, `AURORA_DIST`, `MAG_LAT`, `MAG_LT`) into every WRF-route
-  history frame from the start's Kp. `woof spacewx aurora --energy` adds the
+  history frame from the start's Kp (on hex's generic column seam too, per
+  cell). `woof spacewx aurora --energy` adds the
   precipitating electron and ion energy and number fluxes and the hemispheric
   power of OVATION Prime 2010 (a port of NOAA's public-domain IDL code, which
   reproduces its test outputs; the coefficients are fetched and pinned), and
@@ -1269,13 +1278,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`Window.tl(dx0, partial=True)`). It can also linearise about a
   supplied trajectory instead of its own dry rerun, as WRFPLUS does
   about the nonlinear run's states (`Window.forward(trajectory=...)`).
-  The first moist pieces exist as kernels but are not yet in the step:
-  `calc_cq` (qv, or qv, qc and qr), the pressure gradient's cqu/cqv, the
-  moist buoyancy, the diagnosis's qv (WRF's `qvf`), moist scalar
-  transport (sumflux and the non-PD scalar update,
-  `woof.grad.wrfplus.scalar`), and the moist boundary rows (qv's
-  relaxation and spec_bdy_final, flow_dep_bdy for hydrometeors). The
-  forecast path does not import any of it.
+  The step also covers a moist state without microphysics (qv, qc and
+  qr: calc_cq, the moist pressure gradient, buoyancy and diagnosis,
+  sumflux and the non-PD scalar update, and qv's boundary rows with
+  flow_dep_bdy for qc and qr). The forecast path does not import any of
+  it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8

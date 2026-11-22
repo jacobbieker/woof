@@ -2481,9 +2481,21 @@ def _validate_solar_ssi(cfg) -> None:
 
 def _validate_spacewx_ionosphere(cfg) -> None:
     """spacewx_ionosphere_opt and its keys (woof.spacewx.history)."""
-    opt = cfg.spacewx_ionosphere_opt
-    source, mode, maps = (cfg.spacewx_f107_source, cfg.spacewx_f107_mode,
-                          cfg.spacewx_ionosphere_maps)
+    if not validate_spacewx_ionosphere_keys(
+            cfg.spacewx_ionosphere_opt, cfg.spacewx_f107_source,
+            cfg.spacewx_f107_mode, cfg.spacewx_ionosphere_maps):
+        return
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            f"spacewx_ionosphere_opt = {cfg.spacewx_ionosphere_opt} places the ionosphere on the radiation "
+            "geometry's columns, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def validate_spacewx_ionosphere_keys(opt, source, mode, maps) -> bool:
+    """spacewx_ionosphere_opt and its keys; True when the rows are on.
+    Shared by the WRF route and hex's MPAS suite route, whose rows sit on
+    the cell centres whatever the radiation."""
     if type(opt) is not int or opt not in (0, 1, 2):
         raise ConfigurationRefused(
             f"spacewx_ionosphere_opt={opt!r} must be 0 (no ionosphere), 1 "
@@ -2506,7 +2518,7 @@ def _validate_spacewx_ionosphere(cfg) -> None:
                 "spacewx_f107_source/spacewx_f107_mode/spacewx_ionosphere_maps "
                 "are set but spacewx_ionosphere_opt = 0, so they would do "
                 "nothing; set spacewx_ionosphere_opt = 1 or drop them")
-        return
+        return False
     from woof.spacewx.history import IonosphereHistoryError, parse_f107_source
     try:
         kind, _value = parse_f107_source(source)
@@ -2516,16 +2528,25 @@ def _validate_spacewx_ionosphere(cfg) -> None:
         raise ConfigurationRefused(
             "spacewx_ionosphere_opt = 2 reads ap from the GFZ index file, so "
             "spacewx_f107_source must be 'gfz' or a GFZ-format file, not a number")
-    if not radiation_enabled(cfg):
-        raise ConfigurationRefused(
-            f"spacewx_ionosphere_opt = {opt} places the ionosphere on the radiation "
-            "geometry's columns, and no radiation scheme is on "
-            "(ra_lw_physics = ra_sw_physics = 0)")
+    return True
 
 
 def _validate_spacewx_aurora(cfg) -> None:
     """spacewx_aurora_opt and its key (woof.spacewx.aurora_history)."""
-    opt, source = cfg.spacewx_aurora_opt, cfg.spacewx_kp_source
+    opt = cfg.spacewx_aurora_opt
+    if not validate_spacewx_aurora_keys(opt, cfg.spacewx_kp_source):
+        return
+    if not radiation_enabled(cfg):
+        raise ConfigurationRefused(
+            f"spacewx_aurora_opt = {opt} places the auroral oval on the radiation "
+            "geometry's columns, and no radiation scheme is on "
+            "(ra_lw_physics = ra_sw_physics = 0)")
+
+
+def validate_spacewx_aurora_keys(opt, source) -> bool:
+    """spacewx_aurora_opt and spacewx_kp_source; True when the rows are on.
+    Shared by the WRF route and hex's MPAS suite route, whose rows sit on
+    the cell centres whatever the radiation."""
     if type(opt) is not int or opt not in (0, 1, 2, 3):
         raise ConfigurationRefused(
             f"spacewx_aurora_opt={opt!r} must be 0 (no aurora), 1 (the auroral "
@@ -2538,7 +2559,7 @@ def _validate_spacewx_aurora(cfg) -> None:
             raise ConfigurationRefused(
                 "spacewx_kp_source is set but spacewx_aurora_opt = 0, so it "
                 "would do nothing; set spacewx_aurora_opt = 1 or drop it")
-        return
+        return False
     from woof.spacewx.aurora_history import AuroraHistoryError, parse_kp_source
     try:
         kind, _value = parse_kp_source(source)
@@ -2552,11 +2573,7 @@ def _validate_spacewx_aurora(cfg) -> None:
         raise ConfigurationRefused(
             f"spacewx_aurora_opt = 2 drives OVATION Prime with the solar wind, so "
             f"spacewx_kp_source must be 'omni' or 'swpc', not {source!r}")
-    if not radiation_enabled(cfg):
-        raise ConfigurationRefused(
-            f"spacewx_aurora_opt = {opt} places the auroral oval on the radiation "
-            "geometry's columns, and no radiation scheme is on "
-            "(ra_lw_physics = ra_sw_physics = 0)")
+    return True
 
 
 def _validate_spacewx_epp(cfg) -> None:

@@ -130,12 +130,13 @@ for i, over in enumerate({FLOW!r}):
         assert max(r for _, r in rows) < 1e-9, (key, rows)
 
 
-@pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_float_base_state_is_the_strict_primal(backend, tmp_path):
     """The float build gives woof's strict words: flow_dep_bdy against
     apply_flow_dependent_boundaries (every ring cell moves), and qv's
     capture row against _launch_state_relaxation with qv's time-t source
-    and mass.  Host and CUDA; Metal is not checked here."""
+    and mass.  Every backend: on Metal the ring copy's scatter through a
+    flat view must write back (the "moves" counts)."""
     out = _run(backend, f'''
 from types import SimpleNamespace as NS
 from woof.ingest import lateral_bc as LB

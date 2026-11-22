@@ -10,7 +10,9 @@ active tracers on one block, in the Fortran's order:
    and the land-ice heat flux ('standalone', 'coupled';
    :func:`~woof.hex.mpas_ocean.land_ice_v842.tracers_tend`);
 3. advection (:mod:`~woof.hex.mpas_ocean.tracer_advection_v842`) and
-   horizontal mixing (:mod:`~woof.hex.mpas_ocean.tracer_hmix_v842`);
+   horizontal mixing (:mod:`~woof.hex.mpas_ocean.tracer_hmix_v842`, with
+   Redi's isoneutral mixing under ``config_use_standardGM`` on the slopes
+   GM left in the diagnostics);
 4. the surface flux into the column (``ocn_tracer_surface_flux_tend``, with
    the runoff flux);
 5. Jerlov short-wave absorption (``config_sw_absorption_type`` 'jerlov') or
@@ -185,7 +187,7 @@ def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_te
         mesh=mesh, tend=tend, configs=configs, horizontal_budget=d.get("activeTracerHorizontalAdvectionTendency"),
         vertical_budget=d.get("activeTracerVerticalAdvectionTendency"))
     tracer_hmix_v842.tracer_hmix_tend(tracers=group, layer_thickness_edge=d["layerThicknessEdge"], mesh=mesh,
-                                      tend=tend, configs=configs)
+                                      tend=tend, configs=configs, diagnostics=d)
     if budgets:
         d["activeTracerSurfaceFluxTendency"][:n_cells] = tend[:n_cells]
     if not configs.get("config_disable_tr_sflux", False):

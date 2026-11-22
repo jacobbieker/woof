@@ -22,6 +22,9 @@ THE BREAKAGES THESE PREVENT
 5. A gate that cannot fail: a mutated solve or coefficient must produce
    mismatches.
 6. A coefficient scheme this port does not carry silently skipped: refused by name.
+7. Redi's vertical diffusion "fixed" by default: v8.4.2 adds k33 without
+   config_Redi_kappa; only ``woof_redi_k33 = 'kappa'`` scales it, and that
+   opt-in adds exactly kappa * k33.
 """
 from __future__ import annotations
 
@@ -78,10 +81,29 @@ def test_fixture_covers_the_branches(precision):
 def test_schemes_not_ported_are_refused_by_name():
     from woof.hex.mpas_ocean import vmix_v842 as vm
     vm.check_config(dict(oo.BASE_CONFIG))
-    for knob in ("config_use_tanh_visc", "config_use_tanh_diff", "config_use_cvmix", "config_use_standardGM"):
+    vm.check_config(dict(oo.BASE_CONFIG, config_use_standardGM=True))
+    for knob in ("config_use_tanh_visc", "config_use_tanh_diff", "config_use_cvmix"):
         with pytest.raises(ConfigurationRefusal) as exc:
             vm.check_config(dict(oo.BASE_CONFIG, **{knob: True}))
         assert knob in str(exc.value)
+    with pytest.raises(ConfigurationRefusal, match="woof_redi_k33"):
+        vm.check_config(dict(oo.BASE_CONFIG, config_use_standardGM=True, woof_redi_k33="E3SM"))
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", BOTH)
+def test_the_redi_k33_kappa_scaling_is_opt_in(precision):
+    case = next(c for c in oo.cases(precision) if c["name"] == "redi_const")
+    real = oo.PRECISIONS[precision]
+    nc, diff = case["dims"]["nCells"], "diagnostics/vertDiffTopOfCell"
+    k33 = case["pools"]["diagnostics"]["k33"][:nc]
+    kappa = real(case["config"]["config_Redi_kappa"])
+    without = oo.run_gpu(dict(case, config=dict(case["config"], config_use_standardGM=False)))[diff][:nc]
+    v842 = oo.run_gpu(case)[diff][:nc]
+    scaled = oo.run_gpu(dict(case, config=dict(case["config"], woof_redi_k33="kappa")))[diff][:nc]
+    assert oo.word_mismatches(v842, (without + k33).astype(real)) == 0
+    assert oo.word_mismatches(scaled, (without + (kappa * k33).astype(real)).astype(real)) == 0
+    assert oo.word_mismatches(scaled, v842) > 0
 
 
 @requires_gpu
@@ -116,6 +138,9 @@ def test_gpu_matches_the_v842_oracle_word_for_word(precision):
      "                           areaCell[iCell])", "rich_budgets", "diagnostics/RiTopOfCell", BOTH),
     # the sentinel below a column as an RKIND literal: RKIND 8 widens the binary32 -1e34
     ("#define SENTINEL_DEFAULT ((rk)-1e34f)", "#define SENTINEL_DEFAULT C(-1e34)", "const", TRACERS, ("r8",)),
+    # Redi's k33 scaled by config_Redi_kappa by default ("fixing" v8.4.2)
+    ("kappaScaled ? M(kappa, k33[t]) : k33[t]", "M(kappa, k33[t])", "redi_const",
+     "diagnostics/vertDiffTopOfCell", BOTH),
 ])
 def test_a_mutated_port_is_caught(monkeypatch, precision, original, mutated, case_name, field, precisions):
     if precision not in precisions:
