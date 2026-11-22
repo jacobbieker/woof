@@ -3338,14 +3338,15 @@ from woof.core.wsm3_constants import wsm3_level_tier as _wsm3_level_tier
 # in per-thread arrays, so the frame is linear in the tier.  MEASURED
 # 2026-11-22 on sm_86 (RTX A6000, NVRTC 12.9) through the production loader
 # at QNSE_KMAX / BOULAC_KMAX 128, 192, 256: qnsepbl_column 9,232 / 13,840 /
-# 18,448 B, mfshconv_column 15,360 / 23,040 / 30,720 B (the widest, 60 B per
-# level), boulac_column 7,696 / 11,536 / 15,376 B (60 B per level).  Each is
-# the shipped-tier row plus 60 B per level above 128, so 256 prices
-# qnsepbl at 16,896 + 7,680 = 24,576 B and boulac at 8,208 + 7,680 = 15,888 B.
+# 18,448 B (72 B per level), mfshconv_column 15,360 / 23,040 / 30,720 B (the
+# widest, 120 B per level), boulac_column 7,696 / 11,536 / 15,376 B (60 B per
+# level).  Each module is its shipped-tier row plus its widest kernel's slope
+# above 128, so 256 prices qnsepbl at 16,896 + 15,360 = 32,256 B and boulac
+# at 8,208 + 7,680 = 15,888 B.
 from woof.core.pbl_level_tiers import kmax_tier as _pbl_kmax_tier
 CONDITIONAL_COLUMN_TIERED_FRAMES = {
     "wsm3": (TieredKernelFrame("wsm3", "WSM3_KMAX", 64, 88), _wsm3_level_tier),
-    "qnsepbl": (TieredKernelFrame("qnsepbl", "QNSE_KMAX", 128, 60),
+    "qnsepbl": (TieredKernelFrame("qnsepbl", "QNSE_KMAX", 128, 120),
                 _pbl_kmax_tier),
     "boulac": (TieredKernelFrame("boulac", "BOULAC_KMAX", 128, 60),
                _pbl_kmax_tier),
