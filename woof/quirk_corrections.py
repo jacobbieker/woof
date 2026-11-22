@@ -17,8 +17,13 @@ The rules, the same on every route:
   say) is refused there by name under the umbrella too: ``'all'`` never
   bypasses a refusal and never drops a correction silently. (The
   MPAS-Seaice ``ice_velocity_at_cell`` needs the velocity solver's
-  ``vVelocity`` and ``interiorVertex`` pools; a column run without them
-  is refused under 'all' as under the name.)
+  ``vVelocity`` and ``interiorVertex`` pools: a column run without them
+  does not carry it, so 'all' leaves it off there; named, it is refused.)
+* On the WRF route RunConfig derives the correction keys under 'all'
+  (on where the scheme runs, off elsewhere, again after a
+  ``dataclasses.replace`` that changes the scheme); the TOML readers
+  refuse an explicit conflicting key first. A RunConfig built in Python
+  with 'all' takes the derived values over its correction keys.
 * Each route's umbrella reaches the keys that route carries. The hex
   door's ``--quirk-corrections all`` sets its own flag only: the
   RunConfig corrections (GF's, YSU's) are not hex flags. Where a hex
@@ -198,7 +203,9 @@ def option(config: dict, key: str):
     umbrella = all_on(config)
     if key in config:
         value = config[key]
-        if umbrella and value != c.corrected:
+        # (a value that is neither the default nor the corrected one is the
+        # port's own to refuse as not an option, with or without the umbrella)
+        if umbrella and value == c.default:
             raise _refusal(key, value, conflict_message(key, value),
                            f"{key} = {c.corrected!r} or unset, with {UMBRELLA} = 'all'")
         return value
@@ -231,6 +238,12 @@ def apply_run_corrections(kw: dict) -> dict:
     out = dict(kw)
     for key in keys("wrf"):
         if not run_scheme_active(key, out, RunConfig):
+            if out.get(key) is True:
+                # what validate_run_config refuses without the umbrella;
+                # under 'all' the key would be re-derived off, silently
+                raise ConfigurationRefused(
+                    f"{key} corrects {BY_KEY[key].scheme}, which this run does not select, so it would "
+                    "never be read; drop it")
             continue
         if key in out and out[key] is not True:
             raise ConfigurationRefused(conflict_message(key, out[key]))
@@ -255,8 +268,15 @@ def run_scheme_active(key: str, cfg, defaults=None) -> bool:
 
 def run_corrections_due(cfg) -> tuple[str, ...]:
     """The RunConfig corrections ``'all'`` turns on for ``cfg``: those whose
-    scheme it runs (RunConfig.__post_init__ sets them)."""
+    scheme it runs."""
     return tuple(key for key in keys("wrf") if run_scheme_active(key, cfg))
+
+
+def run_corrections_under_all(cfg) -> dict:
+    """Every RunConfig correction's value under ``'all'``: on where its
+    scheme runs, off elsewhere (RunConfig.__post_init__ writes them)."""
+    due = run_corrections_due(cfg)
+    return {key: key in due for key in keys("wrf")}
 
 
 def check_run_config(cfg) -> None:
@@ -285,9 +305,11 @@ def hex_undriven_species_boundary(arguments, *, carried: bool = True) -> str | N
     regional = getattr(arguments, "lbc_dir", None) is not None
     if not (umbrella and regional):
         return mode
+    if not carried:
+        # the umbrella leaves the rule off here; an explicit flag is the
+        # caller's to judge (free is the only value such a route honours)
+        return mode
     corrected = BY_KEY["undriven_species_boundary"].corrected
     if mode is not None and mode != corrected:
         raise ValueError(conflict_message("undriven_species_boundary", mode))
-    if mode is None and not carried:
-        return None
     return corrected

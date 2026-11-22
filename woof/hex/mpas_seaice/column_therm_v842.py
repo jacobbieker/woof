@@ -240,6 +240,11 @@ def _ice_velocity(pools: dict, configs: dict, n_vertices: int, n_cells: int, dum
     from . import velocity_v842 as vel
     missing = [name for name, there in (("boundary/interiorVertex", (pools.get("boundary") or {}).get(
         "interiorVertex") is not None), ("velocity_solver/vVelocity", vs.get("vVelocity") is not None)) if not there]
+    if missing and "ice_velocity_at_cell" not in cv.named_corrections(configs):
+        # woof_quirk_corrections = 'all' without naming it: a run without the
+        # velocity solver's v and interior vertices does not carry the
+        # correction, so it stays off (v8.4.2's read), as the umbrella's rule
+        return u, dummy
     if missing:
         cv._refuse("woof_v842_corrections", "ice_velocity_at_cell",
                    "the cell's ice velocity is interpolated from the vertices' u and v over the interior vertices; "
