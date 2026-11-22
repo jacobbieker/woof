@@ -622,13 +622,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `ysu_surface_heat_exner` and `mynn_sfclay_psih_zolzt` (WRF route); `--undriven-species-boundary
     wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
-    `woof_bottom_drag_dry_edges` and `woof_rayleigh_bottom_friction`
-    (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
+    `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
+    `woof_redi_k33` (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
     `woof_simple_velocity_bed`, `woof_statistics_extrema` and
-    `woof_analysis_empty` (MALI); and the MPAS-Seaice column's
+    `woof_analysis_empty` (MALI); the MPAS-Seaice column's
     `set_sfcflux_order`, `ice_velocity_at_cell`,
     `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
-    `zbgc_c2n_proteins`, `bgc_inactive_diagnostics` and `zsal_solve`.
+    `zbgc_c2n_proteins`, `bgc_inactive_diagnostics` and `zsal_solve`;
+    and the MPAS-Seaice velocity solver's `planar_metric_terms`,
+    `periodic_local_coords` and `weak_ridge_delta`.
     The list and its values are in
     [CONFIGURATION.md](docs/public/CONFIGURATION.md) and
     `woof/quirk_corrections.py`.

@@ -618,8 +618,9 @@ door takes it as `--quirk-corrections all`. `"all"` turns on:
   `--quirk-corrections all` sets only this flag: the RunConfig keys above
   are not hex flags.
 - MPAS-Ocean: `woof_land_ice_isomip_freezing_salinity =
-  'boundary_layer_salinity'`, `woof_bottom_drag_dry_edges = 'skip'` and
-  `woof_rayleigh_bottom_friction = 'corrected'`.
+  'boundary_layer_salinity'`, `woof_bottom_drag_dry_edges = 'skip'`,
+  `woof_rayleigh_bottom_friction = 'corrected'` and `woof_redi_k33 =
+  'kappa'`.
 - MALI: `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
   `woof_simple_velocity_bed` and `woof_analysis_empty` at `'corrected'`,
   and `woof_statistics_extrema = 'ice'`.
@@ -627,6 +628,10 @@ door takes it as `--quirk-corrections all`. `"all"` turns on:
   `set_sfcflux_order`, `ice_velocity_at_cell`,
   `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
   `zbgc_c2n_proteins`, `bgc_inactive_diagnostics` and `zsal_solve`.
+- MPAS-Seaice velocity solver set-up (the time step's
+  `basis_corrections` / `weak_corrections` names): `planar_metric_terms`
+  and `periodic_local_coords` (variational basis; each acts only on a
+  planar or periodic mesh) and `weak_ridge_delta` (weak stress divergence).
 
 `mynn_sfclay_psih_zolzt` (default `false`) is an opt-in correction to the
 MYNN surface layer's 2 m and 10 m diagnostics (`sf_sfclay_physics = 5`,

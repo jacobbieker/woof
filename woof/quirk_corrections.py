@@ -55,6 +55,7 @@ ROUTES = {
     "mpas_ocean": "MPAS-Ocean configs dict",
     "mali": "MALI (mpas_ice) config dict",
     "mpas_seaice": "MPAS-Seaice column configs['woof_v842_corrections'] name",
+    "mpas_seaice_velocity": "MPAS-Seaice velocity solver set-up name (timestep basis_corrections / weak_corrections)",
 }
 
 
@@ -106,6 +107,9 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
     QuirkCorrection(
         "woof_rayleigh_bottom_friction", "mpas_ocean", "v842", "corrected", "config_Rayleigh_bottom_friction",
         "Rayleigh bottom friction uses config_Rayleigh_bottom_damping_coeff whenever it is on"),
+    QuirkCorrection(
+        "woof_redi_k33", "mpas_ocean", "v842", "kappa", "config_use_Redi",
+        "Redi's vertical diffusion adds config_Redi_kappa * k33 (a diffusivity), not the bare slope k33"),
     # MALI v8.4.2
     QuirkCorrection(
         "woof_sgh_init_mask", "mali", "v842", "corrected", "config_SGH",
@@ -144,6 +148,16 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
     QuirkCorrection(
         "zsal_solve", "mpas_seaice", False, True, "config_use_vertical_zsalinity",
         "the vertical salinity is solved, as config_use_vertical_zsalinity asks"),
+    # MPAS-Seaice v8.4.2 velocity solver set-up (woof.hex.mpas_seaice.timestep_v842)
+    QuirkCorrection(
+        "planar_metric_terms", "mpas_seaice_velocity", False, True, "variational basis on a planar mesh",
+        "the variational metric terms are zero on a plane (not the rotated z' or 0/0)"),
+    QuirkCorrection(
+        "periodic_local_coords", "mpas_seaice_velocity", False, True, "variational basis on a periodic plane",
+        "the basis' vertex offsets are unwrapped across the period, as mpas_fix_periodicity does"),
+    QuirkCorrection(
+        "weak_ridge_delta", "mpas_seaice_velocity", False, True, "weak stress divergence with the column package",
+        "each cell's ridgeShear takes its own Delta, not the last owned cell's"),
 )
 
 BY_KEY = {c.key: c for c in CORRECTIONS}
