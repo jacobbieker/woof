@@ -58,7 +58,8 @@ CONFIGS = {
     # smallest domain
     "lf": [dict(kind=k) for k in ("u", "v", "theta", "phi", "w", "mu")]
     + [dict(kind="u", has_msf=1), dict(kind="v", has_msf=1), dict(kind="w", has_msf=1),
-       dict(kind="theta", spec_zone=2), dict(kind="u", spec_zone=3, ny=7, nx=6)],
+       dict(kind="theta", spec_zone=2), dict(kind="u", spec_zone=3, ny=7, nx=6),
+       dict(kind="qv"), dict(kind="qv", spec_zone=2, has_msf=1)],
     # spec_zone 1-3, the smallest domains, one level
     "sp": [dict(), dict(spec_zone=2), dict(nz=1, ny=3, nx=3), dict(spec_zone=3, ny=7, nx=8),
            dict(nz=6, ny=5, nx=12)],
@@ -318,7 +319,7 @@ def test_geometry_rejects_unported_options():
     source column, unknown kinds and empty axes are refused, not run."""
     from woof.grad.wrfplus import cases as C
     for make, over in ((C.lf_geometry, dict(spec_zone=0)), (C.lf_geometry, dict(width=1, spec_zone=2)),
-                       (C.lf_geometry, dict(kind="qv")), (C.lf_geometry, dict(ny=2)),
+                       (C.lf_geometry, dict(kind="qc")), (C.lf_geometry, dict(ny=2)),
                        (C.lf_geometry, dict(nz=0)), (C.sp_geometry, dict(spec_zone=0)),
                        (C.sp_geometry, dict(ny=2)), (C.sp_geometry, dict(nx=4, spec_zone=2)),
                        (C.sp_geometry, dict(nz=0))):

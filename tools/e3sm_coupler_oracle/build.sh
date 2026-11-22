@@ -6,7 +6,13 @@
 # the coupler's surface fractions, seq_frac_set (run_seq_frac), and its
 # atmosphere-ocean flux, seq_flux_atmocn_mct (run_flux_atmocn), its ocean
 # albedos, seq_flux_ocnalb_mct (run_flux_ocnalb), and the ocean-input
-# accumulation, prep_ocn_accum and prep_ocn_accum_avg (run_ocn_accum).
+# accumulation, prep_ocn_accum and prep_ocn_accum_avg (run_ocn_accum),
+# one coupler interval chaining them all (run_coupler_interval), and, given
+# MPAS v8.4.2 (MPAS_V842_SOURCE_ROOT, MPAS_OCEAN_ORACLE_BUILD), the hybrid
+# ocean: the MPAS v8.4.2 ocean under E3SM's ocean coupling
+# (run_hybrid_ocean_{e3sm,mpas}), and, given MPAS_SEAICE_ORACLE_BUILD too,
+# the hybrid sea ice: the MPAS v8.4.2 sea ice under E3SM's sea-ice coupling
+# (run_hybrid_seaice).
 #
 #   bash tools/e3sm_coupler_oracle/build.sh E3SM_SOURCE_ROOT MCT_SOURCE_ROOT BUILD_DIR [ICEPACK_SOURCE_ROOT]
 #
@@ -243,6 +249,200 @@ if grep -E '\b(exp|log|pow|sin|cos|tan|atan|asin|acos|cbrt|erf)[fl]?\b' undefine
     exit 6
 fi
 echo "built ${build_dir}/run_ocean_coupling"
+
+# ---------------------------------------------------------------- the hybrid ocean (E3SM coupler, MPAS v8.4.2 ocean)
+# "E3SM v3.2.0 coupler with MPAS v8.4.2 components, not an E3SM
+# configuration" (woof.hex.coupled.hybrid_ocean).  Built when
+# MPAS_V842_SOURCE_ROOT names an MPAS-Model v8.4.2 tree and
+# MPAS_OCEAN_ORACLE_BUILD the BUILD_DIR of tools/mpas_ocean_oracle/build.sh
+# over it (its r8 objects and modules: the forward mode, every module
+# verbatim).  The cut above (ocn_comp_mct_cut.F90: ocn_import_mct and
+# ocn_export_mct, verbatim) is compiled again against the component's
+# modules: v8.4.2's ocn_constants, ocn_equation_of_state (its
+# ocn_freezing_temperature), mpas_constants and the same framework stubs;
+# ocean_standins.F90 and e3sm_standins.F90 hold the rest.  v8.4.2's
+# mpas_ocn_constants.F is compiled twice, as E3SM builds MPAS
+# (-DMPAS_ESM_SHR_CONST, shr_const_mod's constants: run_hybrid_ocean_e3sm)
+# and as v8.4.2 builds itself (run_hybrid_ocean_mpas).
+if [[ -z "${MPAS_V842_SOURCE_ROOT:-}" || -z "${MPAS_OCEAN_ORACLE_BUILD:-}" ]]; then
+    echo "no MPAS_V842_SOURCE_ROOT / MPAS_OCEAN_ORACLE_BUILD: the hybrid ocean oracle is not built"
+else
+    mpas_src=$(cd "${MPAS_V842_SOURCE_ROOT}" && pwd)
+    mpas_obj=$(cd "${MPAS_OCEAN_ORACLE_BUILD}/r8" && pwd)
+    ( cd "${mpas_src}" && grep '  src/core_ocean/shared/mpas_ocn_constants.F$' "${script_dir}/../mpas_ocean_oracle/SOURCES.sha256" \
+        | { command -v sha256sum >/dev/null && sha256sum -c --quiet - || shasum -a 256 -c --quiet -; } ) || {
+        echo "MPAS's mpas_ocn_constants.F differs from SOURCES.sha256; refusing to build" >&2
+        exit 3
+    }
+    obj="${build_dir}/hybrid_ocean"
+    rm -rf "${obj}" && mkdir -p "${obj}/shr" && cd "${obj}"
+    hflags=(-c -cpp -O0 -ffp-contract=off -ffree-line-length-none -DNDEBUG -I"${mpas_obj}/eos" -I"${mpas_obj}"
+            -I"${e3sm}/share/include" "${mctinc[@]}")
+    cp "${build_dir}/merge/mct_mod.F90" mct_mod.F90
+    cp "${build_dir}/ocean/ocn_comp_mct_cut.F90" ocn_comp_mct_cut.F90
+    "${fc[@]}" "${hflags[@]}" "${e3sm}/share/util/shr_kind_mod.F90"
+    "${fc[@]}" "${hflags[@]}" "${e3sm}/share/util/shr_const_mod.F90"
+    "${fc[@]}" "${hflags[@]}" "${script_dir}/e3sm_standins.F90"
+    "${fc[@]}" "${hflags[@]}" "${script_dir}/ocean_standins.F90"
+    "${fc[@]}" "${hflags[@]}" mct_mod.F90
+    "${fc[@]}" "${hflags[@]}" "${e3sm}/driver-mct/shr/glc_zocnclass_mod.F90"
+    "${fc[@]}" "${hflags[@]}" -ffree-form "${src}/driver/mpaso_cpl_indices.F"
+    "${fc[@]}" "${hflags[@]}" ocn_comp_mct_cut.F90
+    "${fc[@]}" "${hflags[@]}" "${script_dir}/run_hybrid_ocean.F90"
+    ( cd shr && "${fc[@]}" "${hflags[@]}" -I.. -ffree-form -DMPAS_ESM_SHR_CONST \
+        "${mpas_src}/src/core_ocean/shared/mpas_ocn_constants.F" )
+    libm_objects=()
+    while read -r object; do libm_objects+=("${object}"); done \
+        < <(bash "${script_dir}/../oracle_libm/build_host_libm.sh" 2> libm.txt)
+    component=("${mpas_obj}"/eos/ocn_timestep_cut.o "${mpas_obj}"/eos/oracle_stream.o "${mpas_obj}"/eos/ocn_split_step_cut.o
+               "${mpas_obj}"/eos/mpas_vector_reconstruction_cut.o "${mpas_obj}"/eos/stubs_split.o
+               "${mpas_obj}"/eos/mpas_ocn_time_average_coupled.o "${mpas_obj}"/eos/mpas_ocn_effective_density_in_land_ice.o
+               "${mpas_obj}"/eos/mpas_ocn_tendency.o "${mpas_obj}"/eos/mpas_ocn_surface_bulk_forcing.o
+               "${mpas_obj}"/eos/mpas_ocn_frazil_forcing.o "${mpas_obj}"/eos/mpas_ocn_surface_land_ice_fluxes.o
+               "${mpas_obj}"/eos/mpas_ocn_tracer_*.o "${mpas_obj}"/eos/mpas_tracer_advection_helpers_cut.o
+               "${mpas_obj}"/eos/ocn_diagnostics_cut.o "${mpas_obj}"/eos/mpas_ocn_diagnostics_routines.o
+               "${mpas_obj}"/eos/mpas_ocn_thick_ale.o "${mpas_obj}"/eos/mpas_ocn_vmix*.o "${mpas_obj}"/eos/stubs_vmix.o
+               "${mpas_obj}"/eos/mpas_ocn_equation_of_state*.o "${mpas_obj}"/mpas_ocn_vel_*.o
+               "${mpas_obj}"/mpas_ocn_thick_hadv.o "${mpas_obj}"/mpas_ocn_thick_vadv.o
+               "${mpas_obj}"/mpas_ocn_thick_surface_flux.o "${mpas_obj}"/mpas_ocn_forcing.o "${mpas_obj}"/mpas_constants.o
+               "${mpas_obj}"/stubs_unported.o "${mpas_obj}"/stubs.o "${mpas_obj}"/mpas_kind_types.o)
+    coupler=(run_hybrid_ocean.o ocn_comp_mct_cut.o mpaso_cpl_indices.o glc_zocnclass_mod.o mct_mod.o ocean_standins.o
+             e3sm_standins.o shr_const_mod.o shr_kind_mod.o)
+    "${fc[@]}" -o "${build_dir}/run_hybrid_ocean_e3sm" "${coupler[@]}" shr/mpas_ocn_constants.o "${component[@]}" \
+        "${mctlib[@]}" ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_hybrid_ocean_mpas" "${coupler[@]}" "${mpas_obj}"/mpas_ocn_constants.o \
+        "${component[@]}" "${mctlib[@]}" ${libm_objects[@]+"${libm_objects[@]}"}
+    if command -v objdump >/dev/null; then
+        objdump -d ocn_comp_mct_cut.o run_hybrid_ocean.o shr/mpas_ocn_constants.o > disassembly.txt
+        if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
+            echo "an object contains an FMA instruction (${obj}/fma.txt)" >&2
+            exit 5
+        fi
+    fi
+    echo "built ${build_dir}/run_hybrid_ocean_{e3sm,mpas}"
+fi
+
+# ---------------------------------------------------------------- the hybrid sea ice (E3SM coupler, MPAS v8.4.2 sea ice)
+# "E3SM v3.2.0 coupler with MPAS v8.4.2 components, not an E3SM
+# configuration" (woof.hex.coupled.hybrid_seaice).  Built when
+# MPAS_V842_SOURCE_ROOT names an MPAS-Model v8.4.2 tree and
+# MPAS_SEAICE_ORACLE_BUILD the BUILD_DIR of tools/mpas_seaice_oracle/build.sh
+# over it (its column oracle's objects and modules, BUILD_DIR/column: the
+# column package with the stand-alone build's cice constants and v8.4.2's
+# time step, every module verbatim, at RKIND 8).  E3SM's ice_import_mct,
+# ice_export_mct, basal_pressure and frazil_mass are cut byte for byte out of
+# ice_comp_mct.F as for run_seaice_coupling, with the host's use lines for
+# seaice_constants and seaice_mesh pointed at hybrid_seaice_constants and
+# hybrid_seaice_mesh (renames only), and compiled against v8.4.2's modules:
+# hybrid_seaice_shims.F90 gives E3SM's three extra constants and Icepack's
+# three functions from v8.4.2's column package; hybrid_seaice_mesh is
+# v8.4.2's mpas_seaice_mesh.F rotation routines, cut byte for byte.
+# v8.4.2's post_atmospheric_coupling and post_oceanic_coupling
+# (mpas_seaice_forcing.F) and seaice_init_post_clock_advance
+# (mpas_seaice_initialize.F) are cut byte for byte into hybrid_seaice_forcing.
+if [[ -z "${MPAS_V842_SOURCE_ROOT:-}" || -z "${MPAS_SEAICE_ORACLE_BUILD:-}" ]]; then
+    echo "no MPAS_V842_SOURCE_ROOT / MPAS_SEAICE_ORACLE_BUILD: the hybrid sea-ice oracle is not built"
+else
+    mpas_src=$(cd "${MPAS_V842_SOURCE_ROOT}" && pwd)
+    col_obj=$(cd "${MPAS_SEAICE_ORACLE_BUILD}/column" && pwd)
+    ( cd "${mpas_src}" && grep -E '  src/core_seaice/shared/mpas_seaice_(mesh|forcing|initialize)\.F$' \
+        "${script_dir}/../mpas_seaice_oracle/SOURCES.sha256" \
+        | { command -v sha256sum >/dev/null && sha256sum -c --quiet - || shasum -a 256 -c --quiet -; } ) || {
+        echo "MPAS's sea-ice mesh, forcing or initialize differs from SOURCES.sha256; refusing to build" >&2
+        exit 3
+    }
+    v842="${mpas_src}/src/core_seaice/shared"
+    isrc="${e3sm}/components/mpas-seaice"
+    obj="${build_dir}/hybrid_seaice"
+    rm -rf "${obj}" && mkdir -p "${obj}" && cd "${obj}"
+    hcut() {  # hcut FILE ROUTINE...: the routines, verbatim
+        local file=$1; shift
+        for routine in "$@"; do
+            awk -v r="${routine}" '$0 ~ "^ *subroutine +" r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine +" r "([^a-zA-Z_0-9]|$)" {on=0}' "${file}"
+        done
+    }
+    rot=(seaice_latlon_vector_rotation_backward seaice_latlon_vector_rotation_forward seaice_grid_rotation_forward
+         seaice_latlon_from_xyz latlon_vector_to_xyz_vector xyz_vector_rotation_backward xyz_vector_rotation_forward
+         xyz_vector_to_latlon_vector)
+    { printf 'module hybrid_seaice_mesh\n  use mpas_kind_types\n  implicit none\n  public\ncontains\n'
+      hcut "${v842}/mpas_seaice_mesh.F" "${rot[@]}"
+      printf 'end module hybrid_seaice_mesh\n'; } > hybrid_seaice_mesh.F90
+    { printf 'module hybrid_seaice_forcing\n  use mpas_derived_types\n  use mpas_pool_routines\n'
+      printf '  use mpas_timekeeping\n  use mpas_kind_types\n  implicit none\n  public\ncontains\n'
+      hcut "${v842}/mpas_seaice_forcing.F" post_atmospheric_coupling post_oceanic_coupling \
+          | sed 's/^\( *use \)seaice_mesh, only:/\1hybrid_seaice_mesh, only:/'
+      hcut "${v842}/mpas_seaice_initialize.F" seaice_init_post_clock_advance
+      printf 'end module hybrid_seaice_forcing\n'; } > hybrid_seaice_forcing.F90
+    host_use=$(sed -n '58,68p;75p;78p' "${isrc}/driver/ice_comp_mct.F" \
+        | sed -e 's/^\( *use \)seaice_constants, only:/\1hybrid_seaice_constants, only:/' \
+              -e 's/^\( *use \)seaice_mesh, only:/\1hybrid_seaice_mesh, only:/')
+    host_decl=$(sed -n '124p' "${isrc}/driver/ice_comp_mct.F")
+    {
+        printf 'module ice_comp_mct_cut\n'
+        printf '  use seq_flds_mod\n  use mpassi_cpl_indices\n  use mpas_derived_types\n  use mpas_pool_routines\n'
+        printf '  use mpas_kind_types\n  use mpas_dmpar\n'
+        printf '%s\n' "${host_use}"
+        printf '  implicit none\n  public\n'
+        printf '%s\n' "${host_decl}"
+        printf 'contains\n'
+        awk '/^ subroutine ice_import_mct\(/{on=1} on{print} /^ end subroutine ice_import_mct!/{on=0}' "${isrc}/driver/ice_comp_mct.F"
+        awk '/^ subroutine ice_export_mct\(/{on=1} on{print} /^ end subroutine ice_export_mct!/{on=0}' "${isrc}/driver/ice_comp_mct.F"
+        awk '/^   subroutine basal_pressure\(/{on=1} on{print} /^   end subroutine basal_pressure!/{on=0}' "${isrc}/driver/ice_comp_mct.F"
+        awk '/^   subroutine frazil_mass\(/{on=1} on{print} /^   end subroutine frazil_mass!/{on=0}' "${isrc}/driver/ice_comp_mct.F"
+        printf 'end module ice_comp_mct_cut\n'
+    } > ice_comp_mct_cut.F90
+    for want in ice_import_mct:ice_comp_mct_cut.F90 ice_export_mct:ice_comp_mct_cut.F90 \
+                basal_pressure:ice_comp_mct_cut.F90 frazil_mass:ice_comp_mct_cut.F90 \
+                post_atmospheric_coupling:hybrid_seaice_forcing.F90 post_oceanic_coupling:hybrid_seaice_forcing.F90 \
+                seaice_init_post_clock_advance:hybrid_seaice_forcing.F90 "${rot[@]/%/:hybrid_seaice_mesh.F90}"; do
+        IFS=: read -r r file <<< "${want}"
+        if [[ $(grep -cE "^ *(end )?subroutine ${r}([( !]|$)" "${file}") -ne 2 ]]; then
+            echo "${r} was not cut out whole (${file})" >&2
+            exit 3
+        fi
+    done
+    if [[ $(printf '%s\n' "${host_use}" | grep -cE 'use hybrid_seaice_constants, only: coupleAlarmID|^ +pii$|use hybrid_seaice_mesh, only: seaice_latlon_vector_rotation_backward$|use icepack_intfc, only: icepack_sea_freezing_temperature$') -ne 4 \
+          || "${host_decl}" != "   type (domain_type), pointer :: domain" \
+          || $(grep -c 'use hybrid_seaice_mesh, only:' hybrid_seaice_forcing.F90) -ne 2 ]]; then
+        echo "ice_comp_mct.F's or mpas_seaice_forcing.F's use lines moved" >&2
+        exit 3
+    fi
+    hflags=(-c -cpp -O0 -ffp-contract=off -ffree-form -ffree-line-length-none -DNDEBUG -I"${col_obj}"
+            -I"${e3sm}/share/include" "${mctinc[@]}")
+    cp "${build_dir}/merge/mct_mod.F90" mct_mod.F90
+    "${fc[@]}" "${hflags[@]}" "${e3sm}/share/util/shr_kind_mod.F90"
+    "${fc[@]}" "${hflags[@]}" "${script_dir}/e3sm_standins.F90"
+    "${fc[@]}" "${hflags[@]}" mct_mod.F90
+    "${fc[@]}" "${hflags[@]}" "${isrc}/driver/mpassi_cpl_indices.F"
+    "${fc[@]}" "${hflags[@]}" "${script_dir}/hybrid_seaice_shims.F90"
+    "${fc[@]}" "${hflags[@]}" hybrid_seaice_mesh.F90
+    "${fc[@]}" "${hflags[@]}" hybrid_seaice_forcing.F90
+    "${fc[@]}" "${hflags[@]}" ice_comp_mct_cut.F90
+    "${fc[@]}" "${hflags[@]}" "${script_dir}/run_hybrid_seaice.F90"
+    component=(seaice_time_integration_cut.o mpas_seaice_velocity_solver.o seaice_diagnostics_cut.o
+               mpas_seaice_advection.o mpas_seaice_advection_incremental_remap.o
+               mpas_seaice_advection_incremental_remap_tracers.o rbf_standins.o
+               mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o
+               step_standins.o seaice_mesh_interpolation.o mpas_seaice_column.o remap_standins.o
+               mpas_seaice_constants.o "ice_*.o" oracle_stream.o stubs.o mpas_kind_types.o)
+    comp_paths=()
+    for o in "${component[@]}"; do for f in "${col_obj}"/${o}; do comp_paths+=("${f}"); done; done
+    libm_objects=()
+    while read -r object; do libm_objects+=("${object}"); done \
+        < <(bash "${script_dir}/../oracle_libm/build_host_libm.sh" 2> libm.txt)
+    "${fc[@]}" -o "${build_dir}/run_hybrid_seaice" run_hybrid_seaice.o ice_comp_mct_cut.o hybrid_seaice_forcing.o \
+        hybrid_seaice_mesh.o hybrid_seaice_shims.o mpassi_cpl_indices.o mct_mod.o e3sm_standins.o shr_kind_mod.o \
+        "${comp_paths[@]}" "${mctlib[@]}" \
+        ${libm_objects[@]+"${libm_objects[@]}"}
+    if command -v objdump >/dev/null; then
+        objdump -d ice_comp_mct_cut.o hybrid_seaice_forcing.o hybrid_seaice_mesh.o run_hybrid_seaice.o > disassembly.txt
+        if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
+            echo "an object contains an FMA instruction (${obj}/fma.txt)" >&2
+            exit 5
+        fi
+    fi
+    echo "built ${build_dir}/run_hybrid_seaice"
+fi
 
 # ---------------------------------------------------------------- the surface fractions
 # seq_frac_set and seq_frac_check are cut byte for byte out of
@@ -502,6 +702,127 @@ if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\
     exit 6
 fi
 echo "built ${build_dir}/run_ocn_accum"
+
+# ---------------------------------------------------------------- one coupler interval, chained
+# The coupler's own sequence over one or more coupler steps (cime_comp_mod's
+# RASM_OPTION1 order, aoflux_grid 'ocn'; the components are scripted from
+# the stream): prep_ocn_calc_i2x_ox, seq_flux_atmocn_mct, prep_ocn_mrg,
+# prep_ocn_accum and seq_flux_ocnalb_mct; on the ocean's run alarm
+# prep_ocn_accum_avg; on the sea ice's prep_ice_calc_o2x_ix,
+# prep_ice_calc_a2x_ix and prep_ice_mrg; then seq_frac_set.  Every routine is
+# the single-routine oracles' cut, byte for byte, linked together:
+# prep_ocn_mod and prep_ice_mod hold the host's use lines (prep_ocn_mod.F90
+# 3-21, prep_ice_mod.F90 3-20) and module data (81-113; 62-78), made public
+# for the driver (prep_ocn_init and prep_ice_init set them up, as the driver
+# does), and their routines and getters; seq_flux_mct, seq_frac_mct,
+# seq_map_mod and seq_map_type_mod as in the flux and fractions sections;
+# mct_mod from the pinned wrapper's renames with its
+# mct_rearr_rearrange_fldlist, mct_avect_accum and mct_aVect_avg cut
+# verbatim.  Compiled verbatim: shr_kind_mod, shr_const_mod,
+# water_isotopes and shr_flux_mod.  chain_standins_base.F90 and
+# chain_standins.F90 hold the rest (no arithmetic).
+obj="${build_dir}/interval"
+rm -rf "${obj}" && mkdir -p "${obj}" && cd "${obj}"
+{
+    printf 'module mct_mod\n'
+    grep -E '^ *use (shr_mpi_mod|shr_sys_mod|shr_const_mod) ' "${e3sm}/share/util/mct_mod.F90"
+    grep -E '^ *use m_[A-Za-z0-9_]+ +,only:' "${e3sm}/share/util/mct_mod.F90"
+    printf '  use shr_kind_mod, only: R8 => SHR_KIND_R8, IN => SHR_KIND_IN\n  implicit none\n'
+    grep -E '^ *logical,public :: mct_use(alltoall|vector) = \.false\.$' "${e3sm}/share/util/mct_mod.F90"
+    printf 'contains\n'
+    for r in mct_rearr_rearrange_fldlist mct_avect_accum mct_aVect_avg; do
+        cut "${e3sm}/share/util/mct_mod.F90" "${r}" subroutine
+    done
+    printf 'end module mct_mod\n'
+} > mct_mod.F90
+cp "${build_dir}/frac/seq_map_type_cut.F90" "${build_dir}/frac/seq_map_cut.F90" "${build_dir}/frac/seq_frac_cut.F90" .
+cp "${build_dir}/flux/seq_flux_cut.F90" .
+ocn_use=$(sed -n '3,21p' "${drv}/prep_ocn_mod.F90")
+ocn_data=$(sed -n '81,113p' "${drv}/prep_ocn_mod.F90")
+ice_use=$(sed -n '3,20p' "${drv}/prep_ice_mod.F90")
+ice_data=$(sed -n '62,78p' "${drv}/prep_ice_mod.F90")
+if [[ "$(printf '%s\n' "${ocn_use}" | head -1)" != *'r8 => SHR_KIND_R8'* \
+      || "$(printf '%s\n' "${ocn_use}" | tail -1)" != *'only: ocn, atm, ice, rof, wav, glc'* \
+      || "$(printf '%s\n' "${ocn_data}" | head -1 | tr -d ' ')" != '!mappers' \
+      || "$(printf '%s\n' "${ocn_data}" | tail -1)" != *':: x2o_average'* \
+      || "$(printf '%s\n' "${ice_use}" | head -1)" != *'r8 => SHR_KIND_R8'* \
+      || "$(printf '%s\n' "${ice_use}" | tail -1)" != *'only: ice, atm, ocn, glc, rof, wav'* \
+      || "$(printf '%s\n' "${ice_data}" | head -1 | tr -d ' ')" != '!mappers' \
+      || "$(printf '%s\n' "${ice_data}" | tail -1)" != *':: mpicom_CPLID'* ]]; then
+    echo "prep_ocn_mod.F90's or prep_ice_mod.F90's head is not where the cut expects it" >&2
+    exit 3
+fi
+ocn_routines=(prep_ocn_mrg prep_ocn_merge prep_ocn_accum prep_ocn_accum_avg prep_ocn_calc_i2x_ox)
+ocn_getters=(prep_ocn_get_mapper_Fa2o prep_ocn_get_mapper_SFi2o)
+ice_routines=(prep_ice_mrg prep_ice_merge prep_ice_calc_a2x_ix prep_ice_calc_o2x_ix)
+ice_getters=(prep_ice_get_mapper_SFo2i)
+{
+    printf 'module prep_ocn_mod\n'
+    printf '%s\n' "${ocn_use}"
+    printf '  implicit none\n  save\n  private\n'
+    printf '  public :: %s\n' "${ocn_routines[@]}" "${ocn_getters[@]}"
+    printf '  ! the harness: prep_ocn_init sets these up\n'
+    printf '  public :: mapper_SFi2o, mapper_Fa2o, a2x_ox, r2x_ox, i2x_ox, g2x_ox, w2x_ox\n'
+    printf '  public :: x2oacc_ox, x2oacc_ox_cnt, mpicom_CPLID, x2o_average\n'
+    printf '%s\n' "${ocn_data}"
+    printf 'contains\n'
+    for r in "${ocn_routines[@]}"; do cut "${drv}/prep_ocn_mod.F90" "${r}" subroutine; done
+    for r in "${ocn_getters[@]}"; do cut "${drv}/prep_ocn_mod.F90" "${r}" function; done
+    printf 'end module prep_ocn_mod\n'
+} > prep_ocn_cut.F90
+{
+    printf 'module prep_ice_mod\n'
+    printf '%s\n' "${ice_use}"
+    printf '  implicit none\n  save\n  private\n'
+    printf '  public :: %s\n' "${ice_routines[@]}" "${ice_getters[@]}"
+    printf '  ! the harness: prep_ice_init sets these up\n'
+    printf '  public :: mapper_SFo2i, a2x_ix, o2x_ix, g2x_ix, r2x_ix, w2x_ix, mpicom_CPLID\n'
+    printf '%s\n' "${ice_data}"
+    printf 'contains\n'
+    for r in "${ice_routines[@]}"; do cut "${drv}/prep_ice_mod.F90" "${r}" subroutine; done
+    for r in "${ice_getters[@]}"; do cut "${drv}/prep_ice_mod.F90" "${r}" function; done
+    printf 'end module prep_ice_mod\n'
+} > prep_ice_cut.F90
+for want in "${ocn_routines[@]/%/:subroutine:prep_ocn_cut.F90}" "${ocn_getters[@]/%/:function:prep_ocn_cut.F90}" \
+            "${ice_routines[@]/%/:subroutine:prep_ice_cut.F90}" "${ice_getters[@]/%/:function:prep_ice_cut.F90}" \
+            mct_rearr_rearrange_fldlist:subroutine:mct_mod.F90 mct_avect_accum:subroutine:mct_mod.F90 \
+            mct_aVect_avg:subroutine:mct_mod.F90; do
+    IFS=: read -r r kind file <<< "${want}"
+    if [[ $(grep -cE "^ *(end )?${kind} ${r}( |\\(|$)" "${file}") -ne 2 ]]; then
+        echo "a routine was not cut out whole (${r})" >&2
+        exit 3
+    fi
+done
+iflags=(-c -cpp -O0 -ffp-contract=off -ffree-line-length-none "${mctinc[@]}")
+"${fc[@]}" "${iflags[@]}" "${e3sm}/share/util/shr_kind_mod.F90"
+"${fc[@]}" "${iflags[@]}" "${e3sm}/share/util/shr_const_mod.F90"
+"${fc[@]}" "${iflags[@]}" "${script_dir}/chain_standins_base.F90"
+"${fc[@]}" "${iflags[@]}" "${e3sm}/share/util/water_isotopes.F90"
+"${fc[@]}" "${iflags[@]}" "${e3sm}/share/util/shr_flux_mod.F90"
+"${fc[@]}" "${iflags[@]}" mct_mod.F90
+"${fc[@]}" "${iflags[@]}" seq_map_type_cut.F90
+"${fc[@]}" "${iflags[@]}" "${script_dir}/chain_standins.F90"
+"${fc[@]}" "${iflags[@]}" seq_map_cut.F90
+"${fc[@]}" "${iflags[@]}" prep_ocn_cut.F90
+"${fc[@]}" "${iflags[@]}" prep_ice_cut.F90
+"${fc[@]}" "${iflags[@]}" seq_frac_cut.F90
+"${fc[@]}" "${iflags[@]}" seq_flux_cut.F90
+"${fc[@]}" "${iflags[@]}" "${script_dir}/run_coupler_interval.F90"
+"${fc[@]}" -o "${build_dir}/run_coupler_interval" ./*.o "${mctlib[@]}"
+if command -v objdump >/dev/null; then
+    objdump -d prep_ocn_cut.o prep_ice_cut.o seq_frac_cut.o seq_map_cut.o seq_flux_cut.o shr_flux_mod.o mct_mod.o \
+        > disassembly.txt
+    if grep -iE '\s(v?fn?m(add|sub)[0-9a-z]*|fn?m(add|sub))\s' disassembly.txt > fma.txt; then
+        echo "an object contains an FMA instruction (${obj}/fma.txt)" >&2
+        exit 5
+    fi
+fi
+nm -u prep_ocn_cut.o prep_ice_cut.o seq_frac_cut.o seq_map_cut.o mct_mod.o > undefined.txt
+if grep -E '\b(exp|log|pow|sqrt|sin|cos|tan|atan|atan2|asin|acos|cbrt|erf)[fl]?\b' undefined.txt; then
+    echo "the merges, the accumulation, the mapping or the fractions call libm" >&2
+    exit 6
+fi
+echo "built ${build_dir}/run_coupler_interval"
 
 # ---------------------------------------------------------------- the sea ice's import and export
 # ice_import_mct, ice_export_mct, basal_pressure and frazil_mass are cut byte

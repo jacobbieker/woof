@@ -113,3 +113,60 @@ def test_go_preflight_asks_for_lake_depth_only_with_use_lakedepth(tmp_path, use_
     config = tmp_path / "lakes.toml"
     config.write_bytes(emit_experiment_toml(raw).encode())
     assert ("lake_depth" in geography_for_run(config)["datasets"]) is needed
+
+
+def _lakes_config(tmp_path, use_lakedepth=1):
+    from woof.toml_document import emit_experiment_toml
+    recipe = Path(__file__).resolve().parents[1] / "woof/data/recipes/hrrr_v4_gsd41.toml"
+    raw = lake_settings(tomllib.loads(recipe.read_text()), "clm")
+    raw.pop("static", None)
+    raw.setdefault("shared", {})["use_lakedepth"] = use_lakedepth
+    for domain in raw.get("domain", ()):
+        domain.pop("use_lakedepth", None)
+    config = tmp_path / "lakes.toml"
+    config.write_bytes(emit_experiment_toml(raw).encode())
+    return config
+
+
+def test_go_stages_lake_depth_itself_when_the_lake_model_needs_it(tmp_path, monkeypatch):
+    """`woof go --lakes clm` fetched nothing for lake_depth and refused; go now stages it."""
+    from woof import geog_assets, go_cli
+    calls = []
+    monkeypatch.setattr(geog_assets, "fetch_geog", lambda **kw: calls.append(kw) or 1)
+    root = tmp_path / "WPS_GEOG"
+    assert go_cli.stage_lake_depth(root, _lakes_config(tmp_path)) is True
+    assert [(c["root"], c["datasets"], c["source"]) for c in calls] == [(root, ("lake_depth",), "ncar")]
+    # Only lake_depth: every other missing dataset still refuses with its remedy.
+    assert "lake_depth/index" in go_cli.geography_refusal(root, config=_lakes_config(tmp_path))
+    flagged = go_cli.go_stages_lake_depth_refusal(root, config=_lakes_config(tmp_path))
+    assert flagged is not None and "lake_depth/index" not in flagged
+
+
+def test_go_stages_nothing_when_lake_depth_is_present_or_not_read(tmp_path, monkeypatch):
+    from woof import geog_assets, go_cli
+    calls = []
+    monkeypatch.setattr(geog_assets, "fetch_geog", lambda **kw: calls.append(kw) or 1)
+    root = tmp_path / "WPS_GEOG"
+    assert go_cli.stage_lake_depth(root, _lakes_config(tmp_path, use_lakedepth=0)) is False
+    assert go_cli.stage_lake_depth(root, None) is False
+    (root / "lake_depth").mkdir(parents=True)
+    (root / "lake_depth" / "index").write_text("x")
+    assert go_cli.stage_lake_depth(root, _lakes_config(tmp_path)) is False
+    assert calls == []
+
+
+def test_a_failed_lake_depth_fetch_refuses_with_both_remedies(tmp_path, monkeypatch):
+    from woof import geog_assets, go_cli
+
+    def fail(**kw):
+        raise geog_assets.GeogFetchError("no route to host")
+
+    monkeypatch.setattr(geog_assets, "fetch_geog", fail)
+    with pytest.raises(go_cli.GoRefusal, match="no route to host") as refused:
+        go_cli.stage_lake_depth(tmp_path / "WPS_GEOG", _lakes_config(tmp_path))
+    assert "fetch-geog --datasets lake_depth" in str(refused.value) and "use_lakedepth = 0" in str(refused.value)
+    # An unwritable tree or a lock another fetch holds refuses the same way, not as a traceback.
+    for error in (PermissionError("read-only tree"), RuntimeError("another fetch holds the lock")):
+        monkeypatch.setattr(geog_assets, "fetch_geog", lambda error=error, **kw: (_ for _ in ()).throw(error))
+        with pytest.raises(go_cli.GoRefusal, match=str(error)):
+            go_cli.stage_lake_depth(tmp_path / "WPS_GEOG", _lakes_config(tmp_path))

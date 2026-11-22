@@ -185,13 +185,16 @@ def _case_on_device(name: str, precision: str = "r4"):
 
 
 @requires_gpu
-@pytest.mark.parametrize("knob, value", [("config_velocity_solver", "simple"),
-                                         ("config_velocity_solver", "FO")])
-def test_the_pieces_not_ported_are_refused_by_name(knob, value):
+@pytest.mark.parametrize("knob, value, words", [
+    ("config_velocity_solver", "FO", "config_velocity_solver"),
+    ("config_velocity_solver", "L1L2", "config_velocity_solver"),
+    # 'simple' is ported; without its prescribed velocity it is refused by the field's name
+    ("config_velocity_solver", "simple", "normalVelocityInitial")])
+def test_the_pieces_not_ported_are_refused_by_name(knob, value, words):
     from woof.hex.errors import ConfigurationRefusal
     from woof.hex.mpas_ice import time_integration_fe_v842 as fe
     case, mesh, dev = _case_on_device("sia_temperature_fo")
-    with pytest.raises(ConfigurationRefusal, match=knob):
+    with pytest.raises(ConfigurationRefusal, match=words):
         fe.forward_euler_step(mesh=mesh, geometry=dev["geometry"], thermal=dev["thermal"],
                               velocity=dev["velocity"], config=dict(case["config"], **{knob: value}))
 

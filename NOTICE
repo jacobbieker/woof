@@ -1819,6 +1819,38 @@ licenses/LICENSE-MPAS-BSD-3-Clause.txt. This is a modified derivative, not
 the version available from the E3SM or MPAS projects, and none of their
 copyright holders nor the Department of Energy endorses it.
 
+woof/hex/coupled/hybrid_ocean.py transcribes the order in which E3SM
+v3.2.0's ocn_init_mct and ocn_run_mct (components/mpas-ocean/driver/
+ocn_comp_mct.F; E3SM: Copyright 2024, UChicago Argonne, LLC, BSD 3-Clause)
+call the ocean, around MPAS-Model v8.4.2's ocean (MPAS-Ocean: Copyright (c)
+2013, Los Alamos National Security, LLC and UCAR, BSD 3-Clause), including
+ocn_time_average_coupled_init from v8.4.2's
+src/core_ocean/shared/mpas_ocn_time_average_coupled.F. It is an E3SM v3.2.0
+coupler with MPAS v8.4.2 components, not an E3SM configuration. Its oracle,
+tools/e3sm_coupler_oracle/run_hybrid_ocean.F90, compiles E3SM's import and
+export verbatim against v8.4.2's modules. The terms are reproduced at
+licenses/LICENSE-E3SM-BSD-3-Clause.txt and
+licenses/LICENSE-MPAS-BSD-3-Clause.txt. This is a modified derivative, not
+the version available from the E3SM or MPAS projects, and none of their
+copyright holders nor the Department of Energy endorses it.
+
+woof/hex/coupled/hybrid_seaice.py transcribes the order in which E3SM
+v3.2.0's ice_init_mct and ice_run_mct (components/mpas-seaice/driver/
+ice_comp_mct.F; E3SM: Copyright 2024, UChicago Argonne, LLC, BSD 3-Clause)
+call the sea ice, around MPAS-Model v8.4.2's sea ice (MPAS-Seaice: Copyright
+(c) 2013, Los Alamos National Security, LLC and UCAR, BSD 3-Clause).
+woof/hex/mpas_seaice/post_coupling_v842.cu (and its Python wrapper)
+transcribe post_atmospheric_coupling and post_oceanic_coupling from v8.4.2's
+src/core_seaice/shared/mpas_seaice_forcing.F, with the vector rotation of
+mpas_seaice_mesh.F. It is an E3SM v3.2.0 coupler with MPAS v8.4.2
+components, not an E3SM configuration. Its oracle,
+tools/e3sm_coupler_oracle/run_hybrid_seaice.F90, compiles E3SM's import and
+export verbatim against v8.4.2's modules. The terms are reproduced at
+licenses/LICENSE-E3SM-BSD-3-Clause.txt and
+licenses/LICENSE-MPAS-BSD-3-Clause.txt. This is a modified derivative, not
+the version available from the E3SM or MPAS projects, and none of their
+copyright holders nor the Department of Energy endorses it.
+
 woof/hex/coupled/seq_frac_e3sm.cu (and its Python wrapper) transcribe
 E3SM v3.2.0's coupler surface fractions update, seq_frac_set and
 seq_frac_check from driver-mct/main/seq_frac_mct.F90, the maps they make
@@ -1867,6 +1899,23 @@ Copyright 2024, UChicago Argonne, LLC; BSD 3-Clause) and mct_avect_accum and
 mct_aVect_avg from share/util/mct_mod.F90 (CESM share code: UCAR; E3SM:
 Copyright 2024, UChicago Argonne, LLC; BSD 3-Clause). Its oracle,
 tools/e3sm_coupler_oracle/, compiles those routines verbatim on MCT as it
+is. The terms are reproduced at licenses/LICENSE-E3SM-BSD-3-Clause.txt. This
+is a modified derivative, not the version available from the E3SM project,
+and neither the E3SM project, UChicago Argonne, LLC, UCAR nor the Department
+of Energy endorses it.
+
+woof/hex/coupled/interval_e3sm.py (and woof/hex/coupled/run_e3sm.py, which
+calls the components at the points that driver's RASM_OPTION1 loop runs them)
+follows the order E3SM v3.2.0's driver
+runs its coupler routines in one coupler step, cime_run_atmocn_setup,
+cime_run_ocn_setup_send, cime_run_ice_setup_send, cime_run_update_fractions,
+cime_run_atmocn_fluxes and cime_run_ocn_albedos from
+driver-mct/main/cime_comp_mod.F90 (cpl7: University Corporation for
+Atmospheric Research and UChicago Argonne, LLC; E3SM: Copyright 2024,
+UChicago Argonne, LLC; BSD 3-Clause). Its oracle, tools/e3sm_coupler_oracle/
+(run_coupler_interval.F90, chain_standins*.F90), links the routines cut
+verbatim from prep_ocn_mod.F90, prep_ice_mod.F90, seq_flux_mct.F90,
+seq_frac_mct.F90, seq_map_mod.F90 and share/util/mct_mod.F90 on MCT as it
 is. The terms are reproduced at licenses/LICENSE-E3SM-BSD-3-Clause.txt. This
 is a modified derivative, not the version available from the E3SM project,
 and neither the E3SM project, UChicago Argonne, LLC, UCAR nor the Department

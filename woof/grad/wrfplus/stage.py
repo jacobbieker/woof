@@ -52,13 +52,21 @@ PRP_STATE = ("p", "al", "alt", "p_pp")
 PRP_ACTIVE = ("thp", "php", "mup", "muts")
 PRP_PASSIVE = ("mub", "phb", "alb", "pb", "rdnw", "c1h", "c2h", "c3h", "c4h",
                "c3f", "c4f")
+#: the moist diagnosis's actives: the dry ones and qv
+PRPM_ACTIVE = PRP_ACTIVE + ("qv",)
+
+
+def prp_active(geom) -> tuple:
+    return PRPM_ACTIVE if geom.moist else PRP_ACTIVE
 
 
 @dataclass(frozen=True)
 class PRPGeometry:
     """calc_p_alpha's scalars.  ``carried`` reads WRF's grid%muts from
     ``muts`` (calc_p_alpha_carried_muts); otherwise muts = mub + mup and
-    ``muts`` is not read."""
+    ``muts`` is not read.  ``moist`` reads qv (an active input) through
+    WRF's ``qvf = 1 + rvovrd qv``, as the primal does for a moist state
+    without use_theta_m."""
     nz: int
     ny: int
     nx: int
@@ -66,11 +74,19 @@ class PRPGeometry:
     base3d: int = 1
     carried: int = 1
     p_top: float = 0.0
+    moist: int = 0
 
     def args(self, dtype) -> tuple:
+        from woof.core.constants import RVOVRD
         i, r = np.int32, np.dtype(dtype).type
+        # RVOVRD is the binary32 quotient the primal's #define carries
         return (i(self.nz), i(self.ny), i(self.nx), i(self.hypso),
-                i(self.base3d), i(self.carried), r(self.p_top))
+                i(self.base3d), i(self.carried), r(self.p_top), i(self.moist),
+                r(np.float32(RVOVRD)))
+
+    def validate(self) -> None:
+        if self.moist not in (0, 1):
+            raise ValueError(f"moist is 0 or 1, got {self.moist}")
 
 
 def prp_shapes(geom: PRPGeometry) -> dict:
@@ -82,22 +98,26 @@ def prp_shapes(geom: PRPGeometry) -> dict:
             "phb": wlev if b3 else (nz + 1,), "alb": mass if b3 else (nz,),
             "pb": mass if b3 else (nz,), "rdnw": (nz,), "c1h": (nz,),
             "c2h": (nz,), "c3h": (nz,), "c4h": (nz,), "c3f": (nz + 1,),
-            "c4f": (nz + 1,)}
+            "c4f": (nz + 1,), "qv": mass}
 
 
 def calc_p_rho_phi_tl(state, pert_state, traj, pert, geom, *, nl=True):
-    """WRFPLUS G_CALC_P_RHO_PHI (dry, non-hydrostatic) on woof's strict
+    """WRFPLUS G_CALC_P_RHO_PHI (non-hydrostatic) on woof's strict
     calc_p_alpha[_carried_muts]: p, al, alt and p_pp from thp, php, mup
-    (and muts when carried)."""
+    (and muts when carried), and qv with ``geom.moist``."""
+    geom.validate()
     sh = prp_shapes(geom)
+    act = prp_active(geom)
     _check(geom, _named("state", PRP_STATE, state)
            + _named("pert", PRP_STATE, pert_state)
-           + _named("traj", PRP_ACTIVE + PRP_PASSIVE, traj)
-           + _named("pert", PRP_ACTIVE, pert), sh, min_nz=1)
+           + _named("traj", act + PRP_PASSIVE, traj)
+           + _named("pert", act, pert), sh, min_nz=1)
+    # dry: qv is never read (thp stands in)
+    qv = (traj["qv"], pert["qv"]) if geom.moist else (traj["thp"], pert["thp"])
     arrs = (tuple(state[n] for n in PRP_STATE)
             + tuple(pert_state[n] for n in PRP_STATE)
             + tuple(traj[n] for n in PRP_ACTIVE)
-            + tuple(pert[n] for n in PRP_ACTIVE)
+            + tuple(pert[n] for n in PRP_ACTIVE) + qv
             + tuple(traj[n] for n in PRP_PASSIVE))
     dtype = _dtype(arrs)
     _kernel("calc_p_rho_phi_tl", dtype)(
@@ -106,13 +126,17 @@ def calc_p_rho_phi_tl(state, pert_state, traj, pert, geom, *, nl=True):
 
 
 def calc_p_rho_phi_ad(adj_state, traj, adj, geom):
+    geom.validate()
     sh = prp_shapes(geom)
+    act = prp_active(geom)
     _check(geom, _named("adj", PRP_STATE, adj_state)
-           + _named("traj", PRP_ACTIVE + PRP_PASSIVE, traj)
-           + _named("adj", PRP_ACTIVE, adj), sh, min_nz=1)
+           + _named("traj", act + PRP_PASSIVE, traj)
+           + _named("adj", act, adj), sh, min_nz=1)
+    # dry: qv is never read nor its adjoint written
+    qv = (traj["qv"], adj["qv"]) if geom.moist else (traj["thp"], adj["thp"])
     arrs = (tuple(adj_state[n] for n in PRP_STATE)
             + tuple(traj[n] for n in PRP_ACTIVE)
-            + tuple(adj[n] for n in PRP_ACTIVE)
+            + tuple(adj[n] for n in PRP_ACTIVE) + qv
             + tuple(traj[n] for n in PRP_PASSIVE))
     dtype = _dtype(arrs)
     _kernel("calc_p_rho_phi_ad", dtype)(
@@ -139,12 +163,27 @@ class RSPGeometry:
     has_msf: int = 0
     boundary_x: int = 0
     boundary_y: int = 0
+    halo: int = 0
 
     def args(self, dtype) -> tuple:
         i, r = np.int32, np.dtype(dtype).type
         return (i(self.nz), i(self.ny), i(self.nx), i(self.has_msf),
                 i(self.boundary_x), i(self.boundary_y), r(self.rdx),
-                r(self.rdy))
+                r(self.rdy), i(self.halo))
+
+
+#: The carried mu halo rk_step 1 reads on a bounded axis
+#: (RSPGeometry.halo): an extra active input, absent otherwise.
+RSP_HALO = "mu_halo"
+
+
+def _halo(d: dict, geom) -> object:
+    """``d``'s mu halo, or its mup (never read) without ``geom.halo``."""
+    if geom.halo:
+        if RSP_HALO not in d:
+            raise ValueError(f"RSPGeometry.halo needs {RSP_HALO!r}")
+        return d[RSP_HALO]
+    return d["mup"]
 
 
 def rsp_shapes(geom: RSPGeometry) -> dict:
@@ -160,18 +199,23 @@ def rk_step_prep_tl(state, pert_state, traj, pert, geom, *, nl=True):
     """WRFPLUS g_calc_mu_uv + g_couple_momentum + g_calc_ww_cp (the dry
     part of g_rk_step_prep) on woof's strict stage_fluxes: ru, rv, ww.
 
-    Boundary face masses are clamped or wrapped; the rk_step 1
-    ``carried_wrf_mu_halo`` override of a non-periodic axis
-    (``stage_fluxes(first_stage=True)``) is not covered (item 7)."""
+    Boundary face masses are clamped or wrapped.  With ``geom.halo``
+    (rk_step 1 of a carried step on a bounded axis,
+    ``stage_fluxes(first_stage=True)``) calc_ww_cp's boundary faces read
+    the ghost cell's mu' from :data:`RSP_HALO` in ``traj`` and ``pert``."""
     sh = rsp_shapes(geom)
+    halo = (_halo(traj, geom), _halo(pert, geom))
     _check(geom, _named("state", RSP_STATE, state)
            + _named("pert", RSP_STATE, pert_state)
            + _named("traj", RSP_ACTIVE + RSP_PASSIVE, traj)
-           + _named("pert", RSP_ACTIVE, pert), sh, min_nz=1)
+           + _named("pert", RSP_ACTIVE, pert)
+           + ([("traj", RSP_HALO, halo[0]), ("pert", RSP_HALO, halo[1])]
+              if geom.halo else []),
+           {**sh, RSP_HALO: sh["mup"]}, min_nz=1)
     arrs = (tuple(state[n] for n in RSP_STATE)
             + tuple(pert_state[n] for n in RSP_STATE)
-            + tuple(traj[n] for n in RSP_ACTIVE)
-            + tuple(pert[n] for n in RSP_ACTIVE)
+            + tuple(traj[n] for n in RSP_ACTIVE) + halo[:1]
+            + tuple(pert[n] for n in RSP_ACTIVE) + halo[1:]
             + tuple(traj[n] for n in RSP_PASSIVE))
     dtype = _dtype(arrs)
     g = geom
@@ -183,28 +227,38 @@ def rk_step_prep_tl(state, pert_state, traj, pert, geom, *, nl=True):
 
 
 def rk_step_prep_ad(adj_state, traj, adj, geom):
+    """Adjoint of :func:`rk_step_prep_tl`; with ``geom.halo`` the halo's
+    adjoint is added into ``adj[RSP_HALO]``."""
     import cupy as cp
     sh = rsp_shapes(geom)
+    halo = (_halo(traj, geom), _halo(adj, geom))
     _check(geom, _named("adj", RSP_STATE, adj_state)
            + _named("traj", RSP_ACTIVE + RSP_PASSIVE, traj)
-           + _named("adj", RSP_ACTIVE, adj), sh, min_nz=1)
+           + _named("adj", RSP_ACTIVE, adj)
+           + ([("traj", RSP_HALO, halo[0]), ("adj", RSP_HALO, halo[1])]
+              if geom.halo else []),
+           {**sh, RSP_HALO: sh["mup"]}, min_nz=1)
     sa = tuple(adj_state[n] for n in RSP_STATE)
-    tr = tuple(traj[n] for n in RSP_ACTIVE)
+    tr = tuple(traj[n] for n in RSP_ACTIVE) + halo[:1]
     ps = tuple(traj[n] for n in RSP_PASSIVE)
-    dtype = _dtype(sa + tr + ps + tuple(adj[n] for n in RSP_ACTIVE))
+    dtype = _dtype(sa + tr + ps + tuple(adj[n] for n in RSP_ACTIVE) + halo[1:])
     g = geom
     nck = (g.nz + AD_KCHUNK - 1) // AD_KCHUNK
     bk = cp.empty((g.nz, g.ny, g.nx), dtype=dtype)
     xm = cp.empty((nck, g.ny, g.nx + 1), dtype=dtype)
     ym = cp.empty((nck, g.ny + 1, g.nx), dtype=dtype)
+    # the boundary faces' ghost shares (read only with geom.halo)
+    xg, hx = (cp.empty((nck, g.ny, 2), dtype=dtype) for _ in range(2))
+    yg, hy = (cp.empty((nck, 2, g.nx), dtype=dtype) for _ in range(2))
     geo = g.args(dtype)
     _kernel("rk_step_prep_ww_ad", dtype)(
         _blocks(g.ny * g.nx), (THREADS,), sa + (bk,) + ps + geo)
     _kernel("rk_step_prep_flux_ad", dtype)(
         _blocks(nck * (g.ny + 1) * (g.nx + 1)), (THREADS,),
-        sa + (bk,) + tr + (adj["u"], adj["v"], xm, ym) + ps + geo)
+        sa + (bk,) + tr + (adj["u"], adj["v"], xm, ym, xg, yg, hx, hy) + ps + geo)
     _kernel("rk_step_prep_mass_gather", dtype)(
-        _blocks(g.ny * g.nx), (THREADS,), (adj["mup"], xm, ym) + geo)
+        _blocks(g.ny * g.nx), (THREADS,),
+        (adj["mup"], xm, ym, halo[1], xg, yg, hx, hy) + geo)
 
 
 # ------------------------------------------------------------ rk_addtend_dry

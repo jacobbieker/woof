@@ -109,7 +109,9 @@ def test_the_coupled_step_does_not_call_the_merge():
     """Opt-in: nothing under woof/ imports the merge but its own oracle module."""
     users = [p for p in (ROOT / "woof").rglob("*.py")
              if "prep_ocn_merge_e3sm" in p.read_text(encoding="utf-8")
-             and p.name not in ("prep_ocn_merge_e3sm.py", "e3sm_ocean_merge_oracle.py")]
+             and p.name not in ("prep_ocn_merge_e3sm.py", "e3sm_ocean_merge_oracle.py")
+             and p.relative_to(ROOT).as_posix() not in ("woof/hex/coupled/interval_e3sm.py",
+                                                    "woof/verify/e3sm_coupler_interval_oracle.py")]
     assert users == []
 
 
@@ -186,16 +188,16 @@ def test_a_mutated_plan_is_caught(change, field, case):
     coupled two ways."""
     import dataclasses
     c = _case(case)
-    honest = oo.plan_for(c)
+    unmutated = oo.plan_for(c)
     k = c["lists"]["x2o"].index(field)
     if change == "ice_atmosphere_flux_merged":
-        iindx = list(honest.iindx)
+        iindx = list(unmutated.iindx)
         iindx[k] = c["lists"]["i2x"].index("Faii_lat")
-        mutated = dataclasses.replace(honest, iindx=tuple(iindx))
+        mutated = dataclasses.replace(unmutated, iindx=tuple(iindx))
     elif change == "state_replaces":
-        imerge = list(honest.imerge)
+        imerge = list(unmutated.imerge)
         imerge[k] = False
-        mutated = dataclasses.replace(honest, imerge=tuple(imerge))
+        mutated = dataclasses.replace(unmutated, imerge=tuple(imerge))
     else:
         mutated = pom.plan(c["lists"], wav_ocn_coup="twoway")
     outputs, _ = oo.load_fixture()

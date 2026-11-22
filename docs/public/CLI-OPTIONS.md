@@ -4482,20 +4482,32 @@ Takes no options of its own.
 
 | option | what it does |
 |---|---|
+| `--alpha-corr-scale` | horizontal localisation, km (WRFDA alpha_corr_scale; default 200) |
+| `--alpha-std-dev` | WRFDA alpha_std_dev (default 1) |
+| `--alpha-vertloc-opt {0,1,2}` | vertical localisation: 0 none, 1 --be-vertloc file, 2 log-p (default) |
 | `--be` | WRFDA background-error file (be.dat, cv_options = 5) |
+| `--be-vertloc` | WRFDA be.vertloc.dat (--alpha-vertloc-opt 1) |
 | `--check-rh {0,1}` | WRFDA check_rh in the analysis transfer (0 or 1; default 0) |
+| `--ensdim-alpha` | members to read from --ep-dir (WRFDA ensdim_alpha) |
+| `--ensemble-member` | a member's history file (wrfout) valid at the analysis time; repeat for each member (perturbations as WRFDA's gen_be_ep2) |
+| `--ep-dir` | WRFDA ensemble perturbation files (u.e001 ... as gen_be_ep2 writes them) instead of members |
+| `--ep-format {1,11}` | --ep-dir's ep_format (default 1) |
 | `--eps` | gradient reduction target (WRFDA eps; default 0.01) |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--fgat-first-guess` | one time slot's first guess (fg01, fg02, ...), in slot order, one per --fgat-obs: the window's start, then evenly spaced, the last at its end. --first-guess stays the analysis-time background |
+| `--fgat-obs` | one time slot's OBSPROC file (ob01.ascii, ob02.ascii, ...), in slot order; repeat for each slot (instead of --obs) |
 | `--first-guess` | WRF first guess (wrfinput_d01 or a wrfout), WRFDA's fg |
 | `--grid-id` | the bundle's grid name (default: the first guess's file name) |
 | `--iau-window-s` | record an IAU window in the bundle (seconds); default: insert at once |
+| `--je-factor` | WRFDA je_factor (required with an ensemble): Jb is weighted je/(je-1); <= 1 is full-ensemble mode (no static B) |
 | `--landuse-table` | LANDUSE.TBL for the roughness (default: woof's packaged WRF table) |
 | `--log` | also write the minimiser log to this file |
 | `--max-ext-its` | outer loops (WRFDA max_ext_its; default 1) |
+| `--max-vert-var-alpha` | percent of the localisation's variance kept (WRFDA max_vert_var_alpha; default 99) |
 | `--no-orthonorm-gradient` | turn off WRFDA's orthonorm_gradient (on by default, as in the tutorial) |
 | `--no-varbc` | radiances without bias correction |
 | `--ntmax` | inner iterations per outer loop (WRFDA ntmax; default 50) |
-| `--obs` | OBSPROC observations (ob.ascii) |
+| `--obs` | OBSPROC observations (ob.ascii); with FGAT give --fgat-obs per slot instead |
 | `--out` | analysis bundle directory to write (must not exist) |
 | `--ph {analysis,balance}` | bundle PH: WRFDA's hydrostatic PH (analysis, default) or rebuilt by the bundle (balance) |
 | `--radiance-bands` | imager bands in nm (default: the three WV bands and the 11.2 um window) |
@@ -4504,7 +4516,7 @@ Takes no options of its own.
 | `--tier {reference,oracle,production}` | reference: NumPy binary64 (default); oracle: GPU binary64 with WRFDA's serial dot product; production: GPU binary32 |
 | `--varbc-in` | WRFDA VARBC.in; default: a cold start for every sensor |
 | `--varbc-out` | write the updated coefficients (VARBC.out) |
-| `--window-minutes` | observation window half-width around the first guess's time (default 60) |
+| `--window-minutes` | observation window half-width around the first guess's time (default 60; WRFDA's time_window_min/max) |
 
 ## `woof verify`
 

@@ -1159,6 +1159,13 @@ def _the_default_geography_root_counts_as_staged(monkeypatch):
         return real(geog_root, **kwargs)
 
     monkeypatch.setattr(go_cli, "geography_refusal", refusal)
+    # The lake_depth download the launch makes ahead of that check is the same hole: on the
+    # default root it would reach for the network on a host that has no tree.
+    real_stage = go_cli.stage_lake_depth
+    monkeypatch.setattr(
+        go_cli, "stage_lake_depth",
+        lambda geog_root, config: (False if pathlib.Path(geog_root) == default_geog_root()
+                                   else real_stage(geog_root, config)))
 
 
 @pytest.fixture
@@ -1415,6 +1422,21 @@ def grib1_bridge_gap() -> str | None:
 
 @functools.lru_cache(maxsize=1)
 @_never_raises
+def p3_bridge_gap() -> str | None:
+    """Why the Rust rw-p3 startup bridge cannot be resolved here, or None."""
+
+    from woof.core import p3_rust
+
+    try:
+        p3_rust.resolve()
+    except FileNotFoundError as error:
+        return (f"{error}; build it with `cd tools/rustwx && cargo build "
+                "--release -p rw-p3 --offline`")
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+@_never_raises
 def wrf_rust_gap() -> str | None:
     """Why the mandated science core wrf-rust is unavailable, or None."""
 
@@ -1467,6 +1489,7 @@ CAPABILITY_PROBES = {
     "water_blend_bridge": functools.partial(
         cpu_preprocess_gap, "gpuwm_masked_nearest_f32"),
     "wrf_rust": wrf_rust_gap,
+    "p3_bridge": p3_bridge_gap,
     "grib1_bridge": grib1_bridge_gap,
 }
 
@@ -1485,6 +1508,7 @@ requires_masked_stencil_bridge = pytest.mark.requires_capability(
 requires_water_blend_bridge = pytest.mark.requires_capability(
     "water_blend_bridge")
 requires_grib1_bridge = pytest.mark.requires_capability("grib1_bridge")
+requires_p3_bridge = pytest.mark.requires_capability("p3_bridge")
 
 
 def capability_gap(name: str) -> str | None:

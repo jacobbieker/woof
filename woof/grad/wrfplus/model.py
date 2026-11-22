@@ -11,14 +11,18 @@ before the operator runs, and :func:`step_ad` consumes that tape in
 reverse (recompute, then tape: the step's own NL is rerun from its
 start).
 
-Covered: periodic axes, map factors, Coriolis and curvature, dry, no physics or
-mixing, ``rk_ord = 3``, ``h_*_adv_order`` 3-6, a 3-D base state (terrain)
-and the w_damp limiter.
+Covered: periodic axes or specified lateral boundaries (WRF's
+relax_bdy_dry folded into rk_addtend_dry, spec_bdy_dry, spec_bdyupdate_ph
+with zero_grad_bdy, spec_bdy_final and the carried mu halo, with the
+boundary tables as active inputs), map factors, Coriolis and curvature,
+dry, no physics or mixing, ``rk_ord = 3``, ``h_*_adv_order`` 3-6, a 3-D
+base state (terrain) and the w_damp limiter.
 Everything else is refused by :func:`step_geometry`.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 
 import numpy as np
@@ -32,6 +36,9 @@ from .acoustic import (CW_ACTIVE, CW_PASSIVE, CW_STATE, MT_ALIAS, MT_ACTIVE,
                        small_step_finish_ad, small_step_finish_tl,
                        small_step_init_ad, small_step_init_tl)
 from .advect import ADV_ACTIVE, ADV_PASSIVE, ADV_STATE, AdvGeometry, adv_ad, adv_tl
+from .lbc import (LB_PASSIVE, LB_TABLES, LF_PASSIVE, SP_ACTIVE, SP_PASSIVE,
+                  SP_STATE, FinalGeometry, LBCGeometry, SpecPhiGeometry, lbc_ad,
+                  lbc_tl, lbf_ad, lbf_tl, sph_ad, sph_tl)
 from .bigstep import (BUOY_ACTIVE, BUOY_PASSIVE, BUOY_STATE, CC_ACTIVE,
                       CC_PASSIVE, CC_STATE, GEO_ACTIVE, GEO_PASSIVE, GEO_STATE,
                       PGF_ACTIVE, PGF_PASSIVE, PGF_STATE, WD_ACTIVE, WD_PASSIVE,
@@ -39,7 +46,7 @@ from .bigstep import (BUOY_ACTIVE, BUOY_PASSIVE, BUOY_STATE, CC_ACTIVE,
                       PGFGeometry, WDampGeometry, buoy_ad, buoy_tl, cc_ad, cc_tl,
                       geo_ad, geo_tl, pgf_ad, pgf_tl, wd_ad, wd_tl)
 from .stage import (PRP_ACTIVE, PRP_ALIAS, PRP_PASSIVE, PRP_STATE,
-                    RSP_ACTIVE, RSP_ALIAS, RSP_PASSIVE, RSP_STATE,
+                    RSP_ACTIVE, RSP_ALIAS, RSP_HALO, RSP_PASSIVE, RSP_STATE,
                     SW_ACTIVE, SW_PASSIVE, PRPGeometry, RSPGeometry,
                     SWGeometry, _view, calc_p_rho_phi_ad, calc_p_rho_phi_tl,
                     rk_step_prep_ad, rk_step_prep_tl, set_w_surface_ad,
@@ -54,6 +61,43 @@ TENDENCIES = ("ru_t", "rv_t", "rw_t", "rth_t", "rph_t", "rmu_t")
 #: strict build the previous step's diagnosis (p, al, alt and p') with
 #: WRF's carried muts, which rk_step 1 reads as they are.
 STEP_INPUTS = PROGNOSTICS + ("p", "al", "alt", "p_pert", "muts")
+
+#: Specified lateral boundaries.  The step also carries WRF's mu halo
+#: (dycore.WRF_MU_HALO_SLOT: the ring mass before spec_bdy_final, which
+#: the next step's rk_step 1 calc_ww_cp reads), and takes the boundary
+#: interval's tables as inputs it never writes: ``lbc_<field>_<side>``
+#: (value) and ``lbc_<field>_<side>_t`` (tendency) for the dry fields,
+#: coupled as woof's resident tables are (WRF's ``*_b``/``*_bt``).  Their
+#: perturbation is the LBC perturbation, and their adjoint the LBC
+#: gradient (WRFDA's var4d_lbc).
+HALO = RSP_HALO
+LBC_FIELDS = ("u", "v", "theta", "phi", "mu")
+LBC_INPUTS = tuple(f"lbc_{f}_{t}" for f in LBC_FIELDS for t in LB_TABLES)
+
+#: Each LBC field's tendency, state array and held buffer on the step dict.
+_LBC_TEND = {"u": "ru_t", "v": "rv_t", "theta": "rth_t", "phi": "rph_t", "mu": "rmu_t"}
+_LBC_SRC = {"u": "u", "v": "v", "theta": "thp", "phi": "php", "mu": "lbc_mu_src"}
+_LBC_FINAL = {"u": "u", "v": "v", "theta": "thp", "phi": "php", "mu": "mup"}
+#: The relaxation rows' passive names (state_relaxation_multi's header:
+#: msfv is MSFV_INV in the strict build).
+_LB_PASS = {"mub": "mub2d", "msfv": "msfv_inv", "fcx": "lbc_fcx", "gcx": "lbc_gcx"}
+#: fold_lateral_relaxation's held slot per folded row, the map factor the
+#: relaxation is scaled by and the one it is then divided by ("inv": times
+#: msfv_inv, as _couple_dry_mixing_map_factor does under BIGSTEP).
+_FOLD = {"u": ("fold_u", "msfu", "msfu"), "v": ("fold_v", "msfv", "inv"),
+         "theta": ("fold_theta", None, "msft")}
+
+
+def step_inputs(geom) -> tuple:
+    """What a step of ``geom`` reads from the previous one: STEP_INPUTS,
+    and the mu halo on a specified domain."""
+    return STEP_INPUTS + ((HALO,) if geom.specified else ())
+
+
+def step_parameters(geom) -> tuple:
+    """The inputs a step of ``geom`` reads and never writes, whose
+    perturbation and adjoint are the window's: the boundary tables."""
+    return LBC_INPUTS if geom.specified else ()
 
 #: Each slow operator's names on the step dict.
 _ADV_ALIAS = {
@@ -97,6 +141,8 @@ class StageSpec:
     cw: CWGeometry
     first: tuple              # (UVGeometry, MTGeometry, WGeometry)
     later: tuple
+    lbc: tuple = ()           # specified: (kind, LBCGeometry) rows after the held add
+    sph: object = None        # specified: SpecPhiGeometry after each substep
 
 
 @dataclass(frozen=True)
@@ -107,13 +153,18 @@ class StepGeometry:
     stages: tuple
     end_prp: PRPGeometry
     sw: SWGeometry
+    specified: bool = False
+    capture: tuple = ()       # stage 1's held relaxation: (kind, LBCGeometry)
+    fold: tuple = ()          # the folded kinds (u, v, theta)
+    fold_msf: bool = False    # the fold's map-factor scaling (state.has_msf)
+    final: tuple = ()         # spec_bdy_final: (kind, FinalGeometry), mu first
 
 
 def _refuse(cfg, state) -> None:
     from woof.core.advection import scalar_horizontal_order
     checks = {
-        "lateral boundaries other than periodic": bool(
-            cfg.open_x or cfg.open_y or cfg.specified or getattr(cfg, "nested", False)),
+        "nested lateral boundaries": bool(getattr(cfg, "nested", False)),
+        "open lateral boundaries": bool((cfg.open_x or cfg.open_y) and not cfg.specified),
         "moisture": state.qv is not None,   # the primal's test (dycore._step_body)
         "microphysics": bool(cfg.mp_physics),
         "rk_ord 2": getattr(cfg, "rk_ord", 3) != 3,
@@ -148,9 +199,44 @@ def _refuse(cfg, state) -> None:
         "spectral nudging": getattr(state, "_spectral_nudging_graph", None) is not None,
         "odd time_step_sound": int(cfg.time_step_sound) % 2 != 0,
     })
+    if cfg.specified:
+        checks.update(_refuse_specified(cfg, state))
     bad = [k for k, v in checks.items() if v]
     if bad:
         raise NotImplementedError("the P3a step TL/AD does not cover: " + ", ".join(bad))
+
+
+def _refuse_specified(cfg, state) -> dict:
+    """What the specified binding does not cover."""
+    from woof.ingest import lateral_bc as L
+    resident = getattr(state, "_lateral_boundary_device", None)
+    bounds = state.lateral_boundaries
+    out = {"specified lateral boundaries without attached tables":
+           resident is None or bounds is None}
+    if out["specified lateral boundaries without attached tables"]:
+        return out
+    laws = any(side.time_law is not None for iv in bounds.intervals
+               for b in iv.fields.values()
+               for side in (b.west, b.east, b.south, b.north))
+    out.update({
+        # the bound DomainClock's fp32 dtbc recurrence is not replayed
+        "a bound boundary clock (DomainClock)": resident.clock is not None,
+        "boundary time laws other than linear": laws,
+        "relax_w (the table's w on a specified domain)": bool(L.specified_relaxes_w(cfg)),
+        "DFI boundary forcing": getattr(state, "_dfi_boundary_start", None) is not None
+                                or bool(getattr(cfg, "dfi_constant_bc", False)),
+        "streamed tile seams": bool(getattr(bounds, "seam_sides", ()) or ()),
+        "spec_zone 0": int(cfg.spec_zone) < 1,
+        # the binding assumes both axes bounded (dycore._boundary_x/_y)
+        "a specified domain with a periodic axis": not (
+            _dycore_boundary(cfg, "x") and _dycore_boundary(cfg, "y")),
+    })
+    return out
+
+
+def _dycore_boundary(cfg, axis: str) -> bool:
+    from woof.core import dycore as D
+    return bool(D._boundary_x(cfg) if axis == "x" else D._boundary_y(cfg))
 
 
 def step_geometries(state, cfg, nstep: int) -> tuple:
@@ -158,18 +244,51 @@ def step_geometries(state, cfg, nstep: int) -> tuple:
     first follows the state (a cold state, without WRF's carried muts,
     diagnoses on rk_step 1); every later step follows a strict step, so it
     reuses that step's diagnosis and carried muts."""
+    if cfg.specified:   # each step reads its own boundary time
+        return tuple(step_geometry(state, cfg, step=k, **({} if k == 0 else dict(
+            reuse_first=True, carried=True))) for k in range(nstep))
     first = step_geometry(state, cfg)
     later = step_geometry(state, cfg, reuse_first=True, carried=True)
     return (first,) + (later,) * (nstep - 1)
 
 
+def _boundary_times(state, cfg, step: int) -> tuple:
+    """WRF's dtbc for step ``step`` after ``state`` (the unbound clock,
+    lateral_bc._served_external_interval): the stage rows' at the step
+    start and spec_bdy_final's at its end (apply_state_boundary_values),
+    elapsed time accumulated as dycore.step does.  Both must fall in the
+    interval the window starts in: its tables are the step's inputs.  A
+    step ending on the interval's end is accepted when the primal serves
+    that time from the same interval (the last one, interval_index) and
+    refused when it serves it from the next one."""
+    bounds = state.lateral_boundaries
+    first = bounds.interval_at(state.elapsed_seconds)
+    t = state.elapsed_seconds
+    for _ in range(step):
+        t += cfg.dt
+    end = t + cfg.dt
+    def at(time):
+        try:
+            return bounds.interval_at(time)
+        except ValueError:   # past the last table: another interval too
+            return None
+    if at(t) is not first or at(end) is not first:
+        raise NotImplementedError(
+            "the P3a step TL/AD does not cover: a window reaching another boundary "
+            f"interval (step {step} ends at {end} s, which the primal serves from "
+            f"another interval than {first.start_seconds}-{first.end_seconds} s)")
+    return t - first.start_seconds, end - first.start_seconds
+
+
 def step_geometry(state, cfg, *, reuse_first: bool | None = None,
-                  carried: bool | None = None) -> StepGeometry:
+                  carried: bool | None = None, step: int = 0) -> StepGeometry:
     """The operators' geometries for one strict step of ``state`` under
     ``cfg``, with each scalar rounded as its primal launcher rounds it.
     ``reuse_first``: rk_step 1 reads the previous step's diagnosis;
-    ``carried``: the state holds WRF's muts.  Both default to what
-    ``state`` holds now; chained steps take :func:`step_geometries`."""
+    ``carried``: the state holds WRF's muts (and, specified, the mu
+    halo).  Both default to what ``state`` holds now; chained steps take
+    :func:`step_geometries`.  ``step``: the step's index after ``state``
+    (its boundary time, specified only)."""
     from woof.core import dycore as D
     from woof.core.acoustic import damp_magnitude
     from woof.core.advection import scalar_horizontal_order, vertical_orders
@@ -188,24 +307,40 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
         reuse_first = bool(D._wrf_reuse_diagnostics(state))
     if carried is None:
         carried = D._wrf_muts(state) is not None
+    spec = bool(cfg.specified)
+    halo = 0
+    if spec:
+        from woof.state_serialization_contract import carried_wrf_mu_halo
+        if step == 0:
+            halo = int(carried_wrf_mu_halo(state) is not None
+                       and getattr(state, "_wrf_mass_carriers_ready", True))
+        else:
+            halo = int(carried)
+    bx, by = int(D._boundary_x(cfg)), int(D._boundary_y(cfg))
+    szone = int(cfg.spec_zone) if spec else 0
+    mzone = 1 if spec else 0     # acoustic._mass_w_boundary_zone
     vsca, vmom = vertical_orders(cfg)
     hsca, hmom = scalar_horizontal_order(cfg), int(cfg.h_mom_adv_order)
-    adv = tuple(AdvGeometry(kind, nz, ny, nx, rdx, rdy, vorder=v, horder=h)
+    adv = tuple(AdvGeometry(kind, nz, ny, nx, rdx, rdy, vorder=v, horder=h,
+                            open_x=bx, open_y=by, spec=int(spec))
                 for kind, v, h in (("scalar", vsca, hsca), ("u", vmom, hmom),
                                    ("v", vmom, hmom), ("w", vsca, hsca)))
-    pgf = PGFGeometry(nz, ny, nx, rdx, rdy, cfn=cfn, cfn1=cfn1, top_lid=top_lid, **cf)
+    pgf = PGFGeometry(nz, ny, nx, rdx, rdy, cfn=cfn, cfn1=cfn1, top_lid=top_lid,
+                      boundary_x=bx, boundary_y=by, **cf)
     buoy = BuoyGeometry(nz, ny, nx, has_msf=msf)
     geo = GeoGeometry(nz, ny, nx, quarter_rdx=float(f32(0.25 / dx)),
                       quarter_rdy=float(f32(0.25 / dy)), cfn=cfn, cfn1=cfn1, order=hsca,
-                      has_msf=msf)
+                      has_msf=msf, specified=int(spec))
     wd = None
     if cfg.w_damping == 1:
         wd = WDampGeometry(nz, ny, nx, dt=float(f32(cfg.dt)),
                            w_damp_on=float(f32(D.w_damp_onset(cfg))),
                            w_crit_cfl=float(f32(cfg.w_crit_cfl)))
     rsp = RSPGeometry(nz, ny, nx, rdx=float(f32(1) / f32(dx)), rdy=float(f32(1) / f32(dy)),
-                      has_msf=msf)
-    cc = CCGeometry(nz, ny, nx, rdx=rdx, rdy=rdy) if state.rotational else None
+                      has_msf=msf, boundary_x=bx, boundary_y=by)
+    cc = (CCGeometry(nz, ny, nx, rdx=rdx, rdy=rdy, boundary_x=bx, boundary_y=by)
+          if state.rotational else None)
+    lb = _lbc_geometries(state, cfg, step, msf) if spec else None
     stages = []
     for istage, (nsub, dtau) in enumerate(D._rk_acoustic_stages(cfg)):
         dtau = float(f32(dtau))
@@ -216,23 +351,63 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
 
         def sub(smdiv):
             return (UVGeometry(nz, ny, nx, rdx, rdy, dtau, smdiv=smdiv, top_lid=top_lid,
-                               has_msf=msf, **cf),
-                    MTGeometry(nz, ny, nx, rdx, rdy, dtau, write_mudf=0, mapped=msf),
+                               has_msf=msf, spec_zone=szone, **cf),
+                    MTGeometry(nz, ny, nx, rdx, rdy, dtau, write_mudf=0, mapped=msf,
+                               spec_zone=mzone, open_x=bx, open_y=by),
                     WGeometry(nz, ny, nx, rdx, rdy, dtau, epssm=float(f32(cfg.epssm)),
                               top_lid=top_lid, dampmag=float(damp_magnitude(cfg, dtau)),
-                              has_msf=msf, **cf))
+                              has_msf=msf, spec_zone=mzone, boundary_x=bx, boundary_y=by,
+                              **cf))
         stages.append(StageSpec(
-            rk_step=istage + 1, nsub=int(nsub), diagnose=prp, rsp=rsp, adv=adv, pgf=pgf,
-            buoy=buoy, geo=geo, wd=wd, cc=cc,
-            ss=SSGeometry(nz, ny, nx, has_msf=msf, boundary_x=0, boundary_y=0,
+            rk_step=istage + 1, nsub=int(nsub), diagnose=prp,
+            rsp=dataclasses.replace(rsp, halo=halo) if istage == 0 else rsp,
+            adv=adv, pgf=pgf, buoy=buoy, geo=geo, wd=wd, cc=cc,
+            ss=SSGeometry(nz, ny, nx, has_msf=msf, boundary_x=bx, boundary_y=by,
                           rk_step=istage + 1),
             cw=CWGeometry(nz, ny, nx, dtau, epssm=float(f32(cfg.epssm)), top_lid=top_lid),
-            first=sub(0.0), later=sub(float(f32(cfg.smdiv)))))
+            first=sub(0.0), later=sub(float(f32(cfg.smdiv))),
+            lbc=lb["rows"][istage] if spec else (),
+            sph=SpecPhiGeometry(nz, ny, nx, dtau, spec_zone=szone) if spec else None))
     return StepGeometry(
         nz, ny, nx, tuple(stages),
         end_prp=PRPGeometry(nz, ny, nx, hypso=hypso, carried=1, p_top=p_top),
         sw=SWGeometry(nz, ny, nx, half_rdx=float(f32(0.5 / dx)),
-                      half_rdy=float(f32(0.5 / dy)), mapped=msf, **cf))
+                      half_rdy=float(f32(0.5 / dy)), mapped=msf, boundary_x=bx,
+                      boundary_y=by, **cf),
+        specified=spec, **({} if not spec else dict(
+            capture=lb["capture"], fold=lb["fold"], fold_msf=bool(msf),
+            final=lb["final"])))
+
+
+def _lbc_geometries(state, cfg, step: int, msf: int) -> dict:
+    """The specified binding's rows (lateral_bc's strict
+    capture_folded_relaxation, _apply_state_lateral_boundaries_wrf and
+    apply_state_boundary_values) for step ``step``."""
+    from woof.ingest import lateral_bc as L
+    nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
+    dtbc, dtbc_end = _boundary_times(state, cfg, step)
+    device, _common, _weights = L._relaxation_context(state, cfg)
+    width = {f: int(device.fields[f].west.value.shape[-1]) for f in LBC_FIELDS}
+    zones = dict(spec_zone=int(cfg.spec_zone), relax_zone=int(cfg.relax_zone))
+
+    def row(kind, **flags):
+        return (kind, LBCGeometry(nz, ny, nx, kind, width=width[kind], dtbc=dtbc,
+                                  has_msf=msf, **zones, **flags))
+    folded = L.folded_relaxation_rows(cfg)
+    capture = tuple(row(k, held_compute=1, held_store=1, target=0) for k in folded)
+    rows = []
+    for istage in range(3):
+        r = [row(k) for k in ("u", "v", "theta")]
+        if istage == 0:
+            r.append(row("phi", held_compute=1, held_store=1, divide_msf=msf))
+        else:
+            r.append(row("phi", held_read=1))
+        r.append(row("mu", apply_relax=int(istage == 0)))
+        rows.append(tuple(r))
+    final = tuple((k, FinalGeometry(nz, ny, nx, k, width=width[k], spec_zone=int(cfg.spec_zone),
+                                    dtbc=dtbc_end, has_msf=msf))
+                  for k in ("mu", "u", "v", "theta", "phi"))
+    return {"rows": tuple(rows), "capture": capture, "fold": tuple(folded), "final": final}
 
 
 def _names() -> tuple:
@@ -298,7 +473,66 @@ def run_state(state, cfg, dtype=np.float64) -> dict:
         out[n] = cp.ascontiguousarray(a.astype(dtype, copy=True))
     for n in ("fnm", "fnp"):  # the acoustic operators take nz + 1 levels
         out[n + "_w"] = cp.concatenate([out[n], cp.zeros(1, dtype=dtype)])
+    if cfg.specified:
+        out.update(_lbc_state(state, cfg, dtype))
     return out
+
+
+def _lbc_state(state, cfg, dtype) -> dict:
+    """The specified binding's arrays: the interval's tables and Davies
+    weights (lateral_bc._relaxation_context), the carried mu halo (mup
+    where none is carried: the first step does not read it), the held
+    relaxation rows, the folded slots and the mu row's unread source."""
+    import cupy as cp
+    from woof.ingest import lateral_bc as L
+    from woof.state_serialization_contract import carried_wrf_mu_halo
+    nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
+    device, _common, (fcx, gcx) = L._relaxation_context(state, cfg)
+    out = {}
+    for f in LBC_FIELDS:
+        b = device.fields[f]
+        for side in ("west", "east", "south", "north"):
+            sd = getattr(b, side)
+            out[f"lbc_{f}_{side}"] = sd.value
+            out[f"lbc_{f}_{side}_t"] = sd.tendency
+    out["lbc_fcx"], out["lbc_gcx"] = fcx, gcx
+    halo = carried_wrf_mu_halo(state)
+    out[HALO] = state.mup if halo is None else halo
+    out = {n: cp.ascontiguousarray(cp.asarray(a).astype(dtype, copy=True))
+           for n, a in out.items()}
+    u, v, m, w = (nz, ny, nx + 1), (nz, ny + 1, nx), (nz, ny, nx), (nz + 1, ny, nx)
+    for n, sh in (("lbc_held_u", u), ("lbc_held_v", v), ("lbc_held_theta", m),
+                  ("lbc_held_phi", w), ("lbc_held_mu", (1, ny, nx)),
+                  ("fold_u", u), ("fold_v", v), ("fold_theta", m),
+                  ("lbc_mu_src", (1, ny, nx))):
+        out[n] = cp.zeros(sh, dtype=dtype)
+    return out
+
+
+def _3d(a):
+    return a if a.ndim == 3 else a[None]
+
+
+def _lb_views(x, dx, kind):
+    """lbc_tl/lbc_ad's dicts for a ``kind`` row on the step dicts: the
+    state (tendency, held buffer), its trajectory and the active names."""
+    def act(d):
+        out = {"src": _3d(d[_LBC_SRC[kind]]), "mup": d["mup"]}
+        out.update({t: d[f"lbc_{kind}_{t}"] for t in LB_TABLES})
+        return out
+    st = lambda d: {"tend": _3d(d[_LBC_TEND[kind]]), "held": d["lbc_held_" + kind]}
+    traj = {**act(x), **{n: x[_LB_PASS.get(n, n)] for n in LB_PASSIVE}}
+    return st, traj, act
+
+
+def _lf_views(x, kind):
+    def act(d):
+        out = {"muts": d["muts"]}
+        out.update({t: d[f"lbc_{kind}_{t}"] for t in LB_TABLES})
+        return out
+    st = lambda d: {"target": _3d(d[_LBC_FINAL[kind]])}
+    traj = {**act(x), **{n: x[n] for n in LF_PASSIVE}}
+    return st, traj, act
 
 
 def _acoustic(d: dict) -> dict:
@@ -412,6 +646,9 @@ def _step(x, dx, geom, tape, observe, *, tl):
             s, p = _view(x, alias), _view(dx, alias)
             op_tl(s, p, s, p, g, nl=True)
             seen(name, x)
+        if geom.specified:
+            _lbc_stage_tl(x, dx, geom, spec, snap, tl)
+            seen("lbc", x)
         snap(SI_STATE)
         small_step_init_tl(_inv(x), _inv(dx), _inv(x), _inv(dx), spec.ss, nl=True)
         seen("si", x)
@@ -426,23 +663,121 @@ def _step(x, dx, geom, tape, observe, *, tl):
         for i in range(spec.nsub):
             acoustic_substep_tl(_acoustic(x), _acoustic(dx),
                                 spec.first if i == 0 else spec.later, tape)
+            if spec.sph is not None:   # advance_specified_phi_w
+                snap(SP_STATE)
+                sph_tl(x, dx, x, dx, spec.sph, nl=True)
             seen("substep", x)
-        snap(("muts",))
-        cp.add(cp.add(x["mub2d"], x["mup"]), x["mu_pp"], out=x["muts"])
-        if tl:
-            cp.add(dx["mup"], dx["mu_pp"], out=dx["muts"])
+        if not geom.specified:
+            # _capture_wrf_muts; with a boundary zone it keeps the
+            # acoustic carrier the substeps advanced
+            snap(("muts",))
+            cp.add(cp.add(x["mub2d"], x["mup"]), x["mu_pp"], out=x["muts"])
+            if tl:
+                cp.add(dx["mup"], dx["mu_pp"], out=dx["muts"])
         snap(SF_STATE)
         small_step_finish_tl(x, dx, x, dx, spec.ss, nl=True)
         seen("sf", x)
     snap(_written(PRP_ALIAS, PRP_STATE))                          # epilogue diagnosis
     s, p = _view(x, PRP_ALIAS), _view(dx, PRP_ALIAS)
     calc_p_rho_phi_tl(s, p, s, p, geom.end_prp, nl=True)
+    if geom.specified:
+        snap((HALO,))                                             # WRF_MU_HALO_SLOT
+        x[HALO][...] = x["mup"]
+        if tl:
+            dx[HALO][...] = dx["mup"]
+        for kind, g in geom.final:                                # spec_bdy_final
+            snap((_LBC_FINAL[kind],))
+            st, traj, act = _lf_views(x, kind)
+            lbf_tl(st(x), st(dx), traj, act(dx), g, nl=True)
+        seen("final", x)
     snap(("w",))
     set_w_surface_tl(x, dx, x, dx, geom.sw, nl=True)
-    snap(("u", "v"))                                              # close_periodic_alias
-    for d in ((x, dx) if tl else (x,)):
-        d["u"][..., -1] = d["u"][..., 0]
-        d["v"][..., -1, :] = d["v"][..., 0, :]
+    if not geom.specified:
+        snap(("u", "v"))                                          # close_periodic_alias
+        for d in ((x, dx) if tl else (x,)):
+            d["u"][..., -1] = d["u"][..., 0]
+            d["v"][..., -1, :] = d["v"][..., 0, :]
+
+
+def _fold_tl(d, kind, held_name, mapped):
+    """fold_lateral_relaxation on one row, in the primal's operations:
+    the zeroed slot plus the relaxation times its map factor, then the
+    map-factor division of _couple_dry_mixing_map_factor (times msfv_inv
+    for v)."""
+    slot, scale, div = _FOLD[kind]
+    out = d[slot]
+    out[...] = 0
+    h = d[held_name]
+    out += h * d[scale][None] if (mapped and scale) else h
+    if mapped:
+        if div == "inv":
+            out *= d["msfv_inv"][None]
+        else:
+            out /= d[div][None]
+
+
+def _lbc_stage_tl(x, dx, geom, spec, snap, tl):
+    """A stage's specified work after the slow tendencies, in
+    dycore._step_body's strict order: on stage 1 the held relaxation of
+    u, v and theta and its fold (fold_lateral_relaxation), every stage the
+    folded slots' add (add_fixed_dry_tendencies), then the boundary rows
+    (_apply_state_lateral_boundaries_wrf)."""
+    if spec.rk_step == 1:
+        for kind, g in geom.capture:
+            snap(("lbc_held_" + kind,))
+            st, traj, act = _lb_views(x, dx, kind)
+            lbc_tl(st(x), st(dx), traj, act(dx), g, nl=True)
+        for kind in geom.fold:
+            snap((_FOLD[kind][0],))
+            _fold_tl(x, kind, "lbc_held_" + kind, geom.fold_msf)
+            if tl:   # the msf factors are passive: the same operations
+                _fold_tl({**x, _FOLD[kind][0]: dx[_FOLD[kind][0]],
+                          "lbc_held_" + kind: dx["lbc_held_" + kind]},
+                         kind, "lbc_held_" + kind, geom.fold_msf)
+    snap(tuple(_LBC_TEND[k] for k in geom.fold))
+    for kind in geom.fold:
+        x[_LBC_TEND[kind]] += x[_FOLD[kind][0]]
+        if tl:
+            dx[_LBC_TEND[kind]] += dx[_FOLD[kind][0]]
+    for kind, g in spec.lbc:
+        snap((_LBC_TEND[kind], "lbc_held_" + kind))
+        st, traj, act = _lb_views(x, dx, kind)
+        lbc_tl(st(x), st(dx), traj, act(dx), g, nl=True)
+
+
+def _lbc_stage_ad(ax, back, geom, spec):
+    """Adjoint of :func:`_lbc_stage_tl` (``back`` pops one snapshot and
+    returns the base before that operation)."""
+    for kind, g in reversed(spec.lbc):
+        base = back()
+        st, traj, act = _lb_views(base, None, kind)
+        lbc_ad(st(ax), traj, _lb_adj(ax, kind), g)
+    back()
+    for kind in geom.fold:
+        ax[_FOLD[kind][0]] += ax[_LBC_TEND[kind]]
+    if spec.rk_step == 1:
+        for kind in reversed(geom.fold):
+            base = back()
+            slot, scale, div = _FOLD[kind]
+            a = ax[slot]
+            if geom.fold_msf:
+                a = a * base["msfv_inv"][None] if div == "inv" else a / base[div][None]
+                if scale:
+                    a = a * base[scale][None]
+            ax["lbc_held_" + kind] += a
+            ax[slot][...] = 0
+        for kind, g in reversed(geom.capture):
+            base = back()
+            st, traj, act = _lb_views(base, None, kind)
+            lbc_ad(st(ax), traj, _lb_adj(ax, kind), g)
+
+
+def _lb_adj(ax, kind):
+    """lbc_ad's active adjoints on ``ax``: the mu row's source is never
+    read, so its adjoint lands in the unread scratch."""
+    out = {"src": _3d(ax[_LBC_SRC[kind]]), "mup": ax["mup"]}
+    out.update({t: ax[f"lbc_{kind}_{t}"] for t in LB_TABLES})
+    return out
 
 
 def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
@@ -457,24 +792,37 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
         cur = {**cur, **tape.pop()}
         return cur
 
-    back()                                                        # periodic alias
-    ax["u"][..., 0] += ax["u"][..., -1]
-    ax["u"][..., -1] = 0
-    ax["v"][..., 0, :] += ax["v"][..., -1, :]
-    ax["v"][..., -1, :] = 0
+    if not geom.specified:
+        back()                                                    # periodic alias
+        ax["u"][..., 0] += ax["u"][..., -1]
+        ax["u"][..., -1] = 0
+        ax["v"][..., 0, :] += ax["v"][..., -1, :]
+        ax["v"][..., -1, :] = 0
     base = back()
     set_w_surface_ad(ax, base, ax, geom.sw)
+    if geom.specified:
+        for kind, g in reversed(geom.final):                      # spec_bdy_final
+            base = back()
+            st, traj, act = _lf_views(base, kind)
+            lbf_ad(st(ax), traj, act(ax), g)
+        back()                                                    # the halo copy
+        ax["mup"] += ax[HALO]
+        ax[HALO][...] = 0
     base = back()
     a = _view(ax, PRP_ALIAS)
     calc_p_rho_phi_ad(a, _view(base, PRP_ALIAS), a, geom.end_prp)
     for spec in reversed(geom.stages):
         base = back()                                             # sf
         small_step_finish_ad(ax, {n: base[n] for n in SF_STATE}, base, ax, spec.ss)
-        back()                                                    # captured muts
-        ax["mup"] += ax["muts"]
-        ax["mu_pp"] += ax["muts"]
-        ax["muts"][...] = 0
+        if not geom.specified:
+            back()                                                # captured muts
+            ax["mup"] += ax["muts"]
+            ax["mu_pp"] += ax["muts"]
+            ax["muts"][...] = 0
         for i in reversed(range(spec.nsub)):
+            if spec.sph is not None:
+                base = back()
+                sph_ad(ax, base, base, ax, spec.sph)
             cur = acoustic_substep_ad(_acoustic(ax), _acoustic(cur), tape,
                                       spec.first if i == 0 else spec.later)
             cur.update(fnm=x["fnm"], fnp=x["fnp"], msfv=x["msfv"])
@@ -486,6 +834,8 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
         ax["muts"][...] = 0
         base = back()                                             # si
         small_step_init_ad(_inv(ax), _inv(base), _inv(ax), spec.ss)
+        if geom.specified:
+            _lbc_stage_ad(ax, back, geom, spec)
         for _, _, ad, alias, g, _ in reversed(_op_table(spec)):
             base = back()
             a = _view(ax, alias)

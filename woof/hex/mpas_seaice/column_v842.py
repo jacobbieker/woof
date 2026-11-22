@@ -393,6 +393,26 @@ CORRECTIONS = {
         "the proteins' and R_C2N_DON keeps its static zero; initialize_coupler_fields hands both to "
         "carbonToNitrogenRatioAlgae and carbonToNitrogenRatioDON (colpkg_init_ocean_conc); the correction "
         "gives the diatoms config_ratio_C_to_N_diatoms and the proteins config_ratio_C_to_N_proteins"),
+    "bgc_inactive_diagnostics": (
+        "seaice_column_reinitialize_diagnostics_bgc zeroes every biogeochemical diagnostic "
+        "(mpas_seaice_column.F:12450-12471) without asking whether its package is on, and the Registry "
+        "allocates no array for a field whose packages are off: with the brine height alone, "
+        "totalChlorophyll (pkgTracerVerticalAlgae;pkgTracerSkeletalAlgae) is a null pointer whose "
+        "descriptor gfortran gives one element, so the zeroing writes to address 0 and every time step "
+        "with the column biogeochemistry dies there; the correction zeroes only the fields that have an "
+        "array, which nothing else reads"),
+    "zsal_solve": (
+        "colpkg_init_parameters takes solve_zsal_in but never assigns the column package's solve_zsal "
+        "(ice_colpkg.F90:4325-4345; mpas_seaice_column.F:9608 has it commented out), so it stays false, and "
+        "set/get_cice_biogeochemistry_tracer_array_category copy verticalSalinity between the pool and the "
+        "tracer array only with config_use_vertical_tracers (mpas_seaice_column.F:6292,6425-6431,6664,6802-6808 and the cell arrays' at 7075 and 7562): "
+        "config_use_vertical_zsalinity never solves the vertical salinity (the brine height runs "
+        "compute_microS_mushy, BL99's dTemp stays 0.01, colpkg_init_zsalinity's sss*salt_loss never reaches the "
+        "pool); the correction sets solve_zsal and copies the vertical salinity, so the init writes it, "
+        "column_biogeochemistry runs compute_microS and zsalinity, BL99 uses dTemp = 0.1, and the ITD and the "
+        "ridging run their solve_zsal branches (add_new_ice's salt loss, add_new_ice_bgc's adjust_tracer_profile, "
+        "lateral_melt_bgc, zap_small_areas' dfzsal). Held to the "
+        "oracle built with tools/mpas_seaice_oracle/zsal_solve.patch"),
 }
 
 
@@ -417,16 +437,53 @@ def corrections(configs: dict) -> frozenset[str]:
 
 #: the biogeochemistry flags the port carries (the brine height); the others are refused by name
 BGC_PORTED = ("config_use_brine",)
+#: the vertical salinity: every biogeochemistry stage carries v8.4.2's inert one and the solved
+#: one (ZSAL_SOLVE)
+ZSAL_FLAG = "config_use_vertical_zsalinity"
+#: the opt-in correction that solves the vertical salinity (CORRECTIONS)
+ZSAL_SOLVE = "zsal_solve"
 
 
-def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool = False) -> None:
+#: the vertical biogeochemical tracers (z_tracers): the init and column_biogeochemistry
+#: carry them with the nonreactive tracer (VT_PORTED) alone; every other stage refuses them
+VT_FLAG = "config_use_vertical_tracers"
+#: the vertical tracers' flags the port carries
+VT_PORTED = ("config_use_nonreactive",)
+
+
+def vertical_tracers(configs: dict) -> bool:
+    """Whether the column package's z_tracers are on (the column
+    biogeochemistry with ``config_use_vertical_tracers``)."""
+    return bool(configs["config_use_column_biogeochemistry"] and configs[VT_FLAG])
+
+
+def solves_zsal(configs: dict) -> bool:
+    """Whether the column package solves the vertical salinity: never in
+    v8.4.2 (its solve_zsal is never set), only under the opt-in correction
+    ``zsal_solve`` (:data:`CORRECTIONS`) with the biogeochemistry, the brine
+    height and ``config_use_vertical_zsalinity`` on."""
+    return bool(configs["config_use_column_biogeochemistry"] and configs["config_use_brine"]
+                and configs[ZSAL_FLAG] and "zsal_solve" in corrections(configs))
+
+
+def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool = False,
+                    z_tracers: bool = False) -> None:
     """Refuse, by name, what this stage of the column port does not carry.
 
-    ``biogeochemistry`` is the caller's: the init (:func:`initialize`) and
-    :func:`woof.hex.mpas_seaice.column_bgc_v842.biogeochemistry` carry the
-    column biogeochemistry's framework and its brine height
-    (``config_use_brine``); every other routine refuses
-    ``config_use_column_biogeochemistry``."""
+    ``biogeochemistry`` is the caller's: the init (:func:`initialize`),
+    :func:`woof.hex.mpas_seaice.column_bgc_v842.biogeochemistry`, the
+    vertical and ITD thermodynamics, the ridging, the shortwave and the
+    column step carry the column biogeochemistry's framework and its brine
+    height (``config_use_brine``); every other routine refuses
+    ``config_use_column_biogeochemistry``. Those stages all carry the
+    vertical salinity (``config_use_vertical_zsalinity``): v8.4.2's inert
+    one (its tracers counted, never solved or copied) and, under the
+    ``zsal_solve`` correction, the solved one.
+
+    ``z_tracers`` is the caller's too: the init and ``column_biogeochemistry``
+    carry the vertical tracers (``config_use_vertical_tracers``) with the
+    nonreactive tracer alone (:data:`VT_PORTED`); every other stage refuses
+    them."""
     c = configs
     if not c.get("config_use_column_package", False):
         _refuse("config_use_column_package", False, "the column port runs only with the column package on",
@@ -434,12 +491,19 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
     if c["config_use_column_biogeochemistry"]:
         if not biogeochemistry:
             _refuse("config_use_column_biogeochemistry", True,
-                    "the column biogeochemistry is ported for the init and column_biogeochemistry only",
+                    "the column biogeochemistry is ported for the init, the column stages and the column "
+                    "step only",
                     "config_use_column_biogeochemistry = .false.")
+        if c[VT_FLAG] and not z_tracers:
+            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init and column_biogeochemistry "
+                    "only", f"{VT_FLAG} = .false.")
+        carried = BGC_PORTED + (ZSAL_FLAG,) + ((VT_FLAG,) + VT_PORTED if c[VT_FLAG] else ())
         for flag in _BGC_FLAGS:
-            if flag not in BGC_PORTED and c[flag]:
-                _refuse(flag, True, "of the column biogeochemistry only the brine height is ported",
-                        f"{flag} = .false.")
+            if flag not in carried and c[flag]:
+                _refuse(flag, True, "of the column biogeochemistry only the brine height, the vertical "
+                        "salinity and the vertical tracers' nonreactive tracer are ported", f"{flag} = .false.")
+        if c[VT_FLAG]:
+            _refuse_z_tracers(c)
         _refuse_bio_layers(c, dims)
     if dims["nSnowLayers"] != 1:
         _refuse("config_nSnowLayers", dims["nSnowLayers"],
@@ -472,6 +536,29 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
         _refuse("config_initial_velocity_type", c["config_initial_velocity_type"],
                 "this column stage ports the initial velocities " + ", ".join(INITIAL_VELOCITIES),
                 "config_initial_velocity_type in " + ", ".join(INITIAL_VELOCITIES))
+
+
+def _refuse_z_tracers(configs: dict) -> None:
+    """What the vertical tracers' port does not carry, by name."""
+    c = configs
+    if not c["config_use_brine"]:
+        _refuse("config_use_brine", False, "the vertical tracers are ported with the brine height only "
+                "(colpkg_init_zbgc makes them depend on the brine fraction)",
+                f"config_use_brine = .true. with {VT_FLAG}")
+    if not all(c[flag] for flag in VT_PORTED):
+        _refuse("config_use_nonreactive", False, "the vertical tracers are ported with the nonreactive tracer",
+                f"config_use_nonreactive = .true. with {VT_FLAG}")
+    if c[ZSAL_FLAG]:
+        # set/get_cice_biogeochemistry_tracer_array_category copy verticalSalinity at
+        # index_verticalSalinity with the vertical tracers (mpas_seaice_column.F:6292,6664),
+        # which MPAS counts after the brine fraction while colpkg_init_zbgc never places
+        # nt_bgc_S there unless solve_zsal (never set in v8.4.2): the copies land on the
+        # vertical tracers' indices
+        _refuse(ZSAL_FLAG, True, "with the vertical tracers, MPAS copies verticalSalinity to and from tracer "
+                "indices the column package gives the vertical tracers", f"{ZSAL_FLAG} = .false. with {VT_FLAG}")
+    if c["config_scale_initial_vertical_bgc"] and c["config_thermodynamics_type"] == "mushy":
+        _refuse("config_scale_initial_vertical_bgc", True, "colpkg_init_bgc's salinity-scaled profiles (the "
+                "mushy remap) are not ported", "config_scale_initial_vertical_bgc = .false.")
 
 
 def _refuse_bio_layers(configs: dict, dims: dict[str, int]) -> None:
@@ -513,6 +600,15 @@ class TracerObject:
     layout: list[tuple[str, int, int]] = field(default_factory=list)
     #: nTracersNotBio: the physics tracers' count (the biogeochemistry's tracers follow)
     n_tracers_not_bio: int = 0
+    #: nt_bgc_S: index_verticalSalinity, the vertical salinity's first tracer (0 without it)
+    nt_bgc_s: int = 0
+    #: the vertical tracers (z_tracers): nbtrcr, nt_zbgc_frac (index_mobileFraction), and per
+    #: bio tracer its first tracer (bio_index, nblyr + 3 layers: the ice's nblyr + 1, then the
+    #: snow's two) and its place in the ocean concentrations (bio_index_o, 1-based)
+    n_bio_tracers: int = 0
+    nt_zbgc_frac: int = 0
+    bio_index: tuple = ()
+    bio_index_o: tuple = ()
 
     def log_rows(self) -> dict[str, list[int]]:
         """The oracle log's ``TOBJ`` rows."""
@@ -525,7 +621,10 @@ class TracerObject:
                 "firstAncestorMask": [int(x) for row in self.first_ancestor_mask for x in row],
                 "ancestorNumber": self.ancestor_number.tolist(),
                 "ancestorIndices": [int(x) for row in self.ancestor_indices for x in row],
-                "colpkg": [self.nt_tsfc, self.nt_fbri]}
+                "colpkg": [self.nt_tsfc, self.nt_fbri],
+                **({"colpkg_zsal": [self.nt_bgc_s]} if self.nt_bgc_s else {}),
+                **({"colpkg_zbgc": [self.n_bio_tracers, self.nt_zbgc_frac, *self.bio_index, *self.bio_index_o]}
+                   if self.n_bio_tracers else {})}
 
 
 def tracer_object(configs: dict, dims: dict[str, int]) -> TracerObject:
@@ -642,10 +741,75 @@ def tracer_object(configs: dict, dims: dict[str, int]) -> TracerObject:
         number = np.append(number, np.int32(0))
         ancestors = np.concatenate([ancestors, np.zeros((2, 1), np.int32)], axis=1)
         layout.append(("brineFraction", nt_fbri, 1))
-    return TracerObject(n_tracers=n_tracers + (nt_fbri != 0), index=idx, parent_index=parent,
+    nt_bgc_s = 0
+    if c["config_use_column_biogeochemistry"] and c["config_use_brine"] and c[ZSAL_FLAG]:
+        # init_column_tracer_object_tracer_number counts nBioLayers vertical-salinity
+        # tracers after the brine fraction; colpkg_init_zbgc (ice_colpkg.F90:1016-1028)
+        # makes nt_bgc_S = ntrcr + 1 and every layer's trcr_depend 2 + nt_fbri (the
+        # brine volume), but sets trcr_base, n_trcr_strata and nt_strata for nt_bgc_S
+        # alone (its k loop writes index nt_bgc_S each time): the first layer is
+        # brine-volume weighted, (0, 1, 0), with the brine fraction its one ancestor.
+        # The other layers keep what MPAS filled before colpkg_init_zbgc: no ancestors
+        # (ancestorNumber and ancestorIndices are zeroed) and the first-ancestor mask
+        # init_column_tracer_object_first_ancestor_mask made from a parentIndex not yet
+        # set (allocated, never initialised): the ice area's column unless that word
+        # happens to be 1 or 2.
+        n_bio = dims["nBioLayers"]
+        nt_bgc_s = n_tracers + (nt_fbri != 0) + 1
+        parent = np.append(parent, np.full(n_bio, 2 + nt_fbri, np.int32))
+        column = np.zeros((3, n_bio), np.float64)
+        column[0, 1:] = 1.0
+        column[1, 0] = 1.0
+        mask = np.concatenate([mask, column], axis=1)
+        number = np.append(number, np.zeros(n_bio, np.int32))
+        number[nt_bgc_s - 1] = 1
+        more = np.zeros((2, n_bio), np.int32)
+        more[0, 0] = nt_fbri
+        ancestors = np.concatenate([ancestors, more], axis=1)
+        if solves_zsal(c):
+            # v8.4.2 copies verticalSalinity(Cell) to and from the tracer arrays only with the
+            # vertical tracers (mpas_seaice_column.F:6292,6664,7075,7562): its tracers are
+            # counted and never read or written back, so only zsal_solve maps the pool field
+            layout.append(("verticalSalinity", nt_bgc_s, n_bio))
+    bio_index, bio_index_o, nt_zbgc_frac = [], [], 0
+    if vertical_tracers(c) and c["config_use_brine"] and c["config_use_nonreactive"]:
+        # colpkg_init_zbgc's z_tracers (ice_colpkg.F90:1362-1371 and 1426-1490), the
+        # nonreactive tracer (tr_bgc_PON) alone: colpkg_init_bgc_trcr gives its nblyr + 1
+        # ice layers trcr_depend nt_depend = 2 + nt_fbri (ntd = 0 with the brine
+        # fraction), trcr_base (0, 1, 0) and the brine fraction as their one stratum,
+        # then its two snow layers trcr_depend 2, trcr_base (0, 0, 1) and no strata;
+        # bio_index_o(nlt_bgc_PON) = 2*max_algae + max_doc + max_dic + 7. The mobile
+        # fractions follow at nt_zbgc_frac: trcr_depend 2 + nt_fbri, (0, 1, 0), the
+        # brine fraction their stratum. Every word MPAS filled before is overwritten.
+        nk = dims["nBioLayers"] + 1
+        first = len(parent) + 1
+        bio_index.append(first)
+        bio_index_o.append(2 * _MAX_ALGAE + _MAX_DOC + _MAX_DIC + 7)
+        n_bio = len(bio_index)
+        nt_zbgc_frac = first + nk + 2
+        ice, snow = np.full(nk, 2 + nt_fbri, np.int32), np.full(2, 2, np.int32)
+        frac = np.full(n_bio, 2 + nt_fbri, np.int32)
+        parent = np.concatenate([parent, ice, snow, frac])
+        column = np.zeros((3, nk + 2 + n_bio), np.float64)
+        column[1, :nk] = 1.0
+        column[2, nk:nk + 2] = 1.0
+        column[1, nk + 2:] = 1.0
+        mask = np.concatenate([mask, column], axis=1)
+        more_number = np.zeros(nk + 2 + n_bio, np.int32)
+        more_number[:nk] = 1
+        more_number[nk + 2:] = 1
+        number = np.append(number, more_number)
+        more = np.zeros((2, nk + 2 + n_bio), np.int32)
+        more[0, :nk] = nt_fbri
+        more[0, nk + 2:] = nt_fbri
+        ancestors = np.concatenate([ancestors, more], axis=1)
+        layout.append(("verticalNonreactiveConc", first, nk + 2))
+        layout.append(("mobileFraction", nt_zbgc_frac, n_bio))
+    return TracerObject(n_tracers=len(parent), index=idx, parent_index=parent,
                         first_ancestor_mask=mask, ancestor_number=number, ancestor_indices=ancestors,
                         nt_tsfc=idx["surfaceTemperature"], nt_fbri=nt_fbri, layout=layout,
-                        n_tracers_not_bio=n_tracers)
+                        n_tracers_not_bio=n_tracers, nt_bgc_s=nt_bgc_s, n_bio_tracers=len(bio_index),
+                        nt_zbgc_frac=nt_zbgc_frac, bio_index=tuple(bio_index), bio_index_o=tuple(bio_index_o))
 
 
 # ---------------------------------------------------------------------------
@@ -675,18 +839,20 @@ class ColumnState:
     warnings: int | list = 0
 
 
-def init_parameters(pools: dict, configs: dict, biogeochemistry: bool = False) -> ColumnState:
+def init_parameters(pools: dict, configs: dict, biogeochemistry: bool = False,
+                    z_tracers: bool = False) -> ColumnState:
     """``seaice_init_column_physics_package_parameters``: host side. The
     stand-in pointers of the packages that are off change no state the port
-    reads (the absent fields stay ``None``). ``biogeochemistry``: the caller
-    carries the column biogeochemistry (:func:`refuse_unported`)."""
+    reads (the absent fields stay ``None``). ``biogeochemistry`` and
+    ``z_tracers``: the caller carries the column biogeochemistry and its
+    vertical tracers (:func:`refuse_unported`)."""
     mesh = pools["mesh"]
     dims = {k: int(mesh[k]) for k in ("nCells", "nCellsSolve", "nVertices", "nEdges", "maxEdges",
                                        "vertexDegree") if k in mesh}
     for k, v in mesh.items():
         if isinstance(v, (int, np.integer)):
             dims.setdefault(k, int(v))
-    refuse_unported(configs, dims, biogeochemistry)
+    refuse_unported(configs, dims, biogeochemistry, z_tracers)
     check_column_package_configs(configs, dims["nCategories"])
     return ColumnState(
         dims=dims, packages=packages(configs), tracers=tracer_object(configs, dims),
@@ -946,6 +1112,145 @@ def init_biogeochemistry_profiles(pools: dict, configs: dict, state: ColumnState
         # which nothing reads. With it, a missing array is an error, not a skip.
         if configs["config_use_brine"]:
             _need(pools["tracers"], "brineFraction", (d["nCells"] + 1, d["nCategories"], 1))[:n_solve] = 1.0
+    if vertical_tracers(configs):
+        init_bgc(pools, configs, state)
+    if configs[ZSAL_FLAG] and not configs["config_do_restart_zsalinity"]:
+        # colpkg_init_zsalinity per owned cell (ice_colpkg.F90:5448-5494): no Rayleigh
+        # criterion yet and every category's vertical salinity sss*salt_loss. Its
+        # dts_b (300 s up to 7 biology layers, else 50 s) is zsalinity_dts. v8.4.2
+        # copies the tracer array back to verticalSalinity only with the vertical
+        # tracers (mpas_seaice_column.F:6664,6802-6808): only zsal_solve writes it.
+        n_solve = d["nCellsSolve"]
+        n1 = d["nCells"] + 1
+        bgc["rayleighCriteriaReal"][:n_solve] = 0.0
+        if not solves_zsal(configs):
+            return
+        sss = _need(pools["ocean_coupling"], "seaSurfaceSalinity", (n1,))[:n_solve]
+        zsal = _need(pools["tracers"], "verticalSalinity", (n1, d["nCategories"], d["nBioLayers"]))
+        zsal[:n_solve] = (sss * 0.4)[:, None, None]
+
+
+#: colpkg_init_OceanConcArray's (ice_colpkg.F90:5540-5603) layout of the ocean
+#: concentrations, nZBGCTracers long: max_algae 3, max_doc 3, max_dic 1, max_don 1,
+#: max_fe 2, max_aero 6
+_MAX_ALGAE, _MAX_DOC, _MAX_DIC, _MAX_DON, _MAX_FE, _MAX_AERO = 3, 3, 1, 1, 2, 6
+
+
+def zbgc_parameters(configs: dict, tracers: TracerObject) -> dict:
+    """``colpkg_init_zbgc``'s per-bio-tracer parameters (``ice_colpkg.F90:1446-1490``),
+    the nonreactive tracer's alone: its transport type (``nitratetype``,
+    ``config_mobility_type_nitrate``), the retention and release times by
+    type band (1 s each below 0, where none applies), ``zbgc_frac_init`` (1)
+    and ``zbgc_init_frac`` (``frazil_scav``, or ``initbio_frac`` below 0)."""
+    c = configs
+    tau_min = float(c["config_rapid_mobile_to_stationary_time"])
+    tau_max = float(c["config_long_mobile_to_stationary_time"])
+    out = {"type": [], "tau_ret": [], "tau_rel": [], "frac_init": [], "init_frac": []}
+    for _ in range(tracers.n_bio_tracers):
+        kind = float(c["config_mobility_type_nitrate"])
+        ret = rel = 1.0
+        if 0.0 <= kind < 0.5:
+            ret, rel = tau_min, tau_max
+        elif 0.5 <= kind < 1.0:
+            ret, rel = tau_min, tau_min
+        elif 1.0 <= kind < 2.0:
+            ret, rel = tau_max, tau_min
+        elif kind >= 2.0:
+            ret, rel = tau_max, tau_max
+        out["type"].append(kind)
+        out["tau_ret"].append(ret)
+        out["tau_rel"].append(rel)
+        out["frac_init"].append(1.0)
+        out["init_frac"].append(float(c["config_new_ice_fraction_biotracer"]) if kind < 0.0
+                                else float(c["config_fraction_biotracer_in_frazil"]))
+    return out
+
+
+def ocean_conc_array(pools: dict, configs: dict, dims: dict[str, int]) -> None:
+    """``colpkg_init_OceanConcArray`` into ``oceanBioConcentrations`` on the
+    owned cells, from the ocean concentrations ``initialize_coupler_fields``
+    set, ``R_chl2N`` and ``R_S2N`` the chlorophyll and sulfur to nitrogen
+    ratios (``ice_colpkg.F90:1096-1114``)."""
+    import cupy as cp
+    c, bgc = configs, pools["biogeochemistry"]
+    n = dims["nCellsSolve"]
+    out = _need(bgc, "oceanBioConcentrations", (dims["nCells"] + 1, dims["nZBGCTracers"]))
+    for name in ("oceanAlgaeConc", "oceanDOCConc", "oceanDICConc", "oceanDONConc", "oceanDissolvedIronConc",
+                 "oceanParticulateIronConc", "oceanZAerosolConc", "oceanNitrateConc", "oceanAmmoniumConc",
+                 "oceanSilicateConc", "oceanDMSPConc", "oceanDMSConc", "oceanHumicsConc"):
+        if not isinstance(bgc.get(name), cp.ndarray) or len(bgc[name]) < n:
+            raise ValueError(f"{name} must be a device array over the owned cells")
+    algae, doc, dic, don = (bgc[k][:n] for k in ("oceanAlgaeConc", "oceanDOCConc", "oceanDICConc", "oceanDONConc"))
+    fed, fep, zaero = (bgc[k][:n] for k in ("oceanDissolvedIronConc", "oceanParticulateIronConc",
+                                            "oceanZAerosolConc"))
+    chl = [np.float64(c[f"config_ratio_chla_to_N_{a}"]) for a in ("diatoms", "small_plankton", "phaeocystis")]
+    s2n = [np.float64(c[f"config_ratio_S_to_N_{a}"]) for a in ("diatoms", "small_plankton", "phaeocystis")]
+    o = cp.zeros_like(out[:n])
+    for k in range(_MAX_ALGAE):
+        o[:, k] = algae[:, k]
+        o[:, _MAX_ALGAE + _MAX_DOC + _MAX_DIC + 1 + k] = cp.multiply(chl[k], algae[:, k])
+    ks = _MAX_ALGAE + 1
+    for k in range(_MAX_DOC):
+        o[:, ks + k] = doc[:, k]
+    ks += _MAX_DOC
+    for k in range(_MAX_DIC):
+        o[:, ks + k] = dic[:, k]
+    ks = 2 * _MAX_ALGAE + _MAX_DOC + _MAX_DIC + 7
+    for k in range(_MAX_DON):
+        o[:, ks + k] = don[:, k]
+    # ocean_bio_all(ks) for the 1-based ks below is column ks - 1
+    o[:, _MAX_ALGAE] = bgc["oceanNitrateConc"][:n]
+    ks = 2 * _MAX_ALGAE + _MAX_DOC + 2 + _MAX_DIC
+    o[:, ks - 1] = bgc["oceanAmmoniumConc"][:n]
+    o[:, ks] = bgc["oceanSilicateConc"][:n]
+    o[:, ks + 1] = cp.add(cp.add(cp.multiply(s2n[0], algae[:, 0]), cp.multiply(s2n[1], algae[:, 1])),
+                          cp.multiply(s2n[2], algae[:, 2]))
+    o[:, ks + 2] = bgc["oceanDMSPConc"][:n]
+    o[:, ks + 3] = bgc["oceanDMSConc"][:n]
+    o[:, ks + 4] = bgc["oceanNitrateConc"][:n]                       # PON
+    ks = 2 * _MAX_ALGAE + _MAX_DOC + 7 + _MAX_DIC + _MAX_DON
+    for k in range(_MAX_FE):
+        o[:, ks + k] = fed[:, k]
+    ks += _MAX_FE
+    for k in range(_MAX_FE):
+        o[:, ks + k] = fep[:, k]
+    ks += _MAX_FE
+    for k in range(_MAX_AERO):
+        o[:, ks + k] = zaero[:, k]
+    ks += _MAX_AERO + 1
+    o[:, ks - 1] = bgc["oceanHumicsConc"][:n]
+    out[:n] = o
+
+
+def init_bgc(pools: dict, configs: dict, state: ColumnState) -> None:
+    """``colpkg_init_bgc`` per owned cell (``ice_colpkg.F90:575-695``) with the
+    vertical tracers: the ocean concentrations (:func:`ocean_conc_array`)
+    and, without ``config_do_restart_bgc``, every category's tracers: the ice
+    layers ``ocean_bio_all(bio_index_o)*zbgc_init_frac``, the snow's two 0,
+    the mobile fraction ``zbgc_frac_init``. With the brine height and the
+    BL99 thermodynamics (the mushy remap is refused) and the vertical
+    salinity off (refused with the vertical tracers),
+    ``config_scale_initial_vertical_bgc`` takes this branch too."""
+    d, to = state.dims, state.tracers
+    n_solve, nbl = d["nCellsSolve"], d["nBioLayers"]
+    ocean_conc_array(pools, configs, d)
+    if configs["config_do_restart_bgc"] or not n_solve:
+        return
+    par = zbgc_parameters(configs, to)
+    bgc, t = pools["biogeochemistry"], pools["tracers"]
+    conc = bgc["oceanBioConcentrations"]
+    pon = _need(t, "verticalNonreactiveConc", (d["nCells"] + 1, d["nCategories"], nbl + 3))
+    frac = _need(t, "mobileFraction", (d["nCells"] + 1, d["nCategories"], d["nZBGCTracers"]))
+    for m, o in enumerate(to.bio_index_o):
+        ice = conc[:n_solve, o - 1] * np.float64(par["init_frac"][m])
+        pon[:n_solve, :, :nbl + 1] = ice[:, None, None]
+        pon[:n_solve, :, nbl + 1:] = 0.0
+        frac[:n_solve, :, m] = par["frac_init"][m]
+
+
+def zsalinity_dts(n_bio_layers: int) -> float:
+    """``colpkg_init_zsalinity``'s ``dts_b``, the vertical salinity's time step."""
+    return 300.0 if n_bio_layers <= 7 else 50.0
 
 
 def init_ice_state(pools: dict, configs: dict, state: ColumnState) -> None:
@@ -1080,11 +1385,24 @@ def aggregate(pools: dict, configs: dict, state: ColumnState) -> None:
             cp.asarray(np.ascontiguousarray(to.first_ancestor_mask)), cp.asarray(to.ancestor_number),
             cp.asarray(np.ascontiguousarray(to.ancestor_indices)), np.int32(nt), np.int32(to.nt_tsfc),
             np.int32(to.nt_fbri), np.int32(n_solve), np.int32(ncat))
-    for name, first, layers in to.layout:
+    for name, first, layers in to.layout + _cell_only_layout(to, d):
+        if name in _NO_CELL_FIELD:
+            continue
         dst, sub = _cell_field(pools, name)
         field_layers = dst.shape[1] if dst.ndim == 2 else 1
         _launch("seaice_scatter_cell_tracer_v842", n_solve * layers, dst, trcr, np.int32(first - 1),
                 np.int32(layers), np.int32(sub), np.int32(field_layers), np.int32(nt), np.int32(n_solve))
+
+
+#: tracer-array entries get_cice_tracer_array_cell does not copy (the mobile fraction has no cell field)
+_NO_CELL_FIELD = ("mobileFraction",)
+
+
+def _cell_only_layout(to: TracerObject, dims: dict[str, int]) -> list[tuple[str, int, int]]:
+    """The cell fields get_cice_biogeochemistry_tracer_array_cell also writes:
+    the nonreactive tracer's ice layers again, as ``verticalNonreactiveIceCell``
+    (``mpas_seaice_column.F:7701-7709``)."""
+    return [("verticalNonreactiveIce", to.bio_index[0], dims["nBioLayers"] + 1)] if to.n_bio_tracers else []
 
 
 def update_state(pools: dict, configs: dict, state: ColumnState, update_type: str, dt: float,

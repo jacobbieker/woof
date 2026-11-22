@@ -295,7 +295,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     ISOMIP and Jenkins melt, the top drag, the boundary layer, the thickness,
     velocity and tracer forcing, the effective density in land ice and the
     coupler's land-ice means; standalone, in the diagnostics and over forward
-    steps; 'HollandJenkins' is refused by name). Three v8.4.2 quirks keep
+    steps; 'HollandJenkins' is refused by name), and the Gent-McWilliams
+    bolus velocity (`ocn_gm_compute_Bolus_velocity`: isoneutral slopes,
+    their smoothing and tapering, `k33`, the stream function's solve;
+    standalone, not yet wired into the step). Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
@@ -390,13 +393,62 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     profiles and ocean concentrations, and `column_biogeochemistry`'s
     flushing, flooding and Darcy velocity, RKIND 8 with no opt-in, word for
     word with v8.4.2 on CUDA and Metal. v8.4.2's diatom carbon to nitrogen
-    ratio (the proteins') has a named correction (`zbgc_c2n_proteins`);
-    the other biogeochemistry flags, and the brine fraction in the ITD,
-    ridging and remap, are refused by name until their phases land;
+    ratio (the proteins') has a named correction (`zbgc_c2n_proteins`).
+    The brine fraction is carried through the ITD (new ice, the thickness
+    surplus, zapped categories), ridging, the remap, the column step and
+    the coupled step (the ocean biogeochemistry fluxes zeroed and scaled),
+    word for word on CUDA and Metal. v8.4.2's step writes the algae's
+    `totalChlorophyll` through a null pointer when the brine height runs
+    alone (it dies on every step), so the step refuses that configuration
+    unless the correction `bgc_inactive_diagnostics` is named. The vertical
+    salinity (`config_use_vertical_zsalinity`, BL99) is inert in v8.4.2,
+    which never sets the column package's `solve_zsal` and copies
+    `verticalSalinity` only with the vertical tracers; every column stage
+    (the init, the brine height's step, the vertical and ITD
+    thermodynamics, the ridging, the column step and the coupled step)
+    keeps that word for word, and the correction `zsal_solve` solves it
+    (`compute_microS`, `solve_S_dt`, the salt fluxes, BL99's `dTemp`, and
+    in the ITD and the ridging the new ice's salt loss, `adjust_tracer_profile`,
+    `lateral_melt_bgc` and `zap_small_areas`' salt) in every one of those
+    stages, word for word on CUDA and Metal with an oracle built from
+    `zsal_solve.patch`. The vertical tracers (`config_use_vertical_tracers`)
+    with the nonreactive tracer (`config_use_nonreactive`) run in the init
+    and `column_biogeochemistry`: `update_snow_bgc`'s scavenging,
+    `z_biogeochemistry`'s mobile and stationary phases and
+    `merge_bgc_fluxes`, word for word with v8.4.2 on CUDA and Metal. The
+    other stages still refuse them. The other biogeochemistry flags are
+    refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
-    subglacial hydrology and one forward-Euler time step;
+    subglacial hydrology, one forward-Euler time step, and the forward mode
+    around it (the clock with its adaptive-step force alarm, the cold-start
+    initialisation, the initial solve and the time-step loop, with a
+    bitwise restart; `woof/hex/mpas_ice/forward_v842.py`), word-exact over
+    the dome, EISMINT2 A, hydrology and enthalpy-benchmark cases on uniform
+    and variable resolution meshes; `woof hex ice run --namelist
+    namelist.landice --input landice_grid.nc --out DIR` runs it from an
+    MPAS land-ice input file to the oracle's words (`output.nc`, and a
+    `restart.npz` to continue from); MALI's side of the land-ice/ocean seam
+    exports `landIcePressure`, `landIceFraction`, `landIceMask` and the
+    liquid (grounding-line discharge) and solid (calving) runoff, and
+    imports the ocean's floating basal mass balance
+    (`woof/hex/mpas_ice/ocean_seam_v842.py`, graded by conservation); the
+    land-ice core's registry status is now `ported_subset` (velocity
+    solvers 'sia', 'simple' and 'none'), and its global statistics
+    (`config_stats_interval`, `woof/hex/mpas_ice/statistics_v842.py`) match
+    v8.4.2's log report character for character, with
+    `woof_statistics_extrema = 'ice'` as an opt-in correction, and so do
+    its analysis members `globalStats` and `regionalStats`
+    (`woof/hex/mpas_ice/analysis_v842.py`: every word and every compute's
+    time against v8.4.2's driver and members compiled verbatim, their
+    alarms on the streams' reference times; the door writes each stream's
+    records), with `woof_analysis_empty = 'corrected'` (0 for a mean over no
+    ice, which v8.4.2 leaves NaN) as an opt-in correction. Two v8.4.2 quirks have opt-in corrections, off by
+    default: `woof_sgh_init_mask = 'corrected'` and
+    `woof_enthalpy_advection_units = 'corrected'` (the advection converts
+    enthalpy in Celsius, as the thermal solver does, so the EISMINT2
+    enthalpy ice no longer melts away);
   - the coupler's ocean import merge, E3SM v3.2.0's `prep_ocn_merge`
     (`woof/hex/coupled/prep_ocn_merge_e3sm.py`, opt-in, not called by the
     coupled step): x2o built from the atmosphere, sea ice, runoff, waves,
@@ -459,6 +511,61 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     over the ocean's coupling window, averaged by E3SM's rounded `1/count`
     and copied back. real(r8), word-exact on CUDA and Metal against the
     routines compiled verbatim on MCT.
+  - One coupler interval chained (`woof/hex/coupled/interval_e3sm.py`,
+    opt-in): the ported routines above, run in E3SM v3.2.0's RASM_OPTION1
+    order over several coupler steps (the i2x map, the flux, the ocean
+    merge and accumulation, the albedos; the window's average on the
+    ocean's alarm; the o2x and a2x maps and the sea-ice merge on the sea
+    ice's; then the fractions), with the components' exports scripted.
+    real(r8), word-exact on CUDA and Metal against E3SM's own routines cut
+    verbatim, linked and driven in that order on MCT. Like the flux it needs
+    `WOOF_GLIBC239_LIBM64=1`; the wave couplings are refused by name.
+    Per-step inputs (`nextsw_cday`, `flux_epbalfact`, the runoff, land-ice
+    and wave exports) go through `set_inputs`. A `seq_frac_set` stop
+    comes through the chain.
+  - The coupled step on the spine (`woof/hex/coupled/run_e3sm.py`,
+    opt-in): the interval driven over a `CoupledClock`, one coupler step
+    per clock interval. The ocean's and sea ice's alarms come from their
+    coupling periods, and the components are called where RASM_OPTION1
+    runs them. Each hand-over is a matched exchange, refused by its
+    channel's name. Word-exact against the chained oracle with scripted
+    components.
+  - E3SM v3.2.0 coupler with MPAS v8.4.2 components, not an E3SM
+    configuration (`woof/hex/coupled/hybrid_ocean.py`, opt-in): the MPAS
+    v8.4.2 ocean (this fork's port) run as E3SM v3.2.0's `ocn_init_mct` and
+    `ocn_run_mct` run their ocean (the clock moved to its first coupling
+    alarm at start, the means reset each window, the forcing built in
+    E3SM's order), with E3SM's import and export around it. E3SM's build's
+    constants by default (`T0_Kelvin` 273.15, `rho_sw` 1026), or v8.4.2's
+    own. real(r8), word-exact on CUDA and Metal against E3SM's import and
+    export cut verbatim and compiled against v8.4.2's modules, around
+    v8.4.2's forward mode. Each place E3SM's loop does something v8.4.2's
+    does not is listed (`DIVERGENCES`): ported, refused by name (the
+    removed Antarctic runoff, the waves, the 10 m wind, the land ice's
+    'standalone' and 'data', the 3-D thermal forcing, nonzero iceberg
+    fluxes, precipitation scaling, the BGC tracers) or left out with the
+    reason (`Faoo_h2otemp` is sent as 0). E3SM's own MPAS-Ocean is not
+    ported.
+  - The same hybrid for the sea ice (`woof/hex/coupled/hybrid_seaice.py`,
+    opt-in): the MPAS v8.4.2 sea ice (this fork's port, column package and
+    velocity solver) run as E3SM v3.2.0's `ice_init_mct` and `ice_run_mct`
+    run theirs. At start: `nextsw_cday`, the core's init, the coupling
+    preparation, the export, then the zero import. Each window: the fluxes
+    re-initialised once, the import, v8.4.2's post-atmospheric and
+    post-oceanic coupling, then the steps with the counter restarted and no
+    per-step finalize, then the export. The cap's constants are v8.4.2's
+    stand-alone column package's. real(r8), word-exact on CUDA against
+    E3SM's import and export cut verbatim and compiled against v8.4.2's
+    modules. `DIVERGENCES` lists every difference. v8.4.2's ESM build
+    (CCSMCOUPLED) is left out with its reason. Refused by name: Icepack,
+    the forcing streams, prescribed ice, icebergs, floe sizes, waves, the
+    scaled dib, the coupled BGC and aerosols, the slab ocean, restarts.
+    E3SM's own MPAS-Seaice is not ported.
+    are the MALI port's ocean seam: `landIcePressure`, `landIceFraction` and
+    `landIceMask` (int32), liquid and solid runoff in place of one mass
+    channel, and `ocn2li_floating_basal_mass_bal` back in MALI's sign
+    (`landIceDraft` is a diagnostic only). Calving momentum is refused by
+    name.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
@@ -490,6 +597,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
+- **Corrections of WRF/MPAS quirks, each opt-in and off by default.**
+  The default stays word for word with the WRF 4.7.1 / MPAS v8.4.2
+  oracle; each key changes only the arithmetic it names.
+  - `ysu_surface_heat_exner` (YSU, `bl_pbl_physics = 1`, WRF route). WRF's YSU adds the surface sensible heat flux to
+    potential temperature as if it were a temperature flux and converts
+    back with pi, so the column gets `HFX*pi` instead of `HFX`. That loses
+    4.5% of the surface heating at 850 hPa and 14% at 600 hPa. The option
+    uses `HFX/pi(1)` (refused with BEP/BEM, where YSU takes the urban
+    heat sources instead). Checked by the column heat budget, not yet scored
+    against observations; the hex MPAS-suite YSU does not carry it yet.
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
@@ -964,7 +1081,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   ([docs/lakes.md](docs/lakes.md#recommended-settings)): the Great Lakes cool
   2-3 times as fast as GLSEA (WRF's CLM lake), lake-effect cores are
   over-intense (50 mm FSS .81 to .70 at 9 km on Buffalo, Nov 2022),
-  `lake_depth` needs `woof fetch-geog` (unless `use_lakedepth = 0`), and hex
+  `woof go` downloads `lake_depth` itself (2.4 MB, 1.9 GB unpacked; unless `use_lakedepth = 0`), and hex
   R2 lakes start about 1.4 K
   cold.
   On the hex MPAS-suite route, `--physics config_clm_lake_backend=hex-cuda`
@@ -1005,7 +1122,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `spacewx_ionosphere_opt = 1` writes the
   same ionosphere into every WRF-route history frame (`IONO_TEC`,
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
-  forecast; hex and streamed domains refuse it for now. `woof spacewx aurora`
+  forecast, and `spacewx_ionosphere_opt = 2` applies the storm-time
+  correction there too (plus its ratio `IONO_STORM`), from GFZ's ap with the
+  latest observed ap persisted past the start; hex and streamed domains
+  refuse both for now. `woof spacewx aurora`
   places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
@@ -1019,12 +1139,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   0.48-0.61 and the model reads about 2.5 times higher. `spacewx_aurora_opt =
   2` adds OVATION's electron energy flux, mean energy and ion energy flux
   (`AURORA_EFLUX`, `AURORA_EMEAN`, `AURORA_IFLUX`) to those history frames,
-  from the solar wind at the start. `woof spacewx particles` turns the GOES
+  from the solar wind at the start, and `spacewx_aurora_opt = 3` also the
+  Knipp et al. 2004 northern Joule power (`JOULE_POWER`, GW; one number held
+  from OMNI2's PC(N) and Dst at the start, not a local heating rate).
+  `woof spacewx particles` turns the GOES
   integral proton flux (OMNI2 or SWPC real time) into polar-cap ion-pair rates
   and NOx/HOx production during solar proton events (Bethe stopping in air,
   35 eV per ion pair). Against the CMIP7 rates, the ratio is 0.4-1.0 at 0.1-100
   hPa. `spacewx_epp_opt = 1` adds that NO, OH and HO2 to RADM2 chemistry in
-  the polar caps, from the GOES flux at the start. With `--electron-energy-flux`
+  the polar caps, from the GOES flux at the start; on hex, the same keys in
+  the chemistry config's `wrf_chem` block do it on both routes, word for word
+  the WRF path's. With `--electron-energy-flux`
   and `--electron-mean-energy` (OVATION's eflux and mean energy) the command
   adds the auroral electrons' ion-pair rates and NOx (Fang et al. 2010). They
   deposit above about 85 km, so they are a diagnostic, not a forecast source
@@ -1129,8 +1254,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   The binary32 adjoint costs 3.2-5.0x the forward acoustic kernels,
   0.85-3.2x the glue, 3.3-4.5x advection, 1.3-4.4x the big-step
   tendencies and 2.5-3.7x the lateral boundaries. The kernels chain into
-  one strict dry step (`woof.grad.wrfplus.model`, periodic, with
-  Coriolis, curvature and map factors) whose binary32 base state reproduces
+  one strict dry step (`woof.grad.wrfplus.model`, periodic or with
+  specified lateral boundaries, with Coriolis, curvature and map factors;
+  the boundary tables are inputs whose adjoint it returns) whose binary32 base state reproduces
   `dycore.step` word for word, and whose binary64 dot-product and
   finite-difference tests pass. Measured at 200x200x49 on an A6000, the
   step's adjoint sweep costs 3.3x the forward step, and 4.8x with its
@@ -1140,8 +1266,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   over N steps with checkpoints, and takes adjoint forcing at
   intermediate states for 4D-Var. Its TL can start from part of the
   state, with the rest zero, as WRFDA's TL start does
-  (`Window.tl(dx0, partial=True)`). The forecast path does not import any
-  of it.
+  (`Window.tl(dx0, partial=True)`). It can also linearise about a
+  supplied trajectory instead of its own dry rerun, as WRFPLUS does
+  about the nonlinear run's states (`Window.forward(trajectory=...)`).
+  The first moist pieces exist as kernels but are not yet in the step:
+  `calc_cq` (qv, or qv, qc and qr), the pressure gradient's cqu/cqv, the
+  moist buoyancy, the diagnosis's qv (WRF's `qvf`), moist scalar
+  transport (sumflux and the non-PD scalar update,
+  `woof.grad.wrfplus.scalar`), and the moist boundary rows (qv's
+  relaxation and spec_bdy_final, flow_dep_bdy for hydrometeors). The
+  forecast path does not import any of it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
@@ -1210,6 +1344,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   as WRFDA's `gen_be_ep2` does (to 2.8e-13 K in `t`; the rest word for
   word). Its analysis matches WRFDA's `wrfvar_output` to O7's tolerances:
   max |difference| at most 4.7e-5 of the RMS.
+  `woof.da.var.pairing` (Python API) pairs it with an LETKF cycle: the hybrid's
+  ensemble is the LETKF's forecast ensemble, and the LETKF's analysis members
+  are recentred on the variational analysis. Tested on synthetic grids only;
+  no cycling skill claim, and writing the members back is the controller's.
   FGAT (experimental; `woof var --fgat-obs obNN.ascii --fgat-first-guess fgNN`
   per time slot) compares each observation with the first guess at its
   slot's time, as WRFDA's `num_fgat_time` does. On a 7-slot 12-18Z case
@@ -1304,7 +1442,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   MHS and ATMS departures fall on columns that were not assimilated as
   well. Against held-out radiosondes the analysis is neutral to slightly
   better without AMVs. With AMVs, upper-level winds are 3-4 % worse
-  (plan 12.8 item 6).
+  (plan 12.8 item 6). The 31-member solve runs on host-staged arrays
+  (`solve_namespace=np`) with 12 forked workers, 237k active points: the
+  transform took 65 s, against 20 minutes in one process at 4 members.
 - **Neural-network column physics (opt-in, inference only; in progress).**
   `woof.nn` loads a column model (a manifest with weights hash, units,
   normalisation and trained input range) and runs it with PyTorch on CUDA
