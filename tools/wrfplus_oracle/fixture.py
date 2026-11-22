@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -2260,12 +2260,91 @@ def diffusion(exe: str, runner: list[str], seed: int = 20261130) -> dict:
     return out
 
 
+#: hdiff: the diff_opt 1 horizontal-diffusion rows (hdiff.F90), every
+#: row on periodic, specified and channel (periodic x, specified y) axes,
+#: plus short specified cases; c1 = 1, c2 = 0 (WRFPLUS's rows take mu as
+#: the mass).
+HDIFF_ROW_CODE = {"u": 1, "v": 2, "w": 3, "t": 4, "s": 5}
+HDIFF_CASES = {f"hd_{row}_{kind}": dict(row=row, **over)
+               for row in HDIFF_ROW_CODE
+               for kind, over in (("periodic", {}),
+                                  ("spec", dict(boundary_x=1, boundary_y=1)),
+                                  ("spec_y", dict(boundary_y=1)))}
+HDIFF_CASES.update({f"hd_{row}_small": dict(row=row, nz=3, ny=5, nx=4, boundary_x=1,
+                                            boundary_y=1) for row in ("w", "t")})
+
+
+def _hd_record(geom, tr, pe, seed):
+    """hdiff.F90's input.  Halos wrap a periodic axis (a staggered end
+    face takes face 0, which woof reads there) and copy the edge of a
+    specified one."""
+    L = _df_layout(geom)
+    bx, by = geom.boundary_x, geom.boundary_y
+    flags = (int(not bx) | (int(not by) << 1) | (int(bool(bx or by)) << 2)
+             | (HDIFF_ROW_CODE[geom.row] << 4))
+    blob = np.array([geom.nx, geom.ny, geom.nz, flags, 0], dtype=np.int32).tobytes()
+    blob += np.asarray([geom.rdx, geom.rdy], dtype="<f8").tobytes()
+    base = tr["base"] if geom.perturb else np.zeros((geom.nz, geom.ny, geom.nx))
+    a3 = [L.pad3(tr["field"], end=False), L.pad3(pe["field"], end=False),
+          L.pad3(tr["xk"]), L.pad3(pe["xk"]), L.pad3(base), L.place3(tr["tend"]),
+          np.zeros(L.s3), L.place3(seed["tend"])]
+    a2 = [L.pad2(tr["mut"]), L.pad2(pe["mut"]), _rp_pad2(L, tr["msfu"], False),
+          _rp_pad2(L, tr["msfv"], False), L.pad2(tr["msft"])]
+    for a in a3 + a2:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    return blob, L
+
+
+def _hd_expected(geom, out, L):
+    from woof.grad.wrfplus.diffusion import hd_shapes
+    sh = hd_shapes(geom)
+    n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+    vals = np.frombuffer(out, dtype="<f8")
+    assert vals.size == 5 * n3 + n2, (vals.size, n3, n2)
+    x = [vals[i * n3:(i + 1) * n3].reshape(L.s3, order="F") for i in range(5)]
+    amu = vals[5 * n3:].reshape(L.s2, order="F")
+    return {"tl_tend": L.take3(x[0], sh["tend"]), "tl_d_tend": L.take3(x[1], sh["tend"]),
+            "adst_tend": L.take3(x[2], sh["tend"]),
+            # a periodic end face folds onto face 0 (the test sums woof's two)
+            "ad_field": L.fold3(x[3], sh["field"], end=False),
+            "ad_xk": L.fold3(x[4], sh["xk"]), "ad_mut": _rp_fold2(L, amu, sh["mut"], True)}
+
+
+def hdiff(exe: str, runner: list[str], seed: int = 20261201) -> dict:
+    from woof.grad.wrfplus import diffusion as D
+    out = {}
+    for n, (name, over) in enumerate(HDIFF_CASES.items()):
+        dims = dict(DIFF_DIMS)
+        dims.update(over)
+        geom = cases.hd_geometry(**dims)
+        geom.validate()
+        tr = cases.hd_trajectory(geom, seed + 10 * n)
+        pe = cases.hd_perturbation(geom, seed + 10 * n + 1)
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        seeds = {"tend": rng.standard_normal(D.hd_shapes(geom)["tend"])}
+        blob, L = _hd_record(geom, tr, pe, seeds)
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        prefix = f"{name}/"
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for kind, d in (("seed", seeds), ("traj", tr), ("pert", pe)):
+            for k, v in d.items():
+                out[prefix + kind + "/" + k] = v
+        for k, v in _hd_expected(geom, result, L).items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
             "small_step": small_step, "rk_stage": rk_stage,
             "advect": advect, "bigstep": bigstep, "rhsph": rhsph,
             "coriolis": coriolis, "w_damp": w_damp,
-            "lbc": lbc, "lbc_final": lbc_final, "diffusion": diffusion}
+            "lbc": lbc, "lbc_final": lbc_final, "diffusion": diffusion,
+            "hdiff": hdiff}
 
 
 def main(argv=None) -> int:
