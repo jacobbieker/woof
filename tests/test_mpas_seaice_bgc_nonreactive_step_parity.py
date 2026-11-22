@@ -155,11 +155,16 @@ def test_gpu_matches_the_oracle_word_for_word(glibc239):
     assert not any(bad.values()), bad
 
 
-def test_a_nan_matches_any_nan_but_nothing_else():
-    # the NaN's sign and payload are the processor's (Metal's soft float flips the sign of this one)
-    nan, neg = np.float64(np.nan), -np.float64(np.nan)
-    assert co.nan_word_mismatches(np.array([nan, 1.0]), np.array([neg, 1.0])) == 0
-    assert co.nan_word_mismatches(np.array([nan, 0.0]), np.array([1.0, -0.0])) == 2
+def test_only_the_named_fields_nan_may_flip_its_sign():
+    # Metal's soft float gives update_snow_bgc's 0/0 the opposite sign to x86's
+    nan = np.float64(np.nan)
+    neg = -nan
+    other = np.array([0x7FF8000000000001], dtype=np.uint64).view(np.float64)[0]
+    assert co.nan_word_mismatches(np.array([nan, 1.0]), np.array([neg, 1.0]), FLUX) == 0
+    assert co.nan_word_mismatches(np.array([nan, 0.0]), np.array([1.0, -0.0]), FLUX) == 2
+    assert co.nan_word_mismatches(np.array([nan]), np.array([other]), FLUX) == 1
+    assert co.nan_word_mismatches(np.array([nan]), np.array([neg]), "biogeochemistry/oceanNitrateFlux") == 1
+    assert co.NAN_SIGN_FIELDS == {FLUX}
 
 
 def _mismatches(names, *fields):
