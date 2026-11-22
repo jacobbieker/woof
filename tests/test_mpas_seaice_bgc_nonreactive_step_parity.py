@@ -159,7 +159,10 @@ def _mismatches(names, *fields):
 @requires_gpu
 def test_a_step_without_the_separate_is_caught(monkeypatch, glibc239):
     monkeypatch.setattr(cstep, "separate_snow_ice_tracers", lambda pools, configs, state: None)
-    assert _mismatches((DEDD,), SNOW, ICE) > 0
+    # the combine then hands the tracer the input's *Snow and *Ice, and the next step's
+    # z_biogeochemistry stops on them where v8.4.2 runs on
+    with pytest.raises(cbgc.CriticalAbort, match="zbgc initialization error"):
+        _mismatches((DEDD,), SNOW, ICE)
 
 
 @requires_gpu
