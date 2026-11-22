@@ -542,7 +542,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--buffer-km KM[,KM...]` | with --polygon, nonnegative geometry buffer in kilometres; one value applies to every domain, or supply exactly one outer-to-inner value per level. Every value is measured from the polygon itself, not from the next inner grid: '800,300,0' puts the outer grid 800 km from the polygon, about 500 km beyond the middle one. With --ladder auto, a multi-value list selects the preset of that depth (default: zero) |
 | `--cadence HOURS` | boundary spacing in whole hours, validated against the selected product; required for a source that declares no cadence of its own (hex-global, mapped), where it is the spacing of the history files handed to woof prep |
 | `--cadence-minutes MINUTES` | boundary spacing in minutes, for a source that declares no cadence of its own (hex-global: a hex parent's history frames, e.g. 15); a whole number of hours is the same as --cadence |
-| `--card` | GPU to size for: a tier (12gb/16gb/24gb/32gb), a size ('10gb'), or a model with a recorded size ('RTX 3080', '5070 Ti'); sets the VRAM budget with no local probe. With no --card, --vram-gib or --hardware-json the wizard MEASURES the local card's capacity (short-lived probe, suppressed by GPUWM_NO_LOCAL_GPU) and refuses, naming both flags, when there is nothing to measure |
+| `--card` | GPU to size for: a tier (12gb/16gb/24gb/32gb), a size ('10gb'), a model with a recorded size ('RTX 3080', '5070 Ti') or a cloud part ('h100-80gb', 'a100-40gb', 'l40s', 'a10g'); sets the VRAM budget with no local probe. With no --card, --vram-gib or --hardware-json the wizard MEASURES the local card's capacity (short-lived probe, suppressed by GPUWM_NO_LOCAL_GPU) and refuses, naming both flags, when there is nothing to measure |
 | `--chain R1,R2,...` | custom nest refinement ratios, integers in [2, 8] (e.g. --root-dx 3 --chain 4 for 3 km -> 750 m); omit for a single domain at --root-dx. Sized by the same estimator fit loop as the presets |
 | `--clock {auto,adaptive,fixed,tropical-adaptive}` | how the run steps. adaptive: each grid starts at the emitted time_step and then follows its own Courant number between 3 and 8 s per km of its spacing (WRF's use_adaptive_time_step, written into [shared]); the terrain clock still caps it over steep ground at launch. fixed: one step throughout. auto (default): adaptive when every grid starts inside those bounds and lies within the 500 m to 12 km spacings the terrain clock measured, fixed otherwise (the tropical clock's 2.5 s per km is always fixed). adaptive on a grid outside the bounds is refused, naming the grid. tropical-adaptive (opt-in, \|lat\| < 25 only): adaptive from the fixed tropical step, which stays each grid's floor, with the vertical Courant number capped at 1.0 (target_cfl), w_damping on and steps growing at most 5% per step; not byte-identical with the fixed clock |
 | `--cumulus {suite,grid}` | who decides the root's cumulus scheme. suite: the suite's own scheme at any spacing (what naming --physics-profile means when this is left out). grid: the suite's scheme is turned off on a root finer than the 4 km convection-permitting bound, where the dynamics resolve deep convection (what an unnamed suite gets) |
@@ -1437,8 +1437,9 @@ Takes no options of its own.
 | `--keep-checkpoints N` | how many complete checkpoint sets the run keeps in its folder (default 1, enough to resume); 0 keeps every hourly set, which a later branch or downscale from an earlier checkpoint needs |
 | `--keep-member-files` | also retain every member's full history files |
 | `--lake-ice {observed,wps}` | GFS route lake ice: observed (default) freezes lakes the IMS daily analysis sees frozen, fetched only when a domain has lakes; wps keeps the forcing's ice and fetches nothing. Written as [ingest] gfs_lake_ice |
-| `--lake-state {auto,forcing,glsea,era5-land,stated}` | WRF and met_em inputs: where the lakes start from at a cold start: auto (default) requests the analysis of an automatic source that covers the domain's lakes (the NOAA GLERL Great Lakes analysis), forcing keeps the input files' own lake surface and requests nothing, or a source-table row by id |
+| `--lake-state {auto,forcing,glsea,era5-land,era5,stated}` | WRF and met_em inputs: where the lakes start from at a cold start: auto (default) requests the analysis of an automatic source that covers the domain's lakes (the NOAA GLERL Great Lakes analysis), forcing keeps the input files' own lake surface and requests nothing, or a source-table row by id |
 | `--lake-state-path FILE` | WRF and met_em inputs: the acquired CF NetCDF file a --lake-state row reads, for a row with no download address |
+| `--lakes {clm,ic,off}` | opt-in lakes (clm is recommended where lakes matter, but not for Great Lakes lake-effect snow; see docs/lakes.md): clm = WRF's CLM lake model with WPS bathymetry, lakes started from GLSEA where it covers and ERA5's FLake state elsewhere; ic = that initial state only; off = the defaults |
 | `--late-after-minutes MIN` | download routes only: how far past its scheduled time a lead may be before the run stops with exit 75; wins over the config's [fetch] late_after_minutes and the source row's budget |
 | `--live-products-width` | _(accepted, but not listed by --help)_ |
 | `--max-lag-hours` | oldest lagged cycle (0 disables lags) |
@@ -1457,6 +1458,7 @@ Takes no options of its own.
 | `--no-supervise` | WRF input directories only: integrate in this process under an existing device reservation |
 | `--no-surface-fill` | disable fill soil/SST perturbations |
 | `--no-verify-visuals` | skip postforecast observation verification; the physical run is unchanged (also WOOF_VERIFY_VISUALS=0) |
+| `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |
 | `--nudging {off,spectral,grid}` | relax toward prepared source analyses; spectral keeps only the configured large-scale modes |
 | `--outdir DIR` | output root for one timestamped run folder per launch, with forecast files, pictures and diagnostics (default <config-stem>-go beside the config); an existing run-... folder is used directly |
 | `--output-config TOML` | Read [output] formats and icechunk_store from TOML; CLI values override it |
@@ -1825,8 +1827,9 @@ Takes no options of its own.
 | `--keep-checkpoints N` | how many complete checkpoint sets the run keeps in its folder (default 1, enough to resume); 0 keeps every hourly set, which a later branch or downscale from an earlier checkpoint needs |
 | `--keep-member-files` | also retain every member's full history files |
 | `--lake-ice {observed,wps}` | GFS route lake ice: observed (default) freezes lakes the IMS daily analysis sees frozen, fetched only when a domain has lakes; wps keeps the forcing's ice and fetches nothing. Written as [ingest] gfs_lake_ice |
-| `--lake-state {auto,forcing,glsea,era5-land,stated}` | WRF and met_em inputs: where the lakes start from at a cold start: auto (default) requests the analysis of an automatic source that covers the domain's lakes (the NOAA GLERL Great Lakes analysis), forcing keeps the input files' own lake surface and requests nothing, or a source-table row by id |
+| `--lake-state {auto,forcing,glsea,era5-land,era5,stated}` | WRF and met_em inputs: where the lakes start from at a cold start: auto (default) requests the analysis of an automatic source that covers the domain's lakes (the NOAA GLERL Great Lakes analysis), forcing keeps the input files' own lake surface and requests nothing, or a source-table row by id |
 | `--lake-state-path FILE` | WRF and met_em inputs: the acquired CF NetCDF file a --lake-state row reads, for a row with no download address |
+| `--lakes {clm,ic,off}` | opt-in lakes (clm is recommended where lakes matter, but not for Great Lakes lake-effect snow; see docs/lakes.md): clm = WRF's CLM lake model with WPS bathymetry, lakes started from GLSEA where it covers and ERA5's FLake state elsewhere; ic = that initial state only; off = the defaults |
 | `--late-after-minutes MIN` | download routes only: how far past its scheduled time a lead may be before the run stops with exit 75; wins over the config's [fetch] late_after_minutes and the source row's budget |
 | `--live-products-width` | _(accepted, but not listed by --help)_ |
 | `--max-lag-hours` | oldest lagged cycle (0 disables lags) |
@@ -1845,6 +1848,7 @@ Takes no options of its own.
 | `--no-supervise` | WRF input directories only: integrate in this process under an existing device reservation |
 | `--no-surface-fill` | disable fill soil/SST perturbations |
 | `--no-verify-visuals` | skip postforecast observation verification; the physical run is unchanged (also WOOF_VERIFY_VISUALS=0) |
+| `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |
 | `--nudging {off,spectral,grid}` | relax toward prepared source analyses; spectral keeps only the configured large-scale modes |
 | `--outdir DIR` | output root for one timestamped run folder per launch, with forecast files, pictures and diagnostics (default <config-stem>-go beside the config); an existing run-... folder is used directly |
 | `--output-config TOML` | Read [output] formats and icechunk_store from TOML; CLI values override it |
@@ -2293,6 +2297,53 @@ Takes no options of its own.
 |---|---|
 | `--cache` | override WOOF_KERNEL_CACHE |
 | `--sha256` | expected SHA256; defaults to PACK.sha256 |
+
+## `woof local-da`
+
+| option | what it does |
+|---|---|
+| `--assimilate-aircraft` | opt-in: assimilate aircraft_level rows of the observation tables (ACARS, PrepBUFR, WIS2) through the pressure-level operator; off, they are counted and refused |
+| `--budget-seconds` | advisory wall-time target for preparation, forecast and cycles; does not reduce cycles or impose a runtime deadline |
+| `--cadence-seconds` | exact requested whole-second cadence; otherwise derived from scale; never shortened to meet a cost estimate |
+| `--capabilities` | print the companion command and field contract without pricing |
+| `--card-name` | label recorded beside the timing basis so a review names the card it was priced for |
+| `--continuous WINDOWS` | cycle continuously for WINDOWS analysis windows at the reviewed cadence: each window restarts from the previous analysis, assimilates, forecasts and renders, and the boundary forcing is renewed from the same source cycle when a window reaches past it; --status and --stop address the saved plan |
+| `--dry-run` | review only; no writes, downloads or device allocation |
+| `--epoch` | initial UTC timestamp on a whole-second boundary, including Z or an explicit offset |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--forcing-cadence-hours` | whole-hour source boundary spacing, separate from the whole-second analysis cadence |
+| `--forecast-seconds` | length of the forecast that follows the last analysis, in seconds |
+| `--free-gib` | free card memory in GiB when less than the whole card is available; defaults to the declared total |
+| `--host-gib` | declared host RAM in GiB for advisory comparison with estimated analysis arrays and observation tables |
+| `--json` | emit the review as one JSON document on stdout, which this door always does; accepted so a companion can state it |
+| `--launch` | launch or resume an existing local-da.json |
+| `--obs-table` | existing neutral observation table; repeatable |
+| `--out` | new directory to publish experiment.toml, ensemble.toml, experiment.namelist.wps, every other file the published configuration is read with on its own input route, and local-da.json into; refused if it exists |
+| `--point` | latitude,longitude |
+| `--prepared-config` | configuration authority consumed by the supplied prepared bundle |
+| `--prepared-namelist` | WPS authority consumed by the supplied prepared bundle |
+| `--prepared-root` | existing portable single-domain prepared bundle, verified by the ordinary forecast reader |
+| `--profile` | physics profile name resolved by the authoring authority; defaults to the profile that authority selects at the grid spacing of the selected rung |
+| `--radar-grid` | existing radar-grid observation file; repeatable |
+| `--region` | west,south,east,north; east<west crosses the dateline |
+| `--request-json` | arwen.local-da-request.v1 file, or - for stdin |
+| `--run` | launch after publishing the reviewed configuration |
+| `--satellite-grid` | existing cloud-water-path grid; repeatable |
+| `--scale` | requested rung of the derived ladder; its domain, resolution, members and cycle count are preserved, with lower rungs shown as alternatives |
+| `--score PLAN` | score every still-unscored nowcast lead of a saved plan now and exit: each completed window is graded against the MRMS composite nearest 15, 30, 45 and 60 minutes after its analysis, beside the radar-persistence baseline and the difference, and each window receipt is rewritten; a run scores its own leads by default, so this is for the leads whose valid time had not arrived when the run finished |
+| `--seed` | base seed for member perturbation and the static covariance samples; the same seed reproduces the same analysis |
+| `--source` | background source name resolved by its owner; defaults to the package background source |
+| `--source-cycle` | explicit source cycle in UTC; omitted selects one published cycle covering the entire window |
+| `--source-input` | ROLE=PATH for original source bytes needed to verify a supplied member identity; repeatable |
+| `--source-member` | one source member, separate from the regional ensemble member count |
+| `--source-product` | source product selector; source membership never changes the default product implicitly |
+| `--source-provider` | provider supported by the selected product owner |
+| `--source-root` | local source directory with the existing preparation handoff or native member inventory |
+| `--speed-factor` | compute speed relative to the printed reference card, not memory capacity |
+| `--status PLAN` | print the continuous status document of a saved plan with its controller liveness, and exit |
+| `--stop PLAN` | ask the running continuous controller of a saved plan to stop after its current operation; the request is durable, and a launch made while no controller runs clears it and resumes, so ask again after that launch to stop it |
+| `--supplement` | ROLE=PATH consumed by the preparation composition; repeatable |
+| `--vram-gib` | declared card memory in GiB; required unless a request document supplies the card |
 
 ## `woof mesh`
 
@@ -3568,13 +3619,15 @@ Takes no options of its own.
 | `--icechunk-delete-after-commit` | delete each history frame once the store has committed it, so the disk holds only the export's backlog; the model waits for space when the disk runs low (same as [output] icechunk_delete_after_commit) |
 | `--icechunk-store URL` | Output store base: local path or s3://bucket/prefix; domain and member paths are appended (default RUN/icechunk) |
 | `--keep-member-files` | also retain every member's full history files |
-| `--lake-state {auto,forcing,glsea,era5-land,stated}` | WRF and met_em inputs: where the lakes start from at a cold start: auto (default) requests the analysis of an automatic source that covers the domain's lakes (the NOAA GLERL Great Lakes analysis), forcing keeps the input files' own lake surface and requests nothing, or a source-table row by id |
+| `--lake-state {auto,forcing,glsea,era5-land,era5,stated}` | WRF and met_em inputs: where the lakes start from at a cold start: auto (default) requests the analysis of an automatic source that covers the domain's lakes (the NOAA GLERL Great Lakes analysis), forcing keeps the input files' own lake surface and requests nothing, or a source-table row by id |
 | `--lake-state-path FILE` | WRF and met_em inputs: the acquired CF NetCDF file a --lake-state row reads, for a row with no download address |
 | `--members N` | make an N-member ensemble with aggregate products |
 | `--met-em DIR` | WPS metgrid directory with met_em.d0*.nc and producing namelist.input; native WOOF-ArWen initialization |
+| `--nn NN.toml` | opt-in neural-network column physics from the [nn] table of this TOML file (docs/nn-physics.md); mode = "tap" records a scheme's inputs and tendencies as training data and leaves the forecast unchanged; "residual" and "replace" apply a column model, which makes the run not WRF-identical |
 | `--no-memory-gate` | run a case whose priced peak envelope exceeds this card's free memory anyway, as `woof go --no-memory-gate` does: the envelope is an upper bound and the card's own allocation then decides; a model state too big to build at all is still refused |
 | `--no-supervise` | run the experiment in this process (escape hatch; disables fresh-process recovery and exclusive-GPU supervision) |
 | `--no-verify-visuals` | skip postforecast observation verification; the physical run is unchanged (also WOOF_VERIFY_VISUALS=0) |
+| `--no-wrf-hydro-gpu-exchange, --wrf-hydro-gpu-exchange` | on hex, run --wrf-hydro's conservative cell <-> LSM grid exchange on the GPU (the default on a GPU backend; the host route's words); --no-wrf-hydro-gpu-exchange keeps it on the host |
 | `--outdir OUT` | wrfout output directory |
 | `--output-config TOML` | Read [output] formats and icechunk_store from TOML; CLI values override it |
 | `--output-format FORMATS` | Output-format table rows, comma separated (default netcdf); netcdf,icechunk adds atomic native Zarr v3 history |

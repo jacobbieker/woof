@@ -323,7 +323,7 @@ So, plainly, and in the order the two routes actually work:
   and the composition they name was reachable before they were added.
 
 The composition space is measured rather than argued.
-`tools/report_physics_composition_walk.py` makes 582653 physics admission
+`tools/report_physics_composition_walk.py` makes 718313 physics admission
 attempts with real experiment TOMLs, pushes every one through
 `woof.experiment.build_experiment` -- the single front door every
 runner reaches a per-domain `RunConfig` through -- and records the
@@ -331,7 +331,7 @@ verdict. `docs/public/receipts/physics-composition-walk.json` is that
 record, and `tests/test_physics_composition_walk.py` regenerates it on
 every release cut and compares it byte for byte. As measured:
 
-- **71881 of 718313 admission attempts are accepted**, covering **71871 distinct
+- **71986 of 718313 admission attempts are accepted**, covering **71976 distinct
   accepted suites**, against 51 registered templates. The presets are a
   corner of the space, not the space.
 - **Every accepted run keeps every switch the file set**, checked
@@ -348,7 +348,7 @@ every release cut and compares it byte for byte. As measured:
   `ra_lw_physics = 1` (WRF RRTM longwave) was the last unported one;
   1.9 ports it, and it now reaches 7719 distinct accepted suites,
   including 860 paired with Dudhia shortwave.
-- **646432 refusals fall into 50 distinct rules**, every one of which
+- **646327 refusals fall into 49 distinct rules**, every one of which
   names the selector to change, and each of which has a
   demonstrated remedy -- the receipt carries a before/after pair per
   rule showing that doing what the message says reaches an accepted
@@ -1937,7 +1937,7 @@ calls (`tests/test_sfclayrev_nonfinite.py`,
 All five run. In plain words: `template` means **a preset exists**, and
 `component-override` means **a preset exists** on the routes that
 declare it and you **type it in your config** anywhere else -- which is
-how the revised MM5 row's 20559 distinct accepted combinations were measured.
+how the revised MM5 row's 20604 distinct accepted combinations were measured.
 Maturity and reachability are separate registry axes, quoted verbatim
 from the registry: `maturity` is the option's evidence tier and
 `reachability.state` is how a NAMED route can offer it. Neither column

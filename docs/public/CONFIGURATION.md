@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 422,
+**Which keys a `[[domain]]` table may override.** Exactly these 469,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -404,88 +404,86 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     hailcast_opt  haildt  hailcast_version  lightning_option  lightning_dt
     lightning_start_seconds  flashrate_factor  iccg_method  iccg_prescribed_num
     iccg_prescribed_den  cellcount_method  cldtop_adjustment  do_radar_ref
-    cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
-    ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
-    gf_deep_rain_evaporation_booking  ysu_surface_heat_exner  woof_quirk_corrections
-    mynn_sfclay_psih_zolzt
-    noah_smc_floor_booking
-    obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
-    obstacle_drag_coefficient  obstacle_wall_z0  urban_param_file
-    cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
-    radt_minutes  bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics
-    ra_rrtmg_variant  wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat
-    diff_6th_factor  epssm  spec_exp  mp_physics  moist  moist_cq
-    nest_microphysics_transition  spp_conv  spp_pbl  km_opt  bl_pbl_physics
-    sf_sfclay_physics  c_s  c_k  tke_adv_opt  sfs_opt  m_opt  tke_mix2_off
-    tke_mix6_off  moist_mix6_off  diff_6th_factor2  diff_6th_opt  mix_isotropic
-    mix_upper_bound  isfflx  tke_heat_flux  tke_drag_coefficient  tke_upper_bound
-    diff_6th_slopeopt  diff_6th_thresh  dampcoef  zdamp  emdiv  smdiv  khdif  kvdif
-    diff_opt  mix_full_fields  h_sca_adv_order  moist_adv_opt  tracer_opt
-    tracer_adv_opt  tracer_mix2_off  tracer_mix6_off  tracer_pblmix  dm_has_traj
-    trajectory_input  v_sca_adv_order  v_mom_adv_order  h_mom_adv_order  rk_ord
-    momentum_adv_opt  tke_budget  sase_flux_diag  hmix_k_diag  surface_energy_diag
-    rrtmg_spectral_output  radtran_wavelengths  radtran_interval_s  radtran_umu
-    radtran_phi  radtran_mol_abs_param  radtran_solver  radtran_streams
-    radtran_pseudospherical  cu_rad_feedback  radtran_aerosol  multi_perturb
-    pert_farms  pert_farms_albedo  pert_farms_aod  pert_farms_angexp
-    pert_farms_aerasy  pert_farms_qv  pert_farms_qc  pert_farms_qs  pert_deng
-    pert_deng_qv  pert_deng_qc  pert_deng_t  pert_deng_w  pert_thom  pert_thom_qv
-    pert_thom_qc  pert_thom_qi  pert_thom_qs  pert_thom_ni  pert_cld3  pert_cld3_qv
-    pert_cld3_t  spdt  inflow_perturbation  inflow_perturbation_seed
-    inflow_perturbation_amplitude_scale  inflow_perturbation_faces  target_cfl
-    target_hcfl  max_step_increase_pct  starting_time_step  starting_time_step_den
-    max_time_step  max_time_step_den  min_time_step  min_time_step_den
-    min_time_step_sound  slope_rad  topo_shading  mosaic_urban_canopy
-    sf_lake_physics  use_lakedepth  lakedepth_default  lake_min_elev
-    lake_state_source  lake_state_path  lake_state_accept_licence  topo_wind
-    gwd_opt  wind_farm_scheme  wind_farm_table  wind_farm_max_dx_m  wind_farms
-    windfarm_tke_factor  windfarm_ij  windfarm_wake_model  windfarm_overlap_method
-    windfarm_deg  windfarm_induction  windfarm_fitch_version  windturbines_spec
-    td_turbgridid  td_hubheight  gwdo_version  gwd_dx_factor  gwd_if_nonhyd
     dyn_lightning_option  coul_pos  coul_neg  coul_neu  j_pos  j_neg  j_neu
-    td_diameter  td_stdthrcoef  td_cutinspeed  td_cutoutspeed  td_power
-    td_turbpercell  td_ewfx  td_ewfy  td_pwfx  td_pwfy  history_interval2_s
-    history_interval_change_s  prec_acc_dt  prec_acc_dt1  gsd_diagnostics
-    reset_interval1  do_avgflx_em  do_avgflx_cugd  acc_phy_tend  auxhist3_interval
-    sf_surf_irr_scheme  irr_daily_amount  irr_start_hour  irr_num_hours
-    irr_start_julianday  irr_end_julianday  irr_freq  irr_ph  fmoist_run
-    fmoist_interp  fmoist_only  fmoist_freq  fmoist_dt  ifire  fire_boundary_guard
-    fire_num_ignitions  fire_ignition_ros1  fire_ignition_start_lon1
-    fire_ignition_start_lat1  fire_ignition_end_lon1  fire_ignition_end_lat1
-    fire_ignition_radius1  fire_ignition_start_time1  fire_ignition_end_time1
-    fire_ignition_ros2  fire_ignition_start_lon2  fire_ignition_start_lat2
-    fire_ignition_end_lon2  fire_ignition_end_lat2  fire_ignition_radius2
-    fire_ignition_start_time2  fire_ignition_end_time2  fire_ignition_ros3
-    fire_ignition_start_lon3  fire_ignition_start_lat3  fire_ignition_end_lon3
-    fire_ignition_end_lat3  fire_ignition_radius3  fire_ignition_start_time3
-    fire_ignition_end_time3  fire_ignition_ros4  fire_ignition_start_lon4
-    fire_ignition_start_lat4  fire_ignition_end_lon4  fire_ignition_end_lat4
-    fire_ignition_radius4  fire_ignition_start_time4  fire_ignition_end_time4
-    fire_ignition_ros5  fire_ignition_start_lon5  fire_ignition_start_lat5
-    fire_ignition_end_lon5  fire_ignition_end_lat5  fire_ignition_radius5
-    fire_ignition_start_time5  fire_ignition_end_time5  fire_ignition_start_x1
-    fire_ignition_start_y1  fire_ignition_end_x1  fire_ignition_end_y1
-    fire_ignition_start_x2  fire_ignition_start_y2  fire_ignition_end_x2
-    fire_ignition_end_y2  fire_ignition_start_x3  fire_ignition_start_y3
-    fire_ignition_end_x3  fire_ignition_end_y3  fire_ignition_start_x4
-    fire_ignition_start_y4  fire_ignition_end_x4  fire_ignition_end_y4
-    fire_ignition_start_x5  fire_ignition_start_y5  fire_ignition_end_x5
-    fire_ignition_end_y5  fire_lat_init  fire_lon_init  fire_ign_time  fire_shape
-    fire_sprd_mdl  fire_crwn_hgt  fire_ext_grnd  fire_ext_crwn  fire_sfc_flx
-    fire_heat_peak  fire_tg_ub  fire_smk_scheme  fire_smk_peak  fire_smk_ext
-    fire_wind_height  fire_fuel_read  fire_fuel_cat  fire_fmc_read  fire_print_msg
-    fire_print_file  fire_fuel_left_method  fire_fuel_left_irl  fire_fuel_left_jrl
-    fire_grows_only  fire_upwinding  fire_upwind_split  fire_viscosity
-    fire_lfn_ext_up  fire_topo_from_atm  fire_advection  fire_test_steps
-    fire_const_time  fire_const_grnhfx  fire_const_grnqfx  fire_atm_feedback
-    fire_mountain_type  fire_mountain_height  fire_mountain_start_x
-    fire_mountain_start_y  fire_mountain_end_x  fire_mountain_end_y
-    delt_perturbation  xrad_perturbation  yrad_perturbation  zrad_perturbation
-    hght_perturbation  stretch_grd  stretch_hyp  z_grd_scale  sfc_full_init
-    sfc_lu_index  sfc_tsk  sfc_tmn  fire_read_lu  fire_read_tsk  fire_read_tmn
-    fire_read_atm_ht  fire_read_fire_ht  fire_read_atm_grad  fire_read_fire_grad
-    sfc_vegfra  sfc_canwat  sfc_ivgtyp  sfc_isltyp  fire_lsm_reinit
-    fire_lsm_reinit_iter  fire_upwinding_reinit  fire_is_real_perim
+    cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
+    ishallow  cugd_avedx  gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
+    noah_smc_floor_booking  woof_quirk_corrections  mynn_sfclay_psih_zolzt
+    urban_param_file  obstacle_opt  obstacle_file  obstacle_solid_fraction
+    obstacle_relax_factor  obstacle_drag_coefficient  obstacle_wall_z0  kf_edrates
+    maxiens  maxens  maxens2  maxens3  ensdim  cu_diag  convtrans_avglen_m
+    sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes  bldt  grav_settling
+    ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
+    wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat  diff_6th_factor  epssm
+    spec_exp  mp_physics  moist  moist_cq  nest_microphysics_transition  spp_conv
+    spp_pbl  km_opt  bl_pbl_physics  sf_sfclay_physics  c_s  c_k  tke_adv_opt
+    sfs_opt  m_opt  tke_mix2_off  tke_mix6_off  moist_mix6_off  diff_6th_factor2
+    diff_6th_opt  mix_isotropic  mix_upper_bound  isfflx  tke_heat_flux
+    tke_drag_coefficient  tke_upper_bound  diff_6th_slopeopt  diff_6th_thresh
+    dampcoef  zdamp  emdiv  smdiv  khdif  kvdif  diff_opt  mix_full_fields
+    h_sca_adv_order  moist_adv_opt  tracer_opt  tracer_adv_opt  tracer_mix2_off
+    tracer_mix6_off  tracer_pblmix  dm_has_traj  trajectory_input  v_sca_adv_order
+    v_mom_adv_order  h_mom_adv_order  rk_ord  momentum_adv_opt  tke_budget
+    sase_flux_diag  hmix_k_diag  surface_energy_diag  rrtmg_spectral_output
+    radtran_wavelengths  radtran_interval_s  radtran_umu  radtran_phi
+    radtran_mol_abs_param  radtran_solver  radtran_streams  radtran_pseudospherical
+    cu_rad_feedback  radtran_aerosol  multi_perturb  pert_farms  pert_farms_albedo
+    pert_farms_aod  pert_farms_angexp  pert_farms_aerasy  pert_farms_qv
+    pert_farms_qc  pert_farms_qs  pert_deng  pert_deng_qv  pert_deng_qc  pert_deng_t
+    pert_deng_w  pert_thom  pert_thom_qv  pert_thom_qc  pert_thom_qi  pert_thom_qs
+    pert_thom_ni  pert_cld3  pert_cld3_qv  pert_cld3_t  spdt  inflow_perturbation
+    inflow_perturbation_seed  inflow_perturbation_amplitude_scale
+    inflow_perturbation_faces  target_cfl  target_hcfl  max_step_increase_pct
+    starting_time_step  starting_time_step_den  max_time_step  max_time_step_den
+    min_time_step  min_time_step_den  min_time_step_sound  slope_rad  topo_shading
+    mosaic_urban_canopy  sf_lake_physics  use_lakedepth  lakedepth_default
+    lake_min_elev  lake_state_source  lake_state_path  lake_state_accept_licence
+    topo_wind  gwd_opt  gwdo_version  gwd_dx_factor  gwd_if_nonhyd  wind_farm_scheme
+    wind_farm_table  wind_farm_max_dx_m  wind_farms  windfarm_tke_factor
+    windfarm_ij  windfarm_wake_model  windfarm_overlap_method  windfarm_deg
+    windfarm_induction  windfarm_fitch_version  windturbines_spec  td_turbgridid
+    td_hubheight  td_diameter  td_stdthrcoef  td_cutinspeed  td_cutoutspeed
+    td_power  td_turbpercell  td_ewfx  td_ewfy  td_pwfx  td_pwfy
+    history_interval2_s  history_interval_change_s  prec_acc_dt  prec_acc_dt1
+    gsd_diagnostics  reset_interval1  do_avgflx_em  do_avgflx_cugd  acc_phy_tend
+    auxhist3_interval  sf_surf_irr_scheme  irr_daily_amount  irr_start_hour
+    irr_num_hours  irr_start_julianday  irr_end_julianday  irr_freq  irr_ph
+    fmoist_run  fmoist_interp  fmoist_only  fmoist_freq  fmoist_dt  ifire
+    fire_boundary_guard  fire_num_ignitions  fire_ignition_ros1
+    fire_ignition_start_lon1  fire_ignition_start_lat1  fire_ignition_end_lon1
+    fire_ignition_end_lat1  fire_ignition_radius1  fire_ignition_start_time1
+    fire_ignition_end_time1  fire_ignition_ros2  fire_ignition_start_lon2
+    fire_ignition_start_lat2  fire_ignition_end_lon2  fire_ignition_end_lat2
+    fire_ignition_radius2  fire_ignition_start_time2  fire_ignition_end_time2
+    fire_ignition_ros3  fire_ignition_start_lon3  fire_ignition_start_lat3
+    fire_ignition_end_lon3  fire_ignition_end_lat3  fire_ignition_radius3
+    fire_ignition_start_time3  fire_ignition_end_time3  fire_ignition_ros4
+    fire_ignition_start_lon4  fire_ignition_start_lat4  fire_ignition_end_lon4
+    fire_ignition_end_lat4  fire_ignition_radius4  fire_ignition_start_time4
+    fire_ignition_end_time4  fire_ignition_ros5  fire_ignition_start_lon5
+    fire_ignition_start_lat5  fire_ignition_end_lon5  fire_ignition_end_lat5
+    fire_ignition_radius5  fire_ignition_start_time5  fire_ignition_end_time5
+    fire_ignition_start_x1  fire_ignition_start_y1  fire_ignition_end_x1
+    fire_ignition_end_y1  fire_ignition_start_x2  fire_ignition_start_y2
+    fire_ignition_end_x2  fire_ignition_end_y2  fire_ignition_start_x3
+    fire_ignition_start_y3  fire_ignition_end_x3  fire_ignition_end_y3
+    fire_ignition_start_x4  fire_ignition_start_y4  fire_ignition_end_x4
+    fire_ignition_end_y4  fire_ignition_start_x5  fire_ignition_start_y5
+    fire_ignition_end_x5  fire_ignition_end_y5  fire_lat_init  fire_lon_init
+    fire_ign_time  fire_shape  fire_sprd_mdl  fire_crwn_hgt  fire_ext_grnd
+    fire_ext_crwn  fire_sfc_flx  fire_heat_peak  fire_tg_ub  fire_smk_scheme
+    fire_smk_peak  fire_smk_ext  fire_wind_height  fire_fuel_read  fire_fuel_cat
+    fire_fmc_read  fire_print_msg  fire_print_file  fire_fuel_left_method
+    fire_fuel_left_irl  fire_fuel_left_jrl  fire_grows_only  fire_upwinding
+    fire_upwind_split  fire_viscosity  fire_lfn_ext_up  fire_topo_from_atm
+    fire_advection  fire_test_steps  fire_const_time  fire_const_grnhfx
+    fire_const_grnqfx  fire_atm_feedback  fire_mountain_type  fire_mountain_height
+    fire_mountain_start_x  fire_mountain_start_y  fire_mountain_end_x
+    fire_mountain_end_y  delt_perturbation  xrad_perturbation  yrad_perturbation
+    zrad_perturbation  hght_perturbation  stretch_grd  stretch_hyp  z_grd_scale
+    sfc_full_init  sfc_lu_index  sfc_tsk  sfc_tmn  fire_read_lu  fire_read_tsk
+    fire_read_tmn  fire_read_atm_ht  fire_read_fire_ht  fire_read_atm_grad
+    fire_read_fire_grad  sfc_vegfra  sfc_canwat  sfc_ivgtyp  sfc_isltyp
+    fire_lsm_reinit  fire_lsm_reinit_iter  fire_upwinding_reinit  fire_is_real_perim
     fire_lsm_band_ngp  fire_lsm_zcoupling  fire_lsm_zcoupling_ref  fire_tracer_smoke
     fire_viscosity_bg  fire_viscosity_band  fire_viscosity_ngp  fire_slope_factor
     fuel_crosswalk  sr_x  sr_y  fire_static  fire_fuel_namelist  fire_smoke

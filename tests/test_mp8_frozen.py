@@ -1353,7 +1353,7 @@ FROZEN_MODULE_DIGESTS = {
         # the same; only the file and compile-string digests move.
         # Previously ef57884c/42ed557f.
         # RE-PINNED for the upstream WOOF 1.1.7 merge: both edits above.
-        'RECOMPUTE-NOAH-SHA-FILE',
+        '3736ba8f07a6ff915255159e6fec8b29a617e76465364d99d276c0795470e17d',
         'RECOMPUTE-NOAH-SHA-COMPILE'),
     # fix/noahmp-small-defects (2026-11-09): correct-mode SN1, the Noah-MP
     # snowmelt reset re-evaluating ESTG at the reset TG, compiled only under

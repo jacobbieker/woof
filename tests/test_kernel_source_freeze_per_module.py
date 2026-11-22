@@ -671,7 +671,7 @@ BASELINE_PINNED: dict[str, str] = {
     # now compiled per run at a power-of-two tier of nz); the preprocessor
     # drops comments, so no compiled binary moves.  Previously af8c732f.
     "sase":
-        "c1d5aeb507bdf53d812ed1df3e04450e01c32cb190b956e782d971e8f5e1d942",
+        "9c7181d1dd156bd84bd6400ad9b2abeaae404fb80044c0a43ca851476ce5efef",
     # a084e0aeb fix(shinhong): the ULP table moved because the kernel compiler did, so it is
     # RE-PINNED 2026-09-30 by the default-pieces speed lane (878435c39):
     # the column arrays move from a 17,160 B per-thread local frame into a
@@ -1096,7 +1096,7 @@ BASELINE_PINNED: dict[str, str] = {
     # Previously 5da35b59.
     # RE-PINNED at the 1.1.6 upstream merge: the fork's 256-level source on upstream 1.1.6's edits.
     "terrain_drag":
-        'f105fc2ba1310dec62d3c2fafd2f4fd3334370cc30bf8864e88986f6c106f3dd',
+        'ca3fd7768ff2a02ba1da2629f32ca0ac866af0a4566abdb571f36e6e026bc560',
     # feat/windfarm-fitch-kernel: the Fitch et al. (2012) wind-farm drag
     # from WRF v4.7.1 phys/module_wind_fitch.F (windfarm_opt = 1), word for
     # word against WRF's own Fortran and the binary32 CPU mirror
@@ -1605,10 +1605,10 @@ PINNED_HEADERS = {
 
     "urban_ucm480_support.cuh": "6b5db2885a7e00d5c8ec65f7e3857efc9cf30c2264c9e5512020373e891089d6",
     "urban_ucm480.cuh": "bcb062c9ad2854e54ae2205ad898f26aa6153a8144729491577a631ebcc5cfaa",
-    "urban_ucm.cu": "ee5bb8e48b297b0d5304047b7d764103a5c22bc1fb307df13670c122c39e588b",
+    "urban_ucm.cu": "be7d1058e4578338a46713e3725862c4b8c82ccf617857d0820d9832b86431f7",
     # shinhong.cu prepended to the WRF 4.8.0 Shin-Hong unit (shinhong_480);
     # the same bytes as its own module pin above.
-    "shinhong.cu": "cd650676df874db77b0c52303fe6ad3f37a821d3d818d6423b73f3878e46948b",
+    "shinhong.cu": "ba175a81c042ec02e19f819887369a3204e8e1880d7c224c5fe2f3e3da09d221",
     # Lake lower bounds, REAL kinds and division rounding are part of the
     # column contract; test_lake_contract regenerates the WRF statements.
     # ABS sign clearing includes negative zero, subnormals and signed NaNs;

@@ -917,7 +917,7 @@ class RegionalContract:
 #: written against the fork's own (40); upstream's (41) to (46) moved the same set. The merged set carries both;
 #: the value below must be re-derived by tools/repin_source_tables.py on the merged tree (sync follow-up).
 MINTED_KERNEL_SET_SHA256 = (
-    "9d1e4541520084555b588f0f6e0ccbb018893ffb89d1212b0058582f772c526b"
+    "50bf2ff1ec9b69e04ffc4756ff41d4b8acdbb4d0a7d7d3681875d568ff3e8c51"
 )
 
 _DRY_MINT_CAVEAT = (
