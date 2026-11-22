@@ -28,7 +28,8 @@ def _value(v) -> str:
 
 def write_namelist(path, config: dict) -> None:
     lines = ["&landice"]
-    lines += [f"    {k} = {_value(v)}" for k, v in config.items() if k not in ("on_a_sphere", "sphere_radius")]
+    lines += [f"    {k} = {_value(v)}" for k, v in config.items()
+              if k not in ("on_a_sphere", "sphere_radius") and not k.startswith("stream:")]
     path.write_text("\n".join(lines + ["/", ""]), encoding="utf-8")
 
 
@@ -40,14 +41,15 @@ def write_input(path, case: dict, skip: tuple[str, ...] = ()) -> None:
         ds.createDimension("Time", None)
         ds.createDimension("StrLen", 64)
         for name in ("nCells", "nEdges", "nVertices", "nVertLevels", "nVertInterfaces", "maxEdges", "maxEdges2",
-                     "vertexDegree"):
-            ds.createDimension(name, dims[name])
+                     "vertexDegree", "nRegions"):
+            if name in dims:
+                ds.createDimension(name, dims[name])
         ds.createDimension("TWO", 2)
         ds.createDimension("R3", 3)
         ds.setncattr("on_a_sphere", "YES" if case["config"].get("on_a_sphere") else "NO")
         ds.setncattr("sphere_radius", float(case["config"].get("sphere_radius", 0.0)))
-        for pool, name, kind, shape in fo.FIELDS:
-            if kind == "d" or pool == "scratch" or "@" in name or name in skip:
+        for pool, name, kind, shape in fo.fields(case):
+            if kind == "d" or pool in ("scratch", "globalStatsAM", "regionalStatsAM") or "@" in name or name in skip:
                 continue
             value = case["pools"][pool][name]
             if kind == "c":
@@ -89,7 +91,9 @@ def _run(tmp_path, case: dict, *extra: str, skip=()) -> int:
 @requires_gpu
 @pytest.mark.parametrize("name, precision", [
     ("dome_uniform", "r4"), ("hydro_radial_uniform", "r4"), ("eismint2_a_temperature_varres", "r8"),
-    ("dome_adaptive_varres", "r8"),
+    ("dome_adaptive_varres", "r8"), ("simple_radial_shelf_varres", "r4"), ("simple_rim_uniform", "r8"),
+    ("stats_dome_varres", "r4"), ("stats_simple_shelf_uniform", "r8"), ("am_marine_varres", "r4"),
+    ("am_marine_uniform", "r8"),
 ])
 def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
     case = _case(name, precision)
@@ -98,16 +102,41 @@ def test_the_door_runs_to_the_oracles_words(tmp_path, name, precision):
     pinned = fo.load_fixture(precision)[case["name"]]
     assert got["clock/now"] == str(pinned["clock/now"])
     compared = 0
-    for pool, field in fo.OUTPUTS:
+    for pool, field in fo.outputs(case):
         key = f"{pool}/{field}"
-        if key not in pinned or "@" in field:   # a second time level lives in restart.npz only
-            continue
+        if key not in pinned or "@" in field or pool in fo.AM_POOLS:
+            continue   # a second time level lives in restart.npz only; the members' words in their files
         if pinned[key].dtype.kind in "SU":
             assert got[field] == str(pinned[key]).rstrip(), field
         else:
             assert fo.word_mismatches(got[field].reshape(pinned[key].shape), pinned[key]) == 0, field
         compared += 1
     assert compared > 100
+    # the statistics' reports, as the model logs them
+    log = tmp_path / "out" / "statistics.log"
+    assert log.exists() == fo.stats_on(case["config"])
+    if log.exists():
+        assert fo.stats_log(log.read_text().splitlines()) == str(pinned["stats/log"])
+    # the analysis members: each compute a record of its stream's file
+    if fo.am_on(case["config"]):
+        import netCDF4
+        from woof.hex.mpas_ice import analysis_v842 as am
+        words, stamps = [], []
+        files = {m: netCDF4.Dataset(tmp_path / "out" / f"{m}Output.nc") for m in am.enabled(case["config"])}
+        try:
+            counts = dict.fromkeys(files, 0)
+            for code, stamp in zip(pinned["am/member"], pinned["am/xtime"]):
+                member = am.MEMBERS[int(code) - 1]
+                ds, t = files[member], counts[member]
+                counts[member] += 1
+                stamps.append(b"".join(np.asarray(ds["xtime"][t]).tolist()).decode("ascii").rstrip())
+                words.append(np.concatenate([np.asarray(ds[n][t]).ravel() for n in am.FIELDS[member]]))
+            assert all(len(ds["xtime"]) == counts[m] for m, ds in files.items())
+        finally:
+            for ds in files.values():
+                ds.close()
+        assert stamps == [str(x) for x in pinned["am/xtime"]]
+        assert fo.word_mismatches(np.concatenate(words), pinned["am/words"]) == 0
 
 
 @requires_gpu
@@ -138,7 +167,8 @@ def test_the_door_refuses_by_name(tmp_path, capsys):
     for folder, variant, skip, words in (
             ("a", case, ("coeffs_reconstruct",), "coeffs_reconstruct"),
             ("b", dict(case, config=dict(case["config"], config_not_an_option=1)), (), "config_not_an_option"),
-            ("c", dict(case, config=dict(case["config"], config_velocity_solver="FO")), (), "config_velocity_solver")):
+            ("c", dict(case, config=dict(case["config"], config_velocity_solver="FO")), (), "config_velocity_solver"),
+            ("e", _case("simple_uniform_uniform"), ("xEdge",), "xEdge")):
         (tmp_path / folder).mkdir()
         capsys.readouterr()
         assert _run(tmp_path / folder, variant, skip=skip) == 2
@@ -154,3 +184,34 @@ def test_the_registry_defaults_cover_every_option_the_forward_mode_reads():
     assert not missing
     assert defaults["config_velocity_solver"] == "sia" and defaults["config_SGH"] is False
     assert defaults["config_dt"] == "0001-00-00_00:00:00"
+
+
+@requires_gpu
+def test_the_statistics_log_is_this_runs_alone(tmp_path):
+    # statistics on but none in the run: an empty log; statistics off: an
+    # earlier run's log in the same out directory is removed
+    case = _case("stats_dome_uniform", "r4")
+    quiet = dict(case, config=dict(case["config"], config_stats_interval=100, config_write_stats_on_startup=False))
+    (tmp_path / "out").mkdir()
+    log = tmp_path / "out" / "statistics.log"
+    log.write_text("a stale report\n")
+    assert _run(tmp_path, quiet) == 0
+    assert log.read_text() == ""
+    log.write_text("a stale report\n")
+    off = dict(case, config=dict(case["config"], config_stats_interval=0, config_write_stats_on_startup=False))
+    assert _run(tmp_path, off) == 0
+    assert not log.exists()
+
+
+@requires_gpu
+def test_an_analysis_member_that_did_not_compute_leaves_no_file(tmp_path):
+    # globalStats at 'output_interval' with no startup compute never computes:
+    # an earlier run's globalStatsOutput.nc in the same out directory is removed
+    case = _case("am_marine_uniform", "r4")
+    never = dict(case, config=dict(case["config"], config_AM_globalStats_compute_on_startup=False))
+    (tmp_path / "out").mkdir()
+    stale = tmp_path / "out" / "globalStatsOutput.nc"
+    stale.write_text("a stale file\n")
+    assert _run(tmp_path, never) == 0
+    assert not stale.exists()
+    assert (tmp_path / "out" / "regionalStatsOutput.nc").exists()

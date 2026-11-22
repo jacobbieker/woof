@@ -854,6 +854,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "4b92c97efe1aab3473a5925f3a5ecf9cce5417f01549211d57150572e6d1ad93",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "a8e308a9b72c0da4686e6925e251e6fa9d950f7f91ec1cb6a7f1f5cc972a0ec9",
+    "file": "woof/hex/mpas_ocean/gm_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "4be502462b670b9c90af24b5cb506eab01db608e2da220ed00929d79011b2ac4",
     "constructor": "compile_using_nvrtc",
     "factory": "_probe_module",
@@ -1275,6 +1283,14 @@
     "factory": "_module",
     "factory_sha256": "5ed7c56bb36f1d7ac9ace5082ef22cda31cbee9893316d336981f984afb48a08",
     "file": "woof/da/hydrometeor_analysis.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "77164ac78e6137c342ca80a7355842bd18ce87dfc18d17f05c85e5625af4ce08",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "ba91b5bdf03eac1c76b0e81154cc3bd4c6f7fa169fd0c41cfc70ba7f642b9fc0",
+    "file": "woof/hex/mpas_seaice/post_coupling_v842.py",
     "status": "unresolved"
    },
    {
@@ -4925,7 +4941,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/bigstep.cu",
-    "sha256": "fb10da810b5879af826b5962f74e9c388637ca0c83b13eba8ab08533957cf285"
+    "sha256": "c07095b0c47d8ca7772995204b25eed0f98e13ee5ac20439e849eb56712db1e7"
    },
    {
     "file": "woof/grad/wrfplus/kernels/calc_coef_w.cu",
@@ -4933,11 +4949,11 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/lbc.cu",
-    "sha256": "671388f0a3b984eb80818e33aa07957da69d39a78318e686963c28d2c6436f25"
+    "sha256": "c9e135b125dc919dd220fe18ea83ff6fb32f3fc4d939438f83ffb41831b25cc3"
    },
    {
     "file": "woof/grad/wrfplus/kernels/rk_stage.cu",
-    "sha256": "b8493ea687b6229f371fdce179850bdfd91a953abd748f638e1d1d634bc49650"
+    "sha256": "788f6c578355ed90eb93b46da9e13e127ab48543769ea1927ed05c23a23e886c"
    },
    {
     "file": "woof/grad/wrfplus/kernels/small_step.cu",
@@ -5096,6 +5112,10 @@
     "sha256": "f1a1fea6d56a6c9712129acee2a35d75d8ad22128fb5af84d72498175ab796d8"
    },
    {
+    "file": "woof/hex/mpas_ocean/gm_v842.cu",
+    "sha256": "6e1c7777a0a68cde03794b3fd10a2933f91632c7cd8f6fad2af1aac1099d5bdd"
+   },
+   {
     "file": "woof/hex/mpas_ocean/land_ice_v842.cu",
     "sha256": "35c26ab51c26bb4042395efcc15f4a7765d2d73b24efd7b6faac78b1e4a894b3"
    },
@@ -5170,6 +5190,10 @@
    {
     "file": "woof/hex/mpas_seaice/evp_variational_v842.cu",
     "sha256": "c46b9b54299de54a01178590bf6fae320e8bb6a3fbeef3054b4206d21e51b6a2"
+   },
+   {
+    "file": "woof/hex/mpas_seaice/post_coupling_v842.cu",
+    "sha256": "248f98cc7522eab584a09951984542f0d4ad33c8dda19d08a8b44d93dbfe9a54"
    },
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.cu",
@@ -5411,7 +5435,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "f50adb70fa5e73bd95ee355527094433666f08c16a869b097e65286ca1cc5331"
+    "sha256": "5414e1a59af29a05bddf120319148c2b59abc0a1415acfdd70b472be0d29aa32"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5567,7 +5591,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "b95accf11f61db8eeac050936789c6b06ef26ba721f9defd2c7bfcf26c5d9a11"
+    "sha256": "73e76370cd75961e4ef72bd800cd0dfd0339963bac36e2e759003f61d3142c7f"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5759,7 +5783,7 @@
    },
    {
     "file": "woof/ensemble/batch_layout_trials.py",
-    "sha256": "4d0079d9d87eb7733a51455371caf9ff387d6a3b678daf42d0ac2d861a42a2ad"
+    "sha256": "95265924ae01b8deac08daeaed61613426508305100964301e24595e8e96e296"
    },
    {
     "file": "woof/ensemble/batch_moist.py",
@@ -5775,7 +5799,7 @@
    },
    {
     "file": "woof/ensemble/batch_physics.py",
-    "sha256": "166afdd35c7ef8570fc58ca0f6612401fd13cf96c6950e8dc32d797e23f707c6"
+    "sha256": "a18255388bcb442c6e372bfd3e325752621319ff0d71d31a54e57ef5cb605d0b"
    },
    {
     "file": "woof/ensemble/batch_physics_init.py",
@@ -5835,15 +5859,15 @@
    },
    {
     "file": "woof/grad/wrfplus/bigstep.py",
-    "sha256": "944eb82c17e4ad41003dc667fbeb654eda44d867b27c37c60b91cc3ff65db215"
+    "sha256": "67c6e72c2a532f42e552e406c151acc5dda75eb99b274c64d5bc6c0affe06777"
    },
    {
     "file": "woof/grad/wrfplus/lbc.py",
-    "sha256": "bec0a3270382ee5e9f67bf49fb84fa9956bd1c8ce083c9919b8aa54e199096fa"
+    "sha256": "227b5dbbdda6dc32a2b121b30bb99cfd77a82d63b244da3542604e18beec8045"
    },
    {
     "file": "woof/grad/wrfplus/stage.py",
-    "sha256": "1b715ee0af742b8508a84ce6814fea3513611fe441d611477d0c02002087670a"
+    "sha256": "c14c6dae3f02d0ff4923851a77048f25d3f30993b249262fe9294a0c67b83bf1"
    },
    {
     "file": "woof/hex/coupled/flux_atmocn_e3sm.py",
@@ -5851,7 +5875,7 @@
    },
    {
     "file": "woof/hex/coupled/ice_coupling_e3sm.py",
-    "sha256": "0d2ad29b7bfbcab54eeb8eeb9be45a6521c4fae7269554afcfd64595819f82f7"
+    "sha256": "4560a843d394c325697d7013e99f6e6d73631a8bea995893e088d95a361dee06"
    },
    {
     "file": "woof/hex/coupled/ocn_accum_e3sm.py",
@@ -5859,7 +5883,7 @@
    },
    {
     "file": "woof/hex/coupled/ocn_coupling_e3sm.py",
-    "sha256": "429b6463254970ef436c1eba343f363ad9277ad129ea1cf19430c041c6399d37"
+    "sha256": "446c0b1c3c3aff23383833bb57eaaa3df60a14e60fcff5b7357f9d8b44a763ec"
    },
    {
     "file": "woof/hex/coupled/ocnalb_e3sm.py",
@@ -6127,15 +6151,15 @@
    },
    {
     "file": "woof/hex/mpas_ice/forward_v842.py",
-    "sha256": "e4474e9ef816d5b94ea50612949f4e4c90504c15a8209f8bfdbd926a942a1782"
+    "sha256": "d99561578f61cd87d1df05fe8c2c96043294cb213124080c3ab95d83ce43f7e4"
    },
    {
     "file": "woof/hex/mpas_ice/geometry_v842.py",
-    "sha256": "07f53d45dc08ae8e43bdc0b4d4319a47bb1fe847e7541ce970a7c1b1ce766796"
+    "sha256": "127694923763d314d937d501ded710e88804c73c125c1aa1f181ec0f333029b4"
    },
    {
     "file": "woof/hex/mpas_ice/sia_v842.py",
-    "sha256": "77cd765245f4bff99186b4d6977155b7094e044e8f32eac5f487473daa2154b9"
+    "sha256": "ecb1f09c87135584c9c48157df53fb6184a0b8761bbc13221c159db83ceccd39"
    },
    {
     "file": "woof/hex/mpas_ice/subglacial_hydro_v842.py",
@@ -6151,7 +6175,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
-    "sha256": "0c1fbdea6fa23b73d245689c2eb63342fc56ea728c5ccc614f3f17760a297012"
+    "sha256": "d15b0ca12ca7151db3ee971976815bc99eca44a4b6426f92165da8c48d6a739b"
    },
    {
     "file": "woof/hex/mpas_ocean/btr_subcycle_v842.py",
@@ -6178,6 +6202,10 @@
     "sha256": "4977948f9734c70a0c65b6517a381d8ad8b686c14aa8bb8131bd7303db53eb95"
    },
    {
+    "file": "woof/hex/mpas_ocean/gm_v842.py",
+    "sha256": "a09d64f6400e403398f7500440debadf6b210b68e87d426e1b22ec8d79fdacf5"
+   },
+   {
     "file": "woof/hex/mpas_ocean/land_ice_v842.py",
     "sha256": "83a114dce8eb36fae6fe6c076ec829119a76261aeeabbbf0955810ce20f8f2c4"
    },
@@ -6187,7 +6215,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/split_step_v842.py",
-    "sha256": "916d50cd2b98ddeadc93be934c9c679a07474c4201584041cdd012ef0f88c163"
+    "sha256": "f9c7c13ebc726fd70a4a4dd2f6a992e08c8db64d7bb429501d8f2ffabf1a76b9"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
@@ -6244,6 +6272,10 @@
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
     "sha256": "69e77864acce53f216d4ea224a1e869fc16162a7f80d09b5061cc4e43836239d"
+   },
+   {
+    "file": "woof/hex/mpas_seaice/post_coupling_v842.py",
+    "sha256": "3a13c33a3155ea62e61706f2aa2a18e0b88da8c844683a3918734977c7858833"
    },
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
@@ -11980,15 +12012,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "503d4505129272b017ae716f1a79eb767fe172f3078e32f31031625c57679277",
+    "sha256": "c199c9dd392a01d3603806ad8d77dc6ae0a1e993cad7046c18ba64ac1e009cd2",
     "sites": {
-     "100": 905
+     "100": 890
     }
    },
    "native_differences": {
-    "sha256": "b4d9d63827c623c7bd754d4b25bdc4389a10ac8d8ec6b824a48b3b75fbe34f86",
+    "sha256": "ba202071061c14bf060b2817dac50959649153785b5eb7f9d43af4a38dcb5531",
     "sites": {
-     "100": 2333
+     "100": 1985
     }
    },
    "native_errors": {},
@@ -22930,15 +22962,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "0e1114a593288c9587a44f9c52cf858e1f47997d48653f4dbc3566b9662842ae",
+    "sha256": "e76bbfc0012dbabea1d26bd76fe9f57d69b998d9dce382db1803692ec02aca34",
     "sites": {
-     "100": 14
+     "100": 15
     }
    },
    "native_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sha256": "d8954ecd96e4122d1ec24e32303425c580989033991cb9c18116f7b1e03c1d51",
     "sites": {
-     "100": 0
+     "100": 4
     }
    },
    "native_errors": {},
@@ -22977,7 +23009,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "97456a0500349ac03ff4bcaba3b79e55eb6a0a65b6c2c5a7cc994265dd0f0283",
+    "sha256": "604213c81d019ded3d87a61a3e5c3ae39331c908204cc908ce6920c69eb3cc8e",
     "sites": {
      "100": 72
     }
@@ -25998,7 +26030,7 @@
    },
    "source_sha256": "09a8565214c8550d78b4d3eb0ff3009aeafc1cc8fb9fceaa5b007883370928cb"
   },
-  "literal:woof/core/health_ledger.py:423": {
+  "literal:woof/core/health_ledger.py:434": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
@@ -26045,7 +26077,7 @@
    },
    "source_sha256": "2d569e567dc0c58b8909ae66b52cfa361a23ba363bb03ac75f293c47c5a93750"
   },
-  "literal:woof/core/health_ledger.py:650": {
+  "literal:woof/core/health_ledger.py:678": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
@@ -26415,7 +26447,7 @@
    },
    "source_sha256": "aa3255ad884eddc46748ca4e4232188cc3a22c415444c5b956f7dc7dd3c70246"
   },
-  "literal:woof/ensemble/batch_physics.py:528": {
+  "literal:woof/ensemble/batch_physics.py:544": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {

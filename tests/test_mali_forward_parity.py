@@ -30,6 +30,19 @@ THE BREAKAGES THESE PREVENT
    must end on the straight run's words.
 6. Outputs that depend on the model's uninitialised scratch or on prior
    diagnostics: the oracle fills them with random words.
+7. Statistics that agree only to the printed digits. Every word
+   li_compute_statistics's reductions return (``stats/real``, ``stats/int``,
+   recorded by the oracle's mpas_dmpar) and every character of its reports
+   (``stats/log``) must match; a pairwise sum in place of the Fortran's
+   sequential one, or MAX with the other tie rule, must be caught.
+8. Analysis members that compute at the wrong time or to a tolerance. The
+   oracle compiles v8.4.2's analysis-member driver and its globalStats and
+   regionalStats verbatim and records each compute's member, xtime and
+   words (``am/*``): the alarms on a stream's reference time, 'dt',
+   'output_interval' (startup only) and the startup switch, an empty
+   region and a region weighted 2, the NaN of an empty mean bit for bit.
+   A pairwise sum, an alarm reset to now, or the melt rate's sign taken
+   first must be caught.
 """
 from __future__ import annotations
 
@@ -64,7 +77,10 @@ def test_fixture_covers_the_branches(precision):
     cases = {case["name"]: case for case in fo.cases(precision)}
     assert set(fixture) == set(cases) == {f"{n}_{s}" for n, _, _ in fo.CASES for s, _ in fo.MESHES}
     configs = [c["config"] for c in cases.values()]
-    assert {c["config_velocity_solver"] for c in configs} == {"sia", "none"}
+    assert {c["config_velocity_solver"] for c in configs} == {"sia", "simple", "none"}
+    assert {c.get("config_simple_velocity_type") for c in configs} == {None, "uniform", "radial"}
+    assert {c["config_calving"] for c in configs if c["config_velocity_solver"] == "simple"} == {
+        "none", "floating", "topographic_threshold"}
     assert {c["config_thermal_solver"] for c in configs} == {"none", "temperature", "enthalpy"}
     assert {c["config_adaptive_timestep"] for c in configs} == {False, True}
     assert {c["config_calendar_type"] for c in configs} == {"gregorian", "gregorian_noleap"}
@@ -79,13 +95,17 @@ def test_fixture_covers_the_branches(precision):
         bary = (case["config"]["config_velocity_solver"] == "sia"
                 and case["config"]["config_sia_tangent_slope_calculation"] == "from_vertex_barycentric")
         assert (out["logErrors"][0] > 0) == bary, name
-        assert all(np.isfinite(v).all() for k, v in out.items() if v.dtype.kind == "f" and k != "velocity/eTheta")
+        # (an analysis member's mean over no ice is 0/0: NaN, as v8.4.2's)
+        assert all(np.isfinite(v).all() for k, v in out.items()
+                   if v.dtype.kind == "f" and k != "velocity/eTheta" and not k.startswith(fo.AM_POOLS + ("am/",)))
         # the run reached its stop time, one step at a time
         assert str(out["clock/now"]) == str(out["mesh/xtime"])
         assert int(out["mesh/timestepNumber"][()]) >= 2
         assert str(out["mesh/simulationStartTime"]) == case["config"]["config_start_time"]
         # the mesh's own words are left as they were
         for field in fo.MESH_INPUTS:
+            if field not in case["pools"]["mesh"]:
+                continue
             assert fo.word_mismatches(out[f"mesh/{field}"], case["pools"]["mesh"][field]) == 0, (name, field)
         # the time levels shifted after the last step: the old level holds the step's mask
         assert (out["geometry/vertexMask@2"] != 0).any()
@@ -95,6 +115,60 @@ def test_fixture_covers_the_branches(precision):
     assert fixture["dome_adaptive_varres"]["mesh/deltat"][()] < adaptive["mesh/deltat"][()]
     # calving took the floating margin
     assert (fixture["dome_calving_uniform"]["geometry/calvingThickness"] > 0).any()
+    # 'simple': the prescribed velocity moved the ice, the circular-shelf test reshaped the bed,
+    # and the Dirichlet mask it never reads came back as it went in
+    cases = {case["name"]: case for case in fo.cases(precision)}
+    for mesh, _ in fo.MESHES:
+        for name in ("simple_uniform", "simple_radial_shelf", "simple_rim"):
+            out, case = fixture[f"{name}_{mesh}"], cases[f"{name}_{mesh}"]
+            assert (out["velocity/normalVelocity"] != 0).any()
+            assert fo.word_mismatches(out["velocity/dirichletVelocityMask"],
+                                      case["pools"]["velocity"]["dirichletVelocityMask"]) == 0
+            changed = fo.word_mismatches(out["geometry/bedTopography"], case["pools"]["geometry"]["bedTopography"])
+            assert (changed > 0) == (name != "simple_uniform"), name
+        assert (fixture[f"simple_radial_shelf_{mesh}"]["geometry/bedTopography"] == -880.0).any()
+    # the statistics: a report on startup (when asked) and every interval-th step, and
+    # none from the cases without them
+    for name, out in fixture.items():
+        config = cases[name]["config"]
+        if not fo.stats_on(config):
+            assert not any(k.startswith("stats/") for k in out), name
+            continue
+        steps = int(out["mesh/timestepNumber"][()])
+        expected = int(config["config_write_stats_on_startup"]) + steps // config["config_stats_interval"]
+        log = str(out["stats/log"])
+        assert log.count("Global statistics: time =") == expected, name
+        assert out["stats/int"].size == 12 * expected, name
+        found = config["config_stats_cell_ID"] != 0
+        assert ("Local cell ID, block, proc =       0" in log) != found, name
+    # the analysis members: globalStats on startup and as its alarm rings (days 30 and 90 on a
+    # stream whose reference time is day 15, every 70 days), regionalStats every step but not on
+    # startup; on the marine bed, globalStats at 'output_interval' on startup only and
+    # regionalStats on startup and every 20 days
+    for mesh, _ in fo.MESHES:
+        dome, marine = fixture[f"am_dome_{mesh}"], fixture[f"am_marine_{mesh}"]
+        assert list(dome["am/member"]) == [1, 1, 2, 2, 1, 2, 2]
+        assert list(dome["am/xtime"]) == ["0001-01-01_00:00:00", "0001-01-31_00:00:00", "0001-01-31_00:00:00",
+                                          "0001-03-02_00:00:00", "0001-04-01_00:00:00", "0001-04-01_00:00:00",
+                                          "0001-05-01_00:00:00"]
+        assert list(marine["am/member"]) == [1, 2, 2, 2]
+        assert list(marine["am/xtime"]) == ["0001-01-01_00:00:00", "0001-01-01_00:00:00", "0001-01-21_00:00:00",
+                                            "0001-02-10_00:00:00"]
+        # no floating ice on the flat dome: the subshelf melt is 0/0, x86's NaN with the sign
+        # flipped last; the empty region's mean thickness keeps it and its minimum is the sentinel
+        real = fo.PRECISIONS[precision]
+        bits = np.uint32 if real is np.float32 else np.uint64
+        top = 1 << (8 * np.dtype(real).itemsize - 1)
+        melt = np.asarray(dome["globalStatsAM/avgSubshelfMelt"], real).reshape(1)
+        mean = np.asarray(dome["regionalStatsAM/regionalIceThicknessMean"], real)
+        assert np.isnan(melt).all() and not (int(melt.view(bits)[0]) & top)
+        assert np.isnan(mean[2]) and int(mean[2:3].view(bits)[0]) & top
+        assert dome["regionalStatsAM/regionalIceThicknessMin"][2] == 10000.0
+        assert marine["globalStatsAM/floatingIceArea"] > 0
+        assert marine["regionalStatsAM/regionalIceArea"][2] > 0
+    # 'none' leaves every normal velocity 0: the magnitude is MAX of two zeros
+    assert "Max velocity (m/yr), edge, level      0.0000000000000000" in str(
+        fixture["stats_benchmark_uniform"]["stats/log"])
     # the gregorian calendar's leap day lies inside EISMINT2's run
     assert str(fixture["eismint2_a_temperature_uniform"]["clock/now"]) == "2000-03-11_00:00:00"
 
@@ -331,9 +405,9 @@ def _refused_on_host(case: dict, config: dict) -> None:
 
 
 @pytest.mark.parametrize("knob, value", [
-    ("config_do_restart", True), ("config_time_integration", "rk4"), ("config_stats_interval", 1),
-    ("config_write_stats_on_startup", True), ("config_write_albany_ascii_mesh", True),
-    ("config_AM_globalStats_enable", True), ("config_year_digits", 5), ("config_velocity_solver", "FO"),
+    ("config_do_restart", True), ("config_time_integration", "rk4"), ("config_write_albany_ascii_mesh", True),
+    ("woof_statistics_extrema", "other"),
+    ("config_AM_oceanStats_enable", True), ("woof_analysis_empty", "other"), ("config_year_digits", 5), ("config_velocity_solver", "FO"),
     ("config_dt", "0000-01-00_00:00:00"), ("config_dt", "00:00:10.5"), ("config_start_time", "file"),
 ])
 def test_the_pieces_not_ported_are_refused_by_name(knob, value):
@@ -436,3 +510,270 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
         assert sorted(fresh.files) == sorted(pinned.files)
         for key in pinned.files:
             assert fo.word_mismatches(fresh[key], pinned[key]) == 0, key
+
+
+@requires_gpu
+@pytest.mark.parametrize("name", ["simple_radial_shelf_uniform", "simple_rim_varres"])
+def test_the_simple_velocity_bed_correction_is_opt_in(name):
+    # v8.4.2's li_velocity_simple_block_init writes its circular-shelf test's bed
+    # (a -880 m spike, or a deepened rim) over the input's whenever calving is
+    # 'floating' or 'topographic_threshold'; 'corrected' keeps the input bed
+    from woof.hex.errors import ConfigurationRefusal
+    from woof.hex.mpas_ice import forward_v842 as fw
+    case = _case(name)
+    pinned = fo.load_fixture("r4")[case["name"]]
+    default = fo.run_gpu(case)
+    assert all(fo.word_mismatches(default[k], pinned[k]) == 0 for k in default)
+    corrected = fo.run_gpu(case, {"woof_simple_velocity_bed": "corrected"})
+    bed = case["pools"]["geometry"]["bedTopography"]
+    assert fo.word_mismatches(corrected["geometry/bedTopography"], bed) == 0
+    assert fo.word_mismatches(default["geometry/bedTopography"], bed) > 0
+    # the prescribed velocity does not depend on the bed
+    assert fo.word_mismatches(corrected["velocity/normalVelocityInitial"], pinned["velocity/normalVelocityInitial"]) == 0
+    assert all(np.isfinite(v).all() for k, v in corrected.items() if v.dtype.kind == "f")
+    with pytest.raises(ConfigurationRefusal, match="woof_simple_velocity_bed"):
+        fw.run(pools=fo.device_pools(case), config=dict(case["config"], woof_simple_velocity_bed="other"))
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+def test_the_simple_seam_edges_take_cell_twos_vector(monkeypatch, precision):
+    # edges stored across the periodic seam are longer than dcEdge from
+    # cellsOnEdge(1): the model takes the vector into cellsOnEdge(2), negated.
+    # Ignoring that branch leaves the oracle's words.
+    from woof.hex.mpas_ice import velocity_simple_v842 as vs
+    names = {f"simple_uniform_{m}" for m, _ in fo.MESHES}
+    mesh = fo.mesh_of(0.0)
+    x_edge, y_edge = fo.edge_points_of(0.0)
+    c1 = mesh["cellsOnEdge"][:, 0] - 1
+    far = np.hypot(x_edge - mesh["xCell"][c1], y_edge - mesh["yCell"][c1]) > mesh["dcEdge"]
+    assert far.any() and not far.all()
+    real = fo.PRECISIONS[precision]
+    original = vs.normal_velocity_initial
+
+    def never_far(**kw):
+        return original(**dict(kw, dc_edge=np.full(np.shape(kw["dc_edge"]), np.inf, real)))
+
+    monkeypatch.setattr(vs, "normal_velocity_initial", never_far)
+    assert _caught(precision, names, "velocity/normalVelocityInitial") > 0
+
+
+@pytest.mark.parametrize("value, w, d, text", [
+    # gfortran 16's own output (x86-64): ties to even on the exact binary value,
+    # the sign of -0 kept, a three-digit exponent without its E, overflow as asterisks
+    (2.0 ** -17, 24, 16, "      0.0000076293945312"), (-0.0, 24, 16, "     -0.0000000000000000"),
+    (-1.0e-20, 24, 16, "     -0.0000000000000000"), (12345678.9, 24, 16, "*" * 24),
+    (np.float32(0.1), 24, 16, "      0.1000000014901161"), (np.float32(0.1), 6, 4, "0.1000"),
+    (0.00005, 6, 4, "0.0001"), (0.00015, 6, 4, "0.0001"),
+])
+def test_the_f_edit_descriptor_is_gfortrans(value, w, d, text):
+    from woof.hex.mpas_ice import statistics_v842 as st
+    assert st.fmt_f(value, w, d) == text
+
+
+@pytest.mark.parametrize("value, text", [
+    (2.0 ** -17, "  0.7629394531250000E-05"), (-0.0, " -0.0000000000000000E+00"),
+    (1.0e120, "  0.1000000000000000+121"), (1.0e-300, "  0.1000000000000000-299"),
+    (np.float32(123456.789), "  0.1234567890625000E+06"), (0.99999999999999999, "  0.1000000000000000E+01"),
+    (9.99999999999999999e22, "  0.9999999999999999E+23"),
+])
+def test_the_e_edit_descriptor_is_gfortrans(value, text):
+    from woof.hex.mpas_ice import statistics_v842 as st
+    assert st.fmt_e(value, 24, 16) == text
+
+
+def test_max_keeps_x86_gfortrans_tie_rule():
+    # MAX(localMax, -localMin) compiles to maxss with -localMin as the destination:
+    # a tie of signed zeros keeps localMax (gfortran 16 -O0, x86-64)
+    from woof.hex.mpas_ice import statistics_v842 as st
+    z = np.float32(0.0)
+    assert not np.signbit(st._fmax(z, -z)) and np.signbit(st._fmax(-z, z))
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+@pytest.mark.parametrize("mutation, field", [
+    ("pairwise", "stats/real"), ("max_ties", "stats/log"), ("last_location", "stats/int"),
+])
+def test_a_mutated_statistic_is_caught(monkeypatch, precision, mutation, field):
+    from woof.hex.mpas_ice import statistics_v842 as st
+    if mutation == "pairwise":
+        monkeypatch.setattr(st, "_sequential_sum", lambda terms, real: real(np.sum(np.asarray(terms, real))))
+    elif mutation == "max_ties":
+        monkeypatch.setattr(st, "_fmax", lambda a, b: a if a > b else b)
+    else:
+        original = st._first_extreme
+
+        def last(values, init, larger, eligible=None):
+            flat = np.asarray(values).ravel()
+            value, at = original(values, init, larger, eligible)
+            if at:
+                at = int(np.flatnonzero(flat == value)[-1]) + 1
+            return value, at
+        monkeypatch.setattr(st, "_first_extreme", last)
+    names = {f"{n}_{m}" for n in ("stats_dome", "stats_eismint2", "stats_simple_shelf", "stats_benchmark")
+             for m, _ in fo.MESHES}
+    assert _caught(precision, names, field) > 0
+
+
+@requires_gpu
+def test_the_statistics_extrema_correction_is_opt_in():
+    # v8.4.2 takes the extrema over every owned cell and edge, ice or not: the
+    # dome's ice-free margin reports a minimum thickness of 0. 'ice' takes the
+    # ice cells alone; the state's words do not depend on it
+    case = _case("stats_dome_uniform")
+    pinned = fo.load_fixture("r4")[case["name"]]
+    corrected = fo.run_gpu(case, {"woof_statistics_extrema": "ice"})
+    for key in pinned:
+        if key.startswith("stats/") or key in ("errClock", "errInit", "errRun", "logErrors"):
+            continue
+        assert fo.word_mismatches(corrected[key], pinned[key]) == 0, key
+    default_min = [line for line in str(pinned["stats/log"]).splitlines() if line.startswith("Min thickness")]
+    fixed_min = [line for line in str(corrected["stats/log"]).splitlines() if line.startswith("Min thickness")]
+    assert all(" 0.0000000000000000" in line for line in default_min)
+    assert not any(" 0.0000000000000000" in line for line in fixed_min)
+    assert str(corrected["stats/log"]).count("Global statistics") == str(pinned["stats/log"]).count(
+        "Global statistics")
+
+
+_AM_CASES = {f"{n}_{m}" for n in ("am_dome", "am_marine") for m, _ in fo.MESHES}
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+@pytest.mark.parametrize("mutation, field", [
+    ("pairwise", "am/words"), ("alarm_reset_to_now", "am/xtime"), ("sign_first", "am/words"),
+])
+def test_a_mutated_analysis_member_is_caught(monkeypatch, precision, mutation, field):
+    from woof.hex.mpas_ice import analysis_v842 as am
+    if mutation == "pairwise":
+        monkeypatch.setattr(am, "_sum", lambda terms, real: real(np.sum(np.asarray(terms, real))))
+    elif mutation == "alarm_reset_to_now":
+        def reset(self, now):
+            if self.ringing(now):
+                self.prev = now
+        monkeypatch.setattr(am.Alarm, "reset", reset)
+    else:
+        # -1.0 * a first: the 0/0 NaN keeps x86's sign bit
+        monkeypatch.setattr(am, "_negated", lambda x: x)
+    if field == "am/xtime":
+        total = 0
+        for case in fo.cases(precision):
+            if case["name"] in _AM_CASES:
+                got = fo.run_gpu(case)["am/xtime"]
+                want = fo.load_fixture(precision)[case["name"]]["am/xtime"]
+                total += int(list(got) != list(want))
+        assert total > 0
+    else:
+        assert _caught(precision, _AM_CASES, field) > 0
+
+
+@requires_gpu
+def test_the_analysis_empty_correction_is_opt_in():
+    # v8.4.2's means over no ice are 0/0 (NaN) and the minimum thickness of
+    # no ice is the sentinel; 'corrected' reports 0 for both, and nothing
+    # else moves
+    case = _case("am_dome_uniform")
+    pinned = fo.load_fixture("r4")[case["name"]]
+    corrected = fo.run_gpu(case, {"woof_analysis_empty": "corrected"})
+    for key in pinned:
+        if key.startswith(("am/", "globalStatsAM/", "regionalStatsAM/")) or key in (
+                "errClock", "errInit", "errRun", "logErrors"):
+            continue
+        assert fo.word_mismatches(corrected[key], pinned[key]) == 0, key
+    assert list(corrected["am/member"]) == list(pinned["am/member"])
+    assert corrected["globalStatsAM/avgSubshelfMelt"] == 0.0
+    assert corrected["regionalStatsAM/regionalIceThicknessMean"][2] == 0.0
+    assert corrected["regionalStatsAM/regionalIceThicknessMin"][2] == 0.0
+    assert not np.isnan(corrected["am/words"]).any() and np.isnan(pinned["am/words"]).any()
+    same = ~np.isnan(pinned["am/words"]) & (pinned["am/words"] != 10000.0)
+    assert fo.word_mismatches(corrected["am/words"][same], pinned["am/words"][same]) == 0
+
+
+def test_an_analysis_member_on_a_stream_that_does_not_exist_aborts():
+    from woof.hex.mpas_ice import analysis_v842 as am
+    from woof.hex.mpas_ice import forward_v842 as fw
+    case = _case("am_dome_uniform")
+    config = {k: v for k, v in case["config"].items() if not k.startswith("stream:")}
+    clock = fw.clock_init(fw.setup_config_options(config))
+    with pytest.raises(ValueError, match="Stream regionalStatsOutput does not exist"):
+        am.init(config, clock, {"globalStatsOutput": "0001-01-01_00:00:00"})
+    # without declared streams each exists, its reference time the run's start
+    assert set(am.init(config, clock).alarms) == {"globalStats", "regionalStats"}
+
+
+@pytest.mark.parametrize("knob, value", [
+    ("config_AM_globalStats_compute_interval", "0000-01-00_00:00:00"),
+    ("config_AM_globalStats_compute_interval", "00:00:00"),
+])
+def test_an_analysis_alarm_the_clock_cannot_carry_is_refused(knob, value):
+    from woof.hex.errors import ConfigurationRefusal
+    from woof.hex.mpas_ice import analysis_v842 as am
+    from woof.hex.mpas_ice import forward_v842 as fw
+    case = _case("am_dome_uniform")
+    config = {k: v for k, v in case["config"].items() if not k.startswith("stream:")}
+    clock = fw.clock_init(fw.setup_config_options(config))
+    with pytest.raises(ConfigurationRefusal, match=knob):
+        am.init(dict(config, **{knob: value}), clock)
+
+
+def test_an_alarm_rebuilt_between_steps_is_the_one_that_ran():
+    # the alarms are not stored: rebuilding one from its reference time at
+    # any time gives the previous ring the running alarm holds there
+    from woof.hex.mpas_ice import analysis_v842 as am
+    for ref, interval, step in ((15, 70, 30), (0, 20, 10), (-5, 20, 7), (100, 30, 9)):
+        running = am.Alarm(interval, ref - interval)
+        running.reset(0)
+        for now in range(step, 400, step):
+            if running.ringing(now):
+                running.reset(now)
+            rebuilt = am.Alarm(interval, ref - interval)
+            rebuilt.reset(now)
+            assert (rebuilt.prev, rebuilt.ringing(now)) == (running.prev, running.ringing(now)), (ref, now)
+
+
+def test_the_x86_division_and_negation_words():
+    from woof.hex.mpas_ice import analysis_v842 as am
+    for real, bits, default in ((np.float32, np.uint32, 0xFFC00000), (np.float64, np.uint64, 0xFFF8000000000000)):
+        nan = am._div(real(0.0), real(0.0), real)
+        assert int(np.array(nan, real).view(bits)) == default
+        assert int(np.array(am._div(nan, real(917.0), real), real).view(bits)) == default
+        assert int(np.array(am._negated(nan), real).view(bits)) == default ^ (1 << (8 * np.dtype(real).itemsize - 1))
+        assert am._div(real(1.0), real(0.0), real) == np.inf and am._negated(real(2.5)) == real(-2.5)
+
+
+def test_a_thin_basal_layer_does_not_end_a_report_early():
+    # the last interior sigma of fractions [0.99998, 0.00002] prints as 1.0000:
+    # the basal row is the one with the '------' speed field as well
+    from woof.hex.mpas_ice import statistics_v842 as st
+    assert st.fmt_f(0.99999, 6, 4) == st.fmt_f(1.0, 6, 4)
+    lines = [st.RULE, "", "Global statistics: time = 0001-01-01_00:00:00", "",
+             "Sigma        Ice speed (m/yr)       Ice temperature (C)",
+             st.fmt_f(0.0, 6, 4) + st.fmt_a("------", 25) + st.fmt_f(-10.0, 24, 16),
+             st.fmt_f(0.49999, 6, 4) + st.fmt_f(1.0, 25, 16) + st.fmt_f(-5.0, 24, 16),
+             st.fmt_f(0.99999, 6, 4) + st.fmt_f(2.0, 25, 16) + st.fmt_f(-1.0, 24, 16),
+             st.fmt_f(1.0, 6, 4) + st.fmt_a("------", 25) + st.fmt_f(-0.5, 24, 16),
+             " ", "after the report"]
+    assert st.reports(lines) == ["\n".join(line.rstrip() for line in lines[:9])]
+
+
+@requires_gpu
+def test_statistics_with_no_report_in_the_run_are_typed_and_empty():
+    # stats_interval past the run's steps and no startup report: statistics are
+    # on but none falls in the run; the effective config decides, not the case's
+    case = _case("stats_dome_uniform")
+    got = fo.run_gpu(case, {"config_stats_interval": 100, "config_write_stats_on_startup": False})
+    assert got["stats/real"].shape == (0,) and got["stats/real"].dtype == fo._real(case).newbyteorder("=")
+    assert got["stats/int"].shape == (0,) and got["stats/int"].dtype == np.int32
+    assert str(got["stats/log"]) == ""
+    off = fo.run_gpu(case, {"config_stats_interval": 0, "config_write_stats_on_startup": False})
+    assert not any(key.startswith("stats/") for key in off)
+
+
+@requires_gpu
+def test_analysis_members_with_no_compute_in_the_run_are_typed_and_empty():
+    case = _case("am_marine_uniform")
+    got = fo.run_gpu(case, {"config_AM_globalStats_compute_on_startup": False,
+                            "config_AM_regionalStats_enable": False})
+    assert got["am/member"].shape == (0,) and got["am/xtime"].shape == (0,)
+    assert got["am/words"].shape == (0,) and got["am/words"].dtype == fo._real(case).newbyteorder("=")

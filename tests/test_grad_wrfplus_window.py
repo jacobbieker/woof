@@ -172,6 +172,125 @@ for dtn in {dtypes!r}:
             assert val < (1e-12 if key.startswith("float64") else 1e-5), (key, val)
 
 
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_window_external_trajectory(backend, tmp_path):
+    """forward(trajectory=...) linearises step k about the supplied state
+    k (DA item 1, WRFPLUS's auxinput6 trajectory):
+    - the window's own base states as the trajectory give the same TL and
+      adjoint, bit for bit;
+    - another run's states (here the primal's binary32 steps from a
+      perturbed start, read in the window's dtype) move the TL from the
+      state after the first supplied state other than the window's own,
+      and not before it;
+    - the adjoint with forcing is the TL's (1e-12 binary64, 1e-5
+      binary32), and forward returns state N, given or stepped (the own
+      states, N of them, end where the own forward does);
+    - a plain forward afterwards returns to the own TL and adjoint bit
+      for bit, and a refused one, or an external one whose last step
+      fails, leaves the external base in place;
+    - a trajectory of the wrong length, or with x0, is refused."""
+    dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
+    out = _run(backend, f"""
+for dtn in {dtypes!r}:
+    dt = np.dtype(dtn)
+    for i, (over, warm) in enumerate({CASES!r}):
+        cfg, state = build(over, warm)
+        w = W.Window(state, cfg, {N}, dtype=dt)
+        own_end = w.forward()
+        own = [w._checkpoints[k] for k in range({N})]
+        rng = np.random.default_rng(3 + i)
+        x0 = M.run_state(state, cfg, dt)
+        dx0 = rnd(x0, rng)
+        f = {{k: rnd(x0, rng) for k in (1, 2, {N})}}
+        tl_own, ad_own = w.tl(dx0, save_at=(1, 2)), w.ad(None, f)
+        end = w.forward(trajectory=own)
+        tl_ext, ad_ext = w.tl(dx0, save_at=(1, 2)), w.ad(None, f)
+        out[f"same/{{dtn}}/{{i}}"] = (
+            sum(int((cp.asnumpy(tl_own[k][n]) != cp.asnumpy(tl_ext[k][n])).sum())
+                for k in (1, 2, {N}) for n in IN)
+            + sum(int((cp.asnumpy(ad_own[n]) != cp.asnumpy(ad_ext[n])).sum()) for n in IN)
+            + sum(int((cp.asnumpy(own_end[n]) != cp.asnumpy(end[n])).sum()) for n in IN))
+        # another run: the primal from a perturbed start (its own
+        # DomainState); state 0 the window's own, so the TL first moves
+        # at state 2
+        _, other = build(over, warm)
+        other.thp += cp.float32(0.5)
+        traj = [own[0]]
+        for _ in range({N}):
+            D.step(other, cfg)
+            traj.append(w.trajectory_state(other, cfg))
+        endx = w.forward(trajectory=traj)
+        out[f"given_end/{{dtn}}/{{i}}"] = sum(
+            int((cp.asnumpy(endx[n]) != cp.asnumpy(traj[{N}][n])).sum()) for n in IN)
+        tl = w.tl(dx0, save_at=(1, 2))
+        out[f"state1/{{dtn}}/{{i}}"] = sum(
+            int((cp.asnumpy(tl[1][n]) != cp.asnumpy(tl_own[1][n])).sum()) for n in IN)
+        # moved by more than roundoff: ||dx_2 - own dx_2|| / ||own dx_2||
+        out[f"moved/{{dtn}}/{{i}}"] = K.norm([tl[2][n] - tl_own[2][n] for n in IN]) / K.norm(
+            [tl_own[2][n] for n in IN])
+        a0 = w.ad(None, f)
+        ys = sum((flat(tl[k]) for k in sorted(f)), [])
+        fs = sum((flat(f[k]) for k in sorted(f)), [])
+        out[f"{{dtn}}/{{i}}"] = K.dot_product(lambda _x: ys, lambda _y: flat(a0), flat(dx0), fs,
+                                              terms=dtn == "float32")
+        # back to the window's own base: the own TL and adjoint, bit for bit
+        back_end = w.forward()
+        tl_b, ad_b = w.tl(dx0, save_at=(1, 2)), w.ad(None, f)
+        out[f"back/{{dtn}}/{{i}}"] = (
+            sum(int((cp.asnumpy(tl_own[k][n]) != cp.asnumpy(tl_b[k][n])).sum())
+                for k in (1, 2, {N}) for n in IN)
+            + sum(int((cp.asnumpy(ad_own[n]) != cp.asnumpy(ad_b[n])).sum()) for n in IN)
+            + sum(int((cp.asnumpy(own_end[n]) != cp.asnumpy(back_end[n])).sum()) for n in IN))
+        # a refused own forward leaves the external base in place
+        w.forward(trajectory=traj)
+        try:
+            w.forward({{n: v for n, v in x0.items() if n in IN and n != "u"}})
+        except ValueError:
+            pass
+        tl_r = w.tl(dx0, save_at=(1, 2))
+        out[f"kept/{{dtn}}/{{i}}"] = sum(
+            int((cp.asnumpy(tl_r[k][n]) != cp.asnumpy(tl[k][n])).sum())
+            for k in (1, 2, {N}) for n in IN)
+        # so does a trajectory whose last step fails (the N-state form
+        # steps the last state; here that step raises)
+        real = M.step_base
+        def boom(*a, **k):
+            raise RuntimeError("step failed")
+        M.step_base = boom
+        try:
+            w.forward(trajectory=own)
+        except RuntimeError:
+            pass
+        finally:
+            M.step_base = real
+        tl_f = w.tl(dx0, save_at=(1, 2))
+        out[f"failed/{{dtn}}/{{i}}"] = sum(
+            int((cp.asnumpy(tl_f[k][n]) != cp.asnumpy(tl[k][n])).sum())
+            for k in (1, 2, {N}) for n in IN)
+cfg, state = build({{}}, 1)
+w = W.Window(state, cfg, {N})
+x = w.trajectory_state(state, cfg)
+for key, kw in (("short", dict(trajectory=[x] * ({N} - 1))),
+                ("both", dict(x0=x, trajectory=[x] * {N}))):
+    try:
+        w.forward(**kw)
+        out["refuse/" + key] = ""
+    except ValueError as e:
+        out["refuse/" + key] = str(e)
+""", tmp_path)
+    assert f"holds {N - 1} states" in out.pop("refuse/short"), out
+    assert "not both" in out.pop("refuse/both"), out
+    nd = 1 if backend == "mlx" else 2
+    assert len(out) == nd * len(CASES) * 8
+    for key, val in out.items():
+        if key.startswith("moved/"):
+            assert val > 1e-4, (key, val)
+        elif key.startswith(("same/", "given_end/", "state1/", "back/", "kept/", "failed/")):
+            assert val == 0, (key, val)
+        else:
+            assert val < (1e-12 if key.startswith("float64") else 1e-5), (key, val)
+
+
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
 def test_window_tl_is_the_derivative_of_forward(backend, tmp_path):
     """Binary64: ||forward(x0 + a dx0) - forward(x0)|| / ||a TL dx0|| -> 1

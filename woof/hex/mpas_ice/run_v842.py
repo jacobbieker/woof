@@ -25,6 +25,13 @@ for word against the v8.4.2 oracle) and writes the final state.
   record with ``xtime``) and ``restart.npz``
   (:func:`woof.hex.mpas_ice.forward_v842.write_restart`, bitwise); a run
   started from ``--restart`` continues as if never stopped.
+- The analysis members (``config_AM_globalStats_*``,
+  ``config_AM_regionalStats_*``): each compute is one ``Time`` record (its
+  ``xtime`` and its fields by Registry name) of ``<stream_name>.nc``. Every
+  stream a member names exists, with the run's start as its reference time;
+  no output stream rings here, so a member at 'output_interval' computes on
+  startup only. ``regionalStats`` reads ``regionCellMasks`` (``nRegions``)
+  from the input file (0, MPAS's default, where it is absent).
 
 At RKIND 8 the strain-rate angle ``eTheta`` (glibc's binary64 ``atan``) is
 left out of the run and the output unless ``WOOF_GLIBC239_LIBM64=1``.
@@ -42,9 +49,10 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import forward_v842, rkind
+from . import analysis_v842, forward_v842, rkind, statistics_v842
 
-OPTION_FILES = ("registry-options.json", "registry-options-subglacial-hydro.json")
+OPTION_FILES = ("registry-options.json", "registry-options-subglacial-hydro.json",
+                "registry-options-global-stats.json", "registry-options-regional-stats.json")
 #: the fields the forward mode carries with a non-zero Registry default_value
 FIELD_DEFAULTS = {"temperature": 273.15, "surfaceAirTemperature": 273.15, "surfaceTemperature": 273.15,
                   "basalTemperature": 273.15, "basalHeatFlux": 0.06}
@@ -183,8 +191,14 @@ def read_input(path, *, config: dict, precision: str) -> tuple[dict, dict]:
         index = _time_index(ds, config)
         mesh_config = {"on_a_sphere": _truth(_attribute(ds, "on_a_sphere", "NO")),
                        "sphere_radius": float(_attribute(ds, "sphere_radius", 0.0))}
-        pools: dict[str, dict] = {p: {} for p in POOLS}
-        for pool, name, kind, shape in fo.FIELDS:
+        pools: dict[str, dict] = {p: {} for p in POOLS + (fo.AM_POOLS if fo.am_on(config) else ())}
+        if fo.am_on(config):
+            dims["nRegions"] = len(ds.dimensions["nRegions"]) if "nRegions" in ds.dimensions else 0
+            if dims["nRegions"] == 0 and "regionalStats" in analysis_v842.enabled(config):
+                raise ConfigurationRefusal(knob="input.nRegions", value="absent",
+                                           reason="regionalStats sums over each region's cells",
+                                           declaration="an input file with nRegions and regionCellMasks")
+        for pool, name, kind, shape in fo.fields_for(config):
             if kind == "d":
                 continue
             size = tuple(dims[s] if isinstance(s, str) else s for s in shape)
@@ -205,6 +219,7 @@ def read_input(path, *, config: dict, precision: str) -> tuple[dict, dict]:
                 value = np.ascontiguousarray(value, dtype)
             pools[pool][name] = value
         missing = [n for n in RECONSTRUCTION if n not in ds.variables]
+        simple_missing = [n for n in ("xEdge", "yEdge") if n not in ds.variables]
     if precision == "r8" and not rkind.trig64():
         # the strain-rate angle calls glibc's binary64 atan (LGPL): left out at
         # RKIND 8 unless WOOF_GLIBC239_LIBM64=1
@@ -216,6 +231,11 @@ def read_input(path, *, config: dict, precision: str) -> tuple[dict, dict]:
                     "takes edgeNormalVectors and coeffs_reconstruct from its input"),
             declaration="an input file carrying edgeNormalVectors and coeffs_reconstruct (MPAS writes both "
                         "to its output and restart streams)")
+    if config.get("config_velocity_solver") == "simple" and simple_missing:
+        raise ConfigurationRefusal(
+            knob="input." + simple_missing[0], value="absent",
+            reason="config_velocity_solver = 'simple' forms its prescribed velocity from the edge points",
+            declaration="an MPAS mesh with xEdge and yEdge")
     return pools, mesh_config
 
 
@@ -228,7 +248,7 @@ def device_pools(pools: dict) -> dict:
             for pool, fields in pools.items()}
 
 
-def write_output(path, *, pools: dict, clock: forward_v842.Clock) -> None:
+def write_output(path, *, pools: dict, clock: forward_v842.Clock, config: dict | None = None) -> None:
     """The state of every non-scratch field, one ``Time`` record, by Registry name."""
     import cupy as cp
     import netCDF4
@@ -250,8 +270,9 @@ def write_output(path, *, pools: dict, clock: forward_v842.Clock) -> None:
             ds.createDimension(f"R{extent}", extent)
         ds.setncattr("model", "woof hex ice (MALI v8.4.2 forward mode)")
         ds.setncattr("clock_now", clock.time_stamp)
-        for pool, name, kind, shape in fo.FIELDS:
-            if kind == "d" or pool == "scratch" or "@" in name or name not in pools.get(pool, {}):
+        for pool, name, kind, shape in fo.fields_for(config or {}):
+            if (kind == "d" or pool in ("scratch", *fo.AM_POOLS) or "@" in name
+                    or name not in pools.get(pool, {})):
                 continue
             value = pools[pool][name]
             if kind == "c":
@@ -265,27 +286,74 @@ def write_output(path, *, pools: dict, clock: forward_v842.Clock) -> None:
             var[0] = host if axes else host[0]
 
 
+def write_analysis(out: Path, computes: list, *, config: dict) -> None:
+    """Each enabled member's computes, one ``Time`` record each, to its
+    stream's file (``none``: not written); a member that did not compute in
+    this run leaves no file (an earlier run's is removed)."""
+    import netCDF4
+    for member in analysis_v842.enabled(config):
+        stream = str(analysis_v842.option(config, member, "stream_name"))
+        mine = [c for c in computes if c.member == member]
+        if stream == "none":
+            continue
+        if not mine:
+            (out / f"{stream}.nc").unlink(missing_ok=True)
+            continue
+        names = analysis_v842.FIELDS[member]
+        per = mine[0].words.size // len(names)
+        with netCDF4.Dataset(out / f"{stream}.nc", "w") as ds:
+            ds.createDimension("Time", None)
+            ds.createDimension("StrLen", STRLEN)
+            if member == "regionalStats":
+                ds.createDimension("nRegions", per)
+            xtime = ds.createVariable("xtime", "S1", ("Time", "StrLen"))
+            variables = [ds.createVariable(n, mine[0].words.dtype,
+                                           ("Time", "nRegions") if member == "regionalStats" else ("Time",))
+                         for n in names]
+            for t, c in enumerate(mine):
+                xtime[t] = np.frombuffer(c.xtime.ljust(STRLEN)[:STRLEN].encode("ascii"), "S1")
+                for i, var in enumerate(variables):
+                    var[t] = c.words[i * per:(i + 1) * per] if member == "regionalStats" else c.words[i]
+
+
 def run(*, namelist, input=None, out, precision: str | None = None, restart=None, n_steps: int | None = None):
     """A run from ``input`` (a cold start, at ``precision``, 'r4' by
     default) or from ``restart`` (at its stored precision, which
     ``precision`` must name if given); writes ``out/output.nc`` and
-    ``out/restart.npz``. Returns the clock."""
+    ``out/restart.npz``, and ``out/statistics.log`` (every
+    ``li_compute_statistics`` report of this run, as the model logs it;
+    empty if none falls in the run) when the namelist asks for statistics,
+    and ``out/<stream_name>.nc`` for each enabled analysis member that
+    computed. Returns the clock."""
     out = Path(out)
     config = read_namelist(namelist)
+    stats: list = []
+    computes: list = []
     if restart is not None:
         config.update(_restart_mesh_config(restart))
         pools, clock = forward_v842.read_restart(restart, config=config, precision=precision)
-        forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps)
+        forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps, on_statistics=stats.append,
+                                     on_analysis=computes.append)
     else:
         if input is None:
             raise ValueError("a cold start needs --input")
         host, mesh_config = read_input(input, config=config, precision=precision or "r4")
         config.update(mesh_config)
         pools = device_pools(host)
-        clock = forward_v842.cold_start(pools=pools, config=config)
-        forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps)
+        clock = forward_v842.cold_start(pools=pools, config=config, on_statistics=stats.append,
+                                     on_analysis=computes.append)
+        forward_v842.advance(pools=pools, config=config, clock=clock, n_steps=n_steps, on_statistics=stats.append,
+                                     on_analysis=computes.append)
     out.mkdir(parents=True, exist_ok=True)
-    write_output(out / "output.nc", pools=pools, clock=clock)
+    # this run's log alone: empty when the run ends before its first report,
+    # and none (an earlier run's removed) when the namelist asks for none
+    log = out / "statistics.log"
+    if statistics_v842.enabled(config):
+        log.write_text("".join(f"{s.report}\n\n" for s in stats))
+    else:
+        log.unlink(missing_ok=True)
+    write_output(out / "output.nc", pools=pools, clock=clock, config=config)
+    write_analysis(out, computes, config=config)
     forward_v842.write_restart(out / "restart.npz", pools=pools, clock=clock)
     _save_mesh_config(out / "restart.npz", config)
     return clock

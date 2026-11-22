@@ -16,8 +16,12 @@ into the w tendency.
 the w-level perturbation geopotential and ``mup`` the perturbation
 column mass; ``pb``, ``phb`` and ``mub`` are the (3-D) base state.
 
-Not covered: the moist cqu/cqv/cqw factors (calc_cq), the hydrostatic
-option and a 1-D base state.
+Moisture (P3a, DA item 4): ``calc_cq`` (cq_tl/cq_ad) forms cqu, cqv and
+cqw from qv (n_mass 1) or qv, qc and qr (n_mass 3); the pressure
+gradient takes cqu and cqv as active inputs with ``PGFGeometry.moist_cq``
+and the buoyancy qv, qc and qr with ``BuoyGeometry.moist`` (the primal's
+moist_mode 1).  Not covered: the ice species (moist_mode 2-3, n_mass 6-7),
+the hydrostatic option and a 1-D base state.
 """
 
 from __future__ import annotations
@@ -53,6 +57,11 @@ def _named(label, names, d):
     return [(label, n, d[n]) for n in names]
 
 
+def _rdtype(arrs):
+    """The real type of ``arrs``, skipping their int32 flags."""
+    return _dtype(tuple(a for a in arrs if not isinstance(a, np.integer)))
+
+
 def _axes(geom) -> None:
     for name in ("nz", "ny", "nx"):
         if getattr(geom, name) < 1:
@@ -64,6 +73,12 @@ def _axes(geom) -> None:
 PGF_STATE = ("ru_t", "rv_t")
 PGF_ACTIVE = ("p", "al", "alt", "php", "mup")
 PGF_PASSIVE = ("pb", "phb", "mub", "c1h", "c2h", "rdnw", "fnm", "fnp")
+#: the moist pressure gradient's actives: the dry ones and cqu, cqv
+PGFM_ACTIVE = PGF_ACTIVE + ("cqu", "cqv")
+
+
+def pgf_active(geom) -> tuple:
+    return PGFM_ACTIVE if geom.moist_cq else PGF_ACTIVE
 
 
 @dataclass(frozen=True)
@@ -86,6 +101,7 @@ class PGFGeometry:
     top_lid: int = 0
     boundary_x: int = 0
     boundary_y: int = 0
+    moist_cq: int = 0
 
     def args(self, dtype) -> tuple:
         i, r = np.int32, np.dtype(dtype).type
@@ -95,6 +111,8 @@ class PGFGeometry:
 
     def validate(self) -> None:
         _axes(self)
+        if self.moist_cq not in (0, 1):
+            raise ValueError(f"moist_cq is 0 or 1, got {self.moist_cq}")
         if self.nz < 3:
             raise ValueError(f"the pressure gradient needs nz >= 3 (the bottom "
                              f"extrapolation reads levels 0-2), got {self.nz}")
@@ -106,48 +124,60 @@ def pgf_shapes(geom) -> dict:
     return {"ru_t": (nz, ny, nx + 1), "rv_t": (nz, ny + 1, nx), "p": mass,
             "al": mass, "alt": mass, "php": wlev, "mup": (ny, nx), "pb": mass,
             "phb": wlev, "mub": (ny, nx), "c1h": (nz,), "c2h": (nz,),
-            "rdnw": (nz,), "fnm": (nz,), "fnp": (nz,)}
+            "rdnw": (nz,), "fnm": (nz,), "fnp": (nz,), "cqu": (nz, ny, nx + 1),
+            "cqv": (nz, ny + 1, nx)}
 
 
 def pgf_tl(state, pert_state, traj, pert, geom: PGFGeometry, *, nl=True):
-    """WRFPLUS G_HORIZONTAL_PRESSURE_GRADIENT (dry, non-hydrostatic) on
-    woof's strict slow_pgf: ru_t and rv_t lose the pressure-gradient
-    term of p', al, alt, php and mup."""
+    """WRFPLUS G_HORIZONTAL_PRESSURE_GRADIENT (non-hydrostatic) on woof's
+    strict slow_pgf: ru_t and rv_t lose the pressure-gradient term of p',
+    al, alt, php and mup, times cqu/cqv with ``geom.moist_cq``."""
     geom.validate()
+    act = pgf_active(geom)
     _check(geom, _named("state", PGF_STATE, state) + _named("pert", PGF_STATE, pert_state)
-           + _named("traj", PGF_ACTIVE + PGF_PASSIVE, traj)
-           + _named("pert", PGF_ACTIVE, pert), pgf_shapes(geom), min_nz=3)
+           + _named("traj", act + PGF_PASSIVE, traj)
+           + _named("pert", act, pert), pgf_shapes(geom), min_nz=3)
     pairs = ()
     for n in PGF_ACTIVE:
         pairs += (traj[n], pert[n])
+    if geom.moist_cq:
+        cq = (traj["cqu"], pert["cqu"], traj["cqv"], pert["cqv"], np.int32(1))
+    else:   # never read
+        cq = (traj["p"],) * 4 + (np.int32(0),)
     arrs = ((state["ru_t"], pert_state["ru_t"], state["rv_t"], pert_state["rv_t"]) + pairs
-            + tuple(traj[n] for n in PGF_PASSIVE))
-    dtype = _dtype(arrs)
+            + cq + tuple(traj[n] for n in PGF_PASSIVE))
+    dtype = _rdtype(arrs)
     n = geom.nz * (geom.ny + 1) * (geom.nx + 1)
     _kernel("pgf_tl", dtype)(_blocks(n), (THREADS,),
                              arrs + (np.int32(bool(nl)),) + geom.args(dtype))
 
 
 def pgf_ad(adj_state, traj, adj, geom: PGFGeometry):
-    """Adjoint of :func:`pgf_tl`: add into ``adj`` (p, al, alt, php, mup)
-    from the ru_t and rv_t adjoints, which are unchanged."""
+    """Adjoint of :func:`pgf_tl`: add into ``adj`` (p, al, alt, php, mup;
+    cqu, cqv with ``geom.moist_cq``) from the ru_t and rv_t adjoints,
+    which are unchanged."""
     geom.validate()
+    act = pgf_active(geom)
     _check(geom, _named("adj", PGF_STATE, adj_state)
-           + _named("traj", PGF_ACTIVE + PGF_PASSIVE, traj)
-           + _named("adj", PGF_ACTIVE, adj), pgf_shapes(geom), min_nz=3)
+           + _named("traj", act + PGF_PASSIVE, traj)
+           + _named("adj", act, adj), pgf_shapes(geom), min_nz=3)
     import cupy as cp
     ins = tuple(traj[n] for n in PGF_ACTIVE)
     outs = tuple(adj[n] for n in PGF_ACTIVE)
     passive = tuple(traj[n] for n in PGF_PASSIVE)
     seeds = (adj_state["ru_t"], adj_state["rv_t"])
     dtype = _dtype(seeds + ins + outs + passive)
+    if geom.moist_cq:
+        cq = (traj["cqu"], traj["cqv"], adj["cqu"], adj["cqv"], np.int32(1))
+    else:   # never read or written
+        cq = (traj["p"], traj["p"], outs[0], outs[0], np.int32(0))
     nz, ny, nx = geom.nz, geom.ny, geom.nx
     # The per-face adjoints aB, aL, aD, aV (see kernels/bigstep.cu);
     # pgf_ad_face writes every word.
     fu = cp.empty((4, nz, ny, nx + 1), dtype=dtype)
     fv = cp.empty((4, nz, ny + 1, nx), dtype=dtype)
     _kernel("pgf_ad_face", dtype)(_blocks(nz * (ny + 1) * (nx + 1)), (THREADS,),
-                                  seeds + ins + (fu, fv) + passive + geom.args(dtype))
+                                  seeds + ins + cq + (fu, fv) + passive + geom.args(dtype))
     a = (fu, fv) + ins + outs + passive + geom.args(dtype)
     st = ny * nx
     _kernel("pgf_ad_cell", dtype)(_blocks(nz * st), (THREADS,), a)
@@ -160,16 +190,29 @@ def pgf_ad(adj_state, traj, adj, geom: PGFGeometry):
 BUOY_STATE = ("rw_t",)
 BUOY_ACTIVE = ("p", "mup")
 BUOY_PASSIVE = ("rdn", "rdnw", "c1f", "msft")
+#: the moist buoyancy's actives and the passives it adds (base_mass)
+BUOYM_ACTIVE = BUOY_ACTIVE + ("qv", "qc", "qr")
+BUOYM_PASSIVE = BUOY_PASSIVE + ("mub", "c2f")
+
+
+def buoy_active(geom) -> tuple:
+    return BUOYM_ACTIVE if geom.moist else BUOY_ACTIVE
+
+
+def buoy_passive(geom) -> tuple:
+    return BUOYM_PASSIVE if geom.moist else BUOY_PASSIVE
 
 
 @dataclass(frozen=True)
 class BuoyGeometry:
-    """slow_buoyancy's scalars (dry).  ``msft`` is read only when
-    ``has_msf``, but the trajectory must still carry an (ny, nx) array."""
+    """slow_buoyancy's scalars: dry (moist_mode 0) or ``moist`` (moist_mode
+    1: qv, qc and qr).  ``msft`` is read only when ``has_msf``, but the
+    trajectory must still carry an (ny, nx) array."""
     nz: int
     ny: int
     nx: int
     has_msf: int = 0
+    moist: int = 0
 
     def args(self) -> tuple:
         i = np.int32
@@ -177,39 +220,144 @@ class BuoyGeometry:
 
     def validate(self) -> None:
         _axes(self)
+        if self.moist not in (0, 1):
+            raise ValueError(f"the buoyancy's TL/AD covers moist_mode 0 and 1 (qv, qc, qr), "
+                             f"got {self.moist}")
+        if self.moist and self.nz < 2:
+            raise ValueError(f"the moist buoyancy needs nz >= 2 (the top's cqw pairs "
+                             f"levels nz-1 and nz-2), got {self.nz}")
 
 
 def buoy_shapes(geom) -> dict:
     nz, ny, nx = geom.nz, geom.ny, geom.nx
-    return {"rw_t": (nz + 1, ny, nx), "p": (nz, ny, nx), "mup": (ny, nx),
-            "rdn": (nz,), "rdnw": (nz,), "c1f": (nz + 1,), "msft": (ny, nx)}
+    mass = (nz, ny, nx)
+    return {"rw_t": (nz + 1, ny, nx), "p": mass, "mup": (ny, nx),
+            "rdn": (nz,), "rdnw": (nz,), "c1f": (nz + 1,), "msft": (ny, nx),
+            "qv": mass, "qc": mass, "qr": mass, "mub": (ny, nx), "c2f": (nz + 1,)}
+
+
+def _buoy_moist(geom, traj, pert):
+    """The moist arguments (qv, qc, qr pairs, mub, c2f, moist): dummies
+    that are never read on a dry geometry."""
+    if not geom.moist:
+        return (traj["p"],) * 8 + (np.int32(0),)
+    out = ()
+    for n in ("qv", "qc", "qr"):
+        out += (traj[n], pert[n])
+    return out + (traj["mub"], traj["c2f"], np.int32(1))
 
 
 def buoy_tl(state, pert_state, traj, pert, geom: BuoyGeometry, *, nl=True):
-    """WRFPLUS g_pg_buoy_w (dry: cqw = 0) on woof's strict slow_buoyancy:
-    rw_t gains the vertical pressure gradient and buoyancy of p' and mup."""
+    """WRFPLUS g_pg_buoy_w on woof's strict slow_buoyancy: rw_t gains the
+    vertical pressure gradient and buoyancy of p' and mup (dry: cqw = 0),
+    and of qv, qc and qr through WRF's cqw with ``geom.moist``."""
     geom.validate()
+    act, pas = buoy_active(geom), buoy_passive(geom)
     _check(geom, _named("state", BUOY_STATE, state) + _named("pert", BUOY_STATE, pert_state)
-           + _named("traj", BUOY_ACTIVE + BUOY_PASSIVE, traj)
-           + _named("pert", BUOY_ACTIVE, pert), buoy_shapes(geom), min_nz=1)
+           + _named("traj", act + pas, traj)
+           + _named("pert", act, pert), buoy_shapes(geom), min_nz=1)
     arrs = ((state["rw_t"], pert_state["rw_t"], traj["p"], pert["p"], traj["mup"], pert["mup"])
-            + tuple(traj[n] for n in BUOY_PASSIVE))
-    dtype = _dtype(arrs)
+            + _buoy_moist(geom, traj, pert) + tuple(traj[n] for n in BUOY_PASSIVE))
+    dtype = _rdtype(arrs)
     _kernel("buoy_tl", dtype)(_blocks(geom.nz * geom.ny * geom.nx), (THREADS,),
                               arrs + (np.int32(bool(nl)),) + geom.args())
 
 
 def buoy_ad(adj_state, traj, adj, geom: BuoyGeometry):
-    """Adjoint of :func:`buoy_tl`: add into ``adj`` (p, mup) from the
-    rw_t adjoint, which is unchanged."""
+    """Adjoint of :func:`buoy_tl`: add into ``adj`` (p, mup; qv, qc, qr
+    with ``geom.moist``) from the rw_t adjoint, which is unchanged."""
     geom.validate()
+    act, pas = buoy_active(geom), buoy_passive(geom)
     _check(geom, _named("adj", BUOY_STATE, adj_state)
-           + _named("traj", BUOY_PASSIVE, traj)
-           + _named("adj", BUOY_ACTIVE, adj), buoy_shapes(geom), min_nz=1)
-    arrs = ((adj_state["rw_t"], adj["p"], adj["mup"])
+           + _named("traj", ("p",) + (act[2:] if geom.moist else ()) + pas, traj)
+           + _named("adj", act, adj), buoy_shapes(geom), min_nz=1)
+    if geom.moist:
+        moist = (tuple(traj[n] for n in ("qv", "qc", "qr"))
+                 + tuple(adj[n] for n in ("qv", "qc", "qr"))
+                 + (traj["mub"], traj["c2f"], np.int32(1)))
+    else:   # never read or written
+        moist = (traj["p"],) * 3 + (adj["p"],) * 3 + (traj["p"], traj["p"], np.int32(0))
+    arrs = ((adj_state["rw_t"], traj["p"], adj["p"], adj["mup"]) + moist
             + tuple(traj[n] for n in BUOY_PASSIVE))
-    dtype = _dtype(arrs)
+    dtype = _rdtype(arrs)
     _kernel("buoy_ad", dtype)(_blocks(geom.ny * geom.nx), (THREADS,), arrs + geom.args())
+
+
+# ---------------------------------------------------------------- calc_cq
+
+CQ_STATE = ("cqu", "cqv", "cqw")
+CQ_SPECIES = ("qv", "qc", "qr")
+
+
+@dataclass(frozen=True)
+class CQGeometry:
+    """calc_cq's scalars: ``n_mass`` 1 sums qv, 3 sums qv, qc and qr (the
+    primal's moist mass species; the ice species are not ported)."""
+    nz: int
+    ny: int
+    nx: int
+    n_mass: int = 1
+
+    def validate(self) -> None:
+        _axes(self)
+        if self.n_mass not in (1, 3):
+            raise ValueError(f"calc_cq's TL/AD covers n_mass 1 (qv) and 3 (qv, qc, qr), "
+                             f"got {self.n_mass}")
+
+
+def cq_species(geom) -> tuple:
+    return CQ_SPECIES[:geom.n_mass]
+
+
+def cq_shapes(geom) -> dict:
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    mass = (nz, ny, nx)
+    return {"cqu": (nz, ny, nx + 1), "cqv": (nz, ny + 1, nx), "cqw": (nz + 1, ny, nx),
+            "qv": mass, "qc": mass, "qr": mass}
+
+
+def _cq_species(geom, d):
+    """qv, qc, qr from ``d``; qv stands in for the species n_mass 1 never
+    reads."""
+    return tuple(d[n] if n in d else d["qv"] for n in CQ_SPECIES) \
+        if geom.n_mass >= 3 else (d["qv"],) * 3
+
+
+def cq_tl(state, pert_state, traj, pert, geom: CQGeometry, *, nl=True):
+    """WRFPLUS g_calc_cq on woof's strict calc_cq: cqu, cqv and cqw (and
+    their perturbations) are overwritten from the moist species."""
+    geom.validate()
+    sp = cq_species(geom)
+    _check(geom, _named("state", CQ_STATE, state) + _named("pert", CQ_STATE, pert_state)
+           + _named("traj", sp, traj) + _named("pert", sp, pert), cq_shapes(geom), min_nz=1)
+    q, dq = _cq_species(geom, traj), _cq_species(geom, pert)
+    arrs = (state["cqu"], pert_state["cqu"], state["cqv"], pert_state["cqv"],
+            state["cqw"], pert_state["cqw"], q[0], dq[0], q[1], dq[1], q[2], dq[2])
+    dtype = _dtype(arrs)
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    n = max(nz * ny * (nx + 1), nz * (ny + 1) * nx, (nz + 1) * ny * nx)
+    i = np.int32
+    _kernel("cq_tl", dtype)(_blocks(n), (THREADS,),
+                            arrs + (i(bool(nl)), i(geom.n_mass), i(nz), i(ny), i(nx)))
+
+
+def cq_ad(adj_state, traj, adj, geom: CQGeometry):
+    """Adjoint of :func:`cq_tl`: add into ``adj`` (qv; qc, qr with n_mass
+    3) from the cqu, cqv and cqw adjoints, then zero those (the primal
+    overwrites cq)."""
+    geom.validate()
+    sp = cq_species(geom)
+    _check(geom, _named("adj", CQ_STATE, adj_state) + _named("traj", sp, traj)
+           + _named("adj", sp, adj), cq_shapes(geom), min_nz=1)
+    q, aq = _cq_species(geom, traj), _cq_species(geom, adj)
+    arrs = (adj_state["cqu"], adj_state["cqv"], adj_state["cqw"]) + q + aq
+    dtype = _dtype(arrs)
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    i = np.int32
+    _kernel("cq_ad", dtype)(_blocks(nz * ny * nx), (THREADS,),
+                            arrs + (i(geom.n_mass), i(nz), i(ny), i(nx)))
+    for n in CQ_STATE:
+        adj_state[n][...] = 0
 
 
 # ---------------------------------------------------------------- rhs_ph

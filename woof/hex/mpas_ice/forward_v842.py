@@ -11,18 +11,33 @@
   tracers), ``xtime``, ``simulationStartTime``, ``daysSinceStart`` and
   ``deltat``; ``landice_init_block``: the second time level of ``vertexMask``
   cleared, ``li_setup_vertical_grid``, ``li_setup_sign_and_index_fields``,
-  ``li_sia_block_init``'s barycentric weights (``from_vertex_barycentric``),
+  ``li_velocity_block_init`` (``li_sia_block_init``'s barycentric weights
+  with ``from_vertex_barycentric``, or 'simple''s prescribed velocity,
+  :mod:`~woof.hex.mpas_ice.velocity_simple_v842`),
   ``li_calculate_mask_init`` and ``thicknessOld``; ``li_thermal_init``
   (:mod:`~woof.hex.mpas_ice.thermal_init_v842`) and ``li_SGH_init``;
 - ``li_core_initial_solve``: the masks and geometry, ``li_velocity_solve``
   and ``li_calculate_diagnostic_vars``
-  (:mod:`~woof.hex.mpas_ice.time_integration_fe_v842`), and the geometry's
-  time levels shifted;
+  (:mod:`~woof.hex.mpas_ice.time_integration_fe_v842`), the statistics with
+  ``config_write_stats_on_startup`` (:mod:`~woof.hex.mpas_ice.statistics_v842`),
+  and the geometry's time levels shifted;
 - each step (``li_timestep``): ``deltat`` from the clock (or, adaptive, from
   the step's CFL limits and the seconds to the force alarm's next ring), the
   forward-Euler step, the clock advanced (by the adaptive ``deltat``),
   ``xtime`` and ``daysSinceStart``, ``timestepNumber``, the time levels
-  shifted and the force alarm reset when it rings.
+  shifted and the force alarm reset when it rings; then the statistics
+  every ``config_stats_interval``-th step;
+- the analysis members (:mod:`~woof.hex.mpas_ice.analysis_v842`):
+  ``globalStats`` and ``regionalStats`` on startup (after the startup
+  statistics) and after each step's statistics, as their alarms ring.
+
+Each statistics report (:class:`~woof.hex.mpas_ice.statistics_v842.Statistics`)
+goes to ``on_statistics`` when given, else to the ``woof.hex.mpas_ice``
+logger at INFO, as the model writes it to its log. Each analysis-member
+compute leaves its words in its pool (``globalStatsAM``,
+``regionalStatsAM``) and goes to ``on_analysis`` when given; ``streams``
+names the streams that exist with their reference times, and
+``stream_ringing`` says when a stream's output alarm rings (see the module).
 
 The mesh-scale initialisation (the vertical grid, the edge signs, the
 barycentric weights) runs on the host at RKIND, one correctly rounded
@@ -43,18 +58,23 @@ or no ice below sea level, but at that point the mask carries only
 level is given the ocean's pressure as well. 'v842' (the default) keeps the
 model's words; 'corrected' computes ``li_calculate_mask`` first. The
 advection's enthalpy units have one too (``woof_enthalpy_advection_units``,
-:mod:`woof.hex.mpas_ice.advection_v842`).
+:mod:`woof.hex.mpas_ice.advection_v842`), and so does the 'simple' velocity
+solver's circular-shelf bed (``woof_simple_velocity_bed``,
+:mod:`woof.hex.mpas_ice.velocity_simple_v842`), and so do the statistics'
+extrema (``woof_statistics_extrema``, :mod:`woof.hex.mpas_ice.statistics_v842`),
+and so do the analysis members' empty means (``woof_analysis_empty``,
+:mod:`woof.hex.mpas_ice.analysis_v842`).
 
 Refused by name, beyond what the step refuses: a restart start
 (``config_do_restart``; :func:`read_restart` is this port's restart),
-time integrations other than forward Euler, the statistics
-(``config_stats_interval``, ``config_write_stats_on_startup``), the analysis
-members, the Albany mesh writer, intervals with months, years on the
+time integrations other than forward Euler, analysis members other than
+globalStats and regionalStats, the Albany mesh writer, intervals with months, years on the
 Gregorian calendar, fractional seconds, and ``config_year_digits`` other than
 4. Output and restart streams change no state and are the caller's.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
@@ -66,7 +86,8 @@ from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ocean.forward_v842 import calendar_of, format_time, parse_time
 
-from . import geometry_v842, rkind, subglacial_hydro_v842, thermal_init_v842
+from . import (advection_v842, analysis_v842, geometry_v842, rkind, statistics_v842, subglacial_hydro_v842, thermal_init_v842,
+               velocity_simple_v842)
 from . import time_integration_fe_v842 as fe
 
 SOURCE_FILES = (
@@ -75,6 +96,9 @@ SOURCE_FILES = (
     "src/core_landice/shared/mpas_li_setup.F:84-330",
     "src/core_landice/shared/mpas_li_mask.F:172-223",
     "src/core_landice/mode_forward/mpas_li_sia.F:126-211",
+    "src/core_landice/mode_forward/mpas_li_velocity.F:157-208",
+    "src/core_landice/mode_forward/mpas_li_statistics.F",
+    "src/core_landice/analysis_members/mpas_li_analysis_driver.F",
     "src/core_landice/mode_forward/mpas_li_subglacial_hydro.F:75-191,1281-1361",
     "src/operators/mpas_geometry_utils.F:203-236,311-372,423-637,710-749",
     "src/operators/mpas_vector_operations.F:79-121",
@@ -253,16 +277,11 @@ def check_config(config: dict, precision: str, velocity: dict) -> None:
         _refuse("config_time_integration", config["config_time_integration"],
                 "v8.4.2 carries forward Euler only (rk4 is logged as unsupported)",
                 "config_time_integration = 'forward_euler'")
-    if int(config.get("config_stats_interval", 0)) != 0 or config.get("config_write_stats_on_startup", False):
-        _refuse("config_stats_interval", config.get("config_stats_interval", 0),
-                "li_compute_statistics is not ported", "config_stats_interval = 0, "
-                "config_write_stats_on_startup = .false.")
+    statistics_v842.check_config(config)
     if config.get("config_write_albany_ascii_mesh", False):
         _refuse("config_write_albany_ascii_mesh", True, "Albany is not ported", "config_write_albany_ascii_mesh = "
                 ".false.")
-    for knob, value in config.items():
-        if knob.startswith("config_AM_") and knob.endswith("_enable") and value:
-            _refuse(knob, value, "the land-ice analysis members are not ported", f"{knob} = .false.")
+    analysis_v842.check_config(config)
     if int(config.get("config_year_digits", 4)) != 4:
         _refuse("config_year_digits", config["config_year_digits"], "the time stamps carry 4-digit years",
                 "config_year_digits = 4")
@@ -483,7 +502,28 @@ def _sgh_init(precision: str, mesh: dict, geometry: dict, hydro: dict, config: d
         np.int32(n_cells)))
 
 
-def cold_start(*, pools: dict, config: dict) -> Clock:
+def _log_statistics(stats: statistics_v842.Statistics) -> None:
+    logging.getLogger("woof.hex.mpas_ice").info("%s", stats.report)
+
+
+def _statistics(pools: dict, config: dict, on_statistics) -> None:
+    """``li_compute_statistics`` at the current timestepNumber."""
+    m, g = pools["mesh"], pools["geometry"]
+    precision = rkind.precision_of(g["thickness"])
+    n_cells, n_levels = g["layerThickness"].shape
+
+    def layer_thickness() -> None:
+        advection_v842._function(precision, "li_calculate_layer_thickness_v842")(_grid(n_cells), (_BLOCK,), (
+            g["layerThickness"], g["thickness"], m["layerThicknessFractions"], np.int32(n_cells), np.int32(n_levels)))
+
+    stats = statistics_v842.compute_statistics(
+        mesh=m, geometry=g, thermal=pools["thermal"], velocity=pools["velocity"], config=config,
+        itimestep=int(m["timestepNumber"].get()[0]), xtime=m["xtime"], apply_layer_thickness=layer_thickness)
+    (on_statistics or _log_statistics)(stats)
+
+
+def cold_start(*, pools: dict, config: dict, on_statistics=None, on_analysis=None,
+               streams: dict[str, str] | None = None) -> Clock:
     """``li_simulation_clock_init``, ``li_core_init`` and ``li_core_run``'s
     initial solve on a cold start, in place on ``pools`` (MALI's pools by
     name: ``mesh``, ``geometry``, ``thermal``, ``velocity``, ``hydro``;
@@ -507,8 +547,12 @@ def cold_start(*, pools: dict, config: dict) -> Clock:
             _refuse(name, "missing" if name not in m else "all zero",
                     "mpas_rbf_interp_initialize and mpas_init_reconstruct are not ported: the mesh must carry them",
                     f"a mesh pool with {name} (MPAS writes it to its output and restart streams)")
+    if config["config_velocity_solver"] == "simple":
+        velocity_simple_v842.require_fields(mesh=m, velocity=v)
+        velocity_simple_v842.check_config(config)
     config = setup_config_options(config)
     clock = clock_init(config)
+    analysis = analysis_v842.init(config, clock, streams)   # li_core_init's li_analysis_init
     n_cells, n_levels = g["layerThickness"].shape
 
     # li_core_init: the time stamps and the time step
@@ -536,6 +580,8 @@ def cold_start(*, pools: dict, config: dict) -> Clock:
         cells, weights = barycentric_weights(bary_mesh, real)
         m["baryCellsOnVertex"][...] = cp.asarray(cells)
         m["baryWeightsOnVertex"][...] = cp.asarray(weights)
+    elif config["config_velocity_solver"] == "simple":
+        velocity_simple_v842.block_init(mesh=m, geometry=g, velocity=v, config=config)
     _function(precision, "li_mask_init_v842")(_grid(n_cells), (_BLOCK,), (g["cellMask"], g["thickness"],
                                                                           np.int32(n_cells)))
     g["thicknessOld"][...] = g["thickness"]
@@ -561,13 +607,19 @@ def cold_start(*, pools: dict, config: dict) -> Clock:
     fe._update_geometry(mesh, g, config)
     fe.velocity_solve(mesh=mesh, geometry=g, thermal=t, velocity=v, config=config)
     fe.diagnostic_vars(mesh=mesh, geometry=g, thermal=t, config=config, deltat=real(m["deltat"].get()[0]))
+    if config.get("config_write_stats_on_startup", False):
+        _statistics(pools, config, on_statistics)
+    analysis_v842.compute_startup(analysis, pools=pools, config=config, on_analysis=on_analysis)
     _shift_time_levels(g)
     return clock
 
 
-def advance(*, pools: dict, config: dict, clock: Clock, n_steps: int | None = None) -> int:
+def advance(*, pools: dict, config: dict, clock: Clock, n_steps: int | None = None, on_statistics=None,
+            on_analysis=None, streams: dict[str, str] | None = None, stream_ringing=None) -> int:
     """``li_core_run``'s time-step loop, in place, to the clock's stop time
-    or ``n_steps`` steps, whichever is first. Returns the steps taken."""
+    or ``n_steps`` steps, whichever is first. Returns the steps taken. The
+    analysis members' alarms are rebuilt from their reference times at the
+    clock's time (:mod:`~woof.hex.mpas_ice.analysis_v842`)."""
     m, g = pools["mesh"], pools["geometry"]
     precision = rkind.precision_of(g["thickness"])
     real = rkind.PRECISIONS[precision]
@@ -578,6 +630,7 @@ def advance(*, pools: dict, config: dict, clock: Clock, n_steps: int | None = No
         raise ValueError("an adaptive time step needs the clock's force alarm (clock_init with "
                          "config_adaptive_timestep)")
     mesh = _mesh_view(pools)
+    analysis = analysis_v842.init(config, clock, streams)
     taken = 0
     while not clock.stopped and (n_steps is None or taken < n_steps):
         counters = (m["timestepNumber"].copy(), m["deltat"].copy())
@@ -604,14 +657,21 @@ def advance(*, pools: dict, config: dict, clock: Clock, n_steps: int | None = No
         _shift_time_levels(g)
         clock.reset_force_alarm()
         taken += 1
+        if statistics_v842.due(config, int(m["timestepNumber"].get()[0])):
+            _statistics(pools, config, on_statistics)
+        analysis_v842.compute(analysis, pools=pools, config=config, clock=clock, stream_ringing=stream_ringing,
+                              on_analysis=on_analysis)
     return taken
 
 
-def run(*, pools: dict, config: dict) -> Clock:
+def run(*, pools: dict, config: dict, on_statistics=None, on_analysis=None,
+        streams: dict[str, str] | None = None, stream_ringing=None) -> Clock:
     """A whole cold-start run: :func:`cold_start`, then :func:`advance` to
     the stop time. Returns the clock."""
-    clock = cold_start(pools=pools, config=config)
-    advance(pools=pools, config=config, clock=clock)
+    clock = cold_start(pools=pools, config=config, on_statistics=on_statistics, on_analysis=on_analysis,
+                       streams=streams)
+    advance(pools=pools, config=config, clock=clock, on_statistics=on_statistics, on_analysis=on_analysis,
+            streams=streams, stream_ringing=stream_ringing)
     return clock
 
 

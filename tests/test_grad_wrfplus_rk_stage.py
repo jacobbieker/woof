@@ -70,6 +70,9 @@ CONFIGS = {
            dict(nz=19, ny=2, nx=3)],
     "sw": [dict(), dict(mapped=1, boundary_x=0), dict(boundary_y=0, ny=1, nx=2),
            dict(nz=3, ny=2, nx=1, boundary_y=0), dict(mapped=1, boundary_x=0, boundary_y=0, ny=2, nx=3)],
+    # the moist diagnosis (DA item 4): qv through WRF's qvf
+    "prpm": [dict(), dict(hypso=2), dict(carried=0, base3d=0), dict(nz=19, ny=3, nx=2, hypso=2),
+             dict(nz=1, ny=1, nx=1, carried=0)],
 }
 
 
@@ -84,6 +87,8 @@ def _run(backend, body, tmp_path, extra_env=None):
         "OPS = {\n"
         " 'prp': (S.PRP_STATE, S.PRP_ACTIVE, C.prp_geometry, C.prp_trajectory,\n"
         "         C.prp_perturbation, S.calc_p_rho_phi_tl, S.calc_p_rho_phi_ad, False),\n"
+        " 'prpm': (S.PRP_STATE, S.PRPM_ACTIVE, C.prpm_geometry, C.prp_trajectory,\n"
+        "          C.prp_perturbation, S.calc_p_rho_phi_tl, S.calc_p_rho_phi_ad, False),\n"
         " 'rsp': (S.RSP_STATE, S.RSP_ACTIVE, C.rsp_geometry, C.rsp_trajectory,\n"
         "         C.rsp_perturbation, S.rk_step_prep_tl, S.rk_step_prep_ad, False),\n"
         " 'at': (S.AT_STATE, S.AT_ACTIVE, C.at_geometry, C.at_trajectory,\n"
@@ -170,7 +175,7 @@ for op, cfgs in {CONFIGS!r}.items():
         sa, zero = run_ad(op, g, tr, q)
         _, adj = run_ad(op, g, tr, q, {{n: s[n].copy() for n in X}})
         # the outputs the forward overwrites come back consumed (zero)
-        consumed = {{n: sa[n] for n in St}} if op in ("prp", "rsp") else (
+        consumed = {{n: sa[n] for n in St}} if op in ("prp", "prpm", "rsp") else (
             {{"w": sa["w"][0]}} if op == "sw" else {{}})
         for n, v in consumed.items():
             out[f"{{op}}/{{i}}/consumed_{{n}}"] = float(cp.abs(v).max())
@@ -235,7 +240,8 @@ GEOM = {{"prp": S.PRPGeometry, "rsp": S.RSPGeometry, "at": S.ATGeometry,
          "sw": S.SWGeometry}}
 cases = sorted({{k.split("/")[0] for k in z.files if "/" in k}})
 for case in cases:
-    for op, (St, X) in ((op, OPS[op][:2]) for op in OPS):
+    # no WRFPLUS fixture for the moist diagnosis
+    for op, (St, X) in ((op, OPS[op][:2]) for op in OPS if op != "prpm"):
         pre = case + "/" + op + "/"
         g = GEOM[op](**J.loads(str(z[pre + "geometry"])))
         pick = lambda kind: {{k.split("/", 3)[3]: cp.asarray(z[k].astype(dt))
@@ -273,7 +279,8 @@ for case in cases:
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
 def test_float_base_state_is_the_strict_primal(backend, tmp_path):
     """The float build's base state gives woof's strict primal words
-    (GPUWM_WRF_EXACT: calc_p_alpha[_carried_muts], stage_fluxes' couple
+    (GPUWM_WRF_EXACT: calc_p_alpha[_carried_muts], dry and moist (qv
+    through qvf; the moist cases must move p off the dry words), stage_fluxes' couple
     momentum and calc_ww_cp, the dry tendency add + add_held_heating, and
     set_surface_w), so the adjoint is bound to the model woof runs: a
     primal edit fails here until the TL/AD is re-derived.  Host and CUDA;
@@ -310,6 +317,32 @@ for i, over in enumerate(CF["prp"]):
             tr["alb"], tr["pb"], tr["rdnw"], tr["c1h"], tr["c2h"], tr["c3h"],
             tr["c4h"], tr["c3f"], tr["c4f"], dummy, dummy, tr["mub"]) + tail)
     out[f"prp/{{i}}"] = {{n: same(st[n], T[n]) for n in S.PRP_STATE}}
+for i, over in enumerate(CF["prpm"]):
+    g = C.prpm_geometry(**over)
+    tr = traj("prpm", g, 43 + i, f32, bool(i % 2))
+    st, _ = run_tl("prpm", g, tr, zeros("prpm", g, tr), True)
+    T = {{n: cp.zeros_like(tr[n]) for n in S.PRP_STATE}}
+    nz, ny, nx = g.nz, g.ny, g.nx
+    tail = (tr["qv"], f32(g.p_top), i32(g.hypso), i32(1), i32(g.base3d),
+            i32(nz), i32(ny), i32(nx), i32(0), i32(0), i32(ny), i32(nx),
+            T["p"], T["al"], T["alt"], T["p_pp"])
+    colb = ((ny * nx + 255) // 256,)
+    if g.carried:
+        get_kernel("diagnostics", "calc_p_alpha_carried_muts")(colb, (256,), (
+            tr["thp"], tr["php"], tr["mup"], tr["alb"], tr["phb"], tr["alb"],
+            tr["pb"], tr["muts"], tr["rdnw"], tr["c1h"], tr["c2h"], tr["c3h"],
+            tr["c4h"], tr["c3f"], tr["c4f"]) + tail)
+    else:
+        dummy = cp.zeros(nz + 1, dtype=f32)
+        get_kernel("diagnostics", "calc_p_alpha", (nz, ny, nx))(colb, (256,), (
+            tr["thp"], tr["php"], tr["mup"], tr["alb"], tr["phb"], tr["alb"],
+            tr["alb"], tr["pb"], tr["rdnw"], tr["c1h"], tr["c2h"], tr["c3h"],
+            tr["c4h"], tr["c3f"], tr["c4f"], dummy, dummy, tr["mub"]) + tail)
+    # qv must move p, or the check is empty: the dry diagnosis differs
+    gd = C.prp_geometry(**over)
+    sd, _ = run_tl("prp", gd, tr, zeros("prp", gd, tr), True)
+    out[f"prpm/{{i}}"] = {{n: same(st[n], T[n]) for n in S.PRP_STATE}}
+    out[f"prpm/{{i}}"]["moves"] = not same(sd["p"], T["p"])
 for i, over in enumerate(CF["rsp"]):
     dx, dy = 3000.0, 2500.0
     over = dict(over, rdx=float(f32(1) / f32(dx)), rdy=float(f32(1) / f32(dy)))

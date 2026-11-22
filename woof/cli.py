@@ -107,10 +107,10 @@ def _check_geography(args) -> str | None:
     except Exception:
         return None  # check_main names a config it cannot read
     from woof.geog_assets import config_geog_root
-    from woof.go_cli import geography_refusal
+    from woof.go_cli import go_stages_lake_depth_refusal
 
     try:
-        return geography_refusal(config_geog_root(Path(args.config)), config=Path(args.config))
+        return go_stages_lake_depth_refusal(config_geog_root(Path(args.config)), config=Path(args.config))
     except FileNotFoundError:
         # The datasets a run reads come from its WPS namelist.  A
         # configuration that names a namelist (or forcing) not on disk has

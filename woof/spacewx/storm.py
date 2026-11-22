@@ -113,7 +113,7 @@ def last_ended_interval(when: datetime) -> datetime:
     return now - timedelta(hours=AP_HOURS)
 
 
-def _ap_series(geo, when: datetime, nlag: int) -> np.ndarray:
+def ap_series(geo, when: datetime, nlag: int) -> np.ndarray:
     """ap of the ``nlag`` 3-hour intervals that have ended by ``when``, latest
     first (NaN where GFZ has none)."""
     last = last_ended_interval(when)
@@ -134,7 +134,27 @@ def filtered_ap(geo, when: datetime, tau: float, nlag: int, min_weight: float = 
     onset is there); an older missing interval is left out and the weights
     renormalised, and fewer than ``min_weight`` of the weight present is an
     error."""
-    ap = _ap_series(geo, when, nlag)
+    return _filter(ap_series(geo, when, nlag), when, tau, min_weight)
+
+
+def persisted_ap_tau(ap_start, start: datetime, when: datetime, tau: float, min_weight: float = 0.8) -> float:
+    """ap_tau at ``when`` >= ``start`` for a forecast: ``ap_start`` is
+    :func:`ap_series` at the start (latest first), and every 3-hour interval
+    that ends after the start takes the latest observed ap (persistence of the
+    index, as the aurora rows hold the latest Kp).  At the start it is
+    :func:`filtered_ap`; nothing after the start is read."""
+    ap_start = np.asarray(ap_start, dtype=np.float64)
+    nlag = ap_start.size
+    later = int((last_ended_interval(when) - last_ended_interval(start)) / timedelta(hours=AP_HOURS))
+    if later < 0:
+        raise StormError(f"{naive_utc(when):%Y-%m-%dT%H:%MZ} is before the start {naive_utc(start):%Y-%m-%dT%H:%MZ}")
+    # A missing latest ap is refused by name in _filter, as at the start.
+    k = min(later, nlag)
+    return _filter(np.concatenate([np.full(k, ap_start[0]), ap_start[:nlag - k]]), start, tau, min_weight)
+
+
+def _filter(ap: np.ndarray, when: datetime, tau: float, min_weight: float) -> float:
+    nlag = ap.size
     w = (1.0 - tau) * tau ** np.arange(nlag)
     good = np.isfinite(ap)
     if not good[:LATEST_REQUIRED].all():
@@ -203,12 +223,23 @@ def basis(nodes, mlat_deg, lt_h, season) -> np.ndarray:
     return np.einsum("ni,nj,nk->nijk", wm, wl, ws).reshape(wm.shape[0], -1)
 
 
+#: Points per block of the dense basis in :func:`log_ratio`, so a large domain
+#: holds at most this many rows of it (108 float64 each for the shipped fit).
+BASIS_BLOCK = 65536
+
+
 def log_ratio(fit: StormFit, mlat_deg, lt_h, season, ap_tau) -> np.ndarray:
     """log(R) at points; ``ap_tau`` a scalar or one per point."""
     x = np.minimum(np.asarray(ap_tau, dtype=np.float64) / 100.0, fit.x_max)
-    b = basis((fit.mlat_nodes, fit.lt_nodes, fit.season_nodes), mlat_deg, lt_h, season)
+    mlat, lt, sea = (np.asarray(v, dtype=np.float64).ravel() for v in (mlat_deg, lt_h, season))
+    nodes = (fit.mlat_nodes, fit.lt_nodes, fit.season_nodes)
     c = fit.coef.reshape(-1, 2)
-    return (b @ c[:, 0]) * x + (b @ c[:, 1]) * x * x
+    a, b = np.empty(mlat.size), np.empty(mlat.size)
+    for lo in range(0, mlat.size, BASIS_BLOCK):
+        s = slice(lo, lo + BASIS_BLOCK)
+        w = basis(nodes, mlat[s], lt[s], sea[s])
+        a[s], b[s] = w @ c[:, 0], w @ c[:, 1]
+    return a * x + b * x * x
 
 
 def nmf2_factor(fit: StormFit, mlat_deg, lt_h, season, ap_tau) -> np.ndarray:
@@ -233,5 +264,6 @@ def receipt(fit: StormFit, source: str) -> dict:
             "spacewx_storm_ap_source": source}
 
 
-__all__ = ["FIT_PATH", "StormError", "StormFit", "load_fit", "last_ended_interval", "filtered_ap", "magnetic_latitude", "local_time",
+__all__ = ["FIT_PATH", "StormError", "StormFit", "load_fit", "last_ended_interval", "ap_series", "filtered_ap",
+           "persisted_ap_tau", "BASIS_BLOCK", "magnetic_latitude", "local_time",
            "season_coordinate", "basis", "log_ratio", "nmf2_factor", "fof2_scale", "receipt"]
