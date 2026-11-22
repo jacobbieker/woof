@@ -80,7 +80,7 @@ def test_fixture_covers_the_branches(precision):
 @pytest.mark.parametrize("knob, value", [
     ("config_advection_type", "upwind"), ("config_use_forcing", True),
     ("config_perform_unit_test", True), ("config_do_restart", True), ("config_use_halo_exch", True),
-    ("config_stress_divergence_scheme", "weak"),
+    ("config_stress_divergence_scheme", "none"),   # "weak" runs (test_mpas_seaice_weak_parity.py)
 ])
 def test_what_the_driver_does_not_carry_is_refused_by_name(knob, value):
     from woof.hex.mpas_seaice import timestep_v842 as ts
@@ -111,7 +111,7 @@ def test_a_restart_continues_the_run_bitwise(tmp_path, precision):
     dev = stream.on_device(oo.FIELDS, case)
     dev["diagnostics"]["xtime"] = config["diagnostics:xtime"]
     dev["diagnostics"]["simulationStartTime"] = config["diagnostics:simulationStartTime"]
-    clock = ts.initialize(pools=dev, configs=config)
+    clock = ts.initialize(pools=dev, configs=config, basis="input")
     next_step = ts.advance(pools=dev, configs=config, clock=clock, n_steps=1)
     dev["diagnostics"]["oracle_next_step"] = next_step
     ts.write_restart(tmp_path / "restart.npz", pools=dev, clock=clock)
@@ -152,7 +152,8 @@ def test_a_mutated_driver_is_caught(monkeypatch, mutation):
         original_init = ts.initialize
 
         def init_with_two(**kw):
-            clock = original_init(pools=kw["pools"], configs=dict(kw["configs"], config_dynamics_subcycle_number=2))
+            clock = original_init(pools=kw["pools"], configs=dict(kw["configs"], config_dynamics_subcycle_number=2),
+                                  basis=kw.get("basis"))
             return clock
         monkeypatch.setattr(ts, "initialize", init_with_two)
         field = "velocity_solver/uVelocity"

@@ -161,6 +161,8 @@ def op_construct(ctx, *, local, attach, arwen_checkout, stop_on_refusal, compile
             from woof.hex.arwen_surface_update import attach_host
             attach_host(stack["backend"], attach if attach is not None else ctx.host, ctx.schedule, ctx.output_root,
                         dt=float(forecast.DT_SECONDS), layout=layout, wave_ranks=(ctx.rank, ctx.layouts))
+            from woof.hex.spacewx_history import refuse_unwired as refuse_spacewx
+            refuse_spacewx(stack["backend"], "a same-host rank run")
             stack["restart_forcing"] = (restart.restore_forcing(restart_entry, stack)
                                          if restart_entry is not None else None)
             from woof.hex.partition_overlap_v841 import interior_edges

@@ -9,8 +9,8 @@ kernel or a few.
 
 ## 1. What is being linearised
 
-- **Route:** the WRF route, dry, with `moist_adv_opt = 0`, specified or
-  periodic lateral boundaries, one domain, no nests and a fixed `dt`.
+- **Route:** the WRF route, dry (moist with qv, qc and qr from 8l), with
+  `moist_adv_opt = 0`, specified or periodic lateral boundaries, one domain, no nests and a fixed `dt`.
   These are WRFPLUS's own limits.
 - **Routine boundaries:** woof's strict sequence (`GPUWM_WRF_EXACT=1`).
   It keeps WRF's routine boundaries (`small_step_prep`, `advance_uv`,
@@ -103,7 +103,9 @@ routines are named `g_*` (TL) and `a_*` (AD).
 | `rhs_ph` | `g_/a_rhs_ph` | `slow_geopotential[_faces/_open/_vertical]` |
 | `coriolis`, `curvature` | `G_/a_CORIOLIS`, `G_/a_CURVATURE` | `coriolis_curvature` |
 | `w_damp` | `g_/a_w_damp` | `w_damp` |
-| `sixth_order_diffusion`, `horizontal_diffusion` (`diff_opt = 1`, `km_opt = 1`) | `g_/a_sixth_order_diffusion`, `G_/a_HORIZONTAL_DIFFUSION` | diff6, diffusion kernels (optional, last) |
+| `sixth_order_diffusion` | `g_/a_sixth_order_diffusion` | diff6 (optional, last) |
+| `compute_diff_metrics` + `cal_deform_and_div`, `smag2d_km` (`diff_opt = 1`, `km_opt = 4`) | `g_/a_compute_diff_metrics`, `g_/a_cal_deform_and_div`, `G_/A_SMAG2D_KM` (diffusion) | `wrf_smag_deform`, `wrf_diff_opt1_km4` + `wrf_smag_km_bc` |
+| `horizontal_diffusion` ('u', 'v', 'w'), `horizontal_diffusion_3dmp` ('m', theta) (`diff_opt = 1`) | `G_/A_HORIZONTAL_DIFFUSION`, `g_/a_horizontal_diffusion_3dmp` | `wrf_diff_opt1_horizontal` |
 
 **D: lateral boundaries**
 
@@ -705,8 +707,8 @@ Each step is one small PR, taken to merged before the next widens.
      step gives `dycore.step`'s words on a mapped state. With msfv passed
      where the strict path passes MSFV_INV, about 2000 words per
      prognostic differ, so the test pins the choice.
-   - Still refused: lateral boundaries other than periodic (specified
-     boundaries next), so WRFDA's regional tutorial case cannot run yet.
+   - Still refused then: lateral boundaries other than periodic (bound
+     in 8f).
 8f. Specified boundaries in the step (DA item 3): `step_geometry` binds
    woof's strict specified step on a domain whose tables are attached
    (`attach_lateral_boundaries`).
@@ -783,11 +785,12 @@ Each step is one small PR, taken to merged before the next widens.
      supplied state.
    - `Window.trajectory_state(state, cfg)` reads a DomainState (a woof
      forecast's state after some steps) as an entry, in the window's
-     dtype. A WRF trajectory is mapped onto STEP_INPUTS by the caller.
+     dtype. A WRF trajectory is mapped onto `step_inputs(geom)` by the
+     caller (STEP_INPUTS, plus SPECIES on a moist window).
      Each entry must hold what its step reads: on a warm step the
      previous step's diagnosis and carried muts.
    - The geometry is still the window's (the `cfg` it was built with), so
-     a physics run's states are linearised by the dry step: the
+     a physics run's states are linearised by the physics-free step: the
      adiabatic TL of WRFDA's lanes L1/L0 before item 6.
    - `forward` returns state `nsteps`: the supplied one, or one window
      step from the last. A plain `forward()` returns to the window's own
@@ -910,8 +913,106 @@ Each step is one small PR, taken to merged before the next widens.
        `apply_flow_dependent_boundaries` (every ring cell moves) and of
        qv's capture through the primal's own single-row
        `_launch_state_relaxation` with the time-t source and mass.
-9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
-   (`diff_opt = 1`).
+     There is no WRFPLUS fixture.
+8l. Moisture, part 5 (DA item 4): the moist step. `step_geometry` now
+   accepts a moist state without microphysics (qv, qc and qr,
+   `mp_physics = 0`, `moist_adv_opt = 0`) and binds 8h-8k in
+   `dycore._step_body`'s strict order:
+   - `_save_time_t` also copies qv, qc and qr to `*0`; the species are
+     step inputs (`step_inputs`), so the window carries them.
+   - Each stage: `calc_cq` (`n_mass` 1) after rk_step_prep; the pressure
+     gradient with `moist_cq`, the buoyancy with `moist` (base mass from
+     mub2d), the diagnosis (each stage's and the epilogue's) with qv, and
+     calc_coef_w, advance_uv and advance_w with `moist_cq`; sumflux zeroed
+     before the substeps, accumulated after each and finished after
+     small_step_finish; then `advance_scalars_stage`: on rk_step 1 with
+     qv's tables qv's held tendency (zeroed, then the relaxation and
+     specified rows from qv0 at mup0), the qv, qc and qr updates (qv's
+     with the held tendency), and on a specified domain flow_dep_bdy for
+     qc and qr.
+   - Epilogue: qv's spec_bdy_final after phi's; qv's tables are step
+     parameters (`QV_INPUTS`).
+   - Refused by name: `moist_adv_opt` != 0, any species beyond qv, qc and
+     qr (ice, numbers, PBL or tracer scalars, registered mass slots),
+     `moist_cq` off, boundary tables for scalars other than qv, a qv
+     table spec_bdy_final does not force back, and a qv table wider or
+     narrower than theta's (one set of Davies weights).
+   - Tests: `tests/test_grad_wrfplus_model.py` (moist, alone and with map
+     factors, rotation, hybrid, w_damp and six substeps, and a cold moist
+     chain of three) and `tests/test_grad_wrfplus_spec_step.py` (a warm
+     moist step and a cold mapped moist chain with the halo off the ring,
+     and the window's moist forward): the binary32 base is
+     `dycore.step`'s words on every input, the species and the sumflux
+     accumulators; dot product (the species in the identity), base-only
+     tape and FD; dropping qv's capture, its final or flow_dep_bdy moves
+     words.
+9. Diffusion, `diff_opt = 1` / `km_opt = 4` (asked for as item 5 of the
+   follow-up list). WRF 4.7.1 and WRFPLUS run, at `rk_step = 1` on the
+   time-t state: `compute_diff_metrics`, `cal_deform_and_div`,
+   `smag2d_km` (no slope limiter at diff_opt 1), then the
+   coordinate-surface `horizontal_diffusion` ('u', 'v', 'w', with xkmh)
+   and `horizontal_diffusion_3dmp` ('m', theta minus t_init, with xkhh).
+   (`horizontal_diffusion_2` is diff_opt 2 only.) The split:
+   - 9a. The coefficients (`woof.grad.wrfplus.diffusion`,
+     `kernels/diffusion.cu`), not yet in the step.
+     - `df_tl/_ad`: defor11, defor22, defor12 of u, v and ph' (3-D
+       phb, map factors, periodic or bounded axes) on woof's strict
+       `wrf_smag_deform` (the `GPUWM_WRF_EXACT_C_DIFFUSION` statements;
+       `wrf_smag_deform_hat`, Metal's default, gives the same words).
+     - `km_tl/_ad`: xkmh and xkhh = xkmh / Pr on
+       `wrf_diff_opt1_km4` + `wrf_smag_km_bc`, with WRFPLUS's
+       derivatives: none where the 10 * mlen cap acts, and sqrt' = 0 where
+       def2 = 0.
+     - One forward serves both directions: the TL reads the inputs'
+       tangents; the AD thread of an input word seeds that word and
+       gathers a_out * d out / d word over the outputs whose stencil can
+       read it (a deduplicated window: 5x5 columns and the levels
+       L-1..L+1, 0 and nz-1 for the deformation; 2x2 for the
+       coefficients). One writer per word, no atomics. The overwritten
+       outputs' adjoints are consumed. The gather recomputes each
+       neighbour's stencil, so it costs more than a tuned adjoint would;
+       its cost is measured with the step binding (9c).
+     - Tests (`tests/test_grad_wrfplus_diffusion.py`): dot product,
+       accumulation, FD, the strict primal's words (both deformation
+       kernels and the coefficients; the slopes and the cap must move
+       words) and the WRFPLUS fixture (`tests/data/wrfplus/
+       diffusion.npz`, `tools/wrfplus_oracle/diffusion.F90`): in
+       binary64 woof matches WRFPLUS to about 4e-16.
+     - WRFPLUS findings. `compute_diff_metrics` (WRF's too) fills a
+       periodic axis's seam slope (zx at ids/ide, zy at jds/jde) for
+       levels 1..ktf only, so the top w level's seam slope keeps its cold
+       zero, where woof's primal takes the true slope: the fixture leaves
+       those deformation words out (and zeroes their adjoint seeds).
+       `a_cal_deform_and_div` sizes its y tapes (Tmpv400-403) from
+       max(jds+1, jts) but fills them from j_start = jts on a periodic y
+       axis, so it overruns them there: the fully periodic case is TL
+       only.
+   - 9b. The rows (`woof.grad.wrfplus.diffusion.hd_tl/_ad`), not yet in
+     the step: `G_/A_HORIZONTAL_DIFFUSION` ('u', 'v', 'w' and a scalar
+     row, which 9d binds for moisture) and
+     `g_/a_horizontal_diffusion_3dmp` (theta minus its initial field) on
+     `wrf_diff_opt1_horizontal`.
+     - Active: the field, the coefficient (xkmh for u, v, w; xkhh for the
+       scalars) and mut; the hybrid mass c1 mut + c2, the initial theta
+       and the map factors pass through. The tendency accumulates, so its
+       adjoint passes through too.
+     - The same single forward as 9a: the AD thread of an input word
+       gathers over the row points within one column and row of it (a
+       field word at its own level, a coefficient word at its own and,
+       for w, the next level, a mut word at every level).
+     - Tests (`tests/test_grad_wrfplus_hdiff.py`): dot product,
+       accumulation, FD and the strict primal's words (through dycore's
+       `launch_coordinate_horizontal`; the hybrid mass and the initial
+       theta must move words) for every row on periodic, bounded and
+       one- to three-cell axes, and the WRFPLUS fixture (`tests/data/
+       wrfplus/hdiff.npz`, `tools/wrfplus_oracle/hdiff.F90`, 17 cases).
+       WRFPLUS's rows take mu as the mass, so the fixture uses c1 = 1,
+       c2 = 0; in binary64 woof matches it to about 1e-16.
+   - 9c. The step binding (stage 1 into the held slots, the map-factor
+     coupling and the specified fold); lifts the refusal for diff_opt 1
+     with km_opt 4 only.
+   - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`).
+   `sixth_order_diffusion` and diff_opt 2 are not started.
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.

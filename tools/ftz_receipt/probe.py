@@ -735,6 +735,98 @@ def bitpatterns_csv(rows: list[dict]) -> str:
     return buffer.getvalue()
 
 
+#: Inline-PTX helper lines the sensitivity control rewrites (see the receipt test).
+PTX_MUL = ('asm volatile("mul.rn.f32 %0, %1, %2;" : "=f"(r) '
+           ': "f"(a), "f"(b));')
+PTX_CVT = 'asm volatile("cvt.rn.f32.f64 %0, %1;" : "=f"(r) : "d"(a));'
+SENSITIVITY_KERNELS = (("ftz_probe_ptx_mul", False), ("ftz_probe_ptx_cvt", True))
+#: The Metal backend's own committed table.  The CUDA receipt in ``receipt/`` cannot describe it: Metal
+#: gives different words for some probes.  ``receipt/`` is never written from a Metal run.
+METAL_PIN_DIR = Path(__file__).resolve().parent / "receipt_metal"
+
+
+def sensitivity_words(receipt: dict) -> dict:
+    """Run the shipped probe module and one with its inline-PTX multiply and convert rewritten as plain
+    C++, on the active backend; return each kernel's device words from both."""
+    import cupy as cp
+    from woof.core import kernels as gpuwm_kernels
+
+    source = _probe_source()
+    mutated = source.replace(PTX_MUL, "r = a * b;")
+    assert mutated != source, "the inline-PTX multiply arm has moved"
+    mutated2 = mutated.replace(PTX_CVT, "r = __double2float_rn(a);")
+    assert mutated2 != mutated, "the inline-PTX convert arm has moved"
+    options = tuple(receipt["routes"]["R1"]["arm_options"])
+    module = cp.RawModule(code=mutated2, options=options)
+    module.compile()
+    shipped = gpuwm_kernels.load_module("ftz_probe")
+    count = len(INPUT_ROWS)
+    au = cp.asarray(np.array([_f32_bits(row["a"]) for row in INPUT_ROWS], dtype=np.uint32))
+    bu = cp.asarray(np.array([_f32_bits(row["b"]) for row in INPUT_ROWS], dtype=np.uint32))
+    ad = cp.asarray(np.array([row["d"] for row in INPUT_ROWS], dtype=np.float64))
+
+    def run(mod, name, convert):
+        out = cp.zeros(count, dtype=cp.uint32)
+        function = mod.get_function(name)
+        args = (ad, out, np.int32(count)) if convert else (au, bu, out, np.int32(count))
+        function((1,), (32,), args)
+        cp.cuda.runtime.deviceSynchronize()
+        return [int(value) for value in out.get()]
+
+    return {name: {"mutated": run(module, name, convert), "shipped": run(shipped, name, convert)}
+            for name, convert in SENSITIVITY_KERNELS}
+
+
+def write_metal_pin(out_dir: Path, inventory: dict) -> None:
+    """Record, from this (Metal) device, the probe table and the sensitivity words in ``out_dir``."""
+    receipt = json.loads((Path(__file__).resolve().parent / "receipt" / "receipt.json").read_text(encoding="utf-8"))
+    rows, _meta = run_probe(inventory)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "bitpatterns.csv").write_text(bitpatterns_csv(rows), encoding="utf-8", newline="")
+    (out_dir / "sensitivity.json").write_text(
+        json.dumps(sensitivity_words(receipt), indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+
+#: One pinned table per CUDA device model, ``receipt_devices/<device_key>/``.  The words depend on the
+#: architecture and the driver's compile of the shipped routes, so a table measured on one card is not
+#: evidence for another.  ``receipt/`` stays the canonical receipt and is the pin for the device it records.
+DEVICE_PIN_ROOT = Path(__file__).resolve().parent / "receipt_devices"
+
+
+def device_key(name, compute_capability) -> str:
+    """Stable identity of a CUDA device model: ``sm_86-NVIDIA_RTX_A6000``.
+
+    Compute capability plus name, never the UUID, so every card of one model shares one pin.
+    """
+    major, _, minor = str(compute_capability).partition(".")
+    arch = f"sm_{major}{minor or '0'}"
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", str(name)).strip("_")
+    return f"{arch}-{slug}"
+
+
+def recorded_device_key(receipt: dict) -> str:
+    """The device key of the card ``receipt.json`` was measured on."""
+    device = receipt.get("device") or {}
+    if not device.get("name") or not device.get("compute_capability"):
+        return ""
+    return device_key(device["name"], device["compute_capability"])
+
+
+def active_device_key() -> str:
+    """The device key of the CUDA device this process runs on."""
+    identity = device_identity()
+    return device_key(identity["name"], identity["compute_capability"])
+
+
+def write_device_pin(out_dir: Path, inventory: dict) -> None:
+    """Record, from this CUDA device, its probe table in ``out_dir``."""
+    table = bitpatterns_csv(run_probe(inventory)[0])
+    if bitpatterns_csv(run_probe(inventory)[0]) != table:
+        raise SystemExit("two probe runs on this device gave different tables; not recording a pin")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "bitpatterns.csv").write_text(table, encoding="utf-8", newline="")
+
+
 #: A CUDA device UUID is 16 bytes.  ``cudaUUID_t`` is ``char bytes[16]``
 #: with no terminator, so its length is the array bound and nothing else.
 CUDA_UUID_BYTES = 16
@@ -907,10 +999,31 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=None)
     parser.add_argument("--out", default=None)
+    parser.add_argument("--metal-pin", action="store_true",
+                        help="write only the Metal backend's table and sensitivity words "
+                             "(receipt_metal beside receipt/); run under WOOF_BACKEND=mlx")
+    parser.add_argument("--device-pin", action="store_true",
+                        help="write only this CUDA device's table to "
+                             "receipt_devices/<sm_XX-device_name>/ beside receipt/")
     args = parser.parse_args(argv)
     ri.require_same_tree(__file__)
     root = Path(args.root).resolve() if args.root else ri.repo_root()
     inventory = ri.load_inventory(root)
+    if args.metal_pin:
+        from woof import backend
+        if backend.install() != "mlx":
+            raise SystemExit("--metal-pin records the Metal backend: run under WOOF_BACKEND=mlx")
+        write_metal_pin(Path(args.out) if args.out else METAL_PIN_DIR, inventory)
+        return 0
+    if args.device_pin:
+        from woof import backend
+        if backend.install() == "mlx":
+            raise SystemExit("--device-pin records a CUDA device: use --metal-pin under WOOF_BACKEND=mlx")
+        key = active_device_key()
+        out = Path(args.out) if args.out else root / "tools" / "ftz_receipt" / "receipt_devices" / key
+        write_device_pin(out, inventory)
+        print(f"device pin {key}: {out}")
+        return 0
     out_dir = (Path(args.out) if args.out
                else root / "tools" / "ftz_receipt" / "receipt")
     receipt = write_receipt(out_dir, inventory)
