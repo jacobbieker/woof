@@ -222,6 +222,9 @@ _CRLF_DEBT = frozenset({
     # woof/da/letkf.py left this list in the DA speed integration: the
     # obs-ops lane wrote it back LF (e13abf285) and the line-ending hook
     # refuses restoring the CR bytes, so the file stays normalized.
+    # woof/da/obs_goes.py: upstream 1.1.7 deleted local DA and dropped this
+    # row; the fork keeps local DA, so the row stays.
+    "woof/da/obs_goes.py",
     # woof/da/obs_radar.py left this list when the DA line merged into
     # 2.8.7: the radar reflectivity rebuild (098029d01, DA lane 2) wrote it
     # back LF together with its content change, and the line-ending hook

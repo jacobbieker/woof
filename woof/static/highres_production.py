@@ -1005,9 +1005,13 @@ def _terrain_bbox(bbox: FootprintBBox, grid) -> FootprintBBox:
     if reach <= 0:
         return bbox
     wide = domain_footprint(grid, HALO + reach)
+    # A footprint continued past 180 degrees is cut turned half a turn
+    # (dateline_rotation_deg), so its wider window is checked in that frame.
+    rotation = dateline_rotation_deg(bbox)
     try:
-        _require_cut_frame_window(wide)
-    except (CoverageError, ValueError):
+        _require_cut_frame_window(
+            rotate_footprint(wide, rotation) if rotation else wide)
+    except (CoverageError, ValueError, HighresRefusal):
         return bbox
     return FootprintBBox(min(wide.lat_min, bbox.lat_min),
                          max(wide.lat_max, bbox.lat_max),

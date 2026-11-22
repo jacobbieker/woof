@@ -32,8 +32,15 @@ READINGS = (
     ('noahmp_vegprecip', 'noahmp_vegprecip', 'fe5fcc483c9bd173753ab7e428ba373f0bfd0d1c3b9afd2e1f4ca75090fc9c54', 0),
     ('noahmp_leaves', 'noahmp_leaves',
      '673c29ed4b0add71ee3a570c91887160730e0b1c4ff02a9bcb627e7b6d0db3fa', 496),
+    # Upstream WOOF 1.1.7 fork merge (2026-11-22): the merged glacier and water
+    # units (upstream's sources plus the fork's WRF_HYDRO / opt_tksno ordering)
+    # have new identities.  No sm_120 card was available; on the A6000
+    # (sm_86, NVRTC 13.4.92, tools/measure_selected_noahmp_frames.py, fast and
+    # strict) the merged units read exactly what upstream 1.1.7's units read
+    # (glacier 792, water 720 B), so the sm_120 prices are carried to the new
+    # identities.  Follow-up: re-read both on the table's platform.
     ('noahmp_glacier', 'noahmp_glacier_composed',
-     '9478c566dc0d4106aa8624d487c37595a1bba8acfc0702bd69c7627748eed032', 792),
+     'fd8b08e325a5233fd2c34aa4b677b779e518f6bcd66282da8686d951e6ee1e83', 792),
     ('noahmp_radiation', 'noahmp_radiation',
      '4e355d5c9e9b8b7da38e24047bd3fd6d255c552bb96406402874feddcea180cc', 88),
     ('noahmp_bareflux', 'noahmp_bareflux',
@@ -47,7 +54,8 @@ READINGS = (
      # 3.0.0 fix batch 4 (wetland tail): read 272 on sm_120 with NVRTC 13.4.92
      # (fast and strict); the 352 read on NVRTC 12.9.86 for the previous source
      # stays the price until this source is read on the table's platform.
-     '01d3d469f9b12b85500acb3f25f12ef3950955e41956042aa0a2bbb7483948b5', 352),
+     # 1.1.7 fork merge: identity carried as for glacier above.
+     'e5dfb2e1e43499301d3669f4d15d5ddca90df733c1cc8f1cda34f43d78f83ae4', 352),
     ('noahmp_thermal', 'noahmp_thermal_composed',
      # Unchanged source: NVRTC 13.4.92 reads 368, the table platform read 416.
      '5d0d3fc9d1602f3786558f17a5a554d39449861308d417a922bde6c656036b91', 416),

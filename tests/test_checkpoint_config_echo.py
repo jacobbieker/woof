@@ -114,7 +114,8 @@ MOVED = {
         {"ysu_surface_heat_exner", "ysu_version"}),
     "mynn_sfclay_psih_zolzt": (
         dict(sf_sfclay_physics=5, bl_pbl_physics=5, mynn_sfclay_psih_zolzt=True),
-        {"mynn_sfclay_psih_zolzt"}),
+        # MYNN PBL also binds upstream 1.1.7's default-on correct-mode keys.
+        {"mynn_sfclay_psih_zolzt", "mynn_fixes_v61", "mynn_boulac_down_sign"}),
     # Noah runs here, so its default-on prognostic sea ice is bound too.
     "noah_smc_floor_booking": (
         dict(sf_surface_physics=2, noah_smc_floor_booking=True),

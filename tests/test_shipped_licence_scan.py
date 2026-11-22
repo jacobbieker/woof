@@ -246,6 +246,50 @@ _EXPLAINED.update({
 })
 
 
+#: Fork files (jacobbieker/woof) that name a restricted licence without
+#: carrying code under it; added at the upstream WOOF 1.1.7 sync, which
+#: brought this gate.
+_EXPLAINED.update({
+    "licenses/LICENSE-E3SM-BSD-3-Clause.txt": (
+        frozenset({"non-commercial"}),
+        "E3SM's licence file, whose third-party table marks E3SM's own "
+        "copies of AER RRTMG/RRTMGP non-commercial; the fork takes no code "
+        "from those E3SM directories"),
+    "licenses/LICENSE-glibc-LGPL-2.1.txt": (
+        frozenset({"gpl-title"}),
+        "the LGPL text for the opt-in glibc libm routes; their code is not "
+        "package data and no default path or wheel carries it"),
+    "licenses/NOTICE-NCAR-TUVX.txt": (
+        frozenset({"gpl-title"}),
+        "TUV-x notice: records that TUV-x's src/util/assert.F90 is GPL-2.0+ "
+        "and that the oracle build swaps in a clean-room module for it"),
+    "woof/core/glibc239_gpu.py": (
+        frozenset({"gpl-id"}),
+        "the opt-in glibc 2.39 libm loader names the LGPL so the route stays "
+        "an opt-in; the transcription is not package data"),
+    "woof/core/host_libm.py": (
+        frozenset({"gpl-id"}),
+        "the host libm route names the LGPL part of the opt-in "
+        "glibc239-libm crate to explain why it is off by default"),
+    "woof/obs/geo_icechunk.py": (
+        frozenset({"non-commercial"}),
+        "states a GEO imager product's non-commercial terms so the reader "
+        "refuses it; no such data ships"),
+    "woof/radtran/data.py": (
+        frozenset({"gpl-id"}),
+        "says libRadtran data (GPL-2) is never shipped or copied, only read "
+        "from a user's own install"),
+    "woof/rtm/crtm_build.py": (
+        frozenset({"gpl-id", "gpl-title"}),
+        "refuses to build a CRTM tree whose file headers carry the GPL (the "
+        "copy inside WRF); only CRTM v2.4+ CC0 is compiled"),
+    "woof/spacewx/indices.py": (
+        frozenset({"cc-nc-nd-id"}),
+        "the space-weather index reader skips the CC BY-NC sunspot-number "
+        "column by design"),
+})
+
+
 def _is_excluded(relative: str) -> bool:
     return any(relative == sub or relative.startswith(sub + "/")
                for sub in _EXCLUDED_SUBTREES)

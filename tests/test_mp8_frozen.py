@@ -1354,7 +1354,7 @@ FROZEN_MODULE_DIGESTS = {
         # Previously ef57884c/42ed557f.
         # RE-PINNED for the upstream WOOF 1.1.7 merge: both edits above.
         '3736ba8f07a6ff915255159e6fec8b29a617e76465364d99d276c0795470e17d',
-        'RECOMPUTE-NOAH-SHA-COMPILE'),
+        'd97d7894899756adbae9cfbc6e388c6fedc9e95292ae9515111f7819c3675aa2'),
     # fix/noahmp-small-defects (2026-11-09): correct-mode SN1, the Noah-MP
     # snowmelt reset re-evaluating ESTG at the reset TG, compiled only under
     # GPUWM_NOAHMP_MELT_RESET_ESAT.  Without it the arithmetic is unchanged

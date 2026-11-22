@@ -4,9 +4,9 @@
   "authority": {
     "tools/rustwx/crates/rw-wrfbatch/src/wrf_process.rs": "a31d2c2bf095ea6c2df46ceadaa15eefabe062858370ceb4549decb39d7eea13",
     "tools/rustwx/crates/rw-wrfbatch/src/local_import.rs": "b9cce691bd0247eb248f6d7f6c4df597e37adf01f4643addefe73cea3d10126f",
-    "tools/rustwx/crates/rustwx-products/src/windowed.rs": "878b6371d63836910cba5331c4d41e8d183de67590c0c17a61311c17a1c5fda5",
+    "tools/rustwx/crates/rustwx-products/src/windowed.rs": "62a77d6c5fcba63cf777ae484c3188e6259140db322f6c572926837aa4e62853",
     "tools/rustwx/crates/rw-wrfbatch/src/derived_diagnostics.rs": "3822fc30685fca57b4ff59421170547702aaca7332a78271d6ebcbc6b265887a",
-    "tools/rustwx/crates/rustwx-calc/src/derived.rs": "5928b5d14c636755986940b4ad88e58a13a2aa3b1ededc1498297632e9f8a1c0"
+    "tools/rustwx/crates/rustwx-calc/src/derived.rs": "d1fa81ea69b88fbd4a5e708fe6d0090034b6159b663e66bf603a5c4245e411c6"
   },
   "products": {
     "10m_wind_1h_max": {
