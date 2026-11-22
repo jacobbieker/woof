@@ -3573,11 +3573,11 @@
    },
    {
     "file": "woof/core/kernels/gsfcsw.cu",
-    "sha256": "112658723f9630d3acad88f1ea3d5ad71ee363c61d5b4a9ef95204eb7dc1c9b2"
+    "sha256": "520b17104407232684ac9ddf6e9956e219b3cdfb1468f30f3e481a82ed1c2da5"
    },
    {
     "file": "woof/core/kernels/gsfcsw_fast.cuh",
-    "sha256": "e6f663eaeaa24a205d74a287983ef7d9ecdc118c0b7b94d6d7a901db6d788dc2"
+    "sha256": "e7899fc52c5d29127acbe23472fd4392b2e2f7f9341f29f8b153a0f753d5d183"
    },
    {
     "file": "woof/core/kernels/hail.cu",
@@ -5855,7 +5855,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "2d9cc0a892047a68ddf9e6db180e2ab544df45253b59c3a54c3cacef1eb84007"
+    "sha256": "7ff199095634f18b18f9ec34fde491abb2f82181b7da85848c4ae71ee9187214"
    },
    {
     "file": "woof/core/refl.py",
