@@ -5611,7 +5611,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "69addefad8334f2dde10b68a11006846b1a488ce0dc45b98e0093b779509e64c"
+    "sha256": "5645ea51ba36091972e1ff8440ff463dc38d70737a5ab5767186b4a74f33466a"
    },
    {
     "file": "woof/core/refl.py",
