@@ -4,12 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from woof.hex import chem_micm_hex
+from woof.hex import chem_micm_hex, chem_wrf
 from woof.hex.chem_transport import configure, history_metadata, history_units, load_config
 
 MECHANISM = Path(__file__).resolve().parents[3] / "tests" / "data" / "micm_oracle" / "chempas_a_chapman_nox.yaml"
 PHOTO = {"jO2": {"j_max": 1e-11}, "jO3_O": {"j_max": 4e-4}, "jO3_O1D": {"j_max": 3e-5},
          "jNO2": {"j_max": 8e-3}}
+
+
+@pytest.fixture(autouse=True)
+def _no_wrf_chem_units(monkeypatch):
+    # chem_wrf keeps the units of every table it has configured in a process-wide dict, and history_units
+    # answers from it first; a wrf_chem test that ran earlier (RADM2 gives no2 as ppmv) must not decide the
+    # micm rows' units here.  A run carries one mode, so the dict is empty for it.
+    monkeypatch.setattr(chem_wrf, "_UNITS", {})
 
 
 def config(tmp_path, **block):
@@ -40,7 +48,7 @@ def test_metadata_names_the_mechanism(tmp_path):
     ({"chemistry_interval": -1}, "nonnegative"),
     ({"relative_tolerance": 0}, "positive"),
     ({"initial_mass_mixing_ratio": {"NOPE": 1.0}}, "does not transport"),
-    ({"tuvx": True}, "not carried"),
+    ({"tuvx": True}, "read only with"),
 ])
 def test_refusals_by_name(tmp_path, block, match):
     with pytest.raises(ValueError, match=match):

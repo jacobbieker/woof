@@ -2,8 +2,8 @@
 
 ``--lakes clm`` turns on WRF's CLM lake model (``sf_lake_physics = 1``) with
 its WPS bathymetry (``use_lakedepth`` keeps its value, default 1; the
-``lake_depth`` geography is NOT fetched by ``woof go``: go's geography check refuses
-until ``woof fetch-geog`` has staged it) and starts the lakes from ``lake_state_source =
+``lake_depth`` geography is downloaded by ``woof go`` itself when the tree lacks it)
+and starts the lakes from ``lake_state_source =
 "auto+era5"``: GLSEA where it covers, ERA5's FLake state elsewhere.  ``--lakes
 ic`` keeps the lake model off and binds only the initial state; ``--lakes off``
 writes the defaults.  Every domain gets the same choice: a lake model on one

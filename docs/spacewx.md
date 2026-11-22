@@ -14,10 +14,10 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | layer | what it does | status |
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
-| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt`) |
-| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, and the energy flux in history (`spacewx_aurora_opt = 2`) |
+| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt = 1`, and `= 2` with the correction) |
+| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, the energy flux in history (`spacewx_aurora_opt = 2`), and the Joule power in history (`spacewx_aurora_opt = 3`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
-| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make; auroral-electron ion-pair rates (Fang et al. 2010) from OVATION's energy flux and mean energy | ion-pair rates available as `woof spacewx particles` (electrons with `--electron-energy-flux`, a diagnostic above every model top); the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route) |
+| L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make; auroral-electron ion-pair rates (Fang et al. 2010) from OVATION's energy flux and mean energy | ion-pair rates available as `woof spacewx particles` (electrons with `--electron-energy-flux`, a diagnostic above every model top); the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route; on hex in the chemistry config's `wrf_chem` block) |
 | L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route and hex's generic column seam, and on Fast-TUV photolysis (`phot_opt = 3`, RADM2; WRF route and hex) |
 
 Couplings that stay speculative are not implemented, and none is planned. One example is
@@ -382,8 +382,36 @@ the forecast is identical with the option on or off.
   `[spacewx ionosphere]` start-up line records the value and the file's SHA-256.
 - Every monthly map the run will blend is loaded when the run starts, so a
   forecast never fetches one mid-run.
-- Preflight prices the held arrays (14 column vectors and the five rows) and
-  the kernel's 96 B local frame.
+- `spacewx_ionosphere_opt = 2` applies the storm-time correction above to
+  every frame and adds a sixth row, `IONO_STORM` (R; foF2 is multiplied by
+  sqrt(R), and hmF2, NmF2 and TEC follow).
+  - ap is read from the same GFZ file as F10.7, so a numeric
+    `spacewx_f107_source` is refused. At the start, ap_tau is the CLI's: the
+    intervals that have ended by then, the latest two required (refused by
+    name otherwise). A cache that lacks the latest ended interval is fetched
+    again, and kept if GFZ cannot be reached.
+  - A forecast has no ap for its future. Every interval that ends after the
+    start takes the latest observed ap, and the filter runs on with each
+    frame: persistence of the index, as the aurora rows hold the latest Kp.
+    In a storm's main phase ap_tau keeps rising towards that ap, and after a
+    storm it does not decay, so read long forecasts with that in mind.
+  - The dipole magnetic latitude is taken at the start; local time and season
+    move with each frame.
+  - The ap series is held per source and start in
+    `~/.woof/spacewx/storm-activity`, so a resume, and every domain that
+    starts at the same time, reads the same ap. A nest that starts later reads
+    the ap ended by its own start. A series is kept only from a fresh fetch
+    that has the latest two intervals: an incomplete one, or one from the
+    cached file used when GFZ cannot be reached (flagged in the receipt), is
+    not kept, so a later run fetches again. The `[spacewx ionosphere]` line adds the fit's SHA-256, tau, the
+    latest ap, its interval and ap_tau at the start.
+  - Scale check (`tests/test_spacewx_ionosphere_history.py`): at a strong
+    storm the shipped fit's mean R at |MLAT| 35-62.5 deg is about 0.30 in local
+    summer, 0.51 at equinox and 0.90 in winter, and above 1 at low latitudes
+    in winter: the seasonal pattern of the F2 negative and positive phases
+    (Prolss 1995; Fuller-Rowell et al. 1994, JGR 99, 3893).
+- Preflight prices the held arrays (14 column vectors and the five rows, six
+  with the correction plus its factor) and the kernel's 96 B local frame.
 - A streamed domain refuses the option, because the rows are not a tile
   carrier, and hex refuses it until a hex history stream carries them.
 
@@ -570,6 +598,25 @@ The forecast is identical with the option on or off.
   option existed has no dPhi/dt: the solar wind for the start is then read
   again, and the resume is refused by name if the feed no longer covers it
   (SWPC keeps only 24 h).
+- `spacewx_aurora_opt = 3` adds `JOULE_POWER` (GW) to option 2's rows: the
+  northern hemisphere's Joule power of Knipp et al. 2004 (Sol. Phys. 224, 495,
+  Table I), a seasonal quadratic in |PC(N)| and |Dst| fitted to AMIE. PC(N) and
+  Dst are OMNI2 words 52 and 41, so it needs `spacewx_kp_source = "omni"` (SWPC's
+  feed carries neither). Both come from the latest hour that has ended by the
+  start and has both values, within 24 h; Knipp's season is the start's. The
+  value is held for the run, and the fit has no horizontal structure, so the row
+  holds that one number in every column of every frame. It is the
+  hemisphere-integrated power, not a local heating rate. The summer fit can go
+  a fraction of a GW below 0 for near-zero PC(N) and Dst; the row holds
+  max(fit, 0), and the receipt keeps the fit's value too. The `[spacewx aurora]`
+  line adds PC(N), Dst, their hour, the season, the northern power and Knipp's
+  global value (twice the northern). The drivers are kept with the held Kp
+  whenever OMNI2 has them, and an older hold without them reads OMNI2 again.
+  Scale check: with the climatological |PC(N)| of about 1.2 and Dst of about
+  -17 nT, the annual fit gives a global 84 GW, against the 95 GW mean that
+  Knipp et al. 2004 report for 1975-2003; a severe storm (PC(N) 6, Dst -250 nT)
+  gives about 470 GW in the north, the scale of AMIE storm peaks (McHarg et al.
+  2005, JGR 110, A12S16, up to about 300 GW).
 - Rows are rebuilt from the configuration on restart (no checkpoint state),
   and the two keys are output-only for the restart and prepared-cache
   identities, so a resume may switch the rows on or off. A fetched Kp (gfz,
@@ -700,9 +747,20 @@ domain that runs RADM2 (`chem_sets` `radm2` or `radm2sorg`).
   at its mid depth sqrt(X_top X_bottom), with X = p8w / g. This is within 3 %
   of the layer means wherever the rate matters
   (`tests/test_spacewx_epp_chem.py`).
-- **Refusals.** Streamed domains and hex refuse the option, for now, and so
-  does a run with no radiation scheme (the caps are placed on the radiation
+- **Refusals.** Streamed domains refuse the option, for now, and so does a
+  WRF-route run with no radiation scheme (the caps are placed on the radiation
   geometry's xlat/xlong). A domain with no cell in a polar cap adds nothing.
+- **On hex.** Set `"spacewx_epp_opt": 1` and `"spacewx_epp_source"` in the
+  `--chemistry-config` document's `wrf_chem` block, beside `chem_sets`
+  (`radm2` or `radm2sorg`). Both hex routes take it there: the generic
+  column seam and the MPAS v8.4.2 suite route. The caps are placed on the
+  cells' own centres, whatever the radiation. `--physics spacewx_epp_opt=...`
+  is refused by name, because the column physics is judged before the
+  chemistry rows join it. The rows, the photolysis rates and each step's
+  increment match the WRF path word for word on the same columns, on equal
+  cells and on variable-resolution cell areas
+  (`tests/test_hex_chem_epp_gpu.py`). The chemistry receipt records the held
+  hour under `spacewx_epp`.
 
 **Validation.** The source is the ion-pair rate above multiplied by fixed
 yields, so its validation is the CMIP7 comparison. A comparison with MLS (OH,

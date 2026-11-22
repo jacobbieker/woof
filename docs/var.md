@@ -113,6 +113,25 @@ WRFDA's gen_be sample forecasts, `je_factor = 2` and `alpha_corr_scale =
   |difference| at most 4.7e-5 of the RMS (PSFC; the other fields at most
   7.2e-6) and correlation of at least 0.9999999996.
 
+### Paired with an LETKF cycle (opt-in, Python API)
+
+`woof.da.var.pairing` is the usual hybrid EnKF-Var pairing. The LETKF's
+forecast ensemble gives the hybrid its `x'_n` (`ensemble_from_letkf`: the
+LETKF's `(R, nz, ny, nx)` stacks, perturbations about their mean), 3DEnVar
+analyses the first guess, the LETKF updates the members, and `recentre` moves
+the analysis members' mean to the variational analysis (`gamma` of the way,
+default all of it) while keeping the LETKF's perturbations. `hybrid_step`
+runs one such step. The pairing works in `u`, `v`, `t`, `q` and `ps`, the
+hybrid's own fields. The LETKF takes only 3-D fields, so `ps` is not analysed
+by it: its members keep the prior's perturbations about the recentred mean.
+Writing the recentred fields back to member files, and the hydrostatic and
+column-mass consistency of a recentred member, belong to the cycle
+controller that owns those files; `analyse` does that for the mean only.
+It is not on the `woof var` door, which takes members' history files
+(`--ensemble-member`) and so already analyses with any cycle's forecasts.
+Tested on synthetic grids with the real LETKF (`tests/test_var_pairing.py`);
+no cycling skill claim (the OSSE half of GV3) is made.
+
 ## FGAT (opt-in)
 
 WRFDA's FGAT (`num_fgat_time > 1`, first guess at appropriate time) compares

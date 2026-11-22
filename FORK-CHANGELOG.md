@@ -31,6 +31,14 @@ fork already had, upstream's keys and flags are now the only ones:
 
 New:
 
+- The WRF dry-step adjoint's step (`woof.grad.wrfplus.model`) now covers
+  a moist state without microphysics (qv, qc and qr): calc_cq, the moist
+  pressure gradient, buoyancy and diagnosis, sumflux and the non-PD
+  scalar update, qv's boundary capture and spec_bdy_final, and
+  flow_dep_bdy for qc and qr, in the strict primal's order. The binary32
+  base reproduces `dycore.step` word for word. The forecast path is
+  unchanged.
+
 - The WRF dry-step adjoint's lateral-boundary rows (`woof.grad.wrfplus.lbc`)
   gain the moist ones: qv's rk_step-1 relaxation capture and its
   spec_bdy_final, and WRF's flow-dependent boundary for hydrometeors

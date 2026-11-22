@@ -126,6 +126,17 @@ struct ItdTracers {
     int nblyr;              // nBioLayers
     const double *bgrid;    // biologyGrid: bgrid(k) is bgrid[k - 1]
     const double *cgrid;    // verticalGrid: cgrid(k) is cgrid[k - 1]
+    // the vertical tracers (z_tracers) with the nonreactive tracer alone: nbtrcr
+    // (0 or 1), its first tracer bio_index(1) (0-based: nblyr + 1 ice layers, then the
+    // snow's two), interfaceBiologyGrid (igrid(k) is igrid[k - 1]), the
+    // column package's zbgc_init_frac(1), and the cell's ocean concentration
+    // (oceanBioConcentrationsUsed(1)) and flux (oceanBioFluxes(1, iCell))
+    int nbio;
+    int bio;
+    const double *igrid;
+    double init_frac;
+    double ocean_bio;
+    double *flux_bio;
 };
 
 // ice_itd.F90:53-81 aggregate_area
@@ -487,15 +498,16 @@ __device__ void itd_update_vertical_tracers(double *trc, double h1, double h2, d
 }
 
 // ice_zbgc_shared.F90:370-524 regrid_stationary as adjust_tracer_profile calls
-// it for the vertical salinity: nblyr - 1 intervals (n = nblyr points c[1..n],
-// 1-based) on igrid = bgrid(2:nblyr+1), no bottom melt or growth, its flux
-// (fluxb) and the sums that feed only it dropped. Returns ITD_ZSAL_REMAP on
-// remap_zbgc's stop.
-__device__ int itd_regrid_stationary(const ItdTracers &T, double *c, double hbri_old, double hbri, double top_conc)
+// it: n points c[1..n] (1-based) on grid (grid[k] is the grid's k-th point), no
+// bottom melt or growth, its flux (fluxb) and the sums that feed only it
+// dropped. The vertical salinity's call is nblyr - 1 intervals (n = nblyr) on
+// bgrid(2:nblyr+1); a vertical tracer's nblyr intervals (n = nblyr + 1) on
+// igrid. Returns ITD_ZSAL_REMAP on remap_zbgc's stop.
+__device__ int itd_regrid_points(double *c, int n, const double *grid, double hbri_old, double hbri,
+                                 double top_conc)
 {
-    const int n = T.nblyr;
-    double trtmp0[ZB_NBMAX + 2], trtmp[ZB_NBMAX + 2];
-    for (int k = 0; k < ZB_NBMAX + 2; ++k) {
+    double trtmp0[ZB_NBMAX + 3], trtmp[ZB_NBMAX + 3];
+    for (int k = 0; k < ZB_NBMAX + 3; ++k) {
         trtmp0[k] = 0.0;
         trtmp[k] = 0.0;
     }
@@ -505,9 +517,9 @@ __device__ int itd_regrid_stationary(const ItdTracers &T, double *c, double hbri
         // nr = 1, hice = htemp = hbri, hbio = hbri_old
         const double htemp = hbri;
         if (htemp > 0.0) {
-            if (remap_zbgc(trtmp0 + 1, 1, n, n, htemp, hbri_old, T.bgrid, T.bgrid, top_conc, trtmp))
+            if (remap_zbgc(trtmp0 + 1, 1, n, n, htemp, hbri_old, grid, grid, top_conc, trtmp))
                 return ITD_ZSAL_REMAP;
-            for (int k = 0; k < ZB_NBMAX + 2; ++k) trtmp0[k] = 0.0;
+            for (int k = 0; k < ZB_NBMAX + 3; ++k) trtmp0[k] = 0.0;
             for (int k = 1; k <= n; ++k) trtmp0[n + 1 - k] = trtmp[k];
             for (int k = 1; k <= n; ++k) c[k] = M(trtmp0[k], htemp);
         }
@@ -515,61 +527,92 @@ __device__ int itd_regrid_stationary(const ItdTracers &T, double *c, double hbri
     return ITD_OK;
 }
 
-// ice_zbgc.F90:332-521 adjust_tracer_profile with the vertical salinity alone
-// (solve_zsal, nbtrcr = 0) on one category's tracers tr. location 1: frazil
-// at the bottom (regrid_stationary); 0: frazil throughout. The ice salinity
-// is remapped from the new vertical salinity; that remap_zbgc's stop is not
-// checked (its receivers stay 0). Returns regrid_stationary's stop.
+__device__ int itd_regrid_stationary(const ItdTracers &T, double *c, double hbri_old, double hbri, double top_conc)
+{
+    return itd_regrid_points(c, T.nblyr, T.bgrid, hbri_old, hbri, top_conc);
+}
+
+// ice_zbgc.F90:332-521 adjust_tracer_profile on one category's tracers tr:
+// the vertical salinity under solve_zsal and the vertical tracer (nbtrcr =
+// T.nbio). location 1: frazil at the bottom (regrid_stationary); 0: frazil
+// throughout. Under solve_zsal the ice salinity is remapped from the new
+// vertical salinity; that remap_zbgc's stop is not checked (its receivers
+// stay 0). Returns regrid_stationary's stop.
 __device__ int itd_adjust_tracer_profile(const ItdTracers &T, double aicen, double vbrin, double vicen, double *tr,
                                          double vtmp, double vsurp, double sss, int location)
 {
     const int nbl = T.nblyr;
-    double *zsal = tr + T.idx[TI_BGCS];
+    // the vertical salinity's index is -1 without it: no pointer before the row
+    double *zsal = T.zsal ? tr + T.idx[TI_BGCS] : tr;
+    double *zbio = tr + T.bio;
     double src[ZB_NBMAX], out[COL_NILYR + 2];
     if (!(vbrin > 0.0)) return ITD_OK;
     if (location == 1) {
         const double hbri = vbrin, hbri_old = vtmp;
-        const double top_conc = M(sss, ITD_SALT_LOSS);
-        double cs[ZB_NBMAX + 1];
-        for (int k = 1; k <= nbl; ++k) cs[k] = M(zsal[k - 1], hbri_old);
-        int stop = itd_regrid_stationary(T, cs, hbri_old, hbri, top_conc);
-        if (stop) return stop;
-        for (int k = 1; k <= nbl; ++k) {
-            zsal[k - 1] = D(cs[k], hbri);
-            src[k - 1] = zsal[k - 1];
+        double cs[ZB_NBMAX + 2];
+        if (T.zsal) {
+            const double top_conc = M(sss, ITD_SALT_LOSS);
+            for (int k = 1; k <= nbl; ++k) cs[k] = M(zsal[k - 1], hbri_old);
+            int stop = itd_regrid_stationary(T, cs, hbri_old, hbri, top_conc);
+            if (stop) return stop;
+            for (int k = 1; k <= nbl; ++k) {
+                zsal[k - 1] = D(cs[k], hbri);
+                src[k - 1] = zsal[k - 1];
+            }
+        }
+        if (T.nbio) {
+            const double top_conc = M(T.ocean_bio, T.init_frac);
+            for (int k = 1; k <= nbl + 1; ++k) cs[k] = M(zbio[k - 1], hbri_old);
+            double ig[ZB_NBMAX + 3];   // igrid(k) at ig[k]
+            for (int k = 1; k <= nbl + 1; ++k) ig[k] = T.igrid[k - 1];
+            int stop = itd_regrid_points(cs, nbl + 1, ig, hbri_old, hbri, top_conc);
+            if (stop) return stop;
+            for (int k = 1; k <= nbl + 1; ++k) zbio[k - 1] = D(cs[k], hbri);
         }
     } else {
-        for (int k = 1; k <= nbl; ++k) {
-            zsal[k - 1] = D(A(M(zsal[k - 1], vtmp), M(M(sss, ITD_SALT_LOSS), vsurp)), vbrin);
-            src[k - 1] = zsal[k - 1];
+        for (int k = 1; k <= nbl + 1; ++k) {
+            if (T.zsal && k < nbl + 1) {
+                zsal[k - 1] = D(A(M(zsal[k - 1], vtmp), M(M(sss, ITD_SALT_LOSS), vsurp)), vbrin);
+                src[k - 1] = zsal[k - 1];
+            }
+            if (T.nbio)
+                zbio[k - 1] = D(A(M(zbio[k - 1], vtmp), M(M(T.ocean_bio, T.init_frac), vsurp)), vbrin);
         }
     }
-    double hinS_new = 0.0, hin = 0.0;
-    if (aicen > 0.0) {
-        hinS_new = D(vbrin, aicen);
-        hin = D(vicen, aicen);
+    if (T.zsal) {
+        double hinS_new = 0.0, hin = 0.0;
+        if (aicen > 0.0) {
+            hinS_new = D(vbrin, aicen);
+            hin = D(vicen, aicen);
+        }
+        for (int k = 0; k < COL_NILYR + 2; ++k) out[k] = 0.0;
+        (void)remap_zbgc(src, 1, COL_NILYR, nbl, hin, hinS_new, T.cgrid, T.bgrid, MIN_SALIN, out);
+        for (int k = 1; k <= COL_NILYR; ++k) tr[T.idx[TI_SICE] + k - 1] = out[k];
     }
-    for (int k = 0; k < COL_NILYR + 2; ++k) out[k] = 0.0;
-    (void)remap_zbgc(src, 1, COL_NILYR, nbl, hin, hinS_new, T.cgrid, T.bgrid, MIN_SALIN, out);
-    for (int k = 1; k <= COL_NILYR; ++k) tr[T.idx[TI_SICE] + k - 1] = out[k];
     return ITD_OK;
 }
 
-// ice_zbgc.F90:29-253 add_new_ice_bgc with the brine height (nbtrcr = 0,
-// l_conservation_check .false.) and, under solve_zsal, the vertical salinity
-// (nltrcr = 1: adjust_tracer_profile; the first category's surface
-// temperature from its new top-layer enthalpy and salinity under no snow).
-// aicen_init and vicen_init are add_new_ice's copies at its entry, aicen and
-// vicen the updated state; vi0new is add_new_ice's final frazil volume and
-// vsnon1 the first category's snow. Returns regrid_stationary's stop.
-__device__ int itd_add_new_ice_bgc(const ItdTracers &T, int ncat, const double *aicen_init,
+// ice_zbgc.F90:29-253 add_new_ice_bgc with the brine height
+// (l_conservation_check .false.), the vertical salinity under solve_zsal and
+// the vertical tracer (nbtrcr = T.nbio): the frazil's tracer taken from the
+// ocean flux, then adjust_tracer_profile for nltrcr > 0 (v8.4.2 counts the
+// vertical salinity in nltrcr unsolved too, where adjust_tracer_profile
+// changes nothing); under solve_zsal the first category's surface temperature
+// from its new top-layer enthalpy and salinity under no snow. aicen_init and
+// vicen_init are add_new_ice's copies at its entry, aicen and vicen the
+// updated state; vi0_init is add_new_ice's first frazil volume, vi0new its
+// final one and vsnon1 the first category's snow. Returns
+// regrid_stationary's stop.
+__device__ int itd_add_new_ice_bgc(const ItdTracers &T, int ncat, double dt, const double *aicen_init,
                                    const double *vicen_init, const double *aicen, const double *vicen, double vsnon1,
-                                   double vi0new, double hsurp, double sss, double *trcrn)
+                                   double vi0_init, double vi0new, double hsurp, double sss, double *trcrn)
 {
     const int nt = T.nt;
     const int fb = T.idx[TI_FBRI];
+    const bool layered = T.zsal || T.nbio;
     double vbrin[ITD_MAXCAT];
     for (int n = 0; n < ncat; ++n) vbrin[n] = M(trcrn[n * nt + fb], vicen_init[n]);
+    if (T.nbio) *T.flux_bio = S(*T.flux_bio, M(M(D(vi0_init, dt), T.ocean_bio), T.init_frac));
     for (int n = 0; n < ncat; ++n) {
         if (hsurp > 0.0) {
             double vtmp = vbrin[n];
@@ -578,7 +621,7 @@ __device__ int itd_add_new_ice_bgc(const ItdTracers &T, int ncat, const double *
             double vice_new = A(vicen_init[n], vsurp);
             if (vicen[n] > 0.0) trcrn[n * nt + fb] = D(vbrin[n], vicen[n]);
             else trcrn[n * nt + fb] = 1.0;
-            if (T.zsal) {
+            if (layered) {
                 int stop = itd_adjust_tracer_profile(T, aicen_init[n], vbrin[n], vice_new, trcrn + n * nt, vtmp,
                                                      vsurp, sss, 1);
                 if (stop) return stop;
@@ -590,10 +633,10 @@ __device__ int itd_add_new_ice_bgc(const ItdTracers &T, int ncat, const double *
         vbrin[0] = A(vbrin[0], vi0new);
         if (vicen[0] > 0.0) trcrn[fb] = D(vbrin[0], vicen[0]);
         else trcrn[fb] = 1.0;
-        if (T.zsal) {
+        if (layered) {
             int stop = itd_adjust_tracer_profile(T, aicen[0], vbrin[0], vicen[0], trcrn, vbri1, vi0new, sss, 0);
             if (stop) return stop;
-            if (vsnon1 <= 0.0) {
+            if (T.zsal && vsnon1 <= 0.0) {
                 double Tmlts = M(-trcrn[T.idx[TI_SICE]], DEPRESST);
                 trcrn[T.idx[TI_TSFC]] = bg_Tin_from_qin(trcrn[T.idx[TI_QICE]], Tmlts);
             }
@@ -635,6 +678,7 @@ __device__ int itd_add_new_ice(const ItdTracers &T, int ncat, double dt, const d
     }
     double fnew = col_max(frzmlt, 0.0);
     double vi0new = -D(M(fnew, dt), qi0new);
+    const double vi0_init = vi0new;
     *frazil = vi0new;
     if (T.zsal) *fzsal = S(*fzsal, M(M(M(D(M(ITD_RHOSI, vi0new), dt), P001), sss), ITD_SALT_LOSS));
     if (*frazil > PUNY && *frz_onset < PUNY) *frz_onset = yday;
@@ -741,13 +785,14 @@ __device__ int itd_add_new_ice(const ItdTracers &T, int ncat, double dt, const d
     }
     // tr_brine .or. nbtrcr > 0 (ice_therm_itd.F90:1491)
     if (ix[TI_FBRI] >= 0)
-        return itd_add_new_ice_bgc(T, ncat, aicen_init, vicen_init, aicen, vicen, vsnon1, vi0new, hsurp, sss,
-                                   trcrn);
+        return itd_add_new_ice_bgc(T, ncat, dt, aicen_init, vicen_init, aicen, vicen, vsnon1, vi0_init, vi0new,
+                                   hsurp, sss, trcrn);
     return ITD_OK;
 }
 
 // ice_therm_itd.F90:829-985 lateral_melt (no aerosols; of the
-// biogeochemistry, lateral_melt_bgc's vertical salinity under solve_zsal)
+// biogeochemistry, the vertical tracer's snow and lateral_melt_bgc: the
+// vertical salinity under solve_zsal and the vertical tracer's ice layers)
 __device__ void itd_lateral_melt(const ItdTracers &T, double dt, int ncat, double *fpond, double *fresh,
                                  double *fsalt, double *fhocn, double rside, double *meltl, double *aicen,
                                  double *vicen, double *vsnon, const double *trcrn, int flags, double *fzsal)
@@ -779,8 +824,15 @@ __device__ void itd_lateral_melt(const ItdTracers &T, double dt, int ncat, doubl
             double dfhocn = D(M(D(M(tr[ix[TI_QSNO] + k], rside), dt), vsnon[n]), (double)ITD_NSLYR);
             *fhocn = A(*fhocn, dfhocn);
         }
+        if (T.nbio) {
+            // the snow tracers, on the melted category's area and snow
+            const double dvssl = col_min(M(0.5, vsnon[n]), M(ZB_HS_SSL, aicen[n]));
+            const double dvint = S(vsnon[n], dvssl);
+            const int sn = T.bio + T.nblyr + 1;
+            *T.flux_bio = A(*T.flux_bio, D(M(A(M(tr[sn], dvssl), M(tr[sn + 1], dvint)), rside), dt));
+        }
     }
-    // ice_zbgc.F90:259-324 lateral_melt_bgc (solve_zsal .or. z_tracers; nbltrcr = 0)
+    // ice_zbgc.F90:259-324 lateral_melt_bgc (solve_zsal .or. z_tracers; nbltrcr = nbtrcr)
     if (T.zsal) {
         const double zspace = D(1.0, (double)T.nblyr);
         for (int n = 0; n < ncat; ++n) {
@@ -788,6 +840,15 @@ __device__ void itd_lateral_melt(const ItdTracers &T, double dt, int ncat, doubl
             for (int k = 0; k < T.nblyr; ++k)
                 *fzsal = A(*fzsal, D(M(M(M(M(M(M(ITD_RHOSI, tr[ix[TI_FBRI]]), vicen_init[n]), P001), zspace),
                                          tr[ix[TI_BGCS] + k]), rside), dt));
+        }
+    }
+    if (T.nbio) {
+        const double zspace = D(1.0, (double)T.nblyr);
+        for (int n = 0; n < ncat; ++n) {
+            const double *tr = trcrn + n * nt;
+            for (int k = 0; k <= T.nblyr; ++k)
+                *T.flux_bio = A(*T.flux_bio, D(M(M(M(M(tr[ix[TI_FBRI]], vicen_init[n]), zspace), tr[T.bio + k]),
+                                                 rside), dt));
         }
     }
 }
@@ -813,10 +874,18 @@ __device__ void itd_reduce_area(double hin_max, double *aicen, double *vicen, do
     }
 }
 
-// ice_itd.F90:1327-1409 zap_snow (no aerosols, no z tracers) on category n's tracers
+// ice_itd.F90:1327-1409 zap_snow (no aerosols) on category n's tracers; the
+// vertical tracer's snow into dflux_bio on aicen, the category's area as the
+// caller passes it (zap_small_areas zeroes it first)
 __device__ void itd_zap_snow(const ItdTracers &T, double dt, double *tr, double *vsnon, double *dfresh,
-                             double *dfhocn)
+                             double *dfhocn, double aicen, double *dflux_bio)
 {
+    if (T.nbio) {
+        const double dvssl = col_min(M(0.5, *vsnon), M(ZB_HS_SSL, aicen));
+        const double dvint = S(*vsnon, dvssl);
+        const int sn = T.bio + T.nblyr + 1;
+        *dflux_bio = A(*dflux_bio, D(A(M(tr[sn], dvssl), M(tr[sn + 1], dvint)), dt));
+    }
     for (int k = 0; k < ITD_NSLYR; ++k) {
         double xtmp = D(M(D(tr[T.idx[TI_QSNO] + k], dt), *vsnon), (double)ITD_NSLYR);
         *dfhocn = A(*dfhocn, xtmp);
@@ -827,13 +896,14 @@ __device__ void itd_zap_snow(const ItdTracers &T, double dt, double *tr, double 
     *vsnon = 0.0;
 }
 
-// ice_itd.F90:1019-1323 zap_small_areas (no aerosols or biogeochemical
-// tracers; tr_brine resets the brine fraction to 1; solve_zsal's salt flux
-// dfzsal). Returns the abort code.
+// ice_itd.F90:1019-1323 zap_small_areas (no aerosols; tr_brine resets the
+// brine fraction to 1; solve_zsal's salt flux dfzsal; the vertical tracer's
+// zapped ice layers, zap_small_bgc, and snow into dflux_bio). Returns the
+// abort code.
 __device__ int itd_zap_small_areas(const ItdTracers &T, double dt, int ncat, double *aice, double *aice0,
                                    double *aicen, double *trcrn, double *vicen, double *vsnon, double *dfpond,
                                    double *dfresh, double *dfsalt, double *dfhocn, int flags, int *first_ice,
-                                   double *dfzsal)
+                                   double *dfzsal, double *dflux_bio)
 {
     const int nt = T.nt;
     const int *ix = T.idx;
@@ -853,6 +923,15 @@ __device__ int itd_zap_small_areas(const ItdTracers &T, double dt, int ncat, dou
                                       (double)T.nblyr), dt);
                     *dfzsal = A(*dfzsal, xtmp);
                 }
+            if (T.nbio) {
+                // ice_zbgc_shared.F90:339-364 zap_small_bgc on the brine's layer volumes
+                const int blevels = T.nblyr + 1;
+                const double bv = M(D(vicen[n], (double)T.nblyr), tr[ix[TI_FBRI]]);
+                for (int k = 1; k <= blevels; ++k) {
+                    const double bvol = (k == 1 || k == blevels) ? M(0.5, bv) : bv;
+                    *dflux_bio = A(*dflux_bio, D(M(tr[T.bio + k - 1], bvol), dt));
+                }
+            }
             for (int k = 0; k < COL_NILYR; ++k) {
                 double xtmp = D(M(D(tr[ix[TI_QICE] + k], dt), vicen[n]), (double)COL_NILYR);
                 *dfhocn = A(*dfhocn, xtmp);
@@ -866,7 +945,7 @@ __device__ int itd_zap_small_areas(const ItdTracers &T, double dt, int ncat, dou
             aicen[n] = 0.0;
             vicen[n] = 0.0;
             tr[ix[TI_TSFC]] = TOCNFRZ;
-            itd_zap_snow(T, dt, tr, &vsnon[n], dfresh, dfhocn);
+            itd_zap_snow(T, dt, tr, &vsnon[n], dfresh, dfhocn, aicen[n], dflux_bio);
             for (int it = 1; it < nt; ++it) tr[it] = it == ix[TI_FBRI] ? 1.0 : 0.0;   // tr_brine: fbri = 1
             first_ice[n] = 1;
         }
@@ -920,7 +999,7 @@ __device__ int itd_zap_small_areas(const ItdTracers &T, double dt, int ncat, dou
 // out-of-bounds snow layer)
 __device__ void itd_zap_snow_temperature(const ItdTracers &T, double dt, int ncat, int heat_capacity,
                                          const double *aicen, double *trcrn, double *vsnon, double *dfresh,
-                                         double *dfhocn, int *nwarn)
+                                         double *dfhocn, int *nwarn, double *dflux_bio)
 {
     const int nt = T.nt;
     const double rnslyr = (double)ITD_NSLYR;
@@ -945,7 +1024,7 @@ __device__ void itd_zap_snow_temperature(const ItdTracers &T, double dt, int nca
                 }
             }
         }
-        if (l_zap) itd_zap_snow(T, dt, tr, &vsnon[n], dfresh, dfhocn);
+        if (l_zap) itd_zap_snow(T, dt, tr, &vsnon[n], dfresh, dfhocn, aicen[n], dflux_bio);
     }
 }
 
@@ -956,21 +1035,23 @@ __device__ int itd_cleanup_itd(const ItdTracers &T, double dt, int ncat, const d
                                int flags, int *first_ice, double *fpond, double *fresh, double *fsalt,
                                double *fhocn, double *atrcrn, int *nwarn, double *fzsal)
 {
-    double dfpond = 0.0, dfresh = 0.0, dfsalt = 0.0, dfhocn = 0.0, dfzsal = 0.0;
+    double dfpond = 0.0, dfresh = 0.0, dfsalt = 0.0, dfhocn = 0.0, dfzsal = 0.0, dflux_bio = 0.0;
     itd_aggregate_area(ncat, aicen, aice, aice0);
     if (*aice > A(1.0, PUNY) || *aice < -PUNY) return ITD_AICE_BOUNDS;
     if (*aice > PUNY) itd_rebin(T, ncat, aicen, trcrn, vicen, vsnon, hin_max, atrcrn);
     int stop = itd_zap_small_areas(T, dt, ncat, aice, aice0, aicen, trcrn, vicen, vsnon, &dfpond, &dfresh,
-                                   &dfsalt, &dfhocn, flags, first_ice, &dfzsal);
+                                   &dfsalt, &dfhocn, flags, first_ice, &dfzsal, &dflux_bio);
     if (stop) return stop;
     itd_zap_snow_temperature(T, dt, ncat, flags & ITD_HEAT_CAPACITY, aicen, trcrn, vsnon, &dfresh, &dfhocn,
-                             nwarn);
+                             nwarn, &dflux_bio);
     *fpond = A(*fpond, dfpond);
     *fresh = A(*fresh, dfresh);
     *fsalt = A(*fsalt, dfsalt);
     *fhocn = A(*fhocn, dfhocn);
     // fzsal is present (MPAS passes zSalinityFlux); v8.4.2's dfzsal is 0 without solve_zsal
     if (T.zsal) *fzsal = A(*fzsal, dfzsal);
+    // flux_bio is present (MPAS passes oceanBioFluxes) for nbtrcr tracers
+    if (T.nbio) *T.flux_bio = A(*T.flux_bio, dflux_bio);
     return ITD_OK;
 }
 
@@ -987,7 +1068,8 @@ extern "C" __global__ void seaice_column_itd_thermodynamics_v842(
     const double *freezingMeltingPotential, double *frazilFormation, const double *rainfallRate,
     double *pondFreshWaterFlux, double *oceanFreshWaterFlux, double *oceanSaltFlux, double *oceanHeatFlux,
     double *frazilGrowthDiagnostic, double *freezeOnset, int *newlyFormedIce, int nblyr, const double *biologyGrid,
-    const double *verticalGrid, double *zSalinityFlux)
+    const double *verticalGrid, double *zSalinityFlux, int nbio, int bio0, const double *interfaceBiologyGrid,
+    double zbgc_init_frac, const double *oceanBioConcentrations, int nzbgc, int bio_o, double *oceanBioFluxes)
 {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= nCellsSolve) return;
@@ -1002,6 +1084,17 @@ extern "C" __global__ void seaice_column_itd_thermodynamics_v842(
     T.nblyr = nblyr;
     T.bgrid = biologyGrid;
     T.cgrid = verticalGrid;
+    // the vertical tracer (nbio = 0: dummies, never read)
+    T.nbio = nbio;
+    T.bio = bio0;
+    T.init_frac = zbgc_init_frac;
+    T.ocean_bio = 0.0;
+    T.flux_bio = oceanBioFluxes;
+    T.igrid = interfaceBiologyGrid;
+    if (nbio) {
+        T.ocean_bio = oceanBioConcentrations[(size_t)c * nzbgc + bio_o];
+        T.flux_bio = oceanBioFluxes + (size_t)c * nzbgc;
+    }
 
     double aicen[ITD_MAXCAT], vicen[ITD_MAXCAT], vsnon[ITD_MAXCAT], aicen_init[ITD_MAXCAT],
         vicen_init[ITD_MAXCAT], hin_max[ITD_MAXCAT + 1];

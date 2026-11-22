@@ -316,3 +316,7 @@ tests/test_tc_climate.py
 # Checkpoint runs complete their initial frame like a plain run (fix/hex-ckpt-surface-fields b58ba34d): a whole
 # x1.2562 run straight vs checkpointed vs resumed on one card; inputs from WOOF_HEX_CKPT_INIT / WOOF_HEX_CKPT_GRID.
 tests/test_checkpoint_first_frame_v842.py
+
+# Device-only files (a module-level cupy import) that were on no tier list; no tier-1 member.
+tests/test_pool_direct_v842.py
+tests/test_regional_lbc_tend_cache.py
