@@ -220,7 +220,7 @@ def run_gpu(case: dict, *, trig=None, mutate=None) -> dict[str, np.ndarray]:
     ice = HybridSeaIce(pools=dev, configs=c, x2i_fields=X2I_FIELDS, i2x_fields=I2X_FIELDS,
                        ice_cpl_dt=h["ice_cpl_dt"], nextsw_cday=float(h["nextsw"][0]),
                        trig=None if trig is None else cp.asarray(np.ascontiguousarray(trig, np.float64)),
-                       sphere_radius=float(c["mesh:sphere_radius"]))
+                       sphere_radius=float(c["mesh:sphere_radius"]), basis="input")
     if mutate is not None:
         mutate(ice)
     out = {"i2x/0": cp.asnumpy(ice.initial_i2x())}

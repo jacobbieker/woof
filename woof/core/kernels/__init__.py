@@ -929,6 +929,21 @@ _NO_FMAD_MODULES = frozenset({"deng", "thompson_collision", "soil_points", "gsfc
                               "wdm6_refl", "wsm3", "wsm6r", "noah", "pxlsm", "mskf", "mskf_aerosol_replay", "cumulus_feedback", "cumulus_aerosol"})
 
 
+#: Modules whose strict-replay (``GPUWM_WRF_EXACT``) build, and only that
+#: build, takes the direct no-FTZ compile.  ``load_module`` and
+#: ``load_module_int_defines`` both route through
+#: :func:`_strict_noftz_route`, so a compile-time tier of one of these
+#: modules is built the way its plain module is.
+_STRICT_NOFTZ_MODULES = frozenset({"boulac"})
+
+
+def _strict_noftz_route(name: str) -> bool:
+    if name not in _STRICT_NOFTZ_MODULES:
+        return False
+    from woof.wrf_exact import ENABLED
+    return bool(ENABLED)
+
+
 #: The solar geometry units (WRF 4.6.1 / 4.8.0 radconst + calc_coszen and the
 #: swint_opt=1 interpolation) keep subnormals but not the no-FMA request: their
 #: arithmetic is written with explicit round-to-nearest intrinsics, and they
@@ -1502,10 +1517,8 @@ def load_module(name: str):
     if name in _PORT_IEEE_DIVISION_MODULES:
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}")
 
-    if name == "boulac":
-        from woof.wrf_exact import ENABLED
-        if ENABLED:
-            return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}")
+    if _strict_noftz_route(name):
+        return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}")
 
     if name == "fogdes":
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}")
@@ -1587,7 +1600,8 @@ def load_module_int_defines(
     if backend.active() != "cuda":
         tier = ",".join(f"{key}={value}" for key, value in normalized)
         return _translated_module(name, src, key=f"{name}[{tier}]")
-    if name in _NO_FTZ_MODULES | _PORT_IEEE_DIVISION_MODULES:
+    if (name in _NO_FTZ_MODULES | _PORT_IEEE_DIVISION_MODULES
+            or _strict_noftz_route(name)):
         tier = ",".join(f"{key}={value}" for key, value in normalized)
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}[{tier}]")
     if name in _DIFFUSION_MODULES:

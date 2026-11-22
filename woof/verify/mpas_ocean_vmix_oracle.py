@@ -75,6 +75,12 @@ CASES = (
     ("vel_disabled", 20261275, 24, 8, {"config_use_const_diff": True, "config_disable_vel_vmix": True,
                                        "config_compute_active_tracer_budgets": True}),
     ("tracers_disabled", 20261276, 24, 8, {"config_use_const_visc": True, "config_disable_tr_vmix": True}),
+    # Redi's vertical diffusion: GM's k33 added to the diffusivity (v8.4.2: without config_Redi_kappa)
+    ("redi_const", 20261277, 40, 14, {"config_use_const_visc": True, "config_use_const_diff": True,
+                                      "config_use_standardGM": True, "config_Redi_kappa": 600.0}),
+    ("redi_rich_budgets", 20261278, 36, 12, {"config_use_rich_visc": True, "config_use_rich_diff": True,
+                                             "config_use_standardGM": True, "config_Redi_kappa": 250.0,
+                                             "config_compute_active_tracer_budgets": True}),
 )
 
 
@@ -134,6 +140,9 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
     for pool, field, kind, fshape in FIELDS:
         if kind in (DIM, DIMS):
             value = values[field]
+        elif field == "k33" and config["config_use_standardGM"]:
+            # GM's tapered slope squared, the slopes up to a few hundredths
+            value = uniform(0.0, 1.0e-3, _stream.shape(case, fshape))
         elif kind == SCRATCH or field == "k33" or (field == "activeTracerVertMixTendency"
                                                    and not config["config_compute_active_tracer_budgets"]):
             value = None

@@ -194,7 +194,7 @@ def test_the_abort_raises_column_abort(glibc239):
     dev, config = on_device(case), case["config"]
     dev["diagnostics"]["xtime"] = config["diagnostics:xtime"]
     dev["diagnostics"]["simulationStartTime"] = config["diagnostics:simulationStartTime"]
-    clock = ts.initialize(pools=dev, configs=config)
+    clock = ts.initialize(pools=dev, configs=config, basis="input")
     with pytest.raises(ts.ColumnAbort) as raised:
         ts.advance(pools=dev, configs=config, clock=clock, n_steps=int(config["oracle_n_steps"]))
     log = co.load_logs(FIXTURE)[ABORT]
