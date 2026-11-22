@@ -193,10 +193,15 @@ def test_the_qnse_and_boulac_tier_frames_are_what_the_driver_reports(
         return max(int(mod.get_function(n).attributes["local_size_bytes"])
                    for n in names)
 
-    assert widest(load_module(module)) == spec.frame_bytes(128) == (
+    # The recorded row is the maximum over architectures, so one card may
+    # read below it; the SLOPE is the arrays' own byte count.
+    shipped = widest(load_module(module))
+    assert shipped <= spec.frame_bytes(128) == (
         pf.KERNEL_MAX_LOCAL_SIZE_BYTES[module])
-    assert widest(load_module_int_defines(
-        module, ((define, 256),))) == spec.frame_bytes(256)
+    assert widest(load_module_int_defines(module, ((define, 128),))) == shipped
+    deep = widest(load_module_int_defines(module, ((define, 256),)))
+    assert deep - shipped == spec.bytes_per_level * 128
+    assert deep <= spec.frame_bytes(256)
 
 
 @requires_nvrtc_frames

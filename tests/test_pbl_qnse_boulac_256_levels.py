@@ -77,7 +77,10 @@ def _qnse_inputs(cp, nz, ncol=NCOL):
                    corf=sfc(1e-4, 1e-4))
     state = dict(thz0=sfc(298, 302), qz0=sfc(0.012, 0.018),
                  qsfc=sfc(0.012, 0.018), ct=sfc(0, 0))
-    tke = lev(rng.uniform(0.05, 0.6, (nz, 1, ncol)))
+    # TKE confined to the boundary layer: a uniform seed would put the
+    # diagnosed PBL top at the model top.
+    tke = lev(np.maximum(atm["z"] * 0 + 0.6 * np.exp(-atm["z"] / 1500.0)
+                         * rng.uniform(0.5, 1.0, (nz, 1, ncol)), 1e-4))
     qfx = sfc(1e-5, 2e-4)
     return columns, surface, state, tke, qfx
 
@@ -122,7 +125,8 @@ def _boulac_inputs(cp, nz, ncol=NCOL):
                    th=lev(atm["theta"]), rho=lev(rho), qv=lev(atm["qv"]),
                    qc=lev(rng.uniform(0, 3e-5, (nz, 1, ncol))))
     surface = dict(hfx=sfc(-30, 250), qfx=sfc(1e-5, 2e-4), ust=sfc(0.1, 0.7))
-    tke = lev(rng.uniform(1e-4, 0.6, (nz, 1, ncol)))
+    tke = lev(np.maximum(0.6 * np.exp(-atm["z"] / 1500.0)
+                         * rng.uniform(0.5, 1.0, (nz, 1, ncol)), 1e-4))
     return columns, surface, tke
 
 

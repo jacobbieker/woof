@@ -17014,7 +17014,7 @@
     },
     {
       "file": "tests/test_kernel_local_bounds.py",
-      "line": 381,
+      "line": 386,
       "kind": "prose",
       "anchor": "# port its unit compiles on its own --fmad=false --ftz=false route, and",
       "anchor_sha256": "daa3b91576b70a8bea89fd4f08db20bd2c7e04f7bd57d69c871609d58b7f0f83",
@@ -66206,7 +66206,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 3735,
+      "line": 3739,
       "kind": "prose",
       "anchor": "# Direct no-FTZ units compose their math and radar headers. The column",
       "anchor_sha256": "184948054ba022bbad69bebea2f81b001a2e7b7ecb87d70239779c61b7c82b7a",
@@ -66217,7 +66217,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 3753,
+      "line": 3757,
       "kind": "prose",
       "anchor": "# Strict -std=c++17 --fmad=false --ftz=false: acm2_pbl_column keeps scalars",
       "anchor_sha256": "9e2c3aa7d94671e8f147fc58dbf1a25417824d5ce144d07fe2b7ca715d74fb41",
@@ -66228,7 +66228,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 4247,
+      "line": 4251,
       "kind": "prose",
       "anchor": "# the direct NVRTC route (--ftz=false); the column arrays live in a",
       "anchor_sha256": "f2e5728c42b24c29e0cdbaee8dae62e5470b144a7383f39941bdf8b4959d8e1e",
@@ -66239,7 +66239,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 4253,
+      "line": 4257,
       "kind": "prose",
       "anchor": "# --ftz=false and strict-only --fmad=false, priced as acm2pbl_composed. Its column",
       "anchor_sha256": "8c902ee0768eea050e9eb4c49a9c618660b542f690745a745db2cbb4e0f91960",
@@ -66250,7 +66250,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 4260,
+      "line": 4264,
       "kind": "prose",
       "anchor": "# MRF's column unit uses the direct no-FTZ compiler; the separate",
       "anchor_sha256": "c58e3c51ed2580a30a90a625ada80e2683a99b24f0ab860af67502df588d0d58",

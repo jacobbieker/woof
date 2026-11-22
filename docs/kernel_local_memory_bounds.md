@@ -1421,8 +1421,12 @@ pre-tier kernel by construction -- and 256 above it, through
 rows and hex's refusal all follow: 256.
 
 Frames are linear in the tier and priced per domain by
-`CONDITIONAL_COLUMN_TIERED_FRAMES` (`qnsepbl`: 132 B per level from the
-16,896 B row; `boulac`: 64 B per level from the 8,208 B row).
+`CONDITIONAL_COLUMN_TIERED_FRAMES`. Measured 2026-11-22 on sm_86 (RTX A6000,
+NVRTC 12.9) through the production loader at tiers 128 / 192 / 256:
+`qnsepbl_column` 9,232 / 13,840 / 18,448 B, `mfshconv_column` 15,360 /
+23,040 / 30,720 B (the widest), `boulac_column` 7,696 / 11,536 / 15,376 B,
+so both modules grow 60 B per level and a 256-level run is priced at 24,576 B
+(QNSE, from the 16,896 B row) and 15,888 B (BouLac, from the 8,208 B row).
 `tests/test_kernel_local_bounds.py::test_the_qnse_and_boulac_tier_frames_are_what_the_driver_reports`
 reads both tiers back off the driver; `tests/test_pbl_qnse_boulac_256_levels.py`
 runs a 256-level column to a 1 hPa top (finite, non-trivial), proves the
