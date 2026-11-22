@@ -34,14 +34,14 @@
     "tests": {
       "cupy.ElementwiseKernel": 7,
       "cupy.RawKernel": 49,
-      "cupy.RawModule": 111,
+      "cupy.RawModule": 110,
       "cupy.ReductionKernel": 10,
       "cupy.cuda.compiler.compile_using_nvrtc": 36
     },
     "tools": {
       "cupy.ElementwiseKernel": 5,
       "cupy.RawKernel": 23,
-      "cupy.RawModule": 69,
+      "cupy.RawModule": 70,
       "cupy.ReductionKernel": 2,
       "cupy.cuda.compiler.compile_using_nvrtc": 17
     }
@@ -1685,22 +1685,6 @@
       ],
       "options_are_literal": true,
       "text": "module = cp.RawModule(code=source, options=(\"-std=c++17\",))"
-    },
-    {
-      "file": "tests/test_ftz_receipt.py",
-      "line": 311,
-      "column": 13,
-      "surface": "tests",
-      "constructor": "cp.RawModule",
-      "constructor_kind": "cupy.RawModule",
-      "enclosing": "test_probe_sensitivity_control_moves_the_bit_column",
-      "takes_caller_options": true,
-      "options_argument_present": true,
-      "options_expression": "options",
-      "options": null,
-      "options_element_expressions": null,
-      "options_are_literal": false,
-      "text": "module = cp.RawModule(code=mutated2, options=options)"
     },
     {
       "file": "tests/test_gbmpbl_cooperative.py",
@@ -5335,6 +5319,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "blob, _mapping = cc.compile_using_nvrtc("
+    },
+    {
+      "file": "tools/ftz_receipt/probe.py",
+      "line": 760,
+      "column": 13,
+      "surface": "tools",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "sensitivity_words",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "module = cp.RawModule(code=mutated2, options=options)"
     },
     {
       "file": "tools/glibc239_libm_gpu/grade_trig.py",

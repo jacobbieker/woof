@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 5950,
+  "site_count": 5949,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 5883
+    "prose": 5882
   },
   "sites": [
     {
@@ -415,7 +415,7 @@
     },
     {
       "file": "README.md",
-      "line": 963,
+      "line": 978,
       "kind": "prose",
       "anchor": "pairs was checked under both subnormal modes",
       "anchor_sha256": "2d72bca9880fb9136b484ba3ebdab81af419d5df3061964499ecb9120e7d562e",
@@ -1449,7 +1449,7 @@
     },
     {
       "file": "docs/public/CONFIGURATION.md",
-      "line": 724,
+      "line": 734,
       "kind": "prose",
       "anchor": "| `ysu_version` | no stock namelist spelling | `\"wrf_480\"` | `\"wrf_480\"`, `\"wrf_461\"` | Corrected YSU default. WRF 4.8 MMM `550b5b4` removes the old efficiency offset and caps `0.2*8*tmp1` at 0.4. `[shared]` selects the generation; namelist import uses the corrected default and preserves an explicit physics-selector comment (`! gpuwm-physics-selectors-v1: {...}`). `wrf_461` under default arithmetic reproduces 2.8.9's YSU kernel, under its restart identity. Under `GPUWM_WRF_EXACT=1` it matches WRF 4.6.1 `bl_ysu_run` word for word on the 1,188-column test set, with the same declared exceptions as `wrf_480` (YSU surface drag removed on mixed BEP urban columns; the bounded PBL-height search on four-level columns), under its own restart identity, so a strict-mode `wrf_461` checkpoint from 2.9.0 or earlier is refused rather than continued with different arithmetic. Four-level shallow columns use the declared bounded PBL-height search and zero final TKE word. A generation change is refused on restart; old headers without a selector mean `wrf_461`. The corrected path uses the shared no-FTZ loader and WOOF's own math routines |",
       "anchor_sha256": "fce15ee2f0dbd461c7726780e0bbe513e810bf65e03e7facb97c388cdb96fb51",
@@ -1889,7 +1889,7 @@
     },
     {
       "file": "docs/public/PHYSICS.md",
-      "line": 3611,
+      "line": 3622,
       "kind": "prose",
       "anchor": "Default execution uses CUDA hardware math. `GPUWM_WRF_EXACT=1` preserves subnormals and disables contraction for bitwise native replay. Real native replays also set `GPUWM_WRF_GLIBC` to the referee build's glibc version; the regenerated captures (test host A, RTX 4090) use `2.43`. The column grid runs in one launch with a bounded scratch pool. Independent CO2 profiles and ozone/table initialization run in parallel on the GPU. Cloud bounds from KF, Grell, Grell-Freitas and New SAS retain their native levels and sentinels.",
       "anchor_sha256": "1b6bc24d487dee8625fcd34b10969dc4a7b8dd6317a84707058437e7354df051",
@@ -15049,39 +15049,6 @@
       "kind": "prose",
       "anchor": "assert absent[\"without_ftz\"] and not absent[\"with_ftz\"]",
       "anchor_sha256": "a7203195021848d8a82858dbc1ec22ec9fd67b973cd7920877d936d200e77d65",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tests/test_ftz_receipt.py",
-      "line": 314,
-      "kind": "prose",
-      "anchor": "shipped = gpuwm_kernels.load_module(\"ftz_probe\")",
-      "anchor_sha256": "9400bd2246d68888e415d6d8b8ddc7c183cdcadd277e113664d518b6a21131d3",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tests/test_ftz_receipt.py",
-      "line": 332,
-      "kind": "prose",
-      "anchor": "for name, convert in ((\"ftz_probe_ptx_mul\", False),",
-      "anchor_sha256": "5a75442cd73cccbdba5b63d13f5523ea644beb235a8e4289af21149d440fc66e",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tests/test_ftz_receipt.py",
-      "line": 333,
-      "kind": "prose",
-      "anchor": "(\"ftz_probe_ptx_cvt\", True)):",
-      "anchor_sha256": "d6041d1fe88ea0cc425390f9004c800eb88a05ebca040d797b534edd20afd095",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -41027,7 +40994,29 @@
     },
     {
       "file": "tools/ftz_receipt/probe.py",
-      "line": 807,
+      "line": 742,
+      "kind": "prose",
+      "anchor": "SENSITIVITY_KERNELS = ((\"ftz_probe_ptx_mul\", False), (\"ftz_probe_ptx_cvt\", True))",
+      "anchor_sha256": "912a1ababef667692447f5c9f70a9fdd47a70b5793adb7d5ad585f39aea1991a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/ftz_receipt/probe.py",
+      "line": 762,
+      "kind": "prose",
+      "anchor": "shipped = gpuwm_kernels.load_module(\"ftz_probe\")",
+      "anchor_sha256": "9400bd2246d68888e415d6d8b8ddc7c183cdcadd277e113664d518b6a21131d3",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/ftz_receipt/probe.py",
+      "line": 859,
       "kind": "prose",
       "anchor": "\"generator\": \"tools/ftz_receipt/probe.py\",",
       "anchor_sha256": "2d92883bd7176f417e4966e8ba5abef91d1259ba75a2fabf06f46f7361feb061",
@@ -41038,7 +41027,7 @@
     },
     {
       "file": "tools/ftz_receipt/probe.py",
-      "line": 809,
+      "line": 861,
       "kind": "prose",
       "anchor": "\"cupy_ftz_append_site\": ftz_append_site(),",
       "anchor_sha256": "ec2ecbf6c0a1c20ca3565cac26eeef61c1eaebbf36caddd80f3be9b93a0fbe92",
@@ -41049,7 +41038,7 @@
     },
     {
       "file": "tools/ftz_receipt/probe.py",
-      "line": 896,
+      "line": 948,
       "kind": "prose",
       "anchor": "\"ftz_modifiers\": ptx_ftz_modifiers(text)}",
       "anchor_sha256": "19d303d471e15425e6577a5f218b1a4c0ba78e81a89a5dceb097ec0c2de38abd",
@@ -41060,7 +41049,7 @@
     },
     {
       "file": "tools/ftz_receipt/probe.py",
-      "line": 915,
+      "line": 976,
       "kind": "prose",
       "anchor": "else root / \"tools\" / \"ftz_receipt\" / \"receipt\")",
       "anchor_sha256": "7f197d1f3ba932cc6eac5bad7ba8b84dc91a5c9def2b14ff1d467d389f91843d",
