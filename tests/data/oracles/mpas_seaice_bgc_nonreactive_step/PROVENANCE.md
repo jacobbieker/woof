@@ -15,13 +15,16 @@ glibc 2.44), 2026-11-22.
   `totalChlorophyll` an array that is not compared (the step runs with the
   opt-in correction `bgc_inactive_diagnostics`, as in
   `../mpas_seaice_bgc_brine_carry`).
-- Driver: `run_column.F90`, stage `column_step` (the column package's part
-  of `seaice_timestep`, several steps): the pre-dynamics end with
-  `column_separate_snow_ice_tracers`, and each dynamics subcycle's
+- Driver: `run_column.F90`, stages `column_step` (the column package's part
+  of `seaice_timestep`, several steps) and `seaice_step` (`seaice_timestep`
+  with the velocity solver on a culled hexagonal torus): the pre-dynamics end
+  with `column_separate_snow_ice_tracers`, and each dynamics subcycle's
   `seaice_column_dynamics_time_integration` starts with
-  `column_combine_snow_ice_tracers` before the ridging. No velocity solver
-  and no advection.
-- Cases: `BGC_NONREACTIVE_STEP_CASES`. `_nonreactive_carry_state` adds the
+  `column_combine_snow_ice_tracers` before the ridging. No advection (the
+  column oracle's coupled cases run without it).
+- Cases: `BGC_NONREACTIVE_STEP_CASES`: three column steps and
+  `seaice_nonreactive_bl99_dedd_rothrock`, the coupled step (12x6 torus,
+  3 owned columns). `_nonreactive_carry_state` adds the
   tracer profiles, mobile fractions, ocean concentrations,
   `oceanBioFluxes` and the brine grids to the step state.
   - `step_nonreactive_bl99_dedd_subcycles_gregorian`: two dynamics
