@@ -238,13 +238,16 @@ def test_all_on_the_hex_door_is_regional_only():
     assert forecast_door._resolve_undriven_species_boundary(ns) == "wrf-flow-dependent"
     # drivers that do not carry the rule: under the umbrella it stays off there
     assert qc.hex_undriven_species_boundary(ns, carried=False) is None
-    for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
-        lts = argparse.Namespace(quirk_corrections="all", lbc_dir="x", **{flag: True})
+    for flag, value in (("local_timestep", True), ("fullstep_local_timestep", True), ("partial_nest", True),
+                        ("samehost_devices", "0,1")):
+        lts = argparse.Namespace(quirk_corrections="all", lbc_dir="x", **{flag: value})
         assert forecast_door._resolve_undriven_species_boundary(lts) is None
         free = argparse.Namespace(quirk_corrections="all", lbc_dir="x", undriven_species_boundary="free",
-                                  **{flag: True})
+                                  **{flag: value})
         assert forecast_door._resolve_undriven_species_boundary(free) is None
-        explicit = argparse.Namespace(lbc_dir="x", undriven_species_boundary="wrf-flow-dependent", **{flag: True})
+        if flag == "samehost_devices":
+            continue  # an explicit flag there is refused later, by the partitioned executor's admission
+        explicit = argparse.Namespace(lbc_dir="x", undriven_species_boundary="wrf-flow-dependent", **{flag: value})
         with pytest.raises(Exception, match="--undriven-species-boundary"):
             forecast_door._resolve_undriven_species_boundary(explicit)
 
@@ -253,6 +256,21 @@ def test_all_turns_on_every_seaice_column_correction():
     from woof.hex.mpas_seaice import column_v842
     assert column_v842.corrections({qc.UMBRELLA: "all"}) == set(column_v842.CORRECTIONS)
     assert column_v842.named_corrections({qc.UMBRELLA: "all"}) == frozenset()
+
+
+def test_the_seaice_kernel_flag_follows_the_ice_velocity_handed_over():
+    """Under the umbrella without the velocity solver's v, the correction stays off: the kernel's
+    fix_ice_velocity bit (8) must then be clear, or it reads the 1-word placeholder per cell."""
+    from types import SimpleNamespace
+    from woof.hex.mpas_seaice import column_therm_v842 as therm
+    configs = {qc.UMBRELLA: "all", "config_calc_surface_stresses": False,
+               "config_use_high_frequency_coupling": False, "config_heat_conductivity_type": "bubbly",
+               "config_use_ice_age": False, "config_use_first_year_ice": False,
+               "config_use_column_biogeochemistry": False}
+    state = SimpleNamespace(ktherm=2, calc_tsfc=True)
+    assert therm._flags(configs, state) >> 8 & 1 == 1
+    assert therm._flags(configs, state, False) >> 8 & 1 == 0
+    assert therm._flags(configs, state, True) >> 8 & 1 == 1
 
 
 def test_the_ocean_forcing_configs_resolve_the_umbrella():

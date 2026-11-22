@@ -3333,9 +3333,11 @@ def _resolve_undriven_species_boundary(arguments) -> str | None:
     from woof import quirk_corrections
     try:
         # --quirk-corrections all asks for wrf-flow-dependent on a regional run whose drivers carry the rule; the
-        # local-timestep and partial-nest drivers do not, so there it stays off (an explicit flag is refused below)
+        # local-timestep, partial-nest and partitioned same-host drivers do not, so there it stays off (an
+        # explicit flag is refused below)
         carried = not any(getattr(arguments, flag, False)
-                          for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"))
+                          for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest")) \
+            and getattr(arguments, "samehost_devices", None) is None
         mode = quirk_corrections.hex_undriven_species_boundary(arguments, carried=carried)
     except ValueError as error:
         raise _refuse(str(error)) from error
