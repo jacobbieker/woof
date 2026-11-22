@@ -4,6 +4,10 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
 `make_fixture.py --piece forward_land_ice` on pb (Linux 6.12 x86_64,
 glibc 2.44), 2026-11-20.
 
+`inputs.sha256` was re-recorded on 2026-11-21 (same build, same make_fixture command): the forward oracle's
+cases gained `config_calendar_type` (gregorian_noleap, the Registry default) in the calendar change, which
+changed every case's input-stream digest. `oracle-r4.npz` and `oracle-r8.npz` re-ran byte-identical.
+
 - MPAS source: github.com/MPAS-Dev/MPAS-Model tag v8.4.2, commit
   `f34984b2c89353cf31c235b08d3b4acd96b37bb3`, byte-unmodified. build.sh checks
   `tools/mpas_ocean_oracle/SOURCES.sha256`.

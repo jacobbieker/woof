@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
+from woof.hex.mpas_ice import analysis_v842
 from woof.verify import mali_hexmesh
 from woof.verify import mali_time_integration_fe_oracle as fe_oracle
 
@@ -53,12 +54,66 @@ _FORWARD_FIELDS = (
     ("scratch", "vertexIndices", "i", (_V,)),
 )
 FIELDS = fe_oracle.FIELDS + _FORWARD_FIELDS
+#: what the 'simple' velocity solver adds (its cases only, so the other cases'
+#: streams are unchanged): the edge points, the prescribed velocity, and the
+#: higher-order package's Dirichlet mask, which 'simple' allocates but never
+#: reads (carried, and compared, word for word)
+SIMPLE_FIELDS = (
+    ("mesh", "xEdge", "r", (_E,)), ("mesh", "yEdge", "r", (_E,)),
+    ("velocity", "normalVelocityInitial", "r", (_E, _I)),
+    ("velocity", "dirichletVelocityMask", "i", (_C, _I)),
+)
+
+
+#: what li_compute_statistics adds (its cases only): its edge scratch mask
+STATS_FIELDS = (("scratch", "iceEdgeMask", "i", (_E,)),)
+
+
+#: what the analysis members add (their cases only): both members' pools, the
+#: regions and their dimensions
+AM_FIELDS = (("mesh", "nRegions", "d", ()), ("mesh", "nRegionGroups", "d", ()),
+             *(("globalStatsAM", name, "r", ()) for name in analysis_v842.GLOBAL_FIELDS),
+             *(("regionalStatsAM", name, "r", ("nRegions",)) for name in analysis_v842.REGIONAL_FIELDS),
+             ("regions", "regionCellMasks", "i", (_C, "nRegions")))
+AM_POOLS = ("globalStatsAM", "regionalStatsAM", "regions")
+
+
+def am_on(config: dict) -> bool:
+    """Whether an analysis member is enabled (and so its pools are carried)."""
+    return bool(analysis_v842.enabled(config))
+
+
+def streams_of(config: dict) -> dict[str, str] | None:
+    """The streams a case declares ('stream:NAME' configs: their reference times)."""
+    return {k[7:]: v for k, v in config.items() if k.startswith("stream:")} or None
+
+
+def stats_on(config: dict) -> bool:
+    return int(config.get("config_stats_interval", 0)) > 0 or bool(config.get("config_write_stats_on_startup", False))
+
+
+def fields_for(config: dict) -> tuple:
+    """The field table of a run with ``config``."""
+    return (FIELDS + (SIMPLE_FIELDS if config.get("config_velocity_solver") == "simple" else ())
+            + (STATS_FIELDS if stats_on(config) else ()) + (AM_FIELDS if am_on(config) else ()))
+
+
+def fields(case: dict) -> tuple:
+    return fields_for(case["config"])
+
+
+def outputs(case: dict) -> tuple:
+    """Every word compared for ``case``: :data:`OUTPUTS`, plus 'simple''s."""
+    return tuple((pool, name) for pool, name, kind, _ in fields(case)
+                 if pool not in ("scratch", "regions") and kind != "d")
+
 #: the mesh's own words: the run must leave them as they are (compared too)
 MESH_INPUTS = ("nEdgesOnCell", "cellsOnCell", "cellsOnVertex", "cellsOnEdge", "edgesOnCell", "verticesOnEdge",
                "nEdgesOnEdge", "edgesOnEdge", "indexToCellID", "indexToEdgeID", "dvEdge", "dcEdge", "areaCell",
                "xCell", "yCell", "zCell", "xVertex", "yVertex", "zVertex", "latCell", "lonCell",
-               "kiteAreasOnVertex", "weightsOnEdge", "edgeNormalVectors", "coeffs_reconstruct", "verticesOnCell")
-#: every word compared: every field but the dimensions and the scratch
+               "kiteAreasOnVertex", "weightsOnEdge", "edgeNormalVectors", "coeffs_reconstruct", "verticesOnCell",
+               "xEdge", "yEdge")
+#: every word compared (the cases without 'simple'): every field but the dimensions and the scratch
 OUTPUTS = tuple((pool, name) for pool, name, kind, _ in FIELDS if pool != "scratch" and kind != "d")
 #: refused at RKIND 8 (glibc's binary64 atan): not in the r8 fixture
 R8_REFUSED = (("velocity", "eTheta"),)
@@ -80,6 +135,14 @@ BASE_CONFIG = dict(
 )
 
 _DOME = {"_physics": "dome"}
+
+
+def _am(member: str, interval: str, on_startup: bool) -> dict:
+    """An enabled analysis member's configs."""
+    return {f"config_AM_{member}_enable": True, f"config_AM_{member}_compute_interval": interval,
+            f"config_AM_{member}_stream_name": f"{member}Output",
+            f"config_AM_{member}_compute_on_startup": on_startup, f"config_AM_{member}_write_on_startup": on_startup}
+
 #: (name, nVertLevels, overrides of BASE_CONFIG); '_' keys shape the fields
 CASES = (
     ("dome", 5, dict(_DOME)),
@@ -107,6 +170,53 @@ CASES = (
                          "config_velocity_solver": "none", "config_thickness_advection": "none",
                          "config_dt": "06:00:00", "config_run_duration": "0000-00-00_12:00:00",
                          "config_SGH_englacial_porosity": 1.0, "config_SGH_conduc_coeff": 1.0e-4}),
+    # the 'simple' velocity solver: a prescribed field, with the thermal solver; radial on the
+    # marine bed with the circular-shelf test's spike ('floating') and rim ('topographic_threshold')
+    ("simple_uniform", 5, dict(_DOME, config_velocity_solver="simple", config_simple_velocity_type="uniform",
+                               config_stats_cell_ID=1, config_thermal_solver="temperature")),
+    ("simple_radial_shelf", 5, dict(_DOME, _bed="marine", config_velocity_solver="simple",
+                                    config_simple_velocity_type="radial", config_stats_cell_ID=1,
+                                    config_calving="floating", config_dt="10_00:00:00",
+                                    config_run_duration="40_00:00:00")),
+    ("simple_rim", 5, dict(_DOME, _bed="marine", config_velocity_solver="simple",
+                           config_simple_velocity_type="uniform", config_stats_cell_ID=1,
+                           config_calving="topographic_threshold", config_dt="10_00:00:00",
+                           config_run_duration="40_00:00:00")),
+    # li_compute_statistics: on startup and every step or every other, the diagnostic column at
+    # the dome's summit ('_stats_cell'), on no cell (ID 0), with the thermal solver, the
+    # 'simple' solver's signed velocities and the zero velocity of 'none'
+    ("stats_dome", 5, dict(_DOME, _stats_cell="centre", config_stats_interval=2,
+                           config_write_stats_on_startup=True)),
+    ("stats_eismint2", 10, {"_physics": "eismint2", "config_thermal_solver": "temperature",
+                            "config_flowParamA_calculation": "PB1982",
+                            "config_surface_air_temperature_source": "file", "config_dt": "0000-00-10_00:00:00",
+                            "config_run_duration": "30_00:00:00", "config_stats_interval": 1,
+                            "config_stats_cell_ID": 0}),
+    ("stats_simple_shelf", 5, dict(_DOME, _bed="marine", _stats_cell="centre", config_velocity_solver="simple",
+                                   config_simple_velocity_type="radial", config_calving="floating",
+                                   config_dt="10_00:00:00", config_run_duration="30_00:00:00",
+                                   config_stats_interval=1, config_write_stats_on_startup=True)),
+    ("stats_benchmark", 10, {"_physics": "benchmark", "_stats_cell": "centre", "config_thermal_solver": "enthalpy",
+                             "config_velocity_solver": "none", "config_thickness_advection": "none",
+                             "config_surface_air_temperature_value": 243.15,
+                             "config_dt": "0001-00-00_00:00:00", "config_run_duration": "0002-00-00_00:00:00",
+                             "config_stats_interval": 2, "config_write_stats_on_startup": True}),
+    # the analysis members: globalStats every 70 days on a stream whose reference time is 15 days
+    # in (computes at days 30 and 90, and on startup), regionalStats every step from startup off,
+    # over an inner disc, a half plane and no cell; on the marine bed with its grounding line,
+    # globalStats at 'output_interval' (on startup only) and regionalStats every 20 days, a region
+    # weighted 2 (its streams at the run's start, the door's default)
+    ("am_dome", 5, dict(_DOME, _region3="empty", **_am("globalStats", "0000-00-70_00:00:00", True),
+                        **_am("regionalStats", "dt", False),
+                        **{"stream:globalStatsOutput": "0001-01-16_00:00:00",
+                           "stream:regionalStatsOutput": "0001-01-01_00:00:00"})),
+    ("am_marine", 5, dict(_DOME, _bed="marine", _region3="double", config_calving="floating",
+                          config_dt="10_00:00:00", config_run_duration="40_00:00:00",
+                          config_sia_tangent_slope_calculation="from_normal_slope",
+                          **_am("globalStats", "output_interval", True),
+                          **_am("regionalStats", "0000-00-20_00:00:00", True),
+                          **{"stream:globalStatsOutput": "0001-01-01_00:00:00",
+                             "stream:regionalStatsOutput": "0001-01-01_00:00:00"})),
     ("enthalpy_benchmark", 10, {"_physics": "benchmark", "config_thermal_solver": "enthalpy",
                                 "config_velocity_solver": "none", "config_thickness_advection": "none",
                                 "config_surface_air_temperature_value": 243.15,
@@ -120,6 +230,11 @@ MESH_N, MESH_DC = 20, 4000.0
 @lru_cache(maxsize=None)
 def mesh_of(stretch: float) -> dict:
     return mali_hexmesh.torus(MESH_N, MESH_DC, stretch)
+
+
+@lru_cache(maxsize=None)
+def edge_points_of(stretch: float) -> tuple[np.ndarray, np.ndarray]:
+    return mali_hexmesh.edge_points(MESH_N, MESH_DC, stretch)
 
 
 def field_shape(case: dict, shape: tuple) -> tuple[int, ...]:
@@ -255,6 +370,26 @@ def make_case(name: str, n_levels: int, overrides: dict, stretch: float, suffix:
             scratch[field] = ((rs.random_sample(s) * 11).astype(np.int32) - 5 if kind == "i"
                               else r(-1.0e3 + 2.0e3 * rs.random_sample(s)))
     pools["scratch"] = scratch
+    if overrides.get("_stats_cell") == "centre":
+        config["config_stats_cell_ID"] = int(np.argmin(d)) + 1
+    if config["config_velocity_solver"] == "simple":
+        # drawn last, so the other cases' words are as they were
+        x_edge, y_edge = edge_points_of(stretch)
+        pools["mesh"].update(xEdge=r(x_edge), yEdge=r(y_edge))
+        pools["velocity"]["normalVelocityInitial"] = prior((ne, nl + 1))
+        pools["velocity"]["dirichletVelocityMask"] = (rs.random_sample((nc, nl + 1)) < 0.5).astype(np.int32)
+    if stats_on(config):
+        scratch["iceEdgeMask"] = (rs.random_sample(ne) * 11).astype(np.int32) - 5
+    if am_on(config):
+        dims.update(nRegions=3, nRegionGroups=1)
+        regions = np.zeros((nc, 3), np.int32)
+        regions[:, 0] = d < 15000.0
+        regions[:, 1] = np.asarray(mesh["xCell"]) > x0
+        if overrides["_region3"] == "double":
+            regions[:, 2] = 2 * (d < 10000.0)
+        pools["regions"] = {"regionCellMasks": regions}
+        pools["globalStatsAM"] = {k: prior(()) for k in analysis_v842.GLOBAL_FIELDS}
+        pools["regionalStatsAM"] = {k: prior(3) for k in analysis_v842.REGIONAL_FIELDS}
     return case
 
 
@@ -283,7 +418,8 @@ def input_bytes(case: dict) -> bytes:
     """run_forward.F90's input stream for ``case``."""
     real = _real(case)
     config = case["config"]
-    parts = [np.array([len(config), len(FIELDS)], "<i4").tobytes()]
+    table = fields(case)
+    parts = [np.array([len(config), len(table)], "<i4").tobytes()]
     for name in sorted(config):
         value = config[name]
         if isinstance(value, bool):
@@ -294,7 +430,7 @@ def input_bytes(case: dict) -> bytes:
             parts += [_text(name, 64), np.array([1], "<i4").tobytes(), np.array(value, real).tobytes()]
         else:
             parts += [_text(name, 64), np.array([4], "<i4").tobytes(), _text(value, STRKIND)]
-    for pool, name, kind, shape in FIELDS:
+    for pool, name, kind, shape in table:
         s = field_shape(case, shape)
         code = {"r": 1, "i": 2, "d": 3, "c": 4}[kind]
         dims = list(reversed(s)) + [1] * (3 - len(s))
@@ -318,13 +454,15 @@ def input_digest(case: dict) -> str:
 def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     """run_forward.F90's output stream -> ``pool/name`` arrays (:data:`OUTPUTS`
     without the RKIND 8 refusals; text fields as 0-d unicode arrays), the
-    error words and the clock's final time (``clock/now``)."""
+    error words and the clock's final time (``clock/now``); with the
+    statistics on, li_compute_statistics's reduction words (``stats/real``,
+    ``stats/int``) and its reports (``stats/log``, :func:`stats_log`)."""
     head = np.frombuffer(raw, "<i4", 4, 0)
     out = {"errClock": head[0:1].copy(), "errInit": head[1:2].copy(), "errRun": head[2:3].copy(),
            "logErrors": head[3:4].copy(),
            "clock/now": np.array(raw[16:16 + STRKIND].decode("ascii").rstrip())}
-    off, keep = 16 + STRKIND, set(OUTPUTS) - set(refused(case))
-    for pool, name, kind, shape in FIELDS:
+    off, keep = 16 + STRKIND, set(outputs(case)) - set(refused(case))
+    for pool, name, kind, shape in fields(case):
         if kind == "c":
             if (pool, name) in keep:
                 out[f"{pool}/{name}"] = np.array(raw[off:off + STRKIND].decode("ascii").rstrip())
@@ -336,9 +474,49 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
         if (pool, name) in keep:
             out[f"{pool}/{name}"] = np.frombuffer(raw, dtype, n, off).reshape(s).astype(dtype.newbyteorder("="))
         off += dtype.itemsize * n
+    n_real, n_int, n_lines = (int(n) for n in np.frombuffer(raw, "<i4", 3, off))
+    off += 12
+    real_words = np.frombuffer(raw, _real(case), n_real, off).astype(_real(case).newbyteorder("="))
+    off += _real(case).itemsize * int(n_real)
+    int_words = np.frombuffer(raw, "<i4", n_int, off).astype(np.int32)
+    off += 4 * int(n_int)
+    lines = [raw[off + i * STRKIND:off + (i + 1) * STRKIND].decode("ascii") for i in range(int(n_lines))]
+    off += STRKIND * int(n_lines)
+    n_computes, n_words = (int(n) for n in np.frombuffer(raw, "<i4", 2, off))
+    off += 8
+    members = np.frombuffer(raw, "<i4", n_computes, off).astype(np.int32)
+    off += 4 * n_computes
+    times = [raw[off + i * STRKIND:off + (i + 1) * STRKIND].decode("ascii").rstrip() for i in range(n_computes)]
+    off += STRKIND * n_computes
+    am_words = np.frombuffer(raw, _real(case), n_words, off).astype(_real(case).newbyteorder("="))
+    off += _real(case).itemsize * n_words
     if off != len(raw):
         raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
+    if stats_on(case["config"]):
+        out["stats/real"], out["stats/int"] = real_words, int_words
+        out["stats/log"] = np.array(stats_log(lines))
+    elif n_real or n_int:
+        raise ValueError("oracle output: statistics words from a run without statistics")
+    if am_on(case["config"]):
+        out["am/member"], out["am/xtime"], out["am/words"] = members, np.array(times), am_words
+    elif n_computes:
+        raise ValueError("oracle output: analysis-member computes from a run without them")
+    # The driver writes back the arrays it put, but the stub's
+    # mpas_pool_shift_time_levels trades them between NAME and NAME@2 (once in
+    # the initial solve, once a step): after an odd number of shifts the array
+    # put as level 1 holds level 2. Label the words by time level, as MPAS's
+    # pool (and the port) does.
+    if "mesh/timestepNumber" in out and (1 + int(out["mesh/timestepNumber"][()])) % 2 == 1:
+        for key in [k for k in out if k.endswith("@2")]:
+            out[key], out[key[:-2]] = out[key[:-2]], out[key]
     return out
+
+
+def stats_log(lines) -> str:
+    """Every li_compute_statistics report in a log, in order, one blank
+    line between."""
+    from woof.hex.mpas_ice import statistics_v842
+    return "\n\n".join(statistics_v842.reports(lines))
 
 
 def load_fixture(precision: str = "r4") -> dict[str, dict[str, np.ndarray]]:
@@ -363,7 +541,7 @@ def device_pools(case: dict) -> dict:
     """The case's pools as the port takes them: device arrays, host text and integers."""
     import cupy as cp
     pools = {}
-    for pool in POOLS:
+    for pool in POOLS + (AM_POOLS if am_on(case["config"]) else ()):
         pools[pool] = {}
         for name, value in case["pools"][pool].items():
             if isinstance(value, str):
@@ -379,7 +557,7 @@ def outputs_of(case: dict, pools: dict, clock) -> dict[str, np.ndarray]:
     """The port's pools as the oracle's ``pool/name`` outputs."""
     import cupy as cp
     out = {"clock/now": np.array(clock.time_stamp)}
-    for pool, name in OUTPUTS:
+    for pool, name in outputs(case):
         if (pool, name) in refused(case):
             continue
         value = pools[pool][name]
@@ -398,8 +576,23 @@ def run_gpu(case: dict, config: dict | None = None) -> dict[str, np.ndarray]:
     from woof.hex.mpas_ice import forward_v842
 
     pools = device_pools(case)
-    clock = forward_v842.run(pools=pools, config=dict(case["config"], **(config or {})))
-    return outputs_of(case, pools, clock)
+    stats: list = []
+    computes: list = []
+    effective = dict(case["config"], **(config or {}))
+    run_config = {k: v for k, v in effective.items() if not k.startswith("stream:")}
+    clock = forward_v842.run(pools=pools, config=run_config, on_statistics=stats.append, on_analysis=computes.append,
+                             streams=streams_of(effective))
+    out = outputs_of(case, pools, clock)
+    real = _real(case).newbyteorder("=")
+    if am_on(effective):
+        out["am/member"] = np.array([1 + analysis_v842.MEMBERS.index(c.member) for c in computes], np.int32)
+        out["am/xtime"] = np.array([c.xtime for c in computes], str)
+        out["am/words"] = np.concatenate([np.empty(0, real)] + [c.words for c in computes]).astype(real)
+    if stats_on(effective):
+        out["stats/real"] = np.concatenate([np.empty(0, real)] + [s.real_words for s in stats]).astype(real)
+        out["stats/int"] = np.concatenate([np.empty(0, np.int32)] + [s.int_words for s in stats]).astype(np.int32)
+        out["stats/log"] = np.array(stats_log([line for s in stats for line in s.lines]))
+    return out
 
 
 def measure(reference: dict | None = None, precision: str = "r4") -> dict[str, dict[str, int]]:

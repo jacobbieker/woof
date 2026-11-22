@@ -1,9 +1,11 @@
 """Big-step tendency TL/AD (P3a item 5, woof.grad.wrfplus.bigstep): WRF
 horizontal_pressure_gradient, pg_buoy_w, rhs_ph, coriolis and curvature
-on woof's strict slow_pgf, slow_buoyancy (dry), slow_geopotential and
+on woof's strict slow_pgf, slow_buoyancy, slow_geopotential and
 coriolis_curvature, with periodic, open and specified axes, the lid
 extrapolation, map factors, hybrid levels and (rhs_ph) every
-h_sca_adv_order.
+h_sca_adv_order; and the moist pieces (DA item 4): WRF calc_cq (qv, or
+qv, qc and qr), the pressure gradient times cqu/cqv and pg_buoy_w with
+moist_mode 1.
 
 Breakage this prevents:
 - an adjoint that is not the transpose of its TL (dot-product test);
@@ -78,6 +80,15 @@ CONFIGS = {
     # onset than w_crit_cfl (zadvect_implicit), one interior level
     "wd": [dict(), dict(w_damp_on=0.8), dict(w_damp_on=1.2, w_crit_cfl=0.9),
            dict(nz=2, ny=3, nx=2), dict(nz=5, ny=12, nx=4)],
+    # moisture (DA item 4): the pressure gradient with cqu/cqv, the
+    # buoyancy with moist_mode 1 and calc_cq for qv alone (n_mass 1) and
+    # qv, qc, qr (n_mass 3), with single-cell lines (periodic self-pairs)
+    "pgfm": [dict(), dict(boundary_x=1, boundary_y=1, top_lid=1),
+             dict(nz=3, ny=1, nx=2, top_lid=1), dict(ny=2, nx=1, boundary_y=1)],
+    "buoym": [dict(), dict(has_msf=1), dict(nz=2, ny=1, nx=1, has_msf=1),
+              dict(nz=2, ny=3, nx=1)],
+    "cq": [dict(), dict(n_mass=3), dict(nz=1, ny=1, nx=1, n_mass=3), dict(nz=2, ny=2, nx=1),
+           dict(nz=3, ny=1, nx=2, n_mass=3)],
 }
 
 
@@ -106,7 +117,13 @@ def _run(backend, body, tmp_path, extra_env=None):
         " 'cc': (B.CC_STATE, B.CC_ACTIVE, C.cc_geometry, C.cc_trajectory,\n"
         "        C.cc_perturbation, B.cc_tl, B.cc_ad, B.CCGeometry),\n"
         " 'wd': (B.WD_STATE, B.WD_ACTIVE, C.wd_geometry, C.wd_trajectory,\n"
-        "        C.wd_perturbation, B.wd_tl, B.wd_ad, B.WDampGeometry)}\n"
+        "        C.wd_perturbation, B.wd_tl, B.wd_ad, B.WDampGeometry),\n"
+        " 'pgfm': (B.PGF_STATE, B.PGFM_ACTIVE, C.pgfm_geometry, C.pgf_trajectory,\n"
+        "          C.pgf_perturbation, B.pgf_tl, B.pgf_ad, B.PGFGeometry),\n"
+        " 'buoym': (B.BUOY_STATE, B.BUOYM_ACTIVE, C.buoym_geometry, C.buoy_trajectory,\n"
+        "           C.buoy_perturbation, B.buoy_tl, B.buoy_ad, B.BuoyGeometry),\n"
+        " 'cq': (B.CQ_STATE, B.CQ_SPECIES, C.cq_geometry, C.cq_trajectory,\n"
+        "        C.cq_perturbation, B.cq_tl, B.cq_ad, B.CQGeometry)}\n"
         "def dev(d):\n"
         "    return {k: cp.asarray(v) for k, v in d.items()}\n"
         "def run_tl(op, g, tr, pe, nl):\n"
@@ -166,7 +183,8 @@ for dtn in {dtypes!r}:
 def test_adjoint_accumulates(backend, tmp_path):
     """The AD adds into ``adj`` and leaves the tendencies' adjoints (which
     pass through, the tendencies being accumulated) unchanged, except
-    rhs_ph's top level, which the primal overwrites: its adjoint is 0."""
+    rhs_ph's top level and calc_cq's cqu, cqv and cqw, which the primal
+    overwrites: their adjoints are 0."""
     dtn = "float32" if backend == "mlx" else "float64"
     out = _run(backend, f'''
 dt = np.dtype({dtn!r})
@@ -183,6 +201,8 @@ for op, cfgs in {CONFIGS!r}.items():
             want = q[n].copy()
             if op == "geo":
                 want[-1] = 0
+            if op == "cq":
+                want[...] = 0
             out[f"{{op}}/{{i}}/{{n}}"] = float(cp.abs(sa[n] - want).max())
         for n in X:
             want = cp.asnumpy(s[n]).astype(np.float64) + cp.asnumpy(zero[n])
@@ -311,9 +331,10 @@ for z in [np.load(f) for f in {[str(f) for f in FIXTURES]!r}]:
 
 @pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
 def test_float_base_state_is_the_strict_primal(backend, tmp_path):
-    """The float build's base state gives woof's strict slow_pgf,
-    slow_buoyancy, slow_geopotential (open and, for order 5, fused) and
-    coriolis_curvature and w_damp words (GPUWM_WRF_EXACT, dry, 3-D base), so the adjoint is
+    """The float build's base state gives woof's strict slow_pgf (dry and
+    with cqu/cqv), slow_buoyancy (dry and moist_mode 1), calc_cq (n_mass 1
+    and 3), slow_geopotential (open and, for order 5, fused) and
+    coriolis_curvature and w_damp words (GPUWM_WRF_EXACT, 3-D base), so the adjoint is
     bound to the model woof runs: a primal edit fails here until the TL/AD
     is re-derived.  Host and CUDA; Metal is not checked here."""
     out = _run(backend, f'''
@@ -336,6 +357,48 @@ for i, over in enumerate({CONFIGS["pgf"]!r}):
         i32(0), f32(1 / dx), f32(1 / dy), f32(0.5 / dx), f32(0.5 / dy), i32(g.boundary_x),
         i32(g.boundary_y), i32(1), i32(nz), i32(ny), i32(nx)))
     out[f"pgf/{{i}}"] = diff(st["ru_t"], ru) + diff(st["rv_t"], rv)
+for i, over in enumerate({CONFIGS["pgfm"]!r}):
+    g = C.pgfm_geometry(rdx=float(f32(1 / dx)), rdy=float(f32(1 / dy)), **over)
+    tr = dev(C.pgf_trajectory(g, 43 + i, f32, hybrid=bool(i % 2)))
+    st, _ = run_tl("pgfm", g, tr, {{n: cp.zeros_like(tr[n]) for n in B.PGFM_ACTIVE}}, True)
+    ru, rv = tr["ru_t"].copy(), tr["rv_t"].copy()
+    nz, ny, nx = g.nz, g.ny, g.nx
+    n = nz * (ny + 1) * (nx + 1)
+    get_kernel("dycore", "slow_pgf")(((n + 255) // 256,), (256,), (
+        ru, rv, tr["p"], tr["pb"], tr["al"], tr["alt"], tr["php"], tr["phb"], tr["mup"],
+        tr["mub"], tr["c1h"], tr["c2h"], tr["rdnw"], tr["fnm"], tr["fnp"], f32(g.cf1),
+        f32(g.cf2), f32(g.cf3), i32(g.top_lid), f32(g.cfn), f32(g.cfn1), tr["cqu"], tr["cqv"],
+        i32(1), f32(1 / dx), f32(1 / dy), f32(0.5 / dx), f32(0.5 / dy), i32(g.boundary_x),
+        i32(g.boundary_y), i32(1), i32(nz), i32(ny), i32(nx)))
+    # cq must change the tendency, or the check is empty
+    g0 = C.pgf_geometry(rdx=g.rdx, rdy=g.rdy, **over)
+    s0, _ = run_tl("pgf", g0, tr, {{n: cp.zeros_like(tr[n]) for n in B.PGF_ACTIVE}}, True)
+    out[f"pgfm/{{i}}"] = (diff(st["ru_t"], ru) + diff(st["rv_t"], rv)
+                         + int(diff(s0["ru_t"], ru) + diff(s0["rv_t"], rv) == 0))
+for i, over in enumerate({CONFIGS["buoym"]!r}):
+    g = C.buoym_geometry(**over)
+    tr = dev(C.buoy_trajectory(g, 63 + i, f32, hybrid=bool(i % 2)))
+    st, _ = run_tl("buoym", g, tr, {{n: cp.zeros_like(tr[n]) for n in B.BUOYM_ACTIVE}}, True)
+    rw = tr["rw_t"].copy()
+    nz, ny, nx = g.nz, g.ny, g.nx
+    q = tr["p"]
+    get_kernel("dycore", "slow_buoyancy")((((nz * ny * nx) + 255) // 256,), (256,), (
+        rw, q, q, tr["mup"], tr["mub"], tr["qv"], tr["qc"], tr["qr"], q, q, q, q, tr["rdn"],
+        tr["rdnw"], tr["c1f"], tr["c2f"], tr["msft"], i32(1), i32(g.has_msf), i32(1), i32(nz),
+        i32(ny), i32(nx)))
+    out[f"buoym/{{i}}"] = diff(st["rw_t"], rw)
+for i, over in enumerate({CONFIGS["cq"]!r}):
+    g = C.cq_geometry(**over)
+    tr = dev(C.cq_trajectory(g, 65 + i, f32))
+    st, _ = run_tl("cq", g, tr, {{n: cp.zeros_like(tr[n]) for n in B.CQ_SPECIES}}, True)
+    r = {{n: tr[n].copy() for n in B.CQ_STATE}}
+    nz, ny, nx = g.nz, g.ny, g.nx
+    n = max(nz * ny * (nx + 1), nz * (ny + 1) * nx, (nz + 1) * ny * nx)
+    qv = tr["qv"]
+    get_kernel("acoustic", "calc_cq")(((n + 255) // 256,), (256,), (
+        qv, tr["qc"], tr["qr"], qv, qv, qv, qv, r["cqu"], r["cqv"], r["cqw"], i32(g.n_mass),
+        i32(nz), i32(ny), i32(nx)))
+    out[f"cq/{{i}}"] = sum(diff(st[n], r[n]) for n in B.CQ_STATE)
 for i, over in enumerate({CONFIGS["buoy"]!r}):
     g = C.buoy_geometry(**over)
     tr = dev(C.buoy_trajectory(g, 61 + i, f32, hybrid=bool(i % 2)))
@@ -411,10 +474,14 @@ def test_geometry_rejects_unported_options():
     """A pressure gradient under 3 levels (the bottom extrapolation reads
     levels 0-2), rhs_ph under 2 levels, on axes too short for its stencil
     or with an unknown order, coriolis/curvature with another earth radius,
-    and empty axes are refused, not run."""
+    the moist buoyancy under 2 levels or with the ice species (moist 2),
+    calc_cq with the ice species (n_mass 6) and empty axes are refused, not run."""
     from woof.grad.wrfplus import cases as C
     for make, over in ((C.pgf_geometry, dict(nz=2)), (C.pgf_geometry, dict(nx=0)),
-                       (C.buoy_geometry, dict(ny=0)), (C.geo_geometry, dict(nz=1)),
+                       (C.buoy_geometry, dict(ny=0)), (C.buoym_geometry, dict(nz=1)),
+                       (C.buoy_geometry, dict(moist=2)), (C.pgf_geometry, dict(moist_cq=2)),
+                       (C.cq_geometry, dict(n_mass=6)), (C.cq_geometry, dict(nx=0)),
+                       (C.geo_geometry, dict(nz=1)),
                        (C.geo_geometry, dict(nx=6)), (C.geo_geometry, dict(ny=4, order=4)),
                        (C.geo_geometry, dict(order=7)), (C.cc_geometry, dict(nz=0)),
                        (C.cc_geometry, dict(rerad=1.0 / 6371.0e3)),

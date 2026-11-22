@@ -199,6 +199,26 @@ def torus(n: int, dc: float, stretch: float = 0.0) -> dict:
     return mesh
 
 
+def edge_points(n: int, dc: float, stretch: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+    """:func:`torus`'s ``xEdge`` and ``yEdge``: the plane point of each edge's
+    axial midpoint (between ``cellsOnEdge(1)`` at ``(q, r)`` and its neighbour
+    one step away), stored inside the rhombus as the cell and vertex points
+    are, so an edge on the seam may sit next to ``cellsOnEdge(2)`` rather
+    than ``cellsOnEdge(1)``."""
+    span = dc * n
+    x_edge, y_edge = np.zeros(3 * n * n), np.zeros(3 * n * n)
+    for r in range(n):
+        for q in range(n):
+            c = r * n + q
+            for k in range(3):
+                dq, dr = _STEPS[k]
+                a, b = q + 0.5 * dq, r + 0.5 * dr
+                a, b = a - n * math.floor(a / n), b - n * math.floor(b / n)
+                fa, fb = _stretch_map(a / n, stretch), _stretch_map(b / n, stretch)
+                x_edge[3 * c + k], y_edge[3 * c + k] = span * (fa + 0.5 * fb), -span * (0.5 * _R3) * fb
+    return x_edge, y_edge
+
+
 def _midpoint(a, b) -> tuple[float, float]:
     return 0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])
 

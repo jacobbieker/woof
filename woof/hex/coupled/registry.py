@@ -36,10 +36,38 @@ _COMPONENTS: dict[str, tuple[str, str, str]] = {
 
 #: component -> the schemes a ``ported_subset`` component can run in a coupled step
 _SUBSETS: dict[str, tuple[str, ...]] = {
-    # MALI v8.4.2: the forward mode with these velocity solvers ('simple' is
-    # next; Albany's FO/L1L2/Stokes are refused by name)
-    "landice": ("sia", "none"),
+    # MALI v8.4.2: the forward mode with these velocity solvers (Albany's
+    # FO/L1L2/Stokes are refused by name)
+    "landice": ("sia", "simple", "none"),
 }
+
+
+#: opt-in coupled configurations that are not a model's own, each named plainly:
+#: name -> (what it is, the module that runs it, the components it carries)
+_HYBRIDS: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    "e3sm-v3.2.0-coupler+mpas-v8.4.2": (
+        "E3SM v3.2.0 coupler with MPAS v8.4.2 components, not an E3SM configuration",
+        "woof.hex.coupled.hybrid_ocean",
+        ("ocean", "seaice"),
+    ),
+}
+#: name -> component -> the module that runs that component under the hybrid
+_HYBRID_MODULES: dict[str, dict[str, str]] = {
+    "e3sm-v3.2.0-coupler+mpas-v8.4.2": {"ocean": "woof.hex.coupled.hybrid_ocean",
+                                        "seaice": "woof.hex.coupled.hybrid_seaice"},
+}
+
+
+def hybrids() -> dict[str, tuple[str, str, tuple[str, ...]]]:
+    """The opt-in hybrid configurations (none is on the default path). E3SM
+    v3.2.0's own MPAS-Ocean and MPAS-Seaice are not ported
+    (docs/mpas-coupled-roadmap.md)."""
+    return dict(_HYBRIDS)
+
+
+def hybrid_modules(name: str) -> dict[str, str]:
+    """Per component, the module that runs it under hybrid ``name``."""
+    return dict(_HYBRID_MODULES[name])
 
 
 @dataclass(frozen=True)
