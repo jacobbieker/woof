@@ -5165,7 +5165,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.cu",
-    "sha256": "ff7724604a24e2c11a86bd0efa037772f367c616753e38fb49496fcd6527cb30"
+    "sha256": "035ee3896b5d6ef65db3f20efa2cb467b88c41a31dab57f4fde7d269743009c5"
    },
    {
     "file": "woof/hex/mpas_seaice/column_dedd_v842.cu",
@@ -6259,7 +6259,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
-    "sha256": "9d34a63cfaf518e58fc6e6e21e4d6d8d231705d8517f8f77b9a7b1dfa9a517f6"
+    "sha256": "5ed62d1233608195b14bd9de4d29a64bd488586d72f31c0df0c29aeadc9f2283"
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.py",
@@ -6267,7 +6267,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
-    "sha256": "c373aa387b2221ec04883eb8eba58d1de262fc591dc61c8017b9494c4bbf62b0"
+    "sha256": "d48066d65cf72620bc843688d65ed6f20ee55f5ec8388dd3ea27eaf22c8e35c6"
    },
    {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.py",
@@ -6275,15 +6275,15 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_therm_v842.py",
-    "sha256": "3a18262ff33e858f84c8f6c34dea79a914d9dab8665da21cc322a1c4f3349282"
+    "sha256": "fc43fc106f094aa9e2e48619ba58aaab64172ca95efab6aaf30cf8691255bf95"
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.py",
-    "sha256": "b938063322d6133fe4d0c98772871de346ee3f4c7e36f0d85303e7250eb594ea"
+    "sha256": "bc32f7349ee11beb53b621deb81819c1f4f082d9ebdecfcc370331ec40b32b5b"
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",
-    "sha256": "558e6c58a42c6d7c5f426ae353d171befd36c06ef5af000a2754857d417eb583"
+    "sha256": "f0dc2eb0fbbd60c6901bb0c5b7f707079780b7ed7318e245c2e3d85e30a9f467"
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
@@ -31383,53 +31383,6 @@
    },
    "source_sha256": "3d338be1f544eab513d0a75e2f6759c32e7666c0d1790713b6e83f3cfffd1773"
   },
-  "spp:mynn_surface[capacity=40]": {
-   "assessment": "static_diagnostic_only",
-   "coverage": "compiled",
-   "dataflow_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "errors": {},
-   "native_dataflow_differences": {
-    "sha256": "df129a738b441097dba4ff4d83bb4cdb29ec98f942a58cf80f914d22daaab612",
-    "sites": {
-     "100": 549
-    }
-   },
-   "native_differences": {
-    "sha256": "c15c901fd1717c955a097e98a40bd12a46a86dade723cf575834d5f99be6870a",
-    "sites": {
-     "100": 632
-    }
-   },
-   "native_errors": {},
-   "options": {
-    "100": [
-     "-std=c++17",
-     "-ftz=true",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_100"
-    ],
-    "120": [
-     "-std=c++17",
-     "-ftz=true",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ]
-   },
-   "source_sha256": "b2745d3f2bcf8eee60ac158316f2c9fd01386d6e90f07382302662dc74e9f6ab"
-  },
   "spp:mynn_surface[capacity=40,MYNN_SL_PSIH_ZOLZT=1]": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
@@ -31476,6 +31429,53 @@
     ]
    },
    "source_sha256": "8f3ebf378093a4773083454163370bcdada40a8fbfd6971c58cfdddac537a6ac"
+  },
+  "spp:mynn_surface[capacity=40]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "df129a738b441097dba4ff4d83bb4cdb29ec98f942a58cf80f914d22daaab612",
+    "sites": {
+     "100": 549
+    }
+   },
+   "native_differences": {
+    "sha256": "c15c901fd1717c955a097e98a40bd12a46a86dade723cf575834d5f99be6870a",
+    "sites": {
+     "100": 632
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "b2745d3f2bcf8eee60ac158316f2c9fd01386d6e90f07382302662dc74e9f6ab"
   }
  }
 }

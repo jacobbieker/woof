@@ -229,7 +229,7 @@ def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None,
     if configs.get("config_use_column_package", False):
         from . import column_v842 as cv
         _column_precision(pools)
-        cv.init_column_itd(pools, cv.init_parameters(pools, configs, biogeochemistry=True))
+        cv.init_column_itd(pools, cv.init_parameters(pools, configs, biogeochemistry=True, z_tracers=True))
     advection = configs.get("config_use_advection", False)
     if remap_geometry is None:
         remap_geometry = "compute" if advection else "input"
@@ -273,7 +273,7 @@ def _column_state(pools: dict, configs: dict):
     ``colpkg_init_itd`` run on a copy of the thickness limits (the pools'
     keep what the run has made of them, as a running model's do)."""
     from . import column_v842 as cv
-    state = cv.init_parameters(pools, configs, biogeochemistry=True)
+    state = cv.init_parameters(pools, configs, biogeochemistry=True, z_tracers=True)
     limits = pools["initial"]["categoryThicknessLimits"]
     cv.init_column_itd({"initial": {"categoryThicknessLimits": limits.copy()}}, state)
     return state

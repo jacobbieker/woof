@@ -148,6 +148,12 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
     QuirkCorrection(
         "zsal_solve", "mpas_seaice", False, True, "config_use_vertical_zsalinity",
         "the vertical salinity is solved, as config_use_vertical_zsalinity asks"),
+    QuirkCorrection(
+        "bgc_snow_new_category", "mpas_seaice", False, True, "vertical tracers without the vertical thermodynamics",
+        "a category without an initial area had no snow (no 0/0 NaN in oceanBioFluxes)"),
+    QuirkCorrection(
+        "subcycle_snow_ice_tracers", "mpas_seaice", False, True, "vertical tracers with dynamics subcycles",
+        "the vertical tracers are separated after each subcycle, so the next combine keeps the ridging"),
     # MPAS-Seaice v8.4.2 velocity solver set-up (woof.hex.mpas_seaice.timestep_v842)
     QuirkCorrection(
         "planar_metric_terms", "mpas_seaice_velocity", False, True, "variational basis on a planar mesh",

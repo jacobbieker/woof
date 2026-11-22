@@ -737,14 +737,18 @@ __device__ int zsalinity(int n, double dt, const double *cgrid0, const double *b
 // trc[NB1 + 1]. The conservation and negative-aerosol warnings are not kept.
 __device__ void update_snow_bgc(double dt, double melts, double snoice, double fsnow, double *trc,
                                 double aice_old, double vsno_old, double vsnon, double aicen,
-                                double flux_bio_atm, double *zbgc_snow, double *zbgc_atm, double *flux_bio)
+                                double flux_bio_atm, double *zbgc_snow, double *zbgc_atm, double *flux_bio,
+                                int new_category)
 {
     double a1 = 0.0, a2 = 0.0;
     *zbgc_snow = 0.0;
     *zbgc_atm = 0.0;
-    // aice_old = 0 (ice new to the category) is unguarded upstream; the step never
-    // reaches it (aicen > puny there implies aicen_init > puny)
-    double hs_old = D(vsno_old, aice_old);
+    // aice_old = 0 (ice new to the category) is unguarded upstream: with the vertical
+    // thermodynamics the step never reaches it (aicen > puny there implies aicen_init >
+    // puny), but without them aicen_init is never refreshed, so a category the last
+    // step's ITD opened gives 0/0 here and a NaN flux; new_category (the opt-in
+    // correction bgc_snow_new_category) takes such a category to have had no snow
+    double hs_old = new_category && aice_old <= PUNY ? 0.0 : D(vsno_old, aice_old);
     double hslyr_old = D(hs_old, 1.0);
     double dzssl = col_min(D(hslyr_old, 2.0), ZB_HS_SSL);
     double dzint = S(hs_old, dzssl);
@@ -1242,7 +1246,7 @@ __device__ void merge_bgc_fluxes(double dt, double aicen, double vicen, double v
 
 // column_biogeochemistry: one thread per owned cell. flags: bit 0 tr_brine,
 // bit 1 solve_zsal, bit 2 z_tracers (with the brine height; the nonreactive
-// tracer alone). fbri is brineFraction and zsal_out verticalSalinity, ztr_conc
+// tracer alone), bit 3 the correction bgc_snow_new_category. fbri is brineFraction and zsal_out verticalSalinity, ztr_conc
 // verticalNonreactiveConc (nblyr + 3 per category) and ztr_frac mobileFraction
 // (nzbgc per category) (or dummies without them).
 extern "C" __global__ void seaice_column_biogeochemistry_v842(
@@ -1273,6 +1277,7 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
     const int iCell = blockIdx.x * blockDim.x + threadIdx.x;
     if (iCell >= nCellsSolve) return;
     const int tr_brine = flags & 1, solve_zsal = (flags >> 1) & 1, z_tracers = (flags >> 2) & 1;
+    const int snow_new_category = (flags >> 3) & 1;
     const zsal_params zp = {dts_b, l_skS, grid_oS, l_sk};
     // the uncoupled build's deposition (#else of #ifdef coupled)
     atm_bc[iCell * 2 + 0] = 1.e-12;
@@ -1369,7 +1374,7 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
                     double zsn, zan, flux_sno = 0.0, flux_bion = 0.0;
                     update_snow_bgc(dt, melts[c], snoice[c], fsnow[iCell], trc, aicen_init[c], vsno_init[c],
                                     vsnon[c], aicen[c], flux_bio_atm[(size_t)iCell * nzbgc], &zsn, &zan,
-                                    &flux_sno);
+                                    &flux_sno, snow_new_category);
                     l_stop = z_biogeochemistry(dt, first_ice[n], aicen[c], vicen[c], hin_old[c], ocean_bio,
                                                &flux_bion, bp, iphin_c, trc, ztr_frac + (size_t)c * nzbgc, idi,
                                                fswthrul + (size_t)c * (COL_NILYR + 1), zfswin + (size_t)c * NB1,
