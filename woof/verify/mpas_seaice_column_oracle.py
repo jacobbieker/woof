@@ -116,6 +116,7 @@ BGC_ZSAL_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_carry"
 BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_solve_carry"
 #: the vertical tracers' nonreactive tracer in the init and column_biogeochemistry
 BGC_NONREACTIVE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive"
+BGC_NONREACTIVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive_carry"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -598,6 +599,25 @@ BGC_NONREACTIVE_CASES = (
         **_BGC_NR, **_BL99, "config_mobility_type_nitrate": 0.2, "config_dt": 7200.0}),
     ("bgc_nonreactive_abort_init", 20262617, _BGC_STAGE, _BGC_NR),
     ("bgc_nonreactive_abort_negative", 20262618, _BGC_STAGE, _BGC_NR),
+)
+#: the nonreactive tracer through the ITD thermodynamics and the ridging: name, seed, stage,
+#: overrides
+BGC_NONREACTIVE_CARRY_CASES = (
+    ("itd_nonreactive_mushy_level_ponds", 20262801, _ITD, _BGC_NR),
+    ("itd_nonreactive_bl99_update_ocean", 20262802, _ITD, {**_BGC_NR, **_BL99, "config_update_ocean_fluxes": True}),
+    ("itd_nonreactive_bl99_delta_function_four_layers", 20262803, _ITD, {
+        **_BGC_NR, **_BL99, **_DELTA_NEW, "config_nIceLayers": 4, "config_nCategories": 4,
+        "config_use_level_meltponds": False, "config_use_level_ice": False}),
+    ("itd_nonreactive_single_category", 20262804, _ITD, {
+        **_BGC_NR, "config_nCategories": 1, "config_category_bounds_type": "single category",
+        "config_itd_conversion_type": "delta function"}),
+    ("itd_nonreactive_mobile_three_layers", 20262805, _ITD, {
+        **_BGC_NR, "config_nIceLayers": 3, "config_mobility_type_nitrate": 0.7,
+        "config_fraction_biotracer_in_frazil": 0.6}),
+    ("itd_nonreactive_abort_regrid", 20262806, _ITD, _BGC_NR),
+    ("ridge_nonreactive_mushy_level_ponds", 20262811, _RDG, _BGC_NR),
+    ("ridge_nonreactive_bl99_thorndike_hibler_subcycles", 20262812, _RDG, {
+        **_BGC_NR, **_BL99, **_THORNDIKE, **_HIBLER, "config_dynamics_subcycle_number": 2}),
 )
 
 
@@ -1405,6 +1425,31 @@ def _nonreactive_state(rs, case: dict) -> None:
         bgc["oceanBioConcentrations"][3] = -50.0
 
 
+def _nonreactive_carry_state(rs, case: dict) -> None:
+    """What the ITD thermodynamics and the ridging read of the nonreactive
+    tracer: its ice and snow layers (positive), mobile fractions, the ocean
+    concentration and flux, and ``colpkg_init_hbrine``'s grids.
+    ``abort_regrid`` in the name: a slightly negative brine fraction in cell
+    2's first category, under :func:`_itd_state`'s spread frazil, so the
+    tracer's ``regrid_stationary`` stops on a negative old brine height.
+    Separate numpy ufuncs only."""
+    pools, dims, name = case["pools"], case["dims"], case["name"]
+    n1, ncat, nil, nbl, nz = (dims["nCells"] + 1, dims["nCategories"], dims["nIceLayers"], dims["nBioLayers"],
+                              dims["nZBGCTracers"])
+    u = _uniform(rs)
+    t, bgc = pools["tracers"], pools["biogeochemistry"]
+    conc = u(0.5, 20.0, (n1, ncat, nbl + 3))
+    conc[:, :, nbl + 1:] = u(0.0, 5.0, (n1, ncat, 2))
+    t["verticalNonreactiveConc"] = conc
+    t["mobileFraction"] = u(0.0, 1.0, (n1, ncat, nz))
+    bgc["oceanBioConcentrations"] = u(0.5, 15.0, (n1, nz))
+    bgc["oceanBioFluxes"] = u(-1.0e-4, 1.0e-4, (n1, nz))
+    for key, value in cv.hbrine_grids(nbl, nil).items():
+        bgc[key] = value
+    if "abort_regrid" in name:
+        t["brineFraction"][2, 0, 0] = -1.0e-3
+
+
 def _zsal_dtemp_band(case: dict) -> None:
     """Cell 5's ice 0.05 degC below each layer's melting point, in daylight:
     inside BL99's absorbed-shortwave band, which ``temperature_changes``'
@@ -1617,6 +1662,8 @@ def make_case(name, seed, stage, overrides, torus=None) -> dict:
             _nonreactive_state(rs, case)
     if stage in (_ITD, _RDG, _STEP, _SEAICE_STEP) and cv.solves_zsal(config):
         _zsal_solve_carry_state(rs, case)
+    if stage in (_ITD, _RDG) and cv.vertical_tracers(config):
+        _nonreactive_carry_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
     case["fields"] = [r[:4] for r in rows]
@@ -1770,7 +1817,7 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     stage = case["stage"]
     # the stages that carry the brine height (each refuses the rest itself)
     state = cv.init_parameters(dev, config, biogeochemistry=stage not in ("aggregate", "update_state", _OML),
-                               z_tracers=stage in ("init", _BGC_STAGE))
+                               z_tracers=stage in ("init", _BGC_STAGE, _ITD, _RDG))
     if stage == "init":
         cv.initialize_coupler_fields(dev, config, state)
         cv.init_variables(dev, config, state)

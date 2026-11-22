@@ -412,10 +412,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `lateral_melt_bgc` and `zap_small_areas`' salt) in every one of those
     stages, word for word on CUDA and Metal with an oracle built from
     `zsal_solve.patch`. The vertical tracers (`config_use_vertical_tracers`)
-    with the nonreactive tracer (`config_use_nonreactive`) run in the init
-    and `column_biogeochemistry`: `update_snow_bgc`'s scavenging,
+    with the nonreactive tracer (`config_use_nonreactive`) run in the init,
+    `column_biogeochemistry` (`update_snow_bgc`'s scavenging,
     `z_biogeochemistry`'s mobile and stationary phases and
-    `merge_bgc_fluxes`, word for word with v8.4.2 on CUDA and Metal. The
+    `merge_bgc_fluxes`), the ITD thermodynamics and the ridging
+    (`add_new_ice_bgc`, `lateral_melt_bgc` and `zap_small_areas`' tracer
+    into `oceanBioFluxes`), word for word with v8.4.2 on CUDA and Metal. The
     other stages still refuse them. The other biogeochemistry flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
