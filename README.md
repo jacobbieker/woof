@@ -252,7 +252,7 @@ beside the new `WOOF_*` spelling.
 ## This fork
 
 Everything above describes Recast WOOF, and is kept as upstream wrote it.
-This section is the fork's own. The fork carries upstream WOOF 1.1.6 and adds
+This section is the fork's own. The fork carries upstream WOOF 1.1.7 and adds
 the work below on top of it. It does not change upstream's defaults: each new
 option is off until selected, and a configuration that selects none of them
 runs as upstream's does. The section is grouped by area, and where
@@ -266,6 +266,17 @@ storm merge), coupled ocean waves and storm surge, a GPU mixed-layer ocean
 and sea ice, coupled hydrology over a NextGen hydrofabric, HRRR-Smoke and
 aerosol transport, and its own wiring of `use_theta_m`, FARMS, MAD-WRF and
 Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
+
+Notes on the 1.1.7 sync:
+
+- Upstream 1.1.7 removed `woof local-da`. The fork keeps it, with its
+  tests, and it runs as before.
+- The fork takes upstream 1.1.7's correct mode (`physics.mode`
+  `correct`/`exact`) and its default-on corrections as upstream ships them.
+  The fork's own quirk corrections (`woof_quirk_corrections`) are still
+  off by default.
+- The hex MPAS-route qsat pole guard is now correction RP9, not RP8. This
+  is a user-visible ID change with no alias.
 
 ### What it adds
 
@@ -770,11 +781,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     hour 0. UGWP non-orographic drag does not help. Evidence:
     [declared-divergences.md](components/hex/docs/declared-divergences.md)
     section 1.
-  - On the MPAS suite route the 50 km lid needs correction RP8. MPAS
+  - On the MPAS suite route the 50 km lid needs correction RP9. MPAS
     v8.4.2's MYNN `qsat_blend` has a pole where p reaches the saturation
-    vapour pressure, which happens above about 35 km. RP8 adds the
+    vapour pressure, which happens above about 35 km. RP9 adds the
     NOAA-GSL MYNN-EDMF guards. It is on in correct mode (the route's
-    default), and `--physics-correct-skip RP8` turns it off.
+    default), and `--physics-correct-skip RP9` turns it off. This
+    correction was RP8 before the 1.1.7 sync; upstream 1.1.7 uses RP8 for
+    the BouLac sign fix, so the fork's ID changed to RP9 with no alias.
   - The MPAS suite route also runs the declaration's upper damping as
     MPAS v8.4.2's `&damping` options (`config_mpas_cam_coef`,
     `config_rayleigh_damp_u` and their level counts and timescale). The

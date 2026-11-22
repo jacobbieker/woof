@@ -11320,7 +11320,6 @@ def build(registry: dict) -> dict:
     # every maturity renamed, so the consumer rows see the final
     # option set.
     _cam5_components(registry)
-    _shallow_cumulus_constraints(registry)
     # After every microphysics option is registered, because it walks them.
     # It used to run some 2,800 lines earlier, and _madwrf_metadata (mp=96)
     # and _misc_udm_component (mp=27) rewrite their options whole after
@@ -11328,6 +11327,9 @@ def build(registry: dict) -> dict:
     # called MAD-WRF and UDM on RTE+RRTMGP launchable and validate_run_config
     # refused them (tests/test_physics_combination_matrix.py, 3.0.1).
     _rte_rrtmgp_cloud_optics_constraints(registry)
+    # The fork's shallow-cumulus pass appends, so it runs after the
+    # cloud-optics pass, which sets a scheme's refused_when whole.
+    _shallow_cumulus_constraints(registry)
     _consumer_rows(registry)
     # After the consumer rows exist, because it reads one of them, and
     # BEFORE the reachability pass below, which prices a way out through
