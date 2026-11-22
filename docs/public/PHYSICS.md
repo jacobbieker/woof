@@ -2678,6 +2678,17 @@ So rain amounts improve and the rain area shrinks. The tables are in
 [declared-divergences.md](../../components/hex/docs/declared-divergences.md),
 section 2, under "Opt-in: `gf_deep_rain_evaporation_booking`".
 
+**Opt-in: `ysu_surface_heat_exner` (default off).** WRF 4.7.1's YSU
+(`bl_ysu.F90`) adds the surface sensible heat flux to potential
+temperature as if it were a temperature flux (`sflux` :613, `hgamt`
+:687/:891, the heat solve's lowest row :1045) and converts the theta
+tendency back with pi (:1103). The surface heat therefore enters the
+column as `HFX*pi(1)`: 4.5% short at 850 hPa, 14% at 600 hPa. With the
+option on, YSU's unchanged kernel reads the theta flux `HFX/pi(1)`, so the
+surface heat enters as `HFX` (`tests/test_ysu_surface_heat_exner.py`, by
+the column heat budget). It is per domain, refused off `bl_pbl_physics =
+1` and with BEP/BEM, and not yet scored against observations.
+
 ## Passive tracers (`tracer_opt`)
 
 The non-Chem EM package `tracer_opt=2` carries WRF's eight dimensionless

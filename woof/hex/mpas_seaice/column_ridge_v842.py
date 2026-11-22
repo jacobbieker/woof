@@ -158,6 +158,7 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
     tracer_fields = [cv._tracer_field(pools, name)[0] for name, _, _ in to.layout]
     written = [area, volume, snow, newly, *cell_fields, *category_fields, *tracer_fields]
     zsal_args = citd._zsal_args(pools, configs, d, written, grids=False)
+    ztr_args = citd._ztr_args(pools, configs, state, written, itd=False)
     before = [a[:n_solve].copy() for a in written]
 
     trcrn = cp.zeros((max(n_solve, 1), ncat, nt), np.float64)
@@ -179,7 +180,7 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
         cp.asarray(to.parent_index), cp.asarray(np.ascontiguousarray(to.first_ancestor_mask)),
         cp.asarray(to.ancestor_number), cp.asarray(np.ascontiguousarray(to.ancestor_indices)), limits, trcrn,
         atrcrn, area, volume, snow, cell_fields[0], cell_fields[1], need(rg, "ridgeConvergence", c1),
-        need(rg, "ridgeShear", c1), *cell_fields[2:], *category_fields, newly, *zsal_args,
+        need(rg, "ridgeShear", c1), *cell_fields[2:], *category_fields, newly, *zsal_args, *ztr_args,
     )
     if n_solve:
         _function("seaice_column_ridging_v842", nil)(_grid(n_solve), (_BLOCK,), args)

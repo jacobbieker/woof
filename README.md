@@ -333,8 +333,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     column's loads coalesce: the 33,000-cell step takes 42 instead of 58 ms
     on an A6000, the same words. Metal keeps a thread per column,
     which is faster there (switch: `WOOF_OCEAN_COLUMN_LANES=1` or `32`);
-  - MPAS-Seaice: variational EVP internal stress, the velocity solve and
-    elastic subcycles, the pre-subcycle routines, ocean stress,
+  - MPAS-Seaice: variational EVP internal stress with its basis set-up
+    (Wachspress and PWL under every integration rule, computed on the host
+    in the init; the RKIND 8 metric terms need `metric_libm` because
+    glibc's binary64 asin and tan are not correctly rounded), the
+    weak-form stress divergence (`config_stress_divergence_scheme =
+    'weak'`, its normal vectors computed on the host in the init; on a
+    sphere it needs `metric_libm` too), the velocity
+    solve and elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
     grid, hexagons and quadrilaterals, variable resolution) with its
     optional conservation and monotonicity checks (one rank), a forward
@@ -414,8 +420,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     in the ITD and the ridging the new ice's salt loss, `adjust_tracer_profile`,
     `lateral_melt_bgc` and `zap_small_areas`' salt) in every one of those
     stages, word for word on CUDA and Metal with an oracle built from
-    `zsal_solve.patch`. The other biogeochemistry flags are refused by
-    name until their phases land;
+    `zsal_solve.patch`. The vertical tracers (`config_use_vertical_tracers`)
+    with the nonreactive tracer (`config_use_nonreactive`) run in the init,
+    `column_biogeochemistry` (`update_snow_bgc`'s scavenging,
+    `z_biogeochemistry`'s mobile and stationary phases and
+    `merge_bgc_fluxes`), the ITD thermodynamics and the ridging
+    (`add_new_ice_bgc`, `lateral_melt_bgc` and `zap_small_areas`' tracer
+    into `oceanBioFluxes`), word for word with v8.4.2 on CUDA and Metal. The
+    other stages still refuse them. The other biogeochemistry flags are
+    refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -595,6 +608,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
+- **Corrections of WRF/MPAS quirks, each opt-in and off by default.**
+  The default stays word for word with the WRF 4.7.1 / MPAS v8.4.2
+  oracle; each key changes only the arithmetic it names.
+  - `ysu_surface_heat_exner` (YSU, `bl_pbl_physics = 1`, WRF route). WRF's YSU adds the surface sensible heat flux to
+    potential temperature as if it were a temperature flux and converts
+    back with pi, so the column gets `HFX*pi` instead of `HFX`. That loses
+    4.5% of the surface heating at 850 hPa and 14% at 600 hPa. The option
+    uses `HFX/pi(1)` (refused with BEP/BEM, where YSU takes the urban
+    heat sources instead). Checked by the column heat budget, not yet scored
+    against observations; the hex MPAS-suite YSU does not carry it yet.
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
@@ -1061,7 +1084,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   ([docs/lakes.md](docs/lakes.md#recommended-settings)): the Great Lakes cool
   2-3 times as fast as GLSEA (WRF's CLM lake), lake-effect cores are
   over-intense (50 mm FSS .81 to .70 at 9 km on Buffalo, Nov 2022),
-  `lake_depth` needs `woof fetch-geog` (unless `use_lakedepth = 0`), and hex
+  `woof go` downloads `lake_depth` itself (2.4 MB, 1.9 GB unpacked; unless `use_lakedepth = 0`), and hex
   R2 lakes start about 1.4 K
   cold.
   On the hex MPAS-suite route, `--physics config_clm_lake_backend=hex-cuda`
@@ -1102,7 +1125,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `spacewx_ionosphere_opt = 1` writes the
   same ionosphere into every WRF-route history frame (`IONO_TEC`,
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
-  forecast; hex and streamed domains refuse it for now. `woof spacewx aurora`
+  forecast, and `spacewx_ionosphere_opt = 2` applies the storm-time
+  correction there too (plus its ratio `IONO_STORM`), from GFZ's ap with the
+  latest observed ap persisted past the start; hex and streamed domains
+  refuse both for now. `woof spacewx aurora`
   places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that
@@ -1116,12 +1142,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   0.48-0.61 and the model reads about 2.5 times higher. `spacewx_aurora_opt =
   2` adds OVATION's electron energy flux, mean energy and ion energy flux
   (`AURORA_EFLUX`, `AURORA_EMEAN`, `AURORA_IFLUX`) to those history frames,
-  from the solar wind at the start. `woof spacewx particles` turns the GOES
+  from the solar wind at the start, and `spacewx_aurora_opt = 3` also the
+  Knipp et al. 2004 northern Joule power (`JOULE_POWER`, GW; one number held
+  from OMNI2's PC(N) and Dst at the start, not a local heating rate).
+  `woof spacewx particles` turns the GOES
   integral proton flux (OMNI2 or SWPC real time) into polar-cap ion-pair rates
   and NOx/HOx production during solar proton events (Bethe stopping in air,
   35 eV per ion pair). Against the CMIP7 rates, the ratio is 0.4-1.0 at 0.1-100
   hPa. `spacewx_epp_opt = 1` adds that NO, OH and HO2 to RADM2 chemistry in
-  the polar caps, from the GOES flux at the start. With `--electron-energy-flux`
+  the polar caps, from the GOES flux at the start; on hex, the same keys in
+  the chemistry config's `wrf_chem` block do it on both routes, word for word
+  the WRF path's. With `--electron-energy-flux`
   and `--electron-mean-energy` (OVATION's eflux and mean energy) the command
   adds the auroral electrons' ion-pair rates and NOx (Fang et al. 2010). They
   deposit above about 85 km, so they are a diagnostic, not a forecast source
@@ -1316,6 +1347,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   as WRFDA's `gen_be_ep2` does (to 2.8e-13 K in `t`; the rest word for
   word). Its analysis matches WRFDA's `wrfvar_output` to O7's tolerances:
   max |difference| at most 4.7e-5 of the RMS.
+  `woof.da.var.pairing` (Python API) pairs it with an LETKF cycle: the hybrid's
+  ensemble is the LETKF's forecast ensemble, and the LETKF's analysis members
+  are recentred on the variational analysis. Tested on synthetic grids only;
+  no cycling skill claim, and writing the members back is the controller's.
   FGAT (experimental; `woof var --fgat-obs obNN.ascii --fgat-first-guess fgNN`
   per time slot) compares each observation with the first guess at its
   slot's time, as WRFDA's `num_fgat_time` does. On a 7-slot 12-18Z case
