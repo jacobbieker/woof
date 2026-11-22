@@ -119,6 +119,9 @@ MOVED = {
     "noah_smc_floor_booking": (
         dict(sf_surface_physics=2, noah_smc_floor_booking=True),
         {"noah_smc_floor_booking", *_SEAICE_BOUND}),
+    "thompson_rain_snow_closure": (
+        dict(mp_physics=8, thompson_rain_snow_closure=True),
+        {"thompson_rain_snow_closure"}),
     # The gridded urban morphology rides the single-layer UCM.
     "urban_param_file": (dict(sf_surface_physics=2, sf_urban_physics=1,
                               urban_param_file="geo_em.d01.nc"),
@@ -255,6 +258,8 @@ DEFAULT_OFF = frozenset({
     "mynn_sfclay_psih_zolzt",
     # The opt-in Noah soil-moisture floor booking, absent while off.
     "noah_smc_floor_booking",
+    # The opt-in Thompson rain-snow collection closure, absent while off.
+    "thompson_rain_snow_closure",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The RUC sea-ice threshold switch, absent at 0 as in a 2.8.5 header.

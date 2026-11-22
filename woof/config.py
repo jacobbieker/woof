@@ -2437,6 +2437,15 @@ class RunConfig:
     # bottom layer from RUNOFF3 (:4075), which may then go negative; False
     # is WRF's arithmetic word for word.  Read only where Noah runs.
     noah_smc_floor_booking: bool = _config_field(default=False, kw_only=True)
+    # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-22),
+    # appended off.  Thompson (mp_physics = 8, 28, 38) re-pairs the
+    # rain-snow collection only above 0 C wet bulb (module_mp_thompson.F
+    # :2946-2950); below it the graupel gain prg_rcs keeps its pre-limiter
+    # value while the rain and snow limiters shrink prr_rcs and prs_rcs, so
+    # the exchange creates graupel (and its freezing heat).  True sets
+    # prg_rcs = -(prr_rcs + prs_rcs) after the limiters; False is WRF's
+    # arithmetic word for word.  Read only where Thompson runs.
+    thompson_rain_snow_closure: bool = _config_field(default=False, kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -4667,6 +4676,12 @@ THOMPSON_AEROSOL_FAMILY: dict[int, ThompsonAerosolMember] = {
     29: ThompsonAerosolMember("rcon_mp_scheme", False, ()),
     38: ThompsonAerosolMember("thompsongh", True, ("ng", "qvolg")),
 }
+
+
+#: The Thompson schemes whose rain-snow collection
+#: RunConfig.thompson_rain_snow_closure corrects: classic (8), aerosol-aware
+#: (28, either generation) and hail-aware (38).  RCON (29) is not carried.
+THOMPSON_RAIN_SNOW_MP = frozenset({8, 28, 38})
 
 
 def thompson_aerosol_aware(mp_physics) -> bool:
@@ -9552,6 +9567,13 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("ysu_surface_heat_exner must be true or false")
     if type(cfg.noah_smc_floor_booking) is not bool:
         raise ConfigurationRefused("noah_smc_floor_booking must be true or false")
+    if type(cfg.thompson_rain_snow_closure) is not bool:
+        raise ConfigurationRefused("thompson_rain_snow_closure must be true or false")
+    if cfg.thompson_rain_snow_closure and int(cfg.mp_physics) not in THOMPSON_RAIN_SNOW_MP:
+        raise ConfigurationRefused(
+            "thompson_rain_snow_closure corrects Thompson's rain-snow collection "
+            f"(mp_physics = 8, 28 or 38); this run selects mp_physics = "
+            f"{cfg.mp_physics}, which never reads it")
     if cfg.noah_smc_floor_booking and int(cfg.sf_surface_physics) != 2:
         raise ConfigurationRefused(
             "noah_smc_floor_booking corrects Noah's soil-moisture floor "

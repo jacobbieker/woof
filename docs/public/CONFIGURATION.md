@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 458,
+**Which keys a `[[domain]]` table may override.** Exactly these 459,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -408,7 +408,7 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
     gf_deep_rain_evaporation_booking  ysu_surface_heat_exner  woof_quirk_corrections
     mynn_sfclay_psih_zolzt
-    noah_smc_floor_booking
+    noah_smc_floor_booking  thompson_rain_snow_closure
     obstacle_opt  obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
     obstacle_drag_coefficient  obstacle_wall_z0  urban_param_file
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
@@ -605,6 +605,15 @@ and past the bottom layer from the drainage `RUNOFF3` (`udrunoff`), which
 can then be negative. Off, the arithmetic is WRF's word for word. It is
 not a WRF namelist key; set it in the TOML.
 
+`thompson_rain_snow_closure` (default `false`) is an opt-in correction to
+Thompson's rain-snow collection (`mp_physics = 8`, `28` or `38`, every
+`thompson_version`), per domain on the same terms. Below 0 C (wet bulb)
+WRF limits the rain and snow losses but never re-pairs the graupel gain,
+so graupel is created when collection nearly exhausts rain or snow. With
+`true`, the gain is set to what rain and snow lose after their limiters.
+Off, the arithmetic is WRF's word for word. It is not a WRF namelist key;
+set it in the TOML.
+
 `woof_quirk_corrections` (default `"none"`) is the umbrella over the
 opt-in corrections of WRF 4.7.1 / MPAS v8.4.2 quirks
 (`woof/quirk_corrections.py`). With `"none"` each correction stays on
@@ -619,8 +628,9 @@ door takes it as `--quirk-corrections all`. `"all"` turns on:
 - WRF route (RunConfig): `gf_deep_rain_evaporation_booking = true`
   (`cu_physics = 3`), `ysu_surface_heat_exner = true`
   (`bl_pbl_physics = 1`), `mynn_sfclay_psih_zolzt = true`
-  (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`) and
-  `noah_smc_floor_booking = true` (`sf_surface_physics = 2`).
+  (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`),
+  `noah_smc_floor_booking = true` (`sf_surface_physics = 2`) and
+  `thompson_rain_snow_closure = true` (`mp_physics = 8`, `28` or `38`).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
   stays off on the MPAS suite route, local time stepping, partial nest and

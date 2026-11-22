@@ -548,6 +548,9 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The opt-in Noah soil-moisture floor booking (sf_surface_physics = 2
     # only, default off): a tree prepared before it existed ran it off.
     "run.noah_smc_floor_booking",
+    # The opt-in Thompson rain-snow collection closure (mp_physics = 8, 28,
+    # 38 only, default off): a tree prepared before it existed ran it off.
+    "run.thompson_rain_snow_closure",
     # The opt-in TSI forcing (woof.spacewx), appended off.
     "run.solar_tsi_opt", "run.solar_tsi_source", "run.solar_tsi_mode",
     # The opt-in solar band shares (woof.spacewx), appended off.

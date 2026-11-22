@@ -95,6 +95,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "noah_smc_floor_booking", "wrf", False, True, "sf_surface_physics = 2",
         "Noah's 0.02 soil-moisture floor takes the water it adds from the layer below, or RUNOFF3",
         active=lambda get: int(get("sf_surface_physics")) == 2),
+    QuirkCorrection(
+        "thompson_rain_snow_closure", "wrf", False, True, "mp_physics = 8, 28 or 38",
+        "Thompson's rain-snow collection below 0 C makes graupel from what rain and snow lose after their limiters",
+        active=lambda get: int(get("mp_physics")) in (8, 28, 38)),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",

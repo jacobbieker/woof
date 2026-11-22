@@ -1134,6 +1134,13 @@ __device__ __forceinline__ void thompson_aa_warm_level_wrf461(
     thompson_aa_wrf_frozen_block(&L, dt, odts, T);
     // HOST READBACK ANCHOR: the warm level's frozen block is complete.
     thompson_aa_wrf_conserve(&L, odts);
+#ifdef THOMPSON_RAIN_SNOW_CLOSURE
+    // RunConfig.thompson_rain_snow_closure (default off): WRF re-pairs the
+    // rain-snow transfer only where twet > T_0 (:2946-2950).  Below it the
+    // graupel gain keeps its pre-limiter value while the rain and snow
+    // limiters shrink the losses; the gain becomes what they lose.
+    if (L.twet < AAF_T0) L.prg_rcs = -(L.prr_rcs + L.prs_rcs);
+#endif
     // HOST READBACK ANCHOR: every warm-level rate final.
 
     // The two held branch decisions the fallout reads.

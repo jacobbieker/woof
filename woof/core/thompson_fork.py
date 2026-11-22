@@ -95,8 +95,13 @@ def workspace_bytes(nz: int, threads: int) -> int:
 MODULE_OPTIONS = ("-std=c++17", "--fmad=false", "--ftz=false")
 
 
+#: RunConfig.thompson_rain_snow_closure (default off): the define goes
+#: first, ahead of the unit, which reads it in one #ifdef block.
+RAIN_SNOW_CLOSURE_PREFIX = "#define THOMPSON_RAIN_SNOW_CLOSURE 1\n"
+
+
 @lru_cache(maxsize=None)
-def _module(device: int):
+def _module(device: int, rain_snow_closure: bool = False):
     import cupy as cp
     from woof import nvrtc_ptx_cache as compiler
     from woof.certify.kernel_manifest import record_module
@@ -105,6 +110,9 @@ def _module(device: int):
 
     source = module_source(MODULE)
     key = f"{MODULE_KEY_ROOT}:{MODULE}"
+    if rain_snow_closure:
+        source = RAIN_SNOW_CLOSURE_PREFIX + source
+        key += "[THOMPSON_RAIN_SNOW_CLOSURE=1]"
     with cp.cuda.Device(device), observe_module_compile(key):
         binary, _ = compiler.compile_using_nvrtc(
             source, ("-std=c++17", "--fmad=false", "--ftz=false"), None,
@@ -115,8 +123,10 @@ def _module(device: int):
     return module
 
 
-def _kernel():
+def _kernel(rain_snow_closure: bool = False):
     import cupy as cp
+    if rain_snow_closure:
+        return _module(cp.cuda.runtime.getDevice(), True).get_function(KERNEL)
     return _module(cp.cuda.runtime.getDevice()).get_function(KERNEL)
 
 
@@ -141,7 +151,7 @@ def launch_thompson_fork_column(
         nwfa2d, th_out, rainnc, rainncv, snownc, snowncv, graupelnc,
         graupelncv, sr, refl, effc, effi, effs, table_owner, ccn_table,
         dt: float, *, first_time_step: bool, do_refl: bool,
-        singular_fall: bool) -> None:
+        singular_fall: bool, rain_snow_closure: bool = False) -> None:
     """One fork microphysics call over every column, in place.
 
     ``th``/``pii``/``p``/``dz`` and the species are (nz, ny, nx) float32;
@@ -150,6 +160,8 @@ def launch_thompson_fork_column(
     is written only when ``do_refl``.  ``singular_fall`` selects the fork's
     live melting-snow fall speed (thompson_fork_snow_fall = "wrf_39_noaa");
     false selects WRF v4.6.1's rain-share blend ("blend").
+    ``rain_snow_closure`` (RunConfig.thompson_rain_snow_closure, default
+    off) compiles the unit with the rain-snow closure define.
     """
     import cupy as cp
 
@@ -183,7 +195,7 @@ def launch_thompson_fork_column(
                          "(7, 9, 7, 5, 4) Fortran-order array")
     tables.append(ccn_table)
     refl_arg = refl if do_refl else effc
-    kernel = _kernel()
+    kernel = _kernel(rain_snow_closure)
     threads = _tile(kernel, ncol)
     d_bytes, f_bytes, b_bytes = workspace_layout(nz, threads)
     arena = cp.empty(d_bytes + f_bytes + b_bytes, dtype=cp.uint8)

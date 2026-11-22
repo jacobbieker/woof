@@ -3492,6 +3492,9 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # The opt-in Noah soil-moisture floor booking: absent while off.
     if values.get("noah_smc_floor_booking", False) is False:
         values.pop("noah_smc_floor_booking", None)
+    # The opt-in Thompson rain-snow collection closure: absent while off.
+    if values.get("thompson_rain_snow_closure", False) is False:
+        values.pop("thompson_rain_snow_closure", None)
     # The opt-in resolved obstacles (woof.core.obstacles): every key at its
     # default is what every earlier header ran, so each is echoed only when
     # it differs; obstacle_opt = 1 always echoes with its file.
@@ -5773,6 +5776,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'woof_quirk_corrections': 'none',
     'mynn_sfclay_psih_zolzt': False,
     'noah_smc_floor_booking': False,
+    'thompson_rain_snow_closure': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
     'obstacle_solid_fraction': 0.5,
@@ -6367,6 +6371,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "woof_quirk_corrections": "none",
                           "mynn_sfclay_psih_zolzt": False,
                           "noah_smc_floor_booking": False,
+                          "thompson_rain_snow_closure": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,
                           "obstacle_relax_factor": 10.0,

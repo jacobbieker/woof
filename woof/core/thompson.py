@@ -15,6 +15,23 @@ from woof.core import constants as _constants
 from woof.core.kernels import get_kernel
 from woof.core.state import DTYPE
 
+#: RunConfig.thompson_rain_snow_closure (default off): every Thompson unit
+#: that computes the rain-snow collection (thompson.cu's networks,
+#: thompson_classic.cu, the generated column, thompson_fork.cu and the
+#: aerosol cold/warm units) carries an #ifdef block that, below 0 C (wet
+#: bulb), sets the graupel gain to what rain and snow lose after their
+#: limiters.  Without the define each unit's program is the one before it.
+RAIN_SNOW_CLOSURE_DEFINES = (("THOMPSON_RAIN_SNOW_CLOSURE", 1),)
+
+
+def _closure_kernel(func: str, rain_snow_closure: bool):
+    """``thompson.cu``'s ``func``, with the rain-snow closure define when
+    ``rain_snow_closure``; otherwise the stock kernel."""
+    if not rain_snow_closure:
+        return get_kernel("thompson", func)
+    from woof.core.kernels import get_kernel_int_defines
+    return get_kernel_int_defines("thompson", func, RAIN_SNOW_CLOSURE_DEFINES)
+
 _COLUMN_TPB = 32
 _SHALLOW_KMAX = 64
 _KMAX = 256
@@ -589,7 +606,7 @@ def launch_frozen_vapor_network(
         dt: float, *, rain_snow_tables=None, rain_graupel_tables=None,
         rain_freezing_tables=None, qc=None, rain_cloud_efficiency=None,
         cloud_freezing_tables=None, graupel_number_shadow=None,
-        snow_velocity_boost=None) -> None:
+        snow_velocity_boost=None, rain_snow_closure: bool = False) -> None:
     """Apply simultaneous classic nucleation and cold-ice source exchange.
 
     Non-aerosol Cooper ice nucleation and every frozen-species vapor rate are
@@ -726,8 +743,8 @@ def launch_frozen_vapor_network(
     if include_cold_cloud or graupel_number_shadow is not None:
         graupel_number_value = (
             qg if graupel_number_shadow is None else graupel_number_shadow)
-        get_kernel(
-            "thompson", "thompson_frozen_vapor_cloud_network")(
+        _closure_kernel(
+            "thompson_frozen_vapor_cloud_network", rain_snow_closure)(
                 (blocks,), (threads,),
                 (qi, ni, qs, qg, qr, nr, temperature, pressure, qv,
                  qc_value,
@@ -750,7 +767,7 @@ def launch_frozen_vapor_network(
         # ng shadow intentionally selects the larger kernel above even when
         # qc is absent because only that ABI carries the diagnostic scratch;
         # include_cold_cloud=0 keeps every cloud branch disabled.
-        get_kernel("thompson", "thompson_frozen_vapor_network")(
+        _closure_kernel("thompson_frozen_vapor_network", rain_snow_closure)(
             (blocks,), (threads,),
             (*common, np.int32(include_cold_rain),
              DTYPE(dt), np.int32(size)))
@@ -759,7 +776,8 @@ def launch_frozen_vapor_network(
 def launch_frozen_vapor_network_from_owner(
         qi, ni, qs, qg, qr, nr, temperature, pressure, qv,
         table_owner, dt: float, *, qc=None,
-        graupel_number_shadow=None, snow_velocity_boost=None) -> None:
+        graupel_number_shadow=None, snow_velocity_boost=None,
+        rain_snow_closure: bool = False) -> None:
     """Launch the fused cold source from one verified runtime table owner.
 
     This is the production-facing coefficient seam: callers cannot reorder
@@ -794,6 +812,7 @@ def launch_frozen_vapor_network_from_owner(
             tables.cloud_freezing_tables if qc is not None else None),
         graupel_number_shadow=graupel_number_shadow,
         snow_velocity_boost=snow_velocity_boost,
+        rain_snow_closure=rain_snow_closure,
     )
 
 
@@ -802,7 +821,8 @@ def launch_warm_frozen_source_network(
         graupel_melt_marker, snow_melt_marker,
         temperature, pressure, qv, rain_cloud_efficiency,
         snow_cloud_efficiency, rain_snow_tables,
-        rain_graupel_tables, dt: float) -> None:
+        rain_graupel_tables, dt: float, *,
+        rain_snow_closure: bool = False) -> None:
     """Apply WRF-ordered warm-level rain and frozen-hydrometeor sources.
 
     The companion fused cold kernel already owns all ambient sub-freezing
@@ -866,7 +886,7 @@ def launch_warm_frozen_source_network(
     device_id = getattr(getattr(qc, "device", None), "id", None)
     threads = 64 if device_id is None else _warm_network_threads(device_id)
     blocks = (size + threads - 1) // threads
-    get_kernel("thompson", "thompson_warm_frozen_source_network")(
+    _closure_kernel("thompson_warm_frozen_source_network", rain_snow_closure)(
         (blocks,), (threads,),
         (qc, qr, nr, qs, qg, graupel_number_shadow,
          graupel_melt_marker, snow_melt_marker,
@@ -879,7 +899,8 @@ def launch_warm_frozen_source_network(
 def launch_warm_frozen_source_network_from_owner(
         qc, qr, nr, qs, qg, graupel_number_shadow,
         graupel_melt_marker, snow_melt_marker,
-        temperature, pressure, qv, table_owner, dt: float) -> None:
+        temperature, pressure, qv, table_owner, dt: float, *,
+        rain_snow_closure: bool = False) -> None:
     """Launch the complete ambient-warm source path from one table owner."""
     from woof.core.thompson_runtime import DeviceClassicTableSet
 
@@ -893,7 +914,8 @@ def launch_warm_frozen_source_network_from_owner(
         graupel_melt_marker, snow_melt_marker,
         temperature, pressure, qv,
         tables.rain_cloud_efficiency, table_owner.t_Efsw,
-        tables.rain_snow_tables, tables.rain_graupel_tables, dt)
+        tables.rain_snow_tables, tables.rain_graupel_tables, dt,
+        rain_snow_closure=rain_snow_closure)
 
 
 def launch_final_phase_cleanup(

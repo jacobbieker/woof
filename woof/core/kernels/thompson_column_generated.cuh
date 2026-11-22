@@ -2442,6 +2442,10 @@ prr_rcs[0+(k-(kts))*(1)] = (ratio*tc_sign(1.0f,tc_sngl(prr_rcs[0+(k-(kts))*(1)])
 prs_rcs[0+(k-(kts))*(1)] = (-prr_rcs[0+(k-(kts))*(1)]);
 // source:2722
 }
+#ifdef THOMPSON_RAIN_SNOW_CLOSURE
+// woof opt-in RunConfig.thompson_rain_snow_closure (default off)
+if((temp[0+(k-(kts))*(1)]<t_0)) { prg_rcs[0+(k-(kts))*(1)] = (-((prr_rcs[0+(k-(kts))*(1)]+prs_rcs[0+(k-(kts))*(1)]))); }
+#endif
 // source:2724
 }
 // source:2730

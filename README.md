@@ -630,7 +630,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `--quirk-corrections all`). A key set against it is refused by name,
     and so is a correction its own key refuses in that combination. It
     turns on `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
-    `mynn_sfclay_psih_zolzt` and `noah_smc_floor_booking` (WRF route); `--undriven-species-boundary
+    `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking` and
+    `thompson_rain_snow_closure` (WRF route); `--undriven-species-boundary
     wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -666,6 +667,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     from the layer below, and past the bottom layer from the drainage, so
     the column water budget closes. Not yet scored against observations;
     the hex MPAS-suite Noah does not carry it yet.
+  - `thompson_rain_snow_closure` (Thompson, `mp_physics = 8, 28, 38`, WRF
+    route). Below 0 C, WRF's Thompson limits the rain and snow losses of
+    rain-snow collection but keeps the graupel gain at its unlimited value,
+    so the exchange creates graupel (and its freezing heat) when rain or
+    snow runs out. The option makes the gain equal what rain and snow lose.
+    Not yet scored against observations; the hex MPAS-suite Thompson and
+    RCON (`mp_physics = 29`) do not carry it.
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
