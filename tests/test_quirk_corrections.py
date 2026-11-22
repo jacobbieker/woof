@@ -182,6 +182,8 @@ def test_all_refuses_a_conflicting_key_by_name():
         assert qc.option({qc.UMBRELLA: "all", key: qc.BY_KEY[key].corrected}, key) == qc.BY_KEY[key].corrected
         with pytest.raises(ConfigurationRefusal, match=key):
             qc.option({qc.UMBRELLA: "all", key: qc.BY_KEY[key].default}, key)
+        # a value that is no option at all is the port's to refuse as such
+        assert qc.option({qc.UMBRELLA: "all", key: "typo"}, key) == "typo"
     with pytest.raises(ValueError, match="--quirk-corrections all .*--undriven-species-boundary free"):
         qc.hex_undriven_species_boundary(
             argparse.Namespace(lbc_dir="x", quirk_corrections="all", undriven_species_boundary="free"))
@@ -196,6 +198,14 @@ def test_a_runconfig_built_in_python_resolves_the_umbrella():
     run = _base(bl_pbl_physics=5, sf_sfclay_physics=5, cu_physics=3, woof_quirk_corrections="all")
     assert run.ysu_surface_heat_exner is False and run.gf_deep_rain_evaporation_booking is True
     assert _base(bl_pbl_physics=1, sf_sfclay_physics=1).ysu_surface_heat_exner is False
+    # a replace that changes the scheme re-derives the corrections
+    from dataclasses import replace
+    run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all"))
+    moved = validate_run_config(replace(run, bl_pbl_physics=5, sf_sfclay_physics=5))
+    assert moved.ysu_surface_heat_exner is False
+    # an explicit correction on a scheme the run does not select is refused, as without 'all'
+    with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
+        qc.apply_run_corrections({qc.UMBRELLA: "all", "bl_pbl_physics": 5, "ysu_surface_heat_exner": True})
 
 
 def test_the_umbrella_is_never_echoed_or_bound_on_its_own():
@@ -205,6 +215,10 @@ def test_the_umbrella_is_never_echoed_or_bound_on_its_own():
     values = {qc.UMBRELLA: "all", "ysu_surface_heat_exner": True}
     _drop_default_off_run_keys(values)
     assert values == {"ysu_surface_heat_exner": True}
+    # a run under 'all' resumes from its own checkpoint
+    from woof.io.restart import _require_config_match, configuration_echo
+    run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all"))
+    _require_config_match(configuration_echo(run), run, "ckpt")
 
 
 def test_all_keeps_a_refused_combination_refused_by_name():
@@ -227,6 +241,9 @@ def test_all_on_the_hex_door_is_regional_only():
     for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
         lts = argparse.Namespace(quirk_corrections="all", lbc_dir="x", **{flag: True})
         assert forecast_door._resolve_undriven_species_boundary(lts) is None
+        free = argparse.Namespace(quirk_corrections="all", lbc_dir="x", undriven_species_boundary="free",
+                                  **{flag: True})
+        assert forecast_door._resolve_undriven_species_boundary(free) is None
         explicit = argparse.Namespace(lbc_dir="x", undriven_species_boundary="wrf-flow-dependent", **{flag: True})
         with pytest.raises(Exception, match="--undriven-species-boundary"):
             forecast_door._resolve_undriven_species_boundary(explicit)

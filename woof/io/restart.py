@@ -5871,6 +5871,10 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
     live_config = _mosaic_checkpoint_config(dataclasses.asdict(cfg))
     _drop_default_surface_port_keys(stored_config)
     _drop_default_surface_port_keys(live_config)
+    # The umbrella over the opt-in quirk corrections is never echoed: the
+    # individual keys it resolves into bind on their own (configuration_echo).
+    for values in (stored_config, live_config):
+        values.pop("woof_quirk_corrections", None)
     # Match the writer's scheme scope while preserving active GCE switches.
     from woof.checkpoint_identity import drop_unread_mp_switches
     drop_unread_mp_switches(stored_config)
