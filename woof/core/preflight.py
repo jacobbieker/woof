@@ -3323,16 +3323,27 @@ LIN_TIER_FRAME = TieredKernelFrame("lin", "LIN_KMAX", 128, 60)
 # The linear frame is evaluated at the launcher's 128/256/512 tiers.
 LIN_REFL_TIER_FRAME = TieredKernelFrame(
     "lin_refl", "REFL_KMAX", 128, 55, reference_tier=256)
-# KMAX64: 9248 B; KMAX80: 11552 B, measured through the CUDA driver.
+# KMAX64: 9248 B; KMAX80: 11552 B, measured through the CUDA driver; KMAX128:
+# 18464 B and KMAX256: 36896 B read on an RTX A6000 (sm_86, NVRTC 12.9.86)
+# 2026-11-22 -- exactly 144 B/level at all four tiers.
 WDM5_TIER_FRAME = TieredKernelFrame("wdm5", "WDM5_KMAX", 64, 144)
-# WDM7 private hail column: 9776 B at KMAX64, 12208 B at KMAX80.
+# WDM7 private hail column: 9776 B at KMAX64, 12208 B at KMAX80, 19504 B at
+# KMAX128 and 38960 B at KMAX256 (RTX A6000, 2026-11-22): 152 B/level exactly.
 WDM7_TIER_FRAME = TieredKernelFrame("wdm7", "WDM6_KMAX", 64, 152)
 
 # Additional column families declare their measured compile tiers here.
-# WSM3 reads 5664 B at 64 and 7072 B at 80 in both arithmetic arms.
+# WSM3 reads 5664 B at 64 and 7072 B at 80 in both arithmetic arms; 11296 B at
+# 128 and 22560 B at 256 on an RTX A6000 (sm_86, NVRTC 12.9.86, 2026-11-22):
+# 88 B/level exactly.  WSM5 reads the same 5664 / 7072 / 11296 / 22560 B (its
+# flat ``KERNEL_MAX_LOCAL_SIZE_BYTES`` row is the 80 tier, so its ladder is
+# anchored there and never prices below it).  WSM7 is priced by its own
+# schemes.json row (112 B/level past 80).
 from woof.core.wsm3_constants import wsm3_level_tier as _wsm3_level_tier
+from woof.core.wsm6_constants import wsm5_level_tier as _wsm5_level_tier
 CONDITIONAL_COLUMN_TIERED_FRAMES = {
     "wsm3": (TieredKernelFrame("wsm3", "WSM3_KMAX", 64, 88), _wsm3_level_tier),
+    "wsm5": (TieredKernelFrame("wsm5", "WSM5_KMAX", 80, 88),
+             lambda nz: max(80, _wsm5_level_tier(nz))),
 }
 
 
