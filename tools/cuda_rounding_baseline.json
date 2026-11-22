@@ -3637,7 +3637,7 @@
    },
    {
     "file": "woof/core/kernels/mskf.cu",
-    "sha256": "e5596e0f0a59f848e3eb63fe1952a77d3ac10d5cefd4b1ab26e33daee10deac2"
+    "sha256": "28d338515dacf93c1b2664547feca66ae70f4f7083fb97c14b9fb0ef117a4708"
    },
    {
     "file": "woof/core/kernels/mskf_aerosol.cuh",
@@ -5495,7 +5495,7 @@
    },
    {
     "file": "woof/core/kf.py",
-    "sha256": "db0935b18a6302d88ac5b9948ed4ec49ad61b013750b0b320a2cb8799f86d5e9"
+    "sha256": "5ffaea303831a302c15de260a14c8363b1dc622b988d98c51ad4e48d49ed3e2d"
    },
    {
     "file": "woof/core/microphysics.py",

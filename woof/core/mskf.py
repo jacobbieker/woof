@@ -39,8 +39,9 @@ _LANES = 32
 MSKF_FSLOTS = 101
 MSKF_DSLOTS = 62
 MSKF_ASLOTS = 512
-#: MSKF_KMAX in kernels/mskf.cu: a refusal ceiling, nothing is sized by it.
-VERTICAL_LEVEL_BOUNDS = (8, 160)
+#: MSKF_KMAX in kernels/mskf.cu: a refusal ceiling, nothing is sized by it
+#: (raised 160 -> 256: the workspace slots are runtime-nz, size_t-indexed).
+VERTICAL_LEVEL_BOUNDS = (8, 256)
 #: Columns in flight per streaming multiprocessor without the aerosol path:
 #: the two 128-thread blocks an SM holds resident at mskf_column's 255
 #: registers (sm_86..sm_120), so every SM runs two blocks and one launch covers
@@ -69,7 +70,7 @@ MSKF_STATUS_MESSAGES = {
         "(WRF module_cu_mskf.F:5093 stops the model)",
     32: "MSKF: incorrect ice nucleation number on the aerosol path "
         "(WRF module_cu_mskf.F:3228 stops the model)",
-    64: "MSKF requires 8 <= nz <= 160 (the kernel's refusal ceiling)",
+    64: "MSKF requires 8 <= nz <= 256 (the kernel's refusal ceiling)",
 }
 
 OUTPUT_3D = ("rthcuten", "rqvcuten", "rqccuten", "rqrcuten", "rqicuten",

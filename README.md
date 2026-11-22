@@ -715,7 +715,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
     the 149-level case (nominal eta), MAD-WRF (species row) and any
     radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5,
-    KF-CuP, BouLac and QNSE rows state their layer limits.
+    KF-CuP, BouLac and QNSE rows state their layer limits. KF-CuP and
+    Multiscale Kain-Fritsch now take up to 256 levels (were 128 and 160):
+    both keep every column array in a runtime-sized workspace, so the
+    bound was a refusal guard only, and words at the old level counts are
+    unchanged (`tests/test_cu_kfcup_mskf_256_levels_gpu.py`).
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
