@@ -109,7 +109,7 @@ def df_tl(state, pert_state, traj, pert, geom: DFGeometry, *, nl=True):
     strict wrf_smag_deform: defor11, defor22 and defor12 (overwritten) of
     u, v and php."""
     geom.validate()
-    _check(geom, _named("state", DF_STATE, state) + _named("pert", DF_STATE, pert_state)
+    _check(geom, _named("state", DF_STATE, state) + _named("pert_state", DF_STATE, pert_state)
            + _named("traj", DF_ACTIVE + DF_PASSIVE, traj)
            + _named("pert", DF_ACTIVE, pert), df_shapes(geom), min_nz=3)
     arrs = (tuple(state[n] for n in DF_STATE) + tuple(pert_state[n] for n in DF_STATE)
@@ -180,7 +180,7 @@ def km_tl(state, pert_state, traj, pert, geom: KMGeometry, *, nl=True):
     """WRFPLUS G_SMAG2D_KM (diff_opt 1) on woof's strict wrf_diff_opt1_km4
     + wrf_smag_km_bc: xkmh and xkhh (overwritten) of the deformation."""
     geom.validate()
-    _check(geom, _named("state", KM_STATE, state) + _named("pert", KM_STATE, pert_state)
+    _check(geom, _named("state", KM_STATE, state) + _named("pert_state", KM_STATE, pert_state)
            + _named("traj", KM_ACTIVE + KM_PASSIVE, traj)
            + _named("pert", KM_ACTIVE, pert), km_shapes(geom), min_nz=1)
     arrs = (tuple(state[n] for n in KM_STATE) + tuple(pert_state[n] for n in KM_STATE)
@@ -231,6 +231,10 @@ class HDGeometry:
     boundary_x: int = 0
     boundary_y: int = 0
 
+    def __post_init__(self):
+        if self.row not in HD_ROWS:   # before stag/perturb index HD_ROWS
+            raise ValueError(f"row is one of {sorted(HD_ROWS)}, got {self.row!r}")
+
     @property
     def stag(self) -> int:
         return HD_ROWS[self.row][0]
@@ -276,7 +280,7 @@ def hd_tl(state, pert_state, traj, pert, geom: HDGeometry, *, nl=True):
     woof's strict wrf_diff_opt1_horizontal: ``tend`` (accumulated) of the
     field, the coefficient ``xk`` and ``mut``."""
     geom.validate()
-    _check(geom, _named("state", HD_STATE, state) + _named("pert", HD_STATE, pert_state)
+    _check(geom, _named("state", HD_STATE, state) + _named("pert_state", HD_STATE, pert_state)
            + _named("traj", HD_ACTIVE + hd_passive(geom), traj)
            + _named("pert", HD_ACTIVE, pert), hd_shapes(geom), min_nz=1)
     arrs = ((state["tend"], pert_state["tend"])
