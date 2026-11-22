@@ -90,6 +90,12 @@ def test_kf_phase_mode_mapping_keeps_kessler_and_no_mp_distinct():
     assert kf_phase_mode_for_microphysics(1) == KFPhaseMode.WARM_RAIN
     assert kf_phase_mode_for_microphysics(10) == \
         KFPhaseMode.SEPARATE_ICE_SNOW
+    # CAM-MG (11): cammgmpscheme is moist:qv,qc,qi,qr,qs (Registry.EM_COMMON:3031).
+    assert kf_phase_mode_for_microphysics(11) == \
+        KFPhaseMode.SEPARATE_ICE_SNOW
+    # NTU (56): ntu is moist:qv,qc,qr,qi,qs,qg,qh (Registry.EM_COMMON:3049).
+    assert kf_phase_mode_for_microphysics(56) == \
+        KFPhaseMode.SEPARATE_ICE_SNOW
     # TEMPO (900) is Thompson's moist package: qv,qc,qr,qi,qs,qg.
     assert kf_phase_mode_for_microphysics(900) == \
         KFPhaseMode.SEPARATE_ICE_SNOW

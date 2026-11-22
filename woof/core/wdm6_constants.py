@@ -101,6 +101,12 @@ WDM6_SHALLOW_KMAX = 64
 WDM6_KERNEL_LEVEL_TIERS = (WDM6_SHALLOW_KMAX, 80)
 
 
+#: WDM7 (mp_physics=26): the deepest tier its unit compiles at.  The
+#: registry's vertical row once read WDM6's 256-level ceiling here, so a
+#: 149-level hex run passed the preflight and stopped at step 0.
+WDM7_VERTICAL_LEVEL_BOUNDS = (2, WDM6_KERNEL_LEVEL_TIERS[-1])
+
+
 def wdm6_level_tier(nz: int) -> int:
     """Return the ``WDM6_KMAX`` tier the WDM7 unit compiles for ``nz``."""
     nz = int(nz)
@@ -169,7 +175,7 @@ WDM_SCHEMES = {
                   vertical_level_bounds=WDM6_VERTICAL_LEVEL_BOUNDS),
     26: WdmScheme(26, "WDM7", "wdm7", ("qv", "qc", "qr", "qi", "qs", "qg", "qh"),
                   WDM6_NUMBER_SPECIES, graupel=True, land_sea_mask=True,
-                  vertical_level_bounds=(2, WDM6_KERNEL_LEVEL_TIERS[-1]), hail=True),
+                  vertical_level_bounds=WDM7_VERTICAL_LEVEL_BOUNDS, hail=True),
 
 }
 
@@ -367,7 +373,7 @@ def wrf_word(bits: int) -> float:
 __all__ = ["WDM5_DEEP_KMAX", "WDM5_KERNEL_LEVEL_TIERS", "WDM5_SHALLOW_KMAX", "WDM5_VERTICAL_LEVEL_BOUNDS",
            "WDM6Coefficients", "WDM6WS_SLOTS", "WDM6_BLOCK", "WDM6_DEEP_KMAX",
            "WDM6_KERNEL_LEVEL_TIERS", "WDM6_MAX_LEVELS", "WDM6_NUMBER_SPECIES", "WDM6_SHALLOW_KMAX",
-           "WDM6_TILE_BLOCKS_PER_SM", "WDM6_VERTICAL_LEVEL_BOUNDS", "WDM6_WRF_RIMED_WORDS", "WDM6_WRF_WORDS",
+           "WDM6_TILE_BLOCKS_PER_SM", "WDM6_VERTICAL_LEVEL_BOUNDS", "WDM6_WRF_RIMED_WORDS", "WDM7_VERTICAL_LEVEL_BOUNDS", "WDM6_WRF_WORDS",
            "WDM7_HAIL_SPECIES", "WDM7_WRF_HAIL_WORDS", "WDM_HAIL_SCHEMES", "WDM_SCHEMES",
            "WDM_SCHEME_NAMES", "WdmScheme", "coefficients", "rimed_ice_constants",
            "wdm5_level_tier", "wdm6_level_tier", "wdm6_workspace_extent", "wdm6_workspace_floats",

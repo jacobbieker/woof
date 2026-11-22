@@ -21,7 +21,7 @@ KFCUP_VERTICAL_LEVEL_BOUNDS = (8, 128)
 # workspace, so nothing is compiled per level count).  Those modules are
 # CuPy-free and staged wherever this one is, so the values are imported
 # rather than transcribed.  Re-exported under their own names below.
-from woof.core.wdm6_constants import WDM5_VERTICAL_LEVEL_BOUNDS, WDM6_VERTICAL_LEVEL_BOUNDS
+from woof.core.wdm6_constants import WDM5_VERTICAL_LEVEL_BOUNDS, WDM6_VERTICAL_LEVEL_BOUNDS, WDM7_VERTICAL_LEVEL_BOUNDS
 # WSM3's ceiling is owned the same way: the deepest WSM3_KMAX tier of the
 # CuPy-free constants leaf.
 from woof.core.wsm3_constants import WSM3_VERTICAL_LEVEL_BOUNDS
