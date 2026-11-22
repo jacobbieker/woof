@@ -110,7 +110,6 @@
 
 #define ITD_RHOSI 940.0
 #define ITD_SALT_LOSS 0.4
-#define ITD_HS_SSL 0.040        // ice_colpkg_shared hs_ssl: the snow surface layer (m)
 
 // 1/3 and 2/3 (p333 = c1/c3, p666 = c2/c3: gfortran folds each division)
 __device__ __forceinline__ double p333() { return D(1.0, 3.0); }
@@ -543,7 +542,8 @@ __device__ int itd_adjust_tracer_profile(const ItdTracers &T, double aicen, doub
                                          double vtmp, double vsurp, double sss, int location)
 {
     const int nbl = T.nblyr;
-    double *zsal = tr + T.idx[TI_BGCS];
+    // the vertical salinity's index is -1 without it: no pointer before the row
+    double *zsal = T.zsal ? tr + T.idx[TI_BGCS] : tr;
     double *zbio = tr + T.bio;
     double src[ZB_NBMAX], out[COL_NILYR + 2];
     if (!(vbrin > 0.0)) return ITD_OK;
@@ -826,7 +826,7 @@ __device__ void itd_lateral_melt(const ItdTracers &T, double dt, int ncat, doubl
         }
         if (T.nbio) {
             // the snow tracers, on the melted category's area and snow
-            const double dvssl = col_min(M(0.5, vsnon[n]), M(ITD_HS_SSL, aicen[n]));
+            const double dvssl = col_min(M(0.5, vsnon[n]), M(ZB_HS_SSL, aicen[n]));
             const double dvint = S(vsnon[n], dvssl);
             const int sn = T.bio + T.nblyr + 1;
             *T.flux_bio = A(*T.flux_bio, D(M(A(M(tr[sn], dvssl), M(tr[sn + 1], dvint)), rside), dt));
@@ -881,7 +881,7 @@ __device__ void itd_zap_snow(const ItdTracers &T, double dt, double *tr, double 
                              double *dfhocn, double aicen, double *dflux_bio)
 {
     if (T.nbio) {
-        const double dvssl = col_min(M(0.5, *vsnon), M(ITD_HS_SSL, aicen));
+        const double dvssl = col_min(M(0.5, *vsnon), M(ZB_HS_SSL, aicen));
         const double dvint = S(*vsnon, dvssl);
         const int sn = T.bio + T.nblyr + 1;
         *dflux_bio = A(*dflux_bio, D(A(M(tr[sn], dvssl), M(tr[sn + 1], dvint)), dt));

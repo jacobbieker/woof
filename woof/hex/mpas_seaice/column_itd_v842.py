@@ -155,6 +155,9 @@ def _ztr_args(pools: dict, configs: dict, state: "cv.ColumnState", written: list
     bgc, nz, n1 = pools["biogeochemistry"], d["nZBGCTracers"], d["nCells"] + 1
     flux = cv._need(bgc, "oceanBioFluxes", (n1, nz))
     written.append(flux)
+    if to.n_bio_tracers != 1:
+        # the kernels carry one vertical tracer (one ocean concentration, flux and bio index)
+        raise ValueError(f"the ITD and ridging carry one vertical tracer, not {to.n_bio_tracers}")
     nbio, bio0 = np.int32(to.n_bio_tracers), np.int32(to.bio_index[0] - 1)
     if not itd:
         return (nbio, bio0, np.int32(nz), flux)
