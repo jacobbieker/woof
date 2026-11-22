@@ -117,9 +117,10 @@ def check_config(configs: dict) -> None:
                 "column_separate_snow_ice_tracers and column_combine_snow_ice_tracers are not ported",
                 "config_use_vertical_tracers = .false.")
     if c.get("config_use_velocity_solver", True) and \
-            c.get("config_stress_divergence_scheme", "variational") == "weak":
+            str(c.get("config_stress_divergence_scheme", "variational")).rstrip(" ") == "weak":
         _refuse("config_stress_divergence_scheme", "weak",
-                "the weak-form stress divergence's pool (velocity_weak) is not ported",
+                "the weak-form stress divergence with the column package is not held against an oracle "
+                "(the column oracle carries no velocity_weak pool); it runs without the column package",
                 "config_stress_divergence_scheme = 'variational'")
     crdg.check_config(c)
     cprep.check_config(c)

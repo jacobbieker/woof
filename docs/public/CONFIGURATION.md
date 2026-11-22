@@ -1530,7 +1530,7 @@ each one off, the run executes no new code. The design and the planned layers
 | `solar_tsi_mode` | `"absolute"` | `"absolute"`: the reference is 1370 W m-2, so the measured TSI replaces WRF's constant. `"relative"`: the reference is 1360.8 W m-2 (the TIM cycle mean), which keeps WRF's calibration and adds only the variability. |
 | `solar_ssi_opt` | `0` | `1` moves RRTMG SW's source between its 14 bands with the day's solar spectrum: band b takes `[S_b(t)/TSI(t)] / [S_b/TSI over solar cycle 24]`, renormalised so the total is unchanged (`solar_tsi_opt` sets the total). The 200-263 nm band is about 2.5 % stronger in 2024 than the cycle mean. RRTMG (`ra_sw_physics = 4` with `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (`14`) only. With RADM2 chemistry it also scales Fast-TUV's extraterrestrial flux in each of its 17 bins by `[S_i(t)/TSI(t)] / [S_i/TSI over cycle 24]` (not renormalised; see docs/spacewx.md), and with hex's MICM chemistry and `"photolysis": "tuvx"` it scales TUV-x's flux the same way on its 156 bins. |
 | `solar_ssi_source` | `""` | The spectral series: `"nrlssi2"` fetches the NOAA CDR daily SSI files (about 13 MB a year) for the run's years into the space-weather cache, or NOAA CDR SSI netCDF paths joined by `:`. Daily means sit at noon UTC and are interpolated linearly; a time outside the series or in a gap is refused. |
-| `spacewx_ionosphere_opt` | `0` | `1` adds the climatological ionosphere to every history frame: `IONO_TEC` (vertical TEC, 60-2000 km, TECU), `IONO_FOF2` and `IONO_FOE` (MHz), `IONO_HMF2` (km) and `IONO_NMF2` (m-3), on the domain's columns at the frame's valid time. It is a diagnostic: the atmosphere integrates identically. |
+| `spacewx_ionosphere_opt` | `0` | `1` adds the climatological ionosphere to every history frame: `IONO_TEC` (vertical TEC, 60-2000 km, TECU), `IONO_FOF2` and `IONO_FOE` (MHz), `IONO_HMF2` (km) and `IONO_NMF2` (m-3), on the domain's columns at the frame's valid time. `2` also applies the storm-time foF2 correction (woof's fit, as `woof spacewx ionosphere --storm`) and adds `IONO_STORM`, the NmF2 ratio R (foF2 is scaled by sqrt(R)); its ap comes from the GFZ index file, the intervals ended by the start, with the latest ap held for every later interval, so `spacewx_f107_source` must be `"gfz"` or a GFZ-format file. It is a diagnostic: the atmosphere integrates identically. |
 | `spacewx_f107_source` | `""` | The F10.7 that drives it. `""` or `"gfz"` fetches GFZ's `Kp_ap_Ap_SN_F107_since_1932.txt` into the space-weather cache. A path reads a file in that format, and a number is a fixed flux in sfu. The value at the run's start is held for the whole run (persistence). |
 | `spacewx_f107_mode` | `"81day"` | `"81day"`: the mean observed F10.7 of the 81 UT days ending the day before the start. `"daily"`: the day before the start alone. |
 | `spacewx_ionosphere_maps` | `"ccir"` | The foF2 maps, `"ccir"` or `"ursi"`. |
@@ -1557,7 +1557,8 @@ surface shortwave would not see the band shares) and on hex's MPAS-native suites
 generic column seam takes it).
 
 The `spacewx_f107_*` and `spacewx_ionosphere_maps` keys are refused while
-`spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 1` is refused without a
+`spacewx_ionosphere_opt = 0`. `spacewx_ionosphere_opt = 2` is refused with a numeric
+`spacewx_f107_source` (it reads ap from the GFZ file). `spacewx_ionosphere_opt = 1` or `2` is refused without a
 radiation scheme, since the ionosphere uses the radiation geometry's columns.
 It is also refused on a streamed (tiled) domain and on hex's MPAS-native suites.
 Hex's generic column seam takes it (`--physics spacewx_ionosphere_opt=1`) and

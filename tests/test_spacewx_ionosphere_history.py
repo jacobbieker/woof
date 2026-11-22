@@ -70,7 +70,10 @@ def test_defaults_are_off_and_admitted():
 
 
 @pytest.mark.parametrize("overrides, match", [
-    (dict(spacewx_ionosphere_opt=2), "spacewx_ionosphere_opt"),
+    (dict(spacewx_ionosphere_opt=3), "spacewx_ionosphere_opt"),
+    (dict(spacewx_ionosphere_opt=2, spacewx_f107_source="150"), "reads ap from the GFZ index file"),
+    (dict(spacewx_ionosphere_opt=2, ra_physics=0, ra_sw_physics=0, ra_lw_physics=0),
+     "spacewx_ionosphere_opt = 2 places"),
     (dict(spacewx_ionosphere_opt=True), "spacewx_ionosphere_opt"),
     (dict(spacewx_ionosphere_opt=1, spacewx_f107_mode="27day"), "spacewx_f107_mode"),
     (dict(spacewx_ionosphere_opt=1, spacewx_ionosphere_maps="iri"), "spacewx_ionosphere_maps"),
@@ -91,6 +94,11 @@ def test_refusals_name_the_breakage(overrides, match):
 def test_an_on_config_is_admitted(source):
     validate_run_config(_cfg(spacewx_ionosphere_opt=1, spacewx_f107_source=source,
                              spacewx_f107_mode="daily", spacewx_ionosphere_maps="ursi"))
+
+
+@pytest.mark.parametrize("source", ["", "gfz", "/data/indices.txt"])
+def test_the_storm_correction_is_admitted_with_an_index_file(source):
+    validate_run_config(_cfg(spacewx_ionosphere_opt=2, spacewx_f107_source=source))
 
 
 def test_f107_source_forms():
@@ -125,6 +133,10 @@ def test_produced_history_shapes_carry_the_rows_only_when_on():
     assert tuple(hist.HISTORY_FIELDS) == NAMES
     for name, (_key, desc, units) in hist.HISTORY_FIELDS.items():
         assert REGISTRY_VAR_META[name] == (desc, units)
+    storm_on = produced_history_shapes(_cfg(spacewx_ionosphere_opt=2))
+    assert set(storm_on) - set(off) == set(NAMES) | {"IONO_STORM"}
+    for name, (desc, units) in hist.STORM_HISTORY_FIELDS.items():
+        assert REGISTRY_VAR_META[name] == (desc, units)
 
 
 def test_preflight_prices_the_held_arrays_and_the_kernel():
@@ -132,6 +144,9 @@ def test_preflight_prices_the_held_arrays_and_the_kernel():
     cfg = _cfg(spacewx_ionosphere_opt=1, spacewx_f107_source="150")
     shapes = hist.device_shapes(cfg)
     assert shapes["spacewx_ionosphere/history"] == (5, 4, 6)
+    storm_shapes = hist.device_shapes(_cfg(spacewx_ionosphere_opt=2))
+    assert storm_shapes["spacewx_ionosphere/history"] == (6, 4, 6)
+    assert storm_shapes["spacewx_ionosphere/fo_scale"] == (24,)
     assert sum(1 for name in shapes if shapes[name] == (24,)) == 4 + len(ion.OUTPUTS)
     assert "spacewx_ionosphere" in preflight.KERNEL_MAX_LOCAL_SIZE_BYTES
     src = inspect.getsource(preflight)
@@ -142,7 +157,7 @@ def test_preflight_prices_the_held_arrays_and_the_kernel():
 def test_streamed_domains_refuse_by_name():
     from woof.core import streaming
     src = inspect.getsource(streaming)
-    assert "spacewx_ionosphere_opt = 1, whose history rows are computed on the" in src
+    assert "spacewx_ionosphere_opt = {int(cfg.spacewx_ionosphere_opt)}, whose history rows are computed on the" in src
 
 
 def test_hex_generic_seam_takes_the_keys():
@@ -304,3 +319,209 @@ def test_driver_publishes_the_rows_and_leaves_the_atmosphere_alone(monkeypatch):
         assert np.array_equal(cp.asnumpy(getattr(on, name)), cp.asnumpy(getattr(off, name)))
     for name in ("swdown", "glw"):
         assert np.array_equal(cp.asnumpy(on.fields[name]), cp.asnumpy(off.fields[name]))
+
+
+# --- the storm-time correction (spacewx_ionosphere_opt = 2) ---------------------------
+
+def _storm_gfz(tmp_path, storm_ap=300.0):
+    """_gfz with a storm: ap = ``storm_ap`` in 2024-05-10's 00-18 UT intervals."""
+    path = _gfz(tmp_path)
+    lines = path.read_text().splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("2024 05 10 "):
+            w = line.split()
+            w[15:21] = [f"{storm_ap:.0f}"] * 6               # ap of 00, 03, ..., 15 UT
+            lines[i] = " ".join(w)
+    path.write_text("\n".join(lines) + "\n", encoding="ascii")
+    return path
+
+
+@pytest.fixture
+def storm_fit(tmp_path):
+    import json
+    from woof.spacewx import storm
+    from test_spacewx_storm import _fit_doc
+    path = tmp_path / "fit.json"
+    path.write_text(json.dumps(_fit_doc()))
+    return storm.load_fit(path)
+
+
+def test_persisted_ap_tau_is_the_clis_at_the_start_and_holds_the_latest_ap_after():
+    from woof.spacewx import storm
+    from test_spacewx_storm import _record
+    ap = np.full(10 * 8, 7.0)
+    ap[9 * 8 + 4:9 * 8 + 6] = 300.0                       # 2024-05-10 12-18 UT
+    rec = _record(ap)
+    tau, nlag = 0.9, 24
+    series = storm.ap_series(rec, START, nlag)
+    assert storm.persisted_ap_tau(series, START, START, tau) == storm.filtered_ap(rec, START, tau, nlag)
+    assert storm.persisted_ap_tau(series, START, START + timedelta(hours=2, minutes=59), tau) == (
+        storm.filtered_ap(rec, START, tau, nlag))       # no interval has ended since the start
+    # Six hours on: two more intervals ended, each persisting the latest ap (300).
+    later = START + timedelta(hours=6)
+    future = ap.copy()
+    future[9 * 8 + 6:9 * 8 + 8] = 300.0
+    assert storm.persisted_ap_tau(series, START, later, tau) == pytest.approx(
+        storm.filtered_ap(_record(future), later, tau, nlag), rel=1e-12)
+    # Far on, the filter has forgotten the record: ap_tau is the persisted ap.
+    far = storm.persisted_ap_tau(series, START, START + timedelta(days=20), tau)
+    assert far == pytest.approx(300.0)
+    with pytest.raises(storm.StormError, match="before the start"):
+        storm.persisted_ap_tau(series, START, START - timedelta(hours=3), tau)
+    gap = series.copy()
+    gap[0] = np.nan
+    with pytest.raises(storm.StormError, match="no ap yet"):
+        storm.persisted_ap_tau(gap, START, START + timedelta(hours=9), tau)
+
+
+def test_storm_for_run_reads_ap_through_the_latest_ended_interval(tmp_path, storm_fit):
+    from woof.spacewx import indices, storm
+    path = _storm_gfz(tmp_path)
+    asked = []
+
+    def loader(source, needed, kp=False):
+        asked.append((needed, kp))
+        return indices.read(path)
+
+    cfg = _cfg(spacewx_ionosphere_opt=2, spacewx_f107_source=str(path))
+    h = _history(cfg, indices_loader=loader, storm_fit=storm_fit)
+    assert (START - timedelta(hours=3), True) in asked            # the 15-18 UT interval, with ap
+    want = storm.filtered_ap(indices.read(path), START, storm_fit.tau, storm_fit.nlag)
+    receipt = h.receipt()
+    assert receipt["spacewx_storm_ap_tau_start"] == pytest.approx(want) and want > 50.0
+    assert receipt["spacewx_storm_ap_latest"] == 300.0
+    assert receipt["spacewx_storm_ap_interval"] == "2024-05-10T15:00Z"
+    assert receipt["spacewx_storm_fit_sha256"] == storm_fit.sha256
+    assert receipt["spacewx_storm_ap_sha256"] == indices.read(path).sha256
+    assert h.names == NAMES + ("IONO_STORM",)
+    ap_tau, scale = h.storm_scale(START)
+    assert ap_tau == pytest.approx(want)
+    np.testing.assert_array_equal(scale, storm.fof2_scale(
+        storm_fit, *(a.astype(np.float64) for a in (_radiation().latitude_deg, _radiation().longitude_deg)),
+        START, want, model=_dipole()))
+    later_tau, _ = h.storm_scale(START + timedelta(hours=12))
+    assert later_tau > ap_tau                                      # the persisted 300 keeps raising it
+    # Option 1 on the same file reads no ap and has no storm state.
+    plain = _history(_cfg(spacewx_ionosphere_opt=1, spacewx_f107_source=str(path)))
+    assert plain.storm is None and plain.names == NAMES
+    assert not any(k.startswith("spacewx_storm") for k in plain.receipt())
+
+
+def test_storm_refusals_name_the_breakage(tmp_path, storm_fit):
+    path = _gfz(tmp_path)
+    late = tmp_path / "late.txt"
+    late.write_text("\n".join(line for line in path.read_text().splitlines()
+                              if not line.startswith(("2024 05 10", "2024 05 11", "2024 05 12"))) + "\n")
+    with pytest.raises(hist.IonosphereHistoryError, match="no ap yet"):
+        _history(_cfg(spacewx_ionosphere_opt=2, spacewx_f107_source=str(late), spacewx_f107_mode="81day"),
+                 storm_fit=storm_fit)
+    with pytest.raises(hist.IonosphereHistoryError, match="not a number"):
+        _history(_cfg(spacewx_ionosphere_opt=2, spacewx_f107_source="150"), storm_fit=storm_fit)
+
+
+def test_the_held_ap_is_reused_for_the_start(tmp_path):
+    from woof.spacewx import indices
+    path = _storm_gfz(tmp_path)
+    memo = tmp_path / "memo"
+    calls = []
+
+    def loader(source, needed, kp=False):
+        calls.append(source)
+        return indices.read(path)
+
+    ap, record = hist._held_ap(loader, "gfz", START, 40, memo)
+    again, held = hist._held_ap(lambda *a, **k: 1 / 0, "gfz", START, 40, memo)
+    assert calls == ["gfz"] and np.array_equal(ap, again, equal_nan=True)
+    assert held["spacewx_storm_ap_sha256"] == record["spacewx_storm_ap_sha256"]
+    assert "spacewx_storm_ap_held_from" in held
+    hist._held_ap(loader, "gfz", START + timedelta(hours=3), 40, memo)       # another start: read again
+    assert calls == ["gfz", "gfz"]
+    for p in memo.iterdir():
+        p.write_text("{")                                                  # damaged: read again
+    hist._held_ap(loader, "gfz", START, 40, memo)
+    assert len(calls) == 3
+
+
+def test_an_incomplete_or_offline_ap_series_is_not_held(tmp_path):
+    from woof.spacewx import indices
+    good = _storm_gfz(tmp_path)
+    late = tmp_path / "late.txt"
+    late.write_text("\n".join(line for line in good.read_text().splitlines()
+                              if not line.startswith(("2024 05 10", "2024 05 11", "2024 05 12"))) + "\n")
+    memo = tmp_path / "memo"
+    ap, record = hist._held_ap(lambda s, n, kp=False: indices.read(late), "gfz", START, 40, memo)
+    assert np.isnan(ap[0]) and not memo.exists()                       # GFZ had not posted it yet
+    ap, _ = hist._held_ap(lambda s, n, kp=False: indices.read(good), "gfz", START, 40, memo)
+    assert ap[0] == 300.0 and len(list(memo.iterdir())) == 1          # read again once posted
+
+    def offline(source, needed, kp=False):
+        if needed is not None:
+            raise OSError("network down")
+        return indices.read(good)
+
+    other = START + timedelta(hours=3)
+    _ap, record = hist._held_ap(offline, "gfz", other, 40, memo)
+    assert record["spacewx_storm_ap_offline_cache"] is True
+    assert len(list(memo.iterdir())) == 1                               # the offline read is not held
+
+
+def test_the_blocked_basis_gives_the_unblocked_ratio(monkeypatch):
+    from woof.spacewx import storm
+    fit = storm.load_fit()
+    rng = np.random.default_rng(3)
+    mlat, lt, season = rng.uniform(-80, 80, 1000), rng.uniform(0, 24, 1000), rng.uniform(-1, 1, 1000)
+    whole = storm.log_ratio(fit, mlat, lt, season, 55.0)
+    monkeypatch.setattr(storm, "BASIS_BLOCK", 97)
+    # BLAS may sum a block's dot products in another order (OpenBLAS does), so
+    # the blocks agree to rounding; a grid of one block is the old computation.
+    np.testing.assert_allclose(storm.log_ratio(fit, mlat, lt, season, 55.0), whole, rtol=1e-12, atol=1e-15)
+
+
+def test_the_shipped_storm_fit_has_the_published_seasonal_pattern():
+    """Physical sanity of the shipped fit (woof/data/spacewx/storm_fit_v1.json)
+    at a strong storm: the F2 negative phase is strongest in local summer at
+    middle and high magnetic latitudes and weakest in winter, where low
+    latitudes show a positive phase (Prolss 1995, Handbook of Atmospheric
+    Electrodynamics II, ch. 8; Fuller-Rowell et al. 1994, JGR 99, 3893;
+    the STORM model, Araujo-Pradere et al. 2002, Space Weather/Radio Sci.
+    37, 1071, has summer mid-latitude NmF2 ratios near 0.5 and below)."""
+    from woof.spacewx import storm
+    fit = storm.load_fit()
+    lt = np.arange(0.0, 24.0, 2.0)
+
+    def mean_r(mlat, season):
+        return float(np.mean(storm.nmf2_factor(fit, np.full(lt.size, mlat), lt, np.full(lt.size, season), 150.0)))
+
+    mid = (35.0, 50.0, 62.5)
+    summer = np.mean([mean_r(m, 1.0) for m in mid])
+    equinox = np.mean([mean_r(m, 0.0) for m in mid])
+    winter = np.mean([mean_r(m, -1.0) for m in mid])
+    assert summer < equinox < winter
+    assert 0.15 <= summer <= 0.7
+    assert max(storm.nmf2_factor(fit, np.full(lt.size, 10.0), lt, np.full(lt.size, -1.0), 150.0)) > 1.2
+    assert storm.nmf2_factor(fit, [50.0], [12.0], [1.0], 0.0)[0] == pytest.approx(1.0)
+
+
+@pytest.mark.gpu
+@requires_gpu
+def test_storm_rows_are_the_scaled_kernel_and_r_at_each_valid_time(tmp_path, storm_fit):
+    import cupy as cp
+    from woof.spacewx import indices
+    path = _storm_gfz(tmp_path)
+    cfg = _cfg(spacewx_ionosphere_opt=2, spacewx_f107_source=str(path))
+    h = _history(cfg, indices_loader=lambda s, n, kp=False: indices.read(path), storm_fit=storm_fit)
+    plain = _history(_cfg(spacewx_ionosphere_opt=1, spacewx_f107_source=str(path)))
+    for elapsed in (0.0, 6 * 3600.0):
+        when = START + timedelta(seconds=elapsed)
+        rows = h.history_fields(elapsed)
+        assert tuple(rows) == NAMES + ("IONO_STORM",)
+        _ap_tau, scale = h.storm_scale(when)
+        want = h.ionosphere.evaluate(when, h.f107, fo_scale=scale)
+        for name, (key, _d, _u) in hist.HISTORY_FIELDS.items():
+            assert np.array_equal(cp.asnumpy(rows[name]), cp.asnumpy(want[key]).reshape(4, 6)), name
+        r = cp.asnumpy(rows["IONO_STORM"])
+        np.testing.assert_array_equal(r, (scale * scale).astype(np.float32).reshape(4, 6))
+        assert np.ptp(r) > 0.05
+        base = plain.history_fields(elapsed)
+        np.testing.assert_allclose(cp.asnumpy(rows["IONO_FOF2"]), cp.asnumpy(base["IONO_FOF2"]) * np.sqrt(r),
+                                   rtol=1e-5)

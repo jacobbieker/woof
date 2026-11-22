@@ -330,8 +330,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     column's loads coalesce: the 33,000-cell step takes 42 instead of 58 ms
     on an A6000, the same words. Metal keeps a thread per column,
     which is faster there (switch: `WOOF_OCEAN_COLUMN_LANES=1` or `32`);
-  - MPAS-Seaice: variational EVP internal stress, the velocity solve and
-    elastic subcycles, the pre-subcycle routines, ocean stress,
+  - MPAS-Seaice: variational EVP internal stress with its basis set-up
+    (Wachspress and PWL under every integration rule, computed on the host
+    in the init; the RKIND 8 metric terms need `metric_libm` because
+    glibc's binary64 asin and tan are not correctly rounded), the
+    weak-form stress divergence (`config_stress_divergence_scheme =
+    'weak'`, its normal vectors computed on the host in the init; on a
+    sphere it needs `metric_libm` too), the velocity
+    solve and elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
     grid, hexagons and quadrilaterals, variable resolution) with its
     optional conservation and monotonicity checks (one rank), a forward
@@ -411,8 +417,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     in the ITD and the ridging the new ice's salt loss, `adjust_tracer_profile`,
     `lateral_melt_bgc` and `zap_small_areas`' salt) in every one of those
     stages, word for word on CUDA and Metal with an oracle built from
-    `zsal_solve.patch`. The other biogeochemistry flags are refused by
-    name until their phases land;
+    `zsal_solve.patch`. The vertical tracers (`config_use_vertical_tracers`)
+    with the nonreactive tracer (`config_use_nonreactive`) run in the init,
+    `column_biogeochemistry` (`update_snow_bgc`'s scavenging,
+    `z_biogeochemistry`'s mobile and stationary phases and
+    `merge_bgc_fluxes`), the ITD thermodynamics and the ridging
+    (`add_new_ice_bgc`, `lateral_melt_bgc` and `zap_small_areas`' tracer
+    into `oceanBioFluxes`), word for word with v8.4.2 on CUDA and Metal. The
+    other stages still refuse them. The other biogeochemistry flags are
+    refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -1109,8 +1122,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `spacewx_ionosphere_opt = 1` writes the
   same ionosphere into every WRF-route history frame (`IONO_TEC`,
   `IONO_FOF2`, `IONO_HMF2`, `IONO_NMF2`, `IONO_FOE`) without changing the
-  forecast; hex's generic column seam writes the same rows per cell, and
-  streamed domains refuse it for now. `woof spacewx aurora`
+  forecast, and `spacewx_ionosphere_opt = 2` applies the storm-time
+  correction there too (plus its ratio `IONO_STORM`), from GFZ's ap with the
+  latest observed ap persisted past the start; hex's generic column seam
+  writes the same rows per cell, and streamed domains refuse both for now.
+  `woof spacewx aurora`
   places the auroral oval (Starkov 1994 on the IGRF-14 dipole) on the GPU from
   observed Kp, OMNI2 AL or the solar wind (NASA OMNI2 or NOAA SWPC real time,
   through a Kp fit with test RMSE 0.73); `spacewx_aurora_opt = 1` writes that

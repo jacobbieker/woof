@@ -123,9 +123,9 @@ def _mismatches(names):
     # cleanup_itd without zap_small_areas' salt
     (_ITD_NAMES + _RIDGE_NAMES, "if (T.zsal) *fzsal = A(*fzsal, dfzsal);", ""),
     # regrid_stationary's remap stop not checked
-    ((ABORT,), "        int stop = itd_regrid_stationary(T, cs, hbri_old, hbri, top_conc);\n"
-               "        if (stop) return stop;\n",
-     "        (void)itd_regrid_stationary(T, cs, hbri_old, hbri, top_conc);\n"),
+    ((ABORT,), "            int stop = itd_regrid_stationary(T, cs, hbri_old, hbri, top_conc);\n"
+               "            if (stop) return stop;\n",
+     "            (void)itd_regrid_stationary(T, cs, hbri_old, hbri, top_conc);\n"),
 ])
 def test_mutated_solved_salinity_is_caught(monkeypatch, names, original, mutated):
     source = citd.module_source
