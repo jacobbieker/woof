@@ -63,8 +63,9 @@ fields that exist, and the rest of the step is v8.4.2's word for word.
 v8.4.2's inert vertical salinity (``config_use_vertical_zsalinity``: never
 solved, never copied to the tracer arrays) is carried too, and so is the
 solved one (the ``zsal_solve`` correction). The vertical tracers with the
-nonreactive tracer alone are carried through every stage, its snow and ice
-layers separated for the advection and combined again before the ridging.
+nonreactive tracer, the z-aerosols or both are carried through every stage,
+each tracer's snow and ice layers separated for the advection and combined
+again before the ridging.
 
 Refused by name, besides each stage's own refusals: the ocean mixed
 layer (``coupling_prep_v842``) and, under the velocity solver, the weak-form
