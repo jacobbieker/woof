@@ -57,6 +57,10 @@ want = {
     "perturbation": {"trajectory_io": ".true.", "var4d_detail_out": ".true.",
                      "enable_identity": ".true." if lane == "lid" else ".false."},
     "dynamics": {"hybrid_opt": "0", "use_theta_m": "0"},
+    # the shipped var/test/4dvar namelist says 1; the testdata files carry
+    # HYPSOMETRIC_OPT = 2 (their own namelist.input.4dvar omits it, so the
+    # Registry default 2) and da_wrfvar refuses the mismatch
+    "domains": {"hypsometric_opt": "2"},
 }
 if lane == "l1":
     want["physics"] = {k: "0" for k in ("mp_physics", "cu_physics", "bl_pbl_physics", "ra_lw_physics",
