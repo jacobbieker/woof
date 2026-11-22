@@ -1034,7 +1034,7 @@ Each step is one small PR, taken to merged before the next widens.
        `initialize_coordinate_reference`, as the primal's first step
        does).
      - Refused by name: any other mixing package (diff_opt 2, km_opt 1,
-       2, 3 or 5), a moist state with the mixing (9d),
+       2, 3 or 5),
        `tc_horizontal_length_m`, `m_opt` and a resumed state without
        `diff1_theta_initial` (`dycore.coordinate_reference_missing`, the
        primal's own refusal). Passive tracers are refused on every step:
@@ -1063,7 +1063,30 @@ Each step is one small PR, taken to merged before the next widens.
        252 -> 52 ms (26 ms without it). Each `hd_ad` row's mut thread
        still gathers its column's levels serially; that is left for a
        later perf pass.
-   - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`).
+   - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`), bound
+     into the step (`model.py`, `_MIX_Q`).
+     - WRF and woof's strict primal mix moisture once per step, after
+       rk_step 1's acoustic loop: the 's' row of `hd_tl/_ad` (9b) on
+       qv0, qc0 and qr0 with the time-t xkhh and the loop's carried
+       muts (`_capture_wrf_muts`), c1h/c2h. The rows add into
+       `smag_rqv/qc/qr`, zeroed at the step start, which
+       `fixed_scalar_tendencies` hands to every stage's species update
+       as `moist_tend` (`_wrf_scalar_source`).
+     - The chain holds each row as the species' held source (the
+       `ScalarGeometry.held` add, now allowed on periodic domains too).
+       With qv's tables attached, qv's rk_step-1 boundary capture starts
+       from its row instead of zero, as moist.py's strict capture
+       relaxes onto `moist_tend`.
+     - Active: the time-t species, xkhh (so the deformation and the
+       time-t winds and geopotential) and muts (so the first acoustic
+       loop's mu' and mu''). The rows write slots that nothing reads
+       before them, so they take no snapshot; the adjoint reads their
+       base from the tape's current state.
+     - Tests (`tests/test_grad_wrfplus_mix_step.py`): a warm mapped
+       hybrid periodic moist step, a cold periodic moist chain of two,
+       and a warm and a cold mapped specified moist step with qv's
+       tables. Each gives `dycore.step`'s words, and dropping the moist
+       rows moves every species. Also dot, base-only and FD.
    `sixth_order_diffusion` and diff_opt 2 are not started.
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
