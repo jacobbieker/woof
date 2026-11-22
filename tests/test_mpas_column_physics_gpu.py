@@ -200,12 +200,6 @@ NOT_YET = {
     # handoff clears the measured 1.885x-MP28 microphysics stage.  Owner:
     # the RCON speed lane; this row leaves with that guard.
     "microphysics.rcon-mp29": "RCON-SPEED-01 speed refusal",
-    # NAMED GAP (2.9.1): the CCPP sa-TKE-EDMF PBL refuses a positive bldt (its
-    # TKE tendency is not in the extra-scalar restart stream), and this seam
-    # runs a positive bldt to hold the raw PBL momentum rates it returns, so the
-    # option cannot run on the MPAS column state yet.  Owner: the satmedmf
-    # port (serialize the held TKE tendency, then remove this row).
-    "pbl.ccpp-tke-edmf": "CCPP TKE-EDMF requires bldt=0",
 }
 
 

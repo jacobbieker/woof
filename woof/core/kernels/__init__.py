@@ -941,7 +941,7 @@ def module_source(name: str, *, kernel_dir: Path = _KDIR) -> str:
 #: (tests/test_noah_wrf461_parity.py, tests/test_urban_noah_hook_wrf471_parity.py).
 #: climate_diagnostics: all 48 climate fields match the pinned gfortran
 #: oracle only with separate rounding in strict mode; fast strips this option.
-_NO_FMAD_MODULES = frozenset({"deng", "thompson_collision", "soil_points", "gsfcsw", "gsfcgce", "gsfcgce_refl", "climate_diagnostics", "hail", "lake", "g3", "ysu", "shinhong", "mynn_pbl",
+_NO_FMAD_MODULES = frozenset({"deng", "thompson_collision", "soil_points", "gsfcsw", "gsfcgce", "gsfcgce_refl", "climate_diagnostics", "hail", "lake", "g3", "ysu", "shinhong", "shinhong_480", "mynn_pbl", "mynn_pbl_v61",
                               "radtran_disort",
                               "mynn_dmp_sibling", "wsm6", "kessler", "myjpbl",
                               "milbrandt2", "milbrandt2_zet", "wdm6",
