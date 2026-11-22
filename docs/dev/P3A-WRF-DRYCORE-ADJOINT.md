@@ -1042,7 +1042,16 @@ Each step is one small PR, taken to merged before the next widens.
        carried scratch, and the same step without the mixing moves u, v,
        w and theta. Also the dot product (with the boundary tables on
        the specified cases), the base-only tape and FD.
-     - Cost: COST_PLACEHOLDER
+     - Cost (A6000, 120 x 100 x 40, binary32, a warm periodic step,
+       2026-11-22): the mixing adds about 0.2-1 ms to the TL step
+       (10.7 ms without it) but 226 ms to the base + AD step (26 ms
+       without it). Of that, `df_ad` takes 209 ms and the four `hd_ad`
+       rows 3-4 ms each; `km_ad` takes 0.2 ms. The gathers recompute
+       each neighbour's whole stencil over a window wider than the
+       stencils need (5 x 5 columns and five levels for the
+       deformation). A zero output adjoint skips the recompute, so a
+       step seeded with zeros hides the cost. The windows are narrowed
+       in their own PR.
    - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`).
    `sixth_order_diffusion` and diff_opt 2 are not started.
 
