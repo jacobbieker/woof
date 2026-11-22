@@ -618,8 +618,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     once, each where its scheme runs (default `"none"`; the hex door takes
     `--quirk-corrections all`). A key set against it is refused by name,
     and so is a correction its own key refuses in that combination. It
-    turns on `gf_deep_rain_evaporation_booking` and
-    `ysu_surface_heat_exner` (WRF route); `--undriven-species-boundary
+    turns on `gf_deep_rain_evaporation_booking`,
+    `ysu_surface_heat_exner` and `mynn_sfclay_psih_zolzt` (WRF route); `--undriven-species-boundary
     wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -641,6 +641,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     uses `HFX/pi(1)` (refused with BEP/BEM, where YSU takes the urban
     heat sources instead). Checked by the column heat budget, not yet scored
     against observations; the hex MPAS-suite YSU does not carry it yet.
+  - `mynn_sfclay_psih_zolzt` (MYNN surface layer, `sf_sfclay_physics = 5`,
+    WRF route). WRF integrates the 2 m and 10 m heat profile from `z0/L`
+    while its log term and the first-level `psih` start at the thermal
+    roughness `zt/L`. The option uses `zt/L` throughout. It moves only the
+    T2/Q2 diagnostics; checked against the corrected CPU reference, not yet
+    scored against observations.
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
@@ -740,8 +746,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     hex forecast on CUDA and Metal. Every row now runs or is refused by
     name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
     the 149-level case (nominal eta), MAD-WRF (species row) and any
-    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5,
-    KF-CuP, BouLac and QNSE rows state their layer limits.
+    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5
+    and KF-CuP rows state their layer limits. BouLac and QNSE PBL now
+    admit 256 levels (compile-time 128/256 tier; at 128 levels or fewer
+    the unchanged kernel, word for word); their matrix rows still record
+    the old 128-level refusal until the 149-level hex case is re-run.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)

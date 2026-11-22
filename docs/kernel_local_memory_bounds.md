@@ -1457,3 +1457,34 @@ pytest tests/test_wsm3_wrf461_column_exact.py tests/test_wsm5.py \
        tests/test_wsm7_wrf461_column_exact.py tests/test_wdm5_wrf461_oracle.py \
        tests/test_wdm7_wrf461_oracle.py
 ```
+
+## QNSE and BouLac to 256 levels (compile-time tier)
+
+`QNSE_KMAX` (`kernels/qnsepbl.cu`, both `qnsepbl_column` and
+`mfshconv_column`) and `BOULAC_KMAX` (`kernels/boulac.cu`) size the
+per-thread column arrays, so unlike YSU they cannot be raised for free.
+Each now compiles at one of two tiers (`woof/core/pbl_level_tiers.py`): the
+source's own `#ifndef` default, 128, for every column of at most 128 levels
+-- the unchanged translation unit, so those runs are word-for-word the
+pre-tier kernel by construction -- and 256 above it, through
+`get_kernel_int_defines`. The contract ceilings
+(`QNSE_VERTICAL_LEVEL_BOUNDS`, `BOULAC_VERTICAL_LEVEL_BOUNDS`), the registry
+rows and hex's refusal all follow: 256.
+
+Frames are linear in the tier and priced per domain by
+`CONDITIONAL_COLUMN_TIERED_FRAMES`. Measured 2026-11-22 on sm_86 (RTX A6000,
+NVRTC 12.9) through the production loader at tiers 128 / 192 / 256:
+`qnsepbl_column` 9,232 / 13,840 / 18,448 B, `mfshconv_column` 15,360 /
+23,040 / 30,720 B (the widest), `boulac_column` 7,696 / 11,536 / 15,376 B,
+so on that card the QNSE module grows by its widest kernel's 120 B per level
+and BouLac by 60 B per level.  Those are the arrays one build keeps live; the
+shipped rows are maxima over cards and modes and two of them keep every
+array live (QNSE's 16,896 B = 132 x 128 is the strict sm_89 mass-flux frame,
+BouLac's 8,208 B = 64 x 128 + 16 is sm_120's), so preflight prices the full
+per-level array bytes, 132 B and 64 B: a 256-level run is priced at
+33,792 B (QNSE) and 16,400 B (BouLac).
+`tests/test_kernel_local_bounds.py::test_the_qnse_and_boulac_tier_frames_are_what_the_driver_reports`
+reads both tiers back off the driver; `tests/test_pbl_qnse_boulac_256_levels.py`
+runs a 256-level column to a 1 hPa top (finite, non-trivial), proves the
+256 tier reproduces the unchanged kernel word for word at `nz` 49 and 128,
+and compares CUDA with Metal.

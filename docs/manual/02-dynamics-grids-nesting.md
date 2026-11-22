@@ -7,7 +7,7 @@ Runge-Kutta outer integration wrapping split-explicit acoustic steps
 (forward-backward horizontal, implicit vertical, recoupled to the large step), on a
 hybrid terrain-following dry-mass vertical coordinate, FP32 on CUDA
 [docs/gpuwm-project-history.md:65; README.md, current release scope]. The RK stage table is a
-config-visible knob (`rk_ord`, default 3) [docs/public/CONFIGURATION.md:1214].
+config-visible knob (`rk_ord`, default 3) [docs/public/CONFIGURATION.md:1223].
 
 Advection is WRF's stencils: horizontal momentum and scalars are the WRF flux5
 (5th-order) stencil, and the vertical faces take WRF's `vert_order` ladder,
@@ -17,9 +17,9 @@ selected by `v_sca_adv_order` for scalars, theta, TKE and w and by
 operational HRRR runs 5). Transported-scalar horizontal stencils are fixed at
 5th order, so the importer accepts only the Registry default
 `h_sca_adv_order = 5`; the configurable `h_sca_adv_order` (legacy default 2) feeds
-the geopotential equation only [docs/public/CONFIGURATION.md:738]. Moist transport
+the geopotential equation only [docs/public/CONFIGURATION.md:747]. Moist transport
 runs WRF option 1 (positive-definite limiter) with `scalar_adv_opt` required to
-match [docs/public/CONFIGURATION.md:742, 1219]. At vertical order 5 its
+match [docs/public/CONFIGURATION.md:751, 1228]. At vertical order 5 its
 low-order eta flux takes the operational fork's semi-Lagrangian sum of the
 upstream cells above face Courant 1 (`woof/core/kernels/pd_vertical_sl.cu`)
 and the upwind flux elsewhere, so the limiter stays positive definite.
@@ -31,7 +31,7 @@ the upwind low-order flux at every face.
 
 Lateral boundaries use specified/relaxation zones with Davies-style weighting;
 `spec_bdy_width` defaults to 5 and must be at least `spec_zone + relax_zone`
-[docs/public/CONFIGURATION.md:146, 745]. The damping stack is described in section 1.2.
+[docs/public/CONFIGURATION.md:146, 754]. The damping stack is described in section 1.2.
 
 No symbolic statement of the governing equation set exists in the documentation
 tree; the prose description above and the WRF-ARW technical-note lineage are the
@@ -330,7 +330,7 @@ one line naming the ratio and the limit, and reported by the preflight checker
 `woof check` (section 8.5) as what the run will do. A config that writes
 `mix_isotropic = 0` keeps it, in the danger zone
 too, and gets the advisory carrying the override state
-[docs/public/LES.md:430-442; docs/public/CONFIGURATION.md:719]. Because
+[docs/public/LES.md:430-442; docs/public/CONFIGURATION.md:728]. Because
 `mix_isotropic` is inside the restart fingerprint, a checkpoint written under the
 old anisotropic default does not bit-continue under the auto-selected isotropic
 form. A guard test fails if any shipped config arrives on the exposed path, and the

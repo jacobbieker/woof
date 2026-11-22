@@ -3340,6 +3340,24 @@ WDM7_TIER_FRAME = TieredKernelFrame("wdm7", "WDM6_KMAX", 64, 152)
 # schemes.json row (112 B/level past 80).
 from woof.core.wsm3_constants import wsm3_level_tier as _wsm3_level_tier
 from woof.core.wsm6_constants import wsm5_level_tier as _wsm5_level_tier
+#
+# QNSE and BouLac compile ``QNSE_KMAX`` / ``BOULAC_KMAX`` at 128 for columns
+# of at most 128 levels (the source's own default, the recorded rows above)
+# and at 256 above (woof.core.pbl_level_tiers).  Both hold the whole column
+# in per-thread arrays, so the frame is linear in the tier.  MEASURED
+# 2026-11-22 on sm_86 (RTX A6000, NVRTC 12.9) through the production loader
+# at QNSE_KMAX / BOULAC_KMAX 128, 192, 256: qnsepbl_column 9,232 / 13,840 /
+# 18,448 B (72 B per level), mfshconv_column 15,360 / 23,040 / 30,720 B (the
+# widest, 120 B per level), boulac_column 7,696 / 11,536 / 15,376 B (60 B per
+# level).  Those sm_86 default-build slopes are the LIVE arrays only; the
+# shipped rows are maxima over cards and modes, and two of them keep every
+# column array live: QNSE's 16,896 B row is the strict (GPUWM_WRF_EXACT)
+# sm_89 mass-flux frame, 16,896 = 132 x 128 (all 33 float arrays), and
+# BouLac's 8,208 B row is sm_120's, 8,208 = 64 x 128 + 16 (all 16).  So the
+# slope priced is the full per-level array bytes, 132 B (QNSE) and 64 B
+# (BouLac), never less than any build keeps live: 256 prices qnsepbl at
+# 16,896 + 16,896 = 33,792 B and boulac at 8,208 + 8,192 = 16,400 B.
+from woof.core.pbl_level_tiers import kmax_tier as _pbl_kmax_tier
 CONDITIONAL_COLUMN_TIERED_FRAMES = {
     # nz past the ladder is priced at its deepest tier: the vertical contract
     # owns that refusal (a named PhysicsVerticalPreflightError), not this pricer.
@@ -3347,6 +3365,10 @@ CONDITIONAL_COLUMN_TIERED_FRAMES = {
              lambda nz: _wsm3_level_tier(min(max(int(nz), 2), 256))),
     "wsm5": (TieredKernelFrame("wsm5", "WSM5_KMAX", 80, 88),
              lambda nz: max(80, _wsm5_level_tier(min(max(int(nz), 2), 256)))),
+    "qnsepbl": (TieredKernelFrame("qnsepbl", "QNSE_KMAX", 128, 132),
+                _pbl_kmax_tier),
+    "boulac": (TieredKernelFrame("boulac", "BOULAC_KMAX", 128, 64),
+               _pbl_kmax_tier),
 }
 
 
