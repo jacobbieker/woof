@@ -1276,7 +1276,13 @@ BASELINE_PINNED: dict[str, str] = {
     # WRF column oracle at every non-FTZ word
     # (tests/test_noah_mosaic_wrf471_parity.py).
     "noah_mosaic":
-        'd8739ffa18b0f3f594871cd88a7be274697ba3fb583bf788b4ed49209bdc7e19',
+        # RE-PINNED 2026-11-22 by the opt-in noah_smc_floor_booking (default off): a
+        # NOAH_SMC_FLOOR_BOOKING #ifdef block in SSTEP takes the water the 0.02
+        # floor adds from the layer below (WPLUS < 0) or RUNOFF3; without the
+        # define the preprocessed program is the previous one byte for byte
+        # (tests/test_noah_smc_floor_booking.py strips the block and checks the
+        # previous digest).  Previously d8739ffa.
+        '5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00',
     # development branch (smoke, aerosol and air-quality program).  chem_bdy:
     # WRF-Chem's outer-domain flow_dep_bdy_chem, bit-identical to the
     # Fortran on 24 oracle cases (tests/test_chem_bdy_wrf471_parity.py).
@@ -1781,7 +1787,8 @@ PINNED_HEADERS = {
     'deng_support.cuh': 'c4a417c8377f8464ef8e7746992f380bb171b06e825c353d0bb2f96e8ae26133',
     'mskf_aerosol.cuh': '91fefcce94ec7bc775ba526b2d4a95eb4d4c7946ffd95da11f53474a2811bfa9',
     'mynn_scalar_mix.cu': 'abc61827d645ce7af664a7294ecfd289834de5cc57b485bff20e20d27ed17c1f',
-    'noah_mosaic.cu': 'd8739ffa18b0f3f594871cd88a7be274697ba3fb583bf788b4ed49209bdc7e19',
+    # noah_smc_floor_booking's #ifdef block (default program unchanged).
+    'noah_mosaic.cu': '5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00',
     'noah_seaice_options.cuh': '033fec7afc7129e3455aba955f748e6eb49213aeab12e1ad82801b8c2dfd4b7b',
     'noah_ua.cuh': '6ffe8841f48994d15eb1e6dfeb1d2c0667e1ea0ad4b56a2f50c45ca24d07dba1',
     'noah_ua_plain.cuh': '40746bf3560c1922b28a6341a50753c4ec4946842bfa613c5c1f8b8b826f1108',
@@ -1990,4 +1997,6 @@ def test_mosaic_ucm_composed_source_is_pinned():
     # d04c1a03.
     from woof.core.noah_mosaic import mosaic_ucm_source
     assert hashlib.sha256(mosaic_ucm_source().encode()).hexdigest() == (
-        'ebf5a3d14b34e8d8a1f40245033db71dda9733fb385e926fdf27fc45480fc7df')
+        # noah_smc_floor_booking's #ifdef block in noah_mosaic.cu, unread
+        # without the define.  Previously ebf5a3d1.
+        '5138ec7814e19a0680e9cfd6ff29aba5fc18c3aaa894d3e3b09a3295ccc6c807')

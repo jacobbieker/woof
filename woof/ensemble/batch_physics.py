@@ -403,8 +403,12 @@ NOAH_SHARED_FIELDS = frozenset({"ivgtyp", "isltyp", "shdmin", "shdmax", "tmn", "
 def prepare_noah_column_batch(fields, params, *, members, ny, nx, dt, dzs,
                               shared_fields=(), isurban=None, isice=None,
                               xice_threshold=0.5, frpcpn=False, usemonalb=False,
-                              rdlai2d=False, opt_thcnd=1, array_module=None):
+                              rdlai2d=False, opt_thcnd=1, array_module=None,
+                              smc_floor_booking=False):
     """One nonurban Noah launch, shared lookup tables and explicit static loads.
+
+    ``smc_floor_booking`` (RunConfig.noah_smc_floor_booking, default off)
+    compiles the unit with SSTEP's floor water booked, as launch_noah does.
 
     The caller owns every mutable land-state/output backing and includes it
     in admission. The step number is supplied at launch so the initial-call
@@ -438,8 +442,10 @@ def prepare_noah_column_batch(fields, params, *, members, ny, nx, dt, dzs,
             raise ValueError(f"Noah {name} needs resident contiguous {dtype} shape {shape}")
     tables = _device_tables(params, dzs)
     shared_pointers = tuple(name if name in ("ivgtyp", "isltyp") else f"{name}_a" for name in shared_fields)
+    from woof.core.noah import NOAH_SMC_FLOOR_BOOKING_DEFINES
     kernel, source_receipt = _native_column_kernel("noah", "noah_column",
-        shared_pointers=shared_pointers if members > 1 else (), member_columns=ny * nx)
+        shared_pointers=shared_pointers if members > 1 else (), member_columns=ny * nx,
+        defines=NOAH_SMC_FLOOR_BOOKING_DEFINES if smc_floor_booking else ())
     args = (fields["ivgtyp"], fields["isltyp"]) + tuple(fields[name] for name in _F2D + _F3D) + (fields["ebal"],)
     args += tables + (np.float32(dt), np.int32(params.lucats), np.int32(params.slcats), np.int32(isurban),
                       np.int32(isice), np.float32(xice_threshold))
@@ -1448,7 +1454,8 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
     noah = prepare_noah_column_batch(noah_fields, driver.noah_params, members=members, ny=ny, nx=nx,
         dt=driver.bldt_seconds, dzs=NOAH_LAYER_THICKNESS_M, frpcpn=True, usemonalb=driver.noah_usemonalb,
         rdlai2d=driver.noah_rdlai2d, opt_thcnd=driver.noah_opt_thcnd, array_module=array_module,
-        shared_fields=tuple(sorted(shared_surfaces & NOAH_SHARED_FIELDS)))
+        shared_fields=tuple(sorted(shared_surfaces & NOAH_SHARED_FIELDS)),
+        smc_floor_booking=getattr(cfg, "noah_smc_floor_booking", False) is True)
 
     if "xland" in shared_surfaces:
         # A single 2-D immutable mask cannot be flattened into member stripes
@@ -1508,6 +1515,8 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
         verify_pointers([fields[name] for name in noah_fields], list(noah_fields.values()))
         if params is not driver.noah_params or kwargs.get("urban") is not None or np.float32(dt) != np.float32(driver.bldt_seconds):
             raise ValueError("Noah's table owner, timestep or urban producer changed after admission")
+        if bool(kwargs.get("smc_floor_booking", False)) != (getattr(cfg, "noah_smc_floor_booking", False) is True):
+            raise ValueError("Noah's soil-moisture floor booking changed after admission")
         noah(kwargs["itimestep"])
 
     def sum_radiation(owned):

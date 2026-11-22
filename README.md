@@ -629,8 +629,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     once, each where its scheme runs (default `"none"`; the hex door takes
     `--quirk-corrections all`). A key set against it is refused by name,
     and so is a correction its own key refuses in that combination. It
-    turns on `gf_deep_rain_evaporation_booking`,
-    `ysu_surface_heat_exner` and `mynn_sfclay_psih_zolzt` (WRF route); `--undriven-species-boundary
+    turns on `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
+    `mynn_sfclay_psih_zolzt` and `noah_smc_floor_booking` (WRF route); `--undriven-species-boundary
     wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -659,6 +659,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     roughness `zt/L`. The option uses `zt/L` throughout. It moves only the
     T2/Q2 diagnostics; checked against the corrected CPU reference, not yet
     scored against observations.
+  - `noah_smc_floor_booking` (Noah, `sf_surface_physics = 2`, WRF route).
+    WRF's Noah raises a soil layer that dries below 0.02 to 0.02 and books
+    the water it adds nowhere, so dry sandy columns gain water (up to 30 mm
+    in a step on a column that starts below the floor). The option takes it
+    from the layer below, and past the bottom layer from the drainage, so
+    the column water budget closes. Not yet scored against observations;
+    the hex MPAS-suite Noah does not carry it yet.
 - **Observation-driven corrections, each opt-in and off by default:**
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as

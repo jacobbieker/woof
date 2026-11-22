@@ -91,6 +91,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "the MYNN surface layer's 2 m / 10 m heat profile is integrated from zt/L, as its log term is",
         # the gsl_wrf39 fork integrates from z0/L throughout: nothing to correct
         active=lambda get: int(get("sf_sfclay_physics")) == 5 and get("mynn_sfclay_variant") == "wrf_461"),
+    QuirkCorrection(
+        "noah_smc_floor_booking", "wrf", False, True, "sf_surface_physics = 2",
+        "Noah's 0.02 soil-moisture floor takes the water it adds from the layer below, or RUNOFF3",
+        active=lambda get: int(get("sf_surface_physics")) == 2),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",
