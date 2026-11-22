@@ -256,8 +256,8 @@ This section is the fork's own. The fork carries upstream WOOF 1.1.7 and adds
 the work below on top of it. It does not change upstream's defaults: each new
 option is off until selected, and a configuration that selects none of them
 runs as upstream's does. The section is grouped by area, and where
-something is partial it says so. Every merge into the fork's `main` is released as a
-new `metal-woof` build (`metal-vX.Y.Z.N`). The fork's own changes are recorded
+something is partial it says so. Every merge into the fork's `main` is tagged and released on GitHub as a
+new `metal-woof` build (`metal-vX.Y.Z.N`); PyPI gets the newest one daily. The fork's own changes are recorded
 in [FORK-CHANGELOG.md](FORK-CHANGELOG.md).
 
 Upstream now covers several things this section once listed as the fork's:
@@ -1647,7 +1647,7 @@ Notes on the 1.1.7 sync:
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
-  tags, writes release notes and publishes `metal-woof` to PyPI
+  tags and writes release notes; PyPI gets the newest `metal-woof` tag once a day
   ([docs/dev/ci.md](docs/dev/ci.md)).
 - **256-level columns for WSM3, WSM5, WSM7, WDM5 and WDM7.** These five
   microphysics units (`mp_physics` 3, 4, 24, 14 and 26) keep their level
