@@ -25,7 +25,8 @@ diagnostics`` runs ``run_diagnostics_{r4,r8}`` into
 ``--piece land_ice_diagnostics`` ``run_diagnostics_{r4,r8}`` into
 ``tests/data/oracles/mpas_ocean_land_ice_diagnostics``,
 ``--piece forward_land_ice`` ``run_forward_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_forward_land_ice``,
-``--piece gm`` ``run_gm_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_gm``
+``--piece gm`` ``run_gm_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_gm``,
+``--piece redi`` ``run_tracer_hmix_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_redi``
 (their cases are built per precision).  A piece's ``EXTRA_PRECISIONS`` (the
 tendency's ``r8-glibc239``: its RKIND 8 bulk wind stress) add fixtures run by
 the binary they name.  Writes ``oracle-r4.npz`` and
@@ -49,7 +50,7 @@ if str(ROOT) not in sys.path:
 from woof.verify import (  # noqa: E402
     mpas_ocean_btr_subcycle_oracle, mpas_ocean_diagnostics_oracle, mpas_ocean_forward_frazil_oracle,
     mpas_ocean_forward_land_ice_oracle, mpas_ocean_forward_oracle, mpas_ocean_frazil_oracle, mpas_ocean_gm_oracle,
-    mpas_ocean_land_ice_diagnostics_oracle, mpas_ocean_land_ice_oracle,
+    mpas_ocean_land_ice_diagnostics_oracle, mpas_ocean_land_ice_oracle, mpas_ocean_redi_oracle,
     mpas_ocean_split_step_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle,
     mpas_ocean_tend_tracer_oracle, mpas_ocean_tendency_oracle, mpas_ocean_tracer_advection_oracle,
     mpas_ocean_tracer_hmix_oracle, mpas_ocean_vert_transport_oracle, mpas_ocean_vmix_oracle)
@@ -73,7 +74,8 @@ PIECES = {"tend": (mpas_ocean_tend_oracle, "run_oracle"),
           "land_ice": (mpas_ocean_land_ice_oracle, "run_land_ice"),
           "land_ice_diagnostics": (mpas_ocean_land_ice_diagnostics_oracle, "run_diagnostics"),
           "forward_land_ice": (mpas_ocean_forward_land_ice_oracle, "run_forward"),
-          "gm": (mpas_ocean_gm_oracle, "run_gm")}
+          "gm": (mpas_ocean_gm_oracle, "run_gm"),
+          "redi": (mpas_ocean_redi_oracle, "run_tracer_hmix")}
 
 
 def run_case(oo, binary: Path, case: dict, precision: str) -> dict[str, np.ndarray]:

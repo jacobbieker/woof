@@ -630,6 +630,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "370053044db02e1ab21e07dcf02caeec2619c45ba5aefa23b48a044f6d2871c5",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "6cdd0af565e47e310803837242dab4eb60892c097b012dd1f4fbbec98f32020b",
+    "file": "woof/hex/mpas_seaice/weak_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "3906e794ed37c2b114e021e89124cd4712eade511394f273ba751a0f4df17ebc",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
@@ -5141,7 +5149,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/tracer_hmix_v842.cu",
-    "sha256": "5beba674dfb15d9c70833ef25cd40461bde65b7701d7690132682a2318d297f4"
+    "sha256": "700112854a7ba32be07a89be0bc430fbb517bdf7ceed66e3fe31d998f6a6af71"
    },
    {
     "file": "woof/hex/mpas_ocean/vert_transport_v842.cu",
@@ -5149,11 +5157,11 @@
    },
    {
     "file": "woof/hex/mpas_ocean/vmix_v842.cu",
-    "sha256": "c1a253e775826ab249a894dd987c2b698099b6334b58b42eefaa307b5abf428d"
+    "sha256": "cd656248fb02f0690c8435e3d9027f2f54efbe99806cdcfc1f7c10bbf807a898"
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.cu",
-    "sha256": "8087462e5a698509e74623703fa6a542a7194502db24792210f9e2116f15d3a6"
+    "sha256": "ff7724604a24e2c11a86bd0efa037772f367c616753e38fb49496fcd6527cb30"
    },
    {
     "file": "woof/hex/mpas_seaice/column_dedd_v842.cu",
@@ -5161,7 +5169,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.cu",
-    "sha256": "3d69b70a477828e354fc9cbda78ed7b48a029d78515fdba9e23822daa1f31b57"
+    "sha256": "850573a58c1e3719c5fba8310299d5fdcf9eb054142276e6db6fe007ed5cbbaa"
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.cu",
@@ -5169,7 +5177,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.cu",
-    "sha256": "39bf0cd796613edb2f0f58eb109cd2b1cfe736523110985fc92116c8d422a8ef"
+    "sha256": "59b61c2bbaaf43d302c26a64a7d5c30632584579f4d62ef572d6859f7027120c"
    },
    {
     "file": "woof/hex/mpas_seaice/column_therm_v842.cu",
@@ -5181,7 +5189,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_zbgc_shared_v842.cu",
-    "sha256": "5da18e807f40351f5e7c98536b3e0c0f888df1735a57849f251c9acba77db5c7"
+    "sha256": "c0bd27032a057c3213a67f21d1370f0d76d04c3d126c8938fd7571a1d3d098ee"
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.cu",
@@ -5206,6 +5214,10 @@
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.cu",
     "sha256": "01073e25f0768a46ebd77c21fe27035b3559c55f474b559c45c7440087384791"
+   },
+   {
+    "file": "woof/hex/mpas_seaice/weak_v842.cu",
+    "sha256": "b03a97043565146f5cbfa9c5a4579361f9b4ffa37cf4b9be4c3bbda714dbd141"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_sunpro.cuh",
@@ -5783,7 +5795,7 @@
    },
    {
     "file": "woof/ensemble/batch_layout_trials.py",
-    "sha256": "4d0079d9d87eb7733a51455371caf9ff387d6a3b678daf42d0ac2d861a42a2ad"
+    "sha256": "95265924ae01b8deac08daeaed61613426508305100964301e24595e8e96e296"
    },
    {
     "file": "woof/ensemble/batch_moist.py",
@@ -6219,7 +6231,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
-    "sha256": "807fc3079e2c9de2cea02f5af461d0abceda53ca8e85ca2ce8b8df1a5b5ed5a9"
+    "sha256": "33d516d63509ffa2847a3f87eac2d270db1fd962e753f03ced99f224116c2363"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_v842.py",
@@ -6231,7 +6243,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/tracer_hmix_v842.py",
-    "sha256": "aa1be1a8c5e9fe76594877481bfc07595d9718ee4d0187e89c333b34bdc38086"
+    "sha256": "3d315cbcda48545f811f04ff4242d03711a757c5d977f8e9268383a3dad40d94"
    },
    {
     "file": "woof/hex/mpas_ocean/vert_transport_v842.py",
@@ -6239,15 +6251,15 @@
    },
    {
     "file": "woof/hex/mpas_ocean/vmix_v842.py",
-    "sha256": "0e3db18d2741f6340f341639f8108f9d932afd5fed88428bc66a5632c2737d10"
+    "sha256": "aa8a53faf50f9006cc3e81a95b83e3b36dcf356328a7f263727bdc4cfde55ff3"
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
-    "sha256": "e785e2df00272c595dec20ffad726975aaf5b55373d05910a050e1ebcccae982"
+    "sha256": "9d34a63cfaf518e58fc6e6e21e4d6d8d231705d8517f8f77b9a7b1dfa9a517f6"
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.py",
-    "sha256": "8eae3ca8cc384bdf95fd9d79dec26d8a3b0861c415305e2c444e72eefbca47ef"
+    "sha256": "eafa69503d39243d6ebde59d69dbb01c2a555532d64c3ec112a88b6ce8494c25"
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
@@ -6255,7 +6267,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_ridge_v842.py",
-    "sha256": "22549cb2da70a66d60bf913a686dd1d1d171bd94db31de097aa502d895ef7989"
+    "sha256": "27053608750312efb8aaab627397331be43f7dfa3f70e44d4c154c6826b6e010"
    },
    {
     "file": "woof/hex/mpas_seaice/column_therm_v842.py",
@@ -6263,7 +6275,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.py",
-    "sha256": "37f86e339f4a2cca3b2d89e23844a03fc54e67450970dd65a13238261de122a9"
+    "sha256": "b938063322d6133fe4d0c98772871de346ee3f4c7e36f0d85303e7250eb594ea"
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",
@@ -6271,7 +6283,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
-    "sha256": "69e77864acce53f216d4ea224a1e869fc16162a7f80d09b5061cc4e43836239d"
+    "sha256": "6abd6fb940959a46e3893aed3e8850cbe551479eda97b2fe13399b4b2f5a21d1"
    },
    {
     "file": "woof/hex/mpas_seaice/post_coupling_v842.py",
@@ -6279,7 +6291,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
-    "sha256": "33ea15cccbd03ad8ea011ea0721956a4f098d285060a340b850d3565f1e5ecaa"
+    "sha256": "4e94becc30ac51b81a3562e8cf461ddcc90cceec2a72fee187a82c9b9fd2ba8b"
    },
    {
     "file": "woof/hex/mpas_seaice/remap_v842.py",
@@ -6288,6 +6300,10 @@
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.py",
     "sha256": "7b70420a4f8ada2cc8158cd62b516a7cf5b595d0a7596b92f132aded5ce1b243"
+   },
+   {
+    "file": "woof/hex/mpas_seaice/weak_v842.py",
+    "sha256": "4a3b85c45fd8e39cfade29b0b7b01fdcf2fdb4a011022fe982cf2e7e860d2b58"
    },
    {
     "file": "woof/hex/mpasdiag/_kernels.py",

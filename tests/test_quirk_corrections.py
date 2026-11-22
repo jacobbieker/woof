@@ -101,7 +101,31 @@ def test_every_seaice_correction_table_is_in_the_ledger():
     assert "column_v842.py:CORRECTIONS" in tables
     from woof.hex.mpas_seaice import column_v842
     assert set(column_v842.CORRECTIONS) == set(qc.keys("mpas_seaice"))
-    assert set(tables) == {"column_v842.py:CORRECTIONS"}, sorted(tables)
+    from woof.hex.mpas_seaice import variational_basis_v842, weak_v842
+    assert set(variational_basis_v842.CORRECTIONS) | set(weak_v842.CORRECTIONS) == set(
+        qc.keys("mpas_seaice_velocity"))
+    assert set(tables) == {"column_v842.py:CORRECTIONS", "variational_basis_v842.py:CORRECTIONS",
+                           "weak_v842.py:CORRECTIONS"}, sorted(tables)
+
+
+def test_all_adds_the_seaice_velocity_corrections():
+    from woof.hex.mpas_seaice import timestep_v842, weak_v842
+    on = {qc.UMBRELLA: "all"}
+    assert timestep_v842.velocity_corrections({}, (), weak_v842.CORRECTIONS) == ()
+    assert timestep_v842.velocity_corrections({}, ("weak_ridge_delta",), weak_v842.CORRECTIONS) == (
+        "weak_ridge_delta",)
+    assert timestep_v842.velocity_corrections(on, (), weak_v842.CORRECTIONS) == ("weak_ridge_delta",)
+    assert timestep_v842.velocity_corrections(on, ("weak_ridge_delta",), weak_v842.CORRECTIONS) == (
+        "weak_ridge_delta",)
+
+
+def test_all_scales_redi_k33_by_kappa():
+    from woof.hex.mpas_ocean import vmix_v842
+    assert vmix_v842.redi_k33_kappa_scaled({}) is False
+    assert vmix_v842.redi_k33_kappa_scaled({qc.UMBRELLA: "all"}) is True
+    assert vmix_v842.redi_k33_kappa_scaled({"woof_redi_k33": "kappa"}) is True
+    with pytest.raises(ConfigurationRefusal, match="woof_redi_k33"):
+        vmix_v842.redi_k33_kappa_scaled({qc.UMBRELLA: "all", "woof_redi_k33": "v842"})
 
 
 def test_the_hex_keys_are_door_flags():
