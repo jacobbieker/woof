@@ -97,7 +97,10 @@ def test_the_ocean_door_verify_grades_the_ported_piece():
                                                      "land_ice_fluxes_r4", "land_ice_fluxes_r8",
                                                      "land_ice_diagnostics_r4", "land_ice_diagnostics_r8",
                                                      "forward_mode_land_ice_r4", "forward_mode_land_ice_r8",
-                                                     "gm_bolus_velocity_r4", "gm_bolus_velocity_r8"]
+                                                     "gm_bolus_velocity_r4", "gm_bolus_velocity_r8",
+                                                     "redi_isoneutral_mixing_r4", "redi_isoneutral_mixing_r8",
+                                                     "split_explicit_step_gm_r4", "split_explicit_step_gm_r8",
+                                                     "forward_mode_gm_r4", "forward_mode_gm_r8"]
 
 
 @requires_gpu

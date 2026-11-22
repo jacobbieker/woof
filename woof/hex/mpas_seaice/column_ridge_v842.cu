@@ -408,7 +408,8 @@ extern "C" __global__ void seaice_column_ridging_v842(
     double *oceanHeatFlux, double *ridgeParticipationFunction, double *ratioRidgeThicknessToIce,
     double *fractionNewRidgeArea, double *fractionNewRidgeVolume, double *areaLossRidgeCategory,
     double *areaGainRidgeCategory, double *iceVolumeRidgedCategory, double *raftingIceArea,
-    double *raftingIceVolume, int *newlyFormedIce, int nblyr, double *zSalinityFlux)
+    double *raftingIceVolume, int *newlyFormedIce, int nblyr, double *zSalinityFlux, int nbio, int bio0, int nzbgc,
+    double *oceanBioFluxes)
 {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= nCellsSolve) return;
@@ -424,6 +425,13 @@ extern "C" __global__ void seaice_column_ridging_v842(
     T.nblyr = nblyr;
     T.bgrid = categoryThicknessLimits;   // not read: only add_new_ice_bgc remaps (no grids here)
     T.cgrid = categoryThicknessLimits;
+    // the vertical tracer: cleanup_itd's zapped ice and snow into oceanBioFluxes (MPAS passes it)
+    T.nbio = nbio;
+    T.bio = bio0;
+    T.igrid = categoryThicknessLimits;   // not read
+    T.init_frac = 0.0;
+    T.ocean_bio = 0.0;
+    T.flux_bio = oceanBioFluxes + (nbio ? (size_t)c * nzbgc : 0);
 
     double aicen[ITD_MAXCAT], vicen[ITD_MAXCAT], vsnon[ITD_MAXCAT], hin_max[ITD_MAXCAT + 1];
     int first_ice[ITD_MAXCAT];

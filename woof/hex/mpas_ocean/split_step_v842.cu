@@ -248,20 +248,24 @@ extern "C" __global__ void ocn_ss_final_velocity_v842(
 }
 
 // mpas_reconstruct (2-D, or 1-D with nl = 1): the cell vector from the edge
-// normals, then its zonal and meridional components, cells 1..nCells
+// normals, then its zonal and meridional components, cells 1..nCells (the
+// caller's nCells or nCellsSolve), levels 1..nVertLevels; ldU and ldOut are
+// the input's and outputs' level strides (nVertLevels+1 for the TopOf fields
+// ocn_reconstruct_gm_vectors passes, whose last level is left as it was)
 extern "C" __global__ void ocn_ss_reconstruct_v842(
     rk *x, rk *y, rk *z, rk *zonal, rk *meridional, const rk *u, const rk *coeffs, const int *nEdgesOnCell,
-    const int *edgesOnCell, const rk *latCell, const rk *lonCell, int nCells, int nl, int me, int onSphere)
+    const int *edgesOnCell, const rk *latCell, const rk *lonCell, int nCells, int nl, int me, int onSphere,
+    int ldU, int ldOut)
 {
     SS_LANE(nCells, nl, c, k);
-    const int p = c * nl + k;
+    const int p = c * ldOut + k;
     rk xs = C(0.0), ys = C(0.0), zs = C(0.0);
     for (int i = 0; i < nEdgesOnCell[c]; ++i) {
         const int e = edgesOnCell[c * me + i] - 1;
         const rk *cf = coeffs + (c * me + i) * 3;
-        xs = A(xs, M(cf[0], u[e * nl + k]));
-        ys = A(ys, M(cf[1], u[e * nl + k]));
-        zs = A(zs, M(cf[2], u[e * nl + k]));
+        xs = A(xs, M(cf[0], u[e * ldU + k]));
+        ys = A(ys, M(cf[1], u[e * ldU + k]));
+        zs = A(zs, M(cf[2], u[e * ldU + k]));
     }
     x[p] = xs;
     y[p] = ys;

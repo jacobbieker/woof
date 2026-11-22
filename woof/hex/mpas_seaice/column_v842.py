@@ -480,10 +480,10 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
     one (its tracers counted, never solved or copied) and, under the
     ``zsal_solve`` correction, the solved one.
 
-    ``z_tracers`` is the caller's too: the init and ``column_biogeochemistry``
-    carry the vertical tracers (``config_use_vertical_tracers``) with the
-    nonreactive tracer alone (:data:`VT_PORTED`); every other stage refuses
-    them."""
+    ``z_tracers`` is the caller's too: the init, ``column_biogeochemistry``,
+    the ITD thermodynamics and the ridging carry the vertical tracers
+    (``config_use_vertical_tracers``) with the nonreactive tracer alone
+    (:data:`VT_PORTED`); every other stage refuses them."""
     c = configs
     if not c.get("config_use_column_package", False):
         _refuse("config_use_column_package", False, "the column port runs only with the column package on",
@@ -495,8 +495,8 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
                     "step only",
                     "config_use_column_biogeochemistry = .false.")
         if c[VT_FLAG] and not z_tracers:
-            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init and column_biogeochemistry "
-                    "only", f"{VT_FLAG} = .false.")
+            _refuse(VT_FLAG, True, "the vertical tracers are ported for the init, column_biogeochemistry, "
+                    "the ITD thermodynamics and the ridging only", f"{VT_FLAG} = .false.")
         carried = BGC_PORTED + (ZSAL_FLAG,) + ((VT_FLAG,) + VT_PORTED if c[VT_FLAG] else ())
         for flag in _BGC_FLAGS:
             if flag not in carried and c[flag]:

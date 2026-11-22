@@ -9,8 +9,8 @@ kernel or a few.
 
 ## 1. What is being linearised
 
-- **Route:** the WRF route, dry, with `moist_adv_opt = 0`, specified or
-  periodic lateral boundaries, one domain, no nests and a fixed `dt`.
+- **Route:** the WRF route, dry (moist with qv, qc and qr from 8l), with
+  `moist_adv_opt = 0`, specified or periodic lateral boundaries, one domain, no nests and a fixed `dt`.
   These are WRFPLUS's own limits.
 - **Routine boundaries:** woof's strict sequence (`GPUWM_WRF_EXACT=1`).
   It keeps WRF's routine boundaries (`small_step_prep`, `advance_uv`,
@@ -707,8 +707,8 @@ Each step is one small PR, taken to merged before the next widens.
      step gives `dycore.step`'s words on a mapped state. With msfv passed
      where the strict path passes MSFV_INV, about 2000 words per
      prognostic differ, so the test pins the choice.
-   - Still refused: lateral boundaries other than periodic (specified
-     boundaries next), so WRFDA's regional tutorial case cannot run yet.
+   - Still refused then: lateral boundaries other than periodic (bound
+     in 8f).
 8f. Specified boundaries in the step (DA item 3): `step_geometry` binds
    woof's strict specified step on a domain whose tables are attached
    (`attach_lateral_boundaries`).
@@ -785,11 +785,12 @@ Each step is one small PR, taken to merged before the next widens.
      supplied state.
    - `Window.trajectory_state(state, cfg)` reads a DomainState (a woof
      forecast's state after some steps) as an entry, in the window's
-     dtype. A WRF trajectory is mapped onto STEP_INPUTS by the caller.
+     dtype. A WRF trajectory is mapped onto `step_inputs(geom)` by the
+     caller (STEP_INPUTS, plus SPECIES on a moist window).
      Each entry must hold what its step reads: on a warm step the
      previous step's diagnosis and carried muts.
    - The geometry is still the window's (the `cfg` it was built with), so
-     a physics run's states are linearised by the dry step: the
+     a physics run's states are linearised by the physics-free step: the
      adiabatic TL of WRFDA's lanes L1/L0 before item 6.
    - `forward` returns state `nsteps`: the supplied one, or one window
      step from the last. A plain `forward()` returns to the window's own
@@ -912,6 +913,39 @@ Each step is one small PR, taken to merged before the next widens.
        `apply_flow_dependent_boundaries` (every ring cell moves) and of
        qv's capture through the primal's own single-row
        `_launch_state_relaxation` with the time-t source and mass.
+     There is no WRFPLUS fixture.
+8l. Moisture, part 5 (DA item 4): the moist step. `step_geometry` now
+   accepts a moist state without microphysics (qv, qc and qr,
+   `mp_physics = 0`, `moist_adv_opt = 0`) and binds 8h-8k in
+   `dycore._step_body`'s strict order:
+   - `_save_time_t` also copies qv, qc and qr to `*0`; the species are
+     step inputs (`step_inputs`), so the window carries them.
+   - Each stage: `calc_cq` (`n_mass` 1) after rk_step_prep; the pressure
+     gradient with `moist_cq`, the buoyancy with `moist` (base mass from
+     mub2d), the diagnosis (each stage's and the epilogue's) with qv, and
+     calc_coef_w, advance_uv and advance_w with `moist_cq`; sumflux zeroed
+     before the substeps, accumulated after each and finished after
+     small_step_finish; then `advance_scalars_stage`: on rk_step 1 with
+     qv's tables qv's held tendency (zeroed, then the relaxation and
+     specified rows from qv0 at mup0), the qv, qc and qr updates (qv's
+     with the held tendency), and on a specified domain flow_dep_bdy for
+     qc and qr.
+   - Epilogue: qv's spec_bdy_final after phi's; qv's tables are step
+     parameters (`QV_INPUTS`).
+   - Refused by name: `moist_adv_opt` != 0, any species beyond qv, qc and
+     qr (ice, numbers, PBL or tracer scalars, registered mass slots),
+     `moist_cq` off, boundary tables for scalars other than qv, a qv
+     table spec_bdy_final does not force back, and a qv table wider or
+     narrower than theta's (one set of Davies weights).
+   - Tests: `tests/test_grad_wrfplus_model.py` (moist, alone and with map
+     factors, rotation, hybrid, w_damp and six substeps, and a cold moist
+     chain of three) and `tests/test_grad_wrfplus_spec_step.py` (a warm
+     moist step and a cold mapped moist chain with the halo off the ring,
+     and the window's moist forward): the binary32 base is
+     `dycore.step`'s words on every input, the species and the sumflux
+     accumulators; dot product (the species in the identity), base-only
+     tape and FD; dropping qv's capture, its final or flow_dep_bdy moves
+     words.
 9. Diffusion, `diff_opt = 1` / `km_opt = 4` (asked for as item 5 of the
    follow-up list). WRF 4.7.1 and WRFPLUS run, at `rk_step = 1` on the
    time-t state: `compute_diff_metrics`, `cal_deform_and_div`,

@@ -219,7 +219,7 @@ def run_gpu(case: dict, n_steps: int | None = None) -> dict[str, np.ndarray]:
     config = case["config"]
     dev["diagnostics"]["xtime"] = config["diagnostics:xtime"]
     dev["diagnostics"]["simulationStartTime"] = config["diagnostics:simulationStartTime"]
-    clock = ts.initialize(pools=dev, configs=config)
+    clock = ts.initialize(pools=dev, configs=config, basis="input")
     ts.advance(pools=dev, configs=config, clock=clock,
                n_steps=int(config["oracle_n_steps"]) if n_steps is None else n_steps)
     return {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in FIELDS

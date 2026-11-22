@@ -23,6 +23,7 @@
 #else
 #define ZB_NBMAX 32
 #endif
+#define ZB_HS_SSL 0.040     // ice_colpkg_shared hs_ssl: the snow surface layer (m)
 #define ZB_REMAP_STOP 2     // ice: remap_layers_bgc error
 // the Fortran's arrays are nbyrn + nlyrn + 3 long; the largest remaps are the
 // shortwave's (nilyr + 1 onto nblyr + 1) and regrid_stationary's (nblyr + 1 onto
