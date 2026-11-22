@@ -684,8 +684,8 @@ def wsm6_workspace_bytes_per_column(nz: int) -> int:
 # WSM5 (mp_physics = 4), phys/module_mp_wsm5.F.  The WSM family shares one
 # constants module: WSM5's process constants are WSM6's rain and snow
 # constants (same intercepts, fall laws and densities; no graupel), and
-# kernels/wsm5.cu compiles at the 64/80 level ladder WSM6 had before its
-# column workspace.
+# kernels/wsm5.cu compiles at the 64/80/128/256 level ladder (WSM6 had 64/80 before its
+# column workspace).
 # ---------------------------------------------------------------------------
 
 #: The float32 words ``wsm5init`` leaves in module_mp_wsm5 (WRF v4.6.1, called

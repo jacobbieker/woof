@@ -3341,9 +3341,12 @@ WDM7_TIER_FRAME = TieredKernelFrame("wdm7", "WDM6_KMAX", 64, 152)
 from woof.core.wsm3_constants import wsm3_level_tier as _wsm3_level_tier
 from woof.core.wsm6_constants import wsm5_level_tier as _wsm5_level_tier
 CONDITIONAL_COLUMN_TIERED_FRAMES = {
-    "wsm3": (TieredKernelFrame("wsm3", "WSM3_KMAX", 64, 88), _wsm3_level_tier),
+    # nz past the ladder is priced at its deepest tier: the vertical contract
+    # owns that refusal (a named PhysicsVerticalPreflightError), not this pricer.
+    "wsm3": (TieredKernelFrame("wsm3", "WSM3_KMAX", 64, 88),
+             lambda nz: _wsm3_level_tier(min(max(int(nz), 2), 256))),
     "wsm5": (TieredKernelFrame("wsm5", "WSM5_KMAX", 80, 88),
-             lambda nz: max(80, _wsm5_level_tier(nz))),
+             lambda nz: max(80, _wsm5_level_tier(min(max(int(nz), 2), 256)))),
 }
 
 

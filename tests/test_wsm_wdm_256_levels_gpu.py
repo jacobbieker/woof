@@ -16,10 +16,10 @@ scheme:
    moved" catches.
 
 2. **Nothing moved at or below the old ceiling.**  The 64 and 80 tiers are
-   the unchanged source, so at nz = 49 and nz = 80 every output word of the
-   shipped launcher equals the same source compiled at the 256 tier (and at
-   the old 80 tier), compared as raw bits: the tier is an allocation size
-   and no arithmetic depends on it.
+   the unchanged source (and are what the shipped launcher compiles there),
+   so at nz = 49 and nz = 80 every output word of the shipped launcher
+   equals the same source compiled at the 128 and 256 tiers, compared as raw
+   bits: the tier is an allocation size and no arithmetic depends on it.
 
 3. **The admitted bound and the priced frame follow.**  The contract bound,
    the registry row and preflight's per-thread local frame are the 256-level
@@ -396,6 +396,9 @@ def test_the_priced_frames_are_what_the_driver_reports():
         "wdm5": ("WDM5_KMAX", (), pf.WDM5_TIER_FRAME.frame_bytes),
         "wdm7": ("WDM6_KMAX", (("WDM_HAIL", 1),), pf.WDM7_TIER_FRAME.frame_bytes),
     }
+    from woof.core import wsm_family
+    cases["wsm7"] = ("WSM7_KMAX", (), lambda t: dict(
+        wsm_family.row(24).local_frame_bytes)[t])
     for unit, (define, extra, priced) in cases.items():
         source = (Path(kernels.__file__).parent / f"{unit}.cu").read_text()
         names = sorted(set(re.findall(
