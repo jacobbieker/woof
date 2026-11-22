@@ -8,12 +8,13 @@ for explicitly.  Every public entry point stamps ``status="experimental"``
 into its provenance so a downstream product can refuse to ship a field that
 passed through it.
 
-What is here since 3.0.3.  The local data assimilation that lived in this
-package (``woof local-da``, the LETKF, the static-covariance analysis, the
-radar, satellite and point-observation adapters, the reflectivity nudging,
-the spread repair and the cycle drivers) was removed in gpuwm 3.0.3: it was
-experimental and no longer maintained.  What stays is used by forecasts,
-ensembles and verification, and keeps its import path:
+What is here since 3.0.3.  Upstream gpuwm 3.0.3 removed the local data
+assimilation from this package (``woof local-da``, the LETKF, the static-covariance
+analysis, the radar, satellite and point-observation adapters, the reflectivity
+nudging, the spread repair and the cycle drivers).  This fork keeps all of it
+as fork-owned code: ``woof local-da`` still runs, and :mod:`woof.da.letkf`,
+:mod:`woof.da.obs_point` and the other modules keep their import paths.  The
+modules upstream kept are used by forecasts, ensembles and verification:
 
 - :mod:`woof.da.analysis_door` -- ``woof run --wrfinput DIR --analysis
   BUNDLE``: a forecast started from an analysis made elsewhere, with

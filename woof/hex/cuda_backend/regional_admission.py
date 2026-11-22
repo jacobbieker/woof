@@ -915,7 +915,7 @@ class RegionalContract:
 #: tools/repin_source_tables.py; not a new mint.
 #: (47) 2026-11-22 (fork sync of upstream WOOF 1.1.7): the fork's notes (fork-41) to (fork-43) above were
 #: written against the fork's own (40); upstream's (41) to (46) moved the same set. The merged set carries both;
-#: the value below must be re-derived by tools/repin_source_tables.py on the merged tree (sync follow-up).
+#: the value below was re-derived by tools/repin_source_tables.py on the merged tree.
 MINTED_KERNEL_SET_SHA256 = (
     "50bf2ff1ec9b69e04ffc4756ff41d4b8acdbb4d0a7d7d3681875d568ff3e8c51"
 )
