@@ -297,8 +297,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     coupler's land-ice means; standalone, in the diagnostics and over forward
     steps; 'HollandJenkins' is refused by name), and the Gent-McWilliams
     bolus velocity (`ocn_gm_compute_Bolus_velocity`: isoneutral slopes,
-    their smoothing and tapering, `k33`, the stream function's solve;
-    standalone, not yet wired into the step). Three v8.4.2 quirks keep
+    their smoothing and tapering, `k33`, the stream function's solve) and
+    Redi isoneutral mixing (`ocn_tracer_hmix_redi_tend`'s three horizontal
+    terms, and `k33` in the vertical diffusivity, which v8.4.2 adds without
+    `config_Redi_kappa`; `woof_redi_k33 = 'kappa'` scales it), standalone
+    and not yet wired into the step. Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
@@ -1271,13 +1274,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`Window.tl(dx0, partial=True)`). It can also linearise about a
   supplied trajectory instead of its own dry rerun, as WRFPLUS does
   about the nonlinear run's states (`Window.forward(trajectory=...)`).
-  The first moist pieces exist as kernels but are not yet in the step:
-  `calc_cq` (qv, or qv, qc and qr), the pressure gradient's cqu/cqv, the
-  moist buoyancy, the diagnosis's qv (WRF's `qvf`), moist scalar
-  transport (sumflux and the non-PD scalar update,
-  `woof.grad.wrfplus.scalar`), and the moist boundary rows (qv's
-  relaxation and spec_bdy_final, flow_dep_bdy for hydrometeors). The
-  forecast path does not import any of it.
+  The step also covers a moist state without microphysics (qv, qc and
+  qr: calc_cq, the moist pressure gradient, buoyancy and diagnosis,
+  sumflux and the non-PD scalar update, and qv's boundary rows with
+  flow_dep_bdy for qc and qr). The forecast path does not import any of
+  it.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8

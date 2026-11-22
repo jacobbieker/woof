@@ -127,6 +127,10 @@ def check_config(configs: dict, groups=("activeTracers",)) -> None:
         raise ValueError("config_jerlov_water_type must lie within 1..5")
     tracer_advection_v842.check_config(configs)
     tracer_hmix_v842.check_config(configs)
+    if configs.get("config_use_standardGM", False):
+        _refuse("config_use_standardGM", True,
+                "Redi isoneutral mixing is ported (tracer_hmix_v842) but not yet run inside ocn_tend_tracer",
+                "config_use_standardGM = .false.")
 
 
 def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_tend: dict,
