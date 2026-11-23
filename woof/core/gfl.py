@@ -71,13 +71,18 @@ METAL_REFUSAL = (
     "Metal, or run on CUDA.")
 
 
-def refuse_on_metal():
-    """Refuse GFL at setup on the Metal backend, before any step, naming the Metal-ready choice.
+def refuse_on_metal(backend_name=None):
+    """Refuse GFL on the Metal backend, before any step, naming the Metal-ready choice.
 
-    No silent fallback: the run must select cu_gf_version='wrf_461' itself.
+    ``backend_name`` is the backend the caller prices for (preflight's
+    profile); otherwise the installed backend, or the one this process would
+    select -- read without installing one. No silent fallback: the run must
+    select cu_gf_version='wrf_461' itself.
     """
-    from woof import backend
-    if backend.active() == "mlx":
+    if backend_name is None:
+        from woof import backend
+        backend_name = backend._active if backend._active is not None else backend.requested()
+    if backend_name == "mlx":
         from woof.config import UnsupportedConfiguration
         raise UnsupportedConfiguration(METAL_REFUSAL)
 
