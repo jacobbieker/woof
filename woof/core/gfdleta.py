@@ -5,56 +5,81 @@ import math
 import numpy as np
 from woof.core.kernels import get_kernel
 from woof.config import DEFAULT_COLUMN_CHUNK
+from woof.core import gfdleta_levels as levels
 
 _ROOT=Path(__file__).parent
-_LAYOUT=json.loads((_ROOT/'gfdleta_column_layout.json').read_text())
-_INIT_LAYOUT=json.loads((_ROOT/'gfdleta_init_layout.json').read_text())
-_OFFSETS={}
-_table_count=0
-for _name,(_kind,_shape) in _LAYOUT['tables'].items():
-    _count=math.prod(int(v) for v in _shape.split(',')) if _shape else 1
-    _OFFSETS[_name]=(_table_count,_count)
-    _table_count+=_count
+
+def _table_offsets(layout):
+    offsets={};count=0
+    for name,(_kind,shape) in layout['tables'].items():
+        size=math.prod(int(v) for v in shape.split(',')) if shape else 1
+        offsets[name]=(count,size);count+=size
+    return offsets,count
+
+class _Tier:
+    """One storage tier's modules and layouts (woof.core.gfdleta_levels)."""
+    def __init__(self,maxl):
+        self.maxl=maxl
+        self.column_module=levels.column_module(maxl)
+        self.init_module=levels.co2_init_module(maxl)
+        self.layout=levels.column_layout(maxl)
+        self.init_layout=levels.init_layout(maxl)
+        self.offsets,self.table_count=_table_offsets(self.layout)
+
+_TIERS={}
+def _tier(maxl):
+    if maxl not in _TIERS:_TIERS[maxl]=_Tier(maxl)
+    return _TIERS[maxl]
+
+# The shipped (81-layer storage) tier, as before the deep tier existed.
+_LAYOUT=_tier(levels.SHIPPED_MAXL).layout
+_INIT_LAYOUT=_tier(levels.SHIPPED_MAXL).init_layout
+_OFFSETS=_tier(levels.SHIPPED_MAXL).offsets
+_table_count=_tier(levels.SHIPPED_MAXL).table_count
 
 class GFDLTables:
     """Run-level tables built for the actual vertical grid, as GFDLETAINIT."""
-    def __init__(self,sigma_full,sigma_half,p_top,*,co2tf=1,table_root=None,transmission=None,start_time=None):
+    def __init__(self,sigma_full,sigma_half,p_top,*,co2tf=1,table_root=None,transmission=None,start_time=None,maxl=None):
         import cupy as cp
         from woof.table_assets import physics_table_root
         root=physics_table_root('gfdleta',table_root)
         n=int(sigma_half.size)
-        if n<1 or n>81 or int(sigma_full.size)!=n+1:
-            raise ValueError('GFDL ozone tables cover 1..81 layers; full sigma needs n+1 interfaces')
+        if n<1 or n>levels.DEEP_MAXL or int(sigma_full.size)!=n+1:
+            raise ValueError(f'GFDL Eta tables cover 1..{levels.DEEP_MAXL} layers; full sigma needs n+1 interfaces')
+        # maxl forces a storage tier at or above the column's own (tests).
+        tier=_tier(levels.maxl_tier(n) if maxl is None else int(maxl))
+        if n>tier.maxl:raise ValueError(f'{n} layers exceed GFDL Eta storage tier {tier.maxl}')
         if co2tf not in (0,1):
             raise ValueError('co2tf must be 0 (CONRAD) or 1 (CO2O3)')
-        self.n=n
-        self.words=cp.zeros(_table_count,cp.uint32)
+        self.n=n;self.tier=tier;self.maxl=tier.maxl
+        init=tier.init_module
+        self.words=cp.zeros(tier.table_count,cp.uint32)
         def read(name):
             # These NPY assets were decoded and rounded by the Rust table tool.
             return cp.asarray(np.load(root/name,allow_pickle=False),dtype=cp.float32)
         ozone=read('ozone-coefficients.npy')
         sf=cp.ascontiguousarray(cp.asarray(sigma_full,dtype=cp.float32)).copy()
         sh=cp.ascontiguousarray(cp.asarray(sigma_half,dtype=cp.float32)).copy()
-        get_kernel('gfdleta_co2_init','gd_initialize_climatology')((30,),(256,),(
+        get_kernel(init,'gd_initialize_climatology')((30,),(256,),(
             self.words,ozone,sh,np.float32(p_top/1000.),np.int32(n)))
         if co2tf==1:
             raw=read('co2-raw.npy')
-            work=cp.empty((8,_INIT_LAYOUT['scratch_bytes']),cp.uint8)
-            state=cp.empty((8,_INIT_LAYOUT['state_bytes']),cp.uint8)
-            private_tables=cp.empty((8,_table_count),cp.uint32)
+            work=cp.empty((8,tier.init_layout['scratch_bytes']),cp.uint8)
+            state=cp.empty((8,tier.init_layout['state_bytes']),cp.uint8)
+            private_tables=cp.empty((8,tier.table_count),cp.uint32)
             status=cp.empty(8,cp.int32)
-            get_kernel('gfdleta_co2_init','gd_prepare_co2_profiles')(((8*106929+255)//256,),(256,),(raw,state))
-            get_kernel('gfdleta_co2_init','gd_initialize_co2_profiles')((8,),(32,),(
+            get_kernel(init,'gd_prepare_co2_profiles')(((8*106929+255)//256,),(256,),(raw,state))
+            get_kernel(init,'gd_initialize_co2_profiles')((8,),(32,),(
                 private_tables,sf,sh,np.float32(p_top/1000.),np.int32(n),work,state,status))
-            get_kernel('gfdleta_co2_init','gd_merge_co2_profiles')((((n+1)*(n+1)+255)//256,),(256,),(self.words,work,np.int32(n)))
+            get_kernel(init,'gd_merge_co2_profiles')((((n+1)*(n+1)+255)//256,),(256,),(self.words,work,np.int32(n)))
             # Initialization validates the asset/grid once, before stepping.
             if np.any(cp.asnumpy(status)):
                 raise ValueError('GFDL CO2 interpolation produced a nonpositive logarithm argument')
         if co2tf==0:
             if transmission is None:
                 file_levels=json.loads((root/'MANIFEST.json').read_text())['binary_levels']
-                if type(file_levels) is not int or not 1<=file_levels<=81:
-                    raise ValueError('CONRAD table metadata must declare an integer layer count within 1..81')
+                if type(file_levels) is not int or not 1<=file_levels<=levels.DEEP_MAXL:
+                    raise ValueError(f'CONRAD table metadata must declare an integer layer count within 1..{levels.DEEP_MAXL}')
                 if n!=file_levels:
                     raise ValueError(f'CONRAD co2_trans has {file_levels} layers, run has {n}; select co2tf=1 to compute transmission for this grid')
                 transmission=np.load(root/f'co2-trans-{file_levels}.npy',allow_pickle=False)
@@ -62,7 +87,7 @@ class GFDLTables:
             expected=14*(n+1)+6*n+6*(n+1)*(n+1)
             if transmission.size!=expected:
                 raise ValueError(f'CONRAD transmission shape is wrong for {n} layers: expected {expected} values')
-            get_kernel('gfdleta_co2_init','gd_conrad')((27,),(256,),(self.words,transmission,np.int32(n)))
+            get_kernel(init,'gd_conrad')((27,),(256,),(self.words,transmission,np.int32(n)))
         # TABLE uses its published coefficients, not precomputed oracle outputs.
         coeff=read('table-coefficients.npy');aux=cp.empty(4,cp.float32)
         get_kernel('gfdleta_table_runtime','gd_table_rows_runtime')((1,),(32,),(
@@ -83,14 +108,14 @@ class GFDLTables:
 
 
     def view(self,name):
-        off,count=_OFFSETS[name]
+        off,count=self.tier.offsets[name]
         return self.words[off:off+count].view(np.float32)
 
 class GFDLEtaRadiation:
     """ETARA driver using WRF stepra/nphs, cloud state and table initialization."""
     publishes_cldfra=True
     above_atmosphere_policy='wrf-v4.6.1-gfdl-model-column'
-    def __init__(self,start_time,latitude_deg,longitude_deg,*,p_top=None,co2tf=1,longwave=True,shortwave=True,column_chunk=None):
+    def __init__(self,start_time,latitude_deg,longitude_deg,*,p_top=None,co2tf=1,longwave=True,shortwave=True,column_chunk=None,maxl=None):
         import cupy as cp
         self.start_time=start_time
         self.latitude_deg=cp.ascontiguousarray(cp.asarray(latitude_deg,dtype=cp.float32))
@@ -102,6 +127,9 @@ class GFDLEtaRadiation:
         # Device workers reuse bounded scratch across the column grid.
         self.column_chunk=DEFAULT_COLUMN_CHUNK if column_chunk is None else int(column_chunk)
         if self.column_chunk<1:raise ValueError('GFDL column_chunk must be positive')
+        # None runs each grid at its own storage tier (woof.core.gfdleta_levels);
+        # an explicit tier serves the deep-tier identity tests.
+        self.maxl=maxl
         self.tables=None
         self.update_count=0
 
@@ -123,11 +151,13 @@ class GFDLEtaRadiation:
         nz,ny,nx=atmosphere['temperature'].shape
         if self.latitude_deg.shape!=(ny,nx):raise ValueError('GFDL latitude/longitude must match the model grid')
         if self.tables is None:
-            self.tables=GFDLTables(state.znw,state.znu,float(state.p_top),co2tf=self.co2tf,start_time=self.start_time)
+            self.tables=GFDLTables(state.znw,state.znu,float(state.p_top),co2tf=self.co2tf,start_time=self.start_time,maxl=self.maxl)
+        tier=self.tables.tier;layout=tier.layout
+        if nz>tier.maxl:raise ValueError(f'{nz} layers exceed GFDL Eta storage tier {tier.maxl}')
         ncol=ny*nx
-        f=cp.zeros((ncol,_LAYOUT['float_count']),cp.float32)
-        ints=cp.zeros((ncol,_LAYOUT['int_count']),cp.int32)
-        descriptors={x['name']:x for x in _LAYOUT['fields']}
+        f=cp.zeros((ncol,layout['float_count']),cp.float32)
+        ints=cp.zeros((ncol,layout['int_count']),cp.int32)
+        descriptors={x['name']:x for x in layout['fields']}
         def put(name,value):
             d=descriptors[name];a=f if d['kind']=='real' else ints
             target=a[:,d['offset']:d['offset']+d['count']]
@@ -152,9 +182,9 @@ class GFDLEtaRadiation:
         scalar.update({k:1 for k in 'ids jds kds ims jms kms its jts kts ime jme ite jte'.split()})
         scalar.update({'ide':2,'jde':2,'kde':nz+1,'kme':nz+1,'kte':nz})
         for name,value in scalar.items():put(name,value)
-        chunk=min(ncol,self.column_chunk)
-        work=cp.empty((chunk,_LAYOUT['scratch_bytes']),cp.uint8)
-        kernel=get_kernel('gfdleta_column','gd_radiation_columns_pooled')
+        chunk=levels.column_slots(ncol,self.column_chunk,tier.maxl)
+        work=cp.empty((chunk,layout['scratch_bytes']),cp.uint8)
+        kernel=get_kernel(tier.column_module,'gd_radiation_columns_pooled')
         kernel(((chunk+31)//32,),(32,),
                (self.tables.words,f,ints,work,np.int32(ncol),np.int32(chunk),np.int32(self.longwave),np.int32(self.shortwave)))
         def take(name):

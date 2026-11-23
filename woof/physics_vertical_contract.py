@@ -416,9 +416,12 @@ def legacy_radiation_layer_counts(
     return int(nz) + max(1, rounded), int(nz) + 1
 
 
-# GFDL Eta owns 81-layer work arrays and 82 interface slots. Larger grids
-# would index past the explicit CUDA layout before a radiation call completes.
-GFDLETA_VERTICAL_LEVEL_BOUNDS = (1, 81)
+# GFDL Eta (ra_lw/sw_physics = 99): stock WRF sizes every model-level array
+# from kte; its NL=81 is the ozone climatology's fixed pressure grid.  The
+# transcription's per-column storage is generated at 81 (the unchanged units,
+# every column of at most 81 layers) or 256.  The ceiling is the deep tier of
+# the CuPy-free ladder.
+from woof.core.gfdleta_levels import VERTICAL_LEVEL_BOUNDS as GFDLETA_VERTICAL_LEVEL_BOUNDS
 
 # GSFC shortwave (ra_sw_physics = 2): its device arena is compiled at
 # GSFC_KMAX 128 (the unchanged source, every column of at most 128 layers)

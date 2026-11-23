@@ -86,7 +86,8 @@ FTZ_FALSE_SOURCES = frozenset({
     # no-FTZ units. Both the ordinary and integer-tier runtime dispatch and
     # effective options are checked by the source gate's port-route test.
     "cam3_emissivity.cu", "eeps.cu", "gfdleta_co2_init.cuh",
-    "gfdleta_column.cuh", "gsfcgce4ice_aux.cu", "qnsepbl.cu", "sas.cu",
+    "gfdleta_column.cuh", "gfdleta_co2_init_l256.cuh", "gfdleta_column_l256.cuh",
+    "gsfcgce4ice_aux.cu", "qnsepbl.cu", "sas.cu",
     "sstskin.cu", "temf.cu",
     # Existing no-FTZ port routes, now inventoried by the source gate.
     "gsfcsw.cu", "gsfcsw_fast.cuh", "ishmael.cu", "kfcup.cu", "km5.cu",

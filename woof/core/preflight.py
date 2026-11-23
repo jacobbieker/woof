@@ -4450,6 +4450,13 @@ def _radiation_kernel_modules(run, grid_id: int) -> frozenset[str]:
             modules.update(_radiation_44_kernel_modules(run))
         elif value == 14:
             modules.update(_RRTMGK_KERNEL_MODULES)
+        elif value == 99:
+            # Above 81 layers the column and CO2 units are the 256-layer
+            # storage tier (woof/core/gfdleta_levels.py).
+            from woof.core.gfdleta_levels import maxl_tier, suffix
+            tier = suffix(maxl_tier(run.nz))
+            modules.update(m + tier if m in ("gfdleta_column", "gfdleta_co2_init") else m
+                           for m in _RADIATION_KERNEL_MODULES[value])
         else:
             modules.update(_RADIATION_KERNEL_MODULES[value])
     return frozenset(modules)
@@ -6984,7 +6991,9 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
     if 99 in (ra_lw_physics,ra_sw_physics):
         for name in 'htop hbot htopr hbotr cuppt acfrst acfrcv cfracl cfracm cfrach swdownc rswtoa rlwtoa czmean ncfrst ncfrcv'.split():
             shapes['fields/'+name]=s2
-        shapes['radiation/gfdleta_tables']=(123192,)
+        # GFDLTables.words of the storage tier the grid runs at.
+        from woof.core.gfdleta_levels import init_layout, maxl_tier
+        shapes['radiation/gfdleta_tables']=(init_layout(maxl_tier(cfg.nz))['table_bytes']//4,)
     if 4 in (ra_lw_physics, ra_sw_physics):
         # RRTMGPRadiation.__post_init__ ozone climatology profiles
         # (rrtmgp.py:1076-1077): two 60-level FP32 device arrays, 480 B.
@@ -9776,14 +9785,14 @@ def _named_three_radius_schemes() -> frozenset[int]:
 def gfdleta_column_shapes(cfg: RunConfig, *, column_chunk: int=DEFAULT_COLUMN_CHUNK):
     """Explicit ETARA packing and solver storage from the generated layouts."""
     if 99 not in radiation_scheme_ids(cfg):return {}
-    from pathlib import Path
-    import json
-    root=Path(__file__).parent
-    columns=json.loads((root/'gfdleta_column_layout.json').read_text())
-    initialization=json.loads((root/'gfdleta_init_layout.json').read_text())
+    from woof.core import gfdleta_levels as levels
+    # The layouts of the storage tier this grid's columns run at.
+    maxl=levels.maxl_tier(cfg.nz)
+    columns=levels.column_layout(maxl)
+    initialization=levels.init_layout(maxl)
     ncol=int(cfg.nx)*int(cfg.ny)
     return {'gfdleta/packed':((ncol,columns['float_count']+columns['int_count']),4),
-            'gfdleta/column_work':((min(ncol,column_chunk),columns['scratch_bytes']),1),
+            'gfdleta/column_work':((levels.column_slots(ncol,column_chunk,maxl),columns['scratch_bytes']),1),
             # Eight independent band/method/pressure profiles own private
             # recurrence state and tables during CO2O3 initialization.
             'gfdleta/init_work':((8*(initialization['scratch_bytes']+initialization['state_bytes']+initialization['table_bytes'])+427716+4212+32,),1)}
