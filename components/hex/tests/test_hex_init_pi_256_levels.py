@@ -241,6 +241,12 @@ def test_the_deep_init_build_reproduces_the_shipped_words_and_runs_256_levels():
 @pytest.mark.gpu
 def test_the_pi_kernel_matches_the_cpu_algebra_at_200_levels(algebra):
     cp = pytest.importorskip("cupy")
+    from woof import backend
+    if backend.active() != "cuda":
+        # The PI module is binary64 throughout (and calls remainder()); Metal
+        # has no double, so the module does not build there at any tier
+        # (test_tc_climate's resident PI test fails the same way on main).
+        pytest.skip("the TC PI kernel is binary64 and CUDA-only")
     ref, _ = _reference()
     p, t, r = _resampled(200)
     module = cp.RawModule(code=session.pi_source(session.pi_level_tier(200)), options=("--std=c++17",))
