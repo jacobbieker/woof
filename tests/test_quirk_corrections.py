@@ -125,6 +125,10 @@ def test_all_adds_the_seaice_velocity_corrections():
     assert timestep_v842.velocity_corrections(on, (), weak_v842.CORRECTIONS) == ("weak_ridge_delta",)
     assert timestep_v842.velocity_corrections(on, ("weak_ridge_delta",), weak_v842.CORRECTIONS) == (
         "weak_ridge_delta",)
+    # under the mode's default a named subset is the whole set; 'all' widens it
+    table = ("planar_metric_terms", "periodic_local_coords")
+    assert timestep_v842.velocity_corrections({}, ("planar_metric_terms",), table) == ("planar_metric_terms",)
+    assert timestep_v842.velocity_corrections(on, ("planar_metric_terms",), table) == table
 
 
 def test_all_scales_redi_k33_by_kappa():
@@ -151,9 +155,9 @@ def test_the_docs_list_every_correction():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     config = (ROOT / "docs" / "public" / "CONFIGURATION.md").read_text(encoding="utf-8")
     start = readme.index("woof_quirk_corrections")
-    umbrella_readme = readme[start:start + 3000]
+    umbrella_readme = readme[start:start + 4000]
     start = config.index("`woof_quirk_corrections` (default")
-    umbrella_config = config[start:start + 3000]
+    umbrella_config = config[start:start + 4000]
     for c in qc.CORRECTIONS:
         name = "--undriven-species-boundary" if c.key == "undriven_species_boundary" else c.key
         for text in (umbrella_readme, umbrella_config):
@@ -306,8 +310,9 @@ def test_all_and_none_set_the_run_corrections():
 def test_an_explicit_umbrella_refuses_a_conflicting_key_by_name():
     with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
         qc.apply_run_corrections({qc.UMBRELLA: "all", "bl_pbl_physics": 1, "ysu_surface_heat_exner": False})
-    with pytest.raises(ConfigurationRefused, match="woof_quirk_corrections = 'none'"):
-        qc.apply_run_corrections({qc.UMBRELLA: "none", "cu_physics": 3, "gf_deep_rain_evaporation_booking": True})
+    # 'none' with an individual key: the key wins (as before the mode switch)
+    assert qc.apply_run_corrections({qc.UMBRELLA: "none", "cu_physics": 3, "gf_deep_rain_evaporation_booking": True})[
+        "gf_deep_rain_evaporation_booking"] is True
     # a key whose scheme the domain does not run is never read: no conflict
     assert qc.apply_run_corrections(
         {qc.UMBRELLA: "all", "bl_pbl_physics": 5, "ysu_surface_heat_exner": False})["ysu_surface_heat_exner"] is True
@@ -317,8 +322,7 @@ def test_an_explicit_umbrella_refuses_a_conflicting_key_by_name():
         assert qc.option({qc.UMBRELLA: "all", key: c.corrected}, key) == c.corrected
         with pytest.raises(ConfigurationRefusal, match=key):
             qc.option({qc.UMBRELLA: "all", key: c.exact}, key)
-        with pytest.raises(ConfigurationRefusal, match=key):
-            qc.option({qc.UMBRELLA: "none", key: c.corrected}, key)
+        assert qc.option({qc.UMBRELLA: "none", key: c.corrected}, key) == c.corrected
         # a value that is no option at all is the port's to refuse as such
         assert qc.option({qc.UMBRELLA: "all", key: "typo"}, key) == "typo"
     with pytest.raises(ValueError, match="--quirk-corrections all .*--undriven-species-boundary free"):

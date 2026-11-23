@@ -5026,8 +5026,8 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
                 and "noah_smc_floor_booking" not in dom):
             kw["noah_smc_floor_booking"] = False
-        # woof_quirk_corrections = 'all': every opt-in correction whose
-        # scheme this domain runs, a conflicting explicit key refused by name.
+        # an explicit woof_quirk_corrections ('all' / 'none') sets every
+        # correction key the domain does not set itself (quirk_corrections).
         from woof.quirk_corrections import apply_run_corrections
         kw = apply_run_corrections(kw)
         # G3-only shared controls reach only G3 domains. Explicit domain

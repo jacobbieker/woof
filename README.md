@@ -728,8 +728,8 @@ Notes on the 1.1.7 sync:
     corrections follow the mode, and a correction's own key wins: that
     turns one off in correct mode, or on in exact mode. `"all"` / `"none"`
     turns every one on / off whatever the mode (the hex door takes
-    `--quirk-corrections all|none`), and a key set the other way next to
-    it is refused by name. On the WRF route the four keys are correct-mode
+    `--quirk-corrections all|none`); a key set false next to `"all"` is
+    refused by name, and a key set next to `"none"` wins. On the WRF route the four keys are correct-mode
     findings FQ1-FQ4, so the run receipt's `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt` and `noah_smc_floor_booking` (WRF route); `--undriven-species-boundary

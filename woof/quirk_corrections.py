@@ -268,7 +268,7 @@ def option(config: dict, key: str):
     """The value an MPAS config dict gives correction ``key``: its own key
     when set, else the corrected value in correct mode (or under 'all'),
     else the word-exact value (exact mode, or 'none'). A set key that
-    conflicts with an explicit umbrella is refused by name."""
+    conflicts with an explicit 'all' is refused by name."""
     c = BY_KEY[key]
     if c.route not in ("mpas_ocean", "mali"):
         raise ValueError(f"{key} is carried on the {c.route} route, not in an MPAS config dict")
@@ -278,7 +278,7 @@ def option(config: dict, key: str):
         # (a value that is neither the exact nor the corrected one is the
         # port's own to refuse as not an option, with or without the umbrella)
         other = c.exact if umbrella == "all" else c.corrected
-        if explicit and value == other:
+        if explicit and umbrella == "all" and value == other:
             raise _refusal(key, value, conflict_message(key, value, umbrella),
                            f"{key} = {_wanted(c, umbrella)!r} or unset, with {UMBRELLA} = {umbrella!r}")
         return value
@@ -294,9 +294,11 @@ def apply_run_corrections(kw: dict) -> dict:
     """The WRF route's TOML readers: a RunConfig keyword dict with an
     explicit umbrella resolved.
 
-    Under ``woof_quirk_corrections = 'all'`` / ``'none'`` every RunConfig
-    correction is set true / false; one set explicitly the other way where
-    its scheme runs is refused by name (woof.config.ConfigurationRefused).
+    Under ``woof_quirk_corrections = 'all'`` every RunConfig correction is
+    set true, and one set explicitly false where its scheme runs is refused
+    by name (woof.config.ConfigurationRefused).  Under ``'none'`` every one
+    not set explicitly is set false; one set explicitly keeps its value
+    (as before the mode switch: 'none' with the individual keys).
     The returned dict is the input otherwise (unset: each key keeps its
     own value, whose default follows the physics mode).
     RunConfig.__post_init__ applies the same rule to a RunConfig built
@@ -313,6 +315,8 @@ def apply_run_corrections(kw: dict) -> dict:
     for key, wanted in run_corrections_under(value).items():
         # a key whose scheme the domain does not run is never read; the
         # experiment reader writes such keys off on those domains
+        if key in out and value == "none":
+            continue  # 'none' with an individual key: the key wins
         if key in out and out[key] is not wanted and run_scheme_active(key, out, RunConfig):
             raise ConfigurationRefused(conflict_message(key, out[key], value))
         out[key] = wanted
@@ -392,8 +396,8 @@ def hex_umbrella(arguments) -> tuple[str, bool]:
     value = getattr(arguments, "quirk_corrections", None)
     if value is not None:
         return umbrella_value(value), True
-    from woof.hex.correct_mode import DEFAULT_PHYSICS_MODE
-    return default_umbrella(getattr(arguments, "physics_mode", None) or DEFAULT_PHYSICS_MODE), False
+    # unset: this process's default mode (exact in a strict WRF process)
+    return default_umbrella(getattr(arguments, "physics_mode", None)), False
 
 
 def hex_undriven_species_boundary(arguments, *, carried: bool = True) -> str | None:
@@ -401,8 +405,8 @@ def hex_undriven_species_boundary(arguments, *, carried: bool = True) -> str | N
     the explicit flag when given, else ``wrf-flow-dependent`` on a regional
     run (``--lbc-dir``) whose route ``carried`` the rule, in correct mode
     or under ``--quirk-corrections all``, else None (``free``). An explicit
-    flag that contradicts an explicit ``--quirk-corrections`` on a regional
-    run is refused by name."""
+    flag that contradicts an explicit ``--quirk-corrections all`` on a
+    regional run is refused by name."""
     mode = getattr(arguments, "undriven_species_boundary", None)
     umbrella, explicit = hex_umbrella(arguments)
     regional = getattr(arguments, "lbc_dir", None) is not None
@@ -410,7 +414,7 @@ def hex_undriven_species_boundary(arguments, *, carried: bool = True) -> str | N
         return mode
     c = BY_KEY["undriven_species_boundary"]
     if mode is not None:
-        if explicit and carried and mode != _wanted(c, umbrella):
+        if explicit and umbrella == "all" and carried and mode != c.corrected:
             raise ValueError(conflict_message("undriven_species_boundary", mode, umbrella))
         return mode
     if umbrella != "all" or not carried:

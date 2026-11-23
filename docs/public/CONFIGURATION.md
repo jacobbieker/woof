@@ -621,13 +621,14 @@ mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
 MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
 A correction's own key, when set, wins over the mode, which is how one is
 turned off in correct mode or on in exact mode. `"all"` and `"none"` turn
-every correction on and off whatever the mode, and a key set the other way
-next to them is refused by name. A correction whose scheme the run does
+every correction on and off whatever the mode; a key set the other way
+next to `"all"` is refused by name, and a key set next to `"none"` wins. A correction whose scheme the run does
 not carry is inert. Per domain, like the corrections. The same key works
 in the MPAS config dicts, and the hex door takes it as
-`--quirk-corrections all|none`. The MPAS-Seaice corrections are names, so
-a subset runs as `"none"` with the wanted names in
-`woof_v842_corrections`. In correct mode, or under `"all"`, these are on:
+`--quirk-corrections all|none`. The MPAS-Seaice corrections are names: with the umbrella unset, the
+names given in `woof_v842_corrections` are the whole set (so naming fewer
+turns the others off), and the seaice velocity set-up's named corrections
+likewise. In correct mode, or under `"all"`, these are on:
 
 - WRF route (RunConfig): `gf_deep_rain_evaporation_booking = true`
   (`cu_physics = 3`), `ysu_surface_heat_exner = true`
