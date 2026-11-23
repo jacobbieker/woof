@@ -550,6 +550,22 @@ closure has not been qualified. Source pins and the public-domain notice
 are recorded in
 [the GCE source audit](../../tools/gsfcgce_wrf461_oracle/SOURCE.md).
 
+**Correction: `thompson_rain_snow_closure` (on in correct mode, finding FQ5).**
+WRF 4.7.1's Thompson (`module_mp_thompson.F`) limits the rain and snow
+losses of rain-snow collection when they would exhaust either species, and
+re-pairs the transfer only above 0 C wet bulb (:2946-2950). Below it the
+graupel gain `prg_rcs` keeps its value from before the limiters, so the
+exchange creates graupel, and its freezing heat, out of rain and snow that
+ran out. With the correction on, `prg_rcs = -(prr_rcs + prs_rcs)` after the
+limiters, so the gain is what rain and snow lose, floored at zero: where
+snow's own term is a net gain that the rain limiter has shrunk rain's loss
+below, snow takes only what rain lost (`prs_rcs = -prr_rcs`) and graupel
+gains nothing, so no graupel sink is clipped at `qg = 0` into water. It is per domain, read
+only where `mp_physics = 8`, `28` or `38` (every `thompson_version`), and
+compiled in by a define, so exact mode runs WRF's program unchanged
+(`tests/test_thompson_rain_snow_closure.py`). The hex MPAS-suite Thompson
+and RCON (`mp_physics = 29`) do not carry it.
+
 ### Ferrier-Aligo with advected rime (`mp_physics = 15`)
 
 Option 15 transports total ice and `QRIMEF`, the ice mass multiplied by
@@ -2195,8 +2211,13 @@ Select the split pair in a stock WRF namelist or experiment configuration.
 
 The CUDA column follows WRF's stock controls: old gas quadrature, mixed ice
 optics, prescribed ozone, binary cloud occupancy and no offline aerosol
-input. Its native three cloud groups require 4 to 100 model layers. All
-column work stays on the GPU; the adapter retains its tables and workspace.
+input. Its native three cloud groups require at least 4 model layers, and
+it runs up to 256: stock WRF's `nvx = 100` scratch bound is the compile-time
+`FLG_NVX` tier, 100 (the unchanged stock bound, every column of at most 100
+layers) or 256. A 101 to 256 layer column is checked word for word against
+WRF's `module_ra_flg.F` with only `nvx` raised to 256 (the recorded patch is
+in [the provenance file](../../woof/data/wrf_radiation/flg/PROVENANCE.md)).
+All column work stays on the GPU; the adapter retains its tables and workspace.
 The default uses fast numerics. `GPUWM_WRF_EXACT=1` selects the strict
 arithmetic used by the replay. The source and all 198 coefficient tables
 come from public WRF, covered by its public-domain statement; see

@@ -266,7 +266,10 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
             from woof.physics_compat import radiation_scheme_ids
             for nv1 in sorted({int(dc.run.nz)+1 for dc in experiment.domains
                                if radiation_scheme_ids(dc.run)[0] == 7}):
-                defines = (("FLG_NV1", nv1),)
+                # FLGColumn adds the FLG_NVX tier define past 100 layers;
+                # warm the same module key it loads.
+                from woof.core.flg_levels import nvx_defines
+                defines = (("FLG_NV1", nv1),) + nvx_defines(nv1 - 1)
                 jobs.append((f"flg_column[FLG_NV1={nv1}]",
                              kernels.load_module_unflushed.__wrapped__, (name, defines)))
             continue
@@ -337,6 +340,13 @@ def _reads(run, key: str) -> bool:
 def _psih_zolzt(run) -> bool:
     """RunConfig.mynn_sfclay_psih_zolzt where it is read."""
     return _reads(run, "mynn_sfclay_psih_zolzt")
+
+
+#: Units launched with RunConfig.thompson_rain_snow_closure's define through
+#: load_module_int_defines (woof.core.thompson._closure_kernel,
+#: thompson_classic, thompson_aerosol_launch.CLOSURE_MODULES).
+_THOMPSON_CLOSURE_UNITS = ("thompson", "thompson_classic",
+                           "thompson_aerosol_cold", "thompson_aerosol_warm")
 
 
 def _variant_jobs(experiment, modules):
@@ -415,6 +425,15 @@ def _variant_jobs(experiment, modules):
                 # (woof.core.gf._gf_module), the module the run launches.
                 from woof.core.gf import gf_kernel_capacity
                 tiers.append((("GF_KMAX", gf_kernel_capacity(int(run.nz))), ("GF_DEEP_EVAP_BOOKING", 1)))
+            if (name in _THOMPSON_CLOSURE_UNITS
+                    and _reads(run, "thompson_rain_snow_closure")):
+                # FQ5 (on in correct mode): the unit with the rain-snow
+                # closure define, after the generation defines as
+                # thompson_aerosol_launch.aerosol_kernel orders them.  The
+                # hail-aware image (mp = 38) compiles at its first call.
+                from woof.core.thompson import RAIN_SNOW_CLOSURE_DEFINES
+                tiers.append((defines if name in AEROSOL_KERNEL_MODULES else ())
+                             + RAIN_SNOW_CLOSURE_DEFINES)
             if name in ("noah_ua", "noah_mosaic_ua") and _reads(run, "noah_smc_floor_booking"):
                 # FQ4 (on in correct mode): the booked unit, the define first
                 # (woof.core.noah.smc_floor_booking_module).

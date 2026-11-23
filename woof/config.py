@@ -2665,6 +2665,17 @@ class RunConfig:
     noah_smc_floor_booking: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
     # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-22), appended.
+    # Thompson (mp_physics = 8, 28, 38) re-pairs the rain-snow collection
+    # only above 0 C wet bulb (module_mp_thompson.F :2946-2950); below it
+    # the graupel gain prg_rcs keeps its pre-limiter value while the rain
+    # and snow limiters shrink prr_rcs and prs_rcs, so the exchange creates
+    # graupel (and its freezing heat).  True sets prg_rcs = -(prr_rcs +
+    # prs_rcs) after the limiters; False is WRF's arithmetic word for word.
+    # Read only where Thompson runs.  Correct-mode finding FQ5: on by
+    # default, off in physics.mode = 'exact'.
+    thompson_rain_snow_closure: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-22), appended.
     # RRTMG's longwave wrapper (ra_lw_physics = 4 with ra_rrtmg_variant =
     # "rrtmg_legacy") matches the standard-profile temperature to the column
     # in a loop that starts at kte+1 (module_ra_rrtmg_lw.F:12375), so it
@@ -2939,7 +2950,7 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "mynn_boulac_down_sign, pbl_boulac_down_sign, "
     "gf_deep_rain_evaporation_booking, ysu_surface_heat_exner, "
     "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
-    "rrtmg_lw_model_top); otherwise "
+    "thompson_rain_snow_closure, rrtmg_lw_model_top); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -5123,6 +5134,12 @@ THOMPSON_AEROSOL_FAMILY: dict[int, ThompsonAerosolMember] = {
     29: ThompsonAerosolMember("rcon_mp_scheme", False, ()),
     38: ThompsonAerosolMember("thompsongh", True, ("ng", "qvolg")),
 }
+
+
+#: The Thompson schemes whose rain-snow collection
+#: RunConfig.thompson_rain_snow_closure corrects: classic (8), aerosol-aware
+#: (28, either generation) and hail-aware (38).  RCON (29) is not carried.
+THOMPSON_RAIN_SNOW_MP = frozenset({8, 28, 38})
 
 
 def thompson_aerosol_aware(mp_physics) -> bool:
@@ -10149,6 +10166,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("ysu_surface_heat_exner must be true or false")
     if type(cfg.noah_smc_floor_booking) is not bool:
         raise ConfigurationRefused("noah_smc_floor_booking must be true or false")
+    if type(cfg.thompson_rain_snow_closure) is not bool:
+        raise ConfigurationRefused("thompson_rain_snow_closure must be true or false")
     if type(cfg.rrtmg_lw_model_top) is not bool:
         raise ConfigurationRefused("rrtmg_lw_model_top must be true or false")
     from woof.quirk_corrections import check_run_config
@@ -10229,10 +10248,12 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
                 "(native CASE 0).")
         if ra_lw_physics == 0:
             raise ConfigurationRefused("WRF radiation_driver has no ra_lw_physics=0 CASE for ra_sw_physics=7; select an implemented ra_lw_physics.")
-        if ra_lw_physics == 7 and not 4 <= cfg.nz <= 100:
+        from woof.physics_vertical_contract import FLG_VERTICAL_LEVEL_BOUNDS as _flg_bounds
+        if ra_lw_physics == 7 and not _flg_bounds[0] <= cfg.nz <= _flg_bounds[1]:
             raise ConfigurationRefused(
-                "WRF FLG needs 4 to 100 model layers: its three cloud groups "
-                "need a layer each and its native scratch bound is nvx=100.")
+                f"WRF FLG needs {_flg_bounds[0]} to {_flg_bounds[1]} model layers: its three "
+                "cloud groups need a layer each, and its nvx scratch bound is compiled "
+                "at the stock 100 or the 256 tier.")
     if 14 in (ra_lw_physics, ra_sw_physics):
         validate_rrtmgk_config(cfg, ra_lw_physics, ra_sw_physics)
     if 99 in (ra_lw_physics, ra_sw_physics) and (type(cfg.co2tf) is not int or cfg.co2tf not in (0, 1)):

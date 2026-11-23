@@ -53,7 +53,7 @@ from woof.io import history_selection as history_selection_module
 from woof import simulated_radar_config as simulated_radar_module
 from woof.config_keys import KeyRow, key_rows
 from woof.config import (DEFAULT_COLUMN_CHUNK, RADAR_HEATING_OFF, RadarHeatingConfig,
-                          KF_FAMILY_CU_SCHEMES,
+                          KF_FAMILY_CU_SCHEMES, THOMPSON_RAIN_SNOW_MP,
                           EXPLICIT_HORIZONTAL_DIFFUSION_LIMIT,
                           EPSSM_AUTO,
                           GRELL_FAMILY_CU_PHYSICS, GRELL_FAMILY_DEFAULTS,
@@ -332,6 +332,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The opt-in Noah soil-moisture floor booking, on the same terms: a
     # [shared] value reaches the sf_surface_physics = 2 domains only.
     "noah_smc_floor_booking",
+    # The Thompson rain-snow collection closure (FQ5), on the same terms:
+    # a [shared] value reaches the mp_physics = 8, 28, 38 domains only.
+    "thompson_rain_snow_closure",
     # The RRTMG longwave model-top correction (FQ6), on the same terms: a
     # [shared] value reaches the legacy-RRTMG longwave domains only.
     "rrtmg_lw_model_top",
@@ -4406,6 +4409,14 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             dom.get("sf_surface_physics",
                     shared.get("sf_surface_physics", RunConfig.sf_surface_physics))) == 2
         for dom in domain_tables)
+    # The opt-in Thompson rain-snow collection closure is read only by
+    # Thompson (mp_physics = 8, 28, 38), on the same terms.
+    tree_runs_thompson = any(
+        physics_mode.settings.get(
+            "mp_physics",
+            dom.get("mp_physics",
+                    shared.get("mp_physics", RunConfig.mp_physics))) in THOMPSON_RAIN_SNOW_MP
+        for dom in domain_tables)
     # The opt-in RRTMG longwave model-top correction is read only by the
     # legacy RRTMG longwave (ra_lw_physics = 4 or the ra_physics = 4
     # aggregate, ra_rrtmg_variant = "rrtmg_legacy"), on the same terms.
@@ -5041,6 +5052,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
                 and "noah_smc_floor_booking" not in dom):
             kw["noah_smc_floor_booking"] = False
+        if (tree_runs_thompson
+                and kw.get("mp_physics", RunConfig.mp_physics) not in THOMPSON_RAIN_SNOW_MP
+                and "thompson_rain_snow_closure" not in dom):
+            kw["thompson_rain_snow_closure"] = False
         if (tree_runs_rrtmg_lw
                 and not _runs_rrtmg_lw_legacy(
                     lambda name, default: kw.get(name, default))
@@ -6461,6 +6476,7 @@ def _public_config_value(value):
                                   ("woof_quirk_corrections", None),
                                   ("mynn_sfclay_psih_zolzt", False),
                                   ("noah_smc_floor_booking", False),
+                                  ("thompson_rain_snow_closure", False),
                                   ("rrtmg_lw_model_top", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)

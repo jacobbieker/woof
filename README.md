@@ -730,12 +730,12 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ4 and FQ6, so the run
-    receipt's `correct_mode` block names them.
+    the keys are correct-mode findings FQ1-FQ6, so the run receipt's
+    `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
-    `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking` and
-    `rrtmg_lw_model_top` (WRF route); `--undriven-species-boundary
-    wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
+    `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
+    `thompson_rain_snow_closure` and `rrtmg_lw_model_top` (WRF route);
+    `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
     `woof_redi_k33` (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
@@ -771,6 +771,13 @@ Notes on the 1.1.7 sync:
     the column water budget closes. Not read with a WRF-Hydro coupling. Not
     yet scored against observations; the hex MPAS-suite Noah does not carry
     it yet.
+  - `thompson_rain_snow_closure` (Thompson, `mp_physics = 8, 28, 38`, WRF
+    route). Below 0 C, WRF's Thompson limits the rain and snow losses of
+    rain-snow collection but keeps the graupel gain at its unlimited value,
+    so the exchange creates graupel (and its freezing heat) when rain or
+    snow runs out. The correction makes the gain equal what rain and snow
+    lose, floored at zero (finding FQ5). Not yet scored against observations; the hex
+    MPAS-suite Thompson and RCON (`mp_physics = 29`) do not carry it.
   - `rrtmg_lw_model_top` (legacy RRTMG longwave, `ra_lw_physics = 4` with
     `ra_rrtmg_variant = "rrtmg_legacy"`, WRF route). WRF's RRTMG longwave
     matches its standard profile to the column in a loop that starts one
@@ -1707,6 +1714,23 @@ Notes on the 1.1.7 sync:
   words per column (535 MB to 1.03 GB for the 4,096-column chunk) and
   preflight prices it by tier. Past 256 is refused by name. Hex does not
   offer `ra_sw_physics=2`, so only the WRF route is affected
+  ([the record](docs/kernel_local_memory_bounds.md)).
+- **256-level columns for Fu-Liou-Gu radiation.** `ra_lw_physics=7`
+  (with `ra_sw_physics=7`) was refused above 100 layers, stock WRF's
+  `nvx = 100` scratch bound. The generators now emit that bound as the
+  macro `FLG_NVX`, whose source default is the stock 100: every column of
+  100 layers or fewer compiles stock WRF's bound, and its SASS is identical
+  to the previous kernel's on sm_86, sm_100 and sm_120 in both numerics
+  modes. A 101 to 256 layer column adds `-D FLG_NVX=256` and is checked
+  word for word in strict mode against WRF's `module_ra_flg.F` with only
+  `nvx` raised to 256 (the patch, its hash and why it changes no
+  arithmetic are in `woof/data/wrf_radiation/flg/PROVENANCE.md`). In the
+  forecast column the per-level storage was already a global workspace
+  sized by the column, so the local frame does not grow (928 B on sm_86 at
+  both tiers); the workspace grows from 30,301 to 77,101 words per column
+  at 100 and 256 layers, and admission prices it per domain. Past 256 is
+  refused by name. The hex option-matrix row still records the old
+  100-level refusal at 149 levels until the matrix is re-run
   ([the record](docs/kernel_local_memory_bounds.md)).
 - **256-level hex member init and TC potential intensity.** The hex GPU
   member init (`woof/hex/init_gpu/physics.cu`) and the TC diagnostics'

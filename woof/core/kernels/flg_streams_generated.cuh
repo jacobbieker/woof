@@ -1,4 +1,8 @@
 // Generated from pristine WRF FLG stream solver statements.
+#ifndef FLG_NVX
+#define FLG_NVX 100
+#endif
+#define FLG_NV1X (FLG_NVX+1)
 #define FG_AD(a,b) __fadd_rn((a),(b))
 #define FG_SU(a,b) __fsub_rn((a),(b))
 #define FG_MU(a,b) __fmul_rn((a),(b))
@@ -278,9 +282,9 @@ float a1[(4)*(4)];
 float z1[(4)];
 float fk1t;
 float fk2t;
-float ab[(13)*(101 * 4)];
-float bx[(101 * 4)];
-float xx[(101 * 4)];
+float ab[(13)*(FLG_NV1X * 4)];
+float bx[(FLG_NV1X * 4)];
+float xx[(FLG_NV1X * 4)];
 int n;
 int n4;
 int i;
@@ -636,8 +640,8 @@ return;
 }
 
 __device__ void flgs_adjust(int nv,int nv1,const float* ww1,const float* ww2,const float* ww3,const float* ww4,const float* ww,const float* tt,float* w1,float* w2,float* w3,float* w,float* t,const float* tables,const int* table_offsets,const float* gas_values,const int* gas_switches,int* error){
-float dtt[(101)];
-float dt[(101)];
+float dtt[(FLG_NV1X)];
+float dt[(FLG_NV1X)];
 int n;
 int i;
 float tt0;
@@ -668,19 +672,19 @@ return;
 }
 
 __device__ void flgs_qfts(int nv,int nv1,int ib,float as,float u0,float f0,const float* ww1,const float* ww2,const float* ww3,const float* ww4,const float* ww,const float* tt,float* ffu,float* ffd,float* ffddir,float* ffdif,const float* tables,const int* table_offsets,const float* gas_values,const int* gas_switches,int* error){
-float w1[(101)];
-float w2[(101)];
-float w3[(101)];
-float w4[(101)];
-float w[(101)];
-float t[(101)];
-float u0a[(101)];
-float f0a[(101)];
-float fk1[(101)];
-float fk2[(101)];
-float a4[(4)*(4)*(101)];
-float z4[(4)*(101)];
-float g4[(4)*(101)];
+float w1[(FLG_NV1X)];
+float w2[(FLG_NV1X)];
+float w3[(FLG_NV1X)];
+float w4[(FLG_NV1X)];
+float w[(FLG_NV1X)];
+float t[(FLG_NV1X)];
+float u0a[(FLG_NV1X)];
+float f0a[(FLG_NV1X)];
+float fk1[(FLG_NV1X)];
+float fk2[(FLG_NV1X)];
+float a4[(4)*(4)*(FLG_NV1X)];
+float z4[(4)*(FLG_NV1X)];
+float g4[(4)*(FLG_NV1X)];
 int i;
 int n;
 int m;
@@ -754,13 +758,13 @@ return;
 }
 
 __device__ void flgs_qfti(int nv,int nv1,int ib,float ee,const float* bf,float bs,const float* ww1,const float* ww2,const float* ww3,const float* ww4,const float* ww,const float* tt,float* ffu,float* ffd,const float* tables,const int* table_offsets,const float* gas_values,const int* gas_switches,int* error){
-float w1[(101)];
-float w2[(101)];
-float w3[(101)];
-float w[(101)];
-float t[(101)];
-float u0[(101)];
-float f0[(101)];
+float w1[(FLG_NV1X)];
+float w2[(FLG_NV1X)];
+float w3[(FLG_NV1X)];
+float w[(FLG_NV1X)];
+float t[(FLG_NV1X)];
+float u0[(FLG_NV1X)];
+float f0[(FLG_NV1X)];
 int n;
 int m;
 int i;
@@ -779,11 +783,11 @@ float xy;
 float y1;
 float x[(4)];
 float fi[(4)];
-float fk1[(101)];
-float fk2[(101)];
-float a4[(4)*(4)*(101)];
-float z4[(4)*(101)];
-float g4[(4)*(101)];
+float fk1[(FLG_NV1X)];
+float fk2[(FLG_NV1X)];
+float a4[(4)*(4)*(FLG_NV1X)];
+float z4[(4)*(FLG_NV1X)];
+float g4[(4)*(FLG_NV1X)];
 n=nv;
 m=nv1;
 asbs=FG_MU(bs,ee);
@@ -956,15 +960,15 @@ float rsfc;
 float ssfc;
 float wm1;
 float wm2;
-float xn[(101)];
-float yn[(101)];
-float zn[(101)];
-float a[(101 * 2)];
-float b[(101 * 2)];
-float c[(101 * 2)];
-float r[(101 * 2)];
-float u[(101 * 2)];
-float gam[(101 * 2)];
+float xn[(FLG_NV1X)];
+float yn[(FLG_NV1X)];
+float zn[(FLG_NV1X)];
+float a[(FLG_NV1X * 2)];
+float b[(FLG_NV1X * 2)];
+float c[(FLG_NV1X * 2)];
+float r[(FLG_NV1X * 2)];
+float u[(FLG_NV1X * 2)];
+float gam[(FLG_NV1X * 2)];
 ibn=ib;
 for(k=1;((1)>0?k<=nv:k>=nv);k+=1){
 wn=w[(k-1)*(1)];
@@ -1053,23 +1057,23 @@ return;
 }
 
 __device__ void flgs_qftsts(int nv,int nv1,int ib,float as_in,float u0,float f0,const float* ww1,const float* ww2,const float* ww3,const float* ww4,const float* ww,const float* tt,float* ffu,float* ffd,const float* tables,const int* table_offsets,const float* gas_values,const int* gas_switches,int* error){
-float w1[(101)];
-float w2[(101)];
-float w3[(101)];
-float w[(101)];
-float t[(101)];
-float u0a[(101)];
-float f0a[(101)];
-float lamdan[(101)];
-float gamman[(101)];
-float caddn[(101)];
-float cminn[(101)];
-float caddn0[(101)];
-float cminn0[(101)];
-float aa[(101)];
-float bb[(101)];
-float expn[(101)];
-float g1g2n[(101)];
+float w1[(FLG_NV1X)];
+float w2[(FLG_NV1X)];
+float w3[(FLG_NV1X)];
+float w[(FLG_NV1X)];
+float t[(FLG_NV1X)];
+float u0a[(FLG_NV1X)];
+float f0a[(FLG_NV1X)];
+float lamdan[(FLG_NV1X)];
+float gamman[(FLG_NV1X)];
+float caddn[(FLG_NV1X)];
+float cminn[(FLG_NV1X)];
+float caddn0[(FLG_NV1X)];
+float cminn0[(FLG_NV1X)];
+float aa[(FLG_NV1X)];
+float bb[(FLG_NV1X)];
+float expn[(FLG_NV1X)];
+float g1g2n[(FLG_NV1X)];
 int n;
 int m;
 int k;
@@ -1078,7 +1082,7 @@ float ee;
 float asbs;
 float fw3;
 float xx;
-float yy[(101)];
+float yy[(FLG_NV1X)];
 n=nv;
 m=nv1;
 ee=0.0f;
@@ -1109,31 +1113,31 @@ return;
 
 __device__ void flgs_qftisf(int nv,int nv1,int ib,float ee,const float* bf,float bs,const float* ww1,const float* ww2,const float* ww3,const float* ww4,const float* ww,const float* tt,float* ffu,float* ffd,const float* tables,const int* table_offsets,const float* gas_values,const int* gas_switches,int* error){
 constexpr int nq=2;
-float w1[(101)];
-float w2[(101)];
-float w3[(101)];
-float w[(101)];
-float t[(101)];
-float u0[(101)];
-float f0[(101)];
-float lamdan[(101)];
-float gamman[(101)];
-float caddn[(101)];
-float cminn[(101)];
-float caddn0[(101)];
-float cminn0[(101)];
-float aa[(101)];
-float bb[(101)];
-float expn[(101)];
-float g1g2n[(101)];
-float fuq1[(101)];
-float fuq2[(101)];
-float fg[(101)];
-float fh[(101)];
-float fj[(101)];
-float fk[(101)];
-float fiu[(101)*(nq)];
-float fid[(101)*(nq)];
+float w1[(FLG_NV1X)];
+float w2[(FLG_NV1X)];
+float w3[(FLG_NV1X)];
+float w[(FLG_NV1X)];
+float t[(FLG_NV1X)];
+float u0[(FLG_NV1X)];
+float f0[(FLG_NV1X)];
+float lamdan[(FLG_NV1X)];
+float gamman[(FLG_NV1X)];
+float caddn[(FLG_NV1X)];
+float cminn[(FLG_NV1X)];
+float caddn0[(FLG_NV1X)];
+float cminn0[(FLG_NV1X)];
+float aa[(FLG_NV1X)];
+float bb[(FLG_NV1X)];
+float expn[(FLG_NV1X)];
+float g1g2n[(FLG_NV1X)];
+float fuq1[(FLG_NV1X)];
+float fuq2[(FLG_NV1X)];
+float fg[(FLG_NV1X)];
+float fh[(FLG_NV1X)];
+float fj[(FLG_NV1X)];
+float fk[(FLG_NV1X)];
+float fiu[(FLG_NV1X)*(nq)];
+float fid[(FLG_NV1X)*(nq)];
 int n;
 int m;
 int i;
@@ -1156,12 +1160,12 @@ float tempugbeta;
 float tempxxp1;
 float tempxxm1;
 float ugbeta;
-float alfa[(101+1)];
-float beta[(101)];
-float fx[(101)*(nq)];
-float fy[(101)];
-float fz1[(101)*(nq)];
-float fz2[(101)*(nq)];
+float alfa[(FLG_NV1X+1)];
+float beta[(FLG_NV1X)];
+float fx[(FLG_NV1X)*(nq)];
+float fy[(FLG_NV1X)];
+float fz1[(FLG_NV1X)*(nq)];
+float fz2[(FLG_NV1X)*(nq)];
 if((gas_switches[25]!=0)){
 ugts1=0.57735f;
 }else{
