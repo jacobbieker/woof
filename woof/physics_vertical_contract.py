@@ -420,6 +420,11 @@ def legacy_radiation_layer_counts(
 # would index past the explicit CUDA layout before a radiation call completes.
 GFDLETA_VERTICAL_LEVEL_BOUNDS = (1, 81)
 
+# GSFC shortwave (ra_sw_physics = 2): its device arena is compiled at
+# GSFC_KMAX 128 (the unchanged source, every column of at most 128 layers)
+# or 256.  The ceiling is the deep tier of the CuPy-free ladder.
+from woof.core.gsfcsw_levels import VERTICAL_LEVEL_BOUNDS as GSFCSW_VERTICAL_LEVEL_BOUNDS
+
 #: K-epsilon (bl_pbl_physics=17).  No ceiling: the column arrays live in a
 #: global workspace sized from nz at launch (woof/core/keps.py).  The floor
 #: is GET_PBLH's: its theta-v search starts at level 3 at the earliest and

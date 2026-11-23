@@ -392,7 +392,7 @@ def make_radiation(cfg, start_time, latitude_deg, longitude_deg, *,
         if selector == 2:
             from woof.core.gsfcsw import GSFCSWShortwaveRadiation
             return GSFCSWShortwaveRadiation(*args, icloud=cfg.icloud,
-                                           center_lat=center_lat)
+                                           center_lat=center_lat, nz=cfg.nz)
         if selector == 90:
             from woof.core.analytic_radiation import AnalyticClearSkyRadiation
             return AnalyticClearSkyRadiation(*args)
