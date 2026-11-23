@@ -93,6 +93,18 @@ def test_the_config_admits_256_layers_and_refuses_257_and_3():
         validate_run_config(cfg(3))
 
 
+@pytest.mark.parametrize("nz", [SHIPPED, DEEP])
+def test_admission_prices_the_workspace_of_the_column_it_launches(nz):
+    from woof.core.flg_radiation import flg_radiation_vram_bytes
+
+    # Per column the arena is 300 x (nz + 1) + 1 words; admission's per-column
+    # words add packing and carriers that are also affine in nz.
+    per_column = (flg_radiation_vram_bytes(64, nz) - flg_radiation_vram_bytes(32, nz)) // 32
+    assert per_column >= 4 * (300 * (nz + 1) + 1)
+    assert per_column == 4 * (300 * (nz + 1) + 1 + (12 * nz + 25) + 40 + (11 * nz + 8) + 1
+                              + 4 * nz + 17 + 36 * (nz + 1))
+
+
 def test_the_deep_oracle_patch_is_the_recorded_one():
     patch = (ORACLE / "nvx256.patch").read_bytes()
     digest = hashlib.sha256(patch).hexdigest()
@@ -255,3 +267,21 @@ def test_a_256_layer_column_is_finite_conserves_energy_and_tracks_the_oracle():
     for name in reference:
         np.testing.assert_allclose(got[name], want[name], rtol=0, atol=0.5, err_msg=name)
     _check_xbackend("flg256", out, dp)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("layers", [SHIPPED, DEEP])
+def test_the_deep_tier_frame_is_the_priced_frame(layers):
+    import cupy as cp  # noqa: F401  (GPU test; the CPU tests above stay unmarked)
+
+    from woof import backend
+    from woof.core import preflight as pf
+    from woof.core.flg import FLGColumn
+    from woof.core.kernels import kernel_local_size_bytes
+
+    if backend.active() != "cuda":
+        pytest.skip("driver local frames are a CUDA attribute")
+    column = FLGColumn(1, layers)
+    # The workspace, not the frame, grows with the column: 300 x (nz+1) + 1 words.
+    assert column.workspace.shape[1] == 300 * (layers + 1) + 1
+    assert kernel_local_size_bytes(column.kernel) <= pf.KERNEL_MAX_LOCAL_SIZE_BYTES["flg_column"]

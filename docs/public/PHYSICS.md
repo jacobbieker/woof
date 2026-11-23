@@ -2180,8 +2180,13 @@ Select the split pair in a stock WRF namelist or experiment configuration.
 
 The CUDA column follows WRF's stock controls: old gas quadrature, mixed ice
 optics, prescribed ozone, binary cloud occupancy and no offline aerosol
-input. Its native three cloud groups require 4 to 100 model layers. All
-column work stays on the GPU; the adapter retains its tables and workspace.
+input. Its native three cloud groups require at least 4 model layers, and
+it runs up to 256: stock WRF's `nvx = 100` scratch bound is the compile-time
+`FLG_NVX` tier, 100 (the unchanged stock bound, every column of at most 100
+layers) or 256. A 101 to 256 layer column is checked word for word against
+WRF's `module_ra_flg.F` with only `nvx` raised to 256 (the recorded patch is
+in [the provenance file](../../woof/data/wrf_radiation/flg/PROVENANCE.md)).
+All column work stays on the GPU; the adapter retains its tables and workspace.
 The default uses fast numerics. `GPUWM_WRF_EXACT=1` selects the strict
 arithmetic used by the replay. The source and all 198 coefficient tables
 come from public WRF, covered by its public-domain statement; see
