@@ -2255,14 +2255,17 @@ entry points are in [the FLG oracle](../../tools/flg_wrf461_oracle/README.md).
 ### Original GSFC shortwave
 
 `ra_sw_physics = 2` selects the original GSFC algorithm, with its embedded
-WRF coefficient tables. It supports 2 to 128 mass layers and the existing
-non-chemistry radiation path. Column arithmetic, cloud fraction, packing and
+WRF coefficient tables. It supports 2 to 256 mass layers and the existing
+non-chemistry radiation path (the arena is compiled at a 128 tier, the
+unchanged source, or a 256 tier; see
+[the local-memory record](../kernel_local_memory_bounds.md)). Column arithmetic, cloud fraction, packing and
 unpacking run on the GPU. Fast numerics remain the default; strict replay
 uses `GPUWM_NUMERICS=strict`. The oracle and its source, compiler and table
 identities are under `tools/gsfcsw_wrf461_oracle/`.
 
 The CUDA kernel uses a private, warp-coalesced workspace, bounded to 4,096
-columns at a time. Its maximum workspace is 535,379,968 bytes. On sm_120
+columns at a time. Its maximum workspace is 535,379,968 bytes at 128 layers
+and 1,030,307,840 bytes at 129 to 256. On sm_120
 with NVRTC 13.4.92, the measured local frame is zero bytes in fast mode
 and 16 bytes in strict mode. Preflight charges both the conservative
 frame ceiling and the workspace, including partial-warp padding.

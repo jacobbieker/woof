@@ -256,8 +256,8 @@ This section is the fork's own. The fork carries upstream WOOF 1.1.7 and adds
 the work below on top of it. It does not change upstream's defaults: each new
 option is off until selected, and a configuration that selects none of them
 runs as upstream's does. The section is grouped by area, and where
-something is partial it says so. Every merge into the fork's `main` is released as a
-new `metal-woof` build (`metal-vX.Y.Z.N`). The fork's own changes are recorded
+something is partial it says so. Every merge into the fork's `main` is tagged and released on GitHub as a
+new `metal-woof` build (`metal-vX.Y.Z.N`); PyPI gets the newest one daily. The fork's own changes are recorded
 in [FORK-CHANGELOG.md](FORK-CHANGELOG.md).
 
 Upstream now covers several things this section once listed as the fork's:
@@ -885,6 +885,11 @@ Notes on the 1.1.7 sync:
     admit 256 levels (compile-time 128/256 tier; at 128 levels or fewer
     the unchanged kernel, word for word); their matrix rows still record
     the old 128-level refusal until the 149-level hex case is re-run.
+    KF-CuP and Multiscale Kain-Fritsch now take up to 256 levels (were
+    128 and 160): both keep every column array in a runtime-sized
+    workspace, so the bound was a refusal guard only, and words at the
+    old level counts are unchanged
+    (`tests/test_cu_kfcup_mskf_256_levels_gpu.py`).
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
@@ -1666,7 +1671,7 @@ Notes on the 1.1.7 sync:
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
-  tags, writes release notes and publishes `metal-woof` to PyPI
+  tags and writes release notes; PyPI gets the newest `metal-woof` tag once a day
   ([docs/dev/ci.md](docs/dev/ci.md)).
 - **256-level columns for WSM3, WSM5, WSM7, WDM5 and WDM7.** These five
   microphysics units (`mp_physics` 3, 4, 24, 14 and 26) keep their level
@@ -1683,6 +1688,18 @@ Notes on the 1.1.7 sync:
   ([the frame table](docs/kernel_local_memory_bounds.md)). The committed hex
   option-matrix rows for WSM3 and WSM5 still record the old 80-level
   refusal at 149 levels until the matrix is re-run on its staged case.
+- **256-level columns for the GSFC shortwave scheme.** `ra_sw_physics=2`
+  was refused above 128 layers: its per-column arena (every array's extent
+  and offset) and the entry point's `zero[]` were literals for a 128-layer
+  column. They are now expressions of `GSFC_KMAX`, whose source default is
+  128, so a column of 128 layers or fewer compiles the unchanged-meaning
+  source (the oracle fixture words and a raw-bit comparison at nz = 49 and
+  128 are identical) and a deeper column adds `-D GSFC_KMAX=256`. The
+  local frame stays 0 B at both tiers; the arena grows from 32,677 to 62,885
+  words per column (535 MB to 1.03 GB for the 4,096-column chunk) and
+  preflight prices it by tier. Past 256 is refused by name. Hex does not
+  offer `ra_sw_physics=2`, so only the WRF route is affected
+  ([the record](docs/kernel_local_memory_bounds.md)).
 
 ### Licensing and opt-ins
 
