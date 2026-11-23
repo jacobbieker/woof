@@ -311,7 +311,7 @@ def inventory(root: Path) -> dict:
 #: headers, defines and options. The generic loader's composition of these
 #: files does not compile; composed_units audits what each route compiles.
 DEDICATED_ROUTES = frozenset({"acm2pbl", "eeps", "etanew", "gbmpbl", "mynnsfc_b66187f",
-                              "nextgen_cfe", "nextgen_reservoirs", "snow_papers",
+                              "nextgen_cfe", "nextgen_reservoirs", "snow_lap", "snow_papers",
                               "vortex_init"})
 #: EEPS's column depth is a compile-time define (woof/core/eeps_pbl.py). The
 #: audit compiles WRF's default 45 staggered levels, i.e. 44 mass levels.
@@ -329,7 +329,8 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
     # These files are components, not the sources their runtime compiles.
     # Their real factories are included by composed_units. Compiling a
     # fragment without its defines/libm creates false coverage and errors.
-    fragments = {"p3", "p3_zdiag", "fast_sbm", "rrtmg_lw", "rrtmg_sw", "terrain_drag", "urban_bep_bem",
+    fragments = {"p3", "p3_zdiag", "fast_sbm", "rrtmg_lw", "rrtmg_sw", "terrain_drag",
+                 "terrain_drag_gwdo480", "urban_bep_bem",
                  "windfarm_fitch", "fire_spread", "nest_vertical", "windfarm_fitch_cells",
                  "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
                  "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
@@ -421,6 +422,8 @@ def composed_units(root: Path) -> list[Unit]:
         Unit("composed:rrtmg_sw", sw_defines + (kdir / "rrtmg_sw.cu").read_text(encoding="utf-8")
              + sw.spectral_source(), ("-std=c++17", "--ftz=false")),
         Unit("composed:terrain_drag", terrain.module_source(), tuple(terrain.MODULE_OPTIONS)),
+        Unit("composed:terrain_drag_gwdo480", terrain.gwdo480_module_source(),
+             tuple(terrain.MODULE_OPTIONS)),
         Unit("composed:windfarm_fitch", fitch.module_source(), tuple(fitch.MODULE_OPTIONS)),
         Unit("composed:nest_vertical", vnest.module_source(), tuple(vnest.MODULE_OPTIONS)),
         Unit("composed:windfarm_fitch_cells", fitch.cells_module_source(), tuple(fitch.MODULE_OPTIONS)),
@@ -516,6 +519,10 @@ def dedicated_route_units(root: Path) -> list[Unit]:
              land(("--std=c++17", "--ftz=false") + ieee)),
         # snow_papers._module, through noahmp_kernel_sources._compile_loaded_module.
         Unit("composed:snow_papers", (kdir / "snow_papers.cu").read_text(),
+             land(("-std=c++17", "--ftz=false"))),
+        # snow_papers._lap_module: snow_papers.cu, a newline, then snow_lap.cu.
+        Unit("composed:snow_lap", (kdir / "snow_papers.cu").read_text() + "\n"
+             + (kdir / "snow_lap.cu").read_text(),
              land(("-std=c++17", "--ftz=false"))),
         # woof/tc/vortex.py _module: a RawModule, which appends -ftz=true.
         Unit("composed:vortex_init", (kdir / "vortex_init.cu").read_text(),
