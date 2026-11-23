@@ -550,6 +550,22 @@ closure has not been qualified. Source pins and the public-domain notice
 are recorded in
 [the GCE source audit](../../tools/gsfcgce_wrf461_oracle/SOURCE.md).
 
+**Correction: `thompson_rain_snow_closure` (on in correct mode, finding FQ5).**
+WRF 4.7.1's Thompson (`module_mp_thompson.F`) limits the rain and snow
+losses of rain-snow collection when they would exhaust either species, and
+re-pairs the transfer only above 0 C wet bulb (:2946-2950). Below it the
+graupel gain `prg_rcs` keeps its value from before the limiters, so the
+exchange creates graupel, and its freezing heat, out of rain and snow that
+ran out. With the correction on, `prg_rcs = -(prr_rcs + prs_rcs)` after the
+limiters, so the gain is what rain and snow lose, floored at zero: where
+snow's own term is a net gain that the rain limiter has shrunk rain's loss
+below, snow takes only what rain lost (`prs_rcs = -prr_rcs`) and graupel
+gains nothing, so no graupel sink is clipped at `qg = 0` into water. It is per domain, read
+only where `mp_physics = 8`, `28` or `38` (every `thompson_version`), and
+compiled in by a define, so exact mode runs WRF's program unchanged
+(`tests/test_thompson_rain_snow_closure.py`). The hex MPAS-suite Thompson
+and RCON (`mp_physics = 29`) do not carry it.
+
 ### Ferrier-Aligo with advected rime (`mp_physics = 15`)
 
 Option 15 transports total ice and `QRIMEF`, the ice mass multiplied by
@@ -2195,8 +2211,13 @@ Select the split pair in a stock WRF namelist or experiment configuration.
 
 The CUDA column follows WRF's stock controls: old gas quadrature, mixed ice
 optics, prescribed ozone, binary cloud occupancy and no offline aerosol
-input. Its native three cloud groups require 4 to 100 model layers. All
-column work stays on the GPU; the adapter retains its tables and workspace.
+input. Its native three cloud groups require at least 4 model layers, and
+it runs up to 256: stock WRF's `nvx = 100` scratch bound is the compile-time
+`FLG_NVX` tier, 100 (the unchanged stock bound, every column of at most 100
+layers) or 256. A 101 to 256 layer column is checked word for word against
+WRF's `module_ra_flg.F` with only `nvx` raised to 256 (the recorded patch is
+in [the provenance file](../../woof/data/wrf_radiation/flg/PROVENANCE.md)).
+All column work stays on the GPU; the adapter retains its tables and workspace.
 The default uses fast numerics. `GPUWM_WRF_EXACT=1` selects the strict
 arithmetic used by the replay. The source and all 198 coefficient tables
 come from public WRF, covered by its public-domain statement; see
@@ -3649,7 +3670,21 @@ each checked against WRF's own output words:
 
 ## GFDL Eta radiation (WRF options 99/99)
 
-The CUDA implementation retains WRF v4.6.1 ETARA, FST88 longwave, shortwave, cloud accumulators and CO2/O3 table initialization. Either spectrum can be selected independently. `co2tf=1` builds transmission for the run's vertical grid; `co2tf=0` requires a grid-matched CONRAD table. The packaged CONRAD table has 42 layers. The native ozone tables cover at most 81 layers.
+The CUDA implementation retains WRF v4.6.1 ETARA, FST88 longwave, shortwave, cloud accumulators and CO2/O3 table initialization. Either spectrum can be selected independently. `co2tf=1` builds transmission for the run's vertical grid; `co2tf=0` requires a grid-matched CONRAD table. The packaged CONRAD table has 42 layers.
+
+Vertical levels: 1 to 256 layers. Stock WRF has no 81-layer limit for this scheme. `module_ra_gfdleta.F` sizes every model-level array from `kte`/`kme`: CO2O3 `ALLOCATE`s its `LP1` tables, and CONRAD and RADTN use automatic arrays. Its `NL=81` is the GFDL ozone climatology's fixed pressure grid (`XDUO3N(37,NL)`, `PRGFDL(NL)`), which OZON2D interpolates to any number of model layers. The byte-unmodified module runs a 256-layer column under `-fcheck=all`.
+
+WOOF's transcription gives every per-column array fixed storage, so it has two tiers:
+
+- A column of at most 81 layers runs the unchanged shipped units word for word.
+- A column of 82 to 256 layers runs `gfdleta_column_l256` and `gfdleta_co2_init_l256`. These are the same lowering regenerated with `GFDLETA_MAXL=256` (`tools/gfdleta_wrf461_oracle/build_tier.py`). The ozone climatology stays on its 81 levels.
+
+The two tiers agree word for word:
+
+- Forcing the deep tier onto the 12- to 60-layer WRF fixtures reproduces every initialization word and every output word.
+- A 256-layer column matches stock WRF 4.6.1 at 256 layers word for word in strict numerics (`tests/test_gfdleta_256_levels.py`).
+
+The deep tier's per-column workspace is 1.30 MB, against 234 KB at the shipped tier. Preflight prices `column_chunk` slots of it, and `column_chunk` is the lever at both tiers. Pooled slots are reused in order, so the slot count does not change any word.
 
 Source pin: WRF `d66e442fccc04111067e29274c9f9eaccc3cef28`, `phys/module_ra_gfdleta.F`, `phys/module_mp_etanew.F`, and the distributed transmission tables. WRF distributes these under its public-domain notice. Source URLs, sizes and hashes are recorded in `woof/data/gfdleta/PROVENANCE.json`; the notice is retained beside the assets and CUDA source. No competitor source was used.
 

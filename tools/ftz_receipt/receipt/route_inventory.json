@@ -9,11 +9,11 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 741,
+  "site_count": 743,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 48,
-    "cupy.RawKernel": 124,
-    "cupy.RawModule": 316,
+    "cupy.RawKernel": 125,
+    "cupy.RawModule": 317,
     "cupy.ReductionKernel": 22,
     "cupy.cuda.compiler.compile_using_nvrtc": 231
   },
@@ -33,8 +33,8 @@
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
-      "cupy.RawKernel": 50,
-      "cupy.RawModule": 112,
+      "cupy.RawKernel": 51,
+      "cupy.RawModule": 113,
       "cupy.ReductionKernel": 10,
       "cupy.cuda.compiler.compile_using_nvrtc": 36
     },
@@ -1823,6 +1823,22 @@
       "text": "probe = cp.RawModule(code=source, options=(\"-std=c++17\",))"
     },
     {
+      "file": "tests/test_gfdleta_256_levels.py",
+      "line": 263,
+      "column": 15,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "test_the_layouts_are_the_compiled_struct_sizes",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "tuple(kernels.module_options(module))",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "unit = cp.RawModule(code=source, options=tuple(kernels.module_options(module)))"
+    },
+    {
       "file": "tests/test_gfs_pbl_wrf461_gpu.py",
       "line": 66,
       "column": 13,
@@ -2756,7 +2772,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 70,
+      "line": 75,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2772,7 +2788,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 113,
+      "line": 118,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2792,7 +2808,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 137,
+      "line": 142,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2808,7 +2824,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 161,
+      "line": 166,
       "column": 4,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2824,7 +2840,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 189,
+      "line": 194,
       "column": 4,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2840,7 +2856,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 214,
+      "line": 219,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2856,7 +2872,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 228,
+      "line": 233,
       "column": 17,
       "surface": "tests",
       "constructor": "cp.ElementwiseKernel",
@@ -2872,7 +2888,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 287,
+      "line": 292,
       "column": 4,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2885,6 +2901,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "cp.RawKernel(_NAMED_DEVICE_FIELD, \"named_device_field\")((1,), (1,), (w, np.int32(4)))"
+    },
+    {
+      "file": "tests/test_metal_translation_gaps.py",
+      "line": 328,
+      "column": 4,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "test_template_sized_local_pointer_array",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "cp.RawKernel(_TEMPLATE_POINTER_ARRAY, \"template_pointer_array\")((1,), (32,), (da, db, out, np.int32(32)))"
     },
     {
       "file": "tests/test_milbrandt2_wrf461_exact_gpu.py",
@@ -2952,7 +2984,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3320,
+      "line": 3367,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -7588,7 +7620,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1208,
+      "line": 1212,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -7604,7 +7636,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1293,
+      "line": 1297,
       "column": 19,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -7620,7 +7652,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1307,
+      "line": 1311,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -7636,7 +7668,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1321,
+      "line": 1325,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -7658,7 +7690,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1349,
+      "line": 1353,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -7680,7 +7712,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1378,
+      "line": 1382,
       "column": 26,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -7696,7 +7728,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1402,
+      "line": 1406,
       "column": 26,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -7712,7 +7744,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1425,
+      "line": 1429,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -7728,7 +7760,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1485,
+      "line": 1489,
       "column": 19,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -7744,7 +7776,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1566,
+      "line": 1570,
       "column": 23,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -7760,7 +7792,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1582,
+      "line": 1586,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -7780,7 +7812,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1640,
+      "line": 1644,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -7796,7 +7828,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1662,
+      "line": 1666,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -7818,7 +7850,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1724,
+      "line": 1728,
       "column": 26,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -7834,7 +7866,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1894,
+      "line": 1898,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -7866,7 +7898,7 @@
     },
     {
       "file": "woof/core/kf.py",
-      "line": 385,
+      "line": 388,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -7898,7 +7930,7 @@
     },
     {
       "file": "woof/core/microphysics.py",
-      "line": 1847,
+      "line": 1852,
       "column": 21,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7914,7 +7946,7 @@
     },
     {
       "file": "woof/core/microphysics.py",
-      "line": 1851,
+      "line": 1856,
       "column": 21,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -9142,7 +9174,7 @@
     },
     {
       "file": "woof/core/thompson_aerosol_launch.py",
-      "line": 136,
+      "line": 167,
       "column": 19,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -9158,7 +9190,7 @@
     },
     {
       "file": "woof/core/thompson_fork.py",
-      "line": 109,
+      "line": 117,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -10266,7 +10298,7 @@
     },
     {
       "file": "woof/hex/cuda_physics_v841.py",
-      "line": 1919,
+      "line": 1930,
       "column": 26,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",

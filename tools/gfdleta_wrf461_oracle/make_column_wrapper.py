@@ -8,14 +8,16 @@ parser.add_argument('--wrf-source',type=Path,required=True)
 parser.add_argument('--scratch-layout',type=Path,default=ROOT/'woof/core/gfdleta_column_layout.json')
 parser.add_argument('--output-root',type=Path,default=ROOT)
 options=parser.parse_args()
-path=options.output_root/'woof/core/kernels/gfdleta_column.cuh'
+spec=importlib.util.spec_from_file_location('lower',Path(__file__).with_name('lower_column.py'))
+lower=importlib.util.module_from_spec(spec);spec.loader.exec_module(lower)
+# GFDLETA_MAXL=256 writes the deep tier's own unit and layout beside the shipped ones.
+tier='' if lower.MAXL==81 else f'_l{lower.MAXL}'
+path=options.output_root/f'woof/core/kernels/gfdleta_column{tier}.cuh'
 s=path.read_text()
 m=re.search(r'GD_DEVICE int etara_\((.*?)\)\s*\{',s,re.S)
 args=[];typed=m[1].replace('\n',' ').split(',')
 for x in typed:
  typ,name=x.strip().split('*');args.append((typ.strip(),name.strip()))
-spec=importlib.util.spec_from_file_location('lower',Path(__file__).with_name('lower_column.py'))
-lower=importlib.util.module_from_spec(spec);spec.loader.exec_module(lower)
 source=options.wrf_source.read_text()
 units=lower.routines(lower.logical_lines(source));decls={}
 for _,line in units['ETARA']:
@@ -25,8 +27,8 @@ for _,line in units['ETARA']:
   dims=lower.bounds(d[1]);sizes=[]
   for dim in lower.split_top(dims):
    if ':' in dim:
-    a,b=dim.split(':');sizes.append(eval(b.replace('GDMAX','81'))-eval(a.replace('GDMAX','81'))+1)
-   else:sizes.append(eval(dim.replace('GDMAX','81')))
+    a,b=dim.split(':');sizes.append(eval(b.replace('GDMAX',str(lower.MAXL)))-eval(a.replace('GDMAX',str(lower.MAXL)))+1)
+   else:sizes.append(eval(dim.replace('GDMAX',str(lower.MAXL))))
   size=__import__('math').prod(sizes)
  else:size=1
  for name in lower.split_top(rhs):decls[name.strip().lower()]=size
@@ -44,7 +46,7 @@ scratch=json.loads(options.scratch_layout.read_text())
 schema={'fields':fields,'float_count':offsets['real'],'int_count':offsets['integer'],'tables':lower.GLOBALS,'clock':lower.CLOCK,'scratch_bytes':scratch.get('scratch_bytes',scratch.get('bytes'))}
 if not isinstance(schema['scratch_bytes'],int) or schema['scratch_bytes']<1:
  raise ValueError('scratch layout must declare positive scratch_bytes or bytes')
-(options.output_root/'woof/core/gfdleta_column_layout.json').write_text(json.dumps(schema,indent=2)+'\n')
+(options.output_root/f'woof/core/gfdleta_column_layout{tier}.json').write_text(json.dumps(schema,indent=2)+'\n')
 calls='etara_('+','.join(expr)+');'
 lw=next(x for x in fields if x['name']=='gfdl_lw');sw=next(x for x in fields if x['name']=='gfdl_sw')
 body=f'''GD_DEVICE void gd_column_one(GDTable *table,float *f,int *ints,GDScratch *work,int longwave=1,int shortwave=1) {{
@@ -76,5 +78,5 @@ extern "C" __global__ void gd_radiation_call(GDTable *table,float *floats,int *i
 }}
 #endif
 '''
-(options.output_root/'woof/core/kernels/gfdleta_column.cu').write_text(body)
+(options.output_root/f'woof/core/kernels/gfdleta_column{tier}.cu').write_text(body)
 print(schema['float_count'],schema['int_count'],[x['name'] for x in fields])

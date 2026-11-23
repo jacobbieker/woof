@@ -435,6 +435,7 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
         "cam3_emissivity", "eeps", "gsfcgce4ice_aux", "sstskin",
         "gfdleta_init", "gfdleta_lw_helpers", "gfdleta_tables", "gfdleta_column",
         "gfdleta_math_probe", "gfdleta_co2_init", "gfdleta_table_runtime",
+        "gfdleta_column_l256", "gfdleta_co2_init_l256",
         "qnsepbl", "qnsesfc")})
     if strict:
         expected.update({name: ("-std=c++17", "--ftz=false", "--fmad=false", "-DGPUWM_GFDLETA_STRICT=1")
