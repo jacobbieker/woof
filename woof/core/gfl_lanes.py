@@ -106,6 +106,14 @@ _DEFINES = r'''#ifndef GF_LANES
 #define GFL_MIN_BLOCKS 3
 #endif
 #define GF_CHARACTER_BYTES 256
+// The launch counters (column, spill pool). 32-bit on Metal, which has no 64-bit atomic add (the
+// launcher bounds both counters there); 64-bit on CUDA, whose kernel then compiles as it did with
+// 64-bit counters (a 32-bit column counter cost a 64-bit-counter build ~40% on an A6000, 2026-11-23).
+#ifdef __WOOF_METAL__
+typedef unsigned int gf_counter;
+#else
+typedef unsigned long long gf_counter;
+#endif
 #ifdef GF_HOST_WITNESS
 #define __forceinline__ inline
 #define __launch_bounds__(...)
@@ -187,7 +195,7 @@ _WORKSPACE_NEW = '''struct GFWorkspace {
   // e+1, 0 = none) for the launch. Metal has no device heap, so the pool stands in for an in-kernel malloc on every
   // backend: placement only, the same words. The share is sized to what columns use, the spill keeps a deeper column
   // exact and running.
-  char* spill_pool;unsigned long long spill_bytes,spill_entries;unsigned int* spill_next;unsigned long long spill_entry;
+  char* spill_pool;unsigned long long spill_bytes,spill_entries;gf_counter* spill_next;unsigned long long spill_entry;
   // Character arrays are read bytewise: contiguous per thread.
   char* bytes;unsigned long long bcapacity,bposition;unsigned int lane;
   __device__ void* allocate(unsigned long long n){
@@ -199,7 +207,7 @@ _WORKSPACE_NEW = '''struct GFWorkspace {
       if(position<capacity)position=capacity;
       if(position+n>capacity+spill_bytes){gf_trap();return nullptr;}
       if(spill_entry==0ULL){
-        const unsigned long long taken=atomicAdd(spill_next,1u);
+        const unsigned long long taken=atomicAdd(spill_next,(gf_counter)1);
         if(taken>=spill_entries){gf_trap();return nullptr;}
         spill_entry=taken+1ULL;
       }
@@ -419,8 +427,8 @@ __device__ void gfl_column(long long col,const unsigned long long* ptrs,const un
 }
 #ifndef GF_HOST_WITNESS
 // A block is one slab of the scratch (blockDim = GF_LANES; thread t is lane t of the slab and keeps it, and
-// its spill entry once it takes one). next[0] is the column counter, next[1] the spill pool's (32-bit: Metal has
-// no 64-bit atomic add; the launcher bounds both). Each warp takes the next 32 consecutive columns from
+// its spill entry once it takes one). next[0] is the column counter, next[1] the spill pool's (gf_counter: 32-bit
+// on Metal, where the launcher bounds both, 64-bit on CUDA). Each warp takes the next 32 consecutive columns from
 // the launch's counter until none are left, so a warp held up by convecting columns does not leave the
 // card idle behind it (a fixed column-per-slot round left the last round a few blocks wide). Columns are
 // independent; each executes the complete source order from a fresh workspace, so which warp runs a
@@ -428,15 +436,15 @@ __device__ void gfl_column(long long col,const unsigned long long* ptrs,const un
 extern "C" __global__ void __launch_bounds__(GF_LANES, GFL_MIN_BLOCKS) gfl_lane_columns(long long ncol,
  const unsigned long long* ptrs,const unsigned long long* strides,char* scratch,unsigned long long capacity,
  unsigned long long spill_bytes,unsigned int* diagnostics,unsigned long long* highwater,const int* vertical,
- unsigned int* saved_fct_error,unsigned int* next,char* spill_pool,unsigned long long spill_entries){
+ unsigned int* saved_fct_error,gf_counter* next,char* spill_pool,unsigned long long spill_entries){
  unsigned long long spill_entry=0;
  const unsigned int lane=threadIdx.x, warp_lane=threadIdx.x&31u;
  char* slab=scratch+(unsigned long long)blockIdx.x*(capacity+GF_CHARACTER_BYTES)*GF_LANES;
  for(;;){
-   unsigned int first=0;
-   if(warp_lane==0)first=atomicAdd(next,32u);
+   gf_counter first=0;
+   if(warp_lane==0)first=atomicAdd(next,(gf_counter)32);
    first=__shfl_sync(0xffffffffu,first,0);
-   if((long long)first>=ncol)break;
+   if(first>=(gf_counter)ncol)break;
    const long long col=(long long)first+warp_lane;
    if(col<ncol){
      GFWorkspace workspace{slab+4ULL*lane,capacity,0,0,0,GFReal(0.0f),false,spill_pool,spill_bytes,spill_entries,

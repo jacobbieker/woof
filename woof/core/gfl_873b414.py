@@ -43781,8 +43781,8 @@ def launch_lane_columns(fields, *, ncol, nz, saved_fct_error=None, vertical=None
     capacity = _share_bytes(levels, vertical[5] - vertical[4] + 1)
     kernel = _module(device).get_function('gfl_lane_columns')
     blocks, scratch = _column_scratch(device, kernel, -(-ncol // LANES), capacity)
-    # The 32-bit counters: each warp overshoots the columns by at most one take.
-    if ncol + 32 * (LANES // 32) * blocks >= 1 << 32:
+    # Metal's 32-bit counters (gf_counter): each warp overshoots the columns by at most one take.
+    if _metal() and ncol + 32 * (LANES // 32) * blocks >= 1 << 32:
         raise ValueError(f'GFL launch of {ncol} columns passes its 32-bit column counter')
     spill_bytes = SPILL_SHARES * capacity
     spill, entries = _spill_pool(device, spill_bytes, blocks)
@@ -43798,14 +43798,14 @@ def _next_column(device):
     """The launch's counters, zeroed on the stream before the launch.
 
     Word 0 is the column counter (each warp takes the next 32 columns), word 1 the
-    spill pool's (a thread's first spill takes the next entry). 32-bit words: Metal has
-    no 64-bit atomic add.
+    spill pool's (a thread's first spill takes the next entry). The kernel's gf_counter:
+    32-bit words on Metal, which has no 64-bit atomic add, 64-bit on CUDA.
     """
     import cupy as cp
     held = _NEXT.get(device)
     if held is None:
         with cp.cuda.Device(device):
-            held = _NEXT[device] = cp.zeros(2, dtype=cp.uint32)
+            held = _NEXT[device] = cp.zeros(2, dtype=cp.uint32 if _metal() else cp.uint64)
     held.fill(0)
     return held
 
