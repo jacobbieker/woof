@@ -415,7 +415,7 @@
     },
     {
       "file": "README.md",
-      "line": 1151,
+      "line": 1160,
       "kind": "prose",
       "anchor": "pairs was checked under both subnormal modes",
       "anchor_sha256": "2d72bca9880fb9136b484ba3ebdab81af419d5df3061964499ecb9120e7d562e",
@@ -1449,7 +1449,7 @@
     },
     {
       "file": "docs/public/CONFIGURATION.md",
-      "line": 807,
+      "line": 820,
       "kind": "prose",
       "anchor": "| `ysu_version` | no stock namelist spelling | `\"wrf_480\"` | `\"wrf_480\"`, `\"wrf_461\"` | Corrected YSU default. WRF 4.8 MMM `550b5b4` removes the old efficiency offset and caps `0.2*8*tmp1` at 0.4. `[shared]` selects the generation; namelist import uses the corrected default and preserves an explicit physics-selector comment (`! gpuwm-physics-selectors-v1: {...}`). `wrf_461` under default arithmetic reproduces 2.8.9's YSU kernel, under its restart identity. Under `GPUWM_WRF_EXACT=1` it matches WRF 4.6.1 `bl_ysu_run` word for word on the 1,188-column test set, with the same declared exceptions as `wrf_480` (YSU surface drag removed on mixed BEP urban columns; the bounded PBL-height search on four-level columns), under its own restart identity, so a strict-mode `wrf_461` checkpoint from 2.9.0 or earlier is refused rather than continued with different arithmetic. Four-level shallow columns use the declared bounded PBL-height search and zero final TKE word. A generation change is refused on restart; old headers without a selector mean `wrf_461`. The corrected path uses the shared no-FTZ loader and WOOF's own math routines |",
       "anchor_sha256": "fce15ee2f0dbd461c7726780e0bbe513e810bf65e03e7facb97c388cdb96fb51",
@@ -1889,7 +1889,7 @@
     },
     {
       "file": "docs/public/PHYSICS.md",
-      "line": 3642,
+      "line": 3656,
       "kind": "prose",
       "anchor": "Default execution uses CUDA hardware math. `GPUWM_WRF_EXACT=1` preserves subnormals and disables contraction for bitwise native replay. Real native replays also set `GPUWM_WRF_GLIBC` to the referee build's glibc version; the regenerated captures (test host A, RTX 4090) use `2.43`. The column grid runs in one launch with a bounded scratch pool. Independent CO2 profiles and ozone/table initialization run in parallel on the GPU. Cloud bounds from KF, Grell, Grell-Freitas and New SAS retain their native levels and sentinels.",
       "anchor_sha256": "1b6bc24d487dee8625fcd34b10969dc4a7b8dd6317a84707058437e7354df051",
@@ -17696,7 +17696,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1301,
+      "line": 1306,
       "kind": "prose",
       "anchor": "# WRF column oracle at every non-FTZ word",
       "anchor_sha256": "3e0b346ebd3c9373d111fd292b13931a5c2794a4eb90d89d17d0da08eaddcd53",
@@ -17707,7 +17707,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1614,
+      "line": 1619,
       "kind": "prose",
       "anchor": "# ABS sign clearing includes negative zero, subnormals and signed NaNs;",
       "anchor_sha256": "2316c8314eaf19a4219ba9b29a5d5fe8a4c63479e275c556b00b09c1d0319d02",
@@ -17718,7 +17718,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1740,
+      "line": 1745,
       "kind": "prose",
       "anchor": "# Selected Group A loader header from the delivered 58-sfclay-noftz-mynn-mm5-eta",
       "anchor_sha256": "af71af75c23481d8516a7ad61f5d06630200538f9a10ee7d5b77655ca1f738eb",
@@ -17729,18 +17729,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1743,
-      "kind": "prose",
-      "anchor": "# Selected Group A loader header from the delivered 58-sfclay-noftz-mynn-mm5-eta",
-      "anchor_sha256": "af71af75c23481d8516a7ad61f5d06630200538f9a10ee7d5b77655ca1f738eb",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1746,
+      "line": 1748,
       "kind": "prose",
       "anchor": "# Selected Group A loader header from the delivered 58-sfclay-noftz-mynn-mm5-eta",
       "anchor_sha256": "af71af75c23481d8516a7ad61f5d06630200538f9a10ee7d5b77655ca1f738eb",
@@ -17762,7 +17751,18 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1753,
+      "line": 1756,
+      "kind": "prose",
+      "anchor": "# Selected Group A loader header from the delivered 58-sfclay-noftz-mynn-mm5-eta",
+      "anchor_sha256": "af71af75c23481d8516a7ad61f5d06630200538f9a10ee7d5b77655ca1f738eb",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_kernel_source_freeze_per_module.py",
+      "line": 1758,
       "kind": "prose",
       "anchor": "'surface_subnormal.cuh': '99d0aaf80b1de9e243c11cbdcebbb16198b76bd40c8207847d9284718f8021d4',",
       "anchor_sha256": "55f7e59c312ffb7b640f7e4aad2ed72ddae5b6424cba333511568e37c2fe0b80",
@@ -17773,7 +17773,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 2025,
+      "line": 2030,
       "kind": "prose",
       "anchor": "# WRF 4.8 water balance and the inherited source-scoped no-FTZ loader.",
       "anchor_sha256": "da8870c403912a185f3cfcf9234acb9ee838c784530fb527bddf8bad7038caa7",
@@ -29147,7 +29147,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1251,
+      "line": 1259,
       "kind": "prose",
       "anchor": "\"factory\": \"load_module_no_ftz\",",
       "anchor_sha256": "b0421ca3cd3bd385c26b85a05030a47384adf627d8ff1b368af865eae647bfa8",
@@ -29158,7 +29158,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1253,
+      "line": 1261,
       "kind": "prose",
       "anchor": "\"file\": \"woof/core/kernels/no_ftz.py\",",
       "anchor_sha256": "49e696c34493b8f7aceb70e54266067dfd6ce7130465924b65be77ede7460451",
@@ -29169,7 +29169,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1891,
+      "line": 1899,
       "kind": "prose",
       "anchor": "\"factory\": \"compile_cam_module_no_ftz\",",
       "anchor_sha256": "6d7b417340c11bb8da7a87759b2082beeb41c2e4052dcab0f34849564d65b0b1",
@@ -29180,7 +29180,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1899,
+      "line": 1907,
       "kind": "prose",
       "anchor": "\"factory\": \"compile_ishmael_no_ftz\",",
       "anchor_sha256": "0878ef123b253b6305e7c8e56de1049c1515cd441166258feafaf73e6161dfee",
@@ -29191,7 +29191,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 2139,
+      "line": 2147,
       "kind": "prose",
       "anchor": "\"factory\": \"_subnormal_arith\",",
       "anchor_sha256": "6d86c898bd7196485815fda472a7fed15879a82a033ac9352931e09354e4ddee",
@@ -29202,7 +29202,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 2531,
+      "line": 2539,
       "kind": "prose",
       "anchor": "\"factory\": \"_load_urban_module_without_ftz\",",
       "anchor_sha256": "d26e165000e1af659a39e72f4e877222fbe7b19c77500ef9c03921de27713999",
@@ -71673,7 +71673,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 727,
+      "line": 728,
       "kind": "prose",
       "anchor": "(radii can be FP32 subnormals, which a CuPy ufunc would flush); the",
       "anchor_sha256": "12df524d00ba37fdb6a907425c389c28085068f8ddd0ef433d0341b55c50bf8a",
@@ -71684,7 +71684,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1172,
+      "line": 1173,
       "kind": "prose",
       "anchor": "# NVRTC directly with --ftz=false and writes its arithmetic as unflushed PTX",
       "anchor_sha256": "159f6c9124c7662b2a2e1a17470a51f6abace54b384fd1a8c4fa4fa153a02b43",
@@ -71695,7 +71695,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1195,
+      "line": 1196,
       "kind": "prose",
       "anchor": "(\"-std=c++17\", \"--ftz=false\"),",
       "anchor_sha256": "00e7cb2ac2362b16b95f3ab4c2a28f8c25130cd0cdbbb08ef6c834b93acb7622",
@@ -71706,7 +71706,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1213,
+      "line": 1214,
       "kind": "prose",
       "anchor": "\"\"\"Prove on the live device that the glue unit keeps FP32 subnormals:",
       "anchor_sha256": "7d2f7053244cfba7656b08876fd0a3a616d58ca3985d9290a8ce8d727c298416",
@@ -71717,7 +71717,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1214,
+      "line": 1215,
       "kind": "prose",
       "anchor": "a subnormal product and quotient survive and a subnormal compares",
       "anchor_sha256": "5a32eddc1cfab0ad5c519315f57f0b7fd9202700116049fbe75cde217448b624",
@@ -71728,7 +71728,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1230,
+      "line": 1231,
       "kind": "prose",
       "anchor": "\"(subnormal flush on this toolchain)\" % (got, want))",
       "anchor_sha256": "482442025b5599a522a41aca39febda6c1bffba678dc468f850889dc287bf749",
@@ -71739,7 +71739,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1359,
+      "line": 1360,
       "kind": "prose",
       "anchor": "\"\"\"``a > 0`` for float32 ``a`` decided on the bits, so a subnormal",
       "anchor_sha256": "80806f8c0151a4aa979b462ab5d8b49c30c9618c66713b5db9d9fe068b0667db",
@@ -71750,7 +71750,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1995,
+      "line": 1996,
       "kind": "prose",
       "anchor": "so a subnormal counts) and the same verdict, with one host read.",
       "anchor_sha256": "1553c0631097d4add002ecd37b95fb96e8944b9f5a6a650764694fcae5ed6438",
@@ -71772,7 +71772,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy_device.py",
-      "line": 41,
+      "line": 42,
       "kind": "prose",
       "anchor": "options = (\"-std=c++17\", \"--ftz=false\")",
       "anchor_sha256": "9005e6b29710b42c06c971b190c62b14ef679151dcd181729f784abede4b8281",
@@ -71783,7 +71783,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy_device.py",
-      "line": 57,
+      "line": 61,
       "kind": "prose",
       "anchor": "\"\"\"Prove subnormal multiplication, division and comparison on-card.",
       "anchor_sha256": "24abb7c4a17eba6ad76a0392be14612cffe6f32071de008a302da2c61d48fd1f",
@@ -71860,7 +71860,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy_prep.py",
-      "line": 1626,
+      "line": 1636,
       "kind": "behavioural",
       "anchor": "# the host: mixing ratios traverse the FP32 subnormal range on real",
       "anchor_sha256": "204eac9f90ed8db5f7eb57cf1541563348e35bfa5fa329bd9a7f3b60d0db3116",
@@ -71871,7 +71871,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy_prep.py",
-      "line": 1627,
+      "line": 1637,
       "kind": "behavioural",
       "anchor": "# columns and every cupy-compiled device op flushes subnormals",
       "anchor_sha256": "70cc2401d577ce5c5b84f740570e65a02720509ebe9c2c551f98a0974d22e77d",
@@ -71882,7 +71882,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy_prep.py",
-      "line": 1942,
+      "line": 1956,
       "kind": "behavioural",
       "anchor": "# Host block for the subnormal-hazard chain, exactly as in",
       "anchor_sha256": "26a31ef95d11a1c0cc8b6def3cc4e9c9ebda7c5fd0802a6e00c50fc203373bc1",

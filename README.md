@@ -1700,6 +1700,16 @@ Notes on the 1.1.7 sync:
   preflight prices it by tier. Past 256 is refused by name. Hex does not
   offer `ra_sw_physics=2`, so only the WRF route is affected
   ([the record](docs/kernel_local_memory_bounds.md)).
+- **256-level hex member init and TC potential intensity.** The hex GPU
+  member init (`woof/hex/init_gpu/physics.cu`) and the TC diagnostics'
+  potential-intensity sounding (`tc_climate/potential_intensity.cu`) held
+  per-thread columns of 128 levels and refused deeper meshes. Both bounds
+  are now macros whose default is 128 (`MAX_FG`/`MAX_Z`, `PI_MAX_LEV`): a
+  mesh of 128 levels or fewer compiles the unchanged text (the PI source
+  preprocesses to the old literal source, and the deep builds reproduce the
+  shipped words at 64 levels), and a deeper mesh prepends a 256 define.
+  Past 256 is refused by name. A 200-level resampling of the PI reference
+  sounding gives the reference PI to within 0.4 m/s.
 
 ### Licensing and opt-ins
 
