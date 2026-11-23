@@ -198,3 +198,14 @@ def test_wrf461_gf_on_metal_never_builds_the_gfl_lane(monkeypatch):
     monkeypatch.delitem(sys.modules, "woof.core.gfl_873b414", raising=False)
     getattr(importlib.import_module(module), name)()
     assert "woof.core.gfl_873b414" not in sys.modules
+
+
+def test_wrf461_gf_unit_translates_and_loads_on_metal():
+    """On Metal the non-GFL GF unit (GFDRV, gf.cu) still translates and compiles."""
+    from woof import backend
+
+    if backend.active() != "mlx":
+        pytest.skip("runs under WOOF_BACKEND=mlx")
+    from woof.core.gf import _gf_module
+
+    assert _gf_module(50).get_function("gf_gfdrv_stage") is not None
