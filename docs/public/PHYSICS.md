@@ -2169,6 +2169,23 @@ units, and not yet scored against observations. The hex MPAS-suite Noah
 (`woof/hex/mpasphys/noah_v842.py`) does not carry it yet. Off, and in exact
 mode, the arithmetic is WRF's word for word.
 
+**Correction: `noah_land_ice_rain_runoff` (on in correct mode, finding FQ8).** WRF 4.7.1's Noah
+land-ice arm (`module_sf_noahlsm_glacial_only.F`, `SFLX_GLACIAL`) sets
+`PRCPF = PRCP` for liquid rain (:287) and SNOPAC turns it into
+`PRCP1 = PRCPF*0.001` (:912); nothing reads PRCP1 again, and the rain is not
+added to the pack (only snow and freezing rain are, :259-260). The driver
+books `RUNOFF1 = SNOMLT/DT` alone (:404-406), "since there is no soil
+medium", so the rain leaves the water budget unbooked. With the option on,
+`PRCPF*0.001` is added to `RUNOFF1`: all of it, since WRF's own logic
+refreezes none of it into the pack. The pack and energy balance are
+unchanged, and the pack water budget closes
+(`tests/test_noah_land_ice_rain_runoff.py`, float64 mirror and kernel). It is
+per domain, read only where `sf_surface_physics = 2`, carried by the plain,
+mosaic, UA and urban-canopy Noah units and by a WRF-Hydro coupling (the
+glacial arm writes `sfcrunoff` only), and not yet scored against
+observations. The hex MPAS-suite Noah does not carry it. Off, and in exact
+mode, the arithmetic is WRF's word for word.
+
 ## Radiation (`ra_lw_physics` / `ra_sw_physics`)
 
 | option | selection | maturity | evidence, in one line |

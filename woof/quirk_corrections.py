@@ -117,6 +117,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         active=lambda get: (int(get("ra_physics") if int(get("ra_lw_physics")) == -1
                                 else get("ra_lw_physics")) == 4
                             and get("ra_rrtmg_variant") == "rrtmg_legacy")),
+    QuirkCorrection(
+        "noah_land_ice_rain_runoff", "wrf", False, True, "sf_surface_physics = 2, land-ice points",
+        "Noah books the liquid rain that falls on land ice as surface runoff, where WRF's glacial arm drops it",
+        active=lambda get: int(get("sf_surface_physics")) == 2),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",

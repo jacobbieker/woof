@@ -574,6 +574,9 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The RRTMG longwave model-top correction (FQ6, the legacy RRTMG longwave
     # only, on in correct mode): step-time; preparation never reads it.
     "run.rrtmg_lw_model_top",
+    # The Noah land-ice rain runoff (FQ8, sf_surface_physics = 2 only, on in
+    # correct mode): step-time; preparation never reads it.
+    "run.noah_land_ice_rain_runoff",
     # The opt-in TSI forcing (woof.spacewx), appended off.
     "run.solar_tsi_opt", "run.solar_tsi_source", "run.solar_tsi_mode",
     # The opt-in solar band shares (woof.spacewx), appended off.

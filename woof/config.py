@@ -2686,6 +2686,15 @@ class RunConfig:
     # Correct-mode finding FQ6: on by default, off in physics.mode = 'exact'.
     rrtmg_lw_model_top: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-23), appended.
+    # Noah's land-ice arm (SFLX_GLACIAL, sf_surface_physics = 2) keeps liquid
+    # rain in PRCPF/PRCP1 (module_sf_noahlsm_glacial_only.F:287, :912) and
+    # books only the snowmelt as RUNOFF1 (:406), so rain on a glacier point
+    # leaves the water budget unbooked.  True books it as surface runoff;
+    # False is WRF's arithmetic word for word.  Read only by Noah.
+    # Correct-mode finding FQ8: on by default, off in physics.mode = 'exact'.
+    noah_land_ice_rain_runoff: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -2950,7 +2959,8 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "mynn_boulac_down_sign, pbl_boulac_down_sign, "
     "gf_deep_rain_evaporation_booking, ysu_surface_heat_exner, "
     "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
-    "thompson_rain_snow_closure, rrtmg_lw_model_top); otherwise "
+    "thompson_rain_snow_closure, rrtmg_lw_model_top, "
+    "noah_land_ice_rain_runoff); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -10170,9 +10180,11 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("thompson_rain_snow_closure must be true or false")
     if type(cfg.rrtmg_lw_model_top) is not bool:
         raise ConfigurationRefused("rrtmg_lw_model_top must be true or false")
+    if type(cfg.noah_land_ice_rain_runoff) is not bool:
+        raise ConfigurationRefused("noah_land_ice_rain_runoff must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
-    # The quirk-ledger keys (correct-mode findings FQ1-FQ6) are on by
+    # The quirk-ledger keys (correct-mode findings FQ1-FQ8) are on by
     # default and read only where their scheme runs (correct_mode.KEY_SCOPE,
     # KEY_GENERATIONS, KEY_UNREAD: YSU's not with BEP/BEM, MYNN's only at
     # wrf_461), so an unread one is inert, not refused.

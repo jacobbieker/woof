@@ -730,11 +730,12 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ6, so the run receipt's
+    the keys are correct-mode findings FQ1-FQ6 and FQ8, so the run receipt's
     `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
-    `thompson_rain_snow_closure` and `rrtmg_lw_model_top` (WRF route);
+    `thompson_rain_snow_closure`, `rrtmg_lw_model_top` and
+    `noah_land_ice_rain_runoff` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -785,6 +786,12 @@ Notes on the 1.1.7 sync:
     and the top layer's with the profile and anchors at the interface below
     the top. The option keeps both and anchors at the top interface (finding
     FQ6). Not read by RTE+RRTMGP; not yet scored against observations.
+  - `noah_land_ice_rain_runoff` (Noah, `sf_surface_physics = 2`, land-ice
+    points, WRF route). WRF's glacial arm keeps liquid rain in `PRCPF` and
+    never reads it, booking only the snowmelt as `RUNOFF1`, so rain on a
+    glacier leaves the water budget unbooked. The option adds it to the
+    surface runoff (finding FQ8); a WRF-Hydro coupling carries it. Not yet
+    scored against observations.
 - **Observation-driven corrections, each opt-in and off by default** (GF's
   is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).

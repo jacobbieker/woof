@@ -127,6 +127,11 @@ FQ6  WRF's RRTMG longwave (ra_lw_physics = 4 with ra_rrtmg_variant =
      and the top layer's; the key keeps both and anchors the profile at the
      top interface (``rrtmg_lw_model_top``).  The RTE+RRTMGP adapter does not
      carry it.
+FQ8  Noah (sf_surface_physics = 2) on a land-ice point keeps the liquid rain
+     in PRCPF and never reads it, and books only the snowmelt as runoff, so
+     the rain leaves the water budget; the key books it as surface runoff
+     (``noah_land_ice_rain_runoff``).  A WRF-Hydro coupling carries it (the
+     glacial arm writes SFCRUNOFF, never the routing planes).
 
 WHICH SCHEMES CARRY EACH FINDING is data too (:attr:`Correction.carriers`),
 separate from which schemes a key corrects (:data:`KEY_SCOPE`).  A domain
@@ -329,6 +334,14 @@ CORRECTIONS: tuple[Correction, ...] = (
             "the model top"),
         carriers=(("ra_lw_physics", (4,)),),
     ),
+    Correction(
+        finding="FQ8",
+        keys=("noah_land_ice_rain_runoff",),
+        summary=(
+            "Noah books the liquid rain that falls on land ice as surface "
+            "runoff, where WRF drops it"),
+        carriers=(("sf_surface_physics", (2,)),),
+    ),
 )
 
 #: Finding -> ``(selector, absent value, values)``: a carrier that is a
@@ -393,6 +406,8 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     # FQ6: the longwave scheme (the aggregate ra_physics resolves to it,
     # _selector_int), at the legacy variant (KEY_GENERATIONS).
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
+    # FQ8: Noah's glacial arm (sf_surface_physics = 2, land-ice points).
+    "noah_land_ice_rain_runoff": ("sf_surface_physics", (2,)),
 }
 
 #: Key -> ``(selector, values)``: selections inside :data:`KEY_SCOPE` under

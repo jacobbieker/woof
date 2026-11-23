@@ -434,14 +434,24 @@ def _variant_jobs(experiment, modules):
                 from woof.core.thompson import RAIN_SNOW_CLOSURE_DEFINES
                 tiers.append((defines if name in AEROSOL_KERNEL_MODULES else ())
                              + RAIN_SNOW_CLOSURE_DEFINES)
-            if name in ("noah_ua", "noah_mosaic_ua") and _reads(run, "noah_smc_floor_booking"):
-                # FQ4 (on in correct mode): the booked unit, the define first
-                # (woof.core.noah.smc_floor_booking_module).
-                from woof.core.noah import smc_floor_booking_module
-                if (name, "booking") not in seen:
-                    seen.add((name, "booking"))
-                    jobs.append((f"{name}[NOAH_SMC_FLOOR_BOOKING=1]",
-                                 smc_floor_booking_module.__wrapped__, (name,)))
+            if name == "noah":
+                # FQ4 and FQ8: the integer-define tier launch_noah compiles.
+                from woof.core.noah import noah_define_tier
+                tier = noah_define_tier(_reads(run, "noah_smc_floor_booking"),
+                                        _reads(run, "noah_land_ice_rain_runoff"))
+                if tier:
+                    tiers.append(tier)
+            if name in ("noah_ua", "noah_mosaic_ua"):
+                # FQ4 and FQ8 (on in correct mode): the unit with the Noah
+                # correction defines first, composed as the run launches it
+                # (woof.core.noah.noah_define_module).
+                from woof.core.noah import noah_define_module, noah_define_tier
+                booked = noah_define_tier(_reads(run, "noah_smc_floor_booking"),
+                                          _reads(run, "noah_land_ice_rain_runoff"))
+                if booked and (name, "booking", booked) not in seen:
+                    seen.add((name, "booking", booked))
+                    jobs.append((name + "[" + ",".join(f"{k}={v}" for k, v in booked) + "]",
+                                 noah_define_module.__wrapped__, (name, booked)))
             for tier in tiers:
                 if (name, tier) in seen:
                     continue
