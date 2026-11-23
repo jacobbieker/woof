@@ -763,9 +763,10 @@ def _apply_thompson_default(
         state.qc, state.qi, state.qr, state.qs, state.qg,
         temperature, state.p, state.qv, graupel_number_shadow,
         micro_columns)
-    # RunConfig.thompson_rain_snow_closure (default off): both source
-    # networks compile with the rain-snow closure define.
-    rain_snow_closure = getattr(cfg, "thompson_rain_snow_closure", False) is True
+    # RunConfig.thompson_rain_snow_closure (FQ5): both source networks
+    # compile with the rain-snow closure define.
+    from woof.core.thompson import rain_snow_closure_due
+    rain_snow_closure = rain_snow_closure_due(cfg)
     launch_frozen_vapor_network_from_owner(
         state.qi, state.ni, state.qs, state.qg, state.qr, state.nr,
         temperature, state.p, state.qv, table_owner, dt, qc=state.qc,
@@ -1794,6 +1795,12 @@ def _apply_scheme(state: DomainState, cfg: RunConfig, dt: float, *,
             _restore_spec_zone_ring(state, slices, saved, captured_slots)
             from woof.core.afwa_diagnostics import restore_theta_ring
             restore_theta_ring(state,cfg,slices)
+    if getattr(cfg, "dyn_lightning_option", 0):
+        # module_microphysics_driver.F (v4.8.0): calc_lpi_new, calc_dyn_pe and
+        # calcstroke run inside the driver after the scheme, so before
+        # solve_em's microphysics_zero_out.
+        from woof.core.dyn_lightning import update_dyn_lightning
+        update_dyn_lightning(state, cfg, dt)
     if getattr(cfg, "mp_zero_out", 0):
         microphysics_zero_out(state, cfg)
     return result
@@ -1820,6 +1827,14 @@ WRF_FIRST_SCALAR_SPECIES: dict[int, str] = {
     27: "nn",                                # qnn (UDM, WRF 4.7.1 :3040)
     18: "qndrop",                            # qndrop (v4.6.1 nssl2mconc)
     95: "qt",                                # qt (etampnew, :3045)
+    # woof's TEMPO id (WRF v4.7+ selector 88).  WRF 4.8.0's tempo,
+    # tempo_aerosol and tempo_hail packages (Registry.EM_COMMON:3094,
+    # :3117-3118) register qni, qnr, qnc, qnwfa, qnifa, qng and qvolg; the
+    # scalar array follows DECLARATION order, where qni (:526) precedes
+    # qnr (:536), qng (:538) and qnc (:544), and qndrop (:524) is not
+    # registered by TEMPO.  Named breakage: without the row mp_zero_out_all
+    # = 1 (the HRRR/RAP namelists' setting) refused every TEMPO run.
+    900: "ni",
 }
 
 _MP_ZERO_OUT_KERNELS: dict[str, object] = {}

@@ -15,13 +15,21 @@ from woof.core import constants as _constants
 from woof.core.kernels import get_kernel
 from woof.core.state import DTYPE
 
-#: RunConfig.thompson_rain_snow_closure (default off): every Thompson unit
+#: RunConfig.thompson_rain_snow_closure (finding FQ5): every Thompson unit
 #: that computes the rain-snow collection (thompson.cu's networks,
 #: thompson_classic.cu, the generated column, thompson_fork.cu and the
 #: aerosol cold/warm units) carries an #ifdef block that, below 0 C (wet
 #: bulb), sets the graupel gain to what rain and snow lose after their
 #: limiters.  Without the define each unit's program is the one before it.
 RAIN_SNOW_CLOSURE_DEFINES = (("THOMPSON_RAIN_SNOW_CLOSURE", 1),)
+
+
+def rain_snow_closure_due(cfg) -> bool:
+    """Whether RunConfig.thompson_rain_snow_closure (finding FQ5) reaches
+    ``cfg``'s Thompson: on (correct mode's default) and read by the
+    selected microphysics (mp_physics = 8, 28 or 38)."""
+    from woof.quirk_corrections import run_reads
+    return run_reads(cfg, "thompson_rain_snow_closure")
 
 
 def _closure_kernel(func: str, rain_snow_closure: bool):

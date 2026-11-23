@@ -1532,7 +1532,7 @@ __device__ bool tf_mp_thompson(
                 prs_rcs = -prr_rcs;
             }
 #ifdef THOMPSON_RAIN_SNOW_CLOSURE
-            // RunConfig.thompson_rain_snow_closure (default off): the fork
+            // RunConfig.thompson_rain_snow_closure (FQ5): the fork
             // re-pairs the rain-snow transfer only above 0 C.  Below it the
             // graupel gain keeps its pre-limiter value while the rain and
             // snow limiters shrink the losses; the gain becomes what they

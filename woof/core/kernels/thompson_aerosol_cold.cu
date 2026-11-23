@@ -416,7 +416,7 @@ __device__ __forceinline__ void thompson_aa_cold_level_wrf461(
     // HOST READBACK ANCHOR: the frozen block is complete, pre-limiter.
     thompson_aa_wrf_conserve(&L, odts);
 #ifdef THOMPSON_RAIN_SNOW_CLOSURE
-    // RunConfig.thompson_rain_snow_closure (default off): WRF re-pairs the
+    // RunConfig.thompson_rain_snow_closure (FQ5): WRF re-pairs the
     // rain-snow transfer only where twet > T_0 (:2946-2950).  Below it the
     // graupel gain keeps its pre-limiter value while the rain and snow
     // limiters shrink the losses; the gain becomes what they lose.
@@ -2339,7 +2339,7 @@ extern "C" __global__ void thompson_aa_cold_network(
     }
 
 #ifdef THOMPSON_RAIN_SNOW_CLOSURE
-    // RunConfig.thompson_rain_snow_closure (default off): below 0 C the
+    // RunConfig.thompson_rain_snow_closure (FQ5): below 0 C the
     // rain-snow transfer is never re-paired, so the graupel gain keeps its
     // pre-limiter value while the rain and snow limiters above shrink the
     // losses.  The gain (and, hail-aware, its volume pbg_rcs below) becomes

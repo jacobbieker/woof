@@ -1303,7 +1303,7 @@ extern "C" __global__ void tc_sources(
             prs_rcs = -prr_rcs;
         }
 #ifdef THOMPSON_RAIN_SNOW_CLOSURE
-        // RunConfig.thompson_rain_snow_closure (default off): WRF re-pairs
+        // RunConfig.thompson_rain_snow_closure (FQ5): WRF re-pairs
         // the rain-snow transfer only above 0 C wet bulb.  Below it the
         // graupel gain keeps its pre-limiter value while the rain and snow
         // limiters shrink the losses; the gain becomes what they lose.

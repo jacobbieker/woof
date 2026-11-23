@@ -95,7 +95,7 @@ def workspace_bytes(nz: int, threads: int) -> int:
 MODULE_OPTIONS = ("-std=c++17", "--fmad=false", "--ftz=false")
 
 
-#: RunConfig.thompson_rain_snow_closure (default off): the define goes
+#: RunConfig.thompson_rain_snow_closure (FQ5): the define goes
 #: first, ahead of the unit, which reads it in one #ifdef block.
 RAIN_SNOW_CLOSURE_PREFIX = "#define THOMPSON_RAIN_SNOW_CLOSURE 1\n"
 

@@ -3851,6 +3851,7 @@ dependencies = [
  "rustls",
  "rustls-rustcrypto",
  "rustwx-core",
+ "rw-http",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -3932,6 +3933,10 @@ dependencies = [
  "serde_json",
  "sha2",
 ]
+
+[[package]]
+name = "rw-cu99-launch"
+version = "0.1.0"
 
 [[package]]
 name = "rw-fetch"
@@ -4033,6 +4038,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rw-http"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "sha2",
+ "ureq",
+]
+
+[[package]]
 name = "rw-ingest"
 version = "0.1.0"
 dependencies = [
@@ -4122,6 +4136,7 @@ dependencies = [
  "rayon",
  "rustls",
  "rustls-rustcrypto",
+ "rw-http",
  "rw-store",
  "serde",
  "serde_json",
@@ -4151,6 +4166,7 @@ dependencies = [
  "rustwx-calc",
  "rustwx-core",
  "rustwx-io",
+ "rw-http",
  "rw-nexrad",
  "rw-sat",
  "serde",
@@ -4223,6 +4239,7 @@ dependencies = [
  "rustls",
  "rustls-rustcrypto",
  "rustwx-core",
+ "rw-http",
  "rw-ingest",
  "rw-store",
  "serde",
@@ -4337,10 +4354,6 @@ name = "rw-tempo"
 version = "0.1.0"
 
 [[package]]
-name = "rw-cu99-launch"
-version = "0.1.0"
-
-[[package]]
 name = "rw-wrfbatch"
 version = "0.1.0"
 dependencies = [
@@ -4360,6 +4373,7 @@ dependencies = [
  "rustwx-products",
  "rustwx-render",
  "rusty-weather",
+ "rw-http",
  "rw-ingest",
  "rw-isobaric",
  "rw-mlexport",

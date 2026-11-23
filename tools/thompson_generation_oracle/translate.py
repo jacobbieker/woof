@@ -266,9 +266,9 @@ def dump_init(source, directory):
 #: prg_rcs keeps its pre-limiter value while the rain and snow limiters
 #: shrink prr_rcs and prs_rcs.
 RAIN_SNOW_REPAIR = "prs_rcs(k) = -prr_rcs(k)"
-#: The opt-in correction (RunConfig.thompson_rain_snow_closure, default
-#: off), emitted after that block's endif under a define the default
-#: compile never sets: below 0 C the gain becomes what rain and snow lose.
+#: The correction (RunConfig.thompson_rain_snow_closure, finding FQ5),
+#: emitted after that block's endif under a define an exact-mode compile
+#: never sets: below 0 C the gain becomes what rain and snow lose.
 RAIN_SNOW_CLOSURE = "if (temp(k).lt.T_0) prg_rcs(k) = -(prr_rcs(k) + prs_rcs(k))"
 
 
@@ -276,7 +276,7 @@ def rain_snow_closure(symbols, function):
     """The ``#ifdef THOMPSON_RAIN_SNOW_CLOSURE`` block, translated like the
     body."""
     return ("#ifdef THOMPSON_RAIN_SNOW_CLOSURE\n"
-            "// woof opt-in RunConfig.thompson_rain_snow_closure (default off)\n"
+            "// woof RunConfig.thompson_rain_snow_closure (FQ5)\n"
             + body_line(0, RAIN_SNOW_CLOSURE.lower(), symbols, function)
             + "\n#endif")
 

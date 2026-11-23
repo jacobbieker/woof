@@ -4242,7 +4242,7 @@ extern "C" __global__ void thompson_warm_frozen_source_network(
         rain_snow_snow_rate = -rain_snow_rain_rate;
     }
 #ifdef THOMPSON_RAIN_SNOW_CLOSURE
-    // RunConfig.thompson_rain_snow_closure (default off): WRF re-pairs the
+    // RunConfig.thompson_rain_snow_closure (FQ5): WRF re-pairs the
     // rain-snow transfer only above 0 C wet bulb.  Below it the graupel
     // gain keeps its pre-limiter value while the rain and snow limiters
     // shrink the losses; the gain becomes what they lose.
@@ -7136,7 +7136,7 @@ extern "C" __global__ void thompson_frozen_vapor_network(
     }
 
 #ifdef THOMPSON_RAIN_SNOW_CLOSURE
-    // RunConfig.thompson_rain_snow_closure (default off): below 0 C WRF
+    // RunConfig.thompson_rain_snow_closure (FQ5): below 0 C WRF
     // never re-pairs the rain-snow transfer, so the graupel gain keeps its
     // pre-limiter value while the rain and snow limiters above shrink the
     // losses.  The gain becomes what they lose.
@@ -8245,7 +8245,7 @@ extern "C" __global__ THOMPSON_COLD_NETWORK_BOUNDS void thompson_frozen_vapor_cl
     }
 
 #ifdef THOMPSON_RAIN_SNOW_CLOSURE
-    // RunConfig.thompson_rain_snow_closure (default off): below 0 C WRF
+    // RunConfig.thompson_rain_snow_closure (FQ5): below 0 C WRF
     // never re-pairs the rain-snow transfer, so the graupel gain keeps its
     // pre-limiter value while the rain and snow limiters above shrink the
     // losses.  The gain becomes what they lose.

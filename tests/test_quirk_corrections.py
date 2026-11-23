@@ -1,16 +1,18 @@
-"""The umbrella over the opt-in quirk corrections (woof.quirk_corrections).
+"""The umbrella over the quirk corrections (woof.quirk_corrections).
 
-``woof_quirk_corrections = 'all'`` turns on every opt-in correction of a
-WRF 4.7.1 / MPAS v8.4.2 quirk where its scheme runs; ``'none'`` (the
-default) changes nothing. This file pins:
+Every correction of a WRF 4.7.1 / MPAS v8.4.2 quirk follows the physics
+mode: on where its scheme runs in correct mode (the default), off in exact
+mode; ``woof_quirk_corrections = 'all'`` / ``'none'`` turns every one on /
+off whatever the mode, and a correction's own key, when set, wins. This
+file pins:
 
-* the ledger: every opt-in correction the code carries is in
+* the ledger: every correction the code carries is in
   :data:`woof.quirk_corrections.CORRECTIONS` (a new one cannot be left out
   of the umbrella), and README.md and CONFIGURATION.md list each one;
-* the default: nothing changes on any route without the umbrella;
-* 'all': each route's corrections take their corrected values, a
-  conflicting key is refused by name, and a refused combination stays
-  refused by name.
+* exact mode: every entry of the ledger is off on every route;
+* the default (correct mode): every entry is on, and one key turns one off;
+* an explicit umbrella: each route's corrections take its values, a
+  conflicting key is refused by name.
 """
 
 from __future__ import annotations
@@ -40,16 +42,20 @@ def test_the_ledger_is_well_formed():
     assert len(qc.BY_KEY) == len(qc.CORRECTIONS)
     for c in qc.CORRECTIONS:
         assert c.route in qc.ROUTES, c.key
-        assert c.default != c.corrected, c.key
+        assert c.exact != c.corrected, c.key
         assert c.summary and c.scheme, c.key
 
 
 def test_every_runconfig_quirk_correction_is_in_the_ledger():
     fields = RunConfig.__dataclass_fields__
     assert set(qc.keys("wrf")) <= set(fields)
+    from woof import correct_mode
     for key in qc.keys("wrf"):
-        assert fields[key].default is qc.BY_KEY[key].default
+        # a correct-mode key: on in a default process, off in a strict one
+        assert fields[key].default is correct_mode.CORRECT_KEYS_DEFAULT
+        assert qc.BY_KEY[key].exact is False and qc.BY_KEY[key].corrected is True
         assert fields[key].kw_only
+        assert key in correct_mode.CORRECTION_KEYS, key
     # a field whose comment calls it a correction of a WRF quirk
     lines = (ROOT / "woof" / "config.py").read_text(encoding="utf-8").splitlines()
     marked = []
@@ -111,9 +117,11 @@ def test_every_seaice_correction_table_is_in_the_ledger():
 def test_all_adds_the_seaice_velocity_corrections():
     from woof.hex.mpas_seaice import timestep_v842, weak_v842
     on = {qc.UMBRELLA: "all"}
-    assert timestep_v842.velocity_corrections({}, (), weak_v842.CORRECTIONS) == ()
-    assert timestep_v842.velocity_corrections({}, ("weak_ridge_delta",), weak_v842.CORRECTIONS) == (
+    off = {qc.MODE_KEY: "exact"}
+    assert timestep_v842.velocity_corrections(off, (), weak_v842.CORRECTIONS) == ()
+    assert timestep_v842.velocity_corrections(off, ("weak_ridge_delta",), weak_v842.CORRECTIONS) == (
         "weak_ridge_delta",)
+    assert timestep_v842.velocity_corrections({}, (), weak_v842.CORRECTIONS) == ("weak_ridge_delta",)
     assert timestep_v842.velocity_corrections(on, (), weak_v842.CORRECTIONS) == ("weak_ridge_delta",)
     assert timestep_v842.velocity_corrections(on, ("weak_ridge_delta",), weak_v842.CORRECTIONS) == (
         "weak_ridge_delta",)
@@ -121,7 +129,8 @@ def test_all_adds_the_seaice_velocity_corrections():
 
 def test_all_scales_redi_k33_by_kappa():
     from woof.hex.mpas_ocean import vmix_v842
-    assert vmix_v842.redi_k33_kappa_scaled({}) is False
+    assert vmix_v842.redi_k33_kappa_scaled({qc.MODE_KEY: "exact"}) is False
+    assert vmix_v842.redi_k33_kappa_scaled({}) is True
     assert vmix_v842.redi_k33_kappa_scaled({qc.UMBRELLA: "all"}) is True
     assert vmix_v842.redi_k33_kappa_scaled({"woof_redi_k33": "kappa"}) is True
     with pytest.raises(ConfigurationRefusal, match="woof_redi_k33"):
@@ -142,36 +151,128 @@ def test_the_docs_list_every_correction():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     config = (ROOT / "docs" / "public" / "CONFIGURATION.md").read_text(encoding="utf-8")
     start = readme.index("woof_quirk_corrections")
-    umbrella_readme = readme[start:start + 3000]
+    umbrella_readme = readme[start:start + 4000]
     start = config.index("`woof_quirk_corrections` (default")
-    umbrella_config = config[start:start + 3000]
+    umbrella_config = config[start:start + 4000]
     for c in qc.CORRECTIONS:
         name = "--undriven-species-boundary" if c.key == "undriven_species_boundary" else c.key
         for text in (umbrella_readme, umbrella_config):
             assert re.sub(r"\s+", " ", name) in re.sub(r"\s+", " ", text), name
 
 
-# --- the default --------------------------------------------------------
+# --- exact mode turns every correction off -------------------------------
 
 def _base(**kw):
     return RunConfig(nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, **kw)
 
 
-def test_the_default_changes_nothing():
-    assert RunConfig.__dataclass_fields__[qc.UMBRELLA].default == "none"
+#: one run per WRF-route correction, selecting the scheme it corrects
+_WRF_SCHEMES = {
+    "gf_deep_rain_evaporation_booking": dict(cu_physics=3, moist=True, bl_pbl_physics=1, sf_sfclay_physics=1, cudt_minutes=0),
+    "ysu_surface_heat_exner": dict(bl_pbl_physics=1, sf_sfclay_physics=1),
+    "mynn_sfclay_psih_zolzt": dict(bl_pbl_physics=5, sf_sfclay_physics=5),
+    "noah_smc_floor_booking": dict(sf_surface_physics=2, bl_pbl_physics=1, sf_sfclay_physics=1),
+    "thompson_rain_snow_closure": dict(mp_physics=8, moist=True),
+}
+
+
+def _seaice_on(configs):
+    from woof.hex.mpas_seaice import column_v842, timestep_v842, variational_basis_v842, weak_v842
+    velocity = (timestep_v842.velocity_corrections(configs, (), variational_basis_v842.CORRECTIONS)
+                + timestep_v842.velocity_corrections(configs, (), weak_v842.CORRECTIONS))
+    return set(column_v842.corrections(configs)) | set(velocity)
+
+
+def _route_values(mode):
+    """Every ledger correction's value on its route in physics mode ``mode``,
+    with nothing else named."""
+    from woof import correct_mode
+    values = {}
+    settings = correct_mode.resolve(mode).settings
+    for key, schemes in _WRF_SCHEMES.items():
+        run = validate_run_config(_base(**{**schemes, **settings}))
+        assert qc.run_scheme_active(key, run)
+        values[key] = qc.run_reads(run, key)
+    configs = {qc.MODE_KEY: mode}
+    for key in qc.keys("mpas_ocean") + qc.keys("mali"):
+        values[key] = qc.option(configs, key)
+    on = _seaice_on(configs)
+    for key in qc.keys("mpas_seaice") + qc.keys("mpas_seaice_velocity"):
+        values[key] = key in on
+    args = argparse.Namespace(lbc_dir="x", physics_mode=mode)
+    values["undriven_species_boundary"] = qc.hex_undriven_species_boundary(args) or "free"
+    return values
+
+
+def test_exact_mode_turns_off_every_correction_in_the_ledger():
+    values = _route_values("exact")
+    assert set(values) == set(qc.BY_KEY), set(qc.BY_KEY) ^ set(values)
+    for c in qc.CORRECTIONS:
+        assert values[c.key] == (c.exact if c.route not in ("mpas_seaice", "mpas_seaice_velocity") else False), c.key
+    # the WRF route's exact mode is correct_mode's: it authors every key off
+    from woof import correct_mode
+    assert set(qc.keys("wrf")) <= set(correct_mode.resolve("exact").settings)
+    assert not any(correct_mode.resolve("exact").settings[k] for k in qc.keys("wrf"))
+    # 'none' is exact for the ledger whatever the mode
+    for key in qc.keys("mpas_ocean") + qc.keys("mali"):
+        assert qc.option({qc.UMBRELLA: "none"}, key) == qc.BY_KEY[key].exact
+    assert _seaice_on({qc.UMBRELLA: "none"}) == set()
+
+
+def test_correct_mode_turns_on_every_correction_in_the_ledger():
+    values = _route_values("correct")
+    for c in qc.CORRECTIONS:
+        assert values[c.key] == (c.corrected if c.route not in ("mpas_seaice", "mpas_seaice_velocity") else True), c.key
+
+
+def test_the_default_is_correct_mode():
+    from woof import correct_mode
+    assert RunConfig.__dataclass_fields__[qc.UMBRELLA].default is None
+    assert qc.default_umbrella() == ("all" if correct_mode.CORRECT_KEYS_DEFAULT else "none")
     kw = dict(bl_pbl_physics=1, cu_physics=3)
     assert qc.apply_run_corrections(kw) is kw
-    validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1))
+    run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, cu_physics=3, moist=True, cudt_minutes=0))
+    assert qc.run_corrections_due(run) == (
+        ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner") if correct_mode.CORRECT_KEYS_DEFAULT else ())
     for key in qc.keys("mpas_ocean") + qc.keys("mali"):
-        assert qc.option({}, key) == qc.BY_KEY[key].default
-        assert qc.option({qc.UMBRELLA: "none"}, key) == qc.BY_KEY[key].default
+        assert qc.option({}, key) == qc.BY_KEY[key].corrected
+        assert qc.option({qc.MODE_KEY: "exact"}, key) == qc.BY_KEY[key].exact
         assert qc.option({key: qc.BY_KEY[key].corrected}, key) == qc.BY_KEY[key].corrected
     from woof.hex.mpas_seaice import column_v842
-    assert column_v842.corrections({}) == frozenset()
-    assert column_v842.corrections({"woof_v842_corrections": "zsal_solve"}) == {"zsal_solve"}
-    assert qc.hex_undriven_species_boundary(argparse.Namespace(lbc_dir="x")) is None
+    assert column_v842.corrections({}) == set(column_v842.CORRECTIONS)
+    assert column_v842.corrections({qc.UMBRELLA: "none", "woof_v842_corrections": "zsal_solve"}) == {"zsal_solve"}
+    assert qc.hex_undriven_species_boundary(argparse.Namespace(lbc_dir="x")) == "wrf-flow-dependent"
+    assert qc.hex_undriven_species_boundary(argparse.Namespace(lbc_dir=None)) is None
+
+
+def test_one_key_turns_one_correction_off_in_correct_mode_and_on_in_exact():
+    run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, cu_physics=3, moist=True, cudt_minutes=0,
+                                    **qc.apply_run_corrections({"ysu_surface_heat_exner": False})))
+    assert not qc.run_reads(run, "ysu_surface_heat_exner")
+    for key in qc.keys("mpas_ocean") + qc.keys("mali"):
+        c = qc.BY_KEY[key]
+        assert qc.option({key: c.exact}, key) == c.exact
+        assert qc.option({qc.MODE_KEY: "exact", key: c.corrected}, key) == c.corrected
     assert qc.hex_undriven_species_boundary(
-        argparse.Namespace(lbc_dir="x", undriven_species_boundary="wrf-flow-dependent")) == "wrf-flow-dependent"
+        argparse.Namespace(lbc_dir="x", undriven_species_boundary="free")) == "free"
+    assert qc.hex_undriven_species_boundary(
+        argparse.Namespace(lbc_dir="x", physics_mode="exact",
+                           undriven_species_boundary="wrf-flow-dependent")) == "wrf-flow-dependent"
+
+
+def test_a_correction_outside_its_scheme_is_inert():
+    # on by default, YSU's correction is not read on a MYNN run, nor with BEP/BEM, and is not refused
+    run = validate_run_config(_base(bl_pbl_physics=5, sf_sfclay_physics=5, ysu_surface_heat_exner=True))
+    assert not qc.run_reads(run, "ysu_surface_heat_exner")
+    run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, sf_surface_physics=2,
+                                    sf_urban_physics=2, ysu_surface_heat_exner=True))
+    assert not qc.run_reads(run, "ysu_surface_heat_exner")
+    from woof import correct_mode
+    if correct_mode.CORRECT_KEYS_DEFAULT:
+        assert "FQ2" in correct_mode.uncorrected(run)
+    run = validate_run_config(_base(bl_pbl_physics=5, sf_sfclay_physics=5, mynn_sfclay_variant="gsl_wrf39",
+                                    mynn_sfclay_psih_zolzt=True))
+    assert not qc.run_reads(run, "mynn_sfclay_psih_zolzt")
 
 
 def test_an_unknown_umbrella_value_is_refused():
@@ -181,31 +282,38 @@ def test_an_unknown_umbrella_value_is_refused():
         qc.apply_run_corrections({qc.UMBRELLA: "yes"})
     with pytest.raises(ConfigurationRefusal):
         qc.option({qc.UMBRELLA: True}, "woof_statistics_extrema")
+    with pytest.raises(ConfigurationRefusal, match=qc.MODE_KEY):
+        qc.option({qc.MODE_KEY: "exactly"}, "woof_statistics_extrema")
 
 
-# --- 'all' ---------------------------------------------------------------
+# --- an explicit umbrella ---------------------------------------------------
 
-def test_all_turns_on_the_run_corrections_where_their_scheme_runs():
+def test_all_and_none_set_the_run_corrections():
     kw = qc.apply_run_corrections({qc.UMBRELLA: "all", "bl_pbl_physics": 1, "cu_physics": 3})
     assert kw["ysu_surface_heat_exner"] is True and kw["gf_deep_rain_evaporation_booking"] is True
-    kw = qc.apply_run_corrections({qc.UMBRELLA: "all", "bl_pbl_physics": 5, "cu_physics": 0})
-    assert "ysu_surface_heat_exner" not in kw and "gf_deep_rain_evaporation_booking" not in kw
+    kw = qc.apply_run_corrections({qc.UMBRELLA: "none", "bl_pbl_physics": 1, "cu_physics": 3})
+    assert kw["ysu_surface_heat_exner"] is False and kw["gf_deep_rain_evaporation_booking"] is False
     run = validate_run_config(_base(**qc.apply_run_corrections(
-        {qc.UMBRELLA: "all", "bl_pbl_physics": 1, "sf_sfclay_physics": 1})))
-    assert run.ysu_surface_heat_exner is True
+        {qc.UMBRELLA: "none", "bl_pbl_physics": 1, "sf_sfclay_physics": 1})))
+    assert run.ysu_surface_heat_exner is False
 
 
-def test_all_refuses_a_conflicting_key_by_name():
+def test_an_explicit_umbrella_refuses_a_conflicting_key_by_name():
     with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
         qc.apply_run_corrections({qc.UMBRELLA: "all", "bl_pbl_physics": 1, "ysu_surface_heat_exner": False})
-    # the refusal names the TOML spelling on the WRF route and the flags on the hex door
-    with pytest.raises(ConfigurationRefused, match="woof_quirk_corrections = 'all'"):
-        qc.apply_run_corrections({qc.UMBRELLA: "all", "cu_physics": 3, "gf_deep_rain_evaporation_booking": False})
+    with pytest.raises(ConfigurationRefused, match="woof_quirk_corrections = 'none'"):
+        qc.apply_run_corrections({qc.UMBRELLA: "none", "cu_physics": 3, "gf_deep_rain_evaporation_booking": True})
+    # a key whose scheme the domain does not run is never read: no conflict
+    assert qc.apply_run_corrections(
+        {qc.UMBRELLA: "all", "bl_pbl_physics": 5, "ysu_surface_heat_exner": False})["ysu_surface_heat_exner"] is True
     for key in qc.keys("mpas_ocean") + qc.keys("mali"):
-        assert qc.option({qc.UMBRELLA: "all"}, key) == qc.BY_KEY[key].corrected
-        assert qc.option({qc.UMBRELLA: "all", key: qc.BY_KEY[key].corrected}, key) == qc.BY_KEY[key].corrected
+        c = qc.BY_KEY[key]
+        assert qc.option({qc.UMBRELLA: "all"}, key) == c.corrected
+        assert qc.option({qc.UMBRELLA: "all", key: c.corrected}, key) == c.corrected
         with pytest.raises(ConfigurationRefusal, match=key):
-            qc.option({qc.UMBRELLA: "all", key: qc.BY_KEY[key].default}, key)
+            qc.option({qc.UMBRELLA: "all", key: c.exact}, key)
+        with pytest.raises(ConfigurationRefusal, match=key):
+            qc.option({qc.UMBRELLA: "none", key: c.corrected}, key)
         # a value that is no option at all is the port's to refuse as such
         assert qc.option({qc.UMBRELLA: "all", key: "typo"}, key) == "typo"
     with pytest.raises(ValueError, match="--quirk-corrections all .*--undriven-species-boundary free"):
@@ -216,41 +324,31 @@ def test_all_refuses_a_conflicting_key_by_name():
 def test_a_runconfig_built_in_python_resolves_the_umbrella():
     # every construction path (load_config, build_experiment, the domain and
     # downscale readers, Python) gets the same corrections: __post_init__
-    run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all"))
-    assert run.ysu_surface_heat_exner is True and run.gf_deep_rain_evaporation_booking is False
-    assert qc.run_corrections_due(run) == ("ysu_surface_heat_exner",)
-    run = _base(bl_pbl_physics=5, sf_sfclay_physics=5, cu_physics=3, woof_quirk_corrections="all")
-    assert run.ysu_surface_heat_exner is False and run.gf_deep_rain_evaporation_booking is True
-    assert _base(bl_pbl_physics=1, sf_sfclay_physics=1).ysu_surface_heat_exner is False
-    # a replace that changes the scheme re-derives the corrections
+    run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all",
+                                    ysu_surface_heat_exner=False))
+    assert run.ysu_surface_heat_exner is True and qc.run_corrections_due(run) == ("ysu_surface_heat_exner",)
+    run = _base(bl_pbl_physics=1, sf_sfclay_physics=1, cu_physics=3, woof_quirk_corrections="none")
+    assert run.ysu_surface_heat_exner is False and run.gf_deep_rain_evaporation_booking is False
+    # a replace keeps an explicit umbrella's values; a correction follows its scheme
     from dataclasses import replace
     run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all"))
     moved = validate_run_config(replace(run, bl_pbl_physics=5, sf_sfclay_physics=5))
-    assert moved.ysu_surface_heat_exner is False
-    # an explicit correction on a scheme the run does not select is refused, as without 'all'
-    with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
-        qc.apply_run_corrections({qc.UMBRELLA: "all", "bl_pbl_physics": 5, "ysu_surface_heat_exner": True})
+    assert not qc.run_reads(moved, "ysu_surface_heat_exner")
+    assert qc.run_reads(validate_run_config(replace(moved, bl_pbl_physics=1, sf_sfclay_physics=1)),
+                        "ysu_surface_heat_exner")
 
 
 def test_the_umbrella_is_never_echoed_or_bound_on_its_own():
     from woof.ingest.prepared_cache import PREPARATION_INERT_RUN_FIELDS
     from woof.io.restart import _drop_default_off_run_keys
     assert f"run.{qc.UMBRELLA}" in PREPARATION_INERT_RUN_FIELDS
-    values = {qc.UMBRELLA: "all", "ysu_surface_heat_exner": True}
+    values = {qc.UMBRELLA: "all", "bl_pbl_physics": 1, "ysu_surface_heat_exner": True}
     _drop_default_off_run_keys(values)
-    assert values == {"ysu_surface_heat_exner": True}
+    assert values == {"bl_pbl_physics": 1, "ysu_surface_heat_exner": True}
     # a run under 'all' resumes from its own checkpoint
     from woof.io.restart import _require_config_match, configuration_echo
     run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all"))
     _require_config_match(configuration_echo(run), run, "ckpt")
-
-
-def test_all_keeps_a_refused_combination_refused_by_name():
-    # YSU's correction is refused with BEP/BEM; the umbrella does not bypass it
-    with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
-        validate_run_config(_base(**qc.apply_run_corrections(dict(
-            woof_quirk_corrections="all", bl_pbl_physics=1, sf_sfclay_physics=1, sf_surface_physics=2,
-            sf_urban_physics=2))))
 
 
 def test_all_on_the_hex_door_is_regional_only():
@@ -303,9 +401,14 @@ def test_the_ocean_forcing_configs_resolve_the_umbrella():
     assert qc.UMBRELLA not in merged
     assert merged["woof_bottom_drag_dry_edges"] == "skip"
     assert merged["woof_rayleigh_bottom_friction"] == "corrected"
-    default = forcing_v842._configs({})
-    assert default["woof_bottom_drag_dry_edges"] == "refuse"
-    assert default["woof_rayleigh_bottom_friction"] == "v842"
+    exact = forcing_v842._configs({qc.MODE_KEY: "exact"})
+    assert qc.MODE_KEY not in exact
+    assert exact["woof_bottom_drag_dry_edges"] == "refuse"
+    assert exact["woof_rayleigh_bottom_friction"] == "v842"
+    # correct mode, the default: corrected, with or without configs
+    for default in (forcing_v842._configs({}), forcing_v842._configs(None)):
+        assert default["woof_bottom_drag_dry_edges"] == "skip"
+        assert default["woof_rayleigh_bottom_friction"] == "corrected"
     with pytest.raises(ConfigurationRefusal, match="woof_rayleigh_bottom_friction"):
         forcing_v842._configs({qc.UMBRELLA: "all", "woof_rayleigh_bottom_friction": "v842"})
 
@@ -318,11 +421,13 @@ def test_the_experiment_reader_applies_the_umbrella_per_domain(tmp_path):
     def tree(**tables):
         path = tmp_path / "tree.toml"
         path.write_text(_grell_tree_toml(**tables), encoding="utf-8")
-        return [(d.run.cu_physics, d.run.gf_deep_rain_evaporation_booking, d.run.ysu_surface_heat_exner)
-                for d in load_experiment(path).domains]
+        return [(d.run.cu_physics, qc.run_reads(d.run, "gf_deep_rain_evaporation_booking"),
+                 qc.run_reads(d.run, "ysu_surface_heat_exner")) for d in load_experiment(path).domains]
 
     umbrella = 'woof_quirk_corrections = "all"\n'
-    assert tree() == [(0, False, False), (0, False, False)]
+    assert tree(shared='woof_quirk_corrections = "none"\n') == [(0, False, False), (0, False, False)]
     assert tree(shared=umbrella, root="cu_physics = 3\n") == [(3, True, True), (0, False, True)]
+    assert tree(root="cu_physics = 3\ngf_deep_rain_evaporation_booking = false\n") == [
+        (3, False, True), (0, False, True)]
     with pytest.raises(ValueError, match="ysu_surface_heat_exner"):
         tree(shared=umbrella, root="ysu_surface_heat_exner = false\n")

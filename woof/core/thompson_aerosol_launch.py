@@ -121,7 +121,7 @@ def hail_aware_scope(enabled: bool):
 
 
 # ---------------------------------------------------------------------------
-# The opt-in rain-snow collection closure (RunConfig.thompson_rain_snow_closure).
+# The rain-snow collection closure (RunConfig.thompson_rain_snow_closure, FQ5).
 # ---------------------------------------------------------------------------
 #
 # Off by default.  The cold and warm units carry one #ifdef block each (the

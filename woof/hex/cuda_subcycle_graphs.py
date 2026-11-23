@@ -481,7 +481,8 @@ class SubcycleGraphs:
                 0 if regional is None else regional.discipline.scrubs,
                 0 if regional is None else getattr(regional.discipline, "fused_launches", 0),
                 # --local-timestep (woof.hex.cuda_driver_lts): its receipt counts the class launches a
-                # subcycle makes, so a replay adds the captured subcycle's counts like the others.
+                # subcycle makes, so a replay adds the captured subcycle's counts like the others
+                # (fork jacobbieker/woof PR 473).
                 *(() if lts is None else tuple(lts.launch_counts[name] for name in sorted(lts.launch_counts))))
 
     def _set_counters(self, value: tuple[int, ...]) -> None:
@@ -501,8 +502,8 @@ class SubcycleGraphs:
         return None if lts is None else (lts.tracker.stage_index, lts.tracker.observed)
 
     def _restore_tracker(self, value: Any) -> None:
-        # A pass that stops mid-stage (scratch OOM, a failed capture) leaves the
-        # tracker mid-stage; the next eager subcycle restarts at RK1 and would refuse.
+        # A pass that stops mid-stage (scratch OOM, a failed capture) leaves the tracker mid-stage;
+        # the next eager subcycle restarts at RK1 and would be refused as a mis-scheduled stage.
         if value is not None:
             lts = self.driver.local_timestep
             lts.tracker.stage_index, lts.tracker.observed = value

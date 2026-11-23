@@ -131,12 +131,11 @@ def apply_generated(state, cfg, dt, *, refl_10cm_due=False):
             state.effc, state.effi, state.effs, refl, np.int32(refl_10cm_due), np.int32(nz), np.int32(ny*nx), np.float32(dt),
             *(owner[n] for n in TABLE_ARGUMENTS))
     capacity = next(k for k in (64,128,256) if nz <= k)
-    # RunConfig.thompson_rain_snow_closure (default off): the generated
-    # header's rain-snow closure block, compiled in by its define.
-    from woof.core.thompson import RAIN_SNOW_CLOSURE_DEFINES
+    # RunConfig.thompson_rain_snow_closure (FQ5): the generated header's
+    # rain-snow closure block, compiled in by its define.
+    from woof.core.thompson import RAIN_SNOW_CLOSURE_DEFINES, rain_snow_closure_due
     defines = ((() if capacity == 64 else (("THOMPSON_COLUMN_KMAX", capacity),))
-               + (RAIN_SNOW_CLOSURE_DEFINES
-                  if getattr(cfg, "thompson_rain_snow_closure", False) is True else ()))
+               + (RAIN_SNOW_CLOSURE_DEFINES if rain_snow_closure_due(cfg) else ()))
     kernel = (get_kernel("thompson_column", "thompson_column_step") if not defines
               else get_kernel_int_defines("thompson_column", "thompson_column_step", defines))
     kernel(((ny*nx+31)//32,), (32,), args)

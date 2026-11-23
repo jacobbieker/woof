@@ -32,6 +32,12 @@ def package_active(packages: str, active: Iterable[str]) -> bool:
     return not packages or bool(set(packages.split(';')) & set(active))
 
 
+#: MPAS-Model PR #1409's Registry field (the KIM drag's elvmax, sfc_input/invariant): in a run's Registry only
+#: when it selects bl_kim_gwdo (mpasphys.kim_gwdo_2026.prepare_registry); no other run ever asks for it.
+PR1409_FIELDS = {'elvmax': {'type': 'real', 'dimensions': ['nCells'],
+                            'attrs': {'units': 'm', 'long_name': 'elevation maximum over a grid cell'}, 'gates': []}}
+
+
 def field_definition(name: str, *, physics: bool = True) -> dict:
     """MPAS src/tools/registry/gen_inc.c:40-58; Registry.xml:1356-4020."""
     if not physics and name not in _REGISTRY['dry_fields']:
@@ -40,6 +46,8 @@ def field_definition(name: str, *, physics: bool = True) -> dict:
         return _REGISTRY['fields'][name]
     except KeyError:
         pass
+    if name in PR1409_FIELDS:
+        return PR1409_FIELDS[name]
     # WOOF's own package-gated fields (rrtmg_spectral_output), never in the pinned Registry.
     from .mpasphys import radiation_spectral_v842 as spectral
     if physics and name in spectral.FIELDS:

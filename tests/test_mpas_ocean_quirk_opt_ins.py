@@ -103,7 +103,9 @@ def test_isomip_freezing_point_at_the_boundary_layer_salinity():
 
 def test_isomip_opt_in_values_are_named():
     from woof.hex.mpas_ocean import land_ice_v842 as li
-    assert not li.isomip_salinity_corrected({})
+    # Corrected in correct mode (the default), MPAS's line in exact mode.
+    assert li.isomip_salinity_corrected({})
+    assert not li.isomip_salinity_corrected({"config_physics_mode": "exact"})
     assert li.isomip_salinity_corrected({"woof_land_ice_isomip_freezing_salinity": "boundary_layer_salinity"})
     with pytest.raises(ConfigurationRefusal):
         li.isomip_salinity_corrected({"woof_land_ice_isomip_freezing_salinity": "salinity"})
@@ -223,8 +225,12 @@ def test_rayleigh_bottom_friction_corrected():
 
 def test_forcing_opt_in_values_are_named():
     from woof.hex.mpas_ocean import forcing_v842 as fo
-    assert fo._configs(None)["woof_bottom_drag_dry_edges"] == "refuse"
-    assert fo._configs(None)["woof_rayleigh_bottom_friction"] == "v842"
+    # Corrected in correct mode (the default), v8.4.2's arithmetic in exact mode.
+    assert fo._configs(None)["woof_bottom_drag_dry_edges"] == "skip"
+    assert fo._configs(None)["woof_rayleigh_bottom_friction"] == "corrected"
+    exact = fo._configs({"config_physics_mode": "exact"})
+    assert exact["woof_bottom_drag_dry_edges"] == "refuse"
+    assert exact["woof_rayleigh_bottom_friction"] == "v842"
     for knob in fo.WOOF_OPT_INS:
         assert knob not in fo.DEFAULT_CONFIGS  # the oracle streams carry MPAS's configs only
         with pytest.raises(ConfigurationRefusal):
