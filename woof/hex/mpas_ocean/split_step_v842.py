@@ -174,7 +174,8 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict, t
     sizes = {nc + 1: nc, ne + 1: ne, nv + 1: nv}
     mesh_cut = _cut(m, sizes)
     tend_configs = {k: configs[k] for k in (*forcing_v842.DEFAULT_CONFIGS, *forcing_v842.WOOF_OPT_INS,
-                                            quirk_corrections.UMBRELLA) if k in configs}
+                                            quirk_corrections.UMBRELLA, quirk_corrections.MODE_KEY)
+                    if k in configs}
 
     # the preparation
     _launch(precision, "ocn_ss_prep_edges_v842", ne * nl, (

@@ -1043,6 +1043,30 @@ def _hydro_door_tools_unprobed_outside_hydro_tests(request, monkeypatch):
         "hydro provider tools not probed outside the hydro test modules"])
 
 
+#: the MPAS oracle parity, correction and run-door modules (MPAS-Ocean, MPAS-Seaice, MALI): graded word
+#: for word against v8.4.2, so they run in exact mode (DECISIONS 2026-11-22)
+_MPAS_PARITY_MODULE = re.compile(r"(^|\.)test_(mpas_ocean|mpas_seaice|mali)_\w*(parity|corrections|run_door)$")
+
+
+@pytest.fixture(autouse=True)
+def _mpas_oracle_parity_in_exact_mode(request, monkeypatch):
+    """The MPAS oracle parity modules run in exact mode.
+
+    An MPAS config dict that names no ``config_physics_mode`` follows the
+    process's default physics mode, which is correct mode: every fork
+    quirk correction (woof.quirk_corrections) on.  The parity modules grade
+    the ports against the unmodified v8.4.2 oracles, so here the default is
+    exact, as ``--physics-mode exact`` makes it; a case that wants a
+    correction names its key, which wins in either mode.
+    """
+
+    module = getattr(request.node, "module", None)
+    if not _MPAS_PARITY_MODULE.search(getattr(module, "__name__", "")):
+        return
+    from woof import correct_mode
+    monkeypatch.setattr(correct_mode, "PHYSICS_MODE_DEFAULT", correct_mode.PHYSICS_MODE_EXACT)
+
+
 @pytest.fixture(autouse=True)
 def _run_disk_pinned_to_ample_free_space(monkeypatch):
     """Pin the free disk run-plan's refusal before the download compares with.

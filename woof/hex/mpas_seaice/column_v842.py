@@ -434,11 +434,13 @@ CORRECTIONS = {
 
 
 def corrections(configs: dict) -> frozenset[str]:
-    """The opt-in corrections ``configs`` applies: the ones it names
-    (:func:`named_corrections`), and under ``woof_quirk_corrections = 'all'``
-    (woof.quirk_corrections) every one of :data:`CORRECTIONS`. A correction
-    whose scheme the configuration does not run then changes nothing; one
-    it refuses in this configuration is refused by name, as when named."""
+    """The corrections ``configs`` applies: the ones it names
+    (:func:`named_corrections`); with none named, every one of
+    :data:`CORRECTIONS` in correct mode (the default) and none in exact
+    mode; and every one under ``woof_quirk_corrections = 'all'``
+    (woof.quirk_corrections.seaice_names). A correction the configuration
+    did not name and whose scheme it does not run changes nothing; only
+    named ones are refused where the configuration cannot take them."""
     from woof import quirk_corrections
     return named_corrections(configs) | frozenset(quirk_corrections.seaice_names(configs))
 

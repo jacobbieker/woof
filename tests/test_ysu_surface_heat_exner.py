@@ -45,22 +45,27 @@ def _base(**kw):
                      dt=10.0, run_seconds=60.0, **kw)
 
 
-def test_the_key_is_off_by_default_and_ysu_only():
+def test_the_key_follows_the_mode_and_is_read_by_ysu_only():
+    from woof import correct_mode
     from woof.config import ConfigurationRefused, RunConfig, validate_run_config
+    from woof.quirk_corrections import run_reads
     field = RunConfig.__dataclass_fields__["ysu_surface_heat_exner"]
-    assert field.default is False and field.kw_only
-    validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
-                              ysu_surface_heat_exner=True))
-    with pytest.raises(ConfigurationRefused, match="bl_pbl_physics = 1"):
-        validate_run_config(_base(bl_pbl_physics=5, sf_sfclay_physics=5,
-                                  ysu_surface_heat_exner=True))
-    validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
-                              ysu_version="wrf_461",
-                              ysu_surface_heat_exner=True))
-    with pytest.raises(ConfigurationRefused, match="BEP/BEM"):
-        validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
-                                  sf_surface_physics=2, sf_urban_physics=2,
-                                  ysu_surface_heat_exner=True))
+    # correct-mode finding FQ2: on in a default process, off in exact mode
+    assert field.default is correct_mode.CORRECT_KEYS_DEFAULT and field.kw_only
+    assert correct_mode.resolve("exact").settings["ysu_surface_heat_exner"] is False
+    assert run_reads(validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
+                                               ysu_surface_heat_exner=True)), "ysu_surface_heat_exner")
+    assert not run_reads(validate_run_config(_base(bl_pbl_physics=5, sf_sfclay_physics=5,
+                                                   ysu_surface_heat_exner=True)), "ysu_surface_heat_exner")
+    assert run_reads(validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
+                                               ysu_version="wrf_461",
+                                               ysu_surface_heat_exner=True)), "ysu_surface_heat_exner")
+    # with BEP/BEM YSU takes the urban heat sources: not read, and listed as uncorrected
+    bep = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
+                                    sf_surface_physics=2, sf_urban_physics=2,
+                                    ysu_surface_heat_exner=True))
+    assert not run_reads(bep, "ysu_surface_heat_exner")
+    assert "FQ2" in correct_mode.uncorrected(bep)
     with pytest.raises(ConfigurationRefused, match="true or false"):
         validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
                                   ysu_surface_heat_exner=1))
