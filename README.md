@@ -273,8 +273,8 @@ Notes on the 1.1.7 sync:
   tests, and it runs as before.
 - The fork takes upstream 1.1.7's correct mode (`physics.mode`
   `correct`/`exact`) and its default-on corrections as upstream ships them.
-  The fork's own quirk corrections (`woof_quirk_corrections`) are still
-  off by default.
+  The fork's own quirk corrections follow the same switch: on in correct
+  mode (the default), off in exact mode.
 - The hex MPAS-route qsat pole guard is now correction RP9, not RP8. This
   is a user-visible ID change with no alias.
 
@@ -716,17 +716,27 @@ Notes on the 1.1.7 sync:
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
-- **Corrections of WRF/MPAS quirks, each opt-in and off by default.**
-  The default stays word for word with the WRF 4.7.1 / MPAS v8.4.2
-  oracle; each key changes only the arithmetic it names.
-  - `woof_quirk_corrections = "all"` turns every correction below on at
-    once, each where its scheme runs (default `"none"`; the hex door takes
-    `--quirk-corrections all`). A key set against it is refused by name,
-    and so is a correction its own key refuses in that combination. It
-    turns on `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
-    `mynn_sfclay_psih_zolzt` and `noah_smc_floor_booking` (WRF route); `--undriven-species-boundary
+- **Corrections of WRF/MPAS quirks, on by default (correct mode).**
+  Each key changes only the arithmetic it names, where its scheme runs.
+  Exact mode turns every one off, so the run is the WRF 4.7.1 / MPAS v8.4.2
+  oracle word for word; parity tests run in exact mode. Exact mode is a
+  strict `GPUWM_WRF_EXACT=1` process or every correct-mode key set false
+  (WRF route), `--physics-mode exact` (hex door), or
+  `config_physics_mode = 'exact'` (MPAS-Ocean, MALI and MPAS-Seaice config
+  dicts).
+  - `woof_quirk_corrections` is the umbrella. Unset (the default), the
+    corrections follow the mode, and a correction's own key wins: that
+    turns one off in correct mode, or on in exact mode. `"all"` / `"none"`
+    turns every one on / off whatever the mode (the hex door takes
+    `--quirk-corrections all|none`); a key set false next to `"all"` is
+    refused by name, and a key set next to `"none"` wins. On the WRF route
+    the keys are correct-mode findings FQ1-FQ4 and FQ6, so the run
+    receipt's `correct_mode` block names them.
+    It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
+    `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking` and
+    `rrtmg_lw_model_top` (WRF route); `--undriven-species-boundary
     wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
-    flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
+    flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
     `woof_redi_k33` (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
     `woof_simple_velocity_bed`, `woof_statistics_extrema` and
@@ -744,8 +754,8 @@ Notes on the 1.1.7 sync:
     potential temperature as if it were a temperature flux and converts
     back with pi, so the column gets `HFX*pi` instead of `HFX`. That loses
     4.5% of the surface heating at 850 hPa and 14% at 600 hPa. The option
-    uses `HFX/pi(1)` (refused with BEP/BEM, where YSU takes the urban
-    heat sources instead). Checked by the column heat budget, not yet scored
+    uses `HFX/pi(1)` (not read with BEP/BEM, where YSU takes the urban
+    heat sources instead; the receipt lists it as uncorrected there). Checked by the column heat budget, not yet scored
     against observations; the hex MPAS-suite YSU does not carry it yet.
   - `mynn_sfclay_psih_zolzt` (MYNN surface layer, `sf_sfclay_physics = 5`,
     WRF route). WRF integrates the 2 m and 10 m heat profile from `z0/L`
@@ -758,9 +768,18 @@ Notes on the 1.1.7 sync:
     the water it adds nowhere, so dry sandy columns gain water (up to 30 mm
     in a step on a column that starts below the floor). The option takes it
     from the layer below, and past the bottom layer from the drainage, so
-    the column water budget closes. Not yet scored against observations;
-    the hex MPAS-suite Noah does not carry it yet.
-- **Observation-driven corrections, each opt-in and off by default:**
+    the column water budget closes. Not read with a WRF-Hydro coupling. Not
+    yet scored against observations; the hex MPAS-suite Noah does not carry
+    it yet.
+  - `rrtmg_lw_model_top` (legacy RRTMG longwave, `ra_lw_physics = 4` with
+    `ra_rrtmg_variant = "rrtmg_legacy"`, WRF route). WRF's RRTMG longwave
+    matches its standard profile to the column in a loop that starts one
+    interface too low, so it overwrites the model-top interface temperature
+    and the top layer's with the profile and anchors at the interface below
+    the top. The option keeps both and anchors at the top interface (finding
+    FQ6). Not read by RTE+RRTMGP; not yet scored against observations.
+- **Observation-driven corrections, each opt-in and off by default** (GF's
+  is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
     surface rain too, so deep `pret` is 1.29 to 1.66 times the column's
@@ -1702,6 +1721,16 @@ Notes on the 1.1.7 sync:
 
   The deep column workspace is 1.30 MB per slot, against 234 KB. Preflight
   prices it by tier, and `column_chunk` is the lever at both tiers.
+- **256-level hex member init and TC potential intensity.** The hex GPU
+  member init (`woof/hex/init_gpu/physics.cu`) and the TC diagnostics'
+  potential-intensity sounding (`tc_climate/potential_intensity.cu`) held
+  per-thread columns of 128 levels and refused deeper meshes. Both bounds
+  are now macros whose default is 128 (`MAX_FG`/`MAX_Z`, `PI_MAX_LEV`): a
+  mesh of 128 levels or fewer compiles the unchanged text (the PI source
+  preprocesses to the old literal source, and the deep builds reproduce the
+  shipped words at 64 levels), and a deeper mesh prepends a 256 define.
+  Past 256 is refused by name. A 200-level resampling of the PI reference
+  sounding gives the reference PI to within 0.4 m/s.
 
 ### Licensing and opt-ins
 
@@ -1783,6 +1812,12 @@ on it:
   - the MPAS WSM6 unit of the water-budget gates (binary64) once had not
     finished its cold compile after 1 h 45 min; it now compiles cold in
     about 4 minutes, but its gates have not been re-run on Metal.
+- **WRF v4.8.0 Grell-Freitas-Li is refused on Metal for now.** `cu_physics = 3`
+  with the default `cu_gf_version = 'gfl_873b414'` (also the hex suites'
+  default cumulus) stops at setup on Metal with a message naming the
+  Metal-ready `cu_gf_version = 'wrf_461'` (WRF v4.6.1 GF). Nothing switches
+  to it silently. Its lane-interleaved CUDA unit does not translate to Metal
+  yet; the port is in progress.
 - **Virtual Macs are not supported.** GitHub's hosted macOS runners expose an
   "Apple Paravirtual device" that computes wrong answers (NaN) where an
   M-series GPU matches WRF, so CI runs the Metal parity gates only on real

@@ -5667,6 +5667,10 @@ def gf_column_workspace_bytes(
         if int(dc.run.cu_physics) != 3:
             continue
         if getattr(dc.run, "cu_gf_version", "wrf_461") == "gfl_873b414":
+            # Interim: GFL does not run on Metal; refuse here, before the
+            # memory gate prices lane scratch for a kernel that cannot run.
+            from woof.core.gfl import refuse_on_metal
+            refuse_on_metal(getattr(profile, "backend", "cuda"))
             worst = max(worst, gfl_scratch_bytes(
                 int(dc.run.nz), int(dc.run.nx) * int(dc.run.ny),
                 profile.multiprocessor_count))

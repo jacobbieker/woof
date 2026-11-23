@@ -28,6 +28,9 @@ ORACLE = ROOT / "tests/data/oracles/gfl_wrf480_strict239"
 @pytest.mark.gpu
 def test_gfl_replays_the_native_wrf480_columns_word_for_word():
     cp = pytest.importorskip("cupy")
+    from woof import backend
+    if backend.active() == "mlx":
+        pytest.skip("GFL's lane unit does not translate to Metal yet (woof.core.gfl.METAL_REFUSAL)")
     sys.path.insert(0, str(ROOT / "tools/gfl_873b414"))
     from replay_gfl import read_pre, read_post, LEVEL_IN, SURF_IN, SURF_INOUT, INT_INOUT, LEVEL_INOUT
     from woof import wrf_exact

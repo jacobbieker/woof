@@ -9,18 +9,18 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 740,
+  "site_count": 741,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 48,
     "cupy.RawKernel": 123,
-    "cupy.RawModule": 316,
+    "cupy.RawModule": 317,
     "cupy.ReductionKernel": 22,
     "cupy.cuda.compiler.compile_using_nvrtc": 231
   },
   "site_count_by_surface": {
     "other": {
       "cupy.RawKernel": 9,
-      "cupy.RawModule": 19,
+      "cupy.RawModule": 20,
       "cupy.ReductionKernel": 1,
       "cupy.cuda.compiler.compile_using_nvrtc": 22
     },
@@ -569,6 +569,26 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "module = cp.RawModule(code=text, options=options, name_expressions=names)"
+    },
+    {
+      "file": "components/hex/tests/test_hex_init_pi_256_levels.py",
+      "line": 255,
+      "column": 13,
+      "surface": "other",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "test_the_pi_kernel_matches_the_cpu_algebra_at_200_levels",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"--std=c++17\",)",
+      "options": [
+        "--std=c++17"
+      ],
+      "options_element_expressions": [
+        "\"--std=c++17\""
+      ],
+      "options_are_literal": true,
+      "text": "module = cp.RawModule(code=session.pi_source(session.pi_level_tier(200)), options=(\"--std=c++17\",))"
     },
     {
       "file": "components/hex/tests/test_kernel_plan.py",
@@ -5092,7 +5112,7 @@
     },
     {
       "file": "tools/cuda_rounding_check.py",
-      "line": 579,
+      "line": 591,
       "column": 17,
       "surface": "tools",
       "constructor": "cp.ElementwiseKernel",
@@ -7416,7 +7436,7 @@
     },
     {
       "file": "woof/core/gfl.py",
-      "line": 340,
+      "line": 366,
       "column": 17,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -8590,7 +8610,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1193,
+      "line": 1194,
       "column": 24,
       "surface": "package",
       "constructor": "_cc.compile_using_nvrtc",
@@ -8612,7 +8632,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy_device.py",
-      "line": 47,
+      "line": 51,
       "column": 17,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -9420,7 +9440,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 74,
+      "line": 75,
       "column": 19,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9436,7 +9456,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 164,
+      "line": 165,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -9456,7 +9476,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 550,
+      "line": 551,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -9476,7 +9496,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 930,
+      "line": 931,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -9492,7 +9512,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 1087,
+      "line": 1088,
       "column": 21,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -11178,7 +11198,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_v842.py",
-      "line": 912,
+      "line": 914,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -11554,7 +11574,7 @@
     },
     {
       "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-      "line": 1118,
+      "line": 1126,
       "column": 31,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -11916,7 +11936,7 @@
     },
     {
       "file": "woof/hex/mpasphys/ysu_v842.py",
-      "line": 2745,
+      "line": 2747,
       "column": 24,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -12196,12 +12216,12 @@
     },
     {
       "file": "woof/hex/tc_climate/session.py",
-      "line": 53,
-      "column": 25,
+      "line": 90,
+      "column": 36,
       "surface": "package",
-      "constructor": "cp.RawModule",
+      "constructor": "self.cp.RawModule",
       "constructor_kind": "cupy.RawModule",
-      "enclosing": "__init__",
+      "enclosing": "pi_module",
       "takes_caller_options": true,
       "options_argument_present": true,
       "options_expression": "('--std=c++17',)",
@@ -12212,7 +12232,7 @@
         "'--std=c++17'"
       ],
       "options_are_literal": true,
-      "text": "self.pi_module = cp.RawModule(code=Path(__file__).with_name('potential_intensity.cu').read_text(),"
+      "text": "self.pi_modules[tier] = self.cp.RawModule(code=pi_source(tier), options=('--std=c++17',))"
     },
     {
       "file": "woof/hex/uh_layers.py",

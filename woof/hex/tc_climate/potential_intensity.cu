@@ -17,6 +17,11 @@ __device__ double entropy(double t,double r,double p) {
     double e=r*p/(EPS+r), rh=fmin(1.,e/es(t));
     return (CPD+r*CL)*log(t)-RD*log(p-e)+latent(t)*r/t-r*RV*log(rh);
 }
+// Sounding levels one thread holds.  The default is the shipped tier; the
+// session prepends a deeper define only for a deeper atmosphere.
+#ifndef PI_MAX_LEV
+#define PI_MAX_LEV 128
+#endif
 struct Cape { double value, outflow; int flag; };
 __device__ Cape cape(double tp,double rp,double pp,int levels,int stride,int cell,
     const float* pressure,const float* temperature,const float* vapor) {
@@ -26,7 +31,7 @@ __device__ Cape cape(double tp,double rp,double pp,int levels,int stride,int cel
     if(rh<=0) {out.flag=0;return out;}
     double s=entropy(tp,rp,pp), plcl=pp*pow(rh,tp/(1669.-122.*rh-tp));
     // One thread per sounding, bounded by the launch validation.
-    double buoy[128];
+    double buoy[PI_MAX_LEV];
     int inb=0;
     for(int k=0;k<levels;++k) {
         int i=k*stride+cell;
@@ -87,7 +92,7 @@ extern "C" __global__ void potential_intensity(int n,int nz,
         double d=fabs(pressure[i]*.01-ptop);
         if(d<mind) {mind=d;levels=k;}
     }
-    if(levels<3 || levels>128 || pressure[(nz-1)*n+c]>ptop*100) return;
+    if(levels<3 || levels>PI_MAX_LEV || pressure[(nz-1)*n+c]>ptop*100) return;
     double t=temperature[c],r=vapor[c];
     Cape env=cape(t,r,pressure[c]*.01,levels,n,c,pressure,temperature,vapor);
     if(env.flag!=1) {status[c]=env.flag;return;}

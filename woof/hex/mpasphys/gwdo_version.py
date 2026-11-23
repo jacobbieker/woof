@@ -99,8 +99,15 @@ def configure(config: Any, explicit: Mapping[str, Any] | None, text: str | None 
             raise ValueError(f"{sorted(explicit)} apply to the MPAS-physics route (--physics-suite); this run has none")
         return config
     mode = getattr(config, "mode", "exact")
-    version = normalise(explicit["gwdo_version"]) if "gwdo_version" in explicit else default_version(mode)
     selector = config.selectors.get("gwdo")
+    if "gwdo_version" in explicit:
+        version = normalise(explicit["gwdo_version"])
+    elif selector == YSU:
+        # The suite's YSU drag is the one slot the generation maps, so only there is the version a default.
+        from .version_defaults import defaulted
+        version = defaulted("gwdo_version", default_version(mode), where=f"gwdo_version.configure ({mode} mode)")
+    else:
+        version = default_version(mode)
     named = _named_selector(text)
     if selector == YSU and version == LATEST and named != YSU:
         backend = str(config.backends.get("gwdo"))

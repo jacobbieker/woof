@@ -335,7 +335,8 @@ def physics_inventory(numerics=None, *, mynn_math_source=None):
 
     declarations = [
         ("ntiedtke", ntiedtke.cuda_source(), ntiedtke.CUDA_OPTIONS, "kern.cu"),
-        ("ysu", ysu.cuda_source(ysu.shared_device_math_header()), ysu.COMPILER_OPTIONS, "kern.cu"),
+        # MMM-physics a4baf7f (MPAS-A v8.4.2's pin, mmm_version.py): named, so a pinned lane can build this.
+        ("ysu", ysu.cuda_source(ysu.shared_device_math_header(), "a4baf7f"), ysu.COMPILER_OPTIONS, "kern.cu"),
         # MMM-physics 550b5b4 (WRF v4.8.0's YSU top-down cap, mmm_version.py): the correct-mode default.
         ("ysu", ysu.cuda_source(ysu.shared_device_math_header(), "550b5b4"), ysu.COMPILER_OPTIONS, "kern.cu"),
         ("bl_mynn_adapter", bl.ADAPTER_CUDA_SOURCE, bl.MYNN_CUDA_OPTIONS, "kern.cu"),
