@@ -254,13 +254,20 @@ FROZEN_COMMIT_ORIGINAL = "789f61181fb0b198ace10775f3ea184eb5e786a3"
 #: device test; docs/public/PHYSICS.md "Correction:
 #: thompson_rain_snow_closure").  Previously cad801b7/90c66834 (428431
 #: chars).
+#: RE-FROZEN 2026-11-23 (FQ5 zero floor, review finding): each of the three
+#: blocks now floors the graupel gain at zero, snow then taking only what
+#: rain lost (prs = -prr, prg = 0), so the exchange never makes graupel a
+#: sink that qg = 0 clips into water.  Still inside the #ifdef: without the
+#: define the file is byte-identical to cad801b7 (tests/
+#: test_thompson_rain_snow_closure.py strips the blocks).  Previously
+#: 499b6be6/d85d117f (429660 chars).
 THOMPSON_CU_SHA256 = (
-    '499b6be690e579ed02b2a2910dff3d3319aadac470bb84285c869bfc7cb870c5')
+    '0eab875d9757311f1bbed3b66b28e067535e1eec8fd30bdbb93d8e05ee746042')
 #: sha256 of ``_preamble() + thompson.cu`` -- the exact string nvrtc sees.
 #: THIS is the mp=8 numerics guarantee.
 THOMPSON_COMPILED_SOURCE_SHA256 = (
-    'd85d117fc3d23fb926aae7de889daca6e21c608a7c229db5322f1a91606a33b9')
-THOMPSON_COMPILED_SOURCE_LEN = 429660
+    '1bcf40d8a40da3e754abd72fc2a6f2579caffa61c24856ccb46359b9592e2ca4')
+THOMPSON_COMPILED_SOURCE_LEN = 430278
 
 COMMON_CUH_SHA256 = (
     "c78b17cb02ef67a2ad24d19e06e1129d7d5bcda74b972b38470fd33a6e58ff43")
@@ -404,7 +411,10 @@ THOMPSON_PY_ALL = (
 # Qualified column dispatch added lines; literal values/counts are unchanged.
 #: RE-FROZEN 2026-11-23: FQ5's three #ifdef blocks add lines above later
 #: sites; counts 14 / 7 / 3 / 3 and no site edited.
-THOMPSON_CU_LITERAL_SITES = {'100.0e6f': [416, 1136, 1265, 2572, 3446, 3513, 3762, 4447, 4727, 4850, 4982, 5402, 7677, 9671], '2730.0f': [416, 1136, 1265, 4727, 4850, 5402, 9671], '272.0f': [1142, 1273, 9679], 'cloud_number_bin = 65': [4655, 5068, 7759]}
+#: RE-FROZEN 2026-11-23 (FQ5 zero floor): five more lines in each of the
+#: first two blocks and in the third shift the sites below them; counts
+#: 14 / 7 / 3 / 3 and no site edited.
+THOMPSON_CU_LITERAL_SITES = {'100.0e6f': [416, 1136, 1265, 2572, 3446, 3513, 3762, 4452, 4732, 4855, 4987, 5407, 7687, 9686], '2730.0f': [416, 1136, 1265, 4732, 4855, 5407, 9686], '272.0f': [1142, 1273, 9694], 'cloud_number_bin = 65': [4660, 5073, 7769]}
 
 #: Every ``.cu`` translation unit present at the frozen commit, as
 #: ``name -> (file sha256, assembled-compile-string sha256)``.  Modules
@@ -2195,8 +2205,10 @@ FROZEN_MODULE_DIGESTS = {
         # Previously 1ab8d031/b3bbf88b.
         # RE-FROZEN 2026-11-23 for FQ5 (thompson_rain_snow_closure), the
         # reading at THOMPSON_CU_SHA256.
-        '499b6be690e579ed02b2a2910dff3d3319aadac470bb84285c869bfc7cb870c5',
-        'd85d117fc3d23fb926aae7de889daca6e21c608a7c229db5322f1a91606a33b9'),
+        # RE-FROZEN again 2026-11-23 (FQ5 zero floor), the reading at
+        # THOMPSON_CU_SHA256.
+        '0eab875d9757311f1bbed3b66b28e067535e1eec8fd30bdbb93d8e05ee746042',
+        '1bcf40d8a40da3e754abd72fc2a6f2579caffa61c24856ccb46359b9592e2ca4'),
     'uh_diag': (
         'cbfc98e8d025a4511fd7f8a41ca4bd163c261da4a48dec22bb979ec5a496b14e',
         '9dc88c6e14b2aaaa4249a9f844dc231f105431623375c988a2894e322de2f3ea'),

@@ -1536,8 +1536,14 @@ __device__ bool tf_mp_thompson(
             // re-pairs the rain-snow transfer only above 0 C.  Below it the
             // graupel gain keeps its pre-limiter value while the rain and
             // snow limiters shrink the losses; the gain becomes what they
-            // lose.
-            if (temp[k] < TF_T_0) prg_rcs = -(prr_rcs + prs_rcs);
+            // lose, floored at zero (snow then takes only what rain lost).
+            if (temp[k] < TF_T_0) {
+                prg_rcs = -(prr_rcs + prs_rcs);
+                if (prg_rcs < 0.0) {
+                    prs_rcs = -prr_rcs;
+                    prg_rcs = 0.0;
+                }
+            }
 #endif
         }
 

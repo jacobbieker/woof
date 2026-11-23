@@ -44,12 +44,36 @@ KEY = "thompson_rain_snow_closure"
 UNITS = {
     "thompson.cu": (3, "cad801b72ab59d54c28e7903b125cbced4d8ae7211e1ff28427ffaee0dcd9b43"),
     "thompson_aerosol_cold.cu": (2, "ac6af93c55763d6fc1b42697ad5b93be447547e931a2010e6ba2ba4ed90d4743"),
-    "thompson_aerosol_warm.cu": (1, "c3e55b92419e88dbeccb77fdceac77f5e0db5497e8bcc4b381c06de0812efe16"),
+    "thompson_aerosol_warm.cu": (2, "c3e55b92419e88dbeccb77fdceac77f5e0db5497e8bcc4b381c06de0812efe16"),
     "thompson_classic.cu": (1, "efc122d5dcdc19763584ed856dc7800b20621fd1b7dd80defefe82583b6152bd"),
     "thompson_fork.cu": (1, "c7313ce62d863bdeb9478b7a503c8faffae6d17c8a20cbb1b6d458c216e4c947"),
     "thompson_column_generated.cuh": (1, "f07dd881fbec30952ba3d17b16012693e4ea689f50dcefde350c0222473fb552"),
 }
-_BLOCK = re.compile(r"#ifdef THOMPSON_RAIN_SNOW_CLOSURE\n(.*?)#endif\n", re.S)
+
+
+def _split_blocks(text):
+    """(block bodies, text with the blocks removed).  A block ends at the
+    #endif that closes its #ifdef, so it may hold its own #if arms."""
+    bodies, kept, current, depth = [], [], None, 0
+    for line in text.splitlines(keepends=True):
+        word = line.strip()
+        if current is None:
+            if word == "#ifdef THOMPSON_RAIN_SNOW_CLOSURE":
+                current, depth = [], 1
+            else:
+                kept.append(line)
+            continue
+        if word.startswith("#if"):
+            depth += 1
+        elif word.startswith("#endif"):
+            depth -= 1
+            if depth == 0:
+                bodies.append("".join(current))
+                current = None
+                continue
+        current.append(line)
+    assert current is None, "unterminated closure block"
+    return bodies, "".join(kept)
 
 
 def _run(**kw):
@@ -88,13 +112,22 @@ def test_it_is_inert_where_thompson_does_not_run(mp):
 def test_without_the_define_every_unit_is_the_program_before_the_correction(unit):
     text = (KERNELS / unit).read_text(encoding="utf-8")
     blocks, digest = UNITS[unit]
-    found = _BLOCK.findall(text)
+    found, stripped = _split_blocks(text)
     assert len(found) == blocks, unit
     for body in found:
-        # A pure addition: no #else arm that exact mode would compile.
-        assert "#else" not in body and "#if" not in body, unit
+        # A pure addition: no arm at the block's own level that exact mode
+        # would compile (a nested #if/#else wholly inside the block is
+        # skipped with it).
+        depth = 0
+        for line in body.splitlines():
+            word = line.strip()
+            if word.startswith("#if"):
+                depth += 1
+            elif word.startswith("#endif"):
+                depth -= 1
+            elif word.startswith(("#else", "#elif")):
+                assert depth > 0, unit
         assert "rain_snow" in body or "prg_rcs" in body, unit
-    stripped = _BLOCK.sub("", text)
     assert hashlib.sha256(stripped.encode("utf-8")).hexdigest() == digest, unit
 
 
@@ -103,6 +136,25 @@ def test_the_default_compile_never_sets_the_define():
     assert "THOMPSON_RAIN_SNOW_CLOSURE" not in repr(getattr(kernels, "CUDA_DEFINES", ""))
     from woof.core.thompson import RAIN_SNOW_CLOSURE_DEFINES
     assert RAIN_SNOW_CLOSURE_DEFINES == (("THOMPSON_RAIN_SNOW_CLOSURE", 1),)
+
+
+@pytest.mark.parametrize("unit", sorted(UNITS))
+def test_every_closure_block_floors_the_graupel_gain_at_zero(unit):
+    """Below freezing the snow term can be a net gain; when the rain limiter
+    shrinks rain's loss under it, -(prr+prs) < 0 would make graupel a sink
+    clipped at qg = 0 (water created as snow).  Every block floors the gain
+    at zero and has snow take only what rain lost."""
+    bodies, _ = _split_blocks((KERNELS / unit).read_text(encoding="utf-8"))
+    assert bodies
+    for body in bodies:
+        assert re.search(r"<\s*0\.(0f?|f|)\)", body), (unit, body)
+        compact = re.sub(r"\s+", "", body)
+        assert re.search(
+            r"(prs_rcs|rain_snow_snow_rate|rain_snow_category_rate)"
+            r"(\[[^;]*\])?=\(?-(L\.)?(prr_rcs|rain_snow_rain_rate)",
+            compact), (unit, body)
+        assert re.search(r"(prg_rcs|rain_snow_graupel_rate)(\[[^;]*\])?=0\.(0f?|f|);",
+                         compact), (unit, body)
 
 
 def test_the_generated_column_block_is_the_translator_s():

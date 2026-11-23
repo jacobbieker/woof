@@ -119,7 +119,8 @@ FQ5  Thompson (mp_physics = 8, 28, 38) re-pairs the rain-snow collection
      only above 0 C wet bulb; below it the graupel gain keeps its
      pre-limiter value while the rain and snow limiters shrink their losses,
      so the exchange creates graupel.  The key sets prg_rcs = -(prr_rcs +
-     prs_rcs) after the limiters (``thompson_rain_snow_closure``).
+     prs_rcs) after the limiters, floored at zero (snow then takes only
+     what rain lost) (``thompson_rain_snow_closure``).
 
 WHICH SCHEMES CARRY EACH FINDING is data too (:attr:`Correction.carriers`),
 separate from which schemes a key corrects (:data:`KEY_SCOPE`).  A domain
@@ -309,7 +310,8 @@ CORRECTIONS: tuple[Correction, ...] = (
         keys=("thompson_rain_snow_closure",),
         summary=(
             "Thompson's rain-snow collection below 0 C makes graupel only "
-            "from what rain and snow lose after their limiters"),
+            "from what rain and snow lose after their limiters (floored at "
+            "zero)"),
         carriers=(("mp_physics", (8, 28, 38)),),
     ),
 )

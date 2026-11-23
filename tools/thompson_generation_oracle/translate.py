@@ -268,8 +268,12 @@ def dump_init(source, directory):
 RAIN_SNOW_REPAIR = "prs_rcs(k) = -prr_rcs(k)"
 #: The correction (RunConfig.thompson_rain_snow_closure, finding FQ5),
 #: emitted after that block's endif under a define an exact-mode compile
-#: never sets: below 0 C the gain becomes what rain and snow lose.
-RAIN_SNOW_CLOSURE = "if (temp(k).lt.T_0) prg_rcs(k) = -(prr_rcs(k) + prs_rcs(k))"
+#: never sets: below 0 C the gain becomes what rain and snow lose, floored at zero
+#: (snow then takes only what rain lost).
+RAIN_SNOW_CLOSURE = (
+    "if (temp(k).lt.T_0) prg_rcs(k) = -(prr_rcs(k) + prs_rcs(k))\n"
+    "if (temp(k).lt.T_0 .and. prg_rcs(k).lt.0.) prs_rcs(k) = -prr_rcs(k)\n"
+    "if (temp(k).lt.T_0 .and. prg_rcs(k).lt.0.) prg_rcs(k) = 0.")
 
 
 def rain_snow_closure(symbols, function):
@@ -277,7 +281,8 @@ def rain_snow_closure(symbols, function):
     body."""
     return ("#ifdef THOMPSON_RAIN_SNOW_CLOSURE\n"
             "// woof RunConfig.thompson_rain_snow_closure (FQ5)\n"
-            + body_line(0, RAIN_SNOW_CLOSURE.lower(), symbols, function)
+            + "\n".join(body_line(0, line, symbols, function)
+                        for line in RAIN_SNOW_CLOSURE.lower().split("\n"))
             + "\n#endif")
 
 

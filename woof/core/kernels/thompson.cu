@@ -4245,10 +4245,15 @@ extern "C" __global__ void thompson_warm_frozen_source_network(
     // RunConfig.thompson_rain_snow_closure (FQ5): WRF re-pairs the
     // rain-snow transfer only above 0 C wet bulb.  Below it the graupel
     // gain keeps its pre-limiter value while the rain and snow limiters
-    // shrink the losses; the gain becomes what they lose.
+    // shrink the losses; the gain becomes what they lose, floored at zero
+    // (snow then takes only what rain lost).
     if (wet_bulb < 273.15f) {
         rain_snow_graupel_rate =
             -(rain_snow_rain_rate + rain_snow_snow_rate);
+        if (rain_snow_graupel_rate < 0.0) {
+            rain_snow_snow_rate = -rain_snow_rain_rate;
+            rain_snow_graupel_rate = 0.0;
+        }
     }
 #endif
     paired = fmin(
@@ -7139,9 +7144,14 @@ extern "C" __global__ void thompson_frozen_vapor_network(
     // RunConfig.thompson_rain_snow_closure (FQ5): below 0 C WRF
     // never re-pairs the rain-snow transfer, so the graupel gain keeps its
     // pre-limiter value while the rain and snow limiters above shrink the
-    // losses.  The gain becomes what they lose.
+    // losses.  The gain becomes what they lose, floored at zero (snow then
+    // takes only what rain lost).
     rain_snow_graupel_rate =
         -(rain_snow_rain_rate + rain_snow_category_rate);
+    if (rain_snow_graupel_rate < 0.0) {
+        rain_snow_category_rate = -rain_snow_rain_rate;
+        rain_snow_graupel_rate = 0.0;
+    }
 
 #endif
     // Blossey re-enforcement follows every species cap. Rain/snow is not
@@ -8248,9 +8258,14 @@ extern "C" __global__ THOMPSON_COLD_NETWORK_BOUNDS void thompson_frozen_vapor_cl
     // RunConfig.thompson_rain_snow_closure (FQ5): below 0 C WRF
     // never re-pairs the rain-snow transfer, so the graupel gain keeps its
     // pre-limiter value while the rain and snow limiters above shrink the
-    // losses.  The gain becomes what they lose.
+    // losses.  The gain becomes what they lose, floored at zero (snow then
+    // takes only what rain lost).
     rain_snow_graupel_rate =
         -(rain_snow_rain_rate + rain_snow_category_rate);
+    if (rain_snow_graupel_rate < 0.0) {
+        rain_snow_category_rate = -rain_snow_rain_rate;
+        rain_snow_graupel_rate = 0.0;
+    }
 
 #endif
     // Blossey re-enforcement follows every species cap. Rain/snow is not

@@ -2445,6 +2445,8 @@ prs_rcs[0+(k-(kts))*(1)] = (-prr_rcs[0+(k-(kts))*(1)]);
 #ifdef THOMPSON_RAIN_SNOW_CLOSURE
 // woof RunConfig.thompson_rain_snow_closure (FQ5)
 if((temp[0+(k-(kts))*(1)]<t_0)) { prg_rcs[0+(k-(kts))*(1)] = (-((prr_rcs[0+(k-(kts))*(1)]+prs_rcs[0+(k-(kts))*(1)]))); }
+if(((temp[0+(k-(kts))*(1)]<t_0)&&(prg_rcs[0+(k-(kts))*(1)]<0.f))) { prs_rcs[0+(k-(kts))*(1)] = (-prr_rcs[0+(k-(kts))*(1)]); }
+if(((temp[0+(k-(kts))*(1)]<t_0)&&(prg_rcs[0+(k-(kts))*(1)]<0.f))) { prg_rcs[0+(k-(kts))*(1)] = 0.f; }
 #endif
 // source:2724
 }

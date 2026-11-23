@@ -557,7 +557,10 @@ re-pairs the transfer only above 0 C wet bulb (:2946-2950). Below it the
 graupel gain `prg_rcs` keeps its value from before the limiters, so the
 exchange creates graupel, and its freezing heat, out of rain and snow that
 ran out. With the correction on, `prg_rcs = -(prr_rcs + prs_rcs)` after the
-limiters, so the gain is what rain and snow lose. It is per domain, read
+limiters, so the gain is what rain and snow lose, floored at zero: where
+snow's own term is a net gain that the rain limiter has shrunk rain's loss
+below, snow takes only what rain lost (`prs_rcs = -prr_rcs`) and graupel
+gains nothing, so no graupel sink is clipped at `qg = 0` into water. It is per domain, read
 only where `mp_physics = 8`, `28` or `38` (every `thompson_version`), and
 compiled in by a define, so exact mode runs WRF's program unchanged
 (`tests/test_thompson_rain_snow_closure.py`). The hex MPAS-suite Thompson
