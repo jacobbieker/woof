@@ -247,7 +247,8 @@ def test_a_256_layer_column_is_finite_conserves_energy_and_tracks_the_oracle():
     # Night: no solar flux anywhere; day: incoming at the top is S0 * mu.
     for name in ("fds", "fus", "direct", "diffuse", "dts"):
         assert not out[name][~day].any(), name
-    np.testing.assert_allclose(out["fds"][day, 0], 1361.0 * mu[day], rtol=1e-5)
+    # (the band solar weights sum to 1 within 5e-5)
+    np.testing.assert_allclose(out["fds"][day, 0], 1361.0 * mu[day], rtol=1e-4)
     # Energy closure: each heating rate is a net flux divergence per hPa,
     # so the column sum telescopes to net top minus net surface flux.
     dp = np.diff(fields["pressure"].astype(np.float64), axis=1)
