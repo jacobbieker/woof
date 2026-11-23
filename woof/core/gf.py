@@ -192,7 +192,7 @@ def _gf_booking(cfg) -> bool:
 
 
 def _gf_module(nz: int, *, spp_conv: int = 0, evaporation_booking: bool = False):
-    # RunConfig.gf_deep_rain_evaporation_booking (default off) compiles
+    # RunConfig.gf_deep_rain_evaporation_booking (on in correct mode, FQ1) compiles
     # gf.cu's GF_DEEP_EVAP_BOOKING tier; off, every module is the one this
     # adapter always loaded.
     extra = (("GF_DEEP_EVAP_BOOKING", 1),) if evaporation_booking else ()
