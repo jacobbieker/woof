@@ -62,6 +62,26 @@ _SURF_OUT = ("htop", "hbot", "xmb_shallow", "raincv", "pratec")
 _INT_OUT = ("k22_shallow", "kbcon_shallow", "ktop_shallow")
 
 
+#: Why cu_gf_version='gfl_873b414' is refused on the Metal backend (interim).
+METAL_REFUSAL = (
+    "cu_physics=3 with cu_gf_version='gfl_873b414' (WRF v4.8.0 Grell-Freitas-Li, the default) "
+    "does not run on the Metal backend yet: its lane-interleaved CUDA unit does not translate "
+    "to Metal (device-heap spill, mixed thread/device lane pointers and descriptors, 64-bit "
+    "atomics). Select cu_gf_version='wrf_461' (WRF v4.6.1 Grell-Freitas, GFDRV), which runs on "
+    "Metal, or run on CUDA.")
+
+
+def refuse_on_metal():
+    """Refuse GFL at setup on the Metal backend, before any step, naming the Metal-ready choice.
+
+    No silent fallback: the run must select cu_gf_version='wrf_461' itself.
+    """
+    from woof import backend
+    if backend.active() == "mlx":
+        from woof.config import UnsupportedConfiguration
+        raise UnsupportedConfiguration(METAL_REFUSAL)
+
+
 class GrellFreitasLi:
     """Stateless ``cu_physics=3`` (WRF v4.8.0 GFL) callable for :class:`PhysicsDriver`.
 
@@ -77,6 +97,7 @@ class GrellFreitasLi:
                         "wrf": "06d4240ae989", "gfl": "873b414670323ae766ec4fe1f4b6b5ab891358ed"}
 
     def __init__(self):
+        refuse_on_metal()
         self._driver = None
         self._scalars = {}
 

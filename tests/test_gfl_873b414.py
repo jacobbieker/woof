@@ -164,3 +164,37 @@ def test_preflight_prices_gfl_lane_scratch_not_gfdrv_tiles():
     sms = MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count
     assert gf_column_workspace_bytes(exp("gfl_873b414")) == scratch_bytes(49, 22500, sms)
     assert gf_column_workspace_bytes(exp("wrf_461")) != scratch_bytes(49, 22500, sms)
+
+
+def test_gfl_is_refused_on_metal_naming_the_metal_ready_generation(monkeypatch):
+    """Interim: GFL's lane unit does not translate to Metal, so the Metal backend refuses it at setup.
+
+    The breakage it prevents: every Metal forecast with cu_physics=3 (the hex
+    default, so every hex row) failed at step 0 with a translator error deep in
+    the composite step. The refusal names cu_gf_version='wrf_461', and nothing
+    falls back to it silently; CUDA still builds the callable.
+    """
+    from woof import backend
+    from woof.config import UnsupportedConfiguration
+    from woof.core import gfl
+
+    monkeypatch.setattr(backend, "active", lambda: "mlx")
+    with pytest.raises(UnsupportedConfiguration, match="cu_gf_version='wrf_461'"):
+        gfl.GrellFreitasLi()
+    monkeypatch.setattr(backend, "active", lambda: "cuda")
+    assert gfl.GrellFreitasLi()._driver is None
+
+
+def test_wrf461_gf_on_metal_never_builds_the_gfl_lane(monkeypatch):
+    """cu_gf_version='wrf_461' resolves to GFDRV, which neither refuses nor imports the GFL unit."""
+    import importlib
+    import sys
+    from woof import backend
+    from woof.config import CU_STOCK_CALLABLES, CU_VERSIONED_CALLABLES
+
+    monkeypatch.setattr(backend, "active", lambda: "mlx")
+    dotted = CU_VERSIONED_CALLABLES.get((3, "wrf_461"), CU_STOCK_CALLABLES.get(3))
+    module, _, name = dotted.rpartition(".")
+    monkeypatch.delitem(sys.modules, "woof.core.gfl_873b414", raising=False)
+    getattr(importlib.import_module(module), name)()
+    assert "woof.core.gfl_873b414" not in sys.modules
