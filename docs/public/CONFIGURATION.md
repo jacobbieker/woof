@@ -575,46 +575,59 @@ domain's own table is refused. The HRRR route writes both keys into its
 namelists, where WRF reads each once for the whole run, so on that
 route every Grell-Freitas domain of a tree takes the same values.
 
-`gf_deep_rain_evaporation_booking` (default `false`) is an opt-in
-correction to Grell-Freitas's deep surface rain, on the same per-domain
-terms as `clos_choice`. It is refused on a domain that does not select
-`cu_physics = 3`. WRF's `cup_output_ens_3d` books the downdraft
+`gf_deep_rain_evaporation_booking` (default `true`; correct-mode finding
+FQ1) is a correction to Grell-Freitas's deep surface rain, on the same
+per-domain terms as `clos_choice`. It is read only on a domain that
+selects `cu_physics = 3`. WRF's `cup_output_ens_3d` books the downdraft
 evaporation that detrained condensate cannot supply as extra surface rain
 instead of subtracting it, while the vapour tendency already holds that
 water. With `true`, the deep rain is reduced by that amount, so the deep
-column budget closes; every tendency is unchanged. It is not a WRF
+column budget closes; every tendency is unchanged. `false`, and exact
+mode, keep WRF's arithmetic. It is not a WRF
 namelist key, so it is set in the TOML (or as `--physics
 gf_deep_rain_evaporation_booking=true` on the hex WOOF arm). See the
 Grell-Freitas notes in [PHYSICS.md](PHYSICS.md#cumulus-cu_physics).
 
-`ysu_surface_heat_exner` (default `false`) is an opt-in correction to
+`ysu_surface_heat_exner` (default `true`; finding FQ2) is a correction to
 YSU's surface heat flux (`bl_pbl_physics = 1`, either `ysu_version`),
 per domain on the same terms. WRF's `bl_ysu.F90` adds `HFX` to potential
 temperature as a temperature flux and converts the tendency back with
 pi, so the surface heat enters as `HFX*pi` (4.5% short at 850 hPa). With
 `true`, every use of `HFX` takes the theta flux `HFX/pi` at the lowest
-level, so the surface heat enters as `HFX`. Refused with BEP/BEM
-(`sf_urban_physics` 2 or 3). Off, the arithmetic is WRF's word for word.
+level, so the surface heat enters as `HFX`. Not read with BEP/BEM
+(`sf_urban_physics` 2 or 3), where YSU takes the urban heat sources
+instead; the run receipt lists FQ2 as uncorrected there. Off, and in exact
+mode, the arithmetic is WRF's word for word.
 It is not a WRF namelist key; set it in the TOML.
 
-`noah_smc_floor_booking` (default `false`) is an opt-in correction to
+`noah_smc_floor_booking` (default `true`; finding FQ4) is a correction to
 Noah's soil-moisture floor (`sf_surface_physics = 2`), per domain on the
 same terms. WRF's SSTEP raises a layer below 0.02 to 0.02 and books the
 water it adds nowhere. With `true`, that water comes from the layer below,
 and past the bottom layer from the drainage `RUNOFF3` (`udrunoff`), which
-can then be negative. Off, the arithmetic is WRF's word for word. It is
-not a WRF namelist key; set it in the TOML.
+can then be negative. It is not read with a WRF-Hydro coupling, whose
+drainage must not go negative. Off, and in exact mode, the arithmetic is
+WRF's word for word. It is not a WRF namelist key; set it in the TOML.
 
-`woof_quirk_corrections` (default `"none"`) is the umbrella over the
-opt-in corrections of WRF 4.7.1 / MPAS v8.4.2 quirks
-(`woof/quirk_corrections.py`). With `"none"` each correction stays on
-its own key, off unless set. `"all"` turns on every correction whose
-scheme the run carries; one whose scheme does not run stays off. A key
-set to anything but its corrected value next to `"all"` is refused by
-name, and a correction its own key refuses in some combination (YSU's
-with BEP/BEM) is refused there under `"all"` too. Per domain, like the
-corrections. The same key works in the MPAS config dicts, and the hex
-door takes it as `--quirk-corrections all`. `"all"` turns on:
+`woof_quirk_corrections` (default unset) is the umbrella over the
+corrections of WRF 4.7.1 / MPAS v8.4.2 quirks (`woof/quirk_corrections.py`).
+They follow the physics mode: unset, every correction is on in correct
+mode (the default) where its scheme runs, and off in exact mode, where the
+run is the WRF / MPAS oracle's arithmetic word for word (parity tests run
+there). On the WRF route exact mode is a strict `GPUWM_WRF_EXACT=1`
+process, or every correct-mode key set `false` (the four WRF-route keys
+below are correct-mode findings FQ1-FQ4, in the table under "Correct
+mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
+MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
+A correction's own key, when set, wins over the mode, which is how one is
+turned off in correct mode or on in exact mode. `"all"` and `"none"` turn
+every correction on and off whatever the mode, and a key set the other way
+next to them is refused by name. A correction whose scheme the run does
+not carry is inert. Per domain, like the corrections. The same key works
+in the MPAS config dicts, and the hex door takes it as
+`--quirk-corrections all|none`. The MPAS-Seaice corrections are names, so
+a subset runs as `"none"` with the wanted names in
+`woof_v842_corrections`. In correct mode, or under `"all"`, these are on:
 
 - WRF route (RunConfig): `gf_deep_rain_evaporation_booking = true`
   (`cu_physics = 3`), `ysu_surface_heat_exner = true`
@@ -644,12 +657,12 @@ door takes it as `--quirk-corrections all`. `"all"` turns on:
   and `periodic_local_coords` (variational basis; each acts only on a
   planar or periodic mesh) and `weak_ridge_delta` (weak stress divergence).
 
-`mynn_sfclay_psih_zolzt` (default `false`) is an opt-in correction to the
+`mynn_sfclay_psih_zolzt` (default `true`; finding FQ3) is a correction to the
 MYNN surface layer's 2 m and 10 m diagnostics (`sf_sfclay_physics = 5`,
 `mynn_sfclay_variant = "wrf_461"`), per domain on the same terms. WRF's
 `module_sf_mynn.F` integrates that heat profile from `z0/L` while its log
-term starts at `zt`; with `true` it starts at `zt/L`. Off, the arithmetic
-is WRF's word for word.
+term starts at `zt`; with `true` it starts at `zt/L`. Off, and in exact
+mode, the arithmetic is WRF's word for word.
 
 `obstacle_opt` (default `0`) resolves buildings and other obstacles on an
 LES or other high-resolution domain. It is woof's own option, not a WRF
@@ -853,8 +866,9 @@ for the retained proof and the limits of the forecast evidence.
 
 ### Correct mode (`[shared]`)
 
-Correct mode is the default. It fixes water-budget defects that WRF itself
-carries, one key per scheme, each `true` by default and read only by the
+Correct mode is the default. It fixes defects that WRF itself carries
+(water budgets, and the fork's quirk ledger FQ1-FQ4, see
+`woof_quirk_corrections`), one key per scheme, each `true` by default and read only by the
 schemes named in its row. Setting a key to `false` in `[shared]` runs that
 scheme's WRF-matched arithmetic. Strict WRF mode (`GPUWM_WRF_EXACT=1`)
 forces the WRF-matched arithmetic for every scheme. The run receipt's `correct_mode` block lists the
@@ -871,6 +885,10 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `wsm7_conservative_surface` | WSM7 (24) | WB5 | the same, in WSM7 |
 | `ntiedtke_dry_mass_coupling` | New Tiedtke (`cu_physics = 16`) | WB4 | moist-mass tendencies are scaled onto dry-mass mixing ratios |
 | `thompson_cloud_surface_booking` | Thompson (`mp_physics = 8`) and aerosol-aware Thompson (28) | WB1 | cloud water that settles out of the lowest level is kept in `CLOUDNC` (mm, `CLOUDNCV` per call) instead of being lost; no other output changes |
+| `gf_deep_rain_evaporation_booking` | Grell-Freitas (`cu_physics = 3`) | FQ1 | deep surface rain no longer also counts the downdraft evaporation the tendencies return to vapour |
+| `ysu_surface_heat_exner` | YSU (`bl_pbl_physics = 1`), not with BEP/BEM | FQ2 | the surface heat flux enters the column as `HFX`, not `HFX*pi` |
+| `mynn_sfclay_psih_zolzt` | MYNN surface layer (`sf_sfclay_physics = 5`, `mynn_sfclay_variant = "wrf_461"`) | FQ3 | the 2 m / 10 m heat profile is integrated from `zt/L`, as its log term is |
+| `noah_smc_floor_booking` | Noah (`sf_surface_physics = 2`), not with WRF-Hydro | FQ4 | the water Noah adds at its 0.02 soil-moisture floor comes from the layer below or the drainage |
 
 A checkpoint resumes only under the arithmetic it was written with; a
 mismatch is refused, and the refusal names the key to set.

@@ -328,6 +328,12 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
         job[0].split("[")[0] != "sfclay", -_source_bytes(job[0].split("[")[0]), job[0]))
 
 
+def _psih_zolzt(run) -> bool:
+    """RunConfig.mynn_sfclay_psih_zolzt where it is read (woof.quirk_corrections.run_reads)."""
+    from woof.quirk_corrections import run_reads
+    return run_reads(run, "mynn_sfclay_psih_zolzt")
+
+
 def _variant_jobs(experiment, modules):
     """Compile selector and dimension variants before their first launch.
 
@@ -358,7 +364,7 @@ def _variant_jobs(experiment, modules):
                 # compiled at its first call; mynn_surface keeps its default.
                 variant = getattr(run, "mynn_sfclay_variant", "wrf_461")
                 defines = (mynn_surface_defines(variant,
-                                                getattr(run, "mynn_sfclay_psih_zolzt", False) is True)
+                                                _psih_zolzt(run))
                            if variant in MYNN_SFCLAY_DEFINES else ())
             tiers = [defines] if defines else []
             if name == "advection":

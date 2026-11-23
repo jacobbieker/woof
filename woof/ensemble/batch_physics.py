@@ -21,6 +21,7 @@ import textwrap
 
 import numpy as np
 
+from woof.quirk_corrections import run_reads
 from woof.ensemble.batch_storage import BatchArraySpec, BatchMemoryPlan, BatchStorage
 from woof.certify.kernel_manifest import record_module
 
@@ -1427,7 +1428,7 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
     active = atmosphere()
     extras_plan = default_column_extra_plan(nz=nz, ny=ny, nx=nx)
     ysu_plan = ysu_output_plan(nz=nz, ny=ny, nx=nx, members=members,
-                               surface_heat_exner=getattr(cfg, "ysu_surface_heat_exner", False) is True)
+                               surface_heat_exner=run_reads(cfg, "ysu_surface_heat_exner"))
     required = extras_plan.required_bytes(members) + ysu_plan.required_bytes(members)
     if required > available_bytes:
         raise MemoryError(f"default native physics binding needs {required} bytes for YSU and held carriers")
@@ -1441,7 +1442,7 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
               "xland": f["xland"], "u10": f["u10"], "v10": f["v10"]}
     ysu = prepare_ysu_column_batch(inputs, members=members, ny=ny, nx=nx, dt=driver.bldt_seconds,
         topdown=cfg.ysu_topdown_pblmix, ysu_version=cfg.ysu_version,
-        surface_heat_exner=getattr(cfg, "ysu_surface_heat_exner", False) is True,
+        surface_heat_exner=run_reads(cfg, "ysu_surface_heat_exner"),
         available_bytes=available_bytes - extras_plan.required_bytes(members),
         array_module=array_module, shared_fields=tuple(sorted(shared_surfaces & {"xland"})))
     sf_inputs = {"u": active["u"][0], "v": active["v"][0], "t": active["temperature"][0], "qv": active["qv"][0],
@@ -1457,7 +1458,7 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
         dt=driver.bldt_seconds, dzs=NOAH_LAYER_THICKNESS_M, frpcpn=True, usemonalb=driver.noah_usemonalb,
         rdlai2d=driver.noah_rdlai2d, opt_thcnd=driver.noah_opt_thcnd, array_module=array_module,
         shared_fields=tuple(sorted(shared_surfaces & NOAH_SHARED_FIELDS)),
-        smc_floor_booking=getattr(cfg, "noah_smc_floor_booking", False) is True)
+        smc_floor_booking=run_reads(cfg, "noah_smc_floor_booking"))
 
     if "xland" in shared_surfaces:
         # A single 2-D immutable mask cannot be flattened into member stripes
@@ -1499,7 +1500,7 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
     def native_ysu(*args, **kwargs):
         actual = list(args[:10]) + [kwargs["rthraten"]] + [kwargs[name] for name in YSU_SURFACES]
         verify_pointers(actual, [inputs[name] for name in YSU_COLUMNS + YSU_SURFACES])
-        if bool(kwargs.get("surface_heat_exner", False)) != (getattr(cfg, "ysu_surface_heat_exner", False) is True):
+        if bool(kwargs.get("surface_heat_exner", False)) != (run_reads(cfg, "ysu_surface_heat_exner")):
             raise ValueError("YSU's surface heat flux correction changed after admission")
         if kwargs.get("ysu_version", "wrf_480") != cfg.ysu_version:
             raise ValueError("YSU generation changed after admission; entrainment tendencies would use a different cap")
@@ -1517,7 +1518,7 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
         verify_pointers([fields[name] for name in noah_fields], list(noah_fields.values()))
         if params is not driver.noah_params or kwargs.get("urban") is not None or np.float32(dt) != np.float32(driver.bldt_seconds):
             raise ValueError("Noah's table owner, timestep or urban producer changed after admission")
-        if bool(kwargs.get("smc_floor_booking", False)) != (getattr(cfg, "noah_smc_floor_booking", False) is True):
+        if bool(kwargs.get("smc_floor_booking", False)) != (run_reads(cfg, "noah_smc_floor_booking")):
             raise ValueError("Noah's soil-moisture floor booking changed after admission")
         noah(kwargs["itimestep"])
 

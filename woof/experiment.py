@@ -6438,7 +6438,7 @@ def _public_config_value(value):
                                   ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
                                   ("urban_param_file", ""),
                                   ("ysu_surface_heat_exner", False),
-                                  ("woof_quirk_corrections", "none"),
+                                  ("woof_quirk_corrections", None),
                                   ("mynn_sfclay_psih_zolzt", False),
                                   ("noah_smc_floor_booking", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):

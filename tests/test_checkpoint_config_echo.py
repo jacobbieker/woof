@@ -62,16 +62,17 @@ MOVED = {
     "slope_rad": (dict(slope_rad=1), {"slope_rad"}),
     "topo_shading": (dict(slope_rad=1, topo_shading=1, shadlen=20000.0),
                      {"slope_rad", "topo_shading", "shadlen"}),
-    # YSU runs here, so its generation (default wrf_480, 2.9.0) is bound too.
+    # YSU runs here, so its generation (default wrf_480, 2.9.0) is bound
+    # too, and so is its correct-mode FQ2 correction (on by default).
     "topo_wind": (dict(bl_pbl_physics=1, sf_sfclay_physics=1, topo_wind=1),
-                  {"topo_wind", "ysu_version"}),
+                  {"topo_wind", "ysu_version", "ysu_surface_heat_exner"}),
     "gwd_opt": (dict(gwd_opt=1), {"gwd_opt"}),
     # Noah runs here, so development branch's default-on prognostic sea ice
     # and its parameters are read and bound too (_SEAICE_BOUND).
     "sf_surface_mosaic": (dict(sf_surface_physics=2, sf_surface_mosaic=1,
                                mosaic_cat=2),
                           {"sf_surface_mosaic", "mosaic_cat",
-                           *_SEAICE_BOUND}),
+                           "noah_smc_floor_booking", *_SEAICE_BOUND}),
     # The single-layer urban model runs here, so its water-balance
     # generation (default wrf_480, 2.9.0) is bound too.
     "mosaic_urban_canopy": (dict(sf_surface_physics=2, sf_urban_physics=1,
@@ -79,7 +80,8 @@ MOVED = {
                                  mosaic_urban_canopy="every_tile"),
                             {"sf_surface_mosaic", "mosaic_cat",
                              "urban_water_balance",
-                             "mosaic_urban_canopy", *_SEAICE_BOUND}),
+                             "mosaic_urban_canopy", "noah_smc_floor_booking",
+                             *_SEAICE_BOUND}),
     "diff_opt": (dict(diff_opt=1), {"diff_opt", "mix_full_fields"}),
     "mix_full_fields": (dict(diff_opt=1, mix_full_fields=False),
                         {"diff_opt", "mix_full_fields"}),
@@ -102,9 +104,14 @@ MOVED = {
                                      {"bl_mynn_gsd41_unsquared_qtke"}),
     "mynn_sfclay_variant": (dict(mynn_sfclay_variant="gsl_wrf39"),
                             {"mynn_sfclay_variant"}),
+    # Correct-mode FQ1 (on by default): echoed only where Grell-Freitas
+    # reads it, so moving it means running Grell-Freitas (here under YSU,
+    # whose generation and FQ2 correction are bound too).
     "gf_deep_rain_evaporation_booking": (
-        dict(gf_deep_rain_evaporation_booking=True),
-        {"gf_deep_rain_evaporation_booking"}),
+        dict(cu_physics=3, bl_pbl_physics=1, sf_sfclay_physics=1,
+             cudt_minutes=0.0, moist=True),
+        {"gf_deep_rain_evaporation_booking", "cu_gf_version", "ysu_version",
+         "ysu_surface_heat_exner"}),
     "ysu_surface_heat_exner": (
         dict(bl_pbl_physics=1, sf_sfclay_physics=1, ysu_surface_heat_exner=True),
         {"ysu_surface_heat_exner", "ysu_version"}),
@@ -124,7 +131,7 @@ MOVED = {
     "urban_param_file": (dict(sf_surface_physics=2, sf_urban_physics=1,
                               urban_param_file="geo_em.d01.nc"),
                          {"urban_param_file", "urban_water_balance",
-                          *_SEAICE_BOUND}),
+                          "noah_smc_floor_booking", *_SEAICE_BOUND}),
     "obstacle_opt": (dict(obstacle_opt=1, obstacle_file="city.nc",
                           dx=5.0, dy=5.0),
                      {"obstacle_opt", "obstacle_file"}),
@@ -145,7 +152,8 @@ MOVED = {
     # reads it, so moving it means running that PBL.  ML1 (the BouLac length
     # sign) is read by the same PBL and is echoed with it.
     "mynn_fixes_v61": (dict(bl_pbl_physics=5, sf_sfclay_physics=5),
-                       {"mynn_fixes_v61", "mynn_boulac_down_sign"}),
+                       {"mynn_fixes_v61", "mynn_boulac_down_sign",
+                        "mynn_sfclay_psih_zolzt"}),
     # ML1's second key (3.0.3): on by default, echoed only where the BouLac
     # (8) or k-epsilon (17) PBL reads it.
     "pbl_boulac_down_sign": (dict(bl_pbl_physics=8, sf_sfclay_physics=1),
@@ -757,7 +765,12 @@ def _with_handover(cfg, kept):
     return set(kept)
 
 
-@pytest.mark.parametrize("field", sorted(MOVED))
+#: MOVED rows that run a cumulus scheme, which the fake checkpoint state
+#: here carries no callable for; the digest test still covers their echo.
+_NEEDS_CUMULUS_CALLABLE = frozenset({"gf_deep_rain_evaporation_booking"})
+
+
+@pytest.mark.parametrize("field", sorted(set(MOVED) - _NEEDS_CUMULUS_CALLABLE))
 def test_every_writer_echoes_a_moved_field_alike(monkeypatch, tmp_path, field):
     overrides, kept = MOVED[field]
     if overrides.get("obstacle_file"):
@@ -790,8 +803,7 @@ def test_the_digest_drops_what_the_echo_drops():
 @pytest.mark.parametrize("field", (
     "bl_mynn_version", "bl_mynn_gsd41_unsquared_qtke",
     "bl_mynn_cloud_tendency_form", "swint_opt", "aer_opt", "alb_sol",
-    "gf_deep_rain_evaporation_booking", "obstacle_opt",
-    "obstacle_relax_factor",
+    "obstacle_opt", "obstacle_relax_factor",
 ))
 def test_inherited_default_off_fields_bind_both_restart_directions(field):
     """An old header may omit the default, never an active selector."""

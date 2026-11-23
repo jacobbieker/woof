@@ -184,6 +184,13 @@ _OUT_ISCA = ("ktop_deep", "k22_shallow", "kbcon_shallow", "ktop_shallow",
              "kbcon", "ktop")
 
 
+def _gf_booking(cfg) -> bool:
+    """RunConfig.gf_deep_rain_evaporation_booking where it is read
+    (woof.quirk_corrections.run_reads; on by default, finding FQ1)."""
+    from woof.quirk_corrections import run_reads
+    return run_reads(cfg, "gf_deep_rain_evaporation_booking")
+
+
 def _gf_module(nz: int, *, spp_conv: int = 0, evaporation_booking: bool = False):
     # RunConfig.gf_deep_rain_evaporation_booking (default off) compiles
     # gf.cu's GF_DEEP_EVAP_BOOKING tier; off, every module is the one this
@@ -596,8 +603,7 @@ class GrellFreitas:
         sca = cp.empty((n, len(_OUT_SCA)), dtype=DTYPE)
         isc = cp.empty((n, len(_OUT_ISCA)), dtype=cp.int32)
 
-        module = _gf_module(nz, spp_conv=int(stochastic), evaporation_booking=bool(
-            getattr(cfg, "gf_deep_rain_evaporation_booking", False)))
+        module = _gf_module(nz, spp_conv=int(stochastic), evaporation_booking=_gf_booking(cfg))
         fn = module.get_function("gf_gfdrv_stage")
         block = GF_BLOCK
         # The column arrays live in a global workspace sized to the threads

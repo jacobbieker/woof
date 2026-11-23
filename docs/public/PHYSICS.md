@@ -2136,7 +2136,7 @@ one line:
   models off is untouched: the plain YSU kernel compiles from unchanged
   statements.
 
-**Opt-in: `noah_smc_floor_booking` (default off).** WRF 4.7.1's Noah SSTEP
+**Correction: `noah_smc_floor_booking` (on in correct mode, finding FQ4).** WRF 4.7.1's Noah SSTEP
 (`module_sf_noahlsm.F`) clips each layer's total soil moisture to
 `MAX(MIN(STOT, SMCMAX), 0.02)` (:4030). The upper clip books its excess:
 `WPLUS` passes it to the layer below and, past the bottom layer, to
@@ -2147,10 +2147,11 @@ option on, the water the floor adds is taken from the layer below as a
 negative `WPLUS`, and past the bottom layer from `RUNOFF3`, which can then
 be negative. The column water budget then closes on those columns
 (`tests/test_noah_smc_floor_booking.py`, float64 mirror and kernel). It is
-per domain, refused off `sf_surface_physics = 2`, carried by the plain,
-mosaic, UA and urban-canopy Noah units, and not yet scored against
-observations. The hex MPAS-suite Noah (`woof/hex/mpasphys/noah_v842.py`)
-does not carry it yet. Off, the arithmetic is WRF's word for word.
+per domain, read only where `sf_surface_physics = 2` and not with a
+WRF-Hydro coupling, carried by the plain, mosaic, UA and urban-canopy Noah
+units, and not yet scored against observations. The hex MPAS-suite Noah
+(`woof/hex/mpasphys/noah_v842.py`) does not carry it yet. Off, and in exact
+mode, the arithmetic is WRF's word for word.
 
 ## Radiation (`ra_lw_physics` / `ra_sw_physics`)
 
@@ -2652,7 +2653,7 @@ forcing lanes were zero. It has not been re-measured since those lanes
 were connected; these numbers do not describe the expected behaviour
 of the current engine.
 
-**Opt-in: `gf_deep_rain_evaporation_booking` (default off).** WRF
+**Correction: `gf_deep_rain_evaporation_booking` (on in correct mode, finding FQ1).** WRF
 4.6.1/4.7.1's `cup_output_ens_3d` (`module_cu_gf_deep.F`, lines 3330-3348)
 counts some deep water twice.
 - The downdraft evaporation first comes from detrained condensate. What
@@ -2673,10 +2674,10 @@ With the option on, the evaporation is subtracted (`gf.cu`,
 - Every tendency and every shallow output is bitwise WRF's
   (`tests/test_gf_deep_evaporation_booking_gpu.py`).
 
-It is per domain, refused off `cu_physics = 3`, and reachable from the TOML
-(`[shared]` or `[[domain]]`) and from the hex WOOF arm with `--physics
-gf_deep_rain_evaporation_booking=true`. The default keeps WRF's arithmetic,
-so the GF oracles are unchanged.
+It is per domain, read only where `cu_physics = 3`, and reachable from the
+TOML (`[shared]` or `[[domain]]`) and from the hex WOOF arm with `--physics
+gf_deep_rain_evaporation_booking=true`. `false`, and exact mode, keep WRF's
+arithmetic, so the GF oracles run in exact mode.
 
 Against Stage-IV 24 h totals on five 72 h global 120 km cases, the option
 changes the scores as follows:
@@ -2690,7 +2691,7 @@ So rain amounts improve and the rain area shrinks. The tables are in
 [declared-divergences.md](../../components/hex/docs/declared-divergences.md),
 section 2, under "Opt-in: `gf_deep_rain_evaporation_booking`".
 
-**Opt-in: `ysu_surface_heat_exner` (default off).** WRF 4.7.1's YSU
+**Correction: `ysu_surface_heat_exner` (on in correct mode, finding FQ2).** WRF 4.7.1's YSU
 (`bl_ysu.F90`) adds the surface sensible heat flux to potential
 temperature as if it were a temperature flux (`sflux` :613, `hgamt`
 :687/:891, the heat solve's lowest row :1045) and converts the theta
@@ -2698,18 +2699,20 @@ tendency back with pi (:1103). The surface heat therefore enters the
 column as `HFX*pi(1)`: 4.5% short at 850 hPa, 14% at 600 hPa. With the
 option on, YSU's unchanged kernel reads the theta flux `HFX/pi(1)`, so the
 surface heat enters as `HFX` (`tests/test_ysu_surface_heat_exner.py`, by
-the column heat budget). It is per domain, refused off `bl_pbl_physics =
-1` and with BEP/BEM, and not yet scored against observations.
+the column heat budget). It is per domain, read only where `bl_pbl_physics
+= 1` and not with BEP/BEM (the receipt lists FQ2 as uncorrected there),
+off in exact mode, and not yet scored against observations.
 
-**Opt-in: `mynn_sfclay_psih_zolzt` (default off).** WRF 4.7.1's MYNN
+**Correction: `mynn_sfclay_psih_zolzt` (on in correct mode, finding FQ3).** WRF 4.7.1's MYNN
 surface layer (`module_sf_mynn.F:826-827, 839-840, 910-911, 921-922`)
 integrates the 2 m and 10 m heat stability function from `z0/L`, while the
 log term it is paired with (`gz2ozt = ln((2+z0)/zt)`) and the first-level
 `psih` start at `zt/L`. With the option on, `psih2`/`psih10` also start at
 `zt/L`, so the 2 m temperature and humidity come from one profile. Only
 T2, TH2, Q2 and the 2 m exchange coefficients move
-(`tests/test_mynn_sfclay_psih_zolzt.py`). Refused off `sf_sfclay_physics =
-5` and with the `gsl_wrf39` variant; not yet scored against observations.
+(`tests/test_mynn_sfclay_psih_zolzt.py`). Read only where `sf_sfclay_physics
+= 5` at the `wrf_461` variant, off in exact mode; not yet scored against
+observations.
 
 ## Passive tracers (`tracer_opt`)
 
