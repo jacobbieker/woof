@@ -97,7 +97,7 @@ def test_generated_module_is_the_pinned_transcription():
 
 
 def _spell_back(lane):
-    """Undo gfl_lanes.lane_scheme's spellings: lane pointers, byte displacements, character storage."""
+    """Undo gfl_lanes.lane_scheme's spellings: lane pointers, byte displacements, character and fscav storage."""
     import re
     out, pos = [], 0
     head = re.compile(r'gf_lane_plus<GFReal>\(([A-Za-z_][\w.>-]*), ')
@@ -111,6 +111,8 @@ def _spell_back(lane):
     out.append(lane[pos:])
     text = ''.join(out)
     text = text.replace('GFP ', 'GFReal *').replace('GIP ', 'int *').replace('GBP ', 'bool *')
+    from woof.core import gfl_lanes
+    text = text.replace(gfl_lanes._FSCAV_SCRATCH, gfl_lanes._FSCAV_LOCAL)
     return text.replace(' = (char *) workspace.allocate_bytes (', ' = (char *) workspace.allocate (')
 
 

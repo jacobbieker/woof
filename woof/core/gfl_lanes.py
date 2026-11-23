@@ -34,7 +34,8 @@ import re
 LANES = 128
 
 #: Contiguous character bytes per thread: ierrc, ierrcm and ierrcs are one
-#: 50-byte element each at its=ite=1, each 16-byte rounded (3 x 64 = 192).
+#: 50-byte element each at its=ite=1, each 16-byte rounded (3 x 64 = 192),
+#: and fscav's one word (16).
 CHARACTER_BYTES = 256
 
 #: Resident 128-thread blocks per SM the column kernel is compiled for
@@ -253,6 +254,10 @@ def lower(support, scheme, entry):
     return _DEFINES + support + '\n' + lane_scheme(scheme) + '\n' + _ENTRY.replace('@ARGUMENTS@', arguments)
 
 
+_FSCAV_LOCAL = '  GFReal fscav[1];\n'
+_FSCAV_SCRATCH = '  GFReal (&fscav)[1] = *(GFReal (*)[1]) workspace.allocate_bytes (16);\n'
+
+
 def lane_scheme(scheme):
     """The pinned transcription with lane pointers: the same text but for pointer spellings.
 
@@ -267,12 +272,18 @@ def lane_scheme(scheme):
         pattern = name + ' = (char *) workspace.allocate ('
         assert scheme.count(pattern) == 1, name
         scheme = scheme.replace(pattern, name + ' = (char *) workspace.allocate_bytes (')
+    # fscav, the driver's one-word local array, is passed by descriptor (data = &fscav[0]) to
+    # cu_gfl_deep_run, whose other descriptors hold scratch words; a Metal struct pointer
+    # field has one address space, so its word lives in the per-thread byte region as well.
+    # A reference to the array keeps every use (sizeof, &fscav[0]) spelled and sized as before.
+    assert scheme.count(_FSCAV_LOCAL) == 1
+    scheme = scheme.replace(_FSCAV_LOCAL, _FSCAV_SCRATCH)
     scheme, plus = _pointer_plus(scheme)
     assert plus == 36, plus
     # Every float/integer/logical pointer in the scheme is a lane pointer. Fixed-size
     # local arrays stay C arrays: alpha/g_alpha/xk/xff_shal are read locally, zuh2 is
-    # passed to get_zu_zd_pdf_fim, which never reads it, and fscav (one word) is read at
-    # element 0 only (descriptor lbound = ubound = 1).
+    # passed to get_zu_zd_pdf_fim, which never reads it, and fscav (one contiguous word, above)
+    # is read at element 0 only (descriptor lbound = ubound = 1).
     before = len(re.findall(r'\bGFReal \*|\bint \*|\bbool \*', scheme))
     scheme = re.sub(r'\bGFReal \*', 'GFP ', scheme)
     scheme = re.sub(r'\bint \*', 'GIP ', scheme)
