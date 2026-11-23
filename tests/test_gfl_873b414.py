@@ -218,6 +218,7 @@ def test_wrf461_gf_on_metal_never_builds_the_gfl_lane():
     """
     import subprocess
     import sys
+    pytest.importorskip("mlx", reason="the Metal backend needs the mlx package")
     code = (
         "import sys, importlib\n"
         "sys.modules['woof.core.gfl'] = None\n"
