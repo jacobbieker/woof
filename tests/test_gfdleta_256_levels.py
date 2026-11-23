@@ -88,12 +88,7 @@ def test_the_ladder_contract_registry_and_layouts_agree():
 
 
 def test_the_deep_co2_launch_unit_is_the_counted_storage_substitution(monkeypatch):
-    import importlib.util
-    monkeypatch.setenv('GFDLETA_MAXL', str(DEEP))
-    spec = importlib.util.spec_from_file_location(
-        "gfdleta_build_tier_256", ROOT / "tools/gfdleta_wrf461_oracle/build_tier.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _build_tier(DEEP, monkeypatch)
     kernels = ROOT / "woof/core/kernels"
     assert module.co2_launch_unit((kernels / "gfdleta_co2_init.cu").read_text()) == \
         (kernels / "gfdleta_co2_init_l256.cu").read_text()
@@ -135,14 +130,50 @@ def test_the_config_admits_256_layers_and_refuses_257():
         validate_run_config(cfg(DEEP + 1))
 
 
-def test_the_slot_count_is_the_run_chunk_at_both_tiers():
+def test_the_slot_count_is_the_run_chunks_scratch_budget_at_both_tiers():
     from woof.core import gfdleta_levels as lv
+    shipped, deep = (lv.column_layout(m)['scratch_bytes'] for m in (SHIPPED, DEEP))
+    assert lv.column_slots(10**6, 3125, SHIPPED) == 3125
+    assert lv.column_slots(10**6, 3125, DEEP) == 3125 * shipped // deep == 563
+    assert lv.column_slots(10**6, 3125, DEEP) * deep <= 3125 * shipped
     for maxl in (SHIPPED, DEEP):
-        assert lv.column_slots(10**6, 3125, maxl) == 3125
         assert lv.column_slots(10, 3125, maxl) == 10
-        assert lv.column_slots(10**6, 7, maxl) == 7
+        assert lv.column_slots(10**6, 1, maxl) == 1
+    assert lv.column_slots(10**6, 7, SHIPPED) == 7
     with pytest.raises(ValueError):
         lv.column_slots(10, 3125, 128)
+
+
+def test_more_than_256_layers_is_a_named_refusal():
+    from woof.config import ConfigurationRefused
+    from woof.core import gfdleta_levels as lv
+    with pytest.raises(ConfigurationRefused, match="at most 256 layers.*has 257"):
+        lv.maxl_tier(DEEP + 1)
+
+
+def _build_tier(maxl, monkeypatch):
+    import importlib.util
+    monkeypatch.setenv('GFDLETA_MAXL', str(maxl))
+    spec = importlib.util.spec_from_file_location(
+        f"gfdleta_build_tier_{maxl}", ROOT / "tools/gfdleta_wrf461_oracle/build_tier.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("maxl", [SHIPPED, DEEP])
+def test_the_init_layout_is_the_struct_sizes_of_the_generated_header(maxl, monkeypatch):
+    """struct_bytes counts every dimension, alignment and tail padding; the
+    device sizeof check is test_the_layouts_are_the_compiled_struct_sizes."""
+    from woof.core import gfdleta_levels as lv
+    module = _build_tier(maxl, monkeypatch)
+    text = (ROOT / f"woof/core/kernels/gfdleta_co2_init{lv.suffix(maxl)}.cuh").read_text()
+    assert {'table_bytes': module.struct_bytes(text, 'GDTable'),
+            'scratch_bytes': module.struct_bytes(text, 'GDScratch'),
+            'state_bytes': module.struct_bytes(text, 'GDInitState')} == lv.init_layout(maxl)
+    probe = 'typedef struct { doublereal a; integer b[3][5]; real c; } P;'
+    assert module.struct_bytes(probe, 'P') == 8 + 4 * 15 + 4 + 0  # 72, a multiple of 8
+    assert module.struct_bytes('typedef struct { doublereal a; real c; } P;', 'P') == 16
 
 
 # --------------------------------------------------------------------------- GPU helpers
@@ -202,6 +233,48 @@ def _run_columns(module, table, floats, ints, scratch_bytes):
     work = cp.empty((NCOL, scratch_bytes), cp.uint8)
     get_kernel(module, 'gd_radiation_columns')((1,), (32,), (cp.asarray(table), f, i, work, np.int32(NCOL)))
     return cp.asnumpy(f).view(np.uint32)
+
+
+# --------------------------------------------------------------------------- GPU: ABI
+
+_SIZEOF_PROBE = '''
+extern "C" __global__ void woof_gfdleta_sizeof(unsigned long long *o) {
+ o[0] = sizeof(GDTable); o[1] = sizeof(GDScratch); o[2] = WOOF_STATE_SIZE; }
+'''
+
+
+@gpu
+@pytest.mark.parametrize("maxl", [SHIPPED, DEEP])
+def test_the_layouts_are_the_compiled_struct_sizes(maxl):
+    """Host buffers are sized from the layout JSONs and the kernels index
+    them by sizeof; the two agree exactly on this backend at both tiers."""
+    import cupy as cp
+    from woof.core import gfdleta_levels as lv
+    from woof.core import kernels
+    init, column = lv.init_layout(maxl), lv.column_layout(maxl)
+    expected = {
+        lv.co2_init_module(maxl): (init['table_bytes'], init['scratch_bytes'], init['state_bytes'],
+                                   'sizeof(GDInitState)'),
+        lv.column_module(maxl): (init['table_bytes'], column['scratch_bytes'], 0, '0'),
+    }
+    for module, (table, scratch, state, state_size) in expected.items():
+        source = (kernels.module_source(module)
+                  + _SIZEOF_PROBE.replace('WOOF_STATE_SIZE', state_size))
+        unit = cp.RawModule(code=source, options=tuple(kernels.module_options(module)))
+        out = cp.zeros(3, dtype=cp.uint64)
+        unit.get_function('woof_gfdleta_sizeof')((1,), (1,), (out,))
+        assert [int(v) for v in cp.asnumpy(out)] == [table, scratch, state], module
+
+
+@gpu
+def test_a_reused_adapter_refuses_another_layer_count():
+    from types import SimpleNamespace
+    from woof.core.gfdleta import GFDLEtaRadiation, _tier
+    radiation = GFDLEtaRadiation(datetime(2001, 3, 21, 12), np.zeros((2, 2)), np.zeros((2, 2)))
+    radiation.tables = SimpleNamespace(n=60, tier=_tier(SHIPPED))
+    with pytest.raises(ValueError, match="built for 60 layers; this grid has 70"):
+        radiation(atmosphere={'temperature': np.zeros((70, 2, 2), np.float32)},
+                  fields={}, state=None, cfg=None)
 
 
 # --------------------------------------------------------------------------- GPU: identity

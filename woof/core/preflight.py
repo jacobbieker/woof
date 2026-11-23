@@ -4459,10 +4459,11 @@ def _radiation_kernel_modules(run, grid_id: int) -> frozenset[str]:
         elif value == 99:
             # Above 81 layers the column and CO2 units are the 256-layer
             # storage tier (woof/core/gfdleta_levels.py).
-            from woof.core.gfdleta_levels import maxl_tier, suffix
-            tier = suffix(maxl_tier(run.nz))
-            modules.update(m + tier if m in ("gfdleta_column", "gfdleta_co2_init") else m
-                           for m in _RADIATION_KERNEL_MODULES[value])
+            from woof.core import gfdleta_levels as levels
+            maxl = levels.maxl_tier(run.nz)
+            tiered = {levels.column_module(levels.SHIPPED_MAXL): levels.column_module(maxl),
+                      levels.co2_init_module(levels.SHIPPED_MAXL): levels.co2_init_module(maxl)}
+            modules.update(tiered.get(m, m) for m in _RADIATION_KERNEL_MODULES[value])
         else:
             modules.update(_RADIATION_KERNEL_MODULES[value])
     return frozenset(modules)

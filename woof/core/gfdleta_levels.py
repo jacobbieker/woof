@@ -16,6 +16,7 @@ and layouts; the climatology stays on its 81 levels at both tiers.
 
 from __future__ import annotations
 
+import functools
 import json
 from pathlib import Path
 
@@ -38,9 +39,11 @@ def maxl_tier(nz: int) -> int:
         return SHIPPED_MAXL
     if nz <= DEEP_MAXL:
         return DEEP_MAXL
-    raise ValueError(
-        f"GFDL Eta radiation holds at most {DEEP_MAXL} layers per column; "
-        f"this domain has {nz}")
+    from woof.config import ConfigurationRefused
+    raise ConfigurationRefused(
+        f"GFDL Eta radiation (ra_lw_physics/ra_sw_physics = 99) holds at most "
+        f"{DEEP_MAXL} layers per column, its deepest storage tier; this domain "
+        f"has {nz}. Use at most {DEEP_MAXL} levels or another radiation scheme")
 
 
 def _check(maxl: int) -> int:
@@ -61,10 +64,13 @@ def co2_init_module(maxl: int) -> str:
     return "gfdleta_co2_init" + suffix(maxl)
 
 
+# Parsed once per tier; callers treat the layouts as read-only.
+@functools.lru_cache(maxsize=None)
 def column_layout(maxl: int) -> dict:
     return json.loads((_ROOT / f"gfdleta_column_layout{suffix(maxl)}.json").read_text())
 
 
+@functools.lru_cache(maxsize=None)
 def init_layout(maxl: int) -> dict:
     return json.loads((_ROOT / f"gfdleta_init_layout{suffix(maxl)}.json").read_text())
 
@@ -72,10 +78,16 @@ def init_layout(maxl: int) -> dict:
 def column_slots(ncol: int, column_chunk: int, maxl: int) -> int:
     """Concurrent column slots of one pooled launch.
 
-    ``column_chunk`` is the run's workspace lever at both tiers: a deep slot
-    holds 1.30 MB against 234 KB, and preflight prices ``slots x slot``, so
-    an over-budget deep run lowers ``column_chunk`` as any other does.
-    Pooled slots are reused in order, so the slot count changes no word.
+    ``column_chunk`` counts shipped-tier slots, so it is a scratch budget:
+    a deep slot holds 1.30 MB against 234 KB, and the deep tier runs as many
+    slots as fit the same bytes (the default 3125 shipped slots, 732 MB, are
+    563 deep slots, not 4.1 GB).  Preflight prices ``slots x slot``; an
+    over-budget run lowers ``column_chunk`` at either tier.  Pooled slots are
+    reused in order, so the slot count changes no word.
     """
-    _check(maxl)
-    return max(1, min(int(ncol), int(column_chunk)))
+    maxl = _check(maxl)
+    budget = int(column_chunk)
+    if maxl != SHIPPED_MAXL:
+        budget = (budget * column_layout(SHIPPED_MAXL)["scratch_bytes"]
+                  // column_layout(maxl)["scratch_bytes"])
+    return max(1, min(int(ncol), budget))

@@ -56,14 +56,24 @@ def tidy(path):
 
 
 def struct_bytes(text, name):
+    """sizeof of an f2c struct: every array dimension, field alignment and
+    tail padding (tests/test_gfdleta_256_levels.py checks it against the
+    compiled sizeof on the device)."""
     body = re.search(r'typedef struct \{([^{}]*)\} ' + name + ';', text)[1]
-    total = 0
-    for kind, field in re.findall(r'(real|integer|doublereal|logical)\s+([^;]+);', body):
-        width = 8 if kind == 'doublereal' else 4
-        for entity in field.split(','):
-            m = re.search(r'\[\s*(\d+)\s*\]', entity)
-            total = (total + width - 1) // width * width + width * (int(m[1]) if m else 1)
-    return total
+    widths = {'real': 4, 'integer': 4, 'logical': 4, 'doublereal': 8}
+    total = align = 0
+    for statement in filter(None, (s.strip() for s in body.split(';'))):
+        kind, _, fields = statement.partition(' ')
+        if kind not in widths:
+            raise SystemExit(f'{name}: unsized field {statement!r}')
+        width = widths[kind]
+        align = max(align, width)
+        for entity in fields.split(','):
+            count = 1
+            for dim in re.findall(r'\[\s*(\d+)\s*\]', entity):
+                count *= int(dim)
+            total = (total + width - 1) // width * width + width * count
+    return (total + align - 1) // align * align
 
 
 def co2_launch_unit(text):

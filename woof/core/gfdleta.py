@@ -153,7 +153,11 @@ class GFDLEtaRadiation:
         if self.tables is None:
             self.tables=GFDLTables(state.znw,state.znu,float(state.p_top),co2tf=self.co2tf,start_time=self.start_time,maxl=self.maxl)
         tier=self.tables.tier;layout=tier.layout
-        if nz>tier.maxl:raise ValueError(f'{nz} layers exceed GFDL Eta storage tier {tier.maxl}')
+        # The CO2, ozone and storage tables are the first call's grid's; a
+        # reused adapter on another layer count would run on wrong tables.
+        if nz!=self.tables.n:
+            raise ValueError(f'GFDL Eta tables were built for {self.tables.n} layers; this grid has {nz}. '
+                             'Construct a new GFDLEtaRadiation for each vertical grid')
         ncol=ny*nx
         f=cp.zeros((ncol,layout['float_count']),cp.float32)
         ints=cp.zeros((ncol,layout['int_count']),cp.int32)
