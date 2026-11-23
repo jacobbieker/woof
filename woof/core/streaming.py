@@ -5286,7 +5286,7 @@ def _twin_gfdleta(scheme, cls, lat, lon):
                _tile_geography_like(lon, scheme.longitude_deg),
                p_top=scheme.p_top, co2tf=scheme.co2tf,
                longwave=scheme.longwave, shortwave=scheme.shortwave,
-               column_chunk=scheme.column_chunk)
+               column_chunk=scheme.column_chunk, maxl=scheme.maxl)
 
 
 def _twin_cam3(scheme, cls, lat, lon):
@@ -5349,7 +5349,7 @@ _TWIN_RECIPES = {
         build=_twin_gfdleta,
         reproduces=frozenset({"start_time", "latitude_deg", "longitude_deg",
                               "p_top", "co2tf", "longwave", "shortwave",
-                              "column_chunk"}),
+                              "column_chunk", "maxl"}),
         volatile=frozenset({"update_count"}),
     ),
     "woof.core.radiation_composition:NewtonianRelaxationRadiation": _TwinRecipe(

@@ -230,24 +230,32 @@ def test_the_deep_tier_reproduces_every_initialization_word(n, co2tf):
 @gpu
 @pytest.mark.parametrize("n", [12, 24, 42, 60])
 def test_the_deep_tier_reproduces_every_wrf_column_word(n):
+    """Every real word the deep unit writes equals the shipped unit's on this
+    backend and numerics; in strict numerics both are also WRF's words."""
     from woof.core import gfdleta_levels as lv
+    from woof.numerics import is_strict
     a, b = lv.column_layout(SHIPPED), lv.column_layout(DEEP)
     with np.load(FIX / f'columns-{n}.npz') as z:
         fixture = {k: z[k] for k in z.files}
     floats, ints, table = _deep_from_shipped(fixture)
     got = _run_columns('gfdleta_column_l256', table, floats, ints, b['scratch_bytes'])
-    # Map each shipped-ABI reference index to the same field and level.
-    starts = {x['name']: (x['offset'], y['offset']) for x, y in zip(a['fields'], b['fields'])
-              if x['kind'] == 'real'}
-    index = np.empty_like(fixture['indices'])
-    for k, ix in enumerate(fixture['indices']):
-        name = next(nm for nm, (sa, _) in starts.items()
-                    if sa <= ix < sa + next(x['count'] for x in a['fields'] if x['name'] == nm))
-        index[k] = starts[name][1] + (ix - starts[name][0])
-    words = got[fixture['columns'], index]
-    bad = np.flatnonzero(words != fixture['reference'])
-    assert not len(bad), [(str(fixture['fields'][k]), int(fixture['columns'][k]) + 1,
-                           f'{words[k]:08X}', f'{fixture["reference"][k]:08X}') for k in bad[:12]]
+    ref = _run_columns('gfdleta_column', fixture['table'],
+                       fixture['floats'].view(np.float32).reshape(NCOL, -1),
+                       fixture['integers'].reshape(NCOL, -1), a['scratch_bytes'])
+    # Map each shipped-ABI real word to the same field and level in the deep ABI.
+    deep_index = np.full(a['float_count'], -1, np.int64)
+    for x, y in zip(a['fields'], b['fields']):
+        if x['kind'] == 'real':
+            deep_index[x['offset']:x['offset'] + x['count']] = y['offset'] + np.arange(x['count'])
+    real = np.flatnonzero(deep_index >= 0)
+    differ = np.argwhere(got[:, deep_index[real]] != ref[:, real])
+    assert not len(differ), [(int(c) + 1, int(real[k]), f'{got[c, deep_index[real[k]]]:08X}',
+                              f'{ref[c, real[k]]:08X}') for c, k in differ[:12]]
+    if is_strict():
+        words = got[fixture['columns'], deep_index[fixture['indices']]]
+        bad = np.flatnonzero(words != fixture['reference'])
+        assert not len(bad), [(str(fixture['fields'][k]), int(fixture['columns'][k]) + 1,
+                               f'{words[k]:08X}', f'{fixture["reference"][k]:08X}') for k in bad[:12]]
 
 
 # --------------------------------------------------------------------------- GPU: 256 layers
