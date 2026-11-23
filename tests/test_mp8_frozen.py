@@ -243,13 +243,24 @@ FROZEN_COMMIT_ORIGINAL = "789f61181fb0b198ace10775f3ea184eb5e786a3"
 #: rain-graupel footprint (74 prr_rcg, 80 pnr_rcg, 74 prg_rcg, 55 png_rcg,
 #: 7 prw_vcd cells, one final qg); on sm_89 only the six reading kernels'
 #: SASS moved.  Previously 1ab8d031/b3bbf88b (428981 chars).
+#: RE-FROZEN 2026-11-23 (quirk pass, correct-mode FQ5,
+#: thompson_rain_snow_closure): three #ifdef THOMPSON_RAIN_SNOW_CLOSURE
+#: blocks set the cold rain-snow graupel gain to what rain and snow lose
+#: after their limiters.  Without the define (exact mode) the file is
+#: byte-identical to the previous freeze: tests/test_thompson_rain_snow_
+#: closure.py strips the blocks and pins cad801b7 (and the same for every
+#: other Thompson unit); with it, a 260-263 K column holding snow and a
+#: trace of rain no longer makes 3.5 times its rain as graupel (that file's
+#: device test; docs/public/PHYSICS.md "Correction:
+#: thompson_rain_snow_closure").  Previously cad801b7/90c66834 (428431
+#: chars).
 THOMPSON_CU_SHA256 = (
-    'cad801b72ab59d54c28e7903b125cbced4d8ae7211e1ff28427ffaee0dcd9b43')
+    '499b6be690e579ed02b2a2910dff3d3319aadac470bb84285c869bfc7cb870c5')
 #: sha256 of ``_preamble() + thompson.cu`` -- the exact string nvrtc sees.
 #: THIS is the mp=8 numerics guarantee.
 THOMPSON_COMPILED_SOURCE_SHA256 = (
-    '90c66834a098ecddb0b4b6aa6bb8a9a92e6545c14a9e580bc1e70acafce10904')
-THOMPSON_COMPILED_SOURCE_LEN = 428431
+    'd85d117fc3d23fb926aae7de889daca6e21c608a7c229db5322f1a91606a33b9')
+THOMPSON_COMPILED_SOURCE_LEN = 429660
 
 COMMON_CUH_SHA256 = (
     "c78b17cb02ef67a2ad24d19e06e1129d7d5bcda74b972b38470fd33a6e58ff43")
@@ -295,8 +306,12 @@ CUDA_DEFINES_PIN = {
 #: RE-PINNED for WOOF 1.0.0: the rename rewrote the package name on 10
 #: import lines of woof/core/thompson.py and nothing else, so no launcher and no
 #: keyword moved.  As the engine froze it: 9d07c169.
+#: RE-FROZEN 2026-11-23 (FQ5, thompson_rain_snow_closure): the two source
+#: network launchers take rain_snow_closure and compile the define through
+#: _closure_kernel; rain_snow_closure_due reads the key.  __all__ is
+#: unchanged; without the key no launch moved.  Previously 3f621940.
 THOMPSON_PY_SHA256 = (
-    '3f621940db75e793bc1752e804cb0ab72158cb0d4887fa42b966a81cc9cbcdb3')
+    '991843297d4a381ba76d49eb4f730e21e72730920066c6af00883f719e0ff947')
 
 #: ``woof/core/thompson.py::__all__`` verbatim, in declaration order.
 #: mp=28 launchers live in the new ``thompson_aerosol_*.py`` modules; not
@@ -387,7 +402,9 @@ THOMPSON_PY_ALL = (
 #: later sites and the six one-slab reads removed lines below them; counts
 #: 14 / 7 / 3 / 3 and no site edited.
 # Qualified column dispatch added lines; literal values/counts are unchanged.
-THOMPSON_CU_LITERAL_SITES = {'100.0e6f': [416, 1136, 1265, 2572, 3446, 3513, 3762, 4437, 4717, 4840, 4972, 5392, 7658, 9643], '2730.0f': [416, 1136, 1265, 4717, 4840, 5392, 9643], '272.0f': [1142, 1273, 9651], 'cloud_number_bin = 65': [4645, 5058, 7740]}
+#: RE-FROZEN 2026-11-23: FQ5's three #ifdef blocks add lines above later
+#: sites; counts 14 / 7 / 3 / 3 and no site edited.
+THOMPSON_CU_LITERAL_SITES = {'100.0e6f': [416, 1136, 1265, 2572, 3446, 3513, 3762, 4447, 4727, 4850, 4982, 5402, 7677, 9671], '2730.0f': [416, 1136, 1265, 4727, 4850, 5402, 9671], '272.0f': [1142, 1273, 9679], 'cloud_number_bin = 65': [4655, 5068, 7759]}
 
 #: Every ``.cu`` translation unit present at the frozen commit, as
 #: ``name -> (file sha256, assembled-compile-string sha256)``.  Modules
@@ -2176,8 +2193,10 @@ FROZEN_MODULE_DIGESTS = {
         # RE-FROZEN 2026-10-08 for the one-slab rain-graupel reads
         # (thompson_racg_index); see THOMPSON_CU_SHA256 for the reading.
         # Previously 1ab8d031/b3bbf88b.
-        'cad801b72ab59d54c28e7903b125cbced4d8ae7211e1ff28427ffaee0dcd9b43',
-        '90c66834a098ecddb0b4b6aa6bb8a9a92e6545c14a9e580bc1e70acafce10904'),
+        # RE-FROZEN 2026-11-23 for FQ5 (thompson_rain_snow_closure), the
+        # reading at THOMPSON_CU_SHA256.
+        '499b6be690e579ed02b2a2910dff3d3319aadac470bb84285c869bfc7cb870c5',
+        'd85d117fc3d23fb926aae7de889daca6e21c608a7c229db5322f1a91606a33b9'),
     'uh_diag': (
         'cbfc98e8d025a4511fd7f8a41ca4bd163c261da4a48dec22bb979ec5a496b14e',
         '9dc88c6e14b2aaaa4249a9f844dc231f105431623375c988a2894e322de2f3ea'),
@@ -2734,6 +2753,11 @@ ADAPTER_CALLS_NO_REFL = (
             'scratch[mp_thompson_graupel_number_shadow]',
         'qc':
             'state.qc',
+        # RE-PINNED for the Thompson rain-snow closure (FQ5): both source
+        # networks take RunConfig.thompson_rain_snow_closure (False here:
+        # the recording cfg selects no scheme); see THOMPSON_CU_SHA256.
+        'rain_snow_closure':
+            'False',
         'snow_velocity_boost':
             'scratch[mp_thompson_snow_velocity_boost]',
     }),
@@ -2751,7 +2775,10 @@ ADAPTER_CALLS_NO_REFL = (
         'state.qv',
         '<classic-table-owner>',
         '10.0',
-     ), {}),
+     ), {
+        'rain_snow_closure':
+            'False',
+    }),
     ('launch_adapter_masks', (
         'state.qr',
         'state.qg',
@@ -3022,6 +3049,11 @@ ADAPTER_CALLS_WITH_REFL = (
             'scratch[mp_thompson_graupel_number_shadow]',
         'qc':
             'state.qc',
+        # RE-PINNED for the Thompson rain-snow closure (FQ5): both source
+        # networks take RunConfig.thompson_rain_snow_closure (False here:
+        # the recording cfg selects no scheme); see THOMPSON_CU_SHA256.
+        'rain_snow_closure':
+            'False',
         'snow_velocity_boost':
             'scratch[mp_thompson_snow_velocity_boost]',
     }),
@@ -3039,7 +3071,10 @@ ADAPTER_CALLS_WITH_REFL = (
         'state.qv',
         '<classic-table-owner>',
         '10.0',
-     ), {}),
+     ), {
+        'rain_snow_closure':
+            'False',
+    }),
     ('launch_adapter_masks', (
         'state.qr',
         'state.qg',

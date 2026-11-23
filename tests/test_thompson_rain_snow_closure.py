@@ -133,16 +133,17 @@ def test_thompson_py_compiles_the_define_only_when_asked(monkeypatch, closure):
 # --- the device: the corrected exchange makes no water --------------------
 
 def _cold_column(cp, closure: bool):
-    """One cold (263 K) level holding snow and a trace of rain, so the rain
-    limiter binds in rain-snow collection; returns the fields after one
-    default-Thompson call."""
+    """A cold (260-263 K) column holding snow and a trace of rain, so the
+    rain limiter binds in rain-snow collection; returns the fields after
+    one default-Thompson call.  WRF's arithmetic makes 3.5 times the rain
+    there as graupel; the corrected exchange makes none."""
     from woof.core import constants
     from woof.core.grid import make_base_state, make_vertical_coord
     from woof.core.physics import initialize_physics
     from woof.core.state import init_theta_perturbation
 
     cfg = RunConfig(nx=16, ny=12, nz=4, dx=1000., dy=1000., ztop=4000.,
-                    dt=10., run_seconds=20., time_step_sound=4,
+                    dt=60., run_seconds=120., time_step_sound=4,
                     moist=True, mp_physics=8, **{KEY: closure})
     coord = make_vertical_coord(cfg.nz)
     base = make_base_state(coord, lambda z: np.full_like(z, 300.),
@@ -159,7 +160,7 @@ def _cold_column(cp, closure: bool):
     state.w.fill(0.)
     z = np.arange(cfg.nz + 1, dtype=np.float32) * np.float32(1000.)
     state.phb[...] = cp.asarray(z * np.float32(constants.G)).reshape(state.phb.shape)
-    values = {"qv": 1.0e-3, "qc": 0.0, "qr": 2.0e-6, "qi": 0.0, "qs": 2.0e-3,
+    values = {"qv": 1.0e-3, "qc": 0.0, "qr": 1.0e-5, "qi": 0.0, "qs": 5.0e-3,
               "qg": 0.0, "nr": 2.0e3, "ni": 0.0}
     for name, value in values.items():
         getattr(state, name)[...] = np.float32(value)
