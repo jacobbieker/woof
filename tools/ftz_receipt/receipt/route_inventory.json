@@ -1504,7 +1504,7 @@
     },
     {
       "file": "tests/test_cu_kfcup_mskf_256_levels_gpu.py",
-      "line": 202,
+      "line": 221,
       "column": 10,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -1520,7 +1520,7 @@
     },
     {
       "file": "tests/test_cu_kfcup_mskf_256_levels_gpu.py",
-      "line": 224,
+      "line": 243,
       "column": 10,
       "surface": "tests",
       "constructor": "cp.RawModule",

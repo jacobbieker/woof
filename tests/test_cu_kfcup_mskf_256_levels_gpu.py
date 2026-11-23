@@ -10,12 +10,12 @@ guard only.  Three claims:
    stretched in index space, layer depths rescaled so the column keeps its
    height) runs through the shipped launcher, is finite and non-trivial, and
    the column water budget closes.
-2. Nothing moved at the existing level counts: at nz = 49 the fixture words
-   still equal WRF's, and for MSKF the shipped kernel at nz in {49, 160}
-   equals the same source with the old ``#define MSKF_KMAX 160`` as raw bits
-   (and the old image refuses 256 with status bit 64).  KF-CuP has no
-   compile-time ceiling at all, so its identity arm is the WRF oracle grade
-   at the fixture's own nz.
+2. Nothing moved at the existing level counts: for MSKF the shipped kernel
+   at nz in {49, 160} equals the same source with the old
+   ``#define MSKF_KMAX 160`` as raw bits on a column that triggers (and the
+   old image refuses 256 with status bit 64).  KF-CuP has no compile-time
+   ceiling and its kernel source is unchanged, so its identity arm is the
+   existing WRF word grade in tests/test_kfcup_runtime.py (strict mode).
 3. Optional CUDA-vs-Metal agreement: with ``WOOF_CU256_XBACKEND_DIR`` set each
    backend's 256-level outputs are written there and compared when the other
    backend's file is present.
@@ -23,6 +23,7 @@ guard only.  Three claims:
 
 from __future__ import annotations
 
+import functools
 import os
 import sys
 
@@ -32,6 +33,9 @@ import pytest
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+
+from woof.core.kfcup_contract import (KFCUP_HELD_INTS, KFCUP_HELD_SCALARS,
+                                      KFCUP_LEVEL_INPUTS)
 
 pytestmark = pytest.mark.gpu
 
@@ -45,7 +49,6 @@ def _stretch(a, n, axis=0):
     a = np.asarray(a, np.float64)
     m = a.shape[axis]
     x = np.linspace(0.0, m - 1.0, n)
-    out = np.empty(a.shape[:axis] + (n,) + a.shape[axis + 1:])
     moved = np.moveaxis(a, axis, 0)
     flat = moved.reshape(m, -1)
     res = np.stack([np.interp(x, np.arange(m), flat[:, i])
@@ -157,33 +160,48 @@ def test_mskf_contract_and_message_agree():
     assert f"#define MSKF_KMAX {DEEP}\n" in src
 
 
+def _convected(out):
+    """Whether this call wrote a heating tendency: not the untouched fill
+    (a held column returns before writing) and not the no-feedback zeros
+    (cu_act is set for every column that is not held, triggered or not)."""
+    from woof.verify.mskf_oracle import SENTINEL
+    h = out["rthcuten"]
+    return bool(np.any((h != SENTINEL) & (h != 0)))
+
+
+@functools.lru_cache(maxsize=None)
 def _mskf_triggering_rank():
-    """The first fixture case whose column triggers (cu_act) at the
-    fixture's own nz.  The two strongest-heating cases carry their
-    tendencies from an earlier trigger (NCA still running) and do not
-    trigger on this call at any level count, so they cannot show that a
-    256-level column convects."""
+    """The first fixture case that convects at the fixture's own nz.  The
+    two strongest-heating cases carry their tendencies from an earlier
+    trigger (NCA still running) and return before writing, so they cannot
+    show that a column convects."""
     from woof.verify.mskf_oracle import load_fixture
     nz = load_fixture().nz
     for rank in range(8):
         _, out = _mskf_run(nz, rank=rank)
-        if out["cu_act"].sum() > 0:
+        if _convected(out):
             return rank
-    pytest.fail("no MSKF fixture case triggers at the fixture's nz")
+    pytest.fail("no MSKF fixture case convects at the fixture's nz")
 
 
 def test_mskf_runs_a_256_level_column():
-    status, out = _mskf_run(DEEP, rank=_mskf_triggering_rank())
+    from woof.verify.mskf_oracle import case_columns
+    rank = _mskf_triggering_rank()
+    status, out = _mskf_run(DEEP, rank=rank)
     assert status == 0
     _finite(out)
-    assert out["cu_act"].sum() > 0
-    assert np.any(out["rthcuten"] != 0) and np.any(out["rqvcuten"] != 0)
-    # column water: sum(rho dz (dqv + dqc + dqr + dqi + dqs)) + rain == 0
+    assert _convected(out) and np.any(out["rqvcuten"] != 0)
+    # column water: sum(rho dz (dqv + dqc + dqr [+ dqi] [+ dqs])) + rain == 0;
+    # the kernel writes the ice and snow tendencies only when the phase
+    # carries them, so the others keep their fill and stay out of the sum.
+    fx, c = _mskf_case(rank)
+    ci = case_columns(fx, c)["ints"]
+    q = ["rqvcuten", "rqccuten", "rqrcuten"]
+    q += ["rqicuten"] if ci["f_qi"] else []
+    q += ["rqscuten"] if ci["f_qs"] else []
     rhodz = out["rho"] * out["dz8w"]
-    net = sum((rhodz * out[n]).sum(axis=0) for n in
-              ("rqvcuten", "rqccuten", "rqrcuten", "rqicuten", "rqscuten"))
-    gross = sum((rhodz * np.abs(out[n])).sum(axis=0) for n in
-                ("rqvcuten", "rqccuten", "rqrcuten", "rqicuten", "rqscuten"))
+    net = sum((rhodz * out[n]).sum(axis=0) for n in q)
+    gross = sum((rhodz * np.abs(out[n])).sum(axis=0) for n in q)
     resid = np.abs(net + out["pratec"]).max()
     assert resid <= 1e-4 * max(float(gross.max()), 1e-30), (resid, gross.max())
     _check_xbackend("mskf", out)
@@ -195,7 +213,8 @@ def test_mskf_is_bit_identical_to_the_160_level_kernel(nz, monkeypatch):
     from woof.core.kernels import no_ftz
     import cupy as cp
 
-    shipped_status, shipped = _mskf_run(nz)
+    rank = _mskf_triggering_rank()
+    shipped_status, shipped = _mskf_run(nz, rank=rank)
     source, options = no_ftz.module_recipe_no_ftz("mskf", (("GPUWM_MSKF_NO_AEROSOL", 1),))
     new = f"#define MSKF_KMAX {DEEP}"
     assert source.count(new) == 1
@@ -208,9 +227,9 @@ def test_mskf_is_bit_identical_to_the_160_level_kernel(nz, monkeypatch):
         return old.get_function(symbol)
 
     monkeypatch.setattr(no_ftz, "get_kernel_no_ftz", get_kernel)
-    before_status, before = _mskf_run(nz)
+    before_status, before = _mskf_run(nz, rank=rank)
     assert served and shipped_status == before_status == 0
-    assert np.any(shipped["rthcuten"] != 0)
+    assert _convected(shipped), "the identity column must convect"
     for name in sorted(shipped):
         assert shipped[name].tobytes() == before[name].tobytes(), \
             f"{name} moved: MSKF_KMAX 160 -> 256 at nz={nz}"
@@ -246,11 +265,16 @@ def _cup_run(nz, cfg_index=None, ncol=NCOL):
         c for c in configs() if c.index == cfg_index)
     cap = load_capture(cfg.index)
     b = pack_column_inputs(cap)
+    # Start every column fresh at both level counts: a column still inside
+    # an NCA hold returns its held tendencies (and held cutop/cubot indices on
+    # the fixture's grid) without convecting, which would prove nothing here.
+    for name in ("nca", "cutop", "cubot"):
+        b["held"][KFCUP_HELD_SCALARS.index(name)] = 0
+    b["iheld"][KFCUP_HELD_INTS.index("cupflag")] = 0
     n0 = cap.nz
     if nz != n0:
         lev = _stretch(b["lev_in"], nz, axis=1)
-        names = __import__("woof.core.kf", fromlist=["x"]).KFCUP_LEVEL_INPUTS
-        for i, name in enumerate(names):
+        for i, name in enumerate(KFCUP_LEVEL_INPUTS):
             if name == "dz8w":
                 lev[i] = lev[i] * np.float32(n0 / nz)
         b["lev_in"] = np.ascontiguousarray(lev)
@@ -286,9 +310,8 @@ def _cup_budget(cfg, b, got):
     column's gross tendency for scale.  WRF's KF-CuP sets RAINCV = DT*PRATEC
     with DT the model step (module_cu_kfcup.F; woof.core.kf's driver hands
     back pratec = raincv / dt), so the rate is raincv / dt."""
-    names = __import__("woof.core.kf", fromlist=["x"]).KFCUP_LEVEL_INPUTS
-    rho = b["lev_in"][names.index("rho")].astype(np.float64)
-    dz = b["lev_in"][names.index("dz8w")].astype(np.float64)
+    rho = b["lev_in"][KFCUP_LEVEL_INPUTS.index("rho")].astype(np.float64)
+    dz = b["lev_in"][KFCUP_LEVEL_INPUTS.index("dz8w")].astype(np.float64)
     q = [n for n in ("rqvcuten", "rqccuten", "rqrcuten", "rqicuten", "rqscuten")
          if n in got]
     net = sum((rho * dz * got[n]).sum(axis=0) for n in q)
@@ -307,7 +330,9 @@ def test_kfcup_runs_a_256_level_column():
     for cfg in configs():
         cap, b, got = _cup_run(DEEP, cfg.index)
         _finite(got)
-        if not np.any(got["rthcuten"] != 0):
+        # the seed is one constant word; a convecting column writes others
+        seed = b["lev_out"][0, 0, 0]
+        if not np.any((got["rthcuten"] != 0) & (got["rthcuten"] != seed)):
             continue
         ran += 1
         resid, gross = _cup_budget(cfg, b, got)
@@ -319,25 +344,3 @@ def test_kfcup_runs_a_256_level_column():
         _check_xbackend(f"kfcup{cfg.index}", got)
     assert ran, "no KF-CuP configuration convected on the stretched column"
 
-
-def test_kfcup_fixture_nz_still_equals_wrf():
-    if os.environ.get("GPUWM_WRF_EXACT", "0") != "1":
-        # The WRF word grade is the strict-replay claim, as in
-        # tests/test_kfcup_runtime.py: production numerics differ by rounding.
-        pytest.skip("word-grade proof selects GPUWM_WRF_EXACT=1")
-    from woof.verify.kfcup_oracle import differing_words, expected_outputs
-    # the fixture's own nz, every column, against WRF's words
-    import cupy as cp
-    from woof.core.kf import launch_kfcup_columns
-    from woof.verify.kfcup_oracle import (configs, load_capture,
-                                          pack_column_inputs, unpack_outputs)
-    cfg = configs()[0]
-    cap = load_capture(cfg.index)
-    b = {k: cp.asarray(v) for k, v in pack_column_inputs(cap).items()}
-    launch_kfcup_columns(b, dt=cfg.dt, dx=cfg.dx, ntst=cfg.stepcu,
-                         numbins=cfg.numbins, thbinsize=cfg.thbinsize,
-                         rbinsize=cfg.rbinsize, mindeepfreq=cfg.mindeepfreq,
-                         minshallowfreq=cfg.minshallowfreq, flags=cfg.flags)
-    diff = differing_words(unpack_outputs({k: v.get() for k, v in b.items()}),
-                           expected_outputs(cap))
-    assert not any(diff.values()), diff

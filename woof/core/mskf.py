@@ -70,7 +70,7 @@ MSKF_STATUS_MESSAGES = {
         "(WRF module_cu_mskf.F:5093 stops the model)",
     32: "MSKF: incorrect ice nucleation number on the aerosol path "
         "(WRF module_cu_mskf.F:3228 stops the model)",
-    64: "MSKF requires 8 <= nz <= 256 (the kernel's refusal ceiling)",
+    64: f"MSKF requires {VERTICAL_LEVEL_BOUNDS[0]} <= nz <= {VERTICAL_LEVEL_BOUNDS[1]} (the kernel's refusal ceiling)",
 }
 
 OUTPUT_3D = ("rthcuten", "rqvcuten", "rqccuten", "rqrcuten", "rqicuten",
