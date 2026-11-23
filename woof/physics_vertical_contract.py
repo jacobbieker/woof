@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-KFCUP_VERTICAL_LEVEL_BOUNDS = (8, 128)
+KFCUP_VERTICAL_LEVEL_BOUNDS = (8, 256)
 
 # The two component bounds that are OWNED elsewhere: WSM6's and WDM6's
 # ceilings are the 256-level refusal ceilings their constants modules
@@ -181,7 +181,7 @@ ACM2_VERTICAL_LEVEL_BOUNDS = (4, None)
 #: Every other column array is in a runtime-``nz`` workspace.  The floor is
 #: the kernel's own ``nz >= 8`` refusal.
 KF_VERTICAL_LEVEL_BOUNDS = (8, 256)
-MSKF_VERTICAL_LEVEL_BOUNDS = (8, 160)
+MSKF_VERTICAL_LEVEL_BOUNDS = (8, 256)
 # Grell-Freitas: the inversion-layer search clamps kend to ktf-8 and its
 # second-derivative stencil then reaches ktf-1, so a column shorter than 12
 # levels leaves no search window at all; the certified fixture ran nz=40 and

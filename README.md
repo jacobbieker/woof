@@ -866,6 +866,11 @@ Notes on the 1.1.7 sync:
     admit 256 levels (compile-time 128/256 tier; at 128 levels or fewer
     the unchanged kernel, word for word); their matrix rows still record
     the old 128-level refusal until the 149-level hex case is re-run.
+    KF-CuP and Multiscale Kain-Fritsch now take up to 256 levels (were
+    128 and 160): both keep every column array in a runtime-sized
+    workspace, so the bound was a refusal guard only, and words at the
+    old level counts are unchanged
+    (`tests/test_cu_kfcup_mskf_256_levels_gpu.py`).
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
