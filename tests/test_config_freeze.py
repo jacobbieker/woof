@@ -369,6 +369,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The RRTMG longwave model-top correction (quirk pass, finding FQ6), appended.
+    assert names.pop() == "rrtmg_lw_model_top"
+    assert RunConfig.__dataclass_fields__["rrtmg_lw_model_top"].default is _cm.CORRECT_KEYS_DEFAULT
+    assert RunConfig.__dataclass_fields__["rrtmg_lw_model_top"].kw_only
     # The Thompson rain-snow collection closure (quirk pass, finding FQ5), appended.
     assert names.pop() == "thompson_rain_snow_closure"
     assert RunConfig.__dataclass_fields__["thompson_rain_snow_closure"].default is _cm.CORRECT_KEYS_DEFAULT
@@ -1133,6 +1137,8 @@ def _check_frozen_defaults(actual):
                          ("noah_smc_floor_booking", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the Thompson rain-snow collection closure (FQ5)
                          ("thompson_rain_snow_closure", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the RRTMG longwave model-top correction (FQ6)
+                         ("rrtmg_lw_model_top", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the opt-in resolved obstacles, off
                          *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field

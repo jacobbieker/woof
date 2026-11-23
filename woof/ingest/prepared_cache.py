@@ -571,6 +571,9 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The Thompson rain-snow collection closure (FQ5, mp_physics = 8, 28,
     # 38 only, on in correct mode): step-time; preparation never reads it.
     "run.thompson_rain_snow_closure",
+    # The RRTMG longwave model-top correction (FQ6, the legacy RRTMG longwave
+    # only, on in correct mode): step-time; preparation never reads it.
+    "run.rrtmg_lw_model_top",
     # The opt-in TSI forcing (woof.spacewx), appended off.
     "run.solar_tsi_opt", "run.solar_tsi_source", "run.solar_tsi_mode",
     # The opt-in solar band shares (woof.spacewx), appended off.

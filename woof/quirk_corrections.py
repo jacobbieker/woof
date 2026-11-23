@@ -16,15 +16,16 @@ The rules, the same on every route:
   when set, wins: that is how one correction is turned off in correct
   mode, or on in exact mode.
 * ``woof_quirk_corrections = 'all'`` / ``'none'``: every correction on /
-  off whatever the mode. A key set the other way next to an explicit
-  umbrella is a conflict and is refused by name.
+  off whatever the mode. A key set the other way next to ``'all'`` is a
+  conflict and is refused by name; next to ``'none'`` the key wins (that
+  is how a single correction is run on its own).
 * A correction is read only where its scheme runs (YSU's on a MYNN run,
   the MALI statistics' on a run without them, are inert). Where its
   scheme cannot carry it (YSU's with BEP/BEM, Noah's with a WRF-Hydro
   coupling, the MPAS-Seaice ``ice_velocity_at_cell`` without the
   velocity solver's pools) it stays off; the WRF route's run receipt
   lists such a finding as uncorrected (woof.correct_mode.uncorrected).
-* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ5
+* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ6
   of woof.correct_mode: their defaults are ``CORRECT_KEYS_DEFAULT``,
   exact mode authors them off with every other correct-mode key, and the
   checkpoint echo binds one only where it is on and read.
@@ -109,6 +110,13 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "thompson_rain_snow_closure", "wrf", False, True, "mp_physics = 8, 28 or 38",
         "Thompson's rain-snow collection below 0 C makes graupel from what rain and snow lose after their limiters",
         active=lambda get: int(get("mp_physics")) in (8, 28, 38)),
+    QuirkCorrection(
+        "rrtmg_lw_model_top", "wrf", False, True, "ra_lw_physics = 4, ra_rrtmg_variant = rrtmg_legacy",
+        "WRF's RRTMG longwave keeps the model-top interface and top layer temperatures when it matches the standard profile above the model top",
+        # RTE+RRTMGP is another implementation: nothing to correct
+        active=lambda get: (int(get("ra_physics") if int(get("ra_lw_physics")) == -1
+                                else get("ra_lw_physics")) == 4
+                            and get("ra_rrtmg_variant") == "rrtmg_legacy")),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",

@@ -3556,6 +3556,10 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # which every earlier header ran.
     if values.get("thompson_rain_snow_closure", False) is False:
         values.pop("thompson_rain_snow_closure", None)
+    # The RRTMG longwave model-top correction (FQ6): absent while off, which
+    # every earlier header ran.
+    if values.get("rrtmg_lw_model_top", False) is False:
+        values.pop("rrtmg_lw_model_top", None)
     # The opt-in resolved obstacles (woof.core.obstacles): every key at its
     # default is what every earlier header ran, so each is echoed only when
     # it differs; obstacle_opt = 1 always echoes with its file.
@@ -5849,6 +5853,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'mynn_sfclay_psih_zolzt': False,
     'noah_smc_floor_booking': False,
     'thompson_rain_snow_closure': False,
+    'rrtmg_lw_model_top': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
     'obstacle_solid_fraction': 0.5,
@@ -6503,6 +6508,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "mynn_sfclay_psih_zolzt": False,
                           "noah_smc_floor_booking": False,
                           "thompson_rain_snow_closure": False,
+                          "rrtmg_lw_model_top": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,
                           "obstacle_relax_factor": 10.0,

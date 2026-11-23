@@ -133,6 +133,11 @@ MOVED = {
     "thompson_rain_snow_closure": (
         dict(mp_physics=8),
         {"thompson_rain_snow_closure"}),
+    # Correct-mode FQ6 (on by default): echoed where the legacy RRTMG
+    # longwave runs, whether it is named by ra_lw_physics or the aggregate.
+    "rrtmg_lw_model_top": (
+        dict(ra_lw_physics=4, ra_sw_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
+        {"rrtmg_lw_model_top"}),
     # The gridded urban morphology rides the single-layer UCM.
     "urban_param_file": (dict(sf_surface_physics=2, sf_urban_physics=1,
                               urban_param_file="geo_em.d01.nc"),
@@ -178,12 +183,13 @@ MOVED = {
     "swint_opt": (dict(swint_opt=1), {"swint_opt"}),
     "aer_opt": (dict(aer_opt=3, mp_physics=28, moist=True,
                      ra_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
-                {"aer_opt", "thompson_rain_snow_closure"}),
+                {"aer_opt", "thompson_rain_snow_closure", "rrtmg_lw_model_top"}),
     "rrtmg_aer3_type_source": (
         dict(aer_opt=3, mp_physics=28, moist=True, ra_physics=4,
              ra_rrtmg_variant="rrtmg_legacy",
              rrtmg_aer3_type_source="landmask"),
-        {"aer_opt", "rrtmg_aer3_type_source", "thompson_rain_snow_closure"}),
+        {"aer_opt", "rrtmg_aer3_type_source", "thompson_rain_snow_closure",
+         "rrtmg_lw_model_top"}),
     "alb_sol": (dict(alb_sol=1), {"alb_sol"}),
 }
 
@@ -283,6 +289,9 @@ DEFAULT_OFF = frozenset({
     "mynn_sfclay_psih_zolzt",
     # The opt-in Noah soil-moisture floor booking, absent while off.
     "noah_smc_floor_booking",
+    # The RRTMG longwave model-top correction (FQ6), absent while off or
+    # while the legacy RRTMG longwave does not run.
+    "rrtmg_lw_model_top",
     # WRF v4.8.0 MYNN-SFC roughness keys, absent at their Registry defaults.
     "sf_mynn_sfcflux_land", "sf_mynn_sfcflux_water", "shalwater_z0",
     # The upstream MYNN v6.1 fixes (correct-mode MY1): default on, echoed

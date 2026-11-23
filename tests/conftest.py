@@ -1045,7 +1045,7 @@ def _hydro_door_tools_unprobed_outside_hydro_tests(request, monkeypatch):
 
 #: the MPAS oracle parity, correction and run-door modules (MPAS-Ocean, MPAS-Seaice, MALI): graded word
 #: for word against v8.4.2, so they run in exact mode (DECISIONS 2026-11-22)
-_MPAS_PARITY_MODULE = re.compile(r"(^|\.)test_(mpas_ocean|mpas_seaice|mali)_\w*(parity|corrections|run_door)$")
+_MPAS_PARITY_MODULE = re.compile(r"(^|\.)test_(mpas_ocean|mpas_seaice|mali|e3sm)_\w*(parity|corrections|run_door)$")
 
 
 @pytest.fixture(autouse=True)

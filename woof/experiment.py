@@ -335,6 +335,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The Thompson rain-snow collection closure (FQ5), on the same terms:
     # a [shared] value reaches the mp_physics = 8, 28, 38 domains only.
     "thompson_rain_snow_closure",
+    # The RRTMG longwave model-top correction (FQ6), on the same terms: a
+    # [shared] value reaches the legacy-RRTMG longwave domains only.
+    "rrtmg_lw_model_top",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -4414,6 +4417,18 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             dom.get("mp_physics",
                     shared.get("mp_physics", RunConfig.mp_physics))) in THOMPSON_RAIN_SNOW_MP
         for dom in domain_tables)
+    # The opt-in RRTMG longwave model-top correction is read only by the
+    # legacy RRTMG longwave (ra_lw_physics = 4 or the ra_physics = 4
+    # aggregate, ra_rrtmg_variant = "rrtmg_legacy"), on the same terms.
+    def _runs_rrtmg_lw_legacy(get) -> bool:
+        lw = get("ra_lw_physics", RunConfig.ra_lw_physics)
+        if lw == -1:
+            lw = get("ra_physics", RunConfig.ra_physics)
+        return lw == 4 and get("ra_rrtmg_variant", RunConfig.ra_rrtmg_variant) == "rrtmg_legacy"
+    tree_runs_rrtmg_lw = any(
+        _runs_rrtmg_lw_legacy(lambda name, default, dom=dom: physics_mode.settings.get(
+            name, dom.get(name, shared.get(name, default))))
+        for dom in domain_tables)
     # The same rule for the Grell-family keys.  clos_choice and ishallow
     # are read only where cu_physics = 3, and the wizard writes them in
     # [shared]; on a tree whose cumulus-off child sits under a
@@ -5041,6 +5056,11 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                 and kw.get("mp_physics", RunConfig.mp_physics) not in THOMPSON_RAIN_SNOW_MP
                 and "thompson_rain_snow_closure" not in dom):
             kw["thompson_rain_snow_closure"] = False
+        if (tree_runs_rrtmg_lw
+                and not _runs_rrtmg_lw_legacy(
+                    lambda name, default: kw.get(name, default))
+                and "rrtmg_lw_model_top" not in dom):
+            kw["rrtmg_lw_model_top"] = False
         # an explicit woof_quirk_corrections ('all' / 'none') sets every
         # correction key the domain does not set itself (quirk_corrections).
         from woof.quirk_corrections import apply_run_corrections
@@ -6457,6 +6477,7 @@ def _public_config_value(value):
                                   ("mynn_sfclay_psih_zolzt", False),
                                   ("noah_smc_floor_booking", False),
                                   ("thompson_rain_snow_closure", False),
+                                  ("rrtmg_lw_model_top", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

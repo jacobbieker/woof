@@ -2257,7 +2257,7 @@
     "call_sha256": "bf476cc789b850a447f74b5a8dc1cc9f95da14ced736485acfa844735830b076",
     "constructor": "compile_using_nvrtc",
     "factory": "_gpu_module",
-    "factory_sha256": "ce2de445cf7ebec584fe309a5e6523314254dc3547bd280c81294adb4fe029e2",
+    "factory_sha256": "f0e4a1e0f2252011e7aa00942b6797e9f53978ee15caf1726a3e022e9bbc0bac",
     "file": "woof/core/rrtmg_legacy_device.py",
     "status": "unresolved"
    },
@@ -4309,7 +4309,7 @@
    },
    {
     "file": "woof/core/kernels/rrtmg_legacy_prep.cu",
-    "sha256": "bb6fb8f5194954d6208f66069b3259b02881d2220f22ec4437b66c9544ab7563"
+    "sha256": "7935ca36e19bd18411d6340aec88547687a64e8aa3c76525e80e69694a38bcc8"
    },
    {
     "file": "woof/core/kernels/rrtmg_legacy_solar.cu",
@@ -5875,11 +5875,11 @@
    },
    {
     "file": "woof/core/rrtmg_legacy.py",
-    "sha256": "a930a00cc96087cf20f279611526b7630b29df35f200def2a940aa9e16bb7ab2"
+    "sha256": "faf86bbfa308aa1b4852e7ec15245e39da9b9854654f6619acbebb3dd563259a"
    },
    {
     "file": "woof/core/rrtmg_legacy_device.py",
-    "sha256": "e162dec0f6f1645fb78bcb17154816a74ec2753cfb1ba8e892f9e72a7b0f3c8a"
+    "sha256": "e0dc1490b4430ab4d0abdba1f35bd538710fed9c73530121b6c4981b3126fd4d"
    },
    {
     "file": "woof/core/rrtmg_lw.py",
@@ -11061,13 +11061,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "cb79ab1b474e1a384aca3f0cbcd43d602c5a994f254289f78d3cb35d117ea31a",
+    "sha256": "a2faf069819116304bc93556711ce71f2451bff83aa6ff4dee81fcf66a4abc49",
     "sites": {
      "100": 16
     }
    },
    "native_differences": {
-    "sha256": "27cc11b62718fe6ecc1741025e6a62a3a9d28e8272303c1d43800039a3b2effd",
+    "sha256": "08661a6a6599e8785e94677156654783526ac7a9548de567bce5049b1e336c41",
     "sites": {
      "100": 19
     }
@@ -11089,7 +11089,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "bb6fb8f5194954d6208f66069b3259b02881d2220f22ec4437b66c9544ab7563"
+   "source_sha256": "7935ca36e19bd18411d6340aec88547687a64e8aa3c76525e80e69694a38bcc8"
   },
   "direct:rrtmg_mcica_wrf": {
    "assessment": "static_diagnostic_only",
