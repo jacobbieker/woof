@@ -107,6 +107,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "Noah's 0.02 soil-moisture floor takes the water it adds from the layer below, or RUNOFF3",
         active=lambda get: int(get("sf_surface_physics")) == 2),
     QuirkCorrection(
+        "thompson_rain_snow_closure", "wrf", False, True, "mp_physics = 8, 28 or 38",
+        "Thompson's rain-snow collection below 0 C makes graupel from what rain and snow lose after their limiters",
+        active=lambda get: int(get("mp_physics")) in (8, 28, 38)),
+    QuirkCorrection(
         "rrtmg_lw_model_top", "wrf", False, True, "ra_lw_physics = 4, ra_rrtmg_variant = rrtmg_legacy",
         "WRF's RRTMG longwave keeps the model-top interface and top layer temperatures when it matches the standard profile above the model top",
         # RTE+RRTMGP is another implementation: nothing to correct

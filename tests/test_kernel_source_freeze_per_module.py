@@ -781,8 +781,9 @@ BASELINE_PINNED: dict[str, str] = {
     # 25 oracle CSVs and both-mode state/tendency hashes reproduced at 2f349b417.
     # Integrated 2026-11-01 at 82024a1f6c8b:
     # Native MP38 hail-number/volume arms and ordered arithmetic; batch005 hail GPU and restart checks
+    # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
     "thompson_aerosol_cold":
-        'ac6af93c55763d6fc1b42697ad5b93be447547e931a2010e6ba2ba4ed90d4743',
+        '62371be761d96c91d3788f4d84db6efb190d90245b6c933c5461df8209937e43',
     # 0ebda6608 snapshot(mp28): the recovered aerosol-aware Thompson port, re-parented to it
     "thompson_aerosol_probe":
         'a4db6f915e5393c2a809f40c0b793ccba5e9bba51a672f7d5ea99a04c1a18274',
@@ -961,8 +962,9 @@ BASELINE_PINNED: dict[str, str] = {
     # Hail pin retains E classic scheduling; obsolete one-slab offset removed.
     # Conditional number/volume, density bins, fallout and diagnostics;
     # 25 oracle CSVs and both-mode state/tendency hashes reproduced at 2f349b417.
+    # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
     "thompson_aerosol_warm":
-        'c3e55b92419e88dbeccb77fdceac77f5e0db5497e8bcc4b381c06de0812efe16',
+        '900e26aa8314c8687173078353ef413052c2f888c2638234600bb9c10e70e765',
     # 02cfd5301 feat(les): km_opt=2 restart carrier, lateral-boundary arm, TKE budget
     "tke_budget":
         "c7f6dc37f15b25fccbea50deef0c6d595c08b2ee4762f14eef169b654d54fccb",
@@ -1501,8 +1503,9 @@ BASELINE_PINNED: dict[str, str] = {
     # Previously d13b914a.
     "rrtmgp_gas_default": "66557cb1680e4ee29c86845f408dbf0cf3108ae0e158e830554e5b15b5b2c3ba",
     "rrtmgp_rte_default": "731bd84717398320a1710b2c151a466b9e5bf1a30b633d858fd31d7162dbd173",
-    "thompson_classic": 'efc122d5dcdc19763584ed856dc7800b20621fd1b7dd80defefe82583b6152bd',
-    "thompson_fork": "c7313ce62d863bdeb9478b7a503c8faffae6d17c8a20cbb1b6d458c216e4c947",
+    # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
+    "thompson_classic": '060b73dd839faf37a330bc180dcc2acc429bbd22bd0018a18179512cf7107426',
+    "thompson_fork": "a916ede73fd7cf39ff585b6889e7e90f04338f6c2b097b638d63a09a11cd9ef4",
     # RE-PINNED at the 1.1.0 upstream merge: YSU_KMAX 256 (the fork's ceiling, via the rename of ysu.cu).
     # Previously f56e3ec7.
     "ysu_default": "7192b5b10c683718a9395682bde12a7145c2ca20318047d5a7998b1e87b1fbf2",
@@ -1586,7 +1589,8 @@ PINNED_HEADERS = {
     "../../data/gfs_pbl/gfs_pbl_constants.cuh":
         "a43cc63a6ae846be573e4f550c9a9c40512ced02b8140def12fac08d27dbc9ef",
     # Existing fork radar transcription, reused unchanged by the initial helper.
-    "thompson_fork.cu": "c7313ce62d863bdeb9478b7a503c8faffae6d17c8a20cbb1b6d458c216e4c947",
+    # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
+    "thompson_fork.cu": "a916ede73fd7cf39ff585b6889e7e90f04338f6c2b097b638d63a09a11cd9ef4",
 
     # New Goddard band and sounding tables (lane ra5-goddard), prepended to
     # the goddard unit only (kernels._EXTRA_HEADERS).
@@ -1606,7 +1610,8 @@ PINNED_HEADERS = {
     # if-then brace, so 187 trailing blanks left the regenerated header (the
     # 2.8.9 cut's export whitespace check refused them). Only line-end bytes
     # changed; every statement and table literal is the same.
-    "thompson_column_generated.cuh": "f07dd881fbec30952ba3d17b16012693e4ea689f50dcefde350c0222473fb552",
+    # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
+    "thompson_column_generated.cuh": "739a44fb3c4826ab031a516d4194884b8ca67ca837b8aef1a98d36737da30c2a",
 
     "urban_ucm480_support.cuh": "6b5db2885a7e00d5c8ec65f7e3857efc9cf30c2264c9e5512020373e891089d6",
     "urban_ucm480.cuh": "bcb062c9ad2854e54ae2205ad898f26aa6153a8144729491577a631ebcc5cfaa",

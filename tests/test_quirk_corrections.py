@@ -176,6 +176,7 @@ _WRF_SCHEMES = {
     "ysu_surface_heat_exner": dict(bl_pbl_physics=1, sf_sfclay_physics=1),
     "mynn_sfclay_psih_zolzt": dict(bl_pbl_physics=5, sf_sfclay_physics=5),
     "noah_smc_floor_booking": dict(sf_surface_physics=2, bl_pbl_physics=1, sf_sfclay_physics=1),
+    "thompson_rain_snow_closure": dict(mp_physics=8, moist=True),
     "rrtmg_lw_model_top": dict(ra_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
 }
 

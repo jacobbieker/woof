@@ -568,6 +568,9 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The Noah soil-moisture floor booking (FQ4, sf_surface_physics = 2
     # only, on in correct mode): step-time; preparation never reads it.
     "run.noah_smc_floor_booking",
+    # The Thompson rain-snow collection closure (FQ5, mp_physics = 8, 28,
+    # 38 only, on in correct mode): step-time; preparation never reads it.
+    "run.thompson_rain_snow_closure",
     # The RRTMG longwave model-top correction (FQ6, the legacy RRTMG longwave
     # only, on in correct mode): step-time; preparation never reads it.
     "run.rrtmg_lw_model_top",

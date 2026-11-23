@@ -28,11 +28,11 @@ from woof import correct_mode
 from woof.config import RunConfig, validate_run_config
 
 ROOT = Path(__file__).resolve().parents[1]
-#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ4 and FQ6
-_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ6")
+#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ6
+_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6")
 _FQ_KEYS = ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner",
             "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking",
-            "rrtmg_lw_model_top")
+            "thompson_rain_snow_closure", "rrtmg_lw_model_top")
 
 # -------------------------------------------------------------- the switch --
 def test_exact_mode_authors_every_key_off():
@@ -252,10 +252,12 @@ def test_run_receipt_says_which_corrections_reached_the_run():
     cases = (
         ({"mp_physics": 6}, ["WB5"], ["wsm6_conservative_surface"]),
         ({"mp_physics": 16}, ["WB5"], ["wdm6_conservative_surface"]),
-        ({"mp_physics": 8}, ["WB1", "HN1"], ["thompson_cloud_surface_booking",
-                                             "hydrometeor_handover_numbers"]),
-        ({"mp_physics": 28}, ["WB1", "HN1"], ["thompson_cloud_surface_booking",
-                                              "hydrometeor_handover_numbers"]),
+        ({"mp_physics": 8}, ["WB1", "HN1", "FQ5"], ["thompson_cloud_surface_booking",
+                                             "hydrometeor_handover_numbers",
+                                             "thompson_rain_snow_closure"]),
+        ({"mp_physics": 28}, ["WB1", "HN1", "FQ5"], ["thompson_cloud_surface_booking",
+                                              "hydrometeor_handover_numbers",
+                                              "thompson_rain_snow_closure"]),
         ({"mp_physics": 3}, ["WB5"], ["wsm3_conservative_surface"]),
         ({"mp_physics": 4}, ["WB5"], ["wsm5_conservative_surface"]),
         ({"mp_physics": 24}, ["WB5"], ["wsm7_conservative_surface"]),
@@ -374,12 +376,14 @@ def test_wb1_is_output_only_and_moves_no_thompson_identity():
                                   _require_config_match, configuration_echo)
     assert set(correct_mode.OUTPUT_ONLY_KEYS) <= CONFIG_DIAGNOSTIC_FIELDS
     thompson = RunConfig(**{**_TINY, "mp_physics": 8})
-    # Every key off but HN1 (a trajectory key, which binds; its own test
-    # is above): WB1 alone flips between the two.
+    # Every key off but HN1 and FQ5 (trajectory keys, which bind; their
+    # own tests are elsewhere): WB1 alone flips between the two.
     exact = RunConfig(**{**_TINY, "mp_physics": 8},
                       **{**correct_mode.resolve("exact").settings,
                          "hydrometeor_handover_numbers":
-                             thompson.hydrometeor_handover_numbers})
+                             thompson.hydrometeor_handover_numbers,
+                         "thompson_rain_snow_closure":
+                             thompson.thompson_rain_snow_closure})
     assert configuration_echo(thompson) == configuration_echo(exact)
     assert (_configuration_digest_values(dataclasses.asdict(thompson))
             == _configuration_digest_values(dataclasses.asdict(exact)))

@@ -2936,7 +2936,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3320,
+      "line": 3367,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -7882,7 +7882,7 @@
     },
     {
       "file": "woof/core/microphysics.py",
-      "line": 1847,
+      "line": 1852,
       "column": 21,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7898,7 +7898,7 @@
     },
     {
       "file": "woof/core/microphysics.py",
-      "line": 1851,
+      "line": 1856,
       "column": 21,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -9126,7 +9126,7 @@
     },
     {
       "file": "woof/core/thompson_aerosol_launch.py",
-      "line": 136,
+      "line": 167,
       "column": 19,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -9142,7 +9142,7 @@
     },
     {
       "file": "woof/core/thompson_fork.py",
-      "line": 109,
+      "line": 117,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",

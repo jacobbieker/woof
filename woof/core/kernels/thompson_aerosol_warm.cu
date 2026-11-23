@@ -1134,6 +1134,20 @@ __device__ __forceinline__ void thompson_aa_warm_level_wrf461(
     thompson_aa_wrf_frozen_block(&L, dt, odts, T);
     // HOST READBACK ANCHOR: the warm level's frozen block is complete.
     thompson_aa_wrf_conserve(&L, odts);
+#ifdef THOMPSON_RAIN_SNOW_CLOSURE
+    // RunConfig.thompson_rain_snow_closure (FQ5): WRF re-pairs the
+    // rain-snow transfer only where twet > T_0 (:2946-2950).  Below it the
+    // graupel gain keeps its pre-limiter value while the rain and snow
+    // limiters shrink the losses; the gain becomes what they lose, floored
+    // at zero (snow then takes only what rain lost).
+    if (L.twet < AAF_T0) {
+        L.prg_rcs = -(L.prr_rcs + L.prs_rcs);
+        if (L.prg_rcs < 0.0) {
+            L.prs_rcs = -L.prr_rcs;
+            L.prg_rcs = 0.0;
+        }
+    }
+#endif
     // HOST READBACK ANCHOR: every warm-level rate final.
 
     // The two held branch decisions the fallout reads.
@@ -2059,6 +2073,26 @@ extern "C" __global__ void thompson_aa_warm_source_network(
         thompson_aa_reenforce_pair(&rain_snow_rain_rate,
                                    &rain_snow_snow_rate);
     }
+#ifdef THOMPSON_RAIN_SNOW_CLOSURE
+    // RunConfig.thompson_rain_snow_closure (FQ5): the hail-aware / WRF 3.9
+    // source network re-pairs the rain-snow transfer only above 0 C, so
+    // below it the graupel gain (and its volume pbg_rcs, derived from it
+    // below) keeps its pre-limiter value while the rain and snow limiters
+    // shrink the losses.  The gain becomes what they lose, floored at zero
+    // (snow then takes only what rain lost).
+#if defined(THOMPSON_AA_WRF39)
+    if (temp0 < 273.15f) {
+#else
+    if (wet_bulb < 273.15f) {
+#endif
+        rain_snow_graupel_rate =
+            -(rain_snow_rain_rate + rain_snow_snow_rate);
+        if (rain_snow_graupel_rate < 0.0) {
+            rain_snow_snow_rate = -rain_snow_rain_rate;
+            rain_snow_graupel_rate = 0.0;
+        }
+    }
+#endif
 
 
     // Preserve WRF's two independent post-conservation branch decisions.

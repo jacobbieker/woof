@@ -61,12 +61,14 @@ def test_off_radiation_options_keep_complete_public_document_bytes():
                       # and written while on; the recorded documents predate it.
                       hydrometeor_handover_numbers=False,
                       # Correct-mode FQ6 is read under this legacy RRTMG
-                      # longwave and written while on; the same.
-                      rrtmg_lw_model_top=False)
+                      # longwave and FQ5 under this Thompson; the same.
+                      rrtmg_lw_model_top=False,
+                      thompson_rain_snow_closure=False)
     on = domain_config_document(
         _experiment(terrain_clock="measured", solar_generation="wrf_461").root)["run"]
     assert "hydrometeor_handover_numbers" in on
     assert on["rrtmg_lw_model_top"] is True
+    assert on["thompson_rain_snow_closure"] is True
     # These bytes came from the exact staging serializers with their real
     # 220-field RunConfig, before the three neutral radiation fields existed.
     # A synthetic dataclass skips earlier RunConfig-specific omission rules.
