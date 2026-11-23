@@ -345,3 +345,20 @@ def test_a_256_layer_column_in_the_running_numerics_is_finite_and_near_wrf():
         scale[name] = max(scale.get(name, 0.0), abs(float(w)))
     for (name, column, level, *_), g, w in zip(outputs, got, want):
         assert abs(float(g) - float(w)) <= 1e-3 * max(scale[name], 1e-30), (name, column, level, g, w)
+
+
+@gpu
+@pytest.mark.parametrize("module", ["gfdleta_column_l256", "gfdleta_co2_init_l256"])
+def test_the_deep_tier_has_no_larger_local_frame_than_priced(module):
+    """CUDA only: the frame the driver reserves per resident thread."""
+    import re
+    from woof import backend
+    from woof.core import kernels
+    from woof.core import preflight as pf
+    if backend.active() != "cuda":
+        pytest.skip("local frames are a CUDA driver attribute")
+    names = sorted(set(re.findall(r'extern\s+"C"\s+__global__\s+void\s+(\w+)',
+                                  kernels.module_source(module))))
+    unit = kernels.load_module(module)
+    widest = max(kernels.kernel_local_size_bytes(unit.get_function(n)) for n in names)
+    assert widest <= pf.KERNEL_MAX_LOCAL_SIZE_BYTES[module]

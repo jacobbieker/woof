@@ -2956,6 +2956,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # NVRTC 12.9.86 and 13.4.92, fast and strict, 2026-10-30.
     "wind_farm": 56,
     'gsfcsw': 16,  # Device arena: sm_120 / NVRTC 13.4.92, fast 0 B / strict 16 B.
+    # GFDL Eta 256-layer storage tier (woof/core/gfdleta_levels.py), RTX A6000
+    # sm_86, NVRTC 12.9, default and strict numerics, 2026-11-23: every entry
+    # point's widest frame. The shipped units read 15984 / 26944 B on that card.
+    'gfdleta_column_l256': 4000,
+    'gfdleta_co2_init_l256': 3008,
     # Integration production reads: sm_120 / NVRTC 13.4.59, 2026-11-01.
     # Element-wise maximum of the retained fast and strict readings.
     'bmj': 0,
