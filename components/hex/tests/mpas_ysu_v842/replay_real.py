@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 import numpy as np
 from woof.hex.mpasphys import ysu_v842 as ysu
+from woof.hex.mpasphys.mmm_version import PINNED as MMM_PIN
+from woof.hex.mpasphys.version_defaults import pinned_lane
 
 
 class Record:
@@ -114,7 +116,7 @@ def replay(prefix, output, backend, library, oracle_dir):
             result = ysu.ysu(state, values, dt=values['dt'], flag_qc=flags['f_qc'],
                              flag_qi=flags['f_qi'], flag_bep=flags['flag_bep'],
                              ysu_topdown_pblmix=flags['ysu_topdown_pblmix'],
-                             device_math_header=ysu.shared_device_math_header())
+                             device_math_header=ysu.shared_device_math_header(), mmm_version=MMM_PIN)
         else:
             from oracle import Oracle
             oracle = Oracle(oracle_dir)
@@ -156,7 +158,7 @@ def replay(prefix, output, backend, library, oracle_dir):
         print(f'{prefix.name}: {backend}, {ncol} columns, {nz} levels', flush=True)
         if backend == 'cuda':
             from oracle import cuda_provenance
-            print(json.dumps(dict(cuda_sha256=ysu.CUDA_SHA256, capture_process_count=1,
+            print(json.dumps(dict(cuda_sha256=ysu.CUDA_SHA256, mmm_version=MMM_PIN, capture_process_count=1,
                                   replay_process_count=1, **cuda_provenance())), flush=True)
     finally:
         for record in records.values():
@@ -171,4 +173,5 @@ if __name__ == '__main__':
     parser.add_argument('--io', type=Path, default=Path(os.environ.get('YSU_ORACLE_IO', 'n1out/oracle_io.so')))
     parser.add_argument('--oracle', type=Path, default=Path(os.environ.get('YSU_ORACLE_DIR', 'n1out/proof-bin')))
     args = parser.parse_args()
-    replay(args.prefix, args.output, args.backend, io_library(args.io), args.oracle)
+    with pinned_lane():
+        replay(args.prefix, args.output, args.backend, io_library(args.io), args.oracle)

@@ -11,6 +11,8 @@ import platform
 import cupy as cp
 import numpy as np
 from woof.hex.mpasphys import ysu_v842 as ysu
+from woof.hex.mpasphys.mmm_version import PINNED as MMM_PIN
+from woof.hex.mpasphys.version_defaults import pinned_lane
 from oracle import Oracle, OUTPUTS, constants, extended_fixtures, tracer_fixtures, branch_fixtures, wrapper_fixtures, provenance, cuda_provenance
 
 
@@ -74,7 +76,7 @@ def replay(work, fixtures):
             out = ysu.bl_ysu_run(state, values, dt=values["dt"], f_qc=bool(flags["f_qc"]),
                                  f_qi=bool(flags["f_qi"]), flag_bep=bool(flags["flag_bep"]),
                                  ysu_topdown_pblmix=bool(flags["ysu_topdown_pblmix"]),
-                                 workspace_columns=tile, device_math_header=header)
+                                 workspace_columns=tile, device_math_header=header, mmm_version=MMM_PIN)
             actual = {k: cp.asnumpy(v) for k, v in out.items()}
             for col, (tag, arrays, _) in enumerate(group):
                 expected, _ = oracle.run(arrays, flags, native=True)
@@ -94,7 +96,7 @@ def replay(work, fixtures):
             state = pack([c[1] for c in group], flags)
             out = ysu.ysu(state, values, dt=values["dt"], flag_qc=True, flag_qi=True,
                           flag_bep=bool(flags["flag_bep"]), ysu_topdown_pblmix=selector,
-                          device_math_header=header)
+                          device_math_header=header, mmm_version=MMM_PIN)
             actual = {k: cp.asnumpy(v) for k, v in out.items()}
             mapping = {**ysu._WRAPPER_OUTPUTS, "rthblten": "ttnp"}
             for col, (tag, arrays, _) in enumerate(group):
@@ -108,7 +110,7 @@ def replay(work, fixtures):
                   raw_calls=compared, wrapper_calls=wrapper_calls, compared_words=words,
                   differing_words=differing, mismatches=mismatches,
                   per_array=per_array,
-                  scheme_sha256=ysu.SOURCE_SHA256, cuda_sha256=ysu.CUDA_SHA256,
+                  scheme_sha256=ysu.SOURCE_SHA256, cuda_sha256=ysu.CUDA_SHA256, mmm_version=MMM_PIN,
                   shared_math_sha256=ysu.sha256(header.encode()).hexdigest(),
                   compiler_options=ysu.COMPILER_OPTIONS, device=cp.cuda.runtime.getDeviceProperties(0)["name"].decode(),
                   not_proven=["real columns", "real CLI selection", "whole forecast", "G0-G2"])
@@ -124,7 +126,8 @@ if __name__ == "__main__":
     parser.add_argument("--fixtures", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()
-    receipt = replay(args.work, args.fixtures)
+    with pinned_lane():
+        receipt = replay(args.work, args.fixtures)
     args.receipt.write_text(json.dumps(receipt, indent=2)+"\n")
     print(json.dumps({k: v for k, v in receipt.items() if k != "mismatches"}, indent=2), flush=True)
     raise SystemExit(bool(receipt["differing_words"]))

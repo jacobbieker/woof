@@ -281,13 +281,16 @@ def _column_state(pools: dict, configs: dict):
 
 def velocity_corrections(configs: dict, named, table) -> tuple:
     """The velocity set-up corrections a call takes: those ``named``, plus
-    every one of ``table`` under ``woof_quirk_corrections = 'all'`` in
-    ``configs`` (woof.quirk_corrections; route ``mpas_seaice_velocity``).
-    Each acts only where its mesh has the quirk, so the umbrella carries
-    them everywhere."""
+    every one of ``table`` under an explicit ``woof_quirk_corrections =
+    'all'`` in ``configs``, or in correct mode (the umbrella unset) when the
+    call names none (woof.quirk_corrections; route ``mpas_seaice_velocity``).
+    Under the mode's default a named subset is the whole set, so naming
+    fewer turns the others off. Each acts only where its mesh has the
+    quirk, so the umbrella carries them everywhere."""
     from woof import quirk_corrections
     named = tuple(named)
-    if not quirk_corrections.all_on(configs):
+    umbrella, explicit = quirk_corrections._umbrella(configs)
+    if umbrella != "all" or (named and not explicit):
         return named
     return named + tuple(name for name in table if name not in named)
 

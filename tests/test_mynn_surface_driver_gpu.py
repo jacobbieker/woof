@@ -520,6 +520,7 @@ def test_physics_driver_routes_exact_fields_to_mynn_surface_kernel():
     )
     from woof.core.physics import _prepare_atmosphere
     from test_physics_driver import _full_state
+    from woof.quirk_corrections import run_reads
 
     state, cfg, driver = _full_state(
         sf_sfclay_physics=5,
@@ -571,6 +572,8 @@ def test_physics_driver_routes_exact_fields_to_mynn_surface_kernel():
         itimestep=1,
         mol=seeded_mol.copy(),
         ustm=fields["ustm"].copy(),
+        # correct mode's FQ3 (on by default, off in exact mode)
+        psih_zolzt=run_reads(cfg, "mynn_sfclay_psih_zolzt"),
     )
 
     driver.compute(state, cfg)

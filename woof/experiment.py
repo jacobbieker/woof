@@ -332,6 +332,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The opt-in Noah soil-moisture floor booking, on the same terms: a
     # [shared] value reaches the sf_surface_physics = 2 domains only.
     "noah_smc_floor_booking",
+    # The RRTMG longwave model-top correction (FQ6), on the same terms: a
+    # [shared] value reaches the legacy-RRTMG longwave domains only.
+    "rrtmg_lw_model_top",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -4403,6 +4406,18 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             dom.get("sf_surface_physics",
                     shared.get("sf_surface_physics", RunConfig.sf_surface_physics))) == 2
         for dom in domain_tables)
+    # The opt-in RRTMG longwave model-top correction is read only by the
+    # legacy RRTMG longwave (ra_lw_physics = 4 or the ra_physics = 4
+    # aggregate, ra_rrtmg_variant = "rrtmg_legacy"), on the same terms.
+    def _runs_rrtmg_lw_legacy(get) -> bool:
+        lw = get("ra_lw_physics", RunConfig.ra_lw_physics)
+        if lw == -1:
+            lw = get("ra_physics", RunConfig.ra_physics)
+        return lw == 4 and get("ra_rrtmg_variant", RunConfig.ra_rrtmg_variant) == "rrtmg_legacy"
+    tree_runs_rrtmg_lw = any(
+        _runs_rrtmg_lw_legacy(lambda name, default, dom=dom: physics_mode.settings.get(
+            name, dom.get(name, shared.get(name, default))))
+        for dom in domain_tables)
     # The same rule for the Grell-family keys.  clos_choice and ishallow
     # are read only where cu_physics = 3, and the wizard writes them in
     # [shared]; on a tree whose cumulus-off child sits under a
@@ -5026,8 +5041,13 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
                 and "noah_smc_floor_booking" not in dom):
             kw["noah_smc_floor_booking"] = False
-        # woof_quirk_corrections = 'all': every opt-in correction whose
-        # scheme this domain runs, a conflicting explicit key refused by name.
+        if (tree_runs_rrtmg_lw
+                and not _runs_rrtmg_lw_legacy(
+                    lambda name, default: kw.get(name, default))
+                and "rrtmg_lw_model_top" not in dom):
+            kw["rrtmg_lw_model_top"] = False
+        # an explicit woof_quirk_corrections ('all' / 'none') sets every
+        # correction key the domain does not set itself (quirk_corrections).
         from woof.quirk_corrections import apply_run_corrections
         kw = apply_run_corrections(kw)
         # G3-only shared controls reach only G3 domains. Explicit domain
@@ -6438,9 +6458,10 @@ def _public_config_value(value):
                                   ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
                                   ("urban_param_file", ""),
                                   ("ysu_surface_heat_exner", False),
-                                  ("woof_quirk_corrections", "none"),
+                                  ("woof_quirk_corrections", None),
                                   ("mynn_sfclay_psih_zolzt", False),
                                   ("noah_smc_floor_booking", False),
+                                  ("rrtmg_lw_model_top", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

@@ -4495,8 +4495,11 @@ def tempo_version(options):
     """The TEMPO version an option set selects (config_tempo_version, default DEFAULT_TEMPO_VERSION).
 
     THE BREAKAGE THIS PREVENTS: a misspelt version would silently run the default; it is refused by name."""
-    value = options.get("config_tempo_version", DEFAULT_TEMPO_VERSION)
-    value = (value or DEFAULT_TEMPO_VERSION).strip() if isinstance(value, str) else value
+    value = options.get("config_tempo_version", "")
+    if isinstance(value, str) and not value:
+        from woof.hex.mpasphys.version_defaults import defaulted
+        value = defaulted("config_tempo_version", DEFAULT_TEMPO_VERSION, where="tempo_v303.tempo_version")
+    value = value.strip() if isinstance(value, str) else value
     if value not in TEMPO_VERSIONS:
         raise ValueError(f"config_tempo_version must be one of {list(TEMPO_VERSIONS)}, not {value!r}")
     return value

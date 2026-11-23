@@ -1167,7 +1167,7 @@ def launch_kfcup_columns(buffers, *, dt, dx, ntst, numbins, thbinsize, rbinsize,
         raise ValueError('KF-CuP packed level inputs require (12,nz,ncol)')
     _,nz,ncol=lev.shape
     if not KFCUP_VERTICAL_LEVEL_BOUNDS[0]<=nz<=KFCUP_VERTICAL_LEVEL_BOUNDS[1]:
-        raise ValueError(f'KF-CuP supports 8 through 128 levels, got {nz}')
+        raise ValueError(f'KF-CuP supports {KFCUP_VERTICAL_LEVEL_BOUNDS[0]} through {KFCUP_VERTICAL_LEVEL_BOUNDS[1]} levels, got {nz}')
     shapes={'lev_in':lev.shape,'sca_in':(len(KFCUP_SURFACE_INPUTS),ncol),
             'kpbl':(ncol,),'held':(len(KFCUP_HELD_SCALARS),ncol),
             'iheld':(len(KFCUP_HELD_INTS),ncol),

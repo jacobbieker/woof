@@ -1223,7 +1223,12 @@ BASELINE_PINNED: dict[str, str] = {
         # 2.9.0 round 2: golden/ports-mp's Ferrier consumer edit (024c62024)
         # plus golden/ports-rad's appended rp_cldfra2, each pinned on its lane;
         # the combined bytes are both changes and nothing else.
-        'bb6fb8f5194954d6208f66069b3259b02881d2220f22ec4437b66c9544ab7563',
+        # RE-PINNED by RunConfig.rrtmg_lw_model_top (correct-mode FQ6): an
+        # #ifdef RRTMG_LW_MODEL_TOP / #else arm in the LW profile match keeps
+        # tlev(kte+1) and tlay(kte); without the define the compiled program
+        # is the previous one byte for byte (tests/test_rrtmg_lw_model_top.py
+        # strips the arm and checks the previous digest bb6fb8f5).
+        '7935ca36e19bd18411d6340aec88547687a64e8aa3c76525e80e69694a38bcc8',
     # levels256/rrtmg-lw: regenerated from rrtmg_lw_chain.cu after its
     # RLW_MAXLAY became an #ifndef default (the per-run layer tier); the
     # shipped-tier unit's PTX is byte-identical to the base's.
@@ -1847,8 +1852,8 @@ PINNED_HEADERS = {
 #: tools/transcribe_urban_bem.py and compiled by woof/core/urban_bem.py
 #: (04118fa24) into the BEP+BEM unit.
 COMPOSED_HEADERS = {
-    # GSFC SW production fast image, port-ra2-gsfcsw d15d6f3. Numerical checks are separate.
-    'gsfcsw_fast.cuh': 'e6f663eaeaa24a205d74a287983ef7d9ecdc118c0b7b94d6d7a901db6d788dc2',
+    # GSFC SW production fast image, port-ra2-gsfcsw d15d6f3; re-pinned for the GSFC_KMAX arena macros (128 expands to the old literals; word identity in tests/test_gsfcsw_256_levels.py and the oracle replay). Numerical checks are separate.
+    'gsfcsw_fast.cuh': 'e7899fc52c5d29127acbe23472fd4392b2e2f7f9341f29f8b153a0f753d5d183',
     # LF-normalized at golden/wrf-fixes: the lane blob ended in one stray CR after
     # its final #endif; the oracle-only helper is otherwise byte-identical.
     "urban_root_uptake_480.cuh": "30d091b0ce27830798128f1bb0228c6c8101435c1bf3e530320a723386b237f8",

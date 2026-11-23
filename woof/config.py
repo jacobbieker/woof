@@ -77,14 +77,15 @@ def validate_surface_radiation_policy(policy: str) -> str:
 @dataclass(frozen=True)
 class RunConfig:
     def __post_init__(self):
-        # woof_quirk_corrections = 'all' (woof.quirk_corrections): each
-        # RunConfig correction is on exactly where its scheme runs, however
-        # the RunConfig was built (a dataclasses.replace that changes the
-        # scheme re-derives it).  The TOML readers refuse an explicit
+        # woof_quirk_corrections = 'all' / 'none' (woof.quirk_corrections):
+        # every RunConfig correction on / off, however the RunConfig was
+        # built.  A key is read only where its scheme runs
+        # (correct_mode.KEY_SCOPE).  The TOML readers refuse an explicit
         # conflicting key before this point (apply_run_corrections).
-        if self.woof_quirk_corrections == "all":
-            from woof.quirk_corrections import run_corrections_under_all
-            for key, value in run_corrections_under_all(self).items():
+        if self.woof_quirk_corrections in ("all", "none"):
+            from woof.quirk_corrections import run_corrections_under
+            for key, value in run_corrections_under(
+                    self.woof_quirk_corrections).items():
                 object.__setattr__(self, key, value)
         if self._legacy_h_sca is None:
             object.__setattr__(self, "_legacy_h_sca", self.h_sca_adv_order is None)
@@ -2536,7 +2537,10 @@ class RunConfig:
     # oracle columns.  True subtracts it (pre = xmb*(sum pwo - E_unc)), which
     # closes the deep column budget; tendencies are unchanged
     # (kernels/gf.cu GF_DEEP_EVAP_BOOKING).  Read only where cu_physics = 3.
-    gf_deep_rain_evaporation_booking: bool = _config_field(default=False, kw_only=True)
+    # Correct-mode finding FQ1 (woof/correct_mode.py): on by default, off in
+    # physics.mode = 'exact' and in a strict WRF process.
+    gf_deep_rain_evaporation_booking: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
     # Space weather (woof.spacewx, beyond WRF parity), appended off.
     # solar_tsi_opt = 1 scales every shortwave output of a radiation call
     # by TSI(t)/reference (woof.spacewx.solar_irradiance): "absolute"
@@ -2628,13 +2632,16 @@ class RunConfig:
     # lost at 850 hPa, 14% at 600 hPa.  True divides HFX by the lowest
     # level's pi before the unchanged kernel reads it; False is WRF's
     # arithmetic word for word.  Read only where bl_pbl_physics = 1.
-    ysu_surface_heat_exner: bool = _config_field(default=False, kw_only=True)
-    # The umbrella over the opt-in quirk corrections (woof.quirk_corrections),
-    # appended at 'none': each correction stays on its own key.  'all' turns
-    # on every RunConfig correction whose scheme the domain runs
-    # (__post_init__); the TOML readers (load_config, build_experiment)
-    # refuse one set to anything else next to 'all', by name.
-    woof_quirk_corrections: str = _config_field(default="none", kw_only=True)
+    ysu_surface_heat_exner: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # The umbrella over the quirk corrections (woof.quirk_corrections).
+    # Unset (None, the default), each correction key keeps its own value,
+    # whose default follows the physics mode (correct: on; exact or a
+    # strict WRF process: off).  'all' turns every RunConfig correction on
+    # and 'none' turns every one off (__post_init__); the TOML readers
+    # (load_config, build_experiment) refuse a key set the other way next
+    # to it, by name.
+    woof_quirk_corrections: str | None = _config_field(default=None, kw_only=True)
     # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
     # appended off.  The MYNN surface layer (sf_sfclay_physics = 5)
     # integrates the 2 m and 10 m heat profile from z0/L
@@ -2642,16 +2649,32 @@ class RunConfig:
     # log terms gz2ozt/gz10ozt and the first-level psih start at zt.  True
     # takes zt/L (kernels/mynn_surface.cu MYNN_SL_PSIH_ZOLZT), which moves
     # only T2/TH2/Q2 and the 2 m exchange coefficients; False is WRF's
-    # arithmetic word for word.  wrf_461 variant only.
-    mynn_sfclay_psih_zolzt: bool = _config_field(default=False, kw_only=True)
+    # arithmetic word for word.  wrf_461 variant only.  Correct-mode finding
+    # FQ3: on by default, off in physics.mode = 'exact'.
+    mynn_sfclay_psih_zolzt: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
     # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-22),
     # appended off.  Noah's SSTEP (sf_surface_physics = 2) raises a layer's
     # total soil moisture below 0.02 to 0.02 (module_sf_noahlsm.F:4030) and
     # books the water it adds nowhere, so dry sandy columns gain water.
     # True takes it from the layer below as a negative WPLUS, and below the
     # bottom layer from RUNOFF3 (:4075), which may then go negative; False
-    # is WRF's arithmetic word for word.  Read only where Noah runs.
-    noah_smc_floor_booking: bool = _config_field(default=False, kw_only=True)
+    # is WRF's arithmetic word for word.  Read only where Noah runs, and not
+    # with a WRF-Hydro coupling.  Correct-mode finding FQ4: on by default,
+    # off in physics.mode = 'exact'.
+    noah_smc_floor_booking: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-22), appended.
+    # RRTMG's longwave wrapper (ra_lw_physics = 4 with ra_rrtmg_variant =
+    # "rrtmg_legacy") matches the standard-profile temperature to the column
+    # in a loop that starts at kte+1 (module_ra_rrtmg_lw.F:12375), so it
+    # overwrites the model-top interface temperature (from t8w) and the top
+    # layer's (from t3d) and anchors at the interface below the top.  True
+    # keeps both and anchors at the model-top interface; False is WRF's
+    # arithmetic word for word.  Read only by the legacy RRTMG longwave.
+    # Correct-mode finding FQ6: on by default, off in physics.mode = 'exact'.
+    rrtmg_lw_model_top: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -2913,7 +2936,10 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "wsm5_conservative_surface, wsm7_conservative_surface, "
     "ntiedtke_dry_mass_coupling, hydrometeor_handover_numbers, "
     "noahmp_melt_reset_esat, mynn_fixes_v61, "
-    "mynn_boulac_down_sign, pbl_boulac_down_sign); otherwise "
+    "mynn_boulac_down_sign, pbl_boulac_down_sign, "
+    "gf_deep_rain_evaporation_booking, ysu_surface_heat_exner, "
+    "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
+    "rrtmg_lw_model_top); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -10123,47 +10149,21 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("ysu_surface_heat_exner must be true or false")
     if type(cfg.noah_smc_floor_booking) is not bool:
         raise ConfigurationRefused("noah_smc_floor_booking must be true or false")
-    if cfg.noah_smc_floor_booking and int(cfg.sf_surface_physics) != 2:
-        raise ConfigurationRefused(
-            "noah_smc_floor_booking corrects Noah's soil-moisture floor "
-            f"(sf_surface_physics = 2); this run selects sf_surface_physics = "
-            f"{cfg.sf_surface_physics}, which never reads it")
+    if type(cfg.rrtmg_lw_model_top) is not bool:
+        raise ConfigurationRefused("rrtmg_lw_model_top must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
-    if cfg.ysu_surface_heat_exner and int(cfg.bl_pbl_physics) != 1:
-        raise ConfigurationRefused(
-            "ysu_surface_heat_exner corrects YSU's surface heat flux "
-            f"(bl_pbl_physics = 1); this run selects bl_pbl_physics = "
-            f"{cfg.bl_pbl_physics}, which never reads it")
-    if cfg.ysu_surface_heat_exner and int(cfg.sf_urban_physics) in (2, 3):
-        raise ConfigurationRefused(
-            "ysu_surface_heat_exner corrects the surface heat flux YSU's heat "
-            "solve adds; with BEP/BEM (sf_urban_physics = "
-            f"{cfg.sf_urban_physics}) WRF's YSU takes that heat from the "
-            "urban sources instead (bepswitch = 1), so the correction would "
-            "reach only the PBL diagnosis; drop it or the urban model")
+    # The quirk-ledger keys (correct-mode findings FQ1-FQ6) are on by
+    # default and read only where their scheme runs (correct_mode.KEY_SCOPE,
+    # KEY_GENERATIONS, KEY_UNREAD: YSU's not with BEP/BEM, MYNN's only at
+    # wrf_461), so an unread one is inert, not refused.
     if type(cfg.mynn_sfclay_psih_zolzt) is not bool:
         raise ConfigurationRefused("mynn_sfclay_psih_zolzt must be true or false")
-    if cfg.mynn_sfclay_psih_zolzt and int(cfg.sf_sfclay_physics) != 5:
-        raise ConfigurationRefused(
-            "mynn_sfclay_psih_zolzt corrects the MYNN surface layer's 2 m / "
-            "10 m heat profile (sf_sfclay_physics = 5); this run selects "
-            f"sf_sfclay_physics = {cfg.sf_sfclay_physics}, which never reads it")
-    if cfg.mynn_sfclay_psih_zolzt and cfg.mynn_sfclay_variant != "wrf_461":
-        raise ConfigurationRefused(
-            "mynn_sfclay_psih_zolzt corrects the wrf_461 MYNN surface layer; "
-            f"mynn_sfclay_variant = {cfg.mynn_sfclay_variant!r} integrates "
-            "every heat profile from z0/L by design")
     _validate_solar_tsi(cfg)
     _validate_solar_ssi(cfg)
     _validate_spacewx_ionosphere(cfg)
     _validate_spacewx_aurora(cfg)
     _validate_spacewx_epp(cfg)
-    if cfg.gf_deep_rain_evaporation_booking and int(cfg.cu_physics) != 3:
-        raise ConfigurationRefused(
-            "gf_deep_rain_evaporation_booking corrects Grell-Freitas's deep "
-            f"precipitation (cu_physics = 3); this run selects cu_physics = "
-            f"{cfg.cu_physics}, where it would change nothing")
     if cfg.ruc_qvg_cold_start not in ("air", "wrf"):
         raise ConfigurationRefused(
             f"ruc_qvg_cold_start={cfg.ruc_qvg_cold_start!r} must be 'air' "
@@ -10240,8 +10240,10 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     if 3 in (ra_lw_physics, ra_sw_physics):
         if not math.isfinite(cfg.cam_abs_freq_s) or cfg.cam_abs_freq_s < 0:
             raise ConfigurationRefused("cam_abs_freq_s must be finite and non-negative")
-    if ra_sw_physics == 2 and not 2 <= cfg.nz <= 128:
-        raise ConfigurationRefused('GSFC shortwave requires 2 to 128 layers; larger columns exceed its allocated CUDA workspace')
+    if ra_sw_physics == 2:
+        from woof.physics_vertical_contract import GSFCSW_VERTICAL_LEVEL_BOUNDS as _gsfc_bounds
+        if not _gsfc_bounds[0] <= cfg.nz <= _gsfc_bounds[1]:
+            raise ConfigurationRefused(f'GSFC shortwave requires {_gsfc_bounds[0]} to {_gsfc_bounds[1]} layers; its column arena is compiled at the 128 or 256 level tier')
     if cfg.icloud not in (0, 1, 2, 3):
         raise ConfigurationRefused(f"icloud={cfg.icloud}: choose 0, 1, 2 or 3.")
     if not math.isfinite(cfg.swrad_scat) or cfg.swrad_scat < 0.0:

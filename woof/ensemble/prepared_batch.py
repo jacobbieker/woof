@@ -13,6 +13,7 @@ from operator import index
 import numpy as np
 
 from woof.core.device_inventory import state_array_shapes
+from woof.quirk_corrections import run_reads
 from woof.ensemble.batch_state import (
     BatchedDomainState, BatchStateUnsupported, PreparedHostMember,
     SHARED_STATE_CANDIDATES, _exact_key,
@@ -630,7 +631,7 @@ def native_memory_model_from_node(inputs, node, *, runtime_reservation, allocato
                         evidence="default native column binding construction"),
         MemoryComponent("native_ysu", "physics", plan_for_members=lambda members: ysu_output_plan(
                             **sizes, members=members,
-                            surface_heat_exner=getattr(cfg, "ysu_surface_heat_exner", False) is True),
+                            surface_heat_exner=run_reads(cfg, "ysu_surface_heat_exner")),
                         evidence="YSU retained output and native full launch workspace"),
         MemoryComponent("native_radiation_coszen", "radiation", plan=BatchMemoryPlan((
             BatchArraySpec("radiation:coszen", (cfg.ny, cfg.nx), "member"),), reserved_bytes=0),

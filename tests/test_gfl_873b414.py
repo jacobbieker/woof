@@ -206,3 +206,40 @@ def test_metal_lowering_moves_only_the_passed_on_locals():
     on_metal = gfl_lanes.lower(gfl._SUPPORT, gfl._SCHEME_SOURCE, gfl._ENTRY, metal=True)
     assert metal in on_metal and 'gf_bounds' in on_metal
     assert '#define GF_CHARACTER_BYTES %d\n' % gfl_lanes.METAL_CHARACTER_BYTES in on_metal
+
+
+def test_wrf461_gf_on_metal_never_builds_the_gfl_lane():
+    """cu_gf_version='wrf_461' resolves to GFDRV: on Metal it neither refuses nor imports the GFL unit.
+
+    A fresh interpreter, with the GFL modules made unimportable, builds the
+    wrf_461 callable through the config's resolver.
+    """
+    import subprocess
+    import sys
+    pytest.importorskip("mlx", reason="the Metal backend needs the mlx package")
+    code = (
+        "import sys, importlib\n"
+        "sys.modules['woof.core.gfl'] = None\n"
+        "sys.modules['woof.core.gfl_873b414'] = None\n"
+        "sys.modules['woof.core.gfl_lanes'] = None\n"
+        "from woof.config import CU_STOCK_CALLABLES, CU_VERSIONED_CALLABLES\n"
+        "d = CU_VERSIONED_CALLABLES.get((3, 'wrf_461'), CU_STOCK_CALLABLES.get(3))\n"
+        "m, _, n = d.rpartition('.')\n"
+        "getattr(importlib.import_module(m), n)()\n"
+        "print('ok')\n")
+    env = dict(__import__("os").environ, WOOF_BACKEND="mlx")
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert out.returncode == 0 and out.stdout.strip() == "ok", out.stderr[-2000:]
+
+
+@pytest.mark.gpu
+def test_wrf461_gf_unit_translates_and_loads_on_metal():
+    """On Metal the non-GFL GF unit (GFDRV, gf.cu) still translates and compiles: the default nz<=40 build and a GF_KMAX tier."""
+    from woof import backend
+
+    if backend.active() != "mlx":
+        pytest.skip("runs under WOOF_BACKEND=mlx")
+    from woof.core.gf import _gf_module
+
+    assert _gf_module(40).get_function("gf_gfdrv_stage") is not None
+    assert _gf_module(50).get_function("gf_gfdrv_stage") is not None
