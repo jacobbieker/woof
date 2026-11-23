@@ -1190,6 +1190,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "62142615b2ad3423180bad738be5f60ae623fd5773fdce537376901d050ea853",
+    "constructor": "RawModule",
+    "factory": "pi_module",
+    "factory_sha256": "261664b30b3fe18c7faaf2cf2837c89ebdcb078a63f4db7c83712a8d42533220",
+    "file": "woof/hex/tc_climate/session.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "634fde6764b7292108087cb2ddb8cde430fea5ab7c8205698eb020b764b648b2",
     "constructor": "RawKernel",
     "factory": "_kernel",
@@ -2747,14 +2755,6 @@
     "factory": "_kernel",
     "factory_sha256": "a05f9edb06aec8cf66fb3be528b5fc4a24f4d96148a5b858905cfc1341f385e6",
     "file": "woof/da/radar_tten.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "f3a3f08751b573c4891daafafc4eedaf08f4e0a3cd8437283348bcfc856a889a",
-    "constructor": "RawModule",
-    "factory": "__init__",
-    "factory_sha256": "732b9ceae2d2bc4e93e7a7439612e99e41542784f5b82b108be3f945f6de16bc",
-    "file": "woof/hex/tc_climate/session.py",
     "status": "unresolved"
    },
    {
@@ -5453,7 +5453,7 @@
    },
    {
     "file": "woof/hex/tc_climate/potential_intensity.cu",
-    "sha256": "2a6978d3c8e5a4a3abaac1911646a2abee2449e52627595921d8fd8b3e1c5875"
+    "sha256": "40e3e6cbbdf573bb68360224396aceba8f235f52bedba67c40a17b1540c3353d"
    },
    {
     "file": "woof/hydro/forcing.cu",
@@ -5687,7 +5687,7 @@
    },
    {
     "file": "woof/core/gfl.py",
-    "sha256": "019c128ec35e507add9ff03df2ea05a83d935adfee00bd4285fd82b2b03c9526"
+    "sha256": "f17d2c0f39f71646b1fdd7750c19781b0b09472f2d6b56dbaac5842b74408bc6"
    },
    {
     "file": "woof/core/gfl_873b414.py",
@@ -5855,7 +5855,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "1a66d6b68dc7a4f2196a63f2fd49af98c6860855f3254ca6961575365d2f4124"
+    "sha256": "aaf15342d817301738b123e3f0ddcc7dc6c538a6575448f27900e7f5a639d849"
    },
    {
     "file": "woof/core/refl.py",
@@ -6955,7 +6955,7 @@
    },
    {
     "file": "woof/hex/tc_climate/session.py",
-    "sha256": "69c339ad17f311d487e7a6b65977575da3ed35e48258bc0f31c238a30e261ca8"
+    "sha256": "dce1ef976af0ac04ce37151ea08ca105f0d0368e6b41f3322cdf1ae984f0afa4"
    },
    {
     "file": "woof/hex/uh_layers.py",

@@ -1708,6 +1708,16 @@ Notes on the 1.1.7 sync:
   preflight prices it by tier. Past 256 is refused by name. Hex does not
   offer `ra_sw_physics=2`, so only the WRF route is affected
   ([the record](docs/kernel_local_memory_bounds.md)).
+- **256-level hex member init and TC potential intensity.** The hex GPU
+  member init (`woof/hex/init_gpu/physics.cu`) and the TC diagnostics'
+  potential-intensity sounding (`tc_climate/potential_intensity.cu`) held
+  per-thread columns of 128 levels and refused deeper meshes. Both bounds
+  are now macros whose default is 128 (`MAX_FG`/`MAX_Z`, `PI_MAX_LEV`): a
+  mesh of 128 levels or fewer compiles the unchanged text (the PI source
+  preprocesses to the old literal source, and the deep builds reproduce the
+  shipped words at 64 levels), and a deeper mesh prepends a 256 define.
+  Past 256 is refused by name. A 200-level resampling of the PI reference
+  sounding gives the reference PI to within 0.4 m/s.
 
 ### Licensing and opt-ins
 
@@ -1789,6 +1799,12 @@ on it:
   - the MPAS WSM6 unit of the water-budget gates (binary64) once had not
     finished its cold compile after 1 h 45 min; it now compiles cold in
     about 4 minutes, but its gates have not been re-run on Metal.
+- **WRF v4.8.0 Grell-Freitas-Li is refused on Metal for now.** `cu_physics = 3`
+  with the default `cu_gf_version = 'gfl_873b414'` (also the hex suites'
+  default cumulus) stops at setup on Metal with a message naming the
+  Metal-ready `cu_gf_version = 'wrf_461'` (WRF v4.6.1 GF). Nothing switches
+  to it silently. Its lane-interleaved CUDA unit does not translate to Metal
+  yet; the port is in progress.
 - **Virtual Macs are not supported.** GitHub's hosted macOS runners expose an
   "Apple Paravirtual device" that computes wrong answers (NaN) where an
   M-series GPU matches WRF, so CI runs the Metal parity gates only on real
