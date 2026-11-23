@@ -16,8 +16,8 @@ interface with ``fzm``/``fzp`` as the dynamics does.  ``w_alpha`` = 0.3,
 ``w_beta`` = 1 (the onset, WRF's value when zadvect_implicit is off) and the
 operation order are WRF's (woof/core/kernels/openbc.cu ``w_damp``, the kernel
 the WRF path runs), each operation a single rounding.  Interior w levels only.
-Off by default: nothing here runs unless ``--w-damping`` is given.  Both routes carry it: the
-WOOF-physics route's driver attaches :class:`WDamping`, the MPAS suite route :func:`attach_v842`.
+Off by default: nothing here runs unless ``--w-damping`` is given.  Both routes carry it
+through :func:`attach`: the WOOF-physics route's driver and the MPAS suite route's resident dycore.
 """
 from __future__ import annotations
 
@@ -97,12 +97,12 @@ def apply_w_damping(tend_rw, w, rho, vertical, *, dt, damping: WDamping, cache):
     return tend_rw
 
 
-def attach_v842(dycore, w_crit_cfl: float | None) -> dict | None:
-    """Put the limiter on an MPAS suite run's dycore; the receipt, or None (nothing built) when off.
+def attach(dycore, w_crit_cfl: float | None) -> dict | None:
+    """Put the limiter on a run's resident dycore; the receipt, or None (nothing built) when off.
 
-    The MPAS suite route steps the same resident dycore as the WOOF-physics route
-    (cuda_driver.CudaDryDycoreDriver, or a fork variant built on it), so the term lands at the same
-    point of the RK step (``_w_tendency``), before the vertical-momentum tendency becomes omega's.
+    Both routes step the same resident dycore (cuda_driver.CudaDryDycoreDriver, or a fork variant
+    built on it), so the term lands at the same point of the RK step (``_w_tendency``), before the
+    vertical-momentum tendency becomes omega's.
     A dycore that is not that driver would accept the switch and never apply it: refused by name.
     """
     if w_crit_cfl is None:

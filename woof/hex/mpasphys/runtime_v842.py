@@ -2280,12 +2280,15 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
         inflow_options = getattr(arguments, 'inflow_perturbation_options', None)
         if w_crit_cfl is not None or inflow_options:
             if moves or rank_execution:
-                flag = '--w-damping' if w_crit_cfl is not None else '--inflow-perturbation'
-                raise ValueError(f'{flag} acts in the one-card resident dycore and regional runtime; '
+                # The door refuses the cases it can see (forecast_door.suite_route_seat_refusal); this is the
+                # backstop for an executor or move hook built elsewhere.
+                flags = ' and '.join(flag for flag, on in (('--w-damping', w_crit_cfl is not None),
+                                                           ('--inflow-perturbation', bool(inflow_options))) if on)
+                raise ValueError(f'{flags} act(s) in the one-card resident dycore and regional runtime; '
                                  + ('a moving run remaps onto other meshes' if moves else
                                     f"this run's {type(execution).__name__} executor is not that seat")
                                  + ', so it would be accepted and never applied')
-            from ..cuda_w_damping import attach_v842 as attach_w_damping
+            from ..cuda_w_damping import attach as attach_w_damping
             from ..inflow_perturbation import attach_v842 as attach_inflow
             damping = attach_w_damping(dycore, w_crit_cfl)
             if damping is not None:
@@ -2293,7 +2296,7 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 print(json.dumps({'w_damping': damping}), flush=True)
             seeding = attach_inflow(dycore, inflow_options, n_cells=int(layout.dimensions['nCells']),
                                     pbl_height=lambda: session.field('diag_physics', 'hpbl'),
-                                    pbl_scheme=layout.configs.get('config_pbl_scheme'))
+                                    pbl_active=bool(config.active('pbl')))
             if seeding is not None:
                 receipt['inflow_perturbation'] = seeding
                 print(json.dumps({'inflow_perturbation': seeding}), flush=True)
