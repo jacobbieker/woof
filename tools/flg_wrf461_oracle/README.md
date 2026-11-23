@@ -72,3 +72,33 @@ per-column TSWUP also avoids native RAD_FLG's whole-array USWTOP assignment
 inside its column loop. Neither diagnostic is claimed as bitwise stock
 history proof. General skill and mixed-pair native forecasts remain
 unqualified.
+
+## 101 to 256 layers: the patched-nvx oracle
+
+Stock WRF's `PARA_FILE` fixes `nvx = 100`, so stock FLG has no column
+deeper than 100 layers to compare with. The CUDA sources carry that bound
+as `FLG_NVX` (the generators emit the macro, not the literal; its `#ifndef`
+default is the stock 100, so every column of at most 100 layers compiles
+stock WRF's bound and the default-tier sources preprocess to the previous
+words). A 101 to 256 layer column compiles with `-D FLG_NVX=256` and is
+verified against `module_ra_flg.F` with only `nvx` raised to 256:
+`nvx256.patch`, SHA256
+`b1e28863f9d089db2574252f268a2b8c507c8a8f8df3550b0d00117d2ca0d788`, recorded
+with its reason in `woof/data/wrf_radiation/flg/PROVENANCE.md`. `build.sh`
+still refuses an edited source; `build_nvx256.sh` copies the pristine file,
+applies the recorded patch to the copy and refuses any other source or
+patch bytes. It builds the pristine and patched libraries side by side.
+
+```sh
+bash tools/flg_wrf461_oracle/build_nvx256.sh WRF NVX_BUILD
+python tools/flg_wrf461_oracle/make_nvx256_fixture.py NVX_BUILD \
+  tests/fixtures/flg/nvx256-columns.npz
+GPUWM_WRF_EXACT=1 python -m pytest -q tests/test_flg_256_levels.py
+```
+
+The fixture script first proves the patch inert where stock WRF runs: both
+libraries return the same words for every output of a 24-layer and a
+100-layer deck. The committed fixture was built with gfortran 13.3 on glibc
+2.39 (the strict numerics' default referee libc), from a synthetic six-column
+256-layer deck to 1 hPa (clear, overcast, broken and mixed-phase cloud; four
+day and two night columns): 16,944 output words.

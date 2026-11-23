@@ -10229,10 +10229,12 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
                 "(native CASE 0).")
         if ra_lw_physics == 0:
             raise ConfigurationRefused("WRF radiation_driver has no ra_lw_physics=0 CASE for ra_sw_physics=7; select an implemented ra_lw_physics.")
-        if ra_lw_physics == 7 and not 4 <= cfg.nz <= 100:
+        from woof.physics_vertical_contract import FLG_VERTICAL_LEVEL_BOUNDS as _flg_bounds
+        if ra_lw_physics == 7 and not _flg_bounds[0] <= cfg.nz <= _flg_bounds[1]:
             raise ConfigurationRefused(
-                "WRF FLG needs 4 to 100 model layers: its three cloud groups "
-                "need a layer each and its native scratch bound is nvx=100.")
+                f"WRF FLG needs {_flg_bounds[0]} to {_flg_bounds[1]} model layers: its three "
+                "cloud groups need a layer each, and its nvx scratch bound is compiled "
+                "at the stock 100 or the 256 tier.")
     if 14 in (ra_lw_physics, ra_sw_physics):
         validate_rrtmgk_config(cfg, ra_lw_physics, ra_sw_physics)
     if 99 in (ra_lw_physics, ra_sw_physics) and (type(cfg.co2tf) is not int or cfg.co2tf not in (0, 1)):

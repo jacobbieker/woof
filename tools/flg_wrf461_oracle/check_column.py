@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import numpy as np
 from woof.core.flg import FLGColumn, SOURCE_SHA256
+from woof.core.flg_levels import SHIPPED_NVX, VERTICAL_LEVEL_BOUNDS
 
 
 def inputs():
@@ -30,7 +31,9 @@ def inputs():
                 solar_constant=np.full(n,1367.,dtype=np.float32),skin_temperature=np.full(n,295.,dtype=np.float32))
 
 
-def native(library, fields):
+def native(library, fields, nvx=SHIPPED_NVX):
+    """rad_all from a pristine (nvx=100) or patched-nvx oracle library; ``nvx``
+    is the library's PARA_FILE bound, the leading extent of ``aprofsij``."""
     lib=ct.CDLL(str(Path(library).resolve())); n,nv1=fields['pressure'].shape; nv=nv1-1
     ct.c_int.in_dll(lib,'__para_file_MOD_nsubcld').value=(nv-1)//3
     ct.c_int.in_dll(lib,'__para_file_MOD_ngroup').value=3
@@ -39,7 +42,7 @@ def native(library, fields):
         ct.c_float.in_dll(lib,'__control_para_MOD_'+name).value=0.
     fn=lib.__module_ra_flg_MOD_rad_all; fn.restype=None
     result={name:np.empty((n,nv if name in ('dts','dtir','dt') else nv1),dtype=np.float32) for name in FLGColumn.output_names}
-    aerosols=[np.zeros((7,18),dtype=np.float32),np.zeros((7,18),dtype=np.float32),np.zeros((100,18),dtype=np.float32)]
+    aerosols=[np.zeros((7,18),dtype=np.float32),np.zeros((7,18),dtype=np.float32),np.zeros((nvx,18),dtype=np.float32)]
     def integer(v): return ct.byref(ct.c_int(v))
     def scalar(v): return ct.byref(ct.c_float(float(v)))
     def ptr(a): return a.ctypes.data_as(ct.POINTER(ct.c_float))
@@ -61,7 +64,7 @@ def captured(path):
     with open(path,'rb') as stream:
         while header:=stream.read(8):
             nv,nv1=np.frombuffer(header,dtype='<i4')
-            if nv1!=nv+1 or not 4<=nv<=100: raise ValueError('invalid captured vertical extent')
+            if nv1!=nv+1 or not VERTICAL_LEVEL_BOUNDS[0]<=nv<=VERTICAL_LEVEL_BOUNDS[1]: raise ValueError('invalid captured vertical extent')
             def read(count):
                 data=stream.read(4*int(count))
                 if len(data)!=4*count: raise ValueError('truncated native capture')
