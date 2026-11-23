@@ -217,7 +217,7 @@ bytes are outside the numerical oracle.
   - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:1349`
     (cp.RawModule), and 1 other site(s)
   - `-std=c++17` `--fmad=false` `--ftz=false` --
-    `woof/core/thompson_fork.py:109` (compiler.compile_using_nvrtc), and 1
+    `woof/core/thompson_fork.py:117` (compiler.compile_using_nvrtc), and 1
     other site(s)
   - `--fmad=false` `-std=c++14` -- `woof/da/letkf_device.py:363`
     (cp.RawModule)

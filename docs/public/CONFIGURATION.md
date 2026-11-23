@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 469,
+**Which keys a `[[domain]]` table may override.** Exactly these 470,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -407,12 +407,12 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     dyn_lightning_option  coul_pos  coul_neg  coul_neu  j_pos  j_neg  j_neu
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
-    noah_smc_floor_booking  woof_quirk_corrections  mynn_sfclay_psih_zolzt
-    urban_param_file  obstacle_opt  obstacle_file  obstacle_solid_fraction
-    obstacle_relax_factor  obstacle_drag_coefficient  obstacle_wall_z0  kf_edrates
-    maxiens  maxens  maxens2  maxens3  ensdim  cu_diag  convtrans_avglen_m
-    sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes  bldt  grav_settling
-    ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
+    noah_smc_floor_booking  thompson_rain_snow_closure  woof_quirk_corrections
+    mynn_sfclay_psih_zolzt  urban_param_file  obstacle_opt  obstacle_file
+    obstacle_solid_fraction  obstacle_relax_factor  obstacle_drag_coefficient
+    obstacle_wall_z0  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim  cu_diag
+    convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes
+    bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
     wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat  diff_6th_factor  epssm
     spec_exp  mp_physics  moist  moist_cq  nest_microphysics_transition  spp_conv
     spp_pbl  km_opt  bl_pbl_physics  sf_sfclay_physics  c_s  c_k  tke_adv_opt

@@ -1785,7 +1785,7 @@
     "call_sha256": "90ee68ec1190f87be3c520f8762df32418ca5be8e0eb5925f78a8a265b1c59b5",
     "constructor": "compile_using_nvrtc",
     "factory": "_hail_module",
-    "factory_sha256": "89ac2b5246b15cce35e15bcb207eeb08ab78bae1a5d6d0fc363bcba058928a80",
+    "factory_sha256": "3f3a3acce900b90550984886053344a28a172bc843b27e559f4ae613203fcb90",
     "file": "woof/core/thompson_aerosol_launch.py",
     "status": "unresolved"
    },
@@ -2281,7 +2281,7 @@
     "call_sha256": "c3ef8579eec398570a5cee984638c5edd27c68110e177018a0cac487166e3664",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
-    "factory_sha256": "b974f5613035f53674a768e47ebbdbebe87af07789403489e1876f690d481a09",
+    "factory_sha256": "b0108ce0c468d687808f4fc87b5fddf698046cf5b8ce340d7154ebe4bac6e1d3",
     "file": "woof/core/thompson_fork.py",
     "status": "unresolved"
    },
@@ -4749,11 +4749,11 @@
    },
    {
     "file": "woof/core/kernels/thompson.cu",
-    "sha256": "cad801b72ab59d54c28e7903b125cbced4d8ae7211e1ff28427ffaee0dcd9b43"
+    "sha256": "499b6be690e579ed02b2a2910dff3d3319aadac470bb84285c869bfc7cb870c5"
    },
    {
     "file": "woof/core/kernels/thompson_aerosol_cold.cu",
-    "sha256": "ac6af93c55763d6fc1b42697ad5b93be447547e931a2010e6ba2ba4ed90d4743"
+    "sha256": "8c8c7883a29bee0030ff7850efc7f7aea6123610354cc6f8c99eb750051d3b3d"
    },
    {
     "file": "woof/core/kernels/thompson_aerosol_common.cuh",
@@ -4781,11 +4781,11 @@
    },
    {
     "file": "woof/core/kernels/thompson_aerosol_warm.cu",
-    "sha256": "c3e55b92419e88dbeccb77fdceac77f5e0db5497e8bcc4b381c06de0812efe16"
+    "sha256": "d9ca1fe617104d3995044c7e057dca020da42e837a8ba714d6d38d07b1ab9a8a"
    },
    {
     "file": "woof/core/kernels/thompson_classic.cu",
-    "sha256": "efc122d5dcdc19763584ed856dc7800b20621fd1b7dd80defefe82583b6152bd"
+    "sha256": "026464d72d2699291db5bdfd09f4c4d3b57a9a36125a37b36424fcdf63e8cee5"
    },
    {
     "file": "woof/core/kernels/thompson_classic_constants.cuh",
@@ -4809,7 +4809,7 @@
    },
    {
     "file": "woof/core/kernels/thompson_column_generated.cuh",
-    "sha256": "f07dd881fbec30952ba3d17b16012693e4ea689f50dcefde350c0222473fb552"
+    "sha256": "e906d7e22264a0637464c13b459b832a0122c2b141cf7e98b88dfa62f981b240"
    },
    {
     "file": "woof/core/kernels/thompson_column_radar.cuh",
@@ -4821,7 +4821,7 @@
    },
    {
     "file": "woof/core/kernels/thompson_fork.cu",
-    "sha256": "c7313ce62d863bdeb9478b7a503c8faffae6d17c8a20cbb1b6d458c216e4c947"
+    "sha256": "c80db06f482608c3aa28ee65d487538820fceb12092ff9ca3d82e76a928596f8"
    },
    {
     "file": "woof/core/kernels/thompson_fork_constants.cuh",
@@ -5731,7 +5731,7 @@
    },
    {
     "file": "woof/core/microphysics.py",
-    "sha256": "560ffb13ea943795be4cd36ad93d0c4a66679fa1678eb260b0c04b14a0ef90bf"
+    "sha256": "8c96200c83ebe14a1d5ec1656cdaf61c979b4eacf3b9a10ab06dfa6701f0a95e"
    },
    {
     "file": "woof/core/microphysics_transition.py",
@@ -5983,11 +5983,11 @@
    },
    {
     "file": "woof/core/thompson_aerosol_launch.py",
-    "sha256": "04a52dbb982223e5aa1f6dac59dc1fd7749806374f1d06100209111e2f6d7b69"
+    "sha256": "675aff4b5423d72b01726912a254debf620dded0bab0fb9981e3e778b968a45e"
    },
    {
     "file": "woof/core/thompson_fork.py",
-    "sha256": "369e74412df0db4a9170fe12bf1cc0ee02915eb890224bed86f16b04d5b91951"
+    "sha256": "7d0a8ccfe61294c77914d0bfec2a01b07c5b67eb9ac52e3c5de34a86cffb8e10"
    },
    {
     "file": "woof/core/urban_bem.py",
