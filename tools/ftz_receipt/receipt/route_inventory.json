@@ -9,11 +9,11 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 739,
+  "site_count": 740,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 48,
     "cupy.RawKernel": 123,
-    "cupy.RawModule": 315,
+    "cupy.RawModule": 316,
     "cupy.ReductionKernel": 22,
     "cupy.cuda.compiler.compile_using_nvrtc": 231
   },
@@ -34,7 +34,7 @@
     "tests": {
       "cupy.ElementwiseKernel": 7,
       "cupy.RawKernel": 49,
-      "cupy.RawModule": 112,
+      "cupy.RawModule": 113,
       "cupy.ReductionKernel": 10,
       "cupy.cuda.compiler.compile_using_nvrtc": 36
     },
@@ -1801,6 +1801,22 @@
       ],
       "options_are_literal": true,
       "text": "probe = cp.RawModule(code=source, options=(\"-std=c++17\",))"
+    },
+    {
+      "file": "tests/test_gfdleta_256_levels.py",
+      "line": 263,
+      "column": 15,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "test_the_layouts_are_the_compiled_struct_sizes",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "tuple(kernels.module_options(module))",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "unit = cp.RawModule(code=source, options=tuple(kernels.module_options(module)))"
     },
     {
       "file": "tests/test_gfs_pbl_wrf461_gpu.py",
