@@ -1,4 +1,8 @@
 // Generated from WRF module_ra_flg.F SHA256 c4977cdf2ddf3f2279c9be7e1fc659ef23bbb37376e5cf11f9a98a73d33b0266
+#ifndef FLG_NVX
+#define FLG_NVX 100
+#endif
+#define FLG_NV1X (FLG_NVX+1)
 __device__ void flgc_thicks(int nv,int nv1,const float* pp,const float* pt,const float* ph,const float* po,float* dz,const float* tables,const int* table_offsets,const float* gas_values,int* gas_switches,int* error);
 __device__ void flgc_rayle2(int nv,int nv1,const float* pp,const float* pt,const float* ph,const float* po,float* trp,const float* tables,const int* table_offsets,const float* gas_values,int* gas_switches,int* error);
 __device__ void flgc_rayle(int nv,int nv1,int ib,const float* trp,float* tr,float* wr,float* wwr,float u0,const float* tables,const int* table_offsets,const float* gas_values,int* gas_switches,int* error);
@@ -67,7 +71,7 @@ return;
 
 __device__ void flgc_planck(int nv,int nv1,int ib,float pts,const float* pp,const float* pt,const float* ph,const float* po,float* bf,float& bs,const float* tables,const int* table_offsets,const float* gas_values,int* gas_switches,int* error){
 const int unused_itps[18]={};
-float bt[(101)];
+float bt[(FLG_NV1X)];
 int i;
 int j;
 int nv11;
@@ -731,7 +735,7 @@ return;
 
 __device__ void flgc_comscp_aero_cld(int nv,int nv1,const float* cldamnt,float* area_group,float* cld_group,int* n_group,int* nb,float* ti,const float* wi,const float* wwi,float* tw,const float* ww,const float* www,float* trn,const float* wrn,const float* wwrn,float* tgr,const float* wgr,const float* wwgr,float* tr,const float* wr,const float* wwr,float* tgm,float* tg,const float* tae,const float* wae,const float* wwae,const float* wc1,const float* wc2,const float* wc3,const float* wc4,const float* wc,const float* tt,float* tc_2,float* wc1_2,float* wc2_2,float* wc3_2,float* wc4_2,float* wc_2,const float* tt_2,const float* cc_inho,const float* tables,const int* table_offsets,const float* gas_values,int* gas_switches,int* error){
 const int unused_itps[18]={};
-float tc[(101)];
+float tc[(FLG_NV1X)];
 float tis;
 float tws;
 float trns;
@@ -788,7 +792,7 @@ if((tc_2[(i-1)*(1)+(1-1)*(1*(nv))]<0.f)){
 if((0>=1)){
 for(iac=1;((1)>0?iac<=18:iac>=18);iac+=1){
 if((unused_itps[(iac-1)*(1)]==1)){
-tc_2[(i-1)*(1)+(1-1)*(1*(nv))]=FG_AD(tc_2[(i-1)*(1)+(1-1)*(1*(nv))],tae[(i-1)*(1)+(iac-1)*(1*(100))]);
+tc_2[(i-1)*(1)+(1-1)*(1*(nv))]=FG_AD(tc_2[(i-1)*(1)+(1-1)*(1*(nv))],tae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))]);
 }
 }
 }
@@ -885,7 +889,7 @@ if((tc_2[(i-1)*(1)+(2-1)*(1*(nv))]<0.f)){
 if((0>=1)){
 for(iac=1;((1)>0?iac<=18:iac>=18);iac+=1){
 if((unused_itps[(iac-1)*(1)]==1)){
-tc_2[(i-1)*(1)+(2-1)*(1*(nv))]=FG_AD(tc_2[(i-1)*(1)+(2-1)*(1*(nv))],tae[(i-1)*(1)+(iac-1)*(1*(100))]);
+tc_2[(i-1)*(1)+(2-1)*(1*(nv))]=FG_AD(tc_2[(i-1)*(1)+(2-1)*(1*(nv))],tae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))]);
 }
 }
 }
@@ -901,9 +905,9 @@ taes[(3-0)*(1)]=0.0f;
 taes[(4-0)*(1)]=0.0f;
 for(iac=1;((1)>0?iac<=18:iac>=18);iac+=1){
 if((unused_itps[(iac-1)*(1)]==1)){
-taes[(0-0)*(1)]=FG_AD(taes[(0-0)*(1)],FG_MU(tae[(i-1)*(1)+(iac-1)*(1*(100))],wae[(i-1)*(1)+(iac-1)*(1*(100))]));
+taes[(0-0)*(1)]=FG_AD(taes[(0-0)*(1)],FG_MU(tae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))],wae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))]));
 for(j=1;((1)>0?j<=4:j>=4);j+=1){
-taes[(j-0)*(1)]=FG_AD(taes[(j-0)*(1)],FG_MU(FG_MU(tae[(i-1)*(1)+(iac-1)*(1*(100))],wae[(i-1)*(1)+(iac-1)*(1*(100))]),wwae[(i-1)*(1)+(j-1)*(1*(100))+(iac-1)*(1*(100)*(4))]));
+taes[(j-0)*(1)]=FG_AD(taes[(j-0)*(1)],FG_MU(FG_MU(tae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))],wae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))]),wwae[(i-1)*(1)+(j-1)*(1*(FLG_NVX))+(iac-1)*(1*(FLG_NVX)*(4))]));
 }
 }
 }
@@ -957,71 +961,71 @@ return;
 
 __device__ void flgc_rad_all(int nv,int nv1,const float* asij,float u0,float ss,float pts,const float* eeij,const float* pij,const float* tij,const float* qij,const float* o3ij,const float* piwcij,const float* pdeij,const float* plwcij,const float* preij,const float* prwcij,const float* pgwcij,const float* cldamntij,const float* cc_inhoij,const float* a_wlisij,const float* a_tausij,const float* aprofsij,float* fdsij,float* fusij,float* dtsij,float* fdirij,float* fuirij,float* dtirij,float* fdij,float* fuij,float* dtij,float* fdsdir,float* fdsdif,const float* tables,const int* table_offsets,const float* gas_values,int* gas_switches,int* error){
 const int unused_itps[18]={};
-float pp[(101)];
-float pt[(101)];
-float ph[(101)];
-float po[(101)];
-float fds[(101)];
-float fus[(101)];
-float fdir[(101)];
-float fuir[(101)];
-float fd[(101)];
-float fu[(101)];
-float dts[(101)];
-float dtir[(101)];
-float dt[(101)];
-float piwc[(101)];
-float plwc[(101)];
-float pgwc[(101)];
-float prwc[(101)];
-float pde[(101)];
-float pre[(101)];
-float cldamnt[(101)];
+float pp[(FLG_NV1X)];
+float pt[(FLG_NV1X)];
+float ph[(FLG_NV1X)];
+float po[(FLG_NV1X)];
+float fds[(FLG_NV1X)];
+float fus[(FLG_NV1X)];
+float fdir[(FLG_NV1X)];
+float fuir[(FLG_NV1X)];
+float fd[(FLG_NV1X)];
+float fu[(FLG_NV1X)];
+float dts[(FLG_NV1X)];
+float dtir[(FLG_NV1X)];
+float dt[(FLG_NV1X)];
+float piwc[(FLG_NV1X)];
+float plwc[(FLG_NV1X)];
+float pgwc[(FLG_NV1X)];
+float prwc[(FLG_NV1X)];
+float pde[(FLG_NV1X)];
+float pre[(FLG_NV1X)];
+float cldamnt[(FLG_NV1X)];
 float as[(6)];
 float ee[(12)];
-float fu1[(101)];
-float fd1[(101)];
-float ffddir[(101)];
-float ffdif[(101)];
-float bf[(101)];
+float fu1[(FLG_NV1X)];
+float fd1[(FLG_NV1X)];
+float ffddir[(FLG_NV1X)];
+float ffdif[(FLG_NV1X)];
+float bf[(FLG_NV1X)];
 float bs;
-float wc1[(101)];
-float wc2[(101)];
-float wc3[(101)];
-float wc4[(101)];
-float wc[(101)];
-float tt[(101)];
+float wc1[(FLG_NV1X)];
+float wc2[(FLG_NV1X)];
+float wc3[(FLG_NV1X)];
+float wc4[(FLG_NV1X)];
+float wc[(FLG_NV1X)];
+float tt[(FLG_NV1X)];
 float area_group[(3)*(2)];
 float cld_group[(3)];
 int n_group[(3)];
 int nb[(3)];
 int n_loop[(3)];
-float wc1_2[(101)*(2)];
-float wc2_2[(101)*(2)];
-float wc3_2[(101)*(2)];
-float wc4_2[(101)*(2)];
-float wc_2[(101)*(2)];
-float tt_2[(101)*(2)];
-float tc_2[(101)*(2)];
+float wc1_2[(FLG_NV1X)*(2)];
+float wc2_2[(FLG_NV1X)*(2)];
+float wc3_2[(FLG_NV1X)*(2)];
+float wc4_2[(FLG_NV1X)*(2)];
+float wc_2[(FLG_NV1X)*(2)];
+float tt_2[(FLG_NV1X)*(2)];
+float tc_2[(FLG_NV1X)*(2)];
 int nc1;
 int nc2;
 int nc3;
 int k;
 int kl;
 int kk;
-float fds_tot[(101)];
-float fus_tot[(101)];
-float fdir_tot[(101)];
-float fuir_tot[(101)];
-float fd_tot[(101)];
-float fu_tot[(101)];
-float ctau[(101)];
+float fds_tot[(FLG_NV1X)];
+float fus_tot[(FLG_NV1X)];
+float fdir_tot[(FLG_NV1X)];
+float fuir_tot[(FLG_NV1X)];
+float fd_tot[(FLG_NV1X)];
+float fu_tot[(FLG_NV1X)];
+float ctau[(FLG_NV1X)];
 float hk;
 float fuq1;
 float fuq2;
 float xx;
-float dz[(101)];
-float trp[(101)];
+float dz[(FLG_NV1X)];
+float trp[(FLG_NV1X)];
 int ib;
 int mbn;
 int kg1_num;
@@ -1030,42 +1034,42 @@ int iac;
 int ig1;
 int ig2;
 int i;
-float a_tau1[(100)*(18)*(18)];
-float a_ssa1[(100)*(18)*(18)];
-float a_asy1[(100)*(18)*(18)];
-float a_tau2[(100)*(18)*(18)];
-float a_ssa2[(100)*(18)*(18)];
-float a_asy2[(100)*(18)*(18)];
+float a_tau1[(FLG_NVX)*(18)*(18)];
+float a_ssa1[(FLG_NVX)*(18)*(18)];
+float a_asy1[(FLG_NVX)*(18)*(18)];
+float a_tau2[(FLG_NVX)*(18)*(18)];
+float a_ssa2[(FLG_NVX)*(18)*(18)];
+float a_asy2[(FLG_NVX)*(18)*(18)];
 float a_wlis[(7)*(18)];
 float a_taus[(7)*(18)];
-float aprofs[(100)*(18)];
-float ti[(101)];
-float wi[(101)];
-float wwi[(101)*(4)];
-float tw[(101)];
-float ww[(101)];
-float www[(101)*(4)];
-float trn[(101)];
-float wrn[(101)];
-float wwrn[(101)*(4)];
-float tgr[(101)];
-float wgr[(101)];
-float wwgr[(101)*(4)];
-float tae[(100)*(18)];
-float wae[(100)*(18)];
-float wwae[(100)*(4)*(18)];
-float tgm[(101)];
-float tr[(101)];
-float wr[(101)];
-float wwr[(101)*(4)];
-float tg[(101)];
+float aprofs[(FLG_NVX)*(18)];
+float ti[(FLG_NV1X)];
+float wi[(FLG_NV1X)];
+float wwi[(FLG_NV1X)*(4)];
+float tw[(FLG_NV1X)];
+float ww[(FLG_NV1X)];
+float www[(FLG_NV1X)*(4)];
+float trn[(FLG_NV1X)];
+float wrn[(FLG_NV1X)];
+float wwrn[(FLG_NV1X)*(4)];
+float tgr[(FLG_NV1X)];
+float wgr[(FLG_NV1X)];
+float wwgr[(FLG_NV1X)*(4)];
+float tae[(FLG_NVX)*(18)];
+float wae[(FLG_NVX)*(18)];
+float wwae[(FLG_NVX)*(4)*(18)];
+float tgm[(FLG_NV1X)];
+float tr[(FLG_NV1X)];
+float wr[(FLG_NV1X)];
+float wwr[(FLG_NV1X)*(4)];
+float tg[(FLG_NV1X)];
 float area;
-float cc_inho[(101)];
+float cc_inho[(FLG_NV1X)];
 float f0=FG_DV(1.0f,3.14159f);
 if((0>=1)){
 for(int copy_i=0;copy_i<(7)*(18);++copy_i) a_wlis[copy_i]=a_wlisij[copy_i];
 for(int copy_i=0;copy_i<(7)*(18);++copy_i) a_taus[copy_i]=a_tausij[copy_i];
-for(int copy_i=0;copy_i<(100)*(18);++copy_i) aprofs[copy_i]=aprofsij[copy_i];
+for(int copy_i=0;copy_i<(FLG_NVX)*(18);++copy_i) aprofs[copy_i]=aprofsij[copy_i];
 }
 for(i=1;((1)>0?i<=nv1:i>=nv1);i+=1){
 pp[(i-1)*(1)]=pij[(i-1)*(1)];
@@ -1141,7 +1145,7 @@ ctau[(ib-1)*(1)]=0.f;
 for(i=1;((1)>0?i<=nv:i>=nv);i+=1){
 for(iac=1;((1)>0?iac<=18:iac>=18);iac+=1){
 if((unused_itps[(iac-1)*(1)]==1)){
-ctau[(ib-1)*(1)]=FG_AD(ctau[(ib-1)*(1)],tae[(i-1)*(1)+(iac-1)*(1*(100))]);
+ctau[(ib-1)*(1)]=FG_AD(ctau[(ib-1)*(1)],tae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))]);
 }
 }
 }

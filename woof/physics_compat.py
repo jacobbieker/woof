@@ -2484,7 +2484,8 @@ def validate_resolved_physics_vertical_levels(
     radiation_settings = (SimpleNamespace(**settings) if isinstance(settings, Mapping) else settings)
     pair = radiation_scheme_ids(radiation_settings)
     if pair[0] == 7:
-        bounded("WRF Fu-Liou-Gu radiation", (4, 100))
+        from woof.physics_vertical_contract import FLG_VERTICAL_LEVEL_BOUNDS
+        bounded("WRF Fu-Liou-Gu radiation", FLG_VERTICAL_LEVEL_BOUNDS)
     if 4 in pair:
         top_pressure = 0.0 if p_top is None else float(p_top)
         if rrtmg_variant(settings) == RRTMG_VARIANT_LEGACY:

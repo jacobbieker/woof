@@ -3552,6 +3552,10 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # The opt-in Noah soil-moisture floor booking: absent while off.
     if values.get("noah_smc_floor_booking", False) is False:
         values.pop("noah_smc_floor_booking", None)
+    # The Thompson rain-snow collection closure (FQ5): absent while off,
+    # which every earlier header ran.
+    if values.get("thompson_rain_snow_closure", False) is False:
+        values.pop("thompson_rain_snow_closure", None)
     # The RRTMG longwave model-top correction (FQ6): absent while off, which
     # every earlier header ran.
     if values.get("rrtmg_lw_model_top", False) is False:
@@ -5848,6 +5852,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'woof_quirk_corrections': None,
     'mynn_sfclay_psih_zolzt': False,
     'noah_smc_floor_booking': False,
+    'thompson_rain_snow_closure': False,
     'rrtmg_lw_model_top': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
@@ -6502,6 +6507,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "woof_quirk_corrections": None,
                           "mynn_sfclay_psih_zolzt": False,
                           "noah_smc_floor_booking": False,
+                          "thompson_rain_snow_closure": False,
                           "rrtmg_lw_model_top": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,

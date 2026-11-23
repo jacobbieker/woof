@@ -41,8 +41,10 @@ MOVED = {
     "output_diagnostics": (dict(output_diagnostics=1), {"output_diagnostics", "diag_int", "wind_int"}),
     "diag_int": (dict(diag_int=30), {"diag_int"}),
     "wind_int": (dict(wind_int=10), {"wind_int"}),
-    "thompson_version": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa"), {"thompson_version"}),
-    "thompson_fork_snow_fall": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa", thompson_fork_snow_fall="wrf_39_noaa"), {"thompson_version", "thompson_fork_snow_fall"}),
+    # Thompson runs in these rows, so its FQ5 correction (on by default) is
+    # bound too.
+    "thompson_version": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa"), {"thompson_version", "thompson_rain_snow_closure"}),
+    "thompson_fork_snow_fall": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa", thompson_fork_snow_fall="wrf_39_noaa"), {"thompson_version", "thompson_fork_snow_fall", "thompson_rain_snow_closure"}),
     "upper_wind_limiter_form": (dict(upper_wind_limiter_form="noaa_wrf39"),
                                 {"upper_wind_limiter_form"}),
     "adaptive_nest_lattice": (dict(adaptive_nest_lattice=True),
@@ -127,6 +129,10 @@ MOVED = {
     "noah_smc_floor_booking": (
         dict(sf_surface_physics=2, noah_smc_floor_booking=True),
         {"noah_smc_floor_booking", *_SEAICE_BOUND}),
+    # Correct-mode FQ5 (on by default): echoed where Thompson runs.
+    "thompson_rain_snow_closure": (
+        dict(mp_physics=8),
+        {"thompson_rain_snow_closure"}),
     # Correct-mode FQ6 (on by default): echoed where the legacy RRTMG
     # longwave runs, whether it is named by ra_lw_physics or the aggregate.
     "rrtmg_lw_model_top": (
@@ -177,12 +183,13 @@ MOVED = {
     "swint_opt": (dict(swint_opt=1), {"swint_opt"}),
     "aer_opt": (dict(aer_opt=3, mp_physics=28, moist=True,
                      ra_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
-                {"aer_opt", "rrtmg_lw_model_top"}),
+                {"aer_opt", "thompson_rain_snow_closure", "rrtmg_lw_model_top"}),
     "rrtmg_aer3_type_source": (
         dict(aer_opt=3, mp_physics=28, moist=True, ra_physics=4,
              ra_rrtmg_variant="rrtmg_legacy",
              rrtmg_aer3_type_source="landmask"),
-        {"aer_opt", "rrtmg_aer3_type_source", "rrtmg_lw_model_top"}),
+        {"aer_opt", "rrtmg_aer3_type_source", "thompson_rain_snow_closure",
+         "rrtmg_lw_model_top"}),
     "alb_sol": (dict(alb_sol=1), {"alb_sol"}),
 }
 
@@ -306,6 +313,9 @@ DEFAULT_OFF = frozenset({
     # Noah-MP snow conductivity at option 1 and the snow-layer cold-start
     # profile while Noah-MP is off: absent (woof.checkpoint_identity).
     "opt_tksno", "noahmp_snow_tinit",
+    # The Thompson rain-snow collection closure (FQ5), absent while
+    # Thompson does not run.
+    "thompson_rain_snow_closure",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The TEMPO generation and its hail switch, absent unless TEMPO runs
@@ -699,9 +709,12 @@ def test_chemistry_off_emitted_config_bytes_match_recovery_staging(
     # test_the_wrf480_solar_default_moves_only_the_solar_binding).
     # ... and before the 2.9.7 hydrometeor handover numbers (HN1), which
     # bind under the moist case's Thompson; off is every earlier header's ring.
+    # ... and before the Thompson rain-snow collection closure (FQ5), which
+    # binds there too; off is what every earlier header ran.
     cfg = RunConfig(**{"terrain_clock": "measured",
                        "solar_generation": "wrf_461",
                        "hydrometeor_handover_numbers": False,
+                       "thompson_rain_snow_closure": False,
                        **row["constructor"]})
     if inactive_nondefaults:
         cfg = dataclasses.replace(cfg, chem_adv_opt=2, kemit=17,

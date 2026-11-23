@@ -115,6 +115,12 @@ FQ4  Noah (sf_surface_physics = 2) raises soil moisture to its 0.02 floor
      without taking the water from anywhere; the key books it from the layer
      below or RUNOFF3 (``noah_smc_floor_booking``).  A WRF-Hydro coupling
      does not read it.
+FQ5  Thompson (mp_physics = 8, 28, 38) re-pairs the rain-snow collection
+     only above 0 C wet bulb; below it the graupel gain keeps its
+     pre-limiter value while the rain and snow limiters shrink their losses,
+     so the exchange creates graupel.  The key sets prg_rcs = -(prr_rcs +
+     prs_rcs) after the limiters, floored at zero (snow then takes only
+     what rain lost) (``thompson_rain_snow_closure``).
 FQ6  WRF's RRTMG longwave (ra_lw_physics = 4 with ra_rrtmg_variant =
      rrtmg_legacy) matches its standard-profile temperature to the column
      starting at kte+1, which overwrites the model-top interface temperature
@@ -306,6 +312,15 @@ CORRECTIONS: tuple[Correction, ...] = (
         carriers=(("sf_surface_physics", (2,)),),
     ),
     Correction(
+        finding="FQ5",
+        keys=("thompson_rain_snow_closure",),
+        summary=(
+            "Thompson's rain-snow collection below 0 C makes graupel only "
+            "from what rain and snow lose after their limiters (floored at "
+            "zero)"),
+        carriers=(("mp_physics", (8, 28, 38)),),
+    ),
+    Correction(
         finding="FQ6",
         keys=("rrtmg_lw_model_top",),
         summary=(
@@ -374,6 +389,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
     "noah_smc_floor_booking": ("sf_surface_physics", (2,)),
+    "thompson_rain_snow_closure": ("mp_physics", (8, 28, 38)),
     # FQ6: the longwave scheme (the aggregate ra_physics resolves to it,
     # _selector_int), at the legacy variant (KEY_GENERATIONS).
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),

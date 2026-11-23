@@ -1522,3 +1522,31 @@ column. `tests/test_gsfcsw_256_levels.py` runs a 256-level column to a 1 hPa
 top (finite, bounded heating and fluxes, net top minus net surface flux
 equals the column absorption), proves the 256 tier reproduces the shipped
 tier word for word at nz = 49 and 128, and compares CUDA with Metal.
+
+## WRF Fu-Liou-Gu radiation to 256 levels (compile-time tier)
+
+Stock WRF sizes FLG's level scratch by `PARA_FILE`'s `nvx = 100`. The
+generated headers (`flg_column_generated.cuh`, `flg_gases_generated.cuh`,
+`flg_streams_generated.cuh`, `flg_workspace_generated.cuh`) and the
+component units `flg.cu` and `flg_gases.cu` now carry that bound as
+`FLG_NVX` (`woof/core/flg_levels.py`), `#ifndef` default 100. A column of at
+most 100 layers compiles the stock tier; a 101 to 256 layer column adds
+`-D FLG_NVX=256`.
+
+The forecast unit (`flg_column`) already kept every per-level array in the
+warp-interleaved global workspace, `300 x FLG_NV1 + 1` float words per
+column with `FLG_NV1` the column's interface count (30,301 words at 100
+layers, 77,101 at 256), which admission (`flg_radiation_vram_bytes`) prices
+per domain. In that unit `FLG_NVX` reaches only the aerosol code stock
+`RAD_FLG` (`naero = 0`) never runs, so the compiler removes it: compiled
+with nvcc 13.3 (no `-lineinfo`) from the exact loader source, the
+`flg_column` SASS before and after the macro, and with and without
+`-D FLG_NVX=256`, is identical on sm_86, sm_100 and sm_120 in both
+numerics modes, at `FLG_NV1` 33 and 101. The stack frame is 928 B (sm_86),
+896 B (sm_100; 912 B in strict mode) and 912 B (sm_120) at both tiers, inside
+the priced 928 B, so
+the deep tier needs no driver reservation of its own;
+`tests/test_flg_256_levels.py` reads the loaded frame at 100 and 256 layers.
+The component oracles (`flg`, `flg_gases`, `flg_streams`, never selected by a
+forecast) size thread-local level arrays by the tier, so their frames grow
+at 256; at the stock tier their SASS is likewise identical.

@@ -763,16 +763,21 @@ def _apply_thompson_default(
         state.qc, state.qi, state.qr, state.qs, state.qg,
         temperature, state.p, state.qv, graupel_number_shadow,
         micro_columns)
+    # RunConfig.thompson_rain_snow_closure (FQ5): both source networks
+    # compile with the rain-snow closure define.
+    from woof.core.thompson import rain_snow_closure_due
+    rain_snow_closure = rain_snow_closure_due(cfg)
     launch_frozen_vapor_network_from_owner(
         state.qi, state.ni, state.qs, state.qg, state.qr, state.nr,
         temperature, state.p, state.qv, table_owner, dt, qc=state.qc,
         graupel_number_shadow=graupel_number_shadow,
-        snow_velocity_boost=snow_velocity_boost)
+        snow_velocity_boost=snow_velocity_boost,
+        rain_snow_closure=rain_snow_closure)
     launch_warm_frozen_source_network_from_owner(
         state.qc, state.qr, state.nr, state.qs, state.qg,
         graupel_number_shadow, graupel_melt_marker, snow_melt_marker,
         temperature, state.p, state.qv,
-        table_owner, dt)
+        table_owner, dt, rain_snow_closure=rain_snow_closure)
     # WRF's rain velocity pass refreshes RHOF for every level only when the
     # post-source column contains rain.  RAINNCV is not populated until the
     # later ice fallout launch, so it safely carries this held column mask.

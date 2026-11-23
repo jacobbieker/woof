@@ -428,6 +428,11 @@ from woof.core.gfdleta_levels import VERTICAL_LEVEL_BOUNDS as GFDLETA_VERTICAL_L
 # or 256.  The ceiling is the deep tier of the CuPy-free ladder.
 from woof.core.gsfcsw_levels import VERTICAL_LEVEL_BOUNDS as GSFCSW_VERTICAL_LEVEL_BOUNDS
 
+# WRF Fu-Liou-Gu (ra_lw_physics = ra_sw_physics = 7): WRF's nvx scratch bound
+# is compiled at FLG_NVX 100 (stock WRF, every column of at most 100 layers)
+# or 256; the floor is its three cloud groups.  CuPy-free ladder.
+from woof.core.flg_levels import VERTICAL_LEVEL_BOUNDS as FLG_VERTICAL_LEVEL_BOUNDS
+
 #: K-epsilon (bl_pbl_physics=17).  No ceiling: the column arrays live in a
 #: global workspace sized from nz at launch (woof/core/keps.py).  The floor
 #: is GET_PBLH's: its theta-v search starts at level 3 at the earliest and
