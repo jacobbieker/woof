@@ -28,10 +28,11 @@ from woof import correct_mode
 from woof.config import RunConfig, validate_run_config
 
 ROOT = Path(__file__).resolve().parents[1]
-#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ4
-_FQ = ("FQ1", "FQ2", "FQ3", "FQ4")
+#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ4 and FQ6
+_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ6")
 _FQ_KEYS = ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner",
-            "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking")
+            "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking",
+            "rrtmg_lw_model_top")
 
 # -------------------------------------------------------------- the switch --
 def test_exact_mode_authors_every_key_off():
@@ -422,6 +423,13 @@ def _shipped(component):
     return sorted(v for v in implemented_selector_values(component) if v != 0)
 
 
+def _shipped_lw():
+    from woof.physics_registry import component_options
+    return {int(option["selectors"]["ra_lw_physics"])
+            for option in component_options("radiation").values()
+            if "ra_lw_physics" in option.get("selectors", {})} - {0}
+
+
 def test_every_carrier_scheme_is_a_shipped_scheme():
     """The carrier registry names only schemes the engine ships, so a typo
     cannot hide a carrier from the gate below."""
@@ -429,7 +437,9 @@ def test_every_carrier_scheme_is_a_shipped_scheme():
                "cu_physics": set(_shipped("cumulus")),
                "sf_surface_physics": set(_shipped("land_surface")),
                "bl_pbl_physics": set(_shipped("pbl")),
-               "sf_sfclay_physics": set(_shipped("surface_layer"))}
+               "sf_sfclay_physics": set(_shipped("surface_layer")),
+               # radiation selects on a (LW, SW) pair: the LW values
+               "ra_lw_physics": _shipped_lw()}
     for c in correct_mode.CORRECTIONS:
         assert c.carriers, c.finding
         for selector, schemes in c.carriers:

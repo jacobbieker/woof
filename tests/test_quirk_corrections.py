@@ -151,9 +151,9 @@ def test_the_docs_list_every_correction():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     config = (ROOT / "docs" / "public" / "CONFIGURATION.md").read_text(encoding="utf-8")
     start = readme.index("woof_quirk_corrections")
-    umbrella_readme = readme[start:start + 3000]
+    umbrella_readme = readme[start:start + 4000]
     start = config.index("`woof_quirk_corrections` (default")
-    umbrella_config = config[start:start + 3000]
+    umbrella_config = config[start:start + 4000]
     for c in qc.CORRECTIONS:
         name = "--undriven-species-boundary" if c.key == "undriven_species_boundary" else c.key
         for text in (umbrella_readme, umbrella_config):
@@ -172,6 +172,7 @@ _WRF_SCHEMES = {
     "ysu_surface_heat_exner": dict(bl_pbl_physics=1, sf_sfclay_physics=1),
     "mynn_sfclay_psih_zolzt": dict(bl_pbl_physics=5, sf_sfclay_physics=5),
     "noah_smc_floor_booking": dict(sf_surface_physics=2, bl_pbl_physics=1, sf_sfclay_physics=1),
+    "rrtmg_lw_model_top": dict(ra_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
 }
 
 

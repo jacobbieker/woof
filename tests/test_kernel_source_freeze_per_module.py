@@ -1223,7 +1223,12 @@ BASELINE_PINNED: dict[str, str] = {
         # 2.9.0 round 2: golden/ports-mp's Ferrier consumer edit (024c62024)
         # plus golden/ports-rad's appended rp_cldfra2, each pinned on its lane;
         # the combined bytes are both changes and nothing else.
-        'bb6fb8f5194954d6208f66069b3259b02881d2220f22ec4437b66c9544ab7563',
+        # RE-PINNED by RunConfig.rrtmg_lw_model_top (correct-mode FQ6): an
+        # #ifdef RRTMG_LW_MODEL_TOP / #else arm in the LW profile match keeps
+        # tlev(kte+1) and tlay(kte); without the define the compiled program
+        # is the previous one byte for byte (tests/test_rrtmg_lw_model_top.py
+        # strips the arm and checks the previous digest bb6fb8f5).
+        '7935ca36e19bd18411d6340aec88547687a64e8aa3c76525e80e69694a38bcc8',
     # levels256/rrtmg-lw: regenerated from rrtmg_lw_chain.cu after its
     # RLW_MAXLAY became an #ifndef default (the per-run layer tier); the
     # shipped-tier unit's PTX is byte-identical to the base's.

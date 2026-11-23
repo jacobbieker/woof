@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 469,
+**Which keys a `[[domain]]` table may override.** Exactly these 470,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -407,12 +407,12 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     dyn_lightning_option  coul_pos  coul_neg  coul_neu  j_pos  j_neg  j_neu
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
-    noah_smc_floor_booking  woof_quirk_corrections  mynn_sfclay_psih_zolzt
-    urban_param_file  obstacle_opt  obstacle_file  obstacle_solid_fraction
-    obstacle_relax_factor  obstacle_drag_coefficient  obstacle_wall_z0  kf_edrates
-    maxiens  maxens  maxens2  maxens3  ensdim  cu_diag  convtrans_avglen_m
-    sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes  bldt  grav_settling
-    ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
+    noah_smc_floor_booking  rrtmg_lw_model_top  woof_quirk_corrections
+    mynn_sfclay_psih_zolzt  urban_param_file  obstacle_opt  obstacle_file
+    obstacle_solid_fraction  obstacle_relax_factor  obstacle_drag_coefficient
+    obstacle_wall_z0  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim  cu_diag
+    convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes
+    bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
     wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat  diff_6th_factor  epssm
     spec_exp  mp_physics  moist  moist_cq  nest_microphysics_transition  spp_conv
     spp_pbl  km_opt  bl_pbl_physics  sf_sfclay_physics  c_s  c_k  tke_adv_opt
@@ -609,6 +609,17 @@ can then be negative. It is not read with a WRF-Hydro coupling, whose
 drainage must not go negative. Off, and in exact mode, the arithmetic is
 WRF's word for word. It is not a WRF namelist key; set it in the TOML.
 
+`rrtmg_lw_model_top` (default `true`; finding FQ6) is a correction to the
+legacy RRTMG longwave (`ra_lw_physics = 4`, or the `ra_physics = 4`
+aggregate, with `ra_rrtmg_variant = "rrtmg_legacy"`), per domain on the same
+terms. WRF's `module_ra_rrtmg_lw.F` matches its standard-profile
+temperature to the column in a loop that starts at `kte+1`, so it
+overwrites the model-top interface temperature (from `t8w`) and the top
+layer's (from `t3d`) and anchors the profile at the interface below the top.
+With `true` both are kept and the profile is anchored at the model-top
+interface. Not read by RTE+RRTMGP. Off, and in exact mode, the arithmetic
+is WRF's word for word. It is not a WRF namelist key; set it in the TOML.
+
 `woof_quirk_corrections` (default unset) is the umbrella over the
 corrections of WRF 4.7.1 / MPAS v8.4.2 quirks (`woof/quirk_corrections.py`).
 They follow the physics mode: unset, every correction is on in correct
@@ -616,7 +627,7 @@ mode (the default) where its scheme runs, and off in exact mode, where the
 run is the WRF / MPAS oracle's arithmetic word for word (parity tests run
 there). On the WRF route exact mode is a strict `GPUWM_WRF_EXACT=1`
 process, or every correct-mode key set `false` (the four WRF-route keys
-below are correct-mode findings FQ1-FQ4, in the table under "Correct
+below are correct-mode findings FQ1-FQ4 and FQ6, in the table under "Correct
 mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
 MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
 A correction's own key, when set, wins over the mode, which is how one is
@@ -632,8 +643,10 @@ a subset runs as `"none"` with the wanted names in
 - WRF route (RunConfig): `gf_deep_rain_evaporation_booking = true`
   (`cu_physics = 3`), `ysu_surface_heat_exner = true`
   (`bl_pbl_physics = 1`), `mynn_sfclay_psih_zolzt = true`
-  (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`) and
-  `noah_smc_floor_booking = true` (`sf_surface_physics = 2`).
+  (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`),
+  `noah_smc_floor_booking = true` (`sf_surface_physics = 2`) and
+  `rrtmg_lw_model_top = true` (`ra_lw_physics = 4` with
+  `ra_rrtmg_variant = "rrtmg_legacy"`).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
   stays off on the MPAS suite route, local time stepping, partial nest and
@@ -867,7 +880,7 @@ for the retained proof and the limits of the forecast evidence.
 ### Correct mode (`[shared]`)
 
 Correct mode is the default. It fixes defects that WRF itself carries
-(water budgets, and the fork's quirk ledger FQ1-FQ4, see
+(water budgets, and the fork's quirk ledger FQ1-FQ4 and FQ6, see
 `woof_quirk_corrections`), one key per scheme, each `true` by default and read only by the
 schemes named in its row. Setting a key to `false` in `[shared]` runs that
 scheme's WRF-matched arithmetic. Strict WRF mode (`GPUWM_WRF_EXACT=1`)
@@ -889,6 +902,7 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `ysu_surface_heat_exner` | YSU (`bl_pbl_physics = 1`), not with BEP/BEM | FQ2 | the surface heat flux enters the column as `HFX`, not `HFX*pi` |
 | `mynn_sfclay_psih_zolzt` | MYNN surface layer (`sf_sfclay_physics = 5`, `mynn_sfclay_variant = "wrf_461"`) | FQ3 | the 2 m / 10 m heat profile is integrated from `zt/L`, as its log term is |
 | `noah_smc_floor_booking` | Noah (`sf_surface_physics = 2`), not with WRF-Hydro | FQ4 | the water Noah adds at its 0.02 soil-moisture floor comes from the layer below or the drainage |
+| `rrtmg_lw_model_top` | legacy RRTMG longwave (`ra_lw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) | FQ6 | the model-top interface and top layer temperatures are kept, and the standard profile above them is anchored at the model-top interface |
 
 A checkpoint resumes only under the arithmetic it was written with; a
 mismatch is refused, and the refusal names the key to set.

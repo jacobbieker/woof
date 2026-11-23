@@ -730,9 +730,10 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`), and a key set the other way next to
     it is refused by name. On the WRF route the four keys are correct-mode
-    findings FQ1-FQ4, so the run receipt's `correct_mode` block names them.
+    findings FQ1-FQ4 and FQ6, so the run receipt's `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
-    `mynn_sfclay_psih_zolzt` and `noah_smc_floor_booking` (WRF route); `--undriven-species-boundary
+    `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking` and
+    `rrtmg_lw_model_top` (WRF route); `--undriven-species-boundary
     wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -769,6 +770,13 @@ Notes on the 1.1.7 sync:
     the column water budget closes. Not read with a WRF-Hydro coupling. Not
     yet scored against observations; the hex MPAS-suite Noah does not carry
     it yet.
+  - `rrtmg_lw_model_top` (legacy RRTMG longwave, `ra_lw_physics = 4` with
+    `ra_rrtmg_variant = "rrtmg_legacy"`, WRF route). WRF's RRTMG longwave
+    matches its standard profile to the column in a loop that starts one
+    interface too low, so it overwrites the model-top interface temperature
+    and the top layer's with the profile and anchors at the interface below
+    the top. The option keeps both and anchors at the top interface (finding
+    FQ6). Not read by RTE+RRTMGP; not yet scored against observations.
 - **Observation-driven corrections, each opt-in and off by default** (GF's
   is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).

@@ -96,7 +96,7 @@ MY1  WRF 4.6.1's MYNN (and every MYNN-EDMF before NCAR/MYNN-EDMF f3c9d9e,
      MY1 as uncorrected; GSD MYNN 4.1 (gsd_41) adds the flux with its sign
      and does not carry it.
 
-FQ1-FQ4 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
+FQ1-FQ6 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
 ``woof_quirk_corrections``): corrections of WRF 4.7.1 arithmetic that
 contradicts itself, each with its own key.  Like the findings above they are
 on in correct mode and off in exact mode (and in a strict WRF process).
@@ -115,6 +115,12 @@ FQ4  Noah (sf_surface_physics = 2) raises soil moisture to its 0.02 floor
      without taking the water from anywhere; the key books it from the layer
      below or RUNOFF3 (``noah_smc_floor_booking``).  A WRF-Hydro coupling
      does not read it.
+FQ6  WRF's RRTMG longwave (ra_lw_physics = 4 with ra_rrtmg_variant =
+     rrtmg_legacy) matches its standard-profile temperature to the column
+     starting at kte+1, which overwrites the model-top interface temperature
+     and the top layer's; the key keeps both and anchors the profile at the
+     top interface (``rrtmg_lw_model_top``).  The RTE+RRTMGP adapter does not
+     carry it.
 
 WHICH SCHEMES CARRY EACH FINDING is data too (:attr:`Correction.carriers`),
 separate from which schemes a key corrects (:data:`KEY_SCOPE`).  A domain
@@ -299,6 +305,15 @@ CORRECTIONS: tuple[Correction, ...] = (
             "the layer below, or RUNOFF3"),
         carriers=(("sf_surface_physics", (2,)),),
     ),
+    Correction(
+        finding="FQ6",
+        keys=("rrtmg_lw_model_top",),
+        summary=(
+            "WRF's RRTMG longwave keeps the model-top interface and top "
+            "layer temperatures when it matches the standard profile above "
+            "the model top"),
+        carriers=(("ra_lw_physics", (4,)),),
+    ),
 )
 
 #: Finding -> ``(selector, absent value, values)``: a carrier that is a
@@ -313,6 +328,9 @@ CARRIER_GENERATIONS: Mapping[str, tuple[str, str, tuple[str, ...]]] = {
     "MY1": ("bl_mynn_version", "wrf_461", ("wrf_461", "wrf_471", "wrf_480")),
     # FQ3: the gsl_wrf39 surface layer integrates from z0/L throughout.
     "FQ3": ("mynn_sfclay_variant", "wrf_461", ("wrf_461",)),
+    # FQ6: only the legacy RRTMG longwave (rrtmg_legacy_prep) holds the
+    # profile match; RTE+RRTMGP is another implementation.
+    "FQ6": ("ra_rrtmg_variant", "rte-rrtmgp", ("rrtmg_legacy",)),
 }
 
 #: Key -> ``(selector, absent value, values)``: a key read only under one
@@ -322,6 +340,7 @@ KEY_GENERATIONS: Mapping[str, tuple[str, str, tuple[str, ...]]] = {
     # generations are other sources and never read the key.
     "mynn_fixes_v61": ("bl_mynn_version", "wrf_461", ("wrf_461",)),
     "mynn_sfclay_psih_zolzt": ("mynn_sfclay_variant", "wrf_461", ("wrf_461",)),
+    "rrtmg_lw_model_top": ("ra_rrtmg_variant", "rte-rrtmgp", ("rrtmg_legacy",)),
 }
 
 #: Key -> ``(selector, values)``: the scheme selection under which the key is
@@ -350,11 +369,14 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "mynn_boulac_down_sign": ("bl_pbl_physics", (5,)),
     # ML1's second key: the BouLac (8) and k-epsilon (17) length kernels.
     "pbl_boulac_down_sign": ("bl_pbl_physics", (8, 17)),
-    # FQ1-FQ4, the fork's quirk ledger (woof.quirk_corrections).
+    # FQ1-FQ6, the fork's quirk ledger (woof.quirk_corrections).
     "gf_deep_rain_evaporation_booking": ("cu_physics", (3,)),
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
     "noah_smc_floor_booking": ("sf_surface_physics", (2,)),
+    # FQ6: the longwave scheme (the aggregate ra_physics resolves to it,
+    # _selector_int), at the legacy variant (KEY_GENERATIONS).
+    "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
 }
 
 #: Key -> ``(selector, values)``: selections inside :data:`KEY_SCOPE` under
@@ -386,12 +408,22 @@ def _generation_matches(rule, values: Mapping) -> bool:
     return (absent if value is None else value) in allowed
 
 
+def _selector_int(selector: str, values: Mapping) -> int:
+    """``values[selector]`` as an int.  ``ra_lw_physics`` of -1 (or absent)
+    is "not stated": the aggregate ``ra_physics`` names the longwave scheme
+    (woof.config.radiation_scheme_ids)."""
+    value = values.get(selector, 0)
+    if selector == "ra_lw_physics" and (value is None or value == -1):
+        value = values.get("ra_physics", 0)
+    return int(value or 0)
+
+
 def key_in_scope(key: str, values: Mapping) -> bool:
     """Is correction ``key`` read under the scheme selection in ``values``
     (a configuration echo or ``dataclasses.asdict`` of a RunConfig)?"""
     selector, schemes = KEY_SCOPE[key]
     try:
-        if int(values.get(selector, 0) or 0) not in schemes:
+        if _selector_int(selector, values) not in schemes:
             return False
     except (TypeError, ValueError):
         return True
@@ -406,7 +438,9 @@ SCOPE_SELECTORS: tuple[str, ...] = tuple(dict.fromkeys(
     [selector for selector, _ in KEY_SCOPE.values()]
     + [rule[0] for rule in KEY_GENERATIONS.values()]
     + [rule[0] for rule in CARRIER_GENERATIONS.values()]
-    + [selector for selector, _ in KEY_UNREAD.values()]))
+    + [selector for selector, _ in KEY_UNREAD.values()]
+    # the aggregate radiation selection stands for ra_lw_physics = -1
+    + ["ra_physics"]))
 
 
 def _scope_values(cfg) -> dict:
@@ -561,10 +595,10 @@ def resolution_of(cfg) -> CorrectModeResolution:
 
 
 def _selector_value(cfg, selector: str) -> int | None:
-    value = (cfg.get(selector, 0) if isinstance(cfg, Mapping)
-             else getattr(cfg, selector, 0))
+    values = (cfg if isinstance(cfg, Mapping) else
+              {name: getattr(cfg, name, 0) for name in (selector, "ra_physics")})
     try:
-        return int(value or 0)
+        return _selector_int(selector, values)
     except (TypeError, ValueError):
         return None
 

@@ -123,6 +123,7 @@ exactly that shape.
 from __future__ import annotations
 
 from woof.config import P3_MP_PHYSICS
+from woof.quirk_corrections import run_reads as _run_reads
 from woof.core.device_cache import cuda_cache
 from woof.core.mp_column_schemes import SIX_MASS_TABLE_SCHEMES
 
@@ -2757,6 +2758,9 @@ class RRTMGLegacyRadiation:
             pl = _prep_device.lwrad_prep_batch_device(
                 **kw, emiss=surf["emiss"][sel],
                 nlayers=nlayers, trace_gas_overrides=lw_gases,
+                # RunConfig.rrtmg_lw_model_top (correct-mode FQ6): the
+                # longwave profile match only (the SW prep has no such loop)
+                model_top=_run_reads(cfg, "rrtmg_lw_model_top"),
                 subcolumn_generator=self._mcica_generator(
                     _mcica.gpu_generate_lw_subcolumns),
                 defer_subcolumns=True, **shared)
