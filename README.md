@@ -864,7 +864,10 @@ Notes on the 1.1.7 sync:
     column route, WRF-Solar EPS (`multi_perturb`) on regional meshes, and
     WRF's inflow perturbation on the regional relax rings
     (`woof hex forecast --inflow-perturbation`, which takes its depth from
-    the run's own boundary-layer height since hex has no parent model);
+    the run's own boundary-layer height since hex has no parent model).
+    `--w-damping` and `--inflow-perturbation` run on both the WOOF column
+    route and the MPAS v8.4.2 suite route (R2), where the depth is the
+    suite's `hpbl`;
   - WRF's flow-dependent specified zone for the microphysics species a
     regional boundary stream does not drive (`woof hex forecast
     --undriven-species-boundary wrf-flow-dependent`: outflow copies the

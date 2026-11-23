@@ -290,5 +290,53 @@ def attach(driver, backend, options: Mapping | None):
     return runtime.inflow_perturbation.receipt()
 
 
-__all__ = ["FACES", "GRID_ID", "HexInflowPerturbation", "attach", "face_geometry",
-           "pblh_from_backend", "FACE_CODES"]
+def pblh_from_suite(pbl_height, runtime, n_cells: int, *, pbl_scheme: str | None):
+    """The MPAS suite run's own PBLH (``diag_physics/hpbl``), averaged over the boundary zone's cells.
+
+    ``pbl_height`` returns the run's current ``hpbl`` words (``n_cells`` real cells, host or device);
+    None when the suite runs no PBL scheme, where ``hpbl`` is never written.
+    """
+    if pbl_scheme is None or str(pbl_scheme).strip().strip("'\"").lower() in ("", "off", "none"):
+        return None
+    import cupy as cp
+    ring = np.asarray(runtime.masks_host.bdy_mask_cell)[:n_cells]
+    cells = cp.asarray(np.nonzero(ring >= 1)[0])
+
+    def read():
+        pblh = cp.asarray(pbl_height()).reshape(-1)[:n_cells]
+        return float(cp.mean(pblh[cells].astype(cp.float64)))
+    return read
+
+
+def attach_v842(dycore, options: Mapping | None, *, pbl_height, n_cells: int, pbl_scheme: str | None):
+    """Bind the seeding to an MPAS suite run's regional relaxation; the receipt, or None (nothing built) when off.
+
+    The MPAS suite route's limited-area dycore runs the same regional runtime as the WOOF-physics route
+    (cuda_regional_forecast_v841: the relax-zone Rayleigh/filter kernels this seeding feeds); only the PBLH
+    source differs: the suite's own ``hpbl`` (:func:`pblh_from_suite`).
+    """
+    if not options:
+        return None
+    runtime = getattr(dycore, "regional_v841", None)
+    if runtime is None:
+        raise ValueError("--inflow-perturbation seeds a regional mesh's relaxation zone; this mesh is global")
+    if getattr(runtime.padded.base if hasattr(runtime.padded, "base") else runtime.padded,
+               "partition_layout_v841", None) is not None:
+        raise ValueError("--inflow-perturbation needs the whole boundary on one card (face means); "
+                         "a partitioned regional run would see only its own part")
+    source = pblh_from_suite(pbl_height, runtime, n_cells, pbl_scheme=pbl_scheme)
+    if source is None:
+        raise ValueError(parent_pbl_refusal(0).replace("parent-diagnosed", "run's own")
+                         + " (the suite runs no PBL scheme: config_pbl_scheme is off)")
+    seeding = HexInflowPerturbation(
+        runtime, seed=int(options.get("seed", 0)),
+        amplitude_scale=float(options.get("amplitude_scale", 1.0)),
+        faces=str(options.get("faces", "inflow")), pblh_source=source)
+    from datetime import timedelta
+    seeding.start = runtime.clock - timedelta(seconds=float(dycore.atmosphere.state.time_seconds))
+    runtime.inflow_perturbation = seeding
+    return seeding.receipt()
+
+
+__all__ = ["FACES", "GRID_ID", "HexInflowPerturbation", "attach", "attach_v842", "face_geometry",
+           "pblh_from_backend", "pblh_from_suite", "FACE_CODES"]

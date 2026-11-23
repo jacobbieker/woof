@@ -2273,6 +2273,30 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 pbl_height=lambda: session.field('diag_physics', 'hpbl'))
             receipt['nudging'] = coupling.nudging.receipt()
             print(json.dumps({'nudging': receipt['nudging']}, default=str), flush=True)
+        # --w-damping and --inflow-perturbation (the door resolved them: forecast_door._resolve_w_damping /
+        # _resolve_inflow_perturbation): the same terms the WOOF-physics route runs, on this route's resident dycore
+        # and regional runtime.  Off (the default) builds nothing and leaves every word as it was.
+        w_crit_cfl = getattr(arguments, 'w_damping_crit_cfl', None)
+        inflow_options = getattr(arguments, 'inflow_perturbation_options', None)
+        if w_crit_cfl is not None or inflow_options:
+            if moves or rank_execution:
+                flag = '--w-damping' if w_crit_cfl is not None else '--inflow-perturbation'
+                raise ValueError(f'{flag} acts in the one-card resident dycore and regional runtime; '
+                                 + ('a moving run remaps onto other meshes' if moves else
+                                    f"this run's {type(execution).__name__} executor is not that seat")
+                                 + ', so it would be accepted and never applied')
+            from ..cuda_w_damping import attach_v842 as attach_w_damping
+            from ..inflow_perturbation import attach_v842 as attach_inflow
+            damping = attach_w_damping(dycore, w_crit_cfl)
+            if damping is not None:
+                receipt['w_damping'] = damping
+                print(json.dumps({'w_damping': damping}), flush=True)
+            seeding = attach_inflow(dycore, inflow_options, n_cells=int(layout.dimensions['nCells']),
+                                    pbl_height=lambda: session.field('diag_physics', 'hpbl'),
+                                    pbl_scheme=layout.configs.get('config_pbl_scheme'))
+            if seeding is not None:
+                receipt['inflow_perturbation'] = seeding
+                print(json.dumps({'inflow_perturbation': seeding}), flush=True)
         # --nn (woof.nn.hex_seat, WOOF_NN_CONFIG): the opt-in NN column seat on the held sources.  Without it nothing
         # from woof.nn is imported; a resume refuses a carrier an applying seat sealed (it would splice trajectories).
         nn_carried = moving.carrier.get('nn') if resumed else None
@@ -2715,6 +2739,10 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
         receipt['nn_column_seat']=coupling.nn_seat.close()
     if limited_area:
         receipt['limited_area']=limited_area_receipt(arguments, dycore, coupling)
+        seeding = getattr(getattr(dycore, 'regional_v841', None), 'inflow_perturbation', None)
+        if seeding is not None:
+            # The attach-time receipt has no draws yet; the closing one carries each face's totals.
+            receipt['inflow_perturbation'] = seeding.receipt()
     if fullstep_shadow is not None:
         receipt['fullstep_lts_treatment']=fullstep_shadow.receipt()
     # A ported framework records the lookup files its scheme initialization read (RRFS TEMPO).
