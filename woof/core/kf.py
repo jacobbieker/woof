@@ -176,9 +176,12 @@ def kf_phase_mode_for_microphysics(mp_physics: int) -> KFPhaseMode:
                 else KFPhaseMode.SEPARATE_SNOW if "qs" in row.species
                 else KFPhaseMode.NO_SEPARATE_SNOW)
     # WRF 4.7.1 Registry.EM_COMMON:3040: UDM declares both qi and qs.
+    # Registry.EM_COMMON:3031: cammgmpscheme (mp_physics=11) declares
+    # moist:qv,qc,qi,qr,qs, so F_QI and F_QS are both true.  :3049: ntu
+    # (mp_physics=56) declares moist:qv,qc,qr,qi,qs,qg,qh, the same pair.
     # mp_physics=900 (TEMPO) declares qv,qc,qr,qi,qs,qg like Thompson, and
     # _KF_OLD_SPECIES below already carries it on that contract.
-    if int(mp_physics) in (2, 6, 7, 8, 9, 10, 13, 14, 16, 18, 24, 26, 27, 28, 29, 30, 38, 40, 106, 900) + SIX_MASS_TABLE_SCHEMES:
+    if int(mp_physics) in (2, 6, 7, 8, 9, 10, 11, 13, 14, 16, 18, 24, 26, 27, 28, 29, 30, 38, 40, 56, 106, 900) + SIX_MASS_TABLE_SCHEMES:
         return KFPhaseMode.SEPARATE_ICE_SNOW
     if int(mp_physics) == 1:
         return KFPhaseMode.WARM_RAIN

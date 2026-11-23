@@ -1538,14 +1538,15 @@ def select_initial_scalar_names(
     names = tuple(model_names)
     if names[:len(SOURCE_SCALAR_NAMES)] != tuple(SOURCE_SCALAR_NAMES):
         # Refused by name: MAD-WRF (mp_physics=96) advects qc, qi and qs passively and
-        # its row has no rain slot in third place; the hex scalar block, the init
+        # its row has no rain slot in third place; Eta (95) is qv, qt; the hex scalar block, the init
         # emitter and the LBC species carry rows that begin qv, qc, qr only.
         raise ConfigurationRefusal(
             "scalar_names", names,
             "the model species row must begin with qv, qc and qr: the hex "
             "scalar block, the init emitter and the lateral-boundary species "
             "all key on that leading triple (MAD-WRF, mp_physics=96, passively "
-            "advects qc/qi/qs and starts from an init that carries none of them)",
+            "advects qc/qi/qs and starts from an init that carries none of them; "
+            "Eta, mp_physics=95, carries total condensate qt and no qc/qr)",
             "a microphysics scheme whose species row begins qv, qc, qr")
     missing_source = [name for name in SOURCE_SCALAR_NAMES if name not in variables]
     if missing_source:

@@ -5607,7 +5607,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "5042dbb2daca01685e7744231e78e7dfadb25f5d883c42f525fc3add689467b2"
+    "sha256": "98bcc4104f8f4115f57697a29c87a14035f10c3c126dbd4583856cb47258e8e2"
    },
    {
     "file": "woof/chem_micm.py",
@@ -5727,7 +5727,7 @@
    },
    {
     "file": "woof/core/kf.py",
-    "sha256": "3cbace2bac667620306a64c58e7fc0da0adac9e8240586a64681fe177a97a80e"
+    "sha256": "9580c7938b5a6f2498a33adbdc99494d10776116eb4970b72eae53bec9ce620f"
    },
    {
     "file": "woof/core/microphysics.py",
@@ -6315,7 +6315,7 @@
    },
    {
     "file": "woof/hex/cuda_physics_v841.py",
-    "sha256": "6670121bef99b05877a01fe089910a25b3b5660b34b9afec086a0ff5a86689ad"
+    "sha256": "82cabf93c7e0f5c21f538a3279a039d76e32275715b2f9405918650857d31c42"
    },
    {
     "file": "woof/hex/cuda_regional_hoist_v841.py",

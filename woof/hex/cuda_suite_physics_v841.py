@@ -1736,16 +1736,20 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
                 raise TypeError(f"suite radius carrier {name!r} is missing")
 
     def computes_reflectivity(self) -> bool:
-        """False only on the generic seam with microphysics off.
+        """False on the generic seam with microphysics off, and with Fast-SBM.
 
         THE BREAKAGE: the engine refuses refl_10cm_due with mp_physics=0
         ("no scheme computes a reflectivity"), so a microphysics-off run
         stopped at its first history step.  The rule is the engine's own.
+        Fast-SBM (mp_physics=30) writes no REFL_10CM either
+        (woof.core.fast_sbm_runtime.apply refuses a due frame; obsop's cited
+        absence), and a 1 h hex run stopped at its history step (3570 s) of
+        the option matrix: its frames carry the allocated default.
         """
 
         if self._constructor.physics is None:
             return super().computes_reflectivity()
-        return int(dict(self._constructor.physics).get("mp_physics", 1)) != 0
+        return int(dict(self._constructor.physics).get("mp_physics", 1)) not in (0, 30)
 
     def runs_microphysics(self) -> bool:
         """False only on the generic seam with microphysics off (mp_physics=0).
