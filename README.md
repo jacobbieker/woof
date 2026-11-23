@@ -871,6 +871,14 @@ Notes on the 1.1.7 sync:
     first cell inside the zone, inflow sets 0, or `ccn_conc` for the CCN
     number). The default, `free`, keeps MPAS's behaviour: those species
     get no boundary step;
+  - extra-species microphysics on regional hex runs: CAM-MG, Morrison and
+    Morrison-aerosol, NSSL-2, Milbrandt-Yau, P3 (mp 50-53), NTU, ISHMAEL,
+    UDM, WDM6, Goddard 4-ice, Ferrier-Aligo with advected rime (mp 15)
+    and Fast-SBM run in the hex option matrix on
+    CUDA and Metal (`components/hex/evidence/option-matrix.json`).
+    Fast-SBM history frames carry the allocated reflectivity default,
+    because WRF's Fast-SBM writes no `REFL_10CM`. ISHMAEL needs its WRF
+    tables staged first (`woof fetch-tables --ishmael`);
   - `woof resume` and `woof branch` for hex runs
     ([docs/branch-from-checkpoint.md](docs/branch-from-checkpoint.md));
   - GRIB2 and Earth2 export ([docs/grib2-export.md](docs/grib2-export.md));

@@ -1171,6 +1171,26 @@ def history_cumulus_rain_rate(owner: Any, seam: Any, rainc: Any, cp: Any) -> dic
 _SPECIES_NAME = __import__("re").compile(r"[qnb][a-z0-9]{1,4}")
 
 
+def nonfinite_initial_reflectivity(result: Any, species: Mapping[str, Any], cp: Any) -> str | None:
+    """None when the hour-0 reflectivity is finite everywhere, else the reason it is not written: the
+    count of non-finite words and every number moment that is zero under its mass (``n<x>`` under
+    ``q<x>`` > 1e-9), the init's missing moments a two-moment operator divides by."""
+    nonfinite = int(cp.count_nonzero(~cp.isfinite(result)))
+    if not nonfinite:
+        return None
+    pairs = []
+    for name, value in species.items():
+        mass = "q" + name[1:]
+        if name.startswith("n") and mass in species:
+            count = int(cp.count_nonzero((species[mass] > np.float32(1.0e-9)) & (value <= 0)))
+            if count:
+                pairs.append(f"{name}=0 under {mass}>1e-9 at {count} points")
+    return (f"hour 0: the scheme's reflectivity of the initial state is non-finite at {nonfinite} points ("
+            + ("; ".join(pairs) or "no zero number moment under a mass found")
+            + "); the allocated default is written, as WRF and MPAS do at the initial time, and the scheme's "
+            "first call sets the moments")
+
+
 class InitialReflectivityViewV841:
     """A between-steps column view of the INITIAL state for the engine's 10 cm reflectivity operator.
 
@@ -1188,7 +1208,7 @@ class InitialReflectivityViewV841:
     """
 
     def __init__(self, *, theta: Any, pressure: Any, species: Mapping[str, Any], melting: bool, cp: Any,
-                 rho_dry: Any = None) -> None:
+                 rho_dry: Any = None, w: Any = None) -> None:
         nz, ncol = (int(n) for n in theta.shape)
         shape = (nz, 1, ncol)
 
@@ -1206,6 +1226,10 @@ class InitialReflectivityViewV841:
             # at its first frame with "AttributeError: alt".  The same quotient the seam hands a step
             # (woof.core.mpas_column_suite: alt = 1/rho_dry), in the view's own array.
             self.alt = cp.float32(1.0) / column("rho_dry", rho_dry)
+        if w is not None:
+            # Mass-level vertical velocity (w_p[:-1], as the WSM6 view takes it): NTU's operator
+            # (woof.core.ntu.reflectivity) carries w in its field table, though ntu_refl_cell reads none of it.
+            self.w = column("w", w)
         for name, value in species.items():
             setattr(self, name, column(name, value))
         self.refl10cm_from_melting = bool(melting)
@@ -2130,7 +2154,8 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
         seam = self._seam
         view = InitialReflectivityViewV841(
             theta=prepared.th_p, pressure=prepared.pres_p, species=species,
-            melting=refl_melting_for(seam._state), cp=cp, rho_dry=prepared.rho_dry)
+            melting=refl_melting_for(seam._state), cp=cp, rho_dry=prepared.rho_dry,
+            w=prepared.w_p[:-1])
         try:
             refl = simulated_reflectivity(view, seam._cfg)
         except NotImplementedError as refusal:
@@ -2145,6 +2170,16 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
             return None, f"engine refuses a between-steps reflectivity for this scheme: {refusal}"
         nz, ncol = (int(n) for n in prepared.th_p.shape)
         result = cp.array(refl.reshape(nz, ncol), dtype=cp.float32, copy=True, order="C")
+        nonfinite = nonfinite_initial_reflectivity(result, species, cp)
+        if nonfinite is not None:
+            # THE BREAKAGE (hex option matrix, Morrison mp_physics=10 on a GFS-driven regional init, 2026-11-21):
+            # the init carries the analysis snow and graupel masses, and --augment-init zero-fills the ns/ng
+            # moments the analysis lacks, as real.exe leaves QNS/QNG at zero.  WRF's refl10cm_hm then forms
+            # lambda = 0 and 0 * inf (120 296 NaN words) -- in WRF that never runs at hour 0 and the scheme's first
+            # call sets the moments through its lambda limits.  The hour-0 frame takes the allocated default, as
+            # WRF and native MPAS write, and the reason names the moments; the snapshot gate still refuses any
+            # later NaN.
+            return None, nonfinite
         return result, ("hour 0: the scheme's own 10 cm reflectivity of the initial hydrometeors "
                         "(woof.da.obsop.simulated_reflectivity, mp_physics="
                         f"{int(seam._cfg.mp_physics)}, temperature from initial theta and pressure)")

@@ -9,10 +9,10 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 741,
+  "site_count": 742,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 48,
-    "cupy.RawKernel": 123,
+    "cupy.RawKernel": 124,
     "cupy.RawModule": 317,
     "cupy.ReductionKernel": 22,
     "cupy.cuda.compiler.compile_using_nvrtc": 231
@@ -33,7 +33,7 @@
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
-      "cupy.RawKernel": 49,
+      "cupy.RawKernel": 50,
       "cupy.RawModule": 113,
       "cupy.ReductionKernel": 10,
       "cupy.cuda.compiler.compile_using_nvrtc": 36
@@ -2772,7 +2772,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 70,
+      "line": 75,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2788,7 +2788,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 113,
+      "line": 118,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2808,7 +2808,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 137,
+      "line": 142,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2824,7 +2824,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 161,
+      "line": 166,
       "column": 4,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2840,7 +2840,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 189,
+      "line": 194,
       "column": 4,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2856,7 +2856,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 214,
+      "line": 219,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2872,7 +2872,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 228,
+      "line": 233,
       "column": 17,
       "surface": "tests",
       "constructor": "cp.ElementwiseKernel",
@@ -2885,6 +2885,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "zero_below = cp.ElementwiseKernel(\"float32 t\", \"float32 x\","
+    },
+    {
+      "file": "tests/test_metal_translation_gaps.py",
+      "line": 284,
+      "column": 4,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "test_template_sized_local_pointer_array",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "cp.RawKernel(_TEMPLATE_POINTER_ARRAY, \"template_pointer_array\")((1,), (32,), (da, db, out, np.int32(32)))"
     },
     {
       "file": "tests/test_milbrandt2_wrf461_exact_gpu.py",
@@ -7866,7 +7882,7 @@
     },
     {
       "file": "woof/core/kf.py",
-      "line": 385,
+      "line": 388,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -10266,7 +10282,7 @@
     },
     {
       "file": "woof/hex/cuda_physics_v841.py",
-      "line": 1919,
+      "line": 1930,
       "column": 26,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
