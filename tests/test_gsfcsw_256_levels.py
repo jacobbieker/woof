@@ -99,9 +99,9 @@ def _inputs(nz):
     return {k: np.asarray(v, np.float32) for k, v in data.items()}
 
 
-def _run(nz):
-    import cupy as cp
-
+def _run(nz, cp):
+    # cupy comes from the calling test: a helper that imports it would mark
+    # the whole module gpu (tests/conftest.py) and hide the CPU contract tests.
     from woof.core.gsfcsw import gsfcsw_columns
 
     data = _inputs(nz)
@@ -140,7 +140,9 @@ def _check_xbackend(label, result):
 
 @pytest.mark.gpu
 def test_a_256_level_column_to_1_hpa_is_finite_bounded_and_conserves_energy():
-    data, out = _run(DEEP)
+    import cupy as cp
+
+    data, out = _run(DEEP, cp)
     for name, value in out.items():
         assert np.isfinite(value).all(), name
     assert out["rthraten"].shape == (NCOL, DEEP)
@@ -148,7 +150,7 @@ def test_a_256_level_column_to_1_hpa_is_finite_bounded_and_conserves_energy():
     day = mu > 0
     incoming = SOLCON * mu
     # Night column: no output.
-    assert not out["rthraten"][~day].any() and out["gsw"][~day].all() == 0
+    assert not out["rthraten"][~day].any() and not out["gsw"][~day].any()
     # Heating (K/s) is non-negative (the scheme clamps it) and bounded; the
     # stratosphere above ~10 hPa absorbs in the ozone and O2 bands.
     heating = out["rthraten"].astype(np.float64) * data["exner"]
@@ -178,17 +180,19 @@ def test_a_256_level_column_to_1_hpa_is_finite_bounded_and_conserves_energy():
 @pytest.mark.gpu
 @pytest.mark.parametrize("nz", [49, SHIPPED])
 def test_the_256_tier_reproduces_the_unchanged_kernel(nz, monkeypatch):
+    import cupy as cp
+
     from woof.core import gsfcsw
 
     calls = []
     real = gsfcsw.kmax_tier
     monkeypatch.setattr(gsfcsw, "kmax_tier",
                         lambda n: calls.append(real(n)) or real(n))
-    _, shipped = _run(nz)
+    _, shipped = _run(nz, cp)
     assert set(calls) == {SHIPPED}, "nz <= 128 must take the unchanged tier"
     assert np.any(shipped["rthraten"] != 0)
     monkeypatch.setattr(gsfcsw, "kmax_tier", lambda n: DEEP)
-    _, deep = _run(nz)
+    _, deep = _run(nz, cp)
     _assert_bitwise(deep, shipped, f"GSFC_KMAX 128 -> 256 at nz={nz}")
 
 

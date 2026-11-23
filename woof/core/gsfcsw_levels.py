@@ -7,7 +7,7 @@ and is word for word the pre-tier kernel; a 129 to 256 level column adds
 ``-D GSFC_KMAX=256`` through ``get_kernel_int_defines``.  The per-column
 arena is affine in the interface count ``np = GSFC_KMAX + 1``; the two
 coefficients are bound to the kernel's own ``GSFC_WORKSPACE_WORDS``
-expression by ``tests/test_gsfcsw_resources.py``.
+expression by ``tests/test_gsfcsw_256_levels.py``.
 """
 
 from __future__ import annotations

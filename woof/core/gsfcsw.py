@@ -13,16 +13,16 @@ from woof.core.thompson_contract import TableAsset, read_validated_table_asset
 
 TABLE_ROOT = Path(__file__).resolve().parents[1] / 'data/wrf_radiation/gsfcsw'
 TABLE_ASSET = TableAsset('coefficients.f32',9896,'a23e21798425039a82cf799f81c638a9f6bb7b0562c586829f05bdff10abc533')
-from woof.core.gsfcsw_levels import DEEP_KMAX as MAX_LAYERS, kmax_tier, tier_workspace_words, workspace_words
+from woof.core.gsfcsw_levels import DEEP_KMAX as MAX_LAYERS, SHIPPED_KMAX, kmax_tier, tier_workspace_words, workspace_words
 #: Arena words per column of the shipped (<= 128 layer) tier; deeper columns
 #: use ``workspace_words(nlay)``.
-WORKSPACE_WORDS = workspace_words(128)
+WORKSPACE_WORDS = workspace_words(SHIPPED_KMAX)
 COLUMN_CHUNK = 4096
 
 def workspace_columns(columns):
     return min((int(columns)+31)//32*32,COLUMN_CHUNK)
 
-def workspace_bytes(columns,nlay=128):
+def workspace_bytes(columns,nlay=SHIPPED_KMAX):
     """Bounded call workspace, also charged by forecast preflight."""
     return workspace_columns(columns)*workspace_words(nlay)*4
 
@@ -30,7 +30,7 @@ def gsfcsw_kernel(tier):
     """The column kernel at one GSFC_KMAX tier: the plain loader (the
     unchanged source, GSFC_KMAX 128) or the deep tier's -D build."""
     from woof.core.kernels import get_kernel_int_defines, load_module
-    if tier==128: return load_module('gsfcsw').get_function('gsfcsw_columns_kernel')
+    if tier==SHIPPED_KMAX: return load_module('gsfcsw').get_function('gsfcsw_columns_kernel')
     return get_kernel_int_defines('gsfcsw','gsfcsw_columns_kernel',(('GSFC_KMAX',tier),))
 
 def load_tables(root=None):
@@ -113,6 +113,8 @@ class GSFCSWShortwaveRadiation:
     longitude_deg: object
     icloud: int = 1
     center_lat: float | None = None
+    #: Domain layer count; sizes the arena at its tier (None: the shipped tier).
+    nz: int | None = None
     update_count: int = field(default=0,init=False)
     publishes_cldfra = True
 
@@ -127,8 +129,9 @@ class GSFCSWShortwaveRadiation:
         if not np.isfinite(self.center_lat) or abs(self.center_lat)>90:
             raise ValueError("GSFC center latitude must be finite and within 90 degrees")
         self.gsfc_coefficients=cp.asarray(load_tables())
-        # The shipped tier; a call deeper than 128 layers replaces it with the deep tier's.
-        self.gsfc_workspace=cp.empty((workspace_columns(self.latitude_deg.size),WORKSPACE_WORDS),dtype=cp.float32)
+        # Sized at the domain's tier, so a deep domain never holds the shipped arena too.
+        words=WORKSPACE_WORDS if self.nz is None else workspace_words(self.nz)
+        self.gsfc_workspace=cp.empty((workspace_columns(self.latitude_deg.size),words),dtype=cp.float32)
 
     def __call__(self,*,atmosphere,fields,state,cfg):
         import cupy as cp
@@ -189,4 +192,4 @@ class GSFCSWShortwaveRadiation:
     def restart_identity(self):
         from woof.io.restart import _array_setup_identity
         coefficients_state=_array_setup_identity(self.gsfc_coefficients)
-        return {'algorithm':'wrf-v4.7.1-gsfc-shortwave','coefficients_sha256':TABLE_ASSET.sha256,'coefficients_state':coefficients_state,'center_lat':self.center_lat,'icloud':self.icloud,'supported_path':'no-chem','max_layers':128}
+        return {'algorithm':'wrf-v4.7.1-gsfc-shortwave','coefficients_sha256':TABLE_ASSET.sha256,'coefficients_state':coefficients_state,'center_lat':self.center_lat,'icloud':self.icloud,'supported_path':'no-chem','max_layers':SHIPPED_KMAX if self.nz is None else kmax_tier(self.nz)}
