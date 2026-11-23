@@ -43656,26 +43656,31 @@ def _module(device):
 MODULE_KEY = 'woof.core.gfl_873b414.lanes'
 
 
-def _spill_pool(device, spill_bytes, blocks):
+def _spill_pool(device, spill_bytes, slabs):
     """The spill pool a deep column continues in (GFWorkspace.allocate), kept for the run.
 
     Upstream 1.1.7 spilled to the CUDA device heap (in-kernel malloc, 256 MiB limit);
     Metal has no device heap, so the launch passes this host-allocated pool on every
     backend instead. Entries are lane-interleaved slabs of ``spill_bytes`` per lane;
     a thread takes one the first time one of its columns spills and keeps it for the
-    launch, so ``blocks`` slabs (one entry per launched thread) can never run out and
-    SPILL_POOL_BYTES bounds a large launch, as the heap limit did. The pool changes
-    no output word: placement only.
+    launch. gfl_lanes.spill_pool_slabs gives one slab per domain slab (an entry for
+    every thread the launch can start) within SPILL_POOL_BYTES; where that cap binds
+    (very deep columns on a large domain) a launch with more spilling threads than
+    entries traps, as an exhausted heap did. A held pool at least as large is reused
+    (a nest whose domains differ in nz does not reallocate every step), and the
+    admission prices it (woof.core.preflight.gf_column_workspace_bytes). The pool
+    changes no output word: placement only.
     """
     import cupy as cp
     per_slab = spill_bytes * LANES
-    slabs = max(1, min(int(blocks), SPILL_POOL_BYTES // per_slab))
+    need = _spill_pool_slabs(spill_bytes, slabs) * per_slab
     held = _SPILL.get(device)
-    if held is None or held[0] != spill_bytes or held[1] < slabs:
+    if held is None or held.nbytes < need:
         _SPILL.pop(device, None)
+        held = None  # the held pool is given back before the new one is taken
         with cp.cuda.Device(device):
-            held = _SPILL[device] = (spill_bytes, slabs, cp.empty(slabs * per_slab, dtype=cp.uint8))
-    return held[2], held[1] * LANES
+            held = _SPILL[device] = cp.empty(need, dtype=cp.uint8)
+    return held, held.nbytes // per_slab * LANES
 
 
 _SPILL = {}
@@ -43780,12 +43785,13 @@ def launch_lane_columns(fields, *, ncol, nz, saved_fct_error=None, vertical=None
         return {'diagnostics': diagnostics, 'scratch_highwater': highwater, 'saved_fct_error': saved_fct_error}
     capacity = _share_bytes(levels, vertical[5] - vertical[4] + 1)
     kernel = _module(device).get_function('gfl_lane_columns')
+    # The spill pool first, so the scratch is sized from the memory left after it.
+    spill_bytes = SPILL_SHARES * capacity
+    spill, entries = _spill_pool(device, spill_bytes, -(-ncol // LANES))
     blocks, scratch = _column_scratch(device, kernel, -(-ncol // LANES), capacity)
     # Metal's 32-bit counters (gf_counter): each warp overshoots the columns by at most one take.
     if _metal() and ncol + 32 * (LANES // 32) * blocks >= 1 << 32:
         raise ValueError(f'GFL launch of {ncol} columns passes its 32-bit column counter')
-    spill_bytes = SPILL_SHARES * capacity
-    spill, entries = _spill_pool(device, spill_bytes, blocks)
     table = cp.asarray(np.asarray(pointers + strides, dtype=np.uint64))
     kernel((blocks,), (LANES,), (np.int64(ncol), table[:len(FIELDS)], table[len(FIELDS):], scratch,
            np.uint64(capacity), np.uint64(spill_bytes), diagnostics, highwater,
@@ -43822,18 +43828,17 @@ def _vertical_words(device, vertical):
 
 #: Columns per slab (one 128-thread block); gfl_lanes.LANES.
 LANES = 128
-#: Contiguous character bytes per lane (ierrc, ierrcm, ierrcs); gfl_lanes.CHARACTER_BYTES
-#: (gfl_lanes.character_bytes on Metal, which also holds the passed-on locals there).
+#: Contiguous character bytes per lane (ierrc, ierrcm, ierrcs) of the CUDA lowering;
+#: gfl_lanes.CHARACTER_BYTES. The Metal lowering's region is larger (it also holds the
+#: passed-on locals): size lane regions with gfl_lanes.character_bytes(_metal()).
 CHARACTER_BYTES = 256
-#: Scratch sizing: one formula with the admission (gfl_lanes.scratch_bytes,
-#: priced by woof.core.preflight.gf_column_workspace_bytes). A column that needs
-#: more than its share continues in a spill entry of SPILL_SHARES shares from
-#: the launch's spill pool (_spill_pool), so it stays exact and running.
+#: Scratch sizing: one formula with the admission (gfl_lanes.scratch_bytes and
+#: gfl_lanes.spill_pool_bytes, priced by woof.core.preflight.gf_column_workspace_bytes).
+#: A column that needs more than its share continues in a spill entry of SPILL_SHARES
+#: shares from the launch's spill pool (_spill_pool), so it stays exact and running.
 from woof.core.gfl_lanes import (SCRATCH_CAP_BYTES, SHARE_BYTES_PER_LEVEL, SHARE_BYTES_FIXED,  # noqa: E402,F401
+                                  SPILL_SHARES, SPILL_POOL_BYTES, spill_pool_slabs as _spill_pool_slabs,
                                   scratch_blocks as _scratch_blocks, share_bytes as _lane_share_bytes)
-SPILL_SHARES = 2
-#: The most the spill pool holds (upstream 1.1.7's device-heap limit for the same spill).
-SPILL_POOL_BYTES = 256 << 20
 _SCRATCH = {}
 
 

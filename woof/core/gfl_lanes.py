@@ -85,12 +85,32 @@ def scratch_bytes(nz, columns, sms, *, resident_per_sm=MIN_BLOCKS_PER_SM, free=N
 
     The launcher (woof.core.gfl_873b414._column_scratch) allocates exactly
     this; the admission (woof.core.preflight.gf_column_workspace_bytes)
-    prices it. Storage levels are the nz+1 faces, the widest field the
-    adapter passes.
+    prices it, with the spill pool (:func:`spill_pool_bytes`). Storage levels
+    are the nz+1 faces, the widest field the adapter passes.
     """
     per_slab = (share_bytes(int(nz) + 1, int(nz)) + character_bytes(metal)) * LANES
     slabs = -(-max(int(columns), 1) // LANES)
     return scratch_blocks(slabs, per_slab, resident_per_sm=resident_per_sm, sms=sms, free=free) * per_slab
+
+
+#: Spill shares per spill entry: a column deeper than its share continues in an entry this
+#: many shares deep.
+SPILL_SHARES = 2
+#: The most the spill pool holds (upstream 1.1.7's device-heap limit for the same spill).
+SPILL_POOL_BYTES = 256 << 20
+
+
+def spill_pool_slabs(spill_bytes, slabs):
+    """Slabs of the launch's spill pool: one per domain slab (an entry for every thread the
+    launch can start), within SPILL_POOL_BYTES, and at least one."""
+    return max(1, min(max(int(slabs), 1), SPILL_POOL_BYTES // (int(spill_bytes) * LANES)))
+
+
+def spill_pool_bytes(nz, columns):
+    """Device bytes of the spill pool the GFL column launch holds for ``columns`` columns of
+    ``nz`` mass levels (woof.core.gfl_873b414._spill_pool allocates exactly this)."""
+    spill_bytes = SPILL_SHARES * share_bytes(int(nz) + 1, int(nz))
+    return spill_pool_slabs(spill_bytes, -(-max(int(columns), 1) // LANES)) * spill_bytes * LANES
 
 _DEFINES = r'''#ifndef GF_LANES
 #ifdef GF_HOST_WITNESS
@@ -295,6 +315,19 @@ _FUNCTION_END = re.compile(r'^\}\n', re.M)
 _LOCAL_TYPE = '|'.join(re.escape(t) for t in _LOCAL_TYPES)
 
 
+def _address_taken(body):
+    """Names after an address-of ``&`` (as written in the lowered scheme), not the right side of ``&&``."""
+    names = set()
+    for m in re.finditer(r'&\s*(\w+)', body):
+        at = m.start()
+        if body[at + 1:at + 2] == '&' or body[at - 1:at] == '&':
+            continue
+        if body[at - 1:at].isalnum() or body[at - 1:at] in ('_', '.', '>'):
+            continue
+        names.add(m[1])
+    return names
+
+
 def metal_locals(scheme):
     """Hold every local whose address a scheme function passes on in the thread's contiguous region.
 
@@ -312,7 +345,7 @@ def metal_locals(scheme):
     for head in list(_SCHEME_FUNCTION.finditer(scheme)):
         end = _FUNCTION_END.search(scheme, head.end()).end()
         body = scheme[head.end():end]
-        names = set(re.findall(r'(?<![\w.>])&\s*(\w+)', body))
+        names = _address_taken(body)
         arrays = set(re.findall(r'^\s+(?:%s) (\w+)\[\d+\]' % _LOCAL_TYPE, body, re.M))
         names |= {a for a in arrays if re.search(r'[(,]\s*%s\s*[,)]' % re.escape(a), body)}
         offset = 0

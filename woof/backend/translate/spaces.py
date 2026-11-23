@@ -1065,12 +1065,12 @@ class SpaceAnalysis:
             if ref is not None and self._generic_method(ref):
                 # `a(i)` on a space-generic struct: a reference into its data
                 return self.gspace(self._call_object(e), env)
-            if len(children) == 2 and next(iter(e.get_tokens()), None) is not None \
-                    and next(iter(e.get_tokens())).spelling == "*":
-                # `*q` in a class template where an operator* is in scope (GFReal's): clang
-                # keeps the dereference an unresolved operator call; a raw pointer operand
-                # dereferences to the memory it points into
-                operand = [c for c in children if c.kind.name not in ("DECL_REF_EXPR", "OVERLOADED_DECL_REF")]
+            if len(children) == 2:
+                # `*q` in a template where an operator* is in scope (GFReal's): clang keeps the
+                # dereference an unresolved operator call whose children are the operand and
+                # the overloaded operator* reference (libclang lists the operand first); a raw
+                # pointer operand dereferences to the memory it points into
+                operand = [c for c in children if c.referenced is None or c.referenced.spelling != "operator*"]
                 if len(operand) == 1 and _indirection(operand[0].type) == "ptr":
                     return self.space(operand[0], env)
             info = self.resolve_call(e)

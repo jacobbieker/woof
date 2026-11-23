@@ -155,17 +155,37 @@ def test_lane_scratch_is_bounded_by_the_domain_and_the_cap():
     assert scratch_bytes(49, 424 * 299, 188, free=8 << 30) == (2 << 30) // per_slab * per_slab
 
 
-def test_preflight_prices_gfl_lane_scratch_not_gfdrv_tiles():
+def test_preflight_prices_gfl_lane_scratch_and_spill_pool_not_gfdrv_tiles(monkeypatch):
+    """The admission prices what the GFL launch holds: lane scratch plus the spill pool, with
+    the Metal per-lane region when Metal launches the run.
+
+    Breakage prevented: the spill pool (up to 256 MiB, held for the run) went unpriced, and a
+    reference or declared-budget profile priced a Metal run's scratch with CUDA's 256-byte
+    region instead of Metal's 2048.
+    """
     from types import SimpleNamespace
-    from woof.core.gfl_lanes import scratch_bytes
+    from woof import backend
+    from woof.core.gfl_lanes import (LANES, SPILL_POOL_BYTES, SPILL_SHARES, scratch_bytes, share_bytes,
+                                     spill_pool_bytes)
     from woof.core.preflight import gf_column_workspace_bytes, MEASURED_LOCAL_MEMORY_PROFILE
 
     def exp(version, nx=150, ny=150, nz=49):
         run = SimpleNamespace(cu_physics=3, cu_gf_version=version, nx=nx, ny=ny, nz=nz)
         return SimpleNamespace(domains=[SimpleNamespace(run=run)])
+    per_spill_slab = SPILL_SHARES * share_bytes(50, 49) * LANES
+    pool = spill_pool_bytes(49, 22500)
+    assert pool == min(176, SPILL_POOL_BYTES // per_spill_slab) * per_spill_slab <= SPILL_POOL_BYTES
+    assert spill_pool_bytes(49, 100) == per_spill_slab                  # one slab for a one-slab domain
     sms = MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count
-    assert gf_column_workspace_bytes(exp("gfl_873b414")) == scratch_bytes(49, 22500, sms)
-    assert gf_column_workspace_bytes(exp("wrf_461")) != scratch_bytes(49, 22500, sms)
+    monkeypatch.setattr(backend, "_active", "cuda")
+    assert gf_column_workspace_bytes(exp("gfl_873b414")) == scratch_bytes(49, 22500, sms) + pool
+    assert gf_column_workspace_bytes(exp("wrf_461")) != scratch_bytes(49, 22500, sms) + pool
+    metal = scratch_bytes(49, 22500, sms, metal=True) + pool
+    assert metal > scratch_bytes(49, 22500, sms) + pool
+    live = SimpleNamespace(multiprocessor_count=sms, backend="mlx")
+    assert gf_column_workspace_bytes(exp("gfl_873b414"), profile=live) == metal
+    monkeypatch.setattr(backend, "_active", "mlx")                      # reference profile, Metal process
+    assert gf_column_workspace_bytes(exp("gfl_873b414")) == metal
 
 
 def _unpromote(text):
@@ -198,7 +218,7 @@ def test_metal_lowering_moves_only_the_passed_on_locals():
     for head in gfl_lanes._SCHEME_FUNCTION.finditer(metal):
         end = gfl_lanes._FUNCTION_END.search(metal, head.end()).end()
         body = metal[head.end():end]
-        for name in set(re.findall(r'(?<![\w.>])&\s*(\w+)', body)):
+        for name in gfl_lanes._address_taken(body):
             assert not re.search(r'^\s+(?:GFReal|int|bool|long long|unsigned int) %s(\[\d+\])?( = [^;]*)?;$'
                                  % name, body, re.M), name
     cuda = gfl_lanes.lower(gfl._SUPPORT, gfl._SCHEME_SOURCE, gfl._ENTRY)

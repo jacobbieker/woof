@@ -738,8 +738,7 @@ class _Rewriter:
         # its struct is not made generic (GFL's Metal lowering moves every local a lane pointer can
         # reach into device memory, but the probe still sees the constructors' unbound parameters).
         named = self._space_named_fields(top)
-        generic = {owner for key, spaces in probe.field_spaces.items()
-                   if len(spaces) > 1 and key not in named for owner in (key[0],)}
+        generic = {key[0] for key, spaces in probe.field_spaces.items() if len(spaces) > 1 and key not in named}
         return self._generic_companions(top, generic)
 
     def _space_named_fields(self, top) -> set:

@@ -5638,12 +5638,14 @@ def gf_column_workspace_bytes(
     WRF v4.8.0's Grell-Freitas-Li) holds a different workspace: the lane
     scratch of its persistent column launch, kept for the run and shared by
     every domain on the card (woof.core.gfl_lanes.scratch_bytes, the formula
-    the launcher allocates from). Before 2026-11-09 a GFL run was priced as
-    GFDRV's tile workspace while it held up to 4 GiB.
+    the launcher allocates from), plus the spill pool it keeps beside it
+    (woof.core.gfl_lanes.spill_pool_bytes, at most 256 MiB). Before 2026-11-09
+    a GFL run was priced as GFDRV's tile workspace while it held up to 4 GiB.
     """
     from woof.core.gf import (
         GF_BLOCK, GF_TILE_BLOCKS_PER_SM, gf_workspace_floats)
     from woof.core.gfl_lanes import scratch_bytes as gfl_scratch_bytes
+    from woof.core.gfl_lanes import spill_pool_bytes as gfl_spill_pool_bytes
 
     profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
     tile_cap = (profile.multiprocessor_count * GF_TILE_BLOCKS_PER_SM
@@ -5653,14 +5655,32 @@ def gf_column_workspace_bytes(
         if int(dc.run.cu_physics) != 3:
             continue
         if getattr(dc.run, "cu_gf_version", "wrf_461") == "gfl_873b414":
+            columns = int(dc.run.nx) * int(dc.run.ny)
             worst = max(worst, gfl_scratch_bytes(
-                int(dc.run.nz), int(dc.run.nx) * int(dc.run.ny),
-                profile.multiprocessor_count,
-                metal=getattr(profile, "backend", "cuda") == "mlx"))
+                int(dc.run.nz), columns, profile.multiprocessor_count,
+                metal=_gfl_on_metal(profile))
+                + gfl_spill_pool_bytes(int(dc.run.nz), columns))
             continue
         columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
         worst = max(worst, gf_workspace_floats(int(dc.run.nz), columns) * 4)
     return int(worst)
+
+
+def _gfl_on_metal(profile) -> bool:
+    """Whether the GFL scratch is priced for the Metal lowering (its larger per-lane region).
+
+    A live Metal profile says so; a reference or declared-budget profile does not name the
+    launching backend, so the backend this process runs (installed, or the one it would
+    select) decides. An unreadable backend selection prices for CUDA, whose region is
+    the smaller.
+    """
+    if getattr(profile, "backend", "cuda") == "mlx":
+        return True
+    from woof import backend
+    try:
+        return (backend._active if backend._active is not None else backend.requested()) == "mlx"
+    except backend.BackendUnavailable:
+        return False
 
 
 def gd_column_workspace_bytes(
