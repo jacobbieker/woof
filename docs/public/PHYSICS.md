@@ -3646,7 +3646,7 @@ The two tiers agree word for word:
 - Forcing the deep tier onto the 12- to 60-layer WRF fixtures reproduces every initialization word and every output word.
 - A 256-layer column matches stock WRF 4.6.1 at 256 layers word for word in strict numerics (`tests/test_gfdleta_256_levels.py`).
 
-The deep tier's per-column workspace is 1.26 MB, against 234 KB at the shipped tier. It therefore runs fewer concurrent column slots, within the shipped tier's default workspace budget. Pooled slots are reused in order, so the slot count does not change any word.
+The deep tier's per-column workspace is 1.30 MB, against 234 KB at the shipped tier. It therefore runs fewer concurrent column slots, within the shipped tier's default workspace budget. Pooled slots are reused in order, so the slot count does not change any word.
 
 Source pin: WRF `d66e442fccc04111067e29274c9f9eaccc3cef28`, `phys/module_ra_gfdleta.F`, `phys/module_mp_etanew.F`, and the distributed transmission tables. WRF distributes these under its public-domain notice. Source URLs, sizes and hashes are recorded in `woof/data/gfdleta/PROVENANCE.json`; the notice is retained beside the assets and CUDA source. No competitor source was used.
 

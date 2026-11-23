@@ -42,6 +42,7 @@ typedef struct {
     real co2in1_co2800[66049];
     real co2in1_co2801[66049];
     real co2in1_co2802[66049];
+    real co2in1_d2ct8[66049];
     real co2in1_d2ct10[66049];
     real co2in1_dcdt8[66049];
     real co2in1_co2po[66049];
@@ -51,10 +52,12 @@ typedef struct {
     real co2ins_co2800[66049];
     real co2ins_co2801[66049];
     real co2ins_co2802[66049];
+    real co2ins_d2ct8[66049];
     real co2ins_d2ct10[66049];
     real co2ins_dcdt8[66049];
     real co2ins_co2po[66049];
     real co2ins_dcdt10[66049];
+    real co2ins_co2po1[66049];
     real co2ins_co2po2[66049];
     real co2int_p[257];
     real co2int_pd[258];
@@ -247,8 +250,7 @@ L29:
     real *co2800=work->co2in1_co2800;
     real *co2801=work->co2in1_co2801;
     real *co2802=work->co2in1_co2802;
-    real d2ct8[
-	    66049];
+    real *d2ct8=work->co2in1_d2ct8;
     integer itin;
 
     real *d2ct10=work->co2in1_d2ct10;
@@ -411,14 +413,12 @@ L400:
     real *co2800=work->co2ins_co2800;
     real *co2801=work->co2ins_co2801;
     real *co2802=work->co2ins_co2802;
-    real d2ct8[
-	    66049];
+    real *d2ct8=work->co2ins_d2ct8;
     real *d2ct10=work->co2ins_d2ct10;
     real *dcdt8=work->co2ins_dcdt8;
     real *co2po=work->co2ins_co2po;
     real *dcdt10=work->co2ins_dcdt10;
-    real co2po1[
-	    66049];
+    real *co2po1=work->co2ins_co2po1;
     real *co2po2=work->co2ins_co2po2;
 
 

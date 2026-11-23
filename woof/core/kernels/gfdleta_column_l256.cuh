@@ -129,10 +129,12 @@ typedef struct {
     real fst88_contdg[257];
     real fst88_emissb[257];
     real fst88_cnttau[257];
+    real fst88_flxnet[257];
     real fst88_totevv[257];
     real lwr88_p[257];
     real lwr88_t[257];
     real lwr88_a1[1];
+    real lwr88_a2[1];
     real lwr88_vv[256];
     real lwr88_co21[66049];
     real lwr88_co2r[257];
@@ -216,6 +218,7 @@ typedef struct {
     real radfs_dduo3n[9472];
     real radfs_ddo3n2[9472];
     real radfs_ddo3n3[9472];
+    real radfs_ddo3n4[9472];
     real radfs_alvb[1];
     real radfs_alnb[1];
     real radfs_alvd[1];
@@ -330,6 +333,7 @@ typedef struct {
     real swr93_alfau[257];
     real swr93_ccmax[1];
     real swr93_pptop[257];
+    real swr93_dfnclu[257];
     real swr93_dfntop[12];
     real swr93_dfntrn[257];
     real swr93_ufnclu[257];
@@ -1540,8 +1544,7 @@ GD_DEVICE real fpvs_(real *t, GDTable *gt, GDClock *clock, GDScratch *work)
     real *contdg=work->fst88_contdg;
     real *emissb=work->fst88_emissb;
     real *cnttau=work->fst88_cnttau;
-    real flxnet[
-	    257];
+    real *flxnet=work->fst88_flxnet;
     real *totevv=work->fst88_totevv;
 
 
@@ -2583,8 +2586,7 @@ GD_DEVICE real gausin_(real *xsd, GDTable *gt, GDClock *clock, GDScratch *work)
     real *p=work->lwr88_p;
     real *t=work->lwr88_t;
     real *a1=work->lwr88_a1;
-    real a2[
-	    1];
+    real *a2=work->lwr88_a2;
     integer ll, kp;
 
     real *vv=work->lwr88_vv;
@@ -3843,8 +3845,7 @@ GD_DEVICE real radfs_c_b85 = 50.f;
     real *dduo3n=work->radfs_dduo3n;
     real *ddo3n2=work->radfs_ddo3n2;
     real *ddo3n3=work->radfs_ddo3n3;
-    real ddo3n4[
-	    9472];
+    real *ddo3n4=work->radfs_ddo3n4;
 #define albd ((real *)&equiv_2)
     real ssolar, zen, dzen, alb1, alb2;
 #define alb11 ((real *)&equiv_2)
@@ -6533,8 +6534,7 @@ L1031:
     real htemp;
     real tempg;
     real *pptop=work->swr93_pptop;
-    real dfnclu[
-	    257];
+    real *dfnclu=work->swr93_dfnclu;
     integer nnclds;
 
     real *dfntop=work->swr93_dfntop;
