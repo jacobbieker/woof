@@ -79,6 +79,11 @@ DEFAULT_RING_FACTOR = 3.0
 #: (``evidence/nest-ratio-20260827/``: every field improves monotonically
 #: with cut width and the knee is at 1.35x the fine core).
 DEFAULT_CULL_PAD_SCALE = 1.35
+#: The fork's grading knobs.  They shape the geometry-1 ladder, so a request that names one and no geometry keeps
+#: geometry 1 (upstream 1.1.7 made 2 the default), as ``regional_door.plan`` does.  Their parser defaults are
+#: numbers, so :class:`_GradingKnob` records which were given (``grading_given``).
+GRADING_KNOBS = {"transition_factor": "--transition-factor", "ring_factor": "--ring-factor",
+                 "cull_pad_scale": "--cull-pad-scale"}
 #: Column count every measured row and every anchor in this tree runs at,
 #: and the count a row declares when no vertical declaration says otherwise.
 #: Not a limit: a row's levels are measured from its vertical declaration
@@ -903,6 +908,14 @@ def request_from_arguments(arguments: argparse.Namespace) -> PointRequest:
                 f"{arguments.spec} is the generator's own resolution spec, not a mesh row; the limited-area "
                 f"road reads a row (zones and a region domain)")
         return ask_request(row, arguments)
+    graded = sorted(set(getattr(arguments, "grading_given", None) or ()) & set(GRADING_KNOBS))
+    if getattr(arguments, "geometry", None) is None and graded and not getattr(arguments, "density_raster", None):
+        # The fork's grading knobs shape the geometry-1 ladder: named with no geometry they keep it, as
+        # regional_door.plan does (which passes --geometry 1 on).
+        arguments.geometry = 1
+    if "ring_factor" in graded and arguments_geometry(arguments) == 2:
+        raise PointPlanRefusal("--ring-factor spaces the geometry-1 ladder's rings; geometry 2 lays no rings "
+                               "(name --geometry 1, or no geometry, with it)")
     if getattr(arguments, "density_raster", None):
         # Fork --density-raster rows are painted with the geometry-1 ladder (the generator's finer-wins
         # raster rows); with no geometry named, a raster request keeps geometry 1 (upstream 1.1.7 made 2 the
@@ -2524,6 +2537,14 @@ def generate_point(
 # ---------------------------------------------------------------------------
 # the door
 # ---------------------------------------------------------------------------
+class _GradingKnob(argparse.Action):
+    """Stores a grading knob and records that it was given (``grading_given``), since its default is a number."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        setattr(namespace, "grading_given", frozenset(getattr(namespace, "grading_given", None) or ()) | {self.dest})
+
+
 def add_point_arguments(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group("a fine core at a point (instead of --spec)")
     group.add_argument(
@@ -2552,10 +2573,10 @@ def add_point_arguments(parser: argparse.ArgumentParser) -> None:
         "--background-km", type=float, default=DEFAULT_BACKGROUND_KM, metavar="KM",
         help=f"global background spacing (default {DEFAULT_BACKGROUND_KM:g})")
     group.add_argument(
-        "--transition-factor", type=float, default=DEFAULT_TRANSITION_FACTOR, metavar="X",
+        "--transition-factor", type=float, action=_GradingKnob, default=DEFAULT_TRANSITION_FACTOR, metavar="X",
         help=f"each rung's ramp as a multiple of its own spacing (default {DEFAULT_TRANSITION_FACTOR:g})")
     group.add_argument(
-        "--ring-factor", type=float, default=DEFAULT_RING_FACTOR, metavar="X",
+        "--ring-factor", type=float, action=_GradingKnob, default=DEFAULT_RING_FACTOR, metavar="X",
         help=f"how many ramps of the next finer rung a cap sits outside it (default {DEFAULT_RING_FACTOR:g})")
     group.add_argument(
         "--background-fit", choices=("exact", "nearest", "finer", "coarser"), default=None,
@@ -2594,7 +2615,7 @@ def add_point_arguments(parser: argparse.ArgumentParser) -> None:
 
     mesh_ask.add_generator_arguments(group)
     group.add_argument(
-        "--cull-pad-scale", type=float, default=DEFAULT_CULL_PAD_SCALE, metavar="X",
+        "--cull-pad-scale", type=float, action=_GradingKnob, default=DEFAULT_CULL_PAD_SCALE, metavar="X",
         help=f"the limited-area cut, as a multiple of the core radius (default {DEFAULT_CULL_PAD_SCALE:g}, the measured knee)")
     group.add_argument(
         "--density-raster", action="append", default=[], type=Path, metavar="FILE",

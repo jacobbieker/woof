@@ -662,7 +662,7 @@ def noah_chklowq_myj(dev: dict) -> None:
     cp.copyto(dev["chklowq"], np.float32(0.0), where=low)
 
 
-#: RunConfig.noah_smc_floor_booking (default off): module_sf_noahlsm.F:4026
+#: RunConfig.noah_smc_floor_booking (on in correct mode, FQ4): module_sf_noahlsm.F:4026
 #: (SSTEP) raises a soil layer below 0.02 to 0.02 and books the water it adds
 #: nowhere.  The define takes that water from the layer below (a negative
 #: WPLUS), and below the bottom layer from RUNOFF3.
@@ -824,7 +824,7 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
             raise ValueError("IRRIGATION_CHANNEL must be a float32 surface field")
         args.append(irrigation_channel)
         name = "noah_column_irrigation"
-    # RunConfig.noah_smc_floor_booking (default off): SSTEP books the water
+    # RunConfig.noah_smc_floor_booking (on in correct mode, FQ4): SSTEP books the water
     # its 0.02 soil-moisture floor adds; off, the unit compiled before it.
     if not smc_floor_booking:
         kern = get_kernel(module, name)

@@ -1,15 +1,14 @@
 name: release-metal
 
-# Every merge into main ships a metal-woof release.
+# Every merge into main ships a metal-woof GitHub release (PyPI: daily).
 #
 # The version is upstream's release (pyproject.toml [project].version) plus a
 # fork build number: the first push to main after upstream X.Y.Z lands is
 # metal-vX.Y.Z.1, the next metal-vX.Y.Z.2, and so on.  This job tags the
 # pushed commit, writes the GitHub release (the merged pull requests since the
-# previous metal-v tag, as GitHub generates them), then starts
-# publish-metal.yml on the new tag, which builds, smoke-tests and publishes the
-# version to PyPI.  A tag pushed with GITHUB_TOKEN starts no workflow on its
-# own, so the publish run is dispatched explicitly.
+# previous metal-v tag, as GitHub generates them).  It does not publish: PyPI
+# caps a project at 10 GB and each build takes about 90 minutes, so
+# publish-metal.yml uploads only the newest metal-v tag, at most once a day.
 #
 # Each run releases every first-parent commit on main after the newest
 # metal-v tag, oldest first, so merges that land while a release is running
@@ -34,13 +33,12 @@ concurrency:
 
 jobs:
   release:
-    name: tag, release notes, dispatch publish-metal
+    name: tag and release notes
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     if: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       contents: write   # the tag and the GitHub release
-      actions: write    # dispatching publish-metal.yml
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -89,7 +87,7 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
           echo "plan=$plan" >> "$GITHUB_OUTPUT"
-      - name: tag, GitHub release and publish-metal for each
+      - name: tag and GitHub release for each
         if: steps.version.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -98,16 +96,14 @@ jobs:
           set -euo pipefail
           while read -r sha version previous; do
             header="metal-woof ${version}: Recast WOOF built for Apple silicon (MLX/Metal), from ${sha::12} on main."
-            header+=$'\n\n'"Install: \`pip install metal-woof==${version}\` (PyPI publishing runs in publish-metal.yml)."
+            header+=$'\n\n'"PyPI receives the newest metal-v tag once a day (publish-metal.yml), so this exact version may not be on PyPI: \`pip install metal-woof\` gives the latest published build; to run exactly this one, clone tag metal-v${version} and install from source."
             args=(--target "$sha" --title "metal-woof ${version}" --generate-notes --notes "$header")
             if [ -n "$previous" ]; then
               args+=(--notes-start-tag "$previous")
             fi
             gh release create "metal-v${version}" "${args[@]}"
-            gh workflow run publish-metal.yml --ref "metal-v${version}" \
-              -f version="${version}" -f publish=true
             {
               echo "### metal-woof ${version}"
-              echo "Tagged \`metal-v${version}\` on ${sha::12}; publish-metal.yml dispatched on it."
+              echo "Tagged \`metal-v${version}\` on ${sha::12}."
             } >> "$GITHUB_STEP_SUMMARY"
           done < "$PLAN"
