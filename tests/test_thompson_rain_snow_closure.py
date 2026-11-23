@@ -184,7 +184,8 @@ def test_thompson_py_compiles_the_define_only_when_asked(monkeypatch, closure):
 
 # --- the device: the corrected exchange makes no water --------------------
 
-def _cold_column(cp, closure: bool):
+def _cold_column(cp, closure: bool, mp: int = 8, temps=(263., 262., 261., 260.),
+                 **fields):
     """A cold (260-263 K) column holding snow and a trace of rain, so the
     rain limiter binds in rain-snow collection; returns the fields after
     one default-Thompson call.  WRF's arithmetic makes 3.5 times the rain
@@ -196,14 +197,14 @@ def _cold_column(cp, closure: bool):
 
     cfg = RunConfig(nx=16, ny=12, nz=4, dx=1000., dy=1000., ztop=4000.,
                     dt=60., run_seconds=120., time_step_sound=4,
-                    moist=True, mp_physics=8, **{KEY: closure})
+                    moist=True, mp_physics=mp, **{KEY: closure})
     coord = make_vertical_coord(cfg.nz)
     base = make_base_state(coord, lambda z: np.full_like(z, 300.),
                            p_surf=cfg.p_surf, ztop=cfg.ztop)
     state = init_theta_perturbation(
         cfg, coord, base, lambda x, z: np.zeros((cfg.nz, 1, 1)))
     p = np.asarray([70000., 68000., 66000., 64000.], np.float32)
-    t = np.asarray([263., 262., 261., 260.], np.float32)
+    t = np.asarray(temps, np.float32)
     theta = t * (1.0e5 / p) ** np.float32(constants.RD / constants.CP)
     state.thb.fill(0.)
     state.thp[...] = cp.asarray(theta)[:, None, None]
@@ -214,11 +215,16 @@ def _cold_column(cp, closure: bool):
     state.phb[...] = cp.asarray(z * np.float32(constants.G)).reshape(state.phb.shape)
     values = {"qv": 1.0e-3, "qc": 0.0, "qr": 1.0e-5, "qi": 0.0, "qs": 5.0e-3,
               "qg": 0.0, "nr": 2.0e3, "ni": 0.0}
+    values.update(fields)
     for name, value in values.items():
         getattr(state, name)[...] = np.float32(value)
     initialize_physics(state, cfg, landmask=1.)
     from woof.core import microphysics
-    result = microphysics._apply_thompson(state, cfg, cfg.dt)
+    if mp in (28, 38):
+        from woof.core.microphysics_aerosol import _apply_thompson_aerosol
+        result = _apply_thompson_aerosol(state, cfg, cfg.dt)
+    else:
+        result = microphysics._apply_thompson(state, cfg, cfg.dt)
     cp.cuda.Stream.null.synchronize()
     out = {n: cp.asnumpy(getattr(state, n))[:, 0, 0].astype(np.float64)
            for n in ("qv", "qc", "qr", "qi", "qs", "qg")}
@@ -243,4 +249,23 @@ def test_the_corrected_cold_exchange_makes_no_graupel_from_nothing():
     assert stock["precip_mm"] >= fixed["precip_mm"]
     # The stock column holds more water than the corrected one: the
     # graupel it made from rain and snow that ran out.
+    assert float((stock_total - fixed_total).sum()) > 0.0
+
+
+@pytest.mark.gpu
+def test_the_aerosol_aware_warm_level_is_corrected_too():
+    """mp_physics = 28 at 273.6-274.5 K with a dry wet bulb below 0 C: the
+    warm unit's closure leaves no graupel made from nothing, and no water is
+    created (the corrected column holds no more than the stock one)."""
+    cp = pytest.importorskip("cupy")
+    if cp.cuda.runtime.getDeviceCount() == 0:
+        pytest.skip("device verification needs CUDA")
+    temps = (274.5, 274.0, 273.8, 273.6)
+    stock = _cold_column(cp, False, mp=28, temps=temps)
+    fixed = _cold_column(cp, True, mp=28, temps=temps)
+    names = ("qv", "qc", "qr", "qi", "qs", "qg")
+    assert (fixed["qg"] >= 0.0).all()
+    assert (stock["qg"] > fixed["qg"]).any(), "the closure never bound"
+    stock_total = sum(stock[n] for n in names)
+    fixed_total = sum(fixed[n] for n in names)
     assert float((stock_total - fixed_total).sum()) > 0.0
