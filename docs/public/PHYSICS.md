@@ -2172,6 +2172,20 @@ it is the same registry option 4/4, selected by the
 `ra_rrtmg_variant = "rrtmg_legacy"` token and kept for matched-run
 verification against the WRF CPU reference.
 
+**Correction: `rrtmg_lw_model_top` (on in correct mode, finding FQ6).** WRF 4.7.1's RRTMG longwave
+wrapper (`module_ra_rrtmg_lw.F:12375-12380`) extends the column above the model
+top with a standard profile shifted by `tlev(kte) - varint(kte)`. The loop
+`do L = kte+1, nlayers+1` starts one interface too low: it overwrites
+`tlev(kte+1)`, the model-top interface temperature from `t8w`, and `tlay(kte)`,
+the top model layer's temperature from `t3d`, with the profile, and anchors at
+the interface below the top. With the option on, the loop starts at `kte+2`,
+the anchor is `tlev(kte+1) - varint(kte+1)`, and both model values are kept
+(`tests/test_rrtmg_lw_model_top.py`, Python mirror and kernel). It is per
+domain, read only by the legacy RRTMG longwave (`ra_lw_physics = 4` with
+`ra_rrtmg_variant = "rrtmg_legacy"`; RTE+RRTMGP does not carry it), and not
+yet scored against observations. Off, and in exact mode, the arithmetic is
+WRF's word for word.
+
 ### Fu-Liou-Gu (`ra_lw_physics=7`, `ra_sw_physics=7`)
 
 Select the split pair in a stock WRF namelist or experiment configuration.
