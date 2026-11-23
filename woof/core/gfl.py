@@ -375,6 +375,10 @@ def _pack_lanes(store, names, sources, *, ncol, n, index, nz):
             raise ValueError(f"GFL level source {name} must be [k <= {kme}, {ncol}] columns, got {source.shape}")
         keep.append(source)
         pointers.append(source.data.ptr); levels.append(source.size // ncol)
+    if n == 0:
+        # No active column: nothing to gather, and the kernel's slab count (n+127)/128 would be
+        # 0, a division by zero on CUDA (an illegal address, the all-False active mask).
+        return keep
     total = len(names) * store.shape[1] * kme * 128
     pack, _ = _kernels()
     pack((min(65535, -(-total // 256)),), (256,),
