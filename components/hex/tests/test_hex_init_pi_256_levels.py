@@ -176,8 +176,11 @@ def test_a_200_level_sounding_gives_the_reference_pi(algebra):
         pi, status = _pi(algebra[DEEP], p, t, r, row["sst_k"])
         assert status == 1
         # Finer levels move CAPE by the trapezoid error only.
-        assert pi == pytest.approx(row["pi_ms"], abs=0.75), (row, pi)  # measured 0.16 to 0.38
-        assert _pi(algebra[128], p, t, r, row["sst_k"])[1] == 0, "the shipped build refuses it"
+        assert pi == pytest.approx(row["pi_ms"], abs=0.5), (row, pi)  # measured 0.16 to 0.38
+        # The shipped build refuses it at its level guard (PI left NaN,
+        # status 0) although the same SST and ocean point give status 1 above.
+        shipped_pi, shipped_status = _pi(algebra[128], p, t, r, row["sst_k"])
+        assert shipped_status == 0 and np.isnan(shipped_pi), "the shipped build refuses it"
 
 
 # ---------------------------------------------------------------------------
