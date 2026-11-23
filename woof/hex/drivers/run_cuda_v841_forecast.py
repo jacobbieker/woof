@@ -4046,10 +4046,9 @@ def execute_forecast(
         print(json.dumps({"undriven_species_boundary": attach_undriven(
             stack["driver"], host, host["undriven_species_boundary"])}), flush=True)
     if host.get("w_damping") is not None:
-        from woof.hex.cuda_w_damping import WDamping
-        stack["driver"].w_damping = WDamping(w_crit_cfl=float(host["w_damping"]["w_crit_cfl"]))
-        print(json.dumps({"w_damping": {"w_crit_cfl": float(host["w_damping"]["w_crit_cfl"]),
-                                        "w_damp_on": WDamping().w_damp_on}}), flush=True)
+        from woof.hex.cuda_w_damping import attach as attach_w_damping
+        print(json.dumps({"w_damping": attach_w_damping(
+            stack["driver"], float(host["w_damping"]["w_crit_cfl"]))}), flush=True)
     if host.get("obstacles") is not None:
         # woof's obstacle_opt = 1: buildings as porous immersed obstacles (woof.hex.obstacles).
         from woof.hex.obstacles import ObstacleSettings, attach as attach_obstacles

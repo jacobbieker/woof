@@ -264,10 +264,12 @@ def pblh_from_backend(backend, runtime, n_relax_zone: int = 5):
     return read
 
 
-def attach(driver, backend, options: Mapping | None):
-    """Bind the seeding to a regional run's relaxation; None (nothing built) when off."""
-    if not options:
-        return None
+def _bind(driver, options: Mapping, source_for, no_pbl: str):
+    """Build the seeding on ``driver``'s regional runtime and bind it; the receipt.
+
+    ``source_for(runtime)`` is the route's PBLH reader (None when the run has no PBL scheme); ``no_pbl``
+    names that route's reason in the refusal.
+    """
     runtime = getattr(driver, "regional_v841", None)
     if runtime is None:
         raise ValueError("--inflow-perturbation seeds a regional mesh's relaxation zone; this mesh is global")
@@ -275,10 +277,9 @@ def attach(driver, backend, options: Mapping | None):
                "partition_layout_v841", None) is not None:
         raise ValueError("--inflow-perturbation needs the whole boundary on one card (face means); "
                          "a partitioned regional run would see only its own part")
-    source = pblh_from_backend(backend, runtime)
+    source = source_for(runtime)
     if source is None:
-        raise ValueError(parent_pbl_refusal(0).replace("parent-diagnosed", "run's own")
-                         + " (the hex run's own PBL scheme)")
+        raise ValueError(parent_pbl_refusal(0).replace("parent-diagnosed", "run's own") + f" ({no_pbl})")
     seeding = HexInflowPerturbation(
         runtime, seed=int(options.get("seed", 0)),
         amplitude_scale=float(options.get("amplitude_scale", 1.0)),
@@ -287,8 +288,56 @@ def attach(driver, backend, options: Mapping | None):
     from datetime import timedelta
     seeding.start = runtime.clock - timedelta(seconds=float(driver.atmosphere.state.time_seconds))
     runtime.inflow_perturbation = seeding
-    return runtime.inflow_perturbation.receipt()
+    return seeding.receipt()
 
 
-__all__ = ["FACES", "GRID_ID", "HexInflowPerturbation", "attach", "face_geometry",
-           "pblh_from_backend", "FACE_CODES"]
+def attach(driver, backend, options: Mapping | None):
+    """Bind the seeding to a regional run's relaxation; None (nothing built) when off."""
+    if not options:
+        return None
+    return _bind(driver, options, lambda runtime: pblh_from_backend(backend, runtime),
+                 "the hex run's own PBL scheme")
+
+
+def pblh_from_suite(pbl_height, runtime, n_cells: int, *, pbl_active: bool):
+    """The MPAS suite run's own PBLH (``diag_physics/hpbl``), averaged over the boundary zone's cells.
+
+    ``pbl_height`` returns the run's current ``hpbl`` words (``n_cells`` real cells, host or device);
+    ``pbl_active`` is the resolved PBL slot (``DriverConfig.active('pbl')``: the suite default resolved,
+    an off backend counted).  None when it is off, where ``hpbl`` is never written.  A host field is
+    averaged on the host: no per-step copy of the whole field to the device.
+    """
+    if not pbl_active:
+        return None
+    ring = np.asarray(runtime.masks_host.bdy_mask_cell)[:n_cells]
+    cells = np.nonzero(ring >= 1)[0]
+    device_cells = []
+
+    def read():
+        pblh = pbl_height()
+        if isinstance(pblh, np.ndarray):
+            return float(np.mean(pblh.reshape(-1)[:n_cells][cells].astype(np.float64)))
+        import cupy as cp
+        if not device_cells:
+            device_cells.append(cp.asarray(cells))
+        pblh = cp.asarray(pblh).reshape(-1)[:n_cells]
+        return float(cp.mean(pblh[device_cells[0]].astype(cp.float64)))
+    return read
+
+
+def attach_v842(dycore, options: Mapping | None, *, pbl_height, n_cells: int, pbl_active: bool):
+    """Bind the seeding to an MPAS suite run's regional relaxation; the receipt, or None (nothing built) when off.
+
+    The MPAS suite route's limited-area dycore runs the same regional runtime as the WOOF-physics route
+    (cuda_regional_forecast_v841: the relax-zone Rayleigh/filter kernels this seeding feeds); only the PBLH
+    source differs: the suite's own ``hpbl`` (:func:`pblh_from_suite`).
+    """
+    if not options:
+        return None
+    return _bind(dycore, options,
+                 lambda runtime: pblh_from_suite(pbl_height, runtime, n_cells, pbl_active=pbl_active),
+                 "the suite runs no PBL scheme: its pbl slot resolves to off")
+
+
+__all__ = ["FACES", "GRID_ID", "HexInflowPerturbation", "attach", "attach_v842", "face_geometry",
+           "pblh_from_backend", "pblh_from_suite", "FACE_CODES"]
