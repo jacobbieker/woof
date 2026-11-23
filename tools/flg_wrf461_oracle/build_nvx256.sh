@@ -29,8 +29,8 @@ for build in pristine nvx256; do
      gfortran -shared -o "$out/libflg_oracle_$build.so" module_ra_flg.o stub_wrf_error.o)
 done
 printf '%s\n' "gfortran ${flags[*]}" > "$out/compiler-flags.txt"
-gfortran --version | head -1 > "$out/compiler.txt"
-{ ldd --version 2>/dev/null | head -1 || uname -a; } > "$out/libc.txt"
+gfortran --version | sed -n 1p > "$out/compiler.txt"
+if ldd --version >/dev/null 2>&1; then ldd --version | sed -n 1p; else uname -sr; fi > "$out/libc.txt"
 { for f in "$out/pristine/phys/module_ra_flg.F" "$out/nvx256/phys/module_ra_flg.F" "$here/nvx256.patch" \
            "$here/build_nvx256.sh" "$out/libflg_oracle_pristine.so" "$out/libflg_oracle_nvx256.so"; do
       printf '%s  %s\n' "$(sha "$f")" "${f#"$out/"}"; done; } > "$out/sha256sums.txt"

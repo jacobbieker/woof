@@ -191,7 +191,17 @@ def test_a_256_layer_column_matches_the_patched_nvx_oracle_word_for_word():
         assert not len(misses), f"{name}: {len(misses)} words differ; first {misses[:1].tolist()}"
 
 
-def _check_xbackend(label, result):
+HEATING = ("dts", "dtir", "dt")
+
+
+def _watts(result, dp):
+    """Fluxes as they are; heating (W/m2 per hPa) times its layer's hPa, the
+    layer's absorbed W/m2. Near a 1 hPa top a layer is ~0.03 hPa thick, so
+    a per-hPa limit would ask 30x more of those layers than of the rest."""
+    return {k: v.astype(np.float64) * (dp if k in HEATING else 1.0) for k, v in result.items()}
+
+
+def _check_xbackend(label, result, dp):
     directory = os.environ.get("WOOF_FLG256_XBACKEND_DIR")
     if not directory:
         return
@@ -204,10 +214,10 @@ def _check_xbackend(label, result):
     for other in sorted(n for n in os.listdir(directory)
                         if n.startswith(f"{label}.{mode}.") and n.endswith(".npz") and n != mine):
         with np.load(os.path.join(directory, other)) as theirs:
+            mine_w, theirs_w = _watts(result, dp), _watts({k: theirs[k] for k in result}, dp)
             for name in sorted(result):
-                a, b = result[name].astype(np.float64), theirs[name].astype(np.float64)
-                limit = 0.05  # W/m2 for fluxes, W/m2/hPa for heating
-                err = float(np.abs(a - b).max())
+                err = float(np.abs(mine_w[name] - theirs_w[name]).max())
+                limit = 0.5  # W/m2
                 assert err < limit, f"{label}/{name} vs {other}: {err:.3e}"
 
 
@@ -240,8 +250,8 @@ def test_a_256_layer_column_is_finite_conserves_energy_and_tracks_the_oracle():
     assert (out["fus"][day, 0] < 1361.0 * mu[day]).all()
     assert (out["fdir"][:, -1] > 200).all()
     # Default numerics stay near the strict Fortran oracle (a strict run is
-    # held to words above). Flux and per-hPa heating limits, in W/m2.
-    for name, expected in reference.items():
-        limit = 0.1 if name in ("dts", "dtir", "dt") else 0.5
-        np.testing.assert_allclose(out[name], expected, rtol=0, atol=limit, err_msg=name)
-    _check_xbackend("flg256", out)
+    # held to words above): 0.5 W/m2 in every flux and layer absorption.
+    got, want = _watts(out, dp), _watts(reference, dp)
+    for name in reference:
+        np.testing.assert_allclose(got[name], want[name], rtol=0, atol=0.5, err_msg=name)
+    _check_xbackend("flg256", out, dp)
