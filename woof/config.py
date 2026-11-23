@@ -10265,6 +10265,10 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         from woof.physics_vertical_contract import GSFCSW_VERTICAL_LEVEL_BOUNDS as _gsfc_bounds
         if not _gsfc_bounds[0] <= cfg.nz <= _gsfc_bounds[1]:
             raise ConfigurationRefused(f'GSFC shortwave requires {_gsfc_bounds[0]} to {_gsfc_bounds[1]} layers; its column arena is compiled at the 128 or 256 level tier')
+    if 99 in (ra_lw_physics, ra_sw_physics):
+        from woof.physics_vertical_contract import GFDLETA_VERTICAL_LEVEL_BOUNDS as _gfdl_bounds
+        if not _gfdl_bounds[0] <= cfg.nz <= _gfdl_bounds[1]:
+            raise ConfigurationRefused(f'GFDL Eta radiation requires {_gfdl_bounds[0]} to {_gfdl_bounds[1]} layers; its column storage is generated at the 81 or 256 layer tier')
     if cfg.icloud not in (0, 1, 2, 3):
         raise ConfigurationRefused(f"icloud={cfg.icloud}: choose 0, 1, 2 or 3.")
     if not math.isfinite(cfg.swrad_scat) or cfg.swrad_scat < 0.0:

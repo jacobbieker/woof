@@ -1715,6 +1715,27 @@ Notes on the 1.1.7 sync:
   preflight prices it by tier. Past 256 is refused by name. Hex does not
   offer `ra_sw_physics=2`, so only the WRF route is affected
   ([the record](docs/kernel_local_memory_bounds.md)).
+- **256-level columns for GFDL Eta radiation.** `ra_lw_physics` and
+  `ra_sw_physics` 99 were refused above 81 layers. That was a limit of this
+  port, not of WRF. Stock `module_ra_gfdleta.F` sizes its model-level arrays
+  from `kte`, and its `NL=81` is the ozone climatology's fixed pressure grid,
+  which it interpolates to any model grid. The port's transcription gives
+  every per-column array fixed storage, generated at 81. The same lowering
+  is now regenerated at 256 (`tools/gfdleta_wrf461_oracle/build_tier.py`)
+  into `gfdleta_column_l256` and `gfdleta_co2_init_l256`:
+  - A column of 81 layers or fewer runs the unchanged units.
+  - A deeper column runs the 256-layer units.
+  - Past 256 is refused by name.
+
+  Both tiers are tested word for word:
+  - Forcing the deep tier onto the 12- to 60-layer WRF fixtures reproduces
+    every word.
+  - A 256-layer column matches the byte-unmodified WRF 4.6.1 module run at
+    256 layers in strict numerics, for every CO2/ozone table word and every
+    output word.
+
+  The deep column workspace is 1.30 MB per slot, against 234 KB. Preflight
+  prices it by tier, and `column_chunk` is the lever at both tiers.
 - **256-level columns for Fu-Liou-Gu radiation.** `ra_lw_physics=7`
   (with `ra_sw_physics=7`) was refused above 100 layers, stock WRF's
   `nvx = 100` scratch bound. The generators now emit that bound as the

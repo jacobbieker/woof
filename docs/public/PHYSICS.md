@@ -3670,7 +3670,21 @@ each checked against WRF's own output words:
 
 ## GFDL Eta radiation (WRF options 99/99)
 
-The CUDA implementation retains WRF v4.6.1 ETARA, FST88 longwave, shortwave, cloud accumulators and CO2/O3 table initialization. Either spectrum can be selected independently. `co2tf=1` builds transmission for the run's vertical grid; `co2tf=0` requires a grid-matched CONRAD table. The packaged CONRAD table has 42 layers. The native ozone tables cover at most 81 layers.
+The CUDA implementation retains WRF v4.6.1 ETARA, FST88 longwave, shortwave, cloud accumulators and CO2/O3 table initialization. Either spectrum can be selected independently. `co2tf=1` builds transmission for the run's vertical grid; `co2tf=0` requires a grid-matched CONRAD table. The packaged CONRAD table has 42 layers.
+
+Vertical levels: 1 to 256 layers. Stock WRF has no 81-layer limit for this scheme. `module_ra_gfdleta.F` sizes every model-level array from `kte`/`kme`: CO2O3 `ALLOCATE`s its `LP1` tables, and CONRAD and RADTN use automatic arrays. Its `NL=81` is the GFDL ozone climatology's fixed pressure grid (`XDUO3N(37,NL)`, `PRGFDL(NL)`), which OZON2D interpolates to any number of model layers. The byte-unmodified module runs a 256-layer column under `-fcheck=all`.
+
+WOOF's transcription gives every per-column array fixed storage, so it has two tiers:
+
+- A column of at most 81 layers runs the unchanged shipped units word for word.
+- A column of 82 to 256 layers runs `gfdleta_column_l256` and `gfdleta_co2_init_l256`. These are the same lowering regenerated with `GFDLETA_MAXL=256` (`tools/gfdleta_wrf461_oracle/build_tier.py`). The ozone climatology stays on its 81 levels.
+
+The two tiers agree word for word:
+
+- Forcing the deep tier onto the 12- to 60-layer WRF fixtures reproduces every initialization word and every output word.
+- A 256-layer column matches stock WRF 4.6.1 at 256 layers word for word in strict numerics (`tests/test_gfdleta_256_levels.py`).
+
+The deep tier's per-column workspace is 1.30 MB, against 234 KB at the shipped tier. Preflight prices `column_chunk` slots of it, and `column_chunk` is the lever at both tiers. Pooled slots are reused in order, so the slot count does not change any word.
 
 Source pin: WRF `d66e442fccc04111067e29274c9f9eaccc3cef28`, `phys/module_ra_gfdleta.F`, `phys/module_mp_etanew.F`, and the distributed transmission tables. WRF distributes these under its public-domain notice. Source URLs, sizes and hashes are recorded in `woof/data/gfdleta/PROVENANCE.json`; the notice is retained beside the assets and CUDA source. No competitor source was used.
 

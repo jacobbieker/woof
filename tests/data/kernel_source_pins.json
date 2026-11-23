@@ -49,7 +49,9 @@
     "flg_workspace_generated.cuh": "a6d6bc36d7739b1e0d0be6aef6de816a86128cfb7267b26762400b52117f0d58",
     "flt32_log10_tanh.cuh": "d2f5ba8b49577e28a97f80816373aed05da64fd26e561b24aa455d7f71d84cf2",
     "gfdleta_co2_init.cuh": "b6568fbc35ca2c5332aa80520dd109fa63cb56334ed3f55d4fc93424f8b6e66c",
+    "gfdleta_co2_init_l256.cuh": "b2757c3062c2638f0d90d57696fc9994b404616d77f67d0d74fbbb62accb420d",
     "gfdleta_column.cuh": "5bbb62d7c4d53a730935f154395d78ac34e60acee2ef28f5938e45e04fccd881",
+    "gfdleta_column_l256.cuh": "163338e51f8b95f3bc30af3edfe74893eab2d08b380b7d2ac8ce3e56451d71a9",
     "gfdleta_support.cuh": "62f0b09cefadc90d301cb73d9fd822d358a75268edc4ea903383259ea1be44dd",
     "gfdleta_table_coefficients.cuh": "71b943d0c3ca596a3764cf6e64a7c6ca6e82406bac1b9255629aa20809b37c7e",
     "gsd_hail_bins.cuh": "55646c988bc37b59911385010843d1f48b1644e659390876f3f0581c923c9bed",
@@ -170,6 +172,14 @@
       "gfdleta_support.cuh",
       "gfdleta_co2_init.cuh"
     ],
+    "gfdleta_co2_init_l256": [
+      "glibc_flt32.cuh",
+      "glibc_flt32_extra.cuh",
+      "glibc_trig_flt32.cuh",
+      "portable_libm64.cuh",
+      "gfdleta_support.cuh",
+      "gfdleta_co2_init_l256.cuh"
+    ],
     "gfdleta_column": [
       "glibc_flt32.cuh",
       "glibc_flt32_extra.cuh",
@@ -177,6 +187,14 @@
       "portable_libm64.cuh",
       "gfdleta_support.cuh",
       "gfdleta_column.cuh"
+    ],
+    "gfdleta_column_l256": [
+      "glibc_flt32.cuh",
+      "glibc_flt32_extra.cuh",
+      "glibc_trig_flt32.cuh",
+      "portable_libm64.cuh",
+      "gfdleta_support.cuh",
+      "gfdleta_column_l256.cuh"
     ],
     "gfdleta_init": [
       "glibc_flt32.cuh",
@@ -501,7 +519,9 @@
     "g3": "a3625a4975eb8f2300b2b0e299636a325d327e5be17a960ec3ee56938778c571",
     "gd": "a4041b8e4d4fcca368b02659942fbec510435ecccf52491a94402b4adaa73bff",
     "gfdleta_co2_init": "6195598659c5ea10a2c16df4618108503477011454cb599151a1ea6ebab84582",
+    "gfdleta_co2_init_l256": "b3b8f3930883ce9a5f2ce12d64ad53f2cc38c09fdb24092f680360ce5f5ae560",
     "gfdleta_column": "fbe01d546ce8e2173735b230acd9a6cd3202f77c4e8114230603cb9adb6d417b",
+    "gfdleta_column_l256": "535212bf7cf4f01b8e4be4150322afb96775d8a2287057ce11574ebca9687c31",
     "gfdleta_init": "5f7c351c4c1bf93c05370c148d86aaa9299a68408db2bdfcf5891e43121e9a0e",
     "gfdleta_lw_helpers": "2e4d443cff450f6ae239b4669f60f6247ad9f2d3177a0c2376c7c38588a3bd38",
     "gfdleta_math_probe": "819195367953060145da784ea317ef43e97fdbbd5c3f638a40b04b0b801cdf51",

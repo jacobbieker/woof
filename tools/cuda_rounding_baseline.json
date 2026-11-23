@@ -3424,12 +3424,28 @@
     "sha256": "b6568fbc35ca2c5332aa80520dd109fa63cb56334ed3f55d4fc93424f8b6e66c"
    },
    {
+    "file": "woof/core/kernels/gfdleta_co2_init_l256.cu",
+    "sha256": "b3b8f3930883ce9a5f2ce12d64ad53f2cc38c09fdb24092f680360ce5f5ae560"
+   },
+   {
+    "file": "woof/core/kernels/gfdleta_co2_init_l256.cuh",
+    "sha256": "b2757c3062c2638f0d90d57696fc9994b404616d77f67d0d74fbbb62accb420d"
+   },
+   {
     "file": "woof/core/kernels/gfdleta_column.cu",
     "sha256": "fbe01d546ce8e2173735b230acd9a6cd3202f77c4e8114230603cb9adb6d417b"
    },
    {
     "file": "woof/core/kernels/gfdleta_column.cuh",
     "sha256": "5bbb62d7c4d53a730935f154395d78ac34e60acee2ef28f5938e45e04fccd881"
+   },
+   {
+    "file": "woof/core/kernels/gfdleta_column_l256.cu",
+    "sha256": "535212bf7cf4f01b8e4be4150322afb96775d8a2287057ce11574ebca9687c31"
+   },
+   {
+    "file": "woof/core/kernels/gfdleta_column_l256.cuh",
+    "sha256": "163338e51f8b95f3bc30af3edfe74893eab2d08b380b7d2ac8ce3e56451d71a9"
    },
    {
     "file": "woof/core/kernels/gfdleta_init.cu",
@@ -5715,11 +5731,11 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "eabd9c372e352c84ac2f7e624732fb30391643499cddd6258890adf30345db77"
+    "sha256": "3d855350df5b5ccc3f26ba1a4cac5940ea69f7424762ebd3905651d83968a36f"
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "fe15e0dd558124953c9e271a70791c9ac3fd4a1c6635cb9ce661cc8ef0d638fd"
+    "sha256": "1f5c465a8b4900d155eca08f2d6668a8a868ca0852824a6b83fe56bc6e1c3a40"
    },
    {
     "file": "woof/core/kernels/no_ftz.py",
@@ -5855,7 +5871,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "aaf15342d817301738b123e3f0ddcc7dc6c538a6575448f27900e7f5a639d849"
+    "sha256": "2c77e9f43d8ab78c5263a69472d8467475915ad1be0335ac0b0ca09d7b7a3348"
    },
    {
     "file": "woof/core/refl.py",
@@ -15650,6 +15666,53 @@
    },
    "source_sha256": "5524940f27ad7451d813c958fdd8bdb82764c4004dfe8074b95e91d83f2a89e0"
   },
+  "kernels:gfdleta_co2_init_l256": {
+   "source_sha256": "14f0f2e2433b5d442a83fbc9655e1cdabd36232ac1f52e80a449f7f6e732724c",
+   "errors": {},
+   "native_errors": {},
+   "assessment": "static_diagnostic_only",
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "native_differences": {
+    "sha256": "39ebc21037cf1ce3b263e649f6318c8314e33c1e2bf0fed1d1c86bb909885362",
+    "sites": {
+     "100": 746
+    }
+   },
+   "native_dataflow_differences": {
+    "sha256": "41c087a4ae0944422b083650313a22d907ef41def0fcd2317ea2956c52503769",
+    "sites": {
+     "100": 622
+    }
+   },
+   "options": {
+    "120": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ],
+    "100": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ]
+   },
+   "coverage": "compiled"
+  },
   "kernels:gfdleta_column": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
@@ -15696,6 +15759,53 @@
     ]
    },
    "source_sha256": "954b4283f84f00e22d3641b473142887654d02161f30cb53d631147799001b42"
+  },
+  "kernels:gfdleta_column_l256": {
+   "source_sha256": "ad1448290edf5befdb32f892ccd36a2149b31db21eb32da5971a0114a0fd231d",
+   "errors": {},
+   "native_errors": {},
+   "assessment": "static_diagnostic_only",
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "native_differences": {
+    "sha256": "201c3f558596df0c2bcc15395300244e2d8758c6a0d9a6a1b50079bb5853cdcb",
+    "sites": {
+     "100": 111
+    }
+   },
+   "native_dataflow_differences": {
+    "sha256": "5767c6412a495db97aa242241005bca8ad3cebb488c93e2093e5c418395a29f0",
+    "sites": {
+     "100": 2671
+    }
+   },
+   "options": {
+    "120": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ],
+    "100": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ]
+   },
+   "coverage": "compiled"
   },
   "kernels:gfdleta_init": {
    "assessment": "static_diagnostic_only",

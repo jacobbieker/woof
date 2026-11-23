@@ -14,9 +14,14 @@ STATE={'PA':('REAL','109'),'TRANSA':('REAL','109,109'),'XA':('REAL','109'),'CA':
 base_globals=dict(m.GLOBALS);base_clock=dict(m.CLOCK)
 m.GLOBALS={'GDX_'+k:v for k,v in base_globals.items()};m.CLOCK={'GDC_'+k:v for k,v in base_clock.items()}
 old_bounds=m.bounds
+# Names the routine being lowered declares itself. NL is a dummy layer count
+# in CO2PTZ but WRF's module parameter NL=81 (the ozone climatology's fixed
+# levels) in O3CLIM, which keeps 81 at every GFDLETA_MAXL tier.
+LOCAL=set()
 def bounds(dim):
  dim=old_bounds(dim)
  replacements={'NLP1':'GDMAX+1','NLP2':'GDMAX+2','NLEVLS':'GDMAX','NLV':'GDMAX','NLP1V':'GDMAX+1','NLP2V':'GDMAX+2','LP1':'GDMAX+1','LP2':'GDMAX+2','KD':'GDMAX','KP':'GDMAX+1','KP2':'GDMAX+2','KM':'GDMAX-1','NL':'GDMAX','NLP':'GDMAX+1','L':'GDMAX'}
+ if 'NL' not in LOCAL:del replacements['NL']
  return re.sub(r'\b('+ '|'.join(replacements)+r')\b',lambda z:'('+replacements[z[0]]+')',dim)
 m.bounds=bounds
 
@@ -65,6 +70,7 @@ for name in SELECT:
   for key,value in sorted(mapping.items(),key=lambda x:-len(x[0])):s=re.sub(r'\b'+key+r'\b',value,s,flags=re.I)
   transformed.append((label,s))
  # m.lower supplies the common table and clock blocks before executable code.
+ LOCAL.clear();LOCAL.update(local)
  text=m.lower(name,transformed)
  state=[('GDZ_'+k,v) for k,v in STATE.items()]
  decl=[]

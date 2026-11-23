@@ -66,6 +66,9 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     "gfdleta_co2_init": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh", "glibc_trig_flt32.cuh", "portable_libm64.cuh", "gfdleta_support.cuh", "gfdleta_co2_init.cuh"),
     "gfdleta_table_runtime": ("glibc_flt32.cuh",),
     "gfdleta_column": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh", "glibc_trig_flt32.cuh", "portable_libm64.cuh", "gfdleta_support.cuh", "gfdleta_column.cuh"),
+    # The 256-layer storage tier of the two units above (woof/core/gfdleta_levels.py).
+    "gfdleta_co2_init_l256": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh", "glibc_trig_flt32.cuh", "portable_libm64.cuh", "gfdleta_support.cuh", "gfdleta_co2_init_l256.cuh"),
+    "gfdleta_column_l256": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh", "glibc_trig_flt32.cuh", "portable_libm64.cuh", "gfdleta_support.cuh", "gfdleta_column_l256.cuh"),
     "cam3_prepare": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh", "swint.cu"),
     "cam3_paths": ("glibc_flt64.cuh",),
     "cam3_emissivity": ("glibc_flt64.cuh",),
@@ -1016,7 +1019,8 @@ def _needs_no_fmad(name):
     return name in _NO_FMAD_MODULES or (ENABLED and name in _STRICT_NO_FMAD_MODULES)
 
 
-_GFDLETA_MODULES = frozenset(('gfdleta_init', 'gfdleta_lw_helpers', 'gfdleta_tables', 'gfdleta_column', 'gfdleta_math_probe', 'gfdleta_co2_init', 'gfdleta_table_runtime'))
+_GFDLETA_MODULES = frozenset(('gfdleta_init', 'gfdleta_lw_helpers', 'gfdleta_tables', 'gfdleta_column', 'gfdleta_math_probe', 'gfdleta_co2_init', 'gfdleta_table_runtime',
+                              'gfdleta_column_l256', 'gfdleta_co2_init_l256'))
 
 # A146: these port units contain constant divisions that NVVM rewrites to
 # rounded reciprocal multiplies under CuPy's appended -ftz=true. Use direct

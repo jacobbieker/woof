@@ -71,7 +71,8 @@ def test_port_constant_divisions_take_the_direct_non_ftz_route(monkeypatch, stri
     ports = {"gfdleta_init", "gfdleta_lw_helpers", "gfdleta_tables",
              "afwa_buoyancy", "afwa_severe", "misc_diag_print", "snow_papers",
              "gfdleta_column", "gfdleta_math_probe", "gfdleta_co2_init",
-             "gfdleta_table_runtime", "cam3_emissivity", "eeps",
+             "gfdleta_table_runtime", "gfdleta_column_l256", "gfdleta_co2_init_l256",
+             "cam3_emissivity", "eeps",
              "gsfcgce4ice_aux", "qnsepbl", "qnsesfc", "sas", "sstskin",
              "temf", "temf_sfclay", "idealscmsfclay",
              'pxsfclay', 'ssib', 'trajectory', 'tslist', 'wrf_stock_aer3',
@@ -89,7 +90,8 @@ def test_port_constant_divisions_take_the_direct_non_ftz_route(monkeypatch, stri
             f"{kernels.MODULE_KEY_ROOT}:{name}[COLUMN_DEPTH=34]")
         assert "--ftz=false" in calls[-1][3]
     for name in ("cam3_emissivity.cu", "eeps.cu", "gfdleta_co2_init.cuh",
-                 "gfdleta_column.cuh", "gsfcgce4ice_aux.cu", "qnsepbl.cu",
+                 "gfdleta_column.cuh", "gfdleta_co2_init_l256.cuh",
+                 "gfdleta_column_l256.cuh", "gsfcgce4ice_aux.cu", "qnsepbl.cu",
                  "sas.cu", "sstskin.cu", "temf.cu", "gsfcsw.cu",
                  "gsfcsw_fast.cuh", "kfcup.cu"):
         assert name in FTZ_FALSE_SOURCES
