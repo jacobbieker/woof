@@ -256,8 +256,8 @@ This section is the fork's own. The fork carries upstream WOOF 1.1.7 and adds
 the work below on top of it. It does not change upstream's defaults: each new
 option is off until selected, and a configuration that selects none of them
 runs as upstream's does. The section is grouped by area, and where
-something is partial it says so. Every merge into the fork's `main` is released as a
-new `metal-woof` build (`metal-vX.Y.Z.N`). The fork's own changes are recorded
+something is partial it says so. Every merge into the fork's `main` is tagged and released on GitHub as a
+new `metal-woof` build (`metal-vX.Y.Z.N`); PyPI gets the newest one daily. The fork's own changes are recorded
 in [FORK-CHANGELOG.md](FORK-CHANGELOG.md).
 
 Upstream now covers several things this section once listed as the fork's:
@@ -273,8 +273,8 @@ Notes on the 1.1.7 sync:
   tests, and it runs as before.
 - The fork takes upstream 1.1.7's correct mode (`physics.mode`
   `correct`/`exact`) and its default-on corrections as upstream ships them.
-  The fork's own quirk corrections (`woof_quirk_corrections`) are still
-  off by default.
+  The fork's own quirk corrections follow the same switch: on in correct
+  mode (the default), off in exact mode.
 - The hex MPAS-route qsat pole guard is now correction RP9, not RP8. This
   is a user-visible ID change with no alias.
 
@@ -716,17 +716,25 @@ Notes on the 1.1.7 sync:
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
-- **Corrections of WRF/MPAS quirks, each opt-in and off by default.**
-  The default stays word for word with the WRF 4.7.1 / MPAS v8.4.2
-  oracle; each key changes only the arithmetic it names.
-  - `woof_quirk_corrections = "all"` turns every correction below on at
-    once, each where its scheme runs (default `"none"`; the hex door takes
-    `--quirk-corrections all`). A key set against it is refused by name,
-    and so is a correction its own key refuses in that combination. It
-    turns on `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
+- **Corrections of WRF/MPAS quirks, on by default (correct mode).**
+  Each key changes only the arithmetic it names, where its scheme runs.
+  Exact mode turns every one off, so the run is the WRF 4.7.1 / MPAS v8.4.2
+  oracle word for word; parity tests run in exact mode. Exact mode is a
+  strict `GPUWM_WRF_EXACT=1` process or every correct-mode key set false
+  (WRF route), `--physics-mode exact` (hex door), or
+  `config_physics_mode = 'exact'` (MPAS-Ocean, MALI and MPAS-Seaice config
+  dicts).
+  - `woof_quirk_corrections` is the umbrella. Unset (the default), the
+    corrections follow the mode, and a correction's own key wins: that
+    turns one off in correct mode, or on in exact mode. `"all"` / `"none"`
+    turns every one on / off whatever the mode (the hex door takes
+    `--quirk-corrections all|none`); a key set false next to `"all"` is
+    refused by name, and a key set next to `"none"` wins. On the WRF route the four keys are correct-mode
+    findings FQ1-FQ4, so the run receipt's `correct_mode` block names them.
+    It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt` and `noah_smc_floor_booking` (WRF route); `--undriven-species-boundary
     wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
-    flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
+    flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
     `woof_redi_k33` (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
     `woof_simple_velocity_bed`, `woof_statistics_extrema` and
@@ -744,8 +752,8 @@ Notes on the 1.1.7 sync:
     potential temperature as if it were a temperature flux and converts
     back with pi, so the column gets `HFX*pi` instead of `HFX`. That loses
     4.5% of the surface heating at 850 hPa and 14% at 600 hPa. The option
-    uses `HFX/pi(1)` (refused with BEP/BEM, where YSU takes the urban
-    heat sources instead). Checked by the column heat budget, not yet scored
+    uses `HFX/pi(1)` (not read with BEP/BEM, where YSU takes the urban
+    heat sources instead; the receipt lists it as uncorrected there). Checked by the column heat budget, not yet scored
     against observations; the hex MPAS-suite YSU does not carry it yet.
   - `mynn_sfclay_psih_zolzt` (MYNN surface layer, `sf_sfclay_physics = 5`,
     WRF route). WRF integrates the 2 m and 10 m heat profile from `z0/L`
@@ -758,9 +766,11 @@ Notes on the 1.1.7 sync:
     the water it adds nowhere, so dry sandy columns gain water (up to 30 mm
     in a step on a column that starts below the floor). The option takes it
     from the layer below, and past the bottom layer from the drainage, so
-    the column water budget closes. Not yet scored against observations;
-    the hex MPAS-suite Noah does not carry it yet.
-- **Observation-driven corrections, each opt-in and off by default:**
+    the column water budget closes. Not read with a WRF-Hydro coupling. Not
+    yet scored against observations; the hex MPAS-suite Noah does not carry
+    it yet.
+- **Observation-driven corrections, each opt-in and off by default** (GF's
+  is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
     surface rain too, so deep `pret` is 1.29 to 1.66 times the column's
@@ -866,6 +876,11 @@ Notes on the 1.1.7 sync:
     admit 256 levels (compile-time 128/256 tier; at 128 levels or fewer
     the unchanged kernel, word for word); their matrix rows still record
     the old 128-level refusal until the 149-level hex case is re-run.
+    KF-CuP and Multiscale Kain-Fritsch now take up to 256 levels (were
+    128 and 160): both keep every column array in a runtime-sized
+    workspace, so the bound was a refusal guard only, and words at the
+    old level counts are unchanged
+    (`tests/test_cu_kfcup_mskf_256_levels_gpu.py`).
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
@@ -1647,7 +1662,7 @@ Notes on the 1.1.7 sync:
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
-  tags, writes release notes and publishes `metal-woof` to PyPI
+  tags and writes release notes; PyPI gets the newest `metal-woof` tag once a day
   ([docs/dev/ci.md](docs/dev/ci.md)).
 - **256-level columns for WSM3, WSM5, WSM7, WDM5 and WDM7.** These five
   microphysics units (`mp_physics` 3, 4, 24, 14 and 26) keep their level
@@ -1664,6 +1679,18 @@ Notes on the 1.1.7 sync:
   ([the frame table](docs/kernel_local_memory_bounds.md)). The committed hex
   option-matrix rows for WSM3 and WSM5 still record the old 80-level
   refusal at 149 levels until the matrix is re-run on its staged case.
+- **256-level columns for the GSFC shortwave scheme.** `ra_sw_physics=2`
+  was refused above 128 layers: its per-column arena (every array's extent
+  and offset) and the entry point's `zero[]` were literals for a 128-layer
+  column. They are now expressions of `GSFC_KMAX`, whose source default is
+  128, so a column of 128 layers or fewer compiles the unchanged-meaning
+  source (the oracle fixture words and a raw-bit comparison at nz = 49 and
+  128 are identical) and a deeper column adds `-D GSFC_KMAX=256`. The
+  local frame stays 0 B at both tiers; the arena grows from 32,677 to 62,885
+  words per column (535 MB to 1.03 GB for the 4,096-column chunk) and
+  preflight prices it by tier. Past 256 is refused by name. Hex does not
+  offer `ra_sw_physics=2`, so only the WRF route is affected
+  ([the record](docs/kernel_local_memory_bounds.md)).
 
 ### Licensing and opt-ins
 

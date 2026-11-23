@@ -259,7 +259,7 @@ def launch_ysu(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
             "surface_heat_exner does not combine with bep: the BEP arm takes "
             "the surface heat from the urban sources (bepswitch = 1)")
     if surface_heat_exner:
-        # The opt-in correction (default off): YSU takes HFX as a theta
+        # The correction (on in correct mode, FQ2): YSU takes HFX as a theta
         # flux, so hand it the theta flux HFX/pi(1).  The kernel is not
         # touched; off, the launch below gets the caller's hfx unchanged.
         hfx = hfx / exner[0]

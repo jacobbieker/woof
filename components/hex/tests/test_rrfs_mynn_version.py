@@ -219,14 +219,32 @@ def test_proofs_against_native_44c0849_name_the_pin(tmp_path):
     namelist = tmp_path / 'namelist.atmosphere'
     namelist.write_text(HRRRV5 + '\n')
     base = ['woof hex', 'forecast', '--physics-backend', 'mpasphys']
+    # Every MPAS route also names MMM a4baf7f and the v8.4.2 drag, and the RRFS rows TEMPO v3.0.3
+    # (version_defaults): the generations correct mode would otherwise take by default.
+    pins = ['--physics', 'mmm_version=a4baf7f', '--physics', 'gwdo_version=v842']
     run, record = proof_referee_versions(base, namelist)
-    assert run == base + ['--physics', 'config_mynn_version=pinned'] and record['appended'] == run[len(base):]
-    named = base + ['--physics', 'config_mynn_version=mynn-v6.1']
+    assert run == base + ['--physics', 'config_mynn_version=pinned', '--physics', 'config_tempo_version=v3.0.3',
+                          *pins] and record['appended'] == run[len(base):]
+    named = base + ['--physics', 'config_mynn_version=mynn-v6.1', '--physics', 'config_tempo_version=v3.2.5',
+                    '--physics', 'mmm_version=550b5b4', '--physics', 'gwdo_version=kim2026']
     assert proof_referee_versions(named, namelist)[0] == named
     namelist.write_text(HRRRV5 + "\n&hex_mpasphys config_mynn_version='mynn-v6.1' /\n")
-    assert proof_referee_versions(base, namelist)[0] == base
+    assert 'config_mynn_version=pinned' not in proof_referee_versions(base, namelist)[0]
     namelist.write_text('&physics config_physics_suite="convection_permitting" /\n')
-    assert proof_referee_versions(base, namelist)[0] == base
+    assert proof_referee_versions(base, namelist)[0] == base + pins
+    # The KIM drag has no v842 generation: a deck that names it names no gwdo_version.
+    namelist.write_text("&physics config_physics_suite='convection_permitting' config_gwdo_scheme='bl_kim_gwdo' /\n")
+    assert proof_referee_versions(base, namelist)[0] == base + pins[:2]
+    # The effective drag decides (the command over the namelist): YSU on the command over a KIM namelist is
+    # pinned, and KIM on the command over a namelist that names none is not.
+    ysu = base + ['--physics', 'config_gwdo_scheme=bl_ysu_gwdo']
+    assert proof_referee_versions(ysu, namelist)[0] == ysu + pins
+    namelist.write_text('&physics config_physics_suite="convection_permitting" /\n')
+    kim = base + ['--physics', "config_gwdo_scheme='bl_kim_gwdo'"]
+    assert proof_referee_versions(kim, namelist)[0] == kim + pins[:2]
+    # A command that runs no MPAS route names nothing.
+    namelist.write_text('&nothing /\n')
+    assert proof_referee_versions(['woof hex', 'forecast'], namelist)[0] == ['woof hex', 'forecast']
 
 
 def test_exact_mode_takes_the_pin_unless_named():

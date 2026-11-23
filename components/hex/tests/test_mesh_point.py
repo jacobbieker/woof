@@ -1009,3 +1009,32 @@ def test_a_density_raster_finer_than_the_fine_rung_is_refused(tmp_path: Path) ->
         mesh_point.request_from_arguments(arguments)
     with pytest.raises(PointPlanRefusal, match="no such file"):
         mesh_point.density_raster_paths([tmp_path / "absent.nc"], fine_dx_m=3000.0)
+
+
+@pytest.mark.parametrize("knob", [["--ring-factor", "1"], ["--transition-factor", "12"], ["--cull-pad-scale", "2"]])
+def test_a_grading_knob_with_no_geometry_keeps_the_ladder(knob: list[str]) -> None:
+    """The fork's grading knobs shape the geometry-1 ladder.  ``regional_door.plan`` keeps geometry 1 when one is
+    given with no geometry; mesh-plan fell through to the geometry-2 default (upstream 1.1.7), where
+    --ring-factor was dropped without a word."""
+    arguments = build_parser().parse_args([
+        "mesh-plan", "--point", "39.1,-94.58", "--fine-dx-m", "3000", "--radius-km", "250", *knob])
+    request = mesh_point.request_from_arguments(arguments)
+    assert arguments.geometry == 1
+    assert request.ask is None   # the ladder road, not a geometry-2 row
+    assert getattr(request, knob[0][2:].replace("-", "_")) == float(knob[1])
+
+
+def test_no_grading_knob_keeps_the_geometry_2_default() -> None:
+    arguments = build_parser().parse_args([
+        "mesh-plan", "--point", "39.1,-94.58", "--fine-dx-m", "3000", "--radius-km", "250"])
+    assert mesh_point.request_from_arguments(arguments).ask is not None
+    assert getattr(arguments, "geometry", None) is None
+
+
+def test_a_ring_factor_under_named_geometry_2_is_refused_and_the_others_carry() -> None:
+    base = ["mesh-plan", "--point", "39.1,-94.58", "--fine-dx-m", "3000", "--radius-km", "250", "--geometry", "2"]
+    with pytest.raises(PointPlanRefusal, match="geometry 2 lays no rings"):
+        mesh_point.request_from_arguments(build_parser().parse_args([*base, "--ring-factor", "1"]))
+    # The ramp width and the pad mean something to a geometry-2 row: named with it, they ride the row.
+    request = mesh_point.request_from_arguments(build_parser().parse_args([*base, "--cull-pad-scale", "2"]))
+    assert request.ask is not None

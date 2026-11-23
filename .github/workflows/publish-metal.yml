@@ -3,43 +3,132 @@ name: publish-metal
 # metal-woof: this source built for Apple silicon and published to PyPI.
 #
 # A macOS arm64 platform wheel carrying the macOS Rust bridges, with the MLX
-# backend's requirements in its base dependencies, plus the matching sdist.
-# The distribution is renamed at build time (tools/metal_woof_project.py);
-# recast-woof's own release workflows (publish.yml, publish-data.yml) are
-# untouched.  Publishing is PyPI trusted publishing: project metal-woof,
-# this workflow file, environment pypi-metal (docs/dev/ci.md).
+# backend's requirements in its base dependencies.  Wheel only: PyPI caps a
+# project at 10 GB in total, so no sdist is built or uploaded (the GitHub
+# release of each tag carries the source).  The distribution is renamed at
+# build time (tools/metal_woof_project.py); recast-woof's own release
+# workflows (publish.yml, publish-data.yml) are untouched.  Publishing is
+# PyPI trusted publishing: project metal-woof, this workflow file,
+# environment pypi-metal (docs/dev/ci.md).
 #
-# A tag `metal-vX.Y.Z[.N]` builds, smoke-tests and publishes X.Y.Z[.N].  A
-# manual run builds and smoke-tests the version it is given and publishes
-# only when `publish` is ticked.
+# release-metal.yml tags and releases every merge on GitHub, but PyPI gets
+# the newest metal-v tag at most once a day: the daily schedule below
+# resolves that tag, checks it out, and skips cleanly (no build) when that
+# version is already on PyPI.  A tag push (never fired by release-metal.yml,
+# whose GITHUB_TOKEN pushes start no workflow) and a manual run still work:
+# a tag builds, smoke-tests and publishes X.Y.Z[.N]; a manual run builds and
+# smoke-tests the version it is given and publishes only when `publish` is
+# ticked.
+#
+# Concurrency (job level, on build): scheduled and tag runs share one group
+# with cancel-in-progress, so only the newest proceeds.  A manual run names an
+# explicit version, so it gets its own group per version and is never
+# cancelled by an unrelated schedule or tag run (a requested publish is not
+# lost); re-dispatching the same version replaces only its own pending run.
+# The publish job has its own non-cancelling, queue: max group, so a run superseded
+# mid-upload finishes uploading and no pending upload is dropped.  A scheduled
+# run executes this workflow file
+# from main but builds the newest tag's source and tools; a change to how the
+# workflow calls those tools should land with its tag before the next cron.
 
 on:
   push:
     tags: ["metal-v*"]
+  schedule:
+    - cron: "17 4 * * *"   # daily, 04:17 UTC, off-peak
   workflow_dispatch:
     inputs:
       version:
         description: "metal-woof version to build, for example 1.1.3.1"
         required: true
       publish:
-        description: "upload the built distributions to PyPI"
+        description: "upload the built wheel to PyPI"
         type: boolean
         default: false
 
 permissions:
   contents: read
 
-concurrency:
-  group: publish-metal-${{ github.ref_name }}-${{ inputs.version }}
-  cancel-in-progress: false
-
 env:
   PIXI_VERSION: v0.81.0
   PYTHONUNBUFFERED: "1"
 
 jobs:
+  resolve:
+    name: resolve version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      ref: ${{ steps.v.outputs.ref }}
+      skip: ${{ steps.v.outputs.skip }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - id: v
+        name: the version and ref this run builds, and whether PyPI has it
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          ref="$REF"
+          publish=true
+          case "$EVENT" in
+            push)
+              version="${REF_NAME#metal-v}"
+              ;;
+            schedule)
+              tag="$(git ls-remote --tags --refs origin 'refs/tags/metal-v*' \
+                | sed 's|.*refs/tags/||' | sed 's/^metal-v//' | sort -V | tail -n1)"
+              if [ -z "$tag" ]; then
+                echo "no metal-v tag yet; nothing to publish"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              version="$tag"
+              ref="refs/tags/metal-v${version}"
+              ;;
+            *)
+              version="$INPUT_VERSION"
+              publish="$INPUT_PUBLISH"
+              ;;
+          esac
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+)+$'; then
+            echo "::error::version '$version' is not a release number (tag metal-vX.Y.Z[.N])"
+            exit 1
+          fi
+          skip=false
+          if [ "$publish" = true ]; then
+            code="$(curl -s --retry 3 --retry-all-errors -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/metal-woof/${version}/json" || true)"
+            echo "PyPI metal-woof ${version}: HTTP ${code}"
+            if [ "$code" = 200 ]; then
+              echo "metal-woof ${version} is already on PyPI; nothing to build"
+              skip=true
+            elif [ "$code" != 404 ]; then
+              echo "::error::PyPI answered HTTP ${code} for metal-woof ${version}; not guessing"
+              exit 1
+            fi
+          fi
+          {
+            echo "version=$version"
+            echo "ref=$ref"
+            echo "skip=$skip"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
   build:
     name: build (macos-15, arm64)
+    needs: resolve
+    if: needs.resolve.outputs.skip != 'true'
+    concurrency:
+      group: ${{ github.event_name == 'workflow_dispatch' && format('publish-metal-dispatch-{0}', inputs.version) || 'publish-metal-newest' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
     runs-on: macos-15
     timeout-minutes: 180
     env:
@@ -50,23 +139,13 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
       - id: version
         name: the version this run builds
         env:
-          REF_NAME: ${{ github.ref_name }}
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = push ]; then
-            version="${REF_NAME#metal-v}"
-          else
-            version="${INPUT_VERSION}"
-          fi
-          if ! printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+)+$'; then
-            echo "::error::version '$version' is not a release number (tag metal-vX.Y.Z[.N])"
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
         with:
           pixi-version: ${{ env.PIXI_VERSION }}
@@ -102,19 +181,16 @@ jobs:
       # editable recast-woof) stays usable for the whole job.
       - name: stage the macOS bridges into the checkout's package
         run: python tools/stage_wheel_bridges.py --platform macos-arm64
-      - name: export the tree twice and rename each copy to metal-woof
+      - name: export the tree and rename the copy to metal-woof
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          for tree in sdist wheel; do
-            dir="$RUNNER_TEMP/metal-$tree"
-            rm -rf "$dir" && mkdir -p "$dir"
-            git archive HEAD | tar -x -C "$dir"
-            python tools/metal_woof_project.py --version "$VERSION" "$dir/pyproject.toml"
-          done
-          # The wheel's copy carries the staged bridges; the sdist's never
-          # does (setup.py refuses an sdist with a platform's binaries in it).
+          dir="$RUNNER_TEMP/metal-wheel"
+          rm -rf "$dir" && mkdir -p "$dir"
+          git archive HEAD | tar -x -C "$dir"
+          python tools/metal_woof_project.py --version "$VERSION" "$dir/pyproject.toml"
+          # The copy carries the staged bridges.
           mkdir -p "$RUNNER_TEMP/metal-wheel/woof/libexec"
           cp -R woof/libexec/bridges "$RUNNER_TEMP/metal-wheel/woof/libexec/"
       - id: py
@@ -127,19 +203,16 @@ jobs:
         run: |
           "${{ steps.py.outputs.python-path }}" -m venv "$RUNNER_TEMP/build-env"
           "$RUNNER_TEMP/build-env/bin/python" -m pip install --quiet --upgrade pip build
-      - name: sdist (from the unstaged copy)
-        run: "\"$RUNNER_TEMP/build-env/bin/python\" -m build --sdist --outdir \"$GITHUB_WORKSPACE/dist\" \"$RUNNER_TEMP/metal-sdist\""
-      - name: platform wheel (from the staged copy)
+      - name: platform wheel (from the staged copy; no sdist, see the header)
         run: "\"$RUNNER_TEMP/build-env/bin/python\" -m build --wheel --outdir \"$GITHUB_WORKSPACE/dist\" \"$RUNNER_TEMP/metal-wheel\""
-      - name: the distributions are metal-woof's, and the wheel is macOS arm64
+      - name: the distribution is metal-woof's, and the wheel is macOS arm64
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           ls -l dist
-          test -f "dist/metal_woof-${VERSION}.tar.gz"
           test -f "dist/metal_woof-${VERSION}-py3-none-macosx_14_0_arm64.whl"
-          test "$(find dist -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 2
+          test "$(find dist -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 1
           (cd dist && shasum -a 256 ./* | tee ../SHA256SUMS)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -152,7 +225,7 @@ jobs:
 
   smoke:
     name: install and import (macos-15, clean venv)
-    needs: build
+    needs: [resolve, build]
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -167,7 +240,7 @@ jobs:
           update-environment: false
       - name: pip install the wheel into a fresh venv, outside any checkout
         env:
-          VERSION: ${{ needs.build.outputs.version }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set -euo pipefail
           "${{ steps.py.outputs.python-path }}" -m venv "$RUNNER_TEMP/smoke"
@@ -176,7 +249,7 @@ jobs:
       - name: it is metal-woof, at this version, with its bridges and the MLX stack
         working-directory: ${{ runner.temp }}
         env:
-          VERSION: ${{ needs.build.outputs.version }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set -euo pipefail
           "$RUNNER_TEMP/smoke/bin/python" - <<'EOF'
@@ -194,8 +267,15 @@ jobs:
 
   publish:
     name: publish to PyPI (metal-woof)
-    needs: [build, smoke]
-    if: github.event_name == 'push' || inputs.publish
+    needs: [resolve, build, smoke]
+    if: needs.resolve.outputs.publish == 'true'
+    # Never cancelled: a newer run may cancel the build, not an upload under way.
+    # queue: max keeps every pending upload (the default keeps only the newest
+    # pending job, which could drop an explicit manual publish).
+    concurrency:
+      group: publish-metal-upload
+      cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-24.04
     environment:
       name: pypi-metal

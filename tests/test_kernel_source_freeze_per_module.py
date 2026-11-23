@@ -1847,8 +1847,8 @@ PINNED_HEADERS = {
 #: tools/transcribe_urban_bem.py and compiled by woof/core/urban_bem.py
 #: (04118fa24) into the BEP+BEM unit.
 COMPOSED_HEADERS = {
-    # GSFC SW production fast image, port-ra2-gsfcsw d15d6f3. Numerical checks are separate.
-    'gsfcsw_fast.cuh': 'e6f663eaeaa24a205d74a287983ef7d9ecdc118c0b7b94d6d7a901db6d788dc2',
+    # GSFC SW production fast image, port-ra2-gsfcsw d15d6f3; re-pinned for the GSFC_KMAX arena macros (128 expands to the old literals; word identity in tests/test_gsfcsw_256_levels.py and the oracle replay). Numerical checks are separate.
+    'gsfcsw_fast.cuh': 'e7899fc52c5d29127acbe23472fd4392b2e2f7f9341f29f8b153a0f753d5d183',
     # LF-normalized at golden/wrf-fixes: the lane blob ended in one stray CR after
     # its final #endif; the oracle-only helper is otherwise byte-identical.
     "urban_root_uptake_480.cuh": "30d091b0ce27830798128f1bb0228c6c8101435c1bf3e530320a723386b237f8",
