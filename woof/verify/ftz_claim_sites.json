@@ -1889,7 +1889,7 @@
     },
     {
       "file": "docs/public/PHYSICS.md",
-      "line": 3639,
+      "line": 3644,
       "kind": "prose",
       "anchor": "Default execution uses CUDA hardware math. `GPUWM_WRF_EXACT=1` preserves subnormals and disables contraction for bitwise native replay. Real native replays also set `GPUWM_WRF_GLIBC` to the referee build's glibc version; the regenerated captures (test host A, RTX 4090) use `2.43`. The column grid runs in one launch with a bounded scratch pool. Independent CO2 profiles and ozone/table initialization run in parallel on the GPU. Cloud bounds from KF, Grell, Grell-Freitas and New SAS retain their native levels and sentinels.",
       "anchor_sha256": "1b6bc24d487dee8625fcd34b10969dc4a7b8dd6317a84707058437e7354df051",
@@ -17773,7 +17773,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 2025,
+      "line": 2028,
       "kind": "prose",
       "anchor": "# WRF 4.8 water balance and the inherited source-scoped no-FTZ loader.",
       "anchor_sha256": "da8870c403912a185f3cfcf9234acb9ee838c784530fb527bddf8bad7038caa7",
