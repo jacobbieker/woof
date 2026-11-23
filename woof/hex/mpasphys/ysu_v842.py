@@ -2728,7 +2728,7 @@ def validated_cuda_binary(path: Path, device_math_header: str, architecture: str
 # variants exceed it, and every rank then rebuilds its module each step (thompson_v842._module, 8 cards,
 # 2026-10-28: 1.28 s/step against 0.25 s with the cache fixed).
 @lru_cache(maxsize=None)
-def _kernels(device_math_header: str, device_id: int, mmm_version: str):
+def _kernels(device_math_header: str, device_id: int, mmm_version: str = "a4baf7f"):
     """Load scheme and conversions; physics_mmm/bl_ysu.F90:56-1420;
     mpas_atmphys_driver_pbl.F:309-420; physics_wrf/module_bl_ysu.F:450-461.
     """

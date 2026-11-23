@@ -715,7 +715,13 @@ def proof_referee_versions(command: list[str], namelist: Path | None) -> tuple[l
     on a route whose table row carries ``mynn_versions`` (rrfs-44c0849) a bare run takes MYNN v6.1, which native
     44c0849 does not run. Breakage this prevents: a deck written while 'pinned' was the default would compare
     MYNN v6.1 against native 44c0849 and go RED on every word MYNN touches. A deck that names the selector keeps
-    it, and routes without a versioned scheme are unchanged, so no deck file changes."""
+    it, and routes without a versioned scheme are unchanged, so no deck file changes.
+
+    Every MPAS route also names the generations the proof's mode would otherwise pick by default
+    (version_defaults): MMM-physics ``mmm_version=a4baf7f`` (MPAS-A v8.4.2's Externals pin; correct mode takes
+    550b5b4), the v8.4.2 YSU drag ``gwdo_version=v842`` (not on a deck that names the KIM drag, which has no
+    v842 generation), and the TEMPO the route's ``exact_mode_defaults`` pin (v3.0.3, RRFS 44c0849; correct mode
+    takes v3.2.5).  So a proof compares the pinned schemes with the pinned Fortran whatever the defaults become."""
     from .config import parse_fortran_namelist
     from .mpasphys.forecast_v842 import suite_route_matches
     from .errors import ConfigurationRefusal
@@ -733,11 +739,26 @@ def proof_referee_versions(command: list[str], namelist: Path | None) -> tuple[l
     pin_sets = _command_values(command, "--physics-pin-set")
     named = " ".join(_command_values(command, "--physics"))
     supplied = {key.casefold() for options in groups.values() for key in options}
+    from .mpasphys import gwdo_version as _gwdo, mmm_version as _mmm
+
+    def unnamed(selector: str) -> bool:
+        return selector + "=" not in named and selector.casefold() not in supplied
+
+    kim = any(str(value).strip().strip("\"'") == _gwdo.KIM for options in groups.values()
+              for key, value in options.items() if key.casefold() == "config_gwdo_scheme") or _gwdo.KIM in named
     appended = []
-    for _, row in suite_route_matches(selected, pin_sets[0] if pin_sets else None) if selected else ():
+    rows = list(suite_route_matches(selected, pin_sets[0] if pin_sets else None)) if selected else []
+    for _, row in rows:
         selector = (row.get("mynn_versions") or {}).get("selector")
-        if selector and selector + "=" not in named and selector.casefold() not in supplied:
+        if selector and unnamed(selector):
             appended += ["--physics", f"{selector}=pinned"]
+        for key, value in (row.get("exact_mode_defaults") or {}).items():
+            if key == "config_tempo_version" and unnamed(key) and f"{key}={value}" not in appended:
+                appended += ["--physics", f"{key}={value}"]
+    if rows and unnamed("mmm_version"):
+        appended += ["--physics", f"mmm_version={_mmm.PINNED}"]
+    if rows and not kim and unnamed("gwdo_version"):
+        appended += ["--physics", f"gwdo_version={_gwdo.PINNED}"]
     return [*command, *appended], {"appended": appended,
                                    "source": "verify_mpas referee pins (the deck names no scheme version)"}
 
@@ -910,6 +931,10 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         # proof run writes history and diagnostics in the deck's own io_type, not lossless NetCDF-4
         # (woof.hex.history_compression, the default of every other run).
         run_env = {**os.environ, "GPUWM_HISTORY_COMPRESSION": "none"}
+        # A proof is a pinned lane: proof_referee_versions named every scheme generation, and one the run still
+        # takes from a default is refused by name (version_defaults) rather than compared with the pinned Fortran.
+        from .mpasphys.version_defaults import ENVIRONMENT as PINNED_LANE
+        run_env[PINNED_LANE] = "1"
         with (work / "hex.log").open("w") as log:
             completed = subprocess.run(argv, cwd=run_inputs, stdout=log, stderr=subprocess.STDOUT, check=False,
                                        env=run_env)

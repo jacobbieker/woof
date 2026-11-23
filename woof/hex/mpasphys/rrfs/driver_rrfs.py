@@ -493,10 +493,9 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         # (exact_mode_defaults: config_tempo_version v3.0.3, the TEMPO 9adf9ef both RRFS pins carry).
         # THE BREAKAGE THIS PREVENTS: the RRFS landing gate and every bitwise rerun hand hex the native deck's own
         # namelist, which has no config_tempo_version, so they ran the v3.2.5 default against native's v3.0.3.
-        from ..version_defaults import defaulted
         for key, value in spec.get("exact_mode_defaults", {}).items():
             if key not in named:
-                options[key] = defaulted(key, value, where=f"{table_key} exact_mode_defaults")
+                options[key] = value
     suite = options["config_physics_suite"].rstrip()
     native_suite = spec["suite_routes"].get(suite, suite)
     if native_suite not in spec["suites"]:
@@ -517,6 +516,10 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         if selected not in row["schemes"]:
             raise ValueError(f"illegal fork {row['selector']}={selected!r}")
         selectors[slot] = selected
+    if selectors["microphysics"] == "mp_tempo" and "config_tempo_version" not in named:
+        # TEMPO runs at a version the run did not name: the exact-mode pin or the Registry default (version_defaults).
+        from ..version_defaults import defaulted
+        defaulted("config_tempo_version", options["config_tempo_version"], where=f"{table_key} ({mode} mode)")
     # The source first validates input cloud spelling, then fills an unset
     # radiation cloud, then checks MYNN pairing, then sets internal cld_tempo.
     if (selectors["radiation_lw"] != "off" or selectors["radiation_sw"] != "off") \
