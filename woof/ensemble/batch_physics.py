@@ -245,7 +245,7 @@ YSU_SURFACE_OUTPUTS = ("hpbl", "kpbl", "wstar", "delta", "topdown_radsum", "wsta
 def ysu_output_plan(*, nz, ny, nx, members, reserved_bytes=0, surface_heat_exner=False):
     """All-member one-launch YSU outputs plus its full launch workspace.
 
-    ``surface_heat_exner`` (RunConfig.ysu_surface_heat_exner, default off)
+    ``surface_heat_exner`` (RunConfig.ysu_surface_heat_exner, FQ2)
     adds the member theta-flux buffer the corrected launch reads.
     """
     from woof.core.physics_inventory import ysu_workspace_floats
@@ -316,7 +316,7 @@ def prepare_ysu_column_batch(inputs, *, members, ny, nx, dt, available_bytes,
         shared_pointers=shared_fields if members > 1 else (), member_columns=ny * nx)
     bound = dict(inputs)
     if surface_heat_exner:
-        # RunConfig.ysu_surface_heat_exner (default off), as launch_ysu: the
+        # RunConfig.ysu_surface_heat_exner (FQ2), as launch_ysu: the
         # unchanged kernel reads the theta flux HFX/pi(1) from a planned
         # buffer refreshed before every launch.
         bound["hfx"] = storage.arrays["ysu:hfx_theta"].reshape(inputs["hfx"].shape)
@@ -408,7 +408,7 @@ def prepare_noah_column_batch(fields, params, *, members, ny, nx, dt, dzs,
                               smc_floor_booking=False):
     """One nonurban Noah launch, shared lookup tables and explicit static loads.
 
-    ``smc_floor_booking`` (RunConfig.noah_smc_floor_booking, default off)
+    ``smc_floor_booking`` (RunConfig.noah_smc_floor_booking, FQ4)
     compiles the unit with SSTEP's floor water booked, as launch_noah does.
 
     The caller owns every mutable land-state/output backing and includes it

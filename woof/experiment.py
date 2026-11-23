@@ -5041,8 +5041,8 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                 and kw.get("mp_physics", RunConfig.mp_physics) not in THOMPSON_RAIN_SNOW_MP
                 and "thompson_rain_snow_closure" not in dom):
             kw["thompson_rain_snow_closure"] = False
-        # woof_quirk_corrections = 'all': every opt-in correction whose
-        # scheme this domain runs, a conflicting explicit key refused by name.
+        # an explicit woof_quirk_corrections ('all' / 'none') sets every
+        # correction key the domain does not set itself (quirk_corrections).
         from woof.quirk_corrections import apply_run_corrections
         kw = apply_run_corrections(kw)
         # G3-only shared controls reach only G3 domains. Explicit domain
