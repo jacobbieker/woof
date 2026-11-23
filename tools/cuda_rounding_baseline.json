@@ -5731,7 +5731,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "eabd9c372e352c84ac2f7e624732fb30391643499cddd6258890adf30345db77"
+    "sha256": "b28f029d9c067ebfee8eee98df7a14250eaa1ccc6ca56fc2a98c82433aba1b2b"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5871,7 +5871,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "d8e7b6b845dc0ca4fe11dbd8226b276c6cae7fe66558ba4f131d2af723fc8823"
+    "sha256": "93eec904fd3986708bcd761b15e43daab69186220975a27b2efee824d1fde4f9"
    },
    {
     "file": "woof/core/refl.py",
