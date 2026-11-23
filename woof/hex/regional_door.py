@@ -495,6 +495,10 @@ def plan(args: argparse.Namespace) -> dict[str, Any]:
         geometry_words = _mesh_ask.door_argv(args)
     except _mesh_ask.MeshAskRefusal as error:
         raise RegionalRefusal(str(error)) from error
+    if geometry_two and "ring_factor" in _grading(args):
+        # mesh-plan refuses it too; said here before anything is fetched.
+        raise RegionalRefusal("--ring-factor spaces the geometry-1 ladder's rings; geometry 2 lays no rings "
+                              "(name --geometry 1, or no geometry, with it)")
     # A drawn core (--shape/--ellipse) is the region; the circle is --point.
     drawn = drawn_shape(args)
     if drawn is not None and args.point is not None:
