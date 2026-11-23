@@ -395,22 +395,17 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
 }
 
+#: A launch setting, not a RunConfig field, that :data:`KEY_UNREAD` reads
+#: as a selector: whether this process couples WRF-Hydro
+#: (woof.wrf_hydro_route.configured).  It is stated only in the values
+#: :func:`launch_values` builds (what ran: run_reads, :func:`uncorrected`);
+#: identities and echoes read the configuration alone.
+WRF_HYDRO_SELECTOR = "wrf_hydro_coupled"
+
 #: Key -> ``(selector, values)``: selections inside :data:`KEY_SCOPE` under
 #: which the key is still not read, because that code path has no build of
 #: the correction.  A finding whose carrier runs there is listed as
 #: uncorrected, never as applied.
-#: A launch setting, not a RunConfig field, that KEY_UNREAD reads as a
-#: selector: whether this process couples WRF-Hydro
-#: (woof.wrf_hydro_route.configured).  A mapping may state it; otherwise
-#: the launch's own setting is read.
-WRF_HYDRO_SELECTOR = "wrf_hydro_coupled"
-
-
-def _wrf_hydro_coupled() -> bool:
-    from woof.wrf_hydro_route import configured
-    return configured() is not None
-
-
 KEY_UNREAD: Mapping[str, tuple[str, tuple[object, ...]]] = {
     "mynn_boulac_down_sign": ("bl_mynn_version", ("wrf_471", "wrf_480")),
     # With BEP/BEM, WRF's YSU takes its surface heat from the urban sources
@@ -432,8 +427,6 @@ def _key_unread(key: str, values) -> bool:
     selector, names = unread
     value = (values.get(selector) if isinstance(values, Mapping)
              else getattr(values, selector, None))
-    if value is None and selector == WRF_HYDRO_SELECTOR:
-        value = _wrf_hydro_coupled()
     return value in names
 
 
@@ -476,6 +469,15 @@ SCOPE_SELECTORS: tuple[str, ...] = tuple(dict.fromkeys(
     + [selector for selector, _ in KEY_UNREAD.values()]
     # the aggregate radiation selection stands for ra_lw_physics = -1
     + ["ra_physics"]))
+
+
+def launch_values(cfg) -> dict:
+    """:func:`_scope_values` with this launch's settings that decide what
+    runs (:data:`WRF_HYDRO_SELECTOR`): for the questions "is the correction
+    applied" (woof.quirk_corrections.run_reads) and the receipt
+    (:func:`uncorrected`), never for a configuration's identity."""
+    from woof.wrf_hydro_route import configured
+    return {**_scope_values(cfg), WRF_HYDRO_SELECTOR: configured() is not None}
 
 
 def _scope_values(cfg) -> dict:
@@ -653,7 +655,7 @@ def uncorrected(cfg) -> list[str]:
     if resolution.mode != PHYSICS_MODE_CORRECT:
         return []
     out: list[str] = []
-    values = _scope_values(cfg)
+    values = launch_values(cfg)
     for c in CORRECTIONS:
         if c.finding in resolution.skipped:
             continue

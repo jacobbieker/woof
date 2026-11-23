@@ -373,13 +373,14 @@ def run_corrections_under(umbrella: str) -> dict:
 def run_reads(cfg, key: str) -> bool:
     """Whether RunConfig correction ``key`` reaches ``cfg``'s arithmetic:
     on, and read by the schemes it selects (woof.correct_mode.KEY_SCOPE,
-    KEY_GENERATIONS and KEY_UNREAD). Every consumer asks this, so a key
-    that is on by default (correct mode) is inert where it is not read."""
+    KEY_GENERATIONS and KEY_UNREAD, with this launch's WRF-Hydro coupling:
+    correct_mode.launch_values). Every consumer asks this, so a key that is
+    on by default (correct mode) is inert where it is not read."""
     from woof import correct_mode
     if BY_KEY[key].route != "wrf":
         raise ValueError(f"{key} is not a RunConfig correction")
     return (getattr(cfg, key, False) is True
-            and correct_mode.key_in_scope(key, correct_mode._scope_values(cfg)))
+            and correct_mode.key_in_scope(key, correct_mode.launch_values(cfg)))
 
 
 def check_run_config(cfg) -> None:

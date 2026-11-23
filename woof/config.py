@@ -78,17 +78,21 @@ def validate_surface_radiation_policy(policy: str) -> str:
 class RunConfig:
     def __post_init__(self):
         # woof_quirk_corrections = 'all' / 'none' (woof.quirk_corrections):
-        # every RunConfig correction on / off, however the RunConfig was
-        # built; under 'none' a key passed by name wins, as on the TOML
-        # route (_named_corrections_win_under_none restores it after this).
-        # A key is read only where its scheme runs (correct_mode.KEY_SCOPE).
-        # The TOML readers refuse a key set false next to 'all' before this
-        # point (apply_run_corrections).
+        # every RunConfig correction on / off.  A RunConfig built from
+        # named keywords has already been resolved as on the TOML route
+        # (_umbrella_resolved_as_in_toml: under 'none' a named key wins and
+        # the umbrella arrives as None); what reaches this point is a full
+        # restatement (replace(), asdict) or a subclass.  A key is read only
+        # where its scheme runs (correct_mode.KEY_SCOPE).
         if self.woof_quirk_corrections in ("all", "none"):
             from woof.quirk_corrections import run_corrections_under
             for key, value in run_corrections_under(
                     self.woof_quirk_corrections).items():
                 object.__setattr__(self, key, value)
+            if self.woof_quirk_corrections == "none":
+                # resolved, as apply_run_corrections leaves it: every key
+                # explicit, so a later replace() of one key keeps it
+                object.__setattr__(self, "woof_quirk_corrections", None)
         if self._legacy_h_sca is None:
             object.__setattr__(self, "_legacy_h_sca", self.h_sca_adv_order is None)
         if self.h_sca_adv_order is None:
@@ -2639,10 +2643,12 @@ class RunConfig:
     # The umbrella over the quirk corrections (woof.quirk_corrections).
     # Unset (None, the default), each correction key keeps its own value,
     # whose default follows the physics mode (correct: on; exact or a
-    # strict WRF process: off).  'all' turns every RunConfig correction on
-    # and 'none' turns every one off (__post_init__); the TOML readers
-    # (load_config, build_experiment) refuse a key set the other way next
-    # to it, by name.
+    # strict WRF process: off).  'all' turns every RunConfig correction on;
+    # a key set false next to it is refused by name.  'none' turns off
+    # every correction not named, and a named key wins; the RunConfig then
+    # holds it resolved (None, every key explicit).  The same rule on every
+    # route: the TOML readers and RunConfig(...) both resolve through
+    # woof.quirk_corrections.apply_run_corrections.
     woof_quirk_corrections: str | None = _config_field(default=None, kw_only=True)
     # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
     # appended off.  The MYNN surface layer (sf_sfclay_physics = 5)
@@ -2690,29 +2696,34 @@ class RunConfig:
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
 
-def _named_corrections_win_under_none(init):
-    """RunConfig.__init__, wrapped so that under ``woof_quirk_corrections =
-    'none'`` a correction key passed by name keeps its value, as on the TOML
-    route (woof.quirk_corrections.apply_run_corrections): 'none' turns off
-    every correction not named.  __post_init__ cannot tell a key passed
-    True from its default (True in correct mode), so the names are read
-    here.  ``dataclasses.replace`` passes every field by name, so a
-    replace() of a resolved RunConfig keeps its values and takes the
-    changed key."""
+def _umbrella_resolved_as_in_toml(init):
+    """RunConfig.__init__, wrapped so that a RunConfig built in Python with
+    an explicit ``woof_quirk_corrections`` resolves it as the TOML readers
+    do (woof.quirk_corrections.apply_run_corrections): under 'none' a
+    correction key passed by name wins, under 'all' one passed false where
+    its scheme runs is refused by name.  __post_init__ cannot tell a key
+    passed True from its default (True in correct mode), so the names are
+    read here.  A call that passes every field (``dataclasses.replace``,
+    ``RunConfig(**asdict(cfg), ...)``) restates a resolved configuration:
+    __post_init__ applies the umbrella to all of it.  A dataclass subclass
+    (_DfiBackwardRunConfig, built from an admitted configuration) has its
+    own __init__ and takes __post_init__'s rule only."""
     import functools
 
     @functools.wraps(init)
     def __init__(self, *args, **kwargs):
+        if (kwargs.get("woof_quirk_corrections") is not None
+                and not kwargs.keys() >= _RUN_CONFIG_INIT_FIELDS):
+            from woof.quirk_corrections import apply_run_corrections
+            kwargs = apply_run_corrections(kwargs)
         init(self, *args, **kwargs)
-        if self.woof_quirk_corrections == "none":
-            from woof.quirk_corrections import keys
-            for key in keys("wrf"):
-                if key in kwargs:
-                    object.__setattr__(self, key, kwargs[key])
     return __init__
 
 
-RunConfig.__init__ = _named_corrections_win_under_none(RunConfig.__init__)
+_RUN_CONFIG_INIT_FIELDS = frozenset(f.name for f in fields(RunConfig) if f.init)
+
+
+RunConfig.__init__ = _umbrella_resolved_as_in_toml(RunConfig.__init__)
 
 
 def _validate_solar_tsi(cfg) -> None:
