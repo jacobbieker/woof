@@ -744,8 +744,14 @@ def proof_referee_versions(command: list[str], namelist: Path | None) -> tuple[l
     def unnamed(selector: str) -> bool:
         return selector + "=" not in named and selector.casefold() not in supplied
 
-    kim = any(str(value).strip().strip("\"'") == _gwdo.KIM for options in groups.values()
-              for key, value in options.items() if key.casefold() == "config_gwdo_scheme") or _gwdo.KIM in named
+    # The drag the run takes: the last --physics config_gwdo_scheme= over the namelist's.  THE BREAKAGE THIS
+    # PREVENTS: a namelist naming the KIM drag under a command naming the YSU drag skipped the v842 pin.
+    drag = [part.split("=", 1)[1] for part in _command_values(command, "--physics")
+            if "=" in part and part.split("=", 1)[0].strip().casefold() == "config_gwdo_scheme"]
+    if not drag:
+        drag = [value for options in groups.values() for key, value in options.items()
+                if key.casefold() == "config_gwdo_scheme"]
+    kim = bool(drag) and str(drag[-1]).strip().strip("\"'") == _gwdo.KIM
     appended = []
     rows = list(suite_route_matches(selected, pin_sets[0] if pin_sets else None)) if selected else []
     for _, row in rows:

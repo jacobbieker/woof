@@ -235,6 +235,13 @@ def test_proofs_against_native_44c0849_name_the_pin(tmp_path):
     # The KIM drag has no v842 generation: a deck that names it names no gwdo_version.
     namelist.write_text("&physics config_physics_suite='convection_permitting' config_gwdo_scheme='bl_kim_gwdo' /\n")
     assert proof_referee_versions(base, namelist)[0] == base + pins[:2]
+    # The effective drag decides (the command over the namelist): YSU on the command over a KIM namelist is
+    # pinned, and KIM on the command over a namelist that names none is not.
+    ysu = base + ['--physics', 'config_gwdo_scheme=bl_ysu_gwdo']
+    assert proof_referee_versions(ysu, namelist)[0] == ysu + pins
+    namelist.write_text('&physics config_physics_suite="convection_permitting" /\n')
+    kim = base + ['--physics', "config_gwdo_scheme='bl_kim_gwdo'"]
+    assert proof_referee_versions(kim, namelist)[0] == kim + pins[:2]
     # A command that runs no MPAS route names nothing.
     namelist.write_text('&nothing /\n')
     assert proof_referee_versions(['woof hex', 'forecast'], namelist)[0] == ['woof hex', 'forecast']

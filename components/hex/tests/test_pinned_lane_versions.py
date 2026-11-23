@@ -79,6 +79,17 @@ def test_scheme_module_arguments_and_slot_calls_name_the_generation():
         assert mmm.of(Call(mmm.PINNED_OPTIONS)) is mmm.PINNED_OPTIONS
 
 
+def test_the_kernel_inventory_names_both_ysu_generations_inside_a_lane():
+    # THE BREAKAGE THIS PREVENTS: an unnamed YSU row raised DefaultedVersion inside a lane, and kernel_plan.start
+    # turned that into a catalog error, so the AOT catalog was skipped without a word.
+    from woof.hex.cuda_backend.aot_build import physics_inventory
+
+    header = ysu.shared_device_math_header()
+    with pinned_lane():
+        sources = {row["source"] for row in physics_inventory()}
+    assert {ysu.cuda_source(header, "a4baf7f"), ysu.cuda_source(header, "550b5b4")} <= sources
+
+
 def test_drag_generation_only_where_the_suite_runs_the_ysu_drag():
     assert gwdo.configure(_v842(), {}).gwdo is None   # v842, the default in every mode
     rrfs = _rrfs()
