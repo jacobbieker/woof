@@ -77,6 +77,11 @@ def main():
     if hashlib.sha256(patched).hexdigest() != PATCHED_SHA256 or hashlib.sha256(pristine).hexdigest() != SOURCE_SHA256:
         raise SystemExit('FLG oracle sources differ from the pinned and patched hashes')
     stock_lib, deep_lib = build/'libflg_oracle_pristine.so', build/'libflg_oracle_nvx256.so'
+    # build_nvx256.sh records the libraries it compiled; refuse any other.
+    recorded = dict(reversed(line.split(None, 1)) for line in (build/'sha256sums.txt').read_text().splitlines())
+    for lib in (stock_lib, deep_lib):
+        if recorded.get(lib.name) != hashlib.sha256(lib.read_bytes()).hexdigest():
+            raise SystemExit(f'{lib.name} is not the library build_nvx256.sh recorded')
     inert = {}
     for nv in (24, 100):
         fields = deck(nv)

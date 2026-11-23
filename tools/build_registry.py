@@ -5362,8 +5362,7 @@ _STOCK_CALLABLE_CLASSES: dict[str, dict[str, object]] = {
 #: a 100-level WDM6 run passed ``woof check`` and died on its first
 #: microphysics call.
 _VERTICAL_BOUND_SOURCES: dict[str, dict[str, tuple[str, str]]] = {
-    "radiation": {"wrf-gfdleta": ("GFDL Eta radiation", "GFDLETA_VERTICAL_LEVEL_BOUNDS"),
-                  "fu-liou-gu": ("WRF Fu-Liou-Gu radiation", "FLG_VERTICAL_LEVEL_BOUNDS")},
+    "radiation": {"wrf-gfdleta": ("GFDL Eta radiation", "GFDLETA_VERTICAL_LEVEL_BOUNDS")},
     "microphysics": {
         "cam-mg-mp11": ("CAMMGMP microphysics", "CAMMGMP_VERTICAL_LEVEL_BOUNDS"),
         'ntu-mp56': ("NTU microphysics", "NTU_VERTICAL_LEVEL_BOUNDS"),

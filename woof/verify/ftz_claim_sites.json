@@ -28674,7 +28674,7 @@
     },
     {
       "file": "tools/build_registry.py",
-      "line": 8711,
+      "line": 8710,
       "kind": "prose",
       "anchor": "\"LPBL = 1, subnormal condensate) -- for three consecutive calls; \"",
       "anchor_sha256": "45a3b6763a03fadc0d0d30f49eeae4917dd8379314b76b969faf134b0f19631b",
@@ -28685,7 +28685,7 @@
     },
     {
       "file": "tools/build_registry.py",
-      "line": 8717,
+      "line": 8716,
       "kind": "prose",
       "anchor": "\"arithmetic (CuPy's -ftz=true) only RQCBLTEN/RQIBLTEN words differ, \"",
       "anchor_sha256": "c2b2b7ffd81a91c9aefe72ce9c44301412877ef69fddd32454cca62f84173639",
@@ -28696,7 +28696,7 @@
     },
     {
       "file": "tools/build_registry.py",
-      "line": 8719,
+      "line": 8718,
       "kind": "prose",
       "anchor": "\"leaves subnormal condensate (tests/test_myjpbl_wrf461_parity.py). \"",
       "anchor_sha256": "6c46b50a165ecd7f21f095193eccd6bbe08682dc9539463308275096f3c3d193",
@@ -28707,7 +28707,7 @@
     },
     {
       "file": "tools/build_registry.py",
-      "line": 10993,
+      "line": 10992,
       "kind": "prose",
       "anchor": "\"subnormal-tendency flush on CuPy's -ftz=true compile route.  \"",
       "anchor_sha256": "80dbf7d8d7ffbcdc218cefc3a0c8cf3a0a3fe1d45344b7d5ba5654aa6b753b17",
@@ -73455,7 +73455,7 @@
     },
     {
       "file": "woof/kernel_prewarm.py",
-      "line": 280,
+      "line": 283,
       "kind": "prose",
       "anchor": "from woof.core.kernels.no_ftz import load_module_no_ftz",
       "anchor_sha256": "fa7c642f6f4fe5c6397fe27a514d033cdde967f743f5481ae9e752e8b4a590e5",
@@ -73466,7 +73466,7 @@
     },
     {
       "file": "woof/kernel_prewarm.py",
-      "line": 291,
+      "line": 294,
       "kind": "prose",
       "anchor": "jobs.append((label, load_module_no_ftz.__wrapped__, (name, defines)))",
       "anchor_sha256": "e60507f955952ab7a5078a680e07da42567a0847453ed1dd56e12b47540b93b5",

@@ -220,7 +220,9 @@ def _check_xbackend(label, result, dp):
     from woof import backend
 
     os.makedirs(directory, exist_ok=True)
-    mode = "strict" if __import__("woof.wrf_exact", fromlist=["ENABLED"]).ENABLED else "default"
+    from woof import wrf_exact
+
+    mode = "strict" if wrf_exact.ENABLED else "default"
     mine = f"{label}.{mode}.{backend.active()}.npz"
     np.savez(os.path.join(directory, mine), **result)
     for other in sorted(n for n in os.listdir(directory)

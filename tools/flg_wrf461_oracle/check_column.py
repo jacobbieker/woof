@@ -34,7 +34,10 @@ def inputs():
 def native(library, fields, nvx=SHIPPED_NVX):
     """rad_all from a pristine (nvx=100) or patched-nvx oracle library; ``nvx``
     is the library's PARA_FILE bound, the leading extent of ``aprofsij``."""
-    lib=ct.CDLL(str(Path(library).resolve())); n,nv1=fields['pressure'].shape; nv=nv1-1
+    n,nv1=fields['pressure'].shape; nv=nv1-1
+    if nv>nvx:
+        raise ValueError(f'{nv} layers overrun an nvx={nvx} FLG library; use the patched-nvx build')
+    lib=ct.CDLL(str(Path(library).resolve()))
     ct.c_int.in_dll(lib,'__para_file_MOD_nsubcld').value=(nv-1)//3
     ct.c_int.in_dll(lib,'__para_file_MOD_ngroup').value=3
     ct.c_int.in_dll(lib,'__para_file_MOD_nclouds').value=3*((nv-1)//3)
