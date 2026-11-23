@@ -7471,7 +7471,7 @@ def _kfcup_metadata(registry):
                                    ["kain-fritsch"]["asset_requirements"]),
         "extensions": {"held_state": list(KFCUP_STATE_ROWS)},
         "constraints": {"required_settings": {"moist": True}},
-        "warnings": ["KF-CuP requires 8 through 128 mass levels for its column workspace. "
+        "warnings": ["KF-CuP requires 8 through 256 mass levels for its column workspace. "
                      "Native LNTERMS is undefined outside shallow columns. "
                      "The inherited extreme-PDF overflow correction remains declared. "
                      "Forecast and observation proof is recorded separately."],

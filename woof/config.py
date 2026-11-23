@@ -10245,8 +10245,10 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     if 3 in (ra_lw_physics, ra_sw_physics):
         if not math.isfinite(cfg.cam_abs_freq_s) or cfg.cam_abs_freq_s < 0:
             raise ConfigurationRefused("cam_abs_freq_s must be finite and non-negative")
-    if ra_sw_physics == 2 and not 2 <= cfg.nz <= 128:
-        raise ConfigurationRefused('GSFC shortwave requires 2 to 128 layers; larger columns exceed its allocated CUDA workspace')
+    if ra_sw_physics == 2:
+        from woof.physics_vertical_contract import GSFCSW_VERTICAL_LEVEL_BOUNDS as _gsfc_bounds
+        if not _gsfc_bounds[0] <= cfg.nz <= _gsfc_bounds[1]:
+            raise ConfigurationRefused(f'GSFC shortwave requires {_gsfc_bounds[0]} to {_gsfc_bounds[1]} layers; its column arena is compiled at the 128 or 256 level tier')
     if cfg.icloud not in (0, 1, 2, 3):
         raise ConfigurationRefused(f"icloud={cfg.icloud}: choose 0, 1, 2 or 3.")
     if not math.isfinite(cfg.swrad_scat) or cfg.swrad_scat < 0.0:

@@ -9,11 +9,11 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 737,
+  "site_count": 739,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 48,
     "cupy.RawKernel": 123,
-    "cupy.RawModule": 313,
+    "cupy.RawModule": 315,
     "cupy.ReductionKernel": 22,
     "cupy.cuda.compiler.compile_using_nvrtc": 231
   },
@@ -34,7 +34,7 @@
     "tests": {
       "cupy.ElementwiseKernel": 7,
       "cupy.RawKernel": 49,
-      "cupy.RawModule": 110,
+      "cupy.RawModule": 112,
       "cupy.ReductionKernel": 10,
       "cupy.cuda.compiler.compile_using_nvrtc": 36
     },
@@ -1501,6 +1501,38 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "out = compiler.compile_using_nvrtc(src, options=options)"
+    },
+    {
+      "file": "tests/test_cu_kfcup_mskf_256_levels_gpu.py",
+      "line": 221,
+      "column": 10,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "test_mskf_is_bit_identical_to_the_160_level_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "tuple(options)",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "old = cp.RawModule(code=source.replace(new, f\"#define MSKF_KMAX {OLD_MSKF_KMAX}\"),"
+    },
+    {
+      "file": "tests/test_cu_kfcup_mskf_256_levels_gpu.py",
+      "line": 243,
+      "column": 10,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "test_mskf_old_image_refuses_256",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "tuple(options)",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "old = cp.RawModule(code=source.replace(f\"#define MSKF_KMAX {DEEP}\","
     },
     {
       "file": "tests/test_cu_osas_wrf461_parity.py",
@@ -11506,7 +11538,7 @@
     },
     {
       "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-      "line": 1118,
+      "line": 1126,
       "column": 31,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -11868,7 +11900,7 @@
     },
     {
       "file": "woof/hex/mpasphys/ysu_v842.py",
-      "line": 2745,
+      "line": 2747,
       "column": 24,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",

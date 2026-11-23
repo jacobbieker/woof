@@ -7033,8 +7033,10 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
         shapes["cldfra"] = m
     if ra_sw_physics == 2:
         shapes.update(gsw=s2,taucldc=m,taucldi=m,rswtoa=s2)
-        from woof.core.gsfcsw import workspace_columns, WORKSPACE_WORDS, TABLE_ASSET
-        shapes['radiation/gsfc_workspace']=(workspace_columns(int(cfg.nx)*int(cfg.ny)),WORKSPACE_WORDS)
+        from woof.core.gsfcsw import workspace_columns, TABLE_ASSET
+        from woof.core.gsfcsw_levels import workspace_words as _gsfc_words
+        # validate_run_config refuses nz outside the GSFC bounds; kmax_tier raises there too.
+        shapes['radiation/gsfc_workspace']=(workspace_columns(int(cfg.nx)*int(cfg.ny)),_gsfc_words(int(cfg.nz)))
         shapes['radiation/gsfc_coefficients']=(TABLE_ASSET.bytes//4,)
 
     from woof.core.cam5_coupling import field_shapes as cam_field_shapes

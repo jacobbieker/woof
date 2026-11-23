@@ -174,16 +174,18 @@ __device__ real r_lg10(real *a) {
         'previous_identical_commit':'d66e442fccc04111067e29274c9f9eaccc3cef28'}
     (data/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     try:
-        from .arena import move_arrays, coalesce_arrays, single_column_fast
+        from .arena import move_arrays, coalesce_arrays, single_column_fast, tier_sizes
     except ImportError:
-        from arena import move_arrays, coalesce_arrays, single_column_fast
+        from arena import move_arrays, coalesce_arrays, single_column_fast, tier_sizes
     text, workspace_words = move_arrays(text)
     text = coalesce_arrays(text)
     manifest['workspace_words_per_column'] = workspace_words
     (data/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     source=text + Path(__file__).with_name('entry.cuh').read_text()
-    Path('woof/core/kernels/gsfcsw.cu').write_text('\n'.join(line.rstrip() for line in source.splitlines()).rstrip()+'\n')
     fast=single_column_fast(text) + Path(__file__).with_name('entry.cuh').read_text()
+    # Array extents and offsets become GSFC_KMAX expressions (default 128).
+    source, fast = tier_sizes(source, fast)
+    Path('woof/core/kernels/gsfcsw.cu').write_text('\n'.join(line.rstrip() for line in source.splitlines()).rstrip()+'\n')
     Path('woof/core/kernels/gsfcsw_fast.cuh').write_text('\n'.join(line.rstrip() for line in fast.splitlines()).rstrip()+'\n')
     print(json.dumps(manifest,indent=2))
 if __name__=='__main__': main()
