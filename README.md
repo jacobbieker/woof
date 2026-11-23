@@ -1707,6 +1707,23 @@ Notes on the 1.1.7 sync:
   preflight prices it by tier. Past 256 is refused by name. Hex does not
   offer `ra_sw_physics=2`, so only the WRF route is affected
   ([the record](docs/kernel_local_memory_bounds.md)).
+- **256-level columns for Fu-Liou-Gu radiation.** `ra_lw_physics=7`
+  (with `ra_sw_physics=7`) was refused above 100 layers, stock WRF's
+  `nvx = 100` scratch bound. The generators now emit that bound as the
+  macro `FLG_NVX`, whose source default is the stock 100: every column of
+  100 layers or fewer compiles stock WRF's bound, and its SASS is identical
+  to the previous kernel's on sm_86, sm_100 and sm_120 in both numerics
+  modes. A 101 to 256 layer column adds `-D FLG_NVX=256` and is checked
+  word for word in strict mode against WRF's `module_ra_flg.F` with only
+  `nvx` raised to 256 (the patch, its hash and why it changes no
+  arithmetic are in `woof/data/wrf_radiation/flg/PROVENANCE.md`). In the
+  forecast column the per-level storage was already a global workspace
+  sized by the column, so the local frame does not grow (928 B on sm_86 at
+  both tiers); the workspace grows from 30,301 to 77,101 words per column
+  at 100 and 256 layers, and admission prices it per domain. Past 256 is
+  refused by name. The hex option-matrix row still records the old
+  100-level refusal at 149 levels until the matrix is re-run
+  ([the record](docs/kernel_local_memory_bounds.md)).
 - **256-level hex member init and TC potential intensity.** The hex GPU
   member init (`woof/hex/init_gpu/physics.cu`) and the TC diagnostics'
   potential-intensity sounding (`tc_climate/potential_intensity.cu`) held

@@ -7564,6 +7564,8 @@ def _temf_pair_routes(registry: dict) -> None:
 
 def _fu_liou_gu(registry):
     from woof.core.flg import SOURCE_SHA256, TABLE_SHA256
+    from woof.physics_vertical_contract import FLG_VERTICAL_LEVEL_BOUNDS
+    from woof.core.flg_levels import SHIPPED_NVX, DEEP_NVX
     row=copy.deepcopy(registry['components']['radiation']['options']['wrf-rrtm-dudhia'])
     row.pop('consumers',None)
     row.update(label='WRF Fu-Liou-Gu longwave and shortwave',
@@ -7575,7 +7577,7 @@ def _fu_liou_gu(registry):
                   'TSWUP is the computed per-column upward SW flux. Native RAD_FLG assigns its entire USWTOP array on every column.'],
         extensions={'column_contract':{
             'source_sha256':SOURCE_SHA256,'table_sha256':TABLE_SHA256,
-            'layers':[4,100],'native_controls':{'ngas':0,'nice':2,'npde':2,'nfract':0,'ninho':0,'nozone':1,'naero':0},
+            'layers':list(FLG_VERTICAL_LEVEL_BOUNDS),'nvx_tiers':[SHIPPED_NVX,DEEP_NVX],'native_controls':{'ngas':0,'nice':2,'npde':2,'nfract':0,'ninho':0,'nozone':1,'naero':0},
             'inputs':['T','P8W','PI','RHO','QVAPOR','QCLOUD','QICE','QRAIN','QSNOW','QGRAUP','ALBEDO','EMISS','TSK','XLAT','XLONG'],
             'outputs':['RTHRATENLW','RTHRATENSW','SWDOWN','GLW','GSW','OLR','SWDDNI','SWDDIR','SWDDIF','TLWDN','TLWUP','SLWDN','SLWUP','TSWDN','TSWUP','SSWDN','SSWUP','CLDFRA'],
             'licence':'WRF public domain statement, README.md at v4.7.1'}})

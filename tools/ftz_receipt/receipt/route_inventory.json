@@ -572,7 +572,7 @@
     },
     {
       "file": "components/hex/tests/test_hex_init_pi_256_levels.py",
-      "line": 252,
+      "line": 255,
       "column": 13,
       "surface": "other",
       "constructor": "cp.RawModule",

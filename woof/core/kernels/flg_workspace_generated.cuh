@@ -2,6 +2,10 @@
 #ifndef FLG_NV1
 #define FLG_NV1 101
 #endif
+#ifndef FLG_NVX
+#define FLG_NVX 100
+#endif
+#define FLG_NV1X (FLG_NVX+1)
 #define FLG_WORKSPACE_SCALE 300
 #define FLG_WORKSPACE_BIAS 1
 #define FLG_WORKSPACE_WORDS (300*FLG_NV1+1)
@@ -2928,7 +2932,7 @@ if((tc_2[(i-1)*(1)+(1-1)*(1*(nv))]<0.f)){
 if((0>=1)){
 for(iac=1;((1)>0?iac<=18:iac>=18);iac+=1){
 if((unused_itps[(iac-1)*(1)]==1)){
-tc_2[(i-1)*(1)+(1-1)*(1*(nv))]=FG_AD(tc_2[(i-1)*(1)+(1-1)*(1*(nv))],tae[(i-1)*(1)+(iac-1)*(1*(100))]);
+tc_2[(i-1)*(1)+(1-1)*(1*(nv))]=FG_AD(tc_2[(i-1)*(1)+(1-1)*(1*(nv))],tae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))]);
 }
 }
 }
@@ -3025,7 +3029,7 @@ if((tc_2[(i-1)*(1)+(2-1)*(1*(nv))]<0.f)){
 if((0>=1)){
 for(iac=1;((1)>0?iac<=18:iac>=18);iac+=1){
 if((unused_itps[(iac-1)*(1)]==1)){
-tc_2[(i-1)*(1)+(2-1)*(1*(nv))]=FG_AD(tc_2[(i-1)*(1)+(2-1)*(1*(nv))],tae[(i-1)*(1)+(iac-1)*(1*(100))]);
+tc_2[(i-1)*(1)+(2-1)*(1*(nv))]=FG_AD(tc_2[(i-1)*(1)+(2-1)*(1*(nv))],tae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))]);
 }
 }
 }
@@ -3041,9 +3045,9 @@ taes[(3-0)*(1)]=0.0f;
 taes[(4-0)*(1)]=0.0f;
 for(iac=1;((1)>0?iac<=18:iac>=18);iac+=1){
 if((unused_itps[(iac-1)*(1)]==1)){
-taes[(0-0)*(1)]=FG_AD(taes[(0-0)*(1)],FG_MU(tae[(i-1)*(1)+(iac-1)*(1*(100))],wae[(i-1)*(1)+(iac-1)*(1*(100))]));
+taes[(0-0)*(1)]=FG_AD(taes[(0-0)*(1)],FG_MU(tae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))],wae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))]));
 for(j=1;((1)>0?j<=4:j>=4);j+=1){
-taes[(j-0)*(1)]=FG_AD(taes[(j-0)*(1)],FG_MU(FG_MU(tae[(i-1)*(1)+(iac-1)*(1*(100))],wae[(i-1)*(1)+(iac-1)*(1*(100))]),wwae[(i-1)*(1)+(j-1)*(1*(100))+(iac-1)*(1*(100)*(4))]));
+taes[(j-0)*(1)]=FG_AD(taes[(j-0)*(1)],FG_MU(FG_MU(tae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))],wae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))]),wwae[(i-1)*(1)+(j-1)*(1*(FLG_NVX))+(iac-1)*(1*(FLG_NVX)*(4))]));
 }
 }
 }
@@ -3197,7 +3201,7 @@ float f0=FG_DV(1.0f,3.14159f);
 if((0>=1)){
 for(int copy_i=0;copy_i<(7)*(18);++copy_i) a_wlis[copy_i]=a_wlisij[copy_i];
 for(int copy_i=0;copy_i<(7)*(18);++copy_i) a_taus[copy_i]=a_tausij[copy_i];
-for(int copy_i=0;copy_i<(100)*(18);++copy_i) aprofs[copy_i]=aprofsij[copy_i];
+for(int copy_i=0;copy_i<(FLG_NVX)*(18);++copy_i) aprofs[copy_i]=aprofsij[copy_i];
 }
 for(i=1;((1)>0?i<=nv1:i>=nv1);i+=1){
 pp[(i-1)*(1)]=pij[(i-1)*(1)];
@@ -3273,7 +3277,7 @@ ctau[(ib-1)*(1)]=0.f;
 for(i=1;((1)>0?i<=nv:i>=nv);i+=1){
 for(iac=1;((1)>0?iac<=18:iac>=18);iac+=1){
 if((unused_itps[(iac-1)*(1)]==1)){
-ctau[(ib-1)*(1)]=FG_AD(ctau[(ib-1)*(1)],tae[(i-1)*(1)+(iac-1)*(1*(100))]);
+ctau[(ib-1)*(1)]=FG_AD(ctau[(ib-1)*(1)],tae[(i-1)*(1)+(iac-1)*(1*(FLG_NVX))]);
 }
 }
 }

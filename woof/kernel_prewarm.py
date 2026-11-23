@@ -266,7 +266,10 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
             from woof.physics_compat import radiation_scheme_ids
             for nv1 in sorted({int(dc.run.nz)+1 for dc in experiment.domains
                                if radiation_scheme_ids(dc.run)[0] == 7}):
-                defines = (("FLG_NV1", nv1),)
+                # FLGColumn adds the FLG_NVX tier define past 100 layers;
+                # warm the same module key it loads.
+                from woof.core.flg_levels import nvx_defines
+                defines = (("FLG_NV1", nv1),) + nvx_defines(nv1 - 1)
                 jobs.append((f"flg_column[FLG_NV1={nv1}]",
                              kernels.load_module_unflushed.__wrapped__, (name, defines)))
             continue

@@ -1,0 +1,11 @@
+--- a/phys/module_ra_flg.F
++++ b/phys/module_ra_flg.F
+@@ -8,7 +8,7 @@
+ !   &                      ndfs2  = ndfs * 2, &
+ !   &                      mdfs   = nv + 1,   &
+ !   &                      ndfs4  = 4 * ndfs, &
+-   &                      nvx    = 100,      &
++   &                      nvx    = 256,      &
+    &                      nv1x   = nvx + 1 
+      
+ !spectral band parameters  

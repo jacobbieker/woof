@@ -8,7 +8,7 @@ extern "C" __global__ void flg_gas_driver(int ncol,int nv1,int npoints,
     if(task>=ncol*npoints) return;
     int col=task/npoints,point=task%npoints,nv=nv1-1;
     const int* meta=points+point*4;
-    float pt[101];
+    float pt[FLG_NV1X];
     for(int i=0;i<nv1;++i) pt[i]=temperature[col*nv1+i];
     float hk=0.0f;
     if(meta[0]==0)

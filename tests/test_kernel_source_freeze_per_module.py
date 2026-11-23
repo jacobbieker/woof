@@ -1787,9 +1787,12 @@ PINNED_HEADERS = {
     # r290 exact-chain intake: source identity, numerical gates separate.
     'column_r8.cuh': 'cddbef58db0879c9175766f069cb70d3d14c275009f016e5f3509063abcd498c',
     'cu_osas_table_seeds.cuh': '848e0e566611e26b83b8d741232af42f717aa7221c681f224c4b4500b0dfb80f',
-    'flg_gases_generated.cuh': '22ed32e3a410cf8db4ad49d692300aba45dec5bfac6dd99e3e910afc2247a569',
-    'flg_streams_generated.cuh': '303b233c645a50bcd42ce4bbae868a59195bc9a0814198e53d9ef5bfea845fab',
-    'flg_workspace_generated.cuh': '02f57d888349249c4ad7825c568e02fa3002220da5c9d497bc6eed4ba78a5563',
+    # FLG: re-pinned for the FLG_NVX level tier. The macro (default: stock
+    # nvx=100) replaces level literals only; default-tier SASS is identical
+    # (docs/kernel_local_memory_bounds.md, FLG section).
+    'flg_gases_generated.cuh': '851db6ec73aeab6bfcd54914d93686b20fc5c254e220897ce3b2f79623983691',
+    'flg_streams_generated.cuh': 'df34ad2544bceaf6190be23b1a6828108ff28ea1f475858345937f1cdb3efcb0',
+    'flg_workspace_generated.cuh': 'a6d6bc36d7739b1e0d0be6aef6de816a86128cfb7267b26762400b52117f0d58',
     'flt32_log10_tanh.cuh': 'd2f5ba8b49577e28a97f80816373aed05da64fd26e561b24aa455d7f71d84cf2',
     'gfdleta_co2_init.cuh': 'b6568fbc35ca2c5332aa80520dd109fa63cb56334ed3f55d4fc93424f8b6e66c',
     'gfdleta_column.cuh': '5bbb62d7c4d53a730935f154395d78ac34e60acee2ef28f5938e45e04fccd881',
