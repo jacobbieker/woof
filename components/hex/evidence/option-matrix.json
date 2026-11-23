@@ -1,4 +1,7 @@
 {
+ "backend_notes": {
+  "metal": "Metal entries predate the WRF 4.8.0 sync. Since it, the default Grell-Freitas (cu_gf_version gfl_873b414) is refused on Metal, and this case's base selection runs it; the Metal entries refresh after the GF Metal port lands."
+ },
  "backends": [
   "cuda",
   "metal"
@@ -1063,9 +1066,9 @@
   "cumulus.kf-cup": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - KF-CuP cumulus requires 8 <= nz <= 128, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 20.6
+     "outcome": "non-finite",
+     "reason": "woof hex: the forecast driver stopped with FloatingPointError: negative accumulated precipitation in rainc  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
+     "wall_seconds": 63.5
     },
     "metal": {
      "outcome": "refused",
@@ -1212,9 +1215,9 @@
    "backends": {
     "cuda": {
      "budgets": {
-      "dry_rel_change": -0.00039347114609568834,
-      "dry_rel_change_interior": -0.00047118206802656415,
-      "precip_kg": 3996472.791798749,
+      "dry_rel_change": -0.00039627032768486703,
+      "dry_rel_change_interior": -0.0004751011930485995,
+      "precip_kg": 5441244.1411854075,
       "q_min_end": {
        "qc": 0.0,
        "qg": 0.0,
@@ -1231,8 +1234,8 @@
        "qs",
        "qg"
       ],
-      "water_residual_rel": 0.019076679515185033,
-      "water_residual_rel_interior": 0.01910688105264232
+      "water_residual_rel": 0.01903497838440729,
+      "water_residual_rel_interior": 0.019112688892325494
      },
      "call_counts": {
       "cumulus": 120,
@@ -1245,32 +1248,42 @@
      "graded": {
       "cells": "interior",
       "dry_tol": 0.001,
-      "dry_vs_baseline": 1.1570110613797879e-06,
+      "dry_vs_baseline": -3.8147474506566945e-08,
       "water_tol": 0.05,
-      "water_vs_baseline": -7.492160837130682e-05
+      "water_vs_baseline": 4.965081344925765e-05
      },
      "outcome": "ran",
      "sealed_physics": {
       "bl_pbl_physics": 1,
       "cu_physics": 11,
+      "gf_deep_rain_evaporation_booking": true,
       "gwd_opt": 0,
       "hydrometeor_handover_numbers": true,
       "icloud": 1,
       "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
       "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
       "ra_physics": 4,
       "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
       "sf_sfclay_physics": 1,
       "sf_surface_physics": 4,
       "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
       "wdm6_conservative_surface": true,
       "wsm3_conservative_surface": true,
       "wsm5_conservative_surface": true,
       "wsm6_conservative_surface": true,
-      "wsm7_conservative_surface": true
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
      },
      "seam": "engine",
-     "wall_seconds": 114.5
+     "wall_seconds": 104.9
     },
     "metal": {
      "budgets": {
@@ -5833,9 +5846,9 @@
    "backends": {
     "cuda": {
      "budgets": {
-      "dry_rel_change": -0.00039327998245473645,
-      "dry_rel_change_interior": -0.0004711530231864166,
-      "precip_kg": 4424276834.571633,
+      "dry_rel_change": -0.00039611331732560077,
+      "dry_rel_change_interior": -0.00047512626462217425,
+      "precip_kg": 4424307757.427406,
       "q_min_end": {
        "qc": 0.0,
        "qi": 0.0,
@@ -5850,8 +5863,8 @@
        "qi",
        "qs"
       ],
-      "water_residual_rel": 0.020252036810456654,
-      "water_residual_rel_interior": 0.019057795293681585
+      "water_residual_rel": 0.0202118254765981,
+      "water_residual_rel_interior": 0.019060446554698886
      },
      "call_counts": {
       "cumulus": 120,
@@ -5864,14 +5877,15 @@
      "graded": {
       "cells": "interior",
       "dry_tol": 0.001,
-      "dry_vs_baseline": -1.6752521434903588e-07,
+      "dry_vs_baseline": -6.321904808133903e-08,
       "water_tol": 0.05,
-      "water_vs_baseline": -3.440219365873076e-06
+      "water_vs_baseline": -2.591524177350535e-06
      },
      "outcome": "ran",
      "sealed_physics": {
       "bl_pbl_physics": 1,
       "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
       "gwd_opt": 0,
       "hydrometeor_handover_numbers": true,
       "icloud": 1,
@@ -5879,22 +5893,27 @@
       "mp_physics": 14,
       "mynn_boulac_down_sign": true,
       "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
       "noahmp_melt_reset_esat": true,
       "ntiedtke_dry_mass_coupling": true,
       "pbl_boulac_down_sign": true,
       "ra_physics": 4,
       "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
       "sf_sfclay_physics": 1,
       "sf_surface_physics": 4,
       "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
       "wdm6_conservative_surface": true,
       "wsm3_conservative_surface": true,
       "wsm5_conservative_surface": true,
       "wsm6_conservative_surface": true,
-      "wsm7_conservative_surface": true
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
      },
      "seam": "engine",
-     "wall_seconds": 366.5
+     "wall_seconds": 362.2
     },
     "metal": {
      "outcome": "refused",
@@ -6047,9 +6066,9 @@
    "backends": {
     "cuda": {
      "budgets": {
-      "dry_rel_change": -0.0003931672640697706,
-      "dry_rel_change_interior": -0.00047100716176308314,
-      "precip_kg": 4418531670.593868,
+      "dry_rel_change": -0.000396059316286021,
+      "dry_rel_change_interior": -0.00047509426736042976,
+      "precip_kg": 4418600725.700808,
       "q_min_end": {
        "qc": 0.0,
        "qg": 0.0,
@@ -6068,8 +6087,8 @@
        "qg",
        "qh"
       ],
-      "water_residual_rel": 0.020248029703334145,
-      "water_residual_rel_interior": 0.019060943608987045
+      "water_residual_rel": 0.02020899397320889,
+      "water_residual_rel_interior": 0.019063017562111113
      },
      "call_counts": {
       "cumulus": 120,
@@ -6082,14 +6101,15 @@
      "graded": {
       "cells": "interior",
       "dry_tol": 0.001,
-      "dry_vs_baseline": -2.1663791015594496e-08,
+      "dry_vs_baseline": -3.1221786336854684e-08,
       "water_tol": 0.05,
-      "water_vs_baseline": -2.9190406041282313e-07
+      "water_vs_baseline": -2.051676512362932e-08
      },
      "outcome": "ran",
      "sealed_physics": {
       "bl_pbl_physics": 1,
       "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
       "gwd_opt": 0,
       "hydrometeor_handover_numbers": true,
       "icloud": 1,
@@ -6097,22 +6117,27 @@
       "mp_physics": 26,
       "mynn_boulac_down_sign": true,
       "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
       "noahmp_melt_reset_esat": true,
       "ntiedtke_dry_mass_coupling": true,
       "pbl_boulac_down_sign": true,
       "ra_physics": 4,
       "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
       "sf_sfclay_physics": 1,
       "sf_surface_physics": 4,
       "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
       "wdm6_conservative_surface": true,
       "wsm3_conservative_surface": true,
       "wsm5_conservative_surface": true,
       "wsm6_conservative_surface": true,
-      "wsm7_conservative_surface": true
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
      },
      "seam": "engine",
-     "wall_seconds": 364.5
+     "wall_seconds": 399.0
     },
     "metal": {
      "outcome": "refused",
@@ -6127,9 +6152,71 @@
   "microphysics.wsm3-mp3": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WSM3 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 19.1
+     "budgets": {
+      "dry_rel_change": -0.0003958202429653747,
+      "dry_rel_change_interior": -0.0004746447754517737,
+      "precip_kg": 4426616979.647132,
+      "q_min_end": {
+       "qc": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr"
+      ],
+      "water_residual_rel": 0.020308179788099536,
+      "water_residual_rel_interior": 0.019102494295155998
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.1827012231922863e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": 3.9456216279761674e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 3,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 427.3
     },
     "metal": {
      "outcome": "refused",
@@ -6144,9 +6231,75 @@
   "microphysics.wsm5-mp4": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WSM5 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 18.7
+     "budgets": {
+      "dry_rel_change": -0.00039615076488795,
+      "dry_rel_change_interior": -0.0004750826773360451,
+      "precip_kg": 4418808072.592272,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs"
+      ],
+      "water_residual_rel": 0.02020738269713193,
+      "water_residual_rel_interior": 0.0190648367358611
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -1.9631761952187965e-08,
+      "water_tol": 0.05,
+      "water_vs_baseline": 1.7986569848631173e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 4,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 365.9
     },
     "metal": {
      "outcome": "refused",
@@ -6426,9 +6579,9 @@
    "backends": {
     "cuda": {
      "budgets": {
-      "dry_rel_change": -0.0003932122274323703,
-      "dry_rel_change_interior": -0.000470962369456347,
-      "precip_kg": 4422244768.886752,
+      "dry_rel_change": -0.0003961051726391064,
+      "dry_rel_change_interior": -0.0004750501872688382,
+      "precip_kg": 4420588661.420382,
       "q_min_end": {
        "qc": 0.0,
        "qg": 0.0,
@@ -6447,8 +6600,8 @@
        "qg",
        "qh"
       ],
-      "water_residual_rel": 0.020246221736318695,
-      "water_residual_rel_interior": 0.019062153898576982
+      "water_residual_rel": 0.02020635736427515,
+      "water_residual_rel_interior": 0.01906431694453723
      },
      "call_counts": {
       "cumulus": 120,
@@ -6461,14 +6614,15 @@
      "graded": {
       "cells": "interior",
       "dry_tol": 0.001,
-      "dry_vs_baseline": 2.312851572056334e-08,
+      "dry_vs_baseline": 1.2858305254695359e-08,
       "water_tol": 0.05,
-      "water_vs_baseline": 9.183855295240295e-07
+      "water_vs_baseline": 1.2788656609946658e-06
      },
      "outcome": "ran",
      "sealed_physics": {
       "bl_pbl_physics": 1,
       "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
       "gwd_opt": 0,
       "hydrometeor_handover_numbers": true,
       "icloud": 1,
@@ -6476,22 +6630,27 @@
       "mp_physics": 24,
       "mynn_boulac_down_sign": true,
       "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
       "noahmp_melt_reset_esat": true,
       "ntiedtke_dry_mass_coupling": true,
       "pbl_boulac_down_sign": true,
       "ra_physics": 4,
       "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
       "sf_sfclay_physics": 1,
       "sf_surface_physics": 4,
       "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
       "wdm6_conservative_surface": true,
       "wsm3_conservative_surface": true,
       "wsm5_conservative_surface": true,
       "wsm6_conservative_surface": true,
-      "wsm7_conservative_surface": true
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
      },
      "seam": "engine",
-     "wall_seconds": 351.1
+     "wall_seconds": 353.3
     },
     "metal": {
      "outcome": "refused",
@@ -6639,9 +6798,77 @@
   "pbl.boulac": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - BouLac PBL requires 3 <= nz <= 128, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 19.1
+     "budgets": {
+      "dry_rel_change": -0.00038519445314626183,
+      "dry_rel_change_interior": -0.0004591582042153891,
+      "precip_kg": 4491026970.273563,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.02023010422022354,
+      "water_residual_rel_interior": 0.019162012484937013
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 1.5904841358703806e-05,
+      "water_tol": 0.05,
+      "water_vs_baseline": 9.897440606077695e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 8,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 350.5
     },
     "metal": {
      "outcome": "refused",
@@ -7813,9 +8040,77 @@
   "pbl.qnse": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - QNSE PBL requires 4 <= nz <= 128, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 19.6
+     "budgets": {
+      "dry_rel_change": -0.0003952304619564232,
+      "dry_rel_change_interior": -0.00047155391668644663,
+      "precip_kg": 4440879717.073101,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.016588190273980227,
+      "water_residual_rel_interior": 0.013907608530003208
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 3.5091288876462796e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -0.005155429548873028
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 4,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 4,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 605.1
     },
     "metal": {
      "outcome": "refused",
@@ -8654,9 +8949,77 @@
   "radiation.fu-liou-gu": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with ConfigurationRefused: WRF FLG needs 4 to 100 model layers: its three cloud groups need a layer each and its native scratch bound is nvx=100.  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 17.2
+     "budgets": {
+      "dry_rel_change": -0.0003992149259272024,
+      "dry_rel_change_interior": -0.0004794204346474764,
+      "precip_kg": 4431067387.632019,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.020146757581374374,
+      "water_residual_rel_interior": 0.019001388127778365
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -4.357389073383509e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -6.164995109787103e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_lw_physics": 7,
+      "ra_sw_physics": 7,
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 1211.8
     },
     "metal": {
      "outcome": "refused",
@@ -8673,8 +9036,8 @@
    "backends": {
     "cuda": {
      "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with ConfigurationRefused: GSFC shortwave requires 2 to 128 layers; larger columns exceed its allocated CUDA workspace  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 17.2
+     "reason": "woof hex: the forecast driver stopped with ConfigurationRefused: downward longwave (GLW) has no source: ra_lw_physics=0, so no longwave scheme computes it, and sf_surface_physics=4 (Noah-MP) reads GLW every surface step. initialize_physics will not invent one. REMEDY, in preference order: (1) run a longwave scheme -- set ra_lw_physics=4 with ra_sw_physics=4 (RRTMG-class), which is what every nocturnally valid shipped profile does; or (2) if this is an idealised column that genuinely wants a fixed longwave, declare it by passing glw=<W m-2> explicitly (woof.core.physics.DECLARED_CONSTANT_GLW_WM",
+     "wall_seconds": 29.6
     },
     "metal": {
      "outcome": "refused",
@@ -9323,7 +9686,7 @@
     "cuda": {
      "outcome": "refused",
      "reason": "woof hex: the forecast driver stopped with ConfigurationRefused: GFDL-Eta radiation needs a strictly decreasing nominal eta: p_top_pa=1215.607177734375 is above the standard-atmosphere pressure of the nominal top, so the upper layers clip to eta 0; pass a p_top_pa at or below that pressure  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 20.5
+     "wall_seconds": 22.2
     },
     "metal": {
      "outcome": "refused",
@@ -10280,10 +10643,78 @@
   "surface_layer.qnse": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - QNSE PBL requires 4 <= nz <= 128, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
+     "budgets": {
+      "dry_rel_change": -0.0003952304619564232,
+      "dry_rel_change_interior": -0.00047155391668644663,
+      "precip_kg": 4440879717.073101,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.016588190273980227,
+      "water_residual_rel_interior": 0.013907608530003208
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 3.5091288876462796e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -0.005155429548873028
+     },
+     "outcome": "ran",
      "same_run_as": "pbl.qnse",
-     "wall_seconds": 19.6
+     "sealed_physics": {
+      "bl_pbl_physics": 4,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 4,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 605.1
     },
     "metal": {
      "outcome": "refused",
