@@ -331,6 +331,17 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
         job[0].split("[")[0] != "sfclay", -_source_bytes(job[0].split("[")[0]), job[0]))
 
 
+def _reads(run, key: str) -> bool:
+    """RunConfig correction ``key`` where it is read (woof.quirk_corrections.run_reads)."""
+    from woof.quirk_corrections import run_reads
+    return run_reads(run, key)
+
+
+def _psih_zolzt(run) -> bool:
+    """RunConfig.mynn_sfclay_psih_zolzt where it is read."""
+    return _reads(run, "mynn_sfclay_psih_zolzt")
+
+
 def _variant_jobs(experiment, modules):
     """Compile selector and dimension variants before their first launch.
 
@@ -361,7 +372,7 @@ def _variant_jobs(experiment, modules):
                 # compiled at its first call; mynn_surface keeps its default.
                 variant = getattr(run, "mynn_sfclay_variant", "wrf_461")
                 defines = (mynn_surface_defines(variant,
-                                                getattr(run, "mynn_sfclay_psih_zolzt", False) is True)
+                                                _psih_zolzt(run))
                            if variant in MYNN_SFCLAY_DEFINES else ())
             tiers = [defines] if defines else []
             if name == "advection":
@@ -401,6 +412,20 @@ def _variant_jobs(experiment, modules):
                     # Neither of them is a shaped function (kernel_shape.FUNCTIONS).
                     from woof.core.mynn_pbl_gpu import MYNN_BOULAC_DOWN_SIGN_DEFINE
                     tiers.append(defines + MYNN_BOULAC_DOWN_SIGN_DEFINE)
+            if (name == "gf" and hasattr(run, "nz") and not getattr(run, "spp_conv", 0)
+                    and _reads(run, "gf_deep_rain_evaporation_booking")):
+                # FQ1 (on in correct mode) compiles gf.cu's booking tier
+                # (woof.core.gf._gf_module), the module the run launches.
+                from woof.core.gf import gf_kernel_capacity
+                tiers.append((("GF_KMAX", gf_kernel_capacity(int(run.nz))), ("GF_DEEP_EVAP_BOOKING", 1)))
+            if name in ("noah_ua", "noah_mosaic_ua") and _reads(run, "noah_smc_floor_booking"):
+                # FQ4 (on in correct mode): the booked unit, the define first
+                # (woof.core.noah.smc_floor_booking_module).
+                from woof.core.noah import smc_floor_booking_module
+                if (name, "booking") not in seen:
+                    seen.add((name, "booking"))
+                    jobs.append((f"{name}[NOAH_SMC_FLOOR_BOOKING=1]",
+                                 smc_floor_booking_module.__wrapped__, (name,)))
             for tier in tiers:
                 if (name, tier) in seen:
                     continue

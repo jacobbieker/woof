@@ -156,14 +156,16 @@ def _function(precision: str, name: str):
 
 def _configs(configs: dict | None) -> dict:
     merged = {**DEFAULT_CONFIGS, **WOOF_OPT_INS}
-    if configs:
-        unknown = set(configs) - set(merged) - {quirk_corrections.UMBRELLA}
-        if unknown:
-            raise ValueError(f"configs the composed tendencies do not read: {sorted(unknown)}")
-        # woof_quirk_corrections = 'all' turns every opt-in on unless set
-        # (a set value that conflicts with it is refused by name)
-        merged.update(quirk_corrections.with_options(configs, "mpas_ocean"))
-        merged.pop(quirk_corrections.UMBRELLA, None)
+    configs = configs or {}
+    unknown = set(configs) - set(merged) - {quirk_corrections.UMBRELLA, quirk_corrections.MODE_KEY}
+    if unknown:
+        raise ValueError(f"configs the composed tendencies do not read: {sorted(unknown)}")
+    # the corrections follow the physics mode (correct: on, exact: off) unless
+    # woof_quirk_corrections or their own key says otherwise (a set value
+    # that conflicts with an explicit umbrella is refused by name)
+    merged.update(quirk_corrections.with_options(configs, "mpas_ocean"))
+    merged.pop(quirk_corrections.UMBRELLA, None)
+    merged.pop(quirk_corrections.MODE_KEY, None)
     for knob, values in _OPT_IN_VALUES.items():
         if merged[knob] not in values:
             raise ConfigurationRefusal(knob=knob, value=merged[knob], reason="not one of its values",

@@ -9,6 +9,8 @@ import cupy as cp
 import numpy as np
 from woof.hex.mpasphys import ysu_v842 as ysu
 from woof.hex.mpasphys.driver_v842 import SlotCall, SlotRegistry, Backend, StepFlags
+from woof.hex.mpasphys.mmm_version import PINNED_OPTIONS as MMM_PIN
+from woof.hex.mpasphys.version_defaults import pinned_lane
 from oracle import Oracle, constants, fixtures, provenance, cuda_provenance
 from replay_cuda import pack
 
@@ -66,7 +68,7 @@ def replay(work, folder):
             registry.register("pbl", "bl_ysu", Backend.HEX_CUDA, ysu.launch_slot)
             registry.run(SlotCall("pbl", "bl_ysu", Backend.HEX_CUDA, 1, 0,
                                  float(values["dt"]), StepFlags(), pools,
-                                 {"config_ysu_pblmix": option}))
+                                 {"config_ysu_pblmix": option}, mmm=MMM_PIN))
             actual = {**{k: cp.asnumpy(v) for k, v in diag.items()},
                       **{k: cp.asnumpy(tendencies[k]) for k in ysu._WRAPPER_OUTPUTS if k in tendencies},
                       "rthblten": cp.asnumpy(tendencies["rthblten"])}
@@ -98,7 +100,7 @@ def replay(work, folder):
                 identity_tier="SYNTHETIC-CUDA-DRIVER", compared_calls=calls,
                 compared_words=words, differing_words=differing, mismatches=mismatches,
                 per_array=per_array,
-                cuda_sha256=ysu.CUDA_SHA256, compiler_options=ysu.COMPILER_OPTIONS,
+                cuda_sha256=ysu.CUDA_SHA256, compiler_options=ysu.COMPILER_OPTIONS, mmm_version=MMM_PIN["mmm_version"],
                 conversions=["LW+SW before scheme", "Exner temperature-to-theta", "tendency pools",
                              "kzh/kzm/kzq", "zero diagnostic exch_h", "surface u10/v10 preserved"],
                 prepared_storage="kme=kte+1; inactive profile row NaN; upper pressure interface retained",
@@ -113,7 +115,8 @@ if __name__ == "__main__":
     parser.add_argument("--fixtures", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()
-    result = replay(args.work, args.fixtures)
+    with pinned_lane():
+        result = replay(args.work, args.fixtures)
     args.receipt.write_text(json.dumps(result, indent=2)+"\n")
     print(json.dumps(result, indent=2))
     raise SystemExit(bool(result["differing_words"]))

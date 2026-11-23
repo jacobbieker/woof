@@ -555,19 +555,22 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # any other cumulus scheme), so a tree prepared before they existed
     # could not have selected anything but their defaults.
     "run.nsas_dx_factor", "run.sas_pgcon",
-    # The opt-in GF deep evaporation booking (cu_physics = 3 only, default
-    # off): a tree prepared before it existed ran it off.
+    # The GF deep evaporation booking (FQ1, cu_physics = 3 only, on in
+    # correct mode): step-time; preparation never reads it.
     "run.gf_deep_rain_evaporation_booking",
-    # The opt-in YSU surface heat flux on theta (bl_pbl_physics = 1 only,
-    # default off): a tree prepared before it existed ran it off.
+    # The YSU surface heat flux on theta (FQ2, bl_pbl_physics = 1 only, on
+    # in correct mode): step-time; preparation never reads it.
     "run.ysu_surface_heat_exner",
-    # The opt-in MYNN surface-layer 2 m / 10 m heat profile from zt/L
-    # (sf_sfclay_physics = 5 only, default off): a tree prepared before it
-    # existed ran it off.
+    # The MYNN surface-layer 2 m / 10 m heat profile from zt/L (FQ3,
+    # sf_sfclay_physics = 5 only, on in correct mode): step-time;
+    # preparation never reads it.
     "run.mynn_sfclay_psih_zolzt",
-    # The opt-in Noah soil-moisture floor booking (sf_surface_physics = 2
-    # only, default off): a tree prepared before it existed ran it off.
+    # The Noah soil-moisture floor booking (FQ4, sf_surface_physics = 2
+    # only, on in correct mode): step-time; preparation never reads it.
     "run.noah_smc_floor_booking",
+    # The RRTMG longwave model-top correction (FQ6, the legacy RRTMG longwave
+    # only, on in correct mode): step-time; preparation never reads it.
+    "run.rrtmg_lw_model_top",
     # The opt-in TSI forcing (woof.spacewx), appended off.
     "run.solar_tsi_opt", "run.solar_tsi_source", "run.solar_tsi_mode",
     # The opt-in solar band shares (woof.spacewx), appended off.
@@ -1099,7 +1102,7 @@ SFIRE_PREPARATION_INERT_RUN_FIELDS = frozenset({
 RETIRED_INACTIVE_IDENTITY_FIELDS = {"run.fire_moisture_namelist": ""}
 
 PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
-    # The umbrella over the opt-in quirk corrections: a meta key that the
+    # The umbrella over the quirk corrections: a meta key that the
     # RunConfig resolves into the individual correction keys, which carry
     # the identity themselves.
     "run.woof_quirk_corrections",

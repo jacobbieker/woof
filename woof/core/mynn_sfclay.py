@@ -104,7 +104,7 @@ MYNN_SFCLAY_DEFINES = {
 }
 
 
-#: RunConfig.mynn_sfclay_psih_zolzt (default off): the 2 m / 10 m heat
+#: RunConfig.mynn_sfclay_psih_zolzt (on in correct mode, FQ3): the 2 m / 10 m heat
 #: profile integrated from zt/L, as gz2ozt/gz10ozt and psih are.
 MYNN_SL_PSIH_ZOLZT_DEFINES = (("MYNN_SL_PSIH_ZOLZT", 1),)
 
@@ -233,7 +233,7 @@ def launch_mynn_surface_layer(
 ) -> None:
     """Launch the MYNN surface kernel into preallocated outputs.
 
-    ``psih_zolzt`` (RunConfig.mynn_sfclay_psih_zolzt, default off) is an
+    ``psih_zolzt`` (RunConfig.mynn_sfclay_psih_zolzt, FQ3) is an
     opt-in correction of a WRF quirk: module_sf_mynn.F integrates the 2 m
     and 10 m heat profile from z0/L, not zt/L.  False compiles exactly the
     unit this function compiled before the key existed.

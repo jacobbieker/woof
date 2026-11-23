@@ -855,8 +855,8 @@ def resolve_physics(
 #: (or ``--convection``) decides it, so a selection carrying one of these
 #: is judged here with the scheme that reads it; the bind hands the engine
 #: the cumulus it actually decided (cuda_suite_physics_v841's
-#: ``_from_generic_mapping``), and the engine's validator refuses the
-#: setting there if that cumulus does not read it.
+#: ``_from_generic_mapping``); where that cumulus does not read the
+#: setting it is inert (woof.quirk_corrections.run_reads).
 CUMULUS_SCOPED_SETTINGS = {"gf_deep_rain_evaporation_booking": 3}
 
 
