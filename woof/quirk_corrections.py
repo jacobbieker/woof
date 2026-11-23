@@ -327,6 +327,10 @@ def apply_run_corrections(kw: dict) -> dict:
         if key in out and out[key] is not wanted and run_scheme_active(key, out, RunConfig):
             raise ConfigurationRefused(conflict_message(key, out[key], value))
         out[key] = wanted
+    if value == "none":
+        # every key is now explicit; RunConfig.__post_init__ would otherwise
+        # write 'none' over the individual keys that won
+        out[UMBRELLA] = None
     return out
 
 
@@ -354,7 +358,9 @@ def run_corrections_due(cfg) -> tuple[str, ...]:
 def run_corrections_under(umbrella: str) -> dict:
     """Every RunConfig correction's value under an explicit ``umbrella``:
     all true under 'all', all false under 'none' (RunConfig.__post_init__
-    writes them; each is read only where its scheme runs)."""
+    writes them for a RunConfig built in Python; the TOML readers resolve
+    'none' first, so an individual key set next to it wins there; each is
+    read only where its scheme runs)."""
     umbrella_value(umbrella)
     return {key: _wanted(BY_KEY[key], umbrella) for key in keys("wrf")}
 

@@ -311,9 +311,14 @@ def test_all_and_none_set_the_run_corrections():
 def test_an_explicit_umbrella_refuses_a_conflicting_key_by_name():
     with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
         qc.apply_run_corrections({qc.UMBRELLA: "all", "bl_pbl_physics": 1, "ysu_surface_heat_exner": False})
-    # 'none' with an individual key: the key wins (as before the mode switch)
-    assert qc.apply_run_corrections({qc.UMBRELLA: "none", "cu_physics": 3, "gf_deep_rain_evaporation_booking": True})[
-        "gf_deep_rain_evaporation_booking"] is True
+    # 'none' with an individual key: the key wins (as before the mode switch),
+    # through to the RunConfig the readers build
+    kw = qc.apply_run_corrections({qc.UMBRELLA: "none", "cu_physics": 3, "cudt_minutes": 0.0, "moist": True,
+                                   "bl_pbl_physics": 1, "sf_sfclay_physics": 1,
+                                   "gf_deep_rain_evaporation_booking": True})
+    assert kw["gf_deep_rain_evaporation_booking"] is True
+    run = validate_run_config(_base(**kw))
+    assert run.gf_deep_rain_evaporation_booking is True and run.ysu_surface_heat_exner is False
     # a key whose scheme the domain does not run is never read: no conflict
     assert qc.apply_run_corrections(
         {qc.UMBRELLA: "all", "bl_pbl_physics": 5, "ysu_surface_heat_exner": False})["ysu_surface_heat_exner"] is True
