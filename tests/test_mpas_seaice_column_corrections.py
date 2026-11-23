@@ -41,6 +41,10 @@ def glibc239(monkeypatch):
 
 
 def test_every_correction_is_named_and_unknown_names_are_refused():
+    # none named: every one in correct mode, none in exact mode (this
+    # module's default: tests/conftest.py)
+    assert cv.corrections({"config_physics_mode": "correct"}) == frozenset(cv.CORRECTIONS)
+    assert cv.corrections({"config_physics_mode": "exact"}) == frozenset()
     assert cv.corrections({}) == frozenset()
     assert cv.corrections({KEY: ("set_sfcflux_order",)}) == {"set_sfcflux_order"}
     assert cv.corrections({KEY: "dedd_zero_volume_ice"}) == {"dedd_zero_volume_ice"}

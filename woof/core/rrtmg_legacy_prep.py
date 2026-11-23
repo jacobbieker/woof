@@ -555,7 +555,7 @@ def lwrad_prep(*, p3d, p8w, t3d, t8w, dz8w,
                has_reqc, has_reqi, has_reqs,
                f_qc=True, f_qr=True, f_qi=True, f_qs=True, f_qg=True,
                yr, julian, nlayers, mp_physics=0, g=9.81, trace_gas_overrides=None,
-                     rrtmg_cloud_optics_form="wrf_461"):
+                     rrtmg_cloud_optics_form="wrf_461", model_top=False):
     """RRTMG_LWRAD, from its WRF dummies to the exact rrtmg_lw arguments.
 
     Single column, bottom-up; layer arrays (kte,), interface arrays
@@ -567,6 +567,10 @@ def lwrad_prep(*, p3d, p8w, t3d, t8w, dz8w,
     taucmcl, ciwpmcl, clwpmcl, cswpmcl, reicmcl, relqmcl, resnmcl,
     tauaer; McICA arrays are (ngptlw, nlayers), tauaer (nlayers, nbndlw).
     Extras (not rrtmg_lw args): o31d, hgt, cldfrac, juldat, pdel.
+
+    ``model_top`` (RunConfig.rrtmg_lw_model_top, default False = WRF's
+    arithmetic word for word) keeps tlev(kte+1) and tlay(kte) as the
+    column gave them and anchors the standard profile at tlev(kte+1).
     """
     cloud_form_is_fork(rrtmg_cloud_optics_form)
     _require_radii("lwrad_prep", has_reqc, has_reqi, has_reqs,
@@ -701,8 +705,14 @@ def lwrad_prep(*, p3d, p8w, t3d, t8w, dz8w,
     # oddity): the loop starts at L=kte+1 and so overwrites tlev(kte+1)
     # (the model-top interface from t8w) and tlay(kte) (the top model
     # layer from t3d); the anchor is tlev(kte) - varint(kte).
-    anchor = F(tlev[kte - 1] - varint[kte - 1])
-    for L in range(kte + 1, nlayers + 2):  # Fortran L = kte+1 .. nlayers+1
+    # ``model_top`` (RunConfig.rrtmg_lw_model_top, correct-mode FQ6) keeps
+    # both and anchors at tlev(kte+1): the loop starts at L = kte+2.
+    if model_top:
+        anchor = F(tlev[kte] - varint[kte])
+    else:
+        anchor = F(tlev[kte - 1] - varint[kte - 1])
+    # Fortran L = kte+1 .. nlayers+1 (kte+2 with model_top)
+    for L in range(kte + 2 if model_top else kte + 1, nlayers + 2):
         tlev[L - 1] = F(varint[L - 1] + anchor)
         tlay[L - 2] = F(_HALF * F(tlev[L - 1] + tlev[L - 2]))
 
@@ -1546,7 +1556,7 @@ def lwrad_prep_batch(*, p3d, p8w, t3d, t8w, dz8w,
                      f_qc=True, f_qr=True, f_qi=True, f_qs=True, f_qg=True,
                      yr, julian, nlayers, mp_physics=0, g=9.81,
                      subcolumn_generator=None, trace_gas_overrides=None,
-                     rrtmg_cloud_optics_form="wrf_461"):
+                     rrtmg_cloud_optics_form="wrf_461", model_top=False):
     """Column-vectorized twin of :func:`lwrad_prep` (bitwise per column).
 
     Profiles are (ncol, kte) / (ncol, kte+1), surface fields (ncol,)
@@ -1720,12 +1730,16 @@ def lwrad_prep_batch(*, p3d, p8w, t3d, t8w, dz8w,
     # flattens to two slice assignments (tlev first, then tlay from the
     # updated tlev, whose L-2 term at the first row is the untouched
     # t8w interface value).
-    anchor = (tlev[:, kte - 1] - varint[:, kte - 1]).astype(f32)
-    tlev[:, kte:nlayers + 1] = (varint[:, kte:nlayers + 1]
-                                + anchor[:, None]).astype(f32)
-    tlay[:, kte - 1:nlayers] = (_HALF * (tlev[:, kte:nlayers + 1]
-                                         + tlev[:, kte - 1:nlayers]
-                                         ).astype(f32)).astype(f32)
+    # ``model_top`` (RunConfig.rrtmg_lw_model_top, correct-mode FQ6) starts
+    # one interface higher: tlev(kte+1) and tlay(kte) stay as given and the
+    # anchor is tlev(kte+1) - varint(kte+1).
+    top = 1 if model_top else 0
+    anchor = (tlev[:, kte - 1 + top] - varint[:, kte - 1 + top]).astype(f32)
+    tlev[:, kte + top:nlayers + 1] = (varint[:, kte + top:nlayers + 1]
+                                      + anchor[:, None]).astype(f32)
+    tlay[:, kte - 1 + top:nlayers] = (
+        _HALF * (tlev[:, kte + top:nlayers + 1]
+                 + tlev[:, kte - 1 + top:nlayers]).astype(f32)).astype(f32)
 
     # Ozone profile including the buffer layers.
     o3mmr = _o3data_b(xp, plev)            # (ncol, nlayers)

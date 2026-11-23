@@ -50,37 +50,40 @@ def _run(**kw):
                      sf_sfclay_physics=1, **kw)
 
 
-def test_the_option_is_appended_off_and_noah_only():
+def test_the_option_follows_the_mode_and_is_read_by_noah_only():
+    from woof import correct_mode
+    from woof.quirk_corrections import run_reads
     field = RunConfig.__dataclass_fields__["noah_smc_floor_booking"]
-    assert field.default is False and field.kw_only
-    validate_run_config(_run(sf_surface_physics=2, noah_smc_floor_booking=True))
-    with pytest.raises(ConfigurationRefused, match="noah_smc_floor_booking"):
-        validate_run_config(_run(sf_surface_physics=1, num_soil_layers=5, noah_smc_floor_booking=True))
+    # correct-mode finding FQ4: on in a default process, off in exact mode
+    assert field.default is correct_mode.CORRECT_KEYS_DEFAULT and field.kw_only
+    assert correct_mode.resolve("exact").settings["noah_smc_floor_booking"] is False
+    assert run_reads(validate_run_config(_run(sf_surface_physics=2, noah_smc_floor_booking=True)),
+                     "noah_smc_floor_booking")
+    assert not run_reads(validate_run_config(_run(sf_surface_physics=1, num_soil_layers=5,
+                                                  noah_smc_floor_booking=True)), "noah_smc_floor_booking")
     with pytest.raises(ConfigurationRefused, match="noah_smc_floor_booking"):
         validate_run_config(_run(sf_surface_physics=2, noah_smc_floor_booking=1))
 
 
-def test_the_umbrella_turns_it_on_where_noah_runs():
+def test_the_umbrella_sets_it():
     assert _run(sf_surface_physics=2, woof_quirk_corrections="all").noah_smc_floor_booking is True
-    assert _run(sf_surface_physics=1, num_soil_layers=5, woof_quirk_corrections="all").noah_smc_floor_booking is False
-    assert _run(sf_surface_physics=2).noah_smc_floor_booking is False
+    assert _run(sf_surface_physics=2, woof_quirk_corrections="none").noah_smc_floor_booking is False
     from woof import quirk_corrections as qc
     with pytest.raises(ConfigurationRefused, match="noah_smc_floor_booking"):
         qc.apply_run_corrections({qc.UMBRELLA: "all", "sf_surface_physics": 2, "noah_smc_floor_booking": False})
 
 
-def test_a_wrf_hydro_coupling_refuses_the_booking_and_the_umbrella_leaves_it_off():
+def test_a_wrf_hydro_coupling_does_not_read_the_booking():
     from types import SimpleNamespace
     from woof.core.noah import launch_noah
     from woof.core.physics import _noah_smc_floor_booking
     with pytest.raises(ValueError, match="noah_smc_floor_booking"):
         launch_noah({}, None, 10.0, None, wrf_hydro={}, smc_floor_booking=True)
     hydro = {"wrf_hydro": {}}
-    explicit = SimpleNamespace(noah_smc_floor_booking=True, woof_quirk_corrections="none")
-    umbrella = SimpleNamespace(noah_smc_floor_booking=True, woof_quirk_corrections="all")
-    assert _noah_smc_floor_booking(explicit, hydro) is True      # refused by launch_noah
-    assert _noah_smc_floor_booking(umbrella, hydro) is False
-    assert _noah_smc_floor_booking(umbrella, {}) is True
+    on = SimpleNamespace(noah_smc_floor_booking=True, sf_surface_physics=2)
+    assert _noah_smc_floor_booking(on, hydro) is False
+    assert _noah_smc_floor_booking(on, {}) is True
+    assert _noah_smc_floor_booking(SimpleNamespace(noah_smc_floor_booking=True, sf_surface_physics=1), {}) is False
 
 
 # --- the default ----------------------------------------------------------

@@ -68,7 +68,11 @@ def resolve(explicit: Mapping[str, Any] | None, *, mode: str) -> Mapping[str, An
     unknown = sorted(set(explicit) - set(KEYS))
     if unknown:
         raise ValueError(f"unknown MMM-physics options {unknown}; known: {list(KEYS)}")
-    version = normalise(explicit["mmm_version"]) if "mmm_version" in explicit else default_version(mode)
+    if "mmm_version" in explicit:
+        version = normalise(explicit["mmm_version"])
+    else:
+        from .version_defaults import defaulted
+        version = defaulted("mmm_version", default_version(mode), where=f"mmm_version.resolve ({mode} mode)")
     tofd = _logical(explicit.get("kim_tofd", False))
     factor = float(explicit.get("tofd_factor", TOFD_FACTOR_DEFAULT))
     if not factor > 0.0:
@@ -80,13 +84,25 @@ def resolve(explicit: Mapping[str, Any] | None, *, mode: str) -> Mapping[str, An
     return MappingProxyType({"mmm_version": version, "kim_tofd": tofd, "tofd_factor": factor})
 
 
-PINNED_OPTIONS = resolve({}, mode="exact")
+PINNED_OPTIONS = resolve({"mmm_version": PINNED}, mode="exact")
 
 
 def of(call: Any) -> Mapping[str, Any]:
     """The MMM choice a SlotCall carries; a call built without one (module replays) runs the pin."""
     value = getattr(call, "mmm", None)
-    return PINNED_OPTIONS if not value else value
+    if value:
+        return value
+    from .version_defaults import defaulted
+    return defaulted("mmm_version", PINNED_OPTIONS, where="a SlotCall built without an MMM choice")
+
+
+def named(value: Any, *, where: str) -> str:
+    """A scheme module's ``mmm_version`` argument: the named generation, or the pin when none is named (a
+    module replay against native v8.4.2), which a pinned lane must name (version_defaults)."""
+    if value is not None:
+        return normalise(value)
+    from .version_defaults import defaulted
+    return defaulted("mmm_version", PINNED, where=where)
 
 
 #: The slot/scheme pairs the MMM-physics generation reaches on the MPAS routes.
@@ -100,23 +116,27 @@ def configure(config: Any, explicit: Mapping[str, Any] | None) -> Any:
     version there gets the pin; one that names 550b5b4 (or kim_tofd) there is refused."""
     from dataclasses import replace
     explicit = dict(explicit or {})
-    choice = resolve(explicit, mode=getattr(config, "mode", "exact"))
+    unknown = sorted(set(explicit) - set(KEYS))
+    if unknown:
+        raise ValueError(f"unknown MMM-physics options {unknown}; known: {list(KEYS)}")
     active = getattr(config, "active", lambda slot: True)
     reached = [(slot, config.selectors.get(slot)) for slot, schemes in MMM_SLOTS.items()
                if config.selectors.get(slot) in schemes and active(slot)]
     native = [(slot, scheme) for slot, scheme in reached if str(config.backends.get(slot)) != "hex-cuda"]
-    if not reached and "mmm_version" not in explicit and not choice["kim_tofd"]:
+    named_choice = "mmm_version" in explicit or _logical(explicit.get("kim_tofd", False))
+    if not named_choice and (not reached or native):
         # No YSU or revised-MM5 slot is selected and active, so the generation changes nothing: the run records the
         # pin (no "mmm" receipt entry), as the MYNN suite version does.  THE BREAKAGE THIS PREVENTS: every
-        # convection_permitting receipt named MMM 550b5b4, a scheme generation the run never executes.
+        # convection_permitting receipt named MMM 550b5b4, a scheme generation the run never executes.  A slot
+        # that runs native-cpu runs the library's a4baf7f source, so it is the pin too.  Neither is a default.
         choice = resolve({**explicit, "mmm_version": PINNED}, mode="exact")
+    else:
+        choice = resolve(explicit, mode=getattr(config, "mode", "exact"))
     if native and choice["mmm_version"] != PINNED:
-        if "mmm_version" in explicit or choice["kim_tofd"]:
-            # THE BREAKAGE THIS PREVENTS: the native library is MMM a4baf7f; the run would carry the pin
-            # under the 550b5b4 label.
-            raise ValueError(f"mmm_version={choice['mmm_version']} runs on the GPU port only; "
-                             f"{', '.join(f'{s}={n}' for s, n in native)} runs native-cpu (MMM {PINNED})")
-        choice = resolve({**explicit, "mmm_version": PINNED}, mode="exact")
+        # THE BREAKAGE THIS PREVENTS: the native library is MMM a4baf7f; the run would carry the pin
+        # under the 550b5b4 label.
+        raise ValueError(f"mmm_version={choice['mmm_version']} runs on the GPU port only; "
+                         f"{', '.join(f'{s}={n}' for s, n in native)} runs native-cpu (MMM {PINNED})")
     if choice["kim_tofd"]:
         if config.selectors.get("surface_layer") not in SCHEMES_WITH_TOFD or not active("surface_layer"):
             # THE BREAKAGE THIS PREVENTS: kim_tofd on any other surface layer would run with no form drag.

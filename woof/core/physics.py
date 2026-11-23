@@ -2007,12 +2007,15 @@ def _wrf_hydro_lsm_kwargs(driver) -> dict:
 def _noah_smc_floor_booking(cfg, hydro: dict) -> bool:
     """RunConfig.noah_smc_floor_booking for this Noah call.  A WRF-Hydro
     coupling does not carry the booking (its drainage may go negative), so
-    under ``woof_quirk_corrections = 'all'`` it stays off there; asked for
-    by itself, launch_noah refuses it by name."""
-    booked = getattr(cfg, "noah_smc_floor_booking", False) is True
-    if booked and hydro and getattr(cfg, "woof_quirk_corrections", "none") == "all":
-        return False
-    return booked
+    the correction (on by default, correct-mode finding FQ4) stays off
+    there; launch_noah refuses it by name when a caller passes it."""
+    return _run_reads(cfg, "noah_smc_floor_booking") and not hydro
+
+
+def _run_reads(cfg, key: str) -> bool:
+    """woof.quirk_corrections.run_reads: the correction is on and read."""
+    from woof.quirk_corrections import run_reads
+    return run_reads(cfg, key)
 
 
 def _external_ocean_configured(cfg) -> bool:
@@ -4442,7 +4445,7 @@ class PhysicsDriver:
                                  if cfg.spp_pbl else None),
                 variant=cfg.mynn_sfclay_variant,
                 ocean_z0=(self.ocean.feedback_z0 if getattr(self, "ocean", None) is not None else None),
-                psih_zolzt=getattr(cfg, "mynn_sfclay_psih_zolzt", False) is True,
+                psih_zolzt=_run_reads(cfg, "mynn_sfclay_psih_zolzt"),
             )
             if fractional_ruc:
                 # module_surface_driver.F:5441-5506.  Force the second call
@@ -4482,7 +4485,7 @@ class PhysicsDriver:
                                      if cfg.spp_pbl else None),
                     variant=cfg.mynn_sfclay_variant,
                     ocean_z0=(self.ocean.feedback_z0 if getattr(self, "ocean", None) is not None else None),
-                    psih_zolzt=getattr(cfg, "mynn_sfclay_psih_zolzt", False) is True,
+                    psih_zolzt=_run_reads(cfg, "mynn_sfclay_psih_zolzt"),
                 )
 
                 # :5508-5554.  These diagnostics become grid-cell values
@@ -5337,7 +5340,7 @@ class PhysicsDriver:
                            solar=(self.urban_coupler.state.solar if self.urban_coupler is not None else None),
                            use_wudapt_lcz=int(getattr(cfg, "use_wudapt_lcz", 0)),
                            urban_water_balance=getattr(cfg, "urban_water_balance", None),
-                           smc_floor_booking=getattr(cfg, "noah_smc_floor_booking", False) is True)
+                           smc_floor_booking=_run_reads(cfg, "noah_smc_floor_booking"))
         self._run_noah_seaice(cfg, use_scheme_sr,
                               xice_threshold=setup.xice_threshold)
         if active(cfg): after_lsm(f)
@@ -5832,7 +5835,7 @@ class PhysicsDriver:
             ysu_version=cfg.ysu_version,
             # The opt-in surface heat flux on theta (default off: the
             # historical unit).
-            surface_heat_exner=getattr(cfg, "ysu_surface_heat_exner", False) is True,
+            surface_heat_exner=_run_reads(cfg, "ysu_surface_heat_exner"),
             # BEP/BEM's drag, heat and TKE sources (bl_ysu.F90 flag_bep
             # arm).  Passed ONLY when an urban model produced them, so the
             # non-BEP call is the historical one.

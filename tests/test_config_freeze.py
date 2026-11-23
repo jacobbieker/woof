@@ -351,6 +351,7 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     the 2.9.0 correct-mode defaults and the 2.9.1 ocean/WB5 additions.
     Literal default rows use equality or singleton identity as before.
     """
+    from woof import correct_mode as _cm
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
     names = [f.name for f in dataclasses.fields(RunConfig)]
     # Native groundwater cadence is consumed only by Noah-MP RUN5.
@@ -368,22 +369,30 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The RRTMG longwave model-top correction (quirk pass, finding FQ6), appended.
+    assert names.pop() == "rrtmg_lw_model_top"
+    assert RunConfig.__dataclass_fields__["rrtmg_lw_model_top"].default is _cm.CORRECT_KEYS_DEFAULT
+    assert RunConfig.__dataclass_fields__["rrtmg_lw_model_top"].kw_only
     # The opt-in Noah soil-moisture floor booking (quirk pass), appended off.
     assert names.pop() == "noah_smc_floor_booking"
-    assert RunConfig.__dataclass_fields__["noah_smc_floor_booking"].default is False
+    # a correct-mode key since the 1.1.7 reconciliation (finding FQ1-FQ4)
+    assert RunConfig.__dataclass_fields__["noah_smc_floor_booking"].default is _cm.CORRECT_KEYS_DEFAULT
     assert RunConfig.__dataclass_fields__["noah_smc_floor_booking"].kw_only
     # The opt-in MYNN surface-layer 2 m / 10 m heat profile from zt/L
     # (quirk pass), appended off.
     assert names.pop() == "mynn_sfclay_psih_zolzt"
-    assert RunConfig.__dataclass_fields__["mynn_sfclay_psih_zolzt"].default is False
+    # a correct-mode key since the 1.1.7 reconciliation (finding FQ1-FQ4)
+    assert RunConfig.__dataclass_fields__["mynn_sfclay_psih_zolzt"].default is _cm.CORRECT_KEYS_DEFAULT
     assert RunConfig.__dataclass_fields__["mynn_sfclay_psih_zolzt"].kw_only
     # The umbrella over the opt-in quirk corrections, appended at 'none'.
     assert names.pop() == "woof_quirk_corrections"
-    assert RunConfig.__dataclass_fields__["woof_quirk_corrections"].default == "none"
+    # unset: the corrections follow the physics mode
+    assert RunConfig.__dataclass_fields__["woof_quirk_corrections"].default is None
     assert RunConfig.__dataclass_fields__["woof_quirk_corrections"].kw_only
     # The opt-in YSU surface heat flux on theta (quirk pass), appended off.
     assert names.pop() == "ysu_surface_heat_exner"
-    assert RunConfig.__dataclass_fields__["ysu_surface_heat_exner"].default is False
+    # a correct-mode key since the 1.1.7 reconciliation (finding FQ1-FQ4)
+    assert RunConfig.__dataclass_fields__["ysu_surface_heat_exner"].default is _cm.CORRECT_KEYS_DEFAULT
     assert RunConfig.__dataclass_fields__["ysu_surface_heat_exner"].kw_only
     # The gridded urban morphology (woof.core.urban_param), appended unset.
     assert names.pop() == "urban_param_file"
@@ -424,7 +433,8 @@ def test_new_fields_are_reviewed_defaults_appended_last():
         assert RunConfig.__dataclass_fields__[name].kw_only
     # The opt-in GF deep evaporation booking, appended off.
     assert names.pop() == "gf_deep_rain_evaporation_booking"
-    assert RunConfig.__dataclass_fields__["gf_deep_rain_evaporation_booking"].default is False
+    # a correct-mode key since the 1.1.7 reconciliation (finding FQ1-FQ4)
+    assert RunConfig.__dataclass_fields__["gf_deep_rain_evaporation_booking"].default is _cm.CORRECT_KEYS_DEFAULT
     assert RunConfig.__dataclass_fields__["gf_deep_rain_evaporation_booking"].kw_only
     for name in reversed([*MULTI_PERTURB_RUN_DEFAULTS]):
         assert names.pop() == name
@@ -1096,8 +1106,9 @@ def _check_frozen_defaults(actual):
                          ("radtran_pseudospherical", False),
                          ("radtran_aerosol", "none"),
                          *__import__("woof.config", fromlist=["x"]).MULTI_PERTURB_RUN_DEFAULTS.items(),
-                         # the opt-in GF deep evaporation booking, off
-                         ("gf_deep_rain_evaporation_booking", False),
+                         # the GF deep evaporation booking: correct-mode finding
+                         # FQ1 (the fork's quirk ledger), on in correct mode
+                         ("gf_deep_rain_evaporation_booking", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the opt-in TSI forcing (woof.spacewx), off
                          ("solar_tsi_opt", 0), ("solar_tsi_source", ""),
                          ("solar_tsi_mode", "absolute"),
@@ -1112,14 +1123,16 @@ def _check_frozen_defaults(actual):
                          ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
                          # the gridded urban morphology, unset
                          ("urban_param_file", ""),
-                         # the opt-in YSU surface heat flux on theta, off
-                         ("ysu_surface_heat_exner", False),
-                         # the umbrella over the opt-in quirk corrections, none
-                         ("woof_quirk_corrections", "none"),
-                         # the opt-in MYNN surface-layer 2 m / 10 m correction, off
-                         ("mynn_sfclay_psih_zolzt", False),
-                         # the opt-in Noah soil-moisture floor booking, off
-                         ("noah_smc_floor_booking", False),
+                         # the YSU surface heat flux on theta (FQ2), on in correct mode
+                         ("ysu_surface_heat_exner", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the umbrella over the quirk corrections, unset (the mode)
+                         ("woof_quirk_corrections", None),
+                         # the MYNN surface-layer 2 m / 10 m correction (FQ3)
+                         ("mynn_sfclay_psih_zolzt", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the Noah soil-moisture floor booking (FQ4)
+                         ("noah_smc_floor_booking", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the RRTMG longwave model-top correction (FQ6)
+                         ("rrtmg_lw_model_top", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the opt-in resolved obstacles, off
                          *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field

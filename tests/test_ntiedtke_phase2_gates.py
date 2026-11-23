@@ -550,6 +550,12 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     # this domain's identity binds it while it is on.
     if correct_mode.CORRECT_KEYS_DEFAULT:
         expected_run["hydrometeor_handover_numbers"] = True
+    # FQ1/FQ2/FQ4 are read under Grell-Freitas, YSU and Noah, which this
+    # domain runs, so its identity binds them while they are on.
+    fq = ({"gf_deep_rain_evaporation_booking": True,
+           "ysu_surface_heat_exner": True, "noah_smc_floor_booking": True}
+          if correct_mode.CORRECT_KEYS_DEFAULT else {})
+    expected_run.update(fq)
     assert cached["run"] == expected_run
     assert cached["start_time"] == start.isoformat()
     assert compare(cached, identity(domain)) == ([], [])
@@ -561,7 +567,8 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     # cu_physics = 3's generation (GFL by default since 3.0.0) leaves an
     # identity whose cumulus is not Grell-Freitas.
     assert new_scheme["run"] == {**{k: v for k, v in expected_run.items()
-                                    if k != "cu_gf_version"},
+                                    if k not in ("cu_gf_version",
+                                                 "gf_deep_rain_evaporation_booking")},
                                  "cu_physics": 16, **wb4}
     assert compare(cached, new_scheme) == (
         [], ["run.cu_physics"] + (["run.ntiedtke_dry_mass_coupling"] if wb4 else []))

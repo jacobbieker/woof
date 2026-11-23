@@ -6027,12 +6027,13 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                              "free (default, transported like the interior) or wrf-flow-dependent (WRF's "
                              "flow_dep_bdy: outflow copies the first inner cell, inflow sets 0, or ccn_conc for "
                              "nn/qnn); regional mesh, WOOF-physics route only")
-    parser.add_argument("--quirk-corrections", default="none", choices=("none", "all"),
-                        help="woof_quirk_corrections: 'all' turns on every opt-in correction of a WRF/MPAS quirk "
-                             "this door carries: --undriven-species-boundary wrf-flow-dependent on a regional run "
-                             "whose drivers carry it (not the MPAS suite route, local time stepping, partial nest "
-                             "or the partitioned same-host executor). The RunConfig corrections (GF, YSU, ...) "
-                             "are not hex flags and are not set by it; default none (each key on its own)")
+    parser.add_argument("--quirk-corrections", default=None, choices=("none", "all"),
+                        help="woof_quirk_corrections: 'all' / 'none' turns on / off every correction of a WRF/MPAS "
+                             "quirk this door carries: --undriven-species-boundary wrf-flow-dependent on a regional "
+                             "run whose drivers carry it (not the MPAS suite route, local time stepping, partial "
+                             "nest or the partitioned same-host executor). Unset (default), they follow "
+                             "--physics-mode: on in correct mode, off in exact. The RunConfig corrections (GF, "
+                             "YSU, ...) are not hex flags and are not set by it")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",
                         help="opt-in Fitch turbine drag and TKE from the shared turbine tables")
     # --wrf-hydro / --wrf-hydro-output: WRF-Hydro's routing on its own LSM grid, coupled to the hex land surface
