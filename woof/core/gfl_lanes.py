@@ -273,6 +273,9 @@ def lower(support, scheme, entry, metal=False):
         assert 192 + 16 + need + bounds <= METAL_CHARACTER_BYTES, need
         defines = defines.replace('#define GF_CHARACTER_BYTES %d\n' % CHARACTER_BYTES,
                                   '#define GF_CHARACTER_BYTES %d\n' % METAL_CHARACTER_BYTES)
+        # Every lane pointer now points into device memory (scratch, fields, the byte region).
+        assert support.count(_LANE_FIELD) == 1
+        support = support.replace(_LANE_FIELD, _LANE_FIELD_METAL)
     return defines + support + '\n' + lowered + '\n' + lane_entry
 
 
@@ -346,6 +349,10 @@ def _metal_bounds(entry):
 
 _FSCAV_LOCAL = '  GFReal fscav[1];\n'
 _FSCAV_SCRATCH = '  GFReal (&fscav)[1] = *(GFReal (*)[1]) workspace.allocate_bytes (16);\n'
+
+
+_LANE_FIELD = '  T* p;\n'
+_LANE_FIELD_METAL = '  T* p __attribute__((annotate("woof_space:device")));\n'
 
 
 def lane_scheme(scheme):

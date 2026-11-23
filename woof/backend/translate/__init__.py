@@ -734,8 +734,27 @@ class _Rewriter:
         # A reference member's binding is recorded where its constructor runs, which the real pass may
         # reach after a function that reads through the member: the probe's whole-unit record seeds it.
         self._reference_field_seed = {key: set(spaces) for key, spaces in probe.ref_field_spaces.items()}
-        generic = {owner for (owner, _field), spaces in probe.field_spaces.items() if len(spaces) > 1}
+        # A field that names its space outright (``annotate("woof_space:...")``, _field_space) keeps it:
+        # its struct is not made generic (GFL's Metal lowering moves every local a lane pointer can
+        # reach into device memory, but the probe still sees the constructors' unbound parameters).
+        named = self._space_named_fields(top)
+        generic = {owner for key, spaces in probe.field_spaces.items()
+                   if len(spaces) > 1 and key not in named for owner in (key[0],)}
         return self._generic_companions(top, generic)
+
+    def _space_named_fields(self, top) -> set:
+        """field_key of every pointer field annotated with an explicit address space."""
+        from woof.backend.translate.spaces import field_key
+        named = set()
+        for c in top:
+            if not self.main_file(c):
+                continue
+            for n in c.walk_preorder():
+                if n.kind.name == "FIELD_DECL" and any(
+                        a.kind.name == "ANNOTATE_ATTR" and a.spelling.startswith(_SPACE_HINT)
+                        for a in n.get_children()):
+                    named.add(field_key(n))
+        return named
 
     def _generic_companions(self, top, generic: set) -> set:
         """Pointer-holding class templates that a generic struct's methods
