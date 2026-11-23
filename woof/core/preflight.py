@@ -5655,7 +5655,8 @@ def gf_column_workspace_bytes(
         if getattr(dc.run, "cu_gf_version", "wrf_461") == "gfl_873b414":
             worst = max(worst, gfl_scratch_bytes(
                 int(dc.run.nz), int(dc.run.nx) * int(dc.run.ny),
-                profile.multiprocessor_count))
+                profile.multiprocessor_count,
+                metal=getattr(profile, "backend", "cuda") == "mlx"))
             continue
         columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
         worst = max(worst, gf_workspace_floats(int(dc.run.nz), columns) * 4)

@@ -166,3 +166,43 @@ def test_preflight_prices_gfl_lane_scratch_not_gfdrv_tiles():
     sms = MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count
     assert gf_column_workspace_bytes(exp("gfl_873b414")) == scratch_bytes(49, 22500, sms)
     assert gf_column_workspace_bytes(exp("wrf_461")) != scratch_bytes(49, 22500, sms)
+
+
+def _unpromote(text):
+    """Undo gfl_lanes.metal_locals: each slot reference back to its local declaration."""
+    import re
+    text = re.sub(r'  GFFrame gf_locals_frame \(workspace\);\n  char \*gf_locals = \(char \*\) '
+                  r'workspace\.allocate_bytes \(\d+\);\n', '', text)
+    text = re.sub(r'(\w[\w ]*) \(&(\w+)\)\[(\d+)\] = \*\(\1 \(\*\)\[\3\]\) \(gf_locals \+ \d+\);', r'\1 \2[\3];', text)
+    text = re.sub(r'(\w[\w ]*) &(\w+) = \*\(\1 \*\) \(gf_locals \+ \d+\); \2 = ([^;]*);', r'\1 \2 = \3;', text)
+    return re.sub(r'(\w[\w ]*) &(\w+) = \*\(\1 \*\) \(gf_locals \+ \d+\);', r'\1 \2;', text)
+
+
+def test_metal_lowering_moves_only_the_passed_on_locals():
+    """Metal's GFL lowering holds every passed-on local in device memory and changes nothing else.
+
+    The breakage it prevents: a Metal pointer has one address space, so a lane
+    pointer or descriptor that may point at a local (``&itf``) or at scratch did
+    not compile. Undoing the slot references must give the CUDA lane scheme
+    byte for byte, every passed-on scalar or array local must be moved, and
+    the CUDA lowering must not contain any of it.
+    """
+    import re
+    from woof.core import gfl_873b414 as gfl
+    from woof.core import gfl_lanes
+    lane = gfl_lanes.lane_scheme(gfl._SCHEME_SOURCE)
+    metal, need = gfl_lanes.metal_locals(lane)
+    assert metal != lane and 0 < need <= gfl_lanes.METAL_CHARACTER_BYTES - 192 - 16 - 80
+    assert _unpromote(metal) == lane
+    # every local address the scheme passes on is now a slot reference
+    for head in gfl_lanes._SCHEME_FUNCTION.finditer(metal):
+        end = gfl_lanes._FUNCTION_END.search(metal, head.end()).end()
+        body = metal[head.end():end]
+        for name in set(re.findall(r'(?<![\w.>])&\s*(\w+)', body)):
+            assert not re.search(r'^\s+(?:GFReal|int|bool|long long|unsigned int) %s(\[\d+\])?( = [^;]*)?;$'
+                                 % name, body, re.M), name
+    cuda = gfl_lanes.lower(gfl._SUPPORT, gfl._SCHEME_SOURCE, gfl._ENTRY)
+    assert 'gf_locals' not in cuda and 'gf_bounds' not in cuda
+    on_metal = gfl_lanes.lower(gfl._SUPPORT, gfl._SCHEME_SOURCE, gfl._ENTRY, metal=True)
+    assert metal in on_metal and 'gf_bounds' in on_metal
+    assert '#define GF_CHARACTER_BYTES %d\n' % gfl_lanes.METAL_CHARACTER_BYTES in on_metal

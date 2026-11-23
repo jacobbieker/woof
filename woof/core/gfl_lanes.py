@@ -37,6 +37,14 @@ LANES = 128
 #: 50-byte element each at its=ite=1, each 16-byte rounded (3 x 64 = 192),
 #: and fscav's one word (16).
 CHARACTER_BYTES = 256
+#: The same per-thread contiguous region on Metal, which also holds every local whose address the
+#: scheme passes on (:func:`metal_locals`: about 1.6 KB at most, plus the entry's 18 bounds).
+METAL_CHARACTER_BYTES = 2048
+
+
+def character_bytes(metal=False):
+    """Contiguous bytes per lane for this backend's lowering (GF_CHARACTER_BYTES)."""
+    return METAL_CHARACTER_BYTES if metal else CHARACTER_BYTES
 
 #: Resident 128-thread blocks per SM the column kernel is compiled for
 #: (``GFL_MIN_BLOCKS`` in the kernel defines below; a test keeps the two equal).
@@ -72,7 +80,7 @@ def scratch_blocks(slabs, per_slab, *, resident_per_sm, sms, free=None):
     return max(1, min(cap // per_slab, max(1, int(resident_per_sm)) * int(sms), max(1, int(slabs))))
 
 
-def scratch_bytes(nz, columns, sms, *, resident_per_sm=MIN_BLOCKS_PER_SM, free=None):
+def scratch_bytes(nz, columns, sms, *, resident_per_sm=MIN_BLOCKS_PER_SM, free=None, metal=False):
     """Device bytes the GFL column launch holds for ``columns`` columns of ``nz`` mass levels.
 
     The launcher (woof.core.gfl_873b414._column_scratch) allocates exactly
@@ -80,7 +88,7 @@ def scratch_bytes(nz, columns, sms, *, resident_per_sm=MIN_BLOCKS_PER_SM, free=N
     prices it. Storage levels are the nz+1 faces, the widest field the
     adapter passes.
     """
-    per_slab = (share_bytes(int(nz) + 1, int(nz)) + CHARACTER_BYTES) * LANES
+    per_slab = (share_bytes(int(nz) + 1, int(nz)) + character_bytes(metal)) * LANES
     slabs = -(-max(int(columns), 1) // LANES)
     return scratch_blocks(slabs, per_slab, resident_per_sm=resident_per_sm, sms=sms, free=free) * per_slab
 
@@ -179,7 +187,7 @@ _WORKSPACE_NEW = '''struct GFWorkspace {
   // e+1, 0 = none) for the launch. Metal has no device heap, so the pool stands in for an in-kernel malloc on every
   // backend: placement only, the same words. The share is sized to what columns use, the spill keeps a deeper column
   // exact and running.
-  char* spill_pool;unsigned long long spill_bytes,spill_entries;unsigned long long* spill_next;unsigned long long spill_entry;
+  char* spill_pool;unsigned long long spill_bytes,spill_entries;unsigned int* spill_next;unsigned long long spill_entry;
   // Character arrays are read bytewise: contiguous per thread.
   char* bytes;unsigned long long bcapacity,bposition;unsigned int lane;
   __device__ void* allocate(unsigned long long n){
@@ -191,7 +199,7 @@ _WORKSPACE_NEW = '''struct GFWorkspace {
       if(position<capacity)position=capacity;
       if(position+n>capacity+spill_bytes){gf_trap();return nullptr;}
       if(spill_entry==0ULL){
-        const unsigned long long taken=atomicAdd(spill_next,1ULL);
+        const unsigned long long taken=atomicAdd(spill_next,1u);
         if(taken>=spill_entries){gf_trap();return nullptr;}
         spill_entry=taken+1ULL;
       }
@@ -240,8 +248,13 @@ def _pointer_plus(scheme):
     return ''.join(out), count
 
 
-def lower(support, scheme, entry):
-    """Return the lane-interleaved CUDA source (support, scheme, lane entry) from the pinned pieces."""
+def lower(support, scheme, entry, metal=False):
+    """Return the lane-interleaved CUDA source (support, scheme, lane entry) from the pinned pieces.
+
+    ``metal``: the Metal lowering (:func:`metal_locals`), the same operations in
+    the same order with every local whose address is passed on held in device
+    memory; the CUDA text is unchanged by it.
+    """
     assert support.count(_WORKSPACE_OLD) == 1, 'GFL workspace support changed'
     support = support.replace(_WORKSPACE_OLD, _WORKSPACE_NEW)
     assert support.count('typedef char GFText[50];') == 1
@@ -251,7 +264,84 @@ def lower(support, scheme, entry):
     assert call, 'GFL column entry changed'
     arguments, count = _ARGUMENT.subn(lambda m: f'({m[1]}*)(gfl_field(ptrs,strides,{m[2]},col))', call[1])
     assert count == 46, count
-    return _DEFINES + support + '\n' + lane_scheme(scheme) + '\n' + _ENTRY.replace('@ARGUMENTS@', arguments)
+    defines, lane_entry = _DEFINES, _ENTRY.replace('@ARGUMENTS@', arguments)
+    lowered = lane_scheme(scheme)
+    if metal:
+        lowered, need = metal_locals(lowered)
+        lane_entry, bounds = _metal_bounds(lane_entry)
+        # ierrc/ierrcm/ierrcs (192), fscav (16), the promoted locals (nested calls at most add up) and the bounds
+        assert 192 + 16 + need + bounds <= METAL_CHARACTER_BYTES, need
+        defines = defines.replace('#define GF_CHARACTER_BYTES %d\n' % CHARACTER_BYTES,
+                                  '#define GF_CHARACTER_BYTES %d\n' % METAL_CHARACTER_BYTES)
+    return defines + support + '\n' + lowered + '\n' + lane_entry
+
+
+#: Scalar and array types of the scheme's locals.
+_LOCAL_TYPES = {'GFReal': 4, 'int': 4, 'bool': 1, 'long long': 8, 'unsigned int': 4}
+#: A scheme function: every one takes the column workspace first.
+_SCHEME_FUNCTION = re.compile(r'^__device__ [^\n;]*\(GFWorkspace &workspace[^;{]*\)\s*\n\{\n', re.M)
+_FUNCTION_END = re.compile(r'^\}\n', re.M)
+_LOCAL_TYPE = '|'.join(re.escape(t) for t in _LOCAL_TYPES)
+
+
+def metal_locals(scheme):
+    """Hold every local whose address a scheme function passes on in the thread's contiguous region.
+
+    On CUDA a lane pointer or descriptor may point at a local (``&itf``, a
+    Fortran constant ``&C_7360``, ``zuh2``) or at the scratch: generic
+    addressing covers both. A Metal pointer has one address space, so here
+    each such local of a function becomes a reference to a 16-byte slot of
+    one block the function takes from the workspace's byte region on entry
+    (released on return by its own GFFrame). An initialised local is
+    assigned its initialiser where it was declared. Only placement moves.
+    Returns the lowered scheme and the bytes all functions take together
+    (an upper bound on what nested calls hold at once).
+    """
+    out, pos, total = [], 0, 0
+    for head in list(_SCHEME_FUNCTION.finditer(scheme)):
+        end = _FUNCTION_END.search(scheme, head.end()).end()
+        body = scheme[head.end():end]
+        names = set(re.findall(r'(?<![\w.>])&\s*(\w+)', body))
+        arrays = set(re.findall(r'^\s+(?:%s) (\w+)\[\d+\]' % _LOCAL_TYPE, body, re.M))
+        names |= {a for a in arrays if re.search(r'[(,]\s*%s\s*[,)]' % re.escape(a), body)}
+        offset = 0
+
+        def slot(m):
+            nonlocal offset
+            indent, kind, name, count, value = m[1], m[2], m[3], m[4], m[5]
+            at = offset
+            offset += (_LOCAL_TYPES[kind] * (int(count) if count else 1) + 15) & ~15
+            if count:
+                assert value is None, name
+                return f'{indent}{kind} (&{name})[{count}] = *({kind} (*)[{count}]) (gf_locals + {at});'
+            line = f'{indent}{kind} &{name} = *({kind} *) (gf_locals + {at});'
+            return line if value is None else f'{line} {name} = {value};'
+
+        if names:
+            alternatives = '|'.join(sorted(map(re.escape, names), key=len, reverse=True))
+            declaration = re.compile(r'^(\s+)(%s) (%s)(?:\[(\d+)\])?(?: = ([^;]*))?;$' % (_LOCAL_TYPE, alternatives), re.M)
+            body = declaration.sub(slot, body)
+        if offset:
+            body = ('  GFFrame gf_locals_frame (workspace);\n'
+                    f'  char *gf_locals = (char *) workspace.allocate_bytes ({offset});\n' + body)
+            total += offset
+        out.append(scheme[pos:head.end()] + body)
+        pos = end
+    out.append(scheme[pos:])
+    return ''.join(out), total
+
+
+_ENTRY_BOUNDS = re.compile(r'^ int (ims=1,[^;]*);$', re.M)
+
+
+def _metal_bounds(entry):
+    """The entry's WRF bounds (passed to the driver by address) in the thread's contiguous region."""
+    m = _ENTRY_BOUNDS.search(entry)
+    assert m, 'GFL entry bounds changed'
+    pairs = [d.split('=', 1) for d in m[1].split(',')]
+    lines = [f' int* gf_bounds=(int*)workspace.allocate_bytes({4 * len(pairs)});']
+    lines += [f' int &{name}=gf_bounds[{i}];{name}={value};' for i, (name, value) in enumerate(pairs)]
+    return entry[:m.start()] + '\n'.join(lines) + entry[m.end():], (4 * len(pairs) + 15) & ~15
 
 
 _FSCAV_LOCAL = '  GFReal fscav[1];\n'
@@ -322,7 +412,8 @@ __device__ void gfl_column(long long col,const unsigned long long* ptrs,const un
 }
 #ifndef GF_HOST_WITNESS
 // A block is one slab of the scratch (blockDim = GF_LANES; thread t is lane t of the slab and keeps it, and
-// its spill entry once it takes one). next[0] is the column counter, next[1] the spill pool's. Each warp takes the next 32 consecutive columns from
+// its spill entry once it takes one). next[0] is the column counter, next[1] the spill pool's (32-bit: Metal has
+// no 64-bit atomic add; the launcher bounds both). Each warp takes the next 32 consecutive columns from
 // the launch's counter until none are left, so a warp held up by convecting columns does not leave the
 // card idle behind it (a fixed column-per-slot round left the last round a few blocks wide). Columns are
 // independent; each executes the complete source order from a fresh workspace, so which warp runs a
@@ -330,15 +421,15 @@ __device__ void gfl_column(long long col,const unsigned long long* ptrs,const un
 extern "C" __global__ void __launch_bounds__(GF_LANES, GFL_MIN_BLOCKS) gfl_lane_columns(long long ncol,
  const unsigned long long* ptrs,const unsigned long long* strides,char* scratch,unsigned long long capacity,
  unsigned long long spill_bytes,unsigned int* diagnostics,unsigned long long* highwater,const int* vertical,
- unsigned int* saved_fct_error,unsigned long long* next,char* spill_pool,unsigned long long spill_entries){
+ unsigned int* saved_fct_error,unsigned int* next,char* spill_pool,unsigned long long spill_entries){
  unsigned long long spill_entry=0;
  const unsigned int lane=threadIdx.x, warp_lane=threadIdx.x&31u;
  char* slab=scratch+(unsigned long long)blockIdx.x*(capacity+GF_CHARACTER_BYTES)*GF_LANES;
  for(;;){
-   unsigned long long first=0;
-   if(warp_lane==0)first=atomicAdd(next,32ULL);
+   unsigned int first=0;
+   if(warp_lane==0)first=atomicAdd(next,32u);
    first=__shfl_sync(0xffffffffu,first,0);
-   if(first>=(unsigned long long)ncol)break;
+   if((long long)first>=ncol)break;
    const long long col=(long long)first+warp_lane;
    if(col<ncol){
      GFWorkspace workspace{slab+4ULL*lane,capacity,0,0,0,GFReal(0.0f),false,spill_pool,spill_bytes,spill_entries,

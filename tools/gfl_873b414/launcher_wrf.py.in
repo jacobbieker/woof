@@ -21,10 +21,16 @@ def cuda_source():
     urban = (here / 'urban_bem.cuh').read_text()
     log10 = urban[urban.index('// log10f: CORE-MATH'):urban.index('\n' + '__device__ ' + 'void bem_bem(')]
     # The pinned transcription runs lane-interleaved (woof/core/gfl_lanes.py): placement
-    # only, the same operations in the same order.
+    # only, the same operations in the same order (on Metal, with the passed-on locals in
+    # device memory: gfl_lanes.metal_locals).
     from woof.core import gfl_lanes
     return (header + '\n' + double + '\n' + extra + '\n' + trig + '\n' + log10 + '\n'
-            + gfl_lanes.lower(_SUPPORT, _SCHEME_SOURCE, _ENTRY))
+            + gfl_lanes.lower(_SUPPORT, _SCHEME_SOURCE, _ENTRY, metal=_metal()))
+
+
+def _metal():
+    from woof import backend
+    return backend.active() == "mlx"
 
 
 @lru_cache(maxsize=None)
@@ -168,6 +174,9 @@ def launch_lane_columns(fields, *, ncol, nz, saved_fct_error=None, vertical=None
     capacity = _share_bytes(levels, vertical[5] - vertical[4] + 1)
     kernel = _module(device).get_function('gfl_lane_columns')
     blocks, scratch = _column_scratch(device, kernel, -(-ncol // LANES), capacity)
+    # The 32-bit counters: each warp overshoots the columns by at most one take.
+    if ncol + 32 * (LANES // 32) * blocks >= 1 << 32:
+        raise ValueError(f'GFL launch of {ncol} columns passes its 32-bit column counter')
     spill_bytes = SPILL_SHARES * capacity
     spill, entries = _spill_pool(device, spill_bytes, blocks)
     table = cp.asarray(np.asarray(pointers + strides, dtype=np.uint64))
@@ -182,13 +191,14 @@ def _next_column(device):
     """The launch's counters, zeroed on the stream before the launch.
 
     Word 0 is the column counter (each warp takes the next 32 columns), word 1 the
-    spill pool's (a thread's first spill takes the next entry).
+    spill pool's (a thread's first spill takes the next entry). 32-bit words: Metal has
+    no 64-bit atomic add.
     """
     import cupy as cp
     held = _NEXT.get(device)
     if held is None:
         with cp.cuda.Device(device):
-            held = _NEXT[device] = cp.zeros(2, dtype=cp.uint64)
+            held = _NEXT[device] = cp.zeros(2, dtype=cp.uint32)
     held.fill(0)
     return held
 
@@ -205,7 +215,8 @@ def _vertical_words(device, vertical):
 
 #: Columns per slab (one 128-thread block); gfl_lanes.LANES.
 LANES = 128
-#: Contiguous character bytes per lane (ierrc, ierrcm, ierrcs); gfl_lanes.CHARACTER_BYTES.
+#: Contiguous character bytes per lane (ierrc, ierrcm, ierrcs); gfl_lanes.CHARACTER_BYTES
+#: (gfl_lanes.character_bytes on Metal, which also holds the passed-on locals there).
 CHARACTER_BYTES = 256
 #: Scratch sizing: one formula with the admission (gfl_lanes.scratch_bytes,
 #: priced by woof.core.preflight.gf_column_workspace_bytes). A column that needs
@@ -235,7 +246,8 @@ def _column_scratch(device, kernel, slabs, capacity):
     columns are independent and each starts from a fresh workspace.
     """
     import cupy as cp
-    per_slab = (capacity + CHARACTER_BYTES) * LANES
+    from woof.core.gfl_lanes import character_bytes
+    per_slab = (capacity + character_bytes(_metal())) * LANES
     slabs = max(int(slabs), 1)
     held = _SCRATCH.get(device)
     if held is None or held[1] != capacity or (not held[3] and held[0] < slabs):
