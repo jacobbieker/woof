@@ -160,8 +160,8 @@ def launch_thompson_fork_column(
     is written only when ``do_refl``.  ``singular_fall`` selects the fork's
     live melting-snow fall speed (thompson_fork_snow_fall = "wrf_39_noaa");
     false selects WRF v4.6.1's rain-share blend ("blend").
-    ``rain_snow_closure`` (RunConfig.thompson_rain_snow_closure, default
-    off) compiles the unit with the rain-snow closure define.
+    ``rain_snow_closure`` (RunConfig.thompson_rain_snow_closure, on in
+    correct mode, off in exact mode) compiles the unit with the rain-snow closure define.
     """
     import cupy as cp
 

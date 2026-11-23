@@ -5983,11 +5983,11 @@
    },
    {
     "file": "woof/core/thompson_aerosol_launch.py",
-    "sha256": "675aff4b5423d72b01726912a254debf620dded0bab0fb9981e3e778b968a45e"
+    "sha256": "fd5a9f98d88db35ab27ab07bef6a0f77bef2864759ff05c9a11afcc40882e010"
    },
    {
     "file": "woof/core/thompson_fork.py",
-    "sha256": "7d0a8ccfe61294c77914d0bfec2a01b07c5b67eb9ac52e3c5de34a86cffb8e10"
+    "sha256": "ef2e77071a909f41abb1d48740b2bb387c51e9ebd77b492ded2f92a81ac92454"
    },
    {
     "file": "woof/core/urban_bem.py",

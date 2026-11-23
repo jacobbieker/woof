@@ -124,10 +124,11 @@ def hail_aware_scope(enabled: bool):
 # The rain-snow collection closure (RunConfig.thompson_rain_snow_closure, FQ5).
 # ---------------------------------------------------------------------------
 #
-# Off by default.  The cold and warm units carry one #ifdef block each (the
-# cold unit a second in its WRF 3.9 / hail-aware network) that, below 0 C,
-# sets the graupel gain prg_rcs to what rain and snow lose after their
-# limiters.  Like the generation, a property of one call, set by the
+# On in correct mode (the default), off in exact mode.  The cold unit
+# carries two #ifdef blocks and the warm unit two (the second in its
+# WRF 3.9 / hail-aware network) that, below 0 C, set the graupel gain
+# prg_rcs to what rain and snow lose after their limiters, floored at zero
+# (a negative gain moves to snow: snow takes only what rain lost).  Like the generation, a property of one call, set by the
 # adapter (rain_snow_closure_scope) and read through aerosol_kernel; only
 # CLOSURE_MODULES take the define, so the other units keep their images.
 CLOSURE_MODULES = ("thompson_aerosol_cold", "thompson_aerosol_warm")
