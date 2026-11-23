@@ -2938,7 +2938,8 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "noahmp_melt_reset_esat, mynn_fixes_v61, "
     "mynn_boulac_down_sign, pbl_boulac_down_sign, "
     "gf_deep_rain_evaporation_booking, ysu_surface_heat_exner, "
-    "mynn_sfclay_psih_zolzt, noah_smc_floor_booking); otherwise "
+    "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
+    "rrtmg_lw_model_top); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step

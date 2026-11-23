@@ -16,8 +16,9 @@ The rules, the same on every route:
   when set, wins: that is how one correction is turned off in correct
   mode, or on in exact mode.
 * ``woof_quirk_corrections = 'all'`` / ``'none'``: every correction on /
-  off whatever the mode. A key set the other way next to an explicit
-  umbrella is a conflict and is refused by name.
+  off whatever the mode. A key set the other way next to ``'all'`` is a
+  conflict and is refused by name; next to ``'none'`` the key wins (that
+  is how a single correction is run on its own).
 * A correction is read only where its scheme runs (YSU's on a MYNN run,
   the MALI statistics' on a run without them, are inert). Where its
   scheme cannot carry it (YSU's with BEP/BEM, Noah's with a WRF-Hydro

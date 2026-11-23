@@ -5875,7 +5875,7 @@
    },
    {
     "file": "woof/core/rrtmg_legacy.py",
-    "sha256": "974fa09bcb0b6ed7c571030a027ff433918abe9db6d182fb7896a783ce44170c"
+    "sha256": "faf86bbfa308aa1b4852e7ec15245e39da9b9854654f6619acbebb3dd563259a"
    },
    {
     "file": "woof/core/rrtmg_legacy_device.py",
