@@ -166,7 +166,7 @@ def prepare_mynn_surface_column_batch(inputs, *, mol, ustm, outputs=None,
                         **{f"output:{key}": value for key, value in outputs.items()}}.items():
         _resident(array, xp=array_module, device=device, shape=shape, name=name)
     _validate_surface_aliases(inputs, outputs, mol=mol, ustm=ustm)
-    # RunConfig.mynn_sfclay_psih_zolzt (default off), as the scalar launch.
+    # RunConfig.mynn_sfclay_psih_zolzt (FQ3), as the scalar launch.
     defines = mynn_surface_defines(variant, psih_zolzt)
     kernel = mynn_surface_kernel(variant, psih_zolzt=psih_zolzt)
     arrays = tuple(inputs[name] for name in MYNN_SURFACE_INPUTS) + (mol, ustm)

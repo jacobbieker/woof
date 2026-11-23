@@ -28,6 +28,10 @@ from woof import correct_mode
 from woof.config import RunConfig, validate_run_config
 
 ROOT = Path(__file__).resolve().parents[1]
+#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ4
+_FQ = ("FQ1", "FQ2", "FQ3", "FQ4")
+_FQ_KEYS = ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner",
+            "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking")
 
 # -------------------------------------------------------------- the switch --
 def test_exact_mode_authors_every_key_off():
@@ -45,7 +49,8 @@ def test_exact_mode_authors_every_key_off():
                             "noahmp_melt_reset_esat": False,
                             "mynn_fixes_v61": False,
                             "mynn_boulac_down_sign": False,
-                            "pbl_boulac_down_sign": False}
+                            "pbl_boulac_down_sign": False,
+                            **dict.fromkeys(_FQ_KEYS, False)}
     assert res.applied == ()
     assert "forced_by" not in res.receipt()
 
@@ -63,8 +68,9 @@ def test_correct_mode_sets_every_registered_key():
                             "noahmp_melt_reset_esat": True,
                             "mynn_fixes_v61": True,
                             "mynn_boulac_down_sign": True,
-                            "pbl_boulac_down_sign": True}
-    assert res.receipt()["applied_findings"] == ["WB1", "WB4", "WB5", "HN1", "SN1", "MY1", "ML1"]
+                            "pbl_boulac_down_sign": True,
+                            **dict.fromkeys(_FQ_KEYS, True)}
+    assert res.receipt()["applied_findings"] == ["WB1", "WB4", "WB5", "HN1", "SN1", "MY1", "ML1", *_FQ]
 
 
 def test_correct_skip_drops_one_correction():
@@ -80,7 +86,8 @@ def test_correct_skip_drops_one_correction():
                             "noahmp_melt_reset_esat": True,
                             "mynn_fixes_v61": True,
                             "mynn_boulac_down_sign": True,
-                            "pbl_boulac_down_sign": True}
+                            "pbl_boulac_down_sign": True,
+                            **dict.fromkeys(_FQ_KEYS, True)}
     assert res.receipt()["physics.correct_skip"] == ["WB5"]
 
 
@@ -91,7 +98,7 @@ def test_the_default_is_correct_in_a_default_process():
         pytest.skip("strict process; see the strict subprocess test")
     assert correct_mode.PHYSICS_MODE_DEFAULT == "correct"
     assert correct_mode.resolve() == correct_mode.resolve("correct")
-    assert correct_mode.resolve(None, ["WB4"]).applied == ("WB1", "WB5", "HN1", "SN1", "MY1", "ML1")
+    assert correct_mode.resolve(None, ["WB4"]).applied == ("WB1", "WB5", "HN1", "SN1", "MY1", "ML1", *_FQ)
 
 
 def test_strict_wrf_mode_forces_exact_and_records_it():
@@ -203,7 +210,7 @@ def test_wb5_spans_wsm6_and_wdm6_and_a_one_key_arm_reads_as_itself():
                     **{**correct_mode.resolve("correct").settings,
                        "wsm6_conservative_surface": False})
     receipt = correct_mode.resolution_of(arm).receipt()
-    assert receipt["applied_findings"] == ["WB1", "WB4", "WB5", "HN1", "SN1", "MY1", "ML1"]
+    assert receipt["applied_findings"] == ["WB1", "WB4", "WB5", "HN1", "SN1", "MY1", "ML1", *_FQ]
     assert receipt["keys"] == {"thompson_cloud_surface_booking": True,
                                "ntiedtke_dry_mass_coupling": True,
                                "wdm6_conservative_surface": True,
@@ -214,7 +221,8 @@ def test_wb5_spans_wsm6_and_wdm6_and_a_one_key_arm_reads_as_itself():
                             "noahmp_melt_reset_esat": True,
                             "mynn_fixes_v61": True,
                             "mynn_boulac_down_sign": True,
-                            "pbl_boulac_down_sign": True}
+                            "pbl_boulac_down_sign": True,
+                            **dict.fromkeys(_FQ_KEYS, True)}
 
 
 def test_run_receipt_names_each_domains_mode():
@@ -420,7 +428,8 @@ def test_every_carrier_scheme_is_a_shipped_scheme():
     shipped = {"mp_physics": set(_shipped("microphysics")),
                "cu_physics": set(_shipped("cumulus")),
                "sf_surface_physics": set(_shipped("land_surface")),
-               "bl_pbl_physics": set(_shipped("pbl"))}
+               "bl_pbl_physics": set(_shipped("pbl")),
+               "sf_sfclay_physics": set(_shipped("surface_layer"))}
     for c in correct_mode.CORRECTIONS:
         assert c.carriers, c.finding
         for selector, schemes in c.carriers:
@@ -543,7 +552,8 @@ def test_my1_a_default_mynn_run_limits_dew_instead_of_deleting_it():
     assert default.mynn_fixes_v61 is True
     assert pbl_fixes_active(default) and sfclay_fixes_active(default)
     # MY1 and ML1 (the BouLac length sign) both apply on a default MYNN run.
-    assert correct_mode.in_effect(default)["findings"][-2:] == ["MY1", "ML1"]
+    # (FQ3, the fork's MYNN surface-layer correction, follows them.)
+    assert correct_mode.in_effect(default)["findings"][-3:] == ["MY1", "ML1", "FQ3"]
     assert correct_mode.uncorrected(default) == []
     exact = RunConfig(**_MYNN, **correct_mode.resolve("exact").settings)
     assert exact.mynn_fixes_v61 is False and not pbl_fixes_active(exact)

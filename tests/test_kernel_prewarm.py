@@ -637,3 +637,19 @@ def test_les_nest_column_drops_inflow_perturbation():
     assert column.inflow_perturbation is False
     assert column.nested is False and column.specified is True
     assert column.dx == run.dx and column.nz == run.nz
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+def test_the_booking_variants_the_run_launches_are_warmed(mode):
+    """FQ1 (GF) and FQ4 (Noah UA) compile their own units where they are on."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+    run = validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
+        cu_physics=3, cudt_minutes=0.0, sf_surface_physics=2, sf_sfclay_physics=1, bl_pbl_physics=1,
+        **correct_mode.resolve(mode).settings))
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run),))
+    labels = {job[0] for job in kernel_prewarm._variant_jobs(experiment, ("gf", "noah_ua"))}
+    on = mode == "correct"
+    assert any("GF_DEEP_EVAP_BOOKING=1" in label for label in labels) is on
+    assert ("noah_ua[NOAH_SMC_FLOOR_BOOKING=1]" in labels) is on
