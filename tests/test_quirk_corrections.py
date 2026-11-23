@@ -240,6 +240,12 @@ def test_the_default_is_correct_mode():
     from woof.hex.mpas_seaice import column_v842
     assert column_v842.corrections({}) == set(column_v842.CORRECTIONS)
     assert column_v842.corrections({qc.UMBRELLA: "none", "woof_v842_corrections": "zsal_solve"}) == {"zsal_solve"}
+    # under the mode's default, the names given are the whole set: naming
+    # fewer (or none) turns the others off; exact mode adds none
+    assert column_v842.corrections({"woof_v842_corrections": "zsal_solve"}) == {"zsal_solve"}
+    assert column_v842.corrections({"woof_v842_corrections": ()}) == frozenset()
+    assert column_v842.corrections({qc.MODE_KEY: "exact"}) == frozenset()
+    assert column_v842.corrections({qc.UMBRELLA: "all", "woof_v842_corrections": ()}) == set(column_v842.CORRECTIONS)
     assert qc.hex_undriven_species_boundary(argparse.Namespace(lbc_dir="x")) == "wrf-flow-dependent"
     assert qc.hex_undriven_species_boundary(argparse.Namespace(lbc_dir=None)) is None
 

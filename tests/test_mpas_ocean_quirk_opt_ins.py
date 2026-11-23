@@ -1,9 +1,11 @@
 """The corrected opt-ins for v8.4.2's ocean quirks, each tested on its own.
 
-The defaults keep v8.4.2's words (or its refusal) and stay gated word for word
+Exact mode keeps v8.4.2's words (or its refusal) and stays gated word for word
 against the oracles (test_mpas_ocean_land_ice_parity.py,
 test_mpas_ocean_tendency_parity.py, test_mpas_ocean_split_step_parity.py).
-These tests cover the corrected paths, each against a numpy reference written
+Correct mode (the default) takes every corrected path; the GPU tests here run
+the configs in exact mode and name each corrected path, so each is seen on
+its own.  These tests cover the corrected paths, each against a numpy reference written
 from the physics, evaluated in float64 in the kernels' operation order (one
 IEEE rounding per operation, as the kernels' explicit round-to-nearest
 macros), so the comparison is word for word:
@@ -13,7 +15,7 @@ macros), so the comparison is word for word:
   salinity (v8.4.2 passes its temperature);
 * ``woof_bottom_drag_dry_edges = 'skip'``: the explicit bottom drag and the
   Rayleigh bottom friction leave a dry edge (maxLevelEdgeTop = 0) alone
-  (v8.4.2 reads level 0, outside the array; the default refuses the mesh);
+  (v8.4.2 reads level 0, outside the array; exact mode refuses the mesh);
 * ``woof_rayleigh_bottom_friction = 'corrected'``: the bottom friction takes
   ``config_Rayleigh_bottom_damping_coeff`` and runs whenever
   ``config_Rayleigh_bottom_friction`` is on (v8.4.2 takes the interior
@@ -21,8 +23,8 @@ macros), so the comparison is word for word:
 
 THE BREAKAGES THESE PREVENT
 ---------------------------
-1. A corrected path that is wrong, or that leaks into the default: each is
-   checked against its reference, and the default against v8.4.2's words.
+1. A corrected path that is wrong, or that leaks into exact mode: each is
+   checked against its reference, and exact mode against v8.4.2's words.
 2. A corrected path that differs between numerics modes: the GPU tests also
    run in fast, strict and wrf_exact child processes.
 3. An unknown opt-in value run silently: it is refused by name.
@@ -46,6 +48,7 @@ def _isomip_run(salinity_opt_in):
     from woof.hex.mpas_ocean import eos_v842
     from woof.verify import mpas_ocean_land_ice_oracle as oo
     case = next(c for c in oo.cases("r8") if c["name"] == "standalone_isomip_halo_configured")
+    case = dict(case, config=dict(case["config"], config_physics_mode="exact"))
     if salinity_opt_in is not None:
         case = dict(case, config=dict(case["config"], woof_land_ice_isomip_freezing_salinity=salinity_opt_in))
     return case, oo.run_gpu(case), eos_v842._configs(case["config"])
@@ -149,7 +152,8 @@ def _run(mesh, fields, configs):
     fo.vel_forcing_tend(mesh={k: cp.asarray(v) for k, v in mesh.items()},
                         surface_flux_attenuation_coefficient=cp.ones(N_CELLS, dtype=cp.float64),
                         surface_stress=cp.zeros(N_EDGES, dtype=cp.float64), tend=tend,
-                        configs={"config_disable_vel_surface_stress": True, **configs}, **dev)
+                        configs={"config_disable_vel_surface_stress": True, "config_physics_mode": "exact",
+                                 **configs}, **dev)
     return cp.asnumpy(tend)
 
 
