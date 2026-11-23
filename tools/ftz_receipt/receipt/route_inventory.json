@@ -8574,7 +8574,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1193,
+      "line": 1194,
       "column": 24,
       "surface": "package",
       "constructor": "_cc.compile_using_nvrtc",
@@ -8596,7 +8596,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy_device.py",
-      "line": 47,
+      "line": 51,
       "column": 17,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
