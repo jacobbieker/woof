@@ -2798,6 +2798,9 @@ class _Rewriter:
                 break
         if idx is None:
             return None
+        if cursor.kind.name == "CONVERSION_FUNCTION":
+            # `explicit operator char*()`: the type follows `operator`
+            return tokens[idx + 1].extent.start.offset if idx + 1 < len(tokens) else None
         i = 0
         if tokens and tokens[0].spelling == "template":
             depth = 0

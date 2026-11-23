@@ -537,7 +537,10 @@ class SpaceAnalysis:
             elif kind == K.RETURN_STMT and collect_returns:
                 children = list(node.get_children())
                 if children:
-                    s = self.space(children[0], env, lvalue=True)
+                    # a returned reference names an object (its space); a returned
+                    # pointer is a value: the space it points into (``return (char*)q.p``
+                    # on a struct whose field names its space)
+                    s = self.space(children[0], env, lvalue=_indirection(fn.result_type) != "ptr")
                     if s not in (None, NULL):
                         returned.add(s)
             stack.extend(reversed(list(node.get_children())))
@@ -1019,6 +1022,10 @@ class SpaceAnalysis:
                 return DEVICE           # *table: its first entry
             if lvalue and _operator(e, children) in ("-", "+", "!", "~"):
                 return THREAD           # a prvalue: a temporary binds the reference
+            if children and _operator(e, children) == "*" and _pointer_field(children[0]):
+                # `*p` on a pointer field (implicit this->p): the field's pointee space,
+                # not the space of the object holding it
+                return self.space(children[0], env)
             return self.space(children[0], env, lvalue=True) if children else None
         if kind == "BINARY_OPERATOR":
             if e.type.get_canonical().kind.name == "DEPENDENT" and not lvalue \
@@ -1058,6 +1065,14 @@ class SpaceAnalysis:
             if ref is not None and self._generic_method(ref):
                 # `a(i)` on a space-generic struct: a reference into its data
                 return self.gspace(self._call_object(e), env)
+            if len(children) == 2 and next(iter(e.get_tokens()), None) is not None \
+                    and next(iter(e.get_tokens())).spelling == "*":
+                # `*q` in a class template where an operator* is in scope (GFReal's): clang
+                # keeps the dereference an unresolved operator call; a raw pointer operand
+                # dereferences to the memory it points into
+                operand = [c for c in children if c.kind.name not in ("DECL_REF_EXPR", "OVERLOADED_DECL_REF")]
+                if len(operand) == 1 and _indirection(operand[0].type) == "ptr":
+                    return self.space(operand[0], env)
             info = self.resolve_call(e)
             if info is not None and info.returns:
                 args = _call_arguments(e)
@@ -1108,6 +1123,17 @@ def field_key(field):
     (whose FIELD_DECLs have their own USRs): owner name and field name."""
     parent = field.semantic_parent
     return ((parent.spelling.split("<", 1)[0] if parent is not None else ""), field.spelling)
+
+
+def _pointer_field(e):
+    """``e`` (through parentheses and implicit conversions) names a pointer field."""
+    while e.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR", "IMPLICIT_CAST_EXPR"):
+        kids = list(e.get_children())
+        if len(kids) != 1:
+            return False
+        e = kids[0]
+    ref = e.referenced if e.kind.name == "MEMBER_REF_EXPR" else None
+    return ref is not None and ref.kind.name == "FIELD_DECL" and _indirection(ref.type) == "ptr"
 
 
 def _operator(e, children):
