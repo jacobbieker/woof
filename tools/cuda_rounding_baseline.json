@@ -27383,7 +27383,7 @@
    },
    "source_sha256": "ccef701f1f1ddc3fda00b3e023a28874c32e62e1b63b5a02adebd7de47bb51f6"
   },
-  "literal:woof/core/gfl_873b414.py:43867": {
+  "literal:woof/core/gfl_873b414.py:43895": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
