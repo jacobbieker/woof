@@ -79,9 +79,11 @@ class RunConfig:
     def __post_init__(self):
         # woof_quirk_corrections = 'all' / 'none' (woof.quirk_corrections):
         # every RunConfig correction on / off, however the RunConfig was
-        # built.  A key is read only where its scheme runs
-        # (correct_mode.KEY_SCOPE).  The TOML readers refuse an explicit
-        # conflicting key before this point (apply_run_corrections).
+        # built; under 'none' a key passed by name wins, as on the TOML
+        # route (_named_corrections_win_under_none restores it after this).
+        # A key is read only where its scheme runs (correct_mode.KEY_SCOPE).
+        # The TOML readers refuse a key set false next to 'all' before this
+        # point (apply_run_corrections).
         if self.woof_quirk_corrections in ("all", "none"):
             from woof.quirk_corrections import run_corrections_under
             for key, value in run_corrections_under(
@@ -2686,6 +2688,31 @@ class RunConfig:
     # Correct-mode finding FQ6: on by default, off in physics.mode = 'exact'.
     rrtmg_lw_model_top: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
+
+def _named_corrections_win_under_none(init):
+    """RunConfig.__init__, wrapped so that under ``woof_quirk_corrections =
+    'none'`` a correction key passed by name keeps its value, as on the TOML
+    route (woof.quirk_corrections.apply_run_corrections): 'none' turns off
+    every correction not named.  __post_init__ cannot tell a key passed
+    True from its default (True in correct mode), so the names are read
+    here.  ``dataclasses.replace`` passes every field by name, so a
+    replace() of a resolved RunConfig keeps its values and takes the
+    changed key."""
+    import functools
+
+    @functools.wraps(init)
+    def __init__(self, *args, **kwargs):
+        init(self, *args, **kwargs)
+        if self.woof_quirk_corrections == "none":
+            from woof.quirk_corrections import keys
+            for key in keys("wrf"):
+                if key in kwargs:
+                    object.__setattr__(self, key, kwargs[key])
+    return __init__
+
+
+RunConfig.__init__ = _named_corrections_win_under_none(RunConfig.__init__)
 
 
 def _validate_solar_tsi(cfg) -> None:

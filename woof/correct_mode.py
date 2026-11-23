@@ -399,12 +399,29 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
 #: which the key is still not read, because that code path has no build of
 #: the correction.  A finding whose carrier runs there is listed as
 #: uncorrected, never as applied.
+#: A launch setting, not a RunConfig field, that KEY_UNREAD reads as a
+#: selector: whether this process couples WRF-Hydro
+#: (woof.wrf_hydro_route.configured).  A mapping may state it; otherwise
+#: the launch's own setting is read.
+WRF_HYDRO_SELECTOR = "wrf_hydro_coupled"
+
+
+def _wrf_hydro_coupled() -> bool:
+    from woof.wrf_hydro_route import configured
+    return configured() is not None
+
+
 KEY_UNREAD: Mapping[str, tuple[str, tuple[object, ...]]] = {
     "mynn_boulac_down_sign": ("bl_mynn_version", ("wrf_471", "wrf_480")),
     # With BEP/BEM, WRF's YSU takes its surface heat from the urban sources
     # (bepswitch = 1), so the HFX/pi(1) correction would reach only the PBL
     # diagnosis: the key is not read there.
     "ysu_surface_heat_exner": ("sf_urban_physics", (2, 3)),
+    # A WRF-Hydro coupling does not carry Noah's floor booking (its
+    # drainage may go negative): woof.core.physics keeps FQ4 off there, so
+    # the receipt lists the finding as uncorrected and the echo does not
+    # bind the key.
+    "noah_smc_floor_booking": (WRF_HYDRO_SELECTOR, (True,)),
 }
 
 
@@ -415,6 +432,8 @@ def _key_unread(key: str, values) -> bool:
     selector, names = unread
     value = (values.get(selector) if isinstance(values, Mapping)
              else getattr(values, selector, None))
+    if value is None and selector == WRF_HYDRO_SELECTOR:
+        value = _wrf_hydro_coupled()
     return value in names
 
 

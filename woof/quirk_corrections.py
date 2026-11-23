@@ -363,9 +363,9 @@ def run_corrections_due(cfg) -> tuple[str, ...]:
 def run_corrections_under(umbrella: str) -> dict:
     """Every RunConfig correction's value under an explicit ``umbrella``:
     all true under 'all', all false under 'none' (RunConfig.__post_init__
-    writes them for a RunConfig built in Python; the TOML readers resolve
-    'none' first, so an individual key set next to it wins there; each is
-    read only where its scheme runs)."""
+    writes them for a RunConfig built in Python, where a key passed by name
+    next to 'none' then wins, as it does on the TOML route, which resolves
+    'none' first; each is read only where its scheme runs)."""
     umbrella_value(umbrella)
     return {key: _wanted(BY_KEY[key], umbrella) for key in keys("wrf")}
 

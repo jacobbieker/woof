@@ -309,6 +309,50 @@ def test_all_and_none_set_the_run_corrections():
     assert run.ysu_surface_heat_exner is False
 
 
+def test_a_key_named_next_to_none_wins_in_python_as_in_toml():
+    """RunConfig built in Python (or dataclasses.replace) agrees with the
+    TOML route: 'none' turns off every correction not named."""
+    from dataclasses import replace
+    schemes = dict(cu_physics=3, cudt_minutes=0.0, moist=True, bl_pbl_physics=1, sf_sfclay_physics=1)
+    named = {"gf_deep_rain_evaporation_booking": True}
+    toml = validate_run_config(_base(**qc.apply_run_corrections({qc.UMBRELLA: "none", **schemes, **named})))
+    python = validate_run_config(_base(woof_quirk_corrections="none", **schemes, **named))
+    for key in qc.keys("wrf"):
+        assert getattr(python, key) is getattr(toml, key), key
+    assert python.gf_deep_rain_evaporation_booking is True and python.ysu_surface_heat_exner is False
+    assert qc.run_reads(python, "gf_deep_rain_evaporation_booking")
+    # nothing named: every one off
+    bare = _base(woof_quirk_corrections="none", **schemes)
+    assert not any(getattr(bare, key) for key in qc.keys("wrf"))
+    # replace() of a resolved 'none' RunConfig takes the changed key and keeps the rest
+    turned = replace(bare, ysu_surface_heat_exner=True)
+    assert turned.ysu_surface_heat_exner is True and turned.gf_deep_rain_evaporation_booking is False
+    assert replace(turned, nx=10).ysu_surface_heat_exner is True
+    # 'all' is unchanged: every one on
+    assert all(getattr(_base(woof_quirk_corrections="all", **schemes), key) for key in qc.keys("wrf"))
+
+
+def test_a_wrf_hydro_coupling_does_not_read_the_noah_floor_booking(monkeypatch):
+    """FQ4 is off under a WRF-Hydro coupling (woof.core.physics), so the
+    receipt lists it uncorrected and the echo does not bind it."""
+    from woof import correct_mode
+    from woof.io.restart import configuration_echo
+    from woof.wrf_hydro_route import ENV_NAMELIST
+    run = validate_run_config(_base(**_WRF_SCHEMES["noah_smc_floor_booking"]))
+    monkeypatch.delenv(ENV_NAMELIST, raising=False)
+    assert qc.run_reads(run, "noah_smc_floor_booking")
+    assert "FQ4" not in correct_mode.uncorrected(run)
+    assert configuration_echo(run).get("noah_smc_floor_booking") is True
+    monkeypatch.setenv(ENV_NAMELIST, "hydro.namelist")
+    assert run.noah_smc_floor_booking is True
+    assert not qc.run_reads(run, "noah_smc_floor_booking")
+    assert "FQ4" in correct_mode.uncorrected(run)
+    assert "noah_smc_floor_booking" not in configuration_echo(run)
+    # a mapping that states the coupling is read as stated
+    values = {"sf_surface_physics": 2, correct_mode.WRF_HYDRO_SELECTOR: False}
+    assert correct_mode.key_in_scope("noah_smc_floor_booking", values)
+
+
 def test_an_explicit_umbrella_refuses_a_conflicting_key_by_name():
     with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
         qc.apply_run_corrections({qc.UMBRELLA: "all", "bl_pbl_physics": 1, "ysu_surface_heat_exner": False})
