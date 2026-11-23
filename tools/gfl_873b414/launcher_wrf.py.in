@@ -37,25 +37,35 @@ def _module(device):
     import cupy as cp
     from woof.core.kernels import compile_no_ftz
     with cp.cuda.Device(device):
-        _spill_heap()
         return compile_no_ftz(cuda_source(), module_key=MODULE_KEY, filename='gfl_873b414_lanes.cu', device=device)
 
 
 MODULE_KEY = 'woof.core.gfl_873b414.lanes'
 
 
-def _spill_heap():
-    """The device heap a deep column spills to (GFWorkspace.allocate), set before the first launch."""
+def _spill_pool(device, spill_bytes, blocks):
+    """The spill pool a deep column continues in (GFWorkspace.allocate), kept for the run.
+
+    Upstream 1.1.7 spilled to the CUDA device heap (in-kernel malloc, 256 MiB limit);
+    Metal has no device heap, so the launch passes this host-allocated pool on every
+    backend instead. Entries are lane-interleaved slabs of ``spill_bytes`` per lane;
+    a thread takes one the first time one of its columns spills and keeps it for the
+    launch, so ``blocks`` slabs (one entry per launched thread) can never run out and
+    SPILL_POOL_BYTES bounds a large launch, as the heap limit did. The pool changes
+    no output word: placement only.
+    """
     import cupy as cp
-    import sys
-    limit = cp.cuda.runtime.cudaLimitMallocHeapSize
-    if cp.cuda.runtime.deviceGetLimit(limit) >= SPILL_HEAP_BYTES:
-        return
-    try:
-        cp.cuda.runtime.deviceSetLimit(limit, SPILL_HEAP_BYTES)
-    except cp.cuda.runtime.CUDARuntimeError as error:
-        print(f'woof: GFL spill heap stays at {cp.cuda.runtime.deviceGetLimit(limit):,} bytes ({error}); a '
-              'column deeper than its scratch share uses it', file=sys.stderr)
+    per_slab = spill_bytes * LANES
+    slabs = max(1, min(int(blocks), SPILL_POOL_BYTES // per_slab))
+    held = _SPILL.get(device)
+    if held is None or held[0] != spill_bytes or held[1] < slabs:
+        _SPILL.pop(device, None)
+        with cp.cuda.Device(device):
+            held = _SPILL[device] = (spill_bytes, slabs, cp.empty(slabs * per_slab, dtype=cp.uint8))
+    return held[2], held[1] * LANES
+
+
+_SPILL = {}
 
 
 @lru_cache(maxsize=None)
@@ -158,21 +168,27 @@ def launch_lane_columns(fields, *, ncol, nz, saved_fct_error=None, vertical=None
     capacity = _share_bytes(levels, vertical[5] - vertical[4] + 1)
     kernel = _module(device).get_function('gfl_lane_columns')
     blocks, scratch = _column_scratch(device, kernel, -(-ncol // LANES), capacity)
+    spill_bytes = SPILL_SHARES * capacity
+    spill, entries = _spill_pool(device, spill_bytes, blocks)
     table = cp.asarray(np.asarray(pointers + strides, dtype=np.uint64))
     kernel((blocks,), (LANES,), (np.int64(ncol), table[:len(FIELDS)], table[len(FIELDS):], scratch,
-           np.uint64(capacity), np.uint64(SPILL_SHARES * capacity), diagnostics, highwater,
-           _vertical_words(device, vertical), saved_fct_error, _next_column(device)))
+           np.uint64(capacity), np.uint64(spill_bytes), diagnostics, highwater,
+           _vertical_words(device, vertical), saved_fct_error, _next_column(device), spill, np.uint64(entries)))
     return {'diagnostics': diagnostics, 'scratch_highwater': highwater, 'saved_fct_error': saved_fct_error,
             'tables': table, 'blocks': blocks, 'share_bytes': capacity}
 
 
 def _next_column(device):
-    """The launch's column counter (each warp takes the next 32 columns), zeroed on the stream before the launch."""
+    """The launch's counters, zeroed on the stream before the launch.
+
+    Word 0 is the column counter (each warp takes the next 32 columns), word 1 the
+    spill pool's (a thread's first spill takes the next entry).
+    """
     import cupy as cp
     held = _NEXT.get(device)
     if held is None:
         with cp.cuda.Device(device):
-            held = _NEXT[device] = cp.zeros(1, dtype=cp.uint64)
+            held = _NEXT[device] = cp.zeros(2, dtype=cp.uint64)
     held.fill(0)
     return held
 
@@ -193,13 +209,13 @@ LANES = 128
 CHARACTER_BYTES = 256
 #: Scratch sizing: one formula with the admission (gfl_lanes.scratch_bytes,
 #: priced by woof.core.preflight.gf_column_workspace_bytes). A column that needs
-#: more than its share continues in its slab's spill block of SPILL_SHARES shares
-#: per lane, so it stays exact and running.
+#: more than its share continues in a spill entry of SPILL_SHARES shares from
+#: the launch's spill pool (_spill_pool), so it stays exact and running.
 from woof.core.gfl_lanes import (SCRATCH_CAP_BYTES, SHARE_BYTES_PER_LEVEL, SHARE_BYTES_FIXED,  # noqa: E402,F401
                                   scratch_blocks as _scratch_blocks, share_bytes as _lane_share_bytes)
 SPILL_SHARES = 2
-#: The device heap the spill blocks come from.
-SPILL_HEAP_BYTES = 256 << 20
+#: The most the spill pool holds (upstream 1.1.7's device-heap limit for the same spill).
+SPILL_POOL_BYTES = 256 << 20
 _SCRATCH = {}
 
 

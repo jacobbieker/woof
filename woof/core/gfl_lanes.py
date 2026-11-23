@@ -48,7 +48,7 @@ SCRATCH_CAP_BYTES = 4 << 30
 #: captured WRF v4.8.0 CONUS 12 km calls used 42,928 bytes at 50 storage levels; cut to 16,
 #: 26, 36 and 50 levels they need 14,784, 24,112, 30,320 and 42,736 (about 820 per level),
 #: against shares of 32,768, 43,008, 53,248 and 67,584. A column that needs more continues
-#: in its slab's spill block, so it stays exact and running.
+#: in a spill entry of the launch's spill pool, so it stays exact and running.
 SHARE_BYTES_PER_LEVEL = 1024
 SHARE_BYTES_FIXED = 16384
 
@@ -172,10 +172,13 @@ _WORKSPACE_NEW = '''struct GFWorkspace {
   char* data;unsigned long long capacity,position,highwater;unsigned int diagnostics;GFReal row_dx_first;
   // Mutable SAVE, including the early return: WRF v4.8.0 phys/GFL 873b414 module_cu_gfl_deep.F90:2641-2705
   bool fct1d3_error;
-  // A column whose need passes its share continues in its slab's spill block (spill_bytes per lane, lane-interleaved
-  // like the share, made by the first lane that needs it and freed when the block ends): the share is sized to what
-  // columns use, the spill keeps a deeper column exact and running.
-  char** spill;unsigned long long spill_bytes;
+  // A column whose need passes its share continues in a spill entry of spill_bytes, lane-interleaved like the share:
+  // entry e is word e%GF_LANES of slab e/GF_LANES of the launch's spill pool (host-allocated, spill_entries entries).
+  // A thread takes the next entry (spill_next) the first time one of its columns spills and keeps it (spill_entry,
+  // e+1, 0 = none) for the launch. Metal has no device heap, so the pool stands in for an in-kernel malloc on every
+  // backend: placement only, the same words. The share is sized to what columns use, the spill keeps a deeper column
+  // exact and running.
+  char* spill_pool;unsigned long long spill_bytes,spill_entries;unsigned long long* spill_next;unsigned long long spill_entry;
   // Character arrays are read bytewise: contiguous per thread.
   char* bytes;unsigned long long bcapacity,bposition;unsigned int lane;
   __device__ void* allocate(unsigned long long n){
@@ -186,13 +189,14 @@ _WORKSPACE_NEW = '''struct GFWorkspace {
 #else
       if(position<capacity)position=capacity;
       if(position+n>capacity+spill_bytes){gf_trap();return nullptr;}
-      char* block=*(char* volatile*)spill;
-      if(block==nullptr){
-        char* fresh=(char*)malloc(spill_bytes*GF_LANES);if(fresh==nullptr){gf_trap();return nullptr;}
-        block=(char*)atomicCAS((unsigned long long*)spill,0ULL,(unsigned long long)fresh);
-        if(block==nullptr)block=fresh;else free(fresh);
+      if(spill_entry==0ULL){
+        const unsigned long long taken=atomicAdd(spill_next,1ULL);
+        if(taken>=spill_entries){gf_trap();return nullptr;}
+        spill_entry=taken+1ULL;
       }
-      void* result=block+4ULL*lane+(position-capacity)*GF_LANES;position+=n;highwater=gf_max(highwater,position);return result;
+      const unsigned long long entry=spill_entry-1ULL;
+      char* block=spill_pool+(entry/GF_LANES)*spill_bytes*GF_LANES+4ULL*(entry%GF_LANES);
+      void* result=block+(position-capacity)*GF_LANES;position+=n;highwater=gf_max(highwater,position);return result;
 #endif
     }
     void* result=data+position*GF_LANES;position+=n;highwater=gf_max(highwater,position);return result;
@@ -306,8 +310,8 @@ __device__ void gfl_column(long long col,const unsigned long long* ptrs,const un
  }
 }
 #ifndef GF_HOST_WITNESS
-// A block is one slab of the scratch (blockDim = GF_LANES; thread t is lane t of the slab and keeps it):
-// its threads share the slab's share and spill block. Each warp takes the next 32 consecutive columns from
+// A block is one slab of the scratch (blockDim = GF_LANES; thread t is lane t of the slab and keeps it, and
+// its spill entry once it takes one). next[0] is the column counter, next[1] the spill pool's. Each warp takes the next 32 consecutive columns from
 // the launch's counter until none are left, so a warp held up by convecting columns does not leave the
 // card idle behind it (a fixed column-per-slot round left the last round a few blocks wide). Columns are
 // independent; each executes the complete source order from a fresh workspace, so which warp runs a
@@ -315,10 +319,8 @@ __device__ void gfl_column(long long col,const unsigned long long* ptrs,const un
 extern "C" __global__ void __launch_bounds__(GF_LANES, GFL_MIN_BLOCKS) gfl_lane_columns(long long ncol,
  const unsigned long long* ptrs,const unsigned long long* strides,char* scratch,unsigned long long capacity,
  unsigned long long spill_bytes,unsigned int* diagnostics,unsigned long long* highwater,const int* vertical,
- unsigned int* saved_fct_error,unsigned long long* next){
- __shared__ char* spill;
- if(threadIdx.x==0)spill=nullptr;
- __syncthreads();
+ unsigned int* saved_fct_error,unsigned long long* next,char* spill_pool,unsigned long long spill_entries){
+ unsigned long long spill_entry=0;
  const unsigned int lane=threadIdx.x, warp_lane=threadIdx.x&31u;
  char* slab=scratch+(unsigned long long)blockIdx.x*(capacity+GF_CHARACTER_BYTES)*GF_LANES;
  for(;;){
@@ -328,22 +330,22 @@ extern "C" __global__ void __launch_bounds__(GF_LANES, GFL_MIN_BLOCKS) gfl_lane_
    if(first>=(unsigned long long)ncol)break;
    const long long col=(long long)first+warp_lane;
    if(col<ncol){
-     GFWorkspace workspace{slab+4ULL*lane,capacity,0,0,0,GFReal(0.0f),false,&spill,spill_bytes,
-       slab+capacity*GF_LANES+(unsigned long long)lane*GF_CHARACTER_BYTES,GF_CHARACTER_BYTES,0,lane};
+     GFWorkspace workspace{slab+4ULL*lane,capacity,0,0,0,GFReal(0.0f),false,spill_pool,spill_bytes,spill_entries,
+       next+1,spill_entry,slab+capacity*GF_LANES+(unsigned long long)lane*GF_CHARACTER_BYTES,GF_CHARACTER_BYTES,0,lane};
      gfl_column(col,ptrs,strides,workspace,diagnostics,highwater,vertical,saved_fct_error);
+     spill_entry=workspace.spill_entry;
    }
    __syncwarp();
  }
- __syncthreads();
- if(threadIdx.x==0&&spill!=nullptr)free(spill);
 }
 #else
 extern "C" void gfl_lane_columns_host(long long ncol,const unsigned long long* ptrs,const unsigned long long* strides,
  char* scratch,unsigned long long capacity,unsigned long long spill_bytes,unsigned int* diagnostics,
  unsigned long long* highwater,const int* vertical,unsigned int* saved_fct_error,unsigned long long*){
- char* spill=nullptr;char characters[GF_CHARACTER_BYTES];
+ char characters[GF_CHARACTER_BYTES];
  for(long long c=0;c<ncol;c++){
-   GFWorkspace workspace{scratch,capacity,0,0,0,GFReal(0.0f),false,&spill,spill_bytes,characters,GF_CHARACTER_BYTES,0,0};
+   GFWorkspace workspace{scratch,capacity,0,0,0,GFReal(0.0f),false,nullptr,spill_bytes,0,nullptr,0,characters,
+     GF_CHARACTER_BYTES,0,0};
    gfl_column(c,ptrs,strides,workspace,diagnostics,highwater,vertical,saved_fct_error);
  }
 }
