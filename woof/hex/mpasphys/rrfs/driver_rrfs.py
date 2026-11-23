@@ -493,9 +493,10 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         # (exact_mode_defaults: config_tempo_version v3.0.3, the TEMPO 9adf9ef both RRFS pins carry).
         # THE BREAKAGE THIS PREVENTS: the RRFS landing gate and every bitwise rerun hand hex the native deck's own
         # namelist, which has no config_tempo_version, so they ran the v3.2.5 default against native's v3.0.3.
+        from ..version_defaults import defaulted
         for key, value in spec.get("exact_mode_defaults", {}).items():
             if key not in named:
-                options[key] = value
+                options[key] = defaulted(key, value, where=f"{table_key} exact_mode_defaults")
     suite = options["config_physics_suite"].rstrip()
     native_suite = spec["suite_routes"].get(suite, suite)
     if native_suite not in spec["suites"]:
@@ -645,16 +646,20 @@ def _default_mynn_version(versions, selectors, chosen, library, mode="correct") 
       native library runs the 44c0849 pin there, so the run is that pin and its receipt and start-up line say so.
       A run that names the version itself on such a slot is still refused (``resolve_namelist``)."""
     default = versions.get("default", "pinned")
-    if library or default == "pinned" or mode == "exact":
+    if default == "pinned":
         return "pinned"
     row = versions["versions"][default]
     overlays = {(slot, scheme) for slot, entries in row.get("cuda_entries", {}).items() for scheme in entries}
     needed = {(slot, scheme) for slot, scheme in [*map(tuple, row.get("requires", ())), *overlays]
               if selectors.get(slot) == scheme and chosen[slot] != Backend.OFF}
-    if (not needed & overlays or not needed <= overlays
-            or any(chosen[slot] != Backend.HEX_CUDA for slot, _ in needed)):
+    if not needed & overlays:
         return "pinned"
-    return default
+    # A MYNN slot the version overlays runs, so the version is a choice this run did not name (version_defaults).
+    from ..version_defaults import defaulted
+    if (library or mode == "exact" or not needed <= overlays
+            or any(chosen[slot] != Backend.HEX_CUDA for slot, _ in needed)):
+        return defaulted(versions["selector"], "pinned", where="_default_mynn_version")
+    return defaulted(versions["selector"], default, where="_default_mynn_version")
 
 
 #: The MYNN slots a suite version can overlay, and the submodule each one ports.
