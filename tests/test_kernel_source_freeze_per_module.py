@@ -963,8 +963,9 @@ BASELINE_PINNED: dict[str, str] = {
     # Conditional number/volume, density bins, fallout and diagnostics;
     # 25 oracle CSVs and both-mode state/tendency hashes reproduced at 2f349b417.
     # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
     "thompson_aerosol_warm":
-        '900e26aa8314c8687173078353ef413052c2f888c2638234600bb9c10e70e765',
+        '74b24cd3c2c11f7a2f1ee22e6d5d571c9b835c42cf829a3594ed9dbe8674905a',
     # 02cfd5301 feat(les): km_opt=2 restart carrier, lateral-boundary arm, TKE budget
     "tke_budget":
         "c7f6dc37f15b25fccbea50deef0c6d595c08b2ee4762f14eef169b654d54fccb",
@@ -1505,7 +1506,8 @@ BASELINE_PINNED: dict[str, str] = {
     "rrtmgp_rte_default": "731bd84717398320a1710b2c151a466b9e5bf1a30b633d858fd31d7162dbd173",
     # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
     "thompson_classic": '060b73dd839faf37a330bc180dcc2acc429bbd22bd0018a18179512cf7107426',
-    "thompson_fork": "a916ede73fd7cf39ff585b6889e7e90f04338f6c2b097b638d63a09a11cd9ef4",
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
+    "thompson_fork": "b3f60f73e08e96ebdfb7cca20be5236734bb1d75d5638f3a196fd8cc1dd94a21",
     # RE-PINNED at the 1.1.0 upstream merge: YSU_KMAX 256 (the fork's ceiling, via the rename of ysu.cu).
     # Previously f56e3ec7.
     "ysu_default": "7192b5b10c683718a9395682bde12a7145c2ca20318047d5a7998b1e87b1fbf2",
@@ -1590,7 +1592,8 @@ PINNED_HEADERS = {
         "a43cc63a6ae846be573e4f550c9a9c40512ced02b8140def12fac08d27dbc9ef",
     # Existing fork radar transcription, reused unchanged by the initial helper.
     # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
-    "thompson_fork.cu": "a916ede73fd7cf39ff585b6889e7e90f04338f6c2b097b638d63a09a11cd9ef4",
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
+    "thompson_fork.cu": "b3f60f73e08e96ebdfb7cca20be5236734bb1d75d5638f3a196fd8cc1dd94a21",
 
     # New Goddard band and sounding tables (lane ra5-goddard), prepended to
     # the goddard unit only (kernels._EXTRA_HEADERS).

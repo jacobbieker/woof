@@ -670,3 +670,22 @@ def test_the_thompson_closure_variants_the_run_launches_are_warmed(mode):
     on = mode == "correct"
     assert ("thompson[THOMPSON_RAIN_SNOW_CLOSURE=1]" in labels) is on
     assert ("thompson_aerosol_warm[THOMPSON_RAIN_SNOW_CLOSURE=1]" in labels) is on
+    # mp_physics = 8 never reads FQ7: no lamc tier
+    assert not any("THOMPSON_LAMC_UPDATED_RC" in label for label in labels)
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+def test_the_thompson_lamc_variant_the_run_launches_is_warmed(mode):
+    """FQ7 compiles the aerosol warm unit with the lamc define, composed with
+    the FQ5 closure define, where it is on (mp_physics = 28 here)."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+    run = validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
+        mp_physics=28, **correct_mode.resolve(mode).settings))
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run),))
+    labels = {job[0] for job in kernel_prewarm._variant_jobs(
+        experiment, ("thompson_aerosol_warm",))}
+    on = mode == "correct"
+    assert ("thompson_aerosol_warm[THOMPSON_RAIN_SNOW_CLOSURE=1,THOMPSON_LAMC_UPDATED_RC=1]"
+            in labels) is on

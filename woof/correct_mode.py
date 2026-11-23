@@ -127,6 +127,12 @@ FQ6  WRF's RRTMG longwave (ra_lw_physics = 4 with ra_rrtmg_variant =
      and the top layer's; the key keeps both and anchors the profile at the
      top interface (``rrtmg_lw_model_top``).  The RTE+RRTMGP adapter does not
      carry it.
+FQ7  Thompson's cloud-water mass/number balance forms the cloud slope lamc
+     from the entry cloud mass rc(k) rather than the updated xrc (WRF
+     4.7.1 :3003); the key forms it from xrc, which changes the cloud
+     number tendency of the aerosol-aware schemes (mp_physics = 28, 38;
+     the classic scheme's fixed droplet number never leaves the call)
+     (``thompson_lamc_updated_rc``).
 
 WHICH SCHEMES CARRY EACH FINDING is data too (:attr:`Correction.carriers`),
 separate from which schemes a key corrects (:data:`KEY_SCOPE`).  A domain
@@ -329,6 +335,14 @@ CORRECTIONS: tuple[Correction, ...] = (
             "the model top"),
         carriers=(("ra_lw_physics", (4,)),),
     ),
+    Correction(
+        finding="FQ7",
+        keys=("thompson_lamc_updated_rc",),
+        summary=(
+            "Thompson's cloud-water mass/number balance forms the cloud "
+            "slope from the updated cloud mass, not the entry mass"),
+        carriers=(("mp_physics", (28, 38)),),
+    ),
 )
 
 #: Finding -> ``(selector, absent value, values)``: a carrier that is a
@@ -393,6 +407,8 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     # FQ6: the longwave scheme (the aggregate ra_physics resolves to it,
     # _selector_int), at the legacy variant (KEY_GENERATIONS).
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
+    # FQ7: the aerosol-aware Thompson, whose cloud number leaves the call.
+    "thompson_lamc_updated_rc": ("mp_physics", (28, 38)),
 }
 
 #: Key -> ``(selector, values)``: selections inside :data:`KEY_SCOPE` under

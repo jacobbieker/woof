@@ -51,14 +51,14 @@ UNITS = {
 }
 
 
-def _split_blocks(text):
+def _split_blocks(text, define="THOMPSON_RAIN_SNOW_CLOSURE"):
     """(block bodies, text with the blocks removed).  A block ends at the
     #endif that closes its #ifdef, so it may hold its own #if arms."""
     bodies, kept, current, depth = [], [], None, 0
     for line in text.splitlines(keepends=True):
         word = line.strip()
         if current is None:
-            if word == "#ifdef THOMPSON_RAIN_SNOW_CLOSURE":
+            if word == "#ifdef " + define:
                 current, depth = [], 1
             else:
                 kept.append(line)
@@ -112,6 +112,9 @@ def test_it_is_inert_where_thompson_does_not_run(mp):
 def test_without_the_define_every_unit_is_the_program_before_the_correction(unit):
     text = (KERNELS / unit).read_text(encoding="utf-8")
     blocks, digest = UNITS[unit]
+    # FQ7's block (tests/test_thompson_lamc_updated_rc.py) is an addition of
+    # its own; the digest is the source before either correction.
+    _, text = _split_blocks(text, "THOMPSON_LAMC_UPDATED_RC")
     found, stripped = _split_blocks(text)
     assert len(found) == blocks, unit
     for body in found:

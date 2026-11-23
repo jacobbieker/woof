@@ -117,6 +117,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         active=lambda get: (int(get("ra_physics") if int(get("ra_lw_physics")) == -1
                                 else get("ra_lw_physics")) == 4
                             and get("ra_rrtmg_variant") == "rrtmg_legacy")),
+    QuirkCorrection(
+        "thompson_lamc_updated_rc", "wrf", False, True, "mp_physics = 28 or 38",
+        "Thompson's cloud-water mass/number balance forms the cloud slope from the updated cloud mass, not the entry mass",
+        active=lambda get: int(get("mp_physics")) in (28, 38)),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",

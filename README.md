@@ -730,11 +730,12 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ6, so the run receipt's
+    the keys are correct-mode findings FQ1-FQ7, so the run receipt's
     `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
-    `thompson_rain_snow_closure` and `rrtmg_lw_model_top` (WRF route);
+    `thompson_rain_snow_closure`, `rrtmg_lw_model_top` and
+    `thompson_lamc_updated_rc` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -785,6 +786,14 @@ Notes on the 1.1.7 sync:
     and the top layer's with the profile and anchors at the interface below
     the top. The option keeps both and anchors at the top interface (finding
     FQ6). Not read by RTE+RRTMGP; not yet scored against observations.
+  - `thompson_lamc_updated_rc` (aerosol-aware Thompson, `mp_physics = 28,
+    38`, WRF route). After the cloud-water update WRF's number balance forms
+    the cloud slope from the entry cloud mass instead of the updated mass,
+    so its mean-size clamp, and the cloud number it rediagnoses, answer a
+    mass the cloud no longer holds. The option forms it from the updated
+    mass (finding FQ7). The classic Thompson (`mp_physics = 8`) holds a fixed
+    droplet number that never leaves the call, so it does not read it; not
+    yet scored against observations.
 - **Observation-driven corrections, each opt-in and off by default** (GF's
   is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).

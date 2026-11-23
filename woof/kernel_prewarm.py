@@ -434,6 +434,19 @@ def _variant_jobs(experiment, modules):
                 from woof.core.thompson import RAIN_SNOW_CLOSURE_DEFINES
                 tiers.append((defines if name in AEROSOL_KERNEL_MODULES else ())
                              + RAIN_SNOW_CLOSURE_DEFINES)
+            if (name == "thompson_aerosol_warm"
+                    and _reads(run, "thompson_lamc_updated_rc")):
+                # FQ7 (on in correct mode): the warm unit with the lamc define,
+                # composed with the closure define the same run launches
+                # (thompson_aerosol_launch.aerosol_kernel's order).  The
+                # hail-aware image (mp = 38) compiles at its first call.
+                from woof.core.thompson import (
+                    LAMC_UPDATED_RC_DEFINES, RAIN_SNOW_CLOSURE_DEFINES)
+                tiers.append(defines
+                             + (RAIN_SNOW_CLOSURE_DEFINES
+                                if _reads(run, "thompson_rain_snow_closure")
+                                else ())
+                             + LAMC_UPDATED_RC_DEFINES)
             if name in ("noah_ua", "noah_mosaic_ua") and _reads(run, "noah_smc_floor_booking"):
                 # FQ4 (on in correct mode): the booked unit, the define first
                 # (woof.core.noah.smc_floor_booking_module).
