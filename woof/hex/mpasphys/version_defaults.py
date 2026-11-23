@@ -16,12 +16,31 @@ comparing a newer scheme with the pinned Fortran once that default moves.  Outsi
 from __future__ import annotations
 
 from contextlib import contextmanager
+from fnmatch import fnmatch
 import os
+from pathlib import Path
 from typing import Iterator, TypeVar
 
 ENVIRONMENT = "WOOF_HEX_PINNED_LANE"
 #: Every selector a pinned lane must name (the hex routes' scheme-generation keys).
 SELECTORS = ("mmm_version", "gwdo_version", "config_mynn_version", "config_tempo_version")
+
+#: The pytest oracle lanes that compare hex with pinned Fortran (repository-relative globs).
+#: components/hex/tests/conftest.py runs each of them inside :func:`pinned_lane`.  The forecast proofs
+#: (woof.hex.verify_mpas) name their pins (proof_referee_versions) and run the model under :data:`ENVIRONMENT`.
+#: mpas_mynn_v842's tests are correct-mode correction tests, not lanes.
+PINNED_LANE_TESTS = (
+    "components/hex/tests/mpas_ysu_v842/test_*.py",
+    "components/hex/tests/mpas_wb3_v842/test_*.py",
+    "components/hex/tests/mpas_wb5_v842/test_*.py",
+    "components/hex/tests/radshared_v842/test_*.py",
+    "components/hex/tests/sfclay_mm5_oracle/test_*.py",
+    "components/hex/tests/ruc_lsm_oracle/test_*.py",
+    "components/hex/tests/ugwp_oro_oracle/test_*.py",
+    "components/hex/tests/test_sfclay_mm5_v842.py",
+    "components/hex/tests/test_kim_gwdo_2026.py",
+)
+ROOT = Path(__file__).resolve().parents[3]
 
 _depth = 0
 T = TypeVar("T")
@@ -34,6 +53,15 @@ class DefaultedVersion(RuntimeError):
 def strict() -> bool:
     """Whether a defaulted version is refused here (inside :func:`pinned_lane` or under the environment flag)."""
     return _depth > 0 or os.environ.get(ENVIRONMENT, "").strip() == "1"
+
+
+def is_pinned_lane(path: str | os.PathLike[str]) -> bool:
+    """Whether the test file at ``path`` is one of :data:`PINNED_LANE_TESTS`."""
+    try:
+        relative = Path(path).resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return False
+    return any(fnmatch(relative, pattern) for pattern in PINNED_LANE_TESTS)
 
 
 def defaulted(selector: str, value: T, *, where: str) -> T:

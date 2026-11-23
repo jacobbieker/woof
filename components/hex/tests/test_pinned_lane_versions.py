@@ -16,8 +16,8 @@ from woof.hex.mpasphys import ysu_v842 as ysu
 from woof.hex.mpasphys.driver_v842 import resolve_namelist as resolve_v842
 from woof.hex.mpasphys.rrfs import tempo_v303
 from woof.hex.mpasphys.rrfs.driver_rrfs import resolve_namelist as resolve_rrfs
-from woof.hex.mpasphys.version_defaults import (ENVIRONMENT, SELECTORS, DefaultedVersion, defaulted, pinned_lane,
-                                                strict)
+from woof.hex.mpasphys.version_defaults import (ENVIRONMENT, PINNED_LANE_TESTS, ROOT, SELECTORS, DefaultedVersion,
+                                                defaulted, is_pinned_lane, pinned_lane, strict)
 
 RRFS = "mpasphys_rrfs_44c0849"
 HRRRV5 = '&physics config_physics_suite="hrrrv5" /'
@@ -120,3 +120,12 @@ def test_proofs_name_every_selector_a_pinned_lane_must_name(tmp_path):
         run, _ = proof_referee_versions(["woof hex", "forecast", "--physics-backend", "mpasphys"], namelist)
         named |= {part.split("=", 1)[0] for part in run[4:] if part != "--physics"}
     assert named == set(SELECTORS)
+
+
+def test_every_pinned_lane_glob_names_tests_and_the_lanes_run_strict():
+    # A renamed lane directory would drop out of the guard without a word.
+    for pattern in PINNED_LANE_TESTS:
+        assert sorted(ROOT.glob(pattern)), pattern
+    assert is_pinned_lane(ROOT / "components/hex/tests/mpas_ysu_v842/test_oracle.py")
+    assert not is_pinned_lane(ROOT / "components/hex/tests/mpas_mynn_v842/test_mynn_rp9_qsat_pole.py")
+    assert not is_pinned_lane(__file__)

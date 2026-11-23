@@ -143,6 +143,19 @@ def cpu_physics_phase_release(monkeypatch):
     monkeypatch.setattr(device_memory_release, "phase_release", lambda name: nullcontext())
 
 
+@pytest.fixture(autouse=True)
+def _pinned_lane_names_its_versions(request):
+    """A pinned oracle lane (version_defaults.PINNED_LANE_TESTS) names its scheme versions: inside it, a version
+    taken from a default is refused by name rather than compared with the pinned Fortran."""
+    from woof.hex.mpasphys.version_defaults import is_pinned_lane, pinned_lane
+
+    if not is_pinned_lane(request.node.path):
+        yield
+        return
+    with pinned_lane():
+        yield
+
+
 def pytest_configure(config: pytest.Config) -> None:
     for line in (
         "gpu: needs a CUDA device and cupy; auto-applied to any test whose "
