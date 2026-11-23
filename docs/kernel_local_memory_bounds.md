@@ -1543,7 +1543,8 @@ with nvcc 13.3 (no `-lineinfo`) from the exact loader source, the
 `flg_column` SASS before and after the macro, and with and without
 `-D FLG_NVX=256`, is identical on sm_86, sm_100 and sm_120 in both
 numerics modes, at `FLG_NV1` 33 and 101. The stack frame is 928 B (sm_86),
-896 B (sm_100) and 912 B (sm_120) at both tiers, inside the priced 928 B, so
+896 B (sm_100; 912 B in strict mode) and 912 B (sm_120) at both tiers, inside
+the priced 928 B, so
 the deep tier needs no driver reservation of its own;
 `tests/test_flg_256_levels.py` reads the loaded frame at 100 and 256 layers.
 The component oracles (`flg`, `flg_gases`, `flg_streams`, never selected by a
