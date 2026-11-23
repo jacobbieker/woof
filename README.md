@@ -1700,9 +1700,8 @@ Notes on the 1.1.7 sync:
     256 layers in strict numerics, for every CO2/ozone table word and every
     output word.
 
-  The deep column workspace is 1.30 MB, against 234 KB. Preflight prices it
-  by tier, and the deep tier runs fewer concurrent column slots within the
-  same budget.
+  The deep column workspace is 1.30 MB per slot, against 234 KB. Preflight
+  prices it by tier, and `column_chunk` is the lever at both tiers.
 
 ### Licensing and opt-ins
 

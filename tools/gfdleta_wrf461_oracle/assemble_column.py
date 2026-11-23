@@ -6,7 +6,7 @@ import argparse,json,re,importlib.util
 # shipped 81-layer unit keeps those few arrays as local frame; the deeper
 # tiers move them to the workspace too, so the per-thread frame does not grow
 # with the tier. Moving storage changes no statement or word.
-WORK_ENTITY=(r'\s*(\w+)\[(\d+)\]\s*' if __import__('os').environ.get('GFDLETA_MAXL','81')=='81'
+WORK_ENTITY=(r'\s*(\w+)\[(\d+)\]\s*' if int(__import__('os').environ.get('GFDLETA_MAXL','81'))==81
              else r'\s*(\w+)\[\s*(\d+)\s*\]\s*')
 
 

@@ -32,6 +32,13 @@ def run(*args, cwd=None):
     subprocess.run([str(a) for a in args], cwd=cwd, check=True)
 
 
+def lowered(*args):
+    """Run one lowering. Its chatter is not kept; a failure stops the build."""
+    r = subprocess.run([str(a) for a in args], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit(r.stdout + r.stderr)
+
+
 def f2c_all(f2c, folder):
     for c in folder.glob('*.c'):
         c.unlink()
@@ -91,7 +98,7 @@ def main():
             shutil.rmtree(folder)
     py = sys.executable
     # Column: lowering, compiler-frozen REAL parameters, f2c, assembly, ABI.
-    subprocess.run([py, HERE / 'lower_column.py', wrf, col, f2c], capture_output=True)
+    lowered(py, HERE / 'lower_column.py', wrf, col, f2c)
     run(py, HERE / 'round_parameters.py', col)
     for x in col.glob('*-constants*'):
         x.unlink()
@@ -104,7 +111,7 @@ def main():
     run(py, HERE / 'make_column_wrapper.py', '--wrf-source', wrf / 'phys/module_ra_gfdleta.F',
         '--scratch-layout', col / 'scratch.json', '--output-root', out)
     # CO2/ozone initialization.
-    subprocess.run([py, HERE / 'lower_init.py', wrf, init, f2c], capture_output=True)
+    lowered(py, HERE / 'lower_init.py', wrf, init, f2c)
     run(py, HERE / 'round_parameters.py', init)
     for x in init.glob('*-constants*'):
         x.unlink()

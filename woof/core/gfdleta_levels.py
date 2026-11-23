@@ -69,16 +69,13 @@ def init_layout(maxl: int) -> dict:
     return json.loads((_ROOT / f"gfdleta_init_layout{suffix(maxl)}.json").read_text())
 
 
-#: Column-workspace bytes of one pooled launch at the shipped tier and the
-#: default chunk (woof.config.DEFAULT_COLUMN_CHUNK = 3125).  The deep tier's
-#: slot is 5.4 times larger, so it runs fewer concurrent slots for the same
-#: slab; pooled slots are reused in order, so the slot count changes no word.
-WORK_BUDGET_BYTES = 3125 * 234184
-
-
 def column_slots(ncol: int, column_chunk: int, maxl: int) -> int:
-    """Concurrent column slots of one pooled launch."""
-    slots = min(int(ncol), int(column_chunk))
-    if _check(maxl) != SHIPPED_MAXL:
-        slots = min(slots, max(1, WORK_BUDGET_BYTES // column_layout(maxl)["scratch_bytes"]))
-    return max(1, slots)
+    """Concurrent column slots of one pooled launch.
+
+    ``column_chunk`` is the run's workspace lever at both tiers: a deep slot
+    holds 1.30 MB against 234 KB, and preflight prices ``slots x slot``, so
+    an over-budget deep run lowers ``column_chunk`` as any other does.
+    Pooled slots are reused in order, so the slot count changes no word.
+    """
+    _check(maxl)
+    return max(1, min(int(ncol), int(column_chunk)))

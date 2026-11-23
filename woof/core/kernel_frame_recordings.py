@@ -3180,19 +3180,22 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (
         ),
     ),
 )
-# GFDL Eta 256-layer storage tier (woof/core/gfdleta_levels.py): every
-# entry point through the production loader, default and strict numerics.
+# GFDL Eta at both storage tiers (woof/core/gfdleta_levels.py): every entry
+# point through the production loader, default and strict numerics. The
+# shipped units read wider here than on the 5090 rows above.
 KERNEL_LOCAL_FRAME_RECORDINGS += (
     KernelFrameRecording(
         box="pb", device="NVIDIA RTX A6000",
         compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
         measured="2026-11-23", complete=False,
-        frames=MappingProxyType({"gfdleta_column_l256": 4000, "gfdleta_co2_init_l256": 3008}),
+        frames=MappingProxyType({"gfdleta_column": 15984, "gfdleta_co2_init": 26944,
+                                 "gfdleta_column_l256": 4000, "gfdleta_co2_init_l256": 3008}),
         strict_recording=KernelFrameRecording(
             box="pb", device="NVIDIA RTX A6000",
             compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
             measured="2026-11-23", complete=False,
-            frames=MappingProxyType({"gfdleta_column_l256": 4000, "gfdleta_co2_init_l256": 3008}),
+            frames=MappingProxyType({"gfdleta_column": 15984, "gfdleta_co2_init": 26944,
+                                 "gfdleta_column_l256": 4000, "gfdleta_co2_init_l256": 3008}),
         ),
     ),
 )

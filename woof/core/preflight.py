@@ -2958,7 +2958,7 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     'gsfcsw': 16,  # Device arena: sm_120 / NVRTC 13.4.92, fast 0 B / strict 16 B.
     # GFDL Eta 256-layer storage tier (woof/core/gfdleta_levels.py), RTX A6000
     # sm_86, NVRTC 13.4.92, default and strict numerics, 2026-11-23: every entry
-    # point's widest frame. The shipped units read 15984 / 26944 B on that card.
+    # point's widest frame.
     'gfdleta_column_l256': 4000,
     'gfdleta_co2_init_l256': 3008,
     # Integration production reads: sm_120 / NVRTC 13.4.59, 2026-11-01.
@@ -2967,8 +2967,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     'cam3_emissivity': 2048,
     'cam3_paths': 0,
     'cam3_prepare': 0,
-    'gfdleta_co2_init': 26912,
-    'gfdleta_column': 14320,
+    # RTX A6000 sm_86 / NVRTC 13.4.92, default and strict, 2026-11-23 (above the 5090 reads).
+    'gfdleta_co2_init': 26944,
+    'gfdleta_column': 15984,
     'gfdleta_init': 0,
     'gfdleta_lw_helpers': 0,
     'gfdleta_math_probe': 0,

@@ -58,7 +58,6 @@ def _shape_count(shape):
 def test_the_ladder_contract_registry_and_layouts_agree():
     from woof.core import gfdleta_levels as lv
     from woof.physics_vertical_contract import GFDLETA_VERTICAL_LEVEL_BOUNDS
-    from woof.config import DEFAULT_COLUMN_CHUNK
 
     assert [lv.maxl_tier(n) for n in (1, 60, 81, 82, 256)] == [81, 81, 81, 256, 256]
     for bad in (0, 257):
@@ -69,7 +68,6 @@ def test_the_ladder_contract_registry_and_layouts_agree():
     warning = " ".join(registry["components"]["radiation"]["options"]["wrf-gfdleta"]["warnings"])
     assert "tables allow at most 81" not in warning and "256-layer storage tier" in warning
     shipped, deep = lv.column_layout(SHIPPED), lv.column_layout(DEEP)
-    assert lv.WORK_BUDGET_BYTES == DEFAULT_COLUMN_CHUNK * shipped['scratch_bytes']
     assert [f['name'] for f in shipped['fields']] == [f['name'] for f in deep['fields']]
     for a, b in zip(shipped['fields'], deep['fields']):
         assert (a['count'], b['count']) in ((1, 1), (SHIPPED + 1, DEEP + 1)), a['name']
@@ -137,14 +135,14 @@ def test_the_config_admits_256_layers_and_refuses_257():
         validate_run_config(cfg(DEEP + 1))
 
 
-def test_the_deep_slab_stays_within_the_shipped_budget():
+def test_the_slot_count_is_the_run_chunk_at_both_tiers():
     from woof.core import gfdleta_levels as lv
-    deep = lv.column_layout(DEEP)['scratch_bytes']
-    assert lv.column_slots(10**6, 3125, SHIPPED) == 3125
-    assert lv.column_slots(10, 3125, DEEP) == 10
-    slots = lv.column_slots(10**6, 3125, DEEP)
-    assert slots * deep <= lv.WORK_BUDGET_BYTES < (slots + 1) * deep
-    assert lv.column_slots(10**6, 7, DEEP) == 7
+    for maxl in (SHIPPED, DEEP):
+        assert lv.column_slots(10**6, 3125, maxl) == 3125
+        assert lv.column_slots(10, 3125, maxl) == 10
+        assert lv.column_slots(10**6, 7, maxl) == 7
+    with pytest.raises(ValueError):
+        lv.column_slots(10, 3125, 128)
 
 
 # --------------------------------------------------------------------------- GPU helpers
