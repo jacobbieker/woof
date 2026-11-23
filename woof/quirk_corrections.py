@@ -379,9 +379,14 @@ def check_run_config(cfg) -> None:
 
 def seaice_names(configs: dict) -> tuple[str, ...]:
     """The column corrections the umbrella adds to ``woof_v842_corrections``:
-    every one in correct mode or under 'all', none in exact mode or under
-    'none' (where the names given still apply)."""
-    return keys("mpas_seaice") if all_on(configs) else ()
+    every one under an explicit 'all', or in correct mode when
+    ``woof_v842_corrections`` is unset; none under 'none' or in exact mode.
+    A ``woof_v842_corrections`` given under the mode's default is the whole
+    set (so naming fewer, or none, turns the others off)."""
+    umbrella, explicit = _umbrella(configs)
+    if umbrella != "all" or (not explicit and "woof_v842_corrections" in configs):
+        return ()
+    return keys("mpas_seaice")
 
 
 def hex_umbrella(arguments) -> tuple[str, bool]:
