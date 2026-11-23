@@ -695,12 +695,6 @@ def noah_define_prefix(smc_floor_booking: bool = False,
             + (LAND_ICE_RAIN_RUNOFF_PREFIX if land_ice_rain_runoff else ""))
 
 
-def smc_floor_booking_source(name: str) -> str:
-    """The booked unit's source: the define, then ``name``'s default source."""
-    from woof.core.kernels import module_source
-    return SMC_FLOOR_BOOKING_PREFIX + module_source(name)
-
-
 @cuda_cache(maxsize=None)
 def noah_define_module(name: str, defines: tuple):
     """``name`` (noah_ua or noah_mosaic_ua) with the Noah correction defines
