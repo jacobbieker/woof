@@ -29147,7 +29147,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1251,
+      "line": 1259,
       "kind": "prose",
       "anchor": "\"factory\": \"load_module_no_ftz\",",
       "anchor_sha256": "b0421ca3cd3bd385c26b85a05030a47384adf627d8ff1b368af865eae647bfa8",
@@ -29158,7 +29158,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1253,
+      "line": 1261,
       "kind": "prose",
       "anchor": "\"file\": \"woof/core/kernels/no_ftz.py\",",
       "anchor_sha256": "49e696c34493b8f7aceb70e54266067dfd6ce7130465924b65be77ede7460451",
@@ -29169,7 +29169,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1891,
+      "line": 1899,
       "kind": "prose",
       "anchor": "\"factory\": \"compile_cam_module_no_ftz\",",
       "anchor_sha256": "6d7b417340c11bb8da7a87759b2082beeb41c2e4052dcab0f34849564d65b0b1",
@@ -29180,7 +29180,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1899,
+      "line": 1907,
       "kind": "prose",
       "anchor": "\"factory\": \"compile_ishmael_no_ftz\",",
       "anchor_sha256": "0878ef123b253b6305e7c8e56de1049c1515cd441166258feafaf73e6161dfee",
@@ -29191,7 +29191,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 2139,
+      "line": 2147,
       "kind": "prose",
       "anchor": "\"factory\": \"_subnormal_arith\",",
       "anchor_sha256": "6d86c898bd7196485815fda472a7fed15879a82a033ac9352931e09354e4ddee",
@@ -29202,7 +29202,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 2523,
+      "line": 2531,
       "kind": "prose",
       "anchor": "\"factory\": \"_load_urban_module_without_ftz\",",
       "anchor_sha256": "d26e165000e1af659a39e72f4e877222fbe7b19c77500ef9c03921de27713999",

@@ -12180,12 +12180,12 @@
     },
     {
       "file": "woof/hex/tc_climate/session.py",
-      "line": 53,
-      "column": 25,
+      "line": 90,
+      "column": 36,
       "surface": "package",
-      "constructor": "cp.RawModule",
+      "constructor": "self.cp.RawModule",
       "constructor_kind": "cupy.RawModule",
-      "enclosing": "__init__",
+      "enclosing": "pi_module",
       "takes_caller_options": true,
       "options_argument_present": true,
       "options_expression": "('--std=c++17',)",
@@ -12196,7 +12196,7 @@
         "'--std=c++17'"
       ],
       "options_are_literal": true,
-      "text": "self.pi_module = cp.RawModule(code=Path(__file__).with_name('potential_intensity.cu').read_text(),"
+      "text": "self.pi_modules[tier] = self.cp.RawModule(code=pi_source(tier), options=('--std=c++17',))"
     },
     {
       "file": "woof/hex/uh_layers.py",
