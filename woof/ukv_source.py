@@ -22,8 +22,9 @@ from GFS's 0.25-degree land state past ERA5's last published hour, copied
 cell for cell by nearest index onto the same grid on Noah's four layers:
 nothing is interpolated and the borrowed land/sea boundary follows the
 0.25-degree donor coastline.  The terrain is UKV's own: a live run's
-published orography, or in the archive, which publishes none, the height
-of the first hour's surface pressure on its own pressure-level heights.
+published orography, or where none is published (the archive, and live
+runs before 2025-12-12) the height of the first hour's surface pressure on
+its own pressure-level heights.
 
 Facts of the stores were MEASURED (2026-10-18) and are encoded here,
 because neither store states them:
@@ -730,6 +731,12 @@ _LIVE_ALIASES = {
 }
 
 
+#: Objects a run may lack.  Runs before 2025-12-12 publish no
+#: ``height_of_orography``; their terrain is derived from the first hour's
+#: surface pressure, as for the archive, which publishes none.
+_LIVE_OPTIONAL = frozenset({"height_of_orography"})
+
+
 #: netCDF4/HDF5 is built without thread safety: one decode at a time.
 _NETCDF_LOCK = threading.Lock()
 
@@ -776,7 +783,8 @@ def live_missing(run: datetime, times) -> list[str]:
     for valid in times:
         listed = live_listing(run, valid)
         missing += [live_key(run, valid, product) for product in _LIVE_OBJECTS
-                    if live_object_key(run, valid, product, listed) is None]
+                    if product not in _LIVE_OPTIONAL
+                    and live_object_key(run, valid, product, listed) is None]
         if missing:
             # One absent lead decides it; the rest need not be listed.
             break
@@ -817,7 +825,10 @@ def select_live_run(plan: WindowPlan, pinned: datetime | None = None) -> datetim
 
 def read_live(run: datetime, valid: datetime, regrid: Regridder, staging: Path,
               *, workers: int = 4) -> dict[str, np.ndarray]:
-    """One lead of one live run on the regular grid, keyed like ``read_ukv``."""
+    """One lead of one live run on the regular grid, keyed like ``read_ukv``.
+
+    ``surface_altitude`` is absent when the run publishes no orography.
+    """
 
     from netCDF4 import Dataset
 
@@ -874,9 +885,13 @@ def read_live(run: datetime, valid: datetime, regrid: Regridder, staging: Path,
             values = values[[position[float(level)] for level in PRESSURE_LEVELS_PA]]
         return values
 
+    products = [product for product in _LIVE_OBJECTS
+                if product not in _LIVE_OPTIONAL
+                or live_object_key(run, valid, product, listed) is not None]
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        native = dict(zip(_LIVE_OBJECTS, pool.map(read, _LIVE_OBJECTS)))
-    fields = {output: regrid(native[product]) for product, output in _LIVE_OUTPUTS.items()}
+        native = dict(zip(products, pool.map(read, products)))
+    fields = {output: regrid(native[product]) for product, output in _LIVE_OUTPUTS.items()
+              if product in native}
     for (speed, direction), (u_name, v_name) in _LIVE_WINDS.items():
         u, v = wind_components(native[speed], native[direction])
         fields[u_name], fields[v_name] = regrid(u), regrid(v)
@@ -1375,7 +1390,7 @@ def acquire(*, cycle: datetime, hours: int, cadence: int | None, area,
             + f"; land state from {land.upper()}")
         group = indices = None
         staging = out / ".ukv-staging"
-        terrain = None
+        terrain = terrain_from = None
         files, land_receipts = [], []
         try:
             with ThreadPoolExecutor(max_workers=1) as background:
@@ -1389,6 +1404,7 @@ def acquire(*, cycle: datetime, hours: int, cadence: int | None, area,
                         land_receipts.append(stamp["land_state"])
                         if terrain is None:
                             terrain = _read_terrain(path)
+                            terrain_from = stamp["entry"].get("terrain_from")
                         continue
                     say(f"fetch ukv: {valid:%Y-%m-%dT%H}Z {number}/{len(times)} reading UKV "
                         f"and {land.upper()}")
@@ -1409,24 +1425,29 @@ def acquire(*, cycle: datetime, hours: int, cadence: int | None, area,
                             origin = f"{STORE_URL} snapshot {snapshot}"
                         index, direction_index = indices[valid]
                         fields = read_ukv(group, index, direction_index, regrid, workers=workers)
+                        published = None
                         record.update(store_record=index, wind_direction_record=direction_index,
                                       store_snapshot=snapshot)
                     else:
                         fields = read_live(run, valid, regrid, staging, workers=workers)
-                        published = fields.pop("surface_altitude")
+                        published = fields.pop("surface_altitude", None)
                         record.update(run=run.isoformat(),
                                       lead=int((valid - run).total_seconds() // 3600))
                     land_fields, receipt = land_read.result()
                     if terrain is None:
                         # One terrain for the whole window, so every file's
                         # in-band supplement is byte-identical: the run's own
-                        # orography live, the first hour's derived height in
-                        # the archive, which publishes none.
-                        terrain = published if plan.store == "live" else surface_height(
+                        # orography where published, else the first hour's
+                        # derived height (the archive, and early live runs).
+                        terrain_from = ("published orography" if published is not None
+                                        else "derived from the surface pressure at "
+                                        + times[0].isoformat())
+                        terrain = published if published is not None else surface_height(
                             PRESSURE_LEVELS_PA, fields["geopotential_height"],
                             fields["air_temperature"], fields["relative_humidity"],
                             fields["surface_air_pressure"], fields["air_temperature_1p5m"],
                             fields["relative_humidity_1p5m"])
+                    record["terrain_from"] = terrain_from
                     fields.update(land_fields)
                     fields["surface_altitude"] = terrain
                     write_netcdf(path, valid, latitude, longitude, fields,
@@ -1451,8 +1472,10 @@ def acquire(*, cycle: datetime, hours: int, cadence: int | None, area,
             "grid": {"latitude": [float(latitude[0]), float(latitude[-1]), len(latitude)],
                      "longitude": [float(longitude[0]), float(longitude[-1]), len(longitude)],
                      "native_window": list(regrid.window)},
-            "terrain": {"from": ("derived from the surface pressure at " + times[0].isoformat()
-                                 if plan.store == "archive" else "published orography"),
+            # Stamps from before terrain_from was recorded: the store decides.
+            "terrain": {"from": terrain_from or (
+                            "derived from the surface pressure at " + times[0].isoformat()
+                            if plan.store == "archive" else "published orography"),
                         "min_m": float(terrain.min()), "max_m": float(terrain.max())},
             "land_state_source": land, "land_state": land_receipts,
             "total_bytes": sum(entry["bytes"] for entry in files),

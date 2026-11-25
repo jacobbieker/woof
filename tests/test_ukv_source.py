@@ -669,10 +669,12 @@ def _live_object(path, run, valid, product):
         data.units = units
 
 
-def _live_bucket(tmp_path, monkeypatch, run, times, names=None):
+def _live_bucket(tmp_path, monkeypatch, run, times, names=None, drop=()):
     store = {}
     for valid in times:
         for product in ukv._LIVE_OBJECTS:
+            if product in drop:
+                continue
             key = ukv.live_key(run, valid, (names or {}).get(product, product))
             path = tmp_path / "bucket" / Path(key).name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -726,6 +728,37 @@ def test_live_run_before_the_height_rename_is_read(tmp_path, monkeypatch):
     assert manifest["store"] == "live" and manifest["run"] == run.isoformat()
     with Dataset(tmp_path / "out" / manifest["files"][0]["path"]) as dataset:
         assert np.allclose(dataset.variables["geopotential_height"][0], 1000.0)
+
+
+def test_live_run_without_orography_derives_its_terrain(tmp_path, monkeypatch):
+    from netCDF4 import Dataset
+    _small_plane(monkeypatch)
+    run = datetime(2025, 11, 24, 9)
+    times = (datetime(2025, 11, 24, 12), datetime(2025, 11, 24, 15))
+    _live_bucket(tmp_path, monkeypatch, run, times, drop={"height_of_orography"})
+    assert ukv.live_missing(run, times) == []
+    monkeypatch.setattr(ukv, "read_era5", _fake_era5)
+    lat, lon = ukv.laea_inverse(_SMALL["x0"] + 60000.0, _SMALL["y0"] + 50000.0)
+    area = Area(float(lat) - 0.1, float(lon) - 0.1, float(lat) + 0.1, float(lon) + 0.1)
+    kwargs = dict(cycle=times[0], hours=3, cadence=3, area=area, out=tmp_path / "out",
+                  progress=lambda text: None)
+    manifest = ukv.acquire(**kwargs)
+    assert manifest["store"] == "live"
+    assert manifest["terrain"]["from"] == f"derived from the surface pressure at {times[0].isoformat()}"
+    assert {entry["terrain_from"] for entry in manifest["files"]} == {manifest["terrain"]["from"]}
+    with Dataset(tmp_path / "out" / manifest["files"][0]["path"]) as dataset:
+        derived = np.asarray(dataset.variables["surface_altitude"][0])
+    assert np.isfinite(derived).all() and not np.allclose(derived, 42.0)
+    # An interrupted request (hours stamped, no manifest) resumes from the
+    # stamps and still names the derived terrain.
+    from woof import fetch_routes
+    (tmp_path / "out" / fetch_routes.MANIFEST_NAME).unlink()
+    said = []
+    again = ukv.acquire(**{**kwargs, "progress": said.append})
+    assert sum("kept from an interrupted run" in line for line in said) == len(times)
+    assert again["terrain"]["from"] == manifest["terrain"]["from"]
+    # The resume reads the terrain back from the float32 files.
+    assert again["terrain"]["min_m"] == pytest.approx(manifest["terrain"]["min_m"], rel=1e-6)
 
 
 def test_live_run_missing_every_height_name_is_incomplete(tmp_path, monkeypatch):
