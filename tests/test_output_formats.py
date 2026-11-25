@@ -93,10 +93,10 @@ def test_publication_scan_ignores_retired_column_spool(tmp_path):
     assert worker._published() == [retained/name]
 
 
-def write_history(path, hour, *, cells=False):
+def write_history(path, hour, *, cells=False, container='NETCDF3_64BIT_OFFSET'):
     nc = pytest.importorskip('netCDF4')
     np = pytest.importorskip('numpy')
-    with nc.Dataset(path, 'w', format='NETCDF3_64BIT_OFFSET') as f:
+    with nc.Dataset(path, 'w', format=container) as f:
         dimensions = [('Time', None), ('StrLen', 19), ('nCells', 7), ('nVertLevels', 3)] if cells else [
             ('Time', None), ('StrLen', 19), ('bottom_top', 3), ('south_north', 5), ('west_east', 7)]
         for name, size in dimensions:
@@ -106,7 +106,9 @@ def write_history(path, hour, *, cells=False):
             [list(f'2026-10-28_{hour:02d}:00:00')], dtype='S1')
         dims = ('Time', 'nCells', 'nVertLevels') if cells else ('Time', 'bottom_top', 'south_north', 'west_east')
         shape = (1, 7, 3) if cells else (1, 3, 5, 7)
-        v = f.createVariable('temperature' if cells else 'T', 'f4', dims)
+        # The default history frame is NetCDF-4, deflated and shuffled.
+        packed = dict(zlib=True, shuffle=True) if container.startswith('NETCDF4') else {}
+        v = f.createVariable('temperature' if cells else 'T', 'f4', dims, **packed)
         v[:] = np.arange(np.prod(shape), dtype='f4').reshape(shape) + hour
         v.units = 'K'
         v.description = 'native temperature field'
@@ -116,7 +118,7 @@ def write_history(path, hour, *, cells=False):
         f.frame_number = hour
 
 
-def exercise_writer(tmp_path, *, cells=False):
+def exercise_writer(tmp_path, *, cells=False, container='NETCDF3_64BIT_OFFSET'):
     np = pytest.importorskip('numpy')
     icechunk = pytest.importorskip('icechunk')
     xr = pytest.importorskip('xarray')
@@ -126,7 +128,7 @@ def exercise_writer(tmp_path, *, cells=False):
         pytest.skip('build rw_icechunk or install a platform wheel')
     files = [tmp_path/f'frame-{i}.nc' for i in range(2)]
     for i, path in enumerate(files):
-        write_history(path, i, cells=cells)
+        write_history(path, i, cells=cells, container=container)
     store = tmp_path/'store'
     def invoke(inputs, mode='append'):
         path = tmp_path/'request.json'
@@ -169,8 +171,10 @@ def exercise_writer(tmp_path, *, cells=False):
     assert repo.lookup_branch('main') == events[-1]['snapshot']
 
 
-def test_native_roundtrip_atomic_resume(tmp_path):
-    exercise_writer(tmp_path)
+@pytest.mark.parametrize('container', ['NETCDF3_64BIT_OFFSET', 'NETCDF4'])
+def test_native_roundtrip_atomic_resume(tmp_path, container):
+    # NetCDF-4 keeps NC_CHAR (Times) as a one-byte HDF5 string.
+    exercise_writer(tmp_path, container=container)
 
 
 def test_failed_model_does_not_finalize(tmp_path, monkeypatch):
