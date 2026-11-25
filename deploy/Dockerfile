@@ -12,7 +12,7 @@
 #     -t woof-energy:1.0.3-cu13 .
 #
 # Stages:
-#   build    the locked pixi environment (`default` for CUDA 12, `cuda13`
+#   build    the locked pixi environment (`cuda12` for CUDA 12, `default`
 #            for CUDA 13; CuPy brings its own CUDA toolkit wheels), the
 #            native Rust bridges (`pixi run build-native`, vendored crates,
 #            offline), and the small tables (`woof fetch-tables`, plus the
@@ -55,8 +55,8 @@ WORKDIR /opt/woof
 COPY . /opt/woof
 # The pixi environment for the CUDA major, recorded for the later steps.
 RUN case "${CUDA}" in \
-      12) env=default ;; \
-      13) env=cuda13 ;; \
+      12) env=cuda12 ;; \
+      13) env=default ;; \
       *) echo "CUDA must be 12 or 13, got ${CUDA}" >&2; exit 2 ;; \
     esac \
  && echo "${env}" > /opt/woof/.woof-pixi-env \
