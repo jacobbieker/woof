@@ -719,6 +719,17 @@ _LIVE_WINDS = {
 }
 
 
+#: Earlier object names of the same field.  Runs up to 2026-01-21 publish
+#: the pressure-level height as ``height_ASL_on_pressure_levels``; from the
+#: 2026-01-22 runs it is ``geopotential_height_on_pressure_levels``.  Both
+#: hold ``geopotential_height`` in m on the same 33 levels and 2 km plane,
+#: and the bucket keeps two years, so the name is taken from each run's
+#: listing rather than a cut-over date.
+_LIVE_ALIASES = {
+    "geopotential_height_on_pressure_levels": ("height_ASL_on_pressure_levels",),
+}
+
+
 #: netCDF4/HDF5 is built without thread safety: one decode at a time.
 _NETCDF_LOCK = threading.Lock()
 
@@ -727,6 +738,16 @@ def live_key(run: datetime, valid: datetime, product: str) -> str:
     lead = int((valid - run).total_seconds() // 3600)
     return (f"{LIVE_PREFIX}{run:%Y%m%dT%H%MZ}/{valid:%Y%m%dT%H%MZ}"
             f"-PT{lead:04d}H00M-{product}.nc")
+
+
+def live_object_key(run: datetime, valid: datetime, product: str,
+                    listed: set[str]) -> str | None:
+    """The listed key holding ``product`` for this lead, under any of its names."""
+
+    for name in (product, *_LIVE_ALIASES.get(product, ())):
+        if (key := live_key(run, valid, name)) in listed:
+            return key
+    return None
 
 
 def live_listing(run: datetime, valid: datetime) -> set[str]:
@@ -754,8 +775,8 @@ def live_missing(run: datetime, times) -> list[str]:
     missing = []
     for valid in times:
         listed = live_listing(run, valid)
-        missing += [key for product in _LIVE_OBJECTS
-                    if (key := live_key(run, valid, product)) not in listed]
+        missing += [live_key(run, valid, product) for product in _LIVE_OBJECTS
+                    if live_object_key(run, valid, product, listed) is None]
         if missing:
             # One absent lead decides it; the rest need not be listed.
             break
@@ -802,10 +823,12 @@ def read_live(run: datetime, valid: datetime, regrid: Regridder, staging: Path,
 
     rows, cols = regrid.native_slices()
     staging.mkdir(parents=True, exist_ok=True)
+    listed = live_listing(run, valid)
 
     def read(product):
         variable, units, levelled = _LIVE_OBJECTS[product]
-        key = live_key(run, valid, product)
+        key = (live_object_key(run, valid, product, listed)
+               or live_key(run, valid, product))
         path = staging / Path(key).name
         path.write_bytes(_http_get(f"{LIVE_HOST}/{key}"))
         # Downloads overlap; HDF5 is not thread-safe, so decoding does not.

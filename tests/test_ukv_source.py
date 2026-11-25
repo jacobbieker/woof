@@ -669,11 +669,11 @@ def _live_object(path, run, valid, product):
         data.units = units
 
 
-def _live_bucket(tmp_path, monkeypatch, run, times):
+def _live_bucket(tmp_path, monkeypatch, run, times, names=None):
     store = {}
     for valid in times:
         for product in ukv._LIVE_OBJECTS:
-            key = ukv.live_key(run, valid, product)
+            key = ukv.live_key(run, valid, (names or {}).get(product, product))
             path = tmp_path / "bucket" / Path(key).name
             path.parent.mkdir(parents=True, exist_ok=True)
             _live_object(path, run, valid, product)
@@ -706,6 +706,35 @@ def test_live_window_is_read_from_one_run(tmp_path, monkeypatch):
         assert np.allclose(dataset.variables["eastward_wind"][0], 10.0, atol=1e-4)
         assert np.allclose(dataset.variables["surface_altitude"][0], 42.0)
     assert not (tmp_path / "out" / ".ukv-staging").exists()
+
+
+def test_live_run_before_the_height_rename_is_read(tmp_path, monkeypatch):
+    from netCDF4 import Dataset
+    _small_plane(monkeypatch)
+    run = datetime(2026, 1, 21, 9)
+    times = (datetime(2026, 1, 21, 12), datetime(2026, 1, 21, 15))
+    old = "height_ASL_on_pressure_levels"
+    store = _live_bucket(tmp_path, monkeypatch, run, times,
+                         names={"geopotential_height_on_pressure_levels": old})
+    assert any(key.endswith(f"-{old}.nc") for key in store)
+    assert ukv.live_missing(run, times) == []
+    monkeypatch.setattr(ukv, "read_era5", _fake_era5)
+    lat, lon = ukv.laea_inverse(_SMALL["x0"] + 60000.0, _SMALL["y0"] + 50000.0)
+    area = Area(float(lat) - 0.1, float(lon) - 0.1, float(lat) + 0.1, float(lon) + 0.1)
+    manifest = ukv.acquire(cycle=times[0], hours=3, cadence=3, area=area,
+                           out=tmp_path / "out", progress=lambda text: None)
+    assert manifest["store"] == "live" and manifest["run"] == run.isoformat()
+    with Dataset(tmp_path / "out" / manifest["files"][0]["path"]) as dataset:
+        assert np.allclose(dataset.variables["geopotential_height"][0], 1000.0)
+
+
+def test_live_run_missing_every_height_name_is_incomplete(tmp_path, monkeypatch):
+    run = datetime(2026, 1, 21, 9)
+    times = (datetime(2026, 1, 21, 12),)
+    store = _live_bucket(tmp_path, monkeypatch, run, times)
+    key = ukv.live_key(run, times[0], "geopotential_height_on_pressure_levels")
+    monkeypatch.setattr(ukv, "live_listing", lambda probe, valid: set(store) - {key})
+    assert ukv.live_missing(run, times) == [key]
 
 
 def test_live_run_selection_skips_a_run_still_posting(monkeypatch):
