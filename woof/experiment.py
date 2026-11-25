@@ -3655,6 +3655,52 @@ def _check_whole_second_cadence(label: str, seconds: Fraction, grid_id,
             "replace the earlier.")
 
 
+def delayed_start_root_step_error(exp: ExperimentConfig,
+                                  grid_id: int) -> str | None:
+    """Why ``grid_id``'s delayed start cannot be executed, or None.
+
+    The fixed-step executor runs the tree one ROOT step (one period) at a
+    time and births a delayed nest only at a period boundary
+    (:func:`woof.core.clock.execute_schedule`), the same instant its
+    schedule first recurses into it (:func:`woof.core.clock.build_schedule`
+    activates a nest whose start is at or before the period's start).  A
+    start strictly inside a root step was accepted by the parent-step rule
+    and then fell between the two: the schedule stepped the nest from the
+    NEXT root step while the executor waited for a boundary equal to its
+    start that never came -- so the nest was never initialized from its
+    parent, never wrote history, and its first two history-due steps
+    stashed REFL_10CM with nobody consuming it ("REFL_10CM stash was not
+    consumed before reuse").  WRF has no period executor to fall between:
+    ``nests_to_open`` (frame/module_nesting.F) opens the nest at its
+    parent's first top-of-step whose HEAD-grid time has reached the start,
+    i.e. inside that root step and from the parent's state before the
+    start, then holds the nest's clock at its namelist start until the
+    parent catches up.  That early-birth shape is not representable here,
+    so the start must lie on the root-step lattice.  Adaptive stepping
+    lands on a delayed start as a deadline and is exempt.
+    """
+    dc = exp.domain(grid_id)
+    if dc.parent_id == 0 or getattr(dc.run, "use_adaptive_time_step", False):
+        return None
+    offset = exp.domain_start_offset_exact(grid_id)
+    root_dt = exp.dt_exact(exp.root.grid_id)
+    root_steps = offset / root_dt
+    if root_steps.denominator == 1:
+        return None
+    # start_time is whole seconds in practice, so name the nearest root
+    # steps that are also whole seconds (multiples of dt's numerator).
+    lattice = root_dt.numerator
+    before = (offset // lattice) * lattice
+    return (
+        f"delayed start_time for d{grid_id:02d} "
+        f"({exp.domain_start_time(grid_id).isoformat()}; offset "
+        f"{float(offset):g} s) is not on a root-domain step boundary: "
+        f"d{exp.root.grid_id:02d} dt = {root_dt} s exactly, offset/dt = "
+        f"{root_steps}.  A nest is born only at a root step; move its "
+        f"start to {float(before):g} s or {float(before + lattice):g} s "
+        f"after the experiment start.")
+
+
 def validate_boundary_timing(
         exp: ExperimentConfig, boundary_interval_seconds: int, *,
         source: str = "boundary forcing",
@@ -3706,6 +3752,9 @@ def validate_boundary_timing(
                 f"boundary: d{dc.parent_id:02d} dt = {parent_dt} s "
                 f"exactly, (child-parent start offset)/dt = "
                 f"{parent_steps}.")
+        root_step_error = delayed_start_root_step_error(exp, dc.grid_id)
+        if root_step_error is not None:
+            raise ValueError(root_step_error)
         if getattr(dc, "spawn", None) is not None:
             # A SPAWNED nest's epoch is its trigger's instant, and a
             # trigger fires on the weather rather than on the forcing
