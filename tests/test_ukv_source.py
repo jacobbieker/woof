@@ -748,7 +748,9 @@ def test_live_run_without_orography_derives_its_terrain(tmp_path, monkeypatch):
     assert {entry["terrain_from"] for entry in manifest["files"]} == {manifest["terrain"]["from"]}
     with Dataset(tmp_path / "out" / manifest["files"][0]["path"]) as dataset:
         derived = np.asarray(dataset.variables["surface_altitude"][0])
+        attributes = " ".join(str(dataset.getncattr(name)) for name in dataset.ncattrs())
     assert np.isfinite(derived).all() and not np.allclose(derived, 42.0)
+    assert "hypsometric height" in attributes and "published height_of_orography" not in attributes
     # An interrupted request (hours stamped, no manifest) resumes from the
     # stamps and still names the derived terrain.
     from woof import fetch_routes
@@ -759,6 +761,19 @@ def test_live_run_without_orography_derives_its_terrain(tmp_path, monkeypatch):
     assert again["terrain"]["from"] == manifest["terrain"]["from"]
     # The resume reads the terrain back from the float32 files.
     assert again["terrain"]["min_m"] == pytest.approx(manifest["terrain"]["min_m"], rel=1e-6)
+
+
+def test_live_run_after_the_orography_cut_over_still_posting_is_incomplete(tmp_path, monkeypatch):
+    # From 2025-12-12 every run publishes orography, last of a lead's objects:
+    # a run that has not posted it yet is still posting, not an early run.
+    run = datetime(2025, 12, 12, 9)
+    times = (datetime(2025, 12, 12, 12),)
+    _live_bucket(tmp_path, monkeypatch, run, times, drop={"height_of_orography"})
+    assert ukv.live_missing(run, times) == [
+        ukv.live_key(run, times[0], "height_of_orography")]
+    before = datetime(2025, 12, 11, 21)
+    _live_bucket(tmp_path, monkeypatch, before, times, drop={"height_of_orography"})
+    assert ukv.live_missing(before, times) == []
 
 
 def test_live_run_missing_every_height_name_is_incomplete(tmp_path, monkeypatch):

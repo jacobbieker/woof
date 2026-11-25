@@ -731,10 +731,17 @@ _LIVE_ALIASES = {
 }
 
 
-#: Objects a run may lack.  Runs before 2025-12-12 publish no
-#: ``height_of_orography``; their terrain is derived from the first hour's
-#: surface pressure, as for the archive, which publishes none.
-_LIVE_OPTIONAL = frozenset({"height_of_orography"})
+#: Objects a run may lack, and the first run known to publish each.  Runs
+#: up to 2025-12-11 publish no ``height_of_orography`` (bisected on the 09Z
+#: runs); their terrain is derived from the first hour's surface pressure,
+#: as for the archive, which publishes none.  From the cut-over the object
+#: is required: it posts about 15 minutes after a lead's other objects, so
+#: a run still posting must not pass as complete without it.
+_LIVE_OPTIONAL = {"height_of_orography": datetime(2025, 12, 12, 9)}
+
+
+def _live_required(run: datetime, product: str) -> bool:
+    return product not in _LIVE_OPTIONAL or run >= _LIVE_OPTIONAL[product]
 
 
 #: netCDF4/HDF5 is built without thread safety: one decode at a time.
@@ -783,7 +790,7 @@ def live_missing(run: datetime, times) -> list[str]:
     for valid in times:
         listed = live_listing(run, valid)
         missing += [live_key(run, valid, product) for product in _LIVE_OBJECTS
-                    if product not in _LIVE_OPTIONAL
+                    if _live_required(run, product)
                     and live_object_key(run, valid, product, listed) is None]
         if missing:
             # One absent lead decides it; the rest need not be listed.
@@ -886,7 +893,7 @@ def read_live(run: datetime, valid: datetime, regrid: Regridder, staging: Path,
         return values
 
     products = [product for product in _LIVE_OBJECTS
-                if product not in _LIVE_OPTIONAL
+                if _live_required(run, product)
                 or live_object_key(run, valid, product, listed) is not None]
     with ThreadPoolExecutor(max_workers=workers) as pool:
         native = dict(zip(products, pool.map(read, products)))
@@ -1304,10 +1311,11 @@ def _publish_front_door(out: Path, files: list[dict], first: datetime) -> None:
                                   fetch_routes.render_prep_command(tokens) + "\n")
 
 
-def _file_attributes(store: str, origin: str, land: str, first: datetime) -> dict[str, str]:
+def _file_attributes(store: str, origin: str, land: str, first: datetime,
+                     derived: bool) -> dict[str, str]:
     land_store = ERA5_STORE if land == "era5" else GFS_HOST
     terrain = ("the hypsometric height of the "
-               f"{first:%Y-%m-%dT%H}Z surface pressure" if store == "archive"
+               f"{first:%Y-%m-%dT%H}Z surface pressure" if derived
                else "the run's published height_of_orography")
     return {
         "title": "UKV (Met Office UK deterministic 2 km) regridded for woof",
@@ -1404,7 +1412,11 @@ def acquire(*, cycle: datetime, hours: int, cadence: int | None, area,
                         land_receipts.append(stamp["land_state"])
                         if terrain is None:
                             terrain = _read_terrain(path)
-                            terrain_from = stamp["entry"].get("terrain_from")
+                            # Stamps from before terrain_from was recorded:
+                            # the store decides, as it did then.
+                            terrain_from = stamp["entry"].get("terrain_from") or (
+                                "derived from the surface pressure at " + times[0].isoformat()
+                                if plan.store == "archive" else "published orography")
                         continue
                     say(f"fetch ukv: {valid:%Y-%m-%dT%H}Z {number}/{len(times)} reading UKV "
                         f"and {land.upper()}")
@@ -1451,7 +1463,8 @@ def acquire(*, cycle: datetime, hours: int, cadence: int | None, area,
                     fields.update(land_fields)
                     fields["surface_altitude"] = terrain
                     write_netcdf(path, valid, latitude, longitude, fields,
-                                 _file_attributes(plan.store, origin, land, times[0]))
+                                 _file_attributes(plan.store, origin, land, times[0],
+                                                  terrain_from != "published orography"))
                     entry = {"path": path.name, "bytes": path.stat().st_size,
                              "sha256": _sha256(path), **record}
                     _json(_stamp(path), {"request": identity, "entry": entry,
@@ -1472,10 +1485,7 @@ def acquire(*, cycle: datetime, hours: int, cadence: int | None, area,
             "grid": {"latitude": [float(latitude[0]), float(latitude[-1]), len(latitude)],
                      "longitude": [float(longitude[0]), float(longitude[-1]), len(longitude)],
                      "native_window": list(regrid.window)},
-            # Stamps from before terrain_from was recorded: the store decides.
-            "terrain": {"from": terrain_from or (
-                            "derived from the surface pressure at " + times[0].isoformat()
-                            if plan.store == "archive" else "published orography"),
+            "terrain": {"from": terrain_from,
                         "min_m": float(terrain.min()), "max_m": float(terrain.max())},
             "land_state_source": land, "land_state": land_receipts,
             "total_bytes": sum(entry["bytes"] for entry in files),
