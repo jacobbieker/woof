@@ -259,6 +259,25 @@ and `If-Match`), which a general-purpose bucket supports. It deletes each
 lease object as the job settles, so the policy grants `s3:DeleteObject` on
 the queue prefix.
 
+**A store in another account.** When the stores live in a bucket the job
+role cannot write, such as a Source Cooperative repository, give the Icechunk
+writer its own keys. `rw_icechunk` reads `WOOF_ICECHUNK_AWS_ACCESS_KEY_ID` and
+`WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY` (both or neither, plus an optional
+`WOOF_ICECHUNK_AWS_SESSION_TOKEN`) and `WOOF_ICECHUNK_AWS_ENDPOINT_URL` for
+the store alone. The queue, the inputs, the static data and `result_url` keep
+the job role. Map the variables from Secrets Manager in the job definition's
+`secrets`, with an execution role that may read the secret, so no key is in
+the job document, the queue or the logs:
+
+```json
+"secrets": [
+  {"name": "WOOF_ICECHUNK_AWS_ACCESS_KEY_ID",
+   "valueFrom": "arn:aws:secretsmanager:us-west-2:ACCOUNT:secret:NAME:AWS_ACCESS_KEY_ID::"},
+  {"name": "WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY",
+   "valueFrom": "arn:aws:secretsmanager:us-west-2:ACCOUNT:secret:NAME:AWS_SECRET_ACCESS_KEY::"}
+]
+```
+
 ## 6. Render the two fleets
 
 ```bash

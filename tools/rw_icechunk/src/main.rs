@@ -5,6 +5,7 @@ use futures::{StreamExt, TryStreamExt, stream};
 use icechunk::{
     Repository, Store,
     format::ByteRange,
+    config::{S3Credentials, S3StaticCredentials},
     storage::{S3Options, new_local_filesystem_storage, new_s3_storage},
 };
 use netcdf_reader::{NcAttribute, NcFile, NcSliceInfo, NcSliceInfoElem, NcType};
@@ -354,6 +355,43 @@ fn chunks(a: &Array, time: usize, shape: &[usize]) -> Result<Vec<(String, Bytes)
         })
         .collect()
 }
+/// Credentials for the store alone, when it lives in another account than
+/// the job's own identity: `WOOF_ICECHUNK_AWS_ACCESS_KEY_ID` and
+/// `WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY` (both or neither), with an optional
+/// `WOOF_ICECHUNK_AWS_SESSION_TOKEN`.  Unset, the ambient chain (instance
+/// role, job role, `AWS_PROFILE`, `AWS_*`) is used as before, so the queue,
+/// inputs and results keep the job's identity either way.
+fn store_credentials(
+    var: impl Fn(&str) -> Option<String>,
+) -> Result<Option<S3Credentials>> {
+    let key = var("WOOF_ICECHUNK_AWS_ACCESS_KEY_ID").filter(|s| !s.is_empty());
+    let secret = var("WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY").filter(|s| !s.is_empty());
+    match (key, secret) {
+        (None, None) => Ok(None),
+        (Some(access_key_id), Some(secret_access_key)) => {
+            Ok(Some(S3Credentials::Static(S3StaticCredentials {
+                access_key_id,
+                secret_access_key,
+                session_token: var("WOOF_ICECHUNK_AWS_SESSION_TOKEN")
+                    .filter(|s| !s.is_empty()),
+                expires_after: None,
+            })))
+        }
+        _ => bail!(
+            "WOOF_ICECHUNK_AWS_ACCESS_KEY_ID and WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY \
+             must be set together"
+        ),
+    }
+}
+
+/// The store's endpoint: `WOOF_ICECHUNK_AWS_ENDPOINT_URL` for the store
+/// alone, else the ambient `AWS_ENDPOINT_URL_S3` / `AWS_ENDPOINT_URL`.
+fn store_endpoint(var: impl Fn(&str) -> Option<String>) -> Option<String> {
+    ["WOOF_ICECHUNK_AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_S3", "AWS_ENDPOINT_URL"]
+        .into_iter()
+        .find_map(|name| var(name).filter(|s| !s.is_empty()))
+}
+
 async fn repository(url: &str) -> Result<Repository> {
     let storage = if let Some(s) = url.strip_prefix("s3://") {
         let (bucket, prefix) = s
@@ -363,9 +401,9 @@ async fn repository(url: &str) -> Result<Repository> {
             !bucket.is_empty() && !prefix.trim_matches('/').is_empty(),
             "S3 bucket and prefix must be nonempty"
         );
-        let endpoint = std::env::var("AWS_ENDPOINT_URL_S3")
-            .or_else(|_| std::env::var("AWS_ENDPOINT_URL"))
-            .ok();
+        let env = |name: &str| std::env::var(name).ok();
+        let endpoint = store_endpoint(env);
+        let credentials = store_credentials(env)?;
         let mut opts = S3Options::default()
             .with_allow_http(endpoint.as_ref().is_some_and(|s| s.starts_with("http://")))
             .with_force_path_style(endpoint.is_some());
@@ -376,7 +414,7 @@ async fn repository(url: &str) -> Result<Repository> {
             opts,
             bucket.into(),
             Some(prefix.trim_matches('/').into()),
-            None,
+            credentials,
             Vec::new(),
             Vec::new(),
             None,
@@ -591,5 +629,67 @@ async fn main() {
     if let Err(e) = result {
         eprintln!("rw_icechunk: {e:#}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: BTreeMap<String, String> =
+            pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        move |name: &str| map.get(name).cloned()
+    }
+
+    #[test]
+    fn store_credentials_absent_uses_ambient_chain() {
+        assert!(store_credentials(vars(&[])).unwrap().is_none());
+        assert!(store_credentials(vars(&[("WOOF_ICECHUNK_AWS_ACCESS_KEY_ID", "")]))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn store_credentials_static_pair_and_token() {
+        let got = store_credentials(vars(&[
+            ("WOOF_ICECHUNK_AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+            ("WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY", "secret"),
+            ("WOOF_ICECHUNK_AWS_SESSION_TOKEN", "token"),
+        ]))
+        .unwrap();
+        match got {
+            Some(S3Credentials::Static(c)) => {
+                assert_eq!(c.access_key_id, "AKIDEXAMPLE");
+                assert_eq!(c.secret_access_key, "secret");
+                assert_eq!(c.session_token.as_deref(), Some("token"));
+            }
+            other => panic!("expected static credentials, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn store_credentials_half_a_pair_is_refused() {
+        let err = store_credentials(vars(&[("WOOF_ICECHUNK_AWS_ACCESS_KEY_ID", "AKID")]))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("must be set together"), "{err}");
+        assert!(!err.contains("AKID"), "the key must not reach the message: {err}");
+    }
+
+    #[test]
+    fn store_endpoint_prefers_the_store_variable() {
+        assert_eq!(
+            store_endpoint(vars(&[
+                ("AWS_ENDPOINT_URL_S3", "https://ambient"),
+                ("WOOF_ICECHUNK_AWS_ENDPOINT_URL", "https://store"),
+            ])),
+            Some("https://store".into())
+        );
+        assert_eq!(
+            store_endpoint(vars(&[("AWS_ENDPOINT_URL", "https://generic")])),
+            Some("https://generic".into())
+        );
+        assert_eq!(store_endpoint(vars(&[])), None);
     }
 }
