@@ -851,3 +851,31 @@ def test_gfs_cycle_falls_back_while_the_newest_has_not_posted(monkeypatch):
     times = (datetime(2026, 10, 16, 15), datetime(2026, 10, 16, 18))
     assert ukv.choose_gfs_cycle(datetime(2026, 10, 16, 15), times) == datetime(2026, 10, 16, 6)
     assert asked[-1].endswith("gfs.t06z.pgrb2.0p25.f012.idx")
+
+
+def test_an_era5_hole_inside_the_published_span_sends_the_window_to_gfs():
+    times = [datetime(2026, 11, 17, 9) + timedelta(hours=h) for h in range(52)]
+    through = datetime(2026, 11, 19, 23)
+    hole = {datetime(2026, 11, 18, h) for h in range(24)}
+    assert _REAL_LAND_STATE_SOURCE(times, era5_through=through,
+                                   era5_holds=lambda valid: valid not in hole) == "gfs"
+    assert _REAL_LAND_STATE_SOURCE(times, era5_through=through,
+                                   era5_holds=lambda valid: True) == "era5"
+
+
+def test_a_window_past_the_published_span_is_gfs_without_probing():
+    times = [datetime(2026, 11, 19, 9) + timedelta(hours=h) for h in range(52)]
+
+    def probe(valid):
+        raise AssertionError("no hour is probed past the span")
+
+    assert _REAL_LAND_STATE_SOURCE(times, era5_through=datetime(2026, 11, 19, 23),
+                                   era5_holds=probe) == "gfs"
+
+
+@pytest.mark.network
+@pytest.mark.skipif(os.environ.get("WOOF_NETWORK_TESTS") != "1",
+                    reason="reads Google's ARCO ERA5 copy")
+def test_arco_misses_2026_11_18():
+    assert ukv.era5_hour_published(datetime(2026, 11, 17, 23))
+    assert not ukv.era5_hour_published(datetime(2026, 11, 18, 0))
