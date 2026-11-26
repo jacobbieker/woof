@@ -174,9 +174,10 @@ def test_native_roundtrip_atomic_resume(tmp_path):
 
 
 @pytest.mark.parametrize('fmt', ['NETCDF4_CLASSIC', 'NETCDF4'])
-def test_native_roundtrip_netcdf4_char_times(tmp_path, fmt):
-    # NetCDF-4 stores NC_CHAR (WRF's Times) as a one-byte fixed HDF5 string.
-    exercise_writer(tmp_path, fmt=fmt)
+@pytest.mark.parametrize('cells', [False, True], ids=['wrf', 'mpas'])
+def test_native_roundtrip_netcdf4_char_times(tmp_path, fmt, cells):
+    # NetCDF-4 stores NC_CHAR (WRF's Times, MPAS's xtime) as a one-byte fixed HDF5 string.
+    exercise_writer(tmp_path, cells=cells, fmt=fmt)
 
 
 def test_netcdf4_vlen_string_is_refused_not_omitted(tmp_path):

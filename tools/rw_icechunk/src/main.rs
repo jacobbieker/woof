@@ -183,6 +183,15 @@ fn read_array(file: &NcFile, v: &netcdf_reader::NcVariable, frame: usize) -> Res
             } else {
                 0
             };
+            ensure!(
+                offset + n <= all.len(),
+                "{} holds {} bytes; frame {} needs bytes {}..{}",
+                v.name,
+                all.len(),
+                frame,
+                offset,
+                offset + n
+            );
             ("uint8".into(), 1, all[offset..offset + n].to_vec())
         }
         _ => bail!(
