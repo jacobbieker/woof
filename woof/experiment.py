@@ -3676,13 +3676,20 @@ def delayed_start_root_step_error(exp: ExperimentConfig,
     i.e. inside that root step and from the parent's state before the
     start, then holds the nest's clock at its namelist start until the
     parent catches up.  That early-birth shape is not representable here,
-    so the start must lie on the root-step lattice.  Adaptive stepping
-    lands on a delayed start as a deadline and is exempt.
+    so the start must lie on the root-step lattice.  Exempt: an adaptive
+    tree (any domain adaptive, as :func:`woof.core.clock.resolve_clock`
+    reads it) lands on a delayed start as a deadline; a spawned nest is
+    born at a leg boundary, not its configured start; and a nest alive at
+    the experiment start (offset <= 0, e.g. a restart leg) has no birth.
     """
     dc = exp.domain(grid_id)
-    if dc.parent_id == 0 or getattr(dc.run, "use_adaptive_time_step", False):
+    if (dc.parent_id == 0 or getattr(dc, "spawn", None) is not None
+            or any(getattr(d.run, "use_adaptive_time_step", False)
+                   for d in exp.domains)):
         return None
     offset = exp.domain_start_offset_exact(grid_id)
+    if offset <= 0:
+        return None
     root_dt = exp.dt_exact(exp.root.grid_id)
     root_steps = offset / root_dt
     if root_steps.denominator == 1:

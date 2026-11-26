@@ -899,6 +899,23 @@ def test_delayed_nest_start_inside_a_root_step_is_refused():
         validate_boundary_timing(exp, 60, source="test forcing")
 
 
+def test_root_step_rule_exempts_adaptive_trees_and_live_nests():
+    """Adaptive stepping on ANY domain (resolve_clock's reading) lands on
+    the start as a deadline, and a nest alive at the experiment start has
+    no birth to land, so neither is refused."""
+    from woof.experiment import delayed_start_root_step_error
+
+    exp = _parent_born_chain({2: 60, 3: 80})
+    assert delayed_start_root_step_error(exp, 3) is not None
+    adaptive_root = dataclasses.replace(exp, domains=tuple(
+        dataclasses.replace(dc, run=dataclasses.replace(
+            dc.run, use_adaptive_time_step=True))
+        if dc.parent_id == 0 else dc for dc in exp.domains))
+    assert delayed_start_root_step_error(adaptive_root, 3) is None
+    alive = _parent_born_chain({2: 0, 3: 0})
+    assert delayed_start_root_step_error(alive, 3) is None
+
+
 def test_delayed_grandchild_on_root_step_is_born_and_balances_refl():
     """The same chain with the grandchild moved onto a root step: it is
     born there, writes its analysis frame, and every REFL_10CM stash its
