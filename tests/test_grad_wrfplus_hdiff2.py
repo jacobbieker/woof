@@ -64,7 +64,10 @@ CONFIGS = [dict(nz=5, ny=4, nx=5), dict(nz=5, ny=4, nx=5, boundary_x=1, boundary
            dict(nz=4, ny=4, nx=5, boundary_x=1), dict(nz=4, ny=5, nx=4, boundary_y=1),
            dict(nz=3, ny=1, nx=2), dict(nz=3, ny=3, nx=1, boundary_y=1),
            dict(nz=4, ny=3, nx=4, boundary_x=1, boundary_y=1, moist=1),
-           dict(nz=4, ny=4, nx=3, moist=1)]
+           dict(nz=4, ny=4, nx=3, moist=1),
+           # bounded axes of length 2, where the remapped end faces coincide
+           dict(nz=3, ny=2, nx=2, boundary_x=1, boundary_y=1),
+           dict(nz=4, ny=2, nx=3, boundary_x=1)]
 
 STRICT_ENV = {"GPUWM_WRF_EXACT": "1", "WOOF_WRF_EXACT_DIAGNOSTICS": "1",
               "WOOF_WRF_EXACT_ADVECTION": "1", "GPUWM_WRF_EXACT_DIFFUSION": "1",
