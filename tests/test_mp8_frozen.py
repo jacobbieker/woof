@@ -901,8 +901,15 @@ FROZEN_MODULE_DIGESTS = {
         # Previously 9eb33736/5e418a4f; then 78cf5577/0a8949d9 until one
         # word of the header comment changed for the banned-word census
         # (no statement moved).
-        'd5d3e83ef1094a0202b68b297dd1aad357604327ce607a9aad87fc0772fb2db0',
-        '387f2e0d20c9820963853e606a88f71484c3096f3ae0a4a43f29828607ef1b76'),
+        #
+        # RE-PINNED 2026-11-26 (FQ11 kf_capped_downdraft_rain_floor): the
+        # floor moves into an #ifdef KF_CAPPED_DOWNDRAFT_RAIN_FLOOR block;
+        # without the define the unit is the pin above with WRF's bare
+        # pptflx = trppt - tder (tests/test_kf_capped_downdraft_rain_floor.py).
+        # The correct-mode default compiles the define, the pin above's
+        # program.  Previously d5d3e83e/387f2e0d.
+        'b98a64d1c8c8c414cd7100b63f792e8c2504f2719f243f01b6e42d6fa3d78f60',
+        'a48a1a4b3293cc46af03361d5f9877a829c3ef1b11233fe17d35f2e55f20bd13'),
     'lbc_flow': (
         # 4febd041f supplies resolved WDM6/NSSL inflow concentrations.
         # docs/dev/qnn-specified-inflow.md records 4 CPU + 10 GPU

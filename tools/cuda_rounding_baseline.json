@@ -2241,7 +2241,7 @@
     "call_sha256": "bc97ef0ac9d4187fe203db9e86eb73dcacbbe76cb68fbf60b1388d6098f98439",
     "constructor": "compile_using_nvrtc",
     "factory": "_kf_module",
-    "factory_sha256": "9240c5d5fe9c73177185a0511eb80a088517bebee9d63a95039e0877a5fad084",
+    "factory_sha256": "06186c732d2d4e5c0d5f68acb1575f6fc74c2f3026359f490c9f3ef3d68f7810",
     "file": "woof/core/kf.py",
     "status": "unresolved"
    },
@@ -3673,7 +3673,7 @@
    },
    {
     "file": "woof/core/kernels/kf.cu",
-    "sha256": "d5d3e83ef1094a0202b68b297dd1aad357604327ce607a9aad87fc0772fb2db0"
+    "sha256": "b98a64d1c8c8c414cd7100b63f792e8c2504f2719f243f01b6e42d6fa3d78f60"
    },
    {
     "file": "woof/core/kernels/kf_old.cu",
@@ -3685,7 +3685,7 @@
    },
    {
     "file": "woof/core/kernels/kfcup.cu",
-    "sha256": "61f6342bd981595015499fbca62e222c3413139995a9a9cb9d0e76e9d2aad817"
+    "sha256": "0de29106a1ecef3f6e63416b449108859a22a0dc2c39d90ec936319fb2c6e08f"
    },
    {
     "file": "woof/core/kernels/km5.cu",
@@ -3801,7 +3801,7 @@
    },
    {
     "file": "woof/core/kernels/mskf.cu",
-    "sha256": "28d338515dacf93c1b2664547feca66ae70f4f7083fb97c14b9fb0ef117a4708"
+    "sha256": "fd4cc745a7b6962eaa1e61a9459085b2979b9069a796e64ce0b3073b0d14c893"
    },
    {
     "file": "woof/core/kernels/mskf_aerosol.cuh",
@@ -5743,7 +5743,7 @@
    },
    {
     "file": "woof/core/kf.py",
-    "sha256": "9580c7938b5a6f2498a33adbdc99494d10776116eb4970b72eae53bec9ce620f"
+    "sha256": "bcb8a8c5b9b351ebbda076d2a6e344b89819d77b986b697fc86e8bd708717cf2"
    },
    {
     "file": "woof/core/microphysics.py",

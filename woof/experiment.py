@@ -54,6 +54,7 @@ from woof import simulated_radar_config as simulated_radar_module
 from woof.config_keys import KeyRow, key_rows
 from woof.config import (DEFAULT_COLUMN_CHUNK, RADAR_HEATING_OFF, RadarHeatingConfig,
                           KF_FAMILY_CU_SCHEMES, THOMPSON_RAIN_SNOW_MP,
+                          KF_CAPPED_DOWNDRAFT_CU,
                           EXPLICIT_HORIZONTAL_DIFFUSION_LIMIT,
                           EPSSM_AUTO,
                           GRELL_FAMILY_CU_PHYSICS, GRELL_FAMILY_DEFAULTS,
@@ -338,6 +339,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The RRTMG longwave model-top correction (FQ6), on the same terms: a
     # [shared] value reaches the legacy-RRTMG longwave domains only.
     "rrtmg_lw_model_top",
+    # The Kain-Fritsch capped-downdraft rain floor (FQ11), on the same
+    # terms: a [shared] value reaches the cu_physics = 1, 10, 11 domains only.
+    "kf_capped_downdraft_rain_floor",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -4485,6 +4489,14 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         _runs_rrtmg_lw_legacy(lambda name, default, dom=dom: physics_mode.settings.get(
             name, dom.get(name, shared.get(name, default))))
         for dom in domain_tables)
+    # The opt-in Kain-Fritsch capped-downdraft rain floor is read only by
+    # KF-eta, KF-CuP and MSKF (cu_physics = 1, 10, 11), on the same terms.
+    tree_runs_kf_capped = any(
+        physics_mode.settings.get(
+            "cu_physics",
+            dom.get("cu_physics",
+                    shared.get("cu_physics", RunConfig.cu_physics))) in KF_CAPPED_DOWNDRAFT_CU
+        for dom in domain_tables)
     # The same rule for the Grell-family keys.  clos_choice and ishallow
     # are read only where cu_physics = 3, and the wizard writes them in
     # [shared]; on a tree whose cumulus-off child sits under a
@@ -5117,6 +5129,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     lambda name, default: kw.get(name, default))
                 and "rrtmg_lw_model_top" not in dom):
             kw["rrtmg_lw_model_top"] = False
+        if (tree_runs_kf_capped
+                and kw.get("cu_physics", RunConfig.cu_physics) not in KF_CAPPED_DOWNDRAFT_CU
+                and "kf_capped_downdraft_rain_floor" not in dom):
+            kw["kf_capped_downdraft_rain_floor"] = False
         # an explicit woof_quirk_corrections ('all' / 'none') sets every
         # correction key the domain does not set itself (quirk_corrections).
         from woof.quirk_corrections import apply_run_corrections
@@ -6534,6 +6550,7 @@ def _public_config_value(value):
                                   ("noah_smc_floor_booking", False),
                                   ("thompson_rain_snow_closure", False),
                                   ("rrtmg_lw_model_top", False),
+                                  ("kf_capped_downdraft_rain_floor", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

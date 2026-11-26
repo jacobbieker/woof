@@ -2968,7 +2968,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3367,
+      "line": 3374,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -7882,7 +7882,7 @@
     },
     {
       "file": "woof/core/kf.py",
-      "line": 388,
+      "line": 409,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",

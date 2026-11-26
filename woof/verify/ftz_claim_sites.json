@@ -415,7 +415,7 @@
     },
     {
       "file": "README.md",
-      "line": 1180,
+      "line": 1193,
       "kind": "prose",
       "anchor": "pairs was checked under both subnormal modes",
       "anchor_sha256": "2d72bca9880fb9136b484ba3ebdab81af419d5df3061964499ecb9120e7d562e",
@@ -1449,7 +1449,7 @@
     },
     {
       "file": "docs/public/CONFIGURATION.md",
-      "line": 830,
+      "line": 841,
       "kind": "prose",
       "anchor": "| `ysu_version` | no stock namelist spelling | `\"wrf_480\"` | `\"wrf_480\"`, `\"wrf_461\"` | Corrected YSU default. WRF 4.8 MMM `550b5b4` removes the old efficiency offset and caps `0.2*8*tmp1` at 0.4. `[shared]` selects the generation; namelist import uses the corrected default and preserves an explicit physics-selector comment (`! gpuwm-physics-selectors-v1: {...}`). `wrf_461` under default arithmetic reproduces 2.8.9's YSU kernel, under its restart identity. Under `GPUWM_WRF_EXACT=1` it matches WRF 4.6.1 `bl_ysu_run` word for word on the 1,188-column test set, with the same declared exceptions as `wrf_480` (YSU surface drag removed on mixed BEP urban columns; the bounded PBL-height search on four-level columns), under its own restart identity, so a strict-mode `wrf_461` checkpoint from 2.9.0 or earlier is refused rather than continued with different arithmetic. Four-level shallow columns use the declared bounded PBL-height search and zero final TKE word. A generation change is refused on restart; old headers without a selector mean `wrf_461`. The corrected path uses the shared no-FTZ loader and WOOF's own math routines |",
       "anchor_sha256": "fce15ee2f0dbd461c7726780e0bbe513e810bf65e03e7facb97c388cdb96fb51",
@@ -1889,7 +1889,7 @@
     },
     {
       "file": "docs/public/PHYSICS.md",
-      "line": 3691,
+      "line": 3712,
       "kind": "prose",
       "anchor": "Default execution uses CUDA hardware math. `GPUWM_WRF_EXACT=1` preserves subnormals and disables contraction for bitwise native replay. Real native replays also set `GPUWM_WRF_GLIBC` to the referee build's glibc version; the regenerated captures (test host A, RTX 4090) use `2.43`. The column grid runs in one launch with a bounded scratch pool. Independent CO2 profiles and ozone/table initialization run in parallel on the GPU. Cloud bounds from KF, Grell, Grell-Freitas and New SAS retain their native levels and sentinels.",
       "anchor_sha256": "1b6bc24d487dee8625fcd34b10969dc4a7b8dd6317a84707058437e7354df051",
@@ -19874,7 +19874,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 1776,
+      "line": 1783,
       "kind": "prose",
       "anchor": "# Re-pinned for the one-instruction subnormal armor (65944605a,",
       "anchor_sha256": "f8669ccb776ae32a1bc06678d0045a43d1465f465da35be7c6e383b9632bc3a2",
@@ -19885,7 +19885,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 1982,
+      "line": 1989,
       "kind": "prose",
       "anchor": "# subnormals, misaligned slices, tails and exact in-place output.",
       "anchor_sha256": "b81f8ee6a167229a59dd7d16414845f21621126cbcd777abf86a64c7add693ac",
@@ -19896,7 +19896,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 2301,
+      "line": 2308,
       "kind": "prose",
       "anchor": "# columns whose WRF words are subnormal.  Previously 0028b0c2/d6798c07",
       "anchor_sha256": "2273552ce8c301938067130e83c1fde912e3fbce040eb3053f36ad2882d078e0",
@@ -19907,7 +19907,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 2392,
+      "line": 2399,
       "kind": "prose",
       "anchor": "# number: the registry and the FTZ claim census cite them).  Reading:",
       "anchor_sha256": "4a90007bd681f41f447080bf160abb38d140001fc74d06e1c068d6c1b24682f2",
@@ -19918,7 +19918,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 2394,
+      "line": 2401,
       "kind": "prose",
       "anchor": "# and after (compute_120 and compute_89, -std=c++17 -ftz=true, the",
       "anchor_sha256": "912c01b4eba12ceb0b9a38e7e12f2d6be4678c197ef8beb37531d3bad6e96fda",
@@ -19929,7 +19929,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 2403,
+      "line": 2410,
       "kind": "prose",
       "anchor": "# (ysu_topo.cuh), because sm_120 DAZes a positive subnormal br in a",
       "anchor_sha256": "95213682b1f4ff47858a38971c980c067c00293727981d421601d9355547e059",
@@ -19940,7 +19940,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 2425,
+      "line": 2432,
       "kind": "prose",
       "anchor": "# 11 FTZ-flushed subnormal tendencies; the BEP table and the topo_wind",
       "anchor_sha256": "1f3263dcf2348d5c9cc210e13e4f0207ed41f6aadff8aae306ad531d26843353",
@@ -19951,7 +19951,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3496,
+      "line": 3503,
       "kind": "prose",
       "anchor": "\"mynn_surface\": (\"mynn_libm.cuh\", \"surface_subnormal.cuh\"),",
       "anchor_sha256": "24b08eabb0e45d67c39c2086348cd5c3537c319c8eafd2b64b5f5d177974101b",
@@ -70881,7 +70881,7 @@
     },
     {
       "file": "woof/core/mskf.py",
-      "line": 248,
+      "line": 250,
       "kind": "prose",
       "anchor": "from woof.core.kernels.no_ftz import get_kernel_no_ftz as get_kernel",
       "anchor_sha256": "fad51fdea18c01d2d23a3256b0584bccb8a8826f2cd4765fe107e267825b48ce",
@@ -74038,7 +74038,7 @@
     },
     {
       "file": "woof/kernel_prewarm.py",
-      "line": 283,
+      "line": 291,
       "kind": "prose",
       "anchor": "from woof.core.kernels.no_ftz import load_module_no_ftz",
       "anchor_sha256": "fa7c642f6f4fe5c6397fe27a514d033cdde967f743f5481ae9e752e8b4a590e5",
@@ -74049,7 +74049,7 @@
     },
     {
       "file": "woof/kernel_prewarm.py",
-      "line": 294,
+      "line": 309,
       "kind": "prose",
       "anchor": "jobs.append((label, load_module_no_ftz.__wrapped__, (name, defines)))",
       "anchor_sha256": "e60507f955952ab7a5078a680e07da42567a0847453ed1dd56e12b47540b93b5",

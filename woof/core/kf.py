@@ -370,10 +370,26 @@ def _device_table():
 KF_MODULE_OPTIONS = ("-std=c++17", "--fmad=false", "--ftz=false")
 KF_MODULE_KEY = "woof.core.kernels:kf"
 
+#: RunConfig.kf_capped_downdraft_rain_floor (finding FQ11): kf.cu, kfcup.cu
+#: and mskf.cu each carry one #ifdef block that floors the capped
+#: downdraft's precipitation flux PPTFLX = TRPPT - TDER at zero.  Without
+#: the define each unit is WRF's bare subtraction.
+CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES = (("KF_CAPPED_DOWNDRAFT_RAIN_FLOOR", 1),)
+
+
+def capped_downdraft_rain_floor_due(cfg) -> bool:
+    """Whether RunConfig.kf_capped_downdraft_rain_floor (finding FQ11)
+    reaches ``cfg``'s cumulus: on (correct mode's default) and read by the
+    selected scheme (cu_physics = 1, 10 or 11)."""
+    from woof.quirk_corrections import run_reads
+    return run_reads(cfg, "kf_capped_downdraft_rain_floor")
+
 
 @lru_cache(maxsize=None)
-def _kf_module(device, trigger=1):
-    """kernels/kf.cu for one device, compiled unflushed and uncontracted."""
+def _kf_module(device, trigger=1, rain_floor=False):
+    """kernels/kf.cu for one device, compiled unflushed and uncontracted.
+    ``rain_floor``: RunConfig.kf_capped_downdraft_rain_floor (FQ11), the
+    unit compiled with its define."""
     import cupy as cp
     from woof import nvrtc_ptx_cache as compiler
     from woof.certify.kernel_manifest import record_module
@@ -384,6 +400,11 @@ def _kf_module(device, trigger=1):
     if trigger != 1:
         source = f"#define KF_TRIGGER {int(trigger)}\n" + source
     key = KF_MODULE_KEY if trigger == 1 else f"{KF_MODULE_KEY}:trigger{trigger}"
+    if rain_floor:
+        source = "".join(f"#define {name} {value}\n" for name, value
+                         in CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES) + source
+        key += "[" + ",".join(f"{name}={value}" for name, value
+                              in CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES) + "]"
     with cp.cuda.Device(device), observe_module_compile(key):
         binary, _ = compiler.compile_using_nvrtc(
             source, KF_MODULE_OPTIONS, None, "kf.cu")
@@ -396,18 +417,20 @@ def _kf_module(device, trigger=1):
     return module
 
 
-def _kf_function(name: str, trigger=1):
+def _kf_function(name: str, trigger=1, rain_floor=False):
     """One entry of kernels/kf.cu on the current device."""
     import cupy as cp
 
-    return _kf_module(cp.cuda.runtime.getDevice(), trigger).get_function(name)
+    return _kf_module(cp.cuda.runtime.getDevice(), trigger,
+                      bool(rain_floor)).get_function(name)
 
 
 def launch_kf(u, v, temperature, qv, pressure, rho, exner, dz, w0avg, *,
               dx: float, dt: float, cudt_minutes: float,
               phase_mode: KFPhaseMode = KFPhaseMode.SEPARATE_ICE_SNOW,
               f_qr: bool = True, cloud_diagnostics: bool = False,
-              trigger: int = 1, rqvften=None, tpart=None):
+              trigger: int = 1, rqvften=None, tpart=None,
+              rain_floor: bool = False):
     """Run WRF KF (``KF_eta_PARA``) for a batch of FP32 device columns.
 
     The inputs are KF_eta_CPS's own: ``temperature`` (T), ``qv``,
@@ -429,7 +452,8 @@ def launch_kf(u, v, temperature, qv, pressure, rho, exner, dz, w0avg, *,
     0-based, -1 when the column did not convect).  With
     ``cloud_diagnostics`` it also returns WRF's CLDFRA_DP_KF,
     CLDFRA_SH_KF, QC_KF and QI_KF as ``cldfra_dp``/``cldfra_sh``/
-    ``qc_kf``/``qi_kf``.
+    ``qc_kf``/``qi_kf``.  ``rain_floor`` is RunConfig.
+    kf_capped_downdraft_rain_floor (FQ11); the default is WRF's arithmetic.
     """
     import cupy as cp
 
@@ -481,7 +505,7 @@ def launch_kf(u, v, temperature, qv, pressure, rho, exner, dz, w0avg, *,
         raise ValueError("KF trigger must be integer 1, 2 or 3")
     if trigger == 2 and tpart is None:
         tpart = trigger2_perturbations(temperature, rqvften, dz)
-    kernel = _kf_function("kf_column", trigger)
+    kernel = _kf_function("kf_column", trigger, rain_floor)
     ncol = ny * nx
     # The column arrays live in a global workspace sized to the threads in
     # flight; columns go in tiles of `tile`, each launched with the same
@@ -1045,7 +1069,8 @@ class KainFritsch:
             phase_mode=phase_mode,
             trigger=cfg.kfeta_trigger, rqvften=getattr(state, "rqvften", None),
             f_qr=kf_has_rain_for_microphysics(cfg.mp_physics),
-            cloud_diagnostics=cfg.cu_rad_feedback)
+            cloud_diagnostics=cfg.cu_rad_feedback,
+            rain_floor=capped_downdraft_rain_floor_due(cfg))
         from woof.core.physics import _NativeKFCumulusResult
 
         # PRATEC = PPTFLX*(1-FBFRC)/DXSQ in mm s-1 and NCA come straight
@@ -1161,8 +1186,11 @@ def kfcup_workspace_floats(nz: int, columns: int, numbins: int) -> int:
 
 
 def launch_kfcup_columns(buffers, *, dt, dx, ntst, numbins, thbinsize, rbinsize,
-                         mindeepfreq, minshallowfreq, flags, workspace=None, status=None):
-    """Run the complete CuP column on device, retaining all output words."""
+                         mindeepfreq, minshallowfreq, flags, workspace=None, status=None,
+                         rain_floor=False):
+    """Run the complete CuP column on device, retaining all output words.
+    ``rain_floor`` is RunConfig.kf_capped_downdraft_rain_floor (FQ11); the
+    default is WRF's arithmetic."""
     import cupy as cp
     from woof.core.kernels import get_kernel
     lev=buffers['lev_in']
@@ -1190,7 +1218,12 @@ def launch_kfcup_columns(buffers, *, dt, dx, ntst, numbins, thbinsize, rbinsize,
     if ntst<1 or flags<0 or flags>15:
         raise ValueError('KF-CuP needs positive STEPCU and a four-bit phase mask')
     table=load_kf_table()
-    kernel=get_kernel('kfcup','kfcup_column')
+    if rain_floor:
+        from woof.core.kernels import get_kernel_int_defines
+        kernel=get_kernel_int_defines('kfcup','kfcup_column',
+                                      CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES)
+    else:
+        kernel=get_kernel('kfcup','kfcup_column')
     # At most one 32-thread block per SM is in this allocation. A larger
     # domain reuses the same workspace over disjoint column tiles.
     tile=min(ncol,32*int(cp.cuda.Device().attributes['MultiProcessorCount']))
@@ -1319,7 +1352,8 @@ class KFCumulusPotential(KainFritsch):
         flags|=8 if getattr(state,'qs',None) is not None else 0
         launch_kfcup_columns(b,dt=dt,dx=cfg.dx,
             ntst=max(int(np.floor(cfg.cudt_minutes*60/dt+0.5)),1),
-            flags=flags,workspace=self._ws,status=self._cup_status,**{k:getattr(cfg,k,v) for k,v in KFCUP_PARAMETER_DEFAULTS.items() if k!='shallowcu_forced_ra'})
+            flags=flags,workspace=self._ws,status=self._cup_status,
+            rain_floor=capped_downdraft_rain_floor_due(cfg),**{k:getattr(cfg,k,v) for k,v in KFCUP_PARAMETER_DEFAULTS.items() if k!='shallowcu_forced_ra'})
         from woof.core.physics import _NativeKFCumulusResult
         outputs={key:self.cup_levels[i].reshape(nz,ny,nx) for i,key in enumerate(KFCUP_LEVEL_OUTPUTS)}
         # Publish only to held driver fields. Radiation never receives a

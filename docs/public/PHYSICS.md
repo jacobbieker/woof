@@ -2691,6 +2691,27 @@ forcing lanes were zero. It has not been re-measured since those lanes
 were connected; these numbers do not describe the expected behaviour
 of the current engine.
 
+**Correction: `kf_capped_downdraft_rain_floor` (on in correct mode, finding FQ11).**
+When the Kain-Fritsch family's downdraft would evaporate more than the
+updraft rains, WRF caps it (`DDINC = TRPPT/TDER`, `TDER = TDER*DDINC`) and
+forms the rain flux as `PPTFLX = TRPPT - TDER` with no floor
+(`module_cu_kfeta.F:1810-1821`, `module_cu_kfcup.F:2711-2721`,
+`module_cu_mskf.F:5840` of WRF 4.7.1; 4.8.1 is the same). The float64
+answer is 0, but in binary32 `TDER*DDINC` can round above `TRPPT`, and the
+flux is then a few ulp negative: `RAINCV` is negative for the whole `NCA`
+window and `RAINC` accumulates below zero. With the option on, `kf.cu`,
+`kfcup.cu` and `mskf.cu` floor the flux at zero
+(`KF_CAPPED_DOWNDRAFT_RAIN_FLOOR`); without it each unit is WRF's bare
+subtraction byte for byte (`tests/test_kf_capped_downdraft_rain_floor.py`
+strips the block and checks the digest). On the 149-level KF-CuP column
+that drove a hex forecast's `RAINC` negative, WRF's own Fortran (built as
+WRF builds it) and the port's strict arithmetic both give `RAINCV = 0`; the
+port's default arithmetic gives -2.3e-10 mm, and the option gives 0
+(`tests/test_kfcup_capped_downdraft_gpu.py`). On the seven WRF-graded
+capped KF-eta columns WRF gives 0 and the floor moves no word. It is per
+domain, read only under `cu_physics = 1, 10, 11`, and not scored against
+observations.
+
 **Correction: `gf_deep_rain_evaporation_booking` (on in correct mode, finding FQ1).** WRF
 4.6.1/4.7.1's `cup_output_ens_3d` (`module_cu_gf_deep.F`, lines 3330-3348)
 counts some deep water twice.

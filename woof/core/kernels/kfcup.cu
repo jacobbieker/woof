@@ -1176,15 +1176,18 @@ __device__ void kc_para(const KcTable& tb, const KcWs& ws, const KcParaIn& in,
             DDR(NK) = DDR(NK) * DDINC;
         }
         CPR = TRPPT;
-        /* Declared divergence from WRF, the one kf.cu and mskf.cu carry for
-         * module_cu_kfeta.F and module_cu_mskf.F: when the cap above sets
-         * DDINC = TRPPT/TDER, binary32 TDER*DDINC can round one ulp above
-         * TRPPT, and the bare TRPPT-TDER is then -2^-15 or so, so RAINCV is
+        PPTFLX = TRPPT - TDER;
+#ifdef KF_CAPPED_DOWNDRAFT_RAIN_FLOOR
+        /* RunConfig.kf_capped_downdraft_rain_floor (correct-mode FQ11): when
+         * the cap above sets DDINC = TRPPT/TDER, binary32 TDER*DDINC can
+         * round one ulp above TRPPT, and WRF's bare TRPPT-TDER
+         * (module_cu_kfcup.F:2711-2721) is then about -2^-15, so RAINCV is
          * negative for NCA and RAINC accumulates below zero (hex option
-         * matrix, cumulus.kf-cup: 2 cells at about -3e-10 mm in 1 h on a 5 km
-         * regional mesh; the hex snapshot gate refuses a negative
-         * accumulation).  The float64 answer there is 0. */
-        PPTFLX = fmaxf(TRPPT - TDER, 0.0f);
+         * matrix, cumulus.kf-cup: 2 cells at about -3e-10 mm in 1 h on a
+         * 5 km regional mesh).  The float64 answer there is 0; the flux is
+         * floored at it.  Without the define this is WRF's arithmetic. */
+        PPTFLX = fmaxf(PPTFLX, 0.0f);
+#endif
         PEFF = PPTFLX / TRPPT;
         if (LDB > 1) {
             for (NK = 1; NK <= LDB - 1; ++NK) {

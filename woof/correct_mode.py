@@ -96,7 +96,7 @@ MY1  WRF 4.6.1's MYNN (and every MYNN-EDMF before NCAR/MYNN-EDMF f3c9d9e,
      MY1 as uncorrected; GSD MYNN 4.1 (gsd_41) adds the flux with its sign
      and does not carry it.
 
-FQ1-FQ6 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
+FQ1-FQ6 and FQ11 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
 ``woof_quirk_corrections``): corrections of WRF 4.7.1 arithmetic that
 contradicts itself, each with its own key.  Like the findings above they are
 on in correct mode and off in exact mode (and in a strict WRF process).
@@ -127,6 +127,11 @@ FQ6  WRF's RRTMG longwave (ra_lw_physics = 4 with ra_rrtmg_variant =
      and the top layer's; the key keeps both and anchors the profile at the
      top interface (``rrtmg_lw_model_top``).  The RTE+RRTMGP adapter does not
      carry it.
+FQ11 The Kain-Fritsch family (cu_physics = 1, 10, 11) caps the downdraft
+     with DDINC = TRPPT/TDER and forms the rain flux TRPPT - TDER with no
+     floor; in binary32 TDER*DDINC can round above TRPPT, so RAINCV and
+     RAINC go a few ulp negative.  The key floors the flux at zero, the
+     float64 answer (``kf_capped_downdraft_rain_floor``).
 
 WHICH SCHEMES CARRY EACH FINDING is data too (:attr:`Correction.carriers`),
 separate from which schemes a key corrects (:data:`KEY_SCOPE`).  A domain
@@ -329,6 +334,15 @@ CORRECTIONS: tuple[Correction, ...] = (
             "the model top"),
         carriers=(("ra_lw_physics", (4,)),),
     ),
+    Correction(
+        finding="FQ11",
+        keys=("kf_capped_downdraft_rain_floor",),
+        summary=(
+            "Kain-Fritsch, KF-CuP and MSKF floor the capped downdraft's "
+            "precipitation flux at zero, so convective rain is never a few "
+            "ulp negative"),
+        carriers=(("cu_physics", (1, 10, 11)),),
+    ),
 )
 
 #: Finding -> ``(selector, absent value, values)``: a carrier that is a
@@ -384,7 +398,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "mynn_boulac_down_sign": ("bl_pbl_physics", (5,)),
     # ML1's second key: the BouLac (8) and k-epsilon (17) length kernels.
     "pbl_boulac_down_sign": ("bl_pbl_physics", (8, 17)),
-    # FQ1-FQ6, the fork's quirk ledger (woof.quirk_corrections).
+    # FQ1-FQ6 and FQ11, the fork's quirk ledger (woof.quirk_corrections).
     "gf_deep_rain_evaporation_booking": ("cu_physics", (3,)),
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
@@ -393,6 +407,9 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     # FQ6: the longwave scheme (the aggregate ra_physics resolves to it,
     # _selector_int), at the legacy variant (KEY_GENERATIONS).
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
+    # FQ11: KF-eta (kf.cu), KF-CuP (kfcup.cu) and MSKF (mskf.cu); the old
+    # KF (99) has no capped-downdraft subtraction.
+    "kf_capped_downdraft_rain_floor": ("cu_physics", (1, 10, 11)),
 }
 
 #: Key -> ``(selector, values)``: selections inside :data:`KEY_SCOPE` under

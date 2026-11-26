@@ -383,7 +383,7 @@ def test_kf_prewarm_uses_the_production_trigger_variant(monkeypatch, name, trigg
     assert len(jobs) == 1
     _label, factory, args = jobs[0]
     factory(*args)
-    assert calls == [(7, trigger)]
+    assert calls == [(7, trigger, False)]
 
 
 def test_parallel_plan_covers_selected_physics_and_code_dependent_shapes():
@@ -670,3 +670,40 @@ def test_the_thompson_closure_variants_the_run_launches_are_warmed(mode):
     on = mode == "correct"
     assert ("thompson[THOMPSON_RAIN_SNOW_CLOSURE=1]" in labels) is on
     assert ("thompson_aerosol_warm[THOMPSON_RAIN_SNOW_CLOSURE=1]" in labels) is on
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+@pytest.mark.parametrize("cu, name, label", [
+    (1, "kf", "kf[KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]"),
+    (11, "mskf", "mskf[GPUWM_MSKF_NO_AEROSOL=1,KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]"),
+])
+def test_the_kf_rain_floor_variants_the_run_launches_are_warmed(monkeypatch, mode, cu, name, label):
+    """FQ11 compiles kf.cu and mskf.cu with the capped-downdraft rain floor
+    define where it is on, and only the unit the run launches."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+    run = validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
+        cu_physics=cu, **correct_mode.resolve(mode).settings))
+    monkeypatch.setattr(kernel_prewarm, "static_modules", lambda _experiment: (name,))
+    monkeypatch.setattr(kernel_prewarm, "_inline_jobs", lambda _modules: [])
+    monkeypatch.setattr(kernel_prewarm, "_variant_jobs", lambda *_args: [])
+    labels = {job[0] for job in kernel_prewarm.static_jobs(
+        SimpleNamespace(domains=(SimpleNamespace(run=run),)))}
+    on = mode == "correct"
+    assert labels == ({label} if on else {label.replace(",KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1", "")
+                                          .replace("[KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]", "")})
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+def test_the_kfcup_rain_floor_variant_the_run_launches_is_warmed(mode):
+    """FQ11 compiles KF-CuP's column with the capped-downdraft rain floor
+    define where it is on (cu_physics = 10)."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+    run = validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
+        cu_physics=10, bl_pbl_physics=1, sf_sfclay_physics=1, **correct_mode.resolve(mode).settings))
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run),))
+    labels = {job[0] for job in kernel_prewarm._variant_jobs(experiment, ("kfcup",))}
+    assert ("kfcup[KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]" in labels) is (mode == "correct")

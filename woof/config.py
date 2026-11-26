@@ -2686,6 +2686,17 @@ class RunConfig:
     # Correct-mode finding FQ6: on by default, off in physics.mode = 'exact'.
     rrtmg_lw_model_top: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-26), appended.
+    # The Kain-Fritsch family (cu_physics = 1, 10, 11) caps the downdraft
+    # with DDINC = TRPPT/TDER and forms PPTFLX = TRPPT - TDER with no floor
+    # (module_cu_kfeta.F:1810-1821, module_cu_kfcup.F:2711-2721,
+    # module_cu_mskf.F:5840); in binary32 TDER*DDINC can round above TRPPT,
+    # so the flux, RAINCV and RAINC go a few ulp negative.  True floors
+    # the flux at zero (the float64 answer); False is WRF's arithmetic word
+    # for word.  Read only where KF, KF-CuP or MSKF runs.  Correct-mode
+    # finding FQ11: on by default, off in physics.mode = 'exact'.
+    kf_capped_downdraft_rain_floor: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -2950,7 +2961,8 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "mynn_boulac_down_sign, pbl_boulac_down_sign, "
     "gf_deep_rain_evaporation_booking, ysu_surface_heat_exner, "
     "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
-    "thompson_rain_snow_closure, rrtmg_lw_model_top); otherwise "
+    "thompson_rain_snow_closure, rrtmg_lw_model_top, "
+    "kf_capped_downdraft_rain_floor); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -4162,6 +4174,10 @@ def validate_selector_couplings(cfg):
 # the physics family but owns an independent registry-backed adapter.
 KF_ETA_CU_SCHEMES = frozenset({1, 99})
 KF_FAMILY_CU_SCHEMES = KF_ETA_CU_SCHEMES | {11}
+#: The cumulus schemes whose capped-downdraft rain flux
+#: RunConfig.kf_capped_downdraft_rain_floor floors: KF-eta (1), KF-CuP (10)
+#: and MSKF (11).  The old KF (99) forms no capped TRPPT - TDER.
+KF_CAPPED_DOWNDRAFT_CU = frozenset({1, 10, 11})
 #
 # 5 IS WRF'S OWN NUMBER for G3SCHEME, the Grell 3D ensemble scheme
 # (phys/module_cu_g3.F), transcribed in woof/core/kernels/g3.cu and held
@@ -10170,9 +10186,12 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("thompson_rain_snow_closure must be true or false")
     if type(cfg.rrtmg_lw_model_top) is not bool:
         raise ConfigurationRefused("rrtmg_lw_model_top must be true or false")
+    if type(cfg.kf_capped_downdraft_rain_floor) is not bool:
+        raise ConfigurationRefused(
+            "kf_capped_downdraft_rain_floor must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
-    # The quirk-ledger keys (correct-mode findings FQ1-FQ6) are on by
+    # The quirk-ledger keys (correct-mode findings FQ1-FQ6, FQ11) are on by
     # default and read only where their scheme runs (correct_mode.KEY_SCOPE,
     # KEY_GENERATIONS, KEY_UNREAD: YSU's not with BEP/BEM, MYNN's only at
     # wrf_461), so an unread one is inert, not refused.
