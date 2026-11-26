@@ -124,15 +124,15 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "Thompson's cloud-water mass/number balance forms the cloud slope from the updated cloud mass, not the entry mass",
         active=lambda get: int(get("mp_physics")) in _correct_mode.THOMPSON_CLOUD_BALANCE_MP),
     QuirkCorrection(
-        "diff_metrics_seam_slope", "wrf", False, True, "diff_opt = 1 or 2",
-        "the diffusion metrics take the true terrain slope at a periodic axis's seam on the top w level, "
-        "where WRF keeps a cold zero",
-        active=lambda get: int(get("diff_opt")) in (1, 2)),
-    QuirkCorrection(
         "mynn_sfclay_q2_land_cap", "wrf", False, True, "sf_sfclay_physics = 5, mynn_sfclay_variant = wrf_461",
         "the MYNN surface layer caps its 2 m mixing ratio at 1.05 times the lowest level over land only, as the surface driver does, not over water",
         # the gsl_wrf39 fork is another source: nothing to correct
         active=lambda get: int(get("sf_sfclay_physics")) == 5 and get("mynn_sfclay_variant") == "wrf_461"),
+    QuirkCorrection(
+        "diff_metrics_seam_slope", "wrf", False, True, "diff_opt = 1 or 2",
+        "the diffusion metrics take the true terrain slope at a periodic axis's seam on the top w level, "
+        "where WRF keeps a cold zero",
+        active=lambda get: int(get("diff_opt")) in (1, 2)),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",

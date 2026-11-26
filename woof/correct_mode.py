@@ -133,15 +133,15 @@ FQ7  Thompson's cloud-water mass/number balance forms the cloud slope lamc
      number tendency of the aerosol-aware schemes (mp_physics = 28, 38;
      the classic scheme's fixed droplet number never leaves the call)
      (``thompson_lamc_updated_rc``).
+FQ10 The wrf_461 MYNN surface layer (sf_sfclay_physics = 5) caps its 2 m
+     mixing ratio at 1.05*qv(1) at every point, water included, where the
+     surface driver's own cap of that limit runs over land only; the key
+     caps over land only (``mynn_sfclay_q2_land_cap``).
 FQ12 WRF's compute_diff_metrics (diff_opt = 1, 2) fills a periodic axis's
      seam slope (zx at ids/ide, zy at jds/jde) for levels 1..ktf only, so the
      top w level at the seam keeps its cold zero and the top mass level's
      deformation reads it; the key takes the true slope there
      (``diff_metrics_seam_slope``).  Inert on a bounded axis.
-FQ10 The wrf_461 MYNN surface layer (sf_sfclay_physics = 5) caps its 2 m
-     mixing ratio at 1.05*qv(1) at every point, water included, where the
-     surface driver's own cap of that limit runs over land only; the key
-     caps over land only (``mynn_sfclay_q2_land_cap``).
 
 WHICH SCHEMES CARRY EACH FINDING is data too (:attr:`Correction.carriers`),
 separate from which schemes a key corrects (:data:`KEY_SCOPE`).  A domain
@@ -358,14 +358,6 @@ CORRECTIONS: tuple[Correction, ...] = (
         carriers=(("mp_physics", THOMPSON_CLOUD_BALANCE_MP),),
     ),
     Correction(
-        finding="FQ12",
-        keys=("diff_metrics_seam_slope",),
-        summary=(
-            "the diffusion metrics take the true terrain slope at a periodic "
-            "axis's seam on the top w level, where WRF keeps a cold zero"),
-        carriers=(("diff_opt", (1, 2)),),
-    ),
-    Correction(
         finding="FQ10",
         keys=("mynn_sfclay_q2_land_cap",),
         summary=(
@@ -373,6 +365,14 @@ CORRECTIONS: tuple[Correction, ...] = (
             "the lowest level over land only, as the surface driver does, "
             "not over water"),
         carriers=(("sf_sfclay_physics", (5,)),),
+    ),
+    Correction(
+        finding="FQ12",
+        keys=("diff_metrics_seam_slope",),
+        summary=(
+            "the diffusion metrics take the true terrain slope at a periodic "
+            "axis's seam on the top w level, where WRF keeps a cold zero"),
+        carriers=(("diff_opt", (1, 2)),),
     ),
 )
 

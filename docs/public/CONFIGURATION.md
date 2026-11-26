@@ -958,8 +958,8 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `thompson_rain_snow_closure` | Thompson (`mp_physics = 8, 28, 38`) | FQ5 | below 0 C the rain-snow collection's graupel gain equals what rain and snow lose after their limiters |
 | `rrtmg_lw_model_top` | legacy RRTMG longwave (`ra_lw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) | FQ6 | the model-top interface and top layer temperatures are kept, and the standard profile above them is anchored at the model-top interface |
 | `thompson_lamc_updated_rc` | aerosol-aware Thompson (`mp_physics = 28, 38`) | FQ7 | the cloud-water balance forms the cloud slope from the updated cloud mass, not the entry mass |
-| `diff_metrics_seam_slope` | WRF's mixing package on a periodic axis | FQ12 | the top w level's coordinate slope at a periodic seam is filled like every other column's, not left at zero |
 | `mynn_sfclay_q2_land_cap` | MYNN surface layer (`sf_sfclay_physics = 5`, `mynn_sfclay_variant = "wrf_461"`) | FQ10 | the 1.05 times lowest-level cap on the 2 m mixing ratio runs over land only, as the surface driver's does, not over water |
+| `diff_metrics_seam_slope` | WRF's mixing package on a periodic axis | FQ12 | the top w level's coordinate slope at a periodic seam is filled like every other column's, not left at zero |
 
 A checkpoint resumes only under the arithmetic it was written with; a
 mismatch is refused, and the refusal names the key to set.
