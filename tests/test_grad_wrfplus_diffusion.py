@@ -55,11 +55,16 @@ BACKENDS = [pytest.param("host", marks=pytest.mark.skipif(not HAVE_CXX, reason="
             pytest.param("mlx", marks=pytest.mark.skipif(not _has_metal(), reason="no Metal"))]
 
 # Periodic, bounded (both axes, one), the 3-level minimum, single-cell and
-# two-cell lines (periodic self-reads, a bounded axis's remapped d12 row).
+# two-cell lines (periodic self-reads, a bounded axis's remapped d12 row),
+# and WRF's cold seam slope at the top w level of a periodic axis
+# (seam_cold, RunConfig.diff_metrics_seam_slope off) on both axes, one and
+# a short line.
 CONFIGS = {
     "df": [dict(), dict(boundary_x=1, boundary_y=1), dict(boundary_x=1), dict(boundary_y=1),
            dict(nz=3, ny=1, nx=2), dict(nz=3, ny=2, nx=1, boundary_y=1),
-           dict(nz=4, ny=3, nx=3, boundary_x=1, boundary_y=1), dict(nz=5, ny=4, nx=2)],
+           dict(nz=4, ny=3, nx=3, boundary_x=1, boundary_y=1), dict(nz=5, ny=4, nx=2),
+           dict(seam_cold=1), dict(boundary_y=1, seam_cold=1), dict(boundary_x=1, seam_cold=1),
+           dict(nz=3, ny=2, nx=2, seam_cold=1)],
     "km": [dict(), dict(boundary_x=1, boundary_y=1), dict(boundary_x=1), dict(boundary_y=1),
            dict(nz=1, ny=1, nx=1), dict(nz=2, ny=2, nx=1), dict(ny=3, nx=3, boundary_y=1)],
 }
@@ -205,9 +210,9 @@ def test_wrfplus_oracle_agreement(backend, tmp_path):
     periodic axis's end face repeats face 0: the u and v adjoints of faces
     0 and nx (ny) are compared as a sum (woof reads face 0 for both, WRF
     reads its halo).  WRF's compute_diff_metrics leaves a periodic seam's
-    top-level slope at its cold zero, where woof takes the true slope: the
-    deformation words that read it are left out (the fixture's mask/*) and
-    their adjoint seeds are 0.  a_cal_deform_and_div overruns its y tapes
+    top-level slope at its cold zero: the fixture's geometry carries
+    seam_cold = 1 (RunConfig.diff_metrics_seam_slope off), so every word is
+    compared.  a_cal_deform_and_div overruns its y tapes
     on a periodic y axis, so the fully periodic case is TL only
     (tools/wrfplus_oracle/fixture.py DIFF_CASES)."""
     if not FIXTURE.exists():
@@ -237,9 +242,6 @@ for case in sorted({{k.split("/")[0] for k in z.files if "/" in k}}):
             continue
         name = k.split("/", 2)[2]
         e, w = z[k].copy(), cp.asnumpy(got[name]).astype(np.float64)
-        mk = pre + "mask/" + name.split("_")[-1]
-        if name.startswith("tl_") and mk in z.files:
-            e, w = e[z[mk]], w[z[mk]]
         for x in (e, w):
             if name == "ad_u" and not g.boundary_x:
                 x[..., 0] += x[..., -1]; x[..., -1] = 0
@@ -282,11 +284,20 @@ for i, over in enumerate({CONFIGS["df"]!r}):
               tr["msft"], tr["msfu"], tr["msfv"], tr["fnm"], tr["fnp"], tr["dn"], tr["dnw"],
               f32(g.rdx), f32(g.rdy), f32(dx), f32(dy), f32(g.cf1), f32(g.cf2), f32(g.cf3),
               i32(0))
-    dims = (i32(nz), i32(ny), i32(nx), i32(1), i32(g.boundary_x), i32(g.boundary_y))
+    # the primal's boundary flags (dycore.smag_boundary_flags): 2 is a
+    # periodic axis with WRF's cold seam slope
+    dims = (i32(nz), i32(ny), i32(nx), i32(1)) + tuple(g.args(f32)[5:7])
     grid = ((nx + 63) // 64, ny, nz)
     r = [cp.zeros((nz, ny, nx), f32) for _ in range(3)]
     get_kernel("smag2d", "wrf_smag_deform")(grid, (64, 1, 1), common + tuple(r) + dims)
     out[f"df/{{i}}"] = sum(diff(st[n], x) for n, x in zip(D.DF_STATE, r))
+    if g.seam_cold:
+        # the cold seam must move the words, or it is unchecked
+        r0 = [cp.zeros((nz, ny, nx), f32) for _ in range(3)]
+        flags0 = (i32(g.boundary_x), i32(g.boundary_y))
+        get_kernel("smag2d", "wrf_smag_deform")(grid, (64, 1, 1),
+                                                common + tuple(r0) + dims[:4] + flags0)
+        out[f"df/{{i}}/seam"] = int(sum(diff(a, b) for a, b in zip(r, r0)) == 0)
     defs = (("GPUWM_SMAG_STORED_HAT", 1),)
     uh = cp.zeros((nz, ny, nx + 1), f32)
     vh = cp.zeros((nz, ny + 1, nx), f32)
@@ -326,7 +337,8 @@ for i, over in enumerate({CONFIGS["km"]!r}):
         out[f"km/{{i}}/cap"] = int(not capped.any())
 ''', tmp_path, extra_env=STRICT_ENV)
     caps = sum(1 for c in CONFIGS["km"] if c.get("nz", 7) * c.get("ny", 8) * c.get("nx", 9) > 4)
-    assert len(out) == 3 * len(CONFIGS["df"]) + len(CONFIGS["km"]) + caps + 1
+    seams = sum(1 for c in CONFIGS["df"] if c.get("seam_cold"))
+    assert len(out) == 3 * len(CONFIGS["df"]) + seams + len(CONFIGS["km"]) + caps + 1
     bad = {k: v for k, v in out.items() if v}
     assert not bad, bad
 

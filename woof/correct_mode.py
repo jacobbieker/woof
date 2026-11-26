@@ -96,7 +96,7 @@ MY1  WRF 4.6.1's MYNN (and every MYNN-EDMF before NCAR/MYNN-EDMF f3c9d9e,
      MY1 as uncorrected; GSD MYNN 4.1 (gsd_41) adds the flux with its sign
      and does not carry it.
 
-FQ1-FQ7 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
+FQ1-FQ7 and FQ12 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
 ``woof_quirk_corrections``): corrections of WRF 4.7.1 arithmetic that
 contradicts itself, each with its own key.  Like the findings above they are
 on in correct mode and off in exact mode (and in a strict WRF process).
@@ -133,6 +133,11 @@ FQ7  Thompson's cloud-water mass/number balance forms the cloud slope lamc
      number tendency of the aerosol-aware schemes (mp_physics = 28, 38;
      the classic scheme's fixed droplet number never leaves the call)
      (``thompson_lamc_updated_rc``).
+FQ12 WRF's compute_diff_metrics (diff_opt = 1, 2) fills a periodic axis's
+     seam slope (zx at ids/ide, zy at jds/jde) for levels 1..ktf only, so the
+     top w level at the seam keeps its cold zero and the top mass level's
+     deformation reads it; the key takes the true slope there
+     (``diff_metrics_seam_slope``).  Inert on a bounded axis.
 FQ10 The wrf_461 MYNN surface layer (sf_sfclay_physics = 5) caps its 2 m
      mixing ratio at 1.05*qv(1) at every point, water included, where the
      surface driver's own cap of that limit runs over land only; the key
@@ -353,6 +358,14 @@ CORRECTIONS: tuple[Correction, ...] = (
         carriers=(("mp_physics", THOMPSON_CLOUD_BALANCE_MP),),
     ),
     Correction(
+        finding="FQ12",
+        keys=("diff_metrics_seam_slope",),
+        summary=(
+            "the diffusion metrics take the true terrain slope at a periodic "
+            "axis's seam on the top w level, where WRF keeps a cold zero"),
+        carriers=(("diff_opt", (1, 2)),),
+    ),
+    Correction(
         finding="FQ10",
         keys=("mynn_sfclay_q2_land_cap",),
         summary=(
@@ -419,7 +432,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "mynn_boulac_down_sign": ("bl_pbl_physics", (5,)),
     # ML1's second key: the BouLac (8) and k-epsilon (17) length kernels.
     "pbl_boulac_down_sign": ("bl_pbl_physics", (8, 17)),
-    # FQ1-FQ7, the fork's quirk ledger (woof.quirk_corrections).
+    # FQ1-FQ7 and FQ12, the fork's quirk ledger (woof.quirk_corrections).
     "gf_deep_rain_evaporation_booking": ("cu_physics", (3,)),
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
@@ -430,9 +443,18 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
     # FQ7: the aerosol-aware Thompson, whose cloud number leaves the call.
     "thompson_lamc_updated_rc": ("mp_physics", THOMPSON_CLOUD_BALANCE_MP),
+    # FQ12: compute_diff_metrics runs under either diffusion option.
+    "diff_metrics_seam_slope": ("diff_opt", (1, 2)),
     # FQ10: the MYNN surface layer, at wrf_461 (KEY_GENERATIONS), as FQ3.
     "mynn_sfclay_q2_land_cap": ("sf_sfclay_physics", (5,)),
 }
+
+#: A launch setting, not a RunConfig field, that :data:`KEY_UNREAD` reads
+#: as a selector: whether this process couples WRF-Hydro
+#: (woof.wrf_hydro_route.configured).  It is stated only in the values
+#: :func:`launch_values` builds (what ran: run_reads, :func:`uncorrected`);
+#: identities and echoes read the configuration alone.
+WRF_HYDRO_SELECTOR = "wrf_hydro_coupled"
 
 #: Key -> ``(selector, values)``: selections inside :data:`KEY_SCOPE` under
 #: which the key is still not read, because that code path has no build of
@@ -444,6 +466,11 @@ KEY_UNREAD: Mapping[str, tuple[str, tuple[object, ...]]] = {
     # (bepswitch = 1), so the HFX/pi(1) correction would reach only the PBL
     # diagnosis: the key is not read there.
     "ysu_surface_heat_exner": ("sf_urban_physics", (2, 3)),
+    # A WRF-Hydro coupling does not carry Noah's floor booking (its
+    # drainage may go negative): woof.core.physics keeps FQ4 off there, so
+    # the receipt lists the finding as uncorrected and the echo does not
+    # bind the key.
+    "noah_smc_floor_booking": (WRF_HYDRO_SELECTOR, (True,)),
 }
 
 
@@ -463,11 +490,50 @@ def _generation_matches(rule, values: Mapping) -> bool:
     return (absent if value is None else value) in allowed
 
 
+#: Selectors whose absent value is not 0: an echo omits diff_opt at its
+#: default 2 (woof.io.restart reads an absent diff_opt as 2).
+_ABSENT_SELECTOR = {"diff_opt": 2}
+
+#: The fields :func:`_diff_metrics_seam_read` reads, beside diff_opt.
+_SEAM_FIELDS = ("km_opt", "khdif", "kvdif", "bl_pbl_physics", "isfflx",
+                "tke_heat_flux", "tke_drag_coefficient", "sf_sfclay_physics",
+                "open_x", "open_y", "specified", "nested")
+
+
+class _FieldView:
+    """A mapping read as a RunConfig: an absent field is its default."""
+
+    def __init__(self, values: Mapping):
+        self._values = values
+
+    def __getattr__(self, name):
+        if name in self._values:
+            return self._values[name]
+        from woof.config import RunConfig
+        return RunConfig.__dataclass_fields__[name].default
+
+
+def _diff_metrics_seam_read(values: Mapping) -> bool:
+    """FQ12 is read where the dycore builds WRF's mixing package
+    (woof.config.wrf_mixing_package_active) on a periodic axis: a bounded
+    axis never takes the seam slope."""
+    from woof.config import wrf_mixing_package_active
+    view = _FieldView(values)
+    forced = bool(view.specified or view.nested)
+    periodic = not (view.open_x or forced) or not (view.open_y or forced)
+    return periodic and wrf_mixing_package_active(view)
+
+
+#: Key -> predicate over the selection: a key read only where the predicate
+#: holds, inside its :data:`KEY_SCOPE` scheme.
+KEY_READ_WHEN = {"diff_metrics_seam_slope": _diff_metrics_seam_read}
+
+
 def _selector_int(selector: str, values: Mapping) -> int:
     """``values[selector]`` as an int.  ``ra_lw_physics`` of -1 (or absent)
     is "not stated": the aggregate ``ra_physics`` names the longwave scheme
     (woof.config.radiation_scheme_ids)."""
-    value = values.get(selector, 0)
+    value = values.get(selector, _ABSENT_SELECTOR.get(selector, 0))
     if selector == "ra_lw_physics" and (value is None or value == -1):
         value = values.get("ra_physics", 0)
     return int(value or 0)
@@ -484,6 +550,9 @@ def key_in_scope(key: str, values: Mapping) -> bool:
         return True
     if _key_unread(key, values):
         return False
+    read_when = KEY_READ_WHEN.get(key)
+    if read_when is not None and not read_when(values):
+        return False
     rule = KEY_GENERATIONS.get(key)
     return rule is None or _generation_matches(rule, values)
 
@@ -495,7 +564,18 @@ SCOPE_SELECTORS: tuple[str, ...] = tuple(dict.fromkeys(
     + [rule[0] for rule in CARRIER_GENERATIONS.values()]
     + [selector for selector, _ in KEY_UNREAD.values()]
     # the aggregate radiation selection stands for ra_lw_physics = -1
-    + ["ra_physics"]))
+    + ["ra_physics"]
+    # FQ12's read predicate (KEY_READ_WHEN)
+    + list(_SEAM_FIELDS)))
+
+
+def launch_values(cfg) -> dict:
+    """:func:`_scope_values` with this launch's settings that decide what
+    runs (:data:`WRF_HYDRO_SELECTOR`): for the questions "is the correction
+    applied" (woof.quirk_corrections.run_reads) and the receipt
+    (:func:`uncorrected`), never for a configuration's identity."""
+    from woof.wrf_hydro_route import configured
+    return {**_scope_values(cfg), WRF_HYDRO_SELECTOR: configured() is not None}
 
 
 def _scope_values(cfg) -> dict:
@@ -651,7 +731,8 @@ def resolution_of(cfg) -> CorrectModeResolution:
 
 def _selector_value(cfg, selector: str) -> int | None:
     values = (cfg if isinstance(cfg, Mapping) else
-              {name: getattr(cfg, name, 0) for name in (selector, "ra_physics")})
+              {name: getattr(cfg, name, _ABSENT_SELECTOR.get(name, 0))
+               for name in (selector, "ra_physics")})
     try:
         return _selector_int(selector, values)
     except (TypeError, ValueError):
@@ -673,12 +754,17 @@ def uncorrected(cfg) -> list[str]:
     if resolution.mode != PHYSICS_MODE_CORRECT:
         return []
     out: list[str] = []
-    values = _scope_values(cfg)
+    values = launch_values(cfg)
     for c in CORRECTIONS:
         if c.finding in resolution.skipped:
             continue
         generation = CARRIER_GENERATIONS.get(c.finding)
         if generation is not None and not _generation_matches(generation, values):
+            continue
+        # A carrier whose defect is reached only under a read predicate
+        # (FQ12: a periodic axis) carries nothing outside it.
+        if any(key in KEY_READ_WHEN and not KEY_READ_WHEN[key](values)
+               for key in c.keys):
             continue
         for selector, schemes in c.carriers:
             value = _selector_value(cfg, selector)

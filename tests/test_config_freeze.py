@@ -369,6 +369,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The diffusion-metrics periodic seam correction (finding FQ12), appended.
+    assert names.pop() == "diff_metrics_seam_slope"
+    assert RunConfig.__dataclass_fields__["diff_metrics_seam_slope"].default is _cm.CORRECT_KEYS_DEFAULT
+    assert RunConfig.__dataclass_fields__["diff_metrics_seam_slope"].kw_only
     # The MYNN surface-layer Q2 land cap (quirk pass, finding FQ10), appended.
     assert names.pop() == "mynn_sfclay_q2_land_cap"
     assert RunConfig.__dataclass_fields__["mynn_sfclay_q2_land_cap"].default is _cm.CORRECT_KEYS_DEFAULT
@@ -1149,6 +1153,8 @@ def _check_frozen_defaults(actual):
                          ("rrtmg_lw_model_top", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the Thompson cloud slope from the updated mass (FQ7)
                          ("thompson_lamc_updated_rc", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the diffusion-metrics periodic seam correction (FQ12)
+                         ("diff_metrics_seam_slope", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the MYNN surface-layer Q2 land cap (FQ10)
                          ("mynn_sfclay_q2_land_cap", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the opt-in resolved obstacles, off

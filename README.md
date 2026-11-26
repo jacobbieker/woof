@@ -753,12 +753,13 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ7 and FQ10, so the run receipt's
+    the keys are correct-mode findings FQ1-FQ7, FQ12 and FQ10, so the run receipt's
     `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
-    `thompson_rain_snow_closure`, `rrtmg_lw_model_top` and
-    `thompson_lamc_updated_rc` and `mynn_sfclay_q2_land_cap` (WRF route);
+    `thompson_rain_snow_closure`, `rrtmg_lw_model_top`,
+    `thompson_lamc_updated_rc`, `diff_metrics_seam_slope` and
+    `mynn_sfclay_q2_land_cap` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -819,6 +820,12 @@ Notes on the 1.1.7 sync:
     mass (finding FQ7). The classic Thompson (`mp_physics = 8`) holds a fixed
     droplet number that never leaves the call, so it does not read it; not
     yet scored against observations.
+  - `diff_metrics_seam_slope` (where WRF's mixing package runs on a periodic axis,
+    WRF route). WRF's `compute_diff_metrics` fills the coordinate slope at
+    a periodic seam for every level but the top w level, which keeps its
+    initial zero while every other column has its slope. The option fills
+    the top level too, as the engine always has; off (exact mode) the seam
+    is WRF's word for word (finding FQ12). Bounded axes are unchanged.
   - `mynn_sfclay_q2_land_cap` (MYNN surface layer, `sf_sfclay_physics = 5`
     at `wrf_461`, WRF route). WRF's MYNN caps its 2 m mixing ratio at 1.05
     times the lowest level at every point, water included, while the

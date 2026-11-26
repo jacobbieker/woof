@@ -3564,6 +3564,11 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # which every earlier header ran.
     if values.get("thompson_lamc_updated_rc", False) is False:
         values.pop("thompson_lamc_updated_rc", None)
+    # The diffusion-metrics periodic seam correction (FQ12): absent while
+    # off, as every correction key (the loop above); a checkpoint from
+    # another commit is refused by the runtime identity whatever it echoes.
+    if values.get("diff_metrics_seam_slope", False) is False:
+        values.pop("diff_metrics_seam_slope", None)
     # The MYNN surface-layer Q2 land cap (FQ10): absent while off, which
     # every earlier header ran.
     if values.get("mynn_sfclay_q2_land_cap", False) is False:
@@ -5862,6 +5867,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'thompson_rain_snow_closure': False,
     'rrtmg_lw_model_top': False,
     'thompson_lamc_updated_rc': False,
+    'diff_metrics_seam_slope': False,
     'mynn_sfclay_q2_land_cap': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
@@ -6519,6 +6525,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "thompson_rain_snow_closure": False,
                           "rrtmg_lw_model_top": False,
                           "thompson_lamc_updated_rc": False,
+                          "diff_metrics_seam_slope": False,
                           "mynn_sfclay_q2_land_cap": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,
