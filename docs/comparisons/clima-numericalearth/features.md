@@ -503,8 +503,8 @@ commit.
   the solver admits 256". `docs/public/LES.md:382-384`: no full-physics
   real-data column above 192 levels. `docs/manual/02-dynamics-grids-nesting.md:88`:
   the older 128 statement.
-- **W15** `docs/public/CONFIGURATION.md:450-453`: `damp_opt`, `zdamp`,
-  `dampcoef`, `w_damping`. `docs/public/CONFIGURATION.md:463`: `top_lid`
+- **W15** `docs/public/CONFIGURATION.md:453-456`: `damp_opt`, `zdamp`,
+  `dampcoef`, `w_damping`. `docs/public/CONFIGURATION.md:466`: `top_lid`
   defaults to true.
 - **W16** Local run record, not in the repository. It was produced by
   `woof go` on 2026-10-13 and 14 and is kept read-only under

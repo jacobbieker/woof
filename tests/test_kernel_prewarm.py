@@ -616,3 +616,57 @@ def test_hydro_routing_units_are_in_the_static_plan_unless_hydro_is_off(monkeypa
     assert kernel_prewarm.hydro_wanted()
     monkeypatch.setenv("WOOF_NEXTGEN_ENABLED", "0")
     assert not kernel_prewarm.hydro_wanted()
+
+
+def test_les_nest_column_drops_inflow_perturbation():
+    # WOOF 2026-11-10, run_c8297bf7540c928d: a five-domain 9 km -> 40 m ladder
+    # whose 120 m and 40 m LES nests carry inflow_perturbation failed the
+    # whole pre-warm ("inflow_perturbation is a nest-boundary mechanism ...
+    # requires nested=true"), so no domain's kernels were warmed.  The column
+    # is no nest child; the mechanism is dropped there and nothing else.
+    from dataclasses import replace
+
+    from woof.config import RunConfig, validate_run_config
+    from woof.warm_kernels import forecast_column_config
+
+    base = validate_run_config(RunConfig(
+        nx=40, ny=32, nz=49, dx=120., dy=120., ztop=20000.,
+        dt=0.5, run_seconds=10., output_interval_s=5.))
+    run = replace(base, nested=True, inflow_perturbation=True)
+    column = forecast_column_config(run)
+    assert column.inflow_perturbation is False
+    assert column.nested is False and column.specified is True
+    assert column.dx == run.dx and column.nz == run.nz
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+def test_the_booking_variants_the_run_launches_are_warmed(mode):
+    """FQ1 (GF) and FQ4 (Noah UA) compile their own units where they are on."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+    run = validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
+        cu_physics=3, cudt_minutes=0.0, sf_surface_physics=2, sf_sfclay_physics=1, bl_pbl_physics=1,
+        **correct_mode.resolve(mode).settings))
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run),))
+    labels = {job[0] for job in kernel_prewarm._variant_jobs(experiment, ("gf", "noah_ua"))}
+    on = mode == "correct"
+    assert any("GF_DEEP_EVAP_BOOKING=1" in label for label in labels) is on
+    assert ("noah_ua[NOAH_SMC_FLOOR_BOOKING=1]" in labels) is on
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+def test_the_thompson_closure_variants_the_run_launches_are_warmed(mode):
+    """FQ5 compiles the Thompson units with the rain-snow closure define
+    where it is on (mp_physics = 8 here)."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+    run = validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
+        mp_physics=8, **correct_mode.resolve(mode).settings))
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run),))
+    labels = {job[0] for job in kernel_prewarm._variant_jobs(
+        experiment, ("thompson", "thompson_aerosol_warm"))}
+    on = mode == "correct"
+    assert ("thompson[THOMPSON_RAIN_SNOW_CLOSURE=1]" in labels) is on
+    assert ("thompson_aerosol_warm[THOMPSON_RAIN_SNOW_CLOSURE=1]" in labels) is on

@@ -2360,6 +2360,14 @@ def launch_coordinate_horizontal(field, xk, mut, c1, c2, msft, msfu,
          np.int32(theta_initial is not None)))
 
 
+def coordinate_reference_missing(state, cfg) -> bool:
+    """Whether a diff_opt 1 state has lost WRF's t_init: a resumed state
+    (elapsed time) without ``diff1_theta_initial``, which
+    :func:`initialize_coordinate_reference` refuses to rebuild."""
+    return (cfg.diff_opt == 1 and "diff1_theta_initial" not in state._scratch
+            and getattr(state, "elapsed_seconds", 0.0) > 0.0)
+
+
 def initialize_coordinate_reference(state, cfg) -> None:
     """Capture WRF's t_init before the first step or streaming inventory.
 
@@ -2368,7 +2376,7 @@ def initialize_coordinate_reference(state, cfg) -> None:
     """
     if cfg.diff_opt != 1 or "diff1_theta_initial" in state._scratch:
         return
-    if getattr(state, "elapsed_seconds", 0.0) > 0.0:
+    if coordinate_reference_missing(state, cfg):
         raise RuntimeError(
             "diff_opt=1 restart is missing its original thermal reference "
             "diff1_theta_initial; reconstructing it from evolved theta "
@@ -3311,7 +3319,7 @@ def _prepare_small_step_init_launch(state: DomainState, cfg: RunConfig,
     periodic.  The uv kernel builds WRF's ``muu``/``muus`` inline and
     ``calc_mu_uv`` picks the boundary face's off-domain neighbour from
     ``periodic_x``/``periodic_y`` (module_big_step_utilities_em.F:59-115),
-    so the flag has to reach the kernel; WOOF's spelling of "not periodic"
+    so the flag has to reach the kernel; WOOF-ArWen's spelling of "not periodic"
     is ``_boundary_x``/``_boundary_y`` (open, specified, or nested), the same
     predicate ``slow_pgf`` and the advection launchers already pass.
     """

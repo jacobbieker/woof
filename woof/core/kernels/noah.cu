@@ -361,7 +361,7 @@ __device__ static void noah_canres(real solar, real ch, real sfctmp,
     // to one FP32 self multiply; at -O0 the same source calls powf, which is
     // the gfk_pow arm below and differs in rare words. Keep the subtract,
     // square, coefficient and final subtract separately rounded, as in the
-    // -O2 executable (release box and a development machine disassembly, 2026-11-02).
+    // -O2 executable (release box and RTX 4090 test host disassembly, 2026-11-02).
     real temperature_delta = __fsub_rn(topt, sfctmp);
     real rct = __fsub_rn(1.0f, __fmul_rn(0.0016f,
                                     __fmul_rn(temperature_delta, temperature_delta)));
@@ -705,6 +705,13 @@ __device__ static void noah_sstep(real* sh2oout, const real* sh2oin,
         } else {
             wplus = 0.0f;
         }
+#ifdef NOAH_SMC_FLOOR_BOOKING
+        // Opt-in (RunConfig.noah_smc_floor_booking, default off): WRF
+        // module_sf_noahlsm.F:4026 raises a layer below 0.02 to 0.02 and
+        // books the water it adds nowhere; take it from the layer below
+        // (WPLUS < 0), and below the bottom layer from RUNOFF3.
+        if (stot < 0.02f) wplus = (stot - 0.02f) * ddz;
+#endif
         smc[k] = fmaxf(fminf(stot, smcmax), 0.02f);
         sh2oout[k] = fmaxf(smc[k] - sice[k], 0.0f);
     }

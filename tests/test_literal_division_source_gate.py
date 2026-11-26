@@ -71,7 +71,8 @@ def test_port_constant_divisions_take_the_direct_non_ftz_route(monkeypatch, stri
     ports = {"gfdleta_init", "gfdleta_lw_helpers", "gfdleta_tables",
              "afwa_buoyancy", "afwa_severe", "misc_diag_print", "snow_papers",
              "gfdleta_column", "gfdleta_math_probe", "gfdleta_co2_init",
-             "gfdleta_table_runtime", "cam3_emissivity", "eeps",
+             "gfdleta_table_runtime", "gfdleta_column_l256", "gfdleta_co2_init_l256",
+             "cam3_emissivity", "eeps",
              "gsfcgce4ice_aux", "qnsepbl", "qnsesfc", "sas", "sstskin",
              "temf", "temf_sfclay", "idealscmsfclay",
              'pxsfclay', 'ssib', 'trajectory', 'tslist', 'wrf_stock_aer3',
@@ -89,7 +90,8 @@ def test_port_constant_divisions_take_the_direct_non_ftz_route(monkeypatch, stri
             f"{kernels.MODULE_KEY_ROOT}:{name}[COLUMN_DEPTH=34]")
         assert "--ftz=false" in calls[-1][3]
     for name in ("cam3_emissivity.cu", "eeps.cu", "gfdleta_co2_init.cuh",
-                 "gfdleta_column.cuh", "gsfcgce4ice_aux.cu", "qnsepbl.cu",
+                 "gfdleta_column.cuh", "gfdleta_co2_init_l256.cuh",
+                 "gfdleta_column_l256.cuh", "gsfcgce4ice_aux.cu", "qnsepbl.cu",
                  "sas.cu", "sstskin.cu", "temf.cu", "gsfcsw.cu",
                  "gsfcsw_fast.cuh", "kfcup.cu"):
         assert name in FTZ_FALSE_SOURCES
@@ -138,10 +140,13 @@ def test_terrain_drag_divisions_use_the_direct_non_ftz_production_route():
     source = (REPO_ROOT / "woof" / "core" / "terrain_drag.py").read_text(
         encoding="utf-8")
     sites = route_inventory.scan_source("woof/core/terrain_drag.py", source)
-    assert len(sites) == 1
-    assert sites[0]["constructor_kind"] == (
-        "cupy.cuda.compiler.compile_using_nvrtc")
-    assert sites[0]["options_expression"] == "MODULE_OPTIONS"
+    # The WRF 4.6.1/4.7.1 unit and WRF v4.8.0's gwd_opt = 1 unit (WRF-480
+    # L08, _gwdo480_module), both through the same direct route and options.
+    assert len(sites) == 2
+    for site in sites:
+        assert site["constructor_kind"] == (
+            "cupy.cuda.compiler.compile_using_nvrtc")
+        assert site["options_expression"] == "MODULE_OPTIONS"
     assert terrain_drag.MODULE_OPTIONS == (
         "-std=c++17", "-fmad=false", "--ftz=false")
     assert "terrain_drag.cu" in FTZ_FALSE_SOURCES
@@ -235,7 +240,9 @@ def test_3_0_port_source_exceptions_keep_non_ftz_routes(monkeypatch, strict):
     assert "--ftz=false" in ntu.MODULE_OPTIONS
     assert "--ftz=true" not in ntu.compile_options()
     ntu_py = (REPO_ROOT / "woof/core/ntu.py").read_text(encoding="utf-8")
-    assert "compile_using_nvrtc(module_source(kmax), compile_options()," in ntu_py
+    # WRF-480 L11 binds the generation into the source before the compile.
+    assert "source = module_source(kmax, version=version)" in ntu_py
+    assert 'compile_using_nvrtc(source, compile_options(), arch, "ntu.cu")' in ntu_py
     assert '"ntu_parallel.cuh"' in ntu_py
     assert {"ntu.cu", "ntu_parallel.cuh"} <= FTZ_FALSE_SOURCES
     # dfi_reset: woof.core.dfi compiles it preserving subnormals.

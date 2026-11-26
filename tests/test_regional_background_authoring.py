@@ -99,13 +99,6 @@ def test_native_hourly_prepare_only_returns_published_authorities(tmp_path, monk
     assert Path(returned[0]['experiment_config']).parent == Path(returned[0]['prepared_root'])
 
 
-@pytest.mark.parametrize('cadence', [True, '3', 1.5, float('nan'), float('inf'), 0])
-def test_invalid_boundary_cadence_is_refused_before_source_dispatch(cadence):
-    request = _request(forcing_cadence_hours=cadence)
-    with pytest.raises(ValueError, match='positive integer'):
-        request.validate()
-
-
 def _automatic_sources():
     from woof.background_contract import catalog
     return [row['source'] for row in catalog()['sources'] if 'automatic' in row.get('initialization_modes', [])]

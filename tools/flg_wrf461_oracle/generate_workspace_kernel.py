@@ -18,6 +18,7 @@ Storage choices, none of which changes an operation or its order:
 """
 from pathlib import Path
 import argparse,json,re
+from generate_gas_kernel import NVX_PREAMBLE
 
 THREAD_LOCAL_WORDS=64
 # rad_all arrays native RAD_FLG reads only when naero>=1 (stock RAD_FLG: naero=0).
@@ -122,6 +123,9 @@ def _comscp_band_invariant(code):
 def generate(root):
     files=['flg_gases_generated.cuh','flg_streams_generated.cuh','flg_column_generated.cuh']
     source='\n'.join((root/name).read_text() for name in files)
+    # One FLG_NVX tier preamble for the composed workspace, not one per header.
+    assert source.count(NVX_PREAMBLE)==len(files)
+    source=source.replace(NVX_PREAMBLE,'')
     names=set(re.findall(r'__device__ void (flg\w+)\(',source))
     bodies=dict(re.findall(r'__device__ void (flg\w+)\([^\n]+\)\{([\s\S]*?)(?=\n__device__ void |\Z)',source))
     _check_naero_only(bodies)
@@ -136,6 +140,8 @@ def generate(root):
             if len(re.findall(r'\b'+name+r'\b',bodies[current]))==1:
                 continue  # Native aerosol-only declarations are dead under naero=0.
             extent=re.sub(r'\bnq\b','2',extent)
+            # The stock tier's literals; sized() below makes them affine in FLG_NV1.
+            extent=re.sub(r'\bFLG_NVX\b','100',re.sub(r'\bFLG_NV1X\b','101',extent))
             assert re.fullmatch(r'[0-9()*+ /-]+',extent),extent
             # All array extents are affine in the native vertical limit.
             sized=lambda nv1:eval(re.sub(r'\b100\b',str(nv1-1),re.sub(r'\b101\b',str(nv1),extent)),{'__builtins__':{}},{})
@@ -165,7 +171,7 @@ def generate(root):
         assert name not in path, f'recursive FLG workspace call: {path+[name]}'
         for child in graph[name]:visit(child,path+[name])
     for name in names:visit(name,[])
-    return _comscp_band_invariant(_qftisf_tail(_qcfel_window('// Generated explicit FLG column workspace.\n#ifndef FLG_NV1\n#define FLG_NV1 101\n#endif\n'
+    return _comscp_band_invariant(_qftisf_tail(_qcfel_window('// Generated explicit FLG column workspace.\n#ifndef FLG_NV1\n#define FLG_NV1 101\n#endif\n'+NVX_PREAMBLE
             +f'#define FLG_WORKSPACE_SCALE {scale}\n#define FLG_WORKSPACE_BIAS {bias}\n#define FLG_WORKSPACE_WORDS ({scale}*FLG_NV1+{bias})\n'
             +'''template<class T> struct FLGPtr {
     T* p; int stride;

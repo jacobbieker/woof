@@ -5409,8 +5409,13 @@ def _noah_sstep(sh2oin, cmc, rhstt, rhsct, dt, nsoil, smcmax, cmcmax,
             wplus = (stot - smcmax) * ddz
         else:
             wplus = 0.0
-        if stot < 0.02 or (min(stot, smcmax) - sice[k]) < 0.0:
-            flags["clamped"] = True      # the 0.02/0.0 floors create water
+        booked_floor = bool(flags.get("smc_floor_booking"))
+        if (stot < 0.02 and not booked_floor) or (max(min(stot, smcmax), 0.02) - sice[k]) < 0.0:
+            flags["clamped"] = True      # the 0.02/0.0 floors create water (booked: only the 0.0 one)
+        if flags.get("smc_floor_booking") and stot < 0.02:
+            # opt-in noah_smc_floor_booking: the layer below (or RUNOFF3)
+            # pays for the water the 0.02 floor adds
+            wplus = (stot - 0.02) * ddz
         smc[k] = max(min(stot, smcmax), 0.02)
         sh2oout[k] = max(smc[k] - sice[k], 0.0)
     runoff3 = wplus
@@ -6473,7 +6478,8 @@ def _noah_sflx(ffrozp, dt, nsoil, sldpth, lwdn, soldn, solnet, sfcprs,
 
 def np_noah_column(col, params, dt, dzs, isurban=None, isice=None,
                    xice_threshold=0.5, frpcpn=False, usemonalb=False,
-                   rdlai2d=False, opt_thcnd=1, ua_phys=False):
+                   rdlai2d=False, opt_thcnd=1, ua_phys=False,
+                   smc_floor_booking=False):
     """Float64 mirror of one Noah column step: the WRF v4.6.1 driver
     ``lsm`` prep + ``SFLX`` + post-update, for a single (i, j).
 
@@ -6485,6 +6491,8 @@ def np_noah_column(col, params, dt, dzs, isurban=None, isice=None,
     2 SNOPAC melting unclipped, 3 SNOPAC clipped), ``reslin`` (the
     branch-exact discrete energy-identity residual, W/m^2),
     ``near_branch``/``clamped`` flags, and the WRF ``noahres``.
+    ``smc_floor_booking`` is RunConfig.noah_smc_floor_booking (default
+    off: WRF's word-exact floor).
     """
     if isurban is None or isice is None:
         # the dataset's own ISURBAN/ISICE, as launch_noah resolves them
@@ -6494,7 +6502,7 @@ def np_noah_column(col, params, dt, dzs, isurban=None, isice=None,
         isice = dataset_isice if isice is None else isice
     tresh, a2, a3, a4 = 0.95, 17.67, 273.15, 29.65
     a23m4 = a2 * (a3 - a4)
-    flags = dict(near_branch=False, clamped=False)
+    flags = dict(near_branch=False, clamped=False, smc_floor_booking=bool(smc_floor_booking))
     out = {k: (np.array(v, np.float64) if k in ("smois", "tslb", "sh2o")
                else v) for k, v in col.items()}
     out.update(skip=0, ebal_case=-1, reslin=0.0, noahres=0.0,

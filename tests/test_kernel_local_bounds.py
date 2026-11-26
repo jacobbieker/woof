@@ -169,6 +169,43 @@ def test_the_sase_tier_frame_is_what_the_driver_reports_at_every_rung():
 
 
 @requires_nvrtc_frames
+@pytest.mark.parametrize("module,define", [("qnsepbl", "QNSE_KMAX"),
+                                           ("boulac", "BOULAC_KMAX")])
+def test_the_qnse_and_boulac_tier_frames_are_what_the_driver_reports(
+        module, define):
+    """QNSE and BouLac compile ``*_KMAX`` at 128 (the source default, the
+    recorded row) and 256; the widest export of each tier is read off the
+    driver and must equal the priced :data:`TieredKernelFrame`."""
+    import re
+    from pathlib import Path
+
+    import woof.core.kernels as kernels
+    from woof.core.kernels import load_module, load_module_int_defines
+
+    spec = pf.CONDITIONAL_COLUMN_TIERED_FRAMES[module][0]
+    assert spec.define == define and spec.shipped_tier == 128
+    source = (Path(kernels.__file__).parent / f"{module}.cu").read_text()
+    names = sorted(set(re.findall(
+        r'extern\s+"C"\s+__global__\s+void\s+([A-Za-z_][A-Za-z0-9_]*)',
+        source)))
+
+    def widest(mod):
+        return max(int(mod.get_function(n).attributes["local_size_bytes"])
+                   for n in names)
+
+    # The recorded row is the maximum over cards and modes, so one card may
+    # read below it; the priced slope is every column array's bytes, so a
+    # build that keeps fewer of them live grows by at most that much.
+    shipped = widest(load_module(module))
+    assert shipped <= spec.frame_bytes(128) == (
+        pf.KERNEL_MAX_LOCAL_SIZE_BYTES[module])
+    assert widest(load_module_int_defines(module, ((define, 128),))) == shipped
+    deep = widest(load_module_int_defines(module, ((define, 256),)))
+    assert 0 < deep - shipped <= spec.bytes_per_level * 128
+    assert deep <= spec.frame_bytes(256)
+
+
+@requires_nvrtc_frames
 def test_the_unspecialized_source_still_compiles_to_the_recorded_ceiling():
     """The ``#ifndef`` guard must not move the default.  If it did, every
     historical measurement priced against ``KERNEL_MAX_LOCAL_SIZE_BYTES``

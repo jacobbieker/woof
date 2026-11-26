@@ -117,7 +117,9 @@ def redi_k33_kappa_scaled(configs: dict) -> bool:
     diffusivity takes ``config_Redi_kappa * k33``, the small-slope Redi
     tensor's vertical element (as E3SM's later MPAS-Ocean has it).
     """
-    value = configs.get("woof_redi_k33", "v842")
+    from woof import quirk_corrections
+    # its own key, else 'kappa' under woof_quirk_corrections = 'all' (an explicit 'v842' then is refused by name)
+    value = quirk_corrections.option(configs, "woof_redi_k33")
     if value not in ("v842", "kappa"):
         raise ConfigurationRefusal(
             knob="woof_redi_k33", value=value,

@@ -103,7 +103,9 @@ routines are named `g_*` (TL) and `a_*` (AD).
 | `rhs_ph` | `g_/a_rhs_ph` | `slow_geopotential[_faces/_open/_vertical]` |
 | `coriolis`, `curvature` | `G_/a_CORIOLIS`, `G_/a_CURVATURE` | `coriolis_curvature` |
 | `w_damp` | `g_/a_w_damp` | `w_damp` |
-| `sixth_order_diffusion`, `horizontal_diffusion` (`diff_opt = 1`, `km_opt = 1`) | `g_/a_sixth_order_diffusion`, `G_/a_HORIZONTAL_DIFFUSION` | diff6, diffusion kernels (optional, last) |
+| `sixth_order_diffusion` | `g_/a_sixth_order_diffusion` | diff6 (optional, last) |
+| `compute_diff_metrics` + `cal_deform_and_div`, `smag2d_km` (`diff_opt = 1`, `km_opt = 4`) | `g_/a_compute_diff_metrics`, `g_/a_cal_deform_and_div`, `G_/A_SMAG2D_KM` (diffusion) | `wrf_smag_deform`, `wrf_diff_opt1_km4` + `wrf_smag_km_bc` |
+| `horizontal_diffusion` ('u', 'v', 'w'), `horizontal_diffusion_3dmp` ('m', theta) (`diff_opt = 1`) | `G_/A_HORIZONTAL_DIFFUSION`, `g_/a_horizontal_diffusion_3dmp` | `wrf_diff_opt1_horizontal` |
 
 **D: lateral boundaries**
 
@@ -499,9 +501,10 @@ Each step is one small PR, taken to merged before the next widens.
    periodic alias closure. With a tape it snapshots each operator's
    written arrays before it runs, and `step_ad` pops them in reverse.
    - Scope: periodic axes, no map factors, no rotation (8b adds it), dry, no physics
-     or mixing package, none of the other work `_step_body` can add
-     (use_theta_m, a moving frame, obstacles, polar filtering, lightning,
-     avgflx, IAU or spectral nudging), `rk_ord = 3`, an even
+     or mixing package (9c binds diff_opt 1 / km_opt 4), none of the
+     other work `_step_body` can add (use_theta_m, a moving frame,
+     obstacles, polar filtering, lightning, avgflx, IAU or spectral
+     nudging), `rk_ord = 3`, an even
      time_step_sound, orders 3-6, and a 3-D base state.
      `step_geometry` refuses everything else. `step_geometries` gives a
      chain's geometries: the first step follows the state (a cold one
@@ -856,7 +859,8 @@ Each step is one small PR, taken to merged before the next widens.
    - Still refused then: lateral boundaries other than periodic (bound
      in 8f).
 8j. Moisture, part 3 (DA item 4): moist scalar transport
-   (`woof.grad.wrfplus.scalar`). Two operators, not yet in the step:
+   (`woof.grad.wrfplus.scalar`). Two operators, bound into the step with
+   the moist binding:
    - sumflux (`sumflux_zero/accumulate/finish_tl/_ad`): `ru_m, rv_m, ww_m`
      start at zero, add `u_pp, v_pp, ww_pp` after each acoustic substep,
      and finish as `sum/nsub` plus the stage's coupled `ru, rv, ww`
@@ -886,7 +890,8 @@ Each step is one small PR, taken to merged before the next widens.
        launches' words, and each update moves the species.
      There is no WRFPLUS fixture.
 8k. Moisture, part 4 (DA item 4): the moist boundary rows
-   (`woof.grad.wrfplus.lbc`), not yet in the step.
+   (`woof.grad.wrfplus.lbc`), bound into the step with the moist
+   binding.
    - qv's rows: `LBCGeometry`/`FinalGeometry` take kind `qv` (the
      primal's code 5), a mass-grid row coupled as theta is under the
      strict build, `(c1h mu + c2h) q`. moist.py's rk_step-1 capture is a
@@ -944,8 +949,122 @@ Each step is one small PR, taken to merged before the next widens.
      accumulators; dot product (the species in the identity), base-only
      tape and FD; dropping qv's capture, its final or flow_dep_bdy moves
      words.
-9. Optional, if asked for: `sixth_order_diffusion`, `horizontal_diffusion`
-   (`diff_opt = 1`).
+9. Diffusion, `diff_opt = 1` / `km_opt = 4` (asked for as item 5 of the
+   follow-up list). WRF 4.7.1 and WRFPLUS run, at `rk_step = 1` on the
+   time-t state: `compute_diff_metrics`, `cal_deform_and_div`,
+   `smag2d_km` (no slope limiter at diff_opt 1), then the
+   coordinate-surface `horizontal_diffusion` ('u', 'v', 'w', with xkmh)
+   and `horizontal_diffusion_3dmp` ('m', theta minus t_init, with xkhh).
+   (`horizontal_diffusion_2` is diff_opt 2 only.) The split:
+   - 9a. The coefficients (`woof.grad.wrfplus.diffusion`,
+     `kernels/diffusion.cu`), bound into the step by 9c.
+     - `df_tl/_ad`: defor11, defor22, defor12 of u, v and ph' (3-D
+       phb, map factors, periodic or bounded axes) on woof's strict
+       `wrf_smag_deform` (the `GPUWM_WRF_EXACT_C_DIFFUSION` statements;
+       `wrf_smag_deform_hat`, Metal's default, gives the same words).
+     - `km_tl/_ad`: xkmh and xkhh = xkmh / Pr on
+       `wrf_diff_opt1_km4` + `wrf_smag_km_bc`, with WRFPLUS's
+       derivatives: none where the 10 * mlen cap acts, and sqrt' = 0 where
+       def2 = 0.
+     - One forward serves both directions: the TL reads the inputs'
+       tangents; the AD thread of an input word seeds that word and
+       gathers a_out * d out / d word over the outputs whose stencil can
+       read it (a deduplicated window: 5x5 columns and the levels
+       L-1..L+1, 0 and nz-1 for the deformation; 2x2 for the
+       coefficients). One writer per word, no atomics. The overwritten
+       outputs' adjoints are consumed. The gather recomputes each
+       neighbour's stencil, so it costs more than a tuned adjoint would;
+       its cost is measured with the step binding (9c).
+     - Tests (`tests/test_grad_wrfplus_diffusion.py`): dot product,
+       accumulation, FD, the strict primal's words (both deformation
+       kernels and the coefficients; the slopes and the cap must move
+       words) and the WRFPLUS fixture (`tests/data/wrfplus/
+       diffusion.npz`, `tools/wrfplus_oracle/diffusion.F90`): in
+       binary64 woof matches WRFPLUS to about 4e-16.
+     - WRFPLUS findings. `compute_diff_metrics` (WRF's too) fills a
+       periodic axis's seam slope (zx at ids/ide, zy at jds/jde) for
+       levels 1..ktf only, so the top w level's seam slope keeps its cold
+       zero, where woof's primal takes the true slope: the fixture leaves
+       those deformation words out (and zeroes their adjoint seeds).
+       `a_cal_deform_and_div` sizes its y tapes (Tmpv400-403) from
+       max(jds+1, jts) but fills them from j_start = jts on a periodic y
+       axis, so it overruns them there: the fully periodic case is TL
+       only.
+   - 9b. The rows (`woof.grad.wrfplus.diffusion.hd_tl/_ad`), bound into
+     the step by 9c: `G_/A_HORIZONTAL_DIFFUSION` ('u', 'v', 'w' and a scalar
+     row, which 9d binds for moisture) and
+     `g_/a_horizontal_diffusion_3dmp` (theta minus its initial field) on
+     `wrf_diff_opt1_horizontal`.
+     - Active: the field, the coefficient (xkmh for u, v, w; xkhh for the
+       scalars) and mut; the hybrid mass c1 mut + c2, the initial theta
+       and the map factors pass through. The tendency accumulates, so its
+       adjoint passes through too.
+     - The same single forward as 9a: the AD thread of an input word
+       gathers over the row points within one column and row of it (a
+       field word at its own level, a coefficient word at its own and,
+       for w, the next level, a mut word at every level).
+     - Tests (`tests/test_grad_wrfplus_hdiff.py`): dot product,
+       accumulation, FD and the strict primal's words (through dycore's
+       `launch_coordinate_horizontal`; the hybrid mass and the initial
+       theta must move words) for every row on periodic, bounded and
+       one- to three-cell axes, and the WRFPLUS fixture (`tests/data/
+       wrfplus/hdiff.npz`, `tools/wrfplus_oracle/hdiff.F90`, 17 cases).
+       WRFPLUS's rows take mu as the mass, so the fixture uses c1 = 1,
+       c2 = 0; in binary64 woof matches it to about 1e-16.
+   - 9c. The step binding (`woof.grad.wrfplus.model`), done for a dry
+     state on periodic and specified domains, in `dycore._step_body`'s
+     strict order:
+     - At the step start, after `_save_time_t` (and on a cold step after
+       the diagnosis `_step_body` runs before the mixing): the held rows
+       `smag_ru`, `smag_rv`, `smag_rw` and `smag_rth` zeroed, the
+       deformation of u0, v0 and php0, `smag2d_km`'s xkmh and xkhh, the
+       mass mub2d + mup0, and the u, v, w (xkmh, c1f/c2f) and theta
+       (xkhh, thp0 minus `diff1_theta_initial`) rows into the held rows.
+       On a periodic domain the rows are then divided by their map
+       factor (`_couple_dry_mixing_map_factor`: v times msfv_inv under
+       BIGSTEP).
+     - On a specified domain the fold (`fold_lateral_relaxation`) adds
+       the stage-1 relaxation into the same held rows, so the division
+       covers the mixing and the relaxation together, as
+       `rk_addtend_dry` does. The fold's own slots are gone; without the
+       mixing the words are unchanged.
+     - Every stage adds the held rows after the slow tendencies
+       (`add_fixed_dry_tendencies`).
+     - `diff1_theta_initial` is passive (`run_state` takes it from
+       `initialize_coordinate_reference`, as the primal's first step
+       does).
+     - Refused by name: any other mixing package (diff_opt 2, km_opt 1,
+       2, 3 or 5), a moist state with the mixing (9d),
+       `tc_horizontal_length_m`, `m_opt` and a resumed state without
+       `diff1_theta_initial` (`dycore.coordinate_reference_missing`, the
+       primal's own refusal). Passive tracers are refused on every step:
+       the chain carries neither their transport nor their rows.
+     - Tests (`tests/test_grad_wrfplus_mix_step.py`): a warm periodic
+       step, one with map factors, rotation, the hybrid coordinate and
+       w_damp, a cold periodic chain of three, a warm specified step and
+       a cold mapped specified chain with the halo off the ring. The
+       binary32 base is `dycore.step`'s words on every input and the
+       carried scratch, and the same step without the mixing moves u, v,
+       w and theta. Also the dot product (with the boundary tables on
+       the specified cases), the base-only tape and FD.
+     - Cost (A6000, 120 x 100 x 40, binary32, a warm periodic step,
+       2026-11-22): the mixing adds about 0.2-1 ms to the TL step
+       (10.7 ms without it) but 226 ms to the base + AD step (26 ms
+       without it). Of that, `df_ad` takes 209 ms and the four `hd_ad`
+       rows 3-4 ms each; `km_ad` takes 0.2 ms. The gathers recompute
+       each neighbour's whole stencil over a window wider than the
+       stencils need (5 x 5 columns and five levels for the
+       deformation). A zero output adjoint skips the recompute, so a
+       step seeded with zeros hides the cost. PR #820, a separate
+       change to `df_ad`, narrows the gather to the outputs that read
+       each word (3 x 3 columns at most, the levels it reads, and per
+       term only the reading rows and columns). Measured with it:
+       `df_ad` 209 -> 11.6 ms and the base + AD step with the mixing
+       252 -> 52 ms (26 ms without it). Each `hd_ad` row's mut thread
+       still gathers its column's levels serially; that is left for a
+       later perf pass.
+   - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`).
+   `sixth_order_diffusion` and diff_opt 2 are not started.
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.

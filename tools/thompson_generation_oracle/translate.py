@@ -174,6 +174,10 @@ def expr(source, symbols, slices=None):
     value = lower_arrays(value)
     value = re.sub(r"\blake_(div|pow|min|max|abs)\b", r"tc_\1", value)
     value = re.sub(r"\bcopysign\b", "tc_sign", value)
+    # The lake translator later took its own names for these intrinsics;
+    # the generation keeps the CUDA names it was generated with (exp and
+    # log through WOOF's tc_ routines below, log10 as written).
+    value = re.sub(r"\blake_(exp|log10|log)\(", r"\1(", value)
     # Keep a REAL parameter exponent REAL even when its value is an
     # integer. gfortran calls powf for x**3.0 and multiplies for x**3;
     # those operations have different float32 words on source columns.
@@ -255,6 +259,31 @@ def dump_init(source, directory):
     driver = driver.replace("  open(71", "  call dump_generation_coefficients()\n  open(71")
     (directory / "dump_coefficients.F90").write_text(driver)
     (directory / "coefficient-schema.json").write_text(json.dumps({n: vars(module[n]) for n in names}, indent=2))
+
+
+#: The last statement of mp_thompson's rain-snow re-pairing, which v4.4
+#: guards with temp(k) > T_0 (:2718-2722): below 0 C the graupel gain
+#: prg_rcs keeps its pre-limiter value while the rain and snow limiters
+#: shrink prr_rcs and prs_rcs.
+RAIN_SNOW_REPAIR = "prs_rcs(k) = -prr_rcs(k)"
+#: The correction (RunConfig.thompson_rain_snow_closure, finding FQ5),
+#: emitted after that block's endif under a define an exact-mode compile
+#: never sets: below 0 C the gain becomes what rain and snow lose, floored at zero
+#: (snow then takes only what rain lost).
+RAIN_SNOW_CLOSURE = (
+    "if (temp(k).lt.T_0) prg_rcs(k) = -(prr_rcs(k) + prs_rcs(k))\n"
+    "if (temp(k).lt.T_0 .and. prg_rcs(k).lt.0.) prs_rcs(k) = -prr_rcs(k)\n"
+    "if (temp(k).lt.T_0 .and. prg_rcs(k).lt.0.) prg_rcs(k) = 0.")
+
+
+def rain_snow_closure(symbols, function):
+    """The ``#ifdef THOMPSON_RAIN_SNOW_CLOSURE`` block, translated like the
+    body."""
+    return ("#ifdef THOMPSON_RAIN_SNOW_CLOSURE\n"
+            "// woof RunConfig.thompson_rain_snow_closure (FQ5)\n"
+            + "\n".join(body_line(0, line, symbols, function)
+                        for line in RAIN_SNOW_CLOSURE.lower().split("\n"))
+            + "\n#endif")
 
 
 def generate(source, directory, output):
@@ -346,6 +375,7 @@ def generate(source, directory, output):
             else:
                 initial = " = " + expr(v.initial, symbols) if v.initial else ""
                 lines.append(f"{v.typ} {name}{initial};")
+        closure = None
         for n, line in routine["body"]:
             try:
                 body = body_line(n, line, symbols, function)
@@ -353,6 +383,15 @@ def generate(source, directory, output):
                 raise ValueError((routine["name"], n, line)) from e
             if body:
                 lines.append(f"// source:{n}\n{body}")
+            if line == RAIN_SNOW_REPAIR:
+                if closure is not None:
+                    raise ValueError((routine["name"], n, "second rain-snow re-pairing"))
+                closure = n
+            elif closure is not None and closure > 0 and line in ("endif", "end if"):
+                lines.append(rain_snow_closure(symbols, function))
+                closure = 0
+        if closure:
+            raise ValueError((routine["name"], closure, "rain-snow re-pairing without its endif"))
         if function:
             lines.append("return result;")
         lines.append("}")

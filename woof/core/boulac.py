@@ -35,7 +35,8 @@ from collections.abc import Mapping
 import cupy as cp
 import numpy as np
 
-from woof.core.kernels import get_kernel
+from woof.core.kernels import get_kernel, get_kernel_int_defines
+from woof.core.pbl_level_tiers import SHIPPED_KMAX, kmax_tier
 from woof.core.state import DTYPE
 from woof.physics_vertical_contract import (
     BOULAC_VERTICAL_LEVEL_BOUNDS, outside_vertical_bounds,
@@ -65,11 +66,22 @@ BOULAC_SURFACE_INPUTS = ("hfx", "qfx", "ust")
 BOULAC_TKE_COLD_START = 1.0e-4
 
 
+#: The define that compiles correct-mode ML1's BouLac downward length sign
+#: (RunConfig.pbl_boulac_down_sign) into ``boulac_column`` and the k-epsilon
+#: ``keps_columns``, which carries the same length routine.  Without it each
+#: kernel is WRF's build, defect included.
+BOULAC_DOWN_SIGN_DEFINE = (("BOULAC_DOWN_SIGN", 1),)
+
+
 def launch_boulac(columns: Mapping, surface: Mapping, tke, *, dt: float,
                   cp_air: float, g: float, outputs: Mapping | None = None,
                   bep: Mapping | None = None, frc_urb2d=None,
-                  idiff: int = 0) -> dict:
+                  idiff: int = 0, down_sign: bool = False) -> dict:
     """Run one BouLac step and return its outputs (allocated if not given).
+
+    ``down_sign`` is correct-mode ML1 (RunConfig.pbl_boulac_down_sign): the
+    downward length's constant-theta branch with the sign of its bbb -> 0
+    limit.  Off (the launcher default) is WRF v4.6.1's arithmetic.
 
     ``tke`` is the carried TKE_PBL column, rewritten in place.  ``bep`` is
     the urban PBL handoff (:data:`BOULAC_BEP_INPUTS`, ``sf_bep`` with nz+1
@@ -89,7 +101,8 @@ def launch_boulac(columns: Mapping, surface: Mapping, tke, *, dt: float,
             breakage=(
                 "the kernel holds at most "
                 f"{BOULAC_VERTICAL_LEVEL_BOUNDS[1]} levels per column "
-                "(BOULAC_KMAX in kernels/boulac.cu) -- raise the define and "
+                "(BOULAC_KMAX in kernels/boulac.cu, compiled at the tiers of "
+                "woof.core.pbl_level_tiers) -- extend the ladder and "
                 "re-measure rather than truncating -- and below three levels "
                 "the shear and buoyancy terms, which live on the interior "
                 "levels kts+1..kte-1, do not exist."))
@@ -144,7 +157,14 @@ def launch_boulac(columns: Mapping, surface: Mapping, tke, *, dt: float,
     if n == 0:
         return _aliased(out)
     blocks = (n + _TPB - 1) // _TPB
-    kernel = get_kernel("boulac", "boulac_column")
+    # <= 128 levels compile the unchanged source; deeper columns its 256
+    # tier (woof.core.pbl_level_tiers).  Correct-mode ML1 adds its sign
+    # define on top of either tier.
+    tier = kmax_tier(nz)
+    defines = ((BOULAC_DOWN_SIGN_DEFINE if down_sign else ())
+               + ((("BOULAC_KMAX", tier),) if tier != SHIPPED_KMAX else ()))
+    kernel = (get_kernel_int_defines("boulac", "boulac_column", defines)
+              if defines else get_kernel("boulac", "boulac_column"))
     kernel((blocks,), (_TPB,),
            tuple(column_arrays) + (tke,) + tuple(surface_arrays)
            + (frc, out["pblh"])

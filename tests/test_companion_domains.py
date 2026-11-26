@@ -811,6 +811,19 @@ def test_every_option_carries_the_registrys_own_couplings():
     # NTU (no radii for RTE+RRTMGP, like Lin), SSiB (its spectral surface
     # carriers on RTE+RRTMGP), BMJ (radiation adapters that do not merge its
     # convective cloud) and SMS-3DTKE (scale-aware KF, coordinate diffusion).
+    # The shallow-convection pairings of WRF's check_a_mundo (UW shallow
+    # convection needs the QI carrier, GRIMS needs PBL 1/5/6/11, Deng needs
+    # MYJ or MYNN, MYNN EDMF needs shcu_physics = 0, NSAS already holds NSCV)
+    # and the RCON speed proof, the TOPO_WIND and MYNN icloud_bl refusals add
+    # these carriers.
+    shcu_microphysics = {
+        "ferrier-aligo-advect-mp15", "goddard4ice-mp7", "gsfcgce-mp97",
+        "ishmael-mp55", "kessler-mp1", "madwrf-mp96", "morrison-aero-mp40",
+        "p3-mp51", "p3-mp53", "thompson-graupel-hail-mp38", "udm-mp27",
+        "wdm5-mp14", "wdm7-mp26", "wsm3-mp3", "rcon-mp29"}
+    pbl_options = {"acm2", "boulac", "ccpp-tke-edmf", "eeps", "gbm", "gfs",
+                   "keps", "mrf", "myj", "mynn", "off", "qnse", "sase",
+                   "shinhong", "temf", "uw", "ysu"}
     assert set(carriers) == {("microphysics", "off"),
                              ("microphysics", "fast-sbm-mp30"),
                              ("microphysics", "lin-mp2"),
@@ -819,10 +832,21 @@ def test_every_option_carries_the_registrys_own_couplings():
                              # old Eta Ferrier (3.0 port) carries its own
                              # conditional refusal as well.
                              ("microphysics", "etanew-mp95"),
+                             # UDM and MAD-WRF carry theirs from 3.0.2: the
+                             # builder wrote the RTE+RRTMGP rule before the
+                             # passes that rewrite both options whole, so
+                             # they shipped without it and plan review
+                             # called them launchable where the run refused.
+                             ("microphysics", "udm-mp27"),
+                             ("microphysics", "madwrf-mp96"),
                              ("land_surface", "ssib"),
                              ("cumulus", "betts-miller-janjic"),
+                             ("cumulus", "new-sas"),
+                             ("radiation", "wrf-rrtmg-k"),
                              ("turbulence", "sms-3dtke")} | {
-        ("turbulence", option) for option in turbulence}
+        ("turbulence", option) for option in turbulence} | {
+        ("microphysics", option) for option in shcu_microphysics} | {
+        ("pbl", option) for option in pbl_options}
     for option in turbulence:
         rules = carriers[("turbulence", option)]
         # Terrain admission adds more rules after the diffusion rules.
