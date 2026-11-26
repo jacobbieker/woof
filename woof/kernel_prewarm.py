@@ -221,6 +221,8 @@ def static_modules(experiment) -> tuple[str, ...]:
             modules.update({"noah_fractional", "noah_seaice_options"})
             if getattr(run, "sf_sfclay_physics", 0) == 1:
                 modules.add("sfclay_dx2d")
+        if getattr(run, "kim_tofd", False) and getattr(run, "sf_sfclay_physics", 0) == 1:
+            modules.add("sfclay_tofd")
     return tuple(sorted(modules))
 
 
@@ -264,7 +266,10 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
             from woof.physics_compat import radiation_scheme_ids
             for nv1 in sorted({int(dc.run.nz)+1 for dc in experiment.domains
                                if radiation_scheme_ids(dc.run)[0] == 7}):
-                defines = (("FLG_NV1", nv1),)
+                # FLGColumn adds the FLG_NVX tier define past 100 layers;
+                # warm the same module key it loads.
+                from woof.core.flg_levels import nvx_defines
+                defines = (("FLG_NV1", nv1),) + nvx_defines(nv1 - 1)
                 jobs.append((f"flg_column[FLG_NV1={nv1}]",
                              kernels.load_module_unflushed.__wrapped__, (name, defines)))
             continue
@@ -326,6 +331,24 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
         job[0].split("[")[0] != "sfclay", -_source_bytes(job[0].split("[")[0]), job[0]))
 
 
+def _reads(run, key: str) -> bool:
+    """RunConfig correction ``key`` where it is read (woof.quirk_corrections.run_reads)."""
+    from woof.quirk_corrections import run_reads
+    return run_reads(run, key)
+
+
+def _psih_zolzt(run) -> bool:
+    """RunConfig.mynn_sfclay_psih_zolzt where it is read."""
+    return _reads(run, "mynn_sfclay_psih_zolzt")
+
+
+#: Units launched with RunConfig.thompson_rain_snow_closure's define through
+#: load_module_int_defines (woof.core.thompson._closure_kernel,
+#: thompson_classic, thompson_aerosol_launch.CLOSURE_MODULES).
+_THOMPSON_CLOSURE_UNITS = ("thompson", "thompson_classic",
+                           "thompson_aerosol_cold", "thompson_aerosol_warm")
+
+
 def _variant_jobs(experiment, modules):
     """Compile selector and dimension variants before their first launch.
 
@@ -337,7 +360,7 @@ def _variant_jobs(experiment, modules):
     from woof.core.kernel_shape import FUNCTIONS, shape_defines
     from woof.core.thompson_aerosol_launch import AEROSOL_KERNEL_MODULES, WRF39_DEFINES
     from woof.ingest.lateral_bc import relaxation_shapes
-    from woof.core.mynn_sfclay import mynn_surface_defines
+    from woof.core.mynn_sfclay import MYNN_SFCLAY_DEFINES, mynn_surface_defines
 
     jobs, seen = [], set()
     runs = [dc.run for dc in getattr(experiment, "domains", ()) if hasattr(dc, "run")]
@@ -352,8 +375,12 @@ def _variant_jobs(experiment, modules):
             elif name == "mynn_pbl" and getattr(run, "bl_mynn_version", "") == "gsd_41":
                 defines = (("MYNN_GSD41", 1),)
             elif name == "mynn_surface":
-                defines = mynn_surface_defines(getattr(run, "mynn_sfclay_variant", "wrf_461"),
-                                               getattr(run, "mynn_sfclay_psih_zolzt", False) is True)
+                # mynnsfc_b66187f (WRF v4.8.0 MYNN-SFC) is its own unit,
+                # compiled at its first call; mynn_surface keeps its default.
+                variant = getattr(run, "mynn_sfclay_variant", "wrf_461")
+                defines = (mynn_surface_defines(variant,
+                                                _psih_zolzt(run))
+                           if variant in MYNN_SFCLAY_DEFINES else ())
             tiers = [defines] if defines else []
             if name == "advection":
                 if getattr(run, "momentum_adv_opt", 1) == 3:
@@ -382,6 +409,39 @@ def _variant_jobs(experiment, modules):
                           [(nz, ny, nx)])
                 tiers.extend(defines + shape_defines(name, FUNCTIONS[name][0], shape)
                              for shape in shapes)
+                if (name == "mynn_pbl"
+                        and int(getattr(run, "bl_pbl_physics", 0) or 0) == 5
+                        and getattr(run, "mynn_boulac_down_sign", False) is True
+                        and getattr(run, "bl_mynn_version", "wrf_461") in ("wrf_461", "gsd_41")):
+                    # Correct-mode ML1 compiles the two mixing-length kernels
+                    # with its define (woof/core/mynn_pbl_gpu.py); the other
+                    # MYNN kernels keep the tiers above.
+                    # Neither of them is a shaped function (kernel_shape.FUNCTIONS).
+                    from woof.core.mynn_pbl_gpu import MYNN_BOULAC_DOWN_SIGN_DEFINE
+                    tiers.append(defines + MYNN_BOULAC_DOWN_SIGN_DEFINE)
+            if (name == "gf" and hasattr(run, "nz") and not getattr(run, "spp_conv", 0)
+                    and _reads(run, "gf_deep_rain_evaporation_booking")):
+                # FQ1 (on in correct mode) compiles gf.cu's booking tier
+                # (woof.core.gf._gf_module), the module the run launches.
+                from woof.core.gf import gf_kernel_capacity
+                tiers.append((("GF_KMAX", gf_kernel_capacity(int(run.nz))), ("GF_DEEP_EVAP_BOOKING", 1)))
+            if (name in _THOMPSON_CLOSURE_UNITS
+                    and _reads(run, "thompson_rain_snow_closure")):
+                # FQ5 (on in correct mode): the unit with the rain-snow
+                # closure define, after the generation defines as
+                # thompson_aerosol_launch.aerosol_kernel orders them.  The
+                # hail-aware image (mp = 38) compiles at its first call.
+                from woof.core.thompson import RAIN_SNOW_CLOSURE_DEFINES
+                tiers.append((defines if name in AEROSOL_KERNEL_MODULES else ())
+                             + RAIN_SNOW_CLOSURE_DEFINES)
+            if name in ("noah_ua", "noah_mosaic_ua") and _reads(run, "noah_smc_floor_booking"):
+                # FQ4 (on in correct mode): the booked unit, the define first
+                # (woof.core.noah.smc_floor_booking_module).
+                from woof.core.noah import smc_floor_booking_module
+                if (name, "booking") not in seen:
+                    seen.add((name, "booking"))
+                    jobs.append((f"{name}[NOAH_SMC_FLOOR_BOOKING=1]",
+                                 smc_floor_booking_module.__wrapped__, (name,)))
             for tier in tiers:
                 if (name, tier) in seen:
                     continue
@@ -442,6 +502,7 @@ _DEVICE_LOADERS = {
     "acm2pbl_composed": ("acm2pbl", "_module"),
     "gbmpbl_composed": ("gbmpbl", "_module"),
     "terrain_drag_composed": ("terrain_drag", "_module"),
+    "terrain_drag_gwdo480_composed": ("terrain_drag", "_gwdo480_module"),
     "fogdes_composed": ("fog_settling", "_module"),
     "thompson_fork_unit": ("thompson_fork", "_module"),
     # wind_farm_scheme = "fitch_wrf" (WRF's windfarm_opt = 1): its own direct

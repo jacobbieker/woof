@@ -1531,6 +1531,20 @@ __device__ bool tf_mp_thompson(
                 prr_rcs = (double)(ratio * copysignf(1.0f, (float)prr_rcs));
                 prs_rcs = -prr_rcs;
             }
+#ifdef THOMPSON_RAIN_SNOW_CLOSURE
+            // RunConfig.thompson_rain_snow_closure (FQ5): the fork
+            // re-pairs the rain-snow transfer only above 0 C.  Below it the
+            // graupel gain keeps its pre-limiter value while the rain and
+            // snow limiters shrink the losses; the gain becomes what they
+            // lose, floored at zero (snow then takes only what rain lost).
+            if (temp[k] < TF_T_0) {
+                prg_rcs = -(prr_rcs + prs_rcs);
+                if (prg_rcs < 0.0) {
+                    prs_rcs = -prr_rcs;
+                    prg_rcs = 0.0;
+                }
+            }
+#endif
         }
 
         // ---- tendencies (:2796-2960) ----

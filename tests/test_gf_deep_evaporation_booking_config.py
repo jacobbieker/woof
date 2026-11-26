@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from woof import correct_mode
 from woof.config import RunConfig, validate_run_config
+from woof.quirk_corrections import run_reads
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,15 +30,19 @@ def _gf(**kw):
     return _cfg(cu_physics=3, bl_pbl_physics=1, sf_sfclay_physics=1, cudt_minutes=0.0, **kw)
 
 
-def test_default_is_off():
-    assert _cfg().gf_deep_rain_evaporation_booking is False
+def test_default_follows_the_physics_mode():
+    # correct-mode finding FQ1: on in a default process, off in exact mode
+    assert _cfg().gf_deep_rain_evaporation_booking is correct_mode.CORRECT_KEYS_DEFAULT
+    exact = _gf(**correct_mode.resolve("exact").settings)
+    assert exact.gf_deep_rain_evaporation_booking is False and not run_reads(exact, "gf_deep_rain_evaporation_booking")
 
 
-def test_admitted_with_grell_freitas_only():
+def test_read_with_grell_freitas_only():
     cfg = validate_run_config(_gf(gf_deep_rain_evaporation_booking=True))
-    assert cfg.gf_deep_rain_evaporation_booking is True
-    with pytest.raises(ValueError, match="cu_physics = 16"):
-        validate_run_config(_cfg(cu_physics=16, bl_pbl_physics=1, sf_sfclay_physics=1, cudt_minutes=0.0, gf_deep_rain_evaporation_booking=True))
+    assert run_reads(cfg, "gf_deep_rain_evaporation_booking")
+    other = validate_run_config(_cfg(cu_physics=16, bl_pbl_physics=1, sf_sfclay_physics=1, cudt_minutes=0.0,
+                                     gf_deep_rain_evaporation_booking=True))
+    assert not run_reads(other, "gf_deep_rain_evaporation_booking")
 
 
 @pytest.mark.parametrize("bad", [1, "true", None])
@@ -47,7 +53,11 @@ def test_non_boolean_is_refused(bad):
 
 def test_restart_echo_omits_the_default_only():
     from woof.io import restart
-    values = dataclasses.asdict(_gf())
+    values = dataclasses.asdict(_gf(gf_deep_rain_evaporation_booking=False))
+    restart._drop_default_off_run_keys(values)
+    assert "gf_deep_rain_evaporation_booking" not in values
+    # on but unread (no Grell-Freitas): absent too
+    values = dataclasses.asdict(_cfg(gf_deep_rain_evaporation_booking=True))
     restart._drop_default_off_run_keys(values)
     assert "gf_deep_rain_evaporation_booking" not in values
     assert restart.ECHO_ABSENT_RUN_VALUES["gf_deep_rain_evaporation_booking"] is False
@@ -82,17 +92,16 @@ def test_hex_generic_seam_reaches_the_option():
     # it, so the setting is judged with GF here ...
     auto = _resolve("gf_deep_rain_evaporation_booking=true")
     assert auto["resolved"] is True
-    # ... an explicit other cumulus is refused at once ...
-    refused = _resolve("config_convection_scheme=cu_ntiedtke",
-                       "gf_deep_rain_evaporation_booking=true")
-    assert refused["resolved"] is False
-    assert "cu_physics = 16" in json.dumps(refused["refusals"])
+    # ... and with an explicit other cumulus it is not read (on by default
+    # in correct mode, a correction is inert where its scheme does not run)
+    other = _resolve("config_convection_scheme=cu_ntiedtke",
+                     "gf_deep_rain_evaporation_booking=true")
+    assert other["resolved"] is True
 
 
 def test_the_bind_rejudges_a_scoped_setting_with_the_decided_cumulus():
-    # ... and the bind hands the engine the cumulus it decided, where the
-    # engine's validator refuses a non-GF one.
-    from woof.config import ConfigurationRefused
+    # ... and the bind hands the engine the cumulus it decided, where a
+    # non-GF one does not read it.
     from woof.core.mpas_column_suite import column_physics_plan
     from woof.hex.physics_suites import probe_cumulus
     selection = {"mp_physics": 6, "bl_pbl_physics": 1, "sf_sfclay_physics": 1,
@@ -101,8 +110,7 @@ def test_the_bind_rejudges_a_scoped_setting_with_the_decided_cumulus():
     assert probe_cumulus({**selection, "cu_physics": 16})["cu_physics"] == 16
     assert "cu_physics" not in probe_cumulus({**selection, "gf_deep_rain_evaporation_booking": False})
     column_physics_plan({**selection, "cu_physics": 3})
-    with pytest.raises(ConfigurationRefused, match="cu_physics = 16"):
-        column_physics_plan({**selection, "cu_physics": 16})
+    column_physics_plan({**selection, "cu_physics": 16})
 
 
 def _tree(tmp_path, **tables):
@@ -111,17 +119,16 @@ def _tree(tmp_path, **tables):
     from woof.experiment import load_experiment
     path = tmp_path / "tree.toml"
     path.write_text(_grell_tree_toml(**tables), encoding="utf-8")
-    return [(d.run.cu_physics, d.run.gf_deep_rain_evaporation_booking)
+    return [(d.run.cu_physics, run_reads(d.run, "gf_deep_rain_evaporation_booking"))
             for d in load_experiment(path).domains]
 
 
 def test_experiment_shared_value_reaches_only_grell_freitas_domains(tmp_path):
     on = "gf_deep_rain_evaporation_booking = true\n"
+    off = "gf_deep_rain_evaporation_booking = false\n"
     assert _tree(tmp_path, shared=on, root="cu_physics = 3\n") == [(3, True), (0, False)]
     assert _tree(tmp_path, root="cu_physics = 3\n" + on) == [(3, True), (0, False)]
-    with pytest.raises(ValueError, match="cu_physics = 0"):
-        _tree(tmp_path, shared=on)
-    # A Grell-family tree without a Grell-Freitas domain (Grell 3D only)
-    # has no consumer, so the shared value is refused rather than dropped.
-    with pytest.raises(ValueError, match="cu_physics = 5"):
-        _tree(tmp_path, shared=on, root="cu_physics = 5\n")
+    assert _tree(tmp_path, shared=off, root="cu_physics = 3\n") == [(3, False), (0, False)]
+    # without a Grell-Freitas domain nothing reads it
+    assert _tree(tmp_path, shared=on) == [(0, False), (0, False)]
+    assert _tree(tmp_path, shared=on, root="cu_physics = 5\n") == [(5, False), (0, False)]

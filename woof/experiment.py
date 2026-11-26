@@ -1,7 +1,7 @@
 """Typed multi-domain experiment schema and TOML loader (Phase 5, lane L1).
 
 Implements section A of the RATIFIED Phase-5 nesting architecture
-(docs/superpowers/specs/2026-07-16-phase5-nesting-architecture.md): frozen
+(docs/internal/specs/2026-07-16-phase5-nesting-architecture.md): frozen
 :class:`DomainConfig`/:class:`ExperimentConfig` dataclasses over the
 existing :class:`woof.config.RunConfig`, the ``[experiment]`` /
 ``[shared]`` / ``[[domain]]`` / ``[projection]`` TOML shape, and every
@@ -53,7 +53,7 @@ from woof.io import history_selection as history_selection_module
 from woof import simulated_radar_config as simulated_radar_module
 from woof.config_keys import KeyRow, key_rows
 from woof.config import (DEFAULT_COLUMN_CHUNK, RADAR_HEATING_OFF, RadarHeatingConfig,
-                          KF_FAMILY_CU_SCHEMES,
+                          KF_FAMILY_CU_SCHEMES, THOMPSON_RAIN_SNOW_MP,
                           EXPLICIT_HORIZONTAL_DIFFUSION_LIMIT,
                           EPSSM_AUTO,
                           GRELL_FAMILY_CU_PHYSICS, GRELL_FAMILY_DEFAULTS,
@@ -314,6 +314,8 @@ _DOMAIN_RUN_OVERRIDES = (
     "lightning_option", "lightning_dt", "lightning_start_seconds",
     "flashrate_factor", "iccg_method", "iccg_prescribed_num",
     "iccg_prescribed_den", "cellcount_method", "cldtop_adjustment", "do_radar_ref",
+    "dyn_lightning_option", "coul_pos", "coul_neg", "coul_neu",
+    "j_pos", "j_neg", "j_neu",
     # clos_choice/ishallow ride with cu_physics: per-domain because the
     # scheme they configure is, and inert (validated zero) on any domain
     # that does not select cu_physics = 3.  On a tree that mixes
@@ -327,6 +329,15 @@ _DOMAIN_RUN_OVERRIDES = (
     # The opt-in YSU surface heat flux on theta, on the same terms: a
     # [shared] value reaches the bl_pbl_physics = 1 domains only.
     "ysu_surface_heat_exner",
+    # The opt-in Noah soil-moisture floor booking, on the same terms: a
+    # [shared] value reaches the sf_surface_physics = 2 domains only.
+    "noah_smc_floor_booking",
+    # The Thompson rain-snow collection closure (FQ5), on the same terms:
+    # a [shared] value reaches the mp_physics = 8, 28, 38 domains only.
+    "thompson_rain_snow_closure",
+    # The RRTMG longwave model-top correction (FQ6), on the same terms: a
+    # [shared] value reaches the legacy-RRTMG longwave domains only.
+    "rrtmg_lw_model_top",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -487,7 +498,10 @@ _DOMAIN_RUN_OVERRIDES = (
     # (woof.core.terrain_drag); the GSL suite tapers itself with each
     # domain's grid length, so a column is the natural shape.
     "topo_wind", "gwd_opt",
-    "wind_farm_scheme", "wind_farm_table", "wind_farm_max_dx_m", "wind_farms", "windfarm_tke_factor", "windfarm_ij", "windfarm_wake_model", "windfarm_overlap_method", "windfarm_deg", "windfarm_induction",
+    # WRF v4.8.0's gwd_opt = 1 keys are max_domains as well
+    # (Registry.EM_COMMON:2902-2903), and so is the generation they go with.
+    "gwdo_version", "gwd_dx_factor", "gwd_if_nonhyd",
+    "wind_farm_scheme", "wind_farm_table", "wind_farm_max_dx_m", "wind_farms", "windfarm_tke_factor", "windfarm_ij", "windfarm_wake_model", "windfarm_overlap_method", "windfarm_deg", "windfarm_induction", "windfarm_fitch_version",
     "windturbines_spec", "td_turbgridid", "td_hubheight", "td_diameter", "td_stdthrcoef", "td_cutinspeed", "td_cutoutspeed", "td_power", "td_turbpercell", "td_ewfx", "td_ewfy", "td_pwfx", "td_pwfy",
     "history_interval2_s", "history_interval_change_s",
     "prec_acc_dt", "prec_acc_dt1", "gsd_diagnostics", "reset_interval1",
@@ -3641,6 +3655,59 @@ def _check_whole_second_cadence(label: str, seconds: Fraction, grid_id,
             "replace the earlier.")
 
 
+def delayed_start_root_step_error(exp: ExperimentConfig,
+                                  grid_id: int) -> str | None:
+    """Why ``grid_id``'s delayed start cannot be executed, or None.
+
+    The fixed-step executor runs the tree one ROOT step (one period) at a
+    time and births a delayed nest only at a period boundary
+    (:func:`woof.core.clock.execute_schedule`), the same instant its
+    schedule first recurses into it (:func:`woof.core.clock.build_schedule`
+    activates a nest whose start is at or before the period's start).  A
+    start strictly inside a root step was accepted by the parent-step rule
+    and then fell between the two: the schedule stepped the nest from the
+    NEXT root step while the executor waited for a boundary equal to its
+    start that never came -- so the nest was never initialized from its
+    parent, never wrote history, and its first two history-due steps
+    stashed REFL_10CM with nobody consuming it ("REFL_10CM stash was not
+    consumed before reuse").  WRF has no period executor to fall between:
+    ``nests_to_open`` (frame/module_nesting.F) opens the nest at its
+    parent's first top-of-step whose HEAD-grid time has reached the start,
+    i.e. inside that root step and from the parent's state before the
+    start, then holds the nest's clock at its namelist start until the
+    parent catches up.  That early-birth shape is not representable here,
+    so the start must lie on the root-step lattice.  Exempt: an adaptive
+    tree (any domain adaptive, as :func:`woof.core.clock.resolve_clock`
+    reads it) lands on a delayed start as a deadline; a spawned nest is
+    born at a leg boundary, not its configured start; and a nest alive at
+    the experiment start (offset <= 0, e.g. a restart leg) has no birth.
+    """
+    dc = exp.domain(grid_id)
+    if (dc.parent_id == 0 or getattr(dc, "spawn", None) is not None
+            or any(getattr(d.run, "use_adaptive_time_step", False)
+                   for d in exp.domains)):
+        return None
+    offset = exp.domain_start_offset_exact(grid_id)
+    if offset <= 0:
+        return None
+    root_dt = exp.dt_exact(exp.root.grid_id)
+    root_steps = offset / root_dt
+    if root_steps.denominator == 1:
+        return None
+    # start_time is whole seconds in practice, so name the nearest root
+    # steps that are also whole seconds (multiples of dt's numerator).
+    lattice = root_dt.numerator
+    before = (offset // lattice) * lattice
+    return (
+        f"delayed start_time for d{grid_id:02d} "
+        f"({exp.domain_start_time(grid_id).isoformat()}; offset "
+        f"{float(offset):g} s) is not on a root-domain step boundary: "
+        f"d{exp.root.grid_id:02d} dt = {root_dt} s exactly, offset/dt = "
+        f"{root_steps}.  A nest is born only at a root step; move its "
+        f"start to {float(before):g} s or {float(before + lattice):g} s "
+        f"after the experiment start.")
+
+
 def validate_boundary_timing(
         exp: ExperimentConfig, boundary_interval_seconds: int, *,
         source: str = "boundary forcing",
@@ -3692,6 +3759,9 @@ def validate_boundary_timing(
                 f"boundary: d{dc.parent_id:02d} dt = {parent_dt} s "
                 f"exactly, (child-parent start offset)/dt = "
                 f"{parent_steps}.")
+        root_step_error = delayed_start_root_step_error(exp, dc.grid_id)
+        if root_step_error is not None:
+            raise ValueError(root_step_error)
         if getattr(dc, "spawn", None) is not None:
             # A SPAWNED nest's epoch is its trigger's instant, and a
             # trigger fires on the weather rather than on the forcing
@@ -4151,6 +4221,11 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
 
     # ---- [shared] ------------------------------------------------------
     shared = dict(raw.get("shared", {}))
+    # wrf_reference = "4.8.0" | "4.7.1" pins the scheme generations that
+    # WRF release runs, resolved here into the per-scheme keys (an explicit
+    # per-scheme key wins); absent, nothing changes (woof.wrf_reference).
+    from woof.wrf_reference import resolve_wrf_reference
+    resolve_wrf_reference(shared, where=f"[shared] of {source}")
     # Captured from the RAW table, before anything defaults it: whether
     # the author CHOSE radiation at all.  ra_physics defaults to 0 and
     # ra_lw/sw_physics to -1, so by RunConfig time "wrote ra_physics = 0"
@@ -4381,6 +4456,34 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             "sf_sfclay_physics",
             dom.get("sf_sfclay_physics",
                     shared.get("sf_sfclay_physics", RunConfig.sf_sfclay_physics))) == 5
+        for dom in domain_tables)
+    # The opt-in Noah soil-moisture floor booking is read only by Noah
+    # (sf_surface_physics = 2), on the same terms.
+    tree_runs_noah = any(
+        physics_mode.settings.get(
+            "sf_surface_physics",
+            dom.get("sf_surface_physics",
+                    shared.get("sf_surface_physics", RunConfig.sf_surface_physics))) == 2
+        for dom in domain_tables)
+    # The opt-in Thompson rain-snow collection closure is read only by
+    # Thompson (mp_physics = 8, 28, 38), on the same terms.
+    tree_runs_thompson = any(
+        physics_mode.settings.get(
+            "mp_physics",
+            dom.get("mp_physics",
+                    shared.get("mp_physics", RunConfig.mp_physics))) in THOMPSON_RAIN_SNOW_MP
+        for dom in domain_tables)
+    # The opt-in RRTMG longwave model-top correction is read only by the
+    # legacy RRTMG longwave (ra_lw_physics = 4 or the ra_physics = 4
+    # aggregate, ra_rrtmg_variant = "rrtmg_legacy"), on the same terms.
+    def _runs_rrtmg_lw_legacy(get) -> bool:
+        lw = get("ra_lw_physics", RunConfig.ra_lw_physics)
+        if lw == -1:
+            lw = get("ra_physics", RunConfig.ra_physics)
+        return lw == 4 and get("ra_rrtmg_variant", RunConfig.ra_rrtmg_variant) == "rrtmg_legacy"
+    tree_runs_rrtmg_lw = any(
+        _runs_rrtmg_lw_legacy(lambda name, default, dom=dom: physics_mode.settings.get(
+            name, dom.get(name, shared.get(name, default))))
         for dom in domain_tables)
     # The same rule for the Grell-family keys.  clos_choice and ishallow
     # are read only where cu_physics = 3, and the wizard writes them in
@@ -5002,8 +5105,20 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                      or kw.get("mynn_sfclay_variant", RunConfig.mynn_sfclay_variant) != "wrf_461")
                 and "mynn_sfclay_psih_zolzt" not in dom):
             kw["mynn_sfclay_psih_zolzt"] = False
-        # woof_quirk_corrections = 'all': every opt-in correction whose
-        # scheme this domain runs, a conflicting explicit key refused by name.
+        if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
+                and "noah_smc_floor_booking" not in dom):
+            kw["noah_smc_floor_booking"] = False
+        if (tree_runs_thompson
+                and kw.get("mp_physics", RunConfig.mp_physics) not in THOMPSON_RAIN_SNOW_MP
+                and "thompson_rain_snow_closure" not in dom):
+            kw["thompson_rain_snow_closure"] = False
+        if (tree_runs_rrtmg_lw
+                and not _runs_rrtmg_lw_legacy(
+                    lambda name, default: kw.get(name, default))
+                and "rrtmg_lw_model_top" not in dom):
+            kw["rrtmg_lw_model_top"] = False
+        # an explicit woof_quirk_corrections ('all' / 'none') sets every
+        # correction key the domain does not set itself (quirk_corrections).
         from woof.quirk_corrections import apply_run_corrections
         kw = apply_run_corrections(kw)
         # G3-only shared controls reach only G3 domains. Explicit domain
@@ -5073,8 +5188,6 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         # The full legacy invariant battery applies to every per-domain
         # RunConfig (p5t1 review F1): same checks, same messages as
         # load_config.
-        from woof.surface_ocean import apply_ocean_defaults
-        apply_ocean_defaults(kw)
         run = validate_run_config(RunConfig(**kw))
         bounds = {}
         for bound_key in ("starting_time_step", "max_time_step", "min_time_step"):
@@ -5203,7 +5316,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     # it, and each domain's DomainState allocates its own zero TKE from its
     # own km_opt.  Under a parent carrying no TKE this tree has been run --
     # a 402x402 250 m km_opt=2 PBL-off child under a km_opt=4 750 m parent,
-    # 7 h, status PASS (docs/superpowers/receipts/les/
+    # 7 h, status PASS (docs/internal/receipts/les/
     # nested-les-km2-2026-08-02.md).  Under a km_opt=2 parent the child
     # does the same thing; the parent's TKE simply stays on the parent, as
     # it does in WRF.  That tree is admitted and the run says it is
@@ -5223,7 +5336,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     "f flag; woof/core/nest_fields.py carries no tke "
                     "row. The measured nested km_opt=2 tree had a "
                     "km_opt=4 parent "
-                    "(docs/superpowers/receipts/les/"
+                    "(docs/internal/receipts/les/"
                     "nested-les-km2-2026-08-02.md).")
         if dc.run.km_opt == 5:
             warn_once(
@@ -5855,7 +5968,7 @@ def _refuse_inflow_seeding_under_a_pbl_off_parent(
     nothing to define it with and
     :func:`woof.core.inflow_perturbation.build_inflow_perturbation`
     refuses.  That refusal is correct, it is ratified as G4 in
-    ``docs/superpowers/specs/P6-LES-DECISIONS-RATIFIED-2026-08-05.md``,
+    ``docs/internal/specs/P6-LES-DECISIONS-RATIFIED-2026-08-05.md``,
     and it STAYS where it is -- a spawned or relocated nest is built
     outside the config path and must still hit it.
 
@@ -5907,7 +6020,7 @@ def _refuse_inflow_seeding_under_a_pbl_off_parent(
             "seeding here would double-count them.  The seeding belongs "
             "on the FIRST domain whose parent parameterizes turbulence "
             "(bl_pbl_physics != 0), which is where G4 rules it ON "
-            "(docs/superpowers/specs/"
+            "(docs/internal/specs/"
             "P6-LES-DECISIONS-RATIFIED-2026-08-05.md).  Refused at the "
             "config load rather than at the first nest bind because the "
             "same pairing used to be admitted, prepared and placed on "
@@ -6372,6 +6485,11 @@ def _public_config_value(value):
                                   # and the corrected default is written.
                                   ("solar_generation", "wrf_461"),
                                   ("ysu_version", "wrf_461"),
+                                  ("shinhong_version", "wrf_461"),
+                                  ("shinhong_nonlocal_flux", True),
+                                  ("shinhong_scu_mixing", False),
+                                  ("shinhong_ke_dissipation", False),
+                                  ("cu_gf_version", "wrf_461"),
                                   ("noahmp_snow_age", "wrf_461"),
                                   ("urban_water_balance", "wrf_471")):
                 if run_document.get(name, default) == default:
@@ -6411,8 +6529,11 @@ def _public_config_value(value):
                                   ("spacewx_epp_opt", 0), ("spacewx_epp_source", ""),
                                   ("urban_param_file", ""),
                                   ("ysu_surface_heat_exner", False),
-                                  ("woof_quirk_corrections", "none"),
+                                  ("woof_quirk_corrections", None),
                                   ("mynn_sfclay_psih_zolzt", False),
+                                  ("noah_smc_floor_booking", False),
+                                  ("thompson_rain_snow_closure", False),
+                                  ("rrtmg_lw_model_top", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):
@@ -6423,8 +6544,41 @@ def _public_config_value(value):
             # scheme is off, so they leave such a document whatever they say.
             if run_document.get("bl_pbl_physics", 0) != 1:
                 run_document.pop("ysu_version", None)
+            if run_document.get("bl_pbl_physics", 0) != 11:
+                for _key in ("shinhong_version", "shinhong_nonlocal_flux",
+                             "shinhong_scu_mixing", "shinhong_ke_dissipation"):
+                    run_document.pop(_key, None)
+            if run_document.get("cu_physics", 0) != 3:
+                run_document.pop("cu_gf_version", None)
+            # The TEMPO generation: a document written before it ran v3.0.3,
+            # and the keys reach nothing while TEMPO is off.
+            if (run_document.get("mp_physics", 0) != 900
+                    or run_document.get("tempo_version", "v3.0.3") == "v3.0.3"):
+                run_document.pop("tempo_version", None)
+                run_document.pop("tempo_hailhyperaware", None)
+            if run_document.get("tempo_hailhyperaware", True) is True:
+                run_document.pop("tempo_hailhyperaware", None)
             if run_document.get("sf_surface_physics", 0) != 4:
                 run_document.pop("noahmp_snow_age", None)
+            # WRF 4.8.0 assembly and the MYNN v6.1 option, by the checkpoint
+            # echo's rules (woof.io.restart): dynamic lightning off, the
+            # gwd_opt = 1 generation and its two keys under gwd_opt != 1 or at
+            # wrf_471, the MYNN-SFC roughness keys at their Registry defaults
+            # and the v6.1 fixes off leave the document.  Named breakage: every
+            # default public document moved its bytes (3.0.0 pass 1,
+            # tests/test_chem_emitted_config_bytes.py).
+            from woof.core.dyn_lightning import drop_default_dyn_lightning
+            drop_default_dyn_lightning(run_document)
+            if (int(run_document.get("gwd_opt", 0) or 0) != 1
+                    or run_document.get("gwdo_version", "wrf_471") == "wrf_471"):
+                for _key in ("gwdo_version", "gwd_dx_factor", "gwd_if_nonhyd"):
+                    run_document.pop(_key, None)
+            for _key, _default in (("sf_mynn_sfcflux_land", 0),
+                                   ("sf_mynn_sfcflux_water", 1),
+                                   ("shalwater_z0", 0),
+                                   ("mynn_fixes_v61", False)):
+                if run_document.get(_key, _default) == _default:
+                    run_document.pop(_key, None)
             if int(run_document.get("sf_urban_physics", 0) or 0) != 1:
                 run_document.pop("urban_water_balance", None)
             # The ocean mixed layer (2.9.1): off, its selector and settings
@@ -6518,7 +6672,16 @@ def _nudging_from_tables(raw, domains):
     if row is None:
         return None
     from woof.spectral_nudging.config import from_mapping
-    return from_mapping(row, tuple(dc.grid_id for dc in domains))
+    options = from_mapping(row, tuple(dc.grid_id for dc in domains))
+    if options is not None:
+        # NUDGING_STEP_STRENGTH: every door (TOML, --nudging, WRF &fdda import,
+        # stock wrfinput) loads here, so a coefficient the explicit update
+        # overshoots is refused before any preparation or card time.
+        for dc in domains:
+            controls = options.for_domain(dc.grid_id)
+            if controls is not None:
+                controls.check_step(float(dc.run.dt), where=f"d{dc.grid_id:02d}")
+    return options
 
 
 def experiment_config_document(exp: ExperimentConfig) -> dict[str, object]:

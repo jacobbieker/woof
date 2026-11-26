@@ -394,6 +394,27 @@ def production_units(root) -> list[Unit]:
                       specialized_source("mynn_surface", capacity=40, kernel_dir=kdir,
                                          defines=(("MYNN_SL_PSIH_ZOLZT", 1),)),
                       ("-std=c++17",), []))
+    # The opt-in Noah soil-moisture floor booking (woof.core.noah.launch_noah):
+    # the plain unit's integer tier, and the UA units with the define first.
+    from woof.core.noah import NOAH_SMC_FLOOR_BOOKING_DEFINES, SMC_FLOOR_BOOKING_PREFIX
+    units.append(Unit("kernels:noah[NOAH_SMC_FLOOR_BOOKING=1]",
+                      K.module_source_int_defines("noah", NOAH_SMC_FLOOR_BOOKING_DEFINES, kernel_dir=kdir),
+                      K.module_options("noah"), []))
+    for name in ("noah_ua", "noah_mosaic_ua"):
+        units.append(Unit(f"kernels:{name}[NOAH_SMC_FLOOR_BOOKING=1]",
+                          SMC_FLOOR_BOOKING_PREFIX + K.module_source(name, kernel_dir=kdir),
+                          K.module_options(name), []))
+    # Correct-mode ML1 (RunConfig.pbl_boulac_down_sign and
+    # mynn_boulac_down_sign, both on by default): the BouLac downward length
+    # sign define on the shipped tier (woof.core.boulac, keps, mynn_pbl_gpu).
+    from woof.core.boulac import BOULAC_DOWN_SIGN_DEFINE
+    from woof.core.mynn_pbl_gpu import MYNN_BOULAC_DOWN_SIGN_DEFINE
+    for name, defines in (("boulac", BOULAC_DOWN_SIGN_DEFINE), ("keps", BOULAC_DOWN_SIGN_DEFINE),
+                          ("mynn_pbl", MYNN_BOULAC_DOWN_SIGN_DEFINE)):
+        label = ",".join(f"{key}={value}" for key, value in defines)
+        units.append(Unit(f"kernels:{name}[{label}]",
+                          K.module_source_int_defines(name, defines, kernel_dir=kdir),
+                          K.module_options(name), []))
     for name, parts in N.NOAHMP_TRANSLATION_UNITS.items():
         ru = N.runtime_unit(name, kernel_dir=kdir)
         pieces = ([] if ru.preamble_sha256 != N._sha(K._preamble(kdir))

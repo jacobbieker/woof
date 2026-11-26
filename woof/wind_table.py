@@ -132,6 +132,29 @@ def read_table(path, scheme="fitch", *, windfarm_ij=0):
     return data, hashlib.sha256(raw).hexdigest()
 
 
+FITCH_VERSIONS = ("wrf_480", "wrf_471")
+
+
+def native_wrf_tables(data):
+    """True when every turbine type came from native WRF turbine files."""
+    return bool(data["types"]) and all(spec.get("wrf_curve") for spec in data["types"].values())
+
+
+def fitch_induction(cfg, native_tables=True):
+    """Resolve windfarm_induction for this run (0 or 1).
+
+    -1 means the selected pin's Registry default: WRF v4.8.0
+    Registry.EM_COMMON:3055 defines windfarm_induction with default 1; v4.7.1
+    has no such key, so 0. WOOF-ArWen's own (non-WRF) turbine tables run WOOF-ArWen's
+    Fitch-shaped scheme, which no WRF Registry default reaches.
+    """
+    value = getattr(cfg, "windfarm_induction", 0)
+    if value != -1:
+        return value
+    return int(bool(native_tables) and getattr(cfg, "wind_farm_scheme", "off") == "fitch"
+               and getattr(cfg, "windfarm_fitch_version", "wrf_471") == "wrf_480")
+
+
 def validate_config(cfg):
     scheme = cfg.wind_farm_scheme
     if scheme not in ("off", "fitch", "mav", "fitch_legacy", WRF_FITCH_SCHEME):
@@ -151,8 +174,10 @@ def validate_config(cfg):
         from woof.wind_legacy import validate_config as validate_legacy
         validate_legacy(cfg)
         return
-    if type(cfg.windfarm_induction) is not int or cfg.windfarm_induction not in (0,1):
-        raise ValueError("windfarm_induction must be 0 or 1, as native WRF defines")
+    if type(cfg.windfarm_induction) is not int or cfg.windfarm_induction not in (-1,0,1):
+        raise ValueError("windfarm_induction must be 0 or 1, as native WRF defines (-1: the Fitch pin's default)")
+    if getattr(cfg, "windfarm_fitch_version", "wrf_480") not in FITCH_VERSIONS:
+        raise ValueError("windfarm_fitch_version must be wrf_480 or wrf_471")
     if scheme == "mav":
         if cfg.windfarm_ij not in (1, 2):
             raise ValueError("MAV requires windfarm_ij=1 (xy) or 2 (latitude/longitude), as native WRF does")
@@ -205,7 +230,7 @@ def drop_inert_config(values):
             values.pop(key, None)
     if values.get("wind_farm_scheme", "off") == "off":
         for key in ("wind_farm_scheme", "wind_farm_table", "wind_farm_max_dx_m", "wind_farms", "windfarm_tke_factor", "windfarm_ij", "windfarm_wake_model", "windfarm_overlap_method", "windfarm_deg", "windfarm_induction",
-                    *WRF_FITCH_IDENTITY_KEYS):
+                    "windfarm_fitch_version", *WRF_FITCH_IDENTITY_KEYS):
             values.pop(key, None)
     else:
         if values.get("wind_farm_scheme") == WRF_FITCH_SCHEME:
@@ -216,8 +241,11 @@ def drop_inert_config(values):
             for key in ("windfarm_wake_model", "windfarm_overlap_method", "windfarm_deg"):
                 values.pop(key, None)
 
-    if values.get("wind_farm_scheme") != "fitch" or values.get("windfarm_induction", 0) == 0:
+    if values.get("wind_farm_scheme") != "fitch" or values.get("windfarm_induction", 0) in (0, -1):
         values.pop("windfarm_induction", None)
+    # The previous pin is today's engine: its headers and identities are unchanged.
+    if values.get("wind_farm_scheme") != "fitch" or values.get("windfarm_fitch_version", "wrf_471") == "wrf_471":
+        values.pop("windfarm_fitch_version", None)
 
 
 def bind_wrf_fitch_identity(values):

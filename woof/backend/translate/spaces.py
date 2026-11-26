@@ -483,7 +483,11 @@ class SpaceAnalysis:
                     bucket = self.cast_spaces.setdefault(self._instance, {}).setdefault(key, set())
                     if space not in (None, NULL):
                         bucket.add(space)
-            if kind == K.BINARY_OPERATOR and _indirection(node.type) == "ptr":
+            # a template's `a[c] = p` on `T* a[NCAT]` is typed DEPENDENT in the pattern (p3)
+            if kind == K.BINARY_OPERATOR and (_indirection(node.type) == "ptr" or (
+                    node.type.get_canonical().kind.name == "DEPENDENT"
+                    and (lhs := next(iter(node.get_children()), None)) is not None
+                    and _pointer_array_element(lhs))):
                 kids = list(node.get_children())
                 if len(kids) == 2 and kids[0].kind == K.DECL_REF_EXPR and kids[0].referenced is not None \
                         and kids[0].referenced.kind.name == "VAR_DECL":
@@ -1098,9 +1102,22 @@ def _local_pointer_array(e):
     if d is None or d.kind.name != "VAR_DECL":
         return None
     c = d.type.get_canonical()
-    if c.kind.name != "CONSTANTARRAY" or c.element_type.get_canonical().kind.name != "POINTER":
+    # DEPENDENTSIZEDARRAY: `T* a[NCAT]` in a template on NCAT (p3's qi_/ni_)
+    if c.kind.name not in ("CONSTANTARRAY", "DEPENDENTSIZEDARRAY") \
+            or c.element_type.get_canonical().kind.name != "POINTER":
         return None
     return d
+
+
+def _pointer_array_element(e) -> bool:
+    """``a[i]`` itself, one subscript of a local ``T* a[N]`` (not ``a[i][j]``,
+    the float it points at)."""
+    if e.kind.name != "ARRAY_SUBSCRIPT_EXPR":
+        return False
+    base = next(iter(e.get_children()), None)
+    while base is not None and base.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR"):
+        base = next(iter(base.get_children()), None)
+    return base is not None and base.kind.name == "DECL_REF_EXPR" and _local_pointer_array(base) is not None
 
 
 def field_key(field):

@@ -1,6 +1,6 @@
 """Phase-5 Task 9 (lane L2): integer-tick clocks + flat schedule executor.
 
-Architecture section C pins (docs/superpowers/specs/
+Architecture section C pins (docs/internal/specs/
 2026-07-16-phase5-nesting-architecture.md, 2026-07-16 amendment):
 
 - schedule pin: the flat op table equals an INDEPENDENT reference
@@ -834,6 +834,99 @@ def test_subhour_boundary_cadence_and_delayed_start_constraints():
         resolve_clock(
             _chain_experiment((1, 3), run_seconds=1200.0),
             lbc_interval_s=310)
+
+
+def _parent_born_chain(start_offsets):
+    """A (1, 3, 3) chain whose nests are SINT from their live parent at the
+    given offsets (seconds): root dt 60 s, d02 20 s, d03 20/3 s, 60 s
+    history everywhere."""
+    exp = _chain_experiment((1, 3, 3), run_seconds=300.0)
+    for gid, offset in start_offsets.items():
+        exp = _with_delayed_start(exp, gid, offset)
+    return dataclasses.replace(exp, domains=tuple(
+        dataclasses.replace(dc, start_from="parent")
+        if dc.grid_id in start_offsets else dc for dc in exp.domains))
+
+
+def _run_refl_handoff(schedule):
+    """Drive the executor with the production REFL_10CM handoff shape:
+    a step stashes when ``history_rings_within_step`` (core/model.py) and
+    raises on an unconsumed stash (core/refl.py stash_refl_10cm); a frame
+    consumes when ``refl_10cm_stash_is_due`` (runtime
+    _submit_tree_history_frame)."""
+    from woof.core.refl import refl_10cm_stash_is_due
+
+    stash, starts, history = {}, [], {}
+
+    def on_step(gid, clock):
+        if clock.history_rings_within_step():
+            if stash.get(gid) is not None:
+                raise RuntimeError(
+                    "REFL_10CM stash was not consumed before reuse")
+            stash[gid] = clock.ticks + clock.step_ticks
+
+    def on_history(gid, ticks):
+        history.setdefault(gid, []).append(ticks)
+        start = schedule.clock.domain_clock(gid).spec.start_ticks
+        if refl_10cm_stash_is_due(ticks, domain_start_ticks=start):
+            assert stash.pop(gid, None) == ticks, (gid, ticks)
+
+    execute_schedule(
+        schedule, on_step=on_step, on_history=on_history,
+        on_domain_start=lambda gid, clock: starts.append((gid, clock.ticks)))
+    return starts, history, stash
+
+
+def test_delayed_nest_start_inside_a_root_step_is_refused():
+    """A grandchild born on its parent's step but INSIDE a root step.
+
+    The schedule recursed into it from the next root step while the
+    executor only births at a period boundary equal to its start, which
+    never came: the nest was never initialized, never wrote history, and
+    its second history-due step raised "REFL_10CM stash was not consumed
+    before reuse".  Every route now refuses the start up front.
+    """
+    from woof.experiment import validate_boundary_timing
+
+    exp = _parent_born_chain({2: 60, 3: 80})   # 80 s = 4 d02 steps
+    message = (r"d03 .*offset 80 s.*not on a root-domain step boundary.*"
+               r"offset/dt = 4/3.*60 s or 120 s")
+    with pytest.raises(ValueError, match=message):
+        resolve_clock(exp)
+    with pytest.raises(ValueError, match=message):
+        resolve_clock(exp, lbc_interval_s=60)
+    with pytest.raises(ValueError, match=message):
+        validate_boundary_timing(exp, 60, source="test forcing")
+
+
+def test_root_step_rule_exempts_adaptive_trees_and_live_nests():
+    """Adaptive stepping on ANY domain (resolve_clock's reading) lands on
+    the start as a deadline, and a nest alive at the experiment start has
+    no birth to land, so neither is refused."""
+    from woof.experiment import delayed_start_root_step_error
+
+    exp = _parent_born_chain({2: 60, 3: 80})
+    assert delayed_start_root_step_error(exp, 3) is not None
+    adaptive_root = dataclasses.replace(exp, domains=tuple(
+        dataclasses.replace(dc, run=dataclasses.replace(
+            dc.run, use_adaptive_time_step=True))
+        if dc.parent_id == 0 else dc for dc in exp.domains))
+    assert delayed_start_root_step_error(adaptive_root, 3) is None
+    alive = _parent_born_chain({2: 0, 3: 0})
+    assert delayed_start_root_step_error(alive, 3) is None
+
+
+def test_delayed_grandchild_on_root_step_is_born_and_balances_refl():
+    """The same chain with the grandchild moved onto a root step: it is
+    born there, writes its analysis frame, and every REFL_10CM stash its
+    steps produce is consumed by the frame that follows."""
+    exp = _parent_born_chain({2: 60, 3: 120})
+    schedule = build_schedule(exp, resolve_clock(exp, lbc_interval_s=60))
+    starts, history, stash = _run_refl_handoff(schedule)
+    den = schedule.clock.tick_den
+    assert starts == [(2, 60 * den), (3, 120 * den)]
+    assert history[3] == [t * den for t in (120, 180, 240, 300)]
+    assert not any(stash.values())
 
 
 @requires_4dom_inputs

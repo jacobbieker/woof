@@ -79,7 +79,7 @@
 #undef RHOWATER
 #undef EP2
 
-#define MSKF_KMAX 160
+#define MSKF_KMAX 256
 #define MSKF_LANES 32
 #define MSKF_FSLOTS 101
 #define MSKF_DSLOTS 62
