@@ -647,7 +647,7 @@ They follow the physics mode: unset, every correction is on in correct
 mode (the default) where its scheme runs, and off in exact mode, where the
 run is the WRF / MPAS oracle's arithmetic word for word (parity tests run
 there). On the WRF route exact mode is a strict `GPUWM_WRF_EXACT=1`
-process, or every correct-mode key set `false` (the six WRF-route keys
+process, or every correct-mode key set `false` (the seven WRF-route keys
 below are correct-mode findings FQ1-FQ6 and FQ8, in the table under "Correct
 mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
 MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
@@ -904,7 +904,7 @@ for the retained proof and the limits of the forecast evidence.
 ### Correct mode (`[shared]`)
 
 Correct mode is the default. It fixes defects that WRF itself carries
-(water budgets, and the fork's quirk ledger FQ1-FQ6, see
+(water budgets, and the fork's quirk ledger FQ1-FQ6 and FQ8, see
 `woof_quirk_corrections`), one key per scheme, each `true` by default and read only by the
 schemes named in its row. Setting a key to `false` in `[shared]` runs that
 scheme's WRF-matched arithmetic. Strict WRF mode (`GPUWM_WRF_EXACT=1`)
