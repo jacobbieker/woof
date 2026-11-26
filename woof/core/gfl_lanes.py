@@ -221,11 +221,14 @@ _WORKSPACE_NEW = '''struct GFWorkspace {
   bool fct1d3_error;
   // A column whose need passes its share continues in a spill entry of spill_bytes, lane-interleaved like the share:
   // entry e is word e%GF_LANES of slab e/GF_LANES of the launch's spill pool (host-allocated, spill_entries entries).
-  // A thread takes the next entry (spill_next) the first time one of its columns spills and keeps it (spill_entry,
-  // e+1, 0 = none) for the launch. Metal has no device heap, so the pool stands in for an in-kernel malloc on every
-  // backend: placement only, the same words. The share is sized to what columns use, the spill keeps a deeper column
-  // exact and running.
-  char* spill_pool;unsigned long long spill_bytes,spill_entries;gf_counter* spill_next;unsigned long long spill_entry;
+  // A column that spills takes a free entry (spill_entry, e+1, 0 = none) from the pool's bitmap (spill_map, bit e
+  // set while entry e is held; 32-bit atomics, which Metal has) and the kernel returns it when the column ends.
+  // Metal has no device heap, so the pool stands in for an in-kernel malloc on every backend: placement only, the
+  // same words. The share is sized to what columns use, the spill keeps a deeper column exact and running.
+  // The limit: at most spill_entries columns can be spilling AT THE SAME TIME; one more traps (gf_trap, a loud
+  // failure, never a wrong word). Upstream 1.1.7 gave each spilling block a heap slab of 128 entries for the rest
+  // of the block's run (256 MiB heap), so the pool admits every launch upstream did, and more.
+  char* spill_pool;unsigned long long spill_bytes,spill_entries;unsigned int* spill_map;unsigned long long spill_entry;
   // Character arrays are read bytewise: contiguous per thread.
   char* bytes;unsigned long long bcapacity,bposition;unsigned int lane;
   __device__ void* allocate(unsigned long long n){
@@ -237,9 +240,18 @@ _WORKSPACE_NEW = '''struct GFWorkspace {
       if(position<capacity)position=capacity;
       if(position+n>capacity+spill_bytes){gf_trap();return nullptr;}
       if(spill_entry==0ULL){
-        const unsigned long long taken=atomicAdd(spill_next,(gf_counter)1);
-        if(taken>=spill_entries){gf_trap();return nullptr;}
-        spill_entry=taken+1ULL;
+        // First free entry: scan the bitmap, claiming a clear bit with atomicOr (the old word says who won).
+        const unsigned long long words=(spill_entries+31ULL)/32ULL;
+        for(unsigned long long w=0;w<words&&spill_entry==0ULL;++w){
+          unsigned int seen=spill_map[w];
+          for(unsigned int b=0;b<32u&&spill_entry==0ULL;++b){
+            if(w*32ULL+b>=spill_entries)break;
+            if(seen&(1u<<b))continue;
+            seen=atomicOr(spill_map+w,1u<<b);
+            if((seen&(1u<<b))==0u)spill_entry=w*32ULL+b+1ULL;
+          }
+        }
+        if(spill_entry==0ULL){gf_trap();return nullptr;}  // more columns spilling at once than entries
       }
       const unsigned long long entry=spill_entry-1ULL;
       char* block=spill_pool+(entry/GF_LANES)*spill_bytes*GF_LANES+4ULL*(entry%GF_LANES);
@@ -469,9 +481,9 @@ __device__ void gfl_column(long long col,const unsigned long long* ptrs,const un
  }
 }
 #ifndef GF_HOST_WITNESS
-// A block is one slab of the scratch (blockDim = GF_LANES; thread t is lane t of the slab and keeps it, and
-// its spill entry once it takes one). next[0] is the column counter, next[1] the spill pool's (gf_counter: 32-bit
-// on Metal, where the launcher bounds both, 64-bit on CUDA). Each warp takes the next 32 consecutive columns from
+// A block is one slab of the scratch (blockDim = GF_LANES; thread t is lane t of the slab and keeps it; a
+// column that spills holds a spill entry until it ends). next[0] is the column counter (gf_counter: 32-bit
+// on Metal, where the launcher bounds it, 64-bit on CUDA); spill_map is the pool's entry bitmap. Each warp takes the next 32 consecutive columns from
 // the launch's counter until none are left, so a warp held up by convecting columns does not leave the
 // card idle behind it (a fixed column-per-slot round left the last round a few blocks wide). Columns are
 // independent; each executes the complete source order from a fresh workspace, so which warp runs a
@@ -479,8 +491,8 @@ __device__ void gfl_column(long long col,const unsigned long long* ptrs,const un
 extern "C" __global__ void __launch_bounds__(GF_LANES, GFL_MIN_BLOCKS) gfl_lane_columns(long long ncol,
  const unsigned long long* ptrs,const unsigned long long* strides,char* scratch,unsigned long long capacity,
  unsigned long long spill_bytes,unsigned int* diagnostics,unsigned long long* highwater,const int* vertical,
- unsigned int* saved_fct_error,gf_counter* next,char* spill_pool,unsigned long long spill_entries){
- unsigned long long spill_entry=0;
+ unsigned int* saved_fct_error,gf_counter* next,char* spill_pool,unsigned long long spill_entries,
+ unsigned int* spill_map){
  const unsigned int lane=threadIdx.x, warp_lane=threadIdx.x&31u;
  char* slab=scratch+(unsigned long long)blockIdx.x*(capacity+GF_CHARACTER_BYTES)*GF_LANES;
  for(;;){
@@ -491,9 +503,12 @@ extern "C" __global__ void __launch_bounds__(GF_LANES, GFL_MIN_BLOCKS) gfl_lane_
    const long long col=(long long)first+warp_lane;
    if(col<ncol){
      GFWorkspace workspace{slab+4ULL*lane,capacity,0,0,0,GFReal(0.0f),false,spill_pool,spill_bytes,spill_entries,
-       next+1,spill_entry,slab+capacity*GF_LANES+(unsigned long long)lane*GF_CHARACTER_BYTES,GF_CHARACTER_BYTES,0,lane};
+       spill_map,0ULL,slab+capacity*GF_LANES+(unsigned long long)lane*GF_CHARACTER_BYTES,GF_CHARACTER_BYTES,0,lane};
      gfl_column(col,ptrs,strides,workspace,diagnostics,highwater,vertical,saved_fct_error);
-     spill_entry=workspace.spill_entry;
+     if(workspace.spill_entry!=0ULL){  // the column is done: its spill entry is free for the next one
+       const unsigned long long e=workspace.spill_entry-1ULL;
+       atomicAnd(spill_map+e/32ULL,~(1u<<(unsigned int)(e%32ULL)));
+     }
    }
    __syncwarp();
  }

@@ -55,14 +55,19 @@ def _spill_pool(device, spill_bytes, slabs):
     Upstream 1.1.7 spilled to the CUDA device heap (in-kernel malloc, 256 MiB limit);
     Metal has no device heap, so the launch passes this host-allocated pool on every
     backend instead. Entries are lane-interleaved slabs of ``spill_bytes`` per lane;
-    a thread takes one the first time one of its columns spills and keeps it for the
-    launch. gfl_lanes.spill_pool_slabs gives one slab per domain slab (an entry for
-    every thread the launch can start) within SPILL_POOL_BYTES; where that cap binds
-    (very deep columns on a large domain) a launch with more spilling threads than
-    entries traps, as an exhausted heap did. A held pool at least as large is reused
-    (a nest whose domains differ in nz does not reallocate every step), and the
-    admission prices it (woof.core.preflight.gf_column_workspace_bytes). The pool
-    changes no output word: placement only.
+    a column that spills takes a free entry from the pool's bitmap (_spill_map) and
+    the kernel returns it when the column ends. gfl_lanes.spill_pool_slabs gives one
+    slab per domain slab within SPILL_POOL_BYTES.
+
+    The limit: at most ``entries`` columns can be spilling at the same moment; one
+    more traps (gf_trap: a loud, named failure, never a wrong word). Over a launch
+    any number of columns may spill. Upstream 1.1.7 gave each spilling block one
+    heap slab (128 entries) for the rest of the block's run from a 256 MiB heap,
+    so it trapped once 256 MiB / (spill_bytes x 128) blocks had ever spilled; the
+    pool admits every launch upstream did, and more. A held pool at least as large
+    is reused (a nest whose domains differ in nz does not reallocate every step),
+    and the admission prices it (woof.core.preflight.gf_column_workspace_bytes).
+    The pool changes no output word: placement only.
     """
     import cupy as cp
     per_slab = spill_bytes * LANES
@@ -77,6 +82,26 @@ def _spill_pool(device, spill_bytes, slabs):
 
 
 _SPILL = {}
+
+
+def _spill_map(device, entries):
+    """The spill pool's entry bitmap (bit e set while a column holds entry e), zeroed per launch.
+
+    Every entry is returned when its column ends, so a launch leaves it clear; zeroing
+    it on the stream keeps a launch independent of the one before.
+    """
+    import cupy as cp
+    words = -(-int(entries) // 32)
+    held = _SPILL_MAP.get(device)
+    if held is None or held.size < words:
+        _SPILL_MAP.pop(device, None)
+        with cp.cuda.Device(device):
+            held = _SPILL_MAP[device] = cp.zeros(words, dtype=cp.uint32)
+    held.fill(0)
+    return held
+
+
+_SPILL_MAP = {}
 
 
 @lru_cache(maxsize=None)
@@ -188,23 +213,23 @@ def launch_lane_columns(fields, *, ncol, nz, saved_fct_error=None, vertical=None
     table = cp.asarray(np.asarray(pointers + strides, dtype=np.uint64))
     kernel((blocks,), (LANES,), (np.int64(ncol), table[:len(FIELDS)], table[len(FIELDS):], scratch,
            np.uint64(capacity), np.uint64(spill_bytes), diagnostics, highwater,
-           _vertical_words(device, vertical), saved_fct_error, _next_column(device), spill, np.uint64(entries)))
+           _vertical_words(device, vertical), saved_fct_error, _next_column(device), spill, np.uint64(entries),
+           _spill_map(device, entries)))
     return {'diagnostics': diagnostics, 'scratch_highwater': highwater, 'saved_fct_error': saved_fct_error,
             'tables': table, 'blocks': blocks, 'share_bytes': capacity}
 
 
 def _next_column(device):
-    """The launch's counters, zeroed on the stream before the launch.
+    """The launch's column counter, zeroed on the stream before the launch.
 
-    Word 0 is the column counter (each warp takes the next 32 columns), word 1 the
-    spill pool's (a thread's first spill takes the next entry). The kernel's gf_counter:
-    32-bit words on Metal, which has no 64-bit atomic add, 64-bit on CUDA.
+    Each warp takes the next 32 columns from it. The kernel's gf_counter: a 32-bit
+    word on Metal, which has no 64-bit atomic add, 64-bit on CUDA.
     """
     import cupy as cp
     held = _NEXT.get(device)
     if held is None:
         with cp.cuda.Device(device):
-            held = _NEXT[device] = cp.zeros(2, dtype=cp.uint32 if _metal() else cp.uint64)
+            held = _NEXT[device] = cp.zeros(1, dtype=cp.uint32 if _metal() else cp.uint64)
     held.fill(0)
     return held
 
