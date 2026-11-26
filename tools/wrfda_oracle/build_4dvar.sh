@@ -9,8 +9,9 @@
 #            $W/src/WRFPLUSV4.7.1 and $W/src/WRFDAV4.7.1-4dvar
 #   wrfplus  ./configure wrfplus; ./compile wrfplus  (main/wrfplus.exe)
 #   wrfda    ./configure 4dvar with WRFPLUS_DIR; ./compile all_wrfvar
-#   dump     copy the 4dvar tree to WRFDAV4.7.1-4dvar-dump, hook
-#            woof_dump.inc in (apply_dump_patch.sh) and build it
+#   dump     copy the 4dvar tree to WRFDAV4.7.1-4dvar-dump, clean it, hook
+#            woof_dump.inc in and put the a_/g_ fields on auxhist streams
+#            7 and 8 (apply_dump_patch.sh), and build it
 # The pinned trees are never patched; only the -dump copy is.
 # usage: build_4dvar.sh src|wrfplus|wrfda|dump
 #   J (default 6): make jobs; RESUME=1 (wrfplus): keep the configured tree
@@ -55,6 +56,12 @@ wrfda|dump)
   if [ "$STEP" = dump ]; then
     [ -x "$DA/var/build/da_wrfvar.exe" ] || { echo "build the pinned 4dvar tree first (build_4dvar.sh wrfda)" >&2; exit 2; }
     rm -rf "$DA-dump"; cp -a "$DA" "$DA-dump"; cd "$DA-dump"
+    # the patch edits the Registry (streams 7 and 8 on the a_/g_ fields),
+    # which every module_domain user depends on: rebuild from a fresh
+    # configure (a plain ./clean also drops var/build's source links)
+    ./clean -a >/dev/null 2>&1 || true
+    printf "%s\n" "$OPT" | ./configure 4dvar
+    grep -q "VAR4D" configure.wrf || { echo "configure.wrf has no VAR4D: not a 4dvar build" >&2; exit 1; }
     bash "$here/apply_dump_patch.sh" "$DA-dump"
     LOG=$W/build-WRFDAV4.7.1-4dvar-dump.log
   else

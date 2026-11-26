@@ -54,4 +54,26 @@ if not any(h in s for h in hooks_all):
     s = s.replace(a, "      call da_transform_xtoxa (grid)\n      call woof_dump_final(grid, cv_size, xhat)\n\n      ! [8.6]")
     sol.write_text(s)
 PY
+# var4d_detail_out writes the TL perturbation at each slot (tl_d01_* and
+# auxhist8_d01_*), the adjoint forcing (af_d01_*) and the 0h gradient
+# (gradient_d01_*) through auxhist streams 7 and 8, but registry.var gives
+# the a_/g_ state no stream past history ("rh"), so upstream those files are
+# a netCDF header with no fields.  Add streams 7 and 8 to the a_/g_ fields
+# that carry history; I/O only, the analysis is unchanged.
+python3 - "$tree/Registry/registry.var" <<'PY'
+import re, sys, pathlib
+p = pathlib.Path(sys.argv[1])
+out, n = [], 0
+for line in p.read_text().splitlines(keepends=True):
+    f = line.split()
+    if len(f) > 7 and f[0] == "state" and re.match(r"[ag]_", f[2]) and f[7] in ("rh", "rh078"):
+        if f[7] == "rh":
+            line = re.sub(r"(\s)rh(\s)", r"\1rh078\2", line, count=1)
+        n += 1
+    out.append(line)
+if n < 14:  # u v w ph t mu p, a_ and g_, plus the moist species
+    sys.exit(f"registry.var: only {n} a_/g_ history fields found")
+p.write_text("".join(out))
+print(f"registry.var: {n} a_/g_ fields on streams 7 and 8")
+PY
 echo "patched $tree"

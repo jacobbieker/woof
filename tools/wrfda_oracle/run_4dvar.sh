@@ -64,8 +64,15 @@ want = {
     # namelist omits it, so start_em skips the base-state and V3-input
     # set-up (c1f..c4h, pb/phb/alb, the old-data t_2 fix) and the nonlinear
     # model steps from garbage (NaN in sfclayrev, KF out of bounds)
+    # io_form_auxhist7/8: the Registry default 0 makes the transfer
+    # routines' var4d_detail_out writes (af_d01_*, gradient_d01_*, the TL
+    # slot states) no-ops; 2 = netCDF, as WRFPLUS forces for its own
+    # gradient_wrfplus_d01_*. frames_per_auxhist7/8 = 1: at the Registry
+    # default 999999 med_hist_out keeps the first file open and appends
+    # every later slot to it unflushed, so the files hold a header only
     "time_control": {"run_hours": "6", "start_hour": "12", "end_hour": "18", "force_use_old_data": ".true.",
-                     "input_from_file": ".true."},
+                     "input_from_file": ".true.", "io_form_auxhist7": "2", "io_form_auxhist8": "2",
+                     "frames_per_auxhist7": "1", "frames_per_auxhist8": "1"},
     "perturbation": {"trajectory_io": ".true.", "var4d_detail_out": ".true.",
                      "enable_identity": ".true." if lane == "lid" else ".false."},
     "dynamics": {"hybrid_opt": "0", "use_theta_m": "0"},
