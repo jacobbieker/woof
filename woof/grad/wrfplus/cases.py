@@ -1347,3 +1347,61 @@ def hd_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     scale = {"field": _HD_FIELD[geom.row][1] * 0.2, "xk": 10.0, "mut": 100.0}
     return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
             for n in HD_ACTIVE}
+
+
+def h2_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .diffusion import H2Geometry
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0, cf1=1.6, cf2=-0.8,
+                cf3=0.2)
+    base.update(overrides)
+    return H2Geometry(**base)
+
+
+def h2_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+    """Host state of horizontal_diffusion_2's row: deformations of about
+    1e-3 /s, coefficients spread over 30-3000 m2/s, a specific volume
+    near 0.9 m3/kg (qv near 1e-2 when moist), winds of 10 m/s and w of
+    0.5 m/s, the row's field (theta - 300 of 5 K or a moisture-like
+    scalar), a base geopotential rising 4e3 per level with 50 noise (so
+    the slopes are nonzero) and ph' of 20, map factors near 1, the
+    fnm/fnp/dn/dnw of stretched levels (``hybrid`` only stretches them;
+    the row has no column mass) and a nonzero starting tendency."""
+    from .diffusion import H2_PASSIVE, H2_STATE, h2_active, h2_shapes
+    rng = np.random.default_rng(seed)
+    sh = h2_shapes(geom)
+    v = _vertical(geom.nz, rng, hybrid)
+    znu, dnw = v["znu"], v["dnw"]
+    dn = np.zeros(geom.nz)
+    dn[1:] = np.diff(znu)
+    fnm, fnp = np.zeros(geom.nz), np.zeros(geom.nz)
+    fnm[1:] = 0.5 * dnw[:-1] / dn[1:]
+    fnp[1:] = 0.5 * dnw[1:] / dn[1:]
+    out = dict(dn=dn, dnw=dnw, fnm=fnm, fnp=fnp, tend=rng.standard_normal(sh["tend"]))
+    for n in ("defor11", "defor22", "defor12"):
+        out[n] = 1e-3 * rng.standard_normal(sh[n])
+    out["xk"] = 10.0 ** rng.uniform(1.5, 3.5, sh["xk"])
+    out["alt"] = 0.9 + 0.05 * rng.standard_normal(sh["alt"])
+    out["qv"] = 1e-2 + 2e-3 * rng.standard_normal(sh["qv"])
+    out["u"] = 10.0 + 5.0 * rng.standard_normal(sh["u"])
+    out["v"] = -4.0 + 5.0 * rng.standard_normal(sh["v"])
+    out["w"] = 0.5 * rng.standard_normal(sh["w"])
+    mean, noise = (5.0, 2.0) if geom.row == "t" else (1.0e-2, 3.0e-3)
+    out["field"] = mean + noise * rng.standard_normal(sh["field"])
+    out["php"] = 20.0 * rng.standard_normal(sh["php"])
+    k = np.arange(geom.nz + 1)[:, None, None]
+    out["phb"] = 4.0e3 * k + 50.0 * rng.standard_normal(sh["phb"])
+    for n in ("msft", "msfu", "msfv"):
+        out[n] = 1.0 + 0.02 * rng.standard_normal(sh[n])
+    keep = H2_STATE + h2_active(geom) + H2_PASSIVE
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
+
+
+def h2_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .diffusion import h2_active, h2_shapes
+    rng = np.random.default_rng(seed)
+    sh = h2_shapes(geom)
+    scale = {"defor11": 2e-4, "defor22": 2e-4, "defor12": 2e-4, "xk": 10.0, "alt": 0.01,
+             "qv": 1e-3, "u": 1.0, "v": 1.0, "w": 0.1, "php": 5.0,
+             "field": 0.4 if geom.row == "t" else 6e-4}
+    return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in h2_active(geom)}
